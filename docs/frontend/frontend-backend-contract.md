@@ -29,14 +29,25 @@
 - 不得引入 Monaco、Dockview 或具体业务组件。
 - 不得吞掉后端错误导致用户无法看到失败原因。
 
-Phase 04 已提供的 Runtime API 分组：
+当前 Runtime API 分组：
 
 - Workspace：`POST/GET /api/workspaces`、文件单层列表、UTF-8 内容读写和文件状态。
 - Session：创建、按 workspace 分页、详情、消息追加和消息分页。
 - Run：启动、详情、取消。
+- Diff：`GET /api/runs/{runId}/diff`、`POST /api/runs/{runId}/diff/accept`、`POST /api/runs/{runId}/diff/reject`。
 - Event：`GET /api/runs/{runId}/events`，只消费平台 RunEvent SSE。
 
 详细路径、请求和响应以 `docs/api/backend-api.md` 为准。
+
+## Diff 契约
+
+前端 Diff 闭环只能调用平台 Diff API，不能直连 opencode server。
+
+1. `GET /api/runs/{runId}/diff` 用于刷新 Run 级变更列表和 Monaco Diff 输入。
+2. `POST /api/runs/{runId}/diff/accept` 表示保留当前工作区变更并追加 `diff.accepted` 平台事件。
+3. `POST /api/runs/{runId}/diff/reject` 表示通过后端封装的 opencode `sessionRevert` 回滚本次 Run 对应消息的变更并追加 `diff.rejected` 平台事件。
+4. 后端缺少可回滚的 opencode `messageID` 时返回 `CONFLICT`，前端必须展示错误和 `traceId`，不得承诺已回滚。
+5. Phase 08 不支持 per-file 后端回滚；当前文件接受/拒绝按钮只作为选择和反馈交互，真正落盘语义仍是 Run 级。
 
 ## RunEvent SSE Client
 
@@ -47,7 +58,7 @@ Phase 04 已提供的 Runtime API 分组：
 1. 建立和关闭 RunEvent SSE 连接。
 2. 处理 `Last-Event-ID` 断线续传。
 3. 对重复事件做幂等保护。
-4. 对乱序、缺失和未知事件给出可观测错误。
+4. 对缺失和未知事件给出可观测错误；重复事件必须按 `runId + seq` 幂等忽略。
 5. 向上层输出类型化事件，不暴露原始解析细节。
 
 不得负责：
@@ -68,7 +79,7 @@ Phase 04 已提供的 Runtime API 分组：
 
 - 新增字段必须默认可选，前端必须能处理旧响应缺字段。
 - 废弃字段必须保留过渡期，前后端文档必须说明替代字段。
-- 事件类型新增时，前端必须对未知事件有安全展示或忽略策略。
+- 事件类型新增时，前端必须对未知事件有安全展示或忽略策略。Phase 08 已知 Diff 事件包括 `diff.proposed`、`diff.accepted` 和 `diff.rejected`。
 
 ## 错误映射
 
@@ -86,6 +97,7 @@ Phase 04 已提供的 Runtime API 分组：
 2. 权限错误必须引导重新登录或申请权限。
 3. 限流错误必须展示等待或稍后重试语义。
 4. 系统错误必须展示 traceId，便于排查。
+5. Diff 拒绝返回 `CONFLICT` 时必须说明缺少可回滚消息，不能把它当作普通网络重试。
 
 ## 文档同步
 

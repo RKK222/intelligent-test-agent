@@ -49,6 +49,8 @@
 | `tool.started` | 工具调用开始。 |
 | `tool.finished` | 工具调用结束，payload 使用 `status` 区分 success/failed。 |
 | `diff.proposed` | 智能体提出文件 Diff。 |
+| `diff.accepted` | 用户已接受 Run 级 Diff。 |
+| `diff.rejected` | 用户已拒绝 Run 级 Diff，后端已提交 opencode revert。 |
 | `test.finished` | 测试执行结束。 |
 | `opencode.event.unknown` | 未识别 opencode raw event 的兼容兜底。 |
 
@@ -80,6 +82,32 @@ data: {"eventId":"evt_...","runId":"run_...","seq":2,"type":"assistant.message.d
 - 客户端断开时释放 Flux 订阅。
 - `Last-Event-ID` 解析委托 `RunEventReplayService`；非法值映射为 `VALIDATION_ERROR`。
 - SSE body 使用 `RunEventSsePayload`，不返回 generated SDK DTO 或 opencode raw event。
+
+Phase 08 后，opencode raw event 的终态映射为：
+
+- `session.next.step.ended` -> `run.succeeded`，应用服务同时把 Run 状态更新为 `SUCCEEDED`。
+- `session.next.step.failed` -> `run.failed`，应用服务同时把 Run 状态更新为 `FAILED`。
+- `session.error` -> `run.failed`，应用服务同时把 Run 状态更新为 `FAILED`。
+
+Diff 动作事件：
+
+```text
+id: 12
+event: diff.accepted
+data: {"eventId":"evt_...","runId":"run_...","seq":12,"type":"diff.accepted","traceId":"trace_...","occurredAt":"2026-06-19T00:00:00Z","payload":{"action":"accept","status":"accepted","fileCount":2}}
+```
+
+```text
+id: 13
+event: diff.rejected
+data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","traceId":"trace_...","occurredAt":"2026-06-19T00:00:00Z","payload":{"action":"reject","status":"rejected","fileCount":2}}
+```
+
+前端处理：
+
+- `diff.proposed` 更新 Changed Files 和 DiffActionCard。
+- `diff.accepted` / `diff.rejected` 展示动作结果并保留 traceId。
+- 终态 `run.succeeded` / `run.failed` / `run.cancelled` 必须停止“运行中”状态。
 
 订阅建议：
 

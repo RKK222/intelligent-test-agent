@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.Exceptions;
@@ -28,6 +29,7 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
     private final int maxRetries;
     private final Duration retryBackoff;
 
+    @Autowired
     public DefaultOpencodeClientFacade(OpencodeSdkGateway gateway, OpencodeRunEventMapper eventMapper) {
         this(gateway, eventMapper, Duration.ofSeconds(30), 1, Duration.ofMillis(200));
     }
@@ -109,6 +111,37 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                         "streamRunEvents",
                         command.node())
                 .map(rawEvent -> eventMapper.toDraft(rawEvent, command.runId(), command.traceId()));
+    }
+
+    @Override
+    public Mono<OpencodeDiffResult> getDiff(OpencodeDiffCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        return applyPolicy(
+                Mono.defer(() -> gateway.getDiff(
+                        command.node(),
+                        command.opencodeSessionId(),
+                        command.directory(),
+                        command.workspace(),
+                        command.messageId(),
+                        command.traceId())),
+                "getDiff",
+                command.node());
+    }
+
+    @Override
+    public Mono<OpencodeRejectDiffResult> rejectDiff(OpencodeRejectDiffCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        return applyPolicy(
+                Mono.defer(() -> gateway.rejectDiff(
+                        command.node(),
+                        command.opencodeSessionId(),
+                        command.directory(),
+                        command.workspace(),
+                        command.messageId(),
+                        command.partId(),
+                        command.traceId())),
+                "rejectDiff",
+                command.node());
     }
 
     private <T> Mono<T> applyPolicy(Mono<T> source, String operation, ExecutionNode node) {

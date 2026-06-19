@@ -45,6 +45,8 @@ Phase 04/05 后，`test-agent-app` 承载唯一 Runtime API、WebFilter、安全
 
 Phase 06 前置修复后，平台 Session 与远端 opencode Session 通过 persistence 内部字段映射。前端仍只访问平台 API；后端按功能需要通过 `OpencodeClientFacade` 封装 opencode 能力，不一次性代理完整 opencode server API。
 
+Phase 06-08 后，Diff 查看、接受和拒绝能力由 `test-agent-app` 的 application service 编排。`RunController` 只能调用 `RunDiffApplicationService`，不得直接访问 Repository、generated SDK 或 opencode server；`sessionDiff` 和 `sessionRevert` 只能封装在 `test-agent-opencode-client`，generated SDK DTO 不得进入前端响应或 domain。
+
 ## 前端访问规则
 
 1. 前端不得直接访问 opencode server。
@@ -54,6 +56,7 @@ Phase 06 前置修复后，平台 Session 与远端 opencode Session 通过 pers
 5. `event-stream-client` 不得直接修改 React 组件状态。
 6. `ui-kit` 和 `shared-types` 不得依赖业务 API 或事件流。
 7. 自研 Web IDE 功能必须按 package 边界沉淀，不能把全部逻辑堆到 `apps/agent-web`。
+8. Phase 07 搜索只过滤已加载文件树的文件名；Phase 08 Diff 接受/拒绝只能通过平台 Run 级 API。
 
 ## 文档要求
 

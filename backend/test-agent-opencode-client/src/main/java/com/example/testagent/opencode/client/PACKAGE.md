@@ -19,6 +19,8 @@
 - `OpencodeStartRunCommand`、`OpencodeStartRunResult`：使用远端 opencode session id 调用 `prompt_async`。
 - `OpencodeCancelCommand`、`OpencodeCancelResult`：使用远端 opencode session id 调用 abort。
 - `OpencodeStreamEventsCommand`、`OpencodeRunEventMapper`：订阅 opencode event 并映射为平台 RunEventDraft。
+- `OpencodeDiffCommand`、`OpencodeDiffResult`、`OpencodeDiffFile`：查询 opencode session Diff 并输出平台稳定 DTO。
+- `OpencodeRejectDiffCommand`、`OpencodeRejectDiffResult`：通过 opencode `sessionRevert` 拒绝 Run 级 Diff。
 - `OpencodeHealthCommand`、`OpencodeHealthResult`：执行节点健康检查。
 
 ## 允许依赖
@@ -48,7 +50,7 @@
 ## 测试位置
 
 - opencode-client 模块单元测试和 gateway 级 HTTP 测试。
-- facade 测试覆盖 traceId、错误映射、超时重试、create/start/cancel/event。
+- facade 测试覆盖 traceId、错误映射、超时重试、create/start/cancel/event/diff/revert。
 
 ## 修改时必须同步更新
 

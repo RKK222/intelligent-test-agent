@@ -1,6 +1,6 @@
 # 前端编码规范
 
-本规范适用于未来完全自研的 `frontend/` 工程。
+本规范适用于完全自研的 `frontend/` 工程。
 
 ## 基本原则
 
@@ -46,11 +46,13 @@
 
 ## UI 与交互
 
-1. 使用 shadcn/ui 和 Tailwind 建立统一设计语言。
+1. 使用 Tailwind 和 `packages/ui-kit` 建立统一设计语言。
 2. 工具按钮优先使用图标和 tooltip。
 3. 工作台、编辑器、文件树、Diff、报告等固定格式区域必须有稳定尺寸和响应式约束。
 4. loading、empty、error、retry、cancel 状态必须完整。
 5. 文案必须面向测试智能体工作流，避免把内部实现细节暴露给最终用户。
+6. Phase 07 文件搜索只过滤已加载文件树的文件名，不在前端自行扫描工作区，也不绕过后端新增搜索能力。
+7. Phase 08 Diff 的后端接受/拒绝是 Run 级语义；当前文件按钮只能作为选择和反馈，不得暗示 per-file 后端回滚。
 
 ## 中文注释
 
@@ -65,6 +67,6 @@
 - `docs/frontend/*.md`。
 - `docs/api/backend-api.md`。
 - `docs/api/event-stream-api.md`。
-- 未来 `frontend/README.md`。
+- `frontend/README.md`。
 - 目标 app/package README。
 - 目标源码包 PACKAGE.md。

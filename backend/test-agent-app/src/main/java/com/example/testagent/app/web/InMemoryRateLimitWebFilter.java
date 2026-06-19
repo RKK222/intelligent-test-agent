@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -34,6 +35,7 @@ public class InMemoryRateLimitWebFilter implements WebFilter {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
 
+    @Autowired
     public InMemoryRateLimitWebFilter(TestAgentRuntimeProperties properties) {
         this(
                 properties.getRateLimit().isEnabled(),

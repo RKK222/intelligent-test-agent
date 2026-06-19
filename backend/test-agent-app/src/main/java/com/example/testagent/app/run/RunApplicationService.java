@@ -252,12 +252,28 @@ public class RunApplicationService {
                         workspace.rootPath(),
                         null,
                         traceId))
-                .doOnNext(runEventAppender::append)
+                .doOnNext(draft -> appendStreamEvent(run, draft))
                 .doOnError(error -> failRunFromStream(run, traceId, error))
                 .subscribe(ignored -> {
                 }, ignored -> {
                     // 错误已在 doOnError 中落库，这里消费异常以避免 Reactor dropped error 日志。
                 });
+    }
+
+    private void appendStreamEvent(Run originalRun, RunEventDraft draft) {
+        if (draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED) {
+            Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
+            if (!current.status().isTerminal()) {
+                if (draft.type() == RunEventType.RUN_SUCCEEDED) {
+                    runRepository.save(current.succeed(draft.occurredAt()));
+                } else {
+                    runRepository.save(current.fail(draft.occurredAt()));
+                }
+                runEventAppender.append(draft);
+            }
+            return;
+        }
+        runEventAppender.append(draft);
     }
 
     private void failRunFromStream(Run run, String traceId, Throwable error) {

@@ -12,6 +12,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
@@ -26,6 +27,7 @@ public class OpencodeRunEventMapper {
     private final ObjectMapper objectMapper;
     private final Supplier<Instant> now;
 
+    @Autowired
     public OpencodeRunEventMapper(ObjectMapper objectMapper) {
         this(objectMapper, Instant::now);
     }
@@ -57,6 +59,8 @@ public class OpencodeRunEventMapper {
     private RunEventType mapType(String rawType, Map<String, Object> payload) {
         return switch (rawType) {
             case "session.next.prompted" -> RunEventType.RUN_STARTED;
+            case "session.next.step.ended" -> RunEventType.RUN_SUCCEEDED;
+            case "session.next.step.failed", "session.error" -> RunEventType.RUN_FAILED;
             case "session.next.text.delta", "message.part.delta" -> RunEventType.ASSISTANT_MESSAGE_DELTA;
             case "session.next.tool.called", "session.next.tool.input.started" -> RunEventType.TOOL_STARTED;
             case "session.next.tool.success" -> {

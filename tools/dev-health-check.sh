@@ -41,11 +41,12 @@ curl -fsS --max-time 5 "${base_url}/actuator/health" >/dev/null
 echo "OK ${base_url}/actuator/health"
 
 if [[ "${with_api}" == "true" ]]; then
-  auth_headers=()
   if [[ -n "${TEST_AGENT_API_TOKEN:-}" ]]; then
-    auth_headers=(-H "Authorization: Bearer ${TEST_AGENT_API_TOKEN}")
+    curl -fsS --max-time 5 -H "Authorization: Bearer ${TEST_AGENT_API_TOKEN}" \
+      "${base_url}/api/workspaces?page=1&size=1" >/dev/null
+  else
+    curl -fsS --max-time 5 \
+      "${base_url}/api/workspaces?page=1&size=1" >/dev/null
   fi
-  curl -fsS --max-time 5 "${auth_headers[@]}" \
-    "${base_url}/api/workspaces?page=1&size=1" >/dev/null
   echo "OK ${base_url}/api/workspaces?page=1&size=1"
 fi

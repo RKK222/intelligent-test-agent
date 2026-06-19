@@ -6,6 +6,7 @@ import com.example.testagent.observability.TraceConstants;
 import com.example.testagent.observability.TraceIdSupport;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
@@ -28,6 +29,7 @@ public class ApiTokenWebFilter implements WebFilter {
     private final String apiToken;
     private final ObjectMapper objectMapper;
 
+    @Autowired
     public ApiTokenWebFilter(@Value("${test-agent.security.api-token:}") String apiToken) {
         this(apiToken, new ObjectMapper());
     }

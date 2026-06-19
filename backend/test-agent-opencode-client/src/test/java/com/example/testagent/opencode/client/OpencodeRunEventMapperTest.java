@@ -54,6 +54,43 @@ class OpencodeRunEventMapperTest {
     }
 
     @Test
+    void mapsStepEndedToRunSucceeded() throws Exception {
+        RunEventDraft draft = mapper.toDraft(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_done","type":"session.next.step.ended","properties":{"messageID":"msg_remote_1"}}
+                        """),
+                new RunId("run_1234567890abcdef"),
+                "trace_1234567890abcdef");
+
+        assertThat(draft.type()).isEqualTo(RunEventType.RUN_SUCCEEDED);
+        assertThat(draft.payload()).containsEntry("messageID", "msg_remote_1");
+    }
+
+    @Test
+    void mapsStepFailedToRunFailed() throws Exception {
+        RunEventDraft draft = mapper.toDraft(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_failed","type":"session.next.step.failed","properties":{"messageID":"msg_remote_1"}}
+                        """),
+                new RunId("run_1234567890abcdef"),
+                "trace_1234567890abcdef");
+
+        assertThat(draft.type()).isEqualTo(RunEventType.RUN_FAILED);
+    }
+
+    @Test
+    void mapsSessionErrorToRunFailed() throws Exception {
+        RunEventDraft draft = mapper.toDraft(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_error","type":"session.error","properties":{"error":{"message":"boom"}}}
+                        """),
+                new RunId("run_1234567890abcdef"),
+                "trace_1234567890abcdef");
+
+        assertThat(draft.type()).isEqualTo(RunEventType.RUN_FAILED);
+    }
+
+    @Test
     void mapsUnknownEventWithoutDroppingRawContext() throws Exception {
         RunEventDraft draft = mapper.toDraft(
                 objectMapper.readTree("""

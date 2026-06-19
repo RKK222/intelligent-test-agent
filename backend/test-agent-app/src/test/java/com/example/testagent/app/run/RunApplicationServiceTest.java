@@ -38,8 +38,12 @@ import com.example.testagent.opencode.client.OpencodeCancelResult;
 import com.example.testagent.opencode.client.OpencodeClientFacade;
 import com.example.testagent.opencode.client.OpencodeCreateSessionCommand;
 import com.example.testagent.opencode.client.OpencodeCreateSessionResult;
+import com.example.testagent.opencode.client.OpencodeDiffCommand;
+import com.example.testagent.opencode.client.OpencodeDiffResult;
 import com.example.testagent.opencode.client.OpencodeHealthCommand;
 import com.example.testagent.opencode.client.OpencodeHealthResult;
+import com.example.testagent.opencode.client.OpencodeRejectDiffCommand;
+import com.example.testagent.opencode.client.OpencodeRejectDiffResult;
 import com.example.testagent.opencode.client.OpencodeStartRunCommand;
 import com.example.testagent.opencode.client.OpencodeStartRunResult;
 import com.example.testagent.opencode.client.OpencodeStreamEventsCommand;
@@ -49,6 +53,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -123,6 +128,64 @@ class RunApplicationServiceTest {
         assertThat(facade.startRunCommands).hasSize(1);
         assertThat(facade.startRunCommands.getFirst().opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
         assertThat(facade.startRunCommands.getFirst().workspace()).isNull();
+    }
+
+    @Test
+    void serviceMarksRunSucceededWhenOpencodeStreamEmitsTerminalEvent() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.RUN_SUCCEEDED,
+                command.traceId(),
+                Instant.now(),
+                Map.of("messageID", "msg_remote1234567890abcdef")));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                facade);
+
+        Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.SUCCEEDED);
+        assertThat(events.events).extracting(RunEvent::type)
+                .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_SUCCEEDED);
+    }
+
+    @Test
+    void serviceMarksRunFailedWhenOpencodeStreamEmitsTerminalEvent() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.RUN_FAILED,
+                command.traceId(),
+                Instant.now(),
+                Map.of("messageID", "msg_remote1234567890abcdef")));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                facade);
+
+        Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.FAILED);
+        assertThat(events.events).extracting(RunEvent::type)
+                .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_FAILED);
     }
 
     @Test
@@ -426,6 +489,7 @@ class RunApplicationServiceTest {
         private final List<OpencodeStartRunCommand> startRunCommands = new ArrayList<>();
         private String lastPrompt;
         private RuntimeException createSessionError;
+        private Function<OpencodeStreamEventsCommand, Flux<RunEventDraft>> streamEvents = ignored -> Flux.empty();
 
         @Override
         public Mono<OpencodeHealthResult> health(OpencodeHealthCommand command) {
@@ -455,7 +519,17 @@ class RunApplicationServiceTest {
 
         @Override
         public Flux<RunEventDraft> streamRunEvents(OpencodeStreamEventsCommand command) {
-            return Flux.empty();
+            return streamEvents.apply(command);
+        }
+
+        @Override
+        public Mono<OpencodeDiffResult> getDiff(OpencodeDiffCommand command) {
+            return Mono.just(new OpencodeDiffResult(List.of()));
+        }
+
+        @Override
+        public Mono<OpencodeRejectDiffResult> rejectDiff(OpencodeRejectDiffCommand command) {
+            return Mono.just(new OpencodeRejectDiffResult(true));
         }
     }
 }

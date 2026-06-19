@@ -107,6 +107,49 @@ final class RuntimeDtos {
         }
     }
 
+    record RunDiffFileResponse(
+            String path,
+            String patch,
+            long additions,
+            long deletions,
+            String status) {
+
+        static RunDiffFileResponse from(com.example.testagent.app.run.RunDiffFileResponse file) {
+            return new RunDiffFileResponse(
+                    file.path(),
+                    file.patch(),
+                    file.additions(),
+                    file.deletions(),
+                    file.status());
+        }
+    }
+
+    record RunDiffResponse(
+            String runId,
+            List<RunDiffFileResponse> files) {
+
+        static RunDiffResponse from(com.example.testagent.app.run.RunDiffResponse diff) {
+            return new RunDiffResponse(
+                    diff.runId(),
+                    diff.files().stream().map(RunDiffFileResponse::from).toList());
+        }
+    }
+
+    record RunDiffActionResponse(
+            String runId,
+            String action,
+            String status,
+            int fileCount) {
+
+        static RunDiffActionResponse from(com.example.testagent.app.run.RunDiffActionResponse action) {
+            return new RunDiffActionResponse(
+                    action.runId(),
+                    action.action(),
+                    action.status(),
+                    action.fileCount());
+        }
+    }
+
     static PageResponse<WorkspaceResponse> workspacePage(PageResponse<Workspace> page) {
         return new PageResponse<>(page.items().stream().map(WorkspaceResponse::from).toList(), page.page(), page.size(), page.total());
     }

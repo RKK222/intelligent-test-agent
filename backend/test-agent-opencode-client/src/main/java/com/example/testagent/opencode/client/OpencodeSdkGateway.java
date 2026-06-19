@@ -35,4 +35,21 @@ public interface OpencodeSdkGateway {
             String traceId);
 
     Flux<JsonNode> streamEvents(ExecutionNode node, String directory, String workspace, String traceId);
+
+    Mono<OpencodeDiffResult> getDiff(
+            ExecutionNode node,
+            String opencodeSessionId,
+            String directory,
+            String workspace,
+            String messageId,
+            String traceId);
+
+    Mono<OpencodeRejectDiffResult> rejectDiff(
+            ExecutionNode node,
+            String opencodeSessionId,
+            String directory,
+            String workspace,
+            String messageId,
+            String partId,
+            String traceId);
 }

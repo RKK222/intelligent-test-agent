@@ -18,4 +18,8 @@ public interface OpencodeClientFacade {
     Mono<OpencodeStartRunResult> startRun(OpencodeStartRunCommand command);
 
     Flux<RunEventDraft> streamRunEvents(OpencodeStreamEventsCommand command);
+
+    Mono<OpencodeDiffResult> getDiff(OpencodeDiffCommand command);
+
+    Mono<OpencodeRejectDiffResult> rejectDiff(OpencodeRejectDiffCommand command);
 }

@@ -218,6 +218,9 @@ Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做
 | `GET` | `/api/runs/{runId}` | 查询 Run 状态。 |
 | `POST` | `/api/runs/{runId}/cancel` | 取消 Run。 |
 | `GET` | `/api/runs/{runId}/events` | 订阅 RunEvent SSE。 |
+| `GET` | `/api/runs/{runId}/diff` | 查询 Run 级 Diff。 |
+| `POST` | `/api/runs/{runId}/diff/accept` | 接受 Run 级 Diff。 |
+| `POST` | `/api/runs/{runId}/diff/reject` | 拒绝 Run 级 Diff 并触发 opencode revert。 |
 
 `POST /api/runs` 请求体：
 
@@ -241,6 +244,60 @@ Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做
 `POST /api/runs/{runId}/cancel` 对终态 Run 返回 `CONFLICT`。非终态 Run 会在存在内部映射时使用远端 opencode session id 调用 opencode cancel，并追加 `run.cancelling`、`run.cancelled`。
 
 `GET /api/runs/{runId}/events` 返回 `text/event-stream`，SSE `id` 使用 RunEvent `seq`，`event` 使用稳定 wire name。`Last-Event-ID` 续传规则见 `docs/api/event-stream-api.md`。
+
+### Diff API
+
+Diff API 属于平台 Run 级能力。Controller 只调用 `RunDiffApplicationService`，不直接访问 Repository、generated SDK 或 opencode server。
+
+`GET /api/runs/{runId}/diff` 返回当前 Run 的 Diff：
+
+```json
+{
+  "runId": "run_...",
+  "files": [
+    {
+      "path": "tests/checkout.spec.ts",
+      "patch": "@@ -1 +1 @@\n-old\n+new\n",
+      "additions": 1,
+      "deletions": 1,
+      "status": "modified"
+    }
+  ]
+}
+```
+
+读取顺序：
+
+1. 优先使用该 Run 最新 `diff.proposed` 事件 payload 中的 `diff` 或 `files`。
+2. 若事件中没有 Diff 且 Session 已绑定远端 opencode session，则通过 `OpencodeClientFacade.getDiff` 调用 opencode `sessionDiff`。
+3. 若没有可用映射，返回空文件列表，不暴露内部 opencode 字段。
+
+`POST /api/runs/{runId}/diff/accept` 不修改文件系统；语义为“保留当前工作区变更并追加平台事件”。响应：
+
+```json
+{
+  "runId": "run_...",
+  "action": "accept",
+  "status": "accepted",
+  "fileCount": 2
+}
+```
+
+后端会追加 `diff.accepted` RunEvent，payload 至少包含 `action`、`status`、`fileCount`。
+
+`POST /api/runs/{runId}/diff/reject` 语义为“拒绝本次 Run 对应消息产生的变更”。后端会从 RunEvent payload 中查找最近的 opencode `messageID`，并通过 `OpencodeClientFacade.rejectDiff` 调用 opencode `sessionRevert`。成功后追加 `diff.rejected` RunEvent。
+
+拒绝失败规则：
+
+- 缺少 `messageID` 返回 `CONFLICT`。
+- Session 未绑定远端 opencode session 返回 `CONFLICT`。
+- opencode 超时、不可用或异常仍映射为 `OPENCODE_TIMEOUT`、`OPENCODE_UNAVAILABLE` 或 `OPENCODE_BAD_GATEWAY`。
+
+兼容性：
+
+- Diff 文件对象可新增字段，前端必须忽略未知字段。
+- 当前不支持 per-file 后端回滚；前端“当前文件接受/拒绝”只能作为当前选择和反馈，不承诺后端按文件应用。
+- 不新增数据库 migration；接受/拒绝动作通过 append-only RunEvent 记录。
 
 ### 健康检查
 

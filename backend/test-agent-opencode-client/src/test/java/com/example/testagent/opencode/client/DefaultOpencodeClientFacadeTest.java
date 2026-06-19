@@ -15,6 +15,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -157,6 +158,49 @@ class DefaultOpencodeClientFacadeTest {
         assertThat(draft.payload()).containsEntry("rawType", "session.next.text.delta");
     }
 
+    @Test
+    void facadeReadsSessionDiffWithoutLeakingGeneratedDtos() {
+        FakeGateway gateway = new FakeGateway();
+        OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);
+
+        OpencodeDiffResult result = facade.getDiff(new OpencodeDiffCommand(
+                node(),
+                "ses_remote1234567890abcdef",
+                "/tmp/demo",
+                null,
+                "msg_remote1234567890abcdef",
+                "trace_1234567890abcdef")).block();
+
+        assertThat(result.files()).singleElement().satisfies(file -> {
+            assertThat(file.path()).isEqualTo("tests/demo.spec.ts");
+            assertThat(file.patch()).contains("@@");
+            assertThat(file.additions()).isEqualTo(2);
+            assertThat(file.deletions()).isEqualTo(1);
+            assertThat(file.status()).isEqualTo("modified");
+        });
+        assertThat(gateway.lastOpencodeSessionId).isEqualTo("ses_remote1234567890abcdef");
+        assertThat(gateway.lastMessageId).isEqualTo("msg_remote1234567890abcdef");
+    }
+
+    @Test
+    void facadeRejectsDiffThroughSessionRevert() {
+        FakeGateway gateway = new FakeGateway();
+        OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);
+
+        OpencodeRejectDiffResult result = facade.rejectDiff(new OpencodeRejectDiffCommand(
+                node(),
+                "ses_remote1234567890abcdef",
+                "/tmp/demo",
+                null,
+                "msg_remote1234567890abcdef",
+                null,
+                "trace_1234567890abcdef")).block();
+
+        assertThat(result.rejected()).isTrue();
+        assertThat(gateway.lastOpencodeSessionId).isEqualTo("ses_remote1234567890abcdef");
+        assertThat(gateway.lastMessageId).isEqualTo("msg_remote1234567890abcdef");
+    }
+
     private static OpencodeClientFacade facade(FakeGateway gateway, Duration timeout, int maxRetries) {
         return new DefaultOpencodeClientFacade(
                 gateway,
@@ -200,6 +244,7 @@ class DefaultOpencodeClientFacadeTest {
         private String lastDirectory;
         private String lastWorkspace;
         private String lastTitle;
+        private String lastMessageId;
 
         @Override
         public Mono<OpencodeHealthResult> health(ExecutionNode node, String traceId) {
@@ -260,6 +305,44 @@ class DefaultOpencodeClientFacadeTest {
             lastDirectory = directory;
             lastWorkspace = workspace;
             return events;
+        }
+
+        @Override
+        public Mono<OpencodeDiffResult> getDiff(
+                ExecutionNode node,
+                String opencodeSessionId,
+                String directory,
+                String workspace,
+                String messageId,
+                String traceId) {
+            lastTraceId = traceId;
+            lastOpencodeSessionId = opencodeSessionId;
+            lastDirectory = directory;
+            lastWorkspace = workspace;
+            lastMessageId = messageId;
+            return Mono.just(new OpencodeDiffResult(List.of(new OpencodeDiffFile(
+                    "tests/demo.spec.ts",
+                    "@@ -1 +1 @@\n-old\n+new\n",
+                    2,
+                    1,
+                    "modified"))));
+        }
+
+        @Override
+        public Mono<OpencodeRejectDiffResult> rejectDiff(
+                ExecutionNode node,
+                String opencodeSessionId,
+                String directory,
+                String workspace,
+                String messageId,
+                String partId,
+                String traceId) {
+            lastTraceId = traceId;
+            lastOpencodeSessionId = opencodeSessionId;
+            lastDirectory = directory;
+            lastWorkspace = workspace;
+            lastMessageId = messageId;
+            return Mono.just(new OpencodeRejectDiffResult(true));
         }
 
         private String lastPrompt;

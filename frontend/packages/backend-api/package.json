@@ -1,0 +1,17 @@
+{
+  "name": "@test-agent/backend-api",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "tsc --noEmit --pretty false",
+    "typecheck": "tsc --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@test-agent/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "6.0.3"
+  }
+}

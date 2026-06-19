@@ -19,6 +19,8 @@ public enum RunEventType {
     TOOL_STARTED("tool.started"),
     TOOL_FINISHED("tool.finished"),
     DIFF_PROPOSED("diff.proposed"),
+    DIFF_ACCEPTED("diff.accepted"),
+    DIFF_REJECTED("diff.rejected"),
     TEST_FINISHED("test.finished"),
     OPENCODE_EVENT_UNKNOWN("opencode.event.unknown");
 

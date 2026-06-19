@@ -1,6 +1,6 @@
 # 前端架构规范
 
-当前仓库尚未创建真实 `frontend/` 工程。本规范先定义未来完全自研 Web IDE 前端的 workspace、包职责和访问边界。
+`frontend/` 已在 Phase 06 创建为完全自研 Web IDE 工程。`frontend/interaction-visual-demo` 仅作为布局和交互参考资料保留，不纳入 pnpm workspace 构建，不作为真实应用代码复用。
 
 ## 技术栈
 
@@ -9,7 +9,6 @@
 - Next.js
 - React
 - TypeScript
-- shadcn/ui
 - Tailwind
 - assistant-ui
 - Dockview
@@ -18,13 +17,17 @@
 - Zustand
 - pnpm workspace
 
-## 规划结构
+Phase 06-08 不引入外部 Web 项目作为页面基础，通用组件先沉淀在 `packages/ui-kit`。
+
+## 当前结构
 
 ```text
 frontend/
   README.md
   apps/
     agent-web/
+      README.md
+      src/PACKAGE.md
   packages/
     backend-api/
     event-stream-client/
@@ -34,27 +37,31 @@ frontend/
     diff-viewer/
     agent-chat/
     test-runner/
-    report-viewer/
-    skill-studio/
     ui-kit/
     shared-types/
+  interaction-visual-demo/
 ```
 
 ## 包职责
 
-- `apps/agent-web`：自研主应用，负责路由、整体布局、认证态入口、全局错误边界和页面组合。
-- `packages/backend-api`：访问 `test-agent-app` 的唯一前端 HTTP client。
-- `packages/event-stream-client`：RunEvent SSE client，负责连接、重连、去重、断点恢复和取消订阅。
-- `packages/workbench-shell`：Dockview 工作台布局、面板注册、面板恢复和快捷入口。
-- `packages/file-explorer`：文件树、文件状态、搜索、打开文件入口。
-- `packages/editor`：Monaco 编辑器、文件编辑、保存、只读模式和编辑器状态。
-- `packages/diff-viewer`：Monaco Diff、接受/拒绝修改、变更预览和应用结果。
-- `packages/agent-chat`：assistant-ui 对话、PlanCard、ToolCallCard、TestRunCard、DiffActionCard。
-- `packages/test-runner`：测试执行面板、状态轮询或事件更新、取消和重试。
-- `packages/report-viewer`：报告详情、失败分析、Trace、截图、日志。
-- `packages/skill-studio`：Python 技能编辑、调试、参数配置和运行结果。
-- `packages/ui-kit`：平台通用 UI 组件、主题、图标、反馈组件。
-- `packages/shared-types`：跨包共享 TypeScript 类型。
+- `apps/agent-web`：自研主应用，负责页面组合、TanStack Query Provider、工作空间选择、Run 启动、SSE 订阅编排和全局错误提示。
+- `packages/backend-api`：访问 `test-agent-app` 的唯一前端 HTTP client，负责统一响应、错误和 traceId 映射。
+- `packages/event-stream-client`：RunEvent SSE client，负责连接、自动重连、事件解析、去重和取消订阅。
+- `packages/workbench-shell`：Dockview 工作台布局、顶部栏、左中右底面板和工作台级 Zustand 状态。
+- `packages/file-explorer`：文件树、已加载文件名过滤、变更列表和打开文件入口。
+- `packages/editor`：Monaco 编辑器、语言识别、内容编辑和只读展示。
+- `packages/diff-viewer`：Monaco Diff、变更文件列表、Run 级接受/拒绝按钮和当前文件反馈。
+- `packages/agent-chat`：assistant-ui 集成点、用户消息、运行卡片、PlanCard、ToolCallCard、TestRunCard、DiffActionCard。
+- `packages/test-runner`：底部 Run 状态、取消、重试和事件日志面板。
+- `packages/ui-kit`：平台通用 UI 组件、基础样式组合和反馈组件。
+- `packages/shared-types`：跨包共享 TypeScript 类型和事件/DTO 模型。
+
+## 阶段边界
+
+1. Phase 07 搜索只过滤前端已加载文件树的文件名，不新增后端全文搜索 API。
+2. Phase 08 Diff 接受/拒绝是 Run 级语义；当前文件按钮只改变当前选择和交互反馈，不承诺 per-file 后端回滚。
+3. 前端不直接访问 opencode server；真实 opencode 能力只能通过 `test-agent-app -> test-agent-opencode-client` 调用。
+4. Monaco 编辑器和 Diff 按需加载，固定尺寸面板必须避免文本和控件重叠。
 
 ## 架构红线
 
@@ -78,17 +85,19 @@ apps/agent-web
   -> packages/editor
   -> packages/diff-viewer
   -> packages/test-runner
-  -> packages/report-viewer
-  -> packages/skill-studio
   -> packages/backend-api
   -> packages/event-stream-client
   -> packages/ui-kit
   -> packages/shared-types
 
 feature packages
-  -> packages/backend-api
-  -> packages/event-stream-client
   -> packages/ui-kit
+  -> packages/shared-types
+
+packages/backend-api
+  -> packages/shared-types
+
+packages/event-stream-client
   -> packages/shared-types
 ```
 
@@ -98,10 +107,11 @@ feature packages
 - `packages/event-stream-client` 不得依赖页面、工作台或具体业务组件。
 - `packages/shared-types` 不得依赖任何业务包。
 - `packages/ui-kit` 不得依赖业务 API、事件流或页面状态。
+- `packages/editor`、`packages/diff-viewer` 不得启动 Run 或直连 opencode server。
 
 ## 文档要求
 
-未来创建前端工程后必须补：
+前端工程变更必须同步：
 
 - `frontend/README.md`。
 - 每个 app/package 的 `README.md`。

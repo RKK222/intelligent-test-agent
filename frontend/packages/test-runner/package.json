@@ -1,0 +1,21 @@
+{
+  "name": "@test-agent/test-runner",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "lint": "tsc --noEmit --pretty false",
+    "typecheck": "tsc --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@test-agent/shared-types": "workspace:*",
+    "@test-agent/ui-kit": "workspace:*",
+    "lucide-react": "1.21.0",
+    "react": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.7",
+    "typescript": "6.0.3"
+  }
+}

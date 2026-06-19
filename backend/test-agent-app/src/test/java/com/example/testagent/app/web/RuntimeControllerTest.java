@@ -5,6 +5,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import com.example.testagent.app.run.RunApplicationService;
+import com.example.testagent.app.run.RunDiffActionResponse;
+import com.example.testagent.app.run.RunDiffApplicationService;
+import com.example.testagent.app.run.RunDiffFileResponse;
+import com.example.testagent.app.run.RunDiffResponse;
 import com.example.testagent.app.workspace.WorkspaceApplicationService;
 import com.example.testagent.domain.run.Run;
 import com.example.testagent.domain.run.RunId;
@@ -14,6 +18,7 @@ import com.example.testagent.domain.workspace.Workspace;
 import com.example.testagent.domain.workspace.WorkspaceId;
 import com.example.testagent.domain.workspace.WorkspaceStatus;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -55,7 +60,7 @@ class RuntimeControllerTest {
                         eq("run the tests"),
                         eq("trace_1234567890abcdef")))
                 .thenReturn(run());
-        WebTestClient client = WebTestClient.bindToController(new RunController(service, null))
+        WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
                 .webFilter(new TraceIdWebFilter())
                 .build();
 
@@ -72,6 +77,50 @@ class RuntimeControllerTest {
                 .jsonPath("$.success").isEqualTo(true)
                 .jsonPath("$.data.runId").isEqualTo("run_1234567890abcdef")
                 .jsonPath("$.data.status").isEqualTo("RUNNING");
+    }
+
+    @Test
+    void runControllerExposesDiffAndDiffActions() {
+        RunApplicationService runService = org.mockito.Mockito.mock(RunApplicationService.class);
+        RunDiffApplicationService diffService = org.mockito.Mockito.mock(RunDiffApplicationService.class);
+        when(diffService.getDiff(eq(new RunId("run_1234567890abcdef")), eq("trace_1234567890abcdef")))
+                .thenReturn(new RunDiffResponse(
+                        "run_1234567890abcdef",
+                        List.of(new RunDiffFileResponse("src/App.tsx", "@@", 2, 1, "modified"))));
+        when(diffService.acceptDiff(eq(new RunId("run_1234567890abcdef")), eq("trace_1234567890abcdef")))
+                .thenReturn(new RunDiffActionResponse("run_1234567890abcdef", "accept", "accepted", 1));
+        when(diffService.rejectDiff(eq(new RunId("run_1234567890abcdef")), eq("trace_1234567890abcdef")))
+                .thenReturn(new RunDiffActionResponse("run_1234567890abcdef", "reject", "rejected", 1));
+        WebTestClient client = WebTestClient.bindToController(new RunController(runService, diffService, null))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.get()
+                .uri("/api/runs/run_1234567890abcdef/diff")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.files[0].path").isEqualTo("src/App.tsx")
+                .jsonPath("$.data.files[0].additions").isEqualTo(2);
+
+        client.post()
+                .uri("/api/runs/run_1234567890abcdef/diff/accept")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.action").isEqualTo("accept")
+                .jsonPath("$.data.status").isEqualTo("accepted");
+
+        client.post()
+                .uri("/api/runs/run_1234567890abcdef/diff/reject")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.action").isEqualTo("reject")
+                .jsonPath("$.data.status").isEqualTo("rejected");
     }
 
     private static Workspace workspace() {

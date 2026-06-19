@@ -21,7 +21,10 @@
 - `workspace.WorkspaceApplicationService`、`workspace.WorkspaceFileService`：工作区注册、文件路径归一化和 UTF-8 文件读写。
 - `session.SessionApplicationService`：会话创建、查询和消息追加/分页。
 - `run.RunApplicationService`：Run 启动、路由、opencode session 懒创建/复用、opencode start/cancel 和事件订阅编排。
+- `run.RunDiffApplicationService`：Run 级 Diff 查询、接受事件追加和拒绝时 opencode revert 编排。
 - `config.TestAgentRuntimeProperties`、`config.ExecutionNodeSeeder`：运行时配置绑定和 opencode node seed。
+- `config.DatabaseMigrationRunner`：运行态 Flyway migration 入口，确保空库启动先建表再 seed。
+- `config.RuntimeJsonConfig`：应用运行态共享 Jackson ObjectMapper 配置。
 - `config.OpencodeNodesHealthIndicator`、`config.RedisOptionalHealthIndicator`：本地集成健康检查。
 - `support.RuntimeIdGenerator`：应用层业务 ID 生成入口。
 

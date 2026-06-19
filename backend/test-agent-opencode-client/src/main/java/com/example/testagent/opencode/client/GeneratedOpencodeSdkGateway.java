@@ -6,9 +6,11 @@ import com.example.opencode.sdk.api.GlobalApi;
 import com.example.opencode.sdk.api.SessionApi;
 import com.example.opencode.sdk.model.SessionPromptAsyncRequest;
 import com.example.opencode.sdk.model.SessionPromptRequestPartsInner;
+import com.example.opencode.sdk.model.SnapshotFileDiff;
 import com.example.testagent.domain.node.ExecutionNode;
 import com.example.testagent.observability.TraceConstants;
 import com.fasterxml.jackson.databind.JsonNode;
+import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -134,6 +136,63 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .bodyToFlux(JsonNode.class);
     }
 
+    @Override
+    public Mono<OpencodeDiffResult> getDiff(
+            ExecutionNode node,
+            String opencodeSessionId,
+            String directory,
+            String workspace,
+            String messageId,
+            String traceId) {
+        ApiClient apiClient = apiClient(node, traceId);
+        return new SessionApi(apiClient)
+                .sessionDiff(opencodeSessionId, directory, optionalText(workspace), optionalText(messageId))
+                .map(this::toDiffFile)
+                .collectList()
+                .map(OpencodeDiffResult::new);
+    }
+
+    @Override
+    public Mono<OpencodeRejectDiffResult> rejectDiff(
+            ExecutionNode node,
+            String opencodeSessionId,
+            String directory,
+            String workspace,
+            String messageId,
+            String partId,
+        String traceId) {
+        ApiClient apiClient = apiClient(node, traceId);
+        // generated SessionApi 的参数包装类遮蔽了 model.SessionRevertRequest，这里直接构造稳定 JSON 请求体。
+        Map<String, Object> request = optionalText(partId) == null
+                ? Map.of("messageID", messageId)
+                : Map.of("messageID", messageId, "partID", optionalText(partId));
+        ParameterizedTypeReference<Void> returnType = new ParameterizedTypeReference<>() {
+        };
+        Map<String, Object> pathParams = new HashMap<>();
+        pathParams.put("sessionID", opencodeSessionId);
+        MultiValueMap<String, String> queryParams = queryParams(apiClient, directory, workspace);
+        HttpHeaders headerParams = new HttpHeaders();
+        MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<>();
+        MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<>();
+        List<MediaType> accepts = apiClient.selectHeaderAccept(new String[]{"application/json"});
+        MediaType contentType = apiClient.selectHeaderContentType(new String[]{"application/json"});
+        return apiClient.invokeAPI(
+                        "/session/{sessionID}/revert",
+                        HttpMethod.POST,
+                        pathParams,
+                        queryParams,
+                        request,
+                        headerParams,
+                        cookieParams,
+                        formParams,
+                        accepts,
+                        contentType,
+                        new String[]{},
+                        returnType)
+                .bodyToMono(returnType)
+                .thenReturn(new OpencodeRejectDiffResult(true));
+    }
+
     private ApiClient apiClient(ExecutionNode node, String traceId) {
         return new ApiClient()
                 .setBasePath(node.baseUrl())
@@ -155,6 +214,20 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             throw new IllegalStateException("opencode create session response missing id");
         }
         return body.path("id").asText();
+    }
+
+    private OpencodeDiffFile toDiffFile(SnapshotFileDiff diff) {
+        String status = diff.getStatus() == null ? "modified" : diff.getStatus().getValue();
+        return new OpencodeDiffFile(
+                diff.getFile(),
+                diff.getPatch(),
+                toLong(diff.getAdditions()),
+                toLong(diff.getDeletions()),
+                status);
+    }
+
+    private long toLong(BigDecimal value) {
+        return value == null ? 0 : value.longValue();
     }
 
     private String optionalText(String value) {

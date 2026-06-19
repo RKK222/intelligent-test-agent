@@ -1,6 +1,7 @@
 package com.example.testagent.app.web;
 
 import com.example.testagent.app.run.RunApplicationService;
+import com.example.testagent.app.run.RunDiffApplicationService;
 import com.example.testagent.common.api.ApiResponse;
 import com.example.testagent.domain.run.RunId;
 import com.example.testagent.domain.session.SessionId;
@@ -29,10 +30,15 @@ public class RunController {
     private static final int DEFAULT_BATCH_LIMIT = 100;
 
     private final RunApplicationService runService;
+    private final RunDiffApplicationService runDiffService;
     private final RunEventSseStreamService eventStreamService;
 
-    public RunController(RunApplicationService runService, RunEventSseStreamService eventStreamService) {
+    public RunController(
+            RunApplicationService runService,
+            RunDiffApplicationService runDiffService,
+            RunEventSseStreamService eventStreamService) {
         this.runService = runService;
+        this.runDiffService = runDiffService;
         this.eventStreamService = eventStreamService;
     }
 
@@ -59,6 +65,34 @@ public class RunController {
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         return ApiResponse.ok(RuntimeDtos.RunResponse.from(runService.cancelRun(new RunId(runId), traceId)), traceId);
+    }
+
+    @GetMapping("/api/runs/{runId}/diff")
+    public ApiResponse<RuntimeDtos.RunDiffResponse> getDiff(
+            @PathVariable String runId,
+            ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        return ApiResponse.ok(RuntimeDtos.RunDiffResponse.from(runDiffService.getDiff(new RunId(runId), traceId)), traceId);
+    }
+
+    @PostMapping("/api/runs/{runId}/diff/accept")
+    public ApiResponse<RuntimeDtos.RunDiffActionResponse> acceptDiff(
+            @PathVariable String runId,
+            ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        return ApiResponse.ok(
+                RuntimeDtos.RunDiffActionResponse.from(runDiffService.acceptDiff(new RunId(runId), traceId)),
+                traceId);
+    }
+
+    @PostMapping("/api/runs/{runId}/diff/reject")
+    public ApiResponse<RuntimeDtos.RunDiffActionResponse> rejectDiff(
+            @PathVariable String runId,
+            ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        return ApiResponse.ok(
+                RuntimeDtos.RunDiffActionResponse.from(runDiffService.rejectDiff(new RunId(runId), traceId)),
+                traceId);
     }
 
     @GetMapping(value = "/api/runs/{runId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

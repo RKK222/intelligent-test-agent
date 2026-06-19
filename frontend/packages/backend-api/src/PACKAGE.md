@@ -1,0 +1,24 @@
+# 包说明：@test-agent/backend-api/src
+
+## 职责
+
+封装后端 Runtime HTTP API，输出稳定 TypeScript 方法和错误对象。
+
+## 主要程序清单
+
+- `index.ts`：`createBackendApiClient`、`BackendApiError` 和 API 方法集合。
+
+## 允许依赖
+
+- `@test-agent/shared-types`。
+- 浏览器 `fetch` API。
+
+## 禁止依赖
+
+- React UI、工作台状态、opencode server。
+
+## 修改时必须同步更新
+
+- `docs/api/backend-api.md`。
+- `docs/frontend/frontend-backend-contract.md`。
+- 本包 README 和测试。
