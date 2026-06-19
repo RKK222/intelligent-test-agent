@@ -330,7 +330,7 @@ Session 运行态接口：
 - `sessionId` 为平台 session id，后端通过内部 `opencodeSessionId` 和 `opencodeExecutionNodeId` 定位远端 session；未绑定远端 session 时返回 `CONFLICT`。
 - `permission`/`question` 的平台路径保留在 `/api/sessions/{sessionId}/...` 下，后端实际映射到 opencode `/permission`、`/question` 族 API。
 - 只读 transcript 页面 `/s/{sessionId}` 只消费平台 `GET /api/sessions/{sessionId}` 与 `GET /api/sessions/{sessionId}/messages`，不接 opencode 公网 `share_data/share_poll`，也不绕过平台鉴权。
-- PTY WebSocket 未进入本轮接口；交互式终端必须先补架构和安全文档例外。
+- PTY WebSocket 未进入默认 HTTP/SSE 契约；P2 只能按 `docs/architecture/pty-websocket-design.md` 新增受控 ticket + WebSocket 例外。
 
 对应测试：
 
@@ -380,6 +380,13 @@ Session 运行态接口：
 | Runtime | `GET /api/mcp/status`、`/mcp/resources`、`/mcp/tools` | MCP 状态和目录 | P2 |
 
 PTY WebSocket 不在上述默认 HTTP/SSE 契约内；只有在架构和安全文档确认受控 WebSocket 例外后才能新增。
+
+P2 允许的 PTY 入口形态已在 `docs/architecture/pty-websocket-design.md` 固化：
+
+- `POST /api/sessions/{sessionId}/terminal/tickets`：创建一次性 PTY ticket，仍返回 `ApiResponse<T>`。
+- `GET /api/sessions/{sessionId}/terminal/ws?ticket=...`：仅用于 WebSocket upgrade，ticket 单次使用并短期过期。
+
+PTY 实现必须继续遵守平台鉴权、CORS/origin、限流、traceId、cwd workspace root 归一化和日志脱敏要求。
 
 ### Diff API
 

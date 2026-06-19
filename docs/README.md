@@ -35,6 +35,7 @@
 - `docs/api/backend-api.md`：HTTP API 文档入口。
 - `docs/api/event-stream-api.md`：SSE 和事件流文档入口。
 - `docs/architecture/dependency-rules.md`：分层依赖和访问关系。
+- `docs/architecture/pty-websocket-design.md`：Phase 11 P2 交互式 PTY WebSocket 的受控例外、安全和协议设计。
 - `docs/deployment/backend-docker-deployment.md`：后端 Java 进程容器部署说明。
 - `docs/security/security-standards.md`：安全规范。
 - `docs/database/migrations.md`：数据库 migration、核心表和兼容策略。

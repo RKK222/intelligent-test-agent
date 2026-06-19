@@ -95,7 +95,7 @@
 
 1. 交互式功能以 `opencode-source/opencode-1.17.8/packages/app` 为主要行为来源；`packages/web` 只作为官网文档和 P2 只读分享页参考。
 2. settings/config/provider/server/MCP 安装配置页面不在运行态复刻范围。
-3. bash 工具输出走 RunEvent 和 message part；交互式 PTY 面板属于 P2，新增 WebSocket 前必须先同步架构和安全文档。
+3. bash 工具输出走 RunEvent 和 message part；交互式 PTY 面板属于 P2，只能按 `docs/architecture/pty-websocket-design.md` 的 ticket + WebSocket 例外实现。
 4. `/s/:id` 分享页只能通过平台只读 transcript API 实现，不得直连 opencode `share_data` 或 `share_poll`。
 
 ## 错误映射
