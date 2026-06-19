@@ -36,6 +36,7 @@
 8. Phase 08：Agent 对话、Diff 和运行 MVP。
 9. Phase 09：测试报告和 Skill Studio。
 10. Phase 10：端到端加固和发布验收。
+11. Phase 11：opencode Web 交互功能复刻（会话、对话、工具、Diff、权限、提问、Agent、上下文、斜杠命令、终端、MCP 等）。
 
 ## 验收方式
 

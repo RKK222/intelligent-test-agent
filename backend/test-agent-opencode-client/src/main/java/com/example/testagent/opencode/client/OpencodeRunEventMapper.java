@@ -52,6 +52,9 @@ public class OpencodeRunEventMapper {
         if (type == RunEventType.ASSISTANT_MESSAGE_DELTA) {
             copyTextAlias(payload);
         }
+        if (type == RunEventType.MESSAGE_PART_DELTA) {
+            copyTextAlias(payload);
+        }
 
         return new RunEventDraft(runId, type, traceId, now.get(), payload);
     }
@@ -62,7 +65,12 @@ public class OpencodeRunEventMapper {
             case "session.next.step.ended", "session.idle" -> RunEventType.RUN_SUCCEEDED;
             case "session.status" -> mapSessionStatus(payload);
             case "session.next.step.failed", "session.error" -> RunEventType.RUN_FAILED;
-            case "session.next.text.delta", "message.part.delta" -> RunEventType.ASSISTANT_MESSAGE_DELTA;
+            case "session.next.text.delta" -> RunEventType.ASSISTANT_MESSAGE_DELTA;
+            case "message.updated" -> RunEventType.MESSAGE_UPDATED;
+            case "message.removed" -> RunEventType.MESSAGE_REMOVED;
+            case "message.part.updated" -> RunEventType.MESSAGE_PART_UPDATED;
+            case "message.part.removed" -> RunEventType.MESSAGE_PART_REMOVED;
+            case "message.part.delta" -> RunEventType.MESSAGE_PART_DELTA;
             case "session.next.tool.called", "session.next.tool.input.started" -> RunEventType.TOOL_STARTED;
             case "session.next.tool.success" -> {
                 payload.put("status", "success");
@@ -73,6 +81,15 @@ public class OpencodeRunEventMapper {
                 yield RunEventType.TOOL_FINISHED;
             }
             case "session.diff" -> RunEventType.DIFF_PROPOSED;
+            case "todo.updated" -> RunEventType.TODO_UPDATED;
+            case "permission.asked", "permission.v2.asked" -> RunEventType.PERMISSION_ASKED;
+            case "permission.replied", "permission.v2.replied" -> RunEventType.PERMISSION_REPLIED;
+            case "question.asked", "question.v2.asked" -> RunEventType.QUESTION_ASKED;
+            case "question.replied", "question.v2.replied" -> RunEventType.QUESTION_REPLIED;
+            case "question.rejected", "question.v2.rejected" -> RunEventType.QUESTION_REJECTED;
+            case "vcs.branch.updated" -> RunEventType.VCS_BRANCH_UPDATED;
+            case "lsp.updated" -> RunEventType.LSP_UPDATED;
+            case "mcp.tools.changed" -> RunEventType.MCP_TOOLS_CHANGED;
             case "test.finished" -> RunEventType.TEST_FINISHED;
             default -> RunEventType.OPENCODE_EVENT_UNKNOWN;
         };

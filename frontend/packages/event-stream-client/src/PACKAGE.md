@@ -2,11 +2,11 @@
 
 ## 职责
 
-封装 RunEvent SSE 订阅、解析、去重和关闭。
+封装 RunEvent SSE 订阅、解析、去重、续传和关闭。
 
 ## 主要程序清单
 
-- `index.ts`：`subscribeRunEvents`、`parseRunEvent`、已知事件类型列表。
+- `index.ts`：`subscribeRunEvents`、`parseRunEvent`、已知事件类型列表；浏览器 EventSource 续传使用 `lastEventId` query 参数。
 
 ## 允许依赖
 

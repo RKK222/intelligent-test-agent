@@ -39,9 +39,12 @@ import com.example.testagent.opencode.client.OpencodeHealthCommand;
 import com.example.testagent.opencode.client.OpencodeHealthResult;
 import com.example.testagent.opencode.client.OpencodeRejectDiffCommand;
 import com.example.testagent.opencode.client.OpencodeRejectDiffResult;
+import com.example.testagent.opencode.client.OpencodeRuntimeCommand;
+import com.example.testagent.opencode.client.OpencodeRuntimeResult;
 import com.example.testagent.opencode.client.OpencodeStartRunCommand;
 import com.example.testagent.opencode.client.OpencodeStartRunResult;
 import com.example.testagent.opencode.client.OpencodeStreamEventsCommand;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -374,6 +377,11 @@ class RunDiffApplicationServiceTest {
         public Mono<OpencodeRejectDiffResult> rejectDiff(OpencodeRejectDiffCommand command) {
             rejectDiffCommands.add(command);
             return Mono.just(new OpencodeRejectDiffResult(true));
+        }
+
+        @Override
+        public Mono<OpencodeRuntimeResult> runtime(OpencodeRuntimeCommand command) {
+            return Mono.just(new OpencodeRuntimeResult(JsonNodeFactory.instance.objectNode()));
         }
     }
 }

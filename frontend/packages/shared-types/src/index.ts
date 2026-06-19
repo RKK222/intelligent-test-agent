@@ -63,6 +63,20 @@ export type Session = {
   status: string;
   createdAt: string;
   updatedAt: string;
+  parentId?: string;
+  pinned?: boolean;
+  agent?: string;
+  model?: ModelRef;
+  costUsd?: number;
+  tokens?: TokenUsage;
+};
+
+export type SessionMessage = {
+  messageId: string;
+  sessionId: string;
+  role: "USER" | "ASSISTANT" | "SYSTEM" | string;
+  content: string;
+  createdAt: string;
 };
 
 export type Run = {
@@ -82,12 +96,28 @@ export type RunEventType =
   | "run.failed"
   | "run.cancelled"
   | "assistant.message.delta"
+  | "message.updated"
+  | "message.removed"
+  | "message.part.updated"
+  | "message.part.removed"
+  | "message.part.delta"
+  | "session.diff"
+  | "session.status"
+  | "todo.updated"
   | "tool.started"
   | "tool.finished"
   | "diff.proposed"
   | "diff.accepted"
   | "diff.rejected"
   | "test.finished"
+  | "permission.asked"
+  | "permission.replied"
+  | "question.asked"
+  | "question.replied"
+  | "question.rejected"
+  | "vcs.branch.updated"
+  | "lsp.updated"
+  | "mcp.tools.changed"
   | "opencode.event.unknown"
   | string;
 
@@ -114,6 +144,12 @@ export type RunDiff = {
   files: RunDiffFile[];
 };
 
+export type SessionDiff = {
+  sessionId: string;
+  messageId?: string;
+  files: RunDiffFile[];
+};
+
 export type RunDiffAction = {
   runId: string;
   action: "accept" | "reject" | string;
@@ -121,9 +157,179 @@ export type RunDiffAction = {
   fileCount: number;
 };
 
+export type PromptPart =
+  | { type: "text"; text: string }
+  | {
+      type: "file";
+      path?: string;
+      name?: string;
+      mimeType?: string;
+      content?: string;
+      url?: string;
+      source?: { start?: number; end?: number; text?: string };
+    }
+  | { type: "agent"; agentId: string; name?: string }
+  | { type: "reference"; id: string; label: string; uri?: string; metadata?: Record<string, unknown> };
+
+export type MessagePartStatus = "pending" | "running" | "completed" | "error" | string;
+
+export type TextPart = {
+  partId: string;
+  type: "text";
+  text: string;
+  status?: MessagePartStatus;
+};
+
+export type ReasoningPart = {
+  partId: string;
+  type: "reasoning";
+  text: string;
+  status?: MessagePartStatus;
+  title?: string;
+  durationMs?: number;
+};
+
+export type ToolPart = {
+  partId: string;
+  type: "tool";
+  toolName: string;
+  callId?: string;
+  status: MessagePartStatus;
+  input?: Record<string, unknown>;
+  output?: unknown;
+  metadata?: Record<string, unknown>;
+  startedAt?: string;
+  endedAt?: string;
+};
+
+export type FilePart = {
+  partId: string;
+  type: "file";
+  path?: string;
+  name?: string;
+  mimeType?: string;
+  url?: string;
+  source?: { start?: number; end?: number; text?: string };
+};
+
+export type MessagePart =
+  | TextPart
+  | ReasoningPart
+  | ToolPart
+  | FilePart
+  | { partId: string; type: "event"; eventType: string; payload: Record<string, unknown>; status?: MessagePartStatus };
+
+export type PermissionRequest = {
+  requestId: string;
+  sessionId: string;
+  type: string;
+  title?: string;
+  description?: string;
+  pattern?: string;
+  diff?: SessionDiff;
+  createdAt: string;
+};
+
+export type QuestionRequest = {
+  requestId: string;
+  sessionId: string;
+  questions: Array<{
+    questionId: string;
+    text: string;
+    kind: "single" | "multiple" | "text" | string;
+    options?: Array<{ id: string; label: string; description?: string }>;
+    required?: boolean;
+  }>;
+  createdAt: string;
+};
+
+export type AgentInfo = {
+  agentId: string;
+  name: string;
+  mode?: string;
+  description?: string;
+  color?: string;
+  hidden?: boolean;
+};
+
+export type ModelRef = {
+  id: string;
+  providerId?: string;
+  variant?: string;
+};
+
+export type ModelInfo = ModelRef & {
+  name: string;
+  contextLimit?: number;
+  outputLimit?: number;
+  free?: boolean;
+  variants?: string[];
+};
+
+export type ProviderInfo = {
+  providerId: string;
+  name: string;
+  status?: string;
+  models?: ModelInfo[];
+  metadata?: Record<string, unknown>;
+};
+
+export type CommandInfo = {
+  commandId: string;
+  name: string;
+  aliases?: string[];
+  description?: string;
+  arguments?: string;
+};
+
+export type RuntimeResourceInfo = {
+  id: string;
+  name: string;
+  uri?: string;
+  type?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type RuntimeToolInfo = {
+  toolId: string;
+  name: string;
+  description?: string;
+  parameters?: unknown;
+  source?: "builtin" | "mcp" | "command" | string;
+};
+
+export type TodoItem = {
+  id: string;
+  text: string;
+  status: "pending" | "in_progress" | "completed" | string;
+  priority?: "low" | "medium" | "high" | string;
+};
+
+export type TokenUsage = {
+  input?: number;
+  output?: number;
+  reasoning?: number;
+  cacheRead?: number;
+  cacheWrite?: number;
+  contextWindow?: number;
+};
+
+export type RuntimeStatus = {
+  sessionId: string;
+  runId?: string;
+  status: string;
+  agent?: AgentInfo;
+  model?: ModelRef;
+  tokens?: TokenUsage;
+  costUsd?: number;
+  branch?: string;
+  lsp?: { status: string; diagnostics?: number };
+  mcp?: { status: string; tools?: number; resources?: number };
+};
+
 export type AgentMessage =
-  | { id: string; role: "user"; text: string; createdAt: string }
-  | { id: string; role: "assistant"; text: string; createdAt: string }
+  | { id: string; role: "user"; text: string; parts?: PromptPart[]; createdAt: string; messageId?: string }
+  | { id: string; role: "assistant"; text: string; parts?: MessagePart[]; createdAt: string; messageId?: string }
   | {
       id: string;
       role: "card";

@@ -2,13 +2,27 @@
 
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as React from "react";
-import { AgentChat } from "@test-agent/agent-chat";
+import { AgentChat, createInitialAgentChatRuntimeState, reduceAgentChatRuntime } from "@test-agent/agent-chat";
 import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api";
 import { DiffViewer } from "@test-agent/diff-viewer";
 import { CodeEditor } from "@test-agent/editor";
 import { subscribeRunEvents } from "@test-agent/event-stream-client";
 import { FileExplorer } from "@test-agent/file-explorer";
-import type { AgentMessage, FileTreeEntry, Run, RunDiffFile, RunEvent, Session, Workspace } from "@test-agent/shared-types";
+import type {
+  AgentMessage,
+  FileTreeEntry,
+  ModelInfo,
+  PromptPart,
+  Run,
+  RunDiffFile,
+  RunEvent,
+  RuntimeResourceInfo,
+  RuntimeStatus,
+  RuntimeToolInfo,
+  Session,
+  SessionMessage,
+  Workspace
+} from "@test-agent/shared-types";
 import { TestRunnerPanel } from "@test-agent/test-runner";
 import { Button, FeedbackBanner, Input, type Feedback } from "@test-agent/ui-kit";
 import { useWorkbenchStore, WorkbenchShell } from "@test-agent/workbench-shell";
@@ -34,9 +48,19 @@ function WorkbenchRuntime() {
   const [session, setSession] = React.useState<Session | null>(null);
   const [run, setRun] = React.useState<Run | null>(null);
   const [lastPrompt, setLastPrompt] = React.useState("");
-  const [messages, setMessages] = React.useState<AgentMessage[]>(initialMessages);
+  const [selectedAgent, setSelectedAgent] = React.useState("");
+  const [selectedProvider, setSelectedProvider] = React.useState("");
+  const [selectedModel, setSelectedModel] = React.useState("");
+  const [promptMode, setPromptMode] = React.useState("build");
+  const [chatState, dispatchChat] = React.useReducer(
+    reduceAgentChatRuntime,
+    undefined,
+    () => createInitialAgentChatRuntimeState(initialMessages)
+  );
   const [logs, setLogs] = React.useState<string[]>([]);
   const [diffFiles, setDiffFiles] = React.useState<RunDiffFile[]>([]);
+  const [diffSource, setDiffSource] = React.useState<"run" | "session" | "vcs">("run");
+  const [diffViewMode, setDiffViewMode] = React.useState<"split" | "unified">("split");
   const [centerMode, setCenterMode] = React.useState<"editor" | "diff">("editor");
   const [feedback, setFeedback] = React.useState<Feedback | null>(null);
 
@@ -51,6 +75,72 @@ function WorkbenchRuntime() {
   const workspaces = workspacesQuery.data?.items ?? [];
   const selectedWorkspace = workspaces.find((item) => item.workspaceId === selectedWorkspaceId) ?? workspaces[0];
 
+  const sessionsQuery = useQuery({
+    queryKey: ["sessions", selectedWorkspace?.workspaceId],
+    enabled: Boolean(selectedWorkspace?.workspaceId),
+    queryFn: () => api.listSessions(selectedWorkspace!.workspaceId, 1, 30)
+  });
+
+  const agentsQuery = useQuery({
+    queryKey: ["runtime", "agents", selectedWorkspace?.workspaceId],
+    enabled: Boolean(selectedWorkspace?.workspaceId),
+    queryFn: () => api.listAgents(selectedWorkspace!.workspaceId)
+  });
+
+  const modelsQuery = useQuery({
+    queryKey: ["runtime", "models", selectedWorkspace?.workspaceId],
+    enabled: Boolean(selectedWorkspace?.workspaceId),
+    queryFn: () => api.listModels(selectedWorkspace!.workspaceId)
+  });
+
+  const providersQuery = useQuery({
+    queryKey: ["runtime", "providers", selectedWorkspace?.workspaceId],
+    enabled: Boolean(selectedWorkspace?.workspaceId),
+    queryFn: () => api.listProviders(selectedWorkspace!.workspaceId)
+  });
+
+  const commandsQuery = useQuery({
+    queryKey: ["runtime", "commands", selectedWorkspace?.workspaceId],
+    enabled: Boolean(selectedWorkspace?.workspaceId),
+    queryFn: () => api.listCommands(selectedWorkspace!.workspaceId)
+  });
+
+  const lspStatusQuery = useQuery({
+    queryKey: ["runtime", "lsp", selectedWorkspace?.workspaceId],
+    enabled: Boolean(selectedWorkspace?.workspaceId),
+    queryFn: () => api.getLspStatus(selectedWorkspace!.workspaceId),
+    refetchInterval: 30000
+  });
+
+  const mcpStatusQuery = useQuery({
+    queryKey: ["runtime", "mcp", "status", selectedWorkspace?.workspaceId],
+    enabled: Boolean(selectedWorkspace?.workspaceId),
+    queryFn: () => api.getMcpStatus(selectedWorkspace!.workspaceId),
+    refetchInterval: 30000
+  });
+
+  const mcpResourcesQuery = useQuery({
+    queryKey: ["runtime", "mcp", "resources", selectedWorkspace?.workspaceId],
+    enabled: Boolean(selectedWorkspace?.workspaceId),
+    queryFn: () => api.getMcpResources(selectedWorkspace!.workspaceId)
+  });
+
+  const mcpToolsQuery = useQuery({
+    queryKey: ["runtime", "mcp", "tools", selectedWorkspace?.workspaceId, selectedProvider, selectedModel],
+    enabled: Boolean(selectedWorkspace?.workspaceId),
+    queryFn: () => {
+      const model = modelIdOnly(selectedModel);
+      return api.getMcpTools(selectedWorkspace!.workspaceId, selectedProvider || undefined, model || undefined);
+    }
+  });
+
+  const vcsStatusQuery = useQuery({
+    queryKey: ["runtime", "vcs", "status", selectedWorkspace?.workspaceId],
+    enabled: Boolean(selectedWorkspace?.workspaceId),
+    queryFn: () => api.getVcsStatus(selectedWorkspace!.workspaceId),
+    refetchInterval: 30000
+  });
+
   React.useEffect(() => {
     if (!selectedWorkspaceId && selectedWorkspace?.workspaceId) {
       setSelectedWorkspaceId(selectedWorkspace.workspaceId);
@@ -63,6 +153,34 @@ function WorkbenchRuntime() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedWorkspace?.workspaceId]);
+
+  React.useEffect(() => {
+    if (!selectedAgent && agentsQuery.data?.[0]?.agentId) {
+      setSelectedAgent(agentsQuery.data[0].agentId);
+    }
+  }, [agentsQuery.data, selectedAgent]);
+
+  React.useEffect(() => {
+    if (!selectedProvider && providersQuery.data?.[0]?.providerId) {
+      setSelectedProvider(providersQuery.data[0].providerId);
+    }
+  }, [providersQuery.data, selectedProvider]);
+
+  React.useEffect(() => {
+    if (!selectedModel && modelsQuery.data?.[0]) {
+      setSelectedModel(modelValue(modelsQuery.data[0]));
+    }
+  }, [modelsQuery.data, selectedModel]);
+
+  React.useEffect(() => {
+    if (!selectedProvider || !selectedModel || selectedModel.startsWith(`${selectedProvider}/`)) {
+      return;
+    }
+    const nextModel = modelsQuery.data?.find((model) => model.providerId === selectedProvider);
+    if (nextModel) {
+      setSelectedModel(modelValue(nextModel));
+    }
+  }, [modelsQuery.data, selectedModel, selectedProvider]);
 
   React.useEffect(() => {
     if (!run || !["RUNNING", "CANCELLING"].includes(run.status)) {
@@ -104,7 +222,7 @@ function WorkbenchRuntime() {
   });
 
   const startRunMutation = useMutation({
-    mutationFn: async (prompt: string) => {
+    mutationFn: async (input: { prompt: string; parts: PromptPart[] }) => {
       if (!selectedWorkspace) {
         throw new Error("未选择 Workspace");
       }
@@ -112,13 +230,39 @@ function WorkbenchRuntime() {
         session ??
         (await api.createSession(selectedWorkspace.workspaceId, `Agent ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`));
       setSession(activeSession);
-      return api.startRun(activeSession.sessionId, prompt);
+      return api.startRun({
+        sessionId: activeSession.sessionId,
+        prompt: input.prompt,
+        parts: input.parts,
+        agent: selectedAgent || undefined,
+        model: selectedModel || undefined,
+        mode: promptMode
+      });
     },
     onSuccess: (started) => {
       setRun(started);
       setLogs((current) => [...current, `[run] ${started.runId} ${started.status}`]);
     },
     onError: (error) => setFeedback(errorFeedback("启动 Run 失败", error))
+  });
+
+  const commandMutation = useMutation({
+    mutationFn: async (input: { command: string; arguments: string; prompt: string }) => {
+      if (!session) {
+        throw new Error("当前 Session 尚未绑定远端上下文，请先发送一次普通 prompt");
+      }
+      return api.runSessionCommand(session.sessionId, {
+        command: input.command,
+        arguments: input.arguments,
+        agent: selectedAgent || undefined,
+        model: selectedModel || undefined
+      });
+    },
+    onSuccess: (result) => {
+      setLogs((current) => [...current.slice(-200), "[command] completed"]);
+      dispatchRuntimeResult(result, dispatchChat);
+    },
+    onError: (error) => setFeedback(errorFeedback("命令执行失败", error))
   });
 
   const cancelRunMutation = useMutation({
@@ -152,6 +296,39 @@ function WorkbenchRuntime() {
     },
     onSuccess: (result) => setFeedback({ kind: "success", title: "已拒绝 Run 级 Diff", description: `${result.fileCount} 个文件` }),
     onError: (error) => setFeedback(errorFeedback("拒绝 Diff 失败", error))
+  });
+
+  const replyPermissionMutation = useMutation({
+    mutationFn: async (payload: { requestId: string; decision: "once" | "always" | "reject" }) => {
+      if (!session) {
+        throw new Error("当前没有 Session");
+      }
+      return api.replySessionPermission(session.sessionId, payload.requestId, { decision: payload.decision });
+    },
+    onSuccess: (_result, payload) => dispatchChat({ type: "permission.replied", requestId: payload.requestId }),
+    onError: (error) => setFeedback(errorFeedback("权限回复失败", error))
+  });
+
+  const replyQuestionMutation = useMutation({
+    mutationFn: async (payload: { requestId: string; answers: unknown[] }) => {
+      if (!session) {
+        throw new Error("当前没有 Session");
+      }
+      return api.replySessionQuestion(session.sessionId, payload.requestId, { answers: payload.answers });
+    },
+    onSuccess: (_result, payload) => dispatchChat({ type: "question.replied", requestId: payload.requestId }),
+    onError: (error) => setFeedback(errorFeedback("提问回复失败", error))
+  });
+
+  const rejectQuestionMutation = useMutation({
+    mutationFn: async (requestId: string) => {
+      if (!session) {
+        throw new Error("当前没有 Session");
+      }
+      return api.rejectSessionQuestion(session.sessionId, requestId);
+    },
+    onSuccess: (_result, requestId) => dispatchChat({ type: "question.replied", requestId }),
+    onError: (error) => setFeedback(errorFeedback("拒绝提问失败", error))
   });
 
   async function loadDirectory(path: string) {
@@ -206,24 +383,26 @@ function WorkbenchRuntime() {
 
   function handleSend(prompt: string) {
     setLastPrompt(prompt);
-    setMessages((current) => [
-      ...current,
-      { id: `user-${Date.now()}`, role: "user", text: prompt, createdAt: new Date().toISOString() }
-    ]);
-    startRunMutation.mutate(prompt);
+    const parts = buildPromptParts(prompt, activeTab);
+    dispatchChat({ type: "user.submitted", prompt, parts });
+    const command = parseCommand(prompt, promptMode);
+    if (command && session && !isRunBusy(run)) {
+      commandMutation.mutate({ ...command, prompt });
+      return;
+    }
+    startRunMutation.mutate({ prompt, parts });
   }
 
   function handleRunEvent(event: RunEvent) {
     setLogs((current) => [...current.slice(-200), `[${event.seq}] ${event.type}`]);
+    dispatchChat({ type: "event", event });
+    notifyOnAttention(event, selectedWorkspace, session);
     if (event.type === "assistant.message.delta") {
-      appendAssistantDelta(String(event.payload.text ?? event.payload.delta ?? ""));
-    } else if (event.type === "tool.started" || event.type === "tool.finished") {
-      appendCard("tool", event.type === "tool.started" ? "工具调用开始" : "工具调用完成", event.payload);
-    } else if (event.type === "test.finished") {
-      appendCard("test", "测试运行完成", event.payload);
+      return;
     } else if (event.type === "diff.proposed") {
       const files = diffFilesFromPayload(event.payload);
       if (files.length) {
+        setDiffSource("run");
         setDiffFiles(files);
         setSelectedDiffPath(files[0]?.path);
       } else if (run) {
@@ -232,32 +411,60 @@ function WorkbenchRuntime() {
           setSelectedDiffPath(diff.files[0]?.path);
         });
       }
-      appendCard("diff", "Agent 提出了文件修改", { files });
+    } else if (event.type === "session.diff") {
+      const files = diffFilesFromPayload(event.payload);
+      if (files.length) {
+        setDiffSource("session");
+        setDiffFiles(files);
+        setSelectedDiffPath(files[0]?.path);
+      }
     } else if (event.type === "run.succeeded" || event.type === "run.failed" || event.type === "run.cancelled") {
       setRun((current) => (current ? { ...current, status: event.type === "run.succeeded" ? "SUCCEEDED" : event.type === "run.failed" ? "FAILED" : "CANCELLED" } : current));
-    } else if (event.type === "diff.accepted" || event.type === "diff.rejected") {
-      appendCard("event", event.type === "diff.accepted" ? "Diff 已接受" : "Diff 已拒绝", event.payload);
     }
   }
 
-  function appendAssistantDelta(text: string) {
-    if (!text) {
+  async function loadDiffSource(source: "run" | "session" | "vcs") {
+    setDiffSource(source);
+    setCenterMode("diff");
+    try {
+      const nextFiles =
+        source === "run"
+          ? run
+            ? (await api.getRunDiff(run.runId)).files
+            : []
+          : source === "session"
+            ? session
+              ? (await api.getSessionDiff(session.sessionId)).files
+              : []
+            : selectedWorkspace
+              ? (await api.getVcsDiffFiles(selectedWorkspace.workspaceId)).files
+              : [];
+      setDiffFiles(nextFiles);
+      setSelectedDiffPath(nextFiles[0]?.path);
+    } catch (error) {
+      setFeedback(errorFeedback("加载 Diff 失败", error));
+    }
+  }
+
+  async function requestNotifications() {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setFeedback({ kind: "info", title: "当前浏览器不支持通知" });
       return;
     }
-    setMessages((current) => {
-      const last = current.at(-1);
-      if (last?.role === "assistant") {
-        return [...current.slice(0, -1), { ...last, text: `${last.text}${text}` }];
-      }
-      return [...current, { id: `assistant-${Date.now()}`, role: "assistant", text, createdAt: new Date().toISOString() }];
-    });
+    const result = await Notification.requestPermission();
+    setFeedback({ kind: result === "granted" ? "success" : "info", title: result === "granted" ? "通知已开启" : "通知未开启" });
   }
 
-  function appendCard(cardType: Extract<AgentMessage, { role: "card" }>["cardType"], title: string, payload: Record<string, unknown>) {
-    setMessages((current) => [
-      ...current,
-      { id: `${cardType}-${Date.now()}-${current.length}`, role: "card", cardType, title, payload, createdAt: new Date().toISOString() }
-    ]);
+  async function switchSession(sessionId: string) {
+    const selected = sessionsQuery.data?.items.find((item) => item.sessionId === sessionId) ?? (await api.getSession(sessionId));
+    setSession(selected);
+    try {
+      const page = await api.listSessionMessages(sessionId, 1, 100);
+      dispatchChat({ type: "reset", messages: messagesFromSessionMessages(page.items) });
+      setFeedback({ kind: "info", title: "已切换 Session", description: selected.title });
+    } catch (error) {
+      setFeedback(errorFeedback("加载 Session 消息失败", error));
+    }
   }
 
   const left = selectedWorkspace ? (
@@ -285,10 +492,15 @@ function WorkbenchRuntime() {
       <DiffViewer
         files={diffFiles}
         selectedPath={selectedDiffPath}
+        source={diffSource}
+        viewMode={diffViewMode}
         accepting={acceptDiffMutation.isPending}
         rejecting={rejectDiffMutation.isPending}
         feedback={feedback}
         onSelectFile={setSelectedDiffPath}
+        onSourceChange={(source) => void loadDiffSource(source)}
+        onViewModeChange={setDiffViewMode}
+        onRefresh={() => void loadDiffSource(diffSource)}
         onAcceptRun={() => acceptDiffMutation.mutate()}
         onRejectRun={() => rejectDiffMutation.mutate()}
         onCurrentFileFeedback={(action, path) =>
@@ -322,13 +534,36 @@ function WorkbenchRuntime() {
 
   const right = (
     <AgentChat
-      messages={messages}
-      history={historyItems(run)}
+      messages={chatState.messages}
+      history={historyItems(run, sessionsQuery.data?.items ?? [])}
       running={run?.status === "RUNNING" || run?.status === "CANCELLING"}
       onSend={handleSend}
       onOpenDiff={() => setCenterMode("diff")}
       onRetry={() => lastPrompt && handleSend(lastPrompt)}
       onCancel={() => cancelRunMutation.mutate()}
+      permissions={chatState.permissions}
+      questions={chatState.questions}
+      todos={chatState.todos}
+      onReplyPermission={(requestId, decision) => replyPermissionMutation.mutate({ requestId, decision })}
+      onReplyQuestion={(requestId, answers) => replyQuestionMutation.mutate({ requestId, answers })}
+      onRejectQuestion={(requestId) => rejectQuestionMutation.mutate(requestId)}
+      agents={agentsQuery.data ?? []}
+      models={modelsQuery.data ?? []}
+      commands={commandsQuery.data ?? []}
+      providers={providersQuery.data ?? []}
+      resources={runtimeResources(mcpResourcesQuery.data, activeTab)}
+      tools={mcpToolsQuery.data ?? []}
+      runtimeStatus={runtimeStatus(session, run, selectedAgent, selectedModel, vcsStatusQuery.data, lspStatusQuery.data, mcpStatusQuery.data, mcpToolsQuery.data, mcpResourcesQuery.data)}
+      selectedAgent={selectedAgent}
+      selectedProvider={selectedProvider}
+      selectedModel={selectedModel}
+      mode={promptMode}
+      onAgentChange={setSelectedAgent}
+      onProviderChange={setSelectedProvider}
+      onModelChange={setSelectedModel}
+      onModeChange={setPromptMode}
+      onRequestNotifications={() => void requestNotifications()}
+      onSelectHistory={(sessionId) => void switchSession(sessionId)}
     />
   );
 
@@ -443,8 +678,15 @@ function errorFeedback(title: string, error: unknown): Feedback {
   return { kind: "error", title, description: error instanceof Error ? error.message : "未知错误" };
 }
 
-function historyItems(run: Run | null) {
+function historyItems(run: Run | null, sessions: Session[]) {
   return [
+    ...sessions.map((item) => ({
+      id: item.sessionId,
+      title: item.title,
+      preview: `${item.agent ?? "agent"} ${item.model?.id ?? ""}`.trim() || "Session",
+      status: item.status,
+      updatedAt: new Date(item.updatedAt).toLocaleTimeString("zh-CN", { hour12: false })
+    })),
     {
       id: run?.runId ?? "local",
       title: run ? `Run ${run.runId}` : "本地会话",
@@ -453,6 +695,170 @@ function historyItems(run: Run | null) {
       updatedAt: new Date().toLocaleTimeString("zh-CN", { hour12: false })
     }
   ];
+}
+
+function messagesFromSessionMessages(messages: SessionMessage[]): AgentMessage[] {
+  return messages.map((message) => ({
+    id: message.messageId,
+    messageId: message.messageId,
+    role: message.role === "USER" ? "user" : "assistant",
+    text: message.content,
+    createdAt: message.createdAt
+  }));
+}
+
+function modelValue(model: ModelInfo) {
+  return model.providerId ? `${model.providerId}/${model.id}` : model.id;
+}
+
+function modelIdOnly(value: string) {
+  return value.includes("/") ? value.split("/").slice(1).join("/") : value;
+}
+
+function buildPromptParts(prompt: string, activeTab: { path: string; content: string } | undefined): PromptPart[] {
+  const parts: PromptPart[] = [{ type: "text", text: prompt }];
+  if (activeTab?.path) {
+    parts.push({
+      type: "file",
+      path: activeTab.path,
+      name: activeTab.path.split("/").at(-1) ?? activeTab.path,
+      source: { text: activeTab.content.slice(0, 12000) }
+    });
+  }
+  return parts;
+}
+
+function parseCommand(prompt: string, mode: string) {
+  if (mode.startsWith("command:")) {
+    return { command: mode.slice("command:".length), arguments: prompt };
+  }
+  const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(prompt.trim());
+  return match ? { command: match[1] ?? "", arguments: match[2] ?? "" } : null;
+}
+
+function isRunBusy(run: Run | null) {
+  return run?.status === "RUNNING" || run?.status === "CANCELLING";
+}
+
+function runtimeResources(
+  resources: RuntimeResourceInfo[] | undefined,
+  activeTab: { path: string } | undefined
+): RuntimeResourceInfo[] {
+  const currentFile = activeTab
+    ? [{ id: `editor:${activeTab.path}`, name: activeTab.path, uri: `file://${activeTab.path}`, type: "editor" }]
+    : [];
+  return [...currentFile, ...(resources ?? [])];
+}
+
+function runtimeStatus(
+  session: Session | null,
+  run: Run | null,
+  selectedAgent: string,
+  selectedModel: string,
+  vcsStatus: unknown,
+  lspStatus: unknown,
+  mcpStatus: unknown,
+  tools: RuntimeToolInfo[] | undefined,
+  resources: RuntimeResourceInfo[] | undefined
+): RuntimeStatus | undefined {
+  if (!session && !run) {
+    return undefined;
+  }
+  const branch = text(record(vcsStatus)?.branch) ?? text(record(record(vcsStatus)?.data)?.branch);
+  const lspData = record(record(lspStatus)?.data) ?? record(lspStatus);
+  const mcpData = record(mcpStatus);
+  const mcpEntries = mcpData ? Object.values(mcpData).filter((item) => typeof item === "object" && item !== null) : [];
+  const failedMcp = mcpEntries.some((item) => text(record(item)?.status) === "failed");
+  const connectedMcp = mcpEntries.filter((item) => text(record(item)?.status) === "connected").length;
+  return {
+    sessionId: session?.sessionId ?? run?.sessionId ?? "local",
+    runId: run?.runId,
+    status: run?.status ?? session?.status ?? "IDLE",
+    agent: selectedAgent ? { agentId: selectedAgent, name: selectedAgent } : undefined,
+    model: selectedModel ? { id: modelIdOnly(selectedModel), providerId: selectedModel.includes("/") ? selectedModel.split("/")[0] : undefined } : undefined,
+    tokens: session?.tokens,
+    branch,
+    lsp: lspData ? { status: text(lspData.status) ?? "ready", diagnostics: number(lspData.diagnostics) } : undefined,
+    mcp: {
+      status: failedMcp ? "failed" : connectedMcp > 0 ? "connected" : mcpEntries.length > 0 ? "available" : "unknown",
+      tools: tools?.length,
+      resources: resources?.length
+    }
+  };
+}
+
+function dispatchRuntimeResult(
+  result: unknown,
+  dispatch: React.Dispatch<Parameters<typeof reduceAgentChatRuntime>[1]>
+) {
+  const raw = record(result);
+  if (!raw) {
+    return;
+  }
+  const info = record(raw.info) ?? record(raw.message) ?? raw;
+  const messageId = text(info.id) ?? text(info.messageId) ?? text(info.messageID) ?? `command-${Date.now()}`;
+  const occurredAt = new Date().toISOString();
+  dispatch({
+    type: "event",
+    event: syntheticEvent("message.updated", {
+      message: {
+        id: messageId,
+        role: "assistant",
+        text: text(info.text) ?? text(info.content) ?? "",
+        createdAt: text(record(info.time)?.created) ?? occurredAt
+      }
+    }, occurredAt)
+  });
+  const parts = Array.isArray(raw.parts) ? raw.parts : [];
+  parts
+    .filter((part): part is Record<string, unknown> => typeof part === "object" && part !== null)
+    .forEach((part, index) => {
+      dispatch({
+        type: "event",
+        event: syntheticEvent("message.part.updated", {
+          messageId,
+          part: { id: text(part.id) ?? `part-${index}`, ...part }
+        }, occurredAt)
+      });
+    });
+}
+
+function syntheticEvent(type: string, payload: Record<string, unknown>, occurredAt: string): RunEvent {
+  return {
+    eventId: `local-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    runId: "local",
+    seq: Date.now(),
+    type,
+    traceId: "trace_local",
+    occurredAt,
+    payload
+  };
+}
+
+function notifyOnAttention(event: RunEvent, workspace: Workspace | undefined, session: Session | null) {
+  if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") {
+    return;
+  }
+  if (event.type === "permission.asked" || event.type === "question.asked") {
+    const title = event.type === "permission.asked" ? "权限请求" : "Agent 提问";
+    const body = `${workspace?.name ?? "Workspace"} / ${session?.title ?? "Session"}`;
+    new Notification(title, { body });
+  }
+  if (event.type === "run.succeeded" || event.type === "run.failed") {
+    new Notification(event.type === "run.succeeded" ? "Run 完成" : "Run 失败", { body: session?.title ?? event.runId });
+  }
+}
+
+function record(value: unknown) {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function text(value: unknown) {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function number(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 const initialMessages: AgentMessage[] = [

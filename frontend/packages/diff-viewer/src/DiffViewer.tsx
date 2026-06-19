@@ -10,10 +10,15 @@ import { parseUnifiedPatch } from "./unifiedPatch";
 export type DiffViewerProps = {
   files: RunDiffFile[];
   selectedPath?: string;
+  source?: "run" | "session" | "vcs";
+  viewMode?: "split" | "unified";
   accepting?: boolean;
   rejecting?: boolean;
   feedback?: Feedback | null;
   onSelectFile: (path: string) => void;
+  onSourceChange?: (source: "run" | "session" | "vcs") => void;
+  onViewModeChange?: (mode: "split" | "unified") => void;
+  onRefresh?: () => void;
   onAcceptRun: () => void;
   onRejectRun: () => void;
   onCurrentFileFeedback: (action: "accept-current" | "reject-current", path: string) => void;
@@ -22,10 +27,15 @@ export type DiffViewerProps = {
 export function DiffViewer({
   files,
   selectedPath,
+  source = "run",
+  viewMode = "split",
   accepting,
   rejecting,
   feedback,
   onSelectFile,
+  onSourceChange,
+  onViewModeChange,
+  onRefresh,
   onAcceptRun,
   onRejectRun,
   onCurrentFileFeedback
@@ -35,16 +45,30 @@ export function DiffViewer({
 
   if (!files.length) {
     return (
-      <div className="flex h-full min-h-0 items-center justify-center bg-[var(--ta-panel-2)] text-slate-500">
-        <div className="text-center text-[12px]">暂无 Diff</div>
+      <div className="flex h-full min-h-0 flex-col bg-[var(--ta-panel-2)] text-slate-500">
+        <DiffToolbar
+          source={source}
+          viewMode={viewMode}
+          onSourceChange={onSourceChange}
+          onViewModeChange={onViewModeChange}
+          onRefresh={onRefresh}
+        />
+        <div className="flex flex-1 items-center justify-center text-center text-[12px]">暂无 Diff</div>
       </div>
     );
   }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--ta-panel-2)]">
-      <div className="flex h-10 items-center gap-2 border-b border-slate-800 bg-slate-950 px-3">
-        <div className="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-200">Run Diff</div>
+      <div className="flex min-h-10 flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-950 px-3 py-1">
+        <DiffToolbar
+          source={source}
+          viewMode={viewMode}
+          onSourceChange={onSourceChange}
+          onViewModeChange={onViewModeChange}
+          onRefresh={onRefresh}
+        />
+        <div className="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-200">{sourceTitle(source)}</div>
         <Button size="sm" variant="secondary" disabled={!selected} onClick={() => selected && onCurrentFileFeedback("accept-current", selected.path)}>
           当前文件接受
         </Button>
@@ -86,7 +110,7 @@ export function DiffViewer({
             loading={<div className="p-4 text-[12px] text-slate-500">加载 Diff...</div>}
             options={{
               readOnly: true,
-              renderSideBySide: true,
+              renderSideBySide: viewMode === "split",
               minimap: { enabled: false },
               automaticLayout: true,
               scrollBeyondLastLine: false,
@@ -99,4 +123,53 @@ export function DiffViewer({
       <FeedbackBanner feedback={feedback} />
     </div>
   );
+}
+
+function DiffToolbar({
+  source,
+  viewMode,
+  onSourceChange,
+  onViewModeChange,
+  onRefresh
+}: {
+  source: "run" | "session" | "vcs";
+  viewMode: "split" | "unified";
+  onSourceChange?: (source: "run" | "session" | "vcs") => void;
+  onViewModeChange?: (mode: "split" | "unified") => void;
+  onRefresh?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <select
+        value={source}
+        className="h-8 rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200"
+        onChange={(event) => onSourceChange?.(event.target.value as "run" | "session" | "vcs")}
+      >
+        <option value="run">Run</option>
+        <option value="session">Session</option>
+        <option value="vcs">VCS</option>
+      </select>
+      <select
+        value={viewMode}
+        className="h-8 rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200"
+        onChange={(event) => onViewModeChange?.(event.target.value as "split" | "unified")}
+      >
+        <option value="split">Split</option>
+        <option value="unified">Unified</option>
+      </select>
+      <Button size="sm" variant="secondary" onClick={onRefresh}>
+        刷新
+      </Button>
+    </div>
+  );
+}
+
+function sourceTitle(source: "run" | "session" | "vcs") {
+  if (source === "session") {
+    return "Session Diff";
+  }
+  if (source === "vcs") {
+    return "VCS Diff";
+  }
+  return "Run Diff";
 }

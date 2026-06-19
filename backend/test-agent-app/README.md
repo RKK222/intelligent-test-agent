@@ -30,8 +30,11 @@
 - Workspace API：工作区注册、分页查询、单层文件列表、UTF-8 文件读写和文件状态。
 - Session API：会话创建、分页查询、消息追加和消息分页读取。
 - Run API：启动、查询、取消、RunEvent SSE 和 Run 级 Diff；首次 Run 懒创建远端 opencode session 并保存内部映射，后续 Run 复用原 session 和 execution node。
+- `POST /api/runs` 已接收 Phase 11 可选字段并把 text parts 合成为当前 Run 编排使用的 prompt；file/agent/reference parts 的完整透传等待 opencode facade 扩展。
+- Phase 11 Runtime API：`/api/agents|models|providers|commands|references`、`/api/sessions/{id}/children|todo|diff|abort|fork|compact|revert|unrevert|command|shell`、permission/question、fs/vcs/lsp/mcp status/resources/tools 运行态接口，统一通过 `OpencodeRuntimeApplicationService` 和 opencode-client runtime facade 转发，不直返 generated DTO。
 - Diff API：查询 Run Diff、接受保留当前工作区变更、拒绝时通过 opencode `sessionRevert` 回滚本次 Run 对应消息。
 - RunController 在 WebFlux 下必须把阻塞式 Run/Diff 应用服务调用 offload 到 `boundedElastic`，避免在 event-loop 上触发 `.block()` 造成 `INTERNAL_ERROR`；RunEvent SSE 保持 `Flux` 流式返回。
+- RunEvent SSE 续传时 header `Last-Event-ID` 优先；浏览器原生 `EventSource` 首次续传可使用 query `lastEventId`，由 RunController 传给 event 模块统一解析。
 - RunApplicationService 订阅 opencode stream 后，事件持久化必须串行 offload 到 `boundedElastic`；本地 RunEvent 落库异常只记录告警，不能误判为 opencode Run 失败。
 - Health：opencode nodes health、Redis optional health、数据库 health。
 
@@ -80,6 +83,7 @@
 
 新增对外 API、请求鉴权、代理入口、应用服务编排和启动配置时改这里。业务规则优先下沉到 domain，opencode 调用优先经过 `test-agent-opencode-client`。
 Run 编排不得把平台 `workspaceId` 当作 opencode `workspace` query 传入；本地集成默认只传 workspace rootPath 对应的 `directory`。
+Phase 11 Runtime API 同样不得把平台 `workspaceId` 当作 opencode `workspace` query；workspace 接口只用其 rootPath 作为 `directory`，session 接口必须通过平台 session 的内部远端映射定位 opencode session。MCP resources/tools 只读查询可以映射 opencode experimental API，但不得扩展到 MCP 安装、认证或配置页面。
 Diff 编排必须留在 application service，Controller 不直接调用 opencode facade；缺少 opencode `messageID` 时拒绝 Diff 返回 `CONFLICT`。
 Run/Diff HTTP Controller 返回 `Mono<ApiResponse<...>>` 时必须继续使用 `boundedElastic` 承载阻塞式应用服务，不能把 Repository 或 opencode 同步调用放回 WebFlux event-loop。
 opencode stream 订阅错误和本地事件持久化错误必须区分：只有 opencode 终态事件或启动编排失败可以推进 Run 到终态，本地 RunEvent 写入抖动不能追加 `run.failed`。

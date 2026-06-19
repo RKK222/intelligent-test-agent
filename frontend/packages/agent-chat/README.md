@@ -7,7 +7,10 @@ Agent 对话和结构化卡片展示包。
 ## 主要职责
 
 - 展示用户/助手消息。
+- 展示 message part timeline（text、reasoning、tool、file、event）。
 - 展示 PlanCard、ToolCallCard、TestRunCard、DiffActionCard。
+- 提供 Phase 11 Agent/Provider/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和 Todo 展示。
+- 提供纯 RunEvent reducer，把 `message.part.delta`、permission/question、todo、diff 等事件归并为对话展示状态。
 - 提供发送、取消、重试、打开 Diff 回调。
 - 通过 assistant-ui 类型适配未来完整对话运行时。
 

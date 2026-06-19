@@ -52,4 +52,14 @@ public interface OpencodeSdkGateway {
             String messageId,
             String partId,
             String traceId);
+
+    Mono<OpencodeRuntimeResult> runtime(
+            ExecutionNode node,
+            String method,
+            String path,
+            String directory,
+            String workspace,
+            java.util.Map<String, String> query,
+            Object body,
+            String traceId);
 }

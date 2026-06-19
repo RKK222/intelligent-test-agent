@@ -231,7 +231,91 @@ Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做
 }
 ```
 
+Phase 11 起请求体保持向后兼容，并预留以下可选字段：
+
+```json
+{
+  "sessionId": "ses_...",
+  "prompt": "run prompt",
+  "parts": [
+    { "type": "text", "text": "run prompt" },
+    { "type": "file", "path": "src/App.tsx", "source": { "start": 1, "end": 20 } },
+    { "type": "agent", "agentId": "build" }
+  ],
+  "messageId": "msg_...",
+  "agent": "build",
+  "model": "anthropic/claude-sonnet-4-5",
+  "variant": "default",
+  "mode": "build"
+}
+```
+
+兼容要求：
+
+- 旧 `prompt: string` 继续有效；`parts` 缺失时后端按单个 text part 处理。
+- `parts`、`messageId`、`agent`、`model`、`variant`、`mode` 均为可选字段，旧前端不需要改动。
+- Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置。
+- P0 contract prework 阶段，后端已可接收上述字段并把 text parts 合成为当前 Run 编排使用的 prompt；file/agent/reference parts 的完整语义需等 `test-agent-opencode-client` facade 扩展后再透传。
+
 启动流程会追加用户消息，创建 `PENDING` Run，再按平台 session 的内部 opencode 映射决定路由：
+
+### Phase 11 opencode Web Runtime API
+
+Phase 11 新增的 opencode Web App 运行态能力统一由 `OpencodeRuntimeController` 暴露。前端仍只调用平台 `/api/**`，后端通过 `OpencodeRuntimeApplicationService -> test-agent-opencode-client` facade 访问 opencode HTTP API，不返回 generated SDK DTO，不允许 Controller 直接调用 generated SDK。
+
+运行态目录接口：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/api/agents?workspaceId=` | 读取当前 workspace 的 Agent 列表。 |
+| `GET` | `/api/models?workspaceId=` | 读取当前 workspace 的 Model 列表。 |
+| `GET` | `/api/providers?workspaceId=` | 读取当前 workspace 的 Provider 只读列表。 |
+| `GET` | `/api/commands?workspaceId=` | 读取可执行命令列表。 |
+| `GET` | `/api/references?workspaceId=` | 读取可引用上下文目录。 |
+| `GET` | `/api/fs/list?workspaceId=&path=` | 通过 opencode runtime 列目录。 |
+| `GET` | `/api/fs/find?workspaceId=&query=` | 通过 opencode runtime 查找文件。 |
+| `GET` | `/api/fs/read?workspaceId=&path=` | 通过 opencode runtime 读文件内容。 |
+| `GET` | `/api/vcs/status?workspaceId=` | 读取 VCS 状态。 |
+| `GET` | `/api/vcs/diff?workspaceId=&mode=working\|git\|branch&context=` | 读取 VCS Diff。 |
+| `GET` | `/api/lsp/status?workspaceId=` | 读取 LSP 状态。 |
+| `GET` | `/api/mcp/status?workspaceId=` | 读取 MCP 状态。 |
+| `GET` | `/api/mcp/resources?workspaceId=` | 读取 MCP resource 目录，后端映射到 opencode `/experimental/resource`。 |
+| `GET` | `/api/mcp/tools?workspaceId=&provider=&model=` | 读取 MCP/runtime tool 目录；带 provider/model 时返回工具 schema，否则返回 tool id 降级列表。 |
+
+Session 运行态接口：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/api/sessions/{sessionId}/children` | 查询远端 opencode session children。 |
+| `GET` | `/api/sessions/{sessionId}/todo` | 查询 Todo 列表。 |
+| `GET` | `/api/sessions/{sessionId}/diff?messageId=` | 查询 session/message 级 Diff。 |
+| `POST` | `/api/sessions/{sessionId}/abort` | 中止当前 session 执行。 |
+| `POST` | `/api/sessions/{sessionId}/fork` | fork session。 |
+| `POST` | `/api/sessions/{sessionId}/compact` | 调用 opencode summarize/compact。 |
+| `POST` | `/api/sessions/{sessionId}/revert` | revert 指定 message。 |
+| `POST` | `/api/sessions/{sessionId}/unrevert` | 取消 revert。 |
+| `POST` | `/api/sessions/{sessionId}/command` | 执行 session command。 |
+| `POST` | `/api/sessions/{sessionId}/shell` | 执行 shell command，P1/P2 前端以输出卡片展示。 |
+| `GET` | `/api/sessions/{sessionId}/permissions` | 读取 pending permission。 |
+| `POST` | `/api/sessions/{sessionId}/permissions/{requestId}/reply` | 回复 permission，body 支持 `{ "decision": "once|always|reject" }`。 |
+| `GET` | `/api/sessions/{sessionId}/questions` | 读取 pending question。 |
+| `POST` | `/api/sessions/{sessionId}/questions/{requestId}/reply` | 回复 question，body 为 `{ "answers": [...] }`。 |
+| `POST` | `/api/sessions/{sessionId}/questions/{requestId}/reject` | 拒绝 question。 |
+
+兼容和安全约束：
+
+- 所有响应仍包裹 `ApiResponse<T>`，错误仍走统一错误码和 traceId。
+- `workspaceId` 为平台 workspace id，后端只把 workspace root 映射为 opencode `directory`；不得把平台 id 当作 opencode `workspace` query。
+- `sessionId` 为平台 session id，后端通过内部 `opencodeSessionId` 和 `opencodeExecutionNodeId` 定位远端 session；未绑定远端 session 时返回 `CONFLICT`。
+- `permission`/`question` 的平台路径保留在 `/api/sessions/{sessionId}/...` 下，后端实际映射到 opencode `/permission`、`/question` 族 API。
+- 只读 transcript 页面 `/s/{sessionId}` 只消费平台 `GET /api/sessions/{sessionId}` 与 `GET /api/sessions/{sessionId}/messages`，不接 opencode 公网 `share_data/share_poll`，也不绕过平台鉴权。
+- PTY WebSocket 未进入本轮接口；交互式终端必须先补架构和安全文档例外。
+
+对应测试：
+
+- `OpencodeRuntimeFacadeTest`：验证 facade runtime 调用不泄漏 generated DTO。
+- `OpencodeRuntimeApplicationServiceTest`：验证 workspace directory、远端 session id、permission reply body、MCP resources/tools 映射。
+- `OpencodeRuntimeControllerTest`：验证统一响应、MCP tools 查询和 traceId 透传。
 
 - 首次 Run：先选择可用 execution node，调用 opencode `POST /session` 创建远端 session，保存 `opencodeSessionId` 与 `opencodeExecutionNodeId` 内部映射，然后用远端 session id 调用 opencode `prompt_async`。
 - 后续 Run：复用已保存的远端 opencode session，并固定路由到原 execution node；节点不存在、离线或容量不可用时返回 `OPENCODE_UNAVAILABLE`。
@@ -243,7 +327,38 @@ Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做
 
 `POST /api/runs/{runId}/cancel` 对终态 Run 返回 `CONFLICT`。非终态 Run 会在存在内部映射时使用远端 opencode session id 调用 opencode cancel，并追加 `run.cancelling`、`run.cancelled`。
 
-`GET /api/runs/{runId}/events` 返回 `text/event-stream`，SSE `id` 使用 RunEvent `seq`，`event` 使用稳定 wire name。`Last-Event-ID` 续传规则见 `docs/api/event-stream-api.md`。
+`GET /api/runs/{runId}/events` 返回 `text/event-stream`，SSE `id` 使用 RunEvent `seq`，`event` 使用稳定 wire name。`Last-Event-ID` 续传规则见 `docs/api/event-stream-api.md`。浏览器原生 `EventSource` 首次续传可使用 `GET /api/runs/{runId}/events?lastEventId={seq}`，后端 header 优先、query 兜底。
+
+### Phase 11 opencode Web App 运行态 API 规划
+
+以下接口是 Phase 11 的新增契约方向，必须通过 `test-agent-app -> test-agent-opencode-client` facade 实现；未实现前不得由前端直连 opencode server。
+
+| 域 | 方法与路径 | 用途 | 优先级 |
+|---|---|---|---|
+| Session | `GET /api/sessions` | 列表、搜索、分页、置顶过滤 | P0 |
+| Session | `PATCH /api/sessions/{sessionId}` | 更新标题或置顶 | P0 |
+| Session | `DELETE /api/sessions/{sessionId}` | 删除会话 | P0 |
+| Session | `GET /api/sessions/{sessionId}/children` | 子会话列表 | P1 |
+| Session | `GET /api/sessions/{sessionId}/diff` | session/message diff | P1 |
+| Session | `GET /api/sessions/{sessionId}/todo` | Todo 列表 | P1 |
+| Session | `POST /api/sessions/{sessionId}/fork` | 从会话或消息 fork | P1 |
+| Session | `POST /api/sessions/{sessionId}/abort` | 中断当前运行 | P0 |
+| Session | `POST /api/sessions/{sessionId}/compact` | 压缩/总结 | P1 |
+| Session | `POST /api/sessions/{sessionId}/revert`、`/unrevert` | 撤销/重做 | P1 |
+| Session | `POST /api/sessions/{sessionId}/command` | 斜杠命令 | P1 |
+| Session | `POST /api/sessions/{sessionId}/shell` | shell 命令 | P1 |
+| Permission | `GET /api/sessions/{sessionId}/permissions` | 待审批权限请求 | P0 |
+| Permission | `POST /api/sessions/{sessionId}/permissions/{requestId}/reply` | once/always/reject | P0 |
+| Question | `GET /api/sessions/{sessionId}/questions` | 待回答提问 | P0 |
+| Question | `POST /api/sessions/{sessionId}/questions/{requestId}/reply`、`/reject` | 回复或拒绝提问 | P0 |
+| Runtime | `GET /api/agents`、`/models`、`/providers` | Agent/Model/Provider 只读列表 | P0 |
+| Runtime | `GET /api/commands`、`/references` | 命令和引用目录 | P1 |
+| Runtime | `GET /api/fs/find`、`/fs/read`、`/fs/list` | context picker 文件能力 | P1 |
+| Runtime | `GET /api/vcs/diff`、`/vcs/status` | VCS diff/status | P1 |
+| Runtime | `GET /api/lsp/status` | LSP 状态 | P2 |
+| Runtime | `GET /api/mcp/status`、`/mcp/resources`、`/mcp/tools` | MCP 状态和目录 | P2 |
+
+PTY WebSocket 不在上述默认 HTTP/SSE 契约内；只有在架构和安全文档确认受控 WebSocket 例外后才能新增。
 
 ### Diff API
 

@@ -34,19 +34,35 @@ export const KNOWN_RUN_EVENT_TYPES: RunEventType[] = [
   "run.failed",
   "run.cancelled",
   "assistant.message.delta",
+  "message.updated",
+  "message.removed",
+  "message.part.updated",
+  "message.part.removed",
+  "message.part.delta",
+  "session.diff",
+  "session.status",
+  "todo.updated",
   "tool.started",
   "tool.finished",
   "diff.proposed",
   "diff.accepted",
   "diff.rejected",
   "test.finished",
+  "permission.asked",
+  "permission.replied",
+  "question.asked",
+  "question.replied",
+  "question.rejected",
+  "vcs.branch.updated",
+  "lsp.updated",
+  "mcp.tools.changed",
   "opencode.event.unknown"
 ];
 
 export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventSubscription {
   const baseUrl = (options.baseUrl ?? "http://127.0.0.1:8080").replace(/\/$/, "");
   const factory = options.eventSourceFactory ?? ((url: string) => new EventSource(url));
-  const url = `${baseUrl}/api/runs/${options.runId}/events`;
+  const url = runEventsUrl(baseUrl, options.runId, options.lastEventId);
   const seen = new Set<string>();
   let closed = false;
   const source = factory(url);
@@ -86,6 +102,14 @@ export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventS
       options.onStatus?.("closed");
     }
   };
+}
+
+function runEventsUrl(baseUrl: string, runId: string, lastEventId?: string) {
+  const url = new URL(`${baseUrl}/api/runs/${runId}/events`);
+  if (lastEventId && lastEventId.trim().length > 0) {
+    url.searchParams.set("lastEventId", lastEventId.trim());
+  }
+  return url.toString();
 }
 
 export function parseRunEvent(data: string): RunEvent | null {

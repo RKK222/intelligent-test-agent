@@ -6,7 +6,8 @@
 
 ## 主要职责
 
-- 定义 API 响应、Workspace、Session、Run、RunEvent、Diff、AgentMessage 类型。
+- 定义 API 响应、Workspace、Session、SessionMessage、Run、RunEvent、Diff、AgentMessage 类型。
+- Phase 11 新增 PromptPart、MessagePart、ToolPart、PermissionRequest、QuestionRequest、AgentInfo、ModelInfo、ProviderInfo、CommandInfo、RuntimeResourceInfo、RuntimeToolInfo、SessionDiff、TodoItem、RuntimeStatus 等 Web App 运行态 projection 类型。
 - 不引入运行时依赖。
 
 ## 禁止事项

@@ -18,11 +18,13 @@ import com.example.testagent.domain.session.SessionId;
 import com.example.testagent.domain.workspace.Workspace;
 import com.example.testagent.domain.workspace.WorkspaceId;
 import com.example.testagent.domain.workspace.WorkspaceStatus;
+import com.example.testagent.event.RunEventSseStreamService;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 class RuntimeControllerTest {
@@ -79,6 +81,60 @@ class RuntimeControllerTest {
                 .jsonPath("$.success").isEqualTo(true)
                 .jsonPath("$.data.runId").isEqualTo("run_1234567890abcdef")
                 .jsonPath("$.data.status").isEqualTo("RUNNING");
+    }
+
+    @Test
+    void runControllerAcceptsPhase11PromptPartsPayload() {
+        RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
+        when(service.startRun(
+                        eq(new SessionId("ses_1234567890abcdef")),
+                        eq("run the tests"),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(run());
+        WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.post()
+                .uri("/api/runs")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {
+                          "sessionId":"ses_1234567890abcdef",
+                          "parts":[{"type":"text","text":"run the tests"}],
+                          "agent":"build",
+                          "model":"anthropic/claude-sonnet-4-5",
+                          "variant":"default",
+                          "mode":"build"
+                        }
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("RUNNING");
+    }
+
+    @Test
+    void runControllerRejectsRunStartWithoutPromptOrTextPart() {
+        RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
+        WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
+                .webFilter(new TraceIdWebFilter())
+                .controllerAdvice(new GlobalExceptionHandler())
+                .build();
+
+        client.post()
+                .uri("/api/runs")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"sessionId":"ses_1234567890abcdef","parts":[{"type":"agent","agentId":"build"}]}
+                        """)
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(false)
+                .jsonPath("$.code").isEqualTo("VALIDATION_ERROR");
     }
 
     @Test
@@ -153,6 +209,32 @@ class RuntimeControllerTest {
                 .expectBody()
                 .jsonPath("$.data.action").isEqualTo("reject")
                 .jsonPath("$.data.status").isEqualTo("rejected");
+    }
+
+    @Test
+    void runControllerAcceptsLastEventIdFromQueryForBrowserEventSource() {
+        RunApplicationService runService = org.mockito.Mockito.mock(RunApplicationService.class);
+        RunEventSseStreamService eventStreamService = org.mockito.Mockito.mock(RunEventSseStreamService.class);
+        when(eventStreamService.streamAfter(
+                        eq(new RunId("run_1234567890abcdef")),
+                        eq("7"),
+                        any(),
+                        eq(100)))
+                .thenReturn(Flux.empty());
+        WebTestClient client = WebTestClient.bindToController(new RunController(runService, null, eventStreamService))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.get()
+                .uri("/api/runs/run_1234567890abcdef/events?lastEventId=7")
+                .exchange()
+                .expectStatus().isOk();
+
+        org.mockito.Mockito.verify(eventStreamService).streamAfter(
+                eq(new RunId("run_1234567890abcdef")),
+                eq("7"),
+                any(),
+                eq(100));
     }
 
     private static Workspace workspace() {

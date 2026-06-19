@@ -8,7 +8,9 @@
 
 - `app/layout.tsx`：全局页面壳与元信息。
 - `app/page.tsx`：工作台首页入口。
+- `app/s/[sessionId]/page.tsx`：只读 transcript 页面入口，复用平台 session/messages API。
 - `components/AgentWorkbench.tsx`：组合 workspace、文件树、编辑器、Agent、RunEvent SSE 和 Diff 操作。
+- `components/ReadonlyTranscript.tsx`：只读 transcript 客户端视图，不订阅 SSE，不直连 opencode。
 - `../next.config.ts`：Next 应用配置，允许本地从 `127.0.0.1` 访问开发资源，保持 Run/取消等客户端交互可用。
 
 ## 允许依赖

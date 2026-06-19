@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Flux;
@@ -50,7 +51,7 @@ public class RunController {
             @Valid @RequestBody RuntimeDtos.StartRunRequest request,
             ServerWebExchange exchange) {
         return blockingResponse(exchange, traceId -> RuntimeDtos.RunResponse.from(runService.startRun(
-                new SessionId(request.sessionId()), request.prompt(), traceId)));
+                new SessionId(request.sessionId()), request.effectivePrompt(), traceId)));
     }
 
     @GetMapping("/api/runs/{runId}")
@@ -95,8 +96,10 @@ public class RunController {
     @GetMapping(value = "/api/runs/{runId}/events", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<RunEventSsePayload>> events(
             @PathVariable String runId,
-            @RequestHeader(name = "Last-Event-ID", required = false) String lastEventId) {
-        return eventStreamService.streamAfter(new RunId(runId), lastEventId, DEFAULT_POLL_INTERVAL, DEFAULT_BATCH_LIMIT);
+            @RequestHeader(name = "Last-Event-ID", required = false) String lastEventId,
+            @RequestParam(name = "lastEventId", required = false) String lastEventIdQuery) {
+        String resumeEventId = lastEventId != null ? lastEventId : lastEventIdQuery;
+        return eventStreamService.streamAfter(new RunId(runId), resumeEventId, DEFAULT_POLL_INTERVAL, DEFAULT_BATCH_LIMIT);
     }
 
     private <T> Mono<ApiResponse<T>> blockingResponse(ServerWebExchange exchange, Function<String, T> action) {

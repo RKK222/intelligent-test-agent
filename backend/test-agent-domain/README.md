@@ -21,7 +21,7 @@
 - Workspace：`Workspace`、`WorkspaceId`。
 - Session：`Session`、`SessionId`、`SessionMessage`、`SessionMessageId`、`SessionMessageRole`；`Session` 内含后端内部 opencode session/node 映射字段，不对前端 API 暴露。
 - Run：`Run`、`RunId`、`RunStatus`。
-- RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`。
+- RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`；RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*` 事件以及 Phase 11 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`。
 - ExecutionNode：`ExecutionNode`、`ExecutionNodeId`、`ExecutionNodeStatus`。
 - RoutingDecision：`RoutingDecision`、`RoutingReason`、`ExecutionNodeRouter`。
 - Repository 端口：Workspace、Session、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision 持久化端口。

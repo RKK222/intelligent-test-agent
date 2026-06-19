@@ -68,4 +68,32 @@ describe("event-stream-client", () => {
     expect(source.closed).toBe(true);
     expect(statuses.at(-1)).toBe("closed");
   });
+
+  it("subscribes to Phase 11 opencode app events and resumes with lastEventId query", () => {
+    const source = new FakeEventSource();
+    const received: string[] = [];
+    let openedUrl = "";
+
+    subscribeRunEvents({
+      baseUrl: "http://api",
+      runId: "run_1",
+      lastEventId: "4",
+      eventSourceFactory: (url) => {
+        openedUrl = url;
+        return source;
+      },
+      onEvent: (event) => received.push(event.type)
+    });
+
+    source.emit("message.part.delta", {
+      eventId: "evt_5",
+      runId: "run_1",
+      seq: 5,
+      type: "message.part.delta",
+      payload: { delta: "hello" }
+    });
+
+    expect(openedUrl).toBe("http://api/api/runs/run_1/events?lastEventId=4");
+    expect(received).toEqual(["message.part.delta"]);
+  });
 });

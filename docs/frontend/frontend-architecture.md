@@ -19,6 +19,8 @@
 
 Phase 06-08 不引入外部 Web 项目作为页面基础，通用组件先沉淀在 `packages/ui-kit`。
 
+Phase 11 复刻 opencode Web App 运行态能力时，行为参考以 `opencode-source/opencode-1.17.8/packages/app` 为主；不得迁移 Solid 技术栈，也不得让前端直连 opencode server。
+
 ## 当前结构
 
 ```text
@@ -39,6 +41,14 @@ frontend/
     test-runner/
     ui-kit/
     shared-types/
+    # Phase 11 计划新增 feature packages：
+    session-manager/
+    permission-prompt/
+    question-prompt/
+    agent-model-selector/
+    command-palette/
+    context-picker/
+    terminal/
   interaction-visual-demo/
 ```
 
@@ -50,11 +60,12 @@ frontend/
 - `packages/workbench-shell`：Dockview 工作台布局、顶部栏、左中右底面板和工作台级 Zustand 状态。
 - `packages/file-explorer`：文件树、已加载文件名过滤、变更列表和打开文件入口。
 - `packages/editor`：Monaco 编辑器、语言识别、内容编辑和只读展示。
-- `packages/diff-viewer`：Monaco Diff、变更文件列表、Run 级接受/拒绝按钮和当前文件反馈。
-- `packages/agent-chat`：assistant-ui 集成点、用户消息、运行卡片、PlanCard、ToolCallCard、TestRunCard、DiffActionCard。
+- `packages/diff-viewer`：Monaco Diff、变更文件列表、Run/Session/VCS 来源切换、split/unified 视图、Run 级接受/拒绝按钮和当前文件反馈。
+- `packages/agent-chat`：assistant-ui 集成点、用户消息、message part timeline、运行卡片、PlanCard、ToolCallCard、TestRunCard、DiffActionCard、Phase 11 runtime selector/status、slash command、`@` context、permission/question/Todo dock 和纯 RunEvent reducer。
 - `packages/test-runner`：底部 Run 状态、取消、重试和事件日志面板。
 - `packages/ui-kit`：平台通用 UI 组件、基础样式组合和反馈组件。
 - `packages/shared-types`：跨包共享 TypeScript 类型和事件/DTO 模型。
+- Phase 11 新增 feature packages 必须承接 session、permission、question、Agent/Model、command、context、terminal 等能力，避免继续扩张 `apps/agent-web` 或单个 `AgentWorkbench` 组件。
 
 ## 阶段边界
 
@@ -62,6 +73,8 @@ frontend/
 2. Phase 08 Diff 接受/拒绝是 Run 级语义；当前文件按钮只改变当前选择和交互反馈，不承诺 per-file 后端回滚。
 3. 前端不直接访问 opencode server；真实 opencode 能力只能通过 `test-agent-app -> test-agent-opencode-client` 调用。
 4. Monaco 编辑器和 Diff 按需加载，固定尺寸面板必须避免文本和控件重叠。
+5. Phase 11 不实现 settings/config/provider/server 配置页；只保留 Agent/Provider/Model 等运行态选择和只读状态目录。
+6. PTY WebSocket 属于 P2，必须先有架构和安全文档例外；P1 只实现 bash 工具输出。
 
 ## 架构红线
 
@@ -72,6 +85,7 @@ frontend/
 5. 页面组件不得直接拼接后端 URL，不得绕过 API client。
 6. Web IDE 业务能力必须沉淀到对应 package，不能全部堆在 `apps/agent-web`。
 7. 前端 DTO、事件类型和错误格式必须与 `docs/api/` 和 `docs/frontend/frontend-backend-contract.md` 同步。
+8. Phase 11 运行态列表、permission/question、session 操作、fs/vcs/lsp/mcp 等 HTTP 调用只能新增到 `packages/backend-api`，页面和组件不得直接拼接平台 URL。
 
 ## 访问关系
 

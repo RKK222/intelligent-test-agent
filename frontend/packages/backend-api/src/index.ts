@@ -1,14 +1,26 @@
 import type {
+  AgentInfo,
   ApiFailure,
   ApiResponse,
+  CommandInfo,
   FileContent,
   FileStatus,
   FileTreeEntry,
+  ModelInfo,
   PageResponse,
+  PermissionRequest,
+  PromptPart,
+  ProviderInfo,
+  QuestionRequest,
   Run,
   RunDiff,
   RunDiffAction,
+  RuntimeResourceInfo,
+  RuntimeToolInfo,
+  SessionDiff,
   Session,
+  SessionMessage,
+  TodoItem,
   Workspace
 } from "@test-agent/shared-types";
 
@@ -38,6 +50,19 @@ export class BackendApiError extends Error {
 }
 
 export type BackendApiClient = ReturnType<typeof createBackendApiClient>;
+
+export type StartRunPayload = {
+  sessionId: string;
+  prompt?: string;
+  parts?: PromptPart[];
+  messageId?: string;
+  agent?: string;
+  model?: string;
+  variant?: string;
+  mode?: string;
+};
+
+type RequestFn = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const env = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env;
@@ -100,15 +125,91 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     },
     listSessions: (workspaceId: string, page = 1, size = 20) =>
       request<PageResponse<Session>>(`/api/workspaces/${workspaceId}/sessions?page=${page}&size=${size}`),
+    getSession: (sessionId: string) => request<Session>(`/api/sessions/${encodeURIComponent(sessionId)}`),
+    listSessionMessages: (sessionId: string, page = 1, size = 100) =>
+      request<PageResponse<SessionMessage>>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?page=${page}&size=${size}`),
     createSession: (workspaceId: string, title: string) =>
       request<Session>("/api/sessions", { method: "POST", body: JSON.stringify({ workspaceId, title }) }),
-    startRun: (sessionId: string, prompt: string) =>
-      request<Run>("/api/runs", { method: "POST", body: JSON.stringify({ sessionId, prompt }) }),
+    startRun: (sessionIdOrPayload: string | StartRunPayload, prompt?: string) =>
+      request<Run>("/api/runs", {
+        method: "POST",
+        body: JSON.stringify(normalizeStartRunPayload(sessionIdOrPayload, prompt))
+      }),
     getRun: (runId: string) => request<Run>(`/api/runs/${runId}`),
     cancelRun: (runId: string) => request<Run>(`/api/runs/${runId}/cancel`, { method: "POST" }),
     getRunDiff: (runId: string) => request<RunDiff>(`/api/runs/${runId}/diff`),
     acceptRunDiff: (runId: string) => request<RunDiffAction>(`/api/runs/${runId}/diff/accept`, { method: "POST" }),
-    rejectRunDiff: (runId: string) => request<RunDiffAction>(`/api/runs/${runId}/diff/reject`, { method: "POST" })
+    rejectRunDiff: (runId: string) => request<RunDiffAction>(`/api/runs/${runId}/diff/reject`, { method: "POST" }),
+    listAgents: async (workspaceId?: string) => (await runtimeList(`/api/agents${query({ workspaceId })}`, request)).map(toAgentInfo),
+    listModels: async (workspaceId?: string) => (await runtimeList(`/api/models${query({ workspaceId })}`, request)).map(toModelInfo),
+    listProviders: async (workspaceId?: string) =>
+      (await runtimeList(`/api/providers${query({ workspaceId })}`, request)).map(toProviderInfo),
+    listCommands: async (workspaceId?: string) =>
+      (await runtimeList(`/api/commands${query({ workspaceId })}`, request)).map(toCommandInfo),
+    listReferences: (workspaceId?: string) => request<unknown>(`/api/references${query({ workspaceId })}`),
+    listRuntimeFiles: (workspaceId?: string, path = ".") => request<unknown>(`/api/fs/list${query({ workspaceId, path })}`),
+    findRuntimeFiles: (workspaceId?: string, search = "") => request<unknown>(`/api/fs/find${query({ workspaceId, query: search })}`),
+    readRuntimeFile: (workspaceId: string | undefined, path: string) =>
+      request<unknown>(`/api/fs/read${query({ workspaceId, path })}`),
+    getVcsStatus: (workspaceId?: string) => request<unknown>(`/api/vcs/status${query({ workspaceId })}`),
+    getVcsDiff: (workspaceId?: string, mode = "git", context?: number) =>
+      request<unknown>(`/api/vcs/diff${query({ workspaceId, mode, context })}`),
+    getVcsDiffFiles: async (workspaceId?: string, mode = "working", context?: number) => ({
+      files: listFromRuntimeEnvelope(await request<unknown>(`/api/vcs/diff${query({ workspaceId, mode, context })}`)).map(toRunDiffFile)
+    }),
+    getLspStatus: (workspaceId?: string) => request<unknown>(`/api/lsp/status${query({ workspaceId })}`),
+    getMcpStatus: (workspaceId?: string) => request<unknown>(`/api/mcp/status${query({ workspaceId })}`),
+    getMcpResources: async (workspaceId?: string) =>
+      listFromRuntimeEnvelope(await request<unknown>(`/api/mcp/resources${query({ workspaceId })}`)).map(toRuntimeResourceInfo),
+    getMcpTools: async (workspaceId?: string, provider?: string, model?: string) =>
+      listValuesFromRuntimeEnvelope(await request<unknown>(`/api/mcp/tools${query({ workspaceId, provider, model })}`)).map((item) =>
+        typeof item === "string" ? toRuntimeToolInfo({ id: item, name: item }) : toRuntimeToolInfo(item)
+      ),
+    getSessionChildren: (sessionId: string) => request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/children`),
+    getSessionTodo: async (sessionId: string) =>
+      listFromRuntimeEnvelope(await request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/todo`)).map(toTodoItem),
+    getSessionDiff: async (sessionId: string, messageId?: string) => ({
+      sessionId,
+      messageId,
+      files: listFromRuntimeEnvelope(
+        await request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/diff${query({ messageId })}`)
+      ).map(toRunDiffFile)
+    }) satisfies SessionDiff,
+    abortSession: (sessionId: string) => request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }),
+    forkSession: (sessionId: string, payload?: Record<string, unknown>) =>
+      postRuntime(`/api/sessions/${encodeURIComponent(sessionId)}/fork`, payload, request),
+    compactSession: (sessionId: string, payload?: Record<string, unknown>) =>
+      postRuntime(`/api/sessions/${encodeURIComponent(sessionId)}/compact`, payload, request),
+    revertSession: (sessionId: string, payload?: Record<string, unknown>) =>
+      postRuntime(`/api/sessions/${encodeURIComponent(sessionId)}/revert`, payload, request),
+    unrevertSession: (sessionId: string, payload?: Record<string, unknown>) =>
+      postRuntime(`/api/sessions/${encodeURIComponent(sessionId)}/unrevert`, payload, request),
+    runSessionCommand: (sessionId: string, payload?: Record<string, unknown>) =>
+      postRuntime(`/api/sessions/${encodeURIComponent(sessionId)}/command`, payload, request),
+    runSessionShell: (sessionId: string, payload?: Record<string, unknown>) =>
+      postRuntime(`/api/sessions/${encodeURIComponent(sessionId)}/shell`, payload, request),
+    listSessionPermissions: async (sessionId: string) =>
+      listFromRuntimeEnvelope(await request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/permissions`)).map((item) =>
+        toPermissionRequest(item, sessionId)
+      ),
+    replySessionPermission: (sessionId: string, requestId: string, payload: { decision?: "once" | "always" | "reject"; reply?: string; message?: string }) =>
+      request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/permissions/${encodeURIComponent(requestId)}/reply`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    listSessionQuestions: async (sessionId: string) =>
+      listFromRuntimeEnvelope(await request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/questions`)).map((item) =>
+        toQuestionRequest(item, sessionId)
+      ),
+    replySessionQuestion: (sessionId: string, requestId: string, payload: { answers: unknown[] }) =>
+      request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(requestId)}/reply`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    rejectSessionQuestion: (sessionId: string, requestId: string) =>
+      request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(requestId)}/reject`, {
+        method: "POST"
+      })
   };
 }
 
@@ -133,6 +234,163 @@ type BackendFileStatus = {
   size: number;
   lastModifiedAt?: string;
 };
+
+async function runtimeList(path: string, request: RequestFn) {
+  return listFromRuntimeEnvelope(await request<unknown>(path));
+}
+
+function postRuntime(path: string, payload: Record<string, unknown> | undefined, request: RequestFn) {
+  return request<unknown>(path, {
+    method: "POST",
+    body: payload == null ? undefined : JSON.stringify(payload)
+  });
+}
+
+function listFromRuntimeEnvelope(value: unknown): Record<string, unknown>[] {
+  return listValuesFromRuntimeEnvelope(value).filter(
+    (item): item is Record<string, unknown> => typeof item === "object" && item !== null
+  );
+}
+
+function listValuesFromRuntimeEnvelope(value: unknown): Array<Record<string, unknown> | string> {
+  const data = record(value)?.data;
+  const raw = Array.isArray(data) ? data : Array.isArray(value) ? value : [];
+  return raw.filter((item): item is Record<string, unknown> | string => typeof item === "string" || (typeof item === "object" && item !== null));
+}
+
+function toAgentInfo(value: Record<string, unknown>): AgentInfo {
+  const agentId = text(value.agentId) ?? text(value.agentID) ?? text(value.id) ?? text(value.name) ?? "unknown";
+  return compactObject({
+    agentId,
+    name: text(value.name) ?? agentId,
+    mode: text(value.mode),
+    description: text(value.description),
+    color: text(value.color),
+    hidden: typeof value.hidden === "boolean" ? value.hidden : undefined
+  });
+}
+
+function toModelInfo(value: Record<string, unknown>): ModelInfo {
+  const id = text(value.id) ?? text(value.modelId) ?? text(value.modelID) ?? "unknown";
+  const variants = Array.isArray(value.variants) ? value.variants.filter((item): item is string => typeof item === "string") : undefined;
+  return compactObject({
+    id,
+    providerId: text(value.providerId) ?? text(value.providerID) ?? text(record(value.provider)?.id),
+    name: text(value.name) ?? id,
+    contextLimit: number(value.contextLimit) ?? number(value.context),
+    outputLimit: number(value.outputLimit),
+    free: typeof value.free === "boolean" ? value.free : undefined,
+    variants
+  });
+}
+
+function toProviderInfo(value: Record<string, unknown>): ProviderInfo {
+  const providerId = text(value.providerId) ?? text(value.providerID) ?? text(value.id) ?? text(value.name) ?? "unknown";
+  const rawModels = record(value.models);
+  return compactObject({
+    providerId,
+    name: text(value.name) ?? providerId,
+    status: text(value.status),
+    models: rawModels
+      ? Object.entries(rawModels).map(([id, model]) => toModelInfo({ id, ...(record(model) ?? {}) }))
+      : undefined,
+    metadata: value
+  });
+}
+
+function toCommandInfo(value: Record<string, unknown>): CommandInfo {
+  const commandId = text(value.commandId) ?? text(value.commandID) ?? text(value.id) ?? text(value.name) ?? "unknown";
+  return compactObject({
+    commandId,
+    name: text(value.name) ?? commandId,
+    aliases: Array.isArray(value.aliases) ? value.aliases.filter((item): item is string => typeof item === "string") : undefined,
+    description: text(value.description),
+    arguments: text(value.arguments)
+  });
+}
+
+function toRuntimeResourceInfo(value: Record<string, unknown>): RuntimeResourceInfo {
+  const uri = text(value.uri) ?? text(value.url);
+  const id = text(value.id) ?? uri ?? text(value.name) ?? "unknown";
+  return compactObject({
+    id,
+    name: text(value.name) ?? text(value.title) ?? uri ?? id,
+    uri,
+    type: text(value.type) ?? text(value.mime),
+    metadata: value
+  });
+}
+
+function toRuntimeToolInfo(value: Record<string, unknown>): RuntimeToolInfo {
+  const toolId = text(value.toolId) ?? text(value.toolID) ?? text(value.id) ?? text(value.name) ?? "unknown";
+  return compactObject({
+    toolId,
+    name: text(value.name) ?? toolId,
+    description: text(value.description),
+    parameters: value.parameters,
+    source: text(value.source)
+  });
+}
+
+function toTodoItem(value: Record<string, unknown>): TodoItem {
+  const id = text(value.id) ?? text(value.todoId) ?? text(value.todoID) ?? "unknown";
+  return compactObject({
+    id,
+    text: text(value.text) ?? text(value.content) ?? text(value.title) ?? id,
+    status: text(value.status) ?? "pending",
+    priority: text(value.priority)
+  });
+}
+
+function toRunDiffFile(value: Record<string, unknown>) {
+  return {
+    path: text(value.path) ?? text(value.file) ?? "",
+    patch: text(value.patch) ?? text(value.diff) ?? "",
+    additions: number(value.additions) ?? 0,
+    deletions: number(value.deletions) ?? 0,
+    status: text(value.status) ?? "modified"
+  };
+}
+
+function toPermissionRequest(value: Record<string, unknown>, fallbackSessionId: string): PermissionRequest {
+  const requestId = text(value.requestId) ?? text(value.requestID) ?? text(value.id) ?? "unknown";
+  return compactObject({
+    requestId,
+    sessionId: text(value.sessionId) ?? text(value.sessionID) ?? fallbackSessionId,
+    type: text(value.type) ?? text(value.permission) ?? text(value.action) ?? "permission",
+    title: text(value.title),
+    description: text(value.description) ?? text(value.pattern),
+    pattern: text(value.pattern),
+    createdAt: text(value.createdAt) ?? text(record(value.time)?.created) ?? new Date(0).toISOString()
+  });
+}
+
+function toQuestionRequest(value: Record<string, unknown>, fallbackSessionId: string): QuestionRequest {
+  const requestId = text(value.requestId) ?? text(value.requestID) ?? text(value.id) ?? "unknown";
+  const questions = Array.isArray(value.questions) ? value.questions : Array.isArray(value.items) ? value.items : [value];
+  return {
+    requestId,
+    sessionId: text(value.sessionId) ?? text(value.sessionID) ?? fallbackSessionId,
+    questions: questions
+      .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
+      .map((item, index) => ({
+        questionId: text(item.questionId) ?? text(item.questionID) ?? text(item.id) ?? `${requestId}:${index}`,
+        text: text(item.text) ?? text(item.prompt) ?? text(item.question) ?? "",
+        kind: text(item.kind) ?? text(item.type) ?? "text",
+        options: Array.isArray(item.options)
+          ? item.options
+              .filter((option): option is Record<string, unknown> => typeof option === "object" && option !== null)
+              .map((option) => ({
+                id: text(option.id) ?? text(option.value) ?? text(option.label) ?? "option",
+                label: text(option.label) ?? text(option.value) ?? text(option.id) ?? "option",
+                description: text(option.description)
+              }))
+          : undefined,
+        required: typeof item.required === "boolean" ? item.required : undefined
+      })),
+    createdAt: text(value.createdAt) ?? text(record(value.time)?.created) ?? new Date(0).toISOString()
+  };
+}
 
 function isSuccessResponse<T>(body: unknown): body is ApiResponse<T> & { success: true } {
   return typeof body === "object" && body !== null && (body as { success?: unknown }).success === true;
@@ -184,12 +442,27 @@ function query(values: Record<string, string | number | undefined>) {
   return encoded ? `?${encoded}` : "";
 }
 
+function normalizeStartRunPayload(sessionIdOrPayload: string | StartRunPayload, prompt?: string): StartRunPayload {
+  if (typeof sessionIdOrPayload === "string") {
+    return { sessionId: sessionIdOrPayload, prompt: prompt ?? "" };
+  }
+  return sessionIdOrPayload;
+}
+
 function text(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function record(value: unknown) {
   return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+function number(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function compactObject<T extends Record<string, unknown>>(value: T): T {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
 }
 
 function defaultTraceId() {

@@ -10,6 +10,7 @@ import com.example.opencode.sdk.model.SnapshotFileDiff;
 import com.example.testagent.domain.node.ExecutionNode;
 import com.example.testagent.observability.TraceConstants;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.List;
@@ -29,6 +30,8 @@ import reactor.core.publisher.Mono;
  */
 @Component
 public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
     public Mono<OpencodeHealthResult> health(ExecutionNode node, String traceId) {
@@ -191,6 +194,49 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                         returnType)
                 .bodyToMono(returnType)
                 .thenReturn(new OpencodeRejectDiffResult(true));
+    }
+
+    @Override
+    public Mono<OpencodeRuntimeResult> runtime(
+            ExecutionNode node,
+            String method,
+            String path,
+            String directory,
+            String workspace,
+            Map<String, String> query,
+            Object body,
+            String traceId) {
+        ApiClient apiClient = apiClient(node, traceId);
+        ParameterizedTypeReference<JsonNode> returnType = new ParameterizedTypeReference<>() {
+        };
+        Map<String, Object> pathParams = new HashMap<>();
+        MultiValueMap<String, String> queryParams = queryParams(apiClient, directory, workspace);
+        query.forEach((name, value) -> {
+            if (value != null && !value.isBlank()) {
+                queryParams.putAll(apiClient.parameterToMultiValueMap(null, name, value));
+            }
+        });
+        HttpHeaders headerParams = new HttpHeaders();
+        MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<>();
+        MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<>();
+        List<MediaType> accepts = apiClient.selectHeaderAccept(new String[]{"application/json"});
+        MediaType contentType = apiClient.selectHeaderContentType(new String[]{"application/json"});
+        return apiClient.invokeAPI(
+                        path,
+                        HttpMethod.valueOf(method),
+                        pathParams,
+                        queryParams,
+                        body,
+                        headerParams,
+                        cookieParams,
+                        formParams,
+                        accepts,
+                        contentType,
+                        new String[]{},
+                        returnType)
+                .bodyToMono(returnType)
+                .defaultIfEmpty(objectMapper.createObjectNode().put("accepted", true))
+                .map(OpencodeRuntimeResult::new);
     }
 
     private ApiClient apiClient(ExecutionNode node, String traceId) {

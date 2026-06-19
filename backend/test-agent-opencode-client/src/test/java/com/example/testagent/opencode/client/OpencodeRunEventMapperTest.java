@@ -54,6 +54,46 @@ class OpencodeRunEventMapperTest {
     }
 
     @Test
+    void mapsOpencodeAppMessageEventsToPlatformMessageEvents() throws Exception {
+        RunEventDraft message = mapper.toDraft(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_message","type":"message.updated","properties":{"messageID":"msg_1"}}
+                        """),
+                new RunId("run_1234567890abcdef"),
+                "trace_1234567890abcdef");
+        RunEventDraft part = mapper.toDraft(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_part","type":"message.part.updated","properties":{"partID":"part_1"}}
+                        """),
+                new RunId("run_1234567890abcdef"),
+                "trace_1234567890abcdef");
+        RunEventDraft delta = mapper.toDraft(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_delta","type":"message.part.delta","properties":{"delta":"hello"}}
+                        """),
+                new RunId("run_1234567890abcdef"),
+                "trace_1234567890abcdef");
+
+        assertThat(message.type()).isEqualTo(RunEventType.MESSAGE_UPDATED);
+        assertThat(part.type()).isEqualTo(RunEventType.MESSAGE_PART_UPDATED);
+        assertThat(delta.type()).isEqualTo(RunEventType.MESSAGE_PART_DELTA);
+        assertThat(delta.payload()).containsEntry("text", "hello");
+    }
+
+    @Test
+    void mapsPermissionQuestionAndRuntimeStatusEvents() throws Exception {
+        assertThat(mapType("permission.asked")).isEqualTo(RunEventType.PERMISSION_ASKED);
+        assertThat(mapType("permission.replied")).isEqualTo(RunEventType.PERMISSION_REPLIED);
+        assertThat(mapType("question.asked")).isEqualTo(RunEventType.QUESTION_ASKED);
+        assertThat(mapType("question.replied")).isEqualTo(RunEventType.QUESTION_REPLIED);
+        assertThat(mapType("question.rejected")).isEqualTo(RunEventType.QUESTION_REJECTED);
+        assertThat(mapType("todo.updated")).isEqualTo(RunEventType.TODO_UPDATED);
+        assertThat(mapType("vcs.branch.updated")).isEqualTo(RunEventType.VCS_BRANCH_UPDATED);
+        assertThat(mapType("lsp.updated")).isEqualTo(RunEventType.LSP_UPDATED);
+        assertThat(mapType("mcp.tools.changed")).isEqualTo(RunEventType.MCP_TOOLS_CHANGED);
+    }
+
+    @Test
     void mapsStepEndedToRunSucceeded() throws Exception {
         RunEventDraft draft = mapper.toDraft(
                 objectMapper.readTree("""
@@ -139,5 +179,15 @@ class OpencodeRunEventMapperTest {
         assertThat(draft.type()).isEqualTo(RunEventType.OPENCODE_EVENT_UNKNOWN);
         assertThat(draft.payload()).containsEntry("rawType", "future.event");
         assertThat(draft.payload()).containsKey("rawPayload");
+    }
+
+    private RunEventType mapType(String rawType) throws Exception {
+        RunEventDraft draft = mapper.toDraft(
+                objectMapper.readTree("""
+                        {"id":"evt_raw","type":"%s","properties":{"value":1}}
+                        """.formatted(rawType)),
+                new RunId("run_1234567890abcdef"),
+                "trace_1234567890abcdef");
+        return draft.type();
     }
 }

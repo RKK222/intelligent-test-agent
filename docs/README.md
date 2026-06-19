@@ -52,6 +52,7 @@
 - `docs/plan/08-agent-chat-diff-and-run-mvp.md`：Agent 对话、Diff 和运行 MVP。
 - `docs/plan/09-test-reports-and-skill-studio.md`：测试报告和 Skill Studio。
 - `docs/plan/10-e2e-hardening-and-release.md`：端到端加固和发布验收。
+- `docs/plan/11-opencode-web-feature-replica.md`：opencode Web 交互功能复刻需求（会话、对话、工具、Diff、权限、提问、Agent、上下文、斜杠命令、终端、MCP 等）。
 
 ## 前端任务
 

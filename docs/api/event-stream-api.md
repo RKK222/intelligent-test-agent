@@ -46,12 +46,28 @@
 | `run.failed` | Run 失败结束。 |
 | `run.cancelled` | Run 已取消。 |
 | `assistant.message.delta` | 助手消息增量。 |
+| `message.updated` | opencode Web App message projection 更新。 |
+| `message.removed` | opencode Web App message projection 移除。 |
+| `message.part.updated` | message part 内容或状态更新。 |
+| `message.part.removed` | message part 移除。 |
+| `message.part.delta` | message part 流式增量。 |
+| `session.diff` | session 级 Diff 状态更新。 |
+| `session.status` | session busy/idle/status 更新。 |
+| `todo.updated` | Todo 列表更新。 |
 | `tool.started` | 工具调用开始。 |
 | `tool.finished` | 工具调用结束，payload 使用 `status` 区分 success/failed。 |
 | `diff.proposed` | 智能体提出文件 Diff。 |
 | `diff.accepted` | 用户已接受 Run 级 Diff。 |
 | `diff.rejected` | 用户已拒绝 Run 级 Diff，后端已提交 opencode revert。 |
 | `test.finished` | 测试执行结束。 |
+| `permission.asked` | 权限请求。 |
+| `permission.replied` | 权限回复。 |
+| `question.asked` | 提问请求。 |
+| `question.replied` | 提问回复。 |
+| `question.rejected` | 提问拒绝。 |
+| `vcs.branch.updated` | VCS 分支更新。 |
+| `lsp.updated` | LSP 状态更新。 |
+| `mcp.tools.changed` | MCP 工具目录更新。 |
 | `opencode.event.unknown` | 未识别 opencode raw event 的兼容兜底。 |
 
 ## SSE 续传
@@ -60,6 +76,7 @@
 - Phase 02/03 后，SSE `event` 使用 `RunEventType.wireName()`，例如 `tool.finished`。
 - SSE `id` 使用 RunEvent 的 `seq` 字符串。
 - 客户端断线后携带 `Last-Event-ID`，后端按当前 runId 返回 `seq > Last-Event-ID` 的事件。
+- 浏览器原生 `EventSource` 不能设置自定义请求头；前端首次续传可使用 `GET /api/runs/{runId}/events?lastEventId={seq}`。后端 header 优先，query 参数作为浏览器兼容入口。
 - 如果 `Last-Event-ID` 缺失，默认从当前订阅策略允许的起点开始返回。
 - 如果 `Last-Event-ID` 非数字或小于 0，后端返回统一错误格式，错误码为 `VALIDATION_ERROR`。
 
@@ -91,6 +108,8 @@ Phase 08 后，opencode raw event 的终态映射为：
 - `session.idle` -> `run.succeeded`，兼容 opencode 1.17.8 的完成信号。
 - `session.next.step.failed` -> `run.failed`，应用服务同时把 Run 状态更新为 `FAILED`。
 - `session.error` -> `run.failed`，应用服务同时把 Run 状态更新为 `FAILED`。
+- `message.updated`、`message.part.updated`、`message.part.delta` 等 opencode App 事件进入同名平台 RunEvent，用于 Phase 11 message timeline。
+- `permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed` 进入同名平台 RunEvent，用于 Phase 11 运行态同步。
 
 本地 RunEvent 持久化异常不是 opencode 终态事件，不能单独生成 `run.failed` 或把 Run 状态改为 `FAILED`；前端可通过 SSE 重连和后续事件继续恢复视图。
 

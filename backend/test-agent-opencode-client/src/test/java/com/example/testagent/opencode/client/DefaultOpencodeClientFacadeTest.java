@@ -345,6 +345,22 @@ class DefaultOpencodeClientFacadeTest {
             return Mono.just(new OpencodeRejectDiffResult(true));
         }
 
+        @Override
+        public Mono<OpencodeRuntimeResult> runtime(
+                ExecutionNode node,
+                String method,
+                String path,
+                String directory,
+                String workspace,
+                java.util.Map<String, String> query,
+                Object body,
+                String traceId) {
+            lastTraceId = traceId;
+            lastDirectory = directory;
+            lastWorkspace = workspace;
+            return Mono.just(new OpencodeRuntimeResult(new ObjectMapper().createObjectNode()));
+        }
+
         private String lastPrompt;
     }
 }

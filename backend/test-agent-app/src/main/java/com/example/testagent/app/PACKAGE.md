@@ -16,13 +16,15 @@
 - `TestAgentApplication`：Spring Boot 启动类，扫描 `com.example.testagent` 下的后端组件。
 - `web.TraceIdWebFilter`：入口请求 traceId 透传、生成和响应头写入。
 - `web.GlobalExceptionHandler`：统一异常到平台错误响应的转换。
-- `web.WorkspaceController`、`web.SessionController`、`web.RunController`：Runtime HTTP/SSE 协议转换入口。
-- `web.RunController`：Run/Diff HTTP 端点返回 `Mono<ApiResponse<...>>`，并将阻塞式应用服务编排 offload 到 `boundedElastic`；RunEvent SSE 端点保持 `Flux` 流式返回。
+- `web.WorkspaceController`、`web.SessionController`、`web.RunController`、`web.OpencodeRuntimeController`：Runtime HTTP/SSE 协议转换入口。
+- `web.RunController`：Run/Diff HTTP 端点返回 `Mono<ApiResponse<...>>`，并将阻塞式应用服务编排 offload 到 `boundedElastic`；RunEvent SSE 端点保持 `Flux` 流式返回，续传时 header `Last-Event-ID` 优先、query `lastEventId` 作为浏览器 EventSource 兼容入口。
+- `web.RuntimeDtos.StartRunRequest`：兼容旧 prompt string 与 Phase 11 可选字段，当前仅把 text parts 合成为 Run 编排 prompt。
 - `web.ApiTokenWebFilter`、`web.InMemoryRateLimitWebFilter`：API token 鉴权占位和内存限流占位。
 - `workspace.WorkspaceApplicationService`、`workspace.WorkspaceFileService`：工作区注册、文件路径归一化和 UTF-8 文件读写。
 - `session.SessionApplicationService`：会话创建、查询和消息追加/分页。
 - `run.RunApplicationService`：Run 启动、路由、opencode session 懒创建/复用、opencode start/cancel 和事件订阅编排；opencode stream 事件持久化 offload 到 `boundedElastic`，本地落库异常不改变 Run 终态。
 - `run.RunDiffApplicationService`：Run 级 Diff 查询、接受事件追加和拒绝时 opencode revert 编排。
+- `runtime.OpencodeRuntimeApplicationService`：Phase 11 opencode Web App 运行态 API 编排层，统一把平台 workspace/session 请求映射到 opencode-client runtime facade；MCP resources/tools 仅作为只读运行态目录映射。
 - `config.TestAgentRuntimeProperties`、`config.ExecutionNodeSeeder`：运行时配置绑定和 opencode node seed；运行态 Druid 配置默认借出连接前校验，避免 stale PostgreSQL 连接影响首个请求。
 - `config.RuntimeSecurityConfig`：WebFlux 安全与 CORS 配置，本地默认允许 `localhost:3000` 和 `127.0.0.1:3000`。
 - `config.DatabaseMigrationRunner`：运行态 Flyway migration 入口，确保空库启动先建表再 seed。
