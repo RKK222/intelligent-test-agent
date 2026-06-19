@@ -74,22 +74,31 @@ describe("AgentChat layout", () => {
     ]);
 
     expect(screen.getByText("规划步骤")).toBeTruthy();
+    expect(screen.getByText("工具调用完成")).toBeTruthy();
+    expect(screen.getByText("本次变更涉及 2 个文件")).toBeTruthy();
+    expect(screen.getByText("修复建议")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "展开 规划步骤" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开 修复建议" }));
+
     expect(screen.getByText("读取运行报告")).toBeTruthy();
     expect(screen.getByText("调用技能 analyze_playwright")).toBeTruthy();
     expect(screen.getByText("read_file")).toBeTruthy();
     expect(screen.getByText("路径: reports/run-1287.json")).toBeTruthy();
-    expect(screen.getByText("本次变更涉及 2 个文件")).toBeTruthy();
     expect(screen.getByText("tests/checkout.spec.ts")).toBeTruthy();
     expect(screen.getAllByText("MODIFIED")).toHaveLength(2);
     expect(screen.getAllByText("+2 -1")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "查看 Diff" })).toBeTruthy();
-    expect(screen.getByText("修复建议")).toBeTruthy();
+    expect(screen.getByText("建议增加等待条件并更新定位器")).toBeTruthy();
   });
 
   it("默认只展开最新关键卡片，并允许手动展开折叠", () => {
     renderAgentChat([
       card("diff-old", "diff", "旧 Diff", {
         files: [{ path: "old.ts", status: "modified", additions: 1, deletions: 0 }]
+      }),
+      card("diff-new", "diff", "新 Diff", {
+        files: [{ path: "new.ts", status: "modified", additions: 2, deletions: 1 }]
       }),
       card("tool-new", "tool", "工具调用完成", {
         toolName: "read_file",
@@ -99,11 +108,13 @@ describe("AgentChat layout", () => {
     ]);
 
     const oldDiff = screen.getByTestId("timeline-card-diff-old");
+    const latestDiff = screen.getByTestId("timeline-card-diff-new");
     const latestTool = screen.getByTestId("timeline-card-tool-new");
     expect(oldDiff.hasAttribute("open")).toBe(false);
+    expect(latestDiff.hasAttribute("open")).toBe(true);
     expect(latestTool.hasAttribute("open")).toBe(true);
 
-    fireEvent.click(screen.getByRole("button", { name: "展开 旧 Diff" }));
+    fireEvent.click(screen.getByRole("button", { name: "展开 本次变更涉及 1 个文件" }));
     expect(oldDiff.hasAttribute("open")).toBe(true);
   });
 });

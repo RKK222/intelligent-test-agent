@@ -84,6 +84,14 @@ export function AssistantThread({
     }
     return map;
   }, [messages]);
+  // 时间线只自动展开用户最需要立即查看的结构化结果，避免历史项把线程撑乱。
+  const defaultOpenCardIds = React.useMemo(() => {
+    const reversed = [...messages].reverse();
+    return {
+      latestToolId: reversed.find((message) => message.role === "card" && message.cardType === "tool")?.id,
+      latestDiffId: reversed.find((message) => message.role === "card" && message.cardType === "diff")?.id
+    };
+  }, [messages]);
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
@@ -102,6 +110,7 @@ export function AssistantThread({
                 message={message}
                 original={message.id ? messageById.get(message.id) : undefined}
                 onOpenDiff={onOpenDiff}
+                defaultOpenCardIds={defaultOpenCardIds}
               />
             )}
           </ThreadPrimitive.Messages>
@@ -139,37 +148,68 @@ type MessageStateItem = Parameters<NonNullable<React.ComponentProps<typeof Threa
 function ThreadMessageItem({
   message,
   original,
-  onOpenDiff
+  onOpenDiff,
+  defaultOpenCardIds
 }: {
   message: MessageStateItem;
   original: AgentMessage | undefined;
   onOpenDiff: () => void;
+  defaultOpenCardIds: {
+    latestToolId?: string;
+    latestDiffId?: string;
+  };
 }) {
   const cardMeta = message.metadata?.custom as AgentCardMeta | undefined;
   if (cardMeta?.card && original?.role === "card") {
-    return <AgentCard message={original} onOpenDiff={onOpenDiff} />;
+    return (
+      <AgentCard
+        message={original}
+        onOpenDiff={onOpenDiff}
+        defaultOpen={shouldOpenCardByDefault(original, defaultOpenCardIds)}
+      />
+    );
   }
   const isUser = message.role === "user";
+  const displayText =
+    original?.role === "user" || original?.role === "assistant"
+      ? original.text
+      : typeof message.content === "string"
+        ? message.content
+        : "";
   return (
     <div className={isUser ? "flex justify-end" : "flex justify-start"}>
       <div
         className={
           isUser
-            ? "max-w-[92%] rounded-[10px] border border-[#2a3a63] bg-[#1b2d5a] px-3 py-2"
+            ? "max-w-[92%] rounded-[16px] border border-[#31487d] bg-[#1b2d5a] px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,.04)]"
             : "max-w-[92%] rounded-[10px] border border-[var(--ta-border)] bg-[#101b33] px-3 py-2"
         }
       >
-        <div className="mb-1 text-[11px] text-slate-500">{isUser ? "You" : "Agent"}</div>
+        <div className={isUser ? "mb-2 text-[12px] font-semibold text-[#a8b9dc]" : "mb-1 text-[11px] text-slate-500"}>
+          {isUser ? "用户" : "Agent"}
+        </div>
         {original?.role === "assistant" && original.parts?.length ? (
           <MessageParts parts={original.parts} fallbackText={original.text} />
         ) : (
-          <div className="whitespace-pre-wrap text-[12px] leading-6 text-slate-100">
-            {typeof message.content === "string" ? message.content : ""}
-          </div>
+          <p className="m-0 whitespace-pre-wrap text-[13px] leading-7 text-slate-100">{displayText}</p>
         )}
       </div>
     </div>
   );
+}
+
+function shouldOpenCardByDefault(
+  message: Extract<AgentMessage, { role: "card" }>,
+  defaultOpenCardIds: {
+    latestToolId?: string;
+    latestDiffId?: string;
+  }
+) {
+  const status = typeof message.payload.status === "string" ? message.payload.status.toLowerCase() : "";
+  if (["running", "active", "pending", "queued"].includes(status)) {
+    return true;
+  }
+  return message.id === defaultOpenCardIds.latestToolId || message.id === defaultOpenCardIds.latestDiffId;
 }
 
 /** 按 part 类型区分思考过程、最终回答和工具输出，避免流式内容混在同一块里。 */
@@ -215,8 +255,8 @@ function MessageParts({
 
 function AnswerPart({ part }: { part: Extract<MessagePart, { type: "text" }> }) {
   return (
-    <div className="rounded border border-[#24406f] bg-[#0f1a33] p-2">
-      <div className="mb-1 text-[11px] font-semibold text-[#a3c9ff]">回答</div>
+    <div className="rounded-[10px] border border-[var(--ta-border)] bg-[#0f1a33] p-3">
+      <div className="mb-2 text-[12px] font-semibold text-[#a3c9ff]">回答</div>
       <div className="whitespace-pre-wrap text-[12px] leading-6 text-slate-100">{part.text}</div>
     </div>
   );
@@ -231,7 +271,7 @@ function ReasoningPart({
 }) {
   const running = part.status === "running";
   return (
-    <details open={openByDefault} className="rounded border border-[#27334f] bg-[#0b1426] p-2">
+    <details open={openByDefault} className="rounded-[10px] border border-[var(--ta-border)] bg-[#0b1426] p-3">
       <summary className="flex cursor-pointer list-none items-center gap-2 text-[11px] font-semibold text-slate-400">
         <span className={`h-1.5 w-1.5 rounded-full ${running ? "bg-[var(--ta-accent)]" : "bg-slate-600"}`} />
         <span>{running ? "思考中" : part.title ?? "思考过程"}</span>
