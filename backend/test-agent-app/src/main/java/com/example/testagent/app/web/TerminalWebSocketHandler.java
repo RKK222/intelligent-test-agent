@@ -1,6 +1,7 @@
 package com.example.testagent.app.web;
 
 import com.example.testagent.app.config.TestAgentRuntimeProperties;
+import com.example.testagent.app.terminal.TerminalActiveSessionRegistry;
 import com.example.testagent.app.terminal.TerminalApplicationService;
 import com.example.testagent.app.terminal.TerminalClientMessage;
 import com.example.testagent.app.terminal.TerminalMessageCodec;
@@ -32,16 +33,19 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
     private final TerminalProcessFactory processFactory;
     private final TerminalMessageCodec codec;
     private final Set<String> allowedOrigins;
+    private final TerminalActiveSessionRegistry activeSessions;
 
     public TerminalWebSocketHandler(
             TerminalApplicationService terminalService,
             TerminalProcessFactory processFactory,
             TerminalMessageCodec codec,
-            TestAgentRuntimeProperties properties) {
+            TestAgentRuntimeProperties properties,
+            TerminalActiveSessionRegistry activeSessions) {
         this.terminalService = terminalService;
         this.processFactory = processFactory;
         this.codec = codec;
         this.allowedOrigins = Set.copyOf(properties.getSecurity().getCorsAllowedOrigins());
+        this.activeSessions = activeSessions;
     }
 
     @Override
@@ -61,17 +65,37 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
             return sendErrorAndClose(session, "PTY_DENIED", "terminal denied");
         }
 
-        TerminalProcessSession terminal = processFactory.start(ticket);
+        TerminalActiveSessionRegistry.Lease lease = null;
+        TerminalProcessSession terminal;
+        try {
+            lease = activeSessions.reserve(ticket);
+            terminal = processFactory.start(ticket);
+        } catch (PlatformException exception) {
+            if (lease != null) {
+                lease.close();
+            }
+            return sendErrorAndClose(session, exception.errorCode().name(), exception.getMessage());
+        } catch (Exception exception) {
+            if (lease != null) {
+                lease.close();
+            }
+            return sendErrorAndClose(session, "PTY_UNAVAILABLE", "terminal unavailable");
+        }
+        TerminalActiveSessionRegistry.Lease activeLease = lease;
+        TerminalProcessSession activeTerminal = terminal;
         Mono<Void> inbound = session.receive()
                 .map(WebSocketMessage::getPayloadAsText)
                 .map(codec::decode)
-                .flatMap(message -> handleClientMessage(terminal, message))
+                .flatMap(message -> handleClientMessage(activeTerminal, message))
                 .then();
-        Mono<Void> outbound = session.send(terminal.output()
+        Mono<Void> outbound = session.send(activeTerminal.output()
                 .map(codec::encode)
                 .map(session::textMessage));
         return Mono.when(inbound, outbound)
-                .doFinally(ignored -> terminal.close().subscribe());
+                .doFinally(ignored -> {
+                    activeLease.close();
+                    activeTerminal.close().subscribe();
+                });
     }
 
     private Mono<Void> handleClientMessage(TerminalProcessSession terminal, TerminalClientMessage message) {

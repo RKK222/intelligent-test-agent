@@ -52,7 +52,7 @@ WebSocket message 使用 JSON envelope：
 1. PTY cwd 必须归一化到 workspace root 内，越界返回 `FORBIDDEN`。
 2. 默认 cwd 为 workspace root；用户传入 cwd 只能是 workspace root 下相对路径或等价规范化路径。
 3. shell 白名单由后端配置控制，默认只允许系统默认 shell；不得从前端直接传任意可执行文件路径。
-4. 每个 session 同时最多一个 active PTY；新 ticket 可选择拒绝或关闭旧 PTY，但行为必须在 API 文档中固定。
+4. 每个 session 同时最多一个 active PTY；当前固定策略为拒绝新的 WebSocket 连接，返回 `CONFLICT` error envelope，并保留已有 PTY。
 5. PTY 进程必须在 close、WebSocket 断开、ticket 过期、session abort 或后端关闭时被清理。
 
 ## 限流与配额
@@ -92,6 +92,6 @@ WebSocket message 使用 JSON envelope：
 ## 验收要求
 
 - 后端 ticket controller、application service、WebSocket handler 和 PTY adapter 均有单元或集成测试；当前已覆盖 ticket 创建、无远端映射拒绝、cwd 越界、重复使用和消息 codec。
-- 安全测试覆盖 ticket 过期、重复使用、session/workspace 不匹配、cwd 越界、input 超限和 CORS/origin 拒绝；当前仍需补齐 WebSocket handler 级 origin/input/close 测试。
+- 安全测试覆盖 ticket 过期、重复使用、session/workspace 不匹配、cwd 越界、active PTY 冲突、进程启动失败释放、input 超限和 CORS/origin 拒绝；当前仍需补齐 input/close 和 timeout 测试。
 - 前端测试覆盖 ticket 获取、连接失败、输出渲染、输入发送、resize 和 close；当前已覆盖 terminal client/panel 和 mocked ticket 创建入口。
 - 文档同步 `docs/api/backend-api.md`、`docs/security/security-standards.md`、`docs/frontend/frontend-backend-contract.md` 和相关 README/PACKAGE。
