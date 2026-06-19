@@ -52,11 +52,11 @@ Runtime API 本地默认 CORS 只允许 `http://localhost:3000` 和 `http://127.
 
 ## PTY WebSocket 安全例外
 
-交互式 PTY 终端属于 Phase 11 P2 受控 WebSocket 例外，具体设计见 `docs/architecture/pty-websocket-design.md`。实现前必须满足：
+交互式 PTY 终端属于 Phase 11 P2 受控 WebSocket 例外，具体设计见 `docs/architecture/pty-websocket-design.md`。当前后端已先落地 ticket、Origin、cwd workspace root 归一化、单次使用和 input 大小上限；完整前端面板、主动限流、审计、idle/hard timeout 和真实联调 E2E 仍需按该设计继续补齐。实现和后续扩展必须满足：
 
 1. 先通过 HTTP API 创建一次性 ticket，再使用 ticket 建立 WebSocket；不得直接以长期 Bearer token 暴露在 WebSocket URL 中。
 2. ticket 必须绑定 session、workspace、execution node、traceId 和过期时间，且只能使用一次。
-3. cwd 必须归一化在 workspace root 内，shell 必须走后端白名单。
+3. cwd 必须归一化在 workspace root 内，shell 必须走后端白名单；在白名单配置完成前，前端不得覆盖 shell。
 4. WebSocket upgrade 必须校验 Origin、ticket、session/workspace 归属和限流。
 5. input/output 审计日志默认只记录长度、哈希、事件类型和必要状态，不记录完整终端内容。
 6. input、resize、output buffer、idle timeout 和 hard timeout 必须有明确上限。

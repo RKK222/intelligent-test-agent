@@ -26,6 +26,10 @@ public final class RuntimeIdGenerator {
         return prefixed("msg_");
     }
 
+    public static String terminalTicketId() {
+        return prefixed("pty_");
+    }
+
     private static String prefixed(String prefix) {
         return prefix + UUID.randomUUID().toString().replace("-", "");
     }

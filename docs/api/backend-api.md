@@ -379,14 +379,53 @@ Session 运行态接口：
 | Runtime | `GET /api/lsp/status` | LSP 状态 | P2 |
 | Runtime | `GET /api/mcp/status`、`/mcp/resources`、`/mcp/tools` | MCP 状态和目录 | P2 |
 
-PTY WebSocket 不在上述默认 HTTP/SSE 契约内；只有在架构和安全文档确认受控 WebSocket 例外后才能新增。
-
-P2 允许的 PTY 入口形态已在 `docs/architecture/pty-websocket-design.md` 固化：
+PTY WebSocket 不在上述默认 HTTP/SSE 契约内。Phase 11 P2 已按 `docs/architecture/pty-websocket-design.md` 增加后端受控例外入口，前端仍不得直连 opencode server、SSH、sidecar 或任意主机。
 
 - `POST /api/sessions/{sessionId}/terminal/tickets`：创建一次性 PTY ticket，仍返回 `ApiResponse<T>`。
 - `GET /api/sessions/{sessionId}/terminal/ws?ticket=...`：仅用于 WebSocket upgrade，ticket 单次使用并短期过期。
 
-PTY 实现必须继续遵守平台鉴权、CORS/origin、限流、traceId、cwd workspace root 归一化和日志脱敏要求。
+创建 ticket 的请求体为：
+
+```json
+{
+  "workspaceId": "wrk_...",
+  "cwd": "relative/path",
+  "shell": null,
+  "cols": 120,
+  "rows": 32
+}
+```
+
+当前后端实现限制：
+
+- `workspaceId` 可省略，省略时使用 session 归属 workspace；显式传入时必须与 session 匹配。
+- session 必须已绑定远端 opencode session/execution node，否则返回 `CONFLICT`。
+- `cwd` 会归一化到 workspace root 内，越界或非目录返回 `FORBIDDEN`。
+- `shell` 暂不允许前端覆盖；后端只使用运行环境默认 shell，避免把任意可执行文件路径暴露给 Web 输入。
+- `cols`、`rows` 会按后端上限截断；ticket 默认 60 秒过期且只能使用一次。
+
+ticket 响应 data：
+
+```json
+{
+  "ticket": "tty_...",
+  "expiresAt": "2026-06-19T13:00:00Z",
+  "webSocketUrl": "/api/sessions/ses_.../terminal/ws?ticket=tty_..."
+}
+```
+
+WebSocket 消息使用 JSON envelope：
+
+```json
+{ "type": "input", "data": "npm test\n" }
+{ "type": "resize", "cols": 120, "rows": 32 }
+{ "type": "close", "reason": "user" }
+{ "type": "output", "data": "...", "seq": 12 }
+{ "type": "exit", "code": 0, "seq": 13 }
+{ "type": "error", "code": "PTY_DENIED", "message": "..." }
+```
+
+当前后端已覆盖 ticket、Origin、session/workspace/cwd、单次使用和单条 input 16KB 上限。前端 terminal package、每 session active PTY 限制、完整审计日志、idle/hard timeout、输入限速和三服务 E2E 仍是后续完成项。
 
 ### Diff API
 
