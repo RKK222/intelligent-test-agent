@@ -5,7 +5,6 @@ import type {
   AgentInfo,
   AgentMessage,
   CommandInfo,
-  MessagePart,
   ModelInfo,
   PermissionRequest,
   ProviderInfo,
@@ -15,11 +14,10 @@ import type {
   RuntimeToolInfo,
   TodoItem
 } from "@test-agent/shared-types";
-import { Button, Input, SegmentedTabs, Textarea } from "@test-agent/ui-kit";
-import { ImageIcon, Paperclip, Pin, Trash2, X } from "lucide-react";
-import { AgentCard } from "./cards";
+import { Button, Input, SegmentedTabs } from "@test-agent/ui-kit";
+import { Pin, Trash2 } from "lucide-react";
+import { AssistantThread } from "./AssistantThread";
 import type { ComposerAttachment } from "./prompt-parts";
-import { fileToPromptAttachment } from "./prompt-parts";
 
 export type AgentChatProps = {
   messages: AgentMessage[];
@@ -97,56 +95,14 @@ export function AgentChat({
   onRequestNotifications
 }: AgentChatProps) {
   const [tab, setTab] = React.useState<AgentTab>("agent");
-  const [text, setText] = React.useState("");
-  const [attachments, setAttachments] = React.useState<ComposerAttachment[]>([]);
-  const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
-  const [readingAttachments, setReadingAttachments] = React.useState(false);
   const [localHistorySearch, setLocalHistorySearch] = React.useState("");
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const imageInputRef = React.useRef<HTMLInputElement>(null);
   const resolvedHistorySearch = historySearch ?? localHistorySearch;
-  const slashQuery = React.useMemo(() => commandQuery(text), [text]);
-  const atQuery = React.useMemo(() => contextQuery(text), [text]);
   const filteredHistory = React.useMemo(() => {
     const query = resolvedHistorySearch.trim().toLowerCase();
     return query
       ? history.filter((item) => `${item.title} ${item.preview} ${item.status}`.toLowerCase().includes(query))
       : history;
   }, [history, resolvedHistorySearch]);
-  const contextItems = React.useMemo(() => resources.slice(0, 12).map((item) => ({
-    id: item.id,
-    label: item.name,
-    detail: item.uri ?? item.type ?? item.id
-  })), [resources]);
-
-  function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const prompt = text.trim();
-    if (!prompt && attachments.length === 0) {
-      return;
-    }
-    onSend(prompt, attachments);
-    setText("");
-    setAttachments([]);
-    setAttachmentError(null);
-    setTab("agent");
-  }
-
-  async function addAttachments(files: FileList | null) {
-    if (!files?.length) {
-      return;
-    }
-    setReadingAttachments(true);
-    setAttachmentError(null);
-    try {
-      const next = await Promise.all(Array.from(files).map((file) => fileToPromptAttachment(file)));
-      setAttachments((current) => mergeAttachments(current, next));
-    } catch (error) {
-      setAttachmentError(error instanceof Error ? error.message : "附件读取失败");
-    } finally {
-      setReadingAttachments(false);
-    }
-  }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[var(--ta-panel-2)]">
@@ -160,155 +116,39 @@ export function AgentChat({
       />
       {tab === "agent" ? (
         <>
-          <RuntimeControls
-            agents={agents}
-            models={models}
-            commands={commands}
-            providers={providers}
-            selectedAgent={selectedAgent}
-            selectedProvider={selectedProvider}
-            selectedModel={selectedModel}
-            mode={mode}
-            onAgentChange={onAgentChange}
-            onProviderChange={onProviderChange}
-            onModelChange={onModelChange}
-            onModeChange={onModeChange}
-            onRequestNotifications={onRequestNotifications}
-          />
           <RuntimeStatusPanel runtimeStatus={runtimeStatus} tools={tools} resources={resources} />
-          <div className="min-h-0 flex-1 space-y-3 overflow-auto p-3">
-            <RuntimeDock
-              permissions={permissions}
-              questions={questions}
-              todos={todos}
-              onReplyPermission={onReplyPermission}
-              onReplyQuestion={onReplyQuestion}
-              onRejectQuestion={onRejectQuestion}
+          <RuntimeDock
+            permissions={permissions}
+            questions={questions}
+            todos={todos}
+            onReplyPermission={onReplyPermission}
+            onReplyQuestion={onReplyQuestion}
+            onRejectQuestion={onRejectQuestion}
+          />
+          <section aria-label="Agent 对话线程" className="min-h-0 flex-1 overflow-hidden">
+            <AssistantThread
+              messages={messages}
+              running={running}
+              onSend={onSend}
+              onCancel={onCancel}
+              onRetry={onRetry}
+              onOpenDiff={onOpenDiff}
+              commands={commands}
+              resources={resources}
+              agents={agents}
+              models={models}
+              providers={providers}
+              selectedAgent={selectedAgent}
+              selectedProvider={selectedProvider}
+              selectedModel={selectedModel}
+              mode={mode}
+              onAgentChange={onAgentChange}
+              onProviderChange={onProviderChange}
+              onModelChange={onModelChange}
+              onModeChange={onModeChange}
+              onRequestNotifications={onRequestNotifications}
             />
-            {messages.map((message) =>
-              message.role === "card" ? (
-                <AgentCard key={message.id} message={message} onOpenDiff={onOpenDiff} />
-              ) : (
-                <div key={message.id} className={message.role === "user" ? "flex justify-end" : "flex justify-start"}>
-                  <div className={message.role === "user" ? "max-w-[92%] rounded-md border border-blue-900 bg-blue-950 px-3 py-2" : "max-w-[92%] rounded-md border border-slate-800 bg-slate-950 px-3 py-2"}>
-                    <div className="mb-1 text-[11px] text-slate-500">{message.role === "user" ? "You" : "Agent"}</div>
-                    {message.role === "assistant" && message.parts?.length ? (
-                      <MessageParts parts={message.parts} fallbackText={message.text} />
-                    ) : (
-                      <div className="whitespace-pre-wrap text-[12px] leading-6 text-slate-100">{message.text}</div>
-                    )}
-                  </div>
-                </div>
-              )
-            )}
-          </div>
-          <form className="border-t border-slate-800 bg-slate-950 p-3" onSubmit={submit}>
-            <input
-              ref={fileInputRef}
-              className="hidden"
-              type="file"
-              multiple
-              onChange={(event) => {
-                void addAttachments(event.target.files);
-                event.currentTarget.value = "";
-              }}
-            />
-            <input
-              ref={imageInputRef}
-              className="hidden"
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={(event) => {
-                void addAttachments(event.target.files);
-                event.currentTarget.value = "";
-              }}
-            />
-            <Textarea
-              value={text}
-              rows={3}
-              placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
-              onChange={(event) => setText(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  event.currentTarget.form?.requestSubmit();
-                }
-              }}
-            />
-            {slashQuery != null && commands.length ? (
-              <SuggestionPanel
-                title="Commands"
-                items={commands
-                  .filter((command) => command.name.toLowerCase().includes(slashQuery.toLowerCase()))
-                  .slice(0, 6)
-                  .map((command) => ({
-                    id: command.commandId,
-                    label: `/${command.name}`,
-                    detail: command.description ?? command.arguments ?? "",
-                    onPick: () => setText(replaceCommandQuery(text, command.name))
-                  }))}
-              />
-            ) : null}
-            {atQuery != null && contextItems.length ? (
-              <SuggestionPanel
-                title="Context"
-                items={contextItems
-                  .filter((item) => item.label.toLowerCase().includes(atQuery.toLowerCase()))
-                  .slice(0, 6)
-                  .map((item) => ({
-                    id: item.id,
-                    label: `@${item.label}`,
-                    detail: item.detail,
-                    onPick: () => setText(replaceContextQuery(text, item.label))
-                  }))}
-              />
-            ) : null}
-            {attachments.length || attachmentError || readingAttachments ? (
-              <div className="mt-2 flex min-h-7 flex-wrap items-center gap-2">
-                {attachments.map((attachment) => (
-                  <span
-                    key={attachment.id}
-                    className="inline-flex max-w-full items-center gap-1 rounded border border-slate-800 bg-slate-900 px-2 py-1 text-[11px] text-slate-200"
-                    title={`${attachment.name} ${formatBytes(attachment.size)}`}
-                  >
-                    <span className="max-w-[160px] truncate">{attachment.name}</span>
-                    <span className="text-slate-500">{formatBytes(attachment.size)}</span>
-                    <button
-                      type="button"
-                      title="移除附件"
-                      className="rounded p-0.5 text-slate-500 hover:bg-slate-800 hover:text-slate-100"
-                      onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </span>
-                ))}
-                {readingAttachments ? <span className="text-[11px] text-slate-500">读取中</span> : null}
-                {attachmentError ? <span className="text-[11px] text-red-300">{attachmentError}</span> : null}
-              </div>
-            ) : null}
-            <div className="mt-2 flex items-center justify-between gap-2">
-              <div className="text-[11px] text-slate-500">{running ? "Run 正在执行，发送将排队" : "Enter 发送"}</div>
-              <div className="flex gap-2">
-                <Button type="button" size="icon" variant="secondary" title="添加文件" onClick={() => fileInputRef.current?.click()}>
-                  <Paperclip className="h-4 w-4" />
-                </Button>
-                <Button type="button" size="icon" variant="secondary" title="添加图片" onClick={() => imageInputRef.current?.click()}>
-                  <ImageIcon className="h-4 w-4" />
-                </Button>
-                <Button type="button" size="sm" variant="secondary" disabled={!running} onClick={onCancel}>
-                  取消
-                </Button>
-                <Button type="button" size="sm" variant="secondary" onClick={onRetry}>
-                  重试
-                </Button>
-                <Button type="submit" size="sm" variant="primary" disabled={readingAttachments || (!text.trim() && attachments.length === 0)}>
-                  {running ? "排队" : "发送"}
-                </Button>
-              </div>
-            </div>
-          </form>
+          </section>
         </>
       ) : (
         <div className="min-h-0 flex-1 space-y-2 overflow-auto p-3">
@@ -363,121 +203,6 @@ export function AgentChat({
   );
 }
 
-function mergeAttachments(current: ComposerAttachment[], next: ComposerAttachment[]) {
-  const seen = new Set(current.map((item) => item.id));
-  return [...current, ...next.filter((item) => !seen.has(item.id))];
-}
-
-function formatBytes(size: number) {
-  if (size < 1024) {
-    return `${size} B`;
-  }
-  if (size < 1024 * 1024) {
-    return `${Math.round(size / 1024)} KB`;
-  }
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function RuntimeControls({
-  agents,
-  models,
-  providers,
-  commands,
-  selectedAgent,
-  selectedProvider,
-  selectedModel,
-  mode,
-  onAgentChange,
-  onProviderChange,
-  onModelChange,
-  onModeChange,
-  onRequestNotifications
-}: {
-  agents: AgentInfo[];
-  models: ModelInfo[];
-  providers: ProviderInfo[];
-  commands: CommandInfo[];
-  selectedAgent?: string;
-  selectedProvider?: string;
-  selectedModel?: string;
-  mode: string;
-  onAgentChange?: (agentId: string) => void;
-  onProviderChange?: (providerId: string) => void;
-  onModelChange?: (modelId: string) => void;
-  onModeChange?: (mode: string) => void;
-  onRequestNotifications?: () => void;
-}) {
-  return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 border-b border-slate-800 bg-slate-950 p-2">
-      <label className="min-w-0">
-        <span className="sr-only">Agent</span>
-        <select
-          value={selectedAgent ?? ""}
-          className="h-8 w-full rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200"
-          onChange={(event) => onAgentChange?.(event.target.value)}
-        >
-          <option value="">Agent</option>
-          {agents.map((agent) => (
-            <option key={agent.agentId} value={agent.agentId}>
-              {agent.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="min-w-0">
-        <span className="sr-only">Provider</span>
-        <select
-          value={selectedProvider ?? ""}
-          className="h-8 w-full rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200"
-          onChange={(event) => onProviderChange?.(event.target.value)}
-        >
-          <option value="">Provider</option>
-          {providers.map((provider) => (
-            <option key={provider.providerId} value={provider.providerId}>
-              {provider.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="min-w-0">
-        <span className="sr-only">Model</span>
-        <select
-          value={selectedModel ?? ""}
-          className="h-8 w-full rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200"
-          onChange={(event) => onModelChange?.(event.target.value)}
-        >
-          <option value="">Model</option>
-          {models.map((model) => (
-            <option key={modelOptionValue(model)} value={modelOptionValue(model)}>
-              {model.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <label className="min-w-0">
-        <span className="sr-only">Mode</span>
-        <select
-          value={mode}
-          className="h-8 w-full rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200"
-          onChange={(event) => onModeChange?.(event.target.value)}
-        >
-          <option value="build">Build</option>
-          <option value="plan">Plan</option>
-          <option value="shell">Shell</option>
-          {commands.slice(0, 8).map((command) => (
-            <option key={command.commandId} value={`command:${command.name}`}>
-              /{command.name}
-            </option>
-          ))}
-        </select>
-      </label>
-      <Button type="button" size="sm" variant="secondary" onClick={onRequestNotifications}>
-        通知
-      </Button>
-    </div>
-  );
-}
-
 function RuntimeStatusPanel({
   runtimeStatus,
   tools,
@@ -501,8 +226,8 @@ function RuntimeStatusPanel({
       {resources.length ? <span className="rounded border border-slate-800 px-2 py-0.5">{resources.length} refs</span> : null}
       {percent != null ? (
         <span className="flex min-w-[96px] items-center gap-2">
-          <span className="h-1.5 flex-1 rounded bg-slate-800">
-            <span className="block h-1.5 rounded bg-blue-500" style={{ width: `${percent}%` }} />
+          <span className="h-1.5 flex-1 rounded bg-[#0a1324]">
+            <span className="block h-1.5 rounded bg-[linear-gradient(90deg,#22d3ee,#60a5fa)]" style={{ width: `${percent}%` }} />
           </span>
           {percent}%
         </span>
@@ -534,7 +259,7 @@ function RuntimeDock({
   return (
     <div className="space-y-2">
       {permissions.map((item) => (
-        <div key={item.requestId} className="rounded-md border border-amber-900 bg-amber-950/40 p-3">
+        <div key={item.requestId} className="rounded-md border border-[rgba(245,158,11,.3)] bg-[rgba(245,158,11,.08)] p-3">
           <div className="text-[12px] font-semibold text-amber-100">{item.title ?? item.type}</div>
           <div className="mt-1 whitespace-pre-wrap text-[12px] text-amber-200/80">{item.description ?? item.pattern ?? item.requestId}</div>
           <div className="mt-2 flex flex-wrap gap-2">
@@ -551,7 +276,7 @@ function RuntimeDock({
         </div>
       ))}
       {questions.map((item) => (
-        <div key={item.requestId} className="rounded-md border border-cyan-900 bg-cyan-950/30 p-3">
+        <div key={item.requestId} className="rounded-md border border-[rgba(34,211,238,.4)] bg-[rgba(34,211,238,.08)] p-3">
           {item.questions.map((question) => (
             <div key={question.questionId} className="space-y-2">
               <div className="text-[12px] font-semibold text-cyan-100">{question.text}</div>
@@ -637,7 +362,7 @@ function RuntimeDock({
         </div>
       ))}
       {todos.length ? (
-        <div className="rounded-md border border-slate-800 bg-slate-950 p-3">
+        <div className="rounded-[10px] border border-[var(--ta-border)] bg-[#0f1a33] p-3">
           <div className="mb-2 text-[12px] font-semibold text-slate-200">Todo</div>
           <div className="space-y-1">
             {todos.map((item) => (
@@ -651,85 +376,6 @@ function RuntimeDock({
       ) : null}
     </div>
   );
-}
-
-function SuggestionPanel({
-  title,
-  items
-}: {
-  title: string;
-  items: Array<{ id: string; label: string; detail?: string; onPick: () => void }>;
-}) {
-  if (!items.length) {
-    return null;
-  }
-  return (
-    <div className="mt-2 max-h-44 overflow-auto rounded-md border border-slate-800 bg-slate-950 p-1">
-      <div className="px-2 py-1 text-[11px] uppercase text-slate-500">{title}</div>
-      {items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-slate-800"
-          onClick={item.onPick}
-        >
-          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-slate-200">{item.label}</span>
-          {item.detail ? <span className="max-w-[45%] truncate text-[11px] text-slate-500">{item.detail}</span> : null}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function MessageParts({ parts, fallbackText }: { parts: MessagePart[]; fallbackText: string }) {
-  if (!parts.length) {
-    return <div className="whitespace-pre-wrap text-[12px] leading-6 text-slate-100">{fallbackText}</div>;
-  }
-  return (
-    <div className="space-y-2">
-      {parts.map((part) => (
-        <div key={part.partId} className="rounded border border-slate-800 bg-slate-950/70 p-2">
-          {part.type === "text" || part.type === "reasoning" ? (
-            <div className="whitespace-pre-wrap text-[12px] leading-6 text-slate-100">{part.text}</div>
-          ) : part.type === "tool" ? (
-            <div className="space-y-1 text-[12px] text-slate-300">
-              <div className="font-mono text-slate-200">{part.toolName}</div>
-              <div className="text-slate-500">{part.status}</div>
-              {part.output ? <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-[11px]">{String(part.output)}</pre> : null}
-            </div>
-          ) : part.type === "file" ? (
-            <div className="font-mono text-[12px] text-slate-300">{part.path ?? part.name ?? part.partId}</div>
-          ) : (
-            <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-[11px] text-slate-400">
-              {JSON.stringify(part.payload, null, 2)}
-            </pre>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function modelOptionValue(model: ModelInfo) {
-  return model.providerId ? `${model.providerId}/${model.id}` : model.id;
-}
-
-function commandQuery(text: string) {
-  const match = /(?:^|\n)\/([^\s/]*)$/.exec(text);
-  return match?.[1] ?? null;
-}
-
-function contextQuery(text: string) {
-  const match = /@([^\s@]*)$/.exec(text);
-  return match?.[1] ?? null;
-}
-
-function replaceCommandQuery(text: string, command: string) {
-  return text.replace(/(^|\n)\/[^\s/]*$/, `$1/${command} `);
-}
-
-function replaceContextQuery(text: string, label: string) {
-  return text.replace(/@[^\s@]*$/, `@${label} `);
 }
 
 function contextPercent(runtimeStatus?: RuntimeStatus) {

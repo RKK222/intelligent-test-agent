@@ -167,7 +167,7 @@ function appendAssistantDelta(messages: AgentMessage[], delta: string, event: Ru
 function mergePartDelta(messages: AgentMessage[], event: RunEvent) {
   const messageId = text(event.payload.messageId) ?? text(event.payload.messageID) ?? `assistant-${event.runId}`;
   const partId = text(event.payload.partId) ?? text(event.payload.partID) ?? `part-${event.seq}`;
-  const partType = text(event.payload.partType) ?? text(event.payload.partKind) ?? "text";
+  const partType = text(event.payload.partType) ?? text(event.payload.partKind);
   const delta = text(event.payload.delta) ?? text(event.payload.text) ?? "";
   const existing = findAssistantMessage(messages, messageId);
   const assistant =
@@ -198,12 +198,19 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent) {
   return replaceOrAppendMessage(messages, existing.index, nextAssistant);
 }
 
-function mergeTextualPart(current: MessagePart | undefined, partId: string, partType: string, delta: string): MessagePart {
-  const type = partType === "reasoning" ? "reasoning" : "text";
+function mergeTextualPart(current: MessagePart | undefined, partId: string, partType: string | undefined, delta: string): MessagePart {
+  const currentTextType = current?.type === "text" || current?.type === "reasoning" ? current.type : undefined;
+  const type = partType === "reasoning" || partType === "text" ? partType : currentTextType ?? "text";
   const textValue =
     current && (current.type === "text" || current.type === "reasoning") ? `${current.text}${delta}` : delta;
   if (type === "reasoning") {
-    return { partId, type: "reasoning", text: textValue, status: "running" };
+    return {
+      ...(current?.type === "reasoning" ? current : {}),
+      partId,
+      type: "reasoning",
+      text: textValue,
+      status: "running"
+    };
   }
   return { partId, type: "text", text: textValue, status: "running" };
 }

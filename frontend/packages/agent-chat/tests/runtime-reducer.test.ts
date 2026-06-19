@@ -32,6 +32,57 @@ describe("agent-chat runtime reducer", () => {
     ]);
   });
 
+  it("upserts opencode snapshot message and part updates", () => {
+    const withMessage = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.updated", { message: { id: "msg_1", role: "assistant" } })
+    });
+    const withPart = reduceAgentChatRuntime(withMessage, {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_1",
+        part: { id: "part_1", messageID: "msg_1", type: "text", text: "restored" }
+      })
+    });
+
+    expect(withPart.messages).toMatchObject([
+      {
+        role: "assistant",
+        messageId: "msg_1",
+        text: "restored",
+        parts: [{ partId: "part_1", type: "text", text: "restored" }]
+      }
+    ]);
+  });
+
+  it("keeps reasoning part type when streaming delta omits partType", () => {
+    const withReasoning = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_1",
+        part: { id: "part_reasoning", messageID: "msg_1", type: "reasoning", text: "I should" }
+      })
+    });
+    const withDelta = reduceAgentChatRuntime(withReasoning, {
+      type: "event",
+      event: event("message.part.delta", {
+        messageID: "msg_1",
+        partID: "part_reasoning",
+        field: "text",
+        delta: " inspect the files"
+      })
+    });
+
+    expect(withDelta.messages).toMatchObject([
+      {
+        role: "assistant",
+        messageId: "msg_1",
+        text: "",
+        parts: [{ partId: "part_reasoning", type: "reasoning", text: "I should inspect the files" }]
+      }
+    ]);
+  });
+
   it("tracks permission and question dock state from events", () => {
     const asked = ["permission.asked", "question.asked"].reduce(
       (state, type) =>
