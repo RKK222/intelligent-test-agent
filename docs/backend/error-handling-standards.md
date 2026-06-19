@@ -20,6 +20,8 @@
 
 当前实现类型为 `ApiErrorResponse`，成功响应对应 `ApiResponse<T>`。业务代码优先抛出 `PlatformException` 并携带 `ErrorCode`，入口层由 `GlobalExceptionHandler` 统一转换。
 
+Phase 04 Runtime API 中，`ApiTokenWebFilter` 和 `InMemoryRateLimitWebFilter` 在拦截链中直接写出统一 `ApiErrorResponse`，必须保持 `traceId`、HTTP 状态和错误码与本规范一致。路径穿越、非法 ID、非法分页和非法 `Last-Event-ID` 都必须映射为稳定平台错误码，不允许暴露底层异常。
+
 ## 初版错误码
 
 | code | HTTP 状态 | 默认说明 |

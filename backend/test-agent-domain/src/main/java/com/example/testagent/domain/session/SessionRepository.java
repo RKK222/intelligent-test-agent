@@ -1,5 +1,8 @@
 package com.example.testagent.domain.session;
 
+import com.example.testagent.common.pagination.PageRequest;
+import com.example.testagent.common.pagination.PageResponse;
+import com.example.testagent.domain.workspace.WorkspaceId;
 import java.util.Optional;
 
 /**
@@ -10,4 +13,6 @@ public interface SessionRepository {
     Session save(Session session);
 
     Optional<Session> findById(SessionId sessionId);
+
+    PageResponse<Session> findByWorkspaceId(WorkspaceId workspaceId, PageRequest pageRequest);
 }

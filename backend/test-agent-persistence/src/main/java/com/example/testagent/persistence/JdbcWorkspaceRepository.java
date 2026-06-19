@@ -1,5 +1,7 @@
 package com.example.testagent.persistence;
 
+import com.example.testagent.common.pagination.PageRequest;
+import com.example.testagent.common.pagination.PageResponse;
 import com.example.testagent.domain.workspace.Workspace;
 import com.example.testagent.domain.workspace.WorkspaceId;
 import com.example.testagent.domain.workspace.WorkspaceRepository;
@@ -73,5 +75,23 @@ public class JdbcWorkspaceRepository extends JdbcRepositorySupport implements Wo
                 .param("workspaceId", workspaceId.value())
                 .query(rowMapper)
                 .optional();
+    }
+
+    @Override
+    public PageResponse<Workspace> findPage(PageRequest pageRequest) {
+        var items = jdbcClient.sql("""
+                        select workspace_id, name, root_path, status, trace_id, created_at, updated_at
+                        from workspaces
+                        order by created_at desc, id desc
+                        limit :limit offset :offset
+                        """)
+                .param("limit", pageRequest.size())
+                .param("offset", pageRequest.offset())
+                .query(rowMapper)
+                .list();
+        Long total = jdbcClient.sql("select count(*) from workspaces")
+                .query(Long.class)
+                .single();
+        return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);
     }
 }

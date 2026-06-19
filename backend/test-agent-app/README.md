@@ -24,6 +24,18 @@
 
 - `TraceIdWebFilter`：处理 `X-Trace-Id` 透传、生成和响应头写入。
 - `GlobalExceptionHandler`：把 `PlatformException`、参数异常和未知异常转换为统一错误响应。
+- `ApiTokenWebFilter`：未配置 `TEST_AGENT_API_TOKEN` 时放行；配置后要求 Bearer token。
+- `InMemoryRateLimitWebFilter`：可配置内存限流占位，超限返回 `RATE_LIMITED`。
+- Workspace API：工作区注册、分页查询、单层文件列表、UTF-8 文件读写和文件状态。
+- Session API：会话创建、分页查询、消息追加和消息分页读取。
+- Run API：启动、查询、取消和 RunEvent SSE。
+- Health：opencode nodes health、Redis optional health、数据库 health。
+
+## 本地与生产 profile
+
+- `application-local.yml`：默认连接 `127.0.0.1:15432/test_agent`，用于 `deploy/local/docker-compose.yml`。
+- `application-prod.yml`：数据库、API token、CORS 和 opencode baseUrl 均通过环境变量注入，不提供真实密钥默认值。
+- `test-agent.opencode.nodes` 会在启动时 seed 到 `execution_nodes`，默认本地 node 来自 `TEST_AGENT_OPENCODE_BASE_URL`。
 
 ## 测试环境配置
 

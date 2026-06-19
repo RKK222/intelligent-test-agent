@@ -97,6 +97,24 @@ class DefaultOpencodeClientFacadeTest {
     }
 
     @Test
+    void facadeStartsRunWithPromptAsyncAndPropagatesTraceId() {
+        FakeGateway gateway = new FakeGateway();
+        OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);
+
+        OpencodeStartRunResult result = facade.startRun(new OpencodeStartRunCommand(
+                node(),
+                new SessionId("ses_1234567890abcdef"),
+                "/tmp/demo",
+                "wrk_1234567890abcdef",
+                "run the tests",
+                "trace_1234567890abcdef")).block();
+
+        assertThat(result.accepted()).isTrue();
+        assertThat(gateway.lastTraceId).isEqualTo("trace_1234567890abcdef");
+        assertThat(gateway.lastPrompt).isEqualTo("run the tests");
+    }
+
+    @Test
     void facadeMapsRawOpencodeEventsToRunEventDrafts() throws Exception {
         FakeGateway gateway = new FakeGateway();
         ObjectMapper objectMapper = new ObjectMapper();
@@ -178,9 +196,24 @@ class DefaultOpencodeClientFacadeTest {
         }
 
         @Override
+        public Mono<OpencodeStartRunResult> startRun(
+                ExecutionNode node,
+                SessionId sessionId,
+                String directory,
+                String workspace,
+                String prompt,
+                String traceId) {
+            lastTraceId = traceId;
+            lastPrompt = prompt;
+            return Mono.just(new OpencodeStartRunResult(true));
+        }
+
+        @Override
         public Flux<JsonNode> streamEvents(ExecutionNode node, String directory, String workspace, String traceId) {
             lastTraceId = traceId;
             return events;
         }
+
+        private String lastPrompt;
     }
 }

@@ -124,6 +124,13 @@ frontend/
 7. Persistence：Flyway migration、Repository、事务边界和数据兼容策略。
 8. Observability：traceId、结构化日志、指标、关键链路观测。
 
+Phase 04/05 已固化的后端运行时边界：
+
+- `test-agent-app` 提供 Workspace、Session、Run、Cancel 和 RunEvent SSE Runtime API。
+- Run 启动通过 `OpencodeClientFacade.startRun` 调用 opencode `prompt_async`，generated SDK 不越过 opencode-client 模块。
+- 本地鉴权默认免 token，配置 `TEST_AGENT_API_TOKEN` 后启用 Bearer token 占位鉴权。
+- 本地集成使用 `deploy/local/docker-compose.yml` 提供 Postgres 和可选 Redis，opencode server 通过 `TEST_AGENT_OPENCODE_BASE_URL` 指向外部本地进程。
+
 前端必须逐步提供：
 
 1. Web IDE 基座：Dockview 工作台、侧边栏、状态栏、通知、快捷操作。

@@ -16,7 +16,7 @@
 
 ## 主要职责
 
-- Workspace、Session、Run、RunEvent、ExecutionNode、SessionRoute 等持久化。
+- Workspace、Session、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision 等持久化。
 - Flyway migration。
 - Repository 实现和数据库映射。
 - Redis 限流、幂等或缓存能力的可选适配。
@@ -24,7 +24,9 @@
 ## 已有实现
 
 - `V1__create_core_tables.sql`：创建 Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 核心表。
+- `V2__create_session_messages.sql`：创建 SessionMessage 表和按 session 分页索引。
 - `JdbcWorkspaceRepository`、`JdbcSessionRepository`、`JdbcRunRepository`、`JdbcRunEventRepository`、`JdbcExecutionNodeRepository`、`JdbcRoutingDecisionRepository`。
+- `JdbcSessionMessageRepository`：实现会话消息保存、查询、分页和计数。
 - RunEvent append-only：持久化层分配 `eventId` 和同一 run 内单调递增 `seq`，支持 `runId + lastSeq` 增量读取。
 
 ## 测试环境 PostgreSQL

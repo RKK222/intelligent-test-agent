@@ -20,5 +20,13 @@ public interface OpencodeSdkGateway {
             String workspace,
             String traceId);
 
+    Mono<OpencodeStartRunResult> startRun(
+            ExecutionNode node,
+            SessionId sessionId,
+            String directory,
+            String workspace,
+            String prompt,
+            String traceId);
+
     Flux<JsonNode> streamEvents(ExecutionNode node, String directory, String workspace, String traceId);
 }

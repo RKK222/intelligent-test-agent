@@ -29,6 +29,15 @@
 - 不得引入 Monaco、Dockview 或具体业务组件。
 - 不得吞掉后端错误导致用户无法看到失败原因。
 
+Phase 04 已提供的 Runtime API 分组：
+
+- Workspace：`POST/GET /api/workspaces`、文件单层列表、UTF-8 内容读写和文件状态。
+- Session：创建、按 workspace 分页、详情、消息追加和消息分页。
+- Run：启动、详情、取消。
+- Event：`GET /api/runs/{runId}/events`，只消费平台 RunEvent SSE。
+
+详细路径、请求和响应以 `docs/api/backend-api.md` 为准。
+
 ## RunEvent SSE Client
 
 `packages/event-stream-client` 是前端消费实时事件的唯一入口。

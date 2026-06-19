@@ -22,6 +22,7 @@
 - `RunEventAppender`：追加 `RunEventDraft` 并返回持久化后的 `RunEvent`。
 - `RunEventReplayService`：解析 `Last-Event-ID` 并按 `runId + seq` 增量回放。
 - `RunEventSseMapper`：将 RunEvent 映射为 SSE，`id` 使用 seq，`event` 使用稳定 wire name。
+- `RunEventSseStreamService`：基于 Repository polling 输出可续传 SSE，客户端断开时释放订阅。
 
 ## 允许依赖
 

@@ -11,6 +11,13 @@
 
 当前 HTTP 入口使用请求/响应头 `X-Trace-Id`。合法 traceId 以 `trace_` 开头，只包含字母、数字、下划线和短横线；缺失或非法值由 `TraceIdSupport` 生成新值。`TraceIdWebFilter` 将 traceId 写入 WebExchange attribute、响应头和 Reactor context。
 
+Phase 04 Runtime API 要求：
+
+- `ApiTokenWebFilter` 和 `InMemoryRateLimitWebFilter` 的错误响应也必须返回同一 `X-Trace-Id`。
+- Run 启动、取消、routing decision、RunEvent 追加和 opencode facade 调用必须携带 traceId。
+- opencode 节点 health、Redis optional health 必须避免输出 token、完整 Authorization header 或用户输入。
+- SSE 回放使用事件自身 traceId；请求 traceId 只用于当前 HTTP 连接观测。
+
 ## 日志
 
 1. 使用正式日志框架，禁止 `System.out.println`。
@@ -33,3 +40,5 @@
 - Run 失败率和超时率。
 - 数据库 migration 和 Repository 异常。
 - 限流命中率。
+- opencode node health 连续失败。
+- Redis optional health 从 disabled 切换到 enabled 后的连接失败。

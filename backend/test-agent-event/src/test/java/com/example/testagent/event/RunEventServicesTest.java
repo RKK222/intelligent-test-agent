@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.codec.ServerSentEvent;
+import reactor.test.StepVerifier;
+import java.time.Duration;
 
 class RunEventServicesTest {
 
@@ -66,6 +68,38 @@ class RunEventServicesTest {
         assertThat(sse.event()).isEqualTo("tool.finished");
         assertThat(sse.data()).isNotNull();
         assertThat(sse.data().payload()).containsEntry("status", "success");
+    }
+
+    @Test
+    void sseStreamPollsRepositoryAndAdvancesCursor() {
+        FakeRunEventRepository repository = new FakeRunEventRepository();
+        RunEventAppender appender = new RunEventAppender(repository);
+        RunEventSseStreamService streamService = new RunEventSseStreamService(
+                new RunEventReplayService(repository),
+                new RunEventSseMapper());
+        appender.append(new RunEventDraft(
+                new RunId("run_1234567890abcdef"),
+                RunEventType.RUN_STARTED,
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of()));
+        appender.append(new RunEventDraft(
+                new RunId("run_1234567890abcdef"),
+                RunEventType.ASSISTANT_MESSAGE_DELTA,
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of("text", "hello")));
+
+        StepVerifier.create(streamService.streamAfter(
+                        new RunId("run_1234567890abcdef"),
+                        "1",
+                        Duration.ofMillis(10),
+                        50).take(1))
+                .assertNext(event -> {
+                    assertThat(event.id()).isEqualTo("2");
+                    assertThat(event.event()).isEqualTo("assistant.message.delta");
+                })
+                .verifyComplete();
     }
 
     private static final class FakeRunEventRepository implements RunEventRepository {

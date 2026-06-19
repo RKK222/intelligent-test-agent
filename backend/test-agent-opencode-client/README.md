@@ -19,8 +19,9 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 
 ## 已有实现
 
-- `OpencodeClientFacade` / `DefaultOpencodeClientFacade`：提供 health、cancelSession、streamRunEvents 初版能力。
+- `OpencodeClientFacade` / `DefaultOpencodeClientFacade`：提供 health、startRun、cancelSession、streamRunEvents 初版能力。
 - `GeneratedOpencodeSdkGateway`：唯一直接调用 generated SDK 的内部适配器。
+- `OpencodeStartRunCommand`、`OpencodeStartRunResult`：平台 Run 启动命令和结果，内部映射到 opencode `prompt_async`。
 - `OpencodeRunEventMapper`：把 opencode raw JSON event 映射为平台 `RunEventDraft`，未知事件降级为 `opencode.event.unknown`。
 
 ## 允许依赖

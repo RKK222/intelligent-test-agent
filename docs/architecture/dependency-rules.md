@@ -41,6 +41,8 @@ Phase 01 后，`test-agent-common` 持有统一响应、错误、分页和基础
 
 Phase 02/03 后，`test-agent-domain` 持有 Repository 端口、RunEventDraft 和路由决策逻辑；`test-agent-persistence` 实现这些端口；`test-agent-event` 只依赖 RunEvent 端口做追加、回放和 SSE 映射；`test-agent-opencode-client` 通过 `OpencodeClientFacade` 输出平台 command/result 和 `RunEventDraft`。
 
+Phase 04/05 后，`test-agent-app` 承载唯一 Runtime API、WebFilter、安全占位、application service、本地 profile 和 health contributor。Controller 只能依赖 application service 或 event service，不能直接依赖 Repository 实现或 generated SDK。`test-agent-app -> test-agent-opencode-client -> test-agent-opencode-sdk-generated` 是唯一允许的 opencode 调用链；`test-agent-app` 不能 import `com.example.opencode.sdk.*`。
+
 ## 前端访问规则
 
 1. 前端不得直接访问 opencode server。

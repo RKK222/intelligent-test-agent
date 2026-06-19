@@ -19,12 +19,12 @@
 ## 已有模型
 
 - Workspace：`Workspace`、`WorkspaceId`。
-- Session：`Session`、`SessionId`。
+- Session：`Session`、`SessionId`、`SessionMessage`、`SessionMessageId`、`SessionMessageRole`。
 - Run：`Run`、`RunId`、`RunStatus`。
 - RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`。
 - ExecutionNode：`ExecutionNode`、`ExecutionNodeId`、`ExecutionNodeStatus`。
 - RoutingDecision：`RoutingDecision`、`RoutingReason`、`ExecutionNodeRouter`。
-- Repository 端口：Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 持久化端口。
+- Repository 端口：Workspace、Session、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision 持久化端口。
 
 ## Run 状态机
 

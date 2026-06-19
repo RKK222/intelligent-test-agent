@@ -16,8 +16,9 @@
 - `RunEventAppender`：通过 domain 端口追加事件草稿。
 - `RunEventReplayService`：处理 Last-Event-ID 和事件增量回放。
 - `RunEventSseMapper`：将 RunEvent 映射为 `ServerSentEvent`。
+- `RunEventSseStreamService`：基于 polling 的 RunEvent SSE 输出服务。
 - `RunEventSsePayload`：SSE body 的稳定平台事件载荷。
-- 后续可新增 SSE publisher 和订阅管理器。
+- 后续可新增内存广播、跨实例订阅恢复和订阅管理器。
 
 ## 允许依赖
 

@@ -100,3 +100,148 @@ Phase 02/03 不新增对外 HTTP API，也不新增 Controller。新增的 Works
 - `workspaceId`、`sessionId`、`runId`、`eventId`、`executionNodeId` 均保持带前缀字符串，不向前端暴露数据库 surrogate PK。
 - RunEvent payload 允许新增字段，前端和后续 API DTO 必须按忽略未知字段处理。
 - opencode 错误已在 `test-agent-opencode-client` 映射为平台 `OPENCODE_BAD_GATEWAY`、`OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT`，对外仍使用统一错误响应。
+
+## Phase 04 Runtime API
+
+Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做协议转换、参数校验和统一响应封装，业务编排进入 application service；Controller 不直接访问 Repository，也不直接调用 generated SDK。
+
+### 鉴权、限流和 CORS
+
+- 默认本地开发不配置 `TEST_AGENT_API_TOKEN`，`/api/**` 放行。
+- 配置 `TEST_AGENT_API_TOKEN` 后，`/api/**` 必须携带 `Authorization: Bearer <token>`，失败返回 `UNAUTHENTICATED`。
+- 内存限流通过 `test-agent.rate-limit.enabled` 控制，超限返回 `RATE_LIMITED`。
+- CORS 默认允许 `http://localhost:3000`，生产环境必须通过配置显式设置允许来源。
+
+### 分页
+
+列表接口统一使用 `page` 和 `size` 查询参数，页码从 1 开始，`size` 最大 200。响应 `data` 为：
+
+```json
+{
+  "items": [],
+  "page": 1,
+  "size": 20,
+  "total": 0,
+  "totalPages": 0
+}
+```
+
+### Workspace API
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `POST` | `/api/workspaces` | 注册本地工作区。 |
+| `GET` | `/api/workspaces` | 分页列出工作区。 |
+| `GET` | `/api/workspaces/{workspaceId}` | 查询工作区详情。 |
+| `GET` | `/api/workspaces/{workspaceId}/files` | 单层列目录。 |
+| `GET` | `/api/workspaces/{workspaceId}/files/content` | 读取 UTF-8 文件。 |
+| `PUT` | `/api/workspaces/{workspaceId}/files/content` | 保存 UTF-8 文件。 |
+| `GET` | `/api/workspaces/{workspaceId}/files/status` | 查询文件基础状态。 |
+
+`POST /api/workspaces` 请求体：
+
+```json
+{
+  "name": "demo",
+  "rootPath": "/absolute/workspace/path"
+}
+```
+
+`WorkspaceResponse`：
+
+```json
+{
+  "workspaceId": "ws_...",
+  "name": "demo",
+  "rootPath": "/absolute/workspace/path",
+  "status": "ACTIVE",
+  "createdAt": "2026-06-19T00:00:00Z",
+  "updatedAt": "2026-06-19T00:00:00Z"
+}
+```
+
+文件 API 路径参数 `path` 必须解析在 workspace root 内，越权路径返回 `FORBIDDEN`。目录列表为单层，不递归，默认最多 1000 项；文件读取和写入只支持 UTF-8 文本，默认上限 1MB，可通过 `test-agent.files.*` 配置。
+
+`GET /files` 返回 `FileTreeEntryResponse[]`：`path`、`name`、`directory`、`size`、`lastModifiedAt`。
+
+`GET /files/content` 返回 `FileContentResponse`：`path`、`content`、`size`。
+
+`PUT /files/content` 请求体：
+
+```json
+{
+  "path": "src/App.java",
+  "content": "text"
+}
+```
+
+`GET /files/status` 返回 `FileStatusResponse`：`path`、`exists`、`directory`、`size`、`lastModifiedAt`。
+
+### Session API
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `POST` | `/api/sessions` | 创建会话。 |
+| `GET` | `/api/workspaces/{workspaceId}/sessions` | 按工作区分页查询会话。 |
+| `GET` | `/api/sessions/{sessionId}` | 查询会话详情。 |
+| `POST` | `/api/sessions/{sessionId}/messages` | 追加会话消息。 |
+| `GET` | `/api/sessions/{sessionId}/messages` | 分页读取会话消息。 |
+
+`POST /api/sessions` 请求体：
+
+```json
+{
+  "workspaceId": "ws_...",
+  "title": "new session"
+}
+```
+
+`SessionResponse`：`sessionId`、`workspaceId`、`title`、`status`、`createdAt`、`updatedAt`。
+
+`POST /api/sessions/{sessionId}/messages` 请求体：
+
+```json
+{
+  "role": "USER",
+  "content": "message text"
+}
+```
+
+`SessionMessageResponse`：`messageId`、`sessionId`、`role`、`content`、`createdAt`。当前 role 使用 `USER`、`ASSISTANT`、`SYSTEM`。
+
+### Run、Cancel 和 Event API
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `POST` | `/api/runs` | 启动 Run。 |
+| `GET` | `/api/runs/{runId}` | 查询 Run 状态。 |
+| `POST` | `/api/runs/{runId}/cancel` | 取消 Run。 |
+| `GET` | `/api/runs/{runId}/events` | 订阅 RunEvent SSE。 |
+
+`POST /api/runs` 请求体：
+
+```json
+{
+  "sessionId": "sess_...",
+  "prompt": "run prompt"
+}
+```
+
+启动流程会追加用户消息，创建 `PENDING` Run，执行节点路由，保存 routing decision，调用 opencode `prompt_async`，成功后写入 `run.created` 和 `run.started`。未找到可用节点返回 `OPENCODE_UNAVAILABLE`；opencode 超时或异常分别映射为平台 opencode 错误码。
+
+`RunResponse`：`runId`、`sessionId`、`workspaceId`、`status`、`createdAt`、`updatedAt`。
+
+`POST /api/runs/{runId}/cancel` 对终态 Run 返回 `CONFLICT`。非终态 Run 会调用 opencode cancel 并追加 `run.cancelling`、`run.cancelled`。
+
+`GET /api/runs/{runId}/events` 返回 `text/event-stream`，SSE `id` 使用 RunEvent `seq`，`event` 使用稳定 wire name。`Last-Event-ID` 续传规则见 `docs/api/event-stream-api.md`。
+
+### 健康检查
+
+Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring Boot/Druid 数据源；opencode nodes 由 `OpencodeNodesHealthIndicator` 调用 facade `health`；Redis 未启用时返回 disabled，启用后做 TCP 连通检查。
+
+### 兼容性
+
+- API 不暴露数据库 surrogate PK。
+- 响应 DTO 可以新增字段，前端必须忽略未知字段。
+- 文件 API 初版不承诺 Git 状态、二进制预览、递归扫描和搜索。
+- RunEvent payload 可以新增字段；事件 wire name 不可重命名。

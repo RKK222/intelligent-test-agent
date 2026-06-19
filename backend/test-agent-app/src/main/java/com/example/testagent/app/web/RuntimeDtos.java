@@ -1,0 +1,122 @@
+package com.example.testagent.app.web;
+
+import com.example.testagent.common.pagination.PageResponse;
+import com.example.testagent.domain.run.Run;
+import com.example.testagent.domain.session.Session;
+import com.example.testagent.domain.session.SessionMessage;
+import com.example.testagent.domain.session.SessionMessageRole;
+import com.example.testagent.domain.workspace.Workspace;
+import jakarta.validation.constraints.NotBlank;
+import java.time.Instant;
+import java.util.List;
+
+/**
+ * Runtime API DTO 集合，统一隔离 HTTP 契约与 domain 对象，避免 Controller 直接返回领域模型。
+ */
+final class RuntimeDtos {
+
+    private RuntimeDtos() {
+    }
+
+    record CreateWorkspaceRequest(@NotBlank String name, @NotBlank String rootPath) {
+    }
+
+    record WriteFileRequest(@NotBlank String path, String content) {
+    }
+
+    record CreateSessionRequest(@NotBlank String workspaceId, @NotBlank String title) {
+    }
+
+    record AppendMessageRequest(SessionMessageRole role, @NotBlank String content) {
+    }
+
+    record StartRunRequest(@NotBlank String sessionId, @NotBlank String prompt) {
+    }
+
+    record WorkspaceResponse(
+            String workspaceId,
+            String name,
+            String rootPath,
+            String status,
+            Instant createdAt,
+            Instant updatedAt) {
+
+        static WorkspaceResponse from(Workspace workspace) {
+            return new WorkspaceResponse(
+                    workspace.workspaceId().value(),
+                    workspace.name(),
+                    workspace.rootPath(),
+                    workspace.status().name(),
+                    workspace.createdAt(),
+                    workspace.updatedAt());
+        }
+    }
+
+    record SessionResponse(
+            String sessionId,
+            String workspaceId,
+            String title,
+            String status,
+            Instant createdAt,
+            Instant updatedAt) {
+
+        static SessionResponse from(Session session) {
+            return new SessionResponse(
+                    session.sessionId().value(),
+                    session.workspaceId().value(),
+                    session.title(),
+                    session.status().name(),
+                    session.createdAt(),
+                    session.updatedAt());
+        }
+    }
+
+    record SessionMessageResponse(
+            String messageId,
+            String sessionId,
+            String role,
+            String content,
+            Instant createdAt) {
+
+        static SessionMessageResponse from(SessionMessage message) {
+            return new SessionMessageResponse(
+                    message.messageId().value(),
+                    message.sessionId().value(),
+                    message.role().name(),
+                    message.content(),
+                    message.createdAt());
+        }
+    }
+
+    record RunResponse(
+            String runId,
+            String sessionId,
+            String workspaceId,
+            String status,
+            Instant createdAt,
+            Instant updatedAt) {
+
+        static RunResponse from(Run run) {
+            return new RunResponse(
+                    run.runId().value(),
+                    run.sessionId().value(),
+                    run.workspaceId().value(),
+                    run.status().name(),
+                    run.createdAt(),
+                    run.updatedAt());
+        }
+    }
+
+    static PageResponse<WorkspaceResponse> workspacePage(PageResponse<Workspace> page) {
+        return new PageResponse<>(page.items().stream().map(WorkspaceResponse::from).toList(), page.page(), page.size(), page.total());
+    }
+
+    static PageResponse<SessionResponse> sessionPage(PageResponse<Session> page) {
+        return new PageResponse<>(page.items().stream().map(SessionResponse::from).toList(), page.page(), page.size(), page.total());
+    }
+
+    static PageResponse<SessionMessageResponse> messagePage(PageResponse<SessionMessage> page) {
+        List<SessionMessageResponse> items = page.items().stream().map(SessionMessageResponse::from).toList();
+        return new PageResponse<>(items, page.page(), page.size(), page.total());
+    }
+}

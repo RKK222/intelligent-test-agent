@@ -14,6 +14,8 @@
 - `docs/design/01-backend-domain-and-contracts-design.md`：Phase 01 后端领域模型和契约详细设计。
 - `docs/design/02-persistence-and-routing-design.md`：Phase 02 持久化和执行节点路由详细设计。
 - `docs/design/03-opencode-client-and-events-design.md`：Phase 03 opencode client 与事件体系详细设计。
+- `docs/design/04-backend-api-runtime-design.md`：Phase 04 后端 Runtime API 详细设计。
+- `docs/design/05-local-integration-and-devops-design.md`：Phase 05 本地集成和开发运维详细设计。
 - `docs/plan/00-roadmap.md`：分阶段实施路线图。
 
 ## 后端任务

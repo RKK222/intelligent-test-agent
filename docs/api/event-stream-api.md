@@ -61,6 +61,33 @@
 - 如果 `Last-Event-ID` 缺失，默认从当前订阅策略允许的起点开始返回。
 - 如果 `Last-Event-ID` 非数字或小于 0，后端返回统一错误格式，错误码为 `VALIDATION_ERROR`。
 
+## Phase 04 Runtime SSE
+
+`GET /api/runs/{runId}/events` 是前端消费平台 RunEvent 的唯一实时入口，返回 `text/event-stream`。
+
+示例：
+
+```text
+id: 2
+event: assistant.message.delta
+data: {"eventId":"evt_...","runId":"run_...","seq":2,"type":"assistant.message.delta","traceId":"trace_...","occurredAt":"2026-06-19T00:00:00Z","payload":{"text":"hello"}}
+```
+
+实现策略：
+
+- 初版使用 Repository polling 增量读取，避免只依赖本机内存广播。
+- 每次按 `runId + lastSeq` 查询增量事件，默认批量上限 100。
+- 客户端断开时释放 Flux 订阅。
+- `Last-Event-ID` 解析委托 `RunEventReplayService`；非法值映射为 `VALIDATION_ERROR`。
+- SSE body 使用 `RunEventSsePayload`，不返回 generated SDK DTO 或 opencode raw event。
+
+订阅建议：
+
+- 首次订阅不传 `Last-Event-ID`。
+- 断线重连传上次成功处理的 SSE `id`。
+- 客户端必须按 `seq` 去重，允许同一事件重复投递。
+- 客户端必须忽略未知 payload 字段和未知 event name。
+
 ## 兼容性
 
 1. 新增事件字段必须保持旧前端可忽略。

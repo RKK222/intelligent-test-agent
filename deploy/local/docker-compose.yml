@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: test-agent-postgres
+    environment:
+      POSTGRES_DB: ${TEST_AGENT_POSTGRES_DB:-test_agent}
+      POSTGRES_USER: ${TEST_AGENT_POSTGRES_USER:-test_agent}
+      POSTGRES_PASSWORD: ${TEST_AGENT_POSTGRES_PASSWORD:-test_agent}
+    ports:
+      - "${TEST_AGENT_POSTGRES_PORT:-15432}:5432"
+    volumes:
+      - test-agent-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: test-agent-redis
+    profiles:
+      - redis
+    ports:
+      - "${TEST_AGENT_REDIS_PORT:-16379}:6379"
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  test-agent-postgres-data:

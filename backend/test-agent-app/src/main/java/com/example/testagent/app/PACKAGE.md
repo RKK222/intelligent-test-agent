@@ -16,6 +16,14 @@
 - `TestAgentApplication`：Spring Boot 启动类，扫描 `com.example.testagent` 下的后端组件。
 - `web.TraceIdWebFilter`：入口请求 traceId 透传、生成和响应头写入。
 - `web.GlobalExceptionHandler`：统一异常到平台错误响应的转换。
+- `web.WorkspaceController`、`web.SessionController`、`web.RunController`：Runtime HTTP/SSE 协议转换入口。
+- `web.ApiTokenWebFilter`、`web.InMemoryRateLimitWebFilter`：API token 鉴权占位和内存限流占位。
+- `workspace.WorkspaceApplicationService`、`workspace.WorkspaceFileService`：工作区注册、文件路径归一化和 UTF-8 文件读写。
+- `session.SessionApplicationService`：会话创建、查询和消息追加/分页。
+- `run.RunApplicationService`：Run 启动、路由、opencode start/cancel 和事件订阅编排。
+- `config.TestAgentRuntimeProperties`、`config.ExecutionNodeSeeder`：运行时配置绑定和 opencode node seed。
+- `config.OpencodeNodesHealthIndicator`、`config.RedisOptionalHealthIndicator`：本地集成健康检查。
+- `support.RuntimeIdGenerator`：应用层业务 ID 生成入口。
 
 ## 允许依赖
 

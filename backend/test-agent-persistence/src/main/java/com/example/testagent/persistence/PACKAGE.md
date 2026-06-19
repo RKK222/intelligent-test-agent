@@ -15,11 +15,13 @@
 - `package-info.java`：说明 persistence 包是持久化适配边界。
 - `JdbcWorkspaceRepository`：实现 Workspace 持久化端口。
 - `JdbcSessionRepository`：实现 Session 持久化端口。
+- `JdbcSessionMessageRepository`：实现 SessionMessage 保存、查询、分页和计数。
 - `JdbcRunRepository`：实现 Run 持久化端口。
 - `JdbcRunEventRepository`：实现 RunEvent append-only 追加和增量读取。
 - `JdbcExecutionNodeRepository`：实现执行节点保存和可路由节点查询。
 - `JdbcRoutingDecisionRepository`：实现路由决策保存和查询。
 - `db/migration/V1__create_core_tables.sql`：创建核心业务表和索引。
+- `db/migration/V2__create_session_messages.sql`：创建会话消息表和分页索引。
 - 后续可新增 SQL 查询、migration 相关适配、Redis 限流或缓存实现。
 
 ## 允许依赖

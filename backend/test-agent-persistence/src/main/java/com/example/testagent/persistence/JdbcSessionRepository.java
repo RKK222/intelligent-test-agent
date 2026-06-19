@@ -1,5 +1,7 @@
 package com.example.testagent.persistence;
 
+import com.example.testagent.common.pagination.PageRequest;
+import com.example.testagent.common.pagination.PageResponse;
 import com.example.testagent.domain.session.Session;
 import com.example.testagent.domain.session.SessionId;
 import com.example.testagent.domain.session.SessionRepository;
@@ -74,5 +76,30 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                 .param("sessionId", sessionId.value())
                 .query(rowMapper)
                 .optional();
+    }
+
+    @Override
+    public PageResponse<Session> findByWorkspaceId(WorkspaceId workspaceId, PageRequest pageRequest) {
+        var items = jdbcClient.sql("""
+                        select session_id, workspace_id, title, status, trace_id, created_at, updated_at
+                        from sessions
+                        where workspace_id = :workspaceId
+                        order by created_at desc, id desc
+                        limit :limit offset :offset
+                        """)
+                .param("workspaceId", workspaceId.value())
+                .param("limit", pageRequest.size())
+                .param("offset", pageRequest.offset())
+                .query(rowMapper)
+                .list();
+        Long total = jdbcClient.sql("""
+                        select count(*)
+                        from sessions
+                        where workspace_id = :workspaceId
+                        """)
+                .param("workspaceId", workspaceId.value())
+                .query(Long.class)
+                .single();
+        return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);
     }
 }

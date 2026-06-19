@@ -16,10 +16,14 @@ import com.example.testagent.domain.run.RunId;
 import com.example.testagent.domain.run.RunStatus;
 import com.example.testagent.domain.session.Session;
 import com.example.testagent.domain.session.SessionId;
+import com.example.testagent.domain.session.SessionMessage;
+import com.example.testagent.domain.session.SessionMessageId;
+import com.example.testagent.domain.session.SessionMessageRole;
 import com.example.testagent.domain.session.SessionStatus;
 import com.example.testagent.domain.workspace.Workspace;
 import com.example.testagent.domain.workspace.WorkspaceId;
 import com.example.testagent.domain.workspace.WorkspaceStatus;
+import com.example.testagent.common.pagination.PageRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.Map;
@@ -45,6 +49,7 @@ class JdbcRepositoryIntegrationTest {
     private JdbcRunEventRepository runEvents;
     private JdbcExecutionNodeRepository executionNodes;
     private JdbcRoutingDecisionRepository routingDecisions;
+    private JdbcSessionMessageRepository sessionMessages;
 
     @BeforeEach
     void setUp() {
@@ -62,6 +67,7 @@ class JdbcRepositoryIntegrationTest {
         runEvents = new JdbcRunEventRepository(jdbcClient, objectMapper);
         executionNodes = new JdbcExecutionNodeRepository(jdbcClient, objectMapper);
         routingDecisions = new JdbcRoutingDecisionRepository(jdbcClient);
+        sessionMessages = new JdbcSessionMessageRepository(jdbcClient);
     }
 
     @AfterEach
@@ -142,6 +148,26 @@ class JdbcRepositoryIntegrationTest {
                 .update()).isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    @Test
+    void repositoriesPageWorkspacesSessionsAndSessionMessages() {
+        Workspace workspace = workspace();
+        Session session = session();
+        workspaces.save(workspace);
+        sessions.save(session);
+        sessionMessages.save(sessionMessage("msg_1234567890abcdef", "first"));
+        sessionMessages.save(sessionMessage("msg_2234567890abcdef", "second"));
+
+        assertThat(workspaces.findPage(new PageRequest(1, 10)).items())
+                .extracting(Workspace::workspaceId)
+                .containsExactly(workspace.workspaceId());
+        assertThat(sessions.findByWorkspaceId(workspace.workspaceId(), new PageRequest(1, 10)).items())
+                .extracting(Session::sessionId)
+                .containsExactly(session.sessionId());
+        assertThat(sessionMessages.findBySessionId(session.sessionId(), new PageRequest(1, 10)).items())
+                .extracting(SessionMessage::content)
+                .containsExactly("first", "second");
+    }
+
     private static Workspace workspace() {
         return new Workspace(
                 new WorkspaceId("wrk_1234567890abcdef"),
@@ -160,6 +186,16 @@ class JdbcRepositoryIntegrationTest {
                 "Initial session",
                 SessionStatus.ACTIVE,
                 NOW,
+                NOW,
+                "trace_1234567890abcdef");
+    }
+
+    private static SessionMessage sessionMessage(String messageId, String content) {
+        return new SessionMessage(
+                new SessionMessageId(messageId),
+                new SessionId("ses_1234567890abcdef"),
+                SessionMessageRole.USER,
+                content,
                 NOW,
                 "trace_1234567890abcdef");
     }

@@ -8,11 +8,20 @@
 2. 权限判断应在入口层或应用服务层完成，不散落在 Repository。
 3. 前端只做展示和交互控制，不能依赖前端判断作为最终权限控制。
 
+Phase 04 本地占位策略：
+
+- 未配置 `TEST_AGENT_API_TOKEN` 时，`/api/**` 默认放行，便于本地联调。
+- 配置 `TEST_AGENT_API_TOKEN` 后，`/api/**` 必须携带 `Authorization: Bearer <token>`。
+- 鉴权失败返回统一错误格式，错误码 `UNAUTHENTICATED`，不得回显 token。
+- Actuator health 不使用该占位 token，生产暴露范围后续必须单独收敛。
+
 ## 限流
 
 1. 登录、创建 session、发送 message、代理 opencode 请求等高风险接口必须考虑限流。
 2. 限流返回统一错误格式和 `429` 状态码。
 3. 限流 key 不得直接暴露敏感 token。
+
+Phase 04 内存限流只作为本地和测试占位，通过 `test-agent.rate-limit.enabled` 开关启用；生产需要替换为网关或 Redis 等分布式限流，不能依赖单实例内存计数。
 
 ## 密钥与配置
 
@@ -36,6 +45,8 @@
 2. 安全响应头必须在 `test-agent-app` 统一配置。
 3. 前端不得把密钥写入源码、localStorage 或可公开构建产物。
 4. Druid Web 控制台默认关闭；如后续启用，必须通过环境变量配置账号、密码和访问 allowlist，并同步 API、运维和安全文档。
+
+Runtime API 默认 CORS 只允许 `http://localhost:3000`；生产环境必须通过配置显式声明允许来源。Workspace 文件 API 必须把所有请求路径归一化到注册的 workspace root 内，路径穿越或越权访问返回 `FORBIDDEN`。
 
 ## 安全变更文档
 

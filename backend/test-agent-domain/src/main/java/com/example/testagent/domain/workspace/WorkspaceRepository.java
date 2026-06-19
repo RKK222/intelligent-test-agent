@@ -1,5 +1,7 @@
 package com.example.testagent.domain.workspace;
 
+import com.example.testagent.common.pagination.PageRequest;
+import com.example.testagent.common.pagination.PageResponse;
 import java.util.Optional;
 
 /**
@@ -10,4 +12,6 @@ public interface WorkspaceRepository {
     Workspace save(Workspace workspace);
 
     Optional<Workspace> findById(WorkspaceId workspaceId);
+
+    PageResponse<Workspace> findPage(PageRequest pageRequest);
 }

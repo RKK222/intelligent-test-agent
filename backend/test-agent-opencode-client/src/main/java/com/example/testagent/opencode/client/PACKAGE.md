@@ -15,8 +15,8 @@ opencode client facade 包，隔离 generated SDK，为业务侧提供稳定的 
 - `package-info.java`：说明本包是 generated SDK 的稳定 facade 层。
 - `OpencodeClientFacade`、`DefaultOpencodeClientFacade`：业务侧 opencode 调用门面。
 - `OpencodeSdkGateway`、`GeneratedOpencodeSdkGateway`：generated SDK 内部适配端口和实现。
-- `OpencodeHealthCommand`、`OpencodeCancelCommand`、`OpencodeStreamEventsCommand`：平台命令模型。
-- `OpencodeHealthResult`、`OpencodeCancelResult`：平台结果模型。
+- `OpencodeHealthCommand`、`OpencodeStartRunCommand`、`OpencodeCancelCommand`、`OpencodeStreamEventsCommand`：平台命令模型。
+- `OpencodeHealthResult`、`OpencodeStartRunResult`、`OpencodeCancelResult`：平台结果模型。
 - `OpencodeRunEventMapper`：opencode raw event 到 `RunEventDraft` 的转换器。
 
 ## 允许依赖

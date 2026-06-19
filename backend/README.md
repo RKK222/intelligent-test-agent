@@ -44,6 +44,30 @@ export PATH="$JAVA_HOME/bin:$PATH"
 mvn clean package -DskipTests
 ```
 
+## 本地运行依赖
+
+Phase 05 提供本地 Compose 和检查脚本：
+
+```bash
+tools/dev-local-up.sh
+tools/dev-local-up.sh --redis
+tools/dev-health-check.sh --api
+tools/dev-backend-check.sh
+```
+
+`deploy/local/docker-compose.yml` 默认启动 Postgres，映射到 `127.0.0.1:15432`；Redis 是可选 profile，默认映射到 `127.0.0.1:16379`。脚本只读取环境变量，不生成或写入密钥。
+
+本地 profile 使用 Compose 默认值：
+
+```bash
+cd backend
+export SPRING_PROFILES_ACTIVE=local
+export TEST_AGENT_OPENCODE_BASE_URL=http://127.0.0.1:4096
+mvn -pl test-agent-app spring-boot:run
+```
+
+配置 `TEST_AGENT_API_TOKEN` 后，`/api/**` 要求 `Authorization: Bearer <token>`；未配置时本地默认放行。
+
 ## 测试环境数据库
 
 `test-agent-app` 提供 `test` profile 连接 PostgreSQL 测试库。真实主机、账号和密码必须通过环境变量注入，仓库内配置文件不保存密钥：

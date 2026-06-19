@@ -32,3 +32,23 @@ management:
     web:
       exposure:
         include: health,info,metrics
+
+test-agent:
+  security:
+    api-token: ${TEST_AGENT_API_TOKEN:}
+    cors-allowed-origins:
+      - ${TEST_AGENT_CORS_ORIGIN:http://localhost:3000}
+  rate-limit:
+    enabled: ${TEST_AGENT_RATE_LIMIT_ENABLED:false}
+    capacity: ${TEST_AGENT_RATE_LIMIT_CAPACITY:120}
+    window: ${TEST_AGENT_RATE_LIMIT_WINDOW:1m}
+  files:
+    max-file-bytes: ${TEST_AGENT_MAX_FILE_BYTES:1048576}
+    max-directory-entries: ${TEST_AGENT_MAX_DIRECTORY_ENTRIES:1000}
+  redis:
+    enabled: ${TEST_AGENT_REDIS_ENABLED:false}
+    host: ${TEST_AGENT_REDIS_HOST:127.0.0.1}
+    port: ${TEST_AGENT_REDIS_PORT:6379}
+    timeout: ${TEST_AGENT_REDIS_TIMEOUT:1s}
+  opencode:
+    nodes: []

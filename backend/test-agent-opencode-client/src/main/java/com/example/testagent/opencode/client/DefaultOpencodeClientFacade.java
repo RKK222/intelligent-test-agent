@@ -69,6 +69,21 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
     }
 
     @Override
+    public Mono<OpencodeStartRunResult> startRun(OpencodeStartRunCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        return applyPolicy(
+                Mono.defer(() -> gateway.startRun(
+                        command.node(),
+                        command.sessionId(),
+                        command.directory(),
+                        command.workspace(),
+                        command.prompt(),
+                        command.traceId())),
+                "startRun",
+                command.node());
+    }
+
+    @Override
     public Flux<RunEventDraft> streamRunEvents(OpencodeStreamEventsCommand command) {
         Objects.requireNonNull(command, "command must not be null");
         return applyPolicy(

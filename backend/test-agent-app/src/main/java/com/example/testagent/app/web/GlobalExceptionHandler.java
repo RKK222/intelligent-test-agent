@@ -36,7 +36,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler({
             ServerWebInputException.class,
             WebExchangeBindException.class,
-            ConstraintViolationException.class
+            ConstraintViolationException.class,
+            IllegalArgumentException.class
     })
     public ResponseEntity<ApiErrorResponse> handleValidationException(
             Exception exception,

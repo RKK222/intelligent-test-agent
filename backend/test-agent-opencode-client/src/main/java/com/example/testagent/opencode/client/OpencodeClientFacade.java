@@ -13,5 +13,7 @@ public interface OpencodeClientFacade {
 
     Mono<OpencodeCancelResult> cancelSession(OpencodeCancelCommand command);
 
+    Mono<OpencodeStartRunResult> startRun(OpencodeStartRunCommand command);
+
     Flux<RunEventDraft> streamRunEvents(OpencodeStreamEventsCommand command);
 }
