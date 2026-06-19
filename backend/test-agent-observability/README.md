@@ -8,6 +8,7 @@
 
 - Java 21
 - Spring Boot Actuator
+- SLF4J API
 - Micrometer
 - Maven library jar
 
@@ -21,10 +22,12 @@
 
 - `TraceConstants`：统一 `X-Trace-Id`、WebExchange attribute 和 Reactor context key。
 - `TraceIdSupport`：合法 traceId 透传，缺失或非法 traceId 生成新值。
+- `TraceLogContext`：统一 traceId 的 SLF4J MDC key、写入、恢复和清理逻辑。
 
 ## 允许依赖
 
 - `test-agent-common`。
+- SLF4J API。
 - Spring Boot Actuator。
 - Micrometer。
 

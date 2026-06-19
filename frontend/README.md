@@ -76,6 +76,8 @@ corepack pnpm dev
 tools/dev-runnable-loop-check.sh
 ```
 
+`apps/agent-web/next.config.ts` 允许本地开发从 `http://127.0.0.1:3000` 访问 Next dev resource；联调时使用 `localhost` 或 `127.0.0.1` 都应保持完整交互能力。
+
 ## 访问边界
 
 - 前端不得直连 opencode server。

@@ -40,7 +40,7 @@ public class JdbcRoutingDecisionRepository extends JdbcRepositorySupport impleme
                     .param("runId", routingDecision.runId().value())
                     .param("executionNodeId", routingDecision.executionNodeId().value())
                     .param("reason", routingDecision.reason().name())
-                    .param("decidedAt", routingDecision.decidedAt())
+                    .param("decidedAt", timestamp(routingDecision.decidedAt()))
                     .param("traceId", routingDecision.traceId())
                     .update();
         } else {
@@ -51,7 +51,7 @@ public class JdbcRoutingDecisionRepository extends JdbcRepositorySupport impleme
                     .param("runId", routingDecision.runId().value())
                     .param("executionNodeId", routingDecision.executionNodeId().value())
                     .param("reason", routingDecision.reason().name())
-                    .param("decidedAt", routingDecision.decidedAt())
+                    .param("decidedAt", timestamp(routingDecision.decidedAt()))
                     .param("traceId", routingDecision.traceId())
                     .update();
         }

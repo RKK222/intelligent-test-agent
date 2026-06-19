@@ -79,6 +79,7 @@ data: {"eventId":"evt_...","runId":"run_...","seq":2,"type":"assistant.message.d
 
 - 初版使用 Repository polling 增量读取，避免只依赖本机内存广播。
 - 每次按 `runId + lastSeq` 查询增量事件，默认批量上限 100。
+- polling 查询必须 offload 阻塞式 Repository；单次回放查询失败不改变 Run 状态，后端跳过本轮轮询并在下一轮继续尝试，客户端仍按既有 SSE 续传规则处理。
 - 客户端断开时释放 Flux 订阅。
 - `Last-Event-ID` 解析委托 `RunEventReplayService`；非法值映射为 `VALIDATION_ERROR`。
 - SSE body 使用 `RunEventSsePayload`，不返回 generated SDK DTO 或 opencode raw event。
@@ -86,8 +87,12 @@ data: {"eventId":"evt_...","runId":"run_...","seq":2,"type":"assistant.message.d
 Phase 08 后，opencode raw event 的终态映射为：
 
 - `session.next.step.ended` -> `run.succeeded`，应用服务同时把 Run 状态更新为 `SUCCEEDED`。
+- `session.status` 且 `payload.status.type=idle` -> `run.succeeded`，兼容 opencode 1.17.8 的完成信号。
+- `session.idle` -> `run.succeeded`，兼容 opencode 1.17.8 的完成信号。
 - `session.next.step.failed` -> `run.failed`，应用服务同时把 Run 状态更新为 `FAILED`。
 - `session.error` -> `run.failed`，应用服务同时把 Run 状态更新为 `FAILED`。
+
+本地 RunEvent 持久化异常不是 opencode 终态事件，不能单独生成 `run.failed` 或把 Run 状态改为 `FAILED`；前端可通过 SSE 重连和后续事件继续恢复视图。
 
 Diff 动作事件：
 

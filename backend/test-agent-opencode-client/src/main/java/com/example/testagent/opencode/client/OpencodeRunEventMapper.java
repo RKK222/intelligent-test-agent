@@ -59,7 +59,8 @@ public class OpencodeRunEventMapper {
     private RunEventType mapType(String rawType, Map<String, Object> payload) {
         return switch (rawType) {
             case "session.next.prompted" -> RunEventType.RUN_STARTED;
-            case "session.next.step.ended" -> RunEventType.RUN_SUCCEEDED;
+            case "session.next.step.ended", "session.idle" -> RunEventType.RUN_SUCCEEDED;
+            case "session.status" -> mapSessionStatus(payload);
             case "session.next.step.failed", "session.error" -> RunEventType.RUN_FAILED;
             case "session.next.text.delta", "message.part.delta" -> RunEventType.ASSISTANT_MESSAGE_DELTA;
             case "session.next.tool.called", "session.next.tool.input.started" -> RunEventType.TOOL_STARTED;
@@ -75,6 +76,15 @@ public class OpencodeRunEventMapper {
             case "test.finished" -> RunEventType.TEST_FINISHED;
             default -> RunEventType.OPENCODE_EVENT_UNKNOWN;
         };
+    }
+
+    private RunEventType mapSessionStatus(Map<String, Object> payload) {
+        // opencode 1.17.8 不再发送 session.next.step.ended，idle 状态是本次 prompt 已收敛的终态信号。
+        Object status = payload.get("status");
+        if (status instanceof Map<?, ?> statusMap && "idle".equals(statusMap.get("type"))) {
+            return RunEventType.RUN_SUCCEEDED;
+        }
+        return RunEventType.OPENCODE_EVENT_UNKNOWN;
     }
 
     private String rawType(JsonNode rawEvent) {

@@ -31,7 +31,8 @@
 5. `session_messages` 必须覆盖 save/find/page/count、业务 ID 唯一约束和按 session 分页排序。
 6. 如果后续使用 PostgreSQL 专有能力，例如 JSONB、锁或 advisory lock，必须补充 Testcontainers 或等价 PostgreSQL 集成测试。
 7. 测试环境 PostgreSQL 连通验证应启用 `test-agent-app` 的 `test` profile，并通过 `TEST_AGENT_TEST_DB_*` 环境变量注入主机、库名、账号和密码，禁止把真实凭据写入仓库配置或测试源码。
-8. 数据库连接池使用 Druid，配置测试必须验证 `spring.datasource.druid.*` 能绑定为 Druid DataSource，且 Druid Web 控制台默认关闭。
+8. 测试环境 opencode 连通验证应通过 `TEST_AGENT_OPENCODE_BASE_URL` 注入外部 opencode server；不得要求测试环境用 Docker Compose 启动数据库、Redis 或 opencode。
+9. 数据库连接池使用 Druid，配置测试必须验证 `spring.datasource.druid.*` 能绑定为 Druid DataSource，且 Druid Web 控制台默认关闭。
 
 ## opencode client 测试
 

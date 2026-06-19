@@ -67,6 +67,43 @@ class OpencodeRunEventMapperTest {
     }
 
     @Test
+    void mapsSessionIdleToRunSucceeded() throws Exception {
+        RunEventDraft draft = mapper.toDraft(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_idle","type":"session.idle","properties":{"sessionID":"ses_remote_1"}}
+                        """),
+                new RunId("run_1234567890abcdef"),
+                "trace_1234567890abcdef");
+
+        assertThat(draft.type()).isEqualTo(RunEventType.RUN_SUCCEEDED);
+        assertThat(draft.payload()).containsEntry("sessionID", "ses_remote_1");
+    }
+
+    @Test
+    void mapsSessionStatusIdleToRunSucceeded() throws Exception {
+        RunEventDraft draft = mapper.toDraft(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_status_idle","type":"session.status","properties":{"sessionID":"ses_remote_1","status":{"type":"idle"}}}
+                        """),
+                new RunId("run_1234567890abcdef"),
+                "trace_1234567890abcdef");
+
+        assertThat(draft.type()).isEqualTo(RunEventType.RUN_SUCCEEDED);
+    }
+
+    @Test
+    void keepsSessionStatusBusyAsUnknown() throws Exception {
+        RunEventDraft draft = mapper.toDraft(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_status_busy","type":"session.status","properties":{"sessionID":"ses_remote_1","status":{"type":"busy"}}}
+                        """),
+                new RunId("run_1234567890abcdef"),
+                "trace_1234567890abcdef");
+
+        assertThat(draft.type()).isEqualTo(RunEventType.OPENCODE_EVENT_UNKNOWN);
+    }
+
+    @Test
     void mapsStepFailedToRunFailed() throws Exception {
         RunEventDraft draft = mapper.toDraft(
                 objectMapper.readTree("""

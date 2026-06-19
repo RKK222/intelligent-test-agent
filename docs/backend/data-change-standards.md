@@ -37,5 +37,5 @@
 - `V2__create_session_messages.sql` 创建 `session_messages`，保存会话消息并通过 `(session_id, created_at, id)` 支持分页读取。
 - `V3__add_session_opencode_mapping.sql` 为 `sessions` 增加可空的远端 opencode session/node 映射列，并通过成对 check、节点外键和唯一索引保证内部映射一致。
 - 所有表使用数据库自增 surrogate PK，业务 ID 使用唯一约束并带稳定前缀；API 和事件不得暴露 surrogate PK。
-- `run_events` 使用 `(run_id, seq)` 唯一约束实现同一 Run 内 append-only 顺序读取。
+- `run_events` 使用 `(run_id, seq)` 唯一约束实现同一 Run 内 append-only 顺序读取；Repository 必须处理同一 Run 并发追加时的唯一约束冲突并重试分配 seq。
 - payload 和 capabilities 初版以 JSON 文本保存，兼容 H2 测试和 PostgreSQL；未来改为 JSONB 必须先保持双读兼容。

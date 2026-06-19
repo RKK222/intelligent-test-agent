@@ -6,6 +6,7 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.autoconfigure.context.ConfigurationPropertiesAutoConfiguration;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 class TestAgentRuntimePropertiesBindingTest {
@@ -13,6 +14,31 @@ class TestAgentRuntimePropertiesBindingTest {
     private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(ConfigurationPropertiesAutoConfiguration.class))
             .withBean(TestAgentRuntimeProperties.class);
+
+    private final ApplicationContextRunner profileContextRunner = contextRunner
+            .withInitializer(new ConfigDataApplicationContextInitializer());
+
+    @Test
+    void defaultCorsAllowsLocalhostAndLoopbackFrontendOrigins() {
+        contextRunner.run(context -> {
+            TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
+
+            assertThat(properties.getSecurity().getCorsAllowedOrigins())
+                    .containsExactly("http://localhost:3000", "http://127.0.0.1:3000");
+        });
+    }
+
+    @Test
+    void defaultDruidConfigValidatesBorrowedConnections() {
+        profileContextRunner.run(context -> {
+            assertThat(context.getEnvironment().getProperty("spring.datasource.druid.validation-query"))
+                    .isEqualTo("SELECT 1");
+            assertThat(context.getEnvironment().getProperty("spring.datasource.druid.test-on-borrow", Boolean.class))
+                    .isTrue();
+            assertThat(context.getEnvironment().getProperty("spring.datasource.druid.test-while-idle", Boolean.class))
+                    .isTrue();
+        });
+    }
 
     @Test
     void bindsRuntimePropertiesFromEnvironmentStyleValues() {
@@ -45,6 +71,71 @@ class TestAgentRuntimePropertiesBindingTest {
                     assertThat(properties.getOpencode().getNodes()).hasSize(1);
                     assertThat(properties.getOpencode().getNodes().get(0).getCapabilities())
                             .containsExactly("chat", "diff");
+                });
+    }
+
+    @Test
+    void testProfileBindsExternalDatabaseAndOpencodeNode() {
+        profileContextRunner
+                .withPropertyValues(
+                        "spring.profiles.active=test",
+                        "TEST_AGENT_TEST_DB_HOST=test-postgres.example.internal",
+                        "TEST_AGENT_TEST_DB_PORT=25432",
+                        "TEST_AGENT_TEST_DB_NAME=test_agent_ci",
+                        "TEST_AGENT_TEST_DB_USERNAME=test_agent",
+                        "TEST_AGENT_TEST_DB_PASSWORD=secret",
+                        "TEST_AGENT_OPENCODE_NODE_ID=node_test_opencode",
+                        "TEST_AGENT_OPENCODE_BASE_URL=http://opencode-test.example.internal:4096",
+                        "TEST_AGENT_OPENCODE_MAX_RUNS=6",
+                        "TEST_AGENT_OPENCODE_WEIGHT=80")
+                .run(context -> {
+                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
+
+                    assertThat(context.getEnvironment().getProperty("spring.datasource.druid.url"))
+                            .isEqualTo("jdbc:postgresql://test-postgres.example.internal:25432/test_agent_ci");
+                    assertThat(properties.getOpencode().getNodes()).hasSize(1);
+                    TestAgentRuntimeProperties.Node node = properties.getOpencode().getNodes().getFirst();
+                    assertThat(node.getId()).isEqualTo("node_test_opencode");
+                    assertThat(node.getBaseUrl()).isEqualTo("http://opencode-test.example.internal:4096");
+                    assertThat(node.getMaxRuns()).isEqualTo(6);
+                    assertThat(node.getWeight()).isEqualTo(80);
+                });
+    }
+
+    @Test
+    void prodProfileBindsExternalServicesWithoutBundledDatabaseOrRedis() {
+        profileContextRunner
+                .withPropertyValues(
+                        "spring.profiles.active=prod",
+                        "TEST_AGENT_DB_URL=jdbc:postgresql://prod-postgres.example.internal:5432/test_agent",
+                        "TEST_AGENT_DB_USERNAME=test_agent",
+                        "TEST_AGENT_DB_PASSWORD=secret",
+                        "TEST_AGENT_API_TOKEN=api-token",
+                        "TEST_AGENT_CORS_ALLOWED_ORIGINS=https://agent.example.com",
+                        "TEST_AGENT_REDIS_ENABLED=true",
+                        "TEST_AGENT_REDIS_HOST=prod-redis.example.internal",
+                        "TEST_AGENT_REDIS_PORT=6379",
+                        "TEST_AGENT_OPENCODE_NODE_ID=node_prod_opencode",
+                        "TEST_AGENT_OPENCODE_BASE_URL=http://opencode-prod.example.internal:4096",
+                        "TEST_AGENT_OPENCODE_MAX_RUNS=12",
+                        "TEST_AGENT_OPENCODE_WEIGHT=100")
+                .run(context -> {
+                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
+
+                    assertThat(context.getEnvironment().getProperty("spring.datasource.druid.url"))
+                            .isEqualTo("jdbc:postgresql://prod-postgres.example.internal:5432/test_agent");
+                    assertThat(properties.getSecurity().getApiToken()).isEqualTo("api-token");
+                    assertThat(properties.getSecurity().getCorsAllowedOrigins())
+                            .containsExactly("https://agent.example.com");
+                    assertThat(properties.getRedis().isEnabled()).isTrue();
+                    assertThat(properties.getRedis().getHost()).isEqualTo("prod-redis.example.internal");
+                    assertThat(properties.getRedis().getPort()).isEqualTo(6379);
+                    assertThat(properties.getOpencode().getNodes()).hasSize(1);
+                    TestAgentRuntimeProperties.Node node = properties.getOpencode().getNodes().getFirst();
+                    assertThat(node.getId()).isEqualTo("node_prod_opencode");
+                    assertThat(node.getBaseUrl()).isEqualTo("http://opencode-prod.example.internal:4096");
+                    assertThat(node.getMaxRuns()).isEqualTo(12);
+                    assertThat(node.getWeight()).isEqualTo(100);
                 });
     }
 }

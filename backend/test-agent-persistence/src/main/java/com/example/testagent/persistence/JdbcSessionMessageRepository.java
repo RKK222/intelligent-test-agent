@@ -45,7 +45,7 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                     .param("role", message.role().name())
                     .param("content", message.content())
                     .param("traceId", message.traceId())
-                    .param("createdAt", message.createdAt())
+                    .param("createdAt", timestamp(message.createdAt()))
                     .update();
         } else {
             jdbcClient.sql("""
@@ -57,7 +57,7 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                     .param("role", message.role().name())
                     .param("content", message.content())
                     .param("traceId", message.traceId())
-                    .param("createdAt", message.createdAt())
+                    .param("createdAt", timestamp(message.createdAt()))
                     .update();
         }
         return message;

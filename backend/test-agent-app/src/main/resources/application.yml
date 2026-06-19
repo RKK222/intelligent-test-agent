@@ -10,7 +10,8 @@ spring:
       max-wait: ${TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS:30000}
       validation-query: SELECT 1
       test-while-idle: true
-      test-on-borrow: false
+      # 借出连接前校验，避免远端 PostgreSQL 断开 idle 连接后首个请求拿到 stale connection。
+      test-on-borrow: ${TEST_AGENT_DB_POOL_TEST_ON_BORROW:true}
       test-on-return: false
       time-between-eviction-runs-millis: 60000
       min-evictable-idle-time-millis: 300000
@@ -38,6 +39,7 @@ test-agent:
     api-token: ${TEST_AGENT_API_TOKEN:}
     cors-allowed-origins:
       - ${TEST_AGENT_CORS_ORIGIN:http://localhost:3000}
+      - ${TEST_AGENT_CORS_ORIGIN_LOOPBACK:http://127.0.0.1:3000}
   rate-limit:
     enabled: ${TEST_AGENT_RATE_LIMIT_ENABLED:false}
     capacity: ${TEST_AGENT_RATE_LIMIT_CAPACITY:120}

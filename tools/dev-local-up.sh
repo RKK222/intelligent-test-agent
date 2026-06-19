@@ -8,7 +8,8 @@ usage() {
   cat <<'USAGE'
 Usage: tools/dev-local-up.sh [--redis] [--help]
 
-Start local development dependencies with Docker Compose.
+Start personal offline development dependencies with Docker Compose.
+Research/test and production environments must use external PostgreSQL and Redis addresses.
 
 Environment:
   TEST_AGENT_POSTGRES_DB        default: test_agent

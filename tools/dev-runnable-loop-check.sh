@@ -9,7 +9,7 @@ Probe the already running frontend, backend and opencode server used by the
 Phase 06-08 runnable loop. This script does not start long-running services.
 
 Expected local commands:
-  cd backend && mvn spring-boot:run -pl test-agent-app -Dspring-boot.run.profiles=local
+  tools/dev-backend-run.sh --profile local
   cd frontend && corepack pnpm dev
   opencode serve --hostname 127.0.0.1 --port 4096 --cors http://localhost:3000
 

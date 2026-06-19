@@ -55,6 +55,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataAccessResourceFailureException;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -154,9 +155,8 @@ class RunApplicationServiceTest {
         Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
 
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
-        assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.SUCCEEDED);
-        assertThat(events.events).extracting(RunEvent::type)
-                .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_SUCCEEDED);
+        awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_SUCCEEDED);
     }
 
     @Test
@@ -183,9 +183,39 @@ class RunApplicationServiceTest {
         Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
 
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
-        assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.FAILED);
+        awaitRunStatus(service, run.runId(), RunStatus.FAILED);
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_FAILED);
+    }
+
+    @Test
+    void serviceDoesNotFailRunWhenPersistingNonTerminalStreamEventFails() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        events.failOnType = RunEventType.ASSISTANT_MESSAGE_DELTA;
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.ASSISTANT_MESSAGE_DELTA,
+                command.traceId(),
+                Instant.now(),
+                Map.of("text", "hello")));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                facade);
+
+        Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitFailedAppendAttempts(events, 1);
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.RUNNING);
         assertThat(events.events).extracting(RunEvent::type)
-                .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_FAILED);
+                .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED);
     }
 
     @Test
@@ -329,6 +359,48 @@ class RunApplicationServiceTest {
                 "trace_1234567890abcdef");
     }
 
+    private static void awaitRunStatus(RunApplicationService service, RunId runId, RunStatus expected) {
+        long deadline = System.nanoTime() + 2_000_000_000L;
+        while (System.nanoTime() < deadline) {
+            if (service.getRun(runId).status() == expected) {
+                return;
+            }
+            sleepBriefly();
+        }
+        assertThat(service.getRun(runId).status()).isEqualTo(expected);
+    }
+
+    private static void awaitEventTypes(FakeRunEventRepository events, RunEventType... expected) {
+        long deadline = System.nanoTime() + 2_000_000_000L;
+        while (System.nanoTime() < deadline) {
+            if (events.events.size() == expected.length) {
+                break;
+            }
+            sleepBriefly();
+        }
+        assertThat(events.events).extracting(RunEvent::type).containsExactly(expected);
+    }
+
+    private static void awaitFailedAppendAttempts(FakeRunEventRepository events, int expected) {
+        long deadline = System.nanoTime() + 2_000_000_000L;
+        while (System.nanoTime() < deadline) {
+            if (events.failedAppendAttempts >= expected) {
+                return;
+            }
+            sleepBriefly();
+        }
+        assertThat(events.failedAppendAttempts).isGreaterThanOrEqualTo(expected);
+    }
+
+    private static void sleepBriefly() {
+        try {
+            Thread.sleep(10);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted while waiting for async stream event", exception);
+        }
+    }
+
     private static final class FakeWorkspaceRepository implements WorkspaceRepository {
         @Override
         public Workspace save(Workspace workspace) {
@@ -463,9 +535,15 @@ class RunApplicationServiceTest {
 
     private static final class FakeRunEventRepository implements RunEventRepository {
         private final List<RunEvent> events = new ArrayList<>();
+        private RunEventType failOnType;
+        private int failedAppendAttempts;
 
         @Override
         public RunEvent append(RunEventDraft draft) {
+            if (draft.type() == failOnType) {
+                failedAppendAttempts++;
+                throw new DataAccessResourceFailureException("connection closed");
+            }
             RunEvent event = new RunEvent(
                     new RunEventId("evt_" + (events.size() + 1)),
                     draft.runId(),

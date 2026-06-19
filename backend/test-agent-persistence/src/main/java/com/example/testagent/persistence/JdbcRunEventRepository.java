@@ -13,10 +13,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
 /**
  * RunEvent JDBC Repository，集中维护 append-only 的 eventId 和同一 run 内 seq 分配规则。
@@ -48,32 +48,44 @@ public class JdbcRunEventRepository extends JdbcRepositorySupport implements Run
     }
 
     @Override
-    @Transactional
     public RunEvent append(RunEventDraft draft) {
-        Long nextSeq = jdbcClient.sql("""
+        String eventId = "evt_" + UUID.randomUUID().toString().replace("-", "");
+        for (int attempt = 1; attempt <= 20; attempt++) {
+            Long nextSeq = nextSeq(draft.runId());
+            try {
+                jdbcClient.sql("""
+                                insert into run_events(event_id, run_id, seq, type, trace_id, occurred_at, payload_json)
+                                values (:eventId, :runId, :seq, :type, :traceId, :occurredAt, :payloadJson)
+                                """)
+                        .param("eventId", eventId)
+                        .param("runId", draft.runId().value())
+                        .param("seq", nextSeq)
+                        .param("type", draft.type().wireName())
+                        .param("traceId", draft.traceId())
+                        .param("occurredAt", timestamp(draft.occurredAt()))
+                        .param("payloadJson", writePayload(draft.payload()))
+                        .update();
+
+                return findByRunIdAndSeq(draft.runId(), nextSeq);
+            } catch (DuplicateKeyException exception) {
+                // 并发 append 可能读到相同 max(seq)，唯一约束冲突后重读即可保持 append-only 顺序。
+                if (attempt == 20) {
+                    throw exception;
+                }
+            }
+        }
+        throw new PlatformException(ErrorCode.INTERNAL_ERROR, "RunEvent seq 分配失败", Map.of("runId", draft.runId().value()));
+    }
+
+    private Long nextSeq(RunId runId) {
+        return jdbcClient.sql("""
                         select coalesce(max(seq), 0) + 1
                         from run_events
                         where run_id = :runId
                         """)
-                .param("runId", draft.runId().value())
+                .param("runId", runId.value())
                 .query(Long.class)
                 .single();
-        String eventId = "evt_" + UUID.randomUUID().toString().replace("-", "");
-
-        jdbcClient.sql("""
-                        insert into run_events(event_id, run_id, seq, type, trace_id, occurred_at, payload_json)
-                        values (:eventId, :runId, :seq, :type, :traceId, :occurredAt, :payloadJson)
-                        """)
-                .param("eventId", eventId)
-                .param("runId", draft.runId().value())
-                .param("seq", nextSeq)
-                .param("type", draft.type().wireName())
-                .param("traceId", draft.traceId())
-                .param("occurredAt", draft.occurredAt())
-                .param("payloadJson", writePayload(draft.payload()))
-                .update();
-
-        return findByRunIdAndSeq(draft.runId(), nextSeq);
     }
 
     @Override

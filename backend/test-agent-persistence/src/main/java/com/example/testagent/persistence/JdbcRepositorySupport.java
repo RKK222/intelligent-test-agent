@@ -14,4 +14,9 @@ abstract class JdbcRepositorySupport {
         Timestamp timestamp = resultSet.getTimestamp(column);
         return timestamp == null ? null : timestamp.toInstant();
     }
+
+    // PostgreSQL JDBC 不能稳定推断 Instant 参数类型，写入 timestamp 字段前统一显式转换。
+    protected Timestamp timestamp(Instant instant) {
+        return instant == null ? null : Timestamp.from(instant);
+    }
 }

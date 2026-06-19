@@ -44,5 +44,6 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 ## 后续 AI 编码指引
 
 新增 opencode server 调用、错误映射、事件映射时改这里。除本模块外，不要让其他业务模块直接 import `com.example.opencode.sdk.*`。
+opencode 1.17.8 的 Run 终态既可能来自旧的 `session.next.step.ended`，也可能来自 `session.status` 的 `idle` 状态或 `session.idle`；这些 raw event 必须统一映射为平台 `run.succeeded`，避免前端 Run 长时间停在 `RUNNING`。
 Facade 对外方法不得返回 generated SDK DTO，新增方法必须同步测试成功、超时、远端错误和 traceId 透传。`workspace` query 仅在后续接入真实 opencode workspace/control-plane 时传入；本地模式默认只传 `directory`。
 generated `SessionApi` 中存在和 model 同名的参数包装类时，必须在本模块内用 `ApiClient.invokeAPI` 做安全适配，不能手改 generated SDK。

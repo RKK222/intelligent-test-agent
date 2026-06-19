@@ -1,5 +1,6 @@
 package com.example.testagent.app.web;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
@@ -22,6 +23,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
+import reactor.core.publisher.Mono;
 
 class RuntimeControllerTest {
 
@@ -76,6 +78,36 @@ class RuntimeControllerTest {
                 .expectBody()
                 .jsonPath("$.success").isEqualTo(true)
                 .jsonPath("$.data.runId").isEqualTo("run_1234567890abcdef")
+                .jsonPath("$.data.status").isEqualTo("RUNNING");
+    }
+
+    @Test
+    void runControllerOffloadsBlockingRunStartFromWebFluxThread() {
+        RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
+        when(service.startRun(
+                        eq(new SessionId("ses_1234567890abcdef")),
+                        eq("run the tests"),
+                        eq("trace_1234567890abcdef")))
+                .thenAnswer(ignored -> {
+                    assertThat(Thread.currentThread().getName()).contains("boundedElastic");
+                    return Mono.just(run()).block();
+                });
+        WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.post()
+                .uri("/api/runs")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"sessionId":"ses_1234567890abcdef","prompt":"run the tests"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.traceId").isEqualTo("trace_1234567890abcdef")
                 .jsonPath("$.data.status").isEqualTo("RUNNING");
     }
 

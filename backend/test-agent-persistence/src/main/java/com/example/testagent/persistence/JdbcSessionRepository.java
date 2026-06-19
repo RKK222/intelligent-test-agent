@@ -52,8 +52,8 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                     .param("title", session.title())
                     .param("status", session.status().name())
                     .param("traceId", session.traceId())
-                    .param("createdAt", session.createdAt())
-                    .param("updatedAt", session.updatedAt())
+                    .param("createdAt", timestamp(session.createdAt()))
+                    .param("updatedAt", timestamp(session.updatedAt()))
                     .param("opencodeSessionId", session.opencodeSessionId())
                     .param("opencodeExecutionNodeId", executionNodeIdValue(session.opencodeExecutionNodeId()))
                     .update();
@@ -73,8 +73,8 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                     .param("title", session.title())
                     .param("status", session.status().name())
                     .param("traceId", session.traceId())
-                    .param("createdAt", session.createdAt())
-                    .param("updatedAt", session.updatedAt())
+                    .param("createdAt", timestamp(session.createdAt()))
+                    .param("updatedAt", timestamp(session.updatedAt()))
                     .param("opencodeSessionId", session.opencodeSessionId())
                     .param("opencodeExecutionNodeId", executionNodeIdValue(session.opencodeExecutionNodeId()))
                     .update();
@@ -139,7 +139,7 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                 .param("sessionId", sessionId.value())
                 .param("opencodeSessionId", opencodeSessionId)
                 .param("opencodeExecutionNodeId", executionNodeId.value())
-                .param("updatedAt", updatedAt)
+                .param("updatedAt", timestamp(updatedAt))
                 .param("traceId", traceId)
                 .update();
         return findById(sessionId);

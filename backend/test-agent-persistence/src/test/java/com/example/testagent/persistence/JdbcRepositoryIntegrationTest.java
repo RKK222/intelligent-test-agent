@@ -25,9 +25,17 @@ import com.example.testagent.domain.workspace.WorkspaceId;
 import com.example.testagent.domain.workspace.WorkspaceStatus;
 import com.example.testagent.common.pagination.PageRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.AfterEach;
@@ -146,6 +154,46 @@ class JdbcRepositoryIntegrationTest {
     }
 
     @Test
+    void runEventsAppendAllocatesUniqueSeqUnderConcurrentWrites() throws Exception {
+        workspaces.save(workspace());
+        sessions.save(session());
+        runs.save(run());
+
+        int writers = 12;
+        ExecutorService executor = Executors.newFixedThreadPool(writers);
+        CountDownLatch ready = new CountDownLatch(writers);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<RunEvent>> futures = new ArrayList<>();
+        for (int i = 0; i < writers; i++) {
+            int index = i;
+            futures.add(executor.submit(() -> {
+                ready.countDown();
+                start.await(2, TimeUnit.SECONDS);
+                return runEvents.append(new RunEventDraft(
+                        new RunId("run_1234567890abcdef"),
+                        RunEventType.ASSISTANT_MESSAGE_DELTA,
+                        "trace_1234567890abcdef",
+                        NOW.plusMillis(index),
+                        Map.of("index", index)));
+            }));
+        }
+
+        assertThat(ready.await(2, TimeUnit.SECONDS)).isTrue();
+        start.countDown();
+        List<RunEvent> appended = new ArrayList<>();
+        for (Future<RunEvent> future : futures) {
+            appended.add(future.get(5, TimeUnit.SECONDS));
+        }
+        executor.shutdownNow();
+
+        assertThat(appended).extracting(RunEvent::seq)
+                .containsExactlyInAnyOrderElementsOf(
+                        java.util.stream.LongStream.rangeClosed(1, writers).boxed().toList());
+        assertThat(runEvents.findByRunIdAfter(new RunId("run_1234567890abcdef"), 0L, 50))
+                .hasSize(writers);
+    }
+
+    @Test
     void runEventsEnforceUniqueRunSequence() {
         workspaces.save(workspace());
         sessions.save(session());
@@ -167,7 +215,7 @@ class JdbcRepositoryIntegrationTest {
                 .param("seq", event.seq())
                 .param("type", event.type().wireName())
                 .param("traceId", event.traceId())
-                .param("occurredAt", event.occurredAt())
+                .param("occurredAt", Timestamp.from(event.occurredAt()))
                 .param("payloadJson", "{}")
                 .update()).isInstanceOf(DataIntegrityViolationException.class);
     }

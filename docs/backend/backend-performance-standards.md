@@ -17,7 +17,7 @@
 2. 高频查询必须有索引设计。
 3. 批量写入使用批处理或明确事务边界。
 4. 查询必须只取需要字段，避免无意义加载大文本或大 JSON。
-5. JDBC 连接池统一使用 Druid，连接池大小通过 `TEST_AGENT_DB_POOL_INITIAL_SIZE`、`TEST_AGENT_DB_POOL_MIN_IDLE`、`TEST_AGENT_DB_POOL_MAX_ACTIVE`、`TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS` 配置；不得在代码中硬编码环境容量。
+5. JDBC 连接池统一使用 Druid，连接池大小通过 `TEST_AGENT_DB_POOL_INITIAL_SIZE`、`TEST_AGENT_DB_POOL_MIN_IDLE`、`TEST_AGENT_DB_POOL_MAX_ACTIVE`、`TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS` 配置；默认必须保留 `validation-query=SELECT 1` 和借出连接校验，`TEST_AGENT_DB_POOL_TEST_ON_BORROW` 只允许在明确评估数据库稳定性后关闭；不得在代码中硬编码环境容量。
 
 ## opencode 调用
 

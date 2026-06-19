@@ -26,6 +26,7 @@ Phase 03 通过 `OpencodeClientFacade` 收敛 generated SDK 调用，并把 open
 - opencode SSE 通过 generated `EventApi.eventSubscribeWithResponseSpec(...).bodyToFlux(JsonNode.class)` 读取，避免 generated anyOf DTO 丢失未知字段。
 - `OpencodeRunEventMapper` 把 raw type 转为平台 `RunEventDraft`：
   - `session.next.prompted` -> `run.started`
+  - `session.next.step.ended`、`session.status` 的 `idle` 状态、`session.idle` -> `run.succeeded`
   - `session.next.text.delta`、`message.part.delta` -> `assistant.message.delta`
   - `session.next.tool.called` -> `tool.started`
   - `session.next.tool.success`、`session.next.tool.failed` -> `tool.finished`

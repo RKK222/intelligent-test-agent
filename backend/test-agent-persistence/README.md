@@ -9,7 +9,7 @@
 - Java 21
 - Spring Data JDBC
 - PostgreSQL
-- Flyway
+- Flyway Core + PostgreSQL database support
 - Druid JDBC 连接池
 - Redis optional
 - Maven library jar
@@ -17,7 +17,7 @@
 ## 主要职责
 
 - Workspace、Session、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision 等持久化。
-- Flyway migration。
+- Flyway migration，包含 PostgreSQL 16 所需的 Flyway database support。
 - Repository 实现和数据库映射。
 - Redis 限流、幂等或缓存能力的可选适配。
 
@@ -28,7 +28,7 @@
 - `V3__add_session_opencode_mapping.sql`：为 Session 增加可空的远端 opencode session/node 内部映射列、约束和索引。
 - `JdbcWorkspaceRepository`、`JdbcSessionRepository`、`JdbcRunRepository`、`JdbcRunEventRepository`、`JdbcExecutionNodeRepository`、`JdbcRoutingDecisionRepository`。
 - `JdbcSessionMessageRepository`：实现会话消息保存、查询、分页和计数。
-- RunEvent append-only：持久化层分配 `eventId` 和同一 run 内单调递增 `seq`，支持 `runId + lastSeq` 增量读取。
+- RunEvent append-only：持久化层分配 `eventId` 和同一 run 内单调递增 `seq`，并发追加时通过 `(run_id, seq)` 唯一约束冲突后重读重试，支持 `runId + lastSeq` 增量读取。
 
 ## 测试环境 PostgreSQL
 
@@ -39,7 +39,7 @@
 - `test-agent-common`。
 - `test-agent-domain`。
 - Spring Data JDBC。
-- Flyway、PostgreSQL、Druid、Redis。
+- Flyway、Flyway PostgreSQL database support、PostgreSQL、Druid、Redis。
 
 ## 禁止依赖
 
@@ -52,3 +52,4 @@
 新增表结构、Repository、数据库映射和 migration 时改这里。不要把任务状态机或 HTTP API 编排逻辑放进本模块。
 JSON payload/capabilities 当前以文本列保存，未来切换 PostgreSQL JSONB 必须同步兼容策略和测试。
 Session 的 `opencode_session_id` 与 `opencode_execution_node_id` 是后端内部运行时映射，新增查询或导出时不得默认暴露给前端 DTO。
+RunEvent 追加可能来自 opencode stream、取消和 Diff 动作等多个线程；修改 `JdbcRunEventRepository` 时必须保留并发 append 下 seq 单调且不重复的测试。

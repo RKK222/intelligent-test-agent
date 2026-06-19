@@ -36,6 +36,8 @@ import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * Run 应用服务，集中编排持久化、路由、opencode 启动/取消和 RunEvent 追加。
@@ -252,7 +254,18 @@ public class RunApplicationService {
                         workspace.rootPath(),
                         null,
                         traceId))
-                .doOnNext(draft -> appendStreamEvent(run, draft))
+                // opencode stream 来自 Netty 线程，事件落库必须串行 offload，且本地 DB 抖动不能误判为 Run 失败。
+                .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(run, draft))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .onErrorResume(error -> {
+                            LOGGER.warn(
+                                    "Failed to persist opencode stream event, runId={}, eventType={}, traceId={}",
+                                    run.runId().value(),
+                                    draft.type().wireName(),
+                                    traceId,
+                                    error);
+                            return Mono.empty();
+                        }))
                 .doOnError(error -> failRunFromStream(run, traceId, error))
                 .subscribe(ignored -> {
                 }, ignored -> {

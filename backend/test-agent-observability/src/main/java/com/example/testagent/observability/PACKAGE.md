@@ -15,11 +15,13 @@
 - `package-info.java`：说明 observability 包是日志、trace 和指标边界。
 - `TraceConstants`：traceId 相关 header、attribute 和 Reactor context key。
 - `TraceIdSupport`：traceId 生成、校验和入站值解析工具。
-- 后续可新增 MDC 工具、指标命名、meter 封装和观测性配置。
+- `TraceLogContext`：traceId 的 SLF4J MDC 写入、恢复和清理工具。
+- 后续可新增指标命名、meter 封装和观测性配置。
 
 ## 允许依赖
 
 - `test-agent-common`。
+- SLF4J API。
 - Spring Boot Actuator。
 - Micrometer。
 
@@ -38,7 +40,7 @@
 ## 下游依赖
 
 - `test-agent-common`。
-- Micrometer 和日志框架。
+- SLF4J API、Micrometer 和日志框架。
 
 ## 测试位置
 

@@ -62,11 +62,11 @@ public class JdbcExecutionNodeRepository extends JdbcRepositorySupport implement
                     .param("runningRuns", executionNode.runningRuns())
                     .param("maxRuns", executionNode.maxRuns())
                     .param("weight", executionNode.weight())
-                    .param("lastHeartbeatAt", executionNode.lastHeartbeatAt())
+                    .param("lastHeartbeatAt", timestamp(executionNode.lastHeartbeatAt()))
                     .param("capabilitiesJson", writeCapabilities(executionNode.capabilities()))
                     .param("traceId", executionNode.traceId())
-                    .param("createdAt", executionNode.createdAt())
-                    .param("updatedAt", executionNode.updatedAt())
+                    .param("createdAt", timestamp(executionNode.createdAt()))
+                    .param("updatedAt", timestamp(executionNode.updatedAt()))
                     .update();
         } else {
             jdbcClient.sql("""
@@ -83,11 +83,11 @@ public class JdbcExecutionNodeRepository extends JdbcRepositorySupport implement
                     .param("runningRuns", executionNode.runningRuns())
                     .param("maxRuns", executionNode.maxRuns())
                     .param("weight", executionNode.weight())
-                    .param("lastHeartbeatAt", executionNode.lastHeartbeatAt())
+                    .param("lastHeartbeatAt", timestamp(executionNode.lastHeartbeatAt()))
                     .param("capabilitiesJson", writeCapabilities(executionNode.capabilities()))
                     .param("traceId", executionNode.traceId())
-                    .param("createdAt", executionNode.createdAt())
-                    .param("updatedAt", executionNode.updatedAt())
+                    .param("createdAt", timestamp(executionNode.createdAt()))
+                    .param("updatedAt", timestamp(executionNode.updatedAt()))
                     .update();
         }
         return executionNode;

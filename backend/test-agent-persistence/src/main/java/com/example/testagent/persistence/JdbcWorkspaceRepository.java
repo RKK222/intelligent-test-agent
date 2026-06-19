@@ -45,8 +45,8 @@ public class JdbcWorkspaceRepository extends JdbcRepositorySupport implements Wo
                     .param("rootPath", workspace.rootPath())
                     .param("status", workspace.status().name())
                     .param("traceId", workspace.traceId())
-                    .param("createdAt", workspace.createdAt())
-                    .param("updatedAt", workspace.updatedAt())
+                    .param("createdAt", timestamp(workspace.createdAt()))
+                    .param("updatedAt", timestamp(workspace.updatedAt()))
                     .update();
         } else {
             jdbcClient.sql("""
@@ -58,8 +58,8 @@ public class JdbcWorkspaceRepository extends JdbcRepositorySupport implements Wo
                     .param("rootPath", workspace.rootPath())
                     .param("status", workspace.status().name())
                     .param("traceId", workspace.traceId())
-                    .param("createdAt", workspace.createdAt())
-                    .param("updatedAt", workspace.updatedAt())
+                    .param("createdAt", timestamp(workspace.createdAt()))
+                    .param("updatedAt", timestamp(workspace.updatedAt()))
                     .update();
         }
         return workspace;

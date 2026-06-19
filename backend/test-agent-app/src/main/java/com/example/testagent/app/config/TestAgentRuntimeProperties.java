@@ -41,7 +41,7 @@ public class TestAgentRuntimeProperties {
 
     public static class Security {
         private String apiToken;
-        private List<String> corsAllowedOrigins = new ArrayList<>(List.of("http://localhost:3000"));
+        private List<String> corsAllowedOrigins = new ArrayList<>(List.of("http://localhost:3000", "http://127.0.0.1:3000"));
 
         public String getApiToken() {
             return apiToken;

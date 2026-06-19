@@ -17,7 +17,7 @@
 - `JdbcSessionRepository`：实现 Session 持久化端口，并保存平台 session 到远端 opencode session/node 的内部映射。
 - `JdbcSessionMessageRepository`：实现 SessionMessage 保存、查询、分页和计数。
 - `JdbcRunRepository`：实现 Run 持久化端口。
-- `JdbcRunEventRepository`：实现 RunEvent append-only 追加和增量读取。
+- `JdbcRunEventRepository`：实现 RunEvent append-only 追加和增量读取；并发追加时依赖 `(run_id, seq)` 唯一约束冲突后重试来保持 seq 单调且不重复。
 - `JdbcExecutionNodeRepository`：实现执行节点保存和可路由节点查询。
 - `JdbcRoutingDecisionRepository`：实现路由决策保存和查询。
 - `db/migration/V1__create_core_tables.sql`：创建核心业务表和索引。
@@ -57,6 +57,7 @@
 
 - persistence 模块集成测试。
 - Repository、migration、唯一约束、事务、分页和排序测试；当前使用 H2 PostgreSQL 模式执行 Flyway migration。
+- RunEvent 测试必须覆盖同一 run 的并发 append，防止 stream 事件和取消事件同时落库时重复分配 seq。
 - Druid 连接池配置测试；当前验证 `spring.datasource.druid.*` 可绑定为 Druid DataSource，且 Web 控制台默认关闭。
 
 ## 修改时必须同步更新

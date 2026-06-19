@@ -129,7 +129,8 @@ Phase 04/05 已固化的后端运行时边界：
 - `test-agent-app` 提供 Workspace、Session、Run、Cancel 和 RunEvent SSE Runtime API。
 - Run 启动通过 `OpencodeClientFacade.createSession` 懒创建远端 opencode session，再由 `OpencodeClientFacade.startRun` 调用 `prompt_async`；后续 Run 复用内部映射，generated SDK 不越过 opencode-client 模块。
 - 本地鉴权默认免 token，配置 `TEST_AGENT_API_TOKEN` 后启用 Bearer token 占位鉴权。
-- 本地集成使用 `deploy/local/docker-compose.yml` 提供 Postgres 和可选 Redis，opencode server 通过 `TEST_AGENT_OPENCODE_BASE_URL` 指向外部本地进程。
+- 研发测试和生产部署只将 `test-agent-app` Java 进程放入 Docker；PostgreSQL、Redis 和 opencode server 均通过外部地址注入。
+- `deploy/local/docker-compose.yml` 仅作为个人离线开发备用入口，不作为研发测试或生产部署主路径。
 
 前端必须逐步提供：
 

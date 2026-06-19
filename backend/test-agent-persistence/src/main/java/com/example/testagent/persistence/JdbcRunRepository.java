@@ -45,8 +45,8 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                     .param("workspaceId", run.workspaceId().value())
                     .param("status", run.status().name())
                     .param("traceId", run.traceId())
-                    .param("createdAt", run.createdAt())
-                    .param("updatedAt", run.updatedAt())
+                    .param("createdAt", timestamp(run.createdAt()))
+                    .param("updatedAt", timestamp(run.updatedAt()))
                     .update();
         } else {
             jdbcClient.sql("""
@@ -58,8 +58,8 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                     .param("workspaceId", run.workspaceId().value())
                     .param("status", run.status().name())
                     .param("traceId", run.traceId())
-                    .param("createdAt", run.createdAt())
-                    .param("updatedAt", run.updatedAt())
+                    .param("createdAt", timestamp(run.createdAt()))
+                    .param("updatedAt", timestamp(run.updatedAt()))
                     .update();
         }
         return run;

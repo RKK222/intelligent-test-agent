@@ -17,6 +17,7 @@ test-agent:
     api-token: ${TEST_AGENT_API_TOKEN:}
     cors-allowed-origins:
       - ${TEST_AGENT_CORS_ORIGIN:http://localhost:3000}
+      - ${TEST_AGENT_CORS_ORIGIN_LOOPBACK:http://127.0.0.1:3000}
   rate-limit:
     enabled: ${TEST_AGENT_RATE_LIMIT_ENABLED:false}
     capacity: ${TEST_AGENT_RATE_LIMIT_CAPACITY:120}

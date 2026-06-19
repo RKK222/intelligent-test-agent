@@ -58,3 +58,7 @@
 - 本文件。
 - `docs/api/backend-api.md`，如果影响平台 API 语义或错误码。
 - `docs/architecture/dependency-rules.md`，如果依赖边界变化。
+
+## 事件映射注意事项
+
+`OpencodeRunEventMapper` 必须兼容 opencode raw event 演进。opencode 1.17.8 中 `session.status` 的 `idle` 状态和 `session.idle` 代表本次 prompt 已结束，应映射为平台 `run.succeeded`；`busy` 等非终态状态继续降级为 `opencode.event.unknown`。

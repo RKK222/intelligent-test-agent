@@ -56,5 +56,6 @@
 - 新增字段优先允许空值或提供默认值，避免破坏旧数据。
 - `sessions.opencode_session_id` 和 `sessions.opencode_execution_node_id` 是后端内部字段，不进入 API DTO；旧 session 两列为空时由首次 Run 懒创建远端 opencode session。
 - `run_events.payload_json` 和 `execution_nodes.capabilities_json` 当前为 JSON 文本，便于 H2 和 PostgreSQL 共用测试；未来迁移到 JSONB 时必须先保持旧列读取兼容。
+- `run_events.seq` 由持久化层按同一 run 分配，取消、Diff 动作和 opencode stream 并发追加时必须依赖 `(run_id, seq)` 唯一约束冲突后重试，保持事件流单调递增且不重复。
 - `session_messages.content` 当前直接保存文本；后续如拆分富文本 parts，必须保留旧 content 读取兼容。
 - 删除或重命名状态、事件类型、数据库字段必须拆分为读取兼容、数据迁移、清理三个阶段。

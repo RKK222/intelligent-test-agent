@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN" monitorInterval="30">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="timestamp=&quot;%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}&quot; level=%p traceId=&quot;%enc{%X{traceId}}{CRLF}&quot; module=backend logger=&quot;%c{1.}&quot; thread=&quot;%enc{%t}{CRLF}&quot; message=&quot;%enc{%m}{CRLF}&quot;%n%xEx"/>
+        </Console>
+    </Appenders>
+
+    <Loggers>
+        <Logger name="com.example.testagent" level="INFO"/>
+        <Root level="INFO">
+            <AppenderRef ref="Console"/>
+        </Root>
+    </Loggers>
+</Configuration>

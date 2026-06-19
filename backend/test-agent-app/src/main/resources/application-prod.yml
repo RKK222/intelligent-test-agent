@@ -22,5 +22,15 @@ test-agent:
     window: ${TEST_AGENT_RATE_LIMIT_WINDOW:1m}
   redis:
     enabled: ${TEST_AGENT_REDIS_ENABLED:false}
-    host: ${TEST_AGENT_REDIS_HOST:127.0.0.1}
+    host: ${TEST_AGENT_REDIS_HOST:}
     port: ${TEST_AGENT_REDIS_PORT:6379}
+  opencode:
+    nodes:
+      - id: ${TEST_AGENT_OPENCODE_NODE_ID:node_prod_opencode}
+        base-url: ${TEST_AGENT_OPENCODE_BASE_URL}
+        max-runs: ${TEST_AGENT_OPENCODE_MAX_RUNS:4}
+        weight: ${TEST_AGENT_OPENCODE_WEIGHT:100}
+        capabilities:
+          - chat
+          - diff
+          - test

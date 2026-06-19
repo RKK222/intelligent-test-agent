@@ -102,9 +102,37 @@ class RunEventServicesTest {
                 .verifyComplete();
     }
 
+    @Test
+    void sseStreamContinuesPollingAfterTransientReplayFailure() {
+        FakeRunEventRepository repository = new FakeRunEventRepository();
+        repository.remainingFindFailures = 1;
+        RunEventAppender appender = new RunEventAppender(repository);
+        RunEventSseStreamService streamService = new RunEventSseStreamService(
+                new RunEventReplayService(repository),
+                new RunEventSseMapper());
+        appender.append(new RunEventDraft(
+                new RunId("run_1234567890abcdef"),
+                RunEventType.RUN_STARTED,
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of()));
+
+        StepVerifier.create(streamService.streamAfter(
+                        new RunId("run_1234567890abcdef"),
+                        "0",
+                        Duration.ofMillis(10),
+                        50).take(1))
+                .assertNext(event -> {
+                    assertThat(event.id()).isEqualTo("1");
+                    assertThat(event.event()).isEqualTo("run.started");
+                })
+                .verifyComplete();
+    }
+
     private static final class FakeRunEventRepository implements RunEventRepository {
 
         private final List<RunEvent> events = new ArrayList<>();
+        private int remainingFindFailures;
 
         @Override
         public RunEvent append(RunEventDraft draft) {
@@ -122,6 +150,10 @@ class RunEventServicesTest {
 
         @Override
         public List<RunEvent> findByRunIdAfter(RunId runId, long lastSeq, int limit) {
+            if (remainingFindFailures > 0) {
+                remainingFindFailures--;
+                throw new IllegalStateException("connection closed");
+            }
             return events.stream()
                     .filter(event -> event.runId().equals(runId))
                     .filter(event -> event.seq() > lastSeq)
