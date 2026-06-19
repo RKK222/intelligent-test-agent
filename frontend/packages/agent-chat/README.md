@@ -7,9 +7,10 @@ Agent 对话和结构化卡片展示包。
 ## 主要职责
 
 - 展示用户/助手消息。
-- 展示 message part timeline（text、reasoning、tool、file、event）。
+- 展示 message part timeline（text、reasoning、tool、file、event），用户消息使用“用户”蓝色气泡。
 - `reasoning` 与最终 `text` 回答必须分块展示，避免把思考过程和答复混在同一个气泡里。
-- 展示 PlanCard、ToolCallCard、TestRunCard、DiffActionCard。
+- 结构化 Agent 时间线使用统一深色折叠卡片壳展示 plan、tool、test、diff、event：标题行包含图标、标题和展开/收起按钮；内容区按类型展示步骤、工具摘要、测试命令、变更文件表格或紧凑 JSON fallback。
+- 时间线默认只展开运行中卡片、最新工具卡片和最新 Diff 卡片；历史完成项默认折叠，避免长输出撑乱工作台。
 - 提供 Phase 11 Agent/Provider/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和 Todo 展示。
 - Prompt composer 支持文本、文件附件、图片附件和附件 chips；文件读取后只向 app 层返回平台 `PromptPart`，不直接提交后端。
 - History tab 支持受控搜索、选择会话、置顶/取消置顶和删除回调；实际 API 调用由 app 层完成。
