@@ -8,6 +8,7 @@ Monaco 文件编辑器包。
 
 - 按文件路径推断语言。
 - 展示当前文件内容、脏状态、只读状态和保存按钮。
+- 上报 Monaco 当前文本选区给 app 层，用于构造 Prompt file context。
 - 保存动作通过回调交给 app 层调用 `backend-api`。
 
 ## 禁止事项

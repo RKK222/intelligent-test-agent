@@ -85,4 +85,4 @@ tools/dev-runnable-loop-check.sh
 - RunEvent SSE 只能通过 `packages/event-stream-client`。
 - `apps/agent-web` 负责组合页面；业务能力必须沉淀到对应 package。
 - Phase 11 opencode Web App 复刻以运行态能力为范围，交互行为参考 `opencode-source/opencode-1.17.8/packages/app`；settings/config/provider/server 配置页、opencode `packages/web` 公网分享轮询和未经确认的 PTY WebSocket 不进入默认前端边界。
-- 当前 Phase 11 实现已接入 backend-api runtime 方法、Agent/Provider/Model/Mode 运行态选择、session history 搜索/置顶/删除、message part reducer、permission/question dock、Todo、文件/图片附件、busy follow-up 队列、slash command palette、`@` context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与 hunk context、MCP/LSP/VCS 状态摘要和 `/s/[sessionId]` 只读 transcript；公开 share 授权、Monaco 任意选区上下文、per-file/per-message 回滚和交互式 PTY 仍按后续批次推进。
+- 当前 Phase 11 实现已接入 backend-api runtime 方法、Agent/Provider/Model/Mode 运行态选择、session history 搜索/置顶/删除、message part reducer、permission/question dock、Todo、文件/图片附件、busy follow-up 队列、Monaco 选区上下文、slash command palette、`@` context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与 hunk context、MCP/LSP/VCS 状态摘要和 `/s/[sessionId]` 只读 transcript；公开 share 授权、per-file/per-message 回滚和交互式 PTY 仍按后续批次推进。

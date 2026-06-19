@@ -6,7 +6,7 @@
 
 ## 主要程序清单
 
-- `CodeEditor.tsx`：Monaco 编辑器和保存反馈。
+- `CodeEditor.tsx`：Monaco 编辑器、保存反馈和当前选区上报回调。
 - `language.ts`：路径到 Monaco language 映射。
 
 ## 允许依赖

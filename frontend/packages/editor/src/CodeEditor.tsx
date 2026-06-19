@@ -15,9 +15,18 @@ export type CodeEditorProps = {
   feedback?: Feedback | null;
   onChange: (content: string) => void;
   onSave: () => void;
+  onSelectionChange?: (selection: EditorSelectionContext | undefined) => void;
 };
 
-export function CodeEditor({ path, content = "", dirty, readonly, saving, feedback, onChange, onSave }: CodeEditorProps) {
+export type EditorSelectionContext = {
+  startLineNumber: number;
+  startColumn: number;
+  endLineNumber: number;
+  endColumn: number;
+  text: string;
+};
+
+export function CodeEditor({ path, content = "", dirty, readonly, saving, feedback, onChange, onSave, onSelectionChange }: CodeEditorProps) {
   if (!path) {
     return (
       <div className="flex h-full min-h-0 items-center justify-center bg-[var(--ta-panel-2)] text-slate-500">
@@ -56,6 +65,28 @@ export function CodeEditor({ path, content = "", dirty, readonly, saving, feedba
             wordWrap: "off"
           }}
           onChange={(value) => onChange(value ?? "")}
+          onMount={(editor) => {
+            if (!onSelectionChange) {
+              return;
+            }
+            const emitSelection = () => {
+              const selection = editor.getSelection();
+              const model = editor.getModel();
+              if (!selection || !model || selection.isEmpty()) {
+                onSelectionChange(undefined);
+                return;
+              }
+              onSelectionChange({
+                startLineNumber: selection.startLineNumber,
+                startColumn: selection.startColumn,
+                endLineNumber: selection.endLineNumber,
+                endColumn: selection.endColumn,
+                text: model.getValueInRange(selection)
+              });
+            };
+            editor.onDidChangeCursorSelection(emitSelection);
+            emitSelection();
+          }}
         />
       </div>
       <FeedbackBanner feedback={feedback} />

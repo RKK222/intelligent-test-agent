@@ -89,7 +89,7 @@
 - `packages/backend-api` 已封装 agents/models/providers/commands/references、session messages、session children/todo/diff/abort/fork/compact/revert/command/shell、permission/question、fs/vcs/lsp/mcp status/resources/tools 等平台 API 方法；页面组件不得自行拼接这些 URL。
 - `packages/agent-chat` 通过纯 reducer 消费 RunEvent，归并 message timeline、message parts、permission dock、question dock、Todo 和 session diff 状态；它不订阅 SSE，也不调用 HTTP API。
 - `apps/agent-web` 负责组合 TanStack Query、RunEvent SSE、backend-api mutation 和 reducer dispatch；发送 Run 时同时提交 `prompt`、text/file `parts`，并带上当前 Agent/Provider/Model/Mode 运行态选择。文件附件由 `agent-chat` 转成平台 `PromptPart` 后交给 app 层，文本文件以内联 `content` 提交，图片和二进制文件以 `data:` URL 提交。`mode` 只作为平台运行态字段保留，opencode `PromptInput` 不支持时不得强行塞进 `prompt_async`。History 搜索、置顶和删除只能通过 `backend-api` 的平台 Session 方法完成。
-- 当前 UI 已提供 Agent/Provider/Model/Mode 选择、真实 Session history 切换、文件/图片附件、busy follow-up 本地 FIFO 队列、permission once/always/reject、question reply/reject、Todo 展示、slash command palette、`@` runtime context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与 hunk context、MCP/LSP/VCS 状态摘要和 `/s/{sessionId}` 只读 transcript 页面；公开 share 授权、Monaco 任意选区上下文、per-file/per-message 回滚和 PTY 仍按后续批次推进。
+- 当前 UI 已提供 Agent/Provider/Model/Mode 选择、真实 Session history 切换、文件/图片附件、busy follow-up 本地 FIFO 队列、Monaco 选区上下文、permission once/always/reject、question reply/reject、Todo 展示、slash command palette、`@` runtime context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与 hunk context、MCP/LSP/VCS 状态摘要和 `/s/{sessionId}` 只读 transcript 页面；公开 share 授权、per-file/per-message 回滚和 PTY 仍按后续批次推进。
 
 ## Phase 11 Web App 复刻边界
 

@@ -5,7 +5,7 @@ import * as React from "react";
 import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
 import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api";
 import { DiffViewer } from "@test-agent/diff-viewer";
-import { CodeEditor } from "@test-agent/editor";
+import { CodeEditor, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents } from "@test-agent/event-stream-client";
 import { FileExplorer } from "@test-agent/file-explorer";
 import type {
@@ -27,6 +27,7 @@ import { TestRunnerPanel } from "@test-agent/test-runner";
 import { Button, FeedbackBanner, Input, type Feedback } from "@test-agent/ui-kit";
 import { useWorkbenchStore, WorkbenchShell } from "@test-agent/workbench-shell";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, type FollowUpDraft } from "./follow-up-queue";
+import { buildEditorFilePromptPart } from "./prompt-context";
 
 const queryClient = new QueryClient();
 const apiBaseUrl = process.env.NEXT_PUBLIC_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
@@ -67,6 +68,7 @@ function WorkbenchRuntime() {
   const [sessionSearch, setSessionSearch] = React.useState("");
   const [followUpQueue, setFollowUpQueue] = React.useState<FollowUpDraft[]>([]);
   const [diffContextParts, setDiffContextParts] = React.useState<PromptPart[]>([]);
+  const [editorSelection, setEditorSelection] = React.useState<EditorSelectionContext>();
 
   const { tabs, activePath, selectedDiffPath, openTab, closeTab, updateTabContent, markTabSaved, setActivePath, setSelectedDiffPath } =
     useWorkbenchStore();
@@ -153,6 +155,10 @@ function WorkbenchRuntime() {
       setSelectedWorkspaceId(selectedWorkspace.workspaceId);
     }
   }, [selectedWorkspace?.workspaceId, selectedWorkspaceId]);
+
+  React.useEffect(() => {
+    setEditorSelection(undefined);
+  }, [activePath]);
 
   React.useEffect(() => {
     if (selectedWorkspace?.workspaceId) {
@@ -430,7 +436,7 @@ function WorkbenchRuntime() {
   }
 
   function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
-    const parts = buildPromptParts(prompt, activeTab, attachments, diffContextParts);
+    const parts = buildPromptParts(prompt, activeTab, attachments, diffContextParts, editorSelection);
     const displayPrompt = prompt.trim() || promptFromParts(parts);
     setLastPrompt(displayPrompt);
     setDiffContextParts([]);
@@ -587,6 +593,7 @@ function WorkbenchRuntime() {
             feedback={feedback}
             onChange={(content) => activeTab && updateTabContent(activeTab.path, content)}
             onSave={() => activeTab && saveMutation.mutate(activeTab)}
+            onSelectionChange={setEditorSelection}
           />
         }
       />
@@ -784,17 +791,14 @@ function buildPromptParts(
   prompt: string,
   activeTab: { path: string; content: string } | undefined,
   attachments: ComposerAttachment[] = [],
-  extraParts: PromptPart[] = []
+  extraParts: PromptPart[] = [],
+  editorSelection?: EditorSelectionContext
 ): PromptPart[] {
   const parts = buildComposerPromptParts(prompt, attachments);
   parts.push(...extraParts);
-  if (activeTab?.path) {
-    parts.push({
-      type: "file",
-      path: activeTab.path,
-      name: activeTab.path.split("/").at(-1) ?? activeTab.path,
-      source: { text: activeTab.content.slice(0, 12000) }
-    });
+  const editorPart = buildEditorFilePromptPart(activeTab, editorSelection);
+  if (editorPart) {
+    parts.push(editorPart);
   }
   return parts;
 }
