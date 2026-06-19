@@ -147,18 +147,27 @@
 ### Batch C：真实三服务联调 E2E
 
 - 修改文件：
-  - `frontend/apps/agent-web/tests/workbench.e2e.spec.ts`
-  - `frontend/apps/agent-web/playwright.config.ts`
-  - 新增或更新本地联调脚本，优先放在现有 `tools/` 或 `scripts/` 目录。
+  - 新增 `tools/dev-phase11-real-e2e.sh`
+  - 新增 `frontend/playwright.real.config.ts`
+  - 新增 `frontend/apps/agent-web/tests/workbench.real-spec.ts`
+  - 更新 `frontend/package.json`
   - `docs/frontend/frontend-testing-standards.md`
+  - `frontend/README.md`
   - `docs/development/ai-self-checklist.md`
 - 具体改动：
   - 明确前端、`test-agent-app`、opencode server 三服务启动顺序、端口、健康检查和退出清理。
   - E2E 覆盖真实 terminal ticket 创建、WebSocket 连接、输入命令、收到 stdout、关闭终端、重复连接被拒绝。
   - 保留 mock E2E 作为快速回归，真实三服务 E2E 单独命名，避免默认开发循环过慢。
+- 执行步骤：
+  - 第一步先新增 `tools/dev-phase11-real-e2e.sh --help`，只输出用法和依赖，不读取或打印 `.env.local`、`.env.test` 中的敏感值；脚本默认复用现有服务，显式传入 `--start-services` 时才启动 opencode server、后端和前端。
+  - 第二步新增 `frontend/playwright.real.config.ts`，沿用现有 Playwright 浏览器项目，但只匹配 `**/*.real-spec.ts`，避免影响 `corepack pnpm e2e` 的 mock 快速回归。
+  - 第三步新增 `workbench.real-spec.ts`：通过后端 API 创建临时 workspace/session，触发一次真实 `POST /api/runs` 建立 opencode session 映射，然后创建 terminal ticket，在浏览器上下文中连接 WebSocket，发送 `printf phase11-real-e2e`，断言收到 stdout，再关闭连接并验证同一 ticket 重连失败。
+  - 第四步把真实套件接入 `frontend/package.json` 的 `e2e:real`，并在脚本中执行 `cd frontend && corepack pnpm e2e:real`；脚本失败时保留 `.tmp/phase11-real-e2e/` 下的服务日志和 Playwright trace。
+  - 第五步若真实 opencode server 因本机 provider/model 配置缺失无法建立 session 映射，必须在脚本输出和本计划中记录精确阻塞点、端口、健康检查结果和后端统一错误码，不得把该场景标记为完成。
 - 验收：
+  - `tools/dev-phase11-real-e2e.sh --help` 通过，且输出不包含密钥或环境变量值。
   - 快速套件：`cd frontend && corepack pnpm e2e` 通过。
-  - 真实套件：启动前端、后端和 opencode server 后执行指定 Playwright 项目，至少覆盖 Phase 11 主路径和 PTY 主路径。
+  - 真实套件：`tools/dev-phase11-real-e2e.sh --start-services` 能启动或复用前端、后端、opencode server，完成健康检查，执行指定 Playwright 项目，至少覆盖 Phase 11 主路径和 PTY 主路径。
 
 ### Batch D：Phase 11 最终收口
 
