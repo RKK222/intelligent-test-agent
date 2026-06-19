@@ -3,12 +3,12 @@
 ## 背景
 
 - 用户问题：当前 Phase 11 已完成 P0/P1 主路径，但仍有若干能力未达到 `docs/plan/11-opencode-web-feature-replica.md` 的完整验收范围。
-- 当前现象：已实现 runtime facade/API、事件 reducer、运行态选择、permission/question、Todo、slash command、`@` context、Diff 来源切换、MCP/LSP/VCS 状态和只读 transcript；完整 prompt parts、session 管理、附件/图片、follow-up、深度 Diff review、PTY 和 E2E 仍缺口明确。
+- 当前现象：已实现 runtime facade/API、事件 reducer、运行态选择、permission/question、Todo、slash command、`@` context、Diff 来源切换、MCP/LSP/VCS 状态、只读 transcript、`POST /api/runs` 的 PromptPart 到 opencode `prompt_async` 端到端透传，以及 Session 全局搜索/置顶/软删除；附件/图片、follow-up、深度 Diff review、PTY 和 E2E 仍缺口明确。
 - 目标：按不破坏现有边界的方式补完 Phase 11，最终达到 Web App 运行态能力完整可验收。
 
 ## 范围
 
-- 包含：PromptPart 端到端透传、Session 管理、附件/图片、busy follow-up、Diff review 增强、PTY 架构与安全前置、Playwright E2E 和文档验收。
+- 包含：附件/图片、busy follow-up、Diff review 增强、PTY 架构与安全前置、Playwright E2E 和文档验收。
 - 不包含：settings/config/provider/server 配置页、MCP 安装认证配置 UI、前端直连 opencode server、绕过平台鉴权的公网分享。
 
 ## 现状分析
@@ -20,24 +20,24 @@
   - `frontend/apps/agent-web/src/components/AgentWorkbench.tsx`
   - `frontend/packages/agent-chat/src/AgentChat.tsx`
   - `frontend/packages/diff-viewer/src/DiffViewer.tsx`
-- 当前实现：`POST /api/runs` 已接收 `parts`，但后端仍把 text part 合成为 prompt；Session 列表只走 workspace 维度，缺少全局搜索、重命名、置顶、删除；Diff 仍以 Run 级 accept/reject 为唯一落盘语义；PTY 未进入安全边界。
+- 当前实现：`POST /api/runs` 已把平台 text/file/agent/reference parts 转换为 opencode `prompt_async` 输入并保留旧 `prompt` 兼容；Session 已支持全局搜索、标题更新、置顶和软删除，workspace 列表继续兼容；Diff 仍以 Run 级 accept/reject 为唯一落盘语义；PTY 未进入安全边界。
 - 问题原因：Phase 11 先落了兼容主路径，剩余能力需要明确 opencode payload 映射、平台 API 语义、安全边界和 E2E 场景后再补。
 
 ## 修改方案
 
-### 1. PromptPart 端到端透传
+### 1. PromptPart 端到端透传（已完成）
 
 - 修改文件：`RuntimeDtos.java`、`RunApplicationService.java`、`OpencodeStartRunCommand.java`、`DefaultOpencodeClientFacade.java`、`GeneratedOpencodeSdkGateway.java`、`frontend/packages/backend-api/src/index.ts`、`frontend/apps/agent-web/src/components/AgentWorkbench.tsx`。
 - 修改位置：Run 启动请求 DTO、应用服务启动编排、opencode facade startRun 命令体、前端 prompt composer。
-- 具体改动：保留旧 `prompt` 字段，新增平台 `PromptPart` 到 opencode text/file/agent part 的转换；文件 part 只允许 workspace 内路径或已读文件内容；agent/reference part 保留平台 projection 并映射到 opencode 可识别字段。
-- 原因：解决当前只合成 text prompt 的兼容实现，支撑附件、文件上下文和 agent part。
+- 完成内容：保留旧 `prompt` 字段；新增 `StartRunInput` 和 `OpencodePromptPart`；平台 text/file/agent/reference part 已转换为 opencode `text/file/agent` part 或可读 text part；文件 part 只允许 workspace 内路径或内联内容；`agent/model/variant/messageId` 已下沉到 opencode facade。
+- 后续注意：图片附件的 UI 构造和上传/URL 来源仍归入“附件、图片和 busy follow-up”批次，不影响当前后端 parts 透传能力。
 
-### 2. Session 管理补齐
+### 2. Session 管理补齐（已完成）
 
 - 修改文件：`SessionController.java`、`SessionApplicationService.java`、`SessionRepository.java`、`JdbcSessionRepository.java`、`frontend/packages/backend-api/src/index.ts`、`frontend/apps/agent-web/src/components/AgentWorkbench.tsx`。
 - 修改位置：Session API、应用服务、持久化端口与工作台 history 区。
-- 具体改动：新增平台 `GET /api/sessions` 搜索分页、`PATCH /api/sessions/{id}` 标题/置顶、`DELETE /api/sessions/{id}` 软删除；如需新增 pinned/deleted 字段，配套 Flyway migration 并保持旧数据默认未置顶、未删除。
-- 原因：达到 Phase 11 会话列表、搜索、重命名、置顶、删除和 tab/draft 验收。
+- 完成内容：新增平台 `GET /api/sessions` 搜索分页、`PATCH /api/sessions/{id}` 标题/置顶、`DELETE /api/sessions/{id}` 软删除；新增 Flyway V4 `sessions.pinned`，旧数据默认未置顶；前端 History 搜索、置顶和删除通过 `backend-api` 接入。
+- 后续注意：session tab/draft 的更复杂跨设备同步仍未做数据库扩展；当前实现满足 Web History 主路径。
 
 ### 3. 附件、图片和 busy follow-up
 
@@ -70,14 +70,14 @@
 ## 影响范围
 
 - UI/交互：Agent 面板、prompt composer、history、Diff viewer、terminal。
-- 数据/协议：可能新增 Session pinned/deleted 字段；PromptPart 会从兼容字段升级为真实运行输入。
+- 数据/协议：已新增 Session `pinned` 字段；软删除复用 `status=ARCHIVED`；PromptPart 已升级为真实运行输入。
 - 兼容性：旧 `prompt`、旧 `assistant.message.delta`、Run 级 Diff accept/reject 必须保留。
-- 风险：PromptPart 到 opencode part 的映射、PTY 安全边界、Session migration 和 E2E 稳定性是主要风险点。
+- 风险：PTY 安全边界、附件/图片来源约束和 E2E 稳定性是主要风险点。
 
 ## 验收标准
 
-- [ ] `POST /api/runs` 的 text/file/agent/reference parts 能端到端进入 opencode 运行，不破坏旧 prompt。
-- [ ] Session 支持全局列表/搜索/重命名/置顶/删除，旧 workspace session API 继续可用。
+- [x] `POST /api/runs` 的 text/file/agent/reference parts 能端到端进入 opencode 运行，不破坏旧 prompt。
+- [x] Session 支持全局列表/搜索/重命名/置顶/删除，旧 workspace session API 继续可用。
 - [ ] prompt composer 支持文件、图片、当前选区上下文和 busy follow-up 队列。
 - [ ] Diff viewer 支持 Run/Session/VCS 来源、split/unified、文件/hunk 导航和选区上下文，只有 Run 级 accept/reject 可落盘。
 - [ ] PTY WebSocket 只有在架构与安全文档合并后才进入实现。

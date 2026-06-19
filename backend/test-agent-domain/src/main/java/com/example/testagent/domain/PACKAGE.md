@@ -14,7 +14,7 @@
 
 - `package-info.java`：说明 domain 包是纯领域模型和状态机边界。
 - `workspace.Workspace`、`workspace.WorkspaceId`、`workspace.WorkspaceStatus`、`workspace.WorkspaceRepository`：工作区领域对象和值对象、持久化端口。
-- `session.Session`、`session.SessionId`、`session.SessionStatus`、`session.SessionRepository`：会话领域对象和值对象、持久化端口；Session 保存后端内部 opencode session/node 映射，不进入 HTTP DTO。
+- `session.Session`、`session.SessionId`、`session.SessionStatus`、`session.SessionRepository`：会话领域对象和值对象、持久化端口；Session 保存平台置顶状态和后端内部 opencode session/node 映射，软删除使用 `ARCHIVED` 状态。
 - `session.SessionMessage`、`session.SessionMessageId`、`session.SessionMessageRole`、`session.SessionMessageRepository`：会话消息领域对象、角色和值对象、持久化端口。
 - `run.Run`、`run.RunId`、`run.RunStatus`、`run.RunRepository`：运行聚合和值对象、状态机、持久化端口。
 - `event.RunEvent`、`event.RunEventDraft`、`event.RunEventId`、`event.RunEventType`、`event.RunEventRepository`：平台运行事件模型和 append-only 端口；RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*` 事件以及 Phase 11 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed` 等运行态事件。

@@ -3,6 +3,7 @@ package com.example.testagent.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.example.testagent.common.pagination.PageResponse;
 import com.example.testagent.domain.event.RunEvent;
 import com.example.testagent.domain.event.RunEventDraft;
 import com.example.testagent.domain.event.RunEventType;
@@ -240,6 +241,24 @@ class JdbcRepositoryIntegrationTest {
                 .containsExactly("first", "second");
     }
 
+    @Test
+    void sessionsSupportGlobalSearchPinnedOrderingAndArchiveFiltering() {
+        Workspace workspace = workspace();
+        workspaces.save(workspace);
+        sessions.save(session("ses_1234567890abcdef", "Alpha session", false, SessionStatus.ACTIVE, 0));
+        sessions.save(session("ses_2234567890abcdef", "Demo pinned", true, SessionStatus.ACTIVE, 1));
+        sessions.save(session("ses_3234567890abcdef", "Demo archived", true, SessionStatus.ARCHIVED, 2));
+
+        PageResponse<Session> page = sessions.findPage("demo", new PageRequest(1, 10));
+
+        assertThat(page.items()).extracting(Session::sessionId)
+                .containsExactly(new SessionId("ses_2234567890abcdef"));
+        assertThat(page.items().getFirst().pinned()).isTrue();
+        assertThat(sessions.findByWorkspaceId(workspace.workspaceId(), new PageRequest(1, 10)).items())
+                .extracting(Session::sessionId)
+                .containsExactly(new SessionId("ses_2234567890abcdef"), new SessionId("ses_1234567890abcdef"));
+    }
+
     private static Workspace workspace() {
         return new Workspace(
                 new WorkspaceId("wrk_1234567890abcdef"),
@@ -252,14 +271,21 @@ class JdbcRepositoryIntegrationTest {
     }
 
     private static Session session() {
+        return session("ses_1234567890abcdef", "Initial session", false, SessionStatus.ACTIVE, 0);
+    }
+
+    private static Session session(String sessionId, String title, boolean pinned, SessionStatus status, long secondOffset) {
         return new Session(
-                new SessionId("ses_1234567890abcdef"),
+                new SessionId(sessionId),
                 new WorkspaceId("wrk_1234567890abcdef"),
-                "Initial session",
-                SessionStatus.ACTIVE,
+                title,
+                status,
                 NOW,
-                NOW,
-                "trace_1234567890abcdef");
+                NOW.plusSeconds(secondOffset),
+                "trace_1234567890abcdef",
+                null,
+                null,
+                pinned);
     }
 
     private static SessionMessage sessionMessage(String messageId, String content) {

@@ -50,11 +50,25 @@
 - `uk_sessions_opencode_session_id` 保证远端 opencode session 与平台 session 一对一。
 - `idx_sessions_opencode_execution_node` 支持按执行节点排查会话映射。
 
+## V4 Session 管理字段
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V4__add_session_management_fields.sql` 为 `sessions` 增加 Phase 11 History 管理字段：
+
+| 字段 | 说明 |
+|---|---|
+| `pinned` | 会话是否置顶，非空，默认 `false`，旧数据自动保持未置顶。 |
+
+索引：
+
+- `idx_sessions_active_pinned_updated(status, pinned, updated_at, id)` 支持全局 ACTIVE 会话搜索后的置顶优先排序。
+- `idx_sessions_workspace_active_pinned_updated(workspace_id, status, pinned, updated_at, id)` 支持 workspace 维度会话列表排序。
+
 ## 兼容策略
 
 - 所有表使用自增 surrogate PK；业务层只使用带前缀业务 ID。
 - 新增字段优先允许空值或提供默认值，避免破坏旧数据。
 - `sessions.opencode_session_id` 和 `sessions.opencode_execution_node_id` 是后端内部字段，不进入 API DTO；旧 session 两列为空时由首次 Run 懒创建远端 opencode session。
+- `sessions.pinned` 进入 Session API DTO；软删除复用 `status=ARCHIVED`，不新增删除时间字段，旧数据默认 `ACTIVE` 且 `pinned=false`。
 - `run_events.payload_json` 和 `execution_nodes.capabilities_json` 当前为 JSON 文本，便于 H2 和 PostgreSQL 共用测试；未来迁移到 JSONB 时必须先保持旧列读取兼容。
 - `run_events.seq` 由持久化层按同一 run 分配，取消、Diff 动作和 opencode stream 并发追加时必须依赖 `(run_id, seq)` 唯一约束冲突后重试，保持事件流单调递增且不重复。
 - `session_messages.content` 当前直接保存文本；后续如拆分富文本 parts，必须保留旧 content 读取兼容。

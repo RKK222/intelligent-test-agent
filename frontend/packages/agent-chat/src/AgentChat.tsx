@@ -16,11 +16,12 @@ import type {
   TodoItem
 } from "@test-agent/shared-types";
 import { Button, Input, SegmentedTabs, Textarea } from "@test-agent/ui-kit";
+import { Pin, Trash2 } from "lucide-react";
 import { AgentCard } from "./cards";
 
 export type AgentChatProps = {
   messages: AgentMessage[];
-  history: { id: string; title: string; preview: string; status: string; updatedAt: string }[];
+  history: { id: string; title: string; preview: string; status: string; updatedAt: string; pinned?: boolean }[];
   running?: boolean;
   onSend: (prompt: string) => void;
   onOpenDiff: () => void;
@@ -48,6 +49,10 @@ export type AgentChatProps = {
   onModelChange?: (modelId: string) => void;
   onModeChange?: (mode: string) => void;
   onSelectHistory?: (sessionId: string) => void;
+  historySearch?: string;
+  onHistorySearchChange?: (query: string) => void;
+  onToggleHistoryPin?: (sessionId: string, pinned: boolean) => void;
+  onDeleteHistory?: (sessionId: string) => void;
   onRequestNotifications?: () => void;
 };
 
@@ -83,19 +88,24 @@ export function AgentChat({
   onModelChange,
   onModeChange,
   onSelectHistory,
+  historySearch,
+  onHistorySearchChange,
+  onToggleHistoryPin,
+  onDeleteHistory,
   onRequestNotifications
 }: AgentChatProps) {
   const [tab, setTab] = React.useState<AgentTab>("agent");
   const [text, setText] = React.useState("");
-  const [historySearch, setHistorySearch] = React.useState("");
+  const [localHistorySearch, setLocalHistorySearch] = React.useState("");
+  const resolvedHistorySearch = historySearch ?? localHistorySearch;
   const slashQuery = React.useMemo(() => commandQuery(text), [text]);
   const atQuery = React.useMemo(() => contextQuery(text), [text]);
   const filteredHistory = React.useMemo(() => {
-    const query = historySearch.trim().toLowerCase();
+    const query = resolvedHistorySearch.trim().toLowerCase();
     return query
       ? history.filter((item) => `${item.title} ${item.preview} ${item.status}`.toLowerCase().includes(query))
       : history;
-  }, [history, historySearch]);
+  }, [history, resolvedHistorySearch]);
   const contextItems = React.useMemo(() => resources.slice(0, 12).map((item) => ({
     id: item.id,
     label: item.name,
@@ -226,21 +236,50 @@ export function AgentChat({
         </>
       ) : (
         <div className="min-h-0 flex-1 space-y-2 overflow-auto p-3">
-          <Input value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} placeholder="搜索 Session" />
+          <Input
+            value={resolvedHistorySearch}
+            onChange={(event) => {
+              setLocalHistorySearch(event.target.value);
+              onHistorySearchChange?.(event.target.value);
+            }}
+            placeholder="搜索 Session"
+          />
           {filteredHistory.map((item) => (
-            <button
+            <div
               key={item.id}
-              type="button"
-              className="w-full rounded-md border border-slate-800 bg-slate-950 p-3 text-left hover:border-slate-600"
-              onClick={() => onSelectHistory?.(item.id)}
+              className="rounded-md border border-slate-800 bg-slate-950 p-3 hover:border-slate-600"
             >
-              <div className="flex items-center gap-2">
-                <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">{item.status}</span>
-                <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-100">{item.title}</span>
-                <span className="text-[11px] text-slate-500">{item.updatedAt}</span>
+              <div className="flex items-start gap-2">
+                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onSelectHistory?.(item.id)}>
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">{item.status}</span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-100">{item.title}</span>
+                    <span className="text-[11px] text-slate-500">{item.updatedAt}</span>
+                  </div>
+                  <div className="mt-1 truncate text-[12px] text-slate-500">{item.preview}</div>
+                </button>
+                {item.id.startsWith("ses_") ? (
+                  <div className="flex shrink-0 gap-1">
+                    <button
+                      type="button"
+                      title={item.pinned ? "取消置顶" : "置顶"}
+                      className={`rounded border border-slate-800 p-1 ${item.pinned ? "text-cyan-300" : "text-slate-500"} hover:border-slate-600 hover:text-slate-100`}
+                      onClick={() => onToggleHistoryPin?.(item.id, !item.pinned)}
+                    >
+                      <Pin className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      title="删除"
+                      className="rounded border border-slate-800 p-1 text-slate-500 hover:border-red-900 hover:text-red-200"
+                      onClick={() => onDeleteHistory?.(item.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : null}
               </div>
-              <div className="mt-1 truncate text-[12px] text-slate-500">{item.preview}</div>
-            </button>
+            </div>
           ))}
         </div>
       )}

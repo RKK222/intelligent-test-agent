@@ -55,8 +55,16 @@ public class SessionApplicationService {
     }
 
     public Session getSession(SessionId sessionId) {
-        return sessionRepository.findById(sessionId)
+        Session session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Session 不存在", Map.of("sessionId", sessionId.value())));
+        if (session.status() == SessionStatus.ARCHIVED) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "Session 不存在", Map.of("sessionId", sessionId.value()));
+        }
+        return session;
+    }
+
+    public PageResponse<Session> listSessions(String query, PageRequest pageRequest) {
+        return sessionRepository.findPage(query, pageRequest);
     }
 
     public PageResponse<Session> listSessions(WorkspaceId workspaceId, PageRequest pageRequest) {
@@ -64,6 +72,18 @@ public class SessionApplicationService {
             throw new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value()));
         }
         return sessionRepository.findByWorkspaceId(workspaceId, pageRequest);
+    }
+
+    public Session updateSession(SessionId sessionId, String title, Boolean pinned, String traceId) {
+        Session current = getSession(sessionId);
+        String nextTitle = title == null || title.isBlank() ? current.title() : title;
+        boolean nextPinned = pinned == null ? current.pinned() : pinned;
+        return sessionRepository.save(current.updateTitleAndPinned(nextTitle, nextPinned, Instant.now(), traceId));
+    }
+
+    public Session archiveSession(SessionId sessionId, String traceId) {
+        Session current = getSession(sessionId);
+        return sessionRepository.save(current.archive(Instant.now(), traceId));
     }
 
     public SessionMessage appendMessage(SessionId sessionId, SessionMessageRole role, String content, String traceId) {

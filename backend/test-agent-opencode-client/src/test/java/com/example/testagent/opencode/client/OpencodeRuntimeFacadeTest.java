@@ -114,7 +114,19 @@ class OpencodeRuntimeFacadeTest {
         }
 
         @Override
-        public Mono<OpencodeStartRunResult> startRun(ExecutionNode node, String opencodeSessionId, String directory, String workspace, String prompt, String traceId) {
+        public Mono<OpencodeStartRunResult> startRun(
+                ExecutionNode node,
+                String opencodeSessionId,
+                String directory,
+                String workspace,
+                String prompt,
+                List<OpencodePromptPart> parts,
+                String messageId,
+                String agent,
+                String modelProviderId,
+                String modelId,
+                String variant,
+                String traceId) {
             return Mono.just(new OpencodeStartRunResult(true));
         }
 

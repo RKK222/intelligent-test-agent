@@ -19,7 +19,8 @@ public record Session(
         Instant updatedAt,
         String traceId,
         String opencodeSessionId,
-        ExecutionNodeId opencodeExecutionNodeId) {
+        ExecutionNodeId opencodeExecutionNodeId,
+        boolean pinned) {
 
     public Session(SessionId sessionId, WorkspaceId workspaceId, String title, Instant createdAt) {
         this(sessionId, workspaceId, title, SessionStatus.ACTIVE, createdAt, createdAt, "trace_unspecified");
@@ -34,6 +35,19 @@ public record Session(
             Instant updatedAt,
             String traceId) {
         this(sessionId, workspaceId, title, status, createdAt, updatedAt, traceId, null, null);
+    }
+
+    public Session(
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            String title,
+            SessionStatus status,
+            Instant createdAt,
+            Instant updatedAt,
+            String traceId,
+            String opencodeSessionId,
+            ExecutionNodeId opencodeExecutionNodeId) {
+        this(sessionId, workspaceId, title, status, createdAt, updatedAt, traceId, opencodeSessionId, opencodeExecutionNodeId, false);
     }
 
     public Session {
@@ -73,6 +87,35 @@ public record Session(
                 updatedAt,
                 traceId,
                 opencodeSessionId,
-                executionNodeId);
+                executionNodeId,
+                pinned);
+    }
+
+    public Session updateTitleAndPinned(String title, boolean pinned, Instant updatedAt, String traceId) {
+        return new Session(
+                sessionId,
+                workspaceId,
+                title,
+                status,
+                createdAt,
+                updatedAt,
+                traceId,
+                opencodeSessionId,
+                opencodeExecutionNodeId,
+                pinned);
+    }
+
+    public Session archive(Instant updatedAt, String traceId) {
+        return new Session(
+                sessionId,
+                workspaceId,
+                title,
+                SessionStatus.ARCHIVED,
+                createdAt,
+                updatedAt,
+                traceId,
+                opencodeSessionId,
+                opencodeExecutionNodeId,
+                false);
     }
 }

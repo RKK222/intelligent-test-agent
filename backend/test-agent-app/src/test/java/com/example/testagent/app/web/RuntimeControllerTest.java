@@ -2,6 +2,7 @@ package com.example.testagent.app.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
@@ -10,11 +11,16 @@ import com.example.testagent.app.run.RunDiffActionResponse;
 import com.example.testagent.app.run.RunDiffApplicationService;
 import com.example.testagent.app.run.RunDiffFileResponse;
 import com.example.testagent.app.run.RunDiffResponse;
+import com.example.testagent.app.run.StartRunInput;
+import com.example.testagent.app.session.SessionApplicationService;
 import com.example.testagent.app.workspace.WorkspaceApplicationService;
+import com.example.testagent.common.pagination.PageResponse;
 import com.example.testagent.domain.run.Run;
 import com.example.testagent.domain.run.RunId;
 import com.example.testagent.domain.run.RunStatus;
+import com.example.testagent.domain.session.Session;
 import com.example.testagent.domain.session.SessionId;
+import com.example.testagent.domain.session.SessionStatus;
 import com.example.testagent.domain.workspace.Workspace;
 import com.example.testagent.domain.workspace.WorkspaceId;
 import com.example.testagent.domain.workspace.WorkspaceStatus;
@@ -60,8 +66,8 @@ class RuntimeControllerTest {
     void runControllerStartsRunAndReturnsRunningStatus() {
         RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
         when(service.startRun(
-                        eq(new SessionId("ses_1234567890abcdef")),
-                        eq("run the tests"),
+                        argThat(input -> new SessionId("ses_1234567890abcdef").equals(input.sessionId())
+                                && "run the tests".equals(input.effectivePrompt())),
                         eq("trace_1234567890abcdef")))
                 .thenReturn(run());
         WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
@@ -87,8 +93,11 @@ class RuntimeControllerTest {
     void runControllerAcceptsPhase11PromptPartsPayload() {
         RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
         when(service.startRun(
-                        eq(new SessionId("ses_1234567890abcdef")),
-                        eq("run the tests"),
+                        argThat(input -> new SessionId("ses_1234567890abcdef").equals(input.sessionId())
+                                && "run the tests".equals(input.effectivePrompt())
+                                && input.parts().size() == 1
+                                && "build".equals(input.agent())
+                                && "anthropic/claude-sonnet-4-5".equals(input.model())),
                         eq("trace_1234567890abcdef")))
                 .thenReturn(run());
         WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
@@ -141,8 +150,7 @@ class RuntimeControllerTest {
     void runControllerOffloadsBlockingRunStartFromWebFluxThread() {
         RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
         when(service.startRun(
-                        eq(new SessionId("ses_1234567890abcdef")),
-                        eq("run the tests"),
+                        any(StartRunInput.class),
                         eq("trace_1234567890abcdef")))
                 .thenAnswer(ignored -> {
                     assertThat(Thread.currentThread().getName()).contains("boundedElastic");
@@ -237,6 +245,54 @@ class RuntimeControllerTest {
                 eq(100));
     }
 
+    @Test
+    void sessionControllerListsSearchesUpdatesAndSoftDeletesSessions() {
+        SessionApplicationService service = org.mockito.Mockito.mock(SessionApplicationService.class);
+        when(service.listSessions(eq("demo"), any()))
+                .thenReturn(new PageResponse<>(List.of(session("Demo session", true, SessionStatus.ACTIVE)), 1, 20, 1));
+        when(service.updateSession(
+                        eq(new SessionId("ses_1234567890abcdef")),
+                        eq("Renamed"),
+                        eq(false),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(session("Renamed", false, SessionStatus.ACTIVE));
+        when(service.archiveSession(eq(new SessionId("ses_1234567890abcdef")), eq("trace_1234567890abcdef")))
+                .thenReturn(session("Renamed", false, SessionStatus.ARCHIVED));
+        WebTestClient client = WebTestClient.bindToController(new SessionController(service))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.get()
+                .uri("/api/sessions?q=demo&page=1&size=20")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.items[0].title").isEqualTo("Demo session")
+                .jsonPath("$.data.items[0].pinned").isEqualTo(true);
+
+        client.patch()
+                .uri("/api/sessions/ses_1234567890abcdef")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"title":"Renamed","pinned":false}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.title").isEqualTo("Renamed")
+                .jsonPath("$.data.pinned").isEqualTo(false);
+
+        client.delete()
+                .uri("/api/sessions/ses_1234567890abcdef")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("ARCHIVED");
+    }
+
     private static Workspace workspace() {
         return new Workspace(
                 new WorkspaceId("wrk_1234567890abcdef"),
@@ -257,5 +313,19 @@ class RuntimeControllerTest {
                 NOW,
                 NOW,
                 "trace_1234567890abcdef");
+    }
+
+    private static Session session(String title, boolean pinned, SessionStatus status) {
+        return new Session(
+                new SessionId("ses_1234567890abcdef"),
+                new WorkspaceId("wrk_1234567890abcdef"),
+                title,
+                status,
+                NOW,
+                NOW,
+                "trace_1234567890abcdef",
+                null,
+                null,
+                pinned);
     }
 }

@@ -23,6 +23,7 @@
 - `db/migration/V1__create_core_tables.sql`：创建核心业务表和索引。
 - `db/migration/V2__create_session_messages.sql`：创建会话消息表和分页索引。
 - `db/migration/V3__add_session_opencode_mapping.sql`：为 sessions 增加可空内部 opencode 映射列、成对 check、节点外键和索引。
+- `db/migration/V4__add_session_management_fields.sql`：为 sessions 增加 pinned 字段和 ACTIVE 会话排序索引。
 - 后续可新增 SQL 查询、migration 相关适配、Redis 限流或缓存实现。
 
 ## 允许依赖

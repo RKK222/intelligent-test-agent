@@ -183,8 +183,11 @@ Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `POST` | `/api/sessions` | 创建会话。 |
+| `GET` | `/api/sessions?q=&page=&size=` | 全局搜索/分页查询 ACTIVE 会话，置顶优先。 |
 | `GET` | `/api/workspaces/{workspaceId}/sessions` | 按工作区分页查询会话。 |
 | `GET` | `/api/sessions/{sessionId}` | 查询会话详情。 |
+| `PATCH` | `/api/sessions/{sessionId}` | 更新会话标题或置顶状态。 |
+| `DELETE` | `/api/sessions/{sessionId}` | 软删除会话，状态变为 `ARCHIVED`。 |
 | `POST` | `/api/sessions/{sessionId}/messages` | 追加会话消息。 |
 | `GET` | `/api/sessions/{sessionId}/messages` | 分页读取会话消息。 |
 
@@ -197,7 +200,22 @@ Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做
 }
 ```
 
-`SessionResponse`：`sessionId`、`workspaceId`、`title`、`status`、`createdAt`、`updatedAt`。
+`PATCH /api/sessions/{sessionId}` 请求体：
+
+```json
+{
+  "title": "renamed session",
+  "pinned": true
+}
+```
+
+`SessionResponse`：`sessionId`、`workspaceId`、`title`、`status`、`pinned`、`createdAt`、`updatedAt`。
+
+兼容要求：
+
+- 旧的 `/api/workspaces/{workspaceId}/sessions` 继续有效，但默认只返回 `ACTIVE` 会话。
+- `GET /api/sessions` 用于 Phase 11 History 全局搜索，`q` 为空时返回所有 `ACTIVE` 会话。
+- `DELETE /api/sessions/{sessionId}` 为软删除，不删除消息、Run、事件或远端 opencode 映射；普通详情、列表和消息追加会把 `ARCHIVED` 会话视为不存在。
 
 `POST /api/sessions/{sessionId}/messages` 请求体：
 
@@ -231,7 +249,7 @@ Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做
 }
 ```
 
-Phase 11 起请求体保持向后兼容，并预留以下可选字段：
+Phase 11 起请求体保持向后兼容，并支持以下可选字段：
 
 ```json
 {
@@ -239,8 +257,9 @@ Phase 11 起请求体保持向后兼容，并预留以下可选字段：
   "prompt": "run prompt",
   "parts": [
     { "type": "text", "text": "run prompt" },
-    { "type": "file", "path": "src/App.tsx", "source": { "start": 1, "end": 20 } },
-    { "type": "agent", "agentId": "build" }
+    { "type": "file", "path": "src/App.tsx", "source": { "text": "file content", "start": 0, "end": 12 } },
+    { "type": "agent", "agentId": "build" },
+    { "type": "reference", "id": "ref_1", "label": "Current issue", "uri": "mcp://issues/1" }
   ],
   "messageId": "msg_...",
   "agent": "build",
@@ -254,8 +273,10 @@ Phase 11 起请求体保持向后兼容，并预留以下可选字段：
 
 - 旧 `prompt: string` 继续有效；`parts` 缺失时后端按单个 text part 处理。
 - `parts`、`messageId`、`agent`、`model`、`variant`、`mode` 均为可选字段，旧前端不需要改动。
-- Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置。
-- P0 contract prework 阶段，后端已可接收上述字段并把 text parts 合成为当前 Run 编排使用的 prompt；file/agent/reference parts 的完整语义需等 `test-agent-opencode-client` facade 扩展后再透传。
+- `parts` 会下沉为 opencode `prompt_async` 的 `text/file/agent` parts；`reference` part 会转换为可读 text part。
+- file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；只有没有内联内容时才把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。
+- `model` 使用 `providerId/modelId` 字符串格式；格式不完整时后端保留旧默认模型，不向 opencode 传 model override。
+- Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此不写入 `prompt_async` 请求体。
 
 启动流程会追加用户消息，创建 `PENDING` Run，再按平台 session 的内部 opencode 映射决定路由：
 

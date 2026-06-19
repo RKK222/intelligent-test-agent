@@ -32,6 +32,12 @@ public interface OpencodeSdkGateway {
             String directory,
             String workspace,
             String prompt,
+            java.util.List<OpencodePromptPart> parts,
+            String messageId,
+            String agent,
+            String modelProviderId,
+            String modelId,
+            String variant,
             String traceId);
 
     Flux<JsonNode> streamEvents(ExecutionNode node, String directory, String workspace, String traceId);

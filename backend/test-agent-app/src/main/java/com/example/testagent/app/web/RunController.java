@@ -4,7 +4,6 @@ import com.example.testagent.app.run.RunApplicationService;
 import com.example.testagent.app.run.RunDiffApplicationService;
 import com.example.testagent.common.api.ApiResponse;
 import com.example.testagent.domain.run.RunId;
-import com.example.testagent.domain.session.SessionId;
 import com.example.testagent.event.RunEventSsePayload;
 import com.example.testagent.event.RunEventSseStreamService;
 import jakarta.validation.Valid;
@@ -51,7 +50,7 @@ public class RunController {
             @Valid @RequestBody RuntimeDtos.StartRunRequest request,
             ServerWebExchange exchange) {
         return blockingResponse(exchange, traceId -> RuntimeDtos.RunResponse.from(runService.startRun(
-                new SessionId(request.sessionId()), request.effectivePrompt(), traceId)));
+                request.toInput(), traceId)));
     }
 
     @GetMapping("/api/runs/{runId}")

@@ -30,7 +30,8 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
             instant(rs, "updated_at"),
             rs.getString("trace_id"),
             rs.getString("opencode_session_id"),
-            executionNodeId(rs.getString("opencode_execution_node_id")));
+            executionNodeId(rs.getString("opencode_execution_node_id")),
+            rs.getBoolean("pinned"));
 
     public JdbcSessionRepository(JdbcClient jdbcClient) {
         this.jdbcClient = jdbcClient;
@@ -44,7 +45,8 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                             set workspace_id = :workspaceId, title = :title, status = :status,
                                 trace_id = :traceId, created_at = :createdAt, updated_at = :updatedAt,
                                 opencode_session_id = :opencodeSessionId,
-                                opencode_execution_node_id = :opencodeExecutionNodeId
+                                opencode_execution_node_id = :opencodeExecutionNodeId,
+                                pinned = :pinned
                             where session_id = :sessionId
                             """)
                     .param("sessionId", session.sessionId().value())
@@ -56,16 +58,17 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                     .param("updatedAt", timestamp(session.updatedAt()))
                     .param("opencodeSessionId", session.opencodeSessionId())
                     .param("opencodeExecutionNodeId", executionNodeIdValue(session.opencodeExecutionNodeId()))
+                    .param("pinned", session.pinned())
                     .update();
         } else {
             jdbcClient.sql("""
                             insert into sessions(
                                 session_id, workspace_id, title, status, trace_id, created_at, updated_at,
-                                opencode_session_id, opencode_execution_node_id
+                                opencode_session_id, opencode_execution_node_id, pinned
                             )
                             values (
                                 :sessionId, :workspaceId, :title, :status, :traceId, :createdAt, :updatedAt,
-                                :opencodeSessionId, :opencodeExecutionNodeId
+                                :opencodeSessionId, :opencodeExecutionNodeId, :pinned
                             )
                             """)
                     .param("sessionId", session.sessionId().value())
@@ -77,6 +80,7 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                     .param("updatedAt", timestamp(session.updatedAt()))
                     .param("opencodeSessionId", session.opencodeSessionId())
                     .param("opencodeExecutionNodeId", executionNodeIdValue(session.opencodeExecutionNodeId()))
+                    .param("pinned", session.pinned())
                     .update();
         }
         return session;
@@ -86,7 +90,7 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
     public Optional<Session> findById(SessionId sessionId) {
         return jdbcClient.sql("""
                         select session_id, workspace_id, title, status, trace_id, created_at, updated_at,
-                               opencode_session_id, opencode_execution_node_id
+                               opencode_session_id, opencode_execution_node_id, pinned
                         from sessions
                         where session_id = :sessionId
                         """)
@@ -96,16 +100,53 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
     }
 
     @Override
+    public PageResponse<Session> findPage(String query, PageRequest pageRequest) {
+        String pattern = searchPattern(query);
+        var items = jdbcClient.sql("""
+                        select session_id, workspace_id, title, status, trace_id, created_at, updated_at,
+                               opencode_session_id, opencode_execution_node_id, pinned
+                        from sessions
+                        where status = :status
+                          and (:queryPattern is null
+                              or lower(title) like :queryPattern
+                              or lower(session_id) like :queryPattern)
+                        order by pinned desc, updated_at desc, id desc
+                        limit :limit offset :offset
+                        """)
+                .param("status", SessionStatus.ACTIVE.name())
+                .param("queryPattern", pattern)
+                .param("limit", pageRequest.size())
+                .param("offset", pageRequest.offset())
+                .query(rowMapper)
+                .list();
+        Long total = jdbcClient.sql("""
+                        select count(*)
+                        from sessions
+                        where status = :status
+                          and (:queryPattern is null
+                              or lower(title) like :queryPattern
+                              or lower(session_id) like :queryPattern)
+                        """)
+                .param("status", SessionStatus.ACTIVE.name())
+                .param("queryPattern", pattern)
+                .query(Long.class)
+                .single();
+        return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);
+    }
+
+    @Override
     public PageResponse<Session> findByWorkspaceId(WorkspaceId workspaceId, PageRequest pageRequest) {
         var items = jdbcClient.sql("""
                         select session_id, workspace_id, title, status, trace_id, created_at, updated_at,
-                               opencode_session_id, opencode_execution_node_id
+                               opencode_session_id, opencode_execution_node_id, pinned
                         from sessions
                         where workspace_id = :workspaceId
-                        order by created_at desc, id desc
+                          and status = :status
+                        order by pinned desc, updated_at desc, id desc
                         limit :limit offset :offset
                         """)
                 .param("workspaceId", workspaceId.value())
+                .param("status", SessionStatus.ACTIVE.name())
                 .param("limit", pageRequest.size())
                 .param("offset", pageRequest.offset())
                 .query(rowMapper)
@@ -114,8 +155,10 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                         select count(*)
                         from sessions
                         where workspace_id = :workspaceId
+                          and status = :status
                         """)
                 .param("workspaceId", workspaceId.value())
+                .param("status", SessionStatus.ACTIVE.name())
                 .query(Long.class)
                 .single();
         return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);
@@ -143,6 +186,13 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                 .param("traceId", traceId)
                 .update();
         return findById(sessionId);
+    }
+
+    private String searchPattern(String query) {
+        if (query == null || query.isBlank()) {
+            return null;
+        }
+        return "%" + query.toLowerCase() + "%";
     }
 
     private ExecutionNodeId executionNodeId(String value) {

@@ -262,6 +262,11 @@ class RunDiffApplicationServiceTest {
         }
 
         @Override
+        public PageResponse<Session> findPage(String query, PageRequest pageRequest) {
+            return new PageResponse<>(List.of(session), pageRequest.page(), pageRequest.size(), 1);
+        }
+
+        @Override
         public PageResponse<Session> findByWorkspaceId(WorkspaceId workspaceId, PageRequest pageRequest) {
             return new PageResponse<>(List.of(session), pageRequest.page(), pageRequest.size(), 1);
         }

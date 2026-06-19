@@ -16,9 +16,9 @@
 - `TestAgentApplication`：Spring Boot 启动类，扫描 `com.example.testagent` 下的后端组件。
 - `web.TraceIdWebFilter`：入口请求 traceId 透传、生成和响应头写入。
 - `web.GlobalExceptionHandler`：统一异常到平台错误响应的转换。
-- `web.WorkspaceController`、`web.SessionController`、`web.RunController`、`web.OpencodeRuntimeController`：Runtime HTTP/SSE 协议转换入口。
+- `web.WorkspaceController`、`web.SessionController`、`web.RunController`、`web.OpencodeRuntimeController`：Runtime HTTP/SSE 协议转换入口；`SessionController` 支持 Phase 11 History 全局搜索、标题/置顶更新和软删除。
 - `web.RunController`：Run/Diff HTTP 端点返回 `Mono<ApiResponse<...>>`，并将阻塞式应用服务编排 offload 到 `boundedElastic`；RunEvent SSE 端点保持 `Flux` 流式返回，续传时 header `Last-Event-ID` 优先、query `lastEventId` 作为浏览器 EventSource 兼容入口。
-- `web.RuntimeDtos.StartRunRequest`：兼容旧 prompt string 与 Phase 11 可选字段，当前仅把 text parts 合成为 Run 编排 prompt。
+- `web.RuntimeDtos.StartRunRequest` / `run.StartRunInput`：兼容旧 prompt string 与 Phase 11 可选字段，把平台 prompt parts 和运行态选择传入 Run 编排。
 - `web.ApiTokenWebFilter`、`web.InMemoryRateLimitWebFilter`：API token 鉴权占位和内存限流占位。
 - `workspace.WorkspaceApplicationService`、`workspace.WorkspaceFileService`：工作区注册、文件路径归一化和 UTF-8 文件读写。
 - `session.SessionApplicationService`：会话创建、查询和消息追加/分页。

@@ -16,6 +16,8 @@ public interface SessionRepository {
 
     Optional<Session> findById(SessionId sessionId);
 
+    PageResponse<Session> findPage(String query, PageRequest pageRequest);
+
     PageResponse<Session> findByWorkspaceId(WorkspaceId workspaceId, PageRequest pageRequest);
 
     /**

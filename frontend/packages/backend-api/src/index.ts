@@ -123,9 +123,13 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         status: status.exists ? "unchanged" : "deleted"
       } satisfies FileStatus;
     },
+    listAllSessions: (page = 1, size = 20, q?: string) => request<PageResponse<Session>>(`/api/sessions${query({ page, size, q })}`),
     listSessions: (workspaceId: string, page = 1, size = 20) =>
       request<PageResponse<Session>>(`/api/workspaces/${workspaceId}/sessions?page=${page}&size=${size}`),
     getSession: (sessionId: string) => request<Session>(`/api/sessions/${encodeURIComponent(sessionId)}`),
+    updateSession: (sessionId: string, payload: { title?: string; pinned?: boolean }) =>
+      request<Session>(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "PATCH", body: JSON.stringify(payload) }),
+    deleteSession: (sessionId: string) => request<Session>(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }),
     listSessionMessages: (sessionId: string, page = 1, size = 100) =>
       request<PageResponse<SessionMessage>>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?page=${page}&size=${size}`),
     createSession: (workspaceId: string, title: string) =>

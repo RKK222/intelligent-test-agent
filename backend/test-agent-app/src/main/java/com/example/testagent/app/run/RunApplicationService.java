@@ -28,9 +28,16 @@ import com.example.testagent.opencode.client.OpencodeCancelCommand;
 import com.example.testagent.opencode.client.OpencodeClientFacade;
 import com.example.testagent.opencode.client.OpencodeCreateSessionCommand;
 import com.example.testagent.opencode.client.OpencodeCreateSessionResult;
+import com.example.testagent.opencode.client.OpencodePromptPart;
 import com.example.testagent.opencode.client.OpencodeStartRunCommand;
 import com.example.testagent.opencode.client.OpencodeStreamEventsCommand;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
@@ -78,7 +85,13 @@ public class RunApplicationService {
     }
 
     public Run startRun(SessionId sessionId, String prompt, String traceId) {
+        return startRun(StartRunInput.ofPrompt(sessionId, prompt), traceId);
+    }
+
+    public Run startRun(StartRunInput input, String traceId) {
         Instant now = Instant.now();
+        SessionId sessionId = input.sessionId();
+        String prompt = input.effectivePrompt();
         Session session = findSession(sessionId);
         Workspace workspace = findWorkspace(session.workspaceId());
         Run pending = new Run(
@@ -97,12 +110,19 @@ public class RunApplicationService {
             OpencodeRoutingTarget target = resolveOpencodeTarget(session, pending.runId(), now, traceId);
             routingDecisionRepository.save(target.decision());
             Session opencodeSession = ensureOpencodeSession(session, workspace, target.node(), traceId);
+            ModelSelection model = parseModel(input.model());
             opencodeClientFacade.startRun(new OpencodeStartRunCommand(
                             target.node(),
                             opencodeSession.opencodeSessionId(),
                             workspace.rootPath(),
                             null,
                             prompt,
+                            toOpencodePromptParts(input, workspace),
+                            input.messageId(),
+                            input.agent(),
+                            model.providerId(),
+                            model.modelId(),
+                            input.variant(),
                             traceId))
                     .block();
             Run running = runRepository.save(pending.start(Instant.now()));
@@ -114,6 +134,171 @@ public class RunApplicationService {
             append(failed.runId(), RunEventType.RUN_FAILED, traceId, Instant.now(), Map.of("errorCode", exception.errorCode().name()));
             throw exception;
         }
+    }
+
+    private List<OpencodePromptPart> toOpencodePromptParts(StartRunInput input, Workspace workspace) {
+        if (input.parts().isEmpty()) {
+            return List.of(OpencodePromptPart.text(input.effectivePrompt()));
+        }
+        List<OpencodePromptPart> parts = new ArrayList<>();
+        boolean hasTextPart = input.parts().stream()
+                .anyMatch(part -> "text".equals(part.type()) && part.text() != null && !part.text().isBlank());
+        if (input.prompt() != null && !hasTextPart) {
+            parts.add(OpencodePromptPart.text(input.prompt()));
+        }
+        parts.addAll(input.parts().stream()
+                .map(part -> toOpencodePromptPart(part, workspace))
+                .filter(Objects::nonNull)
+                .toList());
+        return parts.isEmpty() ? List.of(OpencodePromptPart.text(input.effectivePrompt())) : parts;
+    }
+
+    private OpencodePromptPart toOpencodePromptPart(StartRunInput.PromptPart part, Workspace workspace) {
+        if (part.type() == null) {
+            return null;
+        }
+        return switch (part.type()) {
+            case "text" -> part.text() == null ? null : OpencodePromptPart.text(part.text());
+            case "file" -> toOpencodeFilePart(part, workspace);
+            case "agent" -> toOpencodeAgentPart(part);
+            case "reference" -> toReferenceTextPart(part);
+            default -> null;
+        };
+    }
+
+    private OpencodePromptPart toOpencodeFilePart(StartRunInput.PromptPart part, Workspace workspace) {
+        String mime = firstText(part.mimeType(), "text/plain");
+        String filename = firstText(part.name(), filenameFromPath(part.path()), "attachment");
+        String text = sourceText(part);
+        if (text != null) {
+            String url = "data:" + mime + ";base64," + Base64.getEncoder()
+                    .encodeToString(text.getBytes(StandardCharsets.UTF_8));
+            return OpencodePromptPart.file(url, mime, filename, fileSource(part, text));
+        }
+        if (part.url() != null) {
+            return OpencodePromptPart.file(part.url(), mime, filename, normalizedSource(part.source()));
+        }
+        if (part.path() != null) {
+            // 只允许把 workspace 内路径转成 file:// URL，防止前端构造任意宿主机路径交给 opencode 读取。
+            return OpencodePromptPart.file(workspaceFileUrl(workspace, part.path()), mime, filename, fileSource(part, null));
+        }
+        return null;
+    }
+
+    private OpencodePromptPart toOpencodeAgentPart(StartRunInput.PromptPart part) {
+        String agentName = firstText(part.name(), part.agentId());
+        if (agentName == null) {
+            return null;
+        }
+        return OpencodePromptPart.agent(agentName, agentSource(part));
+    }
+
+    private OpencodePromptPart toReferenceTextPart(StartRunInput.PromptPart part) {
+        String label = firstText(part.label(), part.id(), part.uri());
+        if (label == null) {
+            return null;
+        }
+        String suffix = part.uri() == null ? "" : " (" + part.uri() + ")";
+        return OpencodePromptPart.text("Reference: " + label + suffix);
+    }
+
+    private Map<String, Object> fileSource(StartRunInput.PromptPart part, String text) {
+        String path = firstText(part.path(), part.name());
+        if (path == null && text == null) {
+            return Map.of();
+        }
+        LinkedHashMap<String, Object> source = new LinkedHashMap<>();
+        source.put("type", "file");
+        if (path != null) {
+            source.put("path", path);
+        }
+        if (text != null) {
+            source.put("text", Map.of(
+                    "value", text,
+                    "start", sourceNumber(part.source(), "start", 0),
+                    "end", sourceNumber(part.source(), "end", text.length())));
+        }
+        return Map.copyOf(source);
+    }
+
+    private Map<String, Object> agentSource(StartRunInput.PromptPart part) {
+        String value = sourceText(part);
+        if (value == null) {
+            return Map.of();
+        }
+        return Map.of(
+                "value", value,
+                "start", sourceNumber(part.source(), "start", 0),
+                "end", sourceNumber(part.source(), "end", value.length()));
+    }
+
+    private Map<String, Object> normalizedSource(Map<String, Object> source) {
+        return source == null ? Map.of() : Map.copyOf(source);
+    }
+
+    private String workspaceFileUrl(Workspace workspace, String path) {
+        Path root = Path.of(workspace.rootPath()).toAbsolutePath().normalize();
+        Path target = root.resolve(path).toAbsolutePath().normalize();
+        if (!target.startsWith(root)) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "文件上下文必须位于当前 Workspace 内",
+                    Map.of("path", path, "workspaceId", workspace.workspaceId().value()));
+        }
+        return target.toUri().toString();
+    }
+
+    private String sourceText(StartRunInput.PromptPart part) {
+        if (part.content() != null) {
+            return part.content();
+        }
+        Object text = part.source().get("text");
+        if (text instanceof String value && !value.isBlank()) {
+            return value;
+        }
+        if (text instanceof Map<?, ?> nested) {
+            Object value = nested.get("value");
+            if (value instanceof String stringValue && !stringValue.isBlank()) {
+                return stringValue;
+            }
+        }
+        return null;
+    }
+
+    private int sourceNumber(Map<String, Object> source, String key, int fallback) {
+        Object value = source.get(key);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        return fallback;
+    }
+
+    private String filenameFromPath(String path) {
+        if (path == null) {
+            return null;
+        }
+        Path filename = Path.of(path).getFileName();
+        return filename == null ? path : filename.toString();
+    }
+
+    private ModelSelection parseModel(String model) {
+        if (model == null) {
+            return new ModelSelection(null, null);
+        }
+        int slash = model.indexOf('/');
+        if (slash <= 0 || slash == model.length() - 1) {
+            return new ModelSelection(null, null);
+        }
+        return new ModelSelection(model.substring(0, slash), model.substring(slash + 1));
+    }
+
+    private String firstText(String... values) {
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        }
+        return null;
     }
 
     public Run getRun(RunId runId) {
@@ -304,5 +489,8 @@ public class RunApplicationService {
     }
 
     private record OpencodeRoutingTarget(ExecutionNode node, RoutingDecision decision) {
+    }
+
+    private record ModelSelection(String providerId, String modelId) {
     }
 }

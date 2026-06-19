@@ -42,6 +42,7 @@ import com.example.testagent.opencode.client.OpencodeDiffCommand;
 import com.example.testagent.opencode.client.OpencodeDiffResult;
 import com.example.testagent.opencode.client.OpencodeHealthCommand;
 import com.example.testagent.opencode.client.OpencodeHealthResult;
+import com.example.testagent.opencode.client.OpencodePromptPart;
 import com.example.testagent.opencode.client.OpencodeRejectDiffCommand;
 import com.example.testagent.opencode.client.OpencodeRejectDiffResult;
 import com.example.testagent.opencode.client.OpencodeRuntimeCommand;
@@ -98,6 +99,93 @@ class RunApplicationServiceTest {
         assertThat(sessions.current.opencodeExecutionNodeId()).isEqualTo(node().executionNodeId());
         assertThat(events.events).extracting(RunEvent::type)
                 .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED);
+    }
+
+    @Test
+    void servicePassesPromptPartsAndRuntimeSelectionToOpencodeFacade() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                facade);
+
+        Run run = service.startRun(new StartRunInput(
+                        new SessionId("ses_1234567890abcdef"),
+                        null,
+                        List.of(
+                                StartRunInput.PromptPart.text("review this file"),
+                                StartRunInput.PromptPart.file(
+                                        "src/App.tsx",
+                                        "App.tsx",
+                                        "text/plain",
+                                        null,
+                                        "export function App() { return null; }",
+                                        Map.of("origin", "editor")),
+                                StartRunInput.PromptPart.agent("build", "Build")),
+                        "msg_remote1234567890abcdef",
+                        "build",
+                        "anthropic/claude-sonnet-4-5",
+                        "default",
+                        "build"),
+                "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(facade.startRunCommands).hasSize(1);
+        OpencodeStartRunCommand command = facade.startRunCommands.getFirst();
+        assertThat(command.prompt()).isEqualTo("review this file");
+        assertThat(command.messageId()).isEqualTo("msg_remote1234567890abcdef");
+        assertThat(command.agent()).isEqualTo("build");
+        assertThat(command.modelProviderId()).isEqualTo("anthropic");
+        assertThat(command.modelId()).isEqualTo("claude-sonnet-4-5");
+        assertThat(command.variant()).isEqualTo("default");
+        assertThat(command.parts()).hasSize(3);
+        assertThat(command.parts().get(0).type()).isEqualTo("text");
+        assertThat(command.parts().get(1).type()).isEqualTo("file");
+        assertThat(command.parts().get(1).url()).startsWith("data:text/plain");
+        assertThat(command.parts().get(2).type()).isEqualTo("agent");
+        assertThat(command.parts().get(2).name()).isEqualTo("Build");
+    }
+
+    @Test
+    void servicePreservesLegacyPromptWhenPartsDoNotIncludeText() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                facade);
+
+        service.startRun(new StartRunInput(
+                        new SessionId("ses_1234567890abcdef"),
+                        "legacy prompt",
+                        List.of(StartRunInput.PromptPart.file(
+                                "src/App.tsx",
+                                "App.tsx",
+                                "text/plain",
+                                null,
+                                "export const value = 1;",
+                                Map.of())),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null),
+                "trace_1234567890abcdef");
+
+        assertThat(facade.startRunCommands.getFirst().parts()).extracting(OpencodePromptPart::type)
+                .containsExactly("text", "file");
+        assertThat(facade.startRunCommands.getFirst().parts().getFirst().text()).isEqualTo("legacy prompt");
     }
 
     @Test
@@ -441,6 +529,11 @@ class RunApplicationServiceTest {
         @Override
         public Optional<Session> findById(SessionId sessionId) {
             return Optional.of(current);
+        }
+
+        @Override
+        public PageResponse<Session> findPage(String query, PageRequest pageRequest) {
+            return new PageResponse<>(List.of(current), pageRequest.page(), pageRequest.size(), 1);
         }
 
         @Override

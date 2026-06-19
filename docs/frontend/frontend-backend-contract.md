@@ -32,8 +32,8 @@
 当前 Runtime API 分组：
 
 - Workspace：`POST/GET /api/workspaces`、文件单层列表、UTF-8 内容读写和文件状态。
-- Session：创建、按 workspace 分页、详情、消息追加和消息分页。
-- Run：启动、详情、取消；Phase 11 起 `POST /api/runs` 可选支持 `parts`、`messageId`、`agent`、`model`、`variant`、`mode`，旧 `prompt` 保持有效。
+- Session：创建、按 workspace 分页、全局搜索、详情、标题/置顶更新、软删除、消息追加和消息分页。
+- Run：启动、详情、取消；Phase 11 起 `POST /api/runs` 可选支持 `parts`、`messageId`、`agent`、`model`、`variant`、`mode`，旧 `prompt` 保持有效，后端会把 text/file/agent parts 与 agent/model/variant/messageId 下沉到 opencode facade。
 - Diff：`GET /api/runs/{runId}/diff`、`POST /api/runs/{runId}/diff/accept`、`POST /api/runs/{runId}/diff/reject`。
 - Event：`GET /api/runs/{runId}/events`，只消费平台 RunEvent SSE。
 - Phase 11 Runtime：Session 列表/搜索/children/diff/todo/fork/abort/revert/command/shell、permissions、questions、agents、models、providers、commands、references、fs、vcs、lsp、mcp 等接口必须先进入 `backend-api`，页面不得直接拼接 URL。
@@ -88,7 +88,7 @@
 
 - `packages/backend-api` 已封装 agents/models/providers/commands/references、session messages、session children/todo/diff/abort/fork/compact/revert/command/shell、permission/question、fs/vcs/lsp/mcp status/resources/tools 等平台 API 方法；页面组件不得自行拼接这些 URL。
 - `packages/agent-chat` 通过纯 reducer 消费 RunEvent，归并 message timeline、message parts、permission dock、question dock、Todo 和 session diff 状态；它不订阅 SSE，也不调用 HTTP API。
-- `apps/agent-web` 负责组合 TanStack Query、RunEvent SSE、backend-api mutation 和 reducer dispatch；发送 Run 时同时提交 `prompt`、text/file `parts`，并带上当前 Agent/Provider/Model/Mode 运行态选择。
+- `apps/agent-web` 负责组合 TanStack Query、RunEvent SSE、backend-api mutation 和 reducer dispatch；发送 Run 时同时提交 `prompt`、text/file `parts`，并带上当前 Agent/Provider/Model/Mode 运行态选择。`mode` 只作为平台运行态字段保留，opencode `PromptInput` 不支持时不得强行塞进 `prompt_async`。History 搜索、置顶和删除只能通过 `backend-api` 的平台 Session 方法完成。
 - 当前 UI 已提供 Agent/Provider/Model/Mode 选择、真实 Session history 切换、permission once/always/reject、question reply/reject、Todo 展示、slash command palette、`@` runtime context picker、Run/Session/VCS Diff 来源切换、MCP/LSP/VCS 状态摘要和 `/s/{sessionId}` 只读 transcript 页面；完整图片附件、公开 share 授权、per-file/per-message 回滚和 PTY 仍按后续批次推进。
 
 ## Phase 11 Web App 复刻边界

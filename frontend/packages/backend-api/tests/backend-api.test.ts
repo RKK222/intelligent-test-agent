@@ -169,6 +169,45 @@ describe("backend-api", () => {
     expect(fetcher).toHaveBeenCalledWith("http://api/api/sessions/ses_1/messages?page=1&size=100", expect.any(Object));
   });
 
+  it("uses platform session management APIs without direct opencode URLs", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: { items: [{ sessionId: "ses_1", title: "Pinned", pinned: true }], page: 1, size: 20, total: 1 }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ success: true, traceId: "trace_fixed", data: { sessionId: "ses_1", title: "Renamed", pinned: false } }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: { sessionId: "ses_1", status: "ARCHIVED" } }), {
+          status: 200
+        })
+      );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.listAllSessions(1, 20, "pin")).resolves.toMatchObject({
+      items: [{ sessionId: "ses_1", pinned: true }]
+    });
+    await client.updateSession("ses_1", { title: "Renamed", pinned: false });
+    await client.deleteSession("ses_1");
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe("http://api/api/sessions?page=1&size=20&q=pin");
+    expect(fetcher.mock.calls[1]?.[0]).toBe("http://api/api/sessions/ses_1");
+    expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "PATCH", body: JSON.stringify({ title: "Renamed", pinned: false }) }));
+    expect(fetcher.mock.calls[2]?.[0]).toBe("http://api/api/sessions/ses_1");
+    expect(fetcher.mock.calls[2]?.[1]).toEqual(expect.objectContaining({ method: "DELETE" }));
+  });
+
   it("maps VCS diff files from runtime envelopes", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

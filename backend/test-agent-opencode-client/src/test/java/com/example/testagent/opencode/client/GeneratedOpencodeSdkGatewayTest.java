@@ -65,7 +65,19 @@ class GeneratedOpencodeSdkGatewayTest {
 
         try {
             OpencodeStartRunResult result = new GeneratedOpencodeSdkGateway()
-                    .startRun(node(server), REMOTE_SESSION_ID, "/tmp/demo", null, "run the tests", TRACE_ID)
+                    .startRun(
+                            node(server),
+                            REMOTE_SESSION_ID,
+                            "/tmp/demo",
+                            null,
+                            "run the tests",
+                            List.of(OpencodePromptPart.text("run the tests")),
+                            null,
+                            null,
+                            null,
+                            null,
+                            null,
+                            TRACE_ID)
                     .block(Duration.ofSeconds(5));
 
             assertThat(result.accepted()).isTrue();
@@ -75,6 +87,56 @@ class GeneratedOpencodeSdkGatewayTest {
             assertThat(request.get().query()).doesNotContainKey("workspace");
             assertThat(request.get().traceId()).isEqualTo(TRACE_ID);
             assertThat(request.get().body()).contains("\"type\":\"text\"", "\"text\":\"run the tests\"");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void gatewayStartsRunWithPromptPartsAndRuntimeSelection() throws Exception {
+        AtomicReference<RequestSnapshot> request = new AtomicReference<>();
+        HttpServer server = startServer(exchange -> {
+            request.set(snapshot(exchange));
+            respondNoContent(exchange);
+        });
+
+        try {
+            OpencodeStartRunResult result = new GeneratedOpencodeSdkGateway()
+                    .startRun(
+                            node(server),
+                            REMOTE_SESSION_ID,
+                            "/tmp/demo",
+                            null,
+                            "review this file",
+                            List.of(
+                                    OpencodePromptPart.text("review this file"),
+                                    OpencodePromptPart.file(
+                                            "data:text/plain;base64,ZXhwb3J0IGNvbnN0IGEgPSAx",
+                                            "text/plain",
+                                            "App.tsx",
+                                            Map.of("type", "file", "path", "src/App.tsx",
+                                                    "text", Map.of("value", "export const a = 1", "start", 0, "end", 18))),
+                                    OpencodePromptPart.agent("Build", Map.of("value", "@build", "start", 0, "end", 6))),
+                            "msg_remote1234567890abcdef",
+                            "build",
+                            "anthropic",
+                            "claude-sonnet-4-5",
+                            "default",
+                            TRACE_ID)
+                    .block(Duration.ofSeconds(5));
+
+            assertThat(result.accepted()).isTrue();
+            assertThat(request.get().body()).contains(
+                    "\"messageID\":\"msg_remote1234567890abcdef\"",
+                    "\"agent\":\"build\"",
+                    "\"providerID\":\"anthropic\"",
+                    "\"modelID\":\"claude-sonnet-4-5\"",
+                    "\"variant\":\"default\"",
+                    "\"type\":\"text\"",
+                    "\"type\":\"file\"",
+                    "\"url\":\"data:text/plain;base64,ZXhwb3J0IGNvbnN0IGEgPSAx\"",
+                    "\"type\":\"agent\"",
+                    "\"name\":\"Build\"");
         } finally {
             server.stop(0);
         }

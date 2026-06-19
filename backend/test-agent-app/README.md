@@ -28,9 +28,9 @@
 - `ApiTokenWebFilter`：未配置 `TEST_AGENT_API_TOKEN` 时放行；配置后要求 Bearer token。
 - `InMemoryRateLimitWebFilter`：可配置内存限流占位，超限返回 `RATE_LIMITED`。
 - Workspace API：工作区注册、分页查询、单层文件列表、UTF-8 文件读写和文件状态。
-- Session API：会话创建、分页查询、消息追加和消息分页读取。
+- Session API：会话创建、workspace 分页、全局搜索、标题/置顶更新、软删除、消息追加和消息分页读取。
 - Run API：启动、查询、取消、RunEvent SSE 和 Run 级 Diff；首次 Run 懒创建远端 opencode session 并保存内部映射，后续 Run 复用原 session 和 execution node。
-- `POST /api/runs` 已接收 Phase 11 可选字段并把 text parts 合成为当前 Run 编排使用的 prompt；file/agent/reference parts 的完整透传等待 opencode facade 扩展。
+- `POST /api/runs` 已接收 Phase 11 可选字段；旧 `prompt` 继续兼容，`parts` 会转换为 opencode `text/file/agent` parts，`reference` part 会转为可读 text part，`agent/model/variant/messageId` 会随 `prompt_async` 下沉到 opencode facade。
 - Phase 11 Runtime API：`/api/agents|models|providers|commands|references`、`/api/sessions/{id}/children|todo|diff|abort|fork|compact|revert|unrevert|command|shell`、permission/question、fs/vcs/lsp/mcp status/resources/tools 运行态接口，统一通过 `OpencodeRuntimeApplicationService` 和 opencode-client runtime facade 转发，不直返 generated DTO。
 - Diff API：查询 Run Diff、接受保留当前工作区变更、拒绝时通过 opencode `sessionRevert` 回滚本次 Run 对应消息。
 - RunController 在 WebFlux 下必须把阻塞式 Run/Diff 应用服务调用 offload 到 `boundedElastic`，避免在 event-loop 上触发 `.block()` 造成 `INTERNAL_ERROR`；RunEvent SSE 保持 `Flux` 流式返回。

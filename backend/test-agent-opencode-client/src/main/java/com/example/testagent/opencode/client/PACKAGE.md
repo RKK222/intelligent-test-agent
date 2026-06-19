@@ -16,7 +16,7 @@
 - `OpencodeClientFacade`、`DefaultOpencodeClientFacade`：业务门面和默认实现。
 - `OpencodeSdkGateway`、`GeneratedOpencodeSdkGateway`：内部 gateway 端口与唯一 generated SDK 适配器。
 - `OpencodeCreateSessionCommand`、`OpencodeCreateSessionResult`：创建远端 opencode session。
-- `OpencodeStartRunCommand`、`OpencodeStartRunResult`：使用远端 opencode session id 调用 `prompt_async`。
+- `OpencodeStartRunCommand`、`OpencodePromptPart`、`OpencodeStartRunResult`：使用远端 opencode session id 调用 `prompt_async`，以稳定 facade 模型承载 text/file/agent parts。
 - `OpencodeCancelCommand`、`OpencodeCancelResult`：使用远端 opencode session id 调用 abort。
 - `OpencodeStreamEventsCommand`、`OpencodeRunEventMapper`：订阅 opencode event 并映射为平台 RunEventDraft。
 - `OpencodeDiffCommand`、`OpencodeDiffResult`、`OpencodeDiffFile`：查询 opencode session Diff 并输出平台稳定 DTO。

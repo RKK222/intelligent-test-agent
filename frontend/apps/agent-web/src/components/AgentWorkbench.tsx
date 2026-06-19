@@ -63,6 +63,7 @@ function WorkbenchRuntime() {
   const [diffViewMode, setDiffViewMode] = React.useState<"split" | "unified">("split");
   const [centerMode, setCenterMode] = React.useState<"editor" | "diff">("editor");
   const [feedback, setFeedback] = React.useState<Feedback | null>(null);
+  const [sessionSearch, setSessionSearch] = React.useState("");
 
   const { tabs, activePath, selectedDiffPath, openTab, closeTab, updateTabContent, markTabSaved, setActivePath, setSelectedDiffPath } =
     useWorkbenchStore();
@@ -76,9 +77,12 @@ function WorkbenchRuntime() {
   const selectedWorkspace = workspaces.find((item) => item.workspaceId === selectedWorkspaceId) ?? workspaces[0];
 
   const sessionsQuery = useQuery({
-    queryKey: ["sessions", selectedWorkspace?.workspaceId],
-    enabled: Boolean(selectedWorkspace?.workspaceId),
-    queryFn: () => api.listSessions(selectedWorkspace!.workspaceId, 1, 30)
+    queryKey: ["sessions", selectedWorkspace?.workspaceId, sessionSearch.trim()],
+    enabled: Boolean(selectedWorkspace?.workspaceId) || Boolean(sessionSearch.trim()),
+    queryFn: () => {
+      const query = sessionSearch.trim();
+      return query ? api.listAllSessions(1, 30, query) : api.listSessions(selectedWorkspace!.workspaceId, 1, 30);
+    }
   });
 
   const agentsQuery = useQuery({
@@ -263,6 +267,31 @@ function WorkbenchRuntime() {
       dispatchRuntimeResult(result, dispatchChat);
     },
     onError: (error) => setFeedback(errorFeedback("命令执行失败", error))
+  });
+
+  const updateSessionMutation = useMutation({
+    mutationFn: async (input: { sessionId: string; title?: string; pinned?: boolean }) =>
+      api.updateSession(input.sessionId, { title: input.title, pinned: input.pinned }),
+    onSuccess: (updated) => {
+      if (session?.sessionId === updated.sessionId) {
+        setSession(updated);
+      }
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error) => setFeedback(errorFeedback("更新 Session 失败", error))
+  });
+
+  const deleteSessionMutation = useMutation({
+    mutationFn: async (sessionId: string) => api.deleteSession(sessionId),
+    onSuccess: (deleted) => {
+      if (session?.sessionId === deleted.sessionId) {
+        setSession(null);
+        setRun(null);
+        dispatchChat({ type: "reset" });
+      }
+      void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+    },
+    onError: (error) => setFeedback(errorFeedback("删除 Session 失败", error))
   });
 
   const cancelRunMutation = useMutation({
@@ -536,6 +565,7 @@ function WorkbenchRuntime() {
     <AgentChat
       messages={chatState.messages}
       history={historyItems(run, sessionsQuery.data?.items ?? [])}
+      historySearch={sessionSearch}
       running={run?.status === "RUNNING" || run?.status === "CANCELLING"}
       onSend={handleSend}
       onOpenDiff={() => setCenterMode("diff")}
@@ -563,7 +593,10 @@ function WorkbenchRuntime() {
       onModelChange={setSelectedModel}
       onModeChange={setPromptMode}
       onRequestNotifications={() => void requestNotifications()}
+      onHistorySearchChange={setSessionSearch}
       onSelectHistory={(sessionId) => void switchSession(sessionId)}
+      onToggleHistoryPin={(sessionId, pinned) => updateSessionMutation.mutate({ sessionId, pinned })}
+      onDeleteHistory={(sessionId) => deleteSessionMutation.mutate(sessionId)}
     />
   );
 
@@ -685,7 +718,8 @@ function historyItems(run: Run | null, sessions: Session[]) {
       title: item.title,
       preview: `${item.agent ?? "agent"} ${item.model?.id ?? ""}`.trim() || "Session",
       status: item.status,
-      updatedAt: new Date(item.updatedAt).toLocaleTimeString("zh-CN", { hour12: false })
+      updatedAt: new Date(item.updatedAt).toLocaleTimeString("zh-CN", { hour12: false }),
+      pinned: item.pinned
     })),
     {
       id: run?.runId ?? "local",

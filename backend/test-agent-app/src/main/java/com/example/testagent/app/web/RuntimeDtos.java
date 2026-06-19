@@ -1,8 +1,10 @@
 package com.example.testagent.app.web;
 
+import com.example.testagent.app.run.StartRunInput;
 import com.example.testagent.common.pagination.PageResponse;
 import com.example.testagent.domain.run.Run;
 import com.example.testagent.domain.session.Session;
+import com.example.testagent.domain.session.SessionId;
 import com.example.testagent.domain.session.SessionMessage;
 import com.example.testagent.domain.session.SessionMessageRole;
 import com.example.testagent.domain.workspace.Workspace;
@@ -29,6 +31,9 @@ final class RuntimeDtos {
     record CreateSessionRequest(@NotBlank String workspaceId, @NotBlank String title) {
     }
 
+    record UpdateSessionRequest(String title, Boolean pinned) {
+    }
+
     record AppendMessageRequest(SessionMessageRole role, @NotBlank String content) {
     }
 
@@ -52,6 +57,16 @@ final class RuntimeDtos {
                 return prompt;
             }
             return textFromParts();
+        }
+
+        StartRunInput toInput() {
+            List<StartRunInput.PromptPart> mappedParts = parts == null
+                    ? List.of()
+                    : parts.stream()
+                    .filter(part -> part != null && part.type() != null && !part.type().isBlank())
+                    .map(PromptPartRequest::toInputPart)
+                    .toList();
+            return new StartRunInput(new SessionId(sessionId), prompt, mappedParts, messageId, agent, model, variant, mode);
         }
 
         private String textFromParts() {
@@ -86,6 +101,23 @@ final class RuntimeDtos {
             String uri,
             Map<String, Object> source,
             Map<String, Object> metadata) {
+
+        StartRunInput.PromptPart toInputPart() {
+            return new StartRunInput.PromptPart(
+                    type,
+                    text,
+                    path,
+                    name,
+                    mimeType,
+                    content,
+                    url,
+                    agentId,
+                    id,
+                    label,
+                    uri,
+                    source,
+                    metadata);
+        }
     }
 
     record WorkspaceResponse(
@@ -112,6 +144,7 @@ final class RuntimeDtos {
             String workspaceId,
             String title,
             String status,
+            boolean pinned,
             Instant createdAt,
             Instant updatedAt) {
 
@@ -121,6 +154,7 @@ final class RuntimeDtos {
                     session.workspaceId().value(),
                     session.title(),
                     session.status().name(),
+                    session.pinned(),
                     session.createdAt(),
                     session.updatedAt());
         }

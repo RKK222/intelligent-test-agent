@@ -134,6 +134,7 @@ class DefaultOpencodeClientFacadeTest {
         assertThat(gateway.lastTraceId).isEqualTo("trace_1234567890abcdef");
         assertThat(gateway.lastOpencodeSessionId).isEqualTo("ses_remote1234567890abcdef");
         assertThat(gateway.lastPrompt).isEqualTo("run the tests");
+        assertThat(gateway.lastParts).extracting(OpencodePromptPart::type).containsExactly("text");
         assertThat(gateway.lastWorkspace).isNull();
     }
 
@@ -245,6 +246,7 @@ class DefaultOpencodeClientFacadeTest {
         private String lastWorkspace;
         private String lastTitle;
         private String lastMessageId;
+        private List<OpencodePromptPart> lastParts = List.of();
 
         @Override
         public Mono<OpencodeHealthResult> health(ExecutionNode node, String traceId) {
@@ -290,12 +292,20 @@ class DefaultOpencodeClientFacadeTest {
                 String directory,
                 String workspace,
                 String prompt,
+                List<OpencodePromptPart> parts,
+                String messageId,
+                String agent,
+                String modelProviderId,
+                String modelId,
+                String variant,
                 String traceId) {
             lastTraceId = traceId;
             lastOpencodeSessionId = opencodeSessionId;
             lastDirectory = directory;
             lastWorkspace = workspace;
             lastPrompt = prompt;
+            lastParts = parts;
+            lastMessageId = messageId;
             return Mono.just(new OpencodeStartRunResult(true));
         }
 

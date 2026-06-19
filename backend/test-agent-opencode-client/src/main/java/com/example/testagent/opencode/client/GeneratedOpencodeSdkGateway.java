@@ -4,8 +4,6 @@ import com.example.opencode.sdk.ApiClient;
 import com.example.opencode.sdk.api.EventApi;
 import com.example.opencode.sdk.api.GlobalApi;
 import com.example.opencode.sdk.api.SessionApi;
-import com.example.opencode.sdk.model.SessionPromptAsyncRequest;
-import com.example.opencode.sdk.model.SessionPromptRequestPartsInner;
 import com.example.opencode.sdk.model.SnapshotFileDiff;
 import com.example.testagent.domain.node.ExecutionNode;
 import com.example.testagent.observability.TraceConstants;
@@ -13,6 +11,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.core.ParameterizedTypeReference;
@@ -96,14 +95,16 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String directory,
             String workspace,
             String prompt,
+            List<OpencodePromptPart> parts,
+            String messageId,
+            String agent,
+            String modelProviderId,
+            String modelId,
+            String variant,
             String traceId) {
         ApiClient apiClient = apiClient(node, traceId);
-        SessionPromptRequestPartsInner textPart = new SessionPromptRequestPartsInner()
-                .type(SessionPromptRequestPartsInner.TypeEnum.TEXT)
-                .text(prompt);
-        SessionPromptAsyncRequest request = new SessionPromptAsyncRequest()
-                .parts(List.of(textPart));
-        // generated SessionApi 中参数包装类与 model 同名，直接走 generated ApiClient 可避免错误的内部类型遮蔽。
+        // prompt_async 的 parts 是 union schema；用稳定 JSON Map 避免 generated DTO 对 file/source 字段的类型遮蔽。
+        Map<String, Object> request = promptAsyncRequest(parts, messageId, agent, modelProviderId, modelId, variant, prompt);
         ParameterizedTypeReference<Void> returnType = new ParameterizedTypeReference<>() {
         };
         Map<String, Object> pathParams = new HashMap<>();
@@ -129,6 +130,41 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                         returnType)
                 .bodyToMono(returnType)
                 .thenReturn(new OpencodeStartRunResult(true));
+    }
+
+    private Map<String, Object> promptAsyncRequest(
+            List<OpencodePromptPart> parts,
+            String messageId,
+            String agent,
+            String modelProviderId,
+            String modelId,
+            String variant,
+            String prompt) {
+        LinkedHashMap<String, Object> request = new LinkedHashMap<>();
+        String optionalMessageId = optionalText(messageId);
+        if (optionalMessageId != null) {
+            request.put("messageID", optionalMessageId);
+        }
+        String optionalAgent = optionalText(agent);
+        if (optionalAgent != null) {
+            request.put("agent", optionalAgent);
+        }
+        String optionalModelProvider = optionalText(modelProviderId);
+        String optionalModelId = optionalText(modelId);
+        if (optionalModelProvider != null && optionalModelId != null) {
+            request.put("model", Map.of("providerID", optionalModelProvider, "modelID", optionalModelId));
+        }
+        String optionalVariant = optionalText(variant);
+        if (optionalVariant != null) {
+            request.put("variant", optionalVariant);
+        }
+        List<Map<String, Object>> requestParts = (parts == null || parts.isEmpty()
+                ? List.of(OpencodePromptPart.text(prompt))
+                : parts).stream()
+                .map(OpencodePromptPart::toRequestBody)
+                .toList();
+        request.put("parts", requestParts);
+        return Map.copyOf(request);
     }
 
     @Override

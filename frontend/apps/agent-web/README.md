@@ -11,6 +11,7 @@ Next.js 主应用，组合 Web IDE 工作台、文件树、Monaco 编辑器、Ag
 - 通过 TanStack Query 调用 `@test-agent/backend-api`。
 - 通过 `@test-agent/event-stream-client` 订阅 RunEvent SSE。
 - 用 Zustand 工作台状态管理打开文件、活动 tab 和 Diff 选择。
+- 组合 Session History 搜索、切换、置顶和软删除。
 - 组合 Phase 11 运行态能力：Agent/Provider/Model/Mode 选择、slash command、`@` context、MCP/LSP/VCS 状态、Run/Session/VCS Diff 来源切换。
 - Next dev 配置允许 `127.0.0.1` 作为开发来源，避免本地从该地址访问时 dev resource 被拦截导致工作台交互不可用。
 
