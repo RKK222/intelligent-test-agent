@@ -52,6 +52,13 @@ Phase 06-08 当前已落地的测试重点：
 - Vitest 覆盖文件名过滤、Monaco 语言识别和 unified diff 解析。
 - Playwright 覆盖工作台首屏、workspace 加载、目录展开、打开文件和保存入口。
 
+Phase 11 当前已落地的测试重点：
+
+- Vitest 覆盖 prompt 附件到 `PromptPart` 的转换、follow-up FIFO 队列、Diff hunk 解析/导航和编辑器选区上下文。
+- Playwright 只匹配 `*.spec.ts`，避免误加载 app 目录下的 Vitest `*.test.tsx`。
+- Playwright mock 平台后端 API 和 RunEvent SSE，覆盖文件/图片附件提交、permission dock、question dock、Diff 卡片、hunk 导航入口和 hunk context 反馈。
+- 真实 `test-agent-app`、前端和 opencode server 三服务联调 E2E 仍作为发布前验收项，不能用 mock E2E 替代。
+
 ## Mock 原则
 
 1. 前端测试 mock `test-agent-app` API，不 mock 内部组件行为。

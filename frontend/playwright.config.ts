@@ -2,6 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./apps/agent-web/tests",
+  testMatch: "**/*.spec.ts",
   timeout: 30_000,
   webServer: {
     command: "corepack pnpm --filter @test-agent/agent-web dev --hostname 127.0.0.1 --port 3000",

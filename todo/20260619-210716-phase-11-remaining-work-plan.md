@@ -3,7 +3,7 @@
 ## 背景
 
 - 用户问题：在已提交 Phase 11 主路径能力后，需要明确剩余未完成内容，并形成后续可执行计划。
-- 当前现象：最近提交已完成 opencode Web runtime 主链路、PromptPart 后端透传、Session 全局搜索/置顶/软删除、runtime selector、permission/question、Todo、Diff 来源切换、MCP/LSP/VCS 状态和只读 transcript；本批次补齐了文件/图片附件、busy follow-up 本地 FIFO 队列、Diff hunk 导航、hunk context、Monaco 任意选区上下文和 PTY WebSocket 安全前置文档；仍缺 PTY 实现和 Playwright E2E 闭环。
+- 当前现象：最近提交已完成 opencode Web runtime 主链路、PromptPart 后端透传、Session 全局搜索/置顶/软删除、runtime selector、permission/question、Todo、Diff 来源切换、MCP/LSP/VCS 状态和只读 transcript；本批次补齐了文件/图片附件、busy follow-up 本地 FIFO 队列、Diff hunk 导航、hunk context、Monaco 任意选区上下文、PTY WebSocket 安全前置文档和 mocked Playwright 主流程；仍缺 PTY 实现和真实三服务联调 E2E 闭环。
 - 目标：按 P0/P1/P2 风险顺序补完 Phase 11，保持前端只走 `backend-api` 和 RunEvent SSE、后端只走 `test-agent-opencode-client` facade 的边界。
 
 ## 范围
@@ -118,7 +118,8 @@
 - [x] Diff viewer 支持 Run/Session/VCS 来源、split/unified、文件导航、hunk 导航和 hunk context；只有 Run 级 accept/reject 触发后端落盘 API。
 - [x] Monaco 任意文本选区可转换为下一条 Prompt 的 file context。
 - [x] PTY 代码实现前，`docs/architecture/pty-websocket-design.md` 与 `docs/security/security-standards.md` 已定义安全例外。
-- [ ] Playwright 覆盖 Phase 11 主流程，本地前端、后端、opencode server 联调环境可执行。
+- [x] Playwright mock 覆盖 Phase 11 主流程：prompt parts、permission/question、Diff hunk 和 hunk context。
+- [ ] 本地前端、后端、opencode server 三服务联调 E2E 可执行。
 - [ ] 每批改动同步 README/PACKAGE、API、前后端契约和测试说明文档。
 
 ## 验证方式
