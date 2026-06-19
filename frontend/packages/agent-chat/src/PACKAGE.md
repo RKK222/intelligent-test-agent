@@ -8,6 +8,7 @@
 
 - `AgentChat.tsx`：Agent/历史 tab、受控 History 搜索与置顶/删除回调、Agent/Provider/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission/question/Todo dock、message part timeline、输入框和动作按钮。
 - `cards.tsx`：Plan、Tool、Test、Diff 等卡片。
+- `prompt-parts.ts`：浏览器文件和图片到平台 `PromptPart` 的纯转换，供 composer 和单测复用。
 - `runtime-reducer.ts`：纯 RunEvent reducer，归并旧 `assistant.message.delta` 和 Phase 11 `message.*`、permission/question、todo、diff/session status 事件。
 
 ## 允许依赖

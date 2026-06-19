@@ -274,7 +274,7 @@ Phase 11 起请求体保持向后兼容，并支持以下可选字段：
 - 旧 `prompt: string` 继续有效；`parts` 缺失时后端按单个 text part 处理。
 - `parts`、`messageId`、`agent`、`model`、`variant`、`mode` 均为可选字段，旧前端不需要改动。
 - `parts` 会下沉为 opencode `prompt_async` 的 `text/file/agent` parts；`reference` part 会转换为可读 text part。
-- file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；只有没有内联内容时才把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。
+- file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。只有没有内联内容或 URL 时，后端才把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。
 - `model` 使用 `providerId/modelId` 字符串格式；格式不完整时后端保留旧默认模型，不向 opencode 传 model override。
 - Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此不写入 `prompt_async` 请求体。
 

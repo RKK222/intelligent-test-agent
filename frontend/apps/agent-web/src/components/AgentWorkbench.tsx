@@ -2,7 +2,7 @@
 
 import { QueryClient, QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as React from "react";
-import { AgentChat, createInitialAgentChatRuntimeState, reduceAgentChatRuntime } from "@test-agent/agent-chat";
+import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
 import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api";
 import { DiffViewer } from "@test-agent/diff-viewer";
 import { CodeEditor } from "@test-agent/editor";
@@ -26,6 +26,7 @@ import type {
 import { TestRunnerPanel } from "@test-agent/test-runner";
 import { Button, FeedbackBanner, Input, type Feedback } from "@test-agent/ui-kit";
 import { useWorkbenchStore, WorkbenchShell } from "@test-agent/workbench-shell";
+import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, type FollowUpDraft } from "./follow-up-queue";
 
 const queryClient = new QueryClient();
 const apiBaseUrl = process.env.NEXT_PUBLIC_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
@@ -64,6 +65,7 @@ function WorkbenchRuntime() {
   const [centerMode, setCenterMode] = React.useState<"editor" | "diff">("editor");
   const [feedback, setFeedback] = React.useState<Feedback | null>(null);
   const [sessionSearch, setSessionSearch] = React.useState("");
+  const [followUpQueue, setFollowUpQueue] = React.useState<FollowUpDraft[]>([]);
 
   const { tabs, activePath, selectedDiffPath, openTab, closeTab, updateTabContent, markTabSaved, setActivePath, setSelectedDiffPath } =
     useWorkbenchStore();
@@ -269,6 +271,22 @@ function WorkbenchRuntime() {
     onError: (error) => setFeedback(errorFeedback("命令执行失败", error))
   });
 
+  React.useEffect(() => {
+    if (followUpQueue.length === 0 || !canStartFollowUp(run, startRunMutation.isPending || commandMutation.isPending)) {
+      return;
+    }
+    const { next, queue } = dequeueFollowUp(followUpQueue);
+    if (!next) {
+      return;
+    }
+    setFollowUpQueue(queue);
+    if (next.command && session) {
+      commandMutation.mutate({ ...next.command, prompt: next.prompt });
+    } else {
+      startRunMutation.mutate({ prompt: next.prompt, parts: next.parts });
+    }
+  }, [commandMutation, followUpQueue, run, session, startRunMutation]);
+
   const updateSessionMutation = useMutation({
     mutationFn: async (input: { sessionId: string; title?: string; pinned?: boolean }) =>
       api.updateSession(input.sessionId, { title: input.title, pinned: input.pinned }),
@@ -410,16 +428,23 @@ function WorkbenchRuntime() {
     });
   }
 
-  function handleSend(prompt: string) {
-    setLastPrompt(prompt);
-    const parts = buildPromptParts(prompt, activeTab);
-    dispatchChat({ type: "user.submitted", prompt, parts });
+  function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
+    const parts = buildPromptParts(prompt, activeTab, attachments);
+    const displayPrompt = prompt.trim() || promptFromParts(parts);
+    setLastPrompt(displayPrompt);
+    dispatchChat({ type: "user.submitted", prompt: displayPrompt, parts });
     const command = parseCommand(prompt, promptMode);
-    if (command && session && !isRunBusy(run)) {
-      commandMutation.mutate({ ...command, prompt });
+    const busy = isRunBusyStatus(run?.status) || startRunMutation.isPending || commandMutation.isPending;
+    if (busy) {
+      setFollowUpQueue((current) => enqueueFollowUp(current, createFollowUpDraft(displayPrompt, parts, undefined, command ?? undefined)));
+      setFeedback({ kind: "info", title: "Prompt 已排队", description: `等待当前 Run 完成后继续执行，队列 ${followUpQueue.length + 1} 条` });
       return;
     }
-    startRunMutation.mutate({ prompt, parts });
+    if (command && session) {
+      commandMutation.mutate({ ...command, prompt: displayPrompt });
+      return;
+    }
+    startRunMutation.mutate({ prompt: displayPrompt, parts });
   }
 
   function handleRunEvent(event: RunEvent) {
@@ -566,7 +591,7 @@ function WorkbenchRuntime() {
       messages={chatState.messages}
       history={historyItems(run, sessionsQuery.data?.items ?? [])}
       historySearch={sessionSearch}
-      running={run?.status === "RUNNING" || run?.status === "CANCELLING"}
+      running={isRunBusyStatus(run?.status) || startRunMutation.isPending || commandMutation.isPending}
       onSend={handleSend}
       onOpenDiff={() => setCenterMode("diff")}
       onRetry={() => lastPrompt && handleSend(lastPrompt)}
@@ -749,8 +774,12 @@ function modelIdOnly(value: string) {
   return value.includes("/") ? value.split("/").slice(1).join("/") : value;
 }
 
-function buildPromptParts(prompt: string, activeTab: { path: string; content: string } | undefined): PromptPart[] {
-  const parts: PromptPart[] = [{ type: "text", text: prompt }];
+function buildPromptParts(
+  prompt: string,
+  activeTab: { path: string; content: string } | undefined,
+  attachments: ComposerAttachment[] = []
+): PromptPart[] {
+  const parts = buildComposerPromptParts(prompt, attachments);
   if (activeTab?.path) {
     parts.push({
       type: "file",
@@ -762,16 +791,20 @@ function buildPromptParts(prompt: string, activeTab: { path: string; content: st
   return parts;
 }
 
+function promptFromParts(parts: PromptPart[]) {
+  const fileNames = parts
+    .filter((part): part is Extract<PromptPart, { type: "file" }> => part.type === "file")
+    .map((part) => part.name ?? part.path)
+    .filter((value): value is string => Boolean(value));
+  return fileNames.length ? `附件：${fileNames.join(", ")}` : "";
+}
+
 function parseCommand(prompt: string, mode: string) {
   if (mode.startsWith("command:")) {
     return { command: mode.slice("command:".length), arguments: prompt };
   }
   const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(prompt.trim());
   return match ? { command: match[1] ?? "", arguments: match[2] ?? "" } : null;
-}
-
-function isRunBusy(run: Run | null) {
-  return run?.status === "RUNNING" || run?.status === "CANCELLING";
 }
 
 function runtimeResources(

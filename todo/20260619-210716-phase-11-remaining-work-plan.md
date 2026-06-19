@@ -3,12 +3,12 @@
 ## 背景
 
 - 用户问题：在已提交 Phase 11 主路径能力后，需要明确剩余未完成内容，并形成后续可执行计划。
-- 当前现象：最近提交已完成 opencode Web runtime 主链路、PromptPart 后端透传、Session 全局搜索/置顶/软删除、runtime selector、permission/question、Todo、Diff 来源切换、MCP/LSP/VCS 状态和只读 transcript；仍缺文件/图片附件、busy follow-up 队列、Diff hunk review、PTY WebSocket 安全前置和 Playwright E2E 闭环。
+- 当前现象：最近提交已完成 opencode Web runtime 主链路、PromptPart 后端透传、Session 全局搜索/置顶/软删除、runtime selector、permission/question、Todo、Diff 来源切换、MCP/LSP/VCS 状态和只读 transcript；本批次补齐了文件/图片附件与 busy follow-up 本地 FIFO 队列；仍缺 Diff hunk review、Diff/Monaco 选区上下文、PTY WebSocket 安全前置和 Playwright E2E 闭环。
 - 目标：按 P0/P1/P2 风险顺序补完 Phase 11，保持前端只走 `backend-api` 和 RunEvent SSE、后端只走 `test-agent-opencode-client` facade 的边界。
 
 ## 范围
 
-- 包含：prompt composer 附件/图片/选区上下文、busy follow-up 队列、Diff hunk/file 导航与选区上下文、PTY 架构安全设计、Playwright E2E、对应文档和测试。
+- 包含：prompt composer 附件/图片、Diff hunk/file 导航与选区上下文、PTY 架构安全设计、Playwright E2E、对应文档和测试。
 - 不包含：settings/config/provider/server 配置页、MCP 安装认证配置 UI、前端直连 opencode server、opencode 公网 share API、未经过安全设计的通用 WebSocket。
 
 ## 现状分析
@@ -24,14 +24,14 @@
   - `docs/security/security-standards.md`
 - 当前实现：
   - `PromptPart` 类型已支持 `text/file/agent/reference`，`AgentWorkbench` 会把当前打开文件内容作为 file part 追加到 `POST /api/runs`。
-  - `AgentChat` 的 `onSend` 仍只提交纯文本，没有文件选择、图片 data URL、附件 chips 和 busy follow-up 队列。
+  - `AgentChat` 已支持文件选择、图片 data URL、附件 chips；`AgentWorkbench` 已在 run 忙碌时把 follow-up 放入本地 FIFO 队列，终态后自动提交下一条。
   - `DiffViewer` 已支持 Run/Session/VCS 来源与 split/unified 视图，但 hunk 导航、选区引用和可测试的 hunk 模型尚未补齐。
   - PTY 目前只保留 bash 工具输出卡片方向，尚未在架构和安全文档中声明受控 WebSocket 例外。
 - 问题原因：前期优先完成 API、事件和主 UI 串联，剩余项涉及浏览器文件读取、运行队列语义、Diff 交互状态和双向终端安全边界，需要拆批次补齐并分别验收。
 
 ## 修改方案
 
-### 1. Prompt 附件、图片和 busy follow-up
+### 1. Prompt 附件、图片和 busy follow-up（已完成）
 
 - 修改文件：
   - `frontend/packages/agent-chat/src/AgentChat.tsx`
@@ -113,8 +113,8 @@
 
 ## 验收标准
 
-- [ ] prompt composer 支持文本文件、图片附件、删除附件和当前编辑器上下文，提交 payload 中包含正确 `PromptPart`。
-- [ ] run 忙碌时 follow-up 按 FIFO 排队，当前 run 终态后自动提交下一条，UI 不重复插入用户消息。
+- [x] prompt composer 支持文本文件、图片附件、删除附件和当前编辑器上下文，提交 payload 中包含正确 `PromptPart`。
+- [x] run 忙碌时 follow-up 按 FIFO 排队，当前 run 终态后自动提交下一条，UI 不重复插入用户消息。
 - [ ] Diff viewer 支持 Run/Session/VCS 来源、split/unified、文件导航、hunk 导航和选区上下文；只有 Run 级 accept/reject 触发后端落盘 API。
 - [ ] PTY 代码实现前，`docs/architecture/pty-websocket-design.md` 与 `docs/security/security-standards.md` 已定义安全例外。
 - [ ] Playwright 覆盖 Phase 11 主流程，本地前端、后端、opencode server 联调环境可执行。

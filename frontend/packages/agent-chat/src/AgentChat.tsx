@@ -16,14 +16,16 @@ import type {
   TodoItem
 } from "@test-agent/shared-types";
 import { Button, Input, SegmentedTabs, Textarea } from "@test-agent/ui-kit";
-import { Pin, Trash2 } from "lucide-react";
+import { ImageIcon, Paperclip, Pin, Trash2, X } from "lucide-react";
 import { AgentCard } from "./cards";
+import type { ComposerAttachment } from "./prompt-parts";
+import { fileToPromptAttachment } from "./prompt-parts";
 
 export type AgentChatProps = {
   messages: AgentMessage[];
   history: { id: string; title: string; preview: string; status: string; updatedAt: string; pinned?: boolean }[];
   running?: boolean;
-  onSend: (prompt: string) => void;
+  onSend: (prompt: string, attachments?: ComposerAttachment[]) => void;
   onOpenDiff: () => void;
   onRetry: () => void;
   onCancel: () => void;
@@ -96,7 +98,12 @@ export function AgentChat({
 }: AgentChatProps) {
   const [tab, setTab] = React.useState<AgentTab>("agent");
   const [text, setText] = React.useState("");
+  const [attachments, setAttachments] = React.useState<ComposerAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
+  const [readingAttachments, setReadingAttachments] = React.useState(false);
   const [localHistorySearch, setLocalHistorySearch] = React.useState("");
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const imageInputRef = React.useRef<HTMLInputElement>(null);
   const resolvedHistorySearch = historySearch ?? localHistorySearch;
   const slashQuery = React.useMemo(() => commandQuery(text), [text]);
   const atQuery = React.useMemo(() => contextQuery(text), [text]);
@@ -115,12 +122,30 @@ export function AgentChat({
   function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const prompt = text.trim();
-    if (!prompt) {
+    if (!prompt && attachments.length === 0) {
       return;
     }
-    onSend(prompt);
+    onSend(prompt, attachments);
     setText("");
+    setAttachments([]);
+    setAttachmentError(null);
     setTab("agent");
+  }
+
+  async function addAttachments(files: FileList | null) {
+    if (!files?.length) {
+      return;
+    }
+    setReadingAttachments(true);
+    setAttachmentError(null);
+    try {
+      const next = await Promise.all(Array.from(files).map((file) => fileToPromptAttachment(file)));
+      setAttachments((current) => mergeAttachments(current, next));
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : "附件读取失败");
+    } finally {
+      setReadingAttachments(false);
+    }
   }
 
   return (
@@ -178,6 +203,27 @@ export function AgentChat({
             )}
           </div>
           <form className="border-t border-slate-800 bg-slate-950 p-3" onSubmit={submit}>
+            <input
+              ref={fileInputRef}
+              className="hidden"
+              type="file"
+              multiple
+              onChange={(event) => {
+                void addAttachments(event.target.files);
+                event.currentTarget.value = "";
+              }}
+            />
+            <input
+              ref={imageInputRef}
+              className="hidden"
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(event) => {
+                void addAttachments(event.target.files);
+                event.currentTarget.value = "";
+              }}
+            />
             <Textarea
               value={text}
               rows={3}
@@ -218,17 +264,47 @@ export function AgentChat({
                   }))}
               />
             ) : null}
+            {attachments.length || attachmentError || readingAttachments ? (
+              <div className="mt-2 flex min-h-7 flex-wrap items-center gap-2">
+                {attachments.map((attachment) => (
+                  <span
+                    key={attachment.id}
+                    className="inline-flex max-w-full items-center gap-1 rounded border border-slate-800 bg-slate-900 px-2 py-1 text-[11px] text-slate-200"
+                    title={`${attachment.name} ${formatBytes(attachment.size)}`}
+                  >
+                    <span className="max-w-[160px] truncate">{attachment.name}</span>
+                    <span className="text-slate-500">{formatBytes(attachment.size)}</span>
+                    <button
+                      type="button"
+                      title="移除附件"
+                      className="rounded p-0.5 text-slate-500 hover:bg-slate-800 hover:text-slate-100"
+                      onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+                {readingAttachments ? <span className="text-[11px] text-slate-500">读取中</span> : null}
+                {attachmentError ? <span className="text-[11px] text-red-300">{attachmentError}</span> : null}
+              </div>
+            ) : null}
             <div className="mt-2 flex items-center justify-between gap-2">
-              <div className="text-[11px] text-slate-500">{running ? "Run 正在执行" : "Enter 发送"}</div>
+              <div className="text-[11px] text-slate-500">{running ? "Run 正在执行，发送将排队" : "Enter 发送"}</div>
               <div className="flex gap-2">
+                <Button type="button" size="icon" variant="secondary" title="添加文件" onClick={() => fileInputRef.current?.click()}>
+                  <Paperclip className="h-4 w-4" />
+                </Button>
+                <Button type="button" size="icon" variant="secondary" title="添加图片" onClick={() => imageInputRef.current?.click()}>
+                  <ImageIcon className="h-4 w-4" />
+                </Button>
                 <Button type="button" size="sm" variant="secondary" disabled={!running} onClick={onCancel}>
                   取消
                 </Button>
                 <Button type="button" size="sm" variant="secondary" onClick={onRetry}>
                   重试
                 </Button>
-                <Button type="submit" size="sm" variant="primary" disabled={running || !text.trim()}>
-                  发送
+                <Button type="submit" size="sm" variant="primary" disabled={readingAttachments || (!text.trim() && attachments.length === 0)}>
+                  {running ? "排队" : "发送"}
                 </Button>
               </div>
             </div>
@@ -285,6 +361,21 @@ export function AgentChat({
       )}
     </div>
   );
+}
+
+function mergeAttachments(current: ComposerAttachment[], next: ComposerAttachment[]) {
+  const seen = new Set(current.map((item) => item.id));
+  return [...current, ...next.filter((item) => !seen.has(item.id))];
+}
+
+function formatBytes(size: number) {
+  if (size < 1024) {
+    return `${size} B`;
+  }
+  if (size < 1024 * 1024) {
+    return `${Math.round(size / 1024)} KB`;
+  }
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function RuntimeControls({
