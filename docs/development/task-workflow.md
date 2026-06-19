@@ -45,7 +45,17 @@
 
 完成前必须执行 `docs/development/ai-self-checklist.md` 的清单，并在回复中说明验证结果。
 
-## 8. Git 提交
+## 8. 本地服务重启
+
+需要重新编译并重启本地前后端联调服务时，从仓库根目录执行：
+
+```bash
+./restart-dev-services.sh
+```
+
+脚本默认使用 `local` profile、读取 `.env.local`、先编译后端和自研前端，再重启 `test-agent-app` 与 `frontend/apps/agent-web`。服务日志写入 `.tmp/dev-services/`，不得打印 dotenv 中的敏感值。
+
+## 9. Git 提交
 
 1. 自检通过后提交 git。
 2. commit message 使用中文，描述本次任务的实际修改。
