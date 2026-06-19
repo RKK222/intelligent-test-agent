@@ -18,12 +18,18 @@ public class TerminalProcessSession {
     private final Process process;
     private final OutputStream stdin;
     private final Sinks.Many<TerminalServerMessage> output;
+    private final TerminalOutputLimiter outputLimiter;
     private final AtomicInteger seq = new AtomicInteger();
 
     TerminalProcessSession(Process process) {
+        this(process, new TerminalOutputLimiter(16 * 1024, 1024 * 1024));
+    }
+
+    TerminalProcessSession(Process process, TerminalOutputLimiter outputLimiter) {
         this.process = Objects.requireNonNull(process, "process must not be null");
+        this.outputLimiter = Objects.requireNonNull(outputLimiter, "outputLimiter must not be null");
         this.stdin = process.getOutputStream();
-        this.output = Sinks.many().multicast().onBackpressureBuffer(1024, false);
+        this.output = Sinks.many().replay().limit(1024);
         startOutputPump(process.getInputStream());
         startExitWatcher();
     }
@@ -72,9 +78,9 @@ public class TerminalProcessSession {
                         int read;
                         while ((read = stream.read(buffer)) >= 0) {
                             if (read > 0) {
-                                output.tryEmitNext(TerminalServerMessage.output(
-                                        new String(buffer, 0, read, StandardCharsets.UTF_8),
-                                        seq.incrementAndGet()));
+                                int nextSeq = seq.incrementAndGet();
+                                outputLimiter.output(new String(buffer, 0, read, StandardCharsets.UTF_8), nextSeq)
+                                        .forEach(output::tryEmitNext);
                             }
                         }
                     } catch (Exception exception) {

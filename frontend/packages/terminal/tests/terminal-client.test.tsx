@@ -96,6 +96,34 @@ describe("terminal client", () => {
     expect(onEvent).toHaveBeenLastCalledWith({ type: "error", code: "PTY_DENIED", message: "origin denied" });
   });
 
+  it("surfaces server warning envelopes without closing the terminal", () => {
+    FakeWebSocket.instances = [];
+    const onEvent = vi.fn();
+    const session = createTerminalSession({
+      baseUrl: "http://localhost:3000",
+      ticket: {
+        ticket: "pty_123",
+        expiresAt: "2026-06-19T13:00:00Z",
+        webSocketUrl: "ws://localhost:8080/api/sessions/ses_1/terminal/ws?ticket=pty_123"
+      },
+      WebSocketCtor: FakeWebSocket,
+      onEvent
+    });
+
+    FakeWebSocket.instances[0]?.open();
+    FakeWebSocket.instances[0]?.emit({ type: "warning", code: "PTY_OUTPUT_TRUNCATED", message: "terminal output truncated" });
+
+    expect(session.snapshot()).toMatchObject({
+      status: "open",
+      warnings: [{ code: "PTY_OUTPUT_TRUNCATED", message: "terminal output truncated" }]
+    });
+    expect(onEvent).toHaveBeenLastCalledWith({
+      type: "warning",
+      code: "PTY_OUTPUT_TRUNCATED",
+      message: "terminal output truncated"
+    });
+  });
+
   it("creates a ticket from the panel and renders terminal output", async () => {
     FakeWebSocket.instances = [];
     const createTicket = vi.fn().mockResolvedValue({

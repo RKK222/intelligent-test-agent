@@ -1,5 +1,6 @@
 package com.example.testagent.app.terminal;
 
+import com.example.testagent.app.config.TestAgentRuntimeProperties;
 import com.example.testagent.common.error.ErrorCode;
 import com.example.testagent.common.error.PlatformException;
 import java.util.List;
@@ -12,13 +13,21 @@ import org.springframework.stereotype.Component;
 @Component
 public class TerminalProcessFactory {
 
+    private final TestAgentRuntimeProperties.Terminal terminalProperties;
+
+    public TerminalProcessFactory(TestAgentRuntimeProperties properties) {
+        this.terminalProperties = properties.getTerminal();
+    }
+
     public TerminalProcessSession start(TerminalTicket ticket) {
         try {
             Process process = new ProcessBuilder(List.of(ticket.shell(), "-i"))
                     .directory(ticket.cwd().toFile())
                     .redirectErrorStream(true)
                     .start();
-            return new TerminalProcessSession(process);
+            return new TerminalProcessSession(process, new TerminalOutputLimiter(
+                    terminalProperties.getMaxOutputFrameBytes(),
+                    terminalProperties.getMaxOutputConnectionBytes()));
         } catch (Exception exception) {
             throw new PlatformException(
                     ErrorCode.OPENCODE_UNAVAILABLE,

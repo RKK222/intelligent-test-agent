@@ -24,10 +24,37 @@ class TerminalMessageCodecTest {
     }
 
     @Test
+    void decodesInvalidOrIncompleteClientMessagesAsValidationErrors() {
+        assertThat(codec.decode("not-json"))
+                .isEqualTo(new TerminalClientMessage("error", null, null, null, "invalid-json"));
+        assertThat(codec.decode("""
+                {"data":"missing type"}
+                """)).isEqualTo(new TerminalClientMessage(null, "missing type", null, null, null));
+        assertThat(codec.decode("""
+                {"type":"unknown"}
+                """)).isEqualTo(new TerminalClientMessage("unknown", null, null, null, null));
+    }
+
+    @Test
     void encodesOutputExitAndErrorMessages() throws Exception {
         assertThatJson(codec.encode(TerminalServerMessage.output("hello", 2)), "output", "hello", 2, null, null);
         assertThatJson(codec.encode(TerminalServerMessage.exit(0, 3)), "exit", null, 3, 0, null);
         assertThatJson(codec.encode(TerminalServerMessage.error("PTY_DENIED", "denied")), "error", null, null, "PTY_DENIED", "denied");
+    }
+
+    @Test
+    void encodesTruncatedOutputAndWarningMessages() throws Exception {
+        var truncated = new ObjectMapper().readTree(codec.encode(TerminalServerMessage.output("abc", 4, true)));
+        assertThat(truncated.get("type").asText()).isEqualTo("output");
+        assertThat(truncated.get("truncated").asBoolean()).isTrue();
+
+        assertThatJson(
+                codec.encode(TerminalServerMessage.warning("PTY_OUTPUT_TRUNCATED", "terminal output truncated")),
+                "warning",
+                null,
+                null,
+                "PTY_OUTPUT_TRUNCATED",
+                "terminal output truncated");
     }
 
     private void assertThatJson(String raw, String type, String data, Integer seq, Object code, String message) throws Exception {

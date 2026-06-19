@@ -403,6 +403,7 @@ PTY WebSocket 不在上述默认 HTTP/SSE 契约内。Phase 11 P2 已按 `docs/a
 - `cwd` 会归一化到 workspace root 内，越界或非目录返回 `FORBIDDEN`。
 - `shell` 暂不允许前端覆盖；后端只使用运行环境默认 shell，避免把任意可执行文件路径暴露给 Web 输入。
 - `cols`、`rows` 会按后端上限截断；ticket 默认 60 秒过期且只能使用一次。
+- ticket 创建按 session/workspace 维度限流，超限返回统一错误 `RATE_LIMITED`。
 
 ticket 响应 data：
 
@@ -421,11 +422,13 @@ WebSocket 消息使用 JSON envelope：
 { "type": "resize", "cols": 120, "rows": 32 }
 { "type": "close", "reason": "user" }
 { "type": "output", "data": "...", "seq": 12 }
-{ "type": "exit", "code": 0, "seq": 13 }
+{ "type": "output", "data": "...", "seq": 13, "truncated": true }
+{ "type": "warning", "code": "PTY_OUTPUT_TRUNCATED", "message": "terminal output truncated" }
+{ "type": "exit", "code": 0, "seq": 14 }
 { "type": "error", "code": "PTY_DENIED", "message": "..." }
 ```
 
-当前已覆盖后端 ticket、Origin、session/workspace/cwd、单次使用、每 session 单 active PTY、单条 input 16KB 上限和前端 terminal package 基础接入。已有 active PTY 时，新 WebSocket 会返回 `error` envelope，`code=CONFLICT`，并关闭连接。完整审计日志、idle/hard timeout、输入限速、输出截断和三服务 E2E 仍是后续完成项。
+当前已覆盖后端 ticket、Origin、session/workspace/cwd、单次使用、ticket 创建限流、每 session 单 active PTY、input/resize 限速、output 截断、结构化审计、idle/hard timeout 和前端 terminal package 基础接入。已有 active PTY 时，新 WebSocket 会返回 `error` envelope，`code=CONFLICT`，并关闭连接；非法 client envelope 返回 `error` envelope，`code=VALIDATION_ERROR`；input/resize 超限返回 `error` envelope，`code=RATE_LIMITED`；idle/hard timeout 返回 `error` envelope，`code=PTY_TIMEOUT`。真实前端、后端、opencode server 三服务 E2E 仍是后续完成项。
 
 ### Diff API
 

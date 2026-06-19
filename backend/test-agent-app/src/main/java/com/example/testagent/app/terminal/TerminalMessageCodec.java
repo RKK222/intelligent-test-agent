@@ -40,10 +40,13 @@ public class TerminalMessageCodec {
             if (message.seq() != null) {
                 node.put("seq", message.seq());
             }
+            if (Boolean.TRUE.equals(message.truncated())) {
+                node.put("truncated", true);
+            }
             if ("exit".equals(message.type()) && message.exitCode() != null) {
                 node.put("code", message.exitCode());
             }
-            if ("error".equals(message.type())) {
+            if ("error".equals(message.type()) || "warning".equals(message.type())) {
                 node.put("code", message.errorCode());
                 node.put("message", message.message());
             }

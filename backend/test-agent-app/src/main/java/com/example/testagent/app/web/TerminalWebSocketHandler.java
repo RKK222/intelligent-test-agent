@@ -3,7 +3,9 @@ package com.example.testagent.app.web;
 import com.example.testagent.app.config.TestAgentRuntimeProperties;
 import com.example.testagent.app.terminal.TerminalActiveSessionRegistry;
 import com.example.testagent.app.terminal.TerminalApplicationService;
+import com.example.testagent.app.terminal.TerminalAuditLogger;
 import com.example.testagent.app.terminal.TerminalClientMessage;
+import com.example.testagent.app.terminal.TerminalInputRateLimiter;
 import com.example.testagent.app.terminal.TerminalMessageCodec;
 import com.example.testagent.app.terminal.TerminalProcessFactory;
 import com.example.testagent.app.terminal.TerminalProcessSession;
@@ -14,14 +16,19 @@ import com.example.testagent.domain.session.SessionId;
 import com.example.testagent.observability.TraceConstants;
 import com.example.testagent.observability.TraceIdSupport;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketHandler;
 import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 /**
  * 受控 PTY WebSocket handler。所有 upgrade 必须先消费短期 ticket，不能直接信任前端路径。
@@ -34,18 +41,23 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
     private final TerminalMessageCodec codec;
     private final Set<String> allowedOrigins;
     private final TerminalActiveSessionRegistry activeSessions;
+    private final TestAgentRuntimeProperties.Terminal terminalProperties;
+    private final TerminalAuditLogger auditLogger;
 
     public TerminalWebSocketHandler(
             TerminalApplicationService terminalService,
             TerminalProcessFactory processFactory,
             TerminalMessageCodec codec,
             TestAgentRuntimeProperties properties,
-            TerminalActiveSessionRegistry activeSessions) {
+            TerminalActiveSessionRegistry activeSessions,
+            TerminalAuditLogger auditLogger) {
         this.terminalService = terminalService;
         this.processFactory = processFactory;
         this.codec = codec;
         this.allowedOrigins = Set.copyOf(properties.getSecurity().getCorsAllowedOrigins());
         this.activeSessions = activeSessions;
+        this.terminalProperties = properties.getTerminal();
+        this.auditLogger = auditLogger;
     }
 
     @Override
@@ -70,12 +82,15 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         try {
             lease = activeSessions.reserve(ticket);
             terminal = processFactory.start(ticket);
+            auditLogger.upgradeAccepted(ticket);
         } catch (PlatformException exception) {
+            auditLogger.upgradeRejected(ticket, exception.errorCode().name());
             if (lease != null) {
                 lease.close();
             }
             return sendErrorAndClose(session, exception.errorCode().name(), exception.getMessage());
         } catch (Exception exception) {
+            auditLogger.upgradeRejected(ticket, "PTY_UNAVAILABLE");
             if (lease != null) {
                 lease.close();
             }
@@ -83,32 +98,135 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         }
         TerminalActiveSessionRegistry.Lease activeLease = lease;
         TerminalProcessSession activeTerminal = terminal;
+        AtomicBoolean terminalClosed = new AtomicBoolean(false);
+        Sinks.Many<TerminalServerMessage> controlMessages = Sinks.many().unicast().onBackpressureBuffer();
+        Sinks.Many<Long> activity = Sinks.many().multicast().directBestEffort();
+        TerminalInputRateLimiter inputRateLimiter = new TerminalInputRateLimiter(
+                Clock.systemUTC(),
+                terminalProperties.getMaxInputBytes(),
+                terminalProperties.getInputMessagesPerWindow(),
+                terminalProperties.getResizeMessagesPerWindow(),
+                terminalProperties.getRateLimitWindow());
         Mono<Void> inbound = session.receive()
                 .map(WebSocketMessage::getPayloadAsText)
                 .map(codec::decode)
-                .flatMap(message -> handleClientMessage(activeTerminal, message))
+                .doOnNext(ignored -> activity.tryEmitNext(System.nanoTime()))
+                .concatMap(message -> handleClientMessage(ticket, session, activeTerminal, message, inputRateLimiter, controlMessages, terminalClosed))
+                .onErrorResume(TerminalConnectionClosed.class, ignored -> Mono.empty())
+                .doFinally(ignored -> {
+                    controlMessages.tryEmitComplete();
+                    activity.tryEmitComplete();
+                    closeTerminal(activeTerminal, terminalClosed).subscribe();
+                })
                 .then();
         Mono<Void> outbound = session.send(activeTerminal.output()
+                .doOnNext(message -> auditTerminalOutput(ticket, message))
+                .mergeWith(controlMessages.asFlux())
                 .map(codec::encode)
                 .map(session::textMessage));
-        return Mono.when(inbound, outbound)
+        Mono<Void> main = Mono.when(inbound, outbound);
+        Mono<Void> timeout = timeout(ticket, session, activeTerminal, controlMessages, terminalClosed, activity);
+        return Mono.firstWithSignal(main, timeout)
+                .onErrorResume(TerminalConnectionClosed.class, ignored -> Mono.empty())
                 .doFinally(ignored -> {
                     activeLease.close();
-                    activeTerminal.close().subscribe();
+                    closeTerminal(activeTerminal, terminalClosed).subscribe();
                 });
     }
 
-    private Mono<Void> handleClientMessage(TerminalProcessSession terminal, TerminalClientMessage message) {
+    private Mono<Void> handleClientMessage(
+            TerminalTicket ticket,
+            WebSocketSession session,
+            TerminalProcessSession terminal,
+            TerminalClientMessage message,
+            TerminalInputRateLimiter inputRateLimiter,
+            Sinks.Many<TerminalServerMessage> controlMessages,
+            AtomicBoolean terminalClosed) {
+        if (!supported(message)) {
+            controlMessages.tryEmitNext(TerminalServerMessage.error("VALIDATION_ERROR", "invalid terminal message"));
+            controlMessages.tryEmitComplete();
+            return closeTerminal(terminal, terminalClosed)
+                    .then(session.close())
+                    .then(Mono.error(new TerminalConnectionClosed()));
+        }
+        TerminalInputRateLimiter.Decision decision = inputRateLimiter.check(message);
+        if (!decision.allowed()) {
+            auditLogger.inputRejected(ticket, decision.code(), inputBytes(message));
+            controlMessages.tryEmitNext(TerminalServerMessage.error(decision.code(), decision.message()));
+            controlMessages.tryEmitComplete();
+            return closeTerminal(terminal, terminalClosed)
+                    .then(session.close())
+                    .then(Mono.error(new TerminalConnectionClosed()));
+        }
         if ("input".equals(message.type())) {
+            auditLogger.input(ticket, inputBytes(message));
             return terminal.input(message.data());
         }
         if ("resize".equals(message.type())) {
+            auditLogger.resize(ticket, message.cols(), message.rows());
             return terminal.resize(message.cols(), message.rows());
         }
         if ("close".equals(message.type())) {
-            return terminal.close();
+            auditLogger.close(ticket, message.reason());
+            return closeTerminal(terminal, terminalClosed);
         }
         return Mono.empty();
+    }
+
+    private boolean supported(TerminalClientMessage message) {
+        if (message == null || message.type() == null) {
+            return false;
+        }
+        return "input".equals(message.type()) || "resize".equals(message.type()) || "close".equals(message.type());
+    }
+
+    private Mono<Void> closeTerminal(TerminalProcessSession terminal, AtomicBoolean terminalClosed) {
+        if (!terminalClosed.compareAndSet(false, true)) {
+            return Mono.empty();
+        }
+        return terminal.close();
+    }
+
+    private Mono<Void> timeout(
+            TerminalTicket ticket,
+            WebSocketSession session,
+            TerminalProcessSession terminal,
+            Sinks.Many<TerminalServerMessage> controlMessages,
+            AtomicBoolean terminalClosed,
+            Sinks.Many<Long> activity) {
+        Mono<String> idleTimeout = activity.asFlux()
+                .startWith(0L)
+                .switchMap(ignored -> Mono.delay(positive(terminalProperties.getIdleTimeout(), Duration.ofMinutes(10))))
+                .next()
+                .thenReturn("terminal idle timeout");
+        Mono<String> hardTimeout = Mono.delay(positive(terminalProperties.getHardTimeout(), Duration.ofHours(2)))
+                .thenReturn("terminal hard timeout");
+        return Mono.firstWithSignal(idleTimeout, hardTimeout)
+                .flatMap(message -> {
+                    auditLogger.timeout(ticket, message);
+                    controlMessages.tryEmitNext(TerminalServerMessage.error("PTY_TIMEOUT", message));
+                    controlMessages.tryEmitComplete();
+                    return closeTerminal(terminal, terminalClosed)
+                            .then(session.close())
+                            .then(Mono.error(new TerminalConnectionClosed()));
+                });
+    }
+
+    private Duration positive(Duration value, Duration fallback) {
+        if (value == null || value.isZero() || value.isNegative()) {
+            return fallback;
+        }
+        return value;
+    }
+
+    private int inputBytes(TerminalClientMessage message) {
+        return message == null || message.data() == null ? 0 : message.data().getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    private void auditTerminalOutput(TerminalTicket ticket, TerminalServerMessage message) {
+        if ("exit".equals(message.type()) && message.exitCode() != null) {
+            auditLogger.exit(ticket, message.exitCode());
+        }
     }
 
     private Mono<Void> sendErrorAndClose(WebSocketSession session, String code, String message) {
@@ -141,5 +259,8 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
 
     private String traceId(HttpHeaders headers) {
         return TraceIdSupport.resolve(headers.getFirst(TraceConstants.TRACE_ID_HEADER));
+    }
+
+    private static final class TerminalConnectionClosed extends RuntimeException {
     }
 }

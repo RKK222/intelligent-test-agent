@@ -3,6 +3,7 @@ package com.example.testagent.app.terminal;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.verify;
 
 import com.example.testagent.common.error.ErrorCode;
 import com.example.testagent.common.error.PlatformException;
@@ -53,6 +54,7 @@ class TerminalApplicationServiceTest {
         assertThat(ticket.workspaceId()).isEqualTo(new WorkspaceId("wrk_1234567890abcdef"));
         assertThat(ticket.cwd()).isEqualTo(tempDir.resolve("tests").toRealPath());
         assertThat(ticket.traceId()).isEqualTo("trace_1234567890abcdef");
+        verify(fixture.auditLogger).ticketCreated(ticket);
     }
 
     @Test
@@ -101,9 +103,30 @@ class TerminalApplicationServiceTest {
                 .isEqualTo(ErrorCode.FORBIDDEN);
     }
 
+    @Test
+    void createTicketRejectsWhenSessionWorkspaceTicketRateLimitIsExceeded() {
+        Fixture fixture = new Fixture(
+                tempDir,
+                true,
+                new TerminalTicketRateLimiter(Clock.fixed(NOW, ZoneOffset.UTC), 1, java.time.Duration.ofMinutes(1)));
+        fixture.service.createTicket(
+                new SessionId("ses_1234567890abcdef"),
+                new TerminalTicketRequest("wrk_1234567890abcdef", ".", null, 80, 24),
+                "trace_1234567890abcdef");
+
+        assertThatThrownBy(() -> fixture.service.createTicket(
+                        new SessionId("ses_1234567890abcdef"),
+                        new TerminalTicketRequest("wrk_1234567890abcdef", ".", null, 80, 24),
+                        "trace_1234567890abcdef"))
+                .isInstanceOf(PlatformException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.RATE_LIMITED);
+    }
+
     private static final class Fixture {
         private final WorkspaceRepository workspaceRepository = org.mockito.Mockito.mock(WorkspaceRepository.class);
         private final SessionRepository sessionRepository = org.mockito.Mockito.mock(SessionRepository.class);
+        private final TerminalAuditLogger auditLogger = org.mockito.Mockito.mock(TerminalAuditLogger.class);
         private final TerminalApplicationService service;
 
         private Fixture(Path root) {
@@ -111,10 +134,19 @@ class TerminalApplicationServiceTest {
         }
 
         private Fixture(Path root, boolean mappedSession) {
+            this(root, mappedSession, new TerminalTicketRateLimiter(
+                    Clock.fixed(NOW, ZoneOffset.UTC),
+                    100,
+                    java.time.Duration.ofMinutes(1)));
+        }
+
+        private Fixture(Path root, boolean mappedSession, TerminalTicketRateLimiter ticketRateLimiter) {
             service = new TerminalApplicationService(
                     workspaceRepository,
                     sessionRepository,
-                    new TerminalTicketStore(Clock.fixed(NOW, ZoneOffset.UTC), () -> "pty_1234567890abcdef"));
+                    new TerminalTicketStore(Clock.fixed(NOW, ZoneOffset.UTC), () -> "pty_1234567890abcdef"),
+                    ticketRateLimiter,
+                    auditLogger);
             when(workspaceRepository.findById(new WorkspaceId("wrk_1234567890abcdef"))).thenReturn(Optional.of(workspace(root)));
             when(sessionRepository.findById(new SessionId("ses_1234567890abcdef"))).thenReturn(Optional.of(session(mappedSession)));
         }

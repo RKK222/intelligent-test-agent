@@ -7,12 +7,14 @@ export type TerminalSnapshot = {
   output: string;
   exitCode?: number;
   error?: { code: string; message: string };
+  warnings?: Array<{ code: string; message: string }>;
 };
 
 export type TerminalClientEvent =
   | { type: "open" }
   | { type: "output"; data: string; seq?: number }
   | { type: "exit"; code: number; seq?: number }
+  | { type: "warning"; code: string; message: string }
   | { type: "error"; code: string; message: string }
   | { type: "close" };
 
@@ -78,6 +80,14 @@ export function createTerminalSession({
     if (message.type === "error") {
       snapshot = { ...snapshot, status: "error", error: { code: message.code, message: message.message } };
       emit({ type: "error", code: message.code, message: message.message });
+      return;
+    }
+    if (message.type === "warning") {
+      snapshot = {
+        ...snapshot,
+        warnings: [...(snapshot.warnings ?? []), { code: message.code, message: message.message }]
+      };
+      emit({ type: "warning", code: message.code, message: message.message });
     }
   };
   socket.onerror = () => {
@@ -134,6 +144,13 @@ function parseServerMessage(raw: string): TerminalClientEvent | null {
         type: "error",
         code: typeof value.code === "string" ? value.code : "PTY_ERROR",
         message: typeof value.message === "string" ? value.message : "terminal error"
+      };
+    }
+    if (value.type === "warning") {
+      return {
+        type: "warning",
+        code: typeof value.code === "string" ? value.code : "PTY_WARNING",
+        message: typeof value.message === "string" ? value.message : "terminal warning"
       };
     }
   } catch {

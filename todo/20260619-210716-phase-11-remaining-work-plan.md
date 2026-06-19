@@ -3,7 +3,7 @@
 ## 背景
 
 - 用户问题：在已提交 Phase 11 主路径能力后，需要明确剩余未完成内容，并形成后续可执行计划。
-- 当前现象：最近提交已完成 opencode Web runtime 主链路、PromptPart 后端透传、Session 全局搜索/置顶/软删除、runtime selector、permission/question、Todo、Diff 来源切换、MCP/LSP/VCS 状态和只读 transcript；本批次补齐了文件/图片附件、busy follow-up 本地 FIFO 队列、Diff hunk 导航、hunk context、Monaco 任意选区上下文、PTY WebSocket 安全前置文档、后端最小 PTY ticket/WebSocket 通道、前端 terminal package 和 mocked Playwright 主流程；仍缺完整 PTY 安全配额与真实三服务联调 E2E 闭环。
+- 当前现象：最近提交已完成 opencode Web runtime 主链路、PromptPart 后端透传、Session 全局搜索/置顶/软删除、runtime selector、permission/question、Todo、Diff 来源切换、MCP/LSP/VCS 状态和只读 transcript；本批次补齐了文件/图片附件、busy follow-up 本地 FIFO 队列、Diff hunk 导航、hunk context、Monaco 任意选区上下文、PTY WebSocket 安全前置文档、后端 PTY ticket/WebSocket 通道、ticket 创建限流、input/resize 限速、output 截断、审计、timeout、前端 terminal package warning 处理和 mocked Playwright 主流程；仍缺真实三服务联调 E2E 闭环。
 - 目标：按 P0/P1/P2 风险顺序补完 Phase 11，保持前端只走 `backend-api` 和 RunEvent SSE、后端只走 `test-agent-opencode-client` facade 的边界。
 
 ## 范围
@@ -25,8 +25,8 @@
 - 当前实现：
   - `PromptPart` 类型已支持 `text/file/agent/reference`，`AgentWorkbench` 会把当前打开文件内容作为 file part 追加到 `POST /api/runs`。
   - `AgentChat` 已支持文件选择、图片 data URL、附件 chips；`AgentWorkbench` 已在 run 忙碌时把 follow-up 放入本地 FIFO 队列，终态后自动提交下一条。
-  - `DiffViewer` 已支持 Run/Session/VCS 来源与 split/unified 视图，但 hunk 导航、选区引用和可测试的 hunk 模型尚未补齐。
-  - PTY 已声明受控 WebSocket 例外，并已在后端实现一次性 ticket、Origin 校验、session/workspace/cwd 约束、每 session 单 active PTY、JSON envelope 和本地 shell 进程适配；前端已新增 `packages/terminal` 并接入底部 panel；完整审计、timeout、输入限速、输出截断和三服务 E2E 尚未补齐。
+  - `DiffViewer` 已支持 Run/Session/VCS 来源、split/unified 视图、hunk 导航、选区引用和可测试的 hunk 模型。
+  - PTY 已声明受控 WebSocket 例外，并已在后端实现一次性 ticket、Origin 校验、session/workspace/cwd 约束、ticket 创建限流、每 session 单 active PTY、JSON envelope、本地 shell 进程适配、输入限速、输出截断、审计和 timeout；前端已新增 `packages/terminal` 并接入底部 panel；真实三服务 E2E 尚未补齐。
 - 问题原因：前期优先完成 API、事件和主 UI 串联，剩余项涉及浏览器文件读取、运行队列语义、Diff 交互状态和双向终端安全边界，需要拆批次补齐并分别验收。
 
 ## 修改方案
@@ -78,14 +78,14 @@
   - 新增 `docs/architecture/pty-websocket-design.md`
   - 更新 `docs/security/security-standards.md`
   - 更新 `docs/api/backend-api.md`
-  - 已新增后端 PTY controller/service/WebSocket handler/terminal adapter/active session registry 和前端 terminal package；后续补齐限流、审计、timeout 和输出截断。
+  - 已新增后端 PTY controller/service/WebSocket handler/terminal adapter/active session registry/rate limiter/audit logger 和前端 terminal package；后续补齐真实三服务 E2E。
 - 修改位置：
   - 架构文档先定义 PTY ticket、鉴权、限流、审计、脱敏、输入输出协议、resize/input/close 生命周期。
   - 安全文档加入 workspace/session 隔离、CORS、traceId、日志和敏感输出处理。
 - 具体改动：
   - 已完成第一批后端：`POST /api/sessions/{sessionId}/terminal/tickets` 创建一次性 ticket，`GET /api/sessions/{sessionId}/terminal/ws?ticket=...` 只允许 ticket 保护的 WebSocket upgrade。
   - 前端 terminal package 只消费平台 WebSocket，不连接 opencode server；`packages/backend-api` 只负责创建 ticket，WebSocket 生命周期下沉到 `packages/terminal`。
-  - 后续补齐主动输入限速、output 截断策略、idle/hard timeout、结构化审计日志和 WebSocket handler 级 input/close 测试。
+  - 已补齐 ticket 创建限流、主动输入限速、output 截断策略、idle/hard timeout、结构化审计日志和 WebSocket handler 级 input/close 测试。
 - 原因：PTY 是双向命令通道，必须先满足 Phase 11 计划要求的安全例外。
 
 ### 4. Playwright E2E 和阶段验收闭环
@@ -106,7 +106,7 @@
 
 ## 剩余内容实施批次
 
-### Batch A：PTY 输入输出安全闭环
+### Batch A：PTY 输入输出安全闭环（已完成）
 
 - 修改文件：
   - `backend/test-agent-app/src/main/java/com/example/testagent/app/terminal/TerminalProcessSession.java`
@@ -115,19 +115,21 @@
   - `backend/test-agent-app/src/main/java/com/example/testagent/app/web/TerminalWebSocketHandler.java`
   - 新增 `backend/test-agent-app/src/main/java/com/example/testagent/app/terminal/TerminalInputRateLimiter.java`
   - 新增 `backend/test-agent-app/src/main/java/com/example/testagent/app/terminal/TerminalOutputLimiter.java`
+  - 新增 `backend/test-agent-app/src/main/java/com/example/testagent/app/terminal/TerminalTicketRateLimiter.java`
+  - 新增 `backend/test-agent-app/src/main/java/com/example/testagent/app/terminal/TerminalAuditLogger.java`
   - 新增 `backend/test-agent-app/src/test/java/com/example/testagent/app/terminal/TerminalInputRateLimiterTest.java`
   - 新增 `backend/test-agent-app/src/test/java/com/example/testagent/app/terminal/TerminalOutputLimiterTest.java`
 - 具体改动：
   - 输入侧按 ticket/session 维度限制 input/resize 消息速率和单帧大小，超限返回 `error` envelope 并关闭 WebSocket。
   - 输出侧按单帧和累计窗口截断 stdout/stderr，追加 `truncated=true` 或独立 `warning` envelope，避免浏览器和日志被大输出拖垮。
   - idle timeout 和 hard timeout 在 `TerminalWebSocketHandler` 生命周期统一处理，到期先发送 close/error envelope，再关闭 PTY 进程和 active lease。
-  - 审计日志只记录 traceId、workspaceId、sessionId、cwd、命令入口、输入字节数、输出字节数、关闭原因和耗时，不记录明文输入输出。
+  - 审计日志只记录 traceId、workspaceId、sessionId、cwd、输入字节数、resize 尺寸、关闭/超时原因、退出码和截断状态，不记录明文输入输出。
 - 验收：
   - `TerminalInputRateLimiterTest` 覆盖正常、单帧过大、窗口超限。
   - `TerminalOutputLimiterTest` 覆盖 stdout/stderr 截断、截断标记和累计窗口。
   - `TerminalWebSocketHandlerTest` 覆盖超限关闭、idle timeout、hard timeout、审计字段。
 
-### Batch B：PTY WebSocket 行为级测试补齐
+### Batch B：PTY WebSocket 行为级测试补齐（已完成基础协议覆盖）
 
 - 修改文件：
   - `backend/test-agent-app/src/test/java/com/example/testagent/app/web/TerminalWebSocketHandlerTest.java`
@@ -135,9 +137,9 @@
   - `docs/api/backend-api.md`
   - `docs/architecture/pty-websocket-design.md`
 - 具体改动：
-  - Handler 级覆盖 input、resize、close、进程输出转发、进程退出转为 close envelope。
-  - Codec 覆盖未知 client message、非法 JSON、缺失字段和 server warning/truncated message。
-  - API 文档明确错误码：`CONFLICT`、`VALIDATION_ERROR`、`OPENCODE_UNAVAILABLE`、`RATE_LIMITED`、`PTY_TIMEOUT`。
+  - Handler 级已覆盖 input、resize、close、非法 client message、超限关闭、idle/hard timeout。
+  - Codec 已覆盖未知 client message、非法 JSON、缺失字段和 server warning/truncated message。
+  - API 文档已明确错误码：`CONFLICT`、`VALIDATION_ERROR`、`OPENCODE_UNAVAILABLE`、`RATE_LIMITED`、`PTY_TIMEOUT`。
 - 验收：
   - `cd backend && mvn test -pl test-agent-app -am -Dtest=TerminalWebSocketHandlerTest,TerminalMessageCodecTest -Dsurefire.failIfNoSpecifiedTests=false` 通过。
   - `cd backend && mvn test` 通过。
@@ -179,7 +181,7 @@
 
 ## 影响范围
 
-- UI/交互：prompt composer、AgentChat timeline、AgentWorkbench 运行状态、DiffViewer toolbar、后续 terminal panel。
+- UI/交互：prompt composer、AgentChat timeline、AgentWorkbench 运行状态、DiffViewer toolbar、terminal panel。
 - 数据/协议：不新增数据库字段；附件和选区继续复用现有 `PromptPart`；PTY 文档通过后才新增 WebSocket 协议。
 - 兼容性：旧 `prompt: string`、旧 `assistant.message.delta`、Run 级 Diff accept/reject、只读 transcript API 均继续保留。
 - 风险：图片 data URL 体积、二进制附件大小限制、follow-up 出队时机、Monaco hunk 定位稳定性、PTY 输入输出审计和 E2E 环境稳定性。
@@ -195,7 +197,7 @@
 - [x] 后端 PTY ticket API 和受控 WebSocket handler 已有最小实现，并覆盖 ticket 创建、远端映射缺失、cwd 越界、ticket 重复使用和消息 codec 测试。
 - [x] 前端 `packages/backend-api` 增加 terminal ticket 方法，新增 `packages/terminal` 负责 WebSocket 连接、输入、resize、close 和输出渲染，并在 `AgentWorkbench` 底部接入 terminal panel。
 - [x] PTY 补齐 active session 约束，并覆盖 WebSocket handler 级 origin 拒绝、active 冲突和进程启动失败释放测试。
-- [ ] PTY 补齐输入限速、审计日志、idle/hard timeout、输出截断和 WebSocket handler 级 input/close 测试。
+- [x] PTY 补齐 ticket 创建限流、输入限速、审计日志、idle/hard timeout、输出截断和 WebSocket handler 级 input/close 测试。
 - [ ] 本地前端、后端、opencode server 三服务联调 E2E 可执行。
 - [ ] 每批改动同步 README/PACKAGE、API、前后端契约和测试说明文档。
 

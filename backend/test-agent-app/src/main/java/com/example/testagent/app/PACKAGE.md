@@ -25,7 +25,7 @@
 - `run.RunApplicationService`：Run 启动、路由、opencode session 懒创建/复用、opencode start/cancel 和事件订阅编排；opencode stream 事件持久化 offload 到 `boundedElastic`，本地落库异常不改变 Run 终态。
 - `run.RunDiffApplicationService`：Run 级 Diff 查询、接受事件追加和拒绝时 opencode revert 编排。
 - `runtime.OpencodeRuntimeApplicationService`：Phase 11 opencode Web App 运行态 API 编排层，统一把平台 workspace/session 请求映射到 opencode-client runtime facade；MCP resources/tools 仅作为只读运行态目录映射。
-- `terminal.TerminalApplicationService`、`terminal.TerminalActiveSessionRegistry`、`web.TerminalController`、`web.TerminalWebSocketHandler`：Phase 11 P2 受控 PTY 入口，负责一次性 ticket、workspace/cwd 校验、Origin 校验、每 session 单 active PTY 和 JSON envelope WebSocket 通道；不访问 generated SDK，也不允许前端覆盖 shell。
+- `terminal.TerminalApplicationService`、`terminal.TerminalTicketRateLimiter`、`terminal.TerminalActiveSessionRegistry`、`terminal.TerminalInputRateLimiter`、`terminal.TerminalOutputLimiter`、`terminal.TerminalAuditLogger`、`web.TerminalController`、`web.TerminalWebSocketHandler`：Phase 11 P2 受控 PTY 入口，负责一次性 ticket、workspace/cwd 校验、Origin 校验、ticket 创建限流、每 session 单 active PTY、input/resize 限速、output 截断、idle/hard timeout、审计日志和 JSON envelope WebSocket 通道；不访问 generated SDK，也不允许前端覆盖 shell。
 - `config.TestAgentRuntimeProperties`、`config.ExecutionNodeSeeder`：运行时配置绑定和 opencode node seed；运行态 Druid 配置默认借出连接前校验，避免 stale PostgreSQL 连接影响首个请求。
 - `config.RuntimeSecurityConfig`：WebFlux 安全与 CORS 配置，本地默认允许 `localhost:3000` 和 `127.0.0.1:3000`。
 - `config.DatabaseMigrationRunner`：运行态 Flyway migration 入口，确保空库启动先建表再 seed。

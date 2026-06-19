@@ -1,6 +1,6 @@
 # PTY WebSocket 受控例外设计
 
-本文档定义 Phase 11 P2 交互式 PTY 终端的架构和安全边界。后端已先落地 ticket + WebSocket 的最小受控通道，前端已接入 `packages/terminal` 基础面板；未满足本文档的限流、审计、timeout 和真实联调验收前，默认 Web App 仍只能把它视为 P2 能力。
+本文档定义 Phase 11 P2 交互式 PTY 终端的架构和安全边界。后端已落地 ticket + WebSocket 受控通道、限流、审计、timeout 和输出截断，前端已接入 `packages/terminal` 面板；真实三服务联调验收前，默认 Web App 仍只能把它视为 P2 能力。
 
 ## 目标
 
@@ -57,7 +57,7 @@ WebSocket message 使用 JSON envelope：
 
 ## 限流与配额
 
-1. ticket 创建按用户、session、workspace 三个维度限流。
+1. ticket 创建的用户维度由平台鉴权和入口 HTTP 限流承接；应用内按 session/workspace 维度限流。
 2. WebSocket input 按连接限速，单条 input 默认不超过 16KB。
 3. output 必须有背压和截断策略；单连接内存缓冲默认不超过 1MB。
 4. idle timeout 默认 10 分钟，hard timeout 默认 2 小时。
@@ -65,8 +65,8 @@ WebSocket message 使用 JSON envelope：
 
 ## 审计与脱敏
 
-1. ticket 创建、upgrade 成功、upgrade 拒绝、input、resize、close、exit 都必须记录结构化审计日志。
-2. input/output 日志默认只记录长度、哈希、命令首 token 和事件类型；不得记录完整交互内容。
+1. ticket 创建、upgrade 成功、upgrade 拒绝、input、resize、close、exit 和 timeout 都必须记录结构化审计日志。
+2. input 审计默认只记录长度和事件类型；output 审计只记录截断 warning、exit 状态等生命周期信息；不得记录完整交互内容。
 3. Authorization、Cookie、ticket、API key、token、私钥片段必须脱敏。
 4. traceId 必须贯穿 ticket 创建、WebSocket upgrade 和 PTY 生命周期。
 5. 输出推送给前端前应复用平台脱敏工具处理明显密钥模式；脱敏失败不能写入服务端日志。
@@ -91,7 +91,7 @@ WebSocket message 使用 JSON envelope：
 
 ## 验收要求
 
-- 后端 ticket controller、application service、WebSocket handler 和 PTY adapter 均有单元或集成测试；当前已覆盖 ticket 创建、无远端映射拒绝、cwd 越界、重复使用和消息 codec。
-- 安全测试覆盖 ticket 过期、重复使用、session/workspace 不匹配、cwd 越界、active PTY 冲突、进程启动失败释放、input 超限和 CORS/origin 拒绝；当前仍需补齐 input/close 和 timeout 测试。
-- 前端测试覆盖 ticket 获取、连接失败、输出渲染、输入发送、resize 和 close；当前已覆盖 terminal client/panel 和 mocked ticket 创建入口。
+- 后端 ticket controller、application service、WebSocket handler 和 PTY adapter 均有单元或集成测试；当前已覆盖 ticket 创建、无远端映射拒绝、cwd 越界、重复使用、ticket 创建限流和消息 codec。
+- 安全测试覆盖 ticket 过期、重复使用、session/workspace 不匹配、cwd 越界、active PTY 冲突、进程启动失败释放、input/resize 限速、非法 envelope、idle/hard timeout 和 CORS/origin 拒绝。
+- 前端测试覆盖 ticket 获取、连接失败、输出渲染、输入发送、resize、close、error 和 warning；当前已覆盖 terminal client/panel 和 mocked ticket 创建入口。
 - 文档同步 `docs/api/backend-api.md`、`docs/security/security-standards.md`、`docs/frontend/frontend-backend-contract.md` 和相关 README/PACKAGE。

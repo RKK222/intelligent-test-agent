@@ -41,6 +41,24 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
+    void defaultTerminalSafetyLimitsAreBounded() {
+        contextRunner.run(context -> {
+            TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
+
+            assertThat(properties.getTerminal().getMaxInputBytes()).isEqualTo(16 * 1024);
+            assertThat(properties.getTerminal().getInputMessagesPerWindow()).isEqualTo(64);
+            assertThat(properties.getTerminal().getResizeMessagesPerWindow()).isEqualTo(10);
+            assertThat(properties.getTerminal().getRateLimitWindow()).isEqualTo(Duration.ofSeconds(1));
+            assertThat(properties.getTerminal().getMaxOutputFrameBytes()).isEqualTo(16 * 1024);
+            assertThat(properties.getTerminal().getMaxOutputConnectionBytes()).isEqualTo(1024 * 1024);
+            assertThat(properties.getTerminal().getIdleTimeout()).isEqualTo(Duration.ofMinutes(10));
+            assertThat(properties.getTerminal().getHardTimeout()).isEqualTo(Duration.ofHours(2));
+            assertThat(properties.getTerminal().getTicketCapacity()).isEqualTo(10);
+            assertThat(properties.getTerminal().getTicketWindow()).isEqualTo(Duration.ofMinutes(1));
+        });
+    }
+
+    @Test
     void bindsRuntimePropertiesFromEnvironmentStyleValues() {
         contextRunner
                 .withPropertyValues(
@@ -52,6 +70,16 @@ class TestAgentRuntimePropertiesBindingTest {
                         "test-agent.redis.enabled=true",
                         "test-agent.redis.host=localhost",
                         "test-agent.redis.port=16379",
+                        "test-agent.terminal.max-input-bytes=1024",
+                        "test-agent.terminal.input-messages-per-window=8",
+                        "test-agent.terminal.resize-messages-per-window=3",
+                        "test-agent.terminal.rate-limit-window=500ms",
+                        "test-agent.terminal.max-output-frame-bytes=2048",
+                        "test-agent.terminal.max-output-connection-bytes=4096",
+                        "test-agent.terminal.idle-timeout=30s",
+                        "test-agent.terminal.hard-timeout=5m",
+                        "test-agent.terminal.ticket-capacity=2",
+                        "test-agent.terminal.ticket-window=10s",
                         "test-agent.opencode.nodes[0].id=node_local",
                         "test-agent.opencode.nodes[0].base-url=http://127.0.0.1:4096",
                         "test-agent.opencode.nodes[0].max-runs=3",
@@ -68,6 +96,16 @@ class TestAgentRuntimePropertiesBindingTest {
                     assertThat(properties.getRateLimit().getWindow()).isEqualTo(Duration.ofSeconds(2));
                     assertThat(properties.getRedis().isEnabled()).isTrue();
                     assertThat(properties.getRedis().getPort()).isEqualTo(16379);
+                    assertThat(properties.getTerminal().getMaxInputBytes()).isEqualTo(1024);
+                    assertThat(properties.getTerminal().getInputMessagesPerWindow()).isEqualTo(8);
+                    assertThat(properties.getTerminal().getResizeMessagesPerWindow()).isEqualTo(3);
+                    assertThat(properties.getTerminal().getRateLimitWindow()).isEqualTo(Duration.ofMillis(500));
+                    assertThat(properties.getTerminal().getMaxOutputFrameBytes()).isEqualTo(2048);
+                    assertThat(properties.getTerminal().getMaxOutputConnectionBytes()).isEqualTo(4096);
+                    assertThat(properties.getTerminal().getIdleTimeout()).isEqualTo(Duration.ofSeconds(30));
+                    assertThat(properties.getTerminal().getHardTimeout()).isEqualTo(Duration.ofMinutes(5));
+                    assertThat(properties.getTerminal().getTicketCapacity()).isEqualTo(2);
+                    assertThat(properties.getTerminal().getTicketWindow()).isEqualTo(Duration.ofSeconds(10));
                     assertThat(properties.getOpencode().getNodes()).hasSize(1);
                     assertThat(properties.getOpencode().getNodes().get(0).getCapabilities())
                             .containsExactly("chat", "diff");

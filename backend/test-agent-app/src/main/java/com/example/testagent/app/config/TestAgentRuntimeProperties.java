@@ -18,6 +18,7 @@ public class TestAgentRuntimeProperties {
     private final Files files = new Files();
     private final Redis redis = new Redis();
     private final Opencode opencode = new Opencode();
+    private final Terminal terminal = new Terminal();
 
     public Security getSecurity() {
         return security;
@@ -37,6 +38,10 @@ public class TestAgentRuntimeProperties {
 
     public Opencode getOpencode() {
         return opencode;
+    }
+
+    public Terminal getTerminal() {
+        return terminal;
     }
 
     public static class Security {
@@ -159,6 +164,99 @@ public class TestAgentRuntimeProperties {
 
         public void setNodes(List<Node> nodes) {
             this.nodes = nodes == null ? new ArrayList<>() : new ArrayList<>(nodes);
+        }
+    }
+
+    public static class Terminal {
+        private int maxInputBytes = 16 * 1024;
+        private int inputMessagesPerWindow = 64;
+        private int resizeMessagesPerWindow = 10;
+        private Duration rateLimitWindow = Duration.ofSeconds(1);
+        private int maxOutputFrameBytes = 16 * 1024;
+        private int maxOutputConnectionBytes = 1024 * 1024;
+        private Duration idleTimeout = Duration.ofMinutes(10);
+        private Duration hardTimeout = Duration.ofHours(2);
+        private int ticketCapacity = 10;
+        private Duration ticketWindow = Duration.ofMinutes(1);
+
+        public int getMaxInputBytes() {
+            return maxInputBytes;
+        }
+
+        public void setMaxInputBytes(int maxInputBytes) {
+            this.maxInputBytes = maxInputBytes;
+        }
+
+        public int getInputMessagesPerWindow() {
+            return inputMessagesPerWindow;
+        }
+
+        public void setInputMessagesPerWindow(int inputMessagesPerWindow) {
+            this.inputMessagesPerWindow = inputMessagesPerWindow;
+        }
+
+        public int getResizeMessagesPerWindow() {
+            return resizeMessagesPerWindow;
+        }
+
+        public void setResizeMessagesPerWindow(int resizeMessagesPerWindow) {
+            this.resizeMessagesPerWindow = resizeMessagesPerWindow;
+        }
+
+        public Duration getRateLimitWindow() {
+            return rateLimitWindow;
+        }
+
+        public void setRateLimitWindow(Duration rateLimitWindow) {
+            this.rateLimitWindow = rateLimitWindow;
+        }
+
+        public int getMaxOutputFrameBytes() {
+            return maxOutputFrameBytes;
+        }
+
+        public void setMaxOutputFrameBytes(int maxOutputFrameBytes) {
+            this.maxOutputFrameBytes = maxOutputFrameBytes;
+        }
+
+        public int getMaxOutputConnectionBytes() {
+            return maxOutputConnectionBytes;
+        }
+
+        public void setMaxOutputConnectionBytes(int maxOutputConnectionBytes) {
+            this.maxOutputConnectionBytes = maxOutputConnectionBytes;
+        }
+
+        public Duration getIdleTimeout() {
+            return idleTimeout;
+        }
+
+        public void setIdleTimeout(Duration idleTimeout) {
+            this.idleTimeout = idleTimeout;
+        }
+
+        public Duration getHardTimeout() {
+            return hardTimeout;
+        }
+
+        public void setHardTimeout(Duration hardTimeout) {
+            this.hardTimeout = hardTimeout;
+        }
+
+        public int getTicketCapacity() {
+            return ticketCapacity;
+        }
+
+        public void setTicketCapacity(int ticketCapacity) {
+            this.ticketCapacity = ticketCapacity;
+        }
+
+        public Duration getTicketWindow() {
+            return ticketWindow;
+        }
+
+        public void setTicketWindow(Duration ticketWindow) {
+            this.ticketWindow = ticketWindow;
         }
     }
 

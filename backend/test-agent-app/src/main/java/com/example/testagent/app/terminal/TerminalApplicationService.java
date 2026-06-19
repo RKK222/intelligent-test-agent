@@ -29,14 +29,20 @@ public class TerminalApplicationService {
     private final WorkspaceRepository workspaceRepository;
     private final SessionRepository sessionRepository;
     private final TerminalTicketStore ticketStore;
+    private final TerminalTicketRateLimiter ticketRateLimiter;
+    private final TerminalAuditLogger auditLogger;
 
     public TerminalApplicationService(
             WorkspaceRepository workspaceRepository,
             SessionRepository sessionRepository,
-            TerminalTicketStore ticketStore) {
+            TerminalTicketStore ticketStore,
+            TerminalTicketRateLimiter ticketRateLimiter,
+            TerminalAuditLogger auditLogger) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.ticketStore = Objects.requireNonNull(ticketStore, "ticketStore must not be null");
+        this.ticketRateLimiter = Objects.requireNonNull(ticketRateLimiter, "ticketRateLimiter must not be null");
+        this.auditLogger = Objects.requireNonNull(auditLogger, "auditLogger must not be null");
     }
 
     public TerminalTicketResponse createTicket(SessionId sessionId, TerminalTicketRequest request, String traceId) {
@@ -56,6 +62,7 @@ public class TerminalApplicationService {
         }
         Workspace workspace = workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value())));
+        ticketRateLimiter.acquire(session.sessionId(), workspace.workspaceId());
         Path root = workspaceRoot(workspace);
         Path cwd = resolveCwd(root, request.cwd());
         TerminalTicket ticket = ticketStore.issue(new TerminalTicketDraft(
@@ -68,6 +75,7 @@ public class TerminalApplicationService {
                 clamp(request.cols(), DEFAULT_COLS, MAX_COLS),
                 clamp(request.rows(), DEFAULT_ROWS, MAX_ROWS),
                 traceId));
+        auditLogger.ticketCreated(ticket);
         return new TerminalTicketResponse(
                 ticket.ticket(),
                 ticket.expiresAt(),

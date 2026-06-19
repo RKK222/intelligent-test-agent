@@ -32,7 +32,7 @@
 - Run API：启动、查询、取消、RunEvent SSE 和 Run 级 Diff；首次 Run 懒创建远端 opencode session 并保存内部映射，后续 Run 复用原 session 和 execution node。
 - `POST /api/runs` 已接收 Phase 11 可选字段；旧 `prompt` 继续兼容，`parts` 会转换为 opencode `text/file/agent` parts，`reference` part 会转为可读 text part，`agent/model/variant/messageId` 会随 `prompt_async` 下沉到 opencode facade。
 - Phase 11 Runtime API：`/api/agents|models|providers|commands|references`、`/api/sessions/{id}/children|todo|diff|abort|fork|compact|revert|unrevert|command|shell`、permission/question、fs/vcs/lsp/mcp status/resources/tools 运行态接口，统一通过 `OpencodeRuntimeApplicationService` 和 opencode-client runtime facade 转发，不直返 generated DTO。
-- Phase 11 P2 Terminal API：`POST /api/sessions/{id}/terminal/tickets` 创建 session/workspace 绑定的一次性 PTY ticket，`/api/sessions/{id}/terminal/ws?ticket=...` 作为受控 WebSocket 例外；当前后端已校验远端 session 映射、Origin、workspace/cwd、ticket 单次使用、每 session 单 active PTY 和 input 大小，完整限流/审计/timeout 仍按后续计划补齐。
+- Phase 11 P2 Terminal API：`POST /api/sessions/{id}/terminal/tickets` 创建 session/workspace 绑定的一次性 PTY ticket，`/api/sessions/{id}/terminal/ws?ticket=...` 作为受控 WebSocket 例外；当前后端已校验远端 session 映射、Origin、workspace/cwd、ticket 单次使用、每 session 单 active PTY、ticket 创建限流、input/resize 限速、output 截断、审计日志和 idle/hard timeout。
 - Diff API：查询 Run Diff、接受保留当前工作区变更、拒绝时通过 opencode `sessionRevert` 回滚本次 Run 对应消息。
 - RunController 在 WebFlux 下必须把阻塞式 Run/Diff 应用服务调用 offload 到 `boundedElastic`，避免在 event-loop 上触发 `.block()` 造成 `INTERNAL_ERROR`；RunEvent SSE 保持 `Flux` 流式返回。
 - RunEvent SSE 续传时 header `Last-Event-ID` 优先；浏览器原生 `EventSource` 首次续传可使用 query `lastEventId`，由 RunController 传给 event 模块统一解析。

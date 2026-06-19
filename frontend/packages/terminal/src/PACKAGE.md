@@ -6,8 +6,8 @@
 
 ## 主要程序清单
 
-- `terminal-client.ts`：把后端 ticket 响应转换为受控 WebSocket 会话，负责 input/resize/close 和 output/exit/error 状态归并。
-- `TerminalPanel.tsx`：终端 UI 面板，调用上层传入的 `createTicket` 回调，再交给 `terminal-client` 管理 WebSocket 生命周期。
+- `terminal-client.ts`：把后端 ticket 响应转换为受控 WebSocket 会话，负责 input/resize/close 和 output/exit/error/warning 状态归并。
+- `TerminalPanel.tsx`：终端 UI 面板，调用上层传入的 `createTicket` 回调，再交给 `terminal-client` 管理 WebSocket 生命周期，并展示非致命 warning。
 - `index.ts`：包导出入口。
 
 ## 允许依赖

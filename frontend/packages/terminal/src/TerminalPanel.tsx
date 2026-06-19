@@ -95,6 +95,11 @@ export function TerminalPanel({ baseUrl, createTicket, disabled, disabledReason,
           {snapshot.error.code}: {snapshot.error.message}
         </div>
       ) : null}
+      {snapshot.warnings?.map((warning) => (
+        <div key={`${warning.code}:${warning.message}`} className="border-b border-amber-900/60 bg-amber-950/25 px-3 py-2 text-[12px] text-amber-100">
+          {warning.code}: {warning.message}
+        </div>
+      ))}
       <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-3 font-mono text-[12px] leading-6 text-slate-300">
         {snapshot.output || "连接后显示终端输出..."}
       </pre>

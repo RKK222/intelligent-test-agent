@@ -2,14 +2,18 @@ package com.example.testagent.app.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.example.testagent.app.config.TestAgentRuntimeProperties;
 import com.example.testagent.app.terminal.TerminalActiveSessionRegistry;
+import com.example.testagent.app.terminal.TerminalAuditLogger;
 import com.example.testagent.app.terminal.TerminalApplicationService;
 import com.example.testagent.app.terminal.TerminalMessageCodec;
 import com.example.testagent.app.terminal.TerminalProcessFactory;
+import com.example.testagent.app.terminal.TerminalProcessSession;
+import com.example.testagent.app.terminal.TerminalServerMessage;
 import com.example.testagent.app.terminal.TerminalTicket;
 import com.example.testagent.common.error.ErrorCode;
 import com.example.testagent.common.error.PlatformException;
@@ -22,6 +26,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.security.Principal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -39,6 +44,7 @@ import org.springframework.web.reactive.socket.WebSocketMessage;
 import org.springframework.web.reactive.socket.WebSocketSession;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.publisher.Sinks;
 
 class TerminalWebSocketHandlerTest {
 
@@ -51,6 +57,7 @@ class TerminalWebSocketHandlerTest {
         registry.reserve(ticket);
         TerminalApplicationService terminalService = Mockito.mock(TerminalApplicationService.class);
         TerminalProcessFactory processFactory = Mockito.mock(TerminalProcessFactory.class);
+        TerminalAuditLogger auditLogger = Mockito.mock(TerminalAuditLogger.class);
         when(terminalService.consumeTicket(
                         new SessionId("ses_1234567890abcdef"),
                         "pty_1234567890abcdef",
@@ -59,13 +66,14 @@ class TerminalWebSocketHandlerTest {
                 .thenReturn(ticket);
         FakeWebSocketSession session = FakeWebSocketSession.allowed("/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
 
-        handler(terminalService, processFactory, registry).handle(session).block();
+        handler(terminalService, processFactory, registry, new TestAgentRuntimeProperties(), auditLogger).handle(session).block();
 
         JsonNode error = objectMapper.readTree(session.sentText().getFirst());
         assertThat(error.get("type").asText()).isEqualTo("error");
         assertThat(error.get("code").asText()).isEqualTo("CONFLICT");
         assertThat(session.closed()).isTrue();
         verify(processFactory, never()).start(ticket);
+        verify(auditLogger).upgradeRejected(ticket, "CONFLICT");
     }
 
     @Test
@@ -104,16 +112,253 @@ class TerminalWebSocketHandlerTest {
         assertThat(registry.isActive(new SessionId("ses_1234567890abcdef"))).isFalse();
     }
 
+    @Test
+    void rejectsInputRateViolationBeforeWritingToTerminal() throws Exception {
+        TerminalTicket ticket = ticket("ses_1234567890abcdef");
+        TerminalActiveSessionRegistry registry = new TerminalActiveSessionRegistry();
+        TerminalApplicationService terminalService = Mockito.mock(TerminalApplicationService.class);
+        TerminalProcessFactory processFactory = Mockito.mock(TerminalProcessFactory.class);
+        TerminalProcessSession terminal = Mockito.mock(TerminalProcessSession.class);
+        TerminalAuditLogger auditLogger = Mockito.mock(TerminalAuditLogger.class);
+        TestAgentRuntimeProperties properties = new TestAgentRuntimeProperties();
+        properties.getTerminal().setMaxInputBytes(4);
+        when(terminalService.consumeTicket(
+                        new SessionId("ses_1234567890abcdef"),
+                        "pty_1234567890abcdef",
+                        "http://localhost:3000",
+                        "trace_1234567890abcdef"))
+                .thenReturn(ticket);
+        when(processFactory.start(ticket)).thenReturn(terminal);
+        when(terminal.output()).thenReturn(Flux.empty());
+        when(terminal.close()).thenReturn(Mono.empty());
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef",
+                List.of("""
+                        {"type":"input","data":"12345"}
+                        """));
+
+        handler(terminalService, processFactory, registry, properties, auditLogger).handle(session).block(Duration.ofSeconds(1));
+
+        JsonNode error = objectMapper.readTree(session.sentText().getFirst());
+        assertThat(error.get("type").asText()).isEqualTo("error");
+        assertThat(error.get("code").asText()).isEqualTo("RATE_LIMITED");
+        verify(terminal, never()).input(Mockito.any());
+        verify(terminal).close();
+        verify(auditLogger).inputRejected(ticket, "RATE_LIMITED", 5);
+        assertThat(registry.isActive(new SessionId("ses_1234567890abcdef"))).isFalse();
+    }
+
+    @Test
+    void forwardsInputResizeAndCloseThenReleasesActiveReservation() {
+        TerminalTicket ticket = ticket("ses_1234567890abcdef");
+        TerminalActiveSessionRegistry registry = new TerminalActiveSessionRegistry();
+        TerminalApplicationService terminalService = Mockito.mock(TerminalApplicationService.class);
+        TerminalProcessFactory processFactory = Mockito.mock(TerminalProcessFactory.class);
+        TerminalProcessSession terminal = Mockito.mock(TerminalProcessSession.class);
+        TerminalAuditLogger auditLogger = Mockito.mock(TerminalAuditLogger.class);
+        when(terminalService.consumeTicket(
+                        new SessionId("ses_1234567890abcdef"),
+                        "pty_1234567890abcdef",
+                        "http://localhost:3000",
+                        "trace_1234567890abcdef"))
+                .thenReturn(ticket);
+        when(processFactory.start(ticket)).thenReturn(terminal);
+        when(terminal.output()).thenReturn(Flux.empty());
+        when(terminal.input("echo hi\n")).thenReturn(Mono.empty());
+        when(terminal.resize(120, 32)).thenReturn(Mono.empty());
+        when(terminal.close()).thenReturn(Mono.empty());
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef",
+                List.of(
+                        """
+                        {"type":"input","data":"echo hi\\n"}
+                        """,
+                        """
+                        {"type":"resize","cols":120,"rows":32}
+                        """,
+                        """
+                        {"type":"close","reason":"user"}
+                        """));
+
+        handler(terminalService, processFactory, registry, new TestAgentRuntimeProperties(), auditLogger).handle(session).block(Duration.ofSeconds(1));
+
+        verify(terminal).input("echo hi\n");
+        verify(terminal).resize(120, 32);
+        verify(terminal).close();
+        verify(auditLogger).upgradeAccepted(ticket);
+        verify(auditLogger).input(ticket, 8);
+        verify(auditLogger).resize(ticket, 120, 32);
+        verify(auditLogger).close(ticket, "user");
+        assertThat(registry.isActive(new SessionId("ses_1234567890abcdef"))).isFalse();
+    }
+
+    @Test
+    void rejectsInvalidClientMessageAndClosesTerminal() throws Exception {
+        TerminalTicket ticket = ticket("ses_1234567890abcdef");
+        TerminalActiveSessionRegistry registry = new TerminalActiveSessionRegistry();
+        TerminalApplicationService terminalService = Mockito.mock(TerminalApplicationService.class);
+        TerminalProcessFactory processFactory = Mockito.mock(TerminalProcessFactory.class);
+        TerminalProcessSession terminal = Mockito.mock(TerminalProcessSession.class);
+        Sinks.Many<TerminalServerMessage> output = Sinks.many().unicast().onBackpressureBuffer();
+        when(terminalService.consumeTicket(
+                        new SessionId("ses_1234567890abcdef"),
+                        "pty_1234567890abcdef",
+                        "http://localhost:3000",
+                        "trace_1234567890abcdef"))
+                .thenReturn(ticket);
+        when(processFactory.start(ticket)).thenReturn(terminal);
+        when(terminal.output()).thenReturn(output.asFlux());
+        when(terminal.close()).thenAnswer(invocation -> {
+            output.tryEmitComplete();
+            return Mono.empty();
+        });
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef",
+                List.of("not-json"));
+
+        handler(terminalService, processFactory, registry).handle(session).block(Duration.ofSeconds(1));
+
+        JsonNode error = objectMapper.readTree(session.sentText().getFirst());
+        assertThat(error.get("type").asText()).isEqualTo("error");
+        assertThat(error.get("code").asText()).isEqualTo("VALIDATION_ERROR");
+        assertThat(error.get("message").asText()).isEqualTo("invalid terminal message");
+        verify(terminal, never()).input(Mockito.any());
+        verify(terminal, never()).resize(Mockito.any(), Mockito.any());
+        verify(terminal).close();
+        assertThat(registry.isActive(new SessionId("ses_1234567890abcdef"))).isFalse();
+    }
+
+    @Test
+    void auditsTerminalExitEnvelope() {
+        TerminalTicket ticket = ticket("ses_1234567890abcdef");
+        TerminalActiveSessionRegistry registry = new TerminalActiveSessionRegistry();
+        TerminalApplicationService terminalService = Mockito.mock(TerminalApplicationService.class);
+        TerminalProcessFactory processFactory = Mockito.mock(TerminalProcessFactory.class);
+        TerminalProcessSession terminal = Mockito.mock(TerminalProcessSession.class);
+        TerminalAuditLogger auditLogger = Mockito.mock(TerminalAuditLogger.class);
+        when(terminalService.consumeTicket(
+                        new SessionId("ses_1234567890abcdef"),
+                        "pty_1234567890abcdef",
+                        "http://localhost:3000",
+                        "trace_1234567890abcdef"))
+                .thenReturn(ticket);
+        when(processFactory.start(ticket)).thenReturn(terminal);
+        when(terminal.output()).thenReturn(Flux.just(TerminalServerMessage.exit(0, 1)));
+        when(terminal.close()).thenReturn(Mono.empty());
+        FakeWebSocketSession session = FakeWebSocketSession.allowed(
+                "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+
+        handler(terminalService, processFactory, registry, new TestAgentRuntimeProperties(), auditLogger)
+                .handle(session)
+                .block(Duration.ofSeconds(1));
+
+        verify(auditLogger).exit(ticket, 0);
+    }
+
+    @Test
+    void closesIdleTerminalAfterConfiguredTimeout() throws Exception {
+        TerminalTicket ticket = ticket("ses_1234567890abcdef");
+        TerminalActiveSessionRegistry registry = new TerminalActiveSessionRegistry();
+        TerminalApplicationService terminalService = Mockito.mock(TerminalApplicationService.class);
+        TerminalProcessFactory processFactory = Mockito.mock(TerminalProcessFactory.class);
+        TerminalProcessSession terminal = Mockito.mock(TerminalProcessSession.class);
+        TerminalAuditLogger auditLogger = Mockito.mock(TerminalAuditLogger.class);
+        Sinks.Many<TerminalServerMessage> output = Sinks.many().unicast().onBackpressureBuffer();
+        TestAgentRuntimeProperties properties = new TestAgentRuntimeProperties();
+        properties.getTerminal().setIdleTimeout(Duration.ofMillis(10));
+        properties.getTerminal().setHardTimeout(Duration.ofSeconds(1));
+        when(terminalService.consumeTicket(
+                        new SessionId("ses_1234567890abcdef"),
+                        "pty_1234567890abcdef",
+                        "http://localhost:3000",
+                        "trace_1234567890abcdef"))
+                .thenReturn(ticket);
+        when(processFactory.start(ticket)).thenReturn(terminal);
+        when(terminal.output()).thenReturn(output.asFlux());
+        when(terminal.close()).thenAnswer(invocation -> {
+            output.tryEmitComplete();
+            return Mono.empty();
+        });
+        FakeWebSocketSession session = FakeWebSocketSession.allowedUntilClose(
+                "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+
+        handler(terminalService, processFactory, registry, properties, auditLogger).handle(session).block(Duration.ofSeconds(1));
+
+        JsonNode error = objectMapper.readTree(session.sentText().getFirst());
+        assertThat(error.get("code").asText()).isEqualTo("PTY_TIMEOUT");
+        assertThat(error.get("message").asText()).isEqualTo("terminal idle timeout");
+        assertThat(session.closed()).isTrue();
+        verify(terminal).close();
+        verify(auditLogger).timeout(ticket, "terminal idle timeout");
+        assertThat(registry.isActive(new SessionId("ses_1234567890abcdef"))).isFalse();
+    }
+
+    @Test
+    void closesTerminalAfterConfiguredHardTimeout() throws Exception {
+        TerminalTicket ticket = ticket("ses_1234567890abcdef");
+        TerminalActiveSessionRegistry registry = new TerminalActiveSessionRegistry();
+        TerminalApplicationService terminalService = Mockito.mock(TerminalApplicationService.class);
+        TerminalProcessFactory processFactory = Mockito.mock(TerminalProcessFactory.class);
+        TerminalProcessSession terminal = Mockito.mock(TerminalProcessSession.class);
+        TerminalAuditLogger auditLogger = Mockito.mock(TerminalAuditLogger.class);
+        Sinks.Many<TerminalServerMessage> output = Sinks.many().unicast().onBackpressureBuffer();
+        TestAgentRuntimeProperties properties = new TestAgentRuntimeProperties();
+        properties.getTerminal().setIdleTimeout(Duration.ofSeconds(1));
+        properties.getTerminal().setHardTimeout(Duration.ofMillis(10));
+        when(terminalService.consumeTicket(
+                        new SessionId("ses_1234567890abcdef"),
+                        "pty_1234567890abcdef",
+                        "http://localhost:3000",
+                        "trace_1234567890abcdef"))
+                .thenReturn(ticket);
+        when(processFactory.start(ticket)).thenReturn(terminal);
+        when(terminal.output()).thenReturn(output.asFlux());
+        when(terminal.close()).thenAnswer(invocation -> {
+            output.tryEmitComplete();
+            return Mono.empty();
+        });
+        FakeWebSocketSession session = FakeWebSocketSession.allowedUntilClose(
+                "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+
+        handler(terminalService, processFactory, registry, properties, auditLogger).handle(session).block(Duration.ofSeconds(1));
+
+        JsonNode error = objectMapper.readTree(session.sentText().getFirst());
+        assertThat(error.get("code").asText()).isEqualTo("PTY_TIMEOUT");
+        assertThat(error.get("message").asText()).isEqualTo("terminal hard timeout");
+        assertThat(session.closed()).isTrue();
+        verify(terminal).close();
+        verify(auditLogger).timeout(ticket, "terminal hard timeout");
+        assertThat(registry.isActive(new SessionId("ses_1234567890abcdef"))).isFalse();
+    }
+
     private TerminalWebSocketHandler handler(
             TerminalApplicationService terminalService,
             TerminalProcessFactory processFactory,
             TerminalActiveSessionRegistry registry) {
+        return handler(terminalService, processFactory, registry, new TestAgentRuntimeProperties());
+    }
+
+    private TerminalWebSocketHandler handler(
+            TerminalApplicationService terminalService,
+            TerminalProcessFactory processFactory,
+            TerminalActiveSessionRegistry registry,
+            TestAgentRuntimeProperties properties) {
+        return handler(terminalService, processFactory, registry, properties, new TerminalAuditLogger());
+    }
+
+    private TerminalWebSocketHandler handler(
+            TerminalApplicationService terminalService,
+            TerminalProcessFactory processFactory,
+            TerminalActiveSessionRegistry registry,
+            TestAgentRuntimeProperties properties,
+            TerminalAuditLogger auditLogger) {
         return new TerminalWebSocketHandler(
                 terminalService,
                 processFactory,
                 new TerminalMessageCodec(objectMapper),
-                new TestAgentRuntimeProperties(),
-                registry);
+                properties,
+                registry,
+                auditLogger);
     }
 
     private static TerminalTicket ticket(String sessionId) {
@@ -133,19 +378,40 @@ class TerminalWebSocketHandlerTest {
 
     private static final class FakeWebSocketSession implements WebSocketSession {
         private final HandshakeInfo handshakeInfo;
+        private final List<String> incoming;
+        private final boolean receiveUntilClose;
+        private final Sinks.Empty<Void> closeSignal = Sinks.empty();
         private final DataBufferFactory bufferFactory = DefaultDataBufferFactory.sharedInstance;
         private final List<String> sentText = new ArrayList<>();
         private boolean closed;
 
         private FakeWebSocketSession(String path, String origin) {
+            this(path, origin, List.of(), false);
+        }
+
+        private FakeWebSocketSession(String path, String origin, List<String> incoming) {
+            this(path, origin, incoming, false);
+        }
+
+        private FakeWebSocketSession(String path, String origin, List<String> incoming, boolean receiveUntilClose) {
             HttpHeaders headers = new HttpHeaders();
             headers.setOrigin(origin);
             headers.set("X-Trace-Id", "trace_1234567890abcdef");
             this.handshakeInfo = new HandshakeInfo(URI.create("ws://127.0.0.1:8080" + path), headers, Mono.<Principal>empty(), null);
+            this.incoming = List.copyOf(incoming);
+            this.receiveUntilClose = receiveUntilClose;
         }
 
         static FakeWebSocketSession allowed(String path) {
             return new FakeWebSocketSession(path, "http://localhost:3000");
+        }
+
+        static FakeWebSocketSession allowed(String path, List<String> incoming) {
+            return new FakeWebSocketSession(path, "http://localhost:3000", incoming);
+        }
+
+        static FakeWebSocketSession allowedUntilClose(String path) {
+            return new FakeWebSocketSession(path, "http://localhost:3000", List.of(), true);
         }
 
         static FakeWebSocketSession disallowed(String path) {
@@ -182,7 +448,10 @@ class TerminalWebSocketHandlerTest {
 
         @Override
         public Flux<WebSocketMessage> receive() {
-            return Flux.empty();
+            if (receiveUntilClose) {
+                return closeSignal.asMono().thenMany(Flux.empty());
+            }
+            return Flux.fromIterable(incoming).map(this::textMessage);
         }
 
         @Override
@@ -200,6 +469,7 @@ class TerminalWebSocketHandlerTest {
         @Override
         public Mono<Void> close(CloseStatus status) {
             closed = true;
+            closeSignal.tryEmitEmpty();
             return Mono.empty();
         }
 
