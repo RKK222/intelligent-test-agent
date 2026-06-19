@@ -45,3 +45,8 @@
 
 完成前必须执行 `docs/development/ai-self-checklist.md` 的清单，并在回复中说明验证结果。
 
+## 8. Git 提交
+
+1. 自检通过后提交 git。
+2. commit message 使用中文，描述本次任务的实际修改。
+3. 只提交本次任务相关变更，工作区已有无关改动必须保持原状。
