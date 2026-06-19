@@ -30,12 +30,12 @@
 ## 禁止依赖
 
 - generated SDK 直接返回给前端。
-- `test-agent-app` Controller。
+- `test-agent-api` Controller。
 - persistence 实现细节。
 
 ## 上游调用方
 
-- `test-agent-app` 的事件 API。
+- `test-agent-api` 的事件 API。
 - opencode client facade 的事件转换流程。
 - 前端 SSE 客户端。
 

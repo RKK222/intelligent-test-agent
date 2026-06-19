@@ -22,7 +22,9 @@ Browser
       -> packages/backend-api
       -> packages/event-stream-client
   -> test-agent-app
-      -> domain / persistence / event / observability
+      -> test-agent-api
+          -> workspace-management / opencode-runtime / system-management / integration
+      -> persistence / event / observability
       -> test-agent-opencode-client
           -> test-agent-opencode-sdk-generated
               -> opencode server pool
@@ -31,7 +33,8 @@ Browser
 关键边界：
 
 - 浏览器只认识平台后端 API 和平台事件流。
-- `test-agent-app` 统一承载 API、鉴权、限流、路由、任务入口、事件出口和错误处理。
+- `test-agent-api` 统一承载 API、鉴权、限流、traceId、任务入口、事件出口和错误处理。
+- `test-agent-app` 只承载启动、装配、profile、migration、health 和日志等运行入口，不承载业务逻辑。
 - `test-agent-opencode-client` 是业务代码访问 opencode server 的唯一门面。
 - `test-agent-opencode-sdk-generated` 只保存生成代码，不承载业务逻辑。
 
@@ -47,6 +50,11 @@ backend/
   test-agent-observability/
   test-agent-opencode-sdk-generated/
   test-agent-opencode-client/
+  test-agent-workspace-management/
+  test-agent-opencode-runtime/
+  test-agent-system-management/
+  test-agent-integration/
+  test-agent-api/
   test-agent-persistence/
   test-agent-event/
   test-agent-test-support/
@@ -60,10 +68,15 @@ backend/
 - `test-agent-observability`：traceId、结构化日志、Micrometer 指标、观测性工具。
 - `test-agent-opencode-sdk-generated`：从 `tools/opencode-sdk-generator` 复制的 generated SDK 源码。
 - `test-agent-opencode-client`：封装 generated SDK，提供 `OpencodeClientFacade`。
+- `test-agent-workspace-management`：workspace、文件查看/新增/修改/删除、git/diff、agent 和 skill 管理业务。
+- `test-agent-opencode-runtime`：Session、Run、RunEvent 编排、opencode runtime、Diff/revert、terminal ticket/PTY 业务。
+- `test-agent-system-management`：用户、角色、权限等平台内部管理业务边界。
+- `test-agent-integration`：非 opencode 外部系统联动业务边界。
+- `test-agent-api`：Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流和 trace Web 入口。
 - `test-agent-persistence`：数据库、Flyway、Repository、Redis 可选能力。
 - `test-agent-event`：RunEvent、SSE、事件转换、事件回放。
 - `test-agent-test-support`：测试 fixture、mock server、集成测试支撑。
-- `test-agent-app`：唯一 Spring Boot 启动入口，承载全部对外后端能力。
+- `test-agent-app`：唯一 Spring Boot 启动入口和可部署包，不承载业务逻辑。
 
 最终包形态：
 
@@ -98,7 +111,7 @@ frontend/
 包职责：
 
 - `apps/agent-web`：自研 Web IDE 主应用，负责路由、布局组合、认证态入口和全局错误边界。
-- `packages/backend-api`：访问 `test-agent-app` 的唯一 HTTP client。
+- `packages/backend-api`：访问平台后端服务的唯一 HTTP client，当前后端由 `test-agent-app` 装配运行。
 - `packages/event-stream-client`：RunEvent SSE client，负责连接、重连、去重、断点恢复和取消订阅。
 - `packages/workbench-shell`：Dockview 工作台布局、面板注册和面板生命周期。
 - `packages/file-explorer`：文件树、文件状态、搜索、打开文件入口。
@@ -115,10 +128,10 @@ frontend/
 
 后端必须逐步提供：
 
-1. Workspace API：工作区创建、打开、文件树、文件内容、保存、变更状态。
-2. Session API：会话创建、历史会话、会话详情、消息追加。
-3. Run API：启动任务、取消任务、查询运行状态、记录运行结果。
-4. Event API：RunEvent append-only 存储、SSE 推送、断线续传。
+1. Workspace API：工作区创建、打开、文件树、文件内容、保存、变更状态，业务落在 `test-agent-workspace-management`。
+2. Session API：会话创建、历史会话、会话详情、消息追加，业务落在 `test-agent-opencode-runtime`。
+3. Run API：启动任务、取消任务、查询运行状态、记录运行结果，业务落在 `test-agent-opencode-runtime`。
+4. Event API：RunEvent append-only 存储、SSE 推送、断线续传，API 入口在 `test-agent-api`，事件能力在 `test-agent-event`。
 5. Opencode client：统一调用 opencode server，映射错误、超时、重试和事件。
 6. Routing：根据 workspace、session、负载和健康状态选择执行节点。
 7. Persistence：Flyway migration、Repository、事务边界和数据兼容策略。
@@ -126,11 +139,17 @@ frontend/
 
 Phase 04/05 已固化的后端运行时边界：
 
-- `test-agent-app` 提供 Workspace、Session、Run、Cancel 和 RunEvent SSE Runtime API。
+- `test-agent-api` 提供 Workspace、Session、Run、Cancel 和 RunEvent SSE Runtime API；`test-agent-app` 只负责装配为一个可部署服务包。
 - Run 启动通过 `OpencodeClientFacade.createSession` 懒创建远端 opencode session，再由 `OpencodeClientFacade.startRun` 调用 `prompt_async`；后续 Run 复用内部映射，generated SDK 不越过 opencode-client 模块。
 - 本地鉴权默认免 token，配置 `TEST_AGENT_API_TOKEN` 后启用 Bearer token 占位鉴权。
 - 研发测试和生产部署只将 `test-agent-app` Java 进程放入 Docker；PostgreSQL、Redis 和 opencode server 均通过外部地址注入。
 - `deploy/local/docker-compose.yml` 仅作为个人离线开发备用入口，不作为研发测试或生产部署主路径。
+
+新增 API URL 时必须保留旧 `/api/...` 兼容入口，并同步新增：
+
+- 平台内部 API：`/api/internal/platform/{business-project}/{business}/...`。
+- opencode 交互 API：`/api/internal/agent/opencode/{原 opencode path}`。
+- 对其他系统开放 API：`/api/public/...`。
 
 前端必须逐步提供：
 

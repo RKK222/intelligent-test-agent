@@ -18,11 +18,49 @@
 
 ## 当前约定
 
-1. 前端只能通过 `backend-api` 访问 `test-agent-app`。
+1. 前端只能通过 `backend-api` 访问平台后端服务，当前由 `test-agent-app` 装配运行。
 2. 前端不得直接访问 opencode server。
 3. 后端不得直接返回 generated SDK DTO。
 4. API 返回平台 DTO 和统一错误格式。
 5. API 文档变更必须与 Controller、DTO、测试同步。
+6. 旧 `/api/...` URL 全部保留；新增 URL 与旧 URL 并行暴露，不重定向、不删除。
+
+## API URL 分层
+
+同一业务能力可以同时暴露旧 URL 和新 URL。新旧 URL 必须共享同一 DTO、鉴权、traceId、限流、错误格式和业务实现。
+
+| URL 前缀 | 用途 |
+|---|---|
+| `/api/...` | 旧兼容入口，当前前端和历史调用方继续可用。 |
+| `/api/internal/platform/{business-project}/{business}/...` | 前端调用平台自身能力的新入口。 |
+| `/api/internal/agent/opencode/{原 opencode path}` | 与 opencode 交互的新入口，URL 后半段保持 opencode 原 path 语义。 |
+| `/api/public/...` | 其他系统调用平台的公开 API，当前预留；新增前必须完成鉴权、限流、安全和兼容性设计。 |
+
+当前已落地的新平台入口：
+
+| 业务工程 | 新 URL 示例 | 旧 URL 示例 |
+|---|---|---|
+| `workspace-management` | `/api/internal/platform/workspace-management/workspaces` | `/api/workspaces` |
+| `workspace-management` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/content` | `/api/workspaces/{workspaceId}/files/content` |
+| `opencode-runtime` | `/api/internal/platform/opencode-runtime/sessions` | `/api/sessions` |
+| `opencode-runtime` | `/api/internal/platform/opencode-runtime/runs` | `/api/runs` |
+| `opencode-runtime` | `/api/internal/platform/opencode-runtime/runs/{runId}/events` | `/api/runs/{runId}/events` |
+| `opencode-runtime` | `/api/internal/platform/opencode-runtime/agents` | `/api/agents` |
+| `opencode-runtime` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets` | `/api/sessions/{sessionId}/terminal/tickets` |
+
+当前已落地的 opencode path 入口示例：
+
+| 新 URL | 平台业务实现 |
+|---|---|
+| `/api/internal/agent/opencode/api/agent` | Agent 目录。 |
+| `/api/internal/agent/opencode/api/model` | Model 目录。 |
+| `/api/internal/agent/opencode/file` | 文件列表。 |
+| `/api/internal/agent/opencode/file/content` | 文件读取。 |
+| `/api/internal/agent/opencode/vcs/status` | VCS 状态。 |
+| `/api/internal/agent/opencode/session/{sessionId}/diff` | Session Diff。 |
+| `/api/internal/agent/opencode/session/{sessionId}/abort` | Session abort。 |
+| `/api/internal/agent/opencode/permission?sessionId={sessionId}` | Pending permission；opencode 原路径不包含平台 sessionId，因此使用 query 定位平台 session。 |
+| `/api/internal/agent/opencode/question?sessionId={sessionId}` | Pending question；opencode 原路径不包含平台 sessionId，因此使用 query 定位平台 session。 |
 
 ## 统一响应
 
@@ -89,6 +127,7 @@
 - RunEvent API。
 - Cancel API。
 - opencode 后端内部封装能力。
+- Public API。
 - 健康检查和观测性 API。
 
 ## Phase 02/03 内部能力说明
@@ -104,7 +143,7 @@ Phase 02/03 不新增对外 HTTP API，也不新增 Controller。新增的 Works
 
 ## Phase 04 Runtime API
 
-Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做协议转换、参数校验和统一响应封装，业务编排进入 application service；Controller 不直接访问 Repository，也不直接调用 generated SDK。
+Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agent-app` 装配为单一可部署服务包。Controller 只做协议转换、参数校验和统一响应封装，业务编排进入对应业务模块；Controller 不直接访问 Repository，也不直接调用 generated SDK。
 
 ### 鉴权、限流和 CORS
 
@@ -138,6 +177,15 @@ Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做
 | `GET` | `/api/workspaces/{workspaceId}/files/content` | 读取 UTF-8 文件。 |
 | `PUT` | `/api/workspaces/{workspaceId}/files/content` | 保存 UTF-8 文件。 |
 | `GET` | `/api/workspaces/{workspaceId}/files/status` | 查询文件基础状态。 |
+
+新平台 URL 使用 `/api/internal/platform/workspace-management` 前缀。例如：
+
+| 方法 | 新路径 |
+|---|---|
+| `POST` | `/api/internal/platform/workspace-management/workspaces` |
+| `GET` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files` |
+| `GET` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/content` |
+| `PUT` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/content` |
 
 `POST /api/workspaces` 请求体：
 
@@ -191,6 +239,16 @@ Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做
 | `POST` | `/api/sessions/{sessionId}/messages` | 追加会话消息。 |
 | `GET` | `/api/sessions/{sessionId}/messages` | 分页读取会话消息。 |
 
+新平台 URL 使用 `/api/internal/platform/opencode-runtime` 前缀。例如：
+
+| 方法 | 新路径 |
+|---|---|
+| `POST` | `/api/internal/platform/opencode-runtime/sessions` |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions` |
+| `GET` | `/api/internal/platform/opencode-runtime/workspaces/{workspaceId}/sessions` |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}` |
+| `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` |
+
 `POST /api/sessions` 请求体：
 
 ```json
@@ -240,6 +298,16 @@ Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做
 | `POST` | `/api/runs/{runId}/diff/accept` | 接受 Run 级 Diff。 |
 | `POST` | `/api/runs/{runId}/diff/reject` | 拒绝 Run 级 Diff 并触发 opencode revert。 |
 
+新平台 URL 使用 `/api/internal/platform/opencode-runtime` 前缀。例如：
+
+| 方法 | 新路径 |
+|---|---|
+| `POST` | `/api/internal/platform/opencode-runtime/runs` |
+| `GET` | `/api/internal/platform/opencode-runtime/runs/{runId}` |
+| `POST` | `/api/internal/platform/opencode-runtime/runs/{runId}/cancel` |
+| `GET` | `/api/internal/platform/opencode-runtime/runs/{runId}/events` |
+| `GET` | `/api/internal/platform/opencode-runtime/runs/{runId}/diff` |
+
 `POST /api/runs` 请求体：
 
 ```json
@@ -282,7 +350,7 @@ Phase 11 起请求体保持向后兼容，并支持以下可选字段：
 
 ### Phase 11 opencode Web Runtime API
 
-Phase 11 新增的 opencode Web App 运行态能力统一由 `OpencodeRuntimeController` 暴露。前端仍只调用平台 `/api/**`，后端通过 `OpencodeRuntimeApplicationService -> test-agent-opencode-client` facade 访问 opencode HTTP API，不返回 generated SDK DTO，不允许 Controller 直接调用 generated SDK。
+Phase 11 新增的 opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controller 暴露。前端仍只调用平台后端 API，后端通过 `test-agent-opencode-runtime -> test-agent-opencode-client` facade 访问 opencode HTTP API，不返回 generated SDK DTO，不允许 Controller 直接调用 generated SDK。
 
 运行态目录接口：
 
@@ -302,6 +370,8 @@ Phase 11 新增的 opencode Web App 运行态能力统一由 `OpencodeRuntimeCon
 | `GET` | `/api/mcp/status?workspaceId=` | 读取 MCP 状态。 |
 | `GET` | `/api/mcp/resources?workspaceId=` | 读取 MCP resource 目录，后端映射到 opencode `/experimental/resource`。 |
 | `GET` | `/api/mcp/tools?workspaceId=&provider=&model=` | 读取 MCP/runtime tool 目录；带 provider/model 时返回工具 schema，否则返回 tool id 降级列表。 |
+
+以上运行态目录接口同时暴露 `/api/internal/platform/opencode-runtime/...` 新平台 URL，并对 opencode 原 path 暴露 `/api/internal/agent/opencode/...` 新入口。例如 `/api/agents` 同时可通过 `/api/internal/platform/opencode-runtime/agents` 和 `/api/internal/agent/opencode/api/agent` 调用。
 
 Session 运行态接口：
 
@@ -323,6 +393,8 @@ Session 运行态接口：
 | `POST` | `/api/sessions/{sessionId}/questions/{requestId}/reply` | 回复 question，body 为 `{ "answers": [...] }`。 |
 | `POST` | `/api/sessions/{sessionId}/questions/{requestId}/reject` | 拒绝 question。 |
 
+以上 Session 运行态接口同时暴露 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/...`。其中 children、todo、diff、abort、fork、compact、revert、unrevert、command、shell 也暴露 `/api/internal/agent/opencode/session/{sessionId}/...`；permission/question 的 opencode path 入口使用 `/api/internal/agent/opencode/permission|question`，并通过 query `sessionId` 定位平台 session。
+
 兼容和安全约束：
 
 - 所有响应仍包裹 `ApiResponse<T>`，错误仍走统一错误码和 traceId。
@@ -330,7 +402,7 @@ Session 运行态接口：
 - `sessionId` 为平台 session id，后端通过内部 `opencodeSessionId` 和 `opencodeExecutionNodeId` 定位远端 session；未绑定远端 session 时返回 `CONFLICT`。
 - `permission`/`question` 的平台路径保留在 `/api/sessions/{sessionId}/...` 下，后端实际映射到 opencode `/permission`、`/question` 族 API。
 - 只读 transcript 页面 `/s/{sessionId}` 只消费平台 `GET /api/sessions/{sessionId}` 与 `GET /api/sessions/{sessionId}/messages`，不接 opencode 公网 `share_data/share_poll`，也不绕过平台鉴权。
-- PTY WebSocket 未进入默认 HTTP/SSE 契约；P2 只能按 `docs/architecture/pty-websocket-design.md` 新增受控 ticket + WebSocket 例外。
+- PTY WebSocket 未进入默认 HTTP/SSE 契约；P2 只能按 `docs/architecture/pty-websocket-design.md` 新增受控 ticket + WebSocket 例外。ticket 创建也提供新平台 URL `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets`，响应中的 `webSocketUrl` 会随调用入口返回旧或新 WebSocket path。
 
 对应测试：
 
@@ -352,7 +424,7 @@ Session 运行态接口：
 
 ### Phase 11 opencode Web App 运行态 API 规划
 
-以下接口是 Phase 11 的新增契约方向，必须通过 `test-agent-app -> test-agent-opencode-client` facade 实现；未实现前不得由前端直连 opencode server。
+以下接口是 Phase 11 的新增契约方向，必须通过 `test-agent-api -> test-agent-opencode-runtime -> test-agent-opencode-client` 实现，并由 `test-agent-app` 装配运行；未实现前不得由前端直连 opencode server。
 
 | 域 | 方法与路径 | 用途 | 优先级 |
 |---|---|---|---|
@@ -383,6 +455,8 @@ PTY WebSocket 不在上述默认 HTTP/SSE 契约内。Phase 11 P2 已按 `docs/a
 
 - `POST /api/sessions/{sessionId}/terminal/tickets`：创建一次性 PTY ticket，仍返回 `ApiResponse<T>`。
 - `GET /api/sessions/{sessionId}/terminal/ws?ticket=...`：仅用于 WebSocket upgrade，ticket 单次使用并短期过期。
+- `POST /api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets`：ticket 创建新平台 URL。
+- `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/ws?ticket=...`：WebSocket upgrade 新平台 URL。
 
 创建 ticket 的请求体为：
 
@@ -414,6 +488,8 @@ ticket 响应 data：
   "webSocketUrl": "/api/sessions/ses_.../terminal/ws?ticket=tty_..."
 }
 ```
+
+通过新平台 ticket URL 创建时，`webSocketUrl` 返回 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/ws?ticket=...`。
 
 WebSocket 消息使用 JSON envelope：
 
@@ -492,6 +568,7 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 
 - API 不暴露数据库 surrogate PK。
 - API 不暴露 `opencodeSessionId`、`opencodeExecutionNodeId` 或 generated SDK DTO；前端只依赖平台 Workspace、Session、Run、Cancel 和 RunEvent SSE。
+- 旧 `/api/...` URL 保持兼容；新增 URL 只能作为并行入口补充，不能删除旧 URL。
 - 响应 DTO 可以新增字段，前端必须忽略未知字段。
 - 文件 API 初版不承诺 Git 状态、二进制预览、递归扫描和搜索。
 - RunEvent payload 可以新增字段；事件 wire name 不可重命名。

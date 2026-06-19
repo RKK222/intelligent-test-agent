@@ -76,13 +76,13 @@
 - Phase 02/03 后，SSE `event` 使用 `RunEventType.wireName()`，例如 `tool.finished`。
 - SSE `id` 使用 RunEvent 的 `seq` 字符串。
 - 客户端断线后携带 `Last-Event-ID`，后端按当前 runId 返回 `seq > Last-Event-ID` 的事件。
-- 浏览器原生 `EventSource` 不能设置自定义请求头；前端首次续传可使用 `GET /api/runs/{runId}/events?lastEventId={seq}`。后端 header 优先，query 参数作为浏览器兼容入口。
+- 浏览器原生 `EventSource` 不能设置自定义请求头；前端首次续传可使用 `GET /api/runs/{runId}/events?lastEventId={seq}` 或 `GET /api/internal/platform/opencode-runtime/runs/{runId}/events?lastEventId={seq}`。后端 header 优先，query 参数作为浏览器兼容入口。
 - 如果 `Last-Event-ID` 缺失，默认从当前订阅策略允许的起点开始返回。
 - 如果 `Last-Event-ID` 非数字或小于 0，后端返回统一错误格式，错误码为 `VALIDATION_ERROR`。
 
 ## Phase 04 Runtime SSE
 
-`GET /api/runs/{runId}/events` 是前端消费平台 RunEvent 的唯一实时入口，返回 `text/event-stream`。
+`GET /api/runs/{runId}/events` 是旧兼容入口，`GET /api/internal/platform/opencode-runtime/runs/{runId}/events` 是新平台入口。两者都是前端消费平台 RunEvent 的实时入口，返回 `text/event-stream`，共享同一续传、traceId、错误格式和事件模型。
 
 示例：
 

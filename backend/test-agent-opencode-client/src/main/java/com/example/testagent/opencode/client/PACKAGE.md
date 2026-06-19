@@ -21,7 +21,7 @@
 - `OpencodeStreamEventsCommand`、`OpencodeRunEventMapper`：订阅 opencode event 并映射为平台 RunEventDraft。
 - `OpencodeDiffCommand`、`OpencodeDiffResult`、`OpencodeDiffFile`：查询 opencode session Diff 并输出平台稳定 DTO。
 - `OpencodeRejectDiffCommand`、`OpencodeRejectDiffResult`：通过 opencode `sessionRevert` 拒绝 Run 级 Diff。
-- `OpencodeRuntimeCommand`、`OpencodeRuntimeResult`：Phase 11 Web App 运行态通用 facade 命令和结果，使用 Jackson `JsonNode` 承载 opencode HTTP 响应，支持受控访问 MCP resources/tools 等只读 runtime 目录，避免 generated DTO 穿透 app/domain/API。
+- `OpencodeRuntimeCommand`、`OpencodeRuntimeResult`：Phase 11 Web App 运行态通用 facade 命令和结果，使用 Jackson `JsonNode` 承载 opencode HTTP 响应，支持受控访问 MCP resources/tools 等只读 runtime 目录，避免 generated DTO 穿透业务模块、domain 或 API。
 - `OpencodeHealthCommand`、`OpencodeHealthResult`：执行节点健康检查。
 
 ## 允许依赖
@@ -41,7 +41,8 @@
 
 ## 上游调用方
 
-- `test-agent-app` 应用服务和 health contributor。
+- `test-agent-opencode-runtime` 业务模块。
+- `test-agent-app` health contributor。
 
 ## 下游依赖
 

@@ -12,7 +12,7 @@
 
 ## API 访问
 
-1. 只能通过 `packages/backend-api` 访问 `test-agent-app`。
+1. 只能通过 `packages/backend-api` 访问平台后端服务，当前由 `test-agent-app` 装配运行。
 2. 不得直连 opencode server。
 3. 不得在组件中直接拼接后端 URL。
 4. API 请求、响应、错误类型必须与 `docs/api/backend-api.md` 一致。

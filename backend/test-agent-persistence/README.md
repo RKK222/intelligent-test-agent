@@ -44,7 +44,7 @@
 
 ## 禁止依赖
 
-- `test-agent-app` Controller。
+- `test-agent-api` 和业务模块通过 domain 端口调用。
 - generated SDK。
 - opencode client facade。
 

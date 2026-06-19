@@ -27,6 +27,7 @@
 13. 错误必须统一格式返回，不能把任意异常直接抛给前端。
 14. 关键流程必须携带或生成 traceId，禁止用 `System.out.println` 作为正式日志。
 15. 完成前必须按 `docs/development/ai-self-checklist.md` 自检。
+16. 后端新增文件前必须先分析是否已有合适工程并列出；没有合适工程时，按业务边界新建 Maven module 后再落文件。
 
 ## 完成标准
 

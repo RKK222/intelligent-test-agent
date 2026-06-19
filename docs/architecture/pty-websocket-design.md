@@ -28,6 +28,13 @@ P2 后端已新增以下平台接口：
   - 仅允许 WebSocket upgrade。
   - ticket 单次使用，默认 60 秒过期。
 
+新平台 URL 并行保留同一能力：
+
+- `POST /api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets`
+- `GET /api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/ws?ticket=...`
+
+通过新平台 ticket URL 创建 ticket 时，响应 `webSocketUrl` 返回新 WebSocket path；通过旧 URL 创建时继续返回旧 path。
+
 WebSocket message 使用 JSON envelope：
 
 ```json

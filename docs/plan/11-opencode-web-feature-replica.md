@@ -48,10 +48,10 @@ TUI、Desktop 代码只作为行为参考：可参考快捷键、消息操作、
 
 ## 架构原则
 
-1. 前端 HTTP 只能通过 `frontend/packages/backend-api` 调用 `test-agent-app`。
+1. 前端 HTTP 只能通过 `frontend/packages/backend-api` 调用平台后端服务，当前由 `test-agent-app` 装配运行。
 2. 运行实时事件只能通过 `frontend/packages/event-stream-client` 消费平台 RunEvent SSE。
-3. `test-agent-app` Controller 只做协议转换、参数校验和统一响应封装，不直接调用 Repository、generated SDK 或 opencode server。
-4. `test-agent-opencode-client` facade 是 opencode 能力的唯一后端出口；generated DTO 不进入 app/domain/API 响应。
+3. `test-agent-api` Controller 只做协议转换、参数校验和统一响应封装，不直接调用 Repository、generated SDK 或 opencode server。
+4. `test-agent-opencode-runtime -> test-agent-opencode-client` 是 opencode 业务能力的调用链；generated DTO 不进入 app/domain/API 响应。
 5. 新增 API、DTO、RunEvent、前端 shared types 均保持向后兼容：字段只追加、可选，未知事件可降级。
 6. 先拆 `AgentWorkbench` 聚合逻辑，再下沉可复用能力到 feature packages，避免把 Phase 11 继续堆进单个页面组件。
 

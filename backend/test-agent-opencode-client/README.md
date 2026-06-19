@@ -49,4 +49,4 @@ opencode 1.17.8 的 Run 终态既可能来自旧的 `session.next.step.ended`，
 Phase 11 Web App 复刻新增识别 `message.updated`、`message.part.updated`、`message.part.delta`、`todo.updated`、`permission.*`、`question.*`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed` 等 opencode App 运行态事件，同时保留旧 `assistant.message.delta`、`tool.*`、`diff.*` 兼容事件。
 Facade 对外方法不得返回 generated SDK DTO，新增方法必须同步测试成功、超时、远端错误和 traceId 透传。`workspace` query 仅在后续接入真实 opencode workspace/control-plane 时传入；本地模式默认只传 `directory`。`prompt_async` 的 `text/file/agent` parts 必须通过 `OpencodePromptPart` 传入，generated union DTO 只允许留在本模块内部或用稳定 JSON 请求体替代。
 generated `SessionApi` 中存在和 model 同名的参数包装类时，必须在本模块内用 `ApiClient.invokeAPI` 做安全适配，不能手改 generated SDK。
-Phase 11 runtime facade 是 `test-agent-app` 暴露新增 Web API 的唯一 opencode 访问入口；Controller 和 application service 仍不得 import generated SDK。
+Phase 11 runtime facade 是 `test-agent-opencode-runtime` 访问 opencode 的唯一入口；`test-agent-api` Controller 和业务模块仍不得 import generated SDK。

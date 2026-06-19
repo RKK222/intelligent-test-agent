@@ -24,10 +24,15 @@
 | `test-agent-observability` | 日志、trace、指标等观测性封装 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK |
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
+| `test-agent-workspace-management` | Workspace、文件、git/diff、agent 和 skill 管理业务 |
+| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、opencode runtime、Diff/revert 和 PTY terminal 业务 |
+| `test-agent-system-management` | 用户、角色、权限等系统内部管理业务边界，目前为空骨架 |
+| `test-agent-integration` | 非 opencode 外部系统联动业务边界，目前为空骨架 |
+| `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId 和统一异常入口 |
 | `test-agent-persistence` | 持久化、迁移、Redis/PostgreSQL 访问 |
 | `test-agent-event` | RunEvent、SSE、事件转换与回放 |
 | `test-agent-test-support` | 测试支撑、fixture、mock server |
-| `test-agent-app` | 唯一启动入口和唯一可部署后端服务包 |
+| `test-agent-app` | 唯一启动入口和唯一可部署后端服务包，不承载业务逻辑 |
 
 ## 构建方式
 
@@ -145,8 +150,15 @@ export TEST_AGENT_DB_POOL_TEST_ON_BORROW=true
 ## 后续 AI 编码指引
 
 - 新增可部署入口只允许放在 `test-agent-app`。
+- 新增业务文件前先列出现有合适工程；无合适工程时按业务边界新建 Maven module。
+- `test-agent-app` 只放启动、装配、profile、migration 和 health 等运行入口，不放 Controller 或业务服务。
+- HTTP/SSE/WebSocket 入口放在 `test-agent-api`，旧 `/api/...` URL 必须保留，新 URL 同步写入 `docs/api/backend-api.md`。
+- Workspace、文件、git/diff、agent、skill 管理业务放在 `test-agent-workspace-management`。
+- Session、Run、RunEvent、opencode runtime、Diff/revert、terminal 业务放在 `test-agent-opencode-runtime`。
+- 用户、角色、权限等平台内部管理放在 `test-agent-system-management`。
+- 非 opencode 外部系统联动放在 `test-agent-integration`。
 - 业务模块不要直接依赖 `test-agent-opencode-sdk-generated`，应通过 `test-agent-opencode-client`。
 - 领域模型保持在 `test-agent-domain`，不要依赖 Spring Web 或持久化技术。
 - 对外成功/错误响应使用 `test-agent-common` 的 `ApiResponse` 和 `ApiErrorResponse`。
-- HTTP 入口 traceId 使用 `X-Trace-Id`，由 `test-agent-observability` 和 `test-agent-app` 协作生成或透传。
+- HTTP 入口 traceId 使用 `X-Trace-Id`，由 `test-agent-observability` 和 `test-agent-api` 协作生成或透传。
 - 后端运行态使用 Log4j2 作为 SLF4J 实际绑定，默认控制台日志为 `key=value` 结构化格式并输出 traceId。

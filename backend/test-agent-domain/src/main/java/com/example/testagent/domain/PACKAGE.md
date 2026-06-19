@@ -37,7 +37,7 @@
 
 ## 上游调用方
 
-- `test-agent-app` 应用编排。
+- workspace-management、opencode-runtime 等业务模块。
 - `test-agent-persistence` 映射实现。
 - `test-agent-event` 事件模型。
 - `test-agent-opencode-client` 转换后的平台模型。

@@ -1,6 +1,6 @@
 # 前后端契约规范
 
-本文档定义完全自研前端与 `test-agent-app` 的调用边界。前端不得直连 opencode server，所有 HTTP 请求必须通过 `packages/backend-api`，所有实时事件必须通过 `packages/event-stream-client` 消费 `RunEvent SSE`。
+本文档定义完全自研前端与平台后端的调用边界。前端不得直连 opencode server，所有 HTTP 请求必须通过 `packages/backend-api` 调用 `test-agent-app` 装配出的后端服务，所有实时事件必须通过 `packages/event-stream-client` 消费 `RunEvent SSE`。
 
 ## 契约来源
 
@@ -31,13 +31,13 @@
 
 当前 Runtime API 分组：
 
-- Workspace：`POST/GET /api/workspaces`、文件单层列表、UTF-8 内容读写和文件状态。
+- Workspace：旧 `/api/workspaces` 继续有效，新平台入口为 `/api/internal/platform/workspace-management/workspaces`；包括文件单层列表、UTF-8 内容读写和文件状态。
 - Session：创建、按 workspace 分页、全局搜索、详情、标题/置顶更新、软删除、消息追加和消息分页。
 - Run：启动、详情、取消；Phase 11 起 `POST /api/runs` 可选支持 `parts`、`messageId`、`agent`、`model`、`variant`、`mode`，旧 `prompt` 保持有效，后端会把 text/file/agent parts 与 agent/model/variant/messageId 下沉到 opencode facade。
 - Diff：`GET /api/runs/{runId}/diff`、`POST /api/runs/{runId}/diff/accept`、`POST /api/runs/{runId}/diff/reject`。
-- Event：`GET /api/runs/{runId}/events`，只消费平台 RunEvent SSE。
-- Phase 11 Runtime：Session 列表/搜索/children/diff/todo/fork/abort/revert/command/shell、permissions、questions、agents、models、providers、commands、references、fs、vcs、lsp、mcp 等接口必须先进入 `backend-api`，页面不得直接拼接 URL。
-- Terminal：`POST /api/sessions/{sessionId}/terminal/tickets` 已作为 P2 受控 WebSocket 例外存在；`packages/backend-api` 只负责创建 ticket，`packages/terminal` 负责 WebSocket 生命周期，页面组件不得直接拼接 WebSocket URL 或保存 ticket。
+- Event：旧 `GET /api/runs/{runId}/events` 和新 `GET /api/internal/platform/opencode-runtime/runs/{runId}/events` 都只消费平台 RunEvent SSE。
+- Phase 11 Runtime：Session 列表/搜索/children/diff/todo/fork/abort/revert/command/shell、permissions、questions、agents、models、providers、commands、references、fs、vcs、lsp、mcp 等接口必须先进入 `backend-api`，页面不得直接拼接 URL；新平台前缀为 `/api/internal/platform/opencode-runtime`，opencode path 前缀为 `/api/internal/agent/opencode`。
+- Terminal：旧 `POST /api/sessions/{sessionId}/terminal/tickets` 和新 `POST /api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets` 已作为 P2 受控 WebSocket 例外存在；`packages/backend-api` 只负责创建 ticket，`packages/terminal` 负责 WebSocket 生命周期，页面组件不得直接拼接 WebSocket URL 或保存 ticket。
 
 详细路径、请求和响应以 `docs/api/backend-api.md` 为准。
 
@@ -58,7 +58,7 @@
 必须负责：
 
 1. 建立和关闭 RunEvent SSE 连接。
-2. 处理断线续传；浏览器原生 `EventSource` 首次续传使用 `?lastEventId=`，后端仍保留 `Last-Event-ID` header 兼容。
+2. 处理断线续传；浏览器原生 `EventSource` 首次续传使用 `?lastEventId=`，后端仍保留 `Last-Event-ID` header 兼容；旧 `/api/runs/.../events` 与新 `/api/internal/platform/opencode-runtime/runs/.../events` 行为一致。
 3. 对重复事件做幂等保护。
 4. 对缺失和未知事件给出可观测错误；重复事件必须按 `runId + seq` 幂等忽略。
 5. 向上层输出类型化事件，不暴露原始解析细节。

@@ -9,7 +9,7 @@
 - `test-agent-common` 提供跨模块基础契约：`ApiResponse<T>`、`ApiErrorResponse`、`ErrorCode`、`PlatformException`、`PageRequest`、`PageResponse<T>`。
 - `test-agent-domain` 提供纯领域模型：Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 及对应 ID 值对象，不依赖 Spring Web、Persistence 或 generated SDK。
 - `test-agent-observability` 提供 `TraceConstants` 和 `TraceIdSupport`，固定 `X-Trace-Id` 头、请求 attribute 和 Reactor context key。
-- `test-agent-app` 只提供入口适配：`TraceIdWebFilter` 和 `GlobalExceptionHandler`，真实 Workspace/Session/Run Controller 留到 Phase 04。
+- 入口适配当前归属 `test-agent-api`，由 `test-agent-app` 装配运行；真实 Workspace/Session/Run Controller 不放在 app 模块。
 
 ## 状态机
 

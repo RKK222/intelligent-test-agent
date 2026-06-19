@@ -34,7 +34,7 @@
 ## 禁止依赖
 
 - generated SDK 直接暴露给前端。
-- `test-agent-app` Controller。
+- `test-agent-api` Controller。
 - Persistence 实现细节。
 
 ## 后续 AI 编码指引

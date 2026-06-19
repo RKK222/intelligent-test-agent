@@ -55,7 +55,7 @@ frontend/
 ## 包职责
 
 - `apps/agent-web`：自研主应用，负责页面组合、TanStack Query Provider、工作空间选择、Run 启动、SSE 订阅编排和全局错误提示。
-- `packages/backend-api`：访问 `test-agent-app` 的唯一前端 HTTP client，负责统一响应、错误和 traceId 映射。
+- `packages/backend-api`：访问平台后端服务的唯一前端 HTTP client，负责统一响应、错误和 traceId 映射；当前后端由 `test-agent-app` 装配运行。
 - `packages/event-stream-client`：RunEvent SSE client，负责连接、自动重连、事件解析、去重和取消订阅。
 - `packages/workbench-shell`：Dockview 工作台布局、顶部栏、左中右底面板和工作台级 Zustand 状态。
 - `packages/file-explorer`：文件树、已加载文件名过滤、变更列表和打开文件入口。
@@ -72,7 +72,7 @@ frontend/
 
 1. Phase 07 搜索只过滤前端已加载文件树的文件名，不新增后端全文搜索 API。
 2. Phase 08 Diff 接受/拒绝是 Run 级语义；当前文件按钮只改变当前选择和交互反馈，不承诺 per-file 后端回滚。
-3. 前端不直接访问 opencode server；真实 opencode 能力只能通过 `test-agent-app -> test-agent-opencode-client` 调用。
+3. 前端不直接访问 opencode server；真实 opencode 能力只能通过 `test-agent-api -> test-agent-opencode-runtime -> test-agent-opencode-client` 调用，并由 `test-agent-app` 装配运行。
 4. Monaco 编辑器和 Diff 按需加载，固定尺寸面板必须避免文本和控件重叠。
 5. Phase 11 不实现 settings/config/provider/server 配置页；只保留 Agent/Provider/Model 等运行态选择和只读状态目录。
 6. PTY WebSocket 属于 P2，只能按架构和安全文档的 ticket + WebSocket 例外实现；前端 ticket 创建走 `backend-api`，WebSocket 生命周期下沉到 `packages/terminal`。

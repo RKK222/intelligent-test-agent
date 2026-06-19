@@ -24,6 +24,11 @@
         <module>test-agent-observability</module>
         <module>test-agent-opencode-sdk-generated</module>
         <module>test-agent-opencode-client</module>
+        <module>test-agent-workspace-management</module>
+        <module>test-agent-opencode-runtime</module>
+        <module>test-agent-system-management</module>
+        <module>test-agent-integration</module>
+        <module>test-agent-api</module>
         <module>test-agent-persistence</module>
         <module>test-agent-event</module>
         <module>test-agent-test-support</module>
@@ -142,6 +147,31 @@
             <dependency>
                 <groupId>com.example.testagent</groupId>
                 <artifactId>test-agent-opencode-client</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.example.testagent</groupId>
+                <artifactId>test-agent-workspace-management</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.example.testagent</groupId>
+                <artifactId>test-agent-opencode-runtime</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.example.testagent</groupId>
+                <artifactId>test-agent-system-management</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.example.testagent</groupId>
+                <artifactId>test-agent-integration</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.example.testagent</groupId>
+                <artifactId>test-agent-api</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

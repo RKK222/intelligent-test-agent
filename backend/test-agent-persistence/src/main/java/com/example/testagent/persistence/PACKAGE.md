@@ -38,14 +38,14 @@
 
 ## 禁止依赖
 
-- `test-agent-app` Controller。
+- `test-agent-api` 和业务模块通过 domain 端口调用。
 - generated SDK。
 - opencode client facade。
 - 前端 DTO。
 
 ## 上游调用方
 
-- `test-agent-app` 应用服务。
+- workspace-management、opencode-runtime 等业务模块。
 - event 模块通过接口追加和查询事件。
 
 ## 下游依赖

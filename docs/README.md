@@ -30,6 +30,8 @@
 - `docs/backend/observability-standards.md`：日志与可观测性规范。
 - `docs/backend/data-change-standards.md`：数据库变更规范。
 
+后端新增文件前必须先按 `backend/README.md` 和 `docs/architecture/dependency-rules.md` 列出现有合适工程。没有合适工程时，先按业务边界新增 Maven module，再补模块 README、包级说明和依赖规则。
+
 ## API 与架构任务
 
 - `docs/api/backend-api.md`：HTTP API 文档入口。
@@ -64,6 +66,6 @@
 - `docs/frontend/frontend-coding-standards.md`：前端编码规范。
 - `docs/frontend/frontend-testing-standards.md`：前端测试规范。
 - `docs/frontend/frontend-performance-standards.md`：前端性能规范。
-- `docs/frontend/frontend-backend-contract.md`：自研前端与 `test-agent-app` 的 HTTP API 和 RunEvent SSE 契约。
+- `docs/frontend/frontend-backend-contract.md`：自研前端与平台后端的 HTTP API 和 RunEvent SSE 契约。
 
 未来创建 `frontend/` 后，每个 app、package 和关键源码包必须补 README 或 PACKAGE.md。

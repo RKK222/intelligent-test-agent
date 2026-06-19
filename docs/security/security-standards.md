@@ -44,11 +44,11 @@ Phase 04 内存限流只作为本地和测试占位，通过 `test-agent.rate-li
 ## Web 安全
 
 1. CORS 必须明确允许来源，不使用无限制生产配置。
-2. 安全响应头必须在 `test-agent-app` 统一配置。
+2. 安全响应头必须在 `test-agent-api` 的入口配置中统一定义，并由 `test-agent-app` 装配生效。
 3. 前端不得把密钥写入源码、localStorage 或可公开构建产物。
 4. Druid Web 控制台默认关闭；如后续启用，必须通过环境变量配置账号、密码和访问 allowlist，并同步 API、运维和安全文档。
 
-Runtime API 本地默认 CORS 只允许 `http://localhost:3000` 和 `http://127.0.0.1:3000`；生产环境必须通过配置显式声明允许来源。Workspace 文件 API 必须把所有请求路径归一化到注册的 workspace root 内，路径穿越或越权访问返回 `FORBIDDEN`。
+Runtime API 本地默认 CORS 只允许 `http://localhost:3000` 和 `http://127.0.0.1:3000`；生产环境必须通过配置显式声明允许来源。旧 `/api/...`、新 `/api/internal/platform/...` 和 `/api/internal/agent/opencode/...` 共享同一鉴权、限流、CORS、traceId 与错误格式。Workspace 文件 API 必须把所有请求路径归一化到注册的 workspace root 内，路径穿越或越权访问返回 `FORBIDDEN`。
 
 ## PTY WebSocket 安全例外
 

@@ -22,6 +22,27 @@
 - File service：验证路径穿越拒绝、单层目录列表、UTF-8 读写和超大文件拒绝。
 - Health/config：验证 local/prod properties binding、opencode node seed、Redis disabled/enabled health。
 
+## 模块拆分测试
+
+新增或迁移后端业务时，优先运行对应模块测试：
+
+```bash
+cd backend
+mvn -pl test-agent-workspace-management -am test
+mvn -pl test-agent-opencode-runtime -am test
+mvn -pl test-agent-api -am test
+```
+
+模块边界变更必须补充或运行边界校验：
+
+```bash
+rg "Repository|OpencodeClientFacade" backend/test-agent-api/src/main/java
+rg "ApplicationService|WorkspaceFileService|TerminalApplicationService" backend/test-agent-app/src/main/java
+rg "com.example.opencode.sdk" backend/test-agent-* --glob '!backend/test-agent-opencode-client/**' --glob '!backend/test-agent-opencode-sdk-generated/**' --glob '!**/target/**'
+```
+
+`test-agent-app` 只保留启动装配、profile、migration、health 和模块边界测试；Controller/API 测试放在 `test-agent-api`，workspace/file 业务测试放在 `test-agent-workspace-management`，Session/Run/runtime/terminal 业务测试放在 `test-agent-opencode-runtime`。
+
 ## 数据库测试
 
 1. 新增表、字段、索引或约束必须有 migration 测试或集成验证。
