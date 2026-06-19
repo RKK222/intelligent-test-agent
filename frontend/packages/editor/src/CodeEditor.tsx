@@ -38,10 +38,10 @@ export function CodeEditor({ path, content = "", dirty, readonly, saving, feedba
     );
   }
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[#08111f]">
-      <div className="flex h-10 items-center gap-2 border-b border-slate-800 bg-slate-950 px-3">
+    <div className="flex h-full min-h-0 flex-col bg-[#0a1324]">
+      <div className="flex h-10 items-center gap-2 border-b border-[var(--ta-border)] bg-[#0d1628] px-3">
         <div className="min-w-0 flex-1 truncate font-mono text-[12px] text-slate-200">{path}</div>
-        {dirty ? <span className="rounded-full bg-amber-950 px-2 py-0.5 text-[11px] text-amber-200">未保存</span> : null}
+        {dirty ? <span className="rounded-full bg-[rgba(245,158,11,.15)] px-2 py-0.5 text-[11px] text-[#fcd34d]">未保存</span> : null}
         {readonly ? <span className="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] text-slate-400">只读</span> : null}
         <Button size="sm" variant="primary" disabled={!dirty || readonly || saving} onClick={onSave}>
           <Save className="h-4 w-4" />

@@ -12,7 +12,7 @@ export function AgentCard({ message, onOpenDiff }: { message: Extract<AgentMessa
       <CardShell icon={<ListChecks className="h-4 w-4 text-cyan-300" />} title={message.title}>
         <div className="space-y-1">
           {steps.map((step, index) => (
-            <div key={`${step.title}-${index}`} className="rounded-md border border-slate-800 bg-slate-950 px-2 py-1.5">
+            <div key={`${step.title}-${index}`} className="rounded-md border border-[#1d2b4d] bg-[#0a1324] px-2 py-1.5">
               <div className="flex items-center gap-2">
                 <span className="text-[11px] text-slate-500">{index + 1}</span>
                 <span className="min-w-0 flex-1 text-[12px] text-slate-200">{String(step.title ?? "执行步骤")}</span>
@@ -31,7 +31,7 @@ export function AgentCard({ message, onOpenDiff }: { message: Extract<AgentMessa
           <Badge tone="info">{String(message.payload.toolName ?? message.payload.rawType ?? "tool")}</Badge>
           {message.payload.path ? <span className="font-mono">{String(message.payload.path)}</span> : null}
         </div>
-        <div className="mt-2 rounded-md border border-slate-800 bg-slate-950 p-2 text-[12px] text-slate-300">
+        <div className="mt-2 rounded-md border border-[#1d2b4d] bg-[#0a1324] p-2 text-[12px] text-slate-300">
           {String(message.payload.summary ?? message.payload.status ?? "工具调用已更新")}
         </div>
       </CardShell>
@@ -53,11 +53,11 @@ export function AgentCard({ message, onOpenDiff }: { message: Extract<AgentMessa
       <CardShell icon={<GitCompare className="h-4 w-4 text-amber-300" />} title={message.title}>
         <div className="space-y-1">
           {files.slice(0, 4).map((file) => (
-            <div key={file.path} className="flex items-center gap-2 rounded-md border border-slate-800 bg-slate-950 px-2 py-1.5">
+            <div key={file.path} className="flex items-center gap-2 rounded-md border border-[#1d2b4d] bg-[#0a1324] px-2 py-1.5">
               <Badge tone="warning">{file.status}</Badge>
               <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-slate-200">{file.path}</span>
-              <span className="text-[11px] text-emerald-300">+{file.additions}</span>
-              <span className="text-[11px] text-red-300">-{file.deletions}</span>
+              <span className="text-[11px] text-[#86efac]">+{file.additions}</span>
+              <span className="text-[11px] text-[#fca5a5]">-{file.deletions}</span>
             </div>
           ))}
         </div>
@@ -76,8 +76,8 @@ export function AgentCard({ message, onOpenDiff }: { message: Extract<AgentMessa
 
 function CardShell({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-md border border-slate-800 bg-slate-900">
-      <div className="flex items-center gap-2 border-b border-slate-800 bg-slate-950 px-3 py-2">
+    <div className="overflow-hidden rounded-[10px] border border-[var(--ta-border)] bg-[#0f1a33]">
+      <div className="flex items-center gap-2 border-b border-[var(--ta-border)] bg-[#0c1628] px-3 py-2">
         {icon}
         <div className="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-100">{title}</div>
       </div>

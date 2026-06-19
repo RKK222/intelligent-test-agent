@@ -1,4 +1,6 @@
 export * from "./AgentChat";
+export * from "./AssistantThread";
+export * from "./assistant-thread";
 export * from "./cards";
 export * from "./prompt-parts";
 export * from "./runtime-reducer";

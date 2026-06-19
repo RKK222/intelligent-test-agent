@@ -102,3 +102,4 @@ WebSocket message 使用 JSON envelope：
 - 安全测试覆盖 ticket 过期、重复使用、session/workspace 不匹配、cwd 越界、active PTY 冲突、进程启动失败释放、input/resize 限速、非法 envelope、idle/hard timeout 和 CORS/origin 拒绝。
 - 前端测试覆盖 ticket 获取、连接失败、输出渲染、输入发送、resize、close、error 和 warning；当前已覆盖 terminal client/panel 和 mocked ticket 创建入口。
 - 文档同步 `docs/api/backend-api.md`、`docs/security/security-standards.md`、`docs/frontend/frontend-backend-contract.md` 和相关 README/PACKAGE。
+- 真实前端、后端、opencode server 三服务 E2E 尚无最新通过记录；补齐通过记录前，PTY 只能视为已实现受控通道和 mock/单元测试覆盖，不能作为 Phase 11 最终验收完成项。

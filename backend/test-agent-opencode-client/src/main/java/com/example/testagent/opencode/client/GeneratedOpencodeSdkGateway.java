@@ -3,10 +3,15 @@ package com.example.testagent.opencode.client;
 import com.example.opencode.sdk.ApiClient;
 import com.example.opencode.sdk.api.EventApi;
 import com.example.opencode.sdk.api.GlobalApi;
+import com.example.opencode.sdk.api.MessagesApi;
 import com.example.opencode.sdk.api.SessionApi;
 import com.example.opencode.sdk.model.SnapshotFileDiff;
+import com.example.opencode.sdk.model.SessionMessage;
+import com.example.opencode.sdk.model.SessionMessagesResponse;
+import com.example.opencode.sdk.model.SessionsResponseCursor;
 import com.example.testagent.domain.node.ExecutionNode;
 import com.example.testagent.observability.TraceConstants;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
@@ -275,6 +280,24 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .map(OpencodeRuntimeResult::new);
     }
 
+    @Override
+    public Mono<OpencodeSessionMessagesResult> sessionMessages(
+            ExecutionNode node,
+            String opencodeSessionId,
+            int limit,
+            String order,
+            String cursor,
+            String traceId) {
+        ApiClient apiClient = apiClient(node, traceId);
+        return new MessagesApi(apiClient)
+                .v2SessionMessages(
+                        opencodeSessionId,
+                        BigDecimal.valueOf(limit),
+                        optionalText(order),
+                        optionalText(cursor))
+                .map(this::toSessionMessagesResult);
+    }
+
     private ApiClient apiClient(ExecutionNode node, String traceId) {
         return new ApiClient()
                 .setBasePath(node.baseUrl())
@@ -306,6 +329,82 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 toLong(diff.getAdditions()),
                 toLong(diff.getDeletions()),
                 status);
+    }
+
+    private OpencodeSessionMessagesResult toSessionMessagesResult(SessionMessagesResponse response) {
+        List<OpencodeSessionMessage> messages = response == null || response.getData() == null
+                ? List.of()
+                : response.getData().stream()
+                        .map(this::toSessionMessage)
+                        .toList();
+        SessionsResponseCursor cursor = response == null ? null : response.getCursor();
+        return new OpencodeSessionMessagesResult(
+                messages,
+                cursor == null ? null : cursor.getPrevious(),
+                cursor == null ? null : cursor.getNext());
+    }
+
+    private OpencodeSessionMessage toSessionMessage(SessionMessage message) {
+        Map<String, Object> raw = objectMapper.convertValue(message, new TypeReference<Map<String, Object>>() {
+        });
+        LinkedHashMap<String, Object> normalized = new LinkedHashMap<>(raw);
+        String messageId = stringValue(raw.get("id"));
+        if (messageId != null) {
+            normalized.putIfAbsent("messageID", messageId);
+            normalized.putIfAbsent("messageId", messageId);
+        }
+        String type = stringValue(raw.get("type"));
+        normalized.putIfAbsent("role", "user".equals(type) ? "user" : "assistant");
+        return new OpencodeSessionMessage(immutableWithoutNulls(normalized), partsFromContent(raw, messageId));
+    }
+
+    private List<Map<String, Object>> partsFromContent(Map<String, Object> raw, String messageId) {
+        Object content = raw.get("content");
+        if (!(content instanceof List<?> list)) {
+            return List.of();
+        }
+        return list.stream()
+                .filter(item -> item instanceof Map<?, ?>)
+                .map(item -> normalizePart((Map<?, ?>) item, messageId))
+                .toList();
+    }
+
+    private Map<String, Object> normalizePart(Map<?, ?> rawPart, String messageId) {
+        LinkedHashMap<String, Object> part = new LinkedHashMap<>();
+        rawPart.forEach((key, value) -> {
+            if (key instanceof String name) {
+                part.put(name, value);
+            }
+        });
+        if (messageId != null) {
+            part.putIfAbsent("messageID", messageId);
+            part.putIfAbsent("messageId", messageId);
+        }
+        String partId = stringValue(part.get("id"));
+        if (partId != null) {
+            part.putIfAbsent("partID", partId);
+            part.putIfAbsent("partId", partId);
+        }
+        Object name = part.get("name");
+        if (name instanceof String toolName && "tool".equals(part.get("type"))) {
+            part.putIfAbsent("tool", toolName);
+            part.putIfAbsent("toolName", toolName);
+        }
+        return immutableWithoutNulls(part);
+    }
+
+    private String stringValue(Object value) {
+        return value instanceof String string && !string.isBlank() ? string : null;
+    }
+
+    private Map<String, Object> immutableWithoutNulls(Map<String, Object> source) {
+        LinkedHashMap<String, Object> result = new LinkedHashMap<>();
+        source.forEach((key, value) -> {
+            if (key != null && value != null) {
+                result.put(key, value);
+            }
+        });
+        return Map.copyOf(result);
     }
 
     private long toLong(BigDecimal value) {

@@ -10,8 +10,11 @@
 - 展开目录时通过回调交给 app 调用后端。
 - 搜索只过滤已加载文件树中的文件名或路径。
 - 展示 Diff 文件列表并触发打开 Diff。
+- 保持文件树、Changed Files 和搜索结果的紧凑列表视觉，不因长路径、状态徽标或选中态改变行高。
+- Phase 11 `@` context 和 prompt file context 只消费 app 层传入的选择回调；本包不读取文件内容。
 
 ## 禁止事项
 
 - 不直接调用后端。
 - 不实现内容搜索 API。
+- 不直接构造 `PromptPart`，不访问 opencode server。

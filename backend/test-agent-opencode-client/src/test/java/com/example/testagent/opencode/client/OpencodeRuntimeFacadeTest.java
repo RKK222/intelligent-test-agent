@@ -163,5 +163,16 @@ class OpencodeRuntimeFacadeTest {
             lastBody = body instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
             return Mono.just(new OpencodeRuntimeResult(objectMapper.valueToTree(List.of(Map.of("id", "build")))));
         }
+
+        @Override
+        public Mono<OpencodeSessionMessagesResult> sessionMessages(
+                ExecutionNode node,
+                String opencodeSessionId,
+                int limit,
+                String order,
+                String cursor,
+                String traceId) {
+            return Mono.just(new OpencodeSessionMessagesResult(List.of(), null, null));
+        }
     }
 }

@@ -420,7 +420,9 @@ Session 运行态接口：
 
 `POST /api/runs/{runId}/cancel` 对终态 Run 返回 `CONFLICT`。非终态 Run 会在存在内部映射时使用远端 opencode session id 调用 opencode cancel，并追加 `run.cancelling`、`run.cancelled`。
 
-`GET /api/runs/{runId}/events` 返回 `text/event-stream`，SSE `id` 使用 RunEvent `seq`，`event` 使用稳定 wire name。`Last-Event-ID` 续传规则见 `docs/api/event-stream-api.md`。浏览器原生 `EventSource` 首次续传可使用 `GET /api/runs/{runId}/events?lastEventId={seq}`，后端 header 优先、query 兜底。
+`GET /api/runs/{runId}/events` 返回 `text/event-stream`，`event` 使用稳定 wire name。durable RunEvent 使用 `seq` 作为 SSE `id`，可通过 `Last-Event-ID` 续传；transient live output 不设置 SSE `id`，payload `seq=0`，不参与续传。浏览器原生 `EventSource` 首次续传可使用 `GET /api/runs/{runId}/events?lastEventId={seq}`，后端 header 优先、query 兜底。
+
+SSE 建连时，后端会先尝试从当前 Run 绑定的 opencode session projected messages 拉取消息快照，并转换为 transient `message.updated` / `message.part.updated` 发给前端；随后进入 `run_events` durable replay 与 live bus 合流。消息内容、文本 delta、大段日志和 bash/tool output 不从本平台数据库恢复；如果 opencode session 不可用或拉取失败，后端跳过消息恢复，不阻断 Run 状态、Diff、permission/question 等 durable RunEvent 回放。
 
 ### Phase 11 opencode Web App 运行态 API 规划
 

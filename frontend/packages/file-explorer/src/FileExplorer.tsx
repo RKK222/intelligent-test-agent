@@ -97,13 +97,13 @@ export function FileExplorer({
               <button
                 key={file.path}
                 type="button"
-                className="flex w-full items-center gap-2 rounded-md border border-slate-800 bg-slate-950 px-2 py-2 text-left hover:border-slate-600"
+                className="flex w-full items-center gap-2 rounded-md border border-[var(--ta-border)] bg-[#101b33] px-2 py-2 text-left hover:border-[#2a3a63]"
                 onClick={() => onOpenDiff(file.path)}
               >
                 <Badge tone={file.status === "deleted" ? "danger" : file.status === "added" ? "success" : "warning"}>{file.status}</Badge>
                 <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-slate-200">{file.path}</span>
-                <span className="text-[11px] text-emerald-300">+{file.additions}</span>
-                <span className="text-[11px] text-red-300">-{file.deletions}</span>
+                <span className="text-[11px] text-[#86efac]">+{file.additions}</span>
+                <span className="text-[11px] text-[#fca5a5]">-{file.deletions}</span>
               </button>
             ))}
           </div>
@@ -143,8 +143,8 @@ function DirectoryRows({
             <button
               type="button"
               className={cn(
-                "flex h-7 w-full items-center gap-1 rounded-md px-1 text-left text-slate-300 hover:bg-slate-800",
-                active && "bg-blue-950 text-white"
+                "flex h-7 w-full items-center gap-1 rounded-md px-1 text-left text-slate-300 hover:bg-[#13203f]",
+                active && "bg-[#1a2d58] text-white"
               )}
               style={{ paddingLeft: depth * 14 + 4 }}
               onClick={() => (entry.type === "directory" ? onToggleDirectory(entry.path) : onOpenFile(entry.path))}
@@ -152,7 +152,7 @@ function DirectoryRows({
               {entry.type === "directory" ? (
                 <>
                   <ChevronRight className={cn("h-3.5 w-3.5 text-slate-500 transition", expanded && "rotate-90")} />
-                  <Folder className="h-4 w-4 text-blue-300" />
+                  <Folder className="h-4 w-4 text-[#8db6f5]" />
                 </>
               ) : (
                 <>

@@ -33,6 +33,9 @@ import com.example.testagent.domain.workspace.WorkspaceId;
 import com.example.testagent.domain.workspace.WorkspaceRepository;
 import com.example.testagent.domain.workspace.WorkspaceStatus;
 import com.example.testagent.event.RunEventAppender;
+import com.example.testagent.event.RunEventLiveBus;
+import com.example.testagent.event.RunEventLiveEvent;
+import com.example.testagent.event.RunEventSsePayload;
 import com.example.testagent.opencode.client.OpencodeCancelCommand;
 import com.example.testagent.opencode.client.OpencodeCancelResult;
 import com.example.testagent.opencode.client.OpencodeClientFacade;
@@ -47,6 +50,8 @@ import com.example.testagent.opencode.client.OpencodeRejectDiffCommand;
 import com.example.testagent.opencode.client.OpencodeRejectDiffResult;
 import com.example.testagent.opencode.client.OpencodeRuntimeCommand;
 import com.example.testagent.opencode.client.OpencodeRuntimeResult;
+import com.example.testagent.opencode.client.OpencodeSessionMessagesCommand;
+import com.example.testagent.opencode.client.OpencodeSessionMessagesResult;
 import com.example.testagent.opencode.client.OpencodeStartRunCommand;
 import com.example.testagent.opencode.client.OpencodeStartRunResult;
 import com.example.testagent.opencode.client.OpencodeStreamEventsCommand;
@@ -57,6 +62,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -282,14 +288,14 @@ class RunApplicationServiceTest {
     void serviceDoesNotFailRunWhenPersistingNonTerminalStreamEventFails() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();
-        events.failOnType = RunEventType.ASSISTANT_MESSAGE_DELTA;
+        events.failOnType = RunEventType.TOOL_FINISHED;
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         facade.streamEvents = command -> Flux.just(new RunEventDraft(
                 command.runId(),
-                RunEventType.ASSISTANT_MESSAGE_DELTA,
+                RunEventType.TOOL_FINISHED,
                 command.traceId(),
                 Instant.now(),
-                Map.of("text", "hello")));
+                Map.of("tool", "bash", "status", "completed")));
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(),
                 new FakeSessionRepository(session()),
@@ -307,6 +313,95 @@ class RunApplicationServiceTest {
         assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.RUNNING);
         assertThat(events.events).extracting(RunEvent::type)
                 .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED);
+    }
+
+    @Test
+    void servicePublishesMessageProjectionToLiveBusWithoutPersisting() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = command -> Flux.just(
+                new RunEventDraft(
+                        command.runId(),
+                        RunEventType.MESSAGE_PART_DELTA,
+                        command.traceId(),
+                        Instant.now(),
+                        Map.of(
+                                "messageID", "msg_1",
+                                "partID", "part_1",
+                                "delta", "hello",
+                                "rawPayload", Map.of("full", "event"))),
+                new RunEventDraft(
+                        command.runId(),
+                        RunEventType.MESSAGE_UPDATED,
+                        command.traceId(),
+                        Instant.now(),
+                        Map.of("message", Map.of("id", "msg_1", "role", "assistant"))));
+        RecordingRunEventLiveBus liveBus = new RecordingRunEventLiveBus();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                facade,
+                liveBus,
+                new RunEventPersistencePolicy());
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitLiveEvents(liveBus, 2);
+        assertThat(events.events).extracting(RunEvent::type)
+                .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED);
+        assertThat(liveBus.transientPayloads).extracting(RunEventSsePayload::type)
+                .containsExactly("message.part.delta", "message.updated");
+        assertThat(liveBus.transientPayloads).allSatisfy(payload -> assertThat(payload.seq()).isZero());
+        assertThat(liveBus.transientPayloads.get(0).payload()).doesNotContainKey("rawPayload");
+    }
+
+    @Test
+    void servicePersistsSanitizedToolFinishedPayload() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.TOOL_FINISHED,
+                command.traceId(),
+                Instant.now(),
+                Map.of(
+                        "tool", "bash",
+                        "callID", "call_1",
+                        "messageID", "msg_1",
+                        "partID", "part_1",
+                        "status", "completed",
+                        "title", "Bash",
+                        "rawPayload", Map.of("full", "event"),
+                        "output", "very long bash output",
+                        "input", Map.of("command", "cat large.log"),
+                        "metadata", Map.of("large", "metadata"))));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                facade,
+                new RecordingRunEventLiveBus(),
+                new RunEventPersistencePolicy());
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.TOOL_FINISHED);
+        Map<String, Object> payload = events.events.get(2).payload();
+        assertThat(payload).containsEntry("tool", "bash");
+        assertThat(payload).containsEntry("callID", "call_1");
+        assertThat(payload).containsEntry("status", "completed");
+        assertThat(payload).doesNotContainKeys("rawPayload", "output", "input", "metadata");
     }
 
     @Test
@@ -481,6 +576,17 @@ class RunApplicationServiceTest {
             sleepBriefly();
         }
         assertThat(events.failedAppendAttempts).isGreaterThanOrEqualTo(expected);
+    }
+
+    private static void awaitLiveEvents(RecordingRunEventLiveBus liveBus, int expected) {
+        long deadline = System.nanoTime() + 2_000_000_000L;
+        while (System.nanoTime() < deadline) {
+            if (liveBus.transientPayloads.size() >= expected) {
+                return;
+            }
+            sleepBriefly();
+        }
+        assertThat(liveBus.transientPayloads).hasSizeGreaterThanOrEqualTo(expected);
     }
 
     private static void sleepBriefly() {
@@ -658,6 +764,17 @@ class RunApplicationServiceTest {
         }
     }
 
+    private static final class RecordingRunEventLiveBus extends RunEventLiveBus {
+        private final List<RunEventSsePayload> transientPayloads = new CopyOnWriteArrayList<>();
+
+        @Override
+        public RunEventLiveEvent publishTransient(RunEventDraft draft) {
+            RunEventLiveEvent event = super.publishTransient(draft);
+            transientPayloads.add(event.payload());
+            return event;
+        }
+    }
+
     private static final class FakeOpencodeFacade implements OpencodeClientFacade {
         private final List<OpencodeCreateSessionCommand> createSessionCommands = new ArrayList<>();
         private final List<OpencodeStartRunCommand> startRunCommands = new ArrayList<>();
@@ -709,6 +826,11 @@ class RunApplicationServiceTest {
         @Override
         public Mono<OpencodeRuntimeResult> runtime(OpencodeRuntimeCommand command) {
             return Mono.just(new OpencodeRuntimeResult(JsonNodeFactory.instance.objectNode()));
+        }
+
+        @Override
+        public Mono<OpencodeSessionMessagesResult> sessionMessages(OpencodeSessionMessagesCommand command) {
+            return Mono.just(new OpencodeSessionMessagesResult(List.of(), null, null));
         }
     }
 }

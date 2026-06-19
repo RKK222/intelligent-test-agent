@@ -167,6 +167,21 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                 command.node());
     }
 
+    @Override
+    public Mono<OpencodeSessionMessagesResult> sessionMessages(OpencodeSessionMessagesCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        return applyPolicy(
+                Mono.defer(() -> gateway.sessionMessages(
+                        command.node(),
+                        command.opencodeSessionId(),
+                        command.limit(),
+                        command.order(),
+                        command.cursor(),
+                        command.traceId())),
+                "sessionMessages",
+                command.node());
+    }
+
     private <T> Mono<T> applyPolicy(Mono<T> source, String operation, ExecutionNode node) {
         Mono<T> protectedSource = source.timeout(timeout);
         if (maxRetries > 0) {

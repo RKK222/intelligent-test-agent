@@ -42,13 +42,6 @@ frontend/
     test-runner/
     ui-kit/
     shared-types/
-    # Phase 11 计划新增 feature packages：
-    session-manager/
-    permission-prompt/
-    question-prompt/
-    agent-model-selector/
-    command-palette/
-    context-picker/
   interaction-visual-demo/
 ```
 
@@ -66,7 +59,7 @@ frontend/
 - `packages/test-runner`：底部 Run 状态、取消、重试和事件日志面板。
 - `packages/ui-kit`：平台通用 UI 组件、基础样式组合和反馈组件。
 - `packages/shared-types`：跨包共享 TypeScript 类型和事件/DTO 模型。
-- Phase 11 新增 feature packages 必须承接 session、permission、question、Agent/Model、command、context、terminal 等能力，避免继续扩张 `apps/agent-web` 或单个 `AgentWorkbench` 组件。
+- Phase 11 当前已把 session history、permission/question、Agent/Provider/Model/Mode selector、command、context、Diff hunk 和 terminal 能力沉淀到既有 packages；后续只有当单个能力继续膨胀到可独立复用时，才新增 `session-manager`、`permission-prompt`、`question-prompt`、`agent-model-selector`、`command-palette` 或 `context-picker` 等 feature package。
 
 ## 阶段边界
 
@@ -76,6 +69,7 @@ frontend/
 4. Monaco 编辑器和 Diff 按需加载，固定尺寸面板必须避免文本和控件重叠。
 5. Phase 11 不实现 settings/config/provider/server 配置页；只保留 Agent/Provider/Model 等运行态选择和只读状态目录。
 6. PTY WebSocket 属于 P2，只能按架构和安全文档的 ticket + WebSocket 例外实现；前端 ticket 创建走 `backend-api`，WebSocket 生命周期下沉到 `packages/terminal`。
+7. 顶层 `frontend-opencode` 和 `opencode-source/opencode-1.17.8/packages/frontend-opencode` 目前不属于平台前端 workspace、构建或测试范围；除非后续正式转正，否则只作为 opencode 行为参考资料。
 
 ## 架构红线
 

@@ -91,16 +91,16 @@ export function TerminalPanel({ baseUrl, createTicket, disabled, disabledReason,
         <div className="border-b border-slate-800 px-3 py-2 text-[12px] text-slate-500">{disabledReason ?? "终端当前不可用"}</div>
       ) : null}
       {snapshot.error ? (
-        <div className="border-b border-red-900/60 bg-red-950/30 px-3 py-2 text-[12px] text-red-100">
+        <div className="border-b border-[rgba(239,68,68,.3)] bg-[rgba(239,68,68,.12)] px-3 py-2 text-[12px] text-[#fca5a5]">
           {snapshot.error.code}: {snapshot.error.message}
         </div>
       ) : null}
       {snapshot.warnings?.map((warning) => (
-        <div key={`${warning.code}:${warning.message}`} className="border-b border-amber-900/60 bg-amber-950/25 px-3 py-2 text-[12px] text-amber-100">
+        <div key={`${warning.code}:${warning.message}`} className="border-b border-[rgba(245,158,11,.3)] bg-[rgba(245,158,11,.12)] px-3 py-2 text-[12px] text-[#fcd34d]">
           {warning.code}: {warning.message}
         </div>
       ))}
-      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-3 font-mono text-[12px] leading-6 text-slate-300">
+      <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap p-3 font-mono text-[12px] leading-6 text-[var(--ta-text)]">
         {snapshot.output || "连接后显示终端输出..."}
       </pre>
       <form className="flex gap-2 border-t border-slate-800 bg-slate-950 p-3" onSubmit={send}>

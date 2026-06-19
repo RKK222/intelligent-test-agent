@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -23,6 +24,7 @@ public class TerminalTicketRateLimiter {
     private final Duration window;
     private final Map<String, Counter> counters = new ConcurrentHashMap<>();
 
+    @Autowired
     public TerminalTicketRateLimiter(
             @Value("${test-agent.terminal.ticket-capacity:10}") int capacity,
             @Value("${test-agent.terminal.ticket-window:1m}") Duration window) {

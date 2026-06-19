@@ -24,6 +24,7 @@ import com.example.testagent.domain.session.SessionMessageRole;
 import com.example.testagent.domain.workspace.Workspace;
 import com.example.testagent.domain.workspace.WorkspaceRepository;
 import com.example.testagent.event.RunEventAppender;
+import com.example.testagent.event.RunEventLiveBus;
 import com.example.testagent.opencode.client.OpencodeCancelCommand;
 import com.example.testagent.opencode.client.OpencodeClientFacade;
 import com.example.testagent.opencode.client.OpencodeCreateSessionCommand;
@@ -42,6 +43,7 @@ import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
@@ -63,7 +65,33 @@ public class RunApplicationService {
     private final RoutingDecisionRepository routingDecisionRepository;
     private final RunEventAppender runEventAppender;
     private final OpencodeClientFacade opencodeClientFacade;
+    private final RunEventLiveBus runEventLiveBus;
+    private final RunEventPersistencePolicy runEventPersistencePolicy;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
+
+    @Autowired
+    public RunApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.example.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RoutingDecisionRepository routingDecisionRepository,
+            RunEventAppender runEventAppender,
+            OpencodeClientFacade opencodeClientFacade,
+            RunEventLiveBus runEventLiveBus,
+            RunEventPersistencePolicy runEventPersistencePolicy) {
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
+        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
+        this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
+        this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
+        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
+        this.routingDecisionRepository = Objects.requireNonNull(routingDecisionRepository, "routingDecisionRepository must not be null");
+        this.runEventAppender = Objects.requireNonNull(runEventAppender, "runEventAppender must not be null");
+        this.opencodeClientFacade = Objects.requireNonNull(opencodeClientFacade, "opencodeClientFacade must not be null");
+        this.runEventLiveBus = Objects.requireNonNull(runEventLiveBus, "runEventLiveBus must not be null");
+        this.runEventPersistencePolicy = Objects.requireNonNull(runEventPersistencePolicy, "runEventPersistencePolicy must not be null");
+    }
 
     public RunApplicationService(
             WorkspaceRepository workspaceRepository,
@@ -74,14 +102,17 @@ public class RunApplicationService {
             RoutingDecisionRepository routingDecisionRepository,
             RunEventAppender runEventAppender,
             OpencodeClientFacade opencodeClientFacade) {
-        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
-        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
-        this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
-        this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
-        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
-        this.routingDecisionRepository = Objects.requireNonNull(routingDecisionRepository, "routingDecisionRepository must not be null");
-        this.runEventAppender = Objects.requireNonNull(runEventAppender, "runEventAppender must not be null");
-        this.opencodeClientFacade = Objects.requireNonNull(opencodeClientFacade, "opencodeClientFacade must not be null");
+        this(
+                workspaceRepository,
+                sessionRepository,
+                runRepository,
+                sessionMessageRepository,
+                executionNodeRepository,
+                routingDecisionRepository,
+                runEventAppender,
+                opencodeClientFacade,
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy());
     }
 
     public Run startRun(SessionId sessionId, String prompt, String traceId) {
@@ -439,12 +470,12 @@ public class RunApplicationService {
                         workspace.rootPath(),
                         null,
                         traceId))
-                // opencode stream 来自 Netty 线程，事件落库必须串行 offload，且本地 DB 抖动不能误判为 Run 失败。
+                // opencode stream 来自 Netty 线程，事件入库或实时发布必须串行 offload，且本地 DB 抖动不能误判为 Run 失败。
                 .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(run, draft))
                         .subscribeOn(Schedulers.boundedElastic())
                         .onErrorResume(error -> {
                             LOGGER.warn(
-                                    "Failed to persist opencode stream event, runId={}, eventType={}, traceId={}",
+                                    "Failed to handle opencode stream event, runId={}, eventType={}, traceId={}",
                                     run.runId().value(),
                                     draft.type().wireName(),
                                     traceId,
@@ -467,11 +498,15 @@ public class RunApplicationService {
                 } else {
                     runRepository.save(current.fail(draft.occurredAt()));
                 }
-                runEventAppender.append(draft);
+                runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
             }
             return;
         }
-        runEventAppender.append(draft);
+        if (!runEventPersistencePolicy.shouldPersist(draft)) {
+            runEventLiveBus.publishTransient(runEventPersistencePolicy.sanitizeForPersistence(draft));
+            return;
+        }
+        runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
     }
 
     private void failRunFromStream(Run run, String traceId, Throwable error) {

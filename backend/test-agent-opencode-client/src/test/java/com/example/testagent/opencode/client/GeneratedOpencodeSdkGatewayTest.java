@@ -193,6 +193,53 @@ class GeneratedOpencodeSdkGatewayTest {
         }
     }
 
+    @Test
+    void gatewayReadsSessionMessagesUsingGeneratedMessagesApi() throws Exception {
+        AtomicReference<RequestSnapshot> request = new AtomicReference<>();
+        HttpServer server = startServer(exchange -> {
+            request.set(snapshot(exchange));
+            respond(exchange, 200, "application/json", """
+                    {
+                      "data": [
+                        {
+                          "id": "msg_remote1234567890abcdef",
+                          "type": "assistant",
+                          "agent": "build",
+                          "model": {"id": "claude-sonnet-4-5", "providerID": "anthropic"},
+                          "content": [
+                            {"type": "text", "id": "part_text_1", "text": "hello"}
+                          ],
+                          "time": {"created": 1781846400000}
+                        }
+                      ],
+                      "cursor": {"previous": "previous_cursor", "next": "next_cursor"}
+                    }
+                    """);
+        });
+
+        try {
+            OpencodeSessionMessagesResult result = new GeneratedOpencodeSdkGateway()
+                    .sessionMessages(node(server), REMOTE_SESSION_ID, 100, "asc", null, TRACE_ID)
+                    .block(Duration.ofSeconds(5));
+
+            assertThat(result.previousCursor()).isEqualTo("previous_cursor");
+            assertThat(result.nextCursor()).isEqualTo("next_cursor");
+            assertThat(result.messages()).singleElement().satisfies(message -> {
+                assertThat(message.message()).containsEntry("id", "msg_remote1234567890abcdef");
+                assertThat(message.parts()).singleElement().satisfies(part ->
+                        assertThat(part).containsEntry("text", "hello"));
+            });
+            assertThat(request.get().method()).isEqualTo("GET");
+            assertThat(request.get().path()).isEqualTo("/api/session/" + REMOTE_SESSION_ID + "/message");
+            assertThat(request.get().query()).containsEntry("limit", List.of("100"));
+            assertThat(request.get().query()).containsEntry("order", List.of("asc"));
+            assertThat(request.get().query()).doesNotContainKey("cursor");
+            assertThat(request.get().traceId()).isEqualTo(TRACE_ID);
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private static HttpServer startServer(HttpHandler handler) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", handler);

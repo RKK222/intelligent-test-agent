@@ -11,6 +11,7 @@ import com.example.testagent.opencode.runtime.run.RunDiffActionResponse;
 import com.example.testagent.opencode.runtime.run.RunDiffApplicationService;
 import com.example.testagent.opencode.runtime.run.RunDiffFileResponse;
 import com.example.testagent.opencode.runtime.run.RunDiffResponse;
+import com.example.testagent.opencode.runtime.run.RunMessageRecoveryService;
 import com.example.testagent.opencode.runtime.run.StartRunInput;
 import com.example.testagent.opencode.runtime.session.SessionApplicationService;
 import com.example.testagent.workspace.WorkspaceApplicationService;
@@ -24,11 +25,16 @@ import com.example.testagent.domain.session.SessionStatus;
 import com.example.testagent.domain.workspace.Workspace;
 import com.example.testagent.domain.workspace.WorkspaceId;
 import com.example.testagent.domain.workspace.WorkspaceStatus;
+import com.example.testagent.event.RunEventSseMapper;
+import com.example.testagent.event.RunEventSsePayload;
 import com.example.testagent.event.RunEventSseStreamService;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -320,6 +326,59 @@ class RuntimeControllerTest {
                 eq("7"),
                 any(),
                 eq(100));
+    }
+
+    @Test
+    void runControllerPrependsOpencodeMessageSnapshotBeforeDurableStream() {
+        RunApplicationService runService = org.mockito.Mockito.mock(RunApplicationService.class);
+        RunEventSseStreamService eventStreamService = org.mockito.Mockito.mock(RunEventSseStreamService.class);
+        RunMessageRecoveryService recoveryService = org.mockito.Mockito.mock(RunMessageRecoveryService.class);
+        RunId runId = new RunId("run_1234567890abcdef");
+        RunEventSsePayload snapshot = new RunEventSsePayload(
+                "evt_live_snapshot",
+                runId.value(),
+                0,
+                "message.updated",
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of("message", Map.of("id", "msg_1", "role", "assistant")));
+        RunEventSsePayload durable = new RunEventSsePayload(
+                "evt_1",
+                runId.value(),
+                1,
+                "run.started",
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of("status", "RUNNING"));
+        when(recoveryService.recover(eq(runId), eq("trace_1234567890abcdef"))).thenReturn(Flux.just(snapshot));
+        when(eventStreamService.streamAfter(eq(runId), eq(null), any(), eq(100)))
+                .thenReturn(Flux.just(ServerSentEvent.<RunEventSsePayload>builder()
+                        .id("1")
+                        .event("run.started")
+                        .data(durable)
+                        .build()));
+        WebTestClient client = WebTestClient.bindToController(new RunController(
+                        runService,
+                        null,
+                        eventStreamService,
+                        recoveryService,
+                        new RunEventSseMapper()))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        List<RunEventSsePayload> payloads = client.get()
+                .uri("/api/runs/run_1234567890abcdef/events")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .returnResult(RunEventSsePayload.class)
+                .getResponseBody()
+                .take(2)
+                .collectList()
+                .block(Duration.ofSeconds(2));
+
+        assertThat(payloads).extracting(RunEventSsePayload::type)
+                .containsExactly("message.updated", "run.started");
     }
 
     @Test

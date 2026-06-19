@@ -2,13 +2,17 @@ package com.example.testagent.api.web;
 
 import com.example.testagent.opencode.runtime.run.RunApplicationService;
 import com.example.testagent.opencode.runtime.run.RunDiffApplicationService;
+import com.example.testagent.opencode.runtime.run.RunMessageRecoveryService;
 import com.example.testagent.common.api.ApiResponse;
 import com.example.testagent.domain.run.RunId;
+import com.example.testagent.event.RunEventSseMapper;
 import com.example.testagent.event.RunEventSsePayload;
 import com.example.testagent.event.RunEventSseStreamService;
 import jakarta.validation.Valid;
 import java.time.Duration;
+import java.util.Objects;
 import java.util.function.Function;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,14 +39,28 @@ public class RunController {
     private final RunApplicationService runService;
     private final RunDiffApplicationService runDiffService;
     private final RunEventSseStreamService eventStreamService;
+    private final RunMessageRecoveryService messageRecoveryService;
+    private final RunEventSseMapper sseMapper;
+
+    @Autowired
+    public RunController(
+            RunApplicationService runService,
+            RunDiffApplicationService runDiffService,
+            RunEventSseStreamService eventStreamService,
+            RunMessageRecoveryService messageRecoveryService,
+            RunEventSseMapper sseMapper) {
+        this.runService = runService;
+        this.runDiffService = runDiffService;
+        this.eventStreamService = eventStreamService;
+        this.messageRecoveryService = messageRecoveryService;
+        this.sseMapper = Objects.requireNonNull(sseMapper, "sseMapper must not be null");
+    }
 
     public RunController(
             RunApplicationService runService,
             RunDiffApplicationService runDiffService,
             RunEventSseStreamService eventStreamService) {
-        this.runService = runService;
-        this.runDiffService = runDiffService;
-        this.eventStreamService = eventStreamService;
+        this(runService, runDiffService, eventStreamService, null, new RunEventSseMapper());
     }
 
     @PostMapping({"/api/runs", "/api/internal/platform/opencode-runtime/runs"})
@@ -98,9 +116,18 @@ public class RunController {
     public Flux<ServerSentEvent<RunEventSsePayload>> events(
             @PathVariable String runId,
             @RequestHeader(name = "Last-Event-ID", required = false) String lastEventId,
-            @RequestParam(name = "lastEventId", required = false) String lastEventIdQuery) {
+            @RequestParam(name = "lastEventId", required = false) String lastEventIdQuery,
+            ServerWebExchange exchange) {
         String resumeEventId = lastEventId != null ? lastEventId : lastEventIdQuery;
-        return eventStreamService.streamAfter(new RunId(runId), resumeEventId, DEFAULT_POLL_INTERVAL, DEFAULT_BATCH_LIMIT);
+        RunId currentRunId = new RunId(runId);
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        Flux<ServerSentEvent<RunEventSsePayload>> snapshotEvents = messageRecoveryService == null
+                ? Flux.empty()
+                : messageRecoveryService.recover(currentRunId, traceId)
+                        .map(sseMapper::toTransientSse);
+        return Flux.concat(
+                snapshotEvents,
+                eventStreamService.streamAfter(currentRunId, resumeEventId, DEFAULT_POLL_INTERVAL, DEFAULT_BATCH_LIMIT));
     }
 
     private <T> Mono<ApiResponse<T>> blockingResponse(ServerWebExchange exchange, Function<String, T> action) {

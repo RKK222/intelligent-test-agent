@@ -14,11 +14,12 @@
 
 - `package-info.java`：说明 event 包是平台事件模型、SSE 和回放边界。
 - `RunEventAppender`：通过 domain 端口追加事件草稿。
+- `RunEventLiveBus`、`RunEventLiveEvent`：当前进程内按 runId 广播 durable/transient 实时事件。
 - `RunEventReplayService`：处理 Last-Event-ID 和事件增量回放。
-- `RunEventSseMapper`：将 RunEvent 映射为 `ServerSentEvent`。
-- `RunEventSseStreamService`：基于 polling 的 RunEvent SSE 输出服务；阻塞式回放查询 offload 到 `boundedElastic`，单次回放失败跳过本轮轮询并保持订阅。
+- `RunEventSseMapper`：将 durable RunEvent 映射为带 `id=seq` 的 `ServerSentEvent`，将 transient payload 映射为不带 SSE `id` 的 `ServerSentEvent`。
+- `RunEventSseStreamService`：合并 durable polling replay 和 live bus 的 RunEvent SSE 输出服务；阻塞式回放查询 offload 到 `boundedElastic`，单次回放失败跳过本轮轮询并保持订阅。
 - `RunEventSsePayload`：SSE body 的稳定平台事件载荷。
-- 后续可新增内存广播、跨实例订阅恢复和订阅管理器。
+- 后续可新增跨实例订阅恢复和订阅管理器。
 
 ## 允许依赖
 
@@ -47,7 +48,7 @@
 
 ## 测试位置
 
-- event 模块单元测试。
+- event 模块单元测试，覆盖 durable SSE id、transient SSE 无 id、live bus 合流和 Last-Event-ID。
 - SSE 集成测试。
 - Last-Event-ID、seq 单调递增、断线续传和事件映射测试。
 

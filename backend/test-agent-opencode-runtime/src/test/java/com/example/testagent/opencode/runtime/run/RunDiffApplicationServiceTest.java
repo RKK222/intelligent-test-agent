@@ -41,6 +41,8 @@ import com.example.testagent.opencode.client.OpencodeRejectDiffCommand;
 import com.example.testagent.opencode.client.OpencodeRejectDiffResult;
 import com.example.testagent.opencode.client.OpencodeRuntimeCommand;
 import com.example.testagent.opencode.client.OpencodeRuntimeResult;
+import com.example.testagent.opencode.client.OpencodeSessionMessagesCommand;
+import com.example.testagent.opencode.client.OpencodeSessionMessagesResult;
 import com.example.testagent.opencode.client.OpencodeStartRunCommand;
 import com.example.testagent.opencode.client.OpencodeStartRunResult;
 import com.example.testagent.opencode.client.OpencodeStreamEventsCommand;
@@ -387,6 +389,11 @@ class RunDiffApplicationServiceTest {
         @Override
         public Mono<OpencodeRuntimeResult> runtime(OpencodeRuntimeCommand command) {
             return Mono.just(new OpencodeRuntimeResult(JsonNodeFactory.instance.objectNode()));
+        }
+
+        @Override
+        public Mono<OpencodeSessionMessagesResult> sessionMessages(OpencodeSessionMessagesCommand command) {
+            return Mono.just(new OpencodeSessionMessagesResult(List.of(), null, null));
         }
     }
 }

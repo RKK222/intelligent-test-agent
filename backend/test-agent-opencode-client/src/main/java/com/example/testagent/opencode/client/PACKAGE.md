@@ -22,6 +22,7 @@
 - `OpencodeDiffCommand`、`OpencodeDiffResult`、`OpencodeDiffFile`：查询 opencode session Diff 并输出平台稳定 DTO。
 - `OpencodeRejectDiffCommand`、`OpencodeRejectDiffResult`：通过 opencode `sessionRevert` 拒绝 Run 级 Diff。
 - `OpencodeRuntimeCommand`、`OpencodeRuntimeResult`：Phase 11 Web App 运行态通用 facade 命令和结果，使用 Jackson `JsonNode` 承载 opencode HTTP 响应，支持受控访问 MCP resources/tools 等只读 runtime 目录，避免 generated DTO 穿透业务模块、domain 或 API。
+- `OpencodeSessionMessagesCommand`、`OpencodeSessionMessage`、`OpencodeSessionMessagesResult`：读取 opencode session projected messages 的稳定 facade DTO，用于消息内容恢复。
 - `OpencodeHealthCommand`、`OpencodeHealthResult`：执行节点健康检查。
 
 ## 允许依赖
@@ -52,7 +53,7 @@
 ## 测试位置
 
 - opencode-client 模块单元测试和 gateway 级 HTTP 测试。
-- facade 测试覆盖 traceId、错误映射、超时重试、create/start/cancel/event/diff/revert/runtime。
+- facade 测试覆盖 traceId、错误映射、超时重试、create/start/cancel/event/diff/revert/runtime/session messages。
 
 ## 修改时必须同步更新
 

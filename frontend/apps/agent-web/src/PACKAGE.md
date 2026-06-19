@@ -13,6 +13,7 @@
 - `components/follow-up-queue.ts`：Run 忙碌时 prompt follow-up 的纯 FIFO 队列模型。
 - `components/prompt-context.ts`：活动编辑器或 Monaco 选区到 `PromptPart` file context 的纯转换。
 - `components/ReadonlyTranscript.tsx`：只读 transcript 客户端视图，不订阅 SSE，不直连 opencode。
+- `app/globals.css`：Tailwind 4 全局入口、theme token、Dockview/Monaco 视觉适配、滚动条、panel chrome 和工作台级动画。
 - `../next.config.ts`：Next 应用配置，允许本地从 `127.0.0.1` 访问开发资源，保持 Run/取消等客户端交互可用。
 
 ## 允许依赖

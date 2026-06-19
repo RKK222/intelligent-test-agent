@@ -51,7 +51,7 @@ export function ReadonlyTranscript({ sessionId }: { sessionId: string }) {
         </header>
         <div className="min-h-0 flex-1 space-y-3 py-4">
           {messages.map((message) => (
-            <article key={message.messageId} className="rounded-md border border-slate-800 bg-slate-950 p-3">
+            <article key={message.messageId} className="rounded-[10px] border border-[var(--ta-border)] bg-[#101b33] p-3">
               <div className="mb-2 flex items-center justify-between gap-2 text-[11px] text-slate-500">
                 <span>{message.role}</span>
                 <span>{new Date(message.createdAt).toLocaleString("zh-CN", { hour12: false })}</span>

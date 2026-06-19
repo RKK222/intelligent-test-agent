@@ -2,11 +2,11 @@
 
 ## 职责
 
-承载 Web IDE 工作台布局和工作台级状态。
+承载 Web IDE 工作台布局和工作台级状态，保证 Phase 11 多面板运行态下的固定区域尺寸稳定。
 
 ## 主要程序清单
 
-- `WorkbenchShell.tsx`：Dockview panel 壳和顶部状态栏。
+- `WorkbenchShell.tsx`：Dockview panel 壳、顶部状态栏、底部运行区容器和固定尺寸布局约束。
 - `workbenchStore.ts`：Zustand 工作台状态。
 
 ## 允许依赖
@@ -19,6 +19,7 @@
 ## 禁止依赖
 
 - backend-api、event-stream-client、opencode server。
+- session、prompt、permission/question、terminal WebSocket 等业务运行态。
 
 ## 修改时必须同步更新
 

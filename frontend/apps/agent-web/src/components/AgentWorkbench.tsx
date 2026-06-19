@@ -653,17 +653,17 @@ function WorkbenchRuntime() {
 
   const bottom = (
     <div className="flex h-full min-h-0 flex-col bg-[var(--ta-panel)]">
-      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-slate-800 bg-slate-950 px-2">
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--ta-border)] bg-[#0d1628] px-2">
         <button
           type="button"
-          className={`rounded-md px-2 py-1 text-[12px] ${bottomMode === "run" ? "bg-slate-800 text-slate-100" : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"}`}
+          className={`rounded-md px-2 py-1 text-[12px] ${bottomMode === "run" ? "bg-[#17244a] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-accent)]" : "text-[var(--ta-muted)] hover:bg-[#122044] hover:text-[var(--ta-text)]"}`}
           onClick={() => setBottomMode("run")}
         >
           运行
         </button>
         <button
           type="button"
-          className={`rounded-md px-2 py-1 text-[12px] ${bottomMode === "terminal" ? "bg-slate-800 text-slate-100" : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"}`}
+          className={`rounded-md px-2 py-1 text-[12px] ${bottomMode === "terminal" ? "bg-[#17244a] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-accent)]" : "text-[var(--ta-muted)] hover:bg-[#122044] hover:text-[var(--ta-text)]"}`}
           onClick={() => setBottomMode("terminal")}
         >
           终端
@@ -717,22 +717,22 @@ function EditorPane({
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex h-9 items-end gap-1 overflow-x-auto border-b border-slate-800 bg-slate-950 px-2">
+      <div className="flex h-9 items-end gap-1 overflow-x-auto border-b border-[var(--ta-border)] bg-[#0d1628] px-2">
         {tabs.map((tab) => (
           <button
             key={tab.path}
             type="button"
-            className={`flex h-8 max-w-[240px] items-center gap-2 rounded-t-md border border-b-0 px-2 font-mono text-[12px] ${
-              activePath === tab.path ? "border-slate-700 bg-slate-900 text-slate-100" : "border-slate-800 bg-slate-950 text-slate-500"
+            className={`flex h-8 max-w-[240px] items-center gap-2 rounded-t-[6px] border border-b-0 px-2 font-mono text-[12px] ${
+              activePath === tab.path ? "border-[var(--ta-border)] bg-[#17244a] text-[var(--ta-text)]" : "border-[var(--ta-border)] bg-[#101b33] text-[var(--ta-muted)]"
             }`}
             onClick={() => onActivate(tab.path)}
           >
             <span className="truncate">{tab.title}</span>
-            {tab.content !== tab.savedContent ? <span className="h-1.5 w-1.5 rounded-full bg-amber-400" /> : null}
+            {tab.content !== tab.savedContent ? <span className="h-1.5 w-1.5 rounded-full bg-[#fbbf24]" /> : null}
             <span
               role="button"
               tabIndex={0}
-              className="rounded px-1 text-slate-500 hover:bg-red-950 hover:text-red-200"
+              className="rounded px-1 text-[var(--ta-muted)] hover:bg-[rgba(239,68,68,.15)] hover:text-[#fca5a5]"
               onClick={(event) => {
                 event.stopPropagation();
                 onClose(tab.path);

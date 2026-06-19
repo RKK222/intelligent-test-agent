@@ -1,19 +1,61 @@
 @import "tailwindcss";
 @import "dockview/dist/styles/dockview.css";
 
+/* ===== 设计 token：对齐 interaction-visual-demo 调色板 ===== */
 :root {
   color-scheme: dark;
-  --ta-bg: #0a0f1c;
-  --ta-panel: #101827;
-  --ta-panel-2: #0f1724;
-  --ta-border: #243047;
-  --ta-text: #e7eefc;
-  --ta-muted: #91a4c3;
-  --ta-accent: #4da3ff;
-  --ta-cyan: #29d3c4;
-  --ta-ok: #30c47c;
-  --ta-warn: #f3a93d;
-  --ta-error: #f06363;
+  --ta-bg: #0b1220;
+  --ta-bg-2: #0f172a;
+  --ta-panel: #111a2e;
+  --ta-panel-2: #15213d;
+  --ta-border: #1f2a44;
+  --ta-text: #e5eefc;
+  --ta-muted: #8aa0c6;
+  --ta-accent: #60a5fa;
+  --ta-accent-2: #22d3ee;
+  --ta-cyan: #22d3ee;
+  --ta-ok: #22c55e;
+  --ta-warn: #f59e0b;
+  --ta-error: #ef4444;
+  --ta-del: rgba(239, 68, 68, 0.18);
+  --ta-add: rgba(34, 197, 94, 0.18);
+  --ta-line-numbers: #3a4a6e;
+}
+
+/* ===== Tailwind v4 内置色阶重映射到 demo 调色板（整站换肤） ===== */
+/* 注意：@theme 必须在 @import "tailwindcss" 之后；仅覆盖实际用到的档位 */
+@theme {
+  --color-slate-950: #0b1220;
+  --color-slate-900: #0f1a33;
+  --color-slate-800: #15213d;
+  --color-slate-700: #1f2a44;
+  --color-slate-500: #8aa0c6;
+  --color-slate-400: #93a4c6;
+  --color-slate-300: #cfe0ff;
+  --color-slate-200: #dce5f7;
+  --color-slate-100: #e5eefc;
+
+  --color-blue-500: #60a5fa;
+  --color-blue-600: #3b82f6;
+  --color-blue-900: #1b2d5a;
+  --color-blue-950: #122044;
+  --color-blue-300: #8db6f5;
+  --color-blue-200: #a3c9ff;
+
+  --color-cyan-300: #67e8f9;
+  --color-cyan-900: #0d3b4a;
+  --color-cyan-950: #0a2a36;
+
+  --color-emerald-300: #86efac;
+  --color-emerald-950: #0b2a1a;
+
+  --color-amber-200: #fcd34d;
+  --color-amber-400: #fbbf24;
+  --color-amber-950: #2a1d05;
+
+  --color-red-200: #fca5a5;
+  --color-red-900: #3b0d0d;
+  --color-red-950: #2a0d0d;
 }
 
 * {
@@ -25,7 +67,8 @@ body {
   height: 100%;
   margin: 0;
   overflow: hidden;
-  background: var(--ta-bg);
+  /* demo 径向渐变背景 */
+  background: radial-gradient(1200px 600px at 10% -10%, #1b2a4e 0%, transparent 60%), var(--ta-bg);
   color: var(--ta-text);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
     "Microsoft YaHei", sans-serif;
@@ -39,8 +82,123 @@ select {
   font: inherit;
 }
 
+/* ===== demo 动画 ===== */
+@keyframes ta-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes ta-pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(34, 211, 238, 0);
+  }
+}
+@keyframes ta-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes ta-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+/* ===== demo 质感辅助 class（className 可用，新增不改名） ===== */
+/* 卡片：圆角 10px、demo 面板底色、hover 微抬升 */
+.ta-card {
+  border: 1px solid var(--ta-border);
+  border-radius: 10px;
+  background: #101b33;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.ta-card-hover:hover {
+  border-color: #2a3a63;
+  transform: translateY(-1px);
+}
+/* 药丸徽章 */
+.ta-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+/* 状态点：running 发光脉冲 */
+.ta-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ta-muted);
+}
+.ta-status-dot.running {
+  background: var(--ta-accent);
+  box-shadow: 0 0 10px var(--ta-accent);
+  animation: ta-pulse 1.2s infinite;
+}
+.ta-status-dot.passed {
+  background: var(--ta-ok);
+}
+.ta-status-dot.failed {
+  background: var(--ta-error);
+}
+/* 渐变标题文字 */
+.ta-welcome-h1 {
+  background: linear-gradient(90deg, #60a5fa, #22d3ee, #a78bfa);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+/* 代码块：#0a1324 底色 + #1d2b4d 边框 */
+.ta-codeblock {
+  background: #0a1324;
+  border: 1px solid #1d2b4d;
+  border-radius: 8px;
+}
+
+/* ===== 自定义滚动条（对齐 demo） ===== */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #1c2a4e;
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #253865;
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+
+/* ===== dockview 对齐 demo editor-tabs ===== */
 .dv-dockview {
   background: var(--ta-panel-2);
+  /* 覆盖 dockview 内置 tab 配色变量，对齐 demo */
+  --dv-activegroup-visiblepanel-tab-background-color: #17244a;
+  --dv-activegroup-hiddenpanel-tab-background-color: #122044;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #101b33;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #0f1a33;
+  --dv-activegroup-visiblepanel-tab-color: var(--ta-text);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--ta-muted);
+  --dv-tab-font-size: 12px;
 }
 
 .dv-groupview,
@@ -51,9 +209,18 @@ select {
 
 .dv-tab {
   font-size: 12px;
+  border-radius: 6px 6px 0 0;
+}
+.dv-tab:hover {
+  color: var(--ta-text);
+}
+.dv-tab.dv-active-tab {
+  color: var(--ta-text);
+  box-shadow: inset 0 -2px 0 var(--ta-accent);
 }
 
+/* ===== Monaco 对齐 demo 编辑器底色 ===== */
 .monaco-editor,
 .monaco-diff-editor {
-  --vscode-editor-background: #08111f;
+  --vscode-editor-background: #0a1324;
 }

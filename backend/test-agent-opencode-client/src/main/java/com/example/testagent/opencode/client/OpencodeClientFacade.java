@@ -24,4 +24,6 @@ public interface OpencodeClientFacade {
     Mono<OpencodeRejectDiffResult> rejectDiff(OpencodeRejectDiffCommand command);
 
     Mono<OpencodeRuntimeResult> runtime(OpencodeRuntimeCommand command);
+
+    Mono<OpencodeSessionMessagesResult> sessionMessages(OpencodeSessionMessagesCommand command);
 }

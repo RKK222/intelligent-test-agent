@@ -12,13 +12,13 @@ import com.example.testagent.domain.event.RunEventRepository;
 import com.example.testagent.domain.event.RunEventType;
 import com.example.testagent.domain.run.RunId;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.codec.ServerSentEvent;
 import reactor.test.StepVerifier;
-import java.time.Duration;
 
 class RunEventServicesTest {
 
@@ -71,6 +71,50 @@ class RunEventServicesTest {
     }
 
     @Test
+    void sseMapperOmitsIdForTransientEvent() {
+        RunEventDraft draft = new RunEventDraft(
+                new RunId("run_1234567890abcdef"),
+                RunEventType.MESSAGE_PART_DELTA,
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of("messageID", "msg_1", "partID", "part_1", "delta", "hello"));
+
+        ServerSentEvent<RunEventSsePayload> sse = new RunEventSseMapper()
+                .toTransientSse(RunEventSsePayload.transientFrom(draft, "evt_live_1234567890abcdef"));
+
+        assertThat(sse.id()).isNull();
+        assertThat(sse.event()).isEqualTo("message.part.delta");
+        assertThat(sse.data()).isNotNull();
+        assertThat(sse.data().eventId()).isEqualTo("evt_live_1234567890abcdef");
+        assertThat(sse.data().seq()).isZero();
+        assertThat(sse.data().payload()).containsEntry("delta", "hello");
+    }
+
+    @Test
+    void appenderPublishesDurableEventsToLiveBusAfterPersistence() {
+        FakeRunEventRepository repository = new FakeRunEventRepository();
+        RunEventLiveBus liveBus = new RunEventLiveBus();
+        RunId runId = new RunId("run_1234567890abcdef");
+        RunEventAppender appender = new RunEventAppender(repository, liveBus);
+
+        StepVerifier.create(liveBus.stream(runId).take(1))
+                .then(() -> appender.append(new RunEventDraft(
+                        runId,
+                        RunEventType.RUN_STARTED,
+                        "trace_1234567890abcdef",
+                        NOW,
+                        Map.of("status", "RUNNING"))))
+                .assertNext(event -> {
+                    RunEventSsePayload payload = event.payload();
+                    assertThat(event.durable()).isTrue();
+                    assertThat(payload.eventId()).isEqualTo("evt_1");
+                    assertThat(payload.seq()).isEqualTo(1L);
+                    assertThat(payload.type()).isEqualTo("run.started");
+                })
+                .verifyComplete();
+    }
+
+    @Test
     void sseStreamPollsRepositoryAndAdvancesCursor() {
         FakeRunEventRepository repository = new FakeRunEventRepository();
         RunEventAppender appender = new RunEventAppender(repository);
@@ -98,6 +142,37 @@ class RunEventServicesTest {
                 .assertNext(event -> {
                     assertThat(event.id()).isEqualTo("2");
                     assertThat(event.event()).isEqualTo("assistant.message.delta");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    void sseStreamMergesTransientLiveBusEventsWithoutSseId() {
+        FakeRunEventRepository repository = new FakeRunEventRepository();
+        RunEventLiveBus liveBus = new RunEventLiveBus();
+        RunId runId = new RunId("run_1234567890abcdef");
+        RunEventSseStreamService streamService = new RunEventSseStreamService(
+                new RunEventReplayService(repository),
+                new RunEventSseMapper(),
+                liveBus);
+
+        StepVerifier.create(streamService.streamAfter(
+                        runId,
+                        "0",
+                        Duration.ofSeconds(30),
+                        50).take(1))
+                .then(() -> liveBus.publishTransient(new RunEventDraft(
+                        runId,
+                        RunEventType.MESSAGE_PART_DELTA,
+                        "trace_1234567890abcdef",
+                        NOW,
+                        Map.of("messageID", "msg_1", "partID", "part_1", "delta", "hello"))))
+                .assertNext(event -> {
+                    assertThat(event.id()).isNull();
+                    assertThat(event.event()).isEqualTo("message.part.delta");
+                    assertThat(event.data()).isNotNull();
+                    assertThat(event.data().seq()).isZero();
+                    assertThat(event.data().payload()).containsEntry("delta", "hello");
                 })
                 .verifyComplete();
     }

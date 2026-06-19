@@ -27,6 +27,7 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 - `OpencodeDiffCommand` / `OpencodeDiffResult`：封装 opencode `sessionDiff`，不泄露 `SnapshotFileDiff`。
 - `OpencodeRejectDiffCommand` / `OpencodeRejectDiffResult`：封装 opencode `sessionRevert`，用于 Run 级拒绝 Diff。
 - `OpencodeRuntimeCommand` / `OpencodeRuntimeResult`：Phase 11 运行态通用 facade 命令，用于受控访问 opencode Web App 需要的 agent/model/provider/command/reference、session、permission、question、fs/vcs/lsp/mcp status/resources/tools 等 HTTP API；返回 Jackson `JsonNode`，不泄露 generated DTO。
+- `OpencodeSessionMessagesCommand` / `OpencodeSessionMessagesResult`：封装 generated `MessagesApi.v2SessionMessages`，读取 opencode projected messages 供断线/刷新后恢复消息内容，不向业务模块暴露 generated DTO。
 
 ## 允许依赖
 
@@ -47,6 +48,6 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 新增 opencode server 调用、错误映射、事件映射时改这里。除本模块外，不要让其他业务模块直接 import `com.example.opencode.sdk.*`。
 opencode 1.17.8 的 Run 终态既可能来自旧的 `session.next.step.ended`，也可能来自 `session.status` 的 `idle` 状态或 `session.idle`；这些 raw event 必须统一映射为平台 `run.succeeded`，避免前端 Run 长时间停在 `RUNNING`。
 Phase 11 Web App 复刻新增识别 `message.updated`、`message.part.updated`、`message.part.delta`、`todo.updated`、`permission.*`、`question.*`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed` 等 opencode App 运行态事件，同时保留旧 `assistant.message.delta`、`tool.*`、`diff.*` 兼容事件。
-Facade 对外方法不得返回 generated SDK DTO，新增方法必须同步测试成功、超时、远端错误和 traceId 透传。`workspace` query 仅在后续接入真实 opencode workspace/control-plane 时传入；本地模式默认只传 `directory`。`prompt_async` 的 `text/file/agent` parts 必须通过 `OpencodePromptPart` 传入，generated union DTO 只允许留在本模块内部或用稳定 JSON 请求体替代。
+Facade 对外方法不得返回 generated SDK DTO，新增方法必须同步测试成功、超时、远端错误和 traceId 透传。`workspace` query 仅在后续接入真实 opencode workspace/control-plane 时传入；本地模式默认只传 `directory`。`prompt_async` 的 `text/file/agent` parts 必须通过 `OpencodePromptPart` 传入，generated union DTO 只允许留在本模块内部或用稳定 JSON 请求体替代。session messages 只能通过 facade 平台 DTO 输出，用于 runtime 恢复消息投影。
 generated `SessionApi` 中存在和 model 同名的参数包装类时，必须在本模块内用 `ApiClient.invokeAPI` 做安全适配，不能手改 generated SDK。
 Phase 11 runtime facade 是 `test-agent-opencode-runtime` 访问 opencode 的唯一入口；`test-agent-api` Controller 和业务模块仍不得 import generated SDK。

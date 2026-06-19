@@ -6,7 +6,7 @@
 
 1. 先读 `docs/README.md`，确认任务类型对应的规范文档。
 2. 后端任务读 `backend/README.md`、目标模块 `README.md`、目标包 `PACKAGE.md`。
-3. 前端任务读 `docs/frontend/*.md`；前端是完全自研 Web IDE，未来创建 `frontend/` 后，还必须读对应 workspace、app、package 的 `README.md` 和包级说明。
+3. 前端任务读 `docs/frontend/*.md`；前端是完全自研 Web IDE，必须读对应 workspace、app、package 的 `README.md` 和包级说明。
 4. API、事件、数据库、安全、性能相关任务必须读对应 `docs/api/`、`docs/backend/`、`docs/security/`、`docs/architecture/` 文档。
 5. 分阶段实施任务必须先读 `docs/implementation-plan.md` 和 `docs/plan/` 下对应阶段计划。
 
@@ -38,3 +38,4 @@
 - 哪些文档已同步更新。
 - 是否涉及 API、事件、数据库、性能、安全或兼容性。
 - 是否存在未完成事项或风险。
+- 完成后必须自动提交git且commit信息用中文。

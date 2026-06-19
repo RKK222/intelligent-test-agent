@@ -13,11 +13,11 @@ export function Badge({
   className?: string;
 }) {
   const toneClass = {
-    neutral: "bg-slate-800 text-slate-300",
-    info: "bg-blue-950 text-blue-200",
-    success: "bg-emerald-950 text-emerald-200",
-    warning: "bg-amber-950 text-amber-200",
-    danger: "bg-red-950 text-red-200"
+    neutral: "bg-[rgba(148,163,184,.14)] text-[#cbd5e1]",
+    info: "bg-[rgba(96,165,250,.15)] text-[#8db6f5]",
+    success: "bg-[rgba(34,197,94,.14)] text-[#86efac]",
+    warning: "bg-[rgba(245,158,11,.15)] text-[#fcd34d]",
+    danger: "bg-[rgba(239,68,68,.14)] text-[#fca5a5]"
   }[tone];
   return <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium", toneClass, className)}>{children}</span>;
 }

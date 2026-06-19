@@ -68,4 +68,12 @@ public interface OpencodeSdkGateway {
             java.util.Map<String, String> query,
             Object body,
             String traceId);
+
+    Mono<OpencodeSessionMessagesResult> sessionMessages(
+            ExecutionNode node,
+            String opencodeSessionId,
+            int limit,
+            String order,
+            String cursor,
+            String traceId);
 }

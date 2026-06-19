@@ -162,13 +162,13 @@
   - 已新增 `tools/dev-phase11-real-e2e.sh`，支持默认复用服务、`--start-services` 启动缺失依赖、日志目录和 Docker daemon 预检。
   - 已新增 `frontend/playwright.real.config.ts` 和 `frontend` 的 `e2e:real` 命令，默认 `corepack pnpm e2e` 仍只运行 mock `*.spec.ts`。
   - 已新增 `workbench.real-spec.ts`，通过平台 API 创建 workspace/session/run，再用浏览器 WebSocket 连接 terminal ticket 并验证 stdout 与 ticket 重用拒绝。
-  - 当前本机 `tools/dev-phase11-real-e2e.sh --start-services` 阻塞在 Docker daemon 未运行，无法启动本地 Postgres，因此真实三服务验收尚未标记完成。
+  - 当前真实三服务 E2E 尚无最新通过记录；需要重新运行 `tools/dev-phase11-real-e2e.sh --start-services` 后，以最新日志记录精确阻塞点、端口、健康检查结果和统一错误码。
 - 执行步骤：
   - 第一步已完成：`tools/dev-phase11-real-e2e.sh --help` 只输出用法和依赖，不读取或打印 `.env.local`、`.env.test` 中的敏感值；脚本默认复用现有服务，显式传入 `--start-services` 时才启动缺失依赖。
   - 第二步已完成：`frontend/playwright.real.config.ts` 只匹配 `**/*.real-spec.ts`，避免影响 `corepack pnpm e2e` 的 mock 快速回归。
   - 第三步已完成：`workbench.real-spec.ts` 通过后端 API 创建临时 workspace/session，触发一次真实 `POST /api/runs` 建立 opencode session 映射，然后创建 terminal ticket，在浏览器上下文中连接 WebSocket，发送 `printf phase11-real-e2e`，断言收到 stdout，再关闭连接并验证同一 ticket 重连失败。
   - 第四步已完成：真实套件已接入 `frontend/package.json` 的 `e2e:real`，脚本执行 `cd frontend && corepack pnpm e2e:real`；脚本失败时保留 `.tmp/phase11-real-e2e/` 下的服务日志和 Playwright trace。
-  - 第五步待完成：启动 Docker daemon 或手动提供可用 PostgreSQL/backend 后，重新运行 `tools/dev-phase11-real-e2e.sh --start-services`。若真实 opencode server 因本机 provider/model 配置缺失无法建立 session 映射，必须在脚本输出和本计划中记录精确阻塞点、端口、健康检查结果和后端统一错误码，不得把该场景标记为完成。
+  - 第五步待完成：重新运行 `tools/dev-phase11-real-e2e.sh --start-services`。若 Docker、PostgreSQL、后端启动、opencode server、provider/model 配置或 session 映射阻塞真实验收，必须在脚本输出和本计划中记录精确阻塞点、端口、健康检查结果、日志路径和后端统一错误码，不得把该场景标记为完成。
 - 验收：
   - `tools/dev-phase11-real-e2e.sh --help` 通过，且输出不包含密钥或环境变量值。
   - 快速套件：`cd frontend && corepack pnpm e2e` 通过。
@@ -213,7 +213,7 @@
 - [x] PTY 补齐 active session 约束，并覆盖 WebSocket handler 级 origin 拒绝、active 冲突和进程启动失败释放测试。
 - [x] PTY 补齐 ticket 创建限流、输入限速、审计日志、idle/hard timeout、输出截断和 WebSocket handler 级 input/close 测试。
 - [ ] 本地前端、后端、opencode server 三服务联调 E2E 可执行。
-- [ ] 每批改动同步 README/PACKAGE、API、前后端契约和测试说明文档。
+- [x] 每批改动同步 README/PACKAGE、API、前后端契约和测试说明文档；本次文档-only 收口已补齐前端包级说明、frontend architecture/testing、PTY 安全/架构状态和实验目录范围。
 
 ## 验证方式
 

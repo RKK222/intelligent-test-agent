@@ -4,6 +4,7 @@ import com.example.testagent.domain.event.RunEvent;
 import com.example.testagent.domain.event.RunEventDraft;
 import com.example.testagent.domain.event.RunEventRepository;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -13,12 +14,23 @@ import org.springframework.stereotype.Service;
 public class RunEventAppender {
 
     private final RunEventRepository runEventRepository;
+    private final RunEventLiveBus liveBus;
 
     public RunEventAppender(RunEventRepository runEventRepository) {
+        this(runEventRepository, null);
+    }
+
+    @Autowired
+    public RunEventAppender(RunEventRepository runEventRepository, RunEventLiveBus liveBus) {
         this.runEventRepository = Objects.requireNonNull(runEventRepository, "runEventRepository must not be null");
+        this.liveBus = liveBus;
     }
 
     public RunEvent append(RunEventDraft draft) {
-        return runEventRepository.append(Objects.requireNonNull(draft, "draft must not be null"));
+        RunEvent event = runEventRepository.append(Objects.requireNonNull(draft, "draft must not be null"));
+        if (liveBus != null) {
+            liveBus.publishDurable(event);
+        }
+        return event;
     }
 }

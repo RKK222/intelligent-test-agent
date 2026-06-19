@@ -75,7 +75,7 @@ export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventS
     if (!parsed) {
       return;
     }
-    const key = `${parsed.runId}:${parsed.seq}`;
+    const key = parsed.eventId.trim().length > 0 ? `event:${parsed.eventId}` : `seq:${parsed.runId}:${parsed.seq}`;
     if (seen.has(key)) {
       return;
     }
@@ -115,11 +115,15 @@ function runEventsUrl(baseUrl: string, runId: string, lastEventId?: string) {
 export function parseRunEvent(data: string): RunEvent | null {
   try {
     const value = JSON.parse(data) as Partial<RunEvent>;
-    if (!value.eventId || !value.runId || typeof value.seq !== "number" || !value.type) {
+    if (!value.runId || typeof value.seq !== "number" || !value.type) {
       return null;
     }
+    const eventId =
+      typeof value.eventId === "string" && value.eventId.trim().length > 0
+        ? value.eventId
+        : `${value.runId}:${value.seq}`;
     return {
-      eventId: value.eventId,
+      eventId,
       runId: value.runId,
       seq: value.seq,
       type: value.type,

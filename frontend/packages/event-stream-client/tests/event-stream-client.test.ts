@@ -44,7 +44,7 @@ describe("event-stream-client", () => {
     ).toMatchObject({ eventId: "evt_1", type: "run.started" });
   });
 
-  it("deduplicates events by run id and seq and closes listeners", () => {
+  it("deduplicates by event id first and allows transient seq zero events", () => {
     const source = new FakeEventSource();
     const received: string[] = [];
     const statuses: string[] = [];
@@ -59,9 +59,23 @@ describe("event-stream-client", () => {
 
     source.onopen?.(new Event("open"));
     source.emit("run.started", { eventId: "evt_1", runId: "run_1", seq: 1, type: "run.started", payload: {} });
-    source.emit("run.started", { eventId: "evt_duplicate", runId: "run_1", seq: 1, type: "run.started", payload: {} });
+    source.emit("run.started", { eventId: "evt_1", runId: "run_1", seq: 99, type: "run.started", payload: {} });
+    source.emit("message.part.delta", {
+      eventId: "evt_live_1",
+      runId: "run_1",
+      seq: 0,
+      type: "message.part.delta",
+      payload: { delta: "hel" }
+    });
+    source.emit("message.part.delta", {
+      eventId: "evt_live_2",
+      runId: "run_1",
+      seq: 0,
+      type: "message.part.delta",
+      payload: { delta: "lo" }
+    });
 
-    expect(received).toEqual(["evt_1"]);
+    expect(received).toEqual(["evt_1", "evt_live_1", "evt_live_2"]);
     expect(statuses).toEqual(["connecting", "open"]);
 
     subscription.close();

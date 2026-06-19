@@ -6,7 +6,7 @@
 
 ## 主要程序清单
 
-- `index.ts`：`subscribeRunEvents`、`parseRunEvent`、已知事件类型列表；浏览器 EventSource 续传使用 `lastEventId` query 参数。
+- `index.ts`：`subscribeRunEvents`、`parseRunEvent`、已知事件类型列表；浏览器 EventSource 续传使用 `lastEventId` query 参数；事件去重优先使用 payload `eventId`，兼容旧事件时回退 `runId + seq`。
 
 ## 允许依赖
 

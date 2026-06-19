@@ -16,6 +16,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -202,6 +203,39 @@ class DefaultOpencodeClientFacadeTest {
         assertThat(gateway.lastMessageId).isEqualTo("msg_remote1234567890abcdef");
     }
 
+    @Test
+    void facadeReadsSessionMessagesWithoutLeakingGeneratedDtos() {
+        FakeGateway gateway = new FakeGateway();
+        gateway.sessionMessagesResult = new OpencodeSessionMessagesResult(
+                List.of(new OpencodeSessionMessage(
+                        Map.of("id", "msg_remote1234567890abcdef", "type", "assistant"),
+                        List.of(Map.of("id", "part_1", "messageID", "msg_remote1234567890abcdef", "type", "text", "text", "hello")))),
+                "previous_cursor",
+                "next_cursor");
+        OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);
+
+        OpencodeSessionMessagesResult result = facade.sessionMessages(new OpencodeSessionMessagesCommand(
+                node(),
+                "ses_remote1234567890abcdef",
+                100,
+                "asc",
+                null,
+                "trace_1234567890abcdef")).block();
+
+        assertThat(result.previousCursor()).isEqualTo("previous_cursor");
+        assertThat(result.nextCursor()).isEqualTo("next_cursor");
+        assertThat(result.messages()).singleElement().satisfies(message -> {
+            assertThat(message.message()).containsEntry("id", "msg_remote1234567890abcdef");
+            assertThat(message.parts()).singleElement().satisfies(part ->
+                    assertThat(part).containsEntry("text", "hello"));
+        });
+        assertThat(gateway.lastTraceId).isEqualTo("trace_1234567890abcdef");
+        assertThat(gateway.lastOpencodeSessionId).isEqualTo("ses_remote1234567890abcdef");
+        assertThat(gateway.lastLimit).isEqualTo(100);
+        assertThat(gateway.lastOrder).isEqualTo("asc");
+        assertThat(gateway.lastCursor).isNull();
+    }
+
     private static OpencodeClientFacade facade(FakeGateway gateway, Duration timeout, int maxRetries) {
         return new DefaultOpencodeClientFacade(
                 gateway,
@@ -246,7 +280,11 @@ class DefaultOpencodeClientFacadeTest {
         private String lastWorkspace;
         private String lastTitle;
         private String lastMessageId;
+        private int lastLimit;
+        private String lastOrder;
+        private String lastCursor;
         private List<OpencodePromptPart> lastParts = List.of();
+        private OpencodeSessionMessagesResult sessionMessagesResult = new OpencodeSessionMessagesResult(List.of(), null, null);
 
         @Override
         public Mono<OpencodeHealthResult> health(ExecutionNode node, String traceId) {
@@ -369,6 +407,22 @@ class DefaultOpencodeClientFacadeTest {
             lastDirectory = directory;
             lastWorkspace = workspace;
             return Mono.just(new OpencodeRuntimeResult(new ObjectMapper().createObjectNode()));
+        }
+
+        @Override
+        public Mono<OpencodeSessionMessagesResult> sessionMessages(
+                ExecutionNode node,
+                String opencodeSessionId,
+                int limit,
+                String order,
+                String cursor,
+                String traceId) {
+            lastTraceId = traceId;
+            lastOpencodeSessionId = opencodeSessionId;
+            lastLimit = limit;
+            lastOrder = order;
+            lastCursor = cursor;
+            return Mono.just(sessionMessagesResult);
         }
 
         private String lastPrompt;

@@ -1,6 +1,7 @@
 package com.example.testagent.event;
 
 import com.example.testagent.domain.event.RunEvent;
+import com.example.testagent.domain.event.RunEventDraft;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -20,8 +21,8 @@ public record RunEventSsePayload(
     public RunEventSsePayload {
         eventId = Objects.requireNonNull(eventId, "eventId must not be null");
         runId = Objects.requireNonNull(runId, "runId must not be null");
-        if (seq <= 0) {
-            throw new IllegalArgumentException("seq must be greater than 0");
+        if (seq < 0) {
+            throw new IllegalArgumentException("seq must not be negative");
         }
         type = Objects.requireNonNull(type, "type must not be null");
         traceId = Objects.requireNonNull(traceId, "traceId must not be null");
@@ -39,5 +40,17 @@ public record RunEventSsePayload(
                 event.traceId(),
                 event.occurredAt(),
                 event.payload());
+    }
+
+    public static RunEventSsePayload transientFrom(RunEventDraft draft, String eventId) {
+        Objects.requireNonNull(draft, "draft must not be null");
+        return new RunEventSsePayload(
+                eventId,
+                draft.runId().value(),
+                0L,
+                draft.type().wireName(),
+                draft.traceId(),
+                draft.occurredAt(),
+                draft.payload());
     }
 }

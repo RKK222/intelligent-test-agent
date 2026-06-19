@@ -133,8 +133,8 @@ export function DiffViewer({
               key={file.path}
               type="button"
               className={cn(
-                "mb-1 flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-2 text-left hover:bg-slate-800",
-                selected?.path === file.path && "border-blue-900 bg-blue-950/60"
+                "mb-1 flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-2 text-left hover:bg-[#13203f]",
+                selected?.path === file.path && "border-[#1d4ed8] bg-[rgba(96,165,250,.12)]"
               )}
               onClick={() => onSelectFile(file.path)}
             >
@@ -150,8 +150,8 @@ export function DiffViewer({
                   key={`${hunk.filePath}:${hunk.index}`}
                   type="button"
                   className={cn(
-                    "mb-1 w-full rounded-md border border-transparent px-2 py-1.5 text-left text-[11px] hover:bg-slate-800",
-                    selectedHunk?.index === hunk.index && "border-cyan-900 bg-cyan-950/40"
+                    "mb-1 w-full rounded-md border border-transparent px-2 py-1.5 text-left text-[11px] hover:bg-[#13203f]",
+                    selectedHunk?.index === hunk.index && "border-[rgba(34,211,238,.4)] bg-[rgba(34,211,238,.08)]"
                   )}
                   onClick={() => setSelectedHunkIndex(hunk.index)}
                 >
