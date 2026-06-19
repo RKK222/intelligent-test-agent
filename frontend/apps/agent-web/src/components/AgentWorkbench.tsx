@@ -66,6 +66,7 @@ function WorkbenchRuntime() {
   const [feedback, setFeedback] = React.useState<Feedback | null>(null);
   const [sessionSearch, setSessionSearch] = React.useState("");
   const [followUpQueue, setFollowUpQueue] = React.useState<FollowUpDraft[]>([]);
+  const [diffContextParts, setDiffContextParts] = React.useState<PromptPart[]>([]);
 
   const { tabs, activePath, selectedDiffPath, openTab, closeTab, updateTabContent, markTabSaved, setActivePath, setSelectedDiffPath } =
     useWorkbenchStore();
@@ -429,9 +430,10 @@ function WorkbenchRuntime() {
   }
 
   function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
-    const parts = buildPromptParts(prompt, activeTab, attachments);
+    const parts = buildPromptParts(prompt, activeTab, attachments, diffContextParts);
     const displayPrompt = prompt.trim() || promptFromParts(parts);
     setLastPrompt(displayPrompt);
+    setDiffContextParts([]);
     dispatchChat({ type: "user.submitted", prompt: displayPrompt, parts });
     const command = parseCommand(prompt, promptMode);
     const busy = isRunBusyStatus(run?.status) || startRunMutation.isPending || commandMutation.isPending;
@@ -564,6 +566,10 @@ function WorkbenchRuntime() {
             description: `${path} 当前版本只支持 Run 级提交`
           })
         }
+        onUseHunkContext={(part) => {
+          setDiffContextParts((current) => [...current, part]);
+          setFeedback({ kind: "info", title: "已引用当前 hunk", description: `${part.path ?? part.name} 将随下一条 Prompt 提交` });
+        }}
       />
     ) : (
       <EditorPane
@@ -777,9 +783,11 @@ function modelIdOnly(value: string) {
 function buildPromptParts(
   prompt: string,
   activeTab: { path: string; content: string } | undefined,
-  attachments: ComposerAttachment[] = []
+  attachments: ComposerAttachment[] = [],
+  extraParts: PromptPart[] = []
 ): PromptPart[] {
   const parts = buildComposerPromptParts(prompt, attachments);
+  parts.push(...extraParts);
   if (activeTab?.path) {
     parts.push({
       type: "file",

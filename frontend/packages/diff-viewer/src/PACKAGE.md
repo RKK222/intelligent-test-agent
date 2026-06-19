@@ -7,6 +7,7 @@
 ## 主要程序清单
 
 - `DiffViewer.tsx`：Monaco Diff 和动作栏。
+- `hunks.ts`：从 unified patch 提取 hunk 范围、循环导航和 hunk 到 `PromptPart` file context 的转换。
 - `unifiedPatch.ts`：统一 diff patch 到 original/modified 文本的轻量转换。
 
 ## 允许依赖

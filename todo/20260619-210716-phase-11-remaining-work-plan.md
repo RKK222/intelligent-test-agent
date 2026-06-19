@@ -3,7 +3,7 @@
 ## 背景
 
 - 用户问题：在已提交 Phase 11 主路径能力后，需要明确剩余未完成内容，并形成后续可执行计划。
-- 当前现象：最近提交已完成 opencode Web runtime 主链路、PromptPart 后端透传、Session 全局搜索/置顶/软删除、runtime selector、permission/question、Todo、Diff 来源切换、MCP/LSP/VCS 状态和只读 transcript；本批次补齐了文件/图片附件与 busy follow-up 本地 FIFO 队列；仍缺 Diff hunk review、Diff/Monaco 选区上下文、PTY WebSocket 安全前置和 Playwright E2E 闭环。
+- 当前现象：最近提交已完成 opencode Web runtime 主链路、PromptPart 后端透传、Session 全局搜索/置顶/软删除、runtime selector、permission/question、Todo、Diff 来源切换、MCP/LSP/VCS 状态和只读 transcript；本批次补齐了文件/图片附件、busy follow-up 本地 FIFO 队列、Diff hunk 导航和 hunk context；仍缺 Monaco 任意选区上下文、PTY WebSocket 安全前置和 Playwright E2E 闭环。
 - 目标：按 P0/P1/P2 风险顺序补完 Phase 11，保持前端只走 `backend-api` 和 RunEvent SSE、后端只走 `test-agent-opencode-client` facade 的边界。
 
 ## 范围
@@ -53,7 +53,7 @@
   - abort 继续复用现有 cancel/abort API；排队消息需要在 UI 中立即出现为用户消息，但出队执行时不得重复插入。
 - 原因：补齐 opencode Web App 的多 part prompt 与 busy follow-up 行为，同时继续保持前端不直连 opencode。
 
-### 2. Diff Review hunk 导航和选区上下文
+### 2. Diff Review hunk 导航和选区上下文（hunk 已完成）
 
 - 修改文件：
   - `frontend/packages/diff-viewer/src/DiffViewer.tsx`
@@ -115,7 +115,8 @@
 
 - [x] prompt composer 支持文本文件、图片附件、删除附件和当前编辑器上下文，提交 payload 中包含正确 `PromptPart`。
 - [x] run 忙碌时 follow-up 按 FIFO 排队，当前 run 终态后自动提交下一条，UI 不重复插入用户消息。
-- [ ] Diff viewer 支持 Run/Session/VCS 来源、split/unified、文件导航、hunk 导航和选区上下文；只有 Run 级 accept/reject 触发后端落盘 API。
+- [x] Diff viewer 支持 Run/Session/VCS 来源、split/unified、文件导航、hunk 导航和 hunk context；只有 Run 级 accept/reject 触发后端落盘 API。
+- [ ] Monaco 任意文本选区可转换为下一条 Prompt 的 file context。
 - [ ] PTY 代码实现前，`docs/architecture/pty-websocket-design.md` 与 `docs/security/security-standards.md` 已定义安全例外。
 - [ ] Playwright 覆盖 Phase 11 主流程，本地前端、后端、opencode server 联调环境可执行。
 - [ ] 每批改动同步 README/PACKAGE、API、前后端契约和测试说明文档。

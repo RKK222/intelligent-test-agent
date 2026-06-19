@@ -1,10 +1,11 @@
 "use client";
 
 import { DiffEditor as MonacoDiffEditor } from "@monaco-editor/react";
-import { Check, RotateCcw } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, MessageSquareQuote, RotateCcw } from "lucide-react";
 import * as React from "react";
-import type { RunDiffFile } from "@test-agent/shared-types";
+import type { PromptPart, RunDiffFile } from "@test-agent/shared-types";
 import { Badge, Button, FeedbackBanner, type Feedback, cn } from "@test-agent/ui-kit";
+import { hunkToPromptPart, parseDiffHunks, selectAdjacentHunk, type DiffHunk } from "./hunks";
 import { parseUnifiedPatch } from "./unifiedPatch";
 
 export type DiffViewerProps = {
@@ -22,6 +23,7 @@ export type DiffViewerProps = {
   onAcceptRun: () => void;
   onRejectRun: () => void;
   onCurrentFileFeedback: (action: "accept-current" | "reject-current", path: string) => void;
+  onUseHunkContext?: (part: Extract<PromptPart, { type: "file" }>) => void;
 };
 
 export function DiffViewer({
@@ -38,10 +40,42 @@ export function DiffViewer({
   onRefresh,
   onAcceptRun,
   onRejectRun,
-  onCurrentFileFeedback
+  onCurrentFileFeedback,
+  onUseHunkContext
 }: DiffViewerProps) {
   const selected = React.useMemo(() => files.find((file) => file.path === selectedPath) ?? files[0], [files, selectedPath]);
   const parsed = React.useMemo(() => parseUnifiedPatch(selected?.patch ?? ""), [selected?.patch]);
+  const hunks = React.useMemo(() => (selected ? parseDiffHunks(selected) : []), [selected]);
+  const [selectedHunkIndex, setSelectedHunkIndex] = React.useState(0);
+  const selectedHunk = hunks[selectedHunkIndex] ?? hunks[0];
+  const diffEditorRef = React.useRef<MinimalDiffEditor | null>(null);
+
+  React.useEffect(() => {
+    setSelectedHunkIndex(0);
+  }, [selected?.path, selected?.patch]);
+
+  React.useEffect(() => {
+    if (selectedHunkIndex >= hunks.length) {
+      setSelectedHunkIndex(0);
+    }
+  }, [hunks.length, selectedHunkIndex]);
+
+  React.useEffect(() => {
+    if (!selectedHunk || !diffEditorRef.current) {
+      return;
+    }
+    const modified = diffEditorRef.current.getModifiedEditor();
+    const lineNumber = Math.max(1, selectedHunk.newStart);
+    modified.revealLineInCenter(lineNumber);
+    modified.setPosition({ lineNumber, column: 1 });
+  }, [selectedHunk]);
+
+  function moveHunk(direction: "previous" | "next") {
+    const next = selectAdjacentHunk(hunks, selectedHunkIndex, direction);
+    if (next) {
+      setSelectedHunkIndex(next.index);
+    }
+  }
 
   if (!files.length) {
     return (
@@ -69,6 +103,14 @@ export function DiffViewer({
           onRefresh={onRefresh}
         />
         <div className="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-200">{sourceTitle(source)}</div>
+        <HunkToolbar
+          hunks={hunks}
+          selectedHunk={selectedHunk}
+          onPrevious={() => moveHunk("previous")}
+          onNext={() => moveHunk("next")}
+          onUseContext={() => selected && selectedHunk && onUseHunkContext?.(hunkToPromptPart(selected, selectedHunk))}
+          canUseContext={Boolean(onUseHunkContext && selected && selectedHunk)}
+        />
         <Button size="sm" variant="secondary" disabled={!selected} onClick={() => selected && onCurrentFileFeedback("accept-current", selected.path)}>
           当前文件接受
         </Button>
@@ -100,6 +142,25 @@ export function DiffViewer({
               <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-slate-200">{file.path}</span>
             </button>
           ))}
+          {hunks.length ? (
+            <div className="mt-3 border-t border-slate-800 pt-2">
+              <div className="mb-1 px-1 text-[11px] font-semibold uppercase text-slate-500">Hunks</div>
+              {hunks.map((hunk) => (
+                <button
+                  key={`${hunk.filePath}:${hunk.index}`}
+                  type="button"
+                  className={cn(
+                    "mb-1 w-full rounded-md border border-transparent px-2 py-1.5 text-left text-[11px] hover:bg-slate-800",
+                    selectedHunk?.index === hunk.index && "border-cyan-900 bg-cyan-950/40"
+                  )}
+                  onClick={() => setSelectedHunkIndex(hunk.index)}
+                >
+                  <div className="font-mono text-slate-200">+{hunk.newStart},{hunk.newLines}</div>
+                  <div className="truncate text-slate-500">{hunk.heading || hunk.patch.split("\n")[0]}</div>
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="min-w-0">
           <MonacoDiffEditor
@@ -117,10 +178,53 @@ export function DiffViewer({
               fontSize: 13,
               lineHeight: 21
             }}
+            onMount={(editor) => {
+              diffEditorRef.current = editor as MinimalDiffEditor;
+            }}
           />
         </div>
       </div>
       <FeedbackBanner feedback={feedback} />
+    </div>
+  );
+}
+
+type MinimalDiffEditor = {
+  getModifiedEditor: () => {
+    revealLineInCenter: (lineNumber: number) => void;
+    setPosition: (position: { lineNumber: number; column: number }) => void;
+  };
+};
+
+function HunkToolbar({
+  hunks,
+  selectedHunk,
+  canUseContext,
+  onPrevious,
+  onNext,
+  onUseContext
+}: {
+  hunks: DiffHunk[];
+  selectedHunk?: DiffHunk;
+  canUseContext: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+  onUseContext: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <Button type="button" size="icon" variant="secondary" title="上一处 hunk" disabled={hunks.length === 0} onClick={onPrevious}>
+        <ChevronUp className="h-4 w-4" />
+      </Button>
+      <Button type="button" size="icon" variant="secondary" title="下一处 hunk" disabled={hunks.length === 0} onClick={onNext}>
+        <ChevronDown className="h-4 w-4" />
+      </Button>
+      <span className="min-w-[52px] text-center font-mono text-[11px] text-slate-500">
+        {selectedHunk ? `${selectedHunk.index + 1}/${hunks.length}` : "0/0"}
+      </span>
+      <Button type="button" size="icon" variant="secondary" title="引用 hunk" disabled={!canUseContext} onClick={onUseContext}>
+        <MessageSquareQuote className="h-4 w-4" />
+      </Button>
     </div>
   );
 }
