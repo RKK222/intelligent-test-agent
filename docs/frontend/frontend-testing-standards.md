@@ -13,6 +13,7 @@ corepack pnpm typecheck
 corepack pnpm test
 corepack pnpm build
 corepack pnpm e2e
+corepack pnpm e2e:real
 ```
 
 本机 `pnpm` 可能不在 PATH，前端命令统一通过 Corepack 调用。
@@ -57,7 +58,8 @@ Phase 11 当前已落地的测试重点：
 - Vitest 覆盖 prompt 附件到 `PromptPart` 的转换、follow-up FIFO 队列、Diff hunk 解析/导航、编辑器选区上下文、terminal ticket client 和 PTY WebSocket envelope。
 - Playwright 只匹配 `*.spec.ts`，避免误加载 app 目录下的 Vitest `*.test.tsx`。
 - Playwright mock 平台后端 API 和 RunEvent SSE，覆盖文件/图片附件提交、permission dock、question dock、Diff 卡片、hunk 导航入口、hunk context 反馈和 terminal ticket 创建入口。
-- 真实 `test-agent-app`、前端和 opencode server 三服务联调 E2E 仍作为发布前验收项，不能用 mock E2E 替代。
+- `frontend/playwright.real.config.ts` 只匹配 `*.real-spec.ts`，`corepack pnpm e2e:real` 必须配合真实 `test-agent-app`、前端和 opencode server 使用，不能用 mock E2E 替代。
+- `tools/dev-phase11-real-e2e.sh` 是 Phase 11 真实三服务验收入口：默认复用已有服务，`--start-services` 会先启动本地 Postgres、opencode server 和后端，再由 Playwright 管理前端 dev server；脚本日志保留在 `.tmp/phase11-real-e2e/`，不得打印 dotenv 敏感值。
 
 ## Mock 原则
 
@@ -66,6 +68,7 @@ Phase 11 当前已落地的测试重点：
 3. 组件测试应优先从用户交互出发，避免只断言内部状态。
 4. API 类型测试必须覆盖新增字段和旧字段兼容场景。
 5. E2E mock 必须使用 `docs/api/backend-api.md` 中记录的后端 DTO 字段，例如文件列表使用 `directory` 而不是前端展示态 `type`。
+6. 真实 E2E 必须通过 `backend-api` 和平台 WebSocket/SSE 入口验证，不得让前端或测试代码直连 opencode 公网 share API。
 
 ## 完成标准
 
