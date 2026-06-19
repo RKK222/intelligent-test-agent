@@ -425,7 +425,7 @@ WebSocket 消息使用 JSON envelope：
 { "type": "error", "code": "PTY_DENIED", "message": "..." }
 ```
 
-当前后端已覆盖 ticket、Origin、session/workspace/cwd、单次使用和单条 input 16KB 上限。前端 terminal package、每 session active PTY 限制、完整审计日志、idle/hard timeout、输入限速和三服务 E2E 仍是后续完成项。
+当前已覆盖后端 ticket、Origin、session/workspace/cwd、单次使用、单条 input 16KB 上限和前端 terminal package 基础接入。每 session active PTY 限制、完整审计日志、idle/hard timeout、输入限速、输出截断和三服务 E2E 仍是后续完成项。
 
 ### Diff API
 

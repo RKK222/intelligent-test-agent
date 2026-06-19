@@ -17,7 +17,8 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
   const runRequests: Array<Record<string, unknown>> = [];
   const permissionReplies: Array<Record<string, unknown>> = [];
   const questionReplies: Array<Record<string, unknown>> = [];
-  await mockBackendApi(page, { runRequests, permissionReplies, questionReplies });
+  const terminalTickets: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, { runRequests, permissionReplies, questionReplies, terminalTickets });
 
   await page.goto("/");
 
@@ -56,6 +57,11 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
   await expect(page.getByText("+1,2")).toBeVisible();
   await page.getByTitle("引用 hunk").click();
   await expect(page.getByRole("main").getByText("已引用当前 hunk")).toBeVisible();
+
+  await page.getByRole("button", { name: "终端" }).click();
+  await page.getByRole("button", { name: "连接终端" }).click();
+  await expect.poll(() => terminalTickets.length).toBe(1);
+  expect(terminalTickets[0]).toEqual({ workspaceId: "wrk_1234567890abcdef", cols: 120, rows: 32 });
 });
 
 async function mockBackendApi(
@@ -64,6 +70,7 @@ async function mockBackendApi(
     runRequests?: Array<Record<string, unknown>>;
     permissionReplies?: Array<Record<string, unknown>>;
     questionReplies?: Array<Record<string, unknown>>;
+    terminalTickets?: Array<Record<string, unknown>>;
   } = {}
 ) {
   await page.route("**/api/**", async (route) => {
@@ -177,6 +184,15 @@ async function mockBackendApi(
     if (method === "POST" && url.pathname === "/api/sessions/ses_1/questions/ques_1/reply") {
       capture.questionReplies?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await route.fulfill(json({ accepted: true }));
+      return;
+    }
+    if (method === "POST" && url.pathname === "/api/sessions/ses_1/terminal/tickets") {
+      capture.terminalTickets?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+      await route.fulfill(json({
+        ticket: "pty_123",
+        expiresAt: "2026-06-19T13:00:00Z",
+        webSocketUrl: "/api/sessions/ses_1/terminal/ws?ticket=pty_123"
+      }));
       return;
     }
     await route.fulfill(json({}));

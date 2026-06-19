@@ -9,7 +9,7 @@
 - `app/layout.tsx`：全局页面壳与元信息。
 - `app/page.tsx`：工作台首页入口。
 - `app/s/[sessionId]/page.tsx`：只读 transcript 页面入口，复用平台 session/messages API。
-- `components/AgentWorkbench.tsx`：组合 workspace、文件树、编辑器、Agent、RunEvent SSE、Session History 搜索/置顶/删除、prompt 附件/follow-up 队列、编辑器选区上下文和 Diff 操作。
+- `components/AgentWorkbench.tsx`：组合 workspace、文件树、编辑器、Agent、RunEvent SSE、Session History 搜索/置顶/删除、prompt 附件/follow-up 队列、编辑器选区上下文、Diff 操作和底部 PTY terminal panel。
 - `components/follow-up-queue.ts`：Run 忙碌时 prompt follow-up 的纯 FIFO 队列模型。
 - `components/prompt-context.ts`：活动编辑器或 Monaco 选区到 `PromptPart` file context 的纯转换。
 - `components/ReadonlyTranscript.tsx`：只读 transcript 客户端视图，不订阅 SSE，不直连 opencode。

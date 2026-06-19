@@ -327,6 +327,20 @@ export type RuntimeStatus = {
   mcp?: { status: string; tools?: number; resources?: number };
 };
 
+export type TerminalTicketRequest = {
+  workspaceId?: string;
+  cwd?: string;
+  shell?: string;
+  cols?: number;
+  rows?: number;
+};
+
+export type TerminalTicketResponse = {
+  ticket: string;
+  expiresAt: string;
+  webSocketUrl: string;
+};
+
 export type AgentMessage =
   | { id: string; role: "user"; text: string; parts?: PromptPart[]; createdAt: string; messageId?: string }
   | { id: string; role: "assistant"; text: string; parts?: MessagePart[]; createdAt: string; messageId?: string }

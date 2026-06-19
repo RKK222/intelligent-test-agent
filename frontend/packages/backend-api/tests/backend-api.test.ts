@@ -225,4 +225,43 @@ describe("backend-api", () => {
       files: [{ path: "src/app.ts", patch: "@@ -1 +1 @@\n-old\n+new", additions: 1, deletions: 1, status: "modified" }]
     });
   });
+
+  it("creates terminal tickets through the platform API only", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            ticket: "pty_123",
+            expiresAt: "2026-06-19T13:00:00Z",
+            webSocketUrl: "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_123"
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(
+      client.createTerminalTicket("ses_1234567890abcdef", {
+        workspaceId: "wrk_1234567890abcdef",
+        cwd: "packages/app",
+        cols: 120,
+        rows: 32
+      })
+    ).resolves.toEqual({
+      ticket: "pty_123",
+      expiresAt: "2026-06-19T13:00:00Z",
+      webSocketUrl: "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_123"
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/sessions/ses_1234567890abcdef/terminal/tickets",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ workspaceId: "wrk_1234567890abcdef", cwd: "packages/app", cols: 120, rows: 32 })
+      })
+    );
+  });
 });

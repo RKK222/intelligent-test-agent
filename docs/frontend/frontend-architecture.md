@@ -38,6 +38,7 @@ frontend/
     editor/
     diff-viewer/
     agent-chat/
+    terminal/
     test-runner/
     ui-kit/
     shared-types/
@@ -48,7 +49,6 @@ frontend/
     agent-model-selector/
     command-palette/
     context-picker/
-    terminal/
   interaction-visual-demo/
 ```
 
@@ -62,6 +62,7 @@ frontend/
 - `packages/editor`：Monaco 编辑器、语言识别、内容编辑和只读展示。
 - `packages/diff-viewer`：Monaco Diff、变更文件列表、Run/Session/VCS 来源切换、split/unified 视图、Run 级接受/拒绝按钮和当前文件反馈。
 - `packages/agent-chat`：assistant-ui 集成点、用户消息、message part timeline、运行卡片、PlanCard、ToolCallCard、TestRunCard、DiffActionCard、Phase 11 runtime selector/status、slash command、`@` context、permission/question/Todo dock 和纯 RunEvent reducer。
+- `packages/terminal`：Phase 11 P2 受控 PTY 前端包，负责 ticket WebSocket 连接、输入、resize、关闭和输出渲染，不创建 ticket、不直连 opencode server。
 - `packages/test-runner`：底部 Run 状态、取消、重试和事件日志面板。
 - `packages/ui-kit`：平台通用 UI 组件、基础样式组合和反馈组件。
 - `packages/shared-types`：跨包共享 TypeScript 类型和事件/DTO 模型。
@@ -74,7 +75,7 @@ frontend/
 3. 前端不直接访问 opencode server；真实 opencode 能力只能通过 `test-agent-app -> test-agent-opencode-client` 调用。
 4. Monaco 编辑器和 Diff 按需加载，固定尺寸面板必须避免文本和控件重叠。
 5. Phase 11 不实现 settings/config/provider/server 配置页；只保留 Agent/Provider/Model 等运行态选择和只读状态目录。
-6. PTY WebSocket 属于 P2，必须先有架构和安全文档例外；P1 只实现 bash 工具输出。
+6. PTY WebSocket 属于 P2，只能按架构和安全文档的 ticket + WebSocket 例外实现；前端 ticket 创建走 `backend-api`，WebSocket 生命周期下沉到 `packages/terminal`。
 
 ## 架构红线
 
@@ -98,6 +99,7 @@ apps/agent-web
   -> packages/file-explorer
   -> packages/editor
   -> packages/diff-viewer
+  -> packages/terminal
   -> packages/test-runner
   -> packages/backend-api
   -> packages/event-stream-client

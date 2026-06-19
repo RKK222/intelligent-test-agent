@@ -37,7 +37,7 @@
 - Diff：`GET /api/runs/{runId}/diff`、`POST /api/runs/{runId}/diff/accept`、`POST /api/runs/{runId}/diff/reject`。
 - Event：`GET /api/runs/{runId}/events`，只消费平台 RunEvent SSE。
 - Phase 11 Runtime：Session 列表/搜索/children/diff/todo/fork/abort/revert/command/shell、permissions、questions、agents、models、providers、commands、references、fs、vcs、lsp、mcp 等接口必须先进入 `backend-api`，页面不得直接拼接 URL。
-- Terminal：`POST /api/sessions/{sessionId}/terminal/tickets` 已作为 P2 后端受控 WebSocket 例外存在；前端尚未封装 `packages/terminal` 时，不得由页面组件直接拼接 WebSocket URL 或保存 ticket。
+- Terminal：`POST /api/sessions/{sessionId}/terminal/tickets` 已作为 P2 受控 WebSocket 例外存在；`packages/backend-api` 只负责创建 ticket，`packages/terminal` 负责 WebSocket 生命周期，页面组件不得直接拼接 WebSocket URL 或保存 ticket。
 
 详细路径、请求和响应以 `docs/api/backend-api.md` 为准。
 
@@ -87,16 +87,17 @@
 
 ## Phase 11 前端调用落点
 
-- `packages/backend-api` 已封装 agents/models/providers/commands/references、session messages、session children/todo/diff/abort/fork/compact/revert/command/shell、permission/question、fs/vcs/lsp/mcp status/resources/tools 等平台 API 方法；页面组件不得自行拼接这些 URL。
+- `packages/backend-api` 已封装 agents/models/providers/commands/references、session messages、session children/todo/diff/abort/fork/compact/revert/command/shell、permission/question、fs/vcs/lsp/mcp status/resources/tools 和 terminal ticket 等平台 API 方法；页面组件不得自行拼接这些 URL。
 - `packages/agent-chat` 通过纯 reducer 消费 RunEvent，归并 message timeline、message parts、permission dock、question dock、Todo 和 session diff 状态；它不订阅 SSE，也不调用 HTTP API。
+- `packages/terminal` 使用后端返回的一次性 ticket 建立平台 WebSocket，负责 `input`、`resize`、`close` 和 `output`、`exit`、`error` envelope；它不调用 backend-api，不持久化 ticket。
 - `apps/agent-web` 负责组合 TanStack Query、RunEvent SSE、backend-api mutation 和 reducer dispatch；发送 Run 时同时提交 `prompt`、text/file `parts`，并带上当前 Agent/Provider/Model/Mode 运行态选择。文件附件由 `agent-chat` 转成平台 `PromptPart` 后交给 app 层，文本文件以内联 `content` 提交，图片和二进制文件以 `data:` URL 提交。`mode` 只作为平台运行态字段保留，opencode `PromptInput` 不支持时不得强行塞进 `prompt_async`。History 搜索、置顶和删除只能通过 `backend-api` 的平台 Session 方法完成。
-- 当前 UI 已提供 Agent/Provider/Model/Mode 选择、真实 Session history 切换、文件/图片附件、busy follow-up 本地 FIFO 队列、Monaco 选区上下文、permission once/always/reject、question reply/reject、Todo 展示、slash command palette、`@` runtime context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与 hunk context、MCP/LSP/VCS 状态摘要和 `/s/{sessionId}` 只读 transcript 页面；公开 share 授权、per-file/per-message 回滚和 PTY 前端 terminal package 仍按后续批次推进。
+- 当前 UI 已提供 Agent/Provider/Model/Mode 选择、真实 Session history 切换、文件/图片附件、busy follow-up 本地 FIFO 队列、Monaco 选区上下文、permission once/always/reject、question reply/reject、Todo 展示、slash command palette、`@` runtime context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与 hunk context、MCP/LSP/VCS 状态摘要、`/s/{sessionId}` 只读 transcript 页面和底部 PTY terminal panel；公开 share 授权、per-file/per-message 回滚、PTY active session 约束和完整安全配额仍按后续批次推进。
 
 ## Phase 11 Web App 复刻边界
 
 1. 交互式功能以 `opencode-source/opencode-1.17.8/packages/app` 为主要行为来源；`packages/web` 只作为官网文档和 P2 只读分享页参考。
 2. settings/config/provider/server/MCP 安装配置页面不在运行态复刻范围。
-3. bash 工具输出走 RunEvent 和 message part；交互式 PTY 面板属于 P2，只能按 `docs/architecture/pty-websocket-design.md` 的 ticket + WebSocket 例外实现。后端 ticket/WS 入口不改变前端边界：`packages/backend-api` 负责创建 ticket，后续 `packages/terminal` 负责 WebSocket 生命周期，页面组件不得直连 opencode 或自行保存 ticket。
+3. bash 工具输出走 RunEvent 和 message part；交互式 PTY 面板属于 P2，只能按 `docs/architecture/pty-websocket-design.md` 的 ticket + WebSocket 例外实现。后端 ticket/WS 入口不改变前端边界：`packages/backend-api` 负责创建 ticket，`packages/terminal` 负责 WebSocket 生命周期，页面组件不得直连 opencode 或自行保存 ticket。
 4. `/s/:id` 分享页只能通过平台只读 transcript API 实现，不得直连 opencode `share_data` 或 `share_poll`。
 
 ## 错误映射

@@ -23,6 +23,7 @@ import type {
   SessionMessage,
   Workspace
 } from "@test-agent/shared-types";
+import { TerminalPanel } from "@test-agent/terminal";
 import { TestRunnerPanel } from "@test-agent/test-runner";
 import { Button, FeedbackBanner, Input, type Feedback } from "@test-agent/ui-kit";
 import { useWorkbenchStore, WorkbenchShell } from "@test-agent/workbench-shell";
@@ -69,6 +70,7 @@ function WorkbenchRuntime() {
   const [followUpQueue, setFollowUpQueue] = React.useState<FollowUpDraft[]>([]);
   const [diffContextParts, setDiffContextParts] = React.useState<PromptPart[]>([]);
   const [editorSelection, setEditorSelection] = React.useState<EditorSelectionContext>();
+  const [bottomMode, setBottomMode] = React.useState<"run" | "terminal">("run");
 
   const { tabs, activePath, selectedDiffPath, openTab, closeTab, updateTabContent, markTabSaved, setActivePath, setSelectedDiffPath } =
     useWorkbenchStore();
@@ -385,6 +387,17 @@ function WorkbenchRuntime() {
     onError: (error) => setFeedback(errorFeedback("拒绝提问失败", error))
   });
 
+  const createTerminalTicket = React.useCallback(() => {
+    if (!session) {
+      throw new Error("当前 Session 尚未绑定远端上下文，请先发送一次普通 prompt");
+    }
+    return api.createTerminalTicket(session.sessionId, {
+      workspaceId: selectedWorkspace?.workspaceId,
+      cols: 120,
+      rows: 32
+    });
+  }, [api, selectedWorkspace?.workspaceId, session]);
+
   async function loadDirectory(path: string) {
     if (!selectedWorkspace) {
       return;
@@ -638,7 +651,38 @@ function WorkbenchRuntime() {
     />
   );
 
-  const bottom = <TestRunnerPanel run={run} logs={logs} onCancel={() => cancelRunMutation.mutate()} onRetry={() => lastPrompt && handleSend(lastPrompt)} />;
+  const bottom = (
+    <div className="flex h-full min-h-0 flex-col bg-[var(--ta-panel)]">
+      <div className="flex h-9 shrink-0 items-center gap-1 border-b border-slate-800 bg-slate-950 px-2">
+        <button
+          type="button"
+          className={`rounded-md px-2 py-1 text-[12px] ${bottomMode === "run" ? "bg-slate-800 text-slate-100" : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"}`}
+          onClick={() => setBottomMode("run")}
+        >
+          运行
+        </button>
+        <button
+          type="button"
+          className={`rounded-md px-2 py-1 text-[12px] ${bottomMode === "terminal" ? "bg-slate-800 text-slate-100" : "text-slate-400 hover:bg-slate-800 hover:text-slate-100"}`}
+          onClick={() => setBottomMode("terminal")}
+        >
+          终端
+        </button>
+      </div>
+      <div className="min-h-0 flex-1">
+        {bottomMode === "run" ? (
+          <TestRunnerPanel run={run} logs={logs} onCancel={() => cancelRunMutation.mutate()} onRetry={() => lastPrompt && handleSend(lastPrompt)} />
+        ) : (
+          <TerminalPanel
+            baseUrl={apiBaseUrl}
+            createTicket={createTerminalTicket}
+            disabled={!session}
+            disabledReason="先发送一次 prompt 建立 Session 运行上下文后再连接终端"
+          />
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <>

@@ -54,9 +54,9 @@ Phase 06-08 当前已落地的测试重点：
 
 Phase 11 当前已落地的测试重点：
 
-- Vitest 覆盖 prompt 附件到 `PromptPart` 的转换、follow-up FIFO 队列、Diff hunk 解析/导航和编辑器选区上下文。
+- Vitest 覆盖 prompt 附件到 `PromptPart` 的转换、follow-up FIFO 队列、Diff hunk 解析/导航、编辑器选区上下文、terminal ticket client 和 PTY WebSocket envelope。
 - Playwright 只匹配 `*.spec.ts`，避免误加载 app 目录下的 Vitest `*.test.tsx`。
-- Playwright mock 平台后端 API 和 RunEvent SSE，覆盖文件/图片附件提交、permission dock、question dock、Diff 卡片、hunk 导航入口和 hunk context 反馈。
+- Playwright mock 平台后端 API 和 RunEvent SSE，覆盖文件/图片附件提交、permission dock、question dock、Diff 卡片、hunk 导航入口、hunk context 反馈和 terminal ticket 创建入口。
 - 真实 `test-agent-app`、前端和 opencode server 三服务联调 E2E 仍作为发布前验收项，不能用 mock E2E 替代。
 
 ## Mock 原则

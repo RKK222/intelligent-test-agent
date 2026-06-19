@@ -1,6 +1,6 @@
 # PTY WebSocket 受控例外设计
 
-本文档定义 Phase 11 P2 交互式 PTY 终端的架构和安全边界。后端已先落地 ticket + WebSocket 的最小受控通道；未满足本文档的前端接入、限流、审计、timeout 和真实联调验收前，默认 Web App 仍只能把它视为 P2 能力。
+本文档定义 Phase 11 P2 交互式 PTY 终端的架构和安全边界。后端已先落地 ticket + WebSocket 的最小受控通道，前端已接入 `packages/terminal` 基础面板；未满足本文档的限流、审计、timeout 和真实联调验收前，默认 Web App 仍只能把它视为 P2 能力。
 
 ## 目标
 
@@ -93,5 +93,5 @@ WebSocket message 使用 JSON envelope：
 
 - 后端 ticket controller、application service、WebSocket handler 和 PTY adapter 均有单元或集成测试；当前已覆盖 ticket 创建、无远端映射拒绝、cwd 越界、重复使用和消息 codec。
 - 安全测试覆盖 ticket 过期、重复使用、session/workspace 不匹配、cwd 越界、input 超限和 CORS/origin 拒绝；当前仍需补齐 WebSocket handler 级 origin/input/close 测试。
-- 前端测试覆盖 ticket 获取、连接失败、输出渲染、输入发送、resize 和 close；当前仍未实现前端 terminal package。
+- 前端测试覆盖 ticket 获取、连接失败、输出渲染、输入发送、resize 和 close；当前已覆盖 terminal client/panel 和 mocked ticket 创建入口。
 - 文档同步 `docs/api/backend-api.md`、`docs/security/security-standards.md`、`docs/frontend/frontend-backend-contract.md` 和相关 README/PACKAGE。

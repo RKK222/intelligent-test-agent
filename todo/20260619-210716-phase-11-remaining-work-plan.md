@@ -3,7 +3,7 @@
 ## 背景
 
 - 用户问题：在已提交 Phase 11 主路径能力后，需要明确剩余未完成内容，并形成后续可执行计划。
-- 当前现象：最近提交已完成 opencode Web runtime 主链路、PromptPart 后端透传、Session 全局搜索/置顶/软删除、runtime selector、permission/question、Todo、Diff 来源切换、MCP/LSP/VCS 状态和只读 transcript；本批次补齐了文件/图片附件、busy follow-up 本地 FIFO 队列、Diff hunk 导航、hunk context、Monaco 任意选区上下文、PTY WebSocket 安全前置文档、后端最小 PTY ticket/WebSocket 通道和 mocked Playwright 主流程；仍缺 PTY 前端 package、完整 PTY 安全配额与真实三服务联调 E2E 闭环。
+- 当前现象：最近提交已完成 opencode Web runtime 主链路、PromptPart 后端透传、Session 全局搜索/置顶/软删除、runtime selector、permission/question、Todo、Diff 来源切换、MCP/LSP/VCS 状态和只读 transcript；本批次补齐了文件/图片附件、busy follow-up 本地 FIFO 队列、Diff hunk 导航、hunk context、Monaco 任意选区上下文、PTY WebSocket 安全前置文档、后端最小 PTY ticket/WebSocket 通道、前端 terminal package 和 mocked Playwright 主流程；仍缺完整 PTY 安全配额与真实三服务联调 E2E 闭环。
 - 目标：按 P0/P1/P2 风险顺序补完 Phase 11，保持前端只走 `backend-api` 和 RunEvent SSE、后端只走 `test-agent-opencode-client` facade 的边界。
 
 ## 范围
@@ -26,7 +26,7 @@
   - `PromptPart` 类型已支持 `text/file/agent/reference`，`AgentWorkbench` 会把当前打开文件内容作为 file part 追加到 `POST /api/runs`。
   - `AgentChat` 已支持文件选择、图片 data URL、附件 chips；`AgentWorkbench` 已在 run 忙碌时把 follow-up 放入本地 FIFO 队列，终态后自动提交下一条。
   - `DiffViewer` 已支持 Run/Session/VCS 来源与 split/unified 视图，但 hunk 导航、选区引用和可测试的 hunk 模型尚未补齐。
-  - PTY 已声明受控 WebSocket 例外，并已在后端实现一次性 ticket、Origin 校验、session/workspace/cwd 约束、JSON envelope 和本地 shell 进程适配；前端 terminal package、每 session active PTY 限制、完整审计、timeout、输入限速和三服务 E2E 尚未补齐。
+  - PTY 已声明受控 WebSocket 例外，并已在后端实现一次性 ticket、Origin 校验、session/workspace/cwd 约束、JSON envelope 和本地 shell 进程适配；前端已新增 `packages/terminal` 并接入底部 panel；每 session active PTY 限制、完整审计、timeout、输入限速、输出截断和三服务 E2E 尚未补齐。
 - 问题原因：前期优先完成 API、事件和主 UI 串联，剩余项涉及浏览器文件读取、运行队列语义、Diff 交互状态和双向终端安全边界，需要拆批次补齐并分别验收。
 
 ## 修改方案
@@ -78,13 +78,13 @@
   - 新增 `docs/architecture/pty-websocket-design.md`
   - 更新 `docs/security/security-standards.md`
   - 更新 `docs/api/backend-api.md`
-  - 已新增后端 PTY controller/service/WebSocket handler/terminal adapter；后续新增前端 terminal package，并补齐限流、审计、timeout 和 active PTY 约束。
+  - 已新增后端 PTY controller/service/WebSocket handler/terminal adapter 和前端 terminal package；后续补齐限流、审计、timeout 和 active PTY 约束。
 - 修改位置：
   - 架构文档先定义 PTY ticket、鉴权、限流、审计、脱敏、输入输出协议、resize/input/close 生命周期。
   - 安全文档加入 workspace/session 隔离、CORS、traceId、日志和敏感输出处理。
 - 具体改动：
   - 已完成第一批后端：`POST /api/sessions/{sessionId}/terminal/tickets` 创建一次性 ticket，`GET /api/sessions/{sessionId}/terminal/ws?ticket=...` 只允许 ticket 保护的 WebSocket upgrade。
-  - 后续前端 terminal package 只消费平台 WebSocket，不连接 opencode server；`packages/backend-api` 只负责创建 ticket，WebSocket 生命周期下沉到 `packages/terminal`。
+  - 前端 terminal package 只消费平台 WebSocket，不连接 opencode server；`packages/backend-api` 只负责创建 ticket，WebSocket 生命周期下沉到 `packages/terminal`。
   - 后续补齐每 session active PTY 约束、主动输入限速、output 截断策略、idle/hard timeout、结构化审计日志和 WebSocket handler 级安全测试。
 - 原因：PTY 是双向命令通道，必须先满足 Phase 11 计划要求的安全例外。
 
@@ -120,7 +120,7 @@
 - [x] PTY 代码实现前，`docs/architecture/pty-websocket-design.md` 与 `docs/security/security-standards.md` 已定义安全例外。
 - [x] Playwright mock 覆盖 Phase 11 主流程：prompt parts、permission/question、Diff hunk 和 hunk context。
 - [x] 后端 PTY ticket API 和受控 WebSocket handler 已有最小实现，并覆盖 ticket 创建、远端映射缺失、cwd 越界、ticket 重复使用和消息 codec 测试。
-- [ ] 前端 `packages/backend-api` 增加 terminal ticket 方法，新增 `packages/terminal` 负责 WebSocket 连接、输入、resize、close 和输出渲染。
+- [x] 前端 `packages/backend-api` 增加 terminal ticket 方法，新增 `packages/terminal` 负责 WebSocket 连接、输入、resize、close 和输出渲染，并在 `AgentWorkbench` 底部接入 terminal panel。
 - [ ] PTY 补齐 active session 约束、输入限速、审计日志、idle/hard timeout、输出截断和 WebSocket handler 级安全测试。
 - [ ] 本地前端、后端、opencode server 三服务联调 E2E 可执行。
 - [ ] 每批改动同步 README/PACKAGE、API、前后端契约和测试说明文档。

@@ -19,6 +19,7 @@
     "@test-agent/event-stream-client": "workspace:*",
     "@test-agent/file-explorer": "workspace:*",
     "@test-agent/shared-types": "workspace:*",
+    "@test-agent/terminal": "workspace:*",
     "@test-agent/test-runner": "workspace:*",
     "@test-agent/ui-kit": "workspace:*",
     "@test-agent/workbench-shell": "workspace:*",

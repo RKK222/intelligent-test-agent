@@ -14,6 +14,7 @@ Next.js 主应用，组合 Web IDE 工作台、文件树、Monaco 编辑器、Ag
 - 组合 Session History 搜索、切换、置顶和软删除。
 - 组合 Phase 11 运行态能力：Agent/Provider/Model/Mode 选择、slash command、`@` context、MCP/LSP/VCS 状态、Run/Session/VCS Diff 来源切换。
 - 组合 prompt 文件/图片附件、活动编辑器选区上下文和 busy follow-up 本地 FIFO 队列；真正提交仍通过 `@test-agent/backend-api`。
+- 组合底部 PTY terminal panel；ticket 创建走 `@test-agent/backend-api`，WebSocket 生命周期由 `@test-agent/terminal` 管理。
 - Next dev 配置允许 `127.0.0.1` 作为开发来源，避免本地从该地址访问时 dev resource 被拦截导致工作台交互不可用。
 
 ## 禁止事项

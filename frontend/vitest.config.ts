@@ -19,6 +19,7 @@ export default defineConfig({
       "@test-agent/editor": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/editor/src",
       "@test-agent/diff-viewer": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/diff-viewer/src",
       "@test-agent/agent-chat": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/agent-chat/src",
+      "@test-agent/terminal": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/terminal/src",
       "@test-agent/test-runner": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/test-runner/src",
       "@test-agent/workbench-shell": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/workbench-shell/src"
     }

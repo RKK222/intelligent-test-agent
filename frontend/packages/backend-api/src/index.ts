@@ -20,6 +20,8 @@ import type {
   SessionDiff,
   Session,
   SessionMessage,
+  TerminalTicketRequest,
+  TerminalTicketResponse,
   TodoItem,
   Workspace
 } from "@test-agent/shared-types";
@@ -213,6 +215,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     rejectSessionQuestion: (sessionId: string, requestId: string) =>
       request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(requestId)}/reject`, {
         method: "POST"
+      }),
+    createTerminalTicket: (sessionId: string, payload: TerminalTicketRequest = {}) =>
+      request<TerminalTicketResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/terminal/tickets`, {
+        method: "POST",
+        body: JSON.stringify(compactObject(payload))
       })
   };
 }
