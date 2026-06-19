@@ -1,0 +1,21 @@
+generatorName: java
+library: webclient
+groupId: com.example.opencode
+artifactId: test-agent-opencode-sdk-generated
+artifactVersion: 1.0.0
+invokerPackage: com.example.opencode.sdk
+apiPackage: com.example.opencode.sdk.api
+modelPackage: com.example.opencode.sdk.model
+dateLibrary: java8
+serializationLibrary: jackson
+openApiNullable: false
+hideGenerationTimestamp: true
+generateClientAsBean: false
+useSingleRequestParameter: true
+supportStreaming: true
+useSpringBoot4: true
+useJakartaEe: true
+typeMappings:
+  AnyOf: Object
+importMappings:
+  AnyOf: java.lang.Object

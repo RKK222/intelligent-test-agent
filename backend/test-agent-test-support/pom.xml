@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.example.testagent</groupId>
+        <artifactId>test-agent-backend</artifactId>
+        <version>0.1.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>test-agent-test-support</artifactId>
+    <name>test-agent-test-support</name>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.example.testagent</groupId>
+            <artifactId>test-agent-common</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.example.testagent</groupId>
+            <artifactId>test-agent-domain</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <optional>true</optional>
+        </dependency>
+    </dependencies>
+</project>

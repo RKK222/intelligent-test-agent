@@ -1,0 +1,50 @@
+# test-agent-persistence
+
+## 工程定位
+
+持久化模块，负责数据库、迁移、Repository 和缓存访问适配。
+
+## 技术栈
+
+- Java 21
+- Spring Data JDBC
+- PostgreSQL
+- Flyway
+- Druid JDBC 连接池
+- Redis optional
+- Maven library jar
+
+## 主要职责
+
+- Workspace、Session、Run、RunEvent、ExecutionNode、SessionRoute 等持久化。
+- Flyway migration。
+- Repository 实现和数据库映射。
+- Redis 限流、幂等或缓存能力的可选适配。
+
+## 已有实现
+
+- `V1__create_core_tables.sql`：创建 Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 核心表。
+- `JdbcWorkspaceRepository`、`JdbcSessionRepository`、`JdbcRunRepository`、`JdbcRunEventRepository`、`JdbcExecutionNodeRepository`、`JdbcRoutingDecisionRepository`。
+- RunEvent append-only：持久化层分配 `eventId` 和同一 run 内单调递增 `seq`，支持 `runId + lastSeq` 增量读取。
+
+## 测试环境 PostgreSQL
+
+`test-agent-app` 的 `test` profile 会通过环境变量装配 PostgreSQL 测试库，并复用本模块 `db/migration` 下的 Flyway migration。持久化模块提供 Druid starter 依赖，实际连接信息和连接池大小由应用 profile 配置注入，不保存环境专属账号、密码或主机地址。
+
+## 允许依赖
+
+- `test-agent-common`。
+- `test-agent-domain`。
+- Spring Data JDBC。
+- Flyway、PostgreSQL、Druid、Redis。
+
+## 禁止依赖
+
+- `test-agent-app` Controller。
+- generated SDK。
+- opencode client facade。
+
+## 后续 AI 编码指引
+
+新增表结构、Repository、数据库映射和 migration 时改这里。不要把任务状态机或 HTTP API 编排逻辑放进本模块。
+JSON payload/capabilities 当前以文本列保存，未来切换 PostgreSQL JSONB 必须同步兼容策略和测试。

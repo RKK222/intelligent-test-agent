@@ -1,0 +1,54 @@
+# 包说明：com.example.testagent.common
+
+## 职责
+
+公共基础包，放置跨后端模块复用的轻量类型、错误基础、响应模型、TraceId、分页、时间和校验工具。
+
+## 不负责
+
+- 不承载 Workspace、Session、Run 等业务规则。
+- 不访问数据库、Redis、HTTP 或 opencode server。
+- 不依赖 Spring Web 或应用入口。
+
+## 主要程序清单
+
+- `package-info.java`：说明 common 包是后端共享基础类型边界。
+- `api.ApiResponse`：统一成功响应模型。
+- `api.ApiErrorResponse`：统一错误响应模型。
+- `error.ErrorCode`：稳定错误码和 HTTP 状态数字。
+- `error.PlatformException`：平台基础异常。
+- `pagination.PageRequest`：分页请求模型。
+- `pagination.PageResponse`：分页响应模型。
+- 后续可新增 Idempotency-Key、时间和校验工具。
+
+## 允许依赖
+
+- JDK 标准库。
+- Jackson annotations。
+- Jakarta Validation API。
+
+## 禁止依赖
+
+- `test-agent-domain` 及任何业务模块。
+- `test-agent-opencode-sdk-generated`。
+- Spring Web、Persistence、App 启动入口。
+
+## 上游调用方
+
+- 所有后端模块。
+
+## 下游依赖
+
+- 仅 JDK 和轻量基础库。
+
+## 测试位置
+
+- common 模块单元测试。
+- 通用校验、时间、错误码和分页逻辑必须有边界测试。
+
+## 修改时必须同步更新
+
+- `backend/test-agent-common/README.md`。
+- 本文件。
+- 受影响模块的 README 或 PACKAGE.md。
+- `docs/backend/backend-coding-standards.md`，如果公共类型边界变化。

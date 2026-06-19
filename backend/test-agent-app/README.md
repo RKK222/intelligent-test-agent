@@ -1,0 +1,54 @@
+# test-agent-app
+
+## 工程定位
+
+唯一 Spring Boot 启动入口，最终只打这一个可运行后端服务包。
+
+## 技术栈
+
+- Java 21
+- Spring Boot 4.1.0
+- Spring WebFlux
+- Spring Security
+- Spring Boot Actuator
+- Maven executable jar
+
+## 主要职责
+
+- 启动 `TestAgentApplication`。
+- 承载入口层、控制面、代理层、路由、认证、限流等单后端职责。
+- 提供 HTTP API、认证、限流、TraceId 注入、API 转发、SSE/WebSocket 代理入口。
+- 编排 workspace、session、run、routing、event、opencode client facade。
+
+## 已有入口能力
+
+- `TraceIdWebFilter`：处理 `X-Trace-Id` 透传、生成和响应头写入。
+- `GlobalExceptionHandler`：把 `PlatformException`、参数异常和未知异常转换为统一错误响应。
+
+## 测试环境配置
+
+- `application.yml`：所有环境统一使用 Druid 管理 JDBC 连接池，默认关闭 Druid Web 控制台和 WebStatFilter。
+- `application-test.yml`：`test` profile 使用 PostgreSQL 数据源，并启用 `test-agent-persistence` 的 Flyway migration。
+- 数据库连接信息通过 `TEST_AGENT_TEST_DB_HOST`、`TEST_AGENT_TEST_DB_PORT`、`TEST_AGENT_TEST_DB_NAME`、`TEST_AGENT_TEST_DB_USERNAME`、`TEST_AGENT_TEST_DB_PASSWORD` 注入。
+- 连接池大小可通过 `TEST_AGENT_DB_POOL_INITIAL_SIZE`、`TEST_AGENT_DB_POOL_MIN_IDLE`、`TEST_AGENT_DB_POOL_MAX_ACTIVE`、`TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS` 覆盖。
+- 真实账号、密码和测试库地址不得写入仓库配置；本地验证可使用 `.env.test` 等已被 `.gitignore` 排除的文件承载。
+
+## 允许依赖
+
+- `test-agent-common`。
+- `test-agent-domain`。
+- `test-agent-observability`。
+- `test-agent-opencode-client`。
+- `test-agent-persistence`。
+- `test-agent-event`。
+- Spring Boot starters。
+
+## 禁止依赖
+
+- 直接依赖 `test-agent-opencode-sdk-generated`。
+- Controller 直接访问数据库实现。
+- Controller 直接调用 generated SDK。
+
+## 后续 AI 编码指引
+
+新增对外 API、请求鉴权、代理入口、应用服务编排和启动配置时改这里。业务规则优先下沉到 domain，opencode 调用优先经过 `test-agent-opencode-client`。

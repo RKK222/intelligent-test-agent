@@ -1,0 +1,18 @@
+spring:
+  config:
+    activate:
+      on-profile: test
+  datasource:
+    druid:
+      driver-class-name: org.postgresql.Driver
+      url: jdbc:postgresql://${TEST_AGENT_TEST_DB_HOST}:${TEST_AGENT_TEST_DB_PORT:5432}/${TEST_AGENT_TEST_DB_NAME}
+      username: ${TEST_AGENT_TEST_DB_USERNAME}
+      password: ${TEST_AGENT_TEST_DB_PASSWORD}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+management:
+  health:
+    db:
+      enabled: true

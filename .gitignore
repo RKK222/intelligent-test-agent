@@ -1,0 +1,55 @@
+# ===== Java / Maven =====
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
+
+# Maven 遗留
+dependency-reduced-pom.xml
+*.versionsBackup
+release.properties
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+
+# ===== IDE =====
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.project
+.classpath
+.factorypath
+*.swp
+*.swo
+
+# ===== 操作系统 =====
+.DS_Store
+Thumbs.db
+
+# ===== 日志 =====
+*.log
+logs/
+
+# ===== 构建产物 / 临时文件 =====
+build/
+out/
+dist/
+tmp/
+*.tmp
+
+# ===== Gradle (SDK 生成器) =====
+.gradle/
+
+# ===== 环境 / 密钥 =====
+.env
+.env.*
+*.pem
+*.key

@@ -1,0 +1,135 @@
+package com.example.testagent.opencode.client;
+
+import com.example.testagent.domain.event.RunEventDraft;
+import com.example.testagent.domain.event.RunEventType;
+import com.example.testagent.domain.run.RunId;
+import com.example.testagent.domain.support.DomainValidation;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.time.Instant;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.function.Supplier;
+import org.springframework.stereotype.Component;
+
+/**
+ * opencode raw JSON 事件到平台 RunEventDraft 的转换器，未知事件保留上下文但不中断运行。
+ */
+@Component
+public class OpencodeRunEventMapper {
+
+    private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
+    };
+
+    private final ObjectMapper objectMapper;
+    private final Supplier<Instant> now;
+
+    public OpencodeRunEventMapper(ObjectMapper objectMapper) {
+        this(objectMapper, Instant::now);
+    }
+
+    public OpencodeRunEventMapper(ObjectMapper objectMapper, Supplier<Instant> now) {
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.now = Objects.requireNonNull(now, "now must not be null");
+    }
+
+    public RunEventDraft toDraft(JsonNode rawEvent, RunId runId, String traceId) {
+        Objects.requireNonNull(rawEvent, "rawEvent must not be null");
+        Objects.requireNonNull(runId, "runId must not be null");
+        traceId = DomainValidation.requireText(traceId, "traceId");
+
+        String rawType = rawType(rawEvent);
+        Map<String, Object> payload = new LinkedHashMap<>(toMap(properties(rawEvent)));
+        RunEventType type = mapType(rawType, payload);
+        payload.put("rawType", rawType);
+        payload.put("rawEventId", rawEventId(rawEvent));
+        payload.put("rawPayload", toMap(rawEvent));
+
+        if (type == RunEventType.ASSISTANT_MESSAGE_DELTA) {
+            copyTextAlias(payload);
+        }
+
+        return new RunEventDraft(runId, type, traceId, now.get(), payload);
+    }
+
+    private RunEventType mapType(String rawType, Map<String, Object> payload) {
+        return switch (rawType) {
+            case "session.next.prompted" -> RunEventType.RUN_STARTED;
+            case "session.next.text.delta", "message.part.delta" -> RunEventType.ASSISTANT_MESSAGE_DELTA;
+            case "session.next.tool.called", "session.next.tool.input.started" -> RunEventType.TOOL_STARTED;
+            case "session.next.tool.success" -> {
+                payload.put("status", "success");
+                yield RunEventType.TOOL_FINISHED;
+            }
+            case "session.next.tool.failed" -> {
+                payload.put("status", "failed");
+                yield RunEventType.TOOL_FINISHED;
+            }
+            case "session.diff" -> RunEventType.DIFF_PROPOSED;
+            case "test.finished" -> RunEventType.TEST_FINISHED;
+            default -> RunEventType.OPENCODE_EVENT_UNKNOWN;
+        };
+    }
+
+    private String rawType(JsonNode rawEvent) {
+        JsonNode topLevelType = rawEvent.path("type");
+        if (topLevelType.isTextual()) {
+            return topLevelType.asText();
+        }
+        JsonNode payloadType = rawEvent.path("payload").path("type");
+        if (payloadType.isTextual()) {
+            return payloadType.asText();
+        }
+        return "unknown";
+    }
+
+    private String rawEventId(JsonNode rawEvent) {
+        JsonNode topLevelId = rawEvent.path("id");
+        if (topLevelId.isTextual()) {
+            return topLevelId.asText();
+        }
+        JsonNode payloadId = rawEvent.path("payload").path("id");
+        if (payloadId.isTextual()) {
+            return payloadId.asText();
+        }
+        return "unknown";
+    }
+
+    private JsonNode properties(JsonNode rawEvent) {
+        JsonNode topLevelProperties = rawEvent.path("properties");
+        if (topLevelProperties.isObject()) {
+            return topLevelProperties;
+        }
+        JsonNode payloadProperties = rawEvent.path("payload").path("properties");
+        if (payloadProperties.isObject()) {
+            return payloadProperties;
+        }
+        return objectMapper.createObjectNode();
+    }
+
+    private Map<String, Object> toMap(JsonNode node) {
+        Map<String, Object> converted = objectMapper.convertValue(node, MAP_TYPE);
+        return sanitize(converted);
+    }
+
+    private Map<String, Object> sanitize(Map<String, Object> source) {
+        Map<String, Object> sanitized = new LinkedHashMap<>();
+        source.forEach((key, value) -> {
+            if (value != null) {
+                sanitized.put(key, value);
+            }
+        });
+        return sanitized;
+    }
+
+    private void copyTextAlias(Map<String, Object> payload) {
+        if (!payload.containsKey("text")) {
+            Object delta = payload.get("delta");
+            if (delta instanceof String text) {
+                payload.put("text", text);
+            }
+        }
+    }
+}

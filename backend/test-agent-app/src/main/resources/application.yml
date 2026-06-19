@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: test-agent
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    druid:
+      initial-size: ${TEST_AGENT_DB_POOL_INITIAL_SIZE:1}
+      min-idle: ${TEST_AGENT_DB_POOL_MIN_IDLE:1}
+      max-active: ${TEST_AGENT_DB_POOL_MAX_ACTIVE:10}
+      max-wait: ${TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS:30000}
+      validation-query: SELECT 1
+      test-while-idle: true
+      test-on-borrow: false
+      test-on-return: false
+      time-between-eviction-runs-millis: 60000
+      min-evictable-idle-time-millis: 300000
+      stat-view-servlet:
+        enabled: false
+      web-stat-filter:
+        enabled: false
+      filter:
+        stat:
+          enabled: true
+          db-type: postgresql
+          log-slow-sql: false
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
