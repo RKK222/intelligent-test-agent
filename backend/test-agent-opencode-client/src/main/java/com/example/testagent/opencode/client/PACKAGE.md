@@ -2,56 +2,57 @@
 
 ## 职责
 
-opencode client facade 包，隔离 generated SDK，为业务侧提供稳定的 opencode server 调用边界。
+业务侧 opencode client facade，隔离 generated SDK、统一 traceId 透传、错误映射、超时重试和 raw event 到平台 RunEvent 的转换。
 
 ## 不负责
 
-- 不暴露 generated SDK DTO 给 domain 或前端。
 - 不承载 Controller。
-- 不访问数据库。
+- 不访问数据库或 Repository。
+- 不返回 generated SDK DTO 给 domain、app 或前端 API。
 
 ## 主要程序清单
 
-- `package-info.java`：说明本包是 generated SDK 的稳定 facade 层。
-- `OpencodeClientFacade`、`DefaultOpencodeClientFacade`：业务侧 opencode 调用门面。
-- `OpencodeSdkGateway`、`GeneratedOpencodeSdkGateway`：generated SDK 内部适配端口和实现。
-- `OpencodeHealthCommand`、`OpencodeStartRunCommand`、`OpencodeCancelCommand`、`OpencodeStreamEventsCommand`：平台命令模型。
-- `OpencodeHealthResult`、`OpencodeStartRunResult`、`OpencodeCancelResult`：平台结果模型。
-- `OpencodeRunEventMapper`：opencode raw event 到 `RunEventDraft` 的转换器。
+- `package-info.java`：说明本包是 generated opencode SDK 之上的稳定 facade。
+- `OpencodeClientFacade`、`DefaultOpencodeClientFacade`：业务门面和默认实现。
+- `OpencodeSdkGateway`、`GeneratedOpencodeSdkGateway`：内部 gateway 端口与唯一 generated SDK 适配器。
+- `OpencodeCreateSessionCommand`、`OpencodeCreateSessionResult`：创建远端 opencode session。
+- `OpencodeStartRunCommand`、`OpencodeStartRunResult`：使用远端 opencode session id 调用 `prompt_async`。
+- `OpencodeCancelCommand`、`OpencodeCancelResult`：使用远端 opencode session id 调用 abort。
+- `OpencodeStreamEventsCommand`、`OpencodeRunEventMapper`：订阅 opencode event 并映射为平台 RunEventDraft。
+- `OpencodeHealthCommand`、`OpencodeHealthResult`：执行节点健康检查。
 
 ## 允许依赖
 
 - `test-agent-common`。
-- `test-agent-domain` 中必要的平台模型。
-- `test-agent-observability` 中 trace header 常量。
+- `test-agent-domain`。
+- `test-agent-observability`。
 - `test-agent-opencode-sdk-generated`。
-- Reactor。
+- Reactor、Jackson。
 
 ## 禁止依赖
 
 - `test-agent-app`。
 - `test-agent-persistence`。
 - Web Controller。
+- 前端 DTO。
 
 ## 上游调用方
 
-- `test-agent-app` 应用服务。
-- event 模块的事件映射协作。
+- `test-agent-app` 应用服务和 health contributor。
 
 ## 下游依赖
 
-- generated SDK。
-- observability trace 和指标能力。
+- generated opencode SDK。
+- opencode server HTTP API。
 
 ## 测试位置
 
-- opencode client 模块单元测试。
-- 使用 mock opencode server 的集成测试。
-- 错误转换、超时、重试、事件转换测试。
+- opencode-client 模块单元测试和 gateway 级 HTTP 测试。
+- facade 测试覆盖 traceId、错误映射、超时重试、create/start/cancel/event。
 
 ## 修改时必须同步更新
 
 - `backend/test-agent-opencode-client/README.md`。
-- `docs/backend/backend-coding-standards.md`，如果 facade 边界变化。
-- `docs/api/event-stream-api.md`，如果事件映射变化。
-- SDK 生成说明，若依赖 generated API 变更。
+- 本文件。
+- `docs/api/backend-api.md`，如果影响平台 API 语义或错误码。
+- `docs/architecture/dependency-rules.md`，如果依赖边界变化。

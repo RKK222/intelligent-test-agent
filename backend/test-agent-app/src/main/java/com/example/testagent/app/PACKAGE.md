@@ -20,7 +20,7 @@
 - `web.ApiTokenWebFilter`、`web.InMemoryRateLimitWebFilter`：API token 鉴权占位和内存限流占位。
 - `workspace.WorkspaceApplicationService`、`workspace.WorkspaceFileService`：工作区注册、文件路径归一化和 UTF-8 文件读写。
 - `session.SessionApplicationService`：会话创建、查询和消息追加/分页。
-- `run.RunApplicationService`：Run 启动、路由、opencode start/cancel 和事件订阅编排。
+- `run.RunApplicationService`：Run 启动、路由、opencode session 懒创建/复用、opencode start/cancel 和事件订阅编排。
 - `config.TestAgentRuntimeProperties`、`config.ExecutionNodeSeeder`：运行时配置绑定和 opencode node seed。
 - `config.OpencodeNodesHealthIndicator`、`config.RedisOptionalHealthIndicator`：本地集成健康检查。
 - `support.RuntimeIdGenerator`：应用层业务 ID 生成入口。

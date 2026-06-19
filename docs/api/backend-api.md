@@ -88,7 +88,7 @@
 - Run API。
 - RunEvent API。
 - Cancel API。
-- opencode 兼容代理 API。
+- opencode 后端内部封装能力。
 - 健康检查和观测性 API。
 
 ## Phase 02/03 内部能力说明
@@ -100,6 +100,7 @@ Phase 02/03 不新增对外 HTTP API，也不新增 Controller。新增的 Works
 - `workspaceId`、`sessionId`、`runId`、`eventId`、`executionNodeId` 均保持带前缀字符串，不向前端暴露数据库 surrogate PK。
 - RunEvent payload 允许新增字段，前端和后续 API DTO 必须按忽略未知字段处理。
 - opencode 错误已在 `test-agent-opencode-client` 映射为平台 `OPENCODE_BAD_GATEWAY`、`OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT`，对外仍使用统一错误响应。
+- 平台 Session 与远端 opencode Session 是不同概念；`opencodeSessionId` 和 `opencodeExecutionNodeId` 只作为后端内部映射保存，不进入 HTTP DTO。
 
 ## Phase 04 Runtime API
 
@@ -151,7 +152,7 @@ Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做
 
 ```json
 {
-  "workspaceId": "ws_...",
+  "workspaceId": "wrk_...",
   "name": "demo",
   "rootPath": "/absolute/workspace/path",
   "status": "ACTIVE",
@@ -191,7 +192,7 @@ Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做
 
 ```json
 {
-  "workspaceId": "ws_...",
+  "workspaceId": "wrk_...",
   "title": "new session"
 }
 ```
@@ -222,16 +223,22 @@ Phase 04 开始由 `test-agent-app` 暴露可联调 HTTP API。Controller 只做
 
 ```json
 {
-  "sessionId": "sess_...",
+  "sessionId": "ses_...",
   "prompt": "run prompt"
 }
 ```
 
-启动流程会追加用户消息，创建 `PENDING` Run，执行节点路由，保存 routing decision，调用 opencode `prompt_async`，成功后写入 `run.created` 和 `run.started`。未找到可用节点返回 `OPENCODE_UNAVAILABLE`；opencode 超时或异常分别映射为平台 opencode 错误码。
+启动流程会追加用户消息，创建 `PENDING` Run，再按平台 session 的内部 opencode 映射决定路由：
+
+- 首次 Run：先选择可用 execution node，调用 opencode `POST /session` 创建远端 session，保存 `opencodeSessionId` 与 `opencodeExecutionNodeId` 内部映射，然后用远端 session id 调用 opencode `prompt_async`。
+- 后续 Run：复用已保存的远端 opencode session，并固定路由到原 execution node；节点不存在、离线或容量不可用时返回 `OPENCODE_UNAVAILABLE`。
+- 本地集成默认只向 opencode 传 `directory=workspace.rootPath`，不把平台 `wrk_...` 作为 opencode `workspace` query 传入。
+
+成功后写入 `run.created` 和 `run.started`。未找到可用节点返回 `OPENCODE_UNAVAILABLE`；opencode 超时或异常分别映射为平台 opencode 错误码。
 
 `RunResponse`：`runId`、`sessionId`、`workspaceId`、`status`、`createdAt`、`updatedAt`。
 
-`POST /api/runs/{runId}/cancel` 对终态 Run 返回 `CONFLICT`。非终态 Run 会调用 opencode cancel 并追加 `run.cancelling`、`run.cancelled`。
+`POST /api/runs/{runId}/cancel` 对终态 Run 返回 `CONFLICT`。非终态 Run 会在存在内部映射时使用远端 opencode session id 调用 opencode cancel，并追加 `run.cancelling`、`run.cancelled`。
 
 `GET /api/runs/{runId}/events` 返回 `text/event-stream`，SSE `id` 使用 RunEvent `seq`，`event` 使用稳定 wire name。`Last-Event-ID` 续传规则见 `docs/api/event-stream-api.md`。
 
@@ -242,6 +249,7 @@ Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring B
 ### 兼容性
 
 - API 不暴露数据库 surrogate PK。
+- API 不暴露 `opencodeSessionId`、`opencodeExecutionNodeId` 或 generated SDK DTO；前端只依赖平台 Workspace、Session、Run、Cancel 和 RunEvent SSE。
 - 响应 DTO 可以新增字段，前端必须忽略未知字段。
 - 文件 API 初版不承诺 Git 状态、二进制预览、递归扫描和搜索。
 - RunEvent payload 可以新增字段；事件 wire name 不可重命名。

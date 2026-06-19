@@ -28,7 +28,7 @@
 - `InMemoryRateLimitWebFilter`：可配置内存限流占位，超限返回 `RATE_LIMITED`。
 - Workspace API：工作区注册、分页查询、单层文件列表、UTF-8 文件读写和文件状态。
 - Session API：会话创建、分页查询、消息追加和消息分页读取。
-- Run API：启动、查询、取消和 RunEvent SSE。
+- Run API：启动、查询、取消和 RunEvent SSE；首次 Run 懒创建远端 opencode session 并保存内部映射，后续 Run 复用原 session 和 execution node。
 - Health：opencode nodes health、Redis optional health、数据库 health。
 
 ## 本地与生产 profile
@@ -64,3 +64,4 @@
 ## 后续 AI 编码指引
 
 新增对外 API、请求鉴权、代理入口、应用服务编排和启动配置时改这里。业务规则优先下沉到 domain，opencode 调用优先经过 `test-agent-opencode-client`。
+Run 编排不得把平台 `workspaceId` 当作 opencode `workspace` query 传入；本地集成默认只传 workspace rootPath 对应的 `directory`。

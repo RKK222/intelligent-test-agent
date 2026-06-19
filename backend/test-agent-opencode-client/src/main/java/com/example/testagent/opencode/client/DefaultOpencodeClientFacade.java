@@ -55,12 +55,26 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
     }
 
     @Override
+    public Mono<OpencodeCreateSessionResult> createSession(OpencodeCreateSessionCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        return applyPolicy(
+                Mono.defer(() -> gateway.createSession(
+                        command.node(),
+                        command.directory(),
+                        command.workspace(),
+                        command.title(),
+                        command.traceId())),
+                "createSession",
+                command.node());
+    }
+
+    @Override
     public Mono<OpencodeCancelResult> cancelSession(OpencodeCancelCommand command) {
         Objects.requireNonNull(command, "command must not be null");
         return applyPolicy(
                 Mono.defer(() -> gateway.cancelSession(
                         command.node(),
-                        command.sessionId(),
+                        command.opencodeSessionId(),
                         command.directory(),
                         command.workspace(),
                         command.traceId())),
@@ -74,7 +88,7 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
         return applyPolicy(
                 Mono.defer(() -> gateway.startRun(
                         command.node(),
-                        command.sessionId(),
+                        command.opencodeSessionId(),
                         command.directory(),
                         command.workspace(),
                         command.prompt(),

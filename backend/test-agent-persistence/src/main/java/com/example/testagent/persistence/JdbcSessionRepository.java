@@ -2,11 +2,13 @@ package com.example.testagent.persistence;
 
 import com.example.testagent.common.pagination.PageRequest;
 import com.example.testagent.common.pagination.PageResponse;
+import com.example.testagent.domain.node.ExecutionNodeId;
 import com.example.testagent.domain.session.Session;
 import com.example.testagent.domain.session.SessionId;
 import com.example.testagent.domain.session.SessionRepository;
 import com.example.testagent.domain.session.SessionStatus;
 import com.example.testagent.domain.workspace.WorkspaceId;
+import java.time.Instant;
 import java.util.Optional;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -26,7 +28,9 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
             SessionStatus.valueOf(rs.getString("status")),
             instant(rs, "created_at"),
             instant(rs, "updated_at"),
-            rs.getString("trace_id"));
+            rs.getString("trace_id"),
+            rs.getString("opencode_session_id"),
+            executionNodeId(rs.getString("opencode_execution_node_id")));
 
     public JdbcSessionRepository(JdbcClient jdbcClient) {
         this.jdbcClient = jdbcClient;
@@ -38,7 +42,9 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
             jdbcClient.sql("""
                             update sessions
                             set workspace_id = :workspaceId, title = :title, status = :status,
-                                trace_id = :traceId, created_at = :createdAt, updated_at = :updatedAt
+                                trace_id = :traceId, created_at = :createdAt, updated_at = :updatedAt,
+                                opencode_session_id = :opencodeSessionId,
+                                opencode_execution_node_id = :opencodeExecutionNodeId
                             where session_id = :sessionId
                             """)
                     .param("sessionId", session.sessionId().value())
@@ -48,11 +54,19 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                     .param("traceId", session.traceId())
                     .param("createdAt", session.createdAt())
                     .param("updatedAt", session.updatedAt())
+                    .param("opencodeSessionId", session.opencodeSessionId())
+                    .param("opencodeExecutionNodeId", executionNodeIdValue(session.opencodeExecutionNodeId()))
                     .update();
         } else {
             jdbcClient.sql("""
-                            insert into sessions(session_id, workspace_id, title, status, trace_id, created_at, updated_at)
-                            values (:sessionId, :workspaceId, :title, :status, :traceId, :createdAt, :updatedAt)
+                            insert into sessions(
+                                session_id, workspace_id, title, status, trace_id, created_at, updated_at,
+                                opencode_session_id, opencode_execution_node_id
+                            )
+                            values (
+                                :sessionId, :workspaceId, :title, :status, :traceId, :createdAt, :updatedAt,
+                                :opencodeSessionId, :opencodeExecutionNodeId
+                            )
                             """)
                     .param("sessionId", session.sessionId().value())
                     .param("workspaceId", session.workspaceId().value())
@@ -61,6 +75,8 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                     .param("traceId", session.traceId())
                     .param("createdAt", session.createdAt())
                     .param("updatedAt", session.updatedAt())
+                    .param("opencodeSessionId", session.opencodeSessionId())
+                    .param("opencodeExecutionNodeId", executionNodeIdValue(session.opencodeExecutionNodeId()))
                     .update();
         }
         return session;
@@ -69,7 +85,8 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
     @Override
     public Optional<Session> findById(SessionId sessionId) {
         return jdbcClient.sql("""
-                        select session_id, workspace_id, title, status, trace_id, created_at, updated_at
+                        select session_id, workspace_id, title, status, trace_id, created_at, updated_at,
+                               opencode_session_id, opencode_execution_node_id
                         from sessions
                         where session_id = :sessionId
                         """)
@@ -81,7 +98,8 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
     @Override
     public PageResponse<Session> findByWorkspaceId(WorkspaceId workspaceId, PageRequest pageRequest) {
         var items = jdbcClient.sql("""
-                        select session_id, workspace_id, title, status, trace_id, created_at, updated_at
+                        select session_id, workspace_id, title, status, trace_id, created_at, updated_at,
+                               opencode_session_id, opencode_execution_node_id
                         from sessions
                         where workspace_id = :workspaceId
                         order by created_at desc, id desc
@@ -101,5 +119,37 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                 .query(Long.class)
                 .single();
         return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);
+    }
+
+    @Override
+    public Optional<Session> attachOpencodeSession(
+            SessionId sessionId,
+            String opencodeSessionId,
+            ExecutionNodeId executionNodeId,
+            Instant updatedAt,
+            String traceId) {
+        jdbcClient.sql("""
+                        update sessions
+                        set opencode_session_id = :opencodeSessionId,
+                            opencode_execution_node_id = :opencodeExecutionNodeId,
+                            updated_at = :updatedAt,
+                            trace_id = :traceId
+                        where session_id = :sessionId
+                        """)
+                .param("sessionId", sessionId.value())
+                .param("opencodeSessionId", opencodeSessionId)
+                .param("opencodeExecutionNodeId", executionNodeId.value())
+                .param("updatedAt", updatedAt)
+                .param("traceId", traceId)
+                .update();
+        return findById(sessionId);
+    }
+
+    private ExecutionNodeId executionNodeId(String value) {
+        return value == null ? null : new ExecutionNodeId(value);
+    }
+
+    private String executionNodeIdValue(ExecutionNodeId executionNodeId) {
+        return executionNodeId == null ? null : executionNodeId.value();
     }
 }

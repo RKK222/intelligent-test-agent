@@ -10,6 +10,7 @@ import com.example.testagent.domain.node.ExecutionNodeRepository;
 import com.example.testagent.domain.routing.ExecutionNodeRouter;
 import com.example.testagent.domain.routing.RoutingDecision;
 import com.example.testagent.domain.routing.RoutingDecisionRepository;
+import com.example.testagent.domain.routing.RoutingReason;
 import com.example.testagent.domain.run.Run;
 import com.example.testagent.domain.run.RunId;
 import com.example.testagent.domain.run.RunRepository;
@@ -25,6 +26,8 @@ import com.example.testagent.domain.workspace.WorkspaceRepository;
 import com.example.testagent.event.RunEventAppender;
 import com.example.testagent.opencode.client.OpencodeCancelCommand;
 import com.example.testagent.opencode.client.OpencodeClientFacade;
+import com.example.testagent.opencode.client.OpencodeCreateSessionCommand;
+import com.example.testagent.opencode.client.OpencodeCreateSessionResult;
 import com.example.testagent.opencode.client.OpencodeStartRunCommand;
 import com.example.testagent.opencode.client.OpencodeStreamEventsCommand;
 import java.time.Instant;
@@ -88,30 +91,21 @@ public class RunApplicationService {
         saveUserMessage(session.sessionId(), prompt, traceId, now);
         append(pending.runId(), RunEventType.RUN_CREATED, traceId, now, Map.of("status", RunStatus.PENDING.name()));
 
-        RoutingDecision decision = executionNodeRouter.route(
-                pending.runId(),
-                executionNodeRepository.findRoutableNodes(ROUTING_CANDIDATE_LIMIT),
-                now,
-                traceId);
-        routingDecisionRepository.save(decision);
-        ExecutionNode node = executionNodeRepository.findById(decision.executionNodeId())
-                .orElseThrow(() -> new PlatformException(
-                        ErrorCode.OPENCODE_UNAVAILABLE,
-                        "路由节点不存在",
-                        Map.of("nodeId", decision.executionNodeId().value())));
-
         try {
+            OpencodeRoutingTarget target = resolveOpencodeTarget(session, pending.runId(), now, traceId);
+            routingDecisionRepository.save(target.decision());
+            Session opencodeSession = ensureOpencodeSession(session, workspace, target.node(), traceId);
             opencodeClientFacade.startRun(new OpencodeStartRunCommand(
-                            node,
-                            session.sessionId(),
+                            target.node(),
+                            opencodeSession.opencodeSessionId(),
                             workspace.rootPath(),
-                            workspace.workspaceId().value(),
+                            null,
                             prompt,
                             traceId))
                     .block();
             Run running = runRepository.save(pending.start(Instant.now()));
             append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
-            subscribeOpencodeEvents(running, node, workspace, traceId);
+            subscribeOpencodeEvents(running, target.node(), workspace, traceId);
             return running;
         } catch (PlatformException exception) {
             Run failed = runRepository.save(pending.fail(Instant.now()));
@@ -143,14 +137,16 @@ public class RunApplicationService {
         if (decision != null) {
             Session session = findSession(run.sessionId());
             Workspace workspace = findWorkspace(run.workspaceId());
-            executionNodeRepository.findById(decision.executionNodeId()).ifPresent(node ->
-                    opencodeClientFacade.cancelSession(new OpencodeCancelCommand(
-                                    node,
-                                    session.sessionId(),
-                                    workspace.rootPath(),
-                                    workspace.workspaceId().value(),
-                                    traceId))
-                            .block());
+            if (session.hasOpencodeSessionMapping()) {
+                executionNodeRepository.findById(session.opencodeExecutionNodeId()).ifPresent(node ->
+                        opencodeClientFacade.cancelSession(new OpencodeCancelCommand(
+                                        node,
+                                        session.opencodeSessionId(),
+                                        workspace.rootPath(),
+                                        null,
+                                        traceId))
+                                .block());
+            }
         }
         Run cancelled = cancelling.status() == RunStatus.CANCELLED
                 ? cancelling
@@ -179,6 +175,72 @@ public class RunApplicationService {
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value())));
     }
 
+    private OpencodeRoutingTarget resolveOpencodeTarget(Session session, RunId runId, Instant now, String traceId) {
+        if (session.hasOpencodeSessionMapping()) {
+            ExecutionNode node = executionNodeRepository.findById(session.opencodeExecutionNodeId())
+                    .orElseThrow(() -> new PlatformException(
+                            ErrorCode.OPENCODE_UNAVAILABLE,
+                            "会话绑定的 opencode 执行节点不存在",
+                            Map.of(
+                                    "sessionId", session.sessionId().value(),
+                                    "nodeId", session.opencodeExecutionNodeId().value())));
+            if (!node.canAcceptRun()) {
+                throw new PlatformException(
+                        ErrorCode.OPENCODE_UNAVAILABLE,
+                        "会话绑定的 opencode 执行节点不可用",
+                        Map.of(
+                                "sessionId", session.sessionId().value(),
+                                "nodeId", node.executionNodeId().value(),
+                                "status", node.status().name()));
+            }
+            return new OpencodeRoutingTarget(
+                    node,
+                    new RoutingDecision(runId, node.executionNodeId(), RoutingReason.STICKY_SESSION, now, traceId));
+        }
+
+        RoutingDecision decision = executionNodeRouter.route(
+                runId,
+                executionNodeRepository.findRoutableNodes(ROUTING_CANDIDATE_LIMIT),
+                now,
+                traceId);
+        ExecutionNode node = executionNodeRepository.findById(decision.executionNodeId())
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.OPENCODE_UNAVAILABLE,
+                        "路由节点不存在",
+                        Map.of("nodeId", decision.executionNodeId().value())));
+        return new OpencodeRoutingTarget(node, decision);
+    }
+
+    private Session ensureOpencodeSession(Session session, Workspace workspace, ExecutionNode node, String traceId) {
+        if (session.hasOpencodeSessionMapping()) {
+            return session;
+        }
+        // 首次 Run 才创建远端 opencode session，平台 ses_ ID 始终只留在平台内部。
+        OpencodeCreateSessionResult created = opencodeClientFacade.createSession(new OpencodeCreateSessionCommand(
+                        node,
+                        workspace.rootPath(),
+                        null,
+                        session.title(),
+                        traceId))
+                .block();
+        if (created == null) {
+            throw new PlatformException(
+                    ErrorCode.OPENCODE_BAD_GATEWAY,
+                    "opencode 创建会话未返回结果",
+                    Map.of("sessionId", session.sessionId().value(), "nodeId", node.executionNodeId().value()));
+        }
+        return sessionRepository.attachOpencodeSession(
+                        session.sessionId(),
+                        created.opencodeSessionId(),
+                        node.executionNodeId(),
+                        Instant.now(),
+                        traceId)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.NOT_FOUND,
+                        "Session 不存在",
+                        Map.of("sessionId", session.sessionId().value())));
+    }
+
     private void append(RunId runId, RunEventType type, String traceId, Instant occurredAt, Map<String, Object> payload) {
         runEventAppender.append(new RunEventDraft(runId, type, traceId, occurredAt, payload));
     }
@@ -188,7 +250,7 @@ public class RunApplicationService {
                         node,
                         run.runId(),
                         workspace.rootPath(),
-                        workspace.workspaceId().value(),
+                        null,
                         traceId))
                 .doOnNext(runEventAppender::append)
                 .doOnError(error -> failRunFromStream(run, traceId, error))
@@ -210,5 +272,8 @@ public class RunApplicationService {
             LOGGER.warn("Failed to persist opencode stream failure, runId={}, traceId={}",
                     run.runId().value(), traceId, exception);
         }
+    }
+
+    private record OpencodeRoutingTarget(ExecutionNode node, RoutingDecision decision) {
     }
 }

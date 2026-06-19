@@ -11,7 +11,6 @@ import com.example.testagent.domain.node.ExecutionNode;
 import com.example.testagent.domain.node.ExecutionNodeId;
 import com.example.testagent.domain.node.ExecutionNodeStatus;
 import com.example.testagent.domain.run.RunId;
-import com.example.testagent.domain.session.SessionId;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Duration;
@@ -88,12 +87,33 @@ class DefaultOpencodeClientFacadeTest {
 
         OpencodeCancelResult result = facade.cancelSession(new OpencodeCancelCommand(
                 node(),
-                new SessionId("ses_1234567890abcdef"),
+                "ses_remote1234567890abcdef",
                 "/tmp/demo",
-                "workspace",
+                null,
                 "trace_1234567890abcdef")).block();
 
         assertThat(result.cancelled()).isTrue();
+        assertThat(gateway.lastOpencodeSessionId).isEqualTo("ses_remote1234567890abcdef");
+        assertThat(gateway.lastWorkspace).isNull();
+    }
+
+    @Test
+    void facadeCreatesOpencodeSessionAndPropagatesOptionalWorkspace() {
+        FakeGateway gateway = new FakeGateway();
+        OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);
+
+        OpencodeCreateSessionResult result = facade.createSession(new OpencodeCreateSessionCommand(
+                node(),
+                "/tmp/demo",
+                null,
+                "Demo session",
+                "trace_1234567890abcdef")).block();
+
+        assertThat(result.opencodeSessionId()).isEqualTo("ses_remote1234567890abcdef");
+        assertThat(gateway.lastTraceId).isEqualTo("trace_1234567890abcdef");
+        assertThat(gateway.lastDirectory).isEqualTo("/tmp/demo");
+        assertThat(gateway.lastWorkspace).isNull();
+        assertThat(gateway.lastTitle).isEqualTo("Demo session");
     }
 
     @Test
@@ -103,15 +123,17 @@ class DefaultOpencodeClientFacadeTest {
 
         OpencodeStartRunResult result = facade.startRun(new OpencodeStartRunCommand(
                 node(),
-                new SessionId("ses_1234567890abcdef"),
+                "ses_remote1234567890abcdef",
                 "/tmp/demo",
-                "wrk_1234567890abcdef",
+                null,
                 "run the tests",
                 "trace_1234567890abcdef")).block();
 
         assertThat(result.accepted()).isTrue();
         assertThat(gateway.lastTraceId).isEqualTo("trace_1234567890abcdef");
+        assertThat(gateway.lastOpencodeSessionId).isEqualTo("ses_remote1234567890abcdef");
         assertThat(gateway.lastPrompt).isEqualTo("run the tests");
+        assertThat(gateway.lastWorkspace).isNull();
     }
 
     @Test
@@ -127,7 +149,7 @@ class DefaultOpencodeClientFacadeTest {
                 node(),
                 new RunId("run_1234567890abcdef"),
                 "/tmp/demo",
-                "workspace",
+                null,
                 "trace_1234567890abcdef")).blockFirst();
 
         assertThat(draft.type()).isEqualTo(RunEventType.ASSISTANT_MESSAGE_DELTA);
@@ -174,6 +196,10 @@ class DefaultOpencodeClientFacadeTest {
         private java.util.function.Supplier<Mono<OpencodeHealthResult>> healthSupplier;
         private Flux<JsonNode> events = Flux.empty();
         private String lastTraceId;
+        private String lastOpencodeSessionId;
+        private String lastDirectory;
+        private String lastWorkspace;
+        private String lastTitle;
 
         @Override
         public Mono<OpencodeHealthResult> health(ExecutionNode node, String traceId) {
@@ -185,25 +211,45 @@ class DefaultOpencodeClientFacadeTest {
         }
 
         @Override
+        public Mono<OpencodeCreateSessionResult> createSession(
+                ExecutionNode node,
+                String directory,
+                String workspace,
+                String title,
+                String traceId) {
+            lastTraceId = traceId;
+            lastDirectory = directory;
+            lastWorkspace = workspace;
+            lastTitle = title;
+            return Mono.just(new OpencodeCreateSessionResult("ses_remote1234567890abcdef"));
+        }
+
+        @Override
         public Mono<OpencodeCancelResult> cancelSession(
                 ExecutionNode node,
-                SessionId sessionId,
+                String opencodeSessionId,
                 String directory,
                 String workspace,
                 String traceId) {
             lastTraceId = traceId;
+            lastOpencodeSessionId = opencodeSessionId;
+            lastDirectory = directory;
+            lastWorkspace = workspace;
             return Mono.just(new OpencodeCancelResult(true));
         }
 
         @Override
         public Mono<OpencodeStartRunResult> startRun(
                 ExecutionNode node,
-                SessionId sessionId,
+                String opencodeSessionId,
                 String directory,
                 String workspace,
                 String prompt,
                 String traceId) {
             lastTraceId = traceId;
+            lastOpencodeSessionId = opencodeSessionId;
+            lastDirectory = directory;
+            lastWorkspace = workspace;
             lastPrompt = prompt;
             return Mono.just(new OpencodeStartRunResult(true));
         }
@@ -211,6 +257,8 @@ class DefaultOpencodeClientFacadeTest {
         @Override
         public Flux<JsonNode> streamEvents(ExecutionNode node, String directory, String workspace, String traceId) {
             lastTraceId = traceId;
+            lastDirectory = directory;
+            lastWorkspace = workspace;
             return events;
         }
 

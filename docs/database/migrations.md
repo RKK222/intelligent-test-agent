@@ -34,10 +34,27 @@
 - `uk_session_messages_message_id` 保证消息业务 ID 唯一。
 - `idx_session_messages_session_created(session_id, created_at, id)` 支持按会话分页读取消息。
 
+## V3 Session opencode 映射
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V3__add_session_opencode_mapping.sql` 为 `sessions` 增加后端内部映射字段：
+
+| 字段 | 说明 |
+|---|---|
+| `opencode_session_id` | 远端 opencode session id，可空；首次 Run 成功创建远端 session 后写入。 |
+| `opencode_execution_node_id` | 远端 session 所在 execution node，可空；引用 `execution_nodes.execution_node_id`。 |
+
+约束和索引：
+
+- `fk_sessions_opencode_execution_node` 保证映射节点存在。
+- `chk_sessions_opencode_mapping` 保证两个映射字段同时为空或同时非空。
+- `uk_sessions_opencode_session_id` 保证远端 opencode session 与平台 session 一对一。
+- `idx_sessions_opencode_execution_node` 支持按执行节点排查会话映射。
+
 ## 兼容策略
 
 - 所有表使用自增 surrogate PK；业务层只使用带前缀业务 ID。
 - 新增字段优先允许空值或提供默认值，避免破坏旧数据。
+- `sessions.opencode_session_id` 和 `sessions.opencode_execution_node_id` 是后端内部字段，不进入 API DTO；旧 session 两列为空时由首次 Run 懒创建远端 opencode session。
 - `run_events.payload_json` 和 `execution_nodes.capabilities_json` 当前为 JSON 文本，便于 H2 和 PostgreSQL 共用测试；未来迁移到 JSONB 时必须先保持旧列读取兼容。
 - `session_messages.content` 当前直接保存文本；后续如拆分富文本 parts，必须保留旧 content 读取兼容。
 - 删除或重命名状态、事件类型、数据库字段必须拆分为读取兼容、数据迁移、清理三个阶段。

@@ -1,7 +1,10 @@
 package com.example.testagent.app.run;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.example.testagent.common.error.ErrorCode;
+import com.example.testagent.common.error.PlatformException;
 import com.example.testagent.common.pagination.PageRequest;
 import com.example.testagent.common.pagination.PageResponse;
 import com.example.testagent.domain.event.RunEvent;
@@ -33,6 +36,8 @@ import com.example.testagent.event.RunEventAppender;
 import com.example.testagent.opencode.client.OpencodeCancelCommand;
 import com.example.testagent.opencode.client.OpencodeCancelResult;
 import com.example.testagent.opencode.client.OpencodeClientFacade;
+import com.example.testagent.opencode.client.OpencodeCreateSessionCommand;
+import com.example.testagent.opencode.client.OpencodeCreateSessionResult;
 import com.example.testagent.opencode.client.OpencodeHealthCommand;
 import com.example.testagent.opencode.client.OpencodeHealthResult;
 import com.example.testagent.opencode.client.OpencodeStartRunCommand;
@@ -51,15 +56,17 @@ import reactor.core.publisher.Mono;
 class RunApplicationServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-06-19T00:00:00Z");
+    private static final String REMOTE_SESSION_ID = "ses_remote1234567890abcdef";
 
     @Test
-    void serviceCreatesRunRoutesNodeStartsOpencodeAndAppendsEvents() {
+    void serviceCreatesRemoteOpencodeSessionOnFirstRunAndDoesNotSendPlatformWorkspace() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(),
-                new FakeSessionRepository(),
+                sessions,
                 runs,
                 new FakeSessionMessageRepository(),
                 new FakeExecutionNodeRepository(),
@@ -72,8 +79,120 @@ class RunApplicationServiceTest {
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
         assertThat(runs.saved).extracting(Run::status).contains(RunStatus.PENDING, RunStatus.RUNNING);
         assertThat(facade.lastPrompt).isEqualTo("run the tests");
+        assertThat(facade.createSessionCommands).hasSize(1);
+        assertThat(facade.createSessionCommands.getFirst().directory()).isEqualTo("/tmp/demo");
+        assertThat(facade.createSessionCommands.getFirst().workspace()).isNull();
+        assertThat(facade.startRunCommands).hasSize(1);
+        assertThat(facade.startRunCommands.getFirst().opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
+        assertThat(facade.startRunCommands.getFirst().workspace()).isNull();
+        assertThat(sessions.current.opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
+        assertThat(sessions.current.opencodeExecutionNodeId()).isEqualTo(node().executionNodeId());
         assertThat(events.events).extracting(RunEvent::type)
                 .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED);
+    }
+
+    @Test
+    void serviceReusesMappedOpencodeSessionAndStickyNodeOnLaterRun() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        Session mappedSession = session().attachOpencodeSession(
+                REMOTE_SESSION_ID,
+                node().executionNodeId(),
+                NOW.plusSeconds(1),
+                "trace_1234567890abcdef");
+        FakeRoutingDecisionRepository routingDecisions = new FakeRoutingDecisionRepository();
+        FakeExecutionNodeRepository nodes = new FakeExecutionNodeRepository();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(mappedSession),
+                runs,
+                new FakeSessionMessageRepository(),
+                nodes,
+                routingDecisions,
+                new RunEventAppender(events),
+                facade);
+
+        Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run again", "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(facade.createSessionCommands).isEmpty();
+        assertThat(nodes.findRoutableNodesCalls).isZero();
+        assertThat(routingDecisions.saved).hasSize(1);
+        assertThat(routingDecisions.saved.getFirst().executionNodeId()).isEqualTo(node().executionNodeId());
+        assertThat(facade.startRunCommands).hasSize(1);
+        assertThat(facade.startRunCommands.getFirst().opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
+        assertThat(facade.startRunCommands.getFirst().workspace()).isNull();
+    }
+
+    @Test
+    void serviceFailsRunWhenMappedExecutionNodeCannotAcceptRun() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        ExecutionNode offlineNode = node(ExecutionNodeStatus.OFFLINE, 0, 4);
+        Session mappedSession = session().attachOpencodeSession(
+                REMOTE_SESSION_ID,
+                offlineNode.executionNodeId(),
+                NOW.plusSeconds(1),
+                "trace_1234567890abcdef");
+        FakeExecutionNodeRepository nodes = new FakeExecutionNodeRepository(offlineNode);
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(mappedSession),
+                runs,
+                new FakeSessionMessageRepository(),
+                nodes,
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                facade);
+
+        assertThatThrownBy(() -> service.startRun(
+                        new SessionId("ses_1234567890abcdef"),
+                        "run while node offline",
+                        "trace_1234567890abcdef"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+
+        assertThat(facade.createSessionCommands).isEmpty();
+        assertThat(facade.startRunCommands).isEmpty();
+        assertThat(runs.saved).extracting(Run::status).contains(RunStatus.PENDING, RunStatus.FAILED);
+        assertThat(events.events).extracting(RunEvent::type)
+                .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_FAILED);
+    }
+
+    @Test
+    void serviceMarksRunFailedWhenOpencodeSessionCreationFails() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.createSessionError = new PlatformException(
+                ErrorCode.OPENCODE_UNAVAILABLE,
+                "opencode unavailable",
+                Map.of("nodeId", node().executionNodeId().value()));
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                sessions,
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                facade);
+
+        assertThatThrownBy(() -> service.startRun(
+                        new SessionId("ses_1234567890abcdef"),
+                        "run the tests",
+                        "trace_1234567890abcdef"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+
+        assertThat(sessions.current.opencodeSessionId()).isNull();
+        assertThat(runs.saved).extracting(Run::status).contains(RunStatus.PENDING, RunStatus.FAILED);
+        assertThat(facade.startRunCommands).isEmpty();
+        assertThat(events.events).extracting(RunEvent::type)
+                .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_FAILED);
     }
 
     @Test
@@ -129,12 +248,16 @@ class RunApplicationServiceTest {
     }
 
     private static ExecutionNode node() {
+        return node(ExecutionNodeStatus.READY, 0, 4);
+    }
+
+    private static ExecutionNode node(ExecutionNodeStatus status, int runningRuns, int maxRuns) {
         return new ExecutionNode(
                 new ExecutionNodeId("node_1234567890abcdef"),
                 "http://127.0.0.1:4096",
-                ExecutionNodeStatus.READY,
-                0,
-                4,
+                status,
+                runningRuns,
+                maxRuns,
                 100,
                 NOW,
                 Set.of("chat"),
@@ -161,19 +284,41 @@ class RunApplicationServiceTest {
     }
 
     private static final class FakeSessionRepository implements com.example.testagent.domain.session.SessionRepository {
+        private Session current;
+
+        private FakeSessionRepository() {
+            this(session());
+        }
+
+        private FakeSessionRepository(Session current) {
+            this.current = current;
+        }
+
         @Override
         public Session save(Session session) {
+            current = session;
             return session;
         }
 
         @Override
         public Optional<Session> findById(SessionId sessionId) {
-            return Optional.of(session());
+            return Optional.of(current);
         }
 
         @Override
         public PageResponse<Session> findByWorkspaceId(WorkspaceId workspaceId, PageRequest pageRequest) {
-            return new PageResponse<>(List.of(session()), pageRequest.page(), pageRequest.size(), 1);
+            return new PageResponse<>(List.of(current), pageRequest.page(), pageRequest.size(), 1);
+        }
+
+        @Override
+        public Optional<Session> attachOpencodeSession(
+                SessionId sessionId,
+                String opencodeSessionId,
+                ExecutionNodeId executionNodeId,
+                Instant updatedAt,
+                String traceId) {
+            current = current.attachOpencodeSession(opencodeSessionId, executionNodeId, updatedAt, traceId);
+            return Optional.of(current);
         }
     }
 
@@ -210,6 +355,17 @@ class RunApplicationServiceTest {
     }
 
     private static final class FakeExecutionNodeRepository implements ExecutionNodeRepository {
+        private final ExecutionNode node;
+        private int findRoutableNodesCalls;
+
+        private FakeExecutionNodeRepository() {
+            this(node());
+        }
+
+        private FakeExecutionNodeRepository(ExecutionNode node) {
+            this.node = node;
+        }
+
         @Override
         public ExecutionNode save(ExecutionNode executionNode) {
             return executionNode;
@@ -217,18 +373,22 @@ class RunApplicationServiceTest {
 
         @Override
         public Optional<ExecutionNode> findById(ExecutionNodeId executionNodeId) {
-            return Optional.of(node());
+            return Optional.of(node);
         }
 
         @Override
         public List<ExecutionNode> findRoutableNodes(int limit) {
-            return List.of(node());
+            findRoutableNodesCalls++;
+            return List.of(node);
         }
     }
 
     private static final class FakeRoutingDecisionRepository implements RoutingDecisionRepository {
+        private final List<RoutingDecision> saved = new ArrayList<>();
+
         @Override
         public RoutingDecision save(RoutingDecision routingDecision) {
+            saved.add(routingDecision);
             return routingDecision;
         }
 
@@ -262,11 +422,23 @@ class RunApplicationServiceTest {
     }
 
     private static final class FakeOpencodeFacade implements OpencodeClientFacade {
+        private final List<OpencodeCreateSessionCommand> createSessionCommands = new ArrayList<>();
+        private final List<OpencodeStartRunCommand> startRunCommands = new ArrayList<>();
         private String lastPrompt;
+        private RuntimeException createSessionError;
 
         @Override
         public Mono<OpencodeHealthResult> health(OpencodeHealthCommand command) {
             return Mono.just(new OpencodeHealthResult(true, command.node().baseUrl()));
+        }
+
+        @Override
+        public Mono<OpencodeCreateSessionResult> createSession(OpencodeCreateSessionCommand command) {
+            createSessionCommands.add(command);
+            if (createSessionError != null) {
+                return Mono.error(createSessionError);
+            }
+            return Mono.just(new OpencodeCreateSessionResult(REMOTE_SESSION_ID));
         }
 
         @Override
@@ -276,6 +448,7 @@ class RunApplicationServiceTest {
 
         @Override
         public Mono<OpencodeStartRunResult> startRun(OpencodeStartRunCommand command) {
+            startRunCommands.add(command);
             lastPrompt = command.prompt();
             return Mono.just(new OpencodeStartRunResult(true));
         }

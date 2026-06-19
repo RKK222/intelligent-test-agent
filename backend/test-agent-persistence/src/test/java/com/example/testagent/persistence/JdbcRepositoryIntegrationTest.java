@@ -97,6 +97,30 @@ class JdbcRepositoryIntegrationTest {
     }
 
     @Test
+    void sessionsPersistNullableOpencodeMappingAndAttachRemoteSession() {
+        workspaces.save(workspace());
+        sessions.save(session());
+
+        Session existing = sessions.findById(new SessionId("ses_1234567890abcdef")).orElseThrow();
+        assertThat(existing.opencodeSessionId()).isNull();
+        assertThat(existing.opencodeExecutionNodeId()).isNull();
+
+        executionNodes.save(executionNode());
+        Session mapped = sessions.attachOpencodeSession(
+                        new SessionId("ses_1234567890abcdef"),
+                        "ses_remote1234567890abcdef",
+                        new ExecutionNodeId("node_1234567890abcdef"),
+                        NOW.plusSeconds(1),
+                        "trace_attach1234567890")
+                .orElseThrow();
+
+        assertThat(mapped.opencodeSessionId()).isEqualTo("ses_remote1234567890abcdef");
+        assertThat(mapped.opencodeExecutionNodeId()).isEqualTo(new ExecutionNodeId("node_1234567890abcdef"));
+        assertThat(mapped.updatedAt()).isEqualTo(NOW.plusSeconds(1));
+        assertThat(sessions.findById(mapped.sessionId())).contains(mapped);
+    }
+
+    @Test
     void runEventsAppendWithMonotonicSeqAndReplayAfterLastSeq() {
         workspaces.save(workspace());
         sessions.save(session());

@@ -1,7 +1,6 @@
 package com.example.testagent.opencode.client;
 
 import com.example.testagent.domain.node.ExecutionNode;
-import com.example.testagent.domain.session.SessionId;
 import com.fasterxml.jackson.databind.JsonNode;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -13,16 +12,23 @@ public interface OpencodeSdkGateway {
 
     Mono<OpencodeHealthResult> health(ExecutionNode node, String traceId);
 
+    Mono<OpencodeCreateSessionResult> createSession(
+            ExecutionNode node,
+            String directory,
+            String workspace,
+            String title,
+            String traceId);
+
     Mono<OpencodeCancelResult> cancelSession(
             ExecutionNode node,
-            SessionId sessionId,
+            String opencodeSessionId,
             String directory,
             String workspace,
             String traceId);
 
     Mono<OpencodeStartRunResult> startRun(
             ExecutionNode node,
-            SessionId sessionId,
+            String opencodeSessionId,
             String directory,
             String workspace,
             String prompt,

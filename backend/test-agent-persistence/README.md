@@ -25,6 +25,7 @@
 
 - `V1__create_core_tables.sql`：创建 Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 核心表。
 - `V2__create_session_messages.sql`：创建 SessionMessage 表和按 session 分页索引。
+- `V3__add_session_opencode_mapping.sql`：为 Session 增加可空的远端 opencode session/node 内部映射列、约束和索引。
 - `JdbcWorkspaceRepository`、`JdbcSessionRepository`、`JdbcRunRepository`、`JdbcRunEventRepository`、`JdbcExecutionNodeRepository`、`JdbcRoutingDecisionRepository`。
 - `JdbcSessionMessageRepository`：实现会话消息保存、查询、分页和计数。
 - RunEvent append-only：持久化层分配 `eventId` 和同一 run 内单调递增 `seq`，支持 `runId + lastSeq` 增量读取。
@@ -50,3 +51,4 @@
 
 新增表结构、Repository、数据库映射和 migration 时改这里。不要把任务状态机或 HTTP API 编排逻辑放进本模块。
 JSON payload/capabilities 当前以文本列保存，未来切换 PostgreSQL JSONB 必须同步兼容策略和测试。
+Session 的 `opencode_session_id` 与 `opencode_execution_node_id` 是后端内部运行时映射，新增查询或导出时不得默认暴露给前端 DTO。

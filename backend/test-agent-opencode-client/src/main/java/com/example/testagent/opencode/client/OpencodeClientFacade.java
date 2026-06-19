@@ -11,6 +11,8 @@ public interface OpencodeClientFacade {
 
     Mono<OpencodeHealthResult> health(OpencodeHealthCommand command);
 
+    Mono<OpencodeCreateSessionResult> createSession(OpencodeCreateSessionCommand command);
+
     Mono<OpencodeCancelResult> cancelSession(OpencodeCancelCommand command);
 
     Mono<OpencodeStartRunResult> startRun(OpencodeStartRunCommand command);

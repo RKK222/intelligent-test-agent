@@ -1,25 +1,24 @@
 package com.example.testagent.opencode.client;
 
 import com.example.testagent.domain.node.ExecutionNode;
-import com.example.testagent.domain.run.RunId;
 import com.example.testagent.domain.support.DomainValidation;
 import java.util.Objects;
 
 /**
- * opencode 事件订阅命令，stream 输出会被转换为平台 RunEventDraft。
+ * 创建远端 opencode 会话命令；workspace query 仅在接入 opencode workspace 控制面时传入。
  */
-public record OpencodeStreamEventsCommand(
+public record OpencodeCreateSessionCommand(
         ExecutionNode node,
-        RunId runId,
         String directory,
         String workspace,
+        String title,
         String traceId) {
 
-    public OpencodeStreamEventsCommand {
+    public OpencodeCreateSessionCommand {
         Objects.requireNonNull(node, "node must not be null");
-        Objects.requireNonNull(runId, "runId must not be null");
         directory = DomainValidation.requireText(directory, "directory");
         workspace = optionalText(workspace);
+        title = DomainValidation.requireText(title, "title");
         traceId = DomainValidation.requireText(traceId, "traceId");
     }
 

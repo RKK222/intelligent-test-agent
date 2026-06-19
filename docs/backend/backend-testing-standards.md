@@ -38,7 +38,7 @@
 1. `OpencodeClientFacade` 优先通过 `OpencodeSdkGateway` stub 测试成功、超时、远端错误、取消、重试和 traceId 透传。
 2. 事件转换测试必须覆盖已知 opencode raw type 和未知事件兜底。
 3. 只有 `GeneratedOpencodeSdkGateway` 允许直接依赖 generated SDK；依赖边界需要用 `dependency:tree` 或 `rg "com\\.example\\.opencode\\.sdk"` 验证。
-4. `startRun` 必须覆盖 `prompt_async` 成功、超时、5xx、连接失败、有限 retry 和 `X-Trace-Id` 透传。
+4. `createSession`、`startRun`、`cancelSession` 和 `streamRunEvents` 必须覆盖路径、query、body、`X-Trace-Id` 透传和 opencode 错误映射；本地模式测试必须验证不会把平台 `workspaceId` 作为 opencode `workspace` query 传入。
 
 ## 本地集成脚本测试
 
