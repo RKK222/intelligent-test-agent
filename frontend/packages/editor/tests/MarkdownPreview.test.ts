@@ -50,6 +50,21 @@ describe("MarkdownPreview", () => {
     expect(code?.classList.contains("hljs")).toBe(true);
   });
 
+  it("顶级块带源码行号 data-source-line，供滚动联动与序号对齐", async () => {
+    const { container } = render(MarkdownPreview, {
+      props: { content: "# 标题\n\n第一段\n\n第二段" }
+    });
+    await waitRender();
+
+    const body = container.querySelector(".markdown-body");
+    const blocks = body?.querySelectorAll<HTMLElement>("[data-source-line]");
+    // h1=1, 第一段 p=3, 第二段 p=5
+    const lines = Array.from(blocks ?? []).map((el) => el.getAttribute("data-source-line"));
+    expect(lines).toContain("1");
+    expect(lines).toContain("3");
+    expect(lines).toContain("5");
+  });
+
   it("空内容显示占位", async () => {
     const { findByText } = render(MarkdownPreview, { props: { content: "   " } });
     expect(await findByText("无内容")).toBeTruthy();

@@ -40,6 +40,12 @@ const showPreview = ref(false);
 // 上下分屏比例（上=编辑器百分比），仅组件内状态，不持久化
 const splitPct = ref(50);
 
+// 上下分屏滚动联动锁：防止编辑器↔预览双向同步形成回环（非响应式，命令式读取）
+const scrollLock = { value: false };
+// 预览组件句柄，用于调用 scrollToSourceLine
+const previewRef = shallowRef<InstanceType<typeof MarkdownPreview> | null>(null);
+let editorScrollRaf = 0;
+
 const containerEl = ref<HTMLElement | null>(null);
 // 编辑器实例用 shallowRef 避免 Vue 深度代理 Monaco 内部对象
 const editor = shallowRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -95,6 +101,12 @@ async function ensureMonacoEditor(path: string, content: string) {
     emit("change", inst.getValue());
   });
   inst.onDidChangeCursorSelection(() => emitSelection(inst));
+  // 编辑器滚动时联动预览到对应源码行（仅预览开启时有意义，处理内早退）
+  inst.onDidScrollChange((e) => {
+    if (e.scrollTopChanged) {
+      onEditorScroll();
+    }
+  });
   emitSelection(inst);
 }
 
@@ -166,6 +178,64 @@ onBeforeUnmount(() => {
   window.removeEventListener("pointermove", onSashMove);
   window.removeEventListener("pointerup", onSashUp);
 });
+
+// 编辑器滚动 → 预览：取编辑器顶部可见行，让对应源码行块顶端对齐预览顶部
+function onEditorScroll() {
+  if (!showPreview.value || scrollLock.value) {
+    return;
+  }
+  if (editorScrollRaf) {
+    return;
+  }
+  editorScrollRaf = requestAnimationFrame(() => {
+    editorScrollRaf = 0;
+    const inst = editor.value;
+    const preview = previewRef.value;
+    if (!inst || !preview || scrollLock.value) {
+      return;
+    }
+    const ranges = inst.getVisibleRanges();
+    const line = ranges?.[0]?.startLineNumber ?? 1;
+    scrollLock.value = true;
+    preview.scrollToSourceLine(line);
+    // 下一帧释放锁：程序触发的滚动事件已在同步阶段发完，避免回环
+    requestAnimationFrame(() => {
+      scrollLock.value = false;
+    });
+  });
+}
+
+// 预览滚动 → 编辑器：把对应源码行滚到编辑器顶部（setScrollTop 同步无动画，避免回环）
+function onPreviewScroll(line: number) {
+  if (scrollLock.value) {
+    return;
+  }
+  const inst = editor.value;
+  if (!inst) {
+    return;
+  }
+  scrollLock.value = true;
+  inst.setScrollTop(inst.getTopForLineNumber(line));
+  requestAnimationFrame(() => {
+    scrollLock.value = false;
+  });
+}
+
+// 预览首次渲染完成后，按编辑器当前位置对齐一次
+function syncFromEditor() {
+  const inst = editor.value;
+  const preview = previewRef.value;
+  if (!inst || !preview) {
+    return;
+  }
+  const ranges = inst.getVisibleRanges();
+  const line = ranges?.[0]?.startLineNumber ?? 1;
+  scrollLock.value = true;
+  preview.scrollToSourceLine(line);
+  requestAnimationFrame(() => {
+    scrollLock.value = false;
+  });
+}
 
 // 外部 content 变化：同步到模型，避免回环
 watch(
@@ -240,7 +310,13 @@ onBeforeUnmount(() => {
           <!-- 扩大 sash 命中区域，便于拖拽 -->
           <div class="absolute inset-x-0 -top-[3px] -bottom-[3px]" />
         </div>
-        <MarkdownPreview :content="content" class="min-h-0 flex-1" />
+        <MarkdownPreview
+          ref="previewRef"
+          :content="content"
+          class="min-h-0 flex-1"
+          @scroll="onPreviewScroll"
+          @ready="syncFromEditor"
+        />
       </template>
     </div>
     <FeedbackBanner :feedback="feedback" />

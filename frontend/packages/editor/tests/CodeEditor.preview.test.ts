@@ -13,9 +13,13 @@ vi.mock("../src/monaco-env", () => {
     setModel: () => {},
     onDidChangeModelContent: () => ({ dispose: () => {} }),
     onDidChangeCursorSelection: () => ({ dispose: () => {} }),
+    onDidScrollChange: () => ({ dispose: () => {} }),
     getSelection: () => null,
     getModel: () => fakeModel,
     updateOptions: () => {},
+    getVisibleRanges: () => [{ startLineNumber: 1, endLineNumber: 1 }],
+    getTopForLineNumber: () => 0,
+    setScrollTop: () => {},
     dispose: () => {}
   };
   return {
