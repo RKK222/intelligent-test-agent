@@ -3,6 +3,7 @@ import { computed, onMounted, watch } from "vue";
 import { useRoute } from "vue-router";
 import { GitBranch, PanelRight, RotateCcw, Square } from "lucide-vue-next";
 import PromptComposer from "@/components/PromptComposer.vue";
+import SessionShareButton from "@/components/SessionShareButton.vue";
 import SessionDockStack from "@/components/SessionDockStack.vue";
 import SessionTimeline from "@/components/SessionTimeline.vue";
 import SidePanel from "@/components/SidePanel.vue";
@@ -59,6 +60,7 @@ async function submit() {
           <h1>{{ session.activeSession?.title ?? "Untitled session" }}</h1>
         </div>
         <div class="toolbar-buttons">
+          <SessionShareButton />
           <button class="icon-text" type="button"><GitBranch :size="15" />Fork</button>
           <button class="icon-text" type="button"><RotateCcw :size="15" />Revert</button>
           <button class="icon-button" type="button" aria-label="Abort session" @click="session.abort"><Square :size="15" /></button>

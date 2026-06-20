@@ -11,6 +11,7 @@
 ## 组件记录
 
 - `src/components/DiffReviewPanel.vue`：复刻 opencode Review 面板的文件聚焦、unified/split 样式切换和 hunk 导航；数据来自平台 `SessionDiff`，不在浏览器端直连 opencode。
+- `src/components/SessionShareButton.vue`：复刻 opencode session share publish/view/copy/unpublish 入口；publish/unpublish 通过平台 `backend-api`，公开 URL 只保存在前端会话状态。
 - `src/components/SettingsWorktreePanel.vue`：复刻 opencode workspace/worktree 管理入口，支持 experimental worktree 列表、创建、重置和删除；所有操作经平台 `backend-api` 代理。
 - `src/components/SettingsMcpPanel.vue`：复刻 opencode MCP 状态/认证入口，展示 connected/failed/needs_auth 等状态，并通过平台 API 发起或移除 MCP auth。
 

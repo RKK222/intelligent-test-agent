@@ -19,9 +19,12 @@ export const useSessionStore = defineStore("session", () => {
   const questions = ref<QuestionRequest[]>([]);
   const followups = ref<FollowupItem[]>([]);
   const revertItems = ref<RevertItem[]>([]);
+  const shareUrl = ref<string>();
   const loading = ref(false);
   const sending = ref(false);
+  const sharing = ref(false);
   const error = ref<string>();
+  const shareError = ref<string>();
 
   const timeline = computed(() => {
     const runEvents = useRunEventStore();
@@ -49,6 +52,7 @@ export const useSessionStore = defineStore("session", () => {
         platform.api.listSessionQuestions(sessionId)
       ]);
       activeSession.value = session;
+      shareUrl.value = extractShareUrl(session);
       messages.value = messagePage.items;
       todos.value = todoItems;
       diff.value = sessionDiff;
@@ -98,6 +102,44 @@ export const useSessionStore = defineStore("session", () => {
     }
     const platform = usePlatformStore();
     await platform.api.abortSession(activeSession.value.sessionId);
+  }
+
+  // 分享入口复刻 opencode 的 publish/unpublish 行为，只保存平台返回的公开 URL。
+  async function publishShare() {
+    const sessionId = requireSessionId();
+    const platform = usePlatformStore();
+    sharing.value = true;
+    shareError.value = undefined;
+    try {
+      const response = await platform.api.shareSession(sessionId);
+      const url = extractShareUrl(response);
+      if (!url) {
+        throw new Error("分享响应缺少 URL");
+      }
+      shareUrl.value = url;
+      return url;
+    } catch (cause) {
+      shareError.value = cause instanceof Error ? cause.message : "会话分享失败";
+      throw cause;
+    } finally {
+      sharing.value = false;
+    }
+  }
+
+  async function unpublishShare() {
+    const sessionId = requireSessionId();
+    const platform = usePlatformStore();
+    sharing.value = true;
+    shareError.value = undefined;
+    try {
+      await platform.api.unshareSession(sessionId);
+      shareUrl.value = undefined;
+    } catch (cause) {
+      shareError.value = cause instanceof Error ? cause.message : "取消分享失败";
+      throw cause;
+    } finally {
+      sharing.value = false;
+    }
   }
 
   // 这些动作对应 opencode composer 上方的权限、问题、follow-up、revert dock。
@@ -175,13 +217,18 @@ export const useSessionStore = defineStore("session", () => {
     questions,
     followups,
     revertItems,
+    shareUrl,
     loading,
     sending,
+    sharing,
     error,
+    shareError,
     load,
     createDraftSession,
     sendPrompt,
     abort,
+    publishShare,
+    unpublishShare,
     replyPermission,
     replyQuestion,
     rejectQuestion,
@@ -211,4 +258,20 @@ function compactPayload(input: {
     prompt?: string;
     agent?: string;
   };
+}
+
+function extractShareUrl(value: unknown): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const nested = isRecord(value.share) ? value.share : undefined;
+  return readString(value.url) ?? readString(nested?.url);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function readString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }

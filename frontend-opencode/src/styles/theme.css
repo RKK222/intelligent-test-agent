@@ -365,6 +365,61 @@ small,
   border-bottom: 1px solid var(--line-soft);
 }
 
+.share-popover-wrap {
+  position: relative;
+}
+
+.session-share-popover {
+  position: absolute;
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 10px;
+  width: min(340px, calc(100vw - 28px));
+  margin-top: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 0.36);
+}
+
+.session-share-popover .section-label {
+  margin-bottom: 4px;
+}
+
+.share-copy {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.share-wide {
+  width: 100%;
+}
+
+.share-url-input {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg-strong);
+  color: var(--text);
+  padding: 0 9px;
+}
+
+.share-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.share-actions .icon-text,
+.share-actions .primary-action {
+  width: 100%;
+}
+
 .pane-heading h1,
 .session-toolbar h1,
 .new-session-copy h1 {
@@ -1440,6 +1495,10 @@ small,
   }
 
   .worktree-create-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .share-actions {
     grid-template-columns: minmax(0, 1fr);
   }
 }
