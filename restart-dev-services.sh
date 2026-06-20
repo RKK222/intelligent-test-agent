@@ -175,12 +175,11 @@ backend_pids() {
   '
 }
 
-# 前端只匹配自研 agent-web dev 进程和它的 Next 子进程，不处理 frontend-opencode 参考目录。
+# 前端只匹配自研 agent-web Vite dev 进程，不处理 frontend-opencode 参考目录。
 frontend_pids() {
   ps -eo pid=,command= | awk -v frontend="${FRONTEND_DIR}" '
     index($0, "@test-agent/agent-web dev") ||
-    (index($0, frontend) && index($0, "next dev")) ||
-    (index($0, frontend) && index($0, ".next/dev/")) { print $1 }
+    (index($0, frontend) && index($0, "vite")) { print $1 }
   '
 }
 
