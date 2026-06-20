@@ -44,6 +44,19 @@ export const usePromptStore = defineStore("prompt", () => {
     text.value = !current || current === "/" || current.startsWith("/") ? usage : `${usage}\n${current}`;
   }
 
+  // Composer context chip 的移除动作集中在 store，避免组件直接重建 prompt part 状态。
+  function removeFile(pathOrName: string) {
+    files.value = files.value.filter((item) => (item.path ?? item.name) !== pathOrName);
+  }
+
+  function removeReference(id: string) {
+    references.value = references.value.filter((item) => item.id !== id);
+  }
+
+  function removeAgent(agentId: string) {
+    agents.value = agents.value.filter((item) => item.agentId !== agentId);
+  }
+
   function reset() {
     text.value = "";
     files.value = [];
@@ -53,5 +66,22 @@ export const usePromptStore = defineStore("prompt", () => {
     shellMode.value = false;
   }
 
-  return { text, files, images, agents, references, shellMode, history, parts, canSubmit, snapshot, remember, insertSlashCommand, reset };
+  return {
+    text,
+    files,
+    images,
+    agents,
+    references,
+    shellMode,
+    history,
+    parts,
+    canSubmit,
+    snapshot,
+    remember,
+    insertSlashCommand,
+    removeFile,
+    removeReference,
+    removeAgent,
+    reset
+  };
 });

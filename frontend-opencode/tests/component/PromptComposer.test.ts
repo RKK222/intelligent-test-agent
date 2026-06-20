@@ -58,12 +58,17 @@ describe("PromptComposer", () => {
     expect(screen.getByRole("dialog", { name: "Attach workspace file" })).toBeInTheDocument();
     await fireEvent.click(await screen.findByRole("button", { name: "Attach src/main.ts file" }));
     expect(screen.getByText("src/main.ts")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Remove src/main.ts attachment" }));
+    expect(screen.queryByText("src/main.ts")).not.toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole("button", { name: "Mention file or symbol" }));
     expect(screen.getByRole("dialog", { name: "Mention workspace file" })).toBeInTheDocument();
     await fireEvent.update(screen.getByLabelText("Search workspace files"), "main");
     await fireEvent.click(await screen.findByRole("button", { name: "Mention src/main.ts file" }));
     expect(screen.getByText("@src/main.ts")).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole("button", { name: "Remove src/main.ts reference" }));
+    expect(screen.queryByText("@src/main.ts")).not.toBeInTheDocument();
+    expect(screen.getByText("0 parts")).toBeInTheDocument();
     expect(calls).toContainEqual(["wrk_1", ""]);
     expect(calls).toContainEqual(["wrk_1", "main"]);
   });

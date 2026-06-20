@@ -718,6 +718,24 @@ small,
   font-size: 12px;
 }
 
+.context-chip button {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-weak);
+  cursor: pointer;
+}
+
+.context-chip button:hover {
+  background: var(--panel-subtle);
+  color: var(--text);
+}
+
 .composer textarea {
   width: 100%;
   min-width: 0;

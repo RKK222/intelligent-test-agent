@@ -14,7 +14,7 @@
 | Session layout 左侧会话、中间 timeline/composer、右侧 review/files/terminal/status | 已实现首版结构。 |
 | Session toolbar：share/fork/compact/revert/abort | 已接入 Vue toolbar；fork 可选择用户消息并跳转子会话，revert 回滚最新用户消息，compact 在当前 session 带 model/provider 时调用 summarize，abort 经平台 API。 |
 | Composer 上方待处理 dock：permission/question/todo/follow-up/revert | 已实现 Vue 版本，操作统一经 `backend-api`，并覆盖组件/状态单测。 |
-| Prompt parts：text/file/image/agent/reference/slash command | 已实现构造与单测；composer 附件/@ 文件选择走平台 fs catalog，slash 菜单从平台 command catalog 选择命令并写入 `/command` 文本。 |
+| Prompt parts：text/file/image/agent/reference/slash command | 已实现构造与单测；composer 附件/@ 文件选择走平台 fs catalog，context chip 支持移除，slash 菜单从平台 command catalog 选择命令并写入 `/command` 文本。 |
 | RunEvent reducer：message part delta、todo、permission、question、diff/status | 已实现核心 reducer 与单测。 |
 | Terminal | 已接入后端 ticket 获取、WebSocket 连接、输出展示、命令发送、关闭/重连操作；完整 xterm 渲染仍是后续增强。 |
 | Diff review | 已接入 `DiffReviewPanel`，支持文件聚焦、unified/split 样式切换、hunk 统计/导航和空态；完整 Monaco diff 后续懒加载。 |

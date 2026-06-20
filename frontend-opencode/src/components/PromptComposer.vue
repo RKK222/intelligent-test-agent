@@ -206,10 +206,24 @@ function readString(value: unknown) {
 
     <div class="composer-context" v-if="prompt.files.length || prompt.references.length || prompt.agents.length">
       <span v-for="file in prompt.files" :key="file.path ?? file.name" class="context-chip">
-        <FileCode2 :size="13" />{{ file.path ?? file.name }}
+        <FileCode2 :size="13" />
+        <span>{{ file.path ?? file.name }}</span>
+        <button type="button" :aria-label="`Remove ${file.path ?? file.name} attachment`" @click="prompt.removeFile(file.path ?? file.name ?? '')">
+          <X :size="12" />
+        </button>
       </span>
-      <span v-for="reference in prompt.references" :key="reference.id" class="context-chip">@{{ reference.label }}</span>
-      <span v-for="agent in prompt.agents" :key="agent.agentId" class="context-chip">agent: {{ agent.name ?? agent.agentId }}</span>
+      <span v-for="reference in prompt.references" :key="reference.id" class="context-chip">
+        <span>@{{ reference.label }}</span>
+        <button type="button" :aria-label="`Remove ${reference.label} reference`" @click="prompt.removeReference(reference.id)">
+          <X :size="12" />
+        </button>
+      </span>
+      <span v-for="agent in prompt.agents" :key="agent.agentId" class="context-chip">
+        <span>agent: {{ agent.name ?? agent.agentId }}</span>
+        <button type="button" :aria-label="`Remove ${agent.name ?? agent.agentId} agent`" @click="prompt.removeAgent(agent.agentId)">
+          <X :size="12" />
+        </button>
+      </span>
     </div>
 
     <textarea
