@@ -9,6 +9,9 @@ public final class TraceConstants {
     public static final String TRACE_ID_ATTRIBUTE = "testAgent.traceId";
     public static final String TRACE_ID_CONTEXT_KEY = "traceId";
 
+    /**
+     * 常量类不允许实例化，所有调用方直接引用公开常量。
+     */
     private TraceConstants() {
     }
 }

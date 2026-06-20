@@ -18,15 +18,24 @@ public enum ErrorCode {
     private final int httpStatus;
     private final String defaultMessage;
 
+    /**
+     * 绑定稳定错误码到 HTTP 状态和安全默认说明；这里不引入 Spring 类型，保持 common 轻量。
+     */
     ErrorCode(int httpStatus, String defaultMessage) {
         this.httpStatus = httpStatus;
         this.defaultMessage = defaultMessage;
     }
 
+    /**
+     * 返回入口层应映射的 HTTP 状态码，供统一异常处理和 WebFilter 直接写出错误响应。
+     */
     public int httpStatus() {
         return httpStatus;
     }
 
+    /**
+     * 返回可直接暴露给前端的默认中文错误说明，不包含内部堆栈或第三方敏感信息。
+     */
     public String defaultMessage() {
         return defaultMessage;
     }

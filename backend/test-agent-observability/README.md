@@ -24,6 +24,11 @@
 - `TraceIdSupport`：合法 traceId 透传，缺失或非法 traceId 生成新值。
 - `TraceLogContext`：统一 traceId 的 SLF4J MDC key、写入、恢复和清理逻辑。
 
+## 测试覆盖
+
+- `TraceIdSupportTest` 覆盖 traceId 透传、生成、长度边界和安全字符集。
+- `TraceLogContextTest` 覆盖 MDC 写入、非法值清理、scope 恢复和无历史 traceId 时的清理逻辑。
+
 ## 允许依赖
 
 - `test-agent-common`。

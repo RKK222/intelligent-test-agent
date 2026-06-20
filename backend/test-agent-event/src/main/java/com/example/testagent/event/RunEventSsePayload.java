@@ -18,6 +18,9 @@ public record RunEventSsePayload(
         Instant occurredAt,
         Map<String, Object> payload) {
 
+    /**
+     * 校验 SSE payload 的稳定字段，并复制 payload map，避免上游在发出事件后继续修改内容。
+     */
     public RunEventSsePayload {
         eventId = Objects.requireNonNull(eventId, "eventId must not be null");
         runId = Objects.requireNonNull(runId, "runId must not be null");
@@ -30,6 +33,9 @@ public record RunEventSsePayload(
         payload = payload == null ? Map.of() : Map.copyOf(payload);
     }
 
+    /**
+     * 从 durable RunEvent 构造 SSE body，保留持久化 eventId、seq、traceId 和业务 payload。
+     */
     public static RunEventSsePayload from(RunEvent event) {
         Objects.requireNonNull(event, "event must not be null");
         return new RunEventSsePayload(
@@ -42,6 +48,9 @@ public record RunEventSsePayload(
                 event.payload());
     }
 
+    /**
+     * 从 transient draft 构造 SSE body，seq 固定为 0，eventId 由 live bus 生成且不可用于续传。
+     */
     public static RunEventSsePayload transientFrom(RunEventDraft draft, String eventId) {
         Objects.requireNonNull(draft, "draft must not be null");
         return new RunEventSsePayload(

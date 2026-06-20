@@ -22,10 +22,16 @@ public class WorkspaceFileService {
     private final long maxFileBytes;
     private final int maxDirectoryEntries;
 
+    /**
+     * 使用默认文件大小和目录项上限构造服务，适用于本地测试和未显式配置的运行环境。
+     */
     public WorkspaceFileService() {
         this(1024 * 1024, 1000);
     }
 
+    /**
+     * 构造文件服务并校验安全上限；maxFileBytes 和 maxDirectoryEntries 必须为正数。
+     */
     @Autowired
     public WorkspaceFileService(
             @Value("${test-agent.files.max-file-bytes:1048576}") long maxFileBytes,
@@ -40,6 +46,9 @@ public class WorkspaceFileService {
         this.maxDirectoryEntries = maxDirectoryEntries;
     }
 
+    /**
+     * 读取 rootPath 内的 UTF-8 文本文件；拒绝目录、缺失文件、越权路径和超过大小上限的文件。
+     */
     public FileContentResponse readContent(String rootPath, String relativePath) {
         Path target = resolveInsideRoot(rootPath, relativePath);
         if (!Files.isRegularFile(target)) {
@@ -61,6 +70,9 @@ public class WorkspaceFileService {
         }
     }
 
+    /**
+     * 写入 rootPath 内的 UTF-8 文本文件；null content 按空文件处理，写入前会创建缺失父目录。
+     */
     public void writeContent(String rootPath, String relativePath, String content) {
         Path target = resolveInsideRoot(rootPath, relativePath);
         byte[] bytes = content == null ? new byte[0] : content.getBytes(StandardCharsets.UTF_8);
@@ -81,6 +93,9 @@ public class WorkspaceFileService {
         }
     }
 
+    /**
+     * 查询 rootPath 内文件或目录状态；目标不存在时返回 exists=false，其他 IO 错误统一转为平台内部错误。
+     */
     public FileStatusResponse status(String rootPath, String relativePath) {
         Path target = resolveInsideRoot(rootPath, relativePath);
         try {
@@ -98,6 +113,9 @@ public class WorkspaceFileService {
         }
     }
 
+    /**
+     * 列出指定目录的一层子项，按文件名排序并限制最大返回数量，避免递归扫描大仓库。
+     */
     public List<FileTreeEntryResponse> listDirectory(String rootPath, String relativePath) {
         Path root = rootRealPath(rootPath);
         Path directory = resolveInsideRoot(rootPath, relativePath);
@@ -114,6 +132,9 @@ public class WorkspaceFileService {
         }
     }
 
+    /**
+     * 将单个文件系统路径转换为目录列表项，大小字段仅对普通文件有效，目录大小固定为 0。
+     */
     private FileTreeEntryResponse entry(Path root, Path path) {
         try {
             return new FileTreeEntryResponse(
@@ -127,6 +148,9 @@ public class WorkspaceFileService {
         }
     }
 
+    /**
+     * 将相对路径解析到真实 root 内部；解析结果不在 root 下时拒绝访问，防止路径穿越。
+     */
     private Path resolveInsideRoot(String rootPath, String relativePath) {
         Path root = rootRealPath(rootPath);
         Path target = root.resolve(normalizeRelativePath(relativePath)).normalize();
@@ -136,6 +160,9 @@ public class WorkspaceFileService {
         return target;
     }
 
+    /**
+     * 解析并校验工作区根目录真实路径，确保根目录存在且是目录。
+     */
     private Path rootRealPath(String rootPath) {
         try {
             Path root = Path.of(rootPath).toRealPath();
@@ -150,6 +177,9 @@ public class WorkspaceFileService {
         }
     }
 
+    /**
+     * 统一相对路径分隔符；空路径表示工作区根目录。
+     */
     private String normalizeRelativePath(String relativePath) {
         if (relativePath == null || relativePath.isBlank()) {
             return "";
@@ -157,6 +187,9 @@ public class WorkspaceFileService {
         return relativePath.replace('\\', '/');
     }
 
+    /**
+     * 返回可放入错误 details 的安全路径字符串，避免 null 进入统一错误响应。
+     */
     private String safePath(String relativePath) {
         return relativePath == null ? "" : relativePath;
     }

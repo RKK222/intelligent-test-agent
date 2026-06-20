@@ -24,4 +24,13 @@ class TraceIdSupportTest {
         assertThat(TraceIdSupport.isValid(missing)).isTrue();
         assertThat(TraceIdSupport.isValid(invalid)).isTrue();
     }
+
+    @Test
+    void isValidRejectsUnsafeLengthAndCharacters() {
+        assertThat(TraceIdSupport.isValid("trace_1234567890abcdef-ABC_def")).isTrue();
+        assertThat(TraceIdSupport.isValid("trace_short")).isFalse();
+        assertThat(TraceIdSupport.isValid("trace_" + "a".repeat(100))).isFalse();
+        assertThat(TraceIdSupport.isValid("trace_1234567890abc/def")).isFalse();
+        assertThat(TraceIdSupport.isValid("span_1234567890abcdef")).isFalse();
+    }
 }

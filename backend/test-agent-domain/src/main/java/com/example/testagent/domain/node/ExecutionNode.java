@@ -21,6 +21,9 @@ public record ExecutionNode(
         Instant updatedAt,
         String traceId) {
 
+    /**
+     * 构造基础执行节点，使用默认权重、空能力集合和占位 traceId，主要用于测试和简单 seed 场景。
+     */
     public ExecutionNode(
             ExecutionNodeId executionNodeId,
             String baseUrl,
@@ -42,6 +45,9 @@ public record ExecutionNode(
                 "trace_unspecified");
     }
 
+    /**
+     * 校验执行节点路由所需不变量；容量不能为负或超额，能力集合会复制成不可变集合。
+     */
     public ExecutionNode {
         Objects.requireNonNull(executionNodeId, "executionNodeId must not be null");
         baseUrl = DomainValidation.requireText(baseUrl, "baseUrl");
@@ -68,10 +74,16 @@ public record ExecutionNode(
         }
     }
 
+    /**
+     * 返回节点当前剩余可接收 Run 数量，调用方可用于路由排序和健康展示。
+     */
     public int availableCapacity() {
         return maxRuns - runningRuns;
     }
 
+    /**
+     * 判断节点是否可接收新的 Run；只有 READY 且仍有容量时才允许路由。
+     */
     public boolean canAcceptRun() {
         return status == ExecutionNodeStatus.READY && availableCapacity() > 0;
     }

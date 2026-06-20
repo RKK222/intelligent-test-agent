@@ -25,6 +25,9 @@ public class RunEventLiveBus {
 
     private final Sinks.Many<RunEventLiveEvent> sink = Sinks.many().multicast().directBestEffort();
 
+    /**
+     * 发布已落库的 durable 事件；payload 携带 seq，SSE 可用该 seq 做断线续传游标。
+     */
     public RunEventLiveEvent publishDurable(RunEvent event) {
         Objects.requireNonNull(event, "event must not be null");
         RunEventLiveEvent liveEvent = RunEventLiveEvent.durable(RunEventSsePayload.from(event));
@@ -32,6 +35,9 @@ public class RunEventLiveBus {
         return liveEvent;
     }
 
+    /**
+     * 发布不落库的 transient 事件，主要用于高频 message delta；事件不可作为 Last-Event-ID 恢复点。
+     */
     public RunEventLiveEvent publishTransient(RunEventDraft draft) {
         Objects.requireNonNull(draft, "draft must not be null");
         RunEventLiveEvent liveEvent = RunEventLiveEvent.transientOnly(
@@ -40,11 +46,17 @@ public class RunEventLiveBus {
         return liveEvent;
     }
 
+    /**
+     * 订阅指定 Run 的实时事件流；只过滤当前进程内发布的事件，不主动回放历史事件。
+     */
     public Flux<RunEventLiveEvent> stream(RunId runId) {
         Objects.requireNonNull(runId, "runId must not be null");
         return sink.asFlux().filter(event -> runId.value().equals(event.payload().runId()));
     }
 
+    /**
+     * 向 Reactor sink 写入事件；无订阅者时静默丢弃，并发发布时短时间 busy loop 重试。
+     */
     private void emit(RunEventLiveEvent liveEvent) {
         Sinks.EmitResult result = sink.tryEmitNext(liveEvent);
         if (result == Sinks.EmitResult.FAIL_ZERO_SUBSCRIBER) {
@@ -59,6 +71,9 @@ public class RunEventLiveBus {
         }
     }
 
+    /**
+     * 生成仅当前 SSE 实时连接使用的 transient eventId，不参与 durable seq 续传。
+     */
     private String transientEventId() {
         return "evt_live_" + UUID.randomUUID().toString().replace("-", "");
     }

@@ -7,29 +7,50 @@ import java.util.UUID;
  */
 public final class RuntimeIdGenerator {
 
+    /**
+     * 工具类不允许实例化，所有 ID 生成入口都通过静态方法暴露。
+     */
     private RuntimeIdGenerator() {
     }
 
+    /**
+     * 生成 Workspace 外部 ID，返回值固定使用 `wrk_` 前缀，便于 API 与日志中识别资源类型。
+     */
     public static String workspaceId() {
         return prefixed("wrk_");
     }
 
+    /**
+     * 生成平台 Session ID，返回值只表示平台会话，不可与远端 opencode session id 混用。
+     */
     public static String sessionId() {
         return prefixed("ses_");
     }
 
+    /**
+     * 生成 Run ID，供运行编排、事件流和 Diff 操作共同引用同一次运行。
+     */
     public static String runId() {
         return prefixed("run_");
     }
 
+    /**
+     * 生成会话消息 ID，供平台持久化消息和恢复投影时稳定定位消息。
+     */
     public static String messageId() {
         return prefixed("msg_");
     }
 
+    /**
+     * 生成 PTY ticket ID，返回值仅用于短生命周期终端连接授权。
+     */
     public static String terminalTicketId() {
         return prefixed("pty_");
     }
 
+    /**
+     * 按给定领域前缀拼接无横线 UUID；调用方必须传入已约定的稳定前缀。
+     */
     private static String prefixed(String prefix) {
         return prefix + UUID.randomUUID().toString().replace("-", "");
     }

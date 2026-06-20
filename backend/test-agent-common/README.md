@@ -24,6 +24,13 @@
 - `ErrorCode`：平台稳定错误码及 HTTP 状态映射数字。
 - `PlatformException`：业务层抛出的平台基础异常。
 - `PageRequest`、`PageResponse<T>`：分页请求和响应模型。
+- `RuntimeIdGenerator`：生成 Workspace、Session、Run、Message 和 PTY ticket 的稳定前缀 ID。
+
+## 测试覆盖
+
+- `ApiResponseTest`、`ApiErrorResponseTest`、`PlatformExceptionTest` 覆盖统一响应和平台异常。
+- `PageRequestTest`、`PageResponseTest` 覆盖分页边界、offset、总页数和列表防御性复制。
+- `ErrorCodeTest`、`RuntimeIdGeneratorTest` 覆盖稳定 HTTP 状态、默认中文说明和运行时 ID 前缀格式。
 
 ## 允许依赖
 

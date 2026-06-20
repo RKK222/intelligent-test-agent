@@ -28,6 +28,9 @@ public class RunEventSseStreamService {
     private final RunEventSseMapper sseMapper;
     private final RunEventLiveBus liveBus;
 
+    /**
+     * 构造生产用 SSE 流服务，合并 durable 回放服务、SSE mapper 和当前进程实时总线。
+     */
     @Autowired
     public RunEventSseStreamService(
             RunEventReplayService replayService,
@@ -38,10 +41,16 @@ public class RunEventSseStreamService {
         this.liveBus = Objects.requireNonNull(liveBus, "liveBus must not be null");
     }
 
+    /**
+     * 构造测试用 SSE 流服务，自动创建本地 live bus，便于单元测试不启动 Spring 容器。
+     */
     public RunEventSseStreamService(RunEventReplayService replayService, RunEventSseMapper sseMapper) {
         this(replayService, sseMapper, new RunEventLiveBus());
     }
 
+    /**
+     * 从指定 Last-Event-ID 后开始输出 RunEvent SSE；durable 事件轮询回放，live bus 事件实时合流。
+     */
     public Flux<ServerSentEvent<RunEventSsePayload>> streamAfter(
             RunId runId,
             String lastEventId,
@@ -69,10 +78,16 @@ public class RunEventSseStreamService {
         return Flux.merge(durableReplay, liveEvents);
     }
 
+    /**
+     * 将 durable repository 事件映射成 SSE，保持 seq 作为客户端续传游标。
+     */
     private ServerSentEvent<RunEventSsePayload> toSse(RunEvent event) {
         return sseMapper.toSse(event);
     }
 
+    /**
+     * 根据 live event 的 durable 标记选择带 id 或不带 id 的 SSE 映射。
+     */
     private ServerSentEvent<RunEventSsePayload> toLiveSse(RunEventLiveEvent event) {
         return event.durable()
                 ? sseMapper.toDurableSse(event.payload())

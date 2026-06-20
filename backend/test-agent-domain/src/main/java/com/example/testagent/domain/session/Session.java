@@ -22,10 +22,16 @@ public record Session(
         ExecutionNodeId opencodeExecutionNodeId,
         boolean pinned) {
 
+    /**
+     * 创建新的平台会话，默认状态为 ACTIVE，traceId 使用内部占位值。
+     */
     public Session(SessionId sessionId, WorkspaceId workspaceId, String title, Instant createdAt) {
         this(sessionId, workspaceId, title, SessionStatus.ACTIVE, createdAt, createdAt, "trace_unspecified");
     }
 
+    /**
+     * 构造不带远端 opencode 映射的会话，适用于普通列表、详情和历史兼容读取。
+     */
     public Session(
             SessionId sessionId,
             WorkspaceId workspaceId,
@@ -37,6 +43,9 @@ public record Session(
         this(sessionId, workspaceId, title, status, createdAt, updatedAt, traceId, null, null);
     }
 
+    /**
+     * 构造带远端 opencode 映射的会话，默认不置顶；映射只供后端运行编排使用。
+     */
     public Session(
             SessionId sessionId,
             WorkspaceId workspaceId,
@@ -50,6 +59,9 @@ public record Session(
         this(sessionId, workspaceId, title, status, createdAt, updatedAt, traceId, opencodeSessionId, opencodeExecutionNodeId, false);
     }
 
+    /**
+     * 校验会话领域不变量：标题、traceId、时间和远端 session/node 映射必须同时有效。
+     */
     public Session {
         Objects.requireNonNull(sessionId, "sessionId must not be null");
         Objects.requireNonNull(workspaceId, "workspaceId must not be null");
@@ -69,10 +81,16 @@ public record Session(
         }
     }
 
+    /**
+     * 判断会话是否已有可复用的远端 opencode session 映射；只有 sessionId 和 nodeId 同时存在才为 true。
+     */
     public boolean hasOpencodeSessionMapping() {
         return opencodeSessionId != null && opencodeExecutionNodeId != null;
     }
 
+    /**
+     * 绑定远端 opencode session 与执行节点，保留平台标题、状态和置顶状态。
+     */
     public Session attachOpencodeSession(
             String opencodeSessionId,
             ExecutionNodeId executionNodeId,
@@ -91,6 +109,9 @@ public record Session(
                 pinned);
     }
 
+    /**
+     * 更新平台会话的展示标题和置顶状态，保留内部 opencode 映射。
+     */
     public Session updateTitleAndPinned(String title, boolean pinned, Instant updatedAt, String traceId) {
         return new Session(
                 sessionId,
@@ -105,6 +126,9 @@ public record Session(
                 pinned);
     }
 
+    /**
+     * 将会话软删除为归档状态；归档后不再置顶，但保留内部映射便于审计和后续兼容读取。
+     */
     public Session archive(Instant updatedAt, String traceId) {
         return new Session(
                 sessionId,

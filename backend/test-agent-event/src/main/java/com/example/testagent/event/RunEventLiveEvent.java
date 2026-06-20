@@ -7,6 +7,9 @@ import java.util.Objects;
  */
 public record RunEventLiveEvent(boolean durable, RunEventSsePayload payload) {
 
+    /**
+     * 校验 live event 与 payload seq 的一致性；durable 必须可续传，transient 必须不可续传。
+     */
     public RunEventLiveEvent {
         payload = Objects.requireNonNull(payload, "payload must not be null");
         if (durable && payload.seq() <= 0) {
@@ -17,10 +20,16 @@ public record RunEventLiveEvent(boolean durable, RunEventSsePayload payload) {
         }
     }
 
+    /**
+     * 包装已持久化事件，供 SSE 输出带 id 的可恢复事件。
+     */
     public static RunEventLiveEvent durable(RunEventSsePayload payload) {
         return new RunEventLiveEvent(true, payload);
     }
 
+    /**
+     * 包装实时临时事件，供 SSE 输出不带 id 的高频内容片段。
+     */
     public static RunEventLiveEvent transientOnly(RunEventSsePayload payload) {
         return new RunEventLiveEvent(false, payload);
     }

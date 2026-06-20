@@ -29,4 +29,13 @@ class TraceLogContextTest {
 
         assertThat(TraceLogContext.currentTraceId()).isNull();
     }
+
+    @Test
+    void withTraceIdClearsMdcWhenNoPreviousTraceIdExists() {
+        try (TraceLogContext.Scope ignored = TraceLogContext.withTraceId("trace_1234567890abcdef")) {
+            assertThat(TraceLogContext.currentTraceId()).isEqualTo("trace_1234567890abcdef");
+        }
+
+        assertThat(TraceLogContext.currentTraceId()).isNull();
+    }
 }
