@@ -55,6 +55,12 @@
 
 脚本默认使用 `local` profile、读取 `.env.local`、先编译后端和自研前端，再重启 `test-agent-app` 与 `frontend/apps/agent-web`。服务日志写入 `.tmp/dev-services/`，不得打印 dotenv 中的敏感值。
 
+开发脚本变更后，必须运行轻量校验，确认根目录重启脚本在 Bash 入口和误用 `sh` 入口下都不会解析失败：
+
+```bash
+tools/verify-dev-scripts.sh
+```
+
 ## 9. Git 提交
 
 1. 自检通过后提交 git。

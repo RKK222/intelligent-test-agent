@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+# 如果用户误用 `sh restart-dev-services.sh`，立即重进 Bash；本脚本依赖数组、[[ ]] 和 printf -v 等 Bash 特性。
+if [ -z "${BASH_VERSION:-}" ]; then
+  exec /usr/bin/env bash "$0" "$@"
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*) exec /usr/bin/env bash "$0" "$@" ;;
+esac
+
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -331,14 +339,15 @@ build_backend
 build_frontend
 
 old_frontend_pids=()
-while IFS= read -r pid; do
-  [[ -n "${pid}" ]] && old_frontend_pids+=("${pid}")
-done < <(frontend_pids)
+# PID 输出只包含数字，使用普通 word splitting 避免 process substitution 被 sh 预解析时报错。
+for pid in $(frontend_pids); do
+  old_frontend_pids+=("${pid}")
+done
 
 old_backend_pids=()
-while IFS= read -r pid; do
-  [[ -n "${pid}" ]] && old_backend_pids+=("${pid}")
-done < <(backend_pids)
+for pid in $(backend_pids); do
+  old_backend_pids+=("${pid}")
+done
 
 if [[ "${#old_frontend_pids[@]}" -gt 0 ]]; then
   stop_pids "frontend" "${old_frontend_pids[@]}"
