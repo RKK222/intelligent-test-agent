@@ -26,6 +26,14 @@ describe("SettingsMcpPanel", () => {
         removeMcpAuth: async (...args: unknown[]) => {
           calls.push(["removeAuth", ...args]);
           return true;
+        },
+        connectMcp: async (...args: unknown[]) => {
+          calls.push(["connect", ...args]);
+          return true;
+        },
+        disconnectMcp: async (...args: unknown[]) => {
+          calls.push(["disconnect", ...args]);
+          return true;
         }
       }
     });
@@ -38,6 +46,12 @@ describe("SettingsMcpPanel", () => {
     expect(screen.getByText("Connected")).toBeInTheDocument();
     expect(screen.getByText("token expired")).toBeInTheDocument();
 
+    await fireEvent.click(screen.getByRole("button", { name: "Connect github" }));
+    await waitFor(() => expect(calls).toContainEqual(["connect", "github", { workspaceId: "wrk_1" }]));
+
+    await fireEvent.click(screen.getByRole("button", { name: "Disconnect filesystem" }));
+    await waitFor(() => expect(calls).toContainEqual(["disconnect", "filesystem", { workspaceId: "wrk_1" }]));
+
     await fireEvent.click(screen.getByRole("button", { name: "Authenticate github" }));
     await waitFor(() => expect(calls).toContainEqual(["auth", "github", { workspaceId: "wrk_1" }]));
     expect(await screen.findByRole("link", { name: "Open github auth URL" })).toHaveAttribute(
@@ -49,6 +63,10 @@ describe("SettingsMcpPanel", () => {
     await waitFor(() => expect(calls).toContainEqual(["removeAuth", "github"]));
 
     expect(calls).toEqual([
+      ["status", "wrk_1"],
+      ["connect", "github", { workspaceId: "wrk_1" }],
+      ["status", "wrk_1"],
+      ["disconnect", "filesystem", { workspaceId: "wrk_1" }],
       ["status", "wrk_1"],
       ["auth", "github", { workspaceId: "wrk_1" }],
       ["status", "wrk_1"],

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { ExternalLink, KeyRound, RefreshCw, ServerCog, Trash2 } from "lucide-vue-next";
+import { ExternalLink, KeyRound, Power, PowerOff, RefreshCw, ServerCog, Trash2 } from "lucide-vue-next";
 import { usePlatformStore } from "@/stores/platform";
 
 type McpStatusItem = {
@@ -72,8 +72,31 @@ async function removeAuth(item: McpStatusItem) {
   }
 }
 
+async function toggleConnection(item: McpStatusItem) {
+  const connected = isConnected(item);
+  action.value = `${connected ? "disconnect" : "connect"}:${item.name}`;
+  error.value = undefined;
+  try {
+    // opencode App 使用 MCP switch 切换连接状态；Vue 版通过平台 connect/disconnect 代理同一意图。
+    if (connected) {
+      await platform.api.disconnectMcp(item.name, workspacePayload());
+    } else {
+      await platform.api.connectMcp(item.name, workspacePayload());
+    }
+    await loadStatus();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : "MCP 连接状态更新失败";
+  } finally {
+    action.value = undefined;
+  }
+}
+
 function canAuthenticate(item: McpStatusItem) {
   return ["needs_auth", "needs_client_registration", "failed"].includes(item.status);
+}
+
+function isConnected(item: McpStatusItem) {
+  return item.status === "connected";
 }
 
 function statusLabel(status: string) {
@@ -184,6 +207,16 @@ function readString(value: unknown) {
       </div>
       <small v-if="item.error" class="mcp-error">{{ item.error }}</small>
       <div class="mcp-actions">
+        <button
+          class="icon-text"
+          type="button"
+          :aria-label="`${isConnected(item) ? 'Disconnect' : 'Connect'} ${item.name}`"
+          :disabled="action === `connect:${item.name}` || action === `disconnect:${item.name}`"
+          @click="toggleConnection(item)"
+        >
+          <PowerOff v-if="isConnected(item)" :size="14" /> <Power v-else :size="14" />
+          {{ isConnected(item) ? "Disconnect" : "Connect" }}
+        </button>
         <button
           v-if="canAuthenticate(item)"
           class="primary-action"
