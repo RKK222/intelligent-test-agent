@@ -1,5 +1,5 @@
 # frontend-opencode
-
+除非我的指令中明确指明了需要修改frontend-opencode工程，否则不要改这个项目的任何内容。
 ## 工程定位
 
 `frontend-opencode` 是 opencode IDE App 的 Vue 3 + TypeScript + Vite 复刻工程，行为参考 `opencode-source/opencode-1.17.8/packages/app`。本工程不复刻 `packages/web` 官网、文档站或公网分享轮询页。
