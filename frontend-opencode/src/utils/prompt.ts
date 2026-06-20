@@ -19,6 +19,7 @@ export type PromptBuildInput = {
   agent?: string;
   model?: string;
   variant?: string;
+  shellMode?: boolean;
 };
 
 export function buildPromptParts(input: PromptBuildInput): PromptPart[] {

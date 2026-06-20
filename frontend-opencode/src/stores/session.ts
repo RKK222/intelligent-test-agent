@@ -82,11 +82,49 @@ export const useSessionStore = defineStore("session", () => {
     }
     const platform = usePlatformStore();
     const runEvents = useRunEventStore();
+    const sessionId = activeSession.value.sessionId;
+    const text = input.text?.trim() ?? "";
     sending.value = true;
     try {
+      if (input.shellMode) {
+        const response = await platform.api.runSessionShell(
+          sessionId,
+          compactRecord({
+            command: text,
+            agent: input.agent,
+            model: input.model,
+            variant: input.variant
+          })
+        );
+        const run = subscribeRuntimeRun(response, platform.baseUrl, runEvents);
+        if (run) {
+          activeRun.value = run;
+        }
+        return response;
+      }
+      const slash = parseSlashCommand(text);
+      if (slash) {
+        const parts = buildNonTextPromptParts(input);
+        const response = await platform.api.runSessionCommand(
+          sessionId,
+          compactRecord({
+            command: slash.command,
+            arguments: slash.arguments,
+            agent: input.agent,
+            model: input.model,
+            variant: input.variant,
+            parts: parts.length ? parts : undefined
+          })
+        );
+        const run = subscribeRuntimeRun(response, platform.baseUrl, runEvents);
+        if (run) {
+          activeRun.value = run;
+        }
+        return response;
+      }
       const payload = compactPayload({
-        sessionId: activeSession.value.sessionId,
-        parts: buildPromptParts(input),
+        sessionId,
+        parts: compactPromptParts(buildPromptParts(input)),
         prompt: input.text,
         // Agent/Model 是 opencode 运行态选择，不作为普通 prompt part 发送。
         agent: input.agent,
@@ -338,13 +376,65 @@ function compactPayload(input: {
   model?: string;
   variant?: string;
 }) {
-  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined && value !== "")) as {
+  return compactRecord(input) as {
     sessionId: string;
     parts: ReturnType<typeof buildPromptParts>;
     prompt?: string;
     agent?: string;
     model?: string;
     variant?: string;
+  };
+}
+
+function compactRecord<T extends Record<string, unknown>>(input: T) {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined && value !== "")) as Partial<T>;
+}
+
+function compactPromptParts(parts: ReturnType<typeof buildPromptParts>) {
+  return parts.map((part) => compactRecord(part) as ReturnType<typeof buildPromptParts>[number]);
+}
+
+function buildNonTextPromptParts(input: PromptBuildInput) {
+  return compactPromptParts(buildPromptParts({ ...input, text: "" }));
+}
+
+function parseSlashCommand(text: string) {
+  if (!text.startsWith("/")) {
+    return undefined;
+  }
+  const [head] = text.split(/\s+/, 1);
+  const command = head.slice(1).trim();
+  if (!command) {
+    return undefined;
+  }
+  return {
+    command,
+    arguments: text.slice(head.length).trim()
+  };
+}
+
+function subscribeRuntimeRun(response: unknown, baseUrl: string, runEvents: ReturnType<typeof useRunEventStore>) {
+  const run = normalizeRunResponse(response);
+  if (!run) {
+    return undefined;
+  }
+  runEvents.subscribe(run.runId, baseUrl);
+  return run;
+}
+
+function normalizeRunResponse(value: unknown): Run | undefined {
+  const source = readPayloadRecord(value);
+  const runId = readString(source?.runId) ?? readString(source?.runID) ?? readString(source?.id);
+  if (!source || !runId) {
+    return undefined;
+  }
+  return {
+    runId,
+    sessionId: readString(source.sessionId) ?? readString(source.sessionID) ?? "",
+    workspaceId: readString(source.workspaceId) ?? readString(source.workspaceID) ?? "",
+    status: readString(source.status) ?? "RUNNING",
+    createdAt: readString(source.createdAt) ?? new Date().toISOString(),
+    updatedAt: readString(source.updatedAt) ?? new Date().toISOString()
   };
 }
 

@@ -27,7 +27,8 @@ export const usePromptStore = defineStore("prompt", () => {
       references: references.value,
       agent: runtimeAgent.value || undefined,
       model: runtimeModel.value || undefined,
-      variant: runtimeVariant.value || undefined
+      variant: runtimeVariant.value || undefined,
+      shellMode: shellMode.value || undefined
     };
   }
 

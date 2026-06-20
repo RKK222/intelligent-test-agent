@@ -8,7 +8,7 @@
 | VCS/LSP/MCP status | `getVcsStatus/getVcsDiff/getLspStatus/getMcpStatus/getMcpResources/getMcpTools` | `/api/vcs/*`、`/api/lsp/status`、`/api/mcp/*` |
 | Prompt submit runtime selection | `startRun({ parts, agent, model, variant })` | `/api/runs`；Agent/Model/Variant 是运行态参数，不进入普通 prompt part；图片附件随 `parts` 以 `file` part 的 `mimeType/url` 发送 |
 | Session children/todo/diff | `getSessionChildren/getSessionTodo/getSessionDiff` | `/api/sessions/{sessionId}/children|todo|diff` |
-| Abort/fork/compact/revert/command/shell | `abortSession/forkSession/compactSession/revertSession/unrevertSession/runSessionCommand/runSessionShell` | `/api/sessions/{sessionId}/...`；fork/revert 请求体使用 opencode `messageID`，compact 使用 `providerID/modelID` |
+| Abort/fork/compact/revert/command/shell | `abortSession/forkSession/compactSession/revertSession/unrevertSession/runSessionCommand/runSessionShell` | `/api/sessions/{sessionId}/...`；fork/revert 请求体使用 opencode `messageID`，compact 使用 `providerID/modelID`；composer shell mode 提交 `command`，slash command 提交 `command/arguments/parts` |
 | Permission/question | `listSessionPermissions/replySessionPermission/listSessionQuestions/...` | `/api/sessions/{sessionId}/permissions|questions` |
 | RunEvent stream | `event-stream-client.subscribeRunEvents` | `/api/runs/{runId}/events` |
 | Terminal | `createTerminalTicket` + PTY JSON envelope | `/api/sessions/{sessionId}/terminal/tickets` + 后端 WebSocket ticket；WebSocket 只发送 `input/resize/close` envelope |

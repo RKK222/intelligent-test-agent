@@ -99,6 +99,63 @@ describe("session store actions", () => {
     ]);
   });
 
+  it("routes shell mode and slash commands through opencode runtime session APIs", async () => {
+    setActivePinia(createPinia());
+    const platform = usePlatformStore();
+    const runEvents = useRunEventStore();
+    const session = useSessionStore();
+    const calls: Array<[string, ...unknown[]]> = [];
+    runEvents.subscribe = vi.fn();
+
+    Object.defineProperty(platform, "api", {
+      value: {
+        startRun: async (...args: unknown[]) => calls.push(["startRun", ...args]),
+        runSessionShell: async (...args: unknown[]) => calls.push(["shell", ...args]),
+        runSessionCommand: async (...args: unknown[]) => calls.push(["command", ...args])
+      }
+    });
+
+    session.activeSession = {
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      title: "Demo",
+      status: "RUNNING",
+      createdAt: "",
+      updatedAt: ""
+    };
+
+    await session.sendPrompt({ text: "pnpm test", shellMode: true, agent: "build", model: "anthropic/claude-sonnet-4", variant: "low" });
+    await session.sendPrompt({
+      text: "/review staged changes",
+      model: "anthropic/claude-sonnet-4",
+      files: [{ path: "src/App.vue", name: "App.vue" }]
+    });
+
+    expect(calls).toEqual([
+      [
+        "shell",
+        "ses_1",
+        {
+          command: "pnpm test",
+          agent: "build",
+          model: "anthropic/claude-sonnet-4",
+          variant: "low"
+        }
+      ],
+      [
+        "command",
+        "ses_1",
+        {
+          command: "review",
+          arguments: "staged changes",
+          model: "anthropic/claude-sonnet-4",
+          parts: [{ type: "file", path: "src/App.vue", name: "App.vue" }]
+        }
+      ]
+    ]);
+    expect(runEvents.subscribe).not.toHaveBeenCalled();
+  });
+
   it("routes toolbar fork, revert, and compact actions through backend-api", async () => {
     setActivePinia(createPinia());
     const platform = usePlatformStore();
