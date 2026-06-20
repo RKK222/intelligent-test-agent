@@ -5,7 +5,7 @@ export default defineConfig({
   testMatch: "**/*.spec.ts",
   timeout: 30_000,
   webServer: {
-    command: "corepack pnpm --filter @test-agent/agent-web dev --hostname 127.0.0.1 --port 3000",
+    command: "corepack pnpm --filter @test-agent/agent-web dev --host 127.0.0.1 --port 3000",
     url: "http://127.0.0.1:3000",
     reuseExistingServer: true,
     timeout: 120_000

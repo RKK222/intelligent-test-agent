@@ -96,7 +96,7 @@ test-agent-event
 2. 所有后端调用必须通过 `backend-api`。
 3. 所有实时事件必须通过 `event-stream-client` 消费平台 RunEvent SSE。
 4. `backend-api` 不得依赖页面、工作台、Monaco、Dockview 或具体业务组件。
-5. `event-stream-client` 不得直接修改 React 组件状态。
+5. `event-stream-client` 不得直接修改 Vue 组件状态。
 6. `ui-kit` 和 `shared-types` 不得依赖业务 API 或事件流。
 7. 自研 Web IDE 功能必须按 package 边界沉淀，不能把全部逻辑堆到 `apps/agent-web`。
 8. Phase 07 搜索只过滤已加载文件树的文件名；Phase 08 Diff 接受/拒绝只能通过平台 Run 级 API。

@@ -2,7 +2,7 @@
 
 ## 部署边界
 
-默认平台前端是 `frontend/apps/agent-web`。`frontend-opencode` 是独立的 Vue/TypeScript/Vite opencode IDE App 复刻工程，需要按该目录 README 单独构建和部署；后端 `test-agent-app`、PostgreSQL、Redis 和 opencode server 都是外部服务。`frontend/interaction-visual-demo` 和 `opencode-source/` 不纳入部署构建。
+默认平台前端是 `frontend/apps/agent-web`，基于 Vue 3 + Vite SPA。`frontend-opencode` 是独立的 Vue/TypeScript/Vite opencode IDE App 复刻工程，需要按该目录 README 单独构建和部署；后端 `test-agent-app`、PostgreSQL、Redis 和 opencode server 都是外部服务。`frontend/interaction-visual-demo` 和 `opencode-source/` 不纳入部署构建。
 
 ## 构建
 
@@ -13,7 +13,7 @@ corepack pnpm install --frozen-lockfile
 corepack pnpm build
 ```
 
-`apps/agent-web` 使用 Next.js 生产构建。若启用 `output: 'standalone'`（见 `apps/agent-web/next.config.ts`），构建产物在 `apps/agent-web/.next/standalone/`，可独立运行无需完整 `node_modules`；静态资源在 `apps/agent-web/.next/static/` 和 `public/`，需一同部署。
+`apps/agent-web` 使用 Vite 生产构建，产物输出到 `apps/agent-web/dist/`：纯静态 HTML/JS/CSS，可由任意静态服务器或反向代理托管，无需 Node 运行时。
 
 `frontend-opencode` 使用 Vite 生产构建：
 
@@ -30,25 +30,22 @@ corepack pnpm build
 前端运行时需要：
 
 ```bash
-NEXT_PUBLIC_API_BASE_URL=https://<backend-host>   # backend-api 的统一 base URL
-VITE_TEST_AGENT_API_BASE_URL=https://<backend-host> # frontend-opencode 可选；同域部署可留空走 /api
+VITE_TEST_AGENT_API_BASE_URL=https://<backend-host>   # agent-web backend-api 的统一 base URL；同域部署可留空走 /api
 ```
 
-- `NEXT_PUBLIC_*` 变量在构建时注入，变更需重新构建。
+- `VITE_` 前缀变量在构建时注入 `import.meta.env`，变更需重新构建。
 - 前端不得把密钥写入源码、`localStorage` 或构建产物；`TEST_AGENT_API_TOKEN` 等 Bearer token 由前端通过受控方式获取并经 `backend-api` 携带，不固化在构建环境。
-- 本地开发默认 `NEXT_PUBLIC_API_BASE_URL` 指向 `http://127.0.0.1:8080`（见 `frontend/README.md`）。
+- 本地开发默认 `VITE_TEST_AGENT_API_BASE_URL` 指向 `http://127.0.0.1:8080`（见 `frontend/README.md`）。
 
 ## 运行
 
-standalone 产物：
+Vite 构建产物为纯静态 SPA，用任意静态服务器托管 `apps/agent-web/dist/` 即可，例如：
 
 ```bash
-NODE_ENV=production \
-NEXT_PUBLIC_API_BASE_URL=https://<backend-host> \
-node apps/agent-web/.next/standalone/apps/agent-web/server.js
+npx serve apps/agent-web/dist -l 3000
 ```
 
-默认平台前端端口由对应 dev server 决定；`frontend-opencode` 本地 Vite dev server 可通过 `corepack pnpm dev` 启动，生产静态托管时由外部 Web server 决定监听端口。
+或通过反向代理把静态资源指向 `dist/`、把 `/api` 转发到 `test-agent-app`。SPA 路由（`/`、`/s/:sessionId`）需配置 history fallback，所有非静态路径回退到 `dist/index.html`。生产监听端口由外部 Web server 决定。
 
 ## 反向代理与 CORS
 

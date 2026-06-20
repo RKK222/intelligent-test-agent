@@ -1,2 +1,3 @@
-export * from "./CodeEditor";
-export * from "./language";
+export { default as CodeEditor } from "./CodeEditor.vue";
+export type { CodeEditorProps, EditorSelectionContext } from "./CodeEditor.vue";
+export { languageFromPath } from "./language";

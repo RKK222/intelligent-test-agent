@@ -2,24 +2,27 @@
 
 ## 职责
 
-承载 Next.js app router 页面和工作台组合层。
+承载 Vue + Vite SPA 路由页面和工作台组合层。
 
 ## 主要程序清单
 
-- `app/layout.tsx`：全局页面壳与元信息。
-- `app/page.tsx`：工作台首页入口。
-- `app/s/[sessionId]/page.tsx`：只读 transcript 页面入口，复用平台 session/messages API。
-- `components/AgentWorkbench.tsx`：组合 workspace、文件树、编辑器、Agent、RunEvent SSE、Session History 搜索/置顶/删除、prompt 附件/follow-up 队列、编辑器选区上下文、Diff 操作和底部 PTY terminal panel。
+- `main.ts`：应用入口，装配 Pinia、`@tanstack/vue-query` 的 `VueQueryPlugin` 和 vue-router。
+- `App.vue`：根组件，渲染 `<RouterView />`。
+- `router.ts`：SPA 客户端路由，`/` 工作台、`/s/:sessionId` 只读 transcript。
+- `views/WorkbenchView.vue`：工作台首页入口。
+- `views/TranscriptView.vue`：只读 transcript 页面入口，复用平台 session/messages API。
+- `components/AgentWorkbench.vue`：组合 workspace、文件树、编辑器、Agent、RunEvent SSE、Session History 搜索/置顶/删除、prompt 附件/follow-up 队列、编辑器选区上下文、Diff 操作和底部 PTY terminal panel。
+- `components/EditorPane.vue`、`WorkspaceBootstrap.vue`、`ReadonlyTranscript.vue`：编辑器 tab 壳、Workspace 注册引导和只读 transcript 视图（不订阅 SSE，不直连 opencode）。
 - `components/follow-up-queue.ts`：Run 忙碌时 prompt follow-up 的纯 FIFO 队列模型。
 - `components/prompt-context.ts`：活动编辑器或 Monaco 选区到 `PromptPart` file context 的纯转换。
-- `components/ReadonlyTranscript.tsx`：只读 transcript 客户端视图，不订阅 SSE，不直连 opencode。
-- `app/globals.css`：Tailwind 4 全局入口、theme token、Dockview/Monaco 视觉适配、滚动条、panel chrome 和工作台级动画。
-- `../next.config.ts`：Next 应用配置，允许本地从 `127.0.0.1` 访问开发资源，保持 Run/取消等客户端交互可用。
+- `components/workbench-utils.ts`：Diff payload 解析、错误反馈、history/runtime status 派生、命令解析等纯函数。
+- `styles/globals.css`：Tailwind 4 全局入口、theme token、dockview-vue/Monaco 视觉适配、滚动条、panel chrome 和工作台级动画。
+- `../vite.config.ts`：Vite 应用配置（Vue 插件、Tailwind 插件、workspace alias、dev server）。
 
 ## 允许依赖
 
 - `@test-agent/*` 前端 workspace packages。
-- Next.js、React、TanStack Query。
+- Vue 3、vue-router、Pinia、`@tanstack/vue-query`、dockview-vue、monaco-editor、lucide-vue-next。
 
 ## 禁止依赖
 

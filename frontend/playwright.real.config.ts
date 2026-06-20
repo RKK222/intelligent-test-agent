@@ -9,12 +9,12 @@ export default defineConfig({
   testMatch: "**/*.real-spec.ts",
   timeout: 120_000,
   webServer: {
-    command: `corepack pnpm --filter @test-agent/agent-web dev --hostname ${frontend.hostname} --port ${frontend.port || "3000"}`,
+    command: `corepack pnpm --filter @test-agent/agent-web dev --host ${frontend.hostname} --port ${frontend.port || "3000"}`,
     url: frontendUrl,
     reuseExistingServer: true,
     timeout: 120_000,
     env: {
-      NEXT_PUBLIC_TEST_AGENT_API_BASE_URL: backendBaseUrl
+      VITE_TEST_AGENT_API_BASE_URL: backendBaseUrl
     }
   },
   use: {

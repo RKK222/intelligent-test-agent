@@ -6,14 +6,15 @@
 
 ## 主要程序清单
 
-- `DiffViewer.tsx`：Monaco Diff、来源切换、split/unified、动作栏、文件列表和 hunk 导航。
+- `DiffViewer.vue`：Monaco Diff、来源切换、split/unified、动作栏、文件列表和 hunk 导航。
+- `monaco-env.ts`：Monaco Web Worker 配置（懒加载）。
 - `hunks.ts`：从 unified patch 提取 hunk 范围、循环导航和 hunk 到 `PromptPart` file context 的转换。
 - `unifiedPatch.ts`：统一 diff patch 到 original/modified 文本的轻量转换。
 
 ## 允许依赖
 
-- React。
-- `@monaco-editor/react`。
+- Vue 3。
+- `monaco-editor`（原生）。
 - `@test-agent/shared-types`。
 - `@test-agent/ui-kit`。
 

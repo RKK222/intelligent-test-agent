@@ -17,7 +17,7 @@ Agent 对话和结构化卡片展示包。
 - History tab 支持受控搜索、选择会话、置顶/取消置顶和删除回调；实际 API 调用由 app 层完成。
 - 提供纯 RunEvent reducer，把 `message.part.delta`、permission/question、todo、diff 等事件归并为对话展示状态。
 - 提供发送、取消、重试、打开 Diff 回调。
-- 通过 assistant-ui 类型适配未来完整对话运行时。
+- 自建最小 chat 运行时（基于纯 reducer + Vue 组合式状态），不依赖外部对话 UI 框架。
 - `assistant.message.delta` 旧事件继续作为兼容输入；新 `message.part.delta` 优先按 messageId/partId 合并，避免流式输出重复。
 - Agent/Provider/Model/Mode selector、slash command、`@` context、permission/question dock、Todo 和 runtime status 只暴露受控回调，HTTP 提交与 SSE 订阅仍由 app 层负责。
 - Timeline、dock、附件 chips、任务分解和 Skill/Tool cards 必须使用固定区域和换行策略，Agent 对话线程必须有独立 sticky scroll 区域：用户在底部时自动跟随，用户向上阅读时保留位置并提示有新内容，避免长命令、长路径、图片名或 streaming 文本撑开工作台。

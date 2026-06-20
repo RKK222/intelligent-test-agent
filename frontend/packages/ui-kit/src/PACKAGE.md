@@ -6,13 +6,13 @@
 
 ## 主要程序清单
 
-- `Button.tsx`、`Badge.tsx`、`Input.tsx`、`Tabs.tsx`、`Toast.tsx`：消费全局 theme token，提供紧凑、可聚焦、可禁用的基础控件外观。
+- `Button.vue`、`Badge.vue`、`Input.vue`、`Textarea.vue`、`Tabs.vue`、`Toast.vue`：消费全局 theme token，提供紧凑、可聚焦、可禁用的基础控件外观。
 - `lib.ts`：样式合并工具。
 
 ## 允许依赖
 
-- React。
-- lucide-react。
+- Vue 3。
+- lucide-vue-next。
 - class-variance-authority、clsx、tailwind-merge。
 
 ## 禁止依赖

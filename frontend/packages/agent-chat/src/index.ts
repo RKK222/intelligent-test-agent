@@ -1,7 +1,9 @@
-export * from "./AgentChat";
-export * from "./AssistantThread";
-export * from "./assistant-thread";
-export * from "./cards";
-export * from "./prompt-parts";
-export * from "./runtime-reducer";
-export type { ThreadMessage as AssistantUiThreadMessage } from "@assistant-ui/react";
+export { default as AgentChat } from "./AgentChat.vue";
+export type { AgentChatProps, HistoryItem } from "./AgentChat.vue";
+export { default as AssistantThread } from "./AssistantThread.vue";
+export type { AssistantThreadProps } from "./AssistantThread.vue";
+export { default as AgentCard } from "./AgentCard.vue";
+export { buildComposerPromptParts, fileToPromptAttachment } from "./prompt-parts";
+export type { ComposerAttachment } from "./prompt-parts";
+export { reduceAgentChatRuntime, createInitialAgentChatRuntimeState } from "./runtime-reducer";
+export type { AgentChatRuntimeState, AgentChatRuntimeAction } from "./runtime-reducer";

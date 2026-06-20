@@ -15,7 +15,7 @@
 
 ## 禁止事项
 
-- 不依赖 React 组件、Dockview、Monaco 或页面状态。
+- 不依赖 Vue 组件、dockview-vue、Monaco 或页面状态。
 - 不访问 opencode server。
 
 ## 验证

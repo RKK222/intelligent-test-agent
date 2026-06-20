@@ -33,5 +33,5 @@
 ## 部署与数据库
 
 - `docs/deployment/backend.md`：后端 Java 进程容器部署。
-- `docs/deployment/frontend.md`：前端 Next.js 生产构建与部署。
+- `docs/deployment/frontend.md`：前端 Vue + Vite 生产构建与部署。
 - `docs/deployment/database.md`：Flyway migration、核心表与兼容策略。

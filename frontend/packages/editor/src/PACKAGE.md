@@ -6,13 +6,14 @@
 
 ## 主要程序清单
 
-- `CodeEditor.tsx`：Monaco 编辑器、保存反馈、只读/脏状态展示和当前选区上报回调。
+- `CodeEditor.vue`：Monaco 编辑器、保存反馈、只读/脏状态展示和当前选区上报回调。
+- `monaco-env.ts`：Monaco Web Worker 配置（懒加载）。
 - `language.ts`：路径到 Monaco language 映射。
 
 ## 允许依赖
 
-- React。
-- `@monaco-editor/react`。
+- Vue 3。
+- `monaco-editor`（原生）。
 - `@test-agent/shared-types`。
 - `@test-agent/ui-kit`。
 

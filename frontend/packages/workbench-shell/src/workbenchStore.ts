@@ -1,4 +1,5 @@
-import { create } from "zustand";
+import { defineStore } from "pinia";
+import { ref } from "vue";
 
 export type EditorTab = {
   id: string;
@@ -9,44 +10,54 @@ export type EditorTab = {
   readonly?: boolean;
 };
 
-export type WorkbenchState = {
-  activePath?: string;
-  tabs: EditorTab[];
-  selectedDiffPath?: string;
-  setActivePath: (path?: string) => void;
-  setSelectedDiffPath: (path?: string) => void;
-  openTab: (tab: EditorTab) => void;
-  closeTab: (path: string) => void;
-  updateTabContent: (path: string, content: string) => void;
-  markTabSaved: (path: string, content: string) => void;
-};
+// 工作台级状态：打开的编辑器 tab、活动文件、选中的 Diff 文件
+export const useWorkbenchStore = defineStore("workbench", () => {
+  const tabs = ref<EditorTab[]>([]);
+  const activePath = ref<string | undefined>(undefined);
+  const selectedDiffPath = ref<string | undefined>(undefined);
 
-export const useWorkbenchStore = create<WorkbenchState>((set) => ({
-  tabs: [],
-  setActivePath: (path) => set({ activePath: path }),
-  setSelectedDiffPath: (path) => set({ selectedDiffPath: path }),
-  openTab: (tab) =>
-    set((state) => {
-      const exists = state.tabs.some((item) => item.path === tab.path);
-      return {
-        activePath: tab.path,
-        tabs: exists ? state.tabs.map((item) => (item.path === tab.path ? { ...item, ...tab } : item)) : [...state.tabs, tab]
-      };
-    }),
-  closeTab: (path) =>
-    set((state) => {
-      const tabs = state.tabs.filter((item) => item.path !== path);
-      return {
-        tabs,
-        activePath: state.activePath === path ? tabs.at(-1)?.path : state.activePath
-      };
-    }),
-  updateTabContent: (path, content) =>
-    set((state) => ({
-      tabs: state.tabs.map((item) => (item.path === path ? { ...item, content } : item))
-    })),
-  markTabSaved: (path, content) =>
-    set((state) => ({
-      tabs: state.tabs.map((item) => (item.path === path ? { ...item, content, savedContent: content } : item))
-    }))
-}));
+  function setActivePath(path?: string) {
+    activePath.value = path;
+  }
+
+  function setSelectedDiffPath(path?: string) {
+    selectedDiffPath.value = path;
+  }
+
+  function openTab(tab: EditorTab) {
+    const exists = tabs.value.some((item) => item.path === tab.path);
+    tabs.value = exists
+      ? tabs.value.map((item) => (item.path === tab.path ? { ...item, ...tab } : item))
+      : [...tabs.value, tab];
+    activePath.value = tab.path;
+  }
+
+  function closeTab(path: string) {
+    tabs.value = tabs.value.filter((item) => item.path !== path);
+    if (activePath.value === path) {
+      activePath.value = tabs.value.at(-1)?.path;
+    }
+  }
+
+  function updateTabContent(path: string, content: string) {
+    tabs.value = tabs.value.map((item) => (item.path === path ? { ...item, content } : item));
+  }
+
+  function markTabSaved(path: string, content: string) {
+    tabs.value = tabs.value.map((item) =>
+      item.path === path ? { ...item, content, savedContent: content } : item
+    );
+  }
+
+  return {
+    tabs,
+    activePath,
+    selectedDiffPath,
+    setActivePath,
+    setSelectedDiffPath,
+    openTab,
+    closeTab,
+    updateTabContent,
+    markTabSaved
+  };
+});

@@ -1,27 +1,34 @@
-import react from "@vitejs/plugin-react";
+import vue from "@vitejs/plugin-vue";
+import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vitest/config";
 
+// 统一通过 import.meta.url 解析 workspace 包源码，避免硬编码绝对路径在不同机器失效
+const pkgSrc = (name: string): URL => new URL(`./packages/${name}/src`, import.meta.url);
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [vue()],
   test: {
     environment: "jsdom",
     globals: true,
     setupFiles: ["./vitest.setup.ts"],
-    include: ["packages/*/tests/**/*.test.ts", "packages/*/tests/**/*.test.tsx", "apps/*/tests/**/*.test.tsx"]
+    include: [
+      "packages/*/tests/**/*.test.ts",
+      "apps/*/tests/**/*.test.ts"
+    ]
   },
   resolve: {
     alias: {
-      "@test-agent/shared-types": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/shared-types/src",
-      "@test-agent/backend-api": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/backend-api/src",
-      "@test-agent/event-stream-client": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/event-stream-client/src",
-      "@test-agent/ui-kit": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/ui-kit/src",
-      "@test-agent/file-explorer": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/file-explorer/src",
-      "@test-agent/editor": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/editor/src",
-      "@test-agent/diff-viewer": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/diff-viewer/src",
-      "@test-agent/agent-chat": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/agent-chat/src",
-      "@test-agent/terminal": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/terminal/src",
-      "@test-agent/test-runner": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/test-runner/src",
-      "@test-agent/workbench-shell": "/Users/huang/workspace/intelligent-test-agent/frontend/packages/workbench-shell/src"
+      "@test-agent/shared-types": fileURLToPath(pkgSrc("shared-types")),
+      "@test-agent/backend-api": fileURLToPath(pkgSrc("backend-api")),
+      "@test-agent/event-stream-client": fileURLToPath(pkgSrc("event-stream-client")),
+      "@test-agent/ui-kit": fileURLToPath(pkgSrc("ui-kit")),
+      "@test-agent/file-explorer": fileURLToPath(pkgSrc("file-explorer")),
+      "@test-agent/editor": fileURLToPath(pkgSrc("editor")),
+      "@test-agent/diff-viewer": fileURLToPath(pkgSrc("diff-viewer")),
+      "@test-agent/agent-chat": fileURLToPath(pkgSrc("agent-chat")),
+      "@test-agent/terminal": fileURLToPath(pkgSrc("terminal")),
+      "@test-agent/test-runner": fileURLToPath(pkgSrc("test-runner")),
+      "@test-agent/workbench-shell": fileURLToPath(pkgSrc("workbench-shell"))
     }
   }
 });

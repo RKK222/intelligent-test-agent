@@ -22,7 +22,7 @@
 
 ## 组件与状态
 
-1. `frontend/` 主 workspace 的 API 远端状态优先放在 TanStack Query；`frontend-opencode` 使用 Pinia store 承载 opencode parity 状态；单组件内部临时状态保持在组件本地。
+1. `frontend/` 主 workspace 的 API 远端状态优先放在 `@tanstack/vue-query`，工作台级 UI 状态放在 Pinia store；`frontend-opencode` 同样使用 Pinia 承载 opencode parity 状态；单组件内部临时状态用 Vue 组合式 `ref`/`reactive` 保持。
 2. 不把密钥、token 或敏感内容放入可持久化前端状态。
 3. Dockview 面板恢复必须使用稳定 id，避免刷新后丢失上下文。
 4. 当前事件流应优先按 `eventId` 去重，兼容旧事件时才回退 `runId + seq`；`seq=0` transient 文本事件不能因为相同 seq 被错误丢弃。
@@ -67,7 +67,7 @@
 ### 请求与缓存
 
 1. 相同资源避免重复请求；请求必须支持取消或过期保护；页面切换时释放无用请求和订阅。
-2. 缓存必须有失效策略；TanStack Query key 必须稳定。
+2. 缓存必须有失效策略；`@tanstack/vue-query` 的 query key 必须稳定。
 
 ### Bundle
 

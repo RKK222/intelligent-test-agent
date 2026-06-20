@@ -16,7 +16,7 @@ Phase 11 已知事件包括旧 `run.*`、`assistant.message.delta`、`tool.*`、
 
 ## 禁止事项
 
-- 不直接修改 React 状态。
+- 不直接修改 Vue 状态。
 - 不访问 opencode server。
 - 不处理业务卡片渲染。
 

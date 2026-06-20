@@ -53,6 +53,16 @@ export class BackendApiError extends Error {
 
 export type BackendApiClient = ReturnType<typeof createBackendApiClient>;
 
+// 统一读取环境变量：Vite 运行时（import.meta.env）优先，Node 运行时（process.env）兜底
+function readEnv(key: string): string | undefined {
+  const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
+  if (viteEnv?.[key]) {
+    return viteEnv[key];
+  }
+  const proc = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process;
+  return proc?.env?.[key];
+}
+
 export type StartRunPayload = {
   sessionId: string;
   prompt?: string;
@@ -67,8 +77,7 @@ export type StartRunPayload = {
 type RequestFn = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 export function createBackendApiClient(options: BackendApiClientOptions = {}) {
-  const env = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-  const baseUrl = (options.baseUrl ?? env?.NEXT_PUBLIC_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080").replace(
+  const baseUrl = (options.baseUrl ?? readEnv("VITE_TEST_AGENT_API_BASE_URL") ?? "http://127.0.0.1:8080").replace(
     /\/$/,
     ""
   );
