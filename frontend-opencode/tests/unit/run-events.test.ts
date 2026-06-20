@@ -36,4 +36,19 @@ describe("run event reducer", () => {
     expect(state.permissions.ses_1[0].requestId).toBe("perm_1");
     expect(state.questions.ses_1[0].questions[0].text).toBe("Continue?");
   });
+
+  it("keeps session id on standalone message part updates", () => {
+    const state = createRunEventState();
+
+    reduceRunEvent(
+      state,
+      event("message.part.updated", {
+        sessionId: "ses_2",
+        messageId: "msg_1",
+        part: { partId: "part_1", type: "text", text: "Streaming answer", status: "running" }
+      })
+    );
+
+    expect(state.messages.msg_1.sessionId).toBe("ses_2");
+  });
 });

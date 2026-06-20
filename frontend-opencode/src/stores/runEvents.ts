@@ -181,6 +181,7 @@ function mergePart(state: RunEventState, payload: Record<string, unknown>, appen
     return;
   }
   const message = ensureMessage(state, messageId);
+  message.sessionId = text(payload.sessionId) ?? text(payload.sessionID) ?? text(raw.sessionId) ?? text(raw.sessionID) ?? message.sessionId;
   const existing = message.parts[partId] as (MessagePart & { text?: string }) | undefined;
   const nextText = text(raw.text) ?? text(raw.content) ?? "";
   message.parts[partId] = {

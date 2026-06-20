@@ -30,14 +30,18 @@ export const useSessionStore = defineStore("session", () => {
 
   const timeline = computed(() => {
     const runEvents = useRunEventStore();
-    const projected = runEvents.timelineMessages.map((message) => ({
-      messageId: message.messageId,
-      sessionId: message.sessionId ?? activeSession.value?.sessionId ?? "",
-      role: message.role.toUpperCase(),
-      content: renderParts(message.parts) || message.text,
-      createdAt: message.updatedAt ?? new Date(0).toISOString(),
-      parts: Object.values(message.parts)
-    }));
+    const currentSessionId = activeSession.value?.sessionId;
+    const projected = runEvents.timelineMessages
+      // RunEvent SSE 是跨运行态入口，切换会话时必须过滤其它 session 的流式投影；旧事件缺 sessionId 时按当前会话兜底。
+      .filter((message) => !message.sessionId || message.sessionId === currentSessionId)
+      .map((message) => ({
+        messageId: message.messageId,
+        sessionId: message.sessionId ?? currentSessionId ?? "",
+        role: message.role.toUpperCase(),
+        content: renderParts(message.parts) || message.text,
+        createdAt: message.updatedAt ?? new Date(0).toISOString(),
+        parts: Object.values(message.parts)
+      }));
     return [...messages.value, ...projected].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   });
   const userMessages = computed(() => timeline.value.filter((message) => message.role.toUpperCase() === "USER"));

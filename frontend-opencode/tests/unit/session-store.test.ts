@@ -42,6 +42,57 @@ describe("session store actions", () => {
     });
   });
 
+  it("shows only RunEvent projected messages for the active session", () => {
+    setActivePinia(createPinia());
+    const session = useSessionStore();
+    const runEvents = useRunEventStore();
+    session.activeSession = {
+      sessionId: "ses_2",
+      workspaceId: "wrk_1",
+      title: "Second",
+      status: "RUNNING",
+      createdAt: "2026-06-20T00:00:00Z",
+      updatedAt: "2026-06-20T00:00:00Z"
+    };
+
+    runEvents.apply({
+      eventId: "evt_other",
+      runId: "run_1",
+      seq: 1,
+      type: "message.updated",
+      traceId: "trace_1",
+      occurredAt: "2026-06-20T00:00:01Z",
+      payload: {
+        message: {
+          messageId: "msg_other",
+          sessionId: "ses_1",
+          role: "assistant",
+          content: "Leaked from first session",
+          updatedAt: "2026-06-20T00:00:01Z"
+        }
+      }
+    });
+    runEvents.apply({
+      eventId: "evt_active",
+      runId: "run_2",
+      seq: 1,
+      type: "message.updated",
+      traceId: "trace_2",
+      occurredAt: "2026-06-20T00:00:02Z",
+      payload: {
+        message: {
+          messageId: "msg_active",
+          sessionId: "ses_2",
+          role: "assistant",
+          content: "Visible in second session",
+          updatedAt: "2026-06-20T00:00:02Z"
+        }
+      }
+    });
+
+    expect(session.timeline.map((message) => message.content)).toEqual(["Visible in second session"]);
+  });
+
   it("proxies dock decisions through backend-api and updates local queues", async () => {
     setActivePinia(createPinia());
     const platform = usePlatformStore();
