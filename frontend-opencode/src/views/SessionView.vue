@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import PromptComposer from "@/components/PromptComposer.vue";
 import SessionDockStack from "@/components/SessionDockStack.vue";
 import SessionTimeline from "@/components/SessionTimeline.vue";
@@ -11,6 +11,7 @@ import { useSessionStore } from "@/stores/session";
 import { useWorkspaceStore } from "@/stores/workspace";
 
 const route = useRoute();
+const router = useRouter();
 const prompt = usePromptStore();
 const session = useSessionStore();
 const workspace = useWorkspaceStore();
@@ -24,6 +25,13 @@ async function load() {
   if (sessionId.value) {
     await session.load(sessionId.value);
   }
+}
+
+function openSession(item: { workspaceId: string; sessionId: string }) {
+  if (item.sessionId === sessionId.value) {
+    return;
+  }
+  void router.push(`/w/${item.workspaceId}/session/${item.sessionId}`);
 }
 
 async function submit() {
@@ -43,6 +51,8 @@ async function submit() {
         class="workspace-row"
         :class="{ active: item.sessionId === sessionId }"
         type="button"
+        :aria-current="item.sessionId === sessionId ? 'page' : undefined"
+        @click="openSession(item)"
       >
         <span class="mini-dot" />
         <span>

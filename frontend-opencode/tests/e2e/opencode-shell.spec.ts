@@ -95,6 +95,20 @@ test("opens a session, sends a prompt, and renders streamed RunEvent output", as
   await expect(page.getByText("All tests passed")).toBeVisible();
 });
 
+test("switches sessions from the session sidebar", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Session sidebar switching is covered on the desktop rail.");
+  await mockBackendApi(page);
+
+  await page.goto("/w/wrk_1/session/ses_1");
+  await expect(page.getByRole("heading", { name: "Demo session" })).toBeVisible();
+
+  await page.getByRole("button", { name: /Second session/ }).click();
+
+  await expect(page).toHaveURL(/\/w\/wrk_1\/session\/ses_2$/);
+  await expect(page.getByRole("heading", { name: "Second session" })).toBeVisible();
+  await expect(page.getByText("Follow-up prompt")).toBeVisible();
+});
+
 test("loads the Monaco diff review editor for session diffs", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "Monaco review loading is covered on the desktop review layout.");
   await mockBackendApi(page, { runRequests: [] }, { sessionDiff: diffFixture() });
@@ -143,11 +157,19 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
             status: "IDLE",
             createdAt: "2026-06-20T00:00:00Z",
             updatedAt: "2026-06-20T00:00:00Z"
+          },
+          {
+            sessionId: "ses_2",
+            workspaceId: "wrk_1",
+            title: "Second session",
+            status: "IDLE",
+            createdAt: "2026-06-20T00:00:03Z",
+            updatedAt: "2026-06-20T00:00:03Z"
           }
         ],
         page: 1,
         size: 20,
-        total: 1
+        total: 2
       });
     }
     if (path === "/api/commands") {
@@ -169,6 +191,16 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         updatedAt: "2026-06-20T00:00:00Z"
       });
     }
+    if (path === "/api/sessions/ses_2") {
+      return json(route, {
+        sessionId: "ses_2",
+        workspaceId: "wrk_1",
+        title: "Second session",
+        status: "IDLE",
+        createdAt: "2026-06-20T00:00:03Z",
+        updatedAt: "2026-06-20T00:00:03Z"
+      });
+    }
     if (path === "/api/sessions/ses_1/messages") {
       return json(route, {
         items: [
@@ -185,10 +217,32 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         total: 1
       });
     }
+    if (path === "/api/sessions/ses_2/messages") {
+      return json(route, {
+        items: [
+          {
+            messageId: "msg_user_2",
+            sessionId: "ses_2",
+            role: "USER",
+            content: "Follow-up prompt",
+            createdAt: "2026-06-20T00:00:04Z"
+          }
+        ],
+        page: 1,
+        size: 200,
+        total: 1
+      });
+    }
     if (path === "/api/sessions/ses_1/diff") {
       return json(route, options.sessionDiff ?? []);
     }
+    if (path === "/api/sessions/ses_2/diff") {
+      return json(route, []);
+    }
     if (path === "/api/sessions/ses_1/todo" || path === "/api/sessions/ses_1/permissions" || path === "/api/sessions/ses_1/questions") {
+      return json(route, []);
+    }
+    if (path === "/api/sessions/ses_2/todo" || path === "/api/sessions/ses_2/permissions" || path === "/api/sessions/ses_2/questions") {
       return json(route, []);
     }
     if (path === "/api/runs" && request.method() === "POST") {
