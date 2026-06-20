@@ -3,6 +3,7 @@ import { expect, type Page, type Route, test } from "@playwright/test";
 type Capture = {
   runRequests: Array<Record<string, unknown>>;
   abortRequests?: Array<Record<string, unknown>>;
+  compactRequests?: Array<Record<string, unknown>>;
   providerAuthRequests?: Array<Record<string, unknown>>;
   shareRequests?: Array<Record<string, unknown>>;
 };
@@ -167,6 +168,26 @@ test("aborts an active session run from the toolbar", async ({ page }, testInfo)
 
   await expect.poll(() => capture.abortRequests?.some((entry) => entry.sessionId === "ses_1")).toBe(true);
   await expect(abort).toBeDisabled();
+});
+
+test("compacts a modeled session from the toolbar", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Toolbar compact is covered on the desktop session controls.");
+  const capture: Capture = { runRequests: [], compactRequests: [] };
+  await mockBackendApi(page, capture);
+
+  await page.goto("/w/wrk_1/session/ses_1");
+  await expect(page.getByRole("heading", { name: "Demo session" })).toBeVisible();
+
+  const compact = page.getByRole("button", { name: "Compact session" });
+  await expect(compact).toBeEnabled();
+  await compact.click();
+
+  await expect.poll(() => capture.compactRequests?.length).toBe(1);
+  expect(capture.compactRequests?.[0]).toMatchObject({
+    sessionId: "ses_1",
+    providerID: "anthropic",
+    modelID: "claude-sonnet-4"
+  });
 });
 
 test("switches sessions from the session sidebar", async ({ page }, testInfo) => {
@@ -342,6 +363,7 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         workspaceId: "wrk_1",
         title: "Demo session",
         status: "IDLE",
+        model: { id: "claude-sonnet-4", providerId: "anthropic" },
         createdAt: "2026-06-20T00:00:00Z",
         updatedAt: "2026-06-20T00:00:00Z"
       });
@@ -422,6 +444,13 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
     if (path === "/api/sessions/ses_1/abort" && request.method() === "POST") {
       capture.abortRequests?.push({ sessionId: "ses_1" });
       return json(route, { cancelled: true });
+    }
+    if (path === "/api/sessions/ses_1/compact" && request.method() === "POST") {
+      capture.compactRequests?.push({
+        sessionId: "ses_1",
+        ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
+      });
+      return json(route, { compacted: true });
     }
 
     return json(route, {});
