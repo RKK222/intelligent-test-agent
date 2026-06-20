@@ -11,7 +11,7 @@
 | Abort/fork/compact/revert/command/shell | `abortSession/forkSession/compactSession/revertSession/unrevertSession/runSessionCommand/runSessionShell` | `/api/sessions/{sessionId}/...`；fork/revert 请求体使用 opencode `messageID`，compact 使用 `providerID/modelID` |
 | Permission/question | `listSessionPermissions/replySessionPermission/listSessionQuestions/...` | `/api/sessions/{sessionId}/permissions|questions` |
 | RunEvent stream | `event-stream-client.subscribeRunEvents` | `/api/runs/{runId}/events` |
-| Terminal | `createTerminalTicket` | `/api/sessions/{sessionId}/terminal/tickets` + 后端 WebSocket ticket |
+| Terminal | `createTerminalTicket` + PTY JSON envelope | `/api/sessions/{sessionId}/terminal/tickets` + 后端 WebSocket ticket；WebSocket 只发送 `input/resize/close` envelope |
 | Config/settings | `getConfig/updateConfig/disposeGlobal` | `/api/config`、`/api/global/dispose` |
 | Provider auth/OAuth | `listProviderAuth/authorizeProviderOAuth/completeProviderOAuth/setProviderAuth/removeProviderAuth` | `/api/provider/auth`、`/api/provider/{providerId}/oauth/*`、`/api/auth/{providerId}` |
 | Worktree | `listWorktrees/createWorktree/removeWorktree/resetWorktree` | `/api/worktrees`、`/api/worktrees/reset` |

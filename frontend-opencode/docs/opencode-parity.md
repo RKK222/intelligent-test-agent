@@ -16,7 +16,7 @@
 | Composer 上方待处理 dock：permission/question/todo/follow-up/revert | 已实现 Vue 版本，操作统一经 `backend-api`，并覆盖组件/状态单测。 |
 | Prompt parts 与运行态选择：text/file/image/agent/reference/slash command、Agent/Model/Variant | 已实现构造与单测；composer 附件/@ 文件选择走平台 fs catalog，图片支持选择、粘贴和拖拽并以 `file` part 发送，context chip 支持移除，Agent/Model/Variant 选择透传 `startRun`，切换模型会清理失效 variant，slash 菜单从平台 command catalog 选择命令并写入 `/command` 文本，支持方向键、Enter、Escape 和参数模板插入。 |
 | RunEvent reducer：message part delta、todo、permission、question、diff/status | 已实现核心 reducer 与单测。 |
-| Terminal | 已接入后端 ticket 获取、WebSocket 连接、输出展示、命令发送、关闭/重连操作；完整 xterm 渲染仍是后续增强。 |
+| Terminal | 已接入后端 ticket 获取、平台 WebSocket JSON envelope、输出展示、warning/error、input、resize、clear、关闭/重连操作；完整 xterm 渲染仍是后续增强。 |
 | Diff review | 已接入 `DiffReviewPanel`，支持文件聚焦、unified/split 样式切换、hunk 统计/导航和空态；完整 Monaco diff 后续懒加载。 |
 | Session share | 已接入 toolbar share popover，支持 publish、显示/复制/打开公开 URL、unpublish，操作统一经 `backend-api`。 |
 | Provider auth/config/worktree/MCP auth API | 后端平台代理已补齐；Settings 已接入 provider auth 状态、API key 保存/移除、provider OAuth authorize URL/code callback、worktree 列表/创建/重置/删除，以及 MCP status/auth/remove auth 入口。 |
@@ -30,4 +30,4 @@
 - Provider API key 管理和 OAuth authorize/code callback 已可用，完整多 method、prompt inputs 和 auto callback flow 仍需真实 provider 环境验收后补齐。
 - Session toolbar fork/revert/compact 已走平台 API；仍需真实三服务验证 fork 返回子会话路由、summarize 模型参数和 revert 后远端消息边界。
 - Prompt composer 附件/@ 文件选择、图片选择/粘贴/拖拽、Agent/Model/Variant 运行态选择和 slash command 已走平台目录；完整 opencode 参数表单、命令参数表单化补全和更完整编辑器级键盘导航仍需继续补齐。
-- Terminal 已具备 ticket/WebSocket 基础交互，后续需用真实三服务验证 PTY 协议、resize 和 xterm 视觉一致性。
+- Terminal 已具备 ticket/WebSocket JSON envelope、input、resize、warning/error 和输出截断基础交互；后续需用真实三服务验证 PTY 协议闭环和 xterm 视觉一致性。
