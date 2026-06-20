@@ -86,13 +86,13 @@ const searchResults = computed(() => filterLoadedFiles(props.entriesByDirectory,
           v-for="file in changedFiles"
           :key="file.path"
           type="button"
-          class="flex w-full items-center gap-2 rounded-md border border-[var(--ta-border)] bg-[#101b33] px-2 py-2 text-left hover:border-[#2a3a63]"
+          class="flex w-full items-center gap-2 rounded-md border border-[var(--ta-border)] bg-[#f4f5f7] px-2 py-2 text-left hover:border-[#c8ced6]"
           @click="emit('openDiff', file.path)"
         >
           <Badge :tone="file.status === 'deleted' ? 'danger' : file.status === 'added' ? 'success' : 'warning'">{{ file.status }}</Badge>
           <span class="min-w-0 flex-1 truncate font-mono text-[12px] text-slate-200">{{ file.path }}</span>
-          <span class="text-[11px] text-[#86efac]">+{{ file.additions }}</span>
-          <span class="text-[11px] text-[#fca5a5]">-{{ file.deletions }}</span>
+          <span class="text-[11px] text-[#3f7a5a]">+{{ file.additions }}</span>
+          <span class="text-[11px] text-[#9e3b34]">-{{ file.deletions }}</span>
         </button>
       </div>
     </div>

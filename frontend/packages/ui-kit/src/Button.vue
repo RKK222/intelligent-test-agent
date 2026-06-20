@@ -9,12 +9,12 @@ const buttonVariants = cva(
     variants: {
       variant: {
         primary:
-          "border-[#1d4ed8] bg-[linear-gradient(180deg,#2563eb,#1d4ed8)] text-white hover:brightness-110",
+          "border-[#2f4a8f] bg-[#2f4a8f] text-white hover:bg-[#243a72]",
         secondary:
-          "border-[var(--ta-border)] bg-[#101b33] text-[var(--ta-text)] hover:border-[#2a3a63]",
+          "border-[var(--ta-border)] bg-[#f4f5f7] text-[var(--ta-text)] hover:border-[#c8ced6]",
         ghost:
-          "border-transparent bg-transparent text-[var(--ta-muted)] hover:bg-[#122044] hover:text-[var(--ta-text)]",
-        danger: "border-[#7f1d1d] bg-[#3b0d0d] text-red-200 hover:bg-[#521414]"
+          "border-transparent bg-transparent text-[var(--ta-muted)] hover:bg-[#e7e9ed] hover:text-[var(--ta-text)]",
+        danger: "border-[#9e3b34] bg-[#f4e3e1] text-red-200 hover:bg-[#ecc9c5]"
       },
       size: {
         sm: "h-7 px-2",

@@ -38,14 +38,14 @@ watch(() => props.sessionId, () => void load(), { immediate: true });
     <section class="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-4 py-6">
       <header class="border-b border-slate-800 pb-4">
         <div class="text-[12px] uppercase tracking-wide text-slate-500">Readonly transcript</div>
-        <h1 class="mt-2 text-2xl font-semibold">{{ session?.title ?? sessionId }}</h1>
+        <h1 class="ta-display mt-2 text-2xl">{{ session?.title ?? sessionId }}</h1>
         <div class="mt-2 flex flex-wrap gap-2 text-[12px] text-slate-500">
           <span>{{ session?.status ?? "loading" }}</span>
           <span>{{ session?.updatedAt ? new Date(session.updatedAt).toLocaleString("zh-CN", { hour12: false }) : "" }}</span>
         </div>
       </header>
       <div class="min-h-0 flex-1 space-y-3 py-4">
-        <article v-for="message in messages" :key="message.messageId" class="rounded-[10px] border border-[var(--ta-border)] bg-[#101b33] p-3">
+        <article v-for="message in messages" :key="message.messageId" class="rounded-[10px] border border-[var(--ta-border)] bg-[#f4f5f7] p-3">
           <div class="mb-2 flex items-center justify-between gap-2 text-[11px] text-slate-500">
             <span>{{ message.role }}</span>
             <span>{{ new Date(message.createdAt).toLocaleString("zh-CN", { hour12: false }) }}</span>

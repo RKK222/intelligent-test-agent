@@ -14,14 +14,14 @@ const value = defineModel<T>({ required: true });
 </script>
 
 <template>
-  <div :class="cn('flex gap-1 border-b border-[var(--ta-border)] bg-[#0d1628] px-2 py-1')">
+  <div :class="cn('flex gap-1 border-b border-[var(--ta-border)] bg-[#eef0f3] px-2 py-1')">
     <button
       v-for="item in items"
       :key="item.id"
       type="button"
       :class="cn(
-        'rounded-md px-2 py-1 text-[12px] text-[var(--ta-muted)] transition hover:bg-[#122044] hover:text-[var(--ta-text)]',
-        value === item.id && 'bg-[#17244a] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-accent)]'
+        'rounded-md px-2 py-1 text-[12px] text-[var(--ta-muted)] transition hover:bg-[#e7e9ed] hover:text-[var(--ta-text)]',
+        value === item.id && 'bg-[#ffffff] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-accent)]'
       )"
       @click="value = item.id"
     >

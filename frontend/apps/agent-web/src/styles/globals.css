@@ -1,25 +1,27 @@
 @import "tailwindcss";
 @import "dockview-vue/dist/styles/dockview.css";
 
-/* ===== 设计 token：对齐 interaction-visual-demo 调色板 ===== */
+/* ===== 设计 token：tracing paper & graphite（灰白底 / 黑灰字）=====
+   以暖灰白纸面为底，深石墨色为字，发丝级边框，单一墨蓝信号色。
+   chrome token 与既有浅色 chat token 统一到同一纸面调性。 */
 :root {
-  color-scheme: dark;
-  --ta-bg: #0b1220;
-  --ta-bg-2: #0f172a;
-  --ta-panel: #111a2e;
-  --ta-panel-2: #15213d;
-  --ta-border: #1f2a44;
-  --ta-text: #e5eefc;
-  --ta-muted: #8aa0c6;
-  --ta-accent: #60a5fa;
-  --ta-accent-2: #22d3ee;
-  --ta-cyan: #22d3ee;
-  --ta-ok: #22c55e;
-  --ta-warn: #f59e0b;
-  --ta-error: #ef4444;
-  --ta-del: rgba(239, 68, 68, 0.18);
-  --ta-add: rgba(34, 197, 94, 0.18);
-  --ta-line-numbers: #3a4a6e;
+  color-scheme: light;
+  --ta-bg: #e9ebef;
+  --ta-bg-2: #eef0f3;
+  --ta-panel: #f4f5f7;
+  --ta-panel-2: #fbfbfc;
+  --ta-border: #dde0e5;
+  --ta-text: #1b1e23;
+  --ta-muted: #5c636c;
+  --ta-accent: #2f4a8f;
+  --ta-accent-2: #5a6f8f;
+  --ta-cyan: #2f6f80;
+  --ta-ok: #3f7a5a;
+  --ta-warn: #946015;
+  --ta-error: #9e3b34;
+  --ta-del: rgba(158, 59, 52, 0.12);
+  --ta-add: rgba(63, 122, 90, 0.12);
+  --ta-line-numbers: #aab0b8;
   --ta-chat-bg: #f6f7f8;
   --ta-chat-surface: #ffffff;
   --ta-chat-message-bg: #fbfbfc;
@@ -40,40 +42,41 @@
   --ta-chat-status-error: #9b4d4d;
 }
 
-/* ===== Tailwind v4 内置色阶重映射到 demo 调色板（整站换肤） ===== */
-/* 注意：@theme 必须在 @import "tailwindcss" 之后；仅覆盖实际用到的档位 */
+/* ===== Tailwind v4 内置色阶重映射到纸面调色板（浅底深字，语义取反）=====
+   组件中 text-slate-100/200 作主文字 → 映射为深石墨；
+   bg-slate-950/900/800 作深底 → 映射为浅纸面；slate-400/500 作次级文字 → 中灰。 */
 @theme {
-  --color-slate-950: #0b1220;
-  --color-slate-900: #0f1a33;
-  --color-slate-800: #15213d;
-  --color-slate-700: #1f2a44;
-  --color-slate-500: #8aa0c6;
-  --color-slate-400: #93a4c6;
-  --color-slate-300: #cfe0ff;
-  --color-slate-200: #dce5f7;
-  --color-slate-100: #e5eefc;
+  --color-slate-950: #e9ebef;
+  --color-slate-900: #eef0f3;
+  --color-slate-800: #dde0e5;
+  --color-slate-700: #c8ced6;
+  --color-slate-500: #5c636c;
+  --color-slate-400: #6f7680;
+  --color-slate-300: #3d434c;
+  --color-slate-200: #2b2f36;
+  --color-slate-100: #1b1e23;
 
-  --color-blue-500: #60a5fa;
-  --color-blue-600: #3b82f6;
-  --color-blue-900: #1b2d5a;
-  --color-blue-950: #122044;
-  --color-blue-300: #8db6f5;
-  --color-blue-200: #a3c9ff;
+  --color-blue-500: #2f4a8f;
+  --color-blue-600: #243a72;
+  --color-blue-900: #2f4a8f;
+  --color-blue-950: #e7e9ed;
+  --color-blue-300: #5a6f8f;
+  --color-blue-200: #8a9bb5;
 
-  --color-cyan-300: #67e8f9;
-  --color-cyan-900: #0d3b4a;
-  --color-cyan-950: #0a2a36;
+  --color-cyan-300: #2f6f80;
+  --color-cyan-900: #2f6f80;
+  --color-cyan-950: #e6eeee;
 
-  --color-emerald-300: #86efac;
-  --color-emerald-950: #0b2a1a;
+  --color-emerald-300: #3f7a5a;
+  --color-emerald-950: #e7eee9;
 
-  --color-amber-200: #fcd34d;
-  --color-amber-400: #fbbf24;
-  --color-amber-950: #2a1d05;
+  --color-amber-200: #946015;
+  --color-amber-400: #b07a2b;
+  --color-amber-950: #f0e6d3;
 
-  --color-red-200: #fca5a5;
-  --color-red-900: #3b0d0d;
-  --color-red-950: #2a0d0d;
+  --color-red-200: #9e3b34;
+  --color-red-900: #9e3b34;
+  --color-red-950: #f4e3e1;
 }
 
 * {
@@ -85,12 +88,18 @@ body {
   height: 100%;
   margin: 0;
   overflow: hidden;
-  /* demo 径向渐变背景 */
-  background: radial-gradient(1200px 600px at 10% -10%, #1b2a4e 0%, transparent 60%), var(--ta-bg);
+  /* 纸面：极淡的双层渐变营造纸纹深度，避免纯色平淡 */
+  background:
+    radial-gradient(1100px 560px at 12% -8%, #f3f4f6 0%, transparent 55%),
+    radial-gradient(900px 600px at 100% 110%, #e4e7ec 0%, transparent 50%),
+    var(--ta-bg);
   color: var(--ta-text);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
+  font-family: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 13px;
+  font-feature-settings: "ss01", "cv01";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 button,
@@ -113,10 +122,10 @@ select {
 @keyframes ta-pulse-glow {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(34, 211, 238, 0.5);
+    box-shadow: 0 0 0 0 rgba(47, 74, 143, 0.45);
   }
   50% {
-    box-shadow: 0 0 0 6px rgba(34, 211, 238, 0);
+    box-shadow: 0 0 0 6px rgba(47, 74, 143, 0);
   }
 }
 @keyframes ta-spin {
@@ -133,17 +142,18 @@ select {
   }
 }
 
-/* ===== demo 质感辅助 class（className 可用，新增不改名） ===== */
-/* 卡片：圆角 10px、demo 面板底色、hover 微抬升 */
+/* ===== 质感辅助 class（className 可用，新增不改名） ===== */
+/* 卡片：纸面卡片，发丝边框，hover 微抬升 */
 .ta-card {
   border: 1px solid var(--ta-border);
   border-radius: 10px;
-  background: #101b33;
-  transition: border-color 0.15s, transform 0.15s;
+  background: var(--ta-panel-2);
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
 }
 .ta-card-hover:hover {
-  border-color: #2a3a63;
+  border-color: var(--ta-chat-border-strong);
   transform: translateY(-1px);
+  box-shadow: 0 6px 20px -12px rgba(27, 30, 35, 0.18);
 }
 /* 药丸徽章 */
 .ta-pill {
@@ -172,21 +182,27 @@ select {
 .ta-status-dot.failed {
   background: var(--ta-error);
 }
-/* 渐变标题文字 */
+/* 标题：Fraunces 衬线展示字，石墨单色（替代旧渐变） */
 .ta-welcome-h1 {
-  background: linear-gradient(90deg, #60a5fa, #22d3ee, #a78bfa);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  font-family: "Fraunces", Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ta-text);
 }
-/* 代码块：#0a1324 底色 + #1d2b4d 边框 */
+/* 展示字族：用于品牌字与章节大标题 */
+.ta-display {
+  font-family: "Fraunces", Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+/* 代码块：纸面底 + 发丝边框 */
 .ta-codeblock {
-  background: #0a1324;
-  border: 1px solid #1d2b4d;
+  background: var(--ta-panel-2);
+  border: 1px solid var(--ta-border);
   border-radius: 8px;
 }
 
-/* ===== 自定义滚动条（对齐 demo） ===== */
+/* ===== 自定义滚动条（纸面） ===== */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -195,28 +211,28 @@ select {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1c2a4e;
+  background: #c8ced6;
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #253865;
+  background: #aab0b8;
   background-clip: padding-box;
   border: 2px solid transparent;
 }
 
-/* ===== dockview 对齐 demo editor-tabs ===== */
+/* ===== dockview 纸面 editor-tabs ===== */
 .dv-dockview {
   /* dockview-vue 的根元素默认不会撑满父容器，显式占满 main 区域 */
   width: 100%;
   height: 100%;
   background: var(--ta-panel-2);
-  /* 覆盖 dockview 内置 tab 配色变量，对齐 demo */
-  --dv-activegroup-visiblepanel-tab-background-color: #17244a;
-  --dv-activegroup-hiddenpanel-tab-background-color: #122044;
-  --dv-inactivegroup-visiblepanel-tab-background-color: #101b33;
-  --dv-inactivegroup-hiddenpanel-tab-background-color: #0f1a33;
+  /* 覆盖 dockview 内置 tab 配色变量，对齐纸面 */
+  --dv-activegroup-visiblepanel-tab-background-color: #ffffff;
+  --dv-activegroup-hiddenpanel-tab-background-color: #f4f5f7;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #eef0f3;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #e9ebef;
   --dv-activegroup-visiblepanel-tab-color: var(--ta-text);
   --dv-inactivegroup-visiblepanel-tab-color: var(--ta-muted);
   --dv-tab-font-size: 12px;
@@ -240,8 +256,8 @@ select {
   box-shadow: inset 0 -2px 0 var(--ta-accent);
 }
 
-/* ===== Monaco 对齐 demo 编辑器底色 ===== */
+/* ===== Monaco 对齐纸面编辑器底色 ===== */
 .monaco-editor,
 .monaco-diff-editor {
-  --vscode-editor-background: #0a1324;
+  --vscode-editor-background: #fbfbfc;
 }

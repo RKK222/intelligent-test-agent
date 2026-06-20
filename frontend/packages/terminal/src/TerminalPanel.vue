@@ -94,13 +94,13 @@ function close() {
     <div v-if="disabled" class="border-b border-slate-800 px-3 py-2 text-[12px] text-slate-500">
       {{ disabledReason ?? "终端当前不可用" }}
     </div>
-    <div v-if="snapshot.error" class="border-b border-[rgba(239,68,68,.3)] bg-[rgba(239,68,68,.12)] px-3 py-2 text-[12px] text-[#fca5a5]">
+    <div v-if="snapshot.error" class="border-b border-[rgba(239,68,68,.3)] bg-[rgba(239,68,68,.12)] px-3 py-2 text-[12px] text-[#9e3b34]">
       {{ snapshot.error.code }}: {{ snapshot.error.message }}
     </div>
     <div
       v-for="warning in snapshot.warnings"
       :key="`${warning.code}:${warning.message}`"
-      class="border-b border-[rgba(245,158,11,.3)] bg-[rgba(245,158,11,.12)] px-3 py-2 text-[12px] text-[#fcd34d]"
+      class="border-b border-[rgba(245,158,11,.3)] bg-[rgba(245,158,11,.12)] px-3 py-2 text-[12px] text-[#946015]"
     >
       {{ warning.code }}: {{ warning.message }}
     </div>

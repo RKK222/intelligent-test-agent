@@ -703,15 +703,15 @@ function onUseHunkContext(part: Extract<PromptPart, { type: "file" }>) {
 
     <template #bottom>
       <div class="flex h-full min-h-0 flex-col bg-[var(--ta-panel)]">
-        <div class="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--ta-border)] bg-[#0d1628] px-2">
+        <div class="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--ta-border)] bg-[#eef0f3] px-2">
           <button
             type="button"
-            :class="['rounded-md px-2 py-1 text-[12px]', bottomMode === 'run' ? 'bg-[#17244a] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-accent)]' : 'text-[var(--ta-muted)] hover:bg-[#122044] hover:text-[var(--ta-text)]']"
+            :class="['rounded-md px-2 py-1 text-[12px]', bottomMode === 'run' ? 'bg-[#ffffff] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-accent)]' : 'text-[var(--ta-muted)] hover:bg-[#e7e9ed] hover:text-[var(--ta-text)]']"
             @click="bottomMode = 'run'"
           >运行</button>
           <button
             type="button"
-            :class="['rounded-md px-2 py-1 text-[12px]', bottomMode === 'terminal' ? 'bg-[#17244a] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-accent)]' : 'text-[var(--ta-muted)] hover:bg-[#122044] hover:text-[var(--ta-text)]']"
+            :class="['rounded-md px-2 py-1 text-[12px]', bottomMode === 'terminal' ? 'bg-[#ffffff] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-accent)]' : 'text-[var(--ta-muted)] hover:bg-[#e7e9ed] hover:text-[var(--ta-text)]']"
             @click="bottomMode = 'terminal'"
           >终端</button>
         </div>

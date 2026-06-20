@@ -213,8 +213,8 @@ onBeforeUnmount(() => {
           :key="file.path"
           type="button"
           :class="cn(
-            'mb-1 flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-2 text-left hover:bg-[#13203f]',
-            selected?.path === file.path && 'border-[#1d4ed8] bg-[rgba(96,165,250,.12)]'
+            'mb-1 flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-2 text-left hover:bg-[#e7e9ed]',
+            selected?.path === file.path && 'border-[#2f4a8f] bg-[rgba(96,165,250,.12)]'
           )"
           @click="emit('selectFile', file.path)"
         >
@@ -228,7 +228,7 @@ onBeforeUnmount(() => {
             :key="`${hunk.filePath}:${hunk.index}`"
             type="button"
             :class="cn(
-              'mb-1 w-full rounded-md border border-transparent px-2 py-1.5 text-left text-[11px] hover:bg-[#13203f]',
+              'mb-1 w-full rounded-md border border-transparent px-2 py-1.5 text-left text-[11px] hover:bg-[#e7e9ed]',
               selectedHunk?.index === hunk.index && 'border-[rgba(34,211,238,.4)] bg-[rgba(34,211,238,.08)]'
             )"
             @click="selectedHunkIndex = hunk.index"

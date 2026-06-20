@@ -78,7 +78,7 @@ onMounted(async () => {
   model = buildModel(props.path, props.content);
   const inst = monacoLib.editor.create(containerEl.value, {
     model,
-    theme: "vs-dark",
+    theme: "vs",
     readOnly: props.readonly ?? false,
     minimap: { enabled: false },
     fontSize: 13,
@@ -145,10 +145,10 @@ onBeforeUnmount(() => {
       <div class="mt-1 text-[12px]">从左侧文件树选择一个测试脚本或配置文件</div>
     </div>
   </div>
-  <div v-else class="flex h-full min-h-0 flex-col bg-[#0a1324]">
-    <div class="flex h-10 items-center gap-2 border-b border-[var(--ta-border)] bg-[#0d1628] px-3">
+  <div v-else class="flex h-full min-h-0 flex-col bg-[#fbfbfc]">
+    <div class="flex h-10 items-center gap-2 border-b border-[var(--ta-border)] bg-[#eef0f3] px-3">
       <div class="min-w-0 flex-1 truncate font-mono text-[12px] text-slate-200">{{ path }}</div>
-      <span v-if="dirty" class="rounded-full bg-[rgba(245,158,11,.15)] px-2 py-0.5 text-[11px] text-[#fcd34d]">未保存</span>
+      <span v-if="dirty" class="rounded-full bg-[rgba(245,158,11,.15)] px-2 py-0.5 text-[11px] text-[#946015]">未保存</span>
       <span v-if="readonly" class="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] text-slate-400">只读</span>
       <Button size="sm" variant="primary" :disabled="!dirty || readonly || saving" @click="emit('save')">
         <Save class="h-4 w-4" />
