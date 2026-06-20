@@ -63,6 +63,12 @@ function toggleFromClick(event: Event) {
   }
 }
 
+function closeFromKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape" && open.value) {
+    open.value = false;
+  }
+}
+
 async function loadProviderAuth() {
   providerError.value = undefined;
   try {
@@ -245,8 +251,14 @@ function promptMatches(prompt: ProviderAuthPrompt, inputs: Record<string, string
   return prompt.when.op === "eq" ? actual === prompt.when.value : actual !== prompt.when.value;
 }
 
-onMounted(() => document.addEventListener("click", toggleFromClick));
-onUnmounted(() => document.removeEventListener("click", toggleFromClick));
+onMounted(() => {
+  document.addEventListener("click", toggleFromClick);
+  document.addEventListener("keydown", closeFromKeydown);
+});
+onUnmounted(() => {
+  document.removeEventListener("click", toggleFromClick);
+  document.removeEventListener("keydown", closeFromKeydown);
+});
 
 // 平台 auth 返回值兼容两类形态：平台状态列表，以及 opencode provider_auth 的 method map。
 function normalizeProviderAuth(response: unknown) {

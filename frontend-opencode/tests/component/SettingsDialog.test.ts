@@ -11,6 +11,29 @@ const Harness = defineComponent({
 });
 
 describe("SettingsDialog", () => {
+  it("closes the settings dialog with Escape", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const platform = usePlatformStore();
+
+    Object.defineProperty(platform, "api", {
+      value: {
+        listProviderAuth: async () => ({}),
+        listWorktrees: async () => [],
+        getMcpStatus: async () => []
+      }
+    });
+
+    render(Harness, { global: { plugins: [pinia] } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByRole("dialog", { name: "Settings" })).toBeInTheDocument();
+
+    await fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "Settings" })).not.toBeInTheDocument();
+  });
+
   it("manages provider auth through backend-api actions", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
