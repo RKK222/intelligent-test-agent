@@ -27,6 +27,10 @@ describe("SettingsDialog", () => {
           calls.push(["list", ...args]);
           return [{ providerId: "anthropic", status: "missing" }];
         },
+        authorizeProviderOAuth: async (...args: unknown[]) => {
+          calls.push(["oauth", ...args]);
+          return { url: "https://auth.example/anthropic" };
+        },
         setProviderAuth: async (...args: unknown[]) => calls.push(["set", ...args]),
         removeProviderAuth: async (...args: unknown[]) => calls.push(["remove", ...args])
       }
@@ -40,11 +44,26 @@ describe("SettingsDialog", () => {
     expect(await screen.findByText("Not connected")).toBeInTheDocument();
 
     await fireEvent.update(screen.getByLabelText("Anthropic API key"), "sk-test");
+    await fireEvent.click(screen.getByRole("button", { name: "Authorize Anthropic OAuth" }));
+    expect(await screen.findByRole("link", { name: "Open Anthropic OAuth URL" })).toHaveAttribute(
+      "href",
+      "https://auth.example/anthropic"
+    );
     await fireEvent.click(screen.getByRole("button", { name: "Save Anthropic key" }));
     await fireEvent.click(screen.getByRole("button", { name: "Remove Anthropic auth" }));
 
     expect(calls).toEqual([
       ["list", "wrk_1"],
+      [
+        "oauth",
+        "anthropic",
+        {
+          method: 0,
+          inputs: {
+            callbackUrl: "http://localhost:3000/api/provider/anthropic/oauth/callback"
+          }
+        }
+      ],
       ["set", "anthropic", { type: "api-key", key: "sk-test" }],
       ["list", "wrk_1"],
       ["remove", "anthropic"],

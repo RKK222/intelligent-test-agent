@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 import type { ProviderInfo } from "@test-agent/shared-types";
+import { ExternalLink, KeyRound } from "lucide-vue-next";
 import SettingsMcpPanel from "@/components/SettingsMcpPanel.vue";
 import SettingsWorktreePanel from "@/components/SettingsWorktreePanel.vue";
 import { usePlatformStore } from "@/stores/platform";
@@ -16,6 +17,7 @@ type ProviderAuthState = {
 const open = ref(false);
 const providerAuth = ref<Record<string, ProviderAuthState>>({});
 const providerKeys = ref<Record<string, string>>({});
+const providerOAuthLinks = ref<Record<string, string | undefined>>({});
 const providerActions = ref<Record<string, string | undefined>>({});
 const providerError = ref<string>();
 const settings = useSettingsStore();
@@ -73,6 +75,28 @@ async function saveProviderKey(provider: ProviderInfo) {
   }
 }
 
+async function authorizeProviderOAuth(provider: ProviderInfo) {
+  providerActions.value[provider.providerId] = "oauth";
+  providerError.value = undefined;
+  try {
+    const response = await platform.api.authorizeProviderOAuth(provider.providerId, {
+      method: 0,
+      inputs: {
+        callbackUrl: providerOAuthCallbackUrl(provider.providerId)
+      }
+    });
+    const url = extractUrl(response);
+    if (!url) {
+      throw new Error("Provider OAuth 响应缺少授权 URL");
+    }
+    providerOAuthLinks.value = { ...providerOAuthLinks.value, [provider.providerId]: url };
+  } catch (cause) {
+    providerError.value = cause instanceof Error ? cause.message : "Provider OAuth 发起失败";
+  } finally {
+    providerActions.value[provider.providerId] = undefined;
+  }
+}
+
 async function removeProviderAuth(provider: ProviderInfo) {
   providerActions.value[provider.providerId] = "removing";
   providerError.value = undefined;
@@ -84,6 +108,10 @@ async function removeProviderAuth(provider: ProviderInfo) {
   } finally {
     providerActions.value[provider.providerId] = undefined;
   }
+}
+
+function providerOAuthCallbackUrl(providerId: string) {
+  return `${window.location.origin}/api/provider/${encodeURIComponent(providerId)}/oauth/callback`;
 }
 
 onMounted(() => document.addEventListener("click", toggleFromClick));
@@ -125,6 +153,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function extractUrl(response: unknown) {
+  if (!isRecord(response)) {
+    return undefined;
+  }
+  const authorization = isRecord(response.authorization) ? response.authorization : undefined;
+  return readString(response.url) ?? readString(response.href) ?? readString(response.authorizationUrl) ?? readString(authorization?.url);
 }
 </script>
 
@@ -194,6 +230,25 @@ function readString(value: unknown) {
             >
               Save key
             </button>
+            <button
+              class="icon-text"
+              type="button"
+              :aria-label="`Authorize ${provider.name} OAuth`"
+              :disabled="providerActions[provider.providerId] === 'oauth'"
+              @click="authorizeProviderOAuth(provider)"
+            >
+              <KeyRound :size="14" />OAuth
+            </button>
+            <a
+              v-if="providerOAuthLinks[provider.providerId]"
+              class="icon-text"
+              :href="providerOAuthLinks[provider.providerId]"
+              target="_blank"
+              rel="noreferrer"
+              :aria-label="`Open ${provider.name} OAuth URL`"
+            >
+              <ExternalLink :size="14" />Open OAuth
+            </a>
             <button
               class="icon-text"
               type="button"
