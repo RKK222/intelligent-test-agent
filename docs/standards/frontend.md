@@ -46,6 +46,26 @@
 2. 工作台、编辑器、文件树、Diff、报告等固定格式区域必须有稳定尺寸和响应式约束。
 3. loading、empty、error、retry、cancel 状态必须完整；文案面向测试智能体工作流，避免暴露内部实现细节。
 
+## 样式与组件编码规范
+
+### 必须遵守
+
+1. **基础 UI 必须优先使用 `packages/ui-kit`**：Button、Input、Badge、Tabs、Toast、Dialog、Tooltip、Select 等通用组件不得在业务页面重复实现。
+2. **重复出现的 UI 必须抽组件**：相同 class 组合、DOM 结构或状态样式出现 2 次以上，应抽取为组件、variant 或公共布局。
+3. **组件 class 合并必须统一使用 `cn`**：不允许手动字符串拼接 class；`cn` 内部应统一组合 `clsx` 和 `tailwind-merge`。
+4. **基础组件变体必须使用 `cva` 管理**：`variant`、`size`、`state` 等稳定变体应集中定义，不得散落在业务页面。
+5. **业务页面应组合组件，不应堆 Tailwind**：页面可以写布局 class，但不应重复编写复杂组件样式。
+6. **颜色必须优先使用语义 token**：优先使用 `primary`、`secondary`、`muted`、`accent`、`destructive`、`background`、`foreground`、`border` 等语义 token；不得随意写死品牌色、灰阶或十六进制颜色。
+7. **尺寸必须遵循统一体系**：基础组件应统一使用 `sm`、`md`、`lg`、`icon` 等尺寸语义；不得随意使用任意尺寸值，除非是 Monaco、Dockview、Terminal 等第三方集成需要。
+8. **`ui-kit` 和业务组件必须分层**：通用基础组件放入 `ui-kit`；Web IDE / 工作台专用组件不得混入 `ui-kit`，应放入独立工作台组件层或业务模块。
+9. **状态 UI 必须统一组件化**：Loading、Empty、Error、Disabled、Selected、Active 等通用状态不得在各页面重复实现。
+10. **图标按钮必须统一封装**：所有图标按钮应使用统一组件，并提供可访问名称。
+11. **复杂业务组件不得滥用 `cva`**：`cva` 只用于稳定、有限的组件变体；复杂业务状态应通过拆分组件和清晰的状态逻辑处理。
+12. **长列表中不得进行复杂 class 计算**：虚拟列表、消息流、日志流、文件列表等高频渲染场景中，应避免重复执行复杂 `cn` 或变体计算。
+13. **Tailwind class 顺序必须保持一致**：应使用统一排序规则或格式化工具，避免 class 顺序混乱。
+14. **组件 API 不得过度暴露内部 class**：优先通过 props、variant、slot 和组合组件扩展；不得随意增加大量 `xxxClass` 属性。
+15. **新增样式前必须先检查是否已有组件或 variant**：已存在的样式能力不得重复实现；可复用能力应沉淀到 `ui-kit`、工作台组件层或公共工具中。
+
 ## 性能
 
 ### 首屏与加载
