@@ -3,6 +3,7 @@ import { expect, type Page, type Route, test } from "@playwright/test";
 type Capture = {
   runRequests: Array<Record<string, unknown>>;
   providerAuthRequests?: Array<Record<string, unknown>>;
+  shareRequests?: Array<Record<string, unknown>>;
 };
 
 type MockOptions = {
@@ -123,6 +124,28 @@ test("opens a session, sends a prompt, and renders streamed RunEvent output", as
   });
 
   await expect(page.getByText("All tests passed")).toBeVisible();
+});
+
+test("publishes and unpublishes a session share link", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Session share popover is covered on the desktop toolbar.");
+  const capture: Capture = { runRequests: [], shareRequests: [] };
+  await mockBackendApi(page, capture);
+
+  await page.goto("/w/wrk_1/session/ses_1");
+  await expect(page.getByRole("heading", { name: "Demo session" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Share session" }).click();
+  const share = page.getByRole("dialog", { name: "Session share" });
+  await expect(share).toBeVisible();
+  await share.getByRole("button", { name: "Publish session" }).click();
+
+  await expect.poll(() => capture.shareRequests?.some((entry) => entry.action === "publish")).toBe(true);
+  await expect(share.getByLabel("Shared session URL")).toHaveValue("https://share.example/ses_1");
+  await expect(share.getByRole("link", { name: "View shared session" })).toHaveAttribute("href", "https://share.example/ses_1");
+
+  await share.getByRole("button", { name: "Unpublish session" }).click();
+  await expect.poll(() => capture.shareRequests?.some((entry) => entry.action === "unpublish")).toBe(true);
+  await expect(share.getByRole("button", { name: "Publish session" })).toBeVisible();
 });
 
 test("switches sessions from the session sidebar", async ({ page }, testInfo) => {
@@ -349,6 +372,14 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
     }
     if (path === "/api/sessions/ses_2/diff") {
       return json(route, []);
+    }
+    if (path === "/api/sessions/ses_1/share" && request.method() === "POST") {
+      capture.shareRequests?.push({ action: "publish", sessionId: "ses_1" });
+      return json(route, { share: { url: "https://share.example/ses_1" } });
+    }
+    if (path === "/api/sessions/ses_1/share" && request.method() === "DELETE") {
+      capture.shareRequests?.push({ action: "unpublish", sessionId: "ses_1" });
+      return json(route, true);
     }
     if (path === "/api/sessions/ses_1/todo" || path === "/api/sessions/ses_1/permissions" || path === "/api/sessions/ses_1/questions") {
       return json(route, []);
