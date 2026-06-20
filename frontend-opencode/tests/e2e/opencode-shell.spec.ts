@@ -145,7 +145,7 @@ test("opens the session side panel as a mobile drawer", async ({ page }, testInf
   await page.getByRole("button", { name: "Panel" }).click();
 
   await expect(page.getByRole("complementary", { name: "Session side panel" })).toBeVisible();
-  await page.getByRole("button", { name: "Status" }).click();
+  await page.getByRole("tab", { name: "Status" }).click();
   await expect(page.getByText("Runtime requests")).toBeVisible();
 
   await page.getByRole("button", { name: "Close session panel" }).click();
