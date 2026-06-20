@@ -4,6 +4,7 @@ type Capture = {
   runRequests: Array<Record<string, unknown>>;
   abortRequests?: Array<Record<string, unknown>>;
   compactRequests?: Array<Record<string, unknown>>;
+  forkRequests?: Array<Record<string, unknown>>;
   providerAuthRequests?: Array<Record<string, unknown>>;
   shareRequests?: Array<Record<string, unknown>>;
 };
@@ -188,6 +189,28 @@ test("compacts a modeled session from the toolbar", async ({ page }, testInfo) =
     providerID: "anthropic",
     modelID: "claude-sonnet-4"
   });
+});
+
+test("forks a session from a selected user message", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Toolbar fork is covered on the desktop session controls.");
+  const capture: Capture = { runRequests: [], forkRequests: [] };
+  await mockBackendApi(page, capture);
+
+  await page.goto("/w/wrk_1/session/ses_1");
+  await expect(page.getByRole("heading", { name: "Demo session" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Fork session" }).click();
+  const fork = page.getByRole("dialog", { name: "Fork session" });
+  await expect(fork).toBeVisible();
+  await fork.getByRole("button", { name: /Initial prompt/ }).click();
+
+  await expect.poll(() => capture.forkRequests?.length).toBe(1);
+  expect(capture.forkRequests?.[0]).toMatchObject({
+    sessionId: "ses_1",
+    messageID: "msg_user"
+  });
+  await expect(page).toHaveURL(/\/w\/wrk_1\/session\/ses_child$/);
+  await expect(page.getByRole("heading", { name: "Forked session" })).toBeVisible();
 });
 
 test("switches sessions from the session sidebar", async ({ page }, testInfo) => {
@@ -378,6 +401,17 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         updatedAt: "2026-06-20T00:00:03Z"
       });
     }
+    if (path === "/api/sessions/ses_child") {
+      return json(route, {
+        sessionId: "ses_child",
+        workspaceId: "wrk_1",
+        title: "Forked session",
+        status: "IDLE",
+        parentId: "ses_1",
+        createdAt: "2026-06-20T00:05:00Z",
+        updatedAt: "2026-06-20T00:05:00Z"
+      });
+    }
     if (path === "/api/sessions/ses_1/messages") {
       return json(route, {
         items: [
@@ -410,10 +444,21 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         total: 1
       });
     }
+    if (path === "/api/sessions/ses_child/messages") {
+      return json(route, {
+        items: [],
+        page: 1,
+        size: 200,
+        total: 0
+      });
+    }
     if (path === "/api/sessions/ses_1/diff") {
       return json(route, options.sessionDiff ?? []);
     }
     if (path === "/api/sessions/ses_2/diff") {
+      return json(route, []);
+    }
+    if (path === "/api/sessions/ses_child/diff") {
       return json(route, []);
     }
     if (path === "/api/sessions/ses_1/share" && request.method() === "POST") {
@@ -428,6 +473,13 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
       return json(route, []);
     }
     if (path === "/api/sessions/ses_2/todo" || path === "/api/sessions/ses_2/permissions" || path === "/api/sessions/ses_2/questions") {
+      return json(route, []);
+    }
+    if (
+      path === "/api/sessions/ses_child/todo" ||
+      path === "/api/sessions/ses_child/permissions" ||
+      path === "/api/sessions/ses_child/questions"
+    ) {
       return json(route, []);
     }
     if (path === "/api/runs" && request.method() === "POST") {
@@ -451,6 +503,21 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
       });
       return json(route, { compacted: true });
+    }
+    if (path === "/api/sessions/ses_1/fork" && request.method() === "POST") {
+      capture.forkRequests?.push({
+        sessionId: "ses_1",
+        ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
+      });
+      return json(route, {
+        sessionId: "ses_child",
+        workspaceId: "wrk_1",
+        title: "Forked session",
+        status: "IDLE",
+        parentId: "ses_1",
+        createdAt: "2026-06-20T00:05:00Z",
+        updatedAt: "2026-06-20T00:05:00Z"
+      });
     }
 
     return json(route, {});

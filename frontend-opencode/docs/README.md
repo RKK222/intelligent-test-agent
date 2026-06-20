@@ -27,7 +27,7 @@
 
 ## 测试记录
 
-- Playwright mock E2E 覆盖桌面/移动端 shell、首页会话列表、命令面板入口、会话详情加载、prompt 提交请求构造、toolbar abort/compact、Session share publish/unpublish，以及通过 fake EventSource 注入 RunEvent 后的 timeline 流式渲染。
+- Playwright mock E2E 覆盖桌面/移动端 shell、首页会话列表、命令面板入口、会话详情加载、prompt 提交请求构造、toolbar abort/compact/fork、Session share publish/unpublish，以及通过 fake EventSource 注入 RunEvent 后的 timeline 流式渲染。
 - Playwright real E2E 入口为 `playwright.real.config.ts` + `tests/e2e-real/*.real-spec.ts`，以单个桌面 smoke 通过真实 `test-agent-app` 创建或复用 workspace/session，再从 Vue UI 发送 prompt，等待 RunEvent SSE 渲染 assistant 文本；该套件只在 `TEST_AGENT_RUN_REAL_E2E=1` 下运行。
 
 ## 当前边界
