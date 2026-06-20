@@ -100,7 +100,7 @@ tools/dev-phase11-real-e2e.sh --start-services
 
 ## Phase 11 UI 与主题边界
 
-- 全局 theme token、Dockview/Monaco 视觉适配、滚动条、panel chrome 和轻量动画由 `apps/agent-web/src/styles/globals.css` 承载；包内组件只消费这些 token，不在业务组件里复制整套主题。
+- 全局 theme token、Figma Web IDE 风格 activity rail、Dockview/Monaco 视觉适配、滚动条、panel chrome 和轻量动画由 `apps/agent-web/src/styles/globals.css` 承载；包内组件只消费这些 token，不在业务组件里复制整套主题。
 - `packages/ui-kit` 只提供 Button、Badge、Input、Tabs 等无业务状态基础控件；运行态选择、permission/question、terminal 和 Diff 语义仍放在对应 feature package。
 - 面板、toolbar、terminal、Diff、Agent timeline 和文件树必须保持稳定尺寸，Agent timeline 需要把 reasoning 思考过程、任务分解、Skill/Tool 调用与最终回答分块展示并保留独立滚动区域；右侧 Agent 对话框使用独立浅色 `--ta-chat-*` token，避免 hover、streaming 文本、warning、hunk 导航或状态徽标导致布局跳动。
 - Phase 11 的真实三服务 E2E 尚无最新通过记录；当前只能认为 mock E2E 和单元测试覆盖了主流程，不能把真实联调标记为完成。

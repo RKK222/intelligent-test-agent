@@ -7,6 +7,7 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
 
   await expect(page.getByText("TestAgent IDE")).toBeVisible();
   await expect(page.getByRole("banner").getByText("demo-tests")).toBeVisible();
+  await expect(page.getByRole("button", { name: "打开运行与终端" })).toBeVisible();
   await page.getByRole("button", { name: /tests/ }).click();
   await page.getByRole("button", { name: /checkout.spec.ts/ }).click();
   await expect(page.getByText("tests/checkout.spec.ts")).toBeVisible();
@@ -58,7 +59,9 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
   await page.getByTitle("引用 hunk").click();
   await expect(page.getByRole("main").getByText("已引用当前 hunk")).toBeVisible();
 
-  await page.getByRole("button", { name: "终端" }).click();
+  await expect(page.getByRole("button", { name: "终端", exact: true })).toBeHidden();
+  await page.getByRole("button", { name: "打开运行与终端" }).click();
+  await page.getByRole("button", { name: "终端", exact: true }).click();
   await page.getByRole("button", { name: "连接终端" }).click();
   await expect.poll(() => terminalTickets.length).toBe(1);
   expect(terminalTickets[0]).toEqual({ workspaceId: "wrk_1234567890abcdef", cols: 120, rows: 32 });

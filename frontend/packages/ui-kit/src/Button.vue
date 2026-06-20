@@ -4,16 +4,16 @@ import { cn } from "./lib";
 
 // 按钮视觉变体，与原 React 版保持一致的设计 token
 const buttonVariants = cva(
-  "inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded-md border px-3 text-[12px] font-medium transition disabled:pointer-events-none disabled:opacity-45",
+  "inline-flex h-8 shrink-0 items-center justify-center gap-2 rounded border px-3 text-[12px] font-medium leading-none transition disabled:pointer-events-none disabled:opacity-45",
   {
     variants: {
       variant: {
         primary:
-          "border-[#2f4a8f] bg-[#2f4a8f] text-white hover:bg-[#243a72]",
+          "border-[var(--ta-ink)] bg-[var(--ta-ink)] text-white hover:bg-[#111111]",
         secondary:
-          "border-[var(--ta-border)] bg-[#f4f5f7] text-[var(--ta-text)] hover:border-[#c8ced6]",
+          "border-[var(--ta-border)] bg-[var(--ta-control)] text-[var(--ta-text)] hover:border-[var(--ta-border-strong)] hover:bg-[var(--ta-hover)]",
         ghost:
-          "border-transparent bg-transparent text-[var(--ta-muted)] hover:bg-[#e7e9ed] hover:text-[var(--ta-text)]",
+          "border-transparent bg-transparent text-[var(--ta-muted)] hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]",
         danger: "border-[#9e3b34] bg-[#f4e3e1] text-red-200 hover:bg-[#ecc9c5]"
       },
       size: {

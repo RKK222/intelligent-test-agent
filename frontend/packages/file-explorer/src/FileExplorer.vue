@@ -16,8 +16,8 @@ type ExplorerTab = "explorer" | "search" | "changes";
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { FileText, RefreshCw, Search } from "lucide-vue-next";
-import { Badge, Button, Input, SegmentedTabs, cn } from "@test-agent/ui-kit";
+import { FileText, FolderTree, GitBranch, RefreshCw, Search } from "lucide-vue-next";
+import { Badge, Button, Input, cn } from "@test-agent/ui-kit";
 import { filterLoadedFiles } from "./filterLoadedFiles";
 import DirectoryRows from "./DirectoryRows.vue";
 
@@ -36,21 +36,43 @@ const searchResults = computed(() => filterLoadedFiles(props.entriesByDirectory,
 
 <template>
   <div class="flex h-full min-h-0 flex-col bg-[var(--ta-panel)]">
-    <div class="flex h-9 items-center justify-between border-b border-slate-800 px-2">
-      <div class="min-w-0 truncate text-[12px] font-semibold text-slate-200">{{ workspaceName }}</div>
-      <Button size="icon" variant="ghost" title="刷新文件树" @click="emit('refresh')">
-        <RefreshCw class="h-4 w-4" />
-      </Button>
+    <div class="ta-icon-tabbar" role="tablist" aria-label="工作区面板">
+      <button
+        type="button"
+        :class="['ta-icon-tab', tab === 'explorer' && 'is-active']"
+        title="文件树"
+        aria-label="文件树"
+        @click="tab = 'explorer'"
+      >
+        <FolderTree class="h-[18px] w-[18px]" />
+      </button>
+      <button
+        type="button"
+        :class="['ta-icon-tab', tab === 'search' && 'is-active']"
+        title="搜索"
+        aria-label="搜索"
+        @click="tab = 'search'"
+      >
+        <Search class="h-[18px] w-[18px]" />
+      </button>
+      <button
+        type="button"
+        :class="['ta-icon-tab', tab === 'changes' && 'is-active']"
+        title="变更"
+        aria-label="变更"
+        @click="tab = 'changes'"
+      >
+        <GitBranch class="h-[18px] w-[18px]" />
+        <span v-if="changedFiles.length" class="ml-1 text-[10px]">{{ changedFiles.length }}</span>
+      </button>
     </div>
-    <SegmentedTabs
-      v-model="tab"
-      :items="[
-        { id: 'explorer', label: '工作空间' },
-        { id: 'search', label: '搜索' },
-        { id: 'changes', label: '变更', count: changedFiles.length }
-      ]"
-    />
-    <div v-if="tab === 'explorer'" class="min-h-0 flex-1 overflow-auto p-2 font-mono text-[12px]">
+    <div v-if="tab === 'explorer'" class="min-h-0 flex-1 overflow-auto px-2 py-2 text-[14px]">
+      <div class="mb-1 flex h-7 items-center justify-between rounded px-2 text-[12px] font-semibold text-[var(--ta-muted)]">
+        <span class="min-w-0 truncate" :title="workspaceName">{{ workspaceName }}</span>
+        <Button size="icon" variant="ghost" title="刷新文件树" @click="emit('refresh')">
+          <RefreshCw class="h-3.5 w-3.5" />
+        </Button>
+      </div>
       <DirectoryRows
         directory=""
         :entries-by-directory="entriesByDirectory"
@@ -64,7 +86,7 @@ const searchResults = computed(() => filterLoadedFiles(props.entriesByDirectory,
     </div>
     <div v-else-if="tab === 'search'" class="min-h-0 flex-1 overflow-auto p-2">
       <div class="relative">
-        <Search class="pointer-events-none absolute left-2 top-2 h-4 w-4 text-slate-500" />
+        <Search class="pointer-events-none absolute left-2 top-2 h-4 w-4 text-[var(--ta-muted)]" />
         <Input v-model="keyword" class="pl-7" placeholder="过滤已加载文件名" />
       </div>
       <div class="mt-2 space-y-1">
@@ -72,10 +94,10 @@ const searchResults = computed(() => filterLoadedFiles(props.entriesByDirectory,
           v-for="entry in searchResults"
           :key="entry.path"
           type="button"
-          :class="cn('flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono text-[12px] text-slate-300 hover:bg-slate-800')"
+          :class="cn('flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[14px] text-[var(--ta-subtle)] hover:bg-[var(--ta-hover)]')"
           @click="emit('openFile', entry.path)"
         >
-          <FileText class="h-4 w-4 text-slate-500" />
+          <FileText class="h-4 w-4 text-[var(--ta-muted)]" />
           <span class="min-w-0 truncate">{{ entry.path }}</span>
         </button>
       </div>
@@ -86,11 +108,11 @@ const searchResults = computed(() => filterLoadedFiles(props.entriesByDirectory,
           v-for="file in changedFiles"
           :key="file.path"
           type="button"
-          class="flex w-full items-center gap-2 rounded-md border border-[var(--ta-border)] bg-[#f4f5f7] px-2 py-2 text-left hover:border-[#c8ced6]"
+          class="flex w-full items-center gap-2 rounded border border-[var(--ta-border)] bg-[var(--ta-surface)] px-2 py-2 text-left hover:border-[var(--ta-border-strong)]"
           @click="emit('openDiff', file.path)"
         >
           <Badge :tone="file.status === 'deleted' ? 'danger' : file.status === 'added' ? 'success' : 'warning'">{{ file.status }}</Badge>
-          <span class="min-w-0 flex-1 truncate font-mono text-[12px] text-slate-200">{{ file.path }}</span>
+          <span class="min-w-0 flex-1 truncate text-[12px] text-[var(--ta-text)]">{{ file.path }}</span>
           <span class="text-[11px] text-[#3f7a5a]">+{{ file.additions }}</span>
           <span class="text-[11px] text-[#9e3b34]">-{{ file.deletions }}</span>
         </button>

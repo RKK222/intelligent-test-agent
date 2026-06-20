@@ -7,10 +7,11 @@ import { DiffViewer } from "@test-agent/diff-viewer";
 import { CodeEditor, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents } from "@test-agent/event-stream-client";
 import { FileExplorer } from "@test-agent/file-explorer";
+import { Bell, Code2, GitBranch, PanelBottom, TerminalSquare } from "lucide-vue-next";
 import type { AgentMessage, FileTreeEntry, PromptPart, Run, RunDiffFile, RunEvent, RuntimeResourceInfo, RuntimeToolInfo, Session, Workspace } from "@test-agent/shared-types";
 import { TerminalPanel } from "@test-agent/terminal";
 import { TestRunnerPanel } from "@test-agent/test-runner";
-import { Button, FeedbackBanner, Input, type Feedback } from "@test-agent/ui-kit";
+import { FeedbackBanner, type Feedback } from "@test-agent/ui-kit";
 import { useWorkbenchStore, WorkbenchShell } from "@test-agent/workbench-shell";
 import EditorPane from "./EditorPane.vue";
 import WorkspaceBootstrap from "./WorkspaceBootstrap.vue";
@@ -61,6 +62,7 @@ const followUpQueue = ref<FollowUpDraft[]>([]);
 const diffContextParts = ref<PromptPart[]>([]);
 const editorSelection = ref<EditorSelectionContext | undefined>(undefined);
 const bottomMode = ref<"run" | "terminal">("run");
+const bottomDrawerOpen = ref(false);
 
 // Chat runtime：单一 reducer 维护，dispatch 闭包更新
 const chatState = ref(createInitialAgentChatRuntimeState(initialMessages));
@@ -597,6 +599,11 @@ function onUseHunkContext(part: Extract<PromptPart, { type: "file" }>) {
   diffContextParts.value = [...diffContextParts.value, part];
   feedback.value = { kind: "info", title: "已引用当前 hunk", description: `${part.path ?? part.name} 将随下一条 Prompt 提交` };
 }
+
+function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
+  bottomMode.value = mode;
+  bottomDrawerOpen.value = true;
+}
 </script>
 
 <template>
@@ -604,7 +611,61 @@ function onUseHunkContext(part: Extract<PromptPart, { type: "file" }>) {
     :workspace-name="selectedWorkspace?.name ?? '未选择 Workspace'"
     branch-name="local"
     :run-status="run?.status ?? 'IDLE'"
+    :bottom-open="bottomDrawerOpen"
+    :bottom-height="190"
   >
+    <template #activity>
+      <nav class="flex h-full flex-col items-center justify-between py-2" aria-label="工作台活动栏">
+        <div class="flex flex-col items-center gap-4">
+          <button
+            type="button"
+            :class="['ta-activity-button', centerMode === 'editor' && 'is-active']"
+            aria-label="打开编辑器"
+            title="打开编辑器"
+            @click="centerMode = 'editor'"
+          >
+            <Code2 class="h-[22px] w-[22px]" />
+          </button>
+          <button
+            type="button"
+            :class="['ta-activity-button', centerMode === 'diff' && 'is-active']"
+            aria-label="打开 Diff"
+            title="打开 Diff"
+            @click="centerMode = 'diff'"
+          >
+            <GitBranch class="h-[22px] w-[22px]" />
+          </button>
+          <button
+            type="button"
+            :class="['ta-activity-button', bottomDrawerOpen && 'is-active']"
+            aria-label="打开运行与终端"
+            title="打开运行与终端"
+            @click="openBottomDrawer()"
+          >
+            <TerminalSquare class="h-[22px] w-[22px]" />
+          </button>
+          <button
+            type="button"
+            class="ta-activity-button"
+            aria-label="请求通知权限"
+            title="请求通知权限"
+            @click="requestNotifications"
+          >
+            <Bell class="h-[22px] w-[22px]" />
+          </button>
+        </div>
+        <button
+          type="button"
+          :class="['ta-activity-button', bottomDrawerOpen && 'is-active']"
+          aria-label="切换底部面板"
+          title="切换底部面板"
+          @click="bottomDrawerOpen = !bottomDrawerOpen"
+        >
+          <PanelBottom class="h-[22px] w-[22px]" />
+        </button>
+      </nav>
+    </template>
+
     <template #left>
       <FileExplorer
         v-if="selectedWorkspace"
@@ -703,17 +764,23 @@ function onUseHunkContext(part: Extract<PromptPart, { type: "file" }>) {
 
     <template #bottom>
       <div class="flex h-full min-h-0 flex-col bg-[var(--ta-panel)]">
-        <div class="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--ta-border)] bg-[#eef0f3] px-2">
+        <div class="flex h-9 shrink-0 items-center gap-1 border-b border-[var(--ta-border)] bg-[var(--ta-tabbar)] px-2">
           <button
             type="button"
-            :class="['rounded-md px-2 py-1 text-[12px]', bottomMode === 'run' ? 'bg-[#ffffff] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-accent)]' : 'text-[var(--ta-muted)] hover:bg-[#e7e9ed] hover:text-[var(--ta-text)]']"
+            :class="['rounded px-2 py-1 text-[12px]', bottomMode === 'run' ? 'bg-[var(--ta-surface)] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-ink)]' : 'text-[var(--ta-muted)] hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]']"
             @click="bottomMode = 'run'"
           >运行</button>
           <button
             type="button"
-            :class="['rounded-md px-2 py-1 text-[12px]', bottomMode === 'terminal' ? 'bg-[#ffffff] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-accent)]' : 'text-[var(--ta-muted)] hover:bg-[#e7e9ed] hover:text-[var(--ta-text)]']"
+            :class="['rounded px-2 py-1 text-[12px]', bottomMode === 'terminal' ? 'bg-[var(--ta-surface)] text-[var(--ta-text)] shadow-[inset_0_-2px_0_var(--ta-ink)]' : 'text-[var(--ta-muted)] hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]']"
             @click="bottomMode = 'terminal'"
           >终端</button>
+          <button
+            type="button"
+            class="ml-auto rounded px-2 py-1 text-[12px] text-[var(--ta-muted)] hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]"
+            aria-label="关闭运行与终端"
+            @click="bottomDrawerOpen = false"
+          >关闭</button>
         </div>
         <div class="min-h-0 flex-1">
           <TestRunnerPanel

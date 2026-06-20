@@ -81,8 +81,9 @@ onMounted(async () => {
     theme: "vs",
     readOnly: props.readonly ?? false,
     minimap: { enabled: false },
-    fontSize: 13,
-    lineHeight: 21,
+    fontFamily: "Menlo, Monaco, Consolas, 'Liberation Mono', monospace",
+    fontSize: 14,
+    lineHeight: 20,
     scrollBeyondLastLine: false,
     automaticLayout: true,
     wordWrap: "off"
@@ -145,14 +146,13 @@ onBeforeUnmount(() => {
       <div class="mt-1 text-[12px]">从左侧文件树选择一个测试脚本或配置文件</div>
     </div>
   </div>
-  <div v-else class="flex h-full min-h-0 flex-col bg-[#fbfbfc]">
-    <div class="flex h-10 items-center gap-2 border-b border-[var(--ta-border)] bg-[#eef0f3] px-3">
-      <div class="min-w-0 flex-1 truncate font-mono text-[12px] text-slate-200">{{ path }}</div>
+  <div v-else class="flex h-full min-h-0 flex-col bg-[var(--ta-surface)]">
+    <div class="flex h-[41px] items-center gap-2 border-b border-[var(--ta-border)] bg-[var(--ta-surface)] px-4">
+      <div class="min-w-0 flex-1 truncate text-[12px] text-[var(--ta-muted)]">{{ path }}</div>
       <span v-if="dirty" class="rounded-full bg-[rgba(245,158,11,.15)] px-2 py-0.5 text-[11px] text-[#946015]">未保存</span>
-      <span v-if="readonly" class="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] text-slate-400">只读</span>
-      <Button size="sm" variant="primary" :disabled="!dirty || readonly || saving" @click="emit('save')">
+      <span v-if="readonly" class="rounded-full bg-[var(--ta-control)] px-2 py-0.5 text-[11px] text-[var(--ta-muted)]">只读</span>
+      <Button size="icon" variant="ghost" :disabled="!dirty || readonly || saving" title="保存" aria-label="保存" @click="emit('save')">
         <Save class="h-4 w-4" />
-        {{ saving ? "保存中" : "保存" }}
       </Button>
     </div>
     <div ref="containerEl" class="min-h-0 flex-1" />

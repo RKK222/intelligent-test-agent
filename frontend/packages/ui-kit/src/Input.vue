@@ -9,7 +9,7 @@ const model = defineModel<string>({ default: "" });
   <input
     v-model="model"
     :class="cn(
-      'h-8 w-full rounded-md border border-[var(--ta-border)] bg-[#f4f5f7] px-2 text-[12px] text-[var(--ta-text)] outline-none transition placeholder:text-[var(--ta-muted)] focus:border-[#c8ced6]'
+      'h-8 w-full rounded border border-[var(--ta-border)] bg-[var(--ta-surface)] px-2 text-[12px] text-[var(--ta-text)] outline-none transition placeholder:text-[var(--ta-muted)] focus:border-[var(--ta-border-strong)]'
     )"
   />
 </template>

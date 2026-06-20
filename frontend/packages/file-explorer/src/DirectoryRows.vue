@@ -39,22 +39,22 @@ function onRowClick(entry: FileTreeEntry) {
       <button
         type="button"
         :class="cn(
-          'flex h-7 w-full items-center gap-1 rounded-md px-1 text-left text-slate-300 hover:bg-[#e7e9ed]',
-          activePath === entry.path && 'bg-[#ffffff] text-white'
+          'flex h-7 w-full items-center gap-1 rounded px-1 text-left text-[14px] leading-5 text-[var(--ta-subtle)] hover:bg-[var(--ta-hover)]',
+          activePath === entry.path && 'bg-[var(--ta-active)] text-[var(--ta-ink)]'
         )"
         :style="{ paddingLeft: depth * 14 + 4 + 'px' }"
         @click="onRowClick(entry)"
       >
         <template v-if="entry.type === 'directory'">
-          <ChevronRight :class="cn('h-3.5 w-3.5 text-slate-500 transition', expandedDirectories.has(entry.path) && 'rotate-90')" />
-          <Folder class="h-4 w-4 text-[#2f4a8f]" />
+          <ChevronRight :class="cn('h-3.5 w-3.5 text-[var(--ta-muted)] transition', expandedDirectories.has(entry.path) && 'rotate-90')" />
+          <Folder class="h-4 w-4 text-[var(--ta-muted)]" />
         </template>
         <template v-else>
           <span class="w-3.5" />
-          <FileText class="h-4 w-4 text-slate-500" />
+          <FileText class="h-4 w-4 text-[var(--ta-muted)]" />
         </template>
         <span class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
-        <span v-if="loadingPath === entry.path" class="text-[10px] text-slate-500">...</span>
+        <span v-if="loadingPath === entry.path" class="text-[10px] text-[var(--ta-muted)]">...</span>
       </button>
       <DirectoryRows
         v-if="entry.type === 'directory' && expandedDirectories.has(entry.path)"

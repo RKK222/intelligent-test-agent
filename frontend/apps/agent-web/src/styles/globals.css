@@ -1,67 +1,74 @@
 @import "tailwindcss";
 @import "dockview-vue/dist/styles/dockview.css";
 
-/* ===== 设计 token：tracing paper & graphite（灰白底 / 黑灰字）=====
-   以暖灰白纸面为底，深石墨色为字，发丝级边框，单一墨蓝信号色。
-   chrome token 与既有浅色 chat token 统一到同一纸面调性。 */
+/* ===== 设计 token：Figma Web IDE neutral chrome =====
+   对齐目标 Frame 的浅灰 chrome、白色编辑面、发丝边框和紧凑 14px 信息密度。 */
 :root {
   color-scheme: light;
-  --ta-bg: #e9ebef;
-  --ta-bg-2: #eef0f3;
-  --ta-panel: #f4f5f7;
-  --ta-panel-2: #fbfbfc;
-  --ta-border: #dde0e5;
-  --ta-text: #1b1e23;
-  --ta-muted: #5c636c;
-  --ta-accent: #2f4a8f;
-  --ta-accent-2: #5a6f8f;
-  --ta-cyan: #2f6f80;
+  --ta-bg: #f5f5f5;
+  --ta-bg-2: #eeeeee;
+  --ta-chrome: #f5f5f5;
+  --ta-tabbar: #eaeaea;
+  --ta-panel: #f5f5f5;
+  --ta-panel-2: #ffffff;
+  --ta-surface: #ffffff;
+  --ta-control: #f5f5f5;
+  --ta-control-strong: #e0e0e0;
+  --ta-hover: #e8e8e8;
+  --ta-active: #e0e0e0;
+  --ta-border: #dddddd;
+  --ta-border-strong: #cfcfcf;
+  --ta-ink: #333333;
+  --ta-text: #333333;
+  --ta-muted: #7a7a7a;
+  --ta-subtle: #444444;
+  --ta-accent: #333333;
+  --ta-accent-2: #555555;
+  --ta-cyan: #4f6f7a;
   --ta-ok: #3f7a5a;
   --ta-warn: #946015;
   --ta-error: #9e3b34;
   --ta-del: rgba(158, 59, 52, 0.12);
   --ta-add: rgba(63, 122, 90, 0.12);
-  --ta-line-numbers: #aab0b8;
-  --ta-chat-bg: #f6f7f8;
+  --ta-line-numbers: #b5b5b5;
+  --ta-chat-bg: #f5f5f5;
   --ta-chat-surface: #ffffff;
-  --ta-chat-message-bg: #fbfbfc;
-  --ta-chat-user-bg: #eef0f2;
+  --ta-chat-message-bg: #ffffff;
+  --ta-chat-user-bg: #dddddd;
   --ta-chat-answer-bg: #ffffff;
-  --ta-chat-process-bg: #f8f9fa;
-  --ta-chat-detail-bg: #f3f4f5;
-  --ta-chat-chip-bg: #f1f2f3;
-  --ta-chat-hover: #eceff1;
-  --ta-chat-border: #dde1e5;
-  --ta-chat-border-strong: #c8ced4;
-  --ta-chat-answer-border: #cfd5db;
-  --ta-chat-text: #24272b;
-  --ta-chat-muted: #68707a;
-  --ta-chat-subtle: #4d555f;
-  --ta-chat-status-running: #5f6b76;
+  --ta-chat-process-bg: #f5f5f5;
+  --ta-chat-detail-bg: #eeeeee;
+  --ta-chat-chip-bg: #f2f2f2;
+  --ta-chat-hover: #eeeeee;
+  --ta-chat-border: #dddddd;
+  --ta-chat-border-strong: #cfcfcf;
+  --ta-chat-answer-border: #dddddd;
+  --ta-chat-text: #333333;
+  --ta-chat-muted: #7a7a7a;
+  --ta-chat-subtle: #555555;
+  --ta-chat-status-running: #555555;
   --ta-chat-status-done: #4f6f5b;
   --ta-chat-status-error: #9b4d4d;
 }
 
-/* ===== Tailwind v4 内置色阶重映射到纸面调色板（浅底深字，语义取反）=====
-   组件中 text-slate-100/200 作主文字 → 映射为深石墨；
-   bg-slate-950/900/800 作深底 → 映射为浅纸面；slate-400/500 作次级文字 → 中灰。 */
+/* ===== Tailwind v4 内置色阶重映射到浅色 IDE token ===== */
 @theme {
-  --color-slate-950: #e9ebef;
-  --color-slate-900: #eef0f3;
-  --color-slate-800: #dde0e5;
-  --color-slate-700: #c8ced6;
-  --color-slate-500: #5c636c;
-  --color-slate-400: #6f7680;
-  --color-slate-300: #3d434c;
-  --color-slate-200: #2b2f36;
-  --color-slate-100: #1b1e23;
+  --color-slate-950: #f5f5f5;
+  --color-slate-900: #eeeeee;
+  --color-slate-800: #dddddd;
+  --color-slate-700: #cfcfcf;
+  --color-slate-500: #7a7a7a;
+  --color-slate-400: #666666;
+  --color-slate-300: #555555;
+  --color-slate-200: #444444;
+  --color-slate-100: #333333;
 
-  --color-blue-500: #2f4a8f;
-  --color-blue-600: #243a72;
-  --color-blue-900: #2f4a8f;
-  --color-blue-950: #e7e9ed;
-  --color-blue-300: #5a6f8f;
-  --color-blue-200: #8a9bb5;
+  --color-blue-500: #333333;
+  --color-blue-600: #111111;
+  --color-blue-900: #333333;
+  --color-blue-950: #eeeeee;
+  --color-blue-300: #555555;
+  --color-blue-200: #888888;
 
   --color-cyan-300: #2f6f80;
   --color-cyan-900: #2f6f80;
@@ -88,16 +95,11 @@ body {
   height: 100%;
   margin: 0;
   overflow: hidden;
-  /* 纸面：极淡的双层渐变营造纸纹深度，避免纯色平淡 */
-  background:
-    radial-gradient(1100px 560px at 12% -8%, #f3f4f6 0%, transparent 55%),
-    radial-gradient(900px 600px at 100% 110%, #e4e7ec 0%, transparent 50%),
-    var(--ta-bg);
+  background: var(--ta-bg);
   color: var(--ta-text);
-  font-family: "Hanken Grotesk", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 13px;
-  font-feature-settings: "ss01", "cv01";
+  font-size: 14px;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -182,24 +184,80 @@ select {
 .ta-status-dot.failed {
   background: var(--ta-error);
 }
-/* 标题：Fraunces 衬线展示字，石墨单色（替代旧渐变） */
+/* 标题辅助：沿用 Inter，避免与 Figma IDE 的紧凑工具界面产生字体割裂。 */
 .ta-welcome-h1 {
-  font-family: "Fraunces", Georgia, "Times New Roman", serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
   color: var(--ta-text);
 }
 /* 展示字族：用于品牌字与章节大标题 */
 .ta-display {
-  font-family: "Fraunces", Georgia, "Times New Roman", serif;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Microsoft YaHei", sans-serif;
   font-weight: 600;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 /* 代码块：纸面底 + 发丝边框 */
 .ta-codeblock {
   background: var(--ta-panel-2);
   border: 1px solid var(--ta-border);
   border-radius: 8px;
+}
+
+.ta-activity-button {
+  position: relative;
+  display: inline-flex;
+  width: 38px;
+  height: 38px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  color: var(--ta-subtle);
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+.ta-activity-button:hover {
+  background: var(--ta-hover);
+  color: var(--ta-text);
+}
+.ta-activity-button.is-active {
+  color: var(--ta-ink);
+}
+.ta-activity-button.is-active::before {
+  position: absolute;
+  left: 0;
+  top: 7px;
+  width: 2px;
+  height: 24px;
+  border-radius: 0 999px 999px 0;
+  background: var(--ta-ink);
+  content: "";
+}
+
+.ta-icon-tabbar {
+  display: flex;
+  height: 45px;
+  border-bottom: 1px solid var(--ta-border);
+  background: var(--ta-tabbar);
+}
+.ta-icon-tab {
+  display: inline-flex;
+  min-width: 0;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 2px solid transparent;
+  color: var(--ta-muted);
+  transition: color 0.14s ease, background-color 0.14s ease, border-color 0.14s ease;
+}
+.ta-icon-tab:hover {
+  background: var(--ta-hover);
+  color: var(--ta-text);
+}
+.ta-icon-tab.is-active {
+  border-bottom-color: var(--ta-ink);
+  color: var(--ta-ink);
 }
 
 /* ===== 自定义滚动条（纸面） ===== */
@@ -211,13 +269,13 @@ select {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #c8ced6;
+  background: #c7c7c7;
   border-radius: 999px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #aab0b8;
+  background: #a8a8a8;
   background-clip: padding-box;
   border: 2px solid transparent;
 }
@@ -228,14 +286,15 @@ select {
   width: 100%;
   height: 100%;
   background: var(--ta-panel-2);
-  /* 覆盖 dockview 内置 tab 配色变量，对齐纸面 */
+  /* 覆盖 dockview 内置 tab 配色变量，对齐 Figma 浅灰 chrome */
   --dv-activegroup-visiblepanel-tab-background-color: #ffffff;
-  --dv-activegroup-hiddenpanel-tab-background-color: #f4f5f7;
-  --dv-inactivegroup-visiblepanel-tab-background-color: #eef0f3;
-  --dv-inactivegroup-hiddenpanel-tab-background-color: #e9ebef;
+  --dv-activegroup-hiddenpanel-tab-background-color: #eaeaea;
+  --dv-inactivegroup-visiblepanel-tab-background-color: #eaeaea;
+  --dv-inactivegroup-hiddenpanel-tab-background-color: #eaeaea;
   --dv-activegroup-visiblepanel-tab-color: var(--ta-text);
   --dv-inactivegroup-visiblepanel-tab-color: var(--ta-muted);
   --dv-tab-font-size: 12px;
+  --dv-tabs-and-actions-container-height: 0px;
 }
 
 .dv-groupview,
@@ -244,20 +303,24 @@ select {
   background: transparent;
 }
 
+.dv-tabs-and-actions-container {
+  display: none !important;
+}
+
 .dv-tab {
   font-size: 12px;
-  border-radius: 6px 6px 0 0;
+  border-radius: 0;
 }
 .dv-tab:hover {
   color: var(--ta-text);
 }
 .dv-tab.dv-active-tab {
   color: var(--ta-text);
-  box-shadow: inset 0 -2px 0 var(--ta-accent);
+  box-shadow: inset 0 -2px 0 var(--ta-ink);
 }
 
 /* ===== Monaco 对齐纸面编辑器底色 ===== */
 .monaco-editor,
 .monaco-diff-editor {
-  --vscode-editor-background: #fbfbfc;
+  --vscode-editor-background: #ffffff;
 }

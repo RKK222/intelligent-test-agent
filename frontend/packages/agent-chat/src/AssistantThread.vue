@@ -28,6 +28,7 @@ export type AssistantThreadProps = {
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
+import { Bot, UserRound } from "lucide-vue-next";
 import AgentCard from "./AgentCard.vue";
 import ComposerArea from "./ComposerArea.vue";
 import MessageParts from "./MessageParts.vue";
@@ -136,7 +137,7 @@ onBeforeUnmount(() => {
     <div
       ref="viewportRef"
       data-testid="agent-thread-viewport"
-      class="relative min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden bg-[var(--ta-chat-bg)] p-3 [scrollbar-gutter:stable]"
+      class="relative min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden bg-[var(--ta-chat-bg)] p-4 [scrollbar-gutter:stable]"
       @scroll="handleViewportScroll"
     >
       <div v-if="!messages.length" class="flex h-full flex-col items-center justify-center gap-1 py-10 text-center text-[var(--ta-muted)]">
@@ -151,15 +152,19 @@ onBeforeUnmount(() => {
           :default-open="shouldOpenCardByDefault(message, defaultOpenCardIds)"
           @open-diff="emit('openDiff')"
         />
-        <div v-else :class="message.role === 'user' ? 'flex justify-end' : 'flex justify-start'">
+        <div v-else :class="message.role === 'user' ? 'flex justify-end gap-2' : 'flex justify-start gap-2'">
+          <span
+            v-if="message.role !== 'user'"
+            class="mt-6 flex h-8 w-8 shrink-0 items-center justify-center rounded border border-[var(--ta-chat-border)] bg-[var(--ta-chat-detail-bg)] text-[var(--ta-chat-subtle)]"
+            aria-hidden="true"
+          >
+            <Bot class="h-4 w-4" />
+          </span>
           <div
             :class="message.role === 'user'
-              ? 'max-w-[92%] rounded-md border border-[var(--ta-chat-border)] bg-[var(--ta-chat-user-bg)] px-3 py-2 text-[var(--ta-chat-text)]'
-              : 'max-w-[92%] rounded-md border border-[var(--ta-chat-border)] bg-[var(--ta-chat-message-bg)] px-2.5 py-2'"
+              ? 'max-w-[78%] rounded-md bg-[var(--ta-chat-user-bg)] px-3 py-2 text-[var(--ta-chat-text)]'
+              : 'max-w-[calc(100%_-_44px)] rounded-md border border-[var(--ta-chat-border)] bg-[var(--ta-chat-message-bg)] px-3 py-3'"
           >
-            <div :class="message.role === 'user' ? 'mb-1 text-[11px] font-semibold text-[var(--ta-chat-subtle)]' : 'mb-1 text-[11px] text-[var(--ta-chat-muted)]'">
-              {{ message.role === "user" ? "用户" : "Agent" }}
-            </div>
             <MessageParts
               v-if="message.role === 'assistant' && message.parts?.length"
               :parts="message.parts"
@@ -168,6 +173,13 @@ onBeforeUnmount(() => {
             <p v-else-if="message.role === 'user'" class="m-0 whitespace-pre-wrap text-[13px] leading-6 text-[var(--ta-chat-text)]">{{ message.text }}</p>
             <PlainAnswer v-else :text="message.text" />
           </div>
+          <span
+            v-if="message.role === 'user'"
+            class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[var(--ta-control-strong)] text-[var(--ta-subtle)]"
+            aria-hidden="true"
+          >
+            <UserRound class="h-4 w-4" />
+          </span>
         </div>
       </template>
       <button

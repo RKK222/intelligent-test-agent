@@ -7,6 +7,7 @@ Agent 对话和结构化卡片展示包。
 ## 主要职责
 
 - 展示用户/助手消息。
+- 右侧 Agent 面板使用 Figma Web IDE 风格的 47px Chat/History 顶部 tab、紧凑消息流和底部 composer/runtime 控制区，适配约 245px 窄面板。
 - 展示 message part timeline（text、reasoning、tool、file、event），用户消息使用右侧浅灰气泡。
 - `reasoning` 与最终 `text` 回答必须分块展示；最终回答使用最清晰的白底正文块，思考过程使用弱化折叠块，避免把思考过程和答复混在同一个气泡里。
 - 结构化 Agent 时间线使用浅色低对比折叠卡片壳展示 plan、tool、test、diff、event：标题行包含图标、标题和展开/收起按钮；内容区按类型展示步骤、工具摘要、测试命令、变更文件表格或紧凑 JSON fallback。

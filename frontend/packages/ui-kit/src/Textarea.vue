@@ -9,7 +9,7 @@ const model = defineModel<string>({ default: "" });
   <textarea
     v-model="model"
     :class="cn(
-      'w-full resize-none rounded-md border border-[var(--ta-border)] bg-[#f4f5f7] px-2 py-2 text-[12px] text-[var(--ta-text)] outline-none transition placeholder:text-[var(--ta-muted)] focus:border-[#c8ced6]'
+      'w-full resize-none rounded border border-[var(--ta-border)] bg-[var(--ta-surface)] px-3 py-2 text-[12px] text-[var(--ta-text)] outline-none transition placeholder:text-[var(--ta-muted)] focus:border-[var(--ta-border-strong)]'
     )"
   />
 </template>

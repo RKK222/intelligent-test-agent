@@ -7,6 +7,8 @@ dockview-vue 工作台布局和跨面板 UI 状态包。
 ## 主要职责
 
 - 渲染顶部栏和 dockview-vue 左/中/右/底 panel。
+- 顶部栏、48px activity rail 和 Dockview 三栏使用 Figma Web IDE 风格的浅灰 chrome；左/右面板默认宽度分别贴近 196px/245px。
+- 提供 `activity` slot 渲染工作台级图标入口；底部 Run/Terminal 通过 `bottomOpen`、`bottomHeight` 控制为覆盖式抽屉，默认不占首屏高度。
 - 提供打开文件 tab、活动文件、Diff 选择等 Pinia 状态。
 - 保证固定布局区域有稳定尺寸。
 - 保持顶部栏、panel tab、底部运行区和状态徽标的视觉稳定性；Phase 11 streaming、terminal warning 或 Diff 状态变化不得改变整体布局尺寸。

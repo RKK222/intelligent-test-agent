@@ -49,8 +49,8 @@ type AgentTab = "agent" | "history";
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { Pin, Trash2 } from "lucide-vue-next";
-import { Input, SegmentedTabs } from "@test-agent/ui-kit";
+import { History, MessageSquare, Pin, Trash2 } from "lucide-vue-next";
+import { Input } from "@test-agent/ui-kit";
 import AssistantThread from "./AssistantThread.vue";
 import RuntimeDock from "./RuntimeDock.vue";
 import { contextPercent } from "./chat-utils";
@@ -109,15 +109,27 @@ function onHistorySearchInput(value: string) {
 
 <template>
   <div class="flex h-full min-h-0 flex-col bg-[var(--ta-chat-bg)] text-[var(--ta-chat-text)]">
-    <SegmentedTabs
-      v-model="tab"
-      :items="[
-        { id: 'agent', label: 'Agent' },
-        { id: 'history', label: '历史', count: history.length }
-      ]"
-    />
+    <div class="flex h-[47px] shrink-0 border-b border-[var(--ta-chat-border)] bg-[var(--ta-chat-bg)]" role="tablist" aria-label="Agent 面板">
+      <button
+        type="button"
+        :class="['flex flex-1 items-center justify-center gap-2 border-b-2 text-[14px] transition', tab === 'agent' ? 'border-[var(--ta-ink)] text-[var(--ta-ink)]' : 'border-transparent text-[var(--ta-muted)] hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]']"
+        @click="tab = 'agent'"
+      >
+        <MessageSquare class="h-4 w-4" />
+        Agent
+      </button>
+      <button
+        type="button"
+        :class="['flex flex-1 items-center justify-center gap-2 border-b-2 text-[14px] transition', tab === 'history' ? 'border-[var(--ta-ink)] text-[var(--ta-ink)]' : 'border-transparent text-[var(--ta-muted)] hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]']"
+        @click="tab = 'history'"
+      >
+        <History class="h-4 w-4" />
+        历史
+        <span v-if="history.length" class="text-[10px] text-[var(--ta-muted)]">{{ history.length }}</span>
+      </button>
+    </div>
     <template v-if="tab === 'agent'">
-      <div v-if="showStatusPanel" class="flex min-h-8 flex-wrap items-center gap-2 border-b border-[var(--ta-chat-border)] bg-[var(--ta-chat-surface)] px-3 py-1.5 text-[11px] text-[var(--ta-chat-muted)]">
+      <div v-if="showStatusPanel" class="flex min-h-8 flex-wrap items-center gap-1.5 border-b border-[var(--ta-chat-border)] bg-[var(--ta-chat-bg)] px-3 py-1.5 text-[11px] text-[var(--ta-chat-muted)]">
         <span class="rounded border border-[var(--ta-chat-border)] px-2 py-0.5">Session {{ runtimeStatus?.status ?? "idle" }}</span>
         <span v-if="runtimeStatus?.branch" class="rounded border border-[var(--ta-chat-border)] px-2 py-0.5">{{ runtimeStatus.branch }}</span>
         <span v-if="runtimeStatus?.lsp" class="rounded border border-[var(--ta-chat-border)] px-2 py-0.5">LSP {{ runtimeStatus.lsp.status }}</span>
@@ -138,7 +150,7 @@ function onHistorySearchInput(value: string) {
         @reply-question="(id, answers) => emit('replyQuestion', id, answers)"
         @reject-question="(id) => emit('rejectQuestion', id)"
       />
-      <section aria-label="Agent 对话线程" class="min-h-0 flex-1 overflow-hidden">
+      <section aria-label="Agent 对话线程" class="min-h-0 flex-1 overflow-hidden border-b border-[var(--ta-chat-border)]">
         <AssistantThread
           :messages="messages"
           :running="running"
@@ -173,22 +185,22 @@ function onHistorySearchInput(value: string) {
       <div
         v-for="item in filteredHistory"
         :key="item.id"
-        class="rounded-md border border-slate-800 bg-slate-950 p-3 hover:border-slate-600"
+        class="rounded border border-[var(--ta-chat-border)] bg-[var(--ta-chat-surface)] p-3 hover:border-[var(--ta-chat-border-strong)]"
       >
         <div class="flex items-start gap-2">
           <button type="button" class="min-w-0 flex-1 text-left" @click="emit('selectHistory', item.id)">
             <div class="flex items-center gap-2">
-              <span class="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] text-slate-300">{{ item.status }}</span>
-              <span class="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-100">{{ item.title }}</span>
-              <span class="text-[11px] text-slate-500">{{ item.updatedAt }}</span>
+              <span class="rounded-full bg-[var(--ta-chat-detail-bg)] px-2 py-0.5 text-[11px] text-[var(--ta-chat-subtle)]">{{ item.status }}</span>
+              <span class="min-w-0 flex-1 truncate text-[12px] font-semibold text-[var(--ta-chat-text)]">{{ item.title }}</span>
+              <span class="text-[11px] text-[var(--ta-chat-muted)]">{{ item.updatedAt }}</span>
             </div>
-            <div class="mt-1 truncate text-[12px] text-slate-500">{{ item.preview }}</div>
+            <div class="mt-1 truncate text-[12px] text-[var(--ta-chat-muted)]">{{ item.preview }}</div>
           </button>
           <div v-if="item.id.startsWith('ses_')" class="flex shrink-0 gap-1">
             <button
               type="button"
               :title="item.pinned ? '取消置顶' : '置顶'"
-              :class="['rounded border border-slate-800 p-1 hover:border-slate-600 hover:text-slate-100', item.pinned ? 'text-cyan-300' : 'text-slate-500']"
+              :class="['rounded border border-[var(--ta-chat-border)] p-1 hover:border-[var(--ta-chat-border-strong)] hover:text-[var(--ta-chat-text)]', item.pinned ? 'text-[var(--ta-cyan)]' : 'text-[var(--ta-chat-muted)]']"
               @click="emit('toggleHistoryPin', item.id, !item.pinned)"
             >
               <Pin class="h-3.5 w-3.5" />
@@ -196,7 +208,7 @@ function onHistorySearchInput(value: string) {
             <button
               type="button"
               title="删除"
-              class="rounded border border-slate-800 p-1 text-slate-500 hover:border-red-900 hover:text-red-200"
+              class="rounded border border-[var(--ta-chat-border)] p-1 text-[var(--ta-chat-muted)] hover:border-[#9e3b34] hover:text-[#9e3b34]"
               @click="emit('deleteHistory', item.id)"
             >
               <Trash2 class="h-3.5 w-3.5" />

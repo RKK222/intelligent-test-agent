@@ -37,7 +37,7 @@ const modeOptions = [
 </script>
 
 <template>
-  <div class="flex flex-wrap items-center gap-2 border-t border-[var(--ta-chat-border)] bg-[var(--ta-chat-surface)] p-2">
+  <div class="flex shrink-0 items-center gap-1.5 overflow-x-auto border-t border-[var(--ta-chat-border)] bg-[var(--ta-chat-bg)] p-2 [scrollbar-width:none]">
     <ChicPopover
       label="Agent"
       placeholder="Agent"

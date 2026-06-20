@@ -103,15 +103,15 @@ function removeAttachment(id: string) {
 
 <template>
   <form
-    class="border-t border-[var(--ta-chat-border)] bg-[var(--ta-chat-surface)] p-3"
+    class="border-t border-[var(--ta-chat-border)] bg-[var(--ta-chat-bg)] px-4 py-3"
     @submit.prevent
   >
-    <input ref="fileInput" class="hidden" type="file" multiple @change="onFileChange" />
-    <input ref="imageInput" class="hidden" type="file" accept="image/*" multiple @change="onFileChange" />
+    <input ref="fileInput" class="hidden" style="display: none" type="file" multiple @change="onFileChange" />
+    <input ref="imageInput" class="hidden" style="display: none" type="file" accept="image/*" multiple @change="onFileChange" />
     <Textarea
       v-model="text"
       rows="3"
-      class="border-[var(--ta-chat-border)] bg-[var(--ta-chat-answer-bg)] text-[var(--ta-chat-text)] placeholder:text-[var(--ta-chat-muted)] focus:border-[var(--ta-chat-border-strong)]"
+      class="min-h-[60px] border-[var(--ta-chat-border)] bg-[var(--ta-chat-answer-bg)] text-[var(--ta-chat-text)] placeholder:text-[var(--ta-chat-muted)] focus:border-[var(--ta-chat-border-strong)]"
       placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
       @keydown.enter.exact.prevent="submit"
     />
@@ -149,8 +149,8 @@ function removeAttachment(id: string) {
       <span v-if="attachmentError" class="text-[11px] text-[var(--ta-chat-status-error)]">{{ attachmentError }}</span>
     </div>
     <div class="mt-2 flex items-center justify-between gap-2">
-      <div class="text-[11px] text-[var(--ta-chat-muted)]">{{ running ? "Run 正在执行，发送将排队" : "Enter 发送" }}</div>
-      <div class="flex gap-2">
+      <div class="max-w-[72px] text-[11px] leading-4 text-[var(--ta-chat-muted)]">{{ running ? "Run 执行中" : "Enter 发送" }}</div>
+      <div class="flex min-w-0 flex-wrap justify-end gap-1.5">
         <Button type="button" size="icon" variant="secondary" title="添加文件" @click="fileInput?.click()">
           <Paperclip class="h-4 w-4" />
         </Button>
