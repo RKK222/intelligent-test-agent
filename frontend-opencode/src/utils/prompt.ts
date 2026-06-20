@@ -15,6 +15,9 @@ export type PromptBuildInput = {
   images?: PromptFileInput[];
   agents?: Array<{ agentId: string; name?: string }>;
   references?: Array<{ id: string; label: string; uri?: string; metadata?: Record<string, unknown> }>;
+  agent?: string;
+  model?: string;
+  variant?: string;
 };
 
 export function buildPromptParts(input: PromptBuildInput): PromptPart[] {

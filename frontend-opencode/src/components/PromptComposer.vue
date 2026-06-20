@@ -24,6 +24,7 @@ const fileLoading = ref(false);
 const fileError = ref<string>();
 const lineCount = computed(() => Math.max(3, Math.min(12, prompt.text.split(/\r?\n/).length + 1)));
 const filePickerLabel = computed(() => (filePickerMode.value === "attach" ? "Attach workspace file" : "Mention workspace file"));
+const runtimeModels = computed(() => workspace.models.filter((model) => model.providerId));
 const slashCommands = computed(() => {
   const query = slashQuery.value.trim().toLowerCase();
   if (!query) {
@@ -121,6 +122,24 @@ function readString(value: unknown) {
 <template>
   <form class="composer" aria-label="Prompt composer" @submit.prevent="emit('submit')">
     <div class="composer-toolbar" aria-label="Prompt tools">
+      <label v-if="workspace.agents.length" class="composer-select">
+        <span>Agent</span>
+        <select v-model="prompt.runtimeAgent" aria-label="Agent">
+          <option value="">Default</option>
+          <option v-for="agent in workspace.agents" :key="agent.agentId" :value="agent.agentId">
+            {{ agent.name }}
+          </option>
+        </select>
+      </label>
+      <label v-if="runtimeModels.length" class="composer-select">
+        <span>Model</span>
+        <select v-model="prompt.runtimeModel" aria-label="Model">
+          <option value="">Default</option>
+          <option v-for="model in runtimeModels" :key="`${model.providerId}:${model.id}`" :value="`${model.providerId}/${model.id}`">
+            {{ model.name }}
+          </option>
+        </select>
+      </label>
       <button type="button" class="tool-button" title="Attach file" aria-label="Attach file" @click="addFile">
         <Paperclip :size="15" />
       </button>

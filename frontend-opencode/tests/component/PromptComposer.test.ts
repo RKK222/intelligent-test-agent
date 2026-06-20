@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/vue";
 import { createPinia, setActivePinia } from "pinia";
 import PromptComposer from "@/components/PromptComposer.vue";
 import { usePlatformStore } from "@/stores/platform";
+import { usePromptStore } from "@/stores/prompt";
 import { useWorkspaceStore } from "@/stores/workspace";
 
 describe("PromptComposer", () => {
@@ -28,6 +29,32 @@ describe("PromptComposer", () => {
 
     expect(view.emitted("submit")).toHaveLength(1);
     expect(workspace.loadCommands).toHaveBeenCalledOnce();
+  });
+
+  it("selects runtime agent and model without adding prompt parts", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const prompt = usePromptStore();
+    const workspace = useWorkspaceStore();
+    workspace.agents = [
+      { agentId: "build", name: "Build", mode: "primary" },
+      { agentId: "review", name: "Review", mode: "subagent" }
+    ];
+    workspace.models = [
+      { id: "claude-sonnet-4", providerId: "anthropic", name: "Claude Sonnet 4" },
+      { id: "gpt-5.1", providerId: "openai", name: "GPT-5.1" }
+    ];
+
+    render(PromptComposer, { global: { plugins: [pinia] } });
+
+    await fireEvent.update(screen.getByLabelText("Agent"), "review");
+    await fireEvent.update(screen.getByLabelText("Model"), "openai/gpt-5.1");
+
+    expect(prompt.snapshot()).toMatchObject({
+      agent: "review",
+      model: "openai/gpt-5.1"
+    });
+    expect(screen.getByText("0 parts")).toBeInTheDocument();
   });
 
   it("selects attachments and @ references through the platform fs catalog", async () => {

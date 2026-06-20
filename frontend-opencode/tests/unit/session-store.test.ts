@@ -55,6 +55,49 @@ describe("session store actions", () => {
     expect(session.revertItems).toHaveLength(0);
   });
 
+  it("passes selected runtime agent and model to startRun", async () => {
+    setActivePinia(createPinia());
+    const platform = usePlatformStore();
+    const runEvents = useRunEventStore();
+    const session = useSessionStore();
+    const calls: Array<[string, ...unknown[]]> = [];
+    platform.baseUrl = "http://127.0.0.1:8080";
+    runEvents.subscribe = vi.fn();
+
+    Object.defineProperty(platform, "api", {
+      value: {
+        startRun: async (...args: unknown[]) => {
+          calls.push(["startRun", ...args]);
+          return { runId: "run_2", sessionId: "ses_1", workspaceId: "wrk_1", status: "RUNNING", createdAt: "", updatedAt: "" };
+        }
+      }
+    });
+
+    session.activeSession = {
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      title: "Demo",
+      status: "RUNNING",
+      createdAt: "",
+      updatedAt: ""
+    };
+
+    await session.sendPrompt({ text: "Use selected runtime", agent: "build", model: "anthropic/claude-sonnet-4" });
+
+    expect(calls).toEqual([
+      [
+        "startRun",
+        {
+          sessionId: "ses_1",
+          parts: [{ type: "text", text: "Use selected runtime" }],
+          prompt: "Use selected runtime",
+          agent: "build",
+          model: "anthropic/claude-sonnet-4"
+        }
+      ]
+    ]);
+  });
+
   it("routes toolbar fork, revert, and compact actions through backend-api", async () => {
     setActivePinia(createPinia());
     const platform = usePlatformStore();

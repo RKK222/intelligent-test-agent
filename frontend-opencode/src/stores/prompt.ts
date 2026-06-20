@@ -9,6 +9,9 @@ export const usePromptStore = defineStore("prompt", () => {
   const images = ref<PromptFileInput[]>([]);
   const agents = ref<Array<{ agentId: string; name?: string }>>([]);
   const references = ref<Array<{ id: string; label: string; uri?: string; metadata?: Record<string, unknown> }>>([]);
+  const runtimeAgent = ref("");
+  const runtimeModel = ref("");
+  const runtimeVariant = ref("");
   const shellMode = ref(false);
   const history = ref<string[]>([]);
 
@@ -21,7 +24,10 @@ export const usePromptStore = defineStore("prompt", () => {
       files: files.value,
       images: images.value,
       agents: agents.value,
-      references: references.value
+      references: references.value,
+      agent: runtimeAgent.value || undefined,
+      model: runtimeModel.value || undefined,
+      variant: runtimeVariant.value || undefined
     };
   }
 
@@ -72,6 +78,9 @@ export const usePromptStore = defineStore("prompt", () => {
     images,
     agents,
     references,
+    runtimeAgent,
+    runtimeModel,
+    runtimeVariant,
     shellMode,
     history,
     parts,

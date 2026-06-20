@@ -88,7 +88,10 @@ export const useSessionStore = defineStore("session", () => {
         sessionId: activeSession.value.sessionId,
         parts: buildPromptParts(input),
         prompt: input.text,
-        agent: input.agents?.[0]?.agentId
+        // Agent/Model 是 opencode 运行态选择，不作为普通 prompt part 发送。
+        agent: input.agent,
+        model: input.model,
+        variant: input.variant
       });
       const run = await platform.api.startRun(payload);
       activeRun.value = run;
@@ -332,12 +335,16 @@ function compactPayload(input: {
   parts: ReturnType<typeof buildPromptParts>;
   prompt?: string;
   agent?: string;
+  model?: string;
+  variant?: string;
 }) {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined && value !== "")) as {
     sessionId: string;
     parts: ReturnType<typeof buildPromptParts>;
     prompt?: string;
     agent?: string;
+    model?: string;
+    variant?: string;
   };
 }
 
