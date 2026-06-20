@@ -34,8 +34,9 @@ export const useSessionStore = defineStore("session", () => {
       messageId: message.messageId,
       sessionId: message.sessionId ?? activeSession.value?.sessionId ?? "",
       role: message.role.toUpperCase(),
-      content: renderParts(message.parts),
-      createdAt: message.updatedAt ?? new Date(0).toISOString()
+      content: renderParts(message.parts) || message.text,
+      createdAt: message.updatedAt ?? new Date(0).toISOString(),
+      parts: Object.values(message.parts)
     }));
     return [...messages.value, ...projected].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   });

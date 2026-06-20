@@ -11,11 +11,11 @@
 |---|---|
 | App shell/topbar/search/new session/settings/command palette | 已实现 Vue 版本；command palette 支持 toolbar trigger、`Ctrl/Cmd+Shift+P` 与 `Ctrl/Cmd+K` 打开、搜索过滤、方向键高亮、Enter 选择、Escape/背景关闭，并把平台 command catalog 选项写入 composer slash 文本。 |
 | Home workspace/session/provider/model/agent 展示 | 已实现，数据来自平台 API。 |
-| Session layout 左侧会话、中间 timeline/composer、右侧 review/files/terminal/status | 已实现首版结构；Files tab 已接入 runtime fs 只读文件树、目录进入、搜索、刷新、空态和错误态。 |
+| Session layout 左侧会话、中间 timeline/composer、右侧 review/files/terminal/status | 已实现首版结构；Timeline 已按 opencode message part 分块展示 text/reasoning/tool/file/event，保留旧纯文本 fallback；Files tab 已接入 runtime fs 只读文件树、目录进入、搜索、刷新、空态和错误态。 |
 | Session toolbar：share/fork/compact/revert/abort | 已接入 Vue toolbar；fork 可选择用户消息并跳转子会话，revert 回滚最新用户消息，compact 在当前 session 带 model/provider 时调用 summarize，abort 经平台 API。 |
 | Composer 上方待处理 dock：permission/question/todo/follow-up/revert | 已实现 Vue 版本，操作统一经 `backend-api`，并覆盖组件/状态单测。 |
 | Prompt parts 与运行态选择：text/file/image/agent/reference/slash command、Agent/Model/Variant | 已实现构造与单测；composer 附件/@ 文件选择走平台 fs catalog，图片支持选择、粘贴和拖拽并以 `file` part 发送，context chip 支持移除，Agent/Model/Variant 选择透传运行态 API，切换模型会清理失效 variant，slash 菜单从平台 command catalog 选择命令并写入 `/command` 文本，支持按钮和 textarea `/query` 触发、方向键、Enter、Escape、参数模板插入和参数表单补全；textarea Enter 提交、Shift+Enter 换行、边界 ArrowUp/ArrowDown 浏览历史；普通 prompt 走 `startRun`，shell mode 走 `runSessionShell`，slash command 走 `runSessionCommand`。 |
-| RunEvent reducer：message part delta、todo、permission、question、diff/status | 已实现核心 reducer 与单测。 |
+| RunEvent reducer：message part delta、todo、permission、question、diff/status | 已实现核心 reducer 与单测；session timeline 投影会保留 message parts 供 Vue timeline 分块渲染。 |
 | Terminal | 已接入后端 ticket 获取、平台 WebSocket JSON envelope、xterm 输出渲染、原始终端输入、warning/error、input、resize、clear、关闭/重连操作。 |
 | Diff review | 已接入 `DiffReviewPanel`，支持文件聚焦、unified/split 样式切换、hunk 统计/导航、空态，以及 `MonacoDiffEditor` 懒加载只读 diff editor；Monaco 不可用时保留 hunk 预览 fallback。 |
 | Session share | 已接入 toolbar share popover，支持 publish、显示/复制/打开公开 URL、unpublish，操作统一经 `backend-api`。 |

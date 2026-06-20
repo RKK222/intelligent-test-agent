@@ -4,6 +4,44 @@ import { useRunEventStore } from "@/stores/runEvents";
 import { useSessionStore } from "@/stores/session";
 
 describe("session store actions", () => {
+  it("keeps RunEvent message parts on the timeline projection", () => {
+    setActivePinia(createPinia());
+    const session = useSessionStore();
+    const runEvents = useRunEventStore();
+    session.activeSession = {
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      title: "Demo",
+      status: "RUNNING",
+      createdAt: "2026-06-20T00:00:00Z",
+      updatedAt: "2026-06-20T00:00:00Z"
+    };
+
+    runEvents.apply({
+      eventId: "evt_tool",
+      runId: "run_1",
+      seq: 1,
+      type: "message.part.updated",
+      traceId: "trace_1",
+      occurredAt: "2026-06-20T00:00:01Z",
+      payload: {
+        messageId: "msg_1",
+        part: {
+          partId: "tool_1",
+          type: "tool",
+          toolName: "grep",
+          status: "completed",
+          output: "vite.config.ts"
+        }
+      }
+    });
+
+    expect(session.timeline[0]).toMatchObject({
+      messageId: "msg_1",
+      parts: [{ partId: "tool_1", type: "tool", toolName: "grep", output: "vite.config.ts" }]
+    });
+  });
+
   it("proxies dock decisions through backend-api and updates local queues", async () => {
     setActivePinia(createPinia());
     const platform = usePlatformStore();
