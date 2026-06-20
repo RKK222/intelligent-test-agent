@@ -42,6 +42,7 @@
 | 业务工程 | 新 URL 示例 | 旧 URL 示例 |
 |---|---|---|
 | `workspace-management` | `/api/internal/platform/workspace-management/workspaces` | `/api/workspaces` |
+| `workspace-management` | `/api/internal/platform/workspace-management/workspace-directories` | `/api/workspace-directories` |
 | `workspace-management` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/content` | `/api/workspaces/{workspaceId}/files/content` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/sessions` | `/api/sessions` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/runs` | `/api/runs` |
@@ -173,6 +174,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 |---|---|---|
 | `POST` | `/api/workspaces` | 注册本地工作区。 |
 | `GET` | `/api/workspaces` | 分页列出工作区。 |
+| `GET` | `/api/workspace-directories?path=` | 在允许根目录内浏览可选择的本机目录。 |
 | `GET` | `/api/workspaces/{workspaceId}` | 查询工作区详情。 |
 | `GET` | `/api/workspaces/{workspaceId}/files` | 单层列目录。 |
 | `GET` | `/api/workspaces/{workspaceId}/files/content` | 读取 UTF-8 文件。 |
@@ -184,6 +186,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 | 方法 | 新路径 |
 |---|---|
 | `POST` | `/api/internal/platform/workspace-management/workspaces` |
+| `GET` | `/api/internal/platform/workspace-management/workspace-directories?path=` |
 | `GET` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files` |
 | `GET` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/content` |
 | `PUT` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/content` |
@@ -209,6 +212,25 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
   "updatedAt": "2026-06-19T00:00:00Z"
 }
 ```
+
+`GET /api/workspace-directories?path=` 用于前端受控选择 Workspace 根目录。`path` 缺省时进入第一个允许根目录；后端只返回一层子目录，不返回文件。允许根目录由 `test-agent.workspace-picker.allowed-roots` 配置，环境变量 `TEST_AGENT_WORKSPACE_PICKER_ROOTS` 使用逗号分隔，默认 `${user.home}/workspace`。
+
+响应 `WorkspaceDirectoryListResponse`：
+
+```json
+{
+  "path": "/Users/huang/workspace",
+  "parentPath": null,
+  "entries": [
+    {
+      "name": "demo",
+      "path": "/Users/huang/workspace/demo"
+    }
+  ]
+}
+```
+
+目录选择器路径必须解析在任一允许根目录内；越出允许根目录返回 `FORBIDDEN`，缺失、不可访问或非目录返回 `VALIDATION_ERROR`。该接口与其他 `/api/**` 入口共享鉴权、限流、CORS、统一错误响应和 traceId 行为。
 
 文件 API 路径参数 `path` 必须解析在 workspace root 内，越权路径返回 `FORBIDDEN`。目录列表为单层，不递归，默认最多 1000 项；文件读取和写入只支持 UTF-8 文本，默认上限 1MB，可通过 `test-agent.files.*` 配置。
 

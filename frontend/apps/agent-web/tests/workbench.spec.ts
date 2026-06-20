@@ -14,6 +14,39 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
   await expect(page.getByRole("button", { name: /保存/ })).toBeVisible();
 });
 
+test("workspace picker creates selected directory and loads its file tree", async ({ page }) => {
+  const workspaceCreates: Array<Record<string, unknown>> = [];
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  await mockBackendApi(page, { workspaceCreates, fileRequests });
+
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "选择工作区目录" }).click();
+  await expect(page.getByRole("dialog", { name: "选择工作区目录" })).toBeVisible();
+  await page.getByRole("button", { name: /project-a/ }).click();
+  await page.getByRole("button", { name: "选择此目录" }).click();
+
+  await expect.poll(() => workspaceCreates.length).toBe(1);
+  expect(workspaceCreates[0]).toEqual({ name: "project-a", rootPath: "/Users/huang/workspace/project-a" });
+  await expect(page.getByRole("banner").getByText("project-a")).toBeVisible();
+  await expect(page.getByRole("button", { name: /src/ })).toBeVisible();
+  expect(fileRequests).toContainEqual({ workspaceId: "wrk_project_a", path: "" });
+});
+
+test("workspace picker switches to an existing workspace without recreating it", async ({ page }) => {
+  const workspaceCreates: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, { workspaceCreates });
+
+  await page.goto("/");
+
+  await page.getByRole("button", { name: "选择工作区目录" }).click();
+  await page.getByRole("button", { name: /demo-tests/ }).click();
+  await page.getByRole("button", { name: "选择此目录" }).click();
+
+  await expect(page.getByRole("banner").getByText("demo-tests")).toBeVisible();
+  expect(workspaceCreates).toEqual([]);
+});
+
 test("model picker groups models by provider and updates run model", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, { runRequests });
@@ -103,8 +136,11 @@ async function mockBackendApi(
     permissionReplies?: Array<Record<string, unknown>>;
     questionReplies?: Array<Record<string, unknown>>;
     terminalTickets?: Array<Record<string, unknown>>;
+    workspaceCreates?: Array<Record<string, unknown>>;
+    fileRequests?: Array<{ workspaceId: string; path: string }>;
   } = {}
 ) {
+  const workspaceItems = [workspace()];
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
@@ -113,12 +149,33 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/workspaces") {
-      await route.fulfill(json(workspacePage()));
+      await route.fulfill(json(pageOf(workspaceItems)));
+      return;
+    }
+    if (method === "POST" && url.pathname === "/api/workspaces") {
+      const payload = JSON.parse(route.request().postData() ?? "{}") as { name: string; rootPath: string };
+      capture.workspaceCreates?.push(payload);
+      const workspace = {
+        workspaceId: "wrk_project_a",
+        name: payload.name,
+        rootPath: payload.rootPath,
+        status: "ACTIVE",
+        createdAt: "2026-06-19T00:00:00Z",
+        updatedAt: "2026-06-19T00:00:00Z"
+      };
+      workspaceItems.unshift(workspace);
+      await route.fulfill(json(workspace));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/workspace-directories") {
+      await route.fulfill(json(workspaceDirectories(url.searchParams.get("path"))));
       return;
     }
     if (method === "GET" && url.pathname.endsWith("/files")) {
       const path = url.searchParams.get("path") ?? "";
-      await route.fulfill(json(fileEntries(path)));
+      const workspaceId = url.pathname.match(/\/api\/workspaces\/([^/]+)\/files$/)?.[1] ?? "";
+      capture.fileRequests?.push({ workspaceId, path });
+      await route.fulfill(json(fileEntries(path, workspaceId)));
       return;
     }
     if (method === "GET" && url.pathname.endsWith("/files/content")) {
@@ -260,20 +317,48 @@ function pageOf(items: unknown[]) {
   return { items, page: 0, size: 30, total: items.length };
 }
 
-function workspacePage() {
-  return pageOf([
-    {
-      workspaceId: "wrk_1234567890abcdef",
-      name: "demo-tests",
-      rootPath: "/tmp/demo",
-      status: "ACTIVE",
-      createdAt: "2026-06-19T00:00:00Z",
-      updatedAt: "2026-06-19T00:00:00Z"
-    }
-  ]);
+function workspace() {
+  return {
+    workspaceId: "wrk_1234567890abcdef",
+    name: "demo-tests",
+    rootPath: "/Users/huang/workspace/demo-tests",
+    status: "ACTIVE",
+    createdAt: "2026-06-19T00:00:00Z",
+    updatedAt: "2026-06-19T00:00:00Z"
+  };
 }
 
-function fileEntries(path: string) {
+function workspaceDirectories(path: string | null) {
+  if (path === "/Users/huang/workspace/project-a") {
+    return {
+      path: "/Users/huang/workspace/project-a",
+      parentPath: "/Users/huang/workspace",
+      entries: [{ name: "src", path: "/Users/huang/workspace/project-a/src" }]
+    };
+  }
+  if (path === "/Users/huang/workspace/demo-tests") {
+    return {
+      path: "/Users/huang/workspace/demo-tests",
+      parentPath: "/Users/huang/workspace",
+      entries: [{ name: "tests", path: "/Users/huang/workspace/demo-tests/tests" }]
+    };
+  }
+  return {
+    path: "/Users/huang/workspace",
+    parentPath: null,
+    entries: [
+      { name: "demo-tests", path: "/Users/huang/workspace/demo-tests" },
+      { name: "project-a", path: "/Users/huang/workspace/project-a" }
+    ]
+  };
+}
+
+function fileEntries(path: string, workspaceId = "wrk_1234567890abcdef") {
+  if (workspaceId === "wrk_project_a") {
+    return path === "src"
+      ? [{ path: "src/main.ts", name: "main.ts", directory: false, size: 90, lastModifiedAt: "2026-06-19T00:00:00Z" }]
+      : [{ path: "src", name: "src", directory: true, size: 0, lastModifiedAt: "2026-06-19T00:00:00Z" }];
+  }
   return path === "tests"
     ? [
         {

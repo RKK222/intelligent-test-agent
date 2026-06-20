@@ -14,6 +14,9 @@ import com.example.testagent.opencode.runtime.run.RunDiffResponse;
 import com.example.testagent.opencode.runtime.run.RunMessageRecoveryService;
 import com.example.testagent.opencode.runtime.run.StartRunInput;
 import com.example.testagent.opencode.runtime.session.SessionApplicationService;
+import com.example.testagent.workspace.WorkspaceDirectoryEntryResponse;
+import com.example.testagent.workspace.WorkspaceDirectoryListResponse;
+import com.example.testagent.workspace.WorkspaceDirectoryService;
 import com.example.testagent.workspace.WorkspaceApplicationService;
 import com.example.testagent.common.pagination.PageResponse;
 import com.example.testagent.domain.run.Run;
@@ -48,7 +51,7 @@ class RuntimeControllerTest {
         WorkspaceApplicationService service = org.mockito.Mockito.mock(WorkspaceApplicationService.class);
         when(service.createWorkspace(eq("Demo"), any(), eq("trace_1234567890abcdef")))
                 .thenReturn(workspace());
-        WebTestClient client = WebTestClient.bindToController(new WorkspaceController(service))
+        WebTestClient client = WebTestClient.bindToController(new WorkspaceController(service, org.mockito.Mockito.mock(WorkspaceDirectoryService.class)))
                 .webFilter(new TraceIdWebFilter())
                 .build();
 
@@ -73,7 +76,7 @@ class RuntimeControllerTest {
         WorkspaceApplicationService service = org.mockito.Mockito.mock(WorkspaceApplicationService.class);
         when(service.createWorkspace(eq("Demo"), any(), eq("trace_1234567890abcdef")))
                 .thenReturn(workspace());
-        WebTestClient client = WebTestClient.bindToController(new WorkspaceController(service))
+        WebTestClient client = WebTestClient.bindToController(new WorkspaceController(service, org.mockito.Mockito.mock(WorkspaceDirectoryService.class)))
                 .webFilter(new TraceIdWebFilter())
                 .build();
 
@@ -90,6 +93,39 @@ class RuntimeControllerTest {
                 .jsonPath("$.success").isEqualTo(true)
                 .jsonPath("$.traceId").isEqualTo("trace_1234567890abcdef")
                 .jsonPath("$.data.workspaceId").isEqualTo("wrk_1234567890abcdef");
+    }
+
+    @Test
+    void workspaceControllerListsSelectableDirectoriesOnCompatibilityAndInternalUrls() {
+        WorkspaceApplicationService workspaceService = org.mockito.Mockito.mock(WorkspaceApplicationService.class);
+        WorkspaceDirectoryService directoryService = org.mockito.Mockito.mock(WorkspaceDirectoryService.class);
+        when(directoryService.listDirectories("/Users/huang/workspace"))
+                .thenReturn(new WorkspaceDirectoryListResponse(
+                        "/Users/huang/workspace",
+                        null,
+                        List.of(new WorkspaceDirectoryEntryResponse("demo", "/Users/huang/workspace/demo"))));
+        WebTestClient client = WebTestClient.bindToController(new WorkspaceController(workspaceService, directoryService))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.get()
+                .uri("/api/workspace-directories?path=/Users/huang/workspace")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.path").isEqualTo("/Users/huang/workspace")
+                .jsonPath("$.data.entries[0].name").isEqualTo("demo")
+                .jsonPath("$.data.entries[0].path").isEqualTo("/Users/huang/workspace/demo");
+
+        client.get()
+                .uri("/api/internal/platform/workspace-management/workspace-directories?path=/Users/huang/workspace")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.entries[0].name").isEqualTo("demo");
     }
 
     @Test

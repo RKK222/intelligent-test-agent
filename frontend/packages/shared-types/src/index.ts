@@ -31,6 +31,17 @@ export type Workspace = {
   updatedAt: string;
 };
 
+export type WorkspaceDirectoryEntry = {
+  name: string;
+  path: string;
+};
+
+export type WorkspaceDirectoryList = {
+  path: string;
+  parentPath: string | null;
+  entries: WorkspaceDirectoryEntry[];
+};
+
 export type FileTreeEntry = {
   path: string;
   name: string;

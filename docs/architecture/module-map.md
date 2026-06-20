@@ -38,7 +38,7 @@ Browser
 | `test-agent-observability` | traceId、结构化日志、Micrometer 指标、观测性工具。 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK，禁止手改。 |
 | `test-agent-opencode-client` | 封装 generated SDK，提供 `OpencodeClientFacade`，是业务访问 opencode 的唯一门面。 |
-| `test-agent-workspace-management` | Workspace、文件查看/新增/修改/删除、git/diff、agent 和 skill 管理业务。 |
+| `test-agent-workspace-management` | Workspace、文件查看/新增/修改/删除、受控目录选择、git/diff、agent 和 skill 管理业务。 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、opencode runtime、Diff/revert、terminal ticket/PTY 业务。 |
 | `test-agent-system-management` | 用户、角色、权限等平台内部管理业务边界（当前为空骨架）。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界（当前为空骨架）。 |
@@ -55,10 +55,10 @@ Browser
 | 包 | 职责 |
 |---|---|
 | `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、Run 启动、SSE 订阅编排和全局错误提示。 |
-| `packages/backend-api` | 访问平台后端服务的唯一前端 HTTP client，负责统一响应、错误和 traceId 映射。 |
+| `packages/backend-api` | 访问平台后端服务的唯一前端 HTTP client，负责统一响应、错误、traceId 和受控目录选择 API 映射。 |
 | `packages/event-stream-client` | RunEvent SSE client，负责连接、自动重连、事件解析、去重和取消订阅。 |
 | `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板和工作台级 Pinia 状态。 |
-| `packages/file-explorer` | 文件树、已加载文件名过滤、变更列表和打开文件入口。 |
+| `packages/file-explorer` | 文件树、选择 Workspace 目录事件、已加载文件名过滤、变更列表和打开文件入口。 |
 | `packages/editor` | Monaco 编辑器（原生 `monaco-editor`）、语言识别、内容编辑和只读展示。 |
 | `packages/diff-viewer` | Monaco Diff、变更文件列表、Run/Session/VCS 来源切换、split/unified 视图、Run 级接受/拒绝按钮和当前文件反馈。 |
 | `packages/agent-chat` | 自建最小 chat 运行时、用户消息、message part timeline、运行卡片（plan/tool/test/diff/event）、runtime selector/status、slash command、`@` context、permission/question/Todo dock 和纯 RunEvent reducer。 |

@@ -3,11 +3,12 @@ package com.example.testagent.app.config;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.nio.file.Path;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * test-agent 运行时配置，集中绑定安全、限流、文件、Redis 和 opencode 节点配置。
+ * test-agent 运行时配置，集中绑定安全、限流、文件、目录选择、Redis 和 opencode 节点配置。
  */
 @Component
 @ConfigurationProperties(prefix = "test-agent")
@@ -16,6 +17,7 @@ public class TestAgentRuntimeProperties {
     private final Security security = new Security();
     private final RateLimit rateLimit = new RateLimit();
     private final Files files = new Files();
+    private final WorkspacePicker workspacePicker = new WorkspacePicker();
     private final Redis redis = new Redis();
     private final Opencode opencode = new Opencode();
     private final Terminal terminal = new Terminal();
@@ -39,6 +41,13 @@ public class TestAgentRuntimeProperties {
      */
     public Files getFiles() {
         return files;
+    }
+
+    /**
+     * 返回工作区目录选择器配置。
+     */
+    public WorkspacePicker getWorkspacePicker() {
+        return workspacePicker;
     }
 
     /**
@@ -194,6 +203,28 @@ public class TestAgentRuntimeProperties {
          */
         public void setMaxDirectoryEntries(int maxDirectoryEntries) {
             this.maxDirectoryEntries = maxDirectoryEntries;
+        }
+    }
+
+    /**
+     * 工作区目录选择器安全边界配置项。
+     */
+    public static class WorkspacePicker {
+        private List<String> allowedRoots = new ArrayList<>(List.of(
+                Path.of(System.getProperty("user.home"), "workspace").toString()));
+
+        /**
+         * 返回允许前端浏览和选择的本机目录根。
+         */
+        public List<String> getAllowedRoots() {
+            return allowedRoots;
+        }
+
+        /**
+         * 绑定允许目录根，null 会被规整为空列表以便部署显式关闭默认值。
+         */
+        public void setAllowedRoots(List<String> allowedRoots) {
+            this.allowedRoots = allowedRoots == null ? new ArrayList<>() : new ArrayList<>(allowedRoots);
         }
     }
 

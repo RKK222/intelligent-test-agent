@@ -8,13 +8,27 @@ import { CodeEditor, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents } from "@test-agent/event-stream-client";
 import { FileExplorer } from "@test-agent/file-explorer";
 import { Bell, Code2, GitBranch, PanelBottom, TerminalSquare } from "lucide-vue-next";
-import type { AgentMessage, FileTreeEntry, PromptPart, Run, RunDiffFile, RunEvent, RuntimeResourceInfo, RuntimeToolInfo, Session, Workspace } from "@test-agent/shared-types";
+import type {
+  AgentMessage,
+  FileTreeEntry,
+  PageResponse,
+  PromptPart,
+  Run,
+  RunDiffFile,
+  RunEvent,
+  RuntimeResourceInfo,
+  RuntimeToolInfo,
+  Session,
+  Workspace,
+  WorkspaceDirectoryList
+} from "@test-agent/shared-types";
 import { TerminalPanel } from "@test-agent/terminal";
 import { TestRunnerPanel } from "@test-agent/test-runner";
 import { FeedbackBanner, type Feedback } from "@test-agent/ui-kit";
 import { useWorkbenchStore, WorkbenchShell } from "@test-agent/workbench-shell";
 import EditorPane from "./EditorPane.vue";
 import WorkspaceBootstrap from "./WorkspaceBootstrap.vue";
+import WorkspaceDirectoryPickerDialog from "./WorkspaceDirectoryPickerDialog.vue";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, type FollowUpDraft } from "./follow-up-queue";
 import {
   buildPromptParts,
@@ -63,6 +77,9 @@ const diffContextParts = ref<PromptPart[]>([]);
 const editorSelection = ref<EditorSelectionContext | undefined>(undefined);
 const bottomMode = ref<"run" | "terminal">("run");
 const bottomDrawerOpen = ref(false);
+const directoryPickerOpen = ref(false);
+const directoryPickerLoading = ref(false);
+const directoryPickerData = shallowRef<WorkspaceDirectoryList | null>(null);
 
 // Chat runtime：单一 reducer 维护，dispatch 闭包更新
 const chatState = ref(createInitialAgentChatRuntimeState(initialMessages));
@@ -174,7 +191,7 @@ watch(activePath, () => {
 });
 watch(selectedWorkspaceIdRef, (id) => {
   if (id) {
-    void loadDirectory("");
+    void loadDirectory("", id);
   }
 });
 watch(agentsQuery.data, (data) => {
@@ -444,13 +461,98 @@ function createTerminalTicket() {
   });
 }
 
-async function loadDirectory(path: string) {
-  if (!selectedWorkspace.value) {
+function resetWorkspaceState() {
+  // Workspace 切换后必须清掉旧根目录绑定的文件树、编辑器、Diff 与运行态，避免误操作旧路径。
+  entriesByDirectory.value = {};
+  expandedDirectories.value = new Set();
+  loadingPath.value = null;
+  session.value = null;
+  run.value = null;
+  logs.value = [];
+  diffFiles.value = [];
+  diffSource.value = "run";
+  centerMode.value = "editor";
+  sessionSearch.value = "";
+  followUpQueue.value = [];
+  diffContextParts.value = [];
+  editorSelection.value = undefined;
+  selectedAgent.value = "";
+  selectedProvider.value = "";
+  selectedModel.value = "";
+  dispatchChat({ type: "reset" });
+  workbench.resetWorkspaceView();
+}
+
+function cacheWorkspace(workspace: Workspace) {
+  queryClient.setQueryData<PageResponse<Workspace>>(["workspaces"], (old) => {
+    const previousItems = old?.items ?? [];
+    const existed = previousItems.some((item) => item.workspaceId === workspace.workspaceId || item.rootPath === workspace.rootPath);
+    const items = [
+      workspace,
+      ...previousItems.filter((item) => item.workspaceId !== workspace.workspaceId && item.rootPath !== workspace.rootPath)
+    ];
+    return {
+      items,
+      page: old?.page ?? 1,
+      size: old?.size ?? Math.max(items.length, 50),
+      total: old ? old.total + (existed ? 0 : 1) : items.length
+    };
+  });
+}
+
+function workspaceNameFromPath(path: string) {
+  return path.split(/[\\/]+/).filter(Boolean).at(-1) ?? "Workspace";
+}
+
+async function loadWorkspaceDirectories(path?: string) {
+  directoryPickerLoading.value = true;
+  try {
+    directoryPickerData.value = await api.listWorkspaceDirectories(path);
+  } catch (error) {
+    feedback.value = errorFeedback("加载工作区目录失败", error);
+  } finally {
+    directoryPickerLoading.value = false;
+  }
+}
+
+function openWorkspaceDirectoryPicker() {
+  directoryPickerOpen.value = true;
+  void loadWorkspaceDirectories();
+}
+
+async function switchWorkspace(workspace: Workspace) {
+  resetWorkspaceState();
+  cacheWorkspace(workspace);
+  selectedWorkspaceId.value = workspace.workspaceId;
+  void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+  void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+  void queryClient.invalidateQueries({ queryKey: ["runtime"] });
+  await loadDirectory("", workspace.workspaceId);
+}
+
+async function selectWorkspaceDirectory(path: string) {
+  directoryPickerLoading.value = true;
+  try {
+    const workspace =
+      workspaces.value.find((item) => item.rootPath === path) ??
+      (await api.createWorkspace({ name: workspaceNameFromPath(path), rootPath: path }));
+    await switchWorkspace(workspace);
+    directoryPickerOpen.value = false;
+    directoryPickerData.value = null;
+  } catch (error) {
+    feedback.value = errorFeedback("切换 Workspace 失败", error);
+  } finally {
+    directoryPickerLoading.value = false;
+  }
+}
+
+async function loadDirectory(path: string, workspaceId = selectedWorkspace.value?.workspaceId) {
+  if (!workspaceId) {
     return;
   }
   loadingPath.value = path;
   try {
-    const entries = await api.listFiles(selectedWorkspace.value.workspaceId, path);
+    const entries = await api.listFiles(workspaceId, path);
     entriesByDirectory.value = { ...entriesByDirectory.value, [path]: entries };
   } catch (error) {
     feedback.value = errorFeedback("加载文件树失败", error);
@@ -679,6 +781,7 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
         @open-file="openFile"
         @open-diff="(path: string) => { workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
         @refresh="loadDirectory('')"
+        @add-workspace="openWorkspaceDirectoryPicker"
       />
       <WorkspaceBootstrap v-else :loading="createWorkspaceMutation.isPending.value" @create="(payload) => createWorkspaceMutation.mutate(payload)" />
     </template>
@@ -805,4 +908,12 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
   <div class="pointer-events-none fixed bottom-3 left-1/2 z-50 w-[min(560px,calc(100vw-24px))] -translate-x-1/2">
     <FeedbackBanner :feedback="feedback" class="pointer-events-auto rounded-md border border-slate-800" />
   </div>
+  <WorkspaceDirectoryPickerDialog
+    :open="directoryPickerOpen"
+    :directory="directoryPickerData"
+    :loading="directoryPickerLoading"
+    @close="directoryPickerOpen = false"
+    @navigate="loadWorkspaceDirectories"
+    @select="selectWorkspaceDirectory"
+  />
 </template>

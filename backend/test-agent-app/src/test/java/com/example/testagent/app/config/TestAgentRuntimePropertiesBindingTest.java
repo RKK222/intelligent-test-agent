@@ -59,6 +59,18 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
+    void workspacePickerAllowedRootsCanBeBoundFromEnvironmentStyleValues() {
+        contextRunner
+                .withPropertyValues("test-agent.workspace-picker.allowed-roots=/Users/huang/workspace,/tmp/projects")
+                .run(context -> {
+                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
+
+                    assertThat(properties.getWorkspacePicker().getAllowedRoots())
+                            .containsExactly("/Users/huang/workspace", "/tmp/projects");
+                });
+    }
+
+    @Test
     void bindsRuntimePropertiesFromEnvironmentStyleValues() {
         contextRunner
                 .withPropertyValues(

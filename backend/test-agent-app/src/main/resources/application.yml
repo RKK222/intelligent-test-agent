@@ -45,6 +45,8 @@ test-agent:
   files:
     max-file-bytes: ${TEST_AGENT_MAX_FILE_BYTES:1048576}
     max-directory-entries: ${TEST_AGENT_MAX_DIRECTORY_ENTRIES:1000}
+  workspace-picker:
+    allowed-roots: ${TEST_AGENT_WORKSPACE_PICKER_ROOTS:${user.home}/workspace}
   redis:
     enabled: ${TEST_AGENT_REDIS_ENABLED:false}
     host: ${TEST_AGENT_REDIS_HOST:127.0.0.1}

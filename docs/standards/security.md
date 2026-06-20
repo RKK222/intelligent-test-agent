@@ -45,6 +45,7 @@
 2. 安全响应头必须在 `test-agent-api` 的入口配置中统一定义，并由 `test-agent-app` 装配生效。
 3. Druid Web 控制台默认关闭；如后续启用，必须通过环境变量配置账号、密码和访问 allowlist，并同步 API、运维和安全文档。
 4. 旧 `/api/...`、新 `/api/internal/platform/...` 和 `/api/internal/agent/opencode/...` 共享同一鉴权、限流、CORS、traceId 与错误格式。Workspace 文件 API 必须把所有请求路径归一化到注册的 workspace root 内，路径穿越或越权访问返回 `FORBIDDEN`。
+5. Workspace 目录选择器只能浏览 `test-agent.workspace-picker.allowed-roots` / `TEST_AGENT_WORKSPACE_PICKER_ROOTS` 声明的本机根目录，默认 `${user.home}/workspace`；越出允许根目录返回 `FORBIDDEN`，缺失或非目录返回 `VALIDATION_ERROR`，前端不得直接调用浏览器、本地插件或 opencode server 枚举任意磁盘路径。
 
 ## PTY WebSocket 安全例外
 

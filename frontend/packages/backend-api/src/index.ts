@@ -23,7 +23,8 @@ import type {
   TerminalTicketRequest,
   TerminalTicketResponse,
   TodoItem,
-  Workspace
+  Workspace,
+  WorkspaceDirectoryList
 } from "@test-agent/shared-types";
 
 export type BackendApiClientOptions = {
@@ -108,6 +109,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<PageResponse<Workspace>>(`/api/workspaces?page=${page}&size=${size}`),
     createWorkspace: (payload: { name: string; rootPath: string }) =>
       request<Workspace>("/api/workspaces", { method: "POST", body: JSON.stringify(payload) }),
+    listWorkspaceDirectories: (path?: string) =>
+      request<WorkspaceDirectoryList>(`/api/workspace-directories${query({ path })}`),
     listFiles: async (workspaceId: string, path = "") => {
       const entries = await request<BackendFileTreeEntry[]>(`/api/workspaces/${workspaceId}/files${query({ path })}`);
       return entries.map((entry) => ({

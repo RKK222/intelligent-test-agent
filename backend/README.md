@@ -24,7 +24,7 @@
 | `test-agent-observability` | 日志、trace、指标等观测性封装 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK |
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
-| `test-agent-workspace-management` | Workspace、文件、git/diff、agent 和 skill 管理业务 |
+| `test-agent-workspace-management` | Workspace、文件、受控目录选择、git/diff、agent 和 skill 管理业务 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、opencode runtime、Diff/revert 和 PTY terminal 业务 |
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务边界，目前为空骨架 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界，目前为空骨架 |

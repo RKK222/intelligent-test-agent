@@ -4,6 +4,8 @@ import com.example.testagent.workspace.FileContentResponse;
 import com.example.testagent.workspace.FileStatusResponse;
 import com.example.testagent.workspace.FileTreeEntryResponse;
 import com.example.testagent.workspace.WorkspaceApplicationService;
+import com.example.testagent.workspace.WorkspaceDirectoryListResponse;
+import com.example.testagent.workspace.WorkspaceDirectoryService;
 import com.example.testagent.common.api.ApiResponse;
 import com.example.testagent.common.pagination.PageResponse;
 import com.example.testagent.domain.workspace.WorkspaceId;
@@ -25,12 +27,14 @@ import org.springframework.web.server.ServerWebExchange;
 public class WorkspaceController {
 
     private final WorkspaceApplicationService workspaceService;
+    private final WorkspaceDirectoryService directoryService;
 
     /**
-     * 注入工作区应用服务，Controller 只负责 HTTP 协议适配。
+     * 注入工作区应用服务和目录选择服务，Controller 只负责 HTTP 协议适配。
      */
-    public WorkspaceController(WorkspaceApplicationService workspaceService) {
+    public WorkspaceController(WorkspaceApplicationService workspaceService, WorkspaceDirectoryService directoryService) {
         this.workspaceService = workspaceService;
+        this.directoryService = directoryService;
     }
 
     /**
@@ -56,6 +60,17 @@ public class WorkspaceController {
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         return ApiResponse.ok(RuntimeDtos.workspacePage(workspaceService.listWorkspaces(RuntimeApiSupport.pageRequest(page, size))), traceId);
+    }
+
+    /**
+     * 浏览允许范围内的本机目录，用于前端选择新的 Workspace 根目录。
+     */
+    @GetMapping({"/api/workspace-directories", "/api/internal/platform/workspace-management/workspace-directories"})
+    public ApiResponse<WorkspaceDirectoryListResponse> listWorkspaceDirectories(
+            @RequestParam(required = false) String path,
+            ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        return ApiResponse.ok(directoryService.listDirectories(path), traceId);
     }
 
     /**

@@ -8,7 +8,7 @@
 
 - 统一 baseUrl、traceId、鉴权头和 JSON 解析。
 - 映射统一错误响应为 `BackendApiError`。
-- 暴露 Workspace、文件、Session、Session message、Run、Diff API 方法；Session 支持 workspace 列表、全局搜索、标题/置顶更新和软删除。
+- 暴露 Workspace、受控目录选择、文件、Session、Session message、Run、Diff API 方法；Session 支持 workspace 列表、全局搜索、标题/置顶更新和软删除。
 - `startRun` 同时支持旧 `(sessionId, prompt)` 参数和 Phase 11 对象 payload（`parts`、`messageId`、`agent`、`model`、`variant`、`mode`）。
 - 暴露 Phase 11 opencode Web App 运行态方法：Agent/Model/Provider/Command/Reference 目录、config、provider auth/OAuth、worktree、Session children/todo/diff/abort/fork/compact/revert/command/shell/share、permission/question、fs/vcs/lsp/mcp status/resources/tools/auth 和 terminal ticket。
 - Command catalog 映射会保留 opencode runtime 的 `source/hints` 可选字段，供 frontend-opencode 生成 slash command 参数表单。

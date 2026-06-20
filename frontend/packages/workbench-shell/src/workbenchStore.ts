@@ -49,6 +49,13 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     );
   }
 
+  function resetWorkspaceView() {
+    // 切换 Workspace 时清掉与旧根目录绑定的编辑器与 Diff 选择，避免展示过期文件路径。
+    tabs.value = [];
+    activePath.value = undefined;
+    selectedDiffPath.value = undefined;
+  }
+
   return {
     tabs,
     activePath,
@@ -58,6 +65,7 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     openTab,
     closeTab,
     updateTabContent,
-    markTabSaved
+    markTabSaved,
+    resetWorkspaceView
   };
 });

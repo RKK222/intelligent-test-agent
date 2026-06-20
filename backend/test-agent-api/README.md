@@ -8,6 +8,7 @@
 
 - 暴露旧 `/api/...` 兼容 URL。
 - 暴露新增 `/api/internal/platform/...`、`/api/internal/agent/opencode/...` 和预留 `/api/public/...` URL。
+- 暴露 Workspace 受控目录选择接口，Controller 只委托 workspace-management 目录服务。
 - Controller 只调用业务模块 service，不直接访问 Repository、generated SDK 或 JDBC 实现。
 - 维护 `RuntimeDtos` 等平台 DTO，不返回 generated SDK DTO。
 - RunEvent SSE 建连时先委托 runtime 恢复 opencode projected messages，再进入 durable replay 与 live bus 合流。
@@ -32,7 +33,7 @@
 
 ## 测试覆盖
 
-- `RuntimeControllerTest` 覆盖 Workspace、Session、Run、Diff、RunEvent SSE 恢复快照和内部平台兼容 URL。
+- `RuntimeControllerTest` 覆盖 Workspace、目录选择、Session、Run、Diff、RunEvent SSE 恢复快照和内部平台兼容 URL。
 - `OpencodeRuntimeControllerTest` 覆盖 opencode runtime 代理入口、MCP tools、permission reply、session share 和原始 opencode 路径兼容。
 - `TerminalControllerTest`、`TerminalWebSocketHandlerTest` 覆盖 PTY ticket、内部平台 WebSocket URL、origin 拒绝、单会话互斥、输入限流、关闭和超时。
 - `RuntimeApiSupportTest` 覆盖分页默认值和非法分页参数转换为统一 `VALIDATION_ERROR`。
