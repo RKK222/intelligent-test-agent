@@ -373,6 +373,81 @@ function toMessagePart(raw: Record<string, unknown>, partId: string): MessagePar
       url: text(raw.url)
     };
   }
+  if (partType === "subtask") {
+    return {
+      partId,
+      type: "subtask",
+      prompt: text(raw.prompt) ?? "",
+      description: text(raw.description) ?? "",
+      agent: text(raw.agent) ?? text(raw.name) ?? "",
+      model: text(raw.model),
+      command: text(raw.command),
+      status: text(raw.status)
+    };
+  }
+  if (partType === "step-start") {
+    return { partId, type: "step-start", snapshot: text(raw.snapshot) };
+  }
+  if (partType === "step-finish") {
+    const tokens = record(raw.tokens);
+    return {
+      partId,
+      type: "step-finish",
+      reason: text(raw.reason) ?? "",
+      snapshot: text(raw.snapshot),
+      cost: number(raw.cost),
+      tokens: tokens
+        ? {
+            total: number(tokens.total),
+            input: number(tokens.input),
+            output: number(tokens.output),
+            reasoning: number(tokens.reasoning)
+          }
+        : undefined
+    };
+  }
+  if (partType === "snapshot") {
+    return { partId, type: "snapshot", snapshot: text(raw.snapshot) ?? "" };
+  }
+  if (partType === "patch") {
+    return {
+      partId,
+      type: "patch",
+      hash: text(raw.hash) ?? "",
+      files: Array.isArray(raw.files) ? raw.files.filter((item): item is string => typeof item === "string") : []
+    };
+  }
+  if (partType === "agent") {
+    const source = record(raw.source);
+    return {
+      partId,
+      type: "agent",
+      name: text(raw.name) ?? "",
+      source: source
+        ? { value: text(source.value) ?? "", start: number(source.start), end: number(source.end) }
+        : undefined
+    };
+  }
+  if (partType === "retry") {
+    const error = record(raw.error);
+    const time = record(raw.time);
+    return {
+      partId,
+      type: "retry",
+      attempt: number(raw.attempt) ?? 0,
+      error: { name: text(error?.name), message: text(error?.message) ?? text(error?.value) },
+      time: time ? { created: number(time.created) } : undefined
+    };
+  }
+  if (partType === "compaction") {
+    return {
+      partId,
+      type: "compaction",
+      auto: typeof raw.auto === "boolean" ? raw.auto : false,
+      overflow: typeof raw.overflow === "boolean" ? raw.overflow : undefined,
+      tailStartId: text(raw.tailStartId) ?? text(raw.tail_start_id)
+    };
+  }
   return { partId, type: "text", text: text(raw.text) ?? text(raw.content) ?? "", status: text(raw.status) };
 }
 

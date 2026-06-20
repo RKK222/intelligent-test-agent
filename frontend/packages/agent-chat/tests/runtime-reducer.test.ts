@@ -189,6 +189,30 @@ describe("agent-chat runtime reducer", () => {
     expect(failed.status).toBe("FAILED");
     expect(cancelled.status).toBe("CANCELLED");
   });
+
+  it("normalizes the eight extended part types via message.part.updated", () => {
+    const cases = [
+      { type: "subtask", part: { id: "p_sub", type: "subtask", prompt: "do x", description: "子任务", agent: "coder", model: "gpt", command: "build" }, expect: { type: "subtask", prompt: "do x", agent: "coder", model: "gpt", command: "build" } },
+      { type: "step-start", part: { id: "p_ss", type: "step-start", snapshot: "s" }, expect: { type: "step-start", snapshot: "s" } },
+      { type: "step-finish", part: { id: "p_sf", type: "step-finish", reason: "done", cost: 0.0012, tokens: { total: 100, input: 60, output: 40 } }, expect: { type: "step-finish", reason: "done", cost: 0.0012, tokens: { total: 100, input: 60, output: 40 } } },
+      { type: "snapshot", part: { id: "p_snap", type: "snapshot", snapshot: "full" }, expect: { type: "snapshot", snapshot: "full" } },
+      { type: "patch", part: { id: "p_patch", type: "patch", hash: "abcdef1234", files: ["a.ts", "b.ts"] }, expect: { type: "patch", hash: "abcdef1234", files: ["a.ts", "b.ts"] } },
+      { type: "agent", part: { id: "p_agent", type: "agent", name: "build", source: { value: "user", start: 0, end: 1 } }, expect: { type: "agent", name: "build", source: { value: "user", start: 0, end: 1 } } },
+      { type: "retry", part: { id: "p_retry", type: "retry", attempt: 2, error: { name: "rate_limit", message: "slow down" }, time: { created: 123 } }, expect: { type: "retry", attempt: 2, error: { name: "rate_limit", message: "slow down" }, time: { created: 123 } } },
+      { type: "compaction", part: { id: "p_comp", type: "compaction", auto: true, overflow: false, tail_start_id: "t1" }, expect: { type: "compaction", auto: true, overflow: false, tailStartId: "t1" } }
+    ] as const;
+
+    for (const item of cases) {
+      const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+        type: "event",
+        event: event("message.part.updated", { messageID: "msg_1", part: { ...item.part, messageID: "msg_1" } })
+      });
+      const message = state.messages[state.messages.length - 1];
+      expect(message).toMatchObject({ role: "assistant", messageId: "msg_1" });
+      const part = (message as { parts?: { type: string }[] }).parts?.[0];
+      expect(part).toMatchObject({ partId: item.part.id, ...item.expect });
+    }
+  });
 });
 
 function event(type: string, payload: Record<string, unknown>): RunEvent {

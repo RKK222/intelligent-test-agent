@@ -223,11 +223,89 @@ export type FilePart = {
   source?: { start?: number; end?: number; text?: string };
 };
 
+// 子任务：主 Agent 派发给子 Agent 的一次独立执行
+export type SubtaskPart = {
+  partId: string;
+  type: "subtask";
+  prompt: string;
+  description: string;
+  agent: string;
+  model?: string;
+  command?: string;
+  status?: MessagePartStatus;
+};
+
+// 步骤开始：标记一次模型回合的起点
+export type StepStartPart = {
+  partId: string;
+  type: "step-start";
+  snapshot?: string;
+};
+
+// 步骤结束：一次模型回合的终点，携带原因与成本
+export type StepFinishPart = {
+  partId: string;
+  type: "step-finish";
+  reason: string;
+  snapshot?: string;
+  cost?: number;
+  tokens?: { total?: number; input?: number; output?: number; reasoning?: number };
+};
+
+// 消息快照：用于回放/回退的完整消息内容
+export type SnapshotPart = {
+  partId: string;
+  type: "snapshot";
+  snapshot: string;
+};
+
+// 补丁：Agent 提出的一组文件改动
+export type PatchPart = {
+  partId: string;
+  type: "patch";
+  hash: string;
+  files: string[];
+};
+
+// Agent 声明：当前活跃的 Agent 标识
+export type AgentPart = {
+  partId: string;
+  type: "agent";
+  name: string;
+  source?: { value: string; start?: number; end?: number };
+};
+
+// 重试：一次失败后的重试事件
+export type RetryPart = {
+  partId: string;
+  type: "retry";
+  attempt: number;
+  error: { name?: string; message?: string };
+  time?: { created?: number };
+};
+
+// 上下文压缩：会话上下文被压缩的事件
+export type CompactionPart = {
+  partId: string;
+  type: "compaction";
+  auto: boolean;
+  overflow?: boolean;
+  tailStartId?: string;
+};
+
 export type MessagePart =
   | TextPart
   | ReasoningPart
   | ToolPart
   | FilePart
+  | SubtaskPart
+  | StepStartPart
+  | StepFinishPart
+  | SnapshotPart
+  | PatchPart
+  | AgentPart
+  | RetryPart
+  | CompactionPart
   | { partId: string; type: "event"; eventType: string; payload: Record<string, unknown>; status?: MessagePartStatus };
 
 export type PermissionRequest = {
