@@ -16,6 +16,9 @@ public class TerminalInputRateLimiter {
     private final WindowCounter inputCounter;
     private final WindowCounter resizeCounter;
 
+    /**
+     * 创建连接级输入限速器，非法配置会归一到最小安全值。
+     */
     public TerminalInputRateLimiter(
             Clock clock,
             int maxInputBytes,
@@ -31,6 +34,9 @@ public class TerminalInputRateLimiter {
         this.resizeCounter = new WindowCounter(Math.max(1, maxResizeMessages), effectiveWindow);
     }
 
+    /**
+     * 检查客户端消息是否允许通过；只对 input 和 resize 做限速，未知消息交给上层处理。
+     */
     public Decision check(TerminalClientMessage message) {
         if (message == null || message.type() == null) {
             return Decision.allow();
@@ -53,10 +59,16 @@ public class TerminalInputRateLimiter {
     }
 
     public record Decision(boolean allowed, String code, String message) {
+        /**
+         * 构造允许通过的检查结果。
+         */
         private static Decision allow() {
             return new Decision(true, null, null);
         }
 
+        /**
+         * 构造拒绝结果，code 使用平台稳定错误码语义。
+         */
         private static Decision reject(String code, String message) {
             return new Decision(false, code, message);
         }
@@ -68,11 +80,17 @@ public class TerminalInputRateLimiter {
         private Instant windowStartedAt;
         private int used;
 
+        /**
+         * 创建固定窗口计数器。
+         */
         private WindowCounter(int capacity, Duration window) {
             this.capacity = capacity;
             this.window = window;
         }
 
+        /**
+         * 尝试占用窗口额度，窗口过期后自动重置计数。
+         */
         private boolean tryAcquire(Instant now) {
             if (windowStartedAt == null || !now.isBefore(windowStartedAt.plus(window))) {
                 windowStartedAt = now;

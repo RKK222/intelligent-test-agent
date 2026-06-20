@@ -49,7 +49,8 @@
 ## 测试位置
 
 - domain 模块单元测试。
-- 状态机、路由决策、值对象约束必须覆盖成功和失败场景。
+- Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 等值对象约束必须覆盖成功和失败场景。
+- 状态机、路由决策和内部 opencode session/node 映射必须覆盖成功和冲突场景。
 - Repository 端口不直接测试数据库，实现测试放在 persistence 模块。
 
 ## 修改时必须同步更新

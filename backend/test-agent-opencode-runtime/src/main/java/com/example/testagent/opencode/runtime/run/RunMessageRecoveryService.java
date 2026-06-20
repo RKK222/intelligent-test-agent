@@ -42,6 +42,9 @@ public class RunMessageRecoveryService {
     private final ExecutionNodeRepository executionNodeRepository;
     private final OpencodeClientFacade opencodeClientFacade;
 
+    /**
+     * 创建消息恢复服务，恢复过程只依赖领域仓储和 opencode facade。
+     */
     public RunMessageRecoveryService(
             RunRepository runRepository,
             SessionRepository sessionRepository,
@@ -53,6 +56,9 @@ public class RunMessageRecoveryService {
         this.opencodeClientFacade = Objects.requireNonNull(opencodeClientFacade, "opencodeClientFacade must not be null");
     }
 
+    /**
+     * 异步恢复 Run 的 opencode projected messages，失败时返回空流而不影响 SSE 建连。
+     */
     public Flux<RunEventSsePayload> recover(RunId runId, String traceId) {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(traceId, "traceId must not be null");
@@ -66,6 +72,9 @@ public class RunMessageRecoveryService {
                 .flatMapMany(Flux::fromIterable);
     }
 
+    /**
+     * 同步执行恢复查询，缺失 Run/Session/节点或未绑定远端 session 时返回空列表。
+     */
     private List<RunEventSsePayload> recoverSync(RunId runId, String traceId) {
         Run run = runRepository.findById(runId).orElse(null);
         if (run == null) {
@@ -90,6 +99,9 @@ public class RunMessageRecoveryService {
         return result == null ? List.of() : toSnapshotEvents(runId, traceId, result.messages());
     }
 
+    /**
+     * 将 projected messages 转换为 transient SSE snapshot 事件，seq 固定为 0 表示不参与持久化续传。
+     */
     private List<RunEventSsePayload> toSnapshotEvents(
             RunId runId,
             String traceId,
@@ -125,6 +137,9 @@ public class RunMessageRecoveryService {
         return List.copyOf(events);
     }
 
+    /**
+     * 构造 transient SSE payload，eventId 使用 live 前缀避免和 durable 事件混淆。
+     */
     private RunEventSsePayload transientPayload(
             RunId runId,
             RunEventType type,
@@ -141,6 +156,9 @@ public class RunMessageRecoveryService {
                 payload);
     }
 
+    /**
+     * 规范化 message 字段，补齐 messageID/messageId 和 role 兼容字段。
+     */
     private Map<String, Object> normalizeMessage(Map<String, Object> message) {
         LinkedHashMap<String, Object> normalized = new LinkedHashMap<>(message);
         String messageId = text(normalized.get("id"));
@@ -153,6 +171,9 @@ public class RunMessageRecoveryService {
         return Map.copyOf(normalized);
     }
 
+    /**
+     * 规范化 part 字段，补齐大小写兼容 ID 字段并继承 messageId。
+     */
     private Map<String, Object> normalizePart(Map<String, Object> part, String messageId) {
         LinkedHashMap<String, Object> normalized = new LinkedHashMap<>(part);
         if (messageId != null) {
@@ -167,10 +188,16 @@ public class RunMessageRecoveryService {
         return Map.copyOf(normalized);
     }
 
+    /**
+     * 生成 transient live 事件 ID，不进入持久化事件序列。
+     */
     private String transientEventId() {
         return "evt_live_" + UUID.randomUUID().toString().replace("-", "");
     }
 
+    /**
+     * 提取非空字符串字段，空白字符串按缺失处理。
+     */
     private String text(Object value) {
         return value instanceof String string && !string.isBlank() ? string : null;
     }

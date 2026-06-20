@@ -7,10 +7,16 @@ import com.example.testagent.domain.support.DomainValidation;
  */
 public record WorkspaceId(String value) {
 
+    /**
+     * 校验工作区 ID 前缀。
+     */
     public WorkspaceId {
         value = DomainValidation.requirePrefixedId(value, "wrk_", "workspaceId");
     }
 
+    /**
+     * 返回原始 workspaceId 字符串，便于日志、事件和持久化参数使用。
+     */
     @Override
     public String toString() {
         return value;

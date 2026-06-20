@@ -18,6 +18,9 @@ public record RunEvent(
         Instant occurredAt,
         Map<String, Object> payload) {
 
+    /**
+     * 校验已持久化事件的不变量，并复制 payload 保持事件不可变。
+     */
     public RunEvent {
         Objects.requireNonNull(eventId, "eventId must not be null");
         Objects.requireNonNull(runId, "runId must not be null");

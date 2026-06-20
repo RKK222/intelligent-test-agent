@@ -50,6 +50,9 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
     private final Duration hardTimeout;
     private final TerminalAuditLogger auditLogger;
 
+    /**
+     * 装配终端 WebSocket 依赖和安全阈值，所有可配置数值都会规整到正数。
+     */
     public TerminalWebSocketHandler(
             TerminalApplicationService terminalService,
             TerminalProcessFactory processFactory,
@@ -81,6 +84,9 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         this.auditLogger = auditLogger;
     }
 
+    /**
+     * 处理终端 WebSocket 生命周期：校验来源、消费 ticket、启动 PTY、转发输入输出并释放租约。
+     */
     @Override
     public Mono<Void> handle(WebSocketSession session) {
         String traceId = traceId(session.getHandshakeInfo().getHeaders());
@@ -155,6 +161,9 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
                 });
     }
 
+    /**
+     * 处理单条前端消息，非法类型或限流失败都会关闭 PTY 以收紧安全边界。
+     */
     private Mono<Void> handleClientMessage(
             TerminalTicket ticket,
             WebSocketSession session,
@@ -194,6 +203,9 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         return Mono.empty();
     }
 
+    /**
+     * 只允许 input、resize、close 三类客户端消息进入 PTY。
+     */
     private boolean supported(TerminalClientMessage message) {
         if (message == null || message.type() == null) {
             return false;
@@ -201,6 +213,9 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         return "input".equals(message.type()) || "resize".equals(message.type()) || "close".equals(message.type());
     }
 
+    /**
+     * 幂等关闭 PTY，避免 inbound/outbound/timeout 多路同时结束时重复销毁进程。
+     */
     private Mono<Void> closeTerminal(TerminalProcessSession terminal, AtomicBoolean terminalClosed) {
         if (!terminalClosed.compareAndSet(false, true)) {
             return Mono.empty();
@@ -208,6 +223,9 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         return terminal.close();
     }
 
+    /**
+     * 合并空闲超时与硬超时，先触发者会向前端发送错误并关闭连接。
+     */
     private Mono<Void> timeout(
             TerminalTicket ticket,
             WebSocketSession session,
@@ -233,6 +251,9 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
                 });
     }
 
+    /**
+     * 将无效配置值替换为默认值，避免配置错误导致超时策略失效。
+     */
     private Duration positive(Duration value, Duration fallback) {
         if (value == null || value.isZero() || value.isNegative()) {
             return fallback;
@@ -240,21 +261,33 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         return value;
     }
 
+    /**
+     * 计算输入消息 UTF-8 字节数，用于限流和审计。
+     */
     private int inputBytes(TerminalClientMessage message) {
         return message == null || message.data() == null ? 0 : message.data().getBytes(StandardCharsets.UTF_8).length;
     }
 
+    /**
+     * 只审计 PTY exit envelope，普通输出内容不进入业务日志。
+     */
     private void auditTerminalOutput(TerminalTicket ticket, TerminalServerMessage message) {
         if ("exit".equals(message.type()) && message.exitCode() != null) {
             auditLogger.exit(ticket, message.exitCode());
         }
     }
 
+    /**
+     * 在 upgrade 拒绝或启动失败时先发送统一错误 envelope，再关闭 WebSocket。
+     */
     private Mono<Void> sendErrorAndClose(WebSocketSession session, String code, String message) {
         return session.send(Mono.just(session.textMessage(codec.encode(TerminalServerMessage.error(code, message)))))
                 .then(session.close());
     }
 
+    /**
+     * 从 WebSocket 路径提取 sessionId，避免信任 ticket 之外的任意查询参数。
+     */
     private SessionId sessionId(String path) {
         List<String> segments = List.of(path.split("/"));
         int index = segments.indexOf("sessions");
@@ -264,6 +297,9 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         return new SessionId(segments.get(index + 1));
     }
 
+    /**
+     * 读取原始 query 参数值，ticket 本身由 TerminalApplicationService 做一次性消费校验。
+     */
     private String query(URI uri, String key) {
         String query = uri.getRawQuery();
         if (query == null || query.isBlank()) {
@@ -278,10 +314,16 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
         return "";
     }
 
+    /**
+     * 从 WebSocket handshake header 解析 traceId，缺失时生成新的链路 ID。
+     */
     private String traceId(HttpHeaders headers) {
         return TraceIdSupport.resolve(headers.getFirst(TraceConstants.TRACE_ID_HEADER));
     }
 
+    /**
+     * 内部控制异常，用于终止 reactive 链路且不再额外记录错误响应。
+     */
     private static final class TerminalConnectionClosed extends RuntimeException {
     }
 }

@@ -22,10 +22,16 @@ public class OpencodeRuntimeController {
 
     private final OpencodeRuntimeApplicationService runtimeService;
 
+    /**
+     * 注入运行态应用服务，所有 opencode 兼容路径均在应用层完成转发。
+     */
     public OpencodeRuntimeController(OpencodeRuntimeApplicationService runtimeService) {
         this.runtimeService = runtimeService;
     }
 
+    /**
+     * 查询可用 agent，兼容项目自有 API、内部平台 API 和 opencode 原始路径。
+     */
     @GetMapping({
             "/api/agents",
             "/api/internal/platform/opencode-runtime/agents",
@@ -35,6 +41,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.listAgents(workspaceId, traceId));
     }
 
+    /**
+     * 查询模型列表，workspaceId 可选以支持默认运行节点。
+     */
     @GetMapping({
             "/api/models",
             "/api/internal/platform/opencode-runtime/models",
@@ -44,6 +53,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.listModels(workspaceId, traceId));
     }
 
+    /**
+     * 查询 provider 列表，返回体保持 opencode 原始结构。
+     */
     @GetMapping({
             "/api/providers",
             "/api/internal/platform/opencode-runtime/providers",
@@ -53,6 +65,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.listProviders(workspaceId, traceId));
     }
 
+    /**
+     * 查询命令列表，用于 Web IDE 命令面板。
+     */
     @GetMapping({
             "/api/commands",
             "/api/internal/platform/opencode-runtime/commands",
@@ -62,6 +77,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.listCommands(workspaceId, traceId));
     }
 
+    /**
+     * 查询引用列表，透传 opencode reference API。
+     */
     @GetMapping({
             "/api/references",
             "/api/internal/platform/opencode-runtime/references",
@@ -71,6 +89,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.listReferences(workspaceId, traceId));
     }
 
+    /**
+     * 列出文件系统目录，路径解析和 workspace 路由由应用服务负责。
+     */
     @GetMapping({
             "/api/fs/list",
             "/api/internal/platform/opencode-runtime/fs/list",
@@ -83,6 +104,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.fsList(workspaceId, path, traceId));
     }
 
+    /**
+     * 通过 opencode 文件搜索接口查找文件。
+     */
     @GetMapping({
             "/api/fs/find",
             "/api/internal/platform/opencode-runtime/fs/find",
@@ -95,6 +119,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.fsFind(workspaceId, query, traceId));
     }
 
+    /**
+     * 读取文件内容，必须经后端代理而不是前端直连 opencode。
+     */
     @GetMapping({
             "/api/fs/read",
             "/api/internal/platform/opencode-runtime/fs/read",
@@ -107,6 +134,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.fsRead(workspaceId, path, traceId));
     }
 
+    /**
+     * 查询版本控制状态，返回 opencode runtime 原始响应。
+     */
     @GetMapping({
             "/api/vcs/status",
             "/api/internal/platform/opencode-runtime/vcs/status",
@@ -116,6 +146,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.vcsStatus(workspaceId, traceId));
     }
 
+    /**
+     * 查询版本控制 diff，mode/context 只做透传不在 Controller 中解释。
+     */
     @GetMapping({
             "/api/vcs/diff",
             "/api/internal/platform/opencode-runtime/vcs/diff",
@@ -129,6 +162,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.vcsDiff(workspaceId, mode, context, traceId));
     }
 
+    /**
+     * 查询 LSP 状态，供前端判断语言服务可用性。
+     */
     @GetMapping({
             "/api/lsp/status",
             "/api/internal/platform/opencode-runtime/lsp/status",
@@ -138,6 +174,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.lspStatus(workspaceId, traceId));
     }
 
+    /**
+     * 查询 MCP 服务状态。
+     */
     @GetMapping({
             "/api/mcp/status",
             "/api/internal/platform/opencode-runtime/mcp/status",
@@ -147,6 +186,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.mcpStatus(workspaceId, traceId));
     }
 
+    /**
+     * 查询 MCP 资源列表，兼容 opencode experimental resource 路径。
+     */
     @GetMapping({
             "/api/mcp/resources",
             "/api/internal/platform/opencode-runtime/mcp/resources",
@@ -156,6 +198,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.mcpResources(workspaceId, traceId));
     }
 
+    /**
+     * 查询 MCP 工具列表，provider/model 参数用于 opencode runtime 侧过滤。
+     */
     @GetMapping({
             "/api/mcp/tools",
             "/api/internal/platform/opencode-runtime/mcp/tools",
@@ -170,6 +215,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.mcpTools(workspaceId, provider, model, traceId));
     }
 
+    /**
+     * 查询会话子会话列表，支撑 Web IDE 的会话树。
+     */
     @GetMapping({
             "/api/sessions/{sessionId}/children",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/children",
@@ -179,6 +227,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.sessionChildren(sessionId, traceId));
     }
 
+    /**
+     * 查询会话 todo 状态，保持与 opencode session todo API 一致。
+     */
     @GetMapping({
             "/api/sessions/{sessionId}/todo",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/todo",
@@ -188,6 +239,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.sessionTodo(sessionId, traceId));
     }
 
+    /**
+     * 查询会话 diff，messageId 可选用于定位特定消息产生的变更。
+     */
     @GetMapping({
             "/api/sessions/{sessionId}/diff",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/diff",
@@ -200,6 +254,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.sessionDiff(sessionId, messageId, traceId));
     }
 
+    /**
+     * 中止 opencode 会话当前执行。
+     */
     @PostMapping({
             "/api/sessions/{sessionId}/abort",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/abort",
@@ -209,6 +266,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.abortSession(sessionId, traceId));
     }
 
+    /**
+     * fork 会话，body 原样交给运行态应用服务适配 opencode。
+     */
     @PostMapping({
             "/api/sessions/{sessionId}/fork",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/fork",
@@ -221,6 +281,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.forkSession(sessionId, body, traceId));
     }
 
+    /**
+     * 压缩会话上下文，对外仍使用统一 ApiResponse。
+     */
     @PostMapping({
             "/api/sessions/{sessionId}/compact",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/compact",
@@ -233,6 +296,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.compactSession(sessionId, body, traceId));
     }
 
+    /**
+     * 回滚会话变更，body 中的 part/message 信息由应用层转换。
+     */
     @PostMapping({
             "/api/sessions/{sessionId}/revert",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/revert",
@@ -245,6 +311,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.revertSession(sessionId, body, traceId));
     }
 
+    /**
+     * 撤销回滚操作，维持与 revert 对称的兼容路径。
+     */
     @PostMapping({
             "/api/sessions/{sessionId}/unrevert",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/unrevert",
@@ -257,6 +326,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.unrevertSession(sessionId, body, traceId));
     }
 
+    /**
+     * 向会话发送命令消息，具体请求体由 runtime service 规范化。
+     */
     @PostMapping({
             "/api/sessions/{sessionId}/command",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/command",
@@ -269,6 +341,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.commandSession(sessionId, body, traceId));
     }
 
+    /**
+     * 向会话发送 shell 命令，仍通过后端代理执行安全边界控制。
+     */
     @PostMapping({
             "/api/sessions/{sessionId}/shell",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/shell",
@@ -281,6 +356,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.shellSession(sessionId, body, traceId));
     }
 
+    /**
+     * 列出会话待处理权限请求。
+     */
     @GetMapping({
             "/api/sessions/{sessionId}/permissions",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/permissions"
@@ -289,6 +367,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.listPermissions(sessionId, traceId));
     }
 
+    /**
+     * 回复权限请求，decision 等字段由应用层生成 opencode 兼容请求体。
+     */
     @PostMapping({
             "/api/sessions/{sessionId}/permissions/{requestId}/reply",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/permissions/{requestId}/reply"
@@ -301,6 +382,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.replyPermission(sessionId, requestId, body, traceId));
     }
 
+    /**
+     * 列出会话待处理问题请求。
+     */
     @GetMapping({
             "/api/sessions/{sessionId}/questions",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions"
@@ -309,6 +393,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.listQuestions(sessionId, traceId));
     }
 
+    /**
+     * 回复问题请求，保留统一 traceId 以便关联运行态日志。
+     */
     @PostMapping({
             "/api/sessions/{sessionId}/questions/{requestId}/reply",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reply"
@@ -321,6 +408,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.replyQuestion(sessionId, requestId, body, traceId));
     }
 
+    /**
+     * 拒绝问题请求。
+     */
     @PostMapping({
             "/api/sessions/{sessionId}/questions/{requestId}/reject",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reject"
@@ -332,6 +422,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.rejectQuestion(sessionId, requestId, traceId));
     }
 
+    /**
+     * 兼容 opencode 原始 permission 查询路径，sessionId 从 query 读取。
+     */
     @GetMapping("/api/internal/agent/opencode/permission")
     public Mono<ApiResponse<Object>> listPermissionsByOpencodePath(
             @RequestParam String sessionId,
@@ -339,6 +432,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.listPermissions(sessionId, traceId));
     }
 
+    /**
+     * 兼容 opencode 原始 permission reply 路径。
+     */
     @PostMapping("/api/internal/agent/opencode/permission/{requestId}/reply")
     public Mono<ApiResponse<Object>> replyPermissionByOpencodePath(
             @RequestParam String sessionId,
@@ -348,6 +444,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.replyPermission(sessionId, requestId, body, traceId));
     }
 
+    /**
+     * 兼容 opencode 原始 question 查询路径，sessionId 从 query 读取。
+     */
     @GetMapping("/api/internal/agent/opencode/question")
     public Mono<ApiResponse<Object>> listQuestionsByOpencodePath(
             @RequestParam String sessionId,
@@ -355,6 +454,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.listQuestions(sessionId, traceId));
     }
 
+    /**
+     * 兼容 opencode 原始 question reply 路径。
+     */
     @PostMapping("/api/internal/agent/opencode/question/{requestId}/reply")
     public Mono<ApiResponse<Object>> replyQuestionByOpencodePath(
             @RequestParam String sessionId,
@@ -364,6 +466,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.replyQuestion(sessionId, requestId, body, traceId));
     }
 
+    /**
+     * 兼容 opencode 原始 question reject 路径。
+     */
     @PostMapping("/api/internal/agent/opencode/question/{requestId}/reject")
     public Mono<ApiResponse<Object>> rejectQuestionByOpencodePath(
             @RequestParam String sessionId,
@@ -372,6 +477,9 @@ public class OpencodeRuntimeController {
         return response(exchange, traceId -> runtimeService.rejectQuestion(sessionId, requestId, traceId));
     }
 
+    /**
+     * 统一封装运行态代理响应，并把可能阻塞的远程调用放到 boundedElastic。
+     */
     private Mono<ApiResponse<Object>> response(ServerWebExchange exchange, Function<String, Object> action) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         return Mono.fromCallable(() -> ApiResponse.ok(action.apply(traceId), traceId))

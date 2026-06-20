@@ -12,10 +12,16 @@ public class TerminalMessageCodec {
 
     private final ObjectMapper objectMapper;
 
+    /**
+     * 创建 JSON envelope 编解码器。
+     */
     public TerminalMessageCodec(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 解码客户端 JSON；非法 JSON 转成 error 类型消息，由上层统一拒绝。
+     */
     public TerminalClientMessage decode(String raw) {
         try {
             JsonNode node = objectMapper.readTree(raw);
@@ -30,6 +36,9 @@ public class TerminalMessageCodec {
         }
     }
 
+    /**
+     * 编码服务端消息；编码失败时返回稳定 error envelope。
+     */
     public String encode(TerminalServerMessage message) {
         try {
             var node = objectMapper.createObjectNode();
@@ -56,11 +65,17 @@ public class TerminalMessageCodec {
         }
     }
 
+    /**
+     * 读取文本字段，非文本值按缺失处理。
+     */
     private String text(JsonNode node, String field) {
         JsonNode value = node.get(field);
         return value != null && value.isTextual() ? value.asText() : null;
     }
 
+    /**
+     * 读取整数数字段，非整数值按缺失处理。
+     */
     private Integer number(JsonNode node, String field) {
         JsonNode value = node.get(field);
         return value != null && value.isInt() ? value.asInt() : null;

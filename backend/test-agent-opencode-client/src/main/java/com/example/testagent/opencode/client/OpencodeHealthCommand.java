@@ -9,6 +9,9 @@ import java.util.Objects;
  */
 public record OpencodeHealthCommand(ExecutionNode node, String traceId) {
 
+    /**
+     * 校验健康检查必须携带执行节点和 traceId。
+     */
     public OpencodeHealthCommand {
         Objects.requireNonNull(node, "node must not be null");
         traceId = DomainValidation.requireText(traceId, "traceId");

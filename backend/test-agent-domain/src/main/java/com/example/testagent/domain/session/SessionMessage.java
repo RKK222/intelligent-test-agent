@@ -15,6 +15,9 @@ public record SessionMessage(
         Instant createdAt,
         String traceId) {
 
+    /**
+     * 校验平台会话消息必填字段，确保空消息不会进入持久化层。
+     */
     public SessionMessage {
         Objects.requireNonNull(messageId, "messageId must not be null");
         Objects.requireNonNull(sessionId, "sessionId must not be null");

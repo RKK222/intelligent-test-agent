@@ -15,6 +15,9 @@ public record ApiErrorResponse(
         String traceId,
         Map<String, Object> details) {
 
+    /**
+     * 校验错误响应的不变量，并复制 details，避免异常 details 在响应创建后被修改。
+     */
     public ApiErrorResponse {
         if (success) {
             throw new IllegalArgumentException("error response must keep success=false");
@@ -34,14 +37,23 @@ public record ApiErrorResponse(
         details = details == null ? Map.of() : Map.copyOf(details);
     }
 
+    /**
+     * 使用错误码默认说明构造错误响应，不附加 details。
+     */
     public static ApiErrorResponse of(ErrorCode errorCode, String traceId) {
         return of(errorCode, errorCode.defaultMessage(), traceId, Map.of());
     }
 
+    /**
+     * 使用错误码默认说明和结构化 details 构造错误响应。
+     */
     public static ApiErrorResponse of(ErrorCode errorCode, String traceId, Map<String, Object> details) {
         return of(errorCode, errorCode.defaultMessage(), traceId, details);
     }
 
+    /**
+     * 使用显式消息构造错误响应，调用方必须保证消息可安全暴露给前端。
+     */
     public static ApiErrorResponse of(
             ErrorCode errorCode,
             String message,
@@ -51,6 +63,9 @@ public record ApiErrorResponse(
         return new ApiErrorResponse(false, errorCode.name(), message, traceId, details);
     }
 
+    /**
+     * 从平台异常转换为统一错误响应，保留稳定错误码、消息和结构化 details。
+     */
     public static ApiErrorResponse from(PlatformException exception, String traceId) {
         Objects.requireNonNull(exception, "exception must not be null");
         return of(exception.errorCode(), exception.getMessage(), traceId, exception.details());

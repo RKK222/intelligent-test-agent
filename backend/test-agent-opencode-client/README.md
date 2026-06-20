@@ -29,6 +29,13 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 - `OpencodeRuntimeCommand` / `OpencodeRuntimeResult`：Phase 11 运行态通用 facade 命令，用于受控访问 opencode Web App 需要的 agent/model/provider/command/reference、session、permission、question、fs/vcs/lsp/mcp status/resources/tools 等 HTTP API；返回 Jackson `JsonNode`，不泄露 generated DTO。
 - `OpencodeSessionMessagesCommand` / `OpencodeSessionMessagesResult`：封装 generated `MessagesApi.v2SessionMessages`，读取 opencode projected messages 供断线/刷新后恢复消息内容，不向业务模块暴露 generated DTO。
 
+## 测试覆盖
+
+- `DefaultOpencodeClientFacadeTest` 覆盖 traceId 透传、health/create/start/cancel/event/diff/reject/messages facade 编排，以及超时、远端 503 和有限重试映射。
+- `OpencodeRunEventMapperTest` 覆盖旧版 `session.next.*` 事件、opencode 1.17.8 `session.status`/`session.idle` 终态、message/permission/question/todo/vcs/lsp/mcp 等运行态事件和未知事件透传。
+- `GeneratedOpencodeSdkGatewayTest` 使用本地 HTTP server 覆盖 create/start/cancel/event/messages/diff/revert/runtime 的真实请求路径、query、请求体和 `X-Trace-Id` header，确保 generated SDK DTO 不外泄。
+- `OpencodeRuntimeFacadeTest` 覆盖 runtime facade 的 GET/POST 调用透传和 JSON projection 返回。
+
 ## 允许依赖
 
 - `test-agent-common`。

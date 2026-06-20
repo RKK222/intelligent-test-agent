@@ -33,6 +33,9 @@ public class OpencodeRuntimeApplicationService {
     private final OpencodeClientFacade opencodeClientFacade;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 创建 opencode runtime 编排服务，Controller 只通过本服务访问 opencode runtime facade。
+     */
     public OpencodeRuntimeApplicationService(
             WorkspaceRepository workspaceRepository,
             SessionRepository sessionRepository,
@@ -46,42 +49,72 @@ public class OpencodeRuntimeApplicationService {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
     }
 
+    /**
+     * 列出当前 workspace 可用 agent。
+     */
     public Object listAgents(String workspaceId, String traceId) {
         return get(workspaceLocation(workspaceId), "/api/agent", Map.of(), traceId);
     }
 
+    /**
+     * 列出当前 workspace 可用模型。
+     */
     public Object listModels(String workspaceId, String traceId) {
         return get(workspaceLocation(workspaceId), "/api/model", Map.of(), traceId);
     }
 
+    /**
+     * 列出当前 workspace 可用 provider。
+     */
     public Object listProviders(String workspaceId, String traceId) {
         return get(workspaceLocation(workspaceId), "/api/provider", Map.of(), traceId);
     }
 
+    /**
+     * 列出 opencode command catalog。
+     */
     public Object listCommands(String workspaceId, String traceId) {
         return get(workspaceLocation(workspaceId), "/api/command", Map.of(), traceId);
     }
 
+    /**
+     * 列出 opencode reference catalog。
+     */
     public Object listReferences(String workspaceId, String traceId) {
         return get(workspaceLocation(workspaceId), "/api/reference", Map.of(), traceId);
     }
 
+    /**
+     * 读取 opencode 文件列表，path 缺省时使用当前目录。
+     */
     public Object fsList(String workspaceId, String path, String traceId) {
         return get(workspaceLocation(workspaceId), "/file", query("path", path == null || path.isBlank() ? "." : path), traceId);
     }
 
+    /**
+     * 调用 opencode 文件搜索 API。
+     */
     public Object fsFind(String workspaceId, String query, String traceId) {
         return get(workspaceLocation(workspaceId), "/find/file", query("query", query), traceId);
     }
 
+    /**
+     * 读取 opencode workspace 文件内容。
+     */
     public Object fsRead(String workspaceId, String path, String traceId) {
         return get(workspaceLocation(workspaceId), "/file/content", query("path", path), traceId);
     }
 
+    /**
+     * 读取远端 VCS 状态。
+     */
     public Object vcsStatus(String workspaceId, String traceId) {
         return get(workspaceLocation(workspaceId), "/vcs/status", Map.of(), traceId);
     }
 
+    /**
+     * 读取远端 VCS Diff，mode 缺省为 working，context 仅在调用方传入时透传。
+     */
     public Object vcsDiff(String workspaceId, String mode, Integer context, String traceId) {
         Map<String, String> query = new LinkedHashMap<>();
         query.put("mode", mode == null || mode.isBlank() ? "working" : mode);
@@ -91,18 +124,30 @@ public class OpencodeRuntimeApplicationService {
         return get(workspaceLocation(workspaceId), "/vcs/diff", query, traceId);
     }
 
+    /**
+     * 查询远端 LSP 状态。
+     */
     public Object lspStatus(String workspaceId, String traceId) {
         return get(workspaceLocation(workspaceId), "/lsp", Map.of(), traceId);
     }
 
+    /**
+     * 查询远端 MCP 状态。
+     */
     public Object mcpStatus(String workspaceId, String traceId) {
         return get(workspaceLocation(workspaceId), "/mcp", Map.of(), traceId);
     }
 
+    /**
+     * 查询远端 MCP resources。
+     */
     public Object mcpResources(String workspaceId, String traceId) {
         return get(workspaceLocation(workspaceId), "/experimental/resource", Map.of(), traceId);
     }
 
+    /**
+     * 查询远端 MCP tools；指定 provider/model 时读取工具详情，否则读取工具 ID 列表。
+     */
     public Object mcpTools(String workspaceId, String provider, String model, String traceId) {
         Map<String, String> query = new LinkedHashMap<>();
         if (provider != null && !provider.isBlank() && model != null && !model.isBlank()) {
@@ -113,61 +158,97 @@ public class OpencodeRuntimeApplicationService {
         return get(workspaceLocation(workspaceId), "/experimental/tool/ids", Map.of(), traceId);
     }
 
+    /**
+     * 查询远端 session children，平台 sessionId 会先映射为 opencode session id。
+     */
     public Object sessionChildren(String sessionId, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return get(location, "/session/" + encodePath(location.opencodeSessionId()) + "/children", Map.of(), traceId);
     }
 
+    /**
+     * 查询远端 session todo。
+     */
     public Object sessionTodo(String sessionId, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return get(location, "/session/" + encodePath(location.opencodeSessionId()) + "/todo", Map.of(), traceId);
     }
 
+    /**
+     * 查询远端 session Diff，messageId 为空时不发送 messageID query。
+     */
     public Object sessionDiff(String sessionId, String messageId, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return get(location, "/session/" + encodePath(location.opencodeSessionId()) + "/diff", query("messageID", messageId), traceId);
     }
 
+    /**
+     * 请求远端中止 session。
+     */
     public Object abortSession(String sessionId, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/abort", Map.of(), traceId);
     }
 
+    /**
+     * 请求远端 fork session，body 透传已由 API 层完成输入约束。
+     */
     public Object forkSession(String sessionId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/fork", safeBody(body), traceId);
     }
 
+    /**
+     * 请求远端 compact/summarize session。
+     */
     public Object compactSession(String sessionId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/summarize", safeBody(body), traceId);
     }
 
+    /**
+     * 请求远端 revert session。
+     */
     public Object revertSession(String sessionId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/revert", safeBody(body), traceId);
     }
 
+    /**
+     * 请求远端 unrevert session。
+     */
     public Object unrevertSession(String sessionId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/unrevert", safeBody(body), traceId);
     }
 
+    /**
+     * 执行远端 session command。
+     */
     public Object commandSession(String sessionId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/command", safeBody(body), traceId);
     }
 
+    /**
+     * 执行远端 session shell 命令；shell 安全边界由 API 层和 opencode runtime 共同约束。
+     */
     public Object shellSession(String sessionId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/shell", safeBody(body), traceId);
     }
 
+    /**
+     * 查询远端 permission 请求列表。
+     */
     public Object listPermissions(String sessionId, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return get(location, "/permission", Map.of(), traceId);
     }
 
+    /**
+     * 回复远端 permission 请求，并兼容前端 decision 字段到 opencode reply 字段。
+     */
     public Object replyPermission(String sessionId, String requestId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return post(
@@ -177,11 +258,17 @@ public class OpencodeRuntimeApplicationService {
                 traceId);
     }
 
+    /**
+     * 查询远端 question 请求列表。
+     */
     public Object listQuestions(String sessionId, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return get(location, "/question", Map.of(), traceId);
     }
 
+    /**
+     * 回复远端 question 请求。
+     */
     public Object replyQuestion(String sessionId, String requestId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return post(
@@ -191,6 +278,9 @@ public class OpencodeRuntimeApplicationService {
                 traceId);
     }
 
+    /**
+     * 拒绝远端 question 请求。
+     */
     public Object rejectQuestion(String sessionId, String requestId, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
         return post(
@@ -200,14 +290,23 @@ public class OpencodeRuntimeApplicationService {
                 traceId);
     }
 
+    /**
+     * 发送 GET runtime 请求。
+     */
     private Object get(RuntimeTarget location, String path, Map<String, String> query, String traceId) {
         return call(location, "GET", path, query, null, traceId);
     }
 
+    /**
+     * 发送 POST runtime 请求。
+     */
     private Object post(RuntimeTarget location, String path, Map<String, Object> body, String traceId) {
         return call(location, "POST", path, Map.of(), body, traceId);
     }
 
+    /**
+     * 统一调用 opencode facade runtime 方法，并把 JsonNode projection 转回普通 Java 对象。
+     */
     private Object call(RuntimeTarget location, String method, String path, Map<String, String> query, Object body, String traceId) {
         OpencodeRuntimeResult result = opencodeClientFacade.runtime(new OpencodeRuntimeCommand(
                         location.node(),
@@ -222,6 +321,9 @@ public class OpencodeRuntimeApplicationService {
         return objectMapper.convertValue(result.body(), Object.class);
     }
 
+    /**
+     * 构造 workspace 级 runtime target；未指定 workspace 时只选择可用节点，不传 directory。
+     */
     private WorkspaceLocation workspaceLocation(String workspaceId) {
         if (workspaceId == null || workspaceId.isBlank()) {
             return new WorkspaceLocation(routableNode(), null);
@@ -234,6 +336,9 @@ public class OpencodeRuntimeApplicationService {
         return new WorkspaceLocation(routableNode(), workspace.rootPath());
     }
 
+    /**
+     * 构造 session 级 runtime target，要求平台 Session 已绑定远端 opencode session 和节点。
+     */
     private SessionLocation sessionLocation(String sessionId) {
         Session session = sessionRepository.findById(new SessionId(sessionId))
                 .orElseThrow(() -> new PlatformException(
@@ -259,6 +364,9 @@ public class OpencodeRuntimeApplicationService {
         return new SessionLocation(node, workspace.rootPath(), session.opencodeSessionId());
     }
 
+    /**
+     * 选择一个当前可路由 opencode 节点，供 workspace catalog/file/vcs 类请求使用。
+     */
     private ExecutionNode routableNode() {
         return executionNodeRepository.findRoutableNodes(1).stream()
                 .findFirst()
@@ -267,6 +375,9 @@ public class OpencodeRuntimeApplicationService {
                         "没有可用 opencode 执行节点"));
     }
 
+    /**
+     * 构造单值 query，空白值按缺失处理。
+     */
     private Map<String, String> query(String name, String value) {
         if (value == null || value.isBlank()) {
             return Map.of();
@@ -274,10 +385,16 @@ public class OpencodeRuntimeApplicationService {
         return Map.of(name, value);
     }
 
+    /**
+     * 规范化可选请求体，null body 以空对象发送。
+     */
     private Map<String, Object> safeBody(Map<String, Object> body) {
         return body == null ? Map.of() : body;
     }
 
+    /**
+     * 兼容前端 permission decision 字段，转换为 opencode 期望的 reply 字段。
+     */
     private Map<String, Object> permissionReplyBody(Map<String, Object> body) {
         Map<String, Object> source = safeBody(body);
         Object reply = source.getOrDefault("reply", source.get("decision"));
@@ -292,6 +409,9 @@ public class OpencodeRuntimeApplicationService {
         return normalized;
     }
 
+    /**
+     * 对路径片段逐段 URL 编码，保留分段斜杠并避免空段进入远端路径。
+     */
     private String encodePath(String path) {
         if (path == null || path.isBlank()) {
             return "";
@@ -311,8 +431,14 @@ public class OpencodeRuntimeApplicationService {
     }
 
     private interface RuntimeTarget {
+        /**
+         * 返回本次 runtime 调用选中的 opencode 执行节点。
+         */
         ExecutionNode node();
 
+        /**
+         * 返回本次 runtime 调用要传给 opencode 的 directory，目录无关请求可为空。
+         */
         String directory();
     }
 

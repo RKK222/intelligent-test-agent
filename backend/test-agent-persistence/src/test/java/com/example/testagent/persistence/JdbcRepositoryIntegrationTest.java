@@ -259,6 +259,53 @@ class JdbcRepositoryIntegrationTest {
                 .containsExactly(new SessionId("ses_2234567890abcdef"), new SessionId("ses_1234567890abcdef"));
     }
 
+    @Test
+    void executionNodesFindRoutableNodesByCapacityStatusAndStableOrdering() {
+        executionNodes.save(executionNode(
+                "node_1234567890abcdef",
+                ExecutionNodeStatus.READY,
+                1,
+                4,
+                50,
+                0));
+        executionNodes.save(executionNode(
+                "node_2234567890abcdef",
+                ExecutionNodeStatus.READY,
+                0,
+                2,
+                10,
+                1));
+        executionNodes.save(executionNode(
+                "node_3234567890abcdef",
+                ExecutionNodeStatus.READY,
+                0,
+                2,
+                100,
+                2));
+        executionNodes.save(executionNode(
+                "node_4234567890abcdef",
+                ExecutionNodeStatus.BUSY,
+                0,
+                4,
+                100,
+                3));
+        executionNodes.save(executionNode(
+                "node_5234567890abcdef",
+                ExecutionNodeStatus.READY,
+                2,
+                2,
+                100,
+                4));
+
+        List<ExecutionNode> routableNodes = executionNodes.findRoutableNodes(10);
+
+        assertThat(routableNodes).extracting(ExecutionNode::executionNodeId)
+                .containsExactly(
+                        new ExecutionNodeId("node_3234567890abcdef"),
+                        new ExecutionNodeId("node_2234567890abcdef"),
+                        new ExecutionNodeId("node_1234567890abcdef"));
+    }
+
     private static Workspace workspace() {
         return new Workspace(
                 new WorkspaceId("wrk_1234567890abcdef"),
@@ -310,17 +357,27 @@ class JdbcRepositoryIntegrationTest {
     }
 
     private static ExecutionNode executionNode() {
+        return executionNode("node_1234567890abcdef", ExecutionNodeStatus.READY, 0, 4, 100, 0);
+    }
+
+    private static ExecutionNode executionNode(
+            String nodeId,
+            ExecutionNodeStatus status,
+            int runningRuns,
+            int maxRuns,
+            int weight,
+            long secondOffset) {
         return new ExecutionNode(
-                new ExecutionNodeId("node_1234567890abcdef"),
+                new ExecutionNodeId(nodeId),
                 "http://127.0.0.1:4096",
-                ExecutionNodeStatus.READY,
-                0,
-                4,
-                100,
+                status,
+                runningRuns,
+                maxRuns,
+                weight,
                 NOW,
                 Set.of("chat", "diff"),
                 NOW,
-                NOW,
+                NOW.plusSeconds(secondOffset),
                 "trace_1234567890abcdef");
     }
 

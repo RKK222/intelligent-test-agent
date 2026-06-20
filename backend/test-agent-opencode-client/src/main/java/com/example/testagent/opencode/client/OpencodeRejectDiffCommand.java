@@ -16,6 +16,9 @@ public record OpencodeRejectDiffCommand(
         String partId,
         String traceId) {
 
+    /**
+     * 校验 Diff 拒绝命令，partId 为空时表示拒绝整个 message 的 Diff。
+     */
     public OpencodeRejectDiffCommand {
         Objects.requireNonNull(node, "node must not be null");
         opencodeSessionId = DomainValidation.requireText(opencodeSessionId, "opencodeSessionId");
@@ -26,6 +29,9 @@ public record OpencodeRejectDiffCommand(
         traceId = DomainValidation.requireText(traceId, "traceId");
     }
 
+    /**
+     * 规范化可选文本，空白字符串按缺失处理。
+     */
     private static String optionalText(String value) {
         return value == null || value.isBlank() ? null : value;
     }

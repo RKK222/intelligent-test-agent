@@ -13,6 +13,16 @@
 - Phase 11 opencode runtime 能力映射。
 - PTY terminal ticket、限流、active session registry、进程适配和审计。
 
+## 测试覆盖
+
+- `RunApplicationServiceTest` 覆盖 Run 创建、远端 session 懒创建/复用、sticky node、prompt parts、终态事件、瞬态消息事件和取消编排。
+- `RunDiffApplicationServiceTest` 覆盖 Diff 事件优先读取、opencode Diff fallback、接受/拒绝动作和缺失 messageID 冲突。
+- `RunEventPersistencePolicyTest` 覆盖消息投影只走实时通道、关键状态事件持久化、tool payload 清洗和 rawPayload 移除。
+- `RunMessageRecoveryServiceTest` 覆盖 opencode projected messages 恢复为 transient SSE snapshot，以及未绑定/远端失败时降级为空。
+- `SessionApplicationServiceTest` 覆盖 Session 创建前 Workspace 校验、归档隐藏、标题/置顶更新和消息追加默认 role。
+- `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、workspace directory 透传和 permission reply body 兼容。
+- `Terminal*Test` 覆盖 ticket 签发/消费/过期、active session 互斥、输入/输出限流、WebSocket envelope 编解码和本地进程适配。
+
 ## 允许依赖
 
 - `test-agent-common`。

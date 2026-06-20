@@ -27,10 +27,16 @@ public class JdbcWorkspaceRepository extends JdbcRepositorySupport implements Wo
             instant(rs, "updated_at"),
             rs.getString("trace_id"));
 
+    /**
+     * 注入 JdbcClient，Repository 不直接管理连接生命周期。
+     */
     public JdbcWorkspaceRepository(JdbcClient jdbcClient) {
         this.jdbcClient = jdbcClient;
     }
 
+    /**
+     * 保存工作区；存在时全量更新，缺失时插入新记录。
+     */
     @Override
     public Workspace save(Workspace workspace) {
         if (findById(workspace.workspaceId()).isPresent()) {
@@ -65,6 +71,9 @@ public class JdbcWorkspaceRepository extends JdbcRepositorySupport implements Wo
         return workspace;
     }
 
+    /**
+     * 按工作区 ID 查询单条记录。
+     */
     @Override
     public Optional<Workspace> findById(WorkspaceId workspaceId) {
         return jdbcClient.sql("""
@@ -77,6 +86,9 @@ public class JdbcWorkspaceRepository extends JdbcRepositorySupport implements Wo
                 .optional();
     }
 
+    /**
+     * 按创建时间倒序分页读取工作区，并返回总数供前端分页。
+     */
     @Override
     public PageResponse<Workspace> findPage(PageRequest pageRequest) {
         var items = jdbcClient.sql("""

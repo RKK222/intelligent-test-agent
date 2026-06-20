@@ -13,11 +13,17 @@ public class TerminalOutputLimiter {
     private int emittedBytes;
     private boolean warned;
 
+    /**
+     * 创建输出预算控制器，帧预算和连接预算至少为 1 字节。
+     */
     public TerminalOutputLimiter(int maxFrameBytes, int maxConnectionBytes) {
         this.maxFrameBytes = Math.max(1, maxFrameBytes);
         this.maxConnectionBytes = Math.max(1, maxConnectionBytes);
     }
 
+    /**
+     * 生成输出 envelope；超出帧或连接预算时截断，预算耗尽后只发一次 warning。
+     */
     public List<TerminalServerMessage> output(String data, int seq) {
         if (data == null || data.isEmpty()) {
             return List.of();
@@ -34,6 +40,9 @@ public class TerminalOutputLimiter {
         return List.of(TerminalServerMessage.output(next, seq, truncated));
     }
 
+    /**
+     * 连接输出预算耗尽时返回单次 warning，避免持续刷屏。
+     */
     private List<TerminalServerMessage> warningOnce() {
         if (warned) {
             return List.of();
@@ -42,6 +51,9 @@ public class TerminalOutputLimiter {
         return List.of(TerminalServerMessage.warning("PTY_OUTPUT_TRUNCATED", "terminal output truncated"));
     }
 
+    /**
+     * 按 UTF-8 字节预算截断字符串，不切断 Unicode code point。
+     */
     private String truncateUtf8(String value, int maxBytes) {
         StringBuilder builder = new StringBuilder();
         int bytes = 0;

@@ -22,10 +22,16 @@ public class TerminalController {
 
     private final TerminalApplicationService terminalService;
 
+    /**
+     * 注入终端应用服务，HTTP 层只负责发放短期 WebSocket ticket。
+     */
     public TerminalController(TerminalApplicationService terminalService) {
         this.terminalService = terminalService;
     }
 
+    /**
+     * 创建终端连接 ticket，允许空请求体以便前端使用默认 cwd、shell 和窗口尺寸。
+     */
     @PostMapping({
             "/api/sessions/{sessionId}/terminal/tickets",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets"
@@ -41,12 +47,18 @@ public class TerminalController {
                 exchange));
     }
 
+    /**
+     * 将 ticket 创建的阻塞校验逻辑移出 WebFlux event-loop。
+     */
     private <T> Mono<ApiResponse<T>> blockingResponse(ServerWebExchange exchange, Function<String, T> action) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         return Mono.fromCallable(() -> ApiResponse.ok(action.apply(traceId), traceId))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
+    /**
+     * 内部平台路径需要返回同前缀 WebSocket URL，避免前端再做路径重写。
+     */
     private TerminalTicketResponse terminalTicketResponse(
             String sessionId,
             TerminalTicketResponse response,

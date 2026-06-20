@@ -8,7 +8,13 @@ import java.util.List;
  */
 public interface RunEventRepository {
 
+    /**
+     * 追加事件草稿，并由持久化实现分配 eventId 和同一 run 内的 seq。
+     */
     RunEvent append(RunEventDraft draft);
 
+    /**
+     * 读取指定 run 在 lastSeq 之后的事件列表，供 SSE 断线恢复使用。
+     */
     List<RunEvent> findByRunIdAfter(RunId runId, long lastSeq, int limit);
 }

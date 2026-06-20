@@ -24,10 +24,16 @@ public class JdbcRoutingDecisionRepository extends JdbcRepositorySupport impleme
             instant(rs, "decided_at"),
             rs.getString("trace_id"));
 
+    /**
+     * 注入 JdbcClient，路由决策按 runId 做一对一审计记录。
+     */
     public JdbcRoutingDecisionRepository(JdbcClient jdbcClient) {
         this.jdbcClient = jdbcClient;
     }
 
+    /**
+     * 保存路由决策；同一 runId 再次保存时更新审计记录。
+     */
     @Override
     public RoutingDecision save(RoutingDecision routingDecision) {
         if (findByRunId(routingDecision.runId()).isPresent()) {
@@ -58,6 +64,9 @@ public class JdbcRoutingDecisionRepository extends JdbcRepositorySupport impleme
         return routingDecision;
     }
 
+    /**
+     * 按运行 ID 查询路由决策。
+     */
     @Override
     public Optional<RoutingDecision> findByRunId(RunId runId) {
         return jdbcClient.sql("""

@@ -27,10 +27,16 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
             instant(rs, "updated_at"),
             rs.getString("trace_id"));
 
+    /**
+     * 注入 JdbcClient，持久化层只负责 Run 表字段映射。
+     */
     public JdbcRunRepository(JdbcClient jdbcClient) {
         this.jdbcClient = jdbcClient;
     }
 
+    /**
+     * 保存运行状态快照；状态迁移合法性由领域和应用层保证。
+     */
     @Override
     public Run save(Run run) {
         if (findById(run.runId()).isPresent()) {
@@ -65,6 +71,9 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
         return run;
     }
 
+    /**
+     * 按运行 ID 查询运行状态。
+     */
     @Override
     public Optional<Run> findById(RunId runId) {
         return jdbcClient.sql("""

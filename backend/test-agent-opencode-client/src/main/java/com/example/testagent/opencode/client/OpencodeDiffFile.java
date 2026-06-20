@@ -12,6 +12,9 @@ public record OpencodeDiffFile(
         long deletions,
         String status) {
 
+    /**
+     * 校验 Diff 文件路径和计数字段，patch 缺失时使用空字符串、状态缺失时使用 modified。
+     */
     public OpencodeDiffFile {
         path = DomainValidation.requireText(path, "path");
         patch = patch == null ? "" : patch;

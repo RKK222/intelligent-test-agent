@@ -37,6 +37,15 @@
 - `application-prod.yml`：数据库、API token、CORS、Redis 和 opencode baseUrl 均通过环境变量注入，不提供真实密钥默认值。
 - `com.h2database:h2` 仅以 test scope 存在，用于 Docker 不可用时的无持久化启动冒烟；正式 local profile 仍以 PostgreSQL/Flyway 为准。
 
+## 测试覆盖
+
+- `AppModuleBoundaryTest` 保证 app 模块不回流 workspace、session、run、runtime、terminal、web 等业务包。
+- `TestAgentRuntimePropertiesBindingTest` 覆盖默认值、local/test/prod profile 配置绑定、终端安全阈值、Redis 和 opencode 节点配置。
+- `ExecutionNodeSeederTest` 覆盖启动时从配置 seed opencode execution node。
+- `OpencodeNodesHealthIndicatorTest` 覆盖全部节点可用时 UP、节点异常时 DOWN，且健康详情只暴露安全错误类别。
+- `RedisOptionalHealthIndicatorTest` 覆盖 Redis 未启用时返回 UP/disabled。
+- `LoggingFrameworkBindingTest` 覆盖运行态使用 Log4j2 作为 SLF4J 实际绑定。
+
 ## 允许依赖
 
 - `test-agent-api`。

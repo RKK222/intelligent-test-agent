@@ -14,6 +14,9 @@ public record OpencodeCreateSessionCommand(
         String title,
         String traceId) {
 
+    /**
+     * 校验创建 session 的目录、标题和 traceId，workspace 为空白时不传给远端。
+     */
     public OpencodeCreateSessionCommand {
         Objects.requireNonNull(node, "node must not be null");
         directory = DomainValidation.requireText(directory, "directory");
@@ -22,6 +25,9 @@ public record OpencodeCreateSessionCommand(
         traceId = DomainValidation.requireText(traceId, "traceId");
     }
 
+    /**
+     * 规范化可选文本，空白字符串按缺失处理。
+     */
     private static String optionalText(String value) {
         return value == null || value.isBlank() ? null : value;
     }

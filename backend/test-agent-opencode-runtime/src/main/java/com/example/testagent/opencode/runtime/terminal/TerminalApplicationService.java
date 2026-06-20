@@ -32,6 +32,9 @@ public class TerminalApplicationService {
     private final TerminalTicketRateLimiter ticketRateLimiter;
     private final TerminalAuditLogger auditLogger;
 
+    /**
+     * 创建 PTY ticket 应用服务，所有安全校验在签发 ticket 前完成。
+     */
     public TerminalApplicationService(
             WorkspaceRepository workspaceRepository,
             SessionRepository sessionRepository,
@@ -45,6 +48,9 @@ public class TerminalApplicationService {
         this.auditLogger = Objects.requireNonNull(auditLogger, "auditLogger must not be null");
     }
 
+    /**
+     * 签发一次性 PTY ticket，校验 Session、Workspace、cwd、shell 和 ticket 创建频率。
+     */
     public TerminalTicketResponse createTicket(SessionId sessionId, TerminalTicketRequest request, String traceId) {
         Session session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Session 不存在", Map.of("sessionId", sessionId.value())));
@@ -82,10 +88,16 @@ public class TerminalApplicationService {
                 "/api/sessions/" + session.sessionId().value() + "/terminal/ws?ticket=" + ticket.ticket());
     }
 
+    /**
+     * 消费一次性 ticket，供 WebSocket upgrade 后创建受控 PTY 会话。
+     */
     public TerminalTicket consumeTicket(SessionId sessionId, String ticket, String origin, String traceId) {
         return ticketStore.consume(sessionId, ticket, origin, traceId);
     }
 
+    /**
+     * 解析 Workspace 根目录真实路径，根目录不可访问时阻止签发 ticket。
+     */
     private Path workspaceRoot(Workspace workspace) {
         try {
             return Path.of(workspace.rootPath()).toRealPath();
@@ -94,6 +106,9 @@ public class TerminalApplicationService {
         }
     }
 
+    /**
+     * 解析并校验 PTY cwd，必须是 Workspace 根目录内已存在的目录。
+     */
     private Path resolveCwd(Path root, String cwd) {
         Path candidate = root.resolve(cwd == null || cwd.isBlank() ? "." : cwd).normalize();
         if (!candidate.startsWith(root)) {
@@ -112,6 +127,9 @@ public class TerminalApplicationService {
         }
     }
 
+    /**
+     * 解析后端允许的 shell；当前禁止前端覆盖 shell 可执行文件路径。
+     */
     private String resolveShell(String requestedShell) {
         if (requestedShell != null && !requestedShell.isBlank()) {
             // 当前只允许前端使用平台默认 shell，避免把任意可执行文件路径暴露为 Web 输入。
@@ -121,6 +139,9 @@ public class TerminalApplicationService {
         return shell == null || shell.isBlank() ? "/bin/sh" : shell;
     }
 
+    /**
+     * 规范化终端尺寸，缺失或非法时使用默认值，并限制最大值。
+     */
     private int clamp(Integer value, int fallback, int max) {
         if (value == null || value <= 0) {
             return fallback;

@@ -59,6 +59,7 @@
 - persistence 模块集成测试。
 - Repository、migration、唯一约束、事务、分页和排序测试；当前使用 H2 PostgreSQL 模式执行 Flyway migration。
 - RunEvent 测试必须覆盖同一 run 的并发 append，防止 stream 事件和取消事件同时落库时重复分配 seq。
+- ExecutionNode 测试必须覆盖可路由节点过滤和排序，防止不可用或满载节点被派发。
 - Druid 连接池配置测试；当前验证 `spring.datasource.druid.*` 可绑定为 Druid DataSource，且 Web 控制台默认关闭。
 
 ## 修改时必须同步更新

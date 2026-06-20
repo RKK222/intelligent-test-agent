@@ -24,6 +24,9 @@ public class TerminalTicketRateLimiter {
     private final Duration window;
     private final Map<String, Counter> counters = new ConcurrentHashMap<>();
 
+    /**
+     * 使用系统时钟创建 ticket 限流器，配置来自 Spring properties。
+     */
     @Autowired
     public TerminalTicketRateLimiter(
             @Value("${test-agent.terminal.ticket-capacity:10}") int capacity,
@@ -31,6 +34,9 @@ public class TerminalTicketRateLimiter {
         this(Clock.systemUTC(), capacity, window);
     }
 
+    /**
+     * 创建可注入时钟的限流器，便于单元测试固定窗口时间。
+     */
     TerminalTicketRateLimiter(Clock clock, int capacity, Duration window) {
         this.clock = clock;
         this.capacity = Math.max(1, capacity);
@@ -39,6 +45,9 @@ public class TerminalTicketRateLimiter {
                 : window;
     }
 
+    /**
+     * 占用 session/workspace 维度的 ticket 创建额度，超限时抛出统一 RATE_LIMITED。
+     */
     public void acquire(SessionId sessionId, WorkspaceId workspaceId) {
         String key = sessionId.value() + "|" + workspaceId.value();
         Counter counter = counters.computeIfAbsent(key, ignored -> new Counter(clock.instant()));
@@ -54,10 +63,16 @@ public class TerminalTicketRateLimiter {
         private Instant windowStartedAt;
         private int used;
 
+        /**
+         * 创建固定窗口计数器。
+         */
         private Counter(Instant windowStartedAt) {
             this.windowStartedAt = windowStartedAt;
         }
 
+        /**
+         * 尝试占用一个额度，窗口过期后重置计数。
+         */
         private synchronized boolean tryAcquire(Instant now, int capacity, Duration window) {
             if (!now.isBefore(windowStartedAt.plus(window))) {
                 windowStartedAt = now;

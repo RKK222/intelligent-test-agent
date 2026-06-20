@@ -14,6 +14,9 @@ import org.springframework.web.reactive.socket.server.support.WebSocketHandlerAd
 @Configuration
 public class TerminalWebSocketConfig {
 
+    /**
+     * 注册 ticket 保护的 terminal WebSocket 路径，兼容旧 URL 和 internal platform URL。
+     */
     @Bean
     HandlerMapping terminalWebSocketHandlerMapping(TerminalWebSocketHandler handler) {
         SimpleUrlHandlerMapping mapping = new SimpleUrlHandlerMapping();
@@ -24,6 +27,9 @@ public class TerminalWebSocketConfig {
         return mapping;
     }
 
+    /**
+     * 提供 WebFlux WebSocket handler adapter。
+     */
     @Bean
     WebSocketHandlerAdapter webSocketHandlerAdapter() {
         return new WebSocketHandlerAdapter();

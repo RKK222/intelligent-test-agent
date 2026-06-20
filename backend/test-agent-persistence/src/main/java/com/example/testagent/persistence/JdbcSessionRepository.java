@@ -33,10 +33,16 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
             executionNodeId(rs.getString("opencode_execution_node_id")),
             rs.getBoolean("pinned"));
 
+    /**
+     * 注入 JdbcClient，所有 SQL 都在本 Repository 内显式声明。
+     */
     public JdbcSessionRepository(JdbcClient jdbcClient) {
         this.jdbcClient = jdbcClient;
     }
 
+    /**
+     * 保存会话；远端 opencode 映射和置顶状态随领域对象一起持久化。
+     */
     @Override
     public Session save(Session session) {
         if (findById(session.sessionId()).isPresent()) {
@@ -86,6 +92,9 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
         return session;
     }
 
+    /**
+     * 按会话 ID 查询，会返回归档会话，是否隐藏由应用层决定。
+     */
     @Override
     public Optional<Session> findById(SessionId sessionId) {
         return jdbcClient.sql("""
@@ -99,6 +108,9 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                 .optional();
     }
 
+    /**
+     * 全局搜索 ACTIVE 会话，按置顶、更新时间和自增 ID 稳定排序。
+     */
     @Override
     public PageResponse<Session> findPage(String query, PageRequest pageRequest) {
         String pattern = searchPattern(query);
@@ -134,6 +146,9 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
         return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);
     }
 
+    /**
+     * 查询指定工作区 ACTIVE 会话，归档会话默认不出现在列表中。
+     */
     @Override
     public PageResponse<Session> findByWorkspaceId(WorkspaceId workspaceId, PageRequest pageRequest) {
         var items = jdbcClient.sql("""
@@ -164,6 +179,9 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
         return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);
     }
 
+    /**
+     * 绑定平台会话到远端 opencode 会话和执行节点，用于后续运行复用。
+     */
     @Override
     public Optional<Session> attachOpencodeSession(
             SessionId sessionId,
@@ -188,6 +206,9 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
         return findById(sessionId);
     }
 
+    /**
+     * 将用户查询转换为大小写不敏感的 LIKE pattern，空查询表示不过滤。
+     */
     private String searchPattern(String query) {
         if (query == null || query.isBlank()) {
             return null;
@@ -195,10 +216,16 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
         return "%" + query.toLowerCase() + "%";
     }
 
+    /**
+     * 将可空字符串转换为可空执行节点 ID。
+     */
     private ExecutionNodeId executionNodeId(String value) {
         return value == null ? null : new ExecutionNodeId(value);
     }
 
+    /**
+     * 将可空执行节点 ID 转回 JDBC 参数。
+     */
     private String executionNodeIdValue(ExecutionNodeId executionNodeId) {
         return executionNodeId == null ? null : executionNodeId.value();
     }

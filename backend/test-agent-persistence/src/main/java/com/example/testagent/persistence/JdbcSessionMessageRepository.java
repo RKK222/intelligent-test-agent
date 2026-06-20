@@ -27,10 +27,16 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
             instant(rs, "created_at"),
             rs.getString("trace_id"));
 
+    /**
+     * 注入 JdbcClient，消息持久化保持和 Session 聚合分离。
+     */
     public JdbcSessionMessageRepository(JdbcClient jdbcClient) {
         this.jdbcClient = jdbcClient;
     }
 
+    /**
+     * 保存会话消息；重复 messageId 时更新内容和元数据。
+     */
     @Override
     public SessionMessage save(SessionMessage message) {
         if (findById(message.messageId()).isPresent()) {
@@ -63,6 +69,9 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
         return message;
     }
 
+    /**
+     * 按消息 ID 查询单条会话消息。
+     */
     @Override
     public Optional<SessionMessage> findById(SessionMessageId messageId) {
         return jdbcClient.sql("""
@@ -75,6 +84,9 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                 .optional();
     }
 
+    /**
+     * 按会话 ID 正序分页读取消息，保证前端按对话顺序展示。
+     */
     @Override
     public PageResponse<SessionMessage> findBySessionId(SessionId sessionId, PageRequest pageRequest) {
         var items = jdbcClient.sql("""

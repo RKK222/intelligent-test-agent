@@ -29,16 +29,25 @@ public class ApiTokenWebFilter implements WebFilter {
     private final String apiToken;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 使用配置中的 API token 创建过滤器，空 token 表示本地/测试环境放行。
+     */
     @Autowired
     public ApiTokenWebFilter(@Value("${test-agent.security.api-token:}") String apiToken) {
         this(apiToken, new ObjectMapper());
     }
 
+    /**
+     * 创建可注入 ObjectMapper 的过滤器，便于单元测试校验错误响应。
+     */
     ApiTokenWebFilter(String apiToken, ObjectMapper objectMapper) {
         this.apiToken = apiToken == null || apiToken.isBlank() ? null : apiToken;
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 对 /api/ 路径执行 Bearer token 校验，未配置 token 或非 API 路径直接放行。
+     */
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         if (!exchange.getRequest().getPath().pathWithinApplication().value().startsWith("/api/")
@@ -52,6 +61,9 @@ public class ApiTokenWebFilter implements WebFilter {
         return unauthorized(exchange);
     }
 
+    /**
+     * 写出统一 401 错误响应，并确保响应头包含 traceId。
+     */
     private Mono<Void> unauthorized(ServerWebExchange exchange) {
         String traceId = traceId(exchange);
         exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
@@ -66,6 +78,9 @@ public class ApiTokenWebFilter implements WebFilter {
         }
     }
 
+    /**
+     * 从 exchange 或请求头恢复 traceId，缺失或非法时生成新 traceId。
+     */
     private String traceId(ServerWebExchange exchange) {
         Object attribute = exchange.getAttribute(TraceConstants.TRACE_ID_ATTRIBUTE);
         if (attribute instanceof String traceId && TraceIdSupport.isValid(traceId)) {

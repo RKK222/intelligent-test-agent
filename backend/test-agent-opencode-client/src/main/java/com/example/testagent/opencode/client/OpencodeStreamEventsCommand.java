@@ -15,6 +15,9 @@ public record OpencodeStreamEventsCommand(
         String workspace,
         String traceId) {
 
+    /**
+     * 校验事件订阅命令的执行节点、Run、目录和 traceId，workspace 为空时不传远端。
+     */
     public OpencodeStreamEventsCommand {
         Objects.requireNonNull(node, "node must not be null");
         Objects.requireNonNull(runId, "runId must not be null");
@@ -23,6 +26,9 @@ public record OpencodeStreamEventsCommand(
         traceId = DomainValidation.requireText(traceId, "traceId");
     }
 
+    /**
+     * 规范化可选文本，空白字符串按缺失处理。
+     */
     private static String optionalText(String value) {
         return value == null || value.isBlank() ? null : value;
     }

@@ -13,9 +13,15 @@ import org.springframework.web.server.ServerWebExchange;
  */
 final class RuntimeApiSupport {
 
+    /**
+     * 工具类不允许实例化，避免在 Controller 中持有状态。
+     */
     private RuntimeApiSupport() {
     }
 
+    /**
+     * 优先使用 TraceIdWebFilter 已解析的 traceId，缺失时从请求头重新生成或规范化。
+     */
     static String traceId(ServerWebExchange exchange) {
         Object attribute = exchange.getAttribute(TraceConstants.TRACE_ID_ATTRIBUTE);
         if (attribute instanceof String traceId && TraceIdSupport.isValid(traceId)) {
@@ -24,6 +30,9 @@ final class RuntimeApiSupport {
         return TraceIdSupport.resolve(exchange.getRequest().getHeaders().getFirst(TraceConstants.TRACE_ID_HEADER));
     }
 
+    /**
+     * 统一分页默认值与校验错误格式，避免各 Controller 重复处理 page/size。
+     */
     static PageRequest pageRequest(Integer page, Integer size) {
         try {
             return new PageRequest(page == null ? 1 : page, size == null ? 50 : size);

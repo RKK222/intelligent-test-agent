@@ -12,12 +12,24 @@ import java.util.Optional;
  */
 public interface SessionRepository {
 
+    /**
+     * 保存平台会话。
+     */
     Session save(Session session);
 
+    /**
+     * 按会话 ID 查询会话。
+     */
     Optional<Session> findById(SessionId sessionId);
 
+    /**
+     * 全局分页搜索会话。
+     */
     PageResponse<Session> findPage(String query, PageRequest pageRequest);
 
+    /**
+     * 按工作区分页查询会话。
+     */
     PageResponse<Session> findByWorkspaceId(WorkspaceId workspaceId, PageRequest pageRequest);
 
     /**

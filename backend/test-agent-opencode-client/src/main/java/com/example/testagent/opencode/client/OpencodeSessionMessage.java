@@ -11,6 +11,9 @@ public record OpencodeSessionMessage(
         Map<String, Object> message,
         List<Map<String, Object>> parts) {
 
+    /**
+     * 固化 message 与 part 投影，过滤 generated DTO 转换过程中产生的 null 字段。
+     */
     public OpencodeSessionMessage {
         message = immutableWithoutNulls(message);
         parts = parts == null ? List.of() : parts.stream()
@@ -18,6 +21,9 @@ public record OpencodeSessionMessage(
                 .toList();
     }
 
+    /**
+     * 复制 Map 并过滤 null 键值，防止空字段进入上层消息恢复逻辑。
+     */
     private static Map<String, Object> immutableWithoutNulls(Map<String, Object> source) {
         if (source == null || source.isEmpty()) {
             return Map.of();

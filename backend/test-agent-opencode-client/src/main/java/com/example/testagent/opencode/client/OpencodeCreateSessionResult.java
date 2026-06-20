@@ -7,6 +7,9 @@ import com.example.testagent.domain.support.DomainValidation;
  */
 public record OpencodeCreateSessionResult(String opencodeSessionId) {
 
+    /**
+     * 校验远端 session id 非空，避免无效 session 继续进入运行编排。
+     */
     public OpencodeCreateSessionResult {
         opencodeSessionId = DomainValidation.requireText(opencodeSessionId, "opencodeSessionId");
     }

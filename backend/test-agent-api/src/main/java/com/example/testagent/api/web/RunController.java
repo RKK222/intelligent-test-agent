@@ -42,6 +42,9 @@ public class RunController {
     private final RunMessageRecoveryService messageRecoveryService;
     private final RunEventSseMapper sseMapper;
 
+    /**
+     * 注入运行、diff、SSE 与消息恢复服务，兼容生产构造路径。
+     */
     @Autowired
     public RunController(
             RunApplicationService runService,
@@ -56,6 +59,9 @@ public class RunController {
         this.sseMapper = Objects.requireNonNull(sseMapper, "sseMapper must not be null");
     }
 
+    /**
+     * 测试兼容构造器，允许只验证运行接口而不装配恢复服务。
+     */
     public RunController(
             RunApplicationService runService,
             RunDiffApplicationService runDiffService,
@@ -63,6 +69,9 @@ public class RunController {
         this(runService, runDiffService, eventStreamService, null, new RunEventSseMapper());
     }
 
+    /**
+     * 启动一次运行，支持 prompt 字符串和 Phase 11 prompt parts 两种输入形态。
+     */
     @PostMapping({"/api/runs", "/api/internal/platform/opencode-runtime/runs"})
     public Mono<ApiResponse<RuntimeDtos.RunResponse>> startRun(
             @Valid @RequestBody RuntimeDtos.StartRunRequest request,
@@ -71,6 +80,9 @@ public class RunController {
                 request.toInput(), traceId)));
     }
 
+    /**
+     * 查询运行详情，当前只做 runId 边界转换并委托应用层。
+     */
     @GetMapping({"/api/runs/{runId}", "/api/internal/platform/opencode-runtime/runs/{runId}"})
     public Mono<ApiResponse<RuntimeDtos.RunResponse>> getRun(
             @PathVariable String runId,
@@ -78,6 +90,9 @@ public class RunController {
         return blockingResponse(exchange, ignored -> RuntimeDtos.RunResponse.from(runService.getRun(new RunId(runId))));
     }
 
+    /**
+     * 取消运行，traceId 用于记录取消事件和后续排障。
+     */
     @PostMapping({"/api/runs/{runId}/cancel", "/api/internal/platform/opencode-runtime/runs/{runId}/cancel"})
     public Mono<ApiResponse<RuntimeDtos.RunResponse>> cancelRun(
             @PathVariable String runId,
@@ -86,6 +101,9 @@ public class RunController {
                 RuntimeDtos.RunResponse.from(runService.cancelRun(new RunId(runId), traceId)));
     }
 
+    /**
+     * 读取运行 diff，diff 来源和 fallback 逻辑由 RunDiffApplicationService 封装。
+     */
     @GetMapping({"/api/runs/{runId}/diff", "/api/internal/platform/opencode-runtime/runs/{runId}/diff"})
     public Mono<ApiResponse<RuntimeDtos.RunDiffResponse>> getDiff(
             @PathVariable String runId,
@@ -94,6 +112,9 @@ public class RunController {
                 RuntimeDtos.RunDiffResponse.from(runDiffService.getDiff(new RunId(runId), traceId)));
     }
 
+    /**
+     * 接受运行产生的 diff，并把动作结果包装为统一响应。
+     */
     @PostMapping({"/api/runs/{runId}/diff/accept", "/api/internal/platform/opencode-runtime/runs/{runId}/diff/accept"})
     public Mono<ApiResponse<RuntimeDtos.RunDiffActionResponse>> acceptDiff(
             @PathVariable String runId,
@@ -102,6 +123,9 @@ public class RunController {
                 RuntimeDtos.RunDiffActionResponse.from(runDiffService.acceptDiff(new RunId(runId), traceId)));
     }
 
+    /**
+     * 拒绝运行产生的 diff，并保留与 accept 相同的响应结构。
+     */
     @PostMapping({"/api/runs/{runId}/diff/reject", "/api/internal/platform/opencode-runtime/runs/{runId}/diff/reject"})
     public Mono<ApiResponse<RuntimeDtos.RunDiffActionResponse>> rejectDiff(
             @PathVariable String runId,
@@ -110,6 +134,9 @@ public class RunController {
                 RuntimeDtos.RunDiffActionResponse.from(runDiffService.rejectDiff(new RunId(runId), traceId)));
     }
 
+    /**
+     * 输出 RunEvent SSE，先补发 opencode 当前消息快照，再接续持久化事件流。
+     */
     @GetMapping(
             value = {"/api/runs/{runId}/events", "/api/internal/platform/opencode-runtime/runs/{runId}/events"},
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -130,6 +157,9 @@ public class RunController {
                 eventStreamService.streamAfter(currentRunId, resumeEventId, DEFAULT_POLL_INTERVAL, DEFAULT_BATCH_LIMIT));
     }
 
+    /**
+     * 将阻塞式应用服务调用移到 boundedElastic，避免占用 WebFlux event-loop。
+     */
     private <T> Mono<ApiResponse<T>> blockingResponse(ServerWebExchange exchange, Function<String, T> action) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         // Run/Diff 编排当前包含阻塞式持久化和 opencode 调用，必须脱离 WebFlux event-loop 执行。

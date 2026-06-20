@@ -16,10 +16,16 @@ public record Workspace(
         Instant updatedAt,
         String traceId) {
 
+    /**
+     * 创建 ACTIVE 工作区，使用占位 traceId 兼容简单测试和历史构造路径。
+     */
     public Workspace(WorkspaceId workspaceId, String name, String rootPath, Instant createdAt) {
         this(workspaceId, name, rootPath, WorkspaceStatus.ACTIVE, createdAt, createdAt, "trace_unspecified");
     }
 
+    /**
+     * 校验工作区领域对象的不变量，确保路径、名称、状态、时间和 traceId 均有效。
+     */
     public Workspace {
         Objects.requireNonNull(workspaceId, "workspaceId must not be null");
         name = DomainValidation.requireText(name, "name");

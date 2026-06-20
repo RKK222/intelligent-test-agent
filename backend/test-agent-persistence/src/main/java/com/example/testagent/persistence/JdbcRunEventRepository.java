@@ -42,11 +42,17 @@ public class JdbcRunEventRepository extends JdbcRepositorySupport implements Run
                 readPayload(rs.getString("payload_json")));
     };
 
+    /**
+     * 注入 JdbcClient 和 ObjectMapper，payload JSON 转换集中在本类处理。
+     */
     public JdbcRunEventRepository(JdbcClient jdbcClient, ObjectMapper objectMapper) {
         this.jdbcClient = jdbcClient;
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 追加运行事件，并在唯一约束冲突时重试分配同一 run 内单调递增的 seq。
+     */
     @Override
     public RunEvent append(RunEventDraft draft) {
         String eventId = "evt_" + UUID.randomUUID().toString().replace("-", "");
@@ -77,6 +83,9 @@ public class JdbcRunEventRepository extends JdbcRepositorySupport implements Run
         throw new PlatformException(ErrorCode.INTERNAL_ERROR, "RunEvent seq 分配失败", Map.of("runId", draft.runId().value()));
     }
 
+    /**
+     * 读取同一 run 当前最大 seq 并分配下一个序号。
+     */
     private Long nextSeq(RunId runId) {
         return jdbcClient.sql("""
                         select coalesce(max(seq), 0) + 1
@@ -88,6 +97,9 @@ public class JdbcRunEventRepository extends JdbcRepositorySupport implements Run
                 .single();
     }
 
+    /**
+     * 按 lastSeq 增量读取事件流，limit 限制用于保护轮询和 SSE 恢复查询。
+     */
     @Override
     public List<RunEvent> findByRunIdAfter(RunId runId, long lastSeq, int limit) {
         if (limit < 1 || limit > 500) {
@@ -107,6 +119,9 @@ public class JdbcRunEventRepository extends JdbcRepositorySupport implements Run
                 .list();
     }
 
+    /**
+     * append 成功后按 runId/seq 读回完整领域事件，确保返回数据库实际持久化结果。
+     */
     private RunEvent findByRunIdAndSeq(RunId runId, long seq) {
         return jdbcClient.sql("""
                         select event_id, run_id, seq, type, trace_id, occurred_at, payload_json
@@ -123,6 +138,9 @@ public class JdbcRunEventRepository extends JdbcRepositorySupport implements Run
                         Map.of("runId", runId.value(), "seq", seq)));
     }
 
+    /**
+     * 序列化事件 payload，失败时转换为统一平台异常。
+     */
     private String writePayload(Map<String, Object> payload) {
         try {
             return objectMapper.writeValueAsString(payload);
@@ -131,6 +149,9 @@ public class JdbcRunEventRepository extends JdbcRepositorySupport implements Run
         }
     }
 
+    /**
+     * 反序列化事件 payload，读取失败说明数据库内容不符合当前契约。
+     */
     private Map<String, Object> readPayload(String json) {
         try {
             return objectMapper.readValue(json, PAYLOAD_TYPE);

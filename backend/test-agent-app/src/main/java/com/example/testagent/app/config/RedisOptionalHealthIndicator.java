@@ -14,10 +14,16 @@ public class RedisOptionalHealthIndicator implements HealthIndicator {
 
     private final TestAgentRuntimeProperties properties;
 
+    /**
+     * 注入运行配置，Redis 未启用时不会尝试网络连接。
+     */
     public RedisOptionalHealthIndicator(TestAgentRuntimeProperties properties) {
         this.properties = properties;
     }
 
+    /**
+     * 返回 Redis 可选健康状态，启用时仅做 TCP 连接探测且不发送业务命令。
+     */
     @Override
     public Health health() {
         TestAgentRuntimeProperties.Redis redis = properties.getRedis();

@@ -19,6 +19,9 @@ public class RuntimeSecurityConfig {
 
     private final List<String> corsAllowedOrigins;
 
+    /**
+     * 解析逗号分隔 CORS origin 白名单，空白项会被忽略。
+     */
     public RuntimeSecurityConfig(
             @Value("${test-agent.security.cors-allowed-origins:http://localhost:3000,http://127.0.0.1:3000}")
             String corsAllowedOrigins) {
@@ -28,6 +31,9 @@ public class RuntimeSecurityConfig {
                 .collect(java.util.stream.Collectors.toCollection(ArrayList::new));
     }
 
+    /**
+     * 配置 WebFlux 安全链：禁用默认登录/Basic/CSRF，鉴权由 ApiTokenWebFilter 处理。
+     */
     @Bean
     SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
         return http
@@ -39,6 +45,9 @@ public class RuntimeSecurityConfig {
                 .build();
     }
 
+    /**
+     * 构造 CORS 配置，暴露 X-Trace-Id 并允许前端发送 Last-Event-ID。
+     */
     @Bean
     UrlBasedCorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();

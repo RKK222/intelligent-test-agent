@@ -15,6 +15,9 @@ public record OpencodeDiffCommand(
         String messageId,
         String traceId) {
 
+    /**
+     * 校验 Diff 查询的远端 session、目录和 traceId，messageId 为空时查询当前 Diff。
+     */
     public OpencodeDiffCommand {
         Objects.requireNonNull(node, "node must not be null");
         opencodeSessionId = DomainValidation.requireText(opencodeSessionId, "opencodeSessionId");
@@ -24,6 +27,9 @@ public record OpencodeDiffCommand(
         traceId = DomainValidation.requireText(traceId, "traceId");
     }
 
+    /**
+     * 规范化可选文本，空白字符串按缺失处理。
+     */
     private static String optionalText(String value) {
         return value == null || value.isBlank() ? null : value;
     }

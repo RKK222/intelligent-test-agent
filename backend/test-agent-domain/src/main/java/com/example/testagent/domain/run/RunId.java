@@ -7,10 +7,16 @@ import com.example.testagent.domain.support.DomainValidation;
  */
 public record RunId(String value) {
 
+    /**
+     * 校验运行 ID 前缀。
+     */
     public RunId {
         value = DomainValidation.requirePrefixedId(value, "run_", "runId");
     }
 
+    /**
+     * 返回原始 runId 字符串，便于日志、事件和错误详情使用。
+     */
     @Override
     public String toString() {
         return value;

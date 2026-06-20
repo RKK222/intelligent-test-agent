@@ -50,6 +50,16 @@ export PATH="$JAVA_HOME/bin:$PATH"
 mvn clean package -DskipTests
 ```
 
+## 测试与校验
+
+跨模块修改完成后，默认在 `backend` 目录执行：
+
+```bash
+mvn test
+```
+
+针对局部模块可先使用 `mvn -pl <module> -am test` 快速验证，但合并前仍应跑全量后端测试，确保 common、domain、API、persistence、runtime 和 app 装配没有破坏依赖边界。
+
 ## 部署与运行
 
 镜像构建、生产/测试 profile、dotenv、连接池和外部依赖配置见 `docs/deployment/backend.md`。

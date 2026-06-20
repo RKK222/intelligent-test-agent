@@ -1,4 +1,4 @@
 /**
- * Pure domain model and state-machine boundaries for the test-agent backend.
+ * 后端纯领域模型、值对象、状态机和领域端口边界。
  */
 package com.example.testagent.domain;

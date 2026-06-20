@@ -45,14 +45,23 @@ public enum RunEventType {
 
     private final String wireName;
 
+    /**
+     * 绑定平台事件枚举到稳定 wireName，wireName 用于数据库和 SSE payload。
+     */
     RunEventType(String wireName) {
         this.wireName = wireName;
     }
 
+    /**
+     * 返回对外稳定事件类型名称。
+     */
     public String wireName() {
         return wireName;
     }
 
+    /**
+     * 根据 wireName 查找事件类型，未知或空值返回 Optional.empty 供调用方决定兼容策略。
+     */
     public static Optional<RunEventType> fromWireName(String wireName) {
         if (wireName == null || wireName.isBlank()) {
             return Optional.empty();

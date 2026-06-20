@@ -16,6 +16,9 @@ public class TerminalActiveSessionRegistry {
 
     private final Map<SessionId, Lease> active = new ConcurrentHashMap<>();
 
+    /**
+     * 为 ticket 对应 Session 预留 active PTY，若已有租约则拒绝第二条连接。
+     */
     public Lease reserve(TerminalTicket ticket) {
         Lease lease = new Lease(ticket.sessionId(), ticket.traceId());
         Lease existing = active.putIfAbsent(ticket.sessionId(), lease);
@@ -28,6 +31,9 @@ public class TerminalActiveSessionRegistry {
         return lease;
     }
 
+    /**
+     * 判断指定 Session 当前是否存在未释放的 PTY 租约。
+     */
     public boolean isActive(SessionId sessionId) {
         return active.containsKey(sessionId);
     }
@@ -37,19 +43,31 @@ public class TerminalActiveSessionRegistry {
         private final String traceId;
         private final AtomicBoolean released = new AtomicBoolean(false);
 
+        /**
+         * 创建租约对象，生命周期由 WebSocket 会话关闭时释放。
+         */
         private Lease(SessionId sessionId, String traceId) {
             this.sessionId = sessionId;
             this.traceId = traceId;
         }
 
+        /**
+         * 返回租约绑定的平台 Session。
+         */
         public SessionId sessionId() {
             return sessionId;
         }
 
+        /**
+         * 返回创建租约时的 traceId，供审计日志关联。
+         */
         public String traceId() {
             return traceId;
         }
 
+        /**
+         * 释放租约；方法幂等，避免重复关闭误删后续新租约。
+         */
         @Override
         public void close() {
             if (released.compareAndSet(false, true)) {

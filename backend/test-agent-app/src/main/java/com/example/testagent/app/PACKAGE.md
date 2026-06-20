@@ -49,6 +49,8 @@
 ## 测试位置
 
 - `backend/test-agent-app/src/test/java` 只保留启动装配、profile、health、migration 和模块边界测试。
+- opencode health 测试必须验证整体 UP/DOWN 聚合和错误详情脱敏；Redis health 测试必须覆盖 disabled 场景。
+- profile 配置测试必须覆盖 test/prod 外部服务注入，不允许把真实密钥或固定主机写死在代码。
 - API 与业务行为测试迁移到对应模块。
 
 ## 修改时必须同步更新

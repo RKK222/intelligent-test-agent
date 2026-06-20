@@ -10,6 +10,9 @@ public record OpencodeSessionMessagesResult(
         String previousCursor,
         String nextCursor) {
 
+    /**
+     * 固化消息列表，null 响应按空列表处理，cursor 保持远端不透明值。
+     */
     public OpencodeSessionMessagesResult {
         messages = messages == null ? List.of() : List.copyOf(messages);
     }

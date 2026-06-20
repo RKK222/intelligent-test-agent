@@ -16,6 +16,9 @@ import java.util.Objects;
  */
 public final class ExecutionNodeRouter {
 
+    /**
+     * 从候选节点中选出可接收 run 的节点；无可用节点时抛出 opencode 不可用错误。
+     */
     public RoutingDecision route(RunId runId, List<ExecutionNode> candidates, Instant decidedAt, String traceId) {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(candidates, "candidates must not be null");

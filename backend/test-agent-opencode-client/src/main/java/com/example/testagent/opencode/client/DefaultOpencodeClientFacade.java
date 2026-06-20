@@ -29,11 +29,17 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
     private final int maxRetries;
     private final Duration retryBackoff;
 
+    /**
+     * 使用线上默认超时和一次有限重试创建 facade。
+     */
     @Autowired
     public DefaultOpencodeClientFacade(OpencodeSdkGateway gateway, OpencodeRunEventMapper eventMapper) {
         this(gateway, eventMapper, Duration.ofSeconds(30), 1, Duration.ofMillis(200));
     }
 
+    /**
+     * 创建可配置策略的 facade，测试可注入更短超时和禁用重试。
+     */
     public DefaultOpencodeClientFacade(
             OpencodeSdkGateway gateway,
             OpencodeRunEventMapper eventMapper,
@@ -47,6 +53,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
         this.retryBackoff = Objects.requireNonNull(retryBackoff, "retryBackoff must not be null");
     }
 
+    /**
+     * 检查指定执行节点的 opencode 健康状态，并套用统一超时、重试和错误转换策略。
+     */
     @Override
     public Mono<OpencodeHealthResult> health(OpencodeHealthCommand command) {
         Objects.requireNonNull(command, "command must not be null");
@@ -56,6 +65,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                 command.node());
     }
 
+    /**
+     * 创建远端 opencode session，只返回平台稳定的 session id 投影。
+     */
     @Override
     public Mono<OpencodeCreateSessionResult> createSession(OpencodeCreateSessionCommand command) {
         Objects.requireNonNull(command, "command must not be null");
@@ -70,6 +82,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                 command.node());
     }
 
+    /**
+     * 取消远端 opencode session，并把远端响应归一为平台取消结果。
+     */
     @Override
     public Mono<OpencodeCancelResult> cancelSession(OpencodeCancelCommand command) {
         Objects.requireNonNull(command, "command must not be null");
@@ -84,6 +99,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                 command.node());
     }
 
+    /**
+     * 通过 opencode prompt_async 启动 Run，generated 请求体只在 gateway 内构造。
+     */
     @Override
     public Mono<OpencodeStartRunResult> startRun(OpencodeStartRunCommand command) {
         Objects.requireNonNull(command, "command must not be null");
@@ -105,6 +123,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                 command.node());
     }
 
+    /**
+     * 订阅 opencode raw event 流，并在 facade 层转换为平台 RunEventDraft。
+     */
     @Override
     public Flux<RunEventDraft> streamRunEvents(OpencodeStreamEventsCommand command) {
         Objects.requireNonNull(command, "command must not be null");
@@ -119,6 +140,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                 .map(rawEvent -> eventMapper.toDraft(rawEvent, command.runId(), command.traceId()));
     }
 
+    /**
+     * 查询远端 session Diff，并保持返回值为平台稳定 Diff DTO。
+     */
     @Override
     public Mono<OpencodeDiffResult> getDiff(OpencodeDiffCommand command) {
         Objects.requireNonNull(command, "command must not be null");
@@ -134,6 +158,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                 command.node());
     }
 
+    /**
+     * 拒绝远端 Diff，映射到 opencode session revert 能力。
+     */
     @Override
     public Mono<OpencodeRejectDiffResult> rejectDiff(OpencodeRejectDiffCommand command) {
         Objects.requireNonNull(command, "command must not be null");
@@ -150,6 +177,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                 command.node());
     }
 
+    /**
+     * 受控转发 opencode Web App runtime API，返回稳定 JsonNode projection。
+     */
     @Override
     public Mono<OpencodeRuntimeResult> runtime(OpencodeRuntimeCommand command) {
         Objects.requireNonNull(command, "command must not be null");
@@ -167,6 +197,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                 command.node());
     }
 
+    /**
+     * 读取远端 projected messages，用于断线或刷新后的消息投影恢复。
+     */
     @Override
     public Mono<OpencodeSessionMessagesResult> sessionMessages(OpencodeSessionMessagesCommand command) {
         Objects.requireNonNull(command, "command must not be null");
@@ -182,6 +215,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                 command.node());
     }
 
+    /**
+     * 为 Mono 外部调用统一增加超时、有限重试和平台错误码映射。
+     */
     private <T> Mono<T> applyPolicy(Mono<T> source, String operation, ExecutionNode node) {
         Mono<T> protectedSource = source.timeout(timeout);
         if (maxRetries > 0) {
@@ -190,6 +226,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
         return protectedSource.onErrorMap(error -> toPlatformException(error, operation, node));
     }
 
+    /**
+     * 为 Flux 外部调用统一增加超时、有限重试和平台错误码映射。
+     */
     private <T> Flux<T> applyPolicy(Flux<T> source, String operation, ExecutionNode node) {
         Flux<T> protectedSource = source.timeout(timeout);
         if (maxRetries > 0) {
@@ -198,11 +237,17 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
         return protectedSource.onErrorMap(error -> toPlatformException(error, operation, node));
     }
 
+    /**
+     * 创建固定间隔重试策略，只允许网络或 5xx 类错误重试。
+     */
     private Retry retrySpec() {
         return Retry.fixedDelay(maxRetries, retryBackoff)
                 .filter(this::isRetryable);
     }
 
+    /**
+     * 判断异常是否适合重试，避免对参数错误或业务冲突重复调用远端。
+     */
     private boolean isRetryable(Throwable error) {
         Throwable current = unwrapRetry(error);
         if (current instanceof WebClientResponseException exception) {
@@ -212,6 +257,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
         return hasCause(current, ConnectException.class);
     }
 
+    /**
+     * 将 gateway 或 WebClient 异常转换为平台统一错误码，防止第三方异常穿透到入口层。
+     */
     private PlatformException toPlatformException(Throwable error, String operation, ExecutionNode node) {
         Throwable current = unwrapRetry(error);
         if (current instanceof PlatformException exception) {
@@ -236,6 +284,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
         return platformException(ErrorCode.OPENCODE_BAD_GATEWAY, operation, node, null, current);
     }
 
+    /**
+     * 构造带安全 details 的 PlatformException，details 只包含节点、操作和可公开 HTTP 状态。
+     */
     private PlatformException platformException(
             ErrorCode errorCode,
             String operation,
@@ -252,6 +303,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
         return new PlatformException(errorCode, errorCode.defaultMessage(), details, cause);
     }
 
+    /**
+     * Reactor 重试耗尽时会包一层异常，这里还原原始失败原因用于错误码判断。
+     */
     private Throwable unwrapRetry(Throwable error) {
         if (Exceptions.isRetryExhausted(error) && error.getCause() != null) {
             return error.getCause();
@@ -259,6 +313,9 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
         return error;
     }
 
+    /**
+     * 沿 cause 链查找指定异常类型，兼容 WebClient 包装后的连接异常。
+     */
     private boolean hasCause(Throwable error, Class<? extends Throwable> causeType) {
         Throwable current = error;
         while (current != null) {

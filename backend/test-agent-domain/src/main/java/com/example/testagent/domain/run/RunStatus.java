@@ -14,6 +14,9 @@ public enum RunStatus {
     FAILED,
     CANCELLED;
 
+    /**
+     * 判断当前状态是否允许流转到目标状态。
+     */
     public boolean canTransitionTo(RunStatus next) {
         if (next == null || this == next || isTerminal()) {
             return false;
@@ -21,10 +24,16 @@ public enum RunStatus {
         return allowedTransitions().contains(next);
     }
 
+    /**
+     * 判断状态是否为终态，终态不允许继续流转。
+     */
     public boolean isTerminal() {
         return this == SUCCEEDED || this == FAILED || this == CANCELLED;
     }
 
+    /**
+     * 返回当前状态允许的下一状态集合。
+     */
     private Set<RunStatus> allowedTransitions() {
         return switch (this) {
             case PENDING -> EnumSet.of(RUNNING, CANCELLED, FAILED);

@@ -36,6 +36,7 @@
 
 ## 测试覆盖
 
+- `WorkspaceTest` 覆盖工作区默认状态、traceId 占位和更新时间边界。
 - `RunStatusTest`、`RunTest` 覆盖 Run 状态机、终态、取消请求、非法流转和时间边界。
 - `SessionMessageTest`、`SessionTest` 覆盖消息约束、会话归档、置顶和内部 opencode session/node 映射边界。
 - `ExecutionNodeRouterTest`、`ExecutionNodeTest` 覆盖执行节点容量、可路由状态和路由冲突错误。

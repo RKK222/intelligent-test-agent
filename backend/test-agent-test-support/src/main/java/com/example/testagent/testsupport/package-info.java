@@ -1,4 +1,4 @@
 /**
- * Test fixtures and integration-test support utilities.
+ * 测试夹具和集成测试支撑工具边界。
  */
 package com.example.testagent.testsupport;

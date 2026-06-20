@@ -27,16 +27,25 @@ public class OpencodeRunEventMapper {
     private final ObjectMapper objectMapper;
     private final Supplier<Instant> now;
 
+    /**
+     * 使用系统时间创建事件映射器，生产环境由 Spring 注入共享 ObjectMapper。
+     */
     @Autowired
     public OpencodeRunEventMapper(ObjectMapper objectMapper) {
         this(objectMapper, Instant::now);
     }
 
+    /**
+     * 创建可注入时钟的映射器，便于测试固定 RunEventDraft 时间戳。
+     */
     public OpencodeRunEventMapper(ObjectMapper objectMapper, Supplier<Instant> now) {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.now = Objects.requireNonNull(now, "now must not be null");
     }
 
+    /**
+     * 将单条 opencode raw event 转换为平台事件草稿，未知事件保留 raw payload 供前端降级展示。
+     */
     public RunEventDraft toDraft(JsonNode rawEvent, RunId runId, String traceId) {
         Objects.requireNonNull(rawEvent, "rawEvent must not be null");
         Objects.requireNonNull(runId, "runId must not be null");
@@ -59,6 +68,9 @@ public class OpencodeRunEventMapper {
         return new RunEventDraft(runId, type, traceId, now.get(), payload);
     }
 
+    /**
+     * 把 opencode 事件类型映射为平台稳定事件类型，并在必要时补充平台状态字段。
+     */
     private RunEventType mapType(String rawType, Map<String, Object> payload) {
         return switch (rawType) {
             case "session.next.prompted" -> RunEventType.RUN_STARTED;
@@ -95,6 +107,9 @@ public class OpencodeRunEventMapper {
         };
     }
 
+    /**
+     * 识别 opencode 1.17.8 的 session.status 终态；非 idle 状态继续作为未知事件透传。
+     */
     private RunEventType mapSessionStatus(Map<String, Object> payload) {
         // opencode 1.17.8 不再发送 session.next.step.ended，idle 状态是本次 prompt 已收敛的终态信号。
         Object status = payload.get("status");
@@ -104,6 +119,9 @@ public class OpencodeRunEventMapper {
         return RunEventType.OPENCODE_EVENT_UNKNOWN;
     }
 
+    /**
+     * 兼容 opencode 顶层 type 与 payload.type 两种事件包裹格式。
+     */
     private String rawType(JsonNode rawEvent) {
         JsonNode topLevelType = rawEvent.path("type");
         if (topLevelType.isTextual()) {
@@ -116,6 +134,9 @@ public class OpencodeRunEventMapper {
         return "unknown";
     }
 
+    /**
+     * 兼容 opencode 顶层 id 与 payload.id 两种事件 ID 格式。
+     */
     private String rawEventId(JsonNode rawEvent) {
         JsonNode topLevelId = rawEvent.path("id");
         if (topLevelId.isTextual()) {
@@ -128,6 +149,9 @@ public class OpencodeRunEventMapper {
         return "unknown";
     }
 
+    /**
+     * 提取事件 properties；没有结构化属性时返回空对象，避免空指针打断事件流。
+     */
     private JsonNode properties(JsonNode rawEvent) {
         JsonNode topLevelProperties = rawEvent.path("properties");
         if (topLevelProperties.isObject()) {
@@ -140,11 +164,17 @@ public class OpencodeRunEventMapper {
         return objectMapper.createObjectNode();
     }
 
+    /**
+     * 将 JsonNode 转为普通 Map，并移除 null 值以保持 SSE payload 简洁。
+     */
     private Map<String, Object> toMap(JsonNode node) {
         Map<String, Object> converted = objectMapper.convertValue(node, MAP_TYPE);
         return sanitize(converted);
     }
 
+    /**
+     * 移除 raw payload 中的 null 值，避免前端把缺失字段误判为显式空值。
+     */
     private Map<String, Object> sanitize(Map<String, Object> source) {
         Map<String, Object> sanitized = new LinkedHashMap<>();
         source.forEach((key, value) -> {
@@ -155,6 +185,9 @@ public class OpencodeRunEventMapper {
         return sanitized;
     }
 
+    /**
+     * 为 delta 类消息补充 text alias，兼容旧前端只读取 text 字段的展示逻辑。
+     */
     private void copyTextAlias(Map<String, Object> payload) {
         if (!payload.containsKey("text")) {
             Object delta = payload.get("delta");

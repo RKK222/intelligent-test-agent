@@ -7,10 +7,16 @@ import com.example.testagent.domain.support.DomainValidation;
  */
 public record SessionId(String value) {
 
+    /**
+     * 校验平台会话 ID 前缀。
+     */
     public SessionId {
         value = DomainValidation.requirePrefixedId(value, "ses_", "sessionId");
     }
 
+    /**
+     * 返回原始 sessionId 字符串，便于日志、事件和持久化参数使用。
+     */
     @Override
     public String toString() {
         return value;

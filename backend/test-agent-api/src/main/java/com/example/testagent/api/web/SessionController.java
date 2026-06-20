@@ -24,10 +24,16 @@ public class SessionController {
 
     private final SessionApplicationService sessionService;
 
+    /**
+     * 注入会话应用服务，Controller 仅保留协议和 DTO 转换职责。
+     */
     public SessionController(SessionApplicationService sessionService) {
         this.sessionService = sessionService;
     }
 
+    /**
+     * 创建 opencode 会话，traceId 从请求上下文透传到应用服务。
+     */
     @PostMapping({"/api/sessions", "/api/internal/platform/opencode-runtime/sessions"})
     public ApiResponse<RuntimeDtos.SessionResponse> createSession(
             @Valid @RequestBody RuntimeDtos.CreateSessionRequest request,
@@ -37,6 +43,9 @@ public class SessionController {
                 new WorkspaceId(request.workspaceId()), request.title(), traceId)), traceId);
     }
 
+    /**
+     * 跨工作区分页查询会话，并支持标题关键字搜索。
+     */
     @GetMapping({"/api/sessions", "/api/internal/platform/opencode-runtime/sessions"})
     public ApiResponse<PageResponse<RuntimeDtos.SessionResponse>> listAllSessions(
             @RequestParam(required = false, name = "q") String query,
@@ -48,6 +57,9 @@ public class SessionController {
                 query, RuntimeApiSupport.pageRequest(page, size))), traceId);
     }
 
+    /**
+     * 查询指定工作区下的会话列表，路径 workspaceId 在边界处转换为领域 ID。
+     */
     @GetMapping({"/api/workspaces/{workspaceId}/sessions", "/api/internal/platform/opencode-runtime/workspaces/{workspaceId}/sessions"})
     public ApiResponse<PageResponse<RuntimeDtos.SessionResponse>> listSessions(
             @PathVariable String workspaceId,
@@ -59,6 +71,9 @@ public class SessionController {
                 new WorkspaceId(workspaceId), RuntimeApiSupport.pageRequest(page, size))), traceId);
     }
 
+    /**
+     * 查询单个会话详情，归档隐藏等业务规则由应用层执行。
+     */
     @GetMapping({"/api/sessions/{sessionId}", "/api/internal/platform/opencode-runtime/sessions/{sessionId}"})
     public ApiResponse<RuntimeDtos.SessionResponse> getSession(
             @PathVariable String sessionId,
@@ -67,6 +82,9 @@ public class SessionController {
         return ApiResponse.ok(RuntimeDtos.SessionResponse.from(sessionService.getSession(new SessionId(sessionId))), traceId);
     }
 
+    /**
+     * 更新会话标题或置顶状态，空字段保留给应用层按局部更新规则处理。
+     */
     @PatchMapping({"/api/sessions/{sessionId}", "/api/internal/platform/opencode-runtime/sessions/{sessionId}"})
     public ApiResponse<RuntimeDtos.SessionResponse> updateSession(
             @PathVariable String sessionId,
@@ -77,6 +95,9 @@ public class SessionController {
                 new SessionId(sessionId), request.title(), request.pinned(), traceId)), traceId);
     }
 
+    /**
+     * 软删除会话，HTTP delete 映射为应用层归档操作。
+     */
     @DeleteMapping({"/api/sessions/{sessionId}", "/api/internal/platform/opencode-runtime/sessions/{sessionId}"})
     public ApiResponse<RuntimeDtos.SessionResponse> deleteSession(
             @PathVariable String sessionId,
@@ -85,6 +106,9 @@ public class SessionController {
         return ApiResponse.ok(RuntimeDtos.SessionResponse.from(sessionService.archiveSession(new SessionId(sessionId), traceId)), traceId);
     }
 
+    /**
+     * 追加会话消息，角色默认和内容校验由应用服务与 DTO 校验共同兜底。
+     */
     @PostMapping({"/api/sessions/{sessionId}/messages", "/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages"})
     public ApiResponse<RuntimeDtos.SessionMessageResponse> appendMessage(
             @PathVariable String sessionId,
@@ -95,6 +119,9 @@ public class SessionController {
                 new SessionId(sessionId), request.role(), request.content(), traceId)), traceId);
     }
 
+    /**
+     * 分页列出会话消息，返回值在边界层转换为稳定的 API DTO。
+     */
     @GetMapping({"/api/sessions/{sessionId}/messages", "/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages"})
     public ApiResponse<PageResponse<RuntimeDtos.SessionMessageResponse>> listMessages(
             @PathVariable String sessionId,

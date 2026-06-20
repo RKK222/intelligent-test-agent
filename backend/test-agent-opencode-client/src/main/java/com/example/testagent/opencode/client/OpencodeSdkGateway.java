@@ -10,8 +10,14 @@ import reactor.core.publisher.Mono;
  */
 public interface OpencodeSdkGateway {
 
+    /**
+     * 直接调用 generated health API，并返回平台健康投影。
+     */
     Mono<OpencodeHealthResult> health(ExecutionNode node, String traceId);
 
+    /**
+     * 调用远端创建 session API，directory 必传，workspace 为空时不传 query。
+     */
     Mono<OpencodeCreateSessionResult> createSession(
             ExecutionNode node,
             String directory,
@@ -19,6 +25,9 @@ public interface OpencodeSdkGateway {
             String title,
             String traceId);
 
+    /**
+     * 调用远端 session abort API，返回远端布尔响应的稳定包装。
+     */
     Mono<OpencodeCancelResult> cancelSession(
             ExecutionNode node,
             String opencodeSessionId,
@@ -26,6 +35,9 @@ public interface OpencodeSdkGateway {
             String workspace,
             String traceId);
 
+    /**
+     * 调用 prompt_async API，prompt parts 和运行态选择由 gateway 转成远端 JSON body。
+     */
     Mono<OpencodeStartRunResult> startRun(
             ExecutionNode node,
             String opencodeSessionId,
@@ -40,8 +52,14 @@ public interface OpencodeSdkGateway {
             String variant,
             String traceId);
 
+    /**
+     * 订阅远端事件 SSE，保持 JsonNode 原文供 facade 做平台事件映射。
+     */
     Flux<JsonNode> streamEvents(ExecutionNode node, String directory, String workspace, String traceId);
 
+    /**
+     * 调用远端 Diff API，并返回平台 Diff DTO。
+     */
     Mono<OpencodeDiffResult> getDiff(
             ExecutionNode node,
             String opencodeSessionId,
@@ -50,6 +68,9 @@ public interface OpencodeSdkGateway {
             String messageId,
             String traceId);
 
+    /**
+     * 调用远端 revert API，可按 message 或 message+part 拒绝 Diff。
+     */
     Mono<OpencodeRejectDiffResult> rejectDiff(
             ExecutionNode node,
             String opencodeSessionId,
@@ -59,6 +80,9 @@ public interface OpencodeSdkGateway {
             String partId,
             String traceId);
 
+    /**
+     * 调用受控 runtime API，query 和 body 由上层策略提前校验。
+     */
     Mono<OpencodeRuntimeResult> runtime(
             ExecutionNode node,
             String method,
@@ -69,6 +93,9 @@ public interface OpencodeSdkGateway {
             Object body,
             String traceId);
 
+    /**
+     * 调用 generated messages API，读取远端 projected messages。
+     */
     Mono<OpencodeSessionMessagesResult> sessionMessages(
             ExecutionNode node,
             String opencodeSessionId,

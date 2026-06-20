@@ -8,6 +8,9 @@ import java.util.Objects;
  */
 public record OpencodeRuntimeResult(JsonNode body) {
 
+    /**
+     * 校验 runtime JSON projection 非空，避免上游处理空响应节点。
+     */
     public OpencodeRuntimeResult {
         Objects.requireNonNull(body, "body must not be null");
     }

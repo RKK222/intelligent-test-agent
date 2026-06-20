@@ -18,6 +18,9 @@ import reactor.core.publisher.Mono;
 @Order(Ordered.HIGHEST_PRECEDENCE)
 public class TraceIdWebFilter implements WebFilter {
 
+    /**
+     * 为每个请求解析或生成 traceId，并写入 exchange、响应头、日志 MDC 和 Reactor context。
+     */
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String traceId = TraceIdSupport.resolve(exchange.getRequest().getHeaders().getFirst(TraceConstants.TRACE_ID_HEADER));

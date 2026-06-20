@@ -19,6 +19,9 @@ public class ExecutionNodeSeeder implements ApplicationRunner {
     private final TestAgentRuntimeProperties properties;
     private final ExecutionNodeRepository executionNodeRepository;
 
+    /**
+     * 注入运行配置和执行节点 Repository，seed 数据来自 test-agent.opencode.nodes。
+     */
     public ExecutionNodeSeeder(
             TestAgentRuntimeProperties properties,
             ExecutionNodeRepository executionNodeRepository) {
@@ -26,6 +29,9 @@ public class ExecutionNodeSeeder implements ApplicationRunner {
         this.executionNodeRepository = executionNodeRepository;
     }
 
+    /**
+     * 启动时写入配置化 opencode 节点，保证路由层有可用候选节点。
+     */
     @Override
     public void run(ApplicationArguments args) {
         Instant now = Instant.now();

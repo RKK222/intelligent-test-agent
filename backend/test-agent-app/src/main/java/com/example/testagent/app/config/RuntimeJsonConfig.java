@@ -10,6 +10,9 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class RuntimeJsonConfig {
 
+    /**
+     * 提供全局 ObjectMapper 并注册 Java Time 等模块，供持久化 JSON payload 使用。
+     */
     @Bean
     ObjectMapper objectMapper() {
         return new ObjectMapper().findAndRegisterModules();

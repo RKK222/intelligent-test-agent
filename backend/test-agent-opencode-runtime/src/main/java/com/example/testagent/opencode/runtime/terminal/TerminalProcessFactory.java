@@ -16,6 +16,9 @@ public class TerminalProcessFactory {
     private final int maxOutputFrameBytes;
     private final int maxOutputConnectionBytes;
 
+    /**
+     * 创建进程工厂，并归一化输出预算配置。
+     */
     public TerminalProcessFactory(
             @Value("${test-agent.terminal.max-output-frame-bytes:16384}") int maxOutputFrameBytes,
             @Value("${test-agent.terminal.max-output-connection-bytes:1048576}") int maxOutputConnectionBytes) {
@@ -23,6 +26,9 @@ public class TerminalProcessFactory {
         this.maxOutputConnectionBytes = Math.max(this.maxOutputFrameBytes, maxOutputConnectionBytes);
     }
 
+    /**
+     * 启动受控交互式 shell 进程，cwd 和 shell 均来自已校验 ticket。
+     */
     public TerminalProcessSession start(TerminalTicket ticket) {
         try {
             Process process = new ProcessBuilder(List.of(ticket.shell(), "-i"))

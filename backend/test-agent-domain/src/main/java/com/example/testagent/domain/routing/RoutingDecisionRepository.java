@@ -8,7 +8,13 @@ import java.util.Optional;
  */
 public interface RoutingDecisionRepository {
 
+    /**
+     * 保存运行到执行节点的路由决策。
+     */
     RoutingDecision save(RoutingDecision routingDecision);
 
+    /**
+     * 按运行 ID 查询已记录的路由决策。
+     */
     Optional<RoutingDecision> findByRunId(RunId runId);
 }

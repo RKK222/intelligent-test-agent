@@ -39,11 +39,17 @@ public class RunEventPersistencePolicy {
             "rawType",
             "rawEventId");
 
+    /**
+     * 判断事件是否需要持久化；高频消息投影只走实时通道。
+     */
     public boolean shouldPersist(RunEventDraft draft) {
         Objects.requireNonNull(draft, "draft must not be null");
         return !TRANSIENT_ONLY_TYPES.contains(draft.type());
     }
 
+    /**
+     * 清洗即将入库的事件 payload，移除 raw payload 和工具大字段。
+     */
     public RunEventDraft sanitizeForPersistence(RunEventDraft draft) {
         Objects.requireNonNull(draft, "draft must not be null");
         Map<String, Object> payload = draft.type() == RunEventType.TOOL_STARTED
@@ -53,6 +59,9 @@ public class RunEventPersistencePolicy {
         return new RunEventDraft(draft.runId(), draft.type(), draft.traceId(), draft.occurredAt(), payload);
     }
 
+    /**
+     * 工具事件只保留低成本、可审计摘要字段，避免大段输入输出落库。
+     */
     private Map<String, Object> toolSummaryPayload(Map<String, Object> payload) {
         LinkedHashMap<String, Object> sanitized = new LinkedHashMap<>();
         payload.forEach((key, value) -> {
@@ -63,6 +72,9 @@ public class RunEventPersistencePolicy {
         return Map.copyOf(sanitized);
     }
 
+    /**
+     * 移除 opencode rawPayload，避免第三方原始事件全文进入 durable RunEvent。
+     */
     private Map<String, Object> withoutRawPayload(Map<String, Object> payload) {
         LinkedHashMap<String, Object> sanitized = new LinkedHashMap<>();
         payload.forEach((key, value) -> {

@@ -194,6 +194,137 @@ class GeneratedOpencodeSdkGatewayTest {
     }
 
     @Test
+    void gatewayReadsSessionDiffWithOptionalMessageId() throws Exception {
+        AtomicReference<RequestSnapshot> request = new AtomicReference<>();
+        HttpServer server = startServer(exchange -> {
+            request.set(snapshot(exchange));
+            respond(exchange, 200, "application/json", """
+                    [
+                      {
+                        "file": "src/App.tsx",
+                        "patch": "@@ -1 +1 @@\\n-old\\n+new\\n",
+                        "additions": 2,
+                        "deletions": 1,
+                        "status": "modified"
+                      }
+                    ]
+                    """);
+        });
+
+        try {
+            OpencodeDiffResult result = new GeneratedOpencodeSdkGateway()
+                    .getDiff(
+                            node(server),
+                            REMOTE_SESSION_ID,
+                            "/tmp/demo",
+                            "workspace-1",
+                            "msg_remote1234567890abcdef",
+                            TRACE_ID)
+                    .block(Duration.ofSeconds(5));
+
+            assertThat(result.files()).singleElement().satisfies(file -> {
+                assertThat(file.path()).isEqualTo("src/App.tsx");
+                assertThat(file.patch()).contains("@@");
+                assertThat(file.additions()).isEqualTo(2);
+                assertThat(file.deletions()).isEqualTo(1);
+                assertThat(file.status()).isEqualTo("modified");
+            });
+            assertThat(request.get().method()).isEqualTo("GET");
+            assertThat(request.get().path()).isEqualTo("/session/" + REMOTE_SESSION_ID + "/diff");
+            assertThat(request.get().query()).containsEntry("directory", List.of("/tmp/demo"));
+            assertThat(request.get().query()).containsEntry("workspace", List.of("workspace-1"));
+            assertThat(request.get().query()).containsEntry("messageID", List.of("msg_remote1234567890abcdef"));
+            assertThat(request.get().traceId()).isEqualTo(TRACE_ID);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void gatewayRejectsDiffWithPartIdUsingStableJsonBody() throws Exception {
+        AtomicReference<RequestSnapshot> request = new AtomicReference<>();
+        HttpServer server = startServer(exchange -> {
+            request.set(snapshot(exchange));
+            respondNoContent(exchange);
+        });
+
+        try {
+            OpencodeRejectDiffResult result = new GeneratedOpencodeSdkGateway()
+                    .rejectDiff(
+                            node(server),
+                            REMOTE_SESSION_ID,
+                            "/tmp/demo",
+                            null,
+                            "msg_remote1234567890abcdef",
+                            "part_remote1234567890abcdef",
+                            TRACE_ID)
+                    .block(Duration.ofSeconds(5));
+
+            assertThat(result.rejected()).isTrue();
+            assertThat(request.get().method()).isEqualTo("POST");
+            assertThat(request.get().path()).isEqualTo("/session/" + REMOTE_SESSION_ID + "/revert");
+            assertThat(request.get().query()).containsEntry("directory", List.of("/tmp/demo"));
+            assertThat(request.get().query()).doesNotContainKey("workspace");
+            assertThat(request.get().body()).contains(
+                    "\"messageID\":\"msg_remote1234567890abcdef\"",
+                    "\"partID\":\"part_remote1234567890abcdef\"");
+            assertThat(request.get().traceId()).isEqualTo(TRACE_ID);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void gatewayRunsRuntimeJsonRequestAndFiltersBlankQueryValues() throws Exception {
+        AtomicReference<RequestSnapshot> request = new AtomicReference<>();
+        HttpServer server = startServer(exchange -> {
+            request.set(snapshot(exchange));
+            respond(exchange, 200, "application/json", "{\"ok\":true}");
+        });
+
+        try {
+            OpencodeRuntimeResult result = new GeneratedOpencodeSdkGateway()
+                    .runtime(
+                            node(server),
+                            "POST",
+                            "/api/session/" + REMOTE_SESSION_ID + "/permission/req_1/reply",
+                            "/tmp/demo",
+                            null,
+                            Map.of("keep", "yes", "blank", " "),
+                            Map.of("decision", "once"),
+                            TRACE_ID)
+                    .block(Duration.ofSeconds(5));
+
+            assertThat(result.body().path("ok").asBoolean()).isTrue();
+            assertThat(request.get().method()).isEqualTo("POST");
+            assertThat(request.get().path()).isEqualTo("/api/session/" + REMOTE_SESSION_ID + "/permission/req_1/reply");
+            assertThat(request.get().query()).containsEntry("directory", List.of("/tmp/demo"));
+            assertThat(request.get().query()).containsEntry("keep", List.of("yes"));
+            assertThat(request.get().query()).doesNotContainKey("blank");
+            assertThat(request.get().body()).contains("\"decision\":\"once\"");
+            assertThat(request.get().traceId()).isEqualTo(TRACE_ID);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void gatewayReturnsAcceptedRuntimeResultForNoContentResponse() throws Exception {
+        HttpServer server = startServer(GeneratedOpencodeSdkGatewayTest::respondNoContent);
+
+        try {
+            OpencodeRuntimeResult result = new GeneratedOpencodeSdkGateway()
+                    .runtime(node(server), "POST", "/api/session/" + REMOTE_SESSION_ID + "/abort",
+                            "/tmp/demo", null, Map.of(), null, TRACE_ID)
+                    .block(Duration.ofSeconds(5));
+
+            assertThat(result.body().path("accepted").asBoolean()).isTrue();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void gatewayReadsSessionMessagesUsingGeneratedMessagesApi() throws Exception {
         AtomicReference<RequestSnapshot> request = new AtomicReference<>();
         HttpServer server = startServer(exchange -> {

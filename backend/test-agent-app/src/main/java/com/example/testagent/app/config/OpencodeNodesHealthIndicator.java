@@ -26,6 +26,9 @@ public class OpencodeNodesHealthIndicator implements HealthIndicator {
     private final TestAgentRuntimeProperties properties;
     private final OpencodeClientFacade opencodeClientFacade;
 
+    /**
+     * 注入节点配置和 opencode facade，健康检查不直接访问 generated SDK。
+     */
     public OpencodeNodesHealthIndicator(
             TestAgentRuntimeProperties properties,
             OpencodeClientFacade opencodeClientFacade) {
@@ -33,6 +36,9 @@ public class OpencodeNodesHealthIndicator implements HealthIndicator {
         this.opencodeClientFacade = opencodeClientFacade;
     }
 
+    /**
+     * 聚合所有配置节点健康状态；任一节点不可用时整体标记为 DOWN。
+     */
     @Override
     public Health health() {
         List<Map<String, Object>> nodes = new ArrayList<>();
@@ -61,6 +67,9 @@ public class OpencodeNodesHealthIndicator implements HealthIndicator {
                 .build();
     }
 
+    /**
+     * 将配置项转换为健康检查命令所需的临时执行节点对象。
+     */
     private ExecutionNode node(TestAgentRuntimeProperties.Node configured) {
         Instant now = Instant.now();
         return new ExecutionNode(

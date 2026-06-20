@@ -24,6 +24,9 @@ public class GlobalExceptionHandler {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    /**
+     * 处理业务层主动抛出的平台异常，保留其稳定错误码和安全 details。
+     */
     @ExceptionHandler(PlatformException.class)
     public ResponseEntity<ApiErrorResponse> handlePlatformException(
             PlatformException exception,
@@ -33,6 +36,9 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(exception.errorCode().httpStatus()).body(response);
     }
 
+    /**
+     * 处理参数绑定、校验和非法参数异常，统一映射为 VALIDATION_ERROR。
+     */
     @ExceptionHandler({
             ServerWebInputException.class,
             WebExchangeBindException.class,
@@ -51,6 +57,9 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(ErrorCode.VALIDATION_ERROR.httpStatus()).body(response);
     }
 
+    /**
+     * 处理未预期异常，只记录服务端日志并返回不泄露内部细节的 INTERNAL_ERROR。
+     */
     @ExceptionHandler(Throwable.class)
     public ResponseEntity<ApiErrorResponse> handleUnexpectedException(
             Throwable exception,
@@ -61,6 +70,9 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(ErrorCode.INTERNAL_ERROR.httpStatus()).body(response);
     }
 
+    /**
+     * 从 exchange attribute 或响应头恢复 traceId，兜底生成合法 traceId。
+     */
     private String traceIdFrom(ServerWebExchange exchange) {
         Object attribute = exchange.getAttribute(TraceConstants.TRACE_ID_ATTRIBUTE);
         if (attribute instanceof String traceId && TraceIdSupport.isValid(traceId)) {

@@ -69,6 +69,9 @@ public class RunApplicationService {
     private final RunEventPersistencePolicy runEventPersistencePolicy;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
+    /**
+     * 创建生产用 Run 编排服务，显式注入实时事件总线和持久化策略。
+     */
     @Autowired
     public RunApplicationService(
             WorkspaceRepository workspaceRepository,
@@ -93,6 +96,9 @@ public class RunApplicationService {
         this.runEventPersistencePolicy = Objects.requireNonNull(runEventPersistencePolicy, "runEventPersistencePolicy must not be null");
     }
 
+    /**
+     * 创建兼容旧测试的服务实例，使用默认实时事件总线和默认事件持久化策略。
+     */
     public RunApplicationService(
             WorkspaceRepository workspaceRepository,
             com.example.testagent.domain.session.SessionRepository sessionRepository,
@@ -115,10 +121,16 @@ public class RunApplicationService {
                 new RunEventPersistencePolicy());
     }
 
+    /**
+     * 以纯文本 prompt 启动 Run，兼容早期只传字符串的调用方。
+     */
     public Run startRun(SessionId sessionId, String prompt, String traceId) {
         return startRun(StartRunInput.ofPrompt(sessionId, prompt), traceId);
     }
 
+    /**
+     * 启动一次平台 Run：创建本地 Run/消息、路由 opencode 节点、启动远端 prompt 并订阅事件流。
+     */
     public Run startRun(StartRunInput input, String traceId) {
         Instant now = Instant.now();
         SessionId sessionId = input.sessionId();
@@ -167,6 +179,9 @@ public class RunApplicationService {
         }
     }
 
+    /**
+     * 将平台 prompt parts 转成 opencode prompt_async parts，缺少显式文本时保留 legacy prompt。
+     */
     private List<OpencodePromptPart> toOpencodePromptParts(StartRunInput input, Workspace workspace) {
         if (input.parts().isEmpty()) {
             return List.of(OpencodePromptPart.text(input.effectivePrompt()));
@@ -184,6 +199,9 @@ public class RunApplicationService {
         return parts.isEmpty() ? List.of(OpencodePromptPart.text(input.effectivePrompt())) : parts;
     }
 
+    /**
+     * 按 part 类型分发到 opencode text/file/agent 表达，未知类型静默丢弃。
+     */
     private OpencodePromptPart toOpencodePromptPart(StartRunInput.PromptPart part, Workspace workspace) {
         if (part.type() == null) {
             return null;
@@ -197,6 +215,9 @@ public class RunApplicationService {
         };
     }
 
+    /**
+     * 将平台文件上下文转成 opencode file part，优先使用内联文本，其次使用前端给出的 URL，再兜底 workspace file URL。
+     */
     private OpencodePromptPart toOpencodeFilePart(StartRunInput.PromptPart part, Workspace workspace) {
         String mime = firstText(part.mimeType(), "text/plain");
         String filename = firstText(part.name(), filenameFromPath(part.path()), "attachment");
@@ -216,6 +237,9 @@ public class RunApplicationService {
         return null;
     }
 
+    /**
+     * 将平台 agent part 转成 opencode agent part，缺少名称时丢弃。
+     */
     private OpencodePromptPart toOpencodeAgentPart(StartRunInput.PromptPart part) {
         String agentName = firstText(part.name(), part.agentId());
         if (agentName == null) {
@@ -224,6 +248,9 @@ public class RunApplicationService {
         return OpencodePromptPart.agent(agentName, agentSource(part));
     }
 
+    /**
+     * 将 reference part 降级为文本提示，避免 opencode 不认识平台引用类型。
+     */
     private OpencodePromptPart toReferenceTextPart(StartRunInput.PromptPart part) {
         String label = firstText(part.label(), part.id(), part.uri());
         if (label == null) {
@@ -233,6 +260,9 @@ public class RunApplicationService {
         return OpencodePromptPart.text("Reference: " + label + suffix);
     }
 
+    /**
+     * 构造文件 source 元数据，保留路径和选区文本范围供 opencode Web 投影使用。
+     */
     private Map<String, Object> fileSource(StartRunInput.PromptPart part, String text) {
         String path = firstText(part.path(), part.name());
         if (path == null && text == null) {
@@ -252,6 +282,9 @@ public class RunApplicationService {
         return Map.copyOf(source);
     }
 
+    /**
+     * 构造 agent source 元数据，保留前端输入范围用于 opencode 侧上下文显示。
+     */
     private Map<String, Object> agentSource(StartRunInput.PromptPart part) {
         String value = sourceText(part);
         if (value == null) {
@@ -263,10 +296,16 @@ public class RunApplicationService {
                 "end", sourceNumber(part.source(), "end", value.length()));
     }
 
+    /**
+     * 固化 source Map，null source 按空上下文处理。
+     */
     private Map<String, Object> normalizedSource(Map<String, Object> source) {
         return source == null ? Map.of() : Map.copyOf(source);
     }
 
+    /**
+     * 将 workspace 相对路径转成 file URL，并拒绝路径穿越到 workspace 根目录外。
+     */
     private String workspaceFileUrl(Workspace workspace, String path) {
         Path root = Path.of(workspace.rootPath()).toAbsolutePath().normalize();
         Path target = root.resolve(path).toAbsolutePath().normalize();
@@ -279,6 +318,9 @@ public class RunApplicationService {
         return target.toUri().toString();
     }
 
+    /**
+     * 从 prompt part 的 content 或 source.text 中提取非空文本内容。
+     */
     private String sourceText(StartRunInput.PromptPart part) {
         if (part.content() != null) {
             return part.content();
@@ -296,6 +338,9 @@ public class RunApplicationService {
         return null;
     }
 
+    /**
+     * 从 source Map 中读取整数字段，缺失或非数字时使用 fallback。
+     */
     private int sourceNumber(Map<String, Object> source, String key, int fallback) {
         Object value = source.get(key);
         if (value instanceof Number number) {
@@ -304,6 +349,9 @@ public class RunApplicationService {
         return fallback;
     }
 
+    /**
+     * 从路径中提取文件名，路径异常或没有文件名时保留原始 path。
+     */
     private String filenameFromPath(String path) {
         if (path == null) {
             return null;
@@ -312,6 +360,9 @@ public class RunApplicationService {
         return filename == null ? path : filename.toString();
     }
 
+    /**
+     * 解析 provider/model 形式的模型选择，格式不合法时不向 opencode 指定模型。
+     */
     private ModelSelection parseModel(String model) {
         if (model == null) {
             return new ModelSelection(null, null);
@@ -323,6 +374,9 @@ public class RunApplicationService {
         return new ModelSelection(model.substring(0, slash), model.substring(slash + 1));
     }
 
+    /**
+     * 返回第一个非空白字符串，用于可选字段兜底。
+     */
     private String firstText(String... values) {
         for (String value : values) {
             if (value != null && !value.isBlank()) {
@@ -332,11 +386,17 @@ public class RunApplicationService {
         return null;
     }
 
+    /**
+     * 查询本地 Run，不存在时抛出统一 NOT_FOUND 平台异常。
+     */
     public Run getRun(RunId runId) {
         return runRepository.findById(runId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Run 不存在", Map.of("runId", runId.value())));
     }
 
+    /**
+     * 请求取消 Run：先更新本地状态，再尽力通知远端 opencode session abort，最后落取消事件。
+     */
     public Run cancelRun(RunId runId, String traceId) {
         Run run = getRun(runId);
         if (run.status().isTerminal()) {
@@ -373,6 +433,9 @@ public class RunApplicationService {
         return cancelled;
     }
 
+    /**
+     * 保存用户消息投影，只保存用户输入文本，不保存远端 assistant 内容。
+     */
     private void saveUserMessage(SessionId sessionId, String prompt, String traceId, Instant createdAt) {
         sessionMessageRepository.save(new SessionMessage(
                 new SessionMessageId(RuntimeIdGenerator.messageId()),
@@ -383,16 +446,25 @@ public class RunApplicationService {
                 traceId));
     }
 
+    /**
+     * 查询 Session，不存在时转换为统一 NOT_FOUND 异常。
+     */
     private Session findSession(SessionId sessionId) {
         return sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Session 不存在", Map.of("sessionId", sessionId.value())));
     }
 
+    /**
+     * 查询 Workspace，不存在时转换为统一 NOT_FOUND 异常。
+     */
     private Workspace findWorkspace(com.example.testagent.domain.workspace.WorkspaceId workspaceId) {
         return workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value())));
     }
 
+    /**
+     * 解析本次 Run 的 opencode 目标节点；已有远端 session 时强制粘滞到绑定节点。
+     */
     private OpencodeRoutingTarget resolveOpencodeTarget(Session session, RunId runId, Instant now, String traceId) {
         if (session.hasOpencodeSessionMapping()) {
             ExecutionNode node = executionNodeRepository.findById(session.opencodeExecutionNodeId())
@@ -429,6 +501,9 @@ public class RunApplicationService {
         return new OpencodeRoutingTarget(node, decision);
     }
 
+    /**
+     * 确保平台 Session 已绑定远端 opencode session；首次 Run 才懒创建远端会话。
+     */
     private Session ensureOpencodeSession(Session session, Workspace workspace, ExecutionNode node, String traceId) {
         if (session.hasOpencodeSessionMapping()) {
             return session;
@@ -459,10 +534,16 @@ public class RunApplicationService {
                         Map.of("sessionId", session.sessionId().value())));
     }
 
+    /**
+     * 追加平台 RunEvent，统一封装 RunEventDraft 构造。
+     */
     private void append(RunId runId, RunEventType type, String traceId, Instant occurredAt, Map<String, Object> payload) {
         runEventAppender.append(new RunEventDraft(runId, type, traceId, occurredAt, payload));
     }
 
+    /**
+     * 订阅 opencode 事件流，事件处理串行 offload，避免阻塞 Netty 线程。
+     */
     private void subscribeOpencodeEvents(Run run, ExecutionNode node, Workspace workspace, String traceId) {
         opencodeClientFacade.streamRunEvents(new OpencodeStreamEventsCommand(
                         node,
@@ -489,6 +570,9 @@ public class RunApplicationService {
                 });
     }
 
+    /**
+     * 处理单个 opencode 事件：终态事件落库并更新 Run，瞬态消息事件只发布 live bus。
+     */
     private void appendStreamEvent(Run originalRun, RunEventDraft draft) {
         if (draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED) {
             Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
@@ -509,6 +593,9 @@ public class RunApplicationService {
         runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
     }
 
+    /**
+     * 事件流异常时尽力把 Run 标记失败；失败落库本身异常只记录日志。
+     */
     private void failRunFromStream(Run run, String traceId, Throwable error) {
         try {
             Run current = runRepository.findById(run.runId()).orElse(run);

@@ -18,6 +18,9 @@ public record OpencodeRuntimeCommand(
         Object body,
         String traceId) {
 
+    /**
+     * 校验 runtime 调用的 HTTP 方法、绝对路径和 traceId，并固化 query 参数。
+     */
     public OpencodeRuntimeCommand {
         Objects.requireNonNull(node, "node must not be null");
         method = DomainValidation.requireText(method, "method").toUpperCase();

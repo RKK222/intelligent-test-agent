@@ -7,6 +7,9 @@ public record PageRequest(int page, int size) {
 
     public static final int MAX_SIZE = 200;
 
+    /**
+     * 校验分页请求边界，防止列表接口出现 0 页、负页或过大 page size。
+     */
     public PageRequest {
         if (page < 1) {
             throw new IllegalArgumentException("page must be greater than or equal to 1");
@@ -16,6 +19,9 @@ public record PageRequest(int page, int size) {
         }
     }
 
+    /**
+     * 计算 SQL 分页 offset，使用 long 避免 page/size 乘法溢出。
+     */
     public long offset() {
         return (long) (page - 1) * size;
     }

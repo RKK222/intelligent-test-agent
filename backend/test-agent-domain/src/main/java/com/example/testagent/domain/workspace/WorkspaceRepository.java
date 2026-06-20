@@ -9,9 +9,18 @@ import java.util.Optional;
  */
 public interface WorkspaceRepository {
 
+    /**
+     * 保存工作区聚合。
+     */
     Workspace save(Workspace workspace);
 
+    /**
+     * 按工作区 ID 查询工作区。
+     */
     Optional<Workspace> findById(WorkspaceId workspaceId);
 
+    /**
+     * 分页查询工作区列表。
+     */
     PageResponse<Workspace> findPage(PageRequest pageRequest);
 }

@@ -7,7 +7,13 @@ import java.util.Optional;
  */
 public interface RunRepository {
 
+    /**
+     * 保存运行聚合当前状态。
+     */
     Run save(Run run);
 
+    /**
+     * 按运行 ID 查询运行聚合。
+     */
     Optional<Run> findById(RunId runId);
 }

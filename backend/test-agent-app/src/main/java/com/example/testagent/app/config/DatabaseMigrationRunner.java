@@ -20,6 +20,9 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
     private final boolean enabled;
     private final String[] locations;
 
+    /**
+     * 注入迁移数据源和 Flyway 配置，locations 默认复用 persistence 模块 migration。
+     */
     public DatabaseMigrationRunner(
             DataSource dataSource,
             @Value("${spring.flyway.enabled:true}") boolean enabled,
@@ -29,6 +32,9 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         this.locations = locations;
     }
 
+    /**
+     * 应用启动早期执行数据库迁移；禁用 Flyway 时直接跳过。
+     */
     @Override
     public void run(ApplicationArguments args) {
         if (!enabled) {

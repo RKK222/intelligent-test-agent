@@ -30,6 +30,9 @@ public class SessionApplicationService {
     private final SessionRepository sessionRepository;
     private final SessionMessageRepository sessionMessageRepository;
 
+    /**
+     * 创建 Session 应用服务，Controller 不直接访问这些仓储实现。
+     */
     public SessionApplicationService(
             WorkspaceRepository workspaceRepository,
             SessionRepository sessionRepository,
@@ -39,6 +42,9 @@ public class SessionApplicationService {
         this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
     }
 
+    /**
+     * 在指定 Workspace 下创建平台 Session，创建前先确认 Workspace 存在。
+     */
     public Session createSession(WorkspaceId workspaceId, String title, String traceId) {
         if (workspaceRepository.findById(workspaceId).isEmpty()) {
             throw new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value()));
@@ -54,6 +60,9 @@ public class SessionApplicationService {
                 traceId));
     }
 
+    /**
+     * 查询未归档 Session；归档 Session 对外按不存在处理。
+     */
     public Session getSession(SessionId sessionId) {
         Session session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Session 不存在", Map.of("sessionId", sessionId.value())));
@@ -63,10 +72,16 @@ public class SessionApplicationService {
         return session;
     }
 
+    /**
+     * 按查询词分页列出 Session，分页上限由 PageRequest 负责约束。
+     */
     public PageResponse<Session> listSessions(String query, PageRequest pageRequest) {
         return sessionRepository.findPage(query, pageRequest);
     }
 
+    /**
+     * 分页列出指定 Workspace 下的 Session，Workspace 不存在时返回 NOT_FOUND。
+     */
     public PageResponse<Session> listSessions(WorkspaceId workspaceId, PageRequest pageRequest) {
         if (workspaceRepository.findById(workspaceId).isEmpty()) {
             throw new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value()));
@@ -74,6 +89,9 @@ public class SessionApplicationService {
         return sessionRepository.findByWorkspaceId(workspaceId, pageRequest);
     }
 
+    /**
+     * 更新 Session 标题和 pinned 状态，未传字段保持原值。
+     */
     public Session updateSession(SessionId sessionId, String title, Boolean pinned, String traceId) {
         Session current = getSession(sessionId);
         String nextTitle = title == null || title.isBlank() ? current.title() : title;
@@ -81,11 +99,17 @@ public class SessionApplicationService {
         return sessionRepository.save(current.updateTitleAndPinned(nextTitle, nextPinned, Instant.now(), traceId));
     }
 
+    /**
+     * 归档 Session；归档后查询接口会按不存在处理。
+     */
     public Session archiveSession(SessionId sessionId, String traceId) {
         Session current = getSession(sessionId);
         return sessionRepository.save(current.archive(Instant.now(), traceId));
     }
 
+    /**
+     * 追加平台侧 Session 消息，role 缺省为 USER；assistant 正文恢复不依赖本地消息表。
+     */
     public SessionMessage appendMessage(SessionId sessionId, SessionMessageRole role, String content, String traceId) {
         getSession(sessionId);
         SessionMessageRole resolvedRole = role == null ? SessionMessageRole.USER : role;
@@ -98,6 +122,9 @@ public class SessionApplicationService {
                 traceId));
     }
 
+    /**
+     * 分页列出 Session 消息，先校验 Session 未归档且存在。
+     */
     public PageResponse<SessionMessage> listMessages(SessionId sessionId, PageRequest pageRequest) {
         getSession(sessionId);
         return sessionMessageRepository.findBySessionId(sessionId, pageRequest);

@@ -35,6 +35,9 @@ public class InMemoryRateLimitWebFilter implements WebFilter {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
 
+    /**
+     * 使用配置创建内存固定窗口限流器，非法容量或窗口会归一为安全默认值。
+     */
     @Autowired
     public InMemoryRateLimitWebFilter(
             @Value("${test-agent.rate-limit.enabled:false}") boolean enabled,
@@ -45,6 +48,9 @@ public class InMemoryRateLimitWebFilter implements WebFilter {
         this.window = window == null || window.isZero() || window.isNegative() ? Duration.ofMinutes(1) : window;
     }
 
+    /**
+     * 对 /api/ 请求执行内存限流；关闭限流或非 API 路径直接放行。
+     */
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         if (!enabled || !exchange.getRequest().getPath().pathWithinApplication().value().startsWith("/api/")) {
@@ -64,6 +70,9 @@ public class InMemoryRateLimitWebFilter implements WebFilter {
         return chain.filter(exchange);
     }
 
+    /**
+     * 计算限流 key，优先使用 X-Forwarded-For 的首个地址，否则使用远端 IP。
+     */
     private String rateLimitKey(ServerWebExchange exchange) {
         String forwarded = exchange.getRequest().getHeaders().getFirst("X-Forwarded-For");
         if (forwarded != null && !forwarded.isBlank()) {
@@ -74,6 +83,9 @@ public class InMemoryRateLimitWebFilter implements WebFilter {
                 : exchange.getRequest().getRemoteAddress().getAddress().getHostAddress();
     }
 
+    /**
+     * 写出统一 429 错误响应，并保持 traceId 响应头。
+     */
     private Mono<Void> rateLimited(ServerWebExchange exchange) {
         String traceId = traceId(exchange);
         exchange.getResponse().setStatusCode(HttpStatus.TOO_MANY_REQUESTS);
@@ -88,6 +100,9 @@ public class InMemoryRateLimitWebFilter implements WebFilter {
         }
     }
 
+    /**
+     * 从 exchange 或请求头恢复 traceId，缺失或非法时生成新 traceId。
+     */
     private String traceId(ServerWebExchange exchange) {
         Object attribute = exchange.getAttribute(TraceConstants.TRACE_ID_ATTRIBUTE);
         if (attribute instanceof String traceId && TraceIdSupport.isValid(traceId)) {

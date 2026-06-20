@@ -16,6 +16,9 @@ public record RunEventDraft(
         Instant occurredAt,
         Map<String, Object> payload) {
 
+    /**
+     * 校验事件草稿必填字段，并复制 payload，正式 eventId/seq 留给 Repository 分配。
+     */
     public RunEventDraft {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(type, "type must not be null");

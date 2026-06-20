@@ -37,6 +37,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /**
+     * 调用 opencode health API，并把 generated 响应归一为平台健康结果。
+     */
     @Override
     public Mono<OpencodeHealthResult> health(ExecutionNode node, String traceId) {
         ApiClient apiClient = apiClient(node, traceId);
@@ -45,6 +48,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .map(ignored -> new OpencodeHealthResult(true, node.baseUrl()));
     }
 
+    /**
+     * 创建 opencode session；generated SDK 缺少稳定 DTO 时直接使用 JsonNode 提取 session id。
+     */
     @Override
     public Mono<OpencodeCreateSessionResult> createSession(
             ExecutionNode node,
@@ -80,6 +86,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .map(body -> new OpencodeCreateSessionResult(extractSessionId(body)));
     }
 
+    /**
+     * 调用远端 session abort，workspace 仅在非空时进入 query。
+     */
     @Override
     public Mono<OpencodeCancelResult> cancelSession(
             ExecutionNode node,
@@ -93,6 +102,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .map(cancelled -> new OpencodeCancelResult(Boolean.TRUE.equals(cancelled)));
     }
 
+    /**
+     * 通过 prompt_async 启动 opencode 运行，使用稳定 JSON Map 隔离 generated union DTO 差异。
+     */
     @Override
     public Mono<OpencodeStartRunResult> startRun(
             ExecutionNode node,
@@ -137,6 +149,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .thenReturn(new OpencodeStartRunResult(true));
     }
 
+    /**
+     * 构造 prompt_async 请求体，只写入调用方显式传入的可选运行态选择字段。
+     */
     private Map<String, Object> promptAsyncRequest(
             List<OpencodePromptPart> parts,
             String messageId,
@@ -172,6 +187,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         return Map.copyOf(request);
     }
 
+    /**
+     * 订阅 opencode SSE 原始事件流，由 facade 再映射为平台 RunEventDraft。
+     */
     @Override
     public Flux<JsonNode> streamEvents(ExecutionNode node, String directory, String workspace, String traceId) {
         ApiClient apiClient = apiClient(node, traceId);
@@ -180,6 +198,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .bodyToFlux(JsonNode.class);
     }
 
+    /**
+     * 查询 session Diff，并把 SnapshotFileDiff 映射为平台稳定 Diff 文件 DTO。
+     */
     @Override
     public Mono<OpencodeDiffResult> getDiff(
             ExecutionNode node,
@@ -196,6 +217,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .map(OpencodeDiffResult::new);
     }
 
+    /**
+     * 拒绝指定 message/part 的 Diff，绕开 generated 参数类重名问题直接发送稳定 JSON。
+     */
     @Override
     public Mono<OpencodeRejectDiffResult> rejectDiff(
             ExecutionNode node,
@@ -204,7 +228,7 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String workspace,
             String messageId,
             String partId,
-        String traceId) {
+            String traceId) {
         ApiClient apiClient = apiClient(node, traceId);
         // generated SessionApi 的参数包装类遮蔽了 model.SessionRevertRequest，这里直接构造稳定 JSON 请求体。
         Map<String, Object> request = optionalText(partId) == null
@@ -237,6 +261,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .thenReturn(new OpencodeRejectDiffResult(true));
     }
 
+    /**
+     * 受控调用 opencode runtime API，追加 directory/workspace/query 后返回 JSON projection。
+     */
     @Override
     public Mono<OpencodeRuntimeResult> runtime(
             ExecutionNode node,
@@ -280,6 +307,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .map(OpencodeRuntimeResult::new);
     }
 
+    /**
+     * 读取 opencode projected messages，并转换为平台 session message 投影。
+     */
     @Override
     public Mono<OpencodeSessionMessagesResult> sessionMessages(
             ExecutionNode node,
@@ -298,12 +328,18 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .map(this::toSessionMessagesResult);
     }
 
+    /**
+     * 为每次 gateway 调用创建带 baseUrl 和 traceId header 的 generated ApiClient。
+     */
     private ApiClient apiClient(ExecutionNode node, String traceId) {
         return new ApiClient()
                 .setBasePath(node.baseUrl())
                 .addDefaultHeader(TraceConstants.TRACE_ID_HEADER, traceId);
     }
 
+    /**
+     * 组装 opencode 约定的 directory/workspace query，workspace 为空时不传。
+     */
     private MultiValueMap<String, String> queryParams(ApiClient apiClient, String directory, String workspace) {
         MultiValueMap<String, String> queryParams = new LinkedMultiValueMap<>();
         queryParams.putAll(apiClient.parameterToMultiValueMap(null, "directory", directory));
@@ -314,6 +350,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         return queryParams;
     }
 
+    /**
+     * 从 create session JSON 响应中提取远端 session id，缺失时让 facade 转换为平台错误。
+     */
     private String extractSessionId(JsonNode body) {
         if (body == null || body.path("id").asText().isBlank()) {
             throw new IllegalStateException("opencode create session response missing id");
@@ -321,6 +360,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         return body.path("id").asText();
     }
 
+    /**
+     * 将 generated Diff 文件转换为平台 DTO，并为缺省状态提供 modified 默认值。
+     */
     private OpencodeDiffFile toDiffFile(SnapshotFileDiff diff) {
         String status = diff.getStatus() == null ? "modified" : diff.getStatus().getValue();
         return new OpencodeDiffFile(
@@ -331,6 +373,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 status);
     }
 
+    /**
+     * 将 generated messages 响应转换为平台结果，并保留分页 cursor 的不透明字符串。
+     */
     private OpencodeSessionMessagesResult toSessionMessagesResult(SessionMessagesResponse response) {
         List<OpencodeSessionMessage> messages = response == null || response.getData() == null
                 ? List.of()
@@ -344,6 +389,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 cursor == null ? null : cursor.getNext());
     }
 
+    /**
+     * 规范化单条 session message，补充 messageID/messageId 和 role 兼容字段。
+     */
     private OpencodeSessionMessage toSessionMessage(SessionMessage message) {
         Map<String, Object> raw = objectMapper.convertValue(message, new TypeReference<Map<String, Object>>() {
         });
@@ -358,6 +406,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         return new OpencodeSessionMessage(immutableWithoutNulls(normalized), partsFromContent(raw, messageId));
     }
 
+    /**
+     * 从 opencode message content 中抽取 part 列表，非列表内容按空列表处理。
+     */
     private List<Map<String, Object>> partsFromContent(Map<String, Object> raw, String messageId) {
         Object content = raw.get("content");
         if (!(content instanceof List<?> list)) {
@@ -369,6 +420,9 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                 .toList();
     }
 
+    /**
+     * 规范化 message part，补齐大小写兼容 ID 字段和工具名 alias。
+     */
     private Map<String, Object> normalizePart(Map<?, ?> rawPart, String messageId) {
         LinkedHashMap<String, Object> part = new LinkedHashMap<>();
         rawPart.forEach((key, value) -> {
@@ -393,10 +447,16 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         return immutableWithoutNulls(part);
     }
 
+    /**
+     * 读取非空字符串字段，空白字符串按缺失处理。
+     */
     private String stringValue(Object value) {
         return value instanceof String string && !string.isBlank() ? string : null;
     }
 
+    /**
+     * 复制 Map 并过滤 null 键值，防止 generated DTO 的空字段泄露给上游。
+     */
     private Map<String, Object> immutableWithoutNulls(Map<String, Object> source) {
         LinkedHashMap<String, Object> result = new LinkedHashMap<>();
         source.forEach((key, value) -> {
@@ -407,10 +467,16 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         return Map.copyOf(result);
     }
 
+    /**
+     * 将 generated BigDecimal 计数字段转为 long；缺失计数按 0 处理。
+     */
     private long toLong(BigDecimal value) {
         return value == null ? 0 : value.longValue();
     }
 
+    /**
+     * 规范化可选文本参数，避免向 opencode 发送空白 query 或空白 body 字段。
+     */
     private String optionalText(String value) {
         return value == null || value.isBlank() ? null : value;
     }

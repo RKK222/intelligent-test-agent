@@ -22,6 +22,9 @@ public record OpencodeStartRunCommand(
         String variant,
         String traceId) {
 
+    /**
+     * 校验 Run 启动命令，并确保 modelProviderId/modelId 要么同时存在要么同时缺失。
+     */
     public OpencodeStartRunCommand {
         Objects.requireNonNull(node, "node must not be null");
         opencodeSessionId = DomainValidation.requireText(opencodeSessionId, "opencodeSessionId");
@@ -40,6 +43,9 @@ public record OpencodeStartRunCommand(
         traceId = DomainValidation.requireText(traceId, "traceId");
     }
 
+    /**
+     * 使用纯文本 prompt 创建最小启动命令，兼容早期调用方。
+     */
     public OpencodeStartRunCommand(
             ExecutionNode node,
             String opencodeSessionId,
@@ -51,6 +57,9 @@ public record OpencodeStartRunCommand(
                 null, null, null, null, null, traceId);
     }
 
+    /**
+     * 规范化 prompt parts，缺省时自动补一个 text part，避免远端收到空 parts。
+     */
     private static List<OpencodePromptPart> normalizeParts(List<OpencodePromptPart> parts, String prompt) {
         if (parts == null || parts.isEmpty()) {
             return List.of(OpencodePromptPart.text(prompt));
@@ -58,6 +67,9 @@ public record OpencodeStartRunCommand(
         return List.copyOf(parts);
     }
 
+    /**
+     * 规范化可选文本，空白字符串按缺失处理。
+     */
     private static String optionalText(String value) {
         return value == null || value.isBlank() ? null : value;
     }

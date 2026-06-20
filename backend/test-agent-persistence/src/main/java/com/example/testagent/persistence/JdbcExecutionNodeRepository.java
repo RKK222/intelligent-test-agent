@@ -40,11 +40,17 @@ public class JdbcExecutionNodeRepository extends JdbcRepositorySupport implement
             instant(rs, "updated_at"),
             rs.getString("trace_id"));
 
+    /**
+     * 注入 JdbcClient 和 ObjectMapper，能力标签以 JSON 文本持久化。
+     */
     public JdbcExecutionNodeRepository(JdbcClient jdbcClient, ObjectMapper objectMapper) {
         this.jdbcClient = jdbcClient;
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 保存执行节点健康和容量快照；存在时更新，缺失时插入。
+     */
     @Override
     public ExecutionNode save(ExecutionNode executionNode) {
         if (findById(executionNode.executionNodeId()).isPresent()) {
@@ -93,6 +99,9 @@ public class JdbcExecutionNodeRepository extends JdbcRepositorySupport implement
         return executionNode;
     }
 
+    /**
+     * 按执行节点 ID 查询节点配置和健康快照。
+     */
     @Override
     public Optional<ExecutionNode> findById(ExecutionNodeId executionNodeId) {
         return jdbcClient.sql("""
@@ -106,6 +115,9 @@ public class JdbcExecutionNodeRepository extends JdbcRepositorySupport implement
                 .optional();
     }
 
+    /**
+     * 查询可路由节点，只返回 READY 且仍有容量的节点，并按负载、权重和更新时间排序。
+     */
     @Override
     public List<ExecutionNode> findRoutableNodes(int limit) {
         if (limit < 1 || limit > 500) {
@@ -125,6 +137,9 @@ public class JdbcExecutionNodeRepository extends JdbcRepositorySupport implement
                 .list();
     }
 
+    /**
+     * 将能力集合序列化为 JSON 文本，便于后续切换 JSONB 时集中调整。
+     */
     private String writeCapabilities(Set<String> capabilities) {
         try {
             return objectMapper.writeValueAsString(capabilities);
@@ -133,6 +148,9 @@ public class JdbcExecutionNodeRepository extends JdbcRepositorySupport implement
         }
     }
 
+    /**
+     * 从 JSON 文本恢复能力集合。
+     */
     private Set<String> readCapabilities(String json) {
         try {
             return objectMapper.readValue(json, CAPABILITIES_TYPE);

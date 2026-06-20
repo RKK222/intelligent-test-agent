@@ -33,6 +33,14 @@ opencode 运行态业务根包，负责平台 Session/Run 与远端 opencode 能
 - `test-agent-opencode-sdk-generated`。
 - `test-agent-persistence` 实现细节。
 
+## 测试位置
+
+- `backend/test-agent-opencode-runtime/src/test/java/com/example/testagent/opencode/runtime`。
+- `run.*` 测试必须覆盖 Run 创建、远端 session 懒创建/复用、事件持久化策略、Diff fallback 和消息恢复。
+- `session.*` 测试必须覆盖 Workspace 校验、归档隐藏、局部更新和消息追加默认 role。
+- `runtime.*` 测试必须覆盖 opencode runtime path、workspace directory 透传、query 过滤和 permission/question body 兼容。
+- `terminal.*` 测试必须覆盖 ticket 签发/消费/过期、active session 互斥、输入输出限流、WebSocket envelope 和进程适配。
+
 ## 修改时必须同步更新
 
 - `backend/test-agent-opencode-runtime/README.md`。
