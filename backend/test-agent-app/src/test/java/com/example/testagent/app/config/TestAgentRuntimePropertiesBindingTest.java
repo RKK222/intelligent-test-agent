@@ -24,7 +24,7 @@ class TestAgentRuntimePropertiesBindingTest {
             TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
 
             assertThat(properties.getSecurity().getCorsAllowedOrigins())
-                    .containsExactly("http://localhost:3000", "http://127.0.0.1:3000");
+                    .contains("http://localhost:3000", "http://127.0.0.1:3000", "http://127.0.0.1:4187");
         });
     }
 

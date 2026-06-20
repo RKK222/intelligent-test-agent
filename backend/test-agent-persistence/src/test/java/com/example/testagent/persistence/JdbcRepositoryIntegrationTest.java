@@ -249,8 +249,11 @@ class JdbcRepositoryIntegrationTest {
         sessions.save(session("ses_2234567890abcdef", "Demo pinned", true, SessionStatus.ACTIVE, 1));
         sessions.save(session("ses_3234567890abcdef", "Demo archived", true, SessionStatus.ARCHIVED, 2));
 
+        PageResponse<Session> all = sessions.findPage(null, new PageRequest(1, 10));
         PageResponse<Session> page = sessions.findPage("demo", new PageRequest(1, 10));
 
+        assertThat(all.items()).extracting(Session::sessionId)
+                .containsExactly(new SessionId("ses_2234567890abcdef"), new SessionId("ses_1234567890abcdef"));
         assertThat(page.items()).extracting(Session::sessionId)
                 .containsExactly(new SessionId("ses_2234567890abcdef"));
         assertThat(page.items().getFirst().pinned()).isTrue();

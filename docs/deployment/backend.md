@@ -65,6 +65,8 @@ TEST_AGENT_OPENCODE_BASE_URL=http://127.0.0.1:4096
 
 配置 `TEST_AGENT_API_TOKEN` 后，`/api/**` 要求 `Authorization: Bearer <token>`；未配置时本地默认放行。
 
+本地 profile 默认允许主前端和 `frontend-opencode` 的 Vite dev/preview/real E2E origin。生产必须设置 `TEST_AGENT_CORS_ALLOWED_ORIGINS`，不要沿用本地端口白名单。
+
 ## 测试环境 profile
 
 `test-agent-app` 提供 `test` profile 连接外部 PostgreSQL 测试库和外部 opencode server。真实主机、账号和密码必须通过环境变量注入，仓库内配置文件不保存密钥：

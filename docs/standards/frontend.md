@@ -114,7 +114,8 @@ corepack pnpm e2e:real
 3. E2E mock 必须使用 `docs/api/http-api.md` 中记录的后端 DTO 字段（例如文件列表使用 `directory` 而不是前端展示态 `type`）。
 4. 真实 E2E 必须通过 `backend-api` 和平台 WebSocket/SSE 入口验证，不得让前端或测试代码直连 opencode 公网 share API。
 5. `frontend-opencode` 的测试属于 opencode Vue/Vite 复刻工程验收，但不能替代 `frontend/` 主 workspace 的 Vitest、mock E2E 或 real E2E；`opencode-source/` 下的测试仍只作为参考。
-6. `frontend/playwright.real.config.ts` 只匹配 `*.real-spec.ts`，`corepack pnpm e2e:real` 必须配合真实 `test-agent-app`、前端和 opencode server 使用，不能用 mock E2E 替代；`tools/dev-phase11-real-e2e.sh` 是真实三服务验收入口。
+6. `frontend/playwright.real.config.ts` 只匹配 `*.real-spec.ts`，`corepack pnpm e2e:real` 必须配合真实 `test-agent-app`、前端和 opencode server 使用，不能用 mock E2E 替代；`tools/dev-phase11-real-e2e.sh` 是主 `frontend/` 真实三服务验收入口。
+7. `frontend-opencode/playwright.real.config.ts` 只匹配 `tests/e2e-real/*.real-spec.ts`，`cd frontend-opencode && corepack pnpm e2e:real` 是 opencode Vue/Vite 复刻工程自己的真实三服务 smoke 验收入口；该测试仍只能访问平台 `/api`、RunEvent SSE 和平台 PTY WebSocket。
 
 ## 完成标准
 

@@ -24,6 +24,7 @@
 4. API 返回平台 DTO 和统一错误格式。
 5. API 文档变更必须与 Controller、DTO、测试同步。
 6. 旧 `/api/...` URL 全部保留；新增 URL 与旧 URL 并行暴露，不重定向、不删除。
+7. CORS 本地默认仅覆盖主前端与 `frontend-opencode` 的 localhost/127.0.0.1 开发、预览和 real E2E 端口；生产必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式配置允许来源。
 
 ## API URL 分层
 

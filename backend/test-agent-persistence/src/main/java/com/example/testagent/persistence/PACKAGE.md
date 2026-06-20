@@ -15,6 +15,7 @@
 - `package-info.java`：说明 persistence 包是持久化适配边界。
 - `JdbcWorkspaceRepository`：实现 Workspace 持久化端口。
 - `JdbcSessionRepository`：实现 Session 持久化端口，并保存平台 session 到远端 opencode session/node 的内部映射。
+- `JdbcSessionRepository.findPage`：全局 ACTIVE session 查询按置顶、更新时间和自增 ID 排序；空搜索不绑定可空 query pattern，兼容 PostgreSQL 参数类型推断。
 - `JdbcSessionMessageRepository`：实现 SessionMessage 保存、查询、分页和计数。
 - `JdbcRunRepository`：实现 Run 持久化端口。
 - `JdbcRunEventRepository`：实现 RunEvent append-only 追加和增量读取；并发追加时依赖 `(run_id, seq)` 唯一约束冲突后重试来保持 seq 单调且不重复。

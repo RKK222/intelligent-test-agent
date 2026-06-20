@@ -67,7 +67,19 @@ public class TestAgentRuntimeProperties {
      */
     public static class Security {
         private String apiToken;
-        private List<String> corsAllowedOrigins = new ArrayList<>(List.of("http://localhost:3000", "http://127.0.0.1:3000"));
+        private List<String> corsAllowedOrigins = new ArrayList<>(List.of(
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+                "http://localhost:4173",
+                "http://127.0.0.1:4173",
+                "http://localhost:4177",
+                "http://127.0.0.1:4177",
+                "http://localhost:4187",
+                "http://127.0.0.1:4187",
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+                "http://localhost:5174",
+                "http://127.0.0.1:5174"));
 
         /**
          * 返回后端 API token，未配置时本地开发可关闭 token 校验。

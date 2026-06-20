@@ -21,10 +21,11 @@
 | Session share | 已接入 toolbar share popover，支持 publish、显示/复制/打开公开 URL、unpublish，操作统一经 `backend-api`。 |
 | Provider auth/config/worktree/MCP auth API | 后端平台代理已补齐；Settings 已接入 provider auth 状态、API key 保存/移除、provider OAuth methods/prompt inputs/authorize URL/code 与 auto callback payload、worktree 列表/创建/重置/删除，以及 MCP status/connect/disconnect/auth/remove auth 入口。 |
 | Mock E2E 验收 | Playwright 已覆盖桌面/移动端 App shell、首页会话列表、会话页加载、prompt submit 请求体，以及 fake RunEvent SSE 驱动 assistant delta 渲染到 timeline。 |
+| Real E2E 入口 | 已新增 `playwright.real.config.ts` 与 `tests/e2e-real/session-stream.real-spec.ts`，仅在 `TEST_AGENT_RUN_REAL_E2E=1` 下运行单个桌面 smoke，通过真实平台 API 查找/创建 workspace、UI 发送 prompt，并等待 RunEvent SSE 渲染 assistant 文本。 |
 
 ## 待真实三服务验收
 
-- 启动 `test-agent-app`、opencode server、`frontend-opencode` 后执行发送 prompt -> RunEvent SSE -> timeline 渲染闭环。
+- 在本机真实启动 `test-agent-app`、opencode server、`frontend-opencode` 后执行 `corepack pnpm e2e:real`，确认发送 prompt -> RunEvent SSE -> timeline 渲染闭环；当前真实套件已落地，但仍依赖外部服务可用性。
 - 桌面 1440x900 与移动 Pixel 7 截图对比原 opencode App。
 - 真实 provider OAuth、MCP auth、worktree、share 依赖可用 opencode runtime 环境；provider OAuth methods、prompt inputs、authorize URL、code/auto callback payload 已走平台代理，仍需真实 provider 验证外部浏览器授权闭环；worktree UI 已走平台代理，仍需真实 Git runtime 验证创建/重置/删除结果；share UI 已走平台代理，仍需真实公开分享服务验证 URL 可访问性。
 - MCP status/connect/disconnect/auth UI 已走平台代理；仍需真实 MCP server 验证连接切换、认证链接和错误状态刷新。

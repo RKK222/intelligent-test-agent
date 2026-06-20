@@ -23,7 +23,7 @@ public class RuntimeSecurityConfig {
      * 解析逗号分隔 CORS origin 白名单，空白项会被忽略。
      */
     public RuntimeSecurityConfig(
-            @Value("${test-agent.security.cors-allowed-origins:http://localhost:3000,http://127.0.0.1:3000}")
+            @Value("${test-agent.security.cors-allowed-origins:http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}")
             String corsAllowedOrigins) {
         this.corsAllowedOrigins = Arrays.stream(corsAllowedOrigins.split(","))
                 .map(String::trim)

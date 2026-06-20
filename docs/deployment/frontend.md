@@ -25,6 +25,15 @@ corepack pnpm build
 
 构建产物在 `frontend-opencode/dist/`，可由任意静态服务器托管；反向代理需把 `/api`、RunEvent SSE 和 PTY WebSocket 路径转发到 `test-agent-app`。
 
+`frontend-opencode` 的真实联调使用独立 Playwright 配置：
+
+```bash
+cd frontend-opencode
+FRONTEND_OPENCODE_REAL_API_BASE_URL=http://127.0.0.1:8080 corepack pnpm e2e:real
+```
+
+该命令要求 `test-agent-app` 和 opencode runtime 已经可用；Vite 只代理平台 `/api`，浏览器不会直连 opencode server。
+
 ## 环境变量
 
 前端运行时需要：

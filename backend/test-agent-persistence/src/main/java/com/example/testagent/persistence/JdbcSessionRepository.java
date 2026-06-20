@@ -114,33 +114,37 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
     @Override
     public PageResponse<Session> findPage(String query, PageRequest pageRequest) {
         String pattern = searchPattern(query);
-        var items = jdbcClient.sql("""
+        String queryFilter = pattern == null ? "" : """
+                          and (lower(title) like :queryPattern
+                              or lower(session_id) like :queryPattern)
+                        """;
+        var itemsSpec = jdbcClient.sql("""
                         select session_id, workspace_id, title, status, trace_id, created_at, updated_at,
                                opencode_session_id, opencode_execution_node_id, pinned
                         from sessions
                         where status = :status
-                          and (:queryPattern is null
-                              or lower(title) like :queryPattern
-                              or lower(session_id) like :queryPattern)
+                        """ + queryFilter + """
                         order by pinned desc, updated_at desc, id desc
                         limit :limit offset :offset
                         """)
                 .param("status", SessionStatus.ACTIVE.name())
-                .param("queryPattern", pattern)
                 .param("limit", pageRequest.size())
-                .param("offset", pageRequest.offset())
-                .query(rowMapper)
+                .param("offset", pageRequest.offset());
+        if (pattern != null) {
+            itemsSpec = itemsSpec.param("queryPattern", pattern);
+        }
+        var items = itemsSpec.query(rowMapper)
                 .list();
-        Long total = jdbcClient.sql("""
+        var totalSpec = jdbcClient.sql("""
                         select count(*)
                         from sessions
                         where status = :status
-                          and (:queryPattern is null
-                              or lower(title) like :queryPattern
-                              or lower(session_id) like :queryPattern)
-                        """)
-                .param("status", SessionStatus.ACTIVE.name())
-                .param("queryPattern", pattern)
+                        """ + queryFilter)
+                .param("status", SessionStatus.ACTIVE.name());
+        if (pattern != null) {
+            totalSpec = totalSpec.param("queryPattern", pattern);
+        }
+        Long total = totalSpec
                 .query(Long.class)
                 .single();
         return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);

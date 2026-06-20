@@ -57,7 +57,7 @@ public class TerminalWebSocketHandler implements WebSocketHandler {
             TerminalApplicationService terminalService,
             TerminalProcessFactory processFactory,
             TerminalMessageCodec codec,
-            @Value("${test-agent.security.cors-allowed-origins:http://localhost:3000,http://127.0.0.1:3000}")
+            @Value("${test-agent.security.cors-allowed-origins:http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}")
             String allowedOrigins,
             @Value("${test-agent.terminal.max-input-bytes:16384}") int maxInputBytes,
             @Value("${test-agent.terminal.input-messages-per-window:64}") int inputMessagesPerWindow,
