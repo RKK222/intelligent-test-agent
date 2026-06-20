@@ -22,13 +22,42 @@ describe("PromptComposer", () => {
     expect(screen.getByRole("dialog", { name: "Slash commands" })).toBeInTheDocument();
 
     await fireEvent.update(screen.getByLabelText("Search slash commands"), "comp");
-    await fireEvent.click(screen.getByRole("button", { name: "/compact Summarize the session" }));
+    await fireEvent.click(screen.getByRole("option", { name: "/compact Summarize the session" }));
 
     expect(screen.getByPlaceholderText("Ask opencode to inspect, edit, test, or explain this workspace...")).toHaveValue("/compact");
     await fireEvent.submit(screen.getByRole("form", { name: "Prompt composer" }));
 
     expect(view.emitted("submit")).toHaveLength(1);
     expect(workspace.loadCommands).toHaveBeenCalledOnce();
+  });
+
+  it("navigates slash commands with the keyboard and inserts argument templates", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const workspace = useWorkspaceStore();
+    workspace.commands = [
+      { commandId: "compact", name: "compact", description: "Summarize the session" },
+      { commandId: "review", name: "review", description: "Review staged changes", arguments: "--quick" }
+    ];
+    workspace.loadCommands = vi.fn();
+
+    render(PromptComposer, { global: { plugins: [pinia] } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Open slash commands" }));
+    const search = screen.getByLabelText("Search slash commands");
+
+    expect(screen.getByRole("option", { name: "/compact Summarize the session" })).toHaveAttribute("aria-selected", "true");
+    await fireEvent.keyDown(search, { key: "ArrowDown" });
+    expect(screen.getByRole("option", { name: "/review Review staged changes" })).toHaveAttribute("aria-selected", "true");
+    await fireEvent.keyDown(search, { key: "Enter" });
+
+    expect(screen.queryByRole("dialog", { name: "Slash commands" })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask opencode to inspect, edit, test, or explain this workspace...")).toHaveValue("/review --quick");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Open slash commands" }));
+    await fireEvent.keyDown(screen.getByLabelText("Search slash commands"), { key: "Escape" });
+
+    expect(screen.queryByRole("dialog", { name: "Slash commands" })).not.toBeInTheDocument();
   });
 
   it("selects runtime agent and model without adding prompt parts", async () => {

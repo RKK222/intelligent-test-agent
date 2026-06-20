@@ -666,7 +666,8 @@ small,
   text-align: left;
 }
 
-.slash-row:hover {
+.slash-row:hover,
+.slash-row.active {
   border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
   background: color-mix(in srgb, var(--accent) 9%, var(--panel-subtle));
 }

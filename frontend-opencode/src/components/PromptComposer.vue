@@ -16,6 +16,7 @@ const prompt = usePromptStore();
 const workspace = useWorkspaceStore();
 const slashOpen = ref(false);
 const slashQuery = ref("");
+const slashActiveIndex = ref(0);
 const filePickerOpen = ref(false);
 const filePickerMode = ref<FilePickerMode>("attach");
 const imageInput = ref<HTMLInputElement>();
@@ -54,6 +55,24 @@ watch(
   { immediate: true }
 );
 
+watch(slashQuery, () => {
+  slashActiveIndex.value = 0;
+});
+
+watch(
+  slashCommands,
+  (commands) => {
+    if (!commands.length) {
+      slashActiveIndex.value = 0;
+      return;
+    }
+    if (slashActiveIndex.value >= commands.length) {
+      slashActiveIndex.value = commands.length - 1;
+    }
+  },
+  { immediate: true }
+);
+
 function addFile() {
   void openFilePicker("attach");
 }
@@ -77,6 +96,9 @@ async function toggleSlashCommands() {
   }
   if (slashOpen.value) {
     await workspace.loadCommands();
+    slashActiveIndex.value = 0;
+  } else {
+    slashQuery.value = "";
   }
 }
 
@@ -84,6 +106,38 @@ function selectSlashCommand(command: CommandInfo) {
   prompt.insertSlashCommand(command);
   slashOpen.value = false;
   slashQuery.value = "";
+  slashActiveIndex.value = 0;
+}
+
+function handleSlashKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    slashOpen.value = false;
+    slashQuery.value = "";
+    slashActiveIndex.value = 0;
+    return;
+  }
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    event.preventDefault();
+    moveSlashActive(event.key === "ArrowDown" ? 1 : -1);
+    return;
+  }
+  if (event.key === "Enter") {
+    event.preventDefault();
+    const command = slashCommands.value[slashActiveIndex.value] ?? slashCommands.value[0];
+    if (command) {
+      selectSlashCommand(command);
+    }
+  }
+}
+
+function moveSlashActive(delta: number) {
+  const count = slashCommands.value.length;
+  if (!count) {
+    slashActiveIndex.value = 0;
+    return;
+  }
+  slashActiveIndex.value = (slashActiveIndex.value + delta + count) % count;
 }
 
 async function openFilePicker(mode: FilePickerMode) {
@@ -300,15 +354,25 @@ function readString(value: unknown) {
         <section v-if="slashOpen" class="slash-menu" role="dialog" aria-label="Slash commands">
           <label class="slash-search">
             <Search :size="14" />
-            <input v-model="slashQuery" aria-label="Search slash commands" autocomplete="off" placeholder="Search commands" />
+            <input
+              v-model="slashQuery"
+              aria-label="Search slash commands"
+              autocomplete="off"
+              placeholder="Search commands"
+              @keydown="handleSlashKeydown"
+            />
           </label>
-          <div class="slash-list">
+          <div class="slash-list" role="listbox" aria-label="Slash command results">
             <button
-              v-for="command in slashCommands"
+              v-for="(command, index) in slashCommands"
               :key="command.commandId"
               class="slash-row"
+              :class="{ active: index === slashActiveIndex }"
               type="button"
+              role="option"
+              :aria-selected="index === slashActiveIndex"
               :aria-label="`/${command.name} ${command.description ?? command.arguments ?? 'opencode command'}`"
+              @mouseenter="slashActiveIndex = index"
               @click="selectSlashCommand(command)"
             >
               <strong>/{{ command.name }}</strong>
