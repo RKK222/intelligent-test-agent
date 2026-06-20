@@ -23,6 +23,10 @@ const workspaceSessions = computed(() => {
   const currentWorkspaceId = routeWorkspaceId.value;
   return workspace.sessions.filter((item) => !currentWorkspaceId || item.workspaceId === currentWorkspaceId);
 });
+const visibleWorkspaceSessions = computed(() => {
+  const currentWorkspaceId = routeWorkspaceId.value;
+  return workspace.filteredSessions.filter((item) => !currentWorkspaceId || item.workspaceId === currentWorkspaceId);
+});
 
 watch(
   routeWorkspaceId,
@@ -76,7 +80,7 @@ async function submit() {
     <aside class="workspace-rail session-rail" aria-label="Session navigation">
       <div class="section-label">Sessions</div>
       <button
-        v-for="item in workspaceSessions"
+        v-for="item in visibleWorkspaceSessions"
         :key="item.sessionId"
         class="workspace-row"
         :class="{ active: item.sessionId === sessionId }"

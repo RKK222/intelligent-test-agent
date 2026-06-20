@@ -109,6 +109,20 @@ test("switches sessions from the session sidebar", async ({ page }, testInfo) =>
   await expect(page.getByText("Follow-up prompt")).toBeVisible();
 });
 
+test("filters the session sidebar with global search", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Session rail filtering is covered on the desktop shell.");
+  await mockBackendApi(page);
+
+  await page.goto("/w/wrk_1/session/ses_1");
+  await expect(page.getByRole("heading", { name: "Demo session" })).toBeVisible();
+
+  await page.getByPlaceholder("Search sessions, files, commands").fill("Second");
+
+  const rail = page.getByLabel("Session navigation");
+  await expect(rail.getByRole("button", { name: /Second session/ })).toBeVisible();
+  await expect(rail.getByRole("button", { name: /Demo session/ })).toHaveCount(0);
+});
+
 test("opens the first workspace session when session id is omitted", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "Optional session route fallback is covered on the desktop shell.");
   await mockBackendApi(page);
