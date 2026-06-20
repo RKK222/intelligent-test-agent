@@ -13,6 +13,7 @@
 - `src/components/DiffReviewPanel.vue`：复刻 opencode Review 面板的文件聚焦、unified/split 样式切换和 hunk 导航；数据来自平台 `SessionDiff`，不在浏览器端直连 opencode。
 - `src/components/MonacoDiffEditor.vue`：为 Review 面板懒加载 Monaco 只读 diff editor，unified/split 与面板状态同步；无可见视口或加载失败时保留 hunk 预览 fallback。
 - `src/components/FileTreePanel.vue`：复刻 opencode Files 侧栏的只读文件树入口，支持 runtime fs 列目录、进入目录、搜索、刷新、空态和错误态；数据统一来自平台 `/api/fs/*`。
+- `src/components/CommandPalette.vue`：复刻 opencode command palette 的平台命令目录入口，支持 toolbar trigger、`Ctrl/Cmd+Shift+P` 与 `Ctrl/Cmd+K` 打开、搜索过滤、方向键高亮、Enter 选择、Escape/背景关闭，并把选中的平台命令写入 composer 的 `/command` slash 文本。
 - `src/components/PromptComposer.vue`：复刻 opencode composer 的文本、附件、图片选择/粘贴/拖拽、@ 上下文、Agent/Model/Variant 运行态选择、shell mode 和 slash command 入口；附件/@ 文件选择通过平台 fs catalog，context chip 可移除，图片以平台 `file` part 契约发送，slash 菜单可由按钮或 textarea `/query` 触发，通过平台命令目录写入 `/command` 文本，并支持方向键、Enter、Escape 键盘操作；带 `hints` 或 `<...>/[...]` 模板的 slash command 会生成参数表单并实时补全 `/command args`；textarea Enter 提交、Shift+Enter 换行、边界 ArrowUp/ArrowDown 浏览历史；提交时 shell mode 走 `runSessionShell`，slash command 走 `runSessionCommand`。
 - `src/components/SessionToolbarActions.vue`：复刻 opencode session toolbar 的 share、fork、compact、revert、abort 入口；fork/revert 按 opencode `messageID` 请求体经平台代理。
 - `src/components/SessionForkDialog.vue`：复刻 opencode fork dialog 的用户消息选择列表，选择后通过 `backend-api.forkSession` 创建子会话并跳转。
@@ -24,7 +25,7 @@
 
 ## 测试记录
 
-- Playwright mock E2E 覆盖桌面/移动端 shell、首页会话列表、会话详情加载、prompt 提交请求构造，以及通过 fake EventSource 注入 RunEvent 后的 timeline 流式渲染。
+- Playwright mock E2E 覆盖桌面/移动端 shell、首页会话列表、命令面板入口、会话详情加载、prompt 提交请求构造，以及通过 fake EventSource 注入 RunEvent 后的 timeline 流式渲染。
 - Playwright real E2E 入口为 `playwright.real.config.ts` + `tests/e2e-real/*.real-spec.ts`，以单个桌面 smoke 通过真实 `test-agent-app` 创建或复用 workspace/session，再从 Vue UI 发送 prompt，等待 RunEvent SSE 渲染 assistant 文本；该套件只在 `TEST_AGENT_RUN_REAL_E2E=1` 下运行。
 
 ## 当前边界

@@ -22,6 +22,22 @@ test("renders desktop opencode workspace shell", async ({ page }) => {
   await expect(page.getByLabel("Sessions").getByText("/repo")).toBeVisible();
 });
 
+test("opens and filters the opencode command palette", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Global command palette keyboard coverage is desktop-specific.");
+  await mockBackendApi(page);
+
+  await page.goto("/");
+  await page.keyboard.press("Control+Shift+P");
+
+  const palette = page.getByRole("dialog", { name: "Command palette" });
+  await expect(palette).toBeVisible();
+  await page.getByLabel("Search commands").fill("review");
+  await expect(page.getByRole("option", { name: "/review Review staged changes" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("option", { name: "/compact Summarize the session" })).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(palette).toHaveCount(0);
+});
+
 test("opens a session, sends a prompt, and renders streamed RunEvent output", async ({ page }) => {
   const capture: Capture = { runRequests: [] };
   await mockBackendApi(page, capture);
@@ -133,6 +149,12 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         size: 20,
         total: 1
       });
+    }
+    if (path === "/api/commands") {
+      return json(route, [
+        { commandId: "compact", name: "compact", description: "Summarize the session" },
+        { commandId: "review", name: "review", description: "Review staged changes", arguments: "--quick" }
+      ]);
     }
     if (path === "/api/agents" || path === "/api/models" || path === "/api/providers") {
       return json(route, []);

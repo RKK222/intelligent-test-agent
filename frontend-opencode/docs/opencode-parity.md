@@ -9,7 +9,7 @@
 
 | 区域 | 状态 |
 |---|---|
-| App shell/topbar/search/new session/settings/command palette | 已实现 Vue 版本。 |
+| App shell/topbar/search/new session/settings/command palette | 已实现 Vue 版本；command palette 支持 toolbar trigger、`Ctrl/Cmd+Shift+P` 与 `Ctrl/Cmd+K` 打开、搜索过滤、方向键高亮、Enter 选择、Escape/背景关闭，并把平台 command catalog 选项写入 composer slash 文本。 |
 | Home workspace/session/provider/model/agent 展示 | 已实现，数据来自平台 API。 |
 | Session layout 左侧会话、中间 timeline/composer、右侧 review/files/terminal/status | 已实现首版结构；Files tab 已接入 runtime fs 只读文件树、目录进入、搜索、刷新、空态和错误态。 |
 | Session toolbar：share/fork/compact/revert/abort | 已接入 Vue toolbar；fork 可选择用户消息并跳转子会话，revert 回滚最新用户消息，compact 在当前 session 带 model/provider 时调用 summarize，abort 经平台 API。 |
