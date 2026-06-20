@@ -49,6 +49,24 @@
   --ta-chat-status-running: #555555;
   --ta-chat-status-done: #4f6f5b;
   --ta-chat-status-error: #9b4d4d;
+
+  /* ===== 语义 token（对齐前端样式规范） ===== */
+  --primary: #333333;
+  --primary-foreground: #ffffff;
+  --secondary: #f5f5f5;
+  --secondary-foreground: #333333;
+  --muted: #7a7a7a;
+  --muted-foreground: #7a7a7a;
+  --accent: #333333;
+  --accent-foreground: #ffffff;
+  --destructive: #9e3b34;
+  --destructive-foreground: #ffffff;
+  --background: #f5f5f5;
+  --foreground: #333333;
+  --border: #dddddd;
+  --surface: #ffffff;
+  --success: #3f7a5a;
+  --warning: #946015;
 }
 
 /* ===== Tailwind v4 内置色阶重映射到浅色 IDE token ===== */
@@ -84,6 +102,24 @@
   --color-red-200: #9e3b34;
   --color-red-900: #9e3b34;
   --color-red-950: #f4e3e1;
+
+  /* 语义色：暴露为 Tailwind 工具类（bg-primary / text-muted / border-destructive 等） */
+  --color-primary: #333333;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f5f5f5;
+  --color-secondary-foreground: #333333;
+  --color-muted: #7a7a7a;
+  --color-muted-foreground: #7a7a7a;
+  --color-accent: #333333;
+  --color-accent-foreground: #ffffff;
+  --color-destructive: #9e3b34;
+  --color-destructive-foreground: #ffffff;
+  --color-background: #f5f5f5;
+  --color-foreground: #333333;
+  --color-border: #dddddd;
+  --color-surface: #ffffff;
+  --color-success: #3f7a5a;
+  --color-warning: #946015;
 }
 
 * {
