@@ -1808,7 +1808,8 @@ small,
   flex-wrap: wrap;
 }
 
-.provider-auth-form input {
+.provider-auth-form input,
+.provider-auth-form select {
   flex: 1 1 180px;
   min-width: 0;
   height: 32px;
@@ -1817,6 +1818,26 @@ small,
   background: var(--bg-strong);
   color: var(--text);
   padding: 0 9px;
+}
+
+.provider-oauth-method,
+.provider-auth-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 180px;
+}
+
+.provider-oauth-method span,
+.provider-auth-prompt span,
+.auth-method-label,
+.auth-instruction {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.auth-instruction {
+  flex: 1 1 220px;
 }
 
 .auth-pill {

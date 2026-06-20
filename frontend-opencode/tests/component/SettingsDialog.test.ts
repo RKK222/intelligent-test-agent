@@ -75,4 +75,89 @@ describe("SettingsDialog", () => {
       ["list", "wrk_1"]
     ]);
   });
+
+  it("submits provider OAuth method prompts with the selected opencode method index", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const workspace = useWorkspaceStore();
+    const platform = usePlatformStore();
+    const calls: Array<[string, ...unknown[]]> = [];
+
+    workspace.selectedWorkspaceId = "wrk_1";
+    workspace.providers = [{ providerId: "github-copilot", name: "Copilot", status: "available" }];
+
+    Object.defineProperty(platform, "api", {
+      value: {
+        listProviderAuth: async (...args: unknown[]) => {
+          calls.push(["list", ...args]);
+          return {
+            "github-copilot": [
+              { type: "api", label: "API key" },
+              {
+                type: "oauth",
+                label: "Browser login",
+                prompts: [
+                  {
+                    type: "select",
+                    key: "region",
+                    message: "Region",
+                    options: [
+                      { label: "Public", value: "public" },
+                      { label: "Enterprise", value: "enterprise", hint: "GitHub Enterprise" }
+                    ]
+                  },
+                  {
+                    type: "text",
+                    key: "tenant",
+                    message: "Tenant",
+                    placeholder: "tenant id",
+                    when: { key: "region", op: "eq", value: "enterprise" }
+                  }
+                ]
+              }
+            ]
+          };
+        },
+        authorizeProviderOAuth: async (...args: unknown[]) => {
+          calls.push(["oauth", ...args]);
+          return { url: "https://auth.example/copilot", method: "code", instructions: "Paste the browser code" };
+        },
+        completeProviderOAuth: async (...args: unknown[]) => calls.push(["callback", ...args]),
+        setProviderAuth: async (...args: unknown[]) => calls.push(["set", ...args]),
+        removeProviderAuth: async (...args: unknown[]) => calls.push(["remove", ...args])
+      }
+    });
+
+    render(Harness, { global: { plugins: [pinia] } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(await screen.findByText("Browser login")).toBeInTheDocument();
+
+    await fireEvent.update(screen.getByLabelText("Copilot Region"), "enterprise");
+    await fireEvent.update(await screen.findByLabelText("Copilot Tenant"), "acme");
+    await fireEvent.click(screen.getByRole("button", { name: "Authorize Copilot OAuth" }));
+
+    expect(await screen.findByRole("link", { name: "Open Copilot OAuth URL" })).toHaveAttribute(
+      "href",
+      "https://auth.example/copilot"
+    );
+    expect(screen.getByText("Paste the browser code")).toBeInTheDocument();
+
+    await fireEvent.update(screen.getByLabelText("Copilot OAuth code"), "oauth-code");
+    await fireEvent.click(screen.getByRole("button", { name: "Complete Copilot OAuth" }));
+
+    expect(calls).toContainEqual([
+      "oauth",
+      "github-copilot",
+      {
+        method: 1,
+        inputs: {
+          callbackUrl: "http://localhost:3000/api/provider/github-copilot/oauth/callback",
+          region: "enterprise",
+          tenant: "acme"
+        }
+      }
+    ]);
+    expect(calls).toContainEqual(["callback", "github-copilot", { method: 1, code: "oauth-code" }]);
+  });
 });

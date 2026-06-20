@@ -13,7 +13,7 @@
 | RunEvent stream | `event-stream-client.subscribeRunEvents` | `/api/runs/{runId}/events` |
 | Terminal | `createTerminalTicket` + PTY JSON envelope | `/api/sessions/{sessionId}/terminal/tickets` + 后端 WebSocket ticket；WebSocket 只发送 `input/resize/close` envelope |
 | Config/settings | `getConfig/updateConfig/disposeGlobal` | `/api/config`、`/api/global/dispose` |
-| Provider auth/OAuth | `listProviderAuth/authorizeProviderOAuth/completeProviderOAuth/setProviderAuth/removeProviderAuth` | `/api/provider/auth`、`/api/provider/{providerId}/oauth/*`、`/api/auth/{providerId}` |
+| Provider auth/OAuth | `listProviderAuth/authorizeProviderOAuth/completeProviderOAuth/setProviderAuth/removeProviderAuth` | `/api/provider/auth`、`/api/provider/{providerId}/oauth/*`、`/api/auth/{providerId}`；`listProviderAuth` 兼容 opencode `ProviderAuthMethod[]` map，authorize 保留 method index 与 prompt inputs |
 | Worktree | `listWorktrees/createWorktree/removeWorktree/resetWorktree` | `/api/worktrees`、`/api/worktrees/reset` |
 | Session share | `shareSession/unshareSession` | `/api/sessions/{sessionId}/share` |
 | MCP connect/auth | `connectMcp/disconnectMcp/startMcpAuth/completeMcpAuth/authenticateMcp/removeMcpAuth` | `/api/mcp/{name}/connect|disconnect|auth*` |

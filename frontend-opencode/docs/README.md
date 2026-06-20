@@ -16,7 +16,7 @@
 - `src/components/SessionToolbarActions.vue`：复刻 opencode session toolbar 的 share、fork、compact、revert、abort 入口；fork/revert 按 opencode `messageID` 请求体经平台代理。
 - `src/components/SessionForkDialog.vue`：复刻 opencode fork dialog 的用户消息选择列表，选择后通过 `backend-api.forkSession` 创建子会话并跳转。
 - `src/components/SessionShareButton.vue`：复刻 opencode session share publish/view/copy/unpublish 入口；publish/unpublish 通过平台 `backend-api`，公开 URL 只保存在前端会话状态。
-- `src/components/SettingsDialog.vue`：承载 opencode 设置入口，已接入 provider auth 状态、API key 保存/移除、provider OAuth authorize URL 展示和基础 code callback。
+- `src/components/SettingsDialog.vue`：承载 opencode 设置入口，已接入 provider auth 状态、API key 保存/移除、provider OAuth methods、prompt inputs、授权 URL、code/auto callback payload。
 - `src/components/SettingsWorktreePanel.vue`：复刻 opencode workspace/worktree 管理入口，支持 experimental worktree 列表、创建、重置和删除；所有操作经平台 `backend-api` 代理。
 - `src/components/SettingsMcpPanel.vue`：复刻 opencode MCP 状态/认证/开关入口，展示 connected/failed/needs_auth 等状态，并通过平台 API connect/disconnect、发起或移除 MCP auth。
 - `src/components/TerminalPanel.vue`：复刻 opencode Terminal 侧栏基础交互，ticket 经 `backend-api` 获取，WebSocket 使用平台 JSON envelope 发送 input/resize/close，展示 output/warning/error，并限制前端输出片段数量。

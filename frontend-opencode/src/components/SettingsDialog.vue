@@ -14,11 +14,40 @@ type ProviderAuthState = {
   account?: string;
 };
 
+type ProviderAuthPrompt = {
+  type: "text" | "select";
+  key: string;
+  message: string;
+  placeholder?: string;
+  options?: Array<{ label: string; value: string; hint?: string }>;
+  when?: { key: string; op: "eq" | "neq"; value: string };
+};
+
+type ProviderAuthMethod = {
+  type: "oauth" | "api" | string;
+  label: string;
+  prompts?: ProviderAuthPrompt[];
+};
+
+type IndexedProviderAuthMethod = ProviderAuthMethod & {
+  methodIndex: number;
+};
+
+type ProviderOAuthAuthorization = {
+  url: string;
+  method: "auto" | "code" | string;
+  instructions?: string;
+};
+
 const open = ref(false);
 const providerAuth = ref<Record<string, ProviderAuthState>>({});
+const providerAuthMethods = ref<Record<string, ProviderAuthMethod[]>>({});
 const providerKeys = ref<Record<string, string>>({});
 const providerOAuthLinks = ref<Record<string, string | undefined>>({});
+const providerOAuthAuthorizations = ref<Record<string, ProviderOAuthAuthorization | undefined>>({});
 const providerOAuthCodes = ref<Record<string, string>>({});
+const providerOAuthInputs = ref<Record<string, Record<string, string>>>({});
+const providerOAuthMethodIndexes = ref<Record<string, number | undefined>>({});
 const providerActions = ref<Record<string, string | undefined>>({});
 const providerError = ref<string>();
 const settings = useSettingsStore();
@@ -37,7 +66,9 @@ function toggleFromClick(event: Event) {
 async function loadProviderAuth() {
   providerError.value = undefined;
   try {
-    providerAuth.value = normalizeProviderAuth(await platform.api.listProviderAuth(workspace.selectedWorkspaceId));
+    const normalized = normalizeProviderAuth(await platform.api.listProviderAuth(workspace.selectedWorkspaceId));
+    providerAuth.value = normalized.states;
+    providerAuthMethods.value = normalized.methods;
   } catch (cause) {
     providerError.value = cause instanceof Error ? cause.message : "Provider auth 加载失败";
   }
@@ -80,17 +111,20 @@ async function authorizeProviderOAuth(provider: ProviderInfo) {
   providerActions.value[provider.providerId] = "oauth";
   providerError.value = undefined;
   try {
+    const method = selectedOAuthMethodIndex(provider);
     const response = await platform.api.authorizeProviderOAuth(provider.providerId, {
-      method: 0,
+      method,
       inputs: {
-        callbackUrl: providerOAuthCallbackUrl(provider.providerId)
+        callbackUrl: providerOAuthCallbackUrl(provider.providerId),
+        ...providerOAuthPromptInputs(provider)
       }
     });
-    const url = extractUrl(response);
-    if (!url) {
+    const authorization = extractAuthorization(response);
+    if (!authorization) {
       throw new Error("Provider OAuth 响应缺少授权 URL");
     }
-    providerOAuthLinks.value = { ...providerOAuthLinks.value, [provider.providerId]: url };
+    providerOAuthAuthorizations.value = { ...providerOAuthAuthorizations.value, [provider.providerId]: authorization };
+    providerOAuthLinks.value = { ...providerOAuthLinks.value, [provider.providerId]: authorization.url };
   } catch (cause) {
     providerError.value = cause instanceof Error ? cause.message : "Provider OAuth 发起失败";
   } finally {
@@ -99,14 +133,18 @@ async function authorizeProviderOAuth(provider: ProviderInfo) {
 }
 
 async function completeProviderOAuth(provider: ProviderInfo) {
+  const authorization = providerOAuthAuthorizations.value[provider.providerId];
   const code = providerOAuthCodes.value[provider.providerId]?.trim();
-  if (!code) {
+  if (authorization?.method !== "auto" && !code) {
     return;
   }
   providerActions.value[provider.providerId] = "callback";
   providerError.value = undefined;
   try {
-    await platform.api.completeProviderOAuth(provider.providerId, { method: 0, code });
+    await platform.api.completeProviderOAuth(provider.providerId, {
+      method: selectedOAuthMethodIndex(provider),
+      ...(authorization?.method === "auto" ? {} : { code })
+    });
     providerOAuthCodes.value[provider.providerId] = "";
     await loadProviderAuth();
   } catch (cause) {
@@ -133,37 +171,203 @@ function providerOAuthCallbackUrl(providerId: string) {
   return `${window.location.origin}/api/provider/${encodeURIComponent(providerId)}/oauth/callback`;
 }
 
+function oauthMethodsForProvider(provider: ProviderInfo): IndexedProviderAuthMethod[] {
+  return providerMethodsForProvider(provider)
+    .map((method, methodIndex) => ({ ...method, methodIndex }))
+    .filter((method) => method.type === "oauth");
+}
+
+function selectedOAuthMethod(provider: ProviderInfo): IndexedProviderAuthMethod | undefined {
+  const methods = oauthMethodsForProvider(provider);
+  const selected = selectedOAuthMethodIndex(provider);
+  return methods.find((method) => method.methodIndex === selected) ?? methods[0];
+}
+
+function selectedOAuthMethodIndex(provider: ProviderInfo) {
+  const methods = oauthMethodsForProvider(provider);
+  const selected = providerOAuthMethodIndexes.value[provider.providerId];
+  if (selected !== undefined && methods.some((method) => method.methodIndex === selected)) {
+    return selected;
+  }
+  return methods[0]?.methodIndex ?? 0;
+}
+
+function setProviderOAuthMethod(provider: ProviderInfo, event: Event) {
+  const value = Number((event.target as HTMLSelectElement).value);
+  providerOAuthMethodIndexes.value[provider.providerId] = Number.isFinite(value) ? value : undefined;
+  providerOAuthInputs.value[provider.providerId] = {};
+  providerOAuthLinks.value = { ...providerOAuthLinks.value, [provider.providerId]: undefined };
+  providerOAuthAuthorizations.value = { ...providerOAuthAuthorizations.value, [provider.providerId]: undefined };
+}
+
+function visibleOAuthPrompts(provider: ProviderInfo) {
+  const inputs = providerOAuthInputs.value[provider.providerId] ?? {};
+  return (selectedOAuthMethod(provider)?.prompts ?? []).filter((prompt) => promptMatches(prompt, inputs));
+}
+
+function providerOAuthInput(provider: ProviderInfo, key: string) {
+  return providerOAuthInputs.value[provider.providerId]?.[key] ?? "";
+}
+
+function setProviderOAuthInput(provider: ProviderInfo, key: string, event: Event) {
+  const value = (event.target as HTMLInputElement | HTMLSelectElement).value;
+  providerOAuthInputs.value[provider.providerId] = {
+    ...(providerOAuthInputs.value[provider.providerId] ?? {}),
+    [key]: value
+  };
+}
+
+function providerOAuthPromptInputs(provider: ProviderInfo) {
+  const visible = new Set(visibleOAuthPrompts(provider).map((prompt) => prompt.key));
+  return Object.fromEntries(
+    Object.entries(providerOAuthInputs.value[provider.providerId] ?? {})
+      .filter(([key, value]) => visible.has(key) && value.trim())
+      .map(([key, value]) => [key, value.trim()])
+  );
+}
+
+function providerMethodsForProvider(provider: ProviderInfo) {
+  const methods = providerAuthMethods.value[provider.providerId];
+  if (methods?.length) {
+    return methods;
+  }
+  return [{ type: "oauth", label: "OAuth" }];
+}
+
+function promptMatches(prompt: ProviderAuthPrompt, inputs: Record<string, string>) {
+  if (!prompt.when) {
+    return true;
+  }
+  const actual = inputs[prompt.when.key];
+  if (actual === undefined) {
+    return false;
+  }
+  return prompt.when.op === "eq" ? actual === prompt.when.value : actual !== prompt.when.value;
+}
+
 onMounted(() => document.addEventListener("click", toggleFromClick));
 onUnmounted(() => document.removeEventListener("click", toggleFromClick));
 
-// 平台 auth 返回值来自后端透传，这里只抽取 UI 需要的稳定字段。
+// 平台 auth 返回值兼容两类形态：平台状态列表，以及 opencode provider_auth 的 method map。
 function normalizeProviderAuth(response: unknown) {
-  const items = Array.isArray(response)
-    ? response
-    : isRecord(response) && Array.isArray(response.items)
-      ? response.items
-      : [];
-  return Object.fromEntries(
-    items.flatMap((item) => {
-      if (!isRecord(item)) {
-        return [];
+  const states: Record<string, ProviderAuthState> = {};
+  const methods: Record<string, ProviderAuthMethod[]> = {};
+  const source = isRecord(response) && isRecord(response.data) ? response.data : response;
+  if (Array.isArray(source)) {
+    Object.assign(states, normalizeProviderAuthStates(source));
+    return { states, methods };
+  }
+  if (!isRecord(source)) {
+    return { states, methods };
+  }
+  if (Array.isArray(source.items)) {
+    Object.assign(states, normalizeProviderAuthStates(source.items));
+    return { states, methods };
+  }
+  Object.entries(source).forEach(([providerId, value]) => {
+    if (Array.isArray(value)) {
+      const normalized = value.flatMap(normalizeProviderAuthMethod);
+      if (normalized.length) {
+        methods[providerId] = normalized;
       }
-      const providerId = readString(item.providerId) ?? readString(item.id) ?? readString(item.provider);
-      if (!providerId) {
-        return [];
+      return;
+    }
+    if (isRecord(value) && Array.isArray(value.methods)) {
+      const normalized = value.methods.flatMap(normalizeProviderAuthMethod);
+      if (normalized.length) {
+        methods[providerId] = normalized;
       }
-      return [
-        [
-          providerId,
-          {
-            providerId,
-            status: readString(item.status) ?? readString(item.state) ?? "unknown",
-            account: readString(item.account) ?? readString(item.email)
+      return;
+    }
+    normalizeProviderAuthState(providerId, value).forEach((state) => {
+      states[state.providerId] = state;
+    });
+  });
+  return { states, methods };
+}
+
+function normalizeProviderAuthStates(items: unknown[]) {
+  return Object.fromEntries(items.flatMap((item) => normalizeProviderAuthState(undefined, item).map((state) => [state.providerId, state])));
+}
+
+function normalizeProviderAuthState(providerId: string | undefined, item: unknown): ProviderAuthState[] {
+  if (!isRecord(item)) {
+    return [];
+  }
+  const id = providerId ?? readString(item.providerId) ?? readString(item.id) ?? readString(item.provider);
+  if (!id) {
+    return [];
+  }
+  return [
+    {
+      providerId: id,
+      status: readString(item.status) ?? readString(item.state) ?? "unknown",
+      account: readString(item.account) ?? readString(item.email)
+    }
+  ];
+}
+
+function normalizeProviderAuthMethod(item: unknown): ProviderAuthMethod[] {
+  if (!isRecord(item)) {
+    return [];
+  }
+  const type = readString(item.type);
+  const label = readString(item.label) ?? (type === "api" ? "API key" : "OAuth");
+  if (type !== "api" && type !== "oauth") {
+    return [];
+  }
+  return [
+    {
+      type,
+      label,
+      prompts: Array.isArray(item.prompts) ? item.prompts.flatMap(normalizeProviderAuthPrompt) : undefined
+    }
+  ];
+}
+
+function normalizeProviderAuthPrompt(item: unknown): ProviderAuthPrompt[] {
+  if (!isRecord(item)) {
+    return [];
+  }
+  const type = readString(item.type);
+  const key = readString(item.key);
+  const message = readString(item.message);
+  if ((type !== "text" && type !== "select") || !key || !message) {
+    return [];
+  }
+  const prompt: ProviderAuthPrompt = {
+    type,
+    key,
+    message,
+    placeholder: readString(item.placeholder),
+    when: normalizePromptWhen(item.when)
+  };
+  if (type === "select") {
+    prompt.options = Array.isArray(item.options)
+      ? item.options.flatMap((option) => {
+          if (!isRecord(option)) {
+            return [];
           }
-        ]
-      ];
-    })
-  ) as Record<string, ProviderAuthState>;
+          const value = readString(option.value);
+          const label = readString(option.label) ?? value;
+          return value && label ? [{ value, label, hint: readString(option.hint) }] : [];
+        })
+      : [];
+  }
+  return [prompt];
+}
+
+function normalizePromptWhen(value: unknown): ProviderAuthPrompt["when"] {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const key = readString(value.key);
+  const op = readString(value.op);
+  const whenValue = readString(value.value);
+  if (!key || (op !== "eq" && op !== "neq") || !whenValue) {
+    return undefined;
+  }
+  return { key, op, value: whenValue };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -174,12 +378,21 @@ function readString(value: unknown) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function extractUrl(response: unknown) {
+function extractAuthorization(response: unknown): ProviderOAuthAuthorization | undefined {
   if (!isRecord(response)) {
     return undefined;
   }
   const authorization = isRecord(response.authorization) ? response.authorization : undefined;
-  return readString(response.url) ?? readString(response.href) ?? readString(response.authorizationUrl) ?? readString(authorization?.url);
+  const source = authorization ?? response;
+  const url = readString(source.url) ?? readString(source.href) ?? readString(source.authorizationUrl);
+  if (!url) {
+    return undefined;
+  }
+  return {
+    url,
+    method: readString(source.method) ?? "code",
+    instructions: readString(source.instructions)
+  };
 }
 </script>
 
@@ -258,6 +471,46 @@ function extractUrl(response: unknown) {
             >
               <KeyRound :size="14" />OAuth
             </button>
+            <label v-if="oauthMethodsForProvider(provider).length > 1" class="provider-oauth-method">
+              <span>OAuth method</span>
+              <select
+                :aria-label="`${provider.name} OAuth method`"
+                :value="selectedOAuthMethodIndex(provider)"
+                @change="setProviderOAuthMethod(provider, $event)"
+              >
+                <option v-for="method in oauthMethodsForProvider(provider)" :key="method.methodIndex" :value="method.methodIndex">
+                  {{ method.label }}
+                </option>
+              </select>
+            </label>
+            <small v-else-if="selectedOAuthMethod(provider)" class="auth-method-label">
+              {{ selectedOAuthMethod(provider)?.label }}
+            </small>
+            <template v-for="prompt in visibleOAuthPrompts(provider)" :key="prompt.key">
+              <label v-if="prompt.type === 'select'" class="provider-auth-prompt">
+                <span>{{ prompt.message }}</span>
+                <select
+                  :aria-label="`${provider.name} ${prompt.message}`"
+                  :value="providerOAuthInput(provider, prompt.key)"
+                  @change="setProviderOAuthInput(provider, prompt.key, $event)"
+                >
+                  <option value="">Select...</option>
+                  <option v-for="option in prompt.options ?? []" :key="option.value" :value="option.value">
+                    {{ option.label }}{{ option.hint ? ` - ${option.hint}` : "" }}
+                  </option>
+                </select>
+              </label>
+              <label v-else class="provider-auth-prompt">
+                <span>{{ prompt.message }}</span>
+                <input
+                  :aria-label="`${provider.name} ${prompt.message}`"
+                  autocomplete="off"
+                  :placeholder="prompt.placeholder ?? prompt.message"
+                  :value="providerOAuthInput(provider, prompt.key)"
+                  @input="setProviderOAuthInput(provider, prompt.key, $event)"
+                />
+              </label>
+            </template>
             <a
               v-if="providerOAuthLinks[provider.providerId]"
               class="icon-text"
@@ -268,8 +521,11 @@ function extractUrl(response: unknown) {
             >
               <ExternalLink :size="14" />Open OAuth
             </a>
+            <small v-if="providerOAuthAuthorizations[provider.providerId]?.instructions" class="auth-instruction">
+              {{ providerOAuthAuthorizations[provider.providerId]?.instructions }}
+            </small>
             <input
-              v-if="providerOAuthLinks[provider.providerId]"
+              v-if="providerOAuthLinks[provider.providerId] && providerOAuthAuthorizations[provider.providerId]?.method !== 'auto'"
               v-model="providerOAuthCodes[provider.providerId]"
               :aria-label="`${provider.name} OAuth code`"
               autocomplete="off"
@@ -283,7 +539,7 @@ function extractUrl(response: unknown) {
               :disabled="providerActions[provider.providerId] === 'callback'"
               @click="completeProviderOAuth(provider)"
             >
-              Complete OAuth
+              {{ providerOAuthAuthorizations[provider.providerId]?.method === "auto" ? "Complete automatic OAuth" : "Complete OAuth" }}
             </button>
             <button
               class="icon-text"
