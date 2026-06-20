@@ -4,7 +4,7 @@
 |---|---|---|
 | Agent/Model/Provider catalog | `backend-api.listAgents/listModels/listProviders` | `/api/agents`、`/api/models`、`/api/providers` |
 | Command/Reference catalog | `backend-api.listCommands/listReferences` | `/api/commands`、`/api/references` |
-| File context picker | `listRuntimeFiles/findRuntimeFiles/readRuntimeFile` | `/api/fs/list`、`/api/fs/find`、`/api/fs/read` |
+| File context picker / Files side panel | `listRuntimeFiles/findRuntimeFiles/readRuntimeFile` | `/api/fs/list`、`/api/fs/find`、`/api/fs/read` |
 | VCS/LSP/MCP status | `getVcsStatus/getVcsDiff/getLspStatus/getMcpStatus/getMcpResources/getMcpTools` | `/api/vcs/*`、`/api/lsp/status`、`/api/mcp/*` |
 | Prompt submit runtime selection | `startRun({ parts, agent, model, variant })` | `/api/runs`；Agent/Model/Variant 是运行态参数，不进入普通 prompt part；图片附件随 `parts` 以 `file` part 的 `mimeType/url` 发送 |
 | Session children/todo/diff | `getSessionChildren/getSessionTodo/getSessionDiff` | `/api/sessions/{sessionId}/children|todo|diff` |

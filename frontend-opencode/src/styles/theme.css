@@ -753,6 +753,81 @@ small,
   color: var(--text-muted);
 }
 
+.file-tree-panel {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.file-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 10px;
+}
+
+.file-tree-header > div {
+  min-width: 0;
+}
+
+.file-tree-header small {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-list {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.file-tree-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--panel-subtle);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.file-tree-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel-subtle));
+}
+
+.file-tree-parent {
+  border-style: dashed;
+}
+
+.file-tree-row span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.file-tree-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-row small {
+  color: var(--text-muted);
+}
+
 .context-chip {
   display: inline-flex;
   align-items: center;

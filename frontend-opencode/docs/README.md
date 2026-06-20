@@ -11,6 +11,7 @@
 ## 组件记录
 
 - `src/components/DiffReviewPanel.vue`：复刻 opencode Review 面板的文件聚焦、unified/split 样式切换和 hunk 导航；数据来自平台 `SessionDiff`，不在浏览器端直连 opencode。
+- `src/components/FileTreePanel.vue`：复刻 opencode Files 侧栏的只读文件树入口，支持 runtime fs 列目录、进入目录、搜索、刷新、空态和错误态；数据统一来自平台 `/api/fs/*`。
 - `src/components/PromptComposer.vue`：复刻 opencode composer 的文本、附件、图片选择/粘贴/拖拽、@ 上下文、Agent/Model/Variant 运行态选择、shell mode 和 slash command 入口；附件/@ 文件选择通过平台 fs catalog，context chip 可移除，图片以平台 `file` part 契约发送，slash 菜单通过平台命令目录写入 `/command` 文本，并支持方向键、Enter、Escape 键盘操作。
 - `src/components/SessionToolbarActions.vue`：复刻 opencode session toolbar 的 share、fork、compact、revert、abort 入口；fork/revert 按 opencode `messageID` 请求体经平台代理。
 - `src/components/SessionForkDialog.vue`：复刻 opencode fork dialog 的用户消息选择列表，选择后通过 `backend-api.forkSession` 创建子会话并跳转。

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref } from "vue";
-import { CheckSquare, FileDiff, FolderTree, RadioTower, TerminalSquare } from "lucide-vue-next";
+import { FileDiff, FolderTree, RadioTower, TerminalSquare } from "lucide-vue-next";
 import DiffReviewPanel from "@/components/DiffReviewPanel.vue";
+import FileTreePanel from "@/components/FileTreePanel.vue";
 import TerminalPanel from "@/components/TerminalPanel.vue";
 import { useSessionStore } from "@/stores/session";
 import { useTerminalStore } from "@/stores/terminal";
@@ -33,12 +34,7 @@ function openTerminal() {
     </section>
 
     <section v-else-if="tab === 'files'" class="panel-section">
-      <div class="section-label">Context</div>
-      <div v-for="todo in session.todos" :key="todo.id" class="catalog-row">
-        <span><CheckSquare :size="14" />{{ todo.text }}</span>
-        <small>{{ todo.status }}</small>
-      </div>
-      <div v-if="!session.todos.length" class="empty-note">Todo updates appear from RunEvent SSE.</div>
+      <FileTreePanel />
     </section>
 
     <section v-else-if="tab === 'terminal'" class="panel-section terminal-panel">
