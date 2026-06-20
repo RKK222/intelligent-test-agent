@@ -105,7 +105,7 @@ export function AgentChat({
   }, [history, resolvedHistorySearch]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-[var(--ta-panel-2)]">
+    <div className="flex h-full min-h-0 flex-col bg-[var(--ta-chat-bg)] text-[var(--ta-chat-text)]">
       <SegmentedTabs
         value={tab}
         onValueChange={setTab}
@@ -120,7 +120,6 @@ export function AgentChat({
           <RuntimeDock
             permissions={permissions}
             questions={questions}
-            todos={todos}
             onReplyPermission={onReplyPermission}
             onReplyQuestion={onReplyQuestion}
             onRejectQuestion={onRejectQuestion}
@@ -135,6 +134,7 @@ export function AgentChat({
               onOpenDiff={onOpenDiff}
               commands={commands}
               resources={resources}
+              todos={todos}
               agents={agents}
               models={models}
               providers={providers}
@@ -217,17 +217,17 @@ function RuntimeStatusPanel({
     return null;
   }
   return (
-    <div className="flex min-h-8 flex-wrap items-center gap-2 border-b border-slate-800 bg-[var(--ta-panel)] px-3 py-1.5 text-[11px] text-slate-400">
-      <span className="rounded border border-slate-800 px-2 py-0.5">Session {runtimeStatus?.status ?? "idle"}</span>
-      {runtimeStatus?.branch ? <span className="rounded border border-slate-800 px-2 py-0.5">{runtimeStatus.branch}</span> : null}
-      {runtimeStatus?.lsp ? <span className="rounded border border-slate-800 px-2 py-0.5">LSP {runtimeStatus.lsp.status}</span> : null}
-      {runtimeStatus?.mcp ? <span className="rounded border border-slate-800 px-2 py-0.5">MCP {runtimeStatus.mcp.status}</span> : null}
-      {tools.length ? <span className="rounded border border-slate-800 px-2 py-0.5">{tools.length} tools</span> : null}
-      {resources.length ? <span className="rounded border border-slate-800 px-2 py-0.5">{resources.length} refs</span> : null}
+    <div className="flex min-h-8 flex-wrap items-center gap-2 border-b border-[var(--ta-chat-border)] bg-[var(--ta-chat-surface)] px-3 py-1.5 text-[11px] text-[var(--ta-chat-muted)]">
+      <span className="rounded border border-[var(--ta-chat-border)] px-2 py-0.5">Session {runtimeStatus?.status ?? "idle"}</span>
+      {runtimeStatus?.branch ? <span className="rounded border border-[var(--ta-chat-border)] px-2 py-0.5">{runtimeStatus.branch}</span> : null}
+      {runtimeStatus?.lsp ? <span className="rounded border border-[var(--ta-chat-border)] px-2 py-0.5">LSP {runtimeStatus.lsp.status}</span> : null}
+      {runtimeStatus?.mcp ? <span className="rounded border border-[var(--ta-chat-border)] px-2 py-0.5">MCP {runtimeStatus.mcp.status}</span> : null}
+      {tools.length ? <span className="rounded border border-[var(--ta-chat-border)] px-2 py-0.5">{tools.length} tools</span> : null}
+      {resources.length ? <span className="rounded border border-[var(--ta-chat-border)] px-2 py-0.5">{resources.length} refs</span> : null}
       {percent != null ? (
         <span className="flex min-w-[96px] items-center gap-2">
-          <span className="h-1.5 flex-1 rounded bg-[#0a1324]">
-            <span className="block h-1.5 rounded bg-[linear-gradient(90deg,#22d3ee,#60a5fa)]" style={{ width: `${percent}%` }} />
+          <span className="h-1.5 flex-1 rounded bg-[var(--ta-chat-detail-bg)]">
+            <span className="block h-1.5 rounded bg-[var(--ta-chat-status-running)]" style={{ width: `${percent}%` }} />
           </span>
           {percent}%
         </span>
@@ -239,21 +239,19 @@ function RuntimeStatusPanel({
 function RuntimeDock({
   permissions,
   questions,
-  todos,
   onReplyPermission,
   onReplyQuestion,
   onRejectQuestion
 }: {
   permissions: PermissionRequest[];
   questions: QuestionRequest[];
-  todos: TodoItem[];
   onReplyPermission?: (requestId: string, decision: "once" | "always" | "reject") => void;
   onReplyQuestion?: (requestId: string, answers: unknown[]) => void;
   onRejectQuestion?: (requestId: string) => void;
 }) {
   const [answers, setAnswers] = React.useState<Record<string, string>>({});
   const [multiAnswers, setMultiAnswers] = React.useState<Record<string, string[]>>({});
-  if (permissions.length === 0 && questions.length === 0 && todos.length === 0) {
+  if (permissions.length === 0 && questions.length === 0) {
     return null;
   }
   return (
@@ -361,19 +359,6 @@ function RuntimeDock({
           ))}
         </div>
       ))}
-      {todos.length ? (
-        <div className="rounded-[10px] border border-[var(--ta-border)] bg-[#0f1a33] p-3">
-          <div className="mb-2 text-[12px] font-semibold text-slate-200">Todo</div>
-          <div className="space-y-1">
-            {todos.map((item) => (
-              <div key={item.id} className="flex items-center gap-2 text-[12px] text-slate-300">
-                <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-400">{item.status}</span>
-                <span className="min-w-0 flex-1 truncate">{item.text}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

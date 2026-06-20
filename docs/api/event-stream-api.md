@@ -114,6 +114,7 @@ data: {"eventId":"evt_live_...","runId":"run_...","seq":0,"type":"message.part.d
 - SSE body 使用 `RunEventSsePayload`，不返回 generated SDK DTO 或 opencode raw event。
 - `message.updated`、`message.part.updated`、`message.part.delta`、`assistant.message.delta` 等消息内容投影事件只进入 live bus；`run.*`、`diff.*`、`permission.*`、`question.*`、`todo.updated` 和关键 tool 状态继续入库。
 - `tool.finished` 入库前会移除 `rawPayload`、`output`、`input`、`metadata` 等大字段，只保留 tool/call/message/part/status/title/error 等摘要。
+- Skill 调用不新增 `skill.*` wire name；opencode 中的 Skill 仍作为 tool 上报，前端仅在 `tool.started`、`tool.finished`、`message.part.updated`、`message.part.delta` 中根据 `payload.tool`、`payload.toolName` 或 ToolPart `toolName=skill` 分类为 Skill 调用展示。
 
 Phase 08 后，opencode raw event 的终态映射为：
 

@@ -20,6 +20,24 @@
   --ta-del: rgba(239, 68, 68, 0.18);
   --ta-add: rgba(34, 197, 94, 0.18);
   --ta-line-numbers: #3a4a6e;
+  --ta-chat-bg: #f6f7f8;
+  --ta-chat-surface: #ffffff;
+  --ta-chat-message-bg: #fbfbfc;
+  --ta-chat-user-bg: #eef0f2;
+  --ta-chat-answer-bg: #ffffff;
+  --ta-chat-process-bg: #f8f9fa;
+  --ta-chat-detail-bg: #f3f4f5;
+  --ta-chat-chip-bg: #f1f2f3;
+  --ta-chat-hover: #eceff1;
+  --ta-chat-border: #dde1e5;
+  --ta-chat-border-strong: #c8ced4;
+  --ta-chat-answer-border: #cfd5db;
+  --ta-chat-text: #24272b;
+  --ta-chat-muted: #68707a;
+  --ta-chat-subtle: #4d555f;
+  --ta-chat-status-running: #5f6b76;
+  --ta-chat-status-done: #4f6f5b;
+  --ta-chat-status-error: #9b4d4d;
 }
 
 /* ===== Tailwind v4 内置色阶重映射到 demo 调色板（整站换肤） ===== */

@@ -87,11 +87,9 @@ export function reduceAgentChatRuntime(
   if (event.type === "tool.started" || event.type === "tool.finished") {
     return {
       ...state,
-      messages: appendCard(
+      messages: upsertToolCard(
         state.messages,
-        "tool",
         event.type === "tool.started" ? "工具调用开始" : "工具调用完成",
-        event.payload,
         event
       )
     };
@@ -146,6 +144,9 @@ export function reduceAgentChatRuntime(
   }
   if (event.type === "session.status") {
     return { ...state, status: text(event.payload.status) ?? state.status };
+  }
+  if (event.type === "run.started" || event.type === "run.created" || event.type === "run.cancelling" || event.type === "run.succeeded" || event.type === "run.failed" || event.type === "run.cancelled") {
+    return { ...state, status: runStatusFromEvent(event) };
   }
   return state;
 }
@@ -312,6 +313,37 @@ function appendCard(
   ] satisfies AgentMessage[];
 }
 
+// 同一次工具调用会先后收到 started/finished；按调用标识原地更新，避免时间线出现重复卡片。
+function upsertToolCard(messages: AgentMessage[], title: string, event: RunEvent) {
+  const key = toolCardKey(event.payload) ?? event.eventId;
+  const index = messages.findIndex((message) => message.role === "card" && message.cardType === "tool" && toolCardKey(message.payload) === key);
+  const nextCard = {
+    id: index >= 0 ? messages[index].id : `tool-${event.eventId}`,
+    role: "card",
+    cardType: "tool",
+    title,
+    payload: {
+      ...(index >= 0 && messages[index].role === "card" ? messages[index].payload : {}),
+      ...event.payload
+    },
+    createdAt: index >= 0 ? messages[index].createdAt : event.occurredAt
+  } satisfies Extract<AgentMessage, { role: "card" }>;
+  if (index < 0) {
+    return [...messages, nextCard] satisfies AgentMessage[];
+  }
+  return [...messages.slice(0, index), nextCard, ...messages.slice(index + 1)];
+}
+
+function toolCardKey(payload: Record<string, unknown>) {
+  return (
+    text(payload.callId) ??
+    text(payload.callID) ??
+    text(payload.partId) ??
+    text(payload.partID) ??
+    text(payload.rawEventId)
+  );
+}
+
 function toMessagePart(raw: Record<string, unknown>, partId: string): MessagePart {
   const partType = text(raw.type) ?? text(raw.partType) ?? "text";
   if (partType === "tool") {
@@ -323,7 +355,9 @@ function toMessagePart(raw: Record<string, unknown>, partId: string): MessagePar
       status: text(raw.status) ?? "completed",
       input: record(raw.input),
       output: raw.output,
-      metadata: record(raw.metadata)
+      metadata: record(raw.metadata),
+      startedAt: text(raw.startedAt),
+      endedAt: text(raw.endedAt)
     };
   }
   if (partType === "reasoning") {
@@ -388,8 +422,30 @@ function toTodoItem(value: Record<string, unknown>): TodoItem {
     id,
     text: text(value.text) ?? text(value.content) ?? text(value.title) ?? id,
     status: text(value.status) ?? "pending",
-    priority: text(value.priority)
+    priority: text(value.priority),
+    title: text(value.title),
+    description: text(value.description),
+    summary: text(value.summary),
+    result: text(value.result),
+    error: text(value.error),
+    steps: Array.isArray(value.steps) ? value.steps.filter((item): item is string => typeof item === "string") : undefined,
+    updatedAt: text(value.updatedAt)
   };
+}
+
+function runStatusFromEvent(event: RunEvent) {
+  const explicit = text(event.payload.status);
+  if (explicit) {
+    return explicit;
+  }
+  return {
+    "run.created": "PENDING",
+    "run.started": "RUNNING",
+    "run.cancelling": "CANCELLING",
+    "run.succeeded": "SUCCEEDED",
+    "run.failed": "FAILED",
+    "run.cancelled": "CANCELLED"
+  }[event.type] ?? event.type;
 }
 
 function diffFilesFromPayload(payload: Record<string, unknown>): RunDiffFile[] {

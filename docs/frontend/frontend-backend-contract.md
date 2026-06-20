@@ -84,11 +84,12 @@
 - 事件类型新增时，前端必须对未知事件有安全展示或忽略策略。Phase 08 已知 Diff 事件包括 `diff.proposed`、`diff.accepted` 和 `diff.rejected`。
 - Phase 11 新增 `PromptPart`、`MessagePart`、`ToolPart`、`PermissionRequest`、`QuestionRequest`、`AgentInfo`、`ModelInfo`、`ProviderInfo`、`CommandInfo`、`SessionDiff`、`TodoItem`、`RuntimeStatus` 等共享模型；这些模型是平台 projection，不是 opencode generated DTO。
 - Phase 11 新增 RunEvent 包括 `message.updated`、`message.part.updated`、`message.part.delta`、`session.status`、`todo.updated`、`permission.*`、`question.*`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`，同时保留旧 `assistant.message.delta`、`tool.*`、`diff.*` 兼容。消息内容投影和文本 delta 可以是 transient SSE，payload `seq=0` 且没有 SSE `id`，刷新后只从 opencode session projected messages 恢复。
+- Skill 调用不新增后端 API、RunEvent 类型或 `AgentMessage.cardType="skill"`；opencode Skill 按 tool 事件进入前端，`packages/agent-chat` 仅根据 `payload.tool`、`payload.toolName` 或 ToolPart `toolName=skill` 做前端展示分类。
 
 ## Phase 11 前端调用落点
 
 - `packages/backend-api` 已封装 agents/models/providers/commands/references、session messages、session children/todo/diff/abort/fork/compact/revert/command/shell、permission/question、fs/vcs/lsp/mcp status/resources/tools 和 terminal ticket 等平台 API 方法；页面组件不得自行拼接这些 URL。
-- `packages/agent-chat` 通过纯 reducer 消费 RunEvent，归并 message timeline、message parts、permission dock、question dock、Todo 和 session diff 状态；它不订阅 SSE，也不调用 HTTP API。
+- `packages/agent-chat` 通过纯 reducer 消费 RunEvent，归并 message timeline、message parts、permission dock、question dock、Todo 和 session diff 状态；它不订阅 SSE，也不调用 HTTP API。Todo 在对话线程内作为“任务分解”展示，Skill 在 tool 投影中分类展示，不改变后端契约。
 - `packages/terminal` 使用后端返回的一次性 ticket 建立平台 WebSocket，负责 `input`、`resize`、`close` 和 `output`、`exit`、`error`、`warning` envelope；它不调用 backend-api，不持久化 ticket。
 - `apps/agent-web` 负责组合 TanStack Query、RunEvent SSE、backend-api mutation 和 reducer dispatch；发送 Run 时同时提交 `prompt`、text/file `parts`，并带上当前 Agent/Provider/Model/Mode 运行态选择。文件附件由 `agent-chat` 转成平台 `PromptPart` 后交给 app 层，文本文件以内联 `content` 提交，图片和二进制文件以 `data:` URL 提交。`mode` 只作为平台运行态字段保留，opencode `PromptInput` 不支持时不得强行塞进 `prompt_async`。History 搜索、置顶和删除只能通过 `backend-api` 的平台 Session 方法完成。
 - 当前 UI 已提供 Agent/Provider/Model/Mode 选择、真实 Session history 切换、文件/图片附件、busy follow-up 本地 FIFO 队列、Monaco 选区上下文、permission once/always/reject、question reply/reject、Todo 展示、slash command palette、`@` runtime context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与 hunk context、MCP/LSP/VCS 状态摘要、`/s/{sessionId}` 只读 transcript 页面和底部 PTY terminal panel；公开 share 授权、per-file/per-message 回滚和真实三服务联调 E2E 仍按后续批次推进，当前不得标记为完成。

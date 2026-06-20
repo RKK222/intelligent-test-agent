@@ -16,11 +16,13 @@ import type {
   MessagePart,
   ModelInfo,
   ProviderInfo,
-  RuntimeResourceInfo
+  RuntimeResourceInfo,
+  TodoItem
 } from "@test-agent/shared-types";
 import { AgentCard } from "./cards";
 import { useAgentExternalRuntime, type AgentCardMeta } from "./assistant-thread";
 import { fileToPromptAttachment, type ComposerAttachment } from "./prompt-parts";
+import { AnswerPart, PlainAnswer, ReasoningPartBlock, TaskBreakdown, ToolPartBlock } from "./process-blocks";
 
 export type AssistantThreadProps = {
   messages: AgentMessage[];
@@ -38,6 +40,7 @@ export type AssistantThreadProps = {
   selectedProvider?: string;
   selectedModel?: string;
   mode?: string;
+  todos?: TodoItem[];
   onAgentChange?: (agentId: string) => void;
   onProviderChange?: (providerId: string) => void;
   onModelChange?: (modelId: string) => void;
@@ -67,6 +70,7 @@ export function AssistantThread({
   selectedProvider,
   selectedModel,
   mode = "build",
+  todos = [],
   onAgentChange,
   onProviderChange,
   onModelChange,
@@ -76,6 +80,9 @@ export function AssistantThread({
   // 待发送附件的 ref：onNew 读取此 ref 随 prompt 一起转发给 onSend
   const attachmentsRef = React.useRef<ComposerAttachment[]>([]);
   const runtime = useAgentExternalRuntime({ messages, running, onSend, onCancel, attachmentsRef });
+  const viewportRef = React.useRef<HTMLDivElement | null>(null);
+  const [isAtBottom, setIsAtBottom] = React.useState(true);
+  const [hasNewContent, setHasNewContent] = React.useState(false);
   // id → 原始 AgentMessage，用于按原消息渲染结构化 part（tool/reasoning/file 等）
   const messageById = React.useMemo(() => {
     const map = new Map<string, AgentMessage>();
@@ -92,17 +99,65 @@ export function AssistantThread({
       latestDiffId: reversed.find((message) => message.role === "card" && message.cardType === "diff")?.id
     };
   }, [messages]);
+  const streamSignature = React.useMemo(
+    () =>
+      messages
+        .map((message) => {
+          if (message.role === "assistant") {
+            return `${message.id}:${message.text.length}:${message.parts?.map((part) => partSignature(part)).join("|") ?? ""}`;
+          }
+          return `${message.id}:${message.role}`;
+        })
+        .join("::"),
+    [messages]
+  );
+  const lastStreamSignatureRef = React.useRef<string | null>(null);
+
+  React.useLayoutEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+    const firstPaint = lastStreamSignatureRef.current == null;
+    const changed = lastStreamSignatureRef.current !== streamSignature;
+    lastStreamSignatureRef.current = streamSignature;
+    if (!changed) {
+      return;
+    }
+
+    // 流式内容只在用户停留底部时自动跟随；用户向上阅读时保留位置并给出新内容提示。
+    if (firstPaint || isAtBottom) {
+      scrollViewportToBottom(viewport, firstPaint ? "auto" : "smooth");
+      setHasNewContent(false);
+    } else {
+      setHasNewContent(true);
+    }
+  }, [isAtBottom, streamSignature]);
+
+  function handleViewportScroll(event: React.UIEvent<HTMLDivElement>) {
+    const nextAtBottom = viewportIsAtBottom(event.currentTarget);
+    setIsAtBottom(nextAtBottom);
+    if (nextAtBottom) {
+      setHasNewContent(false);
+    }
+  }
 
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <ThreadPrimitive.Root className="flex h-full min-h-0 flex-col">
-        <ThreadPrimitive.Viewport className="min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden p-3 [scrollbar-gutter:stable]">
+        <ThreadPrimitive.Viewport
+          ref={viewportRef}
+          data-testid="agent-thread-viewport"
+          className="relative min-h-0 flex-1 space-y-3 overflow-y-auto overflow-x-hidden bg-[var(--ta-chat-bg)] p-3 [scrollbar-gutter:stable]"
+          onScroll={handleViewportScroll}
+        >
           <ThreadPrimitive.Empty>
             <div className="flex h-full flex-col items-center justify-center gap-1 py-10 text-center text-[var(--ta-muted)]">
-              <div className="text-[14px] font-semibold text-[#cfe0ff]">开始与测试智能体对话</div>
-              <div className="text-[12px]">描述测试任务，例如：跑 checkout 模块并分析失败原因</div>
+              <div className="text-[13px] font-semibold text-[var(--ta-chat-text)]">开始与测试智能体对话</div>
+              <div className="text-[12px] text-[var(--ta-chat-muted)]">描述测试任务，例如：跑 checkout 模块并分析失败原因</div>
             </div>
           </ThreadPrimitive.Empty>
+          <TaskBreakdown todos={todos} />
           <ThreadPrimitive.Messages>
             {({ message }) => (
               <ThreadMessageItem
@@ -114,6 +169,22 @@ export function AssistantThread({
               />
             )}
           </ThreadPrimitive.Messages>
+          {hasNewContent ? (
+            <button
+              type="button"
+              className="sticky bottom-2 left-1/2 z-10 -translate-x-1/2 rounded-full border border-[var(--ta-chat-border)] bg-[var(--ta-chat-surface)] px-3 py-1 text-[11px] text-[var(--ta-chat-text)] shadow-sm hover:bg-[var(--ta-chat-hover)]"
+              onClick={() => {
+                const viewport = viewportRef.current;
+                if (viewport) {
+                  scrollViewportToBottom(viewport, "smooth");
+                }
+                setHasNewContent(false);
+                setIsAtBottom(true);
+              }}
+            >
+              查看新内容
+            </button>
+          ) : null}
         </ThreadPrimitive.Viewport>
         <ComposerArea
           running={running}
@@ -181,17 +252,21 @@ function ThreadMessageItem({
       <div
         className={
           isUser
-            ? "max-w-[92%] rounded-[16px] border border-[#31487d] bg-[#1b2d5a] px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,.04)]"
-            : "max-w-[92%] rounded-[10px] border border-[var(--ta-border)] bg-[#101b33] px-3 py-2"
+            ? "max-w-[92%] rounded-md border border-[var(--ta-chat-border)] bg-[var(--ta-chat-user-bg)] px-3 py-2 text-[var(--ta-chat-text)]"
+            : "max-w-[92%] rounded-md border border-[var(--ta-chat-border)] bg-[var(--ta-chat-message-bg)] px-2.5 py-2"
         }
       >
-        <div className={isUser ? "mb-2 text-[12px] font-semibold text-[#a8b9dc]" : "mb-1 text-[11px] text-slate-500"}>
+        <div className={isUser ? "mb-1 text-[11px] font-semibold text-[var(--ta-chat-subtle)]" : "mb-1 text-[11px] text-[var(--ta-chat-muted)]"}>
           {isUser ? "用户" : "Agent"}
         </div>
         {original?.role === "assistant" && original.parts?.length ? (
           <MessageParts parts={original.parts} fallbackText={original.text} />
         ) : (
-          <p className="m-0 whitespace-pre-wrap text-[13px] leading-7 text-slate-100">{displayText}</p>
+          isUser ? (
+            <p className="m-0 whitespace-pre-wrap text-[13px] leading-6 text-[var(--ta-chat-text)]">{displayText}</p>
+          ) : (
+            <PlainAnswer text={displayText} />
+          )
         )}
       </div>
     </div>
@@ -221,7 +296,7 @@ function MessageParts({
   fallbackText: string;
 }) {
   if (!parts.length) {
-    return <div className="whitespace-pre-wrap text-[12px] leading-6 text-slate-100">{fallbackText}</div>;
+    return <PlainAnswer text={fallbackText} />;
   }
   const hasAnswer = parts.some((part) => part.type === "text" && part.text.trim().length > 0);
   return (
@@ -231,56 +306,21 @@ function MessageParts({
           {part.type === "text" ? (
             <AnswerPart part={part} />
           ) : part.type === "reasoning" ? (
-            <ReasoningPart part={part} openByDefault={part.status === "running" || !hasAnswer} />
+            <ReasoningPartBlock part={part} openByDefault={part.status === "running" || !hasAnswer} />
           ) : part.type === "tool" ? (
-            <div className="space-y-1 rounded border border-[#1d2b4d] bg-[#0a1324] p-2 text-[12px] text-slate-300">
-              <div className="font-mono text-slate-200">{part.toolName}</div>
-              <div className="text-slate-500">{part.status}</div>
-              {part.output ? <pre className="max-h-32 overflow-auto whitespace-pre-wrap text-[11px]">{String(part.output)}</pre> : null}
-            </div>
+            <ToolPartBlock part={part} />
           ) : part.type === "file" ? (
-            <div className="rounded border border-[#1d2b4d] bg-[#0a1324] p-2 font-mono text-[12px] text-slate-300">
+            <div className="rounded border border-[var(--ta-chat-border)] bg-[var(--ta-chat-process-bg)] p-2 font-mono text-[12px] text-[var(--ta-chat-muted)]">
               {part.path ?? part.name ?? part.partId}
             </div>
           ) : (
-            <pre className="max-h-32 overflow-auto rounded border border-[#1d2b4d] bg-[#0a1324] p-2 whitespace-pre-wrap text-[11px] text-slate-400">
+            <pre className="max-h-32 overflow-auto rounded border border-[var(--ta-chat-border)] bg-[var(--ta-chat-detail-bg)] p-2 whitespace-pre-wrap text-[11px] text-[var(--ta-chat-muted)]">
               {JSON.stringify((part as { payload?: unknown }).payload, null, 2)}
             </pre>
           )}
         </div>
       ))}
     </div>
-  );
-}
-
-function AnswerPart({ part }: { part: Extract<MessagePart, { type: "text" }> }) {
-  return (
-    <div className="rounded-[10px] border border-[var(--ta-border)] bg-[#0f1a33] p-3">
-      <div className="mb-2 text-[12px] font-semibold text-[#a3c9ff]">回答</div>
-      <div className="whitespace-pre-wrap text-[12px] leading-6 text-slate-100">{part.text}</div>
-    </div>
-  );
-}
-
-function ReasoningPart({
-  part,
-  openByDefault
-}: {
-  part: Extract<MessagePart, { type: "reasoning" }>;
-  openByDefault: boolean;
-}) {
-  const running = part.status === "running";
-  return (
-    <details open={openByDefault} className="rounded-[10px] border border-[var(--ta-border)] bg-[#0b1426] p-3">
-      <summary className="flex cursor-pointer list-none items-center gap-2 text-[11px] font-semibold text-slate-400">
-        <span className={`h-1.5 w-1.5 rounded-full ${running ? "bg-[var(--ta-accent)]" : "bg-slate-600"}`} />
-        <span>{running ? "思考中" : part.title ?? "思考过程"}</span>
-        {part.durationMs ? <span className="font-normal text-slate-600">{Math.round(part.durationMs / 1000)}s</span> : null}
-      </summary>
-      <div className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap pr-1 text-[12px] leading-6 text-slate-400">
-        {part.text}
-      </div>
-    </details>
   );
 }
 
@@ -358,7 +398,7 @@ function ComposerArea({
   return (
     <ComposerPrimitive.Root asChild>
       <form
-        className="border-t border-[var(--ta-border)] bg-[#0d1628] p-3"
+        className="border-t border-[var(--ta-chat-border)] bg-[var(--ta-chat-surface)] p-3"
         onSubmit={(event) => {
           // 阻止浏览器默认提交，交由 ComposerPrimitive.Send 触发 composer.send()
           event.preventDefault();
@@ -386,7 +426,11 @@ function ComposerArea({
           }}
         />
         <ComposerPrimitive.Input asChild>
-          <Textarea rows={3} placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因" />
+          <Textarea
+            rows={3}
+            className="border-[var(--ta-chat-border)] bg-[var(--ta-chat-answer-bg)] text-[var(--ta-chat-text)] placeholder:text-[var(--ta-chat-muted)] focus:border-[var(--ta-chat-border-strong)]"
+            placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
+          />
         </ComposerPrimitive.Input>
         {slashQuery != null && commands.length ? (
           <SuggestionPanel
@@ -421,27 +465,27 @@ function ComposerArea({
             {attachments.map((attachment) => (
               <span
                 key={attachment.id}
-                className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--ta-border)] bg-[#0f1a33] px-2 py-1 text-[11px] text-slate-200"
+                className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--ta-chat-border)] bg-[var(--ta-chat-process-bg)] px-2 py-1 text-[11px] text-[var(--ta-chat-text)]"
                 title={`${attachment.name} ${formatBytes(attachment.size)}`}
               >
                 <span className="max-w-[160px] truncate">{attachment.name}</span>
-                <span className="text-slate-500">{formatBytes(attachment.size)}</span>
+                <span className="text-[var(--ta-chat-muted)]">{formatBytes(attachment.size)}</span>
                 <button
                   type="button"
                   title="移除附件"
-                  className="rounded p-0.5 text-slate-500 hover:bg-[#122044] hover:text-slate-100"
+                  className="rounded p-0.5 text-[var(--ta-chat-muted)] hover:bg-[var(--ta-chat-hover)] hover:text-[var(--ta-chat-text)]"
                   onClick={() => setAttachments((current) => current.filter((item) => item.id !== attachment.id))}
                 >
                   <X className="h-3 w-3" />
                 </button>
               </span>
             ))}
-            {readingAttachments ? <span className="text-[11px] text-slate-500">读取中</span> : null}
-            {attachmentError ? <span className="text-[11px] text-[#fca5a5]">{attachmentError}</span> : null}
+            {readingAttachments ? <span className="text-[11px] text-[var(--ta-chat-muted)]">读取中</span> : null}
+            {attachmentError ? <span className="text-[11px] text-[var(--ta-chat-status-error)]">{attachmentError}</span> : null}
           </div>
         ) : null}
         <div className="mt-2 flex items-center justify-between gap-2">
-          <div className="text-[11px] text-slate-500">{running ? "Run 正在执行，发送将排队" : "Enter 发送"}</div>
+          <div className="text-[11px] text-[var(--ta-chat-muted)]">{running ? "Run 正在执行，发送将排队" : "Enter 发送"}</div>
           <div className="flex gap-2">
             <Button type="button" size="icon" variant="secondary" title="添加文件" onClick={() => fileInputRef.current?.click()}>
               <Paperclip className="h-4 w-4" />
@@ -480,17 +524,17 @@ function SuggestionPanel({
     return null;
   }
   return (
-    <div className="mt-2 max-h-44 overflow-auto rounded-md border border-[var(--ta-border)] bg-[#0a1324] p-1">
-      <div className="px-2 py-1 text-[11px] uppercase text-slate-500">{title}</div>
+    <div className="mt-2 max-h-44 overflow-auto rounded-md border border-[var(--ta-chat-border)] bg-[var(--ta-chat-surface)] p-1">
+      <div className="px-2 py-1 text-[11px] uppercase text-[var(--ta-chat-muted)]">{title}</div>
       {items.map((item) => (
         <button
           key={item.id}
           type="button"
-          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[#13203f]"
+          className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-[var(--ta-chat-hover)]"
           onClick={item.onPick}
         >
-          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-slate-200">{item.label}</span>
-          {item.detail ? <span className="max-w-[45%] truncate text-[11px] text-slate-500">{item.detail}</span> : null}
+          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-[var(--ta-chat-text)]">{item.label}</span>
+          {item.detail ? <span className="max-w-[45%] truncate text-[11px] text-[var(--ta-chat-muted)]">{item.detail}</span> : null}
         </button>
       ))}
     </div>
@@ -530,6 +574,28 @@ function replaceContextQuery(text: string, label: string) {
   return text.replace(/@[^\s@]*$/, `@${label} `);
 }
 
+function partSignature(part: MessagePart) {
+  if (part.type === "text" || part.type === "reasoning") {
+    return `${part.partId}:${part.type}:${part.status ?? ""}:${part.text.length}`;
+  }
+  if (part.type === "tool") {
+    return `${part.partId}:${part.type}:${part.status}:${String(part.output ?? "").length}`;
+  }
+  return `${part.partId}:${part.type}`;
+}
+
+function viewportIsAtBottom(viewport: HTMLDivElement) {
+  return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 24;
+}
+
+function scrollViewportToBottom(viewport: HTMLDivElement, behavior: ScrollBehavior) {
+  if (typeof viewport.scrollTo === "function") {
+    viewport.scrollTo({ top: viewport.scrollHeight, behavior });
+  } else {
+    viewport.scrollTop = viewport.scrollHeight;
+  }
+}
+
 function RuntimeControls({
   agents,
   models,
@@ -560,7 +626,7 @@ function RuntimeControls({
   onRequestNotifications?: () => void;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-slate-800 bg-slate-950 p-2">
+    <div className="flex flex-wrap items-center gap-2 border-t border-[var(--ta-chat-border)] bg-[var(--ta-chat-surface)] p-2">
       <ChicPopover
         label="Agent"
         placeholder="Agent"
@@ -660,33 +726,33 @@ function ChicPopover({
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="inline-flex h-8 items-center gap-1.5 rounded-full border border-slate-700 bg-slate-900 pl-2.5 pr-2.5 text-[12px] text-slate-200 transition hover:border-slate-500 hover:bg-slate-800"
+        className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--ta-chat-border)] bg-[var(--ta-chat-process-bg)] pl-2.5 pr-2.5 text-[12px] text-[var(--ta-chat-text)] transition hover:border-[var(--ta-chat-border-strong)] hover:bg-[var(--ta-chat-hover)]"
       >
-        <span className="shrink-0 text-slate-400">{icon}</span>
+        <span className="shrink-0 text-[var(--ta-chat-muted)]">{icon}</span>
         <span className="max-w-[160px] truncate">{selectedLabel}</span>
-        <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+        <ChevronDown className="h-3.5 w-3.5 text-[var(--ta-chat-muted)]" />
       </button>
 
       {open ? (
         <div
           role="listbox"
-          className="absolute bottom-full left-0 z-50 mb-2 w-[260px] overflow-hidden rounded-lg border border-slate-700 bg-slate-900 shadow-xl"
+          className="absolute bottom-full left-0 z-50 mb-2 w-[260px] overflow-hidden rounded-lg border border-[var(--ta-chat-border)] bg-[var(--ta-chat-surface)] shadow-xl"
         >
           {searchable ? (
-            <div className="flex items-center gap-1.5 border-b border-slate-800 px-2.5 py-2 text-[12px]">
-              <Search className="h-3.5 w-3.5 text-slate-400" />
+            <div className="flex items-center gap-1.5 border-b border-[var(--ta-chat-border)] px-2.5 py-2 text-[12px]">
+              <Search className="h-3.5 w-3.5 text-[var(--ta-chat-muted)]" />
               <input
                 ref={inputRef}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={`搜索${label}`}
-                className="min-w-0 flex-1 bg-transparent text-slate-200 placeholder:text-slate-500 outline-none"
+                className="min-w-0 flex-1 bg-transparent text-[var(--ta-chat-text)] placeholder:text-[var(--ta-chat-muted)] outline-none"
               />
               {query ? (
                 <button
                   type="button"
                   onClick={() => setQuery("")}
-                  className="text-slate-400 hover:text-slate-200"
+                  className="text-[var(--ta-chat-muted)] hover:text-[var(--ta-chat-text)]"
                   aria-label="清空"
                 >
                   <X className="h-3.5 w-3.5" />
@@ -696,7 +762,7 @@ function ChicPopover({
           ) : null}
           <div className="max-h-56 overflow-auto py-1">
             {filtered.length === 0 ? (
-              <div className="px-3 py-2 text-[12px] text-slate-500">无匹配项</div>
+              <div className="px-3 py-2 text-[12px] text-[var(--ta-chat-muted)]">无匹配项</div>
             ) : (
               filtered.map((o) => {
                 const selected = o.value === value;
@@ -711,10 +777,10 @@ function ChicPopover({
                       setOpen(false);
                       setQuery("");
                     }}
-                    className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[12px] text-slate-200 hover:bg-slate-800"
+                    className="flex w-full items-center justify-between gap-2 px-2.5 py-1.5 text-left text-[12px] text-[var(--ta-chat-text)] hover:bg-[var(--ta-chat-hover)]"
                   >
                     <span className="truncate">{o.label}</span>
-                    {selected ? <Check className="h-3.5 w-3.5 text-cyan-300" /> : null}
+                    {selected ? <Check className="h-3.5 w-3.5 text-[var(--ta-chat-subtle)]" /> : null}
                   </button>
                 );
               })

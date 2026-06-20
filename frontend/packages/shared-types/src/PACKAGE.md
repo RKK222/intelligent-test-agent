@@ -6,7 +6,7 @@
 
 ## 主要程序清单
 
-- `index.ts`：共享类型出口，包含 API/RunEvent/Diff 以及 PromptPart、MessagePart、ToolPart、PermissionRequest、QuestionRequest、AgentInfo、ModelInfo、ProviderInfo、CommandInfo、RuntimeResourceInfo、RuntimeToolInfo、SessionDiff、TodoItem、RuntimeStatus、TerminalTicketRequest、TerminalTicketResponse 等模型。
+- `index.ts`：共享类型出口，包含 API/RunEvent/Diff 以及 PromptPart、MessagePart、ToolPart、PermissionRequest、QuestionRequest、AgentInfo、ModelInfo、ProviderInfo、CommandInfo、RuntimeResourceInfo、RuntimeToolInfo、SessionDiff、TodoItem、RuntimeStatus、TerminalTicketRequest、TerminalTicketResponse 等模型；`TodoItem` 的扩展展示字段必须保持可选，兼容旧 payload。
 
 ## 允许依赖
 

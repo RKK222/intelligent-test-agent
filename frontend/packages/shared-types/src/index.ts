@@ -303,6 +303,13 @@ export type TodoItem = {
   text: string;
   status: "pending" | "in_progress" | "completed" | string;
   priority?: "low" | "medium" | "high" | string;
+  title?: string;
+  description?: string;
+  summary?: string;
+  result?: string;
+  error?: string;
+  steps?: string[];
+  updatedAt?: string;
 };
 
 export type TokenUsage = {

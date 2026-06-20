@@ -109,6 +109,86 @@ describe("agent-chat runtime reducer", () => {
     expect(replied.permissions).toHaveLength(0);
     expect(replied.questions).toHaveLength(1);
   });
+
+  it("merges tool started and finished events for the same call", () => {
+    const started = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("tool.started", {
+        tool: "read",
+        callId: "call_1",
+        partId: "part_tool",
+        title: "读取报告",
+        status: "running"
+      })
+    });
+    const finished = reduceAgentChatRuntime(started, {
+      type: "event",
+      event: event("tool.finished", {
+        tool: "read",
+        callId: "call_1",
+        partId: "part_tool",
+        status: "success",
+        summary: "报告读取完成"
+      })
+    });
+
+    expect(finished.messages.filter((message) => message.role === "card" && message.cardType === "tool")).toHaveLength(1);
+    expect(finished.messages).toMatchObject([
+      {
+        role: "card",
+        cardType: "tool",
+        title: "工具调用完成",
+        payload: { callId: "call_1", status: "success", summary: "报告读取完成" }
+      }
+    ]);
+  });
+
+  it("keeps expanded todo metadata for task decomposition display", () => {
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("todo.updated", {
+        items: [
+          {
+            id: "task_1",
+            title: "整理失败报告",
+            description: "读取 run summary",
+            status: "in_progress",
+            summary: "已定位 3 个失败用例",
+            result: "准备生成建议",
+            error: "selector timeout",
+            steps: ["读取报告", "聚合失败"],
+            updatedAt: "2026-06-20T10:00:00Z"
+          }
+        ]
+      })
+    });
+
+    expect(state.todos[0]).toMatchObject({
+      id: "task_1",
+      text: "整理失败报告",
+      title: "整理失败报告",
+      description: "读取 run summary",
+      summary: "已定位 3 个失败用例",
+      result: "准备生成建议",
+      error: "selector timeout",
+      steps: ["读取报告", "聚合失败"],
+      updatedAt: "2026-06-20T10:00:00Z"
+    });
+  });
+
+  it("records terminal run status from run events", () => {
+    const failed = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("run.failed", { status: "FAILED", errorCode: "TOOL_ERROR" })
+    });
+    const cancelled = reduceAgentChatRuntime(failed, {
+      type: "event",
+      event: event("run.cancelled", { status: "CANCELLED" })
+    });
+
+    expect(failed.status).toBe("FAILED");
+    expect(cancelled.status).toBe("CANCELLED");
+  });
 });
 
 function event(type: string, payload: Record<string, unknown>): RunEvent {
