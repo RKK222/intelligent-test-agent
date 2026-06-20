@@ -55,7 +55,9 @@ import com.example.testagent.opencode.client.OpencodeSessionMessagesResult;
 import com.example.testagent.opencode.client.OpencodeStartRunCommand;
 import com.example.testagent.opencode.client.OpencodeStartRunResult;
 import com.example.testagent.opencode.client.OpencodeStreamEventsCommand;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -362,6 +364,184 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void servicePersistsLiveDiffFromCompletedEditToolPart() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.MESSAGE_PART_UPDATED,
+                command.traceId(),
+                Instant.now(),
+                Map.of(
+                        "messageID", "msg_1",
+                        "part", Map.of(
+                                "id", "part_edit",
+                                "messageID", "msg_1",
+                                "type", "tool",
+                                "tool", "edit",
+                                "state", Map.of(
+                                        "status", "completed",
+                                        "input", Map.of("filePath", "/tmp/demo/src/App.ts"),
+                                        "metadata", Map.of("filediff", Map.of(
+                                                "file", "src/App.ts",
+                                                "patch", "@@ -1 +1,2 @@",
+                                                "additions", 2,
+                                                "deletions", 1)))))));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                facade);
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "edit app", "trace_1234567890abcdef");
+
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.DIFF_PROPOSED);
+        Map<String, Object> payload = events.events.get(2).payload();
+        assertThat(payload)
+                .containsEntry("source", "tool")
+                .containsEntry("tool", "edit")
+                .containsEntry("messageID", "msg_1")
+                .containsEntry("partID", "part_edit");
+        assertThat(payload).doesNotContainKeys("rawPayload", "input", "output", "metadata");
+        assertThat((List<?>) payload.get("files"))
+                .singleElement()
+                .satisfies(file -> assertThat(mapObject(file))
+                        .containsEntry("path", "src/App.ts")
+                        .containsEntry("patch", "@@ -1 +1,2 @@")
+                        .containsEntry("additions", 2)
+                        .containsEntry("deletions", 1)
+                        .containsEntry("status", "modified"));
+    }
+
+    @Test
+    void servicePersistsLiveDiffFromCompletedApplyPatchToolPart() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.MESSAGE_PART_UPDATED,
+                command.traceId(),
+                Instant.now(),
+                Map.of(
+                        "messageID", "msg_1",
+                        "part", Map.of(
+                                "id", "part_patch",
+                                "messageID", "msg_1",
+                                "type", "tool",
+                                "tool", "apply_patch",
+                                "state", Map.of(
+                                        "status", "completed",
+                                        "metadata", Map.of("files", List.of(
+                                                Map.of(
+                                                        "relativePath", "src/New.ts",
+                                                        "type", "add",
+                                                        "patch", "@@ new @@",
+                                                        "additions", 3,
+                                                        "deletions", 0),
+                                                Map.of(
+                                                        "relativePath", "src/Old.ts",
+                                                        "type", "delete",
+                                                        "patch", "@@ old @@",
+                                                        "additions", 0,
+                                                        "deletions", 4))))))));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                facade);
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "patch files", "trace_1234567890abcdef");
+
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.DIFF_PROPOSED);
+        Map<String, Object> payload = events.events.get(2).payload();
+        assertThat((List<?>) payload.get("files"))
+                .hasSize(2)
+                .satisfies(files -> {
+                    assertThat(mapObject(files.get(0)))
+                            .containsEntry("path", "src/New.ts")
+                            .containsEntry("status", "added")
+                            .containsEntry("additions", 3)
+                            .containsEntry("deletions", 0);
+                    assertThat(mapObject(files.get(1)))
+                            .containsEntry("path", "src/Old.ts")
+                            .containsEntry("status", "deleted")
+                            .containsEntry("additions", 0)
+                            .containsEntry("deletions", 4);
+                });
+    }
+
+    @Test
+    void serviceUsesWorkingTreeDiffAsFallbackForCompletedWriteToolPart() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.runtime = command -> {
+            facade.runtimeCommands.add(command);
+            ArrayNode files = JsonNodeFactory.instance.arrayNode();
+            ObjectNode file = JsonNodeFactory.instance.objectNode();
+            file.put("path", "src/Write.ts");
+            file.put("patch", "@@ write @@");
+            file.put("additions", 5);
+            file.put("deletions", 2);
+            file.put("status", "modified");
+            files.add(file);
+            return Mono.just(new OpencodeRuntimeResult(files));
+        };
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.MESSAGE_PART_UPDATED,
+                command.traceId(),
+                Instant.now(),
+                Map.of(
+                        "messageID", "msg_1",
+                        "part", Map.of(
+                                "id", "part_write",
+                                "messageID", "msg_1",
+                                "type", "tool",
+                                "tool", "write",
+                                "state", Map.of(
+                                        "status", "completed",
+                                        "input", Map.of("filePath", "/tmp/demo/src/Write.ts"),
+                                        "metadata", Map.of("filepath", "/tmp/demo/src/Write.ts"))))));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                facade);
+
+        service.startRun(new SessionId("ses_1234567890abcdef"), "write file", "trace_1234567890abcdef");
+
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.DIFF_PROPOSED);
+        assertThat(facade.runtimeCommands).singleElement().satisfies(command -> {
+            assertThat(command.method()).isEqualTo("GET");
+            assertThat(command.path()).isEqualTo("/vcs/diff");
+            assertThat(command.directory()).isEqualTo("/tmp/demo");
+            assertThat(command.workspace()).isNull();
+            assertThat(command.query()).containsEntry("mode", "working");
+        });
+        assertThat((List<?>) events.events.get(2).payload().get("files"))
+                .singleElement()
+                .satisfies(file -> assertThat(mapObject(file))
+                        .containsEntry("path", "src/Write.ts")
+                        .containsEntry("additions", 5)
+                        .containsEntry("deletions", 2));
+    }
+
+    @Test
     void servicePersistsSanitizedToolFinishedPayload() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();
@@ -598,6 +778,11 @@ class RunApplicationServiceTest {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> mapObject(Object value) {
+        return (Map<String, Object>) value;
+    }
+
     private static final class FakeWorkspaceRepository implements WorkspaceRepository {
         @Override
         public Workspace save(Workspace workspace) {
@@ -778,9 +963,12 @@ class RunApplicationServiceTest {
     private static final class FakeOpencodeFacade implements OpencodeClientFacade {
         private final List<OpencodeCreateSessionCommand> createSessionCommands = new ArrayList<>();
         private final List<OpencodeStartRunCommand> startRunCommands = new ArrayList<>();
+        private final List<OpencodeRuntimeCommand> runtimeCommands = new ArrayList<>();
         private String lastPrompt;
         private RuntimeException createSessionError;
         private Function<OpencodeStreamEventsCommand, Flux<RunEventDraft>> streamEvents = ignored -> Flux.empty();
+        private Function<OpencodeRuntimeCommand, Mono<OpencodeRuntimeResult>> runtime =
+                ignored -> Mono.just(new OpencodeRuntimeResult(JsonNodeFactory.instance.objectNode()));
 
         @Override
         public Mono<OpencodeHealthResult> health(OpencodeHealthCommand command) {
@@ -825,7 +1013,7 @@ class RunApplicationServiceTest {
 
         @Override
         public Mono<OpencodeRuntimeResult> runtime(OpencodeRuntimeCommand command) {
-            return Mono.just(new OpencodeRuntimeResult(JsonNodeFactory.instance.objectNode()));
+            return runtime.apply(command);
         }
 
         @Override

@@ -9,13 +9,14 @@
 - Session 创建、查询、消息追加和归档。
 - Run 启动、取消、远端 opencode session 懒创建/复用、事件订阅和终态处理。
 - RunEvent 持久化策略、实时发布和 opencode projected messages 恢复。
+- 从完成态 `write`/`edit`/`apply_patch` tool part 派生运行中 `diff.proposed`，供前端实时追踪文件变化和行数统计。
 - Run Diff 查询、接受和拒绝。
 - opencode runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth。
 - PTY terminal ticket、限流、active session registry、进程适配和审计。
 
 ## 测试覆盖
 
-- `RunApplicationServiceTest` 覆盖 Run 创建、远端 session 懒创建/复用、sticky node、prompt parts、终态事件、瞬态消息事件和取消编排。
+- `RunApplicationServiceTest` 覆盖 Run 创建、远端 session 懒创建/复用、sticky node、prompt parts、终态事件、瞬态消息事件、tool part 实时 Diff 派生和取消编排。
 - `RunDiffApplicationServiceTest` 覆盖 Diff 事件优先读取、opencode Diff fallback、接受/拒绝动作和缺失 messageID 冲突。
 - `RunEventPersistencePolicyTest` 覆盖消息投影只走实时通道、关键状态事件持久化、tool payload 清洗和 rawPayload 移除。
 - `RunMessageRecoveryServiceTest` 覆盖 opencode projected messages 恢复为 transient SSE snapshot，以及未绑定/远端失败时降级为空。

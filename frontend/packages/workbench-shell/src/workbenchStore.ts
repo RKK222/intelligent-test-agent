@@ -8,6 +8,8 @@ export type EditorTab = {
   content: string;
   savedContent: string;
   readonly?: boolean;
+  /** 实时追踪打开的 agent 改动预览 tab：只读、内容随 diff 事件刷新、不可保存。 */
+  livePreview?: boolean;
 };
 
 // 工作台级状态：打开的编辑器 tab、活动文件、选中的 Diff 文件

@@ -30,8 +30,11 @@ import com.example.testagent.opencode.client.OpencodeClientFacade;
 import com.example.testagent.opencode.client.OpencodeCreateSessionCommand;
 import com.example.testagent.opencode.client.OpencodeCreateSessionResult;
 import com.example.testagent.opencode.client.OpencodePromptPart;
+import com.example.testagent.opencode.client.OpencodeRuntimeCommand;
+import com.example.testagent.opencode.client.OpencodeRuntimeResult;
 import com.example.testagent.opencode.client.OpencodeStartRunCommand;
 import com.example.testagent.opencode.client.OpencodeStreamEventsCommand;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -41,6 +44,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -56,6 +61,7 @@ public class RunApplicationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RunApplicationService.class);
     private static final int ROUTING_CANDIDATE_LIMIT = 50;
+    private static final Set<String> LIVE_DIFF_TOOLS = Set.of("write", "edit", "apply_patch");
 
     private final WorkspaceRepository workspaceRepository;
     private final com.example.testagent.domain.session.SessionRepository sessionRepository;
@@ -552,7 +558,7 @@ public class RunApplicationService {
                         null,
                         traceId))
                 // opencode stream 来自 Netty 线程，事件入库或实时发布必须串行 offload，且本地 DB 抖动不能误判为 Run 失败。
-                .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(run, draft))
+                .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(run, node, workspace, draft))
                         .subscribeOn(Schedulers.boundedElastic())
                         .onErrorResume(error -> {
                             LOGGER.warn(
@@ -573,7 +579,7 @@ public class RunApplicationService {
     /**
      * 处理单个 opencode 事件：终态事件落库并更新 Run，瞬态消息事件只发布 live bus。
      */
-    private void appendStreamEvent(Run originalRun, RunEventDraft draft) {
+    private void appendStreamEvent(Run originalRun, ExecutionNode node, Workspace workspace, RunEventDraft draft) {
         if (draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED) {
             Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
             if (!current.status().isTerminal()) {
@@ -586,11 +592,296 @@ public class RunApplicationService {
             }
             return;
         }
+        if (draft.type() == RunEventType.MESSAGE_PART_UPDATED) {
+            appendLiveDiffFromToolPart(originalRun, node, workspace, draft);
+        }
         if (!runEventPersistencePolicy.shouldPersist(draft)) {
             runEventLiveBus.publishTransient(runEventPersistencePolicy.sanitizeForPersistence(draft));
             return;
         }
         runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
+    }
+
+    /**
+     * 从 opencode tool part 完成态派生轻量 Diff 事件，供前端在 Run 未结束时实时刷新文件树。
+     */
+    private void appendLiveDiffFromToolPart(Run originalRun, ExecutionNode node, Workspace workspace, RunEventDraft draft) {
+        try {
+            liveDiffFromToolPart(originalRun, node, workspace, draft)
+                    .ifPresent(diff -> runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(diff)));
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "Failed to derive live diff from tool part, runId={}, traceId={}",
+                    originalRun.runId().value(),
+                    draft.traceId(),
+                    exception);
+        }
+    }
+
+    private Optional<RunEventDraft> liveDiffFromToolPart(
+            Run originalRun,
+            ExecutionNode node,
+            Workspace workspace,
+            RunEventDraft draft) {
+        Map<String, Object> rawPart = mapValue(draft.payload().get("part")).orElse(draft.payload());
+        if (!"tool".equals(textValue(rawPart.get("type")).orElse(null))) {
+            return Optional.empty();
+        }
+        Map<String, Object> state = mapValue(rawPart.get("state")).orElse(Map.of());
+        String status = firstMapText(rawPart, "status").or(() -> firstMapText(state, "status")).orElse("");
+        if (!"completed".equals(status)) {
+            return Optional.empty();
+        }
+        String tool = firstMapText(rawPart, "toolName", "tool", "name").orElse("");
+        if (!LIVE_DIFF_TOOLS.contains(tool)) {
+            return Optional.empty();
+        }
+        Map<String, Object> input = mapValue(state.get("input"))
+                .or(() -> mapValue(rawPart.get("input")))
+                .orElse(Map.of());
+        Map<String, Object> metadata = mapValue(state.get("metadata"))
+                .or(() -> mapValue(rawPart.get("metadata")))
+                .orElse(Map.of());
+        List<LiveDiffFile> files = extractToolDiffFiles(tool, input, metadata, workspace);
+        boolean needsWorkingTreeDiff = "write".equals(tool) || files.isEmpty() || files.stream().anyMatch(file -> !file.countsKnown());
+        if (needsWorkingTreeDiff) {
+            List<LiveDiffFile> workingTreeFiles = workingTreeDiffFiles(node, workspace, draft.traceId());
+            if (!workingTreeFiles.isEmpty()) {
+                files = workingTreeFiles;
+            } else if ("write".equals(tool) || files.isEmpty()) {
+                return Optional.empty();
+            }
+        }
+        return Optional.of(new RunEventDraft(
+                originalRun.runId(),
+                RunEventType.DIFF_PROPOSED,
+                draft.traceId(),
+                draft.occurredAt(),
+                liveDiffPayload(tool, rawPart, draft.payload(), files)));
+    }
+
+    private Map<String, Object> liveDiffPayload(
+            String tool,
+            Map<String, Object> rawPart,
+            Map<String, Object> rawPayload,
+            List<LiveDiffFile> files) {
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("source", "tool");
+        payload.put("tool", tool);
+        firstMapText(rawPayload, "messageID", "messageId")
+                .or(() -> firstMapText(rawPart, "messageID", "messageId"))
+                .ifPresent(messageId -> {
+                    payload.put("messageID", messageId);
+                    payload.put("messageId", messageId);
+                });
+        firstMapText(rawPayload, "partID", "partId")
+                .or(() -> firstMapText(rawPart, "partID", "partId", "id"))
+                .ifPresent(partId -> {
+                    payload.put("partID", partId);
+                    payload.put("partId", partId);
+                });
+        payload.put("files", files.stream().map(LiveDiffFile::toPayload).toList());
+        return Map.copyOf(payload);
+    }
+
+    private List<LiveDiffFile> extractToolDiffFiles(
+            String tool,
+            Map<String, Object> input,
+            Map<String, Object> metadata,
+            Workspace workspace) {
+        if ("edit".equals(tool)) {
+            return mapValue(metadata.get("filediff"))
+                    .flatMap(file -> diffFileFromMap(file, workspace, "modified"))
+                    .map(List::of)
+                    .orElse(List.of());
+        }
+        if ("apply_patch".equals(tool)) {
+            Object filesValue = metadata.get("files");
+            if (!(filesValue instanceof List<?> items)) {
+                return List.of();
+            }
+            return items.stream()
+                    .map(this::mapValue)
+                    .flatMap(Optional::stream)
+                    .map(file -> diffFileFromMap(file, workspace, statusFromPatchType(firstMapText(file, "type", "status").orElse(null))))
+                    .flatMap(Optional::stream)
+                    .toList();
+        }
+        String path = firstMapText(metadata, "filepath", "filePath", "path", "file")
+                .or(() -> firstMapText(input, "filePath", "path", "file"))
+                .flatMap(value -> normalizeWorkspacePath(workspace, value))
+                .orElse(null);
+        return path == null ? List.of() : List.of(new LiveDiffFile(path, "", 0, 0, "modified", false));
+    }
+
+    private Optional<LiveDiffFile> diffFileFromMap(Map<String, Object> value, Workspace workspace, String fallbackStatus) {
+        Optional<String> path = firstMapText(value, "path", "file", "filePath", "relativePath")
+                .flatMap(raw -> normalizeWorkspacePath(workspace, raw));
+        if (path.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<Integer> additions = numberValue(value.get("additions"));
+        Optional<Integer> deletions = numberValue(value.get("deletions"));
+        return Optional.of(new LiveDiffFile(
+                path.get(),
+                firstMapText(value, "patch", "diff").orElse(""),
+                additions.orElse(0),
+                deletions.orElse(0),
+                firstMapText(value, "status").orElse(fallbackStatus),
+                additions.isPresent() && deletions.isPresent()));
+    }
+
+    private List<LiveDiffFile> workingTreeDiffFiles(ExecutionNode node, Workspace workspace, String traceId) {
+        OpencodeRuntimeResult result = opencodeClientFacade.runtime(new OpencodeRuntimeCommand(
+                        node,
+                        "GET",
+                        "/vcs/diff",
+                        workspace.rootPath(),
+                        null,
+                        Map.of("mode", "working"),
+                        null,
+                        traceId))
+                .block();
+        if (result == null) {
+            return List.of();
+        }
+        JsonNode filesNode = diffFilesNode(result.body());
+        if (filesNode == null || !filesNode.isArray()) {
+            return List.of();
+        }
+        List<LiveDiffFile> files = new ArrayList<>();
+        filesNode.forEach(item -> diffFileFromJson(item, workspace).ifPresent(files::add));
+        return files;
+    }
+
+    private JsonNode diffFilesNode(JsonNode body) {
+        if (body == null || body.isNull()) {
+            return null;
+        }
+        if (body.isArray()) {
+            return body;
+        }
+        if (body.has("data") && body.get("data").isArray()) {
+            return body.get("data");
+        }
+        if (body.has("files") && body.get("files").isArray()) {
+            return body.get("files");
+        }
+        if (body.has("items") && body.get("items").isArray()) {
+            return body.get("items");
+        }
+        return null;
+    }
+
+    private Optional<LiveDiffFile> diffFileFromJson(JsonNode item, Workspace workspace) {
+        if (item == null || !item.isObject()) {
+            return Optional.empty();
+        }
+        Optional<String> path = firstJsonText(item, "path", "file", "filePath", "relativePath")
+                .flatMap(raw -> normalizeWorkspacePath(workspace, raw));
+        if (path.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new LiveDiffFile(
+                path.get(),
+                firstJsonText(item, "patch", "diff").orElse(""),
+                jsonInt(item, "additions").orElse(0),
+                jsonInt(item, "deletions").orElse(0),
+                firstJsonText(item, "status").orElse("modified"),
+                item.has("additions") && item.has("deletions")));
+    }
+
+    private String statusFromPatchType(String type) {
+        if (type == null) {
+            return "modified";
+        }
+        return switch (type) {
+            case "add", "added", "create", "created" -> "added";
+            case "delete", "deleted", "remove", "removed" -> "deleted";
+            default -> "modified";
+        };
+    }
+
+    private Optional<String> normalizeWorkspacePath(Workspace workspace, String rawPath) {
+        if (rawPath == null || rawPath.isBlank() || "/dev/null".equals(rawPath)) {
+            return Optional.empty();
+        }
+        String path = rawPath.replaceFirst("^([ab])/", "");
+        String root = workspace.rootPath();
+        if (path.equals(root) || path.startsWith(root + "/")) {
+            path = path.substring(root.length()).replaceFirst("^/+", "");
+        }
+        path = path.replaceFirst("^\\./", "");
+        return path.isBlank() || path.startsWith("/") ? Optional.empty() : Optional.of(path);
+    }
+
+    private Optional<Map<String, Object>> mapValue(Object value) {
+        if (!(value instanceof Map<?, ?> raw)) {
+            return Optional.empty();
+        }
+        LinkedHashMap<String, Object> map = new LinkedHashMap<>();
+        raw.forEach((key, item) -> {
+            if (key instanceof String stringKey) {
+                map.put(stringKey, item);
+            }
+        });
+        return Optional.of(map);
+    }
+
+    private Optional<String> firstMapText(Map<String, Object> map, String... keys) {
+        for (String key : keys) {
+            Optional<String> value = textValue(map.get(key));
+            if (value.isPresent()) {
+                return value;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Optional<String> textValue(Object value) {
+        return value instanceof String text && !text.isBlank() ? Optional.of(text) : Optional.empty();
+    }
+
+    private Optional<Integer> numberValue(Object value) {
+        if (value instanceof Number number) {
+            return Optional.of(number.intValue());
+        }
+        if (value instanceof String text && !text.isBlank()) {
+            try {
+                return Optional.of(Integer.parseInt(text));
+            } catch (NumberFormatException ignored) {
+                return Optional.empty();
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Optional<String> firstJsonText(JsonNode item, String... keys) {
+        for (String key : keys) {
+            JsonNode value = item.get(key);
+            if (value != null && value.isTextual() && !value.asText().isBlank()) {
+                return Optional.of(value.asText());
+            }
+        }
+        return Optional.empty();
+    }
+
+    private Optional<Integer> jsonInt(JsonNode item, String key) {
+        JsonNode value = item.get(key);
+        if (value == null || value.isNull()) {
+            return Optional.empty();
+        }
+        if (value.isInt() || value.isLong()) {
+            return Optional.of(value.asInt());
+        }
+        if (value.isTextual() && !value.asText().isBlank()) {
+            try {
+                return Optional.of(Integer.parseInt(value.asText()));
+            } catch (NumberFormatException ignored) {
+                return Optional.empty();
+            }
+        }
+        return Optional.empty();
     }
 
     /**
@@ -611,6 +902,25 @@ public class RunApplicationService {
     }
 
     private record OpencodeRoutingTarget(ExecutionNode node, RoutingDecision decision) {
+    }
+
+    private record LiveDiffFile(
+            String path,
+            String patch,
+            int additions,
+            int deletions,
+            String status,
+            boolean countsKnown) {
+
+        private Map<String, Object> toPayload() {
+            LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+            payload.put("path", path);
+            payload.put("patch", patch);
+            payload.put("additions", additions);
+            payload.put("deletions", deletions);
+            payload.put("status", status);
+            return Map.copyOf(payload);
+        }
     }
 
     private record ModelSelection(String providerId, String modelId) {

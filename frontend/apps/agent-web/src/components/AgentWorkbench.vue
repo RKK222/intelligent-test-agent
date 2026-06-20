@@ -11,6 +11,7 @@ import { Bell, Code2, GitBranch, PanelBottom, TerminalSquare } from "lucide-vue-
 import type {
   AgentMessage,
   FileTreeEntry,
+  MessagePart,
   PageResponse,
   PromptPart,
   Run,
@@ -45,7 +46,8 @@ import {
   promptFromParts,
   runtimeResources,
   runtimeStatus,
-  syntheticEvent
+  syntheticEvent,
+  text
 } from "./workbench-utils";
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
@@ -80,6 +82,11 @@ const bottomDrawerOpen = ref(false);
 const directoryPickerOpen = ref(false);
 const directoryPickerLoading = ref(false);
 const directoryPickerData = shallowRef<WorkspaceDirectoryList | null>(null);
+// 实时追踪：开启后 agent 每次写文件（write/edit/apply_patch 工具完成）就把该文件以只读预览
+// 打开在中间编辑器并读取磁盘最新内容刷新——agent 直接写盘，磁盘即最新。
+const liveTrack = ref(false);
+// 已跟随过的 tool partId，避免同一工具调用重复读盘刷新。
+const liveFollowedParts = ref<Set<string>>(new Set());
 
 // Chat runtime：单一 reducer 维护，dispatch 闭包更新
 const chatState = ref(createInitialAgentChatRuntimeState(initialMessages));
@@ -236,6 +243,37 @@ watch(run, (r, _old, onCleanup) => {
     }
   });
   onCleanup(() => subscription.close());
+});
+
+// 实时追踪：tool part 每次更新都扫描新完成的写文件工具，读盘刷新预览（逐次实时）。
+watch(
+  () => chatState.value.messages,
+  () => scanLiveToolParts(),
+  { deep: true }
+);
+// 开启时重置已跟随记录，并立即扫描当前对话里已完成的历史写文件工具。
+watch(liveTrack, (on) => {
+  liveFollowedParts.value = new Set();
+  if (on) {
+    scanLiveToolParts();
+  }
+});
+// 新 Run 开始时清空已跟随记录。
+watch(run, (r) => {
+  if (r && ["RUNNING", "CANCELLING"].includes(r.status)) {
+    liveFollowedParts.value = new Set();
+  }
+});
+// step 末兜底：diff.proposed 更新 changed files 时，确保最新被改文件已打开预览
+// （覆盖 tool part 路径解析失败的边缘情况；路径不可用则静默跳过，不报错）。
+watch(diffFiles, (files) => {
+  if (!liveTrack.value || files.length === 0) {
+    return;
+  }
+  const rel = normalizeWorkspacePath(files.at(-1)!.path);
+  if (rel && !rel.startsWith("/")) {
+    void openLivePreview(rel);
+  }
 });
 
 // ===== Mutations =====
@@ -476,6 +514,7 @@ function resetWorkspaceState() {
   followUpQueue.value = [];
   diffContextParts.value = [];
   editorSelection.value = undefined;
+  liveFollowedParts.value = new Set();
   selectedAgent.value = "";
   selectedProvider.value = "";
   selectedModel.value = "";
@@ -645,6 +684,145 @@ function handleRunEvent(event: RunEvent) {
   }
 }
 
+// agent 写文件用的 opencode 工具名；这些工具的 input 带文件路径，完成时磁盘已写入。
+const LIVE_WRITE_TOOLS = new Set(["write", "edit", "apply_patch", "str_replace", "multi_edit", "create_file"]);
+
+// 把绝对路径或带 git 前缀的路径归一化为 workspace 相对路径。
+function normalizeWorkspacePath(raw: string): string {
+  const rootPath = selectedWorkspace.value?.rootPath ?? "";
+  let p = raw.replace(/^([ab])\//, "");
+  if (rootPath && (p === rootPath || p.startsWith(`${rootPath}/`))) {
+    p = p.slice(rootPath.length).replace(/^\/+/, "");
+  }
+  return p;
+}
+
+// 从 tool part 的 input 提取文件路径，并归一化为 workspace 相对路径。
+// write/edit 通常用 input.filePath；apply_patch 还可能把文件列表放在 metadata.files。
+function liveToolPath(part: Extract<MessagePart, { type: "tool" }>): string | undefined {
+  const input = (part.input ?? {}) as Record<string, unknown>;
+  const metadata = (part.metadata ?? {}) as Record<string, unknown>;
+
+  const direct =
+    text(input.filePath) ??
+    text(input.path) ??
+    text(input.file) ??
+    text(metadata.filepath) ??
+    text(metadata.filePath) ??
+    text(metadata.path) ??
+    text(metadata.file);
+  if (direct) {
+    return normalizeWorkspacePath(direct);
+  }
+  const metadataFiles = Array.isArray(metadata.files) ? metadata.files : [];
+  for (const file of metadataFiles) {
+    const item = recordValue(file);
+    const filePath = item
+      ? text(item.relativePath) ?? text(item.filePath) ?? text(item.path) ?? text(item.file) ?? text(item.movePath)
+      : undefined;
+    if (filePath) {
+      return normalizeWorkspacePath(filePath);
+    }
+  }
+  // apply_patch：patch 文本取第一个文件路径，兼容 input/patch/patchText 三种字段。
+  const patchText = text(input.input) ?? text(input.patch) ?? text(input.patchText);
+  if (patchText) {
+    const gitMatch = /^diff --git a\/(.+?) b\//m.exec(patchText);
+    if (gitMatch) {
+      return normalizeWorkspacePath(gitMatch[1]);
+    }
+    const plusMatch = /^\+\+\+ (?:b\/)?(.+)$/m.exec(patchText);
+    if (plusMatch) {
+      return normalizeWorkspacePath(plusMatch[1]);
+    }
+  }
+  return undefined;
+}
+
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+}
+
+// 读取磁盘最新内容并以只读实时预览 tab 打开在中间编辑器，并展开文件树到该文件。
+async function openLivePreview(relPath: string) {
+  if (!selectedWorkspace.value) {
+    return;
+  }
+  expandPathToFile(relPath);
+  const existing = tabs.value.find((tab) => tab.path === relPath);
+  if (existing && !existing.livePreview && existing.content !== existing.savedContent) {
+    workbench.setActivePath(relPath);
+    centerMode.value = "editor";
+    feedback.value = { kind: "info", title: "实时追踪未覆盖未保存文件", description: relPath };
+    return;
+  }
+  try {
+    const file = await api.readFile(selectedWorkspace.value.workspaceId, relPath);
+    workbench.openTab({
+      id: `live:${relPath}`,
+      path: relPath,
+      title: relPath.split("/").at(-1) ?? relPath,
+      content: file.content,
+      savedContent: file.content,
+      readonly: true,
+      livePreview: true
+    });
+    centerMode.value = "editor";
+  } catch (error) {
+    feedback.value = errorFeedback("实时追踪读取文件失败", error);
+  }
+}
+
+// 展开文件树到目标文件：把所有祖先目录加入 expandedDirectories 并按需懒加载。
+function expandPathToFile(relPath: string) {
+  if (!relPath || relPath.startsWith("/")) {
+    return;
+  }
+  const segments = relPath.split("/").filter(Boolean);
+  if (segments.length <= 1) {
+    return;
+  }
+  const next = new Set(expandedDirectories.value);
+  let acc = "";
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    acc = acc ? `${acc}/${segments[i]}` : segments[i];
+    next.add(acc);
+    if (!entriesByDirectory.value[acc]) {
+      void loadDirectory(acc);
+    }
+  }
+  expandedDirectories.value = next;
+}
+
+// 扫描对话中的 tool part：新完成的写文件工具 → 读盘刷新预览。
+function scanLiveToolParts() {
+  if (!liveTrack.value) {
+    return;
+  }
+  for (const message of chatState.value.messages) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+    for (const part of message.parts ?? []) {
+      if (part.type !== "tool" || part.status !== "completed") {
+        continue;
+      }
+      if (!LIVE_WRITE_TOOLS.has(part.toolName)) {
+        continue;
+      }
+      if (liveFollowedParts.value.has(part.partId)) {
+        continue;
+      }
+      const path = liveToolPath(part);
+      if (!path) {
+        continue;
+      }
+      liveFollowedParts.value.add(part.partId);
+      void openLivePreview(path);
+    }
+  }
+}
+
 async function loadDiffSource(source: "run" | "session" | "vcs") {
   diffSource.value = source;
   centerMode.value = "diff";
@@ -772,6 +950,7 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
       <FileExplorer
         v-if="selectedWorkspace"
         :workspace-name="selectedWorkspace.name"
+        :workspace-root-path="selectedWorkspace.rootPath"
         :entries-by-directory="entriesByDirectory"
         :expanded-directories="expandedDirectories"
         :active-path="activePath"
@@ -815,12 +994,12 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
         <CodeEditor
           :path="activeTab?.path"
           :content="activeTab?.content"
-          :dirty="activeTab ? activeTab.content !== activeTab.savedContent : false"
+          :dirty="activeTab && !activeTab.livePreview ? activeTab.content !== activeTab.savedContent : false"
           :readonly="activeTab?.readonly"
           :saving="saveMutation.isPending.value"
           :feedback="feedback"
           @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
-          @save="() => activeTab && saveMutation.mutate(activeTab)"
+          @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
           @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"
         />
       </EditorPane>
@@ -846,10 +1025,12 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
         :selected-provider="selectedProvider"
         :selected-model="selectedModel"
         :mode="promptMode"
+        :live-track="liveTrack"
         @send="handleSend"
         @open-diff="centerMode = 'diff'"
         @retry="() => lastPrompt && handleSend(lastPrompt)"
         @cancel="cancelRunMutation.mutate()"
+        @toggle-live-track="liveTrack = !liveTrack"
         @reply-permission="(id: string, decision: 'once' | 'always' | 'reject') => replyPermissionMutation.mutate({ requestId: id, decision })"
         @reply-question="(id: string, answers: unknown[]) => replyQuestionMutation.mutate({ requestId: id, answers })"
         @reject-question="(id: string) => rejectQuestionMutation.mutate(id)"

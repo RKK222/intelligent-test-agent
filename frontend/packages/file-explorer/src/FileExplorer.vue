@@ -3,6 +3,7 @@ import type { FileStatus, FileTreeEntry, RunDiffFile } from "@test-agent/shared-
 
 export type FileExplorerProps = {
   workspaceName?: string;
+  workspaceRootPath?: string;
   entriesByDirectory: Record<string, FileTreeEntry[]>;
   expandedDirectories: Set<string>;
   activePath?: string;
@@ -33,6 +34,24 @@ const emit = defineEmits<{
 const tab = ref<ExplorerTab>("explorer");
 const keyword = ref("");
 const searchResults = computed(() => filterLoadedFiles(props.entriesByDirectory, keyword.value));
+
+// 把 changedFiles 的路径归一化为 workspace 相对路径，用于文件树行匹配 +N -N。
+// opencode 的 diff path 可能是绝对路径或带 a//b/ 前缀，需与文件树 entry.path（相对路径）对齐。
+const changeStats = computed(() => {
+  const root = props.workspaceRootPath ?? "";
+  const map: Record<string, { additions: number; deletions: number }> = {};
+  for (const f of props.changedFiles) {
+    let p = f.path.replace(/^([ab])\//, "");
+    if (root && (p === root || p.startsWith(`${root}/`))) {
+      p = p.slice(root.length).replace(/^\/+/, "");
+    }
+    const prev = map[p];
+    map[p] = prev
+      ? { additions: prev.additions + f.additions, deletions: prev.deletions + f.deletions }
+      : { additions: f.additions, deletions: f.deletions };
+  }
+  return map;
+});
 </script>
 
 <template>
@@ -85,6 +104,7 @@ const searchResults = computed(() => filterLoadedFiles(props.entriesByDirectory,
         :expanded-directories="expandedDirectories"
         :active-path="activePath"
         :loading-path="loadingPath"
+        :change-stats="changeStats"
         :depth="0"
         @toggle-directory="emit('toggleDirectory', $event)"
         @open-file="emit('openFile', $event)"

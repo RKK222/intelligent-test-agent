@@ -8,6 +8,8 @@ export type DirectoryRowsProps = {
   activePath?: string;
   loadingPath?: string | null;
   depth?: number;
+  /** 文件路径 → 行变更统计，用于在文件名后展示 +N -N。 */
+  changeStats?: Record<string, { additions: number; deletions: number }>;
 };
 </script>
 
@@ -54,6 +56,10 @@ function onRowClick(entry: FileTreeEntry) {
           <FileText class="h-4 w-4 text-[var(--ta-muted)]" />
         </template>
         <span class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
+        <template v-if="entry.type === 'file' && changeStats?.[entry.path]">
+          <span class="shrink-0 text-[10px] leading-5 text-[#3f7a5a]">+{{ changeStats[entry.path].additions }}</span>
+          <span class="shrink-0 text-[10px] leading-5 text-[#9e3b34]">-{{ changeStats[entry.path].deletions }}</span>
+        </template>
         <span v-if="loadingPath === entry.path" class="text-[10px] text-[var(--ta-muted)]">...</span>
       </button>
       <DirectoryRows
@@ -63,6 +69,7 @@ function onRowClick(entry: FileTreeEntry) {
         :expanded-directories="expandedDirectories"
         :active-path="activePath"
         :loading-path="loadingPath"
+        :change-stats="changeStats"
         :depth="depth + 1"
         @toggle-directory="emit('toggleDirectory', $event)"
         @open-file="emit('openFile', $event)"

@@ -57,7 +57,7 @@
 | `todo.updated` | Todo 列表更新。 |
 | `tool.started` | 工具调用开始。 |
 | `tool.finished` | 工具调用结束，payload 使用 `status` 区分 success/failed。 |
-| `diff.proposed` | 智能体提出文件 Diff。 |
+| `diff.proposed` | 智能体提出文件 Diff；Run 运行中也会从完成的写文件工具派生实时 Diff。 |
 | `diff.accepted` | 用户已接受 Run 级 Diff。 |
 | `diff.rejected` | 用户已拒绝 Run 级 Diff，后端已提交 opencode revert。 |
 | `test.finished` | 测试执行结束。 |
@@ -114,6 +114,7 @@ data: {"eventId":"evt_live_...","runId":"run_...","seq":0,"type":"message.part.d
 - SSE body 使用 `RunEventSsePayload`，不返回 generated SDK DTO 或 opencode raw event。
 - `message.updated`、`message.part.updated`、`message.part.delta`、`assistant.message.delta` 等消息内容投影事件只进入 live bus；`run.*`、`diff.*`、`permission.*`、`question.*`、`todo.updated` 和关键 tool 状态继续入库。
 - `tool.finished` 入库前会移除 `rawPayload`、`output`、`input`、`metadata` 等大字段，只保留 tool/call/message/part/status/title/error 等摘要。
+- `message.part.updated` 本身仍是 transient；当其中的 `write`、`edit`、`apply_patch` tool part 进入 `completed` 状态时，后端会额外派生 durable `diff.proposed`。payload 只保留 `source=tool`、`tool`、`messageID/messageId`、`partID/partId` 和 `files[]`，不会持久化原始 `rawPayload`、完整 `input/output` 或 tool `metadata`。
 - Skill 调用不新增 `skill.*` wire name；opencode 中的 Skill 仍作为 tool 上报，前端仅在 `tool.started`、`tool.finished`、`message.part.updated`、`message.part.delta` 中根据 `payload.tool`、`payload.toolName` 或 ToolPart `toolName=skill` 分类为 Skill 调用展示。
 
 Phase 08 后，opencode raw event 的终态映射为：
@@ -144,7 +145,7 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 
 前端处理：
 
-- `diff.proposed` 更新 Changed Files 和 DiffActionCard。
+- `diff.proposed` 更新 Changed Files 和 DiffActionCard；开启实时追踪时，前端也用运行中的 `diff.proposed.files[].path/additions/deletions/status` 刷新文件树行数并跟随打开最近变化文件。
 - `diff.accepted` / `diff.rejected` 展示动作结果并保留 traceId。
 - 终态 `run.succeeded` / `run.failed` / `run.cancelled` 必须停止“运行中”状态。
 

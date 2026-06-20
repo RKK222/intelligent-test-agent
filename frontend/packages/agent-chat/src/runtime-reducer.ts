@@ -347,17 +347,19 @@ function toolCardKey(payload: Record<string, unknown>) {
 function toMessagePart(raw: Record<string, unknown>, partId: string): MessagePart {
   const partType = text(raw.type) ?? text(raw.partType) ?? "text";
   if (partType === "tool") {
+    const state = record(raw.state);
+    const stateTime = record(state?.time);
     return {
       partId,
       type: "tool",
-      toolName: text(raw.toolName) ?? text(raw.tool) ?? "tool",
+      toolName: text(raw.toolName) ?? text(raw.tool) ?? text(raw.name) ?? "tool",
       callId: text(raw.callId) ?? text(raw.callID),
-      status: text(raw.status) ?? "completed",
-      input: record(raw.input),
-      output: raw.output,
-      metadata: record(raw.metadata),
-      startedAt: text(raw.startedAt),
-      endedAt: text(raw.endedAt)
+      status: text(raw.status) ?? text(state?.status) ?? "completed",
+      input: record(raw.input) ?? record(state?.input),
+      output: raw.output ?? state?.output,
+      metadata: record(raw.metadata) ?? record(state?.metadata),
+      startedAt: text(raw.startedAt) ?? text(stateTime?.start),
+      endedAt: text(raw.endedAt) ?? text(stateTime?.end)
     };
   }
   if (partType === "reasoning") {

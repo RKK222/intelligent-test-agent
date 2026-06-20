@@ -12,6 +12,7 @@
 - 文件树标题行提供刷新和“选择工作区目录”事件按钮，本包只发出 `addWorkspace` 事件，不直接调用后端。
 - 搜索只过滤已加载文件树中的文件名或路径。
 - 展示 Diff 文件列表并触发打开 Diff。
+- 文件树行支持在文件名后展示变更行数 `+N -N`（绿/红，与 Changed Files 面板一致）：由 app 层传入 `changedFiles` 与 `workspaceRootPath`，本包把 diff 路径归一化为 workspace 相对路径后按文件匹配，行数来自 `RunDiffFile.additions/deletions`。
 - 保持文件树、Changed Files 和搜索结果的紧凑列表视觉，不因长路径、状态徽标或选中态改变行高。
 - `@` context 和 prompt file context 只消费 app 层传入的选择回调；本包不读取文件内容。
 

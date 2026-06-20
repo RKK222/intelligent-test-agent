@@ -30,7 +30,8 @@ const emit = defineEmits<{ activate: [path: string]; close: [path: string] }>();
         @click="emit('activate', tab.path)"
       >
         <span class="truncate">{{ tab.title }}</span>
-        <span v-if="tab.content !== tab.savedContent" class="h-1.5 w-1.5 rounded-full bg-[#b07a2b]" />
+        <span v-if="tab.livePreview" class="rounded bg-[var(--ta-cyan)]/15 px-1 text-[10px] leading-4 text-[var(--ta-cyan)]">实时</span>
+        <span v-else-if="tab.content !== tab.savedContent" class="h-1.5 w-1.5 rounded-full bg-[#b07a2b]" />
         <span
           role="button"
           tabindex="0"

@@ -10,7 +10,7 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
   await expect(page.getByRole("button", { name: "打开运行与终端" })).toBeVisible();
   await page.getByRole("button", { name: /tests/ }).click();
   await page.getByRole("button", { name: /checkout.spec.ts/ }).click();
-  await expect(page.getByText("tests/checkout.spec.ts")).toBeVisible();
+  await expect(page.getByText("tests/checkout.spec.ts", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: /保存/ })).toBeVisible();
 });
 
@@ -129,6 +129,56 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
   expect(terminalTickets[0]).toEqual({ workspaceId: "wrk_1234567890abcdef", cols: 120, rows: 32 });
 });
 
+test("live tracking opens changed file and shows line counts before run finishes", async ({ page }) => {
+  await mockBackendApi(page, {
+    runEvents: [
+      event(1, "message.part.updated", {
+        messageID: "msg_1",
+        part: {
+          id: "part_write",
+          messageID: "msg_1",
+          type: "tool",
+          tool: "write",
+          state: {
+            status: "completed",
+            input: { filePath: "/Users/huang/workspace/demo-tests/tests/checkout.spec.ts" },
+            metadata: { filepath: "/Users/huang/workspace/demo-tests/tests/checkout.spec.ts" }
+          }
+        }
+      }),
+      event(2, "diff.proposed", {
+        source: "tool",
+        tool: "write",
+        messageID: "msg_1",
+        partID: "part_write",
+        files: [
+          {
+            path: "/Users/huang/workspace/demo-tests/tests/checkout.spec.ts",
+            patch: "@@ -1 +1,3 @@",
+            additions: 3,
+            deletions: 1,
+            status: "modified"
+          }
+        ]
+      })
+    ],
+    fileContents: {
+      "tests/checkout.spec.ts": "import { test } from '@playwright/test';\n\n// live tracking content\n"
+    }
+  });
+
+  await page.goto("/");
+
+  const liveButton = page.getByRole("button", { name: "实时" });
+  await liveButton.click();
+  await expect(liveButton).toHaveAttribute("aria-pressed", "true");
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("change checkout");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect(page.getByText("tests/checkout.spec.ts")).toBeVisible();
+  await expect(page.getByRole("button", { name: /checkout\.spec\.ts.*\+3.*-1/ })).toBeVisible();
+});
+
 async function mockBackendApi(
   page: Page,
   capture: {
@@ -138,6 +188,8 @@ async function mockBackendApi(
     terminalTickets?: Array<Record<string, unknown>>;
     workspaceCreates?: Array<Record<string, unknown>>;
     fileRequests?: Array<{ workspaceId: string; path: string }>;
+    runEvents?: Array<ReturnType<typeof event>>;
+    fileContents?: Record<string, string>;
   } = {}
 ) {
   const workspaceItems = [workspace()];
@@ -179,9 +231,10 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname.endsWith("/files/content")) {
+      const path = url.searchParams.get("path") ?? "tests/checkout.spec.ts";
       await route.fulfill(json({
-        path: "tests/checkout.spec.ts",
-        content: "import { test } from '@playwright/test';\n\ntest('checkout', async () => {});\n",
+        path,
+        content: capture.fileContents?.[path] ?? "import { test } from '@playwright/test';\n\ntest('checkout', async () => {});\n",
         encoding: "utf-8",
         size: 80,
         readonly: false
@@ -257,7 +310,7 @@ async function mockBackendApi(
       await route.fulfill({
         status: 200,
         headers: { ...corsHeaders(), "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
-        body: sse([
+        body: sse(capture.runEvents ?? [
           event(1, "permission.asked", { requestId: "perm_1", sessionId: "ses_1", title: "Run bash", description: "Allow npm test?" }),
           event(2, "question.asked", {
             requestId: "ques_1",

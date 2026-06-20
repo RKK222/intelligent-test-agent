@@ -42,6 +42,8 @@ export type AgentChatProps = {
   selectedModel?: string;
   mode?: string;
   historySearch?: string;
+  /** 实时追踪是否开启：开启后 agent 改文件会自动在中间编辑器流式预览。 */
+  liveTrack?: boolean;
 };
 
 type AgentTab = "agent" | "history";
@@ -49,7 +51,7 @@ type AgentTab = "agent" | "history";
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { History, MessageSquare, Pin, Trash2 } from "lucide-vue-next";
+import { History, MessageSquare, Pin, Radar, Trash2 } from "lucide-vue-next";
 import { Input } from "@test-agent/ui-kit";
 import AssistantThread from "./AssistantThread.vue";
 import RuntimeDock from "./RuntimeDock.vue";
@@ -84,6 +86,7 @@ const emit = defineEmits<{
   toggleHistoryPin: [sessionId: string, pinned: boolean];
   deleteHistory: [sessionId: string];
   requestNotifications: [];
+  toggleLiveTrack: [];
 }>();
 
 const tab = ref<AgentTab>("agent");
@@ -110,6 +113,16 @@ function onHistorySearchInput(value: string) {
 <template>
   <div class="ta-agent-chat-root">
     <div class="ta-agent-tabbar" role="tablist" aria-label="Agent 面板">
+      <button
+        type="button"
+        :class="['flex items-center justify-center gap-1.5 border-b-2 px-3 text-[14px] transition', liveTrack ? 'border-[var(--ta-cyan)] text-[var(--ta-cyan)]' : 'border-transparent text-[var(--ta-muted)] hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]']"
+        :aria-pressed="liveTrack ? 'true' : 'false'"
+        :title="liveTrack ? '实时追踪：开（agent 改文件时自动在编辑器预览）' : '实时追踪：关'"
+        @click="emit('toggleLiveTrack')"
+      >
+        <Radar class="h-4 w-4" />
+        实时
+      </button>
       <button
         type="button"
         :class="['flex flex-1 items-center justify-center gap-2 border-b-2 text-[14px] transition', tab === 'agent' ? 'border-[var(--ta-ink)] text-[var(--ta-ink)]' : 'border-transparent text-[var(--ta-muted)] hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]']"

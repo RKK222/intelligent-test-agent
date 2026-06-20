@@ -55,6 +55,50 @@ describe("agent-chat runtime reducer", () => {
     ]);
   });
 
+  it("normalizes opencode tool state from nested message part updates", () => {
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_1",
+        part: {
+          id: "part_tool",
+          messageID: "msg_1",
+          type: "tool",
+          tool: "write",
+          callID: "call_1",
+          state: {
+            status: "completed",
+            input: { filePath: "/tmp/demo/src/App.ts" },
+            output: "updated",
+            metadata: { filepath: "/tmp/demo/src/App.ts" },
+            time: { start: "2026-06-19T00:00:01Z", end: "2026-06-19T00:00:02Z" }
+          }
+        }
+      })
+    });
+
+    expect(state.messages).toMatchObject([
+      {
+        role: "assistant",
+        messageId: "msg_1",
+        parts: [
+          {
+            partId: "part_tool",
+            type: "tool",
+            toolName: "write",
+            callId: "call_1",
+            status: "completed",
+            input: { filePath: "/tmp/demo/src/App.ts" },
+            output: "updated",
+            metadata: { filepath: "/tmp/demo/src/App.ts" },
+            startedAt: "2026-06-19T00:00:01Z",
+            endedAt: "2026-06-19T00:00:02Z"
+          }
+        ]
+      }
+    ]);
+  });
+
   it("keeps reasoning part type when streaming delta omits partType", () => {
     const withReasoning = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",

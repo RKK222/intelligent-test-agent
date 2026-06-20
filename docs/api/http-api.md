@@ -544,7 +544,7 @@ Diff API 属于平台 Run 级能力。Controller 只调用 `RunDiffApplicationSe
 
 读取顺序：
 
-1. 优先使用该 Run 最新 `diff.proposed` 事件 payload 中的 `diff` 或 `files`。
+1. 优先使用该 Run 最新 `diff.proposed` 事件 payload 中的 `diff` 或 `files`；运行中的写文件工具完成时也会派生该事件，用于实时追踪文件变化。
 2. 若事件中没有 Diff 且 Session 已绑定远端 opencode session，则通过 `OpencodeClientFacade.getDiff` 调用 opencode `sessionDiff`。
 3. 若没有可用映射，返回空文件列表，不暴露内部 opencode 字段。
 

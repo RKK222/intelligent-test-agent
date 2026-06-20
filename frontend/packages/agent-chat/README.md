@@ -16,8 +16,9 @@ Agent 对话和结构化卡片展示包。
 - Skill 调用不新增独立卡片类型或 `skill.*` 事件；当 tool/message part 的 `tool` 或 `toolName` 为 `skill` 时，在前端分类展示为 Skill 调用块，并展示 Skill 名称、用途、状态和折叠详情。
 - Prompt composer 支持文本、文件附件、图片附件和附件 chips；文件读取后只向 app 层返回平台 `PromptPart`，不直接提交后端。
 - History tab 支持受控搜索、选择会话、置顶/取消置顶和删除回调；实际 API 调用由 app 层完成。
-- 提供纯 RunEvent reducer，把 `message.part.delta`、permission/question、todo、diff 等事件归并为对话展示状态。
+- 提供纯 RunEvent reducer，把 `message.part.delta`、permission/question、todo、diff 等事件归并为对话展示状态；tool part 会兼容 opencode `part.state.input/metadata/status/time` 嵌套结构，供 app 层实时追踪使用。
 - 提供发送、取消、重试、打开 Diff 回调。
+- Agent 面板 tabbar 最左侧提供"实时追踪"toggle 按钮（`liveTrack` prop 受控、`toggleLiveTrack` emit 回调）：开启后由 app 层在 agent 每次调用 write/edit/apply_patch 完成时自动把该文件以只读预览打开在中间编辑器并读取磁盘最新内容刷新；本包只负责按钮态展示与切换回调，不订阅事件、不操作编辑器。
 - 自建最小 chat 运行时（基于纯 reducer + Vue 组合式状态），不依赖外部对话 UI 框架。
 - `assistant.message.delta` 旧事件继续作为兼容输入；新 `message.part.delta` 优先按 messageId/partId 合并，避免流式输出重复。
 - Agent/Model/Mode selector、slash command、`@` context、permission/question dock、Todo 和 runtime status 只暴露受控回调，HTTP 提交与 SSE 订阅仍由 app 层负责。
