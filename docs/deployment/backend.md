@@ -25,6 +25,74 @@ tools/dev-backend-run.sh --profile test
 
 脚本默认读取 `.env.local`，`--profile test` 读取 `.env.test`，也可以通过 `--env-file <path>` 覆盖。脚本只解析 `KEY=VALUE` 行，不执行 dotenv 文件内容；生产容器仍通过外部环境变量或配置中心注入配置。
 
+`tools/dev-backend-run.sh` 是本地启动后端的统一入口：默认读取仓库根目录未跟踪的 `.env.local` 并启动 `local` profile；传入 `--profile test` 时读取 `.env.test` 并启动 `test` profile。`.env.local` 和 `.env.test` 已被 `.gitignore` 排除，真实数据库密码只允许写入这些本机文件。
+
+其他本地脚本：
+
+```bash
+tools/dev-local-up.sh            # 启用备用 Postgres；--redis 额外启动 Redis
+tools/dev-health-check.sh --api
+tools/dev-backend-check.sh
+```
+
+`deploy/local/docker-compose.yml` 默认启动备用 Postgres，映射到 `127.0.0.1:15432`；Redis 是可选 profile，默认映射到 `127.0.0.1:16379`。脚本只读取环境变量，不生成或写入密钥。
+
+## dotenv 示例
+
+`.env.local`（local profile）：
+
+```dotenv
+SPRING_PROFILES_ACTIVE=local
+TEST_AGENT_LOCAL_DB_HOST=<dev-pg-host>
+TEST_AGENT_LOCAL_DB_PORT=5432
+TEST_AGENT_LOCAL_DB_NAME=<database>
+TEST_AGENT_LOCAL_DB_USERNAME=<username>
+TEST_AGENT_LOCAL_DB_PASSWORD=<password>
+TEST_AGENT_OPENCODE_BASE_URL=http://127.0.0.1:4096
+```
+
+`.env.test`（test profile）：
+
+```dotenv
+SPRING_PROFILES_ACTIVE=test
+TEST_AGENT_TEST_DB_HOST=<test-pg-host>
+TEST_AGENT_TEST_DB_PORT=5432
+TEST_AGENT_TEST_DB_NAME=<database>
+TEST_AGENT_TEST_DB_USERNAME=<username>
+TEST_AGENT_TEST_DB_PASSWORD=<password>
+TEST_AGENT_OPENCODE_BASE_URL=http://127.0.0.1:4096
+```
+
+配置 `TEST_AGENT_API_TOKEN` 后，`/api/**` 要求 `Authorization: Bearer <token>`；未配置时本地默认放行。
+
+## 测试环境 profile
+
+`test-agent-app` 提供 `test` profile 连接外部 PostgreSQL 测试库和外部 opencode server。真实主机、账号和密码必须通过环境变量注入，仓库内配置文件不保存密钥：
+
+```bash
+export SPRING_PROFILES_ACTIVE=test
+export TEST_AGENT_TEST_DB_HOST=<test-pg-host>
+export TEST_AGENT_TEST_DB_PORT=5432
+export TEST_AGENT_TEST_DB_NAME=<database>
+export TEST_AGENT_TEST_DB_USERNAME=<username>
+export TEST_AGENT_TEST_DB_PASSWORD=<password>
+export TEST_AGENT_OPENCODE_BASE_URL=http://<opencode-host>:4096
+```
+
+启用该 profile 后，Spring Boot 通过 Druid 管理 JDBC 连接池，并使用 `test-agent-persistence` 中的 Flyway migration 初始化或校验数据库结构；Actuator `health` 包含数据库健康检查；Druid Web 控制台默认关闭，不提供 `/druid/*` 管理入口。
+
+## 连接池配置
+
+连接池大小和借出校验可通过以下环境变量覆盖，默认值适合轻量测试和本地集成；远端 PostgreSQL 断开 idle 连接后，默认在借出连接时执行 `SELECT 1`，避免首个业务请求拿到 stale connection 后返回 500：
+
+```bash
+export TEST_AGENT_DB_POOL_INITIAL_SIZE=1
+export TEST_AGENT_DB_POOL_MIN_IDLE=1
+export TEST_AGENT_DB_POOL_MAX_ACTIVE=10
+export TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS=30000
+export TEST_AGENT_DB_POOL_TEST_ON_BORROW=true
+```
+
 ## 生产必填环境变量
 
 ```bash
