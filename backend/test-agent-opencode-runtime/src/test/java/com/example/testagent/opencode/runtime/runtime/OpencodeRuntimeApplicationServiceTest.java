@@ -219,6 +219,23 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("a", "b"))));
     }
 
+    @Test
+    void replyQuestionPassesThroughNestedAnswersForMultipleSubQuestions() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("accepted", true)))));
+
+        // 前端对同一请求下的多个子问题一次性提交嵌套 [[q1], [q2]]，应原样透传不重复包装。
+        fixture.service.replyQuestion(
+                "ses_1234567890abcdef",
+                "req_1",
+                Map.of("answers", List.of(List.of("沙箱"), List.of("两个"))),
+                "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("沙箱"), List.of("两个"))));
+    }
+
     private static final class Fixture {
         private final WorkspaceRepository workspaceRepository = org.mockito.Mockito.mock(WorkspaceRepository.class);
         private final SessionRepository sessionRepository = org.mockito.Mockito.mock(SessionRepository.class);

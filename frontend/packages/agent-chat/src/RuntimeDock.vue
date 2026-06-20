@@ -18,8 +18,32 @@ const emit = defineEmits<{
   rejectQuestion: [requestId: string];
 }>();
 
+// 单选/文本题：按 questionId 记录选中的 option id 或输入文本。
 const answers = ref<Record<string, string>>({});
+// 多选题：按 questionId 记录选中的 option id 列表。
 const multiAnswers = ref<Record<string, string[]>>({});
+
+// opencode 要求一次回复覆盖同一请求下的全部子问题，answers 为 List<List<String>>：
+// 外层按子问题顺序排列，内层是该问题的选中 label。这里把同一请求所有子问题的答案按序组装。
+function buildItemAnswers(item: QuestionRequest): unknown[][] {
+  return item.questions.map((question) => {
+    if (question.kind === "multiple") {
+      return multiAnswers.value[question.questionId] ?? [];
+    }
+    const value = answers.value[question.questionId]?.trim();
+    return value ? [value] : [];
+  });
+}
+
+// 同一请求下所有必答子问题都已作答时才允许提交。
+function canReplyItem(item: QuestionRequest): boolean {
+  return item.questions.every((question) => {
+    if (question.kind === "multiple") {
+      return (multiAnswers.value[question.questionId]?.length ?? 0) > 0;
+    }
+    return Boolean(answers.value[question.questionId]?.trim());
+  });
+}
 </script>
 
 <template>
@@ -46,50 +70,28 @@ const multiAnswers = ref<Record<string, string[]>>({});
       <div v-for="question in item.questions" :key="question.questionId" class="space-y-2">
         <div class="text-[12px] font-semibold text-cyan-100">{{ question.text }}</div>
         <template v-if="question.kind === 'text'">
-          <div class="flex gap-2">
-            <Input v-model="answers[question.questionId]" placeholder="回答" />
-            <Button
-              type="button"
-              size="sm"
-              variant="primary"
-              :disabled="!answers[question.questionId]?.trim()"
-              @click="emit('replyQuestion', item.requestId, [answers[question.questionId]?.trim()])"
-            >回复</Button>
-            <Button type="button" size="sm" variant="secondary" @click="emit('rejectQuestion', item.requestId)">拒绝</Button>
-          </div>
+          <Input v-model="answers[question.questionId]" placeholder="回答" />
         </template>
         <template v-else-if="question.kind === 'multiple'">
-          <div class="space-y-2">
-            <div class="flex flex-wrap gap-2">
-              <label
-                v-for="option in (question.options?.length ? question.options : [{ id: 'confirm', label: '确认' }])"
-                :key="option.id"
-                class="flex items-center gap-1 rounded border border-slate-800 px-2 py-1 text-[12px] text-slate-200"
-              >
-                <input
-                  type="checkbox"
-                  :checked="multiAnswers[question.questionId]?.includes(option.id) ?? false"
-                  @change="(e) => {
-                    const checked = (e.target as HTMLInputElement).checked;
-                    const current = multiAnswers[question.questionId] ?? [];
-                    multiAnswers[question.questionId] = checked
-                      ? [...current, option.id]
-                      : current.filter((id) => id !== option.id);
-                  }"
-                />
-                {{ option.label }}
-              </label>
-            </div>
-            <div class="flex gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant="primary"
-                :disabled="!multiAnswers[question.questionId]?.length"
-                @click="emit('replyQuestion', item.requestId, multiAnswers[question.questionId] ?? [])"
-              >回复</Button>
-              <Button type="button" size="sm" variant="secondary" @click="emit('rejectQuestion', item.requestId)">拒绝</Button>
-            </div>
+          <div class="flex flex-wrap gap-2">
+            <label
+              v-for="option in (question.options?.length ? question.options : [{ id: 'confirm', label: '确认' }])"
+              :key="option.id"
+              class="flex items-center gap-1 rounded border border-slate-800 px-2 py-1 text-[12px] text-slate-200"
+            >
+              <input
+                type="checkbox"
+                :checked="multiAnswers[question.questionId]?.includes(option.id) ?? false"
+                @change="(e) => {
+                  const checked = (e.target as HTMLInputElement).checked;
+                  const current = multiAnswers[question.questionId] ?? [];
+                  multiAnswers[question.questionId] = checked
+                    ? [...current, option.id]
+                    : current.filter((id) => id !== option.id);
+                }"
+              />
+              {{ option.label }}
+            </label>
           </div>
         </template>
         <template v-else>
@@ -99,12 +101,21 @@ const multiAnswers = ref<Record<string, string[]>>({});
               :key="option.id"
               type="button"
               size="sm"
-              variant="secondary"
-              @click="emit('replyQuestion', item.requestId, [option.id])"
+              :variant="answers[question.questionId] === option.id ? 'primary' : 'secondary'"
+              @click="answers[question.questionId] = option.id"
             >{{ option.label }}</Button>
-            <Button type="button" size="sm" variant="secondary" @click="emit('rejectQuestion', item.requestId)">拒绝</Button>
           </div>
         </template>
+      </div>
+      <div class="mt-2 flex gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="primary"
+          :disabled="!canReplyItem(item)"
+          @click="emit('replyQuestion', item.requestId, buildItemAnswers(item))"
+        >回复</Button>
+        <Button type="button" size="sm" variant="secondary" @click="emit('rejectQuestion', item.requestId)">拒绝</Button>
       </div>
     </div>
   </div>
