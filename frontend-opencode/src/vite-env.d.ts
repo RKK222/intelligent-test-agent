@@ -5,3 +5,7 @@ declare module "*.vue" {
   const component: DefineComponent<Record<string, unknown>, Record<string, unknown>, unknown>;
   export default component;
 }
+
+declare module "monaco-editor/esm/vs/editor/editor.api.js" {
+  export * from "monaco-editor";
+}

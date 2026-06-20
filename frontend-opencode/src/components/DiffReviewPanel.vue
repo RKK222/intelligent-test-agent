@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import { ChevronLeft, ChevronRight, FileDiff } from "lucide-vue-next";
 import type { RunDiffFile } from "@test-agent/shared-types";
+import MonacoDiffEditor from "@/components/MonacoDiffEditor.vue";
 
 type DiffLine = { id: string; text: string; kind: "hunk" | "add" | "del" | "ctx" };
 type DiffHunk = { id: string; header: string; lines: DiffLine[] };
@@ -124,6 +125,8 @@ function parseHunks(patch: string) {
               </button>
             </div>
           </div>
+
+          <MonacoDiffEditor :file="activeFile" :diff-style="diffStyle" />
 
           <div v-if="activeHunk" class="diff-hunk">
             <code class="diff-hunk-header">{{ activeHunk.header }}</code>

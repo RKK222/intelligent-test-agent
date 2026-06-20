@@ -4,6 +4,10 @@ type Capture = {
   runRequests: Array<Record<string, unknown>>;
 };
 
+type MockOptions = {
+  sessionDiff?: Array<Record<string, unknown>>;
+};
+
 test.beforeEach(async ({ page }) => {
   await installFakeEventSource(page);
 });
@@ -75,7 +79,18 @@ test("opens a session, sends a prompt, and renders streamed RunEvent output", as
   await expect(page.getByText("All tests passed")).toBeVisible();
 });
 
-async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }) {
+test("loads the Monaco diff review editor for session diffs", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Monaco review loading is covered on the desktop review layout.");
+  await mockBackendApi(page, { runRequests: [] }, { sessionDiff: diffFixture() });
+
+  await page.goto("/w/wrk_1/session/ses_1");
+
+  const editor = page.getByRole("region", { name: "Monaco diff editor" });
+  await expect(editor).toContainText("src/App.vue");
+  await expect(editor).toContainText("Unified editor", { timeout: 10_000 });
+});
+
+async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }, options: MockOptions = {}) {
   await page.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -148,12 +163,10 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         total: 1
       });
     }
-    if (
-      path === "/api/sessions/ses_1/todo" ||
-      path === "/api/sessions/ses_1/diff" ||
-      path === "/api/sessions/ses_1/permissions" ||
-      path === "/api/sessions/ses_1/questions"
-    ) {
+    if (path === "/api/sessions/ses_1/diff") {
+      return json(route, options.sessionDiff ?? []);
+    }
+    if (path === "/api/sessions/ses_1/todo" || path === "/api/sessions/ses_1/permissions" || path === "/api/sessions/ses_1/questions") {
       return json(route, []);
     }
     if (path === "/api/runs" && request.method() === "POST") {
@@ -170,6 +183,20 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
 
     return json(route, {});
   });
+}
+
+function diffFixture() {
+  return [
+    {
+      path: "src/App.vue",
+      status: "modified",
+      additions: 2,
+      deletions: 1,
+      patch: ["@@ -1,3 +1,4 @@", " import { ref } from 'vue'", "-const title = 'old'", "+const title = 'new'", "+const mode = ref('review')"].join(
+        "\n"
+      )
+    }
+  ];
 }
 
 async function json(route: Route, data: unknown) {

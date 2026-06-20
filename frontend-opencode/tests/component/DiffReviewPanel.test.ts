@@ -52,6 +52,12 @@ describe("DiffReviewPanel", () => {
     expect(screen.getByText("Hunk 1 / 1")).toBeInTheDocument();
   });
 
+  it("renders a lazy Monaco diff editor region for the active file", () => {
+    render(DiffReviewPanel, { props: { files } });
+
+    expect(screen.getByRole("region", { name: "Monaco diff editor" })).toHaveTextContent("src/App.vue");
+  });
+
   it("renders an actionable empty state", () => {
     render(DiffReviewPanel, { props: { files: [] } });
 

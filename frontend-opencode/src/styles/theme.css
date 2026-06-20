@@ -1353,6 +1353,81 @@ small,
   white-space: nowrap;
 }
 
+.monaco-diff-preview {
+  display: grid;
+  overflow: hidden;
+  min-height: 280px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--bg-strong);
+}
+
+.monaco-diff-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 34px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-subtle);
+  padding: 0 9px;
+}
+
+.monaco-diff-toolbar span {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.monaco-diff-toolbar small {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.monaco-diff-toolbar button {
+  min-height: 24px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  padding: 0 8px;
+}
+
+.monaco-diff-host {
+  min-height: 246px;
+}
+
+.monaco-diff-preview[data-state="waiting"] .monaco-diff-host,
+.monaco-diff-preview[data-state="loading"] .monaco-diff-host,
+.monaco-diff-preview[data-state="error"] .monaco-diff-host {
+  display: grid;
+  place-items: center;
+}
+
+.monaco-diff-preview[data-state="waiting"] .monaco-diff-host::before {
+  content: "Editor loads when the review panel becomes visible.";
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.monaco-diff-preview[data-state="loading"] .monaco-diff-host::before {
+  content: "Loading Monaco diff editor...";
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.monaco-diff-error {
+  margin: 0;
+  border-top: 1px solid var(--line-soft);
+  color: var(--danger);
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
 .diff-hunk,
 .diff-empty-patch {
   display: grid;
