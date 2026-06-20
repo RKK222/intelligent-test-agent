@@ -7,38 +7,55 @@ export type MarkdownPreviewProps = {
 
 <script setup lang="ts">
 import { onBeforeUnmount, ref, shallowRef, watch } from "vue";
+// github-markdown-css 提供 .markdown-body 基础排版样式，侧载一次即可
+import "github-markdown-css/github-markdown.css";
 
 const props = withDefaults(defineProps<MarkdownPreviewProps>(), { content: "" });
 
 // 渲染后的 HTML（已消毒），用 shallowRef 避免对大段 HTML 做深度代理
 const html = ref("");
-// marked / DOMPurify 模块句柄，懒加载后缓存
-const markedRef = shallowRef<((src: string) => string) | null>(null);
+// markdown-it 实例与 DOMPurify 句柄，懒加载后缓存
+const mdRef = shallowRef<{ render: (src: string) => string } | null>(null);
 const purifyRef = shallowRef<{ sanitize: (dirty: string) => string } | null>(null);
-// 渲染中态：首次加载 marked/dompurify 之前给一个轻量占位
+// 首次加载 markdown-it/dompurify 之前给一个轻量占位
 const loading = ref(true);
 
 let renderTimer: ReturnType<typeof setTimeout> | null = null;
 
-// 懒加载 marked + dompurify，仅在首次需要渲染时加载，避免进入首屏 bundle
+// 懒加载 markdown-it + dompurify，仅在首次需要渲染时加载，避免进入首屏 bundle
 async function ensureLibs() {
-  if (markedRef.value && purifyRef.value) {
+  if (mdRef.value && purifyRef.value) {
     return;
   }
-  const [{ marked }, DOMPurifyMod] = await Promise.all([
-    import("marked"),
+  const [MarkdownIt, hljsMod, DOMPurifyMod] = await Promise.all([
+    import("markdown-it"),
+    import("highlight.js"),
     import("dompurify")
   ]);
-  // marked v15 默认同步解析；开启 GFM 表格/删除线等
-  marked.setOptions({ gfm: true, breaks: false });
-  markedRef.value = (src: string) => marked.parse(src, { async: false }) as string;
+  const md = new MarkdownIt.default({
+    html: false, // 不直接内联原始 HTML，交给 DOMPurify 兜底
+    linkify: true,
+    typographer: false,
+    // 代码块用 highlight.js 高亮，命中不到语言时回退纯文本
+    highlight(str: string, lang: string): string {
+      if (lang && hljsMod.default.getLanguage(lang)) {
+        try {
+          return `<pre><code class="hljs language-${lang}">${hljsMod.default.highlight(str, { language: lang }).value}</code></pre>`;
+        } catch {
+          // fallthrough
+        }
+      }
+      return `<pre><code class="hljs">${md.utils.escapeHtml(str)}</code></pre>`;
+    }
+  });
+  mdRef.value = md;
   purifyRef.value = DOMPurifyMod.default;
 }
 
-// 实际渲染：marked 转 HTML 后用 DOMPurify 消毒，防御本地文件中的脚本/恶意链接
+// 实际渲染：markdown-it 转 HTML 后用 DOMPurify 消毒，防御本地文件中的脚本/恶意链接
 async function render() {
   await ensureLibs();
-  const raw = markedRef.value?.(props.content ?? "") ?? "";
+  const raw = mdRef.value?.render(props.content ?? "") ?? "";
   html.value = purifyRef.value?.sanitize(raw) ?? "";
   loading.value = false;
 }
@@ -49,7 +66,7 @@ function scheduleRender() {
     clearTimeout(renderTimer);
   }
   renderTimer = setTimeout(() => {
-    render();
+    void render();
   }, 150);
 }
 
@@ -70,146 +87,67 @@ onBeforeUnmount(() => {
   <div class="md-preview flex h-full min-h-0 flex-col overflow-auto bg-[var(--ta-surface)] px-6 py-4 text-[13px] leading-[1.7] text-[var(--ta-text)]">
     <div v-if="loading" class="text-[12px] text-[var(--ta-muted)]">正在准备预览…</div>
     <div v-else-if="!content.trim()" class="text-[12px] text-[var(--ta-muted)]">无内容</div>
-    <!-- 经 DOMPurify 消毒后的 HTML，可安全注入 -->
-    <div v-else v-html="html" class="md-body min-w-0" />
+    <!-- 经 DOMPurify 消毒后的 HTML，可安全注入；.markdown-body 提供基础排版 -->
+    <div v-else v-html="html" class="markdown-body min-w-0" />
   </div>
 </template>
 
 <style scoped>
-/* 渲染后的 Markdown 排版，颜色全部走设计 token，不写死十六进制色 */
-.md-body :deep() {
-  word-break: break-word;
+/* github-markdown-css 是全局类，scoped 下需用 :deep() 选中后代；
+   颜色覆盖走设计 token，与 IDE chrome 保持一致，避免强白底突兀 */
+.markdown-body {
+  background: transparent;
+  color: var(--ta-text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.7;
 }
 
-.md-body :deep(h1),
-.md-body :deep(h2),
-.md-body :deep(h3),
-.md-body :deep(h4) {
-  margin: 1.2em 0 0.5em;
-  font-weight: 600;
-  line-height: 1.3;
+.markdown-body :deep(h1),
+.markdown-body :deep(h2),
+.markdown-body :deep(h3),
+.markdown-body :deep(h4),
+.markdown-body :deep(h5),
+.markdown-body :deep(h6) {
   color: var(--ta-ink);
+  border-color: var(--ta-border);
 }
 
-.md-body :deep(h1) {
-  font-size: 1.5em;
-  padding-bottom: 0.3em;
-  border-bottom: 1px solid var(--ta-border);
-}
-
-.md-body :deep(h2) {
-  font-size: 1.3em;
-  padding-bottom: 0.25em;
-  border-bottom: 1px solid var(--ta-border);
-}
-
-.md-body :deep(h3) {
-  font-size: 1.15em;
-}
-
-.md-body :deep(h4) {
-  font-size: 1em;
-}
-
-.md-body :deep(p) {
-  margin: 0.6em 0;
-}
-
-.md-body :deep(a) {
+.markdown-body :deep(a) {
   color: var(--primary, var(--ta-ink));
-  text-decoration: underline;
-  text-underline-offset: 2px;
 }
 
-.md-body :deep(ul),
-.md-body :deep(ol) {
-  margin: 0.6em 0;
-  padding-left: 1.6em;
-}
-
-.md-body :deep(li) {
-  margin: 0.25em 0;
-}
-
-.md-body :deep(li > ul),
-.md-body :deep(li > ol) {
-  margin: 0.25em 0;
-}
-
-.md-body :deep(blockquote) {
-  margin: 0.8em 0;
-  padding: 0.2em 0.9em;
-  border-left: 3px solid var(--ta-border);
+.markdown-body :deep(blockquote) {
   color: var(--ta-muted);
+  border-color: var(--ta-border);
 }
 
-.md-body :deep(blockquote p) {
-  margin: 0.3em 0;
+.markdown-body :deep(table th),
+.markdown-body :deep(table td) {
+  border-color: var(--ta-border);
 }
 
-/* 行内代码：浅灰底圆角，对齐 .ta-codeblock 的观感 */
-.md-body :deep(:not(pre) > code) {
-  padding: 0.15em 0.4em;
-  border-radius: 4px;
+.markdown-body :deep(table tr:nth-child(2n)) {
+  background-color: var(--ta-control);
+}
+
+.markdown-body :deep(hr) {
+  background-color: var(--ta-border);
+  height: 1px;
+  border: 0;
+}
+
+.markdown-body :deep(code) {
   background: var(--ta-control);
-  font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 0.9em;
-  color: var(--ta-ink);
 }
 
-/* 代码块：白底发丝边框，与编辑器 .ta-codeblock 风格一致 */
-.md-body :deep(pre) {
-  margin: 0.8em 0;
-  padding: 0.8em 1em;
+.markdown-body :deep(pre) {
+  background: var(--ta-panel-2, var(--ta-control));
   border: 1px solid var(--ta-border);
   border-radius: 6px;
-  background: var(--ta-panel-2, var(--ta-control));
-  overflow: auto;
-  font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  font-size: 0.88em;
-  line-height: 1.6;
 }
 
-.md-body :deep(pre code) {
-  padding: 0;
+.markdown-body :deep(pre code) {
   background: transparent;
-  border-radius: 0;
-  color: var(--ta-text);
-}
-
-.md-body :deep(table) {
-  margin: 0.8em 0;
-  border-collapse: collapse;
-  width: 100%;
-  font-size: 0.92em;
-}
-
-.md-body :deep(th),
-.md-body :deep(td) {
-  padding: 0.4em 0.7em;
-  border: 1px solid var(--ta-border);
-  text-align: left;
-}
-
-.md-body :deep(th) {
-  background: var(--ta-control);
-  font-weight: 600;
-  color: var(--ta-ink);
-}
-
-.md-body :deep(hr) {
-  margin: 1.2em 0;
-  border: 0;
-  border-top: 1px solid var(--ta-border);
-}
-
-.md-body :deep(img) {
-  max-width: 100%;
-  border-radius: 4px;
-}
-
-.md-body :deep(strong) {
-  font-weight: 600;
-  color: var(--ta-ink);
 }
 </style>

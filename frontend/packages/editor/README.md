@@ -14,7 +14,7 @@ Monaco 文件编辑器包。
 - 保存动作通过回调交给 app 层调用 `backend-api`。
 - 选区上下文只上报文件路径、语言、选区范围和文本片段；是否转换为 `PromptPart` 由 app 层负责。
 - 编辑器容器需要保持稳定高度和最小宽度，避免保存反馈、只读状态或长文件名挤压 Monaco 区域。
-- Markdown 预览：`.md` 文件在工具栏保存按钮左侧展示「预览」开关（眼睛图标），文件打开时默认不预览；开启后编辑器主体上下分屏，上为 Monaco 源码、下为渲染预览，中间为可拖拽 sash（20%~80%）。预览由 `MarkdownPreview.vue` 懒加载 `marked` + `dompurify` 渲染并消毒，不进入首屏同步 bundle；切换文件时预览自动重置为关闭。
+- Markdown 预览：`.md` 文件在工具栏保存按钮左侧展示「预览」开关（眼睛图标），文件打开时默认不预览；开启后编辑器主体上下分屏，上为 Monaco 源码、下为渲染预览，中间为可拖拽 sash（20%~80%）。预览由 `MarkdownPreview.vue` 懒加载 `markdown-it`（转 HTML）+ `highlight.js`（代码高亮）+ `dompurify`（安全消毒）渲染，`github-markdown-css` 提供基础排版样式；这套库不进入首屏同步 bundle；切换文件时预览自动重置为关闭。
 
 ## 禁止事项
 
