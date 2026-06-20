@@ -1,6 +1,6 @@
 # 前端规范
 
-本规范适用于完全自研的 `frontend/` 工程，合并编码、性能和测试规范。技术栈版本以 `frontend/README.md` 为单一来源；包职责与访问边界见 `docs/architecture/module-map.md` 和 `docs/architecture/dependency-rules.md`；前后端契约见 `docs/api/`。
+本规范适用于完全自研的 `frontend/` 工程，以及独立的 `frontend-opencode` Vue/Vite opencode 复刻工程。技术栈版本以各自 README 为单一来源；包职责与访问边界见 `docs/architecture/module-map.md` 和 `docs/architecture/dependency-rules.md`；前后端契约见 `docs/api/`。
 
 ## 基本原则
 
@@ -22,7 +22,7 @@
 
 ## 组件与状态
 
-1. API 远端状态优先放在 TanStack Query；跨面板 UI 状态和工作台状态可放在 Zustand；单组件内部临时状态用 React 本地状态。
+1. `frontend/` 主 workspace 的 API 远端状态优先放在 TanStack Query；`frontend-opencode` 使用 Pinia store 承载 opencode parity 状态；单组件内部临时状态保持在组件本地。
 2. 不把密钥、token 或敏感内容放入可持久化前端状态。
 3. Dockview 面板恢复必须使用稳定 id，避免刷新后丢失上下文。
 4. 当前事件流应优先按 `eventId` 去重，兼容旧事件时才回退 `runId + seq`；`seq=0` transient 文本事件不能因为相同 seq 被错误丢弃。
@@ -52,7 +52,7 @@
 
 1. 首屏只加载工作台启动必需数据；大列表、大文件树、长日志和长报告必须分页、虚拟化或懒加载。
 2. 非首屏能力按需加载（报告详情、Skill Studio、截图预览）；避免启动阶段并发请求无关接口。
-3. Next.js 路由和 package 拆分必须控制首屏 bundle；Monaco 编辑器和 Monaco Diff 必须懒加载，不进入首屏同步 bundle。
+3. Vite/路由/package 拆分必须控制首屏 bundle；Monaco 编辑器和 Monaco Diff 必须懒加载，不进入首屏同步 bundle。
 
 ### SSE 渲染
 
@@ -113,7 +113,7 @@ corepack pnpm e2e:real
 2. 事件流测试必须模拟多事件、断线、重连、重复事件和最后事件 id。
 3. E2E mock 必须使用 `docs/api/http-api.md` 中记录的后端 DTO 字段（例如文件列表使用 `directory` 而不是前端展示态 `type`）。
 4. 真实 E2E 必须通过 `backend-api` 和平台 WebSocket/SSE 入口验证，不得让前端或测试代码直连 opencode 公网 share API。
-5. `frontend-opencode` 和 `opencode-source/` 下的测试不属于平台前端验收，不能替代 `frontend/` 下的 Vitest、mock E2E 或 real E2E。
+5. `frontend-opencode` 的测试属于 opencode Vue/Vite 复刻工程验收，但不能替代 `frontend/` 主 workspace 的 Vitest、mock E2E 或 real E2E；`opencode-source/` 下的测试仍只作为参考。
 6. `frontend/playwright.real.config.ts` 只匹配 `*.real-spec.ts`，`corepack pnpm e2e:real` 必须配合真实 `test-agent-app`、前端和 opencode server 使用，不能用 mock E2E 替代；`tools/dev-phase11-real-e2e.sh` 是真实三服务验收入口。
 
 ## 完成标准

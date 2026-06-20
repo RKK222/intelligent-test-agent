@@ -94,6 +94,76 @@ class OpencodeRuntimeApplicationServiceTest {
     }
 
     @Test
+    void getConfigUsesGlobalConfigPath() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("theme", "dark")))));
+
+        fixture.service.getConfig("wrk_1234567890abcdef", "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.method()).isEqualTo("GET");
+        assertThat(command.path()).isEqualTo("/global/config");
+        assertThat(command.directory()).isEqualTo("/tmp/demo");
+    }
+
+    @Test
+    void authorizeProviderOAuthUsesProviderOAuthPathAndBody() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("url", "https://auth.example")))));
+
+        fixture.service.authorizeProviderOAuth("anthropic", Map.of("callbackUrl", "http://localhost/callback"), "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.method()).isEqualTo("POST");
+        assertThat(command.path()).isEqualTo("/provider/anthropic/oauth/authorize");
+        assertThat(command.body()).isEqualTo(Map.of("callbackUrl", "http://localhost/callback"));
+    }
+
+    @Test
+    void createWorktreeUsesExperimentalWorktreePath() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("path", "/tmp/demo/.worktrees/feature")))));
+
+        fixture.service.createWorktree(Map.of("workspaceId", "wrk_1234567890abcdef", "branch", "feature"), "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.method()).isEqualTo("POST");
+        assertThat(command.path()).isEqualTo("/experimental/worktree");
+        assertThat(command.directory()).isEqualTo("/tmp/demo");
+    }
+
+    @Test
+    void shareSessionUsesRemoteSessionId() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("url", "https://opencode.ai/s/abc")))));
+
+        fixture.service.shareSession("ses_1234567890abcdef", "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.method()).isEqualTo("POST");
+        assertThat(command.path()).isEqualTo("/session/ses_remote1234567890abcdef/share");
+        assertThat(command.directory()).isEqualTo("/tmp/demo");
+    }
+
+    @Test
+    void startMcpAuthUsesMcpAuthPath() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("state", "pending")))));
+
+        fixture.service.startMcpAuth("github", Map.of("callbackUrl", "http://localhost/callback"), "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.method()).isEqualTo("POST");
+        assertThat(command.path()).isEqualTo("/mcp/github/auth");
+        assertThat(command.body()).isEqualTo(Map.of("callbackUrl", "http://localhost/callback"));
+    }
+
+    @Test
     void replyPermissionUsesRemoteSessionIdAndRequestBody() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(

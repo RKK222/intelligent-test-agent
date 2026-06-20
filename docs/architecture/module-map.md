@@ -9,6 +9,9 @@ Browser
   -> frontend/apps/agent-web
       -> packages/backend-api
       -> packages/event-stream-client
+  -> frontend-opencode
+      -> packages/backend-api (source alias)
+      -> packages/event-stream-client (source alias)
   -> test-agent-app
       -> test-agent-api
           -> workspace-management / opencode-runtime / system-management / integration
@@ -63,6 +66,7 @@ Browser
 | `packages/test-runner` | 底部 Run 状态、取消、重试和事件日志面板。 |
 | `packages/ui-kit` | 平台通用 UI 组件、基础样式组合和反馈组件。 |
 | `packages/shared-types` | 跨包共享 TypeScript 类型和事件/DTO 模型。 |
+| `../frontend-opencode` | 独立 Vue/TypeScript/Vite opencode IDE App 复刻工程；不加入 `frontend/pnpm-workspace.yaml`，通过 alias 复用 `backend-api`、`event-stream-client`、`shared-types` 源码。 |
 
 ## 前端访问关系
 
@@ -98,4 +102,4 @@ packages/event-stream-client -> packages/shared-types
 
 ## 参考/实验目录
 
-`frontend/interaction-visual-demo`、顶层 `frontend-opencode` 和 `opencode-source/opencode-1.17.8/` 仅作为 opencode Web 行为参考或交互资料，不纳入平台前端 workspace、构建、测试或完成范围；`requirements/` 下的历史文档不作为编码依据。
+`frontend/interaction-visual-demo` 和 `opencode-source/opencode-1.17.8/` 仅作为 opencode Web 行为参考或交互资料；顶层 `frontend-opencode` 是独立 Vue/Vite 复刻工程，验收命令在该目录执行，不替代 `frontend/` 主 workspace 的检查；`requirements/` 下的历史文档不作为编码依据。

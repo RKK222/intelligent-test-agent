@@ -10,7 +10,7 @@
 - Run 启动、取消、远端 opencode session 懒创建/复用、事件订阅和终态处理。
 - RunEvent 持久化策略、实时发布和 opencode projected messages 恢复。
 - Run Diff 查询、接受和拒绝。
-- Phase 11 opencode runtime 能力映射。
+- Phase 11 opencode runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth。
 - PTY terminal ticket、限流、active session registry、进程适配和审计。
 
 ## 测试覆盖
@@ -20,7 +20,7 @@
 - `RunEventPersistencePolicyTest` 覆盖消息投影只走实时通道、关键状态事件持久化、tool payload 清洗和 rawPayload 移除。
 - `RunMessageRecoveryServiceTest` 覆盖 opencode projected messages 恢复为 transient SSE snapshot，以及未绑定/远端失败时降级为空。
 - `SessionApplicationServiceTest` 覆盖 Session 创建前 Workspace 校验、归档隐藏、标题/置顶更新和消息追加默认 role。
-- `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、workspace directory 透传和 permission reply body 兼容。
+- `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
 - `Terminal*Test` 覆盖 ticket 签发/消费/过期、active session 互斥、输入/输出限流、WebSocket envelope 编解码和本地进程适配。
 
 ## 允许依赖

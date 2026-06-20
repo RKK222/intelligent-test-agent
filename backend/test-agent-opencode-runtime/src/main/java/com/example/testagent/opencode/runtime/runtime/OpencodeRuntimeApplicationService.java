@@ -159,6 +159,90 @@ public class OpencodeRuntimeApplicationService {
     }
 
     /**
+     * 读取 opencode 全局配置；仍按 workspace 路由节点，避免前端直连 opencode server。
+     */
+    public Object getConfig(String workspaceId, String traceId) {
+        return get(workspaceLocation(workspaceId), "/global/config", Map.of(), traceId);
+    }
+
+    /**
+     * 更新 opencode 全局配置，body 只做空值兜底，字段兼容由 opencode runtime 负责。
+     */
+    public Object updateConfig(String workspaceId, Map<String, Object> body, String traceId) {
+        return patch(workspaceLocation(workspaceId), "/global/config", safeBody(body), traceId);
+    }
+
+    /**
+     * 触发 opencode runtime dispose，用于 Web App 设置页的服务重载能力。
+     */
+    public Object disposeGlobal(String traceId) {
+        return post(workspaceLocation(null), "/global/dispose", Map.of(), traceId);
+    }
+
+    /**
+     * 查询 provider auth 状态。
+     */
+    public Object listProviderAuth(String workspaceId, String traceId) {
+        return get(workspaceLocation(workspaceId), "/provider/auth", Map.of(), traceId);
+    }
+
+    /**
+     * 发起 provider OAuth 授权。
+     */
+    public Object authorizeProviderOAuth(String providerId, Map<String, Object> body, String traceId) {
+        return post(workspaceLocation(null), "/provider/" + encodePath(providerId) + "/oauth/authorize", safeBody(body), traceId);
+    }
+
+    /**
+     * 完成 provider OAuth 回调。
+     */
+    public Object completeProviderOAuth(String providerId, Map<String, Object> body, String traceId) {
+        return post(workspaceLocation(null), "/provider/" + encodePath(providerId) + "/oauth/callback", safeBody(body), traceId);
+    }
+
+    /**
+     * 写入 provider auth secret，secret 不在应用层记录日志或持久化。
+     */
+    public Object setProviderAuth(String providerId, Map<String, Object> body, String traceId) {
+        return put(workspaceLocation(null), "/auth/" + encodePath(providerId), safeBody(body), traceId);
+    }
+
+    /**
+     * 删除 provider auth secret。
+     */
+    public Object removeProviderAuth(String providerId, String traceId) {
+        return delete(workspaceLocation(null), "/auth/" + encodePath(providerId), Map.of(), traceId);
+    }
+
+    /**
+     * 查询 opencode experimental worktree 列表。
+     */
+    public Object listWorktrees(String workspaceId, String traceId) {
+        return get(workspaceLocation(workspaceId), "/experimental/worktree", Map.of(), traceId);
+    }
+
+    /**
+     * 创建 worktree；workspaceId 只用于平台路由，不透传为额外策略。
+     */
+    public Object createWorktree(Map<String, Object> body, String traceId) {
+        return post(workspaceLocation(text(safeBody(body).get("workspaceId"))), "/experimental/worktree", safeBody(body), traceId);
+    }
+
+    /**
+     * 删除 worktree。
+     */
+    public Object removeWorktree(Map<String, Object> body, String traceId) {
+        return delete(workspaceLocation(text(safeBody(body).get("workspaceId"))), "/experimental/worktree", safeBody(body), traceId);
+    }
+
+    /**
+     * 重置 worktree。
+     */
+    public Object resetWorktree(Map<String, Object> body, String traceId) {
+        return post(workspaceLocation(text(safeBody(body).get("workspaceId"))), "/experimental/worktree/reset", safeBody(body), traceId);
+    }
+
+    /**
      * 查询远端 session children，平台 sessionId 会先映射为 opencode session id。
      */
     public Object sessionChildren(String sessionId, String traceId) {
@@ -239,6 +323,22 @@ public class OpencodeRuntimeApplicationService {
     }
 
     /**
+     * 创建 opencode 会话分享链接，sessionId 经平台映射后再访问远端。
+     */
+    public Object shareSession(String sessionId, String traceId) {
+        SessionLocation location = sessionLocation(sessionId);
+        return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/share", Map.of(), traceId);
+    }
+
+    /**
+     * 取消 opencode 会话分享。
+     */
+    public Object unshareSession(String sessionId, String traceId) {
+        SessionLocation location = sessionLocation(sessionId);
+        return delete(location, "/session/" + encodePath(location.opencodeSessionId()) + "/share", Map.of(), traceId);
+    }
+
+    /**
      * 查询远端 permission 请求列表。
      */
     public Object listPermissions(String sessionId, String traceId) {
@@ -291,6 +391,42 @@ public class OpencodeRuntimeApplicationService {
     }
 
     /**
+     * 发起 MCP auth。
+     */
+    public Object startMcpAuth(String name, Map<String, Object> body, String traceId) {
+        return post(workspaceLocation(text(safeBody(body).get("workspaceId"))), "/mcp/" + encodePath(name) + "/auth", safeBody(body), traceId);
+    }
+
+    /**
+     * 完成 MCP auth 回调。
+     */
+    public Object completeMcpAuth(String name, Map<String, Object> body, String traceId) {
+        return post(
+                workspaceLocation(text(safeBody(body).get("workspaceId"))),
+                "/mcp/" + encodePath(name) + "/auth/callback",
+                safeBody(body),
+                traceId);
+    }
+
+    /**
+     * 执行 MCP auth authenticate 步骤。
+     */
+    public Object authenticateMcp(String name, Map<String, Object> body, String traceId) {
+        return post(
+                workspaceLocation(text(safeBody(body).get("workspaceId"))),
+                "/mcp/" + encodePath(name) + "/auth/authenticate",
+                safeBody(body),
+                traceId);
+    }
+
+    /**
+     * 删除 MCP auth。
+     */
+    public Object removeMcpAuth(String name, String traceId) {
+        return delete(workspaceLocation(null), "/mcp/" + encodePath(name) + "/auth", Map.of(), traceId);
+    }
+
+    /**
      * 发送 GET runtime 请求。
      */
     private Object get(RuntimeTarget location, String path, Map<String, String> query, String traceId) {
@@ -302,6 +438,27 @@ public class OpencodeRuntimeApplicationService {
      */
     private Object post(RuntimeTarget location, String path, Map<String, Object> body, String traceId) {
         return call(location, "POST", path, Map.of(), body, traceId);
+    }
+
+    /**
+     * 发送 PATCH runtime 请求。
+     */
+    private Object patch(RuntimeTarget location, String path, Map<String, Object> body, String traceId) {
+        return call(location, "PATCH", path, Map.of(), body, traceId);
+    }
+
+    /**
+     * 发送 PUT runtime 请求。
+     */
+    private Object put(RuntimeTarget location, String path, Map<String, Object> body, String traceId) {
+        return call(location, "PUT", path, Map.of(), body, traceId);
+    }
+
+    /**
+     * 发送 DELETE runtime 请求。
+     */
+    private Object delete(RuntimeTarget location, String path, Map<String, Object> body, String traceId) {
+        return call(location, "DELETE", path, Map.of(), body, traceId);
     }
 
     /**
@@ -390,6 +547,10 @@ public class OpencodeRuntimeApplicationService {
      */
     private Map<String, Object> safeBody(Map<String, Object> body) {
         return body == null ? Map.of() : body;
+    }
+
+    private String text(Object value) {
+        return value instanceof String text && !text.isBlank() ? text : null;
     }
 
     /**

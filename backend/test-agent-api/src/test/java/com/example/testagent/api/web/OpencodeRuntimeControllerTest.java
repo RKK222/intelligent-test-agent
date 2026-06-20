@@ -99,4 +99,23 @@ class OpencodeRuntimeControllerTest {
                 .jsonPath("$.success").isEqualTo(true)
                 .jsonPath("$.data[0].id").isEqualTo("bash");
     }
+
+    @Test
+    void runtimeControllerSharesSessionThroughUnifiedResponse() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        when(service.shareSession(eq("ses_1234567890abcdef"), eq("trace_1234567890abcdef")))
+                .thenReturn(Map.of("url", "https://opencode.ai/s/abc"));
+        WebTestClient client = WebTestClient.bindToController(new OpencodeRuntimeController(service))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.post()
+                .uri("/api/sessions/ses_1234567890abcdef/share")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.url").isEqualTo("https://opencode.ai/s/abc");
+    }
 }

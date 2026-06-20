@@ -150,6 +150,19 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     listModels: async (workspaceId?: string) => (await runtimeList(`/api/models${query({ workspaceId })}`, request)).map(toModelInfo),
     listProviders: async (workspaceId?: string) =>
       (await runtimeList(`/api/providers${query({ workspaceId })}`, request)).map(toProviderInfo),
+    getConfig: (workspaceId?: string) => request<unknown>(`/api/config${query({ workspaceId })}`),
+    updateConfig: (payload: Record<string, unknown>, workspaceId?: string) =>
+      request<unknown>(`/api/config${query({ workspaceId })}`, { method: "PATCH", body: JSON.stringify(payload) }),
+    disposeGlobal: () => request<unknown>("/api/global/dispose", { method: "POST" }),
+    listProviderAuth: (workspaceId?: string) => request<unknown>(`/api/provider/auth${query({ workspaceId })}`),
+    authorizeProviderOAuth: (providerId: string, payload?: Record<string, unknown>) =>
+      postRuntime(`/api/provider/${encodeURIComponent(providerId)}/oauth/authorize`, payload, request),
+    completeProviderOAuth: (providerId: string, payload?: Record<string, unknown>) =>
+      postRuntime(`/api/provider/${encodeURIComponent(providerId)}/oauth/callback`, payload, request),
+    setProviderAuth: (providerId: string, payload: Record<string, unknown>) =>
+      request<unknown>(`/api/auth/${encodeURIComponent(providerId)}`, { method: "PUT", body: JSON.stringify(payload) }),
+    removeProviderAuth: (providerId: string) =>
+      request<unknown>(`/api/auth/${encodeURIComponent(providerId)}`, { method: "DELETE" }),
     listCommands: async (workspaceId?: string) =>
       (await runtimeList(`/api/commands${query({ workspaceId })}`, request)).map(toCommandInfo),
     listReferences: (workspaceId?: string) => request<unknown>(`/api/references${query({ workspaceId })}`),
@@ -171,6 +184,18 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       listValuesFromRuntimeEnvelope(await request<unknown>(`/api/mcp/tools${query({ workspaceId, provider, model })}`)).map((item) =>
         typeof item === "string" ? toRuntimeToolInfo({ id: item, name: item }) : toRuntimeToolInfo(item)
       ),
+    startMcpAuth: (name: string, payload?: Record<string, unknown>) =>
+      postRuntime(`/api/mcp/${encodeURIComponent(name)}/auth`, payload, request),
+    completeMcpAuth: (name: string, payload?: Record<string, unknown>) =>
+      postRuntime(`/api/mcp/${encodeURIComponent(name)}/auth/callback`, payload, request),
+    authenticateMcp: (name: string, payload?: Record<string, unknown>) =>
+      postRuntime(`/api/mcp/${encodeURIComponent(name)}/auth/authenticate`, payload, request),
+    removeMcpAuth: (name: string) => request<unknown>(`/api/mcp/${encodeURIComponent(name)}/auth`, { method: "DELETE" }),
+    listWorktrees: (workspaceId?: string) => request<unknown>(`/api/worktrees${query({ workspaceId })}`),
+    createWorktree: (payload?: Record<string, unknown>) => postRuntime("/api/worktrees", payload, request),
+    removeWorktree: (payload?: Record<string, unknown>) =>
+      request<unknown>("/api/worktrees", { method: "DELETE", body: payload == null ? undefined : JSON.stringify(payload) }),
+    resetWorktree: (payload?: Record<string, unknown>) => postRuntime("/api/worktrees/reset", payload, request),
     getSessionChildren: (sessionId: string) => request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/children`),
     getSessionTodo: async (sessionId: string) =>
       listFromRuntimeEnvelope(await request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/todo`)).map(toTodoItem),
@@ -194,6 +219,10 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       postRuntime(`/api/sessions/${encodeURIComponent(sessionId)}/command`, payload, request),
     runSessionShell: (sessionId: string, payload?: Record<string, unknown>) =>
       postRuntime(`/api/sessions/${encodeURIComponent(sessionId)}/shell`, payload, request),
+    shareSession: (sessionId: string) =>
+      postRuntime(`/api/sessions/${encodeURIComponent(sessionId)}/share`, undefined, request),
+    unshareSession: (sessionId: string) =>
+      request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/share`, { method: "DELETE" }),
     listSessionPermissions: async (sessionId: string) =>
       listFromRuntimeEnvelope(await request<unknown>(`/api/sessions/${encodeURIComponent(sessionId)}/permissions`)).map((item) =>
         toPermissionRequest(item, sessionId)

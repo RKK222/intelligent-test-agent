@@ -2,19 +2,18 @@
 
 ## 工程定位
 
-完全自研测试智能体 Web IDE 前端。`frontend/interaction-visual-demo` 只作为交互参考资料，不纳入 `pnpm-workspace.yaml` 构建；顶层 `frontend-opencode` 和 `opencode-source/opencode-1.17.8/packages/frontend-opencode` 当前仅作为 opencode Web 行为参考或实验目录，不纳入平台前端稳定 workspace、构建、测试或完成范围。
+完全自研测试智能体 Web IDE 前端。`frontend/interaction-visual-demo` 只作为交互参考资料，不纳入 `pnpm-workspace.yaml` 构建；顶层 `frontend-opencode` 是 opencode IDE App 的 Vue/TypeScript/Vite 复刻交付物，作为独立工程单独安装、构建和验收，不纳入 `frontend/pnpm-workspace.yaml`。
 
 ## 技术栈
 
-- Next.js 16
-- React 19
+- Vue 3
+- Vite 8
 - TypeScript 6
 - Tailwind CSS 4
-- assistant-ui
 - Dockview
 - Monaco Editor / Monaco Diff Editor
 - TanStack Query
-- Zustand
+- Pinia
 - pnpm workspace
 
 ## workspace
@@ -86,7 +85,7 @@ tools/dev-phase11-real-e2e.sh --start-services
 
 该脚本默认复用已运行的 opencode server 和 `test-agent-app`；传入 `--start-services` 时会启动本地 Postgres、opencode server 和后端，前端由 `frontend/playwright.real.config.ts` 的 Playwright `webServer` 管理。服务日志保留在 `.tmp/phase11-real-e2e/`，脚本不会打印 `.env.local` 或 `.env.test` 中的敏感值。本机 Docker daemon 未运行时，脚本会在启动 Postgres 前直接失败并提示先启动 Docker Desktop，或手动启动后端后不带 `--start-services` 重试。
 
-`apps/agent-web/next.config.ts` 允许本地开发从 `http://127.0.0.1:3000` 访问 Next dev resource；联调时使用 `localhost` 或 `127.0.0.1` 都应保持完整交互能力。
+`frontend-opencode` 独立联调见 `frontend-opencode/README.md`，默认通过 Vite proxy 把 `/api` 转发到 `test-agent-app`。
 
 ## 访问边界
 
@@ -94,7 +93,7 @@ tools/dev-phase11-real-e2e.sh --start-services
 - HTTP 请求只能通过 `packages/backend-api`。
 - RunEvent SSE 只能通过 `packages/event-stream-client`。
 - `apps/agent-web` 负责组合页面；业务能力必须沉淀到对应 package。
-- Phase 11 opencode Web App 复刻以运行态能力为范围，交互行为参考 `opencode-source/opencode-1.17.8/packages/app`；settings/config/provider/server 配置页和 opencode `packages/web` 公网分享轮询不进入默认前端边界。
+- Phase 11 opencode Web App 复刻以运行态能力为范围，交互行为参考 `opencode-source/opencode-1.17.8/packages/app`；顶层 `frontend-opencode` 承载 Vue/Vite 复刻工程，opencode `packages/web` 官网/文档/公网分享轮询不进入默认边界。
 - 当前 Phase 11 实现已接入 backend-api runtime 方法、Agent/Provider/Model/Mode 运行态选择、session history 搜索/置顶/删除、message part reducer、permission/question dock、Todo、文件/图片附件、busy follow-up 队列、Monaco 选区上下文、slash command palette、`@` context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与 hunk context、MCP/LSP/VCS 状态摘要、`/s/[sessionId]` 只读 transcript 和受控 PTY terminal panel；公开 share 授权、per-file/per-message 回滚和真实三服务联调 E2E 仍按后续批次推进。
 
 ## Phase 11 UI 与主题边界

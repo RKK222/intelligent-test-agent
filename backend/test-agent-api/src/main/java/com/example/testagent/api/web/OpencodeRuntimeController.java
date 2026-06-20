@@ -4,9 +4,12 @@ import com.example.testagent.opencode.runtime.runtime.OpencodeRuntimeApplication
 import com.example.testagent.common.api.ApiResponse;
 import java.util.Map;
 import java.util.function.Function;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -216,6 +219,168 @@ public class OpencodeRuntimeController {
     }
 
     /**
+     * 读取 opencode 配置，前端只访问平台代理路径。
+     */
+    @GetMapping({
+            "/api/config",
+            "/api/internal/platform/opencode-runtime/config",
+            "/api/internal/agent/opencode/global/config"
+    })
+    public Mono<ApiResponse<Object>> getConfig(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.getConfig(workspaceId, traceId));
+    }
+
+    /**
+     * 更新 opencode 配置，响应仍由统一 ApiResponse 包装。
+     */
+    @PatchMapping({
+            "/api/config",
+            "/api/internal/platform/opencode-runtime/config",
+            "/api/internal/agent/opencode/global/config"
+    })
+    public Mono<ApiResponse<Object>> updateConfig(
+            @RequestParam(required = false) String workspaceId,
+            @RequestBody(required = false) Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.updateConfig(workspaceId, body, traceId));
+    }
+
+    /**
+     * 触发 opencode 全局 dispose，供设置页重载运行态。
+     */
+    @PostMapping({
+            "/api/global/dispose",
+            "/api/internal/platform/opencode-runtime/global/dispose",
+            "/api/internal/agent/opencode/global/dispose"
+    })
+    public Mono<ApiResponse<Object>> disposeGlobal(ServerWebExchange exchange) {
+        return response(exchange, runtimeService::disposeGlobal);
+    }
+
+    /**
+     * 查询 provider auth 状态。
+     */
+    @GetMapping({
+            "/api/provider/auth",
+            "/api/internal/platform/opencode-runtime/provider/auth",
+            "/api/internal/agent/opencode/provider/auth"
+    })
+    public Mono<ApiResponse<Object>> listProviderAuth(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.listProviderAuth(workspaceId, traceId));
+    }
+
+    /**
+     * 发起 provider OAuth。
+     */
+    @PostMapping({
+            "/api/provider/{providerId}/oauth/authorize",
+            "/api/internal/platform/opencode-runtime/provider/{providerId}/oauth/authorize",
+            "/api/internal/agent/opencode/provider/{providerId}/oauth/authorize"
+    })
+    public Mono<ApiResponse<Object>> authorizeProviderOAuth(
+            @PathVariable String providerId,
+            @RequestBody(required = false) Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.authorizeProviderOAuth(providerId, body, traceId));
+    }
+
+    /**
+     * 完成 provider OAuth 回调。
+     */
+    @PostMapping({
+            "/api/provider/{providerId}/oauth/callback",
+            "/api/internal/platform/opencode-runtime/provider/{providerId}/oauth/callback",
+            "/api/internal/agent/opencode/provider/{providerId}/oauth/callback"
+    })
+    public Mono<ApiResponse<Object>> completeProviderOAuth(
+            @PathVariable String providerId,
+            @RequestBody(required = false) Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.completeProviderOAuth(providerId, body, traceId));
+    }
+
+    /**
+     * 写入 provider auth secret，secret 仅透传给运行态。
+     */
+    @PutMapping({
+            "/api/auth/{providerId}",
+            "/api/internal/platform/opencode-runtime/auth/{providerId}",
+            "/api/internal/agent/opencode/auth/{providerId}"
+    })
+    public Mono<ApiResponse<Object>> setProviderAuth(
+            @PathVariable String providerId,
+            @RequestBody(required = false) Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.setProviderAuth(providerId, body, traceId));
+    }
+
+    /**
+     * 删除 provider auth secret。
+     */
+    @DeleteMapping({
+            "/api/auth/{providerId}",
+            "/api/internal/platform/opencode-runtime/auth/{providerId}",
+            "/api/internal/agent/opencode/auth/{providerId}"
+    })
+    public Mono<ApiResponse<Object>> removeProviderAuth(@PathVariable String providerId, ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.removeProviderAuth(providerId, traceId));
+    }
+
+    /**
+     * 查询 experimental worktree。
+     */
+    @GetMapping({
+            "/api/worktrees",
+            "/api/internal/platform/opencode-runtime/worktrees",
+            "/api/internal/agent/opencode/experimental/worktree"
+    })
+    public Mono<ApiResponse<Object>> listWorktrees(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.listWorktrees(workspaceId, traceId));
+    }
+
+    /**
+     * 创建 experimental worktree。
+     */
+    @PostMapping({
+            "/api/worktrees",
+            "/api/internal/platform/opencode-runtime/worktrees",
+            "/api/internal/agent/opencode/experimental/worktree"
+    })
+    public Mono<ApiResponse<Object>> createWorktree(
+            @RequestBody(required = false) Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.createWorktree(body, traceId));
+    }
+
+    /**
+     * 删除 experimental worktree。
+     */
+    @DeleteMapping({
+            "/api/worktrees",
+            "/api/internal/platform/opencode-runtime/worktrees",
+            "/api/internal/agent/opencode/experimental/worktree"
+    })
+    public Mono<ApiResponse<Object>> removeWorktree(
+            @RequestBody(required = false) Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.removeWorktree(body, traceId));
+    }
+
+    /**
+     * 重置 experimental worktree。
+     */
+    @PostMapping({
+            "/api/worktrees/reset",
+            "/api/internal/platform/opencode-runtime/worktrees/reset",
+            "/api/internal/agent/opencode/experimental/worktree/reset"
+    })
+    public Mono<ApiResponse<Object>> resetWorktree(
+            @RequestBody(required = false) Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.resetWorktree(body, traceId));
+    }
+
+    /**
      * 查询会话子会话列表，支撑 Web IDE 的会话树。
      */
     @GetMapping({
@@ -357,6 +522,30 @@ public class OpencodeRuntimeController {
     }
 
     /**
+     * 创建会话分享链接。
+     */
+    @PostMapping({
+            "/api/sessions/{sessionId}/share",
+            "/api/internal/platform/opencode-runtime/sessions/{sessionId}/share",
+            "/api/internal/agent/opencode/session/{sessionId}/share"
+    })
+    public Mono<ApiResponse<Object>> shareSession(@PathVariable String sessionId, ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.shareSession(sessionId, traceId));
+    }
+
+    /**
+     * 取消会话分享。
+     */
+    @DeleteMapping({
+            "/api/sessions/{sessionId}/share",
+            "/api/internal/platform/opencode-runtime/sessions/{sessionId}/share",
+            "/api/internal/agent/opencode/session/{sessionId}/share"
+    })
+    public Mono<ApiResponse<Object>> unshareSession(@PathVariable String sessionId, ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.unshareSession(sessionId, traceId));
+    }
+
+    /**
      * 列出会话待处理权限请求。
      */
     @GetMapping({
@@ -475,6 +664,63 @@ public class OpencodeRuntimeController {
             @PathVariable String requestId,
             ServerWebExchange exchange) {
         return response(exchange, traceId -> runtimeService.rejectQuestion(sessionId, requestId, traceId));
+    }
+
+    /**
+     * 发起 MCP auth。
+     */
+    @PostMapping({
+            "/api/mcp/{name}/auth",
+            "/api/internal/platform/opencode-runtime/mcp/{name}/auth",
+            "/api/internal/agent/opencode/mcp/{name}/auth"
+    })
+    public Mono<ApiResponse<Object>> startMcpAuth(
+            @PathVariable String name,
+            @RequestBody(required = false) Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.startMcpAuth(name, body, traceId));
+    }
+
+    /**
+     * 完成 MCP auth callback。
+     */
+    @PostMapping({
+            "/api/mcp/{name}/auth/callback",
+            "/api/internal/platform/opencode-runtime/mcp/{name}/auth/callback",
+            "/api/internal/agent/opencode/mcp/{name}/auth/callback"
+    })
+    public Mono<ApiResponse<Object>> completeMcpAuth(
+            @PathVariable String name,
+            @RequestBody(required = false) Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.completeMcpAuth(name, body, traceId));
+    }
+
+    /**
+     * 执行 MCP auth authenticate。
+     */
+    @PostMapping({
+            "/api/mcp/{name}/auth/authenticate",
+            "/api/internal/platform/opencode-runtime/mcp/{name}/auth/authenticate",
+            "/api/internal/agent/opencode/mcp/{name}/auth/authenticate"
+    })
+    public Mono<ApiResponse<Object>> authenticateMcp(
+            @PathVariable String name,
+            @RequestBody(required = false) Map<String, Object> body,
+            ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.authenticateMcp(name, body, traceId));
+    }
+
+    /**
+     * 删除 MCP auth。
+     */
+    @DeleteMapping({
+            "/api/mcp/{name}/auth",
+            "/api/internal/platform/opencode-runtime/mcp/{name}/auth",
+            "/api/internal/agent/opencode/mcp/{name}/auth"
+    })
+    public Mono<ApiResponse<Object>> removeMcpAuth(@PathVariable String name, ServerWebExchange exchange) {
+        return response(exchange, traceId -> runtimeService.removeMcpAuth(name, traceId));
     }
 
     /**

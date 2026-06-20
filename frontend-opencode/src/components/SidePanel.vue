@@ -1,0 +1,66 @@
+<script setup lang="ts">
+import { computed, ref } from "vue";
+import { CheckSquare, FileDiff, FolderTree, RadioTower, TerminalSquare } from "lucide-vue-next";
+import { useSessionStore } from "@/stores/session";
+import { useTerminalStore } from "@/stores/terminal";
+
+const session = useSessionStore();
+const terminal = useTerminalStore();
+const tab = ref<"review" | "files" | "terminal" | "status">("review");
+const diffFiles = computed(() => session.diff?.files ?? []);
+
+function openTerminal() {
+  if (session.activeSession?.sessionId) {
+    void terminal.open(session.activeSession.sessionId, { cols: 100, rows: 30 });
+  }
+}
+</script>
+
+<template>
+  <aside class="side-panel" aria-label="Session side panel">
+    <div class="side-tabs" role="tablist">
+      <button type="button" :class="{ active: tab === 'review' }" @click="tab = 'review'"><FileDiff :size="15" />Review</button>
+      <button type="button" :class="{ active: tab === 'files' }" @click="tab = 'files'"><FolderTree :size="15" />Files</button>
+      <button type="button" :class="{ active: tab === 'terminal' }" @click="tab = 'terminal'; openTerminal()">
+        <TerminalSquare :size="15" />Terminal
+      </button>
+      <button type="button" :class="{ active: tab === 'status' }" @click="tab = 'status'"><RadioTower :size="15" />Status</button>
+    </div>
+
+    <section v-if="tab === 'review'" class="panel-section">
+      <div class="section-label">Diff review</div>
+      <div v-for="file in diffFiles" :key="file.path" class="diff-row">
+        <strong>{{ file.path }}</strong>
+        <small>+{{ file.additions }} -{{ file.deletions }} · {{ file.status }}</small>
+        <pre>{{ file.patch || "No patch preview" }}</pre>
+      </div>
+      <div v-if="!diffFiles.length" class="empty-note">No proposed diff for this session.</div>
+    </section>
+
+    <section v-else-if="tab === 'files'" class="panel-section">
+      <div class="section-label">Context</div>
+      <div v-for="todo in session.todos" :key="todo.id" class="catalog-row">
+        <span><CheckSquare :size="14" />{{ todo.text }}</span>
+        <small>{{ todo.status }}</small>
+      </div>
+      <div v-if="!session.todos.length" class="empty-note">Todo updates appear from RunEvent SSE.</div>
+    </section>
+
+    <section v-else-if="tab === 'terminal'" class="panel-section terminal-panel">
+      <div class="section-label">PTY terminal</div>
+      <div class="terminal-screen">
+        <span v-if="terminal.status === 'opening'">opening ticket...</span>
+        <span v-else-if="terminal.ticket">ws {{ terminal.ticket.webSocketUrl }}</span>
+        <span v-else>ticket required</span>
+      </div>
+      <div v-if="terminal.error" class="inline-alert">{{ terminal.error }}</div>
+    </section>
+
+    <section v-else class="panel-section">
+      <div class="section-label">Runtime requests</div>
+      <div class="catalog-row"><span>Permissions</span><small>{{ session.permissions.length }}</small></div>
+      <div class="catalog-row"><span>Questions</span><small>{{ session.questions.length }}</small></div>
+      <div class="catalog-row"><span>Run</span><small>{{ session.activeRun?.status ?? "idle" }}</small></div>
+    </section>
+  </aside>
+</template>
