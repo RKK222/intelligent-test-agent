@@ -20,7 +20,7 @@
 - `src/components/SessionToolbarActions.vue`：复刻 opencode session toolbar 的 share、fork、compact、revert、abort 入口；fork/revert 按 opencode `messageID` 请求体经平台代理。
 - `src/components/SessionForkDialog.vue`：复刻 opencode fork dialog 的用户消息选择列表，选择后通过 `backend-api.forkSession` 创建子会话并跳转。
 - `src/components/SessionShareButton.vue`：复刻 opencode session share publish/view/copy/unpublish 入口；publish/unpublish 通过平台 `backend-api`，公开 URL 只保存在前端会话状态。
-- `src/components/SettingsDialog.vue`：承载 opencode 设置入口，已接入 provider auth 状态、API key 保存/移除、provider OAuth methods、prompt inputs、授权 URL、code/auto callback payload。
+- `src/components/SettingsDialog.vue`：承载 opencode 设置入口，已接入 provider auth 状态、API key 保存/移除、provider OAuth methods、prompt inputs、授权 URL、code/auto callback payload；弹窗内容有独立滚动区域，确保 Worktree/MCP 面板在小视口也可达。
 - `src/components/SettingsWorktreePanel.vue`：复刻 opencode workspace/worktree 管理入口，支持 experimental worktree 列表、创建、重置和删除；所有操作经平台 `backend-api` 代理。
 - `src/components/SettingsMcpPanel.vue`：复刻 opencode MCP 状态/认证/开关入口，展示 connected/failed/needs_auth 等状态，并通过平台 API connect/disconnect、发起或移除 MCP auth。
 - `src/components/TerminalPanel.vue`：复刻 opencode Terminal 侧栏基础交互，ticket 经 `backend-api` 获取，WebSocket 使用平台 JSON envelope 发送 input/resize/close，使用 xterm 渲染输出并保留 warning/error、输出片段上限和可访问 transcript。
@@ -28,7 +28,7 @@
 
 ## 测试记录
 
-- Playwright mock E2E 覆盖桌面/移动端 shell、首页会话列表、命令面板入口、`/new-session?prompt=...` 草稿提升、会话详情加载、prompt 提交请求构造、toolbar abort/compact/fork/revert、Session share publish/unpublish，以及通过 fake EventSource 注入 RunEvent 后的 timeline 流式渲染。
+- Playwright mock E2E 覆盖桌面/移动端 shell、首页会话列表、命令面板入口、`/new-session?prompt=...` 草稿提升、会话详情加载、prompt 提交请求构造、toolbar abort/compact/fork/revert、Session share publish/unpublish、Settings provider/worktree/MCP mock 流程，以及通过 fake EventSource 注入 RunEvent 后的 timeline 流式渲染。
 - Playwright real E2E 入口为 `playwright.real.config.ts` + `tests/e2e-real/*.real-spec.ts`，以单个桌面 smoke 通过真实 `test-agent-app` 创建或复用 workspace/session，再从 Vue UI 发送 prompt，等待 RunEvent SSE 渲染 assistant 文本；该套件只在 `TEST_AGENT_RUN_REAL_E2E=1` 下运行。
 
 ## 当前边界

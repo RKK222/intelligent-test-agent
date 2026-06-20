@@ -19,8 +19,8 @@
 | Terminal | 已接入后端 ticket 获取、平台 WebSocket JSON envelope、xterm 输出渲染、原始终端输入、warning/error、input、resize、clear、关闭/重连操作。 |
 | Diff review | 已接入 `DiffReviewPanel`，支持文件聚焦、unified/split 样式切换、hunk 统计/导航、空态，以及 `MonacoDiffEditor` 懒加载只读 diff editor；Monaco 不可用时保留 hunk 预览 fallback。 |
 | Session share | 已接入 toolbar share popover，支持 publish、显示/复制/打开公开 URL、unpublish，操作统一经 `backend-api`。 |
-| Provider auth/config/worktree/MCP auth API | 后端平台代理已补齐；Settings 已接入 provider auth 状态、API key 保存/移除、provider OAuth methods/prompt inputs/authorize URL/code 与 auto callback payload、worktree 列表/创建/重置/删除，以及 MCP status/connect/disconnect/auth/remove auth 入口。 |
-| Mock E2E 验收 | Playwright 已覆盖桌面/移动端 App shell、首页会话列表、`/new-session?prompt=...` 草稿提升、会话页加载、prompt submit 请求体、toolbar abort/compact/fork/revert、Session share publish/unpublish、Settings provider API key/OAuth/remove auth mock 流程，以及 fake RunEvent SSE 驱动 assistant delta 渲染到 timeline。 |
+| Provider auth/config/worktree/MCP auth API | 后端平台代理已补齐；Settings 已接入 provider auth 状态、API key 保存/移除、provider OAuth methods/prompt inputs/authorize URL/code 与 auto callback payload、worktree 列表/创建/重置/删除，以及 MCP status/connect/disconnect/auth/remove auth 入口；Settings 弹窗具备内部滚动，Worktree/MCP 操作在小视口内可达。 |
+| Mock E2E 验收 | Playwright 已覆盖桌面/移动端 App shell、首页会话列表、`/new-session?prompt=...` 草稿提升、会话页加载、prompt submit 请求体、toolbar abort/compact/fork/revert、Session share publish/unpublish、Settings provider API key/OAuth/remove auth、worktree create/reset/remove、MCP connect/disconnect/auth/remove auth mock 流程，以及 fake RunEvent SSE 驱动 assistant delta 渲染到 timeline。 |
 | Real E2E 入口 | 已新增 `playwright.real.config.ts` 与 `tests/e2e-real/session-stream.real-spec.ts`，仅在 `TEST_AGENT_RUN_REAL_E2E=1` 下运行单个桌面 smoke，通过真实平台 API 查找/创建 workspace、UI 发送 prompt，并等待 RunEvent SSE 渲染 assistant 文本。 |
 
 ## 待真实三服务验收

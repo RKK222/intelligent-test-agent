@@ -9,6 +9,8 @@ type Capture = {
   revertRequests?: Array<Record<string, unknown>>;
   providerAuthRequests?: Array<Record<string, unknown>>;
   shareRequests?: Array<Record<string, unknown>>;
+  worktreeRequests?: Array<Record<string, unknown>>;
+  mcpRequests?: Array<Record<string, unknown>>;
 };
 
 type MockOptions = {
@@ -47,7 +49,7 @@ test("opens and filters the opencode command palette", async ({ page }, testInfo
 
 test("manages provider auth from the settings dialog", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "Provider settings are covered on the desktop dialog.");
-  const capture: Capture = { runRequests: [], providerAuthRequests: [] };
+  const capture: Capture = { runRequests: [], providerAuthRequests: [], worktreeRequests: [], mcpRequests: [] };
   await mockBackendApi(page, capture);
 
   await page.goto("/");
@@ -72,6 +74,37 @@ test("manages provider auth from the settings dialog", async ({ page }, testInfo
 
   await dialog.getByRole("button", { name: "Remove Anthropic auth" }).click();
   await expect.poll(() => capture.providerAuthRequests?.some((entry) => entry.action === "remove")).toBe(true);
+
+  await expect(dialog.getByText("feature ui")).toBeVisible();
+  await expect(dialog.getByText("/repo/.worktrees/feature-vue")).toBeVisible();
+  await dialog.getByLabel("Worktree name").fill("review-ui");
+  await dialog.getByLabel("Startup command").fill("pnpm install");
+  await dialog.getByRole("button", { name: "Create worktree" }).click();
+  await expect.poll(() => capture.worktreeRequests?.some((entry) => entry.action === "create")).toBe(true);
+  expect(capture.worktreeRequests?.find((entry) => entry.action === "create")).toMatchObject({
+    action: "create",
+    workspaceId: "wrk_1",
+    name: "review-ui",
+    startCommand: "pnpm install"
+  });
+  await dialog.getByRole("button", { name: "Reset /repo/.worktrees/feature-vue" }).click();
+  await expect.poll(() => capture.worktreeRequests?.some((entry) => entry.action === "reset")).toBe(true);
+  await dialog.getByRole("button", { name: "Remove /repo/.worktrees/feature-vue" }).click();
+  await expect.poll(() => capture.worktreeRequests?.some((entry) => entry.action === "remove")).toBe(true);
+
+  await expect(dialog.getByText("github")).toBeVisible();
+  await expect(dialog.getByText("filesystem")).toBeVisible();
+  await expect(dialog.getByText("Needs auth")).toBeVisible();
+  await expect(dialog.getByText("Connected", { exact: true })).toBeVisible();
+  await dialog.getByRole("button", { name: "Connect github" }).click();
+  await expect.poll(() => capture.mcpRequests?.some((entry) => entry.action === "connect")).toBe(true);
+  await dialog.getByRole("button", { name: "Disconnect filesystem" }).click();
+  await expect.poll(() => capture.mcpRequests?.some((entry) => entry.action === "disconnect")).toBe(true);
+  await dialog.getByRole("button", { name: "Authenticate github" }).click();
+  await expect.poll(() => capture.mcpRequests?.some((entry) => entry.action === "auth")).toBe(true);
+  await expect(dialog.getByRole("link", { name: "Open github auth URL" })).toHaveAttribute("href", "https://mcp.example/github");
+  await dialog.getByRole("button", { name: "Remove github auth" }).click();
+  await expect.poll(() => capture.mcpRequests?.some((entry) => entry.action === "remove-auth")).toBe(true);
 });
 
 test("opens a session, sends a prompt, and renders streamed RunEvent output", async ({ page }) => {
@@ -446,6 +479,76 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         body: JSON.parse(request.postData() ?? "{}") as Record<string, unknown>
       });
       return json(route, { providerId: "anthropic", status: "connected" });
+    }
+    if (path === "/api/worktrees" && request.method() === "GET") {
+      return json(route, {
+        items: [
+          {
+            name: "feature ui",
+            branch: "feature/vue",
+            directory: "/repo/.worktrees/feature-vue",
+            status: "ready"
+          }
+        ]
+      });
+    }
+    if (path === "/api/worktrees" && request.method() === "POST") {
+      capture.worktreeRequests?.push({
+        action: "create",
+        ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
+      });
+      return json(route, { name: "review-ui", directory: "/repo/.worktrees/review-ui", status: "creating" });
+    }
+    if (path === "/api/worktrees/reset" && request.method() === "POST") {
+      capture.worktreeRequests?.push({
+        action: "reset",
+        ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
+      });
+      return json(route, true);
+    }
+    if (path === "/api/worktrees" && request.method() === "DELETE") {
+      capture.worktreeRequests?.push({
+        action: "remove",
+        ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
+      });
+      return json(route, true);
+    }
+    if (path === "/api/mcp/status") {
+      return json(route, {
+        github: { status: "needs_auth", error: "token expired" },
+        filesystem: { status: "connected" }
+      });
+    }
+    if (path === "/api/mcp/github/connect" && request.method() === "POST") {
+      capture.mcpRequests?.push({
+        action: "connect",
+        name: "github",
+        ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
+      });
+      return json(route, true);
+    }
+    if (path === "/api/mcp/filesystem/disconnect" && request.method() === "POST") {
+      capture.mcpRequests?.push({
+        action: "disconnect",
+        name: "filesystem",
+        ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
+      });
+      return json(route, true);
+    }
+    if (path === "/api/mcp/github/auth" && request.method() === "POST") {
+      capture.mcpRequests?.push({
+        action: "auth",
+        name: "github",
+        ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
+      });
+      return json(route, { url: "https://mcp.example/github" });
+    }
+    if (path === "/api/mcp/github/auth" && request.method() === "DELETE") {
+      capture.mcpRequests?.push({
+        action: "remove-auth",
+        name: "github"
+      });
+      return json(route, true);
     }
     if (path === "/api/agents" || path === "/api/models") {
       return json(route, []);

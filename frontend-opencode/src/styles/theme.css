@@ -1861,6 +1861,12 @@ small,
   padding: 16px;
 }
 
+.settings-dialog {
+  max-height: min(760px, calc(100vh - 96px));
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 .fork-dialog header,
 .settings-dialog header {
   display: flex;
