@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
+import type { CommandInfo } from "@test-agent/shared-types";
 import { buildPromptParts, type PromptBuildInput, type PromptFileInput } from "@/utils/prompt";
 
 export const usePromptStore = defineStore("prompt", () => {
@@ -32,6 +33,17 @@ export const usePromptStore = defineStore("prompt", () => {
     }
   }
 
+  // Slash 命令沿用 opencode 的 /command 文本形态，由 composer 从平台代理命令目录写入。
+  function insertSlashCommand(command: Pick<CommandInfo, "name" | "arguments">) {
+    const name = command.name.replace(/^\//, "").trim();
+    if (!name) {
+      return;
+    }
+    const usage = `/${name}${command.arguments?.trim() ? ` ${command.arguments.trim()}` : ""}`;
+    const current = text.value.trim();
+    text.value = !current || current === "/" || current.startsWith("/") ? usage : `${usage}\n${current}`;
+  }
+
   function reset() {
     text.value = "";
     files.value = [];
@@ -41,5 +53,5 @@ export const usePromptStore = defineStore("prompt", () => {
     shellMode.value = false;
   }
 
-  return { text, files, images, agents, references, shellMode, history, parts, canSubmit, snapshot, remember, reset };
+  return { text, files, images, agents, references, shellMode, history, parts, canSubmit, snapshot, remember, insertSlashCommand, reset };
 });
