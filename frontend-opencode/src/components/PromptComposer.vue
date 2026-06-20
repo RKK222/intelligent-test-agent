@@ -9,7 +9,7 @@ import { useWorkspaceStore } from "@/stores/workspace";
 type FilePickerMode = "attach" | "mention";
 type WorkspaceFileEntry = { path: string; name: string; type: "file" | "directory" | string };
 
-defineProps<{ busy?: boolean }>();
+const props = defineProps<{ busy?: boolean }>();
 const emit = defineEmits<{ submit: [] }>();
 const platform = usePlatformStore();
 const prompt = usePromptStore();
@@ -128,6 +128,17 @@ function handleSlashKeydown(event: KeyboardEvent) {
     if (command) {
       selectSlashCommand(command);
     }
+  }
+}
+
+function handleTextKeydown(event: KeyboardEvent) {
+  if (event.key !== "Enter" || event.shiftKey || event.altKey || event.isComposing) {
+    return;
+  }
+  event.preventDefault();
+  // opencode composer 的主路径是 Enter 提交；Shift+Enter 交给 textarea 保留换行。
+  if (!props.busy && prompt.canSubmit) {
+    emit("submit");
   }
 }
 
@@ -470,8 +481,7 @@ function readString(value: unknown) {
       :rows="lineCount"
       placeholder="Ask opencode to inspect, edit, test, or explain this workspace..."
       @paste="handlePaste"
-      @keydown.meta.enter.prevent="emit('submit')"
-      @keydown.ctrl.enter.prevent="emit('submit')"
+      @keydown="handleTextKeydown"
     />
 
     <div class="composer-footer">

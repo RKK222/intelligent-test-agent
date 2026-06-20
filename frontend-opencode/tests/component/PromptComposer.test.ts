@@ -60,6 +60,20 @@ describe("PromptComposer", () => {
     expect(screen.queryByRole("dialog", { name: "Slash commands" })).not.toBeInTheDocument();
   });
 
+  it("submits with Enter and keeps Shift+Enter for multiline editing", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const view = render(PromptComposer, { global: { plugins: [pinia] } });
+    const textarea = screen.getByPlaceholderText("Ask opencode to inspect, edit, test, or explain this workspace...");
+
+    await fireEvent.update(textarea, "Run tests");
+    await fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+    expect(view.emitted("submit")).toBeUndefined();
+
+    await fireEvent.keyDown(textarea, { key: "Enter" });
+    expect(view.emitted("submit")).toHaveLength(1);
+  });
+
   it("selects runtime agent and model without adding prompt parts", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
