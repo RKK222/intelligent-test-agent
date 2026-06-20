@@ -1149,6 +1149,88 @@ small,
   gap: 9px;
 }
 
+.worktree-panel {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.worktree-create-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr) auto;
+  align-items: end;
+  gap: 9px;
+}
+
+.worktree-create-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.worktree-create-form input {
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg-strong);
+  color: var(--text);
+  padding: 0 9px;
+}
+
+.worktree-form-actions,
+.worktree-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.worktree-row {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--panel-subtle);
+  padding: 10px;
+}
+
+.worktree-head,
+.worktree-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.worktree-head {
+  justify-content: space-between;
+}
+
+.worktree-title {
+  overflow: hidden;
+}
+
+.worktree-title strong,
+.worktree-row code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.worktree-row code {
+  display: block;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.danger-action {
+  border-color: color-mix(in srgb, var(--danger) 36%, var(--line));
+  color: color-mix(in srgb, var(--danger) 78%, var(--text));
+}
+
 .provider-auth-row {
   display: grid;
   gap: 8px;
@@ -1300,6 +1382,10 @@ small,
   }
 
   .settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .worktree-create-form {
     grid-template-columns: minmax(0, 1fr);
   }
 }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 import type { ProviderInfo } from "@test-agent/shared-types";
+import SettingsWorktreePanel from "@/components/SettingsWorktreePanel.vue";
 import { usePlatformStore } from "@/stores/platform";
 import { useSettingsStore } from "@/stores/settings";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -206,6 +207,7 @@ function readString(value: unknown) {
         <div v-if="!workspace.providers.length" class="empty-note">Provider auth is proxied through the backend API.</div>
         <div v-if="providerError" class="inline-alert">{{ providerError }}</div>
       </div>
+      <SettingsWorktreePanel :workspace-id="workspace.selectedWorkspaceId" />
     </section>
   </div>
 </template>
