@@ -182,6 +182,43 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.body()).isEqualTo(Map.of("reply", "once"));
     }
 
+    @Test
+    void replyQuestionNormalizesFlatAnswersToNestedShape() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("accepted", true)))));
+
+        // 单选：前端发送扁平 [label]，应归一化为 [[label]]。
+        fixture.service.replyQuestion(
+                "ses_1234567890abcdef",
+                "req_1",
+                Map.of("answers", List.of("confirm")),
+                "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.method()).isEqualTo("POST");
+        assertThat(command.path()).isEqualTo("/question/req_1/reply");
+        assertThat(command.directory()).isEqualTo("/tmp/demo");
+        assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("confirm"))));
+    }
+
+    @Test
+    void replyQuestionWrapsMultipleAnswersIntoSingleInnerList() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("accepted", true)))));
+
+        // 多选：前端发送扁平 [l1, l2]（同一问题的多个 label），应整体包成 [[l1, l2]]。
+        fixture.service.replyQuestion(
+                "ses_1234567890abcdef",
+                "req_1",
+                Map.of("answers", List.of("a", "b")),
+                "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.body()).isEqualTo(Map.of("answers", List.of(List.of("a", "b"))));
+    }
+
     private static final class Fixture {
         private final WorkspaceRepository workspaceRepository = org.mockito.Mockito.mock(WorkspaceRepository.class);
         private final SessionRepository sessionRepository = org.mockito.Mockito.mock(SessionRepository.class);

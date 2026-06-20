@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
@@ -374,7 +375,7 @@ public class OpencodeRuntimeApplicationService {
         return post(
                 location,
                 "/question/" + encodePath(requestId) + "/reply",
-                safeBody(body),
+                questionReplyBody(body),
                 traceId);
     }
 
@@ -568,6 +569,56 @@ public class OpencodeRuntimeApplicationService {
             normalized.put("message", source.get("message"));
         }
         return normalized;
+    }
+
+    /**
+     * 兼容前端扁平 answers 字段，转换为 opencode 期望的嵌套结构。
+     * <p>
+     * opencode {@code /question/{requestId}/reply} 要求 {@code answers} 为 {@code List<List<String>>}：
+     * 外层数组每个问题一个内层数组，内层放选中的 label。前端 {@code RuntimeDock} 只发送扁平
+     * {@code string[]}（单选 {@code [label]}、文本 {@code [text]}、多选 {@code [l1,l2]}），
+     * 且每条回复只针对一个问题，因此把扁平数组整体包成单个内层数组即可。
+     * 对已嵌套或空数组做幂等处理，避免重复包装。
+     */
+    private Map<String, Object> questionReplyBody(Map<String, Object> body) {
+        Map<String, Object> source = safeBody(body);
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        normalized.put("answers", toQuestionAnswers(source.get("answers")));
+        return normalized;
+    }
+
+    /**
+     * 把前端 answers 归一化为 opencode 的 {@code List<List<String>>}。
+     * <ul>
+     *   <li>null 或非数组 → 空列表；</li>
+     *   <li>空数组 → 空列表；</li>
+     *   <li>已是嵌套（首元素为 List）→ 逐个内层数组转 String 透传；</li>
+     *   <li>扁平标量数组 → 整体包成单个内层数组。</li>
+     * </ul>
+     */
+    private List<List<String>> toQuestionAnswers(Object answers) {
+        if (!(answers instanceof List<?> outer) || outer.isEmpty()) {
+            return List.of();
+        }
+        // 已嵌套：每个元素本身就是某问题的答案数组，逐项转 String 透传。
+        if (outer.get(0) instanceof List<?>) {
+            return outer.stream()
+                    .filter(element -> element instanceof List<?>)
+                    .map(element -> toStringList((List<?>) element))
+                    .toList();
+        }
+        // 扁平：整组 label 属于同一个问题，包成单个内层数组。
+        return List.of(toStringList(outer));
+    }
+
+    /**
+     * 把任意 List 的元素转为 String 列表，null 元素跳过。
+     */
+    private List<String> toStringList(List<?> list) {
+        return list.stream()
+                .filter(Objects::nonNull)
+                .map(String::valueOf)
+                .toList();
     }
 
     /**

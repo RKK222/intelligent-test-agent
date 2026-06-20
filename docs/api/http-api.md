@@ -431,7 +431,7 @@ Session 运行态接口：
 | `GET` | `/api/sessions/{sessionId}/permissions` | 读取 pending permission。 |
 | `POST` | `/api/sessions/{sessionId}/permissions/{requestId}/reply` | 回复 permission，body 支持 `{ "decision": "once|always|reject" }`。 |
 | `GET` | `/api/sessions/{sessionId}/questions` | 读取 pending question。 |
-| `POST` | `/api/sessions/{sessionId}/questions/{requestId}/reply` | 回复 question，body 为 `{ "answers": [...] }`。 |
+| `POST` | `/api/sessions/{sessionId}/questions/{requestId}/reply` | 回复 question，body 为 `{ "answers": [...] }`；`answers` 为扁平 label 数组（单选 `[label]`、多选 `[l1,l2]`、文本 `[text]`），后端归一化为 opencode 的 `List<List<String>>` 嵌套结构（每条回复对应一个问题，整体包成单个内层数组）。 |
 | `POST` | `/api/sessions/{sessionId}/questions/{requestId}/reject` | 拒绝 question。 |
 
 以上 Session 运行态接口同时暴露 `/api/internal/platform/opencode-runtime/sessions/{sessionId}/...`。其中 children、todo、diff、abort、fork、compact、revert、unrevert、command、shell 也暴露 `/api/internal/agent/opencode/session/{sessionId}/...`；permission/question 的 opencode path 入口使用 `/api/internal/agent/opencode/permission|question`，并通过 query `sessionId` 定位平台 session。
