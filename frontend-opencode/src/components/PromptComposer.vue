@@ -206,6 +206,28 @@ function handleTextKeydown(event: KeyboardEvent) {
   }
 }
 
+function handleTextInput(event: Event) {
+  const target = event.currentTarget instanceof HTMLTextAreaElement ? event.currentTarget : undefined;
+  const value = target?.value ?? prompt.text;
+  const slashMatch = value.match(/^\/([^\s/]*)$/);
+  if (!slashMatch) {
+    if (slashOpen.value && !value.startsWith("/")) {
+      slashOpen.value = false;
+      slashQuery.value = "";
+      slashActiveIndex.value = 0;
+    }
+    return;
+  }
+  filePickerOpen.value = false;
+  closeSlashParameters();
+  slashQuery.value = slashMatch[1] ?? "";
+  slashActiveIndex.value = 0;
+  if (!slashOpen.value) {
+    slashOpen.value = true;
+    void workspace.loadCommands();
+  }
+}
+
 function handleHistoryKeydown(event: KeyboardEvent) {
   if ((event.key !== "ArrowUp" && event.key !== "ArrowDown") || event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) {
     return false;
@@ -614,6 +636,7 @@ function readString(value: unknown) {
       :rows="lineCount"
       placeholder="Ask opencode to inspect, edit, test, or explain this workspace..."
       @paste="handlePaste"
+      @input="handleTextInput"
       @keydown="handleTextKeydown"
     />
 

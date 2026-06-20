@@ -60,6 +60,27 @@ describe("PromptComposer", () => {
     expect(screen.queryByRole("dialog", { name: "Slash commands" })).not.toBeInTheDocument();
   });
 
+  it("opens slash commands when typing a slash trigger in the textarea", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const workspace = useWorkspaceStore();
+    workspace.commands = [
+      { commandId: "review", name: "review", description: "Review staged changes" },
+      { commandId: "compact", name: "compact", description: "Summarize the session" }
+    ];
+    workspace.loadCommands = vi.fn();
+
+    render(PromptComposer, { global: { plugins: [pinia] } });
+
+    await fireEvent.update(screen.getByPlaceholderText("Ask opencode to inspect, edit, test, or explain this workspace..."), "/rev");
+
+    expect(screen.getByRole("dialog", { name: "Slash commands" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Search slash commands")).toHaveValue("rev");
+    expect(screen.getByRole("option", { name: "/review Review staged changes" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "/compact Summarize the session" })).not.toBeInTheDocument();
+    expect(workspace.loadCommands).toHaveBeenCalledOnce();
+  });
+
   it("fills slash command parameters through a generated form", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
