@@ -18,6 +18,7 @@ const open = ref(false);
 const providerAuth = ref<Record<string, ProviderAuthState>>({});
 const providerKeys = ref<Record<string, string>>({});
 const providerOAuthLinks = ref<Record<string, string | undefined>>({});
+const providerOAuthCodes = ref<Record<string, string>>({});
 const providerActions = ref<Record<string, string | undefined>>({});
 const providerError = ref<string>();
 const settings = useSettingsStore();
@@ -92,6 +93,24 @@ async function authorizeProviderOAuth(provider: ProviderInfo) {
     providerOAuthLinks.value = { ...providerOAuthLinks.value, [provider.providerId]: url };
   } catch (cause) {
     providerError.value = cause instanceof Error ? cause.message : "Provider OAuth 发起失败";
+  } finally {
+    providerActions.value[provider.providerId] = undefined;
+  }
+}
+
+async function completeProviderOAuth(provider: ProviderInfo) {
+  const code = providerOAuthCodes.value[provider.providerId]?.trim();
+  if (!code) {
+    return;
+  }
+  providerActions.value[provider.providerId] = "callback";
+  providerError.value = undefined;
+  try {
+    await platform.api.completeProviderOAuth(provider.providerId, { method: 0, code });
+    providerOAuthCodes.value[provider.providerId] = "";
+    await loadProviderAuth();
+  } catch (cause) {
+    providerError.value = cause instanceof Error ? cause.message : "Provider OAuth 回调失败";
   } finally {
     providerActions.value[provider.providerId] = undefined;
   }
@@ -249,6 +268,23 @@ function extractUrl(response: unknown) {
             >
               <ExternalLink :size="14" />Open OAuth
             </a>
+            <input
+              v-if="providerOAuthLinks[provider.providerId]"
+              v-model="providerOAuthCodes[provider.providerId]"
+              :aria-label="`${provider.name} OAuth code`"
+              autocomplete="off"
+              placeholder="OAuth code"
+            />
+            <button
+              v-if="providerOAuthLinks[provider.providerId]"
+              class="primary-action"
+              type="button"
+              :aria-label="`Complete ${provider.name} OAuth`"
+              :disabled="providerActions[provider.providerId] === 'callback'"
+              @click="completeProviderOAuth(provider)"
+            >
+              Complete OAuth
+            </button>
             <button
               class="icon-text"
               type="button"

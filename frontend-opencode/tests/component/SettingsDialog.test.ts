@@ -31,6 +31,7 @@ describe("SettingsDialog", () => {
           calls.push(["oauth", ...args]);
           return { url: "https://auth.example/anthropic" };
         },
+        completeProviderOAuth: async (...args: unknown[]) => calls.push(["callback", ...args]),
         setProviderAuth: async (...args: unknown[]) => calls.push(["set", ...args]),
         removeProviderAuth: async (...args: unknown[]) => calls.push(["remove", ...args])
       }
@@ -49,6 +50,8 @@ describe("SettingsDialog", () => {
       "href",
       "https://auth.example/anthropic"
     );
+    await fireEvent.update(screen.getByLabelText("Anthropic OAuth code"), "code-123");
+    await fireEvent.click(screen.getByRole("button", { name: "Complete Anthropic OAuth" }));
     await fireEvent.click(screen.getByRole("button", { name: "Save Anthropic key" }));
     await fireEvent.click(screen.getByRole("button", { name: "Remove Anthropic auth" }));
 
@@ -64,6 +67,8 @@ describe("SettingsDialog", () => {
           }
         }
       ],
+      ["callback", "anthropic", { method: 0, code: "code-123" }],
+      ["list", "wrk_1"],
       ["set", "anthropic", { type: "api-key", key: "sk-test" }],
       ["list", "wrk_1"],
       ["remove", "anthropic"],
