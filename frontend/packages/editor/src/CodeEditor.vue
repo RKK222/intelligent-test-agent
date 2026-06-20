@@ -20,10 +20,11 @@ export type CodeEditorProps = {
 </script>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
-import { Save } from "lucide-vue-next";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { Eye, EyeOff, Save } from "lucide-vue-next";
 import { Button, FeedbackBanner } from "@test-agent/ui-kit";
 import { languageFromPath } from "./language";
+import MarkdownPreview from "./MarkdownPreview.vue";
 
 const props = withDefaults(defineProps<CodeEditorProps>(), { content: "" });
 const emit = defineEmits<{
@@ -31,6 +32,13 @@ const emit = defineEmits<{
   save: [];
   selectionChange: [selection: EditorSelectionContext | undefined];
 }>();
+
+// 当前文件是否为 Markdown：决定是否展示预览开关与分屏能力
+const isMarkdown = computed(() => !!props.path && languageFromPath(props.path) === "markdown");
+// 预览开关：文件打开时默认不预览，点击工具栏眼睛图标后开启
+const showPreview = ref(false);
+// 上下分屏比例（上=编辑器百分比），仅组件内状态，不持久化
+const splitPct = ref(50);
 
 const containerEl = ref<HTMLElement | null>(null);
 // 编辑器实例用 shallowRef 避免 Vue 深度代理 Monaco 内部对象
@@ -120,10 +128,44 @@ watch(
     if (!path) {
       return;
     }
+    // 切换文件时重置预览开关，满足「打开时默认不预览」
+    showPreview.value = false;
     await nextTick();
     await ensureMonacoEditor(path, props.content);
   }
 );
+
+// 上下分屏 sash 拖拽：按容器高度百分比调整，限制在 20%~80%
+const splitContainerEl = ref<HTMLElement | null>(null);
+let dragging = false;
+
+function onSashDown(e: PointerEvent) {
+  e.preventDefault();
+  dragging = true;
+  window.addEventListener("pointermove", onSashMove);
+  window.addEventListener("pointerup", onSashUp);
+}
+
+function onSashMove(e: PointerEvent) {
+  if (!dragging || !splitContainerEl.value) {
+    return;
+  }
+  const rect = splitContainerEl.value.getBoundingClientRect();
+  const pct = ((e.clientY - rect.top) / rect.height) * 100;
+  splitPct.value = Math.min(80, Math.max(20, pct));
+}
+
+function onSashUp() {
+  dragging = false;
+  window.removeEventListener("pointermove", onSashMove);
+  window.removeEventListener("pointerup", onSashUp);
+}
+
+onBeforeUnmount(() => {
+  // 拖拽中卸载时清理全局监听，避免泄漏
+  window.removeEventListener("pointermove", onSashMove);
+  window.removeEventListener("pointerup", onSashUp);
+});
 
 // 外部 content 变化：同步到模型，避免回环
 watch(
@@ -164,11 +206,43 @@ onBeforeUnmount(() => {
       <div class="min-w-0 flex-1 truncate text-[12px] text-[var(--ta-muted)]">{{ path }}</div>
       <span v-if="dirty" class="rounded-full bg-[rgba(245,158,11,.15)] px-2 py-0.5 text-[11px] text-[#946015]">未保存</span>
       <span v-if="readonly" class="rounded-full bg-[var(--ta-control)] px-2 py-0.5 text-[11px] text-[var(--ta-muted)]">只读</span>
+      <!-- 仅 Markdown 文件展示预览开关，位于保存按钮左侧；默认不预览 -->
+      <Button
+        v-if="isMarkdown"
+        size="icon"
+        variant="ghost"
+        :title="showPreview ? '关闭预览' : '预览'"
+        :aria-label="showPreview ? '关闭预览' : '预览'"
+        :aria-pressed="showPreview"
+        :class="showPreview ? 'text-[var(--ta-ink)]' : 'text-[var(--ta-muted)]'"
+        @click="showPreview = !showPreview"
+      >
+        <EyeOff v-if="showPreview" class="h-4 w-4" />
+        <Eye v-else class="h-4 w-4" />
+      </Button>
       <Button size="icon" variant="ghost" :disabled="!dirty || readonly || saving" title="保存" aria-label="保存" @click="emit('save')">
         <Save class="h-4 w-4" />
       </Button>
     </div>
-    <div ref="containerEl" class="min-h-0 flex-1" />
+    <!-- 编辑器主体始终保留同一个容器，避免 v-if 切换销毁 Monaco 已挂载的 DOM；
+         Markdown 预览开启时在下方追加 sash + 预览，形成上下分屏 -->
+    <div ref="splitContainerEl" class="flex min-h-0 flex-1 flex-col">
+      <div
+        ref="containerEl"
+        class="min-h-0"
+        :style="isMarkdown && showPreview ? { height: splitPct + '%' } : { flex: 1 }"
+      />
+      <template v-if="isMarkdown && showPreview">
+        <div
+          class="relative h-[4px] w-full shrink-0 cursor-row-resize bg-[var(--ta-border)] hover:bg-[var(--ta-hover)]"
+          @pointerdown="onSashDown"
+        >
+          <!-- 扩大 sash 命中区域，便于拖拽 -->
+          <div class="absolute inset-x-0 -top-[3px] -bottom-[3px]" />
+        </div>
+        <MarkdownPreview :content="content" class="min-h-0 flex-1" />
+      </template>
+    </div>
     <FeedbackBanner :feedback="feedback" />
   </div>
 </template>

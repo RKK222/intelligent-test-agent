@@ -11,7 +11,9 @@
   "dependencies": {
     "@test-agent/shared-types": "workspace:*",
     "@test-agent/ui-kit": "workspace:*",
+    "dompurify": "3.2.6",
     "lucide-vue-next": "1.0.0",
+    "marked": "15.0.7",
     "monaco-editor": "0.55.1",
     "vue": "3.5.38"
   },
