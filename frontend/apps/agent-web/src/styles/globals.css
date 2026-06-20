@@ -358,6 +358,10 @@ select {
   width: 100%;
 }
 
+.ta-runtime-controls .ta-model-picker {
+  width: 100%;
+}
+
 .ta-runtime-notify {
   grid-column: 1 / -1;
   width: 100%;
@@ -403,6 +407,150 @@ select {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ta-model-picker {
+  position: relative;
+  min-width: 0;
+}
+
+.ta-model-trigger {
+  display: inline-flex;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--ta-chat-border);
+  border-radius: 6px;
+  background: var(--ta-chat-process-bg);
+  padding: 0 8px;
+  color: var(--ta-chat-text);
+  font-size: 12px;
+  transition: border-color 0.14s ease, background-color 0.14s ease;
+}
+
+.ta-model-trigger:hover,
+.ta-model-trigger[aria-expanded="true"] {
+  border-color: var(--ta-chat-border-strong);
+  background: var(--ta-chat-hover);
+}
+
+.ta-model-trigger-label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ta-model-menu {
+  position: fixed;
+  right: 16px;
+  bottom: 72px;
+  z-index: 80;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(560px, calc(100vh - 96px));
+  overflow: hidden;
+  border: 1px solid var(--ta-chat-border-strong);
+  border-radius: 8px;
+  background: var(--ta-chat-surface);
+  box-shadow: 0 18px 42px rgba(17, 24, 39, 0.18), 0 2px 8px rgba(17, 24, 39, 0.08);
+}
+
+.ta-model-search {
+  display: flex;
+  height: 56px;
+  align-items: center;
+  gap: 10px;
+  margin: 12px;
+  border-radius: 8px;
+  background: var(--ta-chat-process-bg);
+  padding: 0 14px;
+}
+
+.ta-model-search input {
+  min-width: 0;
+  flex: 1 1 auto;
+  border: 0;
+  background: transparent;
+  color: var(--ta-chat-text);
+  font-size: 18px;
+  outline: none;
+}
+
+.ta-model-search input::placeholder {
+  color: var(--ta-chat-muted);
+}
+
+.ta-model-search button {
+  color: var(--ta-chat-muted);
+}
+
+.ta-model-list {
+  max-height: calc(min(560px, calc(100vh - 96px)) - 80px);
+  overflow-y: auto;
+  padding: 4px 0 12px;
+}
+
+.ta-model-empty {
+  padding: 18px 24px 24px;
+  color: var(--ta-chat-muted);
+  font-size: 13px;
+}
+
+.ta-model-provider-section {
+  padding: 10px 24px 14px;
+}
+
+.ta-model-provider-section h3 {
+  margin: 0 0 12px;
+  color: var(--ta-chat-muted);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.ta-model-option {
+  display: flex;
+  min-height: 48px;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  padding: 6px 0;
+  color: var(--ta-chat-text);
+  text-align: left;
+  transition: background-color 0.14s ease;
+}
+
+.ta-model-option:hover,
+.ta-model-option[aria-selected="true"] {
+  background: var(--ta-chat-hover);
+}
+
+.ta-model-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ta-model-badge {
+  flex: 0 0 auto;
+  border: 1px solid var(--ta-chat-border);
+  border-radius: 4px;
+  background: var(--ta-chat-process-bg);
+  padding: 1px 6px;
+  color: var(--ta-chat-muted);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 /* ===== 自定义滚动条（纸面） ===== */

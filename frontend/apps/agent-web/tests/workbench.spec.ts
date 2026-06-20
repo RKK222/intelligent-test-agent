@@ -14,6 +14,32 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
   await expect(page.getByRole("button", { name: /保存/ })).toBeVisible();
 });
 
+test("model picker groups models by provider and updates run model", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, { runRequests });
+
+  await page.goto("/");
+
+  await expect(page.getByRole("button", { name: "选择模型" })).toContainText("Sonnet");
+  await page.getByRole("button", { name: "选择模型" }).click();
+  await expect(page.getByRole("dialog", { name: "模型选择" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Anthropic" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Volcengine Ark" })).toBeVisible();
+  await page.getByPlaceholder("搜索模型").fill("glm");
+  await expect(page.getByRole("option", { name: /GLM-5.2/ })).toBeVisible();
+  await page.getByRole("option", { name: /GLM-5.2/ }).click();
+  await expect(page.getByRole("button", { name: "选择模型" })).toContainText("GLM-5.2");
+
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("use selected model");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runRequests.length).toBe(1);
+  expect(runRequests[0]).toMatchObject({
+    prompt: "use selected model",
+    model: "volcengine/glm-5.2"
+  });
+});
+
 test("phase 11 runtime flow sends attachment parts and handles docks", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   const permissionReplies: Array<Record<string, unknown>> = [];
@@ -126,11 +152,20 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/models") {
-      await route.fulfill(json([{ id: "sonnet", providerId: "anthropic", name: "Sonnet" }]));
+      await route.fulfill(json([
+        { id: "sonnet", providerId: "anthropic", name: "Sonnet" },
+        { id: "opus", providerId: "anthropic", name: "Opus" },
+        { id: "glm-5.2", providerId: "volcengine", name: "GLM-5.2" },
+        { id: "north-mini-code", providerId: "opencode-zen", name: "North Mini Code Free", free: true }
+      ]));
       return;
     }
     if (method === "GET" && url.pathname === "/api/providers") {
-      await route.fulfill(json([{ id: "anthropic", name: "Anthropic", status: "ready" }]));
+      await route.fulfill(json([
+        { id: "anthropic", name: "Anthropic", status: "ready" },
+        { id: "volcengine", name: "Volcengine Ark", status: "ready" },
+        { id: "opencode-zen", name: "OpenCode Zen", status: "ready" }
+      ]));
       return;
     }
     if (method === "GET" && url.pathname === "/api/commands") {

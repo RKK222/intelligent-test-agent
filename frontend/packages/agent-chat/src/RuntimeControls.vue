@@ -14,10 +14,10 @@ export type RuntimeControlsProps = {
 </script>
 
 <script setup lang="ts">
-import { Sparkles, TerminalSquare, User } from "lucide-vue-next";
+import { TerminalSquare, User } from "lucide-vue-next";
 import { Button } from "@test-agent/ui-kit";
 import ChicPopover from "./ChicPopover.vue";
-import { modelOptionValue } from "./chat-utils";
+import ModelPicker from "./ModelPicker.vue";
 
 const props = defineProps<RuntimeControlsProps>();
 const emit = defineEmits<{
@@ -34,6 +34,13 @@ const modeOptions = [
   { value: "shell", label: "Shell" },
   ...props.commands.slice(0, 8).map((c) => ({ value: `command:${c.name}`, label: `/${c.name}` }))
 ];
+
+function onModelSelect(payload: { providerId?: string; modelValue: string }) {
+  if (payload.providerId) {
+    emit("providerChange", payload.providerId);
+  }
+  emit("modelChange", payload.modelValue);
+}
 </script>
 
 <template>
@@ -48,26 +55,12 @@ const modeOptions = [
     >
       <template #icon><User class="h-3.5 w-3.5" /></template>
     </ChicPopover>
-    <ChicPopover
-      label="Provider"
-      placeholder="Provider"
-      :value="selectedProvider ?? ''"
-      :options="providers.map((p) => ({ value: p.providerId, label: p.name }))"
-      searchable
-      @change="(v) => emit('providerChange', v)"
-    >
-      <template #icon><TerminalSquare class="h-3.5 w-3.5" /></template>
-    </ChicPopover>
-    <ChicPopover
-      label="Model"
-      placeholder="Model"
-      :value="selectedModel ?? ''"
-      :options="models.map((m) => ({ value: modelOptionValue(m), label: m.name }))"
-      searchable
-      @change="(v) => emit('modelChange', v)"
-    >
-      <template #icon><Sparkles class="h-3.5 w-3.5" /></template>
-    </ChicPopover>
+    <ModelPicker
+      :models="models"
+      :providers="providers"
+      :selected-model="selectedModel"
+      @select="onModelSelect"
+    />
     <ChicPopover
       label="Mode"
       placeholder="Build"
