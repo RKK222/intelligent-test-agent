@@ -1149,7 +1149,8 @@ small,
   gap: 9px;
 }
 
-.worktree-panel {
+.worktree-panel,
+.mcp-panel {
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px solid var(--line-soft);
@@ -1231,6 +1232,49 @@ small,
   color: color-mix(in srgb, var(--danger) 78%, var(--text));
 }
 
+.mcp-summary,
+.mcp-head,
+.mcp-title,
+.mcp-actions {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+}
+
+.mcp-summary,
+.mcp-head {
+  justify-content: space-between;
+}
+
+.mcp-row {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--panel-subtle);
+  padding: 10px;
+}
+
+.mcp-title {
+  overflow: hidden;
+}
+
+.mcp-title strong,
+.mcp-error {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mcp-error {
+  color: var(--text-muted);
+}
+
+.mcp-actions {
+  flex-wrap: wrap;
+}
+
 .provider-auth-row {
   display: grid;
   gap: 8px;
@@ -1287,6 +1331,16 @@ small,
 .auth-pill[data-state="connected"] {
   border-color: color-mix(in srgb, var(--accent) 46%, var(--line));
   color: var(--accent);
+}
+
+.auth-pill[data-state="failed"] {
+  border-color: color-mix(in srgb, var(--danger) 48%, var(--line));
+  color: color-mix(in srgb, var(--danger) 78%, var(--text));
+}
+
+.auth-pill[data-state="warning"] {
+  border-color: color-mix(in srgb, var(--warning) 48%, var(--line));
+  color: color-mix(in srgb, var(--warning) 78%, var(--text));
 }
 
 .toast-host {

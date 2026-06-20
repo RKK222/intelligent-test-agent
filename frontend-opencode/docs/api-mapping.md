@@ -18,3 +18,5 @@
 | MCP auth | `startMcpAuth/completeMcpAuth/authenticateMcp/removeMcpAuth` | `/api/mcp/{name}/auth*` |
 
 所有响应保持平台 `ApiResponse<T>`，错误包含 `traceId/code/message/retryable/details`。本工程不使用 opencode generated SDK，也不访问 opencode server URL。
+
+> 当前 Settings MCP 面板只使用已存在的 `getMcpStatus` 与 MCP auth API。opencode App 的 MCP toggle/connect/disconnect 交互仍需平台后端补齐对应接口后再接入。

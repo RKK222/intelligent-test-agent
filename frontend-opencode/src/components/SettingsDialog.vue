@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from "vue";
 import type { ProviderInfo } from "@test-agent/shared-types";
+import SettingsMcpPanel from "@/components/SettingsMcpPanel.vue";
 import SettingsWorktreePanel from "@/components/SettingsWorktreePanel.vue";
 import { usePlatformStore } from "@/stores/platform";
 import { useSettingsStore } from "@/stores/settings";
@@ -208,6 +209,7 @@ function readString(value: unknown) {
         <div v-if="providerError" class="inline-alert">{{ providerError }}</div>
       </div>
       <SettingsWorktreePanel :workspace-id="workspace.selectedWorkspaceId" />
+      <SettingsMcpPanel :workspace-id="workspace.selectedWorkspaceId" />
     </section>
   </div>
 </template>
