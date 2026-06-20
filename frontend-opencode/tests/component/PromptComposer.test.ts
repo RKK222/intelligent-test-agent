@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/vue";
 import { createPinia, setActivePinia } from "pinia";
 import PromptComposer from "@/components/PromptComposer.vue";
+import { usePlatformStore } from "@/stores/platform";
 import { useWorkspaceStore } from "@/stores/workspace";
 
 describe("PromptComposer", () => {
@@ -27,5 +28,43 @@ describe("PromptComposer", () => {
 
     expect(view.emitted("submit")).toHaveLength(1);
     expect(workspace.loadCommands).toHaveBeenCalledOnce();
+  });
+
+  it("selects attachments and @ references through the platform fs catalog", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const platform = usePlatformStore();
+    const workspace = useWorkspaceStore();
+    const calls: Array<[string | undefined, string]> = [];
+    workspace.selectedWorkspaceId = "wrk_1";
+
+    Object.defineProperty(platform, "api", {
+      value: {
+        findRuntimeFiles: async (workspaceId?: string, query = "") => {
+          calls.push([workspaceId, query]);
+          return {
+            data: [
+              { path: "src/main.ts", name: "main.ts", type: "file" },
+              { path: "src/components", name: "components", type: "directory" }
+            ]
+          };
+        }
+      }
+    });
+
+    render(PromptComposer, { global: { plugins: [pinia] } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Attach file" }));
+    expect(screen.getByRole("dialog", { name: "Attach workspace file" })).toBeInTheDocument();
+    await fireEvent.click(await screen.findByRole("button", { name: "Attach src/main.ts file" }));
+    expect(screen.getByText("src/main.ts")).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Mention file or symbol" }));
+    expect(screen.getByRole("dialog", { name: "Mention workspace file" })).toBeInTheDocument();
+    await fireEvent.update(screen.getByLabelText("Search workspace files"), "main");
+    await fireEvent.click(await screen.findByRole("button", { name: "Mention src/main.ts file" }));
+    expect(screen.getByText("@src/main.ts")).toBeInTheDocument();
+    expect(calls).toContainEqual(["wrk_1", ""]);
+    expect(calls).toContainEqual(["wrk_1", "main"]);
   });
 });

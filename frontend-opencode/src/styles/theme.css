@@ -536,6 +536,7 @@ small,
 }
 
 .composer {
+  position: relative;
   display: grid;
   gap: 8px;
   margin: 0 18px 16px;
@@ -625,6 +626,83 @@ small,
 }
 
 .slash-row small {
+  color: var(--text-muted);
+}
+
+.composer-picker {
+  position: absolute;
+  right: 10px;
+  bottom: calc(100% + 10px);
+  z-index: 34;
+  display: grid;
+  gap: 9px;
+  width: min(460px, calc(100vw - 36px));
+  max-height: min(520px, 68vh);
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 0.34);
+}
+
+.composer-picker header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.composer-picker h2 {
+  margin: 2px 0 0;
+  font-size: 15px;
+}
+
+.file-picker-list {
+  display: grid;
+  gap: 6px;
+  overflow: auto;
+}
+
+.file-picker-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--panel-subtle);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.file-picker-row:not(:disabled):hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--panel-subtle));
+}
+
+.file-picker-row:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.file-picker-row span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.file-picker-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-picker-row small {
   color: var(--text-muted);
 }
 
