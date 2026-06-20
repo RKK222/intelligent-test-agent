@@ -9,6 +9,9 @@ import { useSessionStore } from "@/stores/session";
 const session = useSessionStore();
 const router = useRouter();
 const forkOpen = ref(false);
+const emit = defineEmits<{
+  panel: [];
+}>();
 
 const forkMessages = computed(() => [...session.userMessages].reverse());
 const hasUserMessages = computed(() => forkMessages.value.length > 0);
@@ -46,7 +49,7 @@ async function selectFork(messageId: string) {
     <button class="icon-button" type="button" aria-label="Abort session" :disabled="busy" @click="session.abort">
       <Square :size="15" />
     </button>
-    <button class="icon-button mobile-only" type="button" aria-label="Panel">
+    <button class="icon-button mobile-only" type="button" aria-label="Panel" @click="emit('panel')">
       <PanelRight :size="15" />
     </button>
   </div>

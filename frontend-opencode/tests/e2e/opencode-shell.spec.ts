@@ -109,6 +109,24 @@ test("switches sessions from the session sidebar", async ({ page }, testInfo) =>
   await expect(page.getByText("Follow-up prompt")).toBeVisible();
 });
 
+test("opens the session side panel as a mobile drawer", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "mobile", "Mobile drawer behavior is covered on the mobile viewport.");
+  await mockBackendApi(page);
+
+  await page.goto("/w/wrk_1/session/ses_1");
+  await expect(page.getByRole("heading", { name: "Demo session" })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Session side panel" })).toBeHidden();
+
+  await page.getByRole("button", { name: "Panel" }).click();
+
+  await expect(page.getByRole("complementary", { name: "Session side panel" })).toBeVisible();
+  await page.getByRole("button", { name: "Status" }).click();
+  await expect(page.getByText("Runtime requests")).toBeVisible();
+
+  await page.getByRole("button", { name: "Close session panel" }).click();
+  await expect(page.getByRole("complementary", { name: "Session side panel" })).toBeHidden();
+});
+
 test("loads the Monaco diff review editor for session diffs", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "desktop", "Monaco review loading is covered on the desktop review layout.");
   await mockBackendApi(page, { runRequests: [] }, { sessionDiff: diffFixture() });

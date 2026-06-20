@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import PromptComposer from "@/components/PromptComposer.vue";
 import SessionDockStack from "@/components/SessionDockStack.vue";
@@ -15,6 +15,7 @@ const router = useRouter();
 const prompt = usePromptStore();
 const session = useSessionStore();
 const workspace = useWorkspaceStore();
+const mobilePanelOpen = ref(false);
 
 const sessionId = computed(() => String(route.params.sessionId ?? ""));
 
@@ -31,6 +32,7 @@ function openSession(item: { workspaceId: string; sessionId: string }) {
   if (item.sessionId === sessionId.value) {
     return;
   }
+  mobilePanelOpen.value = false;
   void router.push(`/w/${item.workspaceId}/session/${item.sessionId}`);
 }
 
@@ -68,7 +70,7 @@ async function submit() {
           <p class="eyebrow">{{ session.activeSession?.status ?? "Session" }}</p>
           <h1>{{ session.activeSession?.title ?? "Untitled session" }}</h1>
         </div>
-        <SessionToolbarActions />
+        <SessionToolbarActions @panel="mobilePanelOpen = true" />
       </div>
       <div v-if="session.error || session.actionError" class="inline-alert">{{ session.error ?? session.actionError }}</div>
       <SessionTimeline :messages="session.timeline" />
@@ -76,6 +78,7 @@ async function submit() {
       <PromptComposer :busy="session.sending" @submit="submit" />
     </section>
 
-    <SidePanel />
+    <button v-if="mobilePanelOpen" class="mobile-panel-backdrop" type="button" aria-label="Dismiss panel overlay" @click="mobilePanelOpen = false" />
+    <SidePanel :class="{ 'mobile-panel-open': mobilePanelOpen }" @close="mobilePanelOpen = false" />
   </main>
 </template>

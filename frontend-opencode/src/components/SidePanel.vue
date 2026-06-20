@@ -10,6 +10,9 @@ import { useTerminalStore } from "@/stores/terminal";
 const session = useSessionStore();
 const terminal = useTerminalStore();
 const tab = ref<"review" | "files" | "terminal" | "status">("review");
+const emit = defineEmits<{
+  close: [];
+}>();
 
 function openTerminal() {
   if (session.activeSession?.sessionId) {
@@ -20,6 +23,10 @@ function openTerminal() {
 
 <template>
   <aside class="side-panel" aria-label="Session side panel">
+    <div class="mobile-panel-header">
+      <strong>Panel</strong>
+      <button class="icon-text" type="button" aria-label="Close session panel" @click="emit('close')">Close</button>
+    </div>
     <div class="side-tabs" role="tablist">
       <button type="button" :class="{ active: tab === 'review' }" @click="tab = 'review'"><FileDiff :size="15" />Review</button>
       <button type="button" :class="{ active: tab === 'files' }" @click="tab = 'files'"><FolderTree :size="15" />Files</button>
