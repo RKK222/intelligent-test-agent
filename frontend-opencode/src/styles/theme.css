@@ -1412,6 +1412,39 @@ small,
   white-space: pre-wrap;
 }
 
+.terminal-xterm-shell {
+  position: relative;
+  min-height: 300px;
+  padding: 0;
+  white-space: normal;
+}
+
+.terminal-xterm {
+  position: absolute;
+  inset: 0;
+  padding: 10px;
+}
+
+.terminal-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.terminal-sr-output {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: pre;
+}
+
 .terminal-panel {
   display: grid;
   gap: 10px;

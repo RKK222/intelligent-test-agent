@@ -9,6 +9,7 @@
 | `pinia` | workspace、session、prompt、RunEvent、settings、terminal 状态。 |
 | `lucide-vue-next` | 工具按钮和状态图标。当前版本由 pnpm 安装提示已弃用，后续可迁移到 `@lucide/vue`。 |
 | `@tanstack/vue-virtual` | 预留给长 timeline/session list 虚拟滚动；当前首版 UI 未直接启用。 |
+| `@xterm/xterm`、`@xterm/addon-fit` | Terminal 面板的浏览器终端渲染和容器尺寸适配；输入仍通过平台 WebSocket JSON envelope。 |
 
 ## 开发与验证依赖
 
