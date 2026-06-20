@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import type { MessagePart, SessionMessage } from "@test-agent/shared-types";
-import { Bot, Brain, FileText, RadioTower, UserRound, Wrench } from "lucide-vue-next";
+import { ref } from "vue";
+import { Bot, Brain, ChevronDown, FileText, RadioTower, UserRound, Wrench } from "lucide-vue-next";
 
 type TimelinePart = MessagePart & { text?: string; payload?: Record<string, unknown>; eventType?: string };
 type TimelineMessage = SessionMessage & { parts?: TimelinePart[] };
 
 defineProps<{ messages: TimelineMessage[] }>();
+
+const partOpenOverrides = ref<Record<string, boolean>>({});
 
 function roleLabel(message: TimelineMessage) {
   return message.role.toUpperCase() === "USER" ? "You" : "opencode";
@@ -55,6 +58,47 @@ function partRegionLabel(part: TimelinePart) {
   return `Message part ${partTitle(part)}`;
 }
 
+function partKey(message: TimelineMessage, part: TimelinePart) {
+  return `${message.messageId}:${part.partId}`;
+}
+
+function partStatus(part: TimelinePart) {
+  return "status" in part ? part.status : undefined;
+}
+
+function isCollapsiblePart(part: TimelinePart) {
+  return part.type === "reasoning" || part.type === "tool";
+}
+
+function partDefaultOpen(part: TimelinePart) {
+  if (!isCollapsiblePart(part)) {
+    return true;
+  }
+  const status = partStatus(part);
+  // opencode 原 App 会让运行中和异常 part 保持展开，已完成的工具/推理摘要交给用户按需展开。
+  return status === "running" || status === "pending" || status === "error";
+}
+
+function isPartOpen(message: TimelineMessage, part: TimelinePart) {
+  const override = partOpenOverrides.value[partKey(message, part)];
+  return override ?? partDefaultOpen(part);
+}
+
+function setPartOpen(message: TimelineMessage, part: TimelinePart, open: boolean) {
+  partOpenOverrides.value = {
+    ...partOpenOverrides.value,
+    [partKey(message, part)]: open
+  };
+}
+
+function togglePartOpen(message: TimelineMessage, part: TimelinePart) {
+  setPartOpen(message, part, !isPartOpen(message, part));
+}
+
+function partToggleLabel(message: TimelineMessage, part: TimelinePart) {
+  return `${isPartOpen(message, part) ? "Collapse" : "Expand"} ${partRegionLabel(part)}`;
+}
+
 function payloadPreview(value: unknown) {
   if (value === undefined || value === null || value === "") {
     return "";
@@ -96,18 +140,32 @@ function payloadPreview(value: unknown) {
               role="region"
               :aria-label="partRegionLabel(part)"
             >
-              <header>
+              <button
+                v-if="isCollapsiblePart(part)"
+                class="message-part-toggle"
+                type="button"
+                :aria-expanded="isPartOpen(message, part)"
+                :aria-label="partToggleLabel(message, part)"
+                @click="togglePartOpen(message, part)"
+              >
                 <Brain v-if="part.type === 'reasoning'" :size="14" />
-                <Wrench v-else-if="part.type === 'tool'" :size="14" />
-                <FileText v-else-if="part.type === 'file'" :size="14" />
+                <Wrench v-else :size="14" />
+                <span>{{ partTitle(part) }}</span>
+                <small v-if="partStatus(part)">{{ partStatus(part) }}</small>
+                <ChevronDown class="message-part-chevron" :class="{ flipped: isPartOpen(message, part) }" :size="14" />
+              </button>
+              <header v-else>
+                <FileText v-if="part.type === 'file'" :size="14" />
                 <RadioTower v-else :size="14" />
                 <span>{{ partTitle(part) }}</span>
-                <small v-if="'status' in part && part.status">{{ part.status }}</small>
+                <small v-if="partStatus(part)">{{ partStatus(part) }}</small>
               </header>
-              <p v-if="part.type === 'reasoning'">{{ textFromPart(part) }}</p>
-              <pre v-else-if="part.type === 'tool' && (part.input || part.output)">{{ payloadPreview(part.output ?? part.input) }}</pre>
-              <p v-else-if="part.type === 'file'">{{ part.path ?? part.name }}</p>
-              <pre v-else-if="part.type === 'event'">{{ payloadPreview(part.payload) }}</pre>
+              <template v-if="isPartOpen(message, part)">
+                <p v-if="part.type === 'reasoning'">{{ textFromPart(part) }}</p>
+                <pre v-else-if="part.type === 'tool' && (part.input || part.output)">{{ payloadPreview(part.output ?? part.input) }}</pre>
+                <p v-else-if="part.type === 'file'">{{ part.path ?? part.name }}</p>
+                <pre v-else-if="part.type === 'event'">{{ payloadPreview(part.payload) }}</pre>
+              </template>
             </section>
           </template>
         </div>

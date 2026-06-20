@@ -14,7 +14,7 @@
 - `src/components/MonacoDiffEditor.vue`：为 Review 面板懒加载 Monaco 只读 diff editor，unified/split 与面板状态同步；无可见视口或加载失败时保留 hunk 预览 fallback。
 - `src/components/FileTreePanel.vue`：复刻 opencode Files 侧栏的只读文件树入口，支持 runtime fs 列目录、进入目录、搜索、刷新、空态和错误态；数据统一来自平台 `/api/fs/*`。
 - `src/components/CommandPalette.vue`：复刻 opencode command palette 的平台命令目录入口，支持 toolbar trigger、`Ctrl/Cmd+Shift+P` 与 `Ctrl/Cmd+K` 打开、搜索过滤、方向键高亮、Enter 选择、Escape/背景关闭，并把选中的平台命令写入 composer 的 `/command` slash 文本。
-- `src/components/SessionTimeline.vue`：复刻 opencode message timeline 的 part 分块展示；RunEvent 投影会保留 text、reasoning、tool、file、event part，组件按块展示状态、工具输出、推理摘要和文件/event 摘要，旧的纯文本 `SessionMessage.content` 仍作为 fallback。
+- `src/components/SessionTimeline.vue`：复刻 opencode message timeline 的 part 分块展示；RunEvent 投影会保留 text、reasoning、tool、file、event part，组件按块展示状态、工具输出、推理摘要和文件/event 摘要；已完成的 reasoning/tool 默认折叠，running/pending/error 保持展开，旧的纯文本 `SessionMessage.content` 仍作为 fallback。
 - `src/components/PromptComposer.vue`：复刻 opencode composer 的文本、附件、图片选择/粘贴/拖拽、@ 上下文、Agent/Model/Variant 运行态选择、shell mode 和 slash command 入口；附件/@ 文件选择通过平台 fs catalog，context chip 可移除，图片以平台 `file` part 契约发送，slash 菜单可由按钮或 textarea `/query` 触发，通过平台命令目录写入 `/command` 文本，并支持方向键、Enter、Escape 键盘操作；带 `hints` 或 `<...>/[...]` 模板的 slash command 会生成参数表单并实时补全 `/command args`；textarea Enter 提交、Shift+Enter 换行、边界 ArrowUp/ArrowDown 浏览历史；提交时 shell mode 走 `runSessionShell`，slash command 走 `runSessionCommand`。
 - `src/components/SessionToolbarActions.vue`：复刻 opencode session toolbar 的 share、fork、compact、revert、abort 入口；fork/revert 按 opencode `messageID` 请求体经平台代理。
 - `src/components/SessionForkDialog.vue`：复刻 opencode fork dialog 的用户消息选择列表，选择后通过 `backend-api.forkSession` 创建子会话并跳转。

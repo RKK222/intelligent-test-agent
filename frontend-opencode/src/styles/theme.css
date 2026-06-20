@@ -574,28 +574,61 @@ small,
   background: var(--panel-subtle);
 }
 
-.message-part-card header {
+.message-part-card header,
+.message-part-toggle {
   display: flex;
   align-items: center;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
   min-width: 0;
   gap: 7px;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 650;
+  font-family: inherit;
 }
 
-.message-part-card header span {
+.message-part-toggle {
+  cursor: pointer;
+  text-align: left;
+}
+
+.message-part-toggle:hover {
+  color: var(--text);
+}
+
+.message-part-toggle:focus-visible {
+  border-radius: 5px;
+  outline: 2px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  outline-offset: 2px;
+}
+
+.message-part-card header span,
+.message-part-toggle span {
   overflow: hidden;
   color: var(--text);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.message-part-card header small {
+.message-part-card header small,
+.message-part-toggle small {
   margin-left: auto;
   color: var(--text-weak);
   font-family: var(--font-mono);
   font-size: 11px;
+}
+
+.message-part-chevron {
+  flex: 0 0 auto;
+  color: var(--text-weak);
+  transition: transform 140ms ease;
+}
+
+.message-part-chevron.flipped {
+  transform: rotate(180deg);
 }
 
 .message-part-card[data-part-type="reasoning"] {
