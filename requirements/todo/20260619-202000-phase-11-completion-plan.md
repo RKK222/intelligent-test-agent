@@ -2,7 +2,7 @@
 
 ## 背景
 
-- 用户问题：当前 Phase 11 已完成 P0/P1 主路径，但仍有若干能力未达到 `docs/plan/11-opencode-web-feature-replica.md` 的完整验收范围。
+- 用户问题：当前 Phase 11 已完成 P0/P1 主路径，但仍有若干能力未达到 `requirements/todo/11-opencode-web-feature-replica.md` 的完整验收范围。
 - 当前现象：已实现 runtime facade/API、事件 reducer、运行态选择、permission/question、Todo、slash command、`@` context、Diff 来源切换、MCP/LSP/VCS 状态、只读 transcript、`POST /api/runs` 的 PromptPart 到 opencode `prompt_async` 端到端透传，以及 Session 全局搜索/置顶/软删除；附件/图片、follow-up、深度 Diff review、PTY 和 E2E 仍缺口明确。
 - 目标：按不破坏现有边界的方式补完 Phase 11，最终达到 Web App 运行态能力完整可验收。
 

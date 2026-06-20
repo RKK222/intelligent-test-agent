@@ -2,7 +2,7 @@
 
 ## 职责
 
-提供前端共享类型和稳定字段定义，包含 Phase 11 Web App 运行态 projection 类型。
+提供前端共享类型和稳定字段定义，包含 Web App 运行态 projection 类型。
 
 ## 主要程序清单
 

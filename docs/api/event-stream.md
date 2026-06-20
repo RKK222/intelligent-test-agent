@@ -123,8 +123,8 @@ Phase 08 后，opencode raw event 的终态映射为：
 - `session.idle` -> `run.succeeded`，兼容 opencode 1.17.8 的完成信号。
 - `session.next.step.failed` -> `run.failed`，应用服务同时把 Run 状态更新为 `FAILED`。
 - `session.error` -> `run.failed`，应用服务同时把 Run 状态更新为 `FAILED`。
-- `message.updated`、`message.part.updated`、`message.part.delta` 等 opencode App 事件进入同名 transient SSE，用于 Phase 11 message timeline；不写入 `run_events`。
-- `permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed` 进入同名平台 RunEvent，用于 Phase 11 运行态同步。
+- `message.updated`、`message.part.updated`、`message.part.delta` 等 opencode App 事件进入同名 transient SSE，用于 message timeline；不写入 `run_events`。
+- `permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed` 进入同名平台 RunEvent，用于运行态同步。
 
 本地 RunEvent 持久化异常不是 opencode 终态事件，不能单独生成 `run.failed` 或把 Run 状态改为 `FAILED`；前端可通过 SSE 重连和后续事件继续恢复视图。
 

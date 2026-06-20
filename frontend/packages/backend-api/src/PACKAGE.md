@@ -6,7 +6,7 @@
 
 ## 主要程序清单
 
-- `index.ts`：`createBackendApiClient`、`BackendApiError` 和 API 方法集合；`startRun` 兼容旧 prompt string 与 Phase 11 对象 payload，并封装 Phase 11 runtime 目录、session/message 操作、Session 全局搜索/置顶/删除、permission/question、fs/vcs/lsp/mcp status/resources/tools 和 terminal ticket 方法；Command catalog 映射需保留 `source/hints` 等可选字段，兼容旧 payload。
+- `index.ts`：`createBackendApiClient`、`BackendApiError` 和 API 方法集合；`startRun` 兼容旧 prompt string 与对象 payload，并封装 runtime 目录、session/message 操作、Session 全局搜索/置顶/删除、permission/question、fs/vcs/lsp/mcp status/resources/tools 和 terminal ticket 方法；Command catalog 映射需保留 `source/hints` 等可选字段，兼容旧 payload。
 
 ## 允许依赖
 

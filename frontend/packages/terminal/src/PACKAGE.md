@@ -2,7 +2,7 @@
 
 ## 职责
 
-承载 Phase 11 P2 交互式 PTY 的前端 WebSocket client 和终端面板。
+承载交互式 PTY 的前端 WebSocket client 和终端面板。
 
 ## 主要程序清单
 

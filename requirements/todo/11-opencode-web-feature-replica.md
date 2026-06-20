@@ -316,3 +316,34 @@ E2E：
 2. 默认把只读分享页放入 P2，而不是核心 P0。
 3. 不手改 generated SDK；如 pinned spec 变化，只通过 `tools/generate-opencode-java-sdk.sh` 更新。
 4. 非 Run 级全局同步先用 HTTP/TanStack Query 补齐；只有 agent/run 过程实时输出进入 RunEvent SSE。
+
+## 运行态 API 契约方向（历史规划，已被 docs/api/http-api.md 权威表取代）
+
+> 本节为 Phase 11 推进过程中的优先级规划草稿，保留仅供追溯。权威 HTTP 契约以 `docs/api/http-api.md` 的“运行态目录接口”与“Session 运行态接口”表为准，未实现项以代码现状为准。
+
+以下接口是 Phase 11 的新增契约方向，必须通过 `test-agent-api -> test-agent-opencode-runtime -> test-agent-opencode-client` 实现，并由 `test-agent-app` 装配运行；未实现前不得由前端直连 opencode server。
+
+| 域 | 方法与路径 | 用途 | 优先级 |
+|---|---|---|---|
+| Session | `GET /api/sessions` | 列表、搜索、分页、置顶过滤 | P0 |
+| Session | `PATCH /api/sessions/{sessionId}` | 更新标题或置顶 | P0 |
+| Session | `DELETE /api/sessions/{sessionId}` | 删除会话 | P0 |
+| Session | `GET /api/sessions/{sessionId}/children` | 子会话列表 | P1 |
+| Session | `GET /api/sessions/{sessionId}/diff` | session/message diff | P1 |
+| Session | `GET /api/sessions/{sessionId}/todo` | Todo 列表 | P1 |
+| Session | `POST /api/sessions/{sessionId}/fork` | 从会话或消息 fork | P1 |
+| Session | `POST /api/sessions/{sessionId}/abort` | 中断当前运行 | P0 |
+| Session | `POST /api/sessions/{sessionId}/compact` | 压缩/总结 | P1 |
+| Session | `POST /api/sessions/{sessionId}/revert`、`/unrevert` | 撤销/重做 | P1 |
+| Session | `POST /api/sessions/{sessionId}/command` | 斜杠命令 | P1 |
+| Session | `POST /api/sessions/{sessionId}/shell` | shell 命令 | P1 |
+| Permission | `GET /api/sessions/{sessionId}/permissions` | 待审批权限请求 | P0 |
+| Permission | `POST /api/sessions/{sessionId}/permissions/{requestId}/reply` | once/always/reject | P0 |
+| Question | `GET /api/sessions/{sessionId}/questions` | 待回答提问 | P0 |
+| Question | `POST /api/sessions/{sessionId}/questions/{requestId}/reply`、`/reject` | 回复或拒绝提问 | P0 |
+| Runtime | `GET /api/agents`、`/models`、`/providers` | Agent/Model/Provider 只读列表 | P0 |
+| Runtime | `GET /api/commands`、`/references` | 命令和引用目录 | P1 |
+| Runtime | `GET /api/fs/find`、`/fs/read`、`/fs/list` | context picker 文件能力 | P1 |
+| Runtime | `GET /api/vcs/diff`、`/vcs/status` | VCS diff/status | P1 |
+| Runtime | `GET /api/lsp/status` | LSP 状态 | P2 |
+| Runtime | `GET /api/mcp/status`、`/mcp/resources`、`/mcp/tools` | MCP 状态和目录 | P2 |

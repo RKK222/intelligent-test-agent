@@ -12,7 +12,7 @@ Monaco 文件编辑器包。
 - 从空状态首次打开文件时按需初始化 Monaco，并在后续文件切换时复用 editor 实例切换 model。
 - 上报 Monaco 当前文本选区给 app 层，用于构造 Prompt file context。
 - 保存动作通过回调交给 app 层调用 `backend-api`。
-- Phase 11 选区上下文只上报文件路径、语言、选区范围和文本片段；是否转换为 `PromptPart` 由 app 层负责。
+- 选区上下文只上报文件路径、语言、选区范围和文本片段；是否转换为 `PromptPart` 由 app 层负责。
 - 编辑器容器需要保持稳定高度和最小宽度，避免保存反馈、只读状态或长文件名挤压 Monaco 区域。
 
 ## 禁止事项

@@ -79,7 +79,7 @@ corepack pnpm dev
 tools/dev-runnable-loop-check.sh
 ```
 
-Phase 11 真实三服务联调 E2E 单独执行，不进入默认 `pnpm e2e`：
+真实三服务联调 E2E 单独执行，不进入默认 `pnpm e2e`：
 
 ```bash
 tools/dev-phase11-real-e2e.sh --start-services
@@ -95,12 +95,12 @@ tools/dev-phase11-real-e2e.sh --start-services
 - HTTP 请求只能通过 `packages/backend-api`。
 - RunEvent SSE 只能通过 `packages/event-stream-client`。
 - `apps/agent-web` 负责组合页面；业务能力必须沉淀到对应 package。
-- Phase 11 opencode Web App 复刻以运行态能力为范围，交互行为参考 `opencode-source/opencode-1.17.8/packages/app`；顶层 `frontend-opencode` 承载 Vue/Vite 复刻工程，opencode `packages/web` 官网/文档/公网分享轮询不进入默认边界。
-- 当前 Phase 11 实现已接入 backend-api runtime 方法、Agent/Provider/Model 运行态选择（Agent 下拉过滤为 primary+all，排除 subagent/hidden）、受控 Workspace 目录选择、session history 搜索/置顶/删除、message part reducer、permission/question dock、Todo、文件/图片附件、busy follow-up 队列、Monaco 选区上下文、slash command palette 与参数表单补全、`@` context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与懒加载 editor、MCP/LSP/VCS 状态摘要、`/s/[sessionId]` 只读 transcript 和受控 PTY terminal panel；公开 share 授权、per-file/per-message 回滚和真实三服务联调 E2E 仍按后续批次推进。
+- opencode Web App 复刻以运行态能力为范围，交互行为参考 `opencode-source/opencode-1.17.8/packages/app`；顶层 `frontend-opencode` 承载 Vue/Vite 复刻工程，opencode `packages/web` 官网/文档/公网分享轮询不进入默认边界。
+- 当前已接入 backend-api runtime 方法、Agent/Provider/Model 运行态选择（Agent 下拉过滤为 primary+all，排除 subagent/hidden）、受控 Workspace 目录选择、session history 搜索/置顶/删除、message part reducer、permission/question dock、Todo、文件/图片附件、busy follow-up 队列、Monaco 选区上下文、slash command palette 与参数表单补全、`@` context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与懒加载 editor、MCP/LSP/VCS 状态摘要、`/s/[sessionId]` 只读 transcript 和受控 PTY terminal panel；公开 share 授权、per-file/per-message 回滚和真实三服务联调 E2E 仍按后续批次推进。
 
-## Phase 11 UI 与主题边界
+## UI 与主题边界
 
 - 全局 theme token、Figma Web IDE 风格 activity rail、Dockview/Monaco 视觉适配、滚动条、panel chrome 和轻量动画由 `apps/agent-web/src/styles/globals.css` 承载；包内组件只消费这些 token，不在业务组件里复制整套主题。
 - `packages/ui-kit` 只提供 Button、Badge、Input、Tabs 等无业务状态基础控件；运行态选择、permission/question、terminal 和 Diff 语义仍放在对应 feature package。
 - 面板、toolbar、terminal、Diff、Agent timeline 和文件树必须保持稳定尺寸，Agent timeline 需要把 reasoning 思考过程、任务分解、Skill/Tool 调用与最终回答分块展示并保留独立滚动区域；右侧 Agent 对话框使用独立浅色 `--ta-chat-*` token，避免 hover、streaming 文本、warning、hunk 导航或状态徽标导致布局跳动。
-- Phase 11 的真实三服务 E2E 尚无最新通过记录；当前只能认为 mock E2E 和单元测试覆盖了主流程，不能把真实联调标记为完成。
+- 真实三服务 E2E 尚无最新通过记录；当前只能认为 mock E2E 和单元测试覆盖了主流程，不能把真实联调标记为完成。

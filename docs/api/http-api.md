@@ -295,7 +295,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 兼容要求：
 
 - 旧的 `/api/workspaces/{workspaceId}/sessions` 继续有效，但默认只返回 `ACTIVE` 会话。
-- `GET /api/sessions` 用于 Phase 11 History 全局搜索，`q` 为空时返回所有 `ACTIVE` 会话。
+- `GET /api/sessions` 用于 History 全局搜索，`q` 为空时返回所有 `ACTIVE` 会话。
 - `DELETE /api/sessions/{sessionId}` 为软删除，不删除消息、Run、事件或远端 opencode 映射；普通详情、列表和消息追加会把 `ARCHIVED` 会话视为不存在。
 
 `POST /api/sessions/{sessionId}/messages` 请求体：
@@ -340,7 +340,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 }
 ```
 
-Phase 11 起请求体保持向后兼容，并支持以下可选字段：
+请求体保持向后兼容，并支持以下可选字段：
 
 ```json
 {
@@ -371,9 +371,9 @@ Phase 11 起请求体保持向后兼容，并支持以下可选字段：
 
 启动流程会追加用户消息，创建 `PENDING` Run，再按平台 session 的内部 opencode 映射决定路由：
 
-### Phase 11 opencode Web Runtime API
+### opencode Web Runtime API
 
-Phase 11 新增的 opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controller 暴露。前端仍只调用平台后端 API，后端通过 `test-agent-opencode-runtime -> test-agent-opencode-client` facade 访问 opencode HTTP API，不返回 generated SDK DTO，不允许 Controller 直接调用 generated SDK。
+opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controller 暴露。前端仍只调用平台后端 API，后端通过 `test-agent-opencode-runtime -> test-agent-opencode-client` facade 访问 opencode HTTP API，不返回 generated SDK DTO，不允许 Controller 直接调用 generated SDK。
 
 运行态目录接口：
 
@@ -466,38 +466,7 @@ Session 运行态接口：
 
 SSE 建连时，后端会先尝试从当前 Run 绑定的 opencode session projected messages 拉取消息快照，并转换为 transient `message.updated` / `message.part.updated` 发给前端；随后进入 `run_events` durable replay 与 live bus 合流。消息内容、文本 delta、大段日志和 bash/tool output 不从本平台数据库恢复；如果 opencode session 不可用或拉取失败，后端跳过消息恢复，不阻断 Run 状态、Diff、permission/question 等 durable RunEvent 回放。
 
-### Phase 11 opencode Web App 运行态 API 规划
-
-以下接口是 Phase 11 的新增契约方向，必须通过 `test-agent-api -> test-agent-opencode-runtime -> test-agent-opencode-client` 实现，并由 `test-agent-app` 装配运行；未实现前不得由前端直连 opencode server。
-
-> 注：本表所列接口多数已落地，详见上方“Session 运行态接口”与“运行态目录接口”；未实现项以代码现状为准。
-
-| 域 | 方法与路径 | 用途 | 优先级 |
-|---|---|---|---|
-| Session | `GET /api/sessions` | 列表、搜索、分页、置顶过滤 | P0 |
-| Session | `PATCH /api/sessions/{sessionId}` | 更新标题或置顶 | P0 |
-| Session | `DELETE /api/sessions/{sessionId}` | 删除会话 | P0 |
-| Session | `GET /api/sessions/{sessionId}/children` | 子会话列表 | P1 |
-| Session | `GET /api/sessions/{sessionId}/diff` | session/message diff | P1 |
-| Session | `GET /api/sessions/{sessionId}/todo` | Todo 列表 | P1 |
-| Session | `POST /api/sessions/{sessionId}/fork` | 从会话或消息 fork | P1 |
-| Session | `POST /api/sessions/{sessionId}/abort` | 中断当前运行 | P0 |
-| Session | `POST /api/sessions/{sessionId}/compact` | 压缩/总结 | P1 |
-| Session | `POST /api/sessions/{sessionId}/revert`、`/unrevert` | 撤销/重做 | P1 |
-| Session | `POST /api/sessions/{sessionId}/command` | 斜杠命令 | P1 |
-| Session | `POST /api/sessions/{sessionId}/shell` | shell 命令 | P1 |
-| Permission | `GET /api/sessions/{sessionId}/permissions` | 待审批权限请求 | P0 |
-| Permission | `POST /api/sessions/{sessionId}/permissions/{requestId}/reply` | once/always/reject | P0 |
-| Question | `GET /api/sessions/{sessionId}/questions` | 待回答提问 | P0 |
-| Question | `POST /api/sessions/{sessionId}/questions/{requestId}/reply`、`/reject` | 回复或拒绝提问 | P0 |
-| Runtime | `GET /api/agents`、`/models`、`/providers` | Agent/Model/Provider 只读列表 | P0 |
-| Runtime | `GET /api/commands`、`/references` | 命令和引用目录 | P1 |
-| Runtime | `GET /api/fs/find`、`/fs/read`、`/fs/list` | context picker 文件能力 | P1 |
-| Runtime | `GET /api/vcs/diff`、`/vcs/status` | VCS diff/status | P1 |
-| Runtime | `GET /api/lsp/status` | LSP 状态 | P2 |
-| Runtime | `GET /api/mcp/status`、`/mcp/resources`、`/mcp/tools` | MCP 状态和目录 | P2 |
-
-PTY WebSocket 不在上述默认 HTTP/SSE 契约内。Phase 11 P2 已按 `docs/standards/security.md` 增加后端受控例外入口，前端仍不得直连 opencode server、SSH、sidecar 或任意主机。
+PTY WebSocket 不在上述默认 HTTP/SSE 契约内，已按 `docs/standards/security.md` 增加后端受控例外入口，前端仍不得直连 opencode server、SSH、sidecar 或任意主机。
 
 - `POST /api/sessions/{sessionId}/terminal/tickets`：创建一次性 PTY ticket，仍返回 `ApiResponse<T>`。
 - `GET /api/sessions/{sessionId}/terminal/ws?ticket=...`：仅用于 WebSocket upgrade，ticket 单次使用并短期过期。

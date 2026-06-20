@@ -11,7 +11,7 @@ dockview-vue 工作台布局和跨面板 UI 状态包。
 - 提供 `activity` slot 渲染工作台级图标入口；底部 Run/Terminal 通过 `bottomOpen`、`bottomHeight` 控制为覆盖式抽屉，默认不占首屏高度。
 - 提供打开文件 tab、活动文件、Diff 选择等 Pinia 状态，并提供 `resetWorkspaceView()` 在切换 Workspace 时清空旧文件视图。
 - 保证固定布局区域有稳定尺寸。
-- 保持顶部栏、panel tab、底部运行区和状态徽标的视觉稳定性；Phase 11 streaming、terminal warning 或 Diff 状态变化不得改变整体布局尺寸。
+- 保持顶部栏、panel tab、底部运行区和状态徽标的视觉稳定性；streaming、terminal warning 或 Diff 状态变化不得改变整体布局尺寸。
 - 只承接工作台级 UI 状态，不承接 session、prompt、permission/question 或 terminal WebSocket 业务状态。
 
 ## 禁止事项

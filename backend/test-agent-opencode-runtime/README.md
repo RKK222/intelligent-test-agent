@@ -10,7 +10,7 @@
 - Run 启动、取消、远端 opencode session 懒创建/复用、事件订阅和终态处理。
 - RunEvent 持久化策略、实时发布和 opencode projected messages 恢复。
 - Run Diff 查询、接受和拒绝。
-- Phase 11 opencode runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth。
+- opencode runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth。
 - PTY terminal ticket、限流、active session registry、进程适配和审计。
 
 ## 测试覆盖

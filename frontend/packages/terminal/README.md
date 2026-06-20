@@ -2,7 +2,7 @@
 
 ## 工程定位
 
-Phase 11 P2 交互式 PTY 终端前端包，只负责平台 WebSocket 生命周期、输入、resize、关闭和输出渲染。
+交互式 PTY 终端前端包，只负责平台 WebSocket 生命周期、输入、resize、关闭和输出渲染。
 
 ## 主要职责
 

@@ -21,7 +21,7 @@
 - `OpencodeStreamEventsCommand`、`OpencodeRunEventMapper`：订阅 opencode event 并映射为平台 RunEventDraft。
 - `OpencodeDiffCommand`、`OpencodeDiffResult`、`OpencodeDiffFile`：查询 opencode session Diff 并输出平台稳定 DTO。
 - `OpencodeRejectDiffCommand`、`OpencodeRejectDiffResult`：通过 opencode `sessionRevert` 拒绝 Run 级 Diff。
-- `OpencodeRuntimeCommand`、`OpencodeRuntimeResult`：Phase 11 Web App 运行态通用 facade 命令和结果，使用 Jackson `JsonNode` 承载 opencode HTTP 响应，支持受控访问 MCP resources/tools 等只读 runtime 目录，避免 generated DTO 穿透业务模块、domain 或 API。
+- `OpencodeRuntimeCommand`、`OpencodeRuntimeResult`：Web App 运行态通用 facade 命令和结果，使用 Jackson `JsonNode` 承载 opencode HTTP 响应，支持受控访问 MCP resources/tools 等只读 runtime 目录，避免 generated DTO 穿透业务模块、domain 或 API。
 - `OpencodeSessionMessagesCommand`、`OpencodeSessionMessage`、`OpencodeSessionMessagesResult`：读取 opencode session projected messages 的稳定 facade DTO，用于消息内容恢复。
 - `OpencodeHealthCommand`、`OpencodeHealthResult`：执行节点健康检查。
 
@@ -66,4 +66,4 @@
 
 `OpencodeRunEventMapper` 必须兼容 opencode raw event 演进。opencode 1.17.8 中 `session.status` 的 `idle` 状态和 `session.idle` 代表本次 prompt 已结束，应映射为平台 `run.succeeded`；`busy` 等非终态状态继续降级为 `opencode.event.unknown`。
 
-Phase 11 Web App 复刻时，mapper 需要优先识别 opencode App 实际消费的运行态事件：`message.updated`、`message.part.updated`、`message.part.delta`、`todo.updated`、`permission.*`、`question.*`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`。旧 `assistant.message.delta`、`tool.*`、`diff.*` 兼容事件必须保留，不能破坏现有前端。
+Web App 复刻时，mapper 需要优先识别 opencode App 实际消费的运行态事件：`message.updated`、`message.part.updated`、`message.part.delta`、`todo.updated`、`permission.*`、`question.*`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`。旧 `assistant.message.delta`、`tool.*`、`diff.*` 兼容事件必须保留，不能破坏现有前端。

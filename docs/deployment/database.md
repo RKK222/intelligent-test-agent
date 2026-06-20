@@ -52,7 +52,7 @@
 
 ## V4 Session 管理字段
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V4__add_session_management_fields.sql` 为 `sessions` 增加 Phase 11 History 管理字段：
+`backend/test-agent-persistence/src/main/resources/db/migration/V4__add_session_management_fields.sql` 为 `sessions` 增加 History 管理字段：
 
 | 字段 | 说明 |
 |---|---|

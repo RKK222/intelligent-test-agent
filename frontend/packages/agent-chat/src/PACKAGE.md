@@ -13,7 +13,7 @@
 - `chat-utils.ts`：斜杠/上下文查询、附件合并、流式指纹、卡片默认展开判定等纯函数。
 - `process-status.ts`：过程状态归一化、中文文案、状态色和 Skill tool 判定工具。
 - `prompt-parts.ts`：浏览器文件和图片到平台 `PromptPart` 的纯转换，供 composer 和单测复用。
-- `runtime-reducer.ts`：纯 RunEvent reducer，归并旧 `assistant.message.delta` 和 Phase 11 `message.*`、permission/question、todo、diff/session status 事件。
+- `runtime-reducer.ts`：纯 RunEvent reducer，归并旧 `assistant.message.delta` 和 `message.*`、permission/question、todo、diff/session status 事件。
 
 ## 允许依赖
 

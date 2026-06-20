@@ -100,7 +100,7 @@ test-agent-event
 6. `ui-kit` 和 `shared-types` 不得依赖业务 API 或事件流。
 7. 自研 Web IDE 功能必须按 package 边界沉淀，不能把全部逻辑堆到 `apps/agent-web`。
 8. Phase 07 搜索只过滤已加载文件树的文件名；Phase 08 Diff 接受/拒绝只能通过平台 Run 级 API。
-9. Phase 11 P2 交互式 PTY 只能作为平台后端的受控 WebSocket 例外暴露；前端 terminal package 不得直连 opencode server、SSH、sidecar 或任意主机。
+9. 交互式 PTY 只能作为平台后端的受控 WebSocket 例外暴露；前端 terminal package 不得直连 opencode server、SSH、sidecar 或任意主机。
 
 ## 文档要求
 
