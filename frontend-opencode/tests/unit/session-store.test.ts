@@ -55,7 +55,7 @@ describe("session store actions", () => {
     expect(session.revertItems).toHaveLength(0);
   });
 
-  it("passes selected runtime agent and model to startRun", async () => {
+  it("passes selected runtime agent, model, and variant to startRun", async () => {
     setActivePinia(createPinia());
     const platform = usePlatformStore();
     const runEvents = useRunEventStore();
@@ -82,7 +82,7 @@ describe("session store actions", () => {
       updatedAt: ""
     };
 
-    await session.sendPrompt({ text: "Use selected runtime", agent: "build", model: "anthropic/claude-sonnet-4" });
+    await session.sendPrompt({ text: "Use selected runtime", agent: "build", model: "anthropic/claude-sonnet-4", variant: "high" });
 
     expect(calls).toEqual([
       [
@@ -92,7 +92,8 @@ describe("session store actions", () => {
           parts: [{ type: "text", text: "Use selected runtime" }],
           prompt: "Use selected runtime",
           agent: "build",
-          model: "anthropic/claude-sonnet-4"
+          model: "anthropic/claude-sonnet-4",
+          variant: "high"
         }
       ]
     ]);

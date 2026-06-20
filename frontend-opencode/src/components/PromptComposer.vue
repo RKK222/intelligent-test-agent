@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import type { CommandInfo } from "@test-agent/shared-types";
 import { AtSign, FileCode2, Folder, ImagePlus, Paperclip, Search, SendHorizontal, Slash, X } from "lucide-vue-next";
 import { usePlatformStore } from "@/stores/platform";
@@ -25,6 +25,10 @@ const fileError = ref<string>();
 const lineCount = computed(() => Math.max(3, Math.min(12, prompt.text.split(/\r?\n/).length + 1)));
 const filePickerLabel = computed(() => (filePickerMode.value === "attach" ? "Attach workspace file" : "Mention workspace file"));
 const runtimeModels = computed(() => workspace.models.filter((model) => model.providerId));
+const selectedRuntimeModel = computed(() =>
+  runtimeModels.value.find((model) => `${model.providerId}/${model.id}` === prompt.runtimeModel)
+);
+const runtimeVariants = computed(() => (selectedRuntimeModel.value?.variants ?? []).filter((variant) => variant.trim()));
 const slashCommands = computed(() => {
   const query = slashQuery.value.trim().toLowerCase();
   if (!query) {
@@ -34,6 +38,17 @@ const slashCommands = computed(() => {
     `${command.name} ${command.description ?? ""} ${command.arguments ?? ""}`.toLowerCase().includes(query)
   );
 });
+
+watch(
+  () => [prompt.runtimeModel, runtimeVariants.value.join("\u0000")],
+  () => {
+    // Variant 绑定在具体模型上，切换模型后必须丢弃不再可用的旧运行态选择。
+    if (prompt.runtimeVariant && !runtimeVariants.value.includes(prompt.runtimeVariant)) {
+      prompt.runtimeVariant = "";
+    }
+  },
+  { immediate: true }
+);
 
 function addFile() {
   void openFilePicker("attach");
@@ -137,6 +152,15 @@ function readString(value: unknown) {
           <option value="">Default</option>
           <option v-for="model in runtimeModels" :key="`${model.providerId}:${model.id}`" :value="`${model.providerId}/${model.id}`">
             {{ model.name }}
+          </option>
+        </select>
+      </label>
+      <label v-if="runtimeVariants.length" class="composer-select">
+        <span>Variant</span>
+        <select v-model="prompt.runtimeVariant" aria-label="Model variant">
+          <option value="">Default</option>
+          <option v-for="variant in runtimeVariants" :key="variant" :value="variant">
+            {{ variant }}
           </option>
         </select>
       </label>

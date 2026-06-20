@@ -57,6 +57,37 @@ describe("PromptComposer", () => {
     expect(screen.getByText("0 parts")).toBeInTheDocument();
   });
 
+  it("selects model variants and clears stale variants when the model changes", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const prompt = usePromptStore();
+    const workspace = useWorkspaceStore();
+    workspace.models = [
+      { id: "claude-sonnet-4", providerId: "anthropic", name: "Claude Sonnet 4", variants: ["low", "medium", "high"] },
+      { id: "gpt-5.1", providerId: "openai", name: "GPT-5.1" }
+    ];
+
+    render(PromptComposer, { global: { plugins: [pinia] } });
+
+    expect(screen.queryByLabelText("Model variant")).not.toBeInTheDocument();
+    await fireEvent.update(screen.getByLabelText("Model"), "anthropic/claude-sonnet-4");
+    await fireEvent.update(screen.getByLabelText("Model variant"), "high");
+
+    expect(prompt.snapshot()).toMatchObject({
+      model: "anthropic/claude-sonnet-4",
+      variant: "high"
+    });
+
+    await fireEvent.update(screen.getByLabelText("Model"), "openai/gpt-5.1");
+
+    expect(prompt.snapshot()).toMatchObject({
+      model: "openai/gpt-5.1"
+    });
+    expect(prompt.snapshot().variant).toBeUndefined();
+    expect(screen.queryByLabelText("Model variant")).not.toBeInTheDocument();
+    expect(screen.getByText("0 parts")).toBeInTheDocument();
+  });
+
   it("selects attachments and @ references through the platform fs catalog", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
