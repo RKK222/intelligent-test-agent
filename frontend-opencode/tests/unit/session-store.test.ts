@@ -312,4 +312,40 @@ describe("session store actions", () => {
       ["compact", "ses_child", { providerID: "anthropic", modelID: "claude-sonnet-4" }]
     ]);
   });
+
+  it("marks the active run as cancelled after a successful session abort", async () => {
+    setActivePinia(createPinia());
+    const platform = usePlatformStore();
+    const session = useSessionStore();
+    const calls: Array<[string, ...unknown[]]> = [];
+
+    Object.defineProperty(platform, "api", {
+      value: {
+        abortSession: async (...args: unknown[]) => calls.push(["abort", ...args])
+      }
+    });
+
+    session.activeSession = {
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      title: "Demo",
+      status: "RUNNING",
+      createdAt: "2026-06-20T00:00:00Z",
+      updatedAt: "2026-06-20T00:00:00Z"
+    };
+    session.activeRun = {
+      runId: "run_1",
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      status: "RUNNING",
+      createdAt: "2026-06-20T00:00:01Z",
+      updatedAt: "2026-06-20T00:00:01Z"
+    };
+
+    await session.abort();
+
+    expect(calls).toEqual([["abort", "ses_1"]]);
+    expect(session.activeRun?.status).toBe("CANCELLED");
+    expect(session.activeRun?.updatedAt).not.toBe("2026-06-20T00:00:01Z");
+  });
 });

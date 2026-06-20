@@ -151,6 +151,10 @@ export const useSessionStore = defineStore("session", () => {
     }
     const platform = usePlatformStore();
     await platform.api.abortSession(activeSession.value.sessionId);
+    if (activeRun.value) {
+      // session abort 走 opencode runtime 代理，响应体不保证是平台 Run；成功后先本地收敛运行态，后续 RunEvent 再校正细节。
+      activeRun.value = { ...activeRun.value, status: "CANCELLED", updatedAt: new Date().toISOString() };
+    }
   }
 
   // 会话工具栏命令复刻 opencode 的 messageID 请求体，但统一经 backend-api 代理。

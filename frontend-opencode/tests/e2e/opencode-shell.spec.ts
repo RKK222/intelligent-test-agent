@@ -2,6 +2,7 @@ import { expect, type Page, type Route, test } from "@playwright/test";
 
 type Capture = {
   runRequests: Array<Record<string, unknown>>;
+  abortRequests?: Array<Record<string, unknown>>;
   providerAuthRequests?: Array<Record<string, unknown>>;
   shareRequests?: Array<Record<string, unknown>>;
 };
@@ -146,6 +147,26 @@ test("publishes and unpublishes a session share link", async ({ page }, testInfo
   await share.getByRole("button", { name: "Unpublish session" }).click();
   await expect.poll(() => capture.shareRequests?.some((entry) => entry.action === "unpublish")).toBe(true);
   await expect(share.getByRole("button", { name: "Publish session" })).toBeVisible();
+});
+
+test("aborts an active session run from the toolbar", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Toolbar abort is covered on the desktop session controls.");
+  const capture: Capture = { runRequests: [], abortRequests: [] };
+  await mockBackendApi(page, capture);
+
+  await page.goto("/w/wrk_1/session/ses_1");
+  await expect(page.getByRole("heading", { name: "Demo session" })).toBeVisible();
+
+  const abort = page.getByRole("button", { name: "Abort session" });
+  await expect(abort).toBeDisabled();
+  await page.getByPlaceholder("Ask opencode to inspect, edit, test, or explain this workspace...").fill("Keep running until stopped");
+  await page.getByRole("button", { name: "Send" }).click();
+  await expect(abort).toBeEnabled();
+
+  await abort.click();
+
+  await expect.poll(() => capture.abortRequests?.some((entry) => entry.sessionId === "ses_1")).toBe(true);
+  await expect(abort).toBeDisabled();
 });
 
 test("switches sessions from the session sidebar", async ({ page }, testInfo) => {
@@ -397,6 +418,10 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         createdAt: "2026-06-20T00:00:02Z",
         updatedAt: "2026-06-20T00:00:02Z"
       });
+    }
+    if (path === "/api/sessions/ses_1/abort" && request.method() === "POST") {
+      capture.abortRequests?.push({ sessionId: "ses_1" });
+      return json(route, { cancelled: true });
     }
 
     return json(route, {});
