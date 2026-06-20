@@ -2,6 +2,7 @@ import { expect, type Page, type Route, test } from "@playwright/test";
 
 type Capture = {
   runRequests: Array<Record<string, unknown>>;
+  providerAuthRequests?: Array<Record<string, unknown>>;
 };
 
 type MockOptions = {
@@ -36,6 +37,35 @@ test("opens and filters the opencode command palette", async ({ page }, testInfo
   await expect(page.getByRole("option", { name: "/compact Summarize the session" })).toHaveCount(0);
   await page.keyboard.press("Escape");
   await expect(palette).toHaveCount(0);
+});
+
+test("manages provider auth from the settings dialog", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Provider settings are covered on the desktop dialog.");
+  const capture: Capture = { runRequests: [], providerAuthRequests: [] };
+  await mockBackendApi(page, capture);
+
+  await page.goto("/");
+  await page.getByRole("button", { name: "Settings" }).click();
+
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Anthropic", { exact: true })).toBeVisible();
+
+  await dialog.getByLabel("Anthropic API key").fill("sk-test");
+  await dialog.getByRole("button", { name: "Save Anthropic key" }).click();
+  await expect.poll(() => capture.providerAuthRequests?.some((entry) => entry.action === "set-api-key")).toBe(true);
+
+  await dialog.getByRole("button", { name: "Authorize Anthropic OAuth" }).click();
+  await expect(dialog.getByRole("link", { name: "Open Anthropic OAuth URL" })).toHaveAttribute(
+    "href",
+    "https://auth.example/anthropic"
+  );
+  await dialog.getByLabel("Anthropic OAuth code").fill("code-123");
+  await dialog.getByRole("button", { name: "Complete Anthropic OAuth" }).click();
+  await expect.poll(() => capture.providerAuthRequests?.some((entry) => entry.action === "oauth-callback")).toBe(true);
+
+  await dialog.getByRole("button", { name: "Remove Anthropic auth" }).click();
+  await expect.poll(() => capture.providerAuthRequests?.some((entry) => entry.action === "remove")).toBe(true);
 });
 
 test("opens a session, sends a prompt, and renders streamed RunEvent output", async ({ page }) => {
@@ -221,7 +251,45 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         { commandId: "review", name: "review", description: "Review staged changes", arguments: "--quick" }
       ]);
     }
-    if (path === "/api/agents" || path === "/api/models" || path === "/api/providers") {
+    if (path === "/api/providers") {
+      return json(route, [{ providerId: "anthropic", name: "Anthropic", status: "available" }]);
+    }
+    if (path === "/api/provider/auth") {
+      return json(route, {
+        anthropic: {
+          methods: [{ type: "oauth", label: "OAuth" }]
+        }
+      });
+    }
+    if (path === "/api/auth/anthropic" && request.method() === "PUT") {
+      capture.providerAuthRequests?.push({
+        action: "set-api-key",
+        providerId: "anthropic",
+        body: JSON.parse(request.postData() ?? "{}") as Record<string, unknown>
+      });
+      return json(route, { providerId: "anthropic", status: "connected" });
+    }
+    if (path === "/api/auth/anthropic" && request.method() === "DELETE") {
+      capture.providerAuthRequests?.push({ action: "remove", providerId: "anthropic" });
+      return json(route, { providerId: "anthropic", status: "missing" });
+    }
+    if (path === "/api/provider/anthropic/oauth/authorize" && request.method() === "POST") {
+      capture.providerAuthRequests?.push({
+        action: "oauth-authorize",
+        providerId: "anthropic",
+        body: JSON.parse(request.postData() ?? "{}") as Record<string, unknown>
+      });
+      return json(route, { url: "https://auth.example/anthropic", method: "code", instructions: "Paste the browser code" });
+    }
+    if (path === "/api/provider/anthropic/oauth/callback" && request.method() === "POST") {
+      capture.providerAuthRequests?.push({
+        action: "oauth-callback",
+        providerId: "anthropic",
+        body: JSON.parse(request.postData() ?? "{}") as Record<string, unknown>
+      });
+      return json(route, { providerId: "anthropic", status: "connected" });
+    }
+    if (path === "/api/agents" || path === "/api/models") {
       return json(route, []);
     }
     if (path === "/api/sessions/ses_1") {
