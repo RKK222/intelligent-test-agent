@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { CheckSquare, FileDiff, FolderTree, RadioTower, TerminalSquare } from "lucide-vue-next";
+import TerminalPanel from "@/components/TerminalPanel.vue";
 import { useSessionStore } from "@/stores/session";
 import { useTerminalStore } from "@/stores/terminal";
 
@@ -48,12 +49,7 @@ function openTerminal() {
 
     <section v-else-if="tab === 'terminal'" class="panel-section terminal-panel">
       <div class="section-label">PTY terminal</div>
-      <div class="terminal-screen">
-        <span v-if="terminal.status === 'opening'">opening ticket...</span>
-        <span v-else-if="terminal.ticket">ws {{ terminal.ticket.webSocketUrl }}</span>
-        <span v-else>ticket required</span>
-      </div>
-      <div v-if="terminal.error" class="inline-alert">{{ terminal.error }}</div>
+      <TerminalPanel @reconnect="openTerminal" />
     </section>
 
     <section v-else class="panel-section">

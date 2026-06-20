@@ -802,10 +802,77 @@ small,
 }
 
 .terminal-screen {
-  display: grid;
   min-height: 260px;
-  place-items: start;
+  max-height: 42vh;
   padding: 12px;
+  white-space: pre-wrap;
+}
+
+.terminal-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.terminal-header,
+.terminal-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.terminal-header {
+  justify-content: space-between;
+}
+
+.terminal-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.terminal-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--panel-subtle);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0 8px;
+}
+
+.terminal-status[data-state="ready"] {
+  color: var(--accent);
+}
+
+.terminal-status[data-state="error"] {
+  color: var(--danger);
+}
+
+.terminal-input-row {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  padding: 7px;
+}
+
+.terminal-prompt {
+  color: var(--accent);
+  font-family: var(--font-mono);
+}
+
+.terminal-input-row input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .new-session-copy {
