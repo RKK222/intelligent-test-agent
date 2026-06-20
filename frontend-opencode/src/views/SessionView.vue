@@ -3,6 +3,7 @@ import { computed, onMounted, watch } from "vue";
 import { useRoute } from "vue-router";
 import { GitBranch, PanelRight, RotateCcw, Square } from "lucide-vue-next";
 import PromptComposer from "@/components/PromptComposer.vue";
+import SessionDockStack from "@/components/SessionDockStack.vue";
 import SessionTimeline from "@/components/SessionTimeline.vue";
 import SidePanel from "@/components/SidePanel.vue";
 import { usePromptStore } from "@/stores/prompt";
@@ -66,6 +67,7 @@ async function submit() {
       </div>
       <div v-if="session.error" class="inline-alert">{{ session.error }}</div>
       <SessionTimeline :messages="session.timeline" />
+      <SessionDockStack />
       <PromptComposer :busy="session.sending" @submit="submit" />
     </section>
 
