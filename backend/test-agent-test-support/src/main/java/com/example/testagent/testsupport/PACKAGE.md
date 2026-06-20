@@ -48,6 +48,6 @@
 ## 修改时必须同步更新
 
 - `backend/test-agent-test-support/README.md`。
-- `docs/backend/backend-testing-standards.md`。
+- `docs/standards/backend.md`。
 - 受影响测试模块的 README 或 PACKAGE.md。
 

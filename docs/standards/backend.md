@@ -1,0 +1,145 @@
+# 后端规范
+
+本规范适用于 `backend/` 下所有人工维护代码，合并编码、测试、性能、错误处理、可观测性和数据变更规则。模块职责与依赖边界见 `docs/architecture/dependency-rules.md`，模块速查见 `docs/architecture/module-map.md`，技术栈见 `backend/README.md`。
+
+## 工程原则
+
+1. 后端是 Maven multi-module 工程，Java 21、Spring Boot 4.1.0、Spring WebFlux、Log4j2、Micrometer、Druid 连接池。
+2. 只有 `test-agent-app` 是可运行 Spring Boot 服务包，其余 `test-agent-*` 模块只产出 library jar。
+3. 新增后端文件前必须先按 `docs/architecture/dependency-rules.md` 列出现有合适工程；没有合适工程时按业务边界新建 Maven module。
+4. 业务代码优先遵守模块 README 和 `docs/architecture/dependency-rules.md` 的边界。
+
+## 分层规则
+
+详细依赖方向与禁止关系见 `docs/architecture/dependency-rules.md`。核心红线：
+
+1. Controller 只负责协议适配、参数校验和调用业务模块 service，不得直接访问 Repository 或 generated SDK。
+2. `test-agent-api` 不放业务规则，不依赖 `test-agent-persistence` 或 `test-agent-app`。
+3. 只有 `test-agent-opencode-client` 可以直接依赖 generated SDK；generated SDK DTO 不得进入 domain，不得直接返回前端。
+4. opencode facade 对外只暴露平台 command/result 和 `RunEventDraft`，不返回 generated SDK DTO。
+5. `test-agent-domain` 不依赖 Spring Web、Persistence、generated SDK。
+6. `test-agent-app` 不得新增 Controller、WebFilter、WebSocket handler 或业务源码包。
+
+## DTO 与模型
+
+1. 对外 API 使用平台 DTO，不直接暴露 generated SDK 模型或数据库 surrogate PK。
+2. 领域对象表达业务概念，不携带 HTTP、数据库或 SDK 注解。
+3. Persistence 映射对象只在持久化模块内部使用。
+4. API 请求和响应 DTO 变更必须更新 `docs/api/http-api.md`。
+
+## 错误处理
+
+所有后端错误必须转换为平台统一格式，不把任意 Java 异常直接返回给前端，不泄露堆栈、SQL、密钥、token、内部路径和第三方原始敏感错误。generated SDK 异常必须在 `test-agent-opencode-client` 转换为平台异常。
+
+错误响应 `ApiErrorResponse` 至少包含 `code`（稳定错误码）、`message`（安全说明）、`traceId`、`details`（可选安全结构化详情）；成功响应对应 `ApiResponse<T>`。业务代码优先抛出 `PlatformException` 并携带 `ErrorCode`，入口层由 `GlobalExceptionHandler` 统一转换。`ApiTokenWebFilter` 和 `InMemoryRateLimitWebFilter` 在拦截链中直接写出统一 `ApiErrorResponse`，必须保持 `traceId`、HTTP 状态和错误码一致。路径穿越、非法 ID、非法分页和非法 `Last-Event-ID` 都必须映射为稳定平台错误码。
+
+| code | HTTP 状态 | 默认说明 |
+|---|---:|---|
+| `VALIDATION_ERROR` | 400 | 请求参数无效 |
+| `UNAUTHENTICATED` | 401 | 未认证 |
+| `FORBIDDEN` | 403 | 无权限 |
+| `NOT_FOUND` | 404 | 资源不存在 |
+| `CONFLICT` | 409 | 状态冲突 |
+| `RATE_LIMITED` | 429 | 请求过于频繁 |
+| `INTERNAL_ERROR` | 500 | 服务器内部错误 |
+| `OPENCODE_BAD_GATEWAY` | 502 | opencode 服务响应异常 |
+| `OPENCODE_UNAVAILABLE` | 503 | opencode 服务不可用 |
+| `OPENCODE_TIMEOUT` | 504 | opencode 服务超时 |
+
+新增或修改错误码必须同步 `docs/api/http-api.md`、相关模块 README 和对应测试。
+
+## 可观测性
+
+### TraceId
+
+1. 所有入口请求必须携带或生成 traceId，贯穿 Controller、application service、opencode client、persistence 和 event。
+2. SSE、异步任务、重试和回放流程必须保留 traceId 或生成关联 ID；错误响应必须包含 traceId。
+3. HTTP 入口使用请求/响应头 `X-Trace-Id`。合法 traceId 以 `trace_` 开头，只含字母、数字、下划线和短横线；缺失或非法值由 `TraceIdSupport` 生成新值。`TraceIdWebFilter` 将 traceId 写入 WebExchange attribute、响应头、Reactor context 和 SLF4J MDC。
+4. `ApiTokenWebFilter`、`InMemoryRateLimitWebFilter` 的错误响应也必须返回同一 `X-Trace-Id`。
+5. Run 启动、取消、routing decision、RunEvent 追加和 opencode facade 调用必须携带 traceId；SSE 回放使用事件自身 traceId，请求 traceId 只用于当前 HTTP 连接观测。
+
+### 日志与指标
+
+1. 使用正式日志框架，禁止 `System.out.println`。后端运行态使用 Log4j2 作为 SLF4J 实际绑定，业务代码使用 SLF4J API。
+2. 日志必须结构化，至少包含 traceId、模块、关键业务 ID 和结果；`test-agent-app` 默认控制台日志为 `key=value` 格式。
+3. Log4j2 PatternLayout 必须对可变 message、thread 和 traceId 做 CRLF 编码，避免日志换行注入。
+4. 不记录密钥、token、认证头、个人敏感信息和大段用户输入；热路径避免高频 info 日志，调试细节用 debug。
+5. 关键 API、opencode 调用、SSE 连接、事件处理、数据库访问应有 Micrometer 指标，标签必须低基数（不得用完整 message、token、用户输入）。
+
+## 性能
+
+### API
+
+1. 列表接口必须分页或设置明确上限，查询参数必须限制最大 page size。
+2. 大对象下载、日志、事件回放不得一次性全部加载到内存；同步 API 不执行不可控耗时任务，长任务应异步化或流式返回。
+3. Workspace 文件目录列表必须单层读取并设置上限，默认不超过 1000 项；文件内容读写默认上限 1MB。
+
+### 数据库
+
+1. 避免 N+1 查询，高频查询必须有索引，批量写入使用批处理或明确事务边界，查询只取需要字段。
+2. JDBC 连接池统一使用 Druid，通过 `TEST_AGENT_DB_POOL_INITIAL_SIZE`、`TEST_AGENT_DB_POOL_MIN_IDLE`、`TEST_AGENT_DB_POOL_MAX_ACTIVE`、`TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS` 配置；默认保留 `validation-query=SELECT 1` 和借出连接校验，`TEST_AGENT_DB_POOL_TEST_ON_BORROW` 只允许在明确评估数据库稳定性后关闭；不得在代码中硬编码环境容量。
+
+### opencode 调用
+
+1. 外部调用必须有连接、读取和整体超时；重试必须有上限，只对可重试错误执行。
+2. 取消 Run、SSE 断开、请求超时必须释放资源；opencode server 节点选择不得每次全量扫描大表。
+
+### SSE 与事件
+
+1. SSE 输出必须考虑背压和客户端断开；事件回放必须基于 runId 和 seq 增量查询。
+2. 高频事件可以合并或节流，但不能丢失必要状态；`Last-Event-ID` 续传必须避免重复发送不可幂等事件。
+3. SSE polling 默认批量读取 100 条事件，轮询间隔默认 500ms；调整必须同时评估数据库读压和前端渲染频率。
+
+## 数据变更规则
+
+1. 数据库表结构变更必须有 Flyway migration，不允许只改实体类、Repository 或 SQL 映射。
+2. migration 文件命名必须稳定、递增、可重复执行，必须能从空库执行到最新版本。
+3. 新字段优先允许空值或提供默认值；删除字段必须先完成读取兼容和数据迁移，再分阶段删除；枚举值、状态值、唯一约束和索引变更必须评估历史数据。
+4. 新增表、字段、索引、约束必须有 migration 测试或集成验证；数据迁移脚本必须验证成功路径和关键失败场景；Repository 变更必须验证映射字段、查询条件、分页和排序。
+5. 当前 migration 清单与表结构见 `docs/deployment/database.md`。
+
+## 测试
+
+遵循“改什么补什么测试”。测试数据优先放在 `test-agent-test-support`。
+
+### 分层测试
+
+- Controller/API：验证参数校验、状态码、统一错误格式、traceId、鉴权和限流。
+- Domain：验证状态机、领域规则、值对象约束和边界条件。
+- Persistence：验证 Repository 映射、唯一约束、事务、Flyway migration。
+- Event/SSE：验证事件类型、seq 单调递增、`Last-Event-ID` 续传、断线重连。
+- Opencode client facade：使用 mock opencode server 验证错误转换、超时、重试和事件映射；只有 `GeneratedOpencodeSdkGateway` 允许直接依赖 generated SDK。
+- Observability：验证 traceId 传播、日志字段、关键指标注册。
+- Application service：使用 fake repository/facade 验证 workspace、session、run、cancel 编排和错误映射。
+- File service：验证路径穿越拒绝、单层目录列表、UTF-8 读写和超大文件拒绝。
+- Health/config：验证 local/prod properties binding、opencode node seed、Redis disabled/enabled health。
+
+### 模块测试命令
+
+```bash
+cd backend
+mvn -pl test-agent-workspace-management -am test
+mvn -pl test-agent-opencode-runtime -am test
+mvn -pl test-agent-api -am test
+```
+
+`test-agent-app` 只保留启动装配、profile、migration、health 和模块边界测试；Controller/API 测试放在 `test-agent-api`，workspace/file 业务测试放在 `test-agent-workspace-management`，Session/Run/runtime/terminal 业务测试放在 `test-agent-opencode-runtime`。模块边界变更必须用 `rg` 校验依赖方向（见 `docs/architecture/dependency-rules.md`）。
+
+### 数据库测试
+
+1. 当前 persistence 集成测试使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Repository 映射、RunEvent append-only、增量读取和唯一约束。
+2. 唯一约束、外键约束、状态字段约束必须有失败场景。
+3. 后续使用 PostgreSQL 专有能力（JSONB、锁、advisory lock）必须补 Testcontainers 或等价 PostgreSQL 集成测试。
+4. 测试环境 PostgreSQL 连通验证启用 `test` profile，通过 `TEST_AGENT_TEST_DB_*` 注入凭据，禁止写入仓库配置或测试源码；测试环境 opencode 连通通过 `TEST_AGENT_OPENCODE_BASE_URL` 注入，不得要求测试环境用 Docker Compose 启动数据库、Redis 或 opencode。
+5. 数据库连接池使用 Druid，配置测试必须验证 `spring.datasource.druid.*` 绑定且 Druid Web 控制台默认关闭。
+
+### 构建命令
+
+```bash
+cd backend
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)
+export PATH="$JAVA_HOME/bin:$PATH"
+mvn clean package -DskipTests
+```
+
+有测试代码后优先运行目标模块测试，再运行全量必要测试。

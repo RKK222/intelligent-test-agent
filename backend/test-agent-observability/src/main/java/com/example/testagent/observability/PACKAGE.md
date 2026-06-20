@@ -50,5 +50,5 @@
 ## 修改时必须同步更新
 
 - `backend/test-agent-observability/README.md`。
-- `docs/backend/observability-standards.md`。
-- `docs/security/security-standards.md`，如果涉及日志脱敏。
+- `docs/standards/backend.md`。
+- `docs/standards/security.md`，如果涉及日志脱敏。

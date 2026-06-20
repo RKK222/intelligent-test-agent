@@ -402,7 +402,7 @@ Session 运行态接口：
 - `sessionId` 为平台 session id，后端通过内部 `opencodeSessionId` 和 `opencodeExecutionNodeId` 定位远端 session；未绑定远端 session 时返回 `CONFLICT`。
 - `permission`/`question` 的平台路径保留在 `/api/sessions/{sessionId}/...` 下，后端实际映射到 opencode `/permission`、`/question` 族 API。
 - 只读 transcript 页面 `/s/{sessionId}` 只消费平台 `GET /api/sessions/{sessionId}` 与 `GET /api/sessions/{sessionId}/messages`，不接 opencode 公网 `share_data/share_poll`，也不绕过平台鉴权。
-- PTY WebSocket 未进入默认 HTTP/SSE 契约；P2 只能按 `docs/architecture/pty-websocket-design.md` 新增受控 ticket + WebSocket 例外。ticket 创建也提供新平台 URL `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets`，响应中的 `webSocketUrl` 会随调用入口返回旧或新 WebSocket path。
+- PTY WebSocket 未进入默认 HTTP/SSE 契约；P2 只能按 `docs/standards/security.md` 新增受控 ticket + WebSocket 例外。ticket 创建也提供新平台 URL `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets`，响应中的 `webSocketUrl` 会随调用入口返回旧或新 WebSocket path。
 
 对应测试：
 
@@ -427,6 +427,8 @@ SSE 建连时，后端会先尝试从当前 Run 绑定的 opencode session proje
 ### Phase 11 opencode Web App 运行态 API 规划
 
 以下接口是 Phase 11 的新增契约方向，必须通过 `test-agent-api -> test-agent-opencode-runtime -> test-agent-opencode-client` 实现，并由 `test-agent-app` 装配运行；未实现前不得由前端直连 opencode server。
+
+> 注：本表所列接口多数已落地，详见上方“Session 运行态接口”与“运行态目录接口”；未实现项以代码现状为准。
 
 | 域 | 方法与路径 | 用途 | 优先级 |
 |---|---|---|---|
@@ -453,7 +455,7 @@ SSE 建连时，后端会先尝试从当前 Run 绑定的 opencode session proje
 | Runtime | `GET /api/lsp/status` | LSP 状态 | P2 |
 | Runtime | `GET /api/mcp/status`、`/mcp/resources`、`/mcp/tools` | MCP 状态和目录 | P2 |
 
-PTY WebSocket 不在上述默认 HTTP/SSE 契约内。Phase 11 P2 已按 `docs/architecture/pty-websocket-design.md` 增加后端受控例外入口，前端仍不得直连 opencode server、SSH、sidecar 或任意主机。
+PTY WebSocket 不在上述默认 HTTP/SSE 契约内。Phase 11 P2 已按 `docs/standards/security.md` 增加后端受控例外入口，前端仍不得直连 opencode server、SSH、sidecar 或任意主机。
 
 - `POST /api/sessions/{sessionId}/terminal/tickets`：创建一次性 PTY ticket，仍返回 `ApiResponse<T>`。
 - `GET /api/sessions/{sessionId}/terminal/ws?ticket=...`：仅用于 WebSocket upgrade，ticket 单次使用并短期过期。

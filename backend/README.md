@@ -52,7 +52,7 @@ mvn clean package -DskipTests
 
 ## 后端容器部署模式
 
-上线和研发测试部署只将 `test-agent-app` 后端 Java 进程放入 Docker。PostgreSQL、Redis 和 opencode server 不随本仓库 Docker 部署，必须通过环境变量或配置中心提供外部地址和凭据。详细说明见 `docs/deployment/backend-docker-deployment.md`。
+上线和研发测试部署只将 `test-agent-app` 后端 Java 进程放入 Docker。PostgreSQL、Redis 和 opencode server 不随本仓库 Docker 部署，必须通过环境变量或配置中心提供外部地址和凭据。详细说明见 `docs/deployment/backend.md`。
 
 ```bash
 docker build -f backend/Dockerfile -t test-agent-backend:local backend
@@ -152,7 +152,7 @@ export TEST_AGENT_DB_POOL_TEST_ON_BORROW=true
 - 新增可部署入口只允许放在 `test-agent-app`。
 - 新增业务文件前先列出现有合适工程；无合适工程时按业务边界新建 Maven module。
 - `test-agent-app` 只放启动、装配、profile、migration 和 health 等运行入口，不放 Controller 或业务服务。
-- HTTP/SSE/WebSocket 入口放在 `test-agent-api`，旧 `/api/...` URL 必须保留，新 URL 同步写入 `docs/api/backend-api.md`。
+- HTTP/SSE/WebSocket 入口放在 `test-agent-api`，旧 `/api/...` URL 必须保留，新 URL 同步写入 `docs/api/http-api.md`。
 - Workspace、文件、git/diff、agent、skill 管理业务放在 `test-agent-workspace-management`。
 - Session、Run、RunEvent、opencode runtime、Diff/revert、terminal 业务放在 `test-agent-opencode-runtime`。
 - 用户、角色、权限等平台内部管理放在 `test-agent-system-management`。

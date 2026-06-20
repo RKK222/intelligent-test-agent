@@ -59,7 +59,7 @@
 
 - `backend/test-agent-opencode-client/README.md`。
 - 本文件。
-- `docs/api/backend-api.md`，如果影响平台 API 语义或错误码。
+- `docs/api/http-api.md`，如果影响平台 API 语义或错误码。
 - `docs/architecture/dependency-rules.md`，如果依赖边界变化。
 
 ## 事件映射注意事项

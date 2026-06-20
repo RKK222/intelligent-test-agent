@@ -18,5 +18,5 @@
 
 ## 修改时必须同步更新
 
-- `docs/frontend/frontend-backend-contract.md`。
+- `docs/architecture/module-map.md`。
 - `docs/api/*`，如果字段来自后端契约。

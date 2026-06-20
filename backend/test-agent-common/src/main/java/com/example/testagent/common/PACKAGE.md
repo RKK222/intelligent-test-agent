@@ -51,4 +51,4 @@
 - `backend/test-agent-common/README.md`。
 - 本文件。
 - 受影响模块的 README 或 PACKAGE.md。
-- `docs/backend/backend-coding-standards.md`，如果公共类型边界变化。
+- `docs/standards/backend.md`，如果公共类型边界变化。

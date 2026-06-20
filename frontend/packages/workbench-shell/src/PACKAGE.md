@@ -24,4 +24,4 @@
 ## 修改时必须同步更新
 
 - `frontend/packages/workbench-shell/README.md`。
-- `docs/frontend/frontend-architecture.md`。
+- `docs/architecture/module-map.md`。

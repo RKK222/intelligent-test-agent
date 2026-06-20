@@ -23,5 +23,5 @@
 
 ## 修改时必须同步更新
 
-- `docs/frontend/frontend-coding-standards.md`。
+- `docs/standards/frontend.md`。
 - 本包 README 和测试。

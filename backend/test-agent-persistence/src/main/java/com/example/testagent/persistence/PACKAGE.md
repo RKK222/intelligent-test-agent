@@ -64,6 +64,6 @@
 ## 修改时必须同步更新
 
 - `backend/test-agent-persistence/README.md`。
-- `docs/backend/data-change-standards.md`。
-- `docs/database/migrations.md`，如果存在。
+- `docs/standards/backend.md`。
+- `docs/deployment/database.md`，如果存在。
 - API 或事件文档中暴露的数据字段。

@@ -30,5 +30,5 @@
 
 - `frontend/README.md`。
 - `frontend/apps/agent-web/README.md`。
-- `docs/frontend/*`。
+- `docs/standards/frontend.md`、`docs/architecture/module-map.md`。
 - `docs/api/*`，如果影响 API 或事件契约。

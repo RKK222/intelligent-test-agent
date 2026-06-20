@@ -12,5 +12,5 @@
 ## 修改时必须同步更新
 
 - `backend/test-agent-system-management/README.md`。
-- `docs/api/backend-api.md`，如果新增内部管理 API。
-- `docs/security/security-standards.md`，如果涉及鉴权、权限或用户数据。
+- `docs/api/http-api.md`，如果新增内部管理 API。
+- `docs/standards/security.md`，如果涉及鉴权、权限或用户数据。

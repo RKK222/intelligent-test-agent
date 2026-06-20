@@ -27,5 +27,5 @@
 ## 修改时必须同步更新
 
 - 本包 README。
-- `docs/frontend/frontend-backend-contract.md`。
-- `docs/api/backend-api.md`，如果 terminal 协议变化。
+- `docs/architecture/module-map.md`。
+- `docs/api/http-api.md`，如果 terminal 协议变化。

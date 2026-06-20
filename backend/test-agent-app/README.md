@@ -55,4 +55,4 @@
 
 新增可部署启动、profile、migration runner、health contributor、日志或运行装配时才改本模块。新增 API 先放 `test-agent-api`；新增业务逻辑先判断归属到 workspace-management、opencode-runtime、system-management 或 integration，没有合适工程时按业务新建 Maven module。
 
-运行态安全、鉴权、限流、CORS、API URL 和事件流变化必须同步 `docs/security/security-standards.md`、`docs/api/backend-api.md`、`docs/api/event-stream-api.md` 和相关模块 README/PACKAGE。
+运行态安全、鉴权、限流、CORS、API URL 和事件流变化必须同步 `docs/standards/security.md`、`docs/api/http-api.md`、`docs/api/event-stream.md` 和相关模块 README/PACKAGE。

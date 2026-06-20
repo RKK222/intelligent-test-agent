@@ -21,4 +21,4 @@
 ## 修改时必须同步更新
 
 - 本包 README。
-- `docs/frontend/frontend-testing-standards.md`。
+- `docs/standards/frontend.md`。

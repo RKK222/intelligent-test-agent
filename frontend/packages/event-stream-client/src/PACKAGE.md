@@ -19,6 +19,6 @@
 
 ## 修改时必须同步更新
 
-- `docs/api/event-stream-api.md`。
-- `docs/frontend/frontend-backend-contract.md`。
+- `docs/api/event-stream.md`。
+- `docs/architecture/module-map.md`。
 - 本包 README 和测试。

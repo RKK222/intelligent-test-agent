@@ -104,7 +104,7 @@ test-agent-event
 
 ## 文档要求
 
-每个 PACKAGE.md 必须写清：
+每个模块 README 必须写清：
 
 - 上游调用方。
 - 下游依赖。

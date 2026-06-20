@@ -36,5 +36,5 @@ opencode 运行态业务根包，负责平台 Session/Run 与远端 opencode 能
 ## 修改时必须同步更新
 
 - `backend/test-agent-opencode-runtime/README.md`。
-- `docs/api/backend-api.md` 或 `docs/api/event-stream-api.md`，如果影响 API、DTO 或事件。
+- `docs/api/http-api.md` 或 `docs/api/event-stream.md`，如果影响 API、DTO 或事件。
 - `docs/architecture/dependency-rules.md`，如果依赖边界变化。

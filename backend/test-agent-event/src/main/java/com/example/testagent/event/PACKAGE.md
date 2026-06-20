@@ -55,6 +55,6 @@
 ## 修改时必须同步更新
 
 - `backend/test-agent-event/README.md`。
-- `docs/api/event-stream-api.md`。
-- `docs/backend/backend-testing-standards.md`，如果事件测试策略变化。
+- `docs/api/event-stream.md`。
+- `docs/standards/backend.md`，如果事件测试策略变化。
 - 前端 adapter 契约文档，如果事件形态影响前端。

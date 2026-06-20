@@ -56,4 +56,4 @@
 - `backend/test-agent-app/README.md`。
 - `backend/README.md`。
 - `docs/architecture/dependency-rules.md`，如果依赖边界变化。
-- `docs/security/security-standards.md`，如果涉及运行态安全配置。
+- `docs/standards/security.md`，如果涉及运行态安全配置。

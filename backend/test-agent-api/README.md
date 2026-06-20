@@ -31,4 +31,4 @@
 
 ## 后续 AI 编码指引
 
-新增 API 时先确认业务实现应落在哪个业务模块；本模块只新增 Controller/DTO/协议转换。旧 URL 不删除，新 URL 必须同步记录到 `docs/api/backend-api.md`。
+新增 API 时先确认业务实现应落在哪个业务模块；本模块只新增 Controller/DTO/协议转换。旧 URL 不删除，新 URL 必须同步记录到 `docs/api/http-api.md`。

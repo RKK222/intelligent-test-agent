@@ -25,6 +25,6 @@
 
 ## 修改时必须同步更新
 
-- `docs/api/backend-api.md`。
-- `docs/frontend/frontend-backend-contract.md`。
+- `docs/api/http-api.md`。
+- `docs/architecture/module-map.md`。
 - 本包 README 和测试。

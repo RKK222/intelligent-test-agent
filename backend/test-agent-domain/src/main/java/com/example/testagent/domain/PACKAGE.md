@@ -57,4 +57,4 @@
 - `backend/test-agent-domain/README.md`。
 - 本文件。
 - `docs/architecture/dependency-rules.md`，如果领域边界变化。
-- `docs/api/backend-api.md` 或 `docs/api/event-stream-api.md`，如果领域字段对外暴露。
+- `docs/api/http-api.md` 或 `docs/api/event-stream.md`，如果领域字段对外暴露。
