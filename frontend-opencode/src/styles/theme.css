@@ -676,6 +676,86 @@ small,
   color: var(--text-muted);
 }
 
+.slash-parameter-panel {
+  display: grid;
+  gap: 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--panel-subtle);
+  padding: 10px;
+}
+
+.slash-parameter-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.slash-parameter-panel h2 {
+  overflow: hidden;
+  margin: 1px 0 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+.slash-parameter-panel small {
+  color: var(--text-muted);
+}
+
+.slash-parameter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.slash-parameter-field {
+  display: grid;
+  grid-template-columns: minmax(78px, 0.4fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--bg-strong);
+  padding: 7px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.slash-parameter-field span,
+.slash-parameter-field small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slash-parameter-field input[type="text"] {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+}
+
+.slash-parameter-field input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+}
+
+.slash-parameter-field small {
+  grid-column: 2;
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.slash-parameter-field[data-kind="flag"] {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
 .composer-picker {
   position: absolute;
   right: 10px;
@@ -2053,6 +2133,10 @@ small,
 
   .composer {
     margin: 0 10px 10px;
+  }
+
+  .slash-parameter-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .session-dock-stack {

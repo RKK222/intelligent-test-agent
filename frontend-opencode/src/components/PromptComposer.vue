@@ -5,6 +5,14 @@ import { AtSign, FileCode2, Folder, ImagePlus, Paperclip, Search, SendHorizontal
 import { usePlatformStore } from "@/stores/platform";
 import { usePromptStore } from "@/stores/prompt";
 import { useWorkspaceStore } from "@/stores/workspace";
+import {
+  buildSlashCommandText,
+  createSlashParameterForm,
+  initialSlashParameterValues,
+  type SlashParameterField,
+  type SlashParameterForm,
+  type SlashParameterValue
+} from "@/utils/slashParameters";
 
 type FilePickerMode = "attach" | "mention";
 type WorkspaceFileEntry = { path: string; name: string; type: "file" | "directory" | string };
@@ -17,6 +25,8 @@ const workspace = useWorkspaceStore();
 const slashOpen = ref(false);
 const slashQuery = ref("");
 const slashActiveIndex = ref(0);
+const slashParameterForm = ref<SlashParameterForm>();
+const slashParameterValues = ref<Record<string, SlashParameterValue>>({});
 const historyIndex = ref(-1);
 const historyDraft = ref("");
 const filePickerOpen = ref(false);
@@ -75,6 +85,16 @@ watch(
   { immediate: true }
 );
 
+watch(
+  () => prompt.text,
+  (value) => {
+    const form = slashParameterForm.value;
+    if (form && !value.startsWith(`/${form.commandName}`)) {
+      closeSlashParameters();
+    }
+  }
+);
+
 function addFile() {
   void openFilePicker("attach");
 }
@@ -105,10 +125,46 @@ async function toggleSlashCommands() {
 }
 
 function selectSlashCommand(command: CommandInfo) {
-  prompt.insertSlashCommand(command);
+  const form = createSlashParameterForm(command);
+  if (form) {
+    slashParameterForm.value = form;
+    slashParameterValues.value = initialSlashParameterValues(form);
+    applySlashParameters();
+  } else {
+    slashParameterForm.value = undefined;
+    slashParameterValues.value = {};
+    prompt.insertSlashCommand(command);
+  }
   slashOpen.value = false;
   slashQuery.value = "";
   slashActiveIndex.value = 0;
+}
+
+function setSlashParameterValue(field: SlashParameterField, value: SlashParameterValue) {
+  slashParameterValues.value = { ...slashParameterValues.value, [field.id]: value };
+  applySlashParameters();
+}
+
+function slashParameterText(field: SlashParameterField) {
+  const value = slashParameterValues.value[field.id];
+  return typeof value === "string" ? value : "";
+}
+
+function slashParameterChecked(field: SlashParameterField) {
+  return slashParameterValues.value[field.id] === true;
+}
+
+function applySlashParameters() {
+  const form = slashParameterForm.value;
+  if (!form) {
+    return;
+  }
+  prompt.text = buildSlashCommandText(form, slashParameterValues.value);
+}
+
+function closeSlashParameters() {
+  slashParameterForm.value = undefined;
+  slashParameterValues.value = {};
 }
 
 function handleSlashKeydown(event: KeyboardEvent) {
@@ -441,6 +497,40 @@ function readString(value: unknown) {
         <span>shell</span>
       </label>
     </div>
+
+    <section v-if="slashParameterForm" class="slash-parameter-panel" role="region" aria-label="Command parameters">
+      <header>
+        <div>
+          <p class="eyebrow">Command</p>
+          <h2>/{{ slashParameterForm.commandName }}</h2>
+          <small v-if="slashParameterForm.description">{{ slashParameterForm.description }}</small>
+        </div>
+        <button class="icon-button" type="button" aria-label="Close command parameters" @click="closeSlashParameters">
+          <X :size="15" />
+        </button>
+      </header>
+      <div class="slash-parameter-grid">
+        <label v-for="field in slashParameterForm.fields" :key="field.id" class="slash-parameter-field" :data-kind="field.kind">
+          <span>{{ field.label }}</span>
+          <input
+            v-if="field.kind === 'flag'"
+            type="checkbox"
+            :aria-label="field.label"
+            :checked="slashParameterChecked(field)"
+            @change="setSlashParameterValue(field, ($event.currentTarget as HTMLInputElement).checked)"
+          />
+          <input
+            v-else
+            type="text"
+            :aria-label="field.label"
+            :placeholder="field.placeholder ?? field.label"
+            :value="slashParameterText(field)"
+            @input="setSlashParameterValue(field, ($event.currentTarget as HTMLInputElement).value)"
+          />
+          <small v-if="field.prefix">{{ field.prefix }}</small>
+        </label>
+      </div>
+    </section>
 
     <section v-if="filePickerOpen" class="composer-picker" role="dialog" :aria-label="filePickerLabel">
       <header>

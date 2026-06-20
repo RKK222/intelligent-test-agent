@@ -280,6 +280,8 @@ export type CommandInfo = {
   aliases?: string[];
   description?: string;
   arguments?: string;
+  source?: "command" | "mcp" | "skill" | string;
+  hints?: string[];
 };
 
 export type RuntimeResourceInfo = {

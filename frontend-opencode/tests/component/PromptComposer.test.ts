@@ -60,6 +60,39 @@ describe("PromptComposer", () => {
     expect(screen.queryByRole("dialog", { name: "Slash commands" })).not.toBeInTheDocument();
   });
 
+  it("fills slash command parameters through a generated form", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const workspace = useWorkspaceStore();
+    workspace.commands = [
+      {
+        commandId: "review",
+        name: "review",
+        description: "Review staged changes",
+        arguments: "<target> [--quick] [--base <branch>]"
+      }
+    ];
+    workspace.loadCommands = vi.fn();
+
+    render(PromptComposer, { global: { plugins: [pinia] } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Open slash commands" }));
+    await fireEvent.click(screen.getByRole("option", { name: "/review Review staged changes" }));
+
+    const textarea = screen.getByPlaceholderText("Ask opencode to inspect, edit, test, or explain this workspace...");
+    expect(screen.getByRole("region", { name: "Command parameters" })).toHaveTextContent("/review");
+    expect(textarea).toHaveValue("/review");
+
+    await fireEvent.update(screen.getByLabelText("target"), "staged");
+    await fireEvent.click(screen.getByLabelText("--quick"));
+    await fireEvent.update(screen.getByLabelText("branch"), "main");
+
+    expect(textarea).toHaveValue("/review staged --quick --base main");
+
+    await fireEvent.click(screen.getByRole("button", { name: "Close command parameters" }));
+    expect(screen.queryByRole("region", { name: "Command parameters" })).not.toBeInTheDocument();
+  });
+
   it("submits with Enter and keeps Shift+Enter for multiline editing", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);

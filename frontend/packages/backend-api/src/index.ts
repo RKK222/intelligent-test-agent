@@ -349,12 +349,15 @@ function toProviderInfo(value: Record<string, unknown>): ProviderInfo {
 
 function toCommandInfo(value: Record<string, unknown>): CommandInfo {
   const commandId = text(value.commandId) ?? text(value.commandID) ?? text(value.id) ?? text(value.name) ?? "unknown";
+  const hints = Array.isArray(value.hints) ? value.hints.filter((item): item is string => typeof item === "string") : undefined;
   return compactObject({
     commandId,
     name: text(value.name) ?? commandId,
     aliases: Array.isArray(value.aliases) ? value.aliases.filter((item): item is string => typeof item === "string") : undefined,
     description: text(value.description),
-    arguments: text(value.arguments)
+    arguments: text(value.arguments),
+    source: text(value.source),
+    hints
   });
 }
 

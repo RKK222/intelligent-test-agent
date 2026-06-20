@@ -100,6 +100,30 @@ describe("backend-api", () => {
     expect(fetcher).toHaveBeenCalledWith("http://api/api/agents?workspaceId=wrk_1234567890abcdef", expect.any(Object));
   });
 
+  it("preserves command catalog source and hints for slash parameter forms", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: { data: [{ name: "review", description: "Review changes", source: "command", hints: ["$ARGUMENTS"] }] }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.listCommands("wrk_1234567890abcdef")).resolves.toEqual([
+      {
+        commandId: "review",
+        name: "review",
+        description: "Review changes",
+        source: "command",
+        hints: ["$ARGUMENTS"]
+      }
+    ]);
+  });
+
   it("maps session todo items from opencode runtime payloads", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
