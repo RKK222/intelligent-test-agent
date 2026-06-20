@@ -81,15 +81,15 @@ function onReady(event: DockviewReadyEvent) {
         </span>
       </div>
     </header>
-    <main class="flex min-h-0 overflow-hidden" :style="{ height: '100%' }">
-      <aside class="w-12 shrink-0 min-h-0 border-r border-[var(--ta-border)] bg-[var(--ta-chrome)]">
+    <main class="flex min-h-0 overflow-hidden">
+      <aside class="ta-activity-rail min-h-0 shrink-0 border-r border-[var(--ta-border)] bg-[var(--ta-chrome)]">
         <slot name="activity" />
       </aside>
-      <section class="relative min-w-0 flex-1 overflow-hidden">
+      <section class="ta-workbench-content">
         <DockviewVue class="h-full w-full" :components="components" @ready="onReady" />
         <div
           v-if="bottomOpen"
-          class="absolute inset-x-0 bottom-0 z-20 border-t border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-[0_-12px_28px_rgba(17,24,39,0.08)]"
+          class="ta-bottom-drawer"
           :style="{ height: `${bottomHeight}px` }"
           role="region"
           aria-label="运行与终端"

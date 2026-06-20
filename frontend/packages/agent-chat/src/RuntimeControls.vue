@@ -37,7 +37,7 @@ const modeOptions = [
 </script>
 
 <template>
-  <div class="flex shrink-0 items-center gap-1.5 overflow-x-auto border-t border-[var(--ta-chat-border)] bg-[var(--ta-chat-bg)] p-2 [scrollbar-width:none]">
+  <div class="ta-runtime-controls">
     <ChicPopover
       label="Agent"
       placeholder="Agent"
@@ -77,6 +77,6 @@ const modeOptions = [
     >
       <template #icon><TerminalSquare class="h-3.5 w-3.5" /></template>
     </ChicPopover>
-    <Button type="button" size="sm" variant="secondary" @click="emit('requestNotifications')">通知</Button>
+    <Button type="button" size="sm" variant="secondary" class="ta-runtime-notify" @click="emit('requestNotifications')">通知</Button>
   </div>
 </template>

@@ -9,6 +9,7 @@ Monaco 文件编辑器包。
 - 按文件路径推断语言。
 - 展示当前文件内容、脏状态、只读状态和保存按钮。
 - 编辑器 tab、文件工具栏和 Monaco 容器使用 Figma Web IDE 风格的浅灰/白底紧凑 chrome，代码区默认 14px 字号、20px 行高。
+- 从空状态首次打开文件时按需初始化 Monaco，并在后续文件切换时复用 editor 实例切换 model。
 - 上报 Monaco 当前文本选区给 app 层，用于构造 Prompt file context。
 - 保存动作通过回调交给 app 层调用 `backend-api`。
 - Phase 11 选区上下文只上报文件路径、语言、选区范围和文本片段；是否转换为 `PromptPart` 由 app 层负责。

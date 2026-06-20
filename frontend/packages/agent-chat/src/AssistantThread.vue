@@ -133,11 +133,11 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col">
+  <div class="ta-assistant-thread">
     <div
       ref="viewportRef"
       data-testid="agent-thread-viewport"
-      class="relative min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden bg-[var(--ta-chat-bg)] p-4 [scrollbar-gutter:stable]"
+      class="ta-thread-viewport"
       @scroll="handleViewportScroll"
     >
       <div v-if="!messages.length" class="flex h-full flex-col items-center justify-center gap-1 py-10 text-center text-[var(--ta-muted)]">

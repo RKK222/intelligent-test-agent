@@ -108,8 +108,8 @@ function onHistorySearchInput(value: string) {
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col bg-[var(--ta-chat-bg)] text-[var(--ta-chat-text)]">
-    <div class="flex h-[47px] shrink-0 border-b border-[var(--ta-chat-border)] bg-[var(--ta-chat-bg)]" role="tablist" aria-label="Agent 面板">
+  <div class="ta-agent-chat-root">
+    <div class="ta-agent-tabbar" role="tablist" aria-label="Agent 面板">
       <button
         type="button"
         :class="['flex flex-1 items-center justify-center gap-2 border-b-2 text-[14px] transition', tab === 'agent' ? 'border-[var(--ta-ink)] text-[var(--ta-ink)]' : 'border-transparent text-[var(--ta-muted)] hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]']"
@@ -150,7 +150,7 @@ function onHistorySearchInput(value: string) {
         @reply-question="(id, answers) => emit('replyQuestion', id, answers)"
         @reject-question="(id) => emit('rejectQuestion', id)"
       />
-      <section aria-label="Agent 对话线程" class="min-h-0 flex-1 overflow-hidden border-b border-[var(--ta-chat-border)]">
+      <section aria-label="Agent 对话线程" class="ta-agent-thread-shell">
         <AssistantThread
           :messages="messages"
           :running="running"

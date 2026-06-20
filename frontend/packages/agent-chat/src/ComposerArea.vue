@@ -11,7 +11,7 @@ export type ComposerAreaProps = {
 
 <script setup lang="ts">
 import { computed, ref, shallowRef } from "vue";
-import { ImageIcon, Paperclip, X } from "lucide-vue-next";
+import { ImageIcon, Paperclip, RotateCcw, SendHorizontal, X, XCircle } from "lucide-vue-next";
 import { Button, Textarea } from "@test-agent/ui-kit";
 import SuggestionPanel from "./SuggestionPanel.vue";
 import { fileToPromptAttachment } from "./prompt-parts";
@@ -103,7 +103,7 @@ function removeAttachment(id: string) {
 
 <template>
   <form
-    class="border-t border-[var(--ta-chat-border)] bg-[var(--ta-chat-bg)] px-4 py-3"
+    class="ta-composer-form"
     @submit.prevent
   >
     <input ref="fileInput" class="hidden" style="display: none" type="file" multiple @change="onFileChange" />
@@ -149,18 +149,22 @@ function removeAttachment(id: string) {
       <span v-if="attachmentError" class="text-[11px] text-[var(--ta-chat-status-error)]">{{ attachmentError }}</span>
     </div>
     <div class="mt-2 flex items-center justify-between gap-2">
-      <div class="max-w-[72px] text-[11px] leading-4 text-[var(--ta-chat-muted)]">{{ running ? "Run 执行中" : "Enter 发送" }}</div>
-      <div class="flex min-w-0 flex-wrap justify-end gap-1.5">
+      <div class="min-w-0 text-[11px] leading-4 text-[var(--ta-chat-muted)]">{{ running ? "Run 执行中" : "Enter 发送" }}</div>
+      <div class="flex shrink-0 items-center justify-end gap-1">
         <Button type="button" size="icon" variant="secondary" title="添加文件" @click="fileInput?.click()">
           <Paperclip class="h-4 w-4" />
         </Button>
         <Button type="button" size="icon" variant="secondary" title="添加图片" @click="imageInput?.click()">
           <ImageIcon class="h-4 w-4" />
         </Button>
-        <Button type="button" size="sm" variant="secondary" :disabled="!running" @click="emit('cancel')">取消</Button>
-        <Button type="button" size="sm" variant="secondary" @click="emit('retry')">重试</Button>
-        <Button type="submit" size="sm" variant="primary" :disabled="readingAttachments" @click="submit">
-          {{ running ? "排队" : "发送" }}
+        <Button type="button" size="icon" variant="secondary" :disabled="!running" title="取消" aria-label="取消" @click="emit('cancel')">
+          <XCircle class="h-4 w-4" />
+        </Button>
+        <Button type="button" size="icon" variant="secondary" title="重试" aria-label="重试" @click="emit('retry')">
+          <RotateCcw class="h-4 w-4" />
+        </Button>
+        <Button type="submit" size="icon" variant="primary" :disabled="readingAttachments" :title="running ? '排队' : '发送'" :aria-label="running ? '排队' : '发送'" @click="submit">
+          <SendHorizontal class="h-4 w-4" />
         </Button>
       </div>
     </div>

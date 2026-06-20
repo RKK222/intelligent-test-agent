@@ -20,7 +20,7 @@ export type CodeEditorProps = {
 </script>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
+import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { Save } from "lucide-vue-next";
 import { Button, FeedbackBanner } from "@test-agent/ui-kit";
 import { languageFromPath } from "./language";
@@ -53,29 +53,20 @@ function buildModel(path: string, content: string): monaco.editor.ITextModel {
   return m.editor.createModel(content, languageFromPath(path), uri);
 }
 
-function emitSelection(inst: monaco.editor.IStandaloneCodeEditor) {
-  const selection = inst.getSelection();
-  const m = inst.getModel();
-  if (!selection || !m || selection.isEmpty()) {
-    emit("selectionChange", undefined);
+async function ensureMonacoEditor(path: string, content: string) {
+  if (!containerEl.value) {
     return;
   }
-  emit("selectionChange", {
-    startLineNumber: selection.startLineNumber,
-    startColumn: selection.startColumn,
-    endLineNumber: selection.endLineNumber,
-    endColumn: selection.endColumn,
-    text: m.getValueInRange(selection)
-  });
-}
-
-onMounted(async () => {
-  if (!props.path || !containerEl.value) {
+  if (!monacoLib) {
+    const mod = await import("./monaco-env");
+    monacoLib = mod.monaco;
+  }
+  model = buildModel(path, content);
+  if (editor.value) {
+    editor.value.setModel(model);
+    emitSelection(editor.value);
     return;
   }
-  const mod = await import("./monaco-env");
-  monacoLib = mod.monaco;
-  model = buildModel(props.path, props.content);
   const inst = monacoLib.editor.create(containerEl.value, {
     model,
     theme: "vs",
@@ -97,18 +88,40 @@ onMounted(async () => {
   });
   inst.onDidChangeCursorSelection(() => emitSelection(inst));
   emitSelection(inst);
+}
+
+function emitSelection(inst: monaco.editor.IStandaloneCodeEditor) {
+  const selection = inst.getSelection();
+  const m = inst.getModel();
+  if (!selection || !m || selection.isEmpty()) {
+    emit("selectionChange", undefined);
+    return;
+  }
+  emit("selectionChange", {
+    startLineNumber: selection.startLineNumber,
+    startColumn: selection.startColumn,
+    endLineNumber: selection.endLineNumber,
+    endColumn: selection.endColumn,
+    text: m.getValueInRange(selection)
+  });
+}
+
+onMounted(async () => {
+  if (!props.path || !containerEl.value) {
+    return;
+  }
+  await ensureMonacoEditor(props.path, props.content);
 });
 
 // 路径变化：切换到新文件模型
 watch(
   () => props.path,
   async (path) => {
-    if (!path || !monacoLib || !editor.value) {
+    if (!path) {
       return;
     }
-    model = buildModel(path, props.content);
-    editor.value.setModel(model);
-    emitSelection(editor.value);
+    await nextTick();
+    await ensureMonacoEditor(path, props.content);
   }
 );
 

@@ -61,6 +61,9 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
 
   await expect(page.getByRole("button", { name: "终端", exact: true })).toBeHidden();
   await page.getByRole("button", { name: "打开运行与终端" }).click();
+  const bottomDrawer = page.getByRole("region", { name: "运行与终端" });
+  await expect(bottomDrawer).toBeVisible();
+  await expect.poll(async () => (await bottomDrawer.boundingBox())?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(766);
   await page.getByRole("button", { name: "终端", exact: true }).click();
   await page.getByRole("button", { name: "连接终端" }).click();
   await expect.poll(() => terminalTickets.length).toBe(1);

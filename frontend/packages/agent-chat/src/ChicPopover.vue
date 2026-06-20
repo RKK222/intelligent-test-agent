@@ -53,18 +53,18 @@ function pick(option: ChicPopoverOption) {
 </script>
 
 <template>
-  <div ref="rootRef" class="relative inline-flex shrink-0">
+  <div ref="rootRef" class="ta-chic-popover">
     <button
       type="button"
       :aria-label="label"
       aria-haspopup="listbox"
       :aria-expanded="open"
-      class="inline-flex h-8 items-center gap-1.5 rounded-full border border-[var(--ta-chat-border)] bg-[var(--ta-chat-process-bg)] pl-2.5 pr-2.5 text-[12px] text-[var(--ta-chat-text)] transition hover:border-[var(--ta-chat-border-strong)] hover:bg-[var(--ta-chat-hover)]"
+      class="ta-chic-trigger"
       @click="open = !open"
     >
-      <span class="shrink-0 text-[var(--ta-chat-muted)]"><slot name="icon" /></span>
-      <span class="max-w-[160px] truncate">{{ selectedLabel }}</span>
-      <ChevronDown class="h-3.5 w-3.5 text-[var(--ta-chat-muted)]" />
+      <span class="ta-chic-trigger-icon"><slot name="icon" /></span>
+      <span class="ta-chic-trigger-label">{{ selectedLabel }}</span>
+      <ChevronDown class="ta-chic-trigger-chevron h-3.5 w-3.5" />
     </button>
 
     <div
