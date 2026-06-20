@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import PromptComposer from "@/components/PromptComposer.vue";
 import SessionDockStack from "@/components/SessionDockStack.vue";
@@ -17,15 +17,43 @@ const session = useSessionStore();
 const workspace = useWorkspaceStore();
 const mobilePanelOpen = ref(false);
 
+const routeWorkspaceId = computed(() => String(route.params.workspaceId ?? workspace.selectedWorkspaceId ?? ""));
 const sessionId = computed(() => String(route.params.sessionId ?? ""));
+const workspaceSessions = computed(() => {
+  const currentWorkspaceId = routeWorkspaceId.value;
+  return workspace.sessions.filter((item) => !currentWorkspaceId || item.workspaceId === currentWorkspaceId);
+});
 
-onMounted(load);
-watch(sessionId, load);
+watch(
+  routeWorkspaceId,
+  (workspaceId) => {
+    if (workspaceId) {
+      workspace.selectWorkspace(workspaceId);
+    }
+  },
+  { immediate: true }
+);
 
-async function load() {
-  if (sessionId.value) {
-    await session.load(sessionId.value);
+watch(sessionId, (value) => {
+  if (value) {
+    void load(value);
   }
+}, { immediate: true });
+
+watch([sessionId, workspaceSessions], ([value]) => {
+  if (value) {
+    return;
+  }
+  const fallback = workspaceSessions.value[0];
+  if (!fallback) {
+    return;
+  }
+  // 路由允许省略 sessionId；深链首屏时会话列表异步到达，因此用 replace 补齐当前 workspace 的首个会话。
+  void router.replace(`/w/${fallback.workspaceId}/session/${fallback.sessionId}`);
+}, { immediate: true });
+
+async function load(value: string) {
+  await session.load(value);
 }
 
 function openSession(item: { workspaceId: string; sessionId: string }) {
@@ -48,7 +76,7 @@ async function submit() {
     <aside class="workspace-rail session-rail" aria-label="Session navigation">
       <div class="section-label">Sessions</div>
       <button
-        v-for="item in workspace.sessions"
+        v-for="item in workspaceSessions"
         :key="item.sessionId"
         class="workspace-row"
         :class="{ active: item.sessionId === sessionId }"

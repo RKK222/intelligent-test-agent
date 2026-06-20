@@ -109,6 +109,17 @@ test("switches sessions from the session sidebar", async ({ page }, testInfo) =>
   await expect(page.getByText("Follow-up prompt")).toBeVisible();
 });
 
+test("opens the first workspace session when session id is omitted", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Optional session route fallback is covered on the desktop shell.");
+  await mockBackendApi(page);
+
+  await page.goto("/w/wrk_1/session");
+
+  await expect(page).toHaveURL(/\/w\/wrk_1\/session\/ses_1$/);
+  await expect(page.getByRole("heading", { name: "Demo session" })).toBeVisible();
+  await expect(page.getByText("Initial prompt")).toBeVisible();
+});
+
 test("opens the session side panel as a mobile drawer", async ({ page }, testInfo) => {
   test.skip(testInfo.project.name !== "mobile", "Mobile drawer behavior is covered on the mobile viewport.");
   await mockBackendApi(page);
