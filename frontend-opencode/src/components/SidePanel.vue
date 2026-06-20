@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import { CheckSquare, FileDiff, FolderTree, RadioTower, TerminalSquare } from "lucide-vue-next";
+import DiffReviewPanel from "@/components/DiffReviewPanel.vue";
 import TerminalPanel from "@/components/TerminalPanel.vue";
 import { useSessionStore } from "@/stores/session";
 import { useTerminalStore } from "@/stores/terminal";
@@ -8,7 +9,6 @@ import { useTerminalStore } from "@/stores/terminal";
 const session = useSessionStore();
 const terminal = useTerminalStore();
 const tab = ref<"review" | "files" | "terminal" | "status">("review");
-const diffFiles = computed(() => session.diff?.files ?? []);
 
 function openTerminal() {
   if (session.activeSession?.sessionId) {
@@ -29,13 +29,7 @@ function openTerminal() {
     </div>
 
     <section v-if="tab === 'review'" class="panel-section">
-      <div class="section-label">Diff review</div>
-      <div v-for="file in diffFiles" :key="file.path" class="diff-row">
-        <strong>{{ file.path }}</strong>
-        <small>+{{ file.additions }} -{{ file.deletions }} · {{ file.status }}</small>
-        <pre>{{ file.patch || "No patch preview" }}</pre>
-      </div>
-      <div v-if="!diffFiles.length" class="empty-note">No proposed diff for this session.</div>
+      <DiffReviewPanel :files="session.diff?.files ?? []" />
     </section>
 
     <section v-else-if="tab === 'files'" class="panel-section">

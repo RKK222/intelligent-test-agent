@@ -16,7 +16,7 @@
 | Prompt parts：text/file/image/agent/reference | 已实现构造与单测。 |
 | RunEvent reducer：message part delta、todo、permission、question、diff/status | 已实现核心 reducer 与单测。 |
 | Terminal | 已接入后端 ticket 获取、WebSocket 连接、输出展示、命令发送、关闭/重连操作；完整 xterm 渲染仍是后续增强。 |
-| Diff review | 已展示平台 `SessionDiff` 文件和 patch，占位 Monaco diff 后续懒加载。 |
+| Diff review | 已接入 `DiffReviewPanel`，支持文件聚焦、unified/split 样式切换、hunk 统计/导航和空态；完整 Monaco diff 后续懒加载。 |
 | Provider auth/config/worktree/share/MCP auth API | 后端平台代理已补齐；Settings 已接入 provider auth 状态、API key 保存和移除。 |
 
 ## 待真实三服务验收

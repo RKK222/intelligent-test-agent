@@ -8,6 +8,10 @@
 - `api-mapping.md`：opencode 原 App 调用到平台后端 API 的映射。
 - `opencode-parity.md`：页面、交互、视觉和真实环境验收清单。
 
+## 组件记录
+
+- `src/components/DiffReviewPanel.vue`：复刻 opencode Review 面板的文件聚焦、unified/split 样式切换和 hunk 导航；数据来自平台 `SessionDiff`，不在浏览器端直连 opencode。
+
 ## 当前边界
 
 - 浏览器端只调用平台 `backend-api`，不直接连接 opencode server。
