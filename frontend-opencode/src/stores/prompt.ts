@@ -55,6 +55,10 @@ export const usePromptStore = defineStore("prompt", () => {
     files.value = files.value.filter((item) => (item.path ?? item.name) !== pathOrName);
   }
 
+  function removeImage(idOrName: string) {
+    images.value = images.value.filter((item) => (item.id ?? item.name) !== idOrName);
+  }
+
   function removeReference(id: string) {
     references.value = references.value.filter((item) => item.id !== id);
   }
@@ -89,6 +93,7 @@ export const usePromptStore = defineStore("prompt", () => {
     remember,
     insertSlashCommand,
     removeFile,
+    removeImage,
     removeReference,
     removeAgent,
     reset

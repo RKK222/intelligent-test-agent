@@ -18,10 +18,14 @@ const slashOpen = ref(false);
 const slashQuery = ref("");
 const filePickerOpen = ref(false);
 const filePickerMode = ref<FilePickerMode>("attach");
+const imageInput = ref<HTMLInputElement>();
+const imageError = ref<string>();
+const draggingImages = ref(false);
 const fileQuery = ref("");
 const fileResults = ref<WorkspaceFileEntry[]>([]);
 const fileLoading = ref(false);
 const fileError = ref<string>();
+const imageSequence = ref(0);
 const lineCount = computed(() => Math.max(3, Math.min(12, prompt.text.split(/\r?\n/).length + 1)));
 const filePickerLabel = computed(() => (filePickerMode.value === "attach" ? "Attach workspace file" : "Mention workspace file"));
 const runtimeModels = computed(() => workspace.models.filter((model) => model.providerId));
@@ -52,6 +56,18 @@ watch(
 
 function addFile() {
   void openFilePicker("attach");
+}
+
+function openImagePicker() {
+  imageInput.value?.click();
+}
+
+async function handleImageInput(event: Event) {
+  const target = event.currentTarget instanceof HTMLInputElement ? event.currentTarget : undefined;
+  await addImageFiles(Array.from(target?.files ?? []));
+  if (target) {
+    target.value = "";
+  }
 }
 
 async function toggleSlashCommands() {
@@ -106,6 +122,83 @@ function selectFileEntry(entry: WorkspaceFileEntry) {
   filePickerOpen.value = false;
 }
 
+async function handlePaste(event: ClipboardEvent) {
+  const files = Array.from(event.clipboardData?.items ?? []).flatMap((item) => {
+    if (item.kind !== "file") {
+      return [];
+    }
+    const file = item.getAsFile();
+    return file ? [file] : [];
+  });
+  if (!files.length) {
+    return;
+  }
+  event.preventDefault();
+  await addImageFiles(files);
+}
+
+function handleImageDragOver(event: DragEvent) {
+  if (!Array.from(event.dataTransfer?.types ?? []).includes("Files")) {
+    return;
+  }
+  event.preventDefault();
+  draggingImages.value = true;
+}
+
+function handleImageDragLeave(event: DragEvent) {
+  const nextTarget = event.relatedTarget;
+  if (nextTarget instanceof Node && event.currentTarget instanceof HTMLElement && event.currentTarget.contains(nextTarget)) {
+    return;
+  }
+  draggingImages.value = false;
+}
+
+async function handleImageDrop(event: DragEvent) {
+  const files = Array.from(event.dataTransfer?.files ?? []);
+  if (!files.length) {
+    draggingImages.value = false;
+    return;
+  }
+  event.preventDefault();
+  draggingImages.value = false;
+  await addImageFiles(files);
+}
+
+// 图片附件按平台 PromptPart file 契约发送，url 保留 data URL 供预览和后端读取。
+async function addImageFiles(files: File[]) {
+  const images = files.filter((file) => file.type.startsWith("image/"));
+  if (!images.length) {
+    if (files.length) {
+      imageError.value = "Only image files can be attached";
+    }
+    return;
+  }
+  imageError.value = undefined;
+  for (const file of images) {
+    const url = await readFileDataUrl(file);
+    if (!url) {
+      imageError.value = "Image attachment failed";
+      continue;
+    }
+    const name = file.name || "image";
+    prompt.images.push({
+      id: `image:${Date.now()}:${imageSequence.value++}:${name}`,
+      name,
+      mimeType: file.type || "application/octet-stream",
+      url
+    });
+  }
+}
+
+function readFileDataUrl(file: File) {
+  return new Promise<string>((resolve) => {
+    const reader = new FileReader();
+    reader.addEventListener("error", () => resolve(""));
+    reader.addEventListener("load", () => resolve(typeof reader.result === "string" ? reader.result : ""));
+    reader.readAsDataURL(file);
+  });
+}
+
 function normalizeFileEntries(value: unknown): WorkspaceFileEntry[] {
   const source = readRecord(value);
   const raw = Array.isArray(source?.data) ? source.data : Array.isArray(source?.items) ? source.items : Array.isArray(value) ? value : [];
@@ -135,7 +228,28 @@ function readString(value: unknown) {
 </script>
 
 <template>
-  <form class="composer" aria-label="Prompt composer" @submit.prevent="emit('submit')">
+  <form
+    class="composer"
+    :class="{ 'is-dragging-images': draggingImages }"
+    aria-label="Prompt composer"
+    @submit.prevent="emit('submit')"
+    @dragover="handleImageDragOver"
+    @dragleave="handleImageDragLeave"
+    @drop="handleImageDrop"
+  >
+    <input
+      ref="imageInput"
+      class="composer-file-input"
+      type="file"
+      accept="image/*"
+      multiple
+      aria-label="Image attachment input"
+      @change="handleImageInput"
+    />
+    <div v-if="draggingImages" class="composer-drag-hint" aria-hidden="true">
+      <ImagePlus :size="18" />
+      <span>Images</span>
+    </div>
     <div class="composer-toolbar" aria-label="Prompt tools">
       <label v-if="workspace.agents.length" class="composer-select">
         <span>Agent</span>
@@ -167,7 +281,7 @@ function readString(value: unknown) {
       <button type="button" class="tool-button" title="Attach file" aria-label="Attach file" @click="addFile">
         <Paperclip :size="15" />
       </button>
-      <button type="button" class="tool-button" title="Attach image" aria-label="Attach image">
+      <button type="button" class="tool-button" title="Attach image" aria-label="Attach image" @click="openImagePicker">
         <ImagePlus :size="15" />
       </button>
       <button
@@ -269,10 +383,29 @@ function readString(value: unknown) {
       </span>
     </div>
 
+    <div v-if="prompt.images.length" class="composer-images" aria-label="Image attachments">
+      <figure v-for="image in prompt.images" :key="image.id ?? image.name ?? image.url" class="composer-image">
+        <img v-if="image.url" :src="image.url" :alt="image.name ?? 'image attachment'" />
+        <div v-else class="composer-image-fallback">
+          <ImagePlus :size="18" />
+        </div>
+        <figcaption>{{ image.name ?? "image" }}</figcaption>
+        <button
+          type="button"
+          :aria-label="`Remove ${image.name ?? 'image'} image attachment`"
+          @click="prompt.removeImage(image.id ?? image.name ?? '')"
+        >
+          <X :size="12" />
+        </button>
+      </figure>
+    </div>
+    <div v-if="imageError" class="inline-alert">{{ imageError }}</div>
+
     <textarea
       v-model="prompt.text"
       :rows="lineCount"
       placeholder="Ask opencode to inspect, edit, test, or explain this workspace..."
+      @paste="handlePaste"
       @keydown.meta.enter.prevent="emit('submit')"
       @keydown.ctrl.enter.prevent="emit('submit')"
     />

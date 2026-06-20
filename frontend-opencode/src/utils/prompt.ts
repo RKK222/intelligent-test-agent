@@ -1,6 +1,7 @@
 import type { PromptPart } from "@test-agent/shared-types";
 
 export type PromptFileInput = {
+  id?: string;
   path?: string;
   name?: string;
   mimeType?: string;

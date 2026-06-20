@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/vue";
+import { fireEvent, render, screen, waitFor } from "@testing-library/vue";
 import { createPinia, setActivePinia } from "pinia";
 import PromptComposer from "@/components/PromptComposer.vue";
 import { usePlatformStore } from "@/stores/platform";
@@ -129,5 +129,44 @@ describe("PromptComposer", () => {
     expect(screen.getByText("0 parts")).toBeInTheDocument();
     expect(calls).toContainEqual(["wrk_1", ""]);
     expect(calls).toContainEqual(["wrk_1", "main"]);
+  });
+
+  it("adds image attachments from picker, paste, and drop", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const prompt = usePromptStore();
+    const picked = new File(["picked"], "picked.png", { type: "image/png" });
+    const pasted = new File(["pasted"], "pasted.png", { type: "image/png" });
+    const dropped = new File(["dropped"], "dropped.png", { type: "image/png" });
+
+    render(PromptComposer, { global: { plugins: [pinia] } });
+
+    await fireEvent.change(screen.getByLabelText("Image attachment input"), { target: { files: [picked] } });
+    await fireEvent.paste(screen.getByPlaceholderText("Ask opencode to inspect, edit, test, or explain this workspace..."), {
+      clipboardData: {
+        items: [{ kind: "file", getAsFile: () => pasted }],
+        getData: () => ""
+      }
+    });
+    await fireEvent.drop(screen.getByRole("form", { name: "Prompt composer" }), {
+      dataTransfer: {
+        files: [dropped],
+        types: ["Files"]
+      }
+    });
+
+    await waitFor(() => expect(prompt.images).toHaveLength(3));
+    expect(screen.getByRole("img", { name: "picked.png" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "pasted.png" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "dropped.png" })).toBeInTheDocument();
+    expect(prompt.snapshot().images?.map((image) => image.name)).toEqual(["picked.png", "pasted.png", "dropped.png"]);
+    expect(prompt.snapshot().images?.[0]).toMatchObject({ mimeType: "image/png" });
+    expect(prompt.snapshot().images?.[0]?.url).toMatch(/^data:image\/png;base64,/);
+    expect(screen.getByText("3 parts")).toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole("button", { name: "Remove picked.png image attachment" }));
+
+    expect(prompt.snapshot().images?.map((image) => image.name)).toEqual(["pasted.png", "dropped.png"]);
+    expect(screen.queryByRole("img", { name: "picked.png" })).not.toBeInTheDocument();
   });
 });
