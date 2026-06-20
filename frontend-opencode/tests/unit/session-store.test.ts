@@ -54,4 +54,72 @@ describe("session store actions", () => {
     expect(session.followups).toHaveLength(0);
     expect(session.revertItems).toHaveLength(0);
   });
+
+  it("routes toolbar fork, revert, and compact actions through backend-api", async () => {
+    setActivePinia(createPinia());
+    const platform = usePlatformStore();
+    const session = useSessionStore();
+    const calls: Array<[string, ...unknown[]]> = [];
+
+    Object.defineProperty(platform, "api", {
+      value: {
+        forkSession: async (...args: unknown[]) => {
+          calls.push(["fork", ...args]);
+          return {
+            id: "ses_child",
+            title: "Forked from message",
+            time: { created: "2026-06-20T00:03:00Z", updated: "2026-06-20T00:03:00Z" }
+          };
+        },
+        revertSession: async (...args: unknown[]) => calls.push(["revert", ...args]),
+        compactSession: async (...args: unknown[]) => calls.push(["compact", ...args])
+      }
+    });
+
+    session.activeSession = {
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      title: "Demo",
+      status: "RUNNING",
+      createdAt: "2026-06-20T00:00:00Z",
+      updatedAt: "2026-06-20T00:00:00Z",
+      model: { id: "claude-sonnet-4", providerId: "anthropic" }
+    };
+    session.messages = [
+      {
+        messageId: "msg_1",
+        sessionId: "ses_1",
+        role: "USER",
+        content: "First prompt",
+        createdAt: "2026-06-20T00:01:00Z"
+      },
+      {
+        messageId: "msg_2",
+        sessionId: "ses_1",
+        role: "ASSISTANT",
+        content: "First answer",
+        createdAt: "2026-06-20T00:01:30Z"
+      },
+      {
+        messageId: "msg_3",
+        sessionId: "ses_1",
+        role: "USER",
+        content: "Second prompt",
+        createdAt: "2026-06-20T00:02:00Z"
+      }
+    ];
+
+    const forked = await session.forkFromMessage("msg_1");
+    await session.revertLatestUserMessage();
+    await session.compactSession();
+
+    expect(forked?.sessionId).toBe("ses_child");
+    expect(session.activeSession?.sessionId).toBe("ses_child");
+    expect(session.revertItems).toEqual([{ id: "msg_3", text: "Restore Second prompt" }]);
+    expect(calls).toEqual([
+      ["fork", "ses_1", { messageID: "msg_1" }],
+      ["revert", "ses_child", { messageID: "msg_3" }],
+      ["compact", "ses_child", { providerID: "anthropic", modelID: "claude-sonnet-4" }]
+    ]);
+  });
 });

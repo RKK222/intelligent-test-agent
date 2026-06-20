@@ -23,8 +23,10 @@ export const useSessionStore = defineStore("session", () => {
   const loading = ref(false);
   const sending = ref(false);
   const sharing = ref(false);
+  const actionBusy = ref<"fork" | "revert" | "compact">();
   const error = ref<string>();
   const shareError = ref<string>();
+  const actionError = ref<string>();
 
   const timeline = computed(() => {
     const runEvents = useRunEventStore();
@@ -37,6 +39,7 @@ export const useSessionStore = defineStore("session", () => {
     }));
     return [...messages.value, ...projected].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   });
+  const userMessages = computed(() => timeline.value.filter((message) => message.role.toUpperCase() === "USER"));
 
   async function load(sessionId: string) {
     const platform = usePlatformStore();
@@ -102,6 +105,77 @@ export const useSessionStore = defineStore("session", () => {
     }
     const platform = usePlatformStore();
     await platform.api.abortSession(activeSession.value.sessionId);
+  }
+
+  // 会话工具栏命令复刻 opencode 的 messageID 请求体，但统一经 backend-api 代理。
+  async function forkFromMessage(messageId: string) {
+    const sessionId = requireSessionId();
+    const current = activeSession.value;
+    const platform = usePlatformStore();
+    actionBusy.value = "fork";
+    actionError.value = undefined;
+    try {
+      const response = await platform.api.forkSession(sessionId, { messageID: messageId });
+      const forked = normalizeSessionResponse(response, current);
+      if (!forked) {
+        throw new Error("fork 响应缺少会话 ID");
+      }
+      activeSession.value = forked;
+      return forked;
+    } catch (cause) {
+      actionError.value = cause instanceof Error ? cause.message : "会话 fork 失败";
+      throw cause;
+    } finally {
+      actionBusy.value = undefined;
+    }
+  }
+
+  async function revertToMessage(messageId: string) {
+    const sessionId = requireSessionId();
+    const message = timeline.value.find((item) => item.messageId === messageId);
+    const platform = usePlatformStore();
+    actionBusy.value = "revert";
+    actionError.value = undefined;
+    try {
+      await platform.api.revertSession(sessionId, { messageID: messageId });
+      if (message && !revertItems.value.some((item) => item.id === messageId)) {
+        revertItems.value.push({ id: messageId, text: `Restore ${previewMessage(message.content)}` });
+      }
+    } catch (cause) {
+      actionError.value = cause instanceof Error ? cause.message : "会话回滚失败";
+      throw cause;
+    } finally {
+      actionBusy.value = undefined;
+    }
+  }
+
+  async function revertLatestUserMessage() {
+    const latest = userMessages.value.at(-1);
+    if (!latest) {
+      actionError.value = "没有可回滚的用户消息";
+      return;
+    }
+    await revertToMessage(latest.messageId);
+  }
+
+  async function compactSession() {
+    const sessionId = requireSessionId();
+    const model = activeSession.value?.model;
+    if (!model?.id || !model.providerId) {
+      actionError.value = "缺少当前模型，无法精简会话";
+      return;
+    }
+    const platform = usePlatformStore();
+    actionBusy.value = "compact";
+    actionError.value = undefined;
+    try {
+      await platform.api.compactSession(sessionId, { providerID: model.providerId, modelID: model.id });
+    } catch (cause) {
+      actionError.value = cause instanceof Error ? cause.message : "会话精简失败";
+      throw cause;
+    } finally {
+      actionBusy.value = undefined;
+    }
   }
 
   // 分享入口复刻 opencode 的 publish/unpublish 行为，只保存平台返回的公开 URL。
@@ -211,6 +285,7 @@ export const useSessionStore = defineStore("session", () => {
     activeRun,
     messages,
     timeline,
+    userMessages,
     diff,
     todos,
     permissions,
@@ -221,12 +296,18 @@ export const useSessionStore = defineStore("session", () => {
     loading,
     sending,
     sharing,
+    actionBusy,
     error,
     shareError,
+    actionError,
     load,
     createDraftSession,
     sendPrompt,
     abort,
+    forkFromMessage,
+    revertToMessage,
+    revertLatestUserMessage,
+    compactSession,
     publishShare,
     unpublishShare,
     replyPermission,
@@ -266,6 +347,43 @@ function extractShareUrl(value: unknown): string | undefined {
   }
   const nested = isRecord(value.share) ? value.share : undefined;
   return readString(value.url) ?? readString(nested?.url);
+}
+
+// fork 可能返回 opencode 原始 Session 形态，这里转换为平台共享 Session。
+function normalizeSessionResponse(value: unknown, fallback?: Session): Session | undefined {
+  const source = readPayloadRecord(value);
+  const sessionId = readString(source?.sessionId) ?? readString(source?.sessionID) ?? readString(source?.id);
+  if (!source || !sessionId) {
+    return undefined;
+  }
+  const time = isRecord(source.time) ? source.time : undefined;
+  const createdAt = readString(source.createdAt) ?? readString(time?.created) ?? fallback?.createdAt ?? new Date().toISOString();
+  const updatedAt = readString(source.updatedAt) ?? readString(time?.updated) ?? fallback?.updatedAt ?? createdAt;
+  return {
+    sessionId,
+    workspaceId: readString(source.workspaceId) ?? readString(source.workspaceID) ?? fallback?.workspaceId ?? "",
+    title: readString(source.title) ?? fallback?.title ?? "Forked session",
+    status: readString(source.status) ?? fallback?.status ?? "IDLE",
+    createdAt,
+    updatedAt,
+    parentId: readString(source.parentId) ?? readString(source.parentID) ?? fallback?.sessionId,
+    pinned: typeof source.pinned === "boolean" ? source.pinned : fallback?.pinned,
+    agent: readString(source.agent) ?? fallback?.agent,
+    model: fallback?.model,
+    costUsd: fallback?.costUsd,
+    tokens: fallback?.tokens
+  };
+}
+
+function readPayloadRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  return isRecord(value.data) ? value.data : value;
+}
+
+function previewMessage(content: string) {
+  return content.replace(/\s+/g, " ").trim().slice(0, 120) || "message";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

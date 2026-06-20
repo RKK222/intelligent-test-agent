@@ -32,9 +32,9 @@ corepack pnpm e2e
 - `src/api/platform.ts`：平台 API 适配层，补齐 opencode Web parity 所需 config/provider/worktree/share/MCP auth 方法。
 - `src/stores/`：platform、workspace、session、prompt、run-events、settings、terminal 状态。
 - `src/views/`：`/`、`/w/:workspaceId/session/:sessionId?`、`/new-session` 三个默认路由。
-- `src/components/`：composer、timeline、side panel、settings、command palette、toast。
+- `src/components/`：composer、timeline、session toolbar/fork dialog、side panel、settings、command palette、toast。
 - `docs/`：依赖、API 映射和 parity 验收记录。
 
 ## 验收边界
 
-首版覆盖 opencode App 的 Web IDE 壳层、工作区/会话入口、composer、RunEvent message reducer、permission/question/todo/diff/terminal 面板和 settings/provider 展示入口。真实三服务联调需要同时启动 `test-agent-app`、opencode server 与本工程。
+首版覆盖 opencode App 的 Web IDE 壳层、工作区/会话入口、session toolbar、composer、RunEvent message reducer、permission/question/todo/diff/terminal 面板和 settings/provider 展示入口。真实三服务联调需要同时启动 `test-agent-app`、opencode server 与本工程。

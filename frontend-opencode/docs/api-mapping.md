@@ -7,7 +7,7 @@
 | File context picker | `listRuntimeFiles/findRuntimeFiles/readRuntimeFile` | `/api/fs/list`、`/api/fs/find`、`/api/fs/read` |
 | VCS/LSP/MCP status | `getVcsStatus/getVcsDiff/getLspStatus/getMcpStatus/getMcpResources/getMcpTools` | `/api/vcs/*`、`/api/lsp/status`、`/api/mcp/*` |
 | Session children/todo/diff | `getSessionChildren/getSessionTodo/getSessionDiff` | `/api/sessions/{sessionId}/children|todo|diff` |
-| Abort/fork/compact/revert/command/shell | `abortSession/forkSession/compactSession/revertSession/unrevertSession/runSessionCommand/runSessionShell` | `/api/sessions/{sessionId}/...` |
+| Abort/fork/compact/revert/command/shell | `abortSession/forkSession/compactSession/revertSession/unrevertSession/runSessionCommand/runSessionShell` | `/api/sessions/{sessionId}/...`；fork/revert 请求体使用 opencode `messageID`，compact 使用 `providerID/modelID` |
 | Permission/question | `listSessionPermissions/replySessionPermission/listSessionQuestions/...` | `/api/sessions/{sessionId}/permissions|questions` |
 | RunEvent stream | `event-stream-client.subscribeRunEvents` | `/api/runs/{runId}/events` |
 | Terminal | `createTerminalTicket` | `/api/sessions/{sessionId}/terminal/tickets` + 后端 WebSocket ticket |

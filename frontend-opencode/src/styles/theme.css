@@ -491,6 +491,8 @@ small,
 .toolbar-buttons {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 
@@ -1136,6 +1138,7 @@ small,
 }
 
 .command-palette,
+.fork-dialog,
 .settings-dialog {
   width: min(720px, calc(100vw - 24px));
   border: 1px solid var(--line);
@@ -1156,10 +1159,12 @@ small,
   margin-bottom: 4px;
 }
 
+.fork-dialog,
 .settings-dialog {
   padding: 16px;
 }
 
+.fork-dialog header,
 .settings-dialog header {
   display: flex;
   align-items: center;
@@ -1169,8 +1174,62 @@ small,
   padding-bottom: 12px;
 }
 
+.fork-dialog h2,
 .settings-dialog h2 {
   margin: 2px 0 0;
+}
+
+.fork-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(460px, 58vh);
+  overflow: auto;
+  padding-top: 12px;
+}
+
+.fork-row {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: var(--panel-subtle);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.fork-row:hover {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--line));
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel-subtle));
+}
+
+.fork-row:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.fork-row span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.fork-row strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fork-row small {
+  color: var(--text-muted);
+}
+
+.fork-empty {
+  min-height: 220px;
 }
 
 .settings-grid {

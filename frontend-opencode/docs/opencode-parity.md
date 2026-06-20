@@ -12,6 +12,7 @@
 | App shell/topbar/search/new session/settings/command palette | 已实现 Vue 版本。 |
 | Home workspace/session/provider/model/agent 展示 | 已实现，数据来自平台 API。 |
 | Session layout 左侧会话、中间 timeline/composer、右侧 review/files/terminal/status | 已实现首版结构。 |
+| Session toolbar：share/fork/compact/revert/abort | 已接入 Vue toolbar；fork 可选择用户消息并跳转子会话，revert 回滚最新用户消息，compact 在当前 session 带 model/provider 时调用 summarize，abort 经平台 API。 |
 | Composer 上方待处理 dock：permission/question/todo/follow-up/revert | 已实现 Vue 版本，操作统一经 `backend-api`，并覆盖组件/状态单测。 |
 | Prompt parts：text/file/image/agent/reference | 已实现构造与单测。 |
 | RunEvent reducer：message part delta、todo、permission、question、diff/status | 已实现核心 reducer 与单测。 |
@@ -27,4 +28,5 @@
 - 真实 provider OAuth、MCP auth、worktree、share 依赖可用 opencode runtime 环境；provider OAuth authorize/code callback UI 已走平台代理，仍需真实 provider 验证授权 URL、prompt inputs、多 method 和 auto callback；worktree UI 已走平台代理，仍需真实 Git runtime 验证创建/重置/删除结果；share UI 已走平台代理，仍需真实公开分享服务验证 URL 可访问性。
 - MCP status/auth UI 已走平台代理；opencode App 的 MCP toggle/connect/disconnect 仍需平台后端补齐接口后接入。
 - Provider API key 管理和 OAuth authorize/code callback 已可用，完整多 method、prompt inputs 和 auto callback flow 仍需真实 provider 环境验收后补齐。
+- Session toolbar fork/revert/compact 已走平台 API；仍需真实三服务验证 fork 返回子会话路由、summarize 模型参数和 revert 后远端消息边界。
 - Terminal 已具备 ticket/WebSocket 基础交互，后续需用真实三服务验证 PTY 协议、resize 和 xterm 视觉一致性。
