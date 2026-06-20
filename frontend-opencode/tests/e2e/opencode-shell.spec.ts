@@ -4,6 +4,7 @@ type Capture = {
   runRequests: Array<Record<string, unknown>>;
   abortRequests?: Array<Record<string, unknown>>;
   compactRequests?: Array<Record<string, unknown>>;
+  createSessionRequests?: Array<Record<string, unknown>>;
   forkRequests?: Array<Record<string, unknown>>;
   revertRequests?: Array<Record<string, unknown>>;
   providerAuthRequests?: Array<Record<string, unknown>>;
@@ -128,6 +129,32 @@ test("opens a session, sends a prompt, and renders streamed RunEvent output", as
   });
 
   await expect(page.getByText("All tests passed")).toBeVisible();
+});
+
+test("promotes a new-session deep link prompt into a real session", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "New session deep links are covered on the desktop composer route.");
+  const capture: Capture = { runRequests: [], createSessionRequests: [] };
+  await mockBackendApi(page, capture);
+
+  await page.goto("/new-session?workspaceId=wrk_1&prompt=Run%20deep%20link%20smoke");
+
+  const composer = page.getByPlaceholder("Ask opencode to inspect, edit, test, or explain this workspace...");
+  await expect(composer).toHaveValue("Run deep link smoke");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect.poll(() => capture.createSessionRequests?.length).toBe(1);
+  expect(capture.createSessionRequests?.[0]).toMatchObject({
+    workspaceId: "wrk_1",
+    title: "Run deep link smoke"
+  });
+  await expect.poll(() => capture.runRequests.length).toBe(1);
+  expect(capture.runRequests[0]).toMatchObject({
+    sessionId: "ses_new",
+    prompt: "Run deep link smoke",
+    parts: [{ type: "text", text: "Run deep link smoke" }]
+  });
+  await expect(page).toHaveURL(/\/w\/wrk_1\/session\/ses_new$/);
+  await expect(page.getByRole("heading", { name: "Run deep link smoke" })).toBeVisible();
 });
 
 test("publishes and unpublishes a session share link", async ({ page }, testInfo) => {
@@ -364,6 +391,18 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         total: 2
       });
     }
+    if (path === "/api/sessions" && request.method() === "POST") {
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
+      capture.createSessionRequests?.push(body);
+      return json(route, {
+        sessionId: "ses_new",
+        workspaceId: body.workspaceId,
+        title: body.title,
+        status: "IDLE",
+        createdAt: "2026-06-20T00:06:00Z",
+        updatedAt: "2026-06-20T00:06:00Z"
+      });
+    }
     if (path === "/api/commands") {
       return json(route, [
         { commandId: "compact", name: "compact", description: "Summarize the session" },
@@ -443,6 +482,16 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         updatedAt: "2026-06-20T00:05:00Z"
       });
     }
+    if (path === "/api/sessions/ses_new") {
+      return json(route, {
+        sessionId: "ses_new",
+        workspaceId: "wrk_1",
+        title: "Run deep link smoke",
+        status: "IDLE",
+        createdAt: "2026-06-20T00:06:00Z",
+        updatedAt: "2026-06-20T00:06:00Z"
+      });
+    }
     if (path === "/api/sessions/ses_1/messages") {
       return json(route, {
         items: [
@@ -483,6 +532,22 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         total: 0
       });
     }
+    if (path === "/api/sessions/ses_new/messages") {
+      return json(route, {
+        items: [
+          {
+            messageId: "msg_new_user",
+            sessionId: "ses_new",
+            role: "USER",
+            content: "Run deep link smoke",
+            createdAt: "2026-06-20T00:06:01Z"
+          }
+        ],
+        page: 1,
+        size: 200,
+        total: 1
+      });
+    }
     if (path === "/api/sessions/ses_1/diff") {
       return json(route, options.sessionDiff ?? []);
     }
@@ -490,6 +555,9 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
       return json(route, []);
     }
     if (path === "/api/sessions/ses_child/diff") {
+      return json(route, []);
+    }
+    if (path === "/api/sessions/ses_new/diff") {
       return json(route, []);
     }
     if (path === "/api/sessions/ses_1/share" && request.method() === "POST") {
@@ -513,11 +581,15 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
     ) {
       return json(route, []);
     }
+    if (path === "/api/sessions/ses_new/todo" || path === "/api/sessions/ses_new/permissions" || path === "/api/sessions/ses_new/questions") {
+      return json(route, []);
+    }
     if (path === "/api/runs" && request.method() === "POST") {
-      capture.runRequests.push(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>);
+      const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
+      capture.runRequests.push(body);
       return json(route, {
         runId: "run_1",
-        sessionId: "ses_1",
+        sessionId: body.sessionId ?? "ses_1",
         workspaceId: "wrk_1",
         status: "RUNNING",
         createdAt: "2026-06-20T00:00:02Z",

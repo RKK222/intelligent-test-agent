@@ -24,10 +24,11 @@
 - `src/components/SettingsWorktreePanel.vue`：复刻 opencode workspace/worktree 管理入口，支持 experimental worktree 列表、创建、重置和删除；所有操作经平台 `backend-api` 代理。
 - `src/components/SettingsMcpPanel.vue`：复刻 opencode MCP 状态/认证/开关入口，展示 connected/failed/needs_auth 等状态，并通过平台 API connect/disconnect、发起或移除 MCP auth。
 - `src/components/TerminalPanel.vue`：复刻 opencode Terminal 侧栏基础交互，ticket 经 `backend-api` 获取，WebSocket 使用平台 JSON envelope 发送 input/resize/close，使用 xterm 渲染输出并保留 warning/error、输出片段上限和可访问 transcript。
+- `src/views/NewSessionView.vue`：复刻 opencode `/new-session` 草稿 composer，支持 `workspaceId` 指定目标 workspace、`prompt` deep link 预填并消费 URL 参数，提交后创建真实 session、发送 prompt 并跳转到会话页。
 
 ## 测试记录
 
-- Playwright mock E2E 覆盖桌面/移动端 shell、首页会话列表、命令面板入口、会话详情加载、prompt 提交请求构造、toolbar abort/compact/fork/revert、Session share publish/unpublish，以及通过 fake EventSource 注入 RunEvent 后的 timeline 流式渲染。
+- Playwright mock E2E 覆盖桌面/移动端 shell、首页会话列表、命令面板入口、`/new-session?prompt=...` 草稿提升、会话详情加载、prompt 提交请求构造、toolbar abort/compact/fork/revert、Session share publish/unpublish，以及通过 fake EventSource 注入 RunEvent 后的 timeline 流式渲染。
 - Playwright real E2E 入口为 `playwright.real.config.ts` + `tests/e2e-real/*.real-spec.ts`，以单个桌面 smoke 通过真实 `test-agent-app` 创建或复用 workspace/session，再从 Vue UI 发送 prompt，等待 RunEvent SSE 渲染 assistant 文本；该套件只在 `TEST_AGENT_RUN_REAL_E2E=1` 下运行。
 
 ## 当前边界
