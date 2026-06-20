@@ -7,6 +7,7 @@
 ## 主要职责
 
 - 统一 baseUrl、traceId、鉴权头和 JSON 解析。
+- 默认 30 秒请求超时，可通过 `requestTimeoutMs` 覆盖；超时统一映射为 `BackendApiError` 的 `REQUEST_TIMEOUT`。
 - 映射统一错误响应为 `BackendApiError`。
 - 暴露 Workspace、受控目录选择、文件、Session、Session message、Run、Diff API 方法；Session 支持 workspace 列表、全局搜索、标题/置顶更新和软删除。
 - `startRun` 同时支持旧 `(sessionId, prompt)` 参数和 Phase 11 对象 payload（`parts`、`messageId`、`agent`、`model`、`variant`、`mode`）。

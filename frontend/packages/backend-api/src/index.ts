@@ -32,6 +32,7 @@ export type BackendApiClientOptions = {
   apiToken?: string;
   fetcher?: typeof fetch;
   traceIdFactory?: () => string;
+  requestTimeoutMs?: number;
 };
 
 export class BackendApiError extends Error {
@@ -84,6 +85,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   );
   const fetcher = options.fetcher ?? fetch;
   const traceIdFactory = options.traceIdFactory ?? defaultTraceId;
+  const requestTimeoutMs = options.requestTimeoutMs ?? 30000;
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const traceId = traceIdFactory();
@@ -96,12 +98,46 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     if (options.apiToken) {
       headers.set("Authorization", `Bearer ${options.apiToken}`);
     }
-    const response = await fetcher(`${baseUrl}${path}`, { ...init, headers });
-    const body = await readJson(response);
-    if (!response.ok || !isSuccessResponse<T>(body)) {
-      throw new BackendApiError(response.status, normalizeFailure(body, traceId, response.status));
+    // 所有后端请求统一设置超时，避免目录选择等界面在连接悬挂时一直停留在加载态。
+    const controller = new AbortController();
+    let timedOut = false;
+    const timeoutId =
+      requestTimeoutMs > 0
+        ? setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+          }, requestTimeoutMs)
+        : undefined;
+    const abortFromCaller = () => controller.abort();
+    init.signal?.addEventListener("abort", abortFromCaller, { once: true });
+    if (init.signal?.aborted) {
+      controller.abort();
     }
-    return body.data;
+    try {
+      const response = await fetcher(`${baseUrl}${path}`, { ...init, headers, signal: controller.signal });
+      const body = await readJson(response);
+      if (!response.ok || !isSuccessResponse<T>(body)) {
+        throw new BackendApiError(response.status, normalizeFailure(body, traceId, response.status));
+      }
+      return body.data;
+    } catch (error) {
+      if (timedOut) {
+        throw new BackendApiError(408, {
+          success: false,
+          code: "REQUEST_TIMEOUT",
+          message: "请求超时",
+          traceId,
+          retryable: true,
+          details: { path }
+        });
+      }
+      throw error;
+    } finally {
+      if (timeoutId !== undefined) {
+        clearTimeout(timeoutId);
+      }
+      init.signal?.removeEventListener("abort", abortFromCaller);
+    }
   }
 
   return {
