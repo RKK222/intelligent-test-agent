@@ -21,6 +21,10 @@
 - `src/components/SettingsMcpPanel.vue`：复刻 opencode MCP 状态/认证入口，展示 connected/failed/needs_auth 等状态，并通过平台 API 发起或移除 MCP auth。
 - `src/components/TerminalPanel.vue`：复刻 opencode Terminal 侧栏基础交互，ticket 经 `backend-api` 获取，WebSocket 使用平台 JSON envelope 发送 input/resize/close，展示 output/warning/error，并限制前端输出片段数量。
 
+## 测试记录
+
+- Playwright mock E2E 覆盖桌面/移动端 shell、首页会话列表、会话详情加载、prompt 提交请求构造，以及通过 fake EventSource 注入 RunEvent 后的 timeline 流式渲染。
+
 ## 当前边界
 
 - 浏览器端只调用平台 `backend-api`，不直接连接 opencode server。

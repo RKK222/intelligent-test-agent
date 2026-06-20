@@ -20,6 +20,7 @@
 | Diff review | 已接入 `DiffReviewPanel`，支持文件聚焦、unified/split 样式切换、hunk 统计/导航和空态；完整 Monaco diff 后续懒加载。 |
 | Session share | 已接入 toolbar share popover，支持 publish、显示/复制/打开公开 URL、unpublish，操作统一经 `backend-api`。 |
 | Provider auth/config/worktree/MCP auth API | 后端平台代理已补齐；Settings 已接入 provider auth 状态、API key 保存/移除、provider OAuth authorize URL/code callback、worktree 列表/创建/重置/删除，以及 MCP status/auth/remove auth 入口。 |
+| Mock E2E 验收 | Playwright 已覆盖桌面/移动端 App shell、首页会话列表、会话页加载、prompt submit 请求体，以及 fake RunEvent SSE 驱动 assistant delta 渲染到 timeline。 |
 
 ## 待真实三服务验收
 

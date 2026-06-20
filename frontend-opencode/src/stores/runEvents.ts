@@ -135,7 +135,7 @@ export const useRunEventStore = defineStore("run-events", () => {
     activeRunId.value = runId;
     subscription = subscribeRunEvents({
       runId,
-      baseUrl,
+      baseUrl: resolveEventBaseUrl(baseUrl),
       onEvent: apply,
       onStatus: (status) => {
         streamStatus.value = status;
@@ -151,6 +151,14 @@ export const useRunEventStore = defineStore("run-events", () => {
 
   return { state, streamStatus, activeRunId, timelineMessages, apply, subscribe, close };
 });
+
+function resolveEventBaseUrl(baseUrl: string) {
+  if (baseUrl.trim()) {
+    return baseUrl;
+  }
+  // Vite 本地 mock 与同源部署场景下，EventSource 需要可解析的绝对 origin。
+  return globalThis.location?.origin ?? "http://127.0.0.1:8080";
+}
 
 function mergeMessage(state: RunEventState, payload: Record<string, unknown>) {
   const raw = record(payload.message) ?? payload;
