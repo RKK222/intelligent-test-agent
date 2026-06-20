@@ -6,7 +6,7 @@
 
 ## 主要程序清单
 
-- `AgentChat.vue`：Agent/历史 tab、受控 History 搜索与置顶/删除回调、Agent/Provider/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission/question dock、message part timeline、输入框和动作按钮。
+- `AgentChat.vue`：Agent/历史 tab、受控 History 搜索与置顶/删除回调、Agent/Provider/Model selector（Agent 下拉已过滤为 primary+all，排除 subagent/hidden）、runtime status bar、slash command palette、`@` context picker、permission/question dock、message part timeline、输入框和动作按钮。
 - `AgentCard.vue`、`TimelineCard.vue`：统一 `TimelineCard` 折叠壳，以及 Plan、Tool、Test、Diff、Event 卡片的 payload 派生展示；Diff 卡片展开区展示文件、状态和行变更表格。
 - `AssistantThread.vue`：对话线程视图，负责区分 reasoning 思考过程、任务分解、Skill/Tool 调用与 text 最终回答，并计算运行中、最新工具和最新 Diff 的默认展开状态，不直接接入平台 API。
 - `ComposerArea.vue`、`RuntimeControls.vue`、`ChicPopover.vue`、`RuntimeDock.vue`、`SuggestionPanel.vue`、`TaskBreakdown.vue`、`MessageParts.vue`、`ProcessDisclosure.vue`、`AnswerPart.vue`、`PlainAnswer.vue`、`ReasoningPartBlock.vue`、`ToolPartBlock.vue`、`ToolPayloadBlock.vue`、`ToolDetail.vue`：对话区子组件与浅色过程信息展示块（含 `tool=skill` 的 Skill 调用分类展示）。

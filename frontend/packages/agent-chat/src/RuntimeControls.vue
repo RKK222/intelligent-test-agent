@@ -14,7 +14,8 @@ export type RuntimeControlsProps = {
 </script>
 
 <script setup lang="ts">
-import { TerminalSquare, User } from "lucide-vue-next";
+import { computed } from "vue";
+import { User } from "lucide-vue-next";
 import { Button } from "@test-agent/ui-kit";
 import ChicPopover from "./ChicPopover.vue";
 import ModelPicker from "./ModelPicker.vue";
@@ -28,12 +29,8 @@ const emit = defineEmits<{
   requestNotifications: [];
 }>();
 
-const modeOptions = [
-  { value: "build", label: "Build" },
-  { value: "plan", label: "Plan" },
-  { value: "shell", label: "Shell" },
-  ...props.commands.slice(0, 8).map((c) => ({ value: `command:${c.name}`, label: `/${c.name}` }))
-];
+// Agent 下拉只展示 primary/all，过滤掉 subagent 与 hidden，对齐 opencode local.agent.list() 行为。
+const runtimeAgents = computed(() => props.agents.filter((agent) => agent.mode !== "subagent" && !agent.hidden));
 
 function onModelSelect(payload: { providerId?: string; modelValue: string }) {
   if (payload.providerId) {
@@ -49,7 +46,7 @@ function onModelSelect(payload: { providerId?: string; modelValue: string }) {
       label="Agent"
       placeholder="Agent"
       :value="selectedAgent ?? ''"
-      :options="agents.map((a) => ({ value: a.agentId, label: a.name }))"
+      :options="runtimeAgents.map((a) => ({ value: a.agentId, label: a.name }))"
       searchable
       @change="(v) => emit('agentChange', v)"
     >
@@ -61,15 +58,6 @@ function onModelSelect(payload: { providerId?: string; modelValue: string }) {
       :selected-model="selectedModel"
       @select="onModelSelect"
     />
-    <ChicPopover
-      label="Mode"
-      placeholder="Build"
-      :value="mode"
-      :options="modeOptions"
-      @change="(v) => emit('modeChange', v)"
-    >
-      <template #icon><TerminalSquare class="h-3.5 w-3.5" /></template>
-    </ChicPopover>
     <Button type="button" size="sm" variant="secondary" class="ta-runtime-notify" @click="emit('requestNotifications')">通知</Button>
   </div>
 </template>
