@@ -5,6 +5,7 @@ type Capture = {
   abortRequests?: Array<Record<string, unknown>>;
   compactRequests?: Array<Record<string, unknown>>;
   forkRequests?: Array<Record<string, unknown>>;
+  revertRequests?: Array<Record<string, unknown>>;
   providerAuthRequests?: Array<Record<string, unknown>>;
   shareRequests?: Array<Record<string, unknown>>;
 };
@@ -211,6 +212,36 @@ test("forks a session from a selected user message", async ({ page }, testInfo) 
   });
   await expect(page).toHaveURL(/\/w\/wrk_1\/session\/ses_child$/);
   await expect(page.getByRole("heading", { name: "Forked session" })).toBeVisible();
+});
+
+test("reverts and restores the latest user message from the toolbar", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Toolbar revert is covered on the desktop session controls.");
+  const capture: Capture = { runRequests: [], revertRequests: [] };
+  await mockBackendApi(page, capture);
+
+  await page.goto("/w/wrk_1/session/ses_1");
+  await expect(page.getByRole("heading", { name: "Demo session" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Revert latest user message" }).click();
+
+  await expect.poll(() => capture.revertRequests?.filter((entry) => entry.action === "revert").length).toBe(1);
+  expect(capture.revertRequests?.[0]).toMatchObject({
+    action: "revert",
+    sessionId: "ses_1",
+    messageID: "msg_user"
+  });
+  await expect(page.getByText("1 reverted message")).toBeVisible();
+  await expect(page.getByText("Restore Initial prompt")).toBeVisible();
+
+  await page.getByRole("button", { name: "Restore" }).click();
+
+  await expect.poll(() => capture.revertRequests?.filter((entry) => entry.action === "unrevert").length).toBe(1);
+  expect(capture.revertRequests?.[1]).toMatchObject({
+    action: "unrevert",
+    sessionId: "ses_1",
+    messageId: "msg_user"
+  });
+  await expect(page.getByText("1 reverted message")).toHaveCount(0);
 });
 
 test("switches sessions from the session sidebar", async ({ page }, testInfo) => {
@@ -503,6 +534,22 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
       });
       return json(route, { compacted: true });
+    }
+    if (path === "/api/sessions/ses_1/revert" && request.method() === "POST") {
+      capture.revertRequests?.push({
+        action: "revert",
+        sessionId: "ses_1",
+        ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
+      });
+      return json(route, { reverted: true });
+    }
+    if (path === "/api/sessions/ses_1/unrevert" && request.method() === "POST") {
+      capture.revertRequests?.push({
+        action: "unrevert",
+        sessionId: "ses_1",
+        ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
+      });
+      return json(route, { restored: true });
     }
     if (path === "/api/sessions/ses_1/fork" && request.method() === "POST") {
       capture.forkRequests?.push({
