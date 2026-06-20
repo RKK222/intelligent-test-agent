@@ -17,6 +17,12 @@ const forkMessages = computed(() => [...session.userMessages].reverse());
 const hasUserMessages = computed(() => forkMessages.value.length > 0);
 const busy = computed(() => Boolean(session.actionBusy));
 const canCompact = computed(() => Boolean(session.activeSession?.model?.id && session.activeSession?.model?.providerId));
+const abortableRunStatuses = new Set(["PENDING", "QUEUED", "RUNNING"]);
+const canAbort = computed(() => {
+  const status = session.activeRun?.status?.toUpperCase();
+  // Abort 对应 opencode 的运行中停止按钮，空闲或已结束 run 不应触发后端取消请求。
+  return Boolean(status && abortableRunStatuses.has(status));
+});
 
 // 工具栏只触发 store action，避免组件直接拼接 opencode server 请求。
 async function selectFork(messageId: string) {
@@ -46,7 +52,7 @@ async function selectFork(messageId: string) {
     >
       <RotateCcw :size="15" />Revert
     </button>
-    <button class="icon-button" type="button" aria-label="Abort session" :disabled="busy" @click="session.abort">
+    <button class="icon-button" type="button" aria-label="Abort session" :disabled="!canAbort || busy" @click="session.abort">
       <Square :size="15" />
     </button>
     <button class="icon-button mobile-only" type="button" aria-label="Panel" @click="emit('panel')">

@@ -5,6 +5,46 @@ import SessionToolbarActions from "@/components/SessionToolbarActions.vue";
 import { useSessionStore } from "@/stores/session";
 
 describe("SessionToolbarActions", () => {
+  it("keeps abort disabled until a run is active", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: "/w/:workspaceId/session/:sessionId?", name: "session", component: { template: "<div />" } }]
+    });
+    await router.push("/w/wrk_1/session/ses_1");
+    await router.isReady();
+
+    const session = useSessionStore();
+    session.activeSession = {
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      title: "Demo",
+      status: "IDLE",
+      createdAt: "2026-06-20T00:00:00Z",
+      updatedAt: "2026-06-20T00:00:00Z"
+    };
+    session.abort = vi.fn();
+
+    render(SessionToolbarActions, { global: { plugins: [pinia, router] } });
+
+    const abort = screen.getByRole("button", { name: "Abort session" });
+    expect(abort).toBeDisabled();
+    expect(session.abort).not.toHaveBeenCalled();
+
+    session.activeRun = {
+      runId: "run_1",
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      status: "RUNNING",
+      createdAt: "2026-06-20T00:01:00Z",
+      updatedAt: "2026-06-20T00:01:00Z"
+    };
+    await waitFor(() => expect(abort).not.toBeDisabled());
+    await fireEvent.click(abort);
+    expect(session.abort).toHaveBeenCalledOnce();
+  });
+
   it("opens fork choices and dispatches session toolbar actions", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
@@ -24,6 +64,14 @@ describe("SessionToolbarActions", () => {
       createdAt: "2026-06-20T00:00:00Z",
       updatedAt: "2026-06-20T00:00:00Z",
       model: { id: "claude-sonnet-4", providerId: "anthropic" }
+    };
+    session.activeRun = {
+      runId: "run_1",
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      status: "RUNNING",
+      createdAt: "2026-06-20T00:01:00Z",
+      updatedAt: "2026-06-20T00:01:00Z"
     };
     session.messages = [
       {
