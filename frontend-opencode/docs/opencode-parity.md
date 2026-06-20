@@ -14,7 +14,7 @@
 | Session layout 左侧会话、中间 timeline/composer、右侧 review/files/terminal/status | 已实现首版结构；Files tab 已接入 runtime fs 只读文件树、目录进入、搜索、刷新、空态和错误态。 |
 | Session toolbar：share/fork/compact/revert/abort | 已接入 Vue toolbar；fork 可选择用户消息并跳转子会话，revert 回滚最新用户消息，compact 在当前 session 带 model/provider 时调用 summarize，abort 经平台 API。 |
 | Composer 上方待处理 dock：permission/question/todo/follow-up/revert | 已实现 Vue 版本，操作统一经 `backend-api`，并覆盖组件/状态单测。 |
-| Prompt parts 与运行态选择：text/file/image/agent/reference/slash command、Agent/Model/Variant | 已实现构造与单测；composer 附件/@ 文件选择走平台 fs catalog，图片支持选择、粘贴和拖拽并以 `file` part 发送，context chip 支持移除，Agent/Model/Variant 选择透传运行态 API，切换模型会清理失效 variant，slash 菜单从平台 command catalog 选择命令并写入 `/command` 文本，支持方向键、Enter、Escape 和参数模板插入；textarea Enter 提交、Shift+Enter 换行；普通 prompt 走 `startRun`，shell mode 走 `runSessionShell`，slash command 走 `runSessionCommand`。 |
+| Prompt parts 与运行态选择：text/file/image/agent/reference/slash command、Agent/Model/Variant | 已实现构造与单测；composer 附件/@ 文件选择走平台 fs catalog，图片支持选择、粘贴和拖拽并以 `file` part 发送，context chip 支持移除，Agent/Model/Variant 选择透传运行态 API，切换模型会清理失效 variant，slash 菜单从平台 command catalog 选择命令并写入 `/command` 文本，支持方向键、Enter、Escape 和参数模板插入；textarea Enter 提交、Shift+Enter 换行、边界 ArrowUp/ArrowDown 浏览历史；普通 prompt 走 `startRun`，shell mode 走 `runSessionShell`，slash command 走 `runSessionCommand`。 |
 | RunEvent reducer：message part delta、todo、permission、question、diff/status | 已实现核心 reducer 与单测。 |
 | Terminal | 已接入后端 ticket 获取、平台 WebSocket JSON envelope、xterm 输出渲染、原始终端输入、warning/error、input、resize、clear、关闭/重连操作。 |
 | Diff review | 已接入 `DiffReviewPanel`，支持文件聚焦、unified/split 样式切换、hunk 统计/导航和空态；完整 Monaco diff 后续懒加载。 |
@@ -30,5 +30,5 @@
 - MCP status/connect/disconnect/auth UI 已走平台代理；仍需真实 MCP server 验证连接切换、认证链接和错误状态刷新。
 - Provider API key 管理和 OAuth methods/prompt inputs/code/auto callback payload 已可用，完整外部浏览器 OAuth 完成状态仍需真实 provider 环境验收。
 - Session toolbar fork/revert/compact 已走平台 API；仍需真实三服务验证 fork 返回子会话路由、summarize 模型参数和 revert 后远端消息边界。
-- Prompt composer 附件/@ 文件选择、图片选择/粘贴/拖拽、Agent/Model/Variant 运行态选择、shell mode、slash command runtime 分流和 Enter/Shift+Enter 已走 Vue 版；完整 opencode 参数表单化补全、历史上下键和更完整编辑器级键盘导航仍需继续补齐。
+- Prompt composer 附件/@ 文件选择、图片选择/粘贴/拖拽、Agent/Model/Variant 运行态选择、shell mode、slash command runtime 分流、Enter/Shift+Enter 和历史上下键已走 Vue 版；完整 opencode 参数表单化补全和更完整编辑器级键盘导航仍需继续补齐。
 - Terminal 已具备 ticket/WebSocket JSON envelope、xterm 渲染、原始输入、resize、warning/error 和输出截断基础交互；后续需用真实三服务验证 PTY 协议闭环和终端视觉一致性。

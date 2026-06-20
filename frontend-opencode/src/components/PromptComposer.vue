@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import type { CommandInfo } from "@test-agent/shared-types";
 import { AtSign, FileCode2, Folder, ImagePlus, Paperclip, Search, SendHorizontal, Slash, X } from "lucide-vue-next";
 import { usePlatformStore } from "@/stores/platform";
@@ -17,6 +17,8 @@ const workspace = useWorkspaceStore();
 const slashOpen = ref(false);
 const slashQuery = ref("");
 const slashActiveIndex = ref(0);
+const historyIndex = ref(-1);
+const historyDraft = ref("");
 const filePickerOpen = ref(false);
 const filePickerMode = ref<FilePickerMode>("attach");
 const imageInput = ref<HTMLInputElement>();
@@ -132,7 +134,13 @@ function handleSlashKeydown(event: KeyboardEvent) {
 }
 
 function handleTextKeydown(event: KeyboardEvent) {
+  if (handleHistoryKeydown(event)) {
+    return;
+  }
   if (event.key !== "Enter" || event.shiftKey || event.altKey || event.isComposing) {
+    if (event.key.length === 1) {
+      historyIndex.value = -1;
+    }
     return;
   }
   event.preventDefault();
@@ -140,6 +148,41 @@ function handleTextKeydown(event: KeyboardEvent) {
   if (!props.busy && prompt.canSubmit) {
     emit("submit");
   }
+}
+
+function handleHistoryKeydown(event: KeyboardEvent) {
+  if ((event.key !== "ArrowUp" && event.key !== "ArrowDown") || event.shiftKey || event.altKey || event.metaKey || event.ctrlKey) {
+    return false;
+  }
+  const target = event.currentTarget instanceof HTMLTextAreaElement ? event.currentTarget : undefined;
+  if (!target || !prompt.history.length) {
+    return false;
+  }
+  const atStart = target.selectionStart === 0 && target.selectionEnd === 0;
+  const atEnd = target.selectionStart === target.value.length && target.selectionEnd === target.value.length;
+  if (event.key === "ArrowUp" && !atStart) {
+    return false;
+  }
+  if (event.key === "ArrowDown" && !atEnd) {
+    return false;
+  }
+  event.preventDefault();
+  if (event.key === "ArrowUp") {
+    if (historyIndex.value === -1) {
+      historyDraft.value = prompt.text;
+      historyIndex.value = 0;
+    } else {
+      historyIndex.value = Math.min(historyIndex.value + 1, prompt.history.length - 1);
+    }
+  } else if (historyIndex.value > 0) {
+    historyIndex.value -= 1;
+  } else {
+    historyIndex.value = -1;
+  }
+  const next = historyIndex.value === -1 ? historyDraft.value : prompt.history[historyIndex.value] ?? "";
+  prompt.text = next;
+  void nextTick(() => target.setSelectionRange(next.length, next.length));
+  return true;
 }
 
 function moveSlashActive(delta: number) {

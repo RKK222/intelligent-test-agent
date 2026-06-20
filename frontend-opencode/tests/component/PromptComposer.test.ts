@@ -74,6 +74,32 @@ describe("PromptComposer", () => {
     expect(view.emitted("submit")).toHaveLength(1);
   });
 
+  it("navigates prompt history with ArrowUp and ArrowDown at textarea boundaries", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const prompt = usePromptStore();
+    prompt.history = ["Second prompt", "First prompt"];
+    render(PromptComposer, { global: { plugins: [pinia] } });
+    const textarea = screen.getByPlaceholderText("Ask opencode to inspect, edit, test, or explain this workspace...") as HTMLTextAreaElement;
+
+    await fireEvent.update(textarea, "draft");
+    textarea.setSelectionRange(0, 0);
+    await fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(textarea).toHaveValue("Second prompt");
+
+    textarea.setSelectionRange(0, 0);
+    await fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(textarea).toHaveValue("First prompt");
+
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    await fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    expect(textarea).toHaveValue("Second prompt");
+
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    await fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    expect(textarea).toHaveValue("draft");
+  });
+
   it("selects runtime agent and model without adding prompt parts", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);
