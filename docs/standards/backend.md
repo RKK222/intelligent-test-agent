@@ -16,7 +16,7 @@
 1. Controller 只负责协议适配、参数校验和调用业务模块 service，不得直接访问 Repository 或 generated SDK。
 2. `test-agent-api` 不放业务规则，不依赖 `test-agent-persistence` 或 `test-agent-app`。
 3. 只有 `test-agent-opencode-client` 可以直接依赖 generated SDK；generated SDK DTO 不得进入 domain，不得直接返回前端。
-4. opencode facade 对外只暴露平台 command/result 和 `RunEventDraft`，不返回 generated SDK DTO。
+4. `test-agent-agent-runtime` 负责 agentId 选择、运行时接口、日志/指标包装和具体 agent 适配；opencode facade 对外只暴露平台 command/result 和 `RunEventDraft`，不返回 generated SDK DTO。
 5. `test-agent-domain` 不依赖 Spring Web、Persistence、generated SDK。
 6. `test-agent-app` 不得新增 Controller、WebFilter、WebSocket handler 或业务源码包。
 
@@ -52,11 +52,11 @@
 
 ### TraceId
 
-1. 所有入口请求必须携带或生成 traceId，贯穿 Controller、application service、opencode client、persistence 和 event。
+1. 所有入口请求必须携带或生成 traceId，贯穿 Controller、application service、agent runtime、opencode client、persistence 和 event。
 2. SSE、异步任务、重试和回放流程必须保留 traceId 或生成关联 ID；错误响应必须包含 traceId。
 3. HTTP 入口使用请求/响应头 `X-Trace-Id`。合法 traceId 以 `trace_` 开头，只含字母、数字、下划线和短横线；缺失或非法值由 `TraceIdSupport` 生成新值。`TraceIdWebFilter` 将 traceId 写入 WebExchange attribute、响应头、Reactor context 和 SLF4J MDC。
 4. `ApiTokenWebFilter`、`InMemoryRateLimitWebFilter` 的错误响应也必须返回同一 `X-Trace-Id`。
-5. Run 启动、取消、routing decision、RunEvent 追加和 opencode facade 调用必须携带 traceId；SSE 回放使用事件自身 traceId，请求 traceId 只用于当前 HTTP 连接观测。
+5. Run 启动、取消、routing decision、RunEvent 追加和 agent runtime 调用必须携带 traceId；SSE 回放使用事件自身 traceId，请求 traceId 只用于当前 HTTP 连接观测。
 
 ### 日志与指标
 
@@ -64,7 +64,7 @@
 2. 日志必须结构化，至少包含 traceId、模块、关键业务 ID 和结果；`test-agent-app` 默认控制台日志为 `key=value` 格式。
 3. Log4j2 PatternLayout 必须对可变 message、thread 和 traceId 做 CRLF 编码，避免日志换行注入。
 4. 不记录密钥、token、认证头、个人敏感信息和大段用户输入；热路径避免高频 info 日志，调试细节用 debug。
-5. 关键 API、opencode 调用、SSE 连接、事件处理、数据库访问应有 Micrometer 指标，标签必须低基数（不得用完整 message、token、用户输入）。
+5. 关键 API、agent runtime 调用、SSE 连接、事件处理、数据库访问应有 Micrometer 指标，标签必须低基数（不得用完整 message、token、用户输入）。
 
 ## 性能
 
@@ -83,6 +83,7 @@
 
 1. 外部调用必须有连接、读取和整体超时；重试必须有上限，只对可重试错误执行。
 2. 取消 Run、SSE 断开、请求超时必须释放资源；opencode server 节点选择不得每次全量扫描大表。
+3. 新增 agent 必须实现 `AgentRuntime` 并复用 registry 的日志、指标和统一错误处理；未注册 agent 不得在 Controller 中特殊分支，应由 registry 返回统一错误。
 
 ### SSE 与事件
 
@@ -108,6 +109,7 @@
 - Domain：验证状态机、领域规则、值对象约束和边界条件。
 - Persistence：验证 Repository 映射、唯一约束、事务、Flyway migration。
 - Event/SSE：验证事件类型、seq 单调递增、`Last-Event-ID` 续传、断线重连。
+- Agent runtime：验证 agentId 规范化、默认 opencode 命中、未知 agent 统一错误和运行时调用指标。
 - Opencode client facade：使用 mock opencode server 验证错误转换、超时、重试和事件映射；只有 `GeneratedOpencodeSdkGateway` 允许直接依赖 generated SDK。
 - Observability：验证 traceId 传播、日志字段、关键指标注册。
 - Application service：使用 fake repository/facade 验证 workspace、session、run、cancel 编排和错误映射。
@@ -119,6 +121,7 @@
 ```bash
 cd backend
 mvn -pl test-agent-workspace-management -am test
+mvn -pl test-agent-agent-runtime -am test
 mvn -pl test-agent-opencode-runtime -am test
 mvn -pl test-agent-api -am test
 ```

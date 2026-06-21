@@ -107,7 +107,25 @@ describe("event-stream-client", () => {
       payload: { delta: "hello" }
     });
 
-    expect(openedUrl).toBe("http://api/api/runs/run_1/events?lastEventId=4");
+    expect(openedUrl).toBe("http://api/api/internal/agent/opencode/runs/run_1/events?lastEventId=4");
     expect(received).toEqual(["message.part.delta"]);
+  });
+
+  it("uses custom agent id when opening the SSE stream", () => {
+    const source = new FakeEventSource();
+    let openedUrl = "";
+
+    subscribeRunEvents({
+      baseUrl: "http://api",
+      agentId: "OtherAgent",
+      runId: "run_1",
+      eventSourceFactory: (url) => {
+        openedUrl = url;
+        return source;
+      },
+      onEvent: () => undefined
+    });
+
+    expect(openedUrl).toBe("http://api/api/internal/agent/otheragent/runs/run_1/events");
   });
 });

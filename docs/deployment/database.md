@@ -67,7 +67,8 @@
 
 - 所有表使用自增 surrogate PK；业务层只使用带前缀业务 ID。
 - 新增字段优先允许空值或提供默认值，避免破坏旧数据。
-- `sessions.opencode_session_id` 和 `sessions.opencode_execution_node_id` 是后端内部字段，不进入 API DTO；旧 session 两列为空时由首次 Run 懒创建远端 opencode session。
+- `agent_session_bindings` 是 agent 运行态绑定主数据源，按 `(session_id, agent_id)` 记录平台 session 到远端 session/node 的映射。
+- `sessions.opencode_session_id` 和 `sessions.opencode_execution_node_id` 是后端内部兼容字段，不进入 API DTO；旧 session 两列为空时由首次 `opencode` Run 懒创建远端 session，非 opencode agent 不扩展这些列。
 - `sessions.pinned` 进入 Session API DTO；软删除复用 `status=ARCHIVED`，不新增删除时间字段，旧数据默认 `ACTIVE` 且 `pinned=false`。
 - `run_events.payload_json` 和 `execution_nodes.capabilities_json` 当前为 JSON 文本，便于 H2 和 PostgreSQL 共用测试；未来迁移到 JSONB 时必须先保持旧列读取兼容。
 - `run_events.seq` 由持久化层按同一 run 分配，取消、Diff 动作和 opencode stream 并发追加时必须依赖 `(run_id, seq)` 唯一约束冲突后重试，保持事件流单调递增且不重复。
@@ -145,3 +146,27 @@
 | `created_at` | 创建时间。 |
 
 唯一约束：`(user_id, dict_id)`。
+
+## V6 通用 Agent Session Binding 表
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V6__create_agent_session_bindings.sql` 创建 `agent_session_bindings`，用于替代继续扩展 `sessions.opencode_*` 字段的模式：
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 数据库自增 surrogate PK，不对 API 暴露。 |
+| `session_id` | 平台 session 业务 ID，外键引用 `sessions.session_id`。 |
+| `agent_id` | 规范化后的 agent 标志，当前可运行值为 `opencode`。 |
+| `remote_session_id` | 对应 agent 的远端 session id。 |
+| `execution_node_id` | 远端 session 所在 execution node，外键引用 `execution_nodes.execution_node_id`。 |
+| `created_at` | 绑定创建时间。 |
+| `updated_at` | 绑定更新时间，upsert 时刷新。 |
+| `trace_id` | 创建或更新绑定的 traceId。 |
+
+约束和索引：
+
+- `uk_agent_session_bindings_session_agent(session_id, agent_id)` 保证同一平台 session 对同一 agent 只有一个远端绑定。
+- `uk_agent_session_bindings_agent_remote(agent_id, remote_session_id)` 保证同一 agent 的远端 session 不会绑定到多个平台 session。
+- `fk_agent_session_bindings_session` 和 `fk_agent_session_bindings_execution_node` 保证引用有效。
+- `idx_agent_session_bindings_execution_node` 支持按执行节点排查远端 session 绑定。
+
+迁移会从已有 `sessions.opencode_session_id/opencode_execution_node_id` 回填 `agent_id='opencode'` 的绑定记录。旧字段暂时保留，用于旧链路兼容和回滚窗口；新链路以 `agent_session_bindings` 为主数据源。

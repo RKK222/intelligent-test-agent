@@ -9,6 +9,7 @@ export type RunEventSubscription = {
 export type RunEventSubscribeOptions = {
   runId: string;
   baseUrl?: string;
+  agentId?: string;
   lastEventId?: string;
   onEvent: (event: RunEvent) => void;
   onStatus?: (status: RunEventStreamStatus) => void;
@@ -61,8 +62,9 @@ export const KNOWN_RUN_EVENT_TYPES: RunEventType[] = [
 
 export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventSubscription {
   const baseUrl = (options.baseUrl ?? "http://127.0.0.1:8080").replace(/\/$/, "");
+  const agentId = normalizeAgentId(options.agentId ?? "opencode");
   const factory = options.eventSourceFactory ?? ((url: string) => new EventSource(url));
-  const url = runEventsUrl(baseUrl, options.runId, options.lastEventId);
+  const url = runEventsUrl(baseUrl, agentId, options.runId, options.lastEventId);
   const seen = new Set<string>();
   let closed = false;
   const source = factory(url);
@@ -104,12 +106,17 @@ export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventS
   };
 }
 
-function runEventsUrl(baseUrl: string, runId: string, lastEventId?: string) {
-  const url = new URL(`${baseUrl}/api/runs/${runId}/events`);
+function runEventsUrl(baseUrl: string, agentId: string, runId: string, lastEventId?: string) {
+  const url = new URL(`${baseUrl}/api/internal/agent/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(runId)}/events`);
   if (lastEventId && lastEventId.trim().length > 0) {
     url.searchParams.set("lastEventId", lastEventId.trim());
   }
   return url.toString();
+}
+
+function normalizeAgentId(agentId: string) {
+  const normalized = agentId.trim().toLowerCase();
+  return normalized.length > 0 ? normalized : "opencode";
 }
 
 export function parseRunEvent(data: string): RunEvent | null {

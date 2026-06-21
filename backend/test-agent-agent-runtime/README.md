@@ -1,0 +1,34 @@
+# test-agent-agent-runtime
+
+## 工程定位
+
+多 agent 运行时抽象模块，负责根据 agent 标志选择运行时实现，并为不同 agent 复用统一日志、指标和平台错误格式。
+
+## 主要职责
+
+- 定义 `AgentRuntime` 通用 Java 接口。
+- 提供 `AgentRuntimeRegistry`，按 URL 中的 agentId 查找运行时，未知或未注册 agent 统一返回平台 `NOT_FOUND` 错误。
+- 提供 `OpencodeAgentRuntime`，把通用运行命令适配到 `OpencodeClientFacade`。
+- 提供 `OtherAgentRuntime` 抽象占位类，供后续其他 agent 实现继承；本次不注册为可调用 Spring Bean。
+
+## 测试覆盖
+
+- `AgentRuntimeRegistryTest` 覆盖默认 `opencode` 命中、agentId 规范化和未知 agent 统一错误。
+
+## 允许依赖
+
+- `test-agent-common`。
+- `test-agent-domain`。
+- `test-agent-opencode-client`。
+- Reactor、Jackson、Micrometer、Spring Context。
+
+## 禁止依赖
+
+- `test-agent-api`。
+- `test-agent-app`。
+- `test-agent-persistence`。
+- generated SDK。
+
+## 后续 AI 编码指引
+
+新增真实 agent 时优先新增本模块内的 `AgentRuntime` 实现，输出必须适配为平台稳定 DTO、RunEvent 和错误码；Controller、Repository 和 generated SDK 仍不得穿透到业务模块。

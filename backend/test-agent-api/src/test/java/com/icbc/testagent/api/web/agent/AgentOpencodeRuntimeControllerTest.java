@@ -1,5 +1,6 @@
 package com.icbc.testagent.api.web.agent;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
@@ -7,6 +8,7 @@ import com.icbc.testagent.api.web.common.TraceIdWebFilter;
 import com.icbc.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -18,6 +20,8 @@ class AgentOpencodeRuntimeControllerTest {
         OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
         when(service.listAgents(eq("wrk_1234567890abcdef"), eq("trace_1234567890abcdef")))
                 .thenReturn(List.of(Map.of("id", "build")));
+        when(service.withAgent(eq("opencode"), any())).thenAnswer(invocation ->
+                ((Supplier<?>) invocation.getArgument(1)).get());
         WebTestClient client = WebTestClient.bindToController(new AgentOpencodeRuntimeController(service))
                 .webFilter(new TraceIdWebFilter())
                 .build();
@@ -41,6 +45,8 @@ class AgentOpencodeRuntimeControllerTest {
                         eq(Map.of("decision", "once")),
                         eq("trace_1234567890abcdef")))
                 .thenReturn(Map.of("accepted", true));
+        when(service.withAgent(eq("opencode"), any())).thenAnswer(invocation ->
+                ((Supplier<?>) invocation.getArgument(1)).get());
         WebTestClient client = WebTestClient.bindToController(new AgentOpencodeRuntimeController(service))
                 .webFilter(new TraceIdWebFilter())
                 .build();

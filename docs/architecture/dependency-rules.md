@@ -31,6 +31,11 @@ test-agent-opencode-runtime
   -> test-agent-common
   -> test-agent-domain
   -> test-agent-event
+  -> test-agent-agent-runtime
+
+test-agent-agent-runtime
+  -> test-agent-common
+  -> test-agent-domain
   -> test-agent-opencode-client
 
 test-agent-system-management
@@ -74,7 +79,8 @@ test-agent-event
 新增后端文件前必须先分析并列出现有合适工程：
 
 - Workspace、文件查看/新增/修改/删除、git 操作、差异比对、agent 和 skill 管理：`test-agent-workspace-management`。
-- Session、Run、RunEvent 编排、opencode runtime、Diff/revert、terminal ticket/PTY：`test-agent-opencode-runtime`。
+- 多 agent 运行时接口、agentId registry、统一日志/指标包装、opencode/otheragent 适配骨架：`test-agent-agent-runtime`。
+- Session、Run、RunEvent 编排、agent runtime 调用、Diff/revert、terminal ticket/PTY：`test-agent-opencode-runtime`。
 - 用户、角色、权限等平台内部管理：`test-agent-system-management`。
 - 非 opencode 的外部系统联动：`test-agent-integration`。
 - Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、trace Web 入口：`test-agent-api`。
@@ -86,7 +92,7 @@ test-agent-event
 
 - 旧 `/api/...` URL 全部保留，作为兼容入口，不在本次删除或重定向。
 - 前端调用平台自身能力优先使用 `/api/internal/platform/{business-project}/{business}/...`。
-- 与 opencode 交互的兼容代理入口使用 `/api/internal/agent/opencode/{原 opencode path}`。
+- 与 agent 交互的新入口使用 `/api/internal/agent/{agentId}/...`；当前默认可用 agent 为 `opencode`，opencode 原 path 兼容形态为 `/api/internal/agent/opencode/{原 opencode path}`。
 - 给其他系统调用的公开 API 使用 `/api/public/...`，新增前必须先完成鉴权、限流和兼容性设计。
 
 `test-agent-api` 可以为同一能力同时暴露旧 URL 和新 URL；两者必须共享 DTO、鉴权、traceId、错误格式和同一业务实现。

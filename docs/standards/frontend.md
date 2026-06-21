@@ -12,13 +12,15 @@
 ## API 访问
 
 1. 只能通过 `packages/backend-api` 访问平台后端服务（当前由 `test-agent-app` 装配运行），不得直连 opencode server，不得在组件中直接拼接后端 URL。
-2. API 请求、响应、错误类型必须与 `docs/api/http-api.md` 一致；新增或变更 API 必须同步 `docs/api/http-api.md` 和 `docs/architecture/module-map.md`。
+2. Run、Diff 和 runtime 相关请求默认使用 `agentId=opencode` 的 `/api/internal/agent/{agentId}/...` URL；切换 agent 只能通过 `backend-api` 配置，不得在页面组件中手拼旧 runtime URL。
+3. API 请求、响应、错误类型必须与 `docs/api/http-api.md` 一致；新增或变更 API 必须同步 `docs/api/http-api.md` 和 `docs/architecture/module-map.md`。
 
 ## RunEvent SSE
 
 1. 只能通过 `packages/event-stream-client` 订阅平台 `RunEvent SSE`，必须处理连接、断线、重连、`Last-Event-ID`、重复事件和取消订阅。
-2. 高频事件不得逐条触发重型渲染，必须合并、节流或按面板局部更新。
-3. 事件类型和字段变更必须同步 `docs/api/event-stream.md`。SSE 契约以该文件为单一事实源。
+2. RunEvent SSE 默认使用 `agentId=opencode` 的 `/api/internal/agent/{agentId}/runs/{runId}/events` URL；旧 `/api/runs/{runId}/events` 只作为后端兼容入口。
+3. 高频事件不得逐条触发重型渲染，必须合并、节流或按面板局部更新。
+4. 事件类型和字段变更必须同步 `docs/api/event-stream.md`。SSE 契约以该文件为单一事实源。
 
 ## 组件与状态
 
@@ -112,8 +114,8 @@ corepack pnpm e2e:real
 
 至少覆盖：
 
-1. `backend-api` client 的请求、响应、错误、超时和取消。
-2. `event-stream-client` 的 RunEvent SSE 连接、重连、去重和断点恢复。
+1. `backend-api` client 的请求、响应、错误、超时、取消和默认/自定义 agent URL。
+2. `event-stream-client` 的 RunEvent SSE 连接、agent URL、重连、去重和断点恢复。
 3. `workbench-shell` 的面板注册、布局恢复和关闭行为。
 4. `file-explorer` 的文件树展示、搜索、文件状态和打开文件。
 5. `editor` 的文件加载、编辑、保存、只读状态和错误状态。
@@ -123,8 +125,8 @@ corepack pnpm e2e:real
 
 ### 改动对应测试
 
-- 改 API client：补请求、响应、错误、超时、取消和鉴权头测试。
-- 改 RunEvent SSE：补连接、断线、`Last-Event-ID`、重复事件、乱序事件和取消订阅测试。
+- 改 API client：补请求、响应、错误、超时、取消、鉴权头和 agentId URL 测试。
+- 改 RunEvent SSE：补 agent-scoped URL、连接、断线、`Last-Event-ID`、重复事件、乱序事件和取消订阅测试。
 - 改工作台/文件树/编辑器/Diff/对话/测试面板：按对应交互场景补回归测试。
 
 ### Mock 原则

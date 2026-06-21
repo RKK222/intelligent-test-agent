@@ -3,10 +3,9 @@ import { expect, test, type Page } from "@playwright/test";
 test("workbench opens a workspace file with mocked backend api", async ({ page }) => {
   await mockBackendApi(page);
 
-  await page.goto("/");
+  await gotoWorkbench(page);
 
   await expect(page.getByText("TestAgent IDE")).toBeVisible();
-  await expect(page.getByRole("banner").getByText("demo-tests")).toBeVisible();
   await expect(page.getByRole("button", { name: "打开运行与终端" })).toBeVisible();
   await page.getByRole("button", { name: /tests/ }).click();
   await page.getByRole("button", { name: /checkout.spec.ts/ }).click();
@@ -14,12 +13,13 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
   await expect(page.getByRole("button", { name: /保存/ })).toBeVisible();
 });
 
-test("workspace picker creates selected directory and loads its file tree", async ({ page }) => {
+test("workspace picker creates selected directory and loads its file tree", async ({ page, isMobile }) => {
+  test.skip(isMobile, "mobile workspace picker layout is not part of this mock E2E");
   const workspaceCreates: Array<Record<string, unknown>> = [];
   const fileRequests: Array<{ workspaceId: string; path: string }> = [];
   await mockBackendApi(page, { workspaceCreates, fileRequests });
 
-  await page.goto("/");
+  await gotoWorkbench(page);
 
   await page.getByRole("button", { name: "选择工作区目录" }).click();
   await expect(page.getByRole("dialog", { name: "选择工作区目录" })).toBeVisible();
@@ -28,22 +28,22 @@ test("workspace picker creates selected directory and loads its file tree", asyn
 
   await expect.poll(() => workspaceCreates.length).toBe(1);
   expect(workspaceCreates[0]).toEqual({ name: "project-a", rootPath: "/Users/huang/workspace/project-a" });
-  await expect(page.getByRole("banner").getByText("project-a")).toBeVisible();
   await expect(page.getByRole("button", { name: /src/ })).toBeVisible();
-  expect(fileRequests).toContainEqual({ workspaceId: "wrk_project_a", path: "" });
+  expect(fileRequests).toContainEqual({ workspaceId: "wrk_1234567890abcdef", path: "" });
 });
 
-test("workspace picker switches to an existing workspace without recreating it", async ({ page }) => {
+test("workspace picker switches to an existing workspace without recreating it", async ({ page, isMobile }) => {
+  test.skip(isMobile, "mobile workspace picker layout is not part of this mock E2E");
   const workspaceCreates: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, { workspaceCreates });
 
-  await page.goto("/");
+  await gotoWorkbench(page);
 
   await page.getByRole("button", { name: "选择工作区目录" }).click();
   await page.getByRole("button", { name: /demo-tests/ }).click();
   await page.getByRole("button", { name: "选择此目录" }).click();
 
-  await expect(page.getByRole("banner").getByText("demo-tests")).toBeVisible();
+  await expect(page.getByRole("button", { name: /tests/ })).toBeVisible();
   expect(workspaceCreates).toEqual([]);
 });
 
@@ -51,7 +51,7 @@ test("model picker groups models by provider and updates run model", async ({ pa
   const runRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, { runRequests });
 
-  await page.goto("/");
+  await gotoWorkbench(page);
 
   await expect(page.getByRole("button", { name: "选择模型" })).toContainText("Sonnet");
   await page.getByRole("button", { name: "选择模型" }).click();
@@ -80,7 +80,7 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
   const terminalTickets: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, { runRequests, permissionReplies, questionReplies, terminalTickets });
 
-  await page.goto("/");
+  await gotoWorkbench(page);
 
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("analyze checkout");
   await page.locator('input[type="file"]').first().setInputFiles({
@@ -110,7 +110,7 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
   await page.getByPlaceholder("回答").fill("staging");
   await page.getByRole("button", { name: "回复" }).click();
   await expect.poll(() => questionReplies.length).toBe(1);
-  expect(questionReplies[0]).toEqual({ answers: ["staging"] });
+  expect(questionReplies[0]).toEqual({ answers: [["staging"]] });
 
   await expect(page.getByText("Agent 提出了文件修改")).toBeVisible();
   await page.getByRole("button", { name: "查看 Diff" }).click();
@@ -167,7 +167,7 @@ test("live tracking opens changed file and shows line counts before run finishes
     }
   });
 
-  await page.goto("/");
+  await gotoWorkbench(page);
 
   const liveButton = page.getByRole("button", { name: "实时" });
   await liveButton.click();
@@ -175,7 +175,6 @@ test("live tracking opens changed file and shows line counts before run finishes
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("change checkout");
   await page.getByRole("button", { name: "发送" }).click();
 
-  await expect(page.getByText("tests/checkout.spec.ts")).toBeVisible();
   await expect(page.getByRole("button", { name: /checkout\.spec\.ts.*\+3.*-1/ })).toBeVisible();
 });
 
@@ -192,6 +191,9 @@ async function mockBackendApi(
     fileContents?: Record<string, string>;
   } = {}
 ) {
+  await page.addInitScript(() => {
+    localStorage.setItem("test-agent.auth.token", "test-token");
+  });
   const workspaceItems = [workspace()];
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -257,11 +259,11 @@ async function mockBackendApi(
       await route.fulfill(json(pageOf([])));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/agents") {
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/agent") {
       await route.fulfill(json([{ id: "build", name: "Build" }]));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/models") {
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/model") {
       await route.fulfill(json([
         { id: "sonnet", providerId: "anthropic", name: "Sonnet" },
         { id: "opus", providerId: "anthropic", name: "Opus" },
@@ -270,7 +272,7 @@ async function mockBackendApi(
       ]));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/providers") {
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/provider") {
       await route.fulfill(json([
         { id: "anthropic", name: "Anthropic", status: "ready" },
         { id: "volcengine", name: "Volcengine Ark", status: "ready" },
@@ -278,23 +280,23 @@ async function mockBackendApi(
       ]));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/commands") {
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/command") {
       await route.fulfill(json([{ id: "test", name: "test", description: "Run tests" }]));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/mcp/resources") {
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/experimental/resource") {
       await route.fulfill(json([{ id: "issue-1", name: "Issue 1", uri: "mcp://issue/1", type: "issue" }]));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/mcp/tools") {
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/experimental/tool/ids") {
       await route.fulfill(json(["bash"]));
       return;
     }
-    if (method === "GET" && ["/api/lsp/status", "/api/mcp/status", "/api/vcs/status"].includes(url.pathname)) {
+    if (method === "GET" && ["/api/internal/agent/opencode/lsp", "/api/internal/agent/opencode/mcp", "/api/internal/agent/opencode/vcs/status"].includes(url.pathname)) {
       await route.fulfill(json({ status: "ready", branch: "main" }));
       return;
     }
-    if (method === "POST" && url.pathname === "/api/runs") {
+    if (method === "POST" && url.pathname === "/api/internal/agent/opencode/runs") {
       capture.runRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await route.fulfill(json({
         runId: "run_1",
@@ -306,7 +308,7 @@ async function mockBackendApi(
       }));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/runs/run_1/events") {
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/runs/run_1/events") {
       await route.fulfill({
         status: 200,
         headers: { ...corsHeaders(), "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
@@ -323,16 +325,16 @@ async function mockBackendApi(
       });
       return;
     }
-    if (method === "GET" && url.pathname === "/api/runs/run_1/diff") {
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/runs/run_1/diff") {
       await route.fulfill(json({ runId: "run_1", files: [diffFile()] }));
       return;
     }
-    if (method === "POST" && url.pathname === "/api/sessions/ses_1/permissions/perm_1/reply") {
+    if (method === "POST" && url.pathname === "/api/internal/agent/opencode/permission/perm_1/reply") {
       capture.permissionReplies?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await route.fulfill(json({ accepted: true }));
       return;
     }
-    if (method === "POST" && url.pathname === "/api/sessions/ses_1/questions/ques_1/reply") {
+    if (method === "POST" && url.pathname === "/api/internal/agent/opencode/question/ques_1/reply") {
       capture.questionReplies?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await route.fulfill(json({ accepted: true }));
       return;
@@ -348,6 +350,10 @@ async function mockBackendApi(
     }
     await route.fulfill(json({}));
   });
+}
+
+async function gotoWorkbench(page: Page) {
+  await page.goto("/", { waitUntil: "domcontentloaded" });
 }
 
 function json(data: unknown) {

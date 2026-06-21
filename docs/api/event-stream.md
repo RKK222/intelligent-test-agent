@@ -78,14 +78,14 @@
 - durable SSE `id` 使用 RunEvent 的 `seq` 字符串。
 - transient SSE 不设置 `id`，避免浏览器把非持久化事件作为 `Last-Event-ID`。
 - 客户端断线后携带 `Last-Event-ID`，后端按当前 runId 返回 `seq > Last-Event-ID` 的 durable 事件。
-- 浏览器原生 `EventSource` 不能设置自定义请求头；前端首次续传可使用 `GET /api/runs/{runId}/events?lastEventId={seq}` 或 `GET /api/internal/platform/opencode-runtime/runs/{runId}/events?lastEventId={seq}`。后端 header 优先，query 参数作为浏览器兼容入口。
+- 浏览器原生 `EventSource` 不能设置自定义请求头；前端首次续传优先使用 `GET /api/internal/agent/{agentId}/runs/{runId}/events?lastEventId={seq}`，默认 `agentId=opencode`。旧兼容入口 `GET /api/runs/{runId}/events?lastEventId={seq}` 和 `GET /api/internal/platform/opencode-runtime/runs/{runId}/events?lastEventId={seq}` 继续有效。后端 header 优先，query 参数作为浏览器兼容入口。
 - 如果 `Last-Event-ID` 缺失，默认从当前订阅策略允许的起点开始返回。
 - 如果 `Last-Event-ID` 非数字或小于 0，后端返回统一错误格式，错误码为 `VALIDATION_ERROR`。
-- 消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时后端会先尝试从 opencode `GET /api/session/{sessionID}/message` 拉取 projected messages，并转换为 transient `message.updated` / `message.part.updated` snapshot 事件。
+- 消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时后端会先通过当前 `AgentRuntime.messages` 拉取 projected messages，并转换为 transient `message.updated` / `message.part.updated` snapshot 事件。当前 `opencode` 实现适配 opencode `GET /api/session/{sessionID}/message`。
 
 ## Phase 04 Runtime SSE
 
-`GET /api/runs/{runId}/events` 是旧兼容入口，`GET /api/internal/platform/opencode-runtime/runs/{runId}/events` 是新平台入口。两者都是前端消费平台 RunEvent 的实时入口，返回 `text/event-stream`，共享同一续传、traceId、错误格式和事件模型。
+`GET /api/internal/agent/{agentId}/runs/{runId}/events` 是 agent-scoped RunEvent 实时入口，前端默认使用 `agentId=opencode`。`GET /api/runs/{runId}/events` 和 `GET /api/internal/platform/opencode-runtime/runs/{runId}/events` 是旧兼容入口，默认按 `opencode` 处理。三者返回 `text/event-stream`，共享同一续传、traceId、错误格式和事件模型，payload 格式不随 agentId 改变。
 
 示例：
 

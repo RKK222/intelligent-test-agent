@@ -13,13 +13,31 @@ describe("backend-api", () => {
     await expect(client.getRun("run_1")).resolves.toEqual({ runId: "run_1" });
 
     expect(fetcher).toHaveBeenCalledWith(
-      "http://api/api/runs/run_1",
+      "http://api/api/internal/agent/opencode/runs/run_1",
       expect.objectContaining({
         headers: expect.any(Headers)
       })
     );
     const headers = fetcher.mock.calls[0]?.[1]?.headers as Headers;
     expect(headers.get("X-Trace-Id")).toBe("trace_fixed");
+  });
+
+  it("uses a custom agent id for agent-scoped run APIs", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: { runId: "run_1" } }), {
+        status: 200
+      })
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      agentId: "OtherAgent",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await client.startRun("ses_1", "hello");
+
+    expect(fetcher).toHaveBeenCalledWith("http://api/api/internal/agent/otheragent/runs", expect.any(Object));
   });
 
   it("maps unified error responses to BackendApiError with trace id", async () => {
@@ -156,7 +174,7 @@ describe("backend-api", () => {
       { agentId: "build", name: "Build", description: "Run tests" }
     ]);
 
-    expect(fetcher).toHaveBeenCalledWith("http://api/api/agents?workspaceId=wrk_1234567890abcdef", expect.any(Object));
+    expect(fetcher).toHaveBeenCalledWith("http://api/api/internal/agent/opencode/api/agent?workspaceId=wrk_1234567890abcdef", expect.any(Object));
   });
 
   it("preserves command catalog source and hints for slash parameter forms", async () => {
@@ -210,7 +228,7 @@ describe("backend-api", () => {
     await client.replySessionPermission("ses_1234567890abcdef", "per_123", { decision: "once" });
 
     expect(fetcher).toHaveBeenCalledWith(
-      "http://api/api/sessions/ses_1234567890abcdef/permissions/per_123/reply",
+      "http://api/api/internal/agent/opencode/permission/per_123/reply?sessionId=ses_1234567890abcdef",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ decision: "once" })
@@ -229,7 +247,10 @@ describe("backend-api", () => {
       { toolId: "read", name: "read" }
     ]);
 
-    expect(fetcher).toHaveBeenCalledWith("http://api/api/mcp/tools?workspaceId=wrk_1234567890abcdef", expect.any(Object));
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/agent/opencode/experimental/tool/ids?workspaceId=wrk_1234567890abcdef",
+      expect.any(Object)
+    );
   });
 
   it("reads session messages for readonly transcript pages", async () => {

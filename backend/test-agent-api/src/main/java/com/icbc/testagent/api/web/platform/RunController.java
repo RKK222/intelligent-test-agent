@@ -73,20 +73,32 @@ public class RunController {
     /**
      * 启动一次运行，支持 prompt 字符串和 Phase 11 prompt parts 两种输入形态。
      */
-    @PostMapping({"/api/runs", "/api/internal/platform/opencode-runtime/runs"})
+    @PostMapping({
+            "/api/runs",
+            "/api/internal/platform/opencode-runtime/runs",
+            "/api/internal/agent/{agentId}/runs"
+    })
     public Mono<ApiResponse<RuntimeDtos.RunResponse>> startRun(
+            @PathVariable(name = "agentId", required = false) String agentId,
             @Valid @RequestBody RuntimeDtos.StartRunRequest request,
             ServerWebExchange exchange) {
-        return blockingResponse(exchange, traceId -> RuntimeDtos.RunResponse.from(runService.startRun(
-                request.toInput(), traceId)));
+        return blockingResponse(exchange, traceId -> RuntimeDtos.RunResponse.from(
+                hasAgentId(agentId)
+                        ? runService.startRun(agentId, request.toInput(), traceId)
+                        : runService.startRun(request.toInput(), traceId)));
     }
 
     /**
      * 查询运行详情，当前只做 runId 边界转换并委托应用层。
      */
-    @GetMapping({"/api/runs/{runId}", "/api/internal/platform/opencode-runtime/runs/{runId}"})
+    @GetMapping({
+            "/api/runs/{runId}",
+            "/api/internal/platform/opencode-runtime/runs/{runId}",
+            "/api/internal/agent/{agentId}/runs/{runId}"
+    })
     public Mono<ApiResponse<RuntimeDtos.RunResponse>> getRun(
-            @PathVariable String runId,
+            @PathVariable(name = "agentId", required = false) String agentId,
+            @PathVariable("runId") String runId,
             ServerWebExchange exchange) {
         return blockingResponse(exchange, ignored -> RuntimeDtos.RunResponse.from(runService.getRun(new RunId(runId))));
     }
@@ -94,55 +106,88 @@ public class RunController {
     /**
      * 取消运行，traceId 用于记录取消事件和后续排障。
      */
-    @PostMapping({"/api/runs/{runId}/cancel", "/api/internal/platform/opencode-runtime/runs/{runId}/cancel"})
+    @PostMapping({
+            "/api/runs/{runId}/cancel",
+            "/api/internal/platform/opencode-runtime/runs/{runId}/cancel",
+            "/api/internal/agent/{agentId}/runs/{runId}/cancel"
+    })
     public Mono<ApiResponse<RuntimeDtos.RunResponse>> cancelRun(
-            @PathVariable String runId,
+            @PathVariable(name = "agentId", required = false) String agentId,
+            @PathVariable("runId") String runId,
             ServerWebExchange exchange) {
         return blockingResponse(exchange, traceId ->
-                RuntimeDtos.RunResponse.from(runService.cancelRun(new RunId(runId), traceId)));
+                RuntimeDtos.RunResponse.from(hasAgentId(agentId)
+                        ? runService.cancelRun(agentId, new RunId(runId), traceId)
+                        : runService.cancelRun(new RunId(runId), traceId)));
     }
 
     /**
      * 读取运行 diff，diff 来源和 fallback 逻辑由 RunDiffApplicationService 封装。
      */
-    @GetMapping({"/api/runs/{runId}/diff", "/api/internal/platform/opencode-runtime/runs/{runId}/diff"})
+    @GetMapping({
+            "/api/runs/{runId}/diff",
+            "/api/internal/platform/opencode-runtime/runs/{runId}/diff",
+            "/api/internal/agent/{agentId}/runs/{runId}/diff"
+    })
     public Mono<ApiResponse<RuntimeDtos.RunDiffResponse>> getDiff(
-            @PathVariable String runId,
+            @PathVariable(name = "agentId", required = false) String agentId,
+            @PathVariable("runId") String runId,
             ServerWebExchange exchange) {
         return blockingResponse(exchange, traceId ->
-                RuntimeDtos.RunDiffResponse.from(runDiffService.getDiff(new RunId(runId), traceId)));
+                RuntimeDtos.RunDiffResponse.from(hasAgentId(agentId)
+                        ? runDiffService.getDiff(agentId, new RunId(runId), traceId)
+                        : runDiffService.getDiff(new RunId(runId), traceId)));
     }
 
     /**
      * 接受运行产生的 diff，并把动作结果包装为统一响应。
      */
-    @PostMapping({"/api/runs/{runId}/diff/accept", "/api/internal/platform/opencode-runtime/runs/{runId}/diff/accept"})
+    @PostMapping({
+            "/api/runs/{runId}/diff/accept",
+            "/api/internal/platform/opencode-runtime/runs/{runId}/diff/accept",
+            "/api/internal/agent/{agentId}/runs/{runId}/diff/accept"
+    })
     public Mono<ApiResponse<RuntimeDtos.RunDiffActionResponse>> acceptDiff(
-            @PathVariable String runId,
+            @PathVariable(name = "agentId", required = false) String agentId,
+            @PathVariable("runId") String runId,
             ServerWebExchange exchange) {
         return blockingResponse(exchange, traceId ->
-                RuntimeDtos.RunDiffActionResponse.from(runDiffService.acceptDiff(new RunId(runId), traceId)));
+                RuntimeDtos.RunDiffActionResponse.from(hasAgentId(agentId)
+                        ? runDiffService.acceptDiff(agentId, new RunId(runId), traceId)
+                        : runDiffService.acceptDiff(new RunId(runId), traceId)));
     }
 
     /**
      * 拒绝运行产生的 diff，并保留与 accept 相同的响应结构。
      */
-    @PostMapping({"/api/runs/{runId}/diff/reject", "/api/internal/platform/opencode-runtime/runs/{runId}/diff/reject"})
+    @PostMapping({
+            "/api/runs/{runId}/diff/reject",
+            "/api/internal/platform/opencode-runtime/runs/{runId}/diff/reject",
+            "/api/internal/agent/{agentId}/runs/{runId}/diff/reject"
+    })
     public Mono<ApiResponse<RuntimeDtos.RunDiffActionResponse>> rejectDiff(
-            @PathVariable String runId,
+            @PathVariable(name = "agentId", required = false) String agentId,
+            @PathVariable("runId") String runId,
             ServerWebExchange exchange) {
         return blockingResponse(exchange, traceId ->
-                RuntimeDtos.RunDiffActionResponse.from(runDiffService.rejectDiff(new RunId(runId), traceId)));
+                RuntimeDtos.RunDiffActionResponse.from(hasAgentId(agentId)
+                        ? runDiffService.rejectDiff(agentId, new RunId(runId), traceId)
+                        : runDiffService.rejectDiff(new RunId(runId), traceId)));
     }
 
     /**
      * 输出 RunEvent SSE，先补发 opencode 当前消息快照，再接续持久化事件流。
      */
     @GetMapping(
-            value = {"/api/runs/{runId}/events", "/api/internal/platform/opencode-runtime/runs/{runId}/events"},
+            value = {
+                    "/api/runs/{runId}/events",
+                    "/api/internal/platform/opencode-runtime/runs/{runId}/events",
+                    "/api/internal/agent/{agentId}/runs/{runId}/events"
+            },
             produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public Flux<ServerSentEvent<RunEventSsePayload>> events(
-            @PathVariable String runId,
+            @PathVariable(name = "agentId", required = false) String agentId,
+            @PathVariable("runId") String runId,
             @RequestHeader(name = "Last-Event-ID", required = false) String lastEventId,
             @RequestParam(name = "lastEventId", required = false) String lastEventIdQuery,
             ServerWebExchange exchange) {
@@ -151,7 +196,9 @@ public class RunController {
         String traceId = RuntimeApiSupport.traceId(exchange);
         Flux<ServerSentEvent<RunEventSsePayload>> snapshotEvents = messageRecoveryService == null
                 ? Flux.empty()
-                : messageRecoveryService.recover(currentRunId, traceId)
+                : (hasAgentId(agentId)
+                        ? messageRecoveryService.recover(agentId, currentRunId, traceId)
+                        : messageRecoveryService.recover(currentRunId, traceId))
                         .map(sseMapper::toTransientSse);
         return Flux.concat(
                 snapshotEvents,
@@ -166,5 +213,9 @@ public class RunController {
         // Run/Diff 编排当前包含阻塞式持久化和 opencode 调用，必须脱离 WebFlux event-loop 执行。
         return Mono.fromCallable(() -> ApiResponse.ok(action.apply(traceId), traceId))
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private boolean hasAgentId(String agentId) {
+        return agentId != null && !agentId.isBlank();
     }
 }

@@ -24,6 +24,7 @@
         <module>test-agent-observability</module>
         <module>test-agent-opencode-sdk-generated</module>
         <module>test-agent-opencode-client</module>
+        <module>test-agent-agent-runtime</module>
         <module>test-agent-workspace-management</module>
         <module>test-agent-opencode-runtime</module>
         <module>test-agent-system-management</module>
@@ -147,6 +148,11 @@
             <dependency>
                 <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-opencode-client</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.icbc.testagent</groupId>
+                <artifactId>test-agent-agent-runtime</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

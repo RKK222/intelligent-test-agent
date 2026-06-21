@@ -2,6 +2,12 @@ package com.icbc.testagent.opencode.runtime.runtime;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.agent.runtime.AgentRuntime;
+import com.icbc.testagent.agent.runtime.AgentRuntimeCommand;
+import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
+import com.icbc.testagent.agent.runtime.AgentRuntimeResult;
+import com.icbc.testagent.domain.agent.AgentSessionBinding;
+import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.session.Session;
@@ -10,9 +16,6 @@ import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
-import com.icbc.testagent.opencode.client.OpencodeClientFacade;
-import com.icbc.testagent.opencode.client.OpencodeRuntimeCommand;
-import com.icbc.testagent.opencode.client.OpencodeRuntimeResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -20,10 +23,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.function.Supplier;
 import org.springframework.stereotype.Service;
 
 /**
- * Phase 11 opencode Web App 运行态 API 编排层，统一把平台请求映射到 opencode-client facade。
+ * Phase 11 opencode Web App 运行态 API 编排层，统一把平台请求映射到 AgentRuntime。
  */
 @Service
 public class OpencodeRuntimeApplicationService {
@@ -31,23 +36,45 @@ public class OpencodeRuntimeApplicationService {
     private final WorkspaceRepository workspaceRepository;
     private final SessionRepository sessionRepository;
     private final ExecutionNodeRepository executionNodeRepository;
-    private final OpencodeClientFacade opencodeClientFacade;
+    private final AgentRuntimeRegistry agentRuntimeRegistry;
+    private final AgentSessionBindingRepository agentSessionBindingRepository;
     private final ObjectMapper objectMapper;
+    private final ThreadLocal<String> agentContext = new ThreadLocal<>();
 
     /**
-     * 创建 opencode runtime 编排服务，Controller 只通过本服务访问 opencode runtime facade。
+     * 创建 opencode runtime 编排服务，Controller 只通过本服务访问 agent runtime。
      */
     public OpencodeRuntimeApplicationService(
             WorkspaceRepository workspaceRepository,
             SessionRepository sessionRepository,
             ExecutionNodeRepository executionNodeRepository,
-            OpencodeClientFacade opencodeClientFacade,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
             ObjectMapper objectMapper) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
-        this.opencodeClientFacade = Objects.requireNonNull(opencodeClientFacade, "opencodeClientFacade must not be null");
+        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
+        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+    }
+
+    /**
+     * 在一次同步 runtime 代理调用中指定 agentId，旧 Controller 不调用该方法时默认 opencode。
+     */
+    public <T> T withAgent(String agentId, Supplier<T> supplier) {
+        Objects.requireNonNull(supplier, "supplier must not be null");
+        String previous = agentContext.get();
+        agentContext.set(agentRuntimeRegistry.normalize(agentId));
+        try {
+            return supplier.get();
+        } finally {
+            if (previous == null) {
+                agentContext.remove();
+            } else {
+                agentContext.set(previous);
+            }
+        }
     }
 
     /**
@@ -248,7 +275,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object sessionChildren(String sessionId, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
-        return get(location, "/session/" + encodePath(location.opencodeSessionId()) + "/children", Map.of(), traceId);
+        return get(location, "/session/" + encodePath(location.remoteSessionId()) + "/children", Map.of(), traceId);
     }
 
     /**
@@ -256,7 +283,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object sessionTodo(String sessionId, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
-        return get(location, "/session/" + encodePath(location.opencodeSessionId()) + "/todo", Map.of(), traceId);
+        return get(location, "/session/" + encodePath(location.remoteSessionId()) + "/todo", Map.of(), traceId);
     }
 
     /**
@@ -264,7 +291,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object sessionDiff(String sessionId, String messageId, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
-        return get(location, "/session/" + encodePath(location.opencodeSessionId()) + "/diff", query("messageID", messageId), traceId);
+        return get(location, "/session/" + encodePath(location.remoteSessionId()) + "/diff", query("messageID", messageId), traceId);
     }
 
     /**
@@ -272,7 +299,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object abortSession(String sessionId, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
-        return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/abort", Map.of(), traceId);
+        return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/abort", Map.of(), traceId);
     }
 
     /**
@@ -280,7 +307,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object forkSession(String sessionId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
-        return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/fork", safeBody(body), traceId);
+        return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/fork", safeBody(body), traceId);
     }
 
     /**
@@ -288,7 +315,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object compactSession(String sessionId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
-        return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/summarize", safeBody(body), traceId);
+        return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/summarize", safeBody(body), traceId);
     }
 
     /**
@@ -296,7 +323,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object revertSession(String sessionId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
-        return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/revert", safeBody(body), traceId);
+        return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/revert", safeBody(body), traceId);
     }
 
     /**
@@ -304,7 +331,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object unrevertSession(String sessionId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
-        return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/unrevert", safeBody(body), traceId);
+        return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/unrevert", safeBody(body), traceId);
     }
 
     /**
@@ -312,7 +339,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object commandSession(String sessionId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
-        return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/command", safeBody(body), traceId);
+        return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/command", safeBody(body), traceId);
     }
 
     /**
@@ -320,7 +347,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object shellSession(String sessionId, Map<String, Object> body, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
-        return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/shell", safeBody(body), traceId);
+        return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/shell", safeBody(body), traceId);
     }
 
     /**
@@ -328,7 +355,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object shareSession(String sessionId, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
-        return post(location, "/session/" + encodePath(location.opencodeSessionId()) + "/share", Map.of(), traceId);
+        return post(location, "/session/" + encodePath(location.remoteSessionId()) + "/share", Map.of(), traceId);
     }
 
     /**
@@ -336,7 +363,7 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object unshareSession(String sessionId, String traceId) {
         SessionLocation location = sessionLocation(sessionId);
-        return delete(location, "/session/" + encodePath(location.opencodeSessionId()) + "/share", Map.of(), traceId);
+        return delete(location, "/session/" + encodePath(location.remoteSessionId()) + "/share", Map.of(), traceId);
     }
 
     /**
@@ -463,10 +490,10 @@ public class OpencodeRuntimeApplicationService {
     }
 
     /**
-     * 统一调用 opencode facade runtime 方法，并把 JsonNode projection 转回普通 Java 对象。
+     * 统一调用 AgentRuntime runtime 方法，并把 JsonNode projection 转回普通 Java 对象。
      */
     private Object call(RuntimeTarget location, String method, String path, Map<String, String> query, Object body, String traceId) {
-        OpencodeRuntimeResult result = opencodeClientFacade.runtime(new OpencodeRuntimeCommand(
+        AgentRuntimeResult result = location.runtime().runtime(new AgentRuntimeCommand(
                         location.node(),
                         method,
                         path,
@@ -483,43 +510,46 @@ public class OpencodeRuntimeApplicationService {
      * 构造 workspace 级 runtime target；未指定 workspace 时只选择可用节点，不传 directory。
      */
     private WorkspaceLocation workspaceLocation(String workspaceId) {
+        String agentId = currentAgentId();
+        AgentRuntime runtime = agentRuntimeRegistry.require(agentId);
         if (workspaceId == null || workspaceId.isBlank()) {
-            return new WorkspaceLocation(routableNode(), null);
+            return new WorkspaceLocation(runtime, routableNode(), null);
         }
         Workspace workspace = workspaceRepository.findById(new WorkspaceId(workspaceId))
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.NOT_FOUND,
                         "Workspace 不存在",
                         Map.of("workspaceId", workspaceId)));
-        return new WorkspaceLocation(routableNode(), workspace.rootPath());
+        return new WorkspaceLocation(runtime, routableNode(), workspace.rootPath());
     }
 
     /**
-     * 构造 session 级 runtime target，要求平台 Session 已绑定远端 opencode session 和节点。
+     * 构造 session 级 runtime target，要求平台 Session 已绑定远端 agent session 和节点。
      */
     private SessionLocation sessionLocation(String sessionId) {
+        String agentId = currentAgentId();
+        AgentRuntime runtime = agentRuntimeRegistry.require(agentId);
         Session session = sessionRepository.findById(new SessionId(sessionId))
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.NOT_FOUND,
                         "Session 不存在",
                         Map.of("sessionId", sessionId)));
-        if (!session.hasOpencodeSessionMapping()) {
-            throw new PlatformException(
-                    ErrorCode.CONFLICT,
-                    "Session 尚未绑定远端 opencode 会话",
-                    Map.of("sessionId", sessionId));
-        }
+        AgentSessionBinding binding = findAgentBinding(agentId, session)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "Session 尚未绑定远端 agent 会话",
+                        Map.of("sessionId", sessionId, "agentId", agentId)));
         Workspace workspace = workspaceRepository.findById(session.workspaceId())
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.NOT_FOUND,
                         "Workspace 不存在",
                         Map.of("workspaceId", session.workspaceId().value())));
-        ExecutionNode node = executionNodeRepository.findById(session.opencodeExecutionNodeId())
+        ExecutionNode node = executionNodeRepository.findById(binding.executionNodeId())
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.OPENCODE_UNAVAILABLE,
-                        "会话绑定的 opencode 执行节点不存在",
-                        Map.of("nodeId", session.opencodeExecutionNodeId().value())));
-        return new SessionLocation(node, workspace.rootPath(), session.opencodeSessionId());
+                        "会话绑定的 agent 执行节点不存在",
+                        Map.of("agentId", agentId, "nodeId", binding.executionNodeId().value())));
+        return new SessionLocation(runtime, node, workspace.rootPath(), binding.remoteSessionId());
     }
 
     /**
@@ -531,6 +561,37 @@ public class OpencodeRuntimeApplicationService {
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.OPENCODE_UNAVAILABLE,
                         "没有可用 opencode 执行节点"));
+    }
+
+    /**
+     * 返回当前请求上下文中的 agentId；未设置时兼容旧入口默认 opencode。
+     */
+    private String currentAgentId() {
+        return agentRuntimeRegistry.normalize(agentContext.get());
+    }
+
+    /**
+     * 查询通用 agent 绑定；opencode 旧字段只作为兼容回填来源。
+     */
+    private Optional<AgentSessionBinding> findAgentBinding(String agentId, Session session) {
+        Optional<AgentSessionBinding> binding =
+                agentSessionBindingRepository.findBySessionIdAndAgentId(session.sessionId(), agentId);
+        if (binding.isPresent()) {
+            return binding;
+        }
+        if (AgentRuntimeRegistry.DEFAULT_AGENT_ID.equals(agentRuntimeRegistry.normalize(agentId))
+                && session.hasOpencodeSessionMapping()) {
+            AgentSessionBinding legacy = new AgentSessionBinding(
+                    session.sessionId(),
+                    agentId,
+                    session.opencodeSessionId(),
+                    session.opencodeExecutionNodeId(),
+                    session.createdAt(),
+                    session.updatedAt(),
+                    session.traceId());
+            return Optional.of(agentSessionBindingRepository.save(legacy));
+        }
+        return Optional.empty();
     }
 
     /**
@@ -644,6 +705,11 @@ public class OpencodeRuntimeApplicationService {
 
     private interface RuntimeTarget {
         /**
+         * 返回本次 runtime 调用选中的 agent runtime。
+         */
+        AgentRuntime runtime();
+
+        /**
          * 返回本次 runtime 调用选中的 opencode 执行节点。
          */
         ExecutionNode node();
@@ -654,9 +720,9 @@ public class OpencodeRuntimeApplicationService {
         String directory();
     }
 
-    private record WorkspaceLocation(ExecutionNode node, String directory) implements RuntimeTarget {
+    private record WorkspaceLocation(AgentRuntime runtime, ExecutionNode node, String directory) implements RuntimeTarget {
     }
 
-    private record SessionLocation(ExecutionNode node, String directory, String opencodeSessionId) implements RuntimeTarget {
+    private record SessionLocation(AgentRuntime runtime, ExecutionNode node, String directory, String remoteSessionId) implements RuntimeTarget {
     }
 }

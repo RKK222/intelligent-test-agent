@@ -185,6 +185,33 @@ class RuntimeControllerTest {
     }
 
     @Test
+    void runControllerExposesAgentScopedRunUrl() {
+        RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
+        when(service.startRun(
+                        eq("opencode"),
+                        argThat(input -> new SessionId("ses_1234567890abcdef").equals(input.sessionId())
+                                && "run the tests".equals(input.effectivePrompt())),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(run());
+        WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.post()
+                .uri("/api/internal/agent/opencode/runs")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"sessionId":"ses_1234567890abcdef","prompt":"run the tests"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.runId").isEqualTo("run_1234567890abcdef");
+    }
+
+    @Test
     void runControllerAcceptsPhase11PromptPartsPayload() {
         RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
         when(service.startRun(

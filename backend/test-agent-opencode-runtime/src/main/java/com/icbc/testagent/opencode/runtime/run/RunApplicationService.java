@@ -1,8 +1,20 @@
 package com.icbc.testagent.opencode.runtime.run;
 
-import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.common.id.RuntimeIdGenerator;
+import com.icbc.testagent.agent.runtime.AgentCancelCommand;
+import com.icbc.testagent.agent.runtime.AgentCreateSessionCommand;
+import com.icbc.testagent.agent.runtime.AgentCreateSessionResult;
+import com.icbc.testagent.agent.runtime.AgentPromptPart;
+import com.icbc.testagent.agent.runtime.AgentRuntime;
+import com.icbc.testagent.agent.runtime.AgentRuntimeCommand;
+import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
+import com.icbc.testagent.agent.runtime.AgentRuntimeResult;
+import com.icbc.testagent.agent.runtime.AgentStartRunCommand;
+import com.icbc.testagent.agent.runtime.AgentStreamEventsCommand;
+import com.icbc.testagent.domain.agent.AgentSessionBinding;
+import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.node.ExecutionNode;
@@ -25,15 +37,6 @@ import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.event.RunEventAppender;
 import com.icbc.testagent.event.RunEventLiveBus;
-import com.icbc.testagent.opencode.client.OpencodeCancelCommand;
-import com.icbc.testagent.opencode.client.OpencodeClientFacade;
-import com.icbc.testagent.opencode.client.OpencodeCreateSessionCommand;
-import com.icbc.testagent.opencode.client.OpencodeCreateSessionResult;
-import com.icbc.testagent.opencode.client.OpencodePromptPart;
-import com.icbc.testagent.opencode.client.OpencodeRuntimeCommand;
-import com.icbc.testagent.opencode.client.OpencodeRuntimeResult;
-import com.icbc.testagent.opencode.client.OpencodeStartRunCommand;
-import com.icbc.testagent.opencode.client.OpencodeStreamEventsCommand;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -54,7 +57,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
- * Run 应用服务，集中编排持久化、路由、opencode 启动/取消和 RunEvent 追加。
+ * Run 应用服务，集中编排持久化、路由、agent 启动/取消和 RunEvent 追加。
  */
 @Service
 public class RunApplicationService {
@@ -70,7 +73,8 @@ public class RunApplicationService {
     private final ExecutionNodeRepository executionNodeRepository;
     private final RoutingDecisionRepository routingDecisionRepository;
     private final RunEventAppender runEventAppender;
-    private final OpencodeClientFacade opencodeClientFacade;
+    private final AgentRuntimeRegistry agentRuntimeRegistry;
+    private final AgentSessionBindingRepository agentSessionBindingRepository;
     private final RunEventLiveBus runEventLiveBus;
     private final RunEventPersistencePolicy runEventPersistencePolicy;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
@@ -87,7 +91,8 @@ public class RunApplicationService {
             ExecutionNodeRepository executionNodeRepository,
             RoutingDecisionRepository routingDecisionRepository,
             RunEventAppender runEventAppender,
-            OpencodeClientFacade opencodeClientFacade,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
             RunEventLiveBus runEventLiveBus,
             RunEventPersistencePolicy runEventPersistencePolicy) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
@@ -97,7 +102,8 @@ public class RunApplicationService {
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
         this.routingDecisionRepository = Objects.requireNonNull(routingDecisionRepository, "routingDecisionRepository must not be null");
         this.runEventAppender = Objects.requireNonNull(runEventAppender, "runEventAppender must not be null");
-        this.opencodeClientFacade = Objects.requireNonNull(opencodeClientFacade, "opencodeClientFacade must not be null");
+        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
+        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
         this.runEventLiveBus = Objects.requireNonNull(runEventLiveBus, "runEventLiveBus must not be null");
         this.runEventPersistencePolicy = Objects.requireNonNull(runEventPersistencePolicy, "runEventPersistencePolicy must not be null");
     }
@@ -113,7 +119,8 @@ public class RunApplicationService {
             ExecutionNodeRepository executionNodeRepository,
             RoutingDecisionRepository routingDecisionRepository,
             RunEventAppender runEventAppender,
-            OpencodeClientFacade opencodeClientFacade) {
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository) {
         this(
                 workspaceRepository,
                 sessionRepository,
@@ -122,7 +129,8 @@ public class RunApplicationService {
                 executionNodeRepository,
                 routingDecisionRepository,
                 runEventAppender,
-                opencodeClientFacade,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
                 new RunEventLiveBus(),
                 new RunEventPersistencePolicy());
     }
@@ -131,13 +139,29 @@ public class RunApplicationService {
      * 以纯文本 prompt 启动 Run，兼容早期只传字符串的调用方。
      */
     public Run startRun(SessionId sessionId, String prompt, String traceId) {
-        return startRun(StartRunInput.ofPrompt(sessionId, prompt), traceId);
+        return startRun(agentRuntimeRegistry.defaultAgentId(), StartRunInput.ofPrompt(sessionId, prompt), traceId);
     }
 
     /**
-     * 启动一次平台 Run：创建本地 Run/消息、路由 opencode 节点、启动远端 prompt 并订阅事件流。
+     * 按指定 agent 启动纯文本 Run，agentId 来源于 URL path。
+     */
+    public Run startRun(String agentId, SessionId sessionId, String prompt, String traceId) {
+        return startRun(agentId, StartRunInput.ofPrompt(sessionId, prompt), traceId);
+    }
+
+    /**
+     * 启动一次平台 Run：创建本地 Run/消息、路由 agent 节点、启动远端 prompt 并订阅事件流。
      */
     public Run startRun(StartRunInput input, String traceId) {
+        return startRun(agentRuntimeRegistry.defaultAgentId(), input, traceId);
+    }
+
+    /**
+     * 启动一次指定 agent 的平台 Run，所有 agent 复用同一 RunEvent 和错误处理链路。
+     */
+    public Run startRun(String agentId, StartRunInput input, String traceId) {
+        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         Instant now = Instant.now();
         SessionId sessionId = input.sessionId();
         String prompt = input.effectivePrompt();
@@ -156,17 +180,17 @@ public class RunApplicationService {
         append(pending.runId(), RunEventType.RUN_CREATED, traceId, now, Map.of("status", RunStatus.PENDING.name()));
 
         try {
-            OpencodeRoutingTarget target = resolveOpencodeTarget(session, pending.runId(), now, traceId);
+            AgentRoutingTarget target = resolveAgentTarget(resolvedAgentId, session, pending.runId(), now, traceId);
             routingDecisionRepository.save(target.decision());
-            Session opencodeSession = ensureOpencodeSession(session, workspace, target.node(), traceId);
+            AgentSessionBinding binding = ensureAgentSession(resolvedAgentId, runtime, session, workspace, target.node(), traceId);
             ModelSelection model = parseModel(input.model());
-            opencodeClientFacade.startRun(new OpencodeStartRunCommand(
+            runtime.startRun(new AgentStartRunCommand(
                             target.node(),
-                            opencodeSession.opencodeSessionId(),
+                            binding.remoteSessionId(),
                             workspace.rootPath(),
                             null,
                             prompt,
-                            toOpencodePromptParts(input, workspace),
+                            toAgentPromptParts(input, workspace),
                             input.messageId(),
                             input.agent(),
                             model.providerId(),
@@ -176,7 +200,7 @@ public class RunApplicationService {
                     .block();
             Run running = runRepository.save(pending.start(Instant.now()));
             append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
-            subscribeOpencodeEvents(running, target.node(), workspace, traceId);
+            subscribeAgentEvents(runtime, running, target.node(), workspace, traceId);
             return running;
         } catch (PlatformException exception) {
             Run failed = runRepository.save(pending.fail(Instant.now()));
@@ -188,34 +212,34 @@ public class RunApplicationService {
     /**
      * 将平台 prompt parts 转成 opencode prompt_async parts，缺少显式文本时保留 legacy prompt。
      */
-    private List<OpencodePromptPart> toOpencodePromptParts(StartRunInput input, Workspace workspace) {
+    private List<AgentPromptPart> toAgentPromptParts(StartRunInput input, Workspace workspace) {
         if (input.parts().isEmpty()) {
-            return List.of(OpencodePromptPart.text(input.effectivePrompt()));
+            return List.of(AgentPromptPart.text(input.effectivePrompt()));
         }
-        List<OpencodePromptPart> parts = new ArrayList<>();
+        List<AgentPromptPart> parts = new ArrayList<>();
         boolean hasTextPart = input.parts().stream()
                 .anyMatch(part -> "text".equals(part.type()) && part.text() != null && !part.text().isBlank());
         if (input.prompt() != null && !hasTextPart) {
-            parts.add(OpencodePromptPart.text(input.prompt()));
+            parts.add(AgentPromptPart.text(input.prompt()));
         }
         parts.addAll(input.parts().stream()
-                .map(part -> toOpencodePromptPart(part, workspace))
+                .map(part -> toAgentPromptPart(part, workspace))
                 .filter(Objects::nonNull)
                 .toList());
-        return parts.isEmpty() ? List.of(OpencodePromptPart.text(input.effectivePrompt())) : parts;
+        return parts.isEmpty() ? List.of(AgentPromptPart.text(input.effectivePrompt())) : parts;
     }
 
     /**
      * 按 part 类型分发到 opencode text/file/agent 表达，未知类型静默丢弃。
      */
-    private OpencodePromptPart toOpencodePromptPart(StartRunInput.PromptPart part, Workspace workspace) {
+    private AgentPromptPart toAgentPromptPart(StartRunInput.PromptPart part, Workspace workspace) {
         if (part.type() == null) {
             return null;
         }
         return switch (part.type()) {
-            case "text" -> part.text() == null ? null : OpencodePromptPart.text(part.text());
-            case "file" -> toOpencodeFilePart(part, workspace);
-            case "agent" -> toOpencodeAgentPart(part);
+            case "text" -> part.text() == null ? null : AgentPromptPart.text(part.text());
+            case "file" -> toAgentFilePart(part, workspace);
+            case "agent" -> toAgentAgentPart(part);
             case "reference" -> toReferenceTextPart(part);
             default -> null;
         };
@@ -224,21 +248,21 @@ public class RunApplicationService {
     /**
      * 将平台文件上下文转成 opencode file part，优先使用内联文本，其次使用前端给出的 URL，再兜底 workspace file URL。
      */
-    private OpencodePromptPart toOpencodeFilePart(StartRunInput.PromptPart part, Workspace workspace) {
+    private AgentPromptPart toAgentFilePart(StartRunInput.PromptPart part, Workspace workspace) {
         String mime = firstText(part.mimeType(), "text/plain");
         String filename = firstText(part.name(), filenameFromPath(part.path()), "attachment");
         String text = sourceText(part);
         if (text != null) {
             String url = "data:" + mime + ";base64," + Base64.getEncoder()
                     .encodeToString(text.getBytes(StandardCharsets.UTF_8));
-            return OpencodePromptPart.file(url, mime, filename, fileSource(part, text));
+            return AgentPromptPart.file(url, mime, filename, fileSource(part, text));
         }
         if (part.url() != null) {
-            return OpencodePromptPart.file(part.url(), mime, filename, normalizedSource(part.source()));
+            return AgentPromptPart.file(part.url(), mime, filename, normalizedSource(part.source()));
         }
         if (part.path() != null) {
             // 只允许把 workspace 内路径转成 file:// URL，防止前端构造任意宿主机路径交给 opencode 读取。
-            return OpencodePromptPart.file(workspaceFileUrl(workspace, part.path()), mime, filename, fileSource(part, null));
+            return AgentPromptPart.file(workspaceFileUrl(workspace, part.path()), mime, filename, fileSource(part, null));
         }
         return null;
     }
@@ -246,24 +270,24 @@ public class RunApplicationService {
     /**
      * 将平台 agent part 转成 opencode agent part，缺少名称时丢弃。
      */
-    private OpencodePromptPart toOpencodeAgentPart(StartRunInput.PromptPart part) {
+    private AgentPromptPart toAgentAgentPart(StartRunInput.PromptPart part) {
         String agentName = firstText(part.name(), part.agentId());
         if (agentName == null) {
             return null;
         }
-        return OpencodePromptPart.agent(agentName, agentSource(part));
+        return AgentPromptPart.agent(agentName, agentSource(part));
     }
 
     /**
      * 将 reference part 降级为文本提示，避免 opencode 不认识平台引用类型。
      */
-    private OpencodePromptPart toReferenceTextPart(StartRunInput.PromptPart part) {
+    private AgentPromptPart toReferenceTextPart(StartRunInput.PromptPart part) {
         String label = firstText(part.label(), part.id(), part.uri());
         if (label == null) {
             return null;
         }
         String suffix = part.uri() == null ? "" : " (" + part.uri() + ")";
-        return OpencodePromptPart.text("Reference: " + label + suffix);
+        return AgentPromptPart.text("Reference: " + label + suffix);
     }
 
     /**
@@ -401,9 +425,18 @@ public class RunApplicationService {
     }
 
     /**
-     * 请求取消 Run：先更新本地状态，再尽力通知远端 opencode session abort，最后落取消事件。
+     * 请求取消 Run：先更新本地状态，再尽力通知默认 agent 远端 session abort，最后落取消事件。
      */
     public Run cancelRun(RunId runId, String traceId) {
+        return cancelRun(agentRuntimeRegistry.defaultAgentId(), runId, traceId);
+    }
+
+    /**
+     * 请求取消指定 agent Run；旧 URL 默认传入 opencode，新 URL 由 path 决定。
+     */
+    public Run cancelRun(String agentId, RunId runId, String traceId) {
+        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         Run run = getRun(runId);
         if (run.status().isTerminal()) {
             throw new PlatformException(
@@ -421,16 +454,15 @@ public class RunApplicationService {
         if (decision != null) {
             Session session = findSession(run.sessionId());
             Workspace workspace = findWorkspace(run.workspaceId());
-            if (session.hasOpencodeSessionMapping()) {
-                executionNodeRepository.findById(session.opencodeExecutionNodeId()).ifPresent(node ->
-                        opencodeClientFacade.cancelSession(new OpencodeCancelCommand(
+            findAgentBinding(resolvedAgentId, session, traceId).ifPresent(binding ->
+                    executionNodeRepository.findById(binding.executionNodeId()).ifPresent(node ->
+                            runtime.cancelSession(new AgentCancelCommand(
                                         node,
-                                        session.opencodeSessionId(),
+                                        binding.remoteSessionId(),
                                         workspace.rootPath(),
                                         null,
                                         traceId))
-                                .block());
-            }
+                                    .block()));
         }
         Run cancelled = cancelling.status() == RunStatus.CANCELLED
                 ? cancelling
@@ -469,27 +501,30 @@ public class RunApplicationService {
     }
 
     /**
-     * 解析本次 Run 的 opencode 目标节点；已有远端 session 时强制粘滞到绑定节点。
+     * 解析本次 Run 的 agent 目标节点；已有远端 session 时强制粘滞到绑定节点。
      */
-    private OpencodeRoutingTarget resolveOpencodeTarget(Session session, RunId runId, Instant now, String traceId) {
-        if (session.hasOpencodeSessionMapping()) {
-            ExecutionNode node = executionNodeRepository.findById(session.opencodeExecutionNodeId())
+    private AgentRoutingTarget resolveAgentTarget(String agentId, Session session, RunId runId, Instant now, String traceId) {
+        Optional<AgentSessionBinding> binding = findAgentBinding(agentId, session, traceId);
+        if (binding.isPresent()) {
+            ExecutionNode node = executionNodeRepository.findById(binding.get().executionNodeId())
                     .orElseThrow(() -> new PlatformException(
                             ErrorCode.OPENCODE_UNAVAILABLE,
-                            "会话绑定的 opencode 执行节点不存在",
+                            "会话绑定的 agent 执行节点不存在",
                             Map.of(
                                     "sessionId", session.sessionId().value(),
-                                    "nodeId", session.opencodeExecutionNodeId().value())));
+                                    "agentId", agentId,
+                                    "nodeId", binding.get().executionNodeId().value())));
             if (!node.canAcceptRun()) {
                 throw new PlatformException(
                         ErrorCode.OPENCODE_UNAVAILABLE,
-                        "会话绑定的 opencode 执行节点不可用",
+                        "会话绑定的 agent 执行节点不可用",
                         Map.of(
                                 "sessionId", session.sessionId().value(),
+                                "agentId", agentId,
                                 "nodeId", node.executionNodeId().value(),
                                 "status", node.status().name()));
             }
-            return new OpencodeRoutingTarget(
+            return new AgentRoutingTarget(
                     node,
                     new RoutingDecision(runId, node.executionNodeId(), RoutingReason.STICKY_SESSION, now, traceId));
         }
@@ -504,18 +539,25 @@ public class RunApplicationService {
                         ErrorCode.OPENCODE_UNAVAILABLE,
                         "路由节点不存在",
                         Map.of("nodeId", decision.executionNodeId().value())));
-        return new OpencodeRoutingTarget(node, decision);
+        return new AgentRoutingTarget(node, decision);
     }
 
     /**
-     * 确保平台 Session 已绑定远端 opencode session；首次 Run 才懒创建远端会话。
+     * 确保平台 Session 已绑定指定 agent 的远端 session；首次 Run 才懒创建远端会话。
      */
-    private Session ensureOpencodeSession(Session session, Workspace workspace, ExecutionNode node, String traceId) {
-        if (session.hasOpencodeSessionMapping()) {
-            return session;
+    private AgentSessionBinding ensureAgentSession(
+            String agentId,
+            AgentRuntime runtime,
+            Session session,
+            Workspace workspace,
+            ExecutionNode node,
+            String traceId) {
+        Optional<AgentSessionBinding> existing = findAgentBinding(agentId, session, traceId);
+        if (existing.isPresent()) {
+            return existing.get();
         }
-        // 首次 Run 才创建远端 opencode session，平台 ses_ ID 始终只留在平台内部。
-        OpencodeCreateSessionResult created = opencodeClientFacade.createSession(new OpencodeCreateSessionCommand(
+        // 首次 Run 才创建远端 agent session，平台 ses_ ID 始终只留在平台内部。
+        AgentCreateSessionResult created = runtime.createSession(new AgentCreateSessionCommand(
                         node,
                         workspace.rootPath(),
                         null,
@@ -525,19 +567,64 @@ public class RunApplicationService {
         if (created == null) {
             throw new PlatformException(
                     ErrorCode.OPENCODE_BAD_GATEWAY,
-                    "opencode 创建会话未返回结果",
-                    Map.of("sessionId", session.sessionId().value(), "nodeId", node.executionNodeId().value()));
+                    "agent 创建会话未返回结果",
+                    Map.of(
+                            "sessionId", session.sessionId().value(),
+                            "agentId", agentId,
+                            "nodeId", node.executionNodeId().value()));
         }
-        return sessionRepository.attachOpencodeSession(
-                        session.sessionId(),
-                        created.opencodeSessionId(),
-                        node.executionNodeId(),
-                        Instant.now(),
-                        traceId)
-                .orElseThrow(() -> new PlatformException(
-                        ErrorCode.NOT_FOUND,
-                        "Session 不存在",
-                        Map.of("sessionId", session.sessionId().value())));
+        Instant now = Instant.now();
+        AgentSessionBinding binding = agentSessionBindingRepository.save(new AgentSessionBinding(
+                session.sessionId(),
+                agentId,
+                created.remoteSessionId(),
+                node.executionNodeId(),
+                now,
+                now,
+                traceId));
+        if (isDefaultOpencode(agentId)) {
+            sessionRepository.attachOpencodeSession(
+                            session.sessionId(),
+                            created.remoteSessionId(),
+                            node.executionNodeId(),
+                            now,
+                            traceId)
+                    .orElseThrow(() -> new PlatformException(
+                            ErrorCode.NOT_FOUND,
+                            "Session 不存在",
+                            Map.of("sessionId", session.sessionId().value())));
+        }
+        return binding;
+    }
+
+    /**
+     * 查询通用 agent 绑定；opencode 旧字段只作为兼容回填来源，不再作为新链路主数据源。
+     */
+    private Optional<AgentSessionBinding> findAgentBinding(String agentId, Session session, String traceId) {
+        Optional<AgentSessionBinding> binding =
+                agentSessionBindingRepository.findBySessionIdAndAgentId(session.sessionId(), agentId);
+        if (binding.isPresent()) {
+            return binding;
+        }
+        if (isDefaultOpencode(agentId) && session.hasOpencodeSessionMapping()) {
+            AgentSessionBinding legacy = new AgentSessionBinding(
+                    session.sessionId(),
+                    agentId,
+                    session.opencodeSessionId(),
+                    session.opencodeExecutionNodeId(),
+                    session.createdAt(),
+                    session.updatedAt(),
+                    traceId);
+            return Optional.of(agentSessionBindingRepository.save(legacy));
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * 判断是否为默认 opencode agent，用于兼容旧 sessions.opencode_* 字段。
+     */
+    private boolean isDefaultOpencode(String agentId) {
+        return AgentRuntimeRegistry.DEFAULT_AGENT_ID.equals(agentRuntimeRegistry.normalize(agentId));
     }
 
     /**
@@ -548,17 +635,17 @@ public class RunApplicationService {
     }
 
     /**
-     * 订阅 opencode 事件流，事件处理串行 offload，避免阻塞 Netty 线程。
+     * 订阅 agent 事件流，事件处理串行 offload，避免阻塞 Netty 线程。
      */
-    private void subscribeOpencodeEvents(Run run, ExecutionNode node, Workspace workspace, String traceId) {
-        opencodeClientFacade.streamRunEvents(new OpencodeStreamEventsCommand(
+    private void subscribeAgentEvents(AgentRuntime runtime, Run run, ExecutionNode node, Workspace workspace, String traceId) {
+        runtime.streamRunEvents(new AgentStreamEventsCommand(
                         node,
                         run.runId(),
                         workspace.rootPath(),
                         null,
                         traceId))
                 // opencode stream 来自 Netty 线程，事件入库或实时发布必须串行 offload，且本地 DB 抖动不能误判为 Run 失败。
-                .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(run, node, workspace, draft))
+                .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(runtime, run, node, workspace, draft))
                         .subscribeOn(Schedulers.boundedElastic())
                         .onErrorResume(error -> {
                             LOGGER.warn(
@@ -577,9 +664,9 @@ public class RunApplicationService {
     }
 
     /**
-     * 处理单个 opencode 事件：终态事件落库并更新 Run，瞬态消息事件只发布 live bus。
+     * 处理单个 agent 事件：终态事件落库并更新 Run，瞬态消息事件只发布 live bus。
      */
-    private void appendStreamEvent(Run originalRun, ExecutionNode node, Workspace workspace, RunEventDraft draft) {
+    private void appendStreamEvent(AgentRuntime runtime, Run originalRun, ExecutionNode node, Workspace workspace, RunEventDraft draft) {
         if (draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED) {
             Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
             if (!current.status().isTerminal()) {
@@ -593,7 +680,7 @@ public class RunApplicationService {
             return;
         }
         if (draft.type() == RunEventType.MESSAGE_PART_UPDATED) {
-            appendLiveDiffFromToolPart(originalRun, node, workspace, draft);
+            appendLiveDiffFromToolPart(runtime, originalRun, node, workspace, draft);
         }
         if (!runEventPersistencePolicy.shouldPersist(draft)) {
             runEventLiveBus.publishTransient(runEventPersistencePolicy.sanitizeForPersistence(draft));
@@ -603,11 +690,11 @@ public class RunApplicationService {
     }
 
     /**
-     * 从 opencode tool part 完成态派生轻量 Diff 事件，供前端在 Run 未结束时实时刷新文件树。
+     * 从 agent tool part 完成态派生轻量 Diff 事件，供前端在 Run 未结束时实时刷新文件树。
      */
-    private void appendLiveDiffFromToolPart(Run originalRun, ExecutionNode node, Workspace workspace, RunEventDraft draft) {
+    private void appendLiveDiffFromToolPart(AgentRuntime runtime, Run originalRun, ExecutionNode node, Workspace workspace, RunEventDraft draft) {
         try {
-            liveDiffFromToolPart(originalRun, node, workspace, draft)
+            liveDiffFromToolPart(runtime, originalRun, node, workspace, draft)
                     .ifPresent(diff -> runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(diff)));
         } catch (RuntimeException exception) {
             LOGGER.warn(
@@ -619,6 +706,7 @@ public class RunApplicationService {
     }
 
     private Optional<RunEventDraft> liveDiffFromToolPart(
+            AgentRuntime runtime,
             Run originalRun,
             ExecutionNode node,
             Workspace workspace,
@@ -645,7 +733,7 @@ public class RunApplicationService {
         List<LiveDiffFile> files = extractToolDiffFiles(tool, input, metadata, workspace);
         boolean needsWorkingTreeDiff = "write".equals(tool) || files.isEmpty() || files.stream().anyMatch(file -> !file.countsKnown());
         if (needsWorkingTreeDiff) {
-            List<LiveDiffFile> workingTreeFiles = workingTreeDiffFiles(node, workspace, draft.traceId());
+            List<LiveDiffFile> workingTreeFiles = workingTreeDiffFiles(runtime, node, workspace, draft.traceId());
             if (!workingTreeFiles.isEmpty()) {
                 files = workingTreeFiles;
             } else if ("write".equals(tool) || files.isEmpty()) {
@@ -731,8 +819,8 @@ public class RunApplicationService {
                 additions.isPresent() && deletions.isPresent()));
     }
 
-    private List<LiveDiffFile> workingTreeDiffFiles(ExecutionNode node, Workspace workspace, String traceId) {
-        OpencodeRuntimeResult result = opencodeClientFacade.runtime(new OpencodeRuntimeCommand(
+    private List<LiveDiffFile> workingTreeDiffFiles(AgentRuntime runtime, ExecutionNode node, Workspace workspace, String traceId) {
+        AgentRuntimeResult result = runtime.runtime(new AgentRuntimeCommand(
                         node,
                         "GET",
                         "/vcs/diff",
@@ -901,7 +989,7 @@ public class RunApplicationService {
         }
     }
 
-    private record OpencodeRoutingTarget(ExecutionNode node, RoutingDecision decision) {
+    private record AgentRoutingTarget(ExecutionNode node, RoutingDecision decision) {
     }
 
     private record LiveDiffFile(

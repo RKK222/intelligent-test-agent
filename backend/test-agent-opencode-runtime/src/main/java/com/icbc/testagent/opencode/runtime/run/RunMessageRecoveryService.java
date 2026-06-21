@@ -1,5 +1,12 @@
 package com.icbc.testagent.opencode.runtime.run;
 
+import com.icbc.testagent.agent.runtime.AgentRuntime;
+import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
+import com.icbc.testagent.agent.runtime.AgentSessionMessage;
+import com.icbc.testagent.agent.runtime.AgentSessionMessagesCommand;
+import com.icbc.testagent.agent.runtime.AgentSessionMessagesResult;
+import com.icbc.testagent.domain.agent.AgentSessionBinding;
+import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
@@ -9,16 +16,13 @@ import com.icbc.testagent.domain.run.RunRepository;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.event.RunEventSsePayload;
-import com.icbc.testagent.opencode.client.OpencodeClientFacade;
-import com.icbc.testagent.opencode.client.OpencodeSessionMessage;
-import com.icbc.testagent.opencode.client.OpencodeSessionMessagesCommand;
-import com.icbc.testagent.opencode.client.OpencodeSessionMessagesResult;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,7 +32,7 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
- * SSE 建连时从 opencode projected messages 恢复消息内容；平台本地不再用 run_events 补存消息正文。
+ * SSE 建连时从 agent projected messages 恢复消息内容；平台本地不再用 run_events 补存消息正文。
  */
 @Service
 public class RunMessageRecoveryService {
@@ -40,33 +44,44 @@ public class RunMessageRecoveryService {
     private final RunRepository runRepository;
     private final SessionRepository sessionRepository;
     private final ExecutionNodeRepository executionNodeRepository;
-    private final OpencodeClientFacade opencodeClientFacade;
+    private final AgentRuntimeRegistry agentRuntimeRegistry;
+    private final AgentSessionBindingRepository agentSessionBindingRepository;
 
     /**
-     * 创建消息恢复服务，恢复过程只依赖领域仓储和 opencode facade。
+     * 创建消息恢复服务，恢复过程只依赖领域仓储和 agent runtime registry。
      */
     public RunMessageRecoveryService(
             RunRepository runRepository,
             SessionRepository sessionRepository,
             ExecutionNodeRepository executionNodeRepository,
-            OpencodeClientFacade opencodeClientFacade) {
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository) {
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
-        this.opencodeClientFacade = Objects.requireNonNull(opencodeClientFacade, "opencodeClientFacade must not be null");
+        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
+        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
     }
 
     /**
-     * 异步恢复 Run 的 opencode projected messages，失败时返回空流而不影响 SSE 建连。
+     * 异步恢复 Run 的默认 agent projected messages，失败时返回空流而不影响 SSE 建连。
      */
     public Flux<RunEventSsePayload> recover(RunId runId, String traceId) {
+        return recover(agentRuntimeRegistry.defaultAgentId(), runId, traceId);
+    }
+
+    /**
+     * 异步恢复指定 agent 的 projected messages，失败时返回空流而不影响 SSE 建连。
+     */
+    public Flux<RunEventSsePayload> recover(String agentId, RunId runId, String traceId) {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(traceId, "traceId must not be null");
-        return Mono.fromCallable(() -> recoverSync(runId, traceId))
+        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        return Mono.fromCallable(() -> recoverSync(resolvedAgentId, runId, traceId))
                 .subscribeOn(Schedulers.boundedElastic())
                 .onErrorResume(error -> {
-                    LOGGER.warn("Failed to recover run messages from opencode, runId={}, traceId={}",
-                            runId.value(), traceId, error);
+                    LOGGER.warn("Failed to recover run messages from agent, agentId={}, runId={}, traceId={}",
+                            resolvedAgentId, runId.value(), traceId, error);
                     return Mono.just(List.of());
                 })
                 .flatMapMany(Flux::fromIterable);
@@ -75,22 +90,27 @@ public class RunMessageRecoveryService {
     /**
      * 同步执行恢复查询，缺失 Run/Session/节点或未绑定远端 session 时返回空列表。
      */
-    private List<RunEventSsePayload> recoverSync(RunId runId, String traceId) {
+    private List<RunEventSsePayload> recoverSync(String agentId, RunId runId, String traceId) {
+        AgentRuntime runtime = agentRuntimeRegistry.require(agentId);
         Run run = runRepository.findById(runId).orElse(null);
         if (run == null) {
             return List.of();
         }
         Session session = sessionRepository.findById(run.sessionId()).orElse(null);
-        if (session == null || !session.hasOpencodeSessionMapping()) {
+        if (session == null) {
             return List.of();
         }
-        ExecutionNode node = executionNodeRepository.findById(session.opencodeExecutionNodeId()).orElse(null);
+        AgentSessionBinding binding = findAgentBinding(agentId, session, traceId).orElse(null);
+        if (binding == null) {
+            return List.of();
+        }
+        ExecutionNode node = executionNodeRepository.findById(binding.executionNodeId()).orElse(null);
         if (node == null) {
             return List.of();
         }
-        OpencodeSessionMessagesResult result = opencodeClientFacade.sessionMessages(new OpencodeSessionMessagesCommand(
+        AgentSessionMessagesResult result = runtime.sessionMessages(new AgentSessionMessagesCommand(
                         node,
-                        session.opencodeSessionId(),
+                        binding.remoteSessionId(),
                         RECOVERY_MESSAGE_LIMIT,
                         RECOVERY_ORDER,
                         null,
@@ -105,10 +125,10 @@ public class RunMessageRecoveryService {
     private List<RunEventSsePayload> toSnapshotEvents(
             RunId runId,
             String traceId,
-            List<OpencodeSessionMessage> messages) {
+            List<AgentSessionMessage> messages) {
         Instant occurredAt = Instant.now();
         List<RunEventSsePayload> events = new ArrayList<>();
-        for (OpencodeSessionMessage message : messages) {
+        for (AgentSessionMessage message : messages) {
             Map<String, Object> messagePayload = normalizeMessage(message.message());
             String messageId = text(messagePayload.get("id"));
             events.add(transientPayload(
@@ -135,6 +155,30 @@ public class RunMessageRecoveryService {
             }
         }
         return List.copyOf(events);
+    }
+
+    /**
+     * 查询通用 agent 绑定；opencode 旧字段只作为兼容回填来源。
+     */
+    private Optional<AgentSessionBinding> findAgentBinding(String agentId, Session session, String traceId) {
+        Optional<AgentSessionBinding> binding =
+                agentSessionBindingRepository.findBySessionIdAndAgentId(session.sessionId(), agentId);
+        if (binding.isPresent()) {
+            return binding;
+        }
+        if (AgentRuntimeRegistry.DEFAULT_AGENT_ID.equals(agentRuntimeRegistry.normalize(agentId))
+                && session.hasOpencodeSessionMapping()) {
+            AgentSessionBinding legacy = new AgentSessionBinding(
+                    session.sessionId(),
+                    agentId,
+                    session.opencodeSessionId(),
+                    session.opencodeExecutionNodeId(),
+                    session.createdAt(),
+                    session.updatedAt(),
+                    traceId);
+            return Optional.of(agentSessionBindingRepository.save(legacy));
+        }
+        return Optional.empty();
     }
 
     /**

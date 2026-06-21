@@ -7,6 +7,10 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
+import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
+import com.icbc.testagent.agent.runtime.OpencodeAgentRuntime;
+import com.icbc.testagent.domain.agent.AgentSessionBinding;
+import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.event.RunEvent;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventId;
@@ -49,7 +53,9 @@ import com.icbc.testagent.opencode.client.OpencodeStreamEventsCommand;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -164,7 +170,12 @@ class RunDiffApplicationServiceTest {
                 events,
                 new FakeExecutionNodeRepository(),
                 new RunEventAppender(events),
-                facade);
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+    }
+
+    private static AgentRuntimeRegistry runtimeRegistry(FakeOpencodeFacade facade) {
+        return new AgentRuntimeRegistry(List.of(new OpencodeAgentRuntime(facade)));
     }
 
     private static RunEventDraft diffProposed(Map<String, Object> payload) {
@@ -337,6 +348,33 @@ class RunDiffApplicationServiceTest {
         @Override
         public List<ExecutionNode> findRoutableNodes(int limit) {
             return List.of(node());
+        }
+    }
+
+    private static final class FakeAgentSessionBindingRepository implements AgentSessionBindingRepository {
+        private final Map<String, AgentSessionBinding> bindings = new LinkedHashMap<>();
+
+        @Override
+        public AgentSessionBinding save(AgentSessionBinding binding) {
+            bindings.put(key(binding.sessionId(), binding.agentId()), binding);
+            return binding;
+        }
+
+        @Override
+        public Optional<AgentSessionBinding> findBySessionIdAndAgentId(SessionId sessionId, String agentId) {
+            return Optional.ofNullable(bindings.get(key(sessionId, agentId)));
+        }
+
+        @Override
+        public Optional<AgentSessionBinding> findByAgentIdAndRemoteSessionId(String agentId, String remoteSessionId) {
+            return bindings.values().stream()
+                    .filter(binding -> binding.agentId().equals(agentId.trim().toLowerCase(Locale.ROOT)))
+                    .filter(binding -> binding.remoteSessionId().equals(remoteSessionId))
+                    .findFirst();
+        }
+
+        private String key(SessionId sessionId, String agentId) {
+            return sessionId.value() + ":" + agentId.trim().toLowerCase(Locale.ROOT);
         }
     }
 

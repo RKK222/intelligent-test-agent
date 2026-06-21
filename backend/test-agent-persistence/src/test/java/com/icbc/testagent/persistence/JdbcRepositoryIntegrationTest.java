@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.icbc.testagent.common.pagination.PageResponse;
+import com.icbc.testagent.domain.agent.AgentSessionBinding;
 import com.icbc.testagent.domain.event.RunEvent;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventType;
@@ -59,6 +60,7 @@ class JdbcRepositoryIntegrationTest {
     private JdbcExecutionNodeRepository executionNodes;
     private JdbcRoutingDecisionRepository routingDecisions;
     private JdbcSessionMessageRepository sessionMessages;
+    private JdbcAgentSessionBindingRepository agentSessionBindings;
 
     @BeforeEach
     void setUp() {
@@ -77,6 +79,7 @@ class JdbcRepositoryIntegrationTest {
         executionNodes = new JdbcExecutionNodeRepository(jdbcClient, objectMapper);
         routingDecisions = new JdbcRoutingDecisionRepository(jdbcClient);
         sessionMessages = new JdbcSessionMessageRepository(jdbcClient);
+        agentSessionBindings = new JdbcAgentSessionBindingRepository(jdbcClient);
     }
 
     @AfterEach
@@ -127,6 +130,143 @@ class JdbcRepositoryIntegrationTest {
         assertThat(mapped.opencodeExecutionNodeId()).isEqualTo(new ExecutionNodeId("node_1234567890abcdef"));
         assertThat(mapped.updatedAt()).isEqualTo(NOW.plusSeconds(1));
         assertThat(sessions.findById(mapped.sessionId())).contains(mapped);
+    }
+
+    @Test
+    void agentSessionBindingsUpsertAndQuery() {
+        workspaces.save(workspace());
+        sessions.save(session());
+        executionNodes.save(executionNode());
+        sessions.attachOpencodeSession(
+                new SessionId("ses_1234567890abcdef"),
+                "ses_remote1234567890abcdef",
+                new ExecutionNodeId("node_1234567890abcdef"),
+                NOW.plusSeconds(1),
+                "trace_attach1234567890").orElseThrow();
+
+        AgentSessionBinding saved = agentSessionBindings.save(new AgentSessionBinding(
+                new SessionId("ses_1234567890abcdef"),
+                "opencode",
+                "ses_remote2234567890abcdef",
+                new ExecutionNodeId("node_1234567890abcdef"),
+                NOW,
+                NOW.plusSeconds(2),
+                "trace_bind1234567890"));
+
+        assertThat(saved.remoteSessionId()).isEqualTo("ses_remote2234567890abcdef");
+        assertThat(agentSessionBindings.findBySessionIdAndAgentId(new SessionId("ses_1234567890abcdef"), " OPENCODE "))
+                .contains(saved);
+        assertThat(agentSessionBindings.findByAgentIdAndRemoteSessionId(" OPENCODE ", "ses_remote2234567890abcdef"))
+                .contains(saved);
+
+        AgentSessionBinding updated = agentSessionBindings.save(saved.updateRemoteSession(
+                "ses_remote3234567890abcdef",
+                new ExecutionNodeId("node_1234567890abcdef"),
+                NOW.plusSeconds(3),
+                "trace_bind2234567890"));
+
+        assertThat(agentSessionBindings.findBySessionIdAndAgentId(new SessionId("ses_1234567890abcdef"), "opencode"))
+                .contains(updated);
+        assertThat(agentSessionBindings.findByAgentIdAndRemoteSessionId("opencode", "ses_remote2234567890abcdef"))
+                .isEmpty();
+
+        sessions.save(session("ses_2234567890abcdef", "Second session", false, SessionStatus.ACTIVE, 3));
+        assertThatThrownBy(() -> agentSessionBindings.save(new AgentSessionBinding(
+                        new SessionId("ses_2234567890abcdef"),
+                        "opencode",
+                        "ses_remote3234567890abcdef",
+                        new ExecutionNodeId("node_1234567890abcdef"),
+                        NOW,
+                        NOW.plusSeconds(4),
+                        "trace_bind3234567890")))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void agentSessionBindingsBackfillExistingOpencodeMappingDuringMigration() {
+        EmbeddedDatabase migrationDatabase = new EmbeddedDatabaseBuilder()
+                .setType(EmbeddedDatabaseType.H2)
+                .setName("testagent_binding_migration;MODE=PostgreSQL;DATABASE_TO_UPPER=false")
+                .build();
+        try {
+            Flyway.configure()
+                    .dataSource(migrationDatabase)
+                    .locations("classpath:db/migration")
+                    .target("5")
+                    .load()
+                    .migrate();
+            JdbcClient jdbcClient = JdbcClient.create(migrationDatabase);
+            jdbcClient.sql("""
+                            insert into workspaces(workspace_id, name, root_path, status, trace_id, created_at, updated_at)
+                            values (:workspaceId, :name, :rootPath, :status, :traceId, :createdAt, :updatedAt)
+                            """)
+                    .param("workspaceId", "ws_1234567890abcdef")
+                    .param("name", "Test Workspace")
+                    .param("rootPath", "/tmp/workspace")
+                    .param("status", WorkspaceStatus.ACTIVE.name())
+                    .param("traceId", "trace_1234567890abcdef")
+                    .param("createdAt", Timestamp.from(NOW))
+                    .param("updatedAt", Timestamp.from(NOW))
+                    .update();
+            jdbcClient.sql("""
+                            insert into execution_nodes(
+                                execution_node_id, base_url, status, running_runs, max_runs, weight,
+                                last_heartbeat_at, capabilities_json, trace_id, created_at, updated_at
+                            )
+                            values (
+                                :nodeId, :baseUrl, :status, :runningRuns, :maxRuns, :weight,
+                                :lastHeartbeatAt, :capabilitiesJson, :traceId, :createdAt, :updatedAt
+                            )
+                            """)
+                    .param("nodeId", "node_1234567890abcdef")
+                    .param("baseUrl", "http://127.0.0.1:4096")
+                    .param("status", ExecutionNodeStatus.READY.name())
+                    .param("runningRuns", 0)
+                    .param("maxRuns", 4)
+                    .param("weight", 1)
+                    .param("lastHeartbeatAt", Timestamp.from(NOW))
+                    .param("capabilitiesJson", "[]")
+                    .param("traceId", "trace_1234567890abcdef")
+                    .param("createdAt", Timestamp.from(NOW))
+                    .param("updatedAt", Timestamp.from(NOW))
+                    .update();
+            jdbcClient.sql("""
+                            insert into sessions(
+                                session_id, workspace_id, title, status, trace_id, created_at, updated_at,
+                                opencode_session_id, opencode_execution_node_id, pinned
+                            )
+                            values (
+                                :sessionId, :workspaceId, :title, :status, :traceId, :createdAt, :updatedAt,
+                                :opencodeSessionId, :opencodeExecutionNodeId, :pinned
+                            )
+                            """)
+                    .param("sessionId", "ses_1234567890abcdef")
+                    .param("workspaceId", "ws_1234567890abcdef")
+                    .param("title", "Session")
+                    .param("status", SessionStatus.ACTIVE.name())
+                    .param("traceId", "trace_session123456")
+                    .param("createdAt", Timestamp.from(NOW))
+                    .param("updatedAt", Timestamp.from(NOW.plusSeconds(3)))
+                    .param("opencodeSessionId", "ses_remote1234567890abcdef")
+                    .param("opencodeExecutionNodeId", "node_1234567890abcdef")
+                    .param("pinned", false)
+                    .update();
+
+            Flyway.configure().dataSource(migrationDatabase).locations("classpath:db/migration").load().migrate();
+
+            JdbcAgentSessionBindingRepository migratedBindings = new JdbcAgentSessionBindingRepository(jdbcClient);
+            assertThat(migratedBindings.findBySessionIdAndAgentId(new SessionId("ses_1234567890abcdef"), "opencode"))
+                    .contains(new AgentSessionBinding(
+                            new SessionId("ses_1234567890abcdef"),
+                            "opencode",
+                            "ses_remote1234567890abcdef",
+                            new ExecutionNodeId("node_1234567890abcdef"),
+                            NOW,
+                            NOW.plusSeconds(3),
+                            "trace_session123456"));
+        } finally {
+            migrationDatabase.shutdown();
+        }
     }
 
     @Test

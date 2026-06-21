@@ -2,6 +2,15 @@ package com.icbc.testagent.opencode.runtime.run;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.agent.runtime.AgentDiffCommand;
+import com.icbc.testagent.agent.runtime.AgentDiffFile;
+import com.icbc.testagent.agent.runtime.AgentDiffResult;
+import com.icbc.testagent.agent.runtime.AgentRejectDiffCommand;
+import com.icbc.testagent.agent.runtime.AgentRejectDiffResult;
+import com.icbc.testagent.agent.runtime.AgentRuntime;
+import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
+import com.icbc.testagent.domain.agent.AgentSessionBinding;
+import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.event.RunEvent;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventRepository;
@@ -15,12 +24,6 @@ import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.event.RunEventAppender;
-import com.icbc.testagent.opencode.client.OpencodeClientFacade;
-import com.icbc.testagent.opencode.client.OpencodeDiffCommand;
-import com.icbc.testagent.opencode.client.OpencodeDiffFile;
-import com.icbc.testagent.opencode.client.OpencodeDiffResult;
-import com.icbc.testagent.opencode.client.OpencodeRejectDiffCommand;
-import com.icbc.testagent.opencode.client.OpencodeRejectDiffResult;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -31,7 +34,7 @@ import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 /**
- * Run 级 Diff 应用服务，负责读取当前 Diff、接受事件追加和拒绝时调用 opencode revert。
+ * Run 级 Diff 应用服务，负责读取当前 Diff、接受事件追加和拒绝时调用 agent revert。
  */
 @Service
 public class RunDiffApplicationService {
@@ -44,10 +47,11 @@ public class RunDiffApplicationService {
     private final RunEventRepository runEventRepository;
     private final ExecutionNodeRepository executionNodeRepository;
     private final RunEventAppender runEventAppender;
-    private final OpencodeClientFacade opencodeClientFacade;
+    private final AgentRuntimeRegistry agentRuntimeRegistry;
+    private final AgentSessionBindingRepository agentSessionBindingRepository;
 
     /**
-     * 创建 Run Diff 应用服务，依赖领域仓储和 opencode facade，不直接访问持久化实现。
+     * 创建 Run Diff 应用服务，依赖领域仓储和 agent runtime registry，不直接访问持久化实现。
      */
     public RunDiffApplicationService(
             WorkspaceRepository workspaceRepository,
@@ -56,20 +60,31 @@ public class RunDiffApplicationService {
             RunEventRepository runEventRepository,
             ExecutionNodeRepository executionNodeRepository,
             RunEventAppender runEventAppender,
-            OpencodeClientFacade opencodeClientFacade) {
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
         this.runEventRepository = Objects.requireNonNull(runEventRepository, "runEventRepository must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
         this.runEventAppender = Objects.requireNonNull(runEventAppender, "runEventAppender must not be null");
-        this.opencodeClientFacade = Objects.requireNonNull(opencodeClientFacade, "opencodeClientFacade must not be null");
+        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
+        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
     }
 
     /**
-     * 查询 Run 当前 Diff；优先使用最近的 durable Diff 事件，没有事件时回落到 opencode sessionDiff。
+     * 查询 Run 当前 Diff；优先使用最近的 durable Diff 事件，没有事件时回落到 agent sessionDiff。
      */
     public RunDiffResponse getDiff(RunId runId, String traceId) {
+        return getDiff(agentRuntimeRegistry.defaultAgentId(), runId, traceId);
+    }
+
+    /**
+     * 查询指定 agent 的 Run 当前 Diff，响应格式保持平台统一模型。
+     */
+    public RunDiffResponse getDiff(String agentId, RunId runId, String traceId) {
+        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         Run run = findRun(runId);
         List<RunEvent> events = runEvents(run.runId());
         List<RunDiffFileResponse> eventFiles = latestDiffFiles(events);
@@ -77,22 +92,23 @@ public class RunDiffApplicationService {
             return new RunDiffResponse(run.runId().value(), eventFiles);
         }
         Session session = findSession(run);
-        if (!session.hasOpencodeSessionMapping()) {
+        Optional<AgentSessionBinding> binding = findAgentBinding(resolvedAgentId, session, traceId);
+        if (binding.isEmpty()) {
             return new RunDiffResponse(run.runId().value(), List.of());
         }
         Workspace workspace = findWorkspace(run);
-        ExecutionNode node = findNode(session);
+        ExecutionNode node = findNode(binding.get());
         String messageId = latestTextPayloadValue(events, "messageID").orElse(null);
-        OpencodeDiffResult result = opencodeClientFacade.getDiff(new OpencodeDiffCommand(
+        AgentDiffResult result = runtime.getDiff(new AgentDiffCommand(
                         node,
-                        session.opencodeSessionId(),
+                        binding.get().remoteSessionId(),
                         workspace.rootPath(),
                         null,
                         messageId,
                         traceId))
                 .block();
         List<RunDiffFileResponse> files = result == null ? List.of() : result.files().stream()
-                .map(this::fromOpencodeDiffFile)
+                .map(this::fromAgentDiffFile)
                 .toList();
         return new RunDiffResponse(run.runId().value(), files);
     }
@@ -101,35 +117,50 @@ public class RunDiffApplicationService {
      * 接受当前 Run Diff，只追加平台接受事件，不直接调用远端写操作。
      */
     public RunDiffActionResponse acceptDiff(RunId runId, String traceId) {
-        RunDiffResponse diff = getDiff(runId, traceId);
+        return acceptDiff(agentRuntimeRegistry.defaultAgentId(), runId, traceId);
+    }
+
+    /**
+     * 接受指定 agent 的当前 Run Diff，只追加平台接受事件。
+     */
+    public RunDiffActionResponse acceptDiff(String agentId, RunId runId, String traceId) {
+        RunDiffResponse diff = getDiff(agentId, runId, traceId);
         appendActionEvent(runId, RunEventType.DIFF_ACCEPTED, "accept", "accepted", diff.files().size(), traceId);
         return new RunDiffActionResponse(runId.value(), "accept", "accepted", diff.files().size());
     }
 
     /**
-     * 拒绝当前 Run Diff，必须找到 messageID 后调用 opencode revert，再追加平台拒绝事件。
+     * 拒绝当前 Run Diff，必须找到 messageID 后调用 agent revert，再追加平台拒绝事件。
      */
     public RunDiffActionResponse rejectDiff(RunId runId, String traceId) {
+        return rejectDiff(agentRuntimeRegistry.defaultAgentId(), runId, traceId);
+    }
+
+    /**
+     * 拒绝指定 agent 的当前 Run Diff。
+     */
+    public RunDiffActionResponse rejectDiff(String agentId, RunId runId, String traceId) {
+        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         Run run = findRun(runId);
         List<RunEvent> events = runEvents(run.runId());
         String messageId = latestTextPayloadValue(events, "messageID")
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.CONFLICT,
-                        "缺少 opencode messageID，无法拒绝 Diff",
+                        "缺少 agent messageID，无法拒绝 Diff",
                         Map.of("runId", runId.value())));
         String partId = latestTextPayloadValue(events, "partID").orElse(null);
         Session session = findSession(run);
-        if (!session.hasOpencodeSessionMapping()) {
-            throw new PlatformException(
-                    ErrorCode.CONFLICT,
-                    "Session 未绑定 opencode 会话，无法拒绝 Diff",
-                    Map.of("runId", runId.value(), "sessionId", session.sessionId().value()));
-        }
+        AgentSessionBinding binding = findAgentBinding(resolvedAgentId, session, traceId)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "Session 未绑定 agent 会话，无法拒绝 Diff",
+                        Map.of("runId", runId.value(), "sessionId", session.sessionId().value(), "agentId", resolvedAgentId)));
         Workspace workspace = findWorkspace(run);
-        ExecutionNode node = findNode(session);
-        OpencodeRejectDiffResult result = opencodeClientFacade.rejectDiff(new OpencodeRejectDiffCommand(
+        ExecutionNode node = findNode(binding);
+        AgentRejectDiffResult result = runtime.rejectDiff(new AgentRejectDiffCommand(
                         node,
-                        session.opencodeSessionId(),
+                        binding.remoteSessionId(),
                         workspace.rootPath(),
                         null,
                         messageId,
@@ -139,8 +170,8 @@ public class RunDiffApplicationService {
         if (result == null || !result.rejected()) {
             throw new PlatformException(
                     ErrorCode.OPENCODE_BAD_GATEWAY,
-                    "opencode 拒绝 Diff 未返回成功结果",
-                    Map.of("runId", runId.value()));
+                    "agent 拒绝 Diff 未返回成功结果",
+                    Map.of("runId", runId.value(), "agentId", resolvedAgentId));
         }
         int fileCount = latestDiffFiles(events).size();
         appendActionEvent(runId, RunEventType.DIFF_REJECTED, "reject", "rejected", fileCount, traceId);
@@ -178,14 +209,17 @@ public class RunDiffApplicationService {
     }
 
     /**
-     * 查询 Session 绑定的 opencode 节点，缺失时按远端不可用处理。
+     * 查询 Session 绑定的 agent 节点，缺失时按远端不可用处理。
      */
-    private ExecutionNode findNode(Session session) {
-        return executionNodeRepository.findById(session.opencodeExecutionNodeId())
+    private ExecutionNode findNode(AgentSessionBinding binding) {
+        return executionNodeRepository.findById(binding.executionNodeId())
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.OPENCODE_UNAVAILABLE,
-                        "Session 绑定的 opencode 执行节点不存在",
-                        Map.of("sessionId", session.sessionId().value())));
+                        "Session 绑定的 agent 执行节点不存在",
+                        Map.of(
+                                "sessionId", binding.sessionId().value(),
+                                "agentId", binding.agentId(),
+                                "nodeId", binding.executionNodeId().value())));
     }
 
     /**
@@ -249,15 +283,39 @@ public class RunDiffApplicationService {
     }
 
     /**
-     * 将 opencode-client Diff DTO 转换为 runtime 响应对象。
+     * 将 agent runtime Diff DTO 转换为 runtime 响应对象。
      */
-    private RunDiffFileResponse fromOpencodeDiffFile(OpencodeDiffFile file) {
+    private RunDiffFileResponse fromAgentDiffFile(AgentDiffFile file) {
         return new RunDiffFileResponse(
                 file.path(),
                 file.patch(),
                 file.additions(),
                 file.deletions(),
                 file.status());
+    }
+
+    /**
+     * 查询通用 agent 绑定；opencode 旧字段只作为兼容回填来源。
+     */
+    private Optional<AgentSessionBinding> findAgentBinding(String agentId, Session session, String traceId) {
+        Optional<AgentSessionBinding> binding =
+                agentSessionBindingRepository.findBySessionIdAndAgentId(session.sessionId(), agentId);
+        if (binding.isPresent()) {
+            return binding;
+        }
+        if (AgentRuntimeRegistry.DEFAULT_AGENT_ID.equals(agentRuntimeRegistry.normalize(agentId))
+                && session.hasOpencodeSessionMapping()) {
+            AgentSessionBinding legacy = new AgentSessionBinding(
+                    session.sessionId(),
+                    agentId,
+                    session.opencodeSessionId(),
+                    session.opencodeExecutionNodeId(),
+                    session.createdAt(),
+                    session.updatedAt(),
+                    traceId);
+            return Optional.of(agentSessionBindingRepository.save(legacy));
+        }
+        return Optional.empty();
     }
 
     /**

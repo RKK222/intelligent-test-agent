@@ -2,11 +2,11 @@
 
 ## 职责
 
-封装后端 Runtime HTTP API，输出稳定 TypeScript 方法和错误对象。
+封装后端 Runtime HTTP API，输出稳定 TypeScript 方法和错误对象；agent 相关能力默认使用 `opencode`，可通过 `agentId` 切换 URL 前缀。
 
 ## 主要程序清单
 
-- `index.ts`：`createBackendApiClient`、`BackendApiError` 和 API 方法集合；`startRun` 兼容旧 prompt string 与对象 payload，并封装 runtime 目录、session/message 操作、Session 全局搜索/置顶/删除、permission/question、fs/vcs/lsp/mcp status/resources/tools 和 terminal ticket 方法；Command catalog 映射需保留 `source/hints` 等可选字段，兼容旧 payload。
+- `index.ts`：`createBackendApiClient`、`BackendApiError` 和 API 方法集合；`agentId?: string` 默认 `opencode`，Run、Diff 和 runtime 相关方法拼接 `/api/internal/agent/{agentId}/...`；`startRun` 兼容旧 prompt string 与对象 payload，并封装 runtime 目录、session/message 操作、Session 全局搜索/置顶/删除、permission/question、fs/vcs/lsp/mcp status/resources/tools 和 terminal ticket 方法；Command catalog 映射需保留 `source/hints` 等可选字段，兼容旧 payload。
 
 ## 允许依赖
 

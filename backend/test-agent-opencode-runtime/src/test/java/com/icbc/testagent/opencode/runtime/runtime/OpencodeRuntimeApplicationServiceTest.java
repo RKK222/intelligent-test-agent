@@ -5,6 +5,10 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
+import com.icbc.testagent.agent.runtime.OpencodeAgentRuntime;
+import com.icbc.testagent.domain.agent.AgentSessionBinding;
+import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
@@ -22,7 +26,9 @@ import com.icbc.testagent.opencode.client.OpencodeRuntimeCommand;
 import com.icbc.testagent.opencode.client.OpencodeRuntimeResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -240,12 +246,14 @@ class OpencodeRuntimeApplicationServiceTest {
         private final WorkspaceRepository workspaceRepository = org.mockito.Mockito.mock(WorkspaceRepository.class);
         private final SessionRepository sessionRepository = org.mockito.Mockito.mock(SessionRepository.class);
         private final ExecutionNodeRepository executionNodeRepository = org.mockito.Mockito.mock(ExecutionNodeRepository.class);
+        private final AgentSessionBindingRepository bindingRepository = new FakeAgentSessionBindingRepository();
         private final OpencodeClientFacade facade = org.mockito.Mockito.mock(OpencodeClientFacade.class);
         private final OpencodeRuntimeApplicationService service = new OpencodeRuntimeApplicationService(
                 workspaceRepository,
                 sessionRepository,
                 executionNodeRepository,
-                facade,
+                new AgentRuntimeRegistry(List.of(new OpencodeAgentRuntime(facade))),
+                bindingRepository,
                 new ObjectMapper());
 
         private Fixture() {
@@ -298,6 +306,33 @@ class OpencodeRuntimeApplicationServiceTest {
                     NOW,
                     NOW,
                     "trace_1234567890abcdef");
+        }
+    }
+
+    private static final class FakeAgentSessionBindingRepository implements AgentSessionBindingRepository {
+        private final Map<String, AgentSessionBinding> bindings = new LinkedHashMap<>();
+
+        @Override
+        public AgentSessionBinding save(AgentSessionBinding binding) {
+            bindings.put(key(binding.sessionId(), binding.agentId()), binding);
+            return binding;
+        }
+
+        @Override
+        public Optional<AgentSessionBinding> findBySessionIdAndAgentId(SessionId sessionId, String agentId) {
+            return Optional.ofNullable(bindings.get(key(sessionId, agentId)));
+        }
+
+        @Override
+        public Optional<AgentSessionBinding> findByAgentIdAndRemoteSessionId(String agentId, String remoteSessionId) {
+            return bindings.values().stream()
+                    .filter(binding -> binding.agentId().equals(agentId.trim().toLowerCase(Locale.ROOT)))
+                    .filter(binding -> binding.remoteSessionId().equals(remoteSessionId))
+                    .findFirst();
+        }
+
+        private String key(SessionId sessionId, String agentId) {
+            return sessionId.value() + ":" + agentId.trim().toLowerCase(Locale.ROOT);
         }
     }
 }

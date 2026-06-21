@@ -7,6 +7,10 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
+import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
+import com.icbc.testagent.agent.runtime.OpencodeAgentRuntime;
+import com.icbc.testagent.domain.agent.AgentSessionBinding;
+import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.event.RunEvent;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventId;
@@ -60,7 +64,9 @@ import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -82,6 +88,7 @@ class RunApplicationServiceTest {
         FakeRunEventRepository events = new FakeRunEventRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         FakeSessionRepository sessions = new FakeSessionRepository(session());
+        FakeAgentSessionBindingRepository bindings = new FakeAgentSessionBindingRepository();
         RunApplicationService service = new RunApplicationService(
                 new FakeWorkspaceRepository(),
                 sessions,
@@ -90,7 +97,8 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                facade);
+                runtimeRegistry(facade),
+                bindings);
 
         Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
 
@@ -105,6 +113,10 @@ class RunApplicationServiceTest {
         assertThat(facade.startRunCommands.getFirst().workspace()).isNull();
         assertThat(sessions.current.opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
         assertThat(sessions.current.opencodeExecutionNodeId()).isEqualTo(node().executionNodeId());
+        assertThat(bindings.findBySessionIdAndAgentId(new SessionId("ses_1234567890abcdef"), "opencode"))
+                .get()
+                .extracting(AgentSessionBinding::remoteSessionId)
+                .isEqualTo(REMOTE_SESSION_ID);
         assertThat(events.events).extracting(RunEvent::type)
                 .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED);
     }
@@ -122,7 +134,8 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                facade);
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
 
         Run run = service.startRun(new StartRunInput(
                         new SessionId("ses_1234567890abcdef"),
@@ -172,7 +185,8 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(new FakeRunEventRepository()),
-                facade);
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
 
         service.startRun(new StartRunInput(
                         new SessionId("ses_1234567890abcdef"),
@@ -216,7 +230,8 @@ class RunApplicationServiceTest {
                 nodes,
                 routingDecisions,
                 new RunEventAppender(events),
-                facade);
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
 
         Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run again", "trace_1234567890abcdef");
 
@@ -249,7 +264,8 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                facade);
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
 
         Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
 
@@ -277,7 +293,8 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                facade);
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
 
         Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
 
@@ -306,7 +323,8 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                facade);
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
 
         Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
 
@@ -348,7 +366,8 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                facade,
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
                 liveBus,
                 new RunEventPersistencePolicy());
 
@@ -396,7 +415,8 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                facade);
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
 
         service.startRun(new SessionId("ses_1234567890abcdef"), "edit app", "trace_1234567890abcdef");
 
@@ -458,7 +478,8 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                facade);
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
 
         service.startRun(new SessionId("ses_1234567890abcdef"), "patch files", "trace_1234567890abcdef");
 
@@ -521,7 +542,8 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                facade);
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
 
         service.startRun(new SessionId("ses_1234567890abcdef"), "write file", "trace_1234567890abcdef");
 
@@ -570,7 +592,8 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                facade,
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
                 new RecordingRunEventLiveBus(),
                 new RunEventPersistencePolicy());
 
@@ -604,7 +627,8 @@ class RunApplicationServiceTest {
                 nodes,
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                facade);
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
 
         assertThatThrownBy(() -> service.startRun(
                         new SessionId("ses_1234567890abcdef"),
@@ -638,7 +662,8 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                facade);
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
 
         assertThatThrownBy(() -> service.startRun(
                         new SessionId("ses_1234567890abcdef"),
@@ -675,7 +700,8 @@ class RunApplicationServiceTest {
                 new FakeExecutionNodeRepository(),
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
-                new FakeOpencodeFacade());
+                runtimeRegistry(new FakeOpencodeFacade()),
+                new FakeAgentSessionBindingRepository());
 
         Run cancelled = service.cancelRun(pending.runId(), "trace_1234567890abcdef");
 
@@ -957,6 +983,37 @@ class RunApplicationServiceTest {
             RunEventLiveEvent event = super.publishTransient(draft);
             transientPayloads.add(event.payload());
             return event;
+        }
+    }
+
+    private static AgentRuntimeRegistry runtimeRegistry(FakeOpencodeFacade facade) {
+        return new AgentRuntimeRegistry(List.of(new OpencodeAgentRuntime(facade)));
+    }
+
+    private static final class FakeAgentSessionBindingRepository implements AgentSessionBindingRepository {
+        private final Map<String, AgentSessionBinding> bindings = new LinkedHashMap<>();
+
+        @Override
+        public AgentSessionBinding save(AgentSessionBinding binding) {
+            bindings.put(key(binding.sessionId(), binding.agentId()), binding);
+            return binding;
+        }
+
+        @Override
+        public Optional<AgentSessionBinding> findBySessionIdAndAgentId(SessionId sessionId, String agentId) {
+            return Optional.ofNullable(bindings.get(key(sessionId, agentId)));
+        }
+
+        @Override
+        public Optional<AgentSessionBinding> findByAgentIdAndRemoteSessionId(String agentId, String remoteSessionId) {
+            return bindings.values().stream()
+                    .filter(binding -> binding.agentId().equals(agentId.trim().toLowerCase(Locale.ROOT)))
+                    .filter(binding -> binding.remoteSessionId().equals(remoteSessionId))
+                    .findFirst();
+        }
+
+        private String key(SessionId sessionId, String agentId) {
+            return sessionId.value() + ":" + agentId.trim().toLowerCase(Locale.ROOT);
         }
     }
 
