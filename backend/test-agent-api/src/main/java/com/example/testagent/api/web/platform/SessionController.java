@@ -1,5 +1,6 @@
-package com.example.testagent.api.web;
+package com.example.testagent.api.web.platform;
 
+import com.example.testagent.api.web.common.RuntimeApiSupport;
 import com.example.testagent.opencode.runtime.session.SessionApplicationService;
 import com.example.testagent.common.api.ApiResponse;
 import com.example.testagent.common.pagination.PageResponse;

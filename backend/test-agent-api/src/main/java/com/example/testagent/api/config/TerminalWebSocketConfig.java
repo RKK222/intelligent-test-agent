@@ -1,6 +1,6 @@
 package com.example.testagent.api.config;
 
-import com.example.testagent.api.web.TerminalWebSocketHandler;
+import com.example.testagent.api.web.platform.TerminalWebSocketHandler;
 import java.util.Map;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

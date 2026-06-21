@@ -1,4 +1,4 @@
-package com.example.testagent.api.web;
+package com.example.testagent.api.web.common;
 
 import com.example.testagent.common.api.ApiErrorResponse;
 import com.example.testagent.common.error.ErrorCode;

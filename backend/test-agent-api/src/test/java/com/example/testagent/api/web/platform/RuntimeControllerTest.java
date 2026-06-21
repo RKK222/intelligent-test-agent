@@ -1,5 +1,7 @@
-package com.example.testagent.api.web;
+package com.example.testagent.api.web.platform;
 
+import com.example.testagent.api.web.common.GlobalExceptionHandler;
+import com.example.testagent.api.web.common.TraceIdWebFilter;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;

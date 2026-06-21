@@ -1,4 +1,4 @@
-package com.example.testagent.api.web;
+package com.example.testagent.api.web.common;
 
 import com.example.testagent.common.api.ApiErrorResponse;
 import com.example.testagent.common.error.ErrorCode;
@@ -11,7 +11,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
@@ -54,7 +53,7 @@ public class JwtAuthWebFilter implements WebFilter {
     @Override
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         String path = exchange.getRequest().getPath().pathWithinApplication().value();
-        String token = extractToken(exchange);
+        String token = AuthWebSupport.extractBearerToken(exchange);
 
         // 非 API 路径或登录接口直接放行
         if (!path.startsWith("/api/")) {
@@ -75,19 +74,8 @@ public class JwtAuthWebFilter implements WebFilter {
             tokenStore.delete(token);
             return unauthorized(exchange);
         }
-        exchange.getAttributes().put(AuthController.AUTH_ATTR, principal);
+        exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, principal);
         return chain.filter(exchange);
-    }
-
-    /**
-     * 从 Authorization 头中提取 Bearer Token。
-     */
-    private static String extractToken(ServerWebExchange exchange) {
-        String authorization = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
-        if (authorization != null && authorization.startsWith("Bearer ")) {
-            return authorization.substring(7);
-        }
-        return null;
     }
 
     /**

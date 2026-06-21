@@ -1,4 +1,4 @@
-package com.example.testagent.api.web;
+package com.example.testagent.api.web.platform;
 
 /**
  * 认证相关 API 的请求和响应 DTO。

@@ -1,5 +1,6 @@
-package com.example.testagent.api.web;
+package com.example.testagent.api.web.platform;
 
+import com.example.testagent.api.web.common.RuntimeApiSupport;
 import com.example.testagent.workspace.FileContentResponse;
 import com.example.testagent.workspace.FileStatusResponse;
 import com.example.testagent.workspace.FileTreeEntryResponse;

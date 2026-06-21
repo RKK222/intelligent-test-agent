@@ -502,7 +502,8 @@ Session 运行态接口：
 
 - `OpencodeRuntimeFacadeTest`：验证 facade runtime 调用不泄漏 generated DTO。
 - `OpencodeRuntimeApplicationServiceTest`：验证 workspace directory、远端 session id、permission reply body、MCP resources/tools、config/provider OAuth/worktree/share/MCP auth 映射。
-- `OpencodeRuntimeControllerTest`：验证统一响应、MCP tools 查询、session share 和 traceId 透传。
+- `PlatformOpencodeRuntimeControllerTest`：验证平台路径统一响应、MCP tools 查询、session share 和 traceId 透传。
+- `AgentOpencodeRuntimeControllerTest`：验证 `/api/internal/agent/opencode/...` 兼容路径统一响应和 traceId 透传。
 
 - 首次 Run：先选择可用 execution node，调用 opencode `POST /session` 创建远端 session，保存 `opencodeSessionId` 与 `opencodeExecutionNodeId` 内部映射，然后用远端 session id 调用 opencode `prompt_async`。
 - 后续 Run：复用已保存的远端 opencode session，并固定路由到原 execution node；节点不存在、离线或容量不可用时返回 `OPENCODE_UNAVAILABLE`。

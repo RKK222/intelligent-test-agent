@@ -1,4 +1,4 @@
-package com.example.testagent.api.web;
+package com.example.testagent.api.web.platform;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.never;

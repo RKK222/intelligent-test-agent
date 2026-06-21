@@ -1,4 +1,4 @@
-package com.example.testagent.api.web;
+package com.example.testagent.api.web.platform;
 
 import com.example.testagent.opencode.runtime.terminal.TerminalActiveSessionRegistry;
 import com.example.testagent.opencode.runtime.terminal.TerminalApplicationService;

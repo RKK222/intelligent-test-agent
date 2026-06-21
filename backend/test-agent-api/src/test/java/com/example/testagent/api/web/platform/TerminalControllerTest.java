@@ -1,5 +1,6 @@
-package com.example.testagent.api.web;
+package com.example.testagent.api.web.platform;
 
+import com.example.testagent.api.web.common.TraceIdWebFilter;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 

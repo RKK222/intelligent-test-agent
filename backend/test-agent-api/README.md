@@ -8,6 +8,7 @@
 
 - 暴露旧 `/api/...` 兼容 URL。
 - 暴露新增 `/api/internal/platform/...`、`/api/internal/agent/opencode/...` 和预留 `/api/public/...` URL。
+- `web.platform` 承载平台自身接口，`web.agent` 承载 opencode agent 兼容代理入口，`web.common` 承载 traceId、鉴权、限流和统一异常等入口支撑。
 - 暴露 Workspace 受控目录选择接口，Controller 只委托 workspace-management 目录服务。
 - Controller 只调用业务模块 service，不直接访问 Repository、generated SDK 或 JDBC 实现。
 - 维护 `RuntimeDtos` 等平台 DTO，不返回 generated SDK DTO。
@@ -34,7 +35,8 @@
 ## 测试覆盖
 
 - `RuntimeControllerTest` 覆盖 Workspace、目录选择、Session、Run、Diff、RunEvent SSE 恢复快照和内部平台兼容 URL。
-- `OpencodeRuntimeControllerTest` 覆盖 opencode runtime 代理入口、MCP tools、permission reply、session share 和原始 opencode 路径兼容。
+- `PlatformOpencodeRuntimeControllerTest` 覆盖旧 `/api/...` 与 `/api/internal/platform/...` 的 opencode runtime 代理入口、MCP tools、permission reply 和 session share。
+- `AgentOpencodeRuntimeControllerTest` 覆盖 `/api/internal/agent/opencode/...` 原始 opencode 路径兼容。
 - `TerminalControllerTest`、`TerminalWebSocketHandlerTest` 覆盖 PTY ticket、内部平台 WebSocket URL、origin 拒绝、单会话互斥、输入限流、关闭和超时。
 - `RuntimeApiSupportTest` 覆盖分页默认值和非法分页参数转换为统一 `VALIDATION_ERROR`。
 - `RuntimeSecurityConfigTest` 覆盖本地 `frontend-opencode` real E2E Origin 白名单。
@@ -42,4 +44,4 @@
 
 ## 后续 AI 编码指引
 
-新增 API 时先确认业务实现应落在哪个业务模块；本模块只新增 Controller/DTO/协议转换。旧 URL 不删除，新 URL 必须同步记录到 `docs/api/http-api.md`。
+新增 API 时先确认业务实现应落在哪个业务模块；本模块只新增 Controller/DTO/协议转换。平台自身接口放 `web.platform`，agent/opencode 兼容代理入口放 `web.agent`，横切入口支撑放 `web.common`。旧 URL 不删除，新 URL 必须同步记录到 `docs/api/http-api.md`。

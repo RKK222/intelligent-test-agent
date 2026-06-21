@@ -1,4 +1,4 @@
-package com.example.testagent.api.web;
+package com.example.testagent.api.web.common;
 
 import com.example.testagent.observability.TraceConstants;
 import com.example.testagent.observability.TraceIdSupport;

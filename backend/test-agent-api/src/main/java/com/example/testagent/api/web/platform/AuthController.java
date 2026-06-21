@@ -1,8 +1,7 @@
-package com.example.testagent.api.web;
+package com.example.testagent.api.web.platform;
 
+import com.example.testagent.api.web.common.AuthWebSupport;
 import com.example.testagent.common.api.ApiResponse;
-import com.example.testagent.common.error.ErrorCode;
-import com.example.testagent.common.error.PlatformException;
 import com.example.testagent.domain.auth.AuthPrincipal;
 import com.example.testagent.observability.TraceConstants;
 import com.example.testagent.observability.TraceIdSupport;
@@ -25,9 +24,6 @@ import org.springframework.web.server.ServerWebExchange;
 public class AuthController {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AuthController.class);
-
-    /** 认证 attribute key，由 JwtAuthWebFilter 设置 */
-    public static final String AUTH_ATTR = "test-agent.auth.principal";
 
     private final AuthApplicationService authApplicationService;
 
@@ -68,7 +64,7 @@ public class AuthController {
     @PostMapping("/api/auth/logout")
     public ResponseEntity<ApiResponse<Void>> logout(ServerWebExchange exchange) {
         String traceId = traceIdFrom(exchange);
-        String token = extractToken(exchange);
+        String token = AuthWebSupport.extractBearerToken(exchange);
         if (token != null) {
             authApplicationService.logout(token);
             LOGGER.info("User logged out, traceId={}", traceId);
@@ -82,7 +78,7 @@ public class AuthController {
     @GetMapping("/api/auth/me")
     public ResponseEntity<ApiResponse<AuthDtos.CurrentUserResponse>> me(ServerWebExchange exchange) {
         String traceId = traceIdFrom(exchange);
-        AuthPrincipal principal = getAuthPrincipal(exchange);
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
 
         // 从 principal 获取用户基本信息；当前版本只返回 principal 中存储的信息
         AuthDtos.CurrentUserResponse response = new AuthDtos.CurrentUserResponse(
@@ -100,7 +96,7 @@ public class AuthController {
     @PostMapping("/api/auth/refresh")
     public ResponseEntity<ApiResponse<AuthDtos.LoginResponse>> refresh(ServerWebExchange exchange) {
         String traceId = traceIdFrom(exchange);
-        AuthPrincipal principal = getAuthPrincipal(exchange);
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
 
         AuthPrincipal refreshed = authApplicationService.refreshToken(
                 principal,
@@ -114,28 +110,6 @@ public class AuthController {
                 refreshed.unifiedAuthId());
 
         return ResponseEntity.ok(ApiResponse.ok(response, traceId));
-    }
-
-    /**
-     * 从 exchange attribute 中获取认证主体。
-     */
-    public static AuthPrincipal getAuthPrincipal(ServerWebExchange exchange) {
-        Object attr = exchange.getAttribute(AUTH_ATTR);
-        if (attr instanceof AuthPrincipal principal) {
-            return principal;
-        }
-        throw new PlatformException(ErrorCode.UNAUTHENTICATED, "未认证");
-    }
-
-    /**
-     * 从请求头中提取 Bearer Token。
-     */
-    public static String extractToken(ServerWebExchange exchange) {
-        String authorization = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
-        if (authorization != null && authorization.startsWith("Bearer ")) {
-            return authorization.substring(7);
-        }
-        return null;
     }
 
     /**
