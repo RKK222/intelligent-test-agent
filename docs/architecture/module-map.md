@@ -40,7 +40,7 @@ Browser
 | `test-agent-opencode-client` | 封装 generated SDK，提供 `OpencodeClientFacade`，是业务访问 opencode 的唯一门面。 |
 | `test-agent-workspace-management` | Workspace、文件查看/新增/修改/删除、受控目录选择、git/diff、agent 和 skill 管理业务。 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、opencode runtime、Diff/revert、terminal ticket/PTY 业务。 |
-| `test-agent-system-management` | 用户、角色、权限等平台内部管理业务边界（当前为空骨架）。 |
+| `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、登录认证和 Token 管理。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界（当前为空骨架）。 |
 | `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流和 trace Web 入口。 |
 | `test-agent-persistence` | 数据库、Flyway、Repository、Redis 可选适配。 |

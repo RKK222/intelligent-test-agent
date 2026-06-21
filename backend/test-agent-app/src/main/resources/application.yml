@@ -25,6 +25,13 @@ spring:
           db-type: postgresql
           log-slow-sql: false
 
+  data:
+    redis:
+      host: ${TEST_AGENT_REDIS_HOST:127.0.0.1}
+      port: ${TEST_AGENT_REDIS_PORT:6379}
+      password: ${TEST_AGENT_REDIS_PASSWORD:}
+      timeout: ${TEST_AGENT_REDIS_TIMEOUT:1s}
+
 server:
   port: 8080
 
@@ -48,9 +55,10 @@ test-agent:
   workspace-picker:
     allowed-roots: ${TEST_AGENT_WORKSPACE_PICKER_ROOTS:${user.home}/workspace}
   redis:
-    enabled: ${TEST_AGENT_REDIS_ENABLED:false}
+    enabled: ${TEST_AGENT_REDIS_ENABLED:true}
     host: ${TEST_AGENT_REDIS_HOST:127.0.0.1}
     port: ${TEST_AGENT_REDIS_PORT:6379}
+    password: ${TEST_AGENT_REDIS_PASSWORD:}
     timeout: ${TEST_AGENT_REDIS_TIMEOUT:1s}
   opencode:
     nodes: []

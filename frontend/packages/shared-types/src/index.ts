@@ -450,3 +450,35 @@ export type AgentMessage =
       payload: Record<string, unknown>;
       createdAt: string;
     };
+
+// ---- 认证相关类型 ----
+
+/**
+ * 登录请求体。
+ */
+export type LoginRequest = {
+  username: string;
+  password: string;
+};
+
+/**
+ * 登录成功响应体。
+ */
+export type LoginResponse = {
+  token: string;
+  userId: string;
+  username: string;
+  unifiedAuthId: string;
+};
+
+/**
+ * 当前登录用户信息。
+ */
+export type CurrentUser = {
+  userId: string;
+  username: string;
+  unifiedAuthId: string;
+  organization?: string | null;
+  rdDepartment?: string | null;
+  department?: string | null;
+};

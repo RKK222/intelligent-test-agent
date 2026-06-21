@@ -235,6 +235,7 @@ public class TestAgentRuntimeProperties {
         private boolean enabled = false;
         private String host = "127.0.0.1";
         private int port = 6379;
+        private String password;
         private Duration timeout = Duration.ofSeconds(1);
 
         /**
@@ -277,6 +278,20 @@ public class TestAgentRuntimeProperties {
          */
         public void setPort(int port) {
             this.port = port;
+        }
+
+        /**
+         * 返回 Redis 密码。
+         */
+        public String getPassword() {
+            return password;
+        }
+
+        /**
+         * 绑定 Redis 密码。
+         */
+        public void setPassword(String password) {
+            this.password = password;
         }
 
         /**

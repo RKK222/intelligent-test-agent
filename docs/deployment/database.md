@@ -73,3 +73,75 @@
 - `run_events.seq` 由持久化层按同一 run 分配，取消、Diff 动作和 opencode stream 并发追加时必须依赖 `(run_id, seq)` 唯一约束冲突后重试，保持事件流单调递增且不重复。
 - `session_messages.content` 当前直接保存文本；后续如拆分富文本 parts，必须保留旧 content 读取兼容。
 - 删除或重命名状态、事件类型、数据库字段必须拆分为读取兼容、数据迁移、清理三个阶段。
+
+## V5 用户认证表
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V5__create_user_and_auth_tables.sql` 创建以下表：
+
+| 表 | 说明 |
+|---|---|
+| `users` | 平台用户，包含统一认证号、用户名、BCrypt 密码哈希、所属机构/研发部/部门。 |
+| `user_login_logs` | 用户登录日志，记录登录时间、IP、User-Agent 和结果。 |
+| `dictionaries` | 通用字典表，存储应用角色等字典数据。 |
+| `user_roles` | 用户角色对照关系表，关联用户和角色字典。 |
+
+### users 用户表
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 数据库自增 surrogate PK，不对 API 暴露。 |
+| `user_id` | 用户业务 ID，使用 `usr_` 前缀。 |
+| `unified_auth_id` | 统一认证号，唯一不可空。 |
+| `username` | 用户名，唯一。 |
+| `password_hash` | BCrypt 密码哈希值。 |
+| `organization` | 所属机构，可空。 |
+| `rd_department` | 所属研发部，可空。 |
+| `department` | 所属部门，可空。 |
+| `status` | 用户状态，ACTIVE/INACTIVE，默认 ACTIVE。 |
+| `created_at` | 创建时间。 |
+| `updated_at` | 更新时间。 |
+
+### user_login_logs 用户登录日志表
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 数据库自增 PK。 |
+| `log_id` | 日志业务 ID，使用 `log_` 前缀。 |
+| `user_id` | 用户业务 ID，外键引用 users.user_id。 |
+| `login_at` | 登录时间。 |
+| `ip_address` | 客户端 IP 地址。 |
+| `user_agent` | 浏览器 User-Agent。 |
+| `login_result` | 登录结果：SUCCESS/FAILURE。 |
+
+### dictionaries 通用字典表
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 数据库自增 PK。 |
+| `dict_id` | 字典业务 ID，使用 `dict_` 前缀。 |
+| `dict_name` | 字典名称，如"应用角色"。 |
+| `dict_key` | 字典键，如 `ROLE`。 |
+| `dict_value` | 字典值，如 `SUPER_ADMIN`。 |
+| `dict_label` | 显示标签，如"超级管理员"。 |
+| `sort_order` | 排序序号。 |
+| `created_at` | 创建时间。 |
+| `updated_at` | 更新时间。 |
+
+唯一约束：`(dict_key, dict_value)`。
+
+初始化角色字典：
+- `SUPER_ADMIN`（超级管理员）
+- `SYSTEM_ADMIN`（系统管理员）
+- `APP_ADMIN`（应用管理员）
+- `USER`（普通用户）
+
+### user_roles 用户角色对照表
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 数据库自增 PK。 |
+| `user_id` | 用户业务 ID，外键引用 users.user_id。 |
+| `dict_id` | 字典业务 ID，外键引用 dictionaries.dict_id。 |
+| `created_at` | 创建时间。 |
+
+唯一约束：`(user_id, dict_id)`。

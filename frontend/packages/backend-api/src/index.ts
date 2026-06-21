@@ -3,9 +3,12 @@ import type {
   ApiFailure,
   ApiResponse,
   CommandInfo,
+  CurrentUser,
   FileContent,
   FileStatus,
   FileTreeEntry,
+  LoginRequest,
+  LoginResponse,
   ModelInfo,
   PageResponse,
   PermissionRequest,
@@ -95,8 +98,10 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     if (init.body != null && !headers.has("Content-Type")) {
       headers.set("Content-Type", "application/json");
     }
-    if (options.apiToken) {
-      headers.set("Authorization", `Bearer ${options.apiToken}`);
+    // 自动附加用户 Token：优先使用 options 中的 apiToken，其次从 localStorage 读取
+    const userToken = options.apiToken ?? (typeof localStorage !== "undefined" ? localStorage.getItem("test-agent.auth.token") : null);
+    if (userToken && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${userToken}`);
     }
     // 所有后端请求统一设置超时，避免目录选择等界面在连接悬挂时一直停留在加载态。
     const controller = new AbortController();
@@ -117,7 +122,15 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       const response = await fetcher(`${baseUrl}${path}`, { ...init, headers, signal: controller.signal });
       const body = await readJson(response);
       if (!response.ok || !isSuccessResponse<T>(body)) {
-        throw new BackendApiError(response.status, normalizeFailure(body, traceId, response.status));
+        const error = new BackendApiError(response.status, normalizeFailure(body, traceId, response.status));
+        // 401 未认证：触发全局跳转到登录页
+        if (response.status === 401 && typeof window !== "undefined") {
+          const handler = (window as unknown as Record<string, unknown>).__handleUnauthorized;
+          if (typeof handler === "function") {
+            handler();
+          }
+        }
+        throw error;
       }
       return body.data;
     } catch (error) {
@@ -297,7 +310,36 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<TerminalTicketResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/terminal/tickets`, {
         method: "POST",
         body: JSON.stringify(compactObject(payload))
-      })
+      }),
+
+    // ---- 认证相关 API ----
+
+    /**
+     * 用户登录。
+     */
+    login: (payload: LoginRequest) =>
+      request<LoginResponse>("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+
+    /**
+     * 用户登出。
+     */
+    logout: () =>
+      request<void>("/api/auth/logout", { method: "POST" }),
+
+    /**
+     * 获取当前登录用户信息。
+     */
+    getCurrentUser: () =>
+      request<CurrentUser>("/api/auth/me"),
+
+    /**
+     * 刷新当前 Token。
+     */
+    refreshToken: () =>
+      request<LoginResponse>("/api/auth/refresh", { method: "POST" })
   };
 }
 

@@ -18,5 +18,18 @@
             <groupId>com.example.testagent</groupId>
             <artifactId>test-agent-common</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.example.testagent</groupId>
+            <artifactId>test-agent-domain</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+        <!-- Spring Security Crypto 用于 BCrypt 密码加密 -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
     </dependencies>
 </project>

@@ -132,7 +132,59 @@
 - Public API。
 - 健康检查和观测性 API。
 
-## Phase 02/03 内部能力说明
+## 认证 API
+
+认证 API 提供用户登录、登出和 Token 管理功能。登录成功后返回 Token，前端需在后续请求的 `Authorization` 头中携带 `Bearer <token>`。Token 默认过期时间 1 天。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `POST` | `/api/auth/login` | 用户登录，返回 Token。 |
+| `POST` | `/api/auth/logout` | 用户登出，删除 Token。 |
+| `GET` | `/api/auth/me` | 获取当前登录用户信息。 |
+| `POST` | `/api/auth/refresh` | 刷新 Token，旧 Token 失效。 |
+
+`POST /api/auth/login` 请求体：
+
+```json
+{
+  "username": "admin",
+  "password": "password"
+}
+```
+
+响应 `LoginResponse`：
+
+```json
+{
+  "token": "uuid-token-string",
+  "userId": "usr_...",
+  "username": "admin",
+  "unifiedAuthId": "统一认证号"
+}
+```
+
+`GET /api/auth/me` 响应 `CurrentUserResponse`：
+
+```json
+{
+  "userId": "usr_...",
+  "username": "admin",
+  "unifiedAuthId": "统一认证号",
+  "organization": "所属机构",
+  "rdDepartment": "所属研发部",
+  "department": "所属部门"
+}
+```
+
+`POST /api/auth/refresh` 响应 `LoginResponse`（同上）。请求需携带当前有效 Token。
+
+兼容性：
+- 登录路径当前只有 `/api/auth/login`，后续可增加 `/api/internal/platform/system-management/auth/login` 平台入口。
+- Token 存储在 Redis，1 天过期。
+- 认证失败统一返回 `UNAUTHENTICATED` 错误码。
+- 未配置 Token 时 `/api/` 默认放行（本地开发）。
+
+## 限流
 
 Phase 02/03 不新增对外 HTTP API，也不新增 Controller。新增的 Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 字段目前只作为后端内部领域和持久化边界使用，Phase 04 暴露 Runtime API 时再在本文件固化请求/响应 DTO。
 

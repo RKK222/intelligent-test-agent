@@ -49,6 +49,27 @@ public final class RuntimeIdGenerator {
     }
 
     /**
+     * 生成用户外部 ID，返回值固定使用 {@code usr_} 前缀。
+     */
+    public static String userId() {
+        return prefixed("usr_");
+    }
+
+    /**
+     * 生成登录日志 ID，返回值固定使用 {@code log_} 前缀。
+     */
+    public static String logId() {
+        return prefixed("log_");
+    }
+
+    /**
+     * 生成字典 ID，返回值固定使用 {@code dict_} 前缀。
+     */
+    public static String dictId() {
+        return prefixed("dict_");
+    }
+
+    /**
      * 按给定领域前缀拼接无横线 UUID；调用方必须传入已约定的稳定前缀。
      */
     private static String prefixed(String prefix) {

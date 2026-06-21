@@ -26,7 +26,7 @@
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
 | `test-agent-workspace-management` | Workspace、文件、受控目录选择、git/diff、agent 和 skill 管理业务 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、opencode runtime、Diff/revert 和 PTY terminal 业务 |
-| `test-agent-system-management` | 用户、角色、权限等系统内部管理业务边界，目前为空骨架 |
+| `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理等 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界，目前为空骨架 |
 | `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId 和统一异常入口 |
 | `test-agent-persistence` | 持久化、迁移、Redis/PostgreSQL 访问 |

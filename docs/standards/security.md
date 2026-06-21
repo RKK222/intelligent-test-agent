@@ -8,12 +8,22 @@
 2. 权限判断应在入口层或应用服务层完成，不散落在 Repository。
 3. 前端只做展示和交互控制，不能依赖前端判断作为最终权限控制。
 
+认证方式（按优先级）：
+
+1. **用户 Token 鉴权**（`JwtAuthWebFilter`）：所有 `/api/` 请求自动检查 Bearer Token。Token 通过 UUID 生成，存储在 Redis，1 天过期。登录接口 `/api/auth/login` 无需 Token。
+2. **静态 API Token 兜底**（`ApiTokenWebFilter`）：未配置用户 Token 时，检查 `TEST_AGENT_API_TOKEN` 环境变量，向后兼容。
+
+Token 校验流程：
+- `JwtAuthWebFilter`（Order +10）优先检查用户 Token，有效时设置 `AuthPrincipal` 到请求属性。
+- `ApiTokenWebFilter`（Order +20）作为静态 API Token 兜底，未配置时放行。
+
 本地占位策略：
 
+- 未配置 Redis 时，`TokenStore` 回退到 `InMemoryTokenStore`，Token 信息仅存储在本地内存，重启后丢失。
 - 未配置 `TEST_AGENT_API_TOKEN` 时，`/api/**` 默认放行，便于本地联调。
 - 配置 `TEST_AGENT_API_TOKEN` 后，`/api/**` 必须携带 `Authorization: Bearer <token>`。
 - 鉴权失败返回统一错误格式，错误码 `UNAUTHENTICATED`，不得回显 token。
-- Actuator health 不使用该占位 token，生产暴露范围后续必须单独收敛。
+- Actuator health 不使用占位 token，生产暴露范围后续单独收敛。
 
 ## 限流
 

@@ -21,6 +21,7 @@ test-agent-api
   -> test-agent-event
   -> test-agent-workspace-management
   -> test-agent-opencode-runtime
+  -> test-agent-system-management
 
 test-agent-workspace-management
   -> test-agent-common
