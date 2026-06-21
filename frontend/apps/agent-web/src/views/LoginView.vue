@@ -15,8 +15,8 @@ const queryClient = useQueryClient();
 // 创建 API client（不需要 token，登录接口可匿名访问）
 const api: BackendApiClient = createBackendApiClient();
 
-const username = ref("");
-const password = ref("");
+const username = ref("888888888");
+const password = ref("123456");
 const error = ref("");
 const loading = ref(false);
 
