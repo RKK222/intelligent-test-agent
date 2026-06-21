@@ -11,7 +11,7 @@
         <relativePath/>
     </parent>
 
-    <groupId>com.example.testagent</groupId>
+    <groupId>com.icbc.testagent</groupId>
     <artifactId>test-agent-backend</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>pom</packaging>
@@ -42,7 +42,7 @@
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <druid.version>1.2.28</druid.version>
         <spring-boot.version>4.1.0</spring-boot.version>
-        <start-class>com.example.testagent.app.TestAgentApplication</start-class>
+        <start-class>com.icbc.testagent.app.TestAgentApplication</start-class>
     </properties>
 
     <dependencyManagement>
@@ -125,67 +125,67 @@
                 </exclusions>
             </dependency>
             <dependency>
-                <groupId>com.example.testagent</groupId>
+                <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-common</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.example.testagent</groupId>
+                <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-domain</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.example.testagent</groupId>
+                <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-observability</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.example.testagent</groupId>
+                <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-opencode-sdk-generated</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.example.testagent</groupId>
+                <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-opencode-client</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.example.testagent</groupId>
+                <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-workspace-management</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.example.testagent</groupId>
+                <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-opencode-runtime</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.example.testagent</groupId>
+                <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-system-management</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.example.testagent</groupId>
+                <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-integration</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.example.testagent</groupId>
+                <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-api</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.example.testagent</groupId>
+                <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-persistence</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.example.testagent</groupId>
+                <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-event</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
-                <groupId>com.example.testagent</groupId>
+                <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-test-support</artifactId>
                 <version>${project.version}</version>
             </dependency>

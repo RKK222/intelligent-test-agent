@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <parent>
-        <groupId>com.example.testagent</groupId>
+        <groupId>com.icbc.testagent</groupId>
         <artifactId>test-agent-backend</artifactId>
         <version>0.1.0-SNAPSHOT</version>
     </parent>
@@ -15,7 +15,7 @@
 
     <dependencies>
         <dependency>
-            <groupId>com.example.testagent</groupId>
+            <groupId>com.icbc.testagent</groupId>
             <artifactId>test-agent-common</artifactId>
         </dependency>
         <dependency>

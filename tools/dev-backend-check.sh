@@ -39,7 +39,7 @@ cd "${BACKEND_DIR}"
 mvn -q test
 mvn clean package -DskipTests
 mvn -pl test-agent-app -am dependency:tree \
-  -Dincludes=com.example.testagent:test-agent-opencode-sdk-generated
+  -Dincludes=com.icbc.testagent:test-agent-opencode-sdk-generated
 
 if rg "com\\.example\\.opencode\\.sdk" \
   test-agent-app/src/main/java \

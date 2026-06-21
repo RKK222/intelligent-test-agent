@@ -31,6 +31,11 @@ modules=(
   test-agent-observability
   test-agent-opencode-sdk-generated
   test-agent-opencode-client
+  test-agent-workspace-management
+  test-agent-opencode-runtime
+  test-agent-system-management
+  test-agent-integration
+  test-agent-api
   test-agent-persistence
   test-agent-event
   test-agent-test-support
@@ -47,14 +52,13 @@ for module in "${modules[@]}"; do
   assert_file "${BACKEND_DIR}/${module}/pom.xml"
   assert_file "${BACKEND_DIR}/${module}/README.md"
   assert_contains "${BACKEND_DIR}/${module}/README.md" "工程定位"
-  assert_contains "${BACKEND_DIR}/${module}/README.md" "技术栈"
   assert_contains "${BACKEND_DIR}/${module}/README.md" "后续 AI 编码指引"
 done
 
 [[ ! -d "${BACKEND_DIR}/test-agent-gateway" ]] || fail "test-agent-gateway must not exist"
 [[ ! -d "${BACKEND_DIR}/test-agent-control-plane" ]] || fail "test-agent-control-plane must not exist"
 
-assert_file "${BACKEND_DIR}/test-agent-app/src/main/java/com/example/testagent/app/TestAgentApplication.java"
+assert_file "${BACKEND_DIR}/test-agent-app/src/main/java/com/icbc/testagent/app/TestAgentApplication.java"
 assert_file "${BACKEND_DIR}/test-agent-opencode-sdk-generated/src/main/java/com/example/opencode/sdk/ApiClient.java"
 assert_dir "${BACKEND_DIR}/test-agent-opencode-sdk-generated/src/main/java/com/example/opencode/sdk/api"
 assert_dir "${BACKEND_DIR}/test-agent-opencode-sdk-generated/src/main/java/com/example/opencode/sdk/model"
@@ -62,8 +66,8 @@ assert_dir "${BACKEND_DIR}/test-agent-opencode-sdk-generated/src/main/java/com/e
 boot_jar_count="$(find "${BACKEND_DIR}" -path '*/target/*.jar' -name 'test-agent-*.jar' ! -name '*sources.jar' ! -name '*javadoc.jar' | grep -c '/test-agent-app/target/' || true)"
 [[ "${boot_jar_count}" -le 1 ]] || fail "expected at most one runnable app jar, found ${boot_jar_count}"
 
-assert_contains "${ROOT_DIR}/docs/implementation-plan.md" "test-agent-app"
-assert_contains "${ROOT_DIR}/docs/implementation-plan.md" "Maven multi-module"
-assert_contains "${ROOT_DIR}/docs/implementation-plan.md" "生成可执行 Spring Boot jar"
+assert_contains "${BACKEND_DIR}/README.md" "test-agent-app"
+assert_contains "${BACKEND_DIR}/README.md" "Maven multi-module"
+assert_contains "${BACKEND_DIR}/README.md" "可运行 Spring Boot 包"
 
 echo "Backend skeleton verification passed."

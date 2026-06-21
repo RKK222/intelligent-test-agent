@@ -4,9 +4,15 @@
 
 唯一 Spring Boot 启动入口，最终只打这一个可运行后端服务包。本模块不承载业务逻辑，不定义 Controller，不保存 API DTO。
 
+## 技术栈
+
+- Java 21、Spring Boot 4.1.0、Maven multi-module。
+- Spring WebFlux、Actuator、Flyway、Log4j2、Micrometer。
+- 通过 `test-agent-api` 和各业务 library jar 装配运行态能力。
+
 ## 主要职责
 
-- 启动 `TestAgentApplication`，扫描 `com.example.testagent` 下的后端组件。
+- 启动 `TestAgentApplication`，扫描 `com.icbc.testagent` 下的后端组件。
 - 承载运行时 profile、配置绑定、日志配置、Actuator health、Flyway migration 入口和 opencode execution node seed。
 - 组装 `test-agent-api`、业务模块、persistence、event、opencode-client 等 library jar，形成单一部署包。
 - 保持生产容器只运行 Java 进程；PostgreSQL、Redis 和 opencode server 均由外部配置注入。
