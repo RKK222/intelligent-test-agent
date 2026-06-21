@@ -24,9 +24,52 @@ export const router = createRouter({
       name: "transcript",
       component: () => import("./views/TranscriptView.vue"),
       props: true
+    },
+    {
+      path: "/:pathMatch(.*)*",
+      name: "not-found",
+      redirect: "/"
     }
   ]
 });
+
+const LOGIN_REDIRECT_BASE_URL = "http://test-agent.local";
+
+/**
+ * 解析登录成功后的跳转目标。
+ * 只允许跳回当前 SPA 内已知页面，避免旧的 /error 或外部地址让登录成功后停在空白页。
+ */
+export function resolveLoginRedirect(rawRedirect: unknown): string {
+  if (typeof rawRedirect !== "string") {
+    return "/";
+  }
+
+  const redirect = rawRedirect.trim();
+  if (redirect.length === 0 || redirect.startsWith("//")) {
+    return "/";
+  }
+
+  let target: URL;
+  try {
+    target = new URL(redirect, LOGIN_REDIRECT_BASE_URL);
+  } catch {
+    return "/";
+  }
+
+  if (target.origin !== LOGIN_REDIRECT_BASE_URL || target.pathname === "/login") {
+    return "/";
+  }
+
+  if (!isKnownLoginRedirectPath(target.pathname)) {
+    return "/";
+  }
+
+  return `${target.pathname}${target.search}${target.hash}`;
+}
+
+function isKnownLoginRedirectPath(pathname: string): boolean {
+  return pathname === "/" || /^\/s\/[^/]+$/.test(pathname);
+}
 
 /**
  * 全局前置守卫：检查用户是否已登录，未登录时跳转登录页。

@@ -8,7 +8,8 @@
 
 - `main.ts`：应用入口，装配 Pinia、`@tanstack/vue-query` 的 `VueQueryPlugin` 和 vue-router。
 - `App.vue`：根组件，渲染 `<RouterView />`。
-- `router.ts`：SPA 客户端路由，`/` 工作台、`/s/:sessionId` 只读 transcript。
+- `router.ts`：SPA 客户端路由，`/login` 登录页、`/` 工作台、`/s/:sessionId` 只读 transcript，以及未知路径回退。
+- `views/LoginView.vue`：登录页入口，登录成功后只跳回 SPA 内已知页面，非法 redirect 回退到工作台。
 - `views/WorkbenchView.vue`：工作台首页入口。
 - `views/TranscriptView.vue`：只读 transcript 页面入口，复用平台 session/messages API。
 - `components/AgentWorkbench.vue`：组合 workspace、文件树、编辑器、Agent、RunEvent SSE、Session History 搜索/置顶/删除、prompt 附件/follow-up 队列、编辑器选区上下文、Diff 操作和底部 PTY terminal panel。

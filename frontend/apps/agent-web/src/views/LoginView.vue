@@ -3,10 +3,10 @@ import { BackendApiClient, createBackendApiClient } from "@test-agent/backend-ap
 import { Button } from "@test-agent/ui-kit";
 import { Input } from "@test-agent/ui-kit";
 import { useQueryClient } from "@tanstack/vue-query";
-import { ref } from "vue";
+import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import { resolveLoginRedirect } from "../router";
 import { useAuthStore } from "../stores/authStore";
-import { onMounted } from "vue";
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -26,10 +26,7 @@ const loading = ref(false);
 const redirectPath = ref("/");
 
 onMounted(() => {
-  const redirect = router.currentRoute.value.query.redirect as string | undefined;
-  if (redirect) {
-    redirectPath.value = redirect;
-  }
+  redirectPath.value = resolveLoginRedirect(router.currentRoute.value.query.redirect);
 });
 
 /**
