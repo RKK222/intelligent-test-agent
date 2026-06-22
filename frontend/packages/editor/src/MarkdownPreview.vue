@@ -243,13 +243,16 @@ defineExpose({ scrollToSourceLine });
 .markdown-body :deep(pre code) {
   background: transparent;
 }
+</style>
 
-/* 顶级块源码行号：左侧 gutter，与编辑器行号呼应，便于源码↔预览对齐定位 */
-.markdown-body :deep([data-source-line]) {
+<!-- 行号 gutter 用非 scoped 全局样式：v-html 注入的 DOM 没有 Vue scoped 哈希，
+     scoped 的 :deep() 对 [attr]::before 伪元素不够稳定，放全局块保证命中 -->
+<style>
+.md-preview .markdown-body [data-source-line] {
   position: relative;
 }
 
-.markdown-body :deep([data-source-line]::before) {
+.md-preview .markdown-body [data-source-line]::before {
   content: attr(data-source-line);
   position: absolute;
   left: -2.75rem;
