@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
@@ -24,6 +25,7 @@ public class AgentRuntimeRegistry {
     /**
      * 创建生产注册表，并用可选 MeterRegistry 为每个运行时增加统一指标。
      */
+    @Autowired
     public AgentRuntimeRegistry(List<AgentRuntime> runtimes, ObjectProvider<MeterRegistry> meterRegistryProvider) {
         this(runtimes, meterRegistryProvider == null ? null : meterRegistryProvider.getIfAvailable());
     }
