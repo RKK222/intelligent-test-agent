@@ -794,17 +794,68 @@ function expandPathToFile(relPath: string) {
   expandedDirectories.value = next;
 }
 
+// 从 tool card 消息的 payload 提取工具名，兼容多种字段名。
+function toolNameFromPayload(payload: Record<string, unknown>): string | undefined {
+  const name = payload.toolName ?? payload.tool ?? payload.name;
+  return typeof name === "string" && name.length > 0 ? name : undefined;
+}
+
+// 从 tool card 消息的 payload 提取调用标识，用于去重。
+function toolCardPartId(message: Extract<AgentMessage, { role: "card" }>): string {
+  const payload = message.payload;
+  const id = payload.callId ?? payload.callID ?? payload.partId ?? payload.partID ?? payload.rawEventId;
+  return typeof id === "string" && id.length > 0 ? id : message.id;
+}
+
+// 从 tool card 消息的 payload 构造虚拟 ToolPart，供 liveToolPath 复用路径提取逻辑。
+function toolCardToVirtualPart(message: Extract<AgentMessage, { role: "card" }>): Extract<MessagePart, { type: "tool" }> | null {
+  const payload = message.payload;
+  const toolName = toolNameFromPayload(payload);
+  if (!toolName) {
+    return null;
+  }
+  return {
+    partId: toolCardPartId(message),
+    type: "tool",
+    toolName,
+    status: typeof payload.status === "string" ? payload.status : "completed",
+    input: typeof payload.input === "object" && payload.input !== null ? (payload.input as Record<string, unknown>) : undefined,
+    metadata: typeof payload.metadata === "object" && payload.metadata !== null ? (payload.metadata as Record<string, unknown>) : undefined
+  };
+}
+
 // 扫描对话中的 tool part：新完成的写文件工具 → 读盘刷新预览。
+// 同时处理 assistant message 的 parts 中的 tool part 和独立的 tool card 消息。
 function scanLiveToolParts() {
   if (!liveTrack.value) {
     return;
   }
   for (const message of chatState.value.messages) {
-    if (message.role !== "assistant") {
+    // 处理 assistant message 的 parts
+    if (message.role === "assistant") {
+      for (const part of message.parts ?? []) {
+        if (part.type !== "tool" || part.status !== "completed") {
+          continue;
+        }
+        if (!LIVE_WRITE_TOOLS.has(part.toolName)) {
+          continue;
+        }
+        if (liveFollowedParts.value.has(part.partId)) {
+          continue;
+        }
+        const path = liveToolPath(part);
+        if (!path) {
+          continue;
+        }
+        liveFollowedParts.value.add(part.partId);
+        void openLivePreview(path);
+      }
       continue;
     }
-    for (const part of message.parts ?? []) {
-      if (part.type !== "tool" || part.status !== "completed") {
+    // 处理独立的 tool card 消息（由 tool.finished 事件生成）
+    if (message.role === "card" && message.cardType === "tool") {
+      const part = toolCardToVirtualPart(message);
+      if (!part || part.status !== "completed") {
         continue;
       }
       if (!LIVE_WRITE_TOOLS.has(part.toolName)) {
