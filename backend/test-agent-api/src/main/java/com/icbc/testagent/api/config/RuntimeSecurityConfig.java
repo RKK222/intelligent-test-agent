@@ -51,7 +51,11 @@ public class RuntimeSecurityConfig {
     @Bean
     UrlBasedCorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOrigins(corsAllowedOrigins);
+        if (corsAllowedOrigins.size() == 1 && "*".equals(corsAllowedOrigins.get(0))) {
+            configuration.setAllowedOriginPatterns(List.of("*"));
+        } else {
+            configuration.setAllowedOrigins(corsAllowedOrigins);
+        }
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Trace-Id", "Last-Event-ID"));
         configuration.setExposedHeaders(List.of("X-Trace-Id"));
