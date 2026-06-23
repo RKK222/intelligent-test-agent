@@ -22,7 +22,9 @@ test("settings dialog manages application context and SSH key metadata", async (
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await expect(page.getByText("应用人员管理")).toBeVisible();
-  await expect(page.getByLabel("应用选择")).toHaveValue("app_gcms");
+  // Element Plus 的 el-select 是自定义组件：选中值显示在 .el-select__placeholder 的 span 中，
+  // readonly input 的 value 始终为空，不能用 toHaveValue 校验。这里改为校验选中应用名。
+  await expect(page.locator(".el-select").filter({ has: page.getByRole("combobox", { name: "应用选择" }) }).getByText("F-GCMS")).toBeVisible();
 
   await page.getByRole("button", { name: "个人设置" }).click();
   await page.getByPlaceholder("SSH key 名称").fill("work");
@@ -42,7 +44,7 @@ test("settings dialog grants application context to super admin", async ({ page 
   await page.getByRole("button", { name: "打开设置" }).click();
   await expect(page.getByRole("button", { name: "应用与工作区" })).toBeVisible();
   await expect(page.getByText("应用人员管理")).toBeVisible();
-  await expect(page.getByLabel("应用选择")).toHaveValue("app_gcms");
+  await expect(page.locator(".el-select").filter({ has: page.getByRole("combobox", { name: "应用选择" }) }).getByText("F-GCMS")).toBeVisible();
 });
 
 test("settings dialog loads application context after roles arrive while open", async ({ page }) => {
@@ -61,7 +63,7 @@ test("settings dialog loads application context after roles arrive while open", 
 
   releaseAuthMe();
   await expect(page.getByText("应用人员管理")).toBeVisible();
-  await expect(page.getByLabel("应用选择")).toHaveValue("app_gcms");
+  await expect(page.locator(".el-select").filter({ has: page.getByRole("combobox", { name: "应用选择" }) }).getByText("F-GCMS")).toBeVisible();
 });
 
 test("settings dialog shows permission placeholder for non app admins", async ({ page }) => {
