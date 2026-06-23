@@ -1,31 +1,38 @@
 <script setup lang="ts">
-import { ref, watch } from "vue";
+import { provide, ref, watch } from "vue";
+import { createBackendApiClient } from "@test-agent/backend-api";
+import type { CurrentUser } from "@test-agent/shared-types";
 import SettingsMenu from "./SettingsMenu.vue";
 import SettingsPanel from "./SettingsPanel.vue";
 
-type MenuKey = "general" | "appearance" | "account" | "about";
+type MenuKey = "appWorkspace" | "personal";
 
 const props = defineProps<{
-  modelValue: boolean;
+  open: boolean;
+  currentUser: CurrentUser | null;
 }>();
 
 const emit = defineEmits<{
-  (e: "update:modelValue", value: boolean): void;
+  (e: "close"): void;
 }>();
 
-const activeKey = ref<MenuKey>("general");
+const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
+const api = createBackendApiClient({ baseUrl: apiBaseUrl });
+provide("api", api);
+
+const activeKey = ref<MenuKey>("appWorkspace");
 
 watch(
-  () => props.modelValue,
+  () => props.open,
   (open) => {
     if (open) {
-      activeKey.value = "general";
+      activeKey.value = "appWorkspace";
     }
   }
 );
 
 function close() {
-  emit("update:modelValue", false);
+  emit("close");
 }
 
 function selectMenu(key: MenuKey) {
@@ -35,19 +42,18 @@ function selectMenu(key: MenuKey) {
 
 <template>
   <el-dialog
-    :model-value="modelValue"
-    title="系统设置"
-    width="840px"
+    :model-value="open"
+    title="设置"
+    width="960px"
     align-center
-    destroy-on-close
     :close-on-click-modal="false"
     class="ta-settings-dialog"
-    @update:model-value="(v: boolean) => emit('update:modelValue', v)"
+    @update:model-value="(v: boolean) => { if (!v) close() }"
   >
     <div class="ta-settings-shell">
       <SettingsMenu :active-key="activeKey" @select="selectMenu" />
       <div class="ta-settings-content">
-        <SettingsPanel :active-key="activeKey" />
+        <SettingsPanel :active-key="activeKey" :current-user="currentUser" />
       </div>
     </div>
     <template #footer>
@@ -59,13 +65,12 @@ function selectMenu(key: MenuKey) {
 <style scoped>
 .ta-settings-shell {
   display: flex;
-  height: 460px;
+  height: 520px;
   border-top: 1px solid #ebeef5;
   border-bottom: 1px solid #ebeef5;
   background: #fff;
   overflow: hidden;
 }
-
 .ta-settings-content {
   flex: 1;
   min-width: 0;
@@ -78,14 +83,12 @@ function selectMenu(key: MenuKey) {
 </style>
 
 <style>
-/* 全局：限制 el-dialog 整体高度，使其不超出视口 */
 .el-dialog.ta-settings-dialog {
   max-height: calc(100vh - 80px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
-
 .el-dialog.ta-settings-dialog .el-dialog__body {
   padding: 0;
   flex: 1;
