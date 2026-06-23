@@ -469,6 +469,7 @@ export type LoginResponse = {
   userId: string;
   username: string;
   unifiedAuthId: string;
+  roles?: string[];
 };
 
 /**
@@ -481,4 +482,78 @@ export type CurrentUser = {
   organization?: string | null;
   rdDepartment?: string | null;
   department?: string | null;
+  roles?: string[];
+};
+
+// ---- 应用配置管理类型 ----
+
+export type ApplicationDefinition = {
+  appId: string;
+  appName: string;
+  enabled: boolean;
+};
+
+export type PlatformUserSummary = {
+  userId: string;
+  username: string;
+  unifiedAuthId: string;
+  organization?: string | null;
+  rdDepartment?: string | null;
+  department?: string | null;
+};
+
+export type ApplicationMember = PlatformUserSummary;
+
+export type CodeRepositoryConfig = {
+  repositoryId: string;
+  gitUrl: string;
+  name: string;
+  standard: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ApplicationWorkspaceConfig = {
+  workspaceId: string;
+  appId: string;
+  repositoryId: string;
+  branch: string;
+  directoryPath: string;
+  workspaceName: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type SshKeyMetadata = {
+  sshKeyId: string;
+  name: string;
+  fingerprint: string;
+  createdAt: string;
+};
+
+export type CreateRepositoryPayload = {
+  gitUrl: string;
+  name: string;
+  standard?: boolean;
+};
+
+export type UpdateRepositoryPayload = {
+  name: string;
+  standard?: boolean;
+};
+
+export type CreateApplicationWorkspacePayload = {
+  repositoryId: string;
+  branch: string;
+  directoryPath: string;
+  workspaceName?: string;
+};
+
+export type RenameApplicationWorkspacePayload = {
+  workspaceName: string;
+};
+
+export type AddSshKeyPayload = {
+  name: string;
+  privateKey: string;
 };

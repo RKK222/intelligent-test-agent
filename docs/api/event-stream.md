@@ -87,6 +87,8 @@
 
 `GET /api/internal/agent/{agentId}/runs/{runId}/events` 是 agent-scoped RunEvent 实时入口，前端默认使用 `agentId=opencode`。`GET /api/runs/{runId}/events` 和 `GET /api/internal/platform/opencode-runtime/runs/{runId}/events` 是旧兼容入口，默认按 `opencode` 处理。三者返回 `text/event-stream`，共享同一续传、traceId、错误格式和事件模型，payload 格式不随 agentId 改变。
 
+应用配置管理和个人 SSH key 管理不产生 RunEvent，也不新增 SSE 事件类型。`/api/internal/platform/configuration-management/**` 只维护配置数据，不触发 clone、Session、Run 或运行态事件流。
+
 示例：
 
 ```text

@@ -1,9 +1,12 @@
 package com.icbc.testagent.persistence;
 
+import com.icbc.testagent.common.pagination.PageRequest;
+import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.domain.user.UserStatus;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -127,6 +130,51 @@ public class JdbcUserRepository extends JdbcRepositorySupport implements UserRep
                 .param("username", username)
                 .query(rowMapper)
                 .optional();
+    }
+
+    /**
+     * 分页搜索用户；keyword 为空时返回全部用户，非空时匹配用户名或统一认证号。
+     */
+    @Override
+    public PageResponse<User> findPage(String keyword, PageRequest pageRequest) {
+        String normalized = keyword == null ? "" : keyword.trim().toLowerCase();
+        if (normalized.isBlank()) {
+            List<User> items = jdbcClient.sql("""
+                            select user_id, unified_auth_id, username, password_hash,
+                                organization, rd_department, department, status, created_at, updated_at
+                            from users
+                            order by username, user_id
+                            limit :limit offset :offset
+                            """)
+                    .param("limit", pageRequest.size())
+                    .param("offset", pageRequest.offset())
+                    .query(rowMapper)
+                    .list();
+            long total = jdbcClient.sql("select count(*) from users").query(Long.class).single();
+            return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);
+        }
+        String pattern = "%" + normalized + "%";
+        List<User> items = jdbcClient.sql("""
+                        select user_id, unified_auth_id, username, password_hash,
+                            organization, rd_department, department, status, created_at, updated_at
+                        from users
+                        where lower(username) like :pattern or lower(unified_auth_id) like :pattern
+                        order by username, user_id
+                        limit :limit offset :offset
+                        """)
+                .param("pattern", pattern)
+                .param("limit", pageRequest.size())
+                .param("offset", pageRequest.offset())
+                .query(rowMapper)
+                .list();
+        long total = jdbcClient.sql("""
+                        select count(*) from users
+                        where lower(username) like :pattern or lower(unified_auth_id) like :pattern
+                        """)
+                .param("pattern", pattern)
+                .query(Long.class)
+                .single();
+        return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);
     }
 
     /**

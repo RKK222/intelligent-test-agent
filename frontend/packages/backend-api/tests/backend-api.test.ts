@@ -124,6 +124,46 @@ describe("backend-api", () => {
     expect(fetcher).toHaveBeenCalledWith("http://api/api/workspace-directories?path=%2FUsers%2Fhuang%2Fworkspace", expect.any(Object));
   });
 
+  it("maps configuration management APIs through platform URLs", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }]
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.listApplications(true)).resolves.toEqual([{ appId: "app_gcms", appName: "F-GCMS", enabled: true }]);
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/configuration-management/applications?enabled=true",
+      expect.any(Object)
+    );
+  });
+
+  it("does not expose SSH private key content from personal key responses", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: { sshKeyId: "ssh_1", name: "work", fingerprint: "SHA256:abc", createdAt: "2026-06-23T00:00:00Z" }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    const response = await client.addPersonalSshKey({ name: "work", privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----" });
+
+    expect(response).toEqual({ sshKeyId: "ssh_1", name: "work", fingerprint: "SHA256:abc", createdAt: "2026-06-23T00:00:00Z" });
+    expect(response).not.toHaveProperty("privateKey");
+  });
+
   it("aborts hanging requests and maps them to a timeout error", async () => {
     vi.useFakeTimers();
     let signal: AbortSignal | undefined;

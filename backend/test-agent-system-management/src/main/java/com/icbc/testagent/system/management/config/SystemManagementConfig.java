@@ -1,6 +1,8 @@
 package com.icbc.testagent.system.management.config;
 
 import com.icbc.testagent.domain.auth.TokenStore;
+import com.icbc.testagent.domain.dictionary.DictionaryRepository;
+import com.icbc.testagent.domain.dictionary.UserRoleRepository;
 import com.icbc.testagent.domain.user.UserLoginLogRepository;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.system.management.auth.AuthApplicationService;
@@ -29,7 +31,14 @@ public class SystemManagementConfig {
     public AuthApplicationService authApplicationService(
             UserDomainService userDomainService,
             TokenStore tokenStore,
-            UserLoginLogRepository loginLogRepository) {
-        return new AuthApplicationService(userDomainService, tokenStore, loginLogRepository);
+            UserLoginLogRepository loginLogRepository,
+            UserRoleRepository userRoleRepository,
+            DictionaryRepository dictionaryRepository) {
+        return new AuthApplicationService(
+                userDomainService,
+                tokenStore,
+                loginLogRepository,
+                userRoleRepository,
+                dictionaryRepository);
     }
 }

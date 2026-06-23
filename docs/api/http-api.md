@@ -49,6 +49,8 @@
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/runs/{runId}/events` | `/api/runs/{runId}/events` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/agents` | `/api/agents` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets` | `/api/sessions/{sessionId}/terminal/tickets` |
+| `configuration-management` | `/api/internal/platform/configuration-management/applications` | 无旧 URL |
+| `configuration-management` | `/api/internal/platform/configuration-management/personal/ssh-keys` | 无旧 URL |
 
 当前已落地的 agent-scoped 入口示例：
 
@@ -115,6 +117,8 @@
 | `OPENCODE_BAD_GATEWAY` | 502 | opencode 服务响应异常 |
 | `OPENCODE_UNAVAILABLE` | 503 | opencode 服务不可用 |
 | `OPENCODE_TIMEOUT` | 504 | opencode 服务超时 |
+| `GIT_UNAVAILABLE` | 503 | Git 服务不可用 |
+| `GIT_TIMEOUT` | 504 | Git 操作超时 |
 
 ## TraceId 规则
 
@@ -163,7 +167,8 @@
   "token": "uuid-token-string",
   "userId": "usr_...",
   "username": "admin",
-  "unifiedAuthId": "统一认证号"
+  "unifiedAuthId": "统一认证号",
+  "roles": ["APP_ADMIN"]
 }
 ```
 
@@ -176,7 +181,8 @@
   "unifiedAuthId": "统一认证号",
   "organization": "所属机构",
   "rdDepartment": "所属研发部",
-  "department": "所属部门"
+  "department": "所属部门",
+  "roles": ["APP_ADMIN"]
 }
 ```
 
@@ -185,8 +191,120 @@
 兼容性：
 - 登录路径当前只有 `/api/auth/login`，后续可增加 `/api/internal/platform/system-management/auth/login` 平台入口。
 - Token 存储在 Redis，1 天过期。
+- 登录、刷新和 `/api/auth/me` 会返回当前用户全局角色 `roles`。旧 token 或旧响应缺少 `roles` 时前端按空列表兼容。
 - 认证失败统一返回 `UNAUTHENTICATED` 错误码。
 - 未配置 Token 时 `/api/` 默认放行（本地开发）。
+
+## 应用配置管理 API
+
+Base URL：`/api/internal/platform/configuration-management`。本能力只产生和维护配置数据，不触发 clone、不启动 Session/Run、不消费运行态 Workspace。
+
+鉴权：
+
+- 应用与工作区接口需要已登录用户具备全局角色 `APP_ADMIN`；`SUPER_ADMIN` 继承该权限。角色来自 `user_roles + dictionaries(ROLE)`，不在 `user_roles` 增加 `application_id`。
+- 个人 SSH key 接口只要求已登录用户，用户只能管理自己的 key。
+
+### 应用与人员
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/applications?enabled=true` | 查询已同步应用定义；应用只读，不提供 CRUD。 |
+| `GET` | `/applications/{appId}/members` | 查询当前应用有效成员。 |
+| `POST` | `/applications/{appId}/members` | 将已有平台用户加入应用，应用内角色固定为成员。 |
+| `DELETE` | `/applications/{appId}/members/{userId}` | 逻辑删除应用成员关系。 |
+| `GET` | `/users?keyword=&page=&size=` | 搜索已有平台用户，用于添加成员。 |
+
+`POST /applications/{appId}/members` 请求体：
+
+```json
+{ "userId": "usr_..." }
+```
+
+成员删除只更新 `application_members.deleted_at`，不影响平台用户、其他应用关系或后续运行态数据。
+
+### 应用与代码库关联
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/repositories?page=&size=` | 分页查询代码库配置。 |
+| `POST` | `/repositories` | 新增代码库配置。 |
+| `PATCH` | `/repositories/{repoId}` | 编辑中文名称和是否测试智能体标准代码库。 |
+| `GET` | `/applications/{appId}/repositories` | 按应用查询已关联代码库。 |
+| `POST` | `/applications/{appId}/repositories` | 当前应用关联代码库。 |
+| `DELETE` | `/applications/{appId}/repositories/{repoId}` | 删除应用与代码库关联。 |
+| `GET` | `/repositories/{repoId}/applications` | 按代码库查询已关联应用。 |
+| `POST` | `/repositories/{repoId}/applications` | 指定代码库关联应用。 |
+| `DELETE` | `/repositories/{repoId}/applications/{appId}` | 删除代码库与应用关联。 |
+| `GET` | `/repositories/{repoId}/branches` | 使用 Git 远端命令列分支。 |
+| `GET` | `/repositories/{repoId}/directories?branch=main` | 使用 `git archive --remote` 解析指定分支目录。 |
+
+`POST /repositories` 请求体：
+
+```json
+{
+  "gitUrl": "git@gitee.com:org/repo.git",
+  "name": "中文名称",
+  "standard": true
+}
+```
+
+约束：
+
+- `gitUrl` 支持 SSH 和 HTTPS，创建后不可编辑且全局唯一；不提供代码库删除接口。
+- HTTPS URL 不支持内嵌账号或 token；本期不做连通性校验。
+- Git 目录读取不 clone、不 fetch；SSH URL 立即使用当前登录用户保存的唯一 SSH key。当前用户未配置 key 或远端不支持 `git archive --remote` 时返回统一 Git 错误。
+
+### 应用工作空间
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/applications/{appId}/workspaces` | 查询当前应用工作空间配置。 |
+| `POST` | `/applications/{appId}/workspaces` | 基于当前应用已关联代码库的分支和目录创建工作空间配置。 |
+| `PATCH` | `/applications/{appId}/workspaces/{workspaceId}` | 修改工作空间名称。 |
+| `DELETE` | `/applications/{appId}/workspaces/{workspaceId}` | 删除工作空间配置。 |
+
+`POST /applications/{appId}/workspaces` 请求体：
+
+```json
+{
+  "repositoryId": "repo_...",
+  "branch": "main",
+  "directoryPath": "src/main",
+  "workspaceName": "main"
+}
+```
+
+工作空间记录只保存 `应用 + 代码库 + 分支 + 目录路径 + 工作空间名称`，与运行态 `Workspace` 表和目录浏览器独立。删除仅删除配置记录。
+
+### 个人 SSH key
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/personal/ssh-keys` | 查看自己的 SSH key 元信息。 |
+| `POST` | `/personal/ssh-keys` | 新增自己的唯一 SSH 私钥。 |
+| `DELETE` | `/personal/ssh-keys/{sshKeyId}` | 删除自己的 SSH key。 |
+
+`POST /personal/ssh-keys` 请求体：
+
+```json
+{
+  "name": "work",
+  "privateKey": "-----BEGIN OPENSSH PRIVATE KEY-----..."
+}
+```
+
+响应只返回：
+
+```json
+{
+  "sshKeyId": "ssh_...",
+  "name": "work",
+  "fingerprint": "SHA256:...",
+  "createdAt": "2026-06-23T00:00:00Z"
+}
+```
+
+私钥使用 AES-GCM 加密存储，密钥来自 `TEST_AGENT_SSH_KEY_ENCRYPTION_KEY` 或 `test-agent.security.ssh-key-encryption-key`，不回显明文或密文。每个用户最多保存一把 key，重复新增返回 `CONFLICT`。
 
 ## 限流
 

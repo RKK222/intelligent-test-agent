@@ -170,3 +170,40 @@
 - `idx_agent_session_bindings_execution_node` 支持按执行节点排查远端 session 绑定。
 
 迁移会从已有 `sessions.opencode_session_id/opencode_execution_node_id` 回填 `agent_id='opencode'` 的绑定记录。旧字段暂时保留，用于旧链路兼容和回滚窗口；新链路以 `agent_session_bindings` 为主数据源。
+
+## V7 应用配置管理表
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V7__create_configuration_management_tables.sql` 创建独立配置管理表：
+
+| 表 | 说明 |
+|---|---|
+| `applications` | 外部系统同步的应用定义，本期只读消费，不提供应用 CRUD。 |
+| `application_members` | 应用与平台用户成员关系，删除使用 `deleted_at` 逻辑删除。 |
+| `code_repositories` | 代码库配置，`git_url` 全局唯一且创建后不可编辑。 |
+| `application_repository_links` | 应用与代码库多对多关联。 |
+| `application_workspaces` | 应用级工作空间配置，与运行态 `workspaces` 表独立。 |
+| `user_ssh_keys` | 用户个人 SSH 私钥配置，私钥密文、nonce、指纹和名称。 |
+
+关键约束：
+
+- `application_members(app_id, user_id)` 唯一；`deleted_at` 为空表示有效关系。
+- `code_repositories.git_url` 唯一；不提供删除仓库配置的业务接口。
+- `application_repository_links(app_id, repository_id)` 唯一。
+- `application_workspaces(app_id, repository_id, branch, directory_path)` 唯一，一个目录对应一个应用工作空间配置。
+- `user_ssh_keys.user_id` 唯一，保证每个用户最多保存一把 SSH key。
+
+兼容策略：
+
+- `applications` 数据由外部同步写入，平台只读查询；同步机制本期不实现。
+- `application_workspaces` 不复用、不引用运行态 `workspaces`，后续使用场景再决定如何衔接。
+- SSH 私钥只保存 AES-GCM 密文和 nonce，API 不返回明文或密文；加密密钥由部署环境配置。
+
+## V8 默认开发用户超级管理员授权
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V8__grant_default_user_super_admin.sql` 为本地默认前端用户 `888888888` 幂等授予 `SUPER_ADMIN` 角色。
+
+兼容策略：
+
+- 迁移按 `users.username = '888888888'` 和 `dictionaries(ROLE, SUPER_ADMIN)` 查找数据，不硬编码数据库自增主键。
+- 插入前检查 `user_roles(user_id, dict_id)` 是否已存在，重复执行语义下不会产生重复角色关系。
+- 已登录旧 Token 不会自动带上新角色，需要重新登录后 `/api/auth/me.roles` 才会返回 `SUPER_ADMIN`。

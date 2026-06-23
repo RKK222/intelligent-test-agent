@@ -53,7 +53,8 @@ public class AuthController {
                 principal.token(),
                 principal.userId().value(),
                 principal.username(),
-                principal.unifiedAuthId());
+                principal.unifiedAuthId(),
+                principal.roles());
 
         return ResponseEntity.ok(ApiResponse.ok(response, traceId));
     }
@@ -85,7 +86,8 @@ public class AuthController {
                 principal.userId().value(),
                 principal.username(),
                 principal.unifiedAuthId(),
-                null, null, null);
+                null, null, null,
+                principal.roles());
 
         return ResponseEntity.ok(ApiResponse.ok(response, traceId));
     }
@@ -107,7 +109,8 @@ public class AuthController {
                 refreshed.token(),
                 refreshed.userId().value(),
                 refreshed.username(),
-                refreshed.unifiedAuthId());
+                refreshed.unifiedAuthId(),
+                refreshed.roles());
 
         return ResponseEntity.ok(ApiResponse.ok(response, traceId));
     }

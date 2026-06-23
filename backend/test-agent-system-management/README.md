@@ -9,7 +9,7 @@
 已完成用户认证相关的基础能力：
 
 - **用户管理**：用户注册、查询、密码校验（BCrypt）。
-- **认证服务**：用户登录（用户名+密码验证 -> Token 生成）、登出、Token 校验和刷新。
+- **认证服务**：用户登录（用户名+密码验证 -> 加载全局角色 -> Token 生成）、登出、Token 校验和刷新。
 - **领域模型**：`User`、`UserLoginLog`、`Dictionary`、`UserRole`、`AuthPrincipal`、`TokenStore`。
 
 ## 依赖
@@ -29,7 +29,7 @@
 ## 主要接口
 
 - `UserDomainService`：用户注册、密码校验。
-- `AuthApplicationService`：登录/登出/Token 刷新，调用 `UserRepository`、`TokenStore`、`UserLoginLogRepository`。
+- `AuthApplicationService`：登录/登出/Token 刷新，调用 `UserRepository`、`TokenStore`、`UserLoginLogRepository`、`UserRoleRepository`、`DictionaryRepository`；登录时把 `ROLE` 字典值加载为 `AuthPrincipal.roles`。
 
 ## API 入口
 

@@ -13,6 +13,59 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
   await expect(page.getByRole("button", { name: /保存/ })).toBeVisible();
 });
 
+test("settings dialog manages application context and SSH key metadata", async ({ page }) => {
+  await mockBackendApi(page);
+
+  await gotoWorkbench(page);
+
+  await page.getByRole("button", { name: "打开设置" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(page.getByText("应用人员管理")).toBeVisible();
+  await expect(page.getByLabel("应用选择")).toHaveValue("app_gcms");
+
+  await page.getByRole("button", { name: "个人设置" }).click();
+  await page.getByPlaceholder("SSH key 名称").fill("work");
+  await page.getByPlaceholder("-----BEGIN OPENSSH PRIVATE KEY-----").fill("-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----");
+  await page.getByRole("button", { name: "添加 SSH key" }).click();
+
+  await expect(dialog.getByText("SHA256:abc")).toBeVisible();
+  await expect(dialog.getByText("secret")).toHaveCount(0);
+  await expect(dialog.locator("textarea")).toHaveCount(0);
+});
+
+test("settings dialog grants application context to super admin", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+
+  await gotoWorkbench(page);
+
+  await page.getByRole("button", { name: "打开设置" }).click();
+  await expect(page.getByRole("button", { name: "应用与工作区" })).toBeVisible();
+  await expect(page.getByText("应用人员管理")).toBeVisible();
+  await expect(page.getByLabel("应用选择")).toHaveValue("app_gcms");
+});
+
+test("settings dialog shows permission placeholder for non app admins", async ({ page }) => {
+  const configurationApplicationRequests: string[] = [];
+  await mockBackendApi(page, { authRoles: ["USER"], configurationApplicationRequests });
+
+  await gotoWorkbench(page);
+
+  await page.getByRole("button", { name: "打开设置" }).click();
+  await expect(page.getByRole("button", { name: "应用与工作区" })).toBeVisible();
+  await expect(page.getByText("您当前角色[USER]无该项设置权限。")).toBeVisible();
+  expect(configurationApplicationRequests).toEqual([]);
+});
+
+test("settings dialog shows empty role placeholder for users without roles", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: [] });
+
+  await gotoWorkbench(page);
+
+  await page.getByRole("button", { name: "打开设置" }).click();
+  await expect(page.getByText("您当前角色[无角色]无该项设置权限。")).toBeVisible();
+});
+
 test("workspace picker creates selected directory and loads its file tree", async ({ page, isMobile }) => {
   test.skip(isMobile, "mobile workspace picker layout is not part of this mock E2E");
   const workspaceCreates: Array<Record<string, unknown>> = [];
@@ -189,18 +242,76 @@ async function mockBackendApi(
     fileRequests?: Array<{ workspaceId: string; path: string }>;
     runEvents?: Array<ReturnType<typeof event>>;
     fileContents?: Record<string, string>;
+    authRoles?: string[];
+    configurationApplicationRequests?: string[];
   } = {}
 ) {
   await page.addInitScript(() => {
     localStorage.setItem("test-agent.auth.token", "test-token");
   });
+  // E2E 不依赖外部字体，避免 Google Fonts 网络波动阻塞 domcontentloaded。
+  await page.route("https://fonts.googleapis.com/**", async (route) => {
+    await route.fulfill({ status: 200, contentType: "text/css", body: "" });
+  });
+  await page.route("https://fonts.gstatic.com/**", async (route) => {
+    await route.fulfill({ status: 200, body: "" });
+  });
   const workspaceItems = [workspace()];
+  let sshKeys: Array<Record<string, unknown>> = [];
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
     if (method === "OPTIONS") {
       await route.fulfill({ status: 204, headers: corsHeaders() });
       return;
+    }
+    if (method === "GET" && url.pathname === "/api/auth/me") {
+      await route.fulfill(json({
+        userId: "usr_admin",
+        username: "admin",
+        unifiedAuthId: "admin",
+        roles: capture.authRoles ?? ["APP_ADMIN"]
+      }));
+      return;
+    }
+    if (url.pathname.startsWith("/api/internal/platform/configuration-management")) {
+      if (!url.pathname.startsWith("/api/internal/platform/configuration-management/personal/ssh-keys")) {
+        capture.configurationApplicationRequests?.push(`${method} ${url.pathname}`);
+      }
+      if (method === "GET" && url.pathname === "/api/internal/platform/configuration-management/applications") {
+        await route.fulfill(json([{ appId: "app_gcms", appName: "F-GCMS", enabled: true }]));
+        return;
+      }
+      if (method === "GET" && url.pathname === "/api/internal/platform/configuration-management/applications/app_gcms/members") {
+        await route.fulfill(json([]));
+        return;
+      }
+      if (method === "GET" && url.pathname === "/api/internal/platform/configuration-management/repositories") {
+        await route.fulfill(json(pageOf([])));
+        return;
+      }
+      if (method === "GET" && url.pathname === "/api/internal/platform/configuration-management/applications/app_gcms/repositories") {
+        await route.fulfill(json([]));
+        return;
+      }
+      if (method === "GET" && url.pathname === "/api/internal/platform/configuration-management/applications/app_gcms/workspaces") {
+        await route.fulfill(json([]));
+        return;
+      }
+      if (method === "GET" && url.pathname === "/api/internal/platform/configuration-management/personal/ssh-keys") {
+        await route.fulfill(json(sshKeys));
+        return;
+      }
+      if (method === "POST" && url.pathname === "/api/internal/platform/configuration-management/personal/ssh-keys") {
+        sshKeys = [{ sshKeyId: "ssh_1", name: "work", fingerprint: "SHA256:abc", createdAt: "2026-06-23T00:00:00Z" }];
+        await route.fulfill(json(sshKeys[0]));
+        return;
+      }
+      if (method === "DELETE" && url.pathname.startsWith("/api/internal/platform/configuration-management/personal/ssh-keys/")) {
+        sshKeys = [];
+        await route.fulfill(json(null));
+        return;
+      }
     }
     if (method === "GET" && url.pathname === "/api/workspaces") {
       await route.fulfill(json(pageOf(workspaceItems)));

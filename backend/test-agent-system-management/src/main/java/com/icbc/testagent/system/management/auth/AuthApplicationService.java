@@ -1,6 +1,9 @@
 package com.icbc.testagent.system.management.auth;
 
 import com.icbc.testagent.common.id.RuntimeIdGenerator;
+import com.icbc.testagent.domain.dictionary.Dictionary;
+import com.icbc.testagent.domain.dictionary.DictionaryRepository;
+import com.icbc.testagent.domain.dictionary.UserRoleRepository;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.auth.TokenStore;
 import com.icbc.testagent.domain.user.User;
@@ -22,6 +25,8 @@ public class AuthApplicationService {
     private final UserDomainService userDomainService;
     private final TokenStore tokenStore;
     private final UserLoginLogRepository loginLogRepository;
+    private final UserRoleRepository userRoleRepository;
+    private final DictionaryRepository dictionaryRepository;
 
     /**
      * 构造认证服务，注入依赖的领域服务和仓储。
@@ -29,10 +34,14 @@ public class AuthApplicationService {
     public AuthApplicationService(
             UserDomainService userDomainService,
             TokenStore tokenStore,
-            UserLoginLogRepository loginLogRepository) {
+            UserLoginLogRepository loginLogRepository,
+            UserRoleRepository userRoleRepository,
+            DictionaryRepository dictionaryRepository) {
         this.userDomainService = userDomainService;
         this.tokenStore = tokenStore;
         this.loginLogRepository = loginLogRepository;
+        this.userRoleRepository = userRoleRepository;
+        this.dictionaryRepository = dictionaryRepository;
     }
 
     /**
@@ -67,6 +76,7 @@ public class AuthApplicationService {
         Instant now = Instant.now();
         AuthPrincipal principal = new AuthPrincipal(
                 token, user.userId(), user.username(), user.unifiedAuthId(),
+                loadRoleValues(user),
                 now, now.plus(TOKEN_TTL));
 
         // 保存 Token 到 Redis
@@ -104,6 +114,7 @@ public class AuthApplicationService {
         Instant now = Instant.now();
         AuthPrincipal newPrincipal = new AuthPrincipal(
                 newToken, oldPrincipal.userId(), oldPrincipal.username(), oldPrincipal.unifiedAuthId(),
+                oldPrincipal.roles(),
                 now, now.plus(TOKEN_TTL));
 
         // 保存新 Token
@@ -121,5 +132,18 @@ public class AuthApplicationService {
         return tokenStore.findByToken(token)
                 .filter(principal -> !principal.isExpired())
                 .orElse(null);
+    }
+
+    /**
+     * 登录时把用户全局角色加载进认证主体，供 API 和前端菜单显隐使用。
+     */
+    private java.util.List<String> loadRoleValues(User user) {
+        return userRoleRepository.findByUserId(user.userId()).stream()
+                .map(role -> dictionaryRepository.findByDictId(role.dictId()))
+                .flatMap(java.util.Optional::stream)
+                .filter(dictionary -> Dictionary.DICT_KEY_ROLE.equals(dictionary.dictKey()))
+                .map(Dictionary::dictValue)
+                .sorted()
+                .toList();
     }
 }

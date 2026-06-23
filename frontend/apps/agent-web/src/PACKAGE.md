@@ -13,6 +13,7 @@
 - `views/WorkbenchView.vue`：工作台首页入口。
 - `views/TranscriptView.vue`：只读 transcript 页面入口，复用平台 session/messages API。
 - `components/AgentWorkbench.vue`：组合 workspace、文件树、编辑器、Agent、RunEvent SSE、Session History 搜索/置顶/删除、prompt 附件/follow-up 队列、编辑器选区上下文、Diff 操作和底部 PTY terminal panel。
+- `components/SettingsDialog.vue`：左下角设置模态，组合应用人员、代码库关联、应用工作空间和个人 SSH key 配置管理；无应用配置权限时展示当前角色无权限提示。
 - `components/EditorPane.vue`、`WorkspaceBootstrap.vue`、`ReadonlyTranscript.vue`：编辑器 tab 壳、Workspace 注册引导和只读 transcript 视图（不订阅 SSE，不直连 opencode）。
 - `components/follow-up-queue.ts`：Run 忙碌时 prompt follow-up 的纯 FIFO 队列模型。
 - `components/prompt-context.ts`：活动编辑器或 Monaco 选区到 `PromptPart` file context 的纯转换。

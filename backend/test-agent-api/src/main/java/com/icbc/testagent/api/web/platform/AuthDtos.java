@@ -29,13 +29,13 @@ public final class AuthDtos {
     /**
      * 登录成功响应体。
      */
-    public record LoginResponse(String token, String userId, String username, String unifiedAuthId) {
+    public record LoginResponse(String token, String userId, String username, String unifiedAuthId, java.util.List<String> roles) {
     }
 
     /**
      * 当前用户信息响应体。
      */
     public record CurrentUserResponse(String userId, String username, String unifiedAuthId,
-                                       String organization, String rdDepartment, String department) {
+                                       String organization, String rdDepartment, String department, java.util.List<String> roles) {
     }
 }
