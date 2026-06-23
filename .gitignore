@@ -57,3 +57,4 @@ tmp/
 # ===== 前端工具缓存 / 产物 =====
 .vite/
 .playwright-mcp/
+.claude/

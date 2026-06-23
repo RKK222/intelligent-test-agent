@@ -6,17 +6,14 @@ import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api
 import { DiffViewer } from "@test-agent/diff-viewer";
 import { CodeEditor, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents } from "@test-agent/event-stream-client";
-import { Bell, Code2, GitBranch, MessageSquare, Settings, TerminalSquare } from "lucide-vue-next";
+import { Code2, MessageSquare } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
-  ApplicationWorkspaceTemplate,
-  ApplicationWorkspaceVersion,
   FileTreeEntry,
   ManagedApplication,
   MessagePart,
   PageResponse,
-  PersonalWorkspace,
   PromptPart,
   Run,
   RunDiffFile,
@@ -97,14 +94,6 @@ const bottomMode = ref<"run" | "terminal">("run");
 const bottomDrawerOpen = ref(false);
 const rightPanelOpen = ref(true);
 const selectedAppId = ref<string | undefined>(undefined);
-const selectedTemplateId = ref<string | undefined>(undefined);
-const selectedVersionId = ref<string | undefined>(undefined);
-const selectedPersonalWorkspaceId = ref<string | undefined>(undefined);
-const versionDraft = ref("");
-const versionBranchDraft = ref("");
-const personalWorkspaceName = ref("");
-const managedWorkspaceNotice = ref("");
-const pendingApplicationWorkspaceFallback = ref(false);
 const readonlySessionReason = ref("");
 const modelPickerOpen = ref(false);
 const modelSearch = ref("");
@@ -164,38 +153,6 @@ const shellApps = computed(() =>
   managedApplications.value.map((app) => ({ id: app.appId, name: app.appName, description: app.enabled ? "已启用" : "已停用" }))
 );
 const selectedManagedApplication = computed(() => managedApplications.value.find((app) => app.appId === selectedAppId.value));
-
-const workspaceTemplatesQuery = useQuery({
-  queryKey: ["managed-workspace", "templates", selectedAppId],
-  enabled: () => Boolean(selectedAppId.value),
-  queryFn: () => api.listWorkspaceTemplates(selectedAppId.value!)
-});
-const workspaceTemplates = computed<ApplicationWorkspaceTemplate[]>(() => workspaceTemplatesQuery.data.value ?? []);
-const selectedTemplate = computed(() => workspaceTemplates.value.find((template) => template.workspaceId === selectedTemplateId.value));
-
-const workspaceVersionsQuery = useQuery({
-  queryKey: ["managed-workspace", "versions", selectedAppId, selectedTemplateId],
-  enabled: () => Boolean(selectedAppId.value && selectedTemplateId.value),
-  queryFn: () => api.listWorkspaceVersions(selectedAppId.value!, selectedTemplateId.value!)
-});
-const workspaceVersions = computed<ApplicationWorkspaceVersion[]>(() => workspaceVersionsQuery.data.value ?? []);
-const selectedVersion = computed(() => workspaceVersions.value.find((version) => version.versionId === selectedVersionId.value));
-
-const personalWorkspacesQuery = useQuery({
-  queryKey: ["managed-workspace", "personal", selectedVersionId],
-  enabled: () => Boolean(selectedVersionId.value),
-  queryFn: () => api.listPersonalWorkspaces(selectedVersionId.value!)
-});
-const personalWorkspaces = computed<PersonalWorkspace[]>(() => personalWorkspacesQuery.data.value ?? []);
-const selectedPersonalWorkspace = computed(() =>
-  personalWorkspaces.value.find((workspace) => workspace.personalWorkspaceId === selectedPersonalWorkspaceId.value)
-);
-
-const recentManagedWorkspaceQuery = useQuery({
-  queryKey: ["managed-workspace", "recent"],
-  queryFn: () => api.getRecentManagedWorkspace(),
-  retry: false
-});
 
 const sessionsQuery = useQuery({
   queryKey: ["sessions", selectedWorkspaceIdRef, sessionSearchTrim],
@@ -315,16 +272,6 @@ const vcsBranches = computed(() => {
   if (!current) return [];
   return [{ name: current, isCurrent: true }];
 });
-const managedWorkspaceHint = computed(() => {
-  if (managedApplicationsQuery.isLoading.value) return "正在加载应用列表...";
-  if (!selectedManagedApplication.value) return managedApplications.value.length === 0 ? "当前用户未加入任何应用。" : "";
-  if (workspaceTemplatesQuery.isLoading.value) return "正在加载应用工作空间...";
-  if (workspaceTemplates.value.length === 0) return "请联系应用管理员配置应用工作空间";
-  if (workspaceVersionsQuery.isLoading.value) return "正在加载工作空间版本...";
-  if (selectedTemplate.value && workspaceVersions.value.length === 0) return "请在工作空间切换中新增工作空间版本";
-  return managedWorkspaceNotice.value;
-});
-
 function handleChangeBranch(branch: string) {
   // 当前分支切换由应用版本工作区控制，这里只保留编辑器分支选择的即时反馈。
   feedback.value = { kind: "info", title: "已切换分支", description: `当前分支：${branch}` };
@@ -342,42 +289,6 @@ function selectRuntimeModel(model: typeof models.value[number]) {
 watch(managedApplications, (apps) => {
   if (!selectedAppId.value && apps[0]?.appId) {
     selectedAppId.value = apps[0].appId;
-  }
-});
-watch(recentManagedWorkspaceQuery.data, (workspace) => {
-  if (workspace && !selectedWorkspaceId.value) {
-    void switchWorkspace(workspace);
-  } else if (!workspace && !selectedWorkspaceId.value) {
-    pendingApplicationWorkspaceFallback.value = true;
-  }
-});
-watch(selectedAppId, () => {
-  selectedTemplateId.value = undefined;
-  selectedVersionId.value = undefined;
-  selectedPersonalWorkspaceId.value = undefined;
-  managedWorkspaceNotice.value = "";
-});
-watch(workspaceTemplates, (templates) => {
-  if (!selectedTemplateId.value || !templates.some((template) => template.workspaceId === selectedTemplateId.value)) {
-    selectedTemplateId.value = templates[0]?.workspaceId;
-  }
-});
-watch(selectedTemplateId, () => {
-  selectedVersionId.value = undefined;
-  selectedPersonalWorkspaceId.value = undefined;
-});
-watch(workspaceVersions, (versions) => {
-  if (!selectedVersionId.value || !versions.some((version) => version.versionId === selectedVersionId.value)) {
-    selectedVersionId.value = versions[0]?.versionId;
-  }
-  if (pendingApplicationWorkspaceFallback.value && versions[0]) {
-    pendingApplicationWorkspaceFallback.value = false;
-    void switchManagedVersion(versions[0].versionId);
-  }
-});
-watch(personalWorkspaces, (workspaces) => {
-  if (selectedPersonalWorkspaceId.value && !workspaces.some((workspace) => workspace.personalWorkspaceId === selectedPersonalWorkspaceId.value)) {
-    selectedPersonalWorkspaceId.value = undefined;
   }
 });
 watch(selectedWorkspace, (sw) => {
@@ -480,51 +391,6 @@ const createWorkspaceMutation = useMutation({
   },
   onError: (error) => {
     feedback.value = errorFeedback("创建 Workspace 失败", error);
-  }
-});
-
-const createWorkspaceVersionMutation = useMutation({
-  mutationFn: async () => {
-    if (!selectedAppId.value || !selectedTemplateId.value) {
-      throw new Error("请先选择应用工作空间");
-    }
-    return api.createWorkspaceVersion(selectedAppId.value, selectedTemplateId.value, {
-      version: normalizeDateVersion(versionDraft.value),
-      branch: versionBranchDraft.value.trim() || undefined
-    });
-  },
-  onSuccess: async (version) => {
-    versionDraft.value = "";
-    versionBranchDraft.value = "";
-    selectedVersionId.value = version.versionId;
-    selectedPersonalWorkspaceId.value = undefined;
-    await switchWorkspace(version.runtimeWorkspace);
-    await api.markRecentManagedWorkspace(version.runtimeWorkspace.workspaceId);
-    void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "versions"] });
-    feedback.value = { kind: "success", title: "已创建并切换工作空间版本", description: version.version };
-  },
-  onError: (error) => {
-    feedback.value = errorFeedback("创建工作空间版本失败", error);
-  }
-});
-
-const createPersonalWorkspaceMutation = useMutation({
-  mutationFn: async () => {
-    if (!selectedVersionId.value) {
-      throw new Error("请先选择应用工作空间版本");
-    }
-    return api.createPersonalWorkspace(selectedVersionId.value, { workspaceName: personalWorkspaceName.value.trim() });
-  },
-  onSuccess: async (workspace) => {
-    personalWorkspaceName.value = "";
-    selectedPersonalWorkspaceId.value = workspace.personalWorkspaceId;
-    await switchWorkspace(workspace.runtimeWorkspace);
-    await api.markRecentManagedWorkspace(workspace.runtimeWorkspace.workspaceId);
-    void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "personal"] });
-    feedback.value = { kind: "success", title: "已创建并切换个人工作区", description: workspace.workspaceName };
-  },
-  onError: (error) => {
-    feedback.value = errorFeedback("创建个人工作区失败", error);
   }
 });
 
@@ -888,10 +754,6 @@ function workspaceNameFromPath(path: string) {
   return path.split(/[\\/]+/).filter(Boolean).at(-1) ?? "Workspace";
 }
 
-function normalizeDateVersion(value: string) {
-  return value.trim().replaceAll("-", "");
-}
-
 async function loadWorkspaceDirectories(path?: string) {
   directoryPickerLoading.value = true;
   try {
@@ -920,105 +782,15 @@ async function switchWorkspace(workspace: Workspace) {
 
 async function handleSelectApp(appId: string) {
   selectedAppId.value = appId;
-  managedWorkspaceNotice.value = "";
-  pendingApplicationWorkspaceFallback.value = false;
   try {
     const recent = await api.getRecentManagedWorkspaceForApplication(appId);
     if (recent) {
       await switchWorkspace(recent);
       return;
     }
-    pendingApplicationWorkspaceFallback.value = true;
-    feedback.value = { kind: "info", title: "已切换应用", description: "请选择或新增工作空间版本" };
+    feedback.value = { kind: "info", title: "已切换应用", description: "请选择工作空间" };
   } catch (error) {
     feedback.value = errorFeedback("切换应用失败", error);
-  }
-}
-
-async function switchManagedVersion(versionId: string) {
-  const version = workspaceVersions.value.find((item) => item.versionId === versionId);
-  if (!version) {
-    return;
-  }
-  selectedVersionId.value = version.versionId;
-  selectedPersonalWorkspaceId.value = undefined;
-  await switchWorkspace(version.runtimeWorkspace);
-  await api.markRecentManagedWorkspace(version.runtimeWorkspace.workspaceId);
-}
-
-async function switchPersonalWorkspace(personalWorkspaceId: string) {
-  const workspace = personalWorkspaces.value.find((item) => item.personalWorkspaceId === personalWorkspaceId);
-  if (!workspace) {
-    return;
-  }
-  selectedPersonalWorkspaceId.value = workspace.personalWorkspaceId;
-  await switchWorkspace(workspace.runtimeWorkspace);
-  await api.markRecentManagedWorkspace(workspace.runtimeWorkspace.workspaceId);
-  await loadPersonalDiff(workspace.personalWorkspaceId, "application-to-personal");
-}
-
-async function loadPersonalDiff(personalWorkspaceId = selectedPersonalWorkspaceId.value, direction: "preview" | "application-to-personal" = "preview") {
-  if (!personalWorkspaceId) {
-    feedback.value = { kind: "info", title: "请先选择个人工作区" };
-    return [];
-  }
-  try {
-    const diff = await api.diffPersonalWorkspace(personalWorkspaceId);
-    diffFiles.value = diff.files.map((file) => ({
-      path: file.path,
-      status: file.conflict ? `${file.status} conflict` : file.status,
-      patch: "",
-      additions: file.status === "added" ? 1 : 0,
-      deletions: file.status === "deleted" ? 1 : 0
-    }));
-    diffSource.value = "vcs";
-    centerMode.value = "diff";
-    workbench.setSelectedDiffPath(diff.files[0]?.path);
-    if (direction === "application-to-personal" && diff.files.length > 0) {
-      feedback.value = { kind: "info", title: "个人工作区存在待同步差异", description: "可在工作区菜单选择同步方向" };
-    }
-    return diff.files.map((file) => file.path);
-  } catch (error) {
-    feedback.value = errorFeedback("加载个人工作区差异失败", error);
-    return [];
-  }
-}
-
-async function syncPersonalToApplication(force = false) {
-  if (!selectedPersonalWorkspaceId.value) {
-    feedback.value = { kind: "info", title: "请先选择个人工作区" };
-    return;
-  }
-  const files = diffFiles.value.length > 0 ? diffFiles.value.map((file) => file.path) : await loadPersonalDiff();
-  if (files.length === 0) {
-    feedback.value = { kind: "info", title: "没有可同步的差异" };
-    return;
-  }
-  try {
-    const result = await api.syncPersonalToApplication(selectedPersonalWorkspaceId.value, { files, force });
-    feedback.value = { kind: "success", title: "已同步个人工作区到应用工作区", description: `${result.files.length} 个文件` };
-    await loadPersonalDiff();
-  } catch (error) {
-    feedback.value = errorFeedback(force ? "强推同步失败" : "同步个人工作区失败", error);
-  }
-}
-
-async function syncApplicationToPersonal() {
-  if (!selectedPersonalWorkspaceId.value) {
-    feedback.value = { kind: "info", title: "请先选择个人工作区" };
-    return;
-  }
-  const files = diffFiles.value.length > 0 ? diffFiles.value.map((file) => file.path) : await loadPersonalDiff();
-  if (files.length === 0) {
-    feedback.value = { kind: "info", title: "没有可同步的差异" };
-    return;
-  }
-  try {
-    const result = await api.syncApplicationToPersonal(selectedPersonalWorkspaceId.value, { files });
-    feedback.value = { kind: "success", title: "已同步应用工作区到个人工作区", description: `${result.files.length} 个文件` };
-    await loadPersonalDiff();
-  } catch (error) {
-    feedback.value = errorFeedback("同步应用工作区失败", error);
   }
 }
 
@@ -1457,15 +1229,6 @@ async function loadDiffSource(source: "run" | "session" | "vcs") {
   }
 }
 
-async function requestNotifications() {
-  if (typeof window === "undefined" || !("Notification" in window)) {
-    feedback.value = { kind: "info", title: "当前浏览器不支持通知" };
-    return;
-  }
-  const result = await Notification.requestPermission();
-  feedback.value = { kind: result === "granted" ? "success" : "info", title: result === "granted" ? "通知已开启" : "通知未开启" };
-}
-
 async function switchSession(sessionId: string) {
   const selected = sessionsQuery.data.value?.items.find((item) => item.sessionId === sessionId) ?? (await api.getSession(sessionId));
   let readonlyReason = "";
@@ -1508,11 +1271,6 @@ function onUseHunkContext(part: Extract<PromptPart, { type: "file" }>) {
   diffContextParts.value = [...diffContextParts.value, part];
   feedback.value = { kind: "info", title: "已引用当前 hunk", description: `${part.path ?? part.name} 将随下一条 Prompt 提交` };
 }
-
-function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
-  bottomMode.value = mode;
-  bottomDrawerOpen.value = true;
-}
 </script>
 
 <template>
@@ -1541,44 +1299,6 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
           </button>
           <button
             type="button"
-            :class="['figma-activity-btn', centerMode === 'diff' && 'figma-activity-btn--active']"
-            aria-label="打开 Diff"
-            title="打开 Diff"
-            @click="centerMode = 'diff'"
-          >
-            <GitBranch class="figma-activity-icon" />
-          </button>
-          <button
-            type="button"
-            :class="['figma-activity-btn', bottomDrawerOpen && 'figma-activity-btn--active']"
-            aria-label="打开运行与终端"
-            title="打开运行与终端"
-            @click="openBottomDrawer()"
-          >
-            <TerminalSquare class="figma-activity-icon" />
-          </button>
-          <button
-            type="button"
-            class="figma-activity-btn"
-            aria-label="请求通知权限"
-            title="请求通知权限"
-            @click="requestNotifications"
-          >
-            <Bell class="h-[22px] w-[22px]" />
-          </button>
-        </div>
-        <div class="flex flex-col items-center gap-3">
-          <button
-            type="button"
-            :class="['ta-activity-button', settingsOpen && 'is-active']"
-            aria-label="打开设置"
-            title="打开设置"
-            @click="settingsOpen = true"
-          >
-            <Settings class="h-[22px] w-[22px]" />
-          </button>
-          <button
-            type="button"
             :class="['figma-activity-btn', rightPanelOpen && 'figma-activity-btn--active']"
             aria-label="切换对话面板"
             title="切换对话面板"
@@ -1587,99 +1307,22 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
             <MessageSquare class="figma-activity-icon" />
           </button>
         </div>
-        <button
-          type="button"
-          :class="['figma-activity-btn', settingsOpen && 'figma-activity-btn--active']"
-          aria-label="系统设置"
-          title="系统设置"
-          @click="settingsOpen = true"
-        >
-          <ElSetting class="figma-activity-icon" />
-        </button>
+        <div class="figma-activity-bottom">
+          <button
+            type="button"
+            :class="['figma-activity-btn', settingsOpen && 'figma-activity-btn--active']"
+            aria-label="系统设置"
+            title="系统设置"
+            @click="settingsOpen = true"
+          >
+            <ElSetting class="figma-activity-icon" />
+          </button>
+        </div>
       </nav>
     </template>
 
     <template #files>
       <div v-if="selectedManagedApplication || selectedWorkspace" class="managed-workspace-layout">
-        <section class="managed-workspace-switcher" aria-label="应用工作区切换">
-          <div class="managed-workspace-row">
-            <label class="managed-workspace-label" for="managed-template">工作空间</label>
-            <select id="managed-template" v-model="selectedTemplateId" class="managed-workspace-select" @change="pendingApplicationWorkspaceFallback = true">
-              <option v-for="template in workspaceTemplates" :key="template.workspaceId" :value="template.workspaceId">
-                {{ template.workspaceName }}
-              </option>
-            </select>
-          </div>
-          <div class="managed-workspace-row">
-            <label class="managed-workspace-label" for="managed-version">版本</label>
-            <select
-              id="managed-version"
-              v-model="selectedVersionId"
-              class="managed-workspace-select"
-              :disabled="workspaceVersions.length === 0"
-              @change="selectedVersionId && switchManagedVersion(selectedVersionId)"
-            >
-              <option v-for="version in workspaceVersions" :key="version.versionId" :value="version.versionId">
-                {{ version.version }}
-              </option>
-            </select>
-          </div>
-          <div class="managed-workspace-create">
-            <input v-model="versionDraft" class="managed-workspace-input" type="date" aria-label="版本日期" />
-            <input v-model="versionBranchDraft" class="managed-workspace-input" type="text" placeholder="非标准库分支" aria-label="非标准库分支" />
-            <button
-              type="button"
-              class="managed-workspace-button"
-              :disabled="createWorkspaceVersionMutation.isPending.value || !selectedTemplateId || !versionDraft"
-              @click="createWorkspaceVersionMutation.mutate()"
-            >
-              新增版本
-            </button>
-          </div>
-          <div class="managed-workspace-row">
-            <label class="managed-workspace-label" for="personal-workspace">个人空间</label>
-            <select
-              id="personal-workspace"
-              v-model="selectedPersonalWorkspaceId"
-              class="managed-workspace-select"
-              :disabled="personalWorkspaces.length === 0"
-              @change="selectedPersonalWorkspaceId ? switchPersonalWorkspace(selectedPersonalWorkspaceId) : selectedVersionId && switchManagedVersion(selectedVersionId)"
-            >
-              <option value="">应用公共空间</option>
-              <option v-for="workspace in personalWorkspaces" :key="workspace.personalWorkspaceId" :value="workspace.personalWorkspaceId">
-                {{ workspace.workspaceName }}
-              </option>
-            </select>
-          </div>
-          <div class="managed-workspace-create">
-            <input v-model="personalWorkspaceName" class="managed-workspace-input" type="text" placeholder="个人空间名称" aria-label="个人空间名称" />
-            <button
-              type="button"
-              class="managed-workspace-button"
-              :disabled="createPersonalWorkspaceMutation.isPending.value || !selectedVersionId || !personalWorkspaceName.trim()"
-              @click="createPersonalWorkspaceMutation.mutate()"
-            >
-              新增个人空间
-            </button>
-          </div>
-          <div v-if="selectedPersonalWorkspaceId" class="managed-workspace-actions">
-            <button type="button" class="managed-workspace-link" @click="loadPersonalDiff()">查看差异</button>
-            <button type="button" class="managed-workspace-link" @click="syncApplicationToPersonal">应用同步到个人</button>
-            <button type="button" class="managed-workspace-link" @click="syncPersonalToApplication(false)">个人同步到应用</button>
-            <button type="button" class="managed-workspace-link danger" @click="syncPersonalToApplication(true)">强推覆盖应用</button>
-          </div>
-          <div v-if="managedWorkspaceHint" class="managed-workspace-hint">
-            <span>{{ managedWorkspaceHint }}</span>
-            <button
-              v-if="workspaceTemplates.length === 0 && selectedManagedApplication"
-              type="button"
-              class="managed-workspace-link"
-              @click="settingsOpen = true"
-            >
-              设置
-            </button>
-          </div>
-        </section>
         <FigmaFileExplorer
           v-if="selectedWorkspace"
           class="managed-workspace-files"
@@ -1777,7 +1420,7 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
           :permissions="chatState.permissions"
           :questions="chatState.questions"
           placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
-          @send="(text: string, attachments: ComposerAttachment[]) => handleSend(text, attachments)"
+          @send="(text: string) => handleSend(text)"
           @stop="handleStopRun"
           @new-conversation="() => handleSend('')"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
@@ -2051,47 +1694,7 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
   min-height: 0;
 }
 
-.managed-workspace-switcher {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  flex: 0 0 auto;
-  padding: 10px;
-  border-bottom: 1px solid var(--ta-border);
-  background: #fff;
-}
-
-.managed-workspace-row,
-.managed-workspace-create,
-.managed-workspace-actions,
-.managed-workspace-hint {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.managed-workspace-label {
-  width: 52px;
-  flex: 0 0 auto;
-  color: var(--ta-muted);
-  font-size: 12px;
-}
-
-.managed-workspace-select,
-.managed-workspace-input {
-  min-width: 0;
-  height: 28px;
-  flex: 1 1 auto;
-  border: 1px solid var(--ta-border);
-  border-radius: 6px;
-  background: #fff;
-  color: var(--ta-text);
-  font-size: 12px;
-  padding: 0 8px;
-}
-
-.managed-workspace-button,
-.managed-workspace-link {
+.managed-workspace-button {
   height: 28px;
   border: 1px solid var(--ta-border);
   border-radius: 6px;
@@ -2100,26 +1703,6 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
   font-size: 12px;
   padding: 0 8px;
   white-space: nowrap;
-}
-
-.managed-workspace-button:disabled {
-  color: var(--ta-muted);
-  cursor: not-allowed;
-}
-
-.managed-workspace-link {
-  color: #2563eb;
-}
-
-.managed-workspace-link.danger {
-  color: #b42318;
-}
-
-.managed-workspace-hint {
-  align-items: flex-start;
-  color: var(--ta-muted);
-  font-size: 12px;
-  line-height: 18px;
 }
 
 .managed-workspace-files {

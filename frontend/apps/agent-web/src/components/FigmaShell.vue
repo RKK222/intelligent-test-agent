@@ -570,7 +570,8 @@ onUnmounted(() => {
   padding: 8px 0;
 }
 
-:deep(.figma-activity-top) {
+:deep(.figma-activity-top),
+:deep(.figma-activity-bottom) {
   display: flex;
   flex-direction: column;
   align-items: center;
