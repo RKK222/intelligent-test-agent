@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { Setting, User, Brush, InfoFilled } from "@element-plus/icons-vue";
+import { Setting, User } from "@element-plus/icons-vue";
 
-type MenuKey = "general" | "appearance" | "account" | "about";
+type MenuKey = "appWorkspace" | "personal";
 
 defineProps<{
   activeKey: MenuKey;
@@ -12,15 +12,13 @@ const emit = defineEmits<{
 }>();
 
 const items: Array<{ key: MenuKey; label: string; icon: typeof Setting }> = [
-  { key: "general", label: "通用", icon: Setting },
-  { key: "appearance", label: "外观", icon: Brush },
-  { key: "account", label: "账号", icon: User },
-  { key: "about", label: "关于", icon: InfoFilled }
+  { key: "appWorkspace", label: "应用与工作区", icon: Setting },
+  { key: "personal", label: "个人设置", icon: User }
 ];
 </script>
 
 <template>
-  <nav class="ta-settings-menu" aria-label="系统设置导航">
+  <nav class="ta-settings-menu" aria-label="设置导航">
     <ul class="ta-settings-menu-list">
       <li
         v-for="item in items"
@@ -55,7 +53,6 @@ const items: Array<{ key: MenuKey; label: string; icon: typeof Setting }> = [
   box-sizing: border-box;
   overflow-y: auto;
 }
-
 .ta-settings-menu-list {
   list-style: none;
   margin: 0;
@@ -64,7 +61,6 @@ const items: Array<{ key: MenuKey; label: string; icon: typeof Setting }> = [
   flex-direction: column;
   gap: 2px;
 }
-
 .ta-settings-menu-item {
   display: flex;
   align-items: center;
@@ -79,25 +75,16 @@ const items: Array<{ key: MenuKey; label: string; icon: typeof Setting }> = [
   transition: background-color 0.12s ease, color 0.12s ease;
   outline: none;
 }
-
 .ta-settings-menu-item:hover,
 .ta-settings-menu-item:focus-visible {
   background: #f0f0f0;
   color: #18181b;
 }
-
 .ta-settings-menu-item.is-active {
   background: #e8f0ff;
   color: #3366ff;
   font-weight: 500;
 }
-
-.ta-settings-menu-icon {
-  font-size: 16px;
-}
-
-.ta-settings-menu-label {
-  flex: 1;
-  min-width: 0;
-}
+.ta-settings-menu-icon { font-size: 16px; }
+.ta-settings-menu-label { flex: 1; min-width: 0; }
 </style>
