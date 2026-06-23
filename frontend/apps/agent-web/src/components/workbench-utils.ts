@@ -33,6 +33,25 @@ export function diffFilesFromPayload(payload: Record<string, unknown>): RunDiffF
     .filter((item) => item.path.length > 0);
 }
 
+// 把新到达的 diff 文件列表按 path 合并到已有列表中：
+// - 同 path 用新对象整体覆盖（additions/deletions/patch 用最新值），保留 entries 顺序。
+// - 新 path 追加到尾部。
+// 用于解决后端 `edit` 工具的 `diff.proposed` 事件只携带"本工具刚编辑的单个文件"、
+// 多次事件直接替换会导致前面改过的文件被丢失的问题。
+export function mergeDiffFiles(current: RunDiffFile[], incoming: RunDiffFile[]): RunDiffFile[] {
+  if (incoming.length === 0) {
+    return current;
+  }
+  const map = new Map<string, RunDiffFile>();
+  for (const file of current) {
+    if (file.path) map.set(file.path, file);
+  }
+  for (const file of incoming) {
+    if (file.path) map.set(file.path, file);
+  }
+  return Array.from(map.values());
+}
+
 export function errorFeedback(title: string, error: unknown): Feedback {
   if (error instanceof BackendApiError) {
     return { kind: "error", title, description: `${error.code}: ${error.message}`, traceId: error.traceId };

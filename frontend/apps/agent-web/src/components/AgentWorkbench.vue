@@ -43,6 +43,7 @@ import {
   errorFeedback,
   historyItems,
   initialMessages,
+  mergeDiffFiles,
   messagesFromSessionMessages,
   modelIdOnly,
   modelValue,
@@ -829,7 +830,9 @@ function handleRunEvent(event: RunEvent) {
     const files = diffFilesFromPayload(event.payload);
     if (files.length) {
       diffSource.value = "run";
-      diffFiles.value = files;
+      // edit/apply_patch 工具的 diff.proposed 事件只携带本次改动的文件，必须按 path 累加去重，
+      // 否则后续事件会把前面已变更的文件覆盖丢失，导致右侧"X 个文件已更改"提示始终为 1。
+      diffFiles.value = mergeDiffFiles(diffFiles.value, files);
       workbench.setSelectedDiffPath(files[0]?.path);
     } else if (run.value) {
       void api.getRunDiff(run.value.runId).then((diff) => {
@@ -841,7 +844,8 @@ function handleRunEvent(event: RunEvent) {
     const files = diffFilesFromPayload(event.payload);
     if (files.length) {
       diffSource.value = "session";
-      diffFiles.value = files;
+      // 同样按 path 累加，避免被后面的 session.diff 报告"清空"。
+      diffFiles.value = mergeDiffFiles(diffFiles.value, files);
       workbench.setSelectedDiffPath(files[0]?.path);
     }
   } else if (event.type === "run.succeeded" || event.type === "run.failed" || event.type === "run.cancelled") {
