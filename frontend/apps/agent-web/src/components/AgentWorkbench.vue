@@ -123,11 +123,6 @@ const breadcrumbDisplay = computed(() => {
   return activePath.value.split(/[\\/]+/).filter(Boolean).join(" › ");
 });
 
-async function openSettings() {
-  await authStore.fetchCurrentUser(api);
-  settingsDialogOpen.value = true;
-}
-
 // ===== 查询 =====
 const workspacesQuery = useQuery({
   queryKey: ["workspaces"],
@@ -1183,10 +1178,10 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
         <div class="flex flex-col items-center gap-3">
           <button
             type="button"
-            :class="['ta-activity-button', settingsDialogOpen && 'is-active']"
+            :class="['ta-activity-button', settingsOpen && 'is-active']"
             aria-label="打开设置"
             title="打开设置"
-            @click="openSettings"
+            @click="settingsOpen = true"
           >
             <Settings class="h-[22px] w-[22px]" />
           </button>
