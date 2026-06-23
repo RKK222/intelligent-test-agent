@@ -111,7 +111,7 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
                         select a.app_id, a.app_name, a.enabled, a.created_at, a.updated_at
                         from applications a
                         join application_members m on m.app_id = a.app_id
-                        where m.user_id = :userId and m.deleted_at is null and a.enabled = true
+                        where m.user_id = :userId  and a.enabled = true
                         order by a.app_name, a.app_id
                         """)
                 .param("userId", userId.value())
