@@ -2,7 +2,7 @@
 import { inject, onMounted, ref } from "vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type { SshKeyMetadata } from "@test-agent/shared-types";
-import { KeyRound, Trash2 } from "@element-plus/icons-vue";
+import { Key, Delete } from "@element-plus/icons-vue";
 
 defineProps<{
   currentUser: unknown;
@@ -65,14 +65,14 @@ onMounted(() => {
       <div class="ta-item-list">
         <div v-for="sshKey in sshKeys" :key="sshKey.sshKeyId" class="ta-item-row">
           <div class="ta-item-row-left">
-            <el-icon><KeyRound /></el-icon>
+            <el-icon><Key /></el-icon>
             <div>
               <div class="ta-item-title">{{ sshKey.name }}</div>
               <div class="ta-item-subtitle">{{ sshKey.fingerprint }}</div>
             </div>
           </div>
           <el-button size="small" type="danger" plain :disabled="loading" @click="deleteSshKey(sshKey.sshKeyId)">
-            <el-icon><Trash2 /></el-icon> 删除
+            <el-icon><Delete /></el-icon> 删除
           </el-button>
         </div>
       </div>
