@@ -1766,20 +1766,6 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
 
     <template #chat>
       <div class="managed-chat-panel">
-        <div class="managed-chat-toolbar" aria-label="智能体运行设置">
-          <button type="button" class="managed-model-button" aria-label="选择模型" @click="modelPickerOpen = true">
-            <span>选择模型</span>
-            <strong>{{ selectedModelLabel }}</strong>
-          </button>
-          <button
-            type="button"
-            :class="['managed-live-button', liveTrack && 'is-active']"
-            :aria-pressed="liveTrack ? 'true' : 'false'"
-            @click="liveTrack = !liveTrack"
-          >
-            实时
-          </button>
-        </div>
         <FigmaChatPanel
           :messages="chatState.messages"
           :running="runtimeBusy"
