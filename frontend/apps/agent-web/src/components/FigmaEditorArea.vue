@@ -70,6 +70,7 @@ const emit = defineEmits<{
       :dirty="dirty"
       :readonly="readonly"
       :saving="saving"
+      :show-branch="false"
       show-save
       @change-branch="(name: string) => emit('changeBranch', name)"
       @save="emit('save')"

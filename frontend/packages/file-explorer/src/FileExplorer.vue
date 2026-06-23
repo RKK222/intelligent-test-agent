@@ -90,12 +90,24 @@ const changeStats = computed(() => {
       <div class="mb-1 flex h-7 items-center justify-between rounded px-2 text-[12px] font-semibold text-[var(--ta-muted)]">
         <span class="min-w-0 truncate" :title="workspaceName">{{ workspaceName }}</span>
         <div class="flex shrink-0 items-center gap-1">
-          <Button size="icon" variant="ghost" title="刷新文件树" aria-label="刷新文件树" @click="emit('refresh')">
+          <button
+            type="button"
+            class="ta-fe-icon-btn"
+            title="刷新文件树"
+            aria-label="刷新文件树"
+            @click="emit('refresh')"
+          >
             <RefreshCw class="h-3.5 w-3.5" />
-          </Button>
-          <Button size="icon" variant="ghost" title="选择工作区目录" aria-label="选择工作区目录" @click="emit('addWorkspace')">
+          </button>
+          <button
+            type="button"
+            class="ta-fe-icon-btn"
+            title="选择工作区目录"
+            aria-label="选择工作区目录"
+            @click="emit('addWorkspace')"
+          >
             <Plus class="h-3.5 w-3.5" />
-          </Button>
+          </button>
         </div>
       </div>
       <DirectoryRows
@@ -146,3 +158,30 @@ const changeStats = computed(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+.ta-fe-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ta-muted, #6b7280);
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+
+.ta-fe-icon-btn:hover {
+  background: transparent;
+  color: var(--ta-text, #18181b);
+}
+
+.ta-fe-icon-btn:focus-visible {
+  outline: 2px solid var(--ta-accent, #3366ff);
+  outline-offset: 1px;
+}
+</style>

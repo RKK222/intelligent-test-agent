@@ -9,6 +9,8 @@ const props = defineProps<{
   branch?: string;
   /** 可选分支列表；若提供则会渲染下拉切换 */
   branches?: VcsBranch[];
+  /** 是否展示分支选择（仅工作目录场景） */
+  showBranch?: boolean;
   /** 是否展示写入路径（仅编辑器场景） */
   writePath?: string;
   /** 最近一次更新时间（秒或 ISO 字符串均可） */
@@ -28,6 +30,7 @@ const emit = defineEmits<{
   (e: "save"): void;
 }>();
 
+const showBranchValue = computed(() => props.showBranch !== false);
 const updatedLabel = computed(() => {
   if (props.updatedAt === undefined || props.updatedAt === null || props.updatedAt === "") return "—";
   const value = typeof props.updatedAt === "number" ? props.updatedAt * 1000 : Date.parse(props.updatedAt);
@@ -53,7 +56,7 @@ const branchOptions = computed<VcsBranch[]>(() => {
 
 <template>
   <footer class="ta-workbench-footer">
-    <div class="ta-workbench-footer-left">
+    <div v-if="showBranchValue" class="ta-workbench-footer-left">
       <el-dropdown
         v-if="branchOptions.length > 0"
         trigger="click"

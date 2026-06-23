@@ -21,8 +21,7 @@ export type CodeEditorProps = {
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
-import { Eye, EyeOff } from "lucide-vue-next";
-import { Button, FeedbackBanner } from "@test-agent/ui-kit";
+import { FeedbackBanner } from "@test-agent/ui-kit";
 import { languageFromPath } from "./language";
 import MarkdownPreview from "./MarkdownPreview.vue";
 
@@ -277,25 +276,6 @@ onBeforeUnmount(() => {
     </div>
   </div>
   <div v-else class="flex h-full min-h-0 flex-col bg-[var(--ta-surface)]">
-    <div class="flex h-[41px] items-center gap-2 border-b border-[var(--ta-border)] bg-[var(--ta-surface)] px-4">
-      <div class="min-w-0 flex-1 truncate text-[12px] text-[var(--ta-muted)]">{{ displayName }}</div>
-      <span v-if="dirty" class="rounded-full bg-[rgba(245,158,11,.15)] px-2 py-0.5 text-[11px] text-[#946015]">未保存</span>
-      <span v-if="readonly" class="rounded-full bg-[var(--ta-control)] px-2 py-0.5 text-[11px] text-[var(--ta-muted)]">只读</span>
-      <!-- 仅 Markdown 文件展示预览开关，默认不预览 -->
-      <Button
-        v-if="isMarkdown"
-        size="icon"
-        variant="ghost"
-        :title="showPreview ? '关闭预览' : '预览'"
-        :aria-label="showPreview ? '关闭预览' : '预览'"
-        :aria-pressed="showPreview"
-        :class="showPreview ? 'text-[var(--ta-ink)]' : 'text-[var(--ta-muted)]'"
-        @click="showPreview = !showPreview"
-      >
-        <EyeOff v-if="showPreview" class="h-4 w-4" />
-        <Eye v-else class="h-4 w-4" />
-      </Button>
-    </div>
     <!-- 编辑器主体始终保留同一个容器，避免 v-if 切换销毁 Monaco 已挂载的 DOM；
          Markdown 预览开启时在下方追加 sash + 预览，形成上下分屏 -->
     <div ref="splitContainerEl" class="flex min-h-0 flex-1 flex-col">
