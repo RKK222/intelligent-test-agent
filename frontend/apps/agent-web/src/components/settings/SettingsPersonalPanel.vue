@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { inject, onMounted, ref } from "vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
-import type { SshKeyMetadata } from "@test-agent/shared-types";
+import type { CurrentUser, SshKeyMetadata } from "@test-agent/shared-types";
 import { Key, Delete } from "@element-plus/icons-vue";
 
+// SettingsPanel 统一向所有面板传入 currentUser；个人设置面板目前不依赖该字段，
+// 但保留 prop 以避免 Vue 透传告警，类型与 SettingsAppWorkspacePanel 保持一致。
 defineProps<{
-  currentUser: unknown;
+  currentUser: CurrentUser | null;
 }>();
 
 const api = inject<BackendApiClient>("api")!;
