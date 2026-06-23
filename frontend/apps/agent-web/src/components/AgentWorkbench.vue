@@ -965,18 +965,23 @@ async function openLivePreview(relPath: string) {
 }
 
 // 把文件所在父目录重新拉取一次，让新建/删除的文件即时出现在文件树中。
-// 不存在时回退到根目录（与 expandPathToFile 行为一致），但避免对同一目录重复请求。
+// 仅在父目录已经缓存（用户已展开过）时刷新；未加载的目录交给 expandPathToFile 懒加载，
+// 避免一次工具完成触发两次 listFiles 同一目录的重复请求。
 function refreshParentDirectory(relPath: string) {
   if (!relPath || relPath.startsWith("/")) {
     return;
   }
   const segments = relPath.split("/").filter(Boolean);
   if (segments.length <= 1) {
-    void loadDirectory("");
+    if (entriesByDirectory.value[""] !== undefined || expandedDirectories.value.size > 0) {
+      void loadDirectory("");
+    }
     return;
   }
   const parentPath = segments.slice(0, -1).join("/");
-  void loadDirectory(parentPath);
+  if (entriesByDirectory.value[parentPath] !== undefined) {
+    void loadDirectory(parentPath);
+  }
 }
 
 // 展开文件树到目标文件：把所有祖先目录加入 expandedDirectories 并按需懒加载。
@@ -1057,7 +1062,8 @@ function scanLiveToolParts() {
         if (liveTrack.value) {
           void openLivePreview(path);
         } else {
-          // 即使不开实时预览，也要刷新文件树让用户看到新文件。
+          // 即使不开实时预览，也要展开文件树并刷新父目录，让用户看到新文件。
+          expandPathToFile(path);
           refreshParentDirectory(path);
         }
       }
