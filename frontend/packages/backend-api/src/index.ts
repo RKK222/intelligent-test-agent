@@ -1,8 +1,15 @@
 import type {
   AgentInfo,
+  AddSshKeyPayload,
+  ApplicationDefinition,
+  ApplicationMember,
+  ApplicationWorkspaceConfig,
   ApiFailure,
   ApiResponse,
+  CodeRepositoryConfig,
   CommandInfo,
+  CreateApplicationWorkspacePayload,
+  CreateRepositoryPayload,
   CurrentUser,
   FileContent,
   FileStatus,
@@ -11,6 +18,7 @@ import type {
   LoginResponse,
   ModelInfo,
   PageResponse,
+  PlatformUserSummary,
   PermissionRequest,
   PromptPart,
   ProviderInfo,
@@ -23,9 +31,11 @@ import type {
   SessionDiff,
   Session,
   SessionMessage,
+  SshKeyMetadata,
   TerminalTicketRequest,
   TerminalTicketResponse,
   TodoItem,
+  UpdateRepositoryPayload,
   Workspace,
   WorkspaceDirectoryList
 } from "@test-agent/shared-types";
@@ -89,6 +99,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   );
   const agentId = normalizeAgentId(options.agentId ?? readEnv("VITE_TEST_AGENT_AGENT_ID") ?? "opencode");
   const agentBase = `/api/internal/agent/${encodeURIComponent(agentId)}`;
+  const configurationBase = "/api/internal/platform/configuration-management";
   const fetcher = options.fetcher ?? fetch;
   const traceIdFactory = options.traceIdFactory ?? defaultTraceId;
   const requestTimeoutMs = options.requestTimeoutMs ?? 30000;
@@ -344,7 +355,81 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
      * 刷新当前 Token。
      */
     refreshToken: () =>
-      request<LoginResponse>("/api/auth/refresh", { method: "POST" })
+      request<LoginResponse>("/api/auth/refresh", { method: "POST" }),
+
+    // ---- 应用配置管理 API ----
+
+    listApplications: (enabled = true) =>
+      request<ApplicationDefinition[]>(`${configurationBase}/applications${query({ enabled: String(enabled) })}`),
+    listApplicationMembers: (appId: string) =>
+      request<ApplicationMember[]>(`${configurationBase}/applications/${encodeURIComponent(appId)}/members`),
+    addApplicationMember: (appId: string, userId: string) =>
+      request<ApplicationMember>(`${configurationBase}/applications/${encodeURIComponent(appId)}/members`, {
+        method: "POST",
+        body: JSON.stringify({ userId })
+      }),
+    removeApplicationMember: (appId: string, userId: string) =>
+      request<void>(`${configurationBase}/applications/${encodeURIComponent(appId)}/members/${encodeURIComponent(userId)}`, {
+        method: "DELETE"
+      }),
+    searchUsers: (keyword?: string, page = 1, size = 20) =>
+      request<PageResponse<PlatformUserSummary>>(`${configurationBase}/users${query({ keyword, page, size })}`),
+    listRepositories: (page = 1, size = 50) =>
+      request<PageResponse<CodeRepositoryConfig>>(`${configurationBase}/repositories${query({ page, size })}`),
+    createRepository: (payload: CreateRepositoryPayload) =>
+      request<CodeRepositoryConfig>(`${configurationBase}/repositories`, { method: "POST", body: JSON.stringify(payload) }),
+    updateRepository: (repositoryId: string, payload: UpdateRepositoryPayload) =>
+      request<CodeRepositoryConfig>(`${configurationBase}/repositories/${encodeURIComponent(repositoryId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload)
+      }),
+    listApplicationRepositories: (appId: string) =>
+      request<CodeRepositoryConfig[]>(`${configurationBase}/applications/${encodeURIComponent(appId)}/repositories`),
+    linkApplicationRepository: (appId: string, repositoryId: string) =>
+      request<CodeRepositoryConfig>(`${configurationBase}/applications/${encodeURIComponent(appId)}/repositories`, {
+        method: "POST",
+        body: JSON.stringify({ repositoryId })
+      }),
+    unlinkApplicationRepository: (appId: string, repositoryId: string) =>
+      request<void>(`${configurationBase}/applications/${encodeURIComponent(appId)}/repositories/${encodeURIComponent(repositoryId)}`, {
+        method: "DELETE"
+      }),
+    listRepositoryApplications: (repositoryId: string) =>
+      request<ApplicationDefinition[]>(`${configurationBase}/repositories/${encodeURIComponent(repositoryId)}/applications`),
+    linkRepositoryApplication: (repositoryId: string, appId: string) =>
+      request<ApplicationDefinition>(`${configurationBase}/repositories/${encodeURIComponent(repositoryId)}/applications`, {
+        method: "POST",
+        body: JSON.stringify({ appId })
+      }),
+    unlinkRepositoryApplication: (repositoryId: string, appId: string) =>
+      request<void>(`${configurationBase}/repositories/${encodeURIComponent(repositoryId)}/applications/${encodeURIComponent(appId)}`, {
+        method: "DELETE"
+      }),
+    listRepositoryBranches: (repositoryId: string) =>
+      request<string[]>(`${configurationBase}/repositories/${encodeURIComponent(repositoryId)}/branches`),
+    listRepositoryDirectories: (repositoryId: string, branch: string) =>
+      request<string[]>(`${configurationBase}/repositories/${encodeURIComponent(repositoryId)}/directories${query({ branch })}`),
+    listApplicationWorkspaces: (appId: string) =>
+      request<ApplicationWorkspaceConfig[]>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`),
+    createApplicationWorkspace: (appId: string, payload: CreateApplicationWorkspacePayload) =>
+      request<ApplicationWorkspaceConfig>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    renameApplicationWorkspace: (appId: string, workspaceId: string, payload: { workspaceName: string }) =>
+      request<ApplicationWorkspaceConfig>(
+        `${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces/${encodeURIComponent(workspaceId)}`,
+        { method: "PATCH", body: JSON.stringify(payload) }
+      ),
+    deleteApplicationWorkspace: (appId: string, workspaceId: string) =>
+      request<void>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces/${encodeURIComponent(workspaceId)}`, {
+        method: "DELETE"
+      }),
+    listPersonalSshKeys: () => request<SshKeyMetadata[]>(`${configurationBase}/personal/ssh-keys`),
+    addPersonalSshKey: (payload: AddSshKeyPayload) =>
+      request<SshKeyMetadata>(`${configurationBase}/personal/ssh-keys`, { method: "POST", body: JSON.stringify(payload) }),
+    deletePersonalSshKey: (sshKeyId: string) =>
+      request<void>(`${configurationBase}/personal/ssh-keys/${encodeURIComponent(sshKeyId)}`, { method: "DELETE" })
   };
 }
 

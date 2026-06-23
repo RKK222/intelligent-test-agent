@@ -3,6 +3,7 @@ package com.icbc.testagent.domain.auth;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.icbc.testagent.domain.user.UserId;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -14,6 +15,7 @@ public record AuthPrincipal(
         UserId userId,
         String username,
         String unifiedAuthId,
+        List<String> roles,
         Instant issuedAt,
         Instant expiresAt) {
 
@@ -25,6 +27,7 @@ public record AuthPrincipal(
         Objects.requireNonNull(userId, "userId must not be null");
         Objects.requireNonNull(username, "username must not be null");
         Objects.requireNonNull(unifiedAuthId, "unifiedAuthId must not be null");
+        roles = roles == null ? List.of() : List.copyOf(roles);
         Objects.requireNonNull(issuedAt, "issuedAt must not be null");
         Objects.requireNonNull(expiresAt, "expiresAt must not be null");
         if (token.isBlank()) {

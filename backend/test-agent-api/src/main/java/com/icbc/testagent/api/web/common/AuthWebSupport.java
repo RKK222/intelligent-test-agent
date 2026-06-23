@@ -29,6 +29,17 @@ public final class AuthWebSupport {
     }
 
     /**
+     * 校验当前认证主体是否具备指定全局角色，不满足时返回统一无权限错误。
+     */
+    public static AuthPrincipal requireRole(ServerWebExchange exchange, String role) {
+        AuthPrincipal principal = getAuthPrincipal(exchange);
+        if (principal.roles().contains(role)) {
+            return principal;
+        }
+        throw new PlatformException(ErrorCode.FORBIDDEN, "无权限");
+    }
+
+    /**
      * 从 Authorization 请求头提取 Bearer Token；非 Bearer 格式返回 null。
      */
     public static String extractBearerToken(ServerWebExchange exchange) {

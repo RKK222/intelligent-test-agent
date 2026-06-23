@@ -12,7 +12,7 @@
 
 ## 主要职责
 
-- Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision 等领域对象。
+- Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、应用配置管理等领域对象。
 - Run 状态机、路由决策值对象、领域服务接口。
 - 保持业务规则与基础设施分离。
 
@@ -25,7 +25,8 @@
 - RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`；RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`。
 - ExecutionNode：`ExecutionNode`、`ExecutionNodeId`、`ExecutionNodeStatus`。
 - RoutingDecision：`RoutingDecision`、`RoutingReason`、`ExecutionNodeRouter`。
-- Repository 端口：Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision 持久化端口。
+- Configuration：`ApplicationDefinition`、`ApplicationMember`、`CodeRepository`、`ApplicationRepositoryLink`、`ApplicationWorkspace`、`UserSshKey`，与运行态 Workspace/Session/Run 解耦。
+- Repository 端口：Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、ConfigurationManagement 持久化端口。
 
 ## Run 状态机
 
@@ -43,6 +44,7 @@
 - `AgentSessionBindingTest` 覆盖 agentId 规范化、远端 session/node 绑定和 traceId 边界。
 - `ExecutionNodeRouterTest`、`ExecutionNodeTest` 覆盖执行节点容量、可路由状态和路由冲突错误。
 - `RunEventTest`、`RunEventTypeTest`、`DomainValidationTest` 覆盖事件模型、事件 wireName 映射和值对象公共校验。
+- `ConfigurationDomainTest` 覆盖应用成员逻辑删除、代码库 URL 不可编辑、应用工作空间目录约束等配置领域规则。
 
 ## 允许依赖
 

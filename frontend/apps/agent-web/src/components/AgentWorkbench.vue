@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch } from "vue";
+import { computed, onMounted, ref, shallowRef, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
 import { createBackendApiClient } from "@test-agent/backend-api";
@@ -7,7 +7,7 @@ import { DiffViewer } from "@test-agent/diff-viewer";
 import { CodeEditor, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents } from "@test-agent/event-stream-client";
 import { FileExplorer } from "@test-agent/file-explorer";
-import { Bell, Code2, GitBranch, PanelBottom, TerminalSquare } from "lucide-vue-next";
+import { Bell, Code2, GitBranch, PanelBottom, Settings, TerminalSquare } from "lucide-vue-next";
 import type {
   AgentMessage,
   FileTreeEntry,
@@ -28,8 +28,10 @@ import { TestRunnerPanel } from "@test-agent/test-runner";
 import { FeedbackBanner, type Feedback } from "@test-agent/ui-kit";
 import { useWorkbenchStore, WorkbenchShell } from "@test-agent/workbench-shell";
 import EditorPane from "./EditorPane.vue";
+import SettingsDialog from "./SettingsDialog.vue";
 import WorkspaceBootstrap from "./WorkspaceBootstrap.vue";
 import WorkspaceDirectoryPickerDialog from "./WorkspaceDirectoryPickerDialog.vue";
+import { useAuthStore } from "../stores/authStore";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, type FollowUpDraft } from "./follow-up-queue";
 import {
   buildPromptParts,
@@ -54,6 +56,7 @@ const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0
 const api = createBackendApiClient({ baseUrl: apiBaseUrl });
 const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
+const authStore = useAuthStore();
 
 // 工作台状态
 const selectedWorkspaceId = ref<string | undefined>(undefined);
@@ -79,6 +82,7 @@ const diffContextParts = ref<PromptPart[]>([]);
 const editorSelection = ref<EditorSelectionContext | undefined>(undefined);
 const bottomMode = ref<"run" | "terminal">("run");
 const bottomDrawerOpen = ref(false);
+const settingsDialogOpen = ref(false);
 const directoryPickerOpen = ref(false);
 const directoryPickerLoading = ref(false);
 const directoryPickerData = shallowRef<WorkspaceDirectoryList | null>(null);
@@ -98,6 +102,10 @@ const tabs = computed(() => workbench.tabs);
 const activePath = computed(() => workbench.activePath);
 const selectedDiffPath = computed(() => workbench.selectedDiffPath);
 const activeTab = computed(() => tabs.value.find((tab) => tab.path === activePath.value));
+
+onMounted(() => {
+  void authStore.fetchCurrentUser(api);
+});
 
 // ===== 查询 =====
 const workspacesQuery = useQuery({
@@ -985,15 +993,26 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
             <Bell class="h-[22px] w-[22px]" />
           </button>
         </div>
-        <button
-          type="button"
-          :class="['ta-activity-button', bottomDrawerOpen && 'is-active']"
-          aria-label="切换底部面板"
-          title="切换底部面板"
-          @click="bottomDrawerOpen = !bottomDrawerOpen"
-        >
-          <PanelBottom class="h-[22px] w-[22px]" />
-        </button>
+        <div class="flex flex-col items-center gap-3">
+          <button
+            type="button"
+            :class="['ta-activity-button', settingsDialogOpen && 'is-active']"
+            aria-label="打开设置"
+            title="打开设置"
+            @click="settingsDialogOpen = true"
+          >
+            <Settings class="h-[22px] w-[22px]" />
+          </button>
+          <button
+            type="button"
+            :class="['ta-activity-button', bottomDrawerOpen && 'is-active']"
+            aria-label="切换底部面板"
+            title="切换底部面板"
+            @click="bottomDrawerOpen = !bottomDrawerOpen"
+          >
+            <PanelBottom class="h-[22px] w-[22px]" />
+          </button>
+        </div>
       </nav>
     </template>
 
@@ -1147,5 +1166,10 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
     @close="directoryPickerOpen = false"
     @navigate="loadWorkspaceDirectories"
     @select="selectWorkspaceDirectory"
+  />
+  <SettingsDialog
+    :open="settingsDialogOpen"
+    :current-user="authStore.currentUser"
+    @close="settingsDialogOpen = false"
   />
 </template>

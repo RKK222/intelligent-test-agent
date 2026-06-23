@@ -1,5 +1,7 @@
 package com.icbc.testagent.domain.user;
 
+import com.icbc.testagent.common.pagination.PageRequest;
+import com.icbc.testagent.common.pagination.PageResponse;
 import java.util.Optional;
 
 /**
@@ -26,6 +28,11 @@ public interface UserRepository {
      * 根据用户名查找用户。
      */
     Optional<User> findByUsername(String username);
+
+    /**
+     * 按用户名或统一认证号分页搜索用户，用于管理入口选择已有平台用户。
+     */
+    PageResponse<User> findPage(String keyword, PageRequest pageRequest);
 
     /**
      * 检查用户名是否已存在。

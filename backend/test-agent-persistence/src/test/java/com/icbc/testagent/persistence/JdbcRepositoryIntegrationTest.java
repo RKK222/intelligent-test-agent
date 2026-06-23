@@ -5,6 +5,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.agent.AgentSessionBinding;
+import com.icbc.testagent.domain.configuration.ApplicationId;
+import com.icbc.testagent.domain.configuration.ApplicationMember;
+import com.icbc.testagent.domain.configuration.ApplicationWorkspace;
+import com.icbc.testagent.domain.configuration.ApplicationWorkspaceId;
+import com.icbc.testagent.domain.configuration.CodeRepository;
+import com.icbc.testagent.domain.configuration.CodeRepositoryId;
+import com.icbc.testagent.domain.configuration.SshKeyId;
+import com.icbc.testagent.domain.configuration.UserSshKey;
 import com.icbc.testagent.domain.event.RunEvent;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventType;
@@ -22,6 +30,8 @@ import com.icbc.testagent.domain.session.SessionMessage;
 import com.icbc.testagent.domain.session.SessionMessageId;
 import com.icbc.testagent.domain.session.SessionMessageRole;
 import com.icbc.testagent.domain.session.SessionStatus;
+import com.icbc.testagent.domain.user.User;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
@@ -61,6 +71,9 @@ class JdbcRepositoryIntegrationTest {
     private JdbcRoutingDecisionRepository routingDecisions;
     private JdbcSessionMessageRepository sessionMessages;
     private JdbcAgentSessionBindingRepository agentSessionBindings;
+    private JdbcConfigurationManagementRepository configurationManagement;
+    private JdbcUserRepository users;
+    private JdbcClient jdbcClient;
 
     @BeforeEach
     void setUp() {
@@ -70,7 +83,7 @@ class JdbcRepositoryIntegrationTest {
                 .build();
         Flyway.configure().dataSource(database).locations("classpath:db/migration").load().migrate();
 
-        JdbcClient jdbcClient = JdbcClient.create(database);
+        jdbcClient = JdbcClient.create(database);
         ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
         workspaces = new JdbcWorkspaceRepository(jdbcClient);
         sessions = new JdbcSessionRepository(jdbcClient);
@@ -80,6 +93,8 @@ class JdbcRepositoryIntegrationTest {
         routingDecisions = new JdbcRoutingDecisionRepository(jdbcClient);
         sessionMessages = new JdbcSessionMessageRepository(jdbcClient);
         agentSessionBindings = new JdbcAgentSessionBindingRepository(jdbcClient);
+        configurationManagement = new JdbcConfigurationManagementRepository(jdbcClient);
+        users = new JdbcUserRepository(jdbcClient);
     }
 
     @AfterEach
@@ -379,6 +394,74 @@ class JdbcRepositoryIntegrationTest {
         assertThat(sessionMessages.findBySessionId(session.sessionId(), new PageRequest(1, 10)).items())
                 .extracting(SessionMessage::content)
                 .containsExactly("first", "second");
+    }
+
+    @Test
+    void configurationManagementRepositoriesPersistV7ConfigurationTables() {
+        ApplicationId appId = new ApplicationId("app_gcms");
+        UserId userId = new UserId("usr_config");
+        users.save(User.createNew(userId.value(), "AUTH_CONFIG", "config-user", "hash", "org", "rd", "dept"));
+        jdbcClient.sql("""
+                        insert into applications(app_id, app_name, enabled, created_at, updated_at)
+                        values (:appId, :appName, true, :createdAt, :updatedAt)
+                        """)
+                .param("appId", appId.value())
+                .param("appName", "F-GCMS")
+                .param("createdAt", Timestamp.from(NOW))
+                .param("updatedAt", Timestamp.from(NOW))
+                .update();
+
+        configurationManagement.saveMember(ApplicationMember.active(appId, userId, NOW));
+        assertThat(configurationManagement.findActiveMembers(appId)).extracting(ApplicationMember::userId).containsExactly(userId);
+        configurationManagement.deleteMember(appId, userId);
+        assertThat(configurationManagement.findActiveMembers(appId)).isEmpty();
+        configurationManagement.saveMember(ApplicationMember.active(appId, userId, NOW.plusSeconds(1)));
+        assertThat(configurationManagement.findActiveMembers(appId)).extracting(ApplicationMember::userId).containsExactly(userId);
+
+        CodeRepository repository = new CodeRepository(
+                new CodeRepositoryId("repo_config"),
+                "git@gitee.com:demo/repo.git",
+                "配置库",
+                true,
+                NOW,
+                NOW);
+        configurationManagement.saveRepository(repository);
+        configurationManagement.linkRepository(appId, repository.repositoryId());
+        assertThat(configurationManagement.findRepositoriesByApplication(appId)).containsExactly(repository);
+        assertThat(configurationManagement.findApplicationsByRepository(repository.repositoryId()))
+                .extracting(application -> application.appName())
+                .containsExactly("F-GCMS");
+
+        ApplicationWorkspace workspace = new ApplicationWorkspace(
+                new ApplicationWorkspaceId("awp_config"),
+                appId,
+                repository.repositoryId(),
+                "main",
+                "src/main",
+                "main",
+                NOW,
+                NOW);
+        configurationManagement.saveWorkspace(workspace);
+        assertThat(configurationManagement.findWorkspaces(appId)).extracting(ApplicationWorkspace::directoryPath).containsExactly("src/main");
+
+        configurationManagement.saveSshKey(new UserSshKey(
+                new SshKeyId("ssh_config"),
+                userId,
+                "work",
+                "SHA256:abc",
+                "cipher",
+                "nonce",
+                NOW));
+        assertThat(configurationManagement.findSshKeys(userId)).extracting(UserSshKey::name).containsExactly("work");
+        assertThatThrownBy(() -> configurationManagement.saveSshKey(new UserSshKey(
+                        new SshKeyId("ssh_config_2"),
+                        userId,
+                        "second",
+                        "SHA256:def",
+                        "cipher2",
+                        "nonce2",
+                        NOW)))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test

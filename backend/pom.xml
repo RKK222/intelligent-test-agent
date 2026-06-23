@@ -28,6 +28,7 @@
         <module>test-agent-workspace-management</module>
         <module>test-agent-opencode-runtime</module>
         <module>test-agent-system-management</module>
+        <module>test-agent-configuration-management</module>
         <module>test-agent-integration</module>
         <module>test-agent-api</module>
         <module>test-agent-persistence</module>
@@ -168,6 +169,11 @@
             <dependency>
                 <groupId>com.icbc.testagent</groupId>
                 <artifactId>test-agent-system-management</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.icbc.testagent</groupId>
+                <artifactId>test-agent-configuration-management</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>

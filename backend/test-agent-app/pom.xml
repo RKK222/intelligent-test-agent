@@ -48,6 +48,10 @@
         </dependency>
         <dependency>
             <groupId>com.icbc.testagent</groupId>
+            <artifactId>test-agent-configuration-management</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.icbc.testagent</groupId>
             <artifactId>test-agent-integration</artifactId>
         </dependency>
         <dependency>

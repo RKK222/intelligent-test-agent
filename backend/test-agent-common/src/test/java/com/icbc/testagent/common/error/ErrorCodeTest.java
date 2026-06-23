@@ -18,8 +18,11 @@ class ErrorCodeTest {
         assertThat(ErrorCode.OPENCODE_BAD_GATEWAY.httpStatus()).isEqualTo(502);
         assertThat(ErrorCode.OPENCODE_UNAVAILABLE.httpStatus()).isEqualTo(503);
         assertThat(ErrorCode.OPENCODE_TIMEOUT.httpStatus()).isEqualTo(504);
+        assertThat(ErrorCode.GIT_UNAVAILABLE.httpStatus()).isEqualTo(503);
+        assertThat(ErrorCode.GIT_TIMEOUT.httpStatus()).isEqualTo(504);
 
         assertThat(ErrorCode.VALIDATION_ERROR.defaultMessage()).isEqualTo("请求参数无效");
         assertThat(ErrorCode.OPENCODE_TIMEOUT.defaultMessage()).isEqualTo("opencode 服务超时");
+        assertThat(ErrorCode.GIT_TIMEOUT.defaultMessage()).isEqualTo("Git 操作超时");
     }
 }

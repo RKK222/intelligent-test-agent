@@ -28,6 +28,7 @@
 | `test-agent-workspace-management` | Workspace、文件、受控目录选择、git/diff、agent 和 skill 管理业务 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、agent runtime 调用、Diff/revert 和 PTY terminal 业务 |
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理等 |
+| `test-agent-configuration-management` | 应用、应用成员、代码库关联、应用工作空间和个人 SSH key 配置管理 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界，目前为空骨架 |
 | `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId 和统一异常入口 |
 | `test-agent-persistence` | 持久化、迁移、Redis/PostgreSQL 访问 |
@@ -75,6 +76,7 @@ mvn test
 - 多 agent 运行时接口、`agentId` 选择、日志/指标包装和具体 agent 适配器放在 `test-agent-agent-runtime`。
 - Session、Run、RunEvent、agent runtime 调用、Diff/revert、terminal 业务放在 `test-agent-opencode-runtime`。
 - 用户、角色、权限等平台内部管理放在 `test-agent-system-management`。
+- 应用配置、应用人员、代码库关联、应用工作空间和个人 SSH key 管理放在 `test-agent-configuration-management`，不得复用运行态 Workspace。
 - 非 opencode 外部系统联动放在 `test-agent-integration`。
 - 业务模块不要直接依赖 `test-agent-opencode-sdk-generated`，应通过 `test-agent-opencode-client`。
 - 领域模型保持在 `test-agent-domain`，不要依赖 Spring Web 或持久化技术。

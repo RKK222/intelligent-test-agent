@@ -70,6 +70,27 @@ public final class RuntimeIdGenerator {
     }
 
     /**
+     * 生成代码库配置 ID，返回值固定使用 {@code repo_} 前缀。
+     */
+    public static String repositoryId() {
+        return prefixed("repo_");
+    }
+
+    /**
+     * 生成应用工作空间配置 ID，返回值固定使用 {@code awp_} 前缀。
+     */
+    public static String applicationWorkspaceId() {
+        return prefixed("awp_");
+    }
+
+    /**
+     * 生成用户 SSH key 配置 ID，返回值固定使用 {@code ssh_} 前缀。
+     */
+    public static String sshKeyId() {
+        return prefixed("ssh_");
+    }
+
+    /**
      * 按给定领域前缀拼接无横线 UUID；调用方必须传入已约定的稳定前缀。
      */
     private static String prefixed(String prefix) {

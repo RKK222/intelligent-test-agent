@@ -15,6 +15,7 @@
 
 - 通用异常、错误码、响应模型。
 - TraceId、Idempotency-Key、分页、时间、校验相关基础类型。
+- Git 远端只读命令执行与 `git archive --remote` tar 目录解析工具。
 - 不含业务流程和基础设施访问代码。
 
 ## 已有契约
@@ -24,13 +25,15 @@
 - `ErrorCode`：平台稳定错误码及 HTTP 状态映射数字。
 - `PlatformException`：业务层抛出的平台基础异常。
 - `PageRequest`、`PageResponse<T>`：分页请求和响应模型。
-- `RuntimeIdGenerator`：生成 Workspace、Session、Run、Message 和 PTY ticket 的稳定前缀 ID。
+- `RuntimeIdGenerator`：生成 Workspace、Session、Run、Message、PTY ticket、代码库、应用工作空间和 SSH key 的稳定前缀 ID。
+- `GitRemoteService`、`ProcessGitCommandExecutor`：封装 `git ls-remote --heads`、`git archive --remote`、超时、输出上限、非交互环境和临时 SSH key 文件清理。
 
 ## 测试覆盖
 
 - `ApiResponseTest`、`ApiErrorResponseTest`、`PlatformExceptionTest` 覆盖统一响应和平台异常。
 - `PageRequestTest`、`PageResponseTest` 覆盖分页边界、offset、总页数和列表防御性复制。
 - `ErrorCodeTest`、`RuntimeIdGeneratorTest` 覆盖稳定 HTTP 状态、默认中文说明和运行时 ID 前缀格式。
+- `GitRemoteServiceTest` 覆盖分支解析、archive tar 目录解析和 Git 超时错误映射。
 
 ## 允许依赖
 
