@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
-import { Download, History, ListTodo, PanelRightClose, PencilLine, Plus, Send, Square, Upload } from "lucide-vue-next";
+import { ArrowUpRight, Download, History, ListTodo, PanelRightClose, PencilLine, Plus, Send, Square, Upload } from "lucide-vue-next";
+import aiHeaderUrl from "../assets/figma/ai-header.svg";
+import planLoadingUrl from "../assets/figma/plan-loadding.gif";
 
 type ChatMessageInput = {
   id: string;
@@ -117,6 +119,33 @@ const totalDeletions = computed(() =>
 
 const visibleFiles = computed(() => (props.fileChanges || []).slice(0, 3));
 
+// 从最近一条助手回复中解析 token 数量。
+// 支持的格式：↓ 826 tokens、tokens: 826、tokens：826、826 tokens 等。
+function parseTokensFromText(text: string | undefined): number | undefined {
+  if (!text) return undefined;
+  const patterns: RegExp[] = [
+    /↓\s*(\d[\d,]*)\s*tokens/i,
+    /tokens\s*[:：]\s*(\d[\d,]*)/i,
+    /\b(\d[\d,]*)\s*tokens\b/i
+  ];
+  for (const re of patterns) {
+    const m = text.match(re);
+    if (m) {
+      const n = Number(m[1].replace(/,/g, ""));
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return undefined;
+}
+
+const parsedTokens = computed(() => parseTokensFromText(lastAssistant.value?.content));
+
+const displayTokens = computed<number | undefined>(() => parsedTokens.value ?? props.taskUsage?.tokens);
+
+const hasTaskUsageDisplay = computed(
+  () => !!(props.taskUsage && (props.taskUsage.duration || displayTokens.value !== undefined || props.taskUsage.thoughtFor))
+);
+
 const scrollEl = ref<HTMLElement | null>(null);
 
 watch(
@@ -167,55 +196,7 @@ function onKeydown(event: KeyboardEvent) {
       </button>
     </header>
 
-    <!-- 任务消耗提示（位于对话框上方） -->
-    <div v-if="hasTaskUsage" class="figma-chat-usage">
-      <span class="figma-chat-usage-text">
-        <span class="figma-chat-usage-label">· 任务消耗：</span>
-        <span v-if="taskUsage?.duration" class="figma-chat-usage-value">({{ taskUsage.duration }}</span>
-        <span v-if="taskUsage?.tokens !== undefined" class="figma-chat-usage-value"> · ↓ {{ taskUsage.tokens }} tokens</span>
-        <span v-if="taskUsage?.thoughtFor" class="figma-chat-usage-value"> · thought for {{ taskUsage.thoughtFor }}</span>
-        <span v-if="hasTaskUsage" class="figma-chat-usage-value">)</span>
-        <span v-if="hasFileChanges" class="figma-chat-usage-stats">
-          <span class="figma-chat-add">+{{ totalAdditions }}</span>
-          <span class="figma-chat-del">-{{ totalDeletions }}</span>
-        </span>
-      </span>
-    </div>
-
     <div ref="scrollEl" class="figma-chat-scroll">
-      <!-- 文件变更行卡片 -->
-      <div v-if="hasFileChanges" class="figma-chat-changes-card">
-        <div class="figma-chat-changes-icon">
-          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-            <rect x="3" y="2" width="11" height="16" rx="2" stroke="#777" stroke-width="1.4" fill="none"/>
-            <path d="M5.5 7H11.5M5.5 10H11.5M5.5 13H9" stroke="#777" stroke-width="1.4" stroke-linecap="round"/>
-            <path d="M14 14L18 10M18 10H14M18 10V14" stroke="#18a978" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
-          </svg>
-        </div>
-        <div class="figma-chat-changes-info">
-          <span class="figma-chat-changes-title">{{ fileChanges?.length }} 个文件已更改</span>
-          <div class="figma-chat-changes-paths">
-            <div
-              v-for="file in visibleFiles"
-              :key="file.path"
-              class="figma-chat-changes-path"
-              role="button"
-              tabindex="0"
-              @click="emit('open-diff', file.path)"
-            >
-              <span class="figma-chat-changes-path-name">{{ file.path }}</span>
-              <span class="figma-chat-changes-path-stats">
-                <span v-if="file.additions" class="figma-chat-add">+{{ file.additions }}</span>
-                <span v-if="file.deletions" class="figma-chat-del">-{{ file.deletions }}</span>
-              </span>
-            </div>
-            <div v-if="(fileChanges?.length ?? 0) > 3" class="figma-chat-changes-more">
-              还有 {{ (fileChanges?.length ?? 0) - 3 }} 个文件...
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- 用户消息气泡 (右对齐) -->
       <div v-if="lastUser" class="figma-chat-bubble figma-chat-bubble--user">
         <div class="figma-chat-bubble-content">{{ lastUser.content }}</div>
@@ -225,7 +206,7 @@ function onKeydown(event: KeyboardEvent) {
       <!-- 助手消息 (左对齐) -->
       <div v-if="lastAssistant" class="figma-chat-assistant">
         <div class="figma-chat-avatar">
-          <span class="figma-chat-avatar-text">AI</span>
+          <img :src="aiHeaderUrl" alt="AI" class="figma-chat-avatar-icon" />
         </div>
         <div class="figma-chat-assistant-content">
           <div class="figma-chat-bubble figma-chat-bubble--assistant">
@@ -252,6 +233,45 @@ function onKeydown(event: KeyboardEvent) {
         <div class="figma-chat-status-dot" />
         <span>智能体正在思考...</span>
       </div>
+    </div>
+
+    <!-- 文件变更提示（位于任务消耗上方） -->
+    <button
+      v-if="hasFileChanges"
+      type="button"
+      class="figma-chat-changes-card"
+      :title="`${fileChanges?.length} 个文件已更改`"
+      @click="emit('open-diff', visibleFiles[0]?.path ?? '')"
+    >
+      <span class="figma-chat-changes-icon" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M7 18C4.79 18 3 16.21 3 14C3 11.95 4.5 10.27 6.5 10.03C6.97 7.64 9.05 5.85 11.57 5.85C13.95 5.85 15.94 7.42 16.55 9.6C16.97 9.45 17.42 9.36 17.9 9.36C20.18 9.36 22 11.18 22 13.46C22 15.74 20.18 17.56 17.9 17.56"
+            stroke="white"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </span>
+      <span class="figma-chat-changes-title">{{ fileChanges?.length }} 个文件已更改</span>
+      <span class="figma-chat-changes-spacer" />
+      <span class="figma-chat-changes-stats">
+        <span v-if="totalAdditions" class="figma-chat-add">+{{ totalAdditions }}</span>
+        <span v-if="totalDeletions" class="figma-chat-del">-{{ totalDeletions }}</span>
+      </span>
+      <ArrowUpRight class="figma-chat-changes-arrow" :size="16" />
+    </button>
+
+    <!-- 任务消耗提示（位于输入框上方） -->
+    <div v-if="hasTaskUsageDisplay" class="figma-chat-usage">
+      <img :src="planLoadingUrl" alt="" class="figma-chat-usage-icon" />
+      <span class="figma-chat-usage-label">任务消耗：</span>
+      <span class="figma-chat-usage-value">
+        <template v-if="taskUsage?.duration">{{ taskUsage.duration }}</template>
+        <template v-if="displayTokens !== undefined"> · ↓ {{ displayTokens }} tokens</template>
+        <template v-if="taskUsage?.thoughtFor"> · thought for {{ taskUsage.thoughtFor }}</template>
+      </span>
     </div>
 
     <div class="figma-chat-composer">
@@ -386,30 +406,36 @@ function onKeydown(event: KeyboardEvent) {
   gap: 14px;
 }
 
-/* ---- File Changes Card ---- */
+/* ---- File Changes Card (above task usage) ---- */
 .figma-chat-changes-card {
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  margin: 8px 18px 0;
   background: #fafafa;
   border: 1px solid #efefef;
   border-radius: 8px;
+  flex-shrink: 0;
+  cursor: pointer;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.figma-chat-changes-card:hover {
+  background: #f0f0f0;
+  border-color: #e0e0e0;
 }
 
 .figma-chat-changes-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.figma-chat-changes-info {
-  flex: 1;
-  min-width: 0;
+  border-radius: 6px;
+  background: linear-gradient(135deg, #3b5bff 0%, #5b6cff 100%);
 }
 
 .figma-chat-changes-title {
@@ -417,53 +443,26 @@ function onKeydown(event: KeyboardEvent) {
   font-weight: 500;
   color: #18181b;
   line-height: 18px;
-  display: block;
-  margin-bottom: 6px;
-}
-
-.figma-chat-changes-paths {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.figma-chat-changes-path {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 3px 6px;
-  border-radius: 4px;
-  font-size: 11px;
-  color: #555;
-  cursor: pointer;
-  transition: background-color 0.1s ease;
-  font-family: "JetBrains Mono", monospace;
-}
-
-.figma-chat-changes-path:hover {
-  background: #f0f0f0;
-}
-
-.figma-chat-changes-path-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.figma-chat-changes-path-stats {
-  display: flex;
-  gap: 4px;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
+.figma-chat-changes-spacer {
+  flex: 1;
 }
 
-.figma-chat-changes-more {
+.figma-chat-changes-stats {
+  display: inline-flex;
+  gap: 6px;
+  font-family: "JetBrains Mono", monospace;
   font-size: 11px;
+  font-weight: 500;
+}
+
+.figma-chat-changes-arrow {
+  width: 14px;
+  height: 14px;
   color: #999;
-  padding: 2px 6px;
+  flex-shrink: 0;
 }
 
 /* ---- Message Bubbles ---- */
@@ -527,12 +526,15 @@ function onKeydown(event: KeyboardEvent) {
   width: 24px;
   height: 24px;
   border-radius: 6px;
-  background: #f4f4f5;
+  background: transparent;
   flex-shrink: 0;
-  color: #555;
-  font-size: 10px;
-  font-weight: 600;
-  font-family: "Inter", sans-serif;
+  overflow: hidden;
+}
+
+.figma-chat-avatar-icon {
+  width: 24px;
+  height: 24px;
+  display: block;
 }
 
 .figma-chat-assistant-content {
@@ -597,12 +599,15 @@ function onKeydown(event: KeyboardEvent) {
   50% { opacity: 1; }
 }
 
-/* ---- Task Usage (above scroll area) ---- */
+/* ---- Task Usage (above input box) ---- */
 .figma-chat-usage {
   flex-shrink: 0;
-  padding: 8px 18px 4px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 18px 8px;
   background: #fff;
-  border-bottom: 1px solid #f0f0f0;
   font-family: "JetBrains Mono", "PingFang SC", monospace;
   font-size: 12px;
   line-height: 20px;
@@ -610,16 +615,17 @@ function onKeydown(event: KeyboardEvent) {
   letter-spacing: -0.0125em;
 }
 
-.figma-chat-usage-text {
-  display: inline-flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
+.figma-chat-usage-icon {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  display: block;
 }
 
 .figma-chat-usage-label {
   color: #a40dbc;
-  font-weight: 500;
+  font-weight: 600;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 .figma-chat-usage-value {
@@ -628,7 +634,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .figma-chat-usage-stats {
-  margin-left: 8px;
+  margin-left: 4px;
   display: inline-flex;
   gap: 4px;
   font-weight: 500;
@@ -648,7 +654,6 @@ function onKeydown(event: KeyboardEvent) {
 .figma-chat-composer {
   flex-shrink: 0;
   padding: 8px 12px 12px;
-  border-top: 1px solid #ddd;
   background: #fff;
 }
 
