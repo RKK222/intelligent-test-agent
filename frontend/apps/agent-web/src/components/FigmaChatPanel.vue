@@ -140,7 +140,9 @@ function parseTokensFromText(text: string | undefined): number | undefined {
 
 const parsedTokens = computed(() => parseTokensFromText(lastAssistant.value?.content));
 
-const displayTokens = computed<number | undefined>(() => parsedTokens.value ?? props.taskUsage?.tokens);
+// 任务消耗 token 优先取 props.taskUsage.tokens（来自 step-finish 累计），assistant 文本里偶然出现的
+// "826 tokens" 字样仅作为兜底解析，避免 props 缺失时整行空白。
+const displayTokens = computed<number | undefined>(() => props.taskUsage?.tokens ?? parsedTokens.value);
 
 const hasTaskUsageDisplay = computed(
   () => !!(props.taskUsage && (props.taskUsage.duration || displayTokens.value !== undefined || props.taskUsage.thoughtFor))
@@ -268,9 +270,11 @@ function onKeydown(event: KeyboardEvent) {
       <img :src="planLoadingUrl" alt="" class="figma-chat-usage-icon" />
       <span class="figma-chat-usage-label">任务消耗：</span>
       <span class="figma-chat-usage-value">
+        <template v-if="taskUsage?.duration || displayTokens !== undefined || taskUsage?.thoughtFor">(</template>
         <template v-if="taskUsage?.duration">{{ taskUsage.duration }}</template>
         <template v-if="displayTokens !== undefined"> · ↓ {{ displayTokens }} tokens</template>
         <template v-if="taskUsage?.thoughtFor"> · thought for {{ taskUsage.thoughtFor }}</template>
+        <template v-if="taskUsage?.duration || displayTokens !== undefined || taskUsage?.thoughtFor">)</template>
       </span>
     </div>
 
@@ -629,7 +633,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .figma-chat-usage-value {
-  color: #a40dbc;
+  color: #6b6b73;
   font-weight: 400;
 }
 

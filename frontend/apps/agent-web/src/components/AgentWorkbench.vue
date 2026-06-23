@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch } from "vue";
+import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
 import { createBackendApiClient } from "@test-agent/backend-api";
@@ -87,8 +87,16 @@ const bottomDrawerOpen = ref(false);
 const rightPanelOpen = ref(true);
 const selectedAppId = ref("fgcms-psn");
 const chatTitle = ref("生成测试案例");
-const taskUsage = ref<{ duration?: string; tokens?: number; thoughtFor?: string }>({});
+// 任务消耗展示：duration 取 chatStartedAt 实时计算；tokens 从助手消息的 step-finish part
+// 累计（opencode 每轮 step 结束会上报 tokens.total）；thought for 累计 reasoning part 的
+// durationMs。Run 结束后保留最后值继续展示。Run 切换时清零。
 const chatStartedAt = ref<number | null>(null);
+const accumulatedTokens = ref(0);
+const accumulatedReasoningMs = ref(0);
+let lastDuration: string | undefined;
+let lastTokens = 0;
+let lastThoughtForMs = 0;
+const nowTick = ref(Date.now());
 const settingsOpen = ref(false);
 const directoryPickerOpen = ref(false);
 const directoryPickerLoading = ref(false);
@@ -391,6 +399,102 @@ const commandMutation = useMutation({
 
 const runtimeBusy = computed(() => isRunBusyStatus(run.value?.status) || startRunMutation.isPending.value || commandMutation.isPending.value);
 
+// 把累计毫秒数格式化为 "Xm Ys" 或 "Ys" 的展示文案。
+function formatDurationMs(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  if (totalSec <= 0) return "0s";
+  const minutes = Math.floor(totalSec / 60);
+  const remain = totalSec % 60;
+  return minutes > 0 ? `${minutes}m ${remain}s` : `${totalSec}s`;
+}
+
+// 把 "1s"/"500ms"/"1m 30s" 等字符串解析成毫秒；解析失败返回 0。
+function parseDurationStringToMs(input: string): number {
+  const trimmed = input.trim();
+  if (!trimmed) return 0;
+  if (trimmed.endsWith("ms")) {
+    const n = Number(trimmed.slice(0, -2));
+    return Number.isFinite(n) ? n : 0;
+  }
+  if (trimmed.endsWith("s")) {
+    const n = Number(trimmed.slice(0, -1));
+    return Number.isFinite(n) ? n * 1000 : 0;
+  }
+  if (trimmed.endsWith("m")) {
+    const n = Number(trimmed.slice(0, -1));
+    return Number.isFinite(n) ? n * 60_000 : 0;
+  }
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : 0;
+}
+
+// 任务消耗：duration 优先用 chatStartedAt 实时计算（每秒刷新），结束后回退 lastDuration。
+// tokens/thoughtFor 优先用累计值，fallback 到 run 终态事件 payload 中的字段以保持向后兼容。
+const taskUsage = computed<{ duration?: string; tokens?: number; thoughtFor?: string }>(() => {
+  // 引用 nowTick 以触发每秒重算
+  void nowTick.value;
+  const usage: { duration?: string; tokens?: number; thoughtFor?: string } = {};
+  if (chatStartedAt.value) {
+    usage.duration = formatDurationMs(Date.now() - chatStartedAt.value);
+  } else if (lastDuration) {
+    usage.duration = lastDuration;
+  }
+  const tokens = accumulatedTokens.value > 0 ? accumulatedTokens.value : lastTokens;
+  if (tokens > 0) {
+    usage.tokens = tokens;
+  }
+  const reasoningMs = accumulatedReasoningMs.value > 0 ? accumulatedReasoningMs.value : lastThoughtForMs;
+  if (reasoningMs > 0) {
+    usage.thoughtFor = formatDurationMs(reasoningMs);
+  }
+  return usage;
+});
+
+// 扫描 chatState.messages，累计 step-finish tokens 与 reasoning durationMs。
+// 一次 Run 内多次 step-finish 会重复累加，与 opencode 上报的每轮消耗一致。
+function recomputeUsageFromChat() {
+  let tokens = 0;
+  let reasoningMs = 0;
+  for (const message of chatState.value.messages) {
+    if (message.role !== "assistant") continue;
+    for (const part of message.parts ?? []) {
+      if (part.type === "step-finish") {
+        tokens += part.tokens?.total ?? 0;
+      } else if (part.type === "reasoning") {
+        reasoningMs += part.durationMs ?? 0;
+      }
+    }
+  }
+  accumulatedTokens.value = tokens;
+  accumulatedReasoningMs.value = reasoningMs;
+}
+
+watch(
+  () => chatState.value.messages,
+  () => recomputeUsageFromChat(),
+  { deep: true }
+);
+
+// Run 运行时开启 1s tick 让 duration 持续滚动；空闲时停止。
+let tickHandle: ReturnType<typeof setInterval> | null = null;
+function startTick() {
+  if (tickHandle) return;
+  tickHandle = setInterval(() => {
+    nowTick.value = Date.now();
+  }, 1000);
+}
+function stopTick() {
+  if (tickHandle) {
+    clearInterval(tickHandle);
+    tickHandle = null;
+  }
+}
+onScopeDispose(() => stopTick());
+watch(runtimeBusy, (busy) => {
+  if (busy) startTick();
+  else stopTick();
+}, { immediate: true });
+
 // follow-up 队列：Run 空闲且有排队 prompt 时自动出队执行
 watch(
   [followUpQueue, run, session, () => startRunMutation.isPending.value, () => commandMutation.isPending.value],
@@ -554,6 +658,14 @@ function resetWorkspaceState() {
   selectedAgent.value = "";
   selectedProvider.value = "";
   selectedModel.value = "";
+  // 切工作区时同步清掉任务消耗计时与上一轮终态展示，避免旧 Run 的 token/duration 残留。
+  chatStartedAt.value = null;
+  accumulatedTokens.value = 0;
+  accumulatedReasoningMs.value = 0;
+  lastDuration = undefined;
+  lastTokens = 0;
+  lastThoughtForMs = 0;
+  nowTick.value = Date.now();
   dispatchChat({ type: "reset" });
   workbench.resetWorkspaceView();
 }
@@ -675,9 +787,10 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   lastPrompt.value = displayPrompt;
   diffContextParts.value = [];
   dispatchChat({ type: "user.submitted", prompt: displayPrompt, parts });
-  // 启动计时 + 重置任务消耗
+  // 启动计时 + 重置任务消耗累计（lastDuration/lastTokens/lastThoughtForMs 保留上一轮终态以供刷新对比）
   chatStartedAt.value = Date.now();
-  taskUsage.value = {};
+  accumulatedTokens.value = 0;
+  accumulatedReasoningMs.value = 0;
   const command = parseCommand(prompt, promptMode.value);
   if (runtimeBusy.value) {
     followUpQueue.value = enqueueFollowUp(followUpQueue.value, createFollowUpDraft(displayPrompt, parts, undefined, command ?? undefined));
@@ -694,10 +807,10 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
 function handleStopRun() {
   cancelRunMutation.mutate();
   if (chatStartedAt.value) {
-    const durationMs = Date.now() - chatStartedAt.value;
-    const seconds = Math.floor(durationMs / 1000);
-    taskUsage.value = { ...taskUsage.value, duration: `${seconds}s` };
+    lastDuration = formatDurationMs(Date.now() - chatStartedAt.value);
     chatStartedAt.value = null;
+    // 触发 taskUsage 重新计算（duration 从 live 切到 last）
+    nowTick.value = Date.now();
   }
 }
 
@@ -735,19 +848,22 @@ function handleRunEvent(event: RunEvent) {
     run.value = run.value
       ? { ...run.value, status: event.type === "run.succeeded" ? "SUCCEEDED" : event.type === "run.failed" ? "FAILED" : "CANCELLED" }
       : run.value;
-    // 计算任务消耗统计
+    // 计算任务消耗统计：duration 由 chatStartedAt 锁定，tokens/thoughtFor 仍优先取累计值；
+    // 如果后端 payload 直接带上 tokens 或 thoughtFor 字段，则覆盖一次（向后兼容未来后端实现）。
     if (chatStartedAt.value) {
-      const durationMs = Date.now() - chatStartedAt.value;
-      const seconds = Math.floor(durationMs / 1000);
-      const minutes = Math.floor(seconds / 60);
-      const remainSec = seconds % 60;
-      const duration = minutes > 0 ? `${minutes}m ${remainSec}s` : `${remainSec}s`;
-      const payload = event.payload as Record<string, unknown>;
-      const tokens = typeof payload.tokens === "number" ? payload.tokens : undefined;
-      const thoughtFor = typeof payload.thoughtFor === "string" ? payload.thoughtFor : undefined;
-      taskUsage.value = { duration, tokens, thoughtFor };
+      lastDuration = formatDurationMs(Date.now() - chatStartedAt.value);
       chatStartedAt.value = null;
     }
+    const payload = event.payload as Record<string, unknown>;
+    if (typeof payload.tokens === "number") {
+      lastTokens = payload.tokens;
+    }
+    if (typeof payload.thoughtFor === "string") {
+      // 兼容未来后端直接以 "1s"/"100ms" 等字符串上报
+      lastThoughtForMs = parseDurationStringToMs(payload.thoughtFor);
+    }
+    // 触发 taskUsage 重新计算
+    nowTick.value = Date.now();
   }
 }
 
