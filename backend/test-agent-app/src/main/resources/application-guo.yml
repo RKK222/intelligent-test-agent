@@ -1,7 +1,7 @@
 spring:
   config:
     activate:
-      on-profile: local
+      on-profile: guo
   datasource:
     druid:
       driver-class-name: org.postgresql.Driver
@@ -26,6 +26,11 @@ test-agent:
     enabled: false
     capacity: 120
     window: 1m
+  files:
+    max-file-bytes: 1048576
+    max-directory-entries: 1000
+  workspace-picker:
+    allowed-roots: "D:/workspace"
   redis:
     enabled: true
     host: 127.0.0.1

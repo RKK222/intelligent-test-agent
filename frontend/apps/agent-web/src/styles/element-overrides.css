@@ -1,0 +1,53 @@
+/* Element Plus 主题覆盖：与 Figma 浅色界面一致 */
+:root {
+  --el-color-primary: #3366ff;
+  --el-color-success: #18a978;
+  --el-color-warning: #e6a700;
+  --el-color-error: #e5484d;
+  --el-border-radius-base: 8px;
+  --el-font-family: "PingFang SC", "Inter", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+/* Message 气泡：顶部居中、深色卡片 */
+.el-message.ta-top-message {
+  background: #1f1f23;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  min-width: 360px;
+  max-width: 480px;
+  padding: 10px 16px;
+  border-radius: 10px;
+}
+
+.el-message.ta-top-message .el-message__content {
+  color: #f4f4f5;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.el-message.ta-top-message .el-message__icon {
+  font-size: 16px;
+  margin-right: 10px;
+}
+
+.el-message.ta-top-message .el-message__closeBtn {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.ta-notify-title {
+  font-weight: 500;
+  color: #f4f4f5;
+}
+
+.ta-notify-detail {
+  margin-top: 2px;
+  color: rgba(244, 244, 245, 0.7);
+  font-size: 12px;
+}
+
+.ta-notify-meta {
+  margin-top: 2px;
+  color: rgba(244, 244, 245, 0.4);
+  font-size: 11px;
+  font-family: "JetBrains Mono", monospace;
+}

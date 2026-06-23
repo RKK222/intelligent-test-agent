@@ -21,12 +21,17 @@ export type CodeEditorProps = {
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
-import { Eye, EyeOff, Save } from "lucide-vue-next";
+import { Eye, EyeOff } from "lucide-vue-next";
 import { Button, FeedbackBanner } from "@test-agent/ui-kit";
 import { languageFromPath } from "./language";
 import MarkdownPreview from "./MarkdownPreview.vue";
 
 const props = withDefaults(defineProps<CodeEditorProps>(), { content: "" });
+const displayName = computed(() => {
+  if (!props.path) return "";
+  const parts = props.path.split(/[\\/]+/).filter(Boolean);
+  return parts.at(-1) ?? props.path;
+});
 const emit = defineEmits<{
   change: [content: string];
   save: [];
@@ -273,10 +278,10 @@ onBeforeUnmount(() => {
   </div>
   <div v-else class="flex h-full min-h-0 flex-col bg-[var(--ta-surface)]">
     <div class="flex h-[41px] items-center gap-2 border-b border-[var(--ta-border)] bg-[var(--ta-surface)] px-4">
-      <div class="min-w-0 flex-1 truncate text-[12px] text-[var(--ta-muted)]">{{ path }}</div>
+      <div class="min-w-0 flex-1 truncate text-[12px] text-[var(--ta-muted)]">{{ displayName }}</div>
       <span v-if="dirty" class="rounded-full bg-[rgba(245,158,11,.15)] px-2 py-0.5 text-[11px] text-[#946015]">未保存</span>
       <span v-if="readonly" class="rounded-full bg-[var(--ta-control)] px-2 py-0.5 text-[11px] text-[var(--ta-muted)]">只读</span>
-      <!-- 仅 Markdown 文件展示预览开关，位于保存按钮左侧；默认不预览 -->
+      <!-- 仅 Markdown 文件展示预览开关，默认不预览 -->
       <Button
         v-if="isMarkdown"
         size="icon"
@@ -289,9 +294,6 @@ onBeforeUnmount(() => {
       >
         <EyeOff v-if="showPreview" class="h-4 w-4" />
         <Eye v-else class="h-4 w-4" />
-      </Button>
-      <Button size="icon" variant="ghost" :disabled="!dirty || readonly || saving" title="保存" aria-label="保存" @click="emit('save')">
-        <Save class="h-4 w-4" />
       </Button>
     </div>
     <!-- 编辑器主体始终保留同一个容器，避免 v-if 切换销毁 Monaco 已挂载的 DOM；

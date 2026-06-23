@@ -6,8 +6,8 @@ import { createBackendApiClient } from "@test-agent/backend-api";
 import { DiffViewer } from "@test-agent/diff-viewer";
 import { CodeEditor, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents } from "@test-agent/event-stream-client";
-import { FileExplorer } from "@test-agent/file-explorer";
-import { Bell, Code2, GitBranch, PanelBottom, TerminalSquare } from "lucide-vue-next";
+import { Bell, Code2, GitBranch, MessageSquare, TerminalSquare } from "lucide-vue-next";
+import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
   FileTreeEntry,
@@ -25,11 +25,16 @@ import type {
 } from "@test-agent/shared-types";
 import { TerminalPanel } from "@test-agent/terminal";
 import { TestRunnerPanel } from "@test-agent/test-runner";
-import { FeedbackBanner, type Feedback } from "@test-agent/ui-kit";
-import { useWorkbenchStore, WorkbenchShell } from "@test-agent/workbench-shell";
-import EditorPane from "./EditorPane.vue";
+import { type Feedback } from "@test-agent/ui-kit";
+import { useWorkbenchStore } from "@test-agent/workbench-shell";
+import FigmaShell from "./FigmaShell.vue";
+import FigmaFileExplorer from "./FigmaFileExplorer.vue";
+import FigmaEditorArea from "./FigmaEditorArea.vue";
+import FigmaChatPanel from "./FigmaChatPanel.vue";
+import SettingsDialog from "./settings/SettingsDialog.vue";
 import WorkspaceBootstrap from "./WorkspaceBootstrap.vue";
 import WorkspaceDirectoryPickerDialog from "./WorkspaceDirectoryPickerDialog.vue";
+import { notifyFeedback } from "./notify";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, type FollowUpDraft } from "./follow-up-queue";
 import {
   buildPromptParts,
@@ -79,6 +84,12 @@ const diffContextParts = ref<PromptPart[]>([]);
 const editorSelection = ref<EditorSelectionContext | undefined>(undefined);
 const bottomMode = ref<"run" | "terminal">("run");
 const bottomDrawerOpen = ref(false);
+const rightPanelOpen = ref(true);
+const selectedAppId = ref("fgcms-psn");
+const chatTitle = ref("生成测试案例");
+const taskUsage = ref<{ duration?: string; tokens?: number; thoughtFor?: string }>({});
+const chatStartedAt = ref<number | null>(null);
+const settingsOpen = ref(false);
 const directoryPickerOpen = ref(false);
 const directoryPickerLoading = ref(false);
 const directoryPickerData = shallowRef<WorkspaceDirectoryList | null>(null);
@@ -98,6 +109,10 @@ const tabs = computed(() => workbench.tabs);
 const activePath = computed(() => workbench.activePath);
 const selectedDiffPath = computed(() => workbench.selectedDiffPath);
 const activeTab = computed(() => tabs.value.find((tab) => tab.path === activePath.value));
+const breadcrumbDisplay = computed(() => {
+  if (!activePath.value) return "";
+  return activePath.value.split(/[\\/]+/).filter(Boolean).join(" › ");
+});
 
 // ===== 查询 =====
 const workspacesQuery = useQuery({
@@ -186,6 +201,24 @@ const resourcesList = computed(() => runtimeResources(mcpResourcesData.value, ac
 const runtimeStatusValue = computed(() =>
   runtimeStatus(session.value, run.value, selectedAgent.value, selectedModel.value, vcsStatusData.value, lspStatusData.value, mcpStatusData.value, mcpToolsData.value, mcpResourcesData.value)
 );
+const vcsCurrentBranch = computed(() => {
+  const status = vcsStatusData.value as unknown;
+  if (!status || typeof status !== "object") return undefined;
+  const root = status as Record<string, unknown>;
+  const data = (root.data as Record<string, unknown> | undefined) ?? root;
+  const branch = typeof data.branch === "string" ? data.branch : undefined;
+  return branch;
+});
+const vcsBranches = computed(() => {
+  const current = vcsCurrentBranch.value;
+  if (!current) return [];
+  return [{ name: current, isCurrent: true }];
+});
+
+function handleChangeBranch(branch: string) {
+  // TODO: 对接后端切换分支接口
+  feedback.value = { kind: "info", title: "已切换分支", description: `当前分支：${branch}` };
+}
 
 // ===== 默认值与联动 effect =====
 watch(selectedWorkspace, (sw) => {
@@ -266,6 +299,9 @@ watch(run, (r) => {
 });
 // step 末兜底：diff.proposed 更新 changed files 时，确保最新被改文件已打开预览
 // （覆盖 tool part 路径解析失败的边缘情况；路径不可用则静默跳过，不报错）。
+watch(feedback, (current) => {
+  if (current) notifyFeedback(current);
+});
 watch(diffFiles, (files) => {
   if (!liveTrack.value || files.length === 0) {
     return;
@@ -610,7 +646,7 @@ async function openFile(path: string) {
     workbench.openTab({
       id: `file:${path}`,
       path,
-      title: path.split("/").at(-1) ?? path,
+      title: path.split(/[\\/]+/).filter(Boolean).at(-1) ?? path,
       content: file.content,
       savedContent: file.content,
       readonly: file.readonly
@@ -639,6 +675,9 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   lastPrompt.value = displayPrompt;
   diffContextParts.value = [];
   dispatchChat({ type: "user.submitted", prompt: displayPrompt, parts });
+  // 启动计时 + 重置任务消耗
+  chatStartedAt.value = Date.now();
+  taskUsage.value = {};
   const command = parseCommand(prompt, promptMode.value);
   if (runtimeBusy.value) {
     followUpQueue.value = enqueueFollowUp(followUpQueue.value, createFollowUpDraft(displayPrompt, parts, undefined, command ?? undefined));
@@ -650,6 +689,21 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     return;
   }
   startRunMutation.mutate({ prompt: displayPrompt, parts });
+}
+
+function handleStopRun() {
+  cancelRunMutation.mutate();
+  if (chatStartedAt.value) {
+    const durationMs = Date.now() - chatStartedAt.value;
+    const seconds = Math.floor(durationMs / 1000);
+    taskUsage.value = { ...taskUsage.value, duration: `${seconds}s` };
+    chatStartedAt.value = null;
+  }
+}
+
+function handleSelectApp(appId: string) {
+  selectedAppId.value = appId;
+  // TODO: 后续对接后端接口获取应用详情
 }
 
 function handleRunEvent(event: RunEvent) {
@@ -681,6 +735,19 @@ function handleRunEvent(event: RunEvent) {
     run.value = run.value
       ? { ...run.value, status: event.type === "run.succeeded" ? "SUCCEEDED" : event.type === "run.failed" ? "FAILED" : "CANCELLED" }
       : run.value;
+    // 计算任务消耗统计
+    if (chatStartedAt.value) {
+      const durationMs = Date.now() - chatStartedAt.value;
+      const seconds = Math.floor(durationMs / 1000);
+      const minutes = Math.floor(seconds / 60);
+      const remainSec = seconds % 60;
+      const duration = minutes > 0 ? `${minutes}m ${remainSec}s` : `${remainSec}s`;
+      const payload = event.payload as Record<string, unknown>;
+      const tokens = typeof payload.tokens === "number" ? payload.tokens : undefined;
+      const thoughtFor = typeof payload.thoughtFor === "string" ? payload.thoughtFor : undefined;
+      taskUsage.value = { duration, tokens, thoughtFor };
+      chatStartedAt.value = null;
+    }
   }
 }
 
@@ -761,7 +828,7 @@ async function openLivePreview(relPath: string) {
     workbench.openTab({
       id: `live:${relPath}`,
       path: relPath,
-      title: relPath.split("/").at(-1) ?? relPath,
+      title: relPath.split(/[\\/]+/).filter(Boolean).at(-1) ?? relPath,
       content: file.content,
       savedContent: file.content,
       readonly: true,
@@ -938,67 +1005,79 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
 </script>
 
 <template>
-  <WorkbenchShell
-    :workspace-name="selectedWorkspace?.name ?? '未选择 Workspace'"
-    branch-name="local"
-    :run-status="run?.status ?? 'IDLE'"
+  <FigmaShell
+    :workspace-name="selectedWorkspace?.name"
     :bottom-open="bottomDrawerOpen"
-    :bottom-height="190"
+    :show-right-panel="rightPanelOpen"
+    :selected-app-id="selectedAppId"
+    @toggle-left-panel="() => {}"
+    @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
+    @open-folder="openWorkspaceDirectoryPicker"
+    @select-app="handleSelectApp"
   >
     <template #activity>
-      <nav class="flex h-full flex-col items-center justify-between py-2" aria-label="工作台活动栏">
-        <div class="flex flex-col items-center gap-4">
+      <nav class="figma-activity-nav" aria-label="工作台活动栏">
+        <div class="figma-activity-top">
           <button
             type="button"
-            :class="['ta-activity-button', centerMode === 'editor' && 'is-active']"
+            :class="['figma-activity-btn', centerMode === 'editor' && 'figma-activity-btn--active']"
             aria-label="打开编辑器"
             title="打开编辑器"
             @click="centerMode = 'editor'"
           >
-            <Code2 class="h-[22px] w-[22px]" />
+            <Code2 class="figma-activity-icon" />
           </button>
           <button
             type="button"
-            :class="['ta-activity-button', centerMode === 'diff' && 'is-active']"
+            :class="['figma-activity-btn', centerMode === 'diff' && 'figma-activity-btn--active']"
             aria-label="打开 Diff"
             title="打开 Diff"
             @click="centerMode = 'diff'"
           >
-            <GitBranch class="h-[22px] w-[22px]" />
+            <GitBranch class="figma-activity-icon" />
           </button>
           <button
             type="button"
-            :class="['ta-activity-button', bottomDrawerOpen && 'is-active']"
+            :class="['figma-activity-btn', bottomDrawerOpen && 'figma-activity-btn--active']"
             aria-label="打开运行与终端"
             title="打开运行与终端"
             @click="openBottomDrawer()"
           >
-            <TerminalSquare class="h-[22px] w-[22px]" />
+            <TerminalSquare class="figma-activity-icon" />
           </button>
           <button
             type="button"
-            class="ta-activity-button"
+            class="figma-activity-btn"
             aria-label="请求通知权限"
             title="请求通知权限"
             @click="requestNotifications"
           >
-            <Bell class="h-[22px] w-[22px]" />
+            <Bell class="figma-activity-icon" />
+          </button>
+          <button
+            type="button"
+            :class="['figma-activity-btn', rightPanelOpen && 'figma-activity-btn--active']"
+            aria-label="切换对话面板"
+            title="切换对话面板"
+            @click="rightPanelOpen = !rightPanelOpen"
+          >
+            <MessageSquare class="figma-activity-icon" />
           </button>
         </div>
         <button
           type="button"
-          :class="['ta-activity-button', bottomDrawerOpen && 'is-active']"
-          aria-label="切换底部面板"
-          title="切换底部面板"
-          @click="bottomDrawerOpen = !bottomDrawerOpen"
+          :class="['figma-activity-btn', settingsOpen && 'figma-activity-btn--active']"
+          aria-label="系统设置"
+          title="系统设置"
+          @click="settingsOpen = true"
         >
-          <PanelBottom class="h-[22px] w-[22px]" />
+          <ElSetting class="figma-activity-icon" />
         </button>
       </nav>
     </template>
 
-    <template #left>
-      <FileExplorer
+    <template #files>
+      <FigmaFileExplorer
         v-if="selectedWorkspace"
         :workspace-name="selectedWorkspace.name"
         :workspace-root-path="selectedWorkspace.rootPath"
@@ -1007,16 +1086,23 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
         :active-path="activePath"
         :changed-files="diffFiles"
         :loading-path="loadingPath"
+        :branches="vcsBranches"
+        :current-branch="vcsCurrentBranch"
         @toggle-directory="toggleDirectory"
         @open-file="openFile"
         @open-diff="(path: string) => { workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
         @refresh="loadDirectory('')"
         @add-workspace="openWorkspaceDirectoryPicker"
+        @change-branch="handleChangeBranch"
       />
-      <WorkspaceBootstrap v-else :loading="createWorkspaceMutation.isPending.value" @create="(payload) => createWorkspaceMutation.mutate(payload)" />
+      <WorkspaceBootstrap
+        v-else
+        :loading="createWorkspaceMutation.isPending.value"
+        @create="(payload) => createWorkspaceMutation.mutate(payload)"
+      />
     </template>
 
-    <template #center>
+    <template #editor>
       <DiffViewer
         v-if="centerMode === 'diff'"
         :files="diffFiles"
@@ -1035,12 +1121,23 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
         @current-file-feedback="onCurrentFileFeedback"
         @use-hunk-context="onUseHunkContext"
       />
-      <EditorPane
+      <FigmaEditorArea
         v-else
         :tabs="tabs"
         :active-path="activePath"
+        :breadcrumb-path="breadcrumbDisplay"
+        :branches="vcsBranches"
+        :current-branch="vcsCurrentBranch"
+        :write-path="activeTab?.path"
+        :updated-at="activeTab ? Date.now() / 1000 : undefined"
+        :dirty="!!activeTab && !activeTab.livePreview && activeTab.content !== activeTab.savedContent"
+        :readonly="!!activeTab?.readonly"
+        :saving="saveMutation.isPending.value"
         @activate="(path: string) => workbench.setActivePath(path)"
         @close="(path: string) => workbench.closeTab(path)"
+        @editor-action="() => {}"
+        @change-branch="handleChangeBranch"
+        @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
       >
         <CodeEditor
           :path="activeTab?.path"
@@ -1053,47 +1150,22 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
           @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
           @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"
         />
-      </EditorPane>
+      </FigmaEditorArea>
     </template>
 
-    <template #right>
-      <AgentChat
+    <template #chat>
+      <FigmaChatPanel
         :messages="chatState.messages"
-        :history="historyList"
-        :history-search="sessionSearch"
         :running="runtimeBusy"
-        :permissions="chatState.permissions"
-        :questions="chatState.questions"
-        :todos="chatState.todos"
-        :agents="agents"
-        :models="models"
-        :commands="commands"
-        :providers="providers"
-        :resources="resourcesList"
-        :tools="mcpToolsData"
-        :runtime-status="runtimeStatusValue"
-        :selected-agent="selectedAgent"
-        :selected-provider="selectedProvider"
-        :selected-model="selectedModel"
-        :mode="promptMode"
-        :live-track="liveTrack"
-        @send="handleSend"
-        @open-diff="centerMode = 'diff'"
-        @retry="() => lastPrompt && handleSend(lastPrompt)"
-        @cancel="cancelRunMutation.mutate()"
-        @toggle-live-track="liveTrack = !liveTrack"
-        @reply-permission="(id: string, decision: 'once' | 'always' | 'reject') => replyPermissionMutation.mutate({ requestId: id, decision })"
-        @reply-question="(id: string, answers: unknown[]) => replyQuestionMutation.mutate({ requestId: id, answers })"
-        @reject-question="(id: string) => rejectQuestionMutation.mutate(id)"
-        @agent-change="(v: string) => (selectedAgent = v)"
-        @provider-change="(v: string) => (selectedProvider = v)"
-        @model-change="(v: string) => (selectedModel = v)"
-        @mode-change="(v: string) => (promptMode = v)"
-        @request-notifications="requestNotifications"
-        @history-search-change="(v: string) => (sessionSearch = v)"
-        @select-history="(id: string) => switchSession(id)"
-        @toggle-history-pin="(id: string, pinned: boolean) => updateSessionMutation.mutate({ sessionId: id, pinned })"
-        @delete-history="(id: string) => deleteSessionMutation.mutate(id)"
+        :title="chatTitle"
+        :file-changes="diffFiles"
+        :task-usage="taskUsage"
+        :history="historyList"
+        placeholder="Ask the AI agent..."
+        @send="(text: string) => handleSend(text)"
+        @stop="handleStopRun"
+        @new-conversation="() => handleSend('')"
+        @close="rightPanelOpen = false"
       />
     </template>
 
@@ -1135,11 +1207,8 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
         </div>
       </div>
     </template>
-  </WorkbenchShell>
+  </FigmaShell>
 
-  <div class="pointer-events-none fixed bottom-3 left-1/2 z-50 w-[min(560px,calc(100vw-24px))] -translate-x-1/2">
-    <FeedbackBanner :feedback="feedback" class="pointer-events-auto rounded-md border border-slate-800" />
-  </div>
   <WorkspaceDirectoryPickerDialog
     :open="directoryPickerOpen"
     :directory="directoryPickerData"
@@ -1148,4 +1217,6 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
     @navigate="loadWorkspaceDirectories"
     @select="selectWorkspaceDirectory"
   />
+
+  <SettingsDialog v-model="settingsOpen" />
 </template>

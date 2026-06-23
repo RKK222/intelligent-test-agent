@@ -6,7 +6,8 @@ export type ReadonlyTranscriptProps = { sessionId: string };
 import { ref, shallowRef, watch } from "vue";
 import { createBackendApiClient } from "@test-agent/backend-api";
 import type { Session, SessionMessage } from "@test-agent/shared-types";
-import { FeedbackBanner, type Feedback } from "@test-agent/ui-kit";
+import { type Feedback } from "@test-agent/ui-kit";
+import { notifyFeedback } from "./notify";
 
 const props = defineProps<ReadonlyTranscriptProps>();
 
@@ -31,6 +32,9 @@ async function load() {
 }
 
 watch(() => props.sessionId, () => void load(), { immediate: true });
+watch(feedback, (current) => {
+  if (current) notifyFeedback(current);
+});
 </script>
 
 <template>
@@ -54,7 +58,6 @@ watch(() => props.sessionId, () => void load(), { immediate: true });
         </article>
         <div v-if="!messages.length && !feedback" class="py-12 text-center text-[12px] text-slate-500">暂无消息</div>
       </div>
-      <FeedbackBanner :feedback="feedback" />
     </section>
   </main>
 </template>
