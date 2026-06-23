@@ -38,8 +38,8 @@ const resizing = ref(false);
 let resizeStartX = 0;
 let resizeStartWidth = 0;
 
-const MIN_RIGHT_WIDTH = 280;
-const MAX_RIGHT_WIDTH = 600;
+const MIN_RIGHT_WIDTH = 240;
+const MAX_RIGHT_WIDTH = 1200;
 
 const emit = defineEmits<{
   (e: "toggle-left-panel"): void;
@@ -186,13 +186,8 @@ onUnmounted(() => {
           <slot name="editor" />
         </div>
         <div v-if="showRightPanel" class="figma-chat-panel-wrapper">
-          <div
-            class="figma-panel-right"
-            :style="{ width: `${rightPanelWidth}px` }"
-          >
-            <div class="figma-chat-resize-handle" @mousedown="onResizeStart">
-              <div class="figma-chat-resize-line" />
-            </div>
+          <div class="figma-chat-resize-handle" @mousedown="onResizeStart" aria-label="拖拽调整对话窗口宽度" role="separator" aria-orientation="vertical" />
+          <div class="figma-panel-right" :style="{ width: `${rightPanelWidth}px` }">
             <div class="figma-chat-body">
               <slot name="chat" />
             </div>
@@ -211,6 +206,8 @@ onUnmounted(() => {
 .figma-app {
   display: grid;
   grid-template-rows: 52px 1fr;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
   height: 100vh;
   background: #f5f5f5;
   overflow: hidden;
@@ -429,6 +426,8 @@ onUnmounted(() => {
 .figma-body {
   display: flex;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
   position: relative;
 }
 
@@ -447,6 +446,7 @@ onUnmounted(() => {
   flex: 1;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .figma-panel-left {
@@ -472,7 +472,7 @@ onUnmounted(() => {
 
 .figma-panel-center {
   flex: 1;
-  min-width: 0;
+  min-width: 100px;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -484,24 +484,38 @@ onUnmounted(() => {
   flex-shrink: 0;
   display: flex;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .figma-panel-right {
   flex-shrink: 0;
   display: flex;
-  flex-direction: row;
+  flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .figma-chat-resize-handle {
-  width: 8px;
+  width: 4px;
   flex-shrink: 0;
   cursor: col-resize;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   position: relative;
   z-index: 5;
+  background: transparent;
+  transition: background-color 0.14s ease;
+}
+
+.figma-chat-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  margin-left: -0.5px;
+  background: #e4e4e7;
   transition: background-color 0.14s ease;
 }
 
@@ -509,19 +523,12 @@ onUnmounted(() => {
   background: rgba(0, 0, 0, 0.04);
 }
 
+.figma-chat-resize-handle:hover::after {
+  background: #bbb;
+}
+
 .figma-chat-resize-handle:active {
   background: rgba(0, 0, 0, 0.06);
-}
-
-.figma-chat-resize-line {
-  width: 1px;
-  height: 100%;
-  background: #e4e4e7;
-  transition: background-color 0.14s ease;
-}
-
-.figma-chat-resize-handle:hover .figma-chat-resize-line {
-  background: #bbb;
 }
 
 .figma-chat-body {
@@ -530,7 +537,6 @@ onUnmounted(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  border-left: 1px solid #e4e4e7;
   background: #f5f5f5;
 }
 

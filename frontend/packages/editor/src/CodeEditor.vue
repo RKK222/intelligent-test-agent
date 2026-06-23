@@ -95,7 +95,16 @@ async function ensureMonacoEditor(path: string, content: string) {
     lineHeight: 20,
     scrollBeyondLastLine: false,
     automaticLayout: true,
-    wordWrap: "off"
+    wordWrap: "off",
+    // 滚动条细线化：Monaco 内部使用自定义控件，垂直与水平都用 6px
+    scrollbar: {
+      vertical: "visible",
+      horizontal: "visible",
+      verticalScrollbarSize: 6,
+      horizontalScrollbarSize: 6,
+      useShadows: false,
+      arrows: { up: 0, down: 0, left: 0, right: 0 }
+    }
   });
   editor.value = inst;
   inst.onDidChangeModelContent(() => {
@@ -304,3 +313,25 @@ onBeforeUnmount(() => {
     <FeedbackBanner :feedback="feedback" />
   </div>
 </template>
+
+<style scoped>
+/* Monaco 编辑器内部滚动条细线化（同时影响水平与竖向） */
+:deep(.monaco-scrollable-element)::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+:deep(.monaco-scrollable-element)::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 3px;
+}
+:deep(.monaco-scrollable-element)::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.4);
+}
+:deep(.monaco-scrollable-element)::-webkit-scrollbar-track {
+  background: transparent;
+}
+/* 覆盖最小尺寸，防止 Monaco 在极小宽度下出现粗滚动条 */
+:deep(.monaco-scrollable-element) .slider {
+  border-radius: 3px !important;
+}
+</style>
