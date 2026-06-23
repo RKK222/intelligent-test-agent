@@ -123,6 +123,11 @@ const breadcrumbDisplay = computed(() => {
   return activePath.value.split(/[\\/]+/).filter(Boolean).join(" › ");
 });
 
+async function openSettings() {
+  await authStore.fetchCurrentUser(api);
+  settingsDialogOpen.value = true;
+}
+
 // ===== 查询 =====
 const workspacesQuery = useQuery({
   queryKey: ["workspaces"],
@@ -1172,7 +1177,18 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
             title="请求通知权限"
             @click="requestNotifications"
           >
-            <Bell class="figma-activity-icon" />
+            <Bell class="h-[22px] w-[22px]" />
+          </button>
+        </div>
+        <div class="flex flex-col items-center gap-3">
+          <button
+            type="button"
+            :class="['ta-activity-button', settingsDialogOpen && 'is-active']"
+            aria-label="打开设置"
+            title="打开设置"
+            @click="openSettings"
+          >
+            <Settings class="h-[22px] w-[22px]" />
           </button>
           <button
             type="button"
