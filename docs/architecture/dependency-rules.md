@@ -84,11 +84,11 @@ test-agent-event
 
 新增后端文件前必须先分析并列出现有合适工程：
 
-- Workspace、文件查看/新增/修改/删除、git 操作、差异比对、agent 和 skill 管理：`test-agent-workspace-management`。
+- Workspace、文件查看/新增/修改/删除、git 操作、差异比对、应用版本工作区、个人工作区、agent 和 skill 管理：`test-agent-workspace-management`。
 - 多 agent 运行时接口、agentId registry、统一日志/指标包装、opencode/otheragent 适配骨架：`test-agent-agent-runtime`。
 - Session、Run、RunEvent 编排、agent runtime 调用、Diff/revert、terminal ticket/PTY：`test-agent-opencode-runtime`。
 - 用户、角色、权限等平台内部管理：`test-agent-system-management`。
-- 应用定义只读消费、应用成员、代码库配置、应用工作空间、个人 SSH key 和 Git 远端只读目录查询：`test-agent-configuration-management`。
+- 应用定义只读消费、应用成员、代码库配置、应用工作空间模板、个人 SSH key 和 Git 远端只读目录查询：`test-agent-configuration-management`。
 - 非 opencode 的外部系统联动：`test-agent-integration`。
 - Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、trace Web 入口：`test-agent-api`。
 - 启动、profile、migration、health、日志和运行装配：`test-agent-app`。

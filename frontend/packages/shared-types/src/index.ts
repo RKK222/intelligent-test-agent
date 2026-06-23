@@ -530,6 +530,60 @@ export type ApplicationWorkspaceConfig = {
   updatedAt: string;
 };
 
+export type ManagedApplication = ApplicationDefinition;
+
+export type ManagedWorkspaceRuntime = Workspace;
+
+export type ApplicationWorkspaceTemplate = ApplicationWorkspaceConfig;
+
+export type ApplicationWorkspaceVersion = {
+  versionId: string;
+  applicationWorkspaceId: string;
+  appId: string;
+  repositoryId: string;
+  version: string;
+  branch: string;
+  repoRootPath: string;
+  workspaceRootPath: string;
+  runtimeWorkspace: ManagedWorkspaceRuntime;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PersonalWorkspace = {
+  personalWorkspaceId: string;
+  versionId: string;
+  appId: string;
+  applicationWorkspaceId: string;
+  workspaceName: string;
+  branch: string;
+  repoRootPath: string;
+  workspaceRootPath: string;
+  runtimeWorkspace: ManagedWorkspaceRuntime;
+  baseCommit: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type WorkspaceDiffFile = {
+  path: string;
+  status: string;
+  conflict: boolean;
+};
+
+export type WorkspaceDiff = {
+  files: WorkspaceDiffFile[];
+};
+
+export type WorkspaceSyncResult = {
+  syncRecordId: string;
+  status: string;
+  files: string[];
+  force: boolean;
+};
+
 export type SshKeyMetadata = {
   sshKeyId: string;
   name: string;
@@ -562,4 +616,18 @@ export type RenameApplicationWorkspacePayload = {
 export type AddSshKeyPayload = {
   name: string;
   privateKey: string;
+};
+
+export type CreateWorkspaceVersionPayload = {
+  version: string;
+  branch?: string;
+};
+
+export type CreatePersonalWorkspacePayload = {
+  workspaceName: string;
+};
+
+export type SyncWorkspacePayload = {
+  files: string[];
+  force?: boolean;
 };

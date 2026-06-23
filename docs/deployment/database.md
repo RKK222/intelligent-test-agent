@@ -207,3 +207,29 @@
 - 迁移按 `users.username = '888888888'` 和 `dictionaries(ROLE, SUPER_ADMIN)` 查找数据，不硬编码数据库自增主键。
 - 插入前检查 `user_roles(user_id, dict_id)` 是否已存在，重复执行语义下不会产生重复角色关系。
 - 已登录旧 Token 不会自动带上新角色，需要重新登录后 `/api/auth/me.roles` 才会返回 `SUPER_ADMIN`。
+
+## V9 应用版本工作区与个人工作区表
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V9__create_managed_workspace_tables.sql` 创建托管工作区运行配置表：
+
+| 表 | 说明 |
+|---|---|
+| `application_workspace_versions` | 应用工作空间模板的版本实例，记录版本、实际分支、物理仓库目录、opencode 工作目录和关联运行态 `workspaces.workspace_id`。 |
+| `personal_workspaces` | 用户基于应用版本工作区派生的 git worktree，记录展示名称、私有分支、物理目录、base commit 和关联运行态 Workspace。 |
+| `user_global_workspace_preferences` | 用户全局最近使用的托管运行态 Workspace。 |
+| `user_application_workspace_preferences` | 用户在某应用下最近使用的托管运行态 Workspace。 |
+| `workspace_sync_records` | 个人工作区与应用版本工作区同步审计，记录方向、文件列表、是否强推、结果和 traceId。 |
+
+关键约束：
+
+- `application_workspace_versions(application_workspace_id, version)` 唯一，保证同一模板同一日期版本只有一条记录。
+- `application_workspace_versions.runtime_workspace_id` 唯一并引用 `workspaces.workspace_id`。
+- `personal_workspaces(app_workspace_version_id, user_id, workspace_name)` 唯一，保证同一用户在同一应用版本下个人空间名称不重复。
+- 最近使用偏好按全局 `user_id` 唯一、按应用 `(user_id, app_id)` 唯一。
+- 同步审计中的源/目标 workspace 均引用运行态 `workspaces`。
+
+兼容策略：
+
+- 不迁移、不删除既有手动 `workspaces`、sessions、runs；新增托管工作区只是在创建版本或个人空间时新增运行态 `workspaces` 记录。
+- `application_workspaces.branch` 继续保留作为模板创建和目录选择兼容字段；版本实际分支以 `application_workspace_versions.branch` 为准。
+- 物理路径默认由业务配置 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT` 决定，数据库只记录最终路径，不负责创建或清理目录。

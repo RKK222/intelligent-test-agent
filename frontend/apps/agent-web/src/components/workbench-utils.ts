@@ -51,18 +51,40 @@ export function diffFilesFromPayload(payload: Record<string, unknown>): RunDiffF
 // - 新 path 追加到尾部。
 // 用于解决后端 `edit` 工具的 `diff.proposed` 事件只携带"本工具刚编辑的单个文件"、
 // 多次事件直接替换会导致前面改过的文件被丢失的问题。
+//
+// 去重 key 用 normalizePathKey 统一：把 Windows 反斜杠、git a/ b/ 前缀、
+// 末尾斜杠等都折叠成同一种形态，避免 "D:\\workspace\\vue\\src\\App.vue" 和
+// "src/App.vue" 被误当成两个文件。
 export function mergeDiffFiles(current: RunDiffFile[], incoming: RunDiffFile[]): RunDiffFile[] {
   if (incoming.length === 0) {
     return current;
   }
   const map = new Map<string, RunDiffFile>();
   for (const file of current) {
-    if (file.path) map.set(file.path, file);
+    const key = normalizePathKey(file.path);
+    if (key) map.set(key, file);
   }
   for (const file of incoming) {
-    if (file.path) map.set(file.path, file);
+    const key = normalizePathKey(file.path);
+    if (key) map.set(key, file);
   }
   return Array.from(map.values());
+}
+
+// 把任意形态的文件路径归一化为 mergeDiffFiles / FigmaChatPanel 抽屉的去重 key：
+// - 去除 git diff 前缀 "a/" / "b/"
+// - 统一反斜杠为正斜杠
+// - 去除前导 "./"、尾部斜杠
+// - 折叠重复斜杠
+// 该函数无 workspace 上下文依赖（不在此处剥离 rootPath），仅负责形态归一化；
+// workspace 相对化交给 AgentWorkbench 的 normalizeWorkspacePath。
+export function normalizePathKey(raw: string | undefined): string {
+  if (!raw) return "";
+  let p = raw.replace(/^([ab])\//, "").replace(/\\/g, "/").trim();
+  while (p.startsWith("./")) p = p.slice(2);
+  p = p.replace(/\/+$/, "");
+  p = p.replace(/\/+/g, "/");
+  return p.toLowerCase();
 }
 
 // 已知会落盘的工具名集合，与 AgentWorkbench 中的 LIVE_WRITE_TOOLS 保持一致。

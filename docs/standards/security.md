@@ -41,6 +41,7 @@ Token 校验流程：
 5. 个人 Git SSH 私钥必须使用 AES-GCM 加密后落库，加密密钥来自 `TEST_AGENT_SSH_KEY_ENCRYPTION_KEY` 或 `test-agent.security.ssh-key-encryption-key`，要求为 Base64 编码的 16/24/32 字节 AES key；不得提供硬编码默认值。
 6. SSH key API 只能返回 `sshKeyId/name/fingerprint/createdAt` 元信息，禁止回显私钥明文或密文。指纹基于规范化私钥内容的 SHA-256 生成。
 7. Git SSH 远端命令只允许使用当前登录用户保存的唯一 SSH key。临时私钥文件必须设置最小可行权限并在命令结束后清理；Git 命令环境必须禁用交互式凭据提示。
+8. 应用版本工作区和个人工作区的 Git clone/worktree/diff/push 仍只允许使用当前登录用户保存的唯一 SSH key；不得回退到机器账号、部署用户默认 SSH key 或其他用户 key。托管根目录来自 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT`，磁盘目录已存在时只能在校验目标 origin URL 和分支匹配后接管，不得覆盖或删除未知目录。
 
 ## 日志脱敏
 

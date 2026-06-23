@@ -2,12 +2,13 @@
 
 ## 工程定位
 
-应用配置管理业务模块，承载应用定义只读消费、应用成员、应用与代码库关联、应用工作空间和个人 SSH key 管理。
+应用配置管理业务模块，承载应用定义只读消费、应用成员、应用与代码库关联、应用工作空间模板和个人 SSH key 管理。
 
 ## 边界
 
 - 不接入运行态 Workspace / Session / Run。
 - 不执行 clone、fetch 或启动会话；Git 目录读取只使用远端只读命令。
+- 不创建应用版本工作区或个人 worktree；这些运行编排属于 `test-agent-workspace-management`。
 - 不定义 HTTP Controller，API 入口放在 `test-agent-api`。
 - 不实现 JDBC，持久化由 `test-agent-persistence` 通过领域 repository 端口提供。
 
@@ -29,7 +30,7 @@
 ## 主要接口
 
 - `ConfigurationManagementApplicationService`：配置管理编排服务。
-- `SshKeyEncryptionService`：个人 SSH 私钥 AES-GCM 加解密和 SHA-256 指纹生成。
+- `SshKeyEncryptionService`：包装 common 模块的 SSH 私钥 AES-GCM 加解密和 SHA-256 指纹生成能力，保持配置管理业务入口稳定。
 - `ConfigurationManagementResponses`：对 API 层安全暴露的响应模型，不包含私钥明文或密文。
 
 ## 配置项

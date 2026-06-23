@@ -91,6 +91,27 @@ public final class RuntimeIdGenerator {
     }
 
     /**
+     * 生成应用版本工作区 ID，返回值固定使用 {@code awv_} 前缀。
+     */
+    public static String applicationWorkspaceVersionId() {
+        return prefixed("awv_");
+    }
+
+    /**
+     * 生成个人工作区 ID，返回值固定使用 {@code psw_} 前缀。
+     */
+    public static String personalWorkspaceId() {
+        return prefixed("psw_");
+    }
+
+    /**
+     * 生成工作区同步记录 ID，返回值固定使用 {@code sync_} 前缀。
+     */
+    public static String workspaceSyncRecordId() {
+        return prefixed("sync_");
+    }
+
+    /**
      * 按给定领域前缀拼接无横线 UUID；调用方必须传入已约定的稳定前缀。
      */
     private static String prefixed(String prefix) {

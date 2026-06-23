@@ -22,6 +22,8 @@ test-agent:
     enabled: ${TEST_AGENT_REDIS_ENABLED:false}
     host: ${TEST_AGENT_REDIS_HOST:}
     port: ${TEST_AGENT_REDIS_PORT:6379}
+  managed-workspace:
+    root: ${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}
   opencode:
     nodes:
       - id: ${TEST_AGENT_OPENCODE_NODE_ID:node_test_opencode}

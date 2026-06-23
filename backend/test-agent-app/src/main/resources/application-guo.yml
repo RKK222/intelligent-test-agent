@@ -31,6 +31,8 @@ test-agent:
     max-directory-entries: 1000
   workspace-picker:
     allowed-roots: "D:/workspace"
+  managed-workspace:
+    root: ${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}
   redis:
     enabled: true
     host: 127.0.0.1

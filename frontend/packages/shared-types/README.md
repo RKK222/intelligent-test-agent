@@ -12,6 +12,7 @@
 - `TodoItem` 保留旧 `text/status/priority` 字段，并可选承载 `title/description/summary/result/error/steps/updatedAt` 等对话框任务分解展示字段。
 - `CurrentUser`、`LoginResponse` 增加可选 `roles`，旧响应缺字段时按空角色兼容。
 - 定义应用配置管理 DTO：`ApplicationDefinition`、`ApplicationMember`、`CodeRepositoryConfig`、`ApplicationWorkspaceConfig`、`SshKeyMetadata` 和对应请求 payload。
+- 定义应用版本工作区 DTO：`ManagedApplication`、`ApplicationWorkspaceTemplate`、`ApplicationWorkspaceVersion`、`PersonalWorkspace`、`WorkspaceDiff`、`WorkspaceSyncResult` 和对应请求 payload。
 - 不引入运行时依赖。
 
 ## 禁止事项
