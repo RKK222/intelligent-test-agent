@@ -102,8 +102,7 @@ async function ensureMonacoEditor(path: string, content: string) {
       horizontal: "visible",
       verticalScrollbarSize: 6,
       horizontalScrollbarSize: 6,
-      useShadows: false,
-      arrows: { up: 0, down: 0, left: 0, right: 0 }
+      useShadows: false
     }
   });
   editor.value = inst;
@@ -285,6 +284,17 @@ onBeforeUnmount(() => {
     </div>
   </div>
   <div v-else class="flex h-full min-h-0 flex-col bg-[var(--ta-surface)]">
+    <div v-if="isMarkdown" class="ta-editor-toolbar">
+      <button
+        type="button"
+        class="ta-editor-toolbar-button"
+        :aria-label="showPreview ? '关闭预览' : '预览'"
+        :title="showPreview ? '关闭预览' : '预览'"
+        @click="showPreview = !showPreview"
+      >
+        {{ showPreview ? "关闭预览" : "预览" }}
+      </button>
+    </div>
     <!-- 编辑器主体始终保留同一个容器，避免 v-if 切换销毁 Monaco 已挂载的 DOM；
          Markdown 预览开启时在下方追加 sash + 预览，形成上下分屏 -->
     <div ref="splitContainerEl" class="flex min-h-0 flex-1 flex-col">
@@ -315,6 +325,32 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.ta-editor-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  height: 32px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--ta-border);
+  background: var(--ta-tabbar);
+}
+
+.ta-editor-toolbar-button {
+  height: 24px;
+  border: 1px solid var(--ta-border);
+  border-radius: 6px;
+  background: var(--ta-surface);
+  color: var(--ta-text);
+  font-size: 12px;
+  line-height: 20px;
+  padding: 0 8px;
+}
+
+.ta-editor-toolbar-button:hover {
+  background: var(--ta-hover);
+}
+
 /* Monaco 编辑器内部滚动条细线化（同时影响水平与竖向） */
 :deep(.monaco-scrollable-element)::-webkit-scrollbar {
   width: 6px;

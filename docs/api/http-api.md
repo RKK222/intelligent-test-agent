@@ -44,6 +44,9 @@
 | `workspace-management` | `/api/internal/platform/workspace-management/workspaces` | `/api/workspaces` |
 | `workspace-management` | `/api/internal/platform/workspace-management/workspace-directories` | `/api/workspace-directories` |
 | `workspace-management` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/content` | `/api/workspaces/{workspaceId}/files/content` |
+| `workspace-management` | `/api/internal/platform/workspace-management/applications` | 无旧 URL |
+| `workspace-management` | `/api/internal/platform/workspace-management/applications/{appId}/workspace-templates/{templateId}/versions` | 无旧 URL |
+| `workspace-management` | `/api/internal/platform/workspace-management/workspace-versions/{versionId}/personal-workspaces` | 无旧 URL |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/sessions` | `/api/sessions` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/runs` | `/api/runs` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/runs/{runId}/events` | `/api/runs/{runId}/events` |
@@ -422,6 +425,97 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 ```
 
 `GET /files/status` 返回 `FileStatusResponse`：`path`、`exists`、`directory`、`size`、`lastModifiedAt`。
+
+### 应用版本工作区 API
+
+Base URL：`/api/internal/platform/workspace-management`。该能力把配置管理中的应用工作空间模板落为物理 Git 目录，并同步创建运行态 `workspaces` 记录；`workspaces.root_path` 即后续传给 opencode 的工作目录。旧的手动目录注册 `/api/workspaces` 保持兼容。
+
+鉴权：
+
+- 所有接口要求已登录用户。
+- 应用、模板、版本、切换最近使用等应用相关接口要求当前用户是 `application_members` 中的有效成员；不区分管理员和普通成员。
+- 个人工作区接口要求当前用户是个人工作区拥有者且属于对应应用。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/applications` | 查询当前用户加入的启用应用。 |
+| `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间模板，即配置表 `application_workspaces`。 |
+| `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区。 |
+| `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
+| `GET` | `/workspace-versions/{versionId}/personal-workspaces` | 查询当前用户基于某版本派生的个人工作区。 |
+| `POST` | `/workspace-versions/{versionId}/personal-workspaces` | 基于应用版本工作区创建 git worktree 个人工作区。 |
+| `GET` | `/recent-workspace` | 查询当前用户全局最近使用的托管运行态 Workspace。 |
+| `GET` | `/applications/{appId}/recent-workspace` | 查询当前用户在指定应用下最近使用的托管运行态 Workspace。 |
+| `POST` | `/workspaces/{workspaceId}/recent` | 标记某个托管运行态 Workspace 为最近使用。 |
+| `GET` | `/personal-workspaces/{personalWorkspaceId}/diff` | 查询个人工作区与应用版本工作区目录差异。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-to-application` | 将所选个人工作区文件同步到应用版本工作区，提交并 push。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-from-application` | 将所选应用版本工作区文件同步到个人工作区。 |
+
+`POST /applications/{appId}/workspace-templates/{templateId}/versions` 请求体：
+
+```json
+{
+  "version": "20260707",
+  "branch": "feature_testagent_20260707"
+}
+```
+
+规则：
+
+- `version` 只支持 `yyyyMMdd`。
+- 标准代码库分支固定为 `feature_testagent_{version}`，后端会用当前用户 SSH key 先查分支；不存在时返回 `CONFLICT`。
+- 非标准代码库必须传入 `branch`，后端按该分支 clone。
+- 物理目录默认在 `${user.home}/test-agent-data` 下，可通过 `test-agent.managed-workspace.root` 或 `TEST_AGENT_MANAGED_WORKSPACE_ROOT` 覆盖。
+- 应用版本工作区物理仓库目录为 `appworkspace/{version}/{repositoryId}`，opencode root 为仓库目录下模板 `directoryPath`。
+- 磁盘目录已存在时，后端校验 origin URL 和当前分支，匹配则接管，不覆盖、不删除；不匹配返回 `CONFLICT`。
+- SSH Git 操作只使用当前登录用户保存的唯一 SSH key；HTTPS 不额外支持账号或 token。
+
+`ApplicationWorkspaceVersionResponse`：
+
+```json
+{
+  "versionId": "awv_...",
+  "applicationWorkspaceId": "awp_...",
+  "appId": "app_...",
+  "repositoryId": "repo_...",
+  "version": "20260707",
+  "branch": "feature_testagent_20260707",
+  "repoRootPath": "/data/appworkspace/20260707/repo_...",
+  "workspaceRootPath": "/data/appworkspace/20260707/repo_.../F-GCMS/workspace",
+  "runtimeWorkspace": {
+    "workspaceId": "wrk_...",
+    "name": "F-GCMS-20260707",
+    "rootPath": "/data/appworkspace/20260707/repo_.../F-GCMS/workspace",
+    "status": "ACTIVE",
+    "createdAt": "2026-06-23T00:00:00Z",
+    "updatedAt": "2026-06-23T00:00:00Z"
+  },
+  "status": "ACTIVE",
+  "createdAt": "2026-06-23T00:00:00Z",
+  "updatedAt": "2026-06-23T00:00:00Z"
+}
+```
+
+`POST /workspace-versions/{versionId}/personal-workspaces` 请求体：
+
+```json
+{
+  "workspaceName": "私人空间"
+}
+```
+
+个人工作区基于应用版本仓库创建 git worktree，分支名为 `{应用版本分支}_{统一认证号}_{personalWorkspaceId}`，物理路径使用系统 ID 隔离，前端只展示 `workspaceName`。同一用户在同一应用版本下 `workspaceName` 唯一。
+
+同步请求体：
+
+```json
+{
+  "files": ["src/App.java"],
+  "force": false
+}
+```
+
+`sync-to-application.force=true` 时使用 `--force-with-lease` 覆盖远端；失败、冲突或认证问题使用统一 Git/冲突错误码返回，并记录同步审计。应用版本工作区与个人工作区同步不新增 RunEvent/SSE 事件。
 
 ### Session API
 

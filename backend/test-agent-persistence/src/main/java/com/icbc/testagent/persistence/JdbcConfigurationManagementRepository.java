@@ -106,6 +106,34 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
     }
 
     @Override
+    public List<ApplicationDefinition> findApplicationsByMember(UserId userId) {
+        return jdbcClient.sql("""
+                        select a.app_id, a.app_name, a.enabled, a.created_at, a.updated_at
+                        from applications a
+                        join application_members m on m.app_id = a.app_id
+                        where m.user_id = :userId and m.deleted_at is null and a.enabled = true
+                        order by a.app_name, a.app_id
+                        """)
+                .param("userId", userId.value())
+                .query(applicationMapper)
+                .list();
+    }
+
+    @Override
+    public boolean isActiveMember(ApplicationId appId, UserId userId) {
+        Long count = jdbcClient.sql("""
+                        select count(*)
+                        from application_members
+                        where app_id = :appId and user_id = :userId and deleted_at is null
+                        """)
+                .param("appId", appId.value())
+                .param("userId", userId.value())
+                .query(Long.class)
+                .single();
+        return count > 0;
+    }
+
+    @Override
     public List<ApplicationMember> findActiveMembers(ApplicationId appId) {
         return jdbcClient.sql("""
                         select app_id, user_id, created_at, updated_at, deleted_at

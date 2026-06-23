@@ -5,7 +5,7 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
 
   await gotoWorkbench(page);
 
-  await expect(page.getByText("TestAgent IDE")).toBeVisible();
+  await expect(page.getByText("MIMO测试智能体")).toBeVisible();
   await expect(page.getByRole("button", { name: "打开运行与终端" })).toBeVisible();
   await page.getByRole("button", { name: /tests/ }).click();
   await page.getByRole("button", { name: /checkout.spec.ts/ }).click();
@@ -190,7 +190,6 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
   await page.getByTitle("引用 hunk").click();
   await expect(page.getByRole("main").getByText("已引用当前 hunk")).toBeVisible();
 
-  await expect(page.getByRole("button", { name: "终端", exact: true })).toBeHidden();
   await page.getByRole("button", { name: "打开运行与终端" }).click();
   const bottomDrawer = page.getByRole("region", { name: "运行与终端" });
   await expect(bottomDrawer).toBeVisible();
@@ -334,8 +333,43 @@ async function mockBackendApi(
         return;
       }
     }
+    if (url.pathname.startsWith("/api/internal/platform/workspace-management")) {
+      if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/applications") {
+        await route.fulfill(json([{ appId: "app_gcms", appName: "F-GCMS", enabled: true }]));
+        return;
+      }
+      if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/recent-workspace") {
+        await route.fulfill(json(null));
+        return;
+      }
+      if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/applications/app_gcms/recent-workspace") {
+        await route.fulfill(json(null));
+        return;
+      }
+      if (method === "POST" && /^\/api\/internal\/platform\/workspace-management\/workspaces\/[^/]+\/recent$/.test(url.pathname)) {
+        await route.fulfill(json(null));
+        return;
+      }
+      if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates") {
+        await route.fulfill(json([]));
+        return;
+      }
+      if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/applications\/app_gcms\/workspace-templates\/[^/]+\/versions$/.test(url.pathname)) {
+        await route.fulfill(json([]));
+        return;
+      }
+      if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/workspace-versions\/[^/]+\/personal-workspaces$/.test(url.pathname)) {
+        await route.fulfill(json([]));
+        return;
+      }
+    }
     if (method === "GET" && url.pathname === "/api/workspaces") {
       await route.fulfill(json(pageOf(workspaceItems)));
+      return;
+    }
+    if (method === "GET" && /^\/api\/workspaces\/[^/]+$/.test(url.pathname)) {
+      const workspaceId = url.pathname.match(/\/api\/workspaces\/([^/]+)$/)?.[1];
+      await route.fulfill(json(workspaceItems.find((item) => item.workspaceId === workspaceId) ?? workspace()));
       return;
     }
     if (method === "POST" && url.pathname === "/api/workspaces") {

@@ -2,17 +2,21 @@
 import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
-import { createBackendApiClient } from "@test-agent/backend-api";
+import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api";
 import { DiffViewer } from "@test-agent/diff-viewer";
 import { CodeEditor, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents } from "@test-agent/event-stream-client";
-import { Bell, Code2, GitBranch, MessageSquare, TerminalSquare } from "lucide-vue-next";
+import { Bell, Code2, GitBranch, MessageSquare, Settings, TerminalSquare } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
+  ApplicationWorkspaceTemplate,
+  ApplicationWorkspaceVersion,
   FileTreeEntry,
+  ManagedApplication,
   MessagePart,
   PageResponse,
+  PersonalWorkspace,
   PromptPart,
   Run,
   RunDiffFile,
@@ -27,11 +31,12 @@ import { TerminalPanel } from "@test-agent/terminal";
 import { TestRunnerPanel } from "@test-agent/test-runner";
 import { type Feedback } from "@test-agent/ui-kit";
 import { useWorkbenchStore } from "@test-agent/workbench-shell";
+import { useAuthStore } from "../stores/authStore";
 import FigmaShell from "./FigmaShell.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
-import SettingsDialog from "./settings/SettingsDialog.vue";
+import SettingsDialog from "./SettingsDialog.vue";
 import WorkspaceBootstrap from "./WorkspaceBootstrap.vue";
 import WorkspaceDirectoryPickerDialog from "./WorkspaceDirectoryPickerDialog.vue";
 import { notifyFeedback } from "./notify";
@@ -60,6 +65,10 @@ const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0
 const api = createBackendApiClient({ baseUrl: apiBaseUrl });
 const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
+const authStore = useAuthStore();
+
+// 设置弹窗依赖当前用户角色；工作台直达时需要主动补齐 /api/auth/me。
+void authStore.fetchCurrentUser(api);
 
 // 工作台状态
 const selectedWorkspaceId = ref<string | undefined>(undefined);
@@ -86,7 +95,18 @@ const editorSelection = ref<EditorSelectionContext | undefined>(undefined);
 const bottomMode = ref<"run" | "terminal">("run");
 const bottomDrawerOpen = ref(false);
 const rightPanelOpen = ref(true);
-const selectedAppId = ref("fgcms-psn");
+const selectedAppId = ref<string | undefined>(undefined);
+const selectedTemplateId = ref<string | undefined>(undefined);
+const selectedVersionId = ref<string | undefined>(undefined);
+const selectedPersonalWorkspaceId = ref<string | undefined>(undefined);
+const versionDraft = ref("");
+const versionBranchDraft = ref("");
+const personalWorkspaceName = ref("");
+const managedWorkspaceNotice = ref("");
+const pendingApplicationWorkspaceFallback = ref(false);
+const readonlySessionReason = ref("");
+const modelPickerOpen = ref(false);
+const modelSearch = ref("");
 const chatTitle = ref("生成测试案例");
 // 任务消耗展示：duration 取 chatStartedAt 实时计算；tokens 从助手消息的 step-finish part
 // 累计（opencode 每轮 step 结束会上报 tokens.total）；thought for 累计 reasoning part 的
@@ -132,6 +152,49 @@ const workspaces = computed(() => workspacesQuery.data.value?.items ?? []);
 const selectedWorkspace = computed(() => workspaces.value.find((item) => item.workspaceId === selectedWorkspaceId.value) ?? workspaces.value[0]);
 const selectedWorkspaceIdRef = computed(() => selectedWorkspace.value?.workspaceId);
 const sessionSearchTrim = computed(() => sessionSearch.value.trim());
+
+const managedApplicationsQuery = useQuery({
+  queryKey: ["managed-workspace", "applications"],
+  queryFn: () => api.listManagedApplications(),
+  retry: false
+});
+const managedApplications = computed<ManagedApplication[]>(() => managedApplicationsQuery.data.value ?? []);
+const shellApps = computed(() =>
+  managedApplications.value.map((app) => ({ id: app.appId, name: app.appName, description: app.enabled ? "已启用" : "已停用" }))
+);
+const selectedManagedApplication = computed(() => managedApplications.value.find((app) => app.appId === selectedAppId.value));
+
+const workspaceTemplatesQuery = useQuery({
+  queryKey: ["managed-workspace", "templates", selectedAppId],
+  enabled: () => Boolean(selectedAppId.value),
+  queryFn: () => api.listWorkspaceTemplates(selectedAppId.value!)
+});
+const workspaceTemplates = computed<ApplicationWorkspaceTemplate[]>(() => workspaceTemplatesQuery.data.value ?? []);
+const selectedTemplate = computed(() => workspaceTemplates.value.find((template) => template.workspaceId === selectedTemplateId.value));
+
+const workspaceVersionsQuery = useQuery({
+  queryKey: ["managed-workspace", "versions", selectedAppId, selectedTemplateId],
+  enabled: () => Boolean(selectedAppId.value && selectedTemplateId.value),
+  queryFn: () => api.listWorkspaceVersions(selectedAppId.value!, selectedTemplateId.value!)
+});
+const workspaceVersions = computed<ApplicationWorkspaceVersion[]>(() => workspaceVersionsQuery.data.value ?? []);
+const selectedVersion = computed(() => workspaceVersions.value.find((version) => version.versionId === selectedVersionId.value));
+
+const personalWorkspacesQuery = useQuery({
+  queryKey: ["managed-workspace", "personal", selectedVersionId],
+  enabled: () => Boolean(selectedVersionId.value),
+  queryFn: () => api.listPersonalWorkspaces(selectedVersionId.value!)
+});
+const personalWorkspaces = computed<PersonalWorkspace[]>(() => personalWorkspacesQuery.data.value ?? []);
+const selectedPersonalWorkspace = computed(() =>
+  personalWorkspaces.value.find((workspace) => workspace.personalWorkspaceId === selectedPersonalWorkspaceId.value)
+);
+
+const recentManagedWorkspaceQuery = useQuery({
+  queryKey: ["managed-workspace", "recent"],
+  queryFn: () => api.getRecentManagedWorkspace(),
+  retry: false
+});
 
 const sessionsQuery = useQuery({
   queryKey: ["sessions", selectedWorkspaceIdRef, sessionSearchTrim],
@@ -204,6 +267,34 @@ const vcsStatusData = computed(() => vcsStatusQuery.data.value);
 const lspStatusData = computed(() => lspStatusQuery.data.value);
 const mcpStatusData = computed(() => mcpStatusQuery.data.value);
 const sessionsItems = computed(() => sessionsQuery.data.value?.items ?? []);
+const selectedModelInfo = computed(() => {
+  const selected = modelIdOnly(selectedModel.value);
+  return models.value.find((model) => modelValue(model) === selectedModel.value || model.id === selected);
+});
+const selectedModelLabel = computed(() => selectedModelInfo.value?.name ?? selectedModel.value ?? "未选择模型");
+const modelGroups = computed(() => {
+  const keyword = modelSearch.value.trim().toLowerCase();
+  const providerNames = new Map(providers.value.map((provider) => [provider.providerId, provider.name]));
+  const groups = new Map<string, { providerId: string; providerName: string; models: typeof models.value }>();
+  models.value.forEach((model) => {
+    const haystack = `${model.name} ${model.id} ${model.providerId ?? ""}`.toLowerCase();
+    if (keyword && !haystack.includes(keyword)) {
+      return;
+    }
+    const providerId = model.providerId ?? "unknown";
+    const existing = groups.get(providerId);
+    if (existing) {
+      existing.models.push(model);
+      return;
+    }
+    groups.set(providerId, {
+      providerId,
+      providerName: providerNames.get(providerId) ?? providerId,
+      models: [model]
+    });
+  });
+  return Array.from(groups.values()).filter((group) => group.models.length > 0);
+});
 
 const historyList = computed(() => historyItems(run.value, sessionsItems.value));
 const resourcesList = computed(() => runtimeResources(mcpResourcesData.value, activeTab.value));
@@ -223,13 +314,71 @@ const vcsBranches = computed(() => {
   if (!current) return [];
   return [{ name: current, isCurrent: true }];
 });
+const managedWorkspaceHint = computed(() => {
+  if (managedApplicationsQuery.isLoading.value) return "正在加载应用列表...";
+  if (!selectedManagedApplication.value) return managedApplications.value.length === 0 ? "当前用户未加入任何应用。" : "";
+  if (workspaceTemplatesQuery.isLoading.value) return "正在加载应用工作空间...";
+  if (workspaceTemplates.value.length === 0) return "请联系应用管理员配置应用工作空间";
+  if (workspaceVersionsQuery.isLoading.value) return "正在加载工作空间版本...";
+  if (selectedTemplate.value && workspaceVersions.value.length === 0) return "请在工作空间切换中新增工作空间版本";
+  return managedWorkspaceNotice.value;
+});
 
 function handleChangeBranch(branch: string) {
-  // TODO: 对接后端切换分支接口
+  // 当前分支切换由应用版本工作区控制，这里只保留编辑器分支选择的即时反馈。
   feedback.value = { kind: "info", title: "已切换分支", description: `当前分支：${branch}` };
 }
 
+function selectRuntimeModel(model: typeof models.value[number]) {
+  if (model.providerId) {
+    selectedProvider.value = model.providerId;
+  }
+  selectedModel.value = modelValue(model);
+  modelPickerOpen.value = false;
+}
+
 // ===== 默认值与联动 effect =====
+watch(managedApplications, (apps) => {
+  if (!selectedAppId.value && apps[0]?.appId) {
+    selectedAppId.value = apps[0].appId;
+  }
+});
+watch(recentManagedWorkspaceQuery.data, (workspace) => {
+  if (workspace && !selectedWorkspaceId.value) {
+    void switchWorkspace(workspace);
+  } else if (!workspace && !selectedWorkspaceId.value) {
+    pendingApplicationWorkspaceFallback.value = true;
+  }
+});
+watch(selectedAppId, () => {
+  selectedTemplateId.value = undefined;
+  selectedVersionId.value = undefined;
+  selectedPersonalWorkspaceId.value = undefined;
+  managedWorkspaceNotice.value = "";
+});
+watch(workspaceTemplates, (templates) => {
+  if (!selectedTemplateId.value || !templates.some((template) => template.workspaceId === selectedTemplateId.value)) {
+    selectedTemplateId.value = templates[0]?.workspaceId;
+  }
+});
+watch(selectedTemplateId, () => {
+  selectedVersionId.value = undefined;
+  selectedPersonalWorkspaceId.value = undefined;
+});
+watch(workspaceVersions, (versions) => {
+  if (!selectedVersionId.value || !versions.some((version) => version.versionId === selectedVersionId.value)) {
+    selectedVersionId.value = versions[0]?.versionId;
+  }
+  if (pendingApplicationWorkspaceFallback.value && versions[0]) {
+    pendingApplicationWorkspaceFallback.value = false;
+    void switchManagedVersion(versions[0].versionId);
+  }
+});
+watch(personalWorkspaces, (workspaces) => {
+  if (selectedPersonalWorkspaceId.value && !workspaces.some((workspace) => workspace.personalWorkspaceId === selectedPersonalWorkspaceId.value)) {
+    selectedPersonalWorkspaceId.value = undefined;
+  }
+});
 watch(selectedWorkspace, (sw) => {
   if (!selectedWorkspaceId.value && sw?.workspaceId) {
     selectedWorkspaceId.value = sw.workspaceId;
@@ -330,6 +479,51 @@ const createWorkspaceMutation = useMutation({
   },
   onError: (error) => {
     feedback.value = errorFeedback("创建 Workspace 失败", error);
+  }
+});
+
+const createWorkspaceVersionMutation = useMutation({
+  mutationFn: async () => {
+    if (!selectedAppId.value || !selectedTemplateId.value) {
+      throw new Error("请先选择应用工作空间");
+    }
+    return api.createWorkspaceVersion(selectedAppId.value, selectedTemplateId.value, {
+      version: normalizeDateVersion(versionDraft.value),
+      branch: versionBranchDraft.value.trim() || undefined
+    });
+  },
+  onSuccess: async (version) => {
+    versionDraft.value = "";
+    versionBranchDraft.value = "";
+    selectedVersionId.value = version.versionId;
+    selectedPersonalWorkspaceId.value = undefined;
+    await switchWorkspace(version.runtimeWorkspace);
+    await api.markRecentManagedWorkspace(version.runtimeWorkspace.workspaceId);
+    void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "versions"] });
+    feedback.value = { kind: "success", title: "已创建并切换工作空间版本", description: version.version };
+  },
+  onError: (error) => {
+    feedback.value = errorFeedback("创建工作空间版本失败", error);
+  }
+});
+
+const createPersonalWorkspaceMutation = useMutation({
+  mutationFn: async () => {
+    if (!selectedVersionId.value) {
+      throw new Error("请先选择应用工作空间版本");
+    }
+    return api.createPersonalWorkspace(selectedVersionId.value, { workspaceName: personalWorkspaceName.value.trim() });
+  },
+  onSuccess: async (workspace) => {
+    personalWorkspaceName.value = "";
+    selectedPersonalWorkspaceId.value = workspace.personalWorkspaceId;
+    await switchWorkspace(workspace.runtimeWorkspace);
+    await api.markRecentManagedWorkspace(workspace.runtimeWorkspace.workspaceId);
+    void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "personal"] });
+    feedback.value = { kind: "success", title: "已创建并切换个人工作区", description: workspace.workspaceName };
+  },
+  onError: (error) => {
+    feedback.value = errorFeedback("创建个人工作区失败", error);
   }
 });
 
@@ -655,6 +849,7 @@ function resetWorkspaceState() {
   followUpQueue.value = [];
   diffContextParts.value = [];
   editorSelection.value = undefined;
+  readonlySessionReason.value = "";
   liveFollowedParts.value = new Set();
   selectedAgent.value = "";
   selectedProvider.value = "";
@@ -692,6 +887,10 @@ function workspaceNameFromPath(path: string) {
   return path.split(/[\\/]+/).filter(Boolean).at(-1) ?? "Workspace";
 }
 
+function normalizeDateVersion(value: string) {
+  return value.trim().replaceAll("-", "");
+}
+
 async function loadWorkspaceDirectories(path?: string) {
   directoryPickerLoading.value = true;
   try {
@@ -716,6 +915,110 @@ async function switchWorkspace(workspace: Workspace) {
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   void queryClient.invalidateQueries({ queryKey: ["runtime"] });
   await loadDirectory("", workspace.workspaceId);
+}
+
+async function handleSelectApp(appId: string) {
+  selectedAppId.value = appId;
+  managedWorkspaceNotice.value = "";
+  pendingApplicationWorkspaceFallback.value = false;
+  try {
+    const recent = await api.getRecentManagedWorkspaceForApplication(appId);
+    if (recent) {
+      await switchWorkspace(recent);
+      return;
+    }
+    pendingApplicationWorkspaceFallback.value = true;
+    feedback.value = { kind: "info", title: "已切换应用", description: "请选择或新增工作空间版本" };
+  } catch (error) {
+    feedback.value = errorFeedback("切换应用失败", error);
+  }
+}
+
+async function switchManagedVersion(versionId: string) {
+  const version = workspaceVersions.value.find((item) => item.versionId === versionId);
+  if (!version) {
+    return;
+  }
+  selectedVersionId.value = version.versionId;
+  selectedPersonalWorkspaceId.value = undefined;
+  await switchWorkspace(version.runtimeWorkspace);
+  await api.markRecentManagedWorkspace(version.runtimeWorkspace.workspaceId);
+}
+
+async function switchPersonalWorkspace(personalWorkspaceId: string) {
+  const workspace = personalWorkspaces.value.find((item) => item.personalWorkspaceId === personalWorkspaceId);
+  if (!workspace) {
+    return;
+  }
+  selectedPersonalWorkspaceId.value = workspace.personalWorkspaceId;
+  await switchWorkspace(workspace.runtimeWorkspace);
+  await api.markRecentManagedWorkspace(workspace.runtimeWorkspace.workspaceId);
+  await loadPersonalDiff(workspace.personalWorkspaceId, "application-to-personal");
+}
+
+async function loadPersonalDiff(personalWorkspaceId = selectedPersonalWorkspaceId.value, direction: "preview" | "application-to-personal" = "preview") {
+  if (!personalWorkspaceId) {
+    feedback.value = { kind: "info", title: "请先选择个人工作区" };
+    return [];
+  }
+  try {
+    const diff = await api.diffPersonalWorkspace(personalWorkspaceId);
+    diffFiles.value = diff.files.map((file) => ({
+      path: file.path,
+      status: file.conflict ? `${file.status} conflict` : file.status,
+      patch: "",
+      additions: file.status === "added" ? 1 : 0,
+      deletions: file.status === "deleted" ? 1 : 0
+    }));
+    diffSource.value = "vcs";
+    centerMode.value = "diff";
+    workbench.setSelectedDiffPath(diff.files[0]?.path);
+    if (direction === "application-to-personal" && diff.files.length > 0) {
+      feedback.value = { kind: "info", title: "个人工作区存在待同步差异", description: "可在工作区菜单选择同步方向" };
+    }
+    return diff.files.map((file) => file.path);
+  } catch (error) {
+    feedback.value = errorFeedback("加载个人工作区差异失败", error);
+    return [];
+  }
+}
+
+async function syncPersonalToApplication(force = false) {
+  if (!selectedPersonalWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "请先选择个人工作区" };
+    return;
+  }
+  const files = diffFiles.value.length > 0 ? diffFiles.value.map((file) => file.path) : await loadPersonalDiff();
+  if (files.length === 0) {
+    feedback.value = { kind: "info", title: "没有可同步的差异" };
+    return;
+  }
+  try {
+    const result = await api.syncPersonalToApplication(selectedPersonalWorkspaceId.value, { files, force });
+    feedback.value = { kind: "success", title: "已同步个人工作区到应用工作区", description: `${result.files.length} 个文件` };
+    await loadPersonalDiff();
+  } catch (error) {
+    feedback.value = errorFeedback(force ? "强推同步失败" : "同步个人工作区失败", error);
+  }
+}
+
+async function syncApplicationToPersonal() {
+  if (!selectedPersonalWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "请先选择个人工作区" };
+    return;
+  }
+  const files = diffFiles.value.length > 0 ? diffFiles.value.map((file) => file.path) : await loadPersonalDiff();
+  if (files.length === 0) {
+    feedback.value = { kind: "info", title: "没有可同步的差异" };
+    return;
+  }
+  try {
+    const result = await api.syncApplicationToPersonal(selectedPersonalWorkspaceId.value, { files });
+    feedback.value = { kind: "success", title: "已同步应用工作区到个人工作区", description: `${result.files.length} 个文件` };
+    await loadPersonalDiff();
+  } catch (error) {
+    feedback.value = errorFeedback("同步应用工作区失败", error);
+  }
 }
 
 async function selectWorkspaceDirectory(path: string) {
@@ -783,6 +1086,10 @@ function toggleDirectory(path: string) {
 }
 
 function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
+  if (readonlySessionReason.value) {
+    feedback.value = { kind: "info", title: "当前会话只读", description: readonlySessionReason.value };
+    return;
+  }
   const parts = buildPromptParts(prompt, activeTab.value, attachments, diffContextParts.value, editorSelection.value);
   const displayPrompt = prompt.trim() || promptFromParts(parts);
   lastPrompt.value = displayPrompt;
@@ -813,11 +1120,6 @@ function handleStopRun() {
     // 触发 taskUsage 重新计算（duration 从 live 切到 last）
     nowTick.value = Date.now();
   }
-}
-
-function handleSelectApp(appId: string) {
-  selectedAppId.value = appId;
-  // TODO: 后续对接后端接口获取应用详情
 }
 
 function handleRunEvent(event: RunEvent) {
@@ -1095,7 +1397,25 @@ async function requestNotifications() {
 
 async function switchSession(sessionId: string) {
   const selected = sessionsQuery.data.value?.items.find((item) => item.sessionId === sessionId) ?? (await api.getSession(sessionId));
+  let readonlyReason = "";
+  if (selected.workspaceId !== selectedWorkspaceIdRef.value) {
+    try {
+      const workspace = await api.getWorkspace(selected.workspaceId);
+      try {
+        await api.markRecentManagedWorkspace(selected.workspaceId);
+      } catch (error) {
+        if (error instanceof BackendApiError && error.code === "FORBIDDEN") {
+          throw error;
+        }
+      }
+      await switchWorkspace(workspace);
+    } catch (error) {
+      readonlyReason = "当前会话绑定的工作区不可用或无权限，已切换为只读。";
+      feedback.value = errorFeedback("切换 Session 工作区失败", error);
+    }
+  }
   session.value = selected;
+  readonlySessionReason.value = readonlyReason;
   try {
     const page = await api.listSessionMessages(sessionId, 1, 100);
     dispatchChat({ type: "reset", messages: messagesFromSessionMessages(page.items) });
@@ -1129,6 +1449,7 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
     :workspace-name="selectedWorkspace?.name"
     :bottom-open="bottomDrawerOpen"
     :show-right-panel="rightPanelOpen"
+    :apps="shellApps"
     :selected-app-id="selectedAppId"
     @toggle-left-panel="() => {}"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
@@ -1208,24 +1529,110 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
     </template>
 
     <template #files>
-      <FigmaFileExplorer
-        v-if="selectedWorkspace"
-        :workspace-name="selectedWorkspace.name"
-        :workspace-root-path="selectedWorkspace.rootPath"
-        :entries-by-directory="entriesByDirectory"
-        :expanded-directories="expandedDirectories"
-        :active-path="activePath"
-        :changed-files="diffFiles"
-        :loading-path="loadingPath"
-        :branches="vcsBranches"
-        :current-branch="vcsCurrentBranch"
-        @toggle-directory="toggleDirectory"
-        @open-file="openFile"
-        @open-diff="(path: string) => { workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
-        @refresh="loadDirectory('')"
-        @add-workspace="openWorkspaceDirectoryPicker"
-        @change-branch="handleChangeBranch"
-      />
+      <div v-if="selectedManagedApplication || selectedWorkspace" class="managed-workspace-layout">
+        <section class="managed-workspace-switcher" aria-label="应用工作区切换">
+          <div class="managed-workspace-row">
+            <label class="managed-workspace-label" for="managed-template">工作空间</label>
+            <select id="managed-template" v-model="selectedTemplateId" class="managed-workspace-select" @change="pendingApplicationWorkspaceFallback = true">
+              <option v-for="template in workspaceTemplates" :key="template.workspaceId" :value="template.workspaceId">
+                {{ template.workspaceName }}
+              </option>
+            </select>
+          </div>
+          <div class="managed-workspace-row">
+            <label class="managed-workspace-label" for="managed-version">版本</label>
+            <select
+              id="managed-version"
+              v-model="selectedVersionId"
+              class="managed-workspace-select"
+              :disabled="workspaceVersions.length === 0"
+              @change="selectedVersionId && switchManagedVersion(selectedVersionId)"
+            >
+              <option v-for="version in workspaceVersions" :key="version.versionId" :value="version.versionId">
+                {{ version.version }}
+              </option>
+            </select>
+          </div>
+          <div class="managed-workspace-create">
+            <input v-model="versionDraft" class="managed-workspace-input" type="date" aria-label="版本日期" />
+            <input v-model="versionBranchDraft" class="managed-workspace-input" type="text" placeholder="非标准库分支" aria-label="非标准库分支" />
+            <button
+              type="button"
+              class="managed-workspace-button"
+              :disabled="createWorkspaceVersionMutation.isPending.value || !selectedTemplateId || !versionDraft"
+              @click="createWorkspaceVersionMutation.mutate()"
+            >
+              新增版本
+            </button>
+          </div>
+          <div class="managed-workspace-row">
+            <label class="managed-workspace-label" for="personal-workspace">个人空间</label>
+            <select
+              id="personal-workspace"
+              v-model="selectedPersonalWorkspaceId"
+              class="managed-workspace-select"
+              :disabled="personalWorkspaces.length === 0"
+              @change="selectedPersonalWorkspaceId ? switchPersonalWorkspace(selectedPersonalWorkspaceId) : selectedVersionId && switchManagedVersion(selectedVersionId)"
+            >
+              <option value="">应用公共空间</option>
+              <option v-for="workspace in personalWorkspaces" :key="workspace.personalWorkspaceId" :value="workspace.personalWorkspaceId">
+                {{ workspace.workspaceName }}
+              </option>
+            </select>
+          </div>
+          <div class="managed-workspace-create">
+            <input v-model="personalWorkspaceName" class="managed-workspace-input" type="text" placeholder="个人空间名称" aria-label="个人空间名称" />
+            <button
+              type="button"
+              class="managed-workspace-button"
+              :disabled="createPersonalWorkspaceMutation.isPending.value || !selectedVersionId || !personalWorkspaceName.trim()"
+              @click="createPersonalWorkspaceMutation.mutate()"
+            >
+              新增个人空间
+            </button>
+          </div>
+          <div v-if="selectedPersonalWorkspaceId" class="managed-workspace-actions">
+            <button type="button" class="managed-workspace-link" @click="loadPersonalDiff()">查看差异</button>
+            <button type="button" class="managed-workspace-link" @click="syncApplicationToPersonal">应用同步到个人</button>
+            <button type="button" class="managed-workspace-link" @click="syncPersonalToApplication(false)">个人同步到应用</button>
+            <button type="button" class="managed-workspace-link danger" @click="syncPersonalToApplication(true)">强推覆盖应用</button>
+          </div>
+          <div v-if="managedWorkspaceHint" class="managed-workspace-hint">
+            <span>{{ managedWorkspaceHint }}</span>
+            <button
+              v-if="workspaceTemplates.length === 0 && selectedManagedApplication"
+              type="button"
+              class="managed-workspace-link"
+              @click="settingsOpen = true"
+            >
+              设置
+            </button>
+          </div>
+        </section>
+        <FigmaFileExplorer
+          v-if="selectedWorkspace"
+          class="managed-workspace-files"
+          :workspace-name="selectedWorkspace.name"
+          :workspace-root-path="selectedWorkspace.rootPath"
+          :entries-by-directory="entriesByDirectory"
+          :expanded-directories="expandedDirectories"
+          :active-path="activePath"
+          :changed-files="diffFiles"
+          :loading-path="loadingPath"
+          :branches="vcsBranches"
+          :current-branch="vcsCurrentBranch"
+          @toggle-directory="toggleDirectory"
+          @open-file="openFile"
+          @open-diff="(path: string) => { workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
+          @refresh="loadDirectory('')"
+          @add-workspace="openWorkspaceDirectoryPicker"
+          @change-branch="handleChangeBranch"
+        />
+        <div v-else class="managed-workspace-empty">
+          <p>当前应用尚未切换到可用工作区。</p>
+          <button type="button" class="managed-workspace-button" @click="openWorkspaceDirectoryPicker">选择本机目录</button>
+        </div>
+      </div>
       <WorkspaceBootstrap
         v-else
         :loading="createWorkspaceMutation.isPending.value"
@@ -1234,70 +1641,95 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
     </template>
 
     <template #editor>
-      <DiffViewer
-        v-if="centerMode === 'diff'"
-        :files="diffFiles"
-        :selected-path="selectedDiffPath"
-        :source="diffSource"
-        :view-mode="diffViewMode"
-        :accepting="acceptDiffMutation.isPending.value"
-        :rejecting="rejectDiffMutation.isPending.value"
-        :feedback="feedback"
-        @select-file="(path: string) => workbench.setSelectedDiffPath(path)"
-        @source-change="(source: 'run' | 'session' | 'vcs') => loadDiffSource(source)"
-        @view-mode-change="(mode: 'split' | 'unified') => (diffViewMode = mode)"
-        @refresh="loadDiffSource(diffSource)"
-        @accept-run="acceptDiffMutation.mutate()"
-        @reject-run="rejectDiffMutation.mutate()"
-        @current-file-feedback="onCurrentFileFeedback"
-        @use-hunk-context="onUseHunkContext"
-      />
-      <FigmaEditorArea
-        v-else
-        :tabs="tabs"
-        :active-path="activePath"
-        :breadcrumb-path="breadcrumbDisplay"
-        :branches="vcsBranches"
-        :current-branch="vcsCurrentBranch"
-        :write-path="activeTab?.path"
-        :updated-at="activeTab ? Date.now() / 1000 : undefined"
-        :dirty="!!activeTab && !activeTab.livePreview && activeTab.content !== activeTab.savedContent"
-        :readonly="!!activeTab?.readonly"
-        :saving="saveMutation.isPending.value"
-        @activate="(path: string) => workbench.setActivePath(path)"
-        @close="(path: string) => workbench.closeTab(path)"
-        @editor-action="() => {}"
-        @change-branch="handleChangeBranch"
-        @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
-      >
-        <CodeEditor
-          :path="activeTab?.path"
-          :content="activeTab?.content"
-          :dirty="activeTab && !activeTab.livePreview ? activeTab.content !== activeTab.savedContent : false"
-          :readonly="activeTab?.readonly"
-          :saving="saveMutation.isPending.value"
+      <main class="managed-editor-main">
+        <DiffViewer
+          v-if="centerMode === 'diff'"
+          :files="diffFiles"
+          :selected-path="selectedDiffPath"
+          :source="diffSource"
+          :view-mode="diffViewMode"
+          :accepting="acceptDiffMutation.isPending.value"
+          :rejecting="rejectDiffMutation.isPending.value"
           :feedback="feedback"
-          @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
-          @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
-          @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"
+          @select-file="(path: string) => workbench.setSelectedDiffPath(path)"
+          @source-change="(source: 'run' | 'session' | 'vcs') => loadDiffSource(source)"
+          @view-mode-change="(mode: 'split' | 'unified') => (diffViewMode = mode)"
+          @refresh="loadDiffSource(diffSource)"
+          @accept-run="acceptDiffMutation.mutate()"
+          @reject-run="rejectDiffMutation.mutate()"
+          @current-file-feedback="onCurrentFileFeedback"
+          @use-hunk-context="onUseHunkContext"
         />
-      </FigmaEditorArea>
+        <FigmaEditorArea
+          v-else
+          :tabs="tabs"
+          :active-path="activePath"
+          :breadcrumb-path="breadcrumbDisplay"
+          :branches="vcsBranches"
+          :current-branch="vcsCurrentBranch"
+          :write-path="activeTab?.path"
+          :updated-at="activeTab ? Date.now() / 1000 : undefined"
+          :dirty="!!activeTab && !activeTab.livePreview && activeTab.content !== activeTab.savedContent"
+          :readonly="!!activeTab?.readonly"
+          :saving="saveMutation.isPending.value"
+          @activate="(path: string) => workbench.setActivePath(path)"
+          @close="(path: string) => workbench.closeTab(path)"
+          @editor-action="() => {}"
+          @change-branch="handleChangeBranch"
+          @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
+        >
+          <CodeEditor
+            :path="activeTab?.path"
+            :content="activeTab?.content"
+            :dirty="activeTab && !activeTab.livePreview ? activeTab.content !== activeTab.savedContent : false"
+            :readonly="activeTab?.readonly"
+            :saving="saveMutation.isPending.value"
+            :feedback="feedback"
+            @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
+            @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
+            @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"
+          />
+        </FigmaEditorArea>
+      </main>
     </template>
 
     <template #chat>
-      <FigmaChatPanel
-        :messages="chatState.messages"
-        :running="runtimeBusy"
-        :title="chatTitle"
-        :file-changes="diffFiles"
-        :task-usage="taskUsage"
-        :history="historyList"
-        placeholder="Ask the AI agent..."
-        @send="(text: string) => handleSend(text)"
-        @stop="handleStopRun"
-        @new-conversation="() => handleSend('')"
-        @close="rightPanelOpen = false"
-      />
+      <div class="managed-chat-panel">
+        <div class="managed-chat-toolbar" aria-label="智能体运行设置">
+          <button type="button" class="managed-model-button" aria-label="选择模型" @click="modelPickerOpen = true">
+            <span>选择模型</span>
+            <strong>{{ selectedModelLabel }}</strong>
+          </button>
+          <button
+            type="button"
+            :class="['managed-live-button', liveTrack && 'is-active']"
+            :aria-pressed="liveTrack ? 'true' : 'false'"
+            @click="liveTrack = !liveTrack"
+          >
+            实时
+          </button>
+        </div>
+        <FigmaChatPanel
+          :messages="chatState.messages"
+          :running="runtimeBusy"
+          :title="chatTitle"
+          :file-changes="diffFiles"
+          :task-usage="taskUsage"
+          :history="historyList"
+          :readonly-reason="readonlySessionReason"
+          :permissions="chatState.permissions"
+          :questions="chatState.questions"
+          placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
+          @send="(text: string, attachments: ComposerAttachment[]) => handleSend(text, attachments)"
+          @stop="handleStopRun"
+          @new-conversation="() => handleSend('')"
+          @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
+          @reply-permission="(requestId: string, decision: 'once' | 'always' | 'reject') => replyPermissionMutation.mutate({ requestId, decision })"
+          @reply-question="(requestId: string, answers: unknown[]) => replyQuestionMutation.mutate({ requestId, answers })"
+          @reject-question="(requestId: string) => rejectQuestionMutation.mutate(requestId)"
+          @close="rightPanelOpen = false"
+        />
+      </div>
     </template>
 
     <template #bottom>
@@ -1332,8 +1764,8 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
             v-else
             :base-url="apiBaseUrl"
             :create-ticket="createTerminalTicket"
-            :disabled="!session"
-            disabled-reason="先发送一次 prompt 建立 Session 运行上下文后再连接终端"
+            :disabled="!session || !!readonlySessionReason"
+            :disabled-reason="readonlySessionReason || '先发送一次 prompt 建立 Session 运行上下文后再连接终端'"
           />
         </div>
       </div>
@@ -1349,5 +1781,305 @@ function openBottomDrawer(mode: "run" | "terminal" = bottomMode.value) {
     @select="selectWorkspaceDirectory"
   />
 
-  <SettingsDialog v-model="settingsOpen" />
+  <div v-if="modelPickerOpen" class="managed-model-dialog-backdrop">
+    <div class="managed-model-dialog" role="dialog" aria-modal="true" aria-label="模型选择">
+      <header class="managed-model-dialog-header">
+        <h2>模型选择</h2>
+        <button type="button" class="managed-model-close" aria-label="关闭模型选择" @click="modelPickerOpen = false">关闭</button>
+      </header>
+      <input v-model="modelSearch" class="managed-model-search" type="search" placeholder="搜索模型" aria-label="搜索模型" />
+      <div class="managed-model-list">
+        <section v-for="group in modelGroups" :key="group.providerId" class="managed-model-group">
+          <h3>{{ group.providerName }}</h3>
+          <button
+            v-for="model in group.models"
+            :key="modelValue(model)"
+            type="button"
+            role="option"
+            :aria-selected="modelValue(model) === selectedModel"
+            class="managed-model-option"
+            @click="selectRuntimeModel(model)"
+          >
+            <span>{{ model.name }}</span>
+            <small>{{ model.providerId }}/{{ model.id }}</small>
+          </button>
+        </section>
+        <div v-if="modelGroups.length === 0" class="managed-model-empty">暂无匹配模型</div>
+      </div>
+    </div>
+  </div>
+
+  <SettingsDialog :open="settingsOpen" :current-user="authStore.currentUser" @close="settingsOpen = false" />
 </template>
+
+<style scoped>
+.managed-chat-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.managed-editor-main {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.managed-editor-main > *:first-child {
+  min-height: 0;
+  flex: 1;
+}
+
+.managed-chat-panel :deep(.figma-chat-root) {
+  min-height: 0;
+  flex: 1;
+}
+
+.managed-chat-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--ta-border);
+  background: var(--ta-panel);
+}
+
+.managed-model-button,
+.managed-live-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 30px;
+  border: 1px solid var(--ta-border);
+  border-radius: 6px;
+  background: var(--ta-panel-2);
+  color: var(--ta-text);
+  font-size: 12px;
+}
+
+.managed-model-button {
+  min-width: 148px;
+  padding: 0 10px;
+}
+
+.managed-model-button strong {
+  max-width: 92px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.managed-live-button {
+  width: 48px;
+}
+
+.managed-live-button.is-active {
+  border-color: var(--ta-ink);
+  color: var(--ta-ink);
+}
+
+.managed-model-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(0 0 0 / 18%);
+}
+
+.managed-model-dialog {
+  width: min(520px, calc(100vw - 48px));
+  max-height: min(680px, calc(100vh - 80px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ta-border);
+  border-radius: 8px;
+  background: var(--ta-panel);
+  box-shadow: 0 20px 60px rgb(15 23 42 / 20%);
+}
+
+.managed-model-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--ta-border);
+}
+
+.managed-model-dialog-header h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.managed-model-close {
+  border: 0;
+  background: transparent;
+  color: var(--ta-muted);
+  font-size: 13px;
+}
+
+.managed-model-search {
+  margin: 12px 16px 8px;
+  height: 36px;
+  border: 1px solid var(--ta-border);
+  border-radius: 6px;
+  background: var(--ta-panel-2);
+  color: var(--ta-text);
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.managed-model-list {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 16px 16px;
+}
+
+.managed-model-group {
+  display: grid;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.managed-model-group h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ta-text);
+}
+
+.managed-model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--ta-border);
+  border-radius: 6px;
+  background: var(--ta-panel-2);
+  color: var(--ta-text);
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.managed-model-option[aria-selected="true"] {
+  border-color: var(--ta-ink);
+}
+
+.managed-model-option small {
+  color: var(--ta-muted);
+  font-size: 11px;
+}
+
+.managed-model-empty {
+  padding: 24px 0;
+  color: var(--ta-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.managed-workspace-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.managed-workspace-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 10px;
+  border-bottom: 1px solid var(--ta-border);
+  background: #fff;
+}
+
+.managed-workspace-row,
+.managed-workspace-create,
+.managed-workspace-actions,
+.managed-workspace-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.managed-workspace-label {
+  width: 52px;
+  flex: 0 0 auto;
+  color: var(--ta-muted);
+  font-size: 12px;
+}
+
+.managed-workspace-select,
+.managed-workspace-input {
+  min-width: 0;
+  height: 28px;
+  flex: 1 1 auto;
+  border: 1px solid var(--ta-border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ta-text);
+  font-size: 12px;
+  padding: 0 8px;
+}
+
+.managed-workspace-button,
+.managed-workspace-link {
+  height: 28px;
+  border: 1px solid var(--ta-border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--ta-text);
+  font-size: 12px;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
+.managed-workspace-button:disabled {
+  color: var(--ta-muted);
+  cursor: not-allowed;
+}
+
+.managed-workspace-link {
+  color: #2563eb;
+}
+
+.managed-workspace-link.danger {
+  color: #b42318;
+}
+
+.managed-workspace-hint {
+  align-items: flex-start;
+  color: var(--ta-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.managed-workspace-files {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.managed-workspace-empty {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px;
+  color: var(--ta-muted);
+  font-size: 13px;
+  text-align: center;
+}
+</style>

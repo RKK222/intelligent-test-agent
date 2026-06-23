@@ -16,6 +16,16 @@ import com.icbc.testagent.domain.configuration.UserSshKey;
 import com.icbc.testagent.domain.event.RunEvent;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventType;
+import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
+import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
+import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceStatus;
+import com.icbc.testagent.domain.managedworkspace.PersonalWorkspace;
+import com.icbc.testagent.domain.managedworkspace.PersonalWorkspaceId;
+import com.icbc.testagent.domain.managedworkspace.UserWorkspacePreference;
+import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncDirection;
+import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncRecord;
+import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncRecordId;
+import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncStatus;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeStatus;
@@ -72,6 +82,7 @@ class JdbcRepositoryIntegrationTest {
     private JdbcSessionMessageRepository sessionMessages;
     private JdbcAgentSessionBindingRepository agentSessionBindings;
     private JdbcConfigurationManagementRepository configurationManagement;
+    private JdbcManagedWorkspaceRepository managedWorkspaces;
     private JdbcUserRepository users;
     private JdbcClient jdbcClient;
 
@@ -94,6 +105,7 @@ class JdbcRepositoryIntegrationTest {
         sessionMessages = new JdbcSessionMessageRepository(jdbcClient);
         agentSessionBindings = new JdbcAgentSessionBindingRepository(jdbcClient);
         configurationManagement = new JdbcConfigurationManagementRepository(jdbcClient);
+        managedWorkspaces = new JdbcManagedWorkspaceRepository(jdbcClient, objectMapper);
         users = new JdbcUserRepository(jdbcClient);
     }
 
@@ -460,6 +472,129 @@ class JdbcRepositoryIntegrationTest {
                         "SHA256:def",
                         "cipher2",
                         "nonce2",
+                        NOW)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void managedWorkspaceRepositoriesPersistV9Tables() {
+        ApplicationId appId = new ApplicationId("app_managed");
+        UserId userId = new UserId("usr_managed");
+        users.save(User.createNew(userId.value(), "AUTH_MANAGED", "managed-user", "hash", "org", "rd", "dept"));
+        jdbcClient.sql("""
+                        insert into applications(app_id, app_name, enabled, created_at, updated_at)
+                        values (:appId, :appName, true, :createdAt, :updatedAt)
+                        """)
+                .param("appId", appId.value())
+                .param("appName", "F-GCMS")
+                .param("createdAt", Timestamp.from(NOW))
+                .param("updatedAt", Timestamp.from(NOW))
+                .update();
+        CodeRepository repository = configurationManagement.saveRepository(new CodeRepository(
+                new CodeRepositoryId("repo_managed"),
+                "git@gitee.com:demo/managed.git",
+                "托管库",
+                true,
+                NOW,
+                NOW));
+        ApplicationWorkspace template = configurationManagement.saveWorkspace(new ApplicationWorkspace(
+                new ApplicationWorkspaceId("awp_managed"),
+                appId,
+                repository.repositoryId(),
+                "main",
+                "F-GCMS/workspace",
+                "F-GCMS 工作区",
+                NOW,
+                NOW));
+        Workspace applicationRuntime = new Workspace(
+                new WorkspaceId("wrk_app_managed"),
+                "F-GCMS-20260707",
+                "/data/appworkspace/20260707/repo_managed/F-GCMS/workspace",
+                WorkspaceStatus.ACTIVE,
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+        Workspace personalRuntime = new Workspace(
+                new WorkspaceId("wrk_psw_managed"),
+                "私人空间",
+                "/data/personalworktree/20260707/AUTH_MANAGED/repo_managed/psw_1/F-GCMS/workspace",
+                WorkspaceStatus.ACTIVE,
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+        workspaces.save(applicationRuntime);
+        workspaces.save(personalRuntime);
+
+        ApplicationWorkspaceVersion version = managedWorkspaces.saveVersion(new ApplicationWorkspaceVersion(
+                new ApplicationWorkspaceVersionId("awv_managed"),
+                template.workspaceId(),
+                appId,
+                repository.repositoryId(),
+                "20260707",
+                "feature_testagent_20260707",
+                "/data/appworkspace/20260707/repo_managed",
+                applicationRuntime.rootPath(),
+                applicationRuntime.workspaceId(),
+                userId,
+                ManagedWorkspaceStatus.ACTIVE,
+                NOW,
+                NOW));
+        PersonalWorkspace personal = managedWorkspaces.savePersonalWorkspace(new PersonalWorkspace(
+                new PersonalWorkspaceId("psw_managed"),
+                version.versionId(),
+                appId,
+                template.workspaceId(),
+                userId,
+                "私人空间",
+                "feature_testagent_20260707_AUTH_MANAGED_psw_managed",
+                "/data/personalworktree/20260707/AUTH_MANAGED/repo_managed/psw_managed",
+                personalRuntime.rootPath(),
+                personalRuntime.workspaceId(),
+                "abc123",
+                ManagedWorkspaceStatus.ACTIVE,
+                NOW,
+                NOW));
+        managedWorkspaces.savePreference(new UserWorkspacePreference(userId, null, applicationRuntime.workspaceId(), NOW));
+        managedWorkspaces.savePreference(new UserWorkspacePreference(userId, appId, personalRuntime.workspaceId(), NOW.plusSeconds(1)));
+        managedWorkspaces.saveSyncRecord(new WorkspaceSyncRecord(
+                new WorkspaceSyncRecordId("sync_managed"),
+                userId,
+                personalRuntime.workspaceId(),
+                applicationRuntime.workspaceId(),
+                WorkspaceSyncDirection.PERSONAL_TO_APPLICATION,
+                List.of("src/App.java"),
+                true,
+                WorkspaceSyncStatus.SUCCEEDED,
+                "trace_1234567890abcdef",
+                NOW));
+
+        assertThat(managedWorkspaces.findVersions(template.workspaceId())).containsExactly(version);
+        assertThat(managedWorkspaces.findVersionByTemplateAndVersion(template.workspaceId(), "20260707")).contains(version);
+        assertThat(managedWorkspaces.findVersionByRuntimeWorkspace(applicationRuntime.workspaceId())).contains(version);
+        assertThat(managedWorkspaces.findPersonalWorkspaces(version.versionId(), userId)).containsExactly(personal);
+        assertThat(managedWorkspaces.findPersonalWorkspaceByRuntimeWorkspace(personalRuntime.workspaceId())).contains(personal);
+        assertThat(managedWorkspaces.findGlobalPreference(userId).map(UserWorkspacePreference::workspaceId))
+                .contains(applicationRuntime.workspaceId());
+        assertThat(managedWorkspaces.findApplicationPreference(userId, appId).map(UserWorkspacePreference::workspaceId))
+                .contains(personalRuntime.workspaceId());
+        Integer syncRecords = jdbcClient.sql("select count(*) from workspace_sync_records where sync_record_id = 'sync_managed'")
+                .query(Integer.class)
+                .single();
+        assertThat(syncRecords).isEqualTo(1);
+        assertThatThrownBy(() -> managedWorkspaces.savePersonalWorkspace(new PersonalWorkspace(
+                        new PersonalWorkspaceId("psw_managed_2"),
+                        version.versionId(),
+                        appId,
+                        template.workspaceId(),
+                        userId,
+                        "私人空间",
+                        "feature_testagent_20260707_AUTH_MANAGED_psw_managed_2",
+                        "/data/personalworktree/20260707/AUTH_MANAGED/repo_managed/psw_managed_2",
+                        personalRuntime.rootPath() + "_2",
+                        new WorkspaceId("wrk_psw_managed_2"),
+                        "abc123",
+                        ManagedWorkspaceStatus.ACTIVE,
+                        NOW,
                         NOW)))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }

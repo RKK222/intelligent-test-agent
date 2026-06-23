@@ -145,6 +145,53 @@ describe("backend-api", () => {
     );
   });
 
+  it("maps managed workspace APIs through platform URLs", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            versionId: "awv_1",
+            applicationWorkspaceId: "aws_1",
+            appId: "app_gcms",
+            repositoryId: "repo_1",
+            version: "20260707",
+            branch: "feature_testagent_20260707",
+            repoRootPath: "/data/appworkspace/20260707/repo_1",
+            workspaceRootPath: "/data/appworkspace/20260707/repo_1/F-GCMS/workspace",
+            runtimeWorkspace: {
+              workspaceId: "wks_1",
+              name: "F-GCMS-20260707",
+              rootPath: "/data/appworkspace/20260707/repo_1/F-GCMS/workspace",
+              status: "ACTIVE",
+              createdAt: "2026-06-23T00:00:00Z",
+              updatedAt: "2026-06-23T00:00:00Z"
+            },
+            status: "ACTIVE",
+            createdAt: "2026-06-23T00:00:00Z",
+            updatedAt: "2026-06-23T00:00:00Z"
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(
+      client.createWorkspaceVersion("app_gcms", "aws_1", { version: "20260707", branch: "feature_testagent_20260707" })
+    ).resolves.toMatchObject({ versionId: "awv_1", runtimeWorkspace: { workspaceId: "wks_1" } });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates/aws_1/versions",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({
+      version: "20260707",
+      branch: "feature_testagent_20260707"
+    });
+  });
+
   it("does not expose SSH private key content from personal key responses", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

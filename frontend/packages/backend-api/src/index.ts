@@ -1,6 +1,8 @@
 import type {
   AgentInfo,
   AddSshKeyPayload,
+  ApplicationWorkspaceTemplate,
+  ApplicationWorkspaceVersion,
   ApplicationDefinition,
   ApplicationMember,
   ApplicationWorkspaceConfig,
@@ -9,16 +11,21 @@ import type {
   CodeRepositoryConfig,
   CommandInfo,
   CreateApplicationWorkspacePayload,
+  CreatePersonalWorkspacePayload,
   CreateRepositoryPayload,
+  CreateWorkspaceVersionPayload,
   CurrentUser,
   FileContent,
   FileStatus,
   FileTreeEntry,
   LoginRequest,
   LoginResponse,
+  ManagedApplication,
+  ManagedWorkspaceRuntime,
   ModelInfo,
   PageResponse,
   PlatformUserSummary,
+  PersonalWorkspace,
   PermissionRequest,
   PromptPart,
   ProviderInfo,
@@ -32,11 +39,14 @@ import type {
   Session,
   SessionMessage,
   SshKeyMetadata,
+  SyncWorkspacePayload,
   TerminalTicketRequest,
   TerminalTicketResponse,
   TodoItem,
   UpdateRepositoryPayload,
   Workspace,
+  WorkspaceDiff,
+  WorkspaceSyncResult,
   WorkspaceDirectoryList
 } from "@test-agent/shared-types";
 
@@ -100,6 +110,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const agentId = normalizeAgentId(options.agentId ?? readEnv("VITE_TEST_AGENT_AGENT_ID") ?? "opencode");
   const agentBase = `/api/internal/agent/${encodeURIComponent(agentId)}`;
   const configurationBase = "/api/internal/platform/configuration-management";
+  const workspaceManagementBase = "/api/internal/platform/workspace-management";
   const fetcher = options.fetcher ?? fetch;
   const traceIdFactory = options.traceIdFactory ?? defaultTraceId;
   const requestTimeoutMs = options.requestTimeoutMs ?? 30000;
@@ -172,8 +183,45 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   return {
     listWorkspaces: (page = 1, size = 20) =>
       request<PageResponse<Workspace>>(`/api/workspaces?page=${page}&size=${size}`),
+    getWorkspace: (workspaceId: string) => request<Workspace>(`/api/workspaces/${encodeURIComponent(workspaceId)}`),
     createWorkspace: (payload: { name: string; rootPath: string }) =>
       request<Workspace>("/api/workspaces", { method: "POST", body: JSON.stringify(payload) }),
+    listManagedApplications: () => request<ManagedApplication[]>(`${workspaceManagementBase}/applications`),
+    listWorkspaceTemplates: (appId: string) =>
+      request<ApplicationWorkspaceTemplate[]>(`${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates`),
+    listWorkspaceVersions: (appId: string, templateId: string) =>
+      request<ApplicationWorkspaceVersion[]>(
+        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/versions`
+      ),
+    createWorkspaceVersion: (appId: string, templateId: string, payload: CreateWorkspaceVersionPayload) =>
+      request<ApplicationWorkspaceVersion>(
+        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/versions`,
+        { method: "POST", body: JSON.stringify(payload) }
+      ),
+    listPersonalWorkspaces: (versionId: string) =>
+      request<PersonalWorkspace[]>(`${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/personal-workspaces`),
+    createPersonalWorkspace: (versionId: string, payload: CreatePersonalWorkspacePayload) =>
+      request<PersonalWorkspace>(`${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/personal-workspaces`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    getRecentManagedWorkspace: () => request<ManagedWorkspaceRuntime | null>(`${workspaceManagementBase}/recent-workspace`),
+    getRecentManagedWorkspaceForApplication: (appId: string) =>
+      request<ManagedWorkspaceRuntime | null>(`${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/recent-workspace`),
+    markRecentManagedWorkspace: (workspaceId: string) =>
+      request<ManagedWorkspaceRuntime>(`${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/recent`, { method: "POST" }),
+    diffPersonalWorkspace: (personalWorkspaceId: string) =>
+      request<WorkspaceDiff>(`${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/diff`),
+    syncPersonalToApplication: (personalWorkspaceId: string, payload: SyncWorkspacePayload) =>
+      request<WorkspaceSyncResult>(`${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/sync-to-application`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    syncApplicationToPersonal: (personalWorkspaceId: string, payload: SyncWorkspacePayload) =>
+      request<WorkspaceSyncResult>(`${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/sync-from-application`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
     listWorkspaceDirectories: (path?: string) =>
       request<WorkspaceDirectoryList>(`/api/workspace-directories${query({ path })}`),
     listFiles: async (workspaceId: string, path = "") => {

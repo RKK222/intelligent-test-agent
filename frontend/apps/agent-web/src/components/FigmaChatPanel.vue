@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, ref, shallowRef, watch } from "vue";
 import { ArrowUpRight, Download, History, ListTodo, PanelRightClose, PencilLine, Plus, Send, Square, Upload } from "lucide-vue-next";
+import { fileToPromptAttachment, type ComposerAttachment } from "@test-agent/agent-chat";
+import type { PermissionRequest, QuestionRequest } from "@test-agent/shared-types";
 import aiHeaderUrl from "../assets/figma/ai-header.svg";
 import planLoadingUrl from "../assets/figma/plan-loadding.gif";
 
@@ -45,10 +47,14 @@ const props = defineProps<{
   fileChanges?: FileChangeStat[];
   /** 历史对话列表 */
   history?: Array<{ id: string; title: string; createdAt?: string }>;
+  /** 会话只读原因；存在时禁用输入与新建对话。 */
+  readonlyReason?: string;
+  permissions?: PermissionRequest[];
+  questions?: QuestionRequest[];
 }>();
 
 const emit = defineEmits<{
-  (e: "send", prompt: string): void;
+  (e: "send", prompt: string, attachments: ComposerAttachment[]): void;
   (e: "stop"): void;
   (e: "new-conversation"): void;
   (e: "close"): void;
@@ -57,9 +63,17 @@ const emit = defineEmits<{
   (e: "update:inputValue", value: string): void;
   (e: "download-files"): void;
   (e: "open-diff", path: string): void;
+  (e: "reply-permission", requestId: string, decision: "once" | "always" | "reject"): void;
+  (e: "reply-question", requestId: string, answers: unknown[]): void;
+  (e: "reject-question", requestId: string): void;
 }>();
 
 const localInput = ref(props.inputValue ?? "");
+const attachments = ref<ComposerAttachment[]>([]);
+const attachmentError = ref("");
+const readingAttachments = ref(false);
+const fileInput = shallowRef<HTMLInputElement | null>(null);
+const questionAnswers = ref<Record<string, string>>({});
 
 watch(
   () => props.inputValue,
@@ -118,6 +132,12 @@ const totalDeletions = computed(() =>
 );
 
 const visibleFiles = computed(() => (props.fileChanges || []).slice(0, 3));
+const cardMessages = computed(() =>
+  (props.messages || []).filter(
+    (message): message is ChatMessageInput & { role: "card"; cardType?: string; title?: string; payload?: Record<string, unknown> } =>
+      message.role === "card"
+  )
+);
 
 // 从最近一条助手回复中解析 token 数量。
 // 支持的格式：↓ 826 tokens、tokens: 826、tokens：826、826 tokens 等。
@@ -166,10 +186,51 @@ function formatTime(iso: string) {
 
 function submit() {
   const text = localInput.value.trim();
-  if (!text || props.running) return;
-  emit("send", text);
+  if (!text || props.running || props.readonlyReason) return;
+  const submittedAttachments = [...attachments.value];
+  emit("send", text, submittedAttachments);
   localInput.value = "";
+  attachments.value = [];
   emit("update:inputValue", "");
+}
+
+async function addAttachments(files: FileList | null) {
+  if (!files?.length) return;
+  readingAttachments.value = true;
+  attachmentError.value = "";
+  try {
+    const next = await Promise.all(Array.from(files).map((file) => fileToPromptAttachment(file)));
+    const byId = new Map(attachments.value.map((attachment) => [attachment.id, attachment]));
+    next.forEach((attachment) => byId.set(attachment.id, attachment));
+    attachments.value = Array.from(byId.values());
+  } catch (error) {
+    attachmentError.value = error instanceof Error ? error.message : "附件读取失败";
+  } finally {
+    readingAttachments.value = false;
+  }
+}
+
+function onFileChange(event: Event) {
+  const input = event.target as HTMLInputElement;
+  void addAttachments(input.files);
+  input.value = "";
+}
+
+function removeAttachment(id: string) {
+  attachments.value = attachments.value.filter((attachment) => attachment.id !== id);
+}
+
+function formatBytes(size: number) {
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function buildQuestionAnswers(item: QuestionRequest) {
+  return item.questions.map((question) => {
+    const answer = questionAnswers.value[question.questionId]?.trim();
+    return answer ? [answer] : [];
+  });
 }
 
 function stop() {
@@ -215,6 +276,41 @@ function onKeydown(event: KeyboardEvent) {
             <div class="figma-chat-bubble-content">{{ lastAssistant.content }}</div>
           </div>
           <div v-if="lastAssistant.meta" class="figma-chat-bubble-meta">测试智能体 · {{ lastAssistant.meta }}</div>
+        </div>
+      </div>
+
+      <div v-if="permissions?.length || questions?.length" class="figma-chat-runtime-dock">
+        <div v-for="item in permissions" :key="item.requestId" class="figma-chat-runtime-card figma-chat-runtime-card--permission">
+          <div class="figma-chat-runtime-title">{{ item.title ?? item.type }}</div>
+          <div class="figma-chat-runtime-desc">{{ item.description ?? item.pattern ?? item.requestId }}</div>
+          <div class="figma-chat-runtime-actions">
+            <button type="button" @click="emit('reply-permission', item.requestId, 'once')">一次</button>
+            <button type="button" @click="emit('reply-permission', item.requestId, 'always')">始终</button>
+            <button type="button" @click="emit('reply-permission', item.requestId, 'reject')">拒绝</button>
+          </div>
+        </div>
+
+        <div v-for="item in questions" :key="item.requestId" class="figma-chat-runtime-card figma-chat-runtime-card--question">
+          <div v-for="question in item.questions" :key="question.questionId" class="figma-chat-runtime-question">
+            <div class="figma-chat-runtime-title">{{ question.text }}</div>
+            <input
+              v-if="question.kind === 'text'"
+              v-model="questionAnswers[question.questionId]"
+              class="figma-chat-runtime-input"
+              placeholder="回答"
+            />
+          </div>
+          <div class="figma-chat-runtime-actions">
+            <button type="button" @click="emit('reply-question', item.requestId, buildQuestionAnswers(item))">回复</button>
+            <button type="button" @click="emit('reject-question', item.requestId)">拒绝</button>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="cardMessages.length" class="figma-chat-card-list">
+        <div v-for="card in cardMessages" :key="card.id" class="figma-chat-runtime-card">
+          <div class="figma-chat-runtime-title">{{ card.title }}</div>
+          <button v-if="card.cardType === 'diff'" type="button" class="figma-chat-runtime-primary" @click="emit('open-diff', '')">查看 Diff</button>
         </div>
       </div>
 
@@ -279,12 +375,22 @@ function onKeydown(event: KeyboardEvent) {
     </div>
 
     <div class="figma-chat-composer">
+      <div v-if="readonlyReason" class="figma-chat-readonly">{{ readonlyReason }}</div>
+      <input ref="fileInput" class="figma-chat-file-input" type="file" multiple @change="onFileChange" />
+      <div v-if="attachments.length" class="figma-chat-attachments">
+        <span v-for="attachment in attachments" :key="attachment.id" class="figma-chat-attachment">
+          <span class="figma-chat-attachment-name">{{ attachment.name }}</span>
+          <small>{{ formatBytes(attachment.size) }}</small>
+          <button type="button" aria-label="移除附件" @click="removeAttachment(attachment.id)">×</button>
+        </span>
+      </div>
+      <div v-if="attachmentError" class="figma-chat-attachment-error">{{ attachmentError }}</div>
       <textarea
         v-model="localInput"
         class="figma-chat-textarea"
-        :placeholder="placeholder || 'Ask the AI agent...'"
+        :placeholder="readonlyReason || placeholder || 'Ask the AI agent...'"
         rows="1"
-        :disabled="running"
+        :disabled="running || !!readonlyReason"
         @keydown="onKeydown"
       />
       <div class="figma-chat-composer-actions">
@@ -292,10 +398,19 @@ function onKeydown(event: KeyboardEvent) {
           type="button"
           class="figma-chat-icon-btn"
           aria-label="清空输入"
-          :disabled="!localInput || running"
+          :disabled="!localInput || running || !!readonlyReason"
           @click="localInput = ''"
         >
           <PencilLine class="figma-chat-btn-icon" />
+        </button>
+        <button
+          type="button"
+          class="figma-chat-icon-btn"
+          aria-label="添加附件"
+          :disabled="running || !!readonlyReason || readingAttachments"
+          @click="fileInput?.click()"
+        >
+          <Upload class="figma-chat-btn-icon" />
         </button>
         <button
           type="button"
@@ -310,7 +425,7 @@ function onKeydown(event: KeyboardEvent) {
         <button
           type="button"
           class="figma-chat-icon-btn figma-chat-new-btn"
-          :disabled="running"
+          :disabled="running || !!readonlyReason"
           @click="emit('new-conversation')"
         >
           <Plus class="figma-chat-btn-icon" />
@@ -320,7 +435,7 @@ function onKeydown(event: KeyboardEvent) {
           v-if="!running"
           type="button"
           class="figma-chat-send"
-          :disabled="!localInput.trim()"
+          :disabled="!localInput.trim() || !!readonlyReason"
           aria-label="发送"
           @click="submit"
         >
@@ -598,6 +713,83 @@ function onKeydown(event: KeyboardEvent) {
   animation: figma-chat-pulse 1.4s infinite ease-in-out;
 }
 
+.figma-chat-runtime-dock,
+.figma-chat-card-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.figma-chat-runtime-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #dedede;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.figma-chat-runtime-card--permission {
+  border-color: #f2c46d;
+  background: #fffaf0;
+}
+
+.figma-chat-runtime-card--question {
+  border-color: #94d4e8;
+  background: #f2fbff;
+}
+
+.figma-chat-runtime-title {
+  color: #222;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.figma-chat-runtime-desc {
+  white-space: pre-wrap;
+  color: #555;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.figma-chat-runtime-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.figma-chat-runtime-actions button,
+.figma-chat-runtime-primary {
+  min-height: 28px;
+  border: 1px solid #d7d7d7;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.figma-chat-runtime-primary {
+  justify-self: start;
+  border-color: #3366ff;
+  color: #214ed3;
+}
+
+.figma-chat-runtime-question {
+  display: grid;
+  gap: 6px;
+}
+
+.figma-chat-runtime-input {
+  height: 32px;
+  border: 1px solid #d7d7d7;
+  border-radius: 6px;
+  background: #fff;
+  color: #111;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
 @keyframes figma-chat-pulse {
   0%, 100% { opacity: 0.4; }
   50% { opacity: 1; }
@@ -659,6 +851,68 @@ function onKeydown(event: KeyboardEvent) {
   flex-shrink: 0;
   padding: 8px 12px 12px;
   background: #fff;
+}
+
+.figma-chat-readonly {
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid #f0d4d4;
+  border-radius: 6px;
+  background: #fff7f7;
+  color: #9f2d2d;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.figma-chat-file-input {
+  display: none;
+}
+
+.figma-chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.figma-chat-attachment {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #f8f8f8;
+  color: #333;
+  font-size: 12px;
+}
+
+.figma-chat-attachment-name {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figma-chat-attachment small {
+  color: #777;
+}
+
+.figma-chat-attachment button {
+  border: 0;
+  background: transparent;
+  color: #777;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.figma-chat-attachment-error {
+  margin-bottom: 8px;
+  color: #b42318;
+  font-size: 12px;
 }
 
 .figma-chat-textarea {

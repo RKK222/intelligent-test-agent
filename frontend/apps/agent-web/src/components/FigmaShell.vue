@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onUnmounted, ref } from "vue";
+import { computed, onUnmounted, ref } from "vue";
 import { ChevronDown } from "lucide-vue-next";
 import logoUrl from "../assets/figma/logo.svg";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
@@ -72,8 +72,8 @@ function selectApp(app: AppItem) {
   closeAppMenu();
 }
 
-const selectedApp = ref(
-  props.apps.find((a) => a.id === props.selectedAppId) ?? props.apps[0] ?? { id: "", name: "F-GCMS-PSN" }
+const selectedApp = computed(
+  () => props.apps.find((a) => a.id === props.selectedAppId) ?? props.apps[0] ?? { id: "", name: "未选择应用" }
 );
 
 function onAppMenuBlur(event: FocusEvent) {
@@ -195,7 +195,7 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="figma-bottom-drawer" :class="{ 'figma-bottom-drawer--open': bottomOpen }">
+      <div class="figma-bottom-drawer" :class="{ 'figma-bottom-drawer--open': bottomOpen }" role="region" aria-label="运行与终端">
         <slot name="bottom" />
       </div>
     </div>

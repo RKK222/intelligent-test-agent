@@ -15,6 +15,10 @@ public interface ConfigurationManagementRepository {
 
     Optional<ApplicationDefinition> findApplication(ApplicationId appId);
 
+    List<ApplicationDefinition> findApplicationsByMember(UserId userId);
+
+    boolean isActiveMember(ApplicationId appId, UserId userId);
+
     List<ApplicationMember> findActiveMembers(ApplicationId appId);
 
     void saveMember(ApplicationMember member);
