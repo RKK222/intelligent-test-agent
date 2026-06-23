@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.regex.Pattern;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -49,6 +50,7 @@ public class ConfigurationManagementApplicationService {
     /**
      * 注入领域端口和公共 Git/加密服务。
      */
+    @Autowired
     public ConfigurationManagementApplicationService(
             ConfigurationManagementRepository configurationRepository,
             UserRepository userRepository,

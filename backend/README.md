@@ -49,7 +49,7 @@ mvn clean package -DskipTests
 cd backend
 export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 export PATH="$JAVA_HOME/bin:$PATH"
-mvn clean package -DskipTests
+mvn clean package -DskipTests~~~~
 ```
 
 ## 测试与校验
