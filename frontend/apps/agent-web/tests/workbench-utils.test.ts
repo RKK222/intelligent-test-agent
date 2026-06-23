@@ -1,9 +1,20 @@
 import { describe, expect, it } from "vitest";
-import type { RunDiffFile } from "@test-agent/shared-types";
-import { diffFilesFromPayload, mergeDiffFiles } from "../src/components/workbench-utils";
+import type { MessagePart, RunDiffFile } from "@test-agent/shared-types";
+import { diffFilesFromPayload, inferDiffFromToolPart, mergeDiffFiles } from "../src/components/workbench-utils";
 
 function file(path: string, additions: number, deletions: number, status = "modified"): RunDiffFile {
   return { path, patch: "", additions, deletions, status };
+}
+
+function toolPart(input: Record<string, unknown>, overrides: Partial<Extract<MessagePart, { type: "tool" }>> = {}): Extract<MessagePart, { type: "tool" }> {
+  return {
+    partId: "part_1",
+    type: "tool",
+    toolName: "write",
+    status: "completed",
+    input,
+    ...overrides
+  };
 }
 
 describe("diffFilesFromPayload", () => {
@@ -77,5 +88,65 @@ describe("mergeDiffFiles", () => {
       file("c.ts", 3, 0),
       file("d.ts", 0, 0)
     ]);
+  });
+});
+
+describe("inferDiffFromToolPart", () => {
+  it("counts new file lines for write tool", () => {
+    // write 工具完成时，前端应能基于 input.content 估算 additions，让"文件变更"卡片显示 +N。
+    const result = inferDiffFromToolPart(
+      toolPart({ filePath: "/tmp/demo/src/new.ts", content: "export const a = 1\nexport const b = 2\nexport const c = 3" })
+    );
+    expect(result).toEqual({ path: "/tmp/demo/src/new.ts", patch: "", additions: 3, deletions: 0, status: "added" });
+  });
+
+  it("counts new and old lines for edit tool", () => {
+    const result = inferDiffFromToolPart(
+      toolPart(
+        { filePath: "/tmp/demo/src/app.ts", oldString: "const a = 1\nconst b = 2", newString: "const a = 1\nconst b = 2\nconst c = 3" },
+        { toolName: "edit" }
+      )
+    );
+    expect(result).toEqual({
+      path: "/tmp/demo/src/app.ts",
+      patch: "",
+      additions: 3,
+      deletions: 2,
+      status: "modified"
+    });
+  });
+
+  it("parses unified diff for apply_patch tool", () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Update File: src/x.ts",
+      "@@",
+      "-old line",
+      "+new line one",
+      "+new line two",
+      "*** End Patch"
+    ].join("\n");
+    const result = inferDiffFromToolPart(
+      toolPart({ patchText: patch, filePath: "/tmp/demo/src/x.ts" }, { toolName: "apply_patch" })
+    );
+    // patchText 解析以 +/- 行为准：+2, -1。
+    expect(result).toMatchObject({ path: "/tmp/demo/src/x.ts", additions: 2, deletions: 1, status: "modified" });
+  });
+
+  it("treats empty write content as zero additions", () => {
+    const result = inferDiffFromToolPart(toolPart({ filePath: "/tmp/demo/empty.ts", content: "" }));
+    expect(result).toEqual({ path: "/tmp/demo/empty.ts", patch: "", additions: 0, deletions: 0, status: "added" });
+  });
+
+  it("ignores tools outside the write-tool allowlist", () => {
+    const result = inferDiffFromToolPart(
+      toolPart({ filePath: "/tmp/demo/src/app.ts", content: "x" }, { toolName: "read" })
+    );
+    expect(result).toBeUndefined();
+  });
+
+  it("returns undefined when filePath is missing", () => {
+    const result = inferDiffFromToolPart(toolPart({ content: "abc" }));
+    expect(result).toBeUndefined();
   });
 });
