@@ -76,7 +76,17 @@ watch(
     errorMessage.value = "";
     activeMenu.value = "apps";
     await loadSshKeys();
-    if (hasAppSettingsPermission.value) {
+  }
+);
+
+watch(
+  () => [props.open, hasAppSettingsPermission.value] as const,
+  async ([open, canManageApps]) => {
+    if (!open) {
+      return;
+    }
+    // currentUser 可能在设置弹窗打开后才刷新完成，权限变为可管理时需要补加载应用配置。
+    if (canManageApps) {
       await loadApplications();
     } else {
       clearAppContext();

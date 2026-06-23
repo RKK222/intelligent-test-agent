@@ -45,6 +45,25 @@ test("settings dialog grants application context to super admin", async ({ page 
   await expect(page.getByLabel("应用选择")).toHaveValue("app_gcms");
 });
 
+test("settings dialog loads application context after roles arrive while open", async ({ page }) => {
+  let releaseAuthMe!: () => void;
+  const configurationApplicationRequests: string[] = [];
+  const authMeGate = new Promise<void>((resolve) => {
+    releaseAuthMe = resolve;
+  });
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"], authMeGate, configurationApplicationRequests });
+
+  await gotoWorkbench(page);
+
+  await page.getByRole("button", { name: "打开设置" }).click();
+  await expect(page.getByText("您当前角色[无角色]无该项设置权限。")).toBeVisible();
+  expect(configurationApplicationRequests).toEqual([]);
+
+  releaseAuthMe();
+  await expect(page.getByText("应用人员管理")).toBeVisible();
+  await expect(page.getByLabel("应用选择")).toHaveValue("app_gcms");
+});
+
 test("settings dialog shows permission placeholder for non app admins", async ({ page }) => {
   const configurationApplicationRequests: string[] = [];
   await mockBackendApi(page, { authRoles: ["USER"], configurationApplicationRequests });
@@ -243,6 +262,7 @@ async function mockBackendApi(
     runEvents?: Array<ReturnType<typeof event>>;
     fileContents?: Record<string, string>;
     authRoles?: string[];
+    authMeGate?: Promise<void>;
     configurationApplicationRequests?: string[];
   } = {}
 ) {
@@ -266,6 +286,7 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/auth/me") {
+      await capture.authMeGate;
       await route.fulfill(json({
         userId: "usr_admin",
         username: "admin",
