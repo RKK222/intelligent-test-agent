@@ -9,7 +9,7 @@ import type {
   CurrentUser,
   PlatformUserSummary
 } from "@test-agent/shared-types";
-import { UserPlus, Link2, Trash2 } from "@element-plus/icons-vue";
+import { CirclePlus, Link, Delete } from "@element-plus/icons-vue";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -326,7 +326,7 @@ watch(selectedAppId, async (appId) => {
             <div v-for="user in users" :key="user.userId" class="ta-item-row">
               <span>{{ user.username }} · {{ user.unifiedAuthId }}</span>
               <el-button size="small" :disabled="loading" @click="memberUserId = user.userId; addMember()">
-                <el-icon><UserPlus /></el-icon> 加入
+                <el-icon><CirclePlus /></el-icon> 加入
               </el-button>
             </div>
           </div>
@@ -345,7 +345,7 @@ watch(selectedAppId, async (appId) => {
                 <div class="ta-item-subtitle">{{ member.userId }} · {{ member.unifiedAuthId }}</div>
               </div>
               <el-button size="small" type="danger" plain :disabled="loading" @click="removeMember(member.userId)">
-                <el-icon><Trash2 /></el-icon>
+                <el-icon><Delete /></el-icon>
               </el-button>
             </div>
           </div>
@@ -371,7 +371,7 @@ watch(selectedAppId, async (appId) => {
               <el-option v-for="repo in repositories" :key="repo.repositoryId" :label="repo.name" :value="repo.repositoryId" />
             </el-select>
             <el-button type="primary" :disabled="loading || !linkRepositoryId" @click="linkRepository">
-              <el-icon><Link2 /></el-icon> 关联
+              <el-icon><Link /></el-icon> 关联
             </el-button>
           </div>
           <div class="ta-item-list">
