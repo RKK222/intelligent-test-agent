@@ -197,3 +197,13 @@
 - `applications` 数据由外部同步写入，平台只读查询；同步机制本期不实现。
 - `application_workspaces` 不复用、不引用运行态 `workspaces`，后续使用场景再决定如何衔接。
 - SSH 私钥只保存 AES-GCM 密文和 nonce，API 不返回明文或密文；加密密钥由部署环境配置。
+
+## V8 默认开发用户超级管理员授权
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V8__grant_default_user_super_admin.sql` 为本地默认前端用户 `888888888` 幂等授予 `SUPER_ADMIN` 角色。
+
+兼容策略：
+
+- 迁移按 `users.username = '888888888'` 和 `dictionaries(ROLE, SUPER_ADMIN)` 查找数据，不硬编码数据库自增主键。
+- 插入前检查 `user_roles(user_id, dict_id)` 是否已存在，重复执行语义下不会产生重复角色关系。
+- 已登录旧 Token 不会自动带上新角色，需要重新登录后 `/api/auth/me.roles` 才会返回 `SUPER_ADMIN`。

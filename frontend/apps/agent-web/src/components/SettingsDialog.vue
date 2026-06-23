@@ -62,7 +62,9 @@ const sshKeys = ref<SshKeyMetadata[]>([]);
 const sshKeyName = ref("");
 const sshPrivateKey = ref("");
 
-const isAppAdmin = computed(() => props.currentUser?.roles?.includes("APP_ADMIN") ?? false);
+const currentRoles = computed(() => props.currentUser?.roles ?? []);
+const currentRoleLabel = computed(() => (currentRoles.value.length ? currentRoles.value.join(",") : "无角色"));
+const hasAppSettingsPermission = computed(() => currentRoles.value.includes("APP_ADMIN") || currentRoles.value.includes("SUPER_ADMIN"));
 const selectedApp = computed(() => applications.value.find((item) => item.appId === selectedAppId.value));
 
 watch(
@@ -72,16 +74,18 @@ watch(
       return;
     }
     errorMessage.value = "";
-    activeMenu.value = isAppAdmin.value ? "apps" : "personal";
+    activeMenu.value = "apps";
     await loadSshKeys();
-    if (isAppAdmin.value) {
+    if (hasAppSettingsPermission.value) {
       await loadApplications();
+    } else {
+      clearAppContext();
     }
   }
 );
 
 watch(selectedAppId, async (appId) => {
-  if (!props.open || !appId) {
+  if (!props.open || !appId || !hasAppSettingsPermission.value) {
     return;
   }
   await loadAppContext();
@@ -109,6 +113,19 @@ async function loadApplications() {
       await loadAppContext();
     }
   });
+}
+
+function clearAppContext() {
+  applications.value = [];
+  selectedAppId.value = "";
+  members.value = [];
+  users.value = [];
+  repositories.value = [];
+  appRepositories.value = [];
+  repositoryApplications.value = [];
+  workspaces.value = [];
+  branches.value = [];
+  directories.value = [];
 }
 
 async function loadAppContext() {
@@ -329,7 +346,6 @@ async function deleteSshKey(sshKeyId: string) {
         </div>
         <nav class="flex flex-1 flex-col gap-1 p-3" aria-label="设置菜单">
           <button
-            v-if="isAppAdmin"
             type="button"
             :class="['rounded-md px-3 py-2 text-left text-sm', activeMenu === 'apps' ? 'bg-[var(--ta-hover)] text-[var(--ta-ink)]' : 'text-[var(--ta-subtle)] hover:bg-[var(--ta-hover)] hover:text-[var(--ta-text)]']"
             @click="activeMenu = 'apps'"
@@ -352,12 +368,12 @@ async function deleteSshKey(sshKeyId: string) {
             <div class="truncate text-sm font-semibold text-[var(--ta-text)]">
               {{ activeMenu === "apps" ? "应用与工作区" : "SSH key 管理" }}
             </div>
-            <div v-if="activeMenu === 'apps'" class="truncate text-xs text-[var(--ta-muted)]">
+            <div v-if="activeMenu === 'apps' && hasAppSettingsPermission" class="truncate text-xs text-[var(--ta-muted)]">
               {{ selectedApp?.appName ?? "未选择应用" }}
             </div>
           </div>
           <select
-            v-if="activeMenu === 'apps'"
+            v-if="activeMenu === 'apps' && hasAppSettingsPermission"
             v-model="selectedAppId"
             aria-label="应用选择"
             class="h-9 w-64 rounded-md border border-[var(--ta-border)] bg-[var(--ta-panel-2)] px-3 text-sm text-[var(--ta-text)]"
@@ -371,6 +387,13 @@ async function deleteSshKey(sshKeyId: string) {
         </div>
 
         <section v-if="activeMenu === 'apps'" class="flex min-h-0 flex-1 flex-col">
+          <div v-if="!hasAppSettingsPermission" class="flex min-h-0 flex-1 items-center justify-center p-6">
+            <div class="rounded-md border border-[var(--ta-border)] bg-[var(--ta-panel-2)] px-5 py-4 text-sm text-[var(--ta-muted)]">
+              您当前角色[{{ currentRoleLabel }}]无该项设置权限。
+            </div>
+          </div>
+
+          <template v-else>
           <div class="flex h-11 shrink-0 items-center gap-1 border-b border-[var(--ta-border)] px-4">
             <button
               type="button"
@@ -539,6 +562,7 @@ async function deleteSshKey(sshKeyId: string) {
               </div>
             </div>
           </div>
+          </template>
         </section>
 
         <section v-else class="min-h-0 flex-1 overflow-auto p-5">

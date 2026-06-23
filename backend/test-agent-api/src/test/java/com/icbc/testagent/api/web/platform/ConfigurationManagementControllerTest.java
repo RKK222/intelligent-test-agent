@@ -38,6 +38,21 @@ class ConfigurationManagementControllerTest {
     }
 
     @Test
+    void superAdminCanListEnabledApplications() {
+        ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
+        when(service.listApplications(true)).thenReturn(List.of(new ApplicationResponse("app_gcms", "F-GCMS", true)));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/configuration-management/applications?enabled=true")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data[0].appId").isEqualTo("app_gcms");
+    }
+
+    @Test
     void nonAdminCannotAccessApplicationManagement() {
         WebTestClient client = client(org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class), List.of());
 

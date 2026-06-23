@@ -3,6 +3,7 @@ package com.icbc.testagent.api.web.common;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
+import com.icbc.testagent.domain.dictionary.Dictionary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.server.ServerWebExchange;
 
@@ -33,10 +34,21 @@ public final class AuthWebSupport {
      */
     public static AuthPrincipal requireRole(ServerWebExchange exchange, String role) {
         AuthPrincipal principal = getAuthPrincipal(exchange);
-        if (principal.roles().contains(role)) {
+        if (hasRole(principal, role)) {
             return principal;
         }
         throw new PlatformException(ErrorCode.FORBIDDEN, "无权限");
+    }
+
+    /**
+     * 判断全局角色权限，超级管理员继承应用管理员能力，但不改写认证主体中的实际角色。
+     */
+    public static boolean hasRole(AuthPrincipal principal, String role) {
+        if (principal.roles().contains(role)) {
+            return true;
+        }
+        return Dictionary.ROLE_APP_ADMIN.equals(role)
+                && principal.roles().contains(Dictionary.ROLE_SUPER_ADMIN);
     }
 
     /**

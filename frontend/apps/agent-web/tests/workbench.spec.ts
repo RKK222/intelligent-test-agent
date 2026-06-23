@@ -34,6 +34,38 @@ test("settings dialog manages application context and SSH key metadata", async (
   await expect(dialog.locator("textarea")).toHaveCount(0);
 });
 
+test("settings dialog grants application context to super admin", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+
+  await gotoWorkbench(page);
+
+  await page.getByRole("button", { name: "打开设置" }).click();
+  await expect(page.getByRole("button", { name: "应用与工作区" })).toBeVisible();
+  await expect(page.getByText("应用人员管理")).toBeVisible();
+  await expect(page.getByLabel("应用选择")).toHaveValue("app_gcms");
+});
+
+test("settings dialog shows permission placeholder for non app admins", async ({ page }) => {
+  const configurationApplicationRequests: string[] = [];
+  await mockBackendApi(page, { authRoles: ["USER"], configurationApplicationRequests });
+
+  await gotoWorkbench(page);
+
+  await page.getByRole("button", { name: "打开设置" }).click();
+  await expect(page.getByRole("button", { name: "应用与工作区" })).toBeVisible();
+  await expect(page.getByText("您当前角色[USER]无该项设置权限。")).toBeVisible();
+  expect(configurationApplicationRequests).toEqual([]);
+});
+
+test("settings dialog shows empty role placeholder for users without roles", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: [] });
+
+  await gotoWorkbench(page);
+
+  await page.getByRole("button", { name: "打开设置" }).click();
+  await expect(page.getByText("您当前角色[无角色]无该项设置权限。")).toBeVisible();
+});
+
 test("workspace picker creates selected directory and loads its file tree", async ({ page, isMobile }) => {
   test.skip(isMobile, "mobile workspace picker layout is not part of this mock E2E");
   const workspaceCreates: Array<Record<string, unknown>> = [];
@@ -210,6 +242,8 @@ async function mockBackendApi(
     fileRequests?: Array<{ workspaceId: string; path: string }>;
     runEvents?: Array<ReturnType<typeof event>>;
     fileContents?: Record<string, string>;
+    authRoles?: string[];
+    configurationApplicationRequests?: string[];
   } = {}
 ) {
   await page.addInitScript(() => {
@@ -236,11 +270,14 @@ async function mockBackendApi(
         userId: "usr_admin",
         username: "admin",
         unifiedAuthId: "admin",
-        roles: ["APP_ADMIN"]
+        roles: capture.authRoles ?? ["APP_ADMIN"]
       }));
       return;
     }
     if (url.pathname.startsWith("/api/internal/platform/configuration-management")) {
+      if (!url.pathname.startsWith("/api/internal/platform/configuration-management/personal/ssh-keys")) {
+        capture.configurationApplicationRequests?.push(`${method} ${url.pathname}`);
+      }
       if (method === "GET" && url.pathname === "/api/internal/platform/configuration-management/applications") {
         await route.fulfill(json([{ appId: "app_gcms", appName: "F-GCMS", enabled: true }]));
         return;

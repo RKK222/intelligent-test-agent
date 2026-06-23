@@ -465,6 +465,23 @@ class JdbcRepositoryIntegrationTest {
     }
 
     @Test
+    void migrationGrantsDefaultUserSuperAdminRole() {
+        Integer roleCount = jdbcClient.sql("""
+                        select count(*)
+                        from user_roles ur
+                        join users u on u.user_id = ur.user_id
+                        join dictionaries d on d.dict_id = ur.dict_id
+                        where u.username = '888888888'
+                          and d.dict_key = 'ROLE'
+                          and d.dict_value = 'SUPER_ADMIN'
+                        """)
+                .query(Integer.class)
+                .single();
+
+        assertThat(roleCount).isEqualTo(1);
+    }
+
+    @Test
     void sessionsSupportGlobalSearchPinnedOrderingAndArchiveFiltering() {
         Workspace workspace = workspace();
         workspaces.save(workspace);
