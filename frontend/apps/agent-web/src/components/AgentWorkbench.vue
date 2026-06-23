@@ -42,6 +42,7 @@ import {
   dispatchRuntimeResult,
   errorFeedback,
   historyItems,
+  inferDiffFromToolPart,
   initialMessages,
   mergeDiffFiles,
   messagesFromSessionMessages,
@@ -931,11 +932,14 @@ function recordValue(value: unknown): Record<string, unknown> | undefined {
 }
 
 // 读取磁盘最新内容并以只读实时预览 tab 打开在中间编辑器，并展开文件树到该文件。
+// 同时刷新文件所在父目录的条目，让 agent 新建的文件能立刻出现在文件树中
+// （opencode 写文件工具落盘后不会发 diff.proposed，前端必须主动 re-list）。
 async function openLivePreview(relPath: string) {
   if (!selectedWorkspace.value) {
     return;
   }
   expandPathToFile(relPath);
+  refreshParentDirectory(relPath);
   const existing = tabs.value.find((tab) => tab.path === relPath);
   if (existing && !existing.livePreview && existing.content !== existing.savedContent) {
     workbench.setActivePath(relPath);
@@ -958,6 +962,21 @@ async function openLivePreview(relPath: string) {
   } catch (error) {
     feedback.value = errorFeedback("实时追踪读取文件失败", error);
   }
+}
+
+// 把文件所在父目录重新拉取一次，让新建/删除的文件即时出现在文件树中。
+// 不存在时回退到根目录（与 expandPathToFile 行为一致），但避免对同一目录重复请求。
+function refreshParentDirectory(relPath: string) {
+  if (!relPath || relPath.startsWith("/")) {
+    return;
+  }
+  const segments = relPath.split("/").filter(Boolean);
+  if (segments.length <= 1) {
+    void loadDirectory("");
+    return;
+  }
+  const parentPath = segments.slice(0, -1).join("/");
+  void loadDirectory(parentPath);
 }
 
 // 展开文件树到目标文件：把所有祖先目录加入 expandedDirectories 并按需懒加载。
@@ -1011,12 +1030,11 @@ function toolCardToVirtualPart(message: Extract<AgentMessage, { role: "card" }>)
   };
 }
 
-// 扫描对话中的 tool part：新完成的写文件工具 → 读盘刷新预览。
+// 扫描对话中的 tool part：新完成的写文件工具 → 推断 diff 增量、刷新文件树、视情况打开预览。
 // 同时处理 assistant message 的 parts 中的 tool part 和独立的 tool card 消息。
+// diffFiles 与文件树刷新与 liveTrack 解耦，保证"文件变更卡片 +N"和"做测目录即时刷新"在
+// 实时追踪未开启时也能正常工作。
 function scanLiveToolParts() {
-  if (!liveTrack.value) {
-    return;
-  }
   for (const message of chatState.value.messages) {
     // 处理 assistant message 的 parts
     if (message.role === "assistant") {
@@ -1035,7 +1053,13 @@ function scanLiveToolParts() {
           continue;
         }
         liveFollowedParts.value.add(part.partId);
-        void openLivePreview(path);
+        applyToolChangeToDiff(part, path);
+        if (liveTrack.value) {
+          void openLivePreview(path);
+        } else {
+          // 即使不开实时预览，也要刷新文件树让用户看到新文件。
+          refreshParentDirectory(path);
+        }
       }
       continue;
     }
@@ -1056,9 +1080,29 @@ function scanLiveToolParts() {
         continue;
       }
       liveFollowedParts.value.add(part.partId);
-      void openLivePreview(path);
+      applyToolChangeToDiff(part, path);
+      if (liveTrack.value) {
+        void openLivePreview(path);
+      } else {
+        refreshParentDirectory(path);
+      }
     }
   }
+}
+
+// 把一次写文件工具的产出合并到 diffFiles，让"文件变更"卡片在写盘后即时显示 +N。
+// 路径先归一化为 workspace 相对路径，与 diff.proposed 事件中的 path 形态保持一致。
+function applyToolChangeToDiff(part: Extract<MessagePart, { type: "tool" }>, rawPath: string) {
+  const inferred = inferDiffFromToolPart(part);
+  if (!inferred) {
+    return;
+  }
+  const relPath = normalizeWorkspacePath(inferred.path) || normalizeWorkspacePath(rawPath) || inferred.path;
+  if (!relPath || relPath.startsWith("/")) {
+    return;
+  }
+  diffFiles.value = mergeDiffFiles(diffFiles.value, [{ ...inferred, path: relPath }]);
+  workbench.setSelectedDiffPath(relPath);
 }
 
 async function loadDiffSource(source: "run" | "session" | "vcs") {

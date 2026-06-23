@@ -1,6 +1,7 @@
 import { BackendApiError } from "@test-agent/backend-api";
 import type {
   AgentMessage,
+  MessagePart,
   ModelInfo,
   PromptPart,
   Run,
@@ -62,6 +63,106 @@ export function mergeDiffFiles(current: RunDiffFile[], incoming: RunDiffFile[]):
     if (file.path) map.set(file.path, file);
   }
   return Array.from(map.values());
+}
+
+// 已知会落盘的工具名集合，与 AgentWorkbench 中的 LIVE_WRITE_TOOLS 保持一致。
+const DIFF_AWARE_TOOL_NAMES = new Set([
+  "write",
+  "edit",
+  "apply_patch",
+  "str_replace",
+  "multi_edit",
+  "create_file"
+]);
+
+// 从 tool part 的 input/metadata 推断出本工具的 RunDiffFile。
+// opencode 1.17.8 的 `session.diff` 事件在普通 summarize 流程中只发空 diff 数组，
+// 导致前端"文件变更"卡片 +N 永远显示 0。这里基于工具的入参估算新增/删除行数，
+// 让卡片在写文件工具完成时也能即时反映本次改动。
+//
+// 返回 undefined 表示非写文件工具或参数不足，前端应保持原 diffFiles 不变。
+export function inferDiffFromToolPart(part: Extract<MessagePart, { type: "tool" }>): RunDiffFile | undefined {
+  const toolName = (part.toolName ?? "").toLowerCase();
+  if (!DIFF_AWARE_TOOL_NAMES.has(toolName)) {
+    return undefined;
+  }
+  const input = (part.input ?? {}) as Record<string, unknown>;
+  const metadata = (part.metadata ?? {}) as Record<string, unknown>;
+  const filePath =
+    text(input.filePath) ??
+    text(input.path) ??
+    text(input.file) ??
+    text(metadata.filepath) ??
+    text(metadata.filePath) ??
+    text(metadata.path) ??
+    text(metadata.file);
+  if (!filePath) {
+    return undefined;
+  }
+
+  if (toolName === "edit" || toolName === "str_replace" || toolName === "multi_edit") {
+    const oldText = text(input.oldString) ?? text(input.old_string) ?? text(input.oldText) ?? "";
+    const newText = text(input.newString) ?? text(input.new_string) ?? text(input.newText) ?? "";
+    return {
+      path: filePath,
+      patch: "",
+      additions: countAddedLines(newText),
+      deletions: countAddedLines(oldText),
+      status: "modified"
+    };
+  }
+
+  if (toolName === "apply_patch") {
+    const patchText =
+      text(input.input) ?? text(input.patch) ?? text(input.patchText) ?? text(input.patch_text) ?? "";
+    if (!patchText) {
+      return undefined;
+    }
+    const { additions, deletions } = countPatchStats(patchText);
+    return {
+      path: filePath,
+      patch: "",
+      additions,
+      deletions,
+      status: "modified"
+    };
+  }
+
+  // write / create_file：纯新增场景，把新增内容按行数累加成 additions，
+  // deletions 留 0（写入时是否覆盖旧内容前端无法可靠判断，留 0 与平台"新增"语义一致）。
+  const content = text(input.content) ?? text(input.text) ?? "";
+  return {
+    path: filePath,
+    patch: "",
+    additions: countAddedLines(content),
+    deletions: 0,
+    status: "added"
+  };
+}
+
+// 统计非空行数（与 opencode 内部 addLines 语义一致，忽略末尾空行）。
+// 空字符串视作 0 行；保留原 trim 行为以便工具入参为空时也返回 0。
+function countAddedLines(text: string): number {
+  if (!text) return 0;
+  return text.split("\n").filter((line) => line.length > 0).length;
+}
+
+// 解析 unified diff 文本，按行前缀统计 +/- 行数。
+// 兼容 git apply 格式：@@、---、+++ 等元行不计入；新增行以 + 开头（首个字符不是 +++）。
+function countPatchStats(patch: string): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const raw of patch.split("\n")) {
+    if (raw.startsWith("+++") || raw.startsWith("---") || raw.startsWith("@@") || raw.startsWith("\\")) {
+      continue;
+    }
+    if (raw.startsWith("+")) {
+      additions += 1;
+    } else if (raw.startsWith("-")) {
+      deletions += 1;
+    }
+  }
+  return { additions, deletions };
 }
 
 export function errorFeedback(title: string, error: unknown): Feedback {

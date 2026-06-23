@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
-import { ArrowUpRight, Download, History, ListTodo, PanelRightClose, PencilLine, Plus, Send, Square, Upload } from "lucide-vue-next";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { ArrowUpRight, Download, History, ListTodo, PanelRightClose, PencilLine, Plus, Send, Square, Upload, X } from "lucide-vue-next";
 import aiHeaderUrl from "../assets/figma/ai-header.svg";
 import planLoadingUrl from "../assets/figma/plan-loadding.gif";
 
@@ -33,6 +33,18 @@ export type TaskUsage = {
   thoughtFor?: string;
 };
 
+// 抽屉里 diff 行的解析结果：保留原始前缀符号供渲染和后续扩展使用
+type DiffLineKind = "add" | "del" | "ctx" | "meta";
+
+type DiffLine = {
+  kind: DiffLineKind;
+  // meta 行没有行号，add 行只有 newNum，del 行只有 oldNum，ctx 行两者都有
+  oldNum?: number;
+  newNum?: number;
+  // 去掉前缀符号后的真实文本
+  text: string;
+};
+
 const props = defineProps<{
   messages: ChatMessageInput[];
   running?: boolean;
@@ -60,6 +72,113 @@ const emit = defineEmits<{
 }>();
 
 const localInput = ref(props.inputValue ?? "");
+
+// ===== 文件变更抽屉 =====
+// 抽屉默认选中第一个文件；打开后通过 fileChanges 变化自动跟随到最新一个文件（与原有的“跟随最近一次变化”心智一致）。
+const drawerOpen = ref(false);
+const drawerSelectedPath = ref<string>("");
+const drawerScroll = ref<HTMLElement | null>(null);
+
+// 把 unified diff 文本按行解析为带 kind 的结构，供右侧 git-merge 风格渲染使用。
+// 解析规则与 git apply 一致：每行首字符决定 kind；hunk header "@@" 重置行号计数器。
+// 没有 patch 文本（部分 diff.proposed 事件只带 path/additions/deletions）时返回空数组，由模板降级展示空态。
+function parseDiffLines(patch: string | undefined): DiffLine[] {
+  if (!patch) return [];
+  const result: DiffLine[] = [];
+  let oldLine = 0;
+  let newLine = 0;
+  for (const raw of patch.split("\n")) {
+    if (raw.startsWith("@@")) {
+      const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+      if (match) {
+        oldLine = Number(match[1]);
+        newLine = Number(match[2]);
+      }
+      // hunk header 始终原样展示，不去掉 @@ 前缀
+      result.push({ kind: "meta", text: raw });
+      continue;
+    }
+    if (raw.startsWith("---") || raw.startsWith("+++")) {
+      // 文件头 a/path b/path 不进入行号计数
+      result.push({ kind: "meta", text: raw });
+      continue;
+    }
+    if (raw.startsWith("+")) {
+      result.push({ kind: "add", newNum: newLine++, text: raw.slice(1) });
+      continue;
+    }
+    if (raw.startsWith("-")) {
+      result.push({ kind: "del", oldNum: oldLine++, text: raw.slice(1) });
+      continue;
+    }
+    // context 行可能以空格开头，也可能没有前缀（malformed）
+    const text = raw.startsWith(" ") ? raw.slice(1) : raw;
+    result.push({ kind: "ctx", oldNum: oldLine++, newNum: newLine++, text });
+  }
+  return result;
+}
+
+const hasFileChanges = computed(() => (props.fileChanges?.length ?? 0) > 0);
+
+// 抽屉可见文件列表（按 props 顺序）；选中态基于 drawerSelectedPath。
+const drawerFiles = computed(() => props.fileChanges ?? []);
+
+// 当前抽屉选中的文件对象；fallback 到第一个，保证初次打开一定有内容。
+const drawerSelectedFile = computed(
+  () => drawerFiles.value.find((file) => file.path === drawerSelectedPath.value) ?? drawerFiles.value[0]
+);
+
+// 当前文件的解析后 diff 行；用于右侧纯文本渲染。
+const drawerSelectedLines = computed(() => parseDiffLines(drawerSelectedFile.value?.patch));
+
+// 当前文件的增减行数；若 patch 没解析出来，则回退到 FileChangeStat 自带的 additions/deletions。
+const drawerSelectedAdditions = computed(
+  () =>
+    drawerSelectedLines.value.filter((line) => line.kind === "add").length ||
+    drawerSelectedFile.value?.additions ||
+    0
+);
+const drawerSelectedDeletions = computed(
+  () =>
+    drawerSelectedLines.value.filter((line) => line.kind === "del").length ||
+    drawerSelectedFile.value?.deletions ||
+    0
+);
+
+function openChangesDrawer() {
+  if (!hasFileChanges.value) return;
+  // 默认选中第一个文件
+  drawerSelectedPath.value = drawerFiles.value[0]?.path ?? "";
+  drawerOpen.value = true;
+  // 让 diff 区域滚回顶部，避免上次浏览的中间位置被保留
+  void nextTick(() => drawerScroll.value?.scrollTo({ top: 0 }));
+}
+
+function closeChangesDrawer() {
+  drawerOpen.value = false;
+}
+
+function selectDrawerFile(path: string) {
+  if (!path || drawerSelectedPath.value === path) return;
+  drawerSelectedPath.value = path;
+  // 切换文件时重置滚动
+  void nextTick(() => drawerScroll.value?.scrollTo({ top: 0 }));
+}
+
+// Esc 关闭抽屉：监听全局 keydown，只在抽屉打开时响应。
+function onDrawerKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape" && drawerOpen.value) {
+    event.preventDefault();
+    closeChangesDrawer();
+  }
+}
+
+onMounted(() => {
+  window.addEventListener("keydown", onDrawerKeydown);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onDrawerKeydown);
+});
 
 watch(
   () => props.inputValue,
@@ -107,8 +226,6 @@ const hasTaskUsage = computed(
   () => !!(props.taskUsage && (props.taskUsage.duration || props.taskUsage.tokens !== undefined || props.taskUsage.thoughtFor))
 );
 
-const hasFileChanges = computed(() => (props.fileChanges?.length ?? 0) > 0);
-
 const totalAdditions = computed(() =>
   (props.fileChanges || []).reduce((sum, f) => sum + (f.additions ?? 0), 0)
 );
@@ -116,8 +233,6 @@ const totalAdditions = computed(() =>
 const totalDeletions = computed(() =>
   (props.fileChanges || []).reduce((sum, f) => sum + (f.deletions ?? 0), 0)
 );
-
-const visibleFiles = computed(() => (props.fileChanges || []).slice(0, 3));
 
 // 从最近一条助手回复中解析 token 数量。
 // 支持的格式：↓ 826 tokens、tokens: 826、tokens：826、826 tokens 等。
@@ -237,13 +352,15 @@ function onKeydown(event: KeyboardEvent) {
       </div>
     </div>
 
-    <!-- 文件变更提示（位于任务消耗上方） -->
+    <!-- 文件变更提示（位于任务消耗上方）。点击后弹出右侧抽屉，列出本次变更文件并展示 diff。 -->
     <button
       v-if="hasFileChanges"
       type="button"
       class="figma-chat-changes-card"
-      :title="`${fileChanges?.length} 个文件已更改`"
-      @click="emit('open-diff', visibleFiles[0]?.path ?? '')"
+      :title="`${fileChanges?.length} 个文件已更改，点击查看 diff`"
+      :aria-expanded="drawerOpen"
+      aria-haspopup="dialog"
+      @click="openChangesDrawer"
     >
       <span class="figma-chat-changes-icon" aria-hidden="true">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
@@ -337,6 +454,114 @@ function onKeydown(event: KeyboardEvent) {
         </button>
       </div>
     </div>
+
+    <!--
+      文件变更抽屉：覆盖在聊天面板上方，左侧是文件列表，右侧是 git-merge 风格 diff 视图。
+      - 左侧点击切换文件；首次打开默认选中第一个文件。
+      - 右侧按 unified diff 行渲染：+ 绿底、- 红底、@@ 与文件头作为元信息展示。
+      - 关闭：点击 X、点击遮罩、按 Esc。
+    -->
+    <div
+      v-if="drawerOpen"
+      class="figma-chat-drawer-mask"
+      role="presentation"
+      @click.self="closeChangesDrawer"
+    >
+      <div
+        class="figma-chat-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="文件变更 Diff"
+        :data-testid="'chat-changes-drawer'"
+      >
+        <header class="figma-chat-drawer-header">
+          <div class="figma-chat-drawer-title">
+            <span class="figma-chat-drawer-title-text">文件变更</span>
+            <span class="figma-chat-drawer-count">{{ drawerFiles.length }}</span>
+          </div>
+          <div class="figma-chat-drawer-summary">
+            <span class="figma-chat-add">+{{ totalAdditions }}</span>
+            <span class="figma-chat-del">-{{ totalDeletions }}</span>
+          </div>
+          <button
+            type="button"
+            class="figma-chat-drawer-close"
+            aria-label="关闭 diff 抽屉"
+            @click="closeChangesDrawer"
+          >
+            <X :size="14" />
+          </button>
+        </header>
+        <div class="figma-chat-drawer-body">
+          <aside class="figma-chat-drawer-files" aria-label="变更文件列表">
+            <ul class="figma-chat-drawer-files-list">
+              <li v-for="file in drawerFiles" :key="file.path">
+                <button
+                  type="button"
+                  :class="['figma-chat-drawer-file-item', file.path === drawerSelectedFile?.path && 'is-active']"
+                  :data-testid="`chat-drawer-file-${file.path}`"
+                  :title="file.path"
+                  @click="selectDrawerFile(file.path)"
+                >
+                  <span
+                    :class="[
+                      'figma-chat-drawer-file-badge',
+                      file.status === 'added' && 'is-add',
+                      file.status === 'deleted' && 'is-del',
+                      file.status === 'modified' && 'is-mod'
+                    ]"
+                  >{{ file.status === "added" ? "新增" : file.status === "deleted" ? "删除" : "修改" }}</span>
+                  <span class="figma-chat-drawer-file-path">{{ file.path }}</span>
+                  <span class="figma-chat-drawer-file-stats">
+                    <span v-if="file.additions" class="figma-chat-add">+{{ file.additions }}</span>
+                    <span v-if="file.deletions" class="figma-chat-del">-{{ file.deletions }}</span>
+                  </span>
+                </button>
+              </li>
+            </ul>
+          </aside>
+          <section class="figma-chat-drawer-diff" aria-label="文件 diff 视图">
+            <header v-if="drawerSelectedFile" class="figma-chat-drawer-diff-header">
+              <span class="figma-chat-drawer-diff-path" :title="drawerSelectedFile.path">
+                {{ drawerSelectedFile.path }}
+              </span>
+              <span class="figma-chat-drawer-diff-stats">
+                <span class="figma-chat-add">+{{ drawerSelectedAdditions }}</span>
+                <span class="figma-chat-del">-{{ drawerSelectedDeletions }}</span>
+              </span>
+            </header>
+            <div
+              v-if="drawerSelectedLines.length"
+              ref="drawerScroll"
+              class="figma-chat-drawer-diff-scroll"
+              :data-testid="'chat-drawer-diff-scroll'"
+            >
+              <div
+                v-for="(line, index) in drawerSelectedLines"
+                :key="`${line.kind}-${index}`"
+                :class="[
+                  'figma-chat-drawer-diff-line',
+                  line.kind === 'add' && 'is-add',
+                  line.kind === 'del' && 'is-del',
+                  line.kind === 'meta' && 'is-meta'
+                ]"
+              >
+                <span class="figma-chat-drawer-diff-num">{{ line.oldNum ?? "" }}</span>
+                <span class="figma-chat-drawer-diff-num">{{ line.newNum ?? "" }}</span>
+                <span class="figma-chat-drawer-diff-sign">
+                  {{ line.kind === "add" ? "+" : line.kind === "del" ? "-" : line.kind === "meta" ? "" : " " }}
+                </span>
+                <span class="figma-chat-drawer-diff-text">{{ line.text || " " }}</span>
+              </div>
+            </div>
+            <div v-else class="figma-chat-drawer-diff-empty">
+              <p>暂无 diff 内容</p>
+              <p class="figma-chat-drawer-diff-empty-hint">后端事件未携带 patch 文本，请稍候或重新触发 Run。</p>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -348,6 +573,8 @@ function onKeydown(event: KeyboardEvent) {
   min-height: 0;
   background: #fff;
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  /* 抽屉遮罩使用 position: absolute 覆盖在聊天面板上，需要 root 作为定位上下文 */
+  position: relative;
 }
 
 /* ---- Header ---- */
@@ -786,5 +1013,338 @@ function onKeydown(event: KeyboardEvent) {
 .figma-chat-stop-icon {
   width: 13px;
   height: 13px;
+}
+
+/* ---- Changes Drawer ----
+   抽屉打开时覆盖在右侧聊天面板之上。遮罩半透明，点击空白处关闭；
+   抽屉本体占满面板宽度，左侧是文件菜单，右侧是 git-merge 风格的 diff。*/
+.figma-chat-drawer-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: rgba(15, 15, 18, 0.32);
+  display: flex;
+  justify-content: stretch;
+  align-items: stretch;
+  animation: figma-chat-drawer-fade 0.16s ease-out;
+}
+
+.figma-chat-drawer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  background: #fff;
+  box-shadow: -8px 0 24px rgba(15, 15, 18, 0.16);
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  animation: figma-chat-drawer-slide 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@keyframes figma-chat-drawer-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes figma-chat-drawer-slide {
+  from { transform: translateX(20px); opacity: 0.6; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.figma-chat-drawer-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  flex-shrink: 0;
+  padding: 0 8px 0 14px;
+  border-bottom: 1px solid #ddd;
+  background: #fff;
+}
+
+.figma-chat-drawer-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.figma-chat-drawer-title-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: #18181b;
+  line-height: 20px;
+  letter-spacing: 0.0143em;
+}
+
+.figma-chat-drawer-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: #f0f0f0;
+  color: #555;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.figma-chat-drawer-summary {
+  display: inline-flex;
+  gap: 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.figma-chat-drawer-close {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0.8px solid #dfdfdf;
+  border-radius: 6px;
+  background: #fff;
+  color: #777;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.figma-chat-drawer-close:hover {
+  background: #f0f0f0;
+  border-color: #cfcfcf;
+  color: #333;
+}
+
+.figma-chat-drawer-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(140px, 38%) minmax(0, 1fr);
+  background: #fff;
+}
+
+.figma-chat-drawer-files {
+  border-right: 1px solid #ededed;
+  background: #fafafa;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.figma-chat-drawer-files-list {
+  list-style: none;
+  margin: 0;
+  padding: 6px 6px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.figma-chat-drawer-file-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #333;
+  text-align: left;
+  cursor: pointer;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  line-height: 18px;
+  transition: background-color 0.1s ease, border-color 0.1s ease;
+}
+
+.figma-chat-drawer-file-item:hover {
+  background: #efefef;
+}
+
+.figma-chat-drawer-file-item.is-active {
+  background: #eaf0ff;
+  border-color: #b9c8ff;
+  color: #1d3fb0;
+}
+
+.figma-chat-drawer-file-badge {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 18px;
+  background: #e7eee9;
+  color: #3f7a5a;
+}
+
+.figma-chat-drawer-file-badge.is-del {
+  background: #f6dfdc;
+  color: #9e3b34;
+}
+
+.figma-chat-drawer-file-badge.is-mod {
+  background: #f3ecdc;
+  color: #946015;
+}
+
+.figma-chat-drawer-file-path {
+  min-width: 0;
+  flex: 1;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.figma-chat-drawer-file-stats {
+  flex-shrink: 0;
+  display: inline-flex;
+  gap: 4px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 16px;
+}
+
+.figma-chat-drawer-diff {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: #fff;
+}
+
+.figma-chat-drawer-diff-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #ededed;
+  background: #fafafa;
+  font-size: 12px;
+}
+
+.figma-chat-drawer-diff-path {
+  min-width: 0;
+  flex: 1;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.figma-chat-drawer-diff-stats {
+  display: inline-flex;
+  gap: 6px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.figma-chat-drawer-diff-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  font-family: "JetBrains Mono", "Cascadia Mono", monospace;
+  font-size: 12px;
+  line-height: 20px;
+  background: #fff;
+}
+
+.figma-chat-drawer-diff-line {
+  display: grid;
+  grid-template-columns: 44px 44px 18px minmax(0, 1fr);
+  align-items: start;
+  white-space: pre;
+  color: #333;
+}
+
+.figma-chat-drawer-diff-line.is-add {
+  background: rgba(63, 122, 90, 0.12);
+}
+
+.figma-chat-drawer-diff-line.is-add .figma-chat-drawer-diff-sign,
+.figma-chat-drawer-diff-line.is-add .figma-chat-drawer-diff-text {
+  color: #2c6b4b;
+}
+
+.figma-chat-drawer-diff-line.is-del {
+  background: rgba(158, 59, 52, 0.12);
+}
+
+.figma-chat-drawer-diff-line.is-del .figma-chat-drawer-diff-sign,
+.figma-chat-drawer-diff-line.is-del .figma-chat-drawer-diff-text {
+  color: #8a2f29;
+}
+
+.figma-chat-drawer-diff-line.is-meta {
+  background: #f0f3f8;
+  color: #6a6a6a;
+  font-style: normal;
+}
+
+.figma-chat-drawer-diff-line.is-meta .figma-chat-drawer-diff-num,
+.figma-chat-drawer-diff-line.is-meta .figma-chat-drawer-diff-sign {
+  color: transparent;
+}
+
+.figma-chat-drawer-diff-num {
+  text-align: right;
+  padding: 0 8px 0 0;
+  color: #b5b5b5;
+  user-select: none;
+  border-right: 1px solid #ededed;
+  background: rgba(245, 245, 245, 0.6);
+}
+
+.figma-chat-drawer-diff-sign {
+  text-align: center;
+  color: #b5b5b5;
+  user-select: none;
+}
+
+.figma-chat-drawer-diff-text {
+  padding-right: 12px;
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.figma-chat-drawer-diff-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: #888;
+  font-size: 12px;
+  text-align: center;
+  padding: 24px 16px;
+}
+
+.figma-chat-drawer-diff-empty-hint {
+  font-size: 11px;
+  color: #aaa;
+  max-width: 240px;
+  line-height: 18px;
 }
 </style>
