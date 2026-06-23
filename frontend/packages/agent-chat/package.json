@@ -11,10 +11,15 @@
   "dependencies": {
     "@test-agent/shared-types": "workspace:*",
     "@test-agent/ui-kit": "workspace:*",
+    "dompurify": "3.2.6",
+    "github-markdown-css": "^5.9.0",
+    "highlight.js": "^11.11.1",
     "lucide-vue-next": "1.0.0",
+    "markdown-it": "^14.2.0",
     "vue": "3.5.38"
   },
   "devDependencies": {
+    "@types/markdown-it": "^14.1.2",
     "typescript": "6.0.3",
     "vue-tsc": "3.3.5"
   }

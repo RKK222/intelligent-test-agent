@@ -412,11 +412,40 @@ function toMessagePart(raw: Record<string, unknown>, partId: string): MessagePar
     return { partId, type: "snapshot", snapshot: text(raw.snapshot) ?? "" };
   }
   if (partType === "patch") {
+    const metadata = record(raw.metadata);
+    // 后端可能把 filesMap（path → unified diff）和 fileStats（path → { +/– }）挂在 metadata 上，
+    // 也可能平铺在 part 顶层或 files 数组的每项里；这里统一收敛到 metadata 上，方便 PatchBlock 一次性消费
+    const inlineFilesMap = record(raw.filesMap);
+    const inlineFileStats = record(raw.fileStats);
+    const files = Array.isArray(raw.files) ? raw.files.filter((item): item is string => typeof item === "string") : [];
+    const normalizedFilesMap: Record<string, string> = {};
+    for (const [path, diff] of Object.entries({ ...(record(metadata?.filesMap) ?? {}), ...(inlineFilesMap ?? {}) })) {
+      if (typeof diff === "string" && diff.length > 0) {
+        normalizedFilesMap[path] = diff;
+      }
+    }
+    const normalizedFileStats: Record<string, { additions?: number; deletions?: number }> = {};
+    for (const [path, stats] of Object.entries({ ...(record(metadata?.fileStats) ?? {}), ...(inlineFileStats ?? {}) })) {
+      const statsRecord = record(stats);
+      if (!statsRecord) continue;
+      const entry: { additions?: number; deletions?: number } = {};
+      if (typeof statsRecord.additions === "number" && Number.isFinite(statsRecord.additions)) {
+        entry.additions = statsRecord.additions;
+      }
+      if (typeof statsRecord.deletions === "number" && Number.isFinite(statsRecord.deletions)) {
+        entry.deletions = statsRecord.deletions;
+      }
+      normalizedFileStats[path] = entry;
+    }
+    const hasMetadata = Object.keys(normalizedFilesMap).length > 0 || Object.keys(normalizedFileStats).length > 0;
     return {
       partId,
       type: "patch",
       hash: text(raw.hash) ?? "",
-      files: Array.isArray(raw.files) ? raw.files.filter((item): item is string => typeof item === "string") : []
+      files,
+      metadata: hasMetadata
+        ? { filesMap: normalizedFilesMap, fileStats: normalizedFileStats }
+        : undefined
     };
   }
   if (partType === "agent") {

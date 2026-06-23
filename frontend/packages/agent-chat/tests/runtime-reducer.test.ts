@@ -257,6 +257,50 @@ describe("agent-chat runtime reducer", () => {
       expect(part).toMatchObject({ partId: item.part.id, ...item.expect });
     }
   });
+
+  it("collects patch filesMap/fileStats into metadata for the part block", () => {
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_1",
+        part: {
+          id: "p_patch",
+          messageID: "msg_1",
+          type: "patch",
+          hash: "abcdef1234",
+          files: ["a.ts", "b.ts"],
+          filesMap: { "a.ts": "--- a.ts\n+++ a.ts\n@@\n-foo\n+bar" },
+          fileStats: { "a.ts": { additions: 1, deletions: 1 } }
+        }
+      })
+    });
+
+    const message = state.messages[state.messages.length - 1];
+    const part = (message as { parts?: { type: string; metadata?: { filesMap?: Record<string, string>; fileStats?: Record<string, { additions?: number; deletions?: number }> } }[] }).parts?.[0];
+    expect(part?.metadata?.filesMap?.["a.ts"]).toContain("+bar");
+    expect(part?.metadata?.fileStats?.["a.ts"]).toEqual({ additions: 1, deletions: 1 });
+  });
+
+  it("falls back to a top-level metadata object when patch lacks inline maps", () => {
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_1",
+        part: {
+          id: "p_patch2",
+          messageID: "msg_1",
+          type: "patch",
+          hash: "1234",
+          files: ["a.ts"],
+          metadata: { filesMap: { "a.ts": "@@\n-x\n+y" } }
+        }
+      })
+    });
+
+    const message = state.messages[state.messages.length - 1];
+    const part = (message as { parts?: { type: string; metadata?: { filesMap?: Record<string, string> } }[] }).parts?.[0];
+    expect(part?.metadata?.filesMap?.["a.ts"]).toContain("+y");
+  });
 });
 
 function event(type: string, payload: Record<string, unknown>): RunEvent {

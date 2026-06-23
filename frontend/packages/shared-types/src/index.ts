@@ -265,6 +265,12 @@ export type PatchPart = {
   type: "patch";
   hash: string;
   files: string[];
+  // 可选 metadata：filesMap 是 path → unified diff 文本；fileStats 是 path → { additions, deletions }。
+  // 后端把 apply_patch / edit 工具的产物挂在 metadata 上，前端 PatchBlock 据此展示每文件的 diff 与 +/– 行数。
+  metadata?: {
+    filesMap?: Record<string, string>;
+    fileStats?: Record<string, { additions?: number; deletions?: number }>;
+  };
 };
 
 // Agent 声明：当前活跃的 Agent 标识
