@@ -43,6 +43,7 @@ const emit = defineEmits<{
     <WorkbenchFooter
       :branch="currentBranch"
       :branches="branches"
+      :show-branch="true"
       @change-branch="(name: string) => emit('changeBranch', name)"
     />
   </div>
