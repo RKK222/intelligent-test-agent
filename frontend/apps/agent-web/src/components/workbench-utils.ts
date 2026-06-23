@@ -22,15 +22,27 @@ import { buildEditorFilePromptPart } from "./prompt-context";
 export function diffFilesFromPayload(payload: Record<string, unknown>): RunDiffFile[] {
   const raw = Array.isArray(payload.diff) ? payload.diff : Array.isArray(payload.files) ? payload.files : [];
   return raw
-    .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
-    .map((item) => ({
-      path: String(item.path ?? item.file ?? ""),
-      patch: String(item.patch ?? ""),
-      additions: Number(item.additions ?? 0),
-      deletions: Number(item.deletions ?? 0),
-      status: String(item.status ?? "modified")
-    }))
-    .filter((item) => item.path.length > 0);
+    .map((item) => {
+      // opencode 的 session.diff 事件 payload.files 是 path 字符串数组，
+      // 而后端自生成的 diff.proposed 事件 payload.files 是包含 path/additions/deletions 的对象数组。
+      if (typeof item === "string") {
+        return item.length > 0 ? { path: item, patch: "", additions: 0, deletions: 0, status: "modified" } : null;
+      }
+      if (typeof item === "object" && item !== null) {
+        const record = item as Record<string, unknown>;
+        const path = String(record.path ?? record.file ?? "");
+        if (!path) return null;
+        return {
+          path,
+          patch: String(record.patch ?? ""),
+          additions: Number(record.additions ?? 0),
+          deletions: Number(record.deletions ?? 0),
+          status: String(record.status ?? "modified")
+        };
+      }
+      return null;
+    })
+    .filter((item): item is RunDiffFile => item !== null);
 }
 
 // 把新到达的 diff 文件列表按 path 合并到已有列表中：

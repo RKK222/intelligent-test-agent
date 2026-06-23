@@ -827,24 +827,24 @@ function handleRunEvent(event: RunEvent) {
   if (event.type === "assistant.message.delta") {
     return;
   } else if (event.type === "diff.proposed") {
+    // opencode session.diff 与后端自生成的 diff.proposed 都映射为该事件类型。
+    // - edit/apply_patch 工具的 diff.proposed payload.files 是本次刚编辑的文件对象数组；
+    // - opencode session.diff payload.files 是 path 字符串数组。
+    // 两种格式都按 path 累加去重，避免后到的单文件事件把前面已累加的多个文件覆盖。
     const files = diffFilesFromPayload(event.payload);
     if (files.length) {
       diffSource.value = "run";
-      // edit/apply_patch 工具的 diff.proposed 事件只携带本次改动的文件，必须按 path 累加去重，
-      // 否则后续事件会把前面已变更的文件覆盖丢失，导致右侧"X 个文件已更改"提示始终为 1。
       diffFiles.value = mergeDiffFiles(diffFiles.value, files);
       workbench.setSelectedDiffPath(files[0]?.path);
-    } else if (run.value) {
-      void api.getRunDiff(run.value.runId).then((diff) => {
-        diffFiles.value = diff.files;
-        workbench.setSelectedDiffPath(diff.files[0]?.path);
-      });
     }
+    // 注意：不再回退到 api.getRunDiff——该接口返回的是最近一个 diff.proposed 事件的 files，
+    // 触发后会把当前已累加的多文件集合覆盖成单文件，导致"X 个文件已更改"提示从 3 变回 1。
   } else if (event.type === "session.diff") {
+    // 历史事件类型。当前 OpencodeRunEventMapper 已将 session.diff 映射为 diff.proposed，
+    // 这里保留以兼容后端直接转发该类型事件的场景。
     const files = diffFilesFromPayload(event.payload);
     if (files.length) {
       diffSource.value = "session";
-      // 同样按 path 累加，避免被后面的 session.diff 报告"清空"。
       diffFiles.value = mergeDiffFiles(diffFiles.value, files);
       workbench.setSelectedDiffPath(files[0]?.path);
     }

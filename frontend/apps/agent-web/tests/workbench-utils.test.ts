@@ -7,7 +7,7 @@ function file(path: string, additions: number, deletions: number, status = "modi
 }
 
 describe("diffFilesFromPayload", () => {
-  it("reads files from payload.files", () => {
+  it("reads file objects from payload.files", () => {
     expect(diffFilesFromPayload({ files: [{ path: "a.ts", additions: 1, deletions: 0 }] })).toEqual([
       { path: "a.ts", patch: "", additions: 1, deletions: 0, status: "modified" }
     ]);
@@ -22,6 +22,24 @@ describe("diffFilesFromPayload", () => {
   it("filters out items with empty path", () => {
     expect(diffFilesFromPayload({ files: [{ path: "" }, { path: "b.ts" }] })).toEqual([
       { path: "b.ts", patch: "", additions: 0, deletions: 0, status: "modified" }
+    ]);
+  });
+
+  it("normalizes opencode session.diff string path arrays", () => {
+    // opencode session.diff 事件的 payload.files 是 path 字符串数组，
+    // 需要包装成 RunDiffFile 对象才能在 mergeDiffFiles 中按 path 去重累加。
+    expect(diffFilesFromPayload({ files: ["a.ts", "b.ts", ""] })).toEqual([
+      { path: "a.ts", patch: "", additions: 0, deletions: 0, status: "modified" },
+      { path: "b.ts", patch: "", additions: 0, deletions: 0, status: "modified" }
+    ]);
+  });
+
+  it("mixes string paths and file objects in the same array", () => {
+    expect(
+      diffFilesFromPayload({ files: ["c.ts", { path: "a.ts", additions: 2, deletions: 1, status: "modified" }] })
+    ).toEqual([
+      { path: "c.ts", patch: "", additions: 0, deletions: 0, status: "modified" },
+      { path: "a.ts", patch: "", additions: 2, deletions: 1, status: "modified" }
     ]);
   });
 });
