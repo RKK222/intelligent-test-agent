@@ -1,5 +1,6 @@
 package com.icbc.testagent.domain.auth;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.icbc.testagent.domain.user.UserId;
 import java.time.Instant;
 import java.util.Objects;
@@ -7,6 +8,7 @@ import java.util.Objects;
 /**
  * 认证主体，表示经过认证的用户在 Token 中的存储信息。
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record AuthPrincipal(
         String token,
         UserId userId,

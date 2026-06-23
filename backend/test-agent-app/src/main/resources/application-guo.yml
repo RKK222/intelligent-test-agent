@@ -1,0 +1,48 @@
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    druid:
+      driver-class-name: org.postgresql.Driver
+      url: jdbc:postgresql://127.0.0.1:5432/test_agent
+      username: test_agent
+      password: test_agent
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      password: ""
+      timeout: 1s
+
+test-agent:
+  security:
+    api-token: ""
+    cors-allowed-origins: http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174
+  rate-limit:
+    enabled: false
+    capacity: 120
+    window: 1m
+  redis:
+    enabled: true
+    host: 127.0.0.1
+    port: 6379
+    password: ""
+  opencode:
+    nodes:
+      - id: node_local_opencode
+        base-url: http://127.0.0.1:4096
+        max-runs: 4
+        weight: 100
+        capabilities:
+          - chat
+          - diff
+          - test
+
+management:
+  health:
+    db:
+      enabled: true
