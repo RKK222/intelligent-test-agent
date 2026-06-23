@@ -1,24 +1,22 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
-import SettingsGeneralPanel from "./SettingsGeneralPanel.vue";
-import SettingsAppearancePanel from "./SettingsAppearancePanel.vue";
-import SettingsAccountPanel from "./SettingsAccountPanel.vue";
-import SettingsAboutPanel from "./SettingsAboutPanel.vue";
+import type { CurrentUser } from "@test-agent/shared-types";
+import SettingsAppWorkspacePanel from "./SettingsAppWorkspacePanel.vue";
+import SettingsPersonalPanel from "./SettingsPersonalPanel.vue";
 
 type PanelDef = { title: string; component: Component };
 
-const panels: Record<string, PanelDef> = {
-  general: { title: "通用", component: SettingsGeneralPanel },
-  appearance: { title: "外观", component: SettingsAppearancePanel },
-  account: { title: "账号", component: SettingsAccountPanel },
-  about: { title: "关于", component: SettingsAboutPanel }
-};
-
 const props = defineProps<{
   activeKey: string;
+  currentUser: CurrentUser | null;
 }>();
 
-const current = computed<PanelDef>(() => panels[props.activeKey] ?? panels.general);
+const panels: Record<string, PanelDef> = {
+  appWorkspace: { title: "应用与工作区", component: SettingsAppWorkspacePanel },
+  personal: { title: "个人设置", component: SettingsPersonalPanel }
+};
+
+const current = computed<PanelDef>(() => panels[props.activeKey] ?? panels.appWorkspace);
 </script>
 
 <template>
@@ -27,7 +25,7 @@ const current = computed<PanelDef>(() => panels[props.activeKey] ?? panels.gener
       <h3 class="ta-settings-panel-title">{{ current.title }}</h3>
     </header>
     <div class="ta-settings-panel-body">
-      <component :is="current.component" />
+      <component :is="current.component" :current-user="currentUser" />
     </div>
   </div>
 </template>
@@ -39,7 +37,6 @@ const current = computed<PanelDef>(() => panels[props.activeKey] ?? panels.gener
   height: 100%;
   min-height: 0;
 }
-
 .ta-settings-panel-header {
   display: flex;
   align-items: center;
@@ -48,15 +45,13 @@ const current = computed<PanelDef>(() => panels[props.activeKey] ?? panels.gener
   border-bottom: 1px solid #ebeef5;
   flex-shrink: 0;
 }
-
 .ta-settings-panel-title {
   font-size: 14px;
   font-weight: 600;
   color: #18181b;
   margin: 0;
-  font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
 }
-
 .ta-settings-panel-body {
   flex: 1;
   min-height: 0;
