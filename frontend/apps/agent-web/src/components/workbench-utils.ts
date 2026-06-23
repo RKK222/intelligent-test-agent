@@ -80,7 +80,8 @@ export function mergeDiffFiles(current: RunDiffFile[], incoming: RunDiffFile[]):
 // workspace 相对化交给 AgentWorkbench 的 normalizeWorkspacePath。
 export function normalizePathKey(raw: string | undefined): string {
   if (!raw) return "";
-  let p = raw.replace(/^([ab])\//, "").replace(/\\/g, "/").trim();
+  // 必须先把反斜杠折叠成正斜杠，a/ b/ 前缀匹配才能命中 "b\\src\\App.vue" 这类路径。
+  let p = raw.replace(/\\/g, "/").replace(/^([ab])\//, "").trim();
   while (p.startsWith("./")) p = p.slice(2);
   p = p.replace(/\/+$/, "");
   p = p.replace(/\/+/g, "/");
@@ -100,7 +101,8 @@ const DIFF_AWARE_TOOL_NAMES = new Set([
 // 从 tool part 的 input/metadata 推断出本工具的 RunDiffFile。
 // opencode 1.17.8 的 `session.diff` 事件在普通 summarize 流程中只发空 diff 数组，
 // 导致前端"文件变更"卡片 +N 永远显示 0。这里基于工具的入参估算新增/删除行数，
-// 让卡片在写文件工具完成时也能即时反映本次改动。
+// 让卡片在写文件工具完成时也能即时反映本次改动，并补一个合成的 unified diff
+// 文本让"文件变更"抽屉的右侧 diff 视图能立刻渲染内容，而不是显示"暂无 diff 内容"。
 //
 // 返回 undefined 表示非写文件工具或参数不足，前端应保持原 diffFiles 不变。
 export function inferDiffFromToolPart(part: Extract<MessagePart, { type: "tool" }>): RunDiffFile | undefined {
@@ -125,11 +127,16 @@ export function inferDiffFromToolPart(part: Extract<MessagePart, { type: "tool" 
   if (toolName === "edit" || toolName === "str_replace" || toolName === "multi_edit") {
     const oldText = text(input.oldString) ?? text(input.old_string) ?? text(input.oldText) ?? "";
     const newText = text(input.newString) ?? text(input.new_string) ?? text(input.newText) ?? "";
+    const oldLines = splitLines(oldText);
+    const newLines = splitLines(newText);
+    const additions = newLines.length;
+    const deletions = oldLines.length;
+    const patch = buildEditPatch(filePath, oldText, newText);
     return {
       path: filePath,
-      patch: "",
-      additions: countAddedLines(newText),
-      deletions: countAddedLines(oldText),
+      patch,
+      additions,
+      deletions,
       status: "modified"
     };
   }
@@ -143,7 +150,7 @@ export function inferDiffFromToolPart(part: Extract<MessagePart, { type: "tool" 
     const { additions, deletions } = countPatchStats(patchText);
     return {
       path: filePath,
-      patch: "",
+      patch: patchText,
       additions,
       deletions,
       status: "modified"
@@ -152,14 +159,51 @@ export function inferDiffFromToolPart(part: Extract<MessagePart, { type: "tool" 
 
   // write / create_file：纯新增场景，把新增内容按行数累加成 additions，
   // deletions 留 0（写入时是否覆盖旧内容前端无法可靠判断，留 0 与平台"新增"语义一致）。
+  // 合成 unified diff 文本让"文件变更抽屉"右侧能渲染为全 +N 行的视图。
   const content = text(input.content) ?? text(input.text) ?? "";
   return {
     path: filePath,
-    patch: "",
+    patch: buildWritePatch(filePath, content),
     additions: countAddedLines(content),
     deletions: 0,
     status: "added"
   };
+}
+
+// 按 \n / \r\n 拆分并保留尾部空行外的所有行；与 opencode 内部行数统计保持一致。
+function splitLines(text: string): string[] {
+  if (!text) return [];
+  return text.split(/\r?\n/);
+}
+
+// 为 write / create_file 工具合成 unified diff：--- /dev/null → +++ b/<path>，
+// @@ -0,0 +1,N @@，N 为内容总行数；body 每行加 + 前缀。
+// 抽屉的 parseDiffLines 会按 + 行累加，additions 计数与 FileChangeStat.additions 一致。
+function buildWritePatch(filePath: string, content: string): string {
+  const lines = splitLines(content);
+  // 文件头里只暴露 basename，避免与"+ b/<path>"的 git 风格重复
+  const displayPath = filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
+  const header = `--- /dev/null\n+++ b/${displayPath}\n@@ -0,0 +1,${lines.length} @@`;
+  if (lines.length === 0) return header;
+  const body = lines.map((line) => `+${line}`).join("\n");
+  return `${header}\n${body}`;
+}
+
+// 为 edit / str_replace / multi_edit 工具合成 unified diff：oldString 作为 - 行，
+// newString 作为 + 行；行号用 1 起估算，与 git apply 兼容。
+// 真实编辑点位置无法在客户端还原（只看到 oldString/newString 字符串），
+// 但作为可视化 diff 已经足够覆盖"新增/删除行数"和"内容预览"两个用途。
+function buildEditPatch(filePath: string, oldText: string, newText: string): string {
+  const oldLines = splitLines(oldText);
+  const newLines = splitLines(newText);
+  const displayPath = filePath.split(/[\\/]/).filter(Boolean).pop() ?? filePath;
+  const header = `--- a/${displayPath}\n+++ b/${displayPath}\n@@ -1,${oldLines.length} +1,${newLines.length} @@`;
+  if (oldLines.length === 0 && newLines.length === 0) return header;
+  const oldBlock = oldLines.map((line) => `-${line}`).join("\n");
+  const newBlock = newLines.map((line) => `+${line}`).join("\n");
+  if (oldLines.length === 0) return `${header}\n${newBlock}`;
+  if (newLines.length === 0) return `${header}\n${oldBlock}`;
+  return `${header}\n${oldBlock}\n${newBlock}`;
 }
 
 // 统计非空行数（与 opencode 内部 addLines 语义一致，忽略末尾空行）。

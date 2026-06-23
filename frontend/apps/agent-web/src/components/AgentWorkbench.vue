@@ -1134,7 +1134,12 @@ function handleRunEvent(event: RunEvent) {
     // - edit/apply_patch 工具的 diff.proposed payload.files 是本次刚编辑的文件对象数组；
     // - opencode session.diff payload.files 是 path 字符串数组。
     // 两种格式都按 path 累加去重，避免后到的单文件事件把前面已累加的多个文件覆盖。
-    const files = diffFilesFromPayload(event.payload);
+    // 归一化路径后再合并：opencode 部分场景会把 file 写成 "a/src/App.vue" 或带盘符的
+    // 绝对路径，与 inferDiffFromToolPart 推断出来的相对路径必须落到同一个 key。
+    const files = diffFilesFromPayload(event.payload).map((f) => ({
+      ...f,
+      path: normalizeWorkspacePath(f.path) || f.path
+    }));
     if (files.length) {
       diffSource.value = "run";
       diffFiles.value = mergeDiffFiles(diffFiles.value, files);
@@ -1145,7 +1150,10 @@ function handleRunEvent(event: RunEvent) {
   } else if (event.type === "session.diff") {
     // 历史事件类型。当前 OpencodeRunEventMapper 已将 session.diff 映射为 diff.proposed，
     // 这里保留以兼容后端直接转发该类型事件的场景。
-    const files = diffFilesFromPayload(event.payload);
+    const files = diffFilesFromPayload(event.payload).map((f) => ({
+      ...f,
+      path: normalizeWorkspacePath(f.path) || f.path
+    }));
     if (files.length) {
       diffSource.value = "session";
       diffFiles.value = mergeDiffFiles(diffFiles.value, files);
@@ -1177,13 +1185,26 @@ function handleRunEvent(event: RunEvent) {
 // agent 写文件用的 opencode 工具名；这些工具的 input 带文件路径，完成时磁盘已写入。
 const LIVE_WRITE_TOOLS = new Set(["write", "edit", "apply_patch", "str_replace", "multi_edit", "create_file"]);
 
-// 把绝对路径或带 git 前缀的路径归一化为 workspace 相对路径。
+// 把绝对路径或带 git 前缀的路径归一化为 workspace 相对路径（统一使用 / 分隔符）。
+// - 去掉 git diff 前缀 "a/" / "b/"
+// - 把 Windows 反斜杠折叠成正斜杠，让 D:\workspace\vue\src\App.vue 与
+//   D:/workspace/vue/src/App.vue 走同一条剥离分支
+// - 去掉 workspace 根路径（兼容根路径带不带尾斜杠）
+// - 折叠前导 ./ 与重复斜杠
 function normalizeWorkspacePath(raw: string): string {
   const rootPath = selectedWorkspace.value?.rootPath ?? "";
-  let p = raw.replace(/^([ab])\//, "");
-  if (rootPath && (p === rootPath || p.startsWith(`${rootPath}/`))) {
-    p = p.slice(rootPath.length).replace(/^\/+/, "");
+  let p = raw.replace(/^([ab])\//, "").replace(/\\/g, "/");
+  const normalizedRoot = rootPath.replace(/\\/g, "/").replace(/\/+$/, "");
+  if (normalizedRoot) {
+    if (p === normalizedRoot) {
+      p = "";
+    } else if (p.startsWith(`${normalizedRoot}/`)) {
+      p = p.slice(normalizedRoot.length + 1);
+    }
   }
+  while (p.startsWith("./")) p = p.slice(2);
+  p = p.replace(/\/+$/, "");
+  p = p.replace(/\/+/g, "/");
   return p;
 }
 

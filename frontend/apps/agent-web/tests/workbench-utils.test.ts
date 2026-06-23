@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { MessagePart, RunDiffFile } from "@test-agent/shared-types";
-import { diffFilesFromPayload, inferDiffFromToolPart, mergeDiffFiles } from "../src/components/workbench-utils";
+import {
+  diffFilesFromPayload,
+  inferDiffFromToolPart,
+  mergeDiffFiles,
+  normalizePathKey
+} from "../src/components/workbench-utils";
 
 function file(path: string, additions: number, deletions: number, status = "modified"): RunDiffFile {
   return { path, patch: "", additions, deletions, status };
@@ -89,34 +94,100 @@ describe("mergeDiffFiles", () => {
       file("d.ts", 0, 0)
     ]);
   });
+
+  it("deduplicates already-normalized paths in different forms", () => {
+    // 调用方（AgentWorkbench.applyToolChangeToDiff / diff.proposed 事件处理）已用
+    // normalizeWorkspacePath 把 Windows 绝对路径、a/ b/ 前缀等归一化为同一种相对路径形态，
+    // mergeDiffFiles 的职责是把这些"已归一化"路径再按形态 key 折叠，避免大小写、反斜杠残留造成重复。
+    // 这里模拟两条来源的同一文件（已被调用方归一化），验证它们合并为一条。
+    const current = [{ ...file("src/App.vue", 1, 0), patch: "old patch" }];
+    const incoming = [file("src/app.vue", 2, 1)];
+    const merged = mergeDiffFiles(current, incoming);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toEqual({ path: "src/app.vue", patch: "", additions: 2, deletions: 1, status: "modified" });
+  });
+
+  it("collapses mixed backslash / forward-slash forms into a single key", () => {
+    // 模拟调用方未做 separator 折叠时的边缘场景：mergeDiffFiles 自身也要兜底
+    // 让 "src\\App.vue" 与 "src/App.vue" 落到同一个 key。
+    const merged = mergeDiffFiles([file("src\\App.vue", 1, 0)], [file("src/App.vue", 2, 1)]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]).toEqual(file("src/App.vue", 2, 1));
+  });
+
+  it("deduplicates git a/ b/ prefixes as the same path", () => {
+    const current = [file("a/src/App.vue", 1, 0)];
+    const incoming = [file("b/src/App.vue", 3, 1)];
+    expect(mergeDiffFiles(current, incoming)).toHaveLength(1);
+    expect(mergeDiffFiles(current, incoming)[0]).toEqual(file("b/src/App.vue", 3, 1));
+  });
+
+  it("is case-insensitive on the path key for Windows file systems", () => {
+    expect(mergeDiffFiles([file("SRC/App.vue", 1, 0)], [file("src/app.vue", 2, 1)])).toHaveLength(1);
+  });
+});
+
+describe("normalizePathKey", () => {
+  it("strips git a/ b/ prefixes and folds separators", () => {
+    expect(normalizePathKey("a/src/App.vue")).toBe("src/app.vue");
+    expect(normalizePathKey("b\\src\\App.vue")).toBe("src/app.vue");
+  });
+  it("removes trailing slashes and collapses repeated slashes", () => {
+    expect(normalizePathKey("./src//App.vue/")).toBe("src/app.vue");
+  });
+  it("returns empty string for falsy input", () => {
+    expect(normalizePathKey("")).toBe("");
+    expect(normalizePathKey(undefined)).toBe("");
+  });
 });
 
 describe("inferDiffFromToolPart", () => {
-  it("counts new file lines for write tool", () => {
+  it("counts new file lines for write tool and synthesizes a unified diff", () => {
     // write 工具完成时，前端应能基于 input.content 估算 additions，让"文件变更"卡片显示 +N。
+    // 同时合成 unified diff 文本，让"文件变更抽屉"右侧能渲染为全 +N 行的视图，
+    // 避免点击后展示"暂无 diff 内容"的空态。
     const result = inferDiffFromToolPart(
       toolPart({ filePath: "/tmp/demo/src/new.ts", content: "export const a = 1\nexport const b = 2\nexport const c = 3" })
     );
-    expect(result).toEqual({ path: "/tmp/demo/src/new.ts", patch: "", additions: 3, deletions: 0, status: "added" });
+    expect(result).toMatchObject({
+      path: "/tmp/demo/src/new.ts",
+      additions: 3,
+      deletions: 0,
+      status: "added"
+    });
+    // patch 应包含文件头 + + 前缀的全部内容行
+    expect(result?.patch).toContain("--- /dev/null");
+    expect(result?.patch).toContain("+++ b/new.ts");
+    expect(result?.patch).toContain("@@ -0,0 +1,3 @@");
+    expect(result?.patch).toContain("+export const a = 1");
+    expect(result?.patch).toContain("+export const b = 2");
+    expect(result?.patch).toContain("+export const c = 3");
   });
 
-  it("counts new and old lines for edit tool", () => {
+  it("synthesizes unified diff for edit tool from oldString/newString", () => {
     const result = inferDiffFromToolPart(
       toolPart(
         { filePath: "/tmp/demo/src/app.ts", oldString: "const a = 1\nconst b = 2", newString: "const a = 1\nconst b = 2\nconst c = 3" },
         { toolName: "edit" }
       )
     );
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       path: "/tmp/demo/src/app.ts",
-      patch: "",
       additions: 3,
       deletions: 2,
       status: "modified"
     });
+    // patch 应包含 - 行（被替换的旧内容）和 + 行（新增内容）
+    expect(result?.patch).toContain("--- a/app.ts");
+    expect(result?.patch).toContain("+++ b/app.ts");
+    expect(result?.patch).toContain("-const a = 1");
+    expect(result?.patch).toContain("-const b = 2");
+    expect(result?.patch).toContain("+const a = 1");
+    expect(result?.patch).toContain("+const b = 2");
+    expect(result?.patch).toContain("+const c = 3");
   });
 
-  it("parses unified diff for apply_patch tool", () => {
+  it("preserves the original patch text for apply_patch tool", () => {
     const patch = [
       "*** Begin Patch",
       "*** Update File: src/x.ts",
@@ -129,13 +200,20 @@ describe("inferDiffFromToolPart", () => {
     const result = inferDiffFromToolPart(
       toolPart({ patchText: patch, filePath: "/tmp/demo/src/x.ts" }, { toolName: "apply_patch" })
     );
-    // patchText 解析以 +/- 行为准：+2, -1。
-    expect(result).toMatchObject({ path: "/tmp/demo/src/x.ts", additions: 2, deletions: 1, status: "modified" });
+    // apply_patch 把原始 patch 文本透传，不再丢成空字符串，让抽屉能完整渲染。
+    expect(result).toMatchObject({
+      path: "/tmp/demo/src/x.ts",
+      additions: 2,
+      deletions: 1,
+      status: "modified"
+    });
+    expect(result?.patch).toBe(patch);
   });
 
-  it("treats empty write content as zero additions", () => {
+  it("treats empty write content as zero additions with header-only patch", () => {
     const result = inferDiffFromToolPart(toolPart({ filePath: "/tmp/demo/empty.ts", content: "" }));
-    expect(result).toEqual({ path: "/tmp/demo/empty.ts", patch: "", additions: 0, deletions: 0, status: "added" });
+    expect(result).toMatchObject({ path: "/tmp/demo/empty.ts", additions: 0, deletions: 0, status: "added" });
+    expect(result?.patch).toBe("--- /dev/null\n+++ b/empty.ts\n@@ -0,0 +1,0 @@");
   });
 
   it("ignores tools outside the write-tool allowlist", () => {
