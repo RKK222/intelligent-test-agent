@@ -894,24 +894,17 @@ async function loadDirectory(path: string, workspaceId = selectedWorkspace.value
   const nextLoading = new Set(loadingPath.value);
   nextLoading.add(path);
   loadingPath.value = nextLoading;
-  // 临时保存旧 entries，失败时回滚到上一次快照，防止"目录展开但内容空白"。
-  const previousEntries = entriesByDirectory.value[path];
   try {
     const entries = await api.listFiles(workspaceId, path);
     entriesByDirectory.value = { ...entriesByDirectory.value, [path]: entries };
   } catch (error) {
     feedback.value = errorFeedback("加载文件树失败", error);
-    // 加载失败：从展开集合里把这条目录回滚掉，并把占位 entries 恢复成 undefined，
-    // 这样下次点击会重新触发加载，而非展示一个永远空着的目录。
+    // 加载失败：从展开集合里把这条目录回滚掉，让目录行恢复成可点击触发重试。
+    // 注意：不删除 entriesByDirectory[path]——该 key 在失败前并未写入。
     if (expandedDirectories.value.has(path)) {
       const nextExpanded = new Set(expandedDirectories.value);
       nextExpanded.delete(path);
       expandedDirectories.value = nextExpanded;
-    }
-    if (previousEntries === undefined) {
-      const { [path]: _drop, ...rest } = entriesByDirectory.value;
-      void _drop;
-      entriesByDirectory.value = rest;
     }
   } finally {
     const cleared = new Set(loadingPath.value);
