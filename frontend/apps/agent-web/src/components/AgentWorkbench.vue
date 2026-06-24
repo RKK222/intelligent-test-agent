@@ -468,6 +468,35 @@ function handleChangeBranch(branch: string) {
   pendingBranchOverride.value = branch;
 }
 
+// footer 上"记住当前分支"按钮的入口：当前 el-dropdown 只能展示 current 一项且 disable，
+// 用户没办法通过 change-branch 路径触发 markRecentBranch。这里把"切到当前分支并写入偏好"
+// 显式化，点击后直接把 vcs.status 拿到的当前分支写入 user_workspace_branch_preferences。
+function handleRememberCurrentBranch() {
+  const appId = selectedAppId.value;
+  const workspaceId = selectedWorkspaceId.value;
+  const branch = vcsCurrentBranch.value ?? pendingBranchOverride.value;
+  if (!appId || !workspaceId || !branch) {
+    feedback.value = {
+      kind: "error",
+      title: "写入分支偏好失败",
+      description: "缺少应用、工作区或分支信息，请先打开工作区"
+    };
+    return;
+  }
+  api
+    .markRecentBranch(appId, workspaceId, branch)
+    .then(() => {
+      feedback.value = {
+        kind: "success",
+        title: "已记录分支偏好",
+        description: `app=${appId} workspace=${workspaceId} branch=${branch}`
+      };
+    })
+    .catch((error) => {
+      feedback.value = errorFeedback("记录分支偏好失败", error);
+    });
+}
+
 function selectRuntimeModel(model: typeof models.value[number]) {
   if (model.providerId) {
     selectedProvider.value = model.providerId;
@@ -1696,6 +1725,7 @@ async function handleLogout() {
           :selected-version-id="selectedVersionId"
           :loading-app-templates="loadingAppTemplates"
           :loading-app-versions="loadingAppVersions"
+          :remember-disabled="!selectedAppId || !selectedWorkspaceId || !vcsCurrentBranch"
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
           @open-diff="(path: string) => { workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
@@ -1704,6 +1734,7 @@ async function handleLogout() {
           @change-branch="handleChangeBranch"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
+          @remember-current-branch="handleRememberCurrentBranch"
         />
         <div v-else class="managed-workspace-empty">
           <p>当前应用尚未切换到可用工作区。</p>

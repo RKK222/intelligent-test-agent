@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { GitBranch, Layers, Save } from "lucide-vue-next";
+import { BookmarkPlus, GitBranch, Layers, Save } from "lucide-vue-next";
 import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
 
 type VcsBranch = { name: string; isCurrent?: boolean };
@@ -41,11 +41,17 @@ const props = defineProps<{
   loadingTemplates?: boolean;
   /** 工作空间版本是否仍在加载（按模板分组懒加载时使用） */
   loadingVersions?: boolean;
+  /** 是否禁用"保存当前分支为偏好"按钮（无 appId/workspaceId/branch 时） */
+  rememberDisabled?: boolean;
 }>();
 
 const emit = defineEmits<{
   (e: "change-branch", branch: string): void;
   (e: "save"): void;
+  // 把当前 VCS 分支显式写入 user_workspace_branch_preferences。
+  // 当前分支按钮只有 current 一项且被 disable，没办法通过 change-branch 触发持久化，
+  // 因此单独提供"记住当前分支"入口，操作链路上等价于"切到当前分支后写入偏好"。
+  (e: "remember-current-branch"): void;
   // 选择某工作空间下的某个版本：父组件负责切换运行态 Workspace。
   (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
   // 要求父组件按需懒加载某模板下的版本列表
@@ -290,6 +296,26 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         <GitBranch class="ta-workbench-footer-icon" />
         <span>分支选择</span>
       </span>
+      <!--
+        单独"记住当前分支"按钮：当前 el-dropdown 只会展示一个 current branch 且被 disable，
+        用户没办法通过 change-branch 路径触发 markRecentBranch 写入偏好。
+        这里把"切到当前分支并写入偏好"显式化，保证重启前后数据可写入 user_workspace_branch_preferences。
+      -->
+      <button
+        v-if="branchOptions.length > 0"
+        type="button"
+        class="ta-workbench-footer-remember"
+        :disabled="rememberDisabled"
+        :title="
+          rememberDisabled
+            ? '需要选择应用与工作区后才会写入分支偏好'
+            : `把当前分支「${branch ?? ''}」写入分支偏好`
+        "
+        @click="emit('remember-current-branch')"
+      >
+        <BookmarkPlus class="ta-workbench-footer-icon" />
+        <span>记住当前分支</span>
+      </button>
     </div>
 
     <div v-if="showSave" class="ta-workbench-footer-middle">
@@ -374,6 +400,33 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   cursor: default;
   color: #888;
   background: #fafafa;
+}
+
+.ta-workbench-footer-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border: 0.8px dashed #b5c8ff;
+  border-radius: 6px;
+  background: #f3f7ff;
+  color: #1d4ed8;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+  font: inherit;
+}
+
+.ta-workbench-footer-remember:hover:not(:disabled) {
+  background: #e6efff;
+  border-color: #6688e8;
+}
+
+.ta-workbench-footer-remember:disabled {
+  cursor: default;
+  color: #9aa0a6;
+  background: #fafafa;
+  border-color: #e1e1e1;
 }
 
 .ta-workbench-footer-branch-label {
