@@ -349,9 +349,15 @@ function selectRuntimeModel(model: typeof models.value[number]) {
 }
 
 // ===== 默认值与联动 effect =====
-watch(managedApplications, (apps) => {
-  if (!selectedAppId.value && apps[0]?.appId) {
-    selectedAppId.value = apps[0].appId;
+// 首次加载应用列表时，自动选择第一个应用并加载其工作区
+watch(managedApplications, (apps, oldApps) => {
+  // 只在首次加载时自动选择（从无到有）
+  if (!oldApps?.length && apps.length > 0 && !selectedAppId.value) {
+    const firstApp = apps[0];
+    if (firstApp?.appId) {
+      // 调用 handleSelectApp 而不是只设置 ID，确保工作区也被加载
+      void handleSelectApp(firstApp.appId);
+    }
   }
 });
 watch(selectedWorkspace, (sw) => {
