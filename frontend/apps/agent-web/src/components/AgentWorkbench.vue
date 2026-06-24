@@ -195,17 +195,11 @@ const workspacesQuery = useQuery({
   queryFn: () => api.listWorkspaces(1, 50)
 });
 const workspaces = computed(() => workspacesQuery.data.value?.items ?? []);
-// 切换应用期间禁止自动 fallback 到 workspaces[0]，避免 recent workspace 返回前旧文件树被恢复。
-const workspaceFallbackBlocked = ref(false);
-// selectedWorkspace：优先匹配 selectedWorkspaceId；
-// 如果 selectedWorkspaceId 为空且未处于"应用切换/无工作区"状态，则 fallback 到 workspaces[0]
+// selectedWorkspace 只接受应用 recent workspace 或用户显式选择产生的 selectedWorkspaceId。
+// 禁止 fallback 到 workspaces[0]，否则会出现右上角应用与左侧文件树不同步。
 const selectedWorkspace = computed(() => {
-  const byId = workspaces.value.find((item) => item.workspaceId === selectedWorkspaceId.value);
-  if (byId) return byId;
-  // 切换应用后无工作区时，不 fallback，返回 undefined 让 UI 显示空态
-  if (workspaceFallbackBlocked.value) return undefined;
-  // 首次加载时 fallback 到第一个工作区
-  return workspaces.value[0];
+  if (!selectedAppId.value) return undefined;
+  return workspaces.value.find((item) => item.workspaceId === selectedWorkspaceId.value);
 });
 const selectedWorkspaceIdRef = computed(() => selectedWorkspace.value?.workspaceId);
 const sessionSearchTrim = computed(() => sessionSearch.value.trim());
@@ -220,9 +214,12 @@ const canListAllApplications = computed(() => {
   const roles = authStore.currentUser?.roles ?? [];
   return roles.includes("APP_ADMIN") || roles.includes("SUPER_ADMIN");
 });
+const allApplicationsEnabled = computed(
+  () => canListAllApplications.value && managedApplicationsQuery.isSuccess.value && managedApplications.value.length === 0
+);
 const allApplicationsQuery = useQuery({
   queryKey: ["managed-workspace", "applications", "admin-fallback"],
-  enabled: () => canListAllApplications.value && managedApplicationsQuery.isSuccess.value && managedApplications.value.length === 0,
+  enabled: allApplicationsEnabled,
   queryFn: () => api.listApplications(true),
   retry: false
 });
@@ -863,7 +860,6 @@ async function switchWorkspace(workspace: Workspace) {
   resetWorkspaceState();
   cacheWorkspace(workspace);
   selectedWorkspaceId.value = workspace.workspaceId;
-  workspaceFallbackBlocked.value = false;
   void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   void queryClient.invalidateQueries({ queryKey: ["runtime"] });
@@ -872,7 +868,6 @@ async function switchWorkspace(workspace: Workspace) {
 
 async function handleSelectApp(appId: string) {
   // 切换应用时先清空旧 workspace 状态，避免文件树继续展示上一个应用的 workspace 内容
-  workspaceFallbackBlocked.value = true;
   resetWorkspaceState();
   selectedWorkspaceId.value = undefined;
   selectedAppId.value = appId;
@@ -882,7 +877,7 @@ async function handleSelectApp(appId: string) {
       await switchWorkspace(recent);
       return;
     }
-    // 新应用没有 recent workspace，保持禁止 fallback，UI 显示空态。
+    // 新应用没有 recent workspace，保持 selectedWorkspace 为空，UI 显示空态。
     feedback.value = { kind: "info", title: "已切换应用", description: "请选择工作空间" };
   } catch (error) {
     feedback.value = errorFeedback("切换应用失败", error);

@@ -41,6 +41,47 @@ test("switching to an application without recent workspace clears the previous f
   expect(fileRequests).toContainEqual({ workspaceId: "wrk_1234567890abcdef", path: "" });
 });
 
+test("workbench does not read a workspace file tree before an application is selected", async ({ page }) => {
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  await mockBackendApi(page, {
+    applications: [],
+    authRoles: ["USER"],
+    fileRequests
+  });
+
+  await gotoWorkbench(page);
+
+  await expect(page.getByRole("button", { name: "未选择应用" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /tests/ })).toHaveCount(0);
+  expect(fileRequests).toEqual([]);
+});
+
+test("admin application fallback runs after auth roles arrive", async ({ page }) => {
+  let releaseAuthMe!: () => void;
+  const configurationApplicationRequests: string[] = [];
+  const authMeGate = new Promise<void>((resolve) => {
+    releaseAuthMe = resolve;
+  });
+  await mockBackendApi(page, {
+    authRoles: ["SUPER_ADMIN"],
+    authMeGate,
+    configurationApplicationRequests,
+    applications: [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }],
+    managedApplications: []
+  });
+
+  await gotoWorkbench(page);
+
+  await expect(page.getByRole("button", { name: "未选择应用" })).toBeVisible();
+  expect(configurationApplicationRequests).toEqual([]);
+
+  releaseAuthMe();
+
+  await expect(page.getByRole("button", { name: "F-GCMS" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /tests/ })).toBeVisible();
+  expect(configurationApplicationRequests).toContain("GET /api/internal/platform/configuration-management/applications");
+});
+
 test("settings dialog manages application context and SSH key metadata", async ({ page }) => {
   await mockBackendApi(page);
 
@@ -294,6 +335,7 @@ async function mockBackendApi(
     authMeGate?: Promise<void>;
     configurationApplicationRequests?: string[];
     applications?: Array<{ appId: string; appName: string; enabled: boolean }>;
+    managedApplications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     recentWorkspaces?: Record<string, ReturnType<typeof workspace> | null>;
   } = {}
 ) {
@@ -309,6 +351,7 @@ async function mockBackendApi(
   });
   const workspaceItems = [workspace()];
   const applications = capture.applications ?? [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }];
+  const managedApplications = capture.managedApplications ?? applications;
   let sshKeys: Array<Record<string, unknown>> = [];
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -368,7 +411,7 @@ async function mockBackendApi(
     }
     if (url.pathname.startsWith("/api/internal/platform/workspace-management")) {
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/applications") {
-        await route.fulfill(json(applications));
+        await route.fulfill(json(managedApplications));
         return;
       }
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/recent-workspace") {
