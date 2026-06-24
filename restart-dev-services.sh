@@ -322,12 +322,6 @@ start_frontend() {
   frontend_pids >"${LOG_DIR}/frontend.pid"
 }
 
-require_command awk
-require_command corepack
-require_command curl
-require_command java
-require_command mvn
-
 load_env_file "${env_file}"
 export SPRING_PROFILES_ACTIVE="${profile}"
 
@@ -340,6 +334,7 @@ if [[ -z "${JAVA_HOME:-}" ]]; then
   if [[ -z "${JAVA_HOME:-}" ]]; then
     # macOS 以外或 java_home 未找到时的常见路径
     for candidate in \
+      "${HOME}/Library/Java/JavaVirtualMachines/openjdk-${java_version}.0.1/Contents/Home" \
       "/Library/Java/JavaVirtualMachines/openjdk-${java_version}/Contents/Home" \
       "/usr/lib/jvm/java-${java_version}" \
       "/usr/lib/jvm/openjdk-${java_version}" \
@@ -355,6 +350,12 @@ if [[ -z "${JAVA_HOME:-}" ]]; then
     echo "JAVA_HOME set to: ${JAVA_HOME}"
   fi
 fi
+
+require_command awk
+require_command corepack
+require_command curl
+require_command java
+require_command mvn
 
 echo "Sensitive environment values are loaded but not printed."
 echo "Builds run before stopping existing services; failed builds leave current services untouched."
