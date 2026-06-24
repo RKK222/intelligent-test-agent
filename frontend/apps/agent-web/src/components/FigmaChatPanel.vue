@@ -150,8 +150,16 @@ const thinkingLines = computed(() => {
       }
     }
     // card 消息中的工具调用（tool.started / tool.finished 事件）
-    if (msg.role === 'card' && msg.cardType === 'tool') {
-      const payload = msg.payload ?? {}
+    if (
+      msg.role === 'card' &&
+      (msg as { cardType?: string }).cardType === 'tool'
+    ) {
+      const card = msg as unknown as {
+        role: 'card'
+        cardType: string
+        payload?: Record<string, unknown>
+      }
+      const payload = card.payload ?? {}
       const name =
         (typeof payload.toolName === 'string' && payload.toolName) ||
         (typeof payload.name === 'string' && payload.name) ||
