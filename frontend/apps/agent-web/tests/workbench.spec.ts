@@ -231,6 +231,22 @@ test("model picker groups models by provider and updates run model", async ({ pa
   });
 });
 
+test("workbench disables chat until opencode process is initialized", async ({ page }) => {
+  const processInitializations: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, { processStatus: "NEEDS_INITIALIZATION", processInitializations });
+
+  await gotoWorkbench(page);
+
+  await expect(page.getByText("需要初始化 opencode 进程")).toBeVisible();
+  await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
+  await page.getByRole("button", { name: "初始化进程" }).click();
+
+  await expect.poll(() => processInitializations.length).toBe(1);
+  await expect(page.getByText("opencode 进程可用")).toBeVisible();
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("run after init");
+  await expect(page.getByRole("button", { name: "发送" })).toBeEnabled();
+});
+
 test("phase 11 runtime flow sends attachment parts and handles docks", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   const permissionReplies: Array<Record<string, unknown>> = [];
@@ -575,6 +591,10 @@ async function mockBackendApi(
     /** 自定义 /applications/{appId}/workspace-templates/{tid}/versions 返回；key 用 `{appId}:{templateId}`。 */
     workspaceVersions?: Record<string, Array<Record<string, unknown>>>;
   } = {}) {
+    processStatus?: "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE";
+    processInitializations?: Array<Record<string, unknown>>;
+  } = {}
+) {
   await page.addInitScript(() => {
     localStorage.setItem("test-agent.auth.token", "test-token");
   });
@@ -588,6 +608,7 @@ async function mockBackendApi(
   const workspaceItems = [workspace()];
   const applications = capture.applications ?? [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }];
   const managedApplications = capture.managedApplications ?? applications;
+  let currentProcessStatus = capture.processStatus ?? "READY";
   let sshKeys: Array<Record<string, unknown>> = [];
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -722,6 +743,16 @@ async function mockBackendApi(
         await route.fulfill(json([]));
         return;
       }
+    }
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/processes/me") {
+      await route.fulfill(json(opencodeProcessStatus(currentProcessStatus)));
+      return;
+    }
+    if (method === "POST" && url.pathname === "/api/internal/agent/opencode/processes/me/initialize") {
+      capture.processInitializations?.push({});
+      currentProcessStatus = "READY";
+      await route.fulfill(json(opencodeProcessStatus(currentProcessStatus)));
+      return;
     }
     if (method === "GET" && url.pathname === "/api/workspaces") {
       await route.fulfill(json(pageOf(workspaceItems)));
@@ -978,6 +1009,28 @@ function diffFile() {
     additions: 2,
     deletions: 1,
     status: "modified"
+  };
+}
+
+function opencodeProcessStatus(status: "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE") {
+  if (status === "READY") {
+    return {
+      status,
+      initializable: false,
+      message: "opencode 进程可用",
+      processId: "ocp_1234567890abcdef",
+      linuxServerId: "10.8.0.12",
+      containerId: "ctr_01",
+      port: 4096,
+      baseUrl: "http://10.8.0.12:4096",
+      checkedAt: "2026-06-24T00:00:00Z"
+    };
+  }
+  return {
+    status,
+    initializable: status === "NEEDS_INITIALIZATION",
+    message: status === "NEEDS_INITIALIZATION" ? "需要初始化 opencode 进程" : "没有可用的 opencode 容器",
+    checkedAt: "2026-06-24T00:00:00Z"
   };
 }
 

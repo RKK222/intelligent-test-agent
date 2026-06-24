@@ -345,6 +345,29 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
     }
 
     @Override
+    public List<OpencodeContainer> findHealthyContainersByLinuxServer(LinuxServerId linuxServerId, int limit) {
+        if (limit < 1 || limit > 500) {
+            throw new IllegalArgumentException("limit must be between 1 and 500");
+        }
+        return jdbcClient.sql("""
+                        select container_id, linux_server_id, container_name, port_start, port_end,
+                               max_processes, current_processes, status, last_heartbeat_at,
+                               trace_id, created_at, updated_at
+                        from opencode_containers
+                        where linux_server_id = :linuxServerId
+                          and status = :status
+                          and current_processes < max_processes
+                        order by current_processes asc, updated_at asc, container_id asc
+                        limit :limit
+                        """)
+                .param("linuxServerId", linuxServerId.value())
+                .param("status", OpencodeContainerStatus.READY.name())
+                .param("limit", limit)
+                .query(containerRowMapper)
+                .list();
+    }
+
+    @Override
     public OpencodeContainerManager saveContainerManager(OpencodeContainerManager manager) {
         if (findContainerManagerById(manager.managerId()).isPresent()) {
             jdbcClient.sql("""
@@ -542,6 +565,24 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
                 .param("processId", processId.value())
                 .query(processRowMapper)
                 .optional();
+    }
+
+    @Override
+    public List<Integer> findOccupiedPorts(LinuxServerId linuxServerId, OpencodeContainerId containerId) {
+        return jdbcClient.sql("""
+                        select port
+                        from opencode_server_processes
+                        where linux_server_id = :linuxServerId
+                          and container_id = :containerId
+                          and status in (:startingStatus, :runningStatus)
+                        order by port asc
+                        """)
+                .param("linuxServerId", linuxServerId.value())
+                .param("containerId", containerId.value())
+                .param("startingStatus", OpencodeServerProcessStatus.STARTING.name())
+                .param("runningStatus", OpencodeServerProcessStatus.RUNNING.name())
+                .query(Integer.class)
+                .list();
     }
 
     @Override

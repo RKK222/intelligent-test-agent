@@ -33,11 +33,14 @@ import com.icbc.testagent.domain.session.SessionMessage;
 import com.icbc.testagent.domain.session.SessionMessageId;
 import com.icbc.testagent.domain.session.SessionMessageRepository;
 import com.icbc.testagent.domain.session.SessionMessageRole;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.event.RunEventAppender;
 import com.icbc.testagent.event.RunEventLiveBus;
 import com.icbc.testagent.opencode.runtime.model.ModelCatalogApplicationService;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -80,6 +83,7 @@ public class RunApplicationService {
     private final RunEventLiveBus runEventLiveBus;
     private final RunEventPersistencePolicy runEventPersistencePolicy;
     private final ModelCatalogApplicationService modelCatalogService;
+    private final UserOpencodeProcessAssignmentService userProcessAssignmentService;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -98,7 +102,8 @@ public class RunApplicationService {
             AgentSessionBindingRepository agentSessionBindingRepository,
             RunEventLiveBus runEventLiveBus,
             RunEventPersistencePolicy runEventPersistencePolicy,
-            ModelCatalogApplicationService modelCatalogService) {
+            ModelCatalogApplicationService modelCatalogService,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
@@ -111,6 +116,7 @@ public class RunApplicationService {
         this.runEventLiveBus = Objects.requireNonNull(runEventLiveBus, "runEventLiveBus must not be null");
         this.runEventPersistencePolicy = Objects.requireNonNull(runEventPersistencePolicy, "runEventPersistencePolicy must not be null");
         this.modelCatalogService = modelCatalogService;
+        this.userProcessAssignmentService = userProcessAssignmentService;
     }
 
     /**
@@ -140,7 +146,38 @@ public class RunApplicationService {
                 agentSessionBindingRepository,
                 runEventLiveBus,
                 runEventPersistencePolicy,
+                null,
                 null);
+    }
+
+    /**
+     * 创建兼容旧测试的服务实例，使用默认实时事件总线和默认事件持久化策略。
+     */
+    public RunApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RoutingDecisionRepository routingDecisionRepository,
+            RunEventAppender runEventAppender,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService) {
+        this(
+                workspaceRepository,
+                sessionRepository,
+                runRepository,
+                sessionMessageRepository,
+                executionNodeRepository,
+                routingDecisionRepository,
+                runEventAppender,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                null,
+                userProcessAssignmentService);
     }
 
     /**
@@ -166,8 +203,6 @@ public class RunApplicationService {
                 runEventAppender,
                 agentRuntimeRegistry,
                 agentSessionBindingRepository,
-                new RunEventLiveBus(),
-                new RunEventPersistencePolicy(),
                 null);
     }
 
@@ -196,8 +231,27 @@ public class RunApplicationService {
      * 启动一次指定 agent 的平台 Run，所有 agent 复用同一 RunEvent 和错误处理链路。
      */
     public Run startRun(String agentId, StartRunInput input, String traceId) {
+        return startRunInternal(null, agentId, input, traceId);
+    }
+
+    /**
+     * 以当前登录用户启动默认 opencode Run；HTTP 入口使用该方法强制执行用户进程防护。
+     */
+    public Run startRun(UserId userId, StartRunInput input, String traceId) {
+        return startRun(userId, agentRuntimeRegistry.defaultAgentId(), input, traceId);
+    }
+
+    /**
+     * 以当前登录用户启动指定 agent Run；opencode 会先解析用户专属进程。
+     */
+    public Run startRun(UserId userId, String agentId, StartRunInput input, String traceId) {
+        return startRunInternal(Objects.requireNonNull(userId, "userId must not be null"), agentId, input, traceId);
+    }
+
+    private Run startRunInternal(UserId userId, String agentId, StartRunInput input, String traceId) {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
+        UserOpencodeProcessAssignment userProcessAssignment = resolveUserProcessAssignment(userId, resolvedAgentId, traceId);
         Instant now = Instant.now();
         SessionId sessionId = input.sessionId();
         String prompt = input.effectivePrompt();
@@ -216,7 +270,9 @@ public class RunApplicationService {
         append(pending.runId(), RunEventType.RUN_CREATED, traceId, now, Map.of("status", RunStatus.PENDING.name()));
 
         try {
-            AgentRoutingTarget target = resolveAgentTarget(resolvedAgentId, session, pending.runId(), now, traceId);
+            AgentRoutingTarget target = userProcessAssignment == null
+                    ? resolveAgentTarget(resolvedAgentId, session, pending.runId(), now, traceId)
+                    : userProcessTarget(userProcessAssignment, pending.runId(), now, traceId);
             routingDecisionRepository.save(target.decision());
             AgentSessionBinding binding = ensureAgentSession(resolvedAgentId, runtime, session, workspace, target.node(), traceId);
             ModelSelection model = parseModel(input.model());
@@ -246,6 +302,26 @@ public class RunApplicationService {
             append(failed.runId(), RunEventType.RUN_FAILED, traceId, Instant.now(), Map.of("errorCode", exception.errorCode().name()));
             throw exception;
         }
+    }
+
+    private UserOpencodeProcessAssignment resolveUserProcessAssignment(UserId userId, String agentId, String traceId) {
+        if (userId == null || !isDefaultOpencode(agentId)) {
+            return null;
+        }
+        if (userProcessAssignmentService == null) {
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "用户 opencode 进程管理未启用");
+        }
+        return userProcessAssignmentService.requireReadyProcess(userId, agentId, traceId);
+    }
+
+    private AgentRoutingTarget userProcessTarget(
+            UserOpencodeProcessAssignment assignment,
+            RunId runId,
+            Instant now,
+            String traceId) {
+        return new AgentRoutingTarget(
+                assignment.node(),
+                new RoutingDecision(runId, assignment.node().executionNodeId(), RoutingReason.MANUAL_OVERRIDE, now, traceId));
     }
 
     /**
@@ -611,10 +687,11 @@ public class RunApplicationService {
             ExecutionNode node,
             String traceId) {
         Optional<AgentSessionBinding> existing = findAgentBinding(agentId, session, traceId);
-        if (existing.isPresent()) {
+        if (existing.isPresent() && existing.get().executionNodeId().equals(node.executionNodeId())) {
             return existing.get();
         }
         // 首次 Run 才创建远端 agent session，平台 ses_ ID 始终只留在平台内部。
+        // 若已有绑定指向旧节点，说明用户进程已迁移，需要在当前进程重新创建远端 session。
         AgentCreateSessionResult created = runtime.createSession(new AgentCreateSessionCommand(
                         node,
                         workspace.rootPath(),

@@ -1,6 +1,7 @@
 package com.icbc.testagent.api.web.platform;
 
 import com.icbc.testagent.opencode.runtime.run.StartRunInput;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.session.Session;
@@ -256,6 +257,37 @@ final class RuntimeDtos {
                     run.status().name(),
                     run.createdAt(),
                     run.updatedAt());
+        }
+    }
+
+    /**
+     * 当前用户 opencode 进程状态响应 DTO，供前端决定是否允许对话和是否展示初始化入口。
+     */
+    record UserOpencodeProcessResponse(
+            String status,
+            boolean initializable,
+            String message,
+            String processId,
+            String linuxServerId,
+            String containerId,
+            Integer port,
+            String baseUrl,
+            Instant checkedAt) {
+
+        /**
+         * 从应用层响应映射为 HTTP DTO，避免 Controller 泄露内部枚举对象。
+         */
+        static UserOpencodeProcessResponse from(UserOpencodeProcessStatusResponse response) {
+            return new UserOpencodeProcessResponse(
+                    response.status().name(),
+                    response.initializable(),
+                    response.message(),
+                    response.processId(),
+                    response.linuxServerId(),
+                    response.containerId(),
+                    response.port(),
+                    response.baseUrl(),
+                    response.checkedAt());
         }
     }
 

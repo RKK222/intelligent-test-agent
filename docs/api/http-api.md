@@ -62,6 +62,7 @@
 | `/api/internal/agent/{agentId}/runs` | 启动 Run；默认前端传 `opencode`。 |
 | `/api/internal/agent/{agentId}/runs/{runId}/events` | 订阅 RunEvent SSE。 |
 | `/api/internal/agent/{agentId}/runs/{runId}/diff` | 查询 Run 级 Diff。 |
+| `/api/internal/agent/{agentId}/processes/me` | 查询或初始化当前用户的 opencode 进程。 |
 | `/api/internal/agent/opencode/api/agent` | Agent 目录。 |
 | `/api/internal/agent/opencode/api/model` | Model 目录。 |
 | `/api/internal/agent/opencode/api/status` | Runtime 健康状态。 |
@@ -638,6 +639,47 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 | `POST` | `/api/internal/agent/{agentId}/runs/{runId}/diff/accept` |
 | `POST` | `/api/internal/agent/{agentId}/runs/{runId}/diff/reject` |
 
+### 用户 opencode 进程 API
+
+用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。本批次只提供契约和 Run 防护，真实 manager/socket 接入前初始化可能返回 `OPENCODE_UNAVAILABLE`。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/api/internal/agent/{agentId}/processes/me` | 查询当前用户绑定的 opencode 进程状态。 |
+| `POST` | `/api/internal/agent/{agentId}/processes/me/initialize` | 为当前用户初始化或重建 opencode 进程。 |
+
+响应 `data`：
+
+```json
+{
+  "status": "READY",
+  "initializable": false,
+  "message": "opencode 进程可用",
+  "processId": "ocp_...",
+  "linuxServerId": "10.0.0.12",
+  "containerId": "ctr_...",
+  "port": 4096,
+  "baseUrl": "http://10.0.0.12:4096",
+  "checkedAt": "2026-06-24T08:00:00Z"
+}
+```
+
+字段说明：
+
+- `status`：`READY`、`NEEDS_INITIALIZATION`、`UNAVAILABLE`。
+- `initializable`：当前状态是否允许前端展示初始化动作；生产 manager 未接入或无健康容器时为 `false`。
+- `message`：面向用户的状态说明或失败原因。
+- `processId`、`linuxServerId`、`containerId`、`port`、`baseUrl`：仅在已有或成功初始化进程时返回；`baseUrl` 固定为 `http://{linuxServerId}:{port}`。
+- `checkedAt`：本次状态计算时间。
+
+初始化规则：
+
+- 未绑定用户时选择全局进程数最少的 `READY` 容器。
+- 已有绑定但进程不可用时固定原 `linuxServerId`，只在该 Linux 服务器内选择进程数最少容器。
+- 端口从容器端口范围内选择第一个未被当前运行进程占用的端口。
+- 启动参数固定为 `XDG_DATA_HOME=/data/opencode/session/{port}` 和 `OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/`。
+- 初始化成功后会同步写入用户进程绑定、进程快照，以及兼容旧运行链路的 `execution_nodes` 投影。
+
 `POST /api/runs` 请求体：
 
 ```json
@@ -677,7 +719,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 - 当后端启用托管模型目录时，前端从 Model 目录接口获取可选模型并仍按 `providerId/modelId` 提交；企业内默认模型为 `icbc-openai/DeepSeek-V4-Flash-W8A8`。
 - Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt_async` 请求体。
 
-启动流程会追加用户消息，创建 `PENDING` Run，再按 `(sessionId, agentId)` 的 `agent_session_bindings` 决定是否复用远端 session；旧 `sessions.opencode_*` 字段只作为 `opencode` 兼容回填来源。
+启动流程会先校验当前认证用户是否已有 `READY` opencode 进程；未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run。校验通过后追加用户消息，创建 `PENDING` Run，并使用当前用户进程投影出的 `executionNodeId = "node_" + processId` 和 `baseUrl = http://{linuxServerId}:{port}` 作为本次运行目标。若 `(sessionId, agentId)` 的既有 `agent_session_bindings` 指向的节点不是当前用户进程节点，后端会重新创建远端 session 并覆盖绑定；旧 `sessions.opencode_*` 字段只作为 `opencode` 兼容回填来源。
 
 ### opencode Web Runtime API
 
@@ -770,8 +812,8 @@ Session 运行态接口：
 - `AgentOpencodeRuntimeControllerTest`：验证 `/api/internal/agent/opencode/...` agent path 统一响应、agentId 选择和 traceId 透传。
 - `RuntimeControllerTest`：验证 `/api/internal/agent/opencode/runs` 与旧 Run URL 共享 DTO、错误格式和 service 实现。
 
-- 首次 Run：先选择可用 execution node，通过 `AgentRuntime.createSession` 创建远端 session，保存 `agent_session_bindings`；`opencode` 兼容字段 `sessions.opencode_session_id/opencode_execution_node_id` 暂时同步写入。
-- 后续 Run：复用已保存的同 agent 远端 session，并固定路由到原 execution node；节点不存在、离线或容量不可用时返回 `OPENCODE_UNAVAILABLE`。
+- 首次 Run：先校验当前用户已有 `READY` opencode 进程，再通过该进程投影出的 execution node 创建远端 session，保存 `agent_session_bindings`；`opencode` 兼容字段 `sessions.opencode_session_id/opencode_execution_node_id` 暂时同步写入。
+- 后续 Run：优先复用已保存且指向当前用户进程节点的同 agent 远端 session；若绑定节点与当前用户进程不一致，则重新创建远端 session 并覆盖绑定。用户进程不可用、节点不存在、离线或容量不可用时返回 `OPENCODE_UNAVAILABLE`。
 - 本地集成默认只向 opencode 传 `directory=workspace.rootPath`，不把平台 `wrk_...` 作为 opencode `workspace` query 传入。
 
 成功后写入 `run.created` 和 `run.started`。未找到可用节点返回 `OPENCODE_UNAVAILABLE`；opencode 超时或异常分别映射为平台 opencode 错误码。

@@ -1,11 +1,13 @@
 package com.icbc.testagent.api.web.platform;
 
+import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.opencode.runtime.run.RunApplicationService;
 import com.icbc.testagent.opencode.runtime.run.RunDiffApplicationService;
 import com.icbc.testagent.opencode.runtime.run.RunMessageRecoveryService;
 import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.event.RunEventSseMapper;
 import com.icbc.testagent.event.RunEventSsePayload;
 import com.icbc.testagent.event.RunEventSseStreamService;
@@ -82,10 +84,11 @@ public class RunController {
             @PathVariable(name = "agentId", required = false) String agentId,
             @Valid @RequestBody RuntimeDtos.StartRunRequest request,
             ServerWebExchange exchange) {
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         return blockingResponse(exchange, traceId -> RuntimeDtos.RunResponse.from(
                 hasAgentId(agentId)
-                        ? runService.startRun(agentId, request.toInput(), traceId)
-                        : runService.startRun(request.toInput(), traceId)));
+                        ? runService.startRun(userId, agentId, request.toInput(), traceId)
+                        : runService.startRun(userId, request.toInput(), traceId)));
     }
 
     /**

@@ -23,6 +23,8 @@ public interface OpencodeProcessManagementRepository {
 
     List<OpencodeContainer> findHealthyContainers(int limit);
 
+    List<OpencodeContainer> findHealthyContainersByLinuxServer(LinuxServerId linuxServerId, int limit);
+
     OpencodeContainerManager saveContainerManager(OpencodeContainerManager manager);
 
     Optional<OpencodeContainerManager> findContainerManagerById(ContainerManagerId managerId);
@@ -36,6 +38,8 @@ public interface OpencodeProcessManagementRepository {
     OpencodeServerProcess saveOpencodeServerProcess(OpencodeServerProcess process);
 
     Optional<OpencodeServerProcess> findOpencodeServerProcessById(OpencodeProcessId processId);
+
+    List<Integer> findOccupiedPorts(LinuxServerId linuxServerId, OpencodeContainerId containerId);
 
     UserOpencodeProcessBinding saveUserBinding(UserOpencodeProcessBinding binding);
 

@@ -99,6 +99,20 @@ export type Run = {
   updatedAt: string;
 };
 
+export type UserOpencodeProcessStatus = "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE" | string;
+
+export type UserOpencodeProcess = {
+  status: UserOpencodeProcessStatus;
+  initializable: boolean;
+  message: string;
+  processId?: string;
+  linuxServerId?: string;
+  containerId?: string;
+  port?: number;
+  baseUrl?: string;
+  checkedAt: string;
+};
+
 export type RunEventType =
   | "run.created"
   | "run.started"

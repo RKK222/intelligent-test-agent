@@ -40,6 +40,63 @@ describe("backend-api", () => {
     expect(fetcher).toHaveBeenCalledWith("http://api/api/internal/agent/otheragent/runs", expect.any(Object));
   });
 
+  it("maps current user opencode process status and initialization through agent-scoped URLs", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              status: "NEEDS_INITIALIZATION",
+              initializable: true,
+              message: "需要初始化 opencode 进程",
+              checkedAt: "2026-06-24T00:00:00Z"
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              status: "READY",
+              initializable: false,
+              message: "opencode 进程可用",
+              processId: "ocp_1234567890abcdef",
+              linuxServerId: "10.8.0.12",
+              containerId: "ctr_01",
+              port: 4096,
+              baseUrl: "http://10.8.0.12:4096",
+              checkedAt: "2026-06-24T00:00:01Z"
+            }
+          }),
+          { status: 200 }
+        )
+      );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token_123",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.getMyOpencodeProcess()).resolves.toMatchObject({ status: "NEEDS_INITIALIZATION", initializable: true });
+    await expect(client.initializeMyOpencodeProcess()).resolves.toMatchObject({
+      status: "READY",
+      baseUrl: "http://10.8.0.12:4096"
+    });
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe("http://api/api/internal/agent/opencode/processes/me");
+    expect(fetcher.mock.calls[1]?.[0]).toBe("http://api/api/internal/agent/opencode/processes/me/initialize");
+    expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+    const headers = fetcher.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("Authorization")).toBe("Bearer token_123");
+  });
+
   it("maps unified error responses to BackendApiError with trace id", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

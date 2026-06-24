@@ -730,11 +730,15 @@ class JdbcRepositoryIntegrationTest {
         assertThat(opencodeProcesses.findBackendJavaProcessById(backendProcess.backendProcessId())).contains(backendProcess);
         assertThat(opencodeProcesses.findContainerById(container.containerId())).contains(container);
         assertThat(opencodeProcesses.findHealthyContainers(10)).containsExactly(container);
+        assertThat(opencodeProcesses.findHealthyContainersByLinuxServer(new LinuxServerId("10.8.0.12"), 10))
+                .containsExactly(container);
         assertThat(opencodeProcesses.findContainerManagerById(manager.managerId())).contains(manager);
         assertThat(opencodeProcesses.findManagerBackendConnection(manager.managerId(), backendProcess.backendProcessId()))
                 .contains(connection);
         assertThat(opencodeProcesses.findOpencodeServerProcessById(process.processId())).contains(process);
         assertThat(opencodeProcesses.findUserBinding(new UserId("usr_process_user"), " OPENCODE ")).contains(binding);
+        assertThat(opencodeProcesses.findOccupiedPorts(new LinuxServerId("10.8.0.12"), new OpencodeContainerId("ctr_01")))
+                .containsExactly(4096);
         assertThat(opencodeProcesses.findOpencodeServerProcesses(10)).containsExactly(process);
     }
 

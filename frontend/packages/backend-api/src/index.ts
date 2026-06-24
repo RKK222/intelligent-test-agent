@@ -44,6 +44,7 @@ import type {
   TerminalTicketResponse,
   TodoItem,
   UpdateRepositoryPayload,
+  UserOpencodeProcess,
   Workspace,
   WorkspaceDiff,
   WorkspaceSyncResult,
@@ -276,6 +277,9 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "POST",
         body: JSON.stringify(normalizeStartRunPayload(sessionIdOrPayload, prompt))
       }),
+    getMyOpencodeProcess: () => request<UserOpencodeProcess>(agentPath("/processes/me")),
+    initializeMyOpencodeProcess: () =>
+      request<UserOpencodeProcess>(agentPath("/processes/me/initialize"), { method: "POST" }),
     getRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}`)),
     cancelRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}/cancel`), { method: "POST" }),
     getRunDiff: (runId: string) => request<RunDiff>(agentPath(`/runs/${encodeURIComponent(runId)}/diff`)),
