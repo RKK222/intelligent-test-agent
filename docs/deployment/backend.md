@@ -10,7 +10,7 @@
 
 ## opencode-manager 容器进程管理
 
-用户专属 opencode server 进程由每个 opencode 容器内的 `opencode-manager` 管理。`opencode-manager` 是与 `backend/` 平级的 Go 单二进制工程，不打包进后端 Java 镜像；本批只提供容器内 CLI 和本地状态文件，后端 socket 控制面在后续批次接入。
+用户专属 opencode server 进程由每个 opencode 容器内的 `opencode-manager` 管理。`opencode-manager` 是与 `backend/` 平级的 Go 单二进制工程，不打包进后端 Java 镜像；它既提供本地 CLI，也提供 `run` 长运行模式，通过 WebSocket JSON 控制面连接所有 READY 后端 Java 实例。
 
 容器内必须挂载以下目录：
 
@@ -28,11 +28,22 @@ OPENCODE_MANAGER_LINUX_SERVER_ID=10.8.0.12
 OPENCODE_MANAGER_PORT_START=4096
 OPENCODE_MANAGER_PORT_END=4100
 OPENCODE_MANAGER_MAX_PROCESSES=5
+OPENCODE_MANAGER_ID=mgr_1234567890abcdef
+OPENCODE_MANAGER_BACKEND_DISCOVERY_URL=http://10.8.0.21:8080/api/internal/platform/opencode-runtime/manager-backends
+OPENCODE_MANAGER_TOKEN=<manager-control-token>
 OPENCODE_BIN=opencode
 OPENCODE_MANAGER_STATE_DIR=/data/opencode/manager
 OPENCODE_SESSION_ROOT=/data/opencode/session
 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/
 ```
+
+长运行模式启动：
+
+```bash
+opencode-manager run
+```
+
+`run` 会按 `OPENCODE_MANAGER_BACKEND_DISCOVERY_URL` 周期发现后端实例，并用 `Authorization: Bearer <OPENCODE_MANAGER_TOKEN>` 与每个实例建立 `/api/internal/platform/opencode-runtime/manager/ws` WebSocket 长连接。后端扩容后，manager 在下一轮 discovery 中自动连接新实例。生产必须把 discovery URL 指向 manager 可访问的某个后端直连地址或内部服务发现地址；后端返回给 manager 的 `webSocketUrl` 由各实例自己的直连 `listen-url` 生成，不能只配置负载均衡地址。
 
 启动单个用户进程时，manager 会执行：
 
@@ -129,6 +140,9 @@ export TEST_AGENT_TEST_DB_PASSWORD=<password>
 export TEST_AGENT_OPENCODE_BASE_URL=http://<opencode-host>:4096
 export TEST_AGENT_MODEL_CATALOG_SOURCE=internal
 export ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
+export TEST_AGENT_OPENCODE_MANAGER_TOKEN=<manager-control-token>
+export TEST_AGENT_BACKEND_LISTEN_URL=http://<this-backend-ip>:8080
+export TEST_AGENT_LINUX_SERVER_ID=<this-backend-ip>
 ```
 
 启用该 profile 后，Spring Boot 通过 Druid 管理 JDBC 连接池，并使用 `test-agent-persistence` 中的 Flyway migration 初始化或校验数据库结构；Actuator `health` 包含数据库健康检查；Druid Web 控制台默认关闭，不提供 `/druid/*` 管理入口。
@@ -157,6 +171,9 @@ TEST_AGENT_CORS_ALLOWED_ORIGINS=https://<frontend-origin>
 TEST_AGENT_OPENCODE_BASE_URL=http://<opencode-host>:4096
 TEST_AGENT_MODEL_CATALOG_SOURCE=internal
 ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
+TEST_AGENT_OPENCODE_MANAGER_TOKEN=<manager-control-token>
+TEST_AGENT_BACKEND_LISTEN_URL=http://<this-backend-ip>:8080
+TEST_AGENT_LINUX_SERVER_ID=<this-backend-ip>
 ```
 
 可选运行参数：
@@ -165,6 +182,10 @@ ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
 TEST_AGENT_OPENCODE_NODE_ID=node_prod_opencode
 TEST_AGENT_OPENCODE_MAX_RUNS=4
 TEST_AGENT_OPENCODE_WEIGHT=100
+TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL=10s
+TEST_AGENT_BACKEND_STALE_AFTER=30s
+TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT=10s
+TEST_AGENT_BACKEND_DISCOVERY_LIMIT=100
 TEST_AGENT_DB_POOL_INITIAL_SIZE=1
 TEST_AGENT_DB_POOL_MIN_IDLE=1
 TEST_AGENT_DB_POOL_MAX_ACTIVE=10
@@ -195,6 +216,9 @@ docker run --rm -p 8080:8080 \
   -e TEST_AGENT_OPENCODE_BASE_URL=http://opencode.example.internal:4096 \
   -e TEST_AGENT_MODEL_CATALOG_SOURCE=internal \
   -e ICBC_OPENAI_AUTH_TOKEN=change-me \
+  -e TEST_AGENT_OPENCODE_MANAGER_TOKEN=change-me-manager-token \
+  -e TEST_AGENT_BACKEND_LISTEN_URL=http://10.8.0.21:8080 \
+  -e TEST_AGENT_LINUX_SERVER_ID=10.8.0.21 \
   test-agent-backend:local
 ```
 
@@ -218,3 +242,4 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 | `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` | `ICBC_OPENAI_AUTH_TOKEN` | 企业内 token 所在环境变量名。 |
 | `TEST_AGENT_ICBC_OPENAI_AUTH_MODE` | `auth-token` | 企业内调用鉴权头模式，默认写入 `Auth-Token`。 |
 | `TEST_AGENT_INTERNAL_DEFAULT_MODEL` | `DeepSeek-V4-Flash-W8A8` | 企业内默认模型，前端模型切换会优先选中该模型。 |
+`DatabaseMigrationRunner` 会在启动时执行 Flyway migration；`ExecutionNodeSeeder` 会把配置中的 opencode node 写入 `execution_nodes` 作为兼容 Run 路由来源。启用用户进程模型后，`BackendJavaProcessLifecycleRunner` 会在启动和心跳时写入 `linux_servers`、`backend_java_processes`，`opencode-manager` WebSocket 注册和心跳会写入 `opencode_containers`、`opencode_container_managers` 和 `opencode_manager_backend_connections`。

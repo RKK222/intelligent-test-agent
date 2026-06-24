@@ -1,6 +1,7 @@
 package com.icbc.testagent.api.web.platform;
 
 import com.icbc.testagent.opencode.runtime.run.StartRunInput;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerBackendEndpoint;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.run.Run;
@@ -157,6 +158,26 @@ final class RuntimeDtos {
                     uri,
                     source,
                     metadata);
+        }
+    }
+
+    /**
+     * manager discovery 返回的后端实例直连端点 DTO。
+     */
+    record ManagerBackendResponse(
+            String backendProcessId,
+            String linuxServerId,
+            String listenUrl,
+            String webSocketUrl,
+            Instant lastHeartbeatAt) {
+
+        static ManagerBackendResponse from(ManagerBackendEndpoint endpoint) {
+            return new ManagerBackendResponse(
+                    endpoint.backendProcessId(),
+                    endpoint.linuxServerId(),
+                    endpoint.listenUrl(),
+                    endpoint.webSocketUrl(),
+                    endpoint.lastHeartbeatAt());
         }
     }
 

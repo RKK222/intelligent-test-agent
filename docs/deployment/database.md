@@ -268,6 +268,12 @@ V10 种子数据对 F-COSS 的影响：
 | 应用版本 `20260620` | `application_workspace_versions` → `wks_fcoss_20260620` | 默认模板派生出的首个 yyyyMMdd 版本。 |
 | 应用版本 `20260701` | `application_workspace_versions` → `wks_fcoss_20260701` | 默认模板派生出的最新 yyyyMMdd 版本；同时作为默认 recent 偏好。 |
 | 应用成员 | `application_members` | 把默认开发用户 `888888888` 加入 F-COSS，便于 `listApplications` 看到该应用。 |
+- `linux_servers.linux_server_id` 使用服务器 IPv4 地址，后续 `opencode_server_processes.base_url` 由 `http://{linux_server_id}:{port}` 形成。
+- `opencode_containers` 使用每容器独立端口范围，`max_processes` 不能超过端口数，`current_processes` 不能超过 `max_processes`。
+- `opencode_container_managers.container_id` 唯一，保证每个容器只有一个管理进程。
+- `opencode_server_processes(linux_server_id, port)` 唯一，保证同一 Linux 服务器端口不会绑定多个 opencode 进程。
+- `user_opencode_process_bindings(user_id, agent_id)` 唯一，保证同一用户对同一 agent 只有一个当前绑定；`process_id` 同样唯一，避免一个进程被多个用户绑定。
+- 批次 4 不新增表；后端启动/心跳更新 `linux_servers`、`backend_java_processes`，manager WebSocket 注册/心跳更新 `opencode_containers`、`opencode_container_managers` 和 `opencode_manager_backend_connections`。
 
 兼容策略：
 

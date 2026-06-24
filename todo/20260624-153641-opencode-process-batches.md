@@ -228,11 +228,11 @@
 
 ## 验收标准
 
-- [ ] 批次 0：`todo/20260624-153641-opencode-process-batches.md` 存在，并包含 `R1` 到 `R5` 原始需求编号、批次 1 到批次 7 的覆盖关系和验收方式。
-- [ ] 批次 1：数据库 migration 能从空库执行到最新版本，Repository 集成测试能保存和读取 Linux 服务器、容器、管理进程、opencode 进程和用户绑定关系。
-- [ ] 批次 2：调度服务测试覆盖未绑定分配、健康复用、异常后原 Linux 服务器内重建、无可用容器、并发绑定冲突。
-- [ ] 批次 3：管理进程能在容器内启动 opencode server，并正确设置 `XDG_DATA_HOME` 和 `OPENCODE_CONFIG_DIR`。
-- [ ] 批次 4：管理进程能连接多个后端 Java 实例，后端能下发启动、停止、重启、健康检测命令并收到带 commandId 和 traceId 的响应。
+- [x] 批次 0：`todo/20260624-153641-opencode-process-batches.md` 存在，并包含 `R1` 到 `R5` 原始需求编号、批次 1 到批次 7 的覆盖关系和验收方式。
+- [x] 批次 1：数据库 migration 能从空库执行到最新版本，Repository 集成测试能保存和读取 Linux 服务器、容器、管理进程、opencode 进程和用户绑定关系。
+- [x] 批次 2：调度服务测试覆盖未绑定分配、健康复用、异常后原 Linux 服务器内重建、无可用容器、并发绑定冲突。
+- [x] 批次 3：管理进程能在容器内启动 opencode server，并正确设置 `XDG_DATA_HOME` 和 `OPENCODE_CONFIG_DIR`。
+- [x] 批次 4：管理进程能连接多个后端 Java 实例，后端能下发启动、停止、重启、健康检测命令并收到带 commandId 和 traceId 的响应。
 - [ ] 批次 5：Run 启动和 opencode runtime 代理都使用当前用户绑定的健康 opencode 进程；进程异常时按原 Linux 服务器重建。
 - [ ] 批次 6：只有 `SUPER_ADMIN` 可以访问运行管理 API 和前端菜单；页面能展示后端进程、管理进程、opencode server 进程状态。
 - [ ] 批次 7：部署文档包含多 Linux 服务器、多后端 Java 进程、多容器、目录挂载、端口池、健康检查、扩容和回滚说明。

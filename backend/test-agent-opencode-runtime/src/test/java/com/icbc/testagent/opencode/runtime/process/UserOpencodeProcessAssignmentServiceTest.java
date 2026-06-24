@@ -25,6 +25,9 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -172,7 +175,20 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     private static UserOpencodeProcessAssignmentService service(FakeRepository repository, RecordingGateway gateway) {
-        return new UserOpencodeProcessAssignmentService(repository, repository, gateway);
+        return new UserOpencodeProcessAssignmentService(
+                repository,
+                repository,
+                gateway,
+                new BackendJavaProcessLifecycleService(
+                        repository,
+                        new ManagerControlSettings(
+                                "secret-token",
+                                "http://10.8.0.21:8080",
+                                new LinuxServerId("10.8.0.21"),
+                                Duration.ofSeconds(10),
+                                Duration.ofSeconds(30),
+                                Duration.ofSeconds(5),
+                                100)));
     }
 
     private static OpencodeContainer container(
@@ -284,6 +300,19 @@ class UserOpencodeProcessAssignmentServiceTest {
         }
 
         @Override
+        public List<OpencodeContainer> findHealthyContainersConnectedToBackend(BackendProcessId backendProcessId, int limit) {
+            return findHealthyContainers(limit);
+        }
+
+        @Override
+        public List<OpencodeContainer> findHealthyContainersConnectedToBackendByLinuxServer(
+                BackendProcessId backendProcessId,
+                LinuxServerId linuxServerId,
+                int limit) {
+            return findHealthyContainersByLinuxServer(linuxServerId, limit);
+        }
+
+        @Override
         public List<Integer> findOccupiedPorts(LinuxServerId linuxServerId, OpencodeContainerId containerId) {
             return processes.values().stream()
                     .filter(process -> process.linuxServerId().equals(linuxServerId))
@@ -338,6 +367,7 @@ class UserOpencodeProcessAssignmentServiceTest {
         @Override public Optional<LinuxServer> findLinuxServerById(LinuxServerId linuxServerId) { return Optional.empty(); }
         @Override public BackendJavaProcess saveBackendJavaProcess(BackendJavaProcess backendJavaProcess) { return backendJavaProcess; }
         @Override public Optional<BackendJavaProcess> findBackendJavaProcessById(BackendProcessId backendProcessId) { return Optional.empty(); }
+        @Override public List<BackendJavaProcess> findReadyBackendJavaProcesses(Instant minHeartbeatAt, int limit) { return List.of(); }
         @Override public OpencodeContainer saveContainer(OpencodeContainer container) { containers.put(container.containerId().value(), container); return container; }
         @Override public Optional<OpencodeContainer> findContainerById(OpencodeContainerId containerId) { return Optional.ofNullable(containers.get(containerId.value())); }
         @Override public OpencodeContainerManager saveContainerManager(OpencodeContainerManager manager) { return manager; }

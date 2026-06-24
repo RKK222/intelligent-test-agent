@@ -133,6 +133,13 @@ public final class RuntimeIdGenerator {
     }
 
     /**
+     * 生成管理进程控制命令 ID，返回值固定使用 {@code mcmd_} 前缀。
+     */
+    public static String managerCommandId() {
+        return prefixed("mcmd_");
+    }
+
+    /**
      * 按给定领域前缀拼接无横线 UUID；调用方必须传入已约定的稳定前缀。
      */
     private static String prefixed(String prefix) {

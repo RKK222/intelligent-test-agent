@@ -35,6 +35,7 @@
 | `/api/...` | 旧兼容入口，当前前端和历史调用方继续可用。 |
 | `/api/internal/platform/{business-project}/{business}/...` | 前端调用平台自身能力的新入口。 |
 | `/api/internal/agent/{agentId}/...` | 与具体 agent 交互的新入口，`agentId` 由前端 URL 传递；当前唯一可运行值为 `opencode`。 |
+| `/api/internal/platform/opencode-runtime/manager-backends` | opencode-manager 后端发现入口，使用独立 manager token。 |
 | `/api/public/...` | 其他系统调用平台的公开 API，当前预留；新增前必须完成鉴权、限流、安全和兼容性设计。 |
 
 当前已落地的新平台入口：
@@ -641,7 +642,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 ### 用户 opencode 进程 API
 
-用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。本批次只提供契约和 Run 防护，真实 manager/socket 接入前初始化可能返回 `OPENCODE_UNAVAILABLE`。
+用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。初始化会通过当前后端实例已连接的 `opencode-manager` WebSocket 控制面启动进程；无 manager 连接、命令超时或 manager 返回失败时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT` 或 `OPENCODE_BAD_GATEWAY`。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -667,18 +668,43 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 字段说明：
 
 - `status`：`READY`、`NEEDS_INITIALIZATION`、`UNAVAILABLE`。
-- `initializable`：当前状态是否允许前端展示初始化动作；生产 manager 未接入或无健康容器时为 `false`。
+- `initializable`：当前状态是否允许前端展示初始化动作；无当前后端可连接的健康容器时为 `false`。
 - `message`：面向用户的状态说明或失败原因。
 - `processId`、`linuxServerId`、`containerId`、`port`、`baseUrl`：仅在已有或成功初始化进程时返回；`baseUrl` 固定为 `http://{linuxServerId}:{port}`。
 - `checkedAt`：本次状态计算时间。
 
 初始化规则：
 
-- 未绑定用户时选择全局进程数最少的 `READY` 容器。
-- 已有绑定但进程不可用时固定原 `linuxServerId`，只在该 Linux 服务器内选择进程数最少容器。
+- 未绑定用户时选择当前后端实例已连接的全局进程数最少 `READY` 容器。
+- 已有绑定但进程不可用时固定原 `linuxServerId`，只在该 Linux 服务器内选择当前后端已连接的进程数最少容器。
 - 端口从容器端口范围内选择第一个未被当前运行进程占用的端口。
 - 启动参数固定为 `XDG_DATA_HOME=/data/opencode/session/{port}` 和 `OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/`。
 - 初始化成功后会同步写入用户进程绑定、进程快照，以及兼容旧运行链路的 `execution_nodes` 投影。
+
+### opencode-manager 控制面 API
+
+控制面只供容器内 `opencode-manager` 使用，不复用用户 JWT 或普通 API token。后端通过 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 配置独立 manager token；manager 调用 discovery API 和 WebSocket upgrade 时必须携带 `Authorization: Bearer <token>`。token 缺失或错误返回统一 `UNAUTHENTICATED`。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/api/internal/platform/opencode-runtime/manager-backends` | 查询 READY 且心跳未过期的后端实例。 |
+| `WS` | `/api/internal/platform/opencode-runtime/manager/ws` | manager 与当前后端实例建立 JSON WebSocket 长连接。 |
+
+Discovery 响应 `data`：
+
+```json
+[
+  {
+    "backendProcessId": "bjp_...",
+    "linuxServerId": "10.8.0.21",
+    "listenUrl": "http://10.8.0.21:8080",
+    "webSocketUrl": "ws://10.8.0.21:8080/api/internal/platform/opencode-runtime/manager/ws",
+    "lastHeartbeatAt": "2026-06-24T08:00:00Z"
+  }
+]
+```
+
+WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelope，稳定 `type` 包括 `register`、`registered`、`heartbeat`、`command`、`commandResult`、`error`。后端命令使用 `commandId=mcmd_...`，manager 回包必须带同一 `commandId` 和 `traceId`。当前命令集合为 `start`、`health`、`stop`、`restart`，其中用户初始化和健康检测链路使用 `start`、`health`；人工 stop/restart API 留到后续管理页批次。
 
 `POST /api/runs` 请求体：
 

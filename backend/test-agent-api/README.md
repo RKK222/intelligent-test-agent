@@ -15,6 +15,7 @@
 - Controller 只调用业务模块 service，不直接访问 Repository、generated SDK 或 JDBC 实现。
 - 维护 `RuntimeDtos` 等平台 DTO，不返回 generated SDK DTO。
 - RunEvent SSE 建连时先委托 runtime 恢复 opencode projected messages，再进入 durable replay 与 live bus 合流。
+- 暴露 opencode-manager discovery API 和 WebSocket 控制面入口，入口只做 manager token 鉴权、DTO/消息适配和 traceId 处理。
 - 本地 CORS 默认允许主前端和 `frontend-opencode` Vite/Preview/E2E 端口；生产必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式收敛。
 
 ## 允许依赖
@@ -39,6 +40,7 @@
 ## 测试覆盖
 
 - `RuntimeControllerTest` 覆盖 Workspace、目录选择、Session、Run、Diff、agent-scoped Run URL、RunEvent SSE 恢复快照和内部平台兼容 URL。
+- `ManagerBackendDiscoveryControllerTest` 覆盖 manager token 鉴权、统一响应、traceId 和 READY 后端实例 DTO。
 - `PlatformOpencodeRuntimeControllerTest` 覆盖旧 `/api/...` 与 `/api/internal/platform/...` 的 opencode runtime 代理入口、MCP tools、permission reply 和 session share。
 - `AgentOpencodeRuntimeControllerTest` 覆盖 `/api/internal/agent/{agentId}/...` 原始 opencode 路径兼容、agentId 透传和 traceId。
 - `TerminalControllerTest`、`TerminalWebSocketHandlerTest` 覆盖 PTY ticket、内部平台 WebSocket URL、origin 拒绝、单会话互斥、输入限流、关闭和超时。

@@ -17,6 +17,7 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -40,6 +41,7 @@ public class UserOpencodeProcessAssignmentService {
     private final OpencodeProcessManagementRepository repository;
     private final ExecutionNodeRepository executionNodeRepository;
     private final OpencodeProcessManagerGateway gateway;
+    private final BackendJavaProcessLifecycleService backendLifecycle;
 
     /**
      * 注入进程管理 Repository、兼容节点 Repository 和管理进程 gateway。
@@ -47,10 +49,12 @@ public class UserOpencodeProcessAssignmentService {
     public UserOpencodeProcessAssignmentService(
             OpencodeProcessManagementRepository repository,
             ExecutionNodeRepository executionNodeRepository,
-            OpencodeProcessManagerGateway gateway) {
+            OpencodeProcessManagerGateway gateway,
+            BackendJavaProcessLifecycleService backendLifecycle) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
+        this.backendLifecycle = Objects.requireNonNull(backendLifecycle, "backendLifecycle must not be null");
     }
 
     /**
@@ -103,8 +107,13 @@ public class UserOpencodeProcessAssignmentService {
         }
 
         List<OpencodeContainer> candidates = existingBinding
-                .map(binding -> repository.findHealthyContainersByLinuxServer(binding.linuxServerId(), CONTAINER_CANDIDATE_LIMIT))
-                .orElseGet(() -> repository.findHealthyContainers(CONTAINER_CANDIDATE_LIMIT));
+                .map(binding -> repository.findHealthyContainersConnectedToBackendByLinuxServer(
+                        backendLifecycle.backendProcessId(),
+                        binding.linuxServerId(),
+                        CONTAINER_CANDIDATE_LIMIT))
+                .orElseGet(() -> repository.findHealthyContainersConnectedToBackend(
+                        backendLifecycle.backendProcessId(),
+                        CONTAINER_CANDIDATE_LIMIT));
         OpencodeProcessStartCommand command = startCommand(userId, chooseContainer(candidates), traceId);
         OpencodeProcessStartResult started = gateway.startProcess(command);
         if (started == null) {
@@ -190,11 +199,14 @@ public class UserOpencodeProcessAssignmentService {
     }
 
     private boolean hasInitializableContainer() {
-        return !repository.findHealthyContainers(1).isEmpty();
+        return !repository.findHealthyContainersConnectedToBackend(backendLifecycle.backendProcessId(), 1).isEmpty();
     }
 
     private boolean canRebuildOn(LinuxServerId linuxServerId) {
-        return !repository.findHealthyContainersByLinuxServer(linuxServerId, 1).isEmpty();
+        return !repository.findHealthyContainersConnectedToBackendByLinuxServer(
+                backendLifecycle.backendProcessId(),
+                linuxServerId,
+                1).isEmpty();
     }
 
     private OpencodeContainer chooseContainer(List<OpencodeContainer> candidates) {

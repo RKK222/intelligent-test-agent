@@ -314,6 +314,7 @@ public class TestAgentRuntimeProperties {
      */
     public static class Opencode {
         private List<Node> nodes = new ArrayList<>();
+        private final ManagerControl managerControl = new ManagerControl();
 
         /**
          * 返回配置化 opencode 节点列表。
@@ -327,6 +328,124 @@ public class TestAgentRuntimeProperties {
          */
         public void setNodes(List<Node> nodes) {
             this.nodes = nodes == null ? new ArrayList<>() : new ArrayList<>(nodes);
+        }
+
+        /**
+         * 返回 opencode-manager 控制面配置。
+         */
+        public ManagerControl getManagerControl() {
+            return managerControl;
+        }
+    }
+
+    /**
+     * opencode-manager 内部控制面配置项。
+     */
+    public static class ManagerControl {
+        private String token = "";
+        private String listenUrl = "http://127.0.0.1:8080";
+        private String linuxServerId = "127.0.0.1";
+        private Duration heartbeatInterval = Duration.ofSeconds(10);
+        private Duration backendStaleAfter = Duration.ofSeconds(30);
+        private Duration commandTimeout = Duration.ofSeconds(10);
+        private int backendDiscoveryLimit = 100;
+
+        /**
+         * 返回 manager 控制面专用 token。
+         */
+        public String getToken() {
+            return token;
+        }
+
+        /**
+         * 绑定 manager 控制面专用 token。
+         */
+        public void setToken(String token) {
+            this.token = token;
+        }
+
+        /**
+         * 返回当前后端实例可被 manager 直连的 HTTP 地址。
+         */
+        public String getListenUrl() {
+            return listenUrl;
+        }
+
+        /**
+         * 绑定当前后端实例直连 HTTP 地址。
+         */
+        public void setListenUrl(String listenUrl) {
+            this.listenUrl = listenUrl;
+        }
+
+        /**
+         * 返回当前后端 Java 进程所在 Linux 服务器 IP。
+         */
+        public String getLinuxServerId() {
+            return linuxServerId;
+        }
+
+        /**
+         * 绑定当前后端 Java 进程所在 Linux 服务器 IP。
+         */
+        public void setLinuxServerId(String linuxServerId) {
+            this.linuxServerId = linuxServerId;
+        }
+
+        /**
+         * 返回后端进程心跳间隔。
+         */
+        public Duration getHeartbeatInterval() {
+            return heartbeatInterval;
+        }
+
+        /**
+         * 绑定后端进程心跳间隔。
+         */
+        public void setHeartbeatInterval(Duration heartbeatInterval) {
+            this.heartbeatInterval = heartbeatInterval;
+        }
+
+        /**
+         * 返回 manager discovery 认为后端实例仍可用的心跳窗口。
+         */
+        public Duration getBackendStaleAfter() {
+            return backendStaleAfter;
+        }
+
+        /**
+         * 绑定后端实例心跳过期窗口。
+         */
+        public void setBackendStaleAfter(Duration backendStaleAfter) {
+            this.backendStaleAfter = backendStaleAfter;
+        }
+
+        /**
+         * 返回后端等待 manager 命令响应的超时时间。
+         */
+        public Duration getCommandTimeout() {
+            return commandTimeout;
+        }
+
+        /**
+         * 绑定 manager 命令响应超时时间。
+         */
+        public void setCommandTimeout(Duration commandTimeout) {
+            this.commandTimeout = commandTimeout;
+        }
+
+        /**
+         * 返回 discovery API 最多返回的后端实例数。
+         */
+        public int getBackendDiscoveryLimit() {
+            return backendDiscoveryLimit;
+        }
+
+        /**
+         * 绑定 discovery API 返回上限。
+         */
+        public void setBackendDiscoveryLimit(int backendDiscoveryLimit) {
+            this.backendDiscoveryLimit = backendDiscoveryLimit;
         }
     }
 

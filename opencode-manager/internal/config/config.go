@@ -2,10 +2,12 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -13,6 +15,10 @@ const (
 	defaultStateDir    = "/data/opencode/manager"
 	defaultSessionRoot = "/data/opencode/session"
 	defaultConfigDir   = "/data/opencode/.config/opencode/"
+
+	defaultDiscoveryInterval = 10 * time.Second
+	defaultHeartbeatInterval = 10 * time.Second
+	defaultReconnectInterval = 5 * time.Second
 )
 
 // Config 描述单个容器内 opencode-manager 的静态运行边界。
@@ -27,6 +33,17 @@ type Config struct {
 	SessionRoot   string
 	ConfigDir     string
 	AllowedCORS   []string
+}
+
+// ControlConfig 扩展容器本地配置，描述 manager 与后端控制面通信所需参数。
+type ControlConfig struct {
+	Config
+	ManagerID           string
+	BackendDiscoveryURL string
+	Token               string
+	DiscoveryInterval   time.Duration
+	HeartbeatInterval   time.Duration
+	ReconnectInterval   time.Duration
 }
 
 // LoadFromEnv 从环境变量读取容器拓扑、端口池和路径配置。
@@ -58,6 +75,27 @@ func LoadFromEnv() (Config, error) {
 	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
+	}
+	return cfg, nil
+}
+
+// LoadControlFromEnv 读取长运行 WebSocket 控制面所需配置。
+func LoadControlFromEnv() (ControlConfig, error) {
+	base, err := LoadFromEnv()
+	if err != nil {
+		return ControlConfig{}, err
+	}
+	cfg := ControlConfig{
+		Config:              base,
+		ManagerID:           strings.TrimSpace(os.Getenv("OPENCODE_MANAGER_ID")),
+		BackendDiscoveryURL: strings.TrimSpace(os.Getenv("OPENCODE_MANAGER_BACKEND_DISCOVERY_URL")),
+		Token:               strings.TrimSpace(os.Getenv("OPENCODE_MANAGER_TOKEN")),
+		DiscoveryInterval:   durationDefault("OPENCODE_MANAGER_DISCOVERY_INTERVAL", defaultDiscoveryInterval),
+		HeartbeatInterval:   durationDefault("OPENCODE_MANAGER_HEARTBEAT_INTERVAL", defaultHeartbeatInterval),
+		ReconnectInterval:   durationDefault("OPENCODE_MANAGER_RECONNECT_INTERVAL", defaultReconnectInterval),
+	}
+	if err := cfg.ValidateControl(); err != nil {
+		return ControlConfig{}, err
 	}
 	return cfg, nil
 }
@@ -100,6 +138,44 @@ func (c Config) ValidatePort(port int) error {
 	return nil
 }
 
+// ValidateControl 校验 manager 控制面必填项，token 只做存在性检查，避免误写日志。
+func (c ControlConfig) ValidateControl() error {
+	if err := c.Config.Validate(); err != nil {
+		return err
+	}
+	if !strings.HasPrefix(strings.TrimSpace(c.ManagerID), "mgr_") {
+		return fmt.Errorf("OPENCODE_MANAGER_ID must start with mgr_")
+	}
+	if strings.TrimSpace(c.BackendDiscoveryURL) == "" {
+		return fmt.Errorf("OPENCODE_MANAGER_BACKEND_DISCOVERY_URL is required")
+	}
+	parsed, err := url.Parse(c.BackendDiscoveryURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("OPENCODE_MANAGER_BACKEND_DISCOVERY_URL must be an absolute URL")
+	}
+	if strings.TrimSpace(c.Token) == "" {
+		return fmt.Errorf("OPENCODE_MANAGER_TOKEN is required")
+	}
+	if c.DiscoveryInterval <= 0 || c.HeartbeatInterval <= 0 || c.ReconnectInterval <= 0 {
+		return fmt.Errorf("manager control intervals must be positive")
+	}
+	return nil
+}
+
+// String 返回脱敏后的控制配置摘要，禁止暴露 manager token。
+func (c ControlConfig) String() string {
+	return fmt.Sprintf(
+		"managerId=%s containerId=%s linuxServerId=%s discoveryUrl=%s token=<redacted> discoveryInterval=%s heartbeatInterval=%s reconnectInterval=%s",
+		c.ManagerID,
+		c.ContainerID,
+		c.LinuxServerID,
+		c.BackendDiscoveryURL,
+		c.DiscoveryInterval,
+		c.HeartbeatInterval,
+		c.ReconnectInterval,
+	)
+}
+
 // SessionPath 返回指定端口对应的 opencode XDG_DATA_HOME。
 func (c Config) SessionPath(port int) string {
 	return filepath.Join(c.SessionRoot, strconv.Itoa(port))
@@ -125,6 +201,18 @@ func requiredInt(name string) (int, error) {
 func envDefault(name string, fallback string) string {
 	value := strings.TrimSpace(os.Getenv(name))
 	if value == "" {
+		return fallback
+	}
+	return value
+}
+
+func durationDefault(name string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil {
 		return fallback
 	}
 	return value

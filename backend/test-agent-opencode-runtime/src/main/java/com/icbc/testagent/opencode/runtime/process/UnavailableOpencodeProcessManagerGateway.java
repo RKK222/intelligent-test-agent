@@ -2,12 +2,10 @@ package com.icbc.testagent.opencode.runtime.process;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
-import org.springframework.stereotype.Service;
 
 /**
  * 批次 2 的生产占位网关；真实管理进程 socket 接入前，初始化请求明确返回不可用。
  */
-@Service
 public class UnavailableOpencodeProcessManagerGateway implements OpencodeProcessManagerGateway {
 
     @Override

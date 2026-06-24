@@ -25,6 +25,7 @@ import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.icbc.testagent.domain.support.DomainValidation;
 import com.icbc.testagent.domain.user.UserId;
+import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -256,6 +257,24 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
     }
 
     @Override
+    public List<BackendJavaProcess> findReadyBackendJavaProcesses(Instant minHeartbeatAt, int limit) {
+        validateLimit(limit);
+        return jdbcClient.sql("""
+                        select backend_process_id, linux_server_id, listen_url, status,
+                               started_at, last_heartbeat_at, trace_id, created_at, updated_at
+                        from backend_java_processes
+                        where status = :status and last_heartbeat_at >= :minHeartbeatAt
+                        order by last_heartbeat_at desc, backend_process_id asc
+                        limit :limit
+                        """)
+                .param("status", BackendJavaProcessStatus.READY.name())
+                .param("minHeartbeatAt", timestamp(minHeartbeatAt))
+                .param("limit", limit)
+                .query(backendProcessRowMapper)
+                .list();
+    }
+
+    @Override
     public OpencodeContainer saveContainer(OpencodeContainer container) {
         if (findContainerById(container.containerId()).isPresent()) {
             jdbcClient.sql("""
@@ -326,9 +345,7 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
 
     @Override
     public List<OpencodeContainer> findHealthyContainers(int limit) {
-        if (limit < 1 || limit > 500) {
-            throw new IllegalArgumentException("limit must be between 1 and 500");
-        }
+        validateLimit(limit);
         return jdbcClient.sql("""
                         select container_id, linux_server_id, container_name, port_start, port_end,
                                max_processes, current_processes, status, last_heartbeat_at,
@@ -346,9 +363,7 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
 
     @Override
     public List<OpencodeContainer> findHealthyContainersByLinuxServer(LinuxServerId linuxServerId, int limit) {
-        if (limit < 1 || limit > 500) {
-            throw new IllegalArgumentException("limit must be between 1 and 500");
-        }
+        validateLimit(limit);
         return jdbcClient.sql("""
                         select container_id, linux_server_id, container_name, port_start, port_end,
                                max_processes, current_processes, status, last_heartbeat_at,
@@ -362,6 +377,63 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
                         """)
                 .param("linuxServerId", linuxServerId.value())
                 .param("status", OpencodeContainerStatus.READY.name())
+                .param("limit", limit)
+                .query(containerRowMapper)
+                .list();
+    }
+
+    @Override
+    public List<OpencodeContainer> findHealthyContainersConnectedToBackend(BackendProcessId backendProcessId, int limit) {
+        validateLimit(limit);
+        return jdbcClient.sql("""
+                        select c.container_id, c.linux_server_id, c.container_name, c.port_start, c.port_end,
+                               c.max_processes, c.current_processes, c.status, c.last_heartbeat_at,
+                               c.trace_id, c.created_at, c.updated_at
+                        from opencode_containers c
+                        join opencode_container_managers m on m.container_id = c.container_id
+                        join opencode_manager_backend_connections mbc on mbc.manager_id = m.manager_id
+                        where mbc.backend_process_id = :backendProcessId
+                          and mbc.status = :connectionStatus
+                          and m.connection_status = :connectionStatus
+                          and c.status = :containerStatus
+                          and c.current_processes < c.max_processes
+                        order by c.current_processes asc, c.updated_at asc, c.container_id asc
+                        limit :limit
+                        """)
+                .param("backendProcessId", backendProcessId.value())
+                .param("connectionStatus", ManagerConnectionStatus.CONNECTED.name())
+                .param("containerStatus", OpencodeContainerStatus.READY.name())
+                .param("limit", limit)
+                .query(containerRowMapper)
+                .list();
+    }
+
+    @Override
+    public List<OpencodeContainer> findHealthyContainersConnectedToBackendByLinuxServer(
+            BackendProcessId backendProcessId,
+            LinuxServerId linuxServerId,
+            int limit) {
+        validateLimit(limit);
+        return jdbcClient.sql("""
+                        select c.container_id, c.linux_server_id, c.container_name, c.port_start, c.port_end,
+                               c.max_processes, c.current_processes, c.status, c.last_heartbeat_at,
+                               c.trace_id, c.created_at, c.updated_at
+                        from opencode_containers c
+                        join opencode_container_managers m on m.container_id = c.container_id
+                        join opencode_manager_backend_connections mbc on mbc.manager_id = m.manager_id
+                        where mbc.backend_process_id = :backendProcessId
+                          and c.linux_server_id = :linuxServerId
+                          and mbc.status = :connectionStatus
+                          and m.connection_status = :connectionStatus
+                          and c.status = :containerStatus
+                          and c.current_processes < c.max_processes
+                        order by c.current_processes asc, c.updated_at asc, c.container_id asc
+                        limit :limit
+                        """)
+                .param("backendProcessId", backendProcessId.value())
+                .param("linuxServerId", linuxServerId.value())
+                .param("connectionStatus", ManagerConnectionStatus.CONNECTED.name())
+                .param("containerStatus", OpencodeContainerStatus.READY.name())
                 .param("limit", limit)
                 .query(containerRowMapper)
                 .list();
@@ -644,9 +716,7 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
 
     @Override
     public List<OpencodeServerProcess> findOpencodeServerProcesses(int limit) {
-        if (limit < 1 || limit > 500) {
-            throw new IllegalArgumentException("limit must be between 1 and 500");
-        }
+        validateLimit(limit);
         return jdbcClient.sql("""
                         select process_id, user_id, linux_server_id, container_id, port, pid, base_url,
                                status, session_path, config_path, started_at, last_health_check_at,
@@ -665,6 +735,12 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
      */
     private String normalizeAgentId(String agentId) {
         return DomainValidation.requireText(agentId, "agentId").trim().toLowerCase(Locale.ROOT);
+    }
+
+    private void validateLimit(int limit) {
+        if (limit < 1 || limit > 500) {
+            throw new IllegalArgumentException("limit must be between 1 and 500");
+        }
     }
 
     /**

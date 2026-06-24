@@ -1,6 +1,7 @@
 package com.icbc.testagent.domain.opencodeprocess;
 
 import com.icbc.testagent.domain.user.UserId;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -17,6 +18,8 @@ public interface OpencodeProcessManagementRepository {
 
     Optional<BackendJavaProcess> findBackendJavaProcessById(BackendProcessId backendProcessId);
 
+    List<BackendJavaProcess> findReadyBackendJavaProcesses(Instant minHeartbeatAt, int limit);
+
     OpencodeContainer saveContainer(OpencodeContainer container);
 
     Optional<OpencodeContainer> findContainerById(OpencodeContainerId containerId);
@@ -24,6 +27,13 @@ public interface OpencodeProcessManagementRepository {
     List<OpencodeContainer> findHealthyContainers(int limit);
 
     List<OpencodeContainer> findHealthyContainersByLinuxServer(LinuxServerId linuxServerId, int limit);
+
+    List<OpencodeContainer> findHealthyContainersConnectedToBackend(BackendProcessId backendProcessId, int limit);
+
+    List<OpencodeContainer> findHealthyContainersConnectedToBackendByLinuxServer(
+            BackendProcessId backendProcessId,
+            LinuxServerId linuxServerId,
+            int limit);
 
     OpencodeContainerManager saveContainerManager(OpencodeContainerManager manager);
 

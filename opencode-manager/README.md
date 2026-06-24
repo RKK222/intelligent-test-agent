@@ -2,7 +2,7 @@
 
 ## 工程定位
 
-`opencode-manager` 是运行在每个 opencode 容器内的本地进程管理器，负责启动、停止、重启、健康检测容器内的用户专属 opencode server 进程。本批次只提供 CLI 和可复用 Go library，不连接后端 Java socket，也不写数据库。
+`opencode-manager` 是运行在每个 opencode 容器内的本地进程管理器，负责启动、停止、重启、健康检测容器内的用户专属 opencode server 进程。它提供本地 CLI 和 `run` 长运行模式；`run` 会发现所有 READY 后端实例，并与每个实例建立 WebSocket JSON 控制面连接。
 
 ## 构建与运行
 
@@ -26,11 +26,14 @@ opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 
 | 变量 | 说明 |
 |---|---|
-| `OPENCODE_MANAGER_CONTAINER_ID` | 当前容器 ID，后续批次用于注册和命令路由。 |
+| `OPENCODE_MANAGER_CONTAINER_ID` | 当前容器 ID，用于注册和命令路由。 |
 | `OPENCODE_MANAGER_LINUX_SERVER_ID` | Linux 服务器 ID，当前约定为服务器 IP。 |
 | `OPENCODE_MANAGER_PORT_START` | 当前容器可管理端口池起始端口。 |
 | `OPENCODE_MANAGER_PORT_END` | 当前容器可管理端口池结束端口。 |
 | `OPENCODE_MANAGER_MAX_PROCESSES` | 当前容器最大 opencode server 进程数，不得超过端口数量。 |
+| `OPENCODE_MANAGER_ID` | 当前 manager ID，必须以 `mgr_` 开头。 |
+| `OPENCODE_MANAGER_BACKEND_DISCOVERY_URL` | 后端 discovery API，例如 `http://10.8.0.21:8080/api/internal/platform/opencode-runtime/manager-backends`。 |
+| `OPENCODE_MANAGER_TOKEN` | 独立 manager token，用于 discovery API 和 WebSocket 鉴权。 |
 
 可选环境变量：
 
@@ -41,6 +44,9 @@ opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 | `OPENCODE_SESSION_ROOT` | `/data/opencode/session` |
 | `OPENCODE_CONFIG_DIR` | `/data/opencode/.config/opencode/` |
 | `OPENCODE_ALLOWED_CORS` | 空，多个 origin 用逗号分隔 |
+| `OPENCODE_MANAGER_DISCOVERY_INTERVAL` | `10s` |
+| `OPENCODE_MANAGER_HEARTBEAT_INTERVAL` | `10s` |
+| `OPENCODE_MANAGER_RECONNECT_INTERVAL` | `5s` |
 
 ## CLI
 
@@ -56,6 +62,24 @@ opencode-manager list --trace-id trace_1234567890abcdef
 
 `health` 先检查 PID 是否存在，再请求 `http://127.0.0.1:{port}/global/health`，失败时回退 `/doc`。
 
+## WebSocket 控制面
+
+长运行模式：
+
+```bash
+opencode-manager run
+```
+
+`run` 会使用 `OPENCODE_MANAGER_BACKEND_DISCOVERY_URL` 拉取后端实例列表，并对每个实例连接其 `webSocketUrl`。HTTP 和 WebSocket 都使用 `Authorization: Bearer <OPENCODE_MANAGER_TOKEN>`，不得使用用户 JWT、普通 API token 或 opencode server 密钥。
+
+WebSocket 文本帧为 JSON，协议版本固定 `opencode-manager.v1`。manager 会发送：
+
+- `register`：连接建立后注册容器、端口池、容量和能力。
+- `heartbeat`：按间隔刷新当前进程数和连接状态。
+- `commandResult`：执行后端 `command` 后返回状态、端口、PID、路径和 traceId。
+
+manager 当前接受的命令为 `start`、`health`、`stop`、`restart`。命令最终复用 `internal/process`，不会重新实现 opencode 生命周期逻辑。
+
 ## 状态与日志
 
 - 本地状态文件：`{OPENCODE_MANAGER_STATE_DIR}/processes/{port}.json`。
@@ -64,6 +88,6 @@ opencode-manager list --trace-id trace_1234567890abcdef
 
 ## 边界
 
-- 本批不实现后端 socket、注册、心跳、命令分发或数据库写入。
+- manager 不访问后端数据库；拓扑和进程状态持久化由后端 Java 写入数据库。
+- manager 日志不得输出 token、Authorization、Cookie、用户完整输入或完整 prompt。
 - opencode server 默认监听 `0.0.0.0:{port}`，不设置 `OPENCODE_SERVER_PASSWORD`；生产必须依赖容器网络、主机防火墙或网关限制访问面。
-- 后续批次 4 的 socket 控制面应复用 `internal/process`，而不是重新实现进程生命周期。

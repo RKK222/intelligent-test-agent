@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/icbc/test-agent/opencode-manager/internal/config"
+	"github.com/icbc/test-agent/opencode-manager/internal/control"
 	"github.com/icbc/test-agent/opencode-manager/internal/health"
 	"github.com/icbc/test-agent/opencode-manager/internal/process"
 	"github.com/icbc/test-agent/opencode-manager/internal/state"
@@ -24,6 +27,9 @@ func run(args []string) int {
 	if len(args) == 0 {
 		writeJSON(process.Result{Status: process.StatusFailed, Message: "missing command"})
 		return 2
+	}
+	if args[0] == "run" {
+		return runSupervisor()
 	}
 	cfg, err := config.LoadFromEnv()
 	if err != nil {
@@ -41,6 +47,29 @@ func run(args []string) int {
 	result, err := dispatch(context.Background(), manager, args)
 	writeJSON(result)
 	if err != nil {
+		return 1
+	}
+	return 0
+}
+
+func runSupervisor() int {
+	cfg, err := config.LoadControlFromEnv()
+	if err != nil {
+		writeJSON(process.Result{Status: process.StatusFailed, Message: err.Error()})
+		return 2
+	}
+	manager := process.NewManager(
+		cfg.Config,
+		state.NewFileStore(cfg.StateDir),
+		process.OSStarter{},
+		process.OSSignaler{},
+		health.Checker{},
+	)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	supervisor := control.NewSupervisor(cfg, manager, nil)
+	if err := supervisor.Run(ctx); err != nil && ctx.Err() == nil {
+		writeJSON(process.Result{Status: process.StatusFailed, Message: err.Error()})
 		return 1
 	}
 	return 0

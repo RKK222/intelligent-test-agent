@@ -743,6 +743,94 @@ class JdbcRepositoryIntegrationTest {
     }
 
     @Test
+    void opencodeProcessManagementFindsReadyBackendsAndConnectedContainers() {
+        LinuxServer linuxServer = linuxServer();
+        BackendJavaProcess currentBackend = backendJavaProcess();
+        BackendJavaProcess staleBackend = new BackendJavaProcess(
+                new BackendProcessId("bjp_2234567890abcdef"),
+                new LinuxServerId("10.8.0.12"),
+                "http://10.8.0.12:8081",
+                BackendJavaProcessStatus.READY,
+                NOW,
+                NOW.minusSeconds(60),
+                NOW,
+                NOW,
+                "trace_2234567890abcdef");
+        BackendJavaProcess otherBackend = new BackendJavaProcess(
+                new BackendProcessId("bjp_3234567890abcdef"),
+                new LinuxServerId("10.8.0.12"),
+                "http://10.8.0.12:8082",
+                BackendJavaProcessStatus.READY,
+                NOW,
+                NOW,
+                NOW,
+                NOW,
+                "trace_3234567890abcdef");
+        OpencodeContainer connectedContainer = opencodeContainer();
+        OpencodeContainer otherBackendContainer = new OpencodeContainer(
+                new OpencodeContainerId("ctr_02"),
+                new LinuxServerId("10.8.0.12"),
+                "opencode-b",
+                4101,
+                4105,
+                4,
+                0,
+                OpencodeContainerStatus.READY,
+                NOW,
+                NOW,
+                NOW.plusMillis(1),
+                "trace_3234567890abcdef");
+        OpencodeContainerManager connectedManager = opencodeContainerManager();
+        OpencodeContainerManager otherManager = new OpencodeContainerManager(
+                new ContainerManagerId("mgr_2234567890abcdef"),
+                new OpencodeContainerId("ctr_02"),
+                new LinuxServerId("10.8.0.12"),
+                "opencode-manager.v1",
+                ManagerConnectionStatus.CONNECTED,
+                Map.of("start", true, "health", true),
+                NOW,
+                NOW,
+                NOW,
+                "trace_3234567890abcdef");
+
+        opencodeProcesses.saveLinuxServer(linuxServer);
+        opencodeProcesses.saveBackendJavaProcess(currentBackend);
+        opencodeProcesses.saveBackendJavaProcess(staleBackend);
+        opencodeProcesses.saveBackendJavaProcess(otherBackend);
+        opencodeProcesses.saveContainer(connectedContainer);
+        opencodeProcesses.saveContainer(otherBackendContainer);
+        opencodeProcesses.saveContainerManager(connectedManager);
+        opencodeProcesses.saveContainerManager(otherManager);
+        opencodeProcesses.saveManagerBackendConnection(managerBackendConnection());
+        opencodeProcesses.saveManagerBackendConnection(new OpencodeManagerBackendConnection(
+                otherManager.managerId(),
+                otherBackend.backendProcessId(),
+                ManagerConnectionStatus.CONNECTED,
+                NOW,
+                NOW,
+                NOW,
+                "trace_3234567890abcdef"));
+        opencodeProcesses.saveManagerBackendConnection(new OpencodeManagerBackendConnection(
+                otherManager.managerId(),
+                currentBackend.backendProcessId(),
+                ManagerConnectionStatus.DISCONNECTED,
+                NOW,
+                NOW,
+                NOW,
+                "trace_4234567890abcdef"));
+
+        assertThat(opencodeProcesses.findReadyBackendJavaProcesses(NOW.minusSeconds(5), 10))
+                .containsExactly(currentBackend, otherBackend);
+        assertThat(opencodeProcesses.findHealthyContainersConnectedToBackend(currentBackend.backendProcessId(), 10))
+                .containsExactly(connectedContainer);
+        assertThat(opencodeProcesses.findHealthyContainersConnectedToBackendByLinuxServer(
+                        currentBackend.backendProcessId(),
+                        new LinuxServerId("10.8.0.12"),
+                        10))
+                .containsExactly(connectedContainer);
+    }
+
+    @Test
     void opencodeProcessManagementConstraintsProtectCurrentTopology() {
         users.save(processUser("usr_process_user", "process-user"));
         users.save(processUser("usr_process_second", "process-second"));
