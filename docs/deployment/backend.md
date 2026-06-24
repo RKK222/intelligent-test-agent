@@ -55,6 +55,8 @@ opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 
 opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http://{linuxServerIp}:{port}` 访问。生产部署必须通过容器网络、主机防火墙或网关限制端口池访问面，不得把用户进程端口暴露到不可信网络。
 
+启用用户进程模型后，已登录用户的 Run 和 opencode runtime 代理都会优先使用当前用户绑定的 `READY` 进程；用户未初始化或健康检测失败时返回平台 `OPENCODE_UNAVAILABLE`，由前端提示初始化。无用户主体的 static-token 兼容调用仍可使用配置 seed 写入的固定 `execution_nodes`，用于旧集成或本地探测。Session 级 runtime 代理发现绑定节点不是当前用户进程节点时，会在当前进程上创建新的远端 session 并覆盖绑定，不会删除旧远端 session。
+
 ## 构建镜像
 
 ```bash

@@ -1,10 +1,15 @@
 package com.icbc.testagent.opencode.runtime.runtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 
+import com.icbc.testagent.common.error.ErrorCode;
+import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
 import com.icbc.testagent.agent.runtime.OpencodeAgentRuntime;
 import com.icbc.testagent.domain.agent.AgentSessionBinding;
@@ -17,11 +22,16 @@ import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.domain.session.SessionStatus;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.opencode.client.OpencodeClientFacade;
+import com.icbc.testagent.opencode.client.OpencodeCreateSessionCommand;
+import com.icbc.testagent.opencode.client.OpencodeCreateSessionResult;
 import com.icbc.testagent.opencode.client.OpencodeRuntimeCommand;
 import com.icbc.testagent.opencode.client.OpencodeRuntimeResult;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -98,6 +108,41 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.path()).isEqualTo("/global/health");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
         assertThat(result).isInstanceOf(Map.class);
+    }
+
+    @Test
+    void workspaceRuntimeUsesAssignedUserProcessWhenUserContextExists() {
+        Fixture fixture = new Fixture();
+        ExecutionNode userNode = Fixture.userProcessNode("node_ocp_1234567890abcdef", "http://10.8.0.12:4096");
+        when(fixture.assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(userNode));
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("healthy", true)))));
+
+        fixture.service.withUser(
+                new UserId("usr_1234567890abcdef"),
+                () -> fixture.service.runtimeStatus("wrk_1234567890abcdef", "trace_1234567890abcdef"));
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.node().baseUrl()).isEqualTo("http://10.8.0.12:4096");
+        assertThat(command.directory()).isEqualTo("/tmp/demo");
+        verify(fixture.executionNodeRepository, never()).findRoutableNodes(1);
+    }
+
+    @Test
+    void workspaceRuntimeKeepsFixedNodeFallbackWithoutUserContext() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("healthy", true)))));
+
+        fixture.service.runtimeStatus("wrk_1234567890abcdef", "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.node().baseUrl()).isEqualTo("http://127.0.0.1:4096");
+        verify(fixture.assignmentService, never()).requireReadyProcess(any(), anyString(), anyString());
     }
 
     @Test
@@ -183,6 +228,72 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.method()).isEqualTo("POST");
         assertThat(command.path()).isEqualTo("/session/ses_remote1234567890abcdef/share");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
+    }
+
+    @Test
+    void sessionRuntimeReusesRemoteSessionWhenBindingMatchesCurrentUserProcess() {
+        Fixture fixture = new Fixture();
+        ExecutionNode userNode = Fixture.node();
+        when(fixture.assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(userNode));
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("url", "https://opencode.ai/s/abc")))));
+
+        fixture.service.withUser(
+                new UserId("usr_1234567890abcdef"),
+                () -> fixture.service.shareSession("ses_1234567890abcdef", "trace_1234567890abcdef"));
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.path()).isEqualTo("/session/ses_remote1234567890abcdef/share");
+        assertThat(command.node().baseUrl()).isEqualTo("http://127.0.0.1:4096");
+        verify(fixture.facade, never()).createSession(any());
+    }
+
+    @Test
+    void sessionRuntimeRebuildsRemoteSessionWhenBindingNodeDiffersFromCurrentUserProcess() {
+        Fixture fixture = new Fixture();
+        ExecutionNode userNode = Fixture.userProcessNode("node_ocp_1234567890abcdef", "http://10.8.0.12:4096");
+        when(fixture.assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(userNode));
+        when(fixture.facade.createSession(any())).thenReturn(Mono.just(new OpencodeCreateSessionResult("ses_userremote1234567890abcdef")));
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("url", "https://opencode.ai/s/user")))));
+
+        fixture.service.withUser(
+                new UserId("usr_1234567890abcdef"),
+                () -> fixture.service.shareSession("ses_1234567890abcdef", "trace_1234567890abcdef"));
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.path()).isEqualTo("/session/ses_userremote1234567890abcdef/share");
+        assertThat(command.node().baseUrl()).isEqualTo("http://10.8.0.12:4096");
+        AgentSessionBinding binding = fixture.bindingRepository
+                .findBySessionIdAndAgentId(new SessionId("ses_1234567890abcdef"), "opencode")
+                .orElseThrow();
+        assertThat(binding.remoteSessionId()).isEqualTo("ses_userremote1234567890abcdef");
+        assertThat(binding.executionNodeId()).isEqualTo(userNode.executionNodeId());
+        verify(fixture.facade).createSession(any(OpencodeCreateSessionCommand.class));
+    }
+
+    @Test
+    void userRuntimeReturnsUnavailableWhenUserProcessIsNotReady() {
+        Fixture fixture = new Fixture();
+        when(fixture.assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenThrow(new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "请先初始化 opencode 进程"));
+
+        assertThatThrownBy(() -> fixture.service.withUser(
+                        new UserId("usr_1234567890abcdef"),
+                        () -> fixture.service.listAgents("wrk_1234567890abcdef", "trace_1234567890abcdef")))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
     }
 
     @Test
@@ -278,17 +389,26 @@ class OpencodeRuntimeApplicationServiceTest {
         private final ExecutionNodeRepository executionNodeRepository = org.mockito.Mockito.mock(ExecutionNodeRepository.class);
         private final AgentSessionBindingRepository bindingRepository = new FakeAgentSessionBindingRepository();
         private final OpencodeClientFacade facade = org.mockito.Mockito.mock(OpencodeClientFacade.class);
+        private final UserOpencodeProcessAssignmentService assignmentService =
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
         private final OpencodeRuntimeApplicationService service = new OpencodeRuntimeApplicationService(
                 workspaceRepository,
                 sessionRepository,
                 executionNodeRepository,
                 new AgentRuntimeRegistry(List.of(new OpencodeAgentRuntime(facade))),
                 bindingRepository,
-                new ObjectMapper());
+                new ObjectMapper(),
+                assignmentService);
 
         private Fixture() {
             when(workspaceRepository.findById(new WorkspaceId("wrk_1234567890abcdef"))).thenReturn(Optional.of(workspace()));
             when(sessionRepository.findById(new SessionId("ses_1234567890abcdef"))).thenReturn(Optional.of(session()));
+            when(sessionRepository.attachOpencodeSession(any(), anyString(), any(), any(), anyString()))
+                    .thenAnswer(invocation -> Optional.of(session().attachOpencodeSession(
+                            invocation.getArgument(1),
+                            invocation.getArgument(2),
+                            invocation.getArgument(3),
+                            invocation.getArgument(4))));
             when(executionNodeRepository.findRoutableNodes(1)).thenReturn(List.of(node()));
             when(executionNodeRepository.findById(new ExecutionNodeId("node_1234567890abcdef"))).thenReturn(Optional.of(node()));
         }
@@ -333,6 +453,21 @@ class OpencodeRuntimeApplicationServiceTest {
                     100,
                     NOW,
                     Set.of("chat"),
+                    NOW,
+                    NOW,
+                    "trace_1234567890abcdef");
+        }
+
+        private static ExecutionNode userProcessNode(String nodeId, String baseUrl) {
+            return new ExecutionNode(
+                    new ExecutionNodeId(nodeId),
+                    baseUrl,
+                    ExecutionNodeStatus.READY,
+                    0,
+                    1,
+                    100,
+                    NOW,
+                    Set.of("opencode", "user-process"),
                     NOW,
                     NOW,
                     "trace_1234567890abcdef");

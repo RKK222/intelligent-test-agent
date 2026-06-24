@@ -17,6 +17,7 @@
 Token 校验流程：
 - `JwtAuthWebFilter`（Order +10）优先检查用户 Token，有效时设置 `AuthPrincipal` 到请求属性。
 - `ApiTokenWebFilter`（Order +20）作为静态 API Token 兜底，未配置时放行。
+- opencode runtime 代理可以读取可选 `AuthPrincipal`：存在用户主体时业务层使用用户专属 opencode 进程；只有 static token 或本地放行而没有用户主体时，才允许走固定 `execution_nodes` 兼容 fallback。静态 API token 不得被伪装成用户身份。
 
 本地占位策略：
 

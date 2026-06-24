@@ -751,6 +751,12 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
 
 opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controller 暴露。前端仍只调用平台后端 API，后端通过 `test-agent-opencode-runtime -> test-agent-agent-runtime -> test-agent-opencode-client` 访问 opencode HTTP API，不返回 generated SDK DTO，不允许 Controller 直接调用 generated SDK。
 
+运行态代理与 Run 使用同一套目标解析规则：
+
+- 已登录用户访问默认 `opencode` agent 时，workspace 级目录、文件、配置、provider、MCP 等接口会先校验当前用户已有 `READY` opencode 进程，并使用该进程投影出的 `executionNodeId = "node_" + processId` 与 `baseUrl = http://{linuxServerId}:{port}` 调用 opencode；未初始化或健康检测失败返回 `OPENCODE_UNAVAILABLE`。
+- 无用户主体的兼容调用（例如 static API token、本地放行或旧系统集成）继续走固定 `execution_nodes` 路由，不要求用户进程。
+- Session 级运行态接口在已登录用户访问默认 `opencode` 时，会校验 `(sessionId, agentId)` 绑定是否指向当前用户进程节点；绑定缺失或节点不一致时，后端会在当前用户进程上创建新的远端 session，并覆盖 `agent_session_bindings` 与兼容 `sessions.opencode_*` 字段。旧远端 session 不由本接口删除。
+
 运行态目录接口：
 
 | 方法 | 路径 | 用途 |
@@ -824,7 +830,7 @@ Session 运行态接口：
 
 - 所有响应仍包裹 `ApiResponse<T>`，错误仍走统一错误码和 traceId。
 - `workspaceId` 为平台 workspace id，后端只把 workspace root 映射为 opencode `directory`；不得把平台 id 当作 opencode `workspace` query。
-- `sessionId` 为平台 session id，后端通过 `agent_session_bindings` 中的 `(sessionId, agentId)` 定位远端 session；`opencode` 会兼容读取旧 `sessions.opencode_*` 字段并回填 binding。未绑定远端 session 时返回 `CONFLICT`。
+- `sessionId` 为平台 session id。无用户主体时，后端通过 `agent_session_bindings` 中的 `(sessionId, agentId)` 定位远端 session；`opencode` 会兼容读取旧 `sessions.opencode_*` 字段并回填 binding，未绑定远端 session 时返回 `CONFLICT`。有用户主体且 agent 为 `opencode` 时，缺失或不匹配的绑定会自动在当前用户进程上重建。
 - `permission`/`question` 的平台路径保留在 `/api/sessions/{sessionId}/...` 下，后端实际映射到 opencode `/permission`、`/question` 族 API。
 - config/provider auth/worktree/share/MCP auth 均为受控代理能力，前端不得改为直接调用 opencode 原 URL；provider secret 不得写入 localStorage 或日志。
 - 只读 transcript 页面 `/s/{sessionId}` 只消费平台 `GET /api/sessions/{sessionId}` 与 `GET /api/sessions/{sessionId}/messages`，不接 opencode 公网 `share_data/share_poll`，也不绕过平台鉴权。
@@ -833,9 +839,9 @@ Session 运行态接口：
 对应测试：
 
 - `OpencodeRuntimeFacadeTest`：验证 facade runtime 调用不泄漏 generated DTO。
-- `OpencodeRuntimeApplicationServiceTest`：验证 workspace directory、远端 session id、permission reply body、MCP resources/tools、config/provider OAuth/worktree/share/MCP auth 映射。
-- `PlatformOpencodeRuntimeControllerTest`：验证平台路径统一响应、MCP tools 查询、session share 和 traceId 透传。
-- `AgentOpencodeRuntimeControllerTest`：验证 `/api/internal/agent/opencode/...` agent path 统一响应、agentId 选择和 traceId 透传。
+- `OpencodeRuntimeApplicationServiceTest`：验证 workspace directory、用户进程节点路由、固定节点 fallback、远端 session id、binding mismatch 自动重建、permission reply body、MCP resources/tools、config/provider OAuth/worktree/share/MCP auth 映射。
+- `PlatformOpencodeRuntimeControllerTest`：验证平台路径统一响应、MCP tools 查询、session share、traceId 和可选用户主体透传。
+- `AgentOpencodeRuntimeControllerTest`：验证 `/api/internal/agent/opencode/...` agent path 统一响应、agentId 选择、traceId 和可选用户主体透传。
 - `RuntimeControllerTest`：验证 `/api/internal/agent/opencode/runs` 与旧 Run URL 共享 DTO、错误格式和 service 实现。
 
 - 首次 Run：先校验当前用户已有 `READY` opencode 进程，再通过该进程投影出的 execution node 创建远端 session，保存 `agent_session_bindings`；`opencode` 兼容字段 `sessions.opencode_session_id/opencode_execution_node_id` 暂时同步写入。
