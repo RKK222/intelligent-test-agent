@@ -97,6 +97,91 @@ describe("backend-api", () => {
     expect(headers.get("Authorization")).toBe("Bearer token_123");
   });
 
+  it("maps opencode runtime management overview through platform URL with filters", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            generatedAt: "2026-06-24T00:00:00Z",
+            summary: {
+              linuxServers: 1,
+              readyLinuxServers: 1,
+              backendProcesses: 1,
+              readyBackendProcesses: 1,
+              containers: 1,
+              readyContainers: 1,
+              managers: 1,
+              connectedManagers: 1,
+              managerBackendConnections: 1,
+              opencodeProcesses: 1,
+              runningOpencodeProcesses: 1,
+              userBindings: 1
+            },
+            linuxServers: [{ linuxServerId: "10.8.0.12", name: "10.8.0.12", status: "READY", capacitySummary: {}, lastHeartbeatAt: "2026-06-24T00:00:00Z", traceId: "trace_fixed" }],
+            backendProcesses: [],
+            containers: [],
+            managers: [],
+            managerBackendConnections: [],
+            opencodeProcesses: {
+              items: [
+                {
+                  processId: "ocp_1234567890abcdef",
+                  userId: "usr_1234567890abcdef",
+                  linuxServerId: "10.8.0.12",
+                  containerId: "ctr_01",
+                  port: 4096,
+                  pid: 12345,
+                  baseUrl: "http://10.8.0.12:4096",
+                  status: "RUNNING",
+                  sessionPath: "/data/opencode/session/4096",
+                  configPath: "/data/opencode/.config/opencode/",
+                  lastHealthCheckAt: "2026-06-24T00:00:00Z",
+                  healthMessage: "ok",
+                  traceId: "trace_fixed",
+                  bindingAgentId: "opencode",
+                  bindingStatus: "ACTIVE",
+                  bindingUpdatedAt: "2026-06-24T00:00:00Z"
+                }
+              ],
+              page: 1,
+              size: 20,
+              total: 1
+            }
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token_123",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(
+      client.getOpencodeRuntimeManagementOverview({
+        status: "RUNNING",
+        linuxServerId: "10.8.0.12",
+        containerId: "ctr_01",
+        userId: "usr_1234567890abcdef",
+        page: 1,
+        size: 20
+      })
+    ).resolves.toMatchObject({
+      summary: { runningOpencodeProcesses: 1 },
+      opencodeProcesses: { total: 1 }
+    });
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api/api/internal/platform/opencode-runtime/management/overview?status=RUNNING&linuxServerId=10.8.0.12&containerId=ctr_01&userId=usr_1234567890abcdef&page=1&size=20"
+    );
+    const headers = fetcher.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("Authorization")).toBe("Bearer token_123");
+  });
+
   it("maps unified error responses to BackendApiError with trace id", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

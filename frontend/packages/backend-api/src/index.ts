@@ -23,6 +23,8 @@ import type {
   ManagedApplication,
   ManagedWorkspaceRuntime,
   ModelInfo,
+  OpencodeRuntimeManagementOverview,
+  OpencodeRuntimeManagementOverviewParams,
   PageResponse,
   PlatformUserSummary,
   PersonalWorkspace,
@@ -113,6 +115,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const agentBase = `/api/internal/agent/${encodeURIComponent(agentId)}`;
   const configurationBase = "/api/internal/platform/configuration-management";
   const workspaceManagementBase = "/api/internal/platform/workspace-management";
+  const opencodeRuntimeManagementBase = "/api/internal/platform/opencode-runtime/management";
   const fetcher = options.fetcher ?? fetch;
   const traceIdFactory = options.traceIdFactory ?? defaultTraceId;
   const requestTimeoutMs = options.requestTimeoutMs ?? 30000;
@@ -280,6 +283,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     getMyOpencodeProcess: () => request<UserOpencodeProcess>(agentPath("/processes/me")),
     initializeMyOpencodeProcess: () =>
       request<UserOpencodeProcess>(agentPath("/processes/me/initialize"), { method: "POST" }),
+    getOpencodeRuntimeManagementOverview: (params: OpencodeRuntimeManagementOverviewParams = {}) =>
+      request<OpencodeRuntimeManagementOverview>(`${opencodeRuntimeManagementBase}/overview${query({ ...params })}`),
     getRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}`)),
     cancelRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}/cancel`), { method: "POST" }),
     getRunDiff: (runId: string) => request<RunDiff>(agentPath(`/runs/${encodeURIComponent(runId)}/diff`)),

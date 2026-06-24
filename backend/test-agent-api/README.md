@@ -17,6 +17,7 @@
 - runtime Controller 只读取可选认证主体并传入 `test-agent-opencode-runtime`，有用户主体时由业务层使用用户专属 opencode 进程，无用户主体时保持 static-token 兼容 fallback。
 - RunEvent SSE 建连时先委托 runtime 恢复 opencode projected messages，再进入 durable replay 与 live bus 合流。
 - 暴露 opencode-manager discovery API 和 WebSocket 控制面入口，入口只做 manager token 鉴权、DTO/消息适配和 traceId 处理。
+- 暴露超级管理员只读运行管理 overview API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选参数校验、DTO 映射和 traceId 处理。
 - 本地 CORS 默认允许主前端和 `frontend-opencode` Vite/Preview/E2E 端口；生产必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式收敛。
 
 ## 允许依赖
@@ -41,6 +42,7 @@
 ## 测试覆盖
 
 - `RuntimeControllerTest` 覆盖 Workspace、目录选择、Session、Run、Diff、agent-scoped Run URL、RunEvent SSE 恢复快照和内部平台兼容 URL。
+- `RuntimeManagementControllerTest` 覆盖运行管理 overview API 的 `SUPER_ADMIN` 成功、非超级管理员拒绝、未认证、非法分页/状态参数和 traceId。
 - `ManagerBackendDiscoveryControllerTest` 覆盖 manager token 鉴权、统一响应、traceId 和 READY 后端实例 DTO。
 - `PlatformOpencodeRuntimeControllerTest` 覆盖旧 `/api/...` 与 `/api/internal/platform/...` 的 opencode runtime 代理入口、MCP tools、permission reply、session share、traceId 和可选用户主体透传。
 - `AgentOpencodeRuntimeControllerTest` 覆盖 `/api/internal/agent/{agentId}/...` 原始 opencode 路径兼容、agentId、traceId 和可选用户主体透传。

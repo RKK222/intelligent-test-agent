@@ -41,6 +41,7 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerStatus;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnection;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
@@ -740,6 +741,66 @@ class JdbcRepositoryIntegrationTest {
         assertThat(opencodeProcesses.findOccupiedPorts(new LinuxServerId("10.8.0.12"), new OpencodeContainerId("ctr_01")))
                 .containsExactly(4096);
         assertThat(opencodeProcesses.findOpencodeServerProcesses(10)).containsExactly(process);
+        assertThat(opencodeProcesses.findLinuxServers(500)).containsExactly(linuxServer);
+        assertThat(opencodeProcesses.findBackendJavaProcesses(500)).containsExactly(backendProcess);
+        assertThat(opencodeProcesses.findContainers(500)).containsExactly(container);
+        assertThat(opencodeProcesses.findContainerManagers(500)).containsExactly(manager);
+        assertThat(opencodeProcesses.findManagerBackendConnections(500)).containsExactly(connection);
+        assertThat(opencodeProcesses.countUserBindings()).isEqualTo(1);
+        assertThat(opencodeProcesses.findUserBindingsByProcessIds(List.of(process.processId())))
+                .containsEntry(process.processId(), binding);
+        OpencodeServerProcessFilter filter = new OpencodeServerProcessFilter(
+                OpencodeServerProcessStatus.RUNNING,
+                new LinuxServerId("10.8.0.12"),
+                new OpencodeContainerId("ctr_01"),
+                new UserId("usr_process_user"));
+        PageResponse<OpencodeServerProcess> filtered = opencodeProcesses.findOpencodeServerProcesses(filter, new PageRequest(1, 10));
+        assertThat(filtered.items()).containsExactly(process);
+        assertThat(filtered.total()).isEqualTo(1);
+        assertThat(opencodeProcesses.countOpencodeServerProcesses(filter)).isEqualTo(1);
+    }
+
+    @Test
+    void opencodeProcessManagementPagesAndFiltersServerProcesses() {
+        users.save(processUser("usr_process_user", "process-user"));
+        users.save(processUser("usr_process_second", "process-second"));
+        opencodeProcesses.saveLinuxServer(linuxServer());
+        opencodeProcesses.saveBackendJavaProcess(backendJavaProcess());
+        opencodeProcesses.saveContainer(opencodeContainer());
+        opencodeProcesses.saveContainerManager(opencodeContainerManager());
+        OpencodeServerProcess running = opencodeServerProcess(
+                "ocp_1234567890abcdef",
+                "usr_process_user",
+                4096,
+                OpencodeServerProcessStatus.RUNNING);
+        OpencodeServerProcess unhealthy = opencodeServerProcess(
+                "ocp_2234567890abcdef",
+                "usr_process_second",
+                4097,
+                OpencodeServerProcessStatus.UNHEALTHY);
+        opencodeProcesses.saveOpencodeServerProcess(running);
+        opencodeProcesses.saveOpencodeServerProcess(unhealthy);
+
+        PageResponse<OpencodeServerProcess> runningPage = opencodeProcesses.findOpencodeServerProcesses(
+                new OpencodeServerProcessFilter(
+                        OpencodeServerProcessStatus.RUNNING,
+                        new LinuxServerId("10.8.0.12"),
+                        new OpencodeContainerId("ctr_01"),
+                        null),
+                new PageRequest(1, 10));
+        PageResponse<OpencodeServerProcess> secondUserPage = opencodeProcesses.findOpencodeServerProcesses(
+                new OpencodeServerProcessFilter(null, null, null, new UserId("usr_process_second")),
+                new PageRequest(1, 10));
+
+        assertThat(runningPage.items()).containsExactly(running);
+        assertThat(runningPage.total()).isEqualTo(1);
+        assertThat(opencodeProcesses.countOpencodeServerProcesses(new OpencodeServerProcessFilter(
+                OpencodeServerProcessStatus.RUNNING,
+                new LinuxServerId("10.8.0.12"),
+                new OpencodeContainerId("ctr_01"),
+                null))).isEqualTo(1);
+        assertThat(secondUserPage.items()).containsExactly(unhealthy);
+        assertThat(secondUserPage.total()).isEqualTo(1);
     }
 
     @Test
@@ -1047,6 +1108,14 @@ class JdbcRepositoryIntegrationTest {
     }
 
     private static OpencodeServerProcess opencodeServerProcess(String processId, String userId, int port) {
+        return opencodeServerProcess(processId, userId, port, OpencodeServerProcessStatus.RUNNING);
+    }
+
+    private static OpencodeServerProcess opencodeServerProcess(
+            String processId,
+            String userId,
+            int port,
+            OpencodeServerProcessStatus status) {
         return new OpencodeServerProcess(
                 new OpencodeProcessId(processId),
                 new UserId(userId),
@@ -1055,7 +1124,7 @@ class JdbcRepositoryIntegrationTest {
                 port,
                 12345L,
                 "http://10.8.0.12:" + port,
-                OpencodeServerProcessStatus.RUNNING,
+                status,
                 "/data/opencode/session/" + port,
                 "/data/opencode/.config/opencode/",
                 NOW,

@@ -21,7 +21,7 @@
 - `event.RunEvent`、`event.RunEventDraft`、`event.RunEventId`、`event.RunEventType`、`event.RunEventRepository`：平台运行事件模型和 append-only 端口；RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed` 等运行态事件。
 - `node.ExecutionNode`、`node.ExecutionNodeId`、`node.ExecutionNodeStatus`、`node.ExecutionNodeRepository`：执行节点模型和查询端口。
 - `routing.RoutingDecision`、`routing.RoutingReason`、`routing.ExecutionNodeRouter`、`routing.RoutingDecisionRepository`：路由决策值对象、纯路由策略和持久化端口。
-- `opencodeprocess.*`：Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程和用户绑定模型；`OpencodeProcessManagementRepository` 作为持久化端口。
+- `opencodeprocess.*`：Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程、查询筛选和用户绑定模型；`OpencodeProcessManagementRepository` 作为持久化端口。
 - 后续可新增领域命令、领域服务接口和更多状态规则。
 
 ## 允许依赖

@@ -177,13 +177,19 @@
   - `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/RuntimeManagementController.java`
   - `backend/test-agent-api/src/main/java/com/icbc/testagent/api/web/platform/RuntimeManagementDtos.java`
   - `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/RuntimeManagementControllerTest.java`
+  - `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/opencodeprocess/OpencodeServerProcessFilter.java`
+  - `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/opencodeprocess/OpencodeProcessManagementRepository.java`
+  - `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/JdbcOpencodeProcessManagementRepository.java`
   - `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/process/RuntimeManagementQueryService.java`
+  - `backend/test-agent-opencode-runtime/src/test/java/com/icbc/testagent/opencode/runtime/process/RuntimeManagementQueryServiceTest.java`
   - `frontend/packages/shared-types/src/index.ts`
   - `frontend/packages/backend-api/src/index.ts`
-  - `frontend/apps/agent-web/src/components/runtime-management/*`
-  - `frontend/apps/agent-web/src/router/*`
-  - `frontend/apps/agent-web/src/PACKAGE.md`
+  - `frontend/apps/agent-web/src/components/settings/SettingsMenu.vue`
+  - `frontend/apps/agent-web/src/components/settings/SettingsDialog.vue`
+  - `frontend/apps/agent-web/src/components/settings/SettingsPanel.vue`
+  - `frontend/apps/agent-web/src/components/settings/RuntimeManagementPanel.vue`
   - `frontend/packages/backend-api/README.md`
+  - `frontend/apps/agent-web/README.md`
   - `docs/api/http-api.md`
 - 修改位置：
   - 后端新增 `/api/internal/platform/opencode-runtime/management/**` 只读 API。
@@ -233,8 +239,8 @@
 - [x] 批次 2：调度服务测试覆盖未绑定分配、健康复用、异常后原 Linux 服务器内重建、无可用容器、并发绑定冲突。
 - [x] 批次 3：管理进程能在容器内启动 opencode server，并正确设置 `XDG_DATA_HOME` 和 `OPENCODE_CONFIG_DIR`。
 - [x] 批次 4：管理进程能连接多个后端 Java 实例，后端能下发启动、停止、重启、健康检测命令并收到带 commandId 和 traceId 的响应。
-- [ ] 批次 5：Run 启动和 opencode runtime 代理都使用当前用户绑定的健康 opencode 进程；进程异常时按原 Linux 服务器重建。
-- [ ] 批次 6：只有 `SUPER_ADMIN` 可以访问运行管理 API 和前端菜单；页面能展示后端进程、管理进程、opencode server 进程状态。
+- [x] 批次 5：Run 启动和 opencode runtime 代理都使用当前用户绑定的健康 opencode 进程；进程异常时按原 Linux 服务器重建。
+- [x] 批次 6：只有 `SUPER_ADMIN` 可以访问运行管理 API 和前端菜单；页面能展示后端进程、管理进程、opencode server 进程状态。
 - [ ] 批次 7：部署文档包含多 Linux 服务器、多后端 Java 进程、多容器、目录挂载、端口池、健康检查、扩容和回滚说明。
 
 ## 验证方式

@@ -93,6 +93,8 @@
 
 opencode-manager discovery API 和 `/api/internal/platform/opencode-runtime/manager/ws` 控制面 WebSocket 不产生 RunEvent/SSE，不向前端广播注册、心跳或命令结果。
 
+超级管理员运行管理页调用的 `GET /api/internal/platform/opencode-runtime/management/overview` 只读取数据库中的运行态快照，不新增 SSE 事件类型，也不向 RunEvent 流发布拓扑、连接或进程状态变化。
+
 示例：
 
 ```text

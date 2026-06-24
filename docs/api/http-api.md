@@ -36,6 +36,7 @@
 | `/api/internal/platform/{business-project}/{business}/...` | 前端调用平台自身能力的新入口。 |
 | `/api/internal/agent/{agentId}/...` | 与具体 agent 交互的新入口，`agentId` 由前端 URL 传递；当前唯一可运行值为 `opencode`。 |
 | `/api/internal/platform/opencode-runtime/manager-backends` | opencode-manager 后端发现入口，使用独立 manager token。 |
+| `/api/internal/platform/opencode-runtime/management/overview` | 超级管理员只读运行管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
 | `/api/public/...` | 其他系统调用平台的公开 API，当前预留；新增前必须完成鉴权、限流、安全和兼容性设计。 |
 
 当前已落地的新平台入口：
@@ -53,6 +54,7 @@
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/runs/{runId}/events` | `/api/runs/{runId}/events` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/agents` | `/api/agents` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets` | `/api/sessions/{sessionId}/terminal/tickets` |
+| `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/overview` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/applications` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/personal/ssh-keys` | 无旧 URL |
 
@@ -704,7 +706,94 @@ Discovery 响应 `data`：
 ]
 ```
 
-WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelope，稳定 `type` 包括 `register`、`registered`、`heartbeat`、`command`、`commandResult`、`error`。后端命令使用 `commandId=mcmd_...`，manager 回包必须带同一 `commandId` 和 `traceId`。当前命令集合为 `start`、`health`、`stop`、`restart`，其中用户初始化和健康检测链路使用 `start`、`health`；人工 stop/restart API 留到后续管理页批次。
+WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelope，稳定 `type` 包括 `register`、`registered`、`heartbeat`、`command`、`commandResult`、`error`。后端命令使用 `commandId=mcmd_...`，manager 回包必须带同一 `commandId` 和 `traceId`。当前命令集合为 `start`、`health`、`stop`、`restart`，其中用户初始化和健康检测链路使用 `start`、`health`；人工 stop/restart API 留到后续操作批次。
+
+### opencode runtime 运行管理 API
+
+运行管理 API 是只读高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`，非法分页或状态参数返回 `VALIDATION_ERROR`。本接口不直连 opencode server 或 manager，不触发 stop/restart/health 命令，只读取数据库中的最新运行态快照。
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/api/internal/platform/opencode-runtime/management/overview` | 查询 Linux 服务器、后端 Java 进程、容器、管理进程、manager-backend 连接、用户 opencode server 进程和绑定状态。 |
+
+查询参数：
+
+| 参数 | 说明 |
+|---|---|
+| `page` | opencode server 进程分页页码，默认 `1`。 |
+| `size` | opencode server 进程分页大小，默认 `20`，上限沿用平台 `PageRequest` 的 `200`。 |
+| `status` | 可选进程状态：`STARTING`、`RUNNING`、`UNHEALTHY`、`STOPPED`、`FAILED`。 |
+| `linuxServerId` | 可选 Linux 服务器 ID，当前等于服务器 IPv4。 |
+| `containerId` | 可选容器 ID。 |
+| `userId` | 可选用户 ID。 |
+
+响应 `data`：
+
+```json
+{
+  "generatedAt": "2026-06-24T08:00:00Z",
+  "summary": {
+    "linuxServers": 2,
+    "readyLinuxServers": 2,
+    "backendProcesses": 2,
+    "readyBackendProcesses": 2,
+    "containers": 4,
+    "readyContainers": 3,
+    "managers": 4,
+    "connectedManagers": 3,
+    "managerBackendConnections": 6,
+    "opencodeProcesses": 38,
+    "runningOpencodeProcesses": 20,
+    "userBindings": 38
+  },
+  "linuxServers": [
+    {
+      "linuxServerId": "10.8.0.21",
+      "name": "10.8.0.21",
+      "status": "READY",
+      "capacitySummary": {},
+      "lastHeartbeatAt": "2026-06-24T08:00:00Z",
+      "createdAt": "2026-06-24T07:00:00Z",
+      "updatedAt": "2026-06-24T08:00:00Z",
+      "traceId": "trace_..."
+    }
+  ],
+  "backendProcesses": [],
+  "containers": [],
+  "managers": [],
+  "managerBackendConnections": [],
+  "opencodeProcesses": {
+    "items": [
+      {
+        "processId": "ocp_...",
+        "userId": "usr_...",
+        "linuxServerId": "10.8.0.21",
+        "containerId": "ctr_...",
+        "port": 4101,
+        "pid": 12345,
+        "baseUrl": "http://10.8.0.21:4101",
+        "status": "RUNNING",
+        "sessionPath": "/data/opencode/session/4101",
+        "configPath": "/data/opencode/.config/opencode/",
+        "startedAt": "2026-06-24T07:30:00Z",
+        "lastHealthCheckAt": "2026-06-24T08:00:00Z",
+        "healthMessage": "OK",
+        "createdAt": "2026-06-24T07:30:00Z",
+        "updatedAt": "2026-06-24T08:00:00Z",
+        "traceId": "trace_...",
+        "bindingAgentId": "opencode",
+        "bindingStatus": "ACTIVE",
+        "bindingUpdatedAt": "2026-06-24T07:30:00Z"
+      }
+    ],
+    "page": 1,
+    "size": 20,
+    "total": 38
+  }
+}
+```
+
+拓扑列表固定最多返回 500 条，避免管理页一次性读取过多连接和进程快照。`opencodeProcesses.items[]` 的 `bindingAgentId`、`bindingStatus`、`bindingUpdatedAt` 仅在该进程仍是当前用户绑定时返回，否则为 `null`。
 
 `POST /api/runs` 请求体：
 

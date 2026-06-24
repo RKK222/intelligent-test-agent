@@ -25,10 +25,11 @@
 - RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`；RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`。
 - ExecutionNode：`ExecutionNode`、`ExecutionNodeId`、`ExecutionNodeStatus`。
 - RoutingDecision：`RoutingDecision`、`RoutingReason`、`ExecutionNodeRouter`。
-- OpencodeProcess：`LinuxServer`、`BackendJavaProcess`、`OpencodeContainer`、`OpencodeContainerManager`、`OpencodeManagerBackendConnection`、`OpencodeServerProcess`、`UserOpencodeProcessBinding` 和 `OpencodeProcessManagementRepository`；只表达 Linux 服务器、容器、管理进程和用户专属 opencode 进程拓扑，不直接发起进程操作或 socket 通信。
+- OpencodeProcess：`LinuxServer`、`BackendJavaProcess`、`OpencodeContainer`、`OpencodeContainerManager`、`OpencodeManagerBackendConnection`、`OpencodeServerProcess`、`OpencodeServerProcessFilter`、`UserOpencodeProcessBinding` 和 `OpencodeProcessManagementRepository`；只表达 Linux 服务器、容器、管理进程和用户专属 opencode 进程拓扑、查询筛选，不直接发起进程操作或 socket 通信。
 - Configuration：`ApplicationDefinition`、`ApplicationMember`、`CodeRepository`、`ApplicationRepositoryLink`、`ApplicationWorkspace`、`UserSshKey`，与运行态 Workspace/Session/Run 解耦。
 - ManagedWorkspace：`ApplicationWorkspaceVersion`、`PersonalWorkspace`、`UserWorkspacePreference`、`WorkspaceSyncRecord`，把应用工作空间模板落为运行态 Workspace 并记录个人 worktree 与同步审计。
 - Repository 端口：Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、AiModelConfig、ConfigurationManagement、ManagedWorkspace 持久化端口。
+- Repository 端口：Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、OpencodeProcessManagement、ConfigurationManagement、ManagedWorkspace 持久化端口。
 
 ## Run 状态机
 

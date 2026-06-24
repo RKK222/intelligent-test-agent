@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.common.pagination.PageRequest;
+import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
@@ -20,12 +22,14 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnectio
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.icbc.testagent.domain.support.DomainValidation;
 import com.icbc.testagent.domain.user.UserId;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -730,6 +734,166 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
                 .list();
     }
 
+    @Override
+    public List<LinuxServer> findLinuxServers(int limit) {
+        validateLimit(limit);
+        return jdbcClient.sql("""
+                        select linux_server_id, name, status, capacity_summary_json,
+                               last_heartbeat_at, trace_id, created_at, updated_at
+                        from linux_servers
+                        order by updated_at desc, linux_server_id asc
+                        limit :limit
+                        """)
+                .param("limit", limit)
+                .query(linuxServerRowMapper)
+                .list();
+    }
+
+    @Override
+    public List<BackendJavaProcess> findBackendJavaProcesses(int limit) {
+        validateLimit(limit);
+        return jdbcClient.sql("""
+                        select backend_process_id, linux_server_id, listen_url, status,
+                               started_at, last_heartbeat_at, trace_id, created_at, updated_at
+                        from backend_java_processes
+                        order by updated_at desc, backend_process_id asc
+                        limit :limit
+                        """)
+                .param("limit", limit)
+                .query(backendProcessRowMapper)
+                .list();
+    }
+
+    @Override
+    public List<OpencodeContainer> findContainers(int limit) {
+        validateLimit(limit);
+        return jdbcClient.sql("""
+                        select container_id, linux_server_id, container_name, port_start, port_end,
+                               max_processes, current_processes, status, last_heartbeat_at,
+                               trace_id, created_at, updated_at
+                        from opencode_containers
+                        order by linux_server_id asc, current_processes desc, container_id asc
+                        limit :limit
+                        """)
+                .param("limit", limit)
+                .query(containerRowMapper)
+                .list();
+    }
+
+    @Override
+    public List<OpencodeContainerManager> findContainerManagers(int limit) {
+        validateLimit(limit);
+        return jdbcClient.sql("""
+                        select manager_id, container_id, linux_server_id, protocol_version,
+                               connection_status, capabilities_json, last_heartbeat_at,
+                               trace_id, created_at, updated_at
+                        from opencode_container_managers
+                        order by updated_at desc, manager_id asc
+                        limit :limit
+                        """)
+                .param("limit", limit)
+                .query(managerRowMapper)
+                .list();
+    }
+
+    @Override
+    public List<OpencodeManagerBackendConnection> findManagerBackendConnections(int limit) {
+        validateLimit(limit);
+        return jdbcClient.sql("""
+                        select manager_id, backend_process_id, status, connected_at,
+                               last_heartbeat_at, trace_id, updated_at
+                        from opencode_manager_backend_connections
+                        order by updated_at desc, manager_id asc, backend_process_id asc
+                        limit :limit
+                        """)
+                .param("limit", limit)
+                .query(connectionRowMapper)
+                .list();
+    }
+
+    @Override
+    public PageResponse<OpencodeServerProcess> findOpencodeServerProcesses(
+            OpencodeServerProcessFilter filter,
+            PageRequest pageRequest) {
+        String whereClause = processWhereClause(filter);
+        Map<String, Object> params = processFilterParams(filter);
+        params.put("limit", pageRequest.size());
+        params.put("offset", pageRequest.offset());
+        List<OpencodeServerProcess> items = jdbcClient.sql("""
+                        select process_id, user_id, linux_server_id, container_id, port, pid, base_url,
+                               status, session_path, config_path, started_at, last_health_check_at,
+                               health_message, trace_id, created_at, updated_at
+                        from opencode_server_processes
+                        %s
+                        order by updated_at desc, process_id asc
+                        limit :limit offset :offset
+                        """.formatted(whereClause))
+                .params(params)
+                .query(processRowMapper)
+                .list();
+        long total = jdbcClient.sql("""
+                        select count(*)
+                        from opencode_server_processes
+                        %s
+                        """.formatted(whereClause))
+                .params(processFilterParams(filter))
+                .query(Long.class)
+                .single();
+        return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);
+    }
+
+    @Override
+    public long countOpencodeServerProcesses(OpencodeServerProcessFilter filter) {
+        return jdbcClient.sql("""
+                        select count(*)
+                        from opencode_server_processes
+                        %s
+                        """.formatted(processWhereClause(filter)))
+                .params(processFilterParams(filter))
+                .query(Long.class)
+                .single();
+    }
+
+    @Override
+    public Map<OpencodeProcessId, UserOpencodeProcessBinding> findUserBindingsByProcessIds(
+            List<OpencodeProcessId> processIds) {
+        if (processIds == null || processIds.isEmpty()) {
+            return Map.of();
+        }
+        StringBuilder placeholders = new StringBuilder();
+        Map<String, Object> params = new LinkedHashMap<>();
+        for (int i = 0; i < processIds.size(); i++) {
+            if (i > 0) {
+                placeholders.append(", ");
+            }
+            String name = "processId" + i;
+            placeholders.append(':').append(name);
+            params.put(name, processIds.get(i).value());
+        }
+        List<UserOpencodeProcessBinding> rows = jdbcClient.sql("""
+                        select user_id, agent_id, process_id, linux_server_id, port,
+                               status, trace_id, created_at, updated_at
+                        from user_opencode_process_bindings
+                        where process_id in (%s)
+                        order by updated_at desc, process_id asc
+                        """.formatted(placeholders))
+                .params(params)
+                .query(bindingRowMapper)
+                .list();
+        Map<OpencodeProcessId, UserOpencodeProcessBinding> result = new LinkedHashMap<>();
+        for (UserOpencodeProcessBinding binding : rows) {
+            result.put(binding.processId(), binding);
+        }
+        return result;
+    }
+
+    @Override
+    public long countUserBindings() {
+        return jdbcClient.sql("select count(*) from user_opencode_process_bindings")
+                .query(Long.class)
+                .single();
+    }
+
     /**
      * agentId 与 URL 标志保持一致，统一小写并去除首尾空白。
      */
@@ -741,6 +905,46 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
         if (limit < 1 || limit > 500) {
             throw new IllegalArgumentException("limit must be between 1 and 500");
         }
+    }
+
+    /**
+     * 为进程分页查询构造可复用 where 条件；所有入参仍通过命名参数绑定。
+     */
+    private String processWhereClause(OpencodeServerProcessFilter filter) {
+        StringBuilder where = new StringBuilder("where 1 = 1");
+        if (filter != null && filter.status() != null) {
+            where.append(" and status = :status");
+        }
+        if (filter != null && filter.linuxServerId() != null) {
+            where.append(" and linux_server_id = :linuxServerId");
+        }
+        if (filter != null && filter.containerId() != null) {
+            where.append(" and container_id = :containerId");
+        }
+        if (filter != null && filter.userId() != null) {
+            where.append(" and user_id = :userId");
+        }
+        return where.toString();
+    }
+
+    /**
+     * 将进程筛选对象转换为 JDBC 命名参数。
+     */
+    private Map<String, Object> processFilterParams(OpencodeServerProcessFilter filter) {
+        Map<String, Object> params = new LinkedHashMap<>();
+        if (filter != null && filter.status() != null) {
+            params.put("status", filter.status().name());
+        }
+        if (filter != null && filter.linuxServerId() != null) {
+            params.put("linuxServerId", filter.linuxServerId().value());
+        }
+        if (filter != null && filter.containerId() != null) {
+            params.put("containerId", filter.containerId().value());
+        }
+        if (filter != null && filter.userId() != null) {
+            params.put("userId", filter.userId().value());
+        }
+        return params;
     }
 
     /**
