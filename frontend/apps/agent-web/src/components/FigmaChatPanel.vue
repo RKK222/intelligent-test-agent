@@ -1,313 +1,444 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowUpRight, Download, Eye, EyeOff, History, ListTodo, PanelRightClose, PencilLine, Plus, Send, Square, Upload, X } from "lucide-vue-next";
-import aiHeaderUrl from "../assets/figma/ai-header.svg";
-import planLoadingUrl from "../assets/figma/plan-loadding.gif";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  ArrowUpRight,
+  ChevronDown,
+  ChevronRight,
+  Download,
+  Eye,
+  EyeOff,
+  History,
+  ListTodo,
+  PanelRightClose,
+  PencilLine,
+  Plus,
+  Send,
+  Square,
+  Upload,
+  X,
+} from 'lucide-vue-next'
+import aiHeaderUrl from '../assets/figma/ai-header.svg'
+import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 
 type ChatMessageInput = {
-  id: string;
-  role: string;
-  content?: string;
-  text?: string;
-  parts?: Array<{ type: string; text?: string }>;
-  createdAt?: string;
-};
+  id: string
+  role: string
+  content?: string
+  text?: string
+  parts?: Array<{ type: string; text?: string }>
+  createdAt?: string
+}
 
 type ChatMessage = {
-  role: "user" | "assistant";
-  content: string;
-  meta?: string;
-};
+  role: 'user' | 'assistant'
+  content: string
+  meta?: string
+}
 
 export type FileChangeStat = {
-  path: string;
-  additions?: number;
-  deletions?: number;
-  status?: "added" | "modified" | "deleted" | string;
-  patch?: string;
-};
+  path: string
+  additions?: number
+  deletions?: number
+  status?: 'added' | 'modified' | 'deleted' | string
+  patch?: string
+}
 
 export type TaskUsage = {
-  duration?: string;
-  tokens?: number;
-  thoughtFor?: string;
-};
+  duration?: string
+  tokens?: number
+  thoughtFor?: string
+}
 
 // 抽屉里 diff 行的解析结果：保留原始前缀符号供渲染和后续扩展使用
-type DiffLineKind = "add" | "del" | "ctx" | "meta";
+type DiffLineKind = 'add' | 'del' | 'ctx' | 'meta'
 
 type DiffLine = {
-  kind: DiffLineKind;
+  kind: DiffLineKind
   // meta 行没有行号，add 行只有 newNum，del 行只有 oldNum，ctx 行两者都有
-  oldNum?: number;
-  newNum?: number;
+  oldNum?: number
+  newNum?: number
   // 去掉前缀符号后的真实文本
-  text: string;
-};
+  text: string
+}
 
-const props = defineProps<{
-  messages: ChatMessageInput[];
-  running?: boolean;
-  placeholder?: string;
-  inputValue?: string;
-  title?: string;
-  /** 任务消耗（来自 SSE 事件统计） */
-  taskUsage?: TaskUsage;
-  /** 文件变更行（来自 SSE 事件统计） */
-  fileChanges?: FileChangeStat[];
-  /** 历史对话列表 */
-  history?: Array<{ id: string; title: string; createdAt?: string }>;
-}>();
+const props =
+  defineProps<{
+    messages: ChatMessageInput[]
+    running?: boolean
+    placeholder?: string
+    inputValue?: string
+    title?: string
+    /** 任务消耗（来自 SSE 事件统计） */
+    taskUsage?: TaskUsage
+    /** 文件变更行（来自 SSE 事件统计） */
+    fileChanges?: FileChangeStat[]
+    /** 历史对话列表 */
+    history?: Array<{ id: string; title: string; createdAt?: string }>
+  }>()
 
-const emit = defineEmits<{
-  (e: "send", prompt: string): void;
-  (e: "stop"): void;
-  (e: "new-conversation"): void;
-  (e: "close"): void;
-  (e: "open-history"): void;
-  (e: "open-tasks"): void;
-  (e: "update:inputValue", value: string): void;
-  (e: "download-files"): void;
-  (e: "open-diff", path: string): void;
-}>();
+const emit =
+  defineEmits<{
+    (e: 'send', prompt: string): void
+    (e: 'stop'): void
+    (e: 'new-conversation'): void
+    (e: 'close'): void
+    (e: 'open-history'): void
+    (e: 'open-tasks'): void
+    (e: 'update:inputValue', value: string): void
+    (e: 'download-files'): void
+    (e: 'open-diff', path: string): void
+  }>()
 
-const localInput = ref(props.inputValue ?? "");
+const localInput = ref(props.inputValue ?? '')
 
 // ===== 文件变更抽屉 =====
 // 抽屉默认选中第一个文件；打开后通过 fileChanges 变化自动跟随到最新一个文件（与原有的“跟随最近一次变化”心智一致）。
-const drawerOpen = ref(false);
-const drawerSelectedPath = ref<string>("");
-const drawerScroll = ref<HTMLElement | null>(null);
+const drawerOpen = ref(false)
+const drawerSelectedPath = ref<string>('')
+const drawerScroll = ref<HTMLElement | null>(null)
 // 是否在 diff 视图中显示 unified diff 的上下文行（未改动的行）。
 // 默认关闭：用户在文件变更抽屉里通常只想看真正的 +/- 行，避免出现
 // “只改一行但全文飘红” 的体验。当后端 patch 是整文件重写时，关闭上下文
 // 仍然会看到完整的 del+add 列表，但能配合新增的 toggle 切换为完整上下文做核对。
-const showContext = ref(false);
+const showContext = ref(false)
+const thinkingExpanded = ref(false)
+
+// 从最新消息中提取思考过程（reasoning + tool 操作摘要）
+function toolSummary(
+  toolName: string,
+  input: Record<string, unknown> | undefined
+): string {
+  const name = toolName || 'tool'
+  if (!input) return `[${name}]`
+  // 优先展示文件路径（filePath 是 opencode 主字段名）
+  const file =
+    (typeof input.filePath === 'string' && input.filePath) ||
+    (typeof input.path === 'string' && input.path) ||
+    (typeof input.file_path === 'string' && input.file_path) ||
+    (typeof input.file === 'string' && input.file) ||
+    (typeof input.directory === 'string' && input.directory) ||
+    (typeof input.target === 'string' && input.target) ||
+    ''
+  if (file) return `[${name}] ${file}`
+  // bash / 命令类工具：展示描述或命令
+  const desc = typeof input.description === 'string' ? input.description : ''
+  const cmd = typeof input.command === 'string' ? input.command : ''
+  if (desc) return `[${name}] ${desc}`
+  if (cmd)
+    return `[${name}] ${cmd.length > 60 ? cmd.slice(0, 60) + '...' : cmd}`
+  return `[${name}]`
+}
+const thinkingLines = computed(() => {
+  const lines: string[] = []
+  for (let i = (props.messages || []).length - 1; i >= 0; i -= 1) {
+    const msg = props.messages[i]
+    // assistant 消息的 parts（reasoning / tool part）
+    if (msg.role === 'assistant' && Array.isArray(msg.parts)) {
+      for (const p of msg.parts) {
+        if (p.type === 'reasoning' && p.text) {
+          lines.push(p.text)
+        } else if (p.type === 'tool') {
+          const tool = p as {
+            type: 'tool'
+            toolName?: string
+            input?: Record<string, unknown>
+          }
+          lines.push(toolSummary(tool.toolName ?? 'tool', tool.input))
+        }
+      }
+    }
+    // card 消息中的工具调用（tool.started / tool.finished 事件）
+    if (
+      msg.role === 'card' &&
+      (msg as { cardType?: string }).cardType === 'tool'
+    ) {
+      const card = msg as {
+        role: 'card'
+        cardType: string
+        payload?: Record<string, unknown>
+      }
+      const payload = card.payload ?? {}
+      const name =
+        (typeof payload.toolName === 'string' && payload.toolName) ||
+        (typeof payload.name === 'string' && payload.name) ||
+        (typeof payload.tool === 'string' && payload.tool) ||
+        'tool'
+      lines.push(
+        toolSummary(name, (payload.input as Record<string, unknown>) ?? {})
+      )
+    }
+    if (lines.length > 0) return lines
+  }
+  return lines
+})
+const reasoningText = computed(() => thinkingLines.value.join('\n'))
+const reasoningHtml = computed(() =>
+  reasoningText.value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\[(\w+)\]/g, '<strong>[$1]</strong>')
+)
 
 // 把 unified diff 文本按行解析为带 kind 的结构，供右侧 git-merge 风格渲染使用。
 // 解析规则与 git apply 一致：每行首字符决定 kind；hunk header "@@" 重置行号计数器。
 // 没有 patch 文本（部分 diff.proposed 事件只带 path/additions/deletions）时返回空数组，由模板降级展示空态。
 function parseDiffLines(patch: string | undefined): DiffLine[] {
-  if (!patch) return [];
-  const result: DiffLine[] = [];
-  let oldLine = 0;
-  let newLine = 0;
-  for (const raw of patch.split("\n")) {
-    if (raw.startsWith("@@")) {
-      const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+  if (!patch) return []
+  const result: DiffLine[] = []
+  let oldLine = 0
+  let newLine = 0
+  for (const raw of patch.split('\n')) {
+    if (raw.startsWith('@@')) {
+      const match = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw)
       if (match) {
-        oldLine = Number(match[1]);
-        newLine = Number(match[2]);
+        oldLine = Number(match[1])
+        newLine = Number(match[2])
       }
       // hunk header 始终原样展示，不去掉 @@ 前缀
-      result.push({ kind: "meta", text: raw });
-      continue;
+      result.push({ kind: 'meta', text: raw })
+      continue
     }
-    if (raw.startsWith("---") || raw.startsWith("+++")) {
+    if (raw.startsWith('---') || raw.startsWith('+++')) {
       // 文件头 a/path b/path 不进入行号计数
-      result.push({ kind: "meta", text: raw });
-      continue;
+      result.push({ kind: 'meta', text: raw })
+      continue
     }
-    if (raw.startsWith("+")) {
-      result.push({ kind: "add", newNum: newLine++, text: raw.slice(1) });
-      continue;
+    if (raw.startsWith('+')) {
+      result.push({ kind: 'add', newNum: newLine++, text: raw.slice(1) })
+      continue
     }
-    if (raw.startsWith("-")) {
-      result.push({ kind: "del", oldNum: oldLine++, text: raw.slice(1) });
-      continue;
+    if (raw.startsWith('-')) {
+      result.push({ kind: 'del', oldNum: oldLine++, text: raw.slice(1) })
+      continue
     }
     // context 行可能以空格开头，也可能没有前缀（malformed）
-    const text = raw.startsWith(" ") ? raw.slice(1) : raw;
-    result.push({ kind: "ctx", oldNum: oldLine++, newNum: newLine++, text });
+    const text = raw.startsWith(' ') ? raw.slice(1) : raw
+    result.push({ kind: 'ctx', oldNum: oldLine++, newNum: newLine++, text })
   }
-  return result;
+  return result
 }
 
-const hasFileChanges = computed(() => (props.fileChanges?.length ?? 0) > 0);
+const hasFileChanges = computed(() => (props.fileChanges?.length ?? 0) > 0)
 
 // 抽屉可见文件列表（按 props 顺序）；选中态基于 drawerSelectedPath。
-const drawerFiles = computed(() => props.fileChanges ?? []);
+const drawerFiles = computed(() => props.fileChanges ?? [])
 
 // 当前抽屉选中的文件对象；fallback 到第一个，保证初次打开一定有内容。
 const drawerSelectedFile = computed(
-  () => drawerFiles.value.find((file) => file.path === drawerSelectedPath.value) ?? drawerFiles.value[0]
-);
+  () =>
+    drawerFiles.value.find((file) => file.path === drawerSelectedPath.value) ??
+    drawerFiles.value[0]
+)
 
 // 当前文件的解析后 diff 行；用于右侧纯文本渲染。
-const drawerSelectedLines = computed(() => parseDiffLines(drawerSelectedFile.value?.patch));
+const drawerSelectedLines = computed(() =>
+  parseDiffLines(drawerSelectedFile.value?.patch)
+)
 
 // 仅展示变更行：过滤掉 unified diff 中的 ctx 上下文行，保留 hunk header (meta)
 // 让用户在没有上下文干扰的情况下快速看到 +/- 变更。
 // 总 add/del 数仍按 drawerSelectedLines 统计，保证抽屉头部的 +/- 徽标与文件列表一致。
 const visibleDiffLines = computed(() => {
-  if (showContext.value) return drawerSelectedLines.value;
-  return drawerSelectedLines.value.filter((line) => line.kind !== "ctx");
-});
+  if (showContext.value) return drawerSelectedLines.value
+  return drawerSelectedLines.value.filter((line) => line.kind !== 'ctx')
+})
 
 // 当前文件的增减行数；若 patch 没解析出来，则回退到 FileChangeStat 自带的 additions/deletions。
 const drawerSelectedAdditions = computed(
   () =>
-    drawerSelectedLines.value.filter((line) => line.kind === "add").length ||
+    drawerSelectedLines.value.filter((line) => line.kind === 'add').length ||
     drawerSelectedFile.value?.additions ||
     0
-);
+)
 const drawerSelectedDeletions = computed(
   () =>
-    drawerSelectedLines.value.filter((line) => line.kind === "del").length ||
+    drawerSelectedLines.value.filter((line) => line.kind === 'del').length ||
     drawerSelectedFile.value?.deletions ||
     0
-);
+)
 
 function openChangesDrawer() {
-  if (!hasFileChanges.value) return;
+  if (!hasFileChanges.value) return
   // 默认选中第一个文件
-  drawerSelectedPath.value = drawerFiles.value[0]?.path ?? "";
-  drawerOpen.value = true;
+  drawerSelectedPath.value = drawerFiles.value[0]?.path ?? ''
+  drawerOpen.value = true
   // 让 diff 区域滚回顶部，避免上次浏览的中间位置被保留
-  void nextTick(() => drawerScroll.value?.scrollTo({ top: 0 }));
+  void nextTick(() => drawerScroll.value?.scrollTo({ top: 0 }))
 }
 
 function closeChangesDrawer() {
-  drawerOpen.value = false;
+  drawerOpen.value = false
 }
 
 function selectDrawerFile(path: string) {
-  if (!path || drawerSelectedPath.value === path) return;
-  drawerSelectedPath.value = path;
+  if (!path || drawerSelectedPath.value === path) return
+  drawerSelectedPath.value = path
   // 切换文件时重置滚动
-  void nextTick(() => drawerScroll.value?.scrollTo({ top: 0 }));
+  void nextTick(() => drawerScroll.value?.scrollTo({ top: 0 }))
 }
 
 // Esc 关闭抽屉：监听全局 keydown，只在抽屉打开时响应。
 function onDrawerKeydown(event: KeyboardEvent) {
-  if (event.key === "Escape" && drawerOpen.value) {
-    event.preventDefault();
-    closeChangesDrawer();
+  if (event.key === 'Escape' && drawerOpen.value) {
+    event.preventDefault()
+    closeChangesDrawer()
   }
 }
 
 onMounted(() => {
-  window.addEventListener("keydown", onDrawerKeydown);
-});
+  window.addEventListener('keydown', onDrawerKeydown)
+})
 onBeforeUnmount(() => {
-  window.removeEventListener("keydown", onDrawerKeydown);
-});
+  window.removeEventListener('keydown', onDrawerKeydown)
+})
 
 watch(
   () => props.inputValue,
   (v) => {
-    if (typeof v === "string" && v !== localInput.value) localInput.value = v;
+    if (typeof v === 'string' && v !== localInput.value) localInput.value = v
   }
-);
+)
+
+watch(
+  () => props.running,
+  (now, prev) => {
+    if (now && !prev) thinkingExpanded.value = false
+  }
+)
 
 const displayMessages = computed<ChatMessage[]>(() => {
   return (props.messages || [])
     .map((m): ChatMessage | null => {
-      if (m.role !== "user" && m.role !== "assistant") return null;
-      let text = "";
-      if (typeof m.content === "string") {
-        text = m.content;
-      } else if (typeof m.text === "string") {
-        text = m.text;
+      if (m.role !== 'user' && m.role !== 'assistant') return null
+      let text = ''
+      if (typeof m.content === 'string') {
+        text = m.content
+      } else if (typeof m.text === 'string') {
+        text = m.text
       } else if (Array.isArray(m.parts)) {
-        text = m.parts.map((p) => p?.text ?? "").join("");
+        text = m.parts.map((p) => p?.text ?? '').join('')
       }
       return {
         role: m.role,
         content: text,
-        meta: m.createdAt ? formatTime(m.createdAt) : undefined
-      };
+        meta: m.createdAt ? formatTime(m.createdAt) : undefined,
+      }
     })
-    .filter((m): m is ChatMessage => m !== null);
-});
+    .filter((m): m is ChatMessage => m !== null)
+})
 
 const lastAssistant = computed(() => {
   for (let i = displayMessages.value.length - 1; i >= 0; i -= 1) {
-    if (displayMessages.value[i].role === "assistant") return displayMessages.value[i];
+    if (displayMessages.value[i].role === 'assistant')
+      return displayMessages.value[i]
   }
-  return null;
-});
+  return null
+})
 
 const lastUser = computed(() => {
   for (let i = displayMessages.value.length - 1; i >= 0; i -= 1) {
-    if (displayMessages.value[i].role === "user") return displayMessages.value[i];
+    if (displayMessages.value[i].role === 'user')
+      return displayMessages.value[i]
   }
-  return null;
-});
+  return null
+})
 
 const hasTaskUsage = computed(
-  () => !!(props.taskUsage && (props.taskUsage.duration || props.taskUsage.tokens !== undefined || props.taskUsage.thoughtFor))
-);
+  () =>
+    !!(
+      props.taskUsage &&
+      (props.taskUsage.duration ||
+        props.taskUsage.tokens !== undefined ||
+        props.taskUsage.thoughtFor)
+    )
+)
 
 const totalAdditions = computed(() =>
   (props.fileChanges || []).reduce((sum, f) => sum + (f.additions ?? 0), 0)
-);
+)
 
 const totalDeletions = computed(() =>
   (props.fileChanges || []).reduce((sum, f) => sum + (f.deletions ?? 0), 0)
-);
+)
 
 // 从最近一条助手回复中解析 token 数量。
 // 支持的格式：↓ 826 tokens、tokens: 826、tokens：826、826 tokens 等。
 function parseTokensFromText(text: string | undefined): number | undefined {
-  if (!text) return undefined;
+  if (!text) return undefined
   const patterns: RegExp[] = [
     /↓\s*(\d[\d,]*)\s*tokens/i,
     /tokens\s*[:：]\s*(\d[\d,]*)/i,
-    /\b(\d[\d,]*)\s*tokens\b/i
-  ];
+    /\b(\d[\d,]*)\s*tokens\b/i,
+  ]
   for (const re of patterns) {
-    const m = text.match(re);
+    const m = text.match(re)
     if (m) {
-      const n = Number(m[1].replace(/,/g, ""));
-      if (Number.isFinite(n)) return n;
+      const n = Number(m[1].replace(/,/g, ''))
+      if (Number.isFinite(n)) return n
     }
   }
-  return undefined;
+  return undefined
 }
 
-const parsedTokens = computed(() => parseTokensFromText(lastAssistant.value?.content));
+const parsedTokens = computed(() =>
+  parseTokensFromText(lastAssistant.value?.content)
+)
 
 // 任务消耗 token 优先取 props.taskUsage.tokens（来自 step-finish 累计），assistant 文本里偶然出现的
 // "826 tokens" 字样仅作为兜底解析，避免 props 缺失时整行空白。
-const displayTokens = computed<number | undefined>(() => props.taskUsage?.tokens ?? parsedTokens.value);
+const displayTokens = computed<number | undefined>(
+  () => props.taskUsage?.tokens ?? parsedTokens.value
+)
 
 const hasTaskUsageDisplay = computed(
-  () => !!(props.taskUsage && (props.taskUsage.duration || displayTokens.value !== undefined || props.taskUsage.thoughtFor))
-);
+  () =>
+    !!(
+      props.taskUsage &&
+      (props.taskUsage.duration ||
+        displayTokens.value !== undefined ||
+        props.taskUsage.thoughtFor)
+    )
+)
 
-const scrollEl = ref<HTMLElement | null>(null);
+const scrollEl = ref<HTMLElement | null>(null)
 
 watch(
   () => props.messages.length,
-  () => nextTick(() => scrollEl.value?.scrollTo({ top: scrollEl.value.scrollHeight, behavior: "smooth" }))
-);
+  () =>
+    nextTick(() =>
+      scrollEl.value?.scrollTo({
+        top: scrollEl.value.scrollHeight,
+        behavior: 'smooth',
+      })
+    )
+)
 
 function formatTime(iso: string) {
   try {
-    const d = new Date(iso);
-    return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+    const d = new Date(iso)
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   } catch {
-    return "";
+    return ''
   }
 }
 
 function submit() {
-  const text = localInput.value.trim();
-  if (!text || props.running) return;
-  emit("send", text);
-  localInput.value = "";
-  emit("update:inputValue", "");
+  const text = localInput.value.trim()
+  if (!text || props.running) return
+  emit('send', text)
+  localInput.value = ''
+  emit('update:inputValue', '')
 }
 
 function stop() {
-  emit("stop");
+  emit('stop')
 }
 
 function onKeydown(event: KeyboardEvent) {
-  if (event.key === "Enter" && !event.shiftKey) {
-    event.preventDefault();
-    submit();
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault()
+    submit()
   }
 }
 </script>
@@ -315,7 +446,7 @@ function onKeydown(event: KeyboardEvent) {
 <template>
   <div class="figma-chat-root">
     <header class="figma-chat-header">
-      <h2 class="figma-chat-title">{{ title || "生成测试案例" }}</h2>
+      <h2 class="figma-chat-title">{{ title || '生成测试案例' }}</h2>
       <button
         type="button"
         class="figma-chat-close"
@@ -330,7 +461,9 @@ function onKeydown(event: KeyboardEvent) {
       <!-- 用户消息气泡 (右对齐) -->
       <div v-if="lastUser" class="figma-chat-bubble figma-chat-bubble--user">
         <div class="figma-chat-bubble-content">{{ lastUser.content }}</div>
-        <div v-if="lastUser.meta" class="figma-chat-bubble-meta">你 · {{ lastUser.meta }}</div>
+        <div v-if="lastUser.meta" class="figma-chat-bubble-meta">
+          你 · {{ lastUser.meta }}
+        </div>
       </div>
 
       <!-- 助手消息 (左对齐) -->
@@ -340,9 +473,13 @@ function onKeydown(event: KeyboardEvent) {
         </div>
         <div class="figma-chat-assistant-content">
           <div class="figma-chat-bubble figma-chat-bubble--assistant">
-            <div class="figma-chat-bubble-content">{{ lastAssistant.content }}</div>
+            <div class="figma-chat-bubble-content">
+              {{ lastAssistant.content }}
+            </div>
           </div>
-          <div v-if="lastAssistant.meta" class="figma-chat-bubble-meta">测试智能体 · {{ lastAssistant.meta }}</div>
+          <div v-if="lastAssistant.meta" class="figma-chat-bubble-meta">
+            测试智能体 · {{ lastAssistant.meta }}
+          </div>
         </div>
       </div>
 
@@ -350,18 +487,52 @@ function onKeydown(event: KeyboardEvent) {
       <div v-if="displayMessages.length === 0" class="figma-chat-empty">
         <div class="figma-chat-empty-icon">
           <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-            <circle cx="16" cy="16" r="12" stroke="#ccc" stroke-width="1.4" stroke-dasharray="2 2"/>
-            <path d="M12 16L15 19L20 13" stroke="#ccc" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle
+              cx="16"
+              cy="16"
+              r="12"
+              stroke="#ccc"
+              stroke-width="1.4"
+              stroke-dasharray="2 2"
+            />
+            <path
+              d="M12 16L15 19L20 13"
+              stroke="#ccc"
+              stroke-width="1.4"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
           </svg>
         </div>
         <p class="figma-chat-empty-title">开始一次新的对话</p>
-        <p class="figma-chat-empty-hint">告诉我你想测试的模块或功能，我会自动生成测试用例</p>
+        <p class="figma-chat-empty-hint">
+          告诉我你想测试的模块或功能，我会自动生成测试用例
+        </p>
       </div>
 
       <!-- 运行中状态 -->
       <div v-if="running" class="figma-chat-status">
         <div class="figma-chat-status-dot" />
         <span>智能体正在思考...</span>
+        <button
+          v-if="reasoningText"
+          type="button"
+          class="figma-chat-thinking-toggle"
+          :aria-label="thinkingExpanded ? '收起思考过程' : '展开思考过程'"
+          @click="thinkingExpanded = !thinkingExpanded"
+        >
+          <ChevronDown
+            v-if="thinkingExpanded"
+            class="figma-chat-thinking-chevron"
+          />
+          <ChevronRight v-else class="figma-chat-thinking-chevron" />
+        </button>
+      </div>
+      <div
+        v-if="running && thinkingExpanded && reasoningText"
+        class="figma-chat-thinking-body"
+      >
+        <pre class="figma-chat-thinking-text" v-html="reasoningHtml" />
       </div>
     </div>
 
@@ -386,11 +557,17 @@ function onKeydown(event: KeyboardEvent) {
           />
         </svg>
       </span>
-      <span class="figma-chat-changes-title">{{ fileChanges?.length }} 个文件已更改</span>
+      <span class="figma-chat-changes-title"
+        >{{ fileChanges?.length }} 个文件已更改</span
+      >
       <span class="figma-chat-changes-spacer" />
       <span class="figma-chat-changes-stats">
-        <span v-if="totalAdditions" class="figma-chat-add">+{{ totalAdditions }}</span>
-        <span v-if="totalDeletions" class="figma-chat-del">-{{ totalDeletions }}</span>
+        <span v-if="totalAdditions" class="figma-chat-add"
+          >+{{ totalAdditions }}</span
+        >
+        <span v-if="totalDeletions" class="figma-chat-del"
+          >-{{ totalDeletions }}</span
+        >
       </span>
       <ArrowUpRight class="figma-chat-changes-arrow" :size="16" />
     </button>
@@ -400,11 +577,29 @@ function onKeydown(event: KeyboardEvent) {
       <img :src="planLoadingUrl" alt="" class="figma-chat-usage-icon" />
       <span class="figma-chat-usage-label">任务消耗：</span>
       <span class="figma-chat-usage-value">
-        <template v-if="taskUsage?.duration || displayTokens !== undefined || taskUsage?.thoughtFor">(</template>
+        <template
+          v-if="
+            taskUsage?.duration ||
+            displayTokens !== undefined ||
+            taskUsage?.thoughtFor
+          "
+          >(</template
+        >
         <template v-if="taskUsage?.duration">{{ taskUsage.duration }}</template>
-        <template v-if="displayTokens !== undefined"> · ↓ {{ displayTokens }} tokens</template>
-        <template v-if="taskUsage?.thoughtFor"> · thought for {{ taskUsage.thoughtFor }}</template>
-        <template v-if="taskUsage?.duration || displayTokens !== undefined || taskUsage?.thoughtFor">)</template>
+        <template v-if="displayTokens !== undefined">
+          · ↓ {{ displayTokens }} tokens</template
+        >
+        <template v-if="taskUsage?.thoughtFor">
+          · thought for {{ taskUsage.thoughtFor }}</template
+        >
+        <template
+          v-if="
+            taskUsage?.duration ||
+            displayTokens !== undefined ||
+            taskUsage?.thoughtFor
+          "
+          >)</template
+        >
       </span>
     </div>
 
@@ -490,7 +685,9 @@ function onKeydown(event: KeyboardEvent) {
         <header class="figma-chat-drawer-header">
           <div class="figma-chat-drawer-title">
             <span class="figma-chat-drawer-title-text">文件变更</span>
-            <span class="figma-chat-drawer-count">{{ drawerFiles.length }}</span>
+            <span class="figma-chat-drawer-count">{{
+              drawerFiles.length
+            }}</span>
           </div>
           <div class="figma-chat-drawer-summary">
             <span class="figma-chat-add">+{{ totalAdditions }}</span>
@@ -506,7 +703,9 @@ function onKeydown(event: KeyboardEvent) {
             @click="showContext = !showContext"
           >
             <component :is="showContext ? EyeOff : Eye" :size="14" />
-            <span class="figma-chat-drawer-toggle-text">{{ showContext ? "上下文" : "仅变更" }}</span>
+            <span class="figma-chat-drawer-toggle-text">{{
+              showContext ? '上下文' : '仅变更'
+            }}</span>
           </button>
           <button
             type="button"
@@ -523,7 +722,10 @@ function onKeydown(event: KeyboardEvent) {
               <li v-for="file in drawerFiles" :key="file.path">
                 <button
                   type="button"
-                  :class="['figma-chat-drawer-file-item', file.path === drawerSelectedFile?.path && 'is-active']"
+                  :class="[
+                    'figma-chat-drawer-file-item',
+                    file.path === drawerSelectedFile?.path && 'is-active',
+                  ]"
                   :data-testid="`chat-drawer-file-${file.path}`"
                   :title="file.path"
                   @click="selectDrawerFile(file.path)"
@@ -533,26 +735,49 @@ function onKeydown(event: KeyboardEvent) {
                       'figma-chat-drawer-file-badge',
                       file.status === 'added' && 'is-add',
                       file.status === 'deleted' && 'is-del',
-                      file.status === 'modified' && 'is-mod'
+                      file.status === 'modified' && 'is-mod',
                     ]"
-                  >{{ file.status === "added" ? "新增" : file.status === "deleted" ? "删除" : "修改" }}</span>
-                  <span class="figma-chat-drawer-file-path">{{ file.path }}</span>
+                    >{{
+                      file.status === 'added'
+                        ? '新增'
+                        : file.status === 'deleted'
+                        ? '删除'
+                        : '修改'
+                    }}</span
+                  >
+                  <span class="figma-chat-drawer-file-path">{{
+                    file.path
+                  }}</span>
                   <span class="figma-chat-drawer-file-stats">
-                    <span v-if="file.additions" class="figma-chat-add">+{{ file.additions }}</span>
-                    <span v-if="file.deletions" class="figma-chat-del">-{{ file.deletions }}</span>
+                    <span v-if="file.additions" class="figma-chat-add"
+                      >+{{ file.additions }}</span
+                    >
+                    <span v-if="file.deletions" class="figma-chat-del"
+                      >-{{ file.deletions }}</span
+                    >
                   </span>
                 </button>
               </li>
             </ul>
           </aside>
           <section class="figma-chat-drawer-diff" aria-label="文件 diff 视图">
-            <header v-if="drawerSelectedFile" class="figma-chat-drawer-diff-header">
-              <span class="figma-chat-drawer-diff-path" :title="drawerSelectedFile.path">
+            <header
+              v-if="drawerSelectedFile"
+              class="figma-chat-drawer-diff-header"
+            >
+              <span
+                class="figma-chat-drawer-diff-path"
+                :title="drawerSelectedFile.path"
+              >
                 {{ drawerSelectedFile.path }}
               </span>
               <span class="figma-chat-drawer-diff-stats">
-                <span class="figma-chat-add">+{{ drawerSelectedAdditions }}</span>
-                <span class="figma-chat-del">-{{ drawerSelectedDeletions }}</span>
+                <span class="figma-chat-add"
+                  >+{{ drawerSelectedAdditions }}</span
+                >
+                <span class="figma-chat-del"
+                  >-{{ drawerSelectedDeletions }}</span
+                >
               </span>
             </header>
             <div
@@ -568,24 +793,45 @@ function onKeydown(event: KeyboardEvent) {
                   'figma-chat-drawer-diff-line',
                   line.kind === 'add' && 'is-add',
                   line.kind === 'del' && 'is-del',
-                  line.kind === 'meta' && 'is-meta'
+                  line.kind === 'meta' && 'is-meta',
                 ]"
               >
-                <span class="figma-chat-drawer-diff-num">{{ line.oldNum ?? "" }}</span>
-                <span class="figma-chat-drawer-diff-num">{{ line.newNum ?? "" }}</span>
+                <span class="figma-chat-drawer-diff-num">{{
+                  line.oldNum ?? ''
+                }}</span>
+                <span class="figma-chat-drawer-diff-num">{{
+                  line.newNum ?? ''
+                }}</span>
                 <span class="figma-chat-drawer-diff-sign">
-                  {{ line.kind === "add" ? "+" : line.kind === "del" ? "-" : line.kind === "meta" ? "" : " " }}
+                  {{
+                    line.kind === 'add'
+                      ? '+'
+                      : line.kind === 'del'
+                      ? '-'
+                      : line.kind === 'meta'
+                      ? ''
+                      : ' '
+                  }}
                 </span>
-                <span class="figma-chat-drawer-diff-text">{{ line.text || " " }}</span>
+                <span class="figma-chat-drawer-diff-text">{{
+                  line.text || ' '
+                }}</span>
               </div>
             </div>
-            <div v-else-if="drawerSelectedLines.length && !visibleDiffLines.length" class="figma-chat-drawer-diff-empty">
+            <div
+              v-else-if="drawerSelectedLines.length && !visibleDiffLines.length"
+              class="figma-chat-drawer-diff-empty"
+            >
               <p>当前文件没有可显示的变更行</p>
-              <p class="figma-chat-drawer-diff-empty-hint">点击右上角“上下文”可显示完整 diff 行。</p>
+              <p class="figma-chat-drawer-diff-empty-hint">
+                点击右上角“上下文”可显示完整 diff 行。
+              </p>
             </div>
             <div v-else class="figma-chat-drawer-diff-empty">
               <p>暂无 diff 内容</p>
-              <p class="figma-chat-drawer-diff-empty-hint">后端事件未携带 patch 文本，请稍候或重新触发 Run。</p>
+              <p class="figma-chat-drawer-diff-empty-hint">
+                后端事件未携带 patch 文本，请稍候或重新触发 Run。
+              </p>
             </div>
           </section>
         </div>
@@ -601,7 +847,7 @@ function onKeydown(event: KeyboardEvent) {
   height: 100%;
   min-height: 0;
   background: #fff;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
   /* 抽屉遮罩使用 position: absolute 覆盖在聊天面板上，需要 root 作为定位上下文 */
   position: relative;
 }
@@ -624,7 +870,7 @@ function onKeydown(event: KeyboardEvent) {
   letter-spacing: 0.0143em;
   color: #18181b;
   margin: 0;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
   line-height: 20px;
   white-space: nowrap;
   overflow: hidden;
@@ -678,7 +924,7 @@ function onKeydown(event: KeyboardEvent) {
   border-radius: 8px;
   flex-shrink: 0;
   cursor: pointer;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
   transition: background-color 0.12s ease, border-color 0.12s ease;
 }
 
@@ -713,7 +959,7 @@ function onKeydown(event: KeyboardEvent) {
 .figma-chat-changes-stats {
   display: inline-flex;
   gap: 6px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   font-weight: 500;
 }
@@ -773,7 +1019,7 @@ function onKeydown(event: KeyboardEvent) {
 
 .figma-chat-assistant {
   display: flex;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 8px;
   align-self: flex-start;
   max-width: 100%;
@@ -854,9 +1100,58 @@ function onKeydown(event: KeyboardEvent) {
   animation: figma-chat-pulse 1.4s infinite ease-in-out;
 }
 
+.figma-chat-thinking-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.figma-chat-thinking-toggle:hover {
+  background: #e8e8e8;
+  color: #666;
+}
+
+.figma-chat-thinking-chevron {
+  width: 14px;
+  height: 14px;
+}
+
+.figma-chat-thinking-body {
+  align-self: flex-start;
+  width: 100%;
+  padding: 8px 12px;
+  background: #f5f5f5;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+}
+
+.figma-chat-thinking-text {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #666;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
 @keyframes figma-chat-pulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 1; }
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 
 /* ---- Task Usage (above input box) ---- */
@@ -868,7 +1163,7 @@ function onKeydown(event: KeyboardEvent) {
   gap: 6px;
   padding: 6px 18px 8px;
   background: #fff;
-  font-family: "JetBrains Mono", "PingFang SC", monospace;
+  font-family: 'JetBrains Mono', 'PingFang SC', monospace;
   font-size: 12px;
   line-height: 20px;
   color: #a40dbc;
@@ -885,7 +1180,7 @@ function onKeydown(event: KeyboardEvent) {
 .figma-chat-usage-label {
   color: #a40dbc;
   font-weight: 600;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 .figma-chat-usage-value {
@@ -902,12 +1197,12 @@ function onKeydown(event: KeyboardEvent) {
 
 .figma-chat-add {
   color: #18a978;
-  font-family: "JetBrains Mono", monospace;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .figma-chat-del {
   color: #eb5e53;
-  font-family: "JetBrains Mono", monospace;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 /* ---- Composer ---- */
@@ -922,7 +1217,7 @@ function onKeydown(event: KeyboardEvent) {
   min-height: 56px;
   max-height: 120px;
   padding: 8px 10px;
-  font-family: "Inter", "PingFang SC", sans-serif;
+  font-family: 'Inter', 'PingFang SC', sans-serif;
   font-size: 14px;
   line-height: 20px;
   color: #111;
@@ -970,12 +1265,13 @@ function onKeydown(event: KeyboardEvent) {
   border-radius: 6px;
   background: #fff;
   color: #555;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
   opacity: 0.85;
-  transition: opacity 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
+  transition: opacity 0.12s ease, background-color 0.12s ease,
+    border-color 0.12s ease;
 }
 
 .figma-chat-icon-btn:not(:disabled):hover {
@@ -1066,18 +1362,28 @@ function onKeydown(event: KeyboardEvent) {
   height: 100%;
   background: #fff;
   box-shadow: -8px 0 24px rgba(15, 15, 18, 0.16);
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
   animation: figma-chat-drawer-slide 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
 @keyframes figma-chat-drawer-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 @keyframes figma-chat-drawer-slide {
-  from { transform: translateX(20px); opacity: 0.6; }
-  to { transform: translateX(0); opacity: 1; }
+  from {
+    transform: translateX(20px);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
 
 .figma-chat-drawer-header {
@@ -1124,7 +1430,7 @@ function onKeydown(event: KeyboardEvent) {
 .figma-chat-drawer-summary {
   display: inline-flex;
   gap: 8px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   font-weight: 500;
   line-height: 18px;
@@ -1168,7 +1474,8 @@ function onKeydown(event: KeyboardEvent) {
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
-  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease,
+    color 0.12s ease;
 }
 
 .figma-chat-drawer-toggle:hover {
@@ -1188,7 +1495,7 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .figma-chat-drawer-toggle-text {
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
 .figma-chat-drawer-body {
@@ -1227,7 +1534,7 @@ function onKeydown(event: KeyboardEvent) {
   color: #333;
   text-align: left;
   cursor: pointer;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 12px;
   line-height: 18px;
   transition: background-color 0.1s ease, border-color 0.1s ease;
@@ -1271,7 +1578,7 @@ function onKeydown(event: KeyboardEvent) {
 .figma-chat-drawer-file-path {
   min-width: 0;
   flex: 1;
-  font-family: "JetBrains Mono", monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   line-height: 16px;
   white-space: nowrap;
@@ -1283,7 +1590,7 @@ function onKeydown(event: KeyboardEvent) {
   flex-shrink: 0;
   display: inline-flex;
   gap: 4px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
   font-weight: 500;
   line-height: 16px;
@@ -1311,7 +1618,7 @@ function onKeydown(event: KeyboardEvent) {
 .figma-chat-drawer-diff-path {
   min-width: 0;
   flex: 1;
-  font-family: "JetBrains Mono", monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: #333;
   white-space: nowrap;
@@ -1322,7 +1629,7 @@ function onKeydown(event: KeyboardEvent) {
 .figma-chat-drawer-diff-stats {
   display: inline-flex;
   gap: 6px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   font-weight: 500;
 }
@@ -1331,7 +1638,7 @@ function onKeydown(event: KeyboardEvent) {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  font-family: "JetBrains Mono", "Cascadia Mono", monospace;
+  font-family: 'JetBrains Mono', 'Cascadia Mono', monospace;
   font-size: 12px;
   line-height: 20px;
   background: #fff;
