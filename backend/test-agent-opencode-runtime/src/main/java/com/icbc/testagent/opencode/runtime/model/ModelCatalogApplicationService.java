@@ -186,6 +186,7 @@ public class ModelCatalogApplicationService {
         payload.put("providerId", provider.getProviderId());
         payload.put("providerID", provider.getProviderId());
         payload.put("name", id);
+        payload.put("defaultModel", id.equals(provider.getDefaultModel()));
         return payload;
     }
 
