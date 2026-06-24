@@ -8,6 +8,42 @@
 
 `deploy/local/docker-compose.yml` 只作为个人离线开发备用入口，不能作为研发测试或生产部署拓扑。
 
+## opencode-manager 容器进程管理
+
+用户专属 opencode server 进程由每个 opencode 容器内的 `opencode-manager` 管理。`opencode-manager` 是与 `backend/` 平级的 Go 单二进制工程，不打包进后端 Java 镜像；本批只提供容器内 CLI 和本地状态文件，后端 socket 控制面在后续批次接入。
+
+容器内必须挂载以下目录：
+
+```text
+/data/opencode/session              # 用户进程 XDG_DATA_HOME 根目录，按端口分目录
+/data/opencode/.config/opencode/    # 公共 agent、插件、skill 等配置
+/data/opencode/manager              # manager 本地 state 和日志
+```
+
+容器环境变量示例：
+
+```dotenv
+OPENCODE_MANAGER_CONTAINER_ID=ctr_01
+OPENCODE_MANAGER_LINUX_SERVER_ID=10.8.0.12
+OPENCODE_MANAGER_PORT_START=4096
+OPENCODE_MANAGER_PORT_END=4100
+OPENCODE_MANAGER_MAX_PROCESSES=5
+OPENCODE_BIN=opencode
+OPENCODE_MANAGER_STATE_DIR=/data/opencode/manager
+OPENCODE_SESSION_ROOT=/data/opencode/session
+OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/
+```
+
+启动单个用户进程时，manager 会执行：
+
+```bash
+XDG_DATA_HOME=/data/opencode/session/{port} \
+OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ \
+opencode serve --hostname 0.0.0.0 --port {port} --print-logs
+```
+
+opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http://{linuxServerIp}:{port}` 访问。生产部署必须通过容器网络、主机防火墙或网关限制端口池访问面，不得把用户进程端口暴露到不可信网络。
+
 ## 构建镜像
 
 ```bash

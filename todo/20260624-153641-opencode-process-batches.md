@@ -110,20 +110,25 @@
 - 修改文件：
   - `opencode-manager/README.md`
   - `opencode-manager/PACKAGE.md`
-  - `opencode-manager/src/*`
-  - `opencode-manager/tests/*`
+  - `opencode-manager/go.mod`
+  - `opencode-manager/cmd/opencode-manager/*`
+  - `opencode-manager/internal/*`
   - `docs/deployment/backend.md`
 - 修改位置：
   - 在仓库根目录新增与 `backend/` 平级的 `opencode-manager/` 独立工程。
 - 具体改动：
-  - 管理进程启动后读取容器 ID、Linux 服务器 ID、端口池、最大进程数和后端发现配置。
+  - 管理进程启动后读取容器 ID、Linux 服务器 ID、端口池、最大进程数和本地路径配置。
   - 实现本地进程操作：启动、停止、重启、健康检测 opencode server。
   - 启动 opencode server 时设置：
     - `XDG_DATA_HOME=/data/opencode/session/{port}`
     - `OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/`
-  - 管理进程维护端口到 PID 的内存索引，并把命令结果返回后端。
+  - 管理进程维护端口到 PID 的本地 state 文件索引，并通过 CLI 输出稳定 JSON 结果。
 - 原因：
   - 容器内进程生命周期应由容器本地管理进程处理，后端 Java 不直接进入容器执行系统命令。
+- 已锁定实施决策：
+  - 管理进程使用 Go 单二进制工程。
+  - 本批只实现 CLI + 本地 Go library，不实现后端 socket。
+  - opencode server 默认监听 `0.0.0.0:{port}`，不启用 Basic Auth；生产依赖容器网络和主机防火墙限制访问面。
 
 ### 5. 批次 4：后端与管理进程 socket 通信
 
