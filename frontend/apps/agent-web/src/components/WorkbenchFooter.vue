@@ -842,4 +842,153 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ===== 分支两级菜单样式 ===== */
+.ta-workbench-branch-cascade {
+  position: relative;
+}
+
+.ta-workbench-branch-cascade.is-open .ta-workbench-footer-branch {
+  background: #f5f5f5;
+  border-color: #b5b5b5;
+}
+
+.ta-workbench-branch-panel {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  min-width: 200px;
+  background: #fff;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+  z-index: 60;
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+}
+
+.ta-workbench-branch-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.ta-workbench-branch-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.ta-workbench-branch-group:hover,
+.ta-workbench-branch-group.is-hovered {
+  background: #f4f4f5;
+}
+
+.ta-workbench-branch-group-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ta-workbench-branch-group-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #18181b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ta-workbench-branch-group-count {
+  font-size: 11px;
+  color: #999;
+  background: #f0f0f0;
+  border-radius: 999px;
+  padding: 0 6px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.ta-workbench-branch-group-arrow {
+  color: #b5b5b5;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.ta-workbench-branch-submenu {
+  position: absolute;
+  top: -6px;
+  left: calc(100% + 4px);
+  min-width: 180px;
+  background: #fff;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  padding: 6px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
+  z-index: 1;
+}
+
+.ta-workbench-branch-submenu-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.ta-workbench-branch-submenu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.ta-workbench-branch-submenu-item:hover {
+  background: #f4f4f5;
+}
+
+.ta-workbench-branch-submenu-item.is-current {
+  background: #f0f5ff;
+  color: #1d3fb0;
+}
+
+.ta-workbench-branch-submenu-item-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: #18181b;
+  font-family: "JetBrains Mono", "PingFang SC", monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ta-workbench-branch-submenu-item-tag {
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #1d3fb0;
+  color: #fff;
+  font-weight: 500;
+}
+
+.ta-workbench-branch-submenu-item-tag.is-recent {
+  background: #f3f7ff;
+  color: #1d4ed8;
+  border: 0.5px solid #b9c8ff;
+}
 </style>

@@ -335,6 +335,42 @@ test("live tracking opens changed file and shows line counts before run finishes
   await expect(page.getByRole("button", { name: /checkout\.spec\.ts.*\+3.*-1/ })).toBeVisible();
 });
 
+test("branch dropdown exposes a two-level menu grouped by source", async ({ page }) => {
+  const changeBranchRequests: string[] = [];
+  // 1) vcs.status 返回 feature 分支作为当前分支 + main 作为默认分支；
+  // 2) branch-preference GET 返回 release 分支作为最近偏好；
+  // 三者不同，验证两级菜单能同时出现"当前分支 / 默认分支 / 最近使用"三个分组。
+  await mockBackendApi(page, {
+    vcsStatus: { status: "ready", branch: "feature", defaultBranch: "main" },
+    recentBranchPreference: {
+      appId: "app_gcms",
+      workspaceId: "wrk_1234567890abcdef",
+      branch: "release",
+      updatedAt: "2026-06-24T00:00:00Z"
+    },
+    changeBranchRequests
+  });
+
+  await gotoWorkbench(page);
+
+  // footer 上的分支按钮显示当前分支名
+  await expect(page.getByRole("button", { name: "feature" })).toBeVisible();
+
+  // 点击按钮打开一级菜单：三个分组都应出现
+  await page.getByRole("button", { name: "feature" }).click();
+  await expect(page.getByRole("menuitem", { name: "当前分支" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "默认分支" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "最近使用" })).toBeVisible();
+
+  // hover 默认分支 → 二级菜单展示 main 分支名
+  await page.getByRole("menuitem", { name: "默认分支" }).hover();
+  await expect(page.getByRole("menuitem", { name: /^main/ }).first()).toBeVisible();
+
+  // 点击 main → 触发 change-branch 事件
+  await page.getByRole("menuitem", { name: /^main/ }).first().click();
+  await expect.poll(() => changeBranchRequests).toEqual(["main"]);
+});
+
 async function mockBackendApi(
   page: Page,
   capture: {
@@ -353,8 +389,13 @@ async function mockBackendApi(
     applications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     managedApplications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     recentWorkspaces?: Record<string, ReturnType<typeof workspace> | null>;
-  } = {}
-) {
+    /** 自定义 /vcs/status 返回，覆盖默认的 { status: "ready", branch: "main", defaultBranch: "main" }。 */
+    vcsStatus?: { status?: string; branch?: string; defaultBranch?: string };
+    /** 自定义最近 VCS 分支偏好（GET branch-preference）；null 表示不返回偏好。 */
+    recentBranchPreference?: { appId: string; workspaceId: string; branch: string; updatedAt: string } | null;
+    /** 收集用户通过分支下拉发出的"切换分支"请求（POST branch-preference 的 branch 字段）。 */
+    changeBranchRequests?: string[];
+  } = {}) {
   await page.addInitScript(() => {
     localStorage.setItem("test-agent.auth.token", "test-token");
   });
@@ -451,6 +492,21 @@ async function mockBackendApi(
       }
       if (method === "POST" && /^\/api\/internal\/platform\/workspace-management\/workspaces\/[^/]+\/recent$/.test(url.pathname)) {
         await route.fulfill(json(null));
+        return;
+      }
+      if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/applications\/[^/]+\/workspaces\/[^/]+\/branch-preference$/.test(url.pathname)) {
+        await route.fulfill(json(capture.recentBranchPreference ?? null));
+        return;
+      }
+      if (method === "POST" && /\/api\/internal\/platform\/workspace-management\/applications\/[^/]+\/workspaces\/[^/]+\/branch-preference$/.test(url.pathname)) {
+        const payload = JSON.parse(route.request().postData() ?? "{}") as { branch?: string };
+        capture.changeBranchRequests?.push(payload.branch ?? "");
+        await route.fulfill(json({
+          appId: "app_gcms",
+          workspaceId: "wrk_1234567890abcdef",
+          branch: payload.branch ?? "",
+          updatedAt: "2026-06-24T00:00:00Z"
+        }));
         return;
       }
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates") {
@@ -562,7 +618,7 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && ["/api/internal/agent/opencode/lsp", "/api/internal/agent/opencode/mcp", "/api/internal/agent/opencode/vcs/status"].includes(url.pathname)) {
-      await route.fulfill(json({ status: "ready", branch: "main" }));
+      await route.fulfill(json(capture.vcsStatus ?? { status: "ready", branch: "main", defaultBranch: "main" }));
       return;
     }
     if (method === "POST" && url.pathname === "/api/internal/agent/opencode/runs") {
