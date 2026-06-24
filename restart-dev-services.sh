@@ -331,6 +331,31 @@ require_command mvn
 load_env_file "${env_file}"
 export SPRING_PROFILES_ACTIVE="${profile}"
 
+# 设置 JAVA_HOME，默认 Java 21
+java_version="${JAVA_VERSION:-21}"
+if [[ -z "${JAVA_HOME:-}" ]]; then
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    JAVA_HOME="$(/usr/libexec/java_home -v "${java_version}" 2>/dev/null || true)"
+  fi
+  if [[ -z "${JAVA_HOME:-}" ]]; then
+    # macOS 以外或 java_home 未找到时的常见路径
+    for candidate in \
+      "/Library/Java/JavaVirtualMachines/openjdk-${java_version}/Contents/Home" \
+      "/usr/lib/jvm/java-${java_version}" \
+      "/usr/lib/jvm/openjdk-${java_version}" \
+      "${HOME}/.sdkman/candidates/java/current"; do
+      if [[ -d "${candidate}" ]]; then
+        JAVA_HOME="${candidate}"
+        break
+      fi
+    done
+  fi
+  if [[ -n "${JAVA_HOME:-}" ]]; then
+    export JAVA_HOME
+    echo "JAVA_HOME set to: ${JAVA_HOME}"
+  fi
+fi
+
 echo "Sensitive environment values are loaded but not printed."
 echo "Builds run before stopping existing services; failed builds leave current services untouched."
 
