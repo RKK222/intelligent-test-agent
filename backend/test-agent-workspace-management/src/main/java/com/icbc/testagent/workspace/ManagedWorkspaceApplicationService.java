@@ -142,6 +142,22 @@ public class ManagedWorkspaceApplicationService {
             String branch,
             UserId userId,
             String traceId) {
+        try {
+            return doCreateVersion(appId, templateId, version, branch, userId, traceId);
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "创建应用版本工作区失败: " + exception.getMessage(), Map.of(), exception);
+        }
+    }
+
+    private ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse doCreateVersion(
+            String appId,
+            String templateId,
+            String version,
+            String branch,
+            UserId userId,
+            String traceId) {
         ApplicationDefinition application = existingMemberApp(appId, userId);
         ApplicationWorkspace template = existingTemplate(new ApplicationWorkspaceId(templateId));
         if (!template.appId().equals(application.appId())) {
@@ -191,6 +207,20 @@ public class ManagedWorkspaceApplicationService {
     }
 
     public ManagedWorkspaceResponses.PersonalWorkspaceResponse createPersonalWorkspace(
+            String versionId,
+            String workspaceName,
+            UserId userId,
+            String traceId) {
+        try {
+            return doCreatePersonalWorkspace(versionId, workspaceName, userId, traceId);
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "创建个人工作区失败: " + exception.getMessage(), Map.of(), exception);
+        }
+    }
+
+    private ManagedWorkspaceResponses.PersonalWorkspaceResponse doCreatePersonalWorkspace(
             String versionId,
             String workspaceName,
             UserId userId,

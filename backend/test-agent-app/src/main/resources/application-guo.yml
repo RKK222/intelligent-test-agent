@@ -36,7 +36,7 @@ test-agent:
     root: ${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}
   redis:
     enabled: true
-    host: 127.0.0.1
+    host: 192.168.100.135
     port: 6379
     password: ""
   opencode:

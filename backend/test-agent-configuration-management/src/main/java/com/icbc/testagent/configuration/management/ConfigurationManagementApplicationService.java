@@ -30,6 +30,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -208,6 +209,13 @@ public class ConfigurationManagementApplicationService {
         CodeRepository repository = existingRepository(new CodeRepositoryId(repositoryId));
         ensureRepositoryLinked(applicationId, repository.repositoryId());
         String normalizedPath = normalizeDirectoryPath(directoryPath);
+        String normalizedBranch = requireText(branch, "分支不能为空", "branch");
+        // 同一应用下 (repository, branch, directory) 组合必须唯一，已存在时直接返回已有工作空间
+        Optional<ApplicationWorkspace> existing = configurationRepository.findWorkspaceByLocation(
+                applicationId, repository.repositoryId(), normalizedBranch, normalizedPath);
+        if (existing.isPresent()) {
+            return workspaceResponse(existing.get());
+        }
         String resolvedName = workspaceName == null || workspaceName.isBlank()
                 ? defaultWorkspaceName(normalizedPath)
                 : workspaceName.trim();
@@ -216,7 +224,7 @@ public class ConfigurationManagementApplicationService {
                 new ApplicationWorkspaceId(RuntimeIdGenerator.applicationWorkspaceId()),
                 applicationId,
                 repository.repositoryId(),
-                requireText(branch, "分支不能为空", "branch"),
+                normalizedBranch,
                 normalizedPath,
                 resolvedName,
                 now,
