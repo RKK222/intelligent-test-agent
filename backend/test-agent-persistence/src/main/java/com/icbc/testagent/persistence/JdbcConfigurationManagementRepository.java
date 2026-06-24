@@ -350,6 +350,21 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
     }
 
     @Override
+    public Optional<ApplicationWorkspace> findWorkspaceByLocation(ApplicationId appId, CodeRepositoryId repositoryId, String branch, String directoryPath) {
+        return jdbcClient.sql("""
+                        select workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at
+                        from application_workspaces
+                        where app_id = :appId and repository_id = :repositoryId and branch = :branch and directory_path = :directoryPath
+                        """)
+                .param("appId", appId.value())
+                .param("repositoryId", repositoryId.value())
+                .param("branch", branch)
+                .param("directoryPath", directoryPath)
+                .query(workspaceMapper)
+                .optional();
+    }
+
+    @Override
     public ApplicationWorkspace saveWorkspace(ApplicationWorkspace workspace) {
         jdbcClient.sql("""
                         insert into application_workspaces(
