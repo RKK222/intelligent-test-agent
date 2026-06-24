@@ -90,6 +90,30 @@ public class ManagedWorkspaceController {
         return ok(exchange, service.markRecentWorkspace(workspaceId, userId(exchange)));
     }
 
+    /**
+     * 标记当前用户在某 (appId, workspaceId) 维度下最近一次手动选择的 VCS 分支，
+     * 用于下次进入同一工作区时自动回填分支显示。
+     */
+    @PostMapping("/applications/{appId}/workspaces/{workspaceId}/branch-preference")
+    public ApiResponse<Object> markRecentBranch(
+            @PathVariable String appId,
+            @PathVariable String workspaceId,
+            @RequestBody ManagedWorkspaceDtos.BranchPreferenceRequest request,
+            ServerWebExchange exchange) {
+        return ok(exchange, service.markRecentBranch(appId, workspaceId, request.branch(), userId(exchange)));
+    }
+
+    /**
+     * 查询当前用户在某 (appId, workspaceId) 维度下的最近 VCS 分支偏好；未设置时返回 null。
+     */
+    @GetMapping("/applications/{appId}/workspaces/{workspaceId}/branch-preference")
+    public ApiResponse<Object> recentBranch(
+            @PathVariable String appId,
+            @PathVariable String workspaceId,
+            ServerWebExchange exchange) {
+        return ok(exchange, service.recentBranch(appId, workspaceId, userId(exchange)).orElse(null));
+    }
+
     @GetMapping("/personal-workspaces/{personalWorkspaceId}/diff")
     public ApiResponse<Object> diffPersonalWorkspace(@PathVariable String personalWorkspaceId, ServerWebExchange exchange) {
         return ok(exchange, service.diffPersonalWorkspace(personalWorkspaceId, userId(exchange)));

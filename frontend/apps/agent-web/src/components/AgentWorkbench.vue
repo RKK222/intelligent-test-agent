@@ -437,14 +437,35 @@ const vcsCurrentBranch = computed(() => {
   const branch = typeof data.branch === "string" ? data.branch : undefined;
   return branch;
 });
+// 用户在分支选择按钮上选中的分支会通过 markRecentBranch 持久化并被持久化到 user_workspace_branch_preferences。
+// 在 opencode vcs.status 轮询到最新值之前，pendingBranchOverride 用来给 footer 提供即时反馈。
+const pendingBranchOverride = ref<string | undefined>(undefined);
 const vcsBranches = computed(() => {
-  const current = vcsCurrentBranch.value;
+  const current = vcsCurrentBranch.value ?? pendingBranchOverride.value;
   if (!current) return [];
   return [{ name: current, isCurrent: true }];
 });
 function handleChangeBranch(branch: string) {
-  // 当前分支切换由应用版本工作区控制，这里只保留编辑器分支选择的即时反馈。
-  feedback.value = { kind: "info", title: "已切换分支", description: `当前分支：${branch}` };
+  // 用户在工作区下的 VCS 分支按钮选择分支时，持久化到 user_workspace_branch_preferences，
+  // 下次进入同一工作区时通过 getRecentBranch 回查并展示偏好分支。
+  const appId = selectedAppId.value;
+  const workspaceId = selectedWorkspaceId.value;
+  if (!appId || !workspaceId) {
+    feedback.value = { kind: "info", title: "已切换分支", description: `当前分支：${branch}` };
+    return;
+  }
+  api
+    .markRecentBranch(appId, workspaceId, branch)
+    .then(() => {
+      feedback.value = { kind: "success", title: "已记录分支偏好", description: `当前分支：${branch}` };
+    })
+    .catch((error) => {
+      // 持久化失败不阻塞 UI：仅提示用户偏好未保存，当前分支已展示。
+      feedback.value = errorFeedback("记录分支偏好失败", error);
+    });
+  // 即时反映到 UI：vcsCurrentBranch 由 vcs.status 拉取后才更新；这里同步覆盖 footer 上的标签，
+  // 避免 opencode 30s 轮询期间用户看到旧分支。
+  pendingBranchOverride.value = branch;
 }
 
 function selectRuntimeModel(model: typeof models.value[number]) {
@@ -1003,6 +1024,7 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
 // 后端在校验通过后会返回最新的 WorkspaceRuntime，前端无需再单独 getWorkspace。
 // 非托管工作区（不属于任何应用）的 markRecent 会抛 NOT_FOUND，忽略该错误即可，不阻塞切换。
 async function applyManagedWorkspace(workspace: Workspace, feedbackDetail?: { successTitle: string; successDescription: string }) {
+  const appId = selectedAppId.value;
   try {
     await api.markRecentManagedWorkspace(workspace.workspaceId);
   } catch (error) {
@@ -1015,6 +1037,45 @@ async function applyManagedWorkspace(workspace: Workspace, feedbackDetail?: { su
   await switchWorkspace(workspace);
   if (feedbackDetail) {
     feedback.value = { kind: "info", title: feedbackDetail.successTitle, description: feedbackDetail.successDescription };
+  }
+  // 切到运行态工作区后，反查 (userId, appId, workspaceId) 维度的最近 VCS 分支偏好：
+  // 命中但与 vcs.status 当前分支不一致时，提示用户「上次切换到 X，是否要切回」。
+  // 不阻断后续流程：vcs.status 由 30s 轮询驱动，偏好只作为"自动切回"的语义提示。
+  void loadBranchPreferenceOnEnter(appId, workspace.workspaceId);
+}
+
+// 进入工作区后回查 (appId, workspaceId) 维度的最近 VCS 分支偏好；
+// 与 vcs.status 当前分支不一致时通过 feedback 提示用户。空偏好/未配置则静默退出。
+async function loadBranchPreferenceOnEnter(appId: string | undefined, workspaceId: string) {
+  if (!appId) return;
+  try {
+    const preference = await api.getRecentBranch(appId, workspaceId);
+    if (!preference?.branch) return;
+    // 等待 vcs.status 拉取完成后再比较；vcsStatusQuery 在切换后会自动触发。
+    // 这里通过 watchEffect 异步等待 vcsCurrentBranch 有值再判定。
+    const stop = watch(
+      () => vcsCurrentBranch.value,
+      (current) => {
+        if (!current) return;
+        if (current !== preference.branch) {
+          feedback.value = {
+            kind: "info",
+            title: "检测到分支偏好",
+            description: `上次切换到「${preference.branch}」，当前分支为「${current}」，请按需 git checkout`
+          };
+        }
+        stop();
+      },
+      { immediate: true }
+    );
+    // 兜底：5s 内 vcs.status 还没回来就停止 watch，避免悬挂监听。
+    setTimeout(() => stop(), 5000);
+  } catch (error) {
+    // 偏好查询失败不阻塞：用户已经进入工作区，仅不展示偏好提示。
+    if (!(error instanceof BackendApiError)) {
+      // 非 API 错误（网络等）才静默；API 错误仍交给全局处理。
+      return;
+    }
   }
 }
 

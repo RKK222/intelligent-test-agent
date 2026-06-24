@@ -20,6 +20,7 @@ import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceStatus;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspaceId;
+import com.icbc.testagent.domain.managedworkspace.UserWorkspaceBranchPreference;
 import com.icbc.testagent.domain.managedworkspace.UserWorkspacePreference;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncDirection;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncRecord;
@@ -298,6 +299,55 @@ public class ManagedWorkspaceApplicationService {
         copyFiles(Path.of(version.workspaceRootPath()), Path.of(personal.workspaceRootPath()), normalizedFiles);
         saveSync(syncId, userId, version.runtimeWorkspaceId(), personal.runtimeWorkspaceId(), WorkspaceSyncDirection.APPLICATION_TO_PERSONAL, normalizedFiles, false, WorkspaceSyncStatus.SUCCEEDED, traceId);
         return new ManagedWorkspaceResponses.WorkspaceSyncResponse(syncId.value(), WorkspaceSyncStatus.SUCCEEDED.name(), normalizedFiles, false);
+    }
+
+    /**
+     * 记录当前用户在某 (appId, workspaceId) 维度下最近一次手动选择的 VCS 分支，
+     * 用于下次进入同一工作区时把分支显示在 IDE 上；非托管工作区会抛 NOT_FOUND，
+     * 由 Controller 决定是否向上抛错。
+     */
+    public ManagedWorkspaceResponses.BranchPreferenceResponse markRecentBranch(
+            String appId,
+            String workspaceId,
+            String branch,
+            UserId userId) {
+        ApplicationId applicationId = existingMemberApp(appId, userId).appId();
+        Workspace workspace = existingWorkspace(new WorkspaceId(workspaceId));
+        ApplicationId workspaceAppId = appIdForRuntimeWorkspace(workspace.workspaceId())
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "工作区不属于任何应用", Map.of("workspaceId", workspaceId)));
+        if (!applicationId.equals(workspaceAppId)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "工作区不属于当前应用", Map.of("appId", appId, "workspaceId", workspaceId));
+        }
+        String normalizedBranch = requireText(branch, "分支名不能为空", "branch");
+        UserWorkspaceBranchPreference preference = new UserWorkspaceBranchPreference(
+                userId,
+                applicationId,
+                workspace.workspaceId(),
+                normalizedBranch,
+                Instant.now());
+        managedWorkspaceRepository.saveBranchPreference(preference);
+        return ManagedWorkspaceResponses.BranchPreferenceResponse.from(preference);
+    }
+
+    /**
+     * 查询当前用户在某 (appId, workspaceId) 维度下的最近 VCS 分支偏好；未设置时返回 Optional.empty。
+     * 工作区不属于任何应用时返回 Optional.empty，由前端走"无偏好"分支。
+     */
+    public Optional<ManagedWorkspaceResponses.BranchPreferenceResponse> recentBranch(String appId, String workspaceId, UserId userId) {
+        ApplicationId applicationId;
+        try {
+            applicationId = existingMemberApp(appId, userId).appId();
+        } catch (PlatformException exception) {
+            return Optional.empty();
+        }
+        Workspace workspace;
+        try {
+            workspace = existingWorkspace(new WorkspaceId(workspaceId));
+        } catch (PlatformException exception) {
+            return Optional.empty();
+        }
+        return managedWorkspaceRepository.findBranchPreference(userId, applicationId, workspace.workspaceId())
+                .map(ManagedWorkspaceResponses.BranchPreferenceResponse::from);
     }
 
     private void prepareApplicationRepo(CodeRepository repository, String branch, Path repoRoot, Path workspaceRoot, String privateKey) {

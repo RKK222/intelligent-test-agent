@@ -567,6 +567,15 @@ export type PersonalWorkspace = {
   updatedAt: string;
 };
 
+// 用户在 (appId, workspaceId) 维度下最近一次手动选择的 VCS 分支，
+// 用于工作区下分支选择按钮的"下次进入默认切换"持久化。
+export type WorkspaceBranchPreference = {
+  appId: string;
+  workspaceId: string;
+  branch: string;
+  updatedAt: string;
+};
+
 export type WorkspaceDiffFile = {
   path: string;
   status: string;

@@ -25,6 +25,7 @@ import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
 import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspaceId;
+import com.icbc.testagent.domain.managedworkspace.UserWorkspaceBranchPreference;
 import com.icbc.testagent.domain.managedworkspace.UserWorkspacePreference;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncDirection;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncRecord;
@@ -160,6 +161,65 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(managed.syncRecords.get(0).traceId()).isEqualTo("trace_sync");
     }
 
+    @Test
+    void persistsRecentBranchPreferenceAndReadsItBack() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+
+        ManagedWorkspaceResponses.BranchPreferenceResponse recorded = service.markRecentBranch(
+                "app_gcms",
+                version.runtimeWorkspace().workspaceId(),
+                "feature/personalized",
+                new UserId("usr_1"));
+        assertThat(recorded.branch()).isEqualTo("feature/personalized");
+        assertThat(recorded.workspaceId()).isEqualTo(version.runtimeWorkspace().workspaceId());
+        assertThat(recorded.appId()).isEqualTo("app_gcms");
+
+        Optional<ManagedWorkspaceResponses.BranchPreferenceResponse> recent = service.recentBranch(
+                "app_gcms",
+                version.runtimeWorkspace().workspaceId(),
+                new UserId("usr_1"));
+        assertThat(recent).isPresent();
+        assertThat(recent.get().branch()).isEqualTo("feature/personalized");
+    }
+
+    @Test
+    void rejectsMarkRecentBranchWithBlankBranchName() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+
+        // 空分支名被入口校验直接拒绝
+        assertThatThrownBy(() -> service.markRecentBranch(
+                "app_gcms",
+                version.runtimeWorkspace().workspaceId(),
+                "",
+                new UserId("usr_1")))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
+
     private ManagedWorkspaceApplicationService service(
             FakeConfigurationRepository configuration,
             FakeManagedWorkspaceRepository managed,
@@ -284,6 +344,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private final List<WorkspaceSyncRecord> syncRecords = new ArrayList<>();
         private UserWorkspacePreference globalPreference;
         private UserWorkspacePreference applicationPreference;
+        private UserWorkspaceBranchPreference branchPreference;
 
         @Override public List<ApplicationWorkspaceVersion> findVersions(ApplicationWorkspaceId applicationWorkspaceId) { return versions; }
         @Override public List<ApplicationWorkspaceVersion> findVersionsByApplication(ApplicationId appId) { return versions; }
@@ -304,6 +365,17 @@ class ManagedWorkspaceApplicationServiceTest {
         }
         @Override public Optional<UserWorkspacePreference> findGlobalPreference(UserId userId) { return Optional.ofNullable(globalPreference); }
         @Override public Optional<UserWorkspacePreference> findApplicationPreference(UserId userId, ApplicationId appId) { return Optional.ofNullable(applicationPreference); }
+        @Override public void saveBranchPreference(UserWorkspaceBranchPreference preference) { this.branchPreference = preference; }
+        @Override public Optional<UserWorkspaceBranchPreference> findBranchPreference(UserId userId, ApplicationId appId, WorkspaceId workspaceId) {
+            UserWorkspaceBranchPreference current = branchPreference;
+            if (current == null) {
+                return Optional.empty();
+            }
+            if (!current.userId().equals(userId) || !current.appId().equals(appId) || !current.workspaceId().equals(workspaceId)) {
+                return Optional.empty();
+            }
+            return Optional.of(current);
+        }
         @Override public void saveSyncRecord(WorkspaceSyncRecord record) { syncRecords.add(record); }
     }
 

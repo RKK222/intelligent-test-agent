@@ -11,6 +11,7 @@ import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceStatus;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspaceId;
+import com.icbc.testagent.domain.managedworkspace.UserWorkspaceBranchPreference;
 import com.icbc.testagent.domain.managedworkspace.UserWorkspacePreference;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncDirection;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncRecord;
@@ -77,6 +78,13 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
             new UserId(rs.getString("user_id")),
             new ApplicationId(rs.getString("app_id")),
             new WorkspaceId(rs.getString("workspace_id")),
+            instant(rs, "updated_at"));
+
+    private final RowMapper<UserWorkspaceBranchPreference> branchPreferenceMapper = (rs, rowNum) -> new UserWorkspaceBranchPreference(
+            new UserId(rs.getString("user_id")),
+            new ApplicationId(rs.getString("app_id")),
+            new WorkspaceId(rs.getString("workspace_id")),
+            rs.getString("branch"),
             instant(rs, "updated_at"));
 
     public JdbcManagedWorkspaceRepository(JdbcClient jdbcClient, ObjectMapper objectMapper) {
@@ -258,6 +266,54 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
                 .param("userId", userId.value())
                 .param("appId", appId.value())
                 .query(applicationPreferenceMapper)
+                .optional();
+    }
+
+    @Override
+    public void saveBranchPreference(UserWorkspaceBranchPreference preference) {
+        // (user_id, app_id, workspace_id) 唯一键：命中即更新 branch 与 updated_at，未命中则插入新行。
+        // 写策略与 user_application_workspace_preferences.saveApplicationPreference 保持一致。
+        if (findBranchPreference(preference.userId(), preference.appId(), preference.workspaceId()).isPresent()) {
+            jdbcClient.sql("""
+                            update user_workspace_branch_preferences
+                            set branch = :branch, updated_at = :updatedAt
+                            where user_id = :userId and app_id = :appId and workspace_id = :workspaceId
+                            """)
+                    .param("userId", preference.userId().value())
+                    .param("appId", preference.appId().value())
+                    .param("workspaceId", preference.workspaceId().value())
+                    .param("branch", preference.branch())
+                    .param("updatedAt", timestamp(preference.updatedAt()))
+                    .update();
+            return;
+        }
+        jdbcClient.sql("""
+                        insert into user_workspace_branch_preferences(
+                            user_id, app_id, workspace_id, branch, updated_at
+                        )
+                        values (
+                            :userId, :appId, :workspaceId, :branch, :updatedAt
+                        )
+                        """)
+                .param("userId", preference.userId().value())
+                .param("appId", preference.appId().value())
+                .param("workspaceId", preference.workspaceId().value())
+                .param("branch", preference.branch())
+                .param("updatedAt", timestamp(preference.updatedAt()))
+                .update();
+    }
+
+    @Override
+    public Optional<UserWorkspaceBranchPreference> findBranchPreference(UserId userId, ApplicationId appId, WorkspaceId workspaceId) {
+        return jdbcClient.sql("""
+                        select user_id, app_id, workspace_id, branch, updated_at
+                        from user_workspace_branch_preferences
+                        where user_id = :userId and app_id = :appId and workspace_id = :workspaceId
+                        """)
+                .param("userId", userId.value())
+                .param("appId", appId.value())
+                .param("workspaceId", workspaceId.value())
+                .query(branchPreferenceMapper)
                 .optional();
     }
 

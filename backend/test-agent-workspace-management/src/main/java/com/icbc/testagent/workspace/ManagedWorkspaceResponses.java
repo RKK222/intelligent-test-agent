@@ -4,6 +4,7 @@ import com.icbc.testagent.domain.configuration.ApplicationDefinition;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspace;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspace;
+import com.icbc.testagent.domain.managedworkspace.UserWorkspaceBranchPreference;
 import com.icbc.testagent.domain.workspace.Workspace;
 import java.time.Instant;
 import java.util.List;
@@ -131,5 +132,22 @@ public final class ManagedWorkspaceResponses {
     }
 
     public record WorkspaceSyncResponse(String syncRecordId, String status, List<String> files, boolean force) {
+    }
+
+    /**
+     * 用户最近 VCS 分支偏好响应；分支切换按钮持久化使用。
+     */
+    public record BranchPreferenceResponse(
+            String appId,
+            String workspaceId,
+            String branch,
+            Instant updatedAt) {
+        public static BranchPreferenceResponse from(UserWorkspaceBranchPreference preference) {
+            return new BranchPreferenceResponse(
+                    preference.appId().value(),
+                    preference.workspaceId().value(),
+                    preference.branch(),
+                    preference.updatedAt());
+        }
     }
 }

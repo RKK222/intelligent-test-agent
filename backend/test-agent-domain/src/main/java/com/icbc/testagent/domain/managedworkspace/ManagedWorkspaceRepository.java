@@ -38,5 +38,15 @@ public interface ManagedWorkspaceRepository {
 
     Optional<UserWorkspacePreference> findApplicationPreference(UserId userId, ApplicationId appId);
 
+    /**
+     * 写入或更新 (userId, appId, workspaceId) 维度的最近 VCS 分支偏好。
+     */
+    void saveBranchPreference(UserWorkspaceBranchPreference preference);
+
+    /**
+     * 查找 (userId, appId, workspaceId) 维度的最近 VCS 分支偏好；未设置时返回 Optional.empty。
+     */
+    Optional<UserWorkspaceBranchPreference> findBranchPreference(UserId userId, ApplicationId appId, WorkspaceId workspaceId);
+
     void saveSyncRecord(WorkspaceSyncRecord record);
 }

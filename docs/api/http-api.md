@@ -448,6 +448,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/recent-workspace` | 查询当前用户全局最近使用的托管运行态 Workspace。 |
 | `GET` | `/applications/{appId}/recent-workspace` | 查询当前用户在指定应用下最近使用的托管运行态 Workspace。 |
 | `POST` | `/workspaces/{workspaceId}/recent` | 标记某个托管运行态 Workspace 为最近使用。 |
+| `POST` | `/applications/{appId}/workspaces/{workspaceId}/branch-preference` | 记录当前用户在 (appId, workspaceId) 维度下最近一次选择的 VCS 分支。 |
+| `GET` | `/applications/{appId}/workspaces/{workspaceId}/branch-preference` | 查询当前用户在 (appId, workspaceId) 维度下最近一次选择的 VCS 分支；未设置返回 `null`。 |
 | `GET` | `/personal-workspaces/{personalWorkspaceId}/diff` | 查询个人工作区与应用版本工作区目录差异。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-to-application` | 将所选个人工作区文件同步到应用版本工作区，提交并 push。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-from-application` | 将所选应用版本工作区文件同步到个人工作区。 |
@@ -537,6 +539,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 - 后端 `markRecentWorkspace` 同时写入 `user_global_workspace_preferences`（`app_id = NULL`）和 `user_application_workspace_preferences`（`app_id = 解析到的 appId`），对应"全局最近"和"应用内最近"两套维度。
 - 工作区不属于任何应用（即 `appIdForRuntimeWorkspace` 既不匹配应用版本也不匹配个人工作区）时返回 `NOT_FOUND`；前端 `applyManagedWorkspace` 静默吞掉该错误，切换流程不受影响。
+- `POST /applications/{appId}/workspaces/{workspaceId}/branch-preference` 用于在 (appId, workspaceId) 维度持久化用户最近选择的 VCS 分支（写入 `user_workspace_branch_preferences`，按 (user_id, app_id, workspace_id) 唯一索引 upsert）。请求体为 `{"branch":"<branch-name>"}`；调用方需先校验工作区属于该应用。
+- `GET /applications/{appId}/workspaces/{workspaceId}/branch-preference` 返回 `BranchPreferenceResponse { appId, workspaceId, branch, updatedAt }`，未设置时返回 `null`，前端可据此在进入工作区时自动回填分支显示或提示用户当前本地分支与偏好分支不一致。
 
 ### Session API
 

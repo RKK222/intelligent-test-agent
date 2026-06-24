@@ -455,4 +455,69 @@ describe("backend-api", () => {
       })
     );
   });
+
+  it("persists and reads the (app, workspace) VCS branch preference through the platform API", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              appId: "app_gcms",
+              workspaceId: "wks_123",
+              branch: "feature/personalized",
+              updatedAt: "2026-06-24T00:00:00Z"
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              appId: "app_gcms",
+              workspaceId: "wks_123",
+              branch: "feature/personalized",
+              updatedAt: "2026-06-24T00:00:00Z"
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: null }), { status: 200 })
+      );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.markRecentBranch("app_gcms", "wks_123", "feature/personalized")).resolves.toEqual({
+      appId: "app_gcms",
+      workspaceId: "wks_123",
+      branch: "feature/personalized",
+      updatedAt: "2026-06-24T00:00:00Z"
+    });
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({ branch: "feature/personalized" });
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api/api/internal/platform/workspace-management/applications/app_gcms/workspaces/wks_123/branch-preference"
+    );
+
+    await expect(client.getRecentBranch("app_gcms", "wks_123")).resolves.toEqual({
+      appId: "app_gcms",
+      workspaceId: "wks_123",
+      branch: "feature/personalized",
+      updatedAt: "2026-06-24T00:00:00Z"
+    });
+    expect(fetcher.mock.calls[1]?.[0]).toBe(
+      "http://api/api/internal/platform/workspace-management/applications/app_gcms/workspaces/wks_123/branch-preference"
+    );
+    // 未设置偏好时返回 null：用于前端"无偏好"分支静默退出
+    await expect(client.getRecentBranch("app_gcms", "wks_456")).resolves.toBeNull();
+    expect(fetcher.mock.calls[2]?.[0]).toBe(
+      "http://api/api/internal/platform/workspace-management/applications/app_gcms/workspaces/wks_456/branch-preference"
+    );
+  });
 });

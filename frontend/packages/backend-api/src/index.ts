@@ -47,6 +47,7 @@ import type {
   Workspace,
   WorkspaceDiff,
   WorkspaceSyncResult,
+  WorkspaceBranchPreference,
   WorkspaceDirectoryList
 } from "@test-agent/shared-types";
 
@@ -210,6 +211,15 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<ManagedWorkspaceRuntime | null>(`${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/recent-workspace`),
     markRecentManagedWorkspace: (workspaceId: string) =>
       request<ManagedWorkspaceRuntime>(`${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/recent`, { method: "POST" }),
+    markRecentBranch: (appId: string, workspaceId: string, branch: string) =>
+      request<WorkspaceBranchPreference>(
+        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspaces/${encodeURIComponent(workspaceId)}/branch-preference`,
+        { method: "POST", body: JSON.stringify({ branch }) }
+      ),
+    getRecentBranch: (appId: string, workspaceId: string) =>
+      request<WorkspaceBranchPreference | null>(
+        `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspaces/${encodeURIComponent(workspaceId)}/branch-preference`
+      ),
     diffPersonalWorkspace: (personalWorkspaceId: string) =>
       request<WorkspaceDiff>(`${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/diff`),
     syncPersonalToApplication: (personalWorkspaceId: string, payload: SyncWorkspacePayload) =>

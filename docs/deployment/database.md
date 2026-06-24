@@ -273,3 +273,33 @@ V10 种子数据对 F-COSS 的影响：
 - 全部插入语句使用 `where not exists` / `where exists` 保护，重复执行迁移不会破坏数据。
 - 仅在 `users.username = '888888888'` 存在时才插入应用、成员和 recent 偏好，避免在没有初始化用户的环境（如生产）执行失败。
 - 不影响 V5/V8/V9 的用户、角色、配置表结构与已有迁移路径。
+
+## V11 用户工作区分支偏好表
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V11__create_user_workspace_branch_preferences.sql` 持久化用户在 (appId, workspaceId) 维度下最近一次手动选择的 VCS 分支，支撑工作台工作区下分支选择按钮的"下次进入默认切换"：
+
+| 表 | 说明 |
+|---|---|
+| `user_workspace_branch_preferences` | 记录 (userId, appId, workspaceId) 维度下用户最近选择的 VCS 分支，唯一键保证同一 (user, app, workspace) 仅保留最新一条。 |
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 数据库自增 surrogate PK，不对 API 暴露。 |
+| `user_id` | 关联 `users.user_id`。 |
+| `app_id` | 关联 `applications.app_id`。 |
+| `workspace_id` | 关联 `workspaces.workspace_id`。 |
+| `branch` | VCS 分支名，最大 255 字符。 |
+| `updated_at` | 最近一次写入时间。 |
+
+索引与约束：
+
+- `uk_user_workspace_branch_preferences_scope(user_id, app_id, workspace_id)` 唯一约束，`ManagedWorkspaceRepository.saveBranchPreference` 命中即更新 branch 与 updated_at。
+- `fk_user_workspace_branch_preferences_user/app/workspace` 外键保证用户、应用、工作区存在。
+- `idx_user_workspace_branch_preferences_user(user_id, updated_at)` 支撑"我最近切过分支的所有工作区"列表型查询。
+- `idx_user_workspace_branch_preferences_workspace(workspace_id, updated_at)` 支撑按工作区维度排查分支偏好。
+
+兼容策略：
+
+- 与 `user_application_workspace_preferences` 保持一致：复合唯一键、upsert 写入，不引入历史数据迁移。
+- 唯一键冲突由 `INSERT ... ON CONFLICT DO UPDATE` 在 Jdbc 仓库内显式处理，重复执行迁移不会破坏数据。
+- 仅在分支切换按钮的 `markRecentBranch` 接口写入，删除工作区或重置偏好时直接 `DELETE` 行即可，不影响运行态工作区。

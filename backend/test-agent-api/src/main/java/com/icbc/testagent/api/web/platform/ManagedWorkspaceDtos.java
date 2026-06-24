@@ -18,4 +18,10 @@ final class ManagedWorkspaceDtos {
 
     record SyncWorkspaceRequest(List<String> files, Boolean force) {
     }
+
+    /**
+     * VCS 分支偏好写入请求体：当前分支名由前端从 IDE 或 vcs.status 拿到。
+     */
+    record BranchPreferenceRequest(String branch) {
+    }
 }

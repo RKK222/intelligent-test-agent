@@ -11,6 +11,7 @@ import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.workspace.ManagedWorkspaceApplicationService;
 import com.icbc.testagent.workspace.ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse;
+import com.icbc.testagent.workspace.ManagedWorkspaceResponses.BranchPreferenceResponse;
 import com.icbc.testagent.workspace.ManagedWorkspaceResponses.ManagedApplicationResponse;
 import com.icbc.testagent.workspace.ManagedWorkspaceResponses.WorkspaceRuntimeResponse;
 import java.time.Instant;
@@ -110,6 +111,47 @@ class ManagedWorkspaceControllerTest {
 
         client(service).get()
                 .uri("/api/internal/platform/workspace-management/recent-workspace")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data").isEmpty();
+    }
+
+    @Test
+    void markRecentBranchForwardsBranchPayload() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        when(service.markRecentBranch(eq("app_gcms"), eq("wks_123"), eq("feature/personalized"), eq(USER_ID)))
+                .thenReturn(new BranchPreferenceResponse(
+                        "app_gcms",
+                        "wks_123",
+                        "feature/personalized",
+                        Instant.parse("2026-06-24T00:00:00Z")));
+
+        client(service).post()
+                .uri("/api/internal/platform/workspace-management/applications/app_gcms/workspaces/wks_123/branch-preference")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"branch":"feature/personalized"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.appId").isEqualTo("app_gcms")
+                .jsonPath("$.data.workspaceId").isEqualTo("wks_123")
+                .jsonPath("$.data.branch").isEqualTo("feature/personalized");
+
+        verify(service).markRecentBranch("app_gcms", "wks_123", "feature/personalized", USER_ID);
+    }
+
+    @Test
+    void recentBranchMayBeEmpty() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        when(service.recentBranch("app_gcms", "wks_123", USER_ID)).thenReturn(Optional.empty());
+
+        client(service).get()
+                .uri("/api/internal/platform/workspace-management/applications/app_gcms/workspaces/wks_123/branch-preference")
                 .header("X-Trace-Id", TRACE_ID)
                 .exchange()
                 .expectStatus().isOk()

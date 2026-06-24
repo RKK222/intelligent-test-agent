@@ -174,7 +174,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   <footer class="ta-workbench-footer">
     <div v-if="showBranchValue" class="ta-workbench-footer-left">
       <!--
-        两级菜单：当归属应用存在工作空间模板时，替代原来的 VCS 分支按钮。
+        两级菜单：当归属应用存在工作空间模板时，展示「应用 → 工作空间 → 版本」选择器。
         一级菜单展示工作空间模板，二级菜单展示该模板下的应用版本。
         鼠标 hover 模板时触发子菜单；点击版本后由父组件切换运行态 Workspace。
       -->
@@ -255,14 +255,21 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         </div>
       </div>
       <!--
-        向后兼容：未配置应用工作空间模板时回退到原 VCS 分支选择，保持现状可用。
+        VCS 分支选择器：与两级菜单并存展示。两级菜单负责"工作空间/版本"切换，
+        分支选择器负责"当前工作区下的 VCS 分支"切换。
+        修复：之前 useCascadeMenu=true 时 el-dropdown 被 v-else 吞掉，导致分支按钮无法点击。
       -->
       <el-dropdown
-        v-else-if="branchOptions.length > 0"
+        v-if="branchOptions.length > 0"
         trigger="click"
+        :hide-on-click="true"
         @command="(name: string) => emit('change-branch', name)"
       >
-        <button type="button" class="ta-workbench-footer-branch" :title="`当前分支：${branch ?? '—'}`">
+        <button
+          type="button"
+          class="ta-workbench-footer-branch"
+          :title="`当前分支：${branch ?? '—'}`"
+        >
           <GitBranch class="ta-workbench-footer-icon" />
           <span class="ta-workbench-footer-branch-label">{{ branch ?? "选择分支" }}</span>
         </button>
