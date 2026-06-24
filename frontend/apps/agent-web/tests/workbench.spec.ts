@@ -56,6 +56,21 @@ test("workbench does not read a workspace file tree before an application is sel
   expect(fileRequests).toEqual([]);
 });
 
+test("user avatar menu logs out and returns to login", async ({ page }) => {
+  const logoutRequests: string[] = [];
+  await mockBackendApi(page, { logoutRequests });
+
+  await gotoWorkbench(page);
+
+  await page.getByRole("button", { name: "当前用户 admin" }).click();
+  await expect(page.getByRole("menuitem", { name: "退出登录" })).toBeVisible();
+  await page.getByRole("menuitem", { name: "退出登录" }).click();
+
+  await expect(page.getByRole("heading", { name: "智能测试代理平台" })).toBeVisible();
+  await expect.poll(() => logoutRequests).toEqual(["POST /api/auth/logout"]);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("test-agent.auth.token"))).toBeNull();
+});
+
 test("admin application fallback runs after auth roles arrive", async ({ page }) => {
   let releaseAuthMe!: () => void;
   const configurationApplicationRequests: string[] = [];
@@ -333,6 +348,7 @@ async function mockBackendApi(
     fileContents?: Record<string, string>;
     authRoles?: string[];
     authMeGate?: Promise<void>;
+    logoutRequests?: string[];
     configurationApplicationRequests?: string[];
     applications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     managedApplications?: Array<{ appId: string; appName: string; enabled: boolean }>;
@@ -368,6 +384,11 @@ async function mockBackendApi(
         unifiedAuthId: "admin",
         roles: capture.authRoles ?? ["APP_ADMIN"]
       }));
+      return;
+    }
+    if (method === "POST" && url.pathname === "/api/auth/logout") {
+      capture.logoutRequests?.push(`${method} ${url.pathname}`);
+      await route.fulfill(json(null));
       return;
     }
     if (url.pathname.startsWith("/api/internal/platform/configuration-management")) {

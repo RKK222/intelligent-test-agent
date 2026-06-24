@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from "vue";
-import { ChevronDown } from "lucide-vue-next";
+import { ChevronDown, LogOut, UserRound } from "lucide-vue-next";
 import logoUrl from "../assets/figma/logo.svg";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
 import folderIconUrl from "../assets/figma/folder-icon.svg";
@@ -18,6 +18,7 @@ const props = withDefaults(
     bottomOpen?: boolean;
     apps?: AppItem[];
     selectedAppId?: string;
+    currentUserName?: string;
     showRightPanel?: boolean;
   }>(),
   {
@@ -49,9 +50,11 @@ const emit = defineEmits<{
   (e: "toggle-right-panel"): void;
   (e: "open-folder"): void;
   (e: "select-app", appId: string): void;
+  (e: "logout"): void;
 }>();
 
 const appMenuOpen = ref(false);
+const userMenuOpen = ref(false);
 
 function toggleLeftPanel() {
   leftPanelOpen.value = !leftPanelOpen.value;
@@ -64,10 +67,30 @@ function toggleRightPanel() {
 
 function toggleAppMenu() {
   appMenuOpen.value = !appMenuOpen.value;
+  userMenuOpen.value = false;
 }
 
 function closeAppMenu() {
   appMenuOpen.value = false;
+}
+
+function toggleUserMenu() {
+  userMenuOpen.value = !userMenuOpen.value;
+  appMenuOpen.value = false;
+}
+
+function closeUserMenu() {
+  userMenuOpen.value = false;
+}
+
+function closeHeaderMenus() {
+  closeAppMenu();
+  closeUserMenu();
+}
+
+function logout() {
+  closeUserMenu();
+  emit("logout");
 }
 
 function selectApp(app: AppItem) {
@@ -78,11 +101,22 @@ function selectApp(app: AppItem) {
 const selectedApp = computed(
   () => props.apps.find((a) => a.id === props.selectedAppId) ?? props.apps[0] ?? { id: "", name: "未选择应用" }
 );
+const userName = computed(() => props.currentUserName?.trim() || "未登录");
+const userInitial = computed(() => {
+  const first = userName.value.trim().charAt(0);
+  return first ? first.toUpperCase() : "?";
+});
 
 function onAppMenuBlur(event: FocusEvent) {
   const next = event.relatedTarget as Node | null;
   if (next && (event.currentTarget as Node).contains(next)) return;
   setTimeout(closeAppMenu, 120);
+}
+
+function onUserMenuBlur(event: FocusEvent) {
+  const next = event.relatedTarget as Node | null;
+  if (next && (event.currentTarget as Node).contains(next)) return;
+  setTimeout(closeUserMenu, 120);
 }
 
 function onResizeStart(side: "left" | "right", event: MouseEvent) {
@@ -125,7 +159,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="figma-app" @click="closeAppMenu">
+  <div class="figma-app" @click="closeHeaderMenus">
     <header class="figma-header">
       <div class="figma-header-left">
         <div class="figma-sidebar-toggle">
@@ -177,6 +211,29 @@ onUnmounted(() => {
               <span v-if="app.id === selectedApp?.id" class="figma-app-menu-item-check">✓</span>
             </li>
           </ul>
+        </div>
+        <div class="figma-user-menu-wrapper" @click.stop @blur="onUserMenuBlur">
+          <button
+            type="button"
+            class="figma-user-avatar-btn"
+            :class="{ 'is-open': userMenuOpen }"
+            :aria-label="`当前用户 ${userName}`"
+            aria-haspopup="menu"
+            :aria-expanded="userMenuOpen"
+            @click="toggleUserMenu"
+          >
+            <span class="figma-user-avatar">{{ userInitial }}</span>
+          </button>
+          <div v-if="userMenuOpen" class="figma-user-menu-dropdown" role="menu">
+            <div class="figma-user-menu-summary">
+              <UserRound class="figma-user-menu-icon" />
+              <span class="figma-user-menu-name">{{ userName }}</span>
+            </div>
+            <button type="button" class="figma-user-menu-item" role="menuitem" @mousedown.prevent="logout">
+              <LogOut class="figma-user-menu-icon" />
+              <span>退出登录</span>
+            </button>
+          </div>
         </div>
       </div>
     </header>
@@ -401,6 +458,107 @@ onUnmounted(() => {
   color: #18a978;
   font-size: 14px;
   font-weight: 600;
+}
+
+/* ---- User Menu ---- */
+.figma-user-menu-wrapper {
+  position: relative;
+}
+
+.figma-user-avatar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.figma-user-avatar-btn:hover,
+.figma-user-avatar-btn.is-open {
+  background: #f0f0f0;
+  border-color: #dfdfdf;
+}
+
+.figma-user-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  background: #18181b;
+  color: #fff;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.figma-user-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 168px;
+  background: #fff;
+  border: 1px solid #e4e4e7;
+  border-radius: 8px;
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 40;
+}
+
+.figma-user-menu-summary,
+.figma-user-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #18181b;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  line-height: 18px;
+  text-align: left;
+}
+
+.figma-user-menu-summary {
+  color: #666;
+  border-bottom: 1px solid #f0f0f0;
+  border-radius: 6px 6px 0 0;
+}
+
+.figma-user-menu-item {
+  margin-top: 4px;
+  cursor: pointer;
+}
+
+.figma-user-menu-item:hover,
+.figma-user-menu-item:focus-visible {
+  background: #f4f4f5;
+  outline: none;
+}
+
+.figma-user-menu-icon {
+  width: 14px;
+  height: 14px;
+  color: #666;
+  flex-shrink: 0;
+}
+
+.figma-user-menu-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---- Icon Buttons ---- */

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, onScopeDispose, ref, shallowRef, watch } from "vue";
+import { useRouter } from "vue-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
 import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api";
@@ -64,6 +65,7 @@ const api = createBackendApiClient({ baseUrl: apiBaseUrl });
 const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
 const authStore = useAuthStore();
+const router = useRouter();
 
 // 设置弹窗依赖当前用户角色；工作台直达时需要主动补齐 /api/auth/me。
 void authStore.fetchCurrentUser(api);
@@ -1381,6 +1383,11 @@ function onUseHunkContext(part: Extract<PromptPart, { type: "file" }>) {
   diffContextParts.value = [...diffContextParts.value, part];
   feedback.value = { kind: "info", title: "已引用当前 hunk", description: `${part.path ?? part.name} 将随下一条 Prompt 提交` };
 }
+
+async function handleLogout() {
+  authStore.logout(api);
+  await router.push({ name: "login" });
+}
 </script>
 
 <template>
@@ -1390,10 +1397,12 @@ function onUseHunkContext(part: Extract<PromptPart, { type: "file" }>) {
     :show-right-panel="rightPanelOpen"
     :apps="shellApps"
     :selected-app-id="selectedAppId"
+    :current-user-name="authStore.currentUser?.username"
     @toggle-left-panel="() => {}"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
     @open-folder="openWorkspaceDirectoryPicker"
     @select-app="handleSelectApp"
+    @logout="handleLogout"
   >
     <template #activity>
       <nav class="figma-activity-nav" aria-label="工作台活动栏">
