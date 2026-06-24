@@ -325,11 +325,15 @@ start_frontend() {
 load_env_file "${env_file}"
 export SPRING_PROFILES_ACTIVE="${profile}"
 
-# 设置 JAVA_HOME，默认 Java 21
+# 设置 JAVA_HOME
 java_version="${JAVA_VERSION:-21}"
-if [[ -z "${JAVA_HOME:-}" ]]; then
+if [[ -n "${JAVA_VERSION:-}" ]] || [[ -z "${JAVA_HOME:-}" ]]; then
+  # 如果指定了 JAVA_VERSION 或 JAVA_HOME 未设置，则自动查找
   if [[ "$(uname -s)" == "Darwin" ]]; then
-    JAVA_HOME="$(/usr/libexec/java_home -v "${java_version}" 2>/dev/null || true)"
+    detected_home="$(/usr/libexec/java_home -v "${java_version}" 2>/dev/null || true)"
+    if [[ -n "${detected_home}" ]]; then
+      JAVA_HOME="${detected_home}"
+    fi
   fi
   if [[ -z "${JAVA_HOME:-}" ]]; then
     # macOS 以外或 java_home 未找到时的常见路径
