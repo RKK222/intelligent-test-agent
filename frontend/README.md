@@ -57,6 +57,18 @@ tools/dev-frontend-check.sh
 
 ## 本地联调
 
+推荐从仓库根目录使用一键脚本重启三服务，脚本会按 `.env.local` 管理本地 `opencode serve`、后端和前端：
+
+```bash
+./restart-dev-services.sh --env-file .env.local
+```
+
+本机存在多个 opencode 版本时，在 `.env.local` 指定 `TEST_AGENT_OPENCODE_BIN`，避免 PATH 命中旧版本。例如：
+
+```bash
+TEST_AGENT_OPENCODE_BIN=${HOME}/.opencode/bin/opencode
+```
+
 分别启动三个服务：
 
 ```bash
@@ -96,7 +108,7 @@ tools/dev-phase11-real-e2e.sh --start-services
 - RunEvent SSE 只能通过 `packages/event-stream-client`；默认使用 `/api/internal/agent/opencode/runs/{runId}/events`。
 - `apps/agent-web` 负责组合页面；业务能力必须沉淀到对应 package。
 - opencode Web App 复刻以运行态能力为范围，交互行为参考 `opencode-source/opencode-1.17.8/packages/app`；顶层 `frontend-opencode` 承载 Vue/Vite 复刻工程，opencode `packages/web` 官网/文档/公网分享轮询不进入默认边界。
-- 当前已接入 backend-api runtime 方法、Agent/Provider/Model 运行态选择（Agent 下拉过滤为 primary+all，排除 subagent/hidden）、右上角成员应用切换、应用版本工作区/个人工作区切换与同步、受控 Workspace 目录选择、session history 搜索/置顶/删除、历史会话工作区不可用只读态、message part reducer、permission/question dock、Todo、文件/图片附件、busy follow-up 队列、Monaco 选区上下文、slash command palette 与参数表单补全、`@` context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与懒加载 editor、运行中实时追踪写文件工具变更、MCP/LSP/VCS 状态摘要、左下角设置模态（应用与工作区、个人 SSH key；无应用配置权限时显示角色提示）、`/s/[sessionId]` 只读 transcript 和受控 PTY terminal panel；公开 share 授权、per-file/per-message 回滚和真实三服务联调 E2E 仍按后续批次推进。
+- 当前已接入 backend-api runtime 方法、Agent/Provider/Model 运行态选择（Agent 下拉过滤为 primary+all，排除 subagent/hidden；模型切换入口位于右侧聊天输入区）、右上角成员应用切换、应用版本工作区/个人工作区切换与同步、受控 Workspace 目录选择、session history 搜索/置顶/删除、历史会话工作区不可用只读态、message part reducer、permission/question dock、Todo、文件/图片附件、busy follow-up 队列、Monaco 选区上下文、slash command palette 与参数表单补全、`@` context picker、Run/Session/VCS Diff 来源切换、Diff hunk 导航与懒加载 editor、运行中实时追踪写文件工具变更、MCP/LSP/VCS 状态摘要、左下角设置模态（应用与工作区、个人 SSH key；无应用配置权限时显示角色提示）、`/s/[sessionId]` 只读 transcript 和受控 PTY terminal panel；公开 share 授权、per-file/per-message 回滚和真实三服务联调 E2E 仍按后续批次推进。
 
 ## UI 与主题边界
 

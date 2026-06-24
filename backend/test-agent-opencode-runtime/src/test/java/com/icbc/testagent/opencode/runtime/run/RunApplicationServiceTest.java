@@ -111,6 +111,8 @@ class RunApplicationServiceTest {
         assertThat(facade.startRunCommands).hasSize(1);
         assertThat(facade.startRunCommands.getFirst().opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
         assertThat(facade.startRunCommands.getFirst().workspace()).isNull();
+        assertThat(facade.startRunCommands.getFirst().agent()).isEqualTo("build");
+        assertThat(facade.callOrder).containsSubsequence("streamRunEvents", "startRun");
         assertThat(sessions.current.opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
         assertThat(sessions.current.opencodeExecutionNodeId()).isEqualTo(node().executionNodeId());
         assertThat(bindings.findBySessionIdAndAgentId(new SessionId("ses_1234567890abcdef"), "opencode"))
@@ -871,7 +873,7 @@ class RunApplicationServiceTest {
     }
 
     private static final class FakeRunRepository implements RunRepository {
-        private final List<Run> saved = new ArrayList<>();
+        private final List<Run> saved = new CopyOnWriteArrayList<>();
 
         @Override
         public Run save(Run run) {
@@ -1021,6 +1023,7 @@ class RunApplicationServiceTest {
         private final List<OpencodeCreateSessionCommand> createSessionCommands = new ArrayList<>();
         private final List<OpencodeStartRunCommand> startRunCommands = new ArrayList<>();
         private final List<OpencodeRuntimeCommand> runtimeCommands = new ArrayList<>();
+        private final List<String> callOrder = new ArrayList<>();
         private String lastPrompt;
         private RuntimeException createSessionError;
         private Function<OpencodeStreamEventsCommand, Flux<RunEventDraft>> streamEvents = ignored -> Flux.empty();
@@ -1048,6 +1051,7 @@ class RunApplicationServiceTest {
 
         @Override
         public Mono<OpencodeStartRunResult> startRun(OpencodeStartRunCommand command) {
+            callOrder.add("startRun");
             startRunCommands.add(command);
             lastPrompt = command.prompt();
             return Mono.just(new OpencodeStartRunResult(true));
@@ -1055,6 +1059,7 @@ class RunApplicationServiceTest {
 
         @Override
         public Flux<RunEventDraft> streamRunEvents(OpencodeStreamEventsCommand command) {
+            callOrder.add("streamRunEvents");
             return streamEvents.apply(command);
         }
 

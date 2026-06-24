@@ -111,6 +111,21 @@ load_env_file() {
 load_env_file "${env_file}"
 export SPRING_PROFILES_ACTIVE="${profile}"
 
+# 设置 JAVA_HOME
+java_version="${JAVA_VERSION:-21}"
+if [[ -n "${JAVA_VERSION:-}" ]] || [[ -z "${JAVA_HOME:-}" ]]; then
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    detected_home="$(/usr/libexec/java_home -v "${java_version}" 2>/dev/null || true)"
+    if [[ -n "${detected_home}" ]]; then
+      JAVA_HOME="${detected_home}"
+    fi
+  fi
+  if [[ -n "${JAVA_HOME:-}" ]]; then
+    export JAVA_HOME
+    echo "JAVA_HOME set to: ${JAVA_HOME}"
+  fi
+fi
+
 if [[ -z "${TEST_AGENT_OPENCODE_BASE_URL:-}" ]]; then
   echo "TEST_AGENT_OPENCODE_BASE_URL is required in ${env_file}." >&2
   exit 1

@@ -17,22 +17,24 @@ import {
   Upload,
   X,
 } from 'lucide-vue-next'
+import type { AgentMessage } from '@test-agent/shared-types'
 import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 
-type ChatMessageInput = {
-  id: string
-  role: string
-  content?: string
-  text?: string
-  parts?: Array<{ type: string; text?: string }>
-  createdAt?: string
-}
+type ChatMessageInput = AgentMessage & { content?: string }
 
 type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
   meta?: string
+}
+
+function partText(part: unknown): string {
+  if (part && typeof part === 'object' && 'text' in part) {
+    const text = (part as { text?: unknown }).text
+    return typeof text === 'string' ? text : ''
+  }
+  return ''
 }
 
 export type FileChangeStat = {
@@ -74,6 +76,14 @@ const props =
     fileChanges?: FileChangeStat[]
     /** 历史对话列表 */
     history?: Array<{ id: string; title: string; createdAt?: string }>
+    /** 当前选中的模型展示名 */
+    selectedModelLabel?: string
+    /** 模型选择按钮是否禁用 */
+    modelPickerDisabled?: boolean
+    /** 终止按钮是否禁用 */
+    stopDisabled?: boolean
+    /** 终止按钮禁用原因 */
+    stopDisabledReason?: string
   }>()
 
 const emit =
@@ -87,6 +97,7 @@ const emit =
     (e: 'update:inputValue', value: string): void
     (e: 'download-files'): void
     (e: 'open-diff', path: string): void
+    (e: 'open-model-picker'): void
   }>()
 
 const localInput = ref(props.inputValue ?? '')
@@ -152,7 +163,7 @@ const thinkingLines = computed(() => {
       msg.role === 'card' &&
       (msg as { cardType?: string }).cardType === 'tool'
     ) {
-      const card = msg as {
+      const card = msg as unknown as {
         role: 'card'
         cardType: string
         payload?: Record<string, unknown>
@@ -317,7 +328,7 @@ const displayMessages = computed<ChatMessage[]>(() => {
       } else if (typeof m.text === 'string') {
         text = m.text
       } else if (Array.isArray(m.parts)) {
-        text = m.parts.map((p) => p?.text ?? '').join('')
+        text = m.parts.map((p) => partText(p)).join('')
       }
       return {
         role: m.role,
@@ -634,6 +645,17 @@ function onKeydown(event: KeyboardEvent) {
         <div class="figma-chat-composer-spacer" />
         <button
           type="button"
+          class="figma-chat-icon-btn figma-chat-model-btn"
+          :disabled="modelPickerDisabled"
+          title="切换模型"
+          aria-label="切换模型"
+          @click="emit('open-model-picker')"
+        >
+          <span class="figma-chat-model-label">{{ selectedModelLabel || '选择模型' }}</span>
+          <ChevronDown class="figma-chat-btn-icon" />
+        </button>
+        <button
+          type="button"
           class="figma-chat-icon-btn figma-chat-new-btn"
           :disabled="running"
           @click="emit('new-conversation')"
@@ -655,6 +677,8 @@ function onKeydown(event: KeyboardEvent) {
           v-else
           type="button"
           class="figma-chat-stop"
+          :disabled="stopDisabled"
+          :title="stopDisabledReason || '停止执行'"
           aria-label="停止执行"
           @click="stop"
         >
@@ -1291,6 +1315,19 @@ function onKeydown(event: KeyboardEvent) {
   color: #555;
 }
 
+.figma-chat-model-btn {
+  max-width: 156px;
+  min-width: 0;
+}
+
+.figma-chat-model-label {
+  min-width: 0;
+  max-width: 112px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .figma-chat-btn-icon {
   width: 12px;
   height: 12px;
@@ -1332,6 +1369,11 @@ function onKeydown(event: KeyboardEvent) {
 
 .figma-chat-stop:hover {
   background: #f0f4ff;
+}
+
+.figma-chat-stop:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .figma-chat-send-icon,

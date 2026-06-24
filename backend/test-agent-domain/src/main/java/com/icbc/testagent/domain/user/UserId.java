@@ -15,8 +15,5 @@ public record UserId(String value) {
         if (value.isBlank()) {
             throw new IllegalArgumentException("userId must not be blank");
         }
-        if (!value.startsWith("usr_")) {
-            throw new IllegalArgumentException("userId must start with 'usr_'");
-        }
     }
 }

@@ -14,6 +14,7 @@
 - [ ] API、事件、数据库、安全、性能、测试文档已检查并按需更新。
 - [ ] 文档中的模块名、包名、命令和依赖关系与代码一致。
 - [ ] 稳定文档（`docs/`、模块/包 README、`PACKAGE.md`）未使用阶段名（Phase NN）作为来源或时间注脚；阶段计划与待办只放在 `requirements/`。
+- [ ] 若本次会话产生了持久价值，已更新 `.agents/session-log.md`，且条目包含 `Why`、`What`、`How`、`Result`。
 
 ## API 与兼容性
 

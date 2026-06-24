@@ -20,7 +20,7 @@ spring:
 
 test-agent:
   workspace-picker:
-    allowed-roots: /Users/mac/Desktop
+    allowed-roots: ${TEST_AGENT_WORKSPACE_PICKER_ROOTS:${user.home}/workspace}
   security:
     api-token: ${TEST_AGENT_API_TOKEN:}
     cors-allowed-origins: ${TEST_AGENT_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}
@@ -30,6 +30,22 @@ test-agent:
     window: ${TEST_AGENT_RATE_LIMIT_WINDOW:1m}
   managed-workspace:
     root: ${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}
+  model-catalog:
+    source: ${TEST_AGENT_MODEL_CATALOG_SOURCE:bailian}
+    external:
+      provider-id: ${TEST_AGENT_EXTERNAL_MODEL_PROVIDER_ID:modelstudio}
+      name: ${TEST_AGENT_EXTERNAL_MODEL_PROVIDER_NAME:Model Studio Coding Plan}
+      base-url: ${TEST_AGENT_BAILIAN_BASE_URL:https://coding.dashscope.aliyuncs.com/v1}
+      api-key-env: ${TEST_AGENT_BAILIAN_API_KEY_ENV:MODELSTUDIO_API_KEY}
+      auth-mode: bearer
+      default-model: ${TEST_AGENT_BAILIAN_DEFAULT_MODEL:qwen3.5-plus}
+    internal:
+      provider-id: ${TEST_AGENT_INTERNAL_MODEL_PROVIDER_ID:icbc-openai}
+      name: ${TEST_AGENT_INTERNAL_MODEL_PROVIDER_NAME:ICBC OpenAI}
+      base-url: ${TEST_AGENT_ICBC_OPENAI_BASE_URL:http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1}
+      api-key-env: ${TEST_AGENT_ICBC_OPENAI_TOKEN_ENV:ICBC_OPENAI_AUTH_TOKEN}
+      auth-mode: ${TEST_AGENT_ICBC_OPENAI_AUTH_MODE:auth-token}
+      default-model: ${TEST_AGENT_INTERNAL_DEFAULT_MODEL:DeepSeek-V4-Flash-W8A8}
   redis:
     enabled: ${TEST_AGENT_REDIS_ENABLED:true}
     host: ${TEST_AGENT_REDIS_HOST:127.0.0.1}

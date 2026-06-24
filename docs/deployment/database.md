@@ -73,6 +73,7 @@
 - `run_events.payload_json` 和 `execution_nodes.capabilities_json` 当前为 JSON 文本，便于 H2 和 PostgreSQL 共用测试；未来迁移到 JSONB 时必须先保持旧列读取兼容。
 - `run_events.seq` 由持久化层按同一 run 分配，取消、Diff 动作和 opencode stream 并发追加时必须依赖 `(run_id, seq)` 唯一约束冲突后重试，保持事件流单调递增且不重复。
 - `session_messages.content` 当前直接保存文本；后续如拆分富文本 parts，必须保留旧 content 读取兼容。
+- `ai_model_configs` 只保存模型目录元数据，不保存 token、API key 或 provider secret；企业内调用密钥继续由部署环境变量或配置中心注入。
 - 删除或重命名状态、事件类型、数据库字段必须拆分为读取兼容、数据迁移、清理三个阶段。
 
 ## V5 用户认证表
@@ -303,3 +304,34 @@ V10 种子数据对 F-COSS 的影响：
 - 与 `user_application_workspace_preferences` 保持一致：复合唯一键、upsert 写入，不引入历史数据迁移。
 - 唯一键冲突由 `INSERT ... ON CONFLICT DO UPDATE` 在 Jdbc 仓库内显式处理，重复执行迁移不会破坏数据。
 - 仅在分支切换按钮的 `markRecentBranch` 接口写入，删除工作区或重置偏好时直接 `DELETE` 行即可，不影响运行态工作区。
+
+## V12 AI 模型配置表
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V12__create_ai_model_configs.sql` 创建 `ai_model_configs`，用于企业内模型目录接口读取和默认模型控制。
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 数据库自增 surrogate PK，不对 API 暴露。 |
+| `provider_id` | 模型所属 provider，企业内默认 `icbc-openai`。 |
+| `model_id` | 模型标识，例如 `DeepSeek-V4-Flash-W8A8`。 |
+| `name` | 前端展示名称。 |
+| `enabled` | 是否在模型目录中展示。 |
+| `default_model` | 是否为默认模型；前端优先选中该模型。 |
+| `input_modalities_json` | 输入模态 JSON 文本，例如 `["text"]` 或 `["text","image"]`。 |
+| `context_limit` | 上下文窗口限制。 |
+| `output_limit` | 输出 token 限制。 |
+| `sort_order` | 模型展示排序，默认模型仍会优先展示。 |
+| `metadata_json` | 模型来源等扩展元数据 JSON 文本。 |
+| `created_at` | 创建时间。 |
+| `updated_at` | 更新时间。 |
+
+约束和索引：
+
+- `uk_ai_model_configs_provider_model` 保证同一 provider 下模型唯一。
+- `idx_ai_model_configs_provider_enabled(provider_id, enabled, sort_order)` 支持模型目录按 provider 查询启用模型。
+
+兼容策略：
+
+- 启动时由 runtime 服务按配置 seed openclaw 企业 patch 中的内网模型清单；已存在的 `(provider_id, model_id)` 不会被覆盖，表内人工调整的启停、排序和默认模型会保留。
+- 表内不保存调用密钥；`ICBC_OPENAI_AUTH_TOKEN` 或自定义 token 环境变量只在运行时同步 opencode provider 配置时引用。
+- 删除模型建议先设 `enabled=false`，避免前端仍持有旧 `providerId/modelId` 时出现不可解释的目录缺失。

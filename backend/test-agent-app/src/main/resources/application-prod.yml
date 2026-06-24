@@ -26,6 +26,22 @@ test-agent:
     port: ${TEST_AGENT_REDIS_PORT:6379}
   managed-workspace:
     root: ${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}
+  model-catalog:
+    source: ${TEST_AGENT_MODEL_CATALOG_SOURCE:internal}
+    external:
+      provider-id: ${TEST_AGENT_EXTERNAL_MODEL_PROVIDER_ID:modelstudio}
+      name: ${TEST_AGENT_EXTERNAL_MODEL_PROVIDER_NAME:Model Studio Coding Plan}
+      base-url: ${TEST_AGENT_BAILIAN_BASE_URL:https://coding.dashscope.aliyuncs.com/v1}
+      api-key-env: ${TEST_AGENT_BAILIAN_API_KEY_ENV:MODELSTUDIO_API_KEY}
+      auth-mode: bearer
+      default-model: ${TEST_AGENT_BAILIAN_DEFAULT_MODEL:qwen3.5-plus}
+    internal:
+      provider-id: ${TEST_AGENT_INTERNAL_MODEL_PROVIDER_ID:icbc-openai}
+      name: ${TEST_AGENT_INTERNAL_MODEL_PROVIDER_NAME:ICBC OpenAI}
+      base-url: ${TEST_AGENT_ICBC_OPENAI_BASE_URL:http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1}
+      api-key-env: ${TEST_AGENT_ICBC_OPENAI_TOKEN_ENV:ICBC_OPENAI_AUTH_TOKEN}
+      auth-mode: ${TEST_AGENT_ICBC_OPENAI_AUTH_MODE:auth-token}
+      default-model: ${TEST_AGENT_INTERNAL_DEFAULT_MODEL:DeepSeek-V4-Flash-W8A8}
   opencode:
     nodes:
       - id: ${TEST_AGENT_OPENCODE_NODE_ID:node_prod_opencode}

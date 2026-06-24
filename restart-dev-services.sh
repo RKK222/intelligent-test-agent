@@ -16,6 +16,7 @@ BACKEND_JAR="${BACKEND_DIR}/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.
 LOG_DIR="${ROOT_DIR}/.tmp/dev-services"
 BACKEND_SCREEN_SESSION="test-agent-backend"
 FRONTEND_SCREEN_SESSION="test-agent-frontend"
+OPENCODE_SCREEN_SESSION="test-agent-opencode"
 
 profile="local"
 env_file=""
@@ -183,7 +184,117 @@ frontend_pids() {
   '
 }
 
-# 先温和停止，超时后强制清理，避免端口 8080/3000 被旧进程占用。
+url_port() {
+  local url="$1"
+  local hostport
+  hostport="${url#*://}"
+  hostport="${hostport%%/*}"
+  if [[ "${hostport}" == *:* ]]; then
+    echo "${hostport##*:}"
+  elif [[ "${url}" == https://* ]]; then
+    echo 443
+  else
+    echo 80
+  fi
+}
+
+url_host() {
+  local url="$1"
+  local hostport host
+  hostport="${url#*://}"
+  hostport="${hostport%%/*}"
+  host="${hostport%:*}"
+  host="${host#[}"
+  host="${host%]}"
+  echo "${host}"
+}
+
+is_local_opencode_url() {
+  local url="$1"
+  [[ "${url}" == http://127.0.0.1:* || "${url}" == http://localhost:* || "${url}" == http://[::1]:* ]]
+}
+
+should_start_opencode() {
+  case "${TEST_AGENT_START_OPENCODE:-auto}" in
+    true|TRUE|1|yes|YES)
+      return 0
+      ;;
+    false|FALSE|0|no|NO)
+      return 1
+      ;;
+    auto|"")
+      is_local_opencode_url "${TEST_AGENT_OPENCODE_BASE_URL:-}"
+      ;;
+    *)
+      echo "Invalid TEST_AGENT_START_OPENCODE: ${TEST_AGENT_START_OPENCODE}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+opencode_bin() {
+  if [[ -n "${TEST_AGENT_OPENCODE_BIN:-}" ]]; then
+    echo "${TEST_AGENT_OPENCODE_BIN}"
+    return
+  fi
+  if [[ -x "${HOME}/.opencode/bin/opencode" ]]; then
+    echo "${HOME}/.opencode/bin/opencode"
+    return
+  fi
+  command -v opencode || true
+}
+
+# 只清理脚本管理端口上的 opencode serve，避免误杀其他 opencode 客户端。
+opencode_pids() {
+  local port
+  port="$(url_port "${TEST_AGENT_OPENCODE_BASE_URL}")"
+  ps -eo pid=,command= | awk -v port="${port}" '
+    index($0, "opencode serve") && index($0, "--port " port) { print $1 }
+  '
+}
+
+should_seed_demo_workspaces() {
+  case "${TEST_AGENT_SEED_DEMO_WORKSPACES:-auto}" in
+    true|TRUE|1|yes|YES)
+      return 0
+      ;;
+    false|FALSE|0|no|NO)
+      return 1
+      ;;
+    auto|"")
+      should_start_opencode
+      ;;
+    *)
+      echo "Invalid TEST_AGENT_SEED_DEMO_WORKSPACES: ${TEST_AGENT_SEED_DEMO_WORKSPACES}" >&2
+      exit 1
+      ;;
+  esac
+}
+
+# 本地种子数据中的 F-COSS 工作区指向 /tmp/test-agent/fcoss/*；启动时补齐缺失目录，避免默认入口无法运行。
+seed_demo_workspaces() {
+  if ! should_seed_demo_workspaces; then
+    return
+  fi
+
+  local source_dir="${ROOT_DIR}/test-workspaces/F-COSS"
+  local version dest
+  if [[ ! -d "${source_dir}" ]]; then
+    echo "Skipping demo workspace seed: ${source_dir} not found."
+    return
+  fi
+
+  for version in 20260620 20260701; do
+    dest="/tmp/test-agent/fcoss/${version}"
+    mkdir -p "${dest}"
+    if [[ ! -e "${dest}/README.md" ]]; then
+      cp -R "${source_dir}/." "${dest}/"
+    fi
+    mkdir -p "${dest}/src/main"
+  done
+}
+
+# 先温和停止，超时后强制清理，避免端口 8080/3000/4096 被旧进程占用。
 stop_pids() {
   local label="$1"
   shift
@@ -302,6 +413,44 @@ start_backend() {
   backend_pids >"${LOG_DIR}/backend.pid"
 }
 
+start_opencode() {
+  if ! should_start_opencode; then
+    echo "Skipping opencode startup for non-local TEST_AGENT_OPENCODE_BASE_URL=${TEST_AGENT_OPENCODE_BASE_URL}."
+    return
+  fi
+
+  local bin host port config_url version
+  bin="$(opencode_bin)"
+  if [[ -z "${bin}" || ! -x "${bin}" ]]; then
+    echo "opencode binary not found or not executable. Set TEST_AGENT_OPENCODE_BIN in ${env_file}." >&2
+    exit 1
+  fi
+  host="$(url_host "${TEST_AGENT_OPENCODE_BASE_URL}")"
+  port="$(url_port "${TEST_AGENT_OPENCODE_BASE_URL}")"
+  config_url="${TEST_AGENT_OPENCODE_BASE_URL%/}/config"
+  version="$("${bin}" --version 2>/dev/null || true)"
+
+  mkdir -p "${LOG_DIR}"
+  echo "Starting opencode ${version:-unknown} on ${TEST_AGENT_OPENCODE_BASE_URL}. Logs: ${LOG_DIR}/opencode.log"
+  : >"${LOG_DIR}/opencode.log"
+  if command -v screen >/dev/null 2>&1; then
+    local opencode_cmd
+    printf -v opencode_cmd 'cd %q && exec %q serve --hostname %q --port %q --cors %q --cors %q --print-logs >>%q 2>&1' \
+      "${ROOT_DIR}" "${bin}" "${host}" "${port}" "http://localhost:${frontend_port}" "http://127.0.0.1:${frontend_port}" "${LOG_DIR}/opencode.log"
+    screen -dmS "${OPENCODE_SCREEN_SESSION}" bash -lc "${opencode_cmd}"
+  else
+    (
+      cd "${ROOT_DIR}"
+      nohup "${bin}" serve --hostname "${host}" --port "${port}" \
+        --cors "http://localhost:${frontend_port}" --cors "http://127.0.0.1:${frontend_port}" --print-logs \
+        >>"${LOG_DIR}/opencode.log" 2>&1 &
+      echo "$!" >"${LOG_DIR}/opencode.pid"
+    )
+  fi
+  wait_until_http_ok "opencode" "${config_url}" "${LOG_DIR}/opencode.log" 60
+  opencode_pids >"${LOG_DIR}/opencode.pid"
+}
+
 start_frontend() {
   mkdir -p "${LOG_DIR}"
   echo "Starting frontend on port ${frontend_port}. Logs: ${LOG_DIR}/frontend.log"
@@ -322,14 +471,46 @@ start_frontend() {
   frontend_pids >"${LOG_DIR}/frontend.pid"
 }
 
+load_env_file "${env_file}"
+export SPRING_PROFILES_ACTIVE="${profile}"
+
+# 设置 JAVA_HOME
+java_version="${JAVA_VERSION:-21}"
+if [[ -n "${JAVA_VERSION:-}" ]] || [[ -z "${JAVA_HOME:-}" ]]; then
+  # 如果指定了 JAVA_VERSION 或 JAVA_HOME 未设置，则自动查找
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    detected_home="$(/usr/libexec/java_home -v "${java_version}" 2>/dev/null || true)"
+    if [[ -n "${detected_home}" ]]; then
+      JAVA_HOME="${detected_home}"
+    fi
+  fi
+  if [[ -z "${JAVA_HOME:-}" ]]; then
+    # macOS 以外或 java_home 未找到时的常见路径
+    for candidate in \
+      "${HOME}/Library/Java/JavaVirtualMachines/openjdk-${java_version}.0.1/Contents/Home" \
+      "/Library/Java/JavaVirtualMachines/openjdk-${java_version}/Contents/Home" \
+      "/usr/lib/jvm/java-${java_version}" \
+      "/usr/lib/jvm/openjdk-${java_version}" \
+      "${HOME}/.sdkman/candidates/java/current"; do
+      if [[ -d "${candidate}" ]]; then
+        JAVA_HOME="${candidate}"
+        break
+      fi
+    done
+  fi
+  if [[ -n "${JAVA_HOME:-}" ]]; then
+    export JAVA_HOME
+    echo "JAVA_HOME set to: ${JAVA_HOME}"
+  fi
+fi
+
 require_command awk
 require_command corepack
 require_command curl
 require_command java
 require_command mvn
 
-load_env_file "${env_file}"
-export SPRING_PROFILES_ACTIVE="${profile}"
+seed_demo_workspaces
 
 echo "Sensitive environment values are loaded but not printed."
 echo "Builds run before stopping existing services; failed builds leave current services untouched."
@@ -348,6 +529,13 @@ for pid in $(backend_pids); do
   old_backend_pids+=("${pid}")
 done
 
+old_opencode_pids=()
+if should_start_opencode; then
+  for pid in $(opencode_pids); do
+    old_opencode_pids+=("${pid}")
+  done
+fi
+
 if [[ "${#old_frontend_pids[@]}" -gt 0 ]]; then
   stop_pids "frontend" "${old_frontend_pids[@]}"
 else
@@ -359,9 +547,19 @@ if [[ "${#old_backend_pids[@]}" -gt 0 ]]; then
 else
   stop_pids "backend"
 fi
+
+if should_start_opencode; then
+  if [[ "${#old_opencode_pids[@]}" -gt 0 ]]; then
+    stop_pids "opencode" "${old_opencode_pids[@]}"
+  else
+    stop_pids "opencode"
+  fi
+fi
 stop_screen_session "${FRONTEND_SCREEN_SESSION}"
 stop_screen_session "${BACKEND_SCREEN_SESSION}"
+stop_screen_session "${OPENCODE_SCREEN_SESSION}"
 
+start_opencode
 start_backend
 start_frontend
 
@@ -370,5 +568,5 @@ echo "Backend:  ${backend_url}"
 echo "Frontend: ${frontend_url}"
 echo "Logs:     ${LOG_DIR}"
 if command -v screen >/dev/null 2>&1; then
-  echo "Screen:   ${BACKEND_SCREEN_SESSION}, ${FRONTEND_SCREEN_SESSION}"
+  echo "Screen:   ${OPENCODE_SCREEN_SESSION}, ${BACKEND_SCREEN_SESSION}, ${FRONTEND_SCREEN_SESSION}"
 fi

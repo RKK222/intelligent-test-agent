@@ -16,6 +16,7 @@ import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
+import com.icbc.testagent.opencode.runtime.model.ModelCatalogApplicationService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
@@ -25,6 +26,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -39,10 +41,32 @@ public class OpencodeRuntimeApplicationService {
     private final AgentRuntimeRegistry agentRuntimeRegistry;
     private final AgentSessionBindingRepository agentSessionBindingRepository;
     private final ObjectMapper objectMapper;
+    private final ModelCatalogApplicationService modelCatalogService;
     private final ThreadLocal<String> agentContext = new ThreadLocal<>();
 
     /**
      * 创建 opencode runtime 编排服务，Controller 只通过本服务访问 agent runtime。
+     */
+    @Autowired
+    public OpencodeRuntimeApplicationService(
+            WorkspaceRepository workspaceRepository,
+            SessionRepository sessionRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            ObjectMapper objectMapper,
+            ModelCatalogApplicationService modelCatalogService) {
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
+        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
+        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
+        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
+        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.modelCatalogService = Objects.requireNonNull(modelCatalogService, "modelCatalogService must not be null");
+    }
+
+    /**
+     * 兼容旧单测的构造器，默认保持 opencode 原始模型/provider 代理。
      */
     public OpencodeRuntimeApplicationService(
             WorkspaceRepository workspaceRepository,
@@ -57,6 +81,7 @@ public class OpencodeRuntimeApplicationService {
         this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
         this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.modelCatalogService = null;
     }
 
     /**
@@ -88,6 +113,10 @@ public class OpencodeRuntimeApplicationService {
      * 列出当前 workspace 可用模型。
      */
     public Object listModels(String workspaceId, String traceId) {
+        if (modelCatalogService != null && modelCatalogService.managedSourceEnabled()) {
+            syncProviderConfig(workspaceId, traceId);
+            return modelCatalogService.listModels();
+        }
         return get(workspaceLocation(workspaceId), "/api/model", Map.of(), traceId);
     }
 
@@ -95,6 +124,10 @@ public class OpencodeRuntimeApplicationService {
      * 列出当前 workspace 可用 provider。
      */
     public Object listProviders(String workspaceId, String traceId) {
+        if (modelCatalogService != null && modelCatalogService.managedSourceEnabled()) {
+            syncProviderConfig(workspaceId, traceId);
+            return modelCatalogService.listProviders();
+        }
         return get(workspaceLocation(workspaceId), "/api/provider", Map.of(), traceId);
     }
 
@@ -466,6 +499,14 @@ public class OpencodeRuntimeApplicationService {
      */
     private Object get(RuntimeTarget location, String path, Map<String, String> query, String traceId) {
         return call(location, "GET", path, query, null, traceId);
+    }
+
+    /**
+     * 当前模型列表由平台托管时，先把 provider 配置尽力写入 opencode runtime。
+     */
+    private void syncProviderConfig(String workspaceId, String traceId) {
+        WorkspaceLocation location = workspaceLocation(workspaceId);
+        modelCatalogService.syncProviderConfig(location.runtime(), location.node(), traceId);
     }
 
     /**

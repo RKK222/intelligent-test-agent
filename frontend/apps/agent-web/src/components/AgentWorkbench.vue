@@ -339,14 +339,12 @@ const agentsQuery = useQuery({
   queryFn: () => api.listAgents(selectedWorkspaceIdRef.value!)
 });
 const modelsQuery = useQuery({
-  queryKey: ["runtime", "models", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value),
-  queryFn: () => api.listModels(selectedWorkspaceIdRef.value!)
+  queryKey: ["runtime", "models"],
+  queryFn: () => api.listModels()
 });
 const providersQuery = useQuery({
-  queryKey: ["runtime", "providers", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value),
-  queryFn: () => api.listProviders(selectedWorkspaceIdRef.value!)
+  queryKey: ["runtime", "providers"],
+  queryFn: () => api.listProviders()
 });
 const commandsQuery = useQuery({
   queryKey: ["runtime", "commands", selectedWorkspaceIdRef],
@@ -400,6 +398,7 @@ const selectedModelInfo = computed(() => {
   return models.value.find((model) => modelValue(model) === selectedModel.value || model.id === selected);
 });
 const selectedModelLabel = computed(() => selectedModelInfo.value?.name ?? selectedModel.value ?? "未选择模型");
+const modelsLoading = computed(() => modelsQuery.isPending.value || modelsQuery.isFetching.value);
 const modelGroups = computed(() => {
   const keyword = modelSearch.value.trim().toLowerCase();
   const providerNames = new Map(providers.value.map((provider) => [provider.providerId, provider.name]));
@@ -559,7 +558,7 @@ watch(providersQuery.data, (data) => {
 });
 watch(modelsQuery.data, (data) => {
   if (!selectedModel.value && data?.[0]) {
-    selectedModel.value = modelValue(data[0]);
+    selectedModel.value = modelValue(data.find((model) => model.defaultModel) ?? data[0]);
   }
 });
 watch([() => selectedProvider.value, () => selectedModel.value, modelsQuery.data], ([provider, model, data]) => {
@@ -703,6 +702,13 @@ const commandMutation = useMutation({
 });
 
 const runtimeBusy = computed(() => isRunBusyStatus(run.value?.status) || startRunMutation.isPending.value || commandMutation.isPending.value);
+const canStopRun = computed(() => Boolean(run.value && isRunBusyStatus(run.value.status) && !cancelRunMutation.isPending.value));
+const stopDisabledReason = computed(() => {
+  if (cancelRunMutation.isPending.value) return "正在终止";
+  if (!run.value) return "当前没有可终止的运行";
+  if (!isRunBusyStatus(run.value.status)) return "当前运行已结束";
+  return "";
+});
 
 // 把累计毫秒数格式化为 "Xm Ys" 或 "Ys" 的展示文案。
 function formatDurationMs(ms: number): string {
@@ -1262,6 +1268,10 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     feedback.value = { kind: "info", title: "当前会话只读", description: readonlySessionReason.value };
     return;
   }
+  if (!selectedWorkspace.value) {
+    feedback.value = { kind: "info", title: "未选择工作区", description: "请先点击“选择本机目录”或切换到可用工作区，再发送任务。" };
+    return;
+  }
   const parts = buildPromptParts(prompt, activeTab.value, attachments, diffContextParts.value, editorSelection.value);
   const displayPrompt = prompt.trim() || promptFromParts(parts);
   lastPrompt.value = displayPrompt;
@@ -1288,6 +1298,10 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
 }
 
 function handleStopRun() {
+  if (!run.value || !isRunBusyStatus(run.value.status)) {
+    feedback.value = { kind: "info", title: "当前没有可终止的运行", description: "运行启动成功并返回 Run ID 后才能终止。" };
+    return;
+  }
   cancelRunMutation.mutate();
   if (chatStartedAt.value) {
     lastDuration = formatDurationMs(Date.now() - chatStartedAt.value);
@@ -1844,10 +1858,15 @@ async function handleLogout() {
           :readonly-reason="readonlySessionReason"
           :permissions="chatState.permissions"
           :questions="chatState.questions"
+          :selected-model-label="selectedModelLabel"
+          :model-picker-disabled="false"
+          :stop-disabled="!canStopRun"
+          :stop-disabled-reason="stopDisabledReason"
           placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
           @send="(text: string) => handleSend(text)"
           @stop="handleStopRun"
           @new-conversation="() => handleSend('')"
+          @open-model-picker="modelPickerOpen = true"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
           @reply-permission="(requestId: string, decision: 'once' | 'always' | 'reject') => replyPermissionMutation.mutate({ requestId, decision })"
           @reply-question="(requestId: string, answers: unknown[]) => replyQuestionMutation.mutate({ requestId, answers })"
@@ -1914,22 +1933,25 @@ async function handleLogout() {
       </header>
       <input v-model="modelSearch" class="managed-model-search" type="search" placeholder="搜索模型" aria-label="搜索模型" />
       <div class="managed-model-list">
-        <section v-for="group in modelGroups" :key="group.providerId" class="managed-model-group">
-          <h3>{{ group.providerName }}</h3>
-          <button
-            v-for="model in group.models"
-            :key="modelValue(model)"
-            type="button"
-            role="option"
-            :aria-selected="modelValue(model) === selectedModel"
-            class="managed-model-option"
-            @click="selectRuntimeModel(model)"
-          >
-            <span>{{ model.name }}</span>
-            <small>{{ model.providerId }}/{{ model.id }}</small>
-          </button>
-        </section>
-        <div v-if="modelGroups.length === 0" class="managed-model-empty">暂无匹配模型</div>
+        <div v-if="modelsLoading" class="managed-model-empty">模型加载中...</div>
+        <template v-else>
+          <section v-for="group in modelGroups" :key="group.providerId" class="managed-model-group">
+            <h3>{{ group.providerName }}</h3>
+            <button
+              v-for="model in group.models"
+              :key="modelValue(model)"
+              type="button"
+              role="option"
+              :aria-selected="modelValue(model) === selectedModel"
+              class="managed-model-option"
+              @click="selectRuntimeModel(model)"
+            >
+              <span>{{ model.name }}</span>
+              <small>{{ model.providerId }}/{{ model.id }}</small>
+            </button>
+          </section>
+          <div v-if="modelGroups.length === 0" class="managed-model-empty">暂无匹配模型</div>
+        </template>
       </div>
     </div>
   </div>
