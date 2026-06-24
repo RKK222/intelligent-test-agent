@@ -6,7 +6,7 @@ export type DirectoryRowsProps = {
   entriesByDirectory: Record<string, FileTreeEntry[]>;
   expandedDirectories: Set<string>;
   activePath?: string;
-  loadingPath?: string | null;
+  loadingPath?: Set<string>;
   depth?: number;
   /** 文件路径 → 行变更统计，用于在文件名后展示 +N -N。 */
   changeStats?: Record<string, { additions: number; deletions: number }>;
@@ -68,7 +68,7 @@ function onRowClick(entry: FileTreeEntry) {
           <span class="shrink-0 text-[10px] leading-5 text-[#9e3b34]">-{{ changeStats[entry.path].deletions }}</span>
         </template>
         <!-- 加载指示：使用旋转图标，避免行尾细小的 "..." 难以被发现而引起重复点击。 -->
-        <Loader2 v-if="loadingPath === entry.path" :class="cn('h-3.5 w-3.5 shrink-0 animate-spin text-[var(--ta-muted)]')" />
+        <Loader2 v-if="loadingPath?.has(entry.path)" :class="cn('h-3.5 w-3.5 shrink-0 animate-spin text-[var(--ta-muted)]')" />
       </button>
       <DirectoryRows
         v-if="entry.type === 'directory' && expandedDirectories.has(entry.path)"

@@ -9,7 +9,7 @@ export type FileExplorerProps = {
   activePath?: string;
   changedFiles: RunDiffFile[];
   statuses?: Record<string, FileStatus>;
-  loadingPath?: string | null;
+  loadingPath?: Set<string>;
 };
 
 type ExplorerTab = "explorer" | "search" | "changes";

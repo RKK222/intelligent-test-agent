@@ -72,7 +72,10 @@ void authStore.fetchCurrentUser(api);
 const selectedWorkspaceId = ref<string | undefined>(undefined);
 const entriesByDirectory = ref<Record<string, FileTreeEntry[]>>({});
 const expandedDirectories = ref<Set<string>>(new Set());
-const loadingPath = ref<string | null>(null);
+// 多个目录可能同时在加载（用户连续点开多个折叠项，或 expandPathToFile 一次性
+// 展开多层）。使用 Set<string> 而非单值 ref，避免后到的加载把前者的 loading 状态覆盖，
+// 导致"点击没反应"——toggleDirectory 的二次点击守卫会因 loading 状态丢失而误判。
+const loadingPath = ref<Set<string>>(new Set());
 const session = shallowRef<Session | null>(null);
 const run = shallowRef<Run | null>(null);
 const lastPrompt = ref("");
@@ -771,7 +774,7 @@ function resetWorkspaceState() {
   // Workspace 切换后必须清掉旧根目录绑定的文件树、编辑器、Diff 与运行态，避免误操作旧路径。
   entriesByDirectory.value = {};
   expandedDirectories.value = new Set();
-  loadingPath.value = null;
+  loadingPath.value = new Set();
   session.value = null;
   run.value = null;
   logs.value = [];
@@ -884,14 +887,36 @@ async function loadDirectory(path: string, workspaceId = selectedWorkspace.value
   if (!workspaceId) {
     return;
   }
-  loadingPath.value = path;
+  // 已被其他并发请求加载完成（或正在加载）就直接返回，避免重复请求与状态竞争。
+  if (entriesByDirectory.value[path] !== undefined || loadingPath.value.has(path)) {
+    return;
+  }
+  const nextLoading = new Set(loadingPath.value);
+  nextLoading.add(path);
+  loadingPath.value = nextLoading;
+  // 临时保存旧 entries，失败时回滚到上一次快照，防止"目录展开但内容空白"。
+  const previousEntries = entriesByDirectory.value[path];
   try {
     const entries = await api.listFiles(workspaceId, path);
     entriesByDirectory.value = { ...entriesByDirectory.value, [path]: entries };
   } catch (error) {
     feedback.value = errorFeedback("加载文件树失败", error);
+    // 加载失败：从展开集合里把这条目录回滚掉，并把占位 entries 恢复成 undefined，
+    // 这样下次点击会重新触发加载，而非展示一个永远空着的目录。
+    if (expandedDirectories.value.has(path)) {
+      const nextExpanded = new Set(expandedDirectories.value);
+      nextExpanded.delete(path);
+      expandedDirectories.value = nextExpanded;
+    }
+    if (previousEntries === undefined) {
+      const { [path]: _drop, ...rest } = entriesByDirectory.value;
+      void _drop;
+      entriesByDirectory.value = rest;
+    }
   } finally {
-    loadingPath.value = null;
+    const cleared = new Set(loadingPath.value);
+    cleared.delete(path);
+    loadingPath.value = cleared;
   }
 }
 
@@ -918,7 +943,7 @@ async function openFile(path: string) {
 function toggleDirectory(path: string) {
   // 同一目录正在加载时再次点击，会让 path 先被加入、再被移除，表现为"点击没反应"。
   // 这里直接吞掉二次点击，让加载指示（旋转图标）有足够时间呈现给用户。
-  if (loadingPath.value === path) {
+  if (loadingPath.value.has(path)) {
     return;
   }
   const next = new Set(expandedDirectories.value);
@@ -926,7 +951,7 @@ function toggleDirectory(path: string) {
     next.delete(path);
   } else {
     next.add(path);
-    if (!entriesByDirectory.value[path]) {
+    if (entriesByDirectory.value[path] === undefined) {
       void loadDirectory(path);
     }
   }
