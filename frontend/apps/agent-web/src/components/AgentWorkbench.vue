@@ -192,7 +192,14 @@ const workspacesQuery = useQuery({
   queryFn: () => api.listWorkspaces(1, 50)
 });
 const workspaces = computed(() => workspacesQuery.data.value?.items ?? []);
-const selectedWorkspace = computed(() => workspaces.value.find((item) => item.workspaceId === selectedWorkspaceId.value) ?? workspaces.value[0]);
+// selectedWorkspace 只在 selectedWorkspaceId 有值时返回匹配的 workspace；
+// 首次加载时由 watch(managedApplications) 自动选择第一个应用的 recent workspace。
+// 切换应用后如果没有 recent workspace 则返回 undefined，让 UI 显示"请选择工作空间"空态。
+const selectedWorkspace = computed(() => {
+  const id = selectedWorkspaceId.value;
+  if (!id) return undefined;
+  return workspaces.value.find((item) => item.workspaceId === id);
+});
 const selectedWorkspaceIdRef = computed(() => selectedWorkspace.value?.workspaceId);
 const sessionSearchTrim = computed(() => sessionSearch.value.trim());
 
@@ -841,6 +848,9 @@ async function switchWorkspace(workspace: Workspace) {
 }
 
 async function handleSelectApp(appId: string) {
+  // 切换应用时先清空旧 workspace 状态，避免文件树继续展示上一个应用的 workspace 内容
+  resetWorkspaceState();
+  selectedWorkspaceId.value = undefined;
   selectedAppId.value = appId;
   try {
     const recent = await api.getRecentManagedWorkspaceForApplication(appId);

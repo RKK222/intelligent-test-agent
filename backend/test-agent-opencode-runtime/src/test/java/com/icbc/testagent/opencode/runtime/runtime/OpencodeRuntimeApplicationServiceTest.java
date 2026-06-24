@@ -42,7 +42,7 @@ class OpencodeRuntimeApplicationServiceTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void listAgentsUsesWorkspaceDirectoryAndV2AgentPath() {
+    void listAgentsUsesWorkspaceDirectoryAndAgentPath() {
         Fixture fixture = new Fixture();
         when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
                 objectMapper.valueToTree(List.of(Map.of("id", "build"))))));
@@ -51,7 +51,7 @@ class OpencodeRuntimeApplicationServiceTest {
 
         OpencodeRuntimeCommand command = fixture.captureCommand();
         assertThat(command.method()).isEqualTo("GET");
-        assertThat(command.path()).isEqualTo("/api/agent");
+        assertThat(command.path()).isEqualTo("/agent");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
         assertThat(result).isInstanceOf(List.class);
     }
@@ -68,6 +68,36 @@ class OpencodeRuntimeApplicationServiceTest {
         assertThat(command.method()).isEqualTo("GET");
         assertThat(command.path()).isEqualTo("/api/provider");
         assertThat(command.directory()).isEqualTo("/tmp/demo");
+    }
+
+    @Test
+    void listCommandsUsesWorkspaceDirectoryAndCommandPath() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(List.of(Map.of("name", "review"))))));
+
+        Object result = fixture.service.listCommands("wrk_1234567890abcdef", "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.method()).isEqualTo("GET");
+        assertThat(command.path()).isEqualTo("/command");
+        assertThat(command.directory()).isEqualTo("/tmp/demo");
+        assertThat(result).isInstanceOf(List.class);
+    }
+
+    @Test
+    void runtimeStatusUsesGlobalHealthPath() {
+        Fixture fixture = new Fixture();
+        when(fixture.facade.runtime(any())).thenReturn(Mono.just(new OpencodeRuntimeResult(
+                objectMapper.valueToTree(Map.of("healthy", true)))));
+
+        Object result = fixture.service.runtimeStatus("wrk_1234567890abcdef", "trace_1234567890abcdef");
+
+        OpencodeRuntimeCommand command = fixture.captureCommand();
+        assertThat(command.method()).isEqualTo("GET");
+        assertThat(command.path()).isEqualTo("/global/health");
+        assertThat(command.directory()).isEqualTo("/tmp/demo");
+        assertThat(result).isInstanceOf(Map.class);
     }
 
     @Test
