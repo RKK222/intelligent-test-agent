@@ -31,6 +31,7 @@
 14. 关键流程必须携带或生成 traceId，禁止用 `System.out.println` 作为正式日志。
 15. 完成前必须按 `docs/guides/self-checklist.md` 自检。
 16. 后端新增文件前必须先按 `docs/architecture/module-map.md` 和 `docs/architecture/dependency-rules.md` 分析是否已有合适工程；没有合适工程时，按业务边界新建 Maven module 后再落文件。模块 README 即包级说明。
+17. **未经用户明确要求，不得修改 `.env.local` 等环境配置文件**。此类文件包含敏感的数据库连接、API 密钥等，仅在用户明确指示时方可修改。
 
 ## 完成标准
 
