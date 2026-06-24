@@ -6,11 +6,39 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
   await gotoWorkbench(page);
 
   await expect(page.getByText("MIMO测试智能体")).toBeVisible();
-  await expect(page.getByRole("button", { name: "打开运行与终端" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "关闭运行与终端" })).toBeVisible();
   await page.getByRole("button", { name: /tests/ }).click();
   await page.getByRole("button", { name: /checkout.spec.ts/ }).click();
   await expect(page.getByText("tests/checkout.spec.ts", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: /保存/ })).toBeVisible();
+});
+
+test("switching to an application without recent workspace clears the previous file tree", async ({ page }) => {
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  await mockBackendApi(page, {
+    fileRequests,
+    applications: [
+      { appId: "app_gcms", appName: "F-GCMS", enabled: true },
+      { appId: "app_coss", appName: "F-COSS", enabled: true }
+    ],
+    recentWorkspaces: {
+      app_gcms: workspace(),
+      app_coss: null
+    }
+  });
+
+  await gotoWorkbench(page);
+
+  await expect(page.getByRole("button", { name: "F-GCMS" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /tests/ })).toBeVisible();
+
+  await page.getByRole("button", { name: "F-GCMS" }).click();
+  await page.getByRole("option", { name: /F-COSS/ }).click();
+
+  await expect(page.getByRole("button", { name: "F-COSS" })).toBeVisible();
+  await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
+  await expect(page.getByRole("button", { name: /tests/ })).toHaveCount(0);
+  expect(fileRequests).toContainEqual({ workspaceId: "wrk_1234567890abcdef", path: "" });
 });
 
 test("settings dialog manages application context and SSH key metadata", async ({ page }) => {
@@ -18,7 +46,7 @@ test("settings dialog manages application context and SSH key metadata", async (
 
   await gotoWorkbench(page);
 
-  await page.getByRole("button", { name: "打开设置" }).click();
+  await page.getByRole("button", { name: "系统设置" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   await expect(page.getByText("应用人员管理")).toBeVisible();
@@ -41,7 +69,7 @@ test("settings dialog grants application context to super admin", async ({ page 
 
   await gotoWorkbench(page);
 
-  await page.getByRole("button", { name: "打开设置" }).click();
+  await page.getByRole("button", { name: "系统设置" }).click();
   await expect(page.getByRole("button", { name: "应用与工作区" })).toBeVisible();
   await expect(page.getByText("应用人员管理")).toBeVisible();
   await expect(page.locator(".el-select").filter({ has: page.getByRole("combobox", { name: "应用选择" }) }).getByText("F-GCMS")).toBeVisible();
@@ -57,7 +85,7 @@ test("settings dialog loads application context after roles arrive while open", 
 
   await gotoWorkbench(page);
 
-  await page.getByRole("button", { name: "打开设置" }).click();
+  await page.getByRole("button", { name: "系统设置" }).click();
   await expect(page.getByText("您当前角色[无角色]无该项设置权限。")).toBeVisible();
   expect(configurationApplicationRequests).toEqual([]);
 
@@ -72,7 +100,7 @@ test("settings dialog shows permission placeholder for non app admins", async ({
 
   await gotoWorkbench(page);
 
-  await page.getByRole("button", { name: "打开设置" }).click();
+  await page.getByRole("button", { name: "系统设置" }).click();
   await expect(page.getByRole("button", { name: "应用与工作区" })).toBeVisible();
   await expect(page.getByText("您当前角色[USER]无该项设置权限。")).toBeVisible();
   expect(configurationApplicationRequests).toEqual([]);
@@ -83,7 +111,7 @@ test("settings dialog shows empty role placeholder for users without roles", asy
 
   await gotoWorkbench(page);
 
-  await page.getByRole("button", { name: "打开设置" }).click();
+  await page.getByRole("button", { name: "系统设置" }).click();
   await expect(page.getByText("您当前角色[无角色]无该项设置权限。")).toBeVisible();
 });
 
@@ -265,6 +293,8 @@ async function mockBackendApi(
     authRoles?: string[];
     authMeGate?: Promise<void>;
     configurationApplicationRequests?: string[];
+    applications?: Array<{ appId: string; appName: string; enabled: boolean }>;
+    recentWorkspaces?: Record<string, ReturnType<typeof workspace> | null>;
   } = {}
 ) {
   await page.addInitScript(() => {
@@ -278,6 +308,7 @@ async function mockBackendApi(
     await route.fulfill({ status: 200, body: "" });
   });
   const workspaceItems = [workspace()];
+  const applications = capture.applications ?? [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }];
   let sshKeys: Array<Record<string, unknown>> = [];
   await page.route("**/api/**", async (route) => {
     const url = new URL(route.request().url());
@@ -301,7 +332,7 @@ async function mockBackendApi(
         capture.configurationApplicationRequests?.push(`${method} ${url.pathname}`);
       }
       if (method === "GET" && url.pathname === "/api/internal/platform/configuration-management/applications") {
-        await route.fulfill(json([{ appId: "app_gcms", appName: "F-GCMS", enabled: true }]));
+        await route.fulfill(json(applications));
         return;
       }
       if (method === "GET" && url.pathname === "/api/internal/platform/configuration-management/applications/app_gcms/members") {
@@ -337,7 +368,7 @@ async function mockBackendApi(
     }
     if (url.pathname.startsWith("/api/internal/platform/workspace-management")) {
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/applications") {
-        await route.fulfill(json([{ appId: "app_gcms", appName: "F-GCMS", enabled: true }]));
+        await route.fulfill(json(applications));
         return;
       }
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/recent-workspace") {
@@ -345,7 +376,13 @@ async function mockBackendApi(
         return;
       }
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/applications/app_gcms/recent-workspace") {
-        await route.fulfill(json(null));
+        await route.fulfill(json(capture.recentWorkspaces?.app_gcms ?? workspace()));
+        return;
+      }
+      const recentWorkspaceMatch = url.pathname.match(/^\/api\/internal\/platform\/workspace-management\/applications\/([^/]+)\/recent-workspace$/);
+      if (method === "GET" && recentWorkspaceMatch) {
+        const appId = recentWorkspaceMatch[1] ?? "";
+        await route.fulfill(json(capture.recentWorkspaces?.[appId] ?? null));
         return;
       }
       if (method === "POST" && /^\/api\/internal\/platform\/workspace-management\/workspaces\/[^/]+\/recent$/.test(url.pathname)) {
