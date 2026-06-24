@@ -490,6 +490,46 @@ test("workspace cascade menu teleports panel and submenu above all other UI", as
   await expect(page.getByRole("menuitem", { name: /2024年6月/ }).first()).toBeVisible();
 });
 
+test("workspace cascade menu +新增版本 dialog opens with yyyy年M月 label", async ({ page }) => {
+  await mockBackendApi(page, {
+    workspaceTemplates: {
+      app_gcms: [
+        {
+          workspaceId: "awp_main",
+          workspaceName: "F-GCMS 主服务",
+          appId: "app_gcms",
+          repositoryId: "repo_1",
+          defaultBranch: "main",
+          createdAt: "2026-06-24T00:00:00Z",
+          updatedAt: "2026-06-24T00:00:00Z"
+        }
+      ]
+    },
+    workspaceVersions: { "app_gcms:awp_main": [] }
+  });
+
+  await gotoWorkbench(page);
+
+  // 打开一级菜单 → hover 模板 → 出现二级菜单
+  const trigger = page.getByRole("button", { name: /工作空间/ });
+  await trigger.click();
+  const firstItem = page.getByRole("menuitem", { name: /F-GCMS 主服务/ });
+  await firstItem.hover();
+  const submenu = page.locator(".ta-workbench-cascade-submenu");
+  await expect(submenu).toBeVisible();
+
+  // 点「+新增版本」打开 el-dialog
+  await page.getByRole("menuitem", { name: /新增版本/ }).first().click();
+  const dialog = page.locator(".el-dialog");
+  await expect(dialog).toBeVisible();
+  // 弹窗内标签明确告诉用户格式是 yyyy年M月
+  await expect(dialog.getByText("选择月份（格式 yyyy年M月）")).toBeVisible();
+  // el-date-picker 的占位符必须是 "请选择月份"（不能是 Element Plus 默认的 "yyyy-MM"）
+  await expect(dialog.locator(".el-date-editor input")).toHaveAttribute("placeholder", "请选择月份");
+  // 没选日期时确定按钮处于 disabled
+  await expect(dialog.getByRole("button", { name: "确定" })).toBeDisabled();
+});
+
 test("workspace cascade submenu shifts up when it would overflow the viewport bottom", async ({ page, isMobile }) => {
   test.skip(isMobile, "viewport math is desktop-specific in this mock");
   // 构造一个触发 li 接近视口底部的场景：模板多到面板能填满视口。
@@ -531,15 +571,12 @@ test("workspace cascade submenu shifts up when it would overflow the viewport bo
 
   const submenu = page.locator(".ta-workbench-cascade-submenu");
   await expect(submenu).toBeVisible();
-  // 等一帧让 nextTick 的"溢出修正"生效；连续等几次确保 Vue 完成 reactive 周期
+  // 等一帧让 Vue 完成 reactive 周期
   await page.waitForTimeout(200);
   const submenuBox = await submenu.boundingBox();
   const viewport = page.viewportSize();
   expect(submenuBox).not.toBeNull();
   expect(viewport).not.toBeNull();
-  // 调试输出：如果仍失败至少能看到数字
-  // eslint-disable-next-line no-console
-  console.log("[cascade-overflow] submenuBox", submenuBox, "viewport", viewport);
   // 子菜单底部必须 <= 视口高度（不能被底部遮挡）
   expect(submenuBox!.y + submenuBox!.height).toBeLessThanOrEqual(viewport!.height);
 });

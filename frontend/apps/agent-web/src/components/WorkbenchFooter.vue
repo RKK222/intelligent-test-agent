@@ -165,7 +165,7 @@ const hoveredTemplateId = ref<string | null>(null);
 const hoveredTemplateEl = ref<HTMLElement | null>(null);
 const cascadeButtonRef = ref<HTMLElement | null>(null);
 const cascadeMenuPos = ref<{ top: number; left: number } | null>(null);
-const cascadeSubmenuPos = ref<{ top: number; left: number } | null>(null);
+const cascadeSubmenuPos = ref<{ top: number; left: number; maxHeight: number } | null>(null);
 let cascadePosRafId: number | null = null;
 let cascadeSubmenuCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -190,7 +190,14 @@ function openCreateVersionDialog(template: AppWorkspaceTemplate) {
 function confirmCreateVersion() {
   const target = createVersionTarget.value;
   if (!target || !createVersionValue.value) return;
-  emit("create-version", { template: target, version: createVersionValue.value });
+  // value-format 是 "yyyy-MM"（Element Plus 不能正确解析 "yyyy年M月" 格式串），
+  // 这里把 "2026-08" 转换成 "2026年8月"，再透传给后端，让前端用户感受到的格式与
+  // 提交到后端的版本号一致。
+  const match = createVersionValue.value.match(/^(\d{4})-(\d{1,2})$/);
+  if (!match) return;
+  const year = match[1]!;
+  const month = String(parseInt(match[2]!, 10));
+  emit("create-version", { template: target, version: `${year}年${month}月` });
   createVersionOpen.value = false;
 }
 
@@ -252,9 +259,13 @@ function updateCascadeMenuPos() {
 // 计算二级菜单位置：固定在当前 hover 的模板行右侧，让版本子菜单自然越过一级菜单的边界。
 // 关键：用一级菜单面板的右边缘 + 4px 间隙作为子菜单的 left，而不是 li 的右边缘。
 // 原因：li 在面板内（面板有 padding），li 的 right < 面板的 right，按 li 算会让子菜单起点仍落在面板里。
-// 防遮挡：先按 li 的 top 算 natural top；下一帧测量子菜单实际高度，若底部超出视口则向上偏移。
-// 偏移量 = (naturalTop + height) - (viewportHeight - margin)；偏移后底部对齐视口底部减 margin，
-// 顶部不会 < margin（因为子菜单 max-height = 100vh - 24 = viewport - 2*margin，偏移后顶至少是 margin）。
+// 防遮挡策略（两段）：
+// 1) top：让子菜单垂直对齐到 li 顶部，但不低于 margin（避免子菜单顶部超出视口顶部）。
+//    当 li 靠近视口底部时，top 会被拉低到一个能放下"合理高度"的位置。
+// 2) maxHeight：保证子菜单底部不超出 viewportHeight - margin。
+//    max-height 会让内容超出时出现纵向滚动条；用户要求"不能超过底部"，max-height 满足这一点。
+//    之前用 Math.max(120, ...) 给子菜单硬保底 120px 高度，结果在视口底部时反而让子菜单超出底部，
+//    所以改成"严格按可用空间计算"，最多占满从 top 到 viewportHeight - margin 的距离。
 function updateCascadeSubmenuPos() {
   if (!hoveredTemplateEl.value) {
     cascadeSubmenuPos.value = null;
@@ -263,25 +274,21 @@ function updateCascadeSubmenuPos() {
   const liRect = hoveredTemplateEl.value.getBoundingClientRect();
   const panelEl = document.querySelector(".ta-workbench-cascade-panel") as HTMLElement | null;
   const anchorRight = panelEl ? panelEl.getBoundingClientRect().right : liRect.right;
-  const naturalTop = liRect.top - 6;
-  const left = anchorRight + 4;
-  cascadeSubmenuPos.value = { top: naturalTop, left };
-  // 渲染后再做一次"是否超出底部"的修正
-  void nextTick(() => {
-    if (!cascadeSubmenuPos.value) return;
-    const submenuEl = document.querySelector(".ta-workbench-cascade-submenu") as HTMLElement | null;
-    if (!submenuEl) return;
-    const rect = submenuEl.getBoundingClientRect();
-    const viewportHeight = window.innerHeight;
-    const margin = 12;
-    if (rect.bottom > viewportHeight - margin) {
-      const overflow = rect.bottom - (viewportHeight - margin);
-      const newTop = Math.max(margin, naturalTop - overflow);
-      if (newTop !== cascadeSubmenuPos.value.top) {
-        cascadeSubmenuPos.value = { top: newTop, left };
-      }
-    }
-  });
+  const viewportHeight = window.innerHeight;
+  const margin = 12;
+  // naturalTop：先按 li 顶部对齐；若 li 底部太靠近视口底，把 top 拉低。
+  // 用 liRect.bottom + 6 作为"再低就会出底"的边界：top = viewportHeight - margin - (估算高度)。
+  // 估算高度 = liRect.bottom - naturalTop + 兜底（这里粗略取 min(available, 200) 让顶部尽量贴近 li）。
+  const liTop = liRect.top - 6;
+  const availableBelow = viewportHeight - margin - liTop;
+  // 若可用空间不足 200px，把 top 抬到"让子菜单能放下 200px"的位置；否则保持与 li 顶部对齐。
+  const preferredHeight = 200;
+  const naturalTop =
+    availableBelow >= preferredHeight
+      ? Math.max(margin, liTop)
+      : Math.max(margin, viewportHeight - margin - preferredHeight);
+  const maxHeight = Math.max(80, viewportHeight - naturalTop - margin);
+  cascadeSubmenuPos.value = { top: naturalTop, left: anchorRight + 4, maxHeight };
 }
 
 // 菜单打开期间：滚动 / 窗口尺寸变化时同步刷新一二级菜单位置。
@@ -423,8 +430,10 @@ function onTemplateEnter(template: AppWorkspaceTemplate, event: MouseEvent) {
     // 版本未加载：通知父组件按需拉取；hover 状态保留，loading 完成后会渲染子菜单
     emit("load-versions", template.workspaceId);
   }
-  // 等 hoveredTemplateId 触发 v-if 渲染子菜单后再算坐标。
-  void nextTick(() => updateCascadeSubmenuPos());
+  // 同步计算子菜单位置（不需要 nextTick）：
+  // 位置只依赖 li 的 getBoundingClientRect() 和 viewport 高度，DOM 渲染前就能确定。
+  // max-height 由 CSS 变量动态设置，不依赖实际内容高度。
+  updateCascadeSubmenuPos();
 }
 
 function onTemplateLeave() {
@@ -593,7 +602,11 @@ onBeforeUnmount(() => {
             v-if="hoveredTemplate && cascadeSubmenuPos"
             class="ta-workbench-cascade-submenu"
             role="menu"
-            :style="{ top: `${cascadeSubmenuPos.top}px`, left: `${cascadeSubmenuPos.left}px` }"
+            :style="{
+              top: `${cascadeSubmenuPos.top}px`,
+              left: `${cascadeSubmenuPos.left}px`,
+              maxHeight: `${cascadeSubmenuPos.maxHeight}px`
+            }"
             @mouseenter="onCascadeSubmenuEnter"
             @mouseleave="onCascadeSubmenuLeave"
           >
@@ -765,8 +778,9 @@ onBeforeUnmount(() => {
   </footer>
   <!--
     「+新增版本」弹窗：使用 el-dialog 居中显示，与两级菜单 hover 状态解耦。
-    时间选择器 type="month" + format="yyyy年M月" + value-format="yyyy年M月"，
-    选完后 createVersionValue 直接是 "2024年1月" 这种字符串，原样透传给后端。
+    时间选择器 type="month" + format="yyyy-MM" + value-format="yyyy-MM"：
+    Element Plus 对 "yyyy年M月" 格式串解析有 bug，会把格式串当作占位符显示成
+    "yyyy年1月"，所以这里用标准格式显示；提交时把 "2026-08" 转换成 "2026年8月" 再透传给后端。
   -->
   <ElDialog
     v-model="createVersionOpen"
@@ -780,8 +794,8 @@ onBeforeUnmount(() => {
       <ElDatePicker
         v-model="createVersionValue"
         type="month"
-        format="yyyy年M月"
-        value-format="yyyy年M月"
+        format="yyyy-MM"
+        value-format="yyyy-MM"
         placeholder="请选择月份"
         style="width: 100%"
       />
