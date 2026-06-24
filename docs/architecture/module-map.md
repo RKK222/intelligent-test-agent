@@ -37,7 +37,7 @@ Browser
 | 模块 | 职责 |
 |---|---|
 | `test-agent-common` | 公共异常、统一响应 `ApiResponse`/`ApiErrorResponse`、TraceId、分页、校验、时间工具。 |
-| `test-agent-domain` | Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision 等纯领域模型与状态机，不依赖 Spring Web/Persistence/generated SDK。 |
+| `test-agent-domain` | Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑等纯领域模型与状态机，不依赖 Spring Web/Persistence/generated SDK。 |
 | `test-agent-observability` | traceId、结构化日志、Micrometer 指标、观测性工具。 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK，禁止手改。 |
 | `test-agent-opencode-client` | 封装 generated SDK，提供 `OpencodeClientFacade`，是业务访问 opencode 的唯一门面。 |
@@ -48,7 +48,7 @@ Browser
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、应用与代码库关联、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界（当前为空骨架）。 |
 | `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流和 trace Web 入口。 |
-| `test-agent-persistence` | 数据库、Flyway、Repository、Redis 可选适配。 |
+| `test-agent-persistence` | 数据库、Flyway、Repository、Redis 可选适配，包括 opencode 用户进程管理表与 Repository 映射。 |
 | `test-agent-event` | RunEvent、SSE、事件转换、事件回放。 |
 | `test-agent-test-support` | 测试 fixture、mock server、集成测试支撑。 |
 | `test-agent-app` | 唯一启动入口和可部署服务包，只放启动、装配、profile、migration、health 和日志。 |

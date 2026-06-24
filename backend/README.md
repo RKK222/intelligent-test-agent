@@ -20,7 +20,7 @@
 | 模块 | 作用 |
 |---|---|
 | `test-agent-common` | 公共基础模型与工具 |
-| `test-agent-domain` | 纯领域模型与状态机 |
+| `test-agent-domain` | 纯领域模型与状态机，包括 opencode 用户进程管理拓扑模型 |
 | `test-agent-observability` | 日志、trace、指标等观测性封装 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK |
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
@@ -31,7 +31,7 @@
 | `test-agent-configuration-management` | 应用、应用成员、代码库关联、应用工作空间和个人 SSH key 配置管理 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界，目前为空骨架 |
 | `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId 和统一异常入口 |
-| `test-agent-persistence` | 持久化、迁移、Redis/PostgreSQL 访问 |
+| `test-agent-persistence` | 持久化、迁移、Redis/PostgreSQL 访问，包括 opencode 用户进程管理表映射 |
 | `test-agent-event` | RunEvent、SSE、事件转换与回放 |
 | `test-agent-test-support` | 测试支撑、fixture、mock server |
 | `test-agent-app` | 唯一启动入口和唯一可部署后端服务包，不承载业务逻辑 |

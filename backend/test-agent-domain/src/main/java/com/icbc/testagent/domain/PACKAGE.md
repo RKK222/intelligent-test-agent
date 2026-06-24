@@ -2,7 +2,7 @@
 
 ## 职责
 
-纯领域模型包，表达 Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision 等核心业务概念和状态规则。
+纯领域模型包，表达 Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑等核心业务概念和状态规则。
 
 ## 不负责
 
@@ -21,6 +21,7 @@
 - `event.RunEvent`、`event.RunEventDraft`、`event.RunEventId`、`event.RunEventType`、`event.RunEventRepository`：平台运行事件模型和 append-only 端口；RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed` 等运行态事件。
 - `node.ExecutionNode`、`node.ExecutionNodeId`、`node.ExecutionNodeStatus`、`node.ExecutionNodeRepository`：执行节点模型和查询端口。
 - `routing.RoutingDecision`、`routing.RoutingReason`、`routing.ExecutionNodeRouter`、`routing.RoutingDecisionRepository`：路由决策值对象、纯路由策略和持久化端口。
+- `opencodeprocess.*`：Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程和用户绑定模型；`OpencodeProcessManagementRepository` 作为持久化端口。
 - 后续可新增领域命令、领域服务接口和更多状态规则。
 
 ## 允许依赖
@@ -50,7 +51,7 @@
 ## 测试位置
 
 - domain 模块单元测试。
-- Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision 等值对象约束必须覆盖成功和失败场景。
+- Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑等值对象约束必须覆盖成功和失败场景。
 - 状态机、路由决策、通用 agent binding 和内部 opencode session/node 兼容映射必须覆盖成功和冲突场景。
 - Repository 端口不直接测试数据库，实现测试放在 persistence 模块。
 
