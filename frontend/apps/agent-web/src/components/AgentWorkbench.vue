@@ -906,6 +906,11 @@ async function openFile(path: string) {
 }
 
 function toggleDirectory(path: string) {
+  // 同一目录正在加载时再次点击，会让 path 先被加入、再被移除，表现为"点击没反应"。
+  // 这里直接吞掉二次点击，让加载指示（旋转图标）有足够时间呈现给用户。
+  if (loadingPath.value === path) {
+    return;
+  }
   const next = new Set(expandedDirectories.value);
   if (next.has(path)) {
     next.delete(path);
