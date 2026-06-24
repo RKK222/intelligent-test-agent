@@ -234,6 +234,27 @@
 - `application_workspaces.branch` 继续保留作为模板创建和目录选择兼容字段；版本实际分支以 `application_workspace_versions.branch` 为准。
 - 物理路径默认由业务配置 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT` 决定，数据库只记录最终路径，不负责创建或清理目录。
 
+## 用户 → 应用 → 工作空间 默认进入行为
+
+`user_application_workspace_preferences` 与 `user_global_workspace_preferences` 是前端"用户进入平台时默认工作空间"的持久化依据：
+
+- `user_application_workspace_preferences(user_id, app_id)` 唯一键：前端 `GET /applications/{appId}/recent-workspace` 通过该键查询用户在指定应用下的最近工作空间。
+- `user_global_workspace_preferences(user_id)` 唯一键：作为跨应用维度的兜底，避免用户切换应用时丢失上下文。
+- 每次用户切换工作空间（`POST /workspaces/{workspaceId}/recent`）由后端 `ManagedWorkspaceApplicationService.markRecent` 同步写入两表，互不冲突。
+
+首次进入（无 recent）回退策略：
+
+- 前端 `handleSelectApp` → `pickDefaultWorkspaceForApp`：
+  1. 读取 `user_application_workspace_preferences`；命中即用。
+  2. 未命中：调 `listWorkspaceTemplates` + `listWorkspaceVersions` 拿到第一个模板的第一个版本的 `runtimeWorkspace`，再调 `POST /workspaces/{workspaceId}/recent` 写入偏好。
+  3. 应用下没有任何模板/版本：保持空态，由用户手动选择本机目录。
+- 兜底命中会立即持久化偏好，保证"第二次进入直接命中第 1 步"。
+
+V10 种子数据对 F-COSS 的影响：
+
+- `V10__seed_fcoss_application.sql` 同步写入 `user_application_workspace_preferences(user='888888888', app='app_fcoss', workspace='wrk_fcoss_20260701')`，本地开发用户首次进入 F-COSS 直接落到最新版本。
+- 删除/重置后只要重新执行 `V10`（幂等）即可恢复默认状态；偏好表本身的幂等写入由 `INSERT ... ON CONFLICT DO UPDATE` 在 `ManagedWorkspaceRepository.savePreference` 内保证。
+
 ## V10 F-COSS 应用开发种子数据
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V10__seed_fcoss_application.sql` 在本地开发环境提供开箱即用的 F-COSS 应用数据，让工作台左下角的两级菜单（应用→工作空间→版本）首次进入就能看到内容：

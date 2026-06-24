@@ -525,6 +525,19 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 - 点击版本后调用 `GET /workspaces/{workspaceId}` 拉取对应的运行态 `Workspace`，再调用 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好，并触发工作台切换。
 - 当前版本匹配规则：优先按 `runtimeWorkspace.workspaceId` 精确匹配，其次按 `workspaceRootPath` 匹配 `selectedWorkspace.rootPath`。
 
+应用级"默认工作空间"解析规则（前端 `handleSelectApp` + `pickDefaultWorkspaceForApp`）：
+
+1. 调用 `GET /applications/{appId}/recent-workspace` 读取 `user_application_workspace_preferences` 中 `(user_id, app_id)` 对应的最近使用运行态 Workspace。
+2. 命中 recent：调用 `POST /workspaces/{workspaceId}/recent` 刷新时间戳（幂等），再切工作台。
+3. 未命中 recent：调用 `GET /applications/{appId}/workspace-templates` 拉取应用下的工作空间模板，取第一个模板；再调用 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 拉取该模板下的版本，取第一个版本的 `runtimeWorkspace`。
+4. 兜底命中：调用 `POST /workspaces/{workspaceId}/recent` 把该 Workspace 写入 `(user_id, app_id)` 与 `(user_id, NULL)` 两条偏好，下次进入直接命中第 2 步。
+5. 应用下没有任何工作空间模板/版本时保持空态，由用户手动选择本机目录。
+
+`POST /workspaces/{workspaceId}/recent` 兼容说明：
+
+- 后端 `markRecentWorkspace` 同时写入 `user_global_workspace_preferences`（`app_id = NULL`）和 `user_application_workspace_preferences`（`app_id = 解析到的 appId`），对应"全局最近"和"应用内最近"两套维度。
+- 工作区不属于任何应用（即 `appIdForRuntimeWorkspace` 既不匹配应用版本也不匹配个人工作区）时返回 `NOT_FOUND`；前端 `applyManagedWorkspace` 静默吞掉该错误，切换流程不受影响。
+
 ### Session API
 
 | 方法 | 路径 | 用途 |

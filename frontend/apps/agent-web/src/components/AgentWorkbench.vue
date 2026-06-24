@@ -989,22 +989,48 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
   }
   try {
     const workspace = await api.getWorkspace(runtimeWorkspaceId);
-    try {
-      await api.markRecentManagedWorkspace(workspace.workspaceId);
-    } catch (error) {
-      if (error instanceof BackendApiError && error.code === "FORBIDDEN") {
-        throw error;
-      }
-    }
-    await switchWorkspace(workspace);
-    feedback.value = {
-      kind: "info",
-      title: "已切换应用版本",
-      description: `${payload.template.workspaceName} · ${payload.version.version}`
-    };
+    await applyManagedWorkspace(workspace, {
+      successTitle: "已切换应用版本",
+      successDescription: `${payload.template.workspaceName} · ${payload.version.version}`
+    });
   } catch (error) {
     feedback.value = errorFeedback("切换应用版本失败", error);
   }
+}
+
+// 统一"记录最近使用 + 切到运行态 Workspace"流程：先调 markRecentManagedWorkspace 让 user→app→workspace
+// 持久化到 user_application_workspace_preferences / user_global_workspace_preferences，再切工作台。
+// 后端在校验通过后会返回最新的 WorkspaceRuntime，前端无需再单独 getWorkspace。
+// 非托管工作区（不属于任何应用）的 markRecent 会抛 NOT_FOUND，忽略该错误即可，不阻塞切换。
+async function applyManagedWorkspace(workspace: Workspace, feedbackDetail?: { successTitle: string; successDescription: string }) {
+  try {
+    await api.markRecentManagedWorkspace(workspace.workspaceId);
+  } catch (error) {
+    if (error instanceof BackendApiError && error.code === "FORBIDDEN") {
+      throw error;
+    }
+    // NOT_FOUND：工作区不属于任何应用（通常是手动目录注册出来的个人空间），不写入偏好。
+    // 其他错误：网络/服务异常，吞掉但仍尝试切工作区，避免偏好写失败导致整个流程中断。
+  }
+  await switchWorkspace(workspace);
+  if (feedbackDetail) {
+    feedback.value = { kind: "info", title: feedbackDetail.successTitle, description: feedbackDetail.successDescription };
+  }
+}
+
+// 查询指定应用下的"默认进入工作空间"：优先 recent 偏好，否则回退到首模板的首版本。
+// 返回 { workspace, isFallback }：isFallback=true 表示走了"首模板首版本"的兜底，false 表示命中 recent。
+// 两种情况最终都会通过 applyManagedWorkspace 写入 recent，下次进入直接命中该条偏好。
+async function pickDefaultWorkspaceForApp(appId: string): Promise<{ workspace: Workspace; isFallback: boolean } | null> {
+  const recent = await api.getRecentManagedWorkspaceForApplication(appId);
+  if (recent) return { workspace: recent, isFallback: false };
+  const templates = await api.listWorkspaceTemplates(appId);
+  const firstTemplate = templates[0];
+  if (!firstTemplate) return null;
+  const versions = await api.listWorkspaceVersions(appId, firstTemplate.workspaceId);
+  const firstVersion = versions[0];
+  if (!firstVersion?.runtimeWorkspace) return null;
+  return { workspace: firstVersion.runtimeWorkspace, isFallback: true };
 }
 
 // WorkbenchFooter / FigmaFileExplorer 上两级菜单展开模板时调用，触发版本懒加载。
@@ -1018,12 +1044,18 @@ async function handleSelectApp(appId: string) {
   selectedWorkspaceId.value = undefined;
   selectedAppId.value = appId;
   try {
-    const recent = await api.getRecentManagedWorkspaceForApplication(appId);
-    if (recent) {
-      await switchWorkspace(recent);
+    // 解析应用下的"默认工作空间"：
+    //   1) 优先使用 user_application_workspace_preferences 中的 recent；
+    //   2) 没有 recent 时回退到首模板的首版本，并把这条记录写入 recent，下次进入即可命中。
+    // 两种情况都通过 applyManagedWorkspace 完成"写偏好 + 切工作区"两步，保证状态与持久化一致。
+    const pick = await pickDefaultWorkspaceForApp(appId);
+    if (pick) {
+      await applyManagedWorkspace(pick.workspace, pick.isFallback
+        ? { successTitle: "已切换到首个工作空间", successDescription: pick.workspace.name }
+        : { successTitle: "已切换应用", successDescription: pick.workspace.name });
       return;
     }
-    // 新应用没有 recent workspace，保持 selectedWorkspace 为空，UI 显示空态。
+    // 应用下没有任何工作空间模板/版本，保持空态由用户手动选择。
     feedback.value = { kind: "info", title: "已切换应用", description: "请选择工作空间" };
   } catch (error) {
     feedback.value = errorFeedback("切换应用失败", error);
