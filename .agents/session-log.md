@@ -2,6 +2,16 @@
 
 ## Entries
 
+### 2026-06-24 - Require Session Log In Project Rules
+
+- Why: The session log needed to be treated as a first-class tracked artifact, not an ad hoc local note, so remote commits carry the handoff context too.
+- What: Updated `AGENTS.md`, `docs/guides/ai-workflow.md`, and `docs/guides/self-checklist.md` to require `.agents/session-log.md` updates and to describe how it is included in commits.
+- How: Kept the change in the project entry docs instead of business code, and reused the existing Why/What/How/Result log shape so future sessions stay consistent.
+- Result: Future code-change batches should leave behind a committed session log that explains the change for other developers and agents, including remote-push ready workflows.
+- Pitfalls: None.
+- Verification: `git diff --check` not run yet.
+- Next: Run a light diff sanity check, then commit the doc updates together with this log entry.
+
 ### 2026-06-24 - Add Code Update Handoff Skill
 
 - Why: Code-change batches in this repo needed a shared handoff rule so future agents can see the real status and avoid re-deriving context.

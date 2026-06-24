@@ -32,6 +32,7 @@
 15. 完成前必须按 `docs/guides/self-checklist.md` 自检。
 16. 后端新增文件前必须先按 `docs/architecture/module-map.md` 和 `docs/architecture/dependency-rules.md` 分析是否已有合适工程；没有合适工程时，按业务边界新建 Maven module 后再落文件。模块 README 即包级说明。
 17. **未经用户明确要求，不得修改 `.env.local` 等环境配置文件**。此类文件包含敏感的数据库连接、API 密钥等，仅在用户明确指示时方可修改。
+18. 每次产生持久价值的修改结束前，必须更新 `.agents/session-log.md`，用 `Why / What / How / Result` 说明本次变更；该文件属于仓库内容，应随本次 git 提交一起保留，必要时可与其他改动一并推送远程。
 
 ## 完成标准
 
@@ -42,4 +43,5 @@
 - 哪些文档已同步更新。
 - 是否涉及 API、事件、数据库、性能、安全或兼容性。
 - 是否存在未完成事项或风险。
+- 是否已更新 `.agents/session-log.md` 并纳入本次提交。
 - 不要随意新建git分支，除非我明确的告诉你需要新建。完成后必须自动提交 git 且 commit 信息用中文。
