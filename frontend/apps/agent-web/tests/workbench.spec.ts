@@ -358,12 +358,27 @@ test("branch dropdown exposes a two-level menu grouped by source", async ({ page
 
   // 点击按钮打开一级菜单：三个分组都应出现
   await page.getByRole("button", { name: "feature" }).click();
-  await expect(page.getByRole("menuitem", { name: "当前分支" })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: "默认分支" })).toBeVisible();
-  await expect(page.getByRole("menuitem", { name: "最近使用" })).toBeVisible();
+  const currentItem = page.getByRole("menuitem", { name: "当前分支" });
+  const defaultItem = page.getByRole("menuitem", { name: "默认分支" });
+  const recentItem = page.getByRole("menuitem", { name: "最近使用" });
+  await expect(currentItem).toBeVisible();
+  await expect(defaultItem).toBeVisible();
+  await expect(recentItem).toBeVisible();
+
+  // 验证菜单面板 Teleport 到 body、position:fixed、有非零大小（避免被父级 overflow:hidden 裁切）
+  const panel = page.locator(".ta-workbench-branch-panel");
+  await expect(panel).toBeVisible();
+  const panelBox = await panel.boundingBox();
+  expect(panelBox).not.toBeNull();
+  expect(panelBox!.width).toBeGreaterThan(0);
+  expect(panelBox!.height).toBeGreaterThan(0);
+  // 面板 y 应小于按钮 y（菜单在按钮正上方）；Playwright boundingBox 用 y 表示 top
+  const buttonBox = await page.getByRole("button", { name: "feature" }).boundingBox();
+  expect(buttonBox).not.toBeNull();
+  expect(panelBox!.y).toBeLessThan(buttonBox!.y);
 
   // hover 默认分支 → 二级菜单展示 main 分支名
-  await page.getByRole("menuitem", { name: "默认分支" }).hover();
+  await defaultItem.hover();
   await expect(page.getByRole("menuitem", { name: /^main/ }).first()).toBeVisible();
 
   // 点击 main → 触发 change-branch 事件

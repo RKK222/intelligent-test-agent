@@ -158,9 +158,12 @@ const menuRootRef = ref<HTMLElement | null>(null);
 
 // ===== 分支两级菜单弹出状态 =====
 // branchMenuOpen: 一级菜单（分组）开关；hoveredBranchGroup: 当前悬停的分组，控制二级菜单（分支名）显隐。
+// branchButtonRef: 触发按钮的 DOM 引用，用于 Teleport 后定位菜单的 fixed 坐标。
+// branchMenuPos: 计算后的菜单坐标，{top, left}，避免被父级 dockview 面板 overflow:hidden 裁切。
 const branchMenuOpen = ref(false);
 const hoveredBranchGroup = ref<BranchGroupKey | null>(null);
-const branchMenuRef = ref<HTMLElement | null>(null);
+const branchButtonRef = ref<HTMLElement | null>(null);
+const branchMenuPos = ref<{ top: number; left: number } | null>(null);
 let branchSubmenuCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
 function clearBranchSubmenuCloseTimer() {
@@ -168,6 +171,29 @@ function clearBranchSubmenuCloseTimer() {
     clearTimeout(branchSubmenuCloseTimer);
     branchSubmenuCloseTimer = null;
   }
+}
+
+// 计算并刷新菜单坐标：基于触发按钮的 getBoundingClientRect()，定位到按钮正上方。
+// 使用 fixed 定位 + Teleport 把菜单挂到 body，避开 dockview 面板 overflow:hidden / 内部 stacking context 的裁切。
+function updateBranchMenuPos() {
+  if (!branchButtonRef.value) return;
+  const rect = branchButtonRef.value.getBoundingClientRect();
+  branchMenuPos.value = {
+    top: rect.top - 6, // 6px 间隙
+    left: rect.left
+  };
+}
+
+// 菜单打开期间：滚动 / 窗口尺寸变化时同步刷新坐标，避免菜单停留在原位置与按钮错位。
+// 关闭时清掉监听，避免无谓的全局事件。
+let branchPosRafId: number | null = null;
+function onBranchPosScrollOrResize() {
+  if (!branchMenuOpen.value) return;
+  if (branchPosRafId !== null) cancelAnimationFrame(branchPosRafId);
+  branchPosRafId = requestAnimationFrame(() => {
+    updateBranchMenuPos();
+    branchPosRafId = null;
+  });
 }
 
 const selectedTemplate = computed(() =>
@@ -209,9 +235,14 @@ function onDocumentClick(event: MouseEvent) {
       closeMenu();
     }
   }
+  // Teleport 到 body 后菜单不在触发按钮 DOM 子树里，contains 失效；
+  // 直接判断 target 是否在菜单内（用 closest 找 .ta-workbench-branch-panel）或按钮内。
   if (branchMenuOpen.value) {
     const target = event.target as Node | null;
-    if (branchMenuRef.value && target && !branchMenuRef.value.contains(target)) {
+    if (!target) return;
+    const insideMenu = target instanceof Element ? target.closest(".ta-workbench-branch-panel") : null;
+    const insideButton = target instanceof Element ? target.closest(".ta-workbench-branch-cascade") : null;
+    if (!insideMenu && !insideButton) {
       closeBranchMenu();
     }
   }
@@ -272,7 +303,11 @@ function toggleBranchMenu() {
   if (branchMenuOpen.value) {
     closeBranchMenu();
   } else {
+    // 打开前先计算坐标，fixed 定位在 Teleport 之后才有意义。
+    updateBranchMenuPos();
     branchMenuOpen.value = true;
+    window.addEventListener("scroll", onBranchPosScrollOrResize, true);
+    window.addEventListener("resize", onBranchPosScrollOrResize);
   }
 }
 
@@ -280,6 +315,12 @@ function closeBranchMenu() {
   branchMenuOpen.value = false;
   hoveredBranchGroup.value = null;
   clearBranchSubmenuCloseTimer();
+  window.removeEventListener("scroll", onBranchPosScrollOrResize, true);
+  window.removeEventListener("resize", onBranchPosScrollOrResize);
+  if (branchPosRafId !== null) {
+    cancelAnimationFrame(branchPosRafId);
+    branchPosRafId = null;
+  }
 }
 
 function onBranchGroupEnter(groupKey: BranchGroupKey) {
@@ -308,6 +349,13 @@ function onBranchClick(branchName: string) {
 
 onBeforeUnmount(() => {
   clearBranchSubmenuCloseTimer();
+  // 卸载时如果菜单还开着，连带清掉全局事件监听
+  window.removeEventListener("scroll", onBranchPosScrollOrResize, true);
+  window.removeEventListener("resize", onBranchPosScrollOrResize);
+  if (branchPosRafId !== null) {
+    cancelAnimationFrame(branchPosRafId);
+    branchPosRafId = null;
+  }
 });
 </script>
 
@@ -401,14 +449,15 @@ onBeforeUnmount(() => {
         二级菜单展示该组下的分支名。
         数据从 props.branch / defaultBranch / recentBranch / branches 派生；空分组不渲染。
         hover 一级菜单项展开二级菜单，点击分支名后 emit('change-branch') 由父组件持久化偏好。
+        菜单用 <Teleport to="body"> + position:fixed 挂到 body，避开 dockview 面板 overflow:hidden 裁切。
       -->
       <div
         v-if="hasBranchMenu"
-        ref="branchMenuRef"
         class="ta-workbench-branch-cascade"
         :class="{ 'is-open': branchMenuOpen }"
       >
         <button
+          ref="branchButtonRef"
           type="button"
           class="ta-workbench-footer-branch"
           :title="`当前分支：${branch ?? '—'}`"
@@ -419,56 +468,64 @@ onBeforeUnmount(() => {
           <GitBranch class="ta-workbench-footer-icon" />
           <span class="ta-workbench-footer-branch-label">{{ branch ?? "选择分支" }}</span>
         </button>
-        <div v-if="branchMenuOpen" class="ta-workbench-branch-panel" role="menu" @click.stop>
-          <ul class="ta-workbench-branch-list" role="none">
-            <li
-              v-for="group in branchGroups"
-              :key="group.key"
-              :class="[
-                'ta-workbench-branch-group',
-                hoveredBranchGroup === group.key && 'is-hovered'
-              ]"
-              role="menuitem"
-              :aria-haspopup="true"
-              @mouseenter="onBranchGroupEnter(group.key)"
-              @mouseleave="onBranchGroupLeave"
-            >
-              <div class="ta-workbench-branch-group-main">
-                <span class="ta-workbench-branch-group-label">{{ group.label }}</span>
-                <span class="ta-workbench-branch-group-count">{{ group.items.length }}</span>
-              </div>
-              <span class="ta-workbench-branch-group-arrow" aria-hidden="true">›</span>
-              <!--
-                二级菜单：仅在 hover 时渲染；通过 v-if 控制 DOM 数量。
-                子菜单挂载在父级 li 上，hover 从一级菜单跨到子菜单时不需要补额外的 mousemove 逻辑。
-              -->
-              <div
-                v-if="hoveredBranchGroup === group.key"
-                class="ta-workbench-branch-submenu"
-                role="menu"
-                @mouseenter="onBranchSubmenuEnter"
+        <Teleport to="body">
+          <div
+            v-if="branchMenuOpen && branchMenuPos"
+            class="ta-workbench-branch-panel"
+            role="menu"
+            :style="{ top: `${branchMenuPos.top}px`, left: `${branchMenuPos.left}px` }"
+            @click.stop
+          >
+            <ul class="ta-workbench-branch-list" role="none">
+              <li
+                v-for="group in branchGroups"
+                :key="group.key"
+                :class="[
+                  'ta-workbench-branch-group',
+                  hoveredBranchGroup === group.key && 'is-hovered'
+                ]"
+                role="menuitem"
+                :aria-haspopup="true"
+                @mouseenter="onBranchGroupEnter(group.key)"
+                @mouseleave="onBranchGroupLeave"
               >
-                <ul class="ta-workbench-branch-submenu-list" role="none">
-                  <li
-                    v-for="item in group.items"
-                    :key="`${group.key}:${item.name}`"
-                    :class="[
-                      'ta-workbench-branch-submenu-item',
-                      (item.name === branch || item.isCurrent) && 'is-current',
-                      (item.name === recentBranch && group.key !== 'recent') && 'is-recent'
-                    ]"
-                    role="menuitem"
-                    @click="onBranchClick(item.name)"
-                  >
-                    <span class="ta-workbench-branch-submenu-item-name">{{ item.name }}</span>
-                    <span v-if="item.name === branch || item.isCurrent" class="ta-workbench-branch-submenu-item-tag">当前</span>
-                    <span v-else-if="item.name === recentBranch && group.key !== 'recent'" class="ta-workbench-branch-submenu-item-tag is-recent">最近</span>
-                  </li>
-                </ul>
-              </div>
-            </li>
-          </ul>
-        </div>
+                <div class="ta-workbench-branch-group-main">
+                  <span class="ta-workbench-branch-group-label">{{ group.label }}</span>
+                  <span class="ta-workbench-branch-group-count">{{ group.items.length }}</span>
+                </div>
+                <span class="ta-workbench-branch-group-arrow" aria-hidden="true">›</span>
+                <!--
+                  二级菜单：仅在 hover 时渲染；通过 v-if 控制 DOM 数量。
+                  子菜单挂载在父级 li 上，hover 从一级菜单跨到子菜单时不需要补额外的 mousemove 逻辑。
+                -->
+                <div
+                  v-if="hoveredBranchGroup === group.key"
+                  class="ta-workbench-branch-submenu"
+                  role="menu"
+                  @mouseenter="onBranchSubmenuEnter"
+                >
+                  <ul class="ta-workbench-branch-submenu-list" role="none">
+                    <li
+                      v-for="item in group.items"
+                      :key="`${group.key}:${item.name}`"
+                      :class="[
+                        'ta-workbench-branch-submenu-item',
+                        (item.name === branch || item.isCurrent) && 'is-current',
+                        (item.name === recentBranch && group.key !== 'recent') && 'is-recent'
+                      ]"
+                      role="menuitem"
+                      @click="onBranchClick(item.name)"
+                    >
+                      <span class="ta-workbench-branch-submenu-item-name">{{ item.name }}</span>
+                      <span v-if="item.name === branch || item.isCurrent" class="ta-workbench-branch-submenu-item-tag">当前</span>
+                      <span v-else-if="item.name === recentBranch && group.key !== 'recent'" class="ta-workbench-branch-submenu-item-tag is-recent">最近</span>
+                    </li>
+                  </ul>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </Teleport>
       </div>
       <span v-else class="ta-workbench-footer-branch is-disabled">
         <GitBranch class="ta-workbench-footer-icon" />
@@ -853,18 +910,25 @@ onBeforeUnmount(() => {
   border-color: #b5b5b5;
 }
 
+/*
+  菜单面板：使用 position:fixed + <Teleport to="body"> 挂到 body 末尾，
+  避免被父级 dockview 面板的 overflow:hidden 或内部 stacking context 裁掉；
+  top/left 通过 updateBranchMenuPos() 在打开前基于按钮 getBoundingClientRect() 计算。
+  transform: translateY(-100%) 让菜单底边对齐按钮上沿（按钮正上方）。
+*/
 .ta-workbench-branch-panel {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 6px);
+  position: fixed;
   min-width: 200px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
   background: #fff;
   border: 1px solid #e4e4e7;
   border-radius: 8px;
   padding: 6px;
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
-  z-index: 60;
+  z-index: 9999;
   font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  transform: translateY(-100%);
 }
 
 .ta-workbench-branch-list {
