@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onScopeDispose, ref, shallowRef, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
 import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api";
 import { DiffViewer } from "@test-agent/diff-viewer";
-import { CodeEditor, type EditorSelectionContext } from "@test-agent/editor";
+import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents } from "@test-agent/event-stream-client";
 import { Code2, MessageSquare } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
@@ -117,6 +117,59 @@ const directoryPickerData = shallowRef<WorkspaceDirectoryList | null>(null);
 const liveTrack = ref(false);
 // 已跟随过的 tool partId，避免同一工具调用重复读盘刷新。
 const liveFollowedParts = ref<Set<string>>(new Set());
+// Markdown 预览开关：状态由 FigmaEditorArea tab 表头按钮双向绑定到 CodeEditor 的 showPreview。
+// 切换非 Markdown 文件时由 watch 主动复位，避免下次切回 md 时残留之前的开启状态。
+const markdownPreview = ref(false);
+
+// Ctrl/Cmd+S 全局快捷键：在编辑器打开文件时拦截浏览器默认的「保存网页」行为，
+// 转而触发右下角保存按钮同款逻辑（saveMutation.mutate）。
+// 条件与保存按钮禁用态完全一致：必须有 activeTab、非 livePreview、文件存在未保存改动、
+// 非只读、未在保存中。即使条件不满足也要 preventDefault，避免在 IDE 类应用里出现
+// 「按 Ctrl+S 弹网页另存为」的尴尬体验。
+function tryHandleSaveShortcut(event: KeyboardEvent) {
+  // 同时覆盖 Windows/Linux 的 Ctrl 和 macOS 的 Cmd
+  const isSaveCombo = (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && (event.key === "s" || event.key === "S");
+  if (!isSaveCombo) return;
+  const tab = activeTab.value;
+  // 没有活动 tab（用户还在聊天/文件树）也吞掉事件，避免浏览器另存为
+  if (!tab) {
+    event.preventDefault();
+    return;
+  }
+  const dirty = tab.content !== tab.savedContent;
+  const canSave = !tab.livePreview && !tab.readonly && !saveMutation.isPending.value && dirty;
+  // 始终 preventDefault：即使不可保存也吞掉浏览器默认行为
+  event.preventDefault();
+  if (canSave) {
+    saveMutation.mutate(tab);
+  }
+}
+
+function onWindowKeydown(event: KeyboardEvent) {
+  const target = event.target as HTMLElement | null;
+  if (target) {
+    // Monaco 编辑器自带 addCommand 注册了 Ctrl/Cmd+S 快捷键，
+    // 这里识别 Monaco 容器后跳过 window 层处理，避免与编辑器命令重复触发。
+    if (target.closest && target.closest(".monaco-editor")) {
+      return;
+    }
+    const tag = target.tagName;
+    const isEditable = target.isContentEditable;
+    // 普通输入控件（composer、设置页输入、搜索框等）不拦截，
+    // 保留浏览器/控件自身的快捷键和文本编辑体验。
+    if (isEditable || tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
+      return;
+    }
+  }
+  tryHandleSaveShortcut(event);
+}
+
+onMounted(() => {
+  window.addEventListener("keydown", onWindowKeydown);
+});
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onWindowKeydown);
+});
 
 // Chat runtime：单一 reducer 维护，dispatch 闭包更新
 const chatState = ref(createInitialAgentChatRuntimeState(initialMessages));
@@ -298,6 +351,12 @@ watch(selectedWorkspace, (sw) => {
 });
 watch(activePath, () => {
   editorSelection.value = undefined;
+  // 切换到非 Markdown 文件时强制关闭预览：CodeEditor 的预览区在非 md 文件下不会渲染，
+  // 但保留 true 会让后续切回 md 时立刻弹出预览，违背"默认不预览"的心智。
+  const path = activePath.value;
+  if (!path || languageFromPath(path) !== "markdown") {
+    markdownPreview.value = false;
+  }
 });
 watch(selectedWorkspaceIdRef, (id) => {
   if (id) {
@@ -721,6 +780,7 @@ function resetWorkspaceState() {
   selectedAgent.value = "";
   selectedProvider.value = "";
   selectedModel.value = "";
+  markdownPreview.value = false;
   // 切工作区时同步清掉任务消耗计时与上一轮终态展示，避免旧 Run 的 token/duration 残留。
   chatStartedAt.value = null;
   accumulatedTokens.value = 0;
@@ -1386,11 +1446,13 @@ function onUseHunkContext(part: Extract<PromptPart, { type: "file" }>) {
           :dirty="!!activeTab && !activeTab.livePreview && activeTab.content !== activeTab.savedContent"
           :readonly="!!activeTab?.readonly"
           :saving="saveMutation.isPending.value"
+          :markdown-preview="markdownPreview"
           @activate="(path: string) => workbench.setActivePath(path)"
           @close="(path: string) => workbench.closeTab(path)"
           @editor-action="() => {}"
           @change-branch="handleChangeBranch"
           @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
+          @update:markdown-preview="(value: boolean) => (markdownPreview = value)"
         >
           <CodeEditor
             :path="activeTab?.path"
@@ -1399,6 +1461,7 @@ function onUseHunkContext(part: Extract<PromptPart, { type: "file" }>) {
             :readonly="activeTab?.readonly"
             :saving="saveMutation.isPending.value"
             :feedback="feedback"
+            :show-preview="markdownPreview"
             @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
             @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
             @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"

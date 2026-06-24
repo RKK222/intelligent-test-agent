@@ -1,27 +1,35 @@
 <script setup lang="ts">
 import tabCloseUrl from "../assets/figma/tab-close.svg";
 import fileIconUrl from "../assets/figma/file-icon.svg";
+import { computed } from "vue";
+import { Eye, EyeOff } from "lucide-vue-next";
 import type { EditorTab as WorkbenchTab } from "@test-agent/workbench-shell";
+import { languageFromPath } from "@test-agent/editor";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 
 type VcsBranch = { name: string; isCurrent?: boolean };
 
-defineProps<{
-  tabs: WorkbenchTab[];
-  activePath?: string;
-  breadcrumbPath?: string;
-  /** VCS 分支列表（来自 /vcs/status） */
-  branches?: VcsBranch[];
-  /** 当前分支名 */
-  currentBranch?: string;
-  /** 写入路径（编辑器模式显示） */
-  writePath?: string;
-  /** 最近一次更新时间（秒或 ISO 字符串） */
-  updatedAt?: string | number;
-  dirty?: boolean;
-  readonly?: boolean;
-  saving?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    tabs: WorkbenchTab[];
+    activePath?: string;
+    breadcrumbPath?: string;
+    /** VCS 分支列表（来自 /vcs/status） */
+    branches?: VcsBranch[];
+    /** 当前分支名 */
+    currentBranch?: string;
+    /** 写入路径（编辑器模式显示） */
+    writePath?: string;
+    /** 最近一次更新时间（秒或 ISO 字符串） */
+    updatedAt?: string | number;
+    dirty?: boolean;
+    readonly?: boolean;
+    saving?: boolean;
+    /** Markdown 预览开关（受控），由父级双向绑定到 CodeEditor 的 showPreview。 */
+    markdownPreview?: boolean;
+  }>(),
+  { markdownPreview: false }
+);
 
 const emit = defineEmits<{
   activate: [path: string];
@@ -29,7 +37,21 @@ const emit = defineEmits<{
   editorAction: [];
   changeBranch: [branch: string];
   save: [];
+  "update:markdownPreview": [enabled: boolean];
 }>();
+
+// 当前激活 tab 是否是 Markdown 文件：是的话才在 tab 表头最右侧显示预览开关。
+// 使用与 CodeEditor 完全相同的判定规则（@test-agent/editor 的 languageFromPath），
+// 避免出现"按钮可见但点击后编辑器无反应"的不一致。
+const activeIsMarkdown = computed(() => {
+  if (!props.activePath) return false;
+  return languageFromPath(props.activePath) === "markdown";
+});
+
+function toggleMarkdownPreview() {
+  if (!activeIsMarkdown.value) return;
+  emit("update:markdownPreview", !props.markdownPreview);
+}
 </script>
 
 <template>
@@ -56,6 +78,24 @@ const emit = defineEmits<{
           </button>
         </div>
       </div>
+      <!--
+        Markdown 预览开关：放在 tab 行最右侧（margin-left: auto 推右）。
+        只在当前激活 tab 是 Markdown 文件时显示，避免其他文件类型出现无效按钮。
+        状态完全受控于父级：与 CodeEditor 的 showPreview 双向绑定。
+      -->
+      <button
+        v-if="activeIsMarkdown"
+        type="button"
+        :class="['figma-editor-tab-preview', { 'is-active': markdownPreview }]"
+        :aria-label="markdownPreview ? '关闭 Markdown 预览' : '打开 Markdown 预览'"
+        :title="markdownPreview ? '关闭预览' : '预览'"
+        :aria-pressed="markdownPreview"
+        data-testid="editor-tab-markdown-preview"
+        @click.stop="toggleMarkdownPreview"
+      >
+        <component :is="markdownPreview ? EyeOff : Eye" :size="14" />
+        <span>{{ markdownPreview ? "关闭预览" : "预览" }}</span>
+      </button>
     </div>
 
     <div class="figma-editor-content">
@@ -168,6 +208,45 @@ const emit = defineEmits<{
 .figma-icon-14 {
   width: 14px;
   height: 14px;
+}
+
+/* Markdown 预览开关按钮：放在 tab 行最右侧，视觉上与 tab 区分（无下边线、紧凑按钮）。
+   active 态用与活动 tab 接近的高亮色，方便用户感知"预览已开启"。*/
+.figma-editor-tab-preview {
+  margin-left: auto;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  margin-right: 8px;
+  border: 0.8px solid #dfdfdf;
+  border-radius: 6px;
+  background: #fff;
+  color: #555;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.figma-editor-tab-preview:hover {
+  background: #f0f0f0;
+  border-color: #cfcfcf;
+  color: #333;
+}
+
+.figma-editor-tab-preview.is-active {
+  background: #eaf0ff;
+  border-color: #b9c8ff;
+  color: #1d3fb0;
+}
+
+.figma-editor-tab-preview.is-active:hover {
+  background: #dde7ff;
 }
 
 /* ---- Content ---- */

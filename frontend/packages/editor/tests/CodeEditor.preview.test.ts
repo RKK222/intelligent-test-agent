@@ -20,11 +20,14 @@ vi.mock("../src/monaco-env", () => {
     getVisibleRanges: () => [{ startLineNumber: 1, endLineNumber: 1 }],
     getTopForLineNumber: () => 0,
     setScrollTop: () => {},
+    addCommand: () => null,
     dispose: () => {}
   };
   return {
     monaco: {
       Uri: { parse: () => ({}) },
+      KeyMod: { CtrlCmd: 1 << 11 },
+      KeyCode: { KeyS: 49 },
       editor: {
         getModel: () => null,
         createModel: () => fakeModel,
@@ -38,32 +41,38 @@ import CodeEditor from "../src/CodeEditor.vue";
 
 const baseProps = { content: "# hi", dirty: false, readonly: false, saving: false };
 
-describe("CodeEditor Markdown 预览开关", () => {
-  it("打开 .md 文件时展示预览按钮，且默认不预览", async () => {
-    const { queryByLabelText, queryByText } = render(CodeEditor, {
-      props: { ...baseProps, path: "docs/README.md" }
+describe("CodeEditor Markdown 预览受控", () => {
+  // 预览开关已上提到 FigmaEditorArea tab 表头，CodeEditor 只负责受控渲染预览区。
+  it("打开 .md 文件且 showPreview=false 时不渲染预览区", () => {
+    const { queryByText } = render(CodeEditor, {
+      props: { ...baseProps, path: "docs/README.md", showPreview: false }
     });
-    // 默认不预览：存在「预览」按钮，无「关闭预览」，且无渲染预览区
-    expect(queryByLabelText("预览")).toBeTruthy();
-    expect(queryByLabelText("关闭预览")).toBeNull();
     expect(queryByText("正在准备预览…")).toBeNull();
   });
 
-  it("打开 .ts 文件时不展示预览按钮", async () => {
-    const { queryByLabelText } = render(CodeEditor, {
-      props: { ...baseProps, path: "src/app.ts", content: "console.log(1)" }
+  it("打开 .md 文件且 showPreview=true 时进入预览加载态", async () => {
+    const { findByText } = render(CodeEditor, {
+      props: { ...baseProps, path: "docs/README.md", showPreview: true }
     });
+    // 预览组件首次渲染会显示「正在准备预览…」占位（markdown-it 懒加载中）
+    expect(await findByText("正在准备预览…")).toBeTruthy();
+  });
+
+  it("CodeEditor 自身不再渲染预览开关按钮", () => {
+    const { queryByLabelText } = render(CodeEditor, {
+      props: { ...baseProps, path: "docs/README.md", showPreview: false }
+    });
+    // tab 表头按钮上提到 FigmaEditorArea，这里只断言 CodeEditor 不再自带入口
     expect(queryByLabelText("预览")).toBeNull();
     expect(queryByLabelText("关闭预览")).toBeNull();
   });
 
-  it("点击预览后切换为关闭预览并出现预览区", async () => {
-    const { getByLabelText, findByLabelText } = render(CodeEditor, {
-      props: { ...baseProps, path: "docs/README.md" }
+  it("showPreview 由 true 切到 false 时预览区消失", async () => {
+    const { rerender, queryByText } = render(CodeEditor, {
+      props: { ...baseProps, path: "docs/README.md", showPreview: true }
     });
-    const toggle = getByLabelText("预览") as HTMLButtonElement;
-    await toggle.click();
-    // 预览开启：按钮文案切换为「关闭预览」
-    expect(await findByLabelText("关闭预览")).toBeTruthy();
+    expect(queryByText("正在准备预览…")).toBeTruthy();
+    await rerender({ ...baseProps, path: "docs/README.md", showPreview: false });
+    expect(queryByText("正在准备预览…")).toBeNull();
   });
 });

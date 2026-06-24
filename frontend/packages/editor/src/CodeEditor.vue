@@ -16,6 +16,19 @@ export type CodeEditorProps = {
   readonly?: boolean;
   saving?: boolean;
   feedback?: import("@test-agent/ui-kit").Feedback | null;
+  /**
+   * Markdown 预览开关（受控）。开启后会在编辑器下方追加分屏预览区，
+   * 关闭后回到全屏编辑。组件本身不维护该状态，由父级（通常是 tab 表头）
+   * 提供按钮并双向绑定，避免同一状态出现两处入口。
+   */
+  showPreview?: boolean;
+};
+
+export type CodeEditorEmits = {
+  change: [content: string];
+  save: [];
+  selectionChange: [selection: EditorSelectionContext | undefined];
+  "update:showPreview": [enabled: boolean];
 };
 </script>
 
@@ -25,22 +38,19 @@ import { FeedbackBanner } from "@test-agent/ui-kit";
 import { languageFromPath } from "./language";
 import MarkdownPreview from "./MarkdownPreview.vue";
 
-const props = withDefaults(defineProps<CodeEditorProps>(), { content: "" });
+const props = withDefaults(defineProps<CodeEditorProps>(), { content: "", showPreview: false });
 const displayName = computed(() => {
   if (!props.path) return "";
   const parts = props.path.split(/[\\/]+/).filter(Boolean);
   return parts.at(-1) ?? props.path;
 });
-const emit = defineEmits<{
-  change: [content: string];
-  save: [];
-  selectionChange: [selection: EditorSelectionContext | undefined];
-}>();
+const emit = defineEmits<CodeEditorEmits>();
 
 // 当前文件是否为 Markdown：决定是否展示预览开关与分屏能力
 const isMarkdown = computed(() => !!props.path && languageFromPath(props.path) === "markdown");
-// 预览开关：文件打开时默认不预览，点击工具栏眼睛图标后开启
-const showPreview = ref(false);
+// 预览开关：受控模式，状态完全由父级驱动（tab 表头上的预览按钮）。
+// 不再保留组件内部副本，避免出现"两处入口不同步"的问题。
+const showPreview = computed(() => props.showPreview ?? false);
 // 上下分屏比例（上=编辑器百分比），仅组件内状态，不持久化
 const splitPct = ref(50);
 
@@ -119,6 +129,16 @@ async function ensureMonacoEditor(path: string, content: string) {
       onEditorScroll();
     }
   });
+  // 注册 Ctrl/Cmd+S 快捷键：编辑器失焦/聚焦情况下都能拦截浏览器的「保存网页」行为，
+  // 改为向父级 emit('save')，由父级决定是否真的落盘（与右下角保存按钮同款逻辑）。
+  // 只读文件不响应，避免和 Monaco 内置提示产生冲突。
+  if (!props.readonly) {
+    const KeyMod = monacoLib.KeyMod;
+    const KeyCode = monacoLib.KeyCode;
+    inst.addCommand(KeyMod.CtrlCmd | KeyCode.KeyS, () => {
+      emit("save");
+    });
+  }
   emitSelection(inst);
 }
 
@@ -152,8 +172,7 @@ watch(
     if (!path) {
       return;
     }
-    // 切换文件时重置预览开关，满足「打开时默认不预览」
-    showPreview.value = false;
+    // 切换文件时由父级决定是否关闭预览；这里不主动改写 props。
     await nextTick();
     await ensureMonacoEditor(path, props.content);
   }
@@ -284,19 +303,9 @@ onBeforeUnmount(() => {
     </div>
   </div>
   <div v-else class="flex h-full min-h-0 flex-col bg-[var(--ta-surface)]">
-    <div v-if="isMarkdown" class="ta-editor-toolbar">
-      <button
-        type="button"
-        class="ta-editor-toolbar-button"
-        :aria-label="showPreview ? '关闭预览' : '预览'"
-        :title="showPreview ? '关闭预览' : '预览'"
-        @click="showPreview = !showPreview"
-      >
-        {{ showPreview ? "关闭预览" : "预览" }}
-      </button>
-    </div>
     <!-- 编辑器主体始终保留同一个容器，避免 v-if 切换销毁 Monaco 已挂载的 DOM；
-         Markdown 预览开启时在下方追加 sash + 预览，形成上下分屏 -->
+         Markdown 预览开启时在下方追加 sash + 预览，形成上下分屏。
+         预览开关已上提到 tab 表头，受控于 showPreview prop。 -->
     <div ref="splitContainerEl" class="flex min-h-0 flex-1 flex-col">
       <div
         ref="containerEl"
@@ -325,32 +334,6 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.ta-editor-toolbar {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: flex-end;
-  height: 32px;
-  padding: 0 8px;
-  border-bottom: 1px solid var(--ta-border);
-  background: var(--ta-tabbar);
-}
-
-.ta-editor-toolbar-button {
-  height: 24px;
-  border: 1px solid var(--ta-border);
-  border-radius: 6px;
-  background: var(--ta-surface);
-  color: var(--ta-text);
-  font-size: 12px;
-  line-height: 20px;
-  padding: 0 8px;
-}
-
-.ta-editor-toolbar-button:hover {
-  background: var(--ta-hover);
-}
-
 /* Monaco 编辑器内部滚动条细线化（同时影响水平与竖向） */
 :deep(.monaco-scrollable-element)::-webkit-scrollbar {
   width: 6px;

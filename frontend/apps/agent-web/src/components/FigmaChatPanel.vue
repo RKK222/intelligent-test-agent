@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { ArrowUpRight, Download, History, ListTodo, PanelRightClose, PencilLine, Plus, Send, Square, Upload, X } from "lucide-vue-next";
+import { ArrowUpRight, Download, Eye, EyeOff, History, ListTodo, PanelRightClose, PencilLine, Plus, Send, Square, Upload, X } from "lucide-vue-next";
 import aiHeaderUrl from "../assets/figma/ai-header.svg";
 import planLoadingUrl from "../assets/figma/plan-loadding.gif";
 
@@ -78,6 +78,11 @@ const localInput = ref(props.inputValue ?? "");
 const drawerOpen = ref(false);
 const drawerSelectedPath = ref<string>("");
 const drawerScroll = ref<HTMLElement | null>(null);
+// 是否在 diff 视图中显示 unified diff 的上下文行（未改动的行）。
+// 默认关闭：用户在文件变更抽屉里通常只想看真正的 +/- 行，避免出现
+// “只改一行但全文飘红” 的体验。当后端 patch 是整文件重写时，关闭上下文
+// 仍然会看到完整的 del+add 列表，但能配合新增的 toggle 切换为完整上下文做核对。
+const showContext = ref(false);
 
 // 把 unified diff 文本按行解析为带 kind 的结构，供右侧 git-merge 风格渲染使用。
 // 解析规则与 git apply 一致：每行首字符决定 kind；hunk header "@@" 重置行号计数器。
@@ -130,6 +135,14 @@ const drawerSelectedFile = computed(
 
 // 当前文件的解析后 diff 行；用于右侧纯文本渲染。
 const drawerSelectedLines = computed(() => parseDiffLines(drawerSelectedFile.value?.patch));
+
+// 仅展示变更行：过滤掉 unified diff 中的 ctx 上下文行，保留 hunk header (meta)
+// 让用户在没有上下文干扰的情况下快速看到 +/- 变更。
+// 总 add/del 数仍按 drawerSelectedLines 统计，保证抽屉头部的 +/- 徽标与文件列表一致。
+const visibleDiffLines = computed(() => {
+  if (showContext.value) return drawerSelectedLines.value;
+  return drawerSelectedLines.value.filter((line) => line.kind !== "ctx");
+});
 
 // 当前文件的增减行数；若 patch 没解析出来，则回退到 FileChangeStat 自带的 additions/deletions。
 const drawerSelectedAdditions = computed(
@@ -485,6 +498,18 @@ function onKeydown(event: KeyboardEvent) {
           </div>
           <button
             type="button"
+            :class="['figma-chat-drawer-toggle', showContext && 'is-active']"
+            :title="showContext ? '只显示变更行' : '显示上下文行'"
+            :aria-pressed="showContext"
+            :aria-label="showContext ? '隐藏上下文行' : '显示上下文行'"
+            data-testid="chat-drawer-context-toggle"
+            @click="showContext = !showContext"
+          >
+            <component :is="showContext ? EyeOff : Eye" :size="14" />
+            <span class="figma-chat-drawer-toggle-text">{{ showContext ? "上下文" : "仅变更" }}</span>
+          </button>
+          <button
+            type="button"
             class="figma-chat-drawer-close"
             aria-label="关闭 diff 抽屉"
             @click="closeChangesDrawer"
@@ -531,13 +556,13 @@ function onKeydown(event: KeyboardEvent) {
               </span>
             </header>
             <div
-              v-if="drawerSelectedLines.length"
+              v-if="drawerSelectedLines.length && visibleDiffLines.length"
               ref="drawerScroll"
               class="figma-chat-drawer-diff-scroll"
               :data-testid="'chat-drawer-diff-scroll'"
             >
               <div
-                v-for="(line, index) in drawerSelectedLines"
+                v-for="(line, index) in visibleDiffLines"
                 :key="`${line.kind}-${index}`"
                 :class="[
                   'figma-chat-drawer-diff-line',
@@ -553,6 +578,10 @@ function onKeydown(event: KeyboardEvent) {
                 </span>
                 <span class="figma-chat-drawer-diff-text">{{ line.text || " " }}</span>
               </div>
+            </div>
+            <div v-else-if="drawerSelectedLines.length && !visibleDiffLines.length" class="figma-chat-drawer-diff-empty">
+              <p>当前文件没有可显示的变更行</p>
+              <p class="figma-chat-drawer-diff-empty-hint">点击右上角“上下文”可显示完整 diff 行。</p>
             </div>
             <div v-else class="figma-chat-drawer-diff-empty">
               <p>暂无 diff 内容</p>
@@ -1102,7 +1131,6 @@ function onKeydown(event: KeyboardEvent) {
 }
 
 .figma-chat-drawer-close {
-  margin-left: auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1121,6 +1149,46 @@ function onKeydown(event: KeyboardEvent) {
   background: #f0f0f0;
   border-color: #cfcfcf;
   color: #333;
+}
+
+/* 上下文行切换：默认 “仅变更” 状态（is-active）时高亮，让用户一眼分辨当前是哪种模式。
+   按钮放在摘要数字和关闭按钮之间，避免和右上角关闭按钮位置冲突。*/
+.figma-chat-drawer-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 0.8px solid #dfdfdf;
+  border-radius: 6px;
+  background: #fff;
+  color: #555;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.figma-chat-drawer-toggle:hover {
+  background: #f0f0f0;
+  border-color: #cfcfcf;
+  color: #333;
+}
+
+.figma-chat-drawer-toggle.is-active {
+  background: #eaf0ff;
+  border-color: #b9c8ff;
+  color: #1d3fb0;
+}
+
+.figma-chat-drawer-toggle.is-active:hover {
+  background: #dde7ff;
+}
+
+.figma-chat-drawer-toggle-text {
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
 .figma-chat-drawer-body {
