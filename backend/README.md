@@ -66,14 +66,33 @@ export JAVA_HOME=/Users/kaka/Library/Java/JavaVirtualMachines/openjdk-25.0.1/Con
 ### 启动后端
 
 ```bash
+# 使用 dev-backend-run.sh 脚本启动（推荐）
+# 默认读取 .env.local，profile=local
+tools/dev-backend-run.sh
+
+# 或指定其他 profile
+tools/dev-backend-run.sh --profile test
+
+# 或直接使用 Maven
 cd backend
-
-# 方式一：使用 .env.local 中的配置（推荐）
 SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -pl test-agent-app
-
-# 方式二：如果 .env.local 已配置 SPRING_PROFILES_ACTIVE=local
-mvn spring-boot:run -pl test-agent-app
 ```
+
+### 环境变量配置
+
+首次运行前，复制环境变量模板：
+
+```bash
+cp .env.local.example .env.local
+```
+
+编辑 `.env.local` 修改本地数据库、OpenCode 等配置：
+
+| 变量 | 说明 |
+|------|------|
+| `TEST_AGENT_LOCAL_DB_*` | 本地 PostgreSQL 连接信息 |
+| `TEST_AGENT_REDIS_ENABLED` | 是否启用 Redis（本地可设为 false） |
+| `TEST_AGENT_OPENCODE_BASE_URL` | OpenCode 服务地址 |
 
 验证后端启动成功：
 ```bash
