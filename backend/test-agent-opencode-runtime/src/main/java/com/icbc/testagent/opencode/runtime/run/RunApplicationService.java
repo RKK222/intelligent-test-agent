@@ -37,6 +37,7 @@ import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.event.RunEventAppender;
 import com.icbc.testagent.event.RunEventLiveBus;
+import com.icbc.testagent.opencode.runtime.model.ModelCatalogApplicationService;
 import com.fasterxml.jackson.databind.JsonNode;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -64,6 +65,7 @@ public class RunApplicationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RunApplicationService.class);
     private static final int ROUTING_CANDIDATE_LIMIT = 50;
+    private static final String DEFAULT_OPENCODE_AGENT = "build";
     private static final Set<String> LIVE_DIFF_TOOLS = Set.of("write", "edit", "apply_patch");
 
     private final WorkspaceRepository workspaceRepository;
@@ -77,6 +79,7 @@ public class RunApplicationService {
     private final AgentSessionBindingRepository agentSessionBindingRepository;
     private final RunEventLiveBus runEventLiveBus;
     private final RunEventPersistencePolicy runEventPersistencePolicy;
+    private final ModelCatalogApplicationService modelCatalogService;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -94,7 +97,8 @@ public class RunApplicationService {
             AgentRuntimeRegistry agentRuntimeRegistry,
             AgentSessionBindingRepository agentSessionBindingRepository,
             RunEventLiveBus runEventLiveBus,
-            RunEventPersistencePolicy runEventPersistencePolicy) {
+            RunEventPersistencePolicy runEventPersistencePolicy,
+            ModelCatalogApplicationService modelCatalogService) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
@@ -106,6 +110,37 @@ public class RunApplicationService {
         this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
         this.runEventLiveBus = Objects.requireNonNull(runEventLiveBus, "runEventLiveBus must not be null");
         this.runEventPersistencePolicy = Objects.requireNonNull(runEventPersistencePolicy, "runEventPersistencePolicy must not be null");
+        this.modelCatalogService = modelCatalogService;
+    }
+
+    /**
+     * 兼容旧单测的构造器，保留显式实时事件总线和持久化策略注入。
+     */
+    public RunApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            SessionMessageRepository sessionMessageRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RoutingDecisionRepository routingDecisionRepository,
+            RunEventAppender runEventAppender,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunEventLiveBus runEventLiveBus,
+            RunEventPersistencePolicy runEventPersistencePolicy) {
+        this(
+                workspaceRepository,
+                sessionRepository,
+                runRepository,
+                sessionMessageRepository,
+                executionNodeRepository,
+                routingDecisionRepository,
+                runEventAppender,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                runEventLiveBus,
+                runEventPersistencePolicy,
+                null);
     }
 
     /**
@@ -132,7 +167,8 @@ public class RunApplicationService {
                 agentRuntimeRegistry,
                 agentSessionBindingRepository,
                 new RunEventLiveBus(),
-                new RunEventPersistencePolicy());
+                new RunEventPersistencePolicy(),
+                null);
     }
 
     /**
@@ -184,6 +220,12 @@ public class RunApplicationService {
             routingDecisionRepository.save(target.decision());
             AgentSessionBinding binding = ensureAgentSession(resolvedAgentId, runtime, session, workspace, target.node(), traceId);
             ModelSelection model = parseModel(input.model());
+            String opencodeAgent = resolveOpencodeAgent(input);
+            syncProviderConfig(runtime, target.node(), traceId);
+            Run running = runRepository.save(pending.start(Instant.now()));
+            append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
+            // 先订阅事件再触发 prompt，避免 opencode 快速失败或快速返回时平台漏掉终态事件。
+            subscribeAgentEvents(runtime, running, target.node(), workspace, traceId);
             runtime.startRun(new AgentStartRunCommand(
                             target.node(),
                             binding.remoteSessionId(),
@@ -192,21 +234,28 @@ public class RunApplicationService {
                             prompt,
                             toAgentPromptParts(input, workspace),
                             input.messageId(),
-                            input.agent(),
+                            opencodeAgent,
                             model.providerId(),
                             model.modelId(),
                             input.variant(),
                             traceId))
                     .block();
-            Run running = runRepository.save(pending.start(Instant.now()));
-            append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
-            subscribeAgentEvents(runtime, running, target.node(), workspace, traceId);
             return running;
         } catch (PlatformException exception) {
             Run failed = runRepository.save(pending.fail(Instant.now()));
             append(failed.runId(), RunEventType.RUN_FAILED, traceId, Instant.now(), Map.of("errorCode", exception.errorCode().name()));
             throw exception;
         }
+    }
+
+    /**
+     * opencode prompt_async 会把 agent 写入 assistant message；不传时会触发 SQLite 非空约束失败。
+     */
+    private String resolveOpencodeAgent(StartRunInput input) {
+        return Optional.ofNullable(input.agent())
+                .or(() -> Optional.ofNullable(input.mode()))
+                .filter(value -> !value.isBlank())
+                .orElse(DEFAULT_OPENCODE_AGENT);
     }
 
     /**
@@ -227,6 +276,15 @@ public class RunApplicationService {
                 .filter(Objects::nonNull)
                 .toList());
         return parts.isEmpty() ? List.of(AgentPromptPart.text(input.effectivePrompt())) : parts;
+    }
+
+    /**
+     * 托管模型源启用时，在真正 prompt_async 前尽力同步 provider 定义到 opencode。
+     */
+    private void syncProviderConfig(AgentRuntime runtime, ExecutionNode node, String traceId) {
+        if (modelCatalogService != null && modelCatalogService.managedSourceEnabled()) {
+            modelCatalogService.syncProviderConfig(runtime, node, traceId);
+        }
     }
 
     /**

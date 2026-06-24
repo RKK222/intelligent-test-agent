@@ -17,22 +17,24 @@ import {
   Upload,
   X,
 } from 'lucide-vue-next'
+import type { AgentMessage } from '@test-agent/shared-types'
 import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 
-type ChatMessageInput = {
-  id: string
-  role: string
-  content?: string
-  text?: string
-  parts?: Array<{ type: string; text?: string }>
-  createdAt?: string
-}
+type ChatMessageInput = AgentMessage & { content?: string }
 
 type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
   meta?: string
+}
+
+function partText(part: unknown): string {
+  if (part && typeof part === 'object' && 'text' in part) {
+    const text = (part as { text?: unknown }).text
+    return typeof text === 'string' ? text : ''
+  }
+  return ''
 }
 
 export type FileChangeStat = {
@@ -148,16 +150,8 @@ const thinkingLines = computed(() => {
       }
     }
     // card 消息中的工具调用（tool.started / tool.finished 事件）
-    if (
-      msg.role === 'card' &&
-      (msg as { cardType?: string }).cardType === 'tool'
-    ) {
-      const card = msg as {
-        role: 'card'
-        cardType: string
-        payload?: Record<string, unknown>
-      }
-      const payload = card.payload ?? {}
+    if (msg.role === 'card' && msg.cardType === 'tool') {
+      const payload = msg.payload ?? {}
       const name =
         (typeof payload.toolName === 'string' && payload.toolName) ||
         (typeof payload.name === 'string' && payload.name) ||
@@ -317,7 +311,7 @@ const displayMessages = computed<ChatMessage[]>(() => {
       } else if (typeof m.text === 'string') {
         text = m.text
       } else if (Array.isArray(m.parts)) {
-        text = m.parts.map((p) => p?.text ?? '').join('')
+        text = m.parts.map((p) => partText(p)).join('')
       }
       return {
         role: m.role,

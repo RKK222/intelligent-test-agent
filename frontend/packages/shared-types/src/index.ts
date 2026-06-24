@@ -358,6 +358,7 @@ export type ModelInfo = ModelRef & {
   contextLimit?: number;
   outputLimit?: number;
   free?: boolean;
+  defaultModel?: boolean;
   variants?: string[];
 };
 

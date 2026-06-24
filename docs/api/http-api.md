@@ -672,6 +672,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 - `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt_async` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。
 - file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。只有没有内联内容或 URL 时，后端才把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。
 - `model` 使用 `providerId/modelId` 字符串格式；格式不完整时后端保留旧默认模型，不向 opencode 传 model override。
+- 当后端启用托管模型目录时，前端从 Model 目录接口获取可选模型并仍按 `providerId/modelId` 提交；企业内默认模型为 `icbc-openai/DeepSeek-V4-Flash-W8A8`。
 - Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt_async` 请求体。
 
 启动流程会追加用户消息，创建 `PENDING` Run，再按 `(sessionId, agentId)` 的 `agent_session_bindings` 决定是否复用远端 session；旧 `sessions.opencode_*` 字段只作为 `opencode` 兼容回填来源。
@@ -717,6 +718,13 @@ opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controlle
 | `DELETE` | `/api/mcp/{name}/auth` | 删除 MCP auth。 |
 
 以上运行态目录接口同时暴露 `/api/internal/platform/opencode-runtime/...` 兼容平台 URL，并按 agent path 暴露 `/api/internal/agent/{agentId}/...` 新入口。当前 `opencode` 的标准路径形态保持 opencode 原 path，例如 `/api/agents` 同时可通过 `/api/internal/platform/opencode-runtime/agents` 和 `/api/internal/agent/opencode/api/agent` 调用；后续 agent 必须适配到相同平台 DTO 和错误格式。
+
+Model/Provider 目录兼容说明：
+
+- `test-agent.model-catalog.source=opencode` 时，`/api/models` 和 `/api/providers` 保持旧行为，直接代理 opencode。
+- `source=bailian` 时，`/api/models` 由后端请求百炼 OpenAI-compatible `/models` 获取；请求失败时返回配置内置外网模型，Provider 为 `modelstudio`。
+- `source=internal` 时，`/api/models` 从 `ai_model_configs` 表读取启用模型，Provider 为 `icbc-openai`；启动时会按 openclaw 企业 patch 的模型清单初始化表，默认模型为 `DeepSeek-V4-Flash-W8A8`。
+- Model 响应对象包含兼容字段 `id`、`modelId`、`modelID`、`providerId`、`providerID`、`name`，托管来源还会返回 `contextLimit`、`outputLimit` 和 `defaultModel`。前端优先选中 `defaultModel=true` 的模型。
 
 Session 运行态接口：
 

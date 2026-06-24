@@ -558,6 +558,7 @@ function toModelInfo(value: Record<string, unknown>): ModelInfo {
     contextLimit: number(value.contextLimit) ?? number(value.context),
     outputLimit: number(value.outputLimit),
     free: typeof value.free === "boolean" ? value.free : undefined,
+    defaultModel: typeof value.defaultModel === "boolean" ? value.defaultModel : undefined,
     variants
   });
 }

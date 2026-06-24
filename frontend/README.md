@@ -57,6 +57,18 @@ tools/dev-frontend-check.sh
 
 ## 本地联调
 
+推荐从仓库根目录使用一键脚本重启三服务，脚本会按 `.env.local` 管理本地 `opencode serve`、后端和前端：
+
+```bash
+./restart-dev-services.sh --env-file .env.local
+```
+
+本机存在多个 opencode 版本时，在 `.env.local` 指定 `TEST_AGENT_OPENCODE_BIN`，避免 PATH 命中旧版本。例如：
+
+```bash
+TEST_AGENT_OPENCODE_BIN=${HOME}/.opencode/bin/opencode
+```
+
 分别启动三个服务：
 
 ```bash

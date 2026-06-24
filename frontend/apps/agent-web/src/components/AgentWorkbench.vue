@@ -542,7 +542,7 @@ watch(providersQuery.data, (data) => {
 });
 watch(modelsQuery.data, (data) => {
   if (!selectedModel.value && data?.[0]) {
-    selectedModel.value = modelValue(data[0]);
+    selectedModel.value = modelValue(data.find((model) => model.defaultModel) ?? data[0]);
   }
 });
 watch([() => selectedProvider.value, () => selectedModel.value, modelsQuery.data], ([provider, model, data]) => {

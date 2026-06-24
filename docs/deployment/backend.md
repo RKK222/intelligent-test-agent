@@ -54,6 +54,8 @@ TEST_AGENT_REDIS_HOST=<redis-host>
 TEST_AGENT_REDIS_PORT=6379
 TEST_AGENT_REDIS_PASSWORD=<redis-password>
 TEST_AGENT_OPENCODE_BASE_URL=http://127.0.0.1:4096
+TEST_AGENT_MODEL_CATALOG_SOURCE=bailian
+MODELSTUDIO_API_KEY=<bailian-api-key>
 ```
 
 `.env.test`（test profile）：
@@ -69,6 +71,8 @@ TEST_AGENT_REDIS_HOST=<redis-host>
 TEST_AGENT_REDIS_PORT=6379
 TEST_AGENT_REDIS_PASSWORD=<redis-password>
 TEST_AGENT_OPENCODE_BASE_URL=http://127.0.0.1:4096
+TEST_AGENT_MODEL_CATALOG_SOURCE=internal
+ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
 ```
 
 配置 `TEST_AGENT_API_TOKEN` 后，`/api/**` 要求 `Authorization: Bearer <token>`；未配置时本地默认放行。
@@ -87,6 +91,8 @@ export TEST_AGENT_TEST_DB_NAME=<database>
 export TEST_AGENT_TEST_DB_USERNAME=<username>
 export TEST_AGENT_TEST_DB_PASSWORD=<password>
 export TEST_AGENT_OPENCODE_BASE_URL=http://<opencode-host>:4096
+export TEST_AGENT_MODEL_CATALOG_SOURCE=internal
+export ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
 ```
 
 启用该 profile 后，Spring Boot 通过 Druid 管理 JDBC 连接池，并使用 `test-agent-persistence` 中的 Flyway migration 初始化或校验数据库结构；Actuator `health` 包含数据库健康检查；Druid Web 控制台默认关闭，不提供 `/druid/*` 管理入口。
@@ -113,6 +119,8 @@ TEST_AGENT_DB_PASSWORD=<password>
 TEST_AGENT_API_TOKEN=<api-token>
 TEST_AGENT_CORS_ALLOWED_ORIGINS=https://<frontend-origin>
 TEST_AGENT_OPENCODE_BASE_URL=http://<opencode-host>:4096
+TEST_AGENT_MODEL_CATALOG_SOURCE=internal
+ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
 ```
 
 可选运行参数：
@@ -126,6 +134,8 @@ TEST_AGENT_DB_POOL_MIN_IDLE=1
 TEST_AGENT_DB_POOL_MAX_ACTIVE=10
 TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS=30000
 TEST_AGENT_REDIS_ENABLED=false
+TEST_AGENT_INTERNAL_DEFAULT_MODEL=DeepSeek-V4-Flash-W8A8
+TEST_AGENT_ICBC_OPENAI_BASE_URL=http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1
 ```
 
 Redis 只有在启用时才需要提供外部地址：
@@ -147,6 +157,8 @@ docker run --rm -p 8080:8080 \
   -e TEST_AGENT_API_TOKEN=change-me \
   -e TEST_AGENT_CORS_ALLOWED_ORIGINS=https://agent.example.com \
   -e TEST_AGENT_OPENCODE_BASE_URL=http://opencode.example.internal:4096 \
+  -e TEST_AGENT_MODEL_CATALOG_SOURCE=internal \
+  -e ICBC_OPENAI_AUTH_TOKEN=change-me \
   test-agent-backend:local
 ```
 
@@ -156,4 +168,17 @@ docker run --rm -p 8080:8080 \
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
 
-`DatabaseMigrationRunner` 会在启动时执行 Flyway migration；`ExecutionNodeSeeder` 会把配置中的 opencode node 写入 `execution_nodes` 作为 Run 路由来源。
+`DatabaseMigrationRunner` 会在启动时执行 Flyway migration；`ExecutionNodeSeeder` 会把配置中的 opencode node 写入 `execution_nodes` 作为 Run 路由来源。启用 `TEST_AGENT_MODEL_CATALOG_SOURCE=internal` 时，`ModelCatalogApplicationService` 会把企业内模型清单 seed 到 `ai_model_configs`，后续可通过改表控制模型显示、启停和默认值。
+
+## 模型目录配置
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `TEST_AGENT_MODEL_CATALOG_SOURCE` | local: `bailian`；test/prod: `internal` | 模型目录来源。`opencode` 保持旧代理，`bailian` 直连百炼 `/models`，`internal` 从数据库读取企业内模型。 |
+| `TEST_AGENT_BAILIAN_BASE_URL` | `https://coding.dashscope.aliyuncs.com/v1` | 外网百炼 OpenAI-compatible base URL。 |
+| `TEST_AGENT_BAILIAN_API_KEY_ENV` | `MODELSTUDIO_API_KEY` | 外网百炼密钥所在环境变量名。 |
+| `TEST_AGENT_BAILIAN_DEFAULT_MODEL` | `qwen3.5-plus` | 外网模式同步给 opencode 的默认模型。 |
+| `TEST_AGENT_ICBC_OPENAI_BASE_URL` | `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1` | 企业内 OpenAI-compatible base URL，与 openclaw 企业 patch 保持一致。 |
+| `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` | `ICBC_OPENAI_AUTH_TOKEN` | 企业内 token 所在环境变量名。 |
+| `TEST_AGENT_ICBC_OPENAI_AUTH_MODE` | `auth-token` | 企业内调用鉴权头模式，默认写入 `Auth-Token`。 |
+| `TEST_AGENT_INTERNAL_DEFAULT_MODEL` | `DeepSeek-V4-Flash-W8A8` | 企业内默认模型，前端模型切换会优先选中该模型。 |
