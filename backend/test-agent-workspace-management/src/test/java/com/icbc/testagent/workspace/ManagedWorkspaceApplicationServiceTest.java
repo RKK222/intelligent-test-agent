@@ -78,6 +78,57 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void createsApplicationVersionWithYearMonthFormat() throws Exception {
+        // 「+新增版本」场景：version 字段允许原样保留为 yyyy年M月（"2024年1月"），
+        // 但派生出来的分支名 / 路径要走 sanitizeVersionForBranchAndPath 转 yyyy-MM。
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = serviceWithBranches(
+                configuration,
+                managed,
+                workspaces,
+                git,
+                List.of("feature_testagent_2024-01"));
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse response = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "2024年1月",
+                null,
+                new UserId("usr_1"),
+                "trace_year_month");
+
+        assertThat(response.version()).isEqualTo("2024年1月");
+        // 分支名从 "2024年1月" 转 "2024-01"，避免 git ref 出现中文 / 年月字面量
+        assertThat(response.branch()).isEqualTo("feature_testagent_2024-01");
+        assertThat(git.clonedBranch).isEqualTo("feature_testagent_2024-01");
+        // 路径同样用 yyyy-MM；用 Path.endsWith 避免 Windows / Linux 路径分隔符差异
+        assertThat(java.nio.file.Paths.get(response.runtimeWorkspace().rootPath()))
+                .endsWith(java.nio.file.Paths.get("appworkspace", "2024-01", "repo_1", "F-GCMS", "workspace"));
+    }
+
+    @Test
+    void rejectsInvalidVersionFormat() {
+        ManagedWorkspaceApplicationService service = service(
+                new FakeConfigurationRepository(true),
+                new FakeManagedWorkspaceRepository(),
+                new FakeWorkspaceRepository(),
+                new FakeGitWorkspaceService("F-GCMS/workspace"));
+
+        assertThatThrownBy(() -> service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "v1.0",
+                null,
+                new UserId("usr_1"),
+                "trace_invalid"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
+
+    @Test
     void rejectsApplicationWorkspaceOperationsForNonMembers() {
         ManagedWorkspaceApplicationService service = service(
                 new FakeConfigurationRepository(false),
@@ -231,6 +282,23 @@ class ManagedWorkspaceApplicationServiceTest {
                 workspaces,
                 new FakeUserRepository(),
                 new FakeGitRemoteService(List.of("feature_testagent_20260707")),
+                git,
+                new SshKeyCryptoService(java.util.Base64.getEncoder().encodeToString("0123456789abcdef".getBytes())),
+                root.toString());
+    }
+
+    private ManagedWorkspaceApplicationService serviceWithBranches(
+            FakeConfigurationRepository configuration,
+            FakeManagedWorkspaceRepository managed,
+            FakeWorkspaceRepository workspaces,
+            FakeGitWorkspaceService git,
+            List<String> branches) {
+        return new ManagedWorkspaceApplicationService(
+                configuration,
+                managed,
+                workspaces,
+                new FakeUserRepository(),
+                new FakeGitRemoteService(branches),
                 git,
                 new SshKeyCryptoService(java.util.Base64.getEncoder().encodeToString("0123456789abcdef".getBytes())),
                 root.toString());

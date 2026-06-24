@@ -56,6 +56,9 @@ import org.springframework.stereotype.Service;
 public class ManagedWorkspaceApplicationService {
 
     private static final Pattern VERSION_PATTERN = Pattern.compile("^\\d{8}$");
+    // 兼容前端"yyyy年M月"格式（如 2024年1月 / 2024年12月），用于「+新增版本」场景。
+    // 版本字符串允许原样落库，但分支名/路径需要走 sanitizeVersionForBranchAndPath 转为安全片段。
+    private static final Pattern VERSION_PATTERN_YEAR_MONTH = Pattern.compile("^(\\d{4})年(\\d{1,2})月$");
     private static final Pattern SCP_LIKE_SSH_URL = Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9._-]+:.+");
 
     private final ConfigurationManagementRepository configurationRepository;
@@ -379,7 +382,9 @@ public class ManagedWorkspaceApplicationService {
         if (!repository.standard()) {
             return requireText(branch, "非标准代码库必须指定分支", "branch");
         }
-        String expected = "feature_testagent_" + version;
+        // yyyy年M月 格式的版本在分支名里需转为 yyyy-MM，避免 git ref 中出现中文 / 年月字面量。
+        String branchFragment = sanitizeVersionForBranchAndPath(version);
+        String expected = "feature_testagent_" + branchFragment;
         List<String> branches = gitRemoteService.listBranches(repository.gitUrl(), privateKeyFor(repository, userId));
         if (!branches.contains(expected)) {
             throw new PlatformException(ErrorCode.CONFLICT, repository.name() + "代码库无" + expected + "分支，请到开发者门户创建分支", Map.of("branch", expected));
@@ -485,12 +490,14 @@ public class ManagedWorkspaceApplicationService {
     }
 
     private Path appRepoRoot(String version, CodeRepository repository) {
-        return managedRoot.resolve("appworkspace").resolve(version).resolve(repository.repositoryId().value()).normalize();
+        // 路径片段统一走 sanitizeVersionForBranchAndPath：yyyy年M月 → yyyy-MM，避免路径里出现中文。
+        String pathFragment = sanitizeVersionForBranchAndPath(version);
+        return managedRoot.resolve("appworkspace").resolve(pathFragment).resolve(repository.repositoryId().value()).normalize();
     }
 
     private Path personalRepoRoot(ApplicationWorkspaceVersion version, User user, PersonalWorkspaceId personalId) {
         return managedRoot.resolve("personalworktree")
-                .resolve(version.version())
+                .resolve(sanitizeVersionForBranchAndPath(version.version()))
                 .resolve(sanitizePathPart(user.unifiedAuthId()))
                 .resolve(version.repositoryId().value())
                 .resolve(personalId.value())
@@ -604,10 +611,32 @@ public class ManagedWorkspaceApplicationService {
 
     private String normalizeVersion(String version) {
         String value = requireText(version, "版本不能为空", "version");
-        if (!VERSION_PATTERN.matcher(value).matches()) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "版本必须为yyyyMMdd", Map.of("version", value));
+        // 兼容两种格式：
+        // - 历史数据：yyyyMMdd（8 位数字）
+        // - 新增版本：yyyy年M月（如 2024年1月），用户在前端「+新增版本」选择后原样传入。
+        if (VERSION_PATTERN.matcher(value).matches()) {
+            return value;
         }
-        return value;
+        if (VERSION_PATTERN_YEAR_MONTH.matcher(value).matches()) {
+            return value;
+        }
+        throw new PlatformException(ErrorCode.VALIDATION_ERROR, "版本必须为 yyyyMMdd 或 yyyy年M月", Map.of("version", value));
+    }
+
+    /**
+     * 把版本字符串转为分支名/路径安全片段。
+     * - yyyyMMdd：原样使用。
+     * - yyyy年M月：转为 yyyy-MM（如 2024年1月 → 2024-01，2024年12月 → 2024-12）。
+     * 数据库中 version 字段保留用户原值（"2024年1月"），仅在拼分支 / 路径时调本方法做转换。
+     */
+    private String sanitizeVersionForBranchAndPath(String version) {
+        java.util.regex.Matcher matcher = VERSION_PATTERN_YEAR_MONTH.matcher(version);
+        if (matcher.matches()) {
+            String year = matcher.group(1);
+            String month = String.format("%02d", Integer.parseInt(matcher.group(2)));
+            return year + "-" + month;
+        }
+        return version;
     }
 
     private String requireText(String value, String message, String field) {

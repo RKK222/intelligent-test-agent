@@ -410,6 +410,8 @@ async function mockBackendApi(
     recentBranchPreference?: { appId: string; workspaceId: string; branch: string; updatedAt: string } | null;
     /** 收集用户通过分支下拉发出的"切换分支"请求（POST branch-preference 的 branch 字段）。 */
     changeBranchRequests?: string[];
+    /** 收集「+新增版本」发出的 POST workspace-templates/{id}/versions 请求的 version 字段（用户原值）。 */
+    createVersionRequests?: string[];
   } = {}) {
   await page.addInitScript(() => {
     localStorage.setItem("test-agent.auth.token", "test-token");
@@ -530,6 +532,27 @@ async function mockBackendApi(
       }
       if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/applications\/app_gcms\/workspace-templates\/[^/]+\/versions$/.test(url.pathname)) {
         await route.fulfill(json([]));
+        return;
+      }
+      if (method === "POST" && /\/api\/internal\/platform\/workspace-management\/applications\/app_gcms\/workspace-templates\/[^/]+\/versions$/.test(url.pathname)) {
+        // 拦截「+新增版本」请求：捕获 payload，返回一个伪 ApplicationWorkspaceVersion 供前端刷新菜单使用。
+        const body = JSON.parse(route.request().postData() ?? "{}") as { version?: string };
+        capture.createVersionRequests ??= [];
+        capture.createVersionRequests.push(body.version ?? "");
+        await route.fulfill(json({
+          versionId: "awv_new",
+          applicationWorkspaceId: "awp_1",
+          appId: "app_gcms",
+          repositoryId: "repo_1",
+          version: body.version ?? "2024年1月",
+          branch: "feature_testagent_" + (body.version ?? "2024年1月"),
+          repoRootPath: "/tmp/test-agent/appworkspace/new/repo_1",
+          workspaceRootPath: "/tmp/test-agent/appworkspace/new/repo_1/F-GCMS/workspace",
+          runtimeWorkspace: workspace(),
+          status: "ACTIVE",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        }));
         return;
       }
       if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/workspace-versions\/[^/]+\/personal-workspaces$/.test(url.pathname)) {

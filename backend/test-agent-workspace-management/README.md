@@ -18,7 +18,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - `WorkspaceApplicationServiceTest` 覆盖工作区创建、分页/详情查询、未找到错误和文件服务编排。
 - `WorkspaceFileServiceTest` 覆盖 UTF-8 读写、路径穿越拒绝、目录列表排序与上限、文件大小限制和 null 内容写入。
 - `WorkspaceDirectoryServiceTest` 覆盖默认根目录、只返回子目录、排序、父目录边界、越权和缺失目录错误码。
-- `ManagedWorkspaceApplicationServiceTest` 覆盖应用成员校验、标准库分支校验、应用版本工作区创建、运行态 Workspace 关联和最近使用记录。
+- `ManagedWorkspaceApplicationServiceTest` 覆盖应用成员校验、标准库分支校验、应用版本工作区创建、运行态 Workspace 关联、最近使用记录、`yyyy年M月` 版本格式（`sanitizeVersionForBranchAndPath` 转 `yyyy-MM` 派生分支/路径）和非法版本格式拒绝。
 
 ## 允许依赖
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { BookmarkPlus, GitBranch, Layers, Save } from "lucide-vue-next";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { BookmarkPlus, GitBranch, Layers, Plus, Save } from "lucide-vue-next";
+import { ElDatePicker, ElDialog } from "element-plus";
 import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
 
 type VcsBranch = { name: string; isCurrent?: boolean };
@@ -54,6 +55,8 @@ const props = defineProps<{
   loadingVersions?: boolean;
   /** 是否禁用"保存当前分支为偏好"按钮（无 appId/workspaceId/branch 时） */
   rememberDisabled?: boolean;
+  /** 「+新增版本」是否正在提交中（父组件控制禁用 & 展示 loading） */
+  creatingVersion?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -67,6 +70,9 @@ const emit = defineEmits<{
   (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
   // 要求父组件按需懒加载某模板下的版本列表
   (e: "load-versions", templateId: string): void;
+  // 「+新增版本」弹窗确认后回调：父组件负责调用 createWorkspaceVersion。
+  // version 字段保留用户在前端选择的原始字符串（"yyyy年M月"），后端会校验并按需转换分支/路径。
+  (e: "create-version", payload: { template: AppWorkspaceTemplate; version: string }): void;
 }>();
 
 const showBranchValue = computed(() => props.showBranch !== false);
@@ -155,6 +161,35 @@ const useCascadeMenu = computed(() => templates.value.length > 0);
 const menuOpen = ref(false);
 const hoveredTemplateId = ref<string | null>(null);
 const menuRootRef = ref<HTMLElement | null>(null);
+
+// ===== 「+新增版本」弹窗状态 =====
+// createVersionTarget: 当前弹窗操作的模板；createVersionValue: el-date-picker 选中的 yyyy年M月 字符串。
+// createVersionOpen 控制 ElDialog 显隐；与两级菜单的 hover 状态解耦，避免鼠标移开后弹窗被父级 v-if 卸载。
+const createVersionTarget = ref<AppWorkspaceTemplate | null>(null);
+const createVersionValue = ref<string>("");
+const createVersionOpen = ref(false);
+
+function openCreateVersionDialog(template: AppWorkspaceTemplate) {
+  createVersionTarget.value = template;
+  createVersionValue.value = "";
+  // 关闭两级菜单，避免弹窗被外层 click outside 监听立即关掉。
+  closeMenu();
+  // 下一帧再开 dialog：保证前一次 closeMenu() 触发的 v-if 卸载先完成，避免和 dialog 共存出现 stacking 问题。
+  void nextTick(() => {
+    createVersionOpen.value = true;
+  });
+}
+
+function confirmCreateVersion() {
+  const target = createVersionTarget.value;
+  if (!target || !createVersionValue.value) return;
+  emit("create-version", { template: target, version: createVersionValue.value });
+  createVersionOpen.value = false;
+}
+
+function cancelCreateVersion() {
+  createVersionOpen.value = false;
+}
 
 // ===== 分支两级菜单弹出状态 =====
 // branchMenuOpen: 一级菜单（分组）开关；hoveredBranchGroup: 当前悬停的分组，控制二级菜单（分支名）显隐。
@@ -405,12 +440,12 @@ onBeforeUnmount(() => {
             >
               <div class="ta-workbench-cascade-item-main">
                 <span class="ta-workbench-cascade-item-name">{{ template.workspaceName }}</span>
-                <span class="ta-workbench-cascade-item-desc">{{ template.directoryPath }} · {{ template.branch }}</span>
               </div>
               <span class="ta-workbench-cascade-item-arrow" aria-hidden="true">›</span>
               <!--
                 子菜单（版本列表）：仅在 hover 或加载完成时渲染；通过 v-if 保证不渲染多余 DOM。
                 子菜单挂载在父级 li 上，方便 hover 状态在跨元素间自然转移。
+                列表底部固定渲染「+新增版本」行，点击后弹 el-dialog 选 yyyy年M月 提交。
               -->
               <div
                 v-if="hoveredTemplateId === template.workspaceId"
@@ -438,6 +473,19 @@ onBeforeUnmount(() => {
                     <span class="ta-workbench-cascade-submenu-item-desc">{{ version.branch }}</span>
                   </li>
                 </ul>
+                <!--
+                  底部固定「+新增版本」：与是否有版本、是否加载完成解耦。
+                  没版本时在「暂无版本」下面；有版本时在 ul 列表下方。
+                -->
+                <div
+                  class="ta-workbench-cascade-submenu-create"
+                  role="menuitem"
+                  :title="`为「${template.workspaceName}」新增版本`"
+                  @click.stop="openCreateVersionDialog(template)"
+                >
+                  <Plus class="ta-workbench-cascade-submenu-item-icon" />
+                  <span>新增版本</span>
+                </div>
               </div>
             </li>
           </ul>
@@ -527,10 +575,10 @@ onBeforeUnmount(() => {
           </div>
         </Teleport>
       </div>
-      <span v-else class="ta-workbench-footer-branch is-disabled">
+      <!-- <span v-else class="ta-workbench-footer-branch is-disabled">
         <GitBranch class="ta-workbench-footer-icon" />
         <span>分支选择</span>
-      </span>
+      </span> -->
       <!--
         单独"记住当前分支"按钮：两级菜单中"当前分支"组只有 current branch 一项，
         用户没办法通过 change-branch 路径触发 markRecentBranch 写入偏好。
@@ -573,6 +621,49 @@ onBeforeUnmount(() => {
       </button>
     </div>
   </footer>
+  <!--
+    「+新增版本」弹窗：使用 el-dialog 居中显示，与两级菜单 hover 状态解耦。
+    时间选择器 type="month" + format="yyyy年M月" + value-format="yyyy年M月"，
+    选完后 createVersionValue 直接是 "2024年1月" 这种字符串，原样透传给后端。
+  -->
+  <ElDialog
+    v-model="createVersionOpen"
+    :title="`为「${createVersionTarget?.workspaceName ?? ''}」新增版本`"
+    width="420px"
+    :close-on-click-modal="false"
+    @close="cancelCreateVersion"
+  >
+    <div class="ta-workbench-create-version">
+      <label class="ta-workbench-create-version-label">选择月份（格式 yyyy年M月）</label>
+      <ElDatePicker
+        v-model="createVersionValue"
+        type="month"
+        format="yyyy年M月"
+        value-format="yyyy年M月"
+        placeholder="请选择月份"
+        style="width: 100%"
+      />
+      <p class="ta-workbench-create-version-hint">提交后会在远端创建对应的工作空间版本。</p>
+    </div>
+    <template #footer>
+      <button
+        type="button"
+        class="ta-workbench-create-version-cancel"
+        :disabled="creatingVersion"
+        @click="cancelCreateVersion"
+      >
+        取消
+      </button>
+      <button
+        type="button"
+        class="ta-workbench-create-version-confirm"
+        :disabled="!createVersionValue || creatingVersion"
+        @click="confirmCreateVersion"
+      >
+        {{ creatingVersion ? "创建中…" : "确定" }}
+      </button>
+    </template>
+  </ElDialog>
 </template>
 
 <style scoped>
@@ -898,6 +989,94 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/*
+  子菜单底部「+新增版本」按钮：与子菜单上下边距隔开，虚线框 + 强调色 + Plus 图标。
+  hover 时高亮，点击后由父组件弹 el-dialog 选 yyyy年M月。
+*/
+.ta-workbench-cascade-submenu-create {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-top: 1px dashed #e4e4e7;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #1d4ed8;
+  font-size: 12px;
+  transition: background-color 0.1s ease;
+}
+
+.ta-workbench-cascade-submenu-create:hover {
+  background: #eef3ff;
+}
+
+.ta-workbench-cascade-submenu-item-icon {
+  width: 12px;
+  height: 12px;
+  color: inherit;
+}
+
+/*
+  「+新增版本」弹窗内容：label + 时间选择器 + hint。
+  按钮用 plain 风格，避免与 el-button 默认 primary 撞色。
+*/
+.ta-workbench-create-version {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ta-workbench-create-version-label {
+  font-size: 12px;
+  color: #555;
+}
+
+.ta-workbench-create-version-hint {
+  font-size: 11px;
+  color: #999;
+  margin: 0;
+}
+
+.ta-workbench-create-version-cancel,
+.ta-workbench-create-version-confirm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 14px;
+  border-radius: 6px;
+  border: 0.8px solid #dfdfdf;
+  background: #fff;
+  color: #333;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.ta-workbench-create-version-confirm {
+  background: #18181b;
+  border-color: #18181b;
+  color: #fff;
+  margin-left: 8px;
+}
+
+.ta-workbench-create-version-cancel:hover:not(:disabled) {
+  background: #f5f5f5;
+  border-color: #b5b5b5;
+}
+
+.ta-workbench-create-version-confirm:hover:not(:disabled) {
+  background: #000;
+}
+
+.ta-workbench-create-version-cancel:disabled,
+.ta-workbench-create-version-confirm:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 /* ===== 分支两级菜单样式 ===== */

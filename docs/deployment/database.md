@@ -275,6 +275,26 @@ V10 种子数据对 F-COSS 的影响：
 - 仅在 `users.username = '888888888'` 存在时才插入应用、成员和 recent 偏好，避免在没有初始化用户的环境（如生产）执行失败。
 - 不影响 V5/V8/V9 的用户、角色、配置表结构与已有迁移路径。
 
+## V13 F-COSS 应用开发种子数据扩展
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V13__seed_fcoss_more_workspaces.sql` 在 V10 的基础上为 F-COSS 应用追加几个工作空间模板和初始版本，给「+新增版本」和工作空间选择器提供更多可选项：
+
+| 数据 | 标识 | 说明 |
+|---|---|---|
+| 应用工作空间模板 `awp_fcoss_mobile` | `application_workspaces` | F-COSS 移动端，`mobile` 分支 / `src/mobile` 目录。 |
+| 应用工作空间模板 `awp_fcoss_sync` | `application_workspaces` | F-COSS 数据同步，`sync` 分支 / `sync` 目录。 |
+| 应用工作空间模板 `awp_fcoss_report` | `application_workspaces` | F-COSS 报表，`report` 分支 / `reports` 目录。 |
+| 应用版本 `20260705` | `application_workspace_versions` → `wrk_fcoss_mobile_20260705` | 移动端首个 yyyyMMdd 版本。 |
+| 应用版本 `20260710` | `application_workspace_versions` → `wrk_fcoss_sync_20260710` | 数据同步首个 yyyyMMdd 版本。 |
+| 应用版本 `20260715` | `application_workspace_versions` → `wrk_fcoss_report_20260715` | 报表首个 yyyyMMdd 版本。 |
+
+兼容策略：
+
+- 全部插入语句使用 `where exists` / `where not exists` 保护，重复执行迁移不会破坏数据。
+- 仅在 V10 的 `app_fcoss` / `repo_fcoss_main` 存在时才追加模板/版本，与 V10 的「依赖基础数据存在」策略一致。
+- `created_by_user_id` 选择 `users.username = '888888888'` 的用户，没有该用户时整条插入被跳过；不引入新用户。
+- 不影响 V9 的表结构与已有迁移路径；模板与版本均为 ACTIVE，运行态 `workspaces` 同步 ACTIVE 状态。
+
 ## V11 用户工作区分支偏好表
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V11__create_user_workspace_branch_preferences.sql` 持久化用户在 (appId, workspaceId) 维度下最近一次手动选择的 VCS 分支，支撑工作台工作区下分支选择按钮的"下次进入默认切换"：

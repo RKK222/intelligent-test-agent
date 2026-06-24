@@ -1155,6 +1155,63 @@ function handleLoadVersions(templateId: string) {
   ensureAppVersionsLoaded(templateId);
 }
 
+// 「+新增版本」流程：把 yyyy年M月 原样传给后端 createWorkspaceVersion。
+// 成功后失效该模板下的版本查询，让 useQueries 重新拉取；同时把新版本切到工作区。
+const creatingVersion = ref(false);
+async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemplate; version: string }) {
+  const appId = selectedAppId.value;
+  if (!appId) {
+    feedback.value = { kind: "error", title: "未选择应用", description: "请先选择要新增版本的应用。" };
+    return;
+  }
+  creatingVersion.value = true;
+  try {
+    const response = await api.createWorkspaceVersion(appId, payload.template.workspaceId, {
+      version: payload.version
+    });
+    // 失效版本查询：清掉缓存的 versionsByTemplateId 条目，并加入 loadedTemplateIds
+    // 让 useQueries 在下一个 tick 重新发起 listWorkspaceVersions。
+    const nextCache = { ...versionsByTemplateId.value };
+    delete nextCache[payload.template.workspaceId];
+    versionsByTemplateId.value = nextCache;
+    if (!loadedTemplateIds.value.has(payload.template.workspaceId)) {
+      const nextLoaded = new Set(loadedTemplateIds.value);
+      nextLoaded.add(payload.template.workspaceId);
+      loadedTemplateIds.value = nextLoaded;
+    } else {
+      // 已加载过：主动触发一次 invalidate 让 vue-query 重新拉取
+      queryClient.invalidateQueries({
+        queryKey: ["managed-workspace", "app-versions", selectedAppIdRef, payload.template.workspaceId]
+      });
+    }
+    // 切到新版本对应的运行态工作区，保持「新增完即进入新版本」的体验。
+    if (response.runtimeWorkspace?.workspaceId) {
+      const workspace: Workspace = {
+        workspaceId: response.runtimeWorkspace.workspaceId,
+        name: response.runtimeWorkspace.name,
+        rootPath: response.runtimeWorkspace.rootPath,
+        status: response.runtimeWorkspace.status as Workspace["status"],
+        createdAt: response.runtimeWorkspace.createdAt,
+        updatedAt: response.runtimeWorkspace.updatedAt
+      };
+      await applyManagedWorkspace(workspace, {
+        successTitle: "已切换应用版本",
+        successDescription: `${payload.template.workspaceName} · ${response.version}`
+      });
+    } else {
+      feedback.value = {
+        kind: "info",
+        title: "新增版本成功",
+        description: `${payload.template.workspaceName} · ${response.version}`
+      };
+    }
+  } catch (error) {
+    feedback.value = errorFeedback("新增版本失败", error);
+  } finally {
+    creatingVersion.value = false;
+  }
+}
+
 async function handleSelectApp(appId: string) {
   // 切换应用时先清空旧 workspace 状态，避免文件树继续展示上一个应用的 workspace 内容
   resetWorkspaceState();
@@ -1167,13 +1224,10 @@ async function handleSelectApp(appId: string) {
     // 两种情况都通过 applyManagedWorkspace 完成"写偏好 + 切工作区"两步，保证状态与持久化一致。
     const pick = await pickDefaultWorkspaceForApp(appId);
     if (pick) {
-      await applyManagedWorkspace(pick.workspace, pick.isFallback
-        ? { successTitle: "已切换到首个工作空间", successDescription: pick.workspace.name }
-        : { successTitle: "已切换应用", successDescription: pick.workspace.name });
+      await applyManagedWorkspace(pick.workspace);
       return;
     }
     // 应用下没有任何工作空间模板/版本，保持空态由用户手动选择。
-    feedback.value = { kind: "info", title: "已切换应用", description: "请选择工作空间" };
   } catch (error) {
     feedback.value = errorFeedback("切换应用失败", error);
   }
@@ -1766,6 +1820,7 @@ async function handleLogout() {
           :loading-app-templates="loadingAppTemplates"
           :loading-app-versions="loadingAppVersions"
           :remember-disabled="!selectedAppId || !selectedWorkspaceId || !vcsCurrentBranch"
+          :creating-version="creatingVersion"
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
           @open-diff="(path: string) => { workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
@@ -1775,6 +1830,7 @@ async function handleLogout() {
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @remember-current-branch="handleRememberCurrentBranch"
+          @create-version="handleCreateVersion"
         />
         <div v-else class="managed-workspace-empty">
           <p>当前应用尚未切换到可用工作区。</p>

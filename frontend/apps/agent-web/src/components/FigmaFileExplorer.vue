@@ -27,6 +27,8 @@ defineProps<FileExplorerProps & {
   loadingAppVersions?: boolean;
   /** 是否禁用 footer 上的"记住当前分支"按钮；无 appId/workspaceId/branch 时父组件传 true */
   rememberDisabled?: boolean;
+  /** 「+新增版本」提交中标记（父组件控制 WorkbenchFooter 弹窗按钮的禁用与文案） */
+  creatingVersion?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -42,6 +44,8 @@ const emit = defineEmits<{
   loadVersions: [templateId: string];
   // 把当前 VCS 分支写入 user_workspace_branch_preferences；父组件负责调 markRecentBranch。
   rememberCurrentBranch: [];
+  // 「+新增版本」弹窗确认后由父组件调用 createWorkspaceVersion。
+  createVersion: [payload: { template: AppWorkspaceTemplate; version: string }];
 }>();
 </script>
 
@@ -75,10 +79,12 @@ const emit = defineEmits<{
       :loading-templates="loadingAppTemplates"
       :loading-versions="loadingAppVersions"
       :remember-disabled="rememberDisabled"
+      :creating-version="creatingVersion"
       @change-branch="(name: string) => emit('changeBranch', name)"
       @select-version="(payload) => emit('selectVersion', payload)"
       @load-versions="(templateId: string) => emit('loadVersions', templateId)"
       @remember-current-branch="emit('rememberCurrentBranch')"
+      @create-version="(payload) => emit('createVersion', payload)"
     />
   </div>
 </template>

@@ -465,11 +465,12 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 规则：
 
-- `version` 只支持 `yyyyMMdd`。
-- 标准代码库分支固定为 `feature_testagent_{version}`，后端会用当前用户 SSH key 先查分支；不存在时返回 `CONFLICT`。
+- `version` 同时支持 `yyyyMMdd`（历史 8 位数字）和 `yyyy年M月`（前端「+新增版本」原样透传，如 `2024年1月`）；其它格式返回 `VALIDATION_ERROR`。
+- `yyyy年M月` 格式入库时 `version` 字段保留原值；派生分支名/路径时转 `yyyy-MM`（如 `2024年1月` → `2024-01`），避免 git ref / 路径里出现中文。
+- 标准代码库分支固定为 `feature_testagent_{branchFragment}`，其中 `branchFragment` 是 `version` 经 `sanitizeVersionForBranchAndPath` 转换后的值；后端会用当前用户 SSH key 先查分支；不存在时返回 `CONFLICT`。
 - 非标准代码库必须传入 `branch`，后端按该分支 clone。
 - 物理目录默认在 `${user.home}/test-agent-data` 下，可通过 `test-agent.managed-workspace.root` 或 `TEST_AGENT_MANAGED_WORKSPACE_ROOT` 覆盖。
-- 应用版本工作区物理仓库目录为 `appworkspace/{version}/{repositoryId}`，opencode root 为仓库目录下模板 `directoryPath`。
+- 应用版本工作区物理仓库目录为 `appworkspace/{branchFragment}/{repositoryId}`，opencode root 为仓库目录下模板 `directoryPath`。
 - 磁盘目录已存在时，后端校验 origin URL 和当前分支，匹配则接管，不覆盖、不删除；不匹配返回 `CONFLICT`。
 - SSH Git 操作只使用当前登录用户保存的唯一 SSH key；HTTPS 不额外支持账号或 token。
 
@@ -522,10 +523,11 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 前端两级菜单（应用工作空间→版本）使用说明：
 
-- 工作台左下角的"应用工作空间"按钮按当前应用（`selectedAppId`）查询 `GET /applications/{appId}/workspace-templates`，渲染第一级菜单。
+- 工作台左下角的"应用工作空间"按钮按当前应用（`selectedAppId`）查询 `GET /applications/{appId}/workspace-templates`，渲染第一级菜单（只显示 `workspaceName`，不显示 `directoryPath` / `branch`）。
 - 鼠标 hover 第一级菜单项时按需触发 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 加载该模板下的版本（懒加载，未展开的模板不发请求）。
 - 点击版本后调用 `GET /workspaces/{workspaceId}` 拉取对应的运行态 `Workspace`，再调用 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好，并触发工作台切换。
 - 当前版本匹配规则：优先按 `runtimeWorkspace.workspaceId` 精确匹配，其次按 `workspaceRootPath` 匹配 `selectedWorkspace.rootPath`。
+- 第二级菜单（版本列表）底部固定一行「+新增版本」：点击后弹 el-dialog，内嵌 `ElDatePicker`（`type=month`, `format=yyyy年M月`），用户选月份后调用 `POST /applications/{appId}/workspace-templates/{templateId}/versions`，请求体 `version` 字段原样透传 `yyyy年M月` 字符串。成功后失效 `versionsByTemplateId` 缓存并把新建版本切到工作区。
 
 应用级"默认工作空间"解析规则（前端 `handleSelectApp` + `pickDefaultWorkspaceForApp`）：
 
