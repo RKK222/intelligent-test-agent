@@ -81,7 +81,7 @@ public class OpencodeRuntimeApplicationService {
      * 列出当前 workspace 可用 agent。
      */
     public Object listAgents(String workspaceId, String traceId) {
-        return get(workspaceLocation(workspaceId), "/api/agent", Map.of(), traceId);
+        return get(workspaceLocation(workspaceId), "/agent", Map.of(), traceId);
     }
 
     /**
@@ -102,7 +102,7 @@ public class OpencodeRuntimeApplicationService {
      * 列出 opencode command catalog。
      */
     public Object listCommands(String workspaceId, String traceId) {
-        return get(workspaceLocation(workspaceId), "/api/command", Map.of(), traceId);
+        return get(workspaceLocation(workspaceId), "/command", Map.of(), traceId);
     }
 
     /**
@@ -110,6 +110,13 @@ public class OpencodeRuntimeApplicationService {
      */
     public Object listReferences(String workspaceId, String traceId) {
         return get(workspaceLocation(workspaceId), "/api/reference", Map.of(), traceId);
+    }
+
+    /**
+     * 查询 opencode runtime 健康状态，兼容 Web App 原始 /api/status 请求。
+     */
+    public Object runtimeStatus(String workspaceId, String traceId) {
+        return get(workspaceLocation(workspaceId), "/global/health", Map.of(), traceId);
     }
 
     /**

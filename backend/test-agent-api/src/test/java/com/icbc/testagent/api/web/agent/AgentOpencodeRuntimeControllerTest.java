@@ -37,6 +37,27 @@ class AgentOpencodeRuntimeControllerTest {
     }
 
     @Test
+    void agentControllerExposesOpencodeStatusPath() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        when(service.runtimeStatus(eq("wrk_1234567890abcdef"), eq("trace_1234567890abcdef")))
+                .thenReturn(Map.of("healthy", true));
+        when(service.withAgent(eq("opencode"), any())).thenAnswer(invocation ->
+                ((Supplier<?>) invocation.getArgument(1)).get());
+        WebTestClient client = WebTestClient.bindToController(new AgentOpencodeRuntimeController(service))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.get()
+                .uri("/api/internal/agent/opencode/api/status?workspaceId=wrk_1234567890abcdef")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.healthy").isEqualTo(true);
+    }
+
+    @Test
     void agentControllerRepliesToPermissionThroughOpencodePath() {
         OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
         when(service.replyPermission(

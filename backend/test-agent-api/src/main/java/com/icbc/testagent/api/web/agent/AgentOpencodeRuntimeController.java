@@ -83,6 +83,16 @@ public class AgentOpencodeRuntimeController {
     }
 
     /**
+     * 查询 runtime 健康状态，兼容 opencode Web App 原始 status 路径。
+     */
+    @GetMapping({
+            "/api/internal/agent/{agentId}/api/status"
+    })
+    public Mono<ApiResponse<Object>> runtimeStatus(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
+        return agentResponse(exchange, traceId -> runtimeService.runtimeStatus(workspaceId, traceId));
+    }
+
+    /**
      * 列出文件系统目录，路径解析和 workspace 路由由应用服务负责。
      */
     @GetMapping({

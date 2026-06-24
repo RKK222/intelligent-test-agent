@@ -64,6 +64,7 @@
 | `/api/internal/agent/{agentId}/runs/{runId}/diff` | 查询 Run 级 Diff。 |
 | `/api/internal/agent/opencode/api/agent` | Agent 目录。 |
 | `/api/internal/agent/opencode/api/model` | Model 目录。 |
+| `/api/internal/agent/opencode/api/status` | Runtime 健康状态。 |
 | `/api/internal/agent/opencode/file` | 文件列表。 |
 | `/api/internal/agent/opencode/file/content` | 文件读取。 |
 | `/api/internal/agent/opencode/vcs/status` | VCS 状态。 |
@@ -664,6 +665,7 @@ opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controlle
 | `GET` | `/api/providers?workspaceId=` | 读取当前 workspace 的 Provider 只读列表。 |
 | `GET` | `/api/commands?workspaceId=` | 读取可执行命令列表。 |
 | `GET` | `/api/references?workspaceId=` | 读取可引用上下文目录。 |
+| `GET` | `/api/status?workspaceId=` | 读取 opencode runtime 健康状态，后端映射到 opencode `/global/health`。 |
 | `GET` | `/api/fs/list?workspaceId=&path=` | 通过 opencode runtime 列目录。 |
 | `GET` | `/api/fs/find?workspaceId=&query=` | 通过 opencode runtime 查找文件。 |
 | `GET` | `/api/fs/read?workspaceId=&path=` | 通过 opencode runtime 读文件内容。 |

@@ -87,6 +87,17 @@ public class PlatformOpencodeRuntimeController {
     }
 
     /**
+     * 查询 runtime 健康状态，供前端兼容 opencode Web App status 请求。
+     */
+    @GetMapping({
+            "/api/status",
+            "/api/internal/platform/opencode-runtime/status",
+    })
+    public Mono<ApiResponse<Object>> runtimeStatus(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
+        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.runtimeStatus(workspaceId, traceId));
+    }
+
+    /**
      * 列出文件系统目录，路径解析和 workspace 路由由应用服务负责。
      */
     @GetMapping({
