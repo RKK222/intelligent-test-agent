@@ -5,15 +5,15 @@ spring:
   datasource:
     druid:
       driver-class-name: org.postgresql.Driver
-      url: jdbc:postgresql://180.184.65.201:5432/testagent
+      url: jdbc:postgresql://192.168.100.135:5432/testagent
       username: testagent
-      password: a5A7d2hK
+      password: testagent
   flyway:
     enabled: true
     locations: classpath:db/migration
   data:
     redis:
-      host: 127.0.0.1
+      host: 192.168.100.135
       port: 6379
       password: ""
       timeout: 1s
