@@ -980,6 +980,9 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   lastPrompt.value = displayPrompt;
   diffContextParts.value = [];
   dispatchChat({ type: "user.submitted", prompt: displayPrompt, parts });
+  if (!displayPrompt) {
+    return;
+  }
   // 启动计时 + 重置任务消耗累计（lastDuration/lastTokens/lastThoughtForMs 保留上一轮终态以供刷新对比）
   chatStartedAt.value = Date.now();
   accumulatedTokens.value = 0;
