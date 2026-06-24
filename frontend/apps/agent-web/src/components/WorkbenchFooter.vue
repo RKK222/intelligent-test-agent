@@ -158,9 +158,16 @@ const useCascadeMenu = computed(() => templates.value.length > 0);
 
 // ===== 两级菜单弹出状态 =====
 // menuOpen: 一级菜单（工作空间列表）开关；hoveredTemplateId: 当前悬停的模板，控制二级菜单（版本）显隐。
+// cascadeButtonRef: 触发按钮 DOM 引用；cascadeMenuPos / cascadeSubmenuPos: 一级与二级菜单的 fixed 定位坐标。
+// 菜单用 <Teleport to="body"> + position:fixed 挂到 body 末尾，避开父级 dockview 面板 overflow:hidden 裁切。
 const menuOpen = ref(false);
 const hoveredTemplateId = ref<string | null>(null);
-const menuRootRef = ref<HTMLElement | null>(null);
+const hoveredTemplateEl = ref<HTMLElement | null>(null);
+const cascadeButtonRef = ref<HTMLElement | null>(null);
+const cascadeMenuPos = ref<{ top: number; left: number } | null>(null);
+const cascadeSubmenuPos = ref<{ top: number; left: number } | null>(null);
+let cascadePosRafId: number | null = null;
+let cascadeSubmenuCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ===== 「+新增版本」弹窗状态 =====
 // createVersionTarget: 当前弹窗操作的模板；createVersionValue: el-date-picker 选中的 yyyy年M月 字符串。
@@ -231,12 +238,99 @@ function onBranchPosScrollOrResize() {
   });
 }
 
+// 计算一级菜单位置：固定在触发按钮正上方，6px 间隙。
+// 必须在 menuOpen 置 true 前调用（因为 fixed 定位依赖 cascadeMenuPos 的存在）。
+function updateCascadeMenuPos() {
+  if (!cascadeButtonRef.value) return;
+  const rect = cascadeButtonRef.value.getBoundingClientRect();
+  cascadeMenuPos.value = {
+    top: rect.top - 6,
+    left: rect.left
+  };
+}
+
+// 计算二级菜单位置：固定在当前 hover 的模板行右侧，让版本子菜单自然越过一级菜单的边界。
+// 关键：用一级菜单面板的右边缘 + 4px 间隙作为子菜单的 left，而不是 li 的右边缘。
+// 原因：li 在面板内（面板有 padding），li 的 right < 面板的 right，按 li 算会让子菜单起点仍落在面板里。
+// 防遮挡：先按 li 的 top 算 natural top；下一帧测量子菜单实际高度，若底部超出视口则向上偏移。
+// 偏移量 = (naturalTop + height) - (viewportHeight - margin)；偏移后底部对齐视口底部减 margin，
+// 顶部不会 < margin（因为子菜单 max-height = 100vh - 24 = viewport - 2*margin，偏移后顶至少是 margin）。
+function updateCascadeSubmenuPos() {
+  if (!hoveredTemplateEl.value) {
+    cascadeSubmenuPos.value = null;
+    return;
+  }
+  const liRect = hoveredTemplateEl.value.getBoundingClientRect();
+  const panelEl = document.querySelector(".ta-workbench-cascade-panel") as HTMLElement | null;
+  const anchorRight = panelEl ? panelEl.getBoundingClientRect().right : liRect.right;
+  const naturalTop = liRect.top - 6;
+  const left = anchorRight + 4;
+  cascadeSubmenuPos.value = { top: naturalTop, left };
+  // 渲染后再做一次"是否超出底部"的修正
+  void nextTick(() => {
+    if (!cascadeSubmenuPos.value) return;
+    const submenuEl = document.querySelector(".ta-workbench-cascade-submenu") as HTMLElement | null;
+    if (!submenuEl) return;
+    const rect = submenuEl.getBoundingClientRect();
+    const viewportHeight = window.innerHeight;
+    const margin = 12;
+    if (rect.bottom > viewportHeight - margin) {
+      const overflow = rect.bottom - (viewportHeight - margin);
+      const newTop = Math.max(margin, naturalTop - overflow);
+      if (newTop !== cascadeSubmenuPos.value.top) {
+        cascadeSubmenuPos.value = { top: newTop, left };
+      }
+    }
+  });
+}
+
+// 菜单打开期间：滚动 / 窗口尺寸变化时同步刷新一二级菜单位置。
+let onCascadePosScrollOrResizeBound = () => {
+  if (!menuOpen.value) return;
+  if (cascadePosRafId !== null) cancelAnimationFrame(cascadePosRafId);
+  cascadePosRafId = requestAnimationFrame(() => {
+    updateCascadeMenuPos();
+    updateCascadeSubmenuPos();
+    cascadePosRafId = null;
+  });
+};
+
+function clearCascadeSubmenuCloseTimer() {
+  if (cascadeSubmenuCloseTimer !== null) {
+    clearTimeout(cascadeSubmenuCloseTimer);
+    cascadeSubmenuCloseTimer = null;
+  }
+}
+
+// 二级菜单的"延迟关闭"：用户从一级菜单 li 移到二级菜单的中间地带（gap）会触发 mouseleave，
+// 用 200ms 延迟给鼠标进入二级菜单留出窗口；进入二级菜单时清掉定时器（保持打开）。
+function scheduleCascadeSubmenuClose() {
+  clearCascadeSubmenuCloseTimer();
+  const hovered = hoveredTemplateId.value;
+  if (!hovered) return;
+  cascadeSubmenuCloseTimer = setTimeout(() => {
+    if (hoveredTemplateId.value === hovered) {
+      hoveredTemplateId.value = null;
+      hoveredTemplateEl.value = null;
+      cascadeSubmenuPos.value = null;
+    }
+    cascadeSubmenuCloseTimer = null;
+  }, 200);
+}
+
 const selectedTemplate = computed(() =>
   templates.value.find((template) => template.versions?.some((version) => version.versionId === props.selectedVersionId))
 );
 const selectedVersion = computed(() =>
   selectedTemplate.value?.versions?.find((version) => version.versionId === props.selectedVersionId)
 );
+
+// 当前 hover 的模板：二级菜单用它展示版本列表、提示文案和「+新增版本」入口。
+// 从 hoveredTemplateId 反查 templates，避免每次 hover 重新构造对象。
+const hoveredTemplate = computed<AppWorkspaceTemplate | null>(() => {
+  if (!hoveredTemplateId.value) return null;
+  return templates.value.find((template) => template.workspaceId === hoveredTemplateId.value) ?? null;
+});
 
 const triggerLabel = computed(() => {
   if (selectedVersion.value && selectedTemplate.value) {
@@ -249,7 +343,11 @@ function toggleMenu() {
   if (menuOpen.value) {
     closeMenu();
   } else {
+    // 打开前先算 fixed 坐标；菜单用 Teleport 挂到 body，定位不能依赖父级 stacking context。
+    updateCascadeMenuPos();
     menuOpen.value = true;
+    window.addEventListener("scroll", onCascadePosScrollOrResizeBound, true);
+    window.addEventListener("resize", onCascadePosScrollOrResizeBound);
     // 首次打开时若所有模板都未加载版本，触发一次懒加载
     const firstUnloaded = templates.value.find((template) => !template.versions);
     if (firstUnloaded) {
@@ -261,17 +359,30 @@ function toggleMenu() {
 function closeMenu() {
   menuOpen.value = false;
   hoveredTemplateId.value = null;
+  hoveredTemplateEl.value = null;
+  cascadeSubmenuPos.value = null;
+  clearCascadeSubmenuCloseTimer();
+  window.removeEventListener("scroll", onCascadePosScrollOrResizeBound, true);
+  window.removeEventListener("resize", onCascadePosScrollOrResizeBound);
+  if (cascadePosRafId !== null) {
+    cancelAnimationFrame(cascadePosRafId);
+    cascadePosRafId = null;
+  }
 }
 
 function onDocumentClick(event: MouseEvent) {
+  // 菜单已 Teleport 到 body，无法再用 contains()；改用 closest() 找最近的菜单/按钮容器。
   if (menuOpen.value) {
     const target = event.target as Node | null;
-    if (menuRootRef.value && target && !menuRootRef.value.contains(target)) {
+    if (!target) return;
+    const insidePanel = target instanceof Element ? target.closest(".ta-workbench-cascade-panel") : null;
+    const insideSubmenu = target instanceof Element ? target.closest(".ta-workbench-cascade-submenu") : null;
+    const insideButton = target instanceof Element ? target.closest(".ta-workbench-cascade") : null;
+    if (!insidePanel && !insideSubmenu && !insideButton) {
       closeMenu();
     }
   }
-  // Teleport 到 body 后菜单不在触发按钮 DOM 子树里，contains 失效；
-  // 直接判断 target 是否在菜单内（用 closest 找 .ta-workbench-branch-panel）或按钮内。
+  // 分支菜单同样已 Teleport 到 body，用 closest() 判断。
   if (branchMenuOpen.value) {
     const target = event.target as Node | null;
     if (!target) return;
@@ -303,28 +414,32 @@ onBeforeUnmount(() => {
   document.removeEventListener("keydown", onDocumentKeydown);
 });
 
-function onTemplateEnter(template: AppWorkspaceTemplate) {
+function onTemplateEnter(template: AppWorkspaceTemplate, event: MouseEvent) {
   hoveredTemplateId.value = template.workspaceId;
+  // 记录当前 hover 行的 DOM 引用，用于子菜单 fixed 定位 + scroll/resize 期间重算。
+  hoveredTemplateEl.value = event.currentTarget as HTMLElement;
+  clearCascadeSubmenuCloseTimer();
   if (!template.versions) {
     // 版本未加载：通知父组件按需拉取；hover 状态保留，loading 完成后会渲染子菜单
     emit("load-versions", template.workspaceId);
   }
+  // 等 hoveredTemplateId 触发 v-if 渲染子菜单后再算坐标。
+  void nextTick(() => updateCascadeSubmenuPos());
 }
 
 function onTemplateLeave() {
   // 200ms 延迟关闭，给用户从一级菜单滑到二级菜单留出时间；如在 200ms 内鼠标进入子菜单则取消关闭
-  const hovered = hoveredTemplateId.value;
-  if (!hovered) return;
-  setTimeout(() => {
-    if (hoveredTemplateId.value === hovered) {
-      hoveredTemplateId.value = null;
-    }
-  }, 200);
+  scheduleCascadeSubmenuClose();
 }
 
-function keepSubmenuOpen() {
-  // 鼠标进入子菜单：清掉上面 setTimeout 的关闭意图（通过重置 hoveredTemplateId 实现）
-  // 由于子菜单渲染条件依赖 hoveredTemplateId === templateId，hover 在模板上时已经置上，这里不需要额外动作
+function onCascadeSubmenuEnter() {
+  // 进入子菜单：清掉 setTimeout 的关闭意图，hoveredTemplateId 保持，子菜单继续显示。
+  clearCascadeSubmenuCloseTimer();
+}
+
+function onCascadeSubmenuLeave() {
+  // 离开子菜单：同样走延迟关闭，方便用户从子菜单滑到其它位置时被误关。
+  scheduleCascadeSubmenuClose();
 }
 
 function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVersion) {
@@ -391,6 +506,14 @@ onBeforeUnmount(() => {
     cancelAnimationFrame(branchPosRafId);
     branchPosRafId = null;
   }
+  // 工作空间两级菜单的全局监听兜底
+  clearCascadeSubmenuCloseTimer();
+  window.removeEventListener("scroll", onCascadePosScrollOrResizeBound, true);
+  window.removeEventListener("resize", onCascadePosScrollOrResizeBound);
+  if (cascadePosRafId !== null) {
+    cancelAnimationFrame(cascadePosRafId);
+    cascadePosRafId = null;
+  }
 });
 </script>
 
@@ -404,11 +527,11 @@ onBeforeUnmount(() => {
       -->
       <div
         v-if="useCascadeMenu"
-        ref="menuRootRef"
         class="ta-workbench-cascade"
         :class="{ 'is-open': menuOpen }"
       >
         <button
+          ref="cascadeButtonRef"
           type="button"
           class="ta-workbench-footer-branch"
           :title="triggerLabel"
@@ -419,77 +542,96 @@ onBeforeUnmount(() => {
           <Layers class="ta-workbench-footer-icon" />
           <span class="ta-workbench-footer-branch-label">{{ triggerLabel }}</span>
         </button>
-        <div v-if="menuOpen" class="ta-workbench-cascade-panel" role="menu" @click.stop>
-          <div class="ta-workbench-cascade-header">
-            <span>应用：{{ appName || "—" }}</span>
-            <span v-if="loadingTemplates" class="ta-workbench-cascade-loading">加载中…</span>
-          </div>
-          <ul class="ta-workbench-cascade-list" role="none">
-            <li
-              v-for="template in templates"
-              :key="template.workspaceId"
-              :class="[
-                'ta-workbench-cascade-item',
-                hoveredTemplateId === template.workspaceId && 'is-hovered',
-                template.versions?.some((v) => v.versionId === selectedVersionId) && 'is-selected'
-              ]"
-              role="menuitem"
-              :aria-haspopup="true"
-              @mouseenter="onTemplateEnter(template)"
-              @mouseleave="onTemplateLeave"
-            >
-              <div class="ta-workbench-cascade-item-main">
-                <span class="ta-workbench-cascade-item-name">{{ template.workspaceName }}</span>
-              </div>
-              <span class="ta-workbench-cascade-item-arrow" aria-hidden="true">›</span>
-              <!--
-                子菜单（版本列表）：仅在 hover 或加载完成时渲染；通过 v-if 保证不渲染多余 DOM。
-                子菜单挂载在父级 li 上，方便 hover 状态在跨元素间自然转移。
-                列表底部固定渲染「+新增版本」行，点击后弹 el-dialog 选 yyyy年M月 提交。
-              -->
-              <div
-                v-if="hoveredTemplateId === template.workspaceId"
-                class="ta-workbench-cascade-submenu"
-                role="menu"
-                @mouseenter="keepSubmenuOpen"
+        <!--
+          两级菜单用 <Teleport to="body"> + position:fixed 挂到 body 末尾，
+          避开 dockview 面板的 overflow:hidden / 内部 stacking context 裁切。
+          一级菜单 fixed 定位到触发按钮正上方；二级菜单 fixed 定位到当前 hover 行右侧，
+          不再嵌在一级菜单 li 内，所以可以越过一级菜单的边界显示。
+        -->
+        <Teleport to="body">
+          <div
+            v-if="menuOpen && cascadeMenuPos"
+            class="ta-workbench-cascade-panel"
+            role="menu"
+            :style="{ top: `${cascadeMenuPos.top}px`, left: `${cascadeMenuPos.left}px` }"
+            @click.stop
+          >
+            <div class="ta-workbench-cascade-header">
+              <span>应用：{{ appName || "—" }}</span>
+              <span v-if="loadingTemplates" class="ta-workbench-cascade-loading">加载中…</span>
+            </div>
+            <ul class="ta-workbench-cascade-list" role="none">
+              <li
+                v-for="template in templates"
+                :key="template.workspaceId"
+                :class="[
+                  'ta-workbench-cascade-item',
+                  hoveredTemplateId === template.workspaceId && 'is-hovered',
+                  template.versions?.some((v) => v.versionId === selectedVersionId) && 'is-selected'
+                ]"
+                role="menuitem"
+                :aria-haspopup="true"
+                @mouseenter="onTemplateEnter(template, $event)"
+                @mouseleave="onTemplateLeave"
               >
-                <div class="ta-workbench-cascade-submenu-header">版本</div>
-                <div v-if="!template.versions && loadingVersions" class="ta-workbench-cascade-submenu-loading">加载中…</div>
-                <div
-                  v-else-if="!template.versions || template.versions.length === 0"
-                  class="ta-workbench-cascade-submenu-empty"
-                >
-                  暂无版本
+                <div class="ta-workbench-cascade-item-main">
+                  <span class="ta-workbench-cascade-item-name">{{ template.workspaceName }}</span>
                 </div>
-                <ul v-else class="ta-workbench-cascade-submenu-list" role="none">
-                  <li
-                    v-for="version in template.versions"
-                    :key="version.versionId"
-                    :class="['ta-workbench-cascade-submenu-item', version.versionId === selectedVersionId && 'is-selected']"
-                    role="menuitem"
-                    @click="onVersionClick(template, version)"
-                  >
-                    <span class="ta-workbench-cascade-submenu-item-name">{{ version.version }}</span>
-                    <span class="ta-workbench-cascade-submenu-item-desc">{{ version.branch }}</span>
-                  </li>
-                </ul>
-                <!--
-                  底部固定「+新增版本」：与是否有版本、是否加载完成解耦。
-                  没版本时在「暂无版本」下面；有版本时在 ul 列表下方。
-                -->
-                <div
-                  class="ta-workbench-cascade-submenu-create"
-                  role="menuitem"
-                  :title="`为「${template.workspaceName}」新增版本`"
-                  @click.stop="openCreateVersionDialog(template)"
-                >
-                  <Plus class="ta-workbench-cascade-submenu-item-icon" />
-                  <span>新增版本</span>
-                </div>
-              </div>
-            </li>
-          </ul>
-        </div>
+                <span class="ta-workbench-cascade-item-arrow" aria-hidden="true">›</span>
+              </li>
+            </ul>
+          </div>
+        </Teleport>
+        <!--
+          二级菜单独立 Teleport：与一级菜单共享 body 容器但用更高的 z-index，
+          并通过 cascadeSubmenuPos 固定到 hover 行右侧，可越过一级菜单边界。
+          单实例：每次 hover 切换模板时，hoveredTemplate / cascadeSubmenuPos 同步更新，
+          避免给每个模板都挂一个子菜单造成 DOM 冗余。
+        -->
+        <Teleport to="body">
+          <div
+            v-if="hoveredTemplate && cascadeSubmenuPos"
+            class="ta-workbench-cascade-submenu"
+            role="menu"
+            :style="{ top: `${cascadeSubmenuPos.top}px`, left: `${cascadeSubmenuPos.left}px` }"
+            @mouseenter="onCascadeSubmenuEnter"
+            @mouseleave="onCascadeSubmenuLeave"
+          >
+            <div class="ta-workbench-cascade-submenu-header">版本 · {{ hoveredTemplate.workspaceName }}</div>
+            <div v-if="!hoveredTemplate.versions && loadingVersions" class="ta-workbench-cascade-submenu-loading">加载中…</div>
+            <div
+              v-else-if="!hoveredTemplate.versions || hoveredTemplate.versions.length === 0"
+              class="ta-workbench-cascade-submenu-empty"
+            >
+              暂无版本
+            </div>
+            <ul v-else class="ta-workbench-cascade-submenu-list" role="none">
+              <li
+                v-for="version in hoveredTemplate.versions"
+                :key="version.versionId"
+                :class="['ta-workbench-cascade-submenu-item', version.versionId === selectedVersionId && 'is-selected']"
+                role="menuitem"
+                @click="onVersionClick(hoveredTemplate, version)"
+              >
+                <span class="ta-workbench-cascade-submenu-item-name">{{ version.version }}</span>
+                <span class="ta-workbench-cascade-submenu-item-desc">{{ version.branch }}</span>
+              </li>
+            </ul>
+            <!--
+              底部固定「+新增版本」：与是否有版本、是否加载完成解耦。
+              没版本时在「暂无版本」下面；有版本时在 ul 列表下方。
+            -->
+            <div
+              class="ta-workbench-cascade-submenu-create"
+              role="menuitem"
+              :title="`为「${hoveredTemplate.workspaceName}」新增版本`"
+              @click.stop="openCreateVersionDialog(hoveredTemplate)"
+            >
+              <Plus class="ta-workbench-cascade-submenu-item-icon" />
+              <span>新增版本</span>
+            </div>
+          </div>
+        </Teleport>
       </div>
       <!--
         VCS 分支两级菜单：替代原先的单级 el-dropdown。
@@ -834,19 +976,28 @@ onBeforeUnmount(() => {
   border-color: #b5b5b5;
 }
 
+/*
+  一级菜单面板：使用 position:fixed + <Teleport to="body"> 挂到 body 末尾，
+  避免被父级 dockview 面板的 overflow:hidden 或内部 stacking context 裁掉；
+  top/left 通过 updateCascadeMenuPos() 在打开前基于按钮 getBoundingClientRect() 计算。
+  transform: translateY(-100%) 让菜单底边对齐按钮上沿（按钮正上方）。
+  不再设 max-height: 360px，让面板自然延展；改用 viewport-relative 兜底。
+*/
 .ta-workbench-cascade-panel {
-  position: absolute;
+  position: fixed;
   left: 0;
-  bottom: calc(100% + 6px);
   min-width: 280px;
-  max-width: 360px;
+  max-width: 480px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
   background: #fff;
   border: 1px solid #e4e4e7;
   border-radius: 8px;
   padding: 6px;
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
-  z-index: 60;
+  z-index: 9999;
   font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  transform: translateY(-100%);
 }
 
 .ta-workbench-cascade-header {
@@ -873,12 +1024,10 @@ onBeforeUnmount(() => {
   margin: 0;
   padding: 0;
   list-style: none;
-  max-height: 360px;
-  overflow-y: auto;
+  /* 不再设 max-height，让子菜单自然延展；外层 panel 兜底 */
 }
 
 .ta-workbench-cascade-item {
-  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -929,17 +1078,25 @@ onBeforeUnmount(() => {
   line-height: 1;
 }
 
+/*
+  二级菜单：position:fixed 让它可以越过一级菜单的边界显示在右侧，
+  top/left 通过 updateCascadeSubmenuPos() 基于当前 hover 行的 getBoundingClientRect() 计算。
+  z-index 比一级菜单高，避免在两个面板边缘被一级的 box-shadow 盖住。
+  单独 Teleport 后，菜单天然不参与一级菜单的 layout，因此可以设置更大的 max-width / max-height。
+*/
 .ta-workbench-cascade-submenu {
-  position: absolute;
-  top: -6px;
-  left: calc(100% + 4px);
-  min-width: 180px;
+  position: fixed;
+  min-width: 200px;
+  max-width: 320px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
   background: #fff;
   border: 1px solid #e4e4e7;
   border-radius: 8px;
   padding: 6px;
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
-  z-index: 1;
+  z-index: 10000;
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
 
 .ta-workbench-cascade-submenu-header {
@@ -954,8 +1111,7 @@ onBeforeUnmount(() => {
   margin: 0;
   padding: 0;
   list-style: none;
-  max-height: 280px;
-  overflow-y: auto;
+  /* 不再设 max-height，让子菜单级 max-height 兜底 */
 }
 
 .ta-workbench-cascade-submenu-item {

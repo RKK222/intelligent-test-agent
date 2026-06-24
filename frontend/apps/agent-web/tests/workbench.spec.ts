@@ -386,6 +386,164 @@ test("branch dropdown exposes a two-level menu grouped by source", async ({ page
   await expect.poll(() => changeBranchRequests).toEqual(["main"]);
 });
 
+test("workspace cascade menu teleports panel and submenu above all other UI", async ({ page }) => {
+  // 模拟后端返回两个工作空间模板，每个模板下两个版本。
+  // 验证：
+  // 1) 一级菜单 Teleport 到 body + position:fixed，不被 dockview 面板的 overflow:hidden 裁切；
+  // 2) 一级菜单 z-index 高于父级；
+  // 3) hover 一级菜单项后，二级菜单 Teleport 到 body 出现在右侧；
+  // 4) 菜单没有横向滚动条（max-width 不会越界）。
+  await mockBackendApi(page, {
+    workspaceTemplates: {
+      app_gcms: [
+        {
+          workspaceId: "awp_main",
+          workspaceName: "F-GCMS 主服务",
+          appId: "app_gcms",
+          repositoryId: "repo_1",
+          defaultBranch: "main",
+          createdAt: "2026-06-24T00:00:00Z",
+          updatedAt: "2026-06-24T00:00:00Z"
+        },
+        {
+          workspaceId: "awp_v1",
+          workspaceName: "F-GCMS v1 灰度",
+          appId: "app_gcms",
+          repositoryId: "repo_1",
+          defaultBranch: "main",
+          createdAt: "2026-06-24T00:00:00Z",
+          updatedAt: "2026-06-24T00:00:00Z"
+        }
+      ]
+    },
+    workspaceVersions: {
+      "app_gcms:awp_main": [
+        {
+          versionId: "awv_2024_01",
+          applicationWorkspaceId: "awp_main",
+          appId: "app_gcms",
+          repositoryId: "repo_1",
+          version: "2024年1月",
+          branch: "feature_testagent_2024-01",
+          repoRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1",
+          workspaceRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1/F-GCMS/workspace",
+          status: "ACTIVE",
+          createdAt: "2026-06-24T00:00:00Z",
+          updatedAt: "2026-06-24T00:00:00Z"
+        },
+        {
+          versionId: "awv_2024_06",
+          applicationWorkspaceId: "awp_main",
+          appId: "app_gcms",
+          repositoryId: "repo_1",
+          version: "2024年6月",
+          branch: "feature_testagent_2024-06",
+          repoRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1",
+          workspaceRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1/F-GCMS/workspace",
+          status: "ACTIVE",
+          createdAt: "2026-06-24T00:00:00Z",
+          updatedAt: "2026-06-24T00:00:00Z"
+        }
+      ]
+    }
+  });
+
+  await gotoWorkbench(page);
+
+  // 触发按钮：label 是 "F-GCMS 工作空间"（无 selected version）
+  const trigger = page.getByRole("button", { name: /工作空间/ });
+  await expect(trigger).toBeVisible();
+  await trigger.click();
+
+  // 一级菜单面板：Teleport 到 body，position:fixed，有真实宽度
+  const panel = page.locator(".ta-workbench-cascade-panel");
+  await expect(panel).toBeVisible();
+  const panelBox = await panel.boundingBox();
+  expect(panelBox).not.toBeNull();
+  expect(panelBox!.width).toBeGreaterThan(0);
+  expect(panelBox!.height).toBeGreaterThan(0);
+  // 一级菜单 y 小于按钮 y（菜单在按钮正上方）；这个特性是用户反馈"最上面"的关键。
+  const buttonBox = await trigger.boundingBox();
+  expect(buttonBox).not.toBeNull();
+  expect(panelBox!.y).toBeLessThan(buttonBox!.y);
+
+  // 没有横向滚动条：scrollWidth 应等于 clientWidth
+  const panelScroll = await panel.evaluate((el) => ({
+    scrollWidth: (el as HTMLElement).scrollWidth,
+    clientWidth: (el as HTMLElement).clientWidth
+  }));
+  expect(panelScroll.scrollWidth).toBeLessThanOrEqual(panelScroll.clientWidth);
+
+  // hover 一级菜单项 → 二级菜单 Teleport 到 body 出现在一级菜单右侧
+  const firstItem = page.getByRole("menuitem", { name: /F-GCMS 主服务/ });
+  await firstItem.hover();
+  const submenu = page.locator(".ta-workbench-cascade-submenu");
+  await expect(submenu).toBeVisible();
+  const submenuBox = await submenu.boundingBox();
+  expect(submenuBox).not.toBeNull();
+  expect(submenuBox!.width).toBeGreaterThan(0);
+  // 二级菜单 left 应当 >= 一级菜单的 right（出现在右侧）
+  expect(submenuBox!.x).toBeGreaterThanOrEqual(panelBox!.x + panelBox!.width - 1);
+
+  // 二级菜单里展示版本（Teleport 后依然可被 role=menuitem 检索到）
+  await expect(page.getByRole("menuitem", { name: /2024年1月/ }).first()).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /2024年6月/ }).first()).toBeVisible();
+});
+
+test("workspace cascade submenu shifts up when it would overflow the viewport bottom", async ({ page, isMobile }) => {
+  test.skip(isMobile, "viewport math is desktop-specific in this mock");
+  // 构造一个触发 li 接近视口底部的场景：模板多到面板能填满视口。
+  const manyTemplates = Array.from({ length: 20 }).map((_, idx) => ({
+    workspaceId: `awp_${idx}`,
+    workspaceName: `F-COSS 模板 ${idx}`,
+    appId: "app_gcms",
+    repositoryId: "repo_1",
+    defaultBranch: "main",
+    createdAt: "2026-06-24T00:00:00Z",
+    updatedAt: "2026-06-24T00:00:00Z"
+  }));
+  await mockBackendApi(page, {
+    workspaceTemplates: { app_gcms: manyTemplates },
+    workspaceVersions: {
+      "app_gcms:awp_19": Array.from({ length: 15 }).map((_, idx) => ({
+        versionId: `awv_${idx}`,
+        applicationWorkspaceId: "awp_19",
+        appId: "app_gcms",
+        repositoryId: "repo_1",
+        version: `2024年${idx + 1}月`,
+        branch: `feature_testagent_2024-${String(idx + 1).padStart(2, "0")}`,
+        repoRootPath: "/tmp/test-agent/appworkspace/awp_19/repo_1",
+        workspaceRootPath: "/tmp/test-agent/appworkspace/awp_19/repo_1/F-COSS/workspace",
+        status: "ACTIVE",
+        createdAt: "2026-06-24T00:00:00Z",
+        updatedAt: "2026-06-24T00:00:00Z"
+      }))
+    }
+  });
+
+  await gotoWorkbench(page);
+  const trigger = page.getByRole("button", { name: /工作空间/ });
+  await trigger.click();
+
+  // hover 最后一个 li（最接近视口底部），让子菜单自然位置会溢出
+  const lastItem = page.getByRole("menuitem", { name: /F-COSS 模板 19/ });
+  await lastItem.hover();
+
+  const submenu = page.locator(".ta-workbench-cascade-submenu");
+  await expect(submenu).toBeVisible();
+  // 等一帧让 nextTick 的"溢出修正"生效；连续等几次确保 Vue 完成 reactive 周期
+  await page.waitForTimeout(200);
+  const submenuBox = await submenu.boundingBox();
+  const viewport = page.viewportSize();
+  expect(submenuBox).not.toBeNull();
+  expect(viewport).not.toBeNull();
+  // 调试输出：如果仍失败至少能看到数字
+  // eslint-disable-next-line no-console
+  console.log("[cascade-overflow] submenuBox", submenuBox, "viewport", viewport);
+  // 子菜单底部必须 <= 视口高度（不能被底部遮挡）
+  expect(submenuBox!.y + submenuBox!.height).toBeLessThanOrEqual(viewport!.height);
+});
+
 async function mockBackendApi(
   page: Page,
   capture: {
@@ -412,6 +570,10 @@ async function mockBackendApi(
     changeBranchRequests?: string[];
     /** 收集「+新增版本」发出的 POST workspace-templates/{id}/versions 请求的 version 字段（用户原值）。 */
     createVersionRequests?: string[];
+    /** 自定义 /applications/{appId}/workspace-templates 返回；不传则用默认空数组。 */
+    workspaceTemplates?: Record<string, Array<Record<string, unknown>>>;
+    /** 自定义 /applications/{appId}/workspace-templates/{tid}/versions 返回；key 用 `{appId}:{templateId}`。 */
+    workspaceVersions?: Record<string, Array<Record<string, unknown>>>;
   } = {}) {
   await page.addInitScript(() => {
     localStorage.setItem("test-agent.auth.token", "test-token");
@@ -527,11 +689,12 @@ async function mockBackendApi(
         return;
       }
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates") {
-        await route.fulfill(json([]));
+        await route.fulfill(json(capture.workspaceTemplates?.app_gcms ?? []));
         return;
       }
       if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/applications\/app_gcms\/workspace-templates\/[^/]+\/versions$/.test(url.pathname)) {
-        await route.fulfill(json([]));
+        const templateId = url.pathname.match(/\/workspace-templates\/([^/]+)\/versions$/)?.[1] ?? "";
+        await route.fulfill(json(capture.workspaceVersions?.[`app_gcms:${templateId}`] ?? []));
         return;
       }
       if (method === "POST" && /\/api\/internal\/platform\/workspace-management\/applications\/app_gcms\/workspace-templates\/[^/]+\/versions$/.test(url.pathname)) {
