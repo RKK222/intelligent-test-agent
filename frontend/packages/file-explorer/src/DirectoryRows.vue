@@ -24,7 +24,14 @@ const emit = defineEmits<{
   openFile: [path: string];
 }>();
 
-const entries = computed(() => props.entriesByDirectory[props.directory] ?? []);
+const entries = computed(() => {
+  const list = props.entriesByDirectory[props.directory] ?? [];
+  // 文件夹排在前面，文件排在后面；同组内保持原顺序。
+  return [...list].sort((a, b) => {
+    if (a.type === b.type) return 0;
+    return a.type === "directory" ? -1 : 1;
+  });
+});
 
 function onRowClick(entry: FileTreeEntry) {
   if (entry.type === "directory") {
