@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, onScopeDispose, ref, shallowRef, watch } from "vue";
+import { useRouter } from "vue-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
 import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api";
@@ -64,6 +65,7 @@ const api = createBackendApiClient({ baseUrl: apiBaseUrl });
 const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
 const authStore = useAuthStore();
+const router = useRouter();
 
 // 设置弹窗依赖当前用户角色；工作台直达时需要主动补齐 /api/auth/me。
 void authStore.fetchCurrentUser(api);
@@ -195,13 +197,11 @@ const workspacesQuery = useQuery({
   queryFn: () => api.listWorkspaces(1, 50)
 });
 const workspaces = computed(() => workspacesQuery.data.value?.items ?? []);
-// selectedWorkspace 只在 selectedWorkspaceId 有值时返回匹配的 workspace；
-// 首次加载时由 watch(managedApplications) 自动选择第一个应用的 recent workspace。
-// 切换应用后如果没有 recent workspace 则返回 undefined，让 UI 显示"请选择工作空间"空态。
+// selectedWorkspace 只接受应用 recent workspace 或用户显式选择产生的 selectedWorkspaceId。
+// 禁止 fallback 到 workspaces[0]，否则会出现右上角应用与左侧文件树不同步。
 const selectedWorkspace = computed(() => {
-  const id = selectedWorkspaceId.value;
-  if (!id) return undefined;
-  return workspaces.value.find((item) => item.workspaceId === id);
+  if (!selectedAppId.value) return undefined;
+  return workspaces.value.find((item) => item.workspaceId === selectedWorkspaceId.value);
 });
 const selectedWorkspaceIdRef = computed(() => selectedWorkspace.value?.workspaceId);
 const sessionSearchTrim = computed(() => sessionSearch.value.trim());
@@ -212,10 +212,28 @@ const managedApplicationsQuery = useQuery({
   retry: false
 });
 const managedApplications = computed<ManagedApplication[]>(() => managedApplicationsQuery.data.value ?? []);
-const shellApps = computed(() =>
-  managedApplications.value.map((app) => ({ id: app.appId, name: app.appName, description: app.enabled ? "已启用" : "已停用" }))
+const canListAllApplications = computed(() => {
+  const roles = authStore.currentUser?.roles ?? [];
+  return roles.includes("APP_ADMIN") || roles.includes("SUPER_ADMIN");
+});
+const allApplicationsEnabled = computed(
+  () => canListAllApplications.value && managedApplicationsQuery.isSuccess.value && managedApplications.value.length === 0
 );
-const selectedManagedApplication = computed(() => managedApplications.value.find((app) => app.appId === selectedAppId.value));
+const allApplicationsQuery = useQuery({
+  queryKey: ["managed-workspace", "applications", "admin-fallback"],
+  enabled: allApplicationsEnabled,
+  queryFn: () => api.listApplications(true),
+  retry: false
+});
+// 右上角应用目录优先展示当前用户加入的应用；管理员未加入任何应用时，回退到配置管理启用应用，
+// 避免应用菜单一直显示"未选择应用"，同时后续 recent workspace 权限仍由 workspace-management 兜底。
+const applicationCatalog = computed<ManagedApplication[]>(() =>
+  managedApplications.value.length ? managedApplications.value : (allApplicationsQuery.data.value ?? [])
+);
+const shellApps = computed(() =>
+  applicationCatalog.value.map((app) => ({ id: app.appId, name: app.appName, description: app.enabled ? "已启用" : "已停用" }))
+);
+const selectedManagedApplication = computed(() => applicationCatalog.value.find((app) => app.appId === selectedAppId.value));
 
 const sessionsQuery = useQuery({
   queryKey: ["sessions", selectedWorkspaceIdRef, sessionSearchTrim],
@@ -349,9 +367,9 @@ function selectRuntimeModel(model: typeof models.value[number]) {
 }
 
 // ===== 默认值与联动 effect =====
-watch(managedApplications, (apps) => {
+watch(applicationCatalog, (apps) => {
   if (!selectedAppId.value && apps[0]?.appId) {
-    selectedAppId.value = apps[0].appId;
+    void handleSelectApp(apps[0].appId);
   }
 });
 watch(selectedWorkspace, (sw) => {
@@ -861,6 +879,7 @@ async function handleSelectApp(appId: string) {
       await switchWorkspace(recent);
       return;
     }
+    // 新应用没有 recent workspace，保持 selectedWorkspace 为空，UI 显示空态。
     feedback.value = { kind: "info", title: "已切换应用", description: "请选择工作空间" };
   } catch (error) {
     feedback.value = errorFeedback("切换应用失败", error);
@@ -1364,6 +1383,11 @@ function onUseHunkContext(part: Extract<PromptPart, { type: "file" }>) {
   diffContextParts.value = [...diffContextParts.value, part];
   feedback.value = { kind: "info", title: "已引用当前 hunk", description: `${part.path ?? part.name} 将随下一条 Prompt 提交` };
 }
+
+async function handleLogout() {
+  authStore.logout(api);
+  await router.push({ name: "login" });
+}
 </script>
 
 <template>
@@ -1373,10 +1397,12 @@ function onUseHunkContext(part: Extract<PromptPart, { type: "file" }>) {
     :show-right-panel="rightPanelOpen"
     :apps="shellApps"
     :selected-app-id="selectedAppId"
+    :current-user-name="authStore.currentUser?.username"
     @toggle-left-panel="() => {}"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
     @open-folder="openWorkspaceDirectoryPicker"
     @select-app="handleSelectApp"
+    @logout="handleLogout"
   >
     <template #activity>
       <nav class="figma-activity-nav" aria-label="工作台活动栏">

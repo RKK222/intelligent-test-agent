@@ -43,14 +43,65 @@ cd backend
 mvn clean package -DskipTests
 ```
 
-如果本机默认 `java` 不是 21，请显式指定 JDK 21：
+## 本地开发启动
+
+### 环境要求
+
+- **Java 21+**（项目使用 Java 21 编译，class file version 65.0）
+- **Maven 3.9+**
+
+检查 Java 版本：
+```bash
+java -version
+# 必须是 21 或更高版本
+```
+
+如果本机默认 `java` 不是 21+，请显式指定：
+```bash
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)
+# 或使用 Java 25
+export JAVA_HOME=/Users/kaka/Library/Java/JavaVirtualMachines/openjdk-25.0.1/Contents/Home
+```
+
+### 启动后端
 
 ```bash
 cd backend
-export JAVA_HOME=$(/usr/libexec/java_home -v 21)
-export PATH="$JAVA_HOME/bin:$PATH"
-mvn clean package -DskipTests~~~~
+
+# 方式一：使用 .env.local 中的配置（推荐）
+SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -pl test-agent-app
+
+# 方式二：如果 .env.local 已配置 SPRING_PROFILES_ACTIVE=local
+mvn spring-boot:run -pl test-agent-app
 ```
+
+验证后端启动成功：
+```bash
+curl http://127.0.0.1:8080/actuator/health
+# 应返回 {"status":"UP",...}
+```
+
+### 启动前端
+
+```bash
+cd frontend
+npm run dev
+# 访问 http://127.0.0.1:3000
+```
+
+### 常见问题
+
+1. **`UnsupportedClassVersionError: class file version 65.0`**
+   - 原因：Java 版本过低，项目需要 Java 21+
+   - 解决：设置 `JAVA_HOME` 指向 Java 21+
+
+2. **`Connection to 127.0.0.1:5432 refused`**
+   - 原因：未设置 `SPRING_PROFILES_ACTIVE=local`，使用了默认的本地数据库配置
+   - 解决：确保 `.env.local` 存在且设置了 `SPRING_PROFILES_ACTIVE=local`
+
+3. **前端登录失败 `failed to fetch`**
+   - 原因：后端未启动或端口不对
+   - 解决：确认后端在 8080 端口运行
 
 ## 测试与校验
 
