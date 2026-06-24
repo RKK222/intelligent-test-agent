@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, onScopeDispose, ref, shallowRef, watch } from "vue";
 import { useRouter } from "vue-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
 import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api";
 import { DiffViewer } from "@test-agent/diff-viewer";
@@ -11,6 +11,8 @@ import { Code2, MessageSquare } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
+  ApplicationWorkspaceTemplate,
+  ApplicationWorkspaceVersion,
   FileTreeEntry,
   ManagedApplication,
   MessagePart,
@@ -234,6 +236,93 @@ const shellApps = computed(() =>
   applicationCatalog.value.map((app) => ({ id: app.appId, name: app.appName, description: app.enabled ? "已启用" : "已停用" }))
 );
 const selectedManagedApplication = computed(() => applicationCatalog.value.find((app) => app.appId === selectedAppId.value));
+
+// ===== 应用工作空间模板与版本（两级菜单数据源） =====
+// 一级菜单：归属当前应用的工作空间模板（如 F-COSS 主服务）；二级菜单：模板下的应用版本（如 20260701）。
+// 模板在切换应用时拉取一次；版本按需懒加载，用户在菜单里 hover 模板时才拉取，避免一次性把全部版本拉回前端。
+const selectedAppIdRef = computed(() => selectedAppId.value);
+const appTemplatesQuery = useQuery({
+  queryKey: ["managed-workspace", "app-templates", selectedAppIdRef],
+  enabled: () => Boolean(selectedAppIdRef.value),
+  queryFn: () => api.listWorkspaceTemplates(selectedAppIdRef.value!),
+  retry: false
+});
+const appTemplates = computed<ApplicationWorkspaceTemplate[]>(() => appTemplatesQuery.data.value ?? []);
+const loadingAppTemplates = computed(() => appTemplatesQuery.isPending.value);
+// 按模板 ID 缓存应用版本；用户首次展开某个模板时调用 ensureAppVersionsLoaded(templateId)。
+const versionsByTemplateId = ref<Record<string, ApplicationWorkspaceVersion[]>>({});
+const loadingVersionTemplateIds = ref<Set<string>>(new Set());
+// 通过 useQueries 监听"已请求加载的模板"，避免在 set 里手写 fetch 后的状态同步。
+// 数组元素跟着 loadedTemplateIds 派生；enabled = false 时该查询会被 vue-query 跳过。
+const loadedTemplateIds = ref<Set<string>>(new Set());
+const versionQueries = useQueries({
+  queries: computed(() =>
+    [...loadedTemplateIds.value].map((templateId) => {
+      const template = appTemplates.value.find((item) => item.workspaceId === templateId);
+      return {
+        queryKey: ["managed-workspace", "app-versions", selectedAppIdRef, templateId],
+        enabled: () => Boolean(selectedAppIdRef.value && template),
+        queryFn: async (): Promise<ApplicationWorkspaceVersion[]> => {
+          if (!template) return [];
+          return api.listWorkspaceVersions(selectedAppIdRef.value!, template.workspaceId);
+        }
+      };
+    })
+  )
+});
+// 监听 useQueries 的结果回填到 versionsByTemplateId；并清掉 loading 标记。
+// 注意：vue-query 的 useQueries 返回的数组元素是 QueryObserverResult（来自 query-core），
+// 其属性是普通值（isPending/data 为值），不是 ComputedRef；watch 回调拿到的就是已解包的数组。
+watch(
+  versionQueries,
+  (queries) => {
+    const nextMap: Record<string, ApplicationWorkspaceVersion[]> = { ...versionsByTemplateId.value };
+    const nextLoading = new Set(loadingVersionTemplateIds.value);
+    const templateIds = [...loadedTemplateIds.value];
+    templateIds.forEach((templateId, index) => {
+      const result = queries[index];
+      if (!result) return;
+      if (result.isPending) {
+        nextLoading.add(templateId);
+        return;
+      }
+      nextLoading.delete(templateId);
+      if (result.isSuccess && result.data) {
+        nextMap[templateId] = result.data;
+      }
+    });
+    versionsByTemplateId.value = nextMap;
+    loadingVersionTemplateIds.value = nextLoading;
+  },
+  { deep: true }
+);
+const loadingAppVersions = computed(() => loadingVersionTemplateIds.value.size > 0);
+// 把模板 + 关联的版本组装成 WorkbenchFooter 期望的两级结构。
+const appTemplatesWithVersions = computed(() =>
+  appTemplates.value.map((template) => ({
+    ...template,
+    versions: versionsByTemplateId.value[template.workspaceId]
+  }))
+);
+// 当前选中的版本 ID：默认从 selectedWorkspaceId 与 recent 偏好反查；切到版本后由 handleSelectVersion 更新。
+const currentVersionFromWorkspace = ref<string | undefined>(undefined);
+const selectedVersionId = computed(() => currentVersionFromWorkspace.value);
+// 触发懒加载：被调用时把 templateId 加入 loadedTemplateIds，useQueries 派生数组自动同步并发起请求。
+// 重复调用幂等：Set 内部去重；已加载完成的模板（versions 不为 undefined）不会重复请求。
+function ensureAppVersionsLoaded(templateId: string) {
+  if (versionsByTemplateId.value[templateId] !== undefined) return;
+  if (loadedTemplateIds.value.has(templateId)) return;
+  const next = new Set(loadedTemplateIds.value);
+  next.add(templateId);
+  loadedTemplateIds.value = next;
+}
+// 切换应用时清空版本缓存，避免上一个应用的版本残留到新应用的菜单里。
+watch(selectedAppId, () => {
+  versionsByTemplateId.value = {};
+  loadedTemplateIds.value = new Set();
+  loadingVersionTemplateIds.value = new Set();
+  currentVersionFromWorkspace.value = undefined;
+});
 
 const sessionsQuery = useQuery({
   queryKey: ["sessions", selectedWorkspaceIdRef, sessionSearchTrim],
@@ -862,10 +951,65 @@ async function switchWorkspace(workspace: Workspace) {
   resetWorkspaceState();
   cacheWorkspace(workspace);
   selectedWorkspaceId.value = workspace.workspaceId;
+  // 切到运行态 Workspace 后，反查当前 workspace 来自哪个应用版本，驱动两级菜单的高亮项。
+  syncCurrentVersionFromWorkspace(workspace);
   void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
   void queryClient.invalidateQueries({ queryKey: ["sessions"] });
   void queryClient.invalidateQueries({ queryKey: ["runtime"] });
   await loadDirectory("", workspace.workspaceId);
+}
+
+// 根据当前选中的 workspace.rootPath 匹配出对应的应用版本（用于两级菜单高亮）。
+// 优先精确匹配根路径；若版本列表中包含当前 workspace.workspaceId 也直接返回。
+function syncCurrentVersionFromWorkspace(workspace: Workspace) {
+  const entries = Object.values(versionsByTemplateId.value);
+  for (const list of entries) {
+    const hit = list.find((version) =>
+      version.runtimeWorkspace?.workspaceId === workspace.workspaceId ||
+      version.workspaceRootPath === workspace.rootPath
+    );
+    if (hit) {
+      currentVersionFromWorkspace.value = hit.versionId;
+      return;
+    }
+  }
+  // 没有匹配到时不主动清空：可能是用户刚切换应用、版本尚未加载完，避免菜单高亮闪烁。
+}
+
+// 切换到某个应用版本：拉取对应的运行态 Workspace，触发工作台状态切换。
+async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemplate; version: ApplicationWorkspaceVersion }) {
+  const runtimeWorkspaceId = payload.version.runtimeWorkspace?.workspaceId;
+  if (!runtimeWorkspaceId) {
+    feedback.value = { kind: "error", title: "该版本未关联运行态工作区", description: "请先在平台侧初始化版本。" };
+    return;
+  }
+  if (runtimeWorkspaceId === selectedWorkspaceId.value) {
+    feedback.value = { kind: "info", title: "已在该版本工作区", description: payload.version.version };
+    return;
+  }
+  try {
+    const workspace = await api.getWorkspace(runtimeWorkspaceId);
+    try {
+      await api.markRecentManagedWorkspace(workspace.workspaceId);
+    } catch (error) {
+      if (error instanceof BackendApiError && error.code === "FORBIDDEN") {
+        throw error;
+      }
+    }
+    await switchWorkspace(workspace);
+    feedback.value = {
+      kind: "info",
+      title: "已切换应用版本",
+      description: `${payload.template.workspaceName} · ${payload.version.version}`
+    };
+  } catch (error) {
+    feedback.value = errorFeedback("切换应用版本失败", error);
+  }
+}
+
+// WorkbenchFooter / FigmaFileExplorer 上两级菜单展开模板时调用，触发版本懒加载。
+function handleLoadVersions(templateId: string) {
+  ensureAppVersionsLoaded(templateId);
 }
 
 async function handleSelectApp(appId: string) {
@@ -1454,12 +1598,19 @@ async function handleLogout() {
           :loading-path="loadingPath"
           :branches="vcsBranches"
           :current-branch="vcsCurrentBranch"
+          :app-name="selectedManagedApplication?.appName"
+          :app-templates="appTemplatesWithVersions"
+          :selected-version-id="selectedVersionId"
+          :loading-app-templates="loadingAppTemplates"
+          :loading-app-versions="loadingAppVersions"
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
           @open-diff="(path: string) => { workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
           @refresh="loadDirectory('')"
           @add-workspace="openWorkspaceDirectoryPicker"
           @change-branch="handleChangeBranch"
+          @select-version="handleSelectVersion"
+          @load-versions="handleLoadVersions"
         />
         <div v-else class="managed-workspace-empty">
           <p>当前应用尚未切换到可用工作区。</p>

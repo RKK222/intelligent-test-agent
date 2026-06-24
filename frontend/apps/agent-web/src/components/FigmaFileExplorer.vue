@@ -2,6 +2,7 @@
 import chevronUrl from "../assets/figma/chevron-folder.svg";
 import fileIconUrl from "../assets/figma/file-icon.svg";
 import { FileExplorer, type FileExplorerProps } from "@test-agent/file-explorer";
+import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 
 type VcsBranch = { name: string; isCurrent?: boolean };
@@ -10,6 +11,16 @@ defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
   branches?: VcsBranch[];
   currentBranch?: string;
+  /** 当前应用名，传递给 WorkbenchFooter 作为两级菜单首行提示 */
+  appName?: string;
+  /** 归属当前应用的工作空间模板列表（应用→工作空间级） */
+  appTemplates?: AppWorkspaceTemplate[];
+  /** 当前选中的应用版本 ID（用于高亮两级菜单中的版本） */
+  selectedVersionId?: string;
+  /** 工作空间模板加载中标记 */
+  loadingAppTemplates?: boolean;
+  /** 工作空间版本加载中标记 */
+  loadingAppVersions?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -19,6 +30,10 @@ const emit = defineEmits<{
   refresh: [];
   addWorkspace: [];
   changeBranch: [branch: string];
+  // 选择某个应用版本后由父组件切换运行态 Workspace
+  selectVersion: [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
+  // 要求按需懒加载某模板下的版本列表
+  loadVersions: [templateId: string];
 }>();
 </script>
 
@@ -44,7 +59,14 @@ const emit = defineEmits<{
       :branch="currentBranch"
       :branches="branches"
       :show-branch="true"
+      :app-name="appName"
+      :templates="appTemplates"
+      :selected-version-id="selectedVersionId"
+      :loading-templates="loadingAppTemplates"
+      :loading-versions="loadingAppVersions"
       @change-branch="(name: string) => emit('changeBranch', name)"
+      @select-version="(payload) => emit('selectVersion', payload)"
+      @load-versions="(templateId: string) => emit('loadVersions', templateId)"
     />
   </div>
 </template>

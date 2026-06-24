@@ -397,9 +397,11 @@ class JdbcRepositoryIntegrationTest {
         sessionMessages.save(sessionMessage("msg_1234567890abcdef", "first"));
         sessionMessages.save(sessionMessage("msg_2234567890abcdef", "second"));
 
+        // V10 种子会预先写入 F-COSS 的运行态 Workspace，因此这里只断言"测试创建的工作区在分页结果里"
+        // 而非"分页结果只有这一条"，避免后续种子数据扩张再次破坏该测试。
         assertThat(workspaces.findPage(new PageRequest(1, 10)).items())
                 .extracting(Workspace::workspaceId)
-                .containsExactly(workspace.workspaceId());
+                .contains(workspace.workspaceId());
         assertThat(sessions.findByWorkspaceId(workspace.workspaceId(), new PageRequest(1, 10)).items())
                 .extracting(Session::sessionId)
                 .containsExactly(session.sessionId());
