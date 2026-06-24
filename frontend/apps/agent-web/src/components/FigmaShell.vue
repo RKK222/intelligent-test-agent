@@ -33,11 +33,14 @@ const props = withDefaults(
 );
 
 const leftPanelOpen = ref(true);
+const leftPanelWidth = ref(262);
 const rightPanelWidth = ref(320);
-const resizing = ref(false);
+const resizing = ref<"left" | "right" | null>(null);
 let resizeStartX = 0;
 let resizeStartWidth = 0;
 
+const MIN_LEFT_WIDTH = 200;
+const MAX_LEFT_WIDTH = 600;
 const MIN_RIGHT_WIDTH = 240;
 const MAX_RIGHT_WIDTH = 1200;
 
@@ -82,10 +85,10 @@ function onAppMenuBlur(event: FocusEvent) {
   setTimeout(closeAppMenu, 120);
 }
 
-function onResizeStart(event: MouseEvent) {
-  resizing.value = true;
+function onResizeStart(side: "left" | "right", event: MouseEvent) {
+  resizing.value = side;
   resizeStartX = event.clientX;
-  resizeStartWidth = rightPanelWidth.value;
+  resizeStartWidth = side === "left" ? leftPanelWidth.value : rightPanelWidth.value;
   document.addEventListener("mousemove", onResizeMove);
   document.addEventListener("mouseup", onResizeEnd);
   document.body.style.cursor = "col-resize";
@@ -94,13 +97,19 @@ function onResizeStart(event: MouseEvent) {
 
 function onResizeMove(event: MouseEvent) {
   if (!resizing.value) return;
-  const delta = resizeStartX - event.clientX;
-  const nextWidth = Math.min(MAX_RIGHT_WIDTH, Math.max(MIN_RIGHT_WIDTH, resizeStartWidth + delta));
-  rightPanelWidth.value = nextWidth;
+  const delta = event.clientX - resizeStartX;
+  // 左侧把手：向右拖 → 左侧更宽；右侧把手：向左拖 → 右侧更宽。
+  if (resizing.value === "left") {
+    const nextWidth = Math.min(MAX_LEFT_WIDTH, Math.max(MIN_LEFT_WIDTH, resizeStartWidth + delta));
+    leftPanelWidth.value = nextWidth;
+  } else {
+    const nextWidth = Math.min(MAX_RIGHT_WIDTH, Math.max(MIN_RIGHT_WIDTH, resizeStartWidth - delta));
+    rightPanelWidth.value = nextWidth;
+  }
 }
 
 function onResizeEnd() {
-  resizing.value = false;
+  resizing.value = null;
   document.removeEventListener("mousemove", onResizeMove);
   document.removeEventListener("mouseup", onResizeEnd);
   document.body.style.cursor = "";
@@ -178,15 +187,28 @@ onUnmounted(() => {
       </aside>
 
       <div class="figma-panel-group">
-        <div v-if="leftPanelOpen" class="figma-panel-left">
+        <div v-if="leftPanelOpen" class="figma-panel-left" :style="{ width: `${leftPanelWidth}px` }">
           <slot name="files" />
         </div>
-        <div class="figma-resize-handle" />
+        <div
+          v-if="leftPanelOpen"
+          class="figma-files-resize-handle"
+          @mousedown="onResizeStart('left', $event)"
+          aria-label="拖拽调整工作目录宽度"
+          role="separator"
+          aria-orientation="vertical"
+        />
         <div class="figma-panel-center">
           <slot name="editor" />
         </div>
         <div v-if="showRightPanel" class="figma-chat-panel-wrapper">
-          <div class="figma-chat-resize-handle" @mousedown="onResizeStart" aria-label="拖拽调整对话窗口宽度" role="separator" aria-orientation="vertical" />
+          <div
+            class="figma-chat-resize-handle"
+            @mousedown="onResizeStart('right', $event)"
+            aria-label="拖拽调整对话窗口宽度"
+            role="separator"
+            aria-orientation="vertical"
+          />
           <div class="figma-panel-right" :style="{ width: `${rightPanelWidth}px` }">
             <div class="figma-chat-body">
               <slot name="chat" />
@@ -450,7 +472,7 @@ onUnmounted(() => {
 }
 
 .figma-panel-left {
-  width: 262px;
+  /* 宽度由 :style="width: ${leftPanelWidth}px" 动态控制 */
   flex-shrink: 0;
   background: #fafafa;
   display: flex;
@@ -459,15 +481,38 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.figma-resize-handle {
-  width: 1px;
+.figma-files-resize-handle {
+  width: 4px;
   flex-shrink: 0;
-  background: #e4e4e7;
   cursor: col-resize;
+  position: relative;
+  z-index: 5;
+  background: transparent;
+  transition: background-color 0.14s ease;
 }
 
-.figma-resize-handle:hover {
-  background: #ccc;
+.figma-files-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  margin-left: -0.5px;
+  background: #e4e4e7;
+  transition: background-color 0.14s ease;
+}
+
+.figma-files-resize-handle:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.figma-files-resize-handle:hover::after {
+  background: #bbb;
+}
+
+.figma-files-resize-handle:active {
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .figma-panel-center {
