@@ -5,9 +5,9 @@ spring:
   datasource:
     druid:
       driver-class-name: org.postgresql.Driver
-      url: jdbc:postgresql://127.0.0.1:5432/test_agent
-      username: test_agent
-      password: test_agent
+      url: jdbc:postgresql://180.184.65.201:5432/testagent
+      username: testagent
+      password: a5A7d2hK
   flyway:
     enabled: true
     locations: classpath:db/migration

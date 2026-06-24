@@ -175,6 +175,7 @@ defineExpose({ scrollToSourceLine });
   <div
     ref="scrollEl"
     class="md-preview flex h-full min-h-0 flex-col overflow-auto bg-[var(--ta-surface)] pl-14 pr-6 py-4 text-[13px] leading-[1.7] text-[var(--ta-text)]"
+    style="padding:28px;"
     @scroll="onScroll"
   >
     <div v-if="loading" class="text-[12px] text-[var(--ta-muted)]">正在准备预览…</div>
