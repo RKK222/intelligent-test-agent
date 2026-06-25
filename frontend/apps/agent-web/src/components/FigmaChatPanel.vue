@@ -365,6 +365,7 @@ const displayMessages = computed<ChatMessage[]>(() => {
       } else if (Array.isArray(m.parts)) {
         text = m.parts.map((p) => partText(p)).join('')
       }
+      if (!text.trim()) return null
       return {
         id: m.messageId ?? m.id ?? `${m.role}-${index}`,
         role: m.role,
@@ -626,7 +627,8 @@ function onCompositionEnd() {
 
     <!-- 任务消耗提示（位于输入框上方） -->
     <div v-if="hasTaskUsageDisplay" class="figma-chat-usage">
-      <img :src="planLoadingUrl" alt="" class="figma-chat-usage-icon" />
+      <img v-if="running" :src="planLoadingUrl" alt="" class="figma-chat-usage-icon" />
+      <span v-else class="figma-chat-usage-dot" aria-hidden="true" />
       <span class="figma-chat-usage-label">任务消耗：</span>
       <span class="figma-chat-usage-value">
         <template
@@ -1261,6 +1263,15 @@ function onCompositionEnd() {
   height: 20px;
   flex-shrink: 0;
   display: block;
+}
+
+.figma-chat-usage-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  display: block;
+  border-radius: 999px;
+  background: #a40dbc;
 }
 
 .figma-chat-usage-label {

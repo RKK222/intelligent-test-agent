@@ -43,4 +43,45 @@ describe("FigmaChatPanel", () => {
     expect(text.indexOf("第一轮助手回答")).toBeLessThan(text.indexOf("第二轮用户问题"));
     expect(text.indexOf("第二轮用户问题")).toBeLessThan(text.indexOf("第二轮助手回答"));
   });
+
+  it("does not render assistant rows that have no visible content", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          { id: "u1", messageId: "u1", role: "user", text: "滴滴", createdAt: "2026-06-25T09:00:00.000Z" },
+          { id: "a-empty-1", messageId: "a-empty-1", role: "assistant", text: "", createdAt: "2026-06-25T09:00:01.000Z" },
+          {
+            id: "a-empty-2",
+            messageId: "a-empty-2",
+            role: "assistant",
+            text: "",
+            parts: [{ partId: "tool-1", type: "tool", toolName: "read", status: "completed" }],
+            createdAt: "2026-06-25T09:00:02.000Z"
+          },
+          { id: "a1", messageId: "a1", role: "assistant", text: "在的，有什么可以帮你的？", createdAt: "2026-06-25T09:01:00.000Z" }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    expect(wrapper.findAll(".figma-chat-assistant")).toHaveLength(1);
+    expect(wrapper.text()).toContain("在的，有什么可以帮你的？");
+    expect(wrapper.text().match(/测试智能体/g)).toHaveLength(1);
+  });
+
+  it("uses a static task usage marker after the run ends", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        running: false,
+        taskUsage: { duration: "1s", tokens: 19915 },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    expect(wrapper.find(".figma-chat-usage img").exists()).toBe(false);
+    expect(wrapper.find(".figma-chat-usage-dot").exists()).toBe(true);
+    expect(wrapper.text()).toContain("任务消耗");
+    expect(wrapper.text()).toContain("19915 tokens");
+  });
 });
