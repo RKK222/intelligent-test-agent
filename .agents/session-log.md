@@ -5,11 +5,11 @@
 ### 2026-06-25 - Reduce Session Log Noise
 
 - Why: The previous policy made the session log too chatty for small edit batches, which reduced its usefulness as a concise handoff artifact.
-- What: Tightened the repo rules in `AGENTS.md`, `docs/guides/ai-workflow.md`, `docs/guides/self-checklist.md`, and `.opencode/skills/code-update-handoff/SKILL.md` so logging happens once per meaningful session boundary.
+- What: Tightened the repo rules in `AGENTS.md`, `docs/guides/ai-workflow.md`, `docs/guides/self-checklist.md`, and `.opencode/skills/code-update-handoff/SKILL.md` plus its `agents/openai.yaml` metadata so logging happens once per meaningful session boundary.
 - How: Kept the same `Why / What / How / Result` shape, but changed the trigger from per-batch persistence to per-session reusable information, with related edits merged into one entry.
 - Result: Future sessions should write fewer, denser log entries that are easier for other developers and agents to scan.
 - Pitfalls: None.
-- Verification: `git diff --check`.
+- Verification: `git diff --check`; `/Users/kaka/Desktop/intelligent-test-agent/.tmp/skill-validate-venv/bin/python3 /Users/kaka/.codex/skills/.system/skill-creator/scripts/quick_validate.py .`.
 - Next: Use the new rule in subsequent sessions and avoid file-level log spam.
 
 ### 2026-06-25 - 修复运行管理页面因 ID 格式不一致导致查询失败的问题
