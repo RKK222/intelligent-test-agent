@@ -1,6 +1,6 @@
 ---
 name: code-update-handoff
-description: Use when finishing or pausing any code-change batch in this repo so the handoff stays candid, a `Not done yet` section is always included, and `.agents/session-log.md` is updated for future agents.
+description: Use when finishing or pausing any code-change task in this repo so the handoff stays candid, a `Not done yet` section is always included, and `.agents/session-log.md` is updated once per meaningful session boundary for future agents.
 ---
 
 # Code Update Handoff
@@ -10,7 +10,7 @@ Use this skill at the end of any repository edit batch, before the final reply.
 ## Required Workflow
 
 1. Review the latest diff, test output, and any unresolved risks.
-2. Write or update `.agents/session-log.md` with one new top entry.
+2. If the session produced new durable information worth preserving, write or update `.agents/session-log.md` once for the session and merge related edits into a single top entry.
 3. Reply to the user with a concise handoff that always includes:
    - what changed
    - what was verified
@@ -40,6 +40,7 @@ Keep `.agents/session-log.md` as a compact, chronological record for other devel
 
 - Put the newest entry at the top of `## Entries`.
 - Keep each entry factual, short, and repo-relative.
+- Do not add a new entry for every small edit when the same session can be summarized once.
 - If a pitfall is unresolved, say so plainly and name the next useful action.
 - Do not turn the log into a transcript or changelog.
 - Avoid secrets, tokens, and long command output.
