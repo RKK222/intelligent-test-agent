@@ -16,6 +16,16 @@
 - Verification: 数据库查询确认新增记录存在，前端可访问 `http://127.0.0.1:3000`。
 - Next: 用户验证工作区和分支功能是否正常。
 
+### 2026-06-25 - 将 wr 用户角色改为应用管理员
+
+- Why: 用户要求将 wr 用户从普通用户角色改为应用管理员角色。
+- What: 更新 `user_roles` 表，将 wr 用户的 `dict_id` 从 `dict_role_user` 改为 `dict_role_app_admin`。
+- How: 通过 Docker exec 执行 psql UPDATE 命令。
+- Result: wr 用户角色已从"普通用户"改为"应用管理员"。
+- Pitfalls: 无。
+- Verification: 数据库查询确认角色已更新。
+- Next: 无。
+
 ### 2026-06-25 - Fix el-date-picker month cells to show "1月/2月/…" in Chinese
 
 - Why: 用户反馈「+新增版本」弹窗里的 el-date-picker (type=month) 打开后，月份单元格里显示英文 "Jan/Feb/…"，希望显示中文 "1月/2月/3月/…"，与项目里其他中文文案风格一致。
