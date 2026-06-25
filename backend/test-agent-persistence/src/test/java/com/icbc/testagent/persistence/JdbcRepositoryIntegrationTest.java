@@ -796,13 +796,15 @@ class JdbcRepositoryIntegrationTest {
         assertThat(opencodeProcesses.findUserBinding(new UserId("usr_process_user"), " OPENCODE ")).contains(binding);
         assertThat(opencodeProcesses.findOccupiedPorts(new LinuxServerId("10.8.0.12"), new OpencodeContainerId("ctr_01")))
                 .containsExactly(4096);
-        assertThat(opencodeProcesses.findOpencodeServerProcesses(10)).containsExactly(process);
-        assertThat(opencodeProcesses.findLinuxServers(500)).containsExactly(linuxServer);
+        // V17 migration 在每个集成测试 setUp 阶段会再种入本地 opencode 机器与默认开发用户的进程，
+        // 因此这些列举/计数断言需要容忍 V17 的种子行，单独断言"测试用例自己创建的行"仍可定位。
+        assertThat(opencodeProcesses.findOpencodeServerProcesses(10)).contains(process);
+        assertThat(opencodeProcesses.findLinuxServers(500)).contains(linuxServer);
         assertThat(opencodeProcesses.findBackendJavaProcesses(500)).containsExactly(backendProcess);
-        assertThat(opencodeProcesses.findContainers(500)).containsExactly(container);
-        assertThat(opencodeProcesses.findContainerManagers(500)).containsExactly(manager);
+        assertThat(opencodeProcesses.findContainers(500)).contains(container);
+        assertThat(opencodeProcesses.findContainerManagers(500)).contains(manager);
         assertThat(opencodeProcesses.findManagerBackendConnections(500)).containsExactly(connection);
-        assertThat(opencodeProcesses.countUserBindings()).isEqualTo(1);
+        assertThat(opencodeProcesses.countUserBindings()).isEqualTo(2);
         assertThat(opencodeProcesses.findUserBindingsByProcessIds(List.of(process.processId())))
                 .containsEntry(process.processId(), binding);
         OpencodeServerProcessFilter filter = new OpencodeServerProcessFilter(
@@ -1206,5 +1208,49 @@ class JdbcRepositoryIntegrationTest {
                 NOW,
                 NOW,
                 "trace_1234567890abcdef");
+    }
+
+    @Test
+    void v17SeedLocalOpencodeMachineForDefaultUserIsIdempotent() {
+        // V17 已在 setUp 阶段通过 Flyway 应用一次；这里验证种子行已写入。
+        assertThat(opencodeProcesses.findLinuxServerById(new LinuxServerId("127.0.0.1")))
+                .isPresent()
+                .get()
+                .extracting(LinuxServer::status)
+                .isEqualTo(LinuxServerStatus.READY);
+        assertThat(opencodeProcesses.findContainerById(new OpencodeContainerId("ctr_local_4096")))
+                .isPresent();
+        assertThat(opencodeProcesses.findContainerManagerById(new ContainerManagerId("mgr_local_4096")))
+                .isPresent()
+                .get()
+                .extracting(OpencodeContainerManager::connectionStatus)
+                .isEqualTo(ManagerConnectionStatus.CONNECTED);
+        assertThat(opencodeProcesses.findOpencodeServerProcessById(new OpencodeProcessId("ocp_local_user_dev")))
+                .isPresent()
+                .get()
+                .extracting(OpencodeServerProcess::baseUrl)
+                .isEqualTo("http://127.0.0.1:4096");
+        assertThat(opencodeProcesses.findUserBinding(new UserId("usr_test_dev"), "opencode"))
+                .isPresent();
+
+        // 重新执行 V17 也不应破坏数据或产生重复行。
+        Flyway.configure()
+                .dataSource(database)
+                .locations("classpath:db/migration")
+                .target("17")
+                .load()
+                .migrate();
+        Flyway.configure()
+                .dataSource(database)
+                .locations("classpath:db/migration")
+                .target("17")
+                .load()
+                .migrate();
+        assertThat(opencodeProcesses.findContainerManagerById(new ContainerManagerId("mgr_local_4096")))
+                .isPresent();
+        assertThat(opencodeProcesses.findOpencodeServerProcessById(new OpencodeProcessId("ocp_local_user_dev")))
+                .isPresent();
+        assertThat(opencodeProcesses.findUserBinding(new UserId("usr_test_dev"), "opencode"))
+                .isPresent();
     }
 }

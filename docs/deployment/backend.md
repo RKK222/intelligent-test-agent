@@ -251,6 +251,20 @@ export TEST_AGENT_LINUX_SERVER_ID=<this-backend-ip>
 
 启用该 profile 后，Spring Boot 通过 Druid 管理 JDBC 连接池，并使用 `test-agent-persistence` 中的 Flyway migration 初始化或校验数据库结构；Actuator `health` 包含数据库健康检查；Druid Web 控制台默认关闭，不提供 `/druid/*` 管理入口。
 
+## 本地开发 opencode 机器预置
+
+V17 migration（`backend/test-agent-persistence/src/main/resources/db/migration/V17__seed_local_opencode_machine_for_default_user.sql`）为 `local`/`test` profile 自动在数据库中种入：
+
+- `linux_servers`：一条 `127.0.0.1` 的本机服务器，状态 `READY`。
+- `opencode_containers`：`ctr_local_4096`，端口范围 `4096..4096`，容量 `1`，状态 `READY`。
+- `opencode_container_managers`：`mgr_local_4096`，状态 `CONNECTED`。
+- `opencode_server_processes`：`ocp_local_user_dev`，绑用户 `usr_test_dev`（默认开发用户 `888888888`），端口 `4096`，`base_url = http://127.0.0.1:4096`。
+- `user_opencode_process_bindings`：`(usr_test_dev, opencode) -> ocp_local_user_dev`，状态 `ACTIVE`。
+
+`opencode_manager_backend_connections` 的 `backend_process_id` 形如 `bjp_xxx`，是后端 Java 实例 ID；后端启动时由 `BackendJavaProcessLifecycleService.registerHeartbeat` 在为本实例写心跳时补齐 `(mgr_local_4096, bjp_xxx)` 这一行，状态 `CONNECTED`。该自举仅在 (manager, backend) 组合尚无连接行时插入；后续 manager WebSocket 真正连上后由 `ManagerControlApplicationService` 继续维护。
+
+确认本机 opencode server 在 `127.0.0.1:4096` 监听后，直接用默认开发用户登录即可看到右侧对话窗口的进程状态从 "没有可用的 opencode 容器" 变为 READY（基线 URL 指向本地 opencode server）。若还需真实起 manager 控制面，可继续按上文"opencode-manager 容器进程管理"章节配置；manager 未启动时 `health` 命令会在网关层返回 `OPENCODE_UNAVAILABLE`，前端状态会落到 "opencode 进程健康检测失败，需要重新初始化"，需要重启后端或恢复 manager 才能进入 READY。
+
 ## 连接池配置
 
 连接池大小和借出校验可通过以下环境变量覆盖，默认值适合轻量测试和本地集成；远端 PostgreSQL 断开 idle 连接后，默认在借出连接时执行 `SELECT 1`，避免首个业务请求拿到 stale connection 后返回 500：

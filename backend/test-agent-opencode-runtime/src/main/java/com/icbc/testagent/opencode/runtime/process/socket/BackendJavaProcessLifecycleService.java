@@ -6,11 +6,15 @@ import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerStatus;
+import com.icbc.testagent.domain.opencodeprocess.ManagerConnectionStatus;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerManager;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnection;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.List;
 import java.util.Set;
 import java.util.Map;
 import java.util.Objects;
@@ -85,6 +89,16 @@ public class BackendJavaProcessLifecycleService {
 
     /**
      * 注册或刷新当前后端实例心跳。
+     *
+     * <p>除刷新本实例的 Linux 服务器、心跳和 Redis 索引外，还会为同服务器下所有
+     * {@code connection_status = CONNECTED} 的容器管理进程补齐到本实例的连接行，
+     * 让本地开发环境在迁移中预置了 manager 但还没有 manager WebSocket 注册时，
+     * 仍能通过 {@code findHealthyContainersConnectedToBackend*} 查询到本机容器，
+     * 前端用户进程状态从 {@code UNAVAILABLE} 升级为 {@code READY}。
+     *
+     * <p>该自举仅在数据库中确实不存在 (manager, backend) 连接行时才插入，
+     * 已有行只更新 {@code last_heartbeat_at} 和 {@code status}；管理进程 WebSocket
+     * 真连上后由 {@code ManagerControlApplicationService.register/heartbeat} 继续维护。
      */
     public void registerHeartbeat(String traceId) {
         Instant now = Instant.now(clock);
@@ -109,6 +123,46 @@ public class BackendJavaProcessLifecycleService {
                 now,
                 traceId));
         heartbeatStore.recordBackendHeartbeat(backendProcessId, now);
+        bootstrapLocalManagerConnections(now, traceId);
+    }
+
+    /**
+     * 为同 Linux 服务器下所有 CONNECTED 容器管理进程补齐到本后端实例的连接行。
+     * 仅在 {@link OpencodeProcessManagementRepository#findManagerBackendConnection}
+     * 查询为空时插入，已有连接行只更新心跳和状态。
+     */
+    private void bootstrapLocalManagerConnections(Instant now, String traceId) {
+        List<OpencodeContainerManager> managers = repository.findContainerManagers(500);
+        for (OpencodeContainerManager manager : managers) {
+            if (manager.connectionStatus() != ManagerConnectionStatus.CONNECTED) {
+                continue;
+            }
+            if (!settings.linuxServerId().equals(manager.linuxServerId())) {
+                continue;
+            }
+            OpencodeManagerBackendConnection existing = repository
+                    .findManagerBackendConnection(manager.managerId(), backendProcessId)
+                    .orElse(null);
+            if (existing != null) {
+                repository.saveManagerBackendConnection(new OpencodeManagerBackendConnection(
+                        existing.managerId(),
+                        existing.backendProcessId(),
+                        ManagerConnectionStatus.CONNECTED,
+                        existing.connectedAt(),
+                        now,
+                        now,
+                        traceId));
+                continue;
+            }
+            repository.saveManagerBackendConnection(new OpencodeManagerBackendConnection(
+                    manager.managerId(),
+                    backendProcessId,
+                    ManagerConnectionStatus.CONNECTED,
+                    now,
+                    now,
+                    now,
+                    traceId));
+        }
     }
 
     /**

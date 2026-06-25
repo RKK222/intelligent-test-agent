@@ -33,7 +33,9 @@
 - `V8__grant_default_user_super_admin.sql`：为本地默认用户 `888888888` 幂等授予 `SUPER_ADMIN`。
 - `V9__create_managed_workspace_tables.sql`：创建应用版本工作区、个人工作区、最近使用偏好和同步审计表。
 - `V10__add_message_and_run_usage_fields.sql`：为 `session_messages` 和 `runs` 增加 run/remote message/parts/token/cost 快照字段及 active-run 查询索引。
+- `V15__add_opencode_process_id_check_constraints.sql`：为 opencode 进程管理表加 `process_id` 前缀、IPv4、状态、port、baseUrl 形状等 CHECK 约束。
 - `V14__create_opencode_process_management_tables.sql`：创建 Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程和用户绑定表。V10 已用于 F-COSS 本地种子数据，运行管理表使用后续版本避免 Flyway 版本冲突。
+- `V17__seed_local_opencode_machine_for_default_user.sql`：本地开发环境预置一台 `127.0.0.1` 的 opencode 机器（Linux 服务器 + 容器 + 管理进程）并把默认开发用户 `usr_test_dev` 绑定到端口 4096 的本地 opencode server，重复执行安全；`OpencodeManagerBackendConnection` 的 `backend_process_id` 由后端 `BackendJavaProcessLifecycleService.registerHeartbeat` 在启动时按本实例 ID 自举补齐。
 - `JdbcWorkspaceRepository`、`JdbcSessionRepository`、`JdbcRunRepository`、`JdbcRunEventRepository`、`JdbcExecutionNodeRepository`、`JdbcRoutingDecisionRepository`。
 - `JdbcAgentSessionBindingRepository`：实现按 `(sessionId, agentId)` 和 `(agentId, remoteSessionId)` 查询、upsert 通用远端 session 绑定。
 - `JdbcSessionMessageRepository`：实现会话消息保存、按远端 messageId 幂等查询、分页和计数。

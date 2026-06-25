@@ -434,3 +434,32 @@ V10 种子数据对 F-COSS 的影响：
 - 旧消息没有 `run_id`、`remote_message_id`、`parts_json` 和 token/cost 时仍通过 `content` 展示。
 - 远端 opencode 不可用时，消息查询回退读取数据库快照，不要求 V10 字段非空。
 - `run_id` 外键引用 `runs.run_id`，字段可空，避免历史消息迁移失败。
+
+## V17 本地 opencode 机器与默认开发用户进程种子
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V17__seed_local_opencode_machine_for_default_user.sql` 为本地开发环境预置一个 "本地 opencode 机器"（Linux 服务器 + 容器 + 管理进程）和默认开发用户 `usr_test_dev`（用户名 `888888888`）的进程绑定，让前台登录后右侧对话窗口不再因 "没有可用的 opencode 容器" 而直接报错。
+
+种子数据：
+
+| 表 | 关键字段 | 值 |
+|---|---|---|
+| `linux_servers` | `linux_server_id` / `name` / `status` | `127.0.0.1` / `local-opencode-host` / `READY` |
+| `opencode_containers` | `container_id` / `port_start..end` / `max_processes` / `current_processes` / `status` | `ctr_local_4096` / `4096..4096` / `1` / `1` / `READY` |
+| `opencode_container_managers` | `manager_id` / `container_id` / `connection_status` | `mgr_local_4096` / `ctr_local_4096` / `CONNECTED` |
+| `opencode_server_processes` | `process_id` / `user_id` / `port` / `base_url` / `status` | `ocp_local_user_dev` / `usr_test_dev` / `4096` / `http://127.0.0.1:4096` / `RUNNING` |
+| `user_opencode_process_bindings` | `user_id` / `agent_id` / `process_id` / `status` | `usr_test_dev` / `opencode` / `ocp_local_user_dev` / `ACTIVE` |
+
+说明：
+
+- `linux_server_id = 127.0.0.1` 与默认 `TEST_AGENT_LINUX_SERVER_ID`（即 `ManagerControlSettings.linuxServerId`）保持一致；容器端口 `4096` 与默认 `TEST_AGENT_OPENCODE_BASE_URL` 监听端口一致。
+- `opencode_server_processes.base_url` 满足 V15 校验 `= 'http://' || linux_server_id || ':' || port`。
+- `process_id` 以 `ocp_` 开头（V15 校验），`manager_id` 以 `mgr_` 开头（V15 校验）。
+- `OpencodeManagerBackendConnection` 的 `backend_process_id` 形如 `bjp_xxx`，由后端 `BackendJavaProcessLifecycleService.registerHeartbeat` 在启动时为本实例补齐，因此 migration 不预置该行。
+- 补齐逻辑详见 `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/process/socket/BackendJavaProcessLifecycleService.java#bootstrapLocalManagerConnections`，仅在 (manager, backend) 组合不存在连接行时插入；已有行只更新 `last_heartbeat_at` / `status`，与 `ManagerControlApplicationService.register/heartbeat` 协调更新。
+
+兼容策略：
+
+- 全部插入语句使用 `where not exists` / `where exists` 保护，重复执行迁移不会破坏数据或产生重复行。
+- 仅在 `users.user_id = 'usr_test_dev'`（V5 默认开发用户）存在时才插入 `opencode_server_processes` 与 `user_opencode_process_bindings`；生产环境无该用户时整段种子不写用户进程相关表，仅保留拓扑种子，便于后续手工绑定。
+- 容器 `current_processes = 1` 反映当前已有一个用户进程；若需要新增第二个用户，需要先把 `current_processes` 与 `max_processes` 调大并扩展端口池，或先解除已有绑定。
+- 健康检测仍由 `OpencodeProcessManagerGateway` 走 manager WebSocket；本地开发若 manager 未启动，状态会落到 "opencode 进程健康检测失败，需要重新初始化"，本迁移只解决 "没有可用的 opencode 容器" 这一类错误，不替代 manager 部署。

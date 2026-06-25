@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-06-25 - 在库里为默认开发用户预置本地 opencode 机器
+
+- Why: 前台登录（默认开发用户 `888888888 / usr_test_dev`）后，右侧对话窗口报 `opencode 进程不可用` / `没有可用的 opencode 容器`。前者来自 `UserOpencodeProcessAssignmentService` 在有 binding 但健康检测失败时的统一提示，后者来自 `findHealthyContainersConnectedToBackend` / `findHealthyContainersConnectedToBackendByLinuxServer` 返回空——根因是数据库里 `linux_servers / opencode_containers / opencode_container_managers / opencode_manager_backend_connections` 拓扑一行都没有，且当前用户也没有任何 `opencode_server_processes / user_opencode_process_bindings`。
+- What:
+  - 新增 Flyway migration `V17__seed_local_opencode_machine_for_default_user.sql`，在已有 V14 / V15 表结构上幂等种入 `linux_servers(127.0.0.1)`、`opencode_containers(ctr_local_4096, 4096..4096, max=1, current=1, READY)`、`opencode_container_managers(mgr_local_4096, CONNECTED)`、`opencode_server_processes(ocp_local_user_dev, usr_test_dev, 4096, http://127.0.0.1:4096, RUNNING)`、`user_opencode_process_bindings((usr_test_dev, opencode) -> ocp_local_user_dev, ACTIVE)`。`OpencodeManagerBackendConnection` 的 `backend_process_id` 形如 `bjp_xxx`，由后端实例自举。
+  - `BackendJavaProcessLifecycleService.registerHeartbeat` 在为本实例写心跳时，新增 `bootstrapLocalManagerConnections`，遍历 `opencode_container_managers`，对同 `linux_server_id` 且 `connection_status = CONNECTED` 的 manager 自动补齐到本实例的连接行；已有连接行只更新心跳和状态，不会影响 `ManagerControlApplicationService` 的真实连接维护。
+  - 测试：`BackendJavaProcessLifecycleServiceTest` 补两条用例（补齐同服务器 manager、跳过其他服务器 manager），`JdbcRepositoryIntegrationTest` 加 `v17SeedLocalOpencodeMachineForDefaultUserIsIdempotent` 验证 Flyway 落地 + 重复执行不破坏数据。
+  - 文档：`docs/deployment/database.md` 新增 V17 节；`backend/test-agent-persistence/README.md` / `backend/test-agent-opencode-runtime/README.md` 同步 V17 与心跳自举说明；`docs/deployment/backend.md` 在「测试环境 profile」后追加「本地开发 opencode 机器预置」小节，描述本机 opencode server（127.0.0.1:4096）启动后可直接登录看到 READY。
+- How: migration 全部插入用 `where not exists / where exists` 保护，重复执行安全；用户进程表依赖 V5 默认开发用户 `usr_test_dev`，生产环境无该用户时整段用户进程种子不写，仅保留拓扑；心跳自举用 `(manager, backend)` 主键查表，只在缺失时插入 `CONNECTED` 行，不触碰 manager WebSocket 维护流程。
+- Result: 前台 `888888888` 登录后，右侧对话窗口不再因 "没有可用的 opencode 容器" 直接报错；`findHealthyContainersConnectedToBackend*` 可返回本机容器 `ctr_local_4096`；后续若 manager WebSocket 未启动，状态会落到 "opencode 进程健康检测失败，需要重新初始化"（受 manager 网关限制，本地不替代 manager 部署），否则会直接进入 READY。
+- Pitfalls: `OpencodeContainer` 约束 `max_processes <= (port_end - port_start + 1)`，所以单端口 4096 必须把 `max_processes` 设为 1、`current_processes` 设为 1，否则 CHECK 失败；`UserOpencodeProcessBinding` 的 `(user_id, agent_id)` 唯一键被 `on conflict` 守护；`OpencodeServerProcess` 的 `baseUrl` 约束要求 `= 'http://' || linux_server_id || ':' || port`，已与 `127.0.0.1:4096` 对齐。
+- Verification: `mvn -pl test-agent-persistence test` 通过（21/21，含新加 `v17SeedLocalOpencodeMachineForDefaultUserIsIdempotent`）；`mvn -pl test-agent-opencode-runtime test` 通过（104/104，含 `BackendJavaProcessLifecycleServiceTest` 3 个用例）；`mvn -DskipTests=true compile` 全量 17 个模块编译通过；现有 `opencodeProcessManagementRepositoriesSaveAndReadTopology` 已改为兼容 V17 种子行的 `.contains(...)` 断言。
+
 ### 2026-06-25 - 修复运行管理拖动/滚动条问题及文件树和工作台图标大小/线条
 
 - Why: 
