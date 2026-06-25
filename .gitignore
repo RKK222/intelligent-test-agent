@@ -60,5 +60,8 @@ tmp/
 .playwright-mcp/
 .claude/
 
+# ===== opencode-manager 编译产物 =====
+opencode-manager/bin/
+
 # 测试工作区（开发测试用，不提交）
 test-workspaces/
