@@ -115,14 +115,8 @@ fi
 
 frontend_url="${TEST_AGENT_FRONTEND_URL:-http://127.0.0.1:3000}"
 backend_url="${TEST_AGENT_BASE_URL:-http://127.0.0.1:8080}"
-frontend_hostport="${frontend_url#http://}"
-frontend_hostport="${frontend_hostport#https://}"
-frontend_hostport="${frontend_hostport%%/*}"
-if [[ "${frontend_hostport}" == *:* ]]; then
-  frontend_port="${FRONTEND_PORT:-${frontend_hostport##*:}}"
-else
-  frontend_port="${FRONTEND_PORT:-3000}"
-fi
+frontend_host="127.0.0.1"
+frontend_port="3000"
 
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -208,6 +202,26 @@ url_host() {
   host="${host#[}"
   host="${host%]}"
   echo "${host}"
+}
+
+derive_frontend_runtime_settings() {
+  local hostport
+  hostport="${frontend_url#http://}"
+  hostport="${hostport#https://}"
+  hostport="${hostport%%/*}"
+  if [[ "${hostport}" == *:* ]]; then
+    frontend_port="${FRONTEND_PORT:-${hostport##*:}}"
+  else
+    frontend_port="${FRONTEND_PORT:-3000}"
+  fi
+  frontend_host="${FRONTEND_HOST:-$(url_host "${frontend_url}")}"
+}
+
+apply_frontend_origin_defaults() {
+  if [[ -n "${TEST_AGENT_CORS_ALLOWED_ORIGINS:-}" ]]; then
+    return
+  fi
+  export TEST_AGENT_CORS_ALLOWED_ORIGINS="http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,${frontend_url}"
 }
 
 detect_local_ipv4() {
@@ -617,17 +631,18 @@ start_opencode_manager() {
 
 start_frontend() {
   mkdir -p "${LOG_DIR}"
-  echo "Starting frontend on port ${frontend_port}. Logs: ${LOG_DIR}/frontend.log"
+  echo "Starting frontend on ${frontend_host}:${frontend_port}. Logs: ${LOG_DIR}/frontend.log"
   : >"${LOG_DIR}/frontend.log"
   if command -v screen >/dev/null 2>&1; then
     local frontend_cmd
-    printf -v frontend_cmd 'cd %q && export PORT=%q && exec corepack pnpm dev >>%q 2>&1' \
-      "${FRONTEND_DIR}" "${frontend_port}" "${LOG_DIR}/frontend.log"
+    printf -v frontend_cmd 'cd %q && export HOST=%q PORT=%q VITE_TEST_AGENT_API_BASE_URL=%q && exec corepack pnpm dev >>%q 2>&1' \
+      "${FRONTEND_DIR}" "${frontend_host}" "${frontend_port}" "${backend_url}" "${LOG_DIR}/frontend.log"
     screen -dmS "${FRONTEND_SCREEN_SESSION}" bash -lc "${frontend_cmd}"
   else
     (
       cd "${FRONTEND_DIR}"
-      PORT="${frontend_port}" nohup corepack pnpm dev >>"${LOG_DIR}/frontend.log" 2>&1 &
+      HOST="${frontend_host}" PORT="${frontend_port}" VITE_TEST_AGENT_API_BASE_URL="${backend_url}" \
+        nohup corepack pnpm dev >>"${LOG_DIR}/frontend.log" 2>&1 &
       echo "$!" >"${LOG_DIR}/frontend.pid"
     )
   fi
@@ -638,6 +653,8 @@ start_frontend() {
 load_env_file "${env_file}"
 backend_url="${TEST_AGENT_BASE_URL:-${backend_url}}"
 frontend_url="${TEST_AGENT_FRONTEND_URL:-${frontend_url}}"
+derive_frontend_runtime_settings
+apply_frontend_origin_defaults
 apply_detected_runtime_ip_defaults
 export SPRING_PROFILES_ACTIVE="${profile}"
 

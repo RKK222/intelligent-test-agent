@@ -473,6 +473,8 @@ opencode 用户进程管理表曾在设计阶段使用 V10 版本号；实际仓
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V17__seed_local_opencode_machine_for_default_user.sql` 为本地开发环境预置一个 "本地 opencode 机器"（Linux 服务器 + 容器 + 管理进程）和默认开发用户 `usr_test_dev`（用户名 `888888888`）的进程绑定，让前台登录后右侧对话窗口不再因 "没有可用的 opencode 容器" 而直接报错。
 
+兼容历史本地库时，V17 不只按固定 `process_id='ocp_local_user_dev'` 判断是否已种子化，也会检查 `linux_server_id='127.0.0.1' and port=4096` 是否已有 opencode 进程。若同端口已有旧进程，迁移复用该进程写入默认用户绑定，不再插入新的 `ocp_local_user_dev`，避免 `uk_opencode_server_processes_linux_port` 唯一约束阻塞本地启动。
+
 种子数据：
 
 | 表 | 关键字段 | 值 |

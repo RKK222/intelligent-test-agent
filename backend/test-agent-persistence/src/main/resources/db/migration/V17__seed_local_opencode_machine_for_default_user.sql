@@ -48,6 +48,7 @@ where not exists (
 
 -- 用户专属 opencode 进程：直接指向本机已运行的 opencode server（127.0.0.1:4096）。
 -- baseUrl 必须等于 'http://' || linux_server_id || ':' || port，端口 4096 与本地 opencode server 监听端口一致。
+-- 历史本地库可能已存在同一 linux_server_id + port 的旧进程，按端口唯一约束复用它，避免 V17 启动迁移失败。
 insert into opencode_server_processes (
     process_id, user_id, linux_server_id, container_id, port, pid, base_url,
     status, session_path, config_path, started_at, last_health_check_at,
@@ -61,6 +62,10 @@ select 'ocp_local_user_dev', 'usr_test_dev', '127.0.0.1', 'ctr_local_4096',
 where exists (select 1 from users where user_id = 'usr_test_dev')
   and not exists (
       select 1 from opencode_server_processes where process_id = 'ocp_local_user_dev'
+  )
+  and not exists (
+      select 1 from opencode_server_processes
+      where linux_server_id = '127.0.0.1' and port = 4096
   );
 
 -- 当前用户到 opencode agent 的绑定。
@@ -68,10 +73,17 @@ insert into user_opencode_process_bindings (
     user_id, agent_id, process_id, linux_server_id, port,
     status, trace_id, created_at, updated_at
 )
-select 'usr_test_dev', 'opencode', 'ocp_local_user_dev', '127.0.0.1', 4096,
+select 'usr_test_dev', 'opencode', local_process.process_id, '127.0.0.1', 4096,
        'ACTIVE', 'trace_seed_local_opencode_machine', now(), now()
+from opencode_server_processes local_process
 where exists (select 1 from users where user_id = 'usr_test_dev')
+  and local_process.linux_server_id = '127.0.0.1'
+  and local_process.port = 4096
   and not exists (
       select 1 from user_opencode_process_bindings
       where user_id = 'usr_test_dev' and agent_id = 'opencode'
+  )
+  and not exists (
+      select 1 from user_opencode_process_bindings
+      where process_id = local_process.process_id
   );

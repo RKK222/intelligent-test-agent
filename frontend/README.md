@@ -60,8 +60,12 @@ tools/dev-frontend-check.sh
 推荐从仓库根目录使用一键脚本重启三服务，脚本会按 `.env.local` 管理本地 `opencode serve`、后端和前端：
 
 ```bash
-./restart-dev-services.sh --env-file .env.local
+TEST_AGENT_BASE_URL=http://192.168.100.115:8080 \
+TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000 \
+./restart-dev-services.sh --profile guo --env-file .env.local --skip-frontend-build
 ```
+
+脚本会从 `TEST_AGENT_FRONTEND_URL` 推导前端监听 host/port，并把 `TEST_AGENT_BASE_URL` 注入为 Vite 的 `VITE_TEST_AGENT_API_BASE_URL`；需要通过局域网地址访问时，可在启动前设置 `TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000` 和 `TEST_AGENT_BASE_URL=http://192.168.100.115:8080`，后端 CORS 未显式配置时会自动包含该前端 origin。
 
 本机存在多个 opencode 版本时，在 `.env.local` 指定 `TEST_AGENT_OPENCODE_BIN`，避免 PATH 命中旧版本。例如：
 

@@ -1344,4 +1344,87 @@ class JdbcRepositoryIntegrationTest {
         assertThat(opencodeProcesses.findUserBinding(new UserId("usr_test_dev"), "opencode"))
                 .isPresent();
     }
+
+    @Test
+    void v17SeedReusesExistingLocalOpencodePortProcess() {
+        EmbeddedDatabase migrationDatabase = new EmbeddedDatabaseBuilder()
+                .setType(EmbeddedDatabaseType.H2)
+                .setName("testagent_v17_existing_port;MODE=PostgreSQL;DATABASE_TO_UPPER=false")
+                .build();
+        try {
+            Flyway.configure()
+                    .dataSource(migrationDatabase)
+                    .locations("classpath:db/migration")
+                    .target("16")
+                    .load()
+                    .migrate();
+            JdbcClient migrationJdbc = JdbcClient.create(migrationDatabase);
+
+            // 复现历史本地库：V17 尚未应用，但 127.0.0.1:4096 已有旧进程记录。
+            migrationJdbc.sql("""
+                            insert into linux_servers (
+                                linux_server_id, name, status, capacity_summary_json,
+                                last_heartbeat_at, trace_id, created_at, updated_at
+                            )
+                            values (
+                                '127.0.0.1', 'local-opencode-host', 'READY', '{}',
+                                now(), 'trace_existing_local_4096', now(), now()
+                            )
+                            """)
+                    .update();
+            migrationJdbc.sql("""
+                            insert into opencode_containers (
+                                container_id, linux_server_id, container_name,
+                                port_start, port_end, max_processes, current_processes,
+                                status, last_heartbeat_at, trace_id, created_at, updated_at
+                            )
+                            values (
+                                'ctr_local_4096', '127.0.0.1', 'local-opencode',
+                                4096, 4096, 1, 1,
+                                'READY', now(), 'trace_existing_local_4096', now(), now()
+                            )
+                            """)
+                    .update();
+            migrationJdbc.sql("""
+                            insert into opencode_server_processes (
+                                process_id, user_id, linux_server_id, container_id, port, pid, base_url,
+                                status, session_path, config_path, started_at, last_health_check_at,
+                                health_message, trace_id, created_at, updated_at
+                            )
+                            values (
+                                'ocp_existing_local_4096', 'usr_test_dev', '127.0.0.1', 'ctr_local_4096',
+                                4096, null, 'http://127.0.0.1:4096',
+                                'RUNNING', '/data/opencode/session/4096', '/data/opencode/.config/opencode/',
+                                now(), now(), 'existing before V17', 'trace_existing_local_4096', now(), now()
+                            )
+                            """)
+                    .update();
+
+            Flyway.configure()
+                    .dataSource(migrationDatabase)
+                    .locations("classpath:db/migration")
+                    .load()
+                    .migrate();
+
+            Integer processCount = migrationJdbc.sql("""
+                            select count(*)
+                            from opencode_server_processes
+                            where linux_server_id = '127.0.0.1' and port = 4096
+                            """)
+                    .query(Integer.class)
+                    .single();
+            String boundProcessId = migrationJdbc.sql("""
+                            select process_id
+                            from user_opencode_process_bindings
+                            where user_id = 'usr_test_dev' and agent_id = 'opencode'
+                            """)
+                    .query(String.class)
+                    .single();
+
+            assertThat(processCount).isEqualTo(1);
+            assertThat(boundProcessId).isEqualTo("ocp_existing_local_4096");
+        } finally {
+            migrationDatabase.shutdown();
+        }
+    }
 }

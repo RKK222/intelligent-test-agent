@@ -6,6 +6,8 @@ import { defineConfig } from "vite";
 // 统一通过 import.meta.url 解析 workspace 包源码，避免硬编码绝对路径
 const pkgSrc = (name: string): string =>
   fileURLToPath(new URL(`../../packages/${name}/src`, import.meta.url));
+// 本地一键启动脚本会按 TEST_AGENT_FRONTEND_URL 注入 HOST，未注入时保持仅本机访问。
+const devServerHost = process.env.HOST ?? "127.0.0.1";
 
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
@@ -26,7 +28,7 @@ export default defineConfig({
     }
   },
   server: {
-    host: "127.0.0.1",
+    host: devServerHost,
     port: 3000
   }
 });
