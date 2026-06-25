@@ -1428,8 +1428,8 @@ function onCompositionEnd() {
 
 .figma-chat-input-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px;
-  align-items: stretch;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  align-items: center;
   gap: 8px;
 }
 
@@ -1551,10 +1551,10 @@ function onCompositionEnd() {
 }
 
 .figma-chat-send--inline {
-  width: 36px;
-  height: 56px;
-  align-self: stretch;
-  border-radius: 10px;
+  width: 44px;
+  height: 44px;
+  align-self: center;
+  border-radius: 999px;
 }
 
 .figma-chat-send {
@@ -1576,7 +1576,7 @@ function onCompositionEnd() {
   background: #fff;
   color: #3366ff;
   border: 1.5px solid #3366ff;
-  border-radius: 10px;
+  border-radius: 999px;
 }
 
 .figma-chat-stop:hover {
@@ -1600,9 +1600,9 @@ function onCompositionEnd() {
   inset: 0;
   z-index: 35;
   display: flex;
-  align-items: flex-end;
+  align-items: flex-start;
   justify-content: center;
-  padding: 16px 12px;
+  padding: 84px 12px 16px;
   background: rgba(15, 15, 18, 0.28);
   animation: figma-chat-drawer-fade 0.16s ease-out;
 }
@@ -1727,7 +1727,7 @@ function onCompositionEnd() {
 
 @keyframes figma-chat-attachment-pop {
   from {
-    transform: translateY(12px);
+    transform: translateY(-8px);
     opacity: 0.7;
   }
   to {
