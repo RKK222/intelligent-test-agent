@@ -15,6 +15,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -22,6 +24,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class WorkspaceApplicationService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(WorkspaceApplicationService.class);
 
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceFileService fileService;
@@ -38,6 +42,7 @@ public class WorkspaceApplicationService {
      * 注册工作区；rootPath 必须是已存在目录，traceId 会写入领域对象用于审计和排障。
      */
     public Workspace createWorkspace(String name, String rootPath, String traceId) {
+        LOGGER.info("Creating workspace, name={}, rootPath={}, traceId={}", name, rootPath, traceId);
         Path root = validateRootPath(rootPath);
         Instant now = Instant.now();
         Workspace workspace = new Workspace(
@@ -48,7 +53,9 @@ public class WorkspaceApplicationService {
                 now,
                 now,
                 traceId);
-        return workspaceRepository.save(workspace);
+        Workspace saved = workspaceRepository.save(workspace);
+        LOGGER.info("Workspace created, workspaceId={}, name={}, traceId={}", saved.workspaceId().value(), name, traceId);
+        return saved;
     }
 
     /**
@@ -63,10 +70,13 @@ public class WorkspaceApplicationService {
      */
     public Workspace getWorkspace(WorkspaceId workspaceId) {
         return workspaceRepository.findById(workspaceId)
-                .orElseThrow(() -> new PlatformException(
-                        ErrorCode.NOT_FOUND,
-                        "Workspace 不存在",
-                        Map.of("workspaceId", workspaceId.value())));
+                .orElseThrow(() -> {
+                    LOGGER.warn("Workspace not found, workspaceId={}", workspaceId.value());
+                    return new PlatformException(
+                            ErrorCode.NOT_FOUND,
+                            "Workspace 不存在",
+                            Map.of("workspaceId", workspaceId.value()));
+                });
     }
 
     /**

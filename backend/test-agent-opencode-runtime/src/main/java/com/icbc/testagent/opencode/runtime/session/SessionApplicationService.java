@@ -19,6 +19,8 @@ import com.icbc.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -27,6 +29,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class SessionApplicationService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(SessionApplicationService.class);
 
     private final WorkspaceRepository workspaceRepository;
     private final SessionRepository sessionRepository;
@@ -63,10 +67,11 @@ public class SessionApplicationService {
      */
     public Session createSession(WorkspaceId workspaceId, String title, String traceId) {
         if (workspaceRepository.findById(workspaceId).isEmpty()) {
+            LOGGER.warn("Cannot create session: workspace not found, workspaceId={}, traceId={}", workspaceId.value(), traceId);
             throw new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value()));
         }
         Instant now = Instant.now();
-        return sessionRepository.save(new Session(
+        Session session = sessionRepository.save(new Session(
                 new SessionId(RuntimeIdGenerator.sessionId()),
                 workspaceId,
                 title,
@@ -74,6 +79,9 @@ public class SessionApplicationService {
                 now,
                 now,
                 traceId));
+        LOGGER.info("Session created, sessionId={}, workspaceId={}, title={}, traceId={}",
+                session.sessionId().value(), workspaceId.value(), title, traceId);
+        return session;
     }
 
     /**
@@ -120,7 +128,9 @@ public class SessionApplicationService {
      */
     public Session archiveSession(SessionId sessionId, String traceId) {
         Session current = getSession(sessionId);
-        return sessionRepository.save(current.archive(Instant.now(), traceId));
+        Session archived = sessionRepository.save(current.archive(Instant.now(), traceId));
+        LOGGER.info("Session archived, sessionId={}, traceId={}", sessionId.value(), traceId);
+        return archived;
     }
 
     /**

@@ -272,6 +272,11 @@ public class RunApplicationService {
 
     private Run startRunInternal(UserId userId, String agentId, StartRunInput input, String traceId) {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        LOGGER.info("Run starting, userId={}, agentId={}, sessionId={}, traceId={}",
+                userId != null ? userId.value() : "anonymous",
+                resolvedAgentId,
+                input.sessionId().value(),
+                traceId);
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         UserOpencodeProcessAssignment userProcessAssignment = resolveUserProcessAssignment(userId, resolvedAgentId, traceId);
         Instant now = Instant.now();
@@ -295,6 +300,11 @@ public class RunApplicationService {
             AgentRoutingTarget target = userProcessAssignment == null
                     ? resolveAgentTarget(resolvedAgentId, session, pending.runId(), now, traceId)
                     : userProcessTarget(userProcessAssignment, pending.runId(), now, traceId);
+            LOGGER.debug("Run routed, runId={}, nodeId={}, reason={}, traceId={}",
+                    pending.runId().value(),
+                    target.node().executionNodeId().value(),
+                    target.decision().reason().name(),
+                    traceId);
             routingDecisionRepository.save(target.decision());
             AgentSessionBinding binding = runtimeTargetResolver.ensureAgentSession(
                     resolvedAgentId,
@@ -308,6 +318,11 @@ public class RunApplicationService {
             syncProviderConfig(runtime, target.node(), traceId);
             Run running = runRepository.save(pending.start(Instant.now()));
             append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
+            LOGGER.info("Run started, runId={}, nodeId={}, remoteSessionId={}, traceId={}",
+                    running.runId().value(),
+                    target.node().executionNodeId().value(),
+                    binding.remoteSessionId(),
+                    traceId);
             // 先订阅事件再触发 prompt，避免 opencode 快速失败或快速返回时平台漏掉终态事件。
             subscribeAgentEvents(resolvedAgentId, runtime, running, target.node(), workspace, traceId);
             runtime.startRun(new AgentStartRunCommand(
@@ -326,6 +341,10 @@ public class RunApplicationService {
                     .block();
             return running;
         } catch (PlatformException exception) {
+            LOGGER.error("Run failed to start, runId={}, errorCode={}, traceId={}",
+                    pending.runId().value(),
+                    exception.errorCode().name(),
+                    traceId);
             Run failed = runRepository.save(pending.fail(Instant.now()));
             append(failed.runId(), RunEventType.RUN_FAILED, traceId, Instant.now(), Map.of("errorCode", exception.errorCode().name()));
             snapshotService.persistRunSnapshot(resolvedAgentId, failed, traceId);
@@ -601,9 +620,11 @@ public class RunApplicationService {
      */
     public Run cancelRun(String agentId, RunId runId, String traceId) {
         String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        LOGGER.info("Run cancellation requested, runId={}, agentId={}, traceId={}", runId.value(), resolvedAgentId, traceId);
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
         Run run = getRun(runId);
         if (run.status().isTerminal()) {
+            LOGGER.warn("Cannot cancel terminal run, runId={}, status={}, traceId={}", runId.value(), run.status().name(), traceId);
             throw new PlatformException(
                     ErrorCode.CONFLICT,
                     "Run 已结束，不能取消",
@@ -634,6 +655,7 @@ public class RunApplicationService {
                 : runRepository.save(cancelling.cancel(Instant.now()));
         append(runId, RunEventType.RUN_CANCELLED, traceId, Instant.now(), Map.of("status", cancelled.status().name()));
         snapshotService.persistRunSnapshot(resolvedAgentId, cancelled, traceId);
+        LOGGER.info("Run cancelled, runId={}, traceId={}", runId.value(), traceId);
         return cancelled;
     }
 

@@ -2,6 +2,23 @@
 
 ## Entries
 
+### 2026-06-25 - 补充关键节点和流程日志
+
+- Why: 项目中很多关键节点和流程缺少日志，排查问题困难，需要在关键操作处补充结构化日志。
+- What:
+  - **WorkspaceApplicationService**: 新增创建工作区、查询失败等关键操作日志
+  - **SessionApplicationService**: 新增创建会话、归档会话等关键操作日志
+  - **DefaultOpencodeClientFacade**: 新增外部调用开始/完成、重试、错误转换日志
+  - **RunEventSseStreamService**: 新增 SSE 连接开始/取消/错误/完成日志
+  - **RunEventLiveBus**: 新增事件发布、无订阅者、发布失败等日志
+  - **RunApplicationService**: 新增 Run 启动/路由/成功/失败、取消等关键操作日志
+  - **pom.xml**: 为 test-agent-workspace-management 模块添加 slf4j-api 依赖
+- How: 在各关键方法入口添加 info 级别日志，在错误处理分支添加 warn/error 日志，遵循结构化日志规范（包含 traceId、操作类型、关键业务 ID）。
+- Result: 关键流程现在有完整的日志追踪，便于排障和问题定位。
+- Pitfalls: test-agent-workspace-management 模块原本没有 slf4j-api 依赖，需要手动添加。
+- Verification: `mvn compile -DskipTests` 编译成功；`mvn -pl test-agent-workspace-management -am test` 通过；`mvn -pl test-agent-opencode-client -am test` 通过；`mvn -pl test-agent-opencode-runtime -am test` 通过；`mvn -pl test-agent-event -am test` 通过。
+- Next: 无。
+
 ### 2026-06-25 - 运行管理只展示活进程并增加 Redis 心跳
 
 - Why: 超级管理员设置-运行管理页需要面向当前启动的 Java / opencode 进程做运维，原实现只依赖数据库快照且用用户 ID 过滤/展示，容易展示僵死进程，也不便按用户名定位。
