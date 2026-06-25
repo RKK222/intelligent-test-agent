@@ -402,3 +402,23 @@
 - Pitfalls: `/tmp` 在 macOS 重启后会被清理，如果只用 `dev-backend-run.sh` 启动后端而不走 `restart-dev-services.sh`，目录仍可能缺失——需要手动创建或重新运行 `seed_demo_workspaces`。
 - Verification: `GET /api/workspaces/wrk_fcoss_report_20260715/files` 等 5 个 API 全部正常返回；`find /tmp/test-agent/fcoss -type d` 显示完整目录结构。
 - Next: 如果将来种子数据路径从 `/tmp` 改到项目 `.tmp/workspace` 下，则不再受 macOS 清理 `/tmp` 影响。
+  - 恢复已落库的 `V10__seed_fcoss_application.sql` 文件名，避免本地和已部署库出现 "applied migration not resolved locally: 10"。
+  - 将新调度框架 migration 改为 `V20260625184300__create_scheduler_framework_tables.sql`；约定 V17 及以前为历史连续版本，后续新增脚本统一用 `VyyyyMMddHHmmss__description.sql`，按个人更新时间戳确定版本号。
+  - 新增 `FlywayMigrationNamingTest`，校验 migration 版本唯一，并阻止 V17 之后继续新增 V18/V19 这类顺序号。
+  - `RunApplicationService.userProcessTarget` 在保存路由决策和 agent session binding 前，先 upsert 用户进程投影出的兼容 `ExecutionNode`，避免 local-direct 合成节点触发外键失败。
+  - 同步更新 persistence/runtime README、`docs/deployment/database.md` 和 `docs/standards/backend.md`。
+- How: 保留已应用 migration 的版本号不改名，只整理未成功作为稳定历史依赖的新脚本；运行时修复不改变 `UserOpencodeProcessAssignmentService` 的 local-direct 短路语义，仍由 Run 启动阶段承担需要持久化审计/binding 前的兼容节点 upsert。
+- Result: 115 地址重启成功，登录 CORS 预检返回 `Access-Control-Allow-Origin: http://192.168.100.115:3000`；curl 发送对话返回 200，创建 `run_30c7621908934017b8686f38a6f44ebd` 且状态为 `RUNNING`，日志只出现 `Run started`，不再有 `DataIntegrityViolationException`。
+- Pitfalls: 本地 `POST /api/sessions` 当前 DTO 要求 `title` 非空，curl 复测时需要带 `title`；`test-agent.opencode.local-direct=true` 下 `status/initialize/requireReadyProcess` 仍不写 topology，但后续 Run 审计表和 binding 表有外键，不能跳过兼容 `ExecutionNode`。
+- Verification: `mvn -pl test-agent-opencode-runtime -am test -Dtest=RunApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false` 19/19 通过；`mvn -pl test-agent-persistence -am clean test -Dtest=FlywayMigrationNamingTest,JdbcRepositoryIntegrationTest#scheduledTaskRepositoryPersistsDefinitionsPlansAndRunRecords -Dsurefire.failIfNoSpecifiedTests=false` 2/2 通过；`./restart-dev-services.sh --profile guo --env-file .env.local --skip-frontend-build` 构建并重启成功；curl 健康检查、CORS 预检、登录、创建 session、发送对话链路通过。
+- Next: 后续多人新增 Flyway 脚本时直接用当前时间戳版本，不要再把已落库的历史 migration 改名；前端 `AgentWorkbench.vue` 已通过 `api.createSession(workspaceId, title)` 传标题，curl/脚本直调 `/api/sessions` 时也要带 `title`。
+
+### 2026-06-25 - 本地 PostgreSQL JDBC 使用 127.0.0.1，页面访问继续使用 192.168.100.115
+
+- Why: 使用 `.env.local` 直接启动时后端在 Druid 初始化阶段报 `org.postgresql.util.PSQLException: 尝试连线已失败`，底层是 `java.io.EOFException`，发生在 PostgreSQL JDBC 认证阶段；因此 8080/3000 都没有监听。
+- What: 经用户确认，将 `.env.local` 的 `SPRING_DATASOURCE_DRUID_URL` 从 `jdbc:postgresql://192.168.100.115:15432/testagent?sslmode=disable` 改为 `jdbc:postgresql://127.0.0.1:15432/testagent?sslmode=disable`。前后端对外访问地址仍通过 `TEST_AGENT_BASE_URL=http://192.168.100.115:8080` 和 `TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000` 维持 115。
+- How: 对照验证显示 `psql` 连 `192.168.100.115:15432` 成功，PostgreSQL JDBC 连同一地址会 EOF；同一 JDBC 驱动连 `127.0.0.1:15432` 成功。容器 `pg_hba.conf` 中 `127.0.0.1/32` 命中 `trust`，而 115 进入 Docker 后来源为 `172.18.0.1`，命中 `scram-sha-256`。为本地稳定启动，依赖服务走 localhost，浏览器访问继续走局域网 IP。
+- Result: 使用正式 `.env.local` 执行 `./restart-dev-services.sh --profile guo --env-file .env.local --skip-frontend-build` 后端 readiness 和前端 3000 均通过；登录 CORS 预检返回 `Access-Control-Allow-Origin: http://192.168.100.115:3000`；发送对话返回 200，创建 `run_ac72bbb784454f7f9e5aa86de7c45ef7` 且状态 `RUNNING`。
+- Pitfalls: `.env.local` 是忽略文件，不会随 git 提交传播；其他机器如果仍把 JDBC URL 指向本机局域网 IP，可能复现同类 JDBC SCRAM EOF。不要把前端 API 地址改成 127，否则移动设备或其他机器访问 115 页面时会打到自己的 localhost。
+- Verification: `curl http://192.168.100.115:8080/actuator/health` 返回 `UP`；`curl -I http://192.168.100.115:3000` 返回 200；CORS 预检通过；curl 登录、创建 session、发送 run 链路通过。
+- Next: 若后续要坚持数据库也用 115，需要调整本地 Postgres 容器认证/监听策略，而不是改应用代码。
