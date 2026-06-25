@@ -5,16 +5,8 @@ import { FileExplorer, type FileExplorerProps } from "@test-agent/file-explorer"
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 
-type VcsBranch = { name: string; isCurrent?: boolean };
-
 defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
-  branches?: VcsBranch[];
-  currentBranch?: string;
-  /** 仓库默认分支名（来自 /vcs/status 的 default_branch 字段），用于分支两级菜单"默认分支"分组 */
-  defaultBranch?: string;
-  /** 用户最近一次手动选择的 VCS 分支偏好，用于"最近使用"分组 */
-  recentBranch?: string;
   /** 当前应用名，传递给 WorkbenchFooter 作为两级菜单首行提示 */
   appName?: string;
   /** 归属当前应用的工作空间模板列表（应用→工作空间级） */
@@ -25,8 +17,6 @@ defineProps<FileExplorerProps & {
   loadingAppTemplates?: boolean;
   /** 工作空间版本加载中标记 */
   loadingAppVersions?: boolean;
-  /** 是否禁用 footer 上的"记住当前分支"按钮；无 appId/workspaceId/branch 时父组件传 true */
-  rememberDisabled?: boolean;
   /** 「+新增版本」提交中标记（父组件控制 WorkbenchFooter 弹窗按钮的禁用与文案） */
   creatingVersion?: boolean;
 }>();
@@ -36,13 +26,10 @@ const emit = defineEmits<{
   openFile: [path: string];
   openDiff: [path: string];
   refresh: [];
-  changeBranch: [branch: string];
   // 选择某个应用版本后由父组件切换运行态 Workspace
   selectVersion: [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
   // 要求按需懒加载某模板下的版本列表
   loadVersions: [templateId: string];
-  // 把当前 VCS 分支写入 user_workspace_branch_preferences；父组件负责调 markRecentBranch。
-  rememberCurrentBranch: [];
   // 「+新增版本」弹窗确认后由父组件调用 createWorkspaceVersion。
   createVersion: [payload: { template: AppWorkspaceTemplate; version: string }];
 }>();
@@ -66,22 +53,14 @@ const emit = defineEmits<{
       />
     </div>
     <WorkbenchFooter
-      :branch="currentBranch"
-      :branches="branches"
-      :default-branch="defaultBranch"
-      :recent-branch="recentBranch"
-      :show-branch="true"
       :app-name="appName"
       :templates="appTemplates"
       :selected-version-id="selectedVersionId"
       :loading-templates="loadingAppTemplates"
       :loading-versions="loadingAppVersions"
-      :remember-disabled="rememberDisabled"
       :creating-version="creatingVersion"
-      @change-branch="(name: string) => emit('changeBranch', name)"
       @select-version="(payload) => emit('selectVersion', payload)"
       @load-versions="(templateId: string) => emit('loadVersions', templateId)"
-      @remember-current-branch="emit('rememberCurrentBranch')"
       @create-version="(payload) => emit('createVersion', payload)"
     />
   </div>
