@@ -4,13 +4,11 @@ import {
   ArrowUpRight,
   ChevronDown,
   ChevronRight,
-  Download,
   Eye,
   EyeOff,
   History,
   ListTodo,
   PanelRightClose,
-  PencilLine,
   Plus,
   Send,
   Square,
@@ -107,7 +105,6 @@ const emit = defineEmits<{
   (e: "open-history"): void;
   (e: "open-tasks"): void;
   (e: "update:inputValue", value: string): void;
-  (e: "download-files"): void;
   (e: "open-diff", path: string): void;
   (e: "open-model-picker"): void;
   (e: "initialize-process"): void;
@@ -121,6 +118,7 @@ const inputComposing = ref(false)
 const drawerOpen = ref(false)
 const drawerSelectedPath = ref<string>('')
 const drawerScroll = ref<HTMLElement | null>(null)
+const attachmentDialogOpen = ref(false)
 // 是否在 diff 视图中显示 unified diff 的上下文行（未改动的行）。
 // 默认关闭：用户在文件变更抽屉里通常只想看真正的 +/- 行，避免出现
 // “只改一行但全文飘红” 的体验。当后端 patch 是整文件重写时，关闭上下文
@@ -317,6 +315,14 @@ function closeChangesDrawer() {
   drawerOpen.value = false
 }
 
+function openAttachmentDialog() {
+  attachmentDialogOpen.value = true
+}
+
+function closeAttachmentDialog() {
+  attachmentDialogOpen.value = false
+}
+
 function selectDrawerFile(path: string) {
   if (!path || drawerSelectedPath.value === path) return
   drawerSelectedPath.value = path
@@ -324,8 +330,13 @@ function selectDrawerFile(path: string) {
   void nextTick(() => drawerScroll.value?.scrollTo({ top: 0 }))
 }
 
-// Esc 关闭抽屉：监听全局 keydown，只在抽屉打开时响应。
-function onDrawerKeydown(event: KeyboardEvent) {
+// Esc 关闭面板内浮层：监听全局 keydown，只在当前浮层打开时响应。
+function onOverlayKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && attachmentDialogOpen.value) {
+    event.preventDefault()
+    closeAttachmentDialog()
+    return
+  }
   if (event.key === 'Escape' && drawerOpen.value) {
     event.preventDefault()
     closeChangesDrawer()
@@ -333,10 +344,10 @@ function onDrawerKeydown(event: KeyboardEvent) {
 }
 
 onMounted(() => {
-  window.addEventListener('keydown', onDrawerKeydown)
+  window.addEventListener('keydown', onOverlayKeydown)
 })
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', onDrawerKeydown)
+  window.removeEventListener('keydown', onOverlayKeydown)
 })
 
 watch(
@@ -677,34 +688,48 @@ function onCompositionEnd() {
     </div>
 
     <div class="figma-chat-composer">
-      <textarea
-        v-model="localInput"
-        class="figma-chat-textarea"
-        :placeholder="placeholder || 'Ask the AI agent...'"
-        rows="1"
-        :disabled="running || !processReady"
-        @keydown="onKeydown"
-        @compositionstart="onCompositionStart"
-        @compositionend="onCompositionEnd"
-      />
+      <div class="figma-chat-input-row">
+        <textarea
+          v-model="localInput"
+          class="figma-chat-textarea"
+          :placeholder="placeholder || 'Ask the AI agent...'"
+          rows="1"
+          :disabled="running || !processReady"
+          @keydown="onKeydown"
+          @compositionstart="onCompositionStart"
+          @compositionend="onCompositionEnd"
+        />
+        <button
+          v-if="!running"
+          type="button"
+          class="figma-chat-send figma-chat-send--inline"
+          :disabled="!localInput.trim() || !processReady"
+          aria-label="发送"
+          @click="submit"
+        >
+          <Send class="figma-chat-send-icon" />
+        </button>
+        <button
+          v-else
+          type="button"
+          class="figma-chat-stop figma-chat-send--inline"
+          :disabled="stopDisabled"
+          :title="stopDisabledReason || '停止执行'"
+          aria-label="停止执行"
+          @click="stop"
+        >
+          <Square class="figma-chat-stop-icon" fill="currentColor" />
+        </button>
+      </div>
       <div class="figma-chat-composer-actions">
         <button
           type="button"
-          class="figma-chat-icon-btn"
-          aria-label="清空输入"
-          :disabled="!localInput || running || !processReady"
-          @click="localInput = ''"
+          class="figma-chat-icon-btn figma-chat-attachment-btn"
+          aria-label="上传附件"
+          title="上传附件"
+          @click="openAttachmentDialog"
         >
-          <PencilLine class="figma-chat-btn-icon" />
-        </button>
-        <button
-          type="button"
-          class="figma-chat-icon-btn"
-          aria-label="下载文件"
-          :disabled="!hasFileChanges"
-          @click="emit('download-files')"
-        >
-          <Download class="figma-chat-btn-icon" />
+          <Upload class="figma-chat-btn-icon" />
         </button>
         <div class="figma-chat-composer-spacer" />
         <button
@@ -727,28 +752,51 @@ function onCompositionEnd() {
           <Plus class="figma-chat-btn-icon" />
           <span>新建对话</span>
         </button>
-        <button
-          v-if="!running"
-          type="button"
-          class="figma-chat-send"
-          :disabled="!localInput.trim() || !processReady"
-          aria-label="发送"
-          @click="submit"
-        >
-          <Send class="figma-chat-send-icon" />
-        </button>
-        <button
-          v-else
-          type="button"
-          class="figma-chat-stop"
-          :disabled="stopDisabled"
-          :title="stopDisabledReason || '停止执行'"
-          aria-label="停止执行"
-          @click="stop"
-        >
-          <Square class="figma-chat-stop-icon" fill="currentColor" />
-        </button>
       </div>
+    </div>
+
+    <div
+      v-if="attachmentDialogOpen"
+      class="figma-chat-attachment-mask"
+      role="presentation"
+      @click.self="closeAttachmentDialog"
+    >
+      <section
+        class="figma-chat-attachment-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="上传附件"
+      >
+        <header class="figma-chat-attachment-header">
+          <div>
+            <h3 class="figma-chat-attachment-title">上传附件</h3>
+            <p class="figma-chat-attachment-subtitle">附件会随测试任务一起提交</p>
+          </div>
+          <button
+            type="button"
+            class="figma-chat-attachment-close"
+            aria-label="关闭上传附件弹窗"
+            @click="closeAttachmentDialog"
+          >
+            <X :size="14" />
+          </button>
+        </header>
+        <button
+          type="button"
+          class="figma-chat-attachment-drop"
+          @click.prevent
+        >
+          <span class="figma-chat-attachment-drop-icon" aria-hidden="true">
+            <Upload :size="22" />
+          </span>
+          <span class="figma-chat-attachment-drop-title">选择或拖拽文件到这里</span>
+          <span class="figma-chat-attachment-drop-hint">支持文档、图片和日志文件，后台接口接入后开放上传。</span>
+        </button>
+        <div class="figma-chat-attachment-disabled">
+          <span class="figma-chat-attachment-disabled-dot" aria-hidden="true" />
+          当前仅展示前端样式，暂未连接后台上传能力
+        </div>
+      </section>
     </div>
 
     <!--
@@ -1378,6 +1426,13 @@ function onCompositionEnd() {
   background: #fff;
 }
 
+.figma-chat-input-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: stretch;
+  gap: 8px;
+}
+
 .figma-chat-textarea {
   width: 100%;
   min-height: 56px;
@@ -1393,6 +1448,7 @@ function onCompositionEnd() {
   resize: none;
   outline: none;
   box-sizing: border-box;
+  align-self: stretch;
   transition: border-color 0.12s ease;
 }
 
@@ -1414,7 +1470,7 @@ function onCompositionEnd() {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
 .figma-chat-composer-spacer {
@@ -1457,6 +1513,13 @@ function onCompositionEnd() {
   color: #555;
 }
 
+.figma-chat-attachment-btn {
+  width: 28px;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+}
+
 .figma-chat-model-btn {
   max-width: 156px;
   min-width: 0;
@@ -1487,6 +1550,13 @@ function onCompositionEnd() {
   transition: background-color 0.12s ease, opacity 0.12s ease;
 }
 
+.figma-chat-send--inline {
+  width: 36px;
+  height: 56px;
+  align-self: stretch;
+  border-radius: 10px;
+}
+
 .figma-chat-send {
   background: #3366ff;
   color: #fff;
@@ -1506,7 +1576,7 @@ function onCompositionEnd() {
   background: #fff;
   color: #3366ff;
   border: 1.5px solid #3366ff;
-  border-radius: 50%;
+  border-radius: 10px;
 }
 
 .figma-chat-stop:hover {
@@ -1522,6 +1592,148 @@ function onCompositionEnd() {
 .figma-chat-stop-icon {
   width: 13px;
   height: 13px;
+}
+
+/* ---- Attachment Dialog ---- */
+.figma-chat-attachment-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 35;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 16px 12px;
+  background: rgba(15, 15, 18, 0.28);
+  animation: figma-chat-drawer-fade 0.16s ease-out;
+}
+
+.figma-chat-attachment-dialog {
+  width: min(100%, 360px);
+  border: 1px solid #e4e4e7;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 18px 40px rgba(15, 15, 18, 0.18);
+  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  animation: figma-chat-attachment-pop 0.18s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.figma-chat-attachment-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 10px;
+}
+
+.figma-chat-attachment-title {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 600;
+  color: #18181b;
+}
+
+.figma-chat-attachment-subtitle {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: #777;
+}
+
+.figma-chat-attachment-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border: 0.8px solid #dfdfdf;
+  border-radius: 6px;
+  background: #fff;
+  color: #777;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.figma-chat-attachment-close:hover {
+  background: #f0f0f0;
+  border-color: #cfcfcf;
+  color: #333;
+}
+
+.figma-chat-attachment-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: calc(100% - 28px);
+  margin: 0 14px;
+  padding: 20px 14px;
+  border: 1px dashed #c8d2ee;
+  border-radius: 8px;
+  background: #f8faff;
+  color: #333;
+  cursor: default;
+  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.figma-chat-attachment-drop-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: #eaf0ff;
+  color: #3366ff;
+}
+
+.figma-chat-attachment-drop-title {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  color: #18181b;
+}
+
+.figma-chat-attachment-drop-hint {
+  margin-top: 4px;
+  max-width: 260px;
+  font-size: 11px;
+  line-height: 17px;
+  color: #777;
+  text-align: center;
+}
+
+.figma-chat-attachment-disabled {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 12px 14px 14px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  background: #fafafa;
+  color: #666;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.figma-chat-attachment-disabled-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #a1a5b1;
+}
+
+@keyframes figma-chat-attachment-pop {
+  from {
+    transform: translateY(12px);
+    opacity: 0.7;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
 /* ---- Changes Drawer ----
