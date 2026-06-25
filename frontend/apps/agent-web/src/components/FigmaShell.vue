@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from "vue";
-import { ChevronDown, LogOut, UserRound } from "lucide-vue-next";
+import { ChevronDown, LogOut, ShieldCheck, UserRound } from "lucide-vue-next";
 import logoUrl from "../assets/figma/logo.svg";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
 import folderIconUrl from "../assets/figma/folder-icon.svg";
@@ -19,6 +19,7 @@ const props = withDefaults(
     apps?: AppItem[];
     selectedAppId?: string;
     currentUserName?: string;
+    currentUserRoleLabels?: string[];
     showRightPanel?: boolean;
   }>(),
   {
@@ -102,6 +103,15 @@ const selectedApp = computed(
   () => props.apps.find((a) => a.id === props.selectedAppId) ?? props.apps[0] ?? { id: "", name: "未选择应用" }
 );
 const userName = computed(() => props.currentUserName?.trim() || "未登录");
+// 右上角用户菜单顶部的「角色」灰显行：来自后端 /api/auth/me 的 roleLabels（dictionaries.dict_label）。
+// 多个角色用「、」拼接；roleLabels 为空或缺失时整行不渲染，避免在未登录或字典缺失时出现 "角色：" 空文案。
+const userRoleText = computed(() => {
+  const labels = props.currentUserRoleLabels?.filter((label) => !!label && label.trim().length > 0) ?? [];
+  if (labels.length === 0) {
+    return "";
+  }
+  return labels.join("、");
+});
 const userInitial = computed(() => {
   const first = userName.value.trim().charAt(0);
   return first ? first.toUpperCase() : "?";
@@ -225,6 +235,10 @@ onUnmounted(() => {
             <span class="figma-user-avatar">{{ userInitial }}</span>
           </button>
           <div v-if="userMenuOpen" class="figma-user-menu-dropdown" role="menu">
+            <div v-if="userRoleText" class="figma-user-menu-role" role="presentation" aria-label="当前用户角色">
+              <ShieldCheck class="figma-user-menu-icon" />
+              <span class="figma-user-menu-role-text" :title="userRoleText">{{ userRoleText }}</span>
+            </div>
             <div class="figma-user-menu-summary">
               <UserRound class="figma-user-menu-icon" />
               <span class="figma-user-menu-name">{{ userName }}</span>
@@ -513,7 +527,8 @@ onUnmounted(() => {
 }
 
 .figma-user-menu-summary,
-.figma-user-menu-item {
+.figma-user-menu-item,
+.figma-user-menu-role {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -528,6 +543,27 @@ onUnmounted(() => {
   font-size: 13px;
   line-height: 18px;
   text-align: left;
+}
+
+/* 顶部「角色」灰显行：与 summary 共用一行的视觉重量，但用次要色 + 更小字号
+   暗示它不是可点击项；roleLabels 为空时整行 v-if 不渲染。 */
+.figma-user-menu-role {
+  color: #9ca3af;
+  font-size: 12px;
+  cursor: default;
+  border-bottom: 1px solid #f0f0f0;
+  border-radius: 6px 6px 0 0;
+}
+
+.figma-user-menu-role .figma-user-menu-icon {
+  color: #b8b8b8;
+}
+
+.figma-user-menu-role-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .figma-user-menu-summary {

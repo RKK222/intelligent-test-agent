@@ -34,8 +34,13 @@ public final class AuthDtos {
 
     /**
      * 当前用户信息响应体。
+     *
+     * <p>roleLabels 是 {@code roles} 对应的中文展示名（来自 {@code dictionaries.dict_label}），
+     * 供右上角用户菜单直接展示，不在前端再做 i18n 映射；多角色按当前用户实际顺序返回。
      */
     public record CurrentUserResponse(String userId, String username, String unifiedAuthId,
-                                       String organization, String rdDepartment, String department, java.util.List<String> roles) {
+                                       String organization, String rdDepartment, String department,
+                                       java.util.List<String> roles,
+                                       java.util.List<String> roleLabels) {
     }
 }

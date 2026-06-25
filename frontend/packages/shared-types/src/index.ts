@@ -104,6 +104,10 @@ export type UserOpencodeProcessStatus = "READY" | "NEEDS_INITIALIZATION" | "UNAV
 export type UserOpencodeProcess = {
   status: UserOpencodeProcessStatus;
   initializable: boolean;
+  /** 用户绑定指向的 Linux 服务器已无可用容器，但本地仍有可路由节点时为 true。 */
+  bindingClearable?: boolean;
+  /** 当前响应已经回退到固定 execution_node（例如本地 opencode）时为 true。 */
+  localFallback?: boolean;
   message: string;
   processId?: string;
   linuxServerId?: string;
@@ -616,6 +620,9 @@ export type LoginResponse = {
 
 /**
  * 当前登录用户信息。
+ *
+ * roleLabels 是 roles 对应的中文展示名（来自后端 `dictionaries.dict_label`），
+ * 供右上角用户菜单直接展示；缺失时按空数组兼容。
  */
 export type CurrentUser = {
   userId: string;
@@ -625,6 +632,7 @@ export type CurrentUser = {
   rdDepartment?: string | null;
   department?: string | null;
   roles?: string[];
+  roleLabels?: string[];
 };
 
 // ---- 应用配置管理类型 ----

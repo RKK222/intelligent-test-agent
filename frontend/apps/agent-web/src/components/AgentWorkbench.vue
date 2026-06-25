@@ -1671,6 +1671,7 @@ async function handleLogout() {
     :apps="shellApps"
     :selected-app-id="selectedAppId"
     :current-user-name="authStore.currentUser?.username"
+    :current-user-role-labels="authStore.currentUser?.roleLabels"
     @toggle-left-panel="() => {}"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
     @open-folder="openWorkspaceDirectoryPicker"

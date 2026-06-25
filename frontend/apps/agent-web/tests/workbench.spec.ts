@@ -58,11 +58,15 @@ test("workbench does not read a workspace file tree before an application is sel
 
 test("user avatar menu logs out and returns to login", async ({ page }) => {
   const logoutRequests: string[] = [];
-  await mockBackendApi(page, { logoutRequests });
+  await mockBackendApi(page, { logoutRequests, authRoles: ["APP_ADMIN"] });
 
   await gotoWorkbench(page);
 
   await page.getByRole("button", { name: "当前用户 admin" }).click();
+  // 灰显的「应用管理员」角色行应在菜单顶部，且在用户名 / 退出登录之前出现。
+  const roleRow = page.locator(".figma-user-menu-role");
+  await expect(roleRow).toBeVisible();
+  await expect(roleRow).toHaveText("应用管理员");
   await expect(page.getByRole("menuitem", { name: "退出登录" })).toBeVisible();
   await page.getByRole("menuitem", { name: "退出登录" }).click();
 
@@ -609,11 +613,14 @@ async function mockBackendApi(
     }
     if (method === "GET" && url.pathname === "/api/auth/me") {
       await capture.authMeGate;
+      const roles = capture.authRoles ?? ["APP_ADMIN"];
       await route.fulfill(json({
         userId: "usr_admin",
         username: "admin",
         unifiedAuthId: "admin",
-        roles: capture.authRoles ?? ["APP_ADMIN"]
+        roles,
+        // E2E mock 直接把后端 translations 关系预生成好；用户菜单顶部灰显行会展示这里的中文标签。
+        roleLabels: roles.map((role) => roleLabelOf(role))
       }));
       return;
     }
@@ -894,6 +901,25 @@ function json(data: unknown) {
     headers: corsHeaders(),
     body: JSON.stringify({ success: true, traceId: "trace_e2e", data })
   };
+}
+
+/**
+ * E2E mock 用：把 role code 翻译成 mock 后端会返回的 dict_label 形式。
+ * 与后端测试 JDBC fixture 的角色 dict_label 保持一致，避免 e2e 与单测走两套命名。
+ */
+function roleLabelOf(role: string): string {
+  switch (role) {
+    case "SUPER_ADMIN":
+      return "超级管理员";
+    case "SYSTEM_ADMIN":
+      return "系统管理员";
+    case "APP_ADMIN":
+      return "应用管理员";
+    case "USER":
+      return "普通用户";
+    default:
+      return role;
+  }
 }
 
 function corsHeaders() {

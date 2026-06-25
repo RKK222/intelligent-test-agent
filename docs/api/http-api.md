@@ -190,16 +190,21 @@
   "organization": "所属机构",
   "rdDepartment": "所属研发部",
   "department": "所属部门",
-  "roles": ["APP_ADMIN"]
+  "roles": ["APP_ADMIN"],
+  "roleLabels": ["应用管理员"]
 }
 ```
+
+- `roleLabels` 是 `roles` 对应的中文展示名（来自 `dictionaries.dict_label`），供前端用户菜单直接展示；多角色按当前用户的实际顺序返回。
+- 数据来源：`users`（`/api/auth/me` 上下文）→ `user_roles`（关联角色 code）→ `dictionaries`（按 `dict_key = 'ROLE'` 取 `dict_label`）。
+- 字典缺失或 `dict_key` 不匹配时回退为 role code 本身；不会阻断 `/api/auth/me` 主链路。
 
 `POST /api/auth/refresh` 响应 `LoginResponse`（同上）。请求需携带当前有效 Token。
 
 兼容性：
 - 登录路径当前只有 `/api/auth/login`，后续可增加 `/api/internal/platform/system-management/auth/login` 平台入口。
 - Token 存储在 Redis，1 天过期。
-- 登录、刷新和 `/api/auth/me` 会返回当前用户全局角色 `roles`。旧 token 或旧响应缺少 `roles` 时前端按空列表兼容。
+- 登录、刷新和 `/api/auth/me` 会返回当前用户全局角色 `roles`，以及中文展示名 `roleLabels`。旧 token 或旧响应缺少字段时前端按空列表兼容。
 - 认证失败统一返回 `UNAUTHENTICATED` 错误码。
 - 未配置 Token 时 `/api/` 默认放行（本地开发）。
 
@@ -650,6 +655,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 |---|---|---|
 | `GET` | `/api/internal/agent/{agentId}/processes/me` | 查询当前用户绑定的 opencode 进程状态。 |
 | `POST` | `/api/internal/agent/{agentId}/processes/me/initialize` | 为当前用户初始化或重建 opencode 进程。 |
+| `DELETE` | `/api/internal/agent/{agentId}/processes/me/binding` | 清除当前用户的 opencode 进程绑定，便于本地 opencode 场景下用户主动放弃指向已下线 Linux 服务器的脏绑定，让后续状态 / Run 链路回退到 `execution_nodes` 中的固定节点。 |
 
 响应 `data`：
 
@@ -657,6 +663,8 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 {
   "status": "READY",
   "initializable": false,
+  "bindingClearable": false,
+  "localFallback": false,
   "message": "opencode 进程可用",
   "processId": "ocp_...",
   "linuxServerId": "10.0.0.12",
@@ -671,7 +679,9 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 - `status`：`READY`、`NEEDS_INITIALIZATION`、`UNAVAILABLE`。
 - `initializable`：当前状态是否允许前端展示初始化动作；无当前后端可连接的健康容器时为 `false`。
-- `message`：面向用户的状态说明或失败原因。
+- `bindingClearable`：当 `status=UNAVAILABLE` 时，如果后端检测到 `execution_nodes` 中仍有可路由的固定节点（例如本地启动的 opencode）作为兜底，会把 `bindingClearable` 置为 `true`，前端可以展示"重置绑定"按钮。
+- `localFallback`：当 `status=READY` 时，如果响应已经回退到 `execution_nodes` 中的固定节点而非用户专属进程，`localFallback` 为 `true`；此时 `baseUrl` 来自固定节点，前端可以直接发起对话。
+- `message`：面向用户的状态说明或失败原因；命中 `localFallback` 时通常包含"回退到本地 opencode 节点"。
 - `processId`、`linuxServerId`、`containerId`、`port`、`baseUrl`：仅在已有或成功初始化进程时返回；`baseUrl` 固定为 `http://{linuxServerId}:{port}`。
 - `checkedAt`：本次状态计算时间。
 
@@ -682,6 +692,12 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 - 端口从容器端口范围内选择第一个未被当前运行进程占用的端口。
 - 启动参数固定为 `XDG_DATA_HOME=/data/opencode/session/{port}` 和 `OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/`。
 - 初始化成功后会同步写入用户进程绑定、进程快照，以及兼容旧运行链路的 `execution_nodes` 投影。
+
+`DELETE` 行为：
+
+- 不会级联删除 `opencode_server_processes` 记录，避免误关停用户可能在用的后台进程。
+- 不会重启任何容器；调用后立即返回当前最新状态。
+- 典型使用：用户绑定指向的 Linux 服务器已经下线（`canRebuildOn=false`）但本地 `execution_nodes` 里还有 `node_local_opencode`；前端在 `status=UNAVAILABLE` 且 `bindingClearable=true` 时调用此接口，后端会回退到本地节点并把 `status=READY, localFallback=true` 透出。
 
 ### opencode-manager 控制面 API
 

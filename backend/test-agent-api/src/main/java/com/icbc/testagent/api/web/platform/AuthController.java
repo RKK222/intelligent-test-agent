@@ -3,10 +3,13 @@ package com.icbc.testagent.api.web.platform;
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
+import com.icbc.testagent.domain.dictionary.Dictionary;
+import com.icbc.testagent.domain.dictionary.DictionaryRepository;
 import com.icbc.testagent.observability.TraceConstants;
 import com.icbc.testagent.observability.TraceIdSupport;
 import com.icbc.testagent.system.management.auth.AuthApplicationService;
 import jakarta.validation.Valid;
+import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
@@ -26,12 +29,15 @@ public class AuthController {
     private static final Logger LOGGER = LoggerFactory.getLogger(AuthController.class);
 
     private final AuthApplicationService authApplicationService;
+    private final DictionaryRepository dictionaryRepository;
 
     /**
-     * 注入认证应用服务。
+     * 注入认证应用服务与字典仓储。
+     * 字典仓储仅用于按 {@code dict_value} 查 {@code dict_label}，把 {@code roles} 转成中文展示名。
      */
-    public AuthController(AuthApplicationService authApplicationService) {
+    public AuthController(AuthApplicationService authApplicationService, DictionaryRepository dictionaryRepository) {
         this.authApplicationService = authApplicationService;
+        this.dictionaryRepository = dictionaryRepository;
     }
 
     /**
@@ -81,13 +87,21 @@ public class AuthController {
         String traceId = traceIdFrom(exchange);
         AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
 
-        // 从 principal 获取用户基本信息；当前版本只返回 principal 中存储的信息
+        // 把 principal.roles() 翻译成 dictionaries.dict_label 的中文展示名，供右上角用户菜单直接渲染。
+        // 字典缺失或 dict_key 不匹配时回退成角色 code，避免阻断 /api/auth/me 主链路。
+        List<String> roleLabels = principal.roles().stream()
+                .map(role -> dictionaryRepository.findByDictKeyAndValue(Dictionary.DICT_KEY_ROLE, role)
+                        .map(Dictionary::dictLabel)
+                        .orElse(role))
+                .toList();
+
         AuthDtos.CurrentUserResponse response = new AuthDtos.CurrentUserResponse(
                 principal.userId().value(),
                 principal.username(),
                 principal.unifiedAuthId(),
                 null, null, null,
-                principal.roles());
+                principal.roles(),
+                roleLabels);
 
         return ResponseEntity.ok(ApiResponse.ok(response, traceId));
     }
