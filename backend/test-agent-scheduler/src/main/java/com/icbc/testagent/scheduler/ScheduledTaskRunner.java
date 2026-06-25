@@ -218,7 +218,13 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
                             "定时任务 handler 未注册",
                             Map.of("taskKey", task.taskKey().value())));
             ScheduledTaskResult result = handler.run(contextFor(runningRun));
-            repository.saveRun(runningRun.succeed(result == null ? Map.of() : result.result(), clock.instant()));
+            if (stopRequested(runningRun.taskRunId())) {
+                repository.saveRun(latestRunOr(runningRun).manuallyStopped(clock.instant()));
+            } else {
+                repository.saveRun(runningRun.succeed(result == null ? Map.of() : result.result(), clock.instant()));
+            }
+        } catch (ScheduledTaskStopRequestedException exception) {
+            repository.saveRun(latestRunOr(runningRun).manuallyStopped(clock.instant()));
         } catch (PlatformException exception) {
             repository.saveRun(runningRun.fail(exception.errorCode().name(), exception.getMessage(), clock.instant()));
         } catch (Exception exception) {
@@ -247,7 +253,18 @@ public class ScheduledTaskRunner implements SmartLifecycle, ApplicationRunner, S
                 run.requestedByUserId(),
                 run.scheduledFireAt(),
                 run.traceId(),
-                payload);
+                payload,
+                () -> stopRequested(run.taskRunId()));
+    }
+
+    private boolean stopRequested(ScheduledTaskRunId taskRunId) {
+        return repository.findRunById(taskRunId)
+                .map(run -> run.status() == ScheduledTaskRunStatus.STOPPING || run.stopRequestedAt() != null)
+                .orElse(false);
+    }
+
+    private ScheduledTaskRun latestRunOr(ScheduledTaskRun fallback) {
+        return repository.findRunById(fallback.taskRunId()).orElse(fallback);
     }
 
     private ScheduledFuture<?> scheduleRenewal(ScheduledTaskLockLease lease) {

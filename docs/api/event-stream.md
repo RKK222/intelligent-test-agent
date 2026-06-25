@@ -95,6 +95,8 @@ opencode-manager discovery API 和 `/api/internal/platform/opencode-runtime/mana
 
 超级管理员运行管理页调用的 `GET /api/internal/platform/opencode-runtime/management/overview` 只读取数据库中的运行态快照，不新增 SSE 事件类型，也不向 RunEvent 流发布拓扑、连接或进程状态变化。
 
+超级管理员定时任务管理页调用的 `/api/internal/platform/scheduler-management/**` 只维护 scheduler 任务定义和运行记录，不新增 SSE 事件类型，也不向 RunEvent 流发布任务状态变化；页面刷新通过 HTTP 查询完成。
+
 示例：
 
 ```text

@@ -56,7 +56,7 @@ public class SchedulerManagementController {
         requireSuperAdmin(exchange);
         String traceId = RuntimeApiSupport.traceId(exchange);
         PageRequest pageRequest = RuntimeApiSupport.pageRequest(page, size);
-        return blocking(traceId, () -> SchedulerManagementDtos.taskPage(service.findTasks(pageRequest)));
+        return blocking(traceId, () -> SchedulerManagementDtos.taskPage(service.findTasks(pageRequest), service));
     }
 
     @GetMapping("/tasks/{taskKey}")
@@ -64,7 +64,7 @@ public class SchedulerManagementController {
         requireSuperAdmin(exchange);
         String traceId = RuntimeApiSupport.traceId(exchange);
         ScheduledTaskKey key = parseTaskKey(taskKey);
-        return blocking(traceId, () -> SchedulerManagementDtos.TaskResponse.from(service.getTask(key)));
+        return blocking(traceId, () -> SchedulerManagementDtos.TaskResponse.from(service.getTask(key), service));
     }
 
     @PatchMapping("/tasks/{taskKey}")
@@ -79,7 +79,7 @@ public class SchedulerManagementController {
                 request == null ? null : request.enabled(),
                 request == null ? null : request.cronExpression(),
                 request == null || request.lockTtlSeconds() == null ? null : Duration.ofSeconds(request.lockTtlSeconds()));
-        return blocking(traceId, () -> SchedulerManagementDtos.TaskResponse.from(service.updateTask(key, command, traceId)));
+        return blocking(traceId, () -> SchedulerManagementDtos.TaskResponse.from(service.updateTask(key, command, traceId), service));
     }
 
     @PostMapping("/tasks/{taskKey}/trigger")
@@ -87,7 +87,7 @@ public class SchedulerManagementController {
         AuthPrincipal principal = requireSuperAdmin(exchange);
         String traceId = RuntimeApiSupport.traceId(exchange);
         ScheduledTaskKey key = parseTaskKey(taskKey);
-        return blocking(traceId, () -> SchedulerManagementDtos.RunResponse.from(service.trigger(key, principal.userId(), traceId)));
+        return blocking(traceId, () -> SchedulerManagementDtos.RunResponse.from(service.trigger(key, principal.userId(), traceId), service));
     }
 
     @GetMapping("/runs")
@@ -107,7 +107,7 @@ public class SchedulerManagementController {
                 parseStatus(status),
                 parseTriggerType(triggerType),
                 parseUserId(requestedByUserId));
-        return blocking(traceId, () -> SchedulerManagementDtos.runPage(service.findRuns(filter, pageRequest)));
+        return blocking(traceId, () -> SchedulerManagementDtos.runPage(service.findRuns(filter, pageRequest), service));
     }
 
     @GetMapping("/runs/{taskRunId}")
@@ -115,7 +115,17 @@ public class SchedulerManagementController {
         requireSuperAdmin(exchange);
         String traceId = RuntimeApiSupport.traceId(exchange);
         ScheduledTaskRunId runId = parseTaskRunId(taskRunId);
-        return blocking(traceId, () -> SchedulerManagementDtos.RunResponse.from(service.getRun(runId)));
+        return blocking(traceId, () -> SchedulerManagementDtos.RunResponse.from(service.getRun(runId), service));
+    }
+
+    @PostMapping("/runs/{taskRunId}/stop")
+    public Mono<ApiResponse<Object>> stopRun(@PathVariable String taskRunId, ServerWebExchange exchange) {
+        AuthPrincipal principal = requireSuperAdmin(exchange);
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        ScheduledTaskRunId runId = parseTaskRunId(taskRunId);
+        return blocking(traceId, () -> SchedulerManagementDtos.RunResponse.from(
+                service.stopRun(runId, principal.userId(), traceId),
+                service));
     }
 
     private AuthPrincipal requireSuperAdmin(ServerWebExchange exchange) {

@@ -20,6 +20,9 @@ public record Dictionary(
      * 字典 Key 常量定义。
      */
     public static final String DICT_KEY_ROLE = "ROLE";
+    public static final String DICT_KEY_SCHEDULER_RUN_STATUS = "SCHEDULER_RUN_STATUS";
+    public static final String DICT_KEY_SCHEDULER_TRIGGER_TYPE = "SCHEDULER_TRIGGER_TYPE";
+    public static final String DICT_KEY_SCHEDULER_TASK_REGISTRATION_STATUS = "SCHEDULER_TASK_REGISTRATION_STATUS";
 
     /**
      * 字典 Value 常量定义 - 角色类型。

@@ -37,6 +37,13 @@ public class JdbcScheduledTaskRepository extends JdbcRepositorySupport implement
 
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
+    private static final String RUN_COLUMNS = """
+            task_run_id, task_key, plan_id, trigger_type, status,
+            requested_by_user_id, scheduled_fire_at, started_at, ended_at,
+            owner_instance_id, stop_requested_at, stop_requested_by_user_id,
+            stop_reason, skip_reason, error_code, error_message,
+            result_json, trace_id, created_at, updated_at
+            """;
 
     private final JdbcClient jdbcClient;
     private final ObjectMapper objectMapper;
@@ -76,6 +83,9 @@ public class JdbcScheduledTaskRepository extends JdbcRepositorySupport implement
             instant(rs, "started_at"),
             instant(rs, "ended_at"),
             rs.getString("owner_instance_id"),
+            instant(rs, "stop_requested_at"),
+            userId(rs.getString("stop_requested_by_user_id")),
+            rs.getString("stop_reason"),
             rs.getString("skip_reason"),
             rs.getString("error_code"),
             rs.getString("error_message"),
@@ -227,6 +237,9 @@ public class JdbcScheduledTaskRepository extends JdbcRepositorySupport implement
                                 requested_by_user_id = :requestedByUserId,
                                 scheduled_fire_at = :scheduledFireAt, started_at = :startedAt,
                                 ended_at = :endedAt, owner_instance_id = :ownerInstanceId,
+                                stop_requested_at = :stopRequestedAt,
+                                stop_requested_by_user_id = :stopRequestedByUserId,
+                                stop_reason = :stopReason,
                                 skip_reason = :skipReason, error_code = :errorCode,
                                 error_message = :errorMessage, result_json = :resultJson,
                                 trace_id = :traceId, created_at = :createdAt, updated_at = :updatedAt
@@ -239,13 +252,15 @@ public class JdbcScheduledTaskRepository extends JdbcRepositorySupport implement
                             insert into scheduled_task_runs(
                                 task_run_id, task_key, plan_id, trigger_type, status,
                                 requested_by_user_id, scheduled_fire_at, started_at, ended_at,
-                                owner_instance_id, skip_reason, error_code, error_message,
+                                owner_instance_id, stop_requested_at, stop_requested_by_user_id,
+                                stop_reason, skip_reason, error_code, error_message,
                                 result_json, trace_id, created_at, updated_at
                             )
                             values (
                                 :taskRunId, :taskKey, :planId, :triggerType, :status,
                                 :requestedByUserId, :scheduledFireAt, :startedAt, :endedAt,
-                                :ownerInstanceId, :skipReason, :errorCode, :errorMessage,
+                                :ownerInstanceId, :stopRequestedAt, :stopRequestedByUserId,
+                                :stopReason, :skipReason, :errorCode, :errorMessage,
                                 :resultJson, :traceId, :createdAt, :updatedAt
                             )
                             """)
@@ -258,13 +273,10 @@ public class JdbcScheduledTaskRepository extends JdbcRepositorySupport implement
     @Override
     public Optional<ScheduledTaskRun> findRunById(ScheduledTaskRunId taskRunId) {
         return jdbcClient.sql("""
-                        select task_run_id, task_key, plan_id, trigger_type, status,
-                               requested_by_user_id, scheduled_fire_at, started_at, ended_at,
-                               owner_instance_id, skip_reason, error_code, error_message,
-                               result_json, trace_id, created_at, updated_at
+                        select %s
                         from scheduled_task_runs
                         where task_run_id = :taskRunId
-                        """)
+                        """.formatted(RUN_COLUMNS))
                 .param("taskRunId", taskRunId.value())
                 .query(runRowMapper)
                 .optional();
@@ -283,17 +295,14 @@ public class JdbcScheduledTaskRepository extends JdbcRepositorySupport implement
     @Override
     public List<ScheduledTaskRun> findPendingRuns(ScheduledTaskTriggerType triggerType, Instant now, int limit) {
         return jdbcClient.sql("""
-                        select task_run_id, task_key, plan_id, trigger_type, status,
-                               requested_by_user_id, scheduled_fire_at, started_at, ended_at,
-                               owner_instance_id, skip_reason, error_code, error_message,
-                               result_json, trace_id, created_at, updated_at
+                        select %s
                         from scheduled_task_runs
                         where trigger_type = :triggerType
                           and status = :status
                           and scheduled_fire_at <= :now
                         order by scheduled_fire_at asc, id asc
                         limit :limit
-                        """)
+                        """.formatted(RUN_COLUMNS))
                 .param("triggerType", triggerType.name())
                 .param("status", ScheduledTaskRunStatus.PENDING.name())
                 .param("now", timestamp(now))
@@ -309,15 +318,12 @@ public class JdbcScheduledTaskRepository extends JdbcRepositorySupport implement
         params.put("limit", pageRequest.size());
         params.put("offset", pageRequest.offset());
         List<ScheduledTaskRun> items = jdbcClient.sql("""
-                        select task_run_id, task_key, plan_id, trigger_type, status,
-                               requested_by_user_id, scheduled_fire_at, started_at, ended_at,
-                               owner_instance_id, skip_reason, error_code, error_message,
-                               result_json, trace_id, created_at, updated_at
+                        select %s
                         from scheduled_task_runs
                         %s
                         order by scheduled_fire_at desc, id desc
                         limit :limit offset :offset
-                        """.formatted(whereClause))
+                        """.formatted(RUN_COLUMNS, whereClause))
                 .params(params)
                 .query(runRowMapper)
                 .list();
@@ -337,17 +343,14 @@ public class JdbcScheduledTaskRepository extends JdbcRepositorySupport implement
         params.put("taskKey", taskKey.value());
         params.put("excludedTaskRunId", excludedTaskRunId == null ? null : excludedTaskRunId.value());
         return jdbcClient.sql("""
-                        select task_run_id, task_key, plan_id, trigger_type, status,
-                               requested_by_user_id, scheduled_fire_at, started_at, ended_at,
-                               owner_instance_id, skip_reason, error_code, error_message,
-                               result_json, trace_id, created_at, updated_at
+                        select %s
                         from scheduled_task_runs
                         where task_key = :taskKey
-                          and status in ('PENDING', 'RUNNING')
+                          and status in ('PENDING', 'RUNNING', 'STOPPING')
                           and (:excludedTaskRunId is null or task_run_id <> :excludedTaskRunId)
                         order by updated_at desc, id desc
                         limit 1
-                        """)
+                        """.formatted(RUN_COLUMNS))
                 .params(params)
                 .query(runRowMapper)
                 .optional();
@@ -395,6 +398,9 @@ public class JdbcScheduledTaskRepository extends JdbcRepositorySupport implement
         params.put("startedAt", timestamp(run.startedAt()));
         params.put("endedAt", timestamp(run.endedAt()));
         params.put("ownerInstanceId", run.ownerInstanceId());
+        params.put("stopRequestedAt", timestamp(run.stopRequestedAt()));
+        params.put("stopRequestedByUserId", run.stopRequestedByUserId() == null ? null : run.stopRequestedByUserId().value());
+        params.put("stopReason", run.stopReason());
         params.put("skipReason", run.skipReason());
         params.put("errorCode", run.errorCode());
         params.put("errorMessage", run.errorMessage());

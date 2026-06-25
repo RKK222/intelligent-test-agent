@@ -5,12 +5,16 @@ import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
+import com.icbc.testagent.domain.dictionary.Dictionary;
+import com.icbc.testagent.domain.dictionary.DictionaryRepository;
 import com.icbc.testagent.domain.scheduler.ScheduledTask;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskKey;
+import com.icbc.testagent.domain.scheduler.ScheduledTaskRegistrationStatus;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskRepository;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskRun;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskRunFilter;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskRunId;
+import com.icbc.testagent.domain.scheduler.ScheduledTaskRunStatus;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskTriggerType;
 import com.icbc.testagent.domain.user.UserId;
 import java.time.Clock;
@@ -18,6 +22,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import org.springframework.stereotype.Service;
 
 /**
@@ -26,22 +31,27 @@ import org.springframework.stereotype.Service;
 @Service
 public class SchedulerManagementService {
 
+    private static final String DEFAULT_STOP_REASON = "管理员手工停止";
+
     private final ScheduledTaskRepository repository;
     private final CronScheduleCalculator cronScheduleCalculator;
     private final ScheduledTaskDispatcher dispatcher;
+    private final DictionaryRepository dictionaryRepository;
     private final Clock clock;
 
     /**
-     * 注入持久化端口、Cron 校验器、后台 runner 唤醒端口和系统时钟。
+     * 注入持久化端口、Cron 校验器、后台 runner 唤醒端口、字典仓储和系统时钟。
      */
     public SchedulerManagementService(
             ScheduledTaskRepository repository,
             CronScheduleCalculator cronScheduleCalculator,
             ScheduledTaskDispatcher dispatcher,
+            DictionaryRepository dictionaryRepository,
             Clock clock) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.cronScheduleCalculator = Objects.requireNonNull(cronScheduleCalculator, "cronScheduleCalculator must not be null");
         this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher must not be null");
+        this.dictionaryRepository = Objects.requireNonNull(dictionaryRepository, "dictionaryRepository must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -92,6 +102,12 @@ public class SchedulerManagementService {
      */
     public ScheduledTaskRun trigger(ScheduledTaskKey taskKey, UserId requestedByUserId, String traceId) {
         getTask(taskKey);
+        repository.findActiveRunByTaskKey(taskKey).ifPresent(activeRun -> {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "同一 taskKey 已有未结束运行",
+                    Map.of("taskKey", taskKey.value(), "activeTaskRunId", activeRun.taskRunId().value()));
+        });
         Instant now = clock.instant();
         ScheduledTaskRun run = ScheduledTaskRun.pending(
                 new ScheduledTaskRunId(RuntimeIdGenerator.scheduledTaskRunId()),
@@ -106,6 +122,20 @@ public class SchedulerManagementService {
         return saved;
     }
 
+    /**
+     * 管理员请求停止正在运行的任务；实际结束由 handler 协作式退出后由 runner 写入终态。
+     */
+    public ScheduledTaskRun stopRun(ScheduledTaskRunId taskRunId, UserId operatorUserId, String traceId) {
+        ScheduledTaskRun current = getRun(taskRunId);
+        if (current.status() != ScheduledTaskRunStatus.RUNNING) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "只有运行中的定时任务可以停止",
+                    Map.of("taskRunId", taskRunId.value(), "status", current.status().name()));
+        }
+        return repository.saveRun(current.requestStop(operatorUserId, DEFAULT_STOP_REASON, clock.instant()));
+    }
+
     public PageResponse<ScheduledTaskRun> findRuns(ScheduledTaskRunFilter filter, PageRequest pageRequest) {
         return repository.findRuns(filter == null ? ScheduledTaskRunFilter.empty() : filter, pageRequest);
     }
@@ -115,8 +145,39 @@ public class SchedulerManagementService {
                 .orElseThrow(() -> notFound("定时任务运行记录不存在", "taskRunId", taskRunId.value()));
     }
 
+    public Optional<ScheduledTaskRun> findCurrentRunByTaskKey(ScheduledTaskKey taskKey) {
+        return repository.findActiveRunByTaskKey(taskKey);
+    }
+
+    public Optional<ScheduledTaskRun> findLatestRunByTaskKey(ScheduledTaskKey taskKey) {
+        return repository.findRuns(
+                        new ScheduledTaskRunFilter(taskKey, null, null, null),
+                        new PageRequest(1, 1))
+                .items()
+                .stream()
+                .findFirst();
+    }
+
+    public String registrationStatusLabel(ScheduledTaskRegistrationStatus status) {
+        return label(Dictionary.DICT_KEY_SCHEDULER_TASK_REGISTRATION_STATUS, status.name());
+    }
+
+    public String runStatusLabel(ScheduledTaskRunStatus status) {
+        return label(Dictionary.DICT_KEY_SCHEDULER_RUN_STATUS, status.name());
+    }
+
+    public String triggerTypeLabel(ScheduledTaskTriggerType triggerType) {
+        return label(Dictionary.DICT_KEY_SCHEDULER_TRIGGER_TYPE, triggerType.name());
+    }
+
     private PlatformException notFound(String message, String key, String value) {
         return new PlatformException(ErrorCode.NOT_FOUND, message, Map.of(key, value));
+    }
+
+    private String label(String dictKey, String dictValue) {
+        return dictionaryRepository.findByDictKeyAndValue(dictKey, dictValue)
+                .map(Dictionary::dictLabel)
+                .orElse(dictValue);
     }
 
     private String textOrNull(String value) {

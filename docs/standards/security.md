@@ -45,7 +45,7 @@ Token 校验流程：
 8. 应用版本工作区和个人工作区的 Git clone/worktree/diff/push 仍只允许使用当前登录用户保存的唯一 SSH key；不得回退到机器账号、部署用户默认 SSH key 或其他用户 key。托管根目录来自 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT`，磁盘目录已存在时只能在校验目标 origin URL 和分支匹配后接管，不得覆盖或删除未知目录。
 9. opencode-manager 控制面必须使用独立 manager token，配置键为 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN`；不得复用用户 JWT、普通 `TEST_AGENT_API_TOKEN` 或 opencode server 密钥。生产环境该 token 必须由环境变量或配置中心注入，示例只能使用占位值。
 10. 超级管理员运行管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端菜单可见性只作为体验优化，不能作为权限边界。
-11. 定时任务管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；管理员手动触发运行记录必须写入 `requestedByUserId` 和 traceId。scheduler 启用时必须使用 Redis 分布式锁，不得回退到本机锁或数据库锁，以免分布式多节点重复执行。
+11. 定时任务管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端系统管理菜单可见性只作为体验优化。管理员手动触发运行记录必须写入 `requestedByUserId` 和 traceId，停止正在执行的运行记录必须写入 `stopRequestedAt`、`stopRequestedByUserId` 和 `stopReason`。scheduler 启用时必须使用 Redis 分布式锁，不得回退到本机锁或数据库锁，以免分布式多节点重复执行。
 
 ## 日志脱敏
 

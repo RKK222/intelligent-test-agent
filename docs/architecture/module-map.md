@@ -47,7 +47,7 @@ Browser
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、当前用户 opencode 进程状态/初始化契约、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、manager WebSocket 网关与后端实例生命周期、超级管理员运行管理快照聚合、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
 | `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、登录认证和 Token 管理。 |
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、应用与代码库关联、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务。 |
-| `test-agent-scheduler` | 通用分布式定时任务框架，负责任务注册、Cron 计算、Redis 锁、后台扫描、统一运行记录和管理服务；具体业务任务放回所属业务模块。 |
+| `test-agent-scheduler` | 通用分布式定时任务框架，负责任务注册、Cron 计算、Redis 锁、后台扫描、统一运行记录、Cron 调整、手动触发和协作式停止管理服务；具体业务任务放回所属业务模块。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界（当前为空骨架）。 |
 | `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、manager 控制面入口、超级管理员运行管理和定时任务管理入口、trace Web 入口。 |
 | `test-agent-persistence` | 数据库、Flyway、Repository、Redis 可选适配，包括 opencode 用户进程管理表、scheduler 表与 Repository 映射。 |
@@ -61,8 +61,8 @@ Browser
 
 | 包 | 职责 |
 |---|---|
-| `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、设置模态、超级管理员运行管理只读面板和全局错误提示。 |
-| `packages/backend-api` | 访问平台后端服务的唯一前端 HTTP client，负责统一响应、错误、traceId、受控目录选择、用户 opencode 进程状态/初始化、运行管理 overview、配置管理、应用版本工作区 API 映射、active run 恢复查询和默认 `opencode` 的 agent URL 前缀。 |
+| `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、设置模态、超级管理员系统管理容器（定时任务管理 + 运行管理）和全局错误提示。 |
+| `packages/backend-api` | 访问平台后端服务的唯一前端 HTTP client，负责统一响应、错误、traceId、受控目录选择、用户 opencode 进程状态/初始化、运行管理 overview、定时任务管理、配置管理、应用版本工作区 API 映射、active run 恢复查询和默认 `opencode` 的 agent URL 前缀。 |
 | `packages/event-stream-client` | RunEvent SSE client，负责按默认 `opencode` agent URL 连接、自动重连、事件解析、去重和取消订阅。 |
 | `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板和工作台级 Pinia 状态。 |
 | `packages/file-explorer` | 文件树、选择 Workspace 目录事件、已加载文件名过滤、变更列表和打开文件入口。 |

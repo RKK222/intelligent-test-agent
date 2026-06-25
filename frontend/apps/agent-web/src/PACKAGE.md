@@ -12,11 +12,11 @@
 - `views/LoginView.vue`：登录页入口，登录成功后只跳回 SPA 内已知页面，非法 redirect 回退到工作台。
 - `views/WorkbenchView.vue`：工作台首页入口。
 - `views/TranscriptView.vue`：只读 transcript 页面入口，复用平台 session/messages API。
-- `components/AgentWorkbench.vue`：组合 workspace、应用切换、用户头像退出、应用版本/个人工作区切换与同步、文件树、编辑器、Agent、RunEvent SSE、Session History 搜索/置顶/删除、历史会话只读态、follow-up 队列、编辑器选区上下文、Diff 操作和底部 PTY terminal panel。
+- `components/AgentWorkbench.vue`：组合 workspace、应用切换、用户头像退出、系统管理入口、应用版本/个人工作区切换与同步、文件树、编辑器、Agent、RunEvent SSE、Session History 搜索/置顶/删除、历史会话只读态、follow-up 队列、编辑器选区上下文、Diff 操作和底部 PTY terminal panel。
 - `components/FigmaChatPanel.vue`：Figma 风格右侧对话面板，按顺序渲染完整历史用户/助手消息；输入框处理输入法组合输入，避免候选词确认 Enter 被误识别为发送；上传附件按钮当前只打开前端样式弹窗，不接后台上传。
-- `components/settings/SettingsDialog.vue`：左下角设置模态，组合应用人员、代码库关联、应用工作空间和个人 SSH key 配置管理；无应用配置权限时展示当前角色无权限提示。
-- `components/AgentWorkbench.vue`：组合 workspace、应用切换、应用版本/个人工作区切换与同步、文件树、编辑器、Agent、RunEvent SSE、Session History 搜索/置顶/删除、历史会话只读态、follow-up 队列、编辑器选区上下文、Diff 操作和底部 PTY terminal panel。
-- `components/settings/SettingsDialog.vue`：左下角设置模态，组合应用人员、代码库关联、应用工作空间、超级管理员运行管理只读面板和个人 SSH key 配置管理；无应用配置权限时展示当前角色无权限提示；"应用人员管理" tab 用 `el-autocomplete` 懒加载搜索候选用户（userId/unifiedAuthId/username LIKE 匹配，空输入不查后端），选中后主按钮从"搜索"切换为"添加"。
+- `components/settings/SettingsDialog.vue`：左下角设置模态，组合应用人员、代码库关联、应用工作空间和个人 SSH key 配置管理；无应用配置权限时展示当前角色无权限提示；"应用人员管理" tab 用 `el-autocomplete` 懒加载搜索候选用户（userId/unifiedAuthId/username LIKE 匹配，空输入不查后端），选中后主按钮从"搜索"切换为"添加"。
+- `components/SystemManagementWrapper.vue`、`components/system/SystemManagementPanel.vue`：超级管理员系统管理入口和二级导航，包含定时任务管理与运行管理。
+- `components/system/ScheduledTaskManagementPanel.vue`：定时任务管理页，展示任务定义、当前/最近执行状态和历史执行记录，支持启停、Cron 编辑、手工启动和停止 `RUNNING` 运行记录。
 - `components/EditorPane.vue`、`WorkspaceBootstrap.vue`、`ReadonlyTranscript.vue`：编辑器 tab 壳、Workspace 注册引导和只读 transcript 视图（不订阅 SSE，不直连 opencode）。
 - `components/follow-up-queue.ts`：Run 忙碌时 prompt follow-up 的纯 FIFO 队列模型。
 - `components/prompt-context.ts`：活动编辑器或 Monaco 选区到 `PromptPart` file context 的纯转换。

@@ -8,6 +8,7 @@ import com.icbc.testagent.domain.scheduler.ScheduledTaskRun;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskRunId;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskRunStatus;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskTriggerType;
+import com.icbc.testagent.domain.user.UserId;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -127,6 +128,28 @@ class ScheduledTaskRunnerTest {
                 .isEqualTo(ScheduledTaskRunStatus.SUCCEEDED);
     }
 
+    @Test
+    void handlerCanObserveStopRequestAndRunnerRecordsManualStop() {
+        InMemoryScheduledTaskRepository repository = new InMemoryScheduledTaskRepository();
+        repository.saveTask(dueTask().withNextFireAt(NOW.plusSeconds(3600), NOW));
+        ScheduledTaskRun manualRun = ScheduledTaskRun.pending(
+                new ScheduledTaskRunId("str_manual_stop_1234567890abcdef"),
+                TASK_KEY,
+                null,
+                ScheduledTaskTriggerType.MANUAL,
+                null,
+                NOW,
+                TRACE_ID);
+        repository.saveRun(manualRun);
+
+        runner(repository, new FakeScheduledTaskLock(), new StopAwareHandler(repository)).scanOnce();
+
+        ScheduledTaskRun stopped = repository.findRunById(manualRun.taskRunId()).orElseThrow();
+        assertThat(stopped.status()).isEqualTo(ScheduledTaskRunStatus.MANUALLY_STOPPED);
+        assertThat(stopped.stopRequestedByUserId()).isEqualTo(new UserId("usr_operator_1234567890"));
+        assertThat(stopped.endedAt()).isEqualTo(NOW);
+    }
+
     private ScheduledTaskRunner runner(
             InMemoryScheduledTaskRepository repository,
             FakeScheduledTaskLock lock,
@@ -178,6 +201,36 @@ class ScheduledTaskRunnerTest {
             if (fail) {
                 throw new IllegalStateException("boom");
             }
+            return ScheduledTaskResult.of(Map.of("handled", true));
+        }
+    }
+
+    private record StopAwareHandler(InMemoryScheduledTaskRepository repository) implements ScheduledTaskHandler {
+
+        @Override
+        public ScheduledTaskKey taskKey() {
+            return TASK_KEY;
+        }
+
+        @Override
+        public String name() {
+            return "Daily Cleanup";
+        }
+
+        @Override
+        public String cronExpression() {
+            return "0 * * * * *";
+        }
+
+        @Override
+        public ScheduledTaskResult run(ScheduledTaskContext context) {
+            ScheduledTaskRun running = repository.findRunById(context.taskRunId()).orElseThrow();
+            repository.saveRun(running.requestStop(
+                    new UserId("usr_operator_1234567890"),
+                    "管理员手工停止",
+                    NOW));
+            assertThat(context.stopRequested()).isTrue();
+            context.throwIfStopRequested();
             return ScheduledTaskResult.of(Map.of("handled", true));
         }
     }

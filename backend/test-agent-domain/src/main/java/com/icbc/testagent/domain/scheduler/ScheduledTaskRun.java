@@ -21,6 +21,9 @@ public record ScheduledTaskRun(
         Instant startedAt,
         Instant endedAt,
         String ownerInstanceId,
+        Instant stopRequestedAt,
+        UserId stopRequestedByUserId,
+        String stopReason,
         String skipReason,
         String errorCode,
         String errorMessage,
@@ -54,6 +57,9 @@ public record ScheduledTaskRun(
                 null,
                 null,
                 null,
+                null,
+                null,
+                null,
                 Map.of(),
                 traceId,
                 scheduledFireAt,
@@ -75,7 +81,17 @@ public record ScheduledTaskRun(
         if (endedAt != null && startedAt != null && endedAt.isBefore(startedAt)) {
             throw new IllegalArgumentException("endedAt must not be before startedAt");
         }
+        if ((stopRequestedAt == null) != (stopRequestedByUserId == null)) {
+            throw new IllegalArgumentException("stopRequestedAt and stopRequestedByUserId must appear together");
+        }
+        if (stopRequestedAt != null && startedAt != null && stopRequestedAt.isBefore(startedAt)) {
+            throw new IllegalArgumentException("stopRequestedAt must not be before startedAt");
+        }
+        if (endedAt != null && stopRequestedAt != null && endedAt.isBefore(stopRequestedAt)) {
+            throw new IllegalArgumentException("endedAt must not be before stopRequestedAt");
+        }
         ownerInstanceId = optionalText(ownerInstanceId);
+        stopReason = optionalText(stopReason);
         skipReason = optionalText(skipReason);
         errorCode = optionalText(errorCode);
         errorMessage = optionalText(errorMessage);
@@ -106,6 +122,9 @@ public record ScheduledTaskRun(
                 null,
                 null,
                 null,
+                null,
+                null,
+                null,
                 result,
                 traceId,
                 createdAt,
@@ -127,6 +146,9 @@ public record ScheduledTaskRun(
                 startedAt,
                 endedAt,
                 ownerInstanceId,
+                stopRequestedAt,
+                stopRequestedByUserId,
+                stopReason,
                 skipReason,
                 null,
                 null,
@@ -150,6 +172,41 @@ public record ScheduledTaskRun(
         return finish(ScheduledTaskRunStatus.FAILED, errorCode, errorMessage, result, endedAt);
     }
 
+    /**
+     * 标记管理员已请求停止；业务 handler 需要通过上下文协作式退出。
+     */
+    public ScheduledTaskRun requestStop(UserId requestedByUserId, String stopReason, Instant requestedAt) {
+        Objects.requireNonNull(requestedByUserId, "requestedByUserId must not be null");
+        return new ScheduledTaskRun(
+                taskRunId,
+                taskKey,
+                planId,
+                triggerType,
+                ScheduledTaskRunStatus.STOPPING,
+                requestedByUserId(),
+                scheduledFireAt,
+                startedAt,
+                null,
+                ownerInstanceId,
+                requestedAt,
+                requestedByUserId,
+                stopReason,
+                skipReason,
+                errorCode,
+                errorMessage,
+                result,
+                traceId,
+                createdAt,
+                requestedAt);
+    }
+
+    /**
+     * handler 协作式退出后写入最终人工停止状态。
+     */
+    public ScheduledTaskRun manuallyStopped(Instant endedAt) {
+        return finish(ScheduledTaskRunStatus.MANUALLY_STOPPED, null, null, result, endedAt);
+    }
+
     private ScheduledTaskRun finish(
             ScheduledTaskRunStatus status,
             String errorCode,
@@ -167,6 +224,9 @@ public record ScheduledTaskRun(
                 startedAt,
                 endedAt,
                 ownerInstanceId,
+                stopRequestedAt,
+                stopRequestedByUserId,
+                stopReason,
                 skipReason,
                 errorCode,
                 errorMessage,

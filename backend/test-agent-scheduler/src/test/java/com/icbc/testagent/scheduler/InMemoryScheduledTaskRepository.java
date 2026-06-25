@@ -92,7 +92,7 @@ final class InMemoryScheduledTaskRepository implements ScheduledTaskRepository {
     public Optional<ScheduledTaskRun> findActiveRunByTaskKeyExcluding(ScheduledTaskKey taskKey, ScheduledTaskRunId taskRunId) {
         return runs.values().stream()
                 .filter(run -> run.taskKey().equals(taskKey))
-                .filter(run -> run.status() == ScheduledTaskRunStatus.PENDING || run.status() == ScheduledTaskRunStatus.RUNNING)
+                .filter(run -> run.status().active())
                 .filter(run -> taskRunId == null || !run.taskRunId().equals(taskRunId))
                 .max(Comparator.comparing(ScheduledTaskRun::updatedAt));
     }

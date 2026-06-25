@@ -248,6 +248,96 @@ export type OpencodeRuntimeManagementOverview = {
   opencodeProcesses: PageResponse<OpencodeRuntimeProcess>;
 };
 
+// ---- 定时任务管理类型 ----
+
+export type SchedulerRunStatus =
+  | "PENDING"
+  | "RUNNING"
+  | "STOPPING"
+  | "SUCCEEDED"
+  | "FAILED"
+  | "SKIPPED"
+  | "MANUALLY_STOPPED"
+  | string;
+
+export type SchedulerTriggerType = "CRON" | "MANUAL" | "USER_PLAN" | string;
+
+export type SchedulerTaskRegistrationStatus = "REGISTERED" | "MISSING_HANDLER" | string;
+
+export type ScheduledTaskRunSummary = {
+  taskRunId: string;
+  status: SchedulerRunStatus;
+  statusLabel?: string;
+  triggerType: SchedulerTriggerType;
+  triggerTypeLabel?: string;
+  requestedByUserId?: string | null;
+  scheduledFireAt: string;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  ownerInstanceId?: string | null;
+};
+
+export type ScheduledTaskManagementTask = {
+  taskKey: string;
+  name: string;
+  cronExpression: string;
+  enabled: boolean;
+  lockTtlSeconds: number;
+  nextFireAt?: string | null;
+  registrationStatus: SchedulerTaskRegistrationStatus;
+  registrationStatusLabel?: string;
+  currentRun?: ScheduledTaskRunSummary | null;
+  latestRun?: ScheduledTaskRunSummary | null;
+  traceId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ScheduledTaskManagementRun = {
+  taskRunId: string;
+  taskKey: string;
+  planId?: string | null;
+  triggerType: SchedulerTriggerType;
+  triggerTypeLabel?: string;
+  status: SchedulerRunStatus;
+  statusLabel?: string;
+  requestedByUserId?: string | null;
+  scheduledFireAt: string;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  ownerInstanceId?: string | null;
+  stopRequestedAt?: string | null;
+  stopRequestedByUserId?: string | null;
+  stopReason?: string | null;
+  skipReason?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  result?: Record<string, unknown> | null;
+  traceId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ScheduledTaskUpdatePayload = {
+  enabled?: boolean;
+  cronExpression?: string;
+  lockTtlSeconds?: number;
+};
+
+export type ScheduledTaskListParams = {
+  page?: number;
+  size?: number;
+};
+
+export type ScheduledTaskRunListParams = {
+  taskKey?: string;
+  status?: string;
+  triggerType?: string;
+  requestedByUserId?: string;
+  page?: number;
+  size?: number;
+};
+
 export type RunEventType =
   | "run.created"
   | "run.started"

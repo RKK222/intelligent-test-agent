@@ -37,6 +37,11 @@ import type {
   RunDiffAction,
   RuntimeResourceInfo,
   RuntimeToolInfo,
+  ScheduledTaskListParams,
+  ScheduledTaskManagementRun,
+  ScheduledTaskManagementTask,
+  ScheduledTaskRunListParams,
+  ScheduledTaskUpdatePayload,
   SessionDiff,
   Session,
   SessionMessage,
@@ -116,6 +121,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const configurationBase = "/api/internal/platform/configuration-management";
   const workspaceManagementBase = "/api/internal/platform/workspace-management";
   const opencodeRuntimeManagementBase = "/api/internal/platform/opencode-runtime/management";
+  const schedulerManagementBase = "/api/internal/platform/scheduler-management";
   const fetcher = options.fetcher ?? fetch;
   const traceIdFactory = options.traceIdFactory ?? defaultTraceId;
   const requestTimeoutMs = options.requestTimeoutMs ?? 30000;
@@ -307,6 +313,34 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<UserOpencodeProcess>(agentPath("/processes/me/initialize"), { method: "POST" }),
     getOpencodeRuntimeManagementOverview: (params: OpencodeRuntimeManagementOverviewParams = {}) =>
       request<OpencodeRuntimeManagementOverview>(`${opencodeRuntimeManagementBase}/overview${query({ ...params })}`),
+    listScheduledTasks: (params: ScheduledTaskListParams = {}) =>
+      request<PageResponse<ScheduledTaskManagementTask>>(
+        `${schedulerManagementBase}/tasks${query({ page: params.page, size: params.size })}`
+      ),
+    getScheduledTask: (taskKey: string) =>
+      request<ScheduledTaskManagementTask>(`${schedulerManagementBase}/tasks/${encodeURIComponent(taskKey)}`),
+    updateScheduledTask: (taskKey: string, payload: ScheduledTaskUpdatePayload) =>
+      request<ScheduledTaskManagementTask>(`${schedulerManagementBase}/tasks/${encodeURIComponent(taskKey)}`, {
+        method: "PATCH",
+        body: JSON.stringify(compactObject(payload))
+      }),
+    triggerScheduledTask: (taskKey: string) =>
+      request<ScheduledTaskManagementRun>(`${schedulerManagementBase}/tasks/${encodeURIComponent(taskKey)}/trigger`, { method: "POST" }),
+    listScheduledTaskRuns: (params: ScheduledTaskRunListParams = {}) =>
+      request<PageResponse<ScheduledTaskManagementRun>>(
+        `${schedulerManagementBase}/runs${query({
+          taskKey: params.taskKey,
+          status: params.status,
+          triggerType: params.triggerType,
+          requestedByUserId: params.requestedByUserId,
+          page: params.page,
+          size: params.size
+        })}`
+      ),
+    getScheduledTaskRun: (taskRunId: string) =>
+      request<ScheduledTaskManagementRun>(`${schedulerManagementBase}/runs/${encodeURIComponent(taskRunId)}`),
+    stopScheduledTaskRun: (taskRunId: string) =>
+      request<ScheduledTaskManagementRun>(`${schedulerManagementBase}/runs/${encodeURIComponent(taskRunId)}/stop`, { method: "POST" }),
     getRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}`)),
     cancelRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}/cancel`), { method: "POST" }),
     getRunDiff: (runId: string) => request<RunDiff>(agentPath(`/runs/${encodeURIComponent(runId)}/diff`)),

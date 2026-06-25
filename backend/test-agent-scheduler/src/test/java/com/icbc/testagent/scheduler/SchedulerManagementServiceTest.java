@@ -4,9 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.domain.dictionary.DictId;
+import com.icbc.testagent.domain.dictionary.Dictionary;
+import com.icbc.testagent.domain.dictionary.DictionaryRepository;
 import com.icbc.testagent.domain.scheduler.ScheduledTask;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskKey;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskRun;
+import com.icbc.testagent.domain.scheduler.ScheduledTaskRunId;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskRunStatus;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskTriggerType;
 import com.icbc.testagent.domain.user.UserId;
@@ -14,6 +18,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class SchedulerManagementServiceTest {
@@ -66,11 +72,68 @@ class SchedulerManagementServiceTest {
         assertThat(dispatcher.wakeUps).isEqualTo(1);
     }
 
+    @Test
+    void triggerRejectsWhenSameTaskAlreadyHasActiveRun() {
+        InMemoryScheduledTaskRepository repository = repositoryWithTask();
+        ScheduledTaskRun active = ScheduledTaskRun.pending(
+                        new ScheduledTaskRunId("str_active_1234567890abcdef"),
+                        TASK_KEY,
+                        null,
+                        ScheduledTaskTriggerType.CRON,
+                        null,
+                        NOW.minusSeconds(60),
+                        "trace_scheduler_test")
+                .start("scheduler-test-instance", NOW.minusSeconds(30));
+        repository.saveRun(active);
+        SchedulerManagementService service = service(repository, new RecordingDispatcher());
+
+        assertThatThrownBy(() -> service.trigger(
+                        TASK_KEY,
+                        new UserId("usr_admin_1234567890"),
+                        "trace_scheduler_test"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("已有未结束运行");
+    }
+
+    @Test
+    void stopRunOnlyAcceptsRunningRunAndRecordsOperator() {
+        InMemoryScheduledTaskRepository repository = repositoryWithTask();
+        ScheduledTaskRun running = ScheduledTaskRun.pending(
+                        new ScheduledTaskRunId("str_running_1234567890abcdef"),
+                        TASK_KEY,
+                        null,
+                        ScheduledTaskTriggerType.MANUAL,
+                        new UserId("usr_admin_1234567890"),
+                        NOW.minusSeconds(60),
+                        "trace_scheduler_test")
+                .start("scheduler-test-instance", NOW.minusSeconds(30));
+        repository.saveRun(running);
+        SchedulerManagementService service = service(repository, new RecordingDispatcher());
+
+        ScheduledTaskRun stopping = service.stopRun(
+                running.taskRunId(),
+                new UserId("usr_operator_1234567890"),
+                "trace_scheduler_test");
+
+        assertThat(stopping.status()).isEqualTo(ScheduledTaskRunStatus.STOPPING);
+        assertThat(stopping.stopRequestedByUserId()).isEqualTo(new UserId("usr_operator_1234567890"));
+        assertThat(stopping.stopReason()).isEqualTo("管理员手工停止");
+        assertThat(stopping.endedAt()).isNull();
+
+        assertThatThrownBy(() -> service.stopRun(
+                        stopping.taskRunId(),
+                        new UserId("usr_operator_1234567890"),
+                        "trace_scheduler_test"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("只有运行中的定时任务可以停止");
+    }
+
     private SchedulerManagementService service(InMemoryScheduledTaskRepository repository, RecordingDispatcher dispatcher) {
         return new SchedulerManagementService(
                 repository,
                 new CronScheduleCalculator(),
                 dispatcher,
+                new EmptyDictionaryRepository(),
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
@@ -93,6 +156,32 @@ class SchedulerManagementServiceTest {
         @Override
         public void wakeUp() {
             wakeUps++;
+        }
+    }
+
+    private static final class EmptyDictionaryRepository implements DictionaryRepository {
+
+        @Override
+        public void save(Dictionary dictionary) {
+        }
+
+        @Override
+        public Optional<Dictionary> findByDictId(DictId dictId) {
+            return Optional.empty();
+        }
+
+        @Override
+        public List<Dictionary> findByDictKey(String dictKey) {
+            return List.of();
+        }
+
+        @Override
+        public Optional<Dictionary> findByDictKeyAndValue(String dictKey, String dictValue) {
+            return Optional.empty();
+        }
+
+        @Override
+        public void delete(DictId dictId) {
         }
     }
 }

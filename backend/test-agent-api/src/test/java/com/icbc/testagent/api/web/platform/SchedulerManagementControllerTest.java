@@ -13,6 +13,7 @@ import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.dictionary.Dictionary;
 import com.icbc.testagent.domain.scheduler.ScheduledTask;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskKey;
+import com.icbc.testagent.domain.scheduler.ScheduledTaskRegistrationStatus;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskRun;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskRunFilter;
 import com.icbc.testagent.domain.scheduler.ScheduledTaskRunId;
@@ -25,6 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.reactive.server.WebTestClient;
 
@@ -39,8 +41,13 @@ class SchedulerManagementControllerTest {
     @Test
     void superAdminCanListTasks() {
         SchedulerManagementService service = org.mockito.Mockito.mock(SchedulerManagementService.class);
+        mockLabels(service);
         when(service.findTasks(eq(new PageRequest(1, 20))))
                 .thenReturn(new PageResponse<>(List.of(task()), 1, 20, 1));
+        when(service.findCurrentRunByTaskKey(eq(TASK_KEY)))
+                .thenReturn(Optional.of(run(ScheduledTaskRunStatus.RUNNING, ScheduledTaskTriggerType.CRON)));
+        when(service.findLatestRunByTaskKey(eq(TASK_KEY)))
+                .thenReturn(Optional.of(run(ScheduledTaskRunStatus.SUCCEEDED, ScheduledTaskTriggerType.MANUAL)));
         WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.get()
@@ -51,12 +58,18 @@ class SchedulerManagementControllerTest {
                 .expectBody()
                 .jsonPath("$.data.items[0].taskKey").isEqualTo("daily.cleanup")
                 .jsonPath("$.data.items[0].lockTtlSeconds").isEqualTo(300)
-                .jsonPath("$.data.items[0].registrationStatus").isEqualTo("REGISTERED");
+                .jsonPath("$.data.items[0].registrationStatus").isEqualTo("REGISTERED")
+                .jsonPath("$.data.items[0].registrationStatusLabel").isEqualTo("已注册")
+                .jsonPath("$.data.items[0].currentRun.status").isEqualTo("RUNNING")
+                .jsonPath("$.data.items[0].currentRun.statusLabel").isEqualTo("运行中")
+                .jsonPath("$.data.items[0].latestRun.status").isEqualTo("SUCCEEDED")
+                .jsonPath("$.data.items[0].latestRun.statusLabel").isEqualTo("成功");
     }
 
     @Test
     void superAdminCanPatchTaskAndTriggerManualRun() {
         SchedulerManagementService service = org.mockito.Mockito.mock(SchedulerManagementService.class);
+        mockLabels(service);
         when(service.updateTask(
                         eq(TASK_KEY),
                         argThat(command -> command != null
@@ -88,13 +101,16 @@ class SchedulerManagementControllerTest {
                 .expectBody()
                 .jsonPath("$.data.taskRunId").isEqualTo(TASK_RUN_ID.value())
                 .jsonPath("$.data.triggerType").isEqualTo("MANUAL")
+                .jsonPath("$.data.triggerTypeLabel").isEqualTo("手工触发")
                 .jsonPath("$.data.status").isEqualTo("PENDING")
+                .jsonPath("$.data.statusLabel").isEqualTo("待执行")
                 .jsonPath("$.data.requestedByUserId").isEqualTo(ADMIN_USER_ID.value());
     }
 
     @Test
     void superAdminCanFilterRunsAndQueryRunDetail() {
         SchedulerManagementService service = org.mockito.Mockito.mock(SchedulerManagementService.class);
+        mockLabels(service);
         when(service.findRuns(
                         argThat(filter -> filterMatches(filter)),
                         eq(new PageRequest(2, 10))))
@@ -114,7 +130,8 @@ class SchedulerManagementControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data.items[0].taskRunId").isEqualTo(TASK_RUN_ID.value())
-                .jsonPath("$.data.items[0].status").isEqualTo("SUCCEEDED");
+                .jsonPath("$.data.items[0].status").isEqualTo("SUCCEEDED")
+                .jsonPath("$.data.items[0].statusLabel").isEqualTo("成功");
 
         client.get()
                 .uri("/api/internal/platform/scheduler-management/runs/str_1234567890abcdef")
@@ -124,6 +141,26 @@ class SchedulerManagementControllerTest {
                 .expectBody()
                 .jsonPath("$.data.taskKey").isEqualTo("daily.cleanup")
                 .jsonPath("$.data.result.ok").isEqualTo(true);
+    }
+
+    @Test
+    void superAdminCanStopRunningSchedulerRun() {
+        SchedulerManagementService service = org.mockito.Mockito.mock(SchedulerManagementService.class);
+        mockLabels(service);
+        when(service.stopRun(eq(TASK_RUN_ID), eq(ADMIN_USER_ID), eq(TRACE_ID)))
+                .thenReturn(run(ScheduledTaskRunStatus.STOPPING, ScheduledTaskTriggerType.MANUAL));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/scheduler-management/runs/str_1234567890abcdef/stop")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("STOPPING")
+                .jsonPath("$.data.statusLabel").isEqualTo("停止中")
+                .jsonPath("$.data.stopRequestedByUserId").isEqualTo(ADMIN_USER_ID.value())
+                .jsonPath("$.data.stopReason").isEqualTo("管理员手工停止");
     }
 
     @Test
@@ -215,9 +252,32 @@ class SchedulerManagementControllerTest {
             return pending;
         }
         ScheduledTaskRun running = pending.start("scheduler-test-instance", NOW);
+        if (status == ScheduledTaskRunStatus.RUNNING) {
+            return running;
+        }
+        if (status == ScheduledTaskRunStatus.STOPPING) {
+            return running.requestStop(ADMIN_USER_ID, "管理员手工停止", NOW.plusSeconds(1));
+        }
+        if (status == ScheduledTaskRunStatus.MANUALLY_STOPPED) {
+            return running.requestStop(ADMIN_USER_ID, "管理员手工停止", NOW.plusSeconds(1))
+                    .manuallyStopped(NOW.plusSeconds(2));
+        }
         if (status == ScheduledTaskRunStatus.SUCCEEDED) {
             return running.succeed(Map.of("ok", true), NOW.plusSeconds(1));
         }
         return running.fail("INTERNAL_ERROR", "failed", NOW.plusSeconds(1));
+    }
+
+    private static void mockLabels(SchedulerManagementService service) {
+        when(service.registrationStatusLabel(ScheduledTaskRegistrationStatus.REGISTERED)).thenReturn("已注册");
+        when(service.runStatusLabel(ScheduledTaskRunStatus.PENDING)).thenReturn("待执行");
+        when(service.runStatusLabel(ScheduledTaskRunStatus.RUNNING)).thenReturn("运行中");
+        when(service.runStatusLabel(ScheduledTaskRunStatus.STOPPING)).thenReturn("停止中");
+        when(service.runStatusLabel(ScheduledTaskRunStatus.SUCCEEDED)).thenReturn("成功");
+        when(service.runStatusLabel(ScheduledTaskRunStatus.MANUALLY_STOPPED)).thenReturn("人工停止");
+        when(service.triggerTypeLabel(ScheduledTaskTriggerType.CRON)).thenReturn("定时触发");
+        when(service.triggerTypeLabel(ScheduledTaskTriggerType.MANUAL)).thenReturn("手工触发");
+        when(service.findCurrentRunByTaskKey(org.mockito.ArgumentMatchers.any())).thenReturn(Optional.empty());
+        when(service.findLatestRunByTaskKey(org.mockito.ArgumentMatchers.any())).thenReturn(Optional.empty());
     }
 }

@@ -183,6 +183,87 @@ describe("backend-api", () => {
     expect(headers.get("Authorization")).toBe("Bearer token_123");
   });
 
+  it("maps scheduler management APIs through platform URL", async () => {
+    const taskPage = {
+      items: [
+        {
+          taskKey: "daily.cleanup",
+          name: "每日清理",
+          cronExpression: "0 0 2 * * *",
+          enabled: true,
+          lockTtlSeconds: 300,
+          registrationStatus: "REGISTERED",
+          registrationStatusLabel: "已注册",
+          currentRun: null,
+          latestRun: null,
+          traceId: "trace_fixed",
+          createdAt: "2026-06-25T00:00:00Z",
+          updatedAt: "2026-06-25T00:00:00Z"
+        }
+      ],
+      page: 1,
+      size: 20,
+      total: 1
+    };
+    const run = {
+      taskRunId: "str_1234567890abcdef",
+      taskKey: "daily.cleanup",
+      triggerType: "MANUAL",
+      triggerTypeLabel: "手工触发",
+      status: "STOPPING",
+      statusLabel: "停止中",
+      requestedByUserId: "usr_admin",
+      scheduledFireAt: "2026-06-25T00:00:00Z",
+      startedAt: "2026-06-25T00:00:01Z",
+      stopRequestedAt: "2026-06-25T00:00:02Z",
+      stopRequestedByUserId: "usr_admin",
+      stopReason: "管理员手工停止",
+      traceId: "trace_fixed",
+      createdAt: "2026-06-25T00:00:00Z",
+      updatedAt: "2026-06-25T00:00:02Z"
+    };
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: taskPage }), { status: 200 })
+    );
+    fetcher
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: taskPage }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: taskPage.items[0] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: run }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: { items: [run], page: 1, size: 20, total: 1 } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: run }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: run }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token_123",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.listScheduledTasks({ page: 1, size: 20 })).resolves.toMatchObject({ total: 1 });
+    await client.updateScheduledTask("daily.cleanup", { enabled: false, cronExpression: "0 0 3 * * *", lockTtlSeconds: 600 });
+    await client.triggerScheduledTask("daily.cleanup");
+    await client.listScheduledTaskRuns({ taskKey: "daily.cleanup", status: "RUNNING", triggerType: "MANUAL", page: 1, size: 20 });
+    await client.getScheduledTaskRun("str_1234567890abcdef");
+    await client.stopScheduledTaskRun("str_1234567890abcdef");
+
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "http://api/api/internal/platform/scheduler-management/tasks?page=1&size=20",
+      "http://api/api/internal/platform/scheduler-management/tasks/daily.cleanup",
+      "http://api/api/internal/platform/scheduler-management/tasks/daily.cleanup/trigger",
+      "http://api/api/internal/platform/scheduler-management/runs?taskKey=daily.cleanup&status=RUNNING&triggerType=MANUAL&page=1&size=20",
+      "http://api/api/internal/platform/scheduler-management/runs/str_1234567890abcdef",
+      "http://api/api/internal/platform/scheduler-management/runs/str_1234567890abcdef/stop"
+    ]);
+    expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({
+      method: "PATCH",
+      body: JSON.stringify({ enabled: false, cronExpression: "0 0 3 * * *", lockTtlSeconds: 600 })
+    }));
+    expect(fetcher.mock.calls[2]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+    expect(fetcher.mock.calls[5]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+    const headers = fetcher.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("Authorization")).toBe("Bearer token_123");
+  });
+
   it("maps unified error responses to BackendApiError with trace id", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

@@ -46,12 +46,22 @@ class SchedulerDomainTest {
         ScheduledTaskRun running = run.start("instance-a", NOW.plusSeconds(1));
         ScheduledTaskRun skipped = run.skip("LOCK_NOT_ACQUIRED", NOW.plusSeconds(2));
         ScheduledTaskRun succeeded = running.succeed(Map.of("deleted", 3), NOW.plusSeconds(3));
+        ScheduledTaskRun stopping = running.requestStop(
+                new UserId("usr_admin_1234567890"),
+                "管理员手工停止",
+                NOW.plusSeconds(2));
+        ScheduledTaskRun manuallyStopped = stopping.manuallyStopped(NOW.plusSeconds(3));
 
         assertThat(running.status()).isEqualTo(ScheduledTaskRunStatus.RUNNING);
         assertThat(skipped.status()).isEqualTo(ScheduledTaskRunStatus.SKIPPED);
         assertThat(skipped.skipReason()).isEqualTo("LOCK_NOT_ACQUIRED");
         assertThat(succeeded.status()).isEqualTo(ScheduledTaskRunStatus.SUCCEEDED);
         assertThat(succeeded.result()).containsEntry("deleted", 3);
+        assertThat(stopping.status()).isEqualTo(ScheduledTaskRunStatus.STOPPING);
+        assertThat(stopping.stopRequestedByUserId()).isEqualTo(new UserId("usr_admin_1234567890"));
+        assertThat(stopping.stopReason()).isEqualTo("管理员手工停止");
+        assertThat(manuallyStopped.status()).isEqualTo(ScheduledTaskRunStatus.MANUALLY_STOPPED);
+        assertThat(manuallyStopped.endedAt()).isEqualTo(NOW.plusSeconds(3));
     }
 
     @Test

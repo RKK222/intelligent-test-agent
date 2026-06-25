@@ -563,11 +563,38 @@ class JdbcRepositoryIntegrationTest {
         scheduledTasks.saveRun(running);
         ScheduledTaskRun succeeded = running.succeed(Map.of("deleted", 3), NOW.plusSeconds(2));
         scheduledTasks.saveRun(succeeded);
+        ScheduledTaskRun stopPendingRun = ScheduledTaskRun.pending(
+                new ScheduledTaskRunId("str_stop_1234567890abcdef"),
+                task.taskKey(),
+                plan.planId(),
+                ScheduledTaskTriggerType.MANUAL,
+                userId,
+                NOW.plusSeconds(3),
+                "trace_1234567890abcdef");
+        ScheduledTaskRun stopRunning = stopPendingRun.start("instance-a", NOW.plusSeconds(4));
+        scheduledTasks.saveRun(stopRunning);
+        ScheduledTaskRun stopping = stopRunning.requestStop(userId, "管理员手工停止", NOW.plusSeconds(5));
+        scheduledTasks.saveRun(stopping);
 
         assertThat(scheduledTasks.findTaskByKey(task.taskKey())).contains(task);
         assertThat(scheduledTasks.findDueTasks(NOW, 10)).containsExactly(task);
         assertThat(scheduledTasks.findPlanById(plan.planId())).contains(plan);
         assertThat(scheduledTasks.findRunById(pendingRun.taskRunId())).contains(succeeded);
+        assertThat(scheduledTasks.findActiveRunByTaskKey(task.taskKey())).contains(stopping);
+        ScheduledTaskRun manuallyStopped = stopping.manuallyStopped(NOW.plusSeconds(6));
+        scheduledTasks.saveRun(manuallyStopped);
+        assertThat(scheduledTasks.findRunById(stopPendingRun.taskRunId())).contains(manuallyStopped);
+        assertThat(jdbcClient.sql("""
+                        select count(*)
+                        from dictionaries
+                        where dict_key in (
+                            'SCHEDULER_RUN_STATUS',
+                            'SCHEDULER_TRIGGER_TYPE',
+                            'SCHEDULER_TASK_REGISTRATION_STATUS'
+                        )
+                        """)
+                .query(Long.class)
+                .single()).isGreaterThanOrEqualTo(12L);
         assertThat(scheduledTasks.findRuns(
                         new ScheduledTaskRunFilter(
                                 task.taskKey(),

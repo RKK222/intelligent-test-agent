@@ -41,7 +41,7 @@ import FigmaChatPanel from "./FigmaChatPanel.vue";
 import SettingsDialog from "./settings/SettingsDialog.vue";
 import WorkspaceBootstrap from "./WorkspaceBootstrap.vue";
 import WorkspaceDirectoryPickerDialog from "./WorkspaceDirectoryPickerDialog.vue";
-import RuntimeManagementWrapper from "./RuntimeManagementWrapper.vue";
+import SystemManagementWrapper from "./SystemManagementWrapper.vue";
 import { notifyFeedback } from "./notify";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, type FollowUpDraft } from "./follow-up-queue";
 import {
@@ -96,7 +96,7 @@ const logs = ref<string[]>([]);
 const diffFiles = ref<RunDiffFile[]>([]);
 const diffSource = ref<"run" | "session" | "vcs">("run");
 const diffViewMode = ref<"split" | "unified">("split");
-const centerMode = ref<"editor" | "diff" | "runtime">("editor");
+const centerMode = ref<"editor" | "diff" | "system">("editor");
 const feedback = ref<Feedback | null>(null);
 const sessionSearch = ref("");
 const followUpQueue = ref<FollowUpDraft[]>([]);
@@ -1725,11 +1725,11 @@ async function handleLogout() {
           <button
             v-if="isSuperAdmin"
             type="button"
-            :class="['figma-activity-btn', centerMode === 'runtime' && 'figma-activity-btn--active']"
-            aria-label="运行管理"
-            title="运行管理"
+            :class="['figma-activity-btn', centerMode === 'system' && 'figma-activity-btn--active']"
+            aria-label="系统管理"
+            title="系统管理"
             @click="
-              centerMode = 'runtime';
+              centerMode = 'system';
               rightPanelOpen = false;
               bottomDrawerOpen = false;
             "
@@ -1812,8 +1812,8 @@ async function handleLogout() {
           @current-file-feedback="onCurrentFileFeedback"
           @use-hunk-context="onUseHunkContext"
         />
-        <div v-else-if="centerMode === 'runtime'" class="managed-runtime-container">
-          <RuntimeManagementWrapper :current-user="authStore.currentUser" />
+        <div v-else-if="centerMode === 'system'" class="managed-runtime-container">
+          <SystemManagementWrapper :current-user="authStore.currentUser" />
         </div>
         <FigmaEditorArea
           v-else

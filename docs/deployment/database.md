@@ -354,8 +354,9 @@ opencode 用户进程管理表曾在设计阶段使用 V10 版本号；实际仓
 - `scheduled_tasks.lock_ttl_seconds` 保存 Redis 锁租约秒数，必须为正数。
 - `scheduled_task_plans.plan_id`、`scheduled_task_runs.task_run_id` 是业务 ID，不暴露数据库自增 surrogate PK。
 - `scheduled_task_runs.trigger_type` 当前支持 `CRON`、`MANUAL`、`USER_PLAN`；HTTP 首版只创建 `MANUAL`。
-- `scheduled_task_runs.status` 当前支持 `PENDING`、`RUNNING`、`SUCCEEDED`、`FAILED`、`SKIPPED`。
+- `scheduled_task_runs.status` 当前支持 `PENDING`、`RUNNING`、`STOPPING`、`SUCCEEDED`、`FAILED`、`SKIPPED`、`MANUALLY_STOPPED`。
 - `scheduled_task_runs.skip_reason` 保存同一 `taskKey` 已有未结束运行或 Redis 锁竞争失败时的跳过原因。
+- `scheduled_task_runs.stop_requested_at`、`stop_requested_by_user_id`、`stop_reason` 记录超级管理员发起协作式停止的时间、操作者和原因。
 
 新增来源字段：
 
@@ -371,6 +372,15 @@ opencode 用户进程管理表曾在设计阶段使用 V10 版本号；实际仓
 - `scheduled_task_plans` 只预留领域模型和 Repository，不开放 HTTP API，不会被普通用户直接创建。
 - 分布式互斥由 Redis 锁保证，数据库表不作为锁 fallback；Redis 不可用时 scheduler 启用校验失败或运行失败，不降级为本机锁。
 - `result_json`、`payload_json` 保存结构化 JSON 文本，禁止写入密钥、Token、完整 prompt 或其他敏感内容。
+
+## V20260625192100 scheduler 停止字段与状态字典
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260625192100__extend_scheduler_management_stop_and_dicts.sql` 在 scheduler 框架表上扩展管理可视化所需字段和字典：
+
+- `scheduled_task_runs` 增加 `stop_requested_at`、`stop_requested_by_user_id`、`stop_reason`，用于记录管理员停止正在运行任务的审计信息；`stop_requested_by_user_id` 外键指向 `users(user_id)`。
+- 新增 `idx_scheduled_task_runs_stop_user`，支持按停止操作者追溯。
+- seed `SCHEDULER_RUN_STATUS`、`SCHEDULER_TRIGGER_TYPE`、`SCHEDULER_TASK_REGISTRATION_STATUS` 字典，供 scheduler API 直接返回中文 label。字典缺失时 API fallback 为原 code，不影响运行。
+- active run 判定包含 `PENDING`、`RUNNING`、`STOPPING`；管理员手动触发遇到 active run 返回冲突，Cron 重叠触发仍按框架记录 `SKIPPED`。
 
 ## V11 用户工作区分支偏好表
 

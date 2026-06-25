@@ -872,9 +872,10 @@ Base URL：`/api/internal/platform/scheduler-management`
 | `GET` | `/tasks` | 分页查询代码注册的任务定义。 |
 | `GET` | `/tasks/{taskKey}` | 查询单个任务定义。 |
 | `PATCH` | `/tasks/{taskKey}` | 调整任务启停、Cron 表达式和锁 TTL。 |
-| `POST` | `/tasks/{taskKey}/trigger` | 创建管理员手动触发运行记录，后台 runner 异步执行。 |
+| `POST` | `/tasks/{taskKey}/trigger` | 创建管理员手动触发运行记录，后台 runner 异步执行；任务停用时超级管理员仍可手动触发。 |
 | `GET` | `/runs` | 分页查询运行记录，可按任务、状态、触发类型和请求用户过滤。 |
 | `GET` | `/runs/{taskRunId}` | 查询单次运行记录详情。 |
+| `POST` | `/runs/{taskRunId}/stop` | 对正在执行的运行记录发起协作式停止。 |
 
 `GET /tasks` 查询参数：
 
@@ -894,6 +895,20 @@ Base URL：`/api/internal/platform/scheduler-management`
   "lockTtlSeconds": 300,
   "nextFireAt": "2026-06-25T02:00:00Z",
   "registrationStatus": "REGISTERED",
+  "registrationStatusLabel": "已注册",
+  "currentRun": null,
+  "latestRun": {
+    "taskRunId": "str_...",
+    "status": "SUCCEEDED",
+    "statusLabel": "成功",
+    "triggerType": "CRON",
+    "triggerTypeLabel": "定时触发",
+    "requestedByUserId": null,
+    "scheduledFireAt": "2026-06-25T02:00:00Z",
+    "startedAt": "2026-06-25T02:00:01Z",
+    "endedAt": "2026-06-25T02:00:02Z",
+    "ownerInstanceId": "backend-..."
+  },
   "createdAt": "2026-06-24T08:00:00Z",
   "updatedAt": "2026-06-24T08:00:00Z",
   "traceId": "trace_..."
@@ -916,7 +931,7 @@ Base URL：`/api/internal/platform/scheduler-management`
 |---|---|
 | `page` / `size` | 分页参数，默认 `1/50`。 |
 | `taskKey` | 可选任务 key。 |
-| `status` | 可选：`PENDING`、`RUNNING`、`SUCCEEDED`、`FAILED`、`SKIPPED`。 |
+| `status` | 可选：`PENDING`、`RUNNING`、`STOPPING`、`SUCCEEDED`、`FAILED`、`SKIPPED`、`MANUALLY_STOPPED`。 |
 | `triggerType` | 可选：`CRON`、`MANUAL`、`USER_PLAN`。首版 HTTP 只创建 `MANUAL`。 |
 | `requestedByUserId` | 可选管理员用户 ID。 |
 
@@ -928,12 +943,17 @@ Base URL：`/api/internal/platform/scheduler-management`
   "taskKey": "daily.cleanup",
   "planId": null,
   "triggerType": "MANUAL",
-  "status": "SUCCEEDED",
+  "triggerTypeLabel": "手工触发",
+  "status": "MANUALLY_STOPPED",
+  "statusLabel": "人工停止",
   "requestedByUserId": "usr_...",
   "scheduledFireAt": "2026-06-25T02:00:00Z",
   "startedAt": "2026-06-25T02:00:01Z",
   "endedAt": "2026-06-25T02:00:02Z",
   "ownerInstanceId": "backend-...",
+  "stopRequestedAt": "2026-06-25T02:00:01Z",
+  "stopRequestedByUserId": "usr_...",
+  "stopReason": "管理员手工停止",
   "skipReason": null,
   "errorCode": null,
   "errorMessage": null,
@@ -947,7 +967,9 @@ Base URL：`/api/internal/platform/scheduler-management`
 兼容性与审计：
 
 - `scheduled_task_plans` 只作为用户级 Cron 计划预留模型，本批次不开放普通用户 HTTP API。
-- 同一 `taskKey` 已有 `PENDING` 或 `RUNNING` 记录时，新触发会写入 `SKIPPED`，并保存 `skipReason`。
+- 同一 `taskKey` 已有 `PENDING`、`RUNNING` 或 `STOPPING` 记录时，管理员手动触发返回统一 `CONFLICT` 错误，不创建新的手动运行记录；Cron 调度重叠仍会写入 `SKIPPED` 并保存 `skipReason`。
+- `POST /runs/{taskRunId}/stop` 只允许停止 `RUNNING` 记录，成功后状态先变为 `STOPPING` 并记录 `stopRequestedAt/stopRequestedByUserId/stopReason`；handler 协作退出后 runner 保存终态 `MANUALLY_STOPPED`。终态、`PENDING`、不存在记录返回统一错误。
+- `TaskResponse`、`RunResponse` 的中文 label 由后端按字典表查询，字典缺失时回退为原 code；不新增通用字典查询 API。
 - 分布式互斥只使用 Redis 锁；Redis 不可用时 scheduler 不降级为本机锁。
 - 对应测试：`SchedulerManagementControllerTest`、`SchedulerManagementServiceTest`、`ScheduledTaskRunnerTest`。
 

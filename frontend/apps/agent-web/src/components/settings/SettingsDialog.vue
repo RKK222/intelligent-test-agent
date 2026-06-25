@@ -5,7 +5,7 @@ import type { CurrentUser } from "@test-agent/shared-types";
 import SettingsMenu from "./SettingsMenu.vue";
 import SettingsPanel from "./SettingsPanel.vue";
 
-type MenuKey = "appWorkspace" | "runtimeManagement" | "personal";
+type MenuKey = "appWorkspace" | "personal";
 
 const props = defineProps<{
   open: boolean;

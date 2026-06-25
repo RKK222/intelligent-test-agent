@@ -87,7 +87,7 @@ describe("runtime management settings", () => {
     vi.clearAllMocks();
   });
 
-  it("shows runtime management menu only for super admins", async () => {
+  it("keeps runtime management out of the settings menu", () => {
     const superAdmin = render(SettingsMenu, {
       props: {
         activeKey: "appWorkspace",
@@ -100,9 +100,7 @@ describe("runtime management settings", () => {
       }
     });
 
-    expect(superAdmin.getByText("运行管理")).toBeTruthy();
-    await fireEvent.click(superAdmin.getByText("运行管理"));
-    expect(superAdmin.emitted("select")?.[0]).toEqual(["runtimeManagement"]);
+    expect(superAdmin.queryByText("运行管理")).toBeNull();
     superAdmin.unmount();
 
     const appAdmin = render(SettingsMenu, {
