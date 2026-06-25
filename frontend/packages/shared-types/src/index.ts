@@ -131,6 +131,7 @@ export type OpencodeRuntimeManagementOverviewParams = {
   status?: string;
   linuxServerId?: string;
   containerId?: string;
+  username?: string;
   userId?: string;
   page?: number;
   size?: number;
@@ -216,6 +217,7 @@ export type OpencodeRuntimeManagerBackendConnection = {
 export type OpencodeRuntimeProcess = {
   processId: string;
   userId: string;
+  username?: string | null;
   linuxServerId: string;
   containerId: string;
   port: number;

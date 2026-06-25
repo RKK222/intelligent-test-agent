@@ -19,12 +19,12 @@ type FilterDraft = {
   status: string;
   linuxServerId: string;
   containerId: string;
-  userId: string;
+  username: string;
 };
 
-const processStatusOptions = ["STARTING", "RUNNING", "UNHEALTHY", "STOPPED", "FAILED"];
-const draftFilters = ref<FilterDraft>({ status: "", linuxServerId: "", containerId: "", userId: "" });
-const activeFilters = ref<FilterDraft>({ status: "", linuxServerId: "", containerId: "", userId: "" });
+const processStatusOptions = ["RUNNING"];
+const draftFilters = ref<FilterDraft>({ status: "", linuxServerId: "", containerId: "", username: "" });
+const activeFilters = ref<FilterDraft>({ status: "", linuxServerId: "", containerId: "", username: "" });
 const page = ref(1);
 const size = ref(20);
 
@@ -33,7 +33,7 @@ const overviewParams = computed<OpencodeRuntimeManagementOverviewParams>(() => (
   status: activeFilters.value.status || undefined,
   linuxServerId: activeFilters.value.linuxServerId.trim() || undefined,
   containerId: activeFilters.value.containerId.trim() || undefined,
-  userId: activeFilters.value.userId.trim() || undefined,
+  username: activeFilters.value.username.trim() || undefined,
   page: page.value,
   size: size.value
 }));
@@ -80,8 +80,8 @@ function applyFilters() {
 }
 
 function clearFilters() {
-  draftFilters.value = { status: "", linuxServerId: "", containerId: "", userId: "" };
-  activeFilters.value = { status: "", linuxServerId: "", containerId: "", userId: "" };
+  draftFilters.value = { status: "", linuxServerId: "", containerId: "", username: "" };
+  activeFilters.value = { status: "", linuxServerId: "", containerId: "", username: "" };
   page.value = 1;
 }
 
@@ -149,7 +149,7 @@ function compactRecord(value?: Record<string, unknown> | null) {
         </el-select>
         <el-input v-model="draftFilters.linuxServerId" size="small" clearable placeholder="Linux IP" class="ta-runtime-filter" />
         <el-input v-model="draftFilters.containerId" size="small" clearable placeholder="容器 ID" class="ta-runtime-filter" />
-        <el-input v-model="draftFilters.userId" size="small" clearable placeholder="用户 ID" class="ta-runtime-filter" />
+        <el-input v-model="draftFilters.username" size="small" clearable placeholder="用户名" class="ta-runtime-filter" />
         <el-button size="small" type="primary" :icon="Search" :loading="isFetching" @click="applyFilters">查询</el-button>
         <el-button size="small" :icon="Refresh" :loading="isFetching" @click="refresh">刷新</el-button>
         <el-button size="small" @click="clearFilters">清空</el-button>
@@ -299,7 +299,7 @@ function compactRecord(value?: Record<string, unknown> | null) {
                 <tr v-if="!processRows.length"><td colspan="11" class="is-empty">暂无 opencode 进程</td></tr>
                 <tr v-for="process in processRows" :key="process.processId">
                   <td class="is-compact">{{ process.processId }}</td>
-                  <td class="is-compact">{{ process.userId }}</td>
+                  <td class="is-compact">{{ process.username || process.userId }}</td>
                   <td>{{ process.linuxServerId }}</td>
                   <td class="is-compact">{{ process.containerId }}</td>
                   <td>{{ process.port }}</td>

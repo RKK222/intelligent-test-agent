@@ -10,6 +10,7 @@ import com.icbc.testagent.domain.node.ExecutionNodeStatus;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
@@ -26,6 +27,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -42,6 +44,7 @@ public class UserOpencodeProcessAssignmentService {
     private final ExecutionNodeRepository executionNodeRepository;
     private final OpencodeProcessManagerGateway gateway;
     private final BackendJavaProcessLifecycleService backendLifecycle;
+    private final OpencodeProcessHeartbeatStore heartbeatStore;
 
     /**
      * 注入进程管理 Repository、兼容节点 Repository 和管理进程 gateway。
@@ -51,10 +54,24 @@ public class UserOpencodeProcessAssignmentService {
             ExecutionNodeRepository executionNodeRepository,
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle) {
+        this(repository, executionNodeRepository, gateway, backendLifecycle, disabledHeartbeatStore());
+    }
+
+    /**
+     * 注入进程管理 Repository、兼容节点 Repository、管理进程 gateway 和运行进程心跳端口。
+     */
+    @Autowired
+    public UserOpencodeProcessAssignmentService(
+            OpencodeProcessManagementRepository repository,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            BackendJavaProcessLifecycleService backendLifecycle,
+            OpencodeProcessHeartbeatStore heartbeatStore) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.backendLifecycle = Objects.requireNonNull(backendLifecycle, "backendLifecycle must not be null");
+        this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
     }
 
     /**
@@ -80,6 +97,7 @@ public class UserOpencodeProcessAssignmentService {
         if (health.healthy()) {
             OpencodeServerProcess refreshed = refreshProcess(current, OpencodeServerProcessStatus.RUNNING, health.message(), now, traceId);
             repository.saveOpencodeServerProcess(refreshed);
+            heartbeatStore.recordOpencodeHeartbeat(refreshed.processId(), now);
             return ready(refreshed, "opencode 进程可用", now);
         }
         repository.saveOpencodeServerProcess(refreshProcess(current, OpencodeServerProcessStatus.UNHEALTHY, health.message(), now, traceId));
@@ -102,6 +120,7 @@ public class UserOpencodeProcessAssignmentService {
             if (health.healthy()) {
                 OpencodeServerProcess refreshed = refreshProcess(existingProcess.get(), OpencodeServerProcessStatus.RUNNING, health.message(), now, traceId);
                 repository.saveOpencodeServerProcess(refreshed);
+                heartbeatStore.recordOpencodeHeartbeat(refreshed.processId(), now);
                 ExecutionNode node = projectExecutionNode(refreshed, now, traceId);
                 executionNodeRepository.save(node);
                 return ready(refreshed, "opencode 进程可用", now);
@@ -143,6 +162,7 @@ public class UserOpencodeProcessAssignmentService {
                 now,
                 traceId);
         repository.saveOpencodeServerProcess(process);
+        heartbeatStore.recordOpencodeHeartbeat(process.processId(), now);
         repository.saveUserBinding(new UserOpencodeProcessBinding(
                 userId,
                 OPENCODE_AGENT_ID,
@@ -176,6 +196,7 @@ public class UserOpencodeProcessAssignmentService {
         }
         OpencodeServerProcess refreshed = refreshProcess(process, OpencodeServerProcessStatus.RUNNING, health.message(), now, traceId);
         repository.saveOpencodeServerProcess(refreshed);
+        heartbeatStore.recordOpencodeHeartbeat(refreshed.processId(), now);
         ExecutionNode node = projectExecutionNode(refreshed, now, traceId);
         executionNodeRepository.save(node);
         return new UserOpencodeProcessAssignment(node);
@@ -341,5 +362,16 @@ public class UserOpencodeProcessAssignmentService {
 
     private PlatformException unavailableException(String message) {
         return new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, message, Map.of("agentId", OPENCODE_AGENT_ID));
+    }
+
+    private static OpencodeProcessHeartbeatStore disabledHeartbeatStore() {
+        return new OpencodeProcessHeartbeatStore() {
+            @Override public boolean enabled() { return false; }
+            @Override public void recordBackendHeartbeat(com.icbc.testagent.domain.opencodeprocess.BackendProcessId backendProcessId, Instant heartbeatAt) { }
+            @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
+            @Override public Set<com.icbc.testagent.domain.opencodeprocess.BackendProcessId> liveBackendProcessIds() { return Set.of(); }
+            @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
+            @Override public void cleanupExpiredHeartbeats() { }
+        };
     }
 }

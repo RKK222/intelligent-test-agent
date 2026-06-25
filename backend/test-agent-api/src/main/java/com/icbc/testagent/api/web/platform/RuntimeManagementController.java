@@ -46,6 +46,7 @@ public class RuntimeManagementController {
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String linuxServerId,
             @RequestParam(required = false) String containerId,
+            @RequestParam(required = false) String username,
             @RequestParam(required = false) String userId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
@@ -57,7 +58,8 @@ public class RuntimeManagementController {
                 parseStatus(status),
                 parseLinuxServerId(linuxServerId),
                 parseContainerId(containerId),
-                parseUserId(userId));
+                parseUserId(userId),
+                parseUsername(username));
         return Mono.fromCallable(() -> ApiResponse.ok(
                         RuntimeManagementDtos.OverviewResponse.from(queryService.overview(filter, pageRequest, traceId)),
                         traceId))
@@ -114,6 +116,10 @@ public class RuntimeManagementController {
         } catch (IllegalArgumentException exception) {
             throw validationError("用户 ID 无效", "userId", value, exception);
         }
+    }
+
+    private String parseUsername(String rawUsername) {
+        return textOrNull(rawUsername);
     }
 
     private PlatformException validationError(String message, String fieldName, String value, IllegalArgumentException exception) {

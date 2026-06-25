@@ -13,7 +13,7 @@
 ## 主要职责
 
 - 启动 `TestAgentApplication`，扫描 `com.icbc.testagent` 下的后端组件。
-- 承载运行时 profile、配置绑定、日志配置、Actuator health、Flyway migration 入口和 opencode execution node seed。
+- 承载运行时 profile、配置绑定、日志配置、Actuator health、Flyway migration 入口、opencode execution node seed，以及 Java/opencode 运行心跳周期任务装配。
 - 组装 `test-agent-api`、业务模块、persistence、event、opencode-client 等 library jar，形成单一部署包。
 - 保持生产容器只运行 Java 进程；PostgreSQL、Redis 和 opencode server 均由外部配置注入。
 

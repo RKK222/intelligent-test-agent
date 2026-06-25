@@ -129,6 +129,7 @@ describe("backend-api", () => {
                 {
                   processId: "ocp_1234567890abcdef",
                   userId: "usr_1234567890abcdef",
+                  username: "process-user",
                   linuxServerId: "10.8.0.12",
                   containerId: "ctr_01",
                   port: 4096,
@@ -166,7 +167,7 @@ describe("backend-api", () => {
         status: "RUNNING",
         linuxServerId: "10.8.0.12",
         containerId: "ctr_01",
-        userId: "usr_1234567890abcdef",
+        username: "process-user",
         page: 1,
         size: 20
       })
@@ -176,7 +177,7 @@ describe("backend-api", () => {
     });
 
     expect(fetcher.mock.calls[0]?.[0]).toBe(
-      "http://api/api/internal/platform/opencode-runtime/management/overview?status=RUNNING&linuxServerId=10.8.0.12&containerId=ctr_01&userId=usr_1234567890abcdef&page=1&size=20"
+      "http://api/api/internal/platform/opencode-runtime/management/overview?status=RUNNING&linuxServerId=10.8.0.12&containerId=ctr_01&username=process-user&page=1&size=20"
     );
     const headers = fetcher.mock.calls[0]?.[1]?.headers as Headers;
     expect(headers.get("Authorization")).toBe("Bearer token_123");

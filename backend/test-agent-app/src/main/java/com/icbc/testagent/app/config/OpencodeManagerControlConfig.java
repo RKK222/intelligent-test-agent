@@ -2,6 +2,7 @@ package com.icbc.testagent.app.config;
 
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.observability.TraceIdSupport;
+import com.icbc.testagent.opencode.runtime.process.OpencodeProcessHeartbeatMaintenanceService;
 import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import java.util.concurrent.Executors;
@@ -41,8 +42,9 @@ public class OpencodeManagerControlConfig {
     @Bean
     BackendJavaProcessLifecycleRunner backendJavaProcessLifecycleRunner(
             BackendJavaProcessLifecycleService lifecycleService,
+            OpencodeProcessHeartbeatMaintenanceService heartbeatMaintenanceService,
             ManagerControlSettings settings) {
-        return new BackendJavaProcessLifecycleRunner(lifecycleService, settings);
+        return new BackendJavaProcessLifecycleRunner(lifecycleService, heartbeatMaintenanceService, settings);
     }
 
     /**
@@ -51,29 +53,42 @@ public class OpencodeManagerControlConfig {
     static class BackendJavaProcessLifecycleRunner implements ApplicationRunner, DisposableBean {
 
         private final BackendJavaProcessLifecycleService lifecycleService;
+        private final OpencodeProcessHeartbeatMaintenanceService heartbeatMaintenanceService;
         private final ManagerControlSettings settings;
         private ScheduledExecutorService executor;
 
         BackendJavaProcessLifecycleRunner(
                 BackendJavaProcessLifecycleService lifecycleService,
+                OpencodeProcessHeartbeatMaintenanceService heartbeatMaintenanceService,
                 ManagerControlSettings settings) {
             this.lifecycleService = lifecycleService;
+            this.heartbeatMaintenanceService = heartbeatMaintenanceService;
             this.settings = settings;
         }
 
         @Override
         public void run(ApplicationArguments args) {
             lifecycleService.registerHeartbeat(TraceIdSupport.generate());
-            executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            executor = Executors.newScheduledThreadPool(2, runnable -> {
                 Thread thread = new Thread(runnable, "opencode-manager-backend-heartbeat");
                 thread.setDaemon(true);
                 return thread;
             });
             executor.scheduleAtFixedRate(
-                    () -> lifecycleService.registerHeartbeat(TraceIdSupport.generate()),
+                    () -> runSafely(() -> lifecycleService.registerHeartbeat(TraceIdSupport.generate())),
                     settings.heartbeatInterval().toMillis(),
                     settings.heartbeatInterval().toMillis(),
                     TimeUnit.MILLISECONDS);
+            executor.scheduleAtFixedRate(
+                    () -> runSafely(() -> heartbeatMaintenanceService.refreshRunningProcessHeartbeats(TraceIdSupport.generate())),
+                    3,
+                    3,
+                    TimeUnit.MINUTES);
+            executor.scheduleAtFixedRate(
+                    () -> runSafely(heartbeatMaintenanceService::cleanupExpiredHeartbeats),
+                    5,
+                    5,
+                    TimeUnit.MINUTES);
         }
 
         @Override
@@ -82,6 +97,14 @@ public class OpencodeManagerControlConfig {
                 executor.shutdownNow();
             }
             lifecycleService.markOffline(TraceIdSupport.generate());
+        }
+
+        private void runSafely(Runnable runnable) {
+            try {
+                runnable.run();
+            } catch (RuntimeException ignored) {
+                // 周期性心跳失败不能终止调度线程；下一轮会重新写入或清理。
+            }
         }
     }
 }
