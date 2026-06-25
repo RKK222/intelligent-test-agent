@@ -251,14 +251,14 @@
   3. 应用下没有任何模板/版本：保持空态，由用户手动选择本机目录。
 - 兜底命中会立即持久化偏好，保证"第二次进入直接命中第 1 步"。
 
-V10_1 种子数据对 F-COSS 的影响：
+V10 种子数据对 F-COSS 的影响：
 
-- `V10_1__seed_fcoss_application.sql` 同步写入 `user_application_workspace_preferences(user='888888888', app='app_fcoss', workspace='wrk_fcoss_20260701')`，本地开发用户首次进入 F-COSS 直接落到最新版本。
-- 删除/重置后只要重新执行 `V10_1`（幂等）即可恢复默认状态；偏好表本身的幂等写入由 `INSERT ... ON CONFLICT DO UPDATE` 在 `ManagedWorkspaceRepository.savePreference` 内保证。
+- `V10__seed_fcoss_application.sql` 同步写入 `user_application_workspace_preferences(user='888888888', app='app_fcoss', workspace='wrk_fcoss_20260701')`，本地开发用户首次进入 F-COSS 直接落到最新版本。
+- 删除/重置后只要重新执行 `V10`（幂等）即可恢复默认状态；偏好表本身的幂等写入由 `INSERT ... ON CONFLICT DO UPDATE` 在 `ManagedWorkspaceRepository.savePreference` 内保证。
 
 ## opencode 用户进程管理表版本调整
 
-opencode 用户进程管理表曾在设计阶段使用 V10 版本号；实际仓库中 V10 已用于消息/Run 消耗字段，F-COSS seed 使用 `V10_1`，最终表结构迁移以 `V14__create_opencode_process_management_tables.sql` 为准。该迁移都是新增表，不修改旧 `execution_nodes` 或 `sessions.opencode_*` 字段：
+opencode 用户进程管理表曾在设计阶段使用 V10 版本号；实际仓库中 V10 保留给 F-COSS seed，消息/Run 消耗字段迁移使用 V16，最终表结构迁移以 `V14__create_opencode_process_management_tables.sql` 为准。该迁移都是新增表，不修改旧 `execution_nodes` 或 `sessions.opencode_*` 字段：
 
 | 表 | 说明 |
 |---|---|
@@ -285,9 +285,9 @@ opencode 用户进程管理表曾在设计阶段使用 V10 版本号；实际仓
 - 应用回滚时可保留这些新增表；如需完整回退 Web 用户对话到固定节点模式，应回滚后端和前端镜像，而不是删除 V10 表或清理 `/data/opencode/session/{port}`。
 - 后端启动/心跳更新 `linux_servers`、`backend_java_processes`；manager WebSocket 注册和心跳更新 `opencode_containers`、`opencode_container_managers` 和 `opencode_manager_backend_connections`。
 
-## V10_1 F-COSS 应用开发种子数据
+## V10 F-COSS 应用开发种子数据
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V10_1__seed_fcoss_application.sql` 在本地开发环境提供开箱即用的 F-COSS 应用数据，让工作台左下角的两级菜单（应用→工作空间→版本）首次进入就能看到内容：
+`backend/test-agent-persistence/src/main/resources/db/migration/V10__seed_fcoss_application.sql` 在本地开发环境提供开箱即用的 F-COSS 应用数据，让工作台左下角的两级菜单（应用→工作空间→版本）首次进入就能看到内容。该文件保留 V10 版本号，兼容已经应用过旧 V10 seed 的本地库，避免 Flyway 报“applied migration not resolved locally”。
 
 | 数据 | 标识 | 说明 |
 |---|---|---|
@@ -324,7 +324,7 @@ opencode 用户进程管理表曾在设计阶段使用 V10 版本号；实际仓
 
 ## V14 opencode 用户进程管理表
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V14__create_opencode_process_management_tables.sql` 创建企业内部署所需的 opencode 用户进程管理表。V10 已用于消息/Run 消耗字段，F-COSS 本地种子数据使用 V10_1，因此该表结构迁移使用 V14，避免 Flyway 版本冲突。
+`backend/test-agent-persistence/src/main/resources/db/migration/V14__create_opencode_process_management_tables.sql` 创建企业内部署所需的 opencode 用户进程管理表。V10 已用于 F-COSS 本地种子数据，因此该表结构迁移使用 V14，避免 Flyway 版本冲突。
 
 | 表 | 说明 |
 |---|---|
@@ -338,9 +338,9 @@ opencode 用户进程管理表曾在设计阶段使用 V10 版本号；实际仓
 - `created_by_user_id` 选择 `users.username = '888888888'` 的用户，没有该用户时整条插入被跳过；不引入新用户。
 - 不影响 V9 的表结构与已有迁移路径；模板与版本均为 ACTIVE，运行态 `workspaces` 同步 ACTIVE 状态。
 
-## V15 scheduler 框架表与来源预留字段
+## V20260625184300 scheduler 框架表与来源预留字段
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V15__create_scheduler_framework_tables.sql` 创建通用定时任务框架表，并给会话、Run、消息增加来源预留字段。本次只提供框架和管理 API，不新增具体业务任务，也不开放普通用户创建 Cron 计划 API。
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260625184300__create_scheduler_framework_tables.sql` 创建通用定时任务框架表，并给会话、Run、消息增加来源预留字段。本次只提供框架和管理 API，不新增具体业务任务，也不开放普通用户创建 Cron 计划 API。该版本使用 14 位时间戳，避免与既有 `V15__add_opencode_process_id_check_constraints.sql`、`V17__seed_local_opencode_machine_for_default_user.sql` 或其他并行分支的数字版本冲突。
 
 | 表 | 说明 |
 |---|---|
@@ -433,9 +433,9 @@ opencode 用户进程管理表曾在设计阶段使用 V10 版本号；实际仓
 - 表内不保存调用密钥；`ICBC_OPENAI_AUTH_TOKEN` 或自定义 token 环境变量只在运行时同步 opencode provider 配置时引用。
 - 删除模型建议先设 `enabled=false`，避免前端仍持有旧 `providerId/modelId` 时出现不可解释的目录缺失。
 
-## V10 会话消息与 Run 消耗快照字段
+## V16 会话消息与 Run 消耗快照字段
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V10__add_message_and_run_usage_fields.sql` 扩展 `session_messages` 和 `runs`：
+`backend/test-agent-persistence/src/main/resources/db/migration/V16__add_message_and_run_usage_fields.sql` 扩展 `session_messages` 和 `runs`：
 
 ### session_messages 扩展字段
 
@@ -498,6 +498,10 @@ opencode 用户进程管理表曾在设计阶段使用 V10 版本号；实际仓
 - 默认 `test-agent.opencode.manager-control.gateway-mode=socket`（生产）：`SocketOpencodeProcessManagerGateway` 走 manager WebSocket，本地没起 manager 时 health/start 都会返回 `OPENCODE_UNAVAILABLE`，前端状态会落到 "opencode 进程健康检测失败，需要重新初始化"。
 - `application-local.yml` 默认 `gateway-mode=local`（受 `TEST_AGENT_OPENCODE_GATEWAY_MODE` 覆盖）：`LocalOpencodeProcessManagerGateway` 直连 `baseUrl` 跑 HTTP GET，`startProcess` 走占位返回；本机 127.0.0.1:4096 真的在跑 opencode server 时，前台状态会从 UNAVAILABLE 升级为 READY。
 - `local-direct` 完全短路：`application-local.yml` / `application-guo.yml` 默认 `test-agent.opencode.local-direct=true`（受 `TEST_AGENT_OPENCODE_LOCAL_DIRECT` 覆盖），`UserOpencodeProcessAssignmentService` 在 `status` / `initialize` / `requireReadyProcess` 三个入口跳过 database topology / user binding / manager health 校验链路，合成指向 `test-agent.opencode.local-direct-base-url`（默认 `http://127.0.0.1:4096`）的 READY 进程对象；无论 V17 种子 / 真实 opencode server / manager 状态如何，本地登录后状态接口都直接落到 READY。生产请把 `local-direct` 设回 `false`（也是 Java 字段默认值），保留 topology / health 校验。
+
+## 后续 migration 版本规则
+
+V17 及以前保留既有数字版本，已在本地或共享库执行过的 migration 禁止重命名。V17 之后新增 migration 必须使用 `VyyyyMMddHHmmss__description.sql`，时间戳按开发者创建迁移时的本地时间确定；多人并行开发时不得再抢占 `V18`、`V19` 这类顺序数字版本。提交前需运行持久化模块 migration 命名测试，确认版本唯一且时间戳规则生效。
 
 兼容策略：
 

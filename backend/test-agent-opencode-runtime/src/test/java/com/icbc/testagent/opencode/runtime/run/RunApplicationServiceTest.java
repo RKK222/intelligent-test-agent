@@ -161,6 +161,7 @@ class RunApplicationServiceTest {
 
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
         assertThat(nodes.findRoutableNodesCalls).isZero();
+        assertThat(nodes.saved).contains(assignedNode);
         assertThat(facade.createSessionCommands).hasSize(1);
         assertThat(facade.createSessionCommands.getFirst().node().baseUrl()).isEqualTo("http://10.8.0.12:4096");
         assertThat(facade.startRunCommands.getFirst().node().baseUrl()).isEqualTo("http://10.8.0.12:4096");
@@ -1132,6 +1133,7 @@ class RunApplicationServiceTest {
 
     private static final class FakeExecutionNodeRepository implements ExecutionNodeRepository {
         private final ExecutionNode node;
+        private final List<ExecutionNode> saved = new ArrayList<>();
         private int findRoutableNodesCalls;
 
         private FakeExecutionNodeRepository() {
@@ -1144,6 +1146,7 @@ class RunApplicationServiceTest {
 
         @Override
         public ExecutionNode save(ExecutionNode executionNode) {
+            saved.add(executionNode);
             return executionNode;
         }
 

@@ -361,9 +361,11 @@ public class RunApplicationService {
             RunId runId,
             Instant now,
             String traceId) {
+        // 用户进程节点可能是本地直联合成节点，先落兼容节点，避免后续路由审计和 binding 外键失败。
+        ExecutionNode node = executionNodeRepository.save(assignment.node());
         return new AgentRoutingTarget(
-                assignment.node(),
-                new RoutingDecision(runId, assignment.node().executionNodeId(), RoutingReason.MANUAL_OVERRIDE, now, traceId));
+                node,
+                new RoutingDecision(runId, node.executionNodeId(), RoutingReason.MANUAL_OVERRIDE, now, traceId));
     }
 
     /**
