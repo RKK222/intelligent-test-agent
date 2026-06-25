@@ -351,57 +351,6 @@ test("live tracking opens changed file and shows line counts before run finishes
   await expect(page.getByRole("button", { name: /checkout\.spec\.ts.*\+3.*-1/ })).toBeVisible();
 });
 
-test("branch dropdown exposes a two-level menu grouped by source", async ({ page }) => {
-  const changeBranchRequests: string[] = [];
-  // 1) vcs.status 返回 feature 分支作为当前分支 + main 作为默认分支；
-  // 2) branch-preference GET 返回 release 分支作为最近偏好；
-  // 三者不同，验证两级菜单能同时出现"当前分支 / 默认分支 / 最近使用"三个分组。
-  await mockBackendApi(page, {
-    vcsStatus: { status: "ready", branch: "feature", defaultBranch: "main" },
-    recentBranchPreference: {
-      appId: "app_gcms",
-      workspaceId: "wrk_1234567890abcdef",
-      branch: "release",
-      updatedAt: "2026-06-24T00:00:00Z"
-    },
-    changeBranchRequests
-  });
-
-  await gotoWorkbench(page);
-
-  // footer 上的分支按钮显示当前分支名
-  await expect(page.getByRole("button", { name: "feature" })).toBeVisible();
-
-  // 点击按钮打开一级菜单：三个分组都应出现
-  await page.getByRole("button", { name: "feature" }).click();
-  const currentItem = page.getByRole("menuitem", { name: "当前分支" });
-  const defaultItem = page.getByRole("menuitem", { name: "默认分支" });
-  const recentItem = page.getByRole("menuitem", { name: "最近使用" });
-  await expect(currentItem).toBeVisible();
-  await expect(defaultItem).toBeVisible();
-  await expect(recentItem).toBeVisible();
-
-  // 验证菜单面板 Teleport 到 body、position:fixed、有非零大小（避免被父级 overflow:hidden 裁切）
-  const panel = page.locator(".ta-workbench-branch-panel");
-  await expect(panel).toBeVisible();
-  const panelBox = await panel.boundingBox();
-  expect(panelBox).not.toBeNull();
-  expect(panelBox!.width).toBeGreaterThan(0);
-  expect(panelBox!.height).toBeGreaterThan(0);
-  // 面板 y 应小于按钮 y（菜单在按钮正上方）；Playwright boundingBox 用 y 表示 top
-  const buttonBox = await page.getByRole("button", { name: "feature" }).boundingBox();
-  expect(buttonBox).not.toBeNull();
-  expect(panelBox!.y).toBeLessThan(buttonBox!.y);
-
-  // hover 默认分支 → 二级菜单展示 main 分支名
-  await defaultItem.hover();
-  await expect(page.getByRole("menuitem", { name: /^main/ }).first()).toBeVisible();
-
-  // 点击 main → 触发 change-branch 事件
-  await page.getByRole("menuitem", { name: /^main/ }).first().click();
-  await expect.poll(() => changeBranchRequests).toEqual(["main"]);
-});
-
 test("workspace cascade menu teleports panel and submenu above all other UI", async ({ page }) => {
   // 模拟后端返回两个工作空间模板，每个模板下两个版本。
   // 验证：
@@ -626,10 +575,6 @@ async function mockBackendApi(
     recentWorkspaces?: Record<string, ReturnType<typeof workspace> | null>;
     /** 自定义 /vcs/status 返回，覆盖默认的 { status: "ready", branch: "main", defaultBranch: "main" }。 */
     vcsStatus?: { status?: string; branch?: string; defaultBranch?: string };
-    /** 自定义最近 VCS 分支偏好（GET branch-preference）；null 表示不返回偏好。 */
-    recentBranchPreference?: { appId: string; workspaceId: string; branch: string; updatedAt: string } | null;
-    /** 收集用户通过分支下拉发出的"切换分支"请求（POST branch-preference 的 branch 字段）。 */
-    changeBranchRequests?: string[];
     /** 收集「+新增版本」发出的 POST workspace-templates/{id}/versions 请求的 version 字段（用户原值）。 */
     createVersionRequests?: string[];
     /** 自定义 /applications/{appId}/workspace-templates 返回；不传则用默认空数组。 */
@@ -737,21 +682,6 @@ async function mockBackendApi(
       }
       if (method === "POST" && /^\/api\/internal\/platform\/workspace-management\/workspaces\/[^/]+\/recent$/.test(url.pathname)) {
         await route.fulfill(json(null));
-        return;
-      }
-      if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/applications\/[^/]+\/workspaces\/[^/]+\/branch-preference$/.test(url.pathname)) {
-        await route.fulfill(json(capture.recentBranchPreference ?? null));
-        return;
-      }
-      if (method === "POST" && /\/api\/internal\/platform\/workspace-management\/applications\/[^/]+\/workspaces\/[^/]+\/branch-preference$/.test(url.pathname)) {
-        const payload = JSON.parse(route.request().postData() ?? "{}") as { branch?: string };
-        capture.changeBranchRequests?.push(payload.branch ?? "");
-        await route.fulfill(json({
-          appId: "app_gcms",
-          workspaceId: "wrk_1234567890abcdef",
-          branch: payload.branch ?? "",
-          updatedAt: "2026-06-24T00:00:00Z"
-        }));
         return;
       }
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates") {

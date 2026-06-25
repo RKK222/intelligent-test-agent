@@ -437,90 +437,10 @@ const resourcesList = computed(() => runtimeResources(mcpResourcesData.value, ac
 const runtimeStatusValue = computed(() =>
   runtimeStatus(session.value, run.value, selectedAgent.value, selectedModel.value, vcsStatusData.value, lspStatusData.value, mcpStatusData.value, mcpToolsData.value, mcpResourcesData.value)
 );
-const vcsCurrentBranch = computed(() => {
-  const status = vcsStatusData.value as unknown;
-  if (!status || typeof status !== "object") return undefined;
-  const root = status as Record<string, unknown>;
-  const data = (root.data as Record<string, unknown> | undefined) ?? root;
-  const branch = typeof data.branch === "string" ? data.branch : undefined;
-  return branch;
-});
-// 仓库默认分支（vcs.status 返回的 default_branch）：与 current branch 不同时，
-// 在 footer 的分支两级菜单"默认分支"分组里单独展示，方便用户快速识别仓库基线。
-const vcsDefaultBranch = computed(() => {
-  const status = vcsStatusData.value as unknown;
-  if (!status || typeof status !== "object") return undefined;
-  const root = status as Record<string, unknown>;
-  const data = (root.data as Record<string, unknown> | undefined) ?? root;
-  const value = data.defaultBranch ?? data.default_branch;
-  return typeof value === "string" ? value : undefined;
-});
-// 用户在分支选择按钮上选中的分支会通过 markRecentBranch 持久化并被持久化到 user_workspace_branch_preferences。
-// 在 opencode vcs.status 轮询到最新值之前，pendingBranchOverride 用来给 footer 提供即时反馈。
-const pendingBranchOverride = ref<string | undefined>(undefined);
-// 持久化的最近分支偏好：进入工作区时由 loadBranchPreferenceOnEnter 拉取。
-// 在 footer 的两级菜单里以"最近使用"分组展示。
-const recentBranchPreference = ref<string | undefined>(undefined);
-const vcsBranches = computed(() => {
-  const current = vcsCurrentBranch.value ?? pendingBranchOverride.value;
-  if (!current) return [];
-  return [{ name: current, isCurrent: true }];
-});
-function handleChangeBranch(branch: string) {
-  // 用户在工作区下的 VCS 分支按钮选择分支时，持久化到 user_workspace_branch_preferences，
-  // 下次进入同一工作区时通过 getRecentBranch 回查并展示偏好分支。
-  const appId = selectedAppId.value;
-  const workspaceId = selectedWorkspaceId.value;
-  if (!appId || !workspaceId) {
-    feedback.value = { kind: "info", title: "已切换分支", description: `当前分支：${branch}` };
-    return;
-  }
-  api
-    .markRecentBranch(appId, workspaceId, branch)
-    .then(() => {
-      // 同步本地偏好：footer 的"最近使用"分组立即生效，无需等待下次进入工作区。
-      recentBranchPreference.value = branch;
-      feedback.value = { kind: "success", title: "已记录分支偏好", description: `当前分支：${branch}` };
-    })
-    .catch((error) => {
-      // 持久化失败不阻塞 UI：仅提示用户偏好未保存，当前分支已展示。
-      feedback.value = errorFeedback("记录分支偏好失败", error);
-    });
-  // 即时反映到 UI：vcsCurrentBranch 由 vcs.status 拉取后才更新；这里同步覆盖 footer 上的标签，
-  // 避免 opencode 30s 轮询期间用户看到旧分支。
-  pendingBranchOverride.value = branch;
-}
-
-// footer 上"记住当前分支"按钮的入口：当前 el-dropdown 只能展示 current 一项且 disable，
-// 用户没办法通过 change-branch 路径触发 markRecentBranch。这里把"切到当前分支并写入偏好"
-// 显式化，点击后直接把 vcs.status 拿到的当前分支写入 user_workspace_branch_preferences。
-function handleRememberCurrentBranch() {
-  const appId = selectedAppId.value;
-  const workspaceId = selectedWorkspaceId.value;
-  const branch = vcsCurrentBranch.value ?? pendingBranchOverride.value;
-  if (!appId || !workspaceId || !branch) {
-    feedback.value = {
-      kind: "error",
-      title: "写入分支偏好失败",
-      description: "缺少应用、工作区或分支信息，请先打开工作区"
-    };
-    return;
-  }
-  api
-    .markRecentBranch(appId, workspaceId, branch)
-    .then(() => {
-      // 同步本地偏好：footer 的"最近使用"分组立即生效。
-      recentBranchPreference.value = branch;
-      feedback.value = {
-        kind: "success",
-        title: "已记录分支偏好",
-        description: `app=${appId} workspace=${workspaceId} branch=${branch}`
-      };
-    })
-    .catch((error) => {
-      feedback.value = errorFeedback("记录分支偏好失败", error);
-    });
-}
+// VCS 分支选择入口已下线：footer 不再展示「选择分支」/「记住当前分支」按钮，
+// 因此 vcsCurrentBranch / vcsDefaultBranch / pendingBranchOverride / recentBranchPreference /
+// handleChangeBranch / handleRememberCurrentBranch / loadBranchPreferenceOnEnter 等相关状态与函数全部移除。
+// VCS 分支信息仍由 runtimeStatus 读取并参与运行态展示（见 lspStatusData 等 run.status 字段），不依赖此处的引用。
 
 function selectRuntimeModel(model: typeof models.value[number]) {
   if (model.providerId) {
@@ -1117,49 +1037,9 @@ async function applyManagedWorkspace(workspace: Workspace, feedbackDetail?: { su
   if (feedbackDetail) {
     feedback.value = { kind: "info", title: feedbackDetail.successTitle, description: feedbackDetail.successDescription };
   }
-  // 切到运行态工作区后，反查 (userId, appId, workspaceId) 维度的最近 VCS 分支偏好：
-  // 命中但与 vcs.status 当前分支不一致时，提示用户「上次切换到 X，是否要切回」。
-  // 不阻断后续流程：vcs.status 由 30s 轮询驱动，偏好只作为"自动切回"的语义提示。
-  void loadBranchPreferenceOnEnter(appId, workspace.workspaceId);
-}
-
-// 进入工作区后回查 (appId, workspaceId) 维度的最近 VCS 分支偏好；
-// 与 vcs.status 当前分支不一致时通过 feedback 提示用户。空偏好/未配置则静默退出。
-async function loadBranchPreferenceOnEnter(appId: string | undefined, workspaceId: string) {
-  if (!appId) return;
-  try {
-    const preference = await api.getRecentBranch(appId, workspaceId);
-    // 先清掉旧的偏好，避免切换工作区时上一个工作区的 recent 残留在新工作区的菜单里。
-    recentBranchPreference.value = undefined;
-    if (!preference?.branch) return;
-    // 暴露给 footer 的"最近使用"分组；与 current branch 不一致才展示，避免与"当前分支"分组重复。
-    recentBranchPreference.value = preference.branch;
-    // 等待 vcs.status 拉取完成后再比较；vcsStatusQuery 在切换后会自动触发。
-    // 这里通过 watchEffect 异步等待 vcsCurrentBranch 有值再判定。
-    const stop = watch(
-      () => vcsCurrentBranch.value,
-      (current) => {
-        if (!current) return;
-        if (current !== preference.branch) {
-          feedback.value = {
-            kind: "info",
-            title: "检测到分支偏好",
-            description: `上次切换到「${preference.branch}」，当前分支为「${current}」，请按需 git checkout`
-          };
-        }
-        stop();
-      },
-      { immediate: true }
-    );
-    // 兜底：5s 内 vcs.status 还没回来就停止 watch，避免悬挂监听。
-    setTimeout(() => stop(), 5000);
-  } catch (error) {
-    // 偏好查询失败不阻塞：用户已经进入工作区，仅不展示偏好提示。
-    if (!(error instanceof BackendApiError)) {
-      // 非 API 错误（网络等）才静默；API 错误仍交给全局处理。
-      return;
-    }
-  }
+  // 注意：原「切到运行态工作区后回查 (userId, appId, workspaceId) 维度的最近 VCS 分支偏好」
+  // 逻辑（loadBranchPreferenceOnEnter）已随 footer 的「选择分支」/「记住当前分支」入口下线一起移除；
+  // 分支信息仍由 runtimeStatus 从 vcs.status 拉取并展示在右侧 Agent 面板。
 }
 
 // 查询指定应用下的"默认进入工作空间"：优先 recent 偏好，否则回退到首模板的首版本。
@@ -1896,10 +1776,6 @@ async function handleLogout() {
           :tabs="tabs"
           :active-path="activePath"
           :breadcrumb-path="breadcrumbDisplay"
-          :branches="vcsBranches"
-          :current-branch="vcsCurrentBranch"
-          :default-branch="vcsDefaultBranch"
-          :recent-branch="recentBranchPreference"
           :write-path="activeTab?.path"
           :updated-at="activeTab ? Date.now() / 1000 : undefined"
           :dirty="!!activeTab && !activeTab.livePreview && activeTab.content !== activeTab.savedContent"
@@ -1909,7 +1785,6 @@ async function handleLogout() {
           @activate="(path: string) => workbench.setActivePath(path)"
           @close="(path: string) => workbench.closeTab(path)"
           @editor-action="() => {}"
-          @change-branch="handleChangeBranch"
           @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
           @update:markdown-preview="(value: boolean) => (markdownPreview = value)"
         >

@@ -7,21 +7,11 @@ import type { EditorTab as WorkbenchTab } from "@test-agent/workbench-shell";
 import { languageFromPath } from "@test-agent/editor";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 
-type VcsBranch = { name: string; isCurrent?: boolean };
-
 const props = withDefaults(
   defineProps<{
     tabs: WorkbenchTab[];
     activePath?: string;
     breadcrumbPath?: string;
-    /** VCS 分支列表（来自 /vcs/status） */
-    branches?: VcsBranch[];
-    /** 当前分支名 */
-    currentBranch?: string;
-    /** 仓库默认分支名（来自 /vcs/status 的 default_branch 字段），用于分支两级菜单"默认分支"分组 */
-    defaultBranch?: string;
-    /** 用户最近一次手动选择的 VCS 分支偏好，用于"最近使用"分组 */
-    recentBranch?: string;
     /** 写入路径（编辑器模式显示） */
     writePath?: string;
     /** 最近一次更新时间（秒或 ISO 字符串） */
@@ -39,7 +29,6 @@ const emit = defineEmits<{
   activate: [path: string];
   close: [path: string];
   editorAction: [];
-  changeBranch: [branch: string];
   save: [];
   "update:markdownPreview": [enabled: boolean];
 }>();
@@ -107,18 +96,12 @@ function toggleMarkdownPreview() {
     </div>
 
     <WorkbenchFooter
-      :branch="currentBranch"
-      :branches="branches"
-      :default-branch="defaultBranch"
-      :recent-branch="recentBranch"
       :write-path="writePath"
       :updated-at="updatedAt"
       :dirty="dirty"
       :readonly="readonly"
       :saving="saving"
-      :show-branch="false"
       show-save
-      @change-branch="(name: string) => emit('changeBranch', name)"
       @save="emit('save')"
     />
   </div>
