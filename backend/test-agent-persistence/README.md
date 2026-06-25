@@ -21,6 +21,10 @@
 - Repository 实现和数据库映射。
 - Redis 限流、幂等、缓存或运行心跳能力的可选适配。
 
+## 建表规范
+
+- 表和字段必须添加中文注释说明。
+
 ## 已有实现
 
 - `V1__create_core_tables.sql`：创建 Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 核心表。
