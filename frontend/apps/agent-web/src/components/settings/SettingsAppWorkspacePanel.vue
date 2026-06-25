@@ -367,7 +367,7 @@ watch(selectedAppId, async (appId) => {
               <template #default="{ item }">
                 <div class="ta-user-suggestion">
                   <span class="ta-user-suggestion-name">{{ item.username }}</span>
-                  <span class="ta-user-suggestion-meta">{{ item.userId }} · {{ item.unifiedAuthId }}</span>
+                  <span class="ta-user-suggestion-meta">{{ item.userId }}</span>
                 </div>
               </template>
             </el-autocomplete>
