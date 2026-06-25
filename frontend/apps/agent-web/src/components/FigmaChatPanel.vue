@@ -20,6 +20,7 @@ import {
 import type { AgentMessage } from '@test-agent/shared-types'
 import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
+import panelCloseUrl from '../assets/figma/panel-close.svg'
 
 type ChatMessageInput = AgentMessage & { content?: string }
 
@@ -490,14 +491,6 @@ function onKeydown(event: KeyboardEvent) {
   <div class="figma-chat-root">
     <header class="figma-chat-header">
       <h2 class="figma-chat-title">{{ title || '生成测试案例' }}</h2>
-      <button
-        type="button"
-        class="figma-chat-close"
-        aria-label="收起对话面板"
-        @click="emit('close')"
-      >
-        <PanelRightClose class="figma-chat-close-icon" />
-      </button>
     </header>
 
     <div ref="scrollEl" class="figma-chat-scroll">

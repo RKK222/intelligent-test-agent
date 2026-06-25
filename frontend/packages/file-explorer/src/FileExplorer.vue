@@ -63,7 +63,7 @@ const changeStats = computed(() => {
         aria-label="文件树"
         @click="tab = 'explorer'"
       >
-        <FolderTree class="h-[18px] w-[18px]" />
+        <FolderTree class="h-4 w-4" :stroke-width="1.5" />
       </button>
       <button
         type="button"
@@ -72,7 +72,7 @@ const changeStats = computed(() => {
         aria-label="搜索"
         @click="tab = 'search'"
       >
-        <Search class="h-[18px] w-[18px]" />
+        <Search class="h-4 w-4" :stroke-width="1.5" />
       </button>
       <button
         type="button"
@@ -81,7 +81,7 @@ const changeStats = computed(() => {
         aria-label="变更"
         @click="tab = 'changes'"
       >
-        <GitBranch class="h-[18px] w-[18px]" />
+        <GitBranch class="h-4 w-4" :stroke-width="1.5" />
         <span v-if="changedFiles.length" class="ml-1 text-[10px]">{{ changedFiles.length }}</span>
       </button>
     </div>
@@ -96,7 +96,7 @@ const changeStats = computed(() => {
             aria-label="刷新文件树"
             @click="emit('refresh')"
           >
-            <RefreshCw class="h-3.5 w-3.5" />
+            <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.5" />
           </button>
         </div>
       </div>
@@ -114,7 +114,7 @@ const changeStats = computed(() => {
     </div>
     <div v-else-if="tab === 'search'" class="min-h-0 flex-1 overflow-auto p-2">
       <div class="relative">
-        <Search class="pointer-events-none absolute left-2 top-2 h-4 w-4 text-[var(--ta-muted)]" />
+        <Search class="pointer-events-none absolute left-2 top-2 h-4 w-4 text-[var(--ta-muted)]" :stroke-width="1.5" />
         <Input v-model="keyword" class="pl-7" placeholder="过滤已加载文件名" />
       </div>
       <div class="mt-2 space-y-1">
@@ -125,7 +125,7 @@ const changeStats = computed(() => {
           :class="cn('flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[14px] text-[var(--ta-subtle)] hover:bg-[var(--ta-hover)]')"
           @click="emit('openFile', entry.path)"
         >
-          <FileText class="h-4 w-4 text-[var(--ta-muted)]" />
+          <FileText class="h-4 w-4 text-[var(--ta-muted)]" :stroke-width="1.5" />
           <span class="min-w-0 truncate">{{ entry.path }}</span>
         </button>
       </div>

@@ -1687,16 +1687,7 @@ async function handleLogout() {
             title="打开编辑器"
             @click="centerMode = 'editor'"
           >
-            <Code2 class="figma-activity-icon" />
-          </button>
-          <button
-            type="button"
-            :class="['figma-activity-btn', rightPanelOpen && 'figma-activity-btn--active']"
-            aria-label="切换对话面板"
-            title="切换对话面板"
-            @click="rightPanelOpen = !rightPanelOpen"
-          >
-            <MessageSquare class="figma-activity-icon" />
+            <Code2 class="figma-activity-icon" :stroke-width="1.5" />
           </button>
         </div>
         <div class="figma-activity-bottom">

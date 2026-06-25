@@ -170,16 +170,6 @@ onUnmounted(() => {
   <div class="figma-app" @click="closeHeaderMenus">
     <header class="figma-header">
       <div class="figma-header-left">
-        <div class="figma-sidebar-toggle">
-          <button
-            type="button"
-            :class="['figma-icon-btn figma-icon-btn-ghost', !leftPanelOpen && 'figma-icon-btn-ghost--collapsed']"
-            aria-label="切换侧边栏"
-            @click.stop="toggleLeftPanel"
-          >
-            <img :src="panelCloseUrl" alt="toggle panel" class="figma-icon-16" />
-          </button>
-        </div>
         <div class="figma-logo-group">
           <img :src="logoUrl" alt="logo" class="figma-logo" />
           <div class="figma-logo-margin" />
@@ -248,6 +238,43 @@ onUnmounted(() => {
     </header>
 
     <div class="figma-body">
+      <!-- Floating left sidebar toggle button -->
+      <div 
+        class="figma-sidebar-toggle-floating"
+        :style="{ left: leftPanelOpen ? `${leftPanelWidth + 48 - 30}px` : '54px' }"
+      >
+        <button
+          type="button"
+          :class="['figma-icon-btn figma-icon-btn-ghost', !leftPanelOpen && 'figma-icon-btn-ghost--collapsed']"
+          aria-label="切换侧边栏"
+          @click.stop="toggleLeftPanel"
+        >
+          <img 
+            :src="panelCloseUrl" 
+            alt="toggle panel" 
+            class="figma-icon-16" 
+            :style="{ transform: leftPanelOpen ? 'scaleX(-1)' : 'none' }" 
+          />
+        </button>
+      </div>
+
+      <!-- Floating right sidebar toggle button -->
+      <div class="figma-sidebar-toggle-floating figma-sidebar-toggle-floating--right">
+        <button
+          type="button"
+          :class="['figma-icon-btn figma-icon-btn-ghost', !showRightPanel && 'figma-icon-btn-ghost--collapsed']"
+          aria-label="切换右侧栏"
+          @click.stop="toggleRightPanel"
+        >
+          <img 
+            :src="panelCloseUrl" 
+            alt="toggle panel" 
+            class="figma-icon-16" 
+            :style="{ transform: showRightPanel ? 'none' : 'scaleX(-1)' }" 
+          />
+        </button>
+      </div>
+
       <aside class="figma-activity-bar">
         <slot name="activity" />
       </aside>
@@ -850,5 +877,14 @@ onUnmounted(() => {
 :deep(.figma-activity-icon) {
   width: 20px;
   height: 20px;
+}
+.figma-sidebar-toggle-floating {
+  position: absolute;
+  top: 7px;
+  z-index: 40;
+  transition: left 0.15s ease;
+}
+.figma-sidebar-toggle-floating--right {
+  right: 8px;
 }
 </style>
