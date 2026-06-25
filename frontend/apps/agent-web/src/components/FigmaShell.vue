@@ -241,11 +241,14 @@ onUnmounted(() => {
       <!-- Floating left sidebar toggle button -->
       <div 
         class="figma-sidebar-toggle-floating"
-        :style="{ left: leftPanelOpen ? `${leftPanelWidth + 48 - 30}px` : '54px' }"
+        :style="{ left: leftPanelOpen ? `${leftPanelWidth + 48 - 32}px` : '54px' }"
       >
         <button
           type="button"
-          :class="['figma-icon-btn figma-icon-btn-ghost', !leftPanelOpen && 'figma-icon-btn-ghost--collapsed']"
+          :class="[
+            'figma-icon-btn',
+            leftPanelOpen ? 'figma-icon-btn-floating-open' : 'figma-icon-btn-ghost figma-icon-btn-ghost--collapsed'
+          ]"
           aria-label="切换侧边栏"
           @click.stop="toggleLeftPanel"
         >
@@ -262,7 +265,10 @@ onUnmounted(() => {
       <div class="figma-sidebar-toggle-floating figma-sidebar-toggle-floating--right">
         <button
           type="button"
-          :class="['figma-icon-btn figma-icon-btn-ghost', !showRightPanel && 'figma-icon-btn-ghost--collapsed']"
+          :class="[
+            'figma-icon-btn',
+            showRightPanel ? 'figma-icon-btn-floating-open' : 'figma-icon-btn-ghost figma-icon-btn-ghost--collapsed'
+          ]"
           aria-label="切换右侧栏"
           @click.stop="toggleRightPanel"
         >
@@ -880,11 +886,21 @@ onUnmounted(() => {
 }
 .figma-sidebar-toggle-floating {
   position: absolute;
-  top: 7px;
+  top: 5px;
   z-index: 40;
   transition: left 0.15s ease;
 }
 .figma-sidebar-toggle-floating--right {
   right: 8px;
+  top: 4px;
+}
+.figma-icon-btn-floating-open {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+}
+.figma-icon-btn-floating-open:hover {
+  background: rgba(0, 0, 0, 0.05);
 }
 </style>
