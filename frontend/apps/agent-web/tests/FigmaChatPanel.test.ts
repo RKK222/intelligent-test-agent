@@ -3,6 +3,22 @@ import { describe, expect, it } from "vitest";
 import FigmaChatPanel from "../src/components/FigmaChatPanel.vue";
 
 describe("FigmaChatPanel", () => {
+  it("sends the trimmed prompt and clears the composer when the process is ready", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "  写一个登录用例  ",
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    await wrapper.get('[aria-label="发送"]').trigger("click");
+
+    expect(wrapper.emitted("send")).toEqual([["写一个登录用例"]]);
+    expect(wrapper.emitted("update:inputValue")).toEqual([[""]]);
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("");
+  });
+
   it("does not send Enter while IME composition is active", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

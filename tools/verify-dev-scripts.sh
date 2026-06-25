@@ -39,9 +39,10 @@ trap cleanup EXIT
 mkdir -p "${tmp_dir}/bin" "${tmp_dir}/logs"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/ps"
 printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "-list" ]]; then exit 1; fi\nexit 0\n' >"${tmp_dir}/bin/screen"
+printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/curl"
 printf '#!/usr/bin/env bash\necho "   interface: en0"\n' >"${tmp_dir}/bin/route"
 printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "getifaddr" && "${2:-}" == "en0" ]]; then echo "10.8.0.115"; exit 0; fi\nexit 1\n' >"${tmp_dir}/bin/ipconfig"
-chmod +x "${tmp_dir}/bin/ps" "${tmp_dir}/bin/screen" "${tmp_dir}/bin/route" "${tmp_dir}/bin/ipconfig"
+chmod +x "${tmp_dir}/bin/ps" "${tmp_dir}/bin/screen" "${tmp_dir}/bin/curl" "${tmp_dir}/bin/route" "${tmp_dir}/bin/ipconfig"
 printf 'PLACEHOLDER=1\n' >"${tmp_dir}/env.local"
 
 set +e
@@ -73,6 +74,19 @@ fi
 if [[ "${restart_output}" != *"Defaulting TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4: http://10.8.0.115:8080"* ]]; then
   echo "${restart_output}" >&2
   fail "restart script did not default TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4"
+fi
+
+printf 'TEST_AGENT_BASE_URL=http://10.8.0.115:8080\nTEST_AGENT_FRONTEND_URL=http://10.8.0.115:3000\nTEST_AGENT_OPENCODE_BASE_URL=http://10.8.0.115:4096\n' >"${tmp_dir}/env-frontend-host.local"
+restart_frontend_output="$(
+  PATH="${tmp_dir}/bin:${PATH}" sh "${ROOT_DIR}/restart-dev-services.sh" \
+    --skip-backend-build \
+    --skip-frontend-build \
+    --env-file "${tmp_dir}/env-frontend-host.local" \
+    --log-dir "${tmp_dir}/logs" 2>&1
+)"
+if [[ "${restart_frontend_output}" != *"Starting frontend on 0.0.0.0:3000"* ]]; then
+  echo "${restart_frontend_output}" >&2
+  fail "restart script should bind frontend to 0.0.0.0 for non-loopback access URLs"
 fi
 
 echo "Development script verification passed."

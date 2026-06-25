@@ -1495,7 +1495,7 @@ function onCompositionEnd() {
 
 .figma-chat-input-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px;
+  grid-template-columns: minmax(0, 1fr) 32px;
   align-items: center;
   gap: 8px;
 }

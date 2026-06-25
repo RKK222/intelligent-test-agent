@@ -342,7 +342,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 - 默认本地开发不配置 `TEST_AGENT_API_TOKEN`，`/api/**` 放行。
 - 配置 `TEST_AGENT_API_TOKEN` 后，`/api/**` 必须携带 `Authorization: Bearer <token>`，失败返回 `UNAUTHENTICATED`。
 - 内存限流通过 `test-agent.rate-limit.enabled` 控制，超限返回 `RATE_LIMITED`。
-- CORS 本地默认允许 `http://localhost:3000` 和 `http://127.0.0.1:3000`，生产环境必须通过配置显式设置允许来源。
+- CORS 本地默认允许 `http://localhost:3000` 和 `http://127.0.0.1:3000`；`guo` 等本地 profile 可通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 覆盖，根目录启动脚本在局域网 IP 访问时会自动追加实际前端 origin。生产环境必须通过配置显式设置允许来源。
 
 ### 分页
 

@@ -215,13 +215,25 @@ derive_frontend_runtime_settings() {
     frontend_port="${FRONTEND_PORT:-3000}"
   fi
   frontend_host="${FRONTEND_HOST:-$(url_host "${frontend_url}")}"
+  if [[ -z "${FRONTEND_HOST:-}" && "${frontend_host}" != "127.0.0.1" && "${frontend_host}" != "localhost" && "${frontend_host}" != "::1" ]]; then
+    frontend_host="0.0.0.0"
+  fi
 }
 
 apply_frontend_origin_defaults() {
-  if [[ -n "${TEST_AGENT_CORS_ALLOWED_ORIGINS:-}" ]]; then
-    return
+  local default_origins
+  default_origins="http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174"
+  if [[ -z "${TEST_AGENT_CORS_ALLOWED_ORIGINS:-}" ]]; then
+    TEST_AGENT_CORS_ALLOWED_ORIGINS="${default_origins}"
   fi
-  export TEST_AGENT_CORS_ALLOWED_ORIGINS="http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,${frontend_url}"
+  case ",${TEST_AGENT_CORS_ALLOWED_ORIGINS}," in
+    *",${frontend_url},"*) ;;
+    *) TEST_AGENT_CORS_ALLOWED_ORIGINS="${TEST_AGENT_CORS_ALLOWED_ORIGINS},${frontend_url}" ;;
+  esac
+  if [[ "${frontend_url}" != "http://127.0.0.1:${frontend_port}" && ",${TEST_AGENT_CORS_ALLOWED_ORIGINS}," != *",http://127.0.0.1:${frontend_port},"* ]]; then
+    TEST_AGENT_CORS_ALLOWED_ORIGINS="${TEST_AGENT_CORS_ALLOWED_ORIGINS},http://127.0.0.1:${frontend_port}"
+  fi
+  export TEST_AGENT_CORS_ALLOWED_ORIGINS
 }
 
 detect_local_ipv4() {

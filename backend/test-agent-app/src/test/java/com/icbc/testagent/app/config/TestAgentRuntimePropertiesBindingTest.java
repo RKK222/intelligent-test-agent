@@ -30,6 +30,20 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
+    void guoProfileCorsAllowsEnvironmentOverrideForLanFrontendOrigin() {
+        profileContextRunner
+                .withPropertyValues(
+                        "spring.profiles.active=guo",
+                        "TEST_AGENT_CORS_ALLOWED_ORIGINS=http://192.168.100.115:3000,http://127.0.0.1:3000")
+                .run(context -> {
+                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
+
+                    assertThat(properties.getSecurity().getCorsAllowedOrigins())
+                            .containsExactly("http://192.168.100.115:3000", "http://127.0.0.1:3000");
+                });
+    }
+
+    @Test
     void defaultDruidConfigValidatesBorrowedConnections() {
         profileContextRunner.run(context -> {
             assertThat(context.getEnvironment().getProperty("spring.datasource.druid.validation-query"))

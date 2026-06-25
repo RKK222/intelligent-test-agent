@@ -60,7 +60,7 @@ Token 校验流程：
 
 ## Web 安全
 
-1. CORS 必须明确允许来源，不使用无限制生产配置。本地默认允许主前端和 `frontend-opencode` 的 Vite dev/preview/real E2E 端口（`localhost`/`127.0.0.1` 的 `3000`、`4173`、`4177`、`4187`、`5173`、`5174`）；生产环境必须通过配置显式声明允许来源。
+1. CORS 必须明确允许来源，不使用无限制生产配置。本地默认允许主前端和 `frontend-opencode` 的 Vite dev/preview/real E2E 端口（`localhost`/`127.0.0.1` 的 `3000`、`4173`、`4177`、`4187`、`5173`、`5174`）；局域网 IP 调试必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 或根目录启动脚本追加实际前端 origin；生产环境必须通过配置显式声明允许来源。
 2. 安全响应头必须在 `test-agent-api` 的入口配置中统一定义，并由 `test-agent-app` 装配生效。
 3. Druid Web 控制台默认关闭；如后续启用，必须通过环境变量配置账号、密码和访问 allowlist，并同步 API、运维和安全文档。
 4. 旧 `/api/...`、新 `/api/internal/platform/...` 和 `/api/internal/agent/opencode/...` 共享同一鉴权、限流、CORS、traceId 与错误格式。Workspace 文件 API 必须把所有请求路径归一化到注册的 workspace root 内，路径穿越或越权访问返回 `FORBIDDEN`。
