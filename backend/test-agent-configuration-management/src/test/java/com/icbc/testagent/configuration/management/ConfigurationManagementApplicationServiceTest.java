@@ -16,6 +16,8 @@ import com.icbc.testagent.domain.configuration.SshKeyId;
 import com.icbc.testagent.domain.configuration.UserSshKey;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
+import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -31,6 +33,7 @@ class ConfigurationManagementApplicationServiceTest {
         UserRepository userRepository = org.mockito.Mockito.mock(UserRepository.class);
         GitRemoteService gitRemoteService = org.mockito.Mockito.mock(GitRemoteService.class);
         SshKeyEncryptionService encryptionService = new SshKeyEncryptionService(SshKeyEncryptionServiceTest.base64AesKey());
+        GitCloneCacheService gitCloneCacheService = createTestCacheService();
         SshKeyEncryptionService.EncryptedPrivateKey encrypted = encryptionService.encrypt(PRIVATE_KEY);
         CodeRepository codeRepository = codeRepository("git@gitee.com:demo/repo.git");
         UserId userId = new UserId("usr_123");
@@ -47,7 +50,7 @@ class ConfigurationManagementApplicationServiceTest {
         when(gitRemoteService.listBranches(eq(codeRepository.gitUrl()), eq(PRIVATE_KEY))).thenReturn(List.of("main"));
 
         ConfigurationManagementApplicationService service =
-                new ConfigurationManagementApplicationService(repository, userRepository, gitRemoteService, encryptionService);
+                new ConfigurationManagementApplicationService(repository, userRepository, gitRemoteService, gitCloneCacheService, encryptionService);
 
         assertThat(service.listBranches("repo_123", userId)).containsExactly("main");
         verify(gitRemoteService).listBranches(codeRepository.gitUrl(), PRIVATE_KEY);
@@ -69,11 +72,18 @@ class ConfigurationManagementApplicationServiceTest {
                 repository,
                 org.mockito.Mockito.mock(UserRepository.class),
                 org.mockito.Mockito.mock(GitRemoteService.class),
+                createTestCacheService(),
                 new SshKeyEncryptionService(SshKeyEncryptionServiceTest.base64AesKey()));
 
         assertThatThrownBy(() -> service.addSshKey(userId, "work", PRIVATE_KEY))
                 .isInstanceOf(PlatformException.class)
                 .satisfies(error -> assertThat(((PlatformException) error).errorCode()).isEqualTo(ErrorCode.CONFLICT));
+    }
+
+    private static GitCloneCacheService createTestCacheService() {
+        // 测试用的临时缓存目录
+        Path tempDir = Path.of(System.getProperty("java.io.tmpdir"), "git-cache-test-" + System.currentTimeMillis());
+        return new GitCloneCacheService(tempDir, Duration.ofHours(1), Duration.ofMinutes(5));
     }
 
     private static CodeRepository codeRepository(String gitUrl) {

@@ -83,3 +83,8 @@ test-agent:
       command-timeout: ${TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT:10s}
       backend-discovery-limit: ${TEST_AGENT_BACKEND_DISCOVERY_LIMIT:100}
     nodes: []
+  # Git 浅克隆缓存配置，用于加载远端仓库目录结构
+  git-clone-cache:
+    cache-root: ${TEST_AGENT_GIT_CACHE_ROOT:}
+    cache-expiry: ${TEST_AGENT_GIT_CACHE_EXPIRY:1h}
+    clone-timeout: ${TEST_AGENT_GIT_CLONE_TIMEOUT:5m}

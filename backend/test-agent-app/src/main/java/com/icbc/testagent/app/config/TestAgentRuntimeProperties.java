@@ -21,6 +21,7 @@ public class TestAgentRuntimeProperties {
     private final Redis redis = new Redis();
     private final Opencode opencode = new Opencode();
     private final Terminal terminal = new Terminal();
+    private final GitCloneCache gitCloneCache = new GitCloneCache();
 
     /**
      * 返回安全配置，包括 API token 和 CORS 来源白名单。
@@ -69,6 +70,13 @@ public class TestAgentRuntimeProperties {
      */
     public Terminal getTerminal() {
         return terminal;
+    }
+
+    /**
+     * 返回 Git 浅克隆缓存配置。
+     */
+    public GitCloneCache getGitCloneCache() {
+        return gitCloneCache;
     }
 
     /**
@@ -741,6 +749,68 @@ public class TestAgentRuntimeProperties {
          */
         public void setCapabilities(List<String> capabilities) {
             this.capabilities = capabilities == null ? new ArrayList<>() : new ArrayList<>(capabilities);
+        }
+    }
+
+    /**
+     * Git 浅克隆缓存配置项。
+     */
+    public static class GitCloneCache {
+        /**
+         * 缓存根目录路径，默认为系统临时目录下的 git-clone-cache。
+         */
+        private Path cacheRoot = Path.of(System.getProperty("java.io.tmpdir"), "git-clone-cache");
+
+        /**
+         * 缓存过期时间，默认 1 小时。
+         */
+        private Duration cacheExpiry = Duration.ofHours(1);
+
+        /**
+         * 浅克隆超时时间，默认 5 分钟。
+         */
+        private Duration cloneTimeout = Duration.ofMinutes(5);
+
+        /**
+         * 返回缓存根目录路径。
+         */
+        public Path getCacheRoot() {
+            return cacheRoot;
+        }
+
+        /**
+         * 绑定缓存根目录路径。
+         */
+        public void setCacheRoot(Path cacheRoot) {
+            this.cacheRoot = cacheRoot;
+        }
+
+        /**
+         * 返回缓存过期时间。
+         */
+        public Duration getCacheExpiry() {
+            return cacheExpiry;
+        }
+
+        /**
+         * 绑定缓存过期时间。
+         */
+        public void setCacheExpiry(Duration cacheExpiry) {
+            this.cacheExpiry = cacheExpiry;
+        }
+
+        /**
+         * 返回浅克隆超时时间。
+         */
+        public Duration getCloneTimeout() {
+            return cloneTimeout;
+        }
+
+        /**
+         * 绑定浅克隆超时时间。
+         */
+        public void setCloneTimeout(Duration cloneTimeout) {
+            this.cloneTimeout = cloneTimeout;
         }
     }
 }

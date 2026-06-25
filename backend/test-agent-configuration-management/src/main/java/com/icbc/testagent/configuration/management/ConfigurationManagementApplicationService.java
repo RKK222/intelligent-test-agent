@@ -46,6 +46,7 @@ public class ConfigurationManagementApplicationService {
     private final ConfigurationManagementRepository configurationRepository;
     private final UserRepository userRepository;
     private final GitRemoteService gitRemoteService;
+    private final GitCloneCacheService gitCloneCacheService;
     private final SshKeyEncryptionService sshKeyEncryptionService;
 
     /**
@@ -55,8 +56,9 @@ public class ConfigurationManagementApplicationService {
     public ConfigurationManagementApplicationService(
             ConfigurationManagementRepository configurationRepository,
             UserRepository userRepository,
+            GitCloneCacheService gitCloneCacheService,
             SshKeyEncryptionService sshKeyEncryptionService) {
-        this(configurationRepository, userRepository, new GitRemoteService(), sshKeyEncryptionService);
+        this(configurationRepository, userRepository, new GitRemoteService(), gitCloneCacheService, sshKeyEncryptionService);
     }
 
     /**
@@ -66,10 +68,12 @@ public class ConfigurationManagementApplicationService {
             ConfigurationManagementRepository configurationRepository,
             UserRepository userRepository,
             GitRemoteService gitRemoteService,
+            GitCloneCacheService gitCloneCacheService,
             SshKeyEncryptionService sshKeyEncryptionService) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.gitRemoteService = Objects.requireNonNull(gitRemoteService, "gitRemoteService must not be null");
+        this.gitCloneCacheService = Objects.requireNonNull(gitCloneCacheService, "gitCloneCacheService must not be null");
         this.sshKeyEncryptionService = Objects.requireNonNull(sshKeyEncryptionService, "sshKeyEncryptionService must not be null");
     }
 
@@ -186,10 +190,15 @@ public class ConfigurationManagementApplicationService {
         return gitRemoteService.listBranches(repository.gitUrl(), privateKeyFor(repository, currentUserId));
     }
 
+    /**
+     * 列出指定分支的目录结构。
+     * 使用浅克隆缓存服务，避免 git archive --remote 超时问题。
+     */
     public List<String> listDirectories(String repositoryId, String branch, UserId currentUserId) {
         CodeRepository repository = existingRepository(new CodeRepositoryId(repositoryId));
         String normalizedBranch = requireText(branch, "分支不能为空", "branch");
-        return gitRemoteService.listDirectories(repository.gitUrl(), normalizedBranch, privateKeyFor(repository, currentUserId));
+        String privateKey = privateKeyFor(repository, currentUserId);
+        return gitCloneCacheService.listDirectories(repository.gitUrl(), normalizedBranch, privateKey);
     }
 
     public List<ApplicationWorkspaceResponse> listWorkspaces(String appId) {
