@@ -2,15 +2,28 @@
 
 ## Entries
 
-### 2026-06-25 - Close opencode process deployment operations batch
+### 2026-06-25 - Fix el-date-picker month cells to show "1月/2月/…" in Chinese
 
-- Why: opencode 用户进程管理已经完成数据模型、调度契约、manager 控制面、runtime 接入和超管页面，还缺少多 Linux 服务器真实部署、扩容、回滚和验收说明。
-- What: Added `tools/verify-opencode-process-deployment.sh`, wired it into `tools/verify-dev-scripts.sh`, fixed a `restart-dev-services.sh` unset-variable edge case, and updated deployment/database/security/backend/frontend/opencode-manager docs plus the batch ledger.
-- How: Kept runtime behavior unchanged; the new script only performs read-only health, manager discovery and SUPER_ADMIN overview smoke checks. Deployment docs now cover direct backend listen URLs, manager all-backend WebSocket connections, non-overlapping host port pools, mounted session/config/state directories, heartbeat/timeout knobs, scale-out, failure handling and rollback.
-- Result: Batch 7 has an executable smoke check and a stable operations handoff for multi-server validation; `requirements/todo/deployment.md` remains unrelated and unstaged.
-- Pitfalls: Full first-login/process-rebuild validation still requires a real multi-server environment and real tokens; local verification only proves scripts/docs and existing tests.
-- Verification: `git diff --check -- . ':(exclude)requirements/todo/deployment.md'`, `bash -n tools/verify-opencode-process-deployment.sh && tools/verify-dev-scripts.sh`, and `tools/verify-ai-docs.sh` passed locally.
-- Next: Stage only batch 7 files and commit with a Chinese message.
+- Why: 用户反馈「+新增版本」弹窗里的 el-date-picker (type=month) 打开后，月份单元格里显示英文 "Jan/Feb/…"，希望显示中文 "1月/2月/3月/…"，与项目里其他中文文案风格一致。
+- What:
+  - `frontend/apps/agent-web/src/main.ts` 引入 `element-plus/es/locale/lang/zh-cn` 和 `dayjs/locale/zh-cn`，调用 `dayjs.locale("zh-cn")`；在原 zh-cn locale 上派生一个只覆盖 `el.datepicker.months` 12 项的浅拷贝（`jan: "1月"`, `feb: "2月"`, …, `dec: "12月"`），再把这份 locale 通过 `app.use(ElementPlus, { locale: zhCnWithArabicMonths })` 注入。
+  - 不直接用 Element Plus 默认的 `zh-cn` locale 是因为它把月份渲染为中文数字"一月/二月/…"（Element Plus 2.12 的 `el.datepicker.months.{jan,dec}` 默认值），与用户期望的阿拉伯数字 "1月/2月/…" 不一致。
+  - `frontend/apps/agent-web/tests/workbench.spec.ts` 既有"yyyy年M月"测试里追加两步断言：打开日期面板后能定位到 `el-month-table`，并看到 `^1月$` 和 `^6月$` 文案（之前是 `console.log` 调试输出，已清理）。
+- How: 复制 zh-cn locale 的浅层结构再覆盖 `datepicker.months` 这一层，其它字段（按钮、星期、占位符等）原样保留，避免影响其它使用 Element Plus 的位置。
+- Result: e2e 中 `+新增版本` 弹窗的月份面板渲染为 "1月/2月/…/12月"；`pnpm playwright test workbench.spec.ts -g "cascade"` 6 个 case 全部通过（1 个 mobile 被 skip）。
+- Pitfalls: 仅设置 `dayjs.locale("zh-cn")` 不够，Element Plus 月份面板走的是 i18n 包而不是 dayjs 的 locale；需要同时注入 Element Plus locale。`zh-cn` locale 默认会把月份渲染为 "一月/二月/…"，需要再浅拷贝覆盖 `months` 字段。
+- Verification: `pnpm playwright test workbench.spec.ts -g "新增版本 dialog opens"` 通过；`pnpm playwright test workbench.spec.ts -g "cascade"` 全部通过。
+- Next: 等用户验收；如果未来 Element Plus 升级破坏了 i18n key，需要在 e2e 第一时间复现。
+
+### 2026-06-25 - Repair FigmaChatPanel.vue duplicate declarations blocking dev server
+
+- Why: `frontend/apps/agent-web/src/components/FigmaChatPanel.vue` 在某个合并后存在两套 `defineProps` / `defineEmits`（一份带 `processStatus`/`initialize-process`，另一份带 `selectedModelLabel`/`open-model-picker`）和重复的 `const hasFileChanges = computed(...)`，导致 vue-tsc 报 TS2451 / TS2339 / TS2551 / TS2769 共 ~30 条错误，Vite dev server 抛 "Identifier 'props' has already been declared"，e2e 跑不起来。
+- What: 删掉旧的 `const props = defineProps<{...}>()` / `const emit = defineEmits<{...}>()` 整段以及重复的 `hasFileChanges`，把保留版的 props (`selectedModelLabel`/`modelPickerDisabled`/`stopDisabled`/`stopDisabledReason`/`processStatus`/...) 与 emits (`open-model-picker`/`initialize-process`/...) 合到一份。
+- How: 全文检索确认旧版 props（`selectedModelLabel`/`history`/`modelPickerDisabled`/`stopDisabled`）在模板 / script 中没有引用，所以可以直接合并而非 union；保持新版（带 `processStatus` 等的）作为唯一一份。
+- Result: `pnpm typecheck` 对 FigmaChatPanel 的错误清零；dev server 重新启动后 HTTP 200，e2e 可以正常 navigate 到 `/`。
+- Pitfalls: 这个修复与"中文月份"任务无关，但属于阻断 dev server 的预存在 bug；不修就测不了用户反馈。
+- Verification: `pnpm typecheck` 仅剩其它预存在错误（与本 PR 无关），`pnpm playwright test workbench.spec.ts -g "新增版本 dialog opens"` 通过。
+- Next: 在 commit message 里把"中文月份"和"FigmaChatPanel 修复"拆成两条提交，避免单点耦合。
 
 ### 2026-06-24 - Require Session Log In Project Rules
 
