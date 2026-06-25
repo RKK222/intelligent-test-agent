@@ -21,6 +21,9 @@ spring:
 test-agent:
   workspace-picker:
     allowed-roots: ${TEST_AGENT_WORKSPACE_PICKER_ROOTS:${user.home}/workspace}
+  # 公共目录：本地默认禁用；通过 TEST_AGENT_PUBLIC_DIRECTORY_PATH 指定已存在的目录即可启用。
+  public-directory:
+    path: ${TEST_AGENT_PUBLIC_DIRECTORY_PATH:}
   security:
     api-token: ${TEST_AGENT_API_TOKEN:}
     cors-allowed-origins: ${TEST_AGENT_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}

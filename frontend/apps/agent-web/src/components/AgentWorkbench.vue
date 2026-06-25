@@ -13,6 +13,7 @@ import type {
   AgentMessage,
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
+  FileContent,
   FileTreeEntry,
   ManagedApplication,
   MessagePart,
@@ -567,6 +568,11 @@ const createWorkspaceMutation = useMutation({
 
 const saveMutation = useMutation({
   mutationFn: async (tab: NonNullable<typeof activeTab.value>) => {
+    if (isPublicFilePath(tab.path)) {
+      // 公共目录写：仅 SUPER_ADMIN 角色可调（服务端二次校验），前端不暴露给普通用户。
+      await api.writePublicFile(publicFilePath(tab.path), tab.content);
+      return tab;
+    }
     if (!selectedWorkspace.value) {
       throw new Error("未选择 Workspace");
     }
@@ -581,6 +587,17 @@ const saveMutation = useMutation({
     feedback.value = errorFeedback("保存文件失败", error);
   }
 });
+
+// 公共文件 tab.path 用 "public:<相对路径>" 表示；与工作区路径空间隔离，避免编辑器 activePath 撞名。
+const PUBLIC_FILE_PREFIX = "public:";
+function isPublicFilePath(path: string): boolean {
+  return path.startsWith(PUBLIC_FILE_PREFIX);
+}
+function publicFilePath(tabPath: string): string {
+  return tabPath.startsWith(PUBLIC_FILE_PREFIX) ? tabPath.slice(PUBLIC_FILE_PREFIX.length) : tabPath;
+}
+// 当前用户是否具备 SUPER_ADMIN 角色；只有超级管理员的公共目录 tab 允许编辑。
+const isSuperAdmin = computed(() => authStore.currentUser?.roles?.includes("SUPER_ADMIN") ?? false);
 
 const startRunMutation = useMutation({
   mutationFn: async (input: { prompt: string; parts: PromptPart[] }) => {
@@ -1206,6 +1223,21 @@ async function openFile(path: string) {
   }
 }
 
+// 公共目录打开文件：把"public:<相对路径>"作为 tab.path，确保与工作区路径空间隔离。
+// readonly 由 canWrite 反向决定，普通用户永远是只读，超级管理员可写。
+async function openPublicFile(payload: { path: string; content: FileContent; readonly: boolean }) {
+  centerMode.value = "editor";
+  const tabPath = `${PUBLIC_FILE_PREFIX}${payload.path}`;
+  workbench.openTab({
+    id: `public:file:${payload.path}`,
+    path: tabPath,
+    title: payload.path.split(/[\\/]+/).filter(Boolean).at(-1) ?? payload.path,
+    content: payload.content.content,
+    savedContent: payload.content.content,
+    readonly: payload.readonly
+  });
+}
+
 function toggleDirectory(path: string) {
   // 同一目录正在加载时再次点击，会让 path 先被加入、再被移除，表现为"点击没反应"。
   // 这里直接吞掉二次点击，让加载指示（旋转图标）有足够时间呈现给用户。
@@ -1722,6 +1754,8 @@ async function handleLogout() {
           :loading-app-templates="loadingAppTemplates"
           :loading-app-versions="loadingAppVersions"
           :creating-version="creatingVersion"
+          :public-directory-writable="isSuperAdmin"
+          :api-base-url="apiBaseUrl"
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
           @open-diff="(path: string) => { workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
@@ -1729,6 +1763,7 @@ async function handleLogout() {
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"
+          @open-public-file="openPublicFile"
         />
         <div v-else class="managed-workspace-empty">
           <p>当前应用尚未切换到可用工作区。</p>

@@ -56,6 +56,9 @@ test-agent:
     max-directory-entries: ${TEST_AGENT_MAX_DIRECTORY_ENTRIES:1000}
   workspace-picker:
     allowed-roots: D:/workspace
+  # 公共目录：所有登录用户可浏览/读取，SUPER_ADMIN 额外可写；留空表示禁用。
+  public-directory:
+    path: ${TEST_AGENT_PUBLIC_DIRECTORY_PATH:}
   managed-workspace:
     root: ${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}
   redis:

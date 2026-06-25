@@ -417,6 +417,26 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 }
 ```
 
+### Public Directory API
+
+> 公共目录（也叫"固定路径内容扫描"）：根目录由后端 `test-agent.public-directory.path`（环境变量 `TEST_AGENT_PUBLIC_DIRECTORY_PATH`）指定，所有登录用户可浏览/读取，SUPER_ADMIN 额外可写。路径留空时整个服务禁用，调用方按未启用处理（HTTP 404）。
+
+| 方法 | 路径 | 用途 | 角色 |
+|---|---|---|---|
+| `GET` | `/api/public/files?path=` | 公共目录下的一层目录列表；`path` 缺省表示公共根目录。 | 已登录用户 |
+| `GET` | `/api/public/files/content?path=` | 读取公共目录下 UTF-8 文本文件。 | 已登录用户 |
+| `PUT` | `/api/public/files/content` | 写入公共目录下 UTF-8 文本文件。 | 仅 `SUPER_ADMIN` |
+
+新平台 URL 使用 `/api/internal/platform/public-directory` 前缀：
+
+| 方法 | 新路径 |
+|---|---|
+| `GET` | `/api/internal/platform/public-directory/files?path=` |
+| `GET` | `/api/internal/platform/public-directory/files/content?path=` |
+| `PUT` | `/api/internal/platform/public-directory/files/content` |
+
+公共目录的 `list`/`read`/`write` 复用 `WorkspaceFileService` 内的越权拦截与 `WriteFileRequest`/`FileTreeEntryResponse`/`FileContentResponse` 响应结构，路径越界时返回 `INVALID_REQUEST`，未配置或目录不可达时返回 `NOT_FOUND`，普通用户调用写入时返回 `FORBIDDEN`。
+
 目录选择器路径必须解析在任一允许根目录内；越出允许根目录返回 `FORBIDDEN`，缺失、不可访问或非目录返回 `VALIDATION_ERROR`。该接口与其他 `/api/**` 入口共享鉴权、限流、CORS、统一错误响应和 traceId 行为。
 
 文件 API 路径参数 `path` 必须解析在 workspace root 内，越权路径返回 `FORBIDDEN`。目录列表为单层，不递归，默认最多 1000 项；文件读取和写入只支持 UTF-8 文本，默认上限 1MB，可通过 `test-agent.files.*` 配置。

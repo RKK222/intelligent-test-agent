@@ -264,6 +264,27 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         status: status.exists ? "unchanged" : "deleted"
       } satisfies FileStatus;
     },
+    // 公共目录（后端 application.yml 中 test-agent.public-directory.path 配置的固定根目录）：
+    // 列表/读取对所有登录用户开放，写入仅 SUPER_ADMIN 可调用。
+    listPublicFiles: async (path = "") => {
+      const entries = await request<BackendFileTreeEntry[]>(`/api/public/files${query({ path })}`);
+      return entries.map((entry) => ({
+        path: entry.path,
+        name: entry.name,
+        type: entry.directory ? "directory" : "file",
+        size: entry.size,
+        modifiedAt: entry.lastModifiedAt
+      })) satisfies FileTreeEntry[];
+    },
+    readPublicFile: async (path: string) => {
+      const file = await request<BackendFileContent>(`/api/public/files/content${query({ path })}`);
+      return { ...file, encoding: "utf-8", readonly: false } satisfies FileContent;
+    },
+    writePublicFile: (path: string, content: string) =>
+      request<void>("/api/public/files/content", {
+        method: "PUT",
+        body: JSON.stringify({ path, content })
+      }),
     listAllSessions: (page = 1, size = 20, q?: string) => request<PageResponse<Session>>(`/api/sessions${query({ page, size, q })}`),
     listSessions: (workspaceId: string, page = 1, size = 20) =>
       request<PageResponse<Session>>(`/api/workspaces/${workspaceId}/sessions?page=${page}&size=${size}`),

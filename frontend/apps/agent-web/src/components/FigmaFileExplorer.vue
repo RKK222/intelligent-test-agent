@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import chevronUrl from "../assets/figma/chevron-folder.svg";
-import fileIconUrl from "../assets/figma/file-icon.svg";
+import { computed, ref } from "vue";
 import { FileExplorer, type FileExplorerProps } from "@test-agent/file-explorer";
+import type { FileContent } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
+import PublicDirectoryPanel from "./PublicDirectoryPanel.vue";
+import { FolderTree, Layers } from "lucide-vue-next";
 
 defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
@@ -19,6 +21,10 @@ defineProps<FileExplorerProps & {
   loadingAppVersions?: boolean;
   /** 「+新增版本」提交中标记（父组件控制 WorkbenchFooter 弹窗按钮的禁用与文案） */
   creatingVersion?: boolean;
+  /** 是否允许编辑公共目录（仅 SUPER_ADMIN 传 true） */
+  publicDirectoryWritable?: boolean;
+  /** 后端 base url，透传给 PublicDirectoryPanel */
+  apiBaseUrl?: string;
 }>();
 
 const emit = defineEmits<{
@@ -32,13 +38,45 @@ const emit = defineEmits<{
   loadVersions: [templateId: string];
   // 「+新增版本」弹窗确认后由父组件调用 createWorkspaceVersion。
   createVersion: [payload: { template: AppWorkspaceTemplate; version: string }];
+  // 公共目录下打开文件：path + 只读/可写 由父组件决定如何渲染 tab
+  openPublicFile: [payload: { path: string; content: FileContent; readonly: boolean }];
 }>();
+
+// 视图模式：workspace（默认）展示 FileExplorer；public 展示 PublicDirectoryPanel。
+// 切换时通过 v-if 卸载不活跃的组件，避免两个面板相互竞争滚动区域。
+type ViewMode = "workspace" | "public";
+const viewMode = ref<ViewMode>("workspace");
+const showPublicTab = computed(() => true); // 后端未配置时面板自身会展示空态，这里始终可点。
 </script>
 
 <template>
   <div class="figma-file-explorer">
+    <div class="figma-fe-toolbar" role="tablist" aria-label="文件视图切换">
+      <button
+        type="button"
+        :class="['figma-fe-toolbar-tab', viewMode === 'workspace' && 'is-active']"
+        title="工作区文件"
+        aria-label="工作区文件"
+        @click="viewMode = 'workspace'"
+      >
+        <FolderTree class="h-3.5 w-3.5" :stroke-width="1.5" />
+        <span>工作区</span>
+      </button>
+      <button
+        v-if="showPublicTab"
+        type="button"
+        :class="['figma-fe-toolbar-tab', viewMode === 'public' && 'is-active']"
+        title="公共目录（后端固定路径）"
+        aria-label="公共目录"
+        @click="viewMode = 'public'"
+      >
+        <Layers class="h-3.5 w-3.5" :stroke-width="1.5" />
+        <span>公共目录</span>
+      </button>
+    </div>
     <div class="figma-fe-body">
       <FileExplorer
+        v-if="viewMode === 'workspace'"
         :workspace-name="workspaceName"
         :workspace-root-path="workspaceRootPath"
         :entries-by-directory="entriesByDirectory"
@@ -50,6 +88,12 @@ const emit = defineEmits<{
         @open-file="emit('openFile', $event)"
         @open-diff="emit('openDiff', $event)"
         @refresh="emit('refresh')"
+      />
+      <PublicDirectoryPanel
+        v-else
+        :can-write="!!publicDirectoryWritable"
+        :base-url="apiBaseUrl ?? ''"
+        @open-file="emit('openPublicFile', $event)"
       />
     </div>
     <WorkbenchFooter
@@ -72,6 +116,43 @@ const emit = defineEmits<{
   flex-direction: column;
   height: 100%;
   min-height: 0;
+}
+
+.figma-fe-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 8px;
+  border-bottom: 1px solid #e4e4e7;
+  background: #fafafa;
+  flex-shrink: 0;
+}
+
+.figma-fe-toolbar-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border: 0.8px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #555;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.figma-fe-toolbar-tab:hover {
+  background: #f0f0f0;
+  color: #18181b;
+}
+
+.figma-fe-toolbar-tab.is-active {
+  background: #fff;
+  border-color: #dfdfdf;
+  color: #18181b;
 }
 
 .figma-fe-body {
