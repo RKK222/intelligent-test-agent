@@ -41,16 +41,17 @@ public class OpencodeRuntimeApplicationService {
     public OpencodeRuntimeApplicationService(
             AgentRuntimeRegistry agentRuntimeRegistry,
             AgentRuntimeTargetResolver targetResolver,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ModelCatalogApplicationService modelCatalogService) {
         this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
         this.targetResolver = Objects.requireNonNull(targetResolver, "targetResolver must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.modelCatalogService = modelCatalogService;
     }
 
     /**
      * 创建兼容旧测试的服务实例，不启用用户进程上下文。
      */
-    @Autowired
     public OpencodeRuntimeApplicationService(
             WorkspaceRepository workspaceRepository,
             SessionRepository sessionRepository,
@@ -59,13 +60,17 @@ public class OpencodeRuntimeApplicationService {
             AgentSessionBindingRepository agentSessionBindingRepository,
             ObjectMapper objectMapper,
             ModelCatalogApplicationService modelCatalogService) {
-        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
-        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
-        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
-        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
-        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
-        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
-        this.modelCatalogService = Objects.requireNonNull(modelCatalogService, "modelCatalogService must not be null");
+        this(
+                agentRuntimeRegistry,
+                new AgentRuntimeTargetResolver(
+                        workspaceRepository,
+                        sessionRepository,
+                        executionNodeRepository,
+                        agentRuntimeRegistry,
+                        agentSessionBindingRepository,
+                        null),
+                objectMapper,
+                Objects.requireNonNull(modelCatalogService, "modelCatalogService must not be null"));
     }
 
     /**
@@ -78,13 +83,6 @@ public class OpencodeRuntimeApplicationService {
             AgentRuntimeRegistry agentRuntimeRegistry,
             AgentSessionBindingRepository agentSessionBindingRepository,
             ObjectMapper objectMapper) {
-        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
-        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
-        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
-        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
-        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
-        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
-        this.modelCatalogService = null;
         this(
                 agentRuntimeRegistry,
                 new AgentRuntimeTargetResolver(
@@ -94,7 +92,8 @@ public class OpencodeRuntimeApplicationService {
                         agentRuntimeRegistry,
                         agentSessionBindingRepository,
                         null),
-                objectMapper);
+                objectMapper,
+                null);
     }
 
     /**
@@ -117,7 +116,8 @@ public class OpencodeRuntimeApplicationService {
                         agentRuntimeRegistry,
                         agentSessionBindingRepository,
                         userProcessAssignmentService),
-                objectMapper);
+                objectMapper,
+                null);
     }
 
     /**
@@ -173,7 +173,6 @@ public class OpencodeRuntimeApplicationService {
             syncProviderConfig(workspaceId, traceId);
             return modelCatalogService.listModels();
         }
-        return get(workspaceLocation(workspaceId), "/api/model", Map.of(), traceId);
         return get(workspaceLocation(workspaceId, traceId), "/api/model", Map.of(), traceId);
     }
 
@@ -185,7 +184,6 @@ public class OpencodeRuntimeApplicationService {
             syncProviderConfig(workspaceId, traceId);
             return modelCatalogService.listProviders();
         }
-        return get(workspaceLocation(workspaceId), "/api/provider", Map.of(), traceId);
         return get(workspaceLocation(workspaceId, traceId), "/api/provider", Map.of(), traceId);
     }
 
@@ -563,7 +561,7 @@ public class OpencodeRuntimeApplicationService {
      * 当前模型列表由平台托管时，先把 provider 配置尽力写入 opencode runtime。
      */
     private void syncProviderConfig(String workspaceId, String traceId) {
-        WorkspaceLocation location = workspaceLocation(workspaceId);
+        AgentRuntimeTargetResolver.WorkspaceRuntimeTarget location = workspaceLocation(workspaceId, traceId);
         modelCatalogService.syncProviderConfig(location.runtime(), location.node(), traceId);
     }
 

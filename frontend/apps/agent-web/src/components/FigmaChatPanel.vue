@@ -70,42 +70,6 @@ type DiffLine = {
   text: string
 }
 
-const props =
-  defineProps<{
-    messages: ChatMessageInput[]
-    running?: boolean
-    placeholder?: string
-    inputValue?: string
-    title?: string
-    /** 任务消耗（来自 SSE 事件统计） */
-    taskUsage?: TaskUsage
-    /** 文件变更行（来自 SSE 事件统计） */
-    fileChanges?: FileChangeStat[]
-    /** 历史对话列表 */
-    history?: Array<{ id: string; title: string; createdAt?: string }>
-    /** 当前选中的模型展示名 */
-    selectedModelLabel?: string
-    /** 模型选择按钮是否禁用 */
-    modelPickerDisabled?: boolean
-    /** 终止按钮是否禁用 */
-    stopDisabled?: boolean
-    /** 终止按钮禁用原因 */
-    stopDisabledReason?: string
-  }>()
-
-const emit =
-  defineEmits<{
-    (e: 'send', prompt: string): void
-    (e: 'stop'): void
-    (e: 'new-conversation'): void
-    (e: 'close'): void
-    (e: 'open-history'): void
-    (e: 'open-tasks'): void
-    (e: 'update:inputValue', value: string): void
-    (e: 'download-files'): void
-    (e: 'open-diff', path: string): void
-    (e: 'open-model-picker'): void
-  }>()
 const props = defineProps<{
   messages: ChatMessageInput[];
   running?: boolean;
@@ -118,6 +82,14 @@ const props = defineProps<{
   fileChanges?: FileChangeStat[];
   /** 历史对话列表 */
   history?: Array<{ id: string; title: string; createdAt?: string }>;
+  /** 当前选中的模型展示名 */
+  selectedModelLabel?: string;
+  /** 模型选择按钮是否禁用 */
+  modelPickerDisabled?: boolean;
+  /** 终止按钮是否禁用 */
+  stopDisabled?: boolean;
+  /** 终止按钮禁用原因 */
+  stopDisabledReason?: string;
   /** 当前用户 opencode 进程状态，控制是否允许发起对话 */
   processStatus?: OpencodeProcessState | null;
   processRequired?: boolean;
@@ -135,6 +107,7 @@ const emit = defineEmits<{
   (e: "update:inputValue", value: string): void;
   (e: "download-files"): void;
   (e: "open-diff", path: string): void;
+  (e: "open-model-picker"): void;
   (e: "initialize-process"): void;
 }>();
 
@@ -268,7 +241,6 @@ function parseDiffLines(patch: string | undefined): DiffLine[] {
   return result
 }
 
-const hasFileChanges = computed(() => (props.fileChanges?.length ?? 0) > 0)
 const hasFileChanges = computed(() => (props.fileChanges?.length ?? 0) > 0);
 const processReady = computed(() => {
   if (props.processRequired) {

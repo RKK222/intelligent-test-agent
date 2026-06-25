@@ -72,6 +72,7 @@ tools/dev-backend-run.sh
 
 # 或指定其他 profile
 tools/dev-backend-run.sh --profile test
+tools/dev-backend-run.sh --profile guo
 
 # 或直接使用 Maven
 cd backend

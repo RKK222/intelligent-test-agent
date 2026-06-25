@@ -97,12 +97,14 @@ public class UserOpencodeProcessAssignmentService {
         Optional<UserOpencodeProcessBinding> existingBinding = repository.findUserBinding(userId, OPENCODE_AGENT_ID);
         Optional<OpencodeServerProcess> existingProcess = existingBinding.flatMap(binding -> activeProcess(binding).or(() ->
                 repository.findOpencodeServerProcessById(binding.processId())));
-        if (existingProcess.isPresent() && existingProcess.get().status() == OpencodeServerProcessStatus.RUNNING) {
+        if (existingProcess.isPresent() && isRecoverableProcess(existingProcess.get())) {
             OpencodeProcessHealthResult health = checkHealth(existingProcess.get(), traceId);
             if (health.healthy()) {
-                ExecutionNode node = projectExecutionNode(existingProcess.get(), now, traceId);
+                OpencodeServerProcess refreshed = refreshProcess(existingProcess.get(), OpencodeServerProcessStatus.RUNNING, health.message(), now, traceId);
+                repository.saveOpencodeServerProcess(refreshed);
+                ExecutionNode node = projectExecutionNode(refreshed, now, traceId);
                 executionNodeRepository.save(node);
-                return ready(existingProcess.get(), "opencode 进程可用", now);
+                return ready(refreshed, "opencode 进程可用", now);
             }
         }
 
@@ -165,7 +167,7 @@ public class UserOpencodeProcessAssignmentService {
                 .filter(item -> item.status() == UserOpencodeProcessBindingStatus.ACTIVE)
                 .orElseThrow(() -> unavailableException("请先初始化 opencode 进程"));
         OpencodeServerProcess process = repository.findOpencodeServerProcessById(binding.processId())
-                .filter(item -> item.status() == OpencodeServerProcessStatus.RUNNING)
+                .filter(this::isRecoverableProcess)
                 .orElseThrow(() -> unavailableException("请先初始化 opencode 进程"));
         OpencodeProcessHealthResult health = checkHealth(process, traceId);
         if (!health.healthy()) {
@@ -184,7 +186,13 @@ public class UserOpencodeProcessAssignmentService {
             return Optional.empty();
         }
         return repository.findOpencodeServerProcessById(binding.processId())
-                .filter(process -> process.status() == OpencodeServerProcessStatus.RUNNING);
+                .filter(this::isRecoverableProcess);
+    }
+
+    private boolean isRecoverableProcess(OpencodeServerProcess process) {
+        return process.status() == OpencodeServerProcessStatus.RUNNING
+                || process.status() == OpencodeServerProcessStatus.STARTING
+                || process.status() == OpencodeServerProcessStatus.UNHEALTHY;
     }
 
     private OpencodeProcessHealthResult checkHealth(OpencodeServerProcess process, String traceId) {

@@ -679,7 +679,7 @@ const startRunMutation = useMutation({
       prompt: input.prompt,
       parts: input.parts,
       agent: selectedAgent.value || undefined,
-      model: selectedModel.value || undefined,
+      model: selectedModel.value ? `${selectedProvider.value}/${modelIdOnly(selectedModel.value)}` : undefined,
       mode: promptMode.value
     });
   },
@@ -712,7 +712,7 @@ const commandMutation = useMutation({
       command: input.command,
       arguments: input.arguments,
       agent: selectedAgent.value || undefined,
-      model: selectedModel.value || undefined
+      model: selectedModel.value ? `${selectedProvider.value}/${modelIdOnly(selectedModel.value)}` : undefined
     });
   },
   onSuccess: (result) => {
@@ -1008,6 +1008,27 @@ function resetWorkspaceState() {
   nowTick.value = Date.now();
   dispatchChat({ type: "reset" });
   workbench.resetWorkspaceView();
+}
+
+function handleNewConversation() {
+  session.value = null;
+  run.value = null;
+  logs.value = [];
+  diffFiles.value = [];
+  diffSource.value = "run";
+  followUpQueue.value = [];
+  diffContextParts.value = [];
+  readonlySessionReason.value = "";
+  liveFollowedParts.value = new Set();
+  chatStartedAt.value = null;
+  accumulatedTokens.value = 0;
+  accumulatedReasoningMs.value = 0;
+  lastDuration = undefined;
+  lastTokens = 0;
+  lastThoughtForMs = 0;
+  nowTick.value = Date.now();
+  dispatchChat({ type: "reset" });
+  feedback.value = { kind: "success", title: "已新建对话", description: "下一次发送将创建新的 Session。" };
 }
 
 function cacheWorkspace(workspace: Workspace) {
@@ -1960,7 +1981,7 @@ async function handleLogout() {
           placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
           @send="(text: string) => handleSend(text)"
           @stop="handleStopRun"
-          @new-conversation="() => handleSend('')"
+          @new-conversation="handleNewConversation"
           @open-model-picker="modelPickerOpen = true"
           @initialize-process="() => initializeOpencodeProcessMutation.mutate()"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"

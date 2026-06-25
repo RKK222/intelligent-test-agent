@@ -321,6 +321,20 @@ V10 种子数据对 F-COSS 的影响：
 
 - 全部插入语句使用 `where exists` / `where not exists` 保护，重复执行迁移不会破坏数据。
 - 仅在 V10 的 `app_fcoss` / `repo_fcoss_main` 存在时才追加模板/版本，与 V10 的「依赖基础数据存在」策略一致。
+
+## V14 opencode 用户进程管理表
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V14__create_opencode_process_management_tables.sql` 创建企业内部署所需的 opencode 用户进程管理表。V10 已用于 F-COSS 本地种子数据，因此该表结构迁移使用 V14，避免 Flyway 版本冲突。
+
+| 表 | 说明 |
+|---|---|
+| `linux_servers` | 后端 Linux 服务器节点，记录状态、容量摘要和心跳。 |
+| `backend_java_processes` | 后端 Java 进程实例，记录监听地址、所属 Linux 服务器和心跳。 |
+| `opencode_containers` | opencode 容器，记录端口池、容量、当前进程数和状态。 |
+| `opencode_container_managers` | 容器内管理进程，记录协议版本、连接状态、能力和心跳。 |
+| `opencode_manager_backend_connections` | 管理进程到后端 Java 进程的控制面连接状态。 |
+| `opencode_server_processes` | 用户专属 opencode server 进程，记录用户、端口、PID、session/config 路径和健康状态。 |
+| `user_opencode_process_bindings` | 用户到 agent/opencode 进程的唯一绑定。 |
 - `created_by_user_id` 选择 `users.username = '888888888'` 的用户，没有该用户时整条插入被跳过；不引入新用户。
 - 不影响 V9 的表结构与已有迁移路径；模板与版本均为 ACTIVE，运行态 `workspaces` 同步 ACTIVE 状态。
 

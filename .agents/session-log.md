@@ -12,6 +12,24 @@
 - Verification: `git diff --check -- . ':(exclude)requirements/todo/deployment.md'`, `bash -n tools/verify-opencode-process-deployment.sh && tools/verify-dev-scripts.sh`, and `tools/verify-ai-docs.sh` passed locally.
 - Next: Stage only batch 7 files and commit with a Chinese message.
 
+### 2026-06-25 - Fix Chat New Conversation And External Model Sync
+
+- Why: 手工测试发现「新建对话」按钮点击后无效果，且选择部分百炼模型发送后没有收到响应。
+- What: 前端把新建对话从空发送改为显式重置当前 Session / Run / 日志 / diff / token 状态；发送和命令执行时统一传 `provider/model`；后端同步外网百炼 `/models` 返回的完整模型列表到 opencode provider 配置，避免选择未注册模型导致 `ProviderModelNotFound`。
+- How: 复用 `AgentWorkbench.vue` 现有状态、`dispatchChat(reset)` 和 `ModelCatalogApplicationService` 的 provider patch 入口，只扩展现有同步逻辑，不新增并行 API。
+- Result: 本地重启后 `http://127.0.0.1:3000` 和 `http://127.0.0.1:8080` 已启动；opencode 当前 provider 配置已包含百炼返回的 10 个模型 key；`guo` profile 数据库和 Redis 地址按用户最新要求切到 `192.168.100.115`。
+- Pitfalls: UI 级完整人工验收按用户要求改为由用户手工执行；本次只保留接口、构建、单测和启动级验证。
+- Verification: `corepack pnpm --filter @test-agent/agent-web build`；`JAVA_HOME=$(/usr/libexec/java_home -v 25) ... mvn -pl test-agent-opencode-runtime,test-agent-app -am test`；`./restart-dev-services.sh --profile guo --env-file .env.local --skip-frontend-build`。
+
+### 2026-06-24 - Prepare WR Local Guo Startup Data
+
+- Why: 本地验收需要使用 `guo` 配置连接共享 PostgreSQL/Redis，并为用户 `wr` 准备自己的应用 `F-WRAPP` 和项目本地工作区。
+- What: 拉取远程最新 `main`，保留 `guo` PostgreSQL `sslmode=disable` 修正，允许根目录重启脚本使用 `--profile guo`，并同步启动文档；在共享库中按 `lipc` 的数字应用 ID 习惯创建 `app_id=113023` 的 `F-WRAPP` 数据。
+- How: 通过 JDBC 事务清理上一轮不合规的 `f-wrapp` 临时记录，再写入用户、应用成员、代码库、应用工作区模板、应用版本、运行态 Workspace、recent workspace 和分支偏好，工作区路径指向 `/Users/kaka/Desktop/intelligent-test-agent`。
+- Result: Flyway 已校验到 V12，`wr` 用户和 `113023/F-WRAPP` 的本地工作区数据已落库；后续重启仍需受 Redis `192.168.100.135:6379` 网络连通性约束。
+- Pitfalls: `192.168.100.135:6379` 当前从本机返回 `No route to host`，不能通过关闭校验掩盖；若网络未恢复，Actuator health 会保持 DOWN。
+- Verification: 已用 JDBC 查询核对 Flyway、用户、应用、仓库、工作区模板、版本和偏好记录；待执行脚本校验和本地重启。
+
 ### 2026-06-24 - Require Session Log In Project Rules
 
 - Why: The session log needed to be treated as a first-class tracked artifact, not an ad hoc local note, so remote commits carry the handoff context too.

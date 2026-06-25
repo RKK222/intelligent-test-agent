@@ -5,7 +5,7 @@ spring:
   datasource:
     druid:
       driver-class-name: org.postgresql.Driver
-      url: jdbc:postgresql://192.168.100.194:5432/test_agent
+      url: jdbc:postgresql://192.168.100.115:5432/testagent?sslmode=disable
       username: testagent
       password: testagent
   flyway:
@@ -13,7 +13,7 @@ spring:
     locations: classpath:db/migration
   data:
     redis:
-      host: 192.168.100.135
+      host: 192.168.100.115
       port: 6379
       password: ""
       timeout: 1s
@@ -36,7 +36,7 @@ test-agent:
     root: ${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}
   redis:
     enabled: true
-    host: 192.168.100.194
+    host: 192.168.100.115
     port: 6379
     password: ""
   opencode:

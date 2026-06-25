@@ -25,7 +25,7 @@ type Message struct {
 	PortStart        int            `json:"portStart,omitempty"`
 	PortEnd          int            `json:"portEnd,omitempty"`
 	MaxProcesses     int            `json:"maxProcesses,omitempty"`
-	CurrentProcesses int            `json:"currentProcesses,omitempty"`
+	CurrentProcesses int            `json:"currentProcesses"`
 	Capabilities     map[string]any `json:"capabilities,omitempty"`
 	BackendProcessID string         `json:"backendProcessId,omitempty"`
 	CommandID        string         `json:"commandId,omitempty"`

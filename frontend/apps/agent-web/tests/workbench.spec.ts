@@ -639,7 +639,6 @@ async function mockBackendApi(
     workspaceTemplates?: Record<string, Array<Record<string, unknown>>>;
     /** 自定义 /applications/{appId}/workspace-templates/{tid}/versions 返回；key 用 `{appId}:{templateId}`。 */
     workspaceVersions?: Record<string, Array<Record<string, unknown>>>;
-  } = {}) {
     processStatus?: "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE";
     processInitializations?: Array<Record<string, unknown>>;
   } = {}
