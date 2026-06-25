@@ -1674,7 +1674,6 @@ async function handleLogout() {
     :current-user-role-labels="authStore.currentUser?.roleLabels"
     @toggle-left-panel="() => {}"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
-    @open-folder="openWorkspaceDirectoryPicker"
     @select-app="handleSelectApp"
     @logout="handleLogout"
   >

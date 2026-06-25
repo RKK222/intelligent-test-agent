@@ -3,7 +3,6 @@ import { computed, onUnmounted, ref } from "vue";
 import { ChevronDown, LogOut, ShieldCheck, UserRound } from "lucide-vue-next";
 import logoUrl from "../assets/figma/logo.svg";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
-import folderIconUrl from "../assets/figma/folder-icon.svg";
 
 export type AppItem = {
   id: string;
@@ -49,7 +48,6 @@ const MAX_RIGHT_WIDTH = 1200;
 const emit = defineEmits<{
   (e: "toggle-left-panel"): void;
   (e: "toggle-right-panel"): void;
-  (e: "open-folder"): void;
   (e: "select-app", appId: string): void;
   (e: "logout"): void;
 }>();
@@ -189,9 +187,6 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="figma-header-right">
-        <button type="button" class="figma-icon-btn figma-icon-btn-secondary" aria-label="打开文件夹" @click="emit('open-folder')">
-          <img :src="folderIconUrl" alt="folder" class="figma-icon-16" />
-        </button>
         <div class="figma-app-menu-wrapper" @click.stop>
           <button
             type="button"
