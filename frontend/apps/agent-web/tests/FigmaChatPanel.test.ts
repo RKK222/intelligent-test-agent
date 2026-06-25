@@ -84,4 +84,21 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("任务消耗");
     expect(wrapper.text()).toContain("19915 tokens");
   });
+
+  it("opens a frontend-only attachment dialog from the composer action", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    expect(wrapper.find('[role="dialog"][aria-label="上传附件"]').exists()).toBe(false);
+
+    await wrapper.get('[aria-label="上传附件"]').trigger("click");
+
+    expect(wrapper.find('[role="dialog"][aria-label="上传附件"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain("当前仅展示前端样式，暂未连接后台上传能力");
+    expect(wrapper.emitted("download-files")).toBeUndefined();
+  });
 });
