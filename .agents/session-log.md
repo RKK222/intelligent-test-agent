@@ -2,6 +2,16 @@
 
 ## Entries
 
+### 2026-06-25 - Close opencode process deployment operations batch
+
+- Why: opencode 用户进程管理已经完成数据模型、调度契约、manager 控制面、runtime 接入和超管页面，还缺少多 Linux 服务器真实部署、扩容、回滚和验收说明。
+- What: Added `tools/verify-opencode-process-deployment.sh`, wired it into `tools/verify-dev-scripts.sh`, fixed a `restart-dev-services.sh` unset-variable edge case, and updated deployment/database/security/backend/frontend/opencode-manager docs plus the batch ledger.
+- How: Kept runtime behavior unchanged; the new script only performs read-only health, manager discovery and SUPER_ADMIN overview smoke checks. Deployment docs now cover direct backend listen URLs, manager all-backend WebSocket connections, non-overlapping host port pools, mounted session/config/state directories, heartbeat/timeout knobs, scale-out, failure handling and rollback.
+- Result: Batch 7 has an executable smoke check and a stable operations handoff for multi-server validation; `requirements/todo/deployment.md` remains unrelated and unstaged.
+- Pitfalls: Full first-login/process-rebuild validation still requires a real multi-server environment and real tokens; local verification only proves scripts/docs and existing tests.
+- Verification: `git diff --check -- . ':(exclude)requirements/todo/deployment.md'`, `bash -n tools/verify-opencode-process-deployment.sh && tools/verify-dev-scripts.sh`, and `tools/verify-ai-docs.sh` passed locally.
+- Next: Stage only batch 7 files and commit with a Chinese message.
+
 ### 2026-06-24 - Require Session Log In Project Rules
 
 - Why: The session log needed to be treated as a first-class tracked artifact, not an ad hoc local note, so remote commits carry the handoff context too.
@@ -38,23 +48,3 @@
 - Pitfalls: 仓库里两个旧测试（`createsStandardApplicationVersionWorkspaceAndRecordsRecentUsage` / `createsPersonalWorkspaceFromApplicationVersionWorktree`）在 Windows 上因路径分隔符断言失败，与本次改动无关（已用 `git stash` 验证过改动前的状态同样失败）；本次新测试改用 `Path.endsWith` 规避。
 - Verification: `pnpm typecheck` 通过；`mvn -pl test-agent-workspace-management -am test` 我新加的 2 个测试通过（8 / 10），其余 2 个失败是上面提到的预存在 Windows 路径问题。
 - Next: 等用户审过 PR 提单；如需进一步简化可考虑把 FigmaFileExplorer 的 `creatingVersion` 与工作区切换的反馈合并。
-
-### 2026-06-24 - Fix workspace cascade menu z-index/clipping/overflow + date format
-
-- Why: 用户反馈两级菜单 ① 浮在底部被 dockview `overflow:hidden` 裁掉、② hover 一级菜单没有在右侧出现二级菜单（被一级菜单 max-width 切了）、③ 出现横向/竖向滚动条、④ 子菜单靠近视口底时底部被遮挡、⑤ 「+新增版本」日期显示成 `yyyy年1月` 而不是 `2026年8月`。
-- What:
-  - `WorkbenchFooter.vue`：
-    - 一级菜单面板和二级菜单都用 `<Teleport to="body">` + `position:fixed` 挂到 body 末尾，加 `cascadeButtonRef` / `cascadeMenuPos` / `cascadeSubmenuPos` / `hoveredTemplateEl`，打开前用 `getBoundingClientRect()` 算 fixed 坐标；`onCascadePosScrollOrResizeBound` 在 raf 内同步刷新一二级菜单位置。
-    - 一级菜单二级菜单 z-index 分别 9999 / 10000，避免被 dockview 内部 stacking context 盖住。
-    - `onDocumentClick` 改用 `closest('.ta-workbench-cascade-panel/.ta-workbench-cascade-submenu/.ta-workbench-cascade')` 判断点击位置（Teleport 后 contains 失效）。
-    - 子菜单 right 用一级菜单面板的 `right`（不是 li 的 right）作为锚点，避免子菜单起点落在面板里。
-    - 删掉 `max-width:360px / max-height:360px / max-height:280px / overflow-y:auto` 触发的横向竖向滚动条，CSS 只剩面板级 `max-height: calc(100vh - 24px)` 兜底。
-    - 子菜单防底部遮挡：`naturalTop = liRect.top - 6`；若 `viewportHeight - naturalTop - 12 < 200`，把 `naturalTop` 抬到 `viewportHeight - 12 - 200`，并把 `maxHeight` 同步成 `viewportHeight - naturalTop - 12`（用 `Math.max(80, ...)` 兜底），保证子菜单底部不超出视口。
-    - 「+新增版本」`ElDatePicker` 改成 `format="yyyy-MM"` + `value-format="yyyy-MM"`，提交时 `confirmCreateVersion` 用 regex 把 `2026-08` 转换为 `2026年8月` 再 emit；规避 Element Plus 把 `yyyy年M月` 格式串当占位符渲染成 `yyyy年1月` 的 bug。
-  - `workbench.spec.ts`：mockBackendApi 新增 `workspaceTemplates` / `workspaceVersions` 参数；新增 2 个测试：① 一级菜单 Teleport 到 body + 位置在按钮上方 + 无横向滚动 + 二级菜单在右侧；② 构造 20 个模板 + 15 个版本验证子菜单靠近底部时底部不超出视口。
-- How: 一二级菜单都搬出 dockview 容器后，stacking context 不再互相嵌套，z-index 才能稳定生效；用 `closest` 替代 `contains` 适配 Teleport；溢出用"可用空间 + max-height"组合（不是 nextTick 二次测量），避免在 Vite/Playwright 环境下 nextTick 回调被 reactive batch 吞掉的边界；日期格式转换在提交时做而不是在 picker 上做，picker 显示标准格式（清晰无歧义），提交时按用户原始期望"原值透传"映射回 `yyyy年M月`。
-- Result: 5 个 cascade 相关 e2e 测试全过（含桌面 + mobile 配置）；`pnpm typecheck` 通过；`pnpm build` 通过。6 个无关历史失败（model picker / phase 11 / live tracking）已用 `git stash` 验证为改动前就存在。
-- Pitfalls: 第一次实现用 `nextTick` 二次测量修正底部溢出，Playwright 跑下来回调未触发（Vite/Vue 微任务时机问题），改用同步 `max-height` 计算更稳；`Math.max(120, ...)` 给子菜单硬保底 120px 高度反而让靠近底部的子菜单越界，去掉硬保底改 `Math.max(80, ...)` 兜底可读性 + 安全性平衡。
-- Verification: `pnpm playwright test workbench.spec.ts -g "workspace cascade"` 5/5 通过；`pnpm typecheck` 通过；`pnpm build` 通过。
-- Next: 让用户实际再点一遍两级菜单确认无其他视觉问题；如需进一步优化可考虑子菜单"展开方向自适应"（当一级菜单靠近视口右边缘时子菜单从左侧展开）。
-

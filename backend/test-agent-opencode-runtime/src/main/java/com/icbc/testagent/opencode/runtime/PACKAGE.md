@@ -18,6 +18,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `run.RunEventPersistencePolicy`：区分 durable RunEvent 与 transient live output，并清洗 tool 大字段。
 - `run.RunMessageRecoveryService`：SSE 建连时从 agent projected messages 生成 transient message snapshot。
 - `runtime.OpencodeRuntimeApplicationService`：opencode Web App runtime API 到 `AgentRuntime` 的映射。
+- `process.*`：当前用户 opencode 进程分配、manager WebSocket 控制面网关、后端实例生命周期和超级管理员运行管理快照查询。
 - `terminal.*`：PTY ticket、限流、WebSocket 背后的业务状态和本地进程适配。
 
 ## 允许依赖
@@ -39,6 +40,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 - `run.*` 测试必须覆盖 Run 创建、通用 agent binding 保存/复用、远端 session 懒创建/复用、事件持久化策略、Diff fallback 和消息恢复。
 - `session.*` 测试必须覆盖 Workspace 校验、归档隐藏、局部更新和消息追加默认 role。
 - `runtime.*` 测试必须覆盖 opencode runtime path、workspace directory 透传、query 过滤和 permission/question body 兼容。
+- `process.*` 测试必须覆盖用户进程分配、manager 控制面命令路由、后端心跳注册和运行管理快照聚合。
 - `terminal.*` 测试必须覆盖 ticket 签发/消费/过期、active session 互斥、输入输出限流、WebSocket envelope 和进程适配。
 
 ## 修改时必须同步更新

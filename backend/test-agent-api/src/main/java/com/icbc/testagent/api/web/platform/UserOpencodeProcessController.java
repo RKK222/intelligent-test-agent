@@ -1,0 +1,62 @@
+package com.icbc.testagent.api.web.platform;
+
+import com.icbc.testagent.api.web.common.AuthWebSupport;
+import com.icbc.testagent.api.web.common.RuntimeApiSupport;
+import com.icbc.testagent.common.api.ApiResponse;
+import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import java.util.Objects;
+import java.util.function.Function;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
+
+/**
+ * 当前登录用户的 opencode 进程状态与初始化入口。
+ */
+@RestController
+public class UserOpencodeProcessController {
+
+    private final UserOpencodeProcessAssignmentService processAssignmentService;
+
+    /**
+     * 注入用户 opencode 进程分配服务，Controller 只负责协议适配和鉴权。
+     */
+    public UserOpencodeProcessController(UserOpencodeProcessAssignmentService processAssignmentService) {
+        this.processAssignmentService = Objects.requireNonNull(processAssignmentService, "processAssignmentService must not be null");
+    }
+
+    /**
+     * 查询当前用户 opencode 进程状态，不触发进程启动。
+     */
+    @GetMapping("/api/internal/agent/{agentId}/processes/me")
+    public Mono<ApiResponse<RuntimeDtos.UserOpencodeProcessResponse>> status(
+            @PathVariable String agentId,
+            ServerWebExchange exchange) {
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        return blockingResponse(exchange, traceId -> RuntimeDtos.UserOpencodeProcessResponse.from(
+                processAssignmentService.status(userId, agentId, traceId)));
+    }
+
+    /**
+     * 初始化或重建当前用户 opencode 进程；真实启动由后续管理进程 gateway 完成。
+     */
+    @PostMapping("/api/internal/agent/{agentId}/processes/me/initialize")
+    public Mono<ApiResponse<RuntimeDtos.UserOpencodeProcessResponse>> initialize(
+            @PathVariable String agentId,
+            ServerWebExchange exchange) {
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        return blockingResponse(exchange, traceId -> RuntimeDtos.UserOpencodeProcessResponse.from(
+                processAssignmentService.initialize(userId, agentId, traceId)));
+    }
+
+    private <T> Mono<ApiResponse<T>> blockingResponse(ServerWebExchange exchange, Function<String, T> action) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        return Mono.fromCallable(() -> ApiResponse.ok(action.apply(traceId), traceId))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+}

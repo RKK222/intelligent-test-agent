@@ -1,9 +1,12 @@
 package com.icbc.testagent.api.web.platform;
 
+import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
 import com.icbc.testagent.common.api.ApiResponse;
 import java.util.Map;
+import java.util.function.Function;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -39,7 +42,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/agents",
     })
     public Mono<ApiResponse<Object>> listAgents(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.listAgents(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.listAgents(workspaceId, traceId));
     }
 
     /**
@@ -50,7 +53,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/models",
     })
     public Mono<ApiResponse<Object>> listModels(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.listModels(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.listModels(workspaceId, traceId));
     }
 
     /**
@@ -61,7 +64,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/providers",
     })
     public Mono<ApiResponse<Object>> listProviders(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.listProviders(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.listProviders(workspaceId, traceId));
     }
 
     /**
@@ -72,7 +75,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/commands",
     })
     public Mono<ApiResponse<Object>> listCommands(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.listCommands(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.listCommands(workspaceId, traceId));
     }
 
     /**
@@ -83,7 +86,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/references",
     })
     public Mono<ApiResponse<Object>> listReferences(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.listReferences(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.listReferences(workspaceId, traceId));
     }
 
     /**
@@ -94,7 +97,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/status",
     })
     public Mono<ApiResponse<Object>> runtimeStatus(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.runtimeStatus(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.runtimeStatus(workspaceId, traceId));
     }
 
     /**
@@ -108,7 +111,7 @@ public class PlatformOpencodeRuntimeController {
             @RequestParam(required = false) String workspaceId,
             @RequestParam(required = false) String path,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.fsList(workspaceId, path, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.fsList(workspaceId, path, traceId));
     }
 
     /**
@@ -122,7 +125,7 @@ public class PlatformOpencodeRuntimeController {
             @RequestParam(required = false) String workspaceId,
             @RequestParam(required = false) String query,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.fsFind(workspaceId, query, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.fsFind(workspaceId, query, traceId));
     }
 
     /**
@@ -136,7 +139,7 @@ public class PlatformOpencodeRuntimeController {
             @RequestParam(required = false) String workspaceId,
             @RequestParam String path,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.fsRead(workspaceId, path, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.fsRead(workspaceId, path, traceId));
     }
 
     /**
@@ -147,7 +150,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/vcs/status",
     })
     public Mono<ApiResponse<Object>> vcsStatus(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.vcsStatus(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.vcsStatus(workspaceId, traceId));
     }
 
     /**
@@ -162,7 +165,7 @@ public class PlatformOpencodeRuntimeController {
             @RequestParam(required = false) String mode,
             @RequestParam(required = false) Integer context,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.vcsDiff(workspaceId, mode, context, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.vcsDiff(workspaceId, mode, context, traceId));
     }
 
     /**
@@ -173,7 +176,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/lsp/status",
     })
     public Mono<ApiResponse<Object>> lspStatus(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.lspStatus(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.lspStatus(workspaceId, traceId));
     }
 
     /**
@@ -184,7 +187,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/mcp/status",
     })
     public Mono<ApiResponse<Object>> mcpStatus(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.mcpStatus(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.mcpStatus(workspaceId, traceId));
     }
 
     /**
@@ -195,7 +198,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/mcp/resources",
     })
     public Mono<ApiResponse<Object>> mcpResources(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.mcpResources(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.mcpResources(workspaceId, traceId));
     }
 
     /**
@@ -210,7 +213,7 @@ public class PlatformOpencodeRuntimeController {
             @RequestParam(required = false) String provider,
             @RequestParam(required = false) String model,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.mcpTools(workspaceId, provider, model, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.mcpTools(workspaceId, provider, model, traceId));
     }
 
     /**
@@ -221,7 +224,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/config",
     })
     public Mono<ApiResponse<Object>> getConfig(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.getConfig(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.getConfig(workspaceId, traceId));
     }
 
     /**
@@ -235,7 +238,7 @@ public class PlatformOpencodeRuntimeController {
             @RequestParam(required = false) String workspaceId,
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.updateConfig(workspaceId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.updateConfig(workspaceId, body, traceId));
     }
 
     /**
@@ -246,7 +249,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/global/dispose",
     })
     public Mono<ApiResponse<Object>> disposeGlobal(ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, runtimeService::disposeGlobal);
+        return platformResponse(exchange, runtimeService::disposeGlobal);
     }
 
     /**
@@ -257,7 +260,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/provider/auth",
     })
     public Mono<ApiResponse<Object>> listProviderAuth(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.listProviderAuth(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.listProviderAuth(workspaceId, traceId));
     }
 
     /**
@@ -271,7 +274,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String providerId,
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.authorizeProviderOAuth(providerId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.authorizeProviderOAuth(providerId, body, traceId));
     }
 
     /**
@@ -285,7 +288,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String providerId,
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.completeProviderOAuth(providerId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.completeProviderOAuth(providerId, body, traceId));
     }
 
     /**
@@ -299,7 +302,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String providerId,
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.setProviderAuth(providerId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.setProviderAuth(providerId, body, traceId));
     }
 
     /**
@@ -310,7 +313,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/auth/{providerId}",
     })
     public Mono<ApiResponse<Object>> removeProviderAuth(@PathVariable String providerId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.removeProviderAuth(providerId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.removeProviderAuth(providerId, traceId));
     }
 
     /**
@@ -321,7 +324,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/worktrees",
     })
     public Mono<ApiResponse<Object>> listWorktrees(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.listWorktrees(workspaceId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.listWorktrees(workspaceId, traceId));
     }
 
     /**
@@ -334,7 +337,7 @@ public class PlatformOpencodeRuntimeController {
     public Mono<ApiResponse<Object>> createWorktree(
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.createWorktree(body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.createWorktree(body, traceId));
     }
 
     /**
@@ -347,7 +350,7 @@ public class PlatformOpencodeRuntimeController {
     public Mono<ApiResponse<Object>> removeWorktree(
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.removeWorktree(body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.removeWorktree(body, traceId));
     }
 
     /**
@@ -360,7 +363,7 @@ public class PlatformOpencodeRuntimeController {
     public Mono<ApiResponse<Object>> resetWorktree(
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.resetWorktree(body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.resetWorktree(body, traceId));
     }
 
     /**
@@ -371,7 +374,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/children",
     })
     public Mono<ApiResponse<Object>> sessionChildren(@PathVariable String sessionId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.sessionChildren(sessionId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.sessionChildren(sessionId, traceId));
     }
 
     /**
@@ -382,7 +385,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/todo",
     })
     public Mono<ApiResponse<Object>> sessionTodo(@PathVariable String sessionId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.sessionTodo(sessionId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.sessionTodo(sessionId, traceId));
     }
 
     /**
@@ -396,7 +399,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String sessionId,
             @RequestParam(required = false) String messageId,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.sessionDiff(sessionId, messageId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.sessionDiff(sessionId, messageId, traceId));
     }
 
     /**
@@ -407,7 +410,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/abort",
     })
     public Mono<ApiResponse<Object>> abortSession(@PathVariable String sessionId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.abortSession(sessionId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.abortSession(sessionId, traceId));
     }
 
     /**
@@ -421,7 +424,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String sessionId,
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.forkSession(sessionId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.forkSession(sessionId, body, traceId));
     }
 
     /**
@@ -435,7 +438,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String sessionId,
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.compactSession(sessionId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.compactSession(sessionId, body, traceId));
     }
 
     /**
@@ -449,7 +452,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String sessionId,
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.revertSession(sessionId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.revertSession(sessionId, body, traceId));
     }
 
     /**
@@ -463,7 +466,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String sessionId,
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.unrevertSession(sessionId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.unrevertSession(sessionId, body, traceId));
     }
 
     /**
@@ -477,7 +480,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String sessionId,
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.commandSession(sessionId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.commandSession(sessionId, body, traceId));
     }
 
     /**
@@ -491,7 +494,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String sessionId,
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.shellSession(sessionId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.shellSession(sessionId, body, traceId));
     }
 
     /**
@@ -502,7 +505,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/share",
     })
     public Mono<ApiResponse<Object>> shareSession(@PathVariable String sessionId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.shareSession(sessionId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.shareSession(sessionId, traceId));
     }
 
     /**
@@ -513,7 +516,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/share",
     })
     public Mono<ApiResponse<Object>> unshareSession(@PathVariable String sessionId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.unshareSession(sessionId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.unshareSession(sessionId, traceId));
     }
 
     /**
@@ -524,7 +527,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/permissions"
     })
     public Mono<ApiResponse<Object>> listPermissions(@PathVariable String sessionId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.listPermissions(sessionId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.listPermissions(sessionId, traceId));
     }
 
     /**
@@ -539,7 +542,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String requestId,
             @RequestBody Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.replyPermission(sessionId, requestId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.replyPermission(sessionId, requestId, body, traceId));
     }
 
     /**
@@ -550,7 +553,7 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions"
     })
     public Mono<ApiResponse<Object>> listQuestions(@PathVariable String sessionId, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.listQuestions(sessionId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.listQuestions(sessionId, traceId));
     }
 
     /**
@@ -565,7 +568,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String requestId,
             @RequestBody Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.replyQuestion(sessionId, requestId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.replyQuestion(sessionId, requestId, body, traceId));
     }
 
     /**
@@ -579,7 +582,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String sessionId,
             @PathVariable String requestId,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.rejectQuestion(sessionId, requestId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.rejectQuestion(sessionId, requestId, traceId));
     }
 
     /**
@@ -588,7 +591,7 @@ public class PlatformOpencodeRuntimeController {
     public Mono<ApiResponse<Object>> listPermissionsByOpencodePath(
             @RequestParam String sessionId,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.listPermissions(sessionId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.listPermissions(sessionId, traceId));
     }
 
     /**
@@ -599,7 +602,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String requestId,
             @RequestBody Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.replyPermission(sessionId, requestId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.replyPermission(sessionId, requestId, body, traceId));
     }
 
     /**
@@ -608,7 +611,7 @@ public class PlatformOpencodeRuntimeController {
     public Mono<ApiResponse<Object>> listQuestionsByOpencodePath(
             @RequestParam String sessionId,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.listQuestions(sessionId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.listQuestions(sessionId, traceId));
     }
 
     /**
@@ -619,7 +622,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String requestId,
             @RequestBody Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.replyQuestion(sessionId, requestId, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.replyQuestion(sessionId, requestId, body, traceId));
     }
 
     /**
@@ -629,7 +632,7 @@ public class PlatformOpencodeRuntimeController {
             @RequestParam String sessionId,
             @PathVariable String requestId,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.rejectQuestion(sessionId, requestId, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.rejectQuestion(sessionId, requestId, traceId));
     }
 
     /**
@@ -643,7 +646,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String name,
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.startMcpAuth(name, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.startMcpAuth(name, body, traceId));
     }
 
     /**
@@ -657,7 +660,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String name,
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.completeMcpAuth(name, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.completeMcpAuth(name, body, traceId));
     }
 
     /**
@@ -671,7 +674,7 @@ public class PlatformOpencodeRuntimeController {
             @PathVariable String name,
             @RequestBody(required = false) Map<String, Object> body,
             ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.authenticateMcp(name, body, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.authenticateMcp(name, body, traceId));
     }
 
     /**
@@ -682,7 +685,25 @@ public class PlatformOpencodeRuntimeController {
             "/api/internal/platform/opencode-runtime/mcp/{name}/auth",
     })
     public Mono<ApiResponse<Object>> removeMcpAuth(@PathVariable String name, ServerWebExchange exchange) {
-        return RuntimeApiSupport.blockingObjectResponse(exchange, traceId -> runtimeService.removeMcpAuth(name, traceId));
+        return platformResponse(exchange, traceId -> runtimeService.removeMcpAuth(name, traceId));
+    }
+
+    /**
+     * 平台旧入口没有 agentId path，默认 opencode；有用户主体时走用户进程，无用户时固定节点 fallback。
+     */
+    private Mono<ApiResponse<Object>> platformResponse(ServerWebExchange exchange, Function<String, Object> action) {
+        return RuntimeApiSupport.blockingObjectResponse(
+                exchange,
+                traceId -> runtimeService.withUser(optionalUserId(exchange), () -> action.apply(traceId)));
+    }
+
+    /**
+     * 用户 token 鉴权成功时传入 UserId；static token 或本地放行时返回空保持旧固定节点兼容。
+     */
+    private UserId optionalUserId(ServerWebExchange exchange) {
+        return AuthWebSupport.getOptionalAuthPrincipal(exchange)
+                .map(principal -> principal.userId())
+                .orElse(null);
     }
 
 }

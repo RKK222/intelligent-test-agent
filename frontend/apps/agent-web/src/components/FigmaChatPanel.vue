@@ -51,6 +51,13 @@ export type TaskUsage = {
   thoughtFor?: string
 }
 
+type OpencodeProcessState = {
+  status: string;
+  initializable: boolean;
+  message: string;
+  baseUrl?: string;
+};
+
 // 抽屉里 diff 行的解析结果：保留原始前缀符号供渲染和后续扩展使用
 type DiffLineKind = 'add' | 'del' | 'ctx' | 'meta'
 
@@ -99,6 +106,37 @@ const emit =
     (e: 'open-diff', path: string): void
     (e: 'open-model-picker'): void
   }>()
+const props = defineProps<{
+  messages: ChatMessageInput[];
+  running?: boolean;
+  placeholder?: string;
+  inputValue?: string;
+  title?: string;
+  /** 任务消耗（来自 SSE 事件统计） */
+  taskUsage?: TaskUsage;
+  /** 文件变更行（来自 SSE 事件统计） */
+  fileChanges?: FileChangeStat[];
+  /** 历史对话列表 */
+  history?: Array<{ id: string; title: string; createdAt?: string }>;
+  /** 当前用户 opencode 进程状态，控制是否允许发起对话 */
+  processStatus?: OpencodeProcessState | null;
+  processRequired?: boolean;
+  processLoading?: boolean;
+  processInitializing?: boolean;
+}>();
+
+const emit = defineEmits<{
+  (e: "send", prompt: string): void;
+  (e: "stop"): void;
+  (e: "new-conversation"): void;
+  (e: "close"): void;
+  (e: "open-history"): void;
+  (e: "open-tasks"): void;
+  (e: "update:inputValue", value: string): void;
+  (e: "download-files"): void;
+  (e: "open-diff", path: string): void;
+  (e: "initialize-process"): void;
+}>();
 
 const localInput = ref(props.inputValue ?? '')
 
@@ -231,6 +269,28 @@ function parseDiffLines(patch: string | undefined): DiffLine[] {
 }
 
 const hasFileChanges = computed(() => (props.fileChanges?.length ?? 0) > 0)
+const hasFileChanges = computed(() => (props.fileChanges?.length ?? 0) > 0);
+const processReady = computed(() => {
+  if (props.processRequired) {
+    return !props.processLoading && props.processStatus?.status === "READY";
+  }
+  return !props.processLoading && (!props.processStatus || props.processStatus.status === "READY");
+});
+const processStatusVisible = computed(() => props.processRequired || props.processLoading || props.processStatus != null);
+const processStatusTitle = computed(() => {
+  if (props.processLoading) return "正在检查 opencode 进程";
+  if (props.processRequired && !props.processStatus) return "正在检查 opencode 进程";
+  if (!props.processStatus) return "";
+  if (props.processStatus.status === "READY") return "opencode 进程可用";
+  if (props.processStatus.status === "NEEDS_INITIALIZATION") return "需要初始化 opencode 进程";
+  return "opencode 进程不可用";
+});
+const processStatusText = computed(() => {
+  if (props.processLoading) return "正在检查当前用户可用进程";
+  if (props.processRequired && !props.processStatus) return "正在检查当前用户可用进程";
+  if (!props.processStatus) return "";
+  return props.processStatus.baseUrl ?? props.processStatus.message;
+});
 
 // 抽屉可见文件列表（按 props 顺序）；选中态基于 drawerSelectedPath。
 const drawerFiles = computed(() => props.fileChanges ?? [])
@@ -614,13 +674,32 @@ function onKeydown(event: KeyboardEvent) {
       </span>
     </div>
 
+    <div
+      v-if="processStatusVisible"
+      :class="['figma-chat-process-status', processReady ? 'is-ready' : 'is-blocking']"
+    >
+      <div class="figma-chat-process-copy">
+        <span class="figma-chat-process-title">{{ processStatusTitle }}</span>
+        <span v-if="processStatusText" class="figma-chat-process-message">{{ processStatusText }}</span>
+      </div>
+      <button
+        v-if="processStatus?.status === 'NEEDS_INITIALIZATION'"
+        type="button"
+        class="figma-chat-process-init"
+        :disabled="processInitializing || processLoading || !processStatus.initializable"
+        @click="emit('initialize-process')"
+      >
+        {{ processInitializing ? "初始化中" : "初始化进程" }}
+      </button>
+    </div>
+
     <div class="figma-chat-composer">
       <textarea
         v-model="localInput"
         class="figma-chat-textarea"
         :placeholder="placeholder || 'Ask the AI agent...'"
         rows="1"
-        :disabled="running"
+        :disabled="running || !processReady"
         @keydown="onKeydown"
       />
       <div class="figma-chat-composer-actions">
@@ -628,7 +707,7 @@ function onKeydown(event: KeyboardEvent) {
           type="button"
           class="figma-chat-icon-btn"
           aria-label="清空输入"
-          :disabled="!localInput || running"
+          :disabled="!localInput || running || !processReady"
           @click="localInput = ''"
         >
           <PencilLine class="figma-chat-btn-icon" />
@@ -657,7 +736,7 @@ function onKeydown(event: KeyboardEvent) {
         <button
           type="button"
           class="figma-chat-icon-btn figma-chat-new-btn"
-          :disabled="running"
+          :disabled="running || !processReady"
           @click="emit('new-conversation')"
         >
           <Plus class="figma-chat-btn-icon" />
@@ -667,7 +746,7 @@ function onKeydown(event: KeyboardEvent) {
           v-if="!running"
           type="button"
           class="figma-chat-send"
-          :disabled="!localInput.trim()"
+          :disabled="!localInput.trim() || !processReady"
           aria-label="发送"
           @click="submit"
         >
@@ -1227,6 +1306,75 @@ function onKeydown(event: KeyboardEvent) {
 .figma-chat-del {
   color: #eb5e53;
   font-family: 'JetBrains Mono', monospace;
+}
+
+.figma-chat-process-status {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 12px 4px;
+  padding: 8px 10px;
+  border: 1px solid #d7d7d7;
+  border-radius: 6px;
+  background: #fafafa;
+  color: #333;
+}
+
+.figma-chat-process-status.is-ready {
+  border-color: rgba(24, 169, 120, 0.35);
+  background: rgba(24, 169, 120, 0.08);
+}
+
+.figma-chat-process-status.is-blocking {
+  border-color: rgba(235, 94, 83, 0.35);
+  background: rgba(235, 94, 83, 0.07);
+}
+
+.figma-chat-process-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.figma-chat-process-title {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+}
+
+.figma-chat-process-message {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 16px;
+  color: #666;
+}
+
+.figma-chat-process-init {
+  flex-shrink: 0;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid #b5b5b5;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.figma-chat-process-init:not(:disabled):hover {
+  background: #f0f3f8;
+}
+
+.figma-chat-process-init:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 /* ---- Composer ---- */

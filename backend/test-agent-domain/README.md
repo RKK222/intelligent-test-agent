@@ -12,7 +12,7 @@
 
 ## 主要职责
 
-- Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、AI 模型配置、应用配置管理、应用版本工作区和个人工作区等领域对象。
+- Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用配置管理、应用版本工作区和个人工作区等领域对象。
 - Run 状态机、路由决策值对象、领域服务接口。
 - 保持业务规则与基础设施分离。
 
@@ -25,10 +25,11 @@
 - RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`；RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`。
 - ExecutionNode：`ExecutionNode`、`ExecutionNodeId`、`ExecutionNodeStatus`。
 - RoutingDecision：`RoutingDecision`、`RoutingReason`、`ExecutionNodeRouter`。
-- AiModelConfig：`AiModelConfig`、`AiModelConfigRepository`；表达企业内模型目录元数据、启停、默认模型、输入模态和上下文限制，不包含调用密钥。
+- OpencodeProcess：`LinuxServer`、`BackendJavaProcess`、`OpencodeContainer`、`OpencodeContainerManager`、`OpencodeManagerBackendConnection`、`OpencodeServerProcess`、`OpencodeServerProcessFilter`、`UserOpencodeProcessBinding` 和 `OpencodeProcessManagementRepository`；只表达 Linux 服务器、容器、管理进程和用户专属 opencode 进程拓扑、查询筛选，不直接发起进程操作或 socket 通信。
 - Configuration：`ApplicationDefinition`、`ApplicationMember`、`CodeRepository`、`ApplicationRepositoryLink`、`ApplicationWorkspace`、`UserSshKey`，与运行态 Workspace/Session/Run 解耦。
 - ManagedWorkspace：`ApplicationWorkspaceVersion`、`PersonalWorkspace`、`UserWorkspacePreference`、`WorkspaceSyncRecord`，把应用工作空间模板落为运行态 Workspace 并记录个人 worktree 与同步审计。
 - Repository 端口：Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、AiModelConfig、ConfigurationManagement、ManagedWorkspace 持久化端口。
+- Repository 端口：Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、OpencodeProcessManagement、ConfigurationManagement、ManagedWorkspace 持久化端口。
 
 ## Run 状态机
 
@@ -45,6 +46,7 @@
 - `SessionMessageTest`、`SessionTest` 覆盖消息约束、会话归档、置顶和内部 opencode session/node 映射边界。
 - `AgentSessionBindingTest` 覆盖 agentId 规范化、远端 session/node 绑定和 traceId 边界。
 - `ExecutionNodeRouterTest`、`ExecutionNodeTest` 覆盖执行节点容量、可路由状态和路由冲突错误。
+- `OpencodeProcessDomainTest` 覆盖 Linux 服务器 IP、容器端口范围、用户进程 baseUrl 和用户绑定边界。
 - `RunEventTest`、`RunEventTypeTest`、`DomainValidationTest` 覆盖事件模型、事件 wireName 映射和值对象公共校验。
 - `ConfigurationDomainTest` 覆盖应用成员逻辑删除、代码库 URL 不可编辑、应用工作空间目录约束等配置领域规则。
 

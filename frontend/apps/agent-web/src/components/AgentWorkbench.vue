@@ -24,6 +24,7 @@ import type {
   RuntimeResourceInfo,
   RuntimeToolInfo,
   Session,
+  UserOpencodeProcess,
   Workspace,
   WorkspaceDirectoryList
 } from "@test-agent/shared-types";
@@ -382,6 +383,12 @@ const vcsStatusQuery = useQuery({
   queryFn: () => api.getVcsStatus(selectedWorkspaceIdRef.value!),
   refetchInterval: 30000
 });
+const opencodeProcessQuery = useQuery({
+  queryKey: ["runtime", "opencode-process", "me"],
+  enabled: () => Boolean(authStore.currentUser),
+  queryFn: () => api.getMyOpencodeProcess(),
+  retry: false
+});
 
 const agents = computed(() => agentsQuery.data.value ?? []);
 const models = computed(() => modelsQuery.data.value ?? []);
@@ -392,6 +399,8 @@ const mcpToolsData = computed<RuntimeToolInfo[]>(() => mcpToolsQuery.data.value 
 const vcsStatusData = computed(() => vcsStatusQuery.data.value);
 const lspStatusData = computed(() => lspStatusQuery.data.value);
 const mcpStatusData = computed(() => mcpStatusQuery.data.value);
+const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => opencodeProcessQuery.data.value ?? null);
+const opencodeProcessReady = computed(() => opencodeProcessStatus.value?.status === "READY");
 const sessionsItems = computed(() => sessionsQuery.data.value?.items ?? []);
 const selectedModelInfo = computed(() => {
   const selected = modelIdOnly(selectedModel.value);
@@ -655,6 +664,9 @@ const saveMutation = useMutation({
 
 const startRunMutation = useMutation({
   mutationFn: async (input: { prompt: string; parts: PromptPart[] }) => {
+    if (!opencodeProcessReady.value) {
+      throw new Error("请先初始化 opencode 进程");
+    }
     if (!selectedWorkspace.value) {
       throw new Error("未选择 Workspace");
     }
@@ -677,6 +689,17 @@ const startRunMutation = useMutation({
   },
   onError: (error) => {
     feedback.value = errorFeedback("启动 Run 失败", error);
+  }
+});
+
+const initializeOpencodeProcessMutation = useMutation({
+  mutationFn: () => api.initializeMyOpencodeProcess(),
+  onSuccess: (status) => {
+    queryClient.setQueryData(["runtime", "opencode-process", "me"], status);
+    feedback.value = { kind: "success", title: "opencode 进程已初始化", description: status.baseUrl ?? status.message };
+  },
+  onError: (error) => {
+    feedback.value = errorFeedback("初始化 opencode 进程失败", error);
   }
 });
 
@@ -808,9 +831,13 @@ watch(runtimeBusy, (busy) => {
 
 // follow-up 队列：Run 空闲且有排队 prompt 时自动出队执行
 watch(
-  [followUpQueue, run, session, () => startRunMutation.isPending.value, () => commandMutation.isPending.value],
+  [followUpQueue, run, session, () => startRunMutation.isPending.value, () => commandMutation.isPending.value, opencodeProcessReady],
   () => {
-    if (followUpQueue.value.length === 0 || !canStartFollowUp(run.value, startRunMutation.isPending.value || commandMutation.isPending.value)) {
+    if (
+      followUpQueue.value.length === 0 ||
+      !opencodeProcessReady.value ||
+      !canStartFollowUp(run.value, startRunMutation.isPending.value || commandMutation.isPending.value)
+    ) {
       return;
     }
     const { next, queue } = dequeueFollowUp(followUpQueue.value);
@@ -1322,6 +1349,12 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     feedback.value = { kind: "info", title: "当前会话只读", description: readonlySessionReason.value };
     return;
   }
+  if (!opencodeProcessReady.value) {
+    feedback.value = {
+      kind: "info",
+      title: "请先初始化 opencode 进程",
+      description: opencodeProcessStatus.value?.message ?? "正在检查当前用户可用进程"
+    };
   if (!selectedWorkspace.value) {
     feedback.value = { kind: "info", title: "未选择工作区", description: "请先点击“选择本机目录”或切换到可用工作区，再发送任务。" };
     return;
@@ -1912,6 +1945,10 @@ async function handleLogout() {
           :task-usage="taskUsage"
           :history="historyList"
           :readonly-reason="readonlySessionReason"
+          :process-status="opencodeProcessStatus"
+          process-required
+          :process-loading="opencodeProcessQuery.isPending.value"
+          :process-initializing="initializeOpencodeProcessMutation.isPending.value"
           :permissions="chatState.permissions"
           :questions="chatState.questions"
           :selected-model-label="selectedModelLabel"
@@ -1923,6 +1960,7 @@ async function handleLogout() {
           @stop="handleStopRun"
           @new-conversation="() => handleSend('')"
           @open-model-picker="modelPickerOpen = true"
+          @initialize-process="() => initializeOpencodeProcessMutation.mutate()"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
           @reply-permission="(requestId: string, decision: 'once' | 'always' | 'reject') => replyPermissionMutation.mutate({ requestId, decision })"
           @reply-question="(requestId: string, answers: unknown[]) => replyQuestionMutation.mutate({ requestId, answers })"

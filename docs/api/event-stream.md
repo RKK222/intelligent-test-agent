@@ -91,6 +91,10 @@
 
 应用版本工作区和个人工作区管理接口也不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/applications/**`、`/workspace-versions/**`、`/personal-workspaces/**` 会执行 Git clone/worktree/diff/push 并创建或切换运行态 `Workspace` 配置，但不会启动 Session/Run；后续 opencode 对话仍只通过 Run API 产生 RunEvent。
 
+opencode-manager discovery API 和 `/api/internal/platform/opencode-runtime/manager/ws` 控制面 WebSocket 不产生 RunEvent/SSE，不向前端广播注册、心跳或命令结果。
+
+超级管理员运行管理页调用的 `GET /api/internal/platform/opencode-runtime/management/overview` 只读取数据库中的运行态快照，不新增 SSE 事件类型，也不向 RunEvent 流发布拓扑、连接或进程状态变化。
+
 示例：
 
 ```text

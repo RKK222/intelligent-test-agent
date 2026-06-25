@@ -1,0 +1,87 @@
+package com.icbc.testagent.app.config;
+
+import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
+import com.icbc.testagent.observability.TraceIdSupport;
+import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import org.springframework.beans.factory.DisposableBean;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+/**
+ * opencode-manager 控制面运行装配，负责配置绑定和当前后端实例心跳 runner。
+ */
+@Configuration
+public class OpencodeManagerControlConfig {
+
+    /**
+     * 将 app 配置转换为 runtime/API 可复用的控制面 settings。
+     */
+    @Bean
+    ManagerControlSettings managerControlSettings(TestAgentRuntimeProperties properties) {
+        TestAgentRuntimeProperties.ManagerControl control = properties.getOpencode().getManagerControl();
+        return new ManagerControlSettings(
+                control.getToken(),
+                control.getListenUrl(),
+                new LinuxServerId(control.getLinuxServerId()),
+                control.getHeartbeatInterval(),
+                control.getBackendStaleAfter(),
+                control.getCommandTimeout(),
+                control.getBackendDiscoveryLimit());
+    }
+
+    /**
+     * 注册当前后端 Java 进程生命周期 runner。
+     */
+    @Bean
+    BackendJavaProcessLifecycleRunner backendJavaProcessLifecycleRunner(
+            BackendJavaProcessLifecycleService lifecycleService,
+            ManagerControlSettings settings) {
+        return new BackendJavaProcessLifecycleRunner(lifecycleService, settings);
+    }
+
+    /**
+     * 后端进程生命周期 runner，只负责启动/停止时机，不承载业务规则。
+     */
+    static class BackendJavaProcessLifecycleRunner implements ApplicationRunner, DisposableBean {
+
+        private final BackendJavaProcessLifecycleService lifecycleService;
+        private final ManagerControlSettings settings;
+        private ScheduledExecutorService executor;
+
+        BackendJavaProcessLifecycleRunner(
+                BackendJavaProcessLifecycleService lifecycleService,
+                ManagerControlSettings settings) {
+            this.lifecycleService = lifecycleService;
+            this.settings = settings;
+        }
+
+        @Override
+        public void run(ApplicationArguments args) {
+            lifecycleService.registerHeartbeat(TraceIdSupport.generate());
+            executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
+                Thread thread = new Thread(runnable, "opencode-manager-backend-heartbeat");
+                thread.setDaemon(true);
+                return thread;
+            });
+            executor.scheduleAtFixedRate(
+                    () -> lifecycleService.registerHeartbeat(TraceIdSupport.generate()),
+                    settings.heartbeatInterval().toMillis(),
+                    settings.heartbeatInterval().toMillis(),
+                    TimeUnit.MILLISECONDS);
+        }
+
+        @Override
+        public void destroy() {
+            if (executor != null) {
+                executor.shutdownNow();
+            }
+            lifecycleService.markOffline(TraceIdSupport.generate());
+        }
+    }
+}

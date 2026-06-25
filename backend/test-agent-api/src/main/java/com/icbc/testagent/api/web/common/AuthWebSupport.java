@@ -4,6 +4,7 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.dictionary.Dictionary;
+import java.util.Optional;
 import org.springframework.http.HttpHeaders;
 import org.springframework.web.server.ServerWebExchange;
 
@@ -22,11 +23,19 @@ public final class AuthWebSupport {
      * 从 exchange attribute 中获取认证主体，缺失时统一转换为未认证错误。
      */
     public static AuthPrincipal getAuthPrincipal(ServerWebExchange exchange) {
+        return getOptionalAuthPrincipal(exchange)
+                .orElseThrow(() -> new PlatformException(ErrorCode.UNAUTHENTICATED, "未认证"));
+    }
+
+    /**
+     * 从 exchange attribute 中读取可选认证主体；兼容 static token 或本地放行场景不抛错。
+     */
+    public static Optional<AuthPrincipal> getOptionalAuthPrincipal(ServerWebExchange exchange) {
         Object attr = exchange.getAttribute(AUTH_ATTR);
         if (attr instanceof AuthPrincipal principal) {
-            return principal;
+            return Optional.of(principal);
         }
-        throw new PlatformException(ErrorCode.UNAUTHENTICATED, "未认证");
+        return Optional.empty();
     }
 
     /**

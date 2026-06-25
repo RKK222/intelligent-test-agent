@@ -112,6 +112,34 @@ public final class RuntimeIdGenerator {
     }
 
     /**
+     * 生成后端 Java 进程 ID，返回值固定使用 {@code bjp_} 前缀。
+     */
+    public static String backendProcessId() {
+        return prefixed("bjp_");
+    }
+
+    /**
+     * 生成容器管理进程 ID，返回值固定使用 {@code mgr_} 前缀。
+     */
+    public static String containerManagerId() {
+        return prefixed("mgr_");
+    }
+
+    /**
+     * 生成 opencode server 进程 ID，返回值固定使用 {@code ocp_} 前缀。
+     */
+    public static String opencodeProcessId() {
+        return prefixed("ocp_");
+    }
+
+    /**
+     * 生成管理进程控制命令 ID，返回值固定使用 {@code mcmd_} 前缀。
+     */
+    public static String managerCommandId() {
+        return prefixed("mcmd_");
+    }
+
+    /**
      * 按给定领域前缀拼接无横线 UUID；调用方必须传入已约定的稳定前缀。
      */
     private static String prefixed(String prefix) {

@@ -32,6 +32,7 @@ import com.icbc.testagent.domain.session.SessionMessage;
 import com.icbc.testagent.domain.session.SessionMessageId;
 import com.icbc.testagent.domain.session.SessionMessageRepository;
 import com.icbc.testagent.domain.session.SessionStatus;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
@@ -40,6 +41,8 @@ import com.icbc.testagent.event.RunEventAppender;
 import com.icbc.testagent.event.RunEventLiveBus;
 import com.icbc.testagent.event.RunEventLiveEvent;
 import com.icbc.testagent.event.RunEventSsePayload;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.opencode.client.OpencodeCancelCommand;
 import com.icbc.testagent.opencode.client.OpencodeCancelResult;
 import com.icbc.testagent.opencode.client.OpencodeClientFacade;
@@ -121,6 +124,124 @@ class RunApplicationServiceTest {
                 .isEqualTo(REMOTE_SESSION_ID);
         assertThat(events.events).extracting(RunEvent::type)
                 .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED);
+    }
+
+    @Test
+    void userAwareRunUsesAssignedOpencodeProcessNodeAndAvoidsLegacyRouting() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeExecutionNodeRepository nodes = new FakeExecutionNodeRepository();
+        UserOpencodeProcessAssignmentService assignmentService = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ExecutionNode assignedNode = userProcessNode("node_1234567890abcdef", "http://10.8.0.12:4096");
+        org.mockito.Mockito.when(assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(assignedNode));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                nodes,
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                assignmentService);
+
+        Run run = service.startRun(
+                new UserId("usr_1234567890abcdef"),
+                new StartRunInput(new SessionId("ses_1234567890abcdef"), "run the tests", List.of(), null, null, null, null, null),
+                "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(nodes.findRoutableNodesCalls).isZero();
+        assertThat(facade.createSessionCommands).hasSize(1);
+        assertThat(facade.createSessionCommands.getFirst().node().baseUrl()).isEqualTo("http://10.8.0.12:4096");
+        assertThat(facade.startRunCommands.getFirst().node().baseUrl()).isEqualTo("http://10.8.0.12:4096");
+    }
+
+    @Test
+    void userAwareRunRebuildsRemoteSessionWhenExistingBindingPointsToDifferentNode() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeAgentSessionBindingRepository bindings = new FakeAgentSessionBindingRepository();
+        bindings.save(new AgentSessionBinding(
+                new SessionId("ses_1234567890abcdef"),
+                "opencode",
+                "ses_oldremote1234567890abcdef",
+                new ExecutionNodeId("node_old1234567890abcdef"),
+                NOW,
+                NOW,
+                "trace_1234567890abcdef"));
+        UserOpencodeProcessAssignmentService assignmentService = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        ExecutionNode assignedNode = userProcessNode("node_ocp_1234567890abcdef", "http://10.8.0.12:4096");
+        org.mockito.Mockito.when(assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(assignedNode));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                bindings,
+                assignmentService);
+
+        Run run = service.startRun(
+                new UserId("usr_1234567890abcdef"),
+                new StartRunInput(new SessionId("ses_1234567890abcdef"), "run the tests", List.of(), null, null, null, null, null),
+                "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(facade.createSessionCommands).hasSize(1);
+        assertThat(facade.createSessionCommands.getFirst().node().executionNodeId()).isEqualTo(assignedNode.executionNodeId());
+        assertThat(facade.startRunCommands.getFirst().opencodeSessionId()).isEqualTo(REMOTE_SESSION_ID);
+        assertThat(bindings.findBySessionIdAndAgentId(new SessionId("ses_1234567890abcdef"), "opencode"))
+                .get()
+                .satisfies(binding -> {
+                    assertThat(binding.remoteSessionId()).isEqualTo(REMOTE_SESSION_ID);
+                    assertThat(binding.executionNodeId()).isEqualTo(assignedNode.executionNodeId());
+                });
+    }
+
+    @Test
+    void userAwareRunDoesNotCreateLocalRunWhenUserProcessIsUnavailable() {
+        FakeRunRepository runs = new FakeRunRepository();
+        UserOpencodeProcessAssignmentService assignmentService = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        org.mockito.Mockito.when(assignmentService.requireReadyProcess(
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        "trace_1234567890abcdef"))
+                .thenThrow(new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "请先初始化 opencode 进程"));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(new FakeOpencodeFacade()),
+                new FakeAgentSessionBindingRepository(),
+                assignmentService);
+
+        assertThatThrownBy(() -> service.startRun(
+                        new UserId("usr_1234567890abcdef"),
+                        new StartRunInput(new SessionId("ses_1234567890abcdef"), "run the tests", List.of(), null, null, null, null, null),
+                        "trace_1234567890abcdef"))
+                .isInstanceOf(PlatformException.class)
+                .extracting(error -> ((PlatformException) error).errorCode())
+                .isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
+        assertThat(runs.saved).isEmpty();
     }
 
     @Test
@@ -748,6 +869,21 @@ class RunApplicationServiceTest {
                 100,
                 NOW,
                 Set.of("chat"),
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+    }
+
+    private static ExecutionNode userProcessNode(String nodeId, String baseUrl) {
+        return new ExecutionNode(
+                new ExecutionNodeId(nodeId),
+                baseUrl,
+                ExecutionNodeStatus.READY,
+                0,
+                1,
+                100,
+                NOW,
+                Set.of("opencode", "user-process"),
                 NOW,
                 NOW,
                 "trace_1234567890abcdef");

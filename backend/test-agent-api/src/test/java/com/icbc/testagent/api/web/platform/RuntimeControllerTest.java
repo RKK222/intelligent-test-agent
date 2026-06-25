@@ -1,13 +1,17 @@
 package com.icbc.testagent.api.web.platform;
 
 import com.icbc.testagent.api.web.common.GlobalExceptionHandler;
+import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.TraceIdWebFilter;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
+import com.icbc.testagent.common.error.ErrorCode;
+import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.opencode.runtime.run.RunApplicationService;
 import com.icbc.testagent.opencode.runtime.run.RunDiffActionResponse;
 import com.icbc.testagent.opencode.runtime.run.RunDiffApplicationService;
@@ -15,6 +19,10 @@ import com.icbc.testagent.opencode.runtime.run.RunDiffFileResponse;
 import com.icbc.testagent.opencode.runtime.run.RunDiffResponse;
 import com.icbc.testagent.opencode.runtime.run.RunMessageRecoveryService;
 import com.icbc.testagent.opencode.runtime.run.StartRunInput;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
+import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.opencode.runtime.session.SessionApplicationService;
 import com.icbc.testagent.workspace.WorkspaceDirectoryEntryResponse;
 import com.icbc.testagent.workspace.WorkspaceDirectoryListResponse;
@@ -27,6 +35,7 @@ import com.icbc.testagent.domain.run.RunStatus;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionStatus;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
@@ -134,12 +143,14 @@ class RuntimeControllerTest {
     void runControllerStartsRunAndReturnsRunningStatus() {
         RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
         when(service.startRun(
+                        eq(new UserId("usr_1234567890abcdef")),
                         argThat(input -> new SessionId("ses_1234567890abcdef").equals(input.sessionId())
                                 && "run the tests".equals(input.effectivePrompt())),
                         eq("trace_1234567890abcdef")))
                 .thenReturn(run());
         WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.post()
@@ -161,12 +172,14 @@ class RuntimeControllerTest {
     void runControllerAlsoExposesInternalPlatformRunUrl() {
         RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
         when(service.startRun(
+                        eq(new UserId("usr_1234567890abcdef")),
                         argThat(input -> new SessionId("ses_1234567890abcdef").equals(input.sessionId())
                                 && "run the tests".equals(input.effectivePrompt())),
                         eq("trace_1234567890abcdef")))
                 .thenReturn(run());
         WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.post()
@@ -188,6 +201,7 @@ class RuntimeControllerTest {
     void runControllerExposesAgentScopedRunUrl() {
         RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
         when(service.startRun(
+                        eq(new UserId("usr_1234567890abcdef")),
                         eq("opencode"),
                         argThat(input -> new SessionId("ses_1234567890abcdef").equals(input.sessionId())
                                 && "run the tests".equals(input.effectivePrompt())),
@@ -195,6 +209,7 @@ class RuntimeControllerTest {
                 .thenReturn(run());
         WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.post()
@@ -215,6 +230,7 @@ class RuntimeControllerTest {
     void runControllerAcceptsPhase11PromptPartsPayload() {
         RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
         when(service.startRun(
+                        eq(new UserId("usr_1234567890abcdef")),
                         argThat(input -> new SessionId("ses_1234567890abcdef").equals(input.sessionId())
                                 && "run the tests".equals(input.effectivePrompt())
                                 && input.parts().size() == 1
@@ -224,6 +240,7 @@ class RuntimeControllerTest {
                 .thenReturn(run());
         WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.post()
@@ -272,6 +289,7 @@ class RuntimeControllerTest {
     void runControllerOffloadsBlockingRunStartFromWebFluxThread() {
         RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
         when(service.startRun(
+                        eq(new UserId("usr_1234567890abcdef")),
                         any(StartRunInput.class),
                         eq("trace_1234567890abcdef")))
                 .thenAnswer(ignored -> {
@@ -280,6 +298,7 @@ class RuntimeControllerTest {
                 });
         WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
                 .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
                 .build();
 
         client.post()
@@ -295,6 +314,80 @@ class RuntimeControllerTest {
                 .jsonPath("$.success").isEqualTo(true)
                 .jsonPath("$.traceId").isEqualTo("trace_1234567890abcdef")
                 .jsonPath("$.data.status").isEqualTo("RUNNING");
+    }
+
+    @Test
+    void opencodeProcessControllerReturnsCurrentUserProcessStatusAndInitializesIt() {
+        UserOpencodeProcessAssignmentService service = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        UserOpencodeProcessStatusResponse ready = new UserOpencodeProcessStatusResponse(
+                UserOpencodeProcessAvailability.READY,
+                false,
+                "opencode 进程可用",
+                "ocp_1234567890abcdef",
+                "10.8.0.12",
+                "ctr_01",
+                4096,
+                "http://10.8.0.12:4096",
+                NOW);
+        when(service.status(eq(new UserId("usr_1234567890abcdef")), eq("opencode"), eq("trace_1234567890abcdef")))
+                .thenReturn(ready);
+        when(service.initialize(eq(new UserId("usr_1234567890abcdef")), eq("opencode"), eq("trace_1234567890abcdef")))
+                .thenReturn(ready);
+        WebTestClient client = WebTestClient.bindToController(new UserOpencodeProcessController(service))
+                .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
+                .build();
+
+        client.get()
+                .uri("/api/internal/agent/opencode/processes/me")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("READY")
+                .jsonPath("$.data.baseUrl").isEqualTo("http://10.8.0.12:4096");
+
+        client.post()
+                .uri("/api/internal/agent/opencode/processes/me/initialize")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("READY")
+                .jsonPath("$.data.processId").isEqualTo("ocp_1234567890abcdef");
+    }
+
+    @Test
+    void opencodeProcessControllerRequiresAuthenticationAndOpencodeAgent() {
+        UserOpencodeProcessAssignmentService service = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        doThrow(new PlatformException(ErrorCode.VALIDATION_ERROR, "当前只支持 opencode 用户进程"))
+                .when(service).status(any(), eq("otheragent"), eq("trace_1234567890abcdef"));
+        WebTestClient unauthenticatedClient = WebTestClient.bindToController(new UserOpencodeProcessController(service))
+                .webFilter(new TraceIdWebFilter())
+                .controllerAdvice(new GlobalExceptionHandler())
+                .build();
+
+        unauthenticatedClient.get()
+                .uri("/api/internal/agent/opencode/processes/me")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isUnauthorized()
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("UNAUTHENTICATED");
+
+        WebTestClient authenticatedClient = WebTestClient.bindToController(new UserOpencodeProcessController(service))
+                .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
+                .controllerAdvice(new GlobalExceptionHandler())
+                .build();
+
+        authenticatedClient.get()
+                .uri("/api/internal/agent/otheragent/processes/me")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isBadRequest()
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("VALIDATION_ERROR");
     }
 
     @Test
@@ -511,6 +604,20 @@ class RuntimeControllerTest {
                 .expectBody()
                 .jsonPath("$.data.items[0].title").isEqualTo("Demo session")
                 .jsonPath("$.data.items[0].pinned").isEqualTo(true);
+    }
+
+    private static org.springframework.web.server.WebFilter authenticatedUserFilter() {
+        return (exchange, chain) -> {
+            exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, new AuthPrincipal(
+                    "token",
+                    new UserId("usr_1234567890abcdef"),
+                    "admin",
+                    "admin",
+                    List.of("APP_ADMIN"),
+                    NOW,
+                    NOW.plusSeconds(3600)));
+            return chain.filter(exchange);
+        };
     }
 
     private static Workspace workspace() {

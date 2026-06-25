@@ -1,12 +1,21 @@
 package com.icbc.testagent.api.web.platform;
 
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.nullable;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.TraceIdWebFilter;
+import com.icbc.testagent.domain.auth.AuthPrincipal;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -18,9 +27,8 @@ class PlatformOpencodeRuntimeControllerTest {
         OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
         when(service.listAgents(eq("wrk_1234567890abcdef"), eq("trace_1234567890abcdef")))
                 .thenReturn(List.of(Map.of("id", "build")));
-        WebTestClient client = WebTestClient.bindToController(new PlatformOpencodeRuntimeController(service))
-                .webFilter(new TraceIdWebFilter())
-                .build();
+        stubWithUser(service);
+        WebTestClient client = client(service, null);
 
         client.get()
                 .uri("/api/agents?workspaceId=wrk_1234567890abcdef")
@@ -37,9 +45,8 @@ class PlatformOpencodeRuntimeControllerTest {
         OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
         when(service.runtimeStatus(eq("wrk_1234567890abcdef"), eq("trace_1234567890abcdef")))
                 .thenReturn(Map.of("healthy", true));
-        WebTestClient client = WebTestClient.bindToController(new PlatformOpencodeRuntimeController(service))
-                .webFilter(new TraceIdWebFilter())
-                .build();
+        stubWithUser(service);
+        WebTestClient client = client(service, null);
 
         client.get()
                 .uri("/api/status?workspaceId=wrk_1234567890abcdef")
@@ -60,9 +67,8 @@ class PlatformOpencodeRuntimeControllerTest {
                         eq(Map.of("decision", "once")),
                         eq("trace_1234567890abcdef")))
                 .thenReturn(Map.of("accepted", true));
-        WebTestClient client = WebTestClient.bindToController(new PlatformOpencodeRuntimeController(service))
-                .webFilter(new TraceIdWebFilter())
-                .build();
+        stubWithUser(service);
+        WebTestClient client = client(service, null);
 
         client.post()
                 .uri("/api/sessions/ses_1234567890abcdef/permissions/req_1/reply")
@@ -87,9 +93,8 @@ class PlatformOpencodeRuntimeControllerTest {
                         eq("claude-sonnet"),
                         eq("trace_1234567890abcdef")))
                 .thenReturn(List.of(Map.of("id", "bash")));
-        WebTestClient client = WebTestClient.bindToController(new PlatformOpencodeRuntimeController(service))
-                .webFilter(new TraceIdWebFilter())
-                .build();
+        stubWithUser(service);
+        WebTestClient client = client(service, null);
 
         client.get()
                 .uri("/api/mcp/tools?workspaceId=wrk_1234567890abcdef&provider=anthropic&model=claude-sonnet")
@@ -106,9 +111,8 @@ class PlatformOpencodeRuntimeControllerTest {
         OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
         when(service.shareSession(eq("ses_1234567890abcdef"), eq("trace_1234567890abcdef")))
                 .thenReturn(Map.of("url", "https://opencode.ai/s/abc"));
-        WebTestClient client = WebTestClient.bindToController(new PlatformOpencodeRuntimeController(service))
-                .webFilter(new TraceIdWebFilter())
-                .build();
+        stubWithUser(service);
+        WebTestClient client = client(service, null);
 
         client.post()
                 .uri("/api/sessions/ses_1234567890abcdef/share")
@@ -118,5 +122,70 @@ class PlatformOpencodeRuntimeControllerTest {
                 .expectBody()
                 .jsonPath("$.success").isEqualTo(true)
                 .jsonPath("$.data.url").isEqualTo("https://opencode.ai/s/abc");
+    }
+
+    @Test
+    void platformControllerPassesAuthenticatedUserToRuntimeContext() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        UserId userId = new UserId("usr_1234567890abcdef");
+        when(service.runtimeStatus(eq("wrk_1234567890abcdef"), eq("trace_1234567890abcdef")))
+                .thenReturn(Map.of("healthy", true));
+        stubWithUser(service);
+        WebTestClient client = client(service, principal(userId));
+
+        client.get()
+                .uri("/api/status?workspaceId=wrk_1234567890abcdef")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true);
+
+        verify(service).withUser(eq(userId), any());
+    }
+
+    @Test
+    void platformControllerKeepsNullUserContextForStaticTokenCompatibility() {
+        OpencodeRuntimeApplicationService service = org.mockito.Mockito.mock(OpencodeRuntimeApplicationService.class);
+        when(service.runtimeStatus(eq("wrk_1234567890abcdef"), eq("trace_1234567890abcdef")))
+                .thenReturn(Map.of("healthy", true));
+        stubWithUser(service);
+        WebTestClient client = client(service, null);
+
+        client.get()
+                .uri("/api/status?workspaceId=wrk_1234567890abcdef")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).withUser(isNull(), any());
+    }
+
+    private static void stubWithUser(OpencodeRuntimeApplicationService service) {
+        when(service.withUser(nullable(UserId.class), any())).thenAnswer(invocation ->
+                ((Supplier<?>) invocation.getArgument(1)).get());
+    }
+
+    private static WebTestClient client(OpencodeRuntimeApplicationService service, AuthPrincipal principal) {
+        return WebTestClient.bindToController(new PlatformOpencodeRuntimeController(service))
+                .webFilter((exchange, chain) -> {
+                    if (principal != null) {
+                        exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, principal);
+                    }
+                    return chain.filter(exchange);
+                })
+                .webFilter(new TraceIdWebFilter())
+                .build();
+    }
+
+    private static AuthPrincipal principal(UserId userId) {
+        return new AuthPrincipal(
+                "token-123",
+                userId,
+                "alice",
+                "u123",
+                List.of(),
+                Instant.parse("2026-06-19T00:00:00Z"),
+                Instant.parse("2026-06-20T00:00:00Z"));
     }
 }

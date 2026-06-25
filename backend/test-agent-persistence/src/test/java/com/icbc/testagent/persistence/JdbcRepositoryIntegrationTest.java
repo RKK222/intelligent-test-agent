@@ -26,6 +26,25 @@ import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncDirection;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncRecord;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncRecordId;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncStatus;
+import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
+import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
+import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
+import com.icbc.testagent.domain.opencodeprocess.ContainerManagerId;
+import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
+import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
+import com.icbc.testagent.domain.opencodeprocess.LinuxServerStatus;
+import com.icbc.testagent.domain.opencodeprocess.ManagerConnectionStatus;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerManager;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerStatus;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnection;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
+import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
+import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeStatus;
@@ -83,6 +102,7 @@ class JdbcRepositoryIntegrationTest {
     private JdbcAgentSessionBindingRepository agentSessionBindings;
     private JdbcConfigurationManagementRepository configurationManagement;
     private JdbcManagedWorkspaceRepository managedWorkspaces;
+    private JdbcOpencodeProcessManagementRepository opencodeProcesses;
     private JdbcUserRepository users;
     private JdbcClient jdbcClient;
 
@@ -106,6 +126,7 @@ class JdbcRepositoryIntegrationTest {
         agentSessionBindings = new JdbcAgentSessionBindingRepository(jdbcClient);
         configurationManagement = new JdbcConfigurationManagementRepository(jdbcClient);
         managedWorkspaces = new JdbcManagedWorkspaceRepository(jdbcClient, objectMapper);
+        opencodeProcesses = new JdbcOpencodeProcessManagementRepository(jdbcClient, objectMapper);
         users = new JdbcUserRepository(jdbcClient);
     }
 
@@ -686,6 +707,242 @@ class JdbcRepositoryIntegrationTest {
                         new ExecutionNodeId("node_1234567890abcdef"));
     }
 
+    @Test
+    void opencodeProcessManagementRepositoriesSaveAndReadTopology() {
+        users.save(processUser("usr_process_user", "process-user"));
+
+        LinuxServer linuxServer = linuxServer();
+        BackendJavaProcess backendProcess = backendJavaProcess();
+        OpencodeContainer container = opencodeContainer();
+        OpencodeContainerManager manager = opencodeContainerManager();
+        OpencodeManagerBackendConnection connection = managerBackendConnection();
+        OpencodeServerProcess process = opencodeServerProcess("ocp_1234567890abcdef", "usr_process_user", 4096);
+        UserOpencodeProcessBinding binding = userBinding("usr_process_user", "ocp_1234567890abcdef", 4096);
+
+        opencodeProcesses.saveLinuxServer(linuxServer);
+        opencodeProcesses.saveBackendJavaProcess(backendProcess);
+        opencodeProcesses.saveContainer(container);
+        opencodeProcesses.saveContainerManager(manager);
+        opencodeProcesses.saveManagerBackendConnection(connection);
+        opencodeProcesses.saveOpencodeServerProcess(process);
+        opencodeProcesses.saveUserBinding(binding);
+
+        assertThat(opencodeProcesses.findLinuxServerById(linuxServer.linuxServerId())).contains(linuxServer);
+        assertThat(opencodeProcesses.findBackendJavaProcessById(backendProcess.backendProcessId())).contains(backendProcess);
+        assertThat(opencodeProcesses.findContainerById(container.containerId())).contains(container);
+        assertThat(opencodeProcesses.findHealthyContainers(10)).containsExactly(container);
+        assertThat(opencodeProcesses.findHealthyContainersByLinuxServer(new LinuxServerId("10.8.0.12"), 10))
+                .containsExactly(container);
+        assertThat(opencodeProcesses.findContainerManagerById(manager.managerId())).contains(manager);
+        assertThat(opencodeProcesses.findManagerBackendConnection(manager.managerId(), backendProcess.backendProcessId()))
+                .contains(connection);
+        assertThat(opencodeProcesses.findOpencodeServerProcessById(process.processId())).contains(process);
+        assertThat(opencodeProcesses.findUserBinding(new UserId("usr_process_user"), " OPENCODE ")).contains(binding);
+        assertThat(opencodeProcesses.findOccupiedPorts(new LinuxServerId("10.8.0.12"), new OpencodeContainerId("ctr_01")))
+                .containsExactly(4096);
+        assertThat(opencodeProcesses.findOpencodeServerProcesses(10)).containsExactly(process);
+        assertThat(opencodeProcesses.findLinuxServers(500)).containsExactly(linuxServer);
+        assertThat(opencodeProcesses.findBackendJavaProcesses(500)).containsExactly(backendProcess);
+        assertThat(opencodeProcesses.findContainers(500)).containsExactly(container);
+        assertThat(opencodeProcesses.findContainerManagers(500)).containsExactly(manager);
+        assertThat(opencodeProcesses.findManagerBackendConnections(500)).containsExactly(connection);
+        assertThat(opencodeProcesses.countUserBindings()).isEqualTo(1);
+        assertThat(opencodeProcesses.findUserBindingsByProcessIds(List.of(process.processId())))
+                .containsEntry(process.processId(), binding);
+        OpencodeServerProcessFilter filter = new OpencodeServerProcessFilter(
+                OpencodeServerProcessStatus.RUNNING,
+                new LinuxServerId("10.8.0.12"),
+                new OpencodeContainerId("ctr_01"),
+                new UserId("usr_process_user"));
+        PageResponse<OpencodeServerProcess> filtered = opencodeProcesses.findOpencodeServerProcesses(filter, new PageRequest(1, 10));
+        assertThat(filtered.items()).containsExactly(process);
+        assertThat(filtered.total()).isEqualTo(1);
+        assertThat(opencodeProcesses.countOpencodeServerProcesses(filter)).isEqualTo(1);
+    }
+
+    @Test
+    void opencodeProcessManagementPagesAndFiltersServerProcesses() {
+        users.save(processUser("usr_process_user", "process-user"));
+        users.save(processUser("usr_process_second", "process-second"));
+        opencodeProcesses.saveLinuxServer(linuxServer());
+        opencodeProcesses.saveBackendJavaProcess(backendJavaProcess());
+        opencodeProcesses.saveContainer(opencodeContainer());
+        opencodeProcesses.saveContainerManager(opencodeContainerManager());
+        OpencodeServerProcess running = opencodeServerProcess(
+                "ocp_1234567890abcdef",
+                "usr_process_user",
+                4096,
+                OpencodeServerProcessStatus.RUNNING);
+        OpencodeServerProcess unhealthy = opencodeServerProcess(
+                "ocp_2234567890abcdef",
+                "usr_process_second",
+                4097,
+                OpencodeServerProcessStatus.UNHEALTHY);
+        opencodeProcesses.saveOpencodeServerProcess(running);
+        opencodeProcesses.saveOpencodeServerProcess(unhealthy);
+
+        PageResponse<OpencodeServerProcess> runningPage = opencodeProcesses.findOpencodeServerProcesses(
+                new OpencodeServerProcessFilter(
+                        OpencodeServerProcessStatus.RUNNING,
+                        new LinuxServerId("10.8.0.12"),
+                        new OpencodeContainerId("ctr_01"),
+                        null),
+                new PageRequest(1, 10));
+        PageResponse<OpencodeServerProcess> secondUserPage = opencodeProcesses.findOpencodeServerProcesses(
+                new OpencodeServerProcessFilter(null, null, null, new UserId("usr_process_second")),
+                new PageRequest(1, 10));
+
+        assertThat(runningPage.items()).containsExactly(running);
+        assertThat(runningPage.total()).isEqualTo(1);
+        assertThat(opencodeProcesses.countOpencodeServerProcesses(new OpencodeServerProcessFilter(
+                OpencodeServerProcessStatus.RUNNING,
+                new LinuxServerId("10.8.0.12"),
+                new OpencodeContainerId("ctr_01"),
+                null))).isEqualTo(1);
+        assertThat(secondUserPage.items()).containsExactly(unhealthy);
+        assertThat(secondUserPage.total()).isEqualTo(1);
+    }
+
+    @Test
+    void opencodeProcessManagementFindsReadyBackendsAndConnectedContainers() {
+        LinuxServer linuxServer = linuxServer();
+        BackendJavaProcess currentBackend = backendJavaProcess();
+        BackendJavaProcess staleBackend = new BackendJavaProcess(
+                new BackendProcessId("bjp_2234567890abcdef"),
+                new LinuxServerId("10.8.0.12"),
+                "http://10.8.0.12:8081",
+                BackendJavaProcessStatus.READY,
+                NOW,
+                NOW.minusSeconds(60),
+                NOW,
+                NOW,
+                "trace_2234567890abcdef");
+        BackendJavaProcess otherBackend = new BackendJavaProcess(
+                new BackendProcessId("bjp_3234567890abcdef"),
+                new LinuxServerId("10.8.0.12"),
+                "http://10.8.0.12:8082",
+                BackendJavaProcessStatus.READY,
+                NOW,
+                NOW,
+                NOW,
+                NOW,
+                "trace_3234567890abcdef");
+        OpencodeContainer connectedContainer = opencodeContainer();
+        OpencodeContainer otherBackendContainer = new OpencodeContainer(
+                new OpencodeContainerId("ctr_02"),
+                new LinuxServerId("10.8.0.12"),
+                "opencode-b",
+                4101,
+                4105,
+                4,
+                0,
+                OpencodeContainerStatus.READY,
+                NOW,
+                NOW,
+                NOW.plusMillis(1),
+                "trace_3234567890abcdef");
+        OpencodeContainerManager connectedManager = opencodeContainerManager();
+        OpencodeContainerManager otherManager = new OpencodeContainerManager(
+                new ContainerManagerId("mgr_2234567890abcdef"),
+                new OpencodeContainerId("ctr_02"),
+                new LinuxServerId("10.8.0.12"),
+                "opencode-manager.v1",
+                ManagerConnectionStatus.CONNECTED,
+                Map.of("start", true, "health", true),
+                NOW,
+                NOW,
+                NOW,
+                "trace_3234567890abcdef");
+
+        opencodeProcesses.saveLinuxServer(linuxServer);
+        opencodeProcesses.saveBackendJavaProcess(currentBackend);
+        opencodeProcesses.saveBackendJavaProcess(staleBackend);
+        opencodeProcesses.saveBackendJavaProcess(otherBackend);
+        opencodeProcesses.saveContainer(connectedContainer);
+        opencodeProcesses.saveContainer(otherBackendContainer);
+        opencodeProcesses.saveContainerManager(connectedManager);
+        opencodeProcesses.saveContainerManager(otherManager);
+        opencodeProcesses.saveManagerBackendConnection(managerBackendConnection());
+        opencodeProcesses.saveManagerBackendConnection(new OpencodeManagerBackendConnection(
+                otherManager.managerId(),
+                otherBackend.backendProcessId(),
+                ManagerConnectionStatus.CONNECTED,
+                NOW,
+                NOW,
+                NOW,
+                "trace_3234567890abcdef"));
+        opencodeProcesses.saveManagerBackendConnection(new OpencodeManagerBackendConnection(
+                otherManager.managerId(),
+                currentBackend.backendProcessId(),
+                ManagerConnectionStatus.DISCONNECTED,
+                NOW,
+                NOW,
+                NOW,
+                "trace_4234567890abcdef"));
+
+        assertThat(opencodeProcesses.findReadyBackendJavaProcesses(NOW.minusSeconds(5), 10))
+                .containsExactly(currentBackend, otherBackend);
+        assertThat(opencodeProcesses.findHealthyContainersConnectedToBackend(currentBackend.backendProcessId(), 10))
+                .containsExactly(connectedContainer);
+        assertThat(opencodeProcesses.findHealthyContainersConnectedToBackendByLinuxServer(
+                        currentBackend.backendProcessId(),
+                        new LinuxServerId("10.8.0.12"),
+                        10))
+                .containsExactly(connectedContainer);
+    }
+
+    @Test
+    void opencodeProcessManagementConstraintsProtectCurrentTopology() {
+        users.save(processUser("usr_process_user", "process-user"));
+        users.save(processUser("usr_process_second", "process-second"));
+        opencodeProcesses.saveLinuxServer(linuxServer());
+        opencodeProcesses.saveBackendJavaProcess(backendJavaProcess());
+        opencodeProcesses.saveContainer(opencodeContainer());
+        opencodeProcesses.saveContainerManager(opencodeContainerManager());
+        opencodeProcesses.saveOpencodeServerProcess(opencodeServerProcess("ocp_1234567890abcdef", "usr_process_user", 4096));
+
+        assertThatThrownBy(() -> opencodeProcesses.saveContainerManager(new OpencodeContainerManager(
+                        new ContainerManagerId("mgr_2234567890abcdef"),
+                        new OpencodeContainerId("ctr_01"),
+                        new LinuxServerId("10.8.0.12"),
+                        "v1",
+                        ManagerConnectionStatus.CONNECTED,
+                        Map.of("start", true),
+                        NOW,
+                        NOW,
+                        NOW,
+                        "trace_1234567890abcdef")))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        assertThatThrownBy(() -> opencodeProcesses.saveOpencodeServerProcess(
+                        opencodeServerProcess("ocp_2234567890abcdef", "usr_process_second", 4096)))
+                .isInstanceOf(DataIntegrityViolationException.class);
+
+        opencodeProcesses.saveOpencodeServerProcess(opencodeServerProcess("ocp_3234567890abcdef", "usr_process_second", 4097));
+        opencodeProcesses.saveUserBinding(userBinding("usr_process_user", "ocp_1234567890abcdef", 4096));
+        assertThatThrownBy(() -> jdbcClient.sql("""
+                                insert into user_opencode_process_bindings(
+                                    user_id, agent_id, process_id, linux_server_id, port,
+                                    status, trace_id, created_at, updated_at
+                                )
+                                values (
+                                    :userId, :agentId, :processId, :linuxServerId, :port,
+                                    :status, :traceId, :createdAt, :updatedAt
+                                )
+                                """)
+                        .param("userId", "usr_process_user")
+                        .param("agentId", "opencode")
+                        .param("processId", "ocp_3234567890abcdef")
+                        .param("linuxServerId", "10.8.0.12")
+                        .param("port", 4097)
+                        .param("status", UserOpencodeProcessBindingStatus.ACTIVE.name())
+                        .param("traceId", "trace_1234567890abcdef")
+                        .param("createdAt", Timestamp.from(NOW))
+                        .param("updatedAt", Timestamp.from(NOW))
+                        .update())
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
     private static Workspace workspace() {
         return new Workspace(
                 new WorkspaceId("wrk_1234567890abcdef"),
@@ -766,6 +1023,127 @@ class JdbcRepositoryIntegrationTest {
                 new RunId("run_1234567890abcdef"),
                 new ExecutionNodeId("node_1234567890abcdef"),
                 RoutingReason.LOWEST_LOAD,
+                NOW,
+                "trace_1234567890abcdef");
+    }
+
+    private static User processUser(String userId, String username) {
+        return new User(
+                new UserId(userId),
+                "UA_" + username,
+                username,
+                "hash",
+                "org",
+                "rd",
+                "dept",
+                com.icbc.testagent.domain.user.UserStatus.ACTIVE,
+                NOW,
+                NOW);
+    }
+
+    private static LinuxServer linuxServer() {
+        return new LinuxServer(
+                new LinuxServerId("10.8.0.12"),
+                "backend-a",
+                LinuxServerStatus.READY,
+                Map.of("containers", 1, "processes", 1),
+                NOW,
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+    }
+
+    private static BackendJavaProcess backendJavaProcess() {
+        return new BackendJavaProcess(
+                new BackendProcessId("bjp_1234567890abcdef"),
+                new LinuxServerId("10.8.0.12"),
+                "http://10.8.0.12:8080",
+                BackendJavaProcessStatus.READY,
+                NOW,
+                NOW,
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+    }
+
+    private static OpencodeContainer opencodeContainer() {
+        return new OpencodeContainer(
+                new OpencodeContainerId("ctr_01"),
+                new LinuxServerId("10.8.0.12"),
+                "opencode-a",
+                4096,
+                4100,
+                4,
+                1,
+                OpencodeContainerStatus.READY,
+                NOW,
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+    }
+
+    private static OpencodeContainerManager opencodeContainerManager() {
+        return new OpencodeContainerManager(
+                new ContainerManagerId("mgr_1234567890abcdef"),
+                new OpencodeContainerId("ctr_01"),
+                new LinuxServerId("10.8.0.12"),
+                "v1",
+                ManagerConnectionStatus.CONNECTED,
+                Map.of("start", true, "health", true),
+                NOW,
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+    }
+
+    private static OpencodeManagerBackendConnection managerBackendConnection() {
+        return new OpencodeManagerBackendConnection(
+                new ContainerManagerId("mgr_1234567890abcdef"),
+                new BackendProcessId("bjp_1234567890abcdef"),
+                ManagerConnectionStatus.CONNECTED,
+                NOW,
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+    }
+
+    private static OpencodeServerProcess opencodeServerProcess(String processId, String userId, int port) {
+        return opencodeServerProcess(processId, userId, port, OpencodeServerProcessStatus.RUNNING);
+    }
+
+    private static OpencodeServerProcess opencodeServerProcess(
+            String processId,
+            String userId,
+            int port,
+            OpencodeServerProcessStatus status) {
+        return new OpencodeServerProcess(
+                new OpencodeProcessId(processId),
+                new UserId(userId),
+                new LinuxServerId("10.8.0.12"),
+                new OpencodeContainerId("ctr_01"),
+                port,
+                12345L,
+                "http://10.8.0.12:" + port,
+                status,
+                "/data/opencode/session/" + port,
+                "/data/opencode/.config/opencode/",
+                NOW,
+                NOW,
+                "ok",
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+    }
+
+    private static UserOpencodeProcessBinding userBinding(String userId, String processId, int port) {
+        return new UserOpencodeProcessBinding(
+                new UserId(userId),
+                "opencode",
+                new OpencodeProcessId(processId),
+                new LinuxServerId("10.8.0.12"),
+                port,
+                UserOpencodeProcessBindingStatus.ACTIVE,
+                NOW,
                 NOW,
                 "trace_1234567890abcdef");
     }

@@ -1,6 +1,8 @@
 package com.icbc.testagent.api.web.agent;
 
+import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.runtime.OpencodeRuntimeApplicationService;
 import com.icbc.testagent.common.api.ApiResponse;
 import java.util.Map;
@@ -590,7 +592,16 @@ public class AgentOpencodeRuntimeController {
         String agentId = agentId(exchange);
         return RuntimeApiSupport.blockingObjectResponse(
                 exchange,
-                traceId -> runtimeService.withAgent(agentId, () -> action.apply(traceId)));
+                traceId -> runtimeService.withAgent(agentId, optionalUserId(exchange), () -> action.apply(traceId)));
+    }
+
+    /**
+     * 用户 token 鉴权成功时传入 UserId；static token 或本地放行时返回空保持旧固定节点兼容。
+     */
+    private UserId optionalUserId(ServerWebExchange exchange) {
+        return AuthWebSupport.getOptionalAuthPrincipal(exchange)
+                .map(principal -> principal.userId())
+                .orElse(null);
     }
 
     /**

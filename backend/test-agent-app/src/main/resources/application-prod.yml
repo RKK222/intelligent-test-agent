@@ -43,6 +43,14 @@ test-agent:
       auth-mode: ${TEST_AGENT_ICBC_OPENAI_AUTH_MODE:auth-token}
       default-model: ${TEST_AGENT_INTERNAL_DEFAULT_MODEL:DeepSeek-V4-Flash-W8A8}
   opencode:
+    manager-control:
+      token: ${TEST_AGENT_OPENCODE_MANAGER_TOKEN}
+      listen-url: ${TEST_AGENT_BACKEND_LISTEN_URL}
+      linux-server-id: ${TEST_AGENT_LINUX_SERVER_ID}
+      heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:10s}
+      backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:30s}
+      command-timeout: ${TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT:10s}
+      backend-discovery-limit: ${TEST_AGENT_BACKEND_DISCOVERY_LIMIT:100}
     nodes:
       - id: ${TEST_AGENT_OPENCODE_NODE_ID:node_prod_opencode}
         base-url: ${TEST_AGENT_OPENCODE_BASE_URL}

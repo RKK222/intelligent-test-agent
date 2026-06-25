@@ -99,6 +99,141 @@ export type Run = {
   updatedAt: string;
 };
 
+export type UserOpencodeProcessStatus = "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE" | string;
+
+export type UserOpencodeProcess = {
+  status: UserOpencodeProcessStatus;
+  initializable: boolean;
+  message: string;
+  processId?: string;
+  linuxServerId?: string;
+  containerId?: string;
+  port?: number;
+  baseUrl?: string;
+  checkedAt: string;
+};
+
+// ---- opencode 运行管理类型 ----
+
+export type OpencodeRuntimeManagementOverviewParams = {
+  status?: string;
+  linuxServerId?: string;
+  containerId?: string;
+  userId?: string;
+  page?: number;
+  size?: number;
+};
+
+export type OpencodeRuntimeManagementSummary = {
+  linuxServers: number;
+  readyLinuxServers: number;
+  backendProcesses: number;
+  readyBackendProcesses: number;
+  containers: number;
+  readyContainers: number;
+  managers: number;
+  connectedManagers: number;
+  managerBackendConnections: number;
+  opencodeProcesses: number;
+  runningOpencodeProcesses: number;
+  userBindings: number;
+};
+
+export type OpencodeRuntimeLinuxServer = {
+  linuxServerId: string;
+  name: string;
+  status: string;
+  capacitySummary: Record<string, unknown>;
+  lastHeartbeatAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  traceId: string;
+};
+
+export type OpencodeRuntimeBackendProcess = {
+  backendProcessId: string;
+  linuxServerId: string;
+  listenUrl: string;
+  status: string;
+  startedAt?: string | null;
+  lastHeartbeatAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  traceId: string;
+};
+
+export type OpencodeRuntimeContainer = {
+  containerId: string;
+  linuxServerId: string;
+  containerName: string;
+  portStart: number;
+  portEnd: number;
+  maxProcesses: number;
+  currentProcesses: number;
+  availableCapacity: number;
+  status: string;
+  lastHeartbeatAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  traceId: string;
+};
+
+export type OpencodeRuntimeManager = {
+  managerId: string;
+  containerId: string;
+  linuxServerId: string;
+  protocolVersion: string;
+  connectionStatus: string;
+  capabilities: Record<string, unknown>;
+  lastHeartbeatAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  traceId: string;
+};
+
+export type OpencodeRuntimeManagerBackendConnection = {
+  managerId: string;
+  backendProcessId: string;
+  status: string;
+  connectedAt?: string | null;
+  lastHeartbeatAt?: string | null;
+  updatedAt: string;
+  traceId: string;
+};
+
+export type OpencodeRuntimeProcess = {
+  processId: string;
+  userId: string;
+  linuxServerId: string;
+  containerId: string;
+  port: number;
+  pid?: number | null;
+  baseUrl: string;
+  status: string;
+  sessionPath: string;
+  configPath: string;
+  startedAt?: string | null;
+  lastHealthCheckAt?: string | null;
+  healthMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  traceId: string;
+  bindingAgentId?: string | null;
+  bindingStatus?: string | null;
+  bindingUpdatedAt?: string | null;
+};
+
+export type OpencodeRuntimeManagementOverview = {
+  generatedAt: string;
+  summary: OpencodeRuntimeManagementSummary;
+  linuxServers: OpencodeRuntimeLinuxServer[];
+  backendProcesses: OpencodeRuntimeBackendProcess[];
+  containers: OpencodeRuntimeContainer[];
+  managers: OpencodeRuntimeManager[];
+  managerBackendConnections: OpencodeRuntimeManagerBackendConnection[];
+  opencodeProcesses: PageResponse<OpencodeRuntimeProcess>;
+};
+
 export type RunEventType =
   | "run.created"
   | "run.started"

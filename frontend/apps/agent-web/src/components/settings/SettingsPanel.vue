@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
 import type { CurrentUser } from "@test-agent/shared-types";
+import RuntimeManagementPanel from "./RuntimeManagementPanel.vue";
 import SettingsAppWorkspacePanel from "./SettingsAppWorkspacePanel.vue";
 import SettingsPersonalPanel from "./SettingsPersonalPanel.vue";
 
@@ -13,6 +14,7 @@ const props = defineProps<{
 
 const panels: Record<string, PanelDef> = {
   appWorkspace: { title: "应用与工作区", component: SettingsAppWorkspacePanel },
+  runtimeManagement: { title: "运行管理", component: RuntimeManagementPanel },
   personal: { title: "个人设置", component: SettingsPersonalPanel }
 };
 
