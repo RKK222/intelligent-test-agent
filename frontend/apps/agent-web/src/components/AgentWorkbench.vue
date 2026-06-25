@@ -1372,14 +1372,14 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   }
   if (!opencodeProcessReady.value) {
     feedback.value = {
-      kind: “info”,
-      title: “请先初始化 opencode 进程”,
-      description: opencodeProcessStatus.value?.message ?? “正在检查当前用户可用进程”
+      kind: "info",
+      title: "请先初始化 opencode 进程",
+      description: opencodeProcessStatus.value?.message ?? "正在检查当前用户可用进程"
     };
     return;
   }
   if (!selectedWorkspace.value) {
-    feedback.value = { kind: “info”, title: “未选择工作区”, description: “请先点击”选择本机目录”或切换到可用工作区，再发送任务。” };
+    feedback.value = { kind: "info", title: "未选择工作区", description: "请先点击“选择本机目录”或切换到可用工作区，再发送任务。" };
     return;
   }
   const parts = buildPromptParts(prompt, activeTab.value, attachments, diffContextParts.value, editorSelection.value);

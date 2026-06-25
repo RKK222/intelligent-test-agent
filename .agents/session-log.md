@@ -2,6 +2,15 @@
 
 ## Entries
 
+### 2026-06-25 - Fix AgentWorkbench Curly Quote Parse Error
+
+- Why: 本地 Vite 启动后报 `[vue/compiler-sfc] Unexpected character '“'`，`AgentWorkbench.vue` 的 `handleSend` 分支里混入了中文弯引号，导致 SFC 无法解析。
+- What: 将 `feedback.value` 对象里的非法弯引号恢复为 TypeScript 字符串所需的 ASCII 引号，保留用户可见文案里的中文引号。
+- How: 只修改 `AgentWorkbench.vue` 报错段落，并用前端 build 与 dev server 页面访问验证。
+- Result: `corepack pnpm --filter @test-agent/agent-web build` 通过；`http://127.0.0.1:3000/` 已无 Vite overlay，页面进入登录态。
+- Pitfalls: 无。
+- Verification: 前端 build；Playwright 访问本地 dev server 检查无 `[plugin:vite:*]` overlay 和控制台错误。
+
 ### 2026-06-25 - Close opencode process deployment operations batch
 
 - Why: opencode 用户进程管理已经完成数据模型、调度契约、manager 控制面、runtime 接入和超管页面，还缺少多 Linux 服务器真实部署、扩容、回滚和验收说明。
