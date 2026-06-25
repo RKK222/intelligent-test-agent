@@ -32,6 +32,7 @@ import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunStatus;
+import com.icbc.testagent.domain.run.TokenUsage;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionStatus;
@@ -44,8 +45,10 @@ import com.icbc.testagent.event.RunEventSsePayload;
 import com.icbc.testagent.event.RunEventSseStreamService;
 import java.time.Duration;
 import java.time.Instant;
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
@@ -165,7 +168,10 @@ class RuntimeControllerTest {
                 .expectBody()
                 .jsonPath("$.success").isEqualTo(true)
                 .jsonPath("$.data.runId").isEqualTo("run_1234567890abcdef")
-                .jsonPath("$.data.status").isEqualTo("RUNNING");
+                .jsonPath("$.data.status").isEqualTo("RUNNING")
+                .jsonPath("$.data.tokens.input").isEqualTo(11)
+                .jsonPath("$.data.tokens.output").isEqualTo(12)
+                .jsonPath("$.data.costUsd").isEqualTo(0.25);
     }
 
     @Test
@@ -620,6 +626,27 @@ class RuntimeControllerTest {
         };
     }
 
+    @Test
+    void sessionControllerReturnsLatestActiveRunForRefreshRecovery() {
+        SessionApplicationService sessionService = org.mockito.Mockito.mock(SessionApplicationService.class);
+        RunApplicationService runService = org.mockito.Mockito.mock(RunApplicationService.class);
+        when(runService.findActiveRun(eq(new SessionId("ses_1234567890abcdef"))))
+                .thenReturn(Optional.of(run()));
+        WebTestClient client = WebTestClient.bindToController(new SessionController(sessionService, runService))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.get()
+                .uri("/api/sessions/ses_1234567890abcdef/active-run")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.success").isEqualTo(true)
+                .jsonPath("$.data.runId").isEqualTo("run_1234567890abcdef")
+                .jsonPath("$.data.status").isEqualTo("RUNNING");
+    }
+
     private static Workspace workspace() {
         return new Workspace(
                 new WorkspaceId("wrk_1234567890abcdef"),
@@ -639,7 +666,8 @@ class RuntimeControllerTest {
                 RunStatus.RUNNING,
                 NOW,
                 NOW,
-                "trace_1234567890abcdef");
+                "trace_1234567890abcdef")
+                .withUsage(new TokenUsage(11L, 12L, null, null, null), new BigDecimal("0.25"));
     }
 
     private static Session session(String title, boolean pinned, SessionStatus status) {

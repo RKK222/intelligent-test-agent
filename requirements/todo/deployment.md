@@ -88,3 +88,9 @@ XDG_DATA_HOME=/data/opencode/session/{port}
 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/
 
 https://opencode.ai/docs/cli/
+1、进行中和历史会话从数据库中查标题和列表，不直接根据opencode session从opencode查。
+2、一个会话中，每次的用户输入和opencode server的输出需要在这次对话的输出完成后持久化（确认是否是持久化到session_messages中），同时需要增加每次对话的token消耗的持久化。
+3、查询以完成的会话时，优先根据opencode session调用opencode接口恢复会话消息，如果用户的opencode 进程不存在，则从数据库中查询并展示。
+4、优化前端的发送按钮展示逻辑，如果是运行中的状态，则展示为终止按钮，点击以后可以立刻停止输出，并做持久化。
+5、新增run过程中的会话恢复机制，当run还在执行但前端关闭或者刷新是，再次进入会话，如果还是run中，则需要支持查询到历史信息并且仍保证增量输出。由于后端是分布式部署，前端不一定会连接到原来的后端恢复sse输出。建议的方案：前端重新连接后，发送恢复sse的请求，后端负责找到当前sse在哪里，比如sse在B服务器，前端连到了A服务器，则通过A服务器找到B服务器，并在AB之间建立sse。这样来实现后续增量消息的输出，存量消息则从opencode session中查询，然后在前端同步展示增量和存量。
+

@@ -19,6 +19,14 @@ abstract class JdbcRepositorySupport {
     }
 
     /**
+     * 从 ResultSet 读取可空 timestamp，字段为空时使用调用方提供的兼容默认值。
+     */
+    protected Instant instantOrDefault(ResultSet resultSet, String column, Instant defaultValue) throws SQLException {
+        Instant value = instant(resultSet, column);
+        return value == null ? defaultValue : value;
+    }
+
+    /**
      * PostgreSQL JDBC 不能稳定推断 Instant 参数类型，写入 timestamp 字段前统一显式转换。
      */
     protected Timestamp timestamp(Instant instant) {

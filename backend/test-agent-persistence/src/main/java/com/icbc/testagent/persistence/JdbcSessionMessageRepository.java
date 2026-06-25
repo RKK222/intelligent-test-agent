@@ -2,6 +2,8 @@ package com.icbc.testagent.persistence;
 
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
+import com.icbc.testagent.domain.run.RunId;
+import com.icbc.testagent.domain.run.TokenUsage;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionMessage;
 import com.icbc.testagent.domain.session.SessionMessageId;
@@ -25,7 +27,19 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
             SessionMessageRole.valueOf(rs.getString("role")),
             rs.getString("content"),
             instant(rs, "created_at"),
-            rs.getString("trace_id"));
+            rs.getString("trace_id"),
+            runId(rs.getString("run_id")),
+            rs.getString("agent_id"),
+            rs.getString("remote_message_id"),
+            rs.getString("parts_json"),
+            new TokenUsage(
+                    rs.getObject("tokens_input", Long.class),
+                    rs.getObject("tokens_output", Long.class),
+                    rs.getObject("tokens_reasoning", Long.class),
+                    rs.getObject("tokens_cache_read", Long.class),
+                    rs.getObject("tokens_cache_write", Long.class)),
+            rs.getBigDecimal("cost_usd"),
+            instantOrDefault(rs, "updated_at", instant(rs, "created_at")));
 
     /**
      * 注入 JdbcClient，消息持久化保持和 Session 聚合分离。
@@ -43,7 +57,14 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
             jdbcClient.sql("""
                             update session_messages
                             set session_id = :sessionId, role = :role, content = :content,
-                                trace_id = :traceId, created_at = :createdAt
+                                trace_id = :traceId, created_at = :createdAt,
+                                run_id = :runId, agent_id = :agentId,
+                                remote_message_id = :remoteMessageId, parts_json = :partsJson,
+                                tokens_input = :tokensInput, tokens_output = :tokensOutput,
+                                tokens_reasoning = :tokensReasoning,
+                                tokens_cache_read = :tokensCacheRead,
+                                tokens_cache_write = :tokensCacheWrite,
+                                cost_usd = :costUsd, updated_at = :updatedAt
                             where message_id = :messageId
                             """)
                     .param("messageId", message.messageId().value())
@@ -52,11 +73,32 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                     .param("content", message.content())
                     .param("traceId", message.traceId())
                     .param("createdAt", timestamp(message.createdAt()))
+                    .param("runId", runIdValue(message.runId()))
+                    .param("agentId", message.agentId())
+                    .param("remoteMessageId", message.remoteMessageId())
+                    .param("partsJson", message.partsJson())
+                    .param("tokensInput", message.tokenUsage().input())
+                    .param("tokensOutput", message.tokenUsage().output())
+                    .param("tokensReasoning", message.tokenUsage().reasoning())
+                    .param("tokensCacheRead", message.tokenUsage().cacheRead())
+                    .param("tokensCacheWrite", message.tokenUsage().cacheWrite())
+                    .param("costUsd", message.costUsd())
+                    .param("updatedAt", timestamp(message.updatedAt()))
                     .update();
         } else {
             jdbcClient.sql("""
-                            insert into session_messages(message_id, session_id, role, content, trace_id, created_at)
-                            values (:messageId, :sessionId, :role, :content, :traceId, :createdAt)
+                            insert into session_messages(
+                                message_id, session_id, role, content, trace_id, created_at,
+                                run_id, agent_id, remote_message_id, parts_json,
+                                tokens_input, tokens_output, tokens_reasoning,
+                                tokens_cache_read, tokens_cache_write, cost_usd, updated_at
+                            )
+                            values (
+                                :messageId, :sessionId, :role, :content, :traceId, :createdAt,
+                                :runId, :agentId, :remoteMessageId, :partsJson,
+                                :tokensInput, :tokensOutput, :tokensReasoning,
+                                :tokensCacheRead, :tokensCacheWrite, :costUsd, :updatedAt
+                            )
                             """)
                     .param("messageId", message.messageId().value())
                     .param("sessionId", message.sessionId().value())
@@ -64,6 +106,17 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                     .param("content", message.content())
                     .param("traceId", message.traceId())
                     .param("createdAt", timestamp(message.createdAt()))
+                    .param("runId", runIdValue(message.runId()))
+                    .param("agentId", message.agentId())
+                    .param("remoteMessageId", message.remoteMessageId())
+                    .param("partsJson", message.partsJson())
+                    .param("tokensInput", message.tokenUsage().input())
+                    .param("tokensOutput", message.tokenUsage().output())
+                    .param("tokensReasoning", message.tokenUsage().reasoning())
+                    .param("tokensCacheRead", message.tokenUsage().cacheRead())
+                    .param("tokensCacheWrite", message.tokenUsage().cacheWrite())
+                    .param("costUsd", message.costUsd())
+                    .param("updatedAt", timestamp(message.updatedAt()))
                     .update();
         }
         return message;
@@ -75,11 +128,39 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
     @Override
     public Optional<SessionMessage> findById(SessionMessageId messageId) {
         return jdbcClient.sql("""
-                        select message_id, session_id, role, content, trace_id, created_at
+                        select message_id, session_id, role, content, trace_id, created_at,
+                               run_id, agent_id, remote_message_id, parts_json,
+                               tokens_input, tokens_output, tokens_reasoning,
+                               tokens_cache_read, tokens_cache_write, cost_usd, updated_at
                         from session_messages
                         where message_id = :messageId
                         """)
                 .param("messageId", messageId.value())
+                .query(rowMapper)
+                .optional();
+    }
+
+    /**
+     * 按远端消息 ID 查询平台快照，确保同一条 opencode message 多次恢复不会重复落库。
+     */
+    @Override
+    public Optional<SessionMessage> findBySessionIdAndRemoteMessageId(SessionId sessionId, String remoteMessageId) {
+        if (remoteMessageId == null || remoteMessageId.isBlank()) {
+            return Optional.empty();
+        }
+        return jdbcClient.sql("""
+                        select message_id, session_id, role, content, trace_id, created_at,
+                               run_id, agent_id, remote_message_id, parts_json,
+                               tokens_input, tokens_output, tokens_reasoning,
+                               tokens_cache_read, tokens_cache_write, cost_usd, updated_at
+                        from session_messages
+                        where session_id = :sessionId
+                          and remote_message_id = :remoteMessageId
+                        order by updated_at desc, id desc
+                        limit 1
+                        """)
+                .param("sessionId", sessionId.value())
+                .param("remoteMessageId", remoteMessageId)
                 .query(rowMapper)
                 .optional();
     }
@@ -90,7 +171,10 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
     @Override
     public PageResponse<SessionMessage> findBySessionId(SessionId sessionId, PageRequest pageRequest) {
         var items = jdbcClient.sql("""
-                        select message_id, session_id, role, content, trace_id, created_at
+                        select message_id, session_id, role, content, trace_id, created_at,
+                               run_id, agent_id, remote_message_id, parts_json,
+                               tokens_input, tokens_output, tokens_reasoning,
+                               tokens_cache_read, tokens_cache_write, cost_usd, updated_at
                         from session_messages
                         where session_id = :sessionId
                         order by created_at asc, id asc
@@ -110,5 +194,13 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                 .query(Long.class)
                 .single();
         return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);
+    }
+
+    private RunId runId(String value) {
+        return value == null ? null : new RunId(value);
+    }
+
+    private String runIdValue(RunId runId) {
+        return runId == null ? null : runId.value();
     }
 }

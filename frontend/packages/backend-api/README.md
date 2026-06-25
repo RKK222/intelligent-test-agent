@@ -11,12 +11,14 @@
 - 默认 30 秒请求超时，可通过 `requestTimeoutMs` 覆盖；超时统一映射为 `BackendApiError` 的 `REQUEST_TIMEOUT`。
 - 映射统一错误响应为 `BackendApiError`。
 - 暴露 Workspace、受控目录选择、文件、Session、Session message、Run、Diff API 方法；Session 支持 workspace 列表、全局搜索、标题/置顶更新和软删除。Workspace/Session CRUD 仍走平台 URL，不放入 agent URL。
+- 暴露 `getActiveRun(sessionId)`，用于刷新或重进会话后恢复仍在执行的 RunEvent SSE 订阅；返回 `null` 表示当前会话没有非终态 Run。
+- Session message 和 Run 响应透传可选 `parts`、`tokens`、`costUsd` 等新增字段，旧后端缺字段时保持兼容。
 - 暴露配置管理和个人 SSH key API 方法，统一走 `/api/internal/platform/configuration-management`，不直连 Git 服务或 opencode server。
 - 暴露应用版本工作区和个人工作区 API 方法，统一走 `/api/internal/platform/workspace-management`，包括成员应用、模板、版本、个人空间、最近使用、diff 和同步。
 - 暴露当前用户 opencode 进程状态与初始化方法：`getMyOpencodeProcess()`、`initializeMyOpencodeProcess()`，统一走默认 `opencode` 的 agent-scoped URL。
 - 暴露超级管理员运行管理只读方法：`getOpencodeRuntimeManagementOverview(params)`，统一走 `/api/internal/platform/opencode-runtime/management/overview`，自动携带用户 Bearer Token。
 - `startRun` 同时支持旧 `(sessionId, prompt)` 参数和对象 payload（`parts`、`messageId`、`agent`、`model`、`variant`、`mode`）。
-- 暴露 opencode Web App 标准运行态方法：Agent/Model/Provider/Command/Reference 目录、config、provider auth/OAuth、worktree、Session children/todo/diff/abort/fork/compact/revert/command/shell/share、permission/question、fs/vcs/lsp/mcp status/resources/tools/auth 和 terminal ticket；除 terminal ticket 外均按 agent URL 调用。
+- 暴露 opencode Web App 标准运行态方法：Agent/Model/Provider/Command/Reference 目录、config、provider auth/OAuth、worktree、Session active-run/children/todo/diff/abort/fork/compact/revert/command/shell/share、permission/question、fs/vcs/lsp/mcp status/resources/tools/auth 和 terminal ticket；除 terminal ticket 外均按 agent URL 调用。
 - Command catalog 映射会保留 opencode runtime 的 `source/hints` 可选字段，供 frontend-opencode 生成 slash command 参数表单。
 - 把后端文件 DTO 转换为前端稳定展示模型。
 - SSH key 新增方法只发送私钥给平台后端，响应类型只包含 key 元信息，不包含明文或密文。

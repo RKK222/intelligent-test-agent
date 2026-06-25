@@ -5,6 +5,7 @@ import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.run.RunId;
 import java.util.Objects;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
@@ -12,10 +13,9 @@ import reactor.core.publisher.Sinks;
 /**
  * RunEvent 单机实时通道。它只服务当前进程内已连接的 SSE 订阅，断线恢复仍以 durable 回放或 opencode snapshot 为准。
  *
- * <p>基于 Reactor {@link Sinks.Many}（multicast + directBestEffort），<b>不跨进程广播</b>：单实例部署下实时性最佳；
- * 多实例部署下，落在其他实例的 durable 事件由 {@code RunEventSseStreamService} 的 replay 轮询兜底（延迟回升到轮询间隔），
+ * <p>基于 Reactor {@link Sinks.Many}（multicast + directBestEffort）服务本机订阅；配置 Redis 广播时会额外发布到共享通道，
+ * 由其它实例转发给其本机 SSE 客户端。Redis 未启用或不可用时，落在其他实例的 durable 事件仍由 replay 轮询兜底，
  * transient 消息内容事件由建连时的 opencode session snapshot 恢复兜底，不会丢数据但实时性下降。
- * 多实例场景需引入 Redis pub/sub 等跨进程通道，新增前必须先补架构与安全文档例外。
  *
  * <p>{@code FAIL_ZERO_SUBSCRIBER}（无在线订阅）静默丢弃，因为没有 SSE 连接需要即时送达；
  * {@code FAIL_NON_SERIALIZED} 退化为 busyLoop 重试，避免并发发布丢失事件。
@@ -24,6 +24,22 @@ import reactor.core.publisher.Sinks;
 public class RunEventLiveBus {
 
     private final Sinks.Many<RunEventLiveEvent> sink = Sinks.many().multicast().directBestEffort();
+    private final RunEventRemotePublisher remotePublisher;
+
+    /**
+     * 构造默认单机实时总线，Redis 广播未启用时不改变既有行为。
+     */
+    public RunEventLiveBus() {
+        this(NoopRunEventRemotePublisher.INSTANCE);
+    }
+
+    /**
+     * 注入可选远端广播端口，用于多实例部署下把本机事件发布到共享通道。
+     */
+    @Autowired
+    public RunEventLiveBus(RunEventRemotePublisher remotePublisher) {
+        this.remotePublisher = Objects.requireNonNull(remotePublisher, "remotePublisher must not be null");
+    }
 
     /**
      * 发布已落库的 durable 事件；payload 携带 seq，SSE 可用该 seq 做断线续传游标。
@@ -32,6 +48,7 @@ public class RunEventLiveBus {
         Objects.requireNonNull(event, "event must not be null");
         RunEventLiveEvent liveEvent = RunEventLiveEvent.durable(RunEventSsePayload.from(event));
         emit(liveEvent);
+        publishRemote(liveEvent);
         return liveEvent;
     }
 
@@ -43,6 +60,7 @@ public class RunEventLiveBus {
         RunEventLiveEvent liveEvent = RunEventLiveEvent.transientOnly(
                 RunEventSsePayload.transientFrom(draft, transientEventId()));
         emit(liveEvent);
+        publishRemote(liveEvent);
         return liveEvent;
     }
 
@@ -68,6 +86,17 @@ public class RunEventLiveBus {
         }
         if (result.isFailure()) {
             return;
+        }
+    }
+
+    /**
+     * 将事件发布到可选跨实例通道；失败时本机 SSE 仍继续工作。
+     */
+    private void publishRemote(RunEventLiveEvent liveEvent) {
+        try {
+            remotePublisher.publish(liveEvent);
+        } catch (RuntimeException ignored) {
+            // 远端广播是增强通道，异常不应中断本机实时输出和 durable 持久化。
         }
     }
 

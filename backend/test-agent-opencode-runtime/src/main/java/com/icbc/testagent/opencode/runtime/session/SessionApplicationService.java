@@ -15,9 +15,11 @@ import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.domain.session.SessionStatus;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
+import com.icbc.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -29,17 +31,31 @@ public class SessionApplicationService {
     private final WorkspaceRepository workspaceRepository;
     private final SessionRepository sessionRepository;
     private final SessionMessageRepository sessionMessageRepository;
+    private final RunSessionMessageSnapshotService snapshotService;
 
     /**
      * 创建 Session 应用服务，Controller 不直接访问这些仓储实现。
+     */
+    @Autowired
+    public SessionApplicationService(
+            WorkspaceRepository workspaceRepository,
+            SessionRepository sessionRepository,
+            SessionMessageRepository sessionMessageRepository,
+            RunSessionMessageSnapshotService snapshotService) {
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
+        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
+        this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
+        this.snapshotService = snapshotService;
+    }
+
+    /**
+     * 创建兼容旧测试的服务实例，未传快照服务时只读取数据库快照。
      */
     public SessionApplicationService(
             WorkspaceRepository workspaceRepository,
             SessionRepository sessionRepository,
             SessionMessageRepository sessionMessageRepository) {
-        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
-        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
-        this.sessionMessageRepository = Objects.requireNonNull(sessionMessageRepository, "sessionMessageRepository must not be null");
+        this(workspaceRepository, sessionRepository, sessionMessageRepository, null);
     }
 
     /**
@@ -126,7 +142,17 @@ public class SessionApplicationService {
      * 分页列出 Session 消息，先校验 Session 未归档且存在。
      */
     public PageResponse<SessionMessage> listMessages(SessionId sessionId, PageRequest pageRequest) {
-        getSession(sessionId);
+        return listMessages(sessionId, pageRequest, "trace_unspecified");
+    }
+
+    /**
+     * 分页列出 Session 消息，优先刷新 agent 投影，刷新失败时使用数据库快照 fallback。
+     */
+    public PageResponse<SessionMessage> listMessages(SessionId sessionId, PageRequest pageRequest, String traceId) {
+        Session session = getSession(sessionId);
+        if (snapshotService != null) {
+            snapshotService.refreshSessionSnapshot("opencode", session, traceId);
+        }
         return sessionMessageRepository.findBySessionId(sessionId, pageRequest);
     }
 }

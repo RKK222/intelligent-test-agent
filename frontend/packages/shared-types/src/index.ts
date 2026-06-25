@@ -88,6 +88,12 @@ export type SessionMessage = {
   role: "USER" | "ASSISTANT" | "SYSTEM" | string;
   content: string;
   createdAt: string;
+  updatedAt?: string;
+  runId?: string;
+  remoteMessageId?: string;
+  parts?: MessagePart[];
+  costUsd?: number;
+  tokens?: TokenUsage;
 };
 
 export type Run = {
@@ -97,6 +103,8 @@ export type Run = {
   status: "PENDING" | "RUNNING" | "CANCELLING" | "SUCCEEDED" | "FAILED" | "CANCELLED" | string;
   createdAt: string;
   updatedAt: string;
+  costUsd?: number;
+  tokens?: TokenUsage;
 };
 
 export type UserOpencodeProcessStatus = "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE" | string;

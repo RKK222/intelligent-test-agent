@@ -1,10 +1,14 @@
 package com.icbc.testagent.api.web.platform;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.icbc.testagent.opencode.runtime.run.StartRunInput;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerBackendEndpoint;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.run.Run;
+import com.icbc.testagent.domain.run.TokenUsage;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionMessage;
@@ -12,6 +16,7 @@ import com.icbc.testagent.domain.session.SessionMessageRole;
 import com.icbc.testagent.domain.workspace.Workspace;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -20,6 +25,10 @@ import java.util.Map;
  * Runtime API DTO 集合，统一隔离 HTTP 契约与 domain 对象，避免 Controller 直接返回领域模型。
  */
 final class RuntimeDtos {
+
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final TypeReference<List<Map<String, Object>>> MESSAGE_PARTS_TYPE = new TypeReference<>() {
+    };
 
     /**
      * DTO 容器不允许实例化，所有类型都通过嵌套 record 暴露。
@@ -241,7 +250,13 @@ final class RuntimeDtos {
             String sessionId,
             String role,
             String content,
-            Instant createdAt) {
+            Instant createdAt,
+            String runId,
+            String remoteMessageId,
+            List<Map<String, Object>> parts,
+            TokenUsageResponse tokens,
+            BigDecimal costUsd,
+            Instant updatedAt) {
 
         /**
          * 从领域消息映射为 API 响应。
@@ -252,7 +267,36 @@ final class RuntimeDtos {
                     message.sessionId().value(),
                     message.role().name(),
                     message.content(),
-                    message.createdAt());
+                    message.createdAt(),
+                    message.runId() == null ? null : message.runId().value(),
+                    message.remoteMessageId(),
+                    parseParts(message.partsJson()),
+                    TokenUsageResponse.from(message.tokenUsage()),
+                    message.costUsd(),
+                    message.updatedAt());
+        }
+    }
+
+    /**
+     * token 消耗响应 DTO，字段可空以兼容 agent 未返回局部统计的情况。
+     */
+    record TokenUsageResponse(
+            Long input,
+            Long output,
+            Long reasoning,
+            Long cacheRead,
+            Long cacheWrite) {
+
+        static TokenUsageResponse from(TokenUsage tokenUsage) {
+            if (tokenUsage == null || tokenUsage.isEmpty()) {
+                return null;
+            }
+            return new TokenUsageResponse(
+                    tokenUsage.input(),
+                    tokenUsage.output(),
+                    tokenUsage.reasoning(),
+                    tokenUsage.cacheRead(),
+                    tokenUsage.cacheWrite());
         }
     }
 
@@ -265,7 +309,9 @@ final class RuntimeDtos {
             String workspaceId,
             String status,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            TokenUsageResponse tokens,
+            BigDecimal costUsd) {
 
         /**
          * 从领域运行对象映射为 API 响应。
@@ -277,7 +323,20 @@ final class RuntimeDtos {
                     run.workspaceId().value(),
                     run.status().name(),
                     run.createdAt(),
-                    run.updatedAt());
+                    run.updatedAt(),
+                    TokenUsageResponse.from(run.tokenUsage()),
+                    run.costUsd());
+        }
+    }
+
+    private static List<Map<String, Object>> parseParts(String partsJson) {
+        if (partsJson == null || partsJson.isBlank()) {
+            return null;
+        }
+        try {
+            return OBJECT_MAPPER.readValue(partsJson, MESSAGE_PARTS_TYPE);
+        } catch (JsonProcessingException exception) {
+            return null;
         }
     }
 

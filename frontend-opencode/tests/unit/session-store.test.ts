@@ -93,6 +93,90 @@ describe("session store actions", () => {
     expect(session.timeline.map((message) => message.content)).toEqual(["Visible in second session"]);
   });
 
+  it("loads active run and resumes its event stream", async () => {
+    setActivePinia(createPinia());
+    const platform = usePlatformStore();
+    const runEvents = useRunEventStore();
+    const session = useSessionStore();
+    runEvents.subscribe = vi.fn();
+    platform.baseUrl = "http://api";
+
+    Object.defineProperty(platform, "api", {
+      value: {
+        getSession: async () => ({
+          sessionId: "ses_1",
+          workspaceId: "wrk_1",
+          title: "Demo",
+          status: "ACTIVE",
+          createdAt: "2026-06-20T00:00:00Z",
+          updatedAt: "2026-06-20T00:00:00Z"
+        }),
+        listSessionMessages: async () => ({ items: [], page: 1, size: 200, total: 0 }),
+        getActiveRun: async () => ({
+          runId: "run_1",
+          sessionId: "ses_1",
+          workspaceId: "wrk_1",
+          status: "RUNNING",
+          createdAt: "2026-06-20T00:00:01Z",
+          updatedAt: "2026-06-20T00:00:01Z"
+        }),
+        getSessionTodo: async () => [],
+        getSessionDiff: async () => ({ sessionId: "ses_1", files: [] }),
+        listSessionPermissions: async () => [],
+        listSessionQuestions: async () => []
+      }
+    });
+
+    await session.load("ses_1");
+
+    expect(session.activeRun?.runId).toBe("run_1");
+    expect(runEvents.subscribe).toHaveBeenCalledWith("run_1", "http://api");
+  });
+
+  it("merges database messages with stream projections by messageId", () => {
+    setActivePinia(createPinia());
+    const session = useSessionStore();
+    const runEvents = useRunEventStore();
+    session.activeSession = {
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      title: "Demo",
+      status: "RUNNING",
+      createdAt: "2026-06-20T00:00:00Z",
+      updatedAt: "2026-06-20T00:00:00Z"
+    };
+    session.messages = [
+      {
+        messageId: "msg_1",
+        sessionId: "ses_1",
+        role: "ASSISTANT",
+        content: "Old persisted answer",
+        createdAt: "2026-06-20T00:00:01Z"
+      }
+    ];
+
+    runEvents.apply({
+      eventId: "evt_1",
+      runId: "run_1",
+      seq: 1,
+      type: "message.updated",
+      traceId: "trace_1",
+      occurredAt: "2026-06-20T00:00:02Z",
+      payload: {
+        message: {
+          messageId: "msg_1",
+          sessionId: "ses_1",
+          role: "assistant",
+          content: "Live answer",
+          updatedAt: "2026-06-20T00:00:02Z"
+        }
+      }
+    });
+
+    expect(session.timeline).toHaveLength(1);
+    expect(session.timeline[0]).toMatchObject({ messageId: "msg_1", content: "Live answer" });
+  });
+
   it("proxies dock decisions through backend-api and updates local queues", async () => {
     setActivePinia(createPinia());
     const platform = usePlatformStore();
@@ -347,5 +431,68 @@ describe("session store actions", () => {
     expect(calls).toEqual([["abort", "ses_1"]]);
     expect(session.activeRun?.status).toBe("CANCELLED");
     expect(session.activeRun?.updatedAt).not.toBe("2026-06-20T00:00:01Z");
+  });
+
+  it("stops active run immediately, closes local stream, and refreshes message snapshot", async () => {
+    setActivePinia(createPinia());
+    const platform = usePlatformStore();
+    const runEvents = useRunEventStore();
+    const session = useSessionStore();
+    const calls: Array<[string, ...unknown[]]> = [];
+    runEvents.close = vi.fn();
+
+    Object.defineProperty(platform, "api", {
+      value: {
+        cancelRun: async (...args: unknown[]) => {
+          calls.push(["cancelRun", ...args]);
+          return {
+            runId: "run_1",
+            sessionId: "ses_1",
+            workspaceId: "wrk_1",
+            status: "CANCELLED",
+            createdAt: "2026-06-20T00:00:01Z",
+            updatedAt: "2026-06-20T00:00:03Z"
+          };
+        },
+        listSessionMessages: async (...args: unknown[]) => {
+          calls.push(["messages", ...args]);
+          return {
+            items: [{ messageId: "msg_2", sessionId: "ses_1", role: "ASSISTANT", content: "Final snapshot", createdAt: "2026-06-20T00:00:03Z" }],
+            page: 1,
+            size: 200,
+            total: 1
+          };
+        }
+      }
+    });
+
+    session.activeSession = {
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      title: "Demo",
+      status: "RUNNING",
+      createdAt: "2026-06-20T00:00:00Z",
+      updatedAt: "2026-06-20T00:00:00Z"
+    };
+    session.activeRun = {
+      runId: "run_1",
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      status: "RUNNING",
+      createdAt: "2026-06-20T00:00:01Z",
+      updatedAt: "2026-06-20T00:00:01Z"
+    };
+
+    const promise = session.stopActiveRun();
+    expect(runEvents.close).toHaveBeenCalledOnce();
+    expect(session.activeRun?.status).toBe("CANCELLING");
+    await promise;
+
+    expect(calls).toEqual([
+      ["cancelRun", "run_1"],
+      ["messages", "ses_1", 1, 200]
+    ]);
+    expect(session.activeRun?.status).toBe("CANCELLED");
+    expect(session.messages.map((message) => message.content)).toEqual(["Final snapshot"]);
   });
 });

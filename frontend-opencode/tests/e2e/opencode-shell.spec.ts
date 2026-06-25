@@ -3,6 +3,7 @@ import { expect, type Page, type Route, test } from "@playwright/test";
 type Capture = {
   runRequests: Array<Record<string, unknown>>;
   abortRequests?: Array<Record<string, unknown>>;
+  cancelRunRequests?: Array<Record<string, unknown>>;
   compactRequests?: Array<Record<string, unknown>>;
   createSessionRequests?: Array<Record<string, unknown>>;
   forkRequests?: Array<Record<string, unknown>>;
@@ -14,6 +15,7 @@ type Capture = {
 };
 
 type MockOptions = {
+  activeRun?: Record<string, unknown> | null;
   sessionDiff?: Array<Record<string, unknown>>;
 };
 
@@ -162,6 +164,86 @@ test("opens a session, sends a prompt, and renders streamed RunEvent output", as
   });
 
   await expect(page.getByText("All tests passed")).toBeVisible();
+});
+
+test("restores a running session stream after reload", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Running session restore is covered on the desktop stream layout.");
+  await mockBackendApi(
+    page,
+    { runRequests: [] },
+    {
+      activeRun: {
+        runId: "run_restore",
+        sessionId: "ses_1",
+        workspaceId: "wrk_1",
+        status: "RUNNING",
+        createdAt: "2026-06-20T00:00:02Z",
+        updatedAt: "2026-06-20T00:00:02Z"
+      }
+    }
+  );
+
+  await page.goto("/w/wrk_1/session/ses_1");
+
+  await expect(page.getByRole("button", { name: "Stop output" })).toBeVisible();
+  await expect.poll(() => eventSourceCount(page)).toBeGreaterThan(0);
+
+  await emitRunEvent(page, {
+    eventId: "evt_restore_msg",
+    runId: "run_restore",
+    seq: 1,
+    type: "message.updated",
+    traceId: "trace_e2e",
+    occurredAt: "2026-06-20T00:00:02Z",
+    payload: {
+      message: {
+        messageId: "msg_assistant",
+        sessionId: "ses_1",
+        role: "assistant",
+        content: "",
+        updatedAt: "2026-06-20T00:00:02Z"
+      }
+    }
+  });
+  await emitRunEvent(page, {
+    eventId: "evt_restore_delta",
+    runId: "run_restore",
+    seq: 2,
+    type: "message.part.delta",
+    traceId: "trace_e2e",
+    occurredAt: "2026-06-20T00:00:03Z",
+    payload: {
+      messageId: "msg_assistant",
+      part: {
+        partId: "part_text",
+        type: "text",
+        text: "Recovered stream output",
+        status: "completed"
+      }
+    }
+  });
+
+  await expect(page.getByText("Recovered stream output")).toBeVisible();
+});
+
+test("stops a running prompt from the composer", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "Composer stop is covered on the desktop stream layout.");
+  const capture: Capture = { runRequests: [], cancelRunRequests: [] };
+  await mockBackendApi(page, capture);
+
+  await page.goto("/w/wrk_1/session/ses_1");
+  await page.getByPlaceholder("Ask opencode to inspect, edit, test, or explain this workspace...").fill("Stop this run");
+  await page.getByRole("button", { name: "Send" }).click();
+
+  await expect(page.getByRole("button", { name: "Stop output" })).toBeVisible();
+  await expect.poll(() => eventSourceCount(page)).toBeGreaterThan(0);
+
+  await page.getByRole("button", { name: "Stop output" }).click();
+
+  await expect.poll(() => capture.cancelRunRequests?.length).toBe(1);
+  expect(capture.cancelRunRequests?.[0]).toMatchObject({ runId: "run_1" });
+  await expect.poll(() => eventSourceCount(page)).toBe(0);
+  await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
 });
 
 test("promotes a new-session deep link prompt into a real session", async ({ page }, testInfo) => {
@@ -376,9 +458,11 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
   await page.route("**/*", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    const path = url.pathname;
+    const rawPath = url.pathname;
+    const agentPrefix = "/api/internal/agent/opencode";
+    const path = rawPath.startsWith(agentPrefix) ? rawPath.slice(agentPrefix.length) : rawPath;
     // 只接管平台 API，避免把 Vite 的 /src/api/*.ts 模块误当成后端 JSON 响应。
-    if (!path.startsWith("/api/")) {
+    if (!rawPath.startsWith("/api/")) {
       return route.fallback();
     }
 
@@ -436,13 +520,16 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         updatedAt: "2026-06-20T00:06:00Z"
       });
     }
-    if (path === "/api/commands") {
+    if (path === "/api/commands" || path === "/api/command") {
       return json(route, [
         { commandId: "compact", name: "compact", description: "Summarize the session" },
         { commandId: "review", name: "review", description: "Review staged changes", arguments: "--quick" }
       ]);
     }
-    if (path === "/api/providers") {
+    if (path === "/api/agents" || path === "/api/agent" || path === "/api/models" || path === "/api/model") {
+      return json(route, []);
+    }
+    if (path === "/api/providers" || path === "/api/provider") {
       return json(route, [{ providerId: "anthropic", name: "Anthropic", status: "available" }]);
     }
     if (path === "/api/provider/auth") {
@@ -513,7 +600,7 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
       });
       return json(route, true);
     }
-    if (path === "/api/mcp/status") {
+    if (path === "/api/mcp/status" || path === "/mcp") {
       return json(route, {
         github: { status: "needs_auth", error: "token expired" },
         filesystem: { status: "connected" }
@@ -549,9 +636,6 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         name: "github"
       });
       return json(route, true);
-    }
-    if (path === "/api/agents" || path === "/api/models") {
-      return json(route, []);
     }
     if (path === "/api/sessions/ses_1") {
       return json(route, {
@@ -594,6 +678,16 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         createdAt: "2026-06-20T00:06:00Z",
         updatedAt: "2026-06-20T00:06:00Z"
       });
+    }
+    if (path === "/api/sessions/ses_1/active-run") {
+      return json(route, options.activeRun ?? null);
+    }
+    if (
+      path === "/api/sessions/ses_2/active-run" ||
+      path === "/api/sessions/ses_child/active-run" ||
+      path === "/api/sessions/ses_new/active-run"
+    ) {
+      return json(route, null);
     }
     if (path === "/api/sessions/ses_1/messages") {
       return json(route, {
@@ -651,16 +745,16 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         total: 1
       });
     }
-    if (path === "/api/sessions/ses_1/diff") {
+    if (path === "/api/sessions/ses_1/diff" || path === "/session/ses_1/diff") {
       return json(route, options.sessionDiff ?? []);
     }
-    if (path === "/api/sessions/ses_2/diff") {
+    if (path === "/api/sessions/ses_2/diff" || path === "/session/ses_2/diff") {
       return json(route, []);
     }
-    if (path === "/api/sessions/ses_child/diff") {
+    if (path === "/api/sessions/ses_child/diff" || path === "/session/ses_child/diff") {
       return json(route, []);
     }
-    if (path === "/api/sessions/ses_new/diff") {
+    if (path === "/api/sessions/ses_new/diff" || path === "/session/ses_new/diff") {
       return json(route, []);
     }
     if (path === "/api/sessions/ses_1/share" && request.method() === "POST") {
@@ -671,23 +765,45 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
       capture.shareRequests?.push({ action: "unpublish", sessionId: "ses_1" });
       return json(route, true);
     }
-    if (path === "/api/sessions/ses_1/todo" || path === "/api/sessions/ses_1/permissions" || path === "/api/sessions/ses_1/questions") {
+    if (
+      path === "/api/sessions/ses_1/todo" ||
+      path === "/api/sessions/ses_1/permissions" ||
+      path === "/api/sessions/ses_1/questions" ||
+      path === "/session/ses_1/children" ||
+      path === "/session/ses_1/todo" ||
+      path === "/permission" ||
+      path === "/question"
+    ) {
       return json(route, []);
     }
-    if (path === "/api/sessions/ses_2/todo" || path === "/api/sessions/ses_2/permissions" || path === "/api/sessions/ses_2/questions") {
+    if (
+      path === "/api/sessions/ses_2/todo" ||
+      path === "/api/sessions/ses_2/permissions" ||
+      path === "/api/sessions/ses_2/questions" ||
+      path === "/session/ses_2/children" ||
+      path === "/session/ses_2/todo"
+    ) {
       return json(route, []);
     }
     if (
       path === "/api/sessions/ses_child/todo" ||
       path === "/api/sessions/ses_child/permissions" ||
-      path === "/api/sessions/ses_child/questions"
+      path === "/api/sessions/ses_child/questions" ||
+      path === "/session/ses_child/children" ||
+      path === "/session/ses_child/todo"
     ) {
       return json(route, []);
     }
-    if (path === "/api/sessions/ses_new/todo" || path === "/api/sessions/ses_new/permissions" || path === "/api/sessions/ses_new/questions") {
+    if (
+      path === "/api/sessions/ses_new/todo" ||
+      path === "/api/sessions/ses_new/permissions" ||
+      path === "/api/sessions/ses_new/questions" ||
+      path === "/session/ses_new/children" ||
+      path === "/session/ses_new/todo"
+    ) {
       return json(route, []);
     }
-    if (path === "/api/runs" && request.method() === "POST") {
+    if ((path === "/api/runs" || path === "/runs") && request.method() === "POST") {
       const body = JSON.parse(request.postData() ?? "{}") as Record<string, unknown>;
       capture.runRequests.push(body);
       return json(route, {
@@ -699,18 +815,29 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
         updatedAt: "2026-06-20T00:00:02Z"
       });
     }
-    if (path === "/api/sessions/ses_1/abort" && request.method() === "POST") {
+    if ((path === "/api/runs/run_1/cancel" || path === "/runs/run_1/cancel") && request.method() === "POST") {
+      capture.cancelRunRequests?.push({ runId: "run_1" });
+      return json(route, {
+        runId: "run_1",
+        sessionId: "ses_1",
+        workspaceId: "wrk_1",
+        status: "CANCELLED",
+        createdAt: "2026-06-20T00:00:02Z",
+        updatedAt: "2026-06-20T00:00:03Z"
+      });
+    }
+    if ((path === "/api/sessions/ses_1/abort" || path === "/session/ses_1/abort") && request.method() === "POST") {
       capture.abortRequests?.push({ sessionId: "ses_1" });
       return json(route, { cancelled: true });
     }
-    if (path === "/api/sessions/ses_1/compact" && request.method() === "POST") {
+    if ((path === "/api/sessions/ses_1/compact" || path === "/session/ses_1/summarize") && request.method() === "POST") {
       capture.compactRequests?.push({
         sessionId: "ses_1",
         ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
       });
       return json(route, { compacted: true });
     }
-    if (path === "/api/sessions/ses_1/revert" && request.method() === "POST") {
+    if ((path === "/api/sessions/ses_1/revert" || path === "/session/ses_1/revert") && request.method() === "POST") {
       capture.revertRequests?.push({
         action: "revert",
         sessionId: "ses_1",
@@ -718,7 +845,7 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
       });
       return json(route, { reverted: true });
     }
-    if (path === "/api/sessions/ses_1/unrevert" && request.method() === "POST") {
+    if ((path === "/api/sessions/ses_1/unrevert" || path === "/session/ses_1/unrevert") && request.method() === "POST") {
       capture.revertRequests?.push({
         action: "unrevert",
         sessionId: "ses_1",
@@ -726,7 +853,7 @@ async function mockBackendApi(page: Page, capture: Capture = { runRequests: [] }
       });
       return json(route, { restored: true });
     }
-    if (path === "/api/sessions/ses_1/fork" && request.method() === "POST") {
+    if ((path === "/api/sessions/ses_1/fork" || path === "/session/ses_1/fork") && request.method() === "POST") {
       capture.forkRequests?.push({
         sessionId: "ses_1",
         ...(JSON.parse(request.postData() ?? "{}") as Record<string, unknown>)
@@ -771,6 +898,7 @@ async function installFakeEventSource(page: Page) {
   await page.addInitScript(() => {
     type Listener = (event: MessageEvent<string>) => void;
     const sources: Array<{
+      closed: boolean;
       emit: (event: Record<string, unknown>) => void;
     }> = [];
 
@@ -779,6 +907,7 @@ async function installFakeEventSource(page: Page) {
       onopen: ((event: Event) => void) | null = null;
       onerror: ((event: Event) => void) | null = null;
       private listeners = new Map<string, Set<Listener>>();
+      closed = false;
 
       constructor(readonly url: string) {
         sources.push(this);
@@ -796,6 +925,7 @@ async function installFakeEventSource(page: Page) {
       }
 
       close() {
+        this.closed = true;
         this.listeners.clear();
       }
 
@@ -807,7 +937,7 @@ async function installFakeEventSource(page: Page) {
     }
 
     (window as unknown as { EventSource: typeof FakeEventSource }).EventSource = FakeEventSource;
-    (window as unknown as { __eventSourceCount: () => number }).__eventSourceCount = () => sources.length;
+    (window as unknown as { __eventSourceCount: () => number }).__eventSourceCount = () => sources.filter((source) => !source.closed).length;
     (window as unknown as { __emitRunEvent: (event: Record<string, unknown>) => void }).__emitRunEvent = (event) => {
       sources.forEach((source) => source.emit(event));
     };

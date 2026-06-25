@@ -304,7 +304,11 @@ Redis 只有在启用时才需要提供外部地址：
 TEST_AGENT_REDIS_ENABLED=true
 TEST_AGENT_REDIS_HOST=<redis-host>
 TEST_AGENT_REDIS_PORT=6379
+TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true
+TEST_AGENT_RUN_EVENT_REDIS_BUS_CHANNEL=test-agent:run-events
 ```
+
+`TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED` 只控制 RunEvent 跨实例实时 fan-out；数据库 `run_events` replay、`Last-Event-ID` 和 `session_messages` 快照仍是恢复基线。Redis 不可用或该开关为 `false` 时，后端自动退回本机 live bus + DB replay。
 
 ## 运行示例
 

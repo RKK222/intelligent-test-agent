@@ -10,7 +10,7 @@
 |---|---|
 | `workspaces` | 平台工作区，包含业务 ID、名称、根路径、状态、traceId、创建和更新时间。 |
 | `sessions` | 智能体会话，关联 workspace，包含标题、状态、traceId、创建和更新时间。 |
-| `runs` | 运行记录，关联 session/workspace，包含 Run 状态、traceId、创建和更新时间。 |
+| `runs` | 运行记录，关联 session/workspace，包含 Run 状态、traceId、创建和更新时间；V10 后可记录单次 Run token/cost 快照。 |
 | `run_events` | RunEvent append-only 事件流，按 `(run_id, seq)` 唯一并支持增量回放。 |
 | `execution_nodes` | opencode 执行节点，包含 baseUrl、健康状态、运行容量、权重、心跳和能力标签。 |
 | `routing_decisions` | Run 到 ExecutionNode 的路由决策审计记录。 |
@@ -72,7 +72,7 @@
 - `sessions.pinned` 进入 Session API DTO；软删除复用 `status=ARCHIVED`，不新增删除时间字段，旧数据默认 `ACTIVE` 且 `pinned=false`。
 - `run_events.payload_json` 和 `execution_nodes.capabilities_json` 当前为 JSON 文本，便于 H2 和 PostgreSQL 共用测试；未来迁移到 JSONB 时必须先保持旧列读取兼容。
 - `run_events.seq` 由持久化层按同一 run 分配，取消、Diff 动作和 opencode stream 并发追加时必须依赖 `(run_id, seq)` 唯一约束冲突后重试，保持事件流单调递增且不重复。
-- `session_messages.content` 当前直接保存文本；后续如拆分富文本 parts，必须保留旧 content 读取兼容。
+- `session_messages.content` 保留为旧文本 fallback；V10 后新增的 `parts_json`、token/cost 字段允许为空，旧数据和旧前端继续只读 `content`。
 - `ai_model_configs` 只保存模型目录元数据，不保存 token、API key 或 provider secret；企业内调用密钥继续由部署环境变量或配置中心注入。
 - 删除或重命名状态、事件类型、数据库字段必须拆分为读取兼容、数据迁移、清理三个阶段。
 
@@ -398,3 +398,39 @@ V10 种子数据对 F-COSS 的影响：
 - 启动时由 runtime 服务按配置 seed openclaw 企业 patch 中的内网模型清单；已存在的 `(provider_id, model_id)` 不会被覆盖，表内人工调整的启停、排序和默认模型会保留。
 - 表内不保存调用密钥；`ICBC_OPENAI_AUTH_TOKEN` 或自定义 token 环境变量只在运行时同步 opencode provider 配置时引用。
 - 删除模型建议先设 `enabled=false`，避免前端仍持有旧 `providerId/modelId` 时出现不可解释的目录缺失。
+
+## V10 会话消息与 Run 消耗快照字段
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V10__add_message_and_run_usage_fields.sql` 扩展 `session_messages` 和 `runs`：
+
+### session_messages 扩展字段
+
+| 字段 | 说明 |
+|---|---|
+| `run_id` | 本条消息归属的 Run，可空；用户输入在启动 Run 时写入，assistant 快照在 Run 终态/取消后回写。 |
+| `agent_id` | 归一化后的 agent 标志，例如 `opencode`。 |
+| `remote_message_id` | 远端 agent message id，用于 projected messages 刷新时幂等 upsert。 |
+| `parts_json` | 远端 message parts 的 JSON 文本快照，前端优先用它展示结构化 part，旧 `content` 仍作为 fallback。 |
+| `tokens_input` / `tokens_output` / `tokens_reasoning` | 单次 Run 对应 assistant 输出的 token 消耗，可空。 |
+| `tokens_cache_read` / `tokens_cache_write` | cache token 消耗，可空。 |
+| `cost_usd` | 本次 Run 成本美元快照，可空。 |
+| `updated_at` | 快照更新时间；历史数据迁移时回填为 `created_at`。 |
+
+新增索引：
+
+- `idx_session_messages_session_run(session_id, run_id, created_at, id)` 支持按会话和 Run 查询消息快照。
+- `idx_session_messages_session_remote(session_id, remote_message_id)` 支持远端 message 幂等刷新。
+
+### runs 扩展字段
+
+`runs` 同步新增 `tokens_input`、`tokens_output`、`tokens_reasoning`、`tokens_cache_read`、`tokens_cache_write`、`cost_usd`，用于按 Run 查询每次对话消耗；缺失统计时保持 `null`。
+
+新增索引：
+
+- `idx_runs_session_active_updated(session_id, status, updated_at, id)` 支持 `GET /api/sessions/{sessionId}/active-run` 查询最近非终态 Run。
+
+兼容策略：
+
+- 旧消息没有 `run_id`、`remote_message_id`、`parts_json` 和 token/cost 时仍通过 `content` 展示。
+- 远端 opencode 不可用时，消息查询回退读取数据库快照，不要求 V10 字段非空。
+- `run_id` 外键引用 `runs.run_id`，字段可空，避免历史消息迁移失败。

@@ -41,6 +41,7 @@ import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -84,6 +85,7 @@ public class RunApplicationService {
     private final ModelCatalogApplicationService modelCatalogService;
     private final UserOpencodeProcessAssignmentService userProcessAssignmentService;
     private final AgentRuntimeTargetResolver runtimeTargetResolver;
+    private final RunSessionMessageSnapshotService snapshotService;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -103,7 +105,8 @@ public class RunApplicationService {
             RunEventLiveBus runEventLiveBus,
             RunEventPersistencePolicy runEventPersistencePolicy,
             ModelCatalogApplicationService modelCatalogService,
-            UserOpencodeProcessAssignmentService userProcessAssignmentService) {
+            UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            RunSessionMessageSnapshotService snapshotService) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
@@ -124,10 +127,20 @@ public class RunApplicationService {
                 agentRuntimeRegistry,
                 agentSessionBindingRepository,
                 userProcessAssignmentService);
+        this.snapshotService = snapshotService == null
+                ? new RunSessionMessageSnapshotService(
+                        runRepository,
+                        sessionRepository,
+                        sessionMessageRepository,
+                        executionNodeRepository,
+                        agentRuntimeRegistry,
+                        agentSessionBindingRepository,
+                        new ObjectMapper())
+                : snapshotService;
     }
 
     /**
-     * 兼容旧单测的构造器，保留显式实时事件总线和持久化策略注入。
+     * 创建兼容旧装配的服务实例，不显式传入快照服务时内部构造默认实现。
      */
     public RunApplicationService(
             WorkspaceRepository workspaceRepository,
@@ -153,6 +166,7 @@ public class RunApplicationService {
                 agentSessionBindingRepository,
                 runEventLiveBus,
                 runEventPersistencePolicy,
+                null,
                 null,
                 null);
     }
@@ -184,7 +198,8 @@ public class RunApplicationService {
                 new RunEventLiveBus(),
                 new RunEventPersistencePolicy(),
                 null,
-                userProcessAssignmentService);
+                userProcessAssignmentService,
+                null);
     }
 
     /**
@@ -273,7 +288,7 @@ public class RunApplicationService {
                 now,
                 traceId);
         runRepository.save(pending);
-        saveUserMessage(session.sessionId(), prompt, traceId, now);
+        saveUserMessage(session.sessionId(), pending.runId(), prompt, traceId, now);
         append(pending.runId(), RunEventType.RUN_CREATED, traceId, now, Map.of("status", RunStatus.PENDING.name()));
 
         try {
@@ -313,6 +328,7 @@ public class RunApplicationService {
         } catch (PlatformException exception) {
             Run failed = runRepository.save(pending.fail(Instant.now()));
             append(failed.runId(), RunEventType.RUN_FAILED, traceId, Instant.now(), Map.of("errorCode", exception.errorCode().name()));
+            snapshotService.persistRunSnapshot(resolvedAgentId, failed, traceId);
             throw exception;
         }
     }
@@ -566,6 +582,14 @@ public class RunApplicationService {
     }
 
     /**
+     * 查询指定会话最近的非终态 Run，供前端刷新后恢复 SSE 订阅。
+     */
+    public Optional<Run> findActiveRun(SessionId sessionId) {
+        findSession(sessionId);
+        return runRepository.findLatestActiveBySessionId(sessionId);
+    }
+
+    /**
      * 请求取消 Run：先更新本地状态，再尽力通知默认 agent 远端 session abort，最后落取消事件。
      */
     public Run cancelRun(RunId runId, String traceId) {
@@ -609,20 +633,28 @@ public class RunApplicationService {
                 ? cancelling
                 : runRepository.save(cancelling.cancel(Instant.now()));
         append(runId, RunEventType.RUN_CANCELLED, traceId, Instant.now(), Map.of("status", cancelled.status().name()));
+        snapshotService.persistRunSnapshot(resolvedAgentId, cancelled, traceId);
         return cancelled;
     }
 
     /**
-     * 保存用户消息投影，只保存用户输入文本，不保存远端 assistant 内容。
+     * 保存用户消息投影，记录 runId 以支持按每次对话查询用户输入与消耗。
      */
-    private void saveUserMessage(SessionId sessionId, String prompt, String traceId, Instant createdAt) {
+    private void saveUserMessage(SessionId sessionId, RunId runId, String prompt, String traceId, Instant createdAt) {
         sessionMessageRepository.save(new SessionMessage(
                 new SessionMessageId(RuntimeIdGenerator.messageId()),
                 sessionId,
                 SessionMessageRole.USER,
                 prompt,
                 createdAt,
-                traceId));
+                traceId,
+                runId,
+                null,
+                null,
+                null,
+                null,
+                null,
+                createdAt));
     }
 
     /**
@@ -693,7 +725,7 @@ public class RunApplicationService {
     /**
      * 订阅 agent 事件流，事件处理串行 offload，避免阻塞 Netty 线程。
      */
-    private void subscribeAgentEvents(AgentRuntime runtime, Run run, ExecutionNode node, Workspace workspace, String traceId) {
+    private void subscribeAgentEvents(String agentId, AgentRuntime runtime, Run run, ExecutionNode node, Workspace workspace, String traceId) {
         runtime.streamRunEvents(new AgentStreamEventsCommand(
                         node,
                         run.runId(),
@@ -701,7 +733,7 @@ public class RunApplicationService {
                         null,
                         traceId))
                 // opencode stream 来自 Netty 线程，事件入库或实时发布必须串行 offload，且本地 DB 抖动不能误判为 Run 失败。
-                .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(runtime, run, node, workspace, draft))
+                .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(agentId, runtime, run, node, workspace, draft))
                         .subscribeOn(Schedulers.boundedElastic())
                         .onErrorResume(error -> {
                             LOGGER.warn(
@@ -712,7 +744,7 @@ public class RunApplicationService {
                                     error);
                             return Mono.empty();
                         }))
-                .doOnError(error -> failRunFromStream(run, traceId, error))
+                .doOnError(error -> failRunFromStream(agentId, run, traceId, error))
                 .subscribe(ignored -> {
                 }, ignored -> {
                     // 错误已在 doOnError 中落库，这里消费异常以避免 Reactor dropped error 日志。
@@ -722,16 +754,18 @@ public class RunApplicationService {
     /**
      * 处理单个 agent 事件：终态事件落库并更新 Run，瞬态消息事件只发布 live bus。
      */
-    private void appendStreamEvent(AgentRuntime runtime, Run originalRun, ExecutionNode node, Workspace workspace, RunEventDraft draft) {
+    private void appendStreamEvent(String agentId, AgentRuntime runtime, Run originalRun, ExecutionNode node, Workspace workspace, RunEventDraft draft) {
         if (draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED) {
             Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
             if (!current.status().isTerminal()) {
+                Run terminal;
                 if (draft.type() == RunEventType.RUN_SUCCEEDED) {
-                    runRepository.save(current.succeed(draft.occurredAt()));
+                    terminal = runRepository.save(current.succeed(draft.occurredAt()));
                 } else {
-                    runRepository.save(current.fail(draft.occurredAt()));
+                    terminal = runRepository.save(current.fail(draft.occurredAt()));
                 }
                 runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
+                snapshotService.persistRunSnapshot(agentId, terminal, draft.traceId());
             }
             return;
         }
@@ -1031,13 +1065,14 @@ public class RunApplicationService {
     /**
      * 事件流异常时尽力把 Run 标记失败；失败落库本身异常只记录日志。
      */
-    private void failRunFromStream(Run run, String traceId, Throwable error) {
+    private void failRunFromStream(String agentId, Run run, String traceId, Throwable error) {
         try {
             Run current = runRepository.findById(run.runId()).orElse(run);
             if (!current.status().isTerminal()) {
                 Run failed = runRepository.save(current.fail(Instant.now()));
                 append(failed.runId(), RunEventType.RUN_FAILED, traceId, Instant.now(),
                         Map.of("error", error.getClass().getSimpleName()));
+                snapshotService.persistRunSnapshot(agentId, failed, traceId);
             }
         } catch (RuntimeException exception) {
             LOGGER.warn("Failed to persist opencode stream failure, runId={}, traceId={}",

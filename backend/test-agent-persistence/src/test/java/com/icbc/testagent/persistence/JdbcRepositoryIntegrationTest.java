@@ -53,6 +53,7 @@ import com.icbc.testagent.domain.routing.RoutingReason;
 import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunStatus;
+import com.icbc.testagent.domain.run.TokenUsage;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionMessage;
@@ -66,6 +67,7 @@ import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -429,6 +431,60 @@ class JdbcRepositoryIntegrationTest {
         assertThat(sessionMessages.findBySessionId(session.sessionId(), new PageRequest(1, 10)).items())
                 .extracting(SessionMessage::content)
                 .containsExactly("first", "second");
+    }
+
+    @Test
+    void sessionMessagesAndRunsPersistPerRunUsageSnapshotFields() {
+        workspaces.save(workspace());
+        sessions.save(session());
+        TokenUsage usage = new TokenUsage(11L, 12L, 3L, 4L, 5L);
+        Run enrichedRun = run().withUsage(usage, new BigDecimal("0.12345678"));
+        runs.save(enrichedRun);
+        SessionMessage assistant = new SessionMessage(
+                new SessionMessageId("msg_3234567890abcdef"),
+                new SessionId("ses_1234567890abcdef"),
+                SessionMessageRole.ASSISTANT,
+                "assistant answer",
+                NOW.plusSeconds(1),
+                "trace_1234567890abcdef",
+                enrichedRun.runId(),
+                "opencode",
+                "msg_remote_1234567890abcdef",
+                "[{\"id\":\"part_1\",\"type\":\"text\",\"text\":\"assistant answer\"}]",
+                usage,
+                new BigDecimal("0.12345678"),
+                NOW.plusSeconds(2));
+
+        sessionMessages.save(assistant);
+
+        assertThat(runs.findById(enrichedRun.runId())).contains(enrichedRun);
+        assertThat(sessionMessages.findById(assistant.messageId())).contains(assistant);
+        assertThat(sessionMessages.findBySessionId(assistant.sessionId(), new PageRequest(1, 10)).items())
+                .singleElement()
+                .satisfies(message -> {
+                    assertThat(message.runId()).isEqualTo(enrichedRun.runId());
+                    assertThat(message.agentId()).isEqualTo("opencode");
+                    assertThat(message.remoteMessageId()).isEqualTo("msg_remote_1234567890abcdef");
+                    assertThat(message.partsJson()).contains("\"part_1\"");
+                    assertThat(message.tokenUsage()).isEqualTo(usage);
+                    assertThat(message.costUsd()).isEqualByComparingTo("0.12345678");
+                    assertThat(message.updatedAt()).isEqualTo(NOW.plusSeconds(2));
+                });
+    }
+
+    @Test
+    void runRepositoryFindsLatestNonTerminalRunBySessionId() {
+        workspaces.save(workspace());
+        sessions.save(session());
+        Run pending = run("run_1234567890abcdef", RunStatus.PENDING, 0);
+        Run running = run("run_2234567890abcdef", RunStatus.RUNNING, 5);
+        Run succeeded = run("run_3234567890abcdef", RunStatus.SUCCEEDED, 9);
+        runs.save(pending);
+        runs.save(running);
+        runs.save(succeeded);
+
+        assertThat(runs.findLatestActiveBySessionId(new SessionId("ses_1234567890abcdef")))
+                .contains(running);
     }
 
     @Test
@@ -983,13 +1039,17 @@ class JdbcRepositoryIntegrationTest {
     }
 
     private static Run run() {
+        return run("run_1234567890abcdef", RunStatus.PENDING, 0);
+    }
+
+    private static Run run(String runId, RunStatus status, long secondOffset) {
         return new Run(
-                new RunId("run_1234567890abcdef"),
+                new RunId(runId),
                 new SessionId("ses_1234567890abcdef"),
                 new WorkspaceId("wrk_1234567890abcdef"),
-                RunStatus.PENDING,
+                status,
                 NOW,
-                NOW,
+                NOW.plusSeconds(secondOffset),
                 "trace_1234567890abcdef");
     }
 

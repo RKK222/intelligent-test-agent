@@ -1,5 +1,6 @@
 package com.icbc.testagent.domain.run;
 
+import com.icbc.testagent.domain.session.SessionId;
 import java.util.Optional;
 
 /**
@@ -16,4 +17,11 @@ public interface RunRepository {
      * 按运行 ID 查询运行聚合。
      */
     Optional<Run> findById(RunId runId);
+
+    /**
+     * 查询指定会话最近的非终态 Run，用于刷新后恢复运行中的 SSE 订阅。
+     */
+    default Optional<Run> findLatestActiveBySessionId(SessionId sessionId) {
+        return Optional.empty();
+    }
 }

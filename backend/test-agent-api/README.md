@@ -18,6 +18,7 @@
 - RunEvent SSE 建连时先委托 runtime 恢复 opencode projected messages，再进入 durable replay 与 live bus 合流。
 - 暴露 opencode-manager discovery API 和 WebSocket 控制面入口，入口只做 manager token 鉴权、DTO/消息适配和 traceId 处理。
 - 暴露超级管理员只读运行管理 overview API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选参数校验、DTO 映射和 traceId 处理。
+- Session 消息查询优先委托 runtime 刷新 agent projected messages，失败时返回数据库快照；active-run API 供前端刷新后恢复 SSE。
 - 本地 CORS 默认允许主前端和 `frontend-opencode` Vite/Preview/E2E 端口；生产必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式收敛。
 
 ## 允许依赖
