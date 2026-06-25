@@ -25,6 +25,7 @@ import panelCloseUrl from '../assets/figma/panel-close.svg'
 type ChatMessageInput = AgentMessage & { content?: string }
 
 type ChatMessage = {
+  id: string
   role: 'user' | 'assistant'
   content: string
   meta?: string
@@ -113,6 +114,7 @@ const emit = defineEmits<{
 }>();
 
 const localInput = ref(props.inputValue ?? '')
+const inputComposing = ref(false)
 
 // ===== 文件变更抽屉 =====
 // 抽屉默认选中第一个文件；打开后通过 fileChanges 变化自动跟随到最新一个文件（与原有的“跟随最近一次变化”心智一致）。
@@ -353,7 +355,7 @@ watch(
 
 const displayMessages = computed<ChatMessage[]>(() => {
   return (props.messages || [])
-    .map((m): ChatMessage | null => {
+    .map((m, index): ChatMessage | null => {
       if (m.role !== 'user' && m.role !== 'assistant') return null
       let text = ''
       if (typeof m.content === 'string') {
@@ -363,7 +365,9 @@ const displayMessages = computed<ChatMessage[]>(() => {
       } else if (Array.isArray(m.parts)) {
         text = m.parts.map((p) => partText(p)).join('')
       }
+      if (!text.trim()) return null
       return {
+        id: m.messageId ?? m.id ?? `${m.role}-${index}`,
         role: m.role,
         content: text,
         meta: m.createdAt ? formatTime(m.createdAt) : undefined,
@@ -480,10 +484,21 @@ function stop() {
 }
 
 function onKeydown(event: KeyboardEvent) {
+  // 输入法候选词确认也可能触发 Enter keydown；组合输入阶段必须交给 IME，
+  // 否则中文/英文混输时会在用户未确认发送前提交半截内容。
+  if (event.isComposing || inputComposing.value || event.keyCode === 229) return
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
     submit()
   }
+}
+
+function onCompositionStart() {
+  inputComposing.value = true
+}
+
+function onCompositionEnd() {
+  inputComposing.value = false
 }
 </script>
 
@@ -494,30 +509,32 @@ function onKeydown(event: KeyboardEvent) {
     </header>
 
     <div ref="scrollEl" class="figma-chat-scroll">
-      <!-- 用户消息气泡 (右对齐) -->
-      <div v-if="lastUser" class="figma-chat-bubble figma-chat-bubble--user">
-        <div class="figma-chat-bubble-content">{{ lastUser.content }}</div>
-        <div v-if="lastUser.meta" class="figma-chat-bubble-meta">
-          你 · {{ lastUser.meta }}
+      <template v-for="message in displayMessages" :key="message.id">
+        <!-- 用户消息气泡 (右对齐) -->
+        <div v-if="message.role === 'user'" class="figma-chat-bubble figma-chat-bubble--user">
+          <div class="figma-chat-bubble-content">{{ message.content }}</div>
+          <div v-if="message.meta" class="figma-chat-bubble-meta">
+            你 · {{ message.meta }}
+          </div>
         </div>
-      </div>
 
-      <!-- 助手消息 (左对齐) -->
-      <div v-if="lastAssistant" class="figma-chat-assistant">
-        <div class="figma-chat-avatar">
-          <img :src="aiHeaderUrl" alt="AI" class="figma-chat-avatar-icon" />
-        </div>
-        <div class="figma-chat-assistant-content">
-          <div class="figma-chat-bubble figma-chat-bubble--assistant">
-            <div class="figma-chat-bubble-content">
-              {{ lastAssistant.content }}
+        <!-- 助手消息 (左对齐) -->
+        <div v-else class="figma-chat-assistant">
+          <div class="figma-chat-avatar">
+            <img :src="aiHeaderUrl" alt="AI" class="figma-chat-avatar-icon" />
+          </div>
+          <div class="figma-chat-assistant-content">
+            <div class="figma-chat-bubble figma-chat-bubble--assistant">
+              <div class="figma-chat-bubble-content">
+                {{ message.content }}
+              </div>
+            </div>
+            <div v-if="message.meta" class="figma-chat-bubble-meta">
+              测试智能体 · {{ message.meta }}
             </div>
           </div>
-          <div v-if="lastAssistant.meta" class="figma-chat-bubble-meta">
-            测试智能体 · {{ lastAssistant.meta }}
-          </div>
         </div>
-      </div>
+      </template>
 
       <!-- 空态 -->
       <div v-if="displayMessages.length === 0" class="figma-chat-empty">
@@ -610,7 +627,8 @@ function onKeydown(event: KeyboardEvent) {
 
     <!-- 任务消耗提示（位于输入框上方） -->
     <div v-if="hasTaskUsageDisplay" class="figma-chat-usage">
-      <img :src="planLoadingUrl" alt="" class="figma-chat-usage-icon" />
+      <img v-if="running" :src="planLoadingUrl" alt="" class="figma-chat-usage-icon" />
+      <span v-else class="figma-chat-usage-dot" aria-hidden="true" />
       <span class="figma-chat-usage-label">任务消耗：</span>
       <span class="figma-chat-usage-value">
         <template
@@ -666,6 +684,8 @@ function onKeydown(event: KeyboardEvent) {
         rows="1"
         :disabled="running || !processReady"
         @keydown="onKeydown"
+        @compositionstart="onCompositionStart"
+        @compositionend="onCompositionEnd"
       />
       <div class="figma-chat-composer-actions">
         <button
@@ -1243,6 +1263,15 @@ function onKeydown(event: KeyboardEvent) {
   height: 20px;
   flex-shrink: 0;
   display: block;
+}
+
+.figma-chat-usage-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  display: block;
+  border-radius: 999px;
+  background: #a40dbc;
 }
 
 .figma-chat-usage-label {

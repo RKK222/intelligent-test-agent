@@ -2,18 +2,25 @@
 
 ## Entries
 
-### 2026-06-25 - 在库里为默认开发用户预置本地 opencode 机器
+### 2026-06-25 - 修复空助手行和结束态任务消耗动图
 
-- Why: 前台登录（默认开发用户 `888888888 / usr_test_dev`）后，右侧对话窗口报 `opencode 进程不可用` / `没有可用的 opencode 容器`。前者来自 `UserOpencodeProcessAssignmentService` 在有 binding 但健康检测失败时的统一提示，后者来自 `findHealthyContainersConnectedToBackend` / `findHealthyContainersConnectedToBackendByLinuxServer` 返回空——根因是数据库里 `linux_servers / opencode_containers / opencode_container_managers / opencode_manager_backend_connections` 拓扑一行都没有，且当前用户也没有任何 `opencode_server_processes / user_opencode_process_bindings`。
-- What:
-  - 新增 Flyway migration `V17__seed_local_opencode_machine_for_default_user.sql`，在已有 V14 / V15 表结构上幂等种入 `linux_servers(127.0.0.1)`、`opencode_containers(ctr_local_4096, 4096..4096, max=1, current=1, READY)`、`opencode_container_managers(mgr_local_4096, CONNECTED)`、`opencode_server_processes(ocp_local_user_dev, usr_test_dev, 4096, http://127.0.0.1:4096, RUNNING)`、`user_opencode_process_bindings((usr_test_dev, opencode) -> ocp_local_user_dev, ACTIVE)`。`OpencodeManagerBackendConnection` 的 `backend_process_id` 形如 `bjp_xxx`，由后端实例自举。
-  - `BackendJavaProcessLifecycleService.registerHeartbeat` 在为本实例写心跳时，新增 `bootstrapLocalManagerConnections`，遍历 `opencode_container_managers`，对同 `linux_server_id` 且 `connection_status = CONNECTED` 的 manager 自动补齐到本实例的连接行；已有连接行只更新心跳和状态，不会影响 `ManagerControlApplicationService` 的真实连接维护。
-  - 测试：`BackendJavaProcessLifecycleServiceTest` 补两条用例（补齐同服务器 manager、跳过其他服务器 manager），`JdbcRepositoryIntegrationTest` 加 `v17SeedLocalOpencodeMachineForDefaultUserIsIdempotent` 验证 Flyway 落地 + 重复执行不破坏数据。
-  - 文档：`docs/deployment/database.md` 新增 V17 节；`backend/test-agent-persistence/README.md` / `backend/test-agent-opencode-runtime/README.md` 同步 V17 与心跳自举说明；`docs/deployment/backend.md` 在「测试环境 profile」后追加「本地开发 opencode 机器预置」小节，描述本机 opencode server（127.0.0.1:4096）启动后可直接登录看到 READY。
-- How: migration 全部插入用 `where not exists / where exists` 保护，重复执行安全；用户进程表依赖 V5 默认开发用户 `usr_test_dev`，生产环境无该用户时整段用户进程种子不写，仅保留拓扑；心跳自举用 `(manager, backend)` 主键查表，只在缺失时插入 `CONNECTED` 行，不触碰 manager WebSocket 维护流程。
-- Result: 前台 `888888888` 登录后，右侧对话窗口不再因 "没有可用的 opencode 容器" 直接报错；`findHealthyContainersConnectedToBackend*` 可返回本机容器 `ctr_local_4096`；后续若 manager WebSocket 未启动，状态会落到 "opencode 进程健康检测失败，需要重新初始化"（受 manager 网关限制，本地不替代 manager 部署），否则会直接进入 READY。
-- Pitfalls: `OpencodeContainer` 约束 `max_processes <= (port_end - port_start + 1)`，所以单端口 4096 必须把 `max_processes` 设为 1、`current_processes` 设为 1，否则 CHECK 失败；`UserOpencodeProcessBinding` 的 `(user_id, agent_id)` 唯一键被 `on conflict` 守护；`OpencodeServerProcess` 的 `baseUrl` 约束要求 `= 'http://' || linux_server_id || ':' || port`，已与 `127.0.0.1:4096` 对齐。
-- Verification: `mvn -pl test-agent-persistence test` 通过（21/21，含新加 `v17SeedLocalOpencodeMachineForDefaultUserIsIdempotent`）；`mvn -pl test-agent-opencode-runtime test` 通过（104/104，含 `BackendJavaProcessLifecycleServiceTest` 3 个用例）；`mvn -DskipTests=true compile` 全量 17 个模块编译通过；现有 `opencodeProcessManagementRepositoriesSaveAndReadTopology` 已改为兼容 V17 种子行的 `.contains(...)` 断言。
+- Why: 上一轮把对话区改成完整消息列表后，真实 RunEvent 派生的空 assistant 消息也被渲染，导致页面出现多条只有“测试智能体 · 时间”的空行；任务结束后任务消耗行仍使用 loading gif，看起来像还在执行。
+- What: `FigmaChatPanel.vue` 过滤无可见文本的 user/assistant 展示消息；任务消耗行仅在 `running=true` 时使用 loading gif，结束态改用静态紫点；组件测试补充空 assistant 行过滤和结束态静态标记回归用例。
+- How: 先用 Vitest 复现两个失败，再做最小组件修复；浏览器刷新后当前会话无可见消息，只能通过 DOM 检查确认当前页没有空助手行/usage 动图，核心回归由组件测试覆盖。
+- Result: `corepack pnpm test -- apps/agent-web/tests/FigmaChatPanel.test.ts`、`corepack pnpm --filter @test-agent/agent-web typecheck`、`corepack pnpm --filter @test-agent/agent-web build` 和 `git diff --check` 通过。
+- Pitfalls: `message.part.updated` / tool part 派生出的 assistant 消息可能没有可见文本，完整历史渲染必须过滤空文本，否则会把 meta 单独显示成空消息。
+- Verification: 见 Result。
+- Next: 无。
+
+### 2026-06-25 - 修复对话误发送和历史消息只显示最后一轮
+
+- Why: 用户反馈右侧对话输入框在未按发送意图时会误发，尤其是中英文/输入法相关场景；同一历史会话切换后看不到完整历史消息。同时本机换手机热点，需要临时用 127.0.0.1 启动本地服务。
+- What: `FigmaChatPanel.vue` 在输入法 composition 阶段忽略 Enter（同时兼容 `event.isComposing` 和 `keyCode=229`），并把消息区从只渲染最后一条用户/助手消息改为按顺序渲染完整用户/助手消息列表；新增组件回归测试覆盖 IME Enter 不发送和历史四条消息完整展示；同步更新前端 README / 包说明。
+- How: 先用 Vitest 复现两个失败，再做最小组件修复；启动验证时发现 `restart-dev-services.sh` 的 `load_env_file` 会用 env 文件覆盖命令前缀变量，因此用 gitignored 的 `.tmp/dev-127.env` 从 `.env.local` 派生并替换旧热点 IP，追加 127.0.0.1 运行拓扑和 opencode base 覆盖项。
+- Result: 回归测试、`agent-web` typecheck/build、全仓 `git diff --check` 均通过；服务已用 `.tmp/dev-127.env` 重启，`http://127.0.0.1:8080/actuator/health` 为 UP，`http://127.0.0.1:3000` 返回 200。
+- Pitfalls: 直接在启动命令前缀设置 `TEST_AGENT_OPENCODE_BASE_URL` 不生效，因为 `.env.local` 后加载会覆盖它；临时切换热点地址应使用派生 env 文件或修改 env 文件（本次未修改 `.env.local`）。
+- Verification: `corepack pnpm test -- apps/agent-web/tests/FigmaChatPanel.test.ts`；`corepack pnpm --filter @test-agent/agent-web typecheck`；`corepack pnpm --filter @test-agent/agent-web build`；`git diff --check`；`./restart-dev-services.sh --env-file .tmp/dev-127.env --skip-backend-build --skip-frontend-build`；`curl -fsS http://127.0.0.1:8080/actuator/health`；`curl -fsS -I http://127.0.0.1:3000`。
+- Next: 如需长期使用 127.0.0.1，明确后再更新 `.env.local`；当前 `.tmp/dev-127.env` 只是本次本地启动临时文件。
 
 ### 2026-06-25 - 修复运行管理拖动/滚动条问题及文件树和工作台图标大小/线条
 
