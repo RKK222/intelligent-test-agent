@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.http.codec.ServerSentEvent;
 import reactor.test.StepVerifier;
 
@@ -88,6 +89,13 @@ class RunEventServicesTest {
         assertThat(sse.data().eventId()).isEqualTo("evt_live_1234567890abcdef");
         assertThat(sse.data().seq()).isZero();
         assertThat(sse.data().payload()).containsEntry("delta", "hello");
+    }
+
+    @Test
+    void liveBusSpringBeanStartsWithoutRemotePublisherBean() {
+        new ApplicationContextRunner()
+                .withBean(RunEventLiveBus.class)
+                .run(context -> assertThat(context).hasSingleBean(RunEventLiveBus.class));
     }
 
     @Test

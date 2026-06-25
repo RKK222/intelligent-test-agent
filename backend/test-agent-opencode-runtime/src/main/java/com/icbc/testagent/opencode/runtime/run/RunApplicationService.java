@@ -309,7 +309,7 @@ public class RunApplicationService {
             Run running = runRepository.save(pending.start(Instant.now()));
             append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
             // 先订阅事件再触发 prompt，避免 opencode 快速失败或快速返回时平台漏掉终态事件。
-            subscribeAgentEvents(runtime, running, target.node(), workspace, traceId);
+            subscribeAgentEvents(resolvedAgentId, runtime, running, target.node(), workspace, traceId);
             runtime.startRun(new AgentStartRunCommand(
                             target.node(),
                             binding.remoteSessionId(),

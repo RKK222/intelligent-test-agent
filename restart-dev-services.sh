@@ -210,6 +210,67 @@ url_host() {
   echo "${host}"
 }
 
+detect_local_ipv4() {
+  local iface ip
+
+  # 优先使用默认路由网卡，避免把 loopback、Docker 网桥或隧道地址注册成运行服务器 IP。
+  if command -v route >/dev/null 2>&1; then
+    iface="$(route -n get default 2>/dev/null | awk '/interface:/{print $2; exit}')"
+    if [[ -n "${iface}" && "$(uname -s)" == "Darwin" ]] && command -v ipconfig >/dev/null 2>&1; then
+      ip="$(ipconfig getifaddr "${iface}" 2>/dev/null || true)"
+      if is_routable_ipv4 "${ip}"; then
+        echo "${ip}"
+        return 0
+      fi
+    fi
+  fi
+
+  if command -v ip >/dev/null 2>&1; then
+    ip="$(ip route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") {print $(i + 1); exit}}')"
+    if is_routable_ipv4 "${ip}"; then
+      echo "${ip}"
+      return 0
+    fi
+  fi
+
+  if command -v hostname >/dev/null 2>&1; then
+    ip="$(hostname -I 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i !~ /^127\\./ && $i !~ /^169\\.254\\./) {print $i; exit}}')"
+    if is_routable_ipv4 "${ip}"; then
+      echo "${ip}"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+is_routable_ipv4() {
+  local ip="$1"
+  [[ "${ip}" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || return 1
+  [[ "${ip}" != 127.* && "${ip}" != 169.254.* && "${ip}" != 0.0.0.0 ]]
+}
+
+apply_detected_runtime_ip_defaults() {
+  local local_ipv4 backend_port
+  local_ipv4="$(detect_local_ipv4 || true)"
+  if [[ -z "${local_ipv4}" ]]; then
+    return
+  fi
+
+  if [[ -z "${TEST_AGENT_LINUX_SERVER_ID:-}" ]]; then
+    export TEST_AGENT_LINUX_SERVER_ID="${local_ipv4}"
+    echo "Defaulting TEST_AGENT_LINUX_SERVER_ID to detected local IPv4: ${TEST_AGENT_LINUX_SERVER_ID}"
+  fi
+  if [[ -z "${TEST_AGENT_BACKEND_LISTEN_URL:-}" ]]; then
+    backend_port="$(url_port "${backend_url}")"
+    export TEST_AGENT_BACKEND_LISTEN_URL="http://${local_ipv4}:${backend_port}"
+    echo "Defaulting TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4: ${TEST_AGENT_BACKEND_LISTEN_URL}"
+  fi
+  if [[ -z "${OPENCODE_MANAGER_LINUX_SERVER_ID:-}" ]]; then
+    export OPENCODE_MANAGER_LINUX_SERVER_ID="${TEST_AGENT_LINUX_SERVER_ID}"
+  fi
+}
+
 is_local_opencode_url() {
   local url="$1"
   [[ "${url}" == http://127.0.0.1:* || "${url}" == http://localhost:* || "${url}" == http://[::1]:* ]]
@@ -575,6 +636,9 @@ start_frontend() {
 }
 
 load_env_file "${env_file}"
+backend_url="${TEST_AGENT_BASE_URL:-${backend_url}}"
+frontend_url="${TEST_AGENT_FRONTEND_URL:-${frontend_url}}"
+apply_detected_runtime_ip_defaults
 export SPRING_PROFILES_ACTIVE="${profile}"
 
 # 设置 JAVA_HOME
