@@ -13,6 +13,7 @@ import {
   Send,
   Square,
   Upload,
+  User,
   X,
 } from 'lucide-vue-next'
 import type { AgentMessage } from '@test-agent/shared-types'
@@ -52,11 +53,11 @@ export type TaskUsage = {
 }
 
 type OpencodeProcessState = {
-  status: string;
-  initializable: boolean;
-  message: string;
-  baseUrl?: string;
-};
+  status: string
+  initializable: boolean
+  message: string
+  baseUrl?: string
+}
 
 // 抽屉里 diff 行的解析结果：保留原始前缀符号供渲染和后续扩展使用
 type DiffLineKind = 'add' | 'del' | 'ctx' | 'meta'
@@ -70,45 +71,47 @@ type DiffLine = {
   text: string
 }
 
-const props = defineProps<{
-  messages: ChatMessageInput[];
-  running?: boolean;
-  placeholder?: string;
-  inputValue?: string;
-  title?: string;
-  /** 任务消耗（来自 SSE 事件统计） */
-  taskUsage?: TaskUsage;
-  /** 文件变更行（来自 SSE 事件统计） */
-  fileChanges?: FileChangeStat[];
-  /** 历史对话列表 */
-  history?: Array<{ id: string; title: string; createdAt?: string }>;
-  /** 当前选中的模型展示名 */
-  selectedModelLabel?: string;
-  /** 模型选择按钮是否禁用 */
-  modelPickerDisabled?: boolean;
-  /** 终止按钮是否禁用 */
-  stopDisabled?: boolean;
-  /** 终止按钮禁用原因 */
-  stopDisabledReason?: string;
-  /** 当前用户 opencode 进程状态，控制是否允许发起对话 */
-  processStatus?: OpencodeProcessState | null;
-  processRequired?: boolean;
-  processLoading?: boolean;
-  processInitializing?: boolean;
-}>();
+const props =
+  defineProps<{
+    messages: ChatMessageInput[]
+    running?: boolean
+    placeholder?: string
+    inputValue?: string
+    title?: string
+    /** 任务消耗（来自 SSE 事件统计） */
+    taskUsage?: TaskUsage
+    /** 文件变更行（来自 SSE 事件统计） */
+    fileChanges?: FileChangeStat[]
+    /** 历史对话列表 */
+    history?: Array<{ id: string; title: string; createdAt?: string }>
+    /** 当前选中的模型展示名 */
+    selectedModelLabel?: string
+    /** 模型选择按钮是否禁用 */
+    modelPickerDisabled?: boolean
+    /** 终止按钮是否禁用 */
+    stopDisabled?: boolean
+    /** 终止按钮禁用原因 */
+    stopDisabledReason?: string
+    /** 当前用户 opencode 进程状态，控制是否允许发起对话 */
+    processStatus?: OpencodeProcessState | null
+    processRequired?: boolean
+    processLoading?: boolean
+    processInitializing?: boolean
+  }>()
 
-const emit = defineEmits<{
-  (e: "send", prompt: string): void;
-  (e: "stop"): void;
-  (e: "new-conversation"): void;
-  (e: "close"): void;
-  (e: "open-history"): void;
-  (e: "open-tasks"): void;
-  (e: "update:inputValue", value: string): void;
-  (e: "open-diff", path: string): void;
-  (e: "open-model-picker"): void;
-  (e: "initialize-process"): void;
-}>();
+const emit =
+  defineEmits<{
+    (e: 'send', prompt: string): void
+    (e: 'stop'): void
+    (e: 'new-conversation'): void
+    (e: 'close'): void
+    (e: 'open-history'): void
+    (e: 'open-tasks'): void
+    (e: 'update:inputValue', value: string): void
+    (e: 'open-diff', path: string): void
+    (e: 'open-model-picker'): void
+    (e: 'initialize-process'): void
+  }>()
 
 const localInput = ref(props.inputValue ?? '')
 const inputComposing = ref(false)
@@ -245,25 +248,34 @@ function parseDiffLines(patch: string | undefined): DiffLine[] {
 const hasFileChanges = computed(() => (props.fileChanges?.length ?? 0) > 0)
 const processReady = computed(() => {
   if (props.processRequired) {
-    return !props.processLoading && props.processStatus?.status === "READY";
+    return !props.processLoading && props.processStatus?.status === 'READY'
   }
-  return !props.processLoading && (!props.processStatus || props.processStatus.status === "READY");
-});
-const processStatusVisible = computed(() => props.processRequired || props.processLoading || props.processStatus != null);
+  return (
+    !props.processLoading &&
+    (!props.processStatus || props.processStatus.status === 'READY')
+  )
+})
+const processStatusVisible = computed(
+  () =>
+    props.processRequired || props.processLoading || props.processStatus != null
+)
 const processStatusTitle = computed(() => {
-  if (props.processLoading) return "正在检查 opencode 进程";
-  if (props.processRequired && !props.processStatus) return "正在检查 opencode 进程";
-  if (!props.processStatus) return "";
-  if (props.processStatus.status === "READY") return "opencode 进程可用";
-  if (props.processStatus.status === "NEEDS_INITIALIZATION") return "需要初始化 opencode 进程";
-  return "opencode 进程不可用";
-});
+  if (props.processLoading) return '正在检查 opencode 进程'
+  if (props.processRequired && !props.processStatus)
+    return '正在检查 opencode 进程'
+  if (!props.processStatus) return ''
+  if (props.processStatus.status === 'READY') return 'opencode 进程可用'
+  if (props.processStatus.status === 'NEEDS_INITIALIZATION')
+    return '需要初始化 opencode 进程'
+  return 'opencode 进程不可用'
+})
 const processStatusText = computed(() => {
-  if (props.processLoading) return "正在检查当前用户可用进程";
-  if (props.processRequired && !props.processStatus) return "正在检查当前用户可用进程";
-  if (!props.processStatus) return "";
-  return props.processStatus.baseUrl ?? props.processStatus.message;
-});
+  if (props.processLoading) return '正在检查当前用户可用进程'
+  if (props.processRequired && !props.processStatus)
+    return '正在检查当前用户可用进程'
+  if (!props.processStatus) return ''
+  return props.processStatus.baseUrl ?? props.processStatus.message
+})
 
 // 抽屉可见文件列表（按 props 顺序）；选中态基于 drawerSelectedPath。
 const drawerFiles = computed(() => props.fileChanges ?? [])
@@ -522,10 +534,17 @@ function onCompositionEnd() {
     <div ref="scrollEl" class="figma-chat-scroll">
       <template v-for="message in displayMessages" :key="message.id">
         <!-- 用户消息气泡 (右对齐) -->
-        <div v-if="message.role === 'user'" class="figma-chat-bubble figma-chat-bubble--user">
-          <div class="figma-chat-bubble-content">{{ message.content }}</div>
-          <div v-if="message.meta" class="figma-chat-bubble-meta">
-            你 · {{ message.meta }}
+        <div v-if="message.role === 'user'" class="figma-chat-user-message">
+          <div class="figma-chat-user-meta-row">
+            <div v-if="message.meta" class="figma-chat-bubble-meta">
+              你 · {{ message.meta }}
+            </div>
+            <div class="figma-chat-avatar figma-chat-avatar--user">
+              <User class="figma-chat-avatar-icon" />
+            </div>
+          </div>
+          <div class="figma-chat-bubble figma-chat-bubble--user">
+            <div class="figma-chat-bubble-content">{{ message.content }}</div>
           </div>
         </div>
 
@@ -535,13 +554,13 @@ function onCompositionEnd() {
             <img :src="aiHeaderUrl" alt="AI" class="figma-chat-avatar-icon" />
           </div>
           <div class="figma-chat-assistant-content">
+            <div v-if="message.meta" class="figma-chat-bubble-meta">
+              测试智能体 · {{ message.meta }}
+            </div>
             <div class="figma-chat-bubble figma-chat-bubble--assistant">
               <div class="figma-chat-bubble-content">
                 {{ message.content }}
               </div>
-            </div>
-            <div v-if="message.meta" class="figma-chat-bubble-meta">
-              测试智能体 · {{ message.meta }}
             </div>
           </div>
         </div>
@@ -638,7 +657,12 @@ function onCompositionEnd() {
 
     <!-- 任务消耗提示（位于输入框上方） -->
     <div v-if="hasTaskUsageDisplay" class="figma-chat-usage">
-      <img v-if="running" :src="planLoadingUrl" alt="" class="figma-chat-usage-icon" />
+      <img
+        v-if="running"
+        :src="planLoadingUrl"
+        alt=""
+        class="figma-chat-usage-icon"
+      />
       <span v-else class="figma-chat-usage-dot" aria-hidden="true" />
       <span class="figma-chat-usage-label">任务消耗：</span>
       <span class="figma-chat-usage-value">
@@ -670,20 +694,27 @@ function onCompositionEnd() {
 
     <div
       v-if="processStatusVisible"
-      :class="['figma-chat-process-status', processReady ? 'is-ready' : 'is-blocking']"
+      :class="[
+        'figma-chat-process-status',
+        processReady ? 'is-ready' : 'is-blocking',
+      ]"
     >
       <div class="figma-chat-process-copy">
         <span class="figma-chat-process-title">{{ processStatusTitle }}</span>
-        <span v-if="processStatusText" class="figma-chat-process-message">{{ processStatusText }}</span>
+        <span v-if="processStatusText" class="figma-chat-process-message">{{
+          processStatusText
+        }}</span>
       </div>
       <button
         v-if="processStatus?.status === 'NEEDS_INITIALIZATION'"
         type="button"
         class="figma-chat-process-init"
-        :disabled="processInitializing || processLoading || !processStatus.initializable"
+        :disabled="
+          processInitializing || processLoading || !processStatus.initializable
+        "
         @click="emit('initialize-process')"
       >
-        {{ processInitializing ? "初始化中" : "初始化进程" }}
+        {{ processInitializing ? '初始化中' : '初始化进程' }}
       </button>
     </div>
 
@@ -740,7 +771,9 @@ function onCompositionEnd() {
           aria-label="切换模型"
           @click="emit('open-model-picker')"
         >
-          <span class="figma-chat-model-label">{{ selectedModelLabel || '选择模型' }}</span>
+          <span class="figma-chat-model-label">{{
+            selectedModelLabel || '选择模型'
+          }}</span>
           <ChevronDown class="figma-chat-btn-icon" />
         </button>
         <button
@@ -770,7 +803,9 @@ function onCompositionEnd() {
         <header class="figma-chat-attachment-header">
           <div>
             <h3 class="figma-chat-attachment-title">上传附件</h3>
-            <p class="figma-chat-attachment-subtitle">附件会随测试任务一起提交</p>
+            <p class="figma-chat-attachment-subtitle">
+              附件会随测试任务一起提交
+            </p>
           </div>
           <button
             type="button"
@@ -781,16 +816,16 @@ function onCompositionEnd() {
             <X :size="14" />
           </button>
         </header>
-        <button
-          type="button"
-          class="figma-chat-attachment-drop"
-          @click.prevent
-        >
+        <button type="button" class="figma-chat-attachment-drop" @click.prevent>
           <span class="figma-chat-attachment-drop-icon" aria-hidden="true">
             <Upload :size="22" />
           </span>
-          <span class="figma-chat-attachment-drop-title">选择或拖拽文件到这里</span>
-          <span class="figma-chat-attachment-drop-hint">支持文档、图片和日志文件，后台接口接入后开放上传。</span>
+          <span class="figma-chat-attachment-drop-title"
+            >选择或拖拽文件到这里</span
+          >
+          <span class="figma-chat-attachment-drop-hint"
+            >支持文档、图片和日志文件，后台接口接入后开放上传。</span
+          >
         </button>
         <div class="figma-chat-attachment-disabled">
           <span class="figma-chat-attachment-disabled-dot" aria-hidden="true" />
@@ -1120,8 +1155,39 @@ function onCompositionEnd() {
   white-space: pre-wrap;
 }
 
-.figma-chat-bubble--user {
+.figma-chat-user-message {
   align-self: flex-end;
+  max-width: 80%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.figma-chat-user-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.figma-chat-user-meta-row .figma-chat-bubble-meta {
+  margin-top: 0;
+}
+
+.figma-chat-avatar--user {
+  margin-top: 0;
+  background: #f4f4f5;
+  border-radius: 6px;
+  color: #a1a5b1;
+}
+
+.figma-chat-avatar--user .figma-chat-avatar-icon {
+  width: 14px;
+  height: 14px;
+}
+
+.figma-chat-bubble--user {
   background: #f4f4f5;
   color: #111;
   max-width: 80%;
@@ -1159,16 +1225,17 @@ function onCompositionEnd() {
   gap: 8px;
   align-self: flex-start;
   max-width: 100%;
+  align-items: flex-start;
 }
 
 .figma-chat-avatar {
   display: flex;
+  margin-top: 5px;
   align-items: center;
   justify-content: center;
   width: 24px;
   height: 24px;
   border-radius: 6px;
-  background: transparent;
   flex-shrink: 0;
   overflow: hidden;
 }
