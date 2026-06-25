@@ -546,14 +546,11 @@ test("workspace cascade menu +新增版本 dialog opens with yyyy年M月 label",
   await expect(dialog.getByRole("button", { name: "确定" })).toBeDisabled();
 
   // 打开日期面板，验证月份显示中文"1月/2月/…"而不是英文"Jan/Feb/…"
-  // （依赖 main.ts 里的 dayjs.locale("zh-cn")）
+  // （依赖 main.ts 里的 dayjs.locale("zh-cn") + 自定义 months locale 覆盖）
   await dialog.locator(".el-date-editor input").click();
   const monthPanel = page.locator(".el-month-table");
   await expect(monthPanel).toBeVisible();
-  // 调试：dump 月份面板的 HTML 看实际结构
-  // eslint-disable-next-line no-console
-  console.log("[monthPanel html]", await monthPanel.innerHTML());
-  // 第一个月文案应该是"1月"（Element Plus 2.12 用 div.month 或 td）
+  // 第一个月文案应该是"1月"（不是 Element Plus 默认 zh-cn 的"一月"或英文的"Jan"）
   await expect(monthPanel.getByText(/^1月$/).first()).toBeVisible();
   await expect(monthPanel.getByText(/^6月$/).first()).toBeVisible();
 });
@@ -639,7 +636,6 @@ async function mockBackendApi(
     workspaceTemplates?: Record<string, Array<Record<string, unknown>>>;
     /** 自定义 /applications/{appId}/workspace-templates/{tid}/versions 返回；key 用 `{appId}:{templateId}`。 */
     workspaceVersions?: Record<string, Array<Record<string, unknown>>>;
-  } = {}) {
     processStatus?: "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE";
     processInitializations?: Array<Record<string, unknown>>;
   } = {}
