@@ -12,25 +12,25 @@ export const router = createRouter({
     {
       path: "/login",
       name: "login",
-      component: () => import("./views/LoginView.vue")
+      component: () => import("./views/LoginView.vue"),
     },
     {
       path: "/",
       name: "workbench",
-      component: () => import("./views/WorkbenchView.vue")
+      component: () => import("./views/WorkbenchView.vue"),
     },
     {
       path: "/s/:sessionId",
       name: "transcript",
       component: () => import("./views/TranscriptView.vue"),
-      props: true
+      props: true,
     },
     {
       path: "/:pathMatch(.*)*",
       name: "not-found",
-      redirect: "/"
-    }
-  ]
+      redirect: "/",
+    },
+  ],
 });
 
 const LOGIN_REDIRECT_BASE_URL = "http://test-agent.local";

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, type Component } from "vue";
-import { Monitor, Setting, User } from "@element-plus/icons-vue";
+import { Setting, User } from "@element-plus/icons-vue";
 import type { CurrentUser } from "@test-agent/shared-types";
 
-type MenuKey = "appWorkspace" | "runtimeManagement" | "personal";
+type MenuKey = "appWorkspace" | "personal";
 
 const props = defineProps<{
   activeKey: MenuKey;
@@ -18,9 +18,6 @@ type MenuItem = { key: MenuKey; label: string; icon: Component };
 
 const items = computed<MenuItem[]>(() => {
   const menuItems: MenuItem[] = [{ key: "appWorkspace", label: "应用与工作区", icon: Setting }];
-  if (props.currentUser?.roles?.includes("SUPER_ADMIN")) {
-    menuItems.push({ key: "runtimeManagement", label: "运行管理", icon: Monitor });
-  }
   menuItems.push({ key: "personal", label: "个人设置", icon: User });
   return menuItems;
 });

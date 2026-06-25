@@ -7,7 +7,7 @@ import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api
 import { DiffViewer } from "@test-agent/diff-viewer";
 import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents } from "@test-agent/event-stream-client";
-import { Code2, MessageSquare } from "lucide-vue-next";
+import { Code2, MessageSquare, Monitor } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
@@ -41,6 +41,7 @@ import FigmaChatPanel from "./FigmaChatPanel.vue";
 import SettingsDialog from "./settings/SettingsDialog.vue";
 import WorkspaceBootstrap from "./WorkspaceBootstrap.vue";
 import WorkspaceDirectoryPickerDialog from "./WorkspaceDirectoryPickerDialog.vue";
+import RuntimeManagementWrapper from "./RuntimeManagementWrapper.vue";
 import { notifyFeedback } from "./notify";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, type FollowUpDraft } from "./follow-up-queue";
 import {
@@ -71,6 +72,8 @@ const workbench = useWorkbenchStore();
 const authStore = useAuthStore();
 const router = useRouter();
 
+const isSuperAdmin = computed(() => authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+
 // 设置弹窗依赖当前用户角色；工作台直达时需要主动补齐 /api/auth/me。
 void authStore.fetchCurrentUser(api);
 
@@ -93,7 +96,7 @@ const logs = ref<string[]>([]);
 const diffFiles = ref<RunDiffFile[]>([]);
 const diffSource = ref<"run" | "session" | "vcs">("run");
 const diffViewMode = ref<"split" | "unified">("split");
-const centerMode = ref<"editor" | "diff">("editor");
+const centerMode = ref<"editor" | "diff" | "runtime">("editor");
 const feedback = ref<Feedback | null>(null);
 const sessionSearch = ref("");
 const followUpQueue = ref<FollowUpDraft[]>([]);
@@ -596,8 +599,6 @@ function isPublicFilePath(path: string): boolean {
 function publicFilePath(tabPath: string): string {
   return tabPath.startsWith(PUBLIC_FILE_PREFIX) ? tabPath.slice(PUBLIC_FILE_PREFIX.length) : tabPath;
 }
-// 当前用户是否具备 SUPER_ADMIN 角色；只有超级管理员的公共目录 tab 允许编辑。
-const isSuperAdmin = computed(() => authStore.currentUser?.roles?.includes("SUPER_ADMIN") ?? false);
 
 const startRunMutation = useMutation({
   mutationFn: async (input: { prompt: string; parts: PromptPart[] }) => {
@@ -1721,6 +1722,20 @@ async function handleLogout() {
           >
             <Code2 class="figma-activity-icon" :stroke-width="1.5" />
           </button>
+          <button
+            v-if="isSuperAdmin"
+            type="button"
+            :class="['figma-activity-btn', centerMode === 'runtime' && 'figma-activity-btn--active']"
+            aria-label="运行管理"
+            title="运行管理"
+            @click="
+              centerMode = 'runtime';
+              rightPanelOpen = false;
+              bottomDrawerOpen = false;
+            "
+          >
+            <Monitor class="figma-activity-icon" :stroke-width="1.5" />
+          </button>
         </div>
         <div class="figma-activity-bottom">
           <button
@@ -1797,6 +1812,9 @@ async function handleLogout() {
           @current-file-feedback="onCurrentFileFeedback"
           @use-hunk-context="onUseHunkContext"
         />
+        <div v-else-if="centerMode === 'runtime'" class="managed-runtime-container">
+          <RuntimeManagementWrapper :current-user="authStore.currentUser" />
+        </div>
         <FigmaEditorArea
           v-else
           :tabs="tabs"
@@ -1967,6 +1985,14 @@ async function handleLogout() {
 .managed-editor-main > *:first-child {
   min-height: 0;
   flex: 1;
+}
+
+.managed-runtime-container {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+  background: #f5f5f5;
 }
 
 .managed-chat-panel :deep(.figma-chat-root) {
