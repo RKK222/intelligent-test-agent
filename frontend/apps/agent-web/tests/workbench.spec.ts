@@ -179,7 +179,7 @@ test("workspace picker creates selected directory and loads its file tree", asyn
 
   await gotoWorkbench(page);
 
-  await page.getByRole("button", { name: "选择工作区目录" }).click();
+  await page.getByRole("button", { name: "打开文件夹" }).click();
   await expect(page.getByRole("dialog", { name: "选择工作区目录" })).toBeVisible();
   await page.getByRole("button", { name: /project-a/ }).click();
   await page.getByRole("button", { name: "选择此目录" }).click();
@@ -197,7 +197,7 @@ test("workspace picker switches to an existing workspace without recreating it",
 
   await gotoWorkbench(page);
 
-  await page.getByRole("button", { name: "选择工作区目录" }).click();
+  await page.getByRole("button", { name: "打开文件夹" }).click();
   await page.getByRole("button", { name: /demo-tests/ }).click();
   await page.getByRole("button", { name: "选择此目录" }).click();
 

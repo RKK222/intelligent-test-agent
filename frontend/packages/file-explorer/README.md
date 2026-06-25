@@ -9,7 +9,7 @@
 - 展示单层加载的目录树。
 - 使用 Figma Web IDE 风格的 45px icon tabbar 承载文件树、搜索和变更视图，列表行保持 28px 紧凑高度。
 - 展开目录时通过回调交给 app 调用后端。
-- 文件树标题行提供刷新和“选择工作区目录”事件按钮，本包只发出 `addWorkspace` 事件，不直接调用后端。
+- 文件树标题行提供刷新事件按钮，本包不直接调用后端。
 - 搜索只过滤已加载文件树中的文件名或路径。
 - 展示 Diff 文件列表并触发打开 Diff。
 - 文件树行支持在文件名后展示变更行数 `+N -N`（绿/红，与 Changed Files 面板一致）：由 app 层传入 `changedFiles` 与 `workspaceRootPath`，本包把 diff 路径归一化为 workspace 相对路径后按文件匹配，行数来自 `RunDiffFile.additions/deletions`。

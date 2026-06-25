@@ -36,7 +36,6 @@ const emit = defineEmits<{
   openFile: [path: string];
   openDiff: [path: string];
   refresh: [];
-  addWorkspace: [];
   changeBranch: [branch: string];
   // 选择某个应用版本后由父组件切换运行态 Workspace
   selectVersion: [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
@@ -64,7 +63,6 @@ const emit = defineEmits<{
         @open-file="emit('openFile', $event)"
         @open-diff="emit('openDiff', $event)"
         @refresh="emit('refresh')"
-        @add-workspace="emit('addWorkspace')"
       />
     </div>
     <WorkbenchFooter

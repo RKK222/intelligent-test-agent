@@ -1860,7 +1860,6 @@ async function handleLogout() {
           @open-file="openFile"
           @open-diff="(path: string) => { workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
           @refresh="loadDirectory('')"
-          @add-workspace="openWorkspaceDirectoryPicker"
           @change-branch="handleChangeBranch"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
