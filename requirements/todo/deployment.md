@@ -86,3 +86,5 @@ XDG_DATA_HOME=/data/opencode/session/{port}
 目录下的内容有哪些，参考opencode官方文档。
 启动参数：
 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/
+
+https://opencode.ai/docs/cli/
