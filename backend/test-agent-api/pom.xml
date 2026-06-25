@@ -47,6 +47,10 @@
             <artifactId>test-agent-configuration-management</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.icbc.testagent</groupId>
+            <artifactId>test-agent-scheduler</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-webflux</artifactId>
         </dependency>

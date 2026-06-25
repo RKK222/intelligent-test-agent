@@ -3,6 +3,7 @@ package com.icbc.testagent.domain.session;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.icbc.testagent.domain.user.UserId;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 
@@ -36,5 +37,26 @@ class SessionMessageTest {
                 "trace_1234567890abcdef"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("content");
+    }
+
+    @Test
+    void messageDefaultsToManualSourceAndCanCarryScheduledSender() {
+        SessionMessage manual = new SessionMessage(
+                new SessionMessageId("msg_1234567890abcdef"),
+                new SessionId("ses_1234567890abcdef"),
+                SessionMessageRole.USER,
+                "run the tests",
+                NOW,
+                "trace_1234567890abcdef");
+
+        SessionMessage scheduled = manual.withSource(
+                ConversationSourceType.SCHEDULED_TASK,
+                "str_1234567890abcdef",
+                new UserId("usr_1234567890abcdef"));
+
+        assertThat(manual.sourceType()).isEqualTo(ConversationSourceType.MANUAL);
+        assertThat(scheduled.sourceType()).isEqualTo(ConversationSourceType.SCHEDULED_TASK);
+        assertThat(scheduled.sourceRefId()).isEqualTo("str_1234567890abcdef");
+        assertThat(scheduled.senderUserId()).isEqualTo(new UserId("usr_1234567890abcdef"));
     }
 }

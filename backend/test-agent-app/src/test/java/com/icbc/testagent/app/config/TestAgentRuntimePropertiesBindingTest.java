@@ -2,6 +2,7 @@ package com.icbc.testagent.app.config;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.icbc.testagent.scheduler.SchedulerProperties;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -38,6 +39,13 @@ class TestAgentRuntimePropertiesBindingTest {
             assertThat(context.getEnvironment().getProperty("spring.datasource.druid.test-while-idle", Boolean.class))
                     .isTrue();
         });
+    }
+
+    @Test
+    void defaultSchedulerScanningIsDisabled() {
+        profileContextRunner
+                .withBean(SchedulerProperties.class)
+                .run(context -> assertThat(context.getBean(SchedulerProperties.class).isEnabled()).isFalse());
     }
 
     @Test

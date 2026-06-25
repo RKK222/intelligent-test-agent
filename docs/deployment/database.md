@@ -251,14 +251,14 @@
   3. 应用下没有任何模板/版本：保持空态，由用户手动选择本机目录。
 - 兜底命中会立即持久化偏好，保证"第二次进入直接命中第 1 步"。
 
-V10 种子数据对 F-COSS 的影响：
+V10_1 种子数据对 F-COSS 的影响：
 
-- `V10__seed_fcoss_application.sql` 同步写入 `user_application_workspace_preferences(user='888888888', app='app_fcoss', workspace='wrk_fcoss_20260701')`，本地开发用户首次进入 F-COSS 直接落到最新版本。
-- 删除/重置后只要重新执行 `V10`（幂等）即可恢复默认状态；偏好表本身的幂等写入由 `INSERT ... ON CONFLICT DO UPDATE` 在 `ManagedWorkspaceRepository.savePreference` 内保证。
+- `V10_1__seed_fcoss_application.sql` 同步写入 `user_application_workspace_preferences(user='888888888', app='app_fcoss', workspace='wrk_fcoss_20260701')`，本地开发用户首次进入 F-COSS 直接落到最新版本。
+- 删除/重置后只要重新执行 `V10_1`（幂等）即可恢复默认状态；偏好表本身的幂等写入由 `INSERT ... ON CONFLICT DO UPDATE` 在 `ManagedWorkspaceRepository.savePreference` 内保证。
 
-## V10 opencode 用户进程管理表
+## opencode 用户进程管理表版本调整
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V10__create_opencode_process_management_tables.sql` 创建 opencode 用户进程管理拓扑表，都是新增表，不修改旧 `execution_nodes` 或 `sessions.opencode_*` 字段：
+opencode 用户进程管理表曾在设计阶段使用 V10 版本号；实际仓库中 V10 已用于消息/Run 消耗字段，F-COSS seed 使用 `V10_1`，最终表结构迁移以 `V14__create_opencode_process_management_tables.sql` 为准。该迁移都是新增表，不修改旧 `execution_nodes` 或 `sessions.opencode_*` 字段：
 
 | 表 | 说明 |
 |---|---|
@@ -285,9 +285,9 @@ V10 种子数据对 F-COSS 的影响：
 - 应用回滚时可保留这些新增表；如需完整回退 Web 用户对话到固定节点模式，应回滚后端和前端镜像，而不是删除 V10 表或清理 `/data/opencode/session/{port}`。
 - 后端启动/心跳更新 `linux_servers`、`backend_java_processes`；manager WebSocket 注册和心跳更新 `opencode_containers`、`opencode_container_managers` 和 `opencode_manager_backend_connections`。
 
-## V10 F-COSS 应用开发种子数据
+## V10_1 F-COSS 应用开发种子数据
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V10__seed_fcoss_application.sql` 在本地开发环境提供开箱即用的 F-COSS 应用数据，让工作台左下角的两级菜单（应用→工作空间→版本）首次进入就能看到内容：
+`backend/test-agent-persistence/src/main/resources/db/migration/V10_1__seed_fcoss_application.sql` 在本地开发环境提供开箱即用的 F-COSS 应用数据，让工作台左下角的两级菜单（应用→工作空间→版本）首次进入就能看到内容：
 
 | 数据 | 标识 | 说明 |
 |---|---|---|
@@ -324,7 +324,7 @@ V10 种子数据对 F-COSS 的影响：
 
 ## V14 opencode 用户进程管理表
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V14__create_opencode_process_management_tables.sql` 创建企业内部署所需的 opencode 用户进程管理表。V10 已用于 F-COSS 本地种子数据，因此该表结构迁移使用 V14，避免 Flyway 版本冲突。
+`backend/test-agent-persistence/src/main/resources/db/migration/V14__create_opencode_process_management_tables.sql` 创建企业内部署所需的 opencode 用户进程管理表。V10 已用于消息/Run 消耗字段，F-COSS 本地种子数据使用 V10_1，因此该表结构迁移使用 V14，避免 Flyway 版本冲突。
 
 | 表 | 说明 |
 |---|---|
@@ -337,6 +337,40 @@ V10 种子数据对 F-COSS 的影响：
 | `user_opencode_process_bindings` | 用户到 agent/opencode 进程的唯一绑定。 |
 - `created_by_user_id` 选择 `users.username = '888888888'` 的用户，没有该用户时整条插入被跳过；不引入新用户。
 - 不影响 V9 的表结构与已有迁移路径；模板与版本均为 ACTIVE，运行态 `workspaces` 同步 ACTIVE 状态。
+
+## V15 scheduler 框架表与来源预留字段
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V15__create_scheduler_framework_tables.sql` 创建通用定时任务框架表，并给会话、Run、消息增加来源预留字段。本次只提供框架和管理 API，不新增具体业务任务，也不开放普通用户创建 Cron 计划 API。
+
+| 表 | 说明 |
+|---|---|
+| `scheduled_tasks` | 代码注册任务定义，保存任务 key、名称、Cron、启停、锁 TTL、下次触发时间和注册状态。 |
+| `scheduled_task_plans` | 用户级 Cron 计划预留表，包含 owner 用户、Cron、payload、启停和下次触发时间。 |
+| `scheduled_task_runs` | 单次运行记录，统一记录 Cron、管理员手动触发和未来用户计划触发的状态、时间、实例、跳过原因、错误和结果。 |
+
+关键字段：
+
+- `scheduled_tasks.task_key` 唯一，作为代码注册、数据库定义、Redis 锁和运行记录关联键。
+- `scheduled_tasks.lock_ttl_seconds` 保存 Redis 锁租约秒数，必须为正数。
+- `scheduled_task_plans.plan_id`、`scheduled_task_runs.task_run_id` 是业务 ID，不暴露数据库自增 surrogate PK。
+- `scheduled_task_runs.trigger_type` 当前支持 `CRON`、`MANUAL`、`USER_PLAN`；HTTP 首版只创建 `MANUAL`。
+- `scheduled_task_runs.status` 当前支持 `PENDING`、`RUNNING`、`SUCCEEDED`、`FAILED`、`SKIPPED`。
+- `scheduled_task_runs.skip_reason` 保存同一 `taskKey` 已有未结束运行或 Redis 锁竞争失败时的跳过原因。
+
+新增来源字段：
+
+| 表 | 字段 | 说明 |
+|---|---|---|
+| `sessions` | `source_type`、`source_ref_id`、`created_by_user_id` | 会话来源，默认 `MANUAL`；`SCHEDULED_TASK` 用于未来定时会话。 |
+| `runs` | `source_type`、`source_ref_id`、`triggered_by_user_id` | Run 来源，默认 `MANUAL`。 |
+| `session_messages` | `source_type`、`source_ref_id`、`sender_user_id` | 消息来源，默认 `MANUAL`。 |
+
+兼容策略：
+
+- 旧数据通过 `default 'MANUAL'` 保持兼容；新增用户字段均可空。
+- `scheduled_task_plans` 只预留领域模型和 Repository，不开放 HTTP API，不会被普通用户直接创建。
+- 分布式互斥由 Redis 锁保证，数据库表不作为锁 fallback；Redis 不可用时 scheduler 启用校验失败或运行失败，不降级为本机锁。
+- `result_json`、`payload_json` 保存结构化 JSON 文本，禁止写入密钥、Token、完整 prompt 或其他敏感内容。
 
 ## V11 用户工作区分支偏好表
 

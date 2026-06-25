@@ -340,9 +340,15 @@ TEST_AGENT_REDIS_HOST=<redis-host>
 TEST_AGENT_REDIS_PORT=6379
 TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true
 TEST_AGENT_RUN_EVENT_REDIS_BUS_CHANNEL=test-agent:run-events
+TEST_AGENT_SCHEDULER_ENABLED=false
+TEST_AGENT_SCHEDULER_SCAN_INTERVAL=30s
+TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT=50
+TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
 ```
 
 `TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED` 只控制 RunEvent 跨实例实时 fan-out；数据库 `run_events` replay、`Last-Event-ID` 和 `session_messages` 快照仍是恢复基线。Redis 不可用或该开关为 `false` 时，后端自动退回本机 live bus + DB replay。
+
+`TEST_AGENT_SCHEDULER_ENABLED` 默认 `false`。启用 scheduler 后必须同时设置 `TEST_AGENT_REDIS_ENABLED=true` 并提供可用 Redis；scheduler 使用 Redis `SET NX PX` + Lua token 校验作为唯一分布式互斥实现，不降级为本机锁或数据库锁。首版只提供框架和超级管理员管理 API，不内置具体业务任务。
 
 ## 运行示例
 
@@ -370,6 +376,7 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 ```
 
 `DatabaseMigrationRunner` 会在启动时执行 Flyway migration；`ExecutionNodeSeeder` 会把配置中的 opencode node 写入 `execution_nodes` 作为 Run 路由来源。启用 `TEST_AGENT_MODEL_CATALOG_SOURCE=internal` 时，`ModelCatalogApplicationService` 会把企业内模型清单 seed 到 `ai_model_configs`，后续可通过改表控制模型显示、启停和默认值。
+启用 `TEST_AGENT_SCHEDULER_ENABLED=true` 时，`ScheduledTaskRegistry` 会同步代码注册任务，`ScheduledTaskRunner` 后台线程会扫描 due task 和管理员手动触发 pending run。
 
 ## 模型目录配置
 

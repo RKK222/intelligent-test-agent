@@ -37,6 +37,7 @@
 | `/api/internal/agent/{agentId}/...` | 与具体 agent 交互的新入口，`agentId` 由前端 URL 传递；当前唯一可运行值为 `opencode`。 |
 | `/api/internal/platform/opencode-runtime/manager-backends` | opencode-manager 后端发现入口，使用独立 manager token。 |
 | `/api/internal/platform/opencode-runtime/management/overview` | 超级管理员只读运行管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
+| `/api/internal/platform/scheduler-management` | 超级管理员定时任务管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
 | `/api/public/...` | 其他系统调用平台的公开 API，当前预留；新增前必须完成鉴权、限流、安全和兼容性设计。 |
 
 当前已落地的新平台入口：
@@ -55,6 +56,8 @@
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/agents` | `/api/agents` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets` | `/api/sessions/{sessionId}/terminal/tickets` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/overview` | 无旧 URL |
+| `scheduler-management` | `/api/internal/platform/scheduler-management/tasks` | 无旧 URL |
+| `scheduler-management` | `/api/internal/platform/scheduler-management/runs` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/applications` | 无旧 URL |
 | `configuration-management` | `/api/internal/platform/configuration-management/personal/ssh-keys` | 无旧 URL |
 
@@ -857,6 +860,96 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
 ```
 
 拓扑列表固定最多返回 500 条，避免管理页一次性读取过多连接和进程快照。Java 后端和 opencode server 进程通过 Redis 运行心跳做跨实例活跃判定；Redis 未启用时回退到数据库最近心跳/健康检查时间。后端实例注册会持续写入当前 Java 进程心跳，opencode server 由后端每 3 分钟通过 manager health 命令确认并刷新心跳，Redis 心跳 key 5 分钟过期，索引清理每 5 分钟执行一次。`opencodeProcesses.items[]` 的 `bindingAgentId`、`bindingStatus`、`bindingUpdatedAt` 仅在该进程仍是当前用户绑定时返回，否则为 `null`。
+
+### scheduler-management 定时任务管理 API
+
+定时任务管理 API 是高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`，非法分页、任务 key、状态、触发类型、Cron 或锁 TTL 返回 `VALIDATION_ERROR`。本接口只管理框架任务定义和运行记录，不开放普通用户级 Cron 计划创建 API，也不创建定时会话或 Run。
+
+Base URL：`/api/internal/platform/scheduler-management`
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/tasks` | 分页查询代码注册的任务定义。 |
+| `GET` | `/tasks/{taskKey}` | 查询单个任务定义。 |
+| `PATCH` | `/tasks/{taskKey}` | 调整任务启停、Cron 表达式和锁 TTL。 |
+| `POST` | `/tasks/{taskKey}/trigger` | 创建管理员手动触发运行记录，后台 runner 异步执行。 |
+| `GET` | `/runs` | 分页查询运行记录，可按任务、状态、触发类型和请求用户过滤。 |
+| `GET` | `/runs/{taskRunId}` | 查询单次运行记录详情。 |
+
+`GET /tasks` 查询参数：
+
+| 参数 | 说明 |
+|---|---|
+| `page` | 页码，默认 `1`。 |
+| `size` | 分页大小，默认 `50`，上限沿用平台 `PageRequest` 的 `200`。 |
+
+任务响应字段：
+
+```json
+{
+  "taskKey": "daily.cleanup",
+  "name": "Daily Cleanup",
+  "cronExpression": "0 0 2 * * *",
+  "enabled": true,
+  "lockTtlSeconds": 300,
+  "nextFireAt": "2026-06-25T02:00:00Z",
+  "registrationStatus": "REGISTERED",
+  "createdAt": "2026-06-24T08:00:00Z",
+  "updatedAt": "2026-06-24T08:00:00Z",
+  "traceId": "trace_..."
+}
+```
+
+`PATCH /tasks/{taskKey}` 请求体，字段均可选，缺失表示保持原值：
+
+```json
+{
+  "enabled": false,
+  "cronExpression": "0 0 3 * * *",
+  "lockTtlSeconds": 600
+}
+```
+
+`GET /runs` 查询参数：
+
+| 参数 | 说明 |
+|---|---|
+| `page` / `size` | 分页参数，默认 `1/50`。 |
+| `taskKey` | 可选任务 key。 |
+| `status` | 可选：`PENDING`、`RUNNING`、`SUCCEEDED`、`FAILED`、`SKIPPED`。 |
+| `triggerType` | 可选：`CRON`、`MANUAL`、`USER_PLAN`。首版 HTTP 只创建 `MANUAL`。 |
+| `requestedByUserId` | 可选管理员用户 ID。 |
+
+运行记录响应字段：
+
+```json
+{
+  "taskRunId": "str_...",
+  "taskKey": "daily.cleanup",
+  "planId": null,
+  "triggerType": "MANUAL",
+  "status": "SUCCEEDED",
+  "requestedByUserId": "usr_...",
+  "scheduledFireAt": "2026-06-25T02:00:00Z",
+  "startedAt": "2026-06-25T02:00:01Z",
+  "endedAt": "2026-06-25T02:00:02Z",
+  "ownerInstanceId": "backend-...",
+  "skipReason": null,
+  "errorCode": null,
+  "errorMessage": null,
+  "result": {},
+  "traceId": "trace_...",
+  "createdAt": "2026-06-25T02:00:00Z",
+  "updatedAt": "2026-06-25T02:00:02Z"
+}
+```
+
+兼容性与审计：
+
+- `scheduled_task_plans` 只作为用户级 Cron 计划预留模型，本批次不开放普通用户 HTTP API。
+- 同一 `taskKey` 已有 `PENDING` 或 `RUNNING` 记录时，新触发会写入 `SKIPPED`，并保存 `skipReason`。
+- 分布式互斥只使用 Redis 锁；Redis 不可用时 scheduler 不降级为本机锁。
+- 对应测试：`SchedulerManagementControllerTest`、`SchedulerManagementServiceTest`、`ScheduledTaskRunnerTest`。
 
 `POST /api/runs` 请求体：
 

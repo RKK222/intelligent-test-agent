@@ -11,6 +11,7 @@ test-agent-app
   -> test-agent-api
   -> test-agent-system-management
   -> test-agent-configuration-management
+  -> test-agent-scheduler
   -> test-agent-integration
   -> test-agent-common / test-agent-domain / test-agent-observability
   -> test-agent-persistence / test-agent-event / test-agent-opencode-client
@@ -24,6 +25,12 @@ test-agent-api
   -> test-agent-opencode-runtime
   -> test-agent-system-management
   -> test-agent-configuration-management
+  -> test-agent-scheduler
+
+test-agent-scheduler
+  -> test-agent-common
+  -> test-agent-domain
+  -> test-agent-observability
 
 test-agent-workspace-management
   -> test-agent-common
@@ -89,6 +96,7 @@ test-agent-event
 - Session、Run、RunEvent 编排、agent runtime 调用、Diff/revert、terminal ticket/PTY：`test-agent-opencode-runtime`。
 - 用户、角色、权限等平台内部管理：`test-agent-system-management`。
 - 应用定义只读消费、应用成员、代码库配置、应用工作空间模板、个人 SSH key 和 Git 远端只读目录查询：`test-agent-configuration-management`。
+- 通用定时任务注册、Cron 调度、Redis 分布式锁、统一运行记录和管理服务：`test-agent-scheduler`；具体业务任务实现放回所属业务模块。
 - 非 opencode 的外部系统联动：`test-agent-integration`。
 - Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、trace Web 入口：`test-agent-api`。
 - 启动、profile、migration、health、日志和运行装配：`test-agent-app`。

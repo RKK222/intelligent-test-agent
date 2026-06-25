@@ -2,6 +2,7 @@ package com.icbc.testagent.domain.session;
 
 import com.icbc.testagent.domain.support.DomainValidation;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
 import java.util.Objects;
@@ -20,7 +21,10 @@ public record Session(
         String traceId,
         String opencodeSessionId,
         ExecutionNodeId opencodeExecutionNodeId,
-        boolean pinned) {
+        boolean pinned,
+        ConversationSourceType sourceType,
+        String sourceRefId,
+        UserId createdByUserId) {
 
     /**
      * 创建新的平台会话，默认状态为 ACTIVE，traceId 使用内部占位值。
@@ -60,6 +64,36 @@ public record Session(
     }
 
     /**
+     * 构造带远端 opencode 映射和置顶状态的会话，默认来源为人工发起以兼容历史数据。
+     */
+    public Session(
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            String title,
+            SessionStatus status,
+            Instant createdAt,
+            Instant updatedAt,
+            String traceId,
+            String opencodeSessionId,
+            ExecutionNodeId opencodeExecutionNodeId,
+            boolean pinned) {
+        this(
+                sessionId,
+                workspaceId,
+                title,
+                status,
+                createdAt,
+                updatedAt,
+                traceId,
+                opencodeSessionId,
+                opencodeExecutionNodeId,
+                pinned,
+                ConversationSourceType.MANUAL,
+                null,
+                null);
+    }
+
+    /**
      * 校验会话领域不变量：标题、traceId、时间和远端 session/node 映射必须同时有效。
      */
     public Session {
@@ -78,6 +112,10 @@ public record Session(
         }
         if ((opencodeSessionId == null) != (opencodeExecutionNodeId == null)) {
             throw new IllegalArgumentException("opencode session mapping must be set together");
+        }
+        sourceType = sourceType == null ? ConversationSourceType.MANUAL : sourceType;
+        if (sourceRefId != null) {
+            sourceRefId = DomainValidation.requireText(sourceRefId, "sourceRefId");
         }
     }
 
@@ -106,7 +144,10 @@ public record Session(
                 traceId,
                 opencodeSessionId,
                 executionNodeId,
-                pinned);
+                pinned,
+                sourceType,
+                sourceRefId,
+                createdByUserId);
     }
 
     /**
@@ -123,7 +164,10 @@ public record Session(
                 traceId,
                 opencodeSessionId,
                 opencodeExecutionNodeId,
-                pinned);
+                pinned,
+                sourceType,
+                sourceRefId,
+                createdByUserId);
     }
 
     /**
@@ -140,6 +184,29 @@ public record Session(
                 traceId,
                 opencodeSessionId,
                 opencodeExecutionNodeId,
-                false);
+                false,
+                sourceType,
+                sourceRefId,
+                createdByUserId);
+    }
+
+    /**
+     * 设置会话来源信息，后续定时任务模拟会话时用于审计发起链路和开启定时任务的用户。
+     */
+    public Session withSource(ConversationSourceType sourceType, String sourceRefId, UserId createdByUserId) {
+        return new Session(
+                sessionId,
+                workspaceId,
+                title,
+                status,
+                createdAt,
+                updatedAt,
+                traceId,
+                opencodeSessionId,
+                opencodeExecutionNodeId,
+                pinned,
+                sourceType,
+                sourceRefId,
+                createdByUserId);
     }
 }

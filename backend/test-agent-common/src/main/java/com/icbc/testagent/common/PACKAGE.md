@@ -19,6 +19,7 @@
 - `error.PlatformException`：平台基础异常。
 - `pagination.PageRequest`：分页请求模型。
 - `pagination.PageResponse`：分页响应模型。
+- `id.RuntimeIdGenerator`：生成运行态业务 ID，包括 scheduler 运行记录和计划 ID。
 - 后续可新增 Idempotency-Key、时间和校验工具。
 
 ## 允许依赖

@@ -2,7 +2,9 @@ package com.icbc.testagent.domain.run;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.domain.session.ConversationSourceType;
 import com.icbc.testagent.domain.session.SessionId;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -21,7 +23,10 @@ public record Run(
         Instant updatedAt,
         String traceId,
         TokenUsage tokenUsage,
-        BigDecimal costUsd) {
+        BigDecimal costUsd,
+        ConversationSourceType sourceType,
+        String sourceRefId,
+        UserId triggeredByUserId) {
 
     /**
      * 构造未指定 traceId 的 Run，兼容历史测试和持久化重建路径，内部使用占位 traceId。
@@ -51,6 +56,34 @@ public record Run(
     }
 
     /**
+     * 构造含 token/cost 的 Run，默认来源为人工发起以兼容历史数据。
+     */
+    public Run(
+            RunId runId,
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            RunStatus status,
+            Instant createdAt,
+            Instant updatedAt,
+            String traceId,
+            TokenUsage tokenUsage,
+            BigDecimal costUsd) {
+        this(
+                runId,
+                sessionId,
+                workspaceId,
+                status,
+                createdAt,
+                updatedAt,
+                traceId,
+                tokenUsage,
+                costUsd,
+                ConversationSourceType.MANUAL,
+                null,
+                null);
+    }
+
+    /**
      * 校验 Run 聚合的必填字段、时间顺序和可选消耗字段，确保领域对象不会表达无效运行状态。
      */
     public Run {
@@ -68,6 +101,10 @@ public record Run(
         if (costUsd != null && costUsd.signum() < 0) {
             throw new IllegalArgumentException("costUsd must not be negative");
         }
+        sourceType = sourceType == null ? ConversationSourceType.MANUAL : sourceType;
+        if (sourceRefId != null) {
+            sourceRefId = com.icbc.testagent.domain.support.DomainValidation.requireText(sourceRefId, "sourceRefId");
+        }
     }
 
     /**
@@ -82,7 +119,19 @@ public record Run(
                     "Run 状态不允许从 " + status + " 流转到 " + nextStatus,
                     Map.of("currentStatus", status.name(), "nextStatus", nextStatus.name()));
         }
-        return new Run(runId, sessionId, workspaceId, nextStatus, createdAt, nextUpdatedAt, traceId, tokenUsage, costUsd);
+        return new Run(
+                runId,
+                sessionId,
+                workspaceId,
+                nextStatus,
+                createdAt,
+                nextUpdatedAt,
+                traceId,
+                tokenUsage,
+                costUsd,
+                sourceType,
+                sourceRefId,
+                triggeredByUserId);
     }
 
     /**
@@ -127,6 +176,37 @@ public record Run(
      * 更新本次 Run 的 token/cost 快照，供会话列表和消息快照展示每次对话消耗。
      */
     public Run withUsage(TokenUsage tokenUsage, BigDecimal costUsd) {
-        return new Run(runId, sessionId, workspaceId, status, createdAt, updatedAt, traceId, tokenUsage, costUsd);
+        return new Run(
+                runId,
+                sessionId,
+                workspaceId,
+                status,
+                createdAt,
+                updatedAt,
+                traceId,
+                tokenUsage,
+                costUsd,
+                sourceType,
+                sourceRefId,
+                triggeredByUserId);
+    }
+
+    /**
+     * 设置 Run 来源信息，后续定时任务触发对话时用于记录开启定时计划的用户。
+     */
+    public Run withSource(ConversationSourceType sourceType, String sourceRefId, UserId triggeredByUserId) {
+        return new Run(
+                runId,
+                sessionId,
+                workspaceId,
+                status,
+                createdAt,
+                updatedAt,
+                traceId,
+                tokenUsage,
+                costUsd,
+                sourceType,
+                sourceRefId,
+                triggeredByUserId);
     }
 }

@@ -54,6 +54,17 @@ import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunStatus;
 import com.icbc.testagent.domain.run.TokenUsage;
+import com.icbc.testagent.domain.scheduler.ScheduledTask;
+import com.icbc.testagent.domain.scheduler.ScheduledTaskKey;
+import com.icbc.testagent.domain.scheduler.ScheduledTaskPlan;
+import com.icbc.testagent.domain.scheduler.ScheduledTaskPlanId;
+import com.icbc.testagent.domain.scheduler.ScheduledTaskRegistrationStatus;
+import com.icbc.testagent.domain.scheduler.ScheduledTaskRun;
+import com.icbc.testagent.domain.scheduler.ScheduledTaskRunFilter;
+import com.icbc.testagent.domain.scheduler.ScheduledTaskRunId;
+import com.icbc.testagent.domain.scheduler.ScheduledTaskRunStatus;
+import com.icbc.testagent.domain.scheduler.ScheduledTaskTriggerType;
+import com.icbc.testagent.domain.session.ConversationSourceType;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionMessage;
@@ -69,6 +80,7 @@ import com.icbc.testagent.common.pagination.PageRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -105,6 +117,7 @@ class JdbcRepositoryIntegrationTest {
     private JdbcConfigurationManagementRepository configurationManagement;
     private JdbcManagedWorkspaceRepository managedWorkspaces;
     private JdbcOpencodeProcessManagementRepository opencodeProcesses;
+    private JdbcScheduledTaskRepository scheduledTasks;
     private JdbcUserRepository users;
     private JdbcClient jdbcClient;
 
@@ -129,6 +142,7 @@ class JdbcRepositoryIntegrationTest {
         configurationManagement = new JdbcConfigurationManagementRepository(jdbcClient);
         managedWorkspaces = new JdbcManagedWorkspaceRepository(jdbcClient, objectMapper);
         opencodeProcesses = new JdbcOpencodeProcessManagementRepository(jdbcClient, objectMapper);
+        scheduledTasks = new JdbcScheduledTaskRepository(jdbcClient, objectMapper);
         users = new JdbcUserRepository(jdbcClient);
     }
 
@@ -485,6 +499,83 @@ class JdbcRepositoryIntegrationTest {
 
         assertThat(runs.findLatestActiveBySessionId(new SessionId("ses_1234567890abcdef")))
                 .contains(running);
+    }
+
+    @Test
+    void runtimeSourceFieldsPersistForScheduledConversationReservation() {
+        UserId userId = new UserId("usr_scheduler_owner");
+        users.save(User.createNew(userId.value(), "AUTH_SCHEDULER", "scheduler-owner", "hash", "org", "rd", "dept"));
+        workspaces.save(workspace());
+
+        Session scheduledSession = session()
+                .withSource(ConversationSourceType.SCHEDULED_TASK, "str_1234567890abcdef", userId);
+        sessions.save(scheduledSession);
+
+        Run scheduledRun = run()
+                .withSource(ConversationSourceType.SCHEDULED_TASK, "str_1234567890abcdef", userId);
+        runs.save(scheduledRun);
+
+        SessionMessage scheduledMessage = sessionMessage("msg_1234567890abcdef", "scheduled prompt")
+                .withSource(ConversationSourceType.SCHEDULED_TASK, "str_1234567890abcdef", userId);
+        sessionMessages.save(scheduledMessage);
+
+        assertThat(sessions.findById(scheduledSession.sessionId())).contains(scheduledSession);
+        assertThat(runs.findById(scheduledRun.runId())).contains(scheduledRun);
+        assertThat(sessionMessages.findById(scheduledMessage.messageId())).contains(scheduledMessage);
+    }
+
+    @Test
+    void scheduledTaskRepositoryPersistsDefinitionsPlansAndRunRecords() {
+        UserId userId = new UserId("usr_scheduler_owner");
+        users.save(User.createNew(userId.value(), "AUTH_SCHEDULER", "scheduler-owner", "hash", "org", "rd", "dept"));
+        ScheduledTask task = ScheduledTask.registered(
+                new ScheduledTaskKey("daily.cleanup"),
+                "每日清理",
+                "0 0 2 * * *",
+                Duration.ofMinutes(5),
+                NOW,
+                "trace_1234567890abcdef").withNextFireAt(NOW.minusSeconds(1), NOW.plusSeconds(1));
+
+        scheduledTasks.saveTask(task);
+        ScheduledTaskPlan plan = new ScheduledTaskPlan(
+                new ScheduledTaskPlanId("stp_1234567890abcdef"),
+                task.taskKey(),
+                userId,
+                "0 0 9 * * MON-FRI",
+                Map.of("workspaceId", "wrk_1234567890abcdef"),
+                true,
+                NOW.plusSeconds(60),
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+        scheduledTasks.savePlan(plan);
+        ScheduledTaskRun pendingRun = ScheduledTaskRun.pending(
+                new ScheduledTaskRunId("str_1234567890abcdef"),
+                task.taskKey(),
+                plan.planId(),
+                ScheduledTaskTriggerType.USER_PLAN,
+                userId,
+                NOW,
+                "trace_1234567890abcdef");
+
+        scheduledTasks.saveRun(pendingRun);
+        ScheduledTaskRun running = pendingRun.start("instance-a", NOW.plusSeconds(1));
+        scheduledTasks.saveRun(running);
+        ScheduledTaskRun succeeded = running.succeed(Map.of("deleted", 3), NOW.plusSeconds(2));
+        scheduledTasks.saveRun(succeeded);
+
+        assertThat(scheduledTasks.findTaskByKey(task.taskKey())).contains(task);
+        assertThat(scheduledTasks.findDueTasks(NOW, 10)).containsExactly(task);
+        assertThat(scheduledTasks.findPlanById(plan.planId())).contains(plan);
+        assertThat(scheduledTasks.findRunById(pendingRun.taskRunId())).contains(succeeded);
+        assertThat(scheduledTasks.findRuns(
+                        new ScheduledTaskRunFilter(
+                                task.taskKey(),
+                                ScheduledTaskRunStatus.SUCCEEDED,
+                                ScheduledTaskTriggerType.USER_PLAN,
+                                userId),
+                        new PageRequest(1, 10)).items())
+                .containsExactly(succeeded);
     }
 
     @Test

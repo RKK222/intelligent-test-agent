@@ -25,7 +25,7 @@
 - `ErrorCode`：平台稳定错误码及 HTTP 状态映射数字。
 - `PlatformException`：业务层抛出的平台基础异常。
 - `PageRequest`、`PageResponse<T>`：分页请求和响应模型。
-- `RuntimeIdGenerator`：生成 Workspace、Session、Run、Message、PTY ticket、代码库、应用工作空间、应用版本工作区、个人工作区、同步记录和 SSH key 的稳定前缀 ID。
+- `RuntimeIdGenerator`：生成 Workspace、Session、Run、Message、PTY ticket、代码库、应用工作空间、应用版本工作区、个人工作区、同步记录、SSH key 和 scheduler 运行/计划的稳定前缀 ID。
 - `GitRemoteService`、`ProcessGitCommandExecutor`：封装 `git ls-remote --heads`、`git archive --remote`、超时、输出上限、非交互环境和临时 SSH key 文件清理。
 - `GitWorkspaceService`：封装 clone、worktree add、当前分支/origin/head 查询、提交指定文件和 push/force-with-lease。
 - `SshKeyCryptoService`：封装个人 SSH 私钥 AES-GCM 加解密和 SHA-256 指纹生成。

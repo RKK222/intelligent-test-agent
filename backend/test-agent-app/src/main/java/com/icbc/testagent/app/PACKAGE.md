@@ -44,6 +44,7 @@
 
 - API 模块提供的 HTTP/SSE/WebSocket 入口。
 - 业务模块提供的工作区、opencode 运行态、系统管理和外部集成能力。
+- scheduler 模块提供的后台调度框架，默认关闭扫描。
 - persistence、event、observability 和 opencode-client 提供的基础运行能力。
 
 ## 测试位置

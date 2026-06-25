@@ -140,6 +140,20 @@ public final class RuntimeIdGenerator {
     }
 
     /**
+     * 生成定时任务运行记录 ID，返回值固定使用 {@code str_} 前缀。
+     */
+    public static String scheduledTaskRunId() {
+        return prefixed("str_");
+    }
+
+    /**
+     * 生成用户级定时任务计划 ID，返回值固定使用 {@code stp_} 前缀。
+     */
+    public static String scheduledTaskPlanId() {
+        return prefixed("stp_");
+    }
+
+    /**
      * 按给定领域前缀拼接无横线 UUID；调用方必须传入已约定的稳定前缀。
      */
     private static String prefixed(String prefix) {

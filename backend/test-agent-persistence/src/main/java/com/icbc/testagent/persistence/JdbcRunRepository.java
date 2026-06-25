@@ -5,7 +5,9 @@ import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
 import com.icbc.testagent.domain.run.RunStatus;
 import com.icbc.testagent.domain.run.TokenUsage;
+import com.icbc.testagent.domain.session.ConversationSourceType;
 import com.icbc.testagent.domain.session.SessionId;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import java.util.Optional;
 import org.springframework.jdbc.core.RowMapper;
@@ -32,7 +34,10 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                     rs.getObject("tokens_reasoning", Long.class),
                     rs.getObject("tokens_cache_read", Long.class),
                     rs.getObject("tokens_cache_write", Long.class)),
-            rs.getBigDecimal("cost_usd"));
+            rs.getBigDecimal("cost_usd"),
+            ConversationSourceType.valueOf(rs.getString("source_type")),
+            rs.getString("source_ref_id"),
+            userId(rs.getString("triggered_by_user_id")));
 
     /**
      * 注入 JdbcClient，持久化层只负责 Run 表字段映射。
@@ -55,7 +60,10 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                                 tokens_reasoning = :tokensReasoning,
                                 tokens_cache_read = :tokensCacheRead,
                                 tokens_cache_write = :tokensCacheWrite,
-                                cost_usd = :costUsd
+                                cost_usd = :costUsd,
+                                source_type = :sourceType,
+                                source_ref_id = :sourceRefId,
+                                triggered_by_user_id = :triggeredByUserId
                             where run_id = :runId
                             """)
                     .param("runId", run.runId().value())
@@ -71,18 +79,23 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                     .param("tokensCacheRead", run.tokenUsage().cacheRead())
                     .param("tokensCacheWrite", run.tokenUsage().cacheWrite())
                     .param("costUsd", run.costUsd())
+                    .param("sourceType", run.sourceType().name())
+                    .param("sourceRefId", run.sourceRefId())
+                    .param("triggeredByUserId", userIdValue(run.triggeredByUserId()))
                     .update();
         } else {
             jdbcClient.sql("""
                             insert into runs(
                                 run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
                                 tokens_input, tokens_output, tokens_reasoning,
-                                tokens_cache_read, tokens_cache_write, cost_usd
+                                tokens_cache_read, tokens_cache_write, cost_usd,
+                                source_type, source_ref_id, triggered_by_user_id
                             )
                             values (
                                 :runId, :sessionId, :workspaceId, :status, :traceId, :createdAt, :updatedAt,
                                 :tokensInput, :tokensOutput, :tokensReasoning,
-                                :tokensCacheRead, :tokensCacheWrite, :costUsd
+                                :tokensCacheRead, :tokensCacheWrite, :costUsd,
+                                :sourceType, :sourceRefId, :triggeredByUserId
                             )
                             """)
                     .param("runId", run.runId().value())
@@ -98,6 +111,9 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                     .param("tokensCacheRead", run.tokenUsage().cacheRead())
                     .param("tokensCacheWrite", run.tokenUsage().cacheWrite())
                     .param("costUsd", run.costUsd())
+                    .param("sourceType", run.sourceType().name())
+                    .param("sourceRefId", run.sourceRefId())
+                    .param("triggeredByUserId", userIdValue(run.triggeredByUserId()))
                     .update();
         }
         return run;
@@ -111,7 +127,8 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
         return jdbcClient.sql("""
                         select run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
                                tokens_input, tokens_output, tokens_reasoning,
-                               tokens_cache_read, tokens_cache_write, cost_usd
+                               tokens_cache_read, tokens_cache_write, cost_usd,
+                               source_type, source_ref_id, triggered_by_user_id
                         from runs
                         where run_id = :runId
                         """)
@@ -128,7 +145,8 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
         return jdbcClient.sql("""
                         select run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
                                tokens_input, tokens_output, tokens_reasoning,
-                               tokens_cache_read, tokens_cache_write, cost_usd
+                               tokens_cache_read, tokens_cache_write, cost_usd,
+                               source_type, source_ref_id, triggered_by_user_id
                         from runs
                         where session_id = :sessionId
                           and status in ('PENDING', 'RUNNING', 'CANCELLING')
@@ -142,5 +160,13 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
 
     private static TokenUsage tokenUsage(Long input, Long output, Long reasoning, Long cacheRead, Long cacheWrite) {
         return new TokenUsage(input, output, reasoning, cacheRead, cacheWrite);
+    }
+
+    private static UserId userId(String value) {
+        return value == null ? null : new UserId(value);
+    }
+
+    private static String userIdValue(UserId userId) {
+        return userId == null ? null : userId.value();
     }
 }

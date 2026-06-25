@@ -3,6 +3,7 @@ package com.icbc.testagent.domain.session;
 import com.icbc.testagent.domain.support.DomainValidation;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.TokenUsage;
+import com.icbc.testagent.domain.user.UserId;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Objects;
@@ -23,7 +24,10 @@ public record SessionMessage(
         String partsJson,
         TokenUsage tokenUsage,
         BigDecimal costUsd,
-        Instant updatedAt) {
+        Instant updatedAt,
+        ConversationSourceType sourceType,
+        String sourceRefId,
+        UserId senderUserId) {
 
     /**
      * 构造旧版纯文本消息，兼容既有用户输入和历史数据读取路径。
@@ -48,7 +52,46 @@ public record SessionMessage(
                 null,
                 TokenUsage.empty(),
                 null,
-                createdAt);
+                createdAt,
+                ConversationSourceType.MANUAL,
+                null,
+                null);
+    }
+
+    /**
+     * 构造带远端快照字段的消息，默认来源为人工发起以兼容旧数据。
+     */
+    public SessionMessage(
+            SessionMessageId messageId,
+            SessionId sessionId,
+            SessionMessageRole role,
+            String content,
+            Instant createdAt,
+            String traceId,
+            RunId runId,
+            String agentId,
+            String remoteMessageId,
+            String partsJson,
+            TokenUsage tokenUsage,
+            BigDecimal costUsd,
+            Instant updatedAt) {
+        this(
+                messageId,
+                sessionId,
+                role,
+                content,
+                createdAt,
+                traceId,
+                runId,
+                agentId,
+                remoteMessageId,
+                partsJson,
+                tokenUsage,
+                costUsd,
+                updatedAt,
+                ConversationSourceType.MANUAL,
+                null,
+                null);
     }
 
     /**
@@ -78,5 +121,32 @@ public record SessionMessage(
         if (updatedAt.isBefore(createdAt)) {
             throw new IllegalArgumentException("updatedAt must not be before createdAt");
         }
+        sourceType = sourceType == null ? ConversationSourceType.MANUAL : sourceType;
+        if (sourceRefId != null) {
+            sourceRefId = DomainValidation.requireText(sourceRefId, "sourceRefId");
+        }
+    }
+
+    /**
+     * 设置消息来源信息，定时任务模拟用户发送时 senderUserId 记录开启该计划的用户。
+     */
+    public SessionMessage withSource(ConversationSourceType sourceType, String sourceRefId, UserId senderUserId) {
+        return new SessionMessage(
+                messageId,
+                sessionId,
+                role,
+                content,
+                createdAt,
+                traceId,
+                runId,
+                agentId,
+                remoteMessageId,
+                partsJson,
+                tokenUsage,
+                costUsd,
+                updatedAt,
+                sourceType,
+                sourceRefId,
+                senderUserId);
     }
 }
