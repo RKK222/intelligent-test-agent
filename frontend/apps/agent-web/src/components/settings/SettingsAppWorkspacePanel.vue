@@ -366,8 +366,7 @@ watch(selectedAppId, async (appId) => {
             >
               <template #default="{ item }">
                 <div class="ta-user-suggestion">
-                  <span class="ta-user-suggestion-name">{{ item.username }}</span>
-                  <span class="ta-user-suggestion-meta">{{ item.userId }}</span>
+                  <span>{{ item.userId }} · {{ item.username }}</span>
                 </div>
               </template>
             </el-autocomplete>
@@ -594,20 +593,13 @@ watch(selectedAppId, async (appId) => {
 .ta-permission-placeholder {
   padding: 40px 0;
 }
-/* el-autocomplete 下拉项布局：用户名加粗，下方展示 userId 与统一认证号 */
+/* el-autocomplete 下拉项布局：单行展示 userId · userName */
 .ta-user-suggestion {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
   line-height: 1.4;
-}
-.ta-user-suggestion-name {
+  white-space: nowrap;
   font-size: 13px;
   color: #18181b;
-  font-weight: 500;
-}
-.ta-user-suggestion-meta {
-  font-size: 12px;
-  color: #909399;
 }
 </style>
