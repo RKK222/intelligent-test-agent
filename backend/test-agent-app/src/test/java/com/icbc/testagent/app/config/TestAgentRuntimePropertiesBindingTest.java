@@ -144,6 +144,27 @@ class TestAgentRuntimePropertiesBindingTest {
                     assertThat(properties.getOpencode().getManagerControl().getListenUrl()).isEqualTo("http://10.8.0.21:8080");
                     assertThat(properties.getOpencode().getManagerControl().getLinuxServerId()).isEqualTo("10.8.0.21");
                     assertThat(properties.getOpencode().getManagerControl().getCommandTimeout()).isEqualTo(Duration.ofSeconds(7));
+                    // gatewayMode 未显式配置时回退为默认 socket，避免空字符串污染网关激活条件。
+                    assertThat(properties.getOpencode().getManagerControl().getGatewayMode()).isEqualTo("socket");
+                });
+    }
+
+    @Test
+    void managerControlGatewayModeBindsAndDefaultsAreNormalized() {
+        profileContextRunner
+                .withPropertyValues(
+                        "test-agent.opencode.manager-control.gateway-mode=local")
+                .run(context -> {
+                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
+                    assertThat(properties.getOpencode().getManagerControl().getGatewayMode()).isEqualTo("local");
+                });
+        profileContextRunner
+                .withPropertyValues(
+                        "test-agent.opencode.manager-control.gateway-mode=  ")
+                .run(context -> {
+                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
+                    // 空白字符串会被规整回 socket，避免 @ConditionalOnProperty 走空值不匹配的边界条件。
+                    assertThat(properties.getOpencode().getManagerControl().getGatewayMode()).isEqualTo("socket");
                 });
     }
 

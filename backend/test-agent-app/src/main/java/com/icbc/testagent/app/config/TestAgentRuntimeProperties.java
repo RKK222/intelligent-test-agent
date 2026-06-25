@@ -349,6 +349,11 @@ public class TestAgentRuntimeProperties {
         private Duration backendStaleAfter = Duration.ofSeconds(30);
         private Duration commandTimeout = Duration.ofSeconds(10);
         private int backendDiscoveryLimit = 100;
+        /**
+         * 控制面网关模式：socket=生产 WebSocket；local=本地直连 baseUrl 的开发态占位，
+         * 不依赖 opencode-manager 长连接。默认 socket。
+         */
+        private String gatewayMode = "socket";
 
         /**
          * 返回 manager 控制面专用 token。
@@ -446,6 +451,20 @@ public class TestAgentRuntimeProperties {
          */
         public void setBackendDiscoveryLimit(int backendDiscoveryLimit) {
             this.backendDiscoveryLimit = backendDiscoveryLimit;
+        }
+
+        /**
+         * 返回控制面网关模式：socket（生产 WebSocket）/ local（本地直连）。
+         */
+        public String getGatewayMode() {
+            return gatewayMode;
+        }
+
+        /**
+         * 绑定控制面网关模式，未知值会被规整为 socket。
+         */
+        public void setGatewayMode(String gatewayMode) {
+            this.gatewayMode = (gatewayMode == null || gatewayMode.isBlank()) ? "socket" : gatewayMode.trim();
         }
     }
 

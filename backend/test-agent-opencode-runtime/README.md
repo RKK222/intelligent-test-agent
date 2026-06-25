@@ -13,6 +13,7 @@
 - `RuntimeManagementQueryService` 聚合 Linux 服务器、后端 Java 进程、opencode 容器、manager、manager-backend 连接、用户进程和绑定状态，供超级管理员只读管理页展示；默认只返回 5 分钟内仍有心跳/健康确认的活跃运行态，并按用户名筛选/展示用户进程。
 - `OpencodeProcessHeartbeatMaintenanceService` 每 3 分钟通过 manager health 命令确认 RUNNING opencode server 进程并刷新 Redis 心跳，每 5 分钟清理 Redis 心跳索引中过期的 Java/opencode 进程 ID。
 - `BackendJavaProcessLifecycleService.registerHeartbeat` 在为当前后端 Java 实例写心跳时，会为同 `linux_server_id` 下所有 `connection_status = CONNECTED` 的容器管理进程补齐到本实例的 `opencode_manager_backend_connections` 行（仅在 (manager, backend) 组合不存在连接时插入），让本地开发环境在 V17 迁移预置 manager 但还没有 manager WebSocket 注册时，仍能通过 `findHealthyContainersConnectedToBackend*` 查询到本机容器，前端用户进程状态从 `UNAVAILABLE` 升级为 `READY`。
+- `OpencodeProcessManagerGateway` 提供两套实现，通过 `test-agent.opencode.manager-control.gateway-mode` 切换：`socket`（默认，生产用 `SocketOpencodeProcessManagerGateway` 走 manager WebSocket）与 `local`（`LocalOpencodeProcessManagerGateway` 直连 `baseUrl` 跑 HTTP GET 检查、`startProcess` 走占位返回）。两个实现都打 `@ConditionalOnProperty` 互斥激活；`application-local.yml` 默认 `local`，其它 profile 留空走 `socket`。
 - RunEvent 持久化策略、实时发布和 agent projected messages 恢复。
 - Run 终态/取消后的 session_messages 快照持久化，包含 assistant 输出、message parts 和 token/cost。
 - 从完成态 `write`/`edit`/`apply_patch` tool part 派生运行中 `diff.proposed`，供前端实时追踪文件变化和行数统计。
@@ -38,7 +39,7 @@
 - `RunApplicationServiceTest` 覆盖 Run 创建、通用 binding 保存/复用、远端 session 懒创建/复用、用户进程 binding 不一致自动重建、sticky node、prompt parts、终态事件、终态消息快照/token 持久化、瞬态消息事件、tool part 实时 Diff 派生和取消编排。
 - `UserOpencodeProcessAssignmentServiceTest` 覆盖未绑定状态、READY 复用、同服务器重建、端口选择、manager 不可用和绑定/节点投影。
 - `RuntimeManagementQueryServiceTest` 覆盖运行管理快照聚合、活跃进程过滤、用户名筛选、绑定状态合并和空数据。
-- `ManagerControlMessageCodecTest`、`ManagerConnectionRegistryTest`、`SocketOpencodeProcessManagerGatewayTest`、`BackendJavaProcessLifecycleServiceTest` 覆盖 manager 控制面消息、连接路由、命令等待、后端实例心跳以及本地 manager-backend 连接自举。
+- `ManagerControlMessageCodecTest`、`ManagerConnectionRegistryTest`、`SocketOpencodeProcessManagerGatewayTest`、`BackendJavaProcessLifecycleServiceTest`、`LocalOpencodeProcessManagerGatewayTest` 覆盖 manager 控制面消息、连接路由、命令等待、后端实例心跳、本地 manager-backend 连接自举以及 local 网关的 HTTP 健康检查与 start 占位。
 - `RunDiffApplicationServiceTest` 覆盖 Diff 事件优先读取、agent runtime Diff fallback、接受/拒绝动作和缺失 messageID 冲突。
 - `RunEventPersistencePolicyTest` 覆盖消息投影只走实时通道、关键状态事件持久化、tool payload 清洗和 rawPayload 移除。
 - `RunMessageRecoveryServiceTest` 覆盖 agent projected messages 恢复为 transient SSE snapshot，以及未绑定/远端失败时降级为空。

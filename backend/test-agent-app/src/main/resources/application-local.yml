@@ -53,6 +53,10 @@ test-agent:
     password: ${TEST_AGENT_REDIS_PASSWORD:}
   opencode:
     manager-control:
+      # 本地开发：opencode server 已手动启动在 127.0.0.1:4096（与 V17 迁移预置一致），
+      # 但通常没有 opencode-manager 容器在跑；用 local 网关直连 baseUrl 做 health/start 占位。
+      # production profile 不会继承该值（默认 socket）。
+      gateway-mode: ${TEST_AGENT_OPENCODE_GATEWAY_MODE:local}
       token: ${TEST_AGENT_OPENCODE_MANAGER_TOKEN:}
       listen-url: ${TEST_AGENT_BACKEND_LISTEN_URL:http://127.0.0.1:8080}
       linux-server-id: ${TEST_AGENT_LINUX_SERVER_ID:127.0.0.1}

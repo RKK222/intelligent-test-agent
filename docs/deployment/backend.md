@@ -263,7 +263,12 @@ V17 migration（`backend/test-agent-persistence/src/main/resources/db/migration/
 
 `opencode_manager_backend_connections` 的 `backend_process_id` 形如 `bjp_xxx`，是后端 Java 实例 ID；后端启动时由 `BackendJavaProcessLifecycleService.registerHeartbeat` 在为本实例写心跳时补齐 `(mgr_local_4096, bjp_xxx)` 这一行，状态 `CONNECTED`。该自举仅在 (manager, backend) 组合尚无连接行时插入；后续 manager WebSocket 真正连上后由 `ManagerControlApplicationService` 继续维护。
 
-确认本机 opencode server 在 `127.0.0.1:4096` 监听后，直接用默认开发用户登录即可看到右侧对话窗口的进程状态从 "没有可用的 opencode 容器" 变为 READY（基线 URL 指向本地 opencode server）。若还需真实起 manager 控制面，可继续按上文"opencode-manager 容器进程管理"章节配置；manager 未启动时 `health` 命令会在网关层返回 `OPENCODE_UNAVAILABLE`，前端状态会落到 "opencode 进程健康检测失败，需要重新初始化"，需要重启后端或恢复 manager 才能进入 READY。
+`local` profile 默认 `test-agent.opencode.manager-control.gateway-mode=local`（受 `TEST_AGENT_OPENCODE_GATEWAY_MODE` 覆盖），加载 `LocalOpencodeProcessManagerGateway`：
+
+- `checkHealth` 直接对 `opencode_server_processes.baseUrl` 跑 HTTP GET，返回 2xx/3xx 视为健康，因此只要本机 127.0.0.1:4096 真的在跑 opencode server，前台用户进程状态即可落到 `READY`。
+- `startProcess` 走占位返回 `pid=0, status=local-skip`，不实际拉起进程，假设本地手动启动的 127.0.0.1:4096 已就绪。
+
+切换生产请把 `gateway-mode` 显式设回 `socket`（默认），加载 `SocketOpencodeProcessManagerGateway` 走 manager WebSocket；切回 `local` 仅作为没有 opencode-manager 容器时的开发态占位，不替代生产部署。
 
 ## 连接池配置
 

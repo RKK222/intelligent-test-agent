@@ -457,9 +457,13 @@ V10 种子数据对 F-COSS 的影响：
 - `OpencodeManagerBackendConnection` 的 `backend_process_id` 形如 `bjp_xxx`，由后端 `BackendJavaProcessLifecycleService.registerHeartbeat` 在启动时为本实例补齐，因此 migration 不预置该行。
 - 补齐逻辑详见 `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/process/socket/BackendJavaProcessLifecycleService.java#bootstrapLocalManagerConnections`，仅在 (manager, backend) 组合不存在连接行时插入；已有行只更新 `last_heartbeat_at` / `status`，与 `ManagerControlApplicationService.register/heartbeat` 协调更新。
 
+健康检测/启动网关选择：
+
+- 默认 `test-agent.opencode.manager-control.gateway-mode=socket`（生产）：`SocketOpencodeProcessManagerGateway` 走 manager WebSocket，本地没起 manager 时 health/start 都会返回 `OPENCODE_UNAVAILABLE`，前端状态会落到 "opencode 进程健康检测失败，需要重新初始化"。
+- `application-local.yml` 默认 `gateway-mode=local`（受 `TEST_AGENT_OPENCODE_GATEWAY_MODE` 覆盖）：`LocalOpencodeProcessManagerGateway` 直连 `baseUrl` 跑 HTTP GET，`startProcess` 走占位返回；本机 127.0.0.1:4096 真的在跑 opencode server 时，前台状态会从 UNAVAILABLE 升级为 READY。
+
 兼容策略：
 
 - 全部插入语句使用 `where not exists` / `where exists` 保护，重复执行迁移不会破坏数据或产生重复行。
 - 仅在 `users.user_id = 'usr_test_dev'`（V5 默认开发用户）存在时才插入 `opencode_server_processes` 与 `user_opencode_process_bindings`；生产环境无该用户时整段种子不写用户进程相关表，仅保留拓扑种子，便于后续手工绑定。
 - 容器 `current_processes = 1` 反映当前已有一个用户进程；若需要新增第二个用户，需要先把 `current_processes` 与 `max_processes` 调大并扩展端口池，或先解除已有绑定。
-- 健康检测仍由 `OpencodeProcessManagerGateway` 走 manager WebSocket；本地开发若 manager 未启动，状态会落到 "opencode 进程健康检测失败，需要重新初始化"，本迁移只解决 "没有可用的 opencode 容器" 这一类错误，不替代 manager 部署。
