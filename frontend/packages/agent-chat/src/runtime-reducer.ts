@@ -155,9 +155,15 @@ function appendAssistantDelta(messages: AgentMessage[], delta: string, event: Ru
   if (!delta) {
     return messages;
   }
-  const last = messages.at(-1);
-  if (last?.role === "assistant") {
-    return [...messages.slice(0, -1), { ...last, text: `${last.text}${delta}` }];
+  // 从最后往前找最近的 assistant 消息，避免被 card 消息阻断
+  const lastAssistantIdx = findLastAssistantInCurrentTurn(messages);
+  if (lastAssistantIdx >= 0) {
+    const last = messages[lastAssistantIdx] as Extract<AgentMessage, { role: "assistant" }>;
+    return [
+      ...messages.slice(0, lastAssistantIdx),
+      { ...last, text: `${last.text}${delta}` },
+      ...messages.slice(lastAssistantIdx + 1),
+    ];
   }
   return [
     ...messages,
@@ -170,9 +176,11 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent) {
   const partId = text(event.payload.partId) ?? text(event.payload.partID) ?? `part-${event.seq}`;
   const partType = text(event.payload.partType) ?? text(event.payload.partKind);
   const delta = text(event.payload.delta) ?? text(event.payload.text) ?? "";
-  const existing = findAssistantMessage(messages, messageId);
-  const assistant =
-    existing.message ??
+  const exact = findAssistantMessage(messages, messageId);
+  const lastIdx = exact.message ? -1 : findLastAssistantInCurrentTurn(messages);
+  const assistant: Extract<AgentMessage, { role: "assistant" }> =
+    exact.message ??
+    (lastIdx >= 0 ? (messages[lastIdx] as Extract<AgentMessage, { role: "assistant" }>) : undefined) ??
     ({
       id: messageId,
       role: "assistant",
@@ -181,6 +189,7 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent) {
       createdAt: event.occurredAt,
       parts: []
     } satisfies Extract<AgentMessage, { role: "assistant" }>);
+  const replaceIndex = exact.message ? exact.index : lastIdx;
 
   const parts = [...(assistant.parts ?? [])];
   const index = parts.findIndex((part) => part.partId === partId);
@@ -196,7 +205,7 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent) {
     text: nextPart.type === "text" ? `${assistant.text}${delta}` : assistant.text,
     parts
   };
-  return replaceOrAppendMessage(messages, existing.index, nextAssistant);
+  return replaceOrAppendMessage(messages, replaceIndex, nextAssistant);
 }
 
 function mergeTextualPart(current: MessagePart | undefined, partId: string, partType: string | undefined, delta: string): MessagePart {
@@ -223,9 +232,11 @@ function upsertPart(messages: AgentMessage[], event: RunEvent) {
   if (!messageId || !partId) {
     return messages;
   }
-  const existing = findAssistantMessage(messages, messageId);
-  const assistant =
-    existing.message ??
+  const exact = findAssistantMessage(messages, messageId);
+  const lastIdx = exact.message ? -1 : findLastAssistantInCurrentTurn(messages);
+  const assistant: Extract<AgentMessage, { role: "assistant" }> =
+    exact.message ??
+    (lastIdx >= 0 ? (messages[lastIdx] as Extract<AgentMessage, { role: "assistant" }>) : undefined) ??
     ({
       id: messageId,
       role: "assistant",
@@ -234,15 +245,16 @@ function upsertPart(messages: AgentMessage[], event: RunEvent) {
       createdAt: event.occurredAt,
       parts: []
     } satisfies Extract<AgentMessage, { role: "assistant" }>);
+  const replaceIndex = exact.message ? exact.index : lastIdx;
   const part = toMessagePart(raw, partId);
   const parts = [...(assistant.parts ?? [])];
-  const index = parts.findIndex((item) => item.partId === partId);
-  if (index >= 0) {
-    parts[index] = part;
+  const partIdx = parts.findIndex((item) => item.partId === partId);
+  if (partIdx >= 0) {
+    parts[partIdx] = part;
   } else {
     parts.push(part);
   }
-  return replaceOrAppendMessage(messages, existing.index, {
+  return replaceOrAppendMessage(messages, replaceIndex, {
     ...assistant,
     text: part.type === "text" ? part.text : assistant.text,
     parts
@@ -267,14 +279,16 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
   const raw = record(payload.message) ?? payload;
   const messageId = text(raw.messageId) ?? text(raw.messageID) ?? text(raw.id) ?? `message-${event.seq}`;
   const role = text(raw.role) === "user" ? "user" : "assistant";
+  const index = messages.findIndex((item) => item.id === messageId || (item.role !== "card" && item.messageId === messageId));
+  const existing = index >= 0 ? messages[index] : undefined;
   const message = {
     id: messageId,
     role,
     messageId,
     text: text(raw.text) ?? text(raw.content) ?? "",
-    createdAt: text(raw.createdAt) ?? event.occurredAt
+    createdAt: text(raw.createdAt) ?? event.occurredAt,
+    parts: existing && existing.role === "assistant" ? existing.parts : undefined,
   } satisfies Extract<AgentMessage, { role: "assistant" | "user" }>;
-  const index = messages.findIndex((item) => item.id === messageId || (item.role !== "card" && item.messageId === messageId));
   return replaceOrAppendMessage(messages, index, message);
 }
 
@@ -284,6 +298,16 @@ function findAssistantMessage(messages: AgentMessage[], messageId: string) {
     index,
     message: index >= 0 ? (messages[index] as Extract<AgentMessage, { role: "assistant" }>) : undefined
   };
+}
+
+// 从末尾往前找当前轮的 assistant 消息。如果先遇到 user 消息，
+// 说明当前轮还没有 assistant，返回 -1 让调用方创建新消息。
+function findLastAssistantInCurrentTurn(messages: AgentMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role === "assistant") return i;
+    if (messages[i].role === "user") return -1;
+  }
+  return -1;
 }
 
 function replaceOrAppendMessage(messages: AgentMessage[], index: number, message: AgentMessage) {
