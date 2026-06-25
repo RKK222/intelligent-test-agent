@@ -4,6 +4,7 @@ import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
 import com.icbc.testagent.domain.run.RunStatus;
+import com.icbc.testagent.domain.run.TokenUsage;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import java.util.Optional;
@@ -25,7 +26,13 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
             RunStatus.valueOf(rs.getString("status")),
             instant(rs, "created_at"),
             instant(rs, "updated_at"),
-            rs.getString("trace_id"));
+            rs.getString("trace_id"),
+            tokenUsage(rs.getObject("tokens_input", Long.class),
+                    rs.getObject("tokens_output", Long.class),
+                    rs.getObject("tokens_reasoning", Long.class),
+                    rs.getObject("tokens_cache_read", Long.class),
+                    rs.getObject("tokens_cache_write", Long.class)),
+            rs.getBigDecimal("cost_usd"));
 
     /**
      * 注入 JdbcClient，持久化层只负责 Run 表字段映射。
@@ -43,7 +50,12 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
             jdbcClient.sql("""
                             update runs
                             set session_id = :sessionId, workspace_id = :workspaceId, status = :status,
-                                trace_id = :traceId, created_at = :createdAt, updated_at = :updatedAt
+                                trace_id = :traceId, created_at = :createdAt, updated_at = :updatedAt,
+                                tokens_input = :tokensInput, tokens_output = :tokensOutput,
+                                tokens_reasoning = :tokensReasoning,
+                                tokens_cache_read = :tokensCacheRead,
+                                tokens_cache_write = :tokensCacheWrite,
+                                cost_usd = :costUsd
                             where run_id = :runId
                             """)
                     .param("runId", run.runId().value())
@@ -53,11 +65,25 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                     .param("traceId", run.traceId())
                     .param("createdAt", timestamp(run.createdAt()))
                     .param("updatedAt", timestamp(run.updatedAt()))
+                    .param("tokensInput", run.tokenUsage().input())
+                    .param("tokensOutput", run.tokenUsage().output())
+                    .param("tokensReasoning", run.tokenUsage().reasoning())
+                    .param("tokensCacheRead", run.tokenUsage().cacheRead())
+                    .param("tokensCacheWrite", run.tokenUsage().cacheWrite())
+                    .param("costUsd", run.costUsd())
                     .update();
         } else {
             jdbcClient.sql("""
-                            insert into runs(run_id, session_id, workspace_id, status, trace_id, created_at, updated_at)
-                            values (:runId, :sessionId, :workspaceId, :status, :traceId, :createdAt, :updatedAt)
+                            insert into runs(
+                                run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
+                                tokens_input, tokens_output, tokens_reasoning,
+                                tokens_cache_read, tokens_cache_write, cost_usd
+                            )
+                            values (
+                                :runId, :sessionId, :workspaceId, :status, :traceId, :createdAt, :updatedAt,
+                                :tokensInput, :tokensOutput, :tokensReasoning,
+                                :tokensCacheRead, :tokensCacheWrite, :costUsd
+                            )
                             """)
                     .param("runId", run.runId().value())
                     .param("sessionId", run.sessionId().value())
@@ -66,6 +92,12 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                     .param("traceId", run.traceId())
                     .param("createdAt", timestamp(run.createdAt()))
                     .param("updatedAt", timestamp(run.updatedAt()))
+                    .param("tokensInput", run.tokenUsage().input())
+                    .param("tokensOutput", run.tokenUsage().output())
+                    .param("tokensReasoning", run.tokenUsage().reasoning())
+                    .param("tokensCacheRead", run.tokenUsage().cacheRead())
+                    .param("tokensCacheWrite", run.tokenUsage().cacheWrite())
+                    .param("costUsd", run.costUsd())
                     .update();
         }
         return run;
@@ -77,12 +109,38 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
     @Override
     public Optional<Run> findById(RunId runId) {
         return jdbcClient.sql("""
-                        select run_id, session_id, workspace_id, status, trace_id, created_at, updated_at
+                        select run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
+                               tokens_input, tokens_output, tokens_reasoning,
+                               tokens_cache_read, tokens_cache_write, cost_usd
                         from runs
                         where run_id = :runId
                         """)
                 .param("runId", runId.value())
                 .query(rowMapper)
                 .optional();
+    }
+
+    /**
+     * 查询指定会话最近仍在执行的 Run，供前端刷新后恢复 SSE。
+     */
+    @Override
+    public Optional<Run> findLatestActiveBySessionId(SessionId sessionId) {
+        return jdbcClient.sql("""
+                        select run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
+                               tokens_input, tokens_output, tokens_reasoning,
+                               tokens_cache_read, tokens_cache_write, cost_usd
+                        from runs
+                        where session_id = :sessionId
+                          and status in ('PENDING', 'RUNNING', 'CANCELLING')
+                        order by updated_at desc, id desc
+                        limit 1
+                        """)
+                .param("sessionId", sessionId.value())
+                .query(rowMapper)
+                .optional();
+    }
+
+    private static TokenUsage tokenUsage(Long input, Long output, Long reasoning, Long cacheRead, Long cacheWrite) {
+        return new TokenUsage(input, output, reasoning, cacheRead, cacheWrite);
     }
 }

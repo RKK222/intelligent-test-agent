@@ -16,7 +16,8 @@
 - `src/components/CommandPalette.vue`：复刻 opencode command palette 的平台命令目录入口，支持 toolbar trigger、`Ctrl/Cmd+Shift+P` 与 `Ctrl/Cmd+K` 打开、搜索过滤、方向键高亮、Enter 选择、Escape/背景关闭，并把选中的平台命令写入 composer 的 `/command` slash 文本。
 - `src/components/SessionTimeline.vue`：复刻 opencode message timeline 的 part 分块展示；RunEvent 投影会保留 text、reasoning、tool、file、event part，组件按块展示状态、工具输出、推理摘要和文件/event 摘要；已完成的 reasoning/tool 默认折叠，running/pending/error 保持展开，旧的纯文本 `SessionMessage.content` 仍作为 fallback。
 - `src/components/SidePanel.vue`：复刻 opencode session 右侧 Review/Files/Terminal/Status 面板；桌面为固定右栏，移动端通过 toolbar Panel 按钮打开抽屉并保留同一组 tabs。
-- `src/components/PromptComposer.vue`：复刻 opencode composer 的文本、附件、图片选择/粘贴/拖拽、@ 上下文、Agent/Model/Variant 运行态选择、shell mode 和 slash command 入口；附件/@ 文件选择通过平台 fs catalog，context chip 可移除，图片以平台 `file` part 契约发送，slash 菜单可由按钮或 textarea `/query` 触发，通过平台命令目录写入 `/command` 文本，并支持方向键、Enter、Escape 键盘操作；带 `hints` 或 `<...>/[...]` 模板的 slash command 会生成参数表单并实时补全 `/command args`；textarea Enter 提交、Shift+Enter 换行、边界 ArrowUp/ArrowDown 浏览历史；提交时 shell mode 走 `runSessionShell`，slash command 走 `runSessionCommand`。
+- `src/components/PromptComposer.vue`：复刻 opencode composer 的文本、附件、图片选择/粘贴/拖拽、@ 上下文、Agent/Model/Variant 运行态选择、shell mode 和 slash command 入口；附件/@ 文件选择通过平台 fs catalog，context chip 可移除，图片以平台 `file` part 契约发送，slash 菜单可由按钮或 textarea `/query` 触发，通过平台命令目录写入 `/command` 文本，并支持方向键、Enter、Escape 键盘操作；带 `hints` 或 `<...>/[...]` 模板的 slash command 会生成参数表单并实时补全 `/command args`；textarea Enter 提交、Shift+Enter 换行、边界 ArrowUp/ArrowDown 浏览历史；提交时 shell mode 走 `runSessionShell`，slash command 走 `runSessionCommand`；运行中发送按钮切换为 Stop，点击后立即关闭本地 SSE 并调用平台 `cancelRun`。
+- `src/stores/session.ts`：会话加载时并行读取 session、messages 和 active run；active run 为非终态时自动订阅 RunEvent SSE，timeline 按 `messageId` 合并数据库快照与 SSE projection，SSE 增量覆盖同 ID 旧快照，避免刷新或重连后重复展示。
 - `src/components/SessionToolbarActions.vue`：复刻 opencode session toolbar 的 share、fork、compact、revert、abort 入口；fork/revert 按 opencode `messageID` 请求体经平台代理。
 - `src/components/SessionForkDialog.vue`：复刻 opencode fork dialog 的用户消息选择列表，选择后通过 `backend-api.forkSession` 创建子会话并跳转。
 - `src/components/SessionShareButton.vue`：复刻 opencode session share publish/view/copy/unpublish 入口；publish/unpublish 通过平台 `backend-api`，公开 URL 只保存在前端会话状态。
@@ -28,11 +29,11 @@
 
 ## 测试记录
 
-- Playwright mock E2E 覆盖桌面/移动端 shell、首页会话列表、命令面板入口、`/new-session?prompt=...` 草稿提升、会话详情加载、prompt 提交请求构造、toolbar abort/compact/fork/revert、Session share publish/unpublish、Settings provider/worktree/MCP mock 流程，以及通过 fake EventSource 注入 RunEvent 后的 timeline 流式渲染。
+- Playwright mock E2E 覆盖桌面/移动端 shell、首页会话列表、命令面板入口、`/new-session?prompt=...` 草稿提升、会话详情加载、prompt 提交请求构造、toolbar abort/compact/fork/revert、Session share publish/unpublish、Settings provider/worktree/MCP mock 流程，以及通过 fake EventSource 注入 RunEvent 后的 timeline 流式渲染；组件/状态单测覆盖 active run 自动恢复订阅、messageId 去重合并和 Stop 按钮取消 Run。
 - Playwright real E2E 入口为 `playwright.real.config.ts` + `tests/e2e-real/*.real-spec.ts`，以单个桌面 smoke 通过真实 `test-agent-app` 创建或复用 workspace/session，再从 Vue UI 发送 prompt，等待 RunEvent SSE 渲染 assistant 文本；该套件只在 `TEST_AGENT_RUN_REAL_E2E=1` 下运行。
 
 ## 当前边界
 
 - 浏览器端只调用平台 `backend-api`，不直接连接 opencode server。
-- 实时消息只通过 RunEvent SSE 合并到前端状态。
+- 实时消息只通过 RunEvent SSE 合并到前端状态；刷新恢复先加载平台消息快照，再按 active run 恢复 SSE 增量订阅。
 - `packages/web` 官网、文档站和公开分享页不属于当前 v1 复刻范围。

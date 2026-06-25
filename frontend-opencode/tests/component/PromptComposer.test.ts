@@ -128,6 +128,17 @@ describe("PromptComposer", () => {
     expect(view.emitted("submit")).toHaveLength(1);
   });
 
+  it("switches to a stop button while a run is active", async () => {
+    const pinia = createPinia();
+    setActivePinia(pinia);
+    const view = render(PromptComposer, { props: { running: true }, global: { plugins: [pinia] } });
+
+    await fireEvent.click(screen.getByRole("button", { name: "Stop output" }));
+
+    expect(view.emitted("cancel")).toHaveLength(1);
+    expect(view.emitted("submit")).toBeUndefined();
+  });
+
   it("navigates prompt history with ArrowUp and ArrowDown at textarea boundaries", async () => {
     const pinia = createPinia();
     setActivePinia(pinia);

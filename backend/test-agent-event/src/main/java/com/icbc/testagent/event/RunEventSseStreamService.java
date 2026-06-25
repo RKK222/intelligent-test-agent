@@ -14,12 +14,11 @@ import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
 /**
- * RunEvent SSE 流服务：durable 事件通过 Repository 可续传回放，transient/live 事件通过进程内总线即时下发。
+ * RunEvent SSE 流服务：durable 事件通过 Repository 可续传回放，transient/live 事件通过进程内总线或可选 Redis 广播即时下发。
  *
- * <p>{@link #streamAfter} 用 {@link Flux#merge} 合并 durable replay 与 live bus 两条来源。落库的 durable 事件既会被
- * live bus 即时下发，又可能在下一轮 replay 轮询中被查出（live 推送与轮询游标推进存在竞态），因此同一 durable 事件
- * 可能重复投递。durable 事件携带稳定的 {@code evt_} 前缀 eventId，transient 事件携带 {@code evt_live_} 前缀 eventId，
- * 前端必须按 eventId 去重；replay 侧不做额外去重，依赖前端幂等。
+ * <p>{@link #streamAfter} 用 {@link Flux#merge} 合并 durable replay、本机 live bus 与远端广播三条来源。落库的 durable 事件
+ * 既会被 live bus 即时下发，又可能在下一轮 replay 轮询中被查出（live 推送与轮询游标推进存在竞态），因此服务端按 payload
+ * eventId 做一次轻量去重；前端仍需保持 eventId 幂等，兼容断线重连和多实例广播的重复投递。
  */
 @Service
 public class RunEventSseStreamService {
@@ -27,6 +26,7 @@ public class RunEventSseStreamService {
     private final RunEventReplayService replayService;
     private final RunEventSseMapper sseMapper;
     private final RunEventLiveBus liveBus;
+    private final RunEventRemotePublisher remotePublisher;
 
     /**
      * 构造生产用 SSE 流服务，合并 durable 回放服务、SSE mapper 和当前进程实时总线。
@@ -35,10 +35,22 @@ public class RunEventSseStreamService {
     public RunEventSseStreamService(
             RunEventReplayService replayService,
             RunEventSseMapper sseMapper,
-            RunEventLiveBus liveBus) {
+            RunEventLiveBus liveBus,
+            @Autowired(required = false) RunEventRemotePublisher remotePublisher) {
         this.replayService = Objects.requireNonNull(replayService, "replayService must not be null");
         this.sseMapper = Objects.requireNonNull(sseMapper, "sseMapper must not be null");
         this.liveBus = Objects.requireNonNull(liveBus, "liveBus must not be null");
+        this.remotePublisher = remotePublisher == null ? NoopRunEventRemotePublisher.INSTANCE : remotePublisher;
+    }
+
+    /**
+     * 构造兼容旧调用方的 SSE 流服务，只合并 durable 回放和本机 live bus。
+     */
+    public RunEventSseStreamService(
+            RunEventReplayService replayService,
+            RunEventSseMapper sseMapper,
+            RunEventLiveBus liveBus) {
+        this(replayService, sseMapper, liveBus, NoopRunEventRemotePublisher.INSTANCE);
     }
 
     /**
@@ -49,7 +61,7 @@ public class RunEventSseStreamService {
     }
 
     /**
-     * 从指定 Last-Event-ID 后开始输出 RunEvent SSE；durable 事件轮询回放，live bus 事件实时合流。
+     * 从指定 Last-Event-ID 后开始输出 RunEvent SSE；durable 事件轮询回放，本机和远端 live 事件实时合流。
      */
     public Flux<ServerSentEvent<RunEventSsePayload>> streamAfter(
             RunId runId,
@@ -75,7 +87,9 @@ public class RunEventSseStreamService {
                 .doOnNext(event -> cursor.set(event.seq()))
                 .map(this::toSse);
         Flux<ServerSentEvent<RunEventSsePayload>> liveEvents = liveBus.stream(runId).map(this::toLiveSse);
-        return Flux.merge(durableReplay, liveEvents);
+        Flux<ServerSentEvent<RunEventSsePayload>> remoteEvents =
+                remotePublisher.stream(runId).map(this::toLiveSse);
+        return Flux.merge(durableReplay, liveEvents, remoteEvents).distinct(this::eventId);
     }
 
     /**
@@ -92,5 +106,10 @@ public class RunEventSseStreamService {
         return event.durable()
                 ? sseMapper.toDurableSse(event.payload())
                 : sseMapper.toTransientSse(event.payload());
+    }
+
+    private String eventId(ServerSentEvent<RunEventSsePayload> event) {
+        RunEventSsePayload data = event.data();
+        return data == null ? "" : data.eventId();
     }
 }

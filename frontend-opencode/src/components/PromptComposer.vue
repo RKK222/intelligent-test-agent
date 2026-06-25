@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from "vue";
 import type { CommandInfo } from "@test-agent/shared-types";
-import { AtSign, FileCode2, Folder, ImagePlus, Paperclip, Search, SendHorizontal, Slash, X } from "lucide-vue-next";
+import { AtSign, FileCode2, Folder, ImagePlus, Paperclip, Search, SendHorizontal, Slash, Square, X } from "lucide-vue-next";
 import { usePlatformStore } from "@/stores/platform";
 import { usePromptStore } from "@/stores/prompt";
 import { useWorkspaceStore } from "@/stores/workspace";
@@ -17,8 +17,8 @@ import {
 type FilePickerMode = "attach" | "mention";
 type WorkspaceFileEntry = { path: string; name: string; type: "file" | "directory" | string };
 
-const props = defineProps<{ busy?: boolean }>();
-const emit = defineEmits<{ submit: [] }>();
+const props = defineProps<{ busy?: boolean; running?: boolean }>();
+const emit = defineEmits<{ submit: []; cancel: [] }>();
 const platform = usePlatformStore();
 const prompt = usePromptStore();
 const workspace = useWorkspaceStore();
@@ -201,6 +201,16 @@ function handleTextKeydown(event: KeyboardEvent) {
   }
   event.preventDefault();
   // opencode composer 的主路径是 Enter 提交；Shift+Enter 交给 textarea 保留换行。
+  if (!props.busy && !props.running && prompt.canSubmit) {
+    emit("submit");
+  }
+}
+
+function handleSubmit() {
+  if (props.running) {
+    emit("cancel");
+    return;
+  }
   if (!props.busy && prompt.canSubmit) {
     emit("submit");
   }
@@ -418,7 +428,7 @@ function readString(value: unknown) {
     class="composer"
     :class="{ 'is-dragging-images': draggingImages }"
     aria-label="Prompt composer"
-    @submit.prevent="emit('submit')"
+    @submit.prevent="handleSubmit"
     @dragover="handleImageDragOver"
     @dragleave="handleImageDragLeave"
     @drop="handleImageDrop"
@@ -642,9 +652,17 @@ function readString(value: unknown) {
 
     <div class="composer-footer">
       <span>{{ prompt.parts.length }} part{{ prompt.parts.length === 1 ? "" : "s" }}</span>
-      <button class="send-button" type="submit" :disabled="busy || !prompt.canSubmit">
-        <SendHorizontal :size="16" />
-        <span>{{ busy ? "Sending" : "Send" }}</span>
+      <button
+        class="send-button"
+        :class="{ danger: running }"
+        :type="running ? 'button' : 'submit'"
+        :disabled="!running && (busy || !prompt.canSubmit)"
+        :aria-label="running ? 'Stop output' : undefined"
+        @click="running ? emit('cancel') : undefined"
+      >
+        <Square v-if="running" :size="15" />
+        <SendHorizontal v-else :size="16" />
+        <span>{{ running ? "Stop" : busy ? "Sending" : "Send" }}</span>
       </button>
     </div>
   </form>

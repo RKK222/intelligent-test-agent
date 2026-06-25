@@ -273,6 +273,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     deleteSession: (sessionId: string) => request<Session>(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }),
     listSessionMessages: (sessionId: string, page = 1, size = 100) =>
       request<PageResponse<SessionMessage>>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?page=${page}&size=${size}`),
+    getActiveRun: (sessionId: string) => request<Run | null>(`/api/sessions/${encodeURIComponent(sessionId)}/active-run`),
     createSession: (workspaceId: string, title: string) =>
       request<Session>("/api/sessions", { method: "POST", body: JSON.stringify({ workspaceId, title }) }),
     startRun: (sessionIdOrPayload: string | StartRunPayload, prompt?: string) =>

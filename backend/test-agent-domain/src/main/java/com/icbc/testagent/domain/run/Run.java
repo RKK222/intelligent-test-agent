@@ -4,6 +4,7 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -18,7 +19,9 @@ public record Run(
         RunStatus status,
         Instant createdAt,
         Instant updatedAt,
-        String traceId) {
+        String traceId,
+        TokenUsage tokenUsage,
+        BigDecimal costUsd) {
 
     /**
      * 构造未指定 traceId 的 Run，兼容历史测试和持久化重建路径，内部使用占位 traceId。
@@ -34,7 +37,21 @@ public record Run(
     }
 
     /**
-     * 校验 Run 聚合的必填字段和时间顺序，确保领域对象不会表达无效运行状态。
+     * 构造不含 token/cost 的 Run，兼容既有编排和测试代码。
+     */
+    public Run(
+            RunId runId,
+            SessionId sessionId,
+            WorkspaceId workspaceId,
+            RunStatus status,
+            Instant createdAt,
+            Instant updatedAt,
+            String traceId) {
+        this(runId, sessionId, workspaceId, status, createdAt, updatedAt, traceId, TokenUsage.empty(), null);
+    }
+
+    /**
+     * 校验 Run 聚合的必填字段、时间顺序和可选消耗字段，确保领域对象不会表达无效运行状态。
      */
     public Run {
         Objects.requireNonNull(runId, "runId must not be null");
@@ -47,6 +64,10 @@ public record Run(
             throw new IllegalArgumentException("updatedAt must not be before createdAt");
         }
         traceId = com.icbc.testagent.domain.support.DomainValidation.requireText(traceId, "traceId");
+        tokenUsage = tokenUsage == null ? TokenUsage.empty() : tokenUsage;
+        if (costUsd != null && costUsd.signum() < 0) {
+            throw new IllegalArgumentException("costUsd must not be negative");
+        }
     }
 
     /**
@@ -61,7 +82,7 @@ public record Run(
                     "Run 状态不允许从 " + status + " 流转到 " + nextStatus,
                     Map.of("currentStatus", status.name(), "nextStatus", nextStatus.name()));
         }
-        return new Run(runId, sessionId, workspaceId, nextStatus, createdAt, nextUpdatedAt, traceId);
+        return new Run(runId, sessionId, workspaceId, nextStatus, createdAt, nextUpdatedAt, traceId, tokenUsage, costUsd);
     }
 
     /**
@@ -100,5 +121,12 @@ public record Run(
      */
     public Run cancel(Instant nextUpdatedAt) {
         return transitionTo(RunStatus.CANCELLED, nextUpdatedAt);
+    }
+
+    /**
+     * 更新本次 Run 的 token/cost 快照，供会话列表和消息快照展示每次对话消耗。
+     */
+    public Run withUsage(TokenUsage tokenUsage, BigDecimal costUsd) {
+        return new Run(runId, sessionId, workspaceId, status, createdAt, updatedAt, traceId, tokenUsage, costUsd);
     }
 }

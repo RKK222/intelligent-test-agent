@@ -1,12 +1,14 @@
 package com.icbc.testagent.api.web.platform;
 
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
+import com.icbc.testagent.opencode.runtime.run.RunApplicationService;
 import com.icbc.testagent.opencode.runtime.session.SessionApplicationService;
 import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -24,12 +26,22 @@ import org.springframework.web.server.ServerWebExchange;
 public class SessionController {
 
     private final SessionApplicationService sessionService;
+    private final RunApplicationService runService;
 
     /**
      * 注入会话应用服务，Controller 仅保留协议和 DTO 转换职责。
      */
     public SessionController(SessionApplicationService sessionService) {
+        this(sessionService, null);
+    }
+
+    /**
+     * 注入会话与 Run 应用服务，active-run 查询用于刷新后恢复 SSE。
+     */
+    @Autowired
+    public SessionController(SessionApplicationService sessionService, RunApplicationService runService) {
         this.sessionService = sessionService;
+        this.runService = runService;
     }
 
     /**
@@ -84,6 +96,22 @@ public class SessionController {
     }
 
     /**
+     * 查询会话最近仍在执行的 Run；没有活跃 Run 时 data 返回 null。
+     */
+    @GetMapping({"/api/sessions/{sessionId}/active-run", "/api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run"})
+    public ApiResponse<RuntimeDtos.RunResponse> getActiveRun(
+            @PathVariable String sessionId,
+            ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        RuntimeDtos.RunResponse response = runService == null
+                ? null
+                : runService.findActiveRun(new SessionId(sessionId))
+                        .map(RuntimeDtos.RunResponse::from)
+                        .orElse(null);
+        return ApiResponse.ok(response, traceId);
+    }
+
+    /**
      * 更新会话标题或置顶状态，空字段保留给应用层按局部更新规则处理。
      */
     @PatchMapping({"/api/sessions/{sessionId}", "/api/internal/platform/opencode-runtime/sessions/{sessionId}"})
@@ -131,6 +159,6 @@ public class SessionController {
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         return ApiResponse.ok(RuntimeDtos.messagePage(sessionService.listMessages(
-                new SessionId(sessionId), RuntimeApiSupport.pageRequest(page, size))), traceId);
+                new SessionId(sessionId), RuntimeApiSupport.pageRequest(page, size), traceId)), traceId);
     }
 }

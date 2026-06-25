@@ -502,6 +502,24 @@ describe("backend-api", () => {
     expect(fetcher).toHaveBeenCalledWith("http://api/api/sessions/ses_1/messages?page=1&size=100", expect.any(Object));
   });
 
+  it("reads the latest active run for session resume", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: { runId: "run_1", sessionId: "ses_1", workspaceId: "wrk_1", status: "RUNNING" }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.getActiveRun("ses_1")).resolves.toMatchObject({ runId: "run_1", status: "RUNNING" });
+
+    expect(fetcher).toHaveBeenCalledWith("http://api/api/sessions/ses_1/active-run", expect.any(Object));
+  });
+
   it("uses platform session management APIs without direct opencode URLs", async () => {
     const fetcher = vi
       .fn<typeof fetch>()

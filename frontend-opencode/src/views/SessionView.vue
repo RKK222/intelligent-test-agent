@@ -27,6 +27,10 @@ const visibleWorkspaceSessions = computed(() => {
   const currentWorkspaceId = routeWorkspaceId.value;
   return workspace.filteredSessions.filter((item) => !currentWorkspaceId || item.workspaceId === currentWorkspaceId);
 });
+const runActive = computed(() => {
+  const status = session.activeRun?.status?.toUpperCase();
+  return status === "PENDING" || status === "RUNNING" || status === "CANCELLING";
+});
 
 watch(
   routeWorkspaceId,
@@ -73,6 +77,10 @@ async function submit() {
   prompt.remember();
   prompt.reset();
 }
+
+async function stopRun() {
+  await session.stopActiveRun();
+}
 </script>
 
 <template>
@@ -107,7 +115,7 @@ async function submit() {
       <div v-if="session.error || session.actionError" class="inline-alert">{{ session.error ?? session.actionError }}</div>
       <SessionTimeline :messages="session.timeline" />
       <SessionDockStack />
-      <PromptComposer :busy="session.sending" @submit="submit" />
+      <PromptComposer :busy="session.sending" :running="runActive" @submit="submit" @cancel="stopRun" />
     </section>
 
     <button v-if="mobilePanelOpen" class="mobile-panel-backdrop" type="button" aria-label="Dismiss panel overlay" @click="mobilePanelOpen = false" />

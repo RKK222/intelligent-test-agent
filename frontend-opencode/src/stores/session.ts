@@ -9,6 +9,8 @@ import { buildPromptParts, promptPreviewTitle, type PromptBuildInput } from "@/u
 export type FollowupItem = { id: string; text: string };
 export type RevertItem = { id: string; text: string };
 
+const ACTIVE_RUN_STATUSES = new Set(["PENDING", "RUNNING", "CANCELLING"]);
+
 export const useSessionStore = defineStore("session", () => {
   const activeSession = ref<Session>();
   const messages = ref<SessionMessage[]>([]);
@@ -40,9 +42,20 @@ export const useSessionStore = defineStore("session", () => {
         role: message.role.toUpperCase(),
         content: renderParts(message.parts) || message.text,
         createdAt: message.updatedAt ?? new Date(0).toISOString(),
+        updatedAt: message.updatedAt,
         parts: Object.values(message.parts)
       }));
-    return [...messages.value, ...projected].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const byMessageId = new Map<string, SessionMessage>();
+    messages.value.forEach((message) => byMessageId.set(message.messageId, message));
+    projected.forEach((message) => {
+      const existing = byMessageId.get(message.messageId);
+      byMessageId.set(message.messageId, {
+        ...existing,
+        ...message,
+        createdAt: existing?.createdAt ?? message.createdAt
+      });
+    });
+    return Array.from(byMessageId.values()).sort((a, b) => (a.updatedAt ?? a.createdAt).localeCompare(b.updatedAt ?? b.createdAt));
   });
   const userMessages = computed(() => timeline.value.filter((message) => message.role.toUpperCase() === "USER"));
 
@@ -51,9 +64,10 @@ export const useSessionStore = defineStore("session", () => {
     loading.value = true;
     error.value = undefined;
     try {
-      const [session, messagePage, todoItems, sessionDiff, permissionItems, questionItems] = await Promise.all([
+      const [session, messagePage, active, todoItems, sessionDiff, permissionItems, questionItems] = await Promise.all([
         platform.api.getSession(sessionId),
         platform.api.listSessionMessages(sessionId, 1, 200),
+        platform.api.getActiveRun(sessionId),
         platform.api.getSessionTodo(sessionId),
         platform.api.getSessionDiff(sessionId),
         platform.api.listSessionPermissions(sessionId),
@@ -66,6 +80,12 @@ export const useSessionStore = defineStore("session", () => {
       diff.value = sessionDiff;
       permissions.value = permissionItems;
       questions.value = questionItems;
+      activeRun.value = active ?? undefined;
+      if (active && isActiveRun(active)) {
+        useRunEventStore().subscribe(active.runId, platform.baseUrl);
+      } else {
+        useRunEventStore().close();
+      }
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : "会话加载失败";
     } finally {
@@ -155,6 +175,33 @@ export const useSessionStore = defineStore("session", () => {
       // session abort 走 opencode runtime 代理，响应体不保证是平台 Run；成功后先本地收敛运行态，后续 RunEvent 再校正细节。
       activeRun.value = { ...activeRun.value, status: "CANCELLED", updatedAt: new Date().toISOString() };
     }
+  }
+
+  async function stopActiveRun() {
+    const run = activeRun.value;
+    if (!run) {
+      return;
+    }
+    const platform = usePlatformStore();
+    const runEvents = useRunEventStore();
+    runEvents.close();
+    activeRun.value = { ...run, status: "CANCELLING", updatedAt: new Date().toISOString() };
+    try {
+      const cancelled = await platform.api.cancelRun(run.runId);
+      activeRun.value = cancelled ?? { ...activeRun.value, status: "CANCELLED", updatedAt: new Date().toISOString() };
+      if (activeSession.value?.sessionId) {
+        await reloadMessages(activeSession.value.sessionId);
+      }
+    } catch (cause) {
+      error.value = cause instanceof Error ? cause.message : "运行取消失败";
+      throw cause;
+    }
+  }
+
+  async function reloadMessages(sessionId: string) {
+    const platform = usePlatformStore();
+    const messagePage = await platform.api.listSessionMessages(sessionId, 1, 200);
+    messages.value = messagePage.items;
   }
 
   // 会话工具栏命令复刻 opencode 的 messageID 请求体，但统一经 backend-api 代理。
@@ -354,6 +401,7 @@ export const useSessionStore = defineStore("session", () => {
     createDraftSession,
     sendPrompt,
     abort,
+    stopActiveRun,
     forkFromMessage,
     revertToMessage,
     revertLatestUserMessage,
@@ -443,8 +491,14 @@ function normalizeRunResponse(value: unknown): Run | undefined {
     workspaceId: readString(source.workspaceId) ?? readString(source.workspaceID) ?? "",
     status: readString(source.status) ?? "RUNNING",
     createdAt: readString(source.createdAt) ?? new Date().toISOString(),
-    updatedAt: readString(source.updatedAt) ?? new Date().toISOString()
+    updatedAt: readString(source.updatedAt) ?? new Date().toISOString(),
+    costUsd: typeof source.costUsd === "number" ? source.costUsd : undefined,
+    tokens: isRecord(source.tokens) ? (source.tokens as Run["tokens"]) : undefined
   };
+}
+
+function isActiveRun(run: Run) {
+  return ACTIVE_RUN_STATUSES.has(run.status.toUpperCase());
 }
 
 function extractShareUrl(value: unknown): string | undefined {

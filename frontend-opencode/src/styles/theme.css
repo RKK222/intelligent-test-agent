@@ -213,6 +213,11 @@ select:focus-visible {
   font-weight: 620;
 }
 
+.send-button.danger {
+  border-color: color-mix(in srgb, #dc2626 52%, var(--line));
+  background: color-mix(in srgb, #dc2626 15%, var(--panel));
+}
+
 .primary-action:disabled,
 .icon-text:disabled,
 .send-button:disabled {

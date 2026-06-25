@@ -26,6 +26,7 @@ import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
 import com.icbc.testagent.domain.run.RunStatus;
+import com.icbc.testagent.domain.run.TokenUsage;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionMessage;
@@ -57,6 +58,7 @@ import com.icbc.testagent.opencode.client.OpencodeRejectDiffCommand;
 import com.icbc.testagent.opencode.client.OpencodeRejectDiffResult;
 import com.icbc.testagent.opencode.client.OpencodeRuntimeCommand;
 import com.icbc.testagent.opencode.client.OpencodeRuntimeResult;
+import com.icbc.testagent.opencode.client.OpencodeSessionMessage;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessagesCommand;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessagesResult;
 import com.icbc.testagent.opencode.client.OpencodeStartRunCommand;
@@ -65,6 +67,7 @@ import com.icbc.testagent.opencode.client.OpencodeStreamEventsCommand;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -395,6 +398,71 @@ class RunApplicationServiceTest {
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
         awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
         awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_SUCCEEDED);
+    }
+
+    @Test
+    void servicePersistsAssistantSnapshotAndRunUsageWhenTerminalEventArrives() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.sessionMessagesResult = new OpencodeSessionMessagesResult(
+                List.of(new OpencodeSessionMessage(
+                        Map.of(
+                                "id", "msg_remote_1234567890abcdef",
+                                "type", "assistant",
+                                "role", "assistant",
+                                "cost", new BigDecimal("0.25000000"),
+                                "tokens", Map.of(
+                                        "input", 11,
+                                        "output", 12,
+                                        "reasoning", 3,
+                                        "cache", Map.of("read", 4, "write", 5))),
+                        List.of(Map.of(
+                                "id", "part_1",
+                                "messageID", "msg_remote_1234567890abcdef",
+                                "type", "text",
+                                "text", "assistant answer")))),
+                null,
+                null);
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.RUN_SUCCEEDED,
+                command.traceId(),
+                Instant.now(),
+                Map.of("messageID", "msg_remote_1234567890abcdef")));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                messages,
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
+        awaitMessageCount(messages, 2);
+        TokenUsage expectedUsage = new TokenUsage(11L, 12L, 3L, 4L, 5L);
+        assertThat(service.getRun(run.runId()).tokenUsage()).isEqualTo(expectedUsage);
+        assertThat(service.getRun(run.runId()).costUsd()).isEqualByComparingTo("0.25000000");
+        assertThat(messages.saved.get(0)).satisfies(user -> {
+            assertThat(user.role()).isEqualTo(com.icbc.testagent.domain.session.SessionMessageRole.USER);
+            assertThat(user.runId()).isEqualTo(run.runId());
+        });
+        assertThat(messages.saved.get(1)).satisfies(assistant -> {
+            assertThat(assistant.role()).isEqualTo(com.icbc.testagent.domain.session.SessionMessageRole.ASSISTANT);
+            assertThat(assistant.runId()).isEqualTo(run.runId());
+            assertThat(assistant.agentId()).isEqualTo("opencode");
+            assertThat(assistant.remoteMessageId()).isEqualTo("msg_remote_1234567890abcdef");
+            assertThat(assistant.content()).isEqualTo("assistant answer");
+            assertThat(assistant.partsJson()).contains("\"part_1\"");
+            assertThat(assistant.tokenUsage()).isEqualTo(expectedUsage);
+            assertThat(assistant.costUsd()).isEqualByComparingTo("0.25000000");
+        });
     }
 
     @Test
@@ -933,6 +1001,17 @@ class RunApplicationServiceTest {
         assertThat(liveBus.transientPayloads).hasSizeGreaterThanOrEqualTo(expected);
     }
 
+    private static void awaitMessageCount(FakeSessionMessageRepository messages, int expected) {
+        long deadline = System.nanoTime() + 2_000_000_000L;
+        while (System.nanoTime() < deadline) {
+            if (messages.saved.size() >= expected) {
+                return;
+            }
+            sleepBriefly();
+        }
+        assertThat(messages.saved).hasSizeGreaterThanOrEqualTo(expected);
+    }
+
     private static void sleepBriefly() {
         try {
             Thread.sleep(10);
@@ -1021,11 +1100,22 @@ class RunApplicationServiceTest {
         public Optional<Run> findById(RunId runId) {
             return saved.stream().filter(run -> run.runId().equals(runId)).reduce((first, second) -> second);
         }
+
+        @Override
+        public Optional<Run> findLatestActiveBySessionId(SessionId sessionId) {
+            return saved.stream()
+                    .filter(run -> run.sessionId().equals(sessionId))
+                    .filter(run -> !run.status().isTerminal())
+                    .reduce((first, second) -> second);
+        }
     }
 
     private static final class FakeSessionMessageRepository implements SessionMessageRepository {
+        private final List<SessionMessage> saved = new CopyOnWriteArrayList<>();
+
         @Override
         public SessionMessage save(SessionMessage message) {
+            saved.add(message);
             return message;
         }
 
@@ -1036,7 +1126,7 @@ class RunApplicationServiceTest {
 
         @Override
         public PageResponse<SessionMessage> findBySessionId(SessionId sessionId, PageRequest pageRequest) {
-            return new PageResponse<>(List.of(), pageRequest.page(), pageRequest.size(), 0);
+            return new PageResponse<>(saved, pageRequest.page(), pageRequest.size(), saved.size());
         }
     }
 
@@ -1162,6 +1252,7 @@ class RunApplicationServiceTest {
         private final List<String> callOrder = new ArrayList<>();
         private String lastPrompt;
         private RuntimeException createSessionError;
+        private OpencodeSessionMessagesResult sessionMessagesResult = new OpencodeSessionMessagesResult(List.of(), null, null);
         private Function<OpencodeStreamEventsCommand, Flux<RunEventDraft>> streamEvents = ignored -> Flux.empty();
         private Function<OpencodeRuntimeCommand, Mono<OpencodeRuntimeResult>> runtime =
                 ignored -> Mono.just(new OpencodeRuntimeResult(JsonNodeFactory.instance.objectNode()));
@@ -1216,7 +1307,7 @@ class RunApplicationServiceTest {
 
         @Override
         public Mono<OpencodeSessionMessagesResult> sessionMessages(OpencodeSessionMessagesCommand command) {
-            return Mono.just(new OpencodeSessionMessagesResult(List.of(), null, null));
+            return Mono.just(sessionMessagesResult);
         }
     }
 }

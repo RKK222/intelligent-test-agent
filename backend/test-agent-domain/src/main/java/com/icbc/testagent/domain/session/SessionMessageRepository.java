@@ -20,6 +20,13 @@ public interface SessionMessageRepository {
     Optional<SessionMessage> findById(SessionMessageId messageId);
 
     /**
+     * 按远端消息 ID 查询快照，用于 opencode 投影刷新时做幂等 upsert。
+     */
+    default Optional<SessionMessage> findBySessionIdAndRemoteMessageId(SessionId sessionId, String remoteMessageId) {
+        return Optional.empty();
+    }
+
+    /**
      * 按会话 ID 分页读取消息。
      */
     PageResponse<SessionMessage> findBySessionId(SessionId sessionId, PageRequest pageRequest);

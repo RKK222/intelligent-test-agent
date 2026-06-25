@@ -4,7 +4,7 @@
 
 `frontend-opencode` 是 opencode IDE App 的 Vue 3 + TypeScript + Vite 复刻工程，行为参考 `opencode-source/opencode-1.17.8/packages/app`。本工程不复刻 `packages/web` 官网、文档站或公网分享轮询页。
 
-浏览器侧禁止直连 opencode server：HTTP 通过平台 `test-agent-app` 的 `/api` 入口，实时消息通过 RunEvent SSE，受控 PTY 通过后端签发 ticket。
+浏览器侧禁止直连 opencode server：HTTP 通过平台 `test-agent-app` 的 `/api` 入口，实时消息通过 RunEvent SSE，受控 PTY 通过后端签发 ticket。刷新或重新进入运行中会话时，前端先加载平台消息快照，再查询 active run 并恢复 RunEvent SSE 增量订阅。
 
 ## 技术栈
 
@@ -39,11 +39,11 @@ corepack pnpm e2e:real
 ## 目录说明
 
 - `src/api/platform.ts`：平台 API 适配层，补齐 opencode Web parity 所需 config/provider/worktree/share/MCP auth 方法。
-- `src/stores/`：platform、workspace、session、prompt、run-events、settings、terminal 状态。
+- `src/stores/`：platform、workspace、session、prompt、run-events、settings、terminal 状态；session store 负责 active run 恢复、消息快照与 SSE projection 合并、Stop 取消后的快照刷新。
 - `src/views/`：`/`、`/w/:workspaceId/session/:sessionId?`、`/new-session` 三个默认路由。
 - `src/components/`：composer、timeline、session toolbar/fork dialog、side panel、settings、command palette、toast。
 - `docs/`：依赖、API 映射和 parity 验收记录。
 
 ## 验收边界
 
-首版覆盖 opencode App 的 Web IDE 壳层、工作区/会话入口、session toolbar、composer、RunEvent message reducer、permission/question/todo/diff/terminal 面板和 settings/provider 展示入口。真实三服务联调需要同时启动 `test-agent-app`、opencode server 与本工程，并通过 `corepack pnpm e2e:real` 验证 prompt -> RunEvent SSE -> timeline 渲染闭环。
+首版覆盖 opencode App 的 Web IDE 壳层、工作区/会话入口、session toolbar、composer、RunEvent message reducer、运行中刷新恢复、Stop 取消、permission/question/todo/diff/terminal 面板和 settings/provider 展示入口。真实三服务联调需要同时启动 `test-agent-app`、opencode server 与本工程，并通过 `corepack pnpm e2e:real` 验证 prompt -> RunEvent SSE -> timeline 渲染闭环。

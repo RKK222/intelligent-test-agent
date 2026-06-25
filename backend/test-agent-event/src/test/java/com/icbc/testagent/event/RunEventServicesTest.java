@@ -178,6 +178,48 @@ class RunEventServicesTest {
     }
 
     @Test
+    void liveBusPublishesToRemotePublisherAndSseStreamMergesRemoteEvents() {
+        FakeRunEventRepository repository = new FakeRunEventRepository();
+        FakeRunEventRemotePublisher remotePublisher = new FakeRunEventRemotePublisher();
+        RunEventLiveBus liveBus = new RunEventLiveBus(remotePublisher);
+        RunId runId = new RunId("run_1234567890abcdef");
+        RunEventSsePayload remotePayload = new RunEventSsePayload(
+                "evt_live_remote",
+                runId.value(),
+                0,
+                "message.part.delta",
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of("delta", "remote"));
+        RunEventSseStreamService streamService = new RunEventSseStreamService(
+                new RunEventReplayService(repository),
+                new RunEventSseMapper(),
+                liveBus,
+                remotePublisher);
+
+        RunEventLiveEvent published = liveBus.publishTransient(new RunEventDraft(
+                runId,
+                RunEventType.MESSAGE_PART_DELTA,
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of("delta", "local")));
+
+        assertThat(remotePublisher.published).containsExactly(published);
+        StepVerifier.create(streamService.streamAfter(
+                        runId,
+                        "0",
+                        Duration.ofSeconds(30),
+                        50).take(1))
+                .then(() -> remotePublisher.emit(RunEventLiveEvent.transientOnly(remotePayload)))
+                .assertNext(event -> {
+                    assertThat(event.id()).isNull();
+                    assertThat(event.event()).isEqualTo("message.part.delta");
+                    assertThat(event.data()).isEqualTo(remotePayload);
+                })
+                .verifyComplete();
+    }
+
+    @Test
     void sseStreamContinuesPollingAfterTransientReplayFailure() {
         FakeRunEventRepository repository = new FakeRunEventRepository();
         repository.remainingFindFailures = 1;
@@ -234,6 +276,26 @@ class RunEventServicesTest {
                     .filter(event -> event.seq() > lastSeq)
                     .limit(limit)
                     .toList();
+        }
+    }
+
+    private static final class FakeRunEventRemotePublisher implements RunEventRemotePublisher {
+        private final List<RunEventLiveEvent> published = new ArrayList<>();
+        private final reactor.core.publisher.Sinks.Many<RunEventLiveEvent> sink =
+                reactor.core.publisher.Sinks.many().multicast().directBestEffort();
+
+        @Override
+        public void publish(RunEventLiveEvent event) {
+            published.add(event);
+        }
+
+        @Override
+        public reactor.core.publisher.Flux<RunEventLiveEvent> stream(RunId runId) {
+            return sink.asFlux().filter(event -> runId.value().equals(event.payload().runId()));
+        }
+
+        private void emit(RunEventLiveEvent event) {
+            sink.tryEmitNext(event);
         }
     }
 }

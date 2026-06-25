@@ -565,6 +565,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `DELETE` | `/api/sessions/{sessionId}` | 软删除会话，状态变为 `ARCHIVED`。 |
 | `POST` | `/api/sessions/{sessionId}/messages` | 追加会话消息。 |
 | `GET` | `/api/sessions/{sessionId}/messages` | 分页读取会话消息。 |
+| `GET` | `/api/sessions/{sessionId}/active-run` | 查询会话最近的非终态 Run；没有时 `data=null`。 |
 
 新平台 URL 使用 `/api/internal/platform/opencode-runtime` 前缀。例如：
 
@@ -575,6 +576,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/api/internal/platform/opencode-runtime/workspaces/{workspaceId}/sessions` |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}` |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` |
 
 `POST /api/sessions` 请求体：
 
@@ -611,7 +614,20 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`SessionMessageResponse`：`messageId`、`sessionId`、`role`、`content`、`createdAt`。当前 role 使用 `USER`、`ASSISTANT`、`SYSTEM`。
+`GET /api/sessions/{sessionId}/messages` 会先在存在 agent binding 时尝试读取当前 agent projected messages 并 upsert 到 `session_messages`；如果 opencode 进程不可用、超时或远端 session 不存在，接口回退返回数据库快照，不向前端暴露 generated SDK DTO。
+
+`SessionMessageResponse` 基础字段：`messageId`、`sessionId`、`role`、`content`、`createdAt`。当前 role 使用 `USER`、`ASSISTANT`、`SYSTEM`。
+
+新增可选字段：
+
+| 字段 | 说明 |
+|---|---|
+| `runId` | 消息归属的 Run。 |
+| `remoteMessageId` | 远端 agent message id。 |
+| `parts` | 远端 message parts 投影数组；缺失时旧前端继续使用 `content`。 |
+| `tokens` | `{ input, output, reasoning, cacheRead, cacheWrite }`，字段均可空。 |
+| `costUsd` | 单次 Run 成本快照，可空。 |
+| `updatedAt` | 快照更新时间。 |
 
 ### Run、Cancel 和 Event API
 
@@ -850,7 +866,8 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
 - 当后端启用托管模型目录时，前端从 Model 目录接口获取可选模型并仍按 `providerId/modelId` 提交；企业内默认模型为 `icbc-openai/DeepSeek-V4-Flash-W8A8`。
 - Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt_async` 请求体。
 
-启动流程会先校验当前认证用户是否已有 `READY` opencode 进程；未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run。校验通过后追加用户消息，创建 `PENDING` Run，并使用当前用户进程投影出的 `executionNodeId = "node_" + processId` 和 `baseUrl = http://{linuxServerId}:{port}` 作为本次运行目标。若 `(sessionId, agentId)` 的既有 `agent_session_bindings` 指向的节点不是当前用户进程节点，后端会重新创建远端 session 并覆盖绑定；旧 `sessions.opencode_*` 字段只作为 `opencode` 兼容回填来源。
+启动流程会先校验当前认证用户是否已有 `READY` opencode 进程；未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run。校验通过后追加用户消息，创建 `PENDING` Run，并使用当前用户进程投影出的 `executionNodeId = "node_" + processId` 和 `baseUrl = http://{linuxServerId}:{port}` 作为本次运行目标。若 `(sessionId, agentId)` 的既有 `agent_session_bindings` 指向的节点不是当前用户进程节点，后端会重新创建远端 session 并覆盖绑定；旧 `sessions.opencode_*` 字段只作为 `opencode` 兼容回填来源。无用户主体的兼容调用（例如 static API token、本地放行或旧系统集成）继续走固定 `execution_nodes` 路由，不要求用户进程。
+Run 进入成功、失败或取消终态后，后端会尝试拉取 agent projected messages，将 assistant 输出、parts、token/cost 快照 upsert 到 `session_messages`，并把同一份 token/cost 写入 `runs`；拉取失败时保留数据库已有快照。
 
 ### opencode Web Runtime API
 
@@ -955,9 +972,11 @@ Session 运行态接口：
 
 成功后写入 `run.created` 和 `run.started`。未找到可用节点返回 `OPENCODE_UNAVAILABLE`；opencode 超时或异常分别映射为平台 opencode 错误码。
 
-`RunResponse`：`runId`、`sessionId`、`workspaceId`、`status`、`createdAt`、`updatedAt`。
+`RunResponse`：`runId`、`sessionId`、`workspaceId`、`status`、`createdAt`、`updatedAt`，以及可选 `tokens`、`costUsd`。`tokens` 字段结构同 `SessionMessageResponse.tokens`。
 
-`POST /api/runs/{runId}/cancel` 对终态 Run 返回 `CONFLICT`。非终态 Run 会在存在 agent binding 时通过当前 `AgentRuntime.cancel` 取消远端执行，并追加 `run.cancelling`、`run.cancelled`。
+`GET /api/sessions/{sessionId}/active-run` 返回最近的 `PENDING`、`RUNNING` 或 `CANCELLING` Run，供前端刷新后恢复 RunEvent SSE；没有非终态 Run 时响应仍为 `success=true` 且 `data=null`。
+
+`POST /api/runs/{runId}/cancel` 对终态 Run 返回 `CONFLICT`。非终态 Run 会在存在 agent binding 时通过当前 `AgentRuntime.cancel` 取消远端执行，并追加 `run.cancelling`、`run.cancelled`；取消完成后也会触发一次消息快照持久化。
 
 `GET /api/internal/agent/{agentId}/runs/{runId}/events` 返回 `text/event-stream`，旧 `GET /api/runs/{runId}/events` 和平台内部 URL 继续兼容。`event` 使用稳定 wire name。durable RunEvent 使用 `seq` 作为 SSE `id`，可通过 `Last-Event-ID` 续传；transient live output 不设置 SSE `id`，payload `seq=0`，不参与续传。浏览器原生 `EventSource` 首次续传可使用 `?lastEventId={seq}`，后端 header 优先、query 兜底。
 

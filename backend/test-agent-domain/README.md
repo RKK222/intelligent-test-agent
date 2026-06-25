@@ -21,7 +21,7 @@
 - Workspace：`Workspace`、`WorkspaceId`。
 - Session：`Session`、`SessionId`、`SessionStatus`、`SessionMessage`、`SessionMessageId`、`SessionMessageRole`；`Session` 内含平台置顶状态和后端内部 opencode session/node 映射字段，软删除使用 `ARCHIVED` 状态。
 - AgentSessionBinding：`AgentSessionBinding`、`AgentSessionBindingRepository`；按 `(sessionId, agentId)` 表达平台 session 到远端 agent session/node 的通用绑定，旧 opencode 字段只作兼容。
-- Run：`Run`、`RunId`、`RunStatus`。
+- Run：`Run`、`RunId`、`RunStatus`、`TokenUsage`；Run 可保存单次对话 token/cost 快照。
 - RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`；RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`。
 - ExecutionNode：`ExecutionNode`、`ExecutionNodeId`、`ExecutionNodeStatus`。
 - RoutingDecision：`RoutingDecision`、`RoutingReason`、`ExecutionNodeRouter`。
@@ -42,8 +42,8 @@
 ## 测试覆盖
 
 - `WorkspaceTest` 覆盖工作区默认状态、traceId 占位和更新时间边界。
-- `RunStatusTest`、`RunTest` 覆盖 Run 状态机、终态、取消请求、非法流转和时间边界。
-- `SessionMessageTest`、`SessionTest` 覆盖消息约束、会话归档、置顶和内部 opencode session/node 映射边界。
+- `RunStatusTest`、`RunTest` 覆盖 Run 状态机、终态、取消请求、非法流转、时间边界和 token/cost 快照兼容。
+- `SessionMessageTest`、`SessionTest` 覆盖消息约束、parts/token/cost 可选快照、会话归档、置顶和内部 opencode session/node 映射边界。
 - `AgentSessionBindingTest` 覆盖 agentId 规范化、远端 session/node 绑定和 traceId 边界。
 - `ExecutionNodeRouterTest`、`ExecutionNodeTest` 覆盖执行节点容量、可路由状态和路由冲突错误。
 - `OpencodeProcessDomainTest` 覆盖 Linux 服务器 IP、容器端口范围、用户进程 baseUrl 和用户绑定边界。
