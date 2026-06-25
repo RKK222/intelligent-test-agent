@@ -17,8 +17,8 @@ type ExplorerTab = "explorer" | "search" | "changes";
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { FileText, FolderTree, GitBranch, Plus, RefreshCw, Search } from "lucide-vue-next";
-import { Badge, Button, Input, cn } from "@test-agent/ui-kit";
+import { FileText, FolderTree, GitBranch, RefreshCw, Search } from "lucide-vue-next";
+import { Badge, Input, cn } from "@test-agent/ui-kit";
 import { filterLoadedFiles } from "./filterLoadedFiles";
 import DirectoryRows from "./DirectoryRows.vue";
 
@@ -28,7 +28,6 @@ const emit = defineEmits<{
   openFile: [path: string];
   openDiff: [path: string];
   refresh: [];
-  addWorkspace: [];
 }>();
 
 const tab = ref<ExplorerTab>("explorer");
@@ -98,15 +97,6 @@ const changeStats = computed(() => {
             @click="emit('refresh')"
           >
             <RefreshCw class="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            class="ta-fe-icon-btn"
-            title="选择工作区目录"
-            aria-label="选择工作区目录"
-            @click="emit('addWorkspace')"
-          >
-            <Plus class="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
