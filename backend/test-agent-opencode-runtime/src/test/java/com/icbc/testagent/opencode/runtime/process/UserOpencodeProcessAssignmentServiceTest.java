@@ -18,6 +18,7 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerManager;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnection;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
@@ -34,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 
 class UserOpencodeProcessAssignmentServiceTest {
 
@@ -174,6 +176,70 @@ class UserOpencodeProcessAssignmentServiceTest {
                 .isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
     }
 
+    @org.junit.jupiter.api.Test
+    void localDirectStatusReturnsSyntheticReadyWithoutTouchingRepository() {
+        FakeRepository repository = new NoopRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = serviceLocalDirect(repository, gateway, "http://127.0.0.1:4096");
+
+        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
+        assertThat(response.baseUrl()).isEqualTo("http://127.0.0.1:4096");
+        assertThat(response.port()).isEqualTo(4096);
+        assertThat(response.linuxServerId()).isEqualTo("127.0.0.1");
+        assertThat(response.processId()).isEqualTo("ocp_local_direct");
+        assertThat(response.message()).contains("本地开发模式");
+        // 短路模式下不允许触发 gateway 健康检测，也不应写库。
+        assertThat(gateway.startCommands).isEmpty();
+        assertThat(repository.findUserBindingCalls).isEqualTo(0);
+        assertThat(repository.findContainerCalls).isEqualTo(0);
+    }
+
+    @org.junit.jupiter.api.Test
+    void localDirectInitializeReturnsSyntheticReadyAndSkipsGatewayStart() {
+        FakeRepository repository = new NoopRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = serviceLocalDirect(repository, gateway, "http://127.0.0.1:4096");
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
+        assertThat(response.baseUrl()).isEqualTo("http://127.0.0.1:4096");
+        assertThat(response.message()).contains("本地开发模式");
+        // 关键：initialize 也不调用 gateway.startProcess，避免被 manager 状态卡住。
+        assertThat(gateway.startCommands).isEmpty();
+        assertThat(repository.findUserBindingCalls).isEqualTo(0);
+    }
+
+    @org.junit.jupiter.api.Test
+    void localDirectRequireReadyProcessReturnsSyntheticAssignment() {
+        FakeRepository repository = new NoopRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = serviceLocalDirect(repository, gateway, "http://127.0.0.1:4096");
+
+        UserOpencodeProcessAssignment assignment = service.requireReadyProcess(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(assignment.node().baseUrl()).isEqualTo("http://127.0.0.1:4096");
+        assertThat(assignment.node().executionNodeId().value()).isEqualTo("node_ocp_local_direct");
+        // 不应触发 topology / binding 查询，Run 启动可以走到 4096 直连。
+        assertThat(repository.findUserBindingCalls).isEqualTo(0);
+    }
+
+    @org.junit.jupiter.api.Test
+    void localDirectBaseUrlWithoutPortFallsBackToDefaults() {
+        FakeRepository repository = new NoopRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        // 故意传一个不能解析出 host/port 的字符串，验证服务会回退到默认 127.0.0.1:4096 而不是抛错。
+        UserOpencodeProcessAssignmentService service = serviceLocalDirect(repository, gateway, "not a url");
+
+        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
+        assertThat(response.baseUrl()).isEqualTo("http://127.0.0.1:4096");
+        assertThat(response.linuxServerId()).isEqualTo("127.0.0.1");
+    }
+
     private static UserOpencodeProcessAssignmentService service(FakeRepository repository, RecordingGateway gateway) {
         return new UserOpencodeProcessAssignmentService(
                 repository,
@@ -189,6 +255,33 @@ class UserOpencodeProcessAssignmentServiceTest {
                                 Duration.ofSeconds(30),
                                 Duration.ofSeconds(5),
                                 100)));
+    }
+
+    private static UserOpencodeProcessAssignmentService serviceLocalDirect(
+            FakeRepository repository, RecordingGateway gateway, String baseUrl) {
+        return new UserOpencodeProcessAssignmentService(
+                repository,
+                repository,
+                gateway,
+                new BackendJavaProcessLifecycleService(
+                        repository,
+                        new ManagerControlSettings(
+                                "secret-token",
+                                "http://10.8.0.21:8080",
+                                new LinuxServerId("10.8.0.21"),
+                                Duration.ofSeconds(10),
+                                Duration.ofSeconds(30),
+                                Duration.ofSeconds(5),
+                                100)),
+                new OpencodeProcessHeartbeatStore() {
+                    @Override public boolean enabled() { return false; }
+                    @Override public void recordBackendHeartbeat(com.icbc.testagent.domain.opencodeprocess.BackendProcessId backendProcessId, Instant heartbeatAt) { }
+                    @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
+                    @Override public Set<com.icbc.testagent.domain.opencodeprocess.BackendProcessId> liveBackendProcessIds() { return Set.of(); }
+                    @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
+                    @Override public void cleanupExpiredHeartbeats() { }
+                },
+                new LocalDirectSettings(true, baseUrl));
     }
 
     private static OpencodeContainer container(
@@ -276,11 +369,13 @@ class UserOpencodeProcessAssignmentServiceTest {
         }
     }
 
-    private static final class FakeRepository implements OpencodeProcessManagementRepository, ExecutionNodeRepository {
+    static class FakeRepository implements OpencodeProcessManagementRepository, ExecutionNodeRepository {
         private final Map<String, OpencodeContainer> containers = new LinkedHashMap<>();
         private final Map<String, OpencodeServerProcess> processes = new LinkedHashMap<>();
         private final Map<String, UserOpencodeProcessBinding> bindings = new LinkedHashMap<>();
         private final List<ExecutionNode> savedNodes = new ArrayList<>();
+        int findUserBindingCalls;
+        int findContainerCalls;
 
         @Override
         public List<OpencodeContainer> findHealthyContainers(int limit) {
@@ -301,6 +396,7 @@ class UserOpencodeProcessAssignmentServiceTest {
 
         @Override
         public List<OpencodeContainer> findHealthyContainersConnectedToBackend(BackendProcessId backendProcessId, int limit) {
+            findContainerCalls++;
             return findHealthyContainers(limit);
         }
 
@@ -309,6 +405,7 @@ class UserOpencodeProcessAssignmentServiceTest {
                 BackendProcessId backendProcessId,
                 LinuxServerId linuxServerId,
                 int limit) {
+            findContainerCalls++;
             return findHealthyContainersByLinuxServer(linuxServerId, limit);
         }
 
@@ -325,6 +422,7 @@ class UserOpencodeProcessAssignmentServiceTest {
 
         @Override
         public Optional<UserOpencodeProcessBinding> findUserBinding(UserId userId, String agentId) {
+            findUserBindingCalls++;
             return Optional.ofNullable(bindings.get(userId.value() + ":" + agentId.trim().toLowerCase()));
         }
 
@@ -374,6 +472,26 @@ class UserOpencodeProcessAssignmentServiceTest {
         @Override public Optional<OpencodeContainerManager> findContainerManagerById(ContainerManagerId managerId) { return Optional.empty(); }
         @Override public OpencodeManagerBackendConnection saveManagerBackendConnection(OpencodeManagerBackendConnection connection) { return connection; }
         @Override public Optional<OpencodeManagerBackendConnection> findManagerBackendConnection(ContainerManagerId managerId, BackendProcessId backendProcessId) { return Optional.empty(); }
-        @Override public List<OpencodeServerProcess> findOpencodeServerProcesses(int limit) { return processes.values().stream().limit(limit).toList(); }
+        @Override
+        public List<OpencodeServerProcess> findOpencodeServerProcesses(int limit) { return processes.values().stream().limit(limit).toList(); }
+    }
+
+    /**
+     * 用于本地开发短路测试的占位 repository：抛错意味着如果服务真的去查库，
+     * 测试会立即失败，便于保证短路路径不接触数据库。
+     */
+    private static final class NoopRepository extends FakeRepository {
+        @Override
+        public OpencodeServerProcess saveOpencodeServerProcess(OpencodeServerProcess process) {
+            throw new AssertionError("local-direct 不应写库: " + process);
+        }
+        @Override
+        public UserOpencodeProcessBinding saveUserBinding(UserOpencodeProcessBinding binding) {
+            throw new AssertionError("local-direct 不应写库: " + binding);
+        }
+        @Override
+        public ExecutionNode save(ExecutionNode executionNode) {
+            throw new AssertionError("local-direct 不应写库: " + executionNode);
+        }
     }
 }

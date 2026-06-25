@@ -461,6 +461,7 @@ V10 种子数据对 F-COSS 的影响：
 
 - 默认 `test-agent.opencode.manager-control.gateway-mode=socket`（生产）：`SocketOpencodeProcessManagerGateway` 走 manager WebSocket，本地没起 manager 时 health/start 都会返回 `OPENCODE_UNAVAILABLE`，前端状态会落到 "opencode 进程健康检测失败，需要重新初始化"。
 - `application-local.yml` 默认 `gateway-mode=local`（受 `TEST_AGENT_OPENCODE_GATEWAY_MODE` 覆盖）：`LocalOpencodeProcessManagerGateway` 直连 `baseUrl` 跑 HTTP GET，`startProcess` 走占位返回；本机 127.0.0.1:4096 真的在跑 opencode server 时，前台状态会从 UNAVAILABLE 升级为 READY。
+- `local-direct` 完全短路：`application-local.yml` 默认 `test-agent.opencode.local-direct=true`（受 `TEST_AGENT_OPENCODE_LOCAL_DIRECT` 覆盖），`UserOpencodeProcessAssignmentService` 在 `status` / `initialize` / `requireReadyProcess` 三个入口跳过 database topology / user binding / manager health 校验链路，合成指向 `test-agent.opencode.local-direct-base-url`（默认 `http://127.0.0.1:4096`）的 READY 进程对象；无论 V17 种子 / 真实 opencode server / manager 状态如何，本地登录后状态接口都直接落到 READY。生产请把 `local-direct` 设回 `false`（也是 Java 字段默认值），保留 topology / health 校验。
 
 兼容策略：
 

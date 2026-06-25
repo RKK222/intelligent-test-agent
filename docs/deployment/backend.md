@@ -270,6 +270,20 @@ V17 migration（`backend/test-agent-persistence/src/main/resources/db/migration/
 
 切换生产请把 `gateway-mode` 显式设回 `socket`（默认），加载 `SocketOpencodeProcessManagerGateway` 走 manager WebSocket；切回 `local` 仅作为没有 opencode-manager 容器时的开发态占位，不替代生产部署。
 
+## 本地开发 opencode 短路模式
+
+`local` profile 同时启用 `test-agent.opencode.local-direct=true`（受 `TEST_AGENT_OPENCODE_LOCAL_DIRECT` 覆盖，默认 `true`）。该开关在 `UserOpencodeProcessAssignmentService` 的 `status` / `initialize` / `requireReadyProcess` 三个入口短路整个 topology / binding / health 校验链路，直接合成一个指向 `test-agent.opencode.local-direct-base-url`（默认 `http://127.0.0.1:4096`）的 READY 进程对象给前端。
+
+行为说明：
+
+- `status`：不查 `user_opencode_process_bindings`、不调用 `LocalOpencodeProcessManagerGateway.checkHealth`，返回 `本地开发模式：直连 http://127.0.0.1:4096`。
+- `initialize`：不查容器、不调用 `gateway.startProcess`，直接返回上述合成响应。
+- `requireReadyProcess`：不校验 binding / process 健康状态，直接返回 `node_ocp_local_direct` 的兼容 `ExecutionNode` 给 Run 启动链路。
+- 合成进程对象走 `OpencodeServerProcess` 完整校验：host/port 从 baseUrl 解析，构造的 `linuxServerId=127.0.0.1, port=4096, baseUrl=http://127.0.0.1:4096`，因此能通过 V15 CHECK 约束（`base_url = 'http://' || linux_server_id || ':' || port`）。
+- baseUrl 无法解析（空 / 非法）时回退到默认 `http://127.0.0.1:4096`，避免状态接口 500。
+
+生产部署务必保持 `local-direct=false`（也是 Java 字段的默认值），避免跳过 topology 校验引入误判。如果生产环境临时无法访问 manager，可单独把 `gateway-mode` 切到 `local`（仍走实际 HTTP 探测），但 `local-direct` 只能保留 `false`。
+
 ## 连接池配置
 
 连接池大小和借出校验可通过以下环境变量覆盖，默认值适合轻量测试和本地集成；远端 PostgreSQL 断开 idle 连接后，默认在借出连接时执行 `SELECT 1`，避免首个业务请求拿到 stale connection 后返回 500：

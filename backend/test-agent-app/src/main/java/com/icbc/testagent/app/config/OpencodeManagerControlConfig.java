@@ -2,6 +2,7 @@ package com.icbc.testagent.app.config;
 
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.observability.TraceIdSupport;
+import com.icbc.testagent.opencode.runtime.process.LocalDirectSettings;
 import com.icbc.testagent.opencode.runtime.process.OpencodeProcessHeartbeatMaintenanceService;
 import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
@@ -34,6 +35,19 @@ public class OpencodeManagerControlConfig {
                 control.getBackendStaleAfter(),
                 control.getCommandTimeout(),
                 control.getBackendDiscoveryLimit());
+    }
+
+    /**
+     * 将 app 配置中的本地开发短路开关 + baseUrl 绑定为 runtime 可注入的 settings。
+     *
+     * <p>本地开发者开启后，{@link com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService}
+     * 会跳过 database topology / binding / manager 健康检测，直接合成指向 baseUrl 的 READY 进程对象。
+     * 生产必须保持 false。
+     */
+    @Bean
+    LocalDirectSettings localDirectSettings(TestAgentRuntimeProperties properties) {
+        TestAgentRuntimeProperties.Opencode opencode = properties.getOpencode();
+        return new LocalDirectSettings(opencode.isLocalDirect(), opencode.getLocalDirectBaseUrl());
     }
 
     /**

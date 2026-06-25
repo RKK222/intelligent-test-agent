@@ -19,6 +19,8 @@ import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -27,6 +29,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -36,15 +40,19 @@ import org.springframework.stereotype.Service;
 @Service
 public class UserOpencodeProcessAssignmentService {
 
+    private static final Logger log = LoggerFactory.getLogger(UserOpencodeProcessAssignmentService.class);
     private static final String OPENCODE_AGENT_ID = "opencode";
     private static final int CONTAINER_CANDIDATE_LIMIT = 100;
     private static final String CONFIG_PATH = "/data/opencode/.config/opencode/";
+    private static final String LOCAL_DIRECT_PROCESS_ID = "ocp_local_direct";
+    private static final String LOCAL_DIRECT_CONTAINER_ID = "ctr_local_direct";
 
     private final OpencodeProcessManagementRepository repository;
     private final ExecutionNodeRepository executionNodeRepository;
     private final OpencodeProcessManagerGateway gateway;
     private final BackendJavaProcessLifecycleService backendLifecycle;
     private final OpencodeProcessHeartbeatStore heartbeatStore;
+    private final LocalDirectSettings localDirectSettings;
 
     /**
      * 注入进程管理 Repository、兼容节点 Repository 和管理进程 gateway。
@@ -60,18 +68,32 @@ public class UserOpencodeProcessAssignmentService {
     /**
      * 注入进程管理 Repository、兼容节点 Repository、管理进程 gateway 和运行进程心跳端口。
      */
-    @Autowired
     public UserOpencodeProcessAssignmentService(
             OpencodeProcessManagementRepository repository,
             ExecutionNodeRepository executionNodeRepository,
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessHeartbeatStore heartbeatStore) {
+        this(repository, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, LocalDirectSettings.disabled());
+    }
+
+    /**
+     * 注入完整依赖，包含本地开发短路模式设置；Spring 容器默认走这个构造器。
+     */
+    @Autowired
+    public UserOpencodeProcessAssignmentService(
+            OpencodeProcessManagementRepository repository,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            BackendJavaProcessLifecycleService backendLifecycle,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            LocalDirectSettings localDirectSettings) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.backendLifecycle = Objects.requireNonNull(backendLifecycle, "backendLifecycle must not be null");
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
+        this.localDirectSettings = Objects.requireNonNull(localDirectSettings, "localDirectSettings must not be null");
     }
 
     /**
@@ -80,6 +102,9 @@ public class UserOpencodeProcessAssignmentService {
     public UserOpencodeProcessStatusResponse status(UserId userId, String agentId, String traceId) {
         validateAgent(agentId);
         Instant now = Instant.now();
+        if (localDirectSettings.enabled()) {
+            return localDirectStatus(userId, now, traceId);
+        }
         Optional<UserOpencodeProcessBinding> binding = repository.findUserBinding(userId, OPENCODE_AGENT_ID);
         if (binding.isEmpty()) {
             return hasInitializableContainer()
@@ -112,6 +137,11 @@ public class UserOpencodeProcessAssignmentService {
     public UserOpencodeProcessStatusResponse initialize(UserId userId, String agentId, String traceId) {
         validateAgent(agentId);
         Instant now = Instant.now();
+        if (localDirectSettings.enabled()) {
+            log.info("本地开发短路模式：跳过 gateway 拉起与 topology 校验，直接返回合成 READY userId={} baseUrl={}",
+                    userId == null ? null : userId.value(), localDirectSettings.baseUrl());
+            return localDirectStatus(userId, now, traceId);
+        }
         Optional<UserOpencodeProcessBinding> existingBinding = repository.findUserBinding(userId, OPENCODE_AGENT_ID);
         Optional<OpencodeServerProcess> existingProcess = existingBinding.flatMap(binding -> activeProcess(binding).or(() ->
                 repository.findOpencodeServerProcessById(binding.processId())));
@@ -183,6 +213,10 @@ public class UserOpencodeProcessAssignmentService {
     public UserOpencodeProcessAssignment requireReadyProcess(UserId userId, String agentId, String traceId) {
         validateAgent(agentId);
         Instant now = Instant.now();
+        if (localDirectSettings.enabled()) {
+            OpencodeServerProcess process = synthesizeLocalDirectProcess(userId, now, traceId);
+            return new UserOpencodeProcessAssignment(projectExecutionNode(process, now, traceId));
+        }
         UserOpencodeProcessBinding binding = repository.findUserBinding(userId, OPENCODE_AGENT_ID)
                 .filter(item -> item.status() == UserOpencodeProcessBindingStatus.ACTIVE)
                 .orElseThrow(() -> unavailableException("请先初始化 opencode 进程"));
@@ -313,6 +347,70 @@ public class UserOpencodeProcessAssignmentService {
                 now,
                 now,
                 traceId);
+    }
+
+    /**
+     * 本地开发短路：合成指向 baseUrl 的 READY 状态响应。
+     *
+     * <p>不写库，不调用 gateway，不校验 topology / binding / health。生产配置
+     * {@link LocalDirectSettings#enabled()}=false 时该方法不会被触发。
+     */
+    private UserOpencodeProcessStatusResponse localDirectStatus(UserId userId, Instant now, String traceId) {
+        OpencodeServerProcess process = synthesizeLocalDirectProcess(userId, now, traceId);
+        return ready(process, "本地开发模式：直连 " + localDirectSettings.baseUrl(), now);
+    }
+
+    /**
+     * 本地开发短路：构造一个满足 {@link OpencodeServerProcess} 校验的合成进程对象。
+     */
+    private OpencodeServerProcess synthesizeLocalDirectProcess(UserId userId, Instant now, String traceId) {
+        String baseUrl = localDirectSettings.baseUrl();
+        ParsedBaseUrl parsed = parseBaseUrl(baseUrl);
+        return new OpencodeServerProcess(
+                new OpencodeProcessId(LOCAL_DIRECT_PROCESS_ID),
+                userId == null ? new UserId("usr_local_direct") : userId,
+                new LinuxServerId(parsed.host()),
+                new OpencodeContainerId(LOCAL_DIRECT_CONTAINER_ID),
+                parsed.port(),
+                0L,
+                "http://" + parsed.host() + ":" + parsed.port(),
+                OpencodeServerProcessStatus.RUNNING,
+                "/data/opencode/session/" + parsed.port(),
+                CONFIG_PATH,
+                now,
+                now,
+                "local-direct",
+                now,
+                now,
+                traceId);
+    }
+
+    /**
+     * 解析 baseUrl，提取 host 与 port；如果解析失败则回退到默认 127.0.0.1:4096。
+     */
+    private ParsedBaseUrl parseBaseUrl(String baseUrl) {
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return new ParsedBaseUrl("127.0.0.1", 4096);
+        }
+        try {
+            URI uri = new URI(baseUrl);
+            String host = uri.getHost();
+            int port = uri.getPort();
+            if (host == null || host.isBlank() || port < 1 || port > 65535) {
+                return new ParsedBaseUrl("127.0.0.1", 4096);
+            }
+            return new ParsedBaseUrl(host, port);
+        } catch (URISyntaxException exception) {
+            log.warn("local-direct baseUrl 解析失败，回退默认 127.0.0.1:4096 value={} message={}",
+                    baseUrl, exception.getMessage());
+            return new ParsedBaseUrl("127.0.0.1", 4096);
+        }
+    }
+
+    /**
+     * 解析后的 host/port 简单包装。
+     */
+    private record ParsedBaseUrl(String host, int port) {
     }
 
     private UserOpencodeProcessStatusResponse ready(OpencodeServerProcess process, String message, Instant checkedAt) {

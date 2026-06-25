@@ -30,7 +30,7 @@
 - `config.TestAgentRuntimeProperties`：运行时配置绑定。
 - `config.DatabaseMigrationRunner`：启动时执行 `classpath:db/migration`，确保空库先完成 Flyway migration。
 - `config.ExecutionNodeSeeder`：从配置 seed opencode execution node。
-- `config.OpencodeManagerControlConfig`：绑定 manager 控制面 token、后端实例直连地址、Linux server ID、心跳和命令超时，并启动后端实例注册/心跳。
+- `config.OpencodeManagerControlConfig`：绑定 manager 控制面 token、后端实例直连地址、Linux server ID、心跳和命令超时，启动后端实例注册/心跳，并把 `test-agent.opencode.local-direct` / `local-direct-base-url` 绑成 runtime 的 `LocalDirectSettings`（`local` profile 默认开启短路）。
 - `config.OpencodeNodesHealthIndicator`、`config.RedisOptionalHealthIndicator`：运行态健康检查。
 - `config.RuntimeJsonConfig`：应用运行态共享 Jackson 配置。
 - `log4j2-spring.xml`：Log4j2 控制台日志配置，默认输出 `key=value` 结构化字段并对 message、thread 和 traceId 做 CRLF 编码。
@@ -50,7 +50,7 @@
 ## 测试覆盖
 
 - `AppModuleBoundaryTest` 保证 app 模块不回流 workspace、session、run、runtime、terminal、web 等业务包。
-- `TestAgentRuntimePropertiesBindingTest` 覆盖默认值、local/test/prod profile 配置绑定、目录选择根、终端安全阈值、Redis、opencode 节点和 manager 控制面配置。
+- `TestAgentRuntimePropertiesBindingTest` 覆盖默认值、local/test/prod profile 配置绑定、目录选择根、终端安全阈值、Redis、opencode 节点、manager 控制面 gateway-mode 与本地短路开关（`local-direct` / `local-direct-base-url`）。
 - `ExecutionNodeSeederTest` 覆盖启动时从配置 seed opencode execution node。
 - `OpencodeNodesHealthIndicatorTest` 覆盖全部节点可用时 UP、节点异常时 DOWN，且健康详情只暴露安全错误类别。
 - `RedisOptionalHealthIndicatorTest` 覆盖 Redis 未启用时返回 UP/disabled。

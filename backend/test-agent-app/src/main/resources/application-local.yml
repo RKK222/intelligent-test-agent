@@ -64,6 +64,11 @@ test-agent:
       backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:30s}
       command-timeout: ${TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT:10s}
       backend-discovery-limit: ${TEST_AGENT_BACKEND_DISCOVERY_LIMIT:100}
+    # 本地开发短路：直接返回合成 READY，跳过 database topology / binding / health。
+    # 任何调用方都不会被 manager / V17 容器状态阻塞，默认连 127.0.0.1:4096。
+    # production profile 默认 false（见 TestAgentRuntimeProperties.Opencode.localDirect 默认值）。
+    local-direct: ${TEST_AGENT_OPENCODE_LOCAL_DIRECT:true}
+    local-direct-base-url: ${TEST_AGENT_OPENCODE_BASE_URL:http://127.0.0.1:4096}
     nodes:
       - id: ${TEST_AGENT_OPENCODE_NODE_ID:node_local_opencode}
         base-url: ${TEST_AGENT_OPENCODE_BASE_URL:http://127.0.0.1:4096}

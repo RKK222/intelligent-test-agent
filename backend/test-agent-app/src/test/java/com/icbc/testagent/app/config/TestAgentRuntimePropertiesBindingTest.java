@@ -169,6 +169,46 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
+    void opencodeLocalDirectDefaultsAreFalseAnd1270014096() {
+        // 不显式配置时短路默认关闭，baseUrl 回退默认 127.0.0.1:4096，
+        // 避免生产环境被误启用导致 topology 校验被跳过。
+        contextRunner.run(context -> {
+            TestAgentRuntimeProperties.Opencode opencode = context
+                    .getBean(TestAgentRuntimeProperties.class)
+                    .getOpencode();
+            assertThat(opencode.isLocalDirect()).isFalse();
+            assertThat(opencode.getLocalDirectBaseUrl()).isEqualTo("http://127.0.0.1:4096");
+        });
+    }
+
+    @Test
+    void opencodeLocalDirectBindsFromPropertiesAndNormalizesBlankBaseUrl() {
+        contextRunner
+                .withPropertyValues(
+                        "test-agent.opencode.local-direct=true",
+                        "test-agent.opencode.local-direct-base-url=http://opencode-dev.example.internal:5099")
+                .run(context -> {
+                    TestAgentRuntimeProperties.Opencode opencode = context
+                            .getBean(TestAgentRuntimeProperties.class)
+                            .getOpencode();
+                    assertThat(opencode.isLocalDirect()).isTrue();
+                    assertThat(opencode.getLocalDirectBaseUrl()).isEqualTo("http://opencode-dev.example.internal:5099");
+                });
+        // baseUrl 为空时回退到默认 127.0.0.1:4096，避免合成进程构造失败。
+        contextRunner
+                .withPropertyValues(
+                        "test-agent.opencode.local-direct=true",
+                        "test-agent.opencode.local-direct-base-url=  ")
+                .run(context -> {
+                    TestAgentRuntimeProperties.Opencode opencode = context
+                            .getBean(TestAgentRuntimeProperties.class)
+                            .getOpencode();
+                    assertThat(opencode.isLocalDirect()).isTrue();
+                    assertThat(opencode.getLocalDirectBaseUrl()).isEqualTo("http://127.0.0.1:4096");
+                });
+    }
+
+    @Test
     void testProfileBindsExternalDatabaseAndOpencodeNode() {
         profileContextRunner
                 .withPropertyValues(
