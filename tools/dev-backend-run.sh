@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 
 usage() {
   cat <<'USAGE'
-Usage: tools/dev-backend-run.sh [--profile local|test] [--env-file <path>] [--help]
+Usage: tools/dev-backend-run.sh [--profile local|test|guo] [--env-file <path>] [--help]
 
 Start the backend test-agent-app executable jar with environment variables
 loaded from an untracked dotenv file. The script parses KEY=VALUE lines and
@@ -14,9 +14,10 @@ does not source the file, so dotenv content is not executed as shell code.
 Defaults:
   --profile local  reads .env.local
   --profile test   reads .env.test
+  --profile guo    reads .env.guo
 
 Options:
-  --profile   Spring profile to run, local or test. Default: local.
+  --profile   Spring profile to run, local, test, or guo. Default: local.
   --env-file  Override the dotenv file path.
   --help      Show this help.
 USAGE
@@ -56,10 +57,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${profile}" in
-  local|test)
+  local|test|guo)
     ;;
   *)
-    echo "Unsupported profile: ${profile}. Expected local or test." >&2
+    echo "Unsupported profile: ${profile}. Expected local, test, or guo." >&2
     exit 2
     ;;
 esac

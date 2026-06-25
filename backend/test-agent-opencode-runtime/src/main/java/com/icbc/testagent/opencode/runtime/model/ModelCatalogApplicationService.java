@@ -226,8 +226,9 @@ public class ModelCatalogApplicationService {
                 models.put(model.modelId(), toOpenCodeModelConfig(model));
             }
         } else {
-            for (ModelCatalogProperties.Model model : provider.getModels()) {
-                models.put(model.getId(), toOpenCodeModelConfig(model));
+            for (Map<String, Object> model : externalModels()) {
+                String modelId = String.valueOf(model.get("id"));
+                models.put(modelId, toOpenCodeModelConfig(modelId, String.valueOf(model.getOrDefault("name", modelId))));
             }
         }
         Map<String, Object> options = new LinkedHashMap<>();
@@ -269,6 +270,14 @@ public class ModelCatalogApplicationService {
         payload.put("tool_call", true);
         payload.put("modalities", Map.of("input", model.getInput(), "output", List.of("text")));
         payload.put("limit", Map.of("context", model.getContextLimit(), "output", model.getOutputLimit()));
+        return payload;
+    }
+
+    private Map<String, Object> toOpenCodeModelConfig(String modelId, String name) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("name", blankToDefault(name, modelId));
+        payload.put("tool_call", true);
+        payload.put("modalities", Map.of("input", List.of("text"), "output", List.of("text")));
         return payload;
     }
 

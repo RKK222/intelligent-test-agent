@@ -17,6 +17,7 @@ LOG_DIR="${ROOT_DIR}/.tmp/dev-services"
 BACKEND_SCREEN_SESSION="test-agent-backend"
 FRONTEND_SCREEN_SESSION="test-agent-frontend"
 OPENCODE_SCREEN_SESSION="test-agent-opencode"
+OPENCODE_MANAGER_SCREEN_SESSION="test-agent-opencode-manager"
 
 profile="local"
 env_file=""
@@ -25,7 +26,7 @@ skip_frontend_build=false
 
 usage() {
   cat <<'USAGE'
-Usage: ./restart-dev-services.sh [--profile local|test] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--help]
+Usage: ./restart-dev-services.sh [--profile local|test|guo] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--help]
 
 Compile and restart the local platform backend and frontend services.
 
@@ -35,10 +36,10 @@ Defaults:
   backend URL:     TEST_AGENT_BASE_URL or http://127.0.0.1:8080
   frontend URL:    TEST_AGENT_FRONTEND_URL or http://127.0.0.1:3000
   logs:            .tmp/dev-services/
-  screen sessions: test-agent-backend, test-agent-frontend when screen is available
+  screen sessions: test-agent-backend, test-agent-frontend, test-agent-opencode-manager when screen is available
 
 Options:
-  --profile              Backend Spring profile, local or test. Default: local.
+  --profile              Backend Spring profile, local, test, or guo. Default: local.
   --env-file             Backend dotenv file. Relative paths are resolved from the repo root.
   --log-dir              Service log directory. Relative paths are resolved from the repo root.
   --skip-backend-build   Restart backend without running Maven package first.
@@ -94,10 +95,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "${profile}" in
-  local|test)
+  local|test|guo)
     ;;
   *)
-    echo "Unsupported profile: ${profile}. Expected local or test." >&2
+    echo "Unsupported profile: ${profile}. Expected local, test, or guo." >&2
     exit 2
     ;;
 esac
@@ -214,6 +215,24 @@ is_local_opencode_url() {
   [[ "${url}" == http://127.0.0.1:* || "${url}" == http://localhost:* || "${url}" == http://[::1]:* ]]
 }
 
+should_start_opencode_manager() {
+  case "${TEST_AGENT_START_OPENCODE_MANAGER:-auto}" in
+    true|TRUE|1|yes|YES)
+      return 0
+      ;;
+    false|FALSE|0|no|NO)
+      return 1
+      ;;
+    auto|"")
+      [[ -n "${TEST_AGENT_OPENCODE_MANAGER_TOKEN:-}" ]] && is_local_opencode_url "${backend_url}"
+      ;;
+    *)
+      echo "Invalid TEST_AGENT_START_OPENCODE_MANAGER: ${TEST_AGENT_START_OPENCODE_MANAGER}" >&2
+      exit 1
+      ;;
+  esac
+}
+
 should_start_opencode() {
   case "${TEST_AGENT_START_OPENCODE:-auto}" in
     true|TRUE|1|yes|YES)
@@ -223,6 +242,9 @@ should_start_opencode() {
       return 1
       ;;
     auto|"")
+      if should_start_opencode_manager; then
+        return 1
+      fi
       is_local_opencode_url "${TEST_AGENT_OPENCODE_BASE_URL:-}"
       ;;
     *)
@@ -250,6 +272,13 @@ opencode_pids() {
   port="$(url_port "${TEST_AGENT_OPENCODE_BASE_URL}")"
   ps -eo pid=,command= | awk -v port="${port}" '
     index($0, "opencode serve") && index($0, "--port " port) { print $1 }
+  '
+}
+
+opencode_manager_pids() {
+  ps -eo pid=,command= | awk -v root="${ROOT_DIR}" '
+    index($0, root "/opencode-manager/bin/opencode-manager run") ||
+    index($0, "./opencode-manager/bin/opencode-manager run") { print $1 }
   '
 }
 
@@ -387,6 +416,15 @@ build_frontend() {
   (cd "${FRONTEND_DIR}" && corepack pnpm build)
 }
 
+build_opencode_manager() {
+  if ! should_start_opencode_manager; then
+    return
+  fi
+  require_command go
+  echo "Building opencode-manager: go build"
+  (cd "${ROOT_DIR}/opencode-manager" && go build -o bin/opencode-manager ./cmd/opencode-manager)
+}
+
 start_backend() {
   if [[ -z "${TEST_AGENT_OPENCODE_BASE_URL:-}" ]]; then
     echo "TEST_AGENT_OPENCODE_BASE_URL is required in ${env_file}." >&2
@@ -409,7 +447,7 @@ start_backend() {
       echo "$!" >"${LOG_DIR}/backend.pid"
     )
   fi
-  wait_until_http_ok "backend" "${backend_url}/actuator/health" "${LOG_DIR}/backend.log" 90
+  wait_until_http_ok "backend" "${backend_url}/actuator/health/readiness" "${LOG_DIR}/backend.log" 90
   backend_pids >"${LOG_DIR}/backend.pid"
 }
 
@@ -449,6 +487,71 @@ start_opencode() {
   fi
   wait_until_http_ok "opencode" "${config_url}" "${LOG_DIR}/opencode.log" 60
   opencode_pids >"${LOG_DIR}/opencode.pid"
+}
+
+start_opencode_manager() {
+  if ! should_start_opencode_manager; then
+    echo "Skipping opencode-manager startup."
+    return
+  fi
+
+  local bin port_start port_end max_processes manager_id container_id linux_server_id manager_state_dir manager_session_root opencode_config_dir discovery_url version
+  bin="$(opencode_bin)"
+  if [[ -z "${bin}" || ! -x "${bin}" ]]; then
+    echo "opencode binary not found or not executable. Set TEST_AGENT_OPENCODE_BIN in ${env_file}." >&2
+    exit 1
+  fi
+
+  port_start="${OPENCODE_MANAGER_PORT_START:-$(url_port "${TEST_AGENT_OPENCODE_BASE_URL:-http://127.0.0.1:4096}")}"
+  port_end="${OPENCODE_MANAGER_PORT_END:-$((port_start + 9))}"
+  max_processes="${OPENCODE_MANAGER_MAX_PROCESSES:-$((port_end - port_start + 1))}"
+  manager_id="${OPENCODE_MANAGER_ID:-mgr_local_opencode}"
+  container_id="${OPENCODE_MANAGER_CONTAINER_ID:-ctr_local_opencode}"
+  linux_server_id="${OPENCODE_MANAGER_LINUX_SERVER_ID:-127.0.0.1}"
+  manager_state_dir="${OPENCODE_MANAGER_STATE_DIR:-${LOG_DIR}/opencode-manager-state}"
+  manager_session_root="${OPENCODE_SESSION_ROOT:-${LOG_DIR}/opencode-manager-session}"
+  opencode_config_dir="${OPENCODE_CONFIG_DIR:-${HOME}/.config/opencode/}"
+  discovery_url="${OPENCODE_MANAGER_BACKEND_DISCOVERY_URL:-${backend_url%/}/api/internal/platform/opencode-runtime/manager-backends}"
+  version="$("${bin}" --version 2>/dev/null || true)"
+
+  mkdir -p "${LOG_DIR}" "${manager_state_dir}" "${manager_session_root}"
+  echo "Starting opencode-manager for ${container_id} (${version:-opencode unknown}). Logs: ${LOG_DIR}/opencode-manager.log"
+  : >"${LOG_DIR}/opencode-manager.log"
+  if command -v screen >/dev/null 2>&1; then
+    local manager_cmd
+    printf -v manager_cmd 'cd %q && export OPENCODE_MANAGER_CONTAINER_ID=%q OPENCODE_MANAGER_LINUX_SERVER_ID=%q OPENCODE_MANAGER_PORT_START=%q OPENCODE_MANAGER_PORT_END=%q OPENCODE_MANAGER_MAX_PROCESSES=%q OPENCODE_MANAGER_ID=%q OPENCODE_MANAGER_BACKEND_DISCOVERY_URL=%q OPENCODE_MANAGER_TOKEN="$TEST_AGENT_OPENCODE_MANAGER_TOKEN" OPENCODE_MANAGER_STATE_DIR=%q OPENCODE_SESSION_ROOT=%q OPENCODE_CONFIG_DIR=%q OPENCODE_BIN=%q OPENCODE_ALLOWED_CORS=%q OPENCODE_MANAGER_DISCOVERY_INTERVAL="${OPENCODE_MANAGER_DISCOVERY_INTERVAL:-2s}" OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-2s}" OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-1s}" && exec ./opencode-manager/bin/opencode-manager run >>%q 2>&1' \
+      "${ROOT_DIR}" "${container_id}" "${linux_server_id}" "${port_start}" "${port_end}" "${max_processes}" "${manager_id}" "${discovery_url}" "${manager_state_dir}" "${manager_session_root}" "${opencode_config_dir}" "${bin}" "http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}" "${LOG_DIR}/opencode-manager.log"
+    screen -dmS "${OPENCODE_MANAGER_SCREEN_SESSION}" bash -lc "${manager_cmd}"
+  else
+    (
+      cd "${ROOT_DIR}"
+      export OPENCODE_MANAGER_CONTAINER_ID="${container_id}"
+      export OPENCODE_MANAGER_LINUX_SERVER_ID="${linux_server_id}"
+      export OPENCODE_MANAGER_PORT_START="${port_start}"
+      export OPENCODE_MANAGER_PORT_END="${port_end}"
+      export OPENCODE_MANAGER_MAX_PROCESSES="${max_processes}"
+      export OPENCODE_MANAGER_ID="${manager_id}"
+      export OPENCODE_MANAGER_BACKEND_DISCOVERY_URL="${discovery_url}"
+      export OPENCODE_MANAGER_TOKEN="${TEST_AGENT_OPENCODE_MANAGER_TOKEN}"
+      export OPENCODE_MANAGER_STATE_DIR="${manager_state_dir}"
+      export OPENCODE_SESSION_ROOT="${manager_session_root}"
+      export OPENCODE_CONFIG_DIR="${opencode_config_dir}"
+      export OPENCODE_BIN="${bin}"
+      export OPENCODE_ALLOWED_CORS="http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}"
+      export OPENCODE_MANAGER_DISCOVERY_INTERVAL="${OPENCODE_MANAGER_DISCOVERY_INTERVAL:-2s}"
+      export OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-2s}"
+      export OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-1s}"
+      nohup ./opencode-manager/bin/opencode-manager run >>"${LOG_DIR}/opencode-manager.log" 2>&1 &
+      echo "$!" >"${LOG_DIR}/opencode-manager.pid"
+    )
+  fi
+  sleep 3
+  opencode_manager_pids >"${LOG_DIR}/opencode-manager.pid"
+  if [[ ! -s "${LOG_DIR}/opencode-manager.pid" ]]; then
+    echo "opencode-manager failed to stay running." >&2
+    tail -n 120 "${LOG_DIR}/opencode-manager.log" >&2 || true
+    exit 1
+  fi
 }
 
 start_frontend() {
@@ -517,6 +620,7 @@ echo "Builds run before stopping existing services; failed builds leave current 
 
 build_backend
 build_frontend
+build_opencode_manager
 
 old_frontend_pids=()
 # PID 输出只包含数字，使用普通 word splitting 避免 process substitution 被 sh 预解析时报错。
@@ -533,6 +637,13 @@ old_opencode_pids=()
 if should_start_opencode; then
   for pid in $(opencode_pids); do
     old_opencode_pids+=("${pid}")
+  done
+fi
+
+old_opencode_manager_pids=()
+if should_start_opencode_manager; then
+  for pid in $(opencode_manager_pids); do
+    old_opencode_manager_pids+=("${pid}")
   done
 fi
 
@@ -555,12 +666,21 @@ if should_start_opencode; then
     stop_pids "opencode"
   fi
 fi
+if should_start_opencode_manager; then
+  if [[ "${#old_opencode_manager_pids[@]}" -gt 0 ]]; then
+    stop_pids "opencode-manager" "${old_opencode_manager_pids[@]}"
+  else
+    stop_pids "opencode-manager"
+  fi
+fi
 stop_screen_session "${FRONTEND_SCREEN_SESSION}"
 stop_screen_session "${BACKEND_SCREEN_SESSION}"
 stop_screen_session "${OPENCODE_SCREEN_SESSION}"
+stop_screen_session "${OPENCODE_MANAGER_SCREEN_SESSION}"
 
 start_opencode
 start_backend
+start_opencode_manager
 start_frontend
 
 echo "Restart complete."
@@ -568,5 +688,5 @@ echo "Backend:  ${backend_url}"
 echo "Frontend: ${frontend_url}"
 echo "Logs:     ${LOG_DIR}"
 if command -v screen >/dev/null 2>&1; then
-  echo "Screen:   ${OPENCODE_SCREEN_SESSION}, ${BACKEND_SCREEN_SESSION}, ${FRONTEND_SCREEN_SESSION}"
+  echo "Screen:   ${OPENCODE_SCREEN_SESSION}, ${OPENCODE_MANAGER_SCREEN_SESSION}, ${BACKEND_SCREEN_SESSION}, ${FRONTEND_SCREEN_SESSION}"
 fi

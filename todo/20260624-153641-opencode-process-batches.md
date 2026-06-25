@@ -68,7 +68,7 @@
 - 修改文件：
   - `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/node/*`
   - `backend/test-agent-domain/src/main/java/com/icbc/testagent/domain/agent/*`
-  - `backend/test-agent-persistence/src/main/resources/db/migration/V10__create_opencode_process_management_tables.sql`
+  - `backend/test-agent-persistence/src/main/resources/db/migration/V14__create_opencode_process_management_tables.sql`
   - `backend/test-agent-persistence/src/main/java/com/icbc/testagent/persistence/*`
   - `backend/test-agent-persistence/src/test/java/com/icbc/testagent/persistence/JdbcRepositoryIntegrationTest.java`
   - `backend/test-agent-domain/README.md`

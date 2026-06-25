@@ -171,11 +171,12 @@ docker build -f backend/Dockerfile -t test-agent-backend:local backend
 ```bash
 tools/dev-backend-run.sh
 tools/dev-backend-run.sh --profile test
+tools/dev-backend-run.sh --profile guo
 ```
 
-脚本默认读取 `.env.local`，`--profile test` 读取 `.env.test`，也可以通过 `--env-file <path>` 覆盖。脚本只解析 `KEY=VALUE` 行，不执行 dotenv 文件内容；生产容器仍通过外部环境变量或配置中心注入配置。
+脚本默认读取 `.env.local`，`--profile test` 读取 `.env.test`，`--profile guo` 读取 `.env.guo`，也可以通过 `--env-file <path>` 覆盖。脚本只解析 `KEY=VALUE` 行，不执行 dotenv 文件内容；生产容器仍通过外部环境变量或配置中心注入配置。
 
-`tools/dev-backend-run.sh` 是本地启动后端的统一入口：默认读取仓库根目录未跟踪的 `.env.local` 并启动 `local` profile；传入 `--profile test` 时读取 `.env.test` 并启动 `test` profile。`.env.local` 和 `.env.test` 已被 `.gitignore` 排除，真实数据库密码只允许写入这些本机文件。
+`tools/dev-backend-run.sh` 是本地启动后端的统一入口：默认读取仓库根目录未跟踪的 `.env.local` 并启动 `local` profile；传入 `--profile test` 时读取 `.env.test` 并启动 `test` profile，传入 `--profile guo` 时读取 `.env.guo` 并启动 `guo` profile。`.env.local`、`.env.test` 和 `.env.guo` 已被 `.gitignore` 排除，真实数据库密码只允许写入这些本机文件。
 
 其他本地脚本：
 

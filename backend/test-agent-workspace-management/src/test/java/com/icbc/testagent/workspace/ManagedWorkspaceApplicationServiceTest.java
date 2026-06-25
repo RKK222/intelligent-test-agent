@@ -397,6 +397,14 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override public void unlinkRepository(ApplicationId appId, CodeRepositoryId repositoryId) {}
         @Override public List<ApplicationWorkspace> findWorkspaces(ApplicationId appId) { return List.of(workspace); }
         @Override public Optional<ApplicationWorkspace> findWorkspace(ApplicationWorkspaceId workspaceId) { return Optional.of(workspace); }
+        @Override public Optional<ApplicationWorkspace> findWorkspaceByLocation(ApplicationId appId, CodeRepositoryId repositoryId, String branch, String directoryPath) {
+            return workspace.appId().equals(appId)
+                    && workspace.repositoryId().equals(repositoryId)
+                    && workspace.branch().equals(branch)
+                    && workspace.directoryPath().equals(directoryPath)
+                    ? Optional.of(workspace)
+                    : Optional.empty();
+        }
         @Override public ApplicationWorkspace saveWorkspace(ApplicationWorkspace workspace) { return workspace; }
         @Override public ApplicationWorkspace updateWorkspace(ApplicationWorkspace workspace) { return workspace; }
         @Override public void deleteWorkspace(ApplicationWorkspaceId workspaceId) {}
