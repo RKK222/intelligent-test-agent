@@ -5,7 +5,9 @@ spring:
   datasource:
     druid:
       driver-class-name: org.postgresql.Driver
-      url: jdbc:postgresql://${TEST_AGENT_LOCAL_DB_HOST:127.0.0.1}:${TEST_AGENT_LOCAL_DB_PORT:15432}/${TEST_AGENT_LOCAL_DB_NAME:test_agent}
+      # 远程 PostgreSQL 关闭了 SSL，但 JDBC 默认会发起 SSL 协商，对端直接断开导致 EOFException。
+      # 显式 sslmode=disable 跳过协商，仅用于 local profile。
+      url: jdbc:postgresql://${TEST_AGENT_LOCAL_DB_HOST:127.0.0.1}:${TEST_AGENT_LOCAL_DB_PORT:15432}/${TEST_AGENT_LOCAL_DB_NAME:test_agent}?sslmode=disable
       username: ${TEST_AGENT_LOCAL_DB_USERNAME:test_agent}
       password: ${TEST_AGENT_LOCAL_DB_PASSWORD:test_agent}
   flyway:
