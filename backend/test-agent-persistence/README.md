@@ -19,7 +19,7 @@
 - Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用配置管理、应用版本工作区和个人工作区等持久化。
 - Flyway migration，包含 PostgreSQL 16 所需的 Flyway database support。
 - Repository 实现和数据库映射。
-- Redis 限流、幂等或缓存能力的可选适配。
+- Redis 限流、幂等、缓存或运行心跳能力的可选适配。
 
 ## 已有实现
 
@@ -40,6 +40,7 @@
 - `JdbcConfigurationManagementRepository`：实现配置管理表的应用只读查询、成员逻辑删除、仓库关联、工作空间和个人 SSH key 元数据持久化。
 - `JdbcManagedWorkspaceRepository`：实现应用版本工作区、个人工作区、最近使用偏好和同步审计持久化。
 - `JdbcOpencodeProcessManagementRepository`：实现 opencode 用户进程管理拓扑、用户进程、用户绑定持久化，以及超级管理员运行管理页需要的拓扑列表、连接列表、进程分页筛选和绑定关联查询。
+- `RedisOpencodeProcessHeartbeatStore`：在 Redis 启用时保存 Java 后端和 opencode server 进程运行心跳，心跳 key 5 分钟 TTL，供运行管理页跨后端实例识别活进程；Redis 未启用时由 `NoopOpencodeProcessHeartbeatStore` 降级。
 - RunEvent append-only：持久化层分配 `eventId` 和同一 run 内单调递增 `seq`，并发追加时通过 `(run_id, seq)` 唯一约束冲突后重读重试，支持 `runId + lastSeq` 增量读取。
 
 ## 测试环境 PostgreSQL

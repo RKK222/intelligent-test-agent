@@ -13,7 +13,7 @@
 ## 主要职责
 
 - 启动 `TestAgentApplication`，扫描 `com.icbc.testagent` 下的后端组件。
-- 承载运行时 profile、配置绑定、日志配置、Actuator health、Flyway migration 入口和 opencode execution node seed。
+- 承载运行时 profile、配置绑定、日志配置、Actuator health、Flyway migration 入口、opencode execution node seed，以及 Java/opencode 运行心跳周期任务装配。
 - 组装 `test-agent-api`、业务模块、persistence、event、opencode-client 等 library jar，形成单一部署包。
 - 保持生产容器只运行 Java 进程；PostgreSQL、Redis 和 opencode server 均由外部配置注入。
 
@@ -40,6 +40,7 @@
 ## 本地与生产 profile
 
 - `application-local.yml`：默认连接 `127.0.0.1:15432/test_agent`，用于个人离线开发备用的 `deploy/local/docker-compose.yml`。
+- 根目录 `restart-dev-services.sh` 读取 `.env.local` 后，若未配置 `TEST_AGENT_LINUX_SERVER_ID`、`TEST_AGENT_BACKEND_LISTEN_URL` 或 `OPENCODE_MANAGER_LINUX_SERVER_ID`，会自动使用默认路由网卡 IPv4 注册本机运行拓扑。
 - `application-test.yml`：数据库使用 `TEST_AGENT_TEST_DB_*`，opencode node 使用 `TEST_AGENT_OPENCODE_*`，均指向外部研发测试服务。
 - `application-prod.yml`：数据库、API token、CORS、Redis 和 opencode baseUrl 均通过环境变量注入，不提供真实密钥默认值。
 - Workspace 目录选择器允许根目录通过 `test-agent.workspace-picker.allowed-roots` / `TEST_AGENT_WORKSPACE_PICKER_ROOTS` 配置，逗号分隔，默认 `${user.home}/workspace`。

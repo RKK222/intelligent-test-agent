@@ -214,6 +214,7 @@ final class RuntimeManagementDtos {
     record OpencodeProcessResponse(
             String processId,
             String userId,
+            String username,
             String linuxServerId,
             String containerId,
             int port,
@@ -238,6 +239,7 @@ final class RuntimeManagementDtos {
             return new OpencodeProcessResponse(
                     process.processId().value(),
                     process.userId().value(),
+                    row.username().orElse(process.userId().value()),
                     process.linuxServerId().value(),
                     process.containerId().value(),
                     process.port(),

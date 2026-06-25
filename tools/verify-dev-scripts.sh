@@ -39,7 +39,9 @@ trap cleanup EXIT
 mkdir -p "${tmp_dir}/bin" "${tmp_dir}/logs"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/ps"
 printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "-list" ]]; then exit 1; fi\nexit 0\n' >"${tmp_dir}/bin/screen"
-chmod +x "${tmp_dir}/bin/ps" "${tmp_dir}/bin/screen"
+printf '#!/usr/bin/env bash\necho "   interface: en0"\n' >"${tmp_dir}/bin/route"
+printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "getifaddr" && "${2:-}" == "en0" ]]; then echo "10.8.0.115"; exit 0; fi\nexit 1\n' >"${tmp_dir}/bin/ipconfig"
+chmod +x "${tmp_dir}/bin/ps" "${tmp_dir}/bin/screen" "${tmp_dir}/bin/route" "${tmp_dir}/bin/ipconfig"
 printf 'PLACEHOLDER=1\n' >"${tmp_dir}/env.local"
 
 set +e
@@ -63,6 +65,14 @@ fi
 if [[ "${restart_output}" != *"TEST_AGENT_OPENCODE_BASE_URL is required"* ]]; then
   echo "${restart_output}" >&2
   fail "restart script did not reach backend startup precondition"
+fi
+if [[ "${restart_output}" != *"Defaulting TEST_AGENT_LINUX_SERVER_ID to detected local IPv4: 10.8.0.115"* ]]; then
+  echo "${restart_output}" >&2
+  fail "restart script did not default TEST_AGENT_LINUX_SERVER_ID to detected local IPv4"
+fi
+if [[ "${restart_output}" != *"Defaulting TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4: http://10.8.0.115:8080"* ]]; then
+  echo "${restart_output}" >&2
+  fail "restart script did not default TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4"
 fi
 
 echo "Development script verification passed."

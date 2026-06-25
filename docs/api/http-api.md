@@ -742,7 +742,7 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
 
 ### opencode runtime 运行管理 API
 
-运行管理 API 是只读高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`，非法分页或状态参数返回 `VALIDATION_ERROR`。本接口不直连 opencode server 或 manager，不触发 stop/restart/health 命令，只读取数据库中的最新运行态快照。
+运行管理 API 是只读高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`，非法分页或状态参数返回 `VALIDATION_ERROR`。本接口不触发 stop/restart 操作；管理页展示当前活跃的 Java 后端、opencode server、容器和 manager 运行态，僵死或 5 分钟内没有心跳/健康确认的进程不进入响应。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -754,10 +754,11 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
 |---|---|
 | `page` | opencode server 进程分页页码，默认 `1`。 |
 | `size` | opencode server 进程分页大小，默认 `20`，上限沿用平台 `PageRequest` 的 `200`。 |
-| `status` | 可选进程状态：`STARTING`、`RUNNING`、`UNHEALTHY`、`STOPPED`、`FAILED`。 |
+| `status` | 可选进程状态；当前活进程视图只返回 `RUNNING` opencode server 进程，非 `RUNNING` 状态会返回空进程页。 |
 | `linuxServerId` | 可选 Linux 服务器 ID，当前等于服务器 IPv4。 |
 | `containerId` | 可选容器 ID。 |
-| `userId` | 可选用户 ID。 |
+| `username` | 可选用户名，运行管理页按用户名筛选和展示。 |
+| `userId` | 可选用户 ID，保留给旧客户端兼容；新客户端应使用 `username`。 |
 
 响应 `data`：
 
@@ -799,6 +800,7 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
       {
         "processId": "ocp_...",
         "userId": "usr_...",
+        "username": "wr",
         "linuxServerId": "10.8.0.21",
         "containerId": "ctr_...",
         "port": 4101,
@@ -825,7 +827,7 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
 }
 ```
 
-拓扑列表固定最多返回 500 条，避免管理页一次性读取过多连接和进程快照。`opencodeProcesses.items[]` 的 `bindingAgentId`、`bindingStatus`、`bindingUpdatedAt` 仅在该进程仍是当前用户绑定时返回，否则为 `null`。
+拓扑列表固定最多返回 500 条，避免管理页一次性读取过多连接和进程快照。Java 后端和 opencode server 进程通过 Redis 运行心跳做跨实例活跃判定；Redis 未启用时回退到数据库最近心跳/健康检查时间。后端实例注册会持续写入当前 Java 进程心跳，opencode server 由后端每 3 分钟通过 manager health 命令确认并刷新心跳，Redis 心跳 key 5 分钟过期，索引清理每 5 分钟执行一次。`opencodeProcesses.items[]` 的 `bindingAgentId`、`bindingStatus`、`bindingUpdatedAt` 仅在该进程仍是当前用户绑定时返回，否则为 `null`。
 
 `POST /api/runs` 请求体：
 

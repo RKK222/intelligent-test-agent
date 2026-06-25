@@ -6,6 +6,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicLong;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.stereotype.Service;
@@ -22,6 +24,8 @@ import reactor.core.scheduler.Schedulers;
  */
 @Service
 public class RunEventSseStreamService {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(RunEventSseStreamService.class);
 
     private final RunEventReplayService replayService;
     private final RunEventSseMapper sseMapper;
@@ -73,7 +77,10 @@ public class RunEventSseStreamService {
         if (pollInterval.isNegative() || pollInterval.isZero()) {
             throw new IllegalArgumentException("pollInterval must be positive");
         }
-        AtomicLong cursor = new AtomicLong(replayService.resolveLastSeq(lastEventId));
+        long resolvedSeq = replayService.resolveLastSeq(lastEventId);
+        LOGGER.info("SSE stream started, runId={}, lastEventId={}, resolvedSeq={}",
+                runId.value(), lastEventId, resolvedSeq);
+        AtomicLong cursor = new AtomicLong(resolvedSeq);
         Flux<ServerSentEvent<RunEventSsePayload>> durableReplay = Flux.interval(Duration.ZERO, pollInterval)
                 .onBackpressureDrop()
                 .concatMap(ignored -> Mono.fromCallable(() -> replayService.replayAfter(
@@ -82,14 +89,21 @@ public class RunEventSseStreamService {
                                 batchLimit))
                         // RunEvent 回放依赖阻塞式 Repository，单次 DB 抖动只跳过本轮轮询，不断开 SSE。
                         .subscribeOn(Schedulers.boundedElastic())
-                        .onErrorResume(error -> Mono.just(List.<RunEvent>of()))
+                        .onErrorResume(error -> {
+                            LOGGER.warn("SSE replay error, runId={}, error={}", runId.value(), error.getMessage());
+                            return Mono.just(List.<RunEvent>of());
+                        })
                         .flatMapMany(Flux::fromIterable))
                 .doOnNext(event -> cursor.set(event.seq()))
                 .map(this::toSse);
         Flux<ServerSentEvent<RunEventSsePayload>> liveEvents = liveBus.stream(runId).map(this::toLiveSse);
         Flux<ServerSentEvent<RunEventSsePayload>> remoteEvents =
                 remotePublisher.stream(runId).map(this::toLiveSse);
-        return Flux.merge(durableReplay, liveEvents, remoteEvents).distinct(this::eventId);
+        return Flux.merge(durableReplay, liveEvents, remoteEvents)
+                .distinct(this::eventId)
+                .doOnCancel(() -> LOGGER.info("SSE stream cancelled, runId={}", runId.value()))
+                .doOnError(error -> LOGGER.warn("SSE stream error, runId={}, error={}", runId.value(), error.getMessage()))
+                .doOnComplete(() -> LOGGER.debug("SSE stream completed, runId={}", runId.value()));
     }
 
     /**

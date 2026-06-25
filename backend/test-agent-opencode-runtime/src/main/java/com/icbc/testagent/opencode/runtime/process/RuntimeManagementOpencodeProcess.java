@@ -10,7 +10,17 @@ import java.util.Optional;
  */
 public record RuntimeManagementOpencodeProcess(
         OpencodeServerProcess process,
-        Optional<UserOpencodeProcessBinding> binding) {
+        Optional<UserOpencodeProcessBinding> binding,
+        Optional<String> username) {
+
+    /**
+     * 兼容只需要绑定信息的调用方；用户名由查询服务补充。
+     */
+    public RuntimeManagementOpencodeProcess(
+            OpencodeServerProcess process,
+            Optional<UserOpencodeProcessBinding> binding) {
+        this(process, binding, Optional.empty());
+    }
 
     /**
      * 复制 Optional，确保调用方不会传入 null 绑定包装。
@@ -18,5 +28,6 @@ public record RuntimeManagementOpencodeProcess(
     public RuntimeManagementOpencodeProcess {
         Objects.requireNonNull(process, "process must not be null");
         binding = binding == null ? Optional.empty() : binding;
+        username = username == null ? Optional.empty() : username;
     }
 }

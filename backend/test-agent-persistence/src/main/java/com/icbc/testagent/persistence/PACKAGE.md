@@ -30,7 +30,7 @@
 - `db/migration/V6__create_agent_session_bindings.sql`：创建通用 agent session binding 表，并从旧 opencode 映射列回填 `opencode` 绑定。
 - `db/migration/V10__add_message_and_run_usage_fields.sql`：扩展 session_messages/runs 的 run、remote message、parts、token、cost 和 active-run 索引。
 - `db/migration/V14__create_opencode_process_management_tables.sql`：创建 Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程和用户绑定表。
-- 后续可新增 SQL 查询、migration 相关适配、Redis 限流或缓存实现。
+- 后续可新增 SQL 查询、migration 相关适配、Redis 限流、缓存或运行心跳实现。
 
 ## 允许依赖
 

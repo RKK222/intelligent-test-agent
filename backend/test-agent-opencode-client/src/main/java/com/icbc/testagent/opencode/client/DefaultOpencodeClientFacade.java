@@ -9,6 +9,8 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
@@ -22,6 +24,8 @@ import reactor.util.retry.Retry;
  */
 @Service
 public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(DefaultOpencodeClientFacade.class);
 
     private final OpencodeSdkGateway gateway;
     private final OpencodeRunEventMapper eventMapper;
@@ -219,30 +223,45 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
      * 为 Mono 外部调用统一增加超时、有限重试和平台错误码映射。
      */
     private <T> Mono<T> applyPolicy(Mono<T> source, String operation, ExecutionNode node) {
+        String nodeId = node.executionNodeId().value();
+        LOGGER.debug("Opencode call started, operation={}, nodeId={}, baseUrl={}", operation, nodeId, node.baseUrl());
         Mono<T> protectedSource = source.timeout(timeout);
         if (maxRetries > 0) {
-            protectedSource = protectedSource.retryWhen(retrySpec());
+            protectedSource = protectedSource.retryWhen(retrySpec(operation, nodeId));
         }
-        return protectedSource.onErrorMap(error -> toPlatformException(error, operation, node));
+        return protectedSource
+                .doOnSuccess(result -> LOGGER.debug("Opencode call completed, operation={}, nodeId={}", operation, nodeId))
+                .onErrorMap(error -> toPlatformException(error, operation, node));
     }
 
     /**
      * 为 Flux 外部调用统一增加超时、有限重试和平台错误码映射。
      */
     private <T> Flux<T> applyPolicy(Flux<T> source, String operation, ExecutionNode node) {
+        String nodeId = node.executionNodeId().value();
+        LOGGER.debug("Opencode stream started, operation={}, nodeId={}, baseUrl={}", operation, nodeId, node.baseUrl());
         Flux<T> protectedSource = source.timeout(timeout);
         if (maxRetries > 0) {
-            protectedSource = protectedSource.retryWhen(retrySpec());
+            protectedSource = protectedSource.retryWhen(retrySpec(operation, nodeId));
         }
-        return protectedSource.onErrorMap(error -> toPlatformException(error, operation, node));
+        return protectedSource
+                .doOnNext(event -> LOGGER.trace("Opencode stream event, operation={}, nodeId={}", operation, nodeId))
+                .onErrorMap(error -> toPlatformException(error, operation, node));
     }
 
     /**
      * 创建固定间隔重试策略，只允许网络或 5xx 类错误重试。
      */
-    private Retry retrySpec() {
+    private Retry retrySpec(String operation, String nodeId) {
         return Retry.fixedDelay(maxRetries, retryBackoff)
-                .filter(this::isRetryable);
+                .filter(this::isRetryable)
+                .doBeforeRetry(signal -> LOGGER.warn(
+                        "Opencode call retrying, operation={}, nodeId={}, attempt={}/{}, error={}",
+                        operation,
+                        nodeId,
+                        signal.totalRetries() + 1,
+                        maxRetries,
+                        signal.failure().getMessage()));
     }
 
     /**
@@ -266,10 +285,14 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
             return exception;
         }
         if (current instanceof TimeoutException) {
+            LOGGER.error("Opencode call timeout, operation={}, nodeId={}, baseUrl={}",
+                    operation, node.executionNodeId().value(), node.baseUrl());
             return platformException(ErrorCode.OPENCODE_TIMEOUT, operation, node, null, current);
         }
         if (current instanceof WebClientResponseException exception) {
             int status = exception.getStatusCode().value();
+            LOGGER.error("Opencode call failed, operation={}, nodeId={}, baseUrl={}, httpStatus={}",
+                    operation, node.executionNodeId().value(), node.baseUrl(), status);
             if (status == 408 || status == 504) {
                 return platformException(ErrorCode.OPENCODE_TIMEOUT, operation, node, status, current);
             }
@@ -279,8 +302,12 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
             return platformException(ErrorCode.OPENCODE_BAD_GATEWAY, operation, node, status, current);
         }
         if (hasCause(current, ConnectException.class)) {
+            LOGGER.error("Opencode connection refused, operation={}, nodeId={}, baseUrl={}",
+                    operation, node.executionNodeId().value(), node.baseUrl());
             return platformException(ErrorCode.OPENCODE_UNAVAILABLE, operation, node, null, current);
         }
+        LOGGER.error("Opencode call error, operation={}, nodeId={}, baseUrl={}, error={}",
+                operation, node.executionNodeId().value(), node.baseUrl(), current.getMessage());
         return platformException(ErrorCode.OPENCODE_BAD_GATEWAY, operation, node, null, current);
     }
 

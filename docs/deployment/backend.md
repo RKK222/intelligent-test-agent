@@ -76,6 +76,7 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 - `OPENCODE_MANAGER_MAX_PROCESSES` 不得超过 `OPENCODE_MANAGER_PORT_END - OPENCODE_MANAGER_PORT_START + 1`。
 - 建议每个容器预留 1 到 2 个端口作为故障排查或滚动扩容缓冲，不要把端口池全部按理论最大值打满。
 - `OPENCODE_MANAGER_LINUX_SERVER_ID` 必须与后端写入的 `TEST_AGENT_LINUX_SERVER_ID` 使用同一 IPv4 表达，否则用户进程 `baseUrl` 和同服务器重建规则会不一致。
+- 本地 `./restart-dev-services.sh --env-file .env.local` 在未显式配置 `TEST_AGENT_LINUX_SERVER_ID` / `TEST_AGENT_BACKEND_LISTEN_URL` / `OPENCODE_MANAGER_LINUX_SERVER_ID` 时，会使用默认路由网卡的 IPv4 自动填充；生产和多机部署仍建议显式配置，避免网卡切换造成实例标识变化。
 
 目录和日志规划：
 

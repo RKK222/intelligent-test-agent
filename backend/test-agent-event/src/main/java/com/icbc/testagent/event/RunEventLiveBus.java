@@ -5,7 +5,10 @@ import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.run.RunId;
 import java.util.Objects;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
@@ -23,6 +26,8 @@ import reactor.core.publisher.Sinks;
 @Service
 public class RunEventLiveBus {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(RunEventLiveBus.class);
+
     private final Sinks.Many<RunEventLiveEvent> sink = Sinks.many().multicast().directBestEffort();
     private final RunEventRemotePublisher remotePublisher;
 
@@ -37,6 +42,13 @@ public class RunEventLiveBus {
      * 注入可选远端广播端口，用于多实例部署下把本机事件发布到共享通道。
      */
     @Autowired
+    public RunEventLiveBus(ObjectProvider<RunEventRemotePublisher> remotePublisherProvider) {
+        this(remotePublisherProvider.getIfAvailable(() -> NoopRunEventRemotePublisher.INSTANCE));
+    }
+
+    /**
+     * 注入远端广播端口，测试和手工装配可直接指定实现。
+     */
     public RunEventLiveBus(RunEventRemotePublisher remotePublisher) {
         this.remotePublisher = Objects.requireNonNull(remotePublisher, "remotePublisher must not be null");
     }
@@ -46,6 +58,8 @@ public class RunEventLiveBus {
      */
     public RunEventLiveEvent publishDurable(RunEvent event) {
         Objects.requireNonNull(event, "event must not be null");
+        LOGGER.debug("Publishing durable event, runId={}, seq={}, type={}",
+                event.runId().value(), event.seq(), event.type().wireName());
         RunEventLiveEvent liveEvent = RunEventLiveEvent.durable(RunEventSsePayload.from(event));
         emit(liveEvent);
         publishRemote(liveEvent);
@@ -57,6 +71,8 @@ public class RunEventLiveBus {
      */
     public RunEventLiveEvent publishTransient(RunEventDraft draft) {
         Objects.requireNonNull(draft, "draft must not be null");
+        LOGGER.debug("Publishing transient event, runId={}, type={}",
+                draft.runId().value(), draft.type().wireName());
         RunEventLiveEvent liveEvent = RunEventLiveEvent.transientOnly(
                 RunEventSsePayload.transientFrom(draft, transientEventId()));
         emit(liveEvent);
@@ -78,6 +94,7 @@ public class RunEventLiveBus {
     private void emit(RunEventLiveEvent liveEvent) {
         Sinks.EmitResult result = sink.tryEmitNext(liveEvent);
         if (result == Sinks.EmitResult.FAIL_ZERO_SUBSCRIBER) {
+            LOGGER.debug("No subscriber for live event, runId={}", liveEvent.payload().runId());
             return;
         }
         if (result == Sinks.EmitResult.FAIL_NON_SERIALIZED) {
@@ -85,6 +102,7 @@ public class RunEventLiveBus {
             return;
         }
         if (result.isFailure()) {
+            LOGGER.warn("Failed to emit live event, runId={}, result={}", liveEvent.payload().runId(), result);
             return;
         }
     }
@@ -95,7 +113,9 @@ public class RunEventLiveBus {
     private void publishRemote(RunEventLiveEvent liveEvent) {
         try {
             remotePublisher.publish(liveEvent);
-        } catch (RuntimeException ignored) {
+        } catch (RuntimeException exception) {
+            LOGGER.warn("Remote publish failed, runId={}, error={}",
+                    liveEvent.payload().runId(), exception.getMessage());
             // 远端广播是增强通道，异常不应中断本机实时输出和 durable 持久化。
         }
     }

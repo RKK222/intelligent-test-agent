@@ -53,6 +53,7 @@ class RuntimeManagementControllerTest {
                         argThat(filter -> filter.status() == OpencodeServerProcessStatus.RUNNING
                                 && filter.linuxServerId().equals(new LinuxServerId("10.8.0.12"))
                                 && filter.containerId().equals(new OpencodeContainerId("ctr_01"))
+                                && "process-user".equals(filter.username())
                                 && filter.userId().equals(new UserId("usr_1234567890abcdef"))),
                         eq(new PageRequest(1, 20)),
                         eq("trace_1234567890abcdef")))
@@ -60,7 +61,7 @@ class RuntimeManagementControllerTest {
         WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.get()
-                .uri("/api/internal/platform/opencode-runtime/management/overview?status=RUNNING&linuxServerId=10.8.0.12&containerId=ctr_01&userId=usr_1234567890abcdef&page=1&size=20")
+                .uri("/api/internal/platform/opencode-runtime/management/overview?status=RUNNING&linuxServerId=10.8.0.12&containerId=ctr_01&username=process-user&userId=usr_1234567890abcdef&page=1&size=20")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -72,6 +73,7 @@ class RuntimeManagementControllerTest {
                 .jsonPath("$.data.managers[0].connectionStatus").isEqualTo("CONNECTED")
                 .jsonPath("$.data.managerBackendConnections[0].status").isEqualTo("CONNECTED")
                 .jsonPath("$.data.opencodeProcesses.items[0].processId").isEqualTo("ocp_1234567890abcdef")
+                .jsonPath("$.data.opencodeProcesses.items[0].username").isEqualTo("process-user")
                 .jsonPath("$.data.opencodeProcesses.items[0].bindingAgentId").isEqualTo("opencode")
                 .jsonPath("$.data.opencodeProcesses.items[0].bindingStatus").isEqualTo("ACTIVE");
     }
@@ -250,6 +252,6 @@ class RuntimeManagementControllerTest {
                 List.of(container),
                 List.of(manager),
                 List.of(connection),
-                new PageResponse<>(List.of(new RuntimeManagementOpencodeProcess(process, Optional.of(binding))), 1, 20, 1));
+                new PageResponse<>(List.of(new RuntimeManagementOpencodeProcess(process, Optional.of(binding), Optional.of("process-user"))), 1, 20, 1));
     }
 }

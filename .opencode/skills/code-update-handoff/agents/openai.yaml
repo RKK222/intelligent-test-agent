@@ -1,4 +1,4 @@
 interface:
   display_name: "Code Update Handoff"
-  short_description: "Candid handoff and session log after edits"
-  default_prompt: "Use $code-update-handoff to close a code-change batch with a candid handoff and an updated session log."
+  short_description: "Candid handoff and concise session log"
+  default_prompt: "Use $code-update-handoff to close a code-change task with a candid handoff and a concise session log, only when the session produced durable information."

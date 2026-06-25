@@ -6,9 +6,12 @@ import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerStatus;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.Set;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +24,7 @@ import org.springframework.stereotype.Service;
 public class BackendJavaProcessLifecycleService {
 
     private final OpencodeProcessManagementRepository repository;
+    private final OpencodeProcessHeartbeatStore heartbeatStore;
     private final ManagerControlSettings settings;
     private final Clock clock;
     private final BackendProcessId backendProcessId;
@@ -32,8 +36,18 @@ public class BackendJavaProcessLifecycleService {
     @Autowired
     public BackendJavaProcessLifecycleService(
             OpencodeProcessManagementRepository repository,
+            OpencodeProcessHeartbeatStore heartbeatStore,
             ManagerControlSettings settings) {
-        this(repository, settings, Clock.systemUTC());
+        this(repository, heartbeatStore, settings, Clock.systemUTC());
+    }
+
+    /**
+     * 兼容测试和旧装配调用，未显式提供心跳端口时不写 Redis。
+     */
+    public BackendJavaProcessLifecycleService(
+            OpencodeProcessManagementRepository repository,
+            ManagerControlSettings settings) {
+        this(repository, disabledHeartbeatStore(), settings, Clock.systemUTC());
     }
 
     /**
@@ -43,7 +57,19 @@ public class BackendJavaProcessLifecycleService {
             OpencodeProcessManagementRepository repository,
             ManagerControlSettings settings,
             Clock clock) {
+        this(repository, disabledHeartbeatStore(), settings, clock);
+    }
+
+    /**
+     * 测试构造器允许固定时钟并注入心跳端口。
+     */
+    public BackendJavaProcessLifecycleService(
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            ManagerControlSettings settings,
+            Clock clock) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.backendProcessId = new BackendProcessId(RuntimeIdGenerator.backendProcessId());
@@ -82,6 +108,7 @@ public class BackendJavaProcessLifecycleService {
                 existing == null ? now : existing.createdAt(),
                 now,
                 traceId));
+        heartbeatStore.recordBackendHeartbeat(backendProcessId, now);
     }
 
     /**
@@ -100,5 +127,23 @@ public class BackendJavaProcessLifecycleService {
                 existing == null ? now : existing.createdAt(),
                 now,
                 traceId));
+    }
+
+    /**
+     * 清理 Redis 心跳索引中已经超过 5 分钟 TTL 的进程 ID。
+     */
+    public void cleanupExpiredHeartbeats() {
+        heartbeatStore.cleanupExpiredHeartbeats();
+    }
+
+    private static OpencodeProcessHeartbeatStore disabledHeartbeatStore() {
+        return new OpencodeProcessHeartbeatStore() {
+            @Override public boolean enabled() { return false; }
+            @Override public void recordBackendHeartbeat(BackendProcessId backendProcessId, Instant heartbeatAt) { }
+            @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
+            @Override public Set<BackendProcessId> liveBackendProcessIds() { return Set.of(); }
+            @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
+            @Override public void cleanupExpiredHeartbeats() { }
+        };
     }
 }

@@ -3,7 +3,6 @@ import { computed, onUnmounted, ref } from "vue";
 import { ChevronDown, LogOut, ShieldCheck, UserRound } from "lucide-vue-next";
 import logoUrl from "../assets/figma/logo.svg";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
-import folderIconUrl from "../assets/figma/folder-icon.svg";
 
 export type AppItem = {
   id: string;
@@ -49,7 +48,6 @@ const MAX_RIGHT_WIDTH = 1200;
 const emit = defineEmits<{
   (e: "toggle-left-panel"): void;
   (e: "toggle-right-panel"): void;
-  (e: "open-folder"): void;
   (e: "select-app", appId: string): void;
   (e: "logout"): void;
 }>();
@@ -172,16 +170,6 @@ onUnmounted(() => {
   <div class="figma-app" @click="closeHeaderMenus">
     <header class="figma-header">
       <div class="figma-header-left">
-        <div class="figma-sidebar-toggle">
-          <button
-            type="button"
-            :class="['figma-icon-btn figma-icon-btn-ghost', !leftPanelOpen && 'figma-icon-btn-ghost--collapsed']"
-            aria-label="切换侧边栏"
-            @click.stop="toggleLeftPanel"
-          >
-            <img :src="panelCloseUrl" alt="toggle panel" class="figma-icon-16" />
-          </button>
-        </div>
         <div class="figma-logo-group">
           <img :src="logoUrl" alt="logo" class="figma-logo" />
           <div class="figma-logo-margin" />
@@ -189,9 +177,6 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="figma-header-right">
-        <button type="button" class="figma-icon-btn figma-icon-btn-secondary" aria-label="打开文件夹" @click="emit('open-folder')">
-          <img :src="folderIconUrl" alt="folder" class="figma-icon-16" />
-        </button>
         <div class="figma-app-menu-wrapper" @click.stop>
           <button
             type="button"
@@ -253,6 +238,49 @@ onUnmounted(() => {
     </header>
 
     <div class="figma-body">
+      <!-- Floating left sidebar toggle button -->
+      <div 
+        class="figma-sidebar-toggle-floating"
+        :style="{ left: leftPanelOpen ? `${leftPanelWidth + 48 - 32}px` : '54px' }"
+      >
+        <button
+          type="button"
+          :class="[
+            'figma-icon-btn',
+            leftPanelOpen ? 'figma-icon-btn-floating-open' : 'figma-icon-btn-ghost figma-icon-btn-ghost--collapsed'
+          ]"
+          aria-label="切换侧边栏"
+          @click.stop="toggleLeftPanel"
+        >
+          <img 
+            :src="panelCloseUrl" 
+            alt="toggle panel" 
+            class="figma-icon-16" 
+            :style="{ transform: leftPanelOpen ? 'scaleX(-1)' : 'none' }" 
+          />
+        </button>
+      </div>
+
+      <!-- Floating right sidebar toggle button -->
+      <div class="figma-sidebar-toggle-floating figma-sidebar-toggle-floating--right">
+        <button
+          type="button"
+          :class="[
+            'figma-icon-btn',
+            showRightPanel ? 'figma-icon-btn-floating-open' : 'figma-icon-btn-ghost figma-icon-btn-ghost--collapsed'
+          ]"
+          aria-label="切换右侧栏"
+          @click.stop="toggleRightPanel"
+        >
+          <img 
+            :src="panelCloseUrl" 
+            alt="toggle panel" 
+            class="figma-icon-16" 
+            :style="{ transform: showRightPanel ? 'none' : 'scaleX(-1)' }" 
+          />
+        </button>
+      </div>
+
       <aside class="figma-activity-bar">
         <slot name="activity" />
       </aside>
@@ -855,5 +883,24 @@ onUnmounted(() => {
 :deep(.figma-activity-icon) {
   width: 20px;
   height: 20px;
+}
+.figma-sidebar-toggle-floating {
+  position: absolute;
+  top: 5px;
+  z-index: 40;
+  transition: left 0.15s ease;
+}
+.figma-sidebar-toggle-floating--right {
+  right: 8px;
+  top: 4px;
+}
+.figma-icon-btn-floating-open {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+}
+.figma-icon-btn-floating-open:hover {
+  background: rgba(0, 0, 0, 0.05);
 }
 </style>

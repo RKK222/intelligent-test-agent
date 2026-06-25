@@ -27,6 +27,24 @@ function renderRuntimePanel(api: Partial<BackendApiClient>) {
     },
     global: {
       plugins: [[VueQueryPlugin, { queryClient }]],
+      stubs: {
+        ElInput: {
+          props: ["modelValue", "placeholder"],
+          emits: ["update:modelValue"],
+          template: `<input :placeholder="placeholder" :value="modelValue" @input="$emit('update:modelValue', $event.target.value)" />`
+        },
+        ElButton: {
+          emits: ["click"],
+          template: `<button type="button" @click="$emit('click')"><slot /></button>`
+        },
+        ElSelect: {
+          template: `<select><slot /></select>`
+        },
+        ElOption: {
+          props: ["label", "value"],
+          template: `<option :value="value">{{ label }}</option>`
+        }
+      },
       provide: {
         api: api as BackendApiClient
       }
@@ -111,6 +129,59 @@ describe("runtime management settings", () => {
     expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledWith(
       expect.objectContaining({ page: 1, size: 20 })
     );
+
+    queryClient.clear();
+  });
+
+  it("queries and renders opencode processes by username", async () => {
+    const overview: OpencodeRuntimeManagementOverview = {
+      ...emptyOverview,
+      summary: {
+        ...emptyOverview.summary,
+        opencodeProcesses: 1,
+        runningOpencodeProcesses: 1
+      },
+      opencodeProcesses: {
+        items: [
+          {
+            processId: "ocp_1234567890abcdef",
+            userId: "usr_1234567890abcdef",
+            username: "wr",
+            linuxServerId: "10.8.0.12",
+            containerId: "ctr_01",
+            port: 4096,
+            pid: 12345,
+            baseUrl: "http://10.8.0.12:4096",
+            status: "RUNNING",
+            sessionPath: "/data/opencode/session/4096",
+            configPath: "/data/opencode/.config/opencode/",
+            lastHealthCheckAt: "2026-06-24T08:00:00Z",
+            healthMessage: "ok",
+            createdAt: "2026-06-24T08:00:00Z",
+            updatedAt: "2026-06-24T08:00:00Z",
+            traceId: "trace_1234567890abcdef",
+            bindingAgentId: "opencode",
+            bindingStatus: "ACTIVE",
+            bindingUpdatedAt: "2026-06-24T08:00:00Z"
+          }
+        ],
+        page: 1,
+        size: 20,
+        total: 1
+      }
+    };
+    const api = {
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(overview)
+    };
+    const { findByText, getByPlaceholderText, getByText, queryClient } = renderRuntimePanel(api);
+
+    expect(await findByText("wr")).toBeTruthy();
+    await fireEvent.update(getByPlaceholderText("用户名"), "wr");
+    await fireEvent.click(getByText("查询"));
+
+    await waitFor(() => expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenLastCalledWith(
+      expect.objectContaining({ username: "wr", page: 1, size: 20 })
+    ));
 
     queryClient.clear();
   });

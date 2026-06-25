@@ -24,7 +24,10 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
+import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.user.UserRepository;
+import com.icbc.testagent.domain.user.UserStatus;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -56,7 +59,9 @@ class RuntimeManagementQueryServiceTest {
         repository.connections.add(connection);
         repository.processes.add(process);
         repository.bindings.put(process.processId(), binding);
+        repository.users.put(process.userId(), user(process.userId(), "process-user"));
         RuntimeManagementQueryService service = new RuntimeManagementQueryService(
+                repository,
                 repository,
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
@@ -83,13 +88,16 @@ class RuntimeManagementQueryServiceTest {
         assertThat(overview.opencodeProcesses().items()).hasSize(1);
         assertThat(overview.opencodeProcesses().items().getFirst().process()).isEqualTo(process);
         assertThat(overview.opencodeProcesses().items().getFirst().binding()).contains(binding);
+        assertThat(overview.opencodeProcesses().items().getFirst().username()).contains("process-user");
         assertThat(repository.lastFilter.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
-        assertThat(repository.lastPageRequest.size()).isEqualTo(20);
+        assertThat(repository.lastFilter.userId()).isEqualTo(new UserId("usr_1234567890abcdef"));
+        assertThat(overview.opencodeProcesses().size()).isEqualTo(20);
     }
 
     @Test
     void overviewHandlesEmptyTopology() {
         RuntimeManagementQueryService service = new RuntimeManagementQueryService(
+                new FakeRepository(),
                 new FakeRepository(),
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
@@ -109,12 +117,13 @@ class RuntimeManagementQueryServiceTest {
         repository.processes.add(process("ocp_3333333333333333", "usr_3333333333333333", OpencodeServerProcessStatus.STOPPED));
         RuntimeManagementQueryService service = new RuntimeManagementQueryService(
                 repository,
+                repository,
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
         RuntimeManagementOverview overview = service.overview(OpencodeServerProcessFilter.empty(), new PageRequest(1, 1), TRACE_ID);
 
         assertThat(overview.opencodeProcesses().items()).hasSize(1);
-        assertThat(overview.opencodeProcesses().total()).isEqualTo(3);
+        assertThat(overview.opencodeProcesses().total()).isEqualTo(2);
         assertThat(overview.summary().runningOpencodeProcesses()).isEqualTo(2);
     }
 
@@ -125,6 +134,7 @@ class RuntimeManagementQueryServiceTest {
         repository.processes.add(process("ocp_2222222222222222", "usr_2222222222222222", OpencodeServerProcessStatus.FAILED));
         RuntimeManagementQueryService service = new RuntimeManagementQueryService(
                 repository,
+                repository,
                 Clock.fixed(NOW, ZoneOffset.UTC));
 
         RuntimeManagementOverview overview = service.overview(
@@ -132,8 +142,77 @@ class RuntimeManagementQueryServiceTest {
                 new PageRequest(1, 20),
                 TRACE_ID);
 
-        assertThat(overview.opencodeProcesses().items()).hasSize(1);
+        assertThat(overview.opencodeProcesses().items()).isEmpty();
         assertThat(overview.summary().runningOpencodeProcesses()).isZero();
+    }
+
+    @Test
+    void overviewShowsOnlyLiveRuntimeProcessesAndResolvesUsernameFilter() {
+        FakeRepository repository = new FakeRepository();
+        LinuxServer liveServer = linuxServer();
+        LinuxServer staleServer = new LinuxServer(
+                new LinuxServerId("10.8.0.13"),
+                "10.8.0.13",
+                LinuxServerStatus.READY,
+                Map.of(),
+                NOW.minusSeconds(301),
+                NOW.minusSeconds(600),
+                NOW.minusSeconds(301),
+                TRACE_ID);
+        BackendJavaProcess liveBackend = backendProcess();
+        BackendJavaProcess staleBackend = new BackendJavaProcess(
+                new BackendProcessId("bjp_2234567890abcdef"),
+                staleServer.linuxServerId(),
+                "http://10.8.0.13:8080",
+                BackendJavaProcessStatus.READY,
+                NOW,
+                NOW.minusSeconds(301),
+                NOW.minusSeconds(600),
+                NOW.minusSeconds(301),
+                TRACE_ID);
+        OpencodeServerProcess liveProcess = process("ocp_1234567890abcdef", "usr_1234567890abcdef", OpencodeServerProcessStatus.RUNNING);
+        OpencodeServerProcess staleProcess = new OpencodeServerProcess(
+                new OpencodeProcessId("ocp_2234567890abcdef"),
+                new UserId("usr_stale_1234567890"),
+                new LinuxServerId("10.8.0.12"),
+                new OpencodeContainerId("ctr_01"),
+                4097,
+                12346L,
+                "http://10.8.0.12:4097",
+                OpencodeServerProcessStatus.RUNNING,
+                "/data/opencode/session/4097",
+                "/data/opencode/.config/opencode/",
+                NOW,
+                NOW.minusSeconds(301),
+                "ok",
+                NOW.minusSeconds(600),
+                NOW.minusSeconds(301),
+                TRACE_ID);
+        repository.linuxServers.put(liveServer.linuxServerId(), liveServer);
+        repository.linuxServers.put(staleServer.linuxServerId(), staleServer);
+        repository.backendProcesses.put(liveBackend.backendProcessId(), liveBackend);
+        repository.backendProcesses.put(staleBackend.backendProcessId(), staleBackend);
+        repository.processes.add(liveProcess);
+        repository.processes.add(staleProcess);
+        repository.users.put(liveProcess.userId(), user(liveProcess.userId(), "wr"));
+        RuntimeManagementQueryService service = new RuntimeManagementQueryService(
+                repository,
+                repository,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+
+        RuntimeManagementOverview overview = service.overview(
+                OpencodeServerProcessFilter.byUsername("wr"),
+                new PageRequest(1, 20),
+                TRACE_ID);
+
+        assertThat(overview.linuxServers()).containsExactly(liveServer);
+        assertThat(overview.backendProcesses()).containsExactly(liveBackend);
+        assertThat(overview.opencodeProcesses().items()).extracting(row -> row.process().processId())
+                .containsExactly(liveProcess.processId());
+        assertThat(overview.opencodeProcesses().total()).isEqualTo(1);
+        assertThat(overview.summary().opencodeProcesses()).isEqualTo(1);
+        assertThat(overview.summary().runningOpencodeProcesses()).isEqualTo(1);
+        assertThat(repository.lastFilter.userId()).isEqualTo(liveProcess.userId());
     }
 
 
@@ -236,7 +315,21 @@ class RuntimeManagementQueryServiceTest {
                 TRACE_ID);
     }
 
-    private static final class FakeRepository implements OpencodeProcessManagementRepository {
+    private static User user(UserId userId, String username) {
+        return new User(
+                userId,
+                "AUTH_" + username,
+                username,
+                "hash",
+                null,
+                null,
+                null,
+                UserStatus.ACTIVE,
+                NOW,
+                NOW);
+    }
+
+    private static final class FakeRepository implements OpencodeProcessManagementRepository, UserRepository {
         private final Map<LinuxServerId, LinuxServer> linuxServers = new LinkedHashMap<>();
         private final Map<BackendProcessId, BackendJavaProcess> backendProcesses = new LinkedHashMap<>();
         private final Map<OpencodeContainerId, OpencodeContainer> containers = new LinkedHashMap<>();
@@ -244,6 +337,7 @@ class RuntimeManagementQueryServiceTest {
         private final List<OpencodeManagerBackendConnection> connections = new java.util.ArrayList<>();
         private final List<OpencodeServerProcess> processes = new java.util.ArrayList<>();
         private final Map<OpencodeProcessId, UserOpencodeProcessBinding> bindings = new LinkedHashMap<>();
+        private final Map<UserId, User> users = new LinkedHashMap<>();
         private OpencodeServerProcessFilter lastFilter;
         private PageRequest lastPageRequest;
 
@@ -309,6 +403,13 @@ class RuntimeManagementQueryServiceTest {
         @Override public UserOpencodeProcessBinding saveUserBinding(UserOpencodeProcessBinding binding) { bindings.put(binding.processId(), binding); return binding; }
         @Override public Optional<UserOpencodeProcessBinding> findUserBinding(UserId userId, String agentId) { return Optional.empty(); }
         @Override public List<OpencodeServerProcess> findOpencodeServerProcesses(int limit) { return processes.stream().limit(limit).toList(); }
+        @Override public void save(User user) { users.put(user.userId(), user); }
+        @Override public Optional<User> findByUserId(UserId userId) { return Optional.ofNullable(users.get(userId)); }
+        @Override public Optional<User> findByUnifiedAuthId(String unifiedAuthId) { return users.values().stream().filter(user -> user.unifiedAuthId().equals(unifiedAuthId)).findFirst(); }
+        @Override public Optional<User> findByUsername(String username) { return users.values().stream().filter(user -> user.username().equals(username)).findFirst(); }
+        @Override public com.icbc.testagent.common.pagination.PageResponse<User> findPage(String keyword, PageRequest pageRequest) { return new PageResponse<>(List.of(), pageRequest.page(), pageRequest.size(), 0); }
+        @Override public boolean existsByUsername(String username) { return findByUsername(username).isPresent(); }
+        @Override public boolean existsByUnifiedAuthId(String unifiedAuthId) { return findByUnifiedAuthId(unifiedAuthId).isPresent(); }
 
         private List<OpencodeServerProcess> filterProcesses(OpencodeServerProcessFilter filter) {
             return processes.stream()

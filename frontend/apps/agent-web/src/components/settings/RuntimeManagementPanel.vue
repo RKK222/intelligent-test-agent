@@ -19,12 +19,12 @@ type FilterDraft = {
   status: string;
   linuxServerId: string;
   containerId: string;
-  userId: string;
+  username: string;
 };
 
-const processStatusOptions = ["STARTING", "RUNNING", "UNHEALTHY", "STOPPED", "FAILED"];
-const draftFilters = ref<FilterDraft>({ status: "", linuxServerId: "", containerId: "", userId: "" });
-const activeFilters = ref<FilterDraft>({ status: "", linuxServerId: "", containerId: "", userId: "" });
+const processStatusOptions = ["RUNNING"];
+const draftFilters = ref<FilterDraft>({ status: "", linuxServerId: "", containerId: "", username: "" });
+const activeFilters = ref<FilterDraft>({ status: "", linuxServerId: "", containerId: "", username: "" });
 const page = ref(1);
 const size = ref(20);
 
@@ -33,7 +33,7 @@ const overviewParams = computed<OpencodeRuntimeManagementOverviewParams>(() => (
   status: activeFilters.value.status || undefined,
   linuxServerId: activeFilters.value.linuxServerId.trim() || undefined,
   containerId: activeFilters.value.containerId.trim() || undefined,
-  userId: activeFilters.value.userId.trim() || undefined,
+  username: activeFilters.value.username.trim() || undefined,
   page: page.value,
   size: size.value
 }));
@@ -80,8 +80,8 @@ function applyFilters() {
 }
 
 function clearFilters() {
-  draftFilters.value = { status: "", linuxServerId: "", containerId: "", userId: "" };
-  activeFilters.value = { status: "", linuxServerId: "", containerId: "", userId: "" };
+  draftFilters.value = { status: "", linuxServerId: "", containerId: "", username: "" };
+  activeFilters.value = { status: "", linuxServerId: "", containerId: "", username: "" };
   page.value = 1;
 }
 
@@ -140,7 +140,7 @@ function compactRecord(value?: Record<string, unknown> | null) {
 </script>
 
 <template>
-  <section class="ta-runtime-management">
+  <section class="ta-runtime-management" @dragstart.prevent>
     <div v-if="!hasSuperAdmin" class="ta-runtime-placeholder">当前账号无运行管理权限</div>
     <template v-else>
       <div class="ta-runtime-toolbar">
@@ -149,7 +149,7 @@ function compactRecord(value?: Record<string, unknown> | null) {
         </el-select>
         <el-input v-model="draftFilters.linuxServerId" size="small" clearable placeholder="Linux IP" class="ta-runtime-filter" />
         <el-input v-model="draftFilters.containerId" size="small" clearable placeholder="容器 ID" class="ta-runtime-filter" />
-        <el-input v-model="draftFilters.userId" size="small" clearable placeholder="用户 ID" class="ta-runtime-filter" />
+        <el-input v-model="draftFilters.username" size="small" clearable placeholder="用户名" class="ta-runtime-filter" />
         <el-button size="small" type="primary" :icon="Search" :loading="isFetching" @click="applyFilters">查询</el-button>
         <el-button size="small" :icon="Refresh" :loading="isFetching" @click="refresh">刷新</el-button>
         <el-button size="small" @click="clearFilters">清空</el-button>
@@ -175,100 +175,110 @@ function compactRecord(value?: Record<string, unknown> | null) {
           <div class="ta-runtime-grid">
             <div class="ta-runtime-block">
               <h5>Linux 服务器</h5>
-              <table class="ta-runtime-table">
-                <thead>
-                  <tr><th>服务器</th><th>状态</th><th>最近心跳</th><th>容量</th><th>traceId</th></tr>
-                </thead>
-                <tbody>
-                  <tr v-if="!overview?.linuxServers.length"><td colspan="5" class="is-empty">暂无服务器</td></tr>
-                  <tr v-for="server in overview?.linuxServers ?? []" :key="server.linuxServerId">
-                    <td>{{ server.linuxServerId }}</td>
-                    <td><span :class="['ta-status', statusClass(server.status)]">{{ server.status }}</span></td>
-                    <td>{{ formatDate(server.lastHeartbeatAt) }}</td>
-                    <td class="is-compact">{{ compactRecord(server.capacitySummary) }}</td>
-                    <td class="is-compact">{{ server.traceId }}</td>
-                  </tr>
-                </tbody>
-              </table>
+              <div class="ta-runtime-block-scroll">
+                <table class="ta-runtime-table">
+                  <thead>
+                    <tr><th>服务器</th><th>状态</th><th>最近心跳</th><th>容量</th><th>traceId</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="!overview?.linuxServers.length"><td colspan="5" class="is-empty">暂无服务器</td></tr>
+                    <tr v-for="server in overview?.linuxServers ?? []" :key="server.linuxServerId">
+                      <td>{{ server.linuxServerId }}</td>
+                      <td><span :class="['ta-status', statusClass(server.status)]">{{ server.status }}</span></td>
+                      <td>{{ formatDate(server.lastHeartbeatAt) }}</td>
+                      <td class="is-compact">{{ compactRecord(server.capacitySummary) }}</td>
+                      <td class="is-compact">{{ server.traceId }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div class="ta-runtime-block">
               <h5>后端 Java 进程</h5>
-              <table class="ta-runtime-table">
-                <thead>
-                  <tr><th>进程</th><th>服务器</th><th>状态</th><th>直连地址</th><th>心跳</th></tr>
-                </thead>
-                <tbody>
-                  <tr v-if="!overview?.backendProcesses.length"><td colspan="5" class="is-empty">暂无后端进程</td></tr>
-                  <tr v-for="process in overview?.backendProcesses ?? []" :key="process.backendProcessId">
-                    <td class="is-compact">{{ process.backendProcessId }}</td>
-                    <td>{{ process.linuxServerId }}</td>
-                    <td><span :class="['ta-status', statusClass(process.status)]">{{ process.status }}</span></td>
-                    <td class="is-compact">{{ process.listenUrl }}</td>
-                    <td>{{ formatDate(process.lastHeartbeatAt) }}</td>
-                  </tr>
-                </tbody>
-              </table>
+              <div class="ta-runtime-block-scroll">
+                <table class="ta-runtime-table">
+                  <thead>
+                    <tr><th>进程</th><th>服务器</th><th>状态</th><th>直连地址</th><th>心跳</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="!overview?.backendProcesses.length"><td colspan="5" class="is-empty">暂无后端进程</td></tr>
+                    <tr v-for="process in overview?.backendProcesses ?? []" :key="process.backendProcessId">
+                      <td class="is-compact">{{ process.backendProcessId }}</td>
+                      <td>{{ process.linuxServerId }}</td>
+                      <td><span :class="['ta-status', statusClass(process.status)]">{{ process.status }}</span></td>
+                      <td class="is-compact">{{ process.listenUrl }}</td>
+                      <td>{{ formatDate(process.lastHeartbeatAt) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div class="ta-runtime-block">
               <h5>容器</h5>
-              <table class="ta-runtime-table">
-                <thead>
-                  <tr><th>容器</th><th>服务器</th><th>状态</th><th>端口池</th><th>容量</th><th>心跳</th></tr>
-                </thead>
-                <tbody>
-                  <tr v-if="!overview?.containers.length"><td colspan="6" class="is-empty">暂无容器</td></tr>
-                  <tr v-for="container in overview?.containers ?? []" :key="container.containerId">
-                    <td class="is-compact">{{ container.containerId }}</td>
-                    <td>{{ container.linuxServerId }}</td>
-                    <td><span :class="['ta-status', statusClass(container.status)]">{{ container.status }}</span></td>
-                    <td>{{ container.portStart }}-{{ container.portEnd }}</td>
-                    <td>{{ container.currentProcesses }}/{{ container.maxProcesses }}</td>
-                    <td>{{ formatDate(container.lastHeartbeatAt) }}</td>
-                  </tr>
-                </tbody>
-              </table>
+              <div class="ta-runtime-block-scroll">
+                <table class="ta-runtime-table">
+                  <thead>
+                    <tr><th>容器</th><th>服务器</th><th>状态</th><th>端口池</th><th>容量</th><th>心跳</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="!overview?.containers.length"><td colspan="6" class="is-empty">暂无容器</td></tr>
+                    <tr v-for="container in overview?.containers ?? []" :key="container.containerId">
+                      <td class="is-compact">{{ container.containerId }}</td>
+                      <td>{{ container.linuxServerId }}</td>
+                      <td><span :class="['ta-status', statusClass(container.status)]">{{ container.status }}</span></td>
+                      <td>{{ container.portStart }}-{{ container.portEnd }}</td>
+                      <td>{{ container.currentProcesses }}/{{ container.maxProcesses }}</td>
+                      <td>{{ formatDate(container.lastHeartbeatAt) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div class="ta-runtime-block">
               <h5>管理进程</h5>
-              <table class="ta-runtime-table">
-                <thead>
-                  <tr><th>管理进程</th><th>容器</th><th>状态</th><th>协议</th><th>能力</th><th>心跳</th></tr>
-                </thead>
-                <tbody>
-                  <tr v-if="!overview?.managers.length"><td colspan="6" class="is-empty">暂无管理进程</td></tr>
-                  <tr v-for="manager in overview?.managers ?? []" :key="manager.managerId">
-                    <td class="is-compact">{{ manager.managerId }}</td>
-                    <td class="is-compact">{{ manager.containerId }}</td>
-                    <td><span :class="['ta-status', statusClass(manager.connectionStatus)]">{{ manager.connectionStatus }}</span></td>
-                    <td>{{ manager.protocolVersion }}</td>
-                    <td class="is-compact">{{ compactRecord(manager.capabilities) }}</td>
-                    <td>{{ formatDate(manager.lastHeartbeatAt) }}</td>
-                  </tr>
-                </tbody>
-              </table>
+              <div class="ta-runtime-block-scroll">
+                <table class="ta-runtime-table">
+                  <thead>
+                    <tr><th>管理进程</th><th>容器</th><th>状态</th><th>协议</th><th>能力</th><th>心跳</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="!overview?.managers.length"><td colspan="6" class="is-empty">暂无管理进程</td></tr>
+                    <tr v-for="manager in overview?.managers ?? []" :key="manager.managerId">
+                      <td class="is-compact">{{ manager.managerId }}</td>
+                      <td class="is-compact">{{ manager.containerId }}</td>
+                      <td><span :class="['ta-status', statusClass(manager.connectionStatus)]">{{ manager.connectionStatus }}</span></td>
+                      <td>{{ manager.protocolVersion }}</td>
+                      <td class="is-compact">{{ compactRecord(manager.capabilities) }}</td>
+                      <td>{{ formatDate(manager.lastHeartbeatAt) }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <div class="ta-runtime-block is-wide">
               <h5>Manager 与后端连接</h5>
-              <table class="ta-runtime-table">
-                <thead>
-                  <tr><th>管理进程</th><th>后端进程</th><th>状态</th><th>连接时间</th><th>最近心跳</th><th>traceId</th></tr>
-                </thead>
-                <tbody>
-                  <tr v-if="!overview?.managerBackendConnections.length"><td colspan="6" class="is-empty">暂无连接</td></tr>
-                  <tr v-for="connection in overview?.managerBackendConnections ?? []" :key="`${connection.managerId}:${connection.backendProcessId}`">
-                    <td class="is-compact">{{ connection.managerId }}</td>
-                    <td class="is-compact">{{ connection.backendProcessId }}</td>
-                    <td><span :class="['ta-status', statusClass(connection.status)]">{{ connection.status }}</span></td>
-                    <td>{{ formatDate(connection.connectedAt) }}</td>
-                    <td>{{ formatDate(connection.lastHeartbeatAt) }}</td>
-                    <td class="is-compact">{{ connection.traceId }}</td>
-                  </tr>
-                </tbody>
-              </table>
+              <div class="ta-runtime-block-scroll">
+                <table class="ta-runtime-table">
+                  <thead>
+                    <tr><th>管理进程</th><th>后端进程</th><th>状态</th><th>连接时间</th><th>最近心跳</th><th>traceId</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="!overview?.managerBackendConnections.length"><td colspan="6" class="is-empty">暂无连接</td></tr>
+                    <tr v-for="connection in overview?.managerBackendConnections ?? []" :key="`${connection.managerId}:${connection.backendProcessId}`">
+                      <td class="is-compact">{{ connection.managerId }}</td>
+                      <td class="is-compact">{{ connection.backendProcessId }}</td>
+                      <td><span :class="['ta-status', statusClass(connection.status)]">{{ connection.status }}</span></td>
+                      <td>{{ formatDate(connection.connectedAt) }}</td>
+                      <td>{{ formatDate(connection.lastHeartbeatAt) }}</td>
+                      <td class="is-compact">{{ connection.traceId }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </section>
@@ -299,7 +309,7 @@ function compactRecord(value?: Record<string, unknown> | null) {
                 <tr v-if="!processRows.length"><td colspan="11" class="is-empty">暂无 opencode 进程</td></tr>
                 <tr v-for="process in processRows" :key="process.processId">
                   <td class="is-compact">{{ process.processId }}</td>
-                  <td class="is-compact">{{ process.userId }}</td>
+                  <td class="is-compact">{{ process.username || process.userId }}</td>
                   <td>{{ process.linuxServerId }}</td>
                   <td class="is-compact">{{ process.containerId }}</td>
                   <td>{{ process.port }}</td>
@@ -336,6 +346,12 @@ function compactRecord(value?: Record<string, unknown> | null) {
   gap: 14px;
   min-height: 100%;
   color: #18181b;
+  -webkit-user-drag: none;
+  user-drag: none;
+}
+.ta-runtime-management * {
+  -webkit-user-drag: none;
+  user-drag: none;
 }
 .ta-runtime-toolbar {
   display: flex;
@@ -416,6 +432,8 @@ function compactRecord(value?: Record<string, unknown> | null) {
   gap: 10px;
 }
 .ta-runtime-block {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   border: 1px solid #ebeef5;
   border-radius: 8px;
@@ -433,6 +451,11 @@ function compactRecord(value?: Record<string, unknown> | null) {
   font-weight: 650;
   color: #303133;
   background: #fafafa;
+}
+.ta-runtime-block-scroll {
+  flex: 1;
+  width: 100%;
+  overflow-x: auto;
 }
 .ta-runtime-table-scroll {
   width: 100%;

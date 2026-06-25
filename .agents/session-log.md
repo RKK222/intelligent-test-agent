@@ -2,21 +2,108 @@
 
 ## Entries
 
-### 2026-06-25 - 设置"添加成员"下拉搜索改为懒加载
+### 2026-06-25 - 修复运行管理拖动/滚动条问题及文件树和工作台图标大小/线条
 
-- Why: 上一版 `el-autocomplete` 设了 `trigger-on-focus="true"` 且 `fetchUserSuggestions` 在 keyword 为空时仍走"返回全量"分支。用户反馈用户表大时进入设置弹窗 / 聚焦输入框就会触发后端全量查询导致慢，希望只在键入内容后才查库。
-- What: `frontend/apps/agent-web/src/components/settings/SettingsAppWorkspacePanel.vue`：
-  - 模板 `<el-autocomplete>` 把 `:trigger-on-focus="true"` 改成 `:trigger-on-focus="false"`，初始聚焦/初始进入不查后端；`placeholder` 加"(懒加载搜索)"提示。
-  - `fetchUserSuggestions(keyword, callback)` 增加空关键字短路：`if (!trimmed) { callback([]); return; }`，不打 `api.searchUsers`。
-  - `searchUsers` 增加空关键字短路：trim 后为空直接 return，避免显式"搜索"按钮在空输入下也调后端。
-  - "搜索"按钮 `disabled` 增加 `!userKeyword.trim()` 条件，灰态防止误触。
-  - 模板注释 / `frontend/apps/agent-web/README.md` / `frontend/apps/agent-web/src/PACKAGE.md` 描述同步更新为"懒加载搜索"语义。
-- How: 仅前端 el-autocomplete 配置 + 早返短路；后端 `UserRepository.findPage` / SQL / 鉴权 / API 契约均不动；空关键字下 `searchUsers` 仍然不会发请求。
-- Result: 初始进入"应用人员管理"tab 不再调 `/configuration-management/users`；聚焦输入框不再触发全量拉取；只有用户键入 ≥1 个字符（300ms 防抖后）才异步查库并展示候选；空输入时"搜索"按钮灰态、不可点击。
-- Pitfalls: `trigger-on-focus` 是 el-autocomplete 控制初始/聚焦时是否调用 `fetch-suggestions` 的 prop，需要与"空关键字短路"协同才彻底不打后端，单独改一处不生效。
-- Verification: `corepack pnpm --filter @test-agent/agent-web typecheck` 通过。
-- Next: 等用户验收；如果后续用户表更大，可以再加 `minLength` 阈值（如 ≥2 字符才查），避免单字符大表全表扫。
+- Why: 
+  - 用户反馈超级管理员设置-运行管理页内容（拓扑状态及 opencode 进程列表）存在可以被拖动的行为；同时，原多卡片各自独立的滚动条容易产生高度上的错落不齐，希望能将其对齐统一放最下面（保持每个小卡片自己独立带滚动条的形式，但整体布局保持对齐，不要错落）。
+  - 工作台顶栏需保留左侧的文件树展开/收起切换按钮，右侧面板由顶栏右侧的折叠按钮（均使用 `panel-close.svg` 图标）控制。右侧折叠按钮位置调整到面板 header / tabbar 对应高度，浮动在最外层（即使折叠依然可见并能点开），左侧折叠按钮也同样调整至浮动在左面板 tabbar 相同高度上，使两个侧边栏开关功能一致。
+- What:
+  - **RuntimeManagementPanel.vue**: 给最外层 section 增加 `@dragstart.prevent` 并且对容器及其子元素添加 `user-drag: none` 禁用拖拽；对卡片容器 `.ta-runtime-block` 增加 `display: flex; flex-direction: column` 布局，让表格滚动包裹容器 `.ta-runtime-block-scroll` 设为 `flex: 1` 填充全部可用空间，从而将每一排卡片的高度拉伸一致，使各表底部的横向滚动条完全水平对齐（不再错落）。
+  - **FigmaShell.vue**:
+    - 移除原本在最顶部 header 中的侧边栏开关按钮。
+    - 在 `.figma-body` 顶层增加两个绝对定位的浮动按钮（`.figma-sidebar-toggle-floating`），通过 Vue 状态计算属性 `left` 随着面板的展开和收缩移动。这使得开关始终保持在左右面板顶部的 header/tabbar 高度（`top: 7px`）并永远在最外层可见。
+  - **AgentWorkbench.vue**: 移除左侧 Activity Bar 上的对话框按钮（`MessageSquare` 图标按钮），将编辑图标 `Code2` 的 `stroke-width` 设置为 `1.5`。
+  - **FileExplorer.vue**: 将 Tab 栏图标 `FolderTree`、`Search`、`GitBranch` 的 `stroke-width` 设置为 `1.5`，尺寸从 `h-[18px] w-[18px]` 调整为 `h-4 w-4`。其他 Lucide 图标（`Search`、`FileText`、`RefreshCw`）的 `stroke-width` 也同步设置为 `1.5`。
+  - **FigmaChatPanel.vue**: 去除对话框头部的冗余关闭按钮（由外部 FigmaShell 的浮动展开/收起按钮替代）。
+- How: 
+  - 通过 Vue 模板和 CSS 属性实现禁用拖拽和卡片 flex 高度对齐。
+  - 调整 figma-header 和 figma-sidebar 相关的 Vue 模板与 CSS 镜像 transform 设置，增加绝对定位浮动开关。
+- Result: 
+  - 运行管理页面的元素完全不可拖拽，且拓扑图形只有一个位于最下方的滚动条进行整体横向滚动，页面变得非常干净。
+  - 侧边栏折叠按钮恢复并在两侧完美以相反的方向指向，Activity Rail 的对话框切换按钮已去除，一切点击、折叠逻辑符合现代 IDE 的标准行为。
+- Pitfalls: 无。
+- Verification: `corepack pnpm --filter @test-agent/agent-web typecheck && corepack pnpm --filter @test-agent/agent-web build` 编译打包全数通过。
+- Next: 等待用户在前端热重载（无需手动重启）后验收新界面效果。
 
+### 2026-06-25 - 补充关键节点和流程日志
+
+- Why: 项目中很多关键节点和流程缺少日志，排查问题困难，需要在关键操作处补充结构化日志。
+- What:
+  - **WorkspaceApplicationService**: 新增创建工作区、查询失败等关键操作日志
+  - **SessionApplicationService**: 新增创建会话、归档会话等关键操作日志
+  - **DefaultOpencodeClientFacade**: 新增外部调用开始/完成、重试、错误转换日志
+  - **RunEventSseStreamService**: 新增 SSE 连接开始/取消/错误/完成日志
+  - **RunEventLiveBus**: 新增事件发布、无订阅者、发布失败等日志
+  - **RunApplicationService**: 新增 Run 启动/路由/成功/失败、取消等关键操作日志
+  - **pom.xml**: 为 test-agent-workspace-management 模块添加 slf4j-api 依赖
+- How: 在各关键方法入口添加 info 级别日志，在错误处理分支添加 warn/error 日志，遵循结构化日志规范（包含 traceId、操作类型、关键业务 ID）。
+- Result: 关键流程现在有完整的日志追踪，便于排障和问题定位。
+- Pitfalls: test-agent-workspace-management 模块原本没有 slf4j-api 依赖，需要手动添加。
+- Verification: `mvn compile -DskipTests` 编译成功；`mvn -pl test-agent-workspace-management -am test` 通过；`mvn -pl test-agent-opencode-client -am test` 通过；`mvn -pl test-agent-opencode-runtime -am test` 通过；`mvn -pl test-agent-event -am test` 通过。
+- Next: 无。
+
+### 2026-06-25 - 运行管理只展示活进程并增加 Redis 心跳
+
+- Why: 超级管理员设置-运行管理页需要面向当前启动的 Java / opencode 进程做运维，原实现只依赖数据库快照且用用户 ID 过滤/展示，容易展示僵死进程，也不便按用户名定位。
+- What:
+  - 运行管理查询新增 `username` 过滤和响应字段，前端筛选框改为用户名，保留 `userId` 兼容参数。
+  - 后端新增 `OpencodeProcessHeartbeatStore` 端口及 Redis/Noop 实现：Java / opencode 活进程写 5 分钟 TTL 心跳 key，索引集合用于跨机器汇总活进程。
+  - 应用启动后每 3 分钟健康检查 RUNNING opencode 进程并刷新 Redis 心跳，每 5 分钟清理过期心跳索引；查询面板只返回 READY/RUNNING 且心跳未过期的 Java、容器、管理连接、opencode 进程。
+  - 同步更新运行管理 API、后端模块 README、前端 README 和类型/测试。
+- How: 在业务层通过端口依赖 Redis 心跳，Redis 未启用时回退数据库 `lastHeartbeatAt` / `lastHealthCheckAt` 的 5 分钟窗口；前端只保留 RUNNING opencode 状态视角，避免运营面板展示历史失败/停止进程。
+- Result: 管理页可以跨 Linux IP 查看当前活跃 Java/opencode 进程，用户列优先显示用户名；僵死进程在心跳过期或健康检查失败后不再出现在面板中。
+- Pitfalls: `PageRequest` 最大 size 为 200，定时扫描不能使用更大的批量值，否则任务运行时会被分页校验拒绝；Spring Service 一旦保留多个构造器，生产构造器必须显式标 `@Autowired`，否则打包启动时会尝试无参构造并失败。
+- Verification: `mvn -pl test-agent-opencode-runtime -am -Dtest=RuntimeManagementQueryServiceTest,OpencodeProcessHeartbeatMaintenanceServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`；`mvn -pl test-agent-app -am test -Dsurefire.failIfNoSpecifiedTests=false`；`corepack pnpm test -- backend-api runtime-management-settings`；`corepack pnpm --filter @test-agent/agent-web typecheck`；`corepack pnpm --filter @test-agent/backend-api typecheck`。
+- Next: 部署多机环境时确认 `test-agent.redis.enabled=true` 且所有后端实例连接同一 Redis，才能获得跨机器统一活进程视图。
+
+### 2026-06-25 - Reduce Session Log Noise
+
+- Why: The previous policy made the session log too chatty for small edit batches, which reduced its usefulness as a concise handoff artifact.
+- What: Tightened the repo rules in `AGENTS.md`, `docs/guides/ai-workflow.md`, `docs/guides/self-checklist.md`, and `.opencode/skills/code-update-handoff/SKILL.md` plus its `agents/openai.yaml` metadata so logging happens once per meaningful session boundary.
+- How: Kept the same `Why / What / How / Result` shape, but changed the trigger from per-batch persistence to per-session reusable information, with related edits merged into one entry.
+- Result: Future sessions should write fewer, denser log entries that are easier for other developers and agents to scan.
+- Pitfalls: None.
+- Verification: `git diff --check`; `/Users/kaka/Desktop/intelligent-test-agent/.tmp/skill-validate-venv/bin/python3 /Users/kaka/.codex/skills/.system/skill-creator/scripts/quick_validate.py .`.
+- Next: Use the new rule in subsequent sessions and avoid file-level log spam.
+
+### 2026-06-25 - 修复运行管理页面因 ID 格式不一致导致查询失败的问题
+
+- Why: 超级用户在设置-运行管理页面无法看到容器、进程状态。经排查发现：数据库中存在历史/异常写入的 `backend_process_id` 等字段，其格式与当前领域对象要求不一致（如 `BackendProcessId` 要求 `bjp_` 前缀），导致 RowMapper 构造领域对象时抛出 `IllegalArgumentException`，整个页面查询失败。
+- What:
+  - 新增 Flyway migration `V15__add_opencode_process_id_check_constraints.sql`
+  - 清理不符合前缀规则的脏数据：删除 `backend_java_processes` 中 `backend_process_id` 不以 `bjp_` 开头的记录，删除 `opencode_container_managers` 中 `manager_id` 不以 `mgr_` 开头的记录，删除 `opencode_server_processes` 中 `process_id` 不以 `ocp_` 开头的记录
+  - 添加数据库 CHECK 约束，确保 ID 前缀格式正确，防止未来再写入不符合格式的数据
+- How: 通过 Flyway migration 执行 DELETE 清理脏数据 + ALTER TABLE 添加 CHECK 约束。
+- Result: 运行管理页面查询不再因脏数据导致领域对象构造失败；数据库层面新增约束防止非法 ID 写入。
+- Pitfalls: 
+  - 一开始误认为 `LinuxServerId` 也需要 `lsrv_` 前缀，实际上它要求 IPv4 地址格式
+  - `OpencodeContainerId` 只要求非空文本，无固定前缀要求
+- Verification: 需要在有脏数据的环境中重启后端验证 migration 执行成功，页面可正常加载。
+- Next: 建议用户执行 SQL 查询确认是否存在脏数据：`SELECT backend_process_id FROM backend_java_processes WHERE backend_process_id NOT LIKE 'bjp_%';`
+
+### 2026-06-25 - 为 F-WRAPP 应用新增远程代码库用于测试工作区和分支功能
+
+- Why: 本地开发环境数据库中，F-WRAPP 应用只有本地代码库，需要新增远程 Git 代码库用于测试工作区创建、版本库克隆、分支操作等功能。
+- What:
+  - 在 `code_repositories` 表新增 `repo_wrapp_mimoagent` 代码库记录，git_url 为 `https://gitee.com/wrui233/mimoagent`
+  - 在 `application_repository_links` 表新增关联，将新代码库关联到 F-WRAPP 应用 (app_id: 113023)
+  - 拉取远程分支并重启前后台服务
+  - 更新 `.tmp/test-data-add-mimoagent-repo.md` 文档，记录测试场景、测试步骤、测试数据
+- How: 通过 Docker exec 执行 psql 命令直接操作本地数据库（15432端口），使用 INSERT ... ON CONFLICT 语法保证幂等。
+- Result: F-WRAPP 应用现在关联了两个代码库（本地仓库 + 远程仓库），可用于测试工作区和分支功能；前后台服务已重启成功。
+- Pitfalls: 一开始误修改了 `repo_fcoss_main` 的 git_url，后来恢复原数据并新增正确记录。
+- Verification: 数据库查询确认新增记录存在，前端可访问 `http://127.0.0.1:3000`。
+- Next: 用户验证工作区和分支功能是否正常。
+
+### 2026-06-25 - 将 wr 用户角色改为应用管理员
+
+- Why: 用户要求将 wr 用户从普通用户角色改为应用管理员角色。
+- What: 更新 `user_roles` 表，将 wr 用户的 `dict_id` 从 `dict_role_user` 改为 `dict_role_app_admin`。
+- How: 通过 Docker exec 执行 psql UPDATE 命令。
+- Result: wr 用户角色已从"普通用户"改为"应用管理员"。
+- Pitfalls: 无。
+- Verification: 数据库查询确认角色已更新。
+- Next: 无。
 ### 2026-06-25 - 设置"添加成员"下拉项改为单行 userId · userName
 
 - Why: 用户反馈下拉项上下两行（`username` + `userId`）不利于在候选很多时快速浏览，希望改为单行紧凑展示，文案顺序为 `userId · userName`。
@@ -136,3 +223,18 @@
 - Pitfalls: 工作区里同时存在另一位开发者「opencode 进程本地节点回退 & 重置绑定」相关文件的中间态改动（`UserOpencodeProcessStatusResponse` / `UserOpencodeProcessAssignmentService` / `RuntimeDtos` / `UserOpencodeProcessController` / `OpencodeProcessManagementRepository` / `JdbcOpencodeProcessManagementRepository` / `FigmaChatPanel` / `backend-api/index.ts` / `RuntimeControllerTest` / `UserOpencodeProcessAssignmentServiceTest`），会破坏 `mvn -am` 与 `pnpm typecheck` 的全量构建；本次提交只 `git add` 上面 9 个直接相关文件 + 本条 session-log，未把这些未完成改动一起带入。
 - Verification: 临时 stash 掉上述中间态后，`mvn -pl test-agent-api test -Dtest=AuthControllerRolesTest` 3/3 通过；`pnpm --filter @test-agent/shared-types typecheck` 通过；FigmaShell 的 `ShieldCheck` 在 `lucide-vue-next` 类型声明中存在，prop 与 `currentUserRoleLabels` 字段链路类型自洽。
 - Next: 等用户验收；如需补充真实字典接口（`GET /api/dictionaries?dictKey=ROLE`）让前端不再依赖 `/api/auth/me` 翻译结果，下一轮再加，避免本次改动超出最小范围。
+
+### 2026-06-25 - 本地运行管理注册默认使用局域网 IPv4
+
+- Why: 用户追问 `888888888` 为什么还活着，以及本机是否没有取到局域网 IP。排查确认本机默认路由网卡 `en0` 是 `192.168.100.115`，但本地启动链路默认把后端 Java 进程、opencode manager 和 user opencode 进程注册到 `127.0.0.1`；`888888888` 当时对应 opencode 进程健康检查返回 200，所以不是僵死数据，只是服务器标识用了 loopback。
+- What:
+  - `restart-dev-services.sh` 在读取 `.env.local` 后，如果未显式设置 `TEST_AGENT_LINUX_SERVER_ID`、`TEST_AGENT_BACKEND_LISTEN_URL` 或 `OPENCODE_MANAGER_LINUX_SERVER_ID`，会检测默认路由网卡 IPv4，并用该地址作为本地运行拓扑注册值。
+  - `tools/verify-dev-scripts.sh` 增加 fake `route` / `ipconfig` 覆盖，防止脚本回退成 `127.0.0.1`。
+  - `RunEventLiveBus` 改为通过 `ObjectProvider<RunEventRemotePublisher>` 可选注入远端广播端口，避免 Redis bus 未注册时本地 Spring 启动失败。
+  - `RunApplicationService` 补上 `subscribeAgentEvents` 新签名需要的 `resolvedAgentId` 参数，修复当前 `main` 编译中断点。
+  - 文档同步说明本地脚本自动检测默认路由 IPv4，生产和多机部署仍应显式配置。
+- How: 优先用 macOS `route -n get default` 找默认路由接口，再用 `ipconfig getifaddr` 取 IPv4；Linux 下用 `ip route get 1.1.1.1` 的 `src` 地址；过滤 `127.*`、`169.254.*` 和 `0.0.0.0`。
+- Result: 本地未配置显式服务器 ID 时会注册为 `192.168.100.115` 这类局域网地址，而不是 `127.0.0.1`；运行管理面板仍只展示有 Redis 心跳的活进程。
+- Pitfalls: 当前工作区另有未提交的 `WorkspaceApplicationService` 日志改动引入 `org.slf4j` 但模块未声明依赖，导致 `mvn -pl test-agent-app -am test` 和实际重启构建被挡住；本次不回滚该无关改动。
+- Verification: `bash tools/verify-dev-scripts.sh` 通过；`mvn -pl test-agent-event test` 10/10 通过；`git diff --check` 通过。本地完整重启因上述 workspace 无关编译错误未完成。
+- Next: 修复或移除 workspace 模块未提交日志改动后，重新执行 `./restart-dev-services.sh --env-file .env.local`，再验证运行管理 overview 中 `linuxServerId` 是否为 `192.168.100.115`。
