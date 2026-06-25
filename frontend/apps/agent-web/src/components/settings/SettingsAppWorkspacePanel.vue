@@ -33,9 +33,10 @@ const selectedApp = computed(() => applications.value.find((item) => item.appId 
 
 // 成员管理
 const members = ref<ApplicationMember[]>([]);
+// el-autocomplete 双向绑定的输入关键字；触发 fetchUserSuggestions 后异步拉取候选用户
 const userKeyword = ref("");
-const users = ref<PlatformUserSummary[]>([]);
-const memberUserId = ref("");
+// 当前从下拉中选中的候选用户；为空时主按钮显示"搜索"，非空时显示"添加"
+const selectedUser = ref<PlatformUserSummary | null>(null);
 
 // 代码库
 const repositories = ref<CodeRepositoryConfig[]>([]);
@@ -89,7 +90,8 @@ function clearAppContext() {
   applications.value = [];
   selectedAppId.value = "";
   members.value = [];
-  users.value = [];
+  selectedUser.value = null;
+  userKeyword.value = "";
   repositories.value = [];
   appRepositories.value = [];
   repositoryApplications.value = [];
@@ -108,17 +110,46 @@ async function loadMembers() {
   members.value = await api.listApplicationMembers(selectedAppId.value);
 }
 
+/**
+ * el-autocomplete 异步拉取候选用户。Element Plus 自带 300ms 防抖，keyword 为空时也允许返回全量。
+ * 后端 LIKE 匹配 userId / unifiedAuthId / username 任一字段（不区分大小写）。
+ */
+async function fetchUserSuggestions(keyword: string, callback: (items: PlatformUserSummary[]) => void) {
+  try {
+    const page = await api.searchUsers(keyword.trim() || undefined, 1, 20);
+    callback(page.items);
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : "搜索用户失败";
+    callback([]);
+  }
+}
+
+// 显式"搜索"按钮：保留空关键字场景下"列出全部用户"的能力；el-autocomplete 的下拉也会自动触发。
+// 这里把后端结果回写到 selectedUser 仅用于"单条命中"兜底（输入精确 userId 时），避免再点一次下拉。
 async function searchUsers() {
   await run(async () => {
     const page = await api.searchUsers(userKeyword.value.trim() || undefined, 1, 20);
-    users.value = page.items;
+    if (page.items.length === 1) {
+      onUserSelected(page.items[0]);
+    } else {
+      selectedUser.value = null;
+    }
   });
 }
 
-async function addMember() {
+// el-autocomplete 选中候选时落库到 selectedUser，按钮由"搜索"切换为"添加"。
+function onUserSelected(user: PlatformUserSummary) {
+  selectedUser.value = user;
+}
+
+// 直接添加已选中的用户；清空选中态并刷新成员列表。
+async function addSelectedMember() {
+  const user = selectedUser.value;
+  if (!user) return;
   await run(async () => {
-    await api.addApplicationMember(selectedAppId.value, memberUserId.value.trim());
-    memberUserId.value = "";
+    await api.addApplicationMember(selectedAppId.value, user.userId);
+    selectedUser.value = null;
+    userKeyword.value = "";
     await loadMembers();
   });
 }
@@ -317,27 +348,39 @@ watch(selectedAppId, async (appId) => {
       <!-- 成员管理 -->
       <div v-if="selectedAppId && appTab === 'members'" class="ta-panel-content">
         <div class="ta-section">
-          <h4 class="ta-section-title">搜索用户</h4>
+          <h4 class="ta-section-title">添加成员</h4>
           <div class="ta-inline-form">
-            <el-input v-model="userKeyword" placeholder="用户名或统一认证号" style="width: 240px" @keyup.enter="searchUsers" />
-            <el-button type="primary" :disabled="loading" @click="searchUsers">搜索</el-button>
-          </div>
-          <div v-if="users.length" class="ta-item-list">
-            <div v-for="user in users" :key="user.userId" class="ta-item-row">
-              <span>{{ user.username }} · {{ user.unifiedAuthId }}</span>
-              <el-button size="small" :disabled="loading" @click="memberUserId = user.userId; addMember()">
-                <el-icon><CirclePlus /></el-icon> 加入
-              </el-button>
-            </div>
+            <!--
+              el-autocomplete：输入即异步拉取候选用户，下拉展示命中项。
+              选中后主按钮文案从"搜索"切换为"添加"，再点击即把该用户加入当前应用。
+            -->
+            <el-autocomplete
+              v-model="userKeyword"
+              :fetch-suggestions="fetchUserSuggestions"
+              :trigger-on-focus="true"
+              placeholder="输入用户ID、用户名或统一认证号"
+              value-key="username"
+              style="width: 280px"
+              clearable
+              @select="onUserSelected"
+            >
+              <template #default="{ item }">
+                <div class="ta-user-suggestion">
+                  <span class="ta-user-suggestion-name">{{ item.username }}</span>
+                  <span class="ta-user-suggestion-meta">{{ item.userId }} · {{ item.unifiedAuthId }}</span>
+                </div>
+              </template>
+            </el-autocomplete>
+            <el-button v-if="!selectedUser" :disabled="loading" @click="searchUsers">搜索</el-button>
+            <el-button v-else type="primary" :disabled="loading" @click="addSelectedMember">
+              <el-icon><CirclePlus /></el-icon>
+              添加
+            </el-button>
           </div>
         </div>
 
         <div class="ta-section">
-          <h4 class="ta-section-title">按 ID 新增成员</h4>
-          <div class="ta-inline-form">
-            <el-input v-model="memberUserId" placeholder="用户 ID" style="width: 240px" @keyup.enter="addMember" />
-            <el-button type="primary" :disabled="loading || !memberUserId.trim()" @click="addMember">新增</el-button>
-          </div>
+          <h4 class="ta-section-title">已有成员</h4>
           <div class="ta-item-list">
             <div v-for="member in members" :key="member.userId" class="ta-item-row">
               <div>
@@ -550,5 +593,21 @@ watch(selectedAppId, async (appId) => {
 }
 .ta-permission-placeholder {
   padding: 40px 0;
+}
+/* el-autocomplete 下拉项布局：用户名加粗，下方展示 userId 与统一认证号 */
+.ta-user-suggestion {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.4;
+}
+.ta-user-suggestion-name {
+  font-size: 13px;
+  color: #18181b;
+  font-weight: 500;
+}
+.ta-user-suggestion-meta {
+  font-size: 12px;
+  color: #909399;
 }
 </style>

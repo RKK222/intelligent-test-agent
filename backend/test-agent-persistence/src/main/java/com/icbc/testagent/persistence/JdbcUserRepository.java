@@ -133,7 +133,7 @@ public class JdbcUserRepository extends JdbcRepositorySupport implements UserRep
     }
 
     /**
-     * 分页搜索用户；keyword 为空时返回全部用户，非空时匹配用户名或统一认证号。
+     * 分页搜索用户；keyword 为空时返回全部用户，非空时按 userId / unifiedAuthId / username 任意字段 LIKE 匹配（不区分大小写）。
      */
     @Override
     public PageResponse<User> findPage(String keyword, PageRequest pageRequest) {
@@ -154,11 +154,14 @@ public class JdbcUserRepository extends JdbcRepositorySupport implements UserRep
             return new PageResponse<>(items, pageRequest.page(), pageRequest.size(), total);
         }
         String pattern = "%" + normalized + "%";
+        // 同时匹配 user_id / unified_auth_id / username 三个字段，使前端 el-autocomplete 输入 userId 也能命中。
         List<User> items = jdbcClient.sql("""
                         select user_id, unified_auth_id, username, password_hash,
                             organization, rd_department, department, status, created_at, updated_at
                         from users
-                        where lower(username) like :pattern or lower(unified_auth_id) like :pattern
+                        where lower(user_id) like :pattern
+                            or lower(unified_auth_id) like :pattern
+                            or lower(username) like :pattern
                         order by username, user_id
                         limit :limit offset :offset
                         """)
@@ -169,7 +172,9 @@ public class JdbcUserRepository extends JdbcRepositorySupport implements UserRep
                 .list();
         long total = jdbcClient.sql("""
                         select count(*) from users
-                        where lower(username) like :pattern or lower(unified_auth_id) like :pattern
+                        where lower(user_id) like :pattern
+                            or lower(unified_auth_id) like :pattern
+                            or lower(username) like :pattern
                         """)
                 .param("pattern", pattern)
                 .query(Long.class)

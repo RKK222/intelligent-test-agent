@@ -30,7 +30,7 @@ public interface UserRepository {
     Optional<User> findByUsername(String username);
 
     /**
-     * 按用户名或统一认证号分页搜索用户，用于管理入口选择已有平台用户。
+     * 按 userId、unifiedAuthId 或 username 任一字段分页搜索用户，用于管理入口选择已有平台用户。
      */
     PageResponse<User> findPage(String keyword, PageRequest pageRequest);
 
