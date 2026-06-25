@@ -1,17 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { BookmarkPlus, GitBranch, Layers, Plus, Save } from "lucide-vue-next";
+import { Layers, Plus, Save } from "lucide-vue-next";
 import { ElDatePicker, ElDialog } from "element-plus";
 import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
-
-type VcsBranch = { name: string; isCurrent?: boolean };
-
-// 分组键：两级菜单中的一级菜单分类。
-// - current: 当前分支（来自 vcsStatus.branch）
-// - default: 仓库默认分支（来自 vcsStatus.default_branch）
-// - recent: 用户最近一次手动选择的分支（来自 user_workspace_branch_preferences）
-// - other: 父组件额外传入的分支列表（branches prop 中未归入前几项的）
-export type BranchGroupKey = "current" | "default" | "recent" | "other";
 
 // 透传类型：直接复用后端 VO（ApplicationWorkspaceTemplate / ApplicationWorkspaceVersion），
 // 父组件负责把 versions 懒加载后回填到 template.versions 上。
@@ -21,16 +12,6 @@ export type AppWorkspaceTemplate = ApplicationWorkspaceTemplate & {
 export type AppWorkspaceVersion = ApplicationWorkspaceVersion;
 
 const props = defineProps<{
-  /** 当前 VCS 分支名（来自 /vcs/status） */
-  branch?: string;
-  /** 仓库默认分支名（来自 /vcs/status 的 default_branch 字段） */
-  defaultBranch?: string;
-  /** 用户在该 (appId, workspaceId) 维度下最近一次手动选择的 VCS 分支偏好 */
-  recentBranch?: string;
-  /** 可选分支列表；若提供则会渲染下拉切换 */
-  branches?: VcsBranch[];
-  /** 是否展示分支选择（仅工作目录场景） */
-  showBranch?: boolean;
   /** 写入路径（编辑器模式显示） */
   writePath?: string;
   /** 最近一次更新时间（秒或 ISO 字符串均可） */
@@ -45,7 +26,7 @@ const props = defineProps<{
   showSave?: boolean;
   /** 当前应用名（用于菜单首行提示与按钮文案） */
   appName?: string;
-  /** 归属当前应用的工作空间模板列表；为空则降级显示旧的 VCS 分支按钮 */
+  /** 归属当前应用的工作空间模板列表；为空则不展示两级菜单 */
   templates?: AppWorkspaceTemplate[];
   /** 当前选中的版本 ID；用于标记菜单项高亮 */
   selectedVersionId?: string;
@@ -53,19 +34,12 @@ const props = defineProps<{
   loadingTemplates?: boolean;
   /** 工作空间版本是否仍在加载（按模板分组懒加载时使用） */
   loadingVersions?: boolean;
-  /** 是否禁用"保存当前分支为偏好"按钮（无 appId/workspaceId/branch 时） */
-  rememberDisabled?: boolean;
   /** 「+新增版本」是否正在提交中（父组件控制禁用 & 展示 loading） */
   creatingVersion?: boolean;
 }>();
 
 const emit = defineEmits<{
-  (e: "change-branch", branch: string): void;
   (e: "save"): void;
-  // 把当前 VCS 分支显式写入 user_workspace_branch_preferences。
-  // 当前分支按钮只有 current 一项且被 disable，没办法通过 change-branch 触发持久化，
-  // 因此单独提供"记住当前分支"入口，操作链路上等价于"切到当前分支后写入偏好"。
-  (e: "remember-current-branch"): void;
   // 选择某工作空间下的某个版本：父组件负责切换运行态 Workspace。
   (e: "select-version", payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }): void;
   // 要求父组件按需懒加载某模板下的版本列表
@@ -75,7 +49,6 @@ const emit = defineEmits<{
   (e: "create-version", payload: { template: AppWorkspaceTemplate; version: string }): void;
 }>();
 
-const showBranchValue = computed(() => props.showBranch !== false);
 const updatedLabel = computed(() => {
   if (props.updatedAt === undefined || props.updatedAt === null || props.updatedAt === "") return "—";
   const value = typeof props.updatedAt === "number" ? props.updatedAt * 1000 : Date.parse(props.updatedAt);
@@ -93,67 +66,10 @@ const updatedLabel = computed(() => {
   return new Date(value).toLocaleDateString("zh-CN");
 });
 
-const branchOptions = computed<VcsBranch[]>(() => {
-  if (props.branches && props.branches.length > 0) return props.branches;
-  return props.branch ? [{ name: props.branch, isCurrent: true }] : [];
-});
-
-// ===== 分支两级菜单 =====
-type BranchGroup = { key: BranchGroupKey; label: string; items: VcsBranch[] };
-
-// 依据现有数据构造一级菜单分组：
-// 1) 当前分支：vcsStatus.branch；
-// 2) 仓库默认分支：vcsStatus.defaultBranch（与当前分支一致时跳过，避免重复展示）；
-// 3) 最近使用：用户最近一次手动选择的分支偏好（与前面两项一致时跳过）；
-// 4) 其他：branches prop 里尚未归入上述三类的分支。
-// 同一分支名只会出现在一个分组里；空分组不渲染对应一级菜单。
-const branchGroups = computed<BranchGroup[]>(() => {
-  const seen = new Set<string>();
-  const groups: BranchGroup[] = [];
-
-  const pushUnique = (group: BranchGroup, branch: VcsBranch) => {
-    if (!branch?.name) return;
-    if (seen.has(branch.name)) return;
-    seen.add(branch.name);
-    group.items.push(branch);
-  };
-
-  const current = props.branch;
-  const currentGroup: BranchGroup = { key: "current", label: "当前分支", items: [] };
-  if (current) pushUnique(currentGroup, { name: current, isCurrent: true });
-  if (currentGroup.items.length > 0) groups.push(currentGroup);
-
-  const defaultBranch = props.defaultBranch;
-  if (defaultBranch) {
-    const defaultGroup: BranchGroup = { key: "default", label: "默认分支", items: [] };
-    pushUnique(defaultGroup, { name: defaultBranch });
-    if (defaultGroup.items.length > 0) groups.push(defaultGroup);
-  }
-
-  const recent = props.recentBranch;
-  if (recent) {
-    const recentGroup: BranchGroup = { key: "recent", label: "最近使用", items: [] };
-    pushUnique(recentGroup, { name: recent });
-    if (recentGroup.items.length > 0) groups.push(recentGroup);
-  }
-
-  const otherGroup: BranchGroup = { key: "other", label: "其他分支", items: [] };
-  for (const item of branchOptions.value) {
-    if (item?.name) pushUnique(otherGroup, { name: item.name, isCurrent: item.isCurrent });
-  }
-  if (otherGroup.items.length > 0) groups.push(otherGroup);
-
-  return groups;
-});
-
-// 当没有任何分支信息时（既无 current 也无 branches prop），不渲染分支下拉按钮。
-// 触发按钮的可见性遵循 showBranch 控制；这里额外保证下拉有内容才允许点击。
-const hasBranchMenu = computed(() => branchGroups.value.length > 0);
-
 const templates = computed(() => props.templates ?? []);
 
 // ===== 应用工作空间两级菜单的弹出状态 =====
-// 当父组件未传 templates 或 templates 为空时，使用传统 el-dropdown 展示 VCS 分支，保持向后兼容。
+// 当父组件未传 templates 或 templates 为空时，不渲染 VCS 分支按钮（分支选择入口已下线）。
 const useCascadeMenu = computed(() => templates.value.length > 0);
 
 // ===== 两级菜单弹出状态 =====
@@ -203,46 +119,6 @@ function confirmCreateVersion() {
 
 function cancelCreateVersion() {
   createVersionOpen.value = false;
-}
-
-// ===== 分支两级菜单弹出状态 =====
-// branchMenuOpen: 一级菜单（分组）开关；hoveredBranchGroup: 当前悬停的分组，控制二级菜单（分支名）显隐。
-// branchButtonRef: 触发按钮的 DOM 引用，用于 Teleport 后定位菜单的 fixed 坐标。
-// branchMenuPos: 计算后的菜单坐标，{top, left}，避免被父级 dockview 面板 overflow:hidden 裁切。
-const branchMenuOpen = ref(false);
-const hoveredBranchGroup = ref<BranchGroupKey | null>(null);
-const branchButtonRef = ref<HTMLElement | null>(null);
-const branchMenuPos = ref<{ top: number; left: number } | null>(null);
-let branchSubmenuCloseTimer: ReturnType<typeof setTimeout> | null = null;
-
-function clearBranchSubmenuCloseTimer() {
-  if (branchSubmenuCloseTimer !== null) {
-    clearTimeout(branchSubmenuCloseTimer);
-    branchSubmenuCloseTimer = null;
-  }
-}
-
-// 计算并刷新菜单坐标：基于触发按钮的 getBoundingClientRect()，定位到按钮正上方。
-// 使用 fixed 定位 + Teleport 把菜单挂到 body，避开 dockview 面板 overflow:hidden / 内部 stacking context 的裁切。
-function updateBranchMenuPos() {
-  if (!branchButtonRef.value) return;
-  const rect = branchButtonRef.value.getBoundingClientRect();
-  branchMenuPos.value = {
-    top: rect.top - 6, // 6px 间隙
-    left: rect.left
-  };
-}
-
-// 菜单打开期间：滚动 / 窗口尺寸变化时同步刷新坐标，避免菜单停留在原位置与按钮错位。
-// 关闭时清掉监听，避免无谓的全局事件。
-let branchPosRafId: number | null = null;
-function onBranchPosScrollOrResize() {
-  if (!branchMenuOpen.value) return;
-  if (branchPosRafId !== null) cancelAnimationFrame(branchPosRafId);
-  branchPosRafId = requestAnimationFrame(() => {
-    updateBranchMenuPos();
-    branchPosRafId = null;
-  });
 }
 
 // 计算一级菜单位置：固定在触发按钮正上方，6px 间隙。
@@ -389,26 +265,12 @@ function onDocumentClick(event: MouseEvent) {
       closeMenu();
     }
   }
-  // 分支菜单同样已 Teleport 到 body，用 closest() 判断。
-  if (branchMenuOpen.value) {
-    const target = event.target as Node | null;
-    if (!target) return;
-    const insideMenu = target instanceof Element ? target.closest(".ta-workbench-branch-panel") : null;
-    const insideButton = target instanceof Element ? target.closest(".ta-workbench-branch-cascade") : null;
-    if (!insideMenu && !insideButton) {
-      closeBranchMenu();
-    }
-  }
 }
 
 function onDocumentKeydown(event: KeyboardEvent) {
   if (event.key !== "Escape") return;
   if (menuOpen.value) {
     closeMenu();
-    return;
-  }
-  if (branchMenuOpen.value) {
-    closeBranchMenu();
   }
 }
 
@@ -419,6 +281,14 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener("click", onDocumentClick);
   document.removeEventListener("keydown", onDocumentKeydown);
+  // 工作空间两级菜单的全局监听兜底
+  clearCascadeSubmenuCloseTimer();
+  window.removeEventListener("scroll", onCascadePosScrollOrResizeBound, true);
+  window.removeEventListener("resize", onCascadePosScrollOrResizeBound);
+  if (cascadePosRafId !== null) {
+    cancelAnimationFrame(cascadePosRafId);
+    cascadePosRafId = null;
+  }
 });
 
 function onTemplateEnter(template: AppWorkspaceTemplate, event: MouseEvent) {
@@ -455,80 +325,11 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   emit("select-version", { template, version });
   closeMenu();
 }
-
-// ===== 分支两级菜单交互 =====
-
-function toggleBranchMenu() {
-  if (branchMenuOpen.value) {
-    closeBranchMenu();
-  } else {
-    // 打开前先计算坐标，fixed 定位在 Teleport 之后才有意义。
-    updateBranchMenuPos();
-    branchMenuOpen.value = true;
-    window.addEventListener("scroll", onBranchPosScrollOrResize, true);
-    window.addEventListener("resize", onBranchPosScrollOrResize);
-  }
-}
-
-function closeBranchMenu() {
-  branchMenuOpen.value = false;
-  hoveredBranchGroup.value = null;
-  clearBranchSubmenuCloseTimer();
-  window.removeEventListener("scroll", onBranchPosScrollOrResize, true);
-  window.removeEventListener("resize", onBranchPosScrollOrResize);
-  if (branchPosRafId !== null) {
-    cancelAnimationFrame(branchPosRafId);
-    branchPosRafId = null;
-  }
-}
-
-function onBranchGroupEnter(groupKey: BranchGroupKey) {
-  clearBranchSubmenuCloseTimer();
-  hoveredBranchGroup.value = groupKey;
-}
-
-function onBranchGroupLeave() {
-  // 200ms 延迟关闭二级菜单，给用户从一级菜单滑到子菜单留出时间。
-  // 期间若鼠标进入子菜单，onBranchSubmenuEnter 会清掉这个 timer。
-  branchSubmenuCloseTimer = setTimeout(() => {
-    hoveredBranchGroup.value = null;
-    branchSubmenuCloseTimer = null;
-  }, 200);
-}
-
-function onBranchSubmenuEnter() {
-  // 进入子菜单时清掉关闭意图，hoveredBranchGroup 保持。
-  clearBranchSubmenuCloseTimer();
-}
-
-function onBranchClick(branchName: string) {
-  emit("change-branch", branchName);
-  closeBranchMenu();
-}
-
-onBeforeUnmount(() => {
-  clearBranchSubmenuCloseTimer();
-  // 卸载时如果菜单还开着，连带清掉全局事件监听
-  window.removeEventListener("scroll", onBranchPosScrollOrResize, true);
-  window.removeEventListener("resize", onBranchPosScrollOrResize);
-  if (branchPosRafId !== null) {
-    cancelAnimationFrame(branchPosRafId);
-    branchPosRafId = null;
-  }
-  // 工作空间两级菜单的全局监听兜底
-  clearCascadeSubmenuCloseTimer();
-  window.removeEventListener("scroll", onCascadePosScrollOrResizeBound, true);
-  window.removeEventListener("resize", onCascadePosScrollOrResizeBound);
-  if (cascadePosRafId !== null) {
-    cancelAnimationFrame(cascadePosRafId);
-    cascadePosRafId = null;
-  }
-});
 </script>
 
 <template>
   <footer class="ta-workbench-footer">
-    <div v-if="showBranchValue" class="ta-workbench-footer-left">
+    <div class="ta-workbench-footer-left">
       <!--
         两级菜单：当归属应用存在工作空间模板时，展示「应用 → 工作空间 → 版本」选择器。
         一级菜单展示工作空间模板，二级菜单展示该模板下的应用版本。
@@ -646,114 +447,6 @@ onBeforeUnmount(() => {
           </div>
         </Teleport>
       </div>
-      <!--
-        VCS 分支两级菜单：替代原先的单级 el-dropdown。
-        一级菜单按"来源"分组（当前分支 / 默认分支 / 最近使用 / 其他分支），
-        二级菜单展示该组下的分支名。
-        数据从 props.branch / defaultBranch / recentBranch / branches 派生；空分组不渲染。
-        hover 一级菜单项展开二级菜单，点击分支名后 emit('change-branch') 由父组件持久化偏好。
-        菜单用 <Teleport to="body"> + position:fixed 挂到 body，避开 dockview 面板 overflow:hidden 裁切。
-      -->
-      <div
-        v-if="hasBranchMenu"
-        class="ta-workbench-branch-cascade"
-        :class="{ 'is-open': branchMenuOpen }"
-      >
-        <button
-          ref="branchButtonRef"
-          type="button"
-          class="ta-workbench-footer-branch"
-          :title="`当前分支：${branch ?? '—'}`"
-          :aria-expanded="branchMenuOpen"
-          aria-haspopup="menu"
-          @click.stop="toggleBranchMenu"
-        >
-          <GitBranch class="ta-workbench-footer-icon" />
-          <span class="ta-workbench-footer-branch-label">{{ branch ?? "选择分支" }}</span>
-        </button>
-        <Teleport to="body">
-          <div
-            v-if="branchMenuOpen && branchMenuPos"
-            class="ta-workbench-branch-panel"
-            role="menu"
-            :style="{ top: `${branchMenuPos.top}px`, left: `${branchMenuPos.left}px` }"
-            @click.stop
-          >
-            <ul class="ta-workbench-branch-list" role="none">
-              <li
-                v-for="group in branchGroups"
-                :key="group.key"
-                :class="[
-                  'ta-workbench-branch-group',
-                  hoveredBranchGroup === group.key && 'is-hovered'
-                ]"
-                role="menuitem"
-                :aria-haspopup="true"
-                @mouseenter="onBranchGroupEnter(group.key)"
-                @mouseleave="onBranchGroupLeave"
-              >
-                <div class="ta-workbench-branch-group-main">
-                  <span class="ta-workbench-branch-group-label">{{ group.label }}</span>
-                  <span class="ta-workbench-branch-group-count">{{ group.items.length }}</span>
-                </div>
-                <span class="ta-workbench-branch-group-arrow" aria-hidden="true">›</span>
-                <!--
-                  二级菜单：仅在 hover 时渲染；通过 v-if 控制 DOM 数量。
-                  子菜单挂载在父级 li 上，hover 从一级菜单跨到子菜单时不需要补额外的 mousemove 逻辑。
-                -->
-                <div
-                  v-if="hoveredBranchGroup === group.key"
-                  class="ta-workbench-branch-submenu"
-                  role="menu"
-                  @mouseenter="onBranchSubmenuEnter"
-                >
-                  <ul class="ta-workbench-branch-submenu-list" role="none">
-                    <li
-                      v-for="item in group.items"
-                      :key="`${group.key}:${item.name}`"
-                      :class="[
-                        'ta-workbench-branch-submenu-item',
-                        (item.name === branch || item.isCurrent) && 'is-current',
-                        (item.name === recentBranch && group.key !== 'recent') && 'is-recent'
-                      ]"
-                      role="menuitem"
-                      @click="onBranchClick(item.name)"
-                    >
-                      <span class="ta-workbench-branch-submenu-item-name">{{ item.name }}</span>
-                      <span v-if="item.name === branch || item.isCurrent" class="ta-workbench-branch-submenu-item-tag">当前</span>
-                      <span v-else-if="item.name === recentBranch && group.key !== 'recent'" class="ta-workbench-branch-submenu-item-tag is-recent">最近</span>
-                    </li>
-                  </ul>
-                </div>
-              </li>
-            </ul>
-          </div>
-        </Teleport>
-      </div>
-      <!-- <span v-else class="ta-workbench-footer-branch is-disabled">
-        <GitBranch class="ta-workbench-footer-icon" />
-        <span>分支选择</span>
-      </span> -->
-      <!--
-        单独"记住当前分支"按钮：两级菜单中"当前分支"组只有 current branch 一项，
-        用户没办法通过 change-branch 路径触发 markRecentBranch 写入偏好。
-        这里把"切到当前分支并写入偏好"显式化，保证重启前后数据可写入 user_workspace_branch_preferences。
-      -->
-      <button
-        v-if="hasBranchMenu"
-        type="button"
-        class="ta-workbench-footer-remember"
-        :disabled="rememberDisabled"
-        :title="
-          rememberDisabled
-            ? '需要选择应用与工作区后才会写入分支偏好'
-            : `把当前分支「${branch ?? ''}」写入分支偏好`
-        "
-        @click="emit('remember-current-branch')"
-      >
-        <BookmarkPlus class="ta-workbench-footer-icon" />
-        <span>记住当前分支</span>
-      </button>
     </div>
 
     <div v-if="showSave" class="ta-workbench-footer-middle">
@@ -882,33 +575,6 @@ onBeforeUnmount(() => {
   cursor: default;
   color: #888;
   background: #fafafa;
-}
-
-.ta-workbench-footer-remember {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 26px;
-  padding: 0 10px;
-  border: 0.8px dashed #b5c8ff;
-  border-radius: 6px;
-  background: #f3f7ff;
-  color: #1d4ed8;
-  cursor: pointer;
-  transition: background-color 0.12s ease, border-color 0.12s ease;
-  font: inherit;
-}
-
-.ta-workbench-footer-remember:hover:not(:disabled) {
-  background: #e6efff;
-  border-color: #6688e8;
-}
-
-.ta-workbench-footer-remember:disabled {
-  cursor: default;
-  color: #9aa0a6;
-  background: #fafafa;
-  border-color: #e1e1e1;
 }
 
 .ta-workbench-footer-branch-label {
@@ -1247,161 +913,5 @@ onBeforeUnmount(() => {
 .ta-workbench-create-version-confirm:disabled {
   cursor: not-allowed;
   opacity: 0.6;
-}
-
-/* ===== 分支两级菜单样式 ===== */
-.ta-workbench-branch-cascade {
-  position: relative;
-}
-
-.ta-workbench-branch-cascade.is-open .ta-workbench-footer-branch {
-  background: #f5f5f5;
-  border-color: #b5b5b5;
-}
-
-/*
-  菜单面板：使用 position:fixed + <Teleport to="body"> 挂到 body 末尾，
-  避免被父级 dockview 面板的 overflow:hidden 或内部 stacking context 裁掉；
-  top/left 通过 updateBranchMenuPos() 在打开前基于按钮 getBoundingClientRect() 计算。
-  transform: translateY(-100%) 让菜单底边对齐按钮上沿（按钮正上方）。
-*/
-.ta-workbench-branch-panel {
-  position: fixed;
-  min-width: 200px;
-  max-height: calc(100vh - 24px);
-  overflow-y: auto;
-  background: #fff;
-  border: 1px solid #e4e4e7;
-  border-radius: 8px;
-  padding: 6px;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
-  z-index: 9999;
-  font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
-  transform: translateY(-100%);
-}
-
-.ta-workbench-branch-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  max-height: 360px;
-  overflow-y: auto;
-}
-
-.ta-workbench-branch-group {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background-color 0.1s ease;
-}
-
-.ta-workbench-branch-group:hover,
-.ta-workbench-branch-group.is-hovered {
-  background: #f4f4f5;
-}
-
-.ta-workbench-branch-group-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.ta-workbench-branch-group-label {
-  font-size: 13px;
-  font-weight: 500;
-  color: #18181b;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ta-workbench-branch-group-count {
-  font-size: 11px;
-  color: #999;
-  background: #f0f0f0;
-  border-radius: 999px;
-  padding: 0 6px;
-  min-width: 18px;
-  text-align: center;
-}
-
-.ta-workbench-branch-group-arrow {
-  color: #b5b5b5;
-  font-size: 14px;
-  line-height: 1;
-}
-
-.ta-workbench-branch-submenu {
-  position: absolute;
-  top: -6px;
-  left: calc(100% + 4px);
-  min-width: 180px;
-  background: #fff;
-  border: 1px solid #e4e4e7;
-  border-radius: 8px;
-  padding: 6px;
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14);
-  z-index: 1;
-}
-
-.ta-workbench-branch-submenu-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  max-height: 280px;
-  overflow-y: auto;
-}
-
-.ta-workbench-branch-submenu-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background-color 0.1s ease;
-}
-
-.ta-workbench-branch-submenu-item:hover {
-  background: #f4f4f5;
-}
-
-.ta-workbench-branch-submenu-item.is-current {
-  background: #f0f5ff;
-  color: #1d3fb0;
-}
-
-.ta-workbench-branch-submenu-item-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  font-weight: 500;
-  color: #18181b;
-  font-family: "JetBrains Mono", "PingFang SC", monospace;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.ta-workbench-branch-submenu-item-tag {
-  font-size: 10px;
-  line-height: 1;
-  padding: 2px 6px;
-  border-radius: 4px;
-  background: #1d3fb0;
-  color: #fff;
-  font-weight: 500;
-}
-
-.ta-workbench-branch-submenu-item-tag.is-recent {
-  background: #f3f7ff;
-  color: #1d4ed8;
-  border: 0.5px solid #b9c8ff;
 }
 </style>
