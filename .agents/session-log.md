@@ -2,6 +2,21 @@
 
 ## Entries
 
+### 2026-06-25 - 设置"添加成员"下拉搜索改为懒加载
+
+- Why: 上一版 `el-autocomplete` 设了 `trigger-on-focus="true"` 且 `fetchUserSuggestions` 在 keyword 为空时仍走"返回全量"分支。用户反馈用户表大时进入设置弹窗 / 聚焦输入框就会触发后端全量查询导致慢，希望只在键入内容后才查库。
+- What: `frontend/apps/agent-web/src/components/settings/SettingsAppWorkspacePanel.vue`：
+  - 模板 `<el-autocomplete>` 把 `:trigger-on-focus="true"` 改成 `:trigger-on-focus="false"`，初始聚焦/初始进入不查后端；`placeholder` 加"(懒加载搜索)"提示。
+  - `fetchUserSuggestions(keyword, callback)` 增加空关键字短路：`if (!trimmed) { callback([]); return; }`，不打 `api.searchUsers`。
+  - `searchUsers` 增加空关键字短路：trim 后为空直接 return，避免显式"搜索"按钮在空输入下也调后端。
+  - "搜索"按钮 `disabled` 增加 `!userKeyword.trim()` 条件，灰态防止误触。
+  - 模板注释 / `frontend/apps/agent-web/README.md` / `frontend/apps/agent-web/src/PACKAGE.md` 描述同步更新为"懒加载搜索"语义。
+- How: 仅前端 el-autocomplete 配置 + 早返短路；后端 `UserRepository.findPage` / SQL / 鉴权 / API 契约均不动；空关键字下 `searchUsers` 仍然不会发请求。
+- Result: 初始进入"应用人员管理"tab 不再调 `/configuration-management/users`；聚焦输入框不再触发全量拉取；只有用户键入 ≥1 个字符（300ms 防抖后）才异步查库并展示候选；空输入时"搜索"按钮灰态、不可点击。
+- Pitfalls: `trigger-on-focus` 是 el-autocomplete 控制初始/聚焦时是否调用 `fetch-suggestions` 的 prop，需要与"空关键字短路"协同才彻底不打后端，单独改一处不生效。
+- Verification: `corepack pnpm --filter @test-agent/agent-web typecheck` 通过。
+- Next: 等用户验收；如果后续用户表更大，可以再加 `minLength` 阈值（如 ≥2 字符才查），避免单字符大表全表扫。
+
 ### 2026-06-25 - 设置"添加成员"下拉项改为单行 userId · userName
 
 - Why: 用户反馈下拉项上下两行（`username` + `userId`）不利于在候选很多时快速浏览，希望改为单行紧凑展示，文案顺序为 `userId · userName`。

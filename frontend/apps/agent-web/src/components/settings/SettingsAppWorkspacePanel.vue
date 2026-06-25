@@ -111,12 +111,19 @@ async function loadMembers() {
 }
 
 /**
- * el-autocomplete 异步拉取候选用户。Element Plus 自带 300ms 防抖，keyword 为空时也允许返回全量。
- * 后端 LIKE 匹配 userId / unifiedAuthId / username 任一字段（不区分大小写）。
+ * el-autocomplete 异步拉取候选用户（懒加载）。
+ * - Element Plus 自带 300ms 防抖。
+ * - keyword 为空时直接返回空下拉，不打后端，避免用户表数据多时聚焦/初始进入就全量拉取导致慢。
+ * - 后端 LIKE 匹配 userId / unifiedAuthId / username 任一字段（不区分大小写）。
  */
 async function fetchUserSuggestions(keyword: string, callback: (items: PlatformUserSummary[]) => void) {
+  const trimmed = keyword.trim();
+  if (!trimmed) {
+    callback([]);
+    return;
+  }
   try {
-    const page = await api.searchUsers(keyword.trim() || undefined, 1, 20);
+    const page = await api.searchUsers(trimmed, 1, 20);
     callback(page.items);
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : "搜索用户失败";
@@ -124,11 +131,13 @@ async function fetchUserSuggestions(keyword: string, callback: (items: PlatformU
   }
 }
 
-// 显式"搜索"按钮：保留空关键字场景下"列出全部用户"的能力；el-autocomplete 的下拉也会自动触发。
-// 这里把后端结果回写到 selectedUser 仅用于"单条命中"兜底（输入精确 userId 时），避免再点一次下拉。
+// 显式"搜索"按钮：懒加载策略下空输入不查库；el-autocomplete 已自带 300ms 防抖自动拉取候选。
+// 按钮在输入精确 userId 且只有 1 条命中时直接落库到 selectedUser，避免再去下拉里挑。
 async function searchUsers() {
+  const trimmed = userKeyword.value.trim();
+  if (!trimmed) return;
   await run(async () => {
-    const page = await api.searchUsers(userKeyword.value.trim() || undefined, 1, 20);
+    const page = await api.searchUsers(trimmed, 1, 20);
     if (page.items.length === 1) {
       onUserSelected(page.items[0]);
     } else {
@@ -351,14 +360,16 @@ watch(selectedAppId, async (appId) => {
           <h4 class="ta-section-title">添加成员</h4>
           <div class="ta-inline-form">
             <!--
-              el-autocomplete：输入即异步拉取候选用户，下拉展示命中项。
+              el-autocomplete：懒加载搜索。trigger-on-focus=false，初始聚焦/空输入不打后端；
+              仅当用户键入内容时（300ms 防抖）才异步拉取候选用户。
               选中后主按钮文案从"搜索"切换为"添加"，再点击即把该用户加入当前应用。
+              "搜索"按钮在空输入时禁用，作为精确 userId 单条命中场景的兜底。
             -->
             <el-autocomplete
               v-model="userKeyword"
               :fetch-suggestions="fetchUserSuggestions"
-              :trigger-on-focus="true"
-              placeholder="输入用户ID、用户名或统一认证号"
+              :trigger-on-focus="false"
+              placeholder="输入用户ID、用户名或统一认证号（懒加载搜索）"
               value-key="username"
               style="width: 280px"
               clearable
@@ -370,7 +381,7 @@ watch(selectedAppId, async (appId) => {
                 </div>
               </template>
             </el-autocomplete>
-            <el-button v-if="!selectedUser" :disabled="loading" @click="searchUsers">搜索</el-button>
+            <el-button v-if="!selectedUser" :disabled="loading || !userKeyword.trim()" @click="searchUsers">搜索</el-button>
             <el-button v-else type="primary" :disabled="loading" @click="addSelectedMember">
               <el-icon><CirclePlus /></el-icon>
               添加
