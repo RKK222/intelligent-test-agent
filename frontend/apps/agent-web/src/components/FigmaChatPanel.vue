@@ -1551,8 +1551,8 @@ function onCompositionEnd() {
 }
 
 .figma-chat-send--inline {
-  width: 44px;
-  height: 44px;
+  width: 32px;
+  height: 32px;
   align-self: center;
   border-radius: 999px;
 }
@@ -1590,8 +1590,8 @@ function onCompositionEnd() {
 
 .figma-chat-send-icon,
 .figma-chat-stop-icon {
-  width: 13px;
-  height: 13px;
+  width: 10px;
+  height: 10px;
 }
 
 /* ---- Attachment Dialog ---- */
