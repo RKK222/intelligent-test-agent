@@ -256,6 +256,35 @@ V10 种子数据对 F-COSS 的影响：
 - `V10__seed_fcoss_application.sql` 同步写入 `user_application_workspace_preferences(user='888888888', app='app_fcoss', workspace='wrk_fcoss_20260701')`，本地开发用户首次进入 F-COSS 直接落到最新版本。
 - 删除/重置后只要重新执行 `V10`（幂等）即可恢复默认状态；偏好表本身的幂等写入由 `INSERT ... ON CONFLICT DO UPDATE` 在 `ManagedWorkspaceRepository.savePreference` 内保证。
 
+## V10 opencode 用户进程管理表
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V10__create_opencode_process_management_tables.sql` 创建 opencode 用户进程管理拓扑表，都是新增表，不修改旧 `execution_nodes` 或 `sessions.opencode_*` 字段：
+
+| 表 | 说明 |
+|---|---|
+| `linux_servers` | Linux 服务器快照，`linux_server_id` 当前直接保存服务器 IPv4，记录状态、最后心跳和容量摘要 JSON。 |
+| `backend_java_processes` | 后端 Java 实例，记录所属 Linux IP、实例直连地址、状态、启动时间和最后心跳。 |
+| `opencode_containers` | opencode 容器，记录所属 Linux 服务器、容器名称、独立端口池、最大进程数、当前进程数和状态。 |
+| `opencode_container_managers` | 容器管理进程，每个容器最多一个 manager，记录协议版本、连接状态、能力 JSON 和最后心跳。 |
+| `opencode_manager_backend_connections` | manager 与后端 Java 实例的 WebSocket 连接快照，按 `(manager_id, backend_process_id)` 唯一。 |
+| `opencode_server_processes` | 用户专属 opencode server 进程，记录用户、Linux 服务器、容器、主机直通端口、PID、`base_url`、启动路径和健康状态。 |
+| `user_opencode_process_bindings` | 用户到 opencode 进程的当前绑定，按 `(user_id, agent_id)` 唯一，首期 `agent_id='opencode'`。 |
+
+关键约束：
+
+- `linux_servers.linux_server_id` 使用服务器 IPv4 地址，后续 `opencode_server_processes.base_url` 由 `http://{linux_server_id}:{port}` 形成。
+- `opencode_containers` 使用每容器独立端口范围，`max_processes` 不能超过端口数，`current_processes` 不能超过 `max_processes`。
+- `opencode_container_managers.container_id` 唯一，保证每个容器只有一个管理进程。
+- `opencode_server_processes(linux_server_id, port)` 唯一，保证同一 Linux 服务器端口不会绑定多个 opencode 进程。
+- `user_opencode_process_bindings(user_id, agent_id)` 唯一，保证同一用户对同一 agent 只有一个当前绑定；`process_id` 同样唯一，避免一个进程被多个用户绑定。
+
+兼容策略：
+
+- 旧 `execution_nodes` 继续保留，供无用户主体的 static-token 兼容调用和本地固定节点探测使用。
+- `agent_session_bindings` 继续作为平台 Session 到远端 session/node 的主绑定表；用户进程模型只会在 binding 指向的节点与当前用户进程不一致时覆盖当前绑定，不删除旧远端 session。
+- 应用回滚时可保留这些新增表；如需完整回退 Web 用户对话到固定节点模式，应回滚后端和前端镜像，而不是删除 V10 表或清理 `/data/opencode/session/{port}`。
+- 后端启动/心跳更新 `linux_servers`、`backend_java_processes`；manager WebSocket 注册和心跳更新 `opencode_containers`、`opencode_container_managers` 和 `opencode_manager_backend_connections`。
+
 ## V10 F-COSS 应用开发种子数据
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V10__seed_fcoss_application.sql` 在本地开发环境提供开箱即用的 F-COSS 应用数据，让工作台左下角的两级菜单（应用→工作空间→版本）首次进入就能看到内容：
@@ -268,12 +297,6 @@ V10 种子数据对 F-COSS 的影响：
 | 应用版本 `20260620` | `application_workspace_versions` → `wks_fcoss_20260620` | 默认模板派生出的首个 yyyyMMdd 版本。 |
 | 应用版本 `20260701` | `application_workspace_versions` → `wks_fcoss_20260701` | 默认模板派生出的最新 yyyyMMdd 版本；同时作为默认 recent 偏好。 |
 | 应用成员 | `application_members` | 把默认开发用户 `888888888` 加入 F-COSS，便于 `listApplications` 看到该应用。 |
-- `linux_servers.linux_server_id` 使用服务器 IPv4 地址，后续 `opencode_server_processes.base_url` 由 `http://{linux_server_id}:{port}` 形成。
-- `opencode_containers` 使用每容器独立端口范围，`max_processes` 不能超过端口数，`current_processes` 不能超过 `max_processes`。
-- `opencode_container_managers.container_id` 唯一，保证每个容器只有一个管理进程。
-- `opencode_server_processes(linux_server_id, port)` 唯一，保证同一 Linux 服务器端口不会绑定多个 opencode 进程。
-- `user_opencode_process_bindings(user_id, agent_id)` 唯一，保证同一用户对同一 agent 只有一个当前绑定；`process_id` 同样唯一，避免一个进程被多个用户绑定。
-- 批次 4 不新增表；后端启动/心跳更新 `linux_servers`、`backend_java_processes`，manager WebSocket 注册/心跳更新 `opencode_containers`、`opencode_container_managers` 和 `opencode_manager_backend_connections`。
 
 兼容策略：
 

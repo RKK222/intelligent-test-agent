@@ -415,7 +415,7 @@ start_backend() {
 
 start_opencode() {
   if ! should_start_opencode; then
-    echo "Skipping opencode startup for non-local TEST_AGENT_OPENCODE_BASE_URL=${TEST_AGENT_OPENCODE_BASE_URL}."
+    echo "Skipping opencode startup for non-local TEST_AGENT_OPENCODE_BASE_URL=${TEST_AGENT_OPENCODE_BASE_URL:-}."
     return
   fi
 

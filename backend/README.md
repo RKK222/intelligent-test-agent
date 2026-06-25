@@ -105,6 +105,15 @@ curl http://127.0.0.1:8080/actuator/health
 # 应返回 {"status":"UP",...}
 ```
 
+多 Linux 服务器、opencode-manager、用户专属 opencode server 进程的部署与验收见 `docs/deployment/backend.md`。真实环境只读 smoke check 可从仓库根目录执行：
+
+```bash
+tools/verify-opencode-process-deployment.sh \
+  --backend-url http://<backend-or-lb>:8080 \
+  --manager-token <manager-control-token> \
+  --auth-token <super-admin-user-jwt>
+```
+
 ### 启动前端
 
 ```bash

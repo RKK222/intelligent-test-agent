@@ -2,6 +2,16 @@
 
 ## Entries
 
+### 2026-06-25 - Close opencode process deployment operations batch
+
+- Why: opencode 用户进程管理已经完成数据模型、调度契约、manager 控制面、runtime 接入和超管页面，还缺少多 Linux 服务器真实部署、扩容、回滚和验收说明。
+- What: Added `tools/verify-opencode-process-deployment.sh`, wired it into `tools/verify-dev-scripts.sh`, fixed a `restart-dev-services.sh` unset-variable edge case, and updated deployment/database/security/backend/frontend/opencode-manager docs plus the batch ledger.
+- How: Kept runtime behavior unchanged; the new script only performs read-only health, manager discovery and SUPER_ADMIN overview smoke checks. Deployment docs now cover direct backend listen URLs, manager all-backend WebSocket connections, non-overlapping host port pools, mounted session/config/state directories, heartbeat/timeout knobs, scale-out, failure handling and rollback.
+- Result: Batch 7 has an executable smoke check and a stable operations handoff for multi-server validation; `requirements/todo/deployment.md` remains unrelated and unstaged.
+- Pitfalls: Full first-login/process-rebuild validation still requires a real multi-server environment and real tokens; local verification only proves scripts/docs and existing tests.
+- Verification: `git diff --check -- . ':(exclude)requirements/todo/deployment.md'`, `bash -n tools/verify-opencode-process-deployment.sh && tools/verify-dev-scripts.sh`, and `tools/verify-ai-docs.sh` passed locally.
+- Next: Stage only batch 7 files and commit with a Chinese message.
+
 ### 2026-06-24 - Require Session Log In Project Rules
 
 - Why: The session log needed to be treated as a first-class tracked artifact, not an ad hoc local note, so remote commits carry the handoff context too.
@@ -38,4 +48,3 @@
 - Pitfalls: 仓库里两个旧测试（`createsStandardApplicationVersionWorkspaceAndRecordsRecentUsage` / `createsPersonalWorkspaceFromApplicationVersionWorktree`）在 Windows 上因路径分隔符断言失败，与本次改动无关（已用 `git stash` 验证过改动前的状态同样失败）；本次新测试改用 `Path.endsWith` 规避。
 - Verification: `pnpm typecheck` 通过；`mvn -pl test-agent-workspace-management -am test` 我新加的 2 个测试通过（8 / 10），其余 2 个失败是上面提到的预存在 Windows 路径问题。
 - Next: 等用户审过 PR 提单；如需进一步简化可考虑把 FigmaFileExplorer 的 `creatingVersion` 与工作区切换的反馈合并。
-

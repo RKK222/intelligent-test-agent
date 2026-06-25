@@ -211,7 +211,10 @@
   - `backend/README.md`
   - `frontend/README.md`
   - `opencode-manager/README.md`
-  - `tools/*`
+  - `tools/verify-opencode-process-deployment.sh`
+  - `tools/verify-dev-scripts.sh`
+  - `tools/verify-ai-docs.sh`
+  - `restart-dev-services.sh`
 - 修改位置：
   - 补齐多 Linux 服务器、多后端 Java 进程、多容器的部署配置、验收脚本和故障处理说明。
 - 具体改动：
@@ -241,7 +244,7 @@
 - [x] 批次 4：管理进程能连接多个后端 Java 实例，后端能下发启动、停止、重启、健康检测命令并收到带 commandId 和 traceId 的响应。
 - [x] 批次 5：Run 启动和 opencode runtime 代理都使用当前用户绑定的健康 opencode 进程；进程异常时按原 Linux 服务器重建。
 - [x] 批次 6：只有 `SUPER_ADMIN` 可以访问运行管理 API 和前端菜单；页面能展示后端进程、管理进程、opencode server 进程状态。
-- [ ] 批次 7：部署文档包含多 Linux 服务器、多后端 Java 进程、多容器、目录挂载、端口池、健康检查、扩容和回滚说明。
+- [x] 批次 7：部署文档包含多 Linux 服务器、多后端 Java 进程、多容器、目录挂载、端口池、健康检查、扩容和回滚说明。
 
 ## 验证方式
 
