@@ -29,6 +29,7 @@
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、agent runtime 调用、Diff/revert 和 PTY terminal 业务 |
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理等 |
 | `test-agent-configuration-management` | 应用、应用成员、代码库关联、应用工作空间和个人 SSH key 配置管理 |
+| `test-agent-scheduler` | 分布式定时任务框架，提供任务注册、Cron 调度、Redis 锁、运行记录和管理服务，不包含具体业务任务 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界，目前为空骨架 |
 | `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId 和统一异常入口 |
 | `test-agent-persistence` | 持久化、迁移、Redis/PostgreSQL 访问，包括 opencode 用户进程管理表映射 |
@@ -93,6 +94,7 @@ cp .env.local.example .env.local
 |------|------|
 | `TEST_AGENT_LOCAL_DB_*` | 本地 PostgreSQL 连接信息 |
 | `TEST_AGENT_REDIS_ENABLED` | 是否启用 Redis（本地可设为 false） |
+| `TEST_AGENT_SCHEDULER_ENABLED` | 是否启用定时任务后台扫描，默认 false；启用时必须同时启用 Redis。 |
 | `TEST_AGENT_OPENCODE_BASE_URL` | OpenCode 服务地址 |
 | `TEST_AGENT_MODEL_CATALOG_SOURCE` | 模型目录来源：`opencode` 保持旧代理，`bailian` 直连百炼 `/models`，`internal` 从数据库读取企业内模型。local 默认 `bailian`，test/prod 默认 `internal`。 |
 | `MODELSTUDIO_API_KEY` | 外网百炼 Model Studio Coding Plan API Key；变量名可通过 `TEST_AGENT_BAILIAN_API_KEY_ENV` 改为其他环境变量名。 |
@@ -163,6 +165,7 @@ mvn test
 - Model 目录与 opencode provider 同步逻辑放在 `test-agent-opencode-runtime`；企业内模型主数据端口放在 `test-agent-domain`，JDBC/Flyway 实现放在 `test-agent-persistence`。
 - 用户、角色、权限等平台内部管理放在 `test-agent-system-management`。
 - 应用配置、应用人员、代码库关联、应用工作空间模板和个人 SSH key 管理放在 `test-agent-configuration-management`；应用版本工作区运行编排放在 `test-agent-workspace-management`。
+- 通用分布式定时任务框架放在 `test-agent-scheduler`；具体业务任务实现放回所属业务模块，通过 `ScheduledTaskHandler` Bean 注册。
 - 非 opencode 外部系统联动放在 `test-agent-integration`。
 - 业务模块不要直接依赖 `test-agent-opencode-sdk-generated`，应通过 `test-agent-opencode-client`。
 - 领域模型保持在 `test-agent-domain`，不要依赖 Spring Web 或持久化技术。

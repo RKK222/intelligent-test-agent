@@ -3,10 +3,12 @@ package com.icbc.testagent.persistence;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
+import com.icbc.testagent.domain.session.ConversationSourceType;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.domain.session.SessionStatus;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
 import java.util.Optional;
@@ -31,7 +33,10 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
             rs.getString("trace_id"),
             rs.getString("opencode_session_id"),
             executionNodeId(rs.getString("opencode_execution_node_id")),
-            rs.getBoolean("pinned"));
+            rs.getBoolean("pinned"),
+            ConversationSourceType.valueOf(rs.getString("source_type")),
+            rs.getString("source_ref_id"),
+            userId(rs.getString("created_by_user_id")));
 
     /**
      * 注入 JdbcClient，所有 SQL 都在本 Repository 内显式声明。
@@ -52,7 +57,10 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                                 trace_id = :traceId, created_at = :createdAt, updated_at = :updatedAt,
                                 opencode_session_id = :opencodeSessionId,
                                 opencode_execution_node_id = :opencodeExecutionNodeId,
-                                pinned = :pinned
+                                pinned = :pinned,
+                                source_type = :sourceType,
+                                source_ref_id = :sourceRefId,
+                                created_by_user_id = :createdByUserId
                             where session_id = :sessionId
                             """)
                     .param("sessionId", session.sessionId().value())
@@ -65,16 +73,21 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                     .param("opencodeSessionId", session.opencodeSessionId())
                     .param("opencodeExecutionNodeId", executionNodeIdValue(session.opencodeExecutionNodeId()))
                     .param("pinned", session.pinned())
+                    .param("sourceType", session.sourceType().name())
+                    .param("sourceRefId", session.sourceRefId())
+                    .param("createdByUserId", userIdValue(session.createdByUserId()))
                     .update();
         } else {
             jdbcClient.sql("""
                             insert into sessions(
                                 session_id, workspace_id, title, status, trace_id, created_at, updated_at,
-                                opencode_session_id, opencode_execution_node_id, pinned
+                                opencode_session_id, opencode_execution_node_id, pinned,
+                                source_type, source_ref_id, created_by_user_id
                             )
                             values (
                                 :sessionId, :workspaceId, :title, :status, :traceId, :createdAt, :updatedAt,
-                                :opencodeSessionId, :opencodeExecutionNodeId, :pinned
+                                :opencodeSessionId, :opencodeExecutionNodeId, :pinned,
+                                :sourceType, :sourceRefId, :createdByUserId
                             )
                             """)
                     .param("sessionId", session.sessionId().value())
@@ -87,6 +100,9 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                     .param("opencodeSessionId", session.opencodeSessionId())
                     .param("opencodeExecutionNodeId", executionNodeIdValue(session.opencodeExecutionNodeId()))
                     .param("pinned", session.pinned())
+                    .param("sourceType", session.sourceType().name())
+                    .param("sourceRefId", session.sourceRefId())
+                    .param("createdByUserId", userIdValue(session.createdByUserId()))
                     .update();
         }
         return session;
@@ -99,7 +115,8 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
     public Optional<Session> findById(SessionId sessionId) {
         return jdbcClient.sql("""
                         select session_id, workspace_id, title, status, trace_id, created_at, updated_at,
-                               opencode_session_id, opencode_execution_node_id, pinned
+                               opencode_session_id, opencode_execution_node_id, pinned,
+                               source_type, source_ref_id, created_by_user_id
                         from sessions
                         where session_id = :sessionId
                         """)
@@ -120,7 +137,8 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
                         """;
         var itemsSpec = jdbcClient.sql("""
                         select session_id, workspace_id, title, status, trace_id, created_at, updated_at,
-                               opencode_session_id, opencode_execution_node_id, pinned
+                               opencode_session_id, opencode_execution_node_id, pinned,
+                               source_type, source_ref_id, created_by_user_id
                         from sessions
                         where status = :status
                         """ + queryFilter + """
@@ -157,7 +175,8 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
     public PageResponse<Session> findByWorkspaceId(WorkspaceId workspaceId, PageRequest pageRequest) {
         var items = jdbcClient.sql("""
                         select session_id, workspace_id, title, status, trace_id, created_at, updated_at,
-                               opencode_session_id, opencode_execution_node_id, pinned
+                               opencode_session_id, opencode_execution_node_id, pinned,
+                               source_type, source_ref_id, created_by_user_id
                         from sessions
                         where workspace_id = :workspaceId
                           and status = :status
@@ -232,5 +251,13 @@ public class JdbcSessionRepository extends JdbcRepositorySupport implements Sess
      */
     private String executionNodeIdValue(ExecutionNodeId executionNodeId) {
         return executionNodeId == null ? null : executionNodeId.value();
+    }
+
+    private UserId userId(String value) {
+        return value == null ? null : new UserId(value);
+    }
+
+    private String userIdValue(UserId userId) {
+        return userId == null ? null : userId.value();
     }
 }

@@ -4,11 +4,13 @@ import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.TokenUsage;
+import com.icbc.testagent.domain.session.ConversationSourceType;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionMessage;
 import com.icbc.testagent.domain.session.SessionMessageId;
 import com.icbc.testagent.domain.session.SessionMessageRepository;
 import com.icbc.testagent.domain.session.SessionMessageRole;
+import com.icbc.testagent.domain.user.UserId;
 import java.util.Optional;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -39,7 +41,10 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                     rs.getObject("tokens_cache_read", Long.class),
                     rs.getObject("tokens_cache_write", Long.class)),
             rs.getBigDecimal("cost_usd"),
-            instantOrDefault(rs, "updated_at", instant(rs, "created_at")));
+            instantOrDefault(rs, "updated_at", instant(rs, "created_at")),
+            ConversationSourceType.valueOf(rs.getString("source_type")),
+            rs.getString("source_ref_id"),
+            userId(rs.getString("sender_user_id")));
 
     /**
      * 注入 JdbcClient，消息持久化保持和 Session 聚合分离。
@@ -64,7 +69,10 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                                 tokens_reasoning = :tokensReasoning,
                                 tokens_cache_read = :tokensCacheRead,
                                 tokens_cache_write = :tokensCacheWrite,
-                                cost_usd = :costUsd, updated_at = :updatedAt
+                                cost_usd = :costUsd, updated_at = :updatedAt,
+                                source_type = :sourceType,
+                                source_ref_id = :sourceRefId,
+                                sender_user_id = :senderUserId
                             where message_id = :messageId
                             """)
                     .param("messageId", message.messageId().value())
@@ -84,6 +92,9 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                     .param("tokensCacheWrite", message.tokenUsage().cacheWrite())
                     .param("costUsd", message.costUsd())
                     .param("updatedAt", timestamp(message.updatedAt()))
+                    .param("sourceType", message.sourceType().name())
+                    .param("sourceRefId", message.sourceRefId())
+                    .param("senderUserId", userIdValue(message.senderUserId()))
                     .update();
         } else {
             jdbcClient.sql("""
@@ -91,13 +102,15 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                                 message_id, session_id, role, content, trace_id, created_at,
                                 run_id, agent_id, remote_message_id, parts_json,
                                 tokens_input, tokens_output, tokens_reasoning,
-                                tokens_cache_read, tokens_cache_write, cost_usd, updated_at
+                                tokens_cache_read, tokens_cache_write, cost_usd, updated_at,
+                                source_type, source_ref_id, sender_user_id
                             )
                             values (
                                 :messageId, :sessionId, :role, :content, :traceId, :createdAt,
                                 :runId, :agentId, :remoteMessageId, :partsJson,
                                 :tokensInput, :tokensOutput, :tokensReasoning,
-                                :tokensCacheRead, :tokensCacheWrite, :costUsd, :updatedAt
+                                :tokensCacheRead, :tokensCacheWrite, :costUsd, :updatedAt,
+                                :sourceType, :sourceRefId, :senderUserId
                             )
                             """)
                     .param("messageId", message.messageId().value())
@@ -117,6 +130,9 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                     .param("tokensCacheWrite", message.tokenUsage().cacheWrite())
                     .param("costUsd", message.costUsd())
                     .param("updatedAt", timestamp(message.updatedAt()))
+                    .param("sourceType", message.sourceType().name())
+                    .param("sourceRefId", message.sourceRefId())
+                    .param("senderUserId", userIdValue(message.senderUserId()))
                     .update();
         }
         return message;
@@ -131,7 +147,8 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                         select message_id, session_id, role, content, trace_id, created_at,
                                run_id, agent_id, remote_message_id, parts_json,
                                tokens_input, tokens_output, tokens_reasoning,
-                               tokens_cache_read, tokens_cache_write, cost_usd, updated_at
+                               tokens_cache_read, tokens_cache_write, cost_usd, updated_at,
+                               source_type, source_ref_id, sender_user_id
                         from session_messages
                         where message_id = :messageId
                         """)
@@ -152,7 +169,8 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                         select message_id, session_id, role, content, trace_id, created_at,
                                run_id, agent_id, remote_message_id, parts_json,
                                tokens_input, tokens_output, tokens_reasoning,
-                               tokens_cache_read, tokens_cache_write, cost_usd, updated_at
+                               tokens_cache_read, tokens_cache_write, cost_usd, updated_at,
+                               source_type, source_ref_id, sender_user_id
                         from session_messages
                         where session_id = :sessionId
                           and remote_message_id = :remoteMessageId
@@ -174,7 +192,8 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
                         select message_id, session_id, role, content, trace_id, created_at,
                                run_id, agent_id, remote_message_id, parts_json,
                                tokens_input, tokens_output, tokens_reasoning,
-                               tokens_cache_read, tokens_cache_write, cost_usd, updated_at
+                               tokens_cache_read, tokens_cache_write, cost_usd, updated_at,
+                               source_type, source_ref_id, sender_user_id
                         from session_messages
                         where session_id = :sessionId
                         order by created_at asc, id asc
@@ -202,5 +221,13 @@ public class JdbcSessionMessageRepository extends JdbcRepositorySupport implemen
 
     private String runIdValue(RunId runId) {
         return runId == null ? null : runId.value();
+    }
+
+    private UserId userId(String value) {
+        return value == null ? null : new UserId(value);
+    }
+
+    private String userIdValue(UserId userId) {
+        return userId == null ? null : userId.value();
     }
 }

@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.icbc.testagent.domain.session.SessionId;
+import com.icbc.testagent.domain.session.ConversationSourceType;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -44,5 +46,27 @@ class RunTest {
                         CREATED_AT))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("updatedAt");
+    }
+
+    @Test
+    void runDefaultsToManualSourceAndCanCarryScheduledTriggerUser() {
+        Run manual = new Run(
+                new RunId("run_1234567890abcdef"),
+                new SessionId("ses_1234567890abcdef"),
+                new WorkspaceId("wrk_1234567890abcdef"),
+                RunStatus.PENDING,
+                CREATED_AT,
+                CREATED_AT,
+                "trace_123");
+
+        Run scheduled = manual.withSource(
+                ConversationSourceType.SCHEDULED_TASK,
+                "str_1234567890abcdef",
+                new UserId("usr_1234567890abcdef"));
+
+        assertThat(manual.sourceType()).isEqualTo(ConversationSourceType.MANUAL);
+        assertThat(scheduled.sourceType()).isEqualTo(ConversationSourceType.SCHEDULED_TASK);
+        assertThat(scheduled.sourceRefId()).isEqualTo("str_1234567890abcdef");
+        assertThat(scheduled.triggeredByUserId()).isEqualTo(new UserId("usr_1234567890abcdef"));
     }
 }

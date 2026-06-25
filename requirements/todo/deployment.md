@@ -88,9 +88,53 @@ XDG_DATA_HOME=/data/opencode/session/{port}
 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/
 
 https://opencode.ai/docs/cli/
+
+
 1、进行中和历史会话从数据库中查标题和列表，不直接根据opencode session从opencode查。
 2、一个会话中，每次的用户输入和opencode server的输出需要在这次对话的输出完成后持久化（确认是否是持久化到session_messages中），同时需要增加每次对话的token消耗的持久化。
 3、查询以完成的会话时，优先根据opencode session调用opencode接口恢复会话消息，如果用户的opencode 进程不存在，则从数据库中查询并展示。
 4、优化前端的发送按钮展示逻辑，如果是运行中的状态，则展示为终止按钮，点击以后可以立刻停止输出，并做持久化。
-5、新增run过程中的会话恢复机制，当run还在执行但前端关闭或者刷新是，再次进入会话，如果还是run中，则需要支持查询到历史信息并且仍保证增量输出。由于后端是分布式部署，前端不一定会连接到原来的后端恢复sse输出。建议的方案：前端重新连接后，发送恢复sse的请求，后端负责找到当前sse在哪里，比如sse在B服务器，前端连到了A服务器，则通过A服务器找到B服务器，并在AB之间建立sse。这样来实现后续增量消息的输出，存量消息则从opencode session中查询，然后在前端同步展示增量和存量。
+5、新增run过程中的会话恢复机制，当run还在执行但前端关闭或者刷新是，再次进入会话，如果还是run中，则需要支持查询到历史信息并且仍保证增量输出。最终用的是Redis 广播模式，但是不影响现有的正常前端交互，只有会话恢复才进入redis模式。
 
+# 会话持久化与分布式 SSE 恢复优化计划
+
+## Summary
+
+- 会话列表和标题继续只查平台数据库，不再依赖 opencode session 列表。
+- `session_messages` 从“只存用户文本”升级为“每次 Run 完成后保存用户输入、assistant 输出快照、message parts、token/cost”；token 粒度按每次 Run。
+- 查询会话消息时优先从 opencode session 拉取最新投影并回写数据库；opencode 不可用时从数据库 fallback 展示。
+- Run 执行中刷新/重进页面时，前端先加载存量消息，再订阅 active run 的 SSE；多实例增量输出通过 Redis pub/sub fan-out 到任意后端实例。
+- 发送按钮在运行中切换为停止按钮，点击后调用平台 Run cancel，立即停止本地输出订阅，并触发后端最终快照持久化。
+
+## Key Changes
+
+- 数据库与领域模型：
+  - 新增 Flyway migration 扩展 `session_messages`：`run_id`、`agent_id`、`remote_message_id`、`parts_json`、`tokens_input/output/reasoning/cache_read/cache_write`、`cost_usd`、`updated_at`，并增加 `session_id + run_id`、`session_id + remote_message_id` 查询索引。
+  - 扩展 `runs` 保存同一套 token/cost 字段，便于按 Run 查询每次对话消耗。
+  - 扩展 `SessionMessage`、`Run`、Repository 和 JDBC 映射，保持旧 `content` 文本字段作为兼容 fallback。
+
+- 后端业务/API：
+  - `RunApplicationService` 在 Run 终态、失败、取消后调用消息快照持久化服务：优先拉取 agent projected messages，失败时使用本进程内最后收到的 message projection fallback。
+  - `GET /api/sessions/{sessionId}/messages` 行为改为：有 agent binding 时先查 opencode projected messages 并 upsert 到数据库；opencode 不可用/超时/进程不存在时返回数据库快照。
+  - 新增 `GET /api/sessions/{sessionId}/active-run`，返回当前最新非终态 Run 或 `null`，供刷新后恢复订阅。
+  - `SessionMessageResponse` 增加可选 `runId`、`remoteMessageId`、`parts`、`tokens`、`costUsd`、`updatedAt`；`RunResponse` 增加可选 `tokens`、`costUsd`。旧前端可忽略新增字段。
+
+- 分布式 SSE：
+  - 保留当前 DB replay、`Last-Event-ID`、本机 `RunEventLiveBus` 行为。
+  - 新增可选 Redis RunEvent 广播：发布 durable/transient `RunEventSsePayload` 到 `test-agent:run-events` channel，消息带 `originInstanceId`，本机收到自己消息时忽略，其他实例转发给本机 SSE 客户端。
+  - Redis 不可用或 `TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=false` 时自动降级为现有单机 live bus + DB polling，不影响当前正常 SSE。
+
+- 前端：
+  - `shared-types` 增加 message/run token 字段；`backend-api` 增加 `getActiveRun(sessionId)`。
+  - `frontend-opencode` 的 session store 在 `load()` 时并行加载 session、messages、activeRun；activeRun 非终态时自动订阅 RunEvent SSE。
+  - timeline 按 `messageId` 合并数据库消息和 SSE projection，projection 覆盖同 ID 的旧快照，避免刷新恢复后重复显示。
+  - `PromptComposer` 运行中把发送按钮切换为停止按钮；停止调用 `cancelRun(activeRun.runId)`，立即关闭本地 EventSource 并把 activeRun 标记为 cancelling/cancelled，响应返回后重新加载消息快照。
+
+
+## Assumptions
+
+- token 统计口径按每次 Run；消息和 Run 都保存同一份 usage，缺失字段保持 `null`。
+- Redis 广播是补充实时通道，不替代数据库持久化和 `Last-Event-ID` replay。
+- 不手改 generated SDK；只通过现有 opencode client facade 投影字段。
+- 实施时需同步更新 `docs/api/http-api.md`、`docs/api/event-stream.md`、`docs/deployment/database.md`、相关模块 README/PACKAGE，以及 `frontend-opencode/docs/api-mapping.md`。
+- 实施完成后按项目要求不新建分支，并用中文 commit message 自动提交本次相关改动。

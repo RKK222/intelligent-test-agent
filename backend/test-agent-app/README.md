@@ -15,6 +15,7 @@
 - 启动 `TestAgentApplication`，扫描 `com.icbc.testagent` 下的后端组件。
 - 承载运行时 profile、配置绑定、日志配置、Actuator health、Flyway migration 入口、opencode execution node seed，以及 Java/opencode 运行心跳周期任务装配。
 - 组装 `test-agent-api`、业务模块、persistence、event、opencode-client 等 library jar，形成单一部署包。
+- 装配 `test-agent-scheduler`，默认关闭后台扫描；启用后由 scheduler 模块校验 Redis 必需。
 - 保持生产容器只运行 Java 进程；PostgreSQL、Redis 和 opencode server 均由外部配置注入。
 
 ## 不负责
@@ -43,6 +44,7 @@
 - 根目录 `restart-dev-services.sh` 读取 `.env.local` 后，若未配置 `TEST_AGENT_LINUX_SERVER_ID`、`TEST_AGENT_BACKEND_LISTEN_URL` 或 `OPENCODE_MANAGER_LINUX_SERVER_ID`，会自动使用默认路由网卡 IPv4 注册本机运行拓扑。
 - `application-test.yml`：数据库使用 `TEST_AGENT_TEST_DB_*`，opencode node 使用 `TEST_AGENT_OPENCODE_*`，均指向外部研发测试服务。
 - `application-prod.yml`：数据库、API token、CORS、Redis 和 opencode baseUrl 均通过环境变量注入，不提供真实密钥默认值。
+- `application.yml`：`test-agent.scheduler.enabled` 默认 `false`，可通过 `TEST_AGENT_SCHEDULER_ENABLED` 显式启用。
 - Workspace 目录选择器允许根目录通过 `test-agent.workspace-picker.allowed-roots` / `TEST_AGENT_WORKSPACE_PICKER_ROOTS` 配置，逗号分隔，默认 `${user.home}/workspace`。
 - 应用版本工作区物理根目录通过 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT` 配置，未配置时业务层回退到 `${user.home}/test-agent-data`。
 - `com.h2database:h2` 仅以 test scope 存在，用于 Docker 不可用时的无持久化启动冒烟；正式 local profile 仍以 PostgreSQL/Flyway 为准。
@@ -50,7 +52,7 @@
 ## 测试覆盖
 
 - `AppModuleBoundaryTest` 保证 app 模块不回流 workspace、session、run、runtime、terminal、web 等业务包。
-- `TestAgentRuntimePropertiesBindingTest` 覆盖默认值、local/test/prod profile 配置绑定、目录选择根、终端安全阈值、Redis、opencode 节点、manager 控制面 gateway-mode 与本地短路开关（`local-direct` / `local-direct-base-url`）。
+- `TestAgentRuntimePropertiesBindingTest` 覆盖默认值、local/test/prod profile 配置绑定、目录选择根、终端安全阈值、Redis、scheduler 默认关闭、opencode 节点、manager 控制面 gateway-mode 与本地短路开关（`local-direct` / `local-direct-base-url`）。
 - `ExecutionNodeSeederTest` 覆盖启动时从配置 seed opencode execution node。
 - `OpencodeNodesHealthIndicatorTest` 覆盖全部节点可用时 UP、节点异常时 DOWN，且健康详情只暴露安全错误类别。
 - `RedisOptionalHealthIndicatorTest` 覆盖 Redis 未启用时返回 UP/disabled。
@@ -59,7 +61,7 @@
 ## 允许依赖
 
 - `test-agent-api`。
-- `test-agent-system-management`、`test-agent-integration` 运行装配骨架。
+- `test-agent-system-management`、`test-agent-scheduler`、`test-agent-integration` 运行装配骨架。
 - `test-agent-common`、`test-agent-domain`、`test-agent-observability`。
 - `test-agent-persistence`、`test-agent-event`、`test-agent-opencode-client`，仅用于运行装配、migration、health 和 seed。
 - Flyway Core、PostgreSQL database support、Spring Boot starters、Log4j2 starter。
