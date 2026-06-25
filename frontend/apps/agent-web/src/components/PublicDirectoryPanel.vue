@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { AlertTriangle, ChevronRight, FileText, Folder, Loader2, RefreshCw } from "lucide-vue-next";
+import { ref, watch } from "vue";
+import { AlertTriangle, Loader2, RefreshCw } from "lucide-vue-next";
 import { createBackendApiClient, BackendApiError } from "@test-agent/backend-api";
-import { cn } from "@test-agent/ui-kit";
 import type { FileContent, FileTreeEntry } from "@test-agent/shared-types";
+import PublicDirectoryNode from "./PublicDirectoryNode.vue";
 
 /**
  * 公共目录面板：浏览 application.yml 中 test-agent.public-directory.path 指定的固定根目录。
@@ -13,6 +13,9 @@ import type { FileContent, FileTreeEntry } from "@test-agent/shared-types";
  *   <li>展开/读取：所有登录用户</li>
  *   <li>写入：仅 SUPER_ADMIN（在 canWrite 为 true 时显示）</li>
  * </ul>
+ *
+ * <p>树形渲染由递归子组件 {@link PublicDirectoryNode} 完成，支持任意层级；
+ * 本组件只维护 path -> 子项 / 已展开目录 / 正在加载目录 三份状态。
  */
 
 const props = defineProps<{
@@ -105,8 +108,8 @@ function refresh() {
   });
 }
 
-const headerLabel = computed(() => "公共目录");
-const headerTitle = computed(() => "公共目录（由后端 test-agent.public-directory.path 配置）");
+const headerLabel = "公共目录";
+const headerTitle = "公共目录（由后端 test-agent.public-directory.path 配置）";
 
 function errorMessageFor(error: unknown, fallback: string): string {
   if (error instanceof BackendApiError) {
@@ -116,21 +119,6 @@ function errorMessageFor(error: unknown, fallback: string): string {
     return `${fallback}：${error.message}`;
   }
   return fallback;
-}
-
-// 已知为空的目录：不再渲染 chevron，避免出现可点开但无内容的指示。
-function isKnownEmptyDirectory(path: string): boolean {
-  const children = entriesByDirectory.value[path];
-  return Array.isArray(children) && children.length === 0;
-}
-
-function onRowClick(entry: FileTreeEntry) {
-  if (entry.type === "directory") {
-    if (isKnownEmptyDirectory(entry.path)) return;
-    toggleDirectory(entry.path);
-  } else {
-    void openFile(entry.path);
-  }
 }
 
 // 监听 baseUrl 变化后重新构造 client（开发期 hot reload 也会触发）。
@@ -171,64 +159,17 @@ watch(
         加载中…
       </div>
       <div v-else>
-        <div
+        <PublicDirectoryNode
           v-for="entry in entriesByDirectory[''] ?? []"
           :key="entry.path"
-        >
-          <button
-            type="button"
-            :class="cn(
-              'flex h-7 w-full items-center gap-1 rounded px-1 text-left text-[14px] leading-5 text-[var(--ta-subtle)] hover:bg-[var(--ta-hover)]'
-            )"
-            @click="onRowClick(entry)"
-          >
-            <template v-if="entry.type === 'directory'">
-              <ChevronRight
-                v-if="!isKnownEmptyDirectory(entry.path)"
-                :class="cn('h-3.5 w-3.5 text-[var(--ta-muted)] transition', expandedDirectories.has(entry.path) && 'rotate-90')"
-              />
-              <span v-else class="w-3.5" />
-              <Folder class="h-4 w-4 text-[var(--ta-muted)]" />
-            </template>
-            <template v-else>
-              <span class="w-3.5" />
-              <FileText class="h-4 w-4 text-[var(--ta-muted)]" />
-            </template>
-            <span class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
-            <Loader2 v-if="loadingPath.has(entry.path)" class="h-3.5 w-3.5 animate-spin text-[var(--ta-muted)]" />
-          </button>
-          <!-- 展开后展示子项；保持单层 lazy 加载语义与工作区文件树一致。 -->
-          <div
-            v-if="entry.type === 'directory' && expandedDirectories.has(entry.path)"
-            class="space-y-px"
-          >
-            <button
-              v-for="child in entriesByDirectory[entry.path] ?? []"
-              :key="child.path"
-              type="button"
-              :class="cn(
-                'flex h-7 w-full items-center gap-1 rounded px-1 text-left text-[14px] leading-5 text-[var(--ta-subtle)] hover:bg-[var(--ta-hover)]'
-              )"
-              :style="{ paddingLeft: '14px' }"
-              @click="onRowClick(child)"
-            >
-              <template v-if="child.type === 'directory'">
-                <ChevronRight
-                  v-if="!isKnownEmptyDirectory(child.path)"
-                  :class="cn('h-3.5 w-3.5 text-[var(--ta-muted)] transition', expandedDirectories.has(child.path) && 'rotate-90')"
-                />
-                <span v-else class="w-3.5" />
-                <Folder class="h-4 w-4 text-[var(--ta-muted)]" />
-              </template>
-              <template v-else>
-                <span class="w-3.5" />
-                <FileText class="h-4 w-4 text-[var(--ta-muted)]" />
-              </template>
-              <span class="min-w-0 flex-1 truncate">{{ child.name }}</span>
-              <Loader2 v-if="loadingPath.has(child.path)" class="h-3.5 w-3.5 animate-spin text-[var(--ta-muted)]" />
-            </button>
-          </div>
-        </div>
+          :entry="entry"
+          :depth="0"
+          :entries-by-directory="entriesByDirectory"
+          :expanded-directories="expandedDirectories"
+          :loading-path="loadingPath"
+          @toggle="toggleDirectory"
+          @open-file="openFile"
+        />
         <div
           v-if="(entriesByDirectory[''] ?? []).length === 0"
           class="px-2 py-3 text-[12px] text-[var(--ta-muted)]"
