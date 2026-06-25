@@ -38,7 +38,12 @@ const emit = defineEmits<{
   openFile: [path: string];
 }>();
 
-const children = computed<FileTreeEntry[]>(() => props.entriesByDirectory[props.entry.path] ?? []);
+// 严格区分"未加载"和"已加载为空数组"：
+// - children 为 undefined：尚未请求过该目录的子项，需要渲染 chevron + 允许点击
+// - children 为 []：已经请求过且后端返回为空，渲染空白占位、不再发请求
+// 不能用 `?? []` 把 undefined 兜底成空数组，否则 isKnownEmpty 会在未加载时误判为 true，
+// 导致 chevron 不渲染且 onRowClick 直接 return，目录永远打不开。
+const children = computed<FileTreeEntry[] | undefined>(() => props.entriesByDirectory[props.entry.path]);
 const isExpanded = computed(() => props.expandedDirectories.has(props.entry.path));
 const isLoading = computed(() => props.loadingPath.has(props.entry.path));
 const isDirectory = computed(() => props.entry.type === "directory");
@@ -85,7 +90,7 @@ function onRowClick() {
     </button>
     <div v-if="isDirectory && isExpanded" class="space-y-px">
       <PublicDirectoryNode
-        v-for="child in children"
+        v-for="child in children ?? []"
         :key="child.path"
         :entry="child"
         :depth="depth + 1"
