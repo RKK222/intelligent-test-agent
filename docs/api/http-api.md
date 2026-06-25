@@ -421,6 +421,15 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 
 > 公共目录（也叫"固定路径内容扫描"）：根目录由后端 `test-agent.public-directory.path`（环境变量 `TEST_AGENT_PUBLIC_DIRECTORY_PATH`）指定，所有登录用户可浏览/读取，SUPER_ADMIN 额外可写。路径留空时整个服务禁用，调用方按未启用处理（HTTP 404）。
 
+各 profile 协商默认值（可用 `TEST_AGENT_PUBLIC_DIRECTORY_PATH` 覆盖，留空则禁用）：
+
+| profile | 默认 `test-agent.public-directory.path` | 适用场景 |
+|---|---|---|
+| `guo`（默认激活） | `D:/agents` | 本机 Windows 调试，挂在 `D:\agents` 目录 |
+| `local` | `/data/agents-pub` | 本地联调，Linux 容器挂载点 |
+| `test` | `/data/agents-pub` | 集成测试 |
+| `prod` | `/data/agents-pub` | 生产部署，**必须**显式 env 覆盖到实际挂载目录 |
+
 | 方法 | 路径 | 用途 | 角色 |
 |---|---|---|---|
 | `GET` | `/api/public/files?path=` | 公共目录下的一层目录列表；`path` 缺省表示公共根目录。 | 已登录用户 |

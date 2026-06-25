@@ -57,8 +57,9 @@ test-agent:
   workspace-picker:
     allowed-roots: D:/workspace
   # 公共目录：所有登录用户可浏览/读取，SUPER_ADMIN 额外可写；留空表示禁用。
+  # 各 profile 协商默认值：guo = D:/agents，其他 profile = /data/agents-pub，可用 env 覆盖。
   public-directory:
-    path: ${TEST_AGENT_PUBLIC_DIRECTORY_PATH:}
+    path: ${TEST_AGENT_PUBLIC_DIRECTORY_PATH:/data/agents-pub}
   managed-workspace:
     root: ${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}
   redis:
