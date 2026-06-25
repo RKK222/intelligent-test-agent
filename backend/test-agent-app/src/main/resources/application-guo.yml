@@ -5,7 +5,7 @@ spring:
   datasource:
     druid:
       driver-class-name: org.postgresql.Driver
-      url: jdbc:postgresql://192.168.100.115:15432/testagent?sslmode=disable
+      url: jdbc:postgresql://192.168.100.194:5432/test_agent?sslmode=disable
       username: testagent
       password: testagent
   flyway:
@@ -13,8 +13,8 @@ spring:
     locations: classpath:db/migration
   data:
     redis:
-      host: 192.168.100.115
-      port: 16379
+      host: 127.0.0.1
+      port: 6379
       password: ""
       timeout: 1s
 
@@ -36,10 +36,25 @@ test-agent:
     root: ${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}
   redis:
     enabled: true
-    host: 192.168.100.115
-    port: 16379
+    host: 127.0.0.1
+    port: 6379
     password: ""
   opencode:
+    # 本地开发通常没有 opencode-manager 容器在跑；用 local 网关直连 baseUrl 做 health/start 占位。
+    # production profile 不会继承该值（默认 socket）。
+    manager-control:
+      gateway-mode: ${TEST_AGENT_OPENCODE_GATEWAY_MODE:local}
+      token: ${TEST_AGENT_OPENCODE_MANAGER_TOKEN:}
+      listen-url: ${TEST_AGENT_BACKEND_LISTEN_URL:http://127.0.0.1:8080}
+      linux-server-id: ${TEST_AGENT_LINUX_SERVER_ID:127.0.0.1}
+      heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:10s}
+      backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:30s}
+      command-timeout: ${TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT:10s}
+      backend-discovery-limit: ${TEST_AGENT_BACKEND_DISCOVERY_LIMIT:100}
+    # 本地开发短路：直接返回合成 READY，跳过 database topology / binding / health。
+    # 任何调用方都不会被 manager / V17 容器状态阻塞，默认连 127.0.0.1:4096。
+    local-direct: ${TEST_AGENT_OPENCODE_LOCAL_DIRECT:true}
+    local-direct-base-url: ${TEST_AGENT_OPENCODE_BASE_URL:http://127.0.0.1:4096}
     nodes:
       - id: node_local_opencode
         base-url: http://127.0.0.1:4096

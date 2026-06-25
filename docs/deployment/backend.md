@@ -272,7 +272,7 @@ V17 migration（`backend/test-agent-persistence/src/main/resources/db/migration/
 
 ## 本地开发 opencode 短路模式
 
-`local` profile 同时启用 `test-agent.opencode.local-direct=true`（受 `TEST_AGENT_OPENCODE_LOCAL_DIRECT` 覆盖，默认 `true`）。该开关在 `UserOpencodeProcessAssignmentService` 的 `status` / `initialize` / `requireReadyProcess` 三个入口短路整个 topology / binding / health 校验链路，直接合成一个指向 `test-agent.opencode.local-direct-base-url`（默认 `http://127.0.0.1:4096`）的 READY 进程对象给前端。
+`local` / `guo`（开发常用 profile）默认启用 `test-agent.opencode.local-direct=true`（受 `TEST_AGENT_OPENCODE_LOCAL_DIRECT` 覆盖，默认 `true`）。该开关在 `UserOpencodeProcessAssignmentService` 的 `status` / `initialize` / `requireReadyProcess` 三个入口短路整个 topology / binding / health 校验链路，直接合成一个指向 `test-agent.opencode.local-direct-base-url`（默认 `http://127.0.0.1:4096`）的 READY 进程对象给前端。
 
 行为说明：
 
