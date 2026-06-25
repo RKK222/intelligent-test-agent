@@ -15,7 +15,7 @@
 - `components/AgentWorkbench.vue`：组合 workspace、应用切换、用户头像退出、应用版本/个人工作区切换与同步、文件树、编辑器、Agent、RunEvent SSE、Session History 搜索/置顶/删除、历史会话只读态、prompt 附件/follow-up 队列、编辑器选区上下文、Diff 操作和底部 PTY terminal panel。
 - `components/settings/SettingsDialog.vue`：左下角设置模态，组合应用人员、代码库关联、应用工作空间和个人 SSH key 配置管理；无应用配置权限时展示当前角色无权限提示。
 - `components/AgentWorkbench.vue`：组合 workspace、应用切换、应用版本/个人工作区切换与同步、文件树、编辑器、Agent、RunEvent SSE、Session History 搜索/置顶/删除、历史会话只读态、prompt 附件/follow-up 队列、编辑器选区上下文、Diff 操作和底部 PTY terminal panel。
-- `components/settings/SettingsDialog.vue`：左下角设置模态，组合应用人员、代码库关联、应用工作空间、超级管理员运行管理只读面板和个人 SSH key 配置管理；无应用配置权限时展示当前角色无权限提示。
+- `components/settings/SettingsDialog.vue`：左下角设置模态，组合应用人员、代码库关联、应用工作空间、超级管理员运行管理只读面板和个人 SSH key 配置管理；无应用配置权限时展示当前角色无权限提示；"应用人员管理" tab 用 `el-autocomplete` 异步下拉搜索候选用户（userId/unifiedAuthId/username LIKE 匹配），选中后主按钮从"搜索"切换为"添加"。
 - `components/EditorPane.vue`、`WorkspaceBootstrap.vue`、`ReadonlyTranscript.vue`：编辑器 tab 壳、Workspace 注册引导和只读 transcript 视图（不订阅 SSE，不直连 opencode）。
 - `components/follow-up-queue.ts`：Run 忙碌时 prompt follow-up 的纯 FIFO 队列模型。
 - `components/prompt-context.ts`：活动编辑器或 Monaco 选区到 `PromptPart` file context 的纯转换。
