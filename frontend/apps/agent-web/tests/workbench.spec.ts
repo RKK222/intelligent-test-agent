@@ -528,6 +528,18 @@ test("workspace cascade menu +新增版本 dialog opens with yyyy年M月 label",
   await expect(dialog.locator(".el-date-editor input")).toHaveAttribute("placeholder", "请选择月份");
   // 没选日期时确定按钮处于 disabled
   await expect(dialog.getByRole("button", { name: "确定" })).toBeDisabled();
+
+  // 打开日期面板，验证月份显示中文"1月/2月/…"而不是英文"Jan/Feb/…"
+  // （依赖 main.ts 里的 dayjs.locale("zh-cn")）
+  await dialog.locator(".el-date-editor input").click();
+  const monthPanel = page.locator(".el-month-table");
+  await expect(monthPanel).toBeVisible();
+  // 调试：dump 月份面板的 HTML 看实际结构
+  // eslint-disable-next-line no-console
+  console.log("[monthPanel html]", await monthPanel.innerHTML());
+  // 第一个月文案应该是"1月"（Element Plus 2.12 用 div.month 或 td）
+  await expect(monthPanel.getByText(/^1月$/).first()).toBeVisible();
+  await expect(monthPanel.getByText(/^6月$/).first()).toBeVisible();
 });
 
 test("workspace cascade submenu shifts up when it would overflow the viewport bottom", async ({ page, isMobile }) => {

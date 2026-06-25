@@ -22,6 +22,7 @@
     "@test-agent/ui-kit": "workspace:*",
     "@test-agent/workbench-shell": "workspace:*",
     "dockview-vue": "6.6.1",
+    "dayjs": "1.11.21",
     "element-plus": "2.12.0",
     "lucide-vue-next": "1.0.0",
     "monaco-editor": "0.55.1",
