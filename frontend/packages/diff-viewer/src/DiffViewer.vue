@@ -93,14 +93,14 @@ function moveHunk(direction: "previous" | "next") {
   }
 }
 
-onMounted(async () => {
-  if (!containerEl.value) return;
+async function initMonaco(el: HTMLElement) {
+  if (diffEditor.value) return;
   const mod = await import("./monaco-env");
   monacoLib = mod.monaco;
   const lang = diffLanguage(selected.value?.path);
   originalModel = monacoLib.editor.createModel(parsed.value.original, lang);
   modifiedModel = monacoLib.editor.createModel(parsed.value.modified, lang);
-  const inst = monacoLib.editor.createDiffEditor(containerEl.value, {
+  const inst = monacoLib.editor.createDiffEditor(el, {
     readOnly: true,
     renderSideBySide: props.viewMode === "split",
     minimap: { enabled: false },
@@ -111,7 +111,28 @@ onMounted(async () => {
   });
   inst.setModel({ original: originalModel, modified: modifiedModel });
   diffEditor.value = inst;
-});
+}
+
+function disposeMonaco() {
+  diffEditor.value?.dispose();
+  originalModel?.dispose();
+  modifiedModel?.dispose();
+  diffEditor.value = null;
+  originalModel = null;
+  modifiedModel = null;
+}
+
+watch(
+  containerEl,
+  (el) => {
+    if (el) {
+      initMonaco(el);
+    } else {
+      disposeMonaco();
+    }
+  },
+  { immediate: true }
+);
 
 // patch 变化时更新模型内容
 watch(
@@ -142,12 +163,7 @@ watch(
 );
 
 onBeforeUnmount(() => {
-  diffEditor.value?.dispose();
-  originalModel?.dispose();
-  modifiedModel?.dispose();
-  diffEditor.value = null;
-  originalModel = null;
-  modifiedModel = null;
+  disposeMonaco();
 });
 </script>
 

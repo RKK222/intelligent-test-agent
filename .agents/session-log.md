@@ -23,9 +23,10 @@
   - 移除了 commit 选项复选框（SignOff、No-Verify、Amend），简化了提交表单。
   - 重构了 `DiffViewer.vue`：当审查应用工作区或 Agent 变更时，隐藏左侧的文件与 Hunks 列表，隐藏头部 VCS、Split/Unified 下拉框、刷新按钮及 VCS Diff 标题，只保留 Monaco 对比和 Hunk 导航。
   - 实现了单击列表文件即可显示对应文件的实际 Diff 对比效果，并修复了 Diff 文件选择被覆盖重置的 bug。
+  - 修复了 `DiffViewer.vue` 中由于初始 `files` 列表为空导致 Monaco 编辑器容器未在 DOM 中渲染，从而使 Monaco 未能成功初始化的问题。
   - 在“未暂存”与“已暂存”面板间加入了拖拽调节高度的分栏分割线。
-- How: 在 `DiffViewer.vue` 与 `GitChangesPanel.vue` 中对多余 of UI 元素增加 `v-if` 条件过滤，并清除 commit 复选框。
-- Result: Diff 视图变得极简专业，只呈现实际比对效果；前端编译与校验全部通过。
+- How: 在 `DiffViewer.vue` 与 `GitChangesPanel.vue` 中对多余的 UI 元素增加 `v-if` 条件过滤，清除 commit 复选框。同时在 `DiffViewer.vue` 中将 `onMounted` 内的 Monaco 初始化逻辑改为了对 `containerEl` 的 `watch` 侦听器，动态在容器 DOM 渲染后挂载 Monaco 差异编辑器，并在容器销毁时安全释放其内存资源。
+- Result: Diff 视图变得极简专业，在首次加载、切换文件或更新列表时，Monaco 对照视图均能秒级流畅呈现实际差异；前端编译与校验全部通过。
 
 
 ### 2026-06-26 - 工作台侧边栏布局调整与折叠拖拽重构
