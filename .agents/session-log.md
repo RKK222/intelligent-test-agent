@@ -4,14 +4,16 @@
 
 ### 2026-06-26 - 服务器工作空间目录选择器优化为 macOS Finder 风格
 
-- Why: 用户反馈服务器工作空间目录选择器布局简易，希望参考 macOS Finder 的文件管理风格进行界面优化，提升交互美感和可用性。
-- What: 重构了 `frontend/apps/agent-web/src/components/ServerWorkspacePickerDialog.vue`：
-  - 工具栏：引入了 macOS Finder 风格的工具栏，包括工作可用的后退/前进按钮、用于展示层级路径面包屑的 Location Bar，以及将“选择此目录”按钮作为右侧主操作项。
-  - 路径导航：支持基于组件内部 historyStack 的标准后退与前进操作，并对面包屑各层级支持直接点击跳转，其中用户 Home 目录渲染专属的 Home 图标。
-  - 列表视图：将原有的简单文件夹列表改造成了带有表头（名称、修改日期、大小、种类）、横向分列对齐、隔行换色（zebra stripes）的 macOS Finder list-view 结构，文件夹图标替换为 macOS 亮蓝色风格，且增加了悬停和聚焦效果。
-  - 错误展示：将同机校验警告以醒目的红色警告条形式渲染在顶部。
-- How: 重构 template 布局，利用 grid-cols 划分列表列宽；在 script 中实现基于 computed breadcrumbs 的路径解析与基于 watch props.directory.path 路径变化的 history 机制。
-- Result: 界面完美对齐 macOS Finder 文件管理器的精致风格；运行 `@test-agent/agent-web` 的类型检查和 Vitest 测试均顺利通过。
+- Why: 用户反馈服务器工作空间目录选择器布局简易，希望参考 macOS Finder 的文件管理风格进行界面优化，且要求解决文件夹选中后窗口尺寸跳动问题、精简多余列信息、并支持通过点击左侧折叠箭头 inline 展开子目录结构。
+- What:
+  - 窗口尺寸固定：锁定了 `ServerWorkspacePickerDialog.vue` 弹窗的物理尺寸为 `h-[580px] w-[840px]`，保证在任何文件夹切换、加载、或空状态下高度和宽度保持绝对稳定。
+  - 列信息精简与一整行显示：去掉了原 Finder 风格中多余的“修改日期”、“大小”和“种类”列，让文件夹名称占满整行，视觉更聚焦。
+  - 折叠展开与单点跳转交互（引入新组件 [ServerWorkspaceDirectoryNode.vue](file:///Users/huang/workspace/intelligent-test-agent-gitee/frontend/apps/agent-web/src/components/ServerWorkspaceDirectoryNode.vue)）：
+    - 文件夹左侧的 chevron 旋转箭头 `>` 为折叠/展开开关。点击 `>` 将 inline 展开显示子目录树而不发生全局页面跳转；
+    - 点击文件夹名称文字或图标时，才会执行全局的下一级目录导航（向父组件发出 `navigate` 并更新顶部面包屑）。
+  - 路径导航与工具栏：包括后退/前进按钮、面包屑 Location Bar 以及“选择此目录”主按钮。
+- How: 拆分出递归组件 `ServerWorkspaceDirectoryNode.vue`，利用 computed/refs 管理各层级文件夹独立的展开、加载与缓存状态。
+- Result: 对齐 macOS Finder 体验，解决了布局尺寸抖动，实现了完美的树状文件夹折叠展开浏览。类型检查及单元测试完全通过。
 
 ### 2026-06-26 - 恢复 opencode 初始化按钮并重启本地 manager
 

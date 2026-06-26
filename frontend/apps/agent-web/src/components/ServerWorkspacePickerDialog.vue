@@ -3,6 +3,7 @@ import { computed, ref, watch } from "vue";
 import type { WorkspaceBackendServer, WorkspaceDirectoryList } from "@test-agent/shared-types";
 import { AlertTriangle, ChevronLeft, ChevronRight, Folder, Home, Server } from "lucide-vue-next";
 import { Button } from "@test-agent/ui-kit";
+import ServerWorkspaceDirectoryNode from "./ServerWorkspaceDirectoryNode.vue";
 
 const props = defineProps<{
   open: boolean;
@@ -119,7 +120,7 @@ const breadcrumbs = computed(() => {
         role="dialog"
         aria-modal="true"
         aria-label="选择服务器工作空间"
-        class="flex max-h-[min(700px,calc(100vh-48px))] w-[min(880px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl"
+        class="flex h-[580px] w-[840px] max-h-[calc(100vh-48px)] max-w-[calc(100vw-24px)] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl"
       >
         <header class="flex h-12 shrink-0 items-center justify-between border-b border-[var(--ta-border)] px-4">
           <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">选择服务器工作空间</h2>
@@ -222,46 +223,23 @@ const breadcrumbs = computed(() => {
               </Button>
             </div>
 
-            <!-- macOS Finder list-view table -->
+            <!-- macOS Finder list-view container -->
             <div class="flex-1 flex flex-col min-h-0 bg-white border border-[var(--ta-border)] rounded-md overflow-hidden shadow-sm">
-              <!-- Header -->
-              <div class="grid grid-cols-[1fr_150px_100px_100px] border-b border-[var(--ta-border)] bg-[#fafafa] px-3 py-1.5 text-[11px] font-semibold text-gray-400 select-none text-left shrink-0">
-                <div>名称</div>
-                <div>修改日期</div>
-                <div>大小</div>
-                <div>种类</div>
-              </div>
-              
               <!-- Content -->
-              <div class="flex-1 overflow-y-auto min-h-0 divide-y divide-gray-100">
+              <div class="flex-1 overflow-y-auto min-h-0 py-1">
                 <div v-if="loading" class="px-3 py-8 text-[13px] text-[var(--ta-muted)] text-center">正在加载目录</div>
                 <div v-else-if="serverMismatch" class="px-3 py-8 text-[13px] text-[var(--ta-muted)] text-center">请选择与当前 agent 相同的服务器后继续。</div>
                 <div v-else-if="!directory?.entries.length" class="px-3 py-8 text-[13px] text-[var(--ta-muted)] text-center">没有可进入的子目录</div>
                 <template v-else>
-                  <button
-                    v-for="(entry, index) in directory?.entries ?? []"
+                  <ServerWorkspaceDirectoryNode
+                    v-for="entry in directory.entries"
                     :key="entry.path"
-                    type="button"
-                    :class="[
-                      'grid grid-cols-[1fr_150px_100px_100px] w-full items-center px-3 py-1.5 text-left text-[12px] select-none text-gray-700 hover:bg-[#e8f2ff] focus:outline-none focus:bg-[#e8f2ff] transition-colors duration-150',
-                      index % 2 === 1 ? 'bg-[#fafafa]' : 'bg-white'
-                    ]"
+                    :entry="entry"
+                    :level="0"
                     :disabled="serverMismatch"
-                    @click="emit('navigate', entry.path)"
-                  >
-                    <!-- Column 1: Name -->
-                    <span class="flex items-center gap-1.5 min-w-0">
-                      <ChevronRight class="h-3 w-3 text-gray-300 shrink-0" />
-                      <Folder class="h-4 w-4 shrink-0 text-[#3b82f6] fill-[#3b82f6]/10" />
-                      <span class="min-w-0 flex-1 truncate text-gray-900 font-medium">{{ entry.name }}</span>
-                    </span>
-                    <!-- Column 2: Date Modified -->
-                    <span class="text-gray-400 text-[11px] truncate pr-2">—</span>
-                    <!-- Column 3: Size -->
-                    <span class="text-gray-400 text-[11px] text-right pr-4 shrink-0">—</span>
-                    <!-- Column 4: Kind -->
-                    <span class="text-gray-400 text-[11px] truncate">文件夹</span>
-                  </button>
+                    :selected-server="selectedServer"
+                    @navigate="(path) => emit('navigate', path)"
+                  />
                 </template>
               </div>
             </div>
