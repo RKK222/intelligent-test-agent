@@ -18,16 +18,17 @@
 ### 2026-06-26 - 工作台侧边栏布局调整与一级目录可折叠重构
 ### 2026-06-26 - 工作区变更管理面板(Git Source Control)重构与美化
 
-- Why: 增强工作台变更(Changes)标签页的源代码控制功能，支持以极佳的 Git 样式分别展示“应用工作空间”与“agents”的未暂存与已暂存文件，单击/双击查看 Monaco 侧边 diff，并支持暂存/取消暂存、提交与推送动作，以及支持 UNSTAGED/STAGED 面板间的手工拉伸。
+- Why: 增强工作台变更(Changes)标签页的源代码控制功能，支持以极佳 of Git 样式分别展示“应用工作空间”与“agents”的未暂存与已暂存文件，单击/双击查看 Monaco 侧边 diff，并支持暂存/取消暂存、提交与推送动作，以及支持 UNSTAGED/STAGED 面板间的手工拉伸。
 - What:
   - 新增 `GitChangesPanel.vue` 前端 Git 控制面板，提供 `UNSTAGED`/`STAGED` 分组折叠菜单、悬停暂存按钮和底部提交表单（支持 SignOff/No-Verify/Amend 选项，及提交/推送操作）。
-  - 支持“加载/清除测试数据”按钮，自动注入包含修改明细与 Patch 内容的模拟 VCS 与 Agent 变更，修改其为**单击触发**直接激活 Monaco Diff 渲染，避免双击不响应，提供出色的本地化 diff 效果预览。
+  - 支持“加载/清除测试数据”按钮，自动注入包含修改明细与 Patch 内容的模拟 VCS 与 Agent 变更，修改其为**单击触发**直接激活 Monaco Diff 渲染，提供出色的本地化 diff 效果预览。
+  - 修复了在 `AgentWorkbench.vue` 中调用 `loadDiffSource` 加载文件列表时，`workbench.selectedDiffPath` 总是被无条件重置为列表第一个文件的 Bug，确保单击任何文件都能展示对应文件的实际 Diff 差异。
   - 在 `GitChangesPanel.vue` 的 `UNSTAGED`（未暂存）和 `STAGED`（已暂存）两大部分之间加入了 `git-pane-resize-handle` 横向分割线，支持在两展开栏目间自由**上下拉动拖拽**调节高度占比，并在单边折叠时自适应填满。
   - 汉化 `UNSTAGED`（未暂存）与 `STAGED`（已暂存）主栏目标题；为 `SignOff`/`No-Verify`/`Amend` 复选框添加详尽的悬停中文释义 tooltip，解答其深层作用。
   - 对接 agents 的 stage/unstage/commit/publish 真实后端 API；对应用工作空间进行前端模拟；将 `FigmaShell.vue` 拖拽热区宽度从 4px 提高至 6px 优化拉伸体验。
   - 在 `workbenchStore.ts` 引入全局 worktree 与测试模式状态，使 `AgentConfigPanel` 与 `GitChangesPanel` 共享 active 工作区；`DiffViewer.vue` 新增 `agent` 支持并隐藏 AI 采纳按钮。
-- How: 借助 Vue 组合式状态及 Pinia 实现前端暂存集及测试数据开关，鼠标监听 mousemove/mouseup 来动态调整 `unstagedHeight` 的高度值，Monaco 编辑器解析 mock Patch 生成 original/modified 模型。
-- Result: 变更页面体验达到 IDE 级，单击即可在右侧顺畅加载 diff，两区也支持灵活地手动拉动伸缩；前端编译和类型校验全部正常。
+- How: 借助 Vue 组合式状态及 Pinia 实现前端暂存集及测试数据开关，鼠标监听 mousemove/mouseup 来动态调整 `unstagedHeight` 的高度值，Monaco 编辑器解析 mock Patch 生成 original/modified 模型，并在 `loadDiffSource` 中通过已选择路径的存在性守卫防止被强制重置。
+- Result: 变更页面体验达到 IDE 级，单击即可在右侧顺畅加载对应文件的实际前后 diff 差异，两区也支持灵活地手动拉动伸缩；前端编译和类型校验全部正常。
 
 ### 2026-06-26 - 工作台侧边栏布局调整与折叠拖拽重构
 

@@ -1816,7 +1816,9 @@ async function loadDiffSource(source: "run" | "session" | "vcs" | "agent") {
       nextFiles = [...mappedPub, ...mappedWks];
     }
     diffFiles.value = nextFiles;
-    workbench.setSelectedDiffPath(nextFiles[0]?.path);
+    if (!workbench.selectedDiffPath || !nextFiles.some((f) => f.path === workbench.selectedDiffPath)) {
+      workbench.setSelectedDiffPath(nextFiles[0]?.path);
+    }
   } catch (error) {
     feedback.value = errorFeedback("加载 Diff 失败", error);
   }
