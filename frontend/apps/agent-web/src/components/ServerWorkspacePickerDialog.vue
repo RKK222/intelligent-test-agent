@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import type { WorkspaceBackendServer, WorkspaceDirectoryList } from "@test-agent/shared-types";
 import { AlertTriangle, ChevronLeft, ChevronRight, Folder, Home, Server } from "lucide-vue-next";
 import { Button } from "@test-agent/ui-kit";
@@ -52,6 +52,22 @@ watch(
     historyIndex.value = -1;
   }
 );
+
+const breadcrumbsRef = ref<HTMLElement | null>(null);
+
+const scrollToRight = async () => {
+  await nextTick();
+  if (breadcrumbsRef.value) {
+    breadcrumbsRef.value.scrollLeft = breadcrumbsRef.value.scrollWidth;
+  }
+};
+
+watch(() => props.directory?.path, scrollToRight);
+watch(() => props.open, (isOpen) => {
+  if (isOpen) {
+    scrollToRight();
+  }
+});
 
 function goBack() {
   if (historyIndex.value > 0) {
@@ -187,7 +203,10 @@ const breadcrumbs = computed(() => {
               </div>
 
               <!-- Location breadcrumbs -->
-              <div class="flex flex-1 min-w-0 items-center gap-0.5 px-2.5 py-1 bg-white border border-[var(--ta-border)] rounded h-7 overflow-x-auto scrollbar-none">
+              <div
+                ref="breadcrumbsRef"
+                class="flex flex-1 min-w-0 items-center gap-0.5 px-2.5 py-1 bg-white border border-[var(--ta-border)] rounded h-7 overflow-x-auto scrollbar-none"
+              >
                 <span v-if="breadcrumbs.length === 0" class="text-gray-400 select-none text-[12px]">未选择目录</span>
                 <template v-else>
                   <div
