@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-06-26 - 服务器工作空间目录选择器优化为 macOS Finder 风格
+
+- Why: 用户反馈服务器工作空间目录选择器布局简易，希望参考 macOS Finder 的文件管理风格进行界面优化，提升交互美感和可用性。
+- What: 重构了 `frontend/apps/agent-web/src/components/ServerWorkspacePickerDialog.vue`：
+  - 工具栏：引入了 macOS Finder 风格的工具栏，包括工作可用的后退/前进按钮、用于展示层级路径面包屑的 Location Bar，以及将“选择此目录”按钮作为右侧主操作项。
+  - 路径导航：支持基于组件内部 historyStack 的标准后退与前进操作，并对面包屑各层级支持直接点击跳转，其中用户 Home 目录渲染专属的 Home 图标。
+  - 列表视图：将原有的简单文件夹列表改造成了带有表头（名称、修改日期、大小、种类）、横向分列对齐、隔行换色（zebra stripes）的 macOS Finder list-view 结构，文件夹图标替换为 macOS 亮蓝色风格，且增加了悬停和聚焦效果。
+  - 错误展示：将同机校验警告以醒目的红色警告条形式渲染在顶部。
+- How: 重构 template 布局，利用 grid-cols 划分列表列宽；在 script 中实现基于 computed breadcrumbs 的路径解析与基于 watch props.directory.path 路径变化的 history 机制。
+- Result: 界面完美对齐 macOS Finder 文件管理器的精致风格；运行 `@test-agent/agent-web` 的类型检查和 Vitest 测试均顺利通过。
+
 ### 2026-06-26 - 恢复 opencode 初始化按钮并重启本地 manager
 
 - Why: 合并远程后，opencode 进程状态默认折叠成右下角圆点，非 READY 时“初始化进程”按钮也被收起；同时本地 Go manager 内存里残留 4096 已管理状态，导致 wr 用户初始化返回 `port 4096 is already managed`，但本机 4096 实际没有 opencode 监听。
