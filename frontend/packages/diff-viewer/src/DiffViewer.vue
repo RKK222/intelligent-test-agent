@@ -402,16 +402,20 @@ onBeforeUnmount(() => {
    Monaco 内部用 inline style 强制设 30px (ENTIRE_DIFF_OVERVIEW_WIDTH = ONE_OVERVIEW_WIDTH * 2 = 15 * 2)，
    必须用 !important 才能压过。父容器 .diffOverview 也是 30px，需要一起压。
    同时 Monaco 按原 30px 算 left = width - 30，会导致 .diffOverview 右边留出 ~26px 空隙；
-   把 left 强制 auto、改用 right 锚定到容器右边（right: 0 完全贴边，不留缝）。 */
+   把 left 强制 auto、改用 right 锚定到容器右边（right: 0 完全贴边，不留缝）。
+   slider (diffViewport) Monaco 默认会设 left: 0，会和 right: 0 同时生效导致元素在父容器内被拉伸或偏向左侧；
+   这里显式把 left 也压成 auto，让 slider 真的停在父容器最右。 */
 :deep(.monaco-diff-editor .diffOverview) {
   width: 4px !important;
   left: auto !important;
   right: 0 !important;
+  margin: 0 !important;
 }
 :deep(.monaco-diff-editor .diffViewport) {
   width: 4px !important;
   height: 14px !important;
   border-radius: 2px !important;
+  left: auto !important;
   right: 0 !important;
 }
 :deep(.monaco-diff-editor .diffViewport:hover) {

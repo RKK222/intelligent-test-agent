@@ -68,6 +68,19 @@
 - Result: overview ruler 画布消失、slider 完全贴右、工具栏去线、进程状态默认一颗右下角圆点可点开。`packages/diff-viewer/tests` 4/4；`FigmaChatPanel` 既有 2 条失败 pre-existing（已 `git stash` 验证），本次无新增回归。
 - Verification: `corepack pnpm exec vitest run packages/diff-viewer/tests`；`git diff --check`；浏览器需硬刷新（Cmd+Shift+R）让 scoped CSS 重新挂载。
 
+### 2026-06-26 - DiffViewer 第五轮：slider 显式 left: auto 真的贴最右
+
+- Why: 用户反馈 slider 仍能往右挪。原因是 Monaco 给 `.diffViewport` (slider) inline 设了 `left: 0`；
+  我之前只设 `right: 0`，同时存在的 `left: 0` + `right: 0` 会让元素相对父容器左对齐（CSS 里 left 优先于 right），
+  虽然父容器 `.diffOverview` 已经被 right: 0 钉死在最右，slider 实际位置已经贴边，但浏览器渲染时
+  slider 的 inline `left: 0` 仍然可见，让人误以为没贴边。
+- What: `DiffViewer.vue` 的 `.diffViewport` 新增 `left: auto !important`，让 `right: 0` 单独生效；
+  `.diffOverview` 加 `margin: 0 !important` 防止 Monaco 默认 margin 把整条再往左推 1px。
+- How: 纯 CSS override，不动 Monaco 初始化逻辑。
+- Result: slider 的 inline style 仍带 `left: 0`（Monaco 行为），但 CSS `left: auto !important` 把它吃掉，
+  真正由 `right: 0` 锚定到 `.diffOverview` 最右。`packages/diff-viewer/tests` 4/4 通过。
+- Verification: `corepack pnpm exec vitest run packages/diff-viewer/tests`；浏览器需硬刷新（Cmd+Shift+R）。
+
 ### 2026-06-26 - UI 三项改版：Diff light 主题、三栏底部 Footer 对齐、聊天输入卡片化
 
 - Why: 用户要求 (1) Monaco Diff 编辑器切为 light 风格与工作台白色主题匹配；(2) 不管切换到哪个功能，底部那一行应该都存在且高度一致；(3) 聊天面板输入框加宽，把模型选择、新建对话、附件上传挪到输入框内部下方，整体像现代 ChatGPT 风格。
