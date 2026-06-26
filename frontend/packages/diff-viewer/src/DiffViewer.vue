@@ -170,7 +170,7 @@ onBeforeUnmount(() => {
   </div>
   <div v-else class="flex h-full min-h-0 flex-col bg-[var(--ta-panel-2)]">
     <div class="flex min-h-10 flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-950 px-3 py-1">
-      <div class="flex items-center gap-1">
+      <div v-if="source !== 'vcs' && source !== 'agent'" class="flex items-center gap-1">
         <select :value="source" class="h-8 rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200" @change="emit('sourceChange', ($event.target as HTMLSelectElement).value as 'run' | 'session' | 'vcs' | 'agent')">
           <option value="run">Run</option>
           <option value="session">Session</option>
@@ -183,7 +183,8 @@ onBeforeUnmount(() => {
         </select>
         <Button size="sm" variant="secondary" @click="emit('refresh')">刷新</Button>
       </div>
-      <div class="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-200">{{ sourceTitle(source) }}</div>
+      <div v-if="source !== 'vcs' && source !== 'agent'" class="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-200">{{ sourceTitle(source) }}</div>
+      <div v-else class="min-w-0 flex-1" />
       <div class="flex items-center gap-1">
         <Button type="button" size="icon" variant="secondary" title="上一处 hunk" :disabled="hunks.length === 0" @click="moveHunk('previous')">
           <ChevronUp class="h-4 w-4" />
@@ -211,8 +212,8 @@ onBeforeUnmount(() => {
         </Button>
       </template>
     </div>
-    <div class="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)]">
-      <div class="min-h-0 overflow-auto border-r border-slate-800 bg-[var(--ta-panel)] p-2">
+    <div :class="cn('grid min-h-0 flex-1', (source === 'vcs' || source === 'agent') ? 'grid-cols-1' : 'grid-cols-[260px_minmax(0,1fr)]')">
+      <div v-if="source !== 'vcs' && source !== 'agent'" class="min-h-0 overflow-auto border-r border-slate-800 bg-[var(--ta-panel)] p-2">
         <button
           v-for="file in files"
           :key="file.path"

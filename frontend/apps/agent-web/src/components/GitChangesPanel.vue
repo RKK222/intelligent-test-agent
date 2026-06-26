@@ -632,21 +632,6 @@ defineExpose({
         rows="2"
       ></textarea>
 
-      <!-- Checkboxes toolbar -->
-      <div class="git-options-row">
-        <label class="git-option-label" title="在提交说明末尾添加签名信息 (Signed-off-by)">
-          <input type="checkbox" v-model="signOff" :disabled="committing" />
-          <span>SignOff</span>
-        </label>
-        <label class="git-option-label" title="绕过 pre-commit 和 commit-msg 校验钩子 (no-verify)">
-          <input type="checkbox" v-model="noVerify" :disabled="committing" />
-          <span>No-Verify</span>
-        </label>
-        <label class="git-option-label" title="修补/追加到上一次提交上 (amend)">
-          <input type="checkbox" v-model="amend" :disabled="committing" />
-          <span>Amend</span>
-        </label>
-      </div>
 
       <!-- Action buttons -->
       <div class="git-actions-row">
