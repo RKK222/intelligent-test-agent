@@ -46,8 +46,11 @@ public class WorkspaceController {
             @Valid @RequestBody RuntimeDtos.CreateWorkspaceRequest request,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
+        var workspace = request.linuxServerId() == null || request.linuxServerId().isBlank()
+                ? workspaceService.createWorkspace(request.name(), request.rootPath(), traceId)
+                : workspaceService.createWorkspace(request.name(), request.rootPath(), request.linuxServerId(), traceId);
         return ApiResponse.ok(
-                RuntimeDtos.WorkspaceResponse.from(workspaceService.createWorkspace(request.name(), request.rootPath(), traceId)),
+                RuntimeDtos.WorkspaceResponse.from(workspace),
                 traceId);
     }
 

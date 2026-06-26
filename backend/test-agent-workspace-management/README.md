@@ -7,8 +7,10 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 ## 主要职责
 
 - 工作区注册、查询和分页。
-- 工作区内文件单层列表、UTF-8 内容读写、文件状态和路径越权拦截。
-- 受控浏览 `test-agent.workspace-picker.allowed-roots` 内的本机目录，供前端选择新的 Workspace 根目录。
+- 工作区注册时记录 `linuxServerId`，并通过 `WorkspaceServerIdentity` 提供当前 Java 进程所属服务器和默认目录。
+- 工作区内文件单层列表、UTF-8 内容读写、文件状态、普通文件删除和路径越权拦截。
+- 文件 WebSocket ticket 创建前通过 `requireWorkspaceOnCurrentServer` 校验 workspace、当前后端和用户 opencode 进程同服务器；历史空服务器归属工作区在 root path 校验成功后回填当前服务器 ID。
+- 受控浏览 `test-agent.workspace-picker.allowed-roots` 内的本机目录，供前端选择新的 Workspace 根目录；服务器工作空间选择器通过目标后端目录浏览能力从该后端 Java 进程运行目录开始浏览。
 - 公共目录（`test-agent.public-directory.path` 指定固定根目录）的列表/读取/写入，所有登录用户只读，SUPER_ADMIN 可写。
 - 基于配置管理中的应用工作空间模板创建应用版本工作区，clone 指定分支并创建运行态 `Workspace`。
 - 基于应用版本工作区创建个人 git worktree，记录最近使用工作区，并支持个人/应用目录差异和双向文件同步。
@@ -16,8 +18,8 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 
 ## 测试覆盖
 
-- `WorkspaceApplicationServiceTest` 覆盖工作区创建、分页/详情查询、未找到错误和文件服务编排。
-- `WorkspaceFileServiceTest` 覆盖 UTF-8 读写、路径穿越拒绝、目录列表排序与上限、文件大小限制和 null 内容写入。
+- `WorkspaceApplicationServiceTest` 覆盖工作区创建、服务器归属、分页/详情查询、未找到错误和文件服务编排。
+- `WorkspaceFileServiceTest` 覆盖 UTF-8 读写、普通文件删除、目录删除拒绝、路径穿越拒绝、目录列表排序与上限、文件大小限制和 null 内容写入。
 - `WorkspaceDirectoryServiceTest` 覆盖默认根目录、只返回子目录、排序、父目录边界、越权和缺失目录错误码。
 - `PublicDirectoryServiceTest` 覆盖未配置/不存在根目录时 list/read/write 返回 `NOT_FOUND`，以及配置正常时委托给 `WorkspaceFileService` 的 list/read/write 行为。
 - `ManagedWorkspaceApplicationServiceTest` 覆盖应用成员校验、标准库分支校验、应用版本工作区创建、运行态 Workspace 关联、最近使用记录、`yyyy年M月` 版本格式（`sanitizeVersionForBranchAndPath` 转 `yyyy-MM` 派生分支/路径）和非法版本格式拒绝。

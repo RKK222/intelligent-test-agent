@@ -15,6 +15,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -29,20 +30,41 @@ public class WorkspaceApplicationService {
 
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceFileService fileService;
+    private final WorkspaceServerIdentity serverIdentity;
 
     /**
      * 构造 Workspace 应用服务，注入领域 Repository 端口和文件服务，避免 Controller 直接访问底层资源。
      */
-    public WorkspaceApplicationService(WorkspaceRepository workspaceRepository, WorkspaceFileService fileService) {
+    @Autowired
+    public WorkspaceApplicationService(
+            WorkspaceRepository workspaceRepository,
+            WorkspaceFileService fileService,
+            WorkspaceServerIdentity serverIdentity) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.fileService = Objects.requireNonNull(fileService, "fileService must not be null");
+        this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
+    }
+
+    /**
+     * 兼容旧测试构造路径，未显式注入服务器身份时使用本地默认值。
+     */
+    public WorkspaceApplicationService(WorkspaceRepository workspaceRepository, WorkspaceFileService fileService) {
+        this(workspaceRepository, fileService, new WorkspaceServerIdentity("127.0.0.1"));
     }
 
     /**
      * 注册工作区；rootPath 必须是已存在目录，traceId 会写入领域对象用于审计和排障。
      */
     public Workspace createWorkspace(String name, String rootPath, String traceId) {
+        return createWorkspace(name, rootPath, null, traceId);
+    }
+
+    /**
+     * 注册工作区；可选 linuxServerId 必须与当前后端身份一致，用于跨服务器目录选择后的目标端创建。
+     */
+    public Workspace createWorkspace(String name, String rootPath, String linuxServerId, String traceId) {
         LOGGER.info("Creating workspace, name={}, rootPath={}, traceId={}", name, rootPath, traceId);
+        String resolvedLinuxServerId = resolveLinuxServerId(linuxServerId);
         Path root = validateRootPath(rootPath);
         Instant now = Instant.now();
         Workspace workspace = new Workspace(
@@ -52,10 +74,28 @@ public class WorkspaceApplicationService {
                 WorkspaceStatus.ACTIVE,
                 now,
                 now,
+                resolvedLinuxServerId,
                 traceId);
         Workspace saved = workspaceRepository.save(workspace);
         LOGGER.info("Workspace created, workspaceId={}, name={}, traceId={}", saved.workspaceId().value(), name, traceId);
         return saved;
+    }
+
+    /**
+     * 前端传入服务器 ID 时必须与当前后端一致，避免把远端路径注册到错误服务器。
+     */
+    private String resolveLinuxServerId(String requestedLinuxServerId) {
+        String current = serverIdentity.linuxServerId();
+        if (requestedLinuxServerId == null || requestedLinuxServerId.isBlank()) {
+            return current;
+        }
+        if (!current.equals(requestedLinuxServerId.trim())) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "工作空间与 agent 不在同一服务器",
+                    Map.of("workspaceLinuxServerId", requestedLinuxServerId.trim(), "currentLinuxServerId", current));
+        }
+        return current;
     }
 
     /**
@@ -80,6 +120,44 @@ public class WorkspaceApplicationService {
     }
 
     /**
+     * 校验工作区属于当前后端服务器；历史空服务器字段在根目录可访问时回填当前服务器。
+     */
+    public Workspace requireWorkspaceOnCurrentServer(WorkspaceId workspaceId, String traceId) {
+        Workspace workspace = getWorkspace(workspaceId);
+        String currentLinuxServerId = serverIdentity.linuxServerId();
+        if (workspace.linuxServerId() == null) {
+            validateRootPath(workspace.rootPath());
+            Workspace bound = workspace.withLinuxServerId(currentLinuxServerId, traceId, Instant.now());
+            return workspaceRepository.save(bound);
+        }
+        if (!currentLinuxServerId.equals(workspace.linuxServerId())) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "工作空间与 agent 不在同一服务器",
+                    Map.of(
+                            "workspaceId", workspaceId.value(),
+                            "workspaceLinuxServerId", workspace.linuxServerId(),
+                            "currentLinuxServerId", currentLinuxServerId));
+        }
+        validateRootPath(workspace.rootPath());
+        return workspace;
+    }
+
+    /**
+     * 当前后端绑定的 Linux 服务器 ID。
+     */
+    public String currentLinuxServerId() {
+        return serverIdentity.linuxServerId();
+    }
+
+    /**
+     * 当前 Java 进程运行目录，用作远端服务器目录选择默认路径。
+     */
+    public String defaultDirectory() {
+        return serverIdentity.defaultDirectory();
+    }
+
+    /**
      * 列出工作区内指定相对路径的一层目录项，不做递归扫描。
      */
     public List<FileTreeEntryResponse> listFiles(WorkspaceId workspaceId, String path) {
@@ -101,6 +179,14 @@ public class WorkspaceApplicationService {
     public void writeFile(WorkspaceId workspaceId, String path, String content) {
         Workspace workspace = getWorkspace(workspaceId);
         fileService.writeContent(workspace.rootPath(), path, content);
+    }
+
+    /**
+     * 删除工作区内普通文件；目录删除当前不开放，避免 Web 入口误删目录树。
+     */
+    public void deleteFile(WorkspaceId workspaceId, String path) {
+        Workspace workspace = getWorkspace(workspaceId);
+        fileService.deleteFile(workspace.rootPath(), path);
     }
 
     /**

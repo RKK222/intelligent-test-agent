@@ -8,12 +8,30 @@
 
 | 表 | 说明 |
 |---|---|
-| `workspaces` | 平台工作区，包含业务 ID、名称、根路径、状态、traceId、创建和更新时间。 |
+| `workspaces` | 平台工作区，包含业务 ID、名称、根路径、服务器归属、状态、traceId、创建和更新时间。 |
 | `sessions` | 智能体会话，关联 workspace，包含标题、状态、traceId、创建和更新时间。 |
 | `runs` | 运行记录，关联 session/workspace，包含 Run 状态、traceId、创建和更新时间；V10 后可记录单次 Run token/cost 快照。 |
 | `run_events` | RunEvent append-only 事件流，按 `(run_id, seq)` 唯一并支持增量回放。 |
 | `execution_nodes` | opencode 执行节点，包含 baseUrl、健康状态、运行容量、权重、心跳和能力标签。 |
 | `routing_decisions` | Run 到 ExecutionNode 的路由决策审计记录。 |
+
+## V20260626090000 工作空间服务器归属字段
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260626090000__add_workspace_linux_server_id.sql` 为运行态 `workspaces` 增加可空字段：
+
+| 表 | 字段 | 说明 |
+|---|---|---|
+| `workspaces` | `linux_server_id` | 工作空间所在 Linux 服务器 ID，当前与 opencode 进程管理中的 `linux_servers.linux_server_id` 一致。 |
+
+索引：
+
+- `idx_workspaces_linux_server_id` 支撑按服务器归属排查和后续迁移。
+
+兼容策略：
+
+- 新建运行态 Workspace 默认写入当前 Java 进程所属服务器 ID。
+- 历史 `linux_server_id is null` 的工作区按 legacy local 处理；文件 WebSocket ticket 校验 root path 与当前 opencode 进程同服务器成功后回填服务器 ID。
+- 如果 workspace、用户 opencode 进程或目标后端 Java 进程不在同一服务器，文件 WebSocket 路由和 ticket 创建返回 `CONFLICT`，要求用户重新选择工作空间。
 
 ## V2 会话消息表
 

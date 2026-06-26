@@ -28,6 +28,7 @@ public final class ManagedWorkspaceResponses {
             String name,
             String rootPath,
             String status,
+            String linuxServerId,
             Instant createdAt,
             Instant updatedAt) {
         public static WorkspaceRuntimeResponse from(Workspace workspace) {
@@ -36,6 +37,7 @@ public final class ManagedWorkspaceResponses {
                     workspace.name(),
                     workspace.rootPath(),
                     workspace.status().name(),
+                    workspace.linuxServerId(),
                     workspace.createdAt(),
                     workspace.updatedAt());
         }

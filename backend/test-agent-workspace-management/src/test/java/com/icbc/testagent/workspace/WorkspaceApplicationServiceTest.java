@@ -25,12 +25,16 @@ class WorkspaceApplicationServiceTest {
     @Test
     void serviceCreatesWorkspaceWithGeneratedIdAndTraceId() throws Exception {
         FakeWorkspaceRepository repository = new FakeWorkspaceRepository();
-        WorkspaceApplicationService service = new WorkspaceApplicationService(repository, new WorkspaceFileService());
+        WorkspaceApplicationService service = new WorkspaceApplicationService(
+                repository,
+                new WorkspaceFileService(),
+                new WorkspaceServerIdentity("10.8.0.12"));
 
         Workspace workspace = service.createWorkspace("Demo", root.toString(), "trace_1234567890abcdef");
 
         assertThat(workspace.workspaceId().value()).startsWith("wrk_");
         assertThat(workspace.rootPath()).isEqualTo(root.toRealPath().toString());
+        assertThat(workspace.linuxServerId()).isEqualTo("10.8.0.12");
         assertThat(workspace.traceId()).isEqualTo("trace_1234567890abcdef");
         assertThat(repository.saved).containsExactly(workspace);
     }
@@ -79,6 +83,10 @@ class WorkspaceApplicationServiceTest {
         assertThat(service.listFiles(workspace.workspaceId(), "notes"))
                 .extracting(FileTreeEntryResponse::name)
                 .containsExactly("todo.txt");
+
+        service.deleteFile(workspace.workspaceId(), "notes/todo.txt");
+
+        assertThat(service.fileStatus(workspace.workspaceId(), "notes/todo.txt").exists()).isFalse();
     }
 
     private static final class FakeWorkspaceRepository implements WorkspaceRepository {

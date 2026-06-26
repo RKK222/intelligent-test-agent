@@ -70,4 +70,18 @@ class WorkspaceFileServiceTest {
         assertThat(Files.readString(root.resolve("empty.txt"))).isEmpty();
         assertThat(service.readContent(root.toString(), "empty.txt").size()).isZero();
     }
+
+    @Test
+    void serviceDeletesOnlyRegularFilesInsideWorkspaceRoot() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.writeString(root.resolve("remove.txt"), "delete me");
+        Files.createDirectory(root.resolve("directory"));
+
+        service.deleteFile(root.toString(), "remove.txt");
+
+        assertThat(Files.exists(root.resolve("remove.txt"))).isFalse();
+        assertThatThrownBy(() -> service.deleteFile(root.toString(), "directory"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
 }

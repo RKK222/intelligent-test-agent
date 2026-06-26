@@ -25,6 +25,8 @@ defineProps<FileExplorerProps & {
   publicDirectoryWritable?: boolean;
   /** 后端 base url，透传给 PublicDirectoryPanel */
   apiBaseUrl?: string;
+  /** 是否显示超级管理员服务器工作空间切换入口 */
+  showServerWorkspaceSwitch?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -40,6 +42,7 @@ const emit = defineEmits<{
   createVersion: [payload: { template: AppWorkspaceTemplate; version: string }];
   // 公共目录下打开文件：path + 只读/可写 由父组件决定如何渲染 tab
   openPublicFile: [payload: { path: string; content: FileContent; readonly: boolean }];
+  openServerWorkspacePicker: [];
 }>();
 
 // 视图模式：workspace（默认）展示 FileExplorer；public 展示 PublicDirectoryPanel。
@@ -103,9 +106,11 @@ const showPublicTab = computed(() => true); // 后端未配置时面板自身会
       :loading-templates="loadingAppTemplates"
       :loading-versions="loadingAppVersions"
       :creating-version="creatingVersion"
+      :show-server-workspace-switch="showServerWorkspaceSwitch"
       @select-version="(payload) => emit('selectVersion', payload)"
       @load-versions="(templateId: string) => emit('loadVersions', templateId)"
       @create-version="(payload) => emit('createVersion', payload)"
+      @open-server-workspace-picker="emit('openServerWorkspacePicker')"
     />
   </div>
 </template>

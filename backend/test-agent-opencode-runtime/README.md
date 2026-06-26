@@ -9,6 +9,7 @@
 - Session 创建、查询、消息追加和归档。
 - Run 启动、取消、远端 agent session 懒创建/复用、事件订阅和终态处理。
 - 当前用户 opencode 进程状态查询、初始化契约、防绕过 Run 校验、runtime 代理用户进程路由、manager WebSocket 命令网关，以及用户进程到兼容 `ExecutionNode` 的投影。
+- `WorkspaceFileRoutingService` 根据当前用户 opencode 进程定位同服务器后端 Java 进程，供前端工作区文件 WebSocket 先路由到目标后端；超级管理员服务器工作空间选择器也复用该拓扑返回活跃后端服务器列表和默认目录。
 - `AgentRuntimeTargetResolver` 统一封装用户进程节点、固定节点 fallback、远端 session 创建/复用以及 binding 节点不一致时的自动覆盖。
 - `RuntimeManagementQueryService` 聚合 Linux 服务器、后端 Java 进程、opencode 容器、manager、manager-backend 连接、用户进程和绑定状态，供超级管理员只读管理页展示；默认只返回 5 分钟内仍有心跳/健康确认的活跃运行态，并按用户名筛选/展示用户进程。
 - `OpencodeProcessHeartbeatMaintenanceService` 每 3 分钟通过 manager health 命令确认 RUNNING opencode server 进程并刷新 Redis 心跳，每 5 分钟清理 Redis 心跳索引中过期的 Java/opencode 进程 ID。
@@ -39,6 +40,7 @@
 
 - `RunApplicationServiceTest` 覆盖 Run 创建、通用 binding 保存/复用、远端 session 懒创建/复用、用户进程节点 upsert、用户进程 binding 不一致自动重建、sticky node、prompt parts、终态事件、终态消息快照/token 持久化、瞬态消息事件、tool part 实时 Diff 派生和取消编排。
 - `UserOpencodeProcessAssignmentServiceTest` 覆盖未绑定状态、READY 复用、同服务器重建、端口选择、manager 不可用、绑定/节点投影，以及本地短路模式（`local-direct=true`）下 `status` / `initialize` / `requireReadyProcess` 完全跳过 database 与 gateway 直返合成 READY 的行为。
+- `WorkspaceFileRoutingServiceTest` 覆盖同服务器 workspace 路由到目标后端、workspace 与 agent 不同服务器时拒绝。
 - `RuntimeManagementQueryServiceTest` 覆盖运行管理快照聚合、活跃进程过滤、用户名筛选、绑定状态合并和空数据。
 - `ManagerControlMessageCodecTest`、`ManagerConnectionRegistryTest`、`SocketOpencodeProcessManagerGatewayTest`、`BackendJavaProcessLifecycleServiceTest`、`LocalOpencodeProcessManagerGatewayTest` 覆盖 manager 控制面消息、连接路由、命令等待、后端实例心跳、本地 manager-backend 连接自举以及 local 网关的 HTTP 健康检查与 start 占位。
 - `RunDiffApplicationServiceTest` 覆盖 Diff 事件优先读取、agent runtime Diff fallback、接受/拒绝动作和缺失 messageID 冲突。

@@ -68,6 +68,7 @@ public class ManagedWorkspaceApplicationService {
     private final GitRemoteService gitRemoteService;
     private final GitWorkspaceService gitWorkspaceService;
     private final SshKeyCryptoService sshKeyCryptoService;
+    private final WorkspaceServerIdentity serverIdentity;
     private final Path managedRoot;
 
     /**
@@ -79,6 +80,7 @@ public class ManagedWorkspaceApplicationService {
             ManagedWorkspaceRepository managedWorkspaceRepository,
             WorkspaceRepository workspaceRepository,
             UserRepository userRepository,
+            WorkspaceServerIdentity serverIdentity,
             @Value("${test-agent.managed-workspace.root:${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}}") String managedRoot,
             @Value("${test-agent.security.ssh-key-encryption-key:${TEST_AGENT_SSH_KEY_ENCRYPTION_KEY:}}") String encryptionKey) {
         this(
@@ -89,6 +91,7 @@ public class ManagedWorkspaceApplicationService {
                 new GitRemoteService(),
                 new GitWorkspaceService(),
                 new SshKeyCryptoService(encryptionKey),
+                serverIdentity,
                 managedRoot);
     }
 
@@ -104,6 +107,31 @@ public class ManagedWorkspaceApplicationService {
             GitWorkspaceService gitWorkspaceService,
             SshKeyCryptoService sshKeyCryptoService,
             String managedRoot) {
+        this(
+                configurationRepository,
+                managedWorkspaceRepository,
+                workspaceRepository,
+                userRepository,
+                gitRemoteService,
+                gitWorkspaceService,
+                sshKeyCryptoService,
+                new WorkspaceServerIdentity("127.0.0.1"),
+                managedRoot);
+    }
+
+    /**
+     * 测试构造器：允许注入 fake Git 服务、服务器身份和临时根目录。
+     */
+    ManagedWorkspaceApplicationService(
+            ConfigurationManagementRepository configurationRepository,
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            WorkspaceRepository workspaceRepository,
+            UserRepository userRepository,
+            GitRemoteService gitRemoteService,
+            GitWorkspaceService gitWorkspaceService,
+            SshKeyCryptoService sshKeyCryptoService,
+            WorkspaceServerIdentity serverIdentity,
+            String managedRoot) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
         this.managedWorkspaceRepository = Objects.requireNonNull(managedWorkspaceRepository, "managedWorkspaceRepository must not be null");
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
@@ -111,6 +139,7 @@ public class ManagedWorkspaceApplicationService {
         this.gitRemoteService = Objects.requireNonNull(gitRemoteService, "gitRemoteService must not be null");
         this.gitWorkspaceService = Objects.requireNonNull(gitWorkspaceService, "gitWorkspaceService must not be null");
         this.sshKeyCryptoService = Objects.requireNonNull(sshKeyCryptoService, "sshKeyCryptoService must not be null");
+        this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
         this.managedRoot = resolveManagedRoot(managedRoot);
     }
 
@@ -431,6 +460,7 @@ public class ManagedWorkspaceApplicationService {
                 WorkspaceStatus.ACTIVE,
                 now,
                 now,
+                serverIdentity.linuxServerId(),
                 traceId);
         return workspaceRepository.save(workspace);
     }

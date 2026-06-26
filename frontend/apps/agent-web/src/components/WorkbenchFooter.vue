@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { Layers, Plus, Save } from "lucide-vue-next";
+import { Layers, Plus, Save, ServerCog } from "lucide-vue-next";
 import { ElDatePicker, ElDialog } from "element-plus";
 import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
 
@@ -36,6 +36,10 @@ const props = defineProps<{
   loadingVersions?: boolean;
   /** 「+新增版本」是否正在提交中（父组件控制禁用 & 展示 loading） */
   creatingVersion?: boolean;
+  /** 是否显示超级管理员服务器工作空间切换入口 */
+  showServerWorkspaceSwitch?: boolean;
+  /** 服务器工作空间切换入口是否禁用 */
+  serverWorkspaceSwitchDisabled?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -47,6 +51,8 @@ const emit = defineEmits<{
   // 「+新增版本」弹窗确认后回调：父组件负责调用 createWorkspaceVersion。
   // version 字段保留用户在前端选择的原始字符串（"yyyy年M月"），后端会校验并按需转换分支/路径。
   (e: "create-version", payload: { template: AppWorkspaceTemplate; version: string }): void;
+  // 超级管理员打开跨服务器工作空间选择器。
+  (e: "open-server-workspace-picker"): void;
 }>();
 
 const updatedLabel = computed(() => {
@@ -447,6 +453,17 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
           </div>
         </Teleport>
       </div>
+      <button
+        v-if="showServerWorkspaceSwitch"
+        type="button"
+        class="ta-workbench-server-switch"
+        :disabled="serverWorkspaceSwitchDisabled"
+        title="切换服务器工作空间"
+        aria-label="切换服务器工作空间"
+        @click="emit('open-server-workspace-picker')"
+      >
+        <ServerCog class="ta-workbench-footer-icon" />
+      </button>
     </div>
 
     <div v-if="showSave" class="ta-workbench-footer-middle">
@@ -534,6 +551,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
 .ta-workbench-footer-right {
   display: flex;
   align-items: center;
+  gap: 6px;
   flex-shrink: 0;
 }
 
@@ -585,6 +603,30 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   width: 14px;
   height: 14px;
   color: #555;
+}
+
+.ta-workbench-server-switch {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 0.8px solid #dfdfdf;
+  border-radius: 6px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, opacity 0.12s ease;
+}
+
+.ta-workbench-server-switch:hover:not(:disabled) {
+  background: #f5f5f5;
+  border-color: #b5b5b5;
+}
+
+.ta-workbench-server-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .ta-workbench-footer-path,

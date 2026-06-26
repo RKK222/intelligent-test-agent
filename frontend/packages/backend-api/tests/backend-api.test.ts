@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { BackendApiError, createBackendApiClient } from "../src";
+import { BackendApiError, createBackendApiClient, type WorkspaceWebSocketFactory } from "../src";
 
 describe("backend-api", () => {
   it("sends trace id and unwraps successful responses", async () => {
@@ -698,6 +698,69 @@ describe("backend-api", () => {
     );
   });
 
+  it("routes workspace file listing through target backend websocket", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              workspaceId: "wrk_1234567890abcdef",
+              linuxServerId: "10.8.0.12",
+              baseUrl: "http://10.8.0.12:8080",
+              webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+              sameServer: true
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              ticket: "wft_1234567890abcdef",
+              expiresAt: "2026-06-26T10:00:00Z",
+              webSocketUrl: "/api/internal/platform/workspace-management/file/ws?ticket=wft_1234567890abcdef"
+            }
+          }),
+          { status: 200 }
+        )
+      );
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token_123",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: fakeWorkspaceWebSocketFactory(sockets)
+    });
+
+    await expect(client.listFiles("wrk_1234567890abcdef", "src")).resolves.toEqual([
+      {
+        path: "src/App.vue",
+        name: "App.vue",
+        type: "file",
+        size: 42,
+        modifiedAt: "2026-06-26T09:00:00Z"
+      }
+    ]);
+
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "http://api/api/workspaces/wrk_1234567890abcdef/file-ws-route",
+      "http://10.8.0.12:8080/api/internal/platform/workspace-management/file-ws/tickets"
+    ]);
+    expect(sockets[0]?.url).toBe("ws://10.8.0.12:8080/api/internal/platform/workspace-management/file/ws?ticket=wft_1234567890abcdef");
+    expect(sockets[0]?.sentMessages[0]).toMatchObject({
+      op: "workspace.list",
+      params: { workspaceId: "wrk_1234567890abcdef", path: "src" }
+    });
+  });
+
   it("persists and reads the (app, workspace) VCS branch preference through the platform API", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
@@ -763,3 +826,54 @@ describe("backend-api", () => {
     );
   });
 });
+
+type WebSocketEventHandler = ((event: any) => void) | null;
+
+class FakeWorkspaceWebSocket {
+  readonly sentMessages: Array<Record<string, unknown>> = [];
+  onopen: WebSocketEventHandler = null;
+  onmessage: WebSocketEventHandler = null;
+  onerror: WebSocketEventHandler = null;
+  onclose: WebSocketEventHandler = null;
+
+  constructor(readonly url: string) {
+    queueMicrotask(() => this.onopen?.({}));
+  }
+
+  send(payload: string) {
+    const message = JSON.parse(payload) as { id: string; op: string };
+    this.sentMessages.push(message);
+    queueMicrotask(() => {
+      this.onmessage?.({
+        data: JSON.stringify({
+          id: message.id,
+          type: "result",
+          data:
+            message.op === "workspace.list"
+              ? [
+                  {
+                    path: "src/App.vue",
+                    name: "App.vue",
+                    directory: false,
+                    size: 42,
+                    lastModifiedAt: "2026-06-26T09:00:00Z"
+                  }
+                ]
+              : null
+        })
+      });
+    });
+  }
+
+  close() {
+    this.onclose?.({});
+  }
+}
+
+function fakeWorkspaceWebSocketFactory(instances: FakeWorkspaceWebSocket[]) {
+  return ((url: string) => {
+    const socket = new FakeWorkspaceWebSocket(url);
+    instances.push(socket);
+    return socket;
+  }) satisfies WorkspaceWebSocketFactory;
+}

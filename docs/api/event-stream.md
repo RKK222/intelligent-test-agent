@@ -97,6 +97,65 @@ opencode-manager discovery API 和 `/api/internal/platform/opencode-runtime/mana
 
 超级管理员定时任务管理页调用的 `/api/internal/platform/scheduler-management/**` 只维护 scheduler 任务定义和运行记录，不新增 SSE 事件类型，也不向 RunEvent 流发布任务状态变化；页面刷新通过 HTTP 查询完成。
 
+## Workspace File WebSocket
+
+Workspace 文件 WebSocket 不产生 RunEvent/SSE，属于前端工作区文件操作的受控双向 RPC 通道。浏览器先调用 `POST /api/workspaces/{workspaceId}/file-ws-route` 定位目标后端，再在目标后端调用 `POST /api/internal/platform/workspace-management/file-ws/tickets` 创建一次性 ticket，最后连接：
+
+```text
+/api/internal/platform/workspace-management/file/ws?ticket=wft_...
+```
+
+客户端请求 envelope：
+
+```json
+{
+  "id": "req_1",
+  "op": "workspace.read",
+  "params": {
+    "workspaceId": "wrk_...",
+    "path": "src/App.java"
+  }
+}
+```
+
+成功响应：
+
+```json
+{
+  "id": "req_1",
+  "type": "result",
+  "data": {},
+  "traceId": "trace_..."
+}
+```
+
+错误响应：
+
+```json
+{
+  "id": "req_1",
+  "type": "error",
+  "code": "FORBIDDEN",
+  "message": "路径越权",
+  "traceId": "trace_...",
+  "details": {}
+}
+```
+
+当前稳定操作：
+
+| `op` | `params` | 响应 |
+|---|---|---|
+| `workspace.list` | `workspaceId`, `path?` | `FileTreeEntryResponse[]` |
+| `workspace.read` | `workspaceId`, `path` | `FileContentResponse` |
+| `workspace.write` | `workspaceId`, `path`, `content` | `null` |
+| `workspace.status` | `workspaceId`, `path` | `FileStatusResponse` |
+| `workspace.delete` | `workspaceId`, `path` | `null`；仅删除普通文件，目录删除返回统一错误 |
+| `directory.list` | `path?` | `WorkspaceDirectoryListResponse`；用于服务器工作空间选择器 |
+| `workspace.create` | `name`, `rootPath` | `WorkspaceResponse`；仅 `SUPER_ADMIN` 且目标服务器与当前 agent 同服务器时允许 |
+
+服务端必须按 ticket 绑定的 workspace、服务器和模式校验请求：workspace 操作的 `workspaceId` 必须等于 ticket 绑定值；`directory.list` 仅 `directory-picker` ticket 可用；`workspace.create` 必须由 `SUPER_ADMIN` 创建，并且工作空间服务器与当前用户 opencode 进程服务器一致。客户端必须按 `id` 匹配响应，允许未知字段，收到错误 envelope 后按统一错误码处理。
+
 示例：
 
 ```text

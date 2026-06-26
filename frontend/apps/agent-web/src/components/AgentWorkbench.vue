@@ -27,6 +27,7 @@ import type {
   Session,
   UserOpencodeProcess,
   Workspace,
+  WorkspaceBackendServer,
   WorkspaceDirectoryList
 } from "@test-agent/shared-types";
 import { TerminalPanel } from "@test-agent/terminal";
@@ -41,6 +42,7 @@ import FigmaChatPanel from "./FigmaChatPanel.vue";
 import SettingsDialog from "./settings/SettingsDialog.vue";
 import WorkspaceBootstrap from "./WorkspaceBootstrap.vue";
 import WorkspaceDirectoryPickerDialog from "./WorkspaceDirectoryPickerDialog.vue";
+import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
 import { notifyFeedback } from "./notify";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, type FollowUpDraft } from "./follow-up-queue";
@@ -124,6 +126,11 @@ const settingsOpen = ref(false);
 const directoryPickerOpen = ref(false);
 const directoryPickerLoading = ref(false);
 const directoryPickerData = shallowRef<WorkspaceDirectoryList | null>(null);
+const serverWorkspacePickerOpen = ref(false);
+const serverWorkspacePickerLoading = ref(false);
+const serverWorkspaceServers = shallowRef<WorkspaceBackendServer[]>([]);
+const serverWorkspaceDirectory = shallowRef<WorkspaceDirectoryList | null>(null);
+const selectedServerWorkspaceServerId = ref<string | undefined>(undefined);
 // 实时追踪：开启后 agent 每次写文件（write/edit/apply_patch 工具完成）就把该文件以只读预览
 // 打开在中间编辑器并读取磁盘最新内容刷新——agent 直接写盘，磁盘即最新。
 const liveTrack = ref(false);
@@ -951,10 +958,10 @@ function resetWorkspaceState() {
 function cacheWorkspace(workspace: Workspace) {
   queryClient.setQueryData<PageResponse<Workspace>>(["workspaces"], (old) => {
     const previousItems = old?.items ?? [];
-    const existed = previousItems.some((item) => item.workspaceId === workspace.workspaceId || item.rootPath === workspace.rootPath);
+    const existed = previousItems.some((item) => item.workspaceId === workspace.workspaceId || sameWorkspaceLocation(item, workspace));
     const items = [
       workspace,
-      ...previousItems.filter((item) => item.workspaceId !== workspace.workspaceId && item.rootPath !== workspace.rootPath)
+      ...previousItems.filter((item) => item.workspaceId !== workspace.workspaceId && !sameWorkspaceLocation(item, workspace))
     ];
     return {
       items,
@@ -963,6 +970,10 @@ function cacheWorkspace(workspace: Workspace) {
       total: old ? old.total + (existed ? 0 : 1) : items.length
     };
   });
+}
+
+function sameWorkspaceLocation(left: Workspace, right: Workspace) {
+  return left.rootPath === right.rootPath && (left.linuxServerId ?? "") === (right.linuxServerId ?? "");
 }
 
 function workspaceNameFromPath(path: string) {
@@ -983,6 +994,48 @@ async function loadWorkspaceDirectories(path?: string) {
 function openWorkspaceDirectoryPicker() {
   directoryPickerOpen.value = true;
   void loadWorkspaceDirectories();
+}
+
+async function openServerWorkspacePicker() {
+  if (!isSuperAdmin.value) return;
+  serverWorkspacePickerOpen.value = true;
+  serverWorkspacePickerLoading.value = true;
+  serverWorkspaceDirectory.value = null;
+  try {
+    const servers = await api.listWorkspaceBackendServers();
+    serverWorkspaceServers.value = servers;
+    const preferred = servers.find((server) => server.sameAsAgent) ?? servers[0];
+    selectedServerWorkspaceServerId.value = preferred?.linuxServerId;
+    if (preferred) {
+      await loadServerWorkspaceDirectories(preferred.defaultDirectory ?? undefined, preferred);
+    }
+  } catch (error) {
+    feedback.value = errorFeedback("加载后端服务器失败", error);
+  } finally {
+    serverWorkspacePickerLoading.value = false;
+  }
+}
+
+async function selectServerWorkspaceServer(server: WorkspaceBackendServer) {
+  selectedServerWorkspaceServerId.value = server.linuxServerId;
+  serverWorkspaceDirectory.value = null;
+  await loadServerWorkspaceDirectories(server.defaultDirectory ?? undefined, server);
+}
+
+async function loadServerWorkspaceDirectories(path?: string, server = selectedServerWorkspaceServer()) {
+  if (!server) return;
+  serverWorkspacePickerLoading.value = true;
+  try {
+    serverWorkspaceDirectory.value = await api.listServerWorkspaceDirectories(server, path);
+  } catch (error) {
+    feedback.value = errorFeedback("加载服务器目录失败", error);
+  } finally {
+    serverWorkspacePickerLoading.value = false;
+  }
+}
+
+function selectedServerWorkspaceServer() {
+  return serverWorkspaceServers.value.find((server) => server.linuxServerId === selectedServerWorkspaceServerId.value);
 }
 
 async function switchWorkspace(workspace: Workspace) {
@@ -1116,6 +1169,7 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
         name: response.runtimeWorkspace.name,
         rootPath: response.runtimeWorkspace.rootPath,
         status: response.runtimeWorkspace.status as Workspace["status"],
+        linuxServerId: response.runtimeWorkspace.linuxServerId,
         createdAt: response.runtimeWorkspace.createdAt,
         updatedAt: response.runtimeWorkspace.updatedAt
       };
@@ -1171,6 +1225,28 @@ async function selectWorkspaceDirectory(path: string) {
     feedback.value = errorFeedback("切换 Workspace 失败", error);
   } finally {
     directoryPickerLoading.value = false;
+  }
+}
+
+async function selectServerWorkspaceDirectory(payload: { server: WorkspaceBackendServer; path: string }) {
+  serverWorkspacePickerLoading.value = true;
+  try {
+    const existing = workspaces.value.find(
+      (item) => item.rootPath === payload.path && item.linuxServerId === payload.server.linuxServerId
+    );
+    const workspace =
+      existing ??
+      (await api.createServerWorkspace(payload.server, {
+        name: workspaceNameFromPath(payload.path),
+        rootPath: payload.path
+      }));
+    await switchWorkspace(workspace);
+    serverWorkspacePickerOpen.value = false;
+    serverWorkspaceDirectory.value = null;
+  } catch (error) {
+    feedback.value = errorFeedback("切换服务器 Workspace 失败", error);
+  } finally {
+    serverWorkspacePickerLoading.value = false;
   }
 }
 
@@ -1771,6 +1847,7 @@ async function handleLogout() {
           :creating-version="creatingVersion"
           :public-directory-writable="isSuperAdmin"
           :api-base-url="apiBaseUrl"
+          :show-server-workspace-switch="isSuperAdmin"
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
           @open-diff="(path: string) => { workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
@@ -1779,6 +1856,7 @@ async function handleLogout() {
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"
           @open-public-file="openPublicFile"
+          @open-server-workspace-picker="openServerWorkspacePicker"
         />
         <div v-else class="managed-workspace-empty">
           <p>当前应用尚未切换到可用工作区。</p>
@@ -1930,6 +2008,19 @@ async function handleLogout() {
     @close="directoryPickerOpen = false"
     @navigate="loadWorkspaceDirectories"
     @select="selectWorkspaceDirectory"
+  />
+
+  <ServerWorkspacePickerDialog
+    :open="serverWorkspacePickerOpen"
+    :servers="serverWorkspaceServers"
+    :selected-server-id="selectedServerWorkspaceServerId"
+    :directory="serverWorkspaceDirectory"
+    :loading="serverWorkspacePickerLoading"
+    :current-agent-linux-server-id="opencodeProcessStatus?.linuxServerId"
+    @close="serverWorkspacePickerOpen = false"
+    @select-server="selectServerWorkspaceServer"
+    @navigate="(path: string) => loadServerWorkspaceDirectories(path)"
+    @select="selectServerWorkspaceDirectory"
   />
 
   <div v-if="modelPickerOpen" class="managed-model-dialog-backdrop">

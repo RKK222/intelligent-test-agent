@@ -53,17 +53,34 @@ import type {
   UpdateRepositoryPayload,
   UserOpencodeProcess,
   Workspace,
+  WorkspaceBackendServer,
   WorkspaceDiff,
   WorkspaceSyncResult,
   WorkspaceBranchPreference,
-  WorkspaceDirectoryList
+  WorkspaceDirectoryList,
+  WorkspaceFileRoute,
+  WorkspaceFileSocketTicketRequest,
+  WorkspaceFileSocketTicketResponse
 } from "@test-agent/shared-types";
+
+type WorkspaceWebSocketLike = {
+  onopen: ((event: any) => void) | null;
+  onmessage: ((event: any) => void) | null;
+  onerror: ((event: any) => void) | null;
+  onclose: ((event: any) => void) | null;
+  send: (payload: string) => void;
+  close: () => void;
+  readyState?: number;
+};
+
+export type WorkspaceWebSocketFactory = (url: string) => WorkspaceWebSocketLike;
 
 export type BackendApiClientOptions = {
   baseUrl?: string;
   agentId?: string;
   apiToken?: string;
   fetcher?: typeof fetch;
+  webSocketFactory?: WorkspaceWebSocketFactory;
   traceIdFactory?: () => string;
   requestTimeoutMs?: number;
 };
@@ -123,10 +140,18 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const opencodeRuntimeManagementBase = "/api/internal/platform/opencode-runtime/management";
   const schedulerManagementBase = "/api/internal/platform/scheduler-management";
   const fetcher = options.fetcher ?? fetch;
+  const webSocketFactory: WorkspaceWebSocketFactory =
+    options.webSocketFactory ??
+    ((url: string) => {
+      if (typeof WebSocket === "undefined") {
+        throw new Error("WebSocket is not available in this runtime");
+      }
+      return new WebSocket(url);
+    });
   const traceIdFactory = options.traceIdFactory ?? defaultTraceId;
   const requestTimeoutMs = options.requestTimeoutMs ?? 30000;
 
-  async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  async function requestFrom<T>(requestBaseUrl: string, path: string, init: RequestInit = {}): Promise<T> {
     const traceId = traceIdFactory();
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/json");
@@ -155,7 +180,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       controller.abort();
     }
     try {
-      const response = await fetcher(`${baseUrl}${path}`, { ...init, headers, signal: controller.signal });
+      const response = await fetcher(`${requestBaseUrl}${path}`, { ...init, headers, signal: controller.signal });
       const body = await readJson(response);
       if (!response.ok || !isSuccessResponse<T>(body)) {
         const error = new BackendApiError(response.status, normalizeFailure(body, traceId, response.status));
@@ -177,7 +202,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
           message: "请求超时",
           traceId,
           retryable: true,
-          details: { path }
+          details: { path, baseUrl: requestBaseUrl }
         });
       }
       throw error;
@@ -189,13 +214,75 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     }
   }
 
+  async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    return requestFrom<T>(baseUrl, path, init);
+  }
+
   const agentPath = (path: string) => `${agentBase}${path}`;
+  const workspaceFileSockets = new Map<string, WorkspaceFileSocketClient>();
+
+  async function workspaceFileRpc<T>(workspaceId: string, op: string, params: Record<string, unknown>): Promise<T> {
+    const client = await ensureWorkspaceFileClient(workspaceId);
+    return client.request<T>(op, { workspaceId, ...params });
+  }
+
+  async function ensureWorkspaceFileClient(workspaceId: string): Promise<WorkspaceFileSocketClient> {
+    const existing = workspaceFileSockets.get(workspaceId);
+    if (existing?.open) {
+      return existing;
+    }
+    existing?.close();
+    const route = await request<WorkspaceFileRoute>(`/api/workspaces/${encodeURIComponent(workspaceId)}/file-ws-route`, {
+      method: "POST"
+    });
+    const ticket = await requestFrom<WorkspaceFileSocketTicketResponse>(
+      route.baseUrl.replace(/\/$/, ""),
+      "/api/internal/platform/workspace-management/file-ws/tickets",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          workspaceId,
+          linuxServerId: route.linuxServerId,
+          mode: "workspace"
+        } satisfies WorkspaceFileSocketTicketRequest)
+      }
+    );
+    const client = new WorkspaceFileSocketClient(
+      toWebSocketUrl(route.baseUrl, ticket.webSocketUrl),
+      webSocketFactory,
+      () => workspaceFileSockets.delete(workspaceId)
+    );
+    workspaceFileSockets.set(workspaceId, client);
+    await client.ready();
+    return client;
+  }
+
+  async function createDirectoryPickerClient(server: WorkspaceBackendServer): Promise<WorkspaceFileSocketClient> {
+    const ticket = await requestFrom<WorkspaceFileSocketTicketResponse>(
+      server.baseUrl.replace(/\/$/, ""),
+      "/api/internal/platform/workspace-management/file-ws/tickets",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          linuxServerId: server.linuxServerId,
+          mode: "directory-picker"
+        } satisfies WorkspaceFileSocketTicketRequest)
+      }
+    );
+    const client = new WorkspaceFileSocketClient(
+      toWebSocketUrl(server.baseUrl, ticket.webSocketUrl),
+      webSocketFactory,
+      () => {}
+    );
+    await client.ready();
+    return client;
+  }
 
   return {
     listWorkspaces: (page = 1, size = 20) =>
       request<PageResponse<Workspace>>(`/api/workspaces?page=${page}&size=${size}`),
     getWorkspace: (workspaceId: string) => request<Workspace>(`/api/workspaces/${encodeURIComponent(workspaceId)}`),
-    createWorkspace: (payload: { name: string; rootPath: string }) =>
+    createWorkspace: (payload: { name: string; rootPath: string; linuxServerId?: string }) =>
       request<Workspace>("/api/workspaces", { method: "POST", body: JSON.stringify(payload) }),
     listManagedApplications: () => request<ManagedApplication[]>(`${workspaceManagementBase}/applications`),
     listWorkspaceTemplates: (appId: string) =>
@@ -245,7 +332,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     listWorkspaceDirectories: (path?: string) =>
       request<WorkspaceDirectoryList>(`/api/workspace-directories${query({ path })}`),
     listFiles: async (workspaceId: string, path = "") => {
-      const entries = await request<BackendFileTreeEntry[]>(`/api/workspaces/${workspaceId}/files${query({ path })}`);
+      const entries = await workspaceFileRpc<BackendFileTreeEntry[]>(workspaceId, "workspace.list", { path });
       return entries.map((entry) => ({
         path: entry.path,
         name: entry.name,
@@ -255,20 +342,43 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       })) satisfies FileTreeEntry[];
     },
     readFile: async (workspaceId: string, path: string) => {
-      const file = await request<BackendFileContent>(`/api/workspaces/${workspaceId}/files/content${query({ path })}`);
+      const file = await workspaceFileRpc<BackendFileContent>(workspaceId, "workspace.read", { path });
       return { ...file, encoding: "utf-8", readonly: false } satisfies FileContent;
     },
     writeFile: (workspaceId: string, path: string, content: string) =>
-      request<void>(`/api/workspaces/${workspaceId}/files/content`, {
-        method: "PUT",
-        body: JSON.stringify({ path, content })
-      }),
+      workspaceFileRpc<void>(workspaceId, "workspace.write", { path, content }),
     fileStatus: async (workspaceId: string, path: string) => {
-      const status = await request<BackendFileStatus>(`/api/workspaces/${workspaceId}/files/status${query({ path })}`);
+      const status = await workspaceFileRpc<BackendFileStatus>(workspaceId, "workspace.status", { path });
       return {
         ...status,
         status: status.exists ? "unchanged" : "deleted"
       } satisfies FileStatus;
+    },
+    deleteWorkspaceFile: (workspaceId: string, path: string) =>
+      workspaceFileRpc<void>(workspaceId, "workspace.delete", { path }),
+    listWorkspaceBackendServers: () =>
+      request<WorkspaceBackendServer[]>(`${workspaceManagementBase}/backend-servers`),
+    createWorkspaceFileSocketTicket: (targetBaseUrl: string, payload: WorkspaceFileSocketTicketRequest) =>
+      requestFrom<WorkspaceFileSocketTicketResponse>(
+        targetBaseUrl.replace(/\/$/, ""),
+        `${workspaceManagementBase}/file-ws/tickets`,
+        { method: "POST", body: JSON.stringify(payload) }
+      ),
+    listServerWorkspaceDirectories: async (server: WorkspaceBackendServer, path?: string) => {
+      const client = await createDirectoryPickerClient(server);
+      try {
+        return await client.request<WorkspaceDirectoryList>("directory.list", { path });
+      } finally {
+        client.close();
+      }
+    },
+    createServerWorkspace: async (server: WorkspaceBackendServer, payload: { name: string; rootPath: string }) => {
+      const client = await createDirectoryPickerClient(server);
+      try {
+        return await client.request<Workspace>("workspace.create", payload);
+      } finally {
+        client.close();
+      }
     },
     // 公共目录（后端 application.yml 中 test-agent.public-directory.path 配置的固定根目录）：
     // 列表/读取对所有登录用户开放，写入仅 SUPER_ADMIN 可调用。
@@ -577,6 +687,115 @@ type BackendFileStatus = {
   size: number;
   lastModifiedAt?: string;
 };
+
+class WorkspaceFileSocketClient {
+  private readonly socket: WorkspaceWebSocketLike;
+  private readonly pending = new Map<string, { resolve: (value: unknown) => void; reject: (error: unknown) => void; timeoutId: ReturnType<typeof setTimeout> }>();
+  private readonly opened: Promise<void>;
+  private sequence = 0;
+  open = false;
+
+  constructor(url: string, factory: WorkspaceWebSocketFactory, private readonly onClose: () => void) {
+    this.socket = factory(url);
+    this.opened = new Promise((resolve, reject) => {
+      this.socket.onopen = () => {
+        this.open = true;
+        resolve();
+      };
+      this.socket.onerror = () => {
+        reject(new Error("工作空间文件 WebSocket 连接失败"));
+      };
+      this.socket.onclose = () => {
+        this.open = false;
+        this.rejectAll(new Error("工作空间文件 WebSocket 已关闭"));
+        this.onClose();
+      };
+      this.socket.onmessage = (event) => this.handleMessage(event.data);
+    });
+  }
+
+  ready() {
+    return this.opened;
+  }
+
+  request<T>(op: string, params: Record<string, unknown>): Promise<T> {
+    if (!this.open) {
+      return Promise.reject(new Error("工作空间文件 WebSocket 尚未连接"));
+    }
+    const id = `wfr_${Date.now()}_${++this.sequence}`;
+    return new Promise<T>((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new BackendApiError(408, {
+          success: false,
+          code: "REQUEST_TIMEOUT",
+          message: "工作空间文件 WebSocket 请求超时",
+          traceId: "",
+          retryable: true,
+          details: { op }
+        }));
+      }, 30000);
+      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timeoutId });
+      this.socket.send(JSON.stringify({ id, op, params }));
+    });
+  }
+
+  close() {
+    this.socket.close();
+  }
+
+  private handleMessage(payload: string) {
+    const message = JSON.parse(payload) as {
+      id?: string;
+      type?: "result" | "error";
+      data?: unknown;
+      code?: string;
+      message?: string;
+      traceId?: string;
+      details?: Record<string, unknown>;
+    };
+    const id = message.id;
+    if (!id) return;
+    const pending = this.pending.get(id);
+    if (!pending) return;
+    this.pending.delete(id);
+    clearTimeout(pending.timeoutId);
+    if (message.type === "error") {
+      pending.reject(new BackendApiError(500, {
+        success: false,
+        code: message.code ?? "INTERNAL_ERROR",
+        message: message.message ?? "工作空间文件操作失败",
+        traceId: message.traceId ?? "",
+        details: message.details ?? {}
+      }));
+      return;
+    }
+    pending.resolve(message.data);
+  }
+
+  private rejectAll(error: unknown) {
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timeoutId);
+      pending.reject(error);
+    }
+    this.pending.clear();
+  }
+}
+
+function toWebSocketUrl(baseUrl: string, webSocketUrl: string): string {
+  const absolute = webSocketUrl.startsWith("ws://") || webSocketUrl.startsWith("wss://")
+    ? webSocketUrl
+    : webSocketUrl.startsWith("http://") || webSocketUrl.startsWith("https://")
+      ? webSocketUrl
+      : `${baseUrl.replace(/\/$/, "")}${webSocketUrl.startsWith("/") ? "" : "/"}${webSocketUrl}`;
+  if (absolute.startsWith("https://")) {
+    return `wss://${absolute.slice("https://".length)}`;
+  }
+  if (absolute.startsWith("http://")) {
+    return `ws://${absolute.slice("http://".length)}`;
+  }
+  return absolute;
+}
 
 async function runtimeList(path: string, request: RequestFn) {
   return listFromRuntimeEnvelope(await request<unknown>(path));

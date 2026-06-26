@@ -12,6 +12,7 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnectio
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -106,7 +107,9 @@ public class BackendJavaProcessLifecycleService {
                 settings.linuxServerId(),
                 settings.linuxServerId().value(),
                 LinuxServerStatus.READY,
-                Map.of("backendListenUrl", settings.listenUrl()),
+                Map.of(
+                        "backendListenUrl", settings.listenUrl(),
+                        "backendWorkingDirectory", Path.of("").toAbsolutePath().normalize().toString()),
                 now,
                 repository.findLinuxServerById(settings.linuxServerId()).map(LinuxServer::createdAt).orElse(now),
                 now,

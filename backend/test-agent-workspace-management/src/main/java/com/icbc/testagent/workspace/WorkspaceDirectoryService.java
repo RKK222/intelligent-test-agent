@@ -42,6 +42,22 @@ public class WorkspaceDirectoryService {
         Path directory = isBlank(path) ? realDirectory(allowedRootPaths.getFirst()) : realDirectory(path);
         Path allowedRoot = allowedRootFor(directory);
         String parentPath = parentInsideAllowedRoot(directory, allowedRoot);
+        return listDirectoryEntries(directory, parentPath);
+    }
+
+    /**
+     * 超级管理员服务器工作空间选择器使用的目录浏览入口；默认从目标后端 Java 进程运行目录开始。
+     */
+    public WorkspaceDirectoryListResponse listServerDirectories(String path, String defaultPath) {
+        Path directory = isBlank(path) ? realDirectory(defaultPath) : realDirectory(path);
+        Path parent = directory.getParent();
+        return listDirectoryEntries(directory, parent == null ? null : parent.toString());
+    }
+
+    /**
+     * 列出目录的一层子目录并构造统一响应。
+     */
+    private WorkspaceDirectoryListResponse listDirectoryEntries(Path directory, String parentPath) {
         try (var stream = Files.list(directory)) {
             List<WorkspaceDirectoryEntryResponse> entries = stream
                     .filter(Files::isDirectory)

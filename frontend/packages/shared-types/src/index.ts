@@ -27,6 +27,7 @@ export type Workspace = {
   name: string;
   rootPath: string;
   status: string;
+  linuxServerId?: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -65,6 +66,36 @@ export type FileStatus = {
   size?: number;
   lastModifiedAt?: string;
   status: "added" | "modified" | "deleted" | "unchanged" | string;
+};
+
+export type WorkspaceFileRoute = {
+  workspaceId: string;
+  linuxServerId: string;
+  baseUrl: string;
+  webSocketPath: string;
+  sameServer: boolean;
+  message?: string | null;
+};
+
+export type WorkspaceBackendServer = {
+  linuxServerId: string;
+  name: string;
+  baseUrl: string;
+  webSocketPath: string;
+  defaultDirectory?: string | null;
+  sameAsAgent: boolean;
+};
+
+export type WorkspaceFileSocketTicketRequest = {
+  workspaceId?: string;
+  linuxServerId?: string;
+  mode?: "workspace" | "directory-picker" | string;
+};
+
+export type WorkspaceFileSocketTicketResponse = {
+  ticket: string;
+  expiresAt: string;
+  webSocketUrl: string;
 };
 
 export type Session = {

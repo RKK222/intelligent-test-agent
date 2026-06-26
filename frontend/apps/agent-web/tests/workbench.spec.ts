@@ -179,11 +179,11 @@ test("workspace picker creates selected directory and loads its file tree", asyn
   test.skip(isMobile, "mobile workspace picker layout is not part of this mock E2E");
   const workspaceCreates: Array<Record<string, unknown>> = [];
   const fileRequests: Array<{ workspaceId: string; path: string }> = [];
-  await mockBackendApi(page, { workspaceCreates, fileRequests });
+  await mockBackendApi(page, { workspaceCreates, fileRequests, recentWorkspaces: { app_gcms: null } });
 
   await gotoWorkbench(page);
 
-  await page.getByRole("button", { name: "打开文件夹" }).click();
+  await page.getByRole("button", { name: "选择本机目录" }).click();
   await expect(page.getByRole("dialog", { name: "选择工作区目录" })).toBeVisible();
   await page.getByRole("button", { name: /project-a/ }).click();
   await page.getByRole("button", { name: "选择此目录" }).click();
@@ -191,17 +191,17 @@ test("workspace picker creates selected directory and loads its file tree", asyn
   await expect.poll(() => workspaceCreates.length).toBe(1);
   expect(workspaceCreates[0]).toEqual({ name: "project-a", rootPath: "/Users/huang/workspace/project-a" });
   await expect(page.getByRole("button", { name: /src/ })).toBeVisible();
-  expect(fileRequests).toContainEqual({ workspaceId: "wrk_1234567890abcdef", path: "" });
+  expect(fileRequests).toContainEqual({ workspaceId: "wrk_project_a", path: "" });
 });
 
 test("workspace picker switches to an existing workspace without recreating it", async ({ page, isMobile }) => {
   test.skip(isMobile, "mobile workspace picker layout is not part of this mock E2E");
   const workspaceCreates: Array<Record<string, unknown>> = [];
-  await mockBackendApi(page, { workspaceCreates });
+  await mockBackendApi(page, { workspaceCreates, recentWorkspaces: { app_gcms: null } });
 
   await gotoWorkbench(page);
 
-  await page.getByRole("button", { name: "打开文件夹" }).click();
+  await page.getByRole("button", { name: "选择本机目录" }).click();
   await page.getByRole("button", { name: /demo-tests/ }).click();
   await page.getByRole("button", { name: "选择此目录" }).click();
 
@@ -215,15 +215,14 @@ test("model picker groups models by provider and updates run model", async ({ pa
 
   await gotoWorkbench(page);
 
-  await expect(page.getByRole("button", { name: "选择模型" })).toContainText("Sonnet");
-  await page.getByRole("button", { name: "选择模型" }).click();
+  await page.getByRole("button", { name: "切换模型" }).click();
   await expect(page.getByRole("dialog", { name: "模型选择" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Anthropic" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Volcengine Ark" })).toBeVisible();
   await page.getByPlaceholder("搜索模型").fill("glm");
   await expect(page.getByRole("option", { name: /GLM-5.2/ })).toBeVisible();
   await page.getByRole("option", { name: /GLM-5.2/ }).click();
-  await expect(page.getByRole("button", { name: "选择模型" })).toContainText("GLM-5.2");
+  await expect(page.getByRole("button", { name: "切换模型" })).toContainText("GLM-5.2");
 
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("use selected model");
   await page.getByRole("button", { name: "发送" }).click();
@@ -241,7 +240,7 @@ test("workbench disables chat until opencode process is initialized", async ({ p
 
   await gotoWorkbench(page);
 
-  await expect(page.getByText("需要初始化 opencode 进程")).toBeVisible();
+  await expect(page.getByText("需要初始化 opencode 进程").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
   await page.getByRole("button", { name: "初始化进程" }).click();
 
@@ -589,9 +588,114 @@ async function mockBackendApi(
     processInitializations?: Array<Record<string, unknown>>;
   } = {}
 ) {
+  await page.exposeFunction("__taRecordWorkspaceFileRequest", (workspaceId: string, path: string) => {
+    capture.fileRequests?.push({ workspaceId, path });
+  });
   await page.addInitScript(() => {
     localStorage.setItem("test-agent.auth.token", "test-token");
   });
+  await page.addInitScript(({ fileContents }) => {
+    const recordFileRequest = (workspaceId: string, path: string) => {
+      const win = window as Window & {
+        __taRecordWorkspaceFileRequest?: (workspaceId: string, path: string) => void;
+      };
+      win.__taRecordWorkspaceFileRequest?.(workspaceId, path);
+    };
+    const entries = (path: string, workspaceId = "wrk_1234567890abcdef") => {
+      if (workspaceId === "wrk_project_a") {
+        return path === "src"
+          ? [{ path: "src/main.ts", name: "main.ts", directory: false, size: 90, lastModifiedAt: "2026-06-19T00:00:00Z" }]
+          : [{ path: "src", name: "src", directory: true, size: 0, lastModifiedAt: "2026-06-19T00:00:00Z" }];
+      }
+      return path === "tests"
+        ? [{ path: "tests/checkout.spec.ts", name: "checkout.spec.ts", directory: false, size: 120, lastModifiedAt: "2026-06-19T00:00:00Z" }]
+        : [
+            { path: "tests", name: "tests", directory: true, size: 0, lastModifiedAt: "2026-06-19T00:00:00Z" },
+            { path: "package.json", name: "package.json", directory: false, size: 80, lastModifiedAt: "2026-06-19T00:00:00Z" }
+          ];
+    };
+    const directories = (path?: string) => {
+      if (path === "/Users/huang/workspace/project-a") {
+        return { path, parentPath: "/Users/huang/workspace", entries: [{ name: "src", path: "/Users/huang/workspace/project-a/src" }] };
+      }
+      if (path === "/Users/huang/workspace/demo-tests") {
+        return { path, parentPath: "/Users/huang/workspace", entries: [{ name: "tests", path: "/Users/huang/workspace/demo-tests/tests" }] };
+      }
+      return {
+        path: "/Users/huang/workspace",
+        parentPath: null,
+        entries: [
+          { name: "demo-tests", path: "/Users/huang/workspace/demo-tests" },
+          { name: "project-a", path: "/Users/huang/workspace/project-a" }
+        ]
+      };
+    };
+    class MockWorkspaceFileWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      onopen: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+      readyState = MockWorkspaceFileWebSocket.CONNECTING;
+      constructor(readonly url: string) {
+        window.setTimeout(() => {
+          this.readyState = MockWorkspaceFileWebSocket.OPEN;
+          this.onopen?.(new Event("open"));
+        }, 0);
+      }
+      send(payload: string) {
+        const request = JSON.parse(payload) as { id: string; op: string; params?: Record<string, string | undefined> };
+        const params = request.params ?? {};
+        let data: unknown = null;
+        if (request.op === "workspace.list") {
+          recordFileRequest(params.workspaceId ?? "", params.path ?? "");
+          data = entries(params.path ?? "", params.workspaceId);
+        } else if (request.op === "workspace.read") {
+          const path = params.path ?? "tests/checkout.spec.ts";
+          data = {
+            path,
+            content: (fileContents as Record<string, string>)[path] ?? "import { test } from '@playwright/test';\n\ntest('checkout', async () => {});\n",
+            encoding: "utf-8",
+            size: 80,
+            readonly: false
+          };
+        } else if (request.op === "workspace.status") {
+          data = { path: params.path ?? "", exists: true, directory: false, size: 80, lastModifiedAt: "2026-06-19T00:00:00Z" };
+        } else if (request.op === "directory.list") {
+          data = directories(params.path);
+        } else if (request.op === "workspace.create") {
+          data = {
+            workspaceId: "wrk_project_a",
+            name: params.name ?? "project-a",
+            rootPath: params.rootPath ?? "/Users/huang/workspace/project-a",
+            linuxServerId: "10.8.0.12",
+            status: "ACTIVE",
+            createdAt: "2026-06-19T00:00:00Z",
+            updatedAt: "2026-06-19T00:00:00Z"
+          };
+        }
+        window.setTimeout(() => {
+          this.onmessage?.(new MessageEvent("message", {
+            data: JSON.stringify({ id: request.id, type: "result", data, traceId: "trace_e2e" })
+          }));
+        }, 0);
+      }
+      close() {
+        this.readyState = MockWorkspaceFileWebSocket.CLOSED;
+        this.onclose?.(new CloseEvent("close"));
+      }
+    }
+    Object.assign(MockWorkspaceFileWebSocket, {
+      CONNECTING: MockWorkspaceFileWebSocket.CONNECTING,
+      OPEN: MockWorkspaceFileWebSocket.OPEN,
+      CLOSING: MockWorkspaceFileWebSocket.CLOSING,
+      CLOSED: MockWorkspaceFileWebSocket.CLOSED
+    });
+    (window as Window & { WebSocket: typeof WebSocket }).WebSocket = MockWorkspaceFileWebSocket as unknown as typeof WebSocket;
+  }, { fileContents: capture.fileContents ?? {} });
   // E2E 不依赖外部字体，避免 Google Fonts 网络波动阻塞 domcontentloaded。
   await page.route("https://fonts.googleapis.com/**", async (route) => {
     await route.fulfill({ status: 200, contentType: "text/css", body: "" });
@@ -669,6 +773,27 @@ async function mockBackendApi(
       }
     }
     if (url.pathname.startsWith("/api/internal/platform/workspace-management")) {
+      if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/backend-servers") {
+        await route.fulfill(json([
+          {
+            linuxServerId: "10.8.0.12",
+            name: "dev-backend",
+            baseUrl: "http://127.0.0.1:8080",
+            webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+            defaultDirectory: "/Users/huang/workspace",
+            sameAsAgent: true
+          }
+        ]));
+        return;
+      }
+      if (method === "POST" && url.pathname === "/api/internal/platform/workspace-management/file-ws/tickets") {
+        await route.fulfill(json({
+          ticket: "wft_e2e",
+          expiresAt: "2026-06-19T00:01:00Z",
+          webSocketUrl: "/api/internal/platform/workspace-management/file/ws?ticket=wft_e2e"
+        }));
+        return;
+      }
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/applications") {
         await route.fulfill(json(managedApplications));
         return;
@@ -740,6 +865,18 @@ async function mockBackendApi(
       await route.fulfill(json(pageOf(workspaceItems)));
       return;
     }
+    if (method === "POST" && /^\/api\/workspaces\/[^/]+\/file-ws-route$/.test(url.pathname)) {
+      const workspaceId = url.pathname.match(/\/api\/workspaces\/([^/]+)\/file-ws-route$/)?.[1] ?? "";
+      await route.fulfill(json({
+        workspaceId,
+        linuxServerId: "10.8.0.12",
+        baseUrl: "http://127.0.0.1:8080",
+        webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+        sameServer: true,
+        message: null
+      }));
+      return;
+    }
     if (method === "GET" && /^\/api\/workspaces\/[^/]+$/.test(url.pathname)) {
       const workspaceId = url.pathname.match(/\/api\/workspaces\/([^/]+)$/)?.[1];
       await route.fulfill(json(workspaceItems.find((item) => item.workspaceId === workspaceId) ?? workspace()));
@@ -752,6 +889,7 @@ async function mockBackendApi(
         workspaceId: "wrk_project_a",
         name: payload.name,
         rootPath: payload.rootPath,
+        linuxServerId: "10.8.0.12",
         status: "ACTIVE",
         createdAt: "2026-06-19T00:00:00Z",
         updatedAt: "2026-06-19T00:00:00Z"
@@ -765,25 +903,15 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname.endsWith("/files")) {
-      const path = url.searchParams.get("path") ?? "";
-      const workspaceId = url.pathname.match(/\/api\/workspaces\/([^/]+)\/files$/)?.[1] ?? "";
-      capture.fileRequests?.push({ workspaceId, path });
-      await route.fulfill(json(fileEntries(path, workspaceId)));
+      await route.fulfill({ status: 500, ...json({ error: "workspace files must use websocket" }) });
       return;
     }
     if (method === "GET" && url.pathname.endsWith("/files/content")) {
-      const path = url.searchParams.get("path") ?? "tests/checkout.spec.ts";
-      await route.fulfill(json({
-        path,
-        content: capture.fileContents?.[path] ?? "import { test } from '@playwright/test';\n\ntest('checkout', async () => {});\n",
-        encoding: "utf-8",
-        size: 80,
-        readonly: false
-      }));
+      await route.fulfill({ status: 500, ...json({ error: "workspace files must use websocket" }) });
       return;
     }
     if (method === "PUT" && url.pathname.endsWith("/files/content")) {
-      await route.fulfill(json(null));
+      await route.fulfill({ status: 500, ...json({ error: "workspace files must use websocket" }) });
       return;
     }
     if (method === "GET" && /\/api\/workspaces\/[^/]+\/sessions$/.test(url.pathname)) {
@@ -939,6 +1067,7 @@ function workspace() {
     workspaceId: "wrk_1234567890abcdef",
     name: "demo-tests",
     rootPath: "/Users/huang/workspace/demo-tests",
+    linuxServerId: "10.8.0.12",
     status: "ACTIVE",
     createdAt: "2026-06-19T00:00:00Z",
     updatedAt: "2026-06-19T00:00:00Z"
@@ -968,28 +1097,6 @@ function workspaceDirectories(path: string | null) {
       { name: "project-a", path: "/Users/huang/workspace/project-a" }
     ]
   };
-}
-
-function fileEntries(path: string, workspaceId = "wrk_1234567890abcdef") {
-  if (workspaceId === "wrk_project_a") {
-    return path === "src"
-      ? [{ path: "src/main.ts", name: "main.ts", directory: false, size: 90, lastModifiedAt: "2026-06-19T00:00:00Z" }]
-      : [{ path: "src", name: "src", directory: true, size: 0, lastModifiedAt: "2026-06-19T00:00:00Z" }];
-  }
-  return path === "tests"
-    ? [
-        {
-          path: "tests/checkout.spec.ts",
-          name: "checkout.spec.ts",
-          directory: false,
-          size: 120,
-          lastModifiedAt: "2026-06-19T00:00:00Z"
-        }
-      ]
-    : [
-        { path: "tests", name: "tests", directory: true, size: 0, lastModifiedAt: "2026-06-19T00:00:00Z" },
-        { path: "package.json", name: "package.json", directory: false, size: 80, lastModifiedAt: "2026-06-19T00:00:00Z" }
-      ];
 }
 
 function session() {

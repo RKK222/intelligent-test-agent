@@ -94,6 +94,24 @@ public class WorkspaceFileService {
     }
 
     /**
+     * 删除 rootPath 内的普通文件；目录删除不在文件 WebSocket v1 开放，避免误删目录树。
+     */
+    public void deleteFile(String rootPath, String relativePath) {
+        Path target = resolveInsideRoot(rootPath, relativePath);
+        if (Files.isDirectory(target)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "目录删除暂不支持", Map.of("path", safePath(relativePath)));
+        }
+        if (!Files.isRegularFile(target)) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "文件不存在", Map.of("path", safePath(relativePath)));
+        }
+        try {
+            Files.delete(target);
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "删除文件失败", Map.of("path", safePath(relativePath)), exception);
+        }
+    }
+
+    /**
      * 查询 rootPath 内文件或目录状态；目标不存在时返回 exists=false，其他 IO 错误统一转为平台内部错误。
      */
     public FileStatusResponse status(String rootPath, String relativePath) {

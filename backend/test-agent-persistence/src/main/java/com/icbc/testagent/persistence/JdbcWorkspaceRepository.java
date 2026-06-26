@@ -25,6 +25,7 @@ public class JdbcWorkspaceRepository extends JdbcRepositorySupport implements Wo
             WorkspaceStatus.valueOf(rs.getString("status")),
             instant(rs, "created_at"),
             instant(rs, "updated_at"),
+            rs.getString("linux_server_id"),
             rs.getString("trace_id"));
 
     /**
@@ -43,26 +44,29 @@ public class JdbcWorkspaceRepository extends JdbcRepositorySupport implements Wo
             jdbcClient.sql("""
                             update workspaces
                             set name = :name, root_path = :rootPath, status = :status,
-                                trace_id = :traceId, created_at = :createdAt, updated_at = :updatedAt
+                                linux_server_id = :linuxServerId, trace_id = :traceId,
+                                created_at = :createdAt, updated_at = :updatedAt
                             where workspace_id = :workspaceId
                             """)
                     .param("workspaceId", workspace.workspaceId().value())
                     .param("name", workspace.name())
                     .param("rootPath", workspace.rootPath())
                     .param("status", workspace.status().name())
+                    .param("linuxServerId", workspace.linuxServerId())
                     .param("traceId", workspace.traceId())
                     .param("createdAt", timestamp(workspace.createdAt()))
                     .param("updatedAt", timestamp(workspace.updatedAt()))
                     .update();
         } else {
             jdbcClient.sql("""
-                            insert into workspaces(workspace_id, name, root_path, status, trace_id, created_at, updated_at)
-                            values (:workspaceId, :name, :rootPath, :status, :traceId, :createdAt, :updatedAt)
+                            insert into workspaces(workspace_id, name, root_path, status, linux_server_id, trace_id, created_at, updated_at)
+                            values (:workspaceId, :name, :rootPath, :status, :linuxServerId, :traceId, :createdAt, :updatedAt)
                             """)
                     .param("workspaceId", workspace.workspaceId().value())
                     .param("name", workspace.name())
                     .param("rootPath", workspace.rootPath())
                     .param("status", workspace.status().name())
+                    .param("linuxServerId", workspace.linuxServerId())
                     .param("traceId", workspace.traceId())
                     .param("createdAt", timestamp(workspace.createdAt()))
                     .param("updatedAt", timestamp(workspace.updatedAt()))
@@ -77,7 +81,7 @@ public class JdbcWorkspaceRepository extends JdbcRepositorySupport implements Wo
     @Override
     public Optional<Workspace> findById(WorkspaceId workspaceId) {
         return jdbcClient.sql("""
-                        select workspace_id, name, root_path, status, trace_id, created_at, updated_at
+                        select workspace_id, name, root_path, status, linux_server_id, trace_id, created_at, updated_at
                         from workspaces
                         where workspace_id = :workspaceId
                         """)
@@ -92,7 +96,7 @@ public class JdbcWorkspaceRepository extends JdbcRepositorySupport implements Wo
     @Override
     public PageResponse<Workspace> findPage(PageRequest pageRequest) {
         var items = jdbcClient.sql("""
-                        select workspace_id, name, root_path, status, trace_id, created_at, updated_at
+                        select workspace_id, name, root_path, status, linux_server_id, trace_id, created_at, updated_at
                         from workspaces
                         order by created_at desc, id desc
                         limit :limit offset :offset

@@ -47,6 +47,8 @@
 | `workspace-management` | `/api/internal/platform/workspace-management/workspaces` | `/api/workspaces` |
 | `workspace-management` | `/api/internal/platform/workspace-management/workspace-directories` | `/api/workspace-directories` |
 | `workspace-management` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/content` | `/api/workspaces/{workspaceId}/files/content` |
+| `workspace-management` | `/api/internal/platform/workspace-management/file-ws/tickets` | 无旧 URL |
+| `workspace-management` | `/api/internal/platform/workspace-management/backend-servers` | 无旧 URL |
 | `workspace-management` | `/api/internal/platform/workspace-management/applications` | 无旧 URL |
 | `workspace-management` | `/api/internal/platform/workspace-management/applications/{appId}/workspace-templates/{templateId}/versions` | 无旧 URL |
 | `workspace-management` | `/api/internal/platform/workspace-management/workspace-versions/{versionId}/personal-workspaces` | 无旧 URL |
@@ -366,10 +368,11 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 | `GET` | `/api/workspaces` | 分页列出工作区。 |
 | `GET` | `/api/workspace-directories?path=` | 在允许根目录内浏览可选择的本机目录。 |
 | `GET` | `/api/workspaces/{workspaceId}` | 查询工作区详情。 |
-| `GET` | `/api/workspaces/{workspaceId}/files` | 单层列目录。 |
-| `GET` | `/api/workspaces/{workspaceId}/files/content` | 读取 UTF-8 文件。 |
-| `PUT` | `/api/workspaces/{workspaceId}/files/content` | 保存 UTF-8 文件。 |
-| `GET` | `/api/workspaces/{workspaceId}/files/status` | 查询文件基础状态。 |
+| `POST` | `/api/workspaces/{workspaceId}/file-ws-route` | 查询当前工作区文件 WebSocket 应连接的目标后端。 |
+| `GET` | `/api/workspaces/{workspaceId}/files` | 兼容保留：单层列目录，前端工作区文件操作不再使用。 |
+| `GET` | `/api/workspaces/{workspaceId}/files/content` | 兼容保留：读取 UTF-8 文件，前端工作区文件操作不再使用。 |
+| `PUT` | `/api/workspaces/{workspaceId}/files/content` | 兼容保留：保存 UTF-8 文件，前端工作区文件操作不再使用。 |
+| `GET` | `/api/workspaces/{workspaceId}/files/status` | 兼容保留：查询文件基础状态，前端工作区文件操作不再使用。 |
 
 新平台 URL 使用 `/api/internal/platform/workspace-management` 前缀。例如：
 
@@ -377,6 +380,9 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 |---|---|
 | `POST` | `/api/internal/platform/workspace-management/workspaces` |
 | `GET` | `/api/internal/platform/workspace-management/workspace-directories?path=` |
+| `POST` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route` |
+| `GET` | `/api/internal/platform/workspace-management/backend-servers` |
+| `POST` | `/api/internal/platform/workspace-management/file-ws/tickets` |
 | `GET` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files` |
 | `GET` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/content` |
 | `PUT` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/content` |
@@ -386,9 +392,12 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 ```json
 {
   "name": "demo",
-  "rootPath": "/absolute/workspace/path"
+  "rootPath": "/absolute/workspace/path",
+  "linuxServerId": "127.0.0.1"
 }
 ```
+
+`linuxServerId` 可选；缺省时后端使用当前 Java 进程所属服务器。历史 `linuxServerId = null` 的工作区按 legacy local 处理，后续文件 WebSocket ticket 校验 root path 与同服务器关系成功后回填。
 
 `WorkspaceResponse`：
 
@@ -397,6 +406,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
   "workspaceId": "wrk_...",
   "name": "demo",
   "rootPath": "/absolute/workspace/path",
+  "linuxServerId": "127.0.0.1",
   "status": "ACTIVE",
   "createdAt": "2026-06-19T00:00:00Z",
   "updatedAt": "2026-06-19T00:00:00Z"
@@ -419,6 +429,62 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
   ]
 }
 ```
+
+`POST /api/workspaces/{workspaceId}/file-ws-route` 使用当前登录用户的 `opencode` 进程定位同服务器后端，返回浏览器应直连的目标后端地址。工作区服务器归属、用户 opencode 进程服务器和目标后端服务器不一致时返回统一 `CONFLICT`。
+
+响应 `WorkspaceFileRouteResponse`：
+
+```json
+{
+  "workspaceId": "wrk_...",
+  "linuxServerId": "127.0.0.1",
+  "baseUrl": "http://127.0.0.1:8080",
+  "webSocketPath": "/api/internal/platform/workspace-management/file/ws",
+  "sameServer": true,
+  "message": null
+}
+```
+
+`GET /api/internal/platform/workspace-management/backend-servers` 仅 `SUPER_ADMIN` 可调用，用于服务器工作空间选择器。后端基于活跃 `linux_servers` 与 `backend_java_processes` 返回服务器 IP、可访问后端地址、文件 WebSocket path 和默认目录；`defaultDirectory` 为目标 Java 进程运行目录，缺失时回退当前后端 `user.dir`。
+
+响应示例：
+
+```json
+[
+  {
+    "linuxServerId": "127.0.0.1",
+    "name": "local-opencode-host",
+    "baseUrl": "http://127.0.0.1:8080",
+    "webSocketPath": "/api/internal/platform/workspace-management/file/ws",
+    "defaultDirectory": "/opt/test-agent",
+    "sameAsAgent": true
+  }
+]
+```
+
+`POST /api/internal/platform/workspace-management/file-ws/tickets` 在目标后端创建短期一次性 ticket，供浏览器建立文件 WebSocket。该接口必须使用用户登录态；`mode=workspace` 要求当前用户 opencode 进程、workspace 和目标后端同服务器，`mode=directory-picker` 允许 `SUPER_ADMIN` 浏览目标服务器目录，普通用户只能浏览与当前 opencode 进程同服务器的目录。
+
+请求体：
+
+```json
+{
+  "workspaceId": "wrk_...",
+  "linuxServerId": "127.0.0.1",
+  "mode": "workspace"
+}
+```
+
+响应：
+
+```json
+{
+  "ticket": "wft_...",
+  "expiresAt": "2026-06-19T00:01:00Z",
+  "webSocketUrl": "/api/internal/platform/workspace-management/file/ws?ticket=wft_..."
+}
+```
+
+WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSocket”段。旧 HTTP 文件接口继续保留给历史调用方和调试脚本；前端工作区文件树、打开、保存、状态、删除和实时预览读取必须走 route + ticket + 目标后端 WebSocket。
 
 ### Public Directory API
 

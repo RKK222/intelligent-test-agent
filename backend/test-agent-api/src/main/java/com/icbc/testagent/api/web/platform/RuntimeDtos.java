@@ -39,7 +39,7 @@ final class RuntimeDtos {
     /**
      * 创建工作区请求体。
      */
-    record CreateWorkspaceRequest(@NotBlank String name, @NotBlank String rootPath) {
+    record CreateWorkspaceRequest(@NotBlank String name, @NotBlank String rootPath, String linuxServerId) {
     }
 
     /**
@@ -198,6 +198,7 @@ final class RuntimeDtos {
             String name,
             String rootPath,
             String status,
+            String linuxServerId,
             Instant createdAt,
             Instant updatedAt) {
 
@@ -210,6 +211,7 @@ final class RuntimeDtos {
                     workspace.name(),
                     workspace.rootPath(),
                     workspace.status().name(),
+                    workspace.linuxServerId(),
                     workspace.createdAt(),
                     workspace.updatedAt());
         }
