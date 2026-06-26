@@ -6,10 +6,12 @@ import {
   CheckCircle,
   ChevronDown,
   ChevronRight,
+  Circle,
   Eye,
   EyeOff,
   History,
   ListTodo,
+  Loader2,
   MinusCircle,
   PanelRightClose,
   Plus,
@@ -61,6 +63,93 @@ function hasToolParts(msg: AgentMessage): boolean {
   return msg.parts.some((p) => p.type === 'tool')
 }
 
+type TaskPartItem = {
+  partId: string
+  type: 'tool' | 'subtask' | 'step'
+  toolName?: string
+  label: string
+  detail: string
+  status: string
+}
+
+function taskPartLabel(
+  toolName: string,
+  input?: Record<string, unknown>
+): { label: string; detail: string } {
+  const file = input ? toolFilePath(toolName, input) : ''
+  const fileName = file.split('/').pop() || file
+  switch (toolName) {
+    case 'bash': {
+      const cmd = typeof input?.command === 'string' ? input.command : ''
+      const shortCmd = cmd.length > 50 ? cmd.slice(0, 50) + '...' : cmd
+      return { label: '执行命令', detail: shortCmd || 'bash' }
+    }
+    case 'read':
+      return { label: '读取文件', detail: fileName || '文件' }
+    case 'write':
+      return { label: '写入文件', detail: fileName || '文件' }
+    case 'edit':
+      return { label: '编辑文件', detail: fileName || '文件' }
+    case 'apply_patch':
+      return { label: '应用补丁', detail: fileName || '' }
+    case 'grep':
+      return {
+        label: '搜索代码',
+        detail: typeof input?.pattern === 'string' ? input.pattern : '',
+      }
+    case 'glob':
+      return {
+        label: '查找文件',
+        detail: typeof input?.pattern === 'string' ? input.pattern : '',
+      }
+    case 'task':
+      return {
+        label: '子任务',
+        detail:
+          typeof input?.description === 'string'
+            ? input.description.slice(0, 60)
+            : toolName || '',
+      }
+    default:
+      return { label: toolName || '工具', detail: file || '' }
+  }
+}
+
+function taskParts(msg: ChatMessage): TaskPartItem[] {
+  if (!Array.isArray(msg.parts)) return []
+  return msg.parts
+    .filter((p: any) => p.type === 'tool' || p.type === 'subtask')
+    .map((p: any): TaskPartItem => {
+      const toolName = p.toolName || p.agent || ''
+      const { label, detail } = taskPartLabel(toolName, p.input)
+      return {
+        partId: p.partId || '',
+        type: p.type,
+        toolName,
+        label,
+        detail,
+        status: p.status || 'pending',
+      }
+    })
+}
+
+const runStartMsgCount = ref(0)
+
+const liveTaskParts = computed(() => {
+  if (!props.running) return []
+  const seen = new Set<string>()
+  const items: TaskPartItem[] = []
+  for (const msg of displayMessages.value.slice(runStartMsgCount.value)) {
+    if (msg.role !== 'assistant') continue
+    for (const tp of taskParts(msg)) {
+      if (seen.has(tp.partId)) continue
+      seen.add(tp.partId)
+      items.push(tp)
+    }
+  }
+  return items
+})
+
 type FileOperationMessage = Pick<ChatMessage, 'role' | 'parts'>
 
 export type FileChangeStat = {
@@ -75,6 +164,7 @@ export type TaskUsage = {
   duration?: string
   tokens?: number
   thoughtFor?: string
+  totalDuration?: string
 }
 
 type OpencodeProcessState = {
@@ -142,6 +232,98 @@ const localInput = ref(props.inputValue ?? '')
 const inputComposing = ref(false)
 const wasStopped = ref(false)
 const wasCompleted = ref(false)
+const wasFailed = ref(false)
+
+// ===== 选择题检测 =====
+type ChoiceOption = { index: number; label: string }
+const selectedChoice = ref<number | null>(null)
+const choiceCustomInput = ref('')
+const choiceDismissed = ref(false)
+
+const choiceOptions = computed<ChoiceOption[]>(() => {
+  if (props.running) return []
+  const last = displayMessages.value
+    .filter(m => m.role === 'assistant')
+    .pop()
+  if (!last) return []
+  const text = last.content
+  if (!text) return []
+  let clean = text.replace(/\*\*(\d+)\*\*/g, '$1')
+  clean = clean.replace(/\*\*([^*]+)\*\*/g, '$1')
+  clean = clean.replace(/\*([^*]+)\*/g, '$1')
+  clean = clean.replace(/^[-\s>#*]+/gm, '')
+  const lines = clean.split('\n')
+  const opts: ChoiceOption[] = []
+  for (const line of lines) {
+    const trimmed = line.trim()
+    let m = trimmed.match(/^(\d+)[\.\)、\|：:\s]+\s*(.+)/)
+    if (!m) m = trimmed.match(/^[\[【\(](\d+)[\]】\)][\s]*(.+)/)
+    if (!m) {
+      m = trimmed.match(/^([一二三四五六七八九十]+)[、\.\s]\s*(.+)/)
+      if (m) {
+        const map: Record<string, number> = { '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10 }
+        const idx = map[m[1]]
+        if (idx) m = [m[0], String(idx), m[2]]
+        else m = null
+      }
+    }
+    if (m) {
+      const label = m[2].trim().slice(0, 80)
+      if (label) opts.push({ index: parseInt(m[1]), label })
+    }
+  }
+  if (opts.length < 2) return []
+  for (let i = 0; i < opts.length; i++) {
+    if (opts[i].index !== i + 1) return []
+  }
+  const tail = lines.slice(-4).join(' ')
+  const hasChoiceHint = /(选|哪个|choose|select|pick|你希望|你想|你倾向|哪个方案|哪一种|怎么选)/i.test(tail) || /[？?]\s*$/.test(tail.trim())
+  if (!hasChoiceHint) return []
+  return opts
+})
+
+const choiceQuestion = computed(() => {
+  if (choiceOptions.value.length === 0) return ''
+  const last = displayMessages.value.filter(m => m.role === 'assistant').pop()
+  if (!last) return ''
+  const text = last.content
+  const firstOpt = choiceOptions.value[0]
+  const idx = text.indexOf(`${firstOpt.index}.`)
+  const before = idx > 0 ? text.slice(0, idx).trim() : ''
+  const paras = before.split(/\n\n+/)
+  const lastPara = paras.pop()?.trim() || ''
+  const sentences = lastPara.split(/[。！？?!]/)
+  return sentences.slice(-2).join(' ').trim().slice(0, 100)
+})
+
+const showChoicePanel = computed(
+  () => !wasStopped.value && !choiceDismissed.value && choiceOptions.value.length >= 2
+)
+
+function selectChoice(index: number) {
+  selectedChoice.value = index
+  choiceCustomInput.value = ''
+}
+
+function confirmChoice() {
+  if (selectedChoice.value !== null) {
+    const opt = choiceOptions.value.find(o => o.index === selectedChoice.value)
+    if (opt) emit('send', `${opt.index}. ${opt.label}`)
+  } else if (choiceCustomInput.value.trim()) {
+    emit('send', choiceCustomInput.value.trim())
+  }
+  resetChoice()
+}
+
+function cancelChoice() {
+  resetChoice()
+  choiceDismissed.value = true
+}
+
+function resetChoice() {
+  selectedChoice.value = null
+  choiceCustomInput.value = ''
+}
 
 // ===== 文件变更抽屉 =====
 // 抽屉默认选中第一个文件；打开后通过 fileChanges 变化自动跟随到最新一个文件（与原有的“跟随最近一次变化”心智一致）。
@@ -882,9 +1064,14 @@ watch(
     if (now && !prev) {
       thinkingExpanded.value = false
       wasCompleted.value = false
+      wasFailed.value = false
+      choiceDismissed.value = false
+      runStartMsgCount.value = displayMessages.value.length
     }
     if (!now && prev && !wasStopped.value) {
-      wasCompleted.value = true
+      const hasError = displayMessages.value.some((m) => m._error)
+      if (hasError) wasFailed.value = true
+      else wasCompleted.value = true
     }
   }
 )
@@ -968,7 +1155,8 @@ const hasTaskUsage = computed(
       props.taskUsage &&
       (props.taskUsage.duration ||
         props.taskUsage.tokens !== undefined ||
-        props.taskUsage.thoughtFor)
+        props.taskUsage.thoughtFor ||
+        props.taskUsage.totalDuration)
     )
 )
 
@@ -1015,7 +1203,8 @@ const hasTaskUsageDisplay = computed(
       props.taskUsage &&
       (props.taskUsage.duration ||
         displayTokens.value !== undefined ||
-        props.taskUsage.thoughtFor)
+        props.taskUsage.thoughtFor ||
+        props.taskUsage.totalDuration)
     )
 )
 
@@ -1056,6 +1245,10 @@ watch(
   }
 )
 
+watch([wasCompleted, wasStopped, wasFailed], () => {
+  nextTick(scrollToBottom)
+})
+
 function formatTime(iso: string) {
   try {
     const d = new Date(iso)
@@ -1070,6 +1263,8 @@ function submit() {
   if (!text || props.running) return
   wasStopped.value = false
   wasCompleted.value = false
+  wasFailed.value = false
+  choiceDismissed.value = false
   emit('send', text)
   localInput.value = ''
   emit('update:inputValue', '')
@@ -1323,9 +1518,18 @@ function onCompositionEnd() {
         <span>已手动终止</span>
       </div>
 
+      <!-- 对话失败提示 -->
+      <div
+        v-if="wasFailed && !running && displayMessages.length > 0"
+        class="figma-chat-failed"
+      >
+        <AlertTriangle :size="14" class="figma-chat-failed-icon" />
+        <span>任务执行失败</span>
+      </div>
+
       <!-- 对话完成提示 -->
       <div
-        v-if="wasCompleted && !running && displayMessages.length > 0"
+        v-if="wasCompleted && !wasFailed && !running && displayMessages.length > 0"
         class="figma-chat-completed"
       >
         <CheckCircle :size="14" class="figma-chat-completed-icon" />
@@ -1406,7 +1610,8 @@ function onCompositionEnd() {
           v-if="
             taskUsage?.duration ||
             displayTokens !== undefined ||
-            taskUsage?.thoughtFor
+            taskUsage?.thoughtFor ||
+            taskUsage?.totalDuration
           "
           >(</template
         >
@@ -1417,11 +1622,15 @@ function onCompositionEnd() {
         <template v-if="taskUsage?.thoughtFor">
           · thought for {{ taskUsage.thoughtFor }}</template
         >
+        <template v-if="taskUsage?.totalDuration">
+          · 累计 {{ taskUsage.totalDuration }}</template
+        >
         <template
           v-if="
             taskUsage?.duration ||
             displayTokens !== undefined ||
-            taskUsage?.thoughtFor
+            taskUsage?.thoughtFor ||
+            taskUsage?.totalDuration
           "
           >)</template
         >
@@ -1477,8 +1686,40 @@ function onCompositionEnd() {
       </button>
     </div>
 
+    <!-- 任务面板：运行中显示工具操作进度 -->
+    <div v-if="running && liveTaskParts.length > 0" class="figma-chat-task-panel">
+      <div class="figma-chat-task-summary">
+        已完成 {{ liveTaskParts.filter(t => t.status === 'completed').length }} 个任务 共（{{ liveTaskParts.length }} 个）
+      </div>
+      <div v-for="tp in liveTaskParts" :key="tp.partId" :class="['figma-chat-task-row', `figma-chat-task-row--${tp.status}`]">
+        <Loader2 v-if="tp.status === 'running'" :size="12" class="figma-chat-task-icon figma-chat-task-icon--running" />
+        <CheckCircle v-else-if="tp.status === 'completed'" :size="12" class="figma-chat-task-icon figma-chat-task-icon--completed" />
+        <X v-else-if="tp.status === 'error'" :size="12" class="figma-chat-task-icon figma-chat-task-icon--error" />
+        <Circle v-else :size="12" class="figma-chat-task-icon figma-chat-task-icon--pending" />
+        <span class="figma-chat-task-label">{{ tp.label }}</span>
+        <span v-if="tp.detail" class="figma-chat-task-detail">{{ tp.detail }}</span>
+      </div>
+    </div>
+    <!-- 选择题面板：替换输入区域 -->
+    <div v-if="showChoicePanel" class="figma-chat-choice-panel">
+      <div v-if="choiceQuestion" class="figma-chat-choice-question">{{ choiceQuestion }}</div>
+      <div class="figma-chat-choice-list">
+        <div v-for="opt in choiceOptions" :key="opt.index" :class="['figma-chat-choice-row', selectedChoice === opt.index && 'figma-chat-choice-row--selected']" @click="selectChoice(opt.index)">
+          <span class="figma-chat-choice-index">{{ opt.index }}</span>
+          <span class="figma-chat-choice-label">{{ opt.label }}</span>
+        </div>
+        <div :class="['figma-chat-choice-row figma-chat-choice-row--other', selectedChoice === null && choiceCustomInput !== '' && 'figma-chat-choice-row--selected']">
+          <span class="figma-chat-choice-index">#</span>
+          <input v-model="choiceCustomInput" class="figma-chat-choice-input" placeholder="其他..." @focus="selectedChoice = null" />
+        </div>
+      </div>
+      <div class="figma-chat-choice-actions">
+        <button type="button" class="figma-chat-choice-cancel" @click="cancelChoice">取消</button>
+        <button type="button" class="figma-chat-choice-confirm" :disabled="selectedChoice === null && !choiceCustomInput.trim()" @click="confirmChoice">确认</button>
+      </div>
+    </div>
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
-    <div class="figma-chat-composer">
+    <div v-else class="figma-chat-composer">
       <div class="figma-chat-input-card">
         <textarea
           v-model="localInput"
@@ -2272,6 +2513,203 @@ function onCompositionEnd() {
 .figma-chat-completed-icon {
   flex-shrink: 0;
   color: #18a978;
+}
+
+.figma-chat-failed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 12px 4px;
+  font-size: 12px;
+  color: #d1423a;
+  font-weight: 500;
+  align-self: flex-start;
+}
+
+.figma-chat-failed-icon {
+  flex-shrink: 0;
+  color: #d1423a;
+}
+
+/* ---- Task Panel (above input, during running) ---- */
+.figma-chat-task-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  margin: 0 10px 4px;
+  background: var(--ta-chat-process-bg, rgba(0, 0, 0, 0.03));
+  border-radius: 8px;
+  border: 1px solid var(--ta-chat-border, rgba(0, 0, 0, 0.06));
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.figma-chat-task-summary {
+  font-size: 12px;
+  color: var(--ta-chat-muted, #8b8ea0);
+  padding-bottom: 4px;
+}
+
+.figma-chat-task-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.figma-chat-task-icon {
+  flex-shrink: 0;
+  margin-right: 2px;
+}
+
+.figma-chat-task-icon--running {
+  color: #555;
+  animation: figma-chat-pulse 1.4s ease-in-out infinite;
+}
+
+.figma-chat-task-icon--completed {
+  color: #219653;
+}
+
+.figma-chat-task-icon--error {
+  color: #d1423a;
+}
+
+.figma-chat-task-icon--pending {
+  color: #a1a5b1;
+}
+
+.figma-chat-task-label {
+  color: #333;
+  flex-shrink: 0;
+}
+
+.figma-chat-task-detail {
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- 选择题面板 ---- */
+.figma-chat-choice-panel {
+  padding: 2px 10px 6px;
+  border: 1px solid var(--ta-chat-border, #d7d7d7);
+  border-radius: 8px;
+}
+
+.figma-chat-choice-question {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a1a1a;
+  padding: 6px 2px 4px;
+  line-height: 1.45;
+}
+
+.figma-chat-choice-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 2px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.figma-chat-choice-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.figma-chat-choice-row:hover {
+  background: #f0f1f4;
+}
+
+.figma-chat-choice-row--selected {
+  background: #e8f0ff;
+}
+
+.figma-chat-choice-index {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--ta-chat-process-bg, #f0f1f4);
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+}
+
+.figma-chat-choice-row--selected .figma-chat-choice-index {
+  background: #3366ff;
+  color: #fff;
+}
+
+.figma-chat-choice-label {
+  font-size: 13px;
+  line-height: 18px;
+  color: #333;
+}
+
+.figma-chat-choice-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: #333;
+  padding: 0;
+}
+
+.figma-chat-choice-input::placeholder {
+  color: #aaa;
+}
+
+.figma-chat-choice-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.figma-chat-choice-cancel,
+.figma-chat-choice-confirm {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  border: none;
+  transition: background 0.12s;
+}
+
+.figma-chat-choice-cancel {
+  background: #f0f1f4;
+  color: #666;
+}
+
+.figma-chat-choice-cancel:hover {
+  background: #e4e5e9;
+}
+
+.figma-chat-choice-confirm {
+  background: #1a1a1a;
+  color: #fff;
+}
+
+.figma-chat-choice-confirm:not(:disabled):hover {
+  background: #333;
+}
+
+.figma-chat-choice-confirm:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 @keyframes figma-chat-pulse {
