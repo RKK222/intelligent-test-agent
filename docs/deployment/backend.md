@@ -199,6 +199,8 @@ tools/verify-opencode-process-deployment.sh --backend-url http://127.0.0.1:8080
 
 `deploy/local/docker-compose.yml` 默认启动备用 Postgres，映射到 `127.0.0.1:15432`；Redis 是可选 profile，默认映射到 `127.0.0.1:16379`。脚本只读取环境变量，不生成或写入密钥。
 
+仓库根目录的 `restart-dev-services.sh` 是三服务一键重启入口：按「后端 → opencode-manager → 前端」的依赖顺序，**逐个先 kill 原进程再启动**。当 `TEST_AGENT_OPENCODE_BASE_URL` 是本地地址时，脚本默认启动 Go `opencode-manager`（`run` 长运行模式），不再单独启动 standalone `opencode serve`——用户进程由 manager 自行派生，避免 4096 端口冲突。manager 与后端共享的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 未设置时默认 `local-manager-token`（与 `application-guo.yml` 一致），本地无需手配 `.env.local`；设 `TEST_AGENT_START_OPENCODE_MANAGER=false` 可跳过 manager。
+
 ## dotenv 示例
 
 `.env.local`（local profile）：

@@ -28,13 +28,24 @@ usage() {
   cat <<'USAGE'
 Usage: ./restart-dev-services.sh [--profile local|test|guo] [--env-file <path>] [--log-dir <path>] [--skip-backend-build] [--skip-frontend-build] [--help]
 
-Compile and restart the local platform backend and frontend services.
+Compile and restart the local platform services one by one. Each service is
+stopped (kill old process + screen session) before its new instance starts,
+in dependency order: backend -> opencode-manager -> frontend.
+
+Services managed by this script:
+  backend           Spring Boot test-agent-app (java -jar, profile from --profile).
+  opencode-manager  Go opencode-manager supervisor (./opencode-manager/bin/opencode-manager run).
+                    Started by default when TEST_AGENT_OPENCODE_BASE_URL is a local URL.
+                    Standalone `opencode serve` is NOT started separately when the
+                    manager runs, because the manager spawns opencode child processes.
+  frontend          agent-web Vite dev server (corepack pnpm dev).
 
 Defaults:
   backend profile: local
   backend env:     .env.local
   backend URL:     TEST_AGENT_BASE_URL or http://127.0.0.1:8080
   frontend URL:    TEST_AGENT_FRONTEND_URL or http://127.0.0.1:3000
+  manager token:   TEST_AGENT_OPENCODE_MANAGER_TOKEN or local-manager-token (local dev default)
   logs:            .tmp/dev-services/
   screen sessions: test-agent-backend, test-agent-frontend, test-agent-opencode-manager when screen is available
 
@@ -45,6 +56,10 @@ Options:
   --skip-backend-build   Restart backend without running Maven package first.
   --skip-frontend-build  Restart frontend without running pnpm build first.
   --help                 Show this help.
+
+Environment overrides:
+  TEST_AGENT_START_OPENCODE_MANAGER  auto|true|false. Set false to skip the Go manager.
+  TEST_AGENT_OPENCODE_MANAGER_TOKEN  Shared secret between manager and backend. Defaults to local-manager-token.
 USAGE
 }
 
@@ -311,7 +326,10 @@ should_start_opencode_manager() {
       return 1
       ;;
     auto|"")
-      [[ -n "${TEST_AGENT_OPENCODE_MANAGER_TOKEN:-}" ]] && is_local_opencode_url "${backend_url}"
+      # token 已有默认值，这里改用 TEST_AGENT_OPENCODE_BASE_URL 是否配置作为「真实本地环境」判据：
+      # 真实本地必然配置了该地址（start_backend 也会强制校验），而校验环境的占位 env 不会配置，
+      # 从而避免在无 go 工具的校验环境里触发 build_opencode_manager。
+      [[ -n "${TEST_AGENT_OPENCODE_BASE_URL:-}" ]] && is_local_opencode_url "${backend_url}"
       ;;
     *)
       echo "Invalid TEST_AGENT_START_OPENCODE_MANAGER: ${TEST_AGENT_START_OPENCODE_MANAGER}" >&2
@@ -470,6 +488,59 @@ stop_screen_session() {
     echo "Stopping screen session: ${session}"
     screen -S "${session}" -X quit >/dev/null 2>&1 || true
   fi
+}
+
+# 逐个服务的「先 kill 原进程再启动」停止步骤：清理进程 + 对应 screen 会话。
+stop_backend_service() {
+  local pids=()
+  local pid
+  for pid in $(backend_pids); do
+    pids+=("${pid}")
+  done
+  if [[ "${#pids[@]}" -gt 0 ]]; then
+    stop_pids "backend" "${pids[@]}"
+  else
+    stop_pids "backend"
+  fi
+  stop_screen_session "${BACKEND_SCREEN_SESSION}"
+}
+
+stop_frontend_service() {
+  local pids=()
+  local pid
+  for pid in $(frontend_pids); do
+    pids+=("${pid}")
+  done
+  if [[ "${#pids[@]}" -gt 0 ]]; then
+    stop_pids "frontend" "${pids[@]}"
+  else
+    stop_pids "frontend"
+  fi
+  stop_screen_session "${FRONTEND_SCREEN_SESSION}"
+}
+
+# manager 接管 opencode 子进程后，需同时清理可能残留的 standalone opencode serve，避免 4096 端口冲突。
+stop_opencode_manager_service() {
+  local pids=()
+  local pid
+  for pid in $(opencode_manager_pids); do
+    pids+=("${pid}")
+  done
+  if [[ "${#pids[@]}" -gt 0 ]]; then
+    stop_pids "opencode-manager" "${pids[@]}"
+  else
+    stop_pids "opencode-manager"
+  fi
+  stop_screen_session "${OPENCODE_MANAGER_SCREEN_SESSION}"
+
+  local opencode_pids=()
+  for pid in $(opencode_pids); do
+    opencode_pids+=("${pid}")
+  done
+  if [[ "${#opencode_pids[@]}" -gt 0 ]]; then
+    stop_pids "opencode serve" "${opencode_pids[@]}"
+  fi
+  stop_screen_session "${OPENCODE_SCREEN_SESSION}"
 }
 
 http_ok() {
@@ -685,6 +756,13 @@ apply_frontend_origin_defaults
 apply_detected_runtime_ip_defaults
 export SPRING_PROFILES_ACTIVE="${profile}"
 
+# 本地开发默认给 opencode-manager 一个与后端共享的 token，避免每次手配 .env.local。
+# 与 application-guo.yml 的 local-manager-token 约定一致；local/test profile 后端从同一环境变量读取，自动匹配。
+if [[ -z "${TEST_AGENT_OPENCODE_MANAGER_TOKEN:-}" ]]; then
+  export TEST_AGENT_OPENCODE_MANAGER_TOKEN="local-manager-token"
+  echo "Defaulting TEST_AGENT_OPENCODE_MANAGER_TOKEN to local-manager-token for local opencode-manager."
+fi
+
 # 设置 JAVA_HOME
 java_version="${JAVA_VERSION:-21}"
 if [[ -n "${JAVA_VERSION:-}" ]] || [[ -z "${JAVA_HOME:-}" ]]; then
@@ -726,69 +804,25 @@ seed_demo_workspaces
 echo "Sensitive environment values are loaded but not printed."
 echo "Builds run before stopping existing services; failed builds leave current services untouched."
 
+# 先统一构建：任一构建失败则直接退出，不会动到现有运行中的服务。
 build_backend
-build_frontend
 build_opencode_manager
+build_frontend
 
-old_frontend_pids=()
-# PID 输出只包含数字，使用普通 word splitting 避免 process substitution 被 sh 预解析时报错。
-for pid in $(frontend_pids); do
-  old_frontend_pids+=("${pid}")
-done
+# 逐个服务「先 kill 原进程再启动」，按依赖顺序：后端 -> opencode-manager -> 前端。
+# 后端最先：opencode-manager 要发现后端实例，前端要调用后端 API。
 
-old_backend_pids=()
-for pid in $(backend_pids); do
-  old_backend_pids+=("${pid}")
-done
-
-old_opencode_pids=()
-if should_start_opencode; then
-  for pid in $(opencode_pids); do
-    old_opencode_pids+=("${pid}")
-  done
-fi
-
-old_opencode_manager_pids=()
-if should_start_opencode_manager; then
-  for pid in $(opencode_manager_pids); do
-    old_opencode_manager_pids+=("${pid}")
-  done
-fi
-
-if [[ "${#old_frontend_pids[@]}" -gt 0 ]]; then
-  stop_pids "frontend" "${old_frontend_pids[@]}"
-else
-  stop_pids "frontend"
-fi
-
-if [[ "${#old_backend_pids[@]}" -gt 0 ]]; then
-  stop_pids "backend" "${old_backend_pids[@]}"
-else
-  stop_pids "backend"
-fi
-
-if should_start_opencode; then
-  if [[ "${#old_opencode_pids[@]}" -gt 0 ]]; then
-    stop_pids "opencode" "${old_opencode_pids[@]}"
-  else
-    stop_pids "opencode"
-  fi
-fi
-if should_start_opencode_manager; then
-  if [[ "${#old_opencode_manager_pids[@]}" -gt 0 ]]; then
-    stop_pids "opencode-manager" "${old_opencode_manager_pids[@]}"
-  else
-    stop_pids "opencode-manager"
-  fi
-fi
-stop_screen_session "${FRONTEND_SCREEN_SESSION}"
-stop_screen_session "${BACKEND_SCREEN_SESSION}"
-stop_screen_session "${OPENCODE_SCREEN_SESSION}"
-stop_screen_session "${OPENCODE_MANAGER_SCREEN_SESSION}"
-
-start_opencode
+# 1) 后端
+stop_backend_service
 start_backend
+
+# 2) opencode-manager（Go 管理进程）。非本地环境 should_start_opencode_manager 为 false 时自动跳过，
+#    start_opencode_manager 内部也会跳过；stop 步骤仍会清理残留 manager 与 standalone opencode serve。
+stop_opencode_manager_service
 start_opencode_manager
+
+# 3) 前端
+stop_frontend_service
 start_frontend
 
 echo "Restart complete."
@@ -796,5 +830,5 @@ echo "Backend:  ${backend_url}"
 echo "Frontend: ${frontend_url}"
 echo "Logs:     ${LOG_DIR}"
 if command -v screen >/dev/null 2>&1; then
-  echo "Screen:   ${OPENCODE_SCREEN_SESSION}, ${OPENCODE_MANAGER_SCREEN_SESSION}, ${BACKEND_SCREEN_SESSION}, ${FRONTEND_SCREEN_SESSION}"
+  echo "Screen:   ${BACKEND_SCREEN_SESSION}, ${OPENCODE_MANAGER_SCREEN_SESSION}, ${FRONTEND_SCREEN_SESSION}"
 fi
