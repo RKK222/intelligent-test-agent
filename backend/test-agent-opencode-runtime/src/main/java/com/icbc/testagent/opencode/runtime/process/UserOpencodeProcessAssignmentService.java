@@ -7,6 +7,9 @@ import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.node.ExecutionNodeStatus;
+import com.icbc.testagent.domain.configuration.CommonParameter;
+import com.icbc.testagent.domain.configuration.CommonParameterRepository;
+import com.icbc.testagent.domain.configuration.ParameterPlatform;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
@@ -43,11 +46,16 @@ public class UserOpencodeProcessAssignmentService {
     private static final Logger log = LoggerFactory.getLogger(UserOpencodeProcessAssignmentService.class);
     private static final String OPENCODE_AGENT_ID = "opencode";
     private static final int CONTAINER_CANDIDATE_LIMIT = 100;
-    private static final String CONFIG_PATH = "/data/opencode/.config/opencode/";
+    private static final String PARAM_OPENCODE_SESSION_DIR = "OPENCODE_SESSION_DIR";
+    private static final String PARAM_OPENCODE_PUBLIC_CONFIG_DIR = "OPENCODE_PUBLIC_CONFIG_DIR";
+    private static final String DEFAULT_SESSION_DIR = "/data/.testagent/agent-opencode/.session/";
+    private static final String DEFAULT_CONFIG_PATH = "/data/.testagent/agent-opencode/.config/opencode/";
     private static final String LOCAL_DIRECT_PROCESS_ID = "ocp_local_direct";
     private static final String LOCAL_DIRECT_CONTAINER_ID = "ctr_local_direct";
+    private static final CommonParameterRepository EMPTY_PARAMETER_REPOSITORY = (englishName, platform) -> Optional.empty();
 
     private final OpencodeProcessManagementRepository repository;
+    private final CommonParameterRepository commonParameterRepository;
     private final ExecutionNodeRepository executionNodeRepository;
     private final OpencodeProcessManagerGateway gateway;
     private final BackendJavaProcessLifecycleService backendLifecycle;
@@ -74,7 +82,7 @@ public class UserOpencodeProcessAssignmentService {
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessHeartbeatStore heartbeatStore) {
-        this(repository, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, LocalDirectSettings.disabled());
+        this(repository, EMPTY_PARAMETER_REPOSITORY, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, LocalDirectSettings.disabled());
     }
 
     /**
@@ -83,12 +91,14 @@ public class UserOpencodeProcessAssignmentService {
     @Autowired
     public UserOpencodeProcessAssignmentService(
             OpencodeProcessManagementRepository repository,
+            CommonParameterRepository commonParameterRepository,
             ExecutionNodeRepository executionNodeRepository,
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessHeartbeatStore heartbeatStore,
             LocalDirectSettings localDirectSettings) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.commonParameterRepository = Objects.requireNonNull(commonParameterRepository, "commonParameterRepository must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.backendLifecycle = Objects.requireNonNull(backendLifecycle, "backendLifecycle must not be null");
@@ -293,8 +303,8 @@ public class UserOpencodeProcessAssignmentService {
                 container.containerId(),
                 port,
                 baseUrl,
-                "/data/opencode/session/" + port,
-                CONFIG_PATH,
+                sessionPath(port),
+                configPath(),
                 traceId);
     }
 
@@ -375,8 +385,8 @@ public class UserOpencodeProcessAssignmentService {
                 0L,
                 "http://" + parsed.host() + ":" + parsed.port(),
                 OpencodeServerProcessStatus.RUNNING,
-                "/data/opencode/session/" + parsed.port(),
-                CONFIG_PATH,
+                sessionPath(parsed.port()),
+                configPath(),
                 now,
                 now,
                 "local-direct",
@@ -411,6 +421,27 @@ public class UserOpencodeProcessAssignmentService {
      * 解析后的 host/port 简单包装。
      */
     private record ParsedBaseUrl(String host, int port) {
+    }
+
+    private String sessionPath(int port) {
+        return ensureTrailingSlash(configuredParameter(PARAM_OPENCODE_SESSION_DIR, DEFAULT_SESSION_DIR)) + port;
+    }
+
+    private String configPath() {
+        return ensureTrailingSlash(configuredParameter(PARAM_OPENCODE_PUBLIC_CONFIG_DIR, DEFAULT_CONFIG_PATH));
+    }
+
+    private String configuredParameter(String englishName, String fallback) {
+        ParameterPlatform platform = ParameterPlatform.current();
+        return commonParameterRepository.findByEnglishNameAndPlatform(englishName, platform)
+                .or(() -> commonParameterRepository.findByEnglishNameAndPlatform(englishName, ParameterPlatform.ALL))
+                .map(CommonParameter::parameterValue)
+                .orElse(fallback);
+    }
+
+    private String ensureTrailingSlash(String value) {
+        String normalized = value == null || value.isBlank() ? "/" : value.trim().replace('\\', '/');
+        return normalized.endsWith("/") ? normalized : normalized + "/";
     }
 
     private UserOpencodeProcessStatusResponse ready(OpencodeServerProcess process, String message, Instant checkedAt) {

@@ -369,6 +369,67 @@ describe("backend-api", () => {
     );
   });
 
+  it("maps repository english names and workspace create progress through configuration APIs", async () => {
+    const fetcher = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: {
+          repositoryId: "repo_1",
+          gitUrl: "https://gitee.com/demo/repo.git",
+          name: "演示库",
+          englishName: "demorepo",
+          standard: true,
+          createdAt: "2026-06-26T00:00:00Z",
+          updatedAt: "2026-06-26T00:00:00Z"
+        }
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: {
+          workspaceId: "awp_1",
+          appId: "app_1",
+          repositoryId: "repo_1",
+          branch: "feature_testagent_20260707",
+          directoryPath: "src",
+          workspaceName: "src",
+          initialVersion: { versionId: "awv_1", version: "20260707" },
+          createdAt: "2026-06-26T00:00:00Z",
+          updatedAt: "2026-06-26T00:00:00Z"
+        }
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: {
+          operationId: "wco_123",
+          status: "RUNNING",
+          currentStep: "PREPARING_REPOSITORY",
+          steps: [{ code: "PREPARING_REPOSITORY", name: "下载代码", status: "RUNNING" }]
+        }
+      }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await client.createRepository({
+      gitUrl: "https://gitee.com/demo/repo.git",
+      name: "演示库",
+      englishName: "demorepo",
+      standard: true
+    });
+    await client.createApplicationWorkspace("app_1", {
+      repositoryId: "repo_1",
+      branch: "feature_testagent_20260707",
+      directoryPath: "src",
+      operationId: "wco_123"
+    });
+    await client.getWorkspaceCreateOperation("wco_123");
+
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({ englishName: "demorepo" });
+    expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body))).toMatchObject({ operationId: "wco_123" });
+    expect(fetcher.mock.calls[2]?.[0]).toBe("http://api/api/internal/platform/configuration-management/workspace-create-operations/wco_123");
+  });
+
   it("maps managed workspace APIs through platform URLs", async () => {
     const versionResponse = {
       versionId: "awv_1",

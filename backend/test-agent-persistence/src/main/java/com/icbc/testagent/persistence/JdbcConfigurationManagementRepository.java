@@ -45,6 +45,7 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
             new CodeRepositoryId(rs.getString("repository_id")),
             rs.getString("git_url"),
             rs.getString("name"),
+            rs.getString("english_name"),
             rs.getBoolean("standard"),
             instant(rs, "created_at"),
             instant(rs, "updated_at"));
@@ -195,7 +196,7 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
     @Override
     public PageResponse<CodeRepository> findRepositories(PageRequest pageRequest) {
         List<CodeRepository> items = jdbcClient.sql("""
-                        select repository_id, git_url, name, standard, created_at, updated_at
+                        select repository_id, git_url, name, english_name, standard, created_at, updated_at
                         from code_repositories
                         order by updated_at desc, repository_id
                         limit :limit offset :offset
@@ -211,7 +212,7 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
     @Override
     public Optional<CodeRepository> findRepository(CodeRepositoryId repositoryId) {
         return jdbcClient.sql("""
-                        select repository_id, git_url, name, standard, created_at, updated_at
+                        select repository_id, git_url, name, english_name, standard, created_at, updated_at
                         from code_repositories
                         where repository_id = :repositoryId
                         """)
@@ -223,7 +224,7 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
     @Override
     public Optional<CodeRepository> findRepositoryByGitUrl(String gitUrl) {
         return jdbcClient.sql("""
-                        select repository_id, git_url, name, standard, created_at, updated_at
+                        select repository_id, git_url, name, english_name, standard, created_at, updated_at
                         from code_repositories
                         where git_url = :gitUrl
                         """)
@@ -233,14 +234,27 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
     }
 
     @Override
+    public Optional<CodeRepository> findRepositoryByEnglishName(String englishName) {
+        return jdbcClient.sql("""
+                        select repository_id, git_url, name, english_name, standard, created_at, updated_at
+                        from code_repositories
+                        where english_name = :englishName
+                        """)
+                .param("englishName", englishName)
+                .query(repositoryMapper)
+                .optional();
+    }
+
+    @Override
     public CodeRepository saveRepository(CodeRepository repository) {
         jdbcClient.sql("""
-                        insert into code_repositories(repository_id, git_url, name, standard, created_at, updated_at)
-                        values (:repositoryId, :gitUrl, :name, :standard, :createdAt, :updatedAt)
+                        insert into code_repositories(repository_id, git_url, name, english_name, standard, created_at, updated_at)
+                        values (:repositoryId, :gitUrl, :name, :englishName, :standard, :createdAt, :updatedAt)
                         """)
                 .param("repositoryId", repository.repositoryId().value())
                 .param("gitUrl", repository.gitUrl())
                 .param("name", repository.name())
+                .param("englishName", repository.englishName())
                 .param("standard", repository.standard())
                 .param("createdAt", timestamp(repository.createdAt()))
                 .param("updatedAt", timestamp(repository.updatedAt()))
@@ -252,11 +266,12 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
     public CodeRepository updateRepositoryMetadata(CodeRepository repository) {
         jdbcClient.sql("""
                         update code_repositories
-                        set name = :name, standard = :standard, updated_at = :updatedAt
+                        set name = :name, english_name = :englishName, standard = :standard, updated_at = :updatedAt
                         where repository_id = :repositoryId
                         """)
                 .param("repositoryId", repository.repositoryId().value())
                 .param("name", repository.name())
+                .param("englishName", repository.englishName())
                 .param("standard", repository.standard())
                 .param("updatedAt", timestamp(repository.updatedAt()))
                 .update();
@@ -266,7 +281,7 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
     @Override
     public List<CodeRepository> findRepositoriesByApplication(ApplicationId appId) {
         return jdbcClient.sql("""
-                        select r.repository_id, r.git_url, r.name, r.standard, r.created_at, r.updated_at
+                        select r.repository_id, r.git_url, r.name, r.english_name, r.standard, r.created_at, r.updated_at
                         from code_repositories r
                         join application_repository_links l on l.repository_id = r.repository_id
                         where l.app_id = :appId

@@ -72,8 +72,8 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(response.baseUrl()).isEqualTo("http://10.8.0.13:4200");
         assertThat(gateway.startCommands).hasSize(1);
         assertThat(gateway.startCommands.getFirst().containerId()).isEqualTo(new OpencodeContainerId("ctr_idle"));
-        assertThat(gateway.startCommands.getFirst().sessionPath()).isEqualTo("/data/opencode/session/4200");
-        assertThat(gateway.startCommands.getFirst().configPath()).isEqualTo("/data/opencode/.config/opencode/");
+        assertThat(gateway.startCommands.getFirst().sessionPath()).isEqualTo("/data/.testagent/agent-opencode/.session/4200");
+        assertThat(gateway.startCommands.getFirst().configPath()).isEqualTo("/data/.testagent/agent-opencode/.config/opencode/");
         assertThat(repository.findUserBinding(USER_ID, "opencode")).get()
                 .extracting(UserOpencodeProcessBinding::linuxServerId)
                 .isEqualTo(new LinuxServerId("10.8.0.13"));
@@ -261,6 +261,7 @@ class UserOpencodeProcessAssignmentServiceTest {
             FakeRepository repository, RecordingGateway gateway, String baseUrl) {
         return new UserOpencodeProcessAssignmentService(
                 repository,
+                (englishName, platform) -> Optional.empty(),
                 repository,
                 gateway,
                 new BackendJavaProcessLifecycleService(

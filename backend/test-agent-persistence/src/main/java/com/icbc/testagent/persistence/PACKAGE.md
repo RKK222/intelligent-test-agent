@@ -23,6 +23,8 @@
 - `JdbcExecutionNodeRepository`：实现执行节点保存和可路由节点查询。
 - `JdbcRoutingDecisionRepository`：实现路由决策保存和查询。
 - `JdbcOpencodeProcessManagementRepository`：实现 opencode 用户进程管理拓扑、用户进程、用户绑定持久化，以及运行管理页拓扑列表、连接列表、进程分页筛选和绑定关联查询。
+- `JdbcCommonParameterRepository`：实现通用参数读取端口，用于 opencode session/config/app workspace/personal worktree 路径等平台参数。
+- `JdbcWorkspaceCreateOperationRepository`：实现设置页创建应用工作空间进度记录，供配置管理 HTTP 轮询接口读取。
 - `JdbcScheduledTaskRepository`：实现定时任务定义、用户计划和运行记录持久化，支持 due task、pending run 和管理页分页筛选查询。
 - `db/migration/V1__create_core_tables.sql`：创建核心业务表和索引。
 - `db/migration/V2__create_session_messages.sql`：创建会话消息表和分页索引。
@@ -34,6 +36,7 @@
 - `db/migration/V14__create_opencode_process_management_tables.sql`：创建 Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程和用户绑定表。
 - `db/migration/V15__add_opencode_process_id_check_constraints.sql`：为 opencode 进程管理表加 `process_id` 前缀、IPv4、状态、port、baseUrl 形状等 CHECK 约束。
 - `db/migration/V20260625184300__create_scheduler_framework_tables.sql`：创建 scheduler 表并为 sessions/runs/session_messages 增加来源预留字段。
+- `db/migration/V20260626150000__add_common_parameters_and_workspace_create_operations.sql`：创建通用参数表、代码库英文名字段和工作空间创建进度表。
 - `db/migration/V17__seed_local_opencode_machine_for_default_user.sql`：本地开发环境预置一台 `127.0.0.1` 的 opencode 机器并绑定默认开发用户。
 - 后续可新增 SQL 查询、migration 相关适配、Redis 限流、缓存或运行心跳实现。
 
@@ -75,6 +78,7 @@
 - ExecutionNode 测试必须覆盖可路由节点过滤和排序，防止不可用或满载节点被派发。
 - OpencodeProcessManagement 测试必须覆盖拓扑读写、健康容器查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
 - ScheduledTask 测试必须覆盖任务定义、用户计划、运行记录、分页筛选和来源字段读写。
+- CommonParameter 和 WorkspaceCreateOperation 测试必须覆盖平台优先级、默认路径 seed、进度步骤更新、成功/失败状态和按用户隔离查询。
 - Druid 连接池配置测试；当前验证 `spring.datasource.druid.*` 可绑定为 Druid DataSource，且 Web 控制台默认关闭。
 - Flyway migration 命名测试必须覆盖版本唯一性；V17 之后新增 migration 只能使用 `VyyyyMMddHHmmss__description.sql`。
 

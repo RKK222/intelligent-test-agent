@@ -15,7 +15,7 @@
 - 暴露 `listWorkspaceBackendServers()`、`listServerWorkspaceDirectories()`、`createServerWorkspace()` 等超级管理员服务器工作空间选择方法，目录浏览和创建也通过目标后端文件 WebSocket ticket 执行。
 - 暴露 `getActiveRun(sessionId)`，用于刷新或重进会话后恢复仍在执行的 RunEvent SSE 订阅；返回 `null` 表示当前会话没有非终态 Run。
 - Session message 和 Run 响应透传可选 `parts`、`tokens`、`costUsd` 等新增字段，旧后端缺字段时保持兼容。
-- 暴露配置管理和个人 SSH key API 方法，统一走 `/api/internal/platform/configuration-management`，不直连 Git 服务或 opencode server。
+- 暴露配置管理和个人 SSH key API 方法，统一走 `/api/internal/platform/configuration-management`，不直连 Git 服务或 opencode server；代码库新增/编辑 payload 包含 `englishName`，应用工作空间创建支持 `operationId`/`version` 并通过 `getWorkspaceCreateOperation(operationId)` 轮询后端进度。
 - 暴露应用版本工作区和个人工作区 API 方法，统一走 `/api/internal/platform/workspace-management`，包括成员应用、模板、版本、个人空间、最近使用、diff、同步和版本工作区 `gitPullWorkspaceVersion(versionId)`；版本响应透传目标 commit 与服务器副本状态字段。
 - 暴露当前用户 opencode 进程状态与初始化方法：`getMyOpencodeProcess()`、`initializeMyOpencodeProcess()`，统一走默认 `opencode` 的 agent-scoped URL。
 - 暴露超级管理员运行管理只读方法：`getOpencodeRuntimeManagementOverview(params)`，统一走 `/api/internal/platform/opencode-runtime/management/overview`，自动携带用户 Bearer Token；新筛选参数使用 `username`，`userId` 仅保留后端兼容。

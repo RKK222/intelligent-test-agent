@@ -74,7 +74,7 @@ class ManagedWorkspaceApplicationServiceTest {
 
         assertThat(response.version()).isEqualTo("20260707");
         assertThat(response.branch()).isEqualTo("feature_testagent_20260707");
-        assertThat(response.runtimeWorkspace().rootPath()).endsWith("appworkspace/20260707/repo_1/F-GCMS/workspace");
+        assertThat(response.runtimeWorkspace().rootPath()).endsWith("appworkspace/20260707/gcms/F-GCMS/workspace");
         assertThat(git.clonedBranch).isEqualTo("feature_testagent_20260707");
         assertThat(workspaces.saved).hasSize(1);
         assertThat(managed.versions).hasSize(1);
@@ -145,7 +145,7 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.clonedBranch).isEqualTo("feature_testagent_2024-01");
         // 路径同样用 yyyy-MM；用 Path.endsWith 避免 Windows / Linux 路径分隔符差异
         assertThat(java.nio.file.Paths.get(response.runtimeWorkspace().rootPath()))
-                .endsWith(java.nio.file.Paths.get("appworkspace", "2024-01", "repo_1", "F-GCMS", "workspace"));
+                .endsWith(java.nio.file.Paths.get("appworkspace", "2024-01", "gcms", "F-GCMS", "workspace"));
     }
 
     @Test
@@ -204,7 +204,7 @@ class ManagedWorkspaceApplicationServiceTest {
 
         assertThat(personal.workspaceName()).isEqualTo("我的空间");
         assertThat(personal.branch()).contains("feature_testagent_20260707_000857009_psw_");
-        assertThat(personal.runtimeWorkspace().rootPath()).contains("personalworktree/20260707/000857009/repo_1/psw_");
+        assertThat(personal.runtimeWorkspace().rootPath()).contains("personalworktree/20260707/000857009/gcms/psw_");
         assertThat(personal.runtimeWorkspace().rootPath()).endsWith("F-GCMS/workspace");
         assertThat(git.worktreeBranch).isEqualTo(personal.branch());
         assertThat(workspaces.saved).hasSize(2);
@@ -484,7 +484,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private final ApplicationDefinition app = new ApplicationDefinition(
                 new ApplicationId("app_gcms"), "F-GCMS", true, Instant.parse("2026-06-23T00:00:00Z"), Instant.parse("2026-06-23T00:00:00Z"));
         private final CodeRepository repository = new CodeRepository(
-                new CodeRepositoryId("repo_1"), "https://example.com/gcms.git", "gcms/gcms", true, Instant.now(), Instant.now());
+                new CodeRepositoryId("repo_1"), "https://example.com/gcms.git", "gcms/gcms", "gcms", true, Instant.now(), Instant.now());
         private final ApplicationWorkspace workspace = new ApplicationWorkspace(
                 new ApplicationWorkspaceId("awp_1"), app.appId(), repository.repositoryId(), "main", "F-GCMS/workspace", "GCMS Workspace", Instant.now(), Instant.now());
 
@@ -502,6 +502,7 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override public PageResponse<CodeRepository> findRepositories(PageRequest pageRequest) { return new PageResponse<>(List.of(repository), 1, 20, 1); }
         @Override public Optional<CodeRepository> findRepository(CodeRepositoryId repositoryId) { return Optional.of(repository); }
         @Override public Optional<CodeRepository> findRepositoryByGitUrl(String gitUrl) { return Optional.of(repository); }
+        @Override public Optional<CodeRepository> findRepositoryByEnglishName(String englishName) { return Optional.of(repository); }
         @Override public CodeRepository saveRepository(CodeRepository repository) { return repository; }
         @Override public CodeRepository updateRepositoryMetadata(CodeRepository repository) { return repository; }
         @Override public List<CodeRepository> findRepositoriesByApplication(ApplicationId appId) { return List.of(repository); }

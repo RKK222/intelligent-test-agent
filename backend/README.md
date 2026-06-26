@@ -25,10 +25,10 @@
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK |
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
 | `test-agent-agent-runtime` | 多 agent 运行时接口、registry、统一日志/指标包装和 opencode 适配器 |
-| `test-agent-workspace-management` | Workspace、文件、受控目录选择、git/diff、应用版本工作区、个人工作区、agent 和 skill 管理业务 |
+| `test-agent-workspace-management` | Workspace、文件、受控目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、agent 和 skill 管理业务 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、agent runtime 调用、Diff/revert 和 PTY terminal 业务 |
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理等 |
-| `test-agent-configuration-management` | 应用、应用成员、代码库关联、应用工作空间和个人 SSH key 配置管理 |
+| `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、应用工作空间和个人 SSH key 配置管理 |
 | `test-agent-scheduler` | 分布式定时任务框架，提供任务注册、Cron 调度、Redis 锁、运行记录、Cron 调整、手动触发和协作式停止管理服务，不包含具体业务任务 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界，目前为空骨架 |
 | `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId 和统一异常入口 |
@@ -169,12 +169,12 @@ mvn test
 - 新增业务文件前先列出现有合适工程；无合适工程时按业务边界新建 Maven module。
 - `test-agent-app` 只放启动、装配、profile、migration 和 health 等运行入口，不放 Controller 或业务服务。
 - HTTP/SSE/WebSocket 入口放在 `test-agent-api`，旧 `/api/...` URL 必须保留，新 URL 同步写入 `docs/api/http-api.md`。
-- Workspace、文件、git/diff、应用版本工作区、个人工作区、agent、skill 管理业务放在 `test-agent-workspace-management`。
+- Workspace、文件、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、agent、skill 管理业务放在 `test-agent-workspace-management`。
 - 多 agent 运行时接口、`agentId` 选择、日志/指标包装和具体 agent 适配器放在 `test-agent-agent-runtime`。
 - Session、Run、RunEvent、agent runtime 调用、Diff/revert、terminal 业务放在 `test-agent-opencode-runtime`。
 - Model 目录与 opencode provider 同步逻辑放在 `test-agent-opencode-runtime`；企业内模型主数据端口放在 `test-agent-domain`，JDBC/Flyway 实现放在 `test-agent-persistence`。
 - 用户、角色、权限等平台内部管理放在 `test-agent-system-management`。
-- 应用配置、应用人员、代码库关联、应用工作空间模板和个人 SSH key 管理放在 `test-agent-configuration-management`；应用版本工作区运行编排放在 `test-agent-workspace-management`。
+- 应用配置、应用人员、代码库英文名与关联、应用工作空间模板和个人 SSH key 管理放在 `test-agent-configuration-management`；应用版本工作区运行编排和工作空间创建进度放在 `test-agent-workspace-management`。
 - 通用分布式定时任务框架和超级管理员定时任务管理服务放在 `test-agent-scheduler`；具体业务任务实现放回所属业务模块，通过 `ScheduledTaskHandler` Bean 注册，并在长循环中检查 `ScheduledTaskContext` 的停止请求。
 - 非 opencode 外部系统联动放在 `test-agent-integration`。
 - 业务模块不要直接依赖 `test-agent-opencode-sdk-generated`，应通过 `test-agent-opencode-client`。

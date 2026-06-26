@@ -10,6 +10,7 @@ public record CodeRepository(
         CodeRepositoryId repositoryId,
         String gitUrl,
         String name,
+        String englishName,
         boolean standard,
         Instant createdAt,
         Instant updatedAt) {
@@ -26,12 +27,20 @@ public record CodeRepository(
         if (name.isBlank()) {
             throw new IllegalArgumentException("name must not be blank");
         }
+        englishName = normalizeOptional(englishName);
     }
 
     /**
      * 编辑可变元数据，保留不可变 gitUrl。
      */
-    public CodeRepository editMetadata(String name, boolean standard, Instant now) {
-        return new CodeRepository(repositoryId, gitUrl, name, standard, createdAt, now);
+    public CodeRepository editMetadata(String name, String englishName, boolean standard, Instant now) {
+        return new CodeRepository(repositoryId, gitUrl, name, englishName, standard, createdAt, now);
+    }
+
+    private static String normalizeOptional(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        return value.trim();
     }
 }

@@ -789,6 +789,7 @@ export type CodeRepositoryConfig = {
   repositoryId: string;
   gitUrl: string;
   name: string;
+  englishName?: string | null;
   standard: boolean;
   createdAt: string;
   updatedAt: string;
@@ -801,8 +802,28 @@ export type ApplicationWorkspaceConfig = {
   branch: string;
   directoryPath: string;
   workspaceName: string;
+  initialVersion?: ApplicationWorkspaceVersion | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type WorkspaceCreateOperationStep = {
+  code: string;
+  name: string;
+  status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | string;
+};
+
+export type WorkspaceCreateOperation = {
+  operationId: string;
+  status: "RUNNING" | "SUCCEEDED" | "FAILED" | string;
+  currentStep: string;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  workspaceId?: string | null;
+  versionId?: string | null;
+  steps: WorkspaceCreateOperationStep[];
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type ManagedApplication = ApplicationDefinition;
@@ -882,11 +903,13 @@ export type SshKeyMetadata = {
 export type CreateRepositoryPayload = {
   gitUrl: string;
   name: string;
+  englishName: string;
   standard?: boolean;
 };
 
 export type UpdateRepositoryPayload = {
   name: string;
+  englishName: string;
   standard?: boolean;
 };
 
@@ -895,6 +918,8 @@ export type CreateApplicationWorkspacePayload = {
   branch: string;
   directoryPath: string;
   workspaceName?: string;
+  version?: string;
+  operationId?: string;
 };
 
 export type RenameApplicationWorkspacePayload = {

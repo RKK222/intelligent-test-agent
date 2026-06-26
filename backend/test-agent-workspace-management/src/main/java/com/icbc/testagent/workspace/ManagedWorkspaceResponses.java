@@ -2,12 +2,16 @@ package com.icbc.testagent.workspace;
 
 import com.icbc.testagent.domain.configuration.ApplicationDefinition;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspace;
+import com.icbc.testagent.domain.configuration.WorkspaceCreateOperation;
+import com.icbc.testagent.domain.configuration.WorkspaceCreateOperationStatus;
+import com.icbc.testagent.domain.configuration.WorkspaceCreateOperationStep;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.icbc.testagent.domain.managedworkspace.UserWorkspaceBranchPreference;
 import com.icbc.testagent.domain.workspace.Workspace;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -61,6 +65,32 @@ public final class ManagedWorkspaceResponses {
                     workspace.directoryPath(),
                     workspace.workspaceName(),
                     workspace.branch(),
+                    workspace.createdAt(),
+                    workspace.updatedAt());
+        }
+    }
+
+    public record ApplicationWorkspaceCreateResponse(
+            String workspaceId,
+            String appId,
+            String repositoryId,
+            String branch,
+            String directoryPath,
+            String workspaceName,
+            ApplicationWorkspaceVersionResponse initialVersion,
+            Instant createdAt,
+            Instant updatedAt) {
+        public static ApplicationWorkspaceCreateResponse from(
+                ApplicationWorkspace workspace,
+                ApplicationWorkspaceVersionResponse initialVersion) {
+            return new ApplicationWorkspaceCreateResponse(
+                    workspace.workspaceId().value(),
+                    workspace.appId().value(),
+                    workspace.repositoryId().value(),
+                    workspace.branch(),
+                    workspace.directoryPath(),
+                    workspace.workspaceName(),
+                    initialVersion,
                     workspace.createdAt(),
                     workspace.updatedAt());
         }
@@ -183,6 +213,66 @@ public final class ManagedWorkspaceResponses {
     }
 
     public record WorkspaceSyncResponse(String syncRecordId, String status, List<String> files, boolean force) {
+    }
+
+    public record WorkspaceCreateOperationStepResponse(
+            String code,
+            String name,
+            String status) {
+    }
+
+    public record WorkspaceCreateOperationResponse(
+            String operationId,
+            String status,
+            String currentStep,
+            String errorCode,
+            String errorMessage,
+            String workspaceId,
+            String versionId,
+            List<WorkspaceCreateOperationStepResponse> steps,
+            Instant createdAt,
+            Instant updatedAt) {
+        public static WorkspaceCreateOperationResponse from(WorkspaceCreateOperation operation) {
+            return new WorkspaceCreateOperationResponse(
+                    operation.operationId(),
+                    operation.status().name(),
+                    operation.currentStep().name(),
+                    operation.errorCode(),
+                    operation.errorMessage(),
+                    operation.workspaceId() == null ? null : operation.workspaceId().value(),
+                    operation.versionId() == null ? null : operation.versionId().value(),
+                    steps(operation),
+                    operation.createdAt(),
+                    operation.updatedAt());
+        }
+
+        private static List<WorkspaceCreateOperationStepResponse> steps(WorkspaceCreateOperation operation) {
+            List<WorkspaceCreateOperationStepResponse> result = new ArrayList<>();
+            WorkspaceCreateOperationStep current = operation.currentStep();
+            for (WorkspaceCreateOperationStep step : WorkspaceCreateOperationStep.values()) {
+                result.add(new WorkspaceCreateOperationStepResponse(
+                        step.name(),
+                        step.displayName(),
+                        stepStatus(operation.status(), current, step)));
+            }
+            return result;
+        }
+
+        private static String stepStatus(
+                WorkspaceCreateOperationStatus operationStatus,
+                WorkspaceCreateOperationStep current,
+                WorkspaceCreateOperationStep step) {
+            if (operationStatus == WorkspaceCreateOperationStatus.SUCCEEDED) {
+                return "SUCCEEDED";
+            }
+            if (step.ordinal() < current.ordinal()) {
+                return "SUCCEEDED";
+            }
+            if (step == current) {
+                return operationStatus == WorkspaceCreateOperationStatus.FAILED ? "FAILED" : "RUNNING";
+            }
+            return "PENDING";
+        }
     }
 
     /**

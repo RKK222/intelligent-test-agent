@@ -11,8 +11,13 @@ import com.icbc.testagent.domain.configuration.ApplicationWorkspace;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.icbc.testagent.domain.configuration.CodeRepository;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
+import com.icbc.testagent.domain.configuration.CommonParameter;
+import com.icbc.testagent.domain.configuration.ParameterPlatform;
 import com.icbc.testagent.domain.configuration.SshKeyId;
 import com.icbc.testagent.domain.configuration.UserSshKey;
+import com.icbc.testagent.domain.configuration.WorkspaceCreateOperation;
+import com.icbc.testagent.domain.configuration.WorkspaceCreateOperationStatus;
+import com.icbc.testagent.domain.configuration.WorkspaceCreateOperationStep;
 import com.icbc.testagent.domain.event.RunEvent;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventType;
@@ -118,6 +123,8 @@ class JdbcRepositoryIntegrationTest {
     private JdbcSessionMessageRepository sessionMessages;
     private JdbcAgentSessionBindingRepository agentSessionBindings;
     private JdbcConfigurationManagementRepository configurationManagement;
+    private JdbcCommonParameterRepository commonParameters;
+    private JdbcWorkspaceCreateOperationRepository workspaceCreateOperations;
     private JdbcManagedWorkspaceRepository managedWorkspaces;
     private JdbcOpencodeProcessManagementRepository opencodeProcesses;
     private JdbcScheduledTaskRepository scheduledTasks;
@@ -143,6 +150,8 @@ class JdbcRepositoryIntegrationTest {
         sessionMessages = new JdbcSessionMessageRepository(jdbcClient);
         agentSessionBindings = new JdbcAgentSessionBindingRepository(jdbcClient);
         configurationManagement = new JdbcConfigurationManagementRepository(jdbcClient);
+        commonParameters = new JdbcCommonParameterRepository(jdbcClient);
+        workspaceCreateOperations = new JdbcWorkspaceCreateOperationRepository(jdbcClient);
         managedWorkspaces = new JdbcManagedWorkspaceRepository(jdbcClient, objectMapper);
         opencodeProcesses = new JdbcOpencodeProcessManagementRepository(jdbcClient, objectMapper);
         scheduledTasks = new JdbcScheduledTaskRepository(jdbcClient, objectMapper);
@@ -634,10 +643,12 @@ class JdbcRepositoryIntegrationTest {
                 new CodeRepositoryId("repo_config"),
                 "git@gitee.com:demo/repo.git",
                 "配置库",
+                "configrepo",
                 true,
                 NOW,
                 NOW);
         configurationManagement.saveRepository(repository);
+        assertThat(configurationManagement.findRepositoryByEnglishName("configrepo")).contains(repository);
         configurationManagement.linkRepository(appId, repository.repositoryId());
         assertThat(configurationManagement.findRepositoriesByApplication(appId)).containsExactly(repository);
         assertThat(configurationManagement.findApplicationsByRepository(repository.repositoryId()))
@@ -677,6 +688,51 @@ class JdbcRepositoryIntegrationTest {
     }
 
     @Test
+    void commonParametersAreSeededAndWorkspaceCreateOperationsPersistProgress() {
+        assertThat(commonParameters.findByEnglishNameAndPlatform("OPENCODE_APP_WORKSPACE_ROOT", ParameterPlatform.LINUX))
+                .map(CommonParameter::parameterValue)
+                .contains("/data/.testagent/agent-opencode/workspace/appworkspace/");
+        assertThat(commonParameters.findByEnglishNameAndPlatform("OPENCODE_SESSION_DIR", ParameterPlatform.WINDOWS))
+                .map(CommonParameter::parameterValue)
+                .contains("D:/data/.testagent/agent-opencode/.session/");
+
+        users.save(User.createNew("usr_1234567890abcdef", "AUTH_PROGRESS", "progress-user", "hash", "org", "rd", "dept"));
+        jdbcClient.sql("""
+                        insert into applications(app_id, app_name, enabled, created_at, updated_at)
+                        values (:appId, :appName, true, :createdAt, :updatedAt)
+                        """)
+                .param("appId", "app_gcms")
+                .param("appName", "F-GCMS")
+                .param("createdAt", Timestamp.from(NOW))
+                .param("updatedAt", Timestamp.from(NOW))
+                .update();
+
+        WorkspaceCreateOperation operation = workspaceCreateOperations.start(
+                "wco_test_1234567890",
+                new ApplicationId("app_gcms"),
+                new UserId("usr_1234567890abcdef"),
+                "trace_1234567890abcdef",
+                NOW);
+        assertThat(operation.status()).isEqualTo(WorkspaceCreateOperationStatus.RUNNING);
+
+        workspaceCreateOperations.markStep("wco_test_1234567890", WorkspaceCreateOperationStep.PREPARING_REPOSITORY, NOW.plusSeconds(1));
+        workspaceCreateOperations.markSucceeded(
+                "wco_test_1234567890",
+                new ApplicationWorkspaceId("awp_1234567890abcdef"),
+                new ApplicationWorkspaceVersionId("awv_1234567890abcdef"),
+                NOW.plusSeconds(2));
+
+        assertThat(workspaceCreateOperations.findById("wco_test_1234567890"))
+                .get()
+                .satisfies(saved -> {
+                    assertThat(saved.status()).isEqualTo(WorkspaceCreateOperationStatus.SUCCEEDED);
+                    assertThat(saved.currentStep()).isEqualTo(WorkspaceCreateOperationStep.COMPLETED);
+                    assertThat(saved.workspaceId()).isEqualTo(new ApplicationWorkspaceId("awp_1234567890abcdef"));
+                    assertThat(saved.versionId()).isEqualTo(new ApplicationWorkspaceVersionId("awv_1234567890abcdef"));
+                });
+    }
+
+    @Test
     void managedWorkspaceRepositoriesPersistV9Tables() {
         ApplicationId appId = new ApplicationId("app_managed");
         UserId userId = new UserId("usr_managed");
@@ -694,6 +750,7 @@ class JdbcRepositoryIntegrationTest {
                 new CodeRepositoryId("repo_managed"),
                 "git@gitee.com:demo/managed.git",
                 "托管库",
+                "managedrepo",
                 true,
                 NOW,
                 NOW));

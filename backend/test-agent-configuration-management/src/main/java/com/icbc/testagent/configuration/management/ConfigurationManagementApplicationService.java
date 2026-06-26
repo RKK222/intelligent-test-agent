@@ -42,6 +42,7 @@ import org.springframework.stereotype.Service;
 public class ConfigurationManagementApplicationService {
 
     private static final Pattern SCP_LIKE_SSH_URL = Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9._-]+:.+");
+    private static final Pattern REPOSITORY_ENGLISH_NAME_PATTERN = Pattern.compile("^[A-Za-z]{1,29}$");
 
     private final ConfigurationManagementRepository configurationRepository;
     private final UserRepository userRepository;
@@ -120,30 +121,36 @@ public class ConfigurationManagementApplicationService {
                 page.total());
     }
 
-    public CodeRepositoryResponse createRepository(String gitUrl, String name, Boolean standard) {
+    public CodeRepositoryResponse createRepository(String gitUrl, String name, String englishName, Boolean standard) {
         String normalizedUrl = validateGitUrl(gitUrl);
         String normalizedName = requireText(name, "代码库名称不能为空", "name");
+        String normalizedEnglishName = normalizeRepositoryEnglishName(englishName);
         configurationRepository.findRepositoryByGitUrl(normalizedUrl).ifPresent(repository -> {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
                     "代码库地址已存在",
                     Map.of("repositoryId", repository.repositoryId().value()));
         });
+        ensureRepositoryEnglishNameUnique(normalizedEnglishName, null);
         Instant now = Instant.now();
         CodeRepository repository = new CodeRepository(
                 new CodeRepositoryId(RuntimeIdGenerator.repositoryId()),
                 normalizedUrl,
                 normalizedName,
+                normalizedEnglishName,
                 Boolean.TRUE.equals(standard),
                 now,
                 now);
         return repositoryResponse(configurationRepository.saveRepository(repository));
     }
 
-    public CodeRepositoryResponse updateRepository(String repositoryId, String name, Boolean standard) {
+    public CodeRepositoryResponse updateRepository(String repositoryId, String name, String englishName, Boolean standard) {
         CodeRepository repository = existingRepository(new CodeRepositoryId(repositoryId));
+        String normalizedEnglishName = normalizeRepositoryEnglishName(englishName);
+        ensureRepositoryEnglishNameUnique(normalizedEnglishName, repository.repositoryId());
         CodeRepository updated = repository.editMetadata(
                 requireText(name, "代码库名称不能为空", "name"),
+                normalizedEnglishName,
                 Boolean.TRUE.equals(standard),
                 Instant.now());
         return repositoryResponse(configurationRepository.updateRepositoryMetadata(updated));
@@ -348,6 +355,28 @@ public class ConfigurationManagementApplicationService {
         throw new PlatformException(ErrorCode.VALIDATION_ERROR, "仅支持 SSH 或 HTTPS Git URL", Map.of("gitUrl", value));
     }
 
+    private String normalizeRepositoryEnglishName(String englishName) {
+        String value = requireText(englishName, "版本库英文名称不能为空", "englishName");
+        if (!REPOSITORY_ENGLISH_NAME_PATTERN.matcher(value).matches()) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "版本库英文名称只能输入 1 到 29 位英文字母",
+                    Map.of("field", "englishName"));
+        }
+        return value.toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private void ensureRepositoryEnglishNameUnique(String englishName, CodeRepositoryId currentRepositoryId) {
+        configurationRepository.findRepositoryByEnglishName(englishName).ifPresent(existing -> {
+            if (currentRepositoryId == null || !existing.repositoryId().equals(currentRepositoryId)) {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "版本库英文名称已存在",
+                        Map.of("repositoryId", existing.repositoryId().value(), "englishName", englishName));
+            }
+        });
+    }
+
     private static boolean requiresSshKey(String gitUrl) {
         return gitUrl.startsWith("ssh://") || isScpLikeSshUrl(gitUrl);
     }
@@ -421,6 +450,7 @@ public class ConfigurationManagementApplicationService {
                 repository.repositoryId().value(),
                 repository.gitUrl(),
                 repository.name(),
+                repository.englishName(),
                 repository.standard(),
                 repository.createdAt(),
                 repository.updatedAt());

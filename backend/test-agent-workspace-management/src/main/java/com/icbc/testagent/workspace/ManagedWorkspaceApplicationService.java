@@ -15,8 +15,15 @@ import com.icbc.testagent.domain.configuration.ApplicationWorkspace;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.icbc.testagent.domain.configuration.CodeRepository;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
+import com.icbc.testagent.domain.configuration.CommonParameter;
+import com.icbc.testagent.domain.configuration.CommonParameterRepository;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
+import com.icbc.testagent.domain.configuration.ParameterPlatform;
 import com.icbc.testagent.domain.configuration.UserSshKey;
+import com.icbc.testagent.domain.configuration.WorkspaceCreateOperation;
+import com.icbc.testagent.domain.configuration.WorkspaceCreateOperationRepository;
+import com.icbc.testagent.domain.configuration.WorkspaceCreateOperationStatus;
+import com.icbc.testagent.domain.configuration.WorkspaceCreateOperationStep;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
@@ -69,11 +76,19 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     // 兼容前端"yyyy年M月"格式（如 2024年1月 / 2024年12月），用于「+新增版本」场景。
     // 版本字符串允许原样落库，但分支名/路径需要走 sanitizeVersionForBranchAndPath 转为安全片段。
     private static final Pattern VERSION_PATTERN_YEAR_MONTH = Pattern.compile("^(\\d{4})年(\\d{1,2})月$");
+    private static final Pattern STANDARD_BRANCH_PATTERN = Pattern.compile("^feature_testagent_(\\d{8})$");
+    private static final Pattern OPERATION_ID_PATTERN = Pattern.compile("^wco_[A-Za-z0-9_-]{8,128}$");
     private static final Pattern SCP_LIKE_SSH_URL = Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9._-]+:.+");
     private static final String VERSION_SYNC_EVENT = "workspace.version.sync-requested";
+    private static final String PARAM_OPENCODE_APP_WORKSPACE_ROOT = "OPENCODE_APP_WORKSPACE_ROOT";
+    private static final String PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT = "OPENCODE_PERSONAL_WORKTREE_ROOT";
     private static final ServerBroadcastPublisher NOOP_BROADCAST_PUBLISHER = event -> { };
+    private static final CommonParameterRepository EMPTY_PARAMETER_REPOSITORY = (englishName, platform) -> Optional.empty();
+    private static final WorkspaceCreateOperationRepository NOOP_OPERATION_REPOSITORY = new NoopWorkspaceCreateOperationRepository();
 
     private final ConfigurationManagementRepository configurationRepository;
+    private final CommonParameterRepository commonParameterRepository;
+    private final WorkspaceCreateOperationRepository workspaceCreateOperationRepository;
     private final ManagedWorkspaceRepository managedWorkspaceRepository;
     private final WorkspaceRepository workspaceRepository;
     private final UserRepository userRepository;
@@ -86,11 +101,13 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private final Path managedRoot;
 
     /**
-     * Spring 构造器：绑定托管工作区根目录和 SSH key 加密密钥。
+     * Spring 构造器：绑定托管工作区根目录、通用参数和 SSH key 加密密钥。
      */
     @Autowired
     public ManagedWorkspaceApplicationService(
             ConfigurationManagementRepository configurationRepository,
+            CommonParameterRepository commonParameterRepository,
+            WorkspaceCreateOperationRepository workspaceCreateOperationRepository,
             ManagedWorkspaceRepository managedWorkspaceRepository,
             WorkspaceRepository workspaceRepository,
             UserRepository userRepository,
@@ -100,6 +117,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             @Value("${test-agent.security.ssh-key-encryption-key:${TEST_AGENT_SSH_KEY_ENCRYPTION_KEY:}}") String encryptionKey) {
         this(
                 configurationRepository,
+                commonParameterRepository,
+                workspaceCreateOperationRepository,
                 managedWorkspaceRepository,
                 workspaceRepository,
                 userRepository,
@@ -125,6 +144,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String managedRoot) {
         this(
                 configurationRepository,
+                EMPTY_PARAMETER_REPOSITORY,
+                NOOP_OPERATION_REPOSITORY,
                 managedWorkspaceRepository,
                 workspaceRepository,
                 userRepository,
@@ -150,7 +171,37 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
             String managedRoot) {
+        this(
+                configurationRepository,
+                EMPTY_PARAMETER_REPOSITORY,
+                NOOP_OPERATION_REPOSITORY,
+                managedWorkspaceRepository,
+                workspaceRepository,
+                userRepository,
+                gitRemoteService,
+                gitWorkspaceService,
+                sshKeyCryptoService,
+                serverIdentity,
+                broadcastPublisher,
+                managedRoot);
+    }
+
+    ManagedWorkspaceApplicationService(
+            ConfigurationManagementRepository configurationRepository,
+            CommonParameterRepository commonParameterRepository,
+            WorkspaceCreateOperationRepository workspaceCreateOperationRepository,
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            WorkspaceRepository workspaceRepository,
+            UserRepository userRepository,
+            GitRemoteService gitRemoteService,
+            GitWorkspaceService gitWorkspaceService,
+            SshKeyCryptoService sshKeyCryptoService,
+            WorkspaceServerIdentity serverIdentity,
+            ServerBroadcastPublisher broadcastPublisher,
+            String managedRoot) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
+        this.commonParameterRepository = Objects.requireNonNull(commonParameterRepository, "commonParameterRepository must not be null");
+        this.workspaceCreateOperationRepository = Objects.requireNonNull(workspaceCreateOperationRepository, "workspaceCreateOperationRepository must not be null");
         this.managedWorkspaceRepository = Objects.requireNonNull(managedWorkspaceRepository, "managedWorkspaceRepository must not be null");
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
@@ -225,20 +276,116 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "工作空间不属于当前应用", Map.of("workspaceId", templateId));
         }
         String normalizedVersion = normalizeVersion(version);
+        CodeRepository repository = existingRepository(template.repositoryId());
+        String resolvedBranch = resolveBranch(repository, normalizedVersion, branch, userId);
+        return createVersionFromTemplate(
+                application,
+                template,
+                repository,
+                normalizedVersion,
+                resolvedBranch,
+                userId,
+                targetLinuxServerId,
+                traceId,
+                true,
+                WorkspaceCreateProgress.noop());
+    }
+
+    public ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse createApplicationWorkspaceWithInitialVersion(
+            String appId,
+            String repositoryId,
+            String branch,
+            String directoryPath,
+            String workspaceName,
+            String version,
+            String operationId,
+            UserId userId,
+            String targetLinuxServerId,
+            String traceId) {
+        String normalizedOperationId = normalizeOperationId(operationId).orElse(null);
+        WorkspaceCreateProgress progress = WorkspaceCreateProgress.noop();
+        try {
+            ApplicationDefinition application = existingEnabledApp(appId);
+            progress = createProgress(normalizedOperationId, application.appId(), userId, traceId);
+            progress.step(WorkspaceCreateOperationStep.VALIDATING_INPUT);
+            CodeRepository repository = existingRepository(new CodeRepositoryId(repositoryId));
+            requireRepositoryEnglishName(repository);
+            ensureRepositoryLinked(application.appId(), repository.repositoryId());
+            String normalizedBranch = requireText(branch, "分支不能为空", "branch");
+            String normalizedPath = normalizeDirectoryPath(directoryPath);
+            String normalizedVersion = repository.standard()
+                    ? versionFromStandardBranch(normalizedBranch)
+                    : normalizeNonStandardWorkspaceCreateVersion(version);
+
+            progress.step(WorkspaceCreateOperationStep.SAVING_TEMPLATE);
+            ApplicationWorkspace template = saveOrReuseWorkspaceTemplate(
+                    application.appId(),
+                    repository.repositoryId(),
+                    normalizedBranch,
+                    normalizedPath,
+                    workspaceName);
+
+            progress.step(WorkspaceCreateOperationStep.RESOLVING_VERSION);
+            ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse initialVersion = createVersionFromTemplate(
+                    application,
+                    template,
+                    repository,
+                    normalizedVersion,
+                    normalizedBranch,
+                    userId,
+                    targetLinuxServerId,
+                    traceId,
+                    configurationRepository.isActiveMember(application.appId(), userId),
+                    progress);
+            progress.succeeded(template.workspaceId(), new ApplicationWorkspaceVersionId(initialVersion.versionId()));
+            return ManagedWorkspaceResponses.ApplicationWorkspaceCreateResponse.from(template, initialVersion);
+        } catch (PlatformException exception) {
+            progress.failed(exception.errorCode().name(), exception.getMessage());
+            throw exception;
+        } catch (Exception exception) {
+            progress.failed(ErrorCode.INTERNAL_ERROR.name(), "创建应用工作空间失败");
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "创建应用工作空间失败: " + exception.getMessage(), Map.of(), exception);
+        }
+    }
+
+    public ManagedWorkspaceResponses.WorkspaceCreateOperationResponse getWorkspaceCreateOperation(String operationId, UserId userId) {
+        String normalizedOperationId = normalizeOperationId(operationId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.VALIDATION_ERROR, "operationId 不能为空", Map.of("field", "operationId")));
+        WorkspaceCreateOperation operation = workspaceCreateOperationRepository.findById(normalizedOperationId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "工作空间创建进度不存在", Map.of("operationId", normalizedOperationId)));
+        if (!operation.requestedBy().equals(userId)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "无工作空间创建进度权限", Map.of("operationId", normalizedOperationId));
+        }
+        return ManagedWorkspaceResponses.WorkspaceCreateOperationResponse.from(operation);
+    }
+
+    private ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse createVersionFromTemplate(
+            ApplicationDefinition application,
+            ApplicationWorkspace template,
+            CodeRepository repository,
+            String normalizedVersion,
+            String resolvedBranch,
+            UserId userId,
+            String targetLinuxServerId,
+            String traceId,
+            boolean markRecent,
+            WorkspaceCreateProgress progress) {
         Optional<ApplicationWorkspaceVersion> existing = managedWorkspaceRepository.findVersionByTemplateAndVersion(template.workspaceId(), normalizedVersion);
         if (existing.isPresent()) {
             ApplicationWorkspaceVersion current = existing.get();
             ApplicationWorkspaceVersionReplica replica = ensureReplicaForTarget(current, template, userId, targetLinuxServerId, "EXISTING_VERSION", traceId);
-            markRecent(userId, application.appId(), replica.runtimeWorkspaceId());
+            if (markRecent) {
+                markRecent(userId, application.appId(), replica.runtimeWorkspaceId());
+            }
             return versionResponse(current, replica);
         }
-        CodeRepository repository = existingRepository(template.repositoryId());
-        String resolvedBranch = resolveBranch(repository, normalizedVersion, branch, userId);
         String target = requireText(targetLinuxServerId, "目标服务器不能为空", "targetLinuxServerId");
         Path repoRoot = appRepoRoot(normalizedVersion, repository);
         Path workspaceRoot = repoRoot.resolve(template.directoryPath()).normalize();
         String privateKey = privateKeyFor(repository, userId);
+        progress.step(WorkspaceCreateOperationStep.PREPARING_REPOSITORY);
         prepareApplicationRepo(repository, resolvedBranch, repoRoot, workspaceRoot, privateKey);
+        progress.step(WorkspaceCreateOperationStep.CREATING_RUNTIME_WORKSPACE);
         Workspace runtimeWorkspace = createRuntimeWorkspace(
                 template.workspaceName() + "-" + normalizedVersion,
                 workspaceRoot,
@@ -273,12 +420,16 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             ApplicationWorkspaceVersionReplica targetReplica = waitForReadyReplica(saved.versionId(), target)
                     .orElseThrow(() -> new PlatformException(
                             ErrorCode.CONFLICT,
-                            "目标服务器应用版本工作区副本未就绪",
+                    "目标服务器应用版本工作区副本未就绪",
                             Map.of("targetLinuxServerId", target, "versionId", saved.versionId().value())));
-            markRecent(userId, application.appId(), targetReplica.runtimeWorkspaceId());
+            if (markRecent) {
+                markRecent(userId, application.appId(), targetReplica.runtimeWorkspaceId());
+            }
             return versionResponse(existingVersion(saved.versionId()), targetReplica);
         }
-        markRecent(userId, application.appId(), replica.runtimeWorkspaceId());
+        if (markRecent) {
+            markRecent(userId, application.appId(), replica.runtimeWorkspaceId());
+        }
         publishVersionSync(saved, userId, "CREATED", traceId, Map.of());
         return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.from(saved, replica, runtimeWorkspace);
     }
@@ -878,14 +1029,61 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspaceId).map(PersonalWorkspace::appId);
     }
 
-    private ApplicationDefinition existingMemberApp(String appId, UserId userId) {
+    private ApplicationDefinition existingEnabledApp(String appId) {
         ApplicationDefinition application = configurationRepository.findApplication(new ApplicationId(appId))
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "应用不存在", Map.of("appId", appId)));
         if (!application.enabled()) {
             throw new PlatformException(ErrorCode.FORBIDDEN, "应用未启用", Map.of("appId", appId));
         }
+        return application;
+    }
+
+    private ApplicationDefinition existingMemberApp(String appId, UserId userId) {
+        ApplicationDefinition application = existingEnabledApp(appId);
         ensureMember(application.appId(), userId);
         return application;
+    }
+
+    private void ensureRepositoryLinked(ApplicationId appId, CodeRepositoryId repositoryId) {
+        boolean linked = configurationRepository.findRepositoriesByApplication(appId).stream()
+                .anyMatch(repository -> repository.repositoryId().equals(repositoryId));
+        if (!linked) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "代码库未关联当前应用",
+                    Map.of("appId", appId.value(), "repositoryId", repositoryId.value()));
+        }
+    }
+
+    private ApplicationWorkspace saveOrReuseWorkspaceTemplate(
+            ApplicationId appId,
+            CodeRepositoryId repositoryId,
+            String branch,
+            String directoryPath,
+            String workspaceName) {
+        Optional<ApplicationWorkspace> existing = configurationRepository.findWorkspaceByLocation(appId, repositoryId, branch, directoryPath);
+        if (existing.isPresent()) {
+            return existing.get();
+        }
+        String resolvedName = workspaceName == null || workspaceName.isBlank()
+                ? defaultWorkspaceName(directoryPath)
+                : workspaceName.trim();
+        Instant now = Instant.now();
+        return configurationRepository.saveWorkspace(new ApplicationWorkspace(
+                new ApplicationWorkspaceId(RuntimeIdGenerator.applicationWorkspaceId()),
+                appId,
+                repositoryId,
+                branch,
+                directoryPath,
+                resolvedName,
+                now,
+                now));
+    }
+
+    private String defaultWorkspaceName(String directoryPath) {
+        String value = directoryPath == null || directoryPath.isBlank() ? "workspace" : directoryPath;
+        int index = value.lastIndexOf('/');
+        return index >= 0 ? value.substring(index + 1) : value;
     }
 
     private void ensureMember(ApplicationId appId, UserId userId) {
@@ -920,6 +1118,17 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "代码库不存在", Map.of("repositoryId", repositoryId.value())));
     }
 
+    private String requireRepositoryEnglishName(CodeRepository repository) {
+        String englishName = repository.englishName();
+        if (englishName == null || englishName.isBlank()) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "版本库英文名称不能为空，请先在版本库管理中补充",
+                    Map.of("repositoryId", repository.repositoryId().value(), "field", "englishName"));
+        }
+        return sanitizePathPart(englishName);
+    }
+
     private Workspace existingWorkspace(WorkspaceId workspaceId) {
         return workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value())));
@@ -943,15 +1152,30 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private Path appRepoRoot(String version, CodeRepository repository) {
         // 路径片段统一走 sanitizeVersionForBranchAndPath：yyyy年M月 → yyyy-MM，避免路径里出现中文。
         String pathFragment = sanitizeVersionForBranchAndPath(version);
-        return managedRoot.resolve("appworkspace").resolve(pathFragment).resolve(repository.repositoryId().value()).normalize();
+        return configuredPath(PARAM_OPENCODE_APP_WORKSPACE_ROOT, managedRoot.resolve("appworkspace"))
+                .resolve(pathFragment)
+                .resolve(requireRepositoryEnglishName(repository))
+                .normalize();
     }
 
     private Path personalRepoRoot(ApplicationWorkspaceVersion version, User user, PersonalWorkspaceId personalId) {
-        return managedRoot.resolve("personalworktree")
+        CodeRepository repository = existingRepository(version.repositoryId());
+        return configuredPath(PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT, managedRoot.resolve("personalworktree"))
                 .resolve(sanitizeVersionForBranchAndPath(version.version()))
                 .resolve(sanitizePathPart(user.unifiedAuthId()))
-                .resolve(version.repositoryId().value())
+                .resolve(requireRepositoryEnglishName(repository))
                 .resolve(personalId.value())
+                .normalize();
+    }
+
+    private Path configuredPath(String parameterEnglishName, Path fallback) {
+        ParameterPlatform platform = ParameterPlatform.current();
+        return commonParameterRepository.findByEnglishNameAndPlatform(parameterEnglishName, platform)
+                .or(() -> commonParameterRepository.findByEnglishNameAndPlatform(parameterEnglishName, ParameterPlatform.ALL))
+                .map(CommonParameter::parameterValue)
+                .map(Path::of)
+                .orElse(fallback)
+                .toAbsolutePath()
                 .normalize();
     }
 
@@ -1052,12 +1276,36 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return files.stream().map(file -> normalizeRelativePath(file, "path")).distinct().toList();
     }
 
+    private String normalizeDirectoryPath(String directoryPath) {
+        String value = requireText(directoryPath, "目录路径不能为空", "directoryPath")
+                .replace('\\', '/')
+                .trim();
+        while (value.endsWith("/") && value.length() > 1) {
+            value = value.substring(0, value.length() - 1);
+        }
+        if (value.equals(".") || value.startsWith("/") || value.startsWith("../") || value.contains("/../")) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "目录路径无效", Map.of("directoryPath", directoryPath));
+        }
+        return value;
+    }
+
     private String normalizeRelativePath(String path, String field) {
         String value = requireText(path, "路径不能为空", field).replace('\\', '/');
         if (value.equals(".") || value.startsWith("/") || value.startsWith("../") || value.contains("/../")) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "路径无效", Map.of("path", path));
         }
         return value;
+    }
+
+    private Optional<String> normalizeOperationId(String operationId) {
+        if (operationId == null || operationId.isBlank()) {
+            return Optional.empty();
+        }
+        String value = operationId.trim();
+        if (!OPERATION_ID_PATTERN.matcher(value).matches()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "operationId 格式无效", Map.of("field", "operationId"));
+        }
+        return Optional.of(value);
     }
 
     private String normalizeVersion(String version) {
@@ -1072,6 +1320,25 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             return value;
         }
         throw new PlatformException(ErrorCode.VALIDATION_ERROR, "版本必须为 yyyyMMdd 或 yyyy年M月", Map.of("version", value));
+    }
+
+    private String normalizeNonStandardWorkspaceCreateVersion(String version) {
+        String value = requireText(version, "非标准代码库必须输入 yyyyMMdd 版本", "version");
+        if (!VERSION_PATTERN.matcher(value).matches()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "非标准代码库版本必须为 yyyyMMdd", Map.of("version", value));
+        }
+        return value;
+    }
+
+    private String versionFromStandardBranch(String branch) {
+        java.util.regex.Matcher matcher = STANDARD_BRANCH_PATTERN.matcher(branch);
+        if (!matcher.matches()) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "标准代码库分支必须为 feature_testagent_yyyyMMdd",
+                    Map.of("branch", branch));
+        }
+        return matcher.group(1);
     }
 
     /**
@@ -1112,6 +1379,18 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return Path.of(root).toAbsolutePath().normalize();
     }
 
+    private WorkspaceCreateProgress createProgress(
+            String operationId,
+            ApplicationId appId,
+            UserId userId,
+            String traceId) {
+        if (operationId == null) {
+            return WorkspaceCreateProgress.noop();
+        }
+        workspaceCreateOperationRepository.start(operationId, appId, userId, traceId, Instant.now());
+        return new WorkspaceCreateProgress(workspaceCreateOperationRepository, operationId);
+    }
+
     private static boolean requiresSshKey(String gitUrl) {
         return gitUrl.startsWith("ssh://") || SCP_LIKE_SSH_URL.matcher(gitUrl).matches();
     }
@@ -1122,5 +1401,102 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     private static String sanitizeBranchPart(String value) {
         return sanitizePathPart(value);
+    }
+
+    private static final class WorkspaceCreateProgress {
+        private static final WorkspaceCreateProgress NOOP = new WorkspaceCreateProgress(null, null);
+
+        private final WorkspaceCreateOperationRepository repository;
+        private final String operationId;
+
+        private WorkspaceCreateProgress(WorkspaceCreateOperationRepository repository, String operationId) {
+            this.repository = repository;
+            this.operationId = operationId;
+        }
+
+        private static WorkspaceCreateProgress noop() {
+            return NOOP;
+        }
+
+        private void step(WorkspaceCreateOperationStep step) {
+            if (repository != null) {
+                repository.markStep(operationId, step, Instant.now());
+            }
+        }
+
+        private void succeeded(ApplicationWorkspaceId workspaceId, ApplicationWorkspaceVersionId versionId) {
+            if (repository != null) {
+                repository.markSucceeded(operationId, workspaceId, versionId, Instant.now());
+            }
+        }
+
+        private void failed(String errorCode, String errorMessage) {
+            if (repository != null) {
+                repository.markFailed(operationId, errorCode, errorMessage, Instant.now());
+            }
+        }
+    }
+
+    private static final class NoopWorkspaceCreateOperationRepository implements WorkspaceCreateOperationRepository {
+        @Override
+        public WorkspaceCreateOperation start(
+                String operationId,
+                ApplicationId appId,
+                UserId requestedBy,
+                String traceId,
+                Instant now) {
+            return operation(operationId, appId, requestedBy, WorkspaceCreateOperationStatus.RUNNING, WorkspaceCreateOperationStep.VALIDATING_INPUT, null, null, null, null, traceId, now);
+        }
+
+        @Override
+        public WorkspaceCreateOperation markStep(String operationId, WorkspaceCreateOperationStep step, Instant now) {
+            return operation(operationId, new ApplicationId("app_noop"), new UserId("usr_noop"), WorkspaceCreateOperationStatus.RUNNING, step, null, null, null, null, "trace_noop", now);
+        }
+
+        @Override
+        public WorkspaceCreateOperation markSucceeded(
+                String operationId,
+                ApplicationWorkspaceId workspaceId,
+                ApplicationWorkspaceVersionId versionId,
+                Instant now) {
+            return operation(operationId, new ApplicationId("app_noop"), new UserId("usr_noop"), WorkspaceCreateOperationStatus.SUCCEEDED, WorkspaceCreateOperationStep.COMPLETED, null, null, workspaceId, versionId, "trace_noop", now);
+        }
+
+        @Override
+        public WorkspaceCreateOperation markFailed(String operationId, String errorCode, String errorMessage, Instant now) {
+            return operation(operationId, new ApplicationId("app_noop"), new UserId("usr_noop"), WorkspaceCreateOperationStatus.FAILED, WorkspaceCreateOperationStep.VALIDATING_INPUT, errorCode, errorMessage, null, null, "trace_noop", now);
+        }
+
+        @Override
+        public Optional<WorkspaceCreateOperation> findById(String operationId) {
+            return Optional.empty();
+        }
+
+        private WorkspaceCreateOperation operation(
+                String operationId,
+                ApplicationId appId,
+                UserId requestedBy,
+                WorkspaceCreateOperationStatus status,
+                WorkspaceCreateOperationStep currentStep,
+                String errorCode,
+                String errorMessage,
+                ApplicationWorkspaceId workspaceId,
+                ApplicationWorkspaceVersionId versionId,
+                String traceId,
+                Instant now) {
+            return new WorkspaceCreateOperation(
+                    operationId,
+                    appId,
+                    requestedBy,
+                    status,
+                    currentStep,
+                    errorCode,
+                    errorMessage,
+                    workspaceId,
+                    versionId,
+                    traceId,
+                    now,
+                    now);
+        }
     }
 }

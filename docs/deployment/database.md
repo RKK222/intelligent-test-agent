@@ -207,6 +207,7 @@
 
 - `application_members(app_id, user_id)` 唯一；`deleted_at` 为空表示有效关系。
 - `code_repositories.git_url` 唯一；不提供删除仓库配置的业务接口。
+- `code_repositories.english_name` 后续迁移新增，可空兼容历史数据；非空值唯一，新增/编辑代码库时由后端校验 1 到 29 位英文字母并统一小写保存。
 - `application_repository_links(app_id, repository_id)` 唯一。
 - `application_workspaces(app_id, repository_id, branch, directory_path)` 唯一，一个目录对应一个应用工作空间配置。
 - `user_ssh_keys.user_id` 唯一，保证每个用户最多保存一把 SSH key。
@@ -251,7 +252,36 @@
 
 - 不迁移、不删除既有手动 `workspaces`、sessions、runs；新增托管工作区只是在创建版本或个人空间时新增运行态 `workspaces` 记录。
 - `application_workspaces.branch` 继续保留作为模板创建和目录选择兼容字段；版本实际分支以 `application_workspace_versions.branch` 为准。
-- 物理路径默认由业务配置 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT` 决定，数据库只记录最终路径，不负责创建或清理目录。
+- 应用版本和个人工作区物理根目录优先由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定；缺失时回退业务配置 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT` 下的 `appworkspace`、`personalworktree` 子目录。数据库只记录最终路径，不负责创建或清理目录。
+
+## V20260626150000 通用参数与工作空间创建进度
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260626150000__add_common_parameters_and_workspace_create_operations.sql` 增加通用参数、代码库英文名和设置页创建工作空间进度表。
+
+新增表与字段：
+
+| 表/字段 | 说明 |
+|---|---|
+| `common_parameters` | 通用参数表，包含参数英文名、参数中文名、参数值、适用平台 `windows/linux/all`、创建和更新时间。 |
+| `code_repositories.english_name` | 代码库英文名称，可空兼容历史数据，非空唯一，最大 29 字符。 |
+| `workspace_create_operations` | 设置页创建应用工作空间的进度表，按 `operation_id` 记录状态、当前步骤、错误信息、关联应用/用户/模板/版本和 traceId。 |
+
+`common_parameters` 初始化 10 条 opencode 路径参数：
+
+| 参数 | Linux 默认值 | Windows 默认值 |
+|---|---|---|
+| `OPENCODE_WORKSPACE_ROOT` | `/data/.testagent/agent-opencode/workspace/` | `D:/data/.testagent/agent-opencode/workspace/` |
+| `OPENCODE_PUBLIC_CONFIG_DIR` | `/data/.testagent/agent-opencode/.config/opencode/` | `D:/data/.testagent/agent-opencode/.config/opencode/` |
+| `OPENCODE_SESSION_DIR` | `/data/.testagent/agent-opencode/.session/` | `D:/data/.testagent/agent-opencode/.session/` |
+| `OPENCODE_APP_WORKSPACE_ROOT` | `/data/.testagent/agent-opencode/workspace/appworkspace/` | `D:/data/.testagent/agent-opencode/workspace/appworkspace/` |
+| `OPENCODE_PERSONAL_WORKTREE_ROOT` | `/data/.testagent/agent-opencode/workspace/personalworktree/` | `D:/data/.testagent/agent-opencode/workspace/personalworktree/` |
+
+兼容策略：
+
+- 历史代码库的 `english_name` 保持 `null`；列表和详情响应允许返回 `null`，但新增/编辑代码库时必须提供合法英文名。
+- 缺少英文名的历史代码库不能创建新的应用版本工作区，后端返回 `VALIDATION_ERROR`，避免新路径规则下目录冲突。
+- 通用参数读取按 `当前平台 -> all -> 代码 fallback` 顺序选择；默认迁移只写入 `windows` 和 `linux` 平台值。
+- `workspace_create_operations` 只服务 HTTP 轮询进度，不写入 `run_events`，也不参与 RunEvent SSE 续传。
 
 ## V20260626120900 应用版本工作区服务器副本
 
@@ -322,7 +352,7 @@ opencode 用户进程管理表曾在设计阶段使用 V10 版本号；实际仓
 
 - 旧 `execution_nodes` 继续保留，供无用户主体的 static-token 兼容调用和本地固定节点探测使用。
 - `agent_session_bindings` 继续作为平台 Session 到远端 session/node 的主绑定表；用户进程模型只会在 binding 指向的节点与当前用户进程不一致时覆盖当前绑定，不删除旧远端 session。
-- 应用回滚时可保留这些新增表；如需完整回退 Web 用户对话到固定节点模式，应回滚后端和前端镜像，而不是删除 V10 表或清理 `/data/opencode/session/{port}`。
+- 应用回滚时可保留这些新增表；如需完整回退 Web 用户对话到固定节点模式，应回滚后端和前端镜像，而不是删除 V10 表或清理 `/data/.testagent/agent-opencode/.session/{port}`。
 - 后端启动/心跳更新 `linux_servers`、`backend_java_processes`；manager WebSocket 注册和心跳更新 `opencode_containers`、`opencode_container_managers` 和 `opencode_manager_backend_connections`。
 
 ## V10 F-COSS 应用开发种子数据

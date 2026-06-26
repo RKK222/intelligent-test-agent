@@ -12,6 +12,7 @@ const repositories: CodeRepositoryConfig[] = [
     repositoryId: "repo_wr",
     gitUrl: "file:///Users/kaka/Desktop/intelligent-test-agent/test-workspaces/F-WRTESTAPP",
     name: "F-WRTESTAPP 本地测试库",
+    englishName: "wrtestapp",
     standard: true,
     createdAt: "2026-06-26T08:00:00Z",
     updatedAt: "2026-06-26T08:00:00Z"
@@ -20,6 +21,7 @@ const repositories: CodeRepositoryConfig[] = [
     repositoryId: "repo_mimo",
     gitUrl: "https://gitee.com/mimo/demo.git",
     name: "MIMO 示例库",
+    englishName: "mimo",
     standard: false,
     createdAt: "2026-06-26T08:00:00Z",
     updatedAt: "2026-06-26T08:00:00Z"
@@ -37,6 +39,12 @@ function createApi(): Partial<BackendApiClient> {
     listRepositoryBranches: vi.fn().mockResolvedValue(["main"]),
     listRepositoryDirectories: vi.fn().mockResolvedValue(["tests"]),
     createApplicationWorkspace: vi.fn().mockResolvedValue({}),
+    getWorkspaceCreateOperation: vi.fn().mockResolvedValue({
+      operationId: "wco_test",
+      status: "SUCCEEDED",
+      currentStep: "COMPLETED",
+      steps: [{ code: "COMPLETED", name: "完成", status: "SUCCEEDED" }]
+    }),
     createRepository: vi.fn().mockResolvedValue(repositories[1]),
     updateRepository: vi.fn().mockResolvedValue(repositories[0]),
     removeApplicationMember: vi.fn().mockResolvedValue(undefined),
@@ -245,13 +253,31 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
 
     await fireEvent.update(getByPlaceholderText("Git URL"), "https://gitee.com/mimo/new-repo.git");
     await fireEvent.update(getByPlaceholderText("中文名称"), "新增测试库");
+    await fireEvent.update(getByPlaceholderText("英文名称"), "NewRepo");
     await fireEvent.click(getByText("新增"));
 
     await waitFor(() => expect(api.createRepository).toHaveBeenCalledWith({
       gitUrl: "https://gitee.com/mimo/new-repo.git",
       name: "新增测试库",
+      englishName: "newrepo",
       standard: false
     }));
+  });
+
+  it("rejects invalid repository english names before calling the backend", async () => {
+    const api = createApi();
+    const { findByText, getByPlaceholderText, getByText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("版本库管理"));
+
+    await fireEvent.update(getByPlaceholderText("Git URL"), "https://gitee.com/mimo/new-repo.git");
+    await fireEvent.update(getByPlaceholderText("中文名称"), "新增测试库");
+    await fireEvent.update(getByPlaceholderText("英文名称"), "new-repo");
+    await fireEvent.click(getByText("新增"));
+
+    expect(await findByText("版本库英文名称只能输入 1 到 29 位英文字母")).toBeTruthy();
+    expect(api.createRepository).not.toHaveBeenCalled();
   });
 
   it("labels repository management forms and cancels repository editing", async () => {
@@ -262,13 +288,16 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
 
     expect(await findByText("版本库地址")).toBeTruthy();
     expect(getAllByText("版本库名称").length).toBeGreaterThanOrEqual(1);
+    expect(getAllByText("版本库英文名称").length).toBeGreaterThanOrEqual(1);
     const createNameRow = container.querySelector(".ta-repository-create-name-row");
     expect(createNameRow?.textContent).toContain("版本库名称");
+    expect(createNameRow?.textContent).toContain("版本库英文名称");
     expect(createNameRow?.querySelector("input")?.getAttribute("placeholder")).toBe("中文名称");
 
     await fireEvent.click(getAllByText("编辑")[0]);
     expect(getByText("取消")).toBeTruthy();
     expect(getAllByText("版本库名称").length).toBeGreaterThanOrEqual(2);
+    expect(getAllByText("版本库英文名称").length).toBeGreaterThanOrEqual(2);
 
     await fireEvent.update(getByPlaceholderText("名称"), "临时名称");
     await fireEvent.click(getByText("取消"));
@@ -295,6 +324,54 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect(within(createSection as HTMLElement).getByText("刷新分支")).toBeTruthy();
     expect(queryByText("加载分支")).toBeNull();
     expect(container.querySelectorAll(".ta-workspace-step").length).toBe(3);
+  });
+
+  it("creates standard workspaces with an operation id and polls backend progress", async () => {
+    const api = createApi();
+    api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
+    api.listRepositoryDirectories = vi.fn().mockResolvedValue(["F-WRTESTAPP/workspace"]);
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("12345678-1234-1234-1234-123456789abc");
+    const { findByText, getByText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("工作空间管理"));
+    await fireEvent.click(getByText("刷新分支"));
+    await fireEvent.click(getByText("加载目录"));
+    await fireEvent.click(getByText("创建"));
+
+    await waitFor(() => expect(api.createApplicationWorkspace).toHaveBeenCalledWith("F-COSS", {
+      repositoryId: "repo_wr",
+      branch: "feature_testagent_20260707",
+      directoryPath: "F-WRTESTAPP/workspace",
+      workspaceName: undefined,
+      operationId: "wco_12345678123412341234123456789abc"
+    }));
+    await waitFor(() => expect(api.getWorkspaceCreateOperation).toHaveBeenCalledWith("wco_12345678123412341234123456789abc"));
+  });
+
+  it("requires yyyyMMdd version when creating a non-standard workspace", async () => {
+    const api = createApi();
+    api.listApplicationRepositories = vi.fn().mockResolvedValue([repositories[1]]);
+    api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature/demo"]);
+    api.listRepositoryDirectories = vi.fn().mockResolvedValue(["src"]);
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("22345678-1234-1234-1234-123456789abc");
+    const { findByText, getByPlaceholderText, getByText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("工作空间管理"));
+    await fireEvent.click(getByText("刷新分支"));
+    await fireEvent.click(getByText("加载目录"));
+    expect(await findByText("非标准库版本")).toBeTruthy();
+
+    await fireEvent.update(getByPlaceholderText("yyyyMMdd"), "20260707");
+    await fireEvent.click(getByText("创建"));
+
+    await waitFor(() => expect(api.createApplicationWorkspace).toHaveBeenCalledWith("F-COSS", expect.objectContaining({
+      repositoryId: "repo_mimo",
+      branch: "feature/demo",
+      directoryPath: "src",
+      version: "20260707"
+    })));
   });
 
   it("confirms before removing an application member", async () => {

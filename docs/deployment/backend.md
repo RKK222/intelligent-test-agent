@@ -15,9 +15,10 @@
 容器内必须挂载以下目录：
 
 ```text
-/data/opencode/session              # 用户进程 XDG_DATA_HOME 根目录，按端口分目录
-/data/opencode/.config/opencode/    # 公共 agent、插件、skill 等配置
-/data/opencode/manager              # manager 本地 state 和日志
+/data/.testagent/agent-opencode/.session/            # 用户进程 XDG_DATA_HOME 根目录，按端口分目录
+/data/.testagent/agent-opencode/.config/opencode/    # 公共 agent、插件、skill 等配置
+/data/.testagent/agent-opencode/workspace/           # 应用版本工作区和个人 worktree 根目录
+/data/.testagent/agent-opencode/manager              # manager 本地 state 和日志
 ```
 
 容器环境变量示例：
@@ -32,9 +33,9 @@ OPENCODE_MANAGER_ID=mgr_1234567890abcdef
 OPENCODE_MANAGER_BACKEND_DISCOVERY_URL=http://10.8.0.21:8080/api/internal/platform/opencode-runtime/manager-backends
 OPENCODE_MANAGER_TOKEN=<manager-control-token>
 OPENCODE_BIN=opencode
-OPENCODE_MANAGER_STATE_DIR=/data/opencode/manager
-OPENCODE_SESSION_ROOT=/data/opencode/session
-OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/
+OPENCODE_MANAGER_STATE_DIR=/data/.testagent/agent-opencode/manager
+OPENCODE_SESSION_ROOT=/data/.testagent/agent-opencode/.session
+OPENCODE_CONFIG_DIR=/data/.testagent/agent-opencode/.config/opencode/
 ```
 
 长运行模式启动：
@@ -48,12 +49,14 @@ opencode-manager run
 启动单个用户进程时，manager 会执行：
 
 ```bash
-XDG_DATA_HOME=/data/opencode/session/{port} \
-OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ \
+XDG_DATA_HOME=/data/.testagent/agent-opencode/.session/{port} \
+OPENCODE_CONFIG_DIR=/data/.testagent/agent-opencode/.config/opencode/ \
 opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 ```
 
 opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http://{linuxServerIp}:{port}` 访问。生产部署必须通过容器网络、主机防火墙或网关限制端口池访问面，不得把用户进程端口暴露到不可信网络。
+
+后端创建用户进程、应用版本工作区和个人 worktree 时优先读取数据库 `common_parameters` 中当前平台的 opencode 路径参数：`OPENCODE_SESSION_DIR`、`OPENCODE_PUBLIC_CONFIG_DIR`、`OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT`。缺失时分别回退到上表 Linux 默认路径或 `test-agent.managed-workspace.root` 下的子目录；Windows 默认值在迁移中按 `D:/data/.testagent/agent-opencode/...` 初始化。
 
 启用用户进程模型后，已登录用户的 Run 和 opencode runtime 代理都会优先使用当前用户绑定的 `READY` 进程；用户未初始化或健康检测失败时返回平台 `OPENCODE_UNAVAILABLE`，由前端提示初始化。无用户主体的 static-token 兼容调用仍可使用配置 seed 写入的固定 `execution_nodes`，用于旧集成或本地探测。Session 级 runtime 代理发现绑定节点不是当前用户进程节点时，会在当前进程上创建新的远端 session 并覆盖绑定，不会删除旧远端 session。
 
@@ -82,10 +85,12 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 
 | 路径 | 所属节点 | 用途 | 运维要求 |
 |---|---|---|---|
-| `/data/opencode/session/{port}` | Linux 服务器本地盘并挂载到容器 | 用户进程 `XDG_DATA_HOME` | 不能跨 Linux 服务器共享；备份/清理必须按端口和用户绑定关系执行。 |
-| `/data/opencode/.config/opencode/` | Linux 服务器本地盘并挂载到容器 | 公共 agent、插件、skill 配置 | 多容器共享只读或受控写入；变更前先备份。 |
-| `/data/opencode/manager/processes/{port}.json` | 容器挂载目录 | manager 本地进程状态 | 用于 stop/list/restart；容器重启后继续识别已有 state。 |
-| `/data/opencode/manager/logs/{port}.log` | 容器挂载目录 | opencode server stdout/stderr | 日志不得输出 token、Authorization、Cookie 或完整 prompt。 |
+| `/data/.testagent/agent-opencode/.session/{port}` | Linux 服务器本地盘并挂载到容器 | 用户进程 `XDG_DATA_HOME` | 不能跨 Linux 服务器共享；备份/清理必须按端口和用户绑定关系执行。 |
+| `/data/.testagent/agent-opencode/.config/opencode/` | Linux 服务器本地盘并挂载到容器 | 公共 agent、插件、skill 配置 | 多容器共享只读或受控写入；变更前先备份。 |
+| `/data/.testagent/agent-opencode/workspace/appworkspace/` | Linux 服务器本地盘 | 应用版本工作区根目录 | 默认由 `common_parameters.OPENCODE_APP_WORKSPACE_ROOT` 控制；目录片段为版本 + 代码库英文名。 |
+| `/data/.testagent/agent-opencode/workspace/personalworktree/` | Linux 服务器本地盘 | 个人 git worktree 根目录 | 默认由 `common_parameters.OPENCODE_PERSONAL_WORKTREE_ROOT` 控制；目录片段包含版本、统一认证号、代码库英文名和个人空间 ID。 |
+| `/data/.testagent/agent-opencode/manager/processes/{port}.json` | 容器挂载目录 | manager 本地进程状态 | 用于 stop/list/restart；容器重启后继续识别已有 state。 |
+| `/data/.testagent/agent-opencode/manager/logs/{port}.log` | 容器挂载目录 | opencode server stdout/stderr | 日志不得输出 token、Authorization、Cookie 或完整 prompt。 |
 
 容量与心跳参数建议：
 
@@ -116,7 +121,7 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 opencode 容器扩容流程：
 
 1. 在同一 Linux 服务器上分配不与既有容器重叠的端口池。
-2. 按上文挂载 `/data/opencode/session`、`/data/opencode/.config/opencode/` 和 `/data/opencode/manager`。
+2. 按上文挂载 `/data/.testagent/agent-opencode/.session/`、`/data/.testagent/agent-opencode/.config/opencode/`、`/data/.testagent/agent-opencode/workspace/` 和 `/data/.testagent/agent-opencode/manager`。
 3. 配置新的 `OPENCODE_MANAGER_CONTAINER_ID`、`OPENCODE_MANAGER_ID` 和端口池环境变量。
 4. 启动 `opencode-manager run`，检查运行管理页中 `containers`、`managers` 和 `managerBackendConnections` 均出现对应记录。
 
@@ -134,7 +139,7 @@ opencode 容器扩容流程：
 
 - V10 opencode 用户进程管理表是新增表，不修改旧 `execution_nodes`、`sessions.opencode_*` 或 `agent_session_bindings` 的兼容字段；数据库结构可以保留，不需要在应用回滚时删除。
 - 无用户主体的 static-token 兼容调用仍可走固定 `execution_nodes`；已登录 Web 用户在当前版本会优先要求用户专属进程。如果要把 Web 对话完整回退到固定节点模式，应回滚后端和前端镜像到引入用户进程模型之前的版本。
-- 回滚前不要清理 `/data/opencode/session/{port}`，否则再恢复用户进程模型时会丢失远端 session 状态。
+- 回滚前不要清理 `/data/.testagent/agent-opencode/.session/{port}`，否则再恢复用户进程模型时会丢失远端 session 状态。
 - 回滚后若继续保留 manager 容器，应停止 `opencode-manager run` 或撤销 manager token，避免旧版本无法识别的控制面连接持续重试。
 
 ## 真实环境验收

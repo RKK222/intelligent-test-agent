@@ -3,6 +3,7 @@ package com.icbc.testagent.configuration.management;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -20,12 +21,85 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class ConfigurationManagementApplicationServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-06-23T00:00:00Z");
     private static final String PRIVATE_KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----\n";
+
+    @Test
+    void createRepositoryNormalizesEnglishNameBeforeSaving() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                org.mockito.Mockito.mock(UserRepository.class),
+                org.mockito.Mockito.mock(GitRemoteService.class),
+                new SshKeyEncryptionService(SshKeyEncryptionServiceTest.base64AesKey()));
+        when(repository.findRepositoryByGitUrl("https://gitee.com/demo/repo.git")).thenReturn(Optional.empty());
+        when(repository.findRepositoryByEnglishName("demo")).thenReturn(Optional.empty());
+        when(repository.saveRepository(argThat(saved -> "demo".equals(saved.englishName()))))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        ConfigurationManagementResponses.CodeRepositoryResponse response = service.createRepository(
+                "https://gitee.com/demo/repo.git",
+                "演示库",
+                "Demo",
+                true);
+
+        assertThat(response.englishName()).isEqualTo("demo");
+        verify(repository).saveRepository(argThat(saved -> "demo".equals(saved.englishName()) && saved.standard()));
+    }
+
+    @Test
+    void repositoryEnglishNameMustBePureLettersAndShorterThanThirtyCharacters() {
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                org.mockito.Mockito.mock(ConfigurationManagementRepository.class),
+                org.mockito.Mockito.mock(UserRepository.class),
+                org.mockito.Mockito.mock(GitRemoteService.class),
+                new SshKeyEncryptionService(SshKeyEncryptionServiceTest.base64AesKey()));
+
+        assertThatThrownBy(() -> service.createRepository(
+                "https://gitee.com/demo/repo.git",
+                "演示库",
+                "demo-1",
+                true))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+        assertThatThrownBy(() -> service.createRepository(
+                "https://gitee.com/demo/repo.git",
+                "演示库",
+                "abcdefghijklmnopqrstuvwxyzabcd",
+                true))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
+    }
+
+    @Test
+    void updateRepositoryRejectsDuplicateEnglishName() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        CodeRepository current = codeRepository("https://gitee.com/demo/current.git");
+        CodeRepository duplicate = new CodeRepository(
+                new CodeRepositoryId("repo_other"),
+                "https://gitee.com/demo/other.git",
+                "Other",
+                "demo",
+                false,
+                NOW,
+                NOW);
+        when(repository.findRepository(current.repositoryId())).thenReturn(Optional.of(current));
+        when(repository.findRepositoryByEnglishName("demo")).thenReturn(Optional.of(duplicate));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                org.mockito.Mockito.mock(UserRepository.class),
+                org.mockito.Mockito.mock(GitRemoteService.class),
+                new SshKeyEncryptionService(SshKeyEncryptionServiceTest.base64AesKey()));
+
+        assertThatThrownBy(() -> service.updateRepository("repo_123", "演示库", "Demo", false))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+    }
 
     @Test
     void sshRepositoryBranchesUseCurrentUsersStoredPrivateKey() {
@@ -87,6 +161,6 @@ class ConfigurationManagementApplicationServiceTest {
     }
 
     private static CodeRepository codeRepository(String gitUrl) {
-        return new CodeRepository(new CodeRepositoryId("repo_123"), gitUrl, "Demo", false, NOW, NOW);
+        return new CodeRepository(new CodeRepositoryId("repo_123"), gitUrl, "Demo", "demo", false, NOW, NOW);
     }
 }

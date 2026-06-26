@@ -42,10 +42,11 @@ Token 校验流程：
 5. 个人 Git SSH 私钥必须使用 AES-GCM 加密后落库，加密密钥来自 `TEST_AGENT_SSH_KEY_ENCRYPTION_KEY` 或 `test-agent.security.ssh-key-encryption-key`，要求为 Base64 编码的 16/24/32 字节 AES key；不得提供硬编码默认值。
 6. SSH key API 只能返回 `sshKeyId/name/fingerprint/createdAt` 元信息，禁止回显私钥明文或密文。指纹基于规范化私钥内容的 SHA-256 生成。
 7. Git SSH 远端命令只允许使用当前登录用户保存的唯一 SSH key。临时私钥文件必须设置最小可行权限并在命令结束后清理；Git 命令环境必须禁用交互式凭据提示。
-8. 应用版本工作区和个人工作区的 Git clone/worktree/diff/push/pull/副本同步仍只允许使用当前登录用户保存的唯一 SSH key；不得回退到机器账号、部署用户默认 SSH key 或其他用户 key。托管根目录来自 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT`，磁盘目录已存在时只能在校验目标 origin URL 和分支匹配后接管，不得覆盖或删除未知目录。跨服务器副本同步在 `fetch/reset --hard` 前必须确认工作树无未提交变更，否则标记副本 `FAILED` 并拒绝静默覆盖。
-9. opencode-manager 控制面必须使用独立 manager token，配置键为 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN`；不得复用用户 JWT、普通 `TEST_AGENT_API_TOKEN` 或 opencode server 密钥。生产环境该 token 必须由环境变量或配置中心注入，示例只能使用占位值。
-10. 超级管理员运行管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端菜单可见性只作为体验优化，不能作为权限边界。
-11. 定时任务管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端系统管理菜单可见性只作为体验优化。管理员手动触发运行记录必须写入 `requestedByUserId` 和 traceId，停止正在执行的运行记录必须写入 `stopRequestedAt`、`stopRequestedByUserId` 和 `stopReason`。scheduler 启用时必须使用 Redis 分布式锁，不得回退到本机锁或数据库锁，以免分布式多节点重复执行。
+8. 应用版本工作区和个人工作区的 Git clone/worktree/diff/push/pull/副本同步仍只允许使用当前登录用户保存的唯一 SSH key；不得回退到机器账号、部署用户默认 SSH key 或其他用户 key。托管根目录优先来自 `common_parameters.OPENCODE_APP_WORKSPACE_ROOT` / `OPENCODE_PERSONAL_WORKTREE_ROOT`，缺失时回退 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT`；磁盘目录已存在时只能在校验目标 origin URL 和分支匹配后接管，不得覆盖或删除未知目录。跨服务器副本同步在 `fetch/reset --hard` 前必须确认工作树无未提交变更，否则标记副本 `FAILED` 并拒绝静默覆盖。
+9. 设置页创建应用工作空间的 `workspace_create_operations.error_message` 只能保存平台安全错误说明或通用失败文案，不得写入 SSH 私钥、token、Authorization、Cookie、完整命令行、完整用户输入或敏感路径片段。
+10. opencode-manager 控制面必须使用独立 manager token，配置键为 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN`；不得复用用户 JWT、普通 `TEST_AGENT_API_TOKEN` 或 opencode server 密钥。生产环境该 token 必须由环境变量或配置中心注入，示例只能使用占位值。
+11. 超级管理员运行管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端菜单可见性只作为体验优化，不能作为权限边界。
+12. 定时任务管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端系统管理菜单可见性只作为体验优化。管理员手动触发运行记录必须写入 `requestedByUserId` 和 traceId，停止正在执行的运行记录必须写入 `stopRequestedAt`、`stopRequestedByUserId` 和 `stopReason`。scheduler 启用时必须使用 Redis 分布式锁，不得回退到本机锁或数据库锁，以免分布式多节点重复执行。
 
 ## 日志脱敏
 

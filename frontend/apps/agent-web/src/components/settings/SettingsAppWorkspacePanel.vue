@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, nextTick, ref, watch } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
   ApplicationDefinition,
@@ -7,7 +7,8 @@ import type {
   ApplicationWorkspaceConfig,
   CodeRepositoryConfig,
   CurrentUser,
-  PlatformUserSummary
+  PlatformUserSummary,
+  WorkspaceCreateOperation
 } from "@test-agent/shared-types";
 import { CirclePlus, Delete, InfoFilled, Link } from "@element-plus/icons-vue";
 
@@ -68,11 +69,13 @@ const repositoryTotal = ref(0);
 const appRepositories = ref<CodeRepositoryConfig[]>([]);
 const repoGitUrl = ref("");
 const repoName = ref("");
+const repoEnglishName = ref("");
 const repoStandard = ref(false);
 const linkRepositoryId = ref("");
 const lastLinkRepositoryId = ref("");
 const editRepositoryId = ref("");
 const editRepositoryName = ref("");
+const editRepositoryEnglishName = ref("");
 const editRepositoryStandard = ref(false);
 const repositoryCreateSectionRef = ref<HTMLElement | null>(null);
 const repoGitUrlInputRef = ref<{ focus: () => void } | null>(null);
@@ -85,6 +88,13 @@ const workspaceBranch = ref("");
 const directories = ref<string[]>([]);
 const workspaceDirectory = ref("");
 const workspaceName = ref("");
+const workspaceVersion = ref("");
+const workspaceCreateOperation = ref<WorkspaceCreateOperation | null>(null);
+let workspaceCreatePollTimer: number | undefined;
+
+const selectedWorkspaceRepository = computed(() => appRepositories.value.find((item) => item.repositoryId === workspaceRepositoryId.value) ?? null);
+const requiresWorkspaceVersion = computed(() => selectedWorkspaceRepository.value != null && !selectedWorkspaceRepository.value.standard);
+const workspaceCreateSteps = computed(() => workspaceCreateOperation.value?.steps ?? []);
 
 async function run(action: () => Promise<void>) {
   loading.value = true;
@@ -256,14 +266,18 @@ function handleLinkRepositoryChange(repositoryId: string) {
 }
 
 async function createRepository() {
+  const englishName = normalizeRepositoryEnglishName(repoEnglishName.value);
+  if (!englishName) return;
   await run(async () => {
     const repository = await api.createRepository({
       gitUrl: repoGitUrl.value.trim(),
       name: repoName.value.trim(),
+      englishName,
       standard: repoStandard.value
     });
     repoGitUrl.value = "";
     repoName.value = "";
+    repoEnglishName.value = "";
     repoStandard.value = false;
     linkRepositoryId.value = repository.repositoryId;
     lastLinkRepositoryId.value = repository.repositoryId;
@@ -274,19 +288,24 @@ async function createRepository() {
 function startEditRepository(repository: CodeRepositoryConfig) {
   editRepositoryId.value = repository.repositoryId;
   editRepositoryName.value = repository.name;
+  editRepositoryEnglishName.value = repository.englishName ?? "";
   editRepositoryStandard.value = repository.standard;
 }
 
 function cancelEditRepository() {
   editRepositoryId.value = "";
   editRepositoryName.value = "";
+  editRepositoryEnglishName.value = "";
   editRepositoryStandard.value = false;
 }
 
 async function saveRepository() {
+  const englishName = normalizeRepositoryEnglishName(editRepositoryEnglishName.value);
+  if (!englishName) return;
   await run(async () => {
     await api.updateRepository(editRepositoryId.value, {
       name: editRepositoryName.value.trim(),
+      englishName,
       standard: editRepositoryStandard.value
     });
     cancelEditRepository();
@@ -330,16 +349,84 @@ async function loadDirectories() {
 }
 
 async function createWorkspace() {
+  if (requiresWorkspaceVersion.value && !/^\d{8}$/.test(workspaceVersion.value.trim())) {
+    errorMessage.value = "非标准库版本必须为 yyyyMMdd";
+    return;
+  }
+  const operationId = createWorkspaceOperationId();
+  startWorkspaceCreatePolling(operationId);
   await run(async () => {
     await api.createApplicationWorkspace(selectedAppId.value, {
       repositoryId: workspaceRepositoryId.value,
       branch: workspaceBranch.value,
       directoryPath: workspaceDirectory.value,
-      workspaceName: workspaceName.value.trim() || undefined
+      workspaceName: workspaceName.value.trim() || undefined,
+      version: requiresWorkspaceVersion.value ? workspaceVersion.value.trim() : undefined,
+      operationId
     });
+    await refreshWorkspaceCreateOperation(operationId);
     workspaceName.value = "";
+    workspaceVersion.value = "";
     await loadWorkspaces();
+  }).finally(() => {
+    stopWorkspaceCreatePolling();
   });
+}
+
+function normalizeRepositoryEnglishName(value: string) {
+  const trimmed = value.trim();
+  if (!/^[A-Za-z]{1,29}$/.test(trimmed)) {
+    errorMessage.value = "版本库英文名称只能输入 1 到 29 位英文字母";
+    return "";
+  }
+  return trimmed.toLowerCase();
+}
+
+function createWorkspaceOperationId() {
+  const raw = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID().replaceAll("-", "")
+    : `${Date.now()}${Math.random().toString(16).slice(2)}`;
+  return `wco_${raw.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64)}`;
+}
+
+function startWorkspaceCreatePolling(operationId: string) {
+  stopWorkspaceCreatePolling();
+  workspaceCreateOperation.value = {
+    operationId,
+    status: "RUNNING",
+    currentStep: "VALIDATING_INPUT",
+    steps: [
+      { code: "VALIDATING_INPUT", name: "校验参数", status: "RUNNING" },
+      { code: "SAVING_TEMPLATE", name: "保存工作空间配置", status: "PENDING" },
+      { code: "RESOLVING_VERSION", name: "解析版本和分支", status: "PENDING" },
+      { code: "PREPARING_REPOSITORY", name: "下载代码并切换分支", status: "PENDING" },
+      { code: "CREATING_RUNTIME_WORKSPACE", name: "创建运行态工作区", status: "PENDING" },
+      { code: "COMPLETED", name: "完成", status: "PENDING" }
+    ]
+  };
+  void refreshWorkspaceCreateOperation(operationId);
+  workspaceCreatePollTimer = window.setInterval(() => {
+    void refreshWorkspaceCreateOperation(operationId);
+  }, 1200);
+}
+
+function stopWorkspaceCreatePolling() {
+  if (workspaceCreatePollTimer !== undefined) {
+    window.clearInterval(workspaceCreatePollTimer);
+    workspaceCreatePollTimer = undefined;
+  }
+}
+
+async function refreshWorkspaceCreateOperation(operationId: string) {
+  try {
+    const operation = await api.getWorkspaceCreateOperation(operationId);
+    workspaceCreateOperation.value = operation;
+    if (operation.status === "SUCCEEDED" || operation.status === "FAILED") {
+      stopWorkspaceCreatePolling();
+    }
+  } catch {
+    // 创建请求刚发出时后端可能尚未写入 operation，下一轮轮询继续读取。
+  }
 }
 
 async function renameWorkspace(workspace: ApplicationWorkspaceConfig) {
@@ -371,6 +458,10 @@ watch(selectedAppId, async (appId) => {
   if (!appId || !hasAppSettingsPermission.value) return;
   pendingDangerAction.value = null;
   await loadAppContext();
+});
+
+onBeforeUnmount(() => {
+  stopWorkspaceCreatePolling();
 });
 </script>
 
@@ -495,7 +586,7 @@ watch(selectedAppId, async (appId) => {
             <div>
               <span class="ta-item-title">{{ repo.name }}</span>
               <span v-if="repo.standard" class="ta-item-badge">标准库</span>
-              <div class="ta-item-subtitle">{{ repo.gitUrl }}</div>
+              <div class="ta-item-subtitle">{{ repo.englishName || "未配置英文名" }} · {{ repo.gitUrl }}</div>
             </div>
             <el-button size="small" @click="startEditRepository(repo)">编辑</el-button>
           </div>
@@ -503,6 +594,10 @@ watch(selectedAppId, async (appId) => {
             <label class="ta-form-field">
               <span class="ta-form-label">版本库名称</span>
               <el-input v-model="editRepositoryName" placeholder="名称" style="width: 240px" />
+            </label>
+            <label class="ta-form-field">
+              <span class="ta-form-label">版本库英文名称</span>
+              <el-input v-model="editRepositoryEnglishName" placeholder="英文名称" style="width: 180px" />
             </label>
             <el-checkbox v-model="editRepositoryStandard">标准库</el-checkbox>
             <el-tooltip :content="STANDARD_REPOSITORY_TOOLTIP" placement="top">
@@ -526,6 +621,10 @@ watch(selectedAppId, async (appId) => {
               <label class="ta-form-field">
                 <span class="ta-form-label">版本库名称</span>
                 <el-input v-model="repoName" placeholder="中文名称" style="width: 200px" />
+              </label>
+              <label class="ta-form-field">
+                <span class="ta-form-label">版本库英文名称</span>
+                <el-input v-model="repoEnglishName" placeholder="英文名称" style="width: 180px" />
               </label>
               <el-checkbox v-model="repoStandard">标准库</el-checkbox>
               <el-tooltip :content="STANDARD_REPOSITORY_TOOLTIP" placement="top">
@@ -592,8 +691,27 @@ watch(selectedAppId, async (appId) => {
                   <span class="ta-form-label">工作空间名称</span>
                   <el-input v-model="workspaceName" placeholder="工作空间名称" style="width: min(180px, 100%)" />
                 </label>
+                <label v-if="requiresWorkspaceVersion" class="ta-form-field">
+                  <span class="ta-form-label">非标准库版本</span>
+                  <el-input v-model="workspaceVersion" placeholder="yyyyMMdd" style="width: min(140px, 100%)" />
+                </label>
                 <el-button type="primary" :disabled="loading || !workspaceDirectory" @click="createWorkspace">创建</el-button>
               </div>
+            </div>
+          </div>
+          <div v-if="workspaceCreateOperation" class="ta-workspace-progress">
+            <div
+              v-for="step in workspaceCreateSteps"
+              :key="step.code"
+              class="ta-workspace-progress-step"
+              :class="`is-${step.status.toLowerCase()}`"
+            >
+              <span class="ta-progress-dot" />
+              <span>{{ step.name }}</span>
+              <span class="ta-progress-status">{{ step.status }}</span>
+            </div>
+            <div v-if="workspaceCreateOperation.status === 'FAILED'" class="ta-workspace-progress-error">
+              {{ workspaceCreateOperation.errorMessage || "创建工作空间失败" }}
             </div>
           </div>
         </div>
@@ -748,6 +866,46 @@ watch(selectedAppId, async (appId) => {
 }
 .ta-workspace-step .ta-form-field {
   flex-wrap: wrap;
+}
+.ta-workspace-progress {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #ffffff;
+}
+.ta-workspace-progress-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  font-size: 12px;
+  color: #606266;
+}
+.ta-progress-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #dcdfe6;
+}
+.ta-workspace-progress-step.is-running .ta-progress-dot {
+  background: #3366ff;
+}
+.ta-workspace-progress-step.is-succeeded .ta-progress-dot {
+  background: #19a15f;
+}
+.ta-workspace-progress-step.is-failed .ta-progress-dot {
+  background: #d93025;
+}
+.ta-progress-status {
+  color: #909399;
+}
+.ta-workspace-progress-error {
+  width: 100%;
+  color: #d93025;
+  font-size: 12px;
 }
 @media (max-width: 720px) {
   .ta-workspace-step {

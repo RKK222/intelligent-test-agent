@@ -54,6 +54,7 @@ import type {
   UserOpencodeProcess,
   Workspace,
   WorkspaceBackendServer,
+  WorkspaceCreateOperation,
   WorkspaceDiff,
   WorkspaceSyncResult,
   WorkspaceBranchPreference,
@@ -654,6 +655,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "POST",
         body: JSON.stringify(payload)
       }),
+    getWorkspaceCreateOperation: (operationId: string) =>
+      request<WorkspaceCreateOperation>(`${configurationBase}/workspace-create-operations/${encodeURIComponent(operationId)}`),
     renameApplicationWorkspace: (appId: string, workspaceId: string, payload: { workspaceName: string }) =>
       request<ApplicationWorkspaceConfig>(
         `${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces/${encodeURIComponent(workspaceId)}`,

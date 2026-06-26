@@ -5,6 +5,10 @@ import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementApplicationService;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.icbc.testagent.workspace.ManagedWorkspaceApplicationService;
+import java.net.URI;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -26,9 +30,16 @@ public class ConfigurationManagementController {
     private static final String APP_ADMIN = "APP_ADMIN";
 
     private final ConfigurationManagementApplicationService service;
+    private final ManagedWorkspaceApplicationService workspaceService;
+    private final UserOpencodeProcessAssignmentService processAssignmentService;
 
-    public ConfigurationManagementController(ConfigurationManagementApplicationService service) {
+    public ConfigurationManagementController(
+            ConfigurationManagementApplicationService service,
+            ManagedWorkspaceApplicationService workspaceService,
+            UserOpencodeProcessAssignmentService processAssignmentService) {
         this.service = service;
+        this.workspaceService = workspaceService;
+        this.processAssignmentService = processAssignmentService;
     }
 
     @GetMapping("/applications")
@@ -88,7 +99,7 @@ public class ConfigurationManagementController {
             @RequestBody ConfigurationManagementDtos.CreateRepositoryRequest request,
             ServerWebExchange exchange) {
         requireAdmin(exchange);
-        return ok(exchange, service.createRepository(request.gitUrl(), request.name(), request.standard()));
+        return ok(exchange, service.createRepository(request.gitUrl(), request.name(), request.englishName(), request.standard()));
     }
 
     @PatchMapping("/repositories/{repositoryId}")
@@ -97,7 +108,7 @@ public class ConfigurationManagementController {
             @RequestBody ConfigurationManagementDtos.UpdateRepositoryRequest request,
             ServerWebExchange exchange) {
         requireAdmin(exchange);
-        return ok(exchange, service.updateRepository(repositoryId, request.name(), request.standard()));
+        return ok(exchange, service.updateRepository(repositoryId, request.name(), request.englishName(), request.standard()));
     }
 
     @GetMapping("/applications/{appId}/repositories")
@@ -176,13 +187,24 @@ public class ConfigurationManagementController {
             @PathVariable String appId,
             @RequestBody ConfigurationManagementDtos.CreateApplicationWorkspaceRequest request,
             ServerWebExchange exchange) {
-        requireAdmin(exchange);
-        return ok(exchange, service.createWorkspace(
+        UserId userId = requireAdmin(exchange);
+        return ok(exchange, workspaceService.createApplicationWorkspaceWithInitialVersion(
                 appId,
                 request.repositoryId(),
                 request.branch(),
                 request.directoryPath(),
-                request.workspaceName()));
+                request.workspaceName(),
+                request.version(),
+                request.operationId(),
+                userId,
+                agentLinuxServerId(exchange, userId),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
+    @GetMapping("/workspace-create-operations/{operationId}")
+    public ApiResponse<Object> getWorkspaceCreateOperation(@PathVariable String operationId, ServerWebExchange exchange) {
+        UserId userId = requireAdmin(exchange);
+        return ok(exchange, workspaceService.getWorkspaceCreateOperation(operationId, userId));
     }
 
     @PatchMapping("/applications/{appId}/workspaces/{workspaceId}")
@@ -228,6 +250,21 @@ public class ConfigurationManagementController {
 
     private UserId requireAdmin(ServerWebExchange exchange) {
         return AuthWebSupport.requireRole(exchange, APP_ADMIN).userId();
+    }
+
+    private String agentLinuxServerId(ServerWebExchange exchange, UserId userId) {
+        UserOpencodeProcessAssignment assignment = processAssignmentService.requireReadyProcess(
+                userId,
+                "opencode",
+                RuntimeApiSupport.traceId(exchange));
+        if (assignment.linuxServerId() != null) {
+            return assignment.linuxServerId();
+        }
+        try {
+            return URI.create(assignment.node().baseUrl()).getHost();
+        } catch (RuntimeException exception) {
+            return null;
+        }
     }
 
     private ApiResponse<Object> ok(ServerWebExchange exchange, Object data) {

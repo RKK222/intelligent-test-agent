@@ -11,10 +11,10 @@ final class ConfigurationManagementDtos {
     record AddMemberRequest(String userId) {
     }
 
-    record CreateRepositoryRequest(String gitUrl, String name, Boolean standard) {
+    record CreateRepositoryRequest(String gitUrl, String name, String englishName, Boolean standard) {
     }
 
-    record UpdateRepositoryRequest(String name, Boolean standard) {
+    record UpdateRepositoryRequest(String name, String englishName, Boolean standard) {
     }
 
     record LinkRepositoryRequest(String repositoryId) {
@@ -27,7 +27,9 @@ final class ConfigurationManagementDtos {
             String repositoryId,
             String branch,
             String directoryPath,
-            String workspaceName) {
+            String workspaceName,
+            String version,
+            String operationId) {
     }
 
     record RenameApplicationWorkspaceRequest(String workspaceName) {

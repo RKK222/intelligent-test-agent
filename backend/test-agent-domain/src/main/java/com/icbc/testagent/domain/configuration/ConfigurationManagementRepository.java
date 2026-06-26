@@ -31,6 +31,8 @@ public interface ConfigurationManagementRepository {
 
     Optional<CodeRepository> findRepositoryByGitUrl(String gitUrl);
 
+    Optional<CodeRepository> findRepositoryByEnglishName(String englishName);
+
     CodeRepository saveRepository(CodeRepository repository);
 
     CodeRepository updateRepositoryMetadata(CodeRepository repository);

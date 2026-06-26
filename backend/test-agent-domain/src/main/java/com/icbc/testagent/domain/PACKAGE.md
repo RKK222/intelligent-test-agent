@@ -2,7 +2,7 @@
 
 ## 职责
 
-纯领域模型包，表达 Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、定时任务框架等核心业务概念和状态规则。
+纯领域模型包，表达 Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用配置、通用参数、工作空间创建进度、定时任务框架等核心业务概念和状态规则。
 
 ## 不负责
 
@@ -22,6 +22,7 @@
 - `node.ExecutionNode`、`node.ExecutionNodeId`、`node.ExecutionNodeStatus`、`node.ExecutionNodeRepository`：执行节点模型和查询端口。
 - `routing.RoutingDecision`、`routing.RoutingReason`、`routing.ExecutionNodeRouter`、`routing.RoutingDecisionRepository`：路由决策值对象、纯路由策略和持久化端口。
 - `opencodeprocess.*`：Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程、查询筛选和用户绑定模型；`OpencodeProcessManagementRepository` 作为持久化端口。
+- `configuration.*`：应用定义、应用成员、代码库配置、应用仓库关联、应用工作空间模板、个人 SSH key、通用参数和设置页工作空间创建进度；`ConfigurationManagementRepository`、`CommonParameterRepository`、`WorkspaceCreateOperationRepository` 作为持久化端口。
 - `scheduler.*`：定时任务定义、用户级 Cron 计划、运行记录、触发来源和状态枚举；`ScheduledTaskRepository` 作为持久化端口。
 - 后续可新增领域命令、领域服务接口和更多状态规则。
 
@@ -52,7 +53,7 @@
 ## 测试位置
 
 - domain 模块单元测试。
-- Workspace、Session、AgentSessionBinding、Run、TokenUsage、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、定时任务等值对象约束必须覆盖成功和失败场景。
+- Workspace、Session、AgentSessionBinding、Run、TokenUsage、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用配置、通用参数、工作空间创建进度、定时任务等值对象约束必须覆盖成功和失败场景。
 - 状态机、路由决策、通用 agent binding 和内部 opencode session/node 兼容映射必须覆盖成功和冲突场景。
 - Repository 端口不直接测试数据库，实现测试放在 persistence 模块。
 

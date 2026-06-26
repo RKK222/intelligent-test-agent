@@ -17,14 +17,16 @@ class ConfigurationDomainTest {
                 new CodeRepositoryId("repo_1234567890abcdef"),
                 "git@example.com:demo/repo.git",
                 "旧名称",
+                "demo",
                 false,
                 NOW,
                 NOW);
 
-        CodeRepository edited = repository.editMetadata("新名称", true, NOW.plusSeconds(1));
+        CodeRepository edited = repository.editMetadata("新名称", "demonew", true, NOW.plusSeconds(1));
 
         assertThat(edited.gitUrl()).isEqualTo("git@example.com:demo/repo.git");
         assertThat(edited.name()).isEqualTo("新名称");
+        assertThat(edited.englishName()).isEqualTo("demonew");
         assertThat(edited.standard()).isTrue();
         assertThat(edited.updatedAt()).isEqualTo(NOW.plusSeconds(1));
     }

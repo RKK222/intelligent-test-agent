@@ -35,6 +35,7 @@ public final class ConfigurationManagementResponses {
             String repositoryId,
             String gitUrl,
             String name,
+            String englishName,
             boolean standard,
             Instant createdAt,
             Instant updatedAt) {
