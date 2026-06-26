@@ -194,7 +194,7 @@ load_env_file() {
 # 只匹配本仓库 test-agent-app 的可执行 jar，避免误杀其他 Java 服务。
 backend_pids() {
   ps -eo pid=,command= | awk -v jar="${BACKEND_JAR}" '
-    index($0, jar) && index($0, "java -jar") { print $1 }
+    index($0, jar) && index($0, " -jar ") { print $1 }
   '
 }
 
