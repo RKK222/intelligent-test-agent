@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { Layers, Plus, Save, ServerCog } from "lucide-vue-next";
 import { ElDatePicker, ElDialog } from "element-plus";
 import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
+import type { BackendApiClient } from "@test-agent/backend-api";
 
 // 透传类型：直接复用后端 VO（ApplicationWorkspaceTemplate / ApplicationWorkspaceVersion），
 // 父组件负责把 versions 懒加载后回填到 template.versions 上。
 export type AppWorkspaceTemplate = ApplicationWorkspaceTemplate & {
   versions?: ApplicationWorkspaceVersion[];
+  standard?: boolean;
 };
 export type AppWorkspaceVersion = ApplicationWorkspaceVersion;
 
@@ -49,8 +51,8 @@ const emit = defineEmits<{
   // 要求父组件按需懒加载某模板下的版本列表
   (e: "load-versions", templateId: string): void;
   // 「+新增版本」弹窗确认后回调：父组件负责调用 createWorkspaceVersion。
-  // version 字段保留用户在前端选择的原始字符串（"yyyy年M月"），后端会校验并按需转换分支/路径。
-  (e: "create-version", payload: { template: AppWorkspaceTemplate; version: string }): void;
+  // version 字段为 yyyyMMdd 格式（日期选择器结果），非标准库同时传递 branch 分支名。
+  (e: "create-version", payload: { template: AppWorkspaceTemplate; version: string; branch?: string }): void;
   // 超级管理员打开跨服务器工作空间选择器。
   (e: "open-server-workspace-picker"): void;
 }>();
@@ -92,15 +94,31 @@ let cascadePosRafId: number | null = null;
 let cascadeSubmenuCloseTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ===== 「+新增版本」弹窗状态 =====
-// createVersionTarget: 当前弹窗操作的模板；createVersionValue: el-date-picker 选中的 yyyy年M月 字符串。
+// createVersionTarget: 当前弹窗操作的模板；createVersionValue: el-date-picker 选中的 yyyyMMdd 字符串。
 // createVersionOpen 控制 ElDialog 显隐；与两级菜单的 hover 状态解耦，避免鼠标移开后弹窗被父级 v-if 卸载。
+const api = inject<BackendApiClient>("api")!;
 const createVersionTarget = ref<AppWorkspaceTemplate | null>(null);
 const createVersionValue = ref<string>("");
 const createVersionOpen = ref(false);
+const createVersionBranch = ref<string>("");
+const createVersionBranches = ref<string[]>([]);
+const createVersionLoadingBranches = ref(false);
 
 function openCreateVersionDialog(template: AppWorkspaceTemplate) {
   createVersionTarget.value = template;
   createVersionValue.value = "";
+  createVersionBranch.value = "";
+  createVersionBranches.value = [];
+  // 如果是非标准库，加载分支列表
+  if (template.standard === false && template.repositoryId) {
+    createVersionLoadingBranches.value = true;
+    api.listRepositoryBranches(template.repositoryId).then((branches: string[]) => {
+      createVersionBranches.value = branches;
+      createVersionBranch.value = branches[0] ?? "";
+    }).finally(() => {
+      createVersionLoadingBranches.value = false;
+    });
+  }
   // 关闭两级菜单，避免弹窗被外层 click outside 监听立即关掉。
   closeMenu();
   // 下一帧再开 dialog：保证前一次 closeMenu() 触发的 v-if 卸载先完成，避免和 dialog 共存出现 stacking 问题。
@@ -112,14 +130,15 @@ function openCreateVersionDialog(template: AppWorkspaceTemplate) {
 function confirmCreateVersion() {
   const target = createVersionTarget.value;
   if (!target || !createVersionValue.value) return;
-  // value-format 是 "YYYY-MM"（Element Plus 不能正确解析 "yyyy年M月" 格式串），
-  // 这里把 "2026-08" 转换成 "2026年8月"，再透传给后端，让前端用户感受到的格式与
-  // 提交到后端的版本号一致。
-  const match = createVersionValue.value.match(/^(\d{4})-(\d{1,2})$/);
-  if (!match) return;
-  const year = match[1]!;
-  const month = String(parseInt(match[2]!, 10));
-  emit("create-version", { template: target, version: `${year}年${month}月` });
+  // value-format 是 "YYYYMMDD"，直接使用日期字符串作为版本号（yyyyMMdd）。
+  // 非标准库需要同时传递分支。
+  const version = createVersionValue.value.replaceAll("-", "");
+  const isNonStandard = target.standard === false;
+  emit("create-version", {
+    template: target,
+    version,
+    branch: isNonStandard ? createVersionBranch.value || undefined : undefined
+  });
   createVersionOpen.value = false;
 }
 
@@ -488,9 +507,9 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   </footer>
   <!--
     「+新增版本」弹窗：使用 el-dialog 居中显示，与两级菜单 hover 状态解耦。
-    时间选择器 type="month" + format="YYYY-MM" + value-format="YYYY-MM"：
-    Element Plus 对 "yyyy年M月" 格式串解析有 bug，会把格式串当作占位符显示成
-    "yyyy年1月"，所以这里用标准格式显示；提交时把 "2026-08" 转换成 "2026年8月" 再透传给后端。
+    时间选择器 type="date" + format="YYYY-MM-DD" + value-format="YYYYMMDD"：
+    标准库直接选日期，版本号为 yyyyMMdd。
+    非标准库：先选分支，再选日期，版本号为 yyyyMMdd，分支名一并传给后端。
   -->
   <ElDialog
     v-model="createVersionOpen"
@@ -500,13 +519,30 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
     @close="cancelCreateVersion"
   >
     <div class="ta-workbench-create-version">
-      <label class="ta-workbench-create-version-label">选择月份（格式 yyyy年M月）</label>
+      <!-- 非标准库：先选分支 -->
+      <template v-if="createVersionTarget?.standard === false">
+        <label class="ta-workbench-create-version-label">选择分支</label>
+        <el-select
+          v-model="createVersionBranch"
+          :loading="createVersionLoadingBranches"
+          placeholder="请先选择分支"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="branch in createVersionBranches"
+            :key="branch"
+            :label="branch"
+            :value="branch"
+          />
+        </el-select>
+      </template>
+      <label class="ta-workbench-create-version-label">选择日期（格式 yyyyMMdd）</label>
       <ElDatePicker
         v-model="createVersionValue"
-        type="month"
-        format="YYYY-MM"
-        value-format="YYYY-MM"
-        placeholder="请选择月份"
+        type="date"
+        format="YYYY-MM-DD"
+        value-format="YYYYMMDD"
+        placeholder="请选择日期"
         style="width: 100%"
       />
       <p class="ta-workbench-create-version-hint">提交后会在远端创建对应的工作空间版本。</p>
@@ -523,7 +559,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
       <button
         type="button"
         class="ta-workbench-create-version-confirm"
-        :disabled="!createVersionValue || creatingVersion"
+        :disabled="!createVersionValue || creatingVersion || (createVersionTarget?.standard === false && !createVersionBranch)"
         @click="confirmCreateVersion"
       >
         {{ creatingVersion ? "创建中…" : "确定" }}

@@ -55,9 +55,10 @@ public final class ManagedWorkspaceResponses {
             String directoryPath,
             String workspaceName,
             String branch,
+            boolean standard,
             Instant createdAt,
             Instant updatedAt) {
-        public static WorkspaceTemplateResponse from(ApplicationWorkspace workspace) {
+        public static WorkspaceTemplateResponse from(ApplicationWorkspace workspace, boolean standard) {
             return new WorkspaceTemplateResponse(
                     workspace.workspaceId().value(),
                     workspace.appId().value(),
@@ -65,6 +66,7 @@ public final class ManagedWorkspaceResponses {
                     workspace.directoryPath(),
                     workspace.workspaceName(),
                     workspace.branch(),
+                    standard,
                     workspace.createdAt(),
                     workspace.updatedAt());
         }

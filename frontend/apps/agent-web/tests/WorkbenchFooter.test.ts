@@ -12,6 +12,7 @@ describe("WorkbenchFooter", () => {
     directoryPath: "services/main",
     branch: "main",
     enabled: true,
+    standard: true,
     createdAt: "2026-06-26T00:00:00Z",
     updatedAt: "2026-06-26T00:00:00Z",
     versions: []

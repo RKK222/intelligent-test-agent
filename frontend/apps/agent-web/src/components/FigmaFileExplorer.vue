@@ -42,7 +42,7 @@ const emit = defineEmits<{
   // 要求按需懒加载某模板下的版本列表
   loadVersions: [templateId: string];
   // 「+新增版本」弹窗确认后由父组件调用 createWorkspaceVersion。
-  createVersion: [payload: { template: AppWorkspaceTemplate; version: string }];
+  createVersion: [payload: { template: AppWorkspaceTemplate; version: string; branch?: string }];
   // 公共目录下打开文件：path + 只读/可写 由父组件决定如何渲染 tab
   openPublicFile: [payload: { path: string; content: FileContent; readonly: boolean }];
   openAgentFile: [payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null }];

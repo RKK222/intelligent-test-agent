@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, onScopeDispose, ref, shallowRef, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
@@ -69,6 +69,7 @@ import {
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
 const api = createBackendApiClient({ baseUrl: apiBaseUrl });
+provide("api", api);
 const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
 const authStore = useAuthStore();
@@ -1167,10 +1168,10 @@ function handleLoadVersions(templateId: string) {
   ensureAppVersionsLoaded(templateId);
 }
 
-// 「+新增版本」流程：把 yyyy年M月 原样传给后端 createWorkspaceVersion。
+// 「+新增版本」流程：把 yyyyMMdd 和后端所需的 branch（非标准库）传给 createWorkspaceVersion。
 // 成功后失效该模板下的版本查询，让 useQueries 重新拉取；同时把新版本切到工作区。
 const creatingVersion = ref(false);
-async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemplate; version: string }) {
+async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemplate; version: string; branch?: string }) {
   const appId = selectedAppId.value;
   if (!appId) {
     feedback.value = { kind: "error", title: "未选择应用", description: "请先选择要新增版本的应用。" };
@@ -1179,7 +1180,8 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
   creatingVersion.value = true;
   try {
     const response = await api.createWorkspaceVersion(appId, payload.template.workspaceId, {
-      version: payload.version
+      version: payload.version,
+      branch: payload.branch
     });
     // 失效版本查询：清掉缓存的 versionsByTemplateId 条目，并加入 loadedTemplateIds
     // 让 useQueries 在下一个 tick 重新发起 listWorkspaceVersions。

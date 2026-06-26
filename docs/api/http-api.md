@@ -796,10 +796,10 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 规则：
 
-- `version` 同时支持 `yyyyMMdd`（历史 8 位数字）和 `yyyy年M月`（前端「+新增版本」原样透传，如 `2024年1月`）；其它格式返回 `VALIDATION_ERROR`。
+- `version` 支持 `yyyyMMdd`（8 位数字，前端日期选择器结果）和 `yyyy年M月`（历史数据格式）；其它格式返回 `VALIDATION_ERROR`。
 - `yyyy年M月` 格式入库时 `version` 字段保留原值；派生分支名/路径时转 `yyyy-MM`（如 `2024年1月` → `2024-01`），避免 git ref / 路径里出现中文。
-- 标准代码库分支固定为 `feature_testagent_{branchFragment}`，其中 `branchFragment` 是 `version` 经 `sanitizeVersionForBranchAndPath` 转换后的值；后端会用当前用户 SSH key 先查分支；不存在时返回 `CONFLICT`。
-- 非标准代码库必须传入 `branch`，后端按该分支 clone。
+- 标准代码库分支固定为 `feature_testagent_{branchFragment}`，其中 `branchFragment` 是 `version` 经 `sanitizeVersionForBranchAndPath` 转换后的值（`yyyyMMdd` 原样使用）；后端会用当前用户 SSH key 先查分支；不存在时返回 `CONFLICT`。
+- 非标准代码库必须传入 `branch`（前端选择的分支名），后端按该分支 clone。
 - 应用版本工作区物理仓库根目录读取通用参数 `OPENCODE_APP_WORKSPACE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终仓库目录为 `{root}/{branchFragment}/{repository.englishName}`，opencode root 为仓库目录下模板 `directoryPath`。
 - 历史代码库若缺少 `englishName`，创建或接管应用版本工作区会返回 `VALIDATION_ERROR`，需要先在版本库管理补齐英文名称。
 - 磁盘目录已存在时，后端校验 origin URL 和当前分支，匹配则接管，不覆盖、不删除；不匹配返回 `CONFLICT`。
@@ -866,7 +866,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 - 鼠标 hover 第一级菜单项时按需触发 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 加载该模板下的版本（懒加载，未展开的模板不发请求）。
 - 点击版本后调用 `GET /workspaces/{workspaceId}` 拉取对应的运行态 `Workspace`，再调用 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好，并触发工作台切换。
 - 当前版本匹配规则：优先按 `runtimeWorkspace.workspaceId` 精确匹配，其次按 `workspaceRootPath` 匹配 `selectedWorkspace.rootPath`。
-- 第二级菜单（版本列表）底部固定一行「+新增版本」：点击后弹 el-dialog，内嵌 `ElDatePicker`（`type=month`, `format=yyyy年M月`），用户选月份后调用 `POST /applications/{appId}/workspace-templates/{templateId}/versions`，请求体 `version` 字段原样透传 `yyyy年M月` 字符串。成功后失效 `versionsByTemplateId` 缓存并把新建版本切到工作区。
+- 第二级菜单（版本列表）底部固定一行「+新增版本」：点击后弹 el-dialog，内嵌 `ElDatePicker`（`type=date`, `format=yyyyMMdd`），标准库直接选日期；非标准库先通过 `GET /repositories/{repoId}/branches` 加载分支列表，用户选择分支后再选日期。提交时调用 `POST /applications/{appId}/workspace-templates/{templateId}/versions`，请求体 `version` 字段为 `yyyyMMdd` 格式，非标准库同时传递 `branch`。成功后失效 `versionsByTemplateId` 缓存并把新建版本切到工作区。
 
 应用级"默认工作空间"解析规则（前端 `handleSelectApp` + `pickDefaultWorkspaceForApp`）：
 

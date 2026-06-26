@@ -955,7 +955,9 @@ export type ManagedApplication = ApplicationDefinition;
 
 export type ManagedWorkspaceRuntime = Workspace;
 
-export type ApplicationWorkspaceTemplate = ApplicationWorkspaceConfig;
+export type ApplicationWorkspaceTemplate = ApplicationWorkspaceConfig & {
+  standard: boolean;
+};
 
 export type ApplicationWorkspaceVersion = {
   versionId: string;

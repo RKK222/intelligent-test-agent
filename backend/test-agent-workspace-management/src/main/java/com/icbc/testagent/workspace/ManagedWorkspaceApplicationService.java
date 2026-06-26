@@ -58,6 +58,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -243,8 +244,14 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     public List<ManagedWorkspaceResponses.WorkspaceTemplateResponse> listTemplates(String appId, UserId userId) {
         ApplicationId applicationId = existingMemberApp(appId, userId).appId();
+        Map<String, Boolean> standardByRepoId = configurationRepository.findRepositoriesByApplication(applicationId).stream()
+                .collect(Collectors.toMap(
+                        repo -> repo.repositoryId().value(),
+                        CodeRepository::standard));
         return configurationRepository.findWorkspaces(applicationId).stream()
-                .map(ManagedWorkspaceResponses.WorkspaceTemplateResponse::from)
+                .map(workspace -> ManagedWorkspaceResponses.WorkspaceTemplateResponse.from(
+                        workspace,
+                        standardByRepoId.getOrDefault(workspace.repositoryId().value(), false)))
                 .toList();
     }
 
