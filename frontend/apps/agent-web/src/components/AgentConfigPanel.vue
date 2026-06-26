@@ -29,6 +29,7 @@ const props = defineProps<{
   workspaceId?: string;
   canWrite: boolean;
   hideHeader?: boolean;
+  hideGitOps?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -404,7 +405,7 @@ defineExpose({
       </div>
     </div>
 
-    <div v-if="canWrite" class="agent-diff">
+    <div v-if="canWrite && !hideGitOps" class="agent-diff">
       <div class="agent-diff-toolbar">
         <button type="button" class="agent-action-btn" :disabled="busy" @click="loadDiff()">
           <GitCompare class="h-3.5 w-3.5" :stroke-width="1.5" />

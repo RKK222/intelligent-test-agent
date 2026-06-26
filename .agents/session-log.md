@@ -16,11 +16,12 @@
 - How: 先用 `corepack pnpm --filter @test-agent/agent-web build` 复现附件中的 TypeScript 错误，再按错误源头最小修复类型定义和联合类型收窄，不改 `restart-dev-services.sh`。
 - Result: `corepack pnpm --filter @test-agent/agent-web build`、相关 Vitest、`backend-api`/`agent-chat` typecheck 和 `tools/verify-dev-scripts.sh` 均通过；未执行完整一键重启，避免主动停止当前服务。
 ### 2026-06-26 - 工作台侧边栏布局调整与一级目录可折叠重构
+### 2026-06-26 - 工作台侧边栏布局调整与折叠拖拽重构
 
-- Why: 用户要求调整工作台文件区侧边栏的布局，移除顶部的“工作区”、“公共目录”、“Agent”切换按钮，并将“应用工作空间”（原工作区目录）和“agents”（原 Agent 面板）作为可独立折叠展开的一级目录。
-- What: 移除了 `FigmaFileExplorer.vue` 顶部的 `.figma-fe-toolbar`；改用垂直 Flexbox 布局承载“应用工作空间”和“agents”两个 collapsible Section，同时在 `FileExplorer.vue` 和 `AgentConfigPanel.vue` 中实现了 `hideHeader` 隐藏内部冗余标题，并在目录标题右侧增加了对应的刷新按钮。
-- How: 展开的一级目录分配 `flex: 1; min-height: 0` 保证内部滚动，折叠的目录分配 `flex: 0 0 auto`。将 Refresh 和 expose 逻辑连接，使操作更加连贯。
-- Result: 侧边栏视觉精简，无冗余头部，整体高度在目录折叠/展开时动态分配，且所有 124 项前端单元测试通过。
+- Why: 用户要求调整工作台文件区侧边栏的布局，移除顶部的“工作区”、“公共目录”、“Agent”切换按钮，并将“应用工作空间”（原工作区目录）和“agents”（原 Agent 面板）作为可折叠展开的一级目录。同时，修复浮动侧边栏折叠按钮在无工具栏情况下的重叠冲突，实现两一级目录间的上下拉动拖拽缩放，添加悬停显示工作区真实名称，以及移除 agents 底部多余的 git 发布提交模块。
+- What: 移除了 `FigmaFileExplorer.vue` 顶部的 `.figma-fe-toolbar`；在侧边栏中渲染了“应用工作空间”和“agents”两个 collapsible Section 并支持通过 divider 拖拽改变两者的高度权重；实现了 `hideHeader` 隐藏内部冗余标题，并在目录标题右侧增加对应的刷新按钮；在“应用工作空间”标题上增加 `workspaceName` 作为悬停 tooltip；在 `AgentConfigPanel.vue` 中支持 `hideGitOps` 以隐藏底部 diff/commit/push 等 git 操作；调整顶部 header actions 的右边距以避免与绝对定位的侧边栏收缩按钮重叠。
+- How: 展开的一级目录分配 `flex: 1; min-height: 0` 保证内部滚动，折叠的目录分配 `flex: 0 0 auto`。利用 mousemove/mouseup 事件监听实现垂直拖拽调整 height 比例。
+- Result: 侧边栏布局精简且完全符合 IDE 风格，两个主区域在折叠/展开/拖动时响应完美，无重叠或溢出，且 124 项前端测试全部通过。
 
 ### 2026-06-26 - 一键重启脚本默认切到 test 环境
 

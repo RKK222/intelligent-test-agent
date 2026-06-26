@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { FileExplorer, type FileExplorerProps } from "@test-agent/file-explorer";
 import type { FileContent } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
@@ -52,6 +52,46 @@ const workspaceExpanded = ref(true);
 const agentsExpanded = ref(true);
 const agentConfigPanelRef = ref<InstanceType<typeof AgentConfigPanel> | null>(null);
 
+const workspaceHeight = ref<number | null>(null);
+const resizing = ref(false);
+let dragStartY = 0;
+let dragStartHeight = 0;
+
+const workspaceStyle = computed(() => {
+  if (!workspaceExpanded.value) return {};
+  if (!agentsExpanded.value) return { flex: "1", minHeight: "0" };
+  return {
+    height: workspaceHeight.value ? `${workspaceHeight.value}px` : "50%",
+    flex: "0 0 auto"
+  };
+});
+
+function onResizeStart(event: MouseEvent) {
+  resizing.value = true;
+  dragStartY = event.clientY;
+  const el = document.querySelector(".figma-fe-section-workspace") as HTMLElement;
+  dragStartHeight = el ? el.offsetHeight : 300;
+  
+  document.addEventListener("mousemove", onResizeMove);
+  document.addEventListener("mouseup", onResizeEnd);
+  document.body.style.cursor = "row-resize";
+  document.body.style.userSelect = "none";
+}
+
+function onResizeMove(event: MouseEvent) {
+  if (!resizing.value) return;
+  const deltaY = event.clientY - dragStartY;
+  workspaceHeight.value = Math.max(100, dragStartHeight + deltaY);
+}
+
+function onResizeEnd() {
+  resizing.value = false;
+  document.removeEventListener("mousemove", onResizeMove);
+  document.removeEventListener("mouseup", onResizeEnd);
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
+}
+
 function refreshAgents() {
   agentConfigPanelRef.value?.refreshAll();
 }
@@ -61,7 +101,11 @@ function refreshAgents() {
   <div class="figma-file-explorer">
     <div class="figma-fe-body">
       <!-- Section 1: 应用工作空间 -->
-      <div class="figma-fe-section" :class="{ 'is-expanded': workspaceExpanded }">
+      <div
+        class="figma-fe-section figma-fe-section-workspace"
+        :class="{ 'is-expanded': workspaceExpanded }"
+        :style="workspaceStyle"
+      >
         <div class="figma-fe-section-header">
           <button
             type="button"
@@ -70,7 +114,7 @@ function refreshAgents() {
           >
             <ChevronDown v-if="workspaceExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
             <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-            <span class="figma-fe-section-title">应用工作空间</span>
+            <span class="figma-fe-section-title" :title="workspaceName">应用工作空间</span>
           </button>
           <div class="figma-fe-section-actions" v-if="workspaceExpanded">
             <button
@@ -101,6 +145,15 @@ function refreshAgents() {
           />
         </div>
       </div>
+
+      <!-- Resizer divider: only show if both sections are expanded -->
+      <div
+        v-if="workspaceExpanded && agentsExpanded"
+        class="figma-fe-resize-handle"
+        @mousedown="onResizeStart"
+        role="separator"
+        aria-orientation="horizontal"
+      />
 
       <!-- Section 2: agents -->
       <div class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
@@ -133,6 +186,7 @@ function refreshAgents() {
             :workspace-id="workspaceId"
             :can-write="!!publicDirectoryWritable"
             :hide-header="true"
+            :hide-git-ops="true"
             @open-file="emit('openAgentFile', $event)"
           />
         </div>
@@ -185,7 +239,7 @@ function refreshAgents() {
   flex: 0 0 auto;
 }
 
-/* Border separator between sections */
+/* Border separator when resizer is NOT present */
 .figma-fe-section + .figma-fe-section {
   border-top: 1px solid #e4e4e7;
 }
@@ -234,6 +288,11 @@ function refreshAgents() {
   gap: 4px;
 }
 
+/* Avoid overlapping with the absolutely-positioned sidebar floating toggle button in the first header */
+.figma-fe-section:first-child .figma-fe-section-actions {
+  margin-right: 32px;
+}
+
 .figma-fe-section-action-btn {
   display: inline-flex;
   align-items: center;
@@ -259,6 +318,40 @@ function refreshAgents() {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+.figma-fe-resize-handle {
+  height: 4px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  position: relative;
+  z-index: 5;
+  background: transparent;
+  transition: background-color 0.14s ease;
+}
+
+.figma-fe-resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  margin-top: -0.5px;
+  background: #e4e4e7;
+  transition: background-color 0.14s ease;
+}
+
+.figma-fe-resize-handle:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.figma-fe-resize-handle:hover::after {
+  background: #bbb;
+}
+
+.figma-fe-resize-handle:active {
+  background: rgba(0, 0, 0, 0.06);
 }
 
 .figma-fe-body :deep(.ta-icon-tabbar) {
