@@ -26,6 +26,7 @@
 ## 数据与安全
 
 - [ ] 数据库结构变更包含 Flyway migration，并更新 `docs/deployment/database.md`。
+- [ ] 新增或修改关系型数据库 SQL 已通过 MyBatis XML mapper 实现；未新增 JDBC SQL 或 MyBatis 注解 SQL。
 - [ ] 没有硬编码密钥、token、账号或环境特定地址。
 - [ ] 日志不输出密钥、token、个人信息或大段请求体。
 - [ ] 鉴权、限流、CORS、安全响应头影响已检查。

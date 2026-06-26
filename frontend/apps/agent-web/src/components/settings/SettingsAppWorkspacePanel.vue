@@ -102,7 +102,20 @@ async function run(action: () => Promise<void>) {
   try {
     await action();
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "操作失败";
+    if (error instanceof Error) {
+      // 将 fetch 错误转换为更友好的提示
+      if (error.message.includes("fetch") || error.message.includes("Failed to fetch")) {
+        errorMessage.value = "网络请求失败，请检查网络连接或刷新页面重试";
+      } else if (error.message.includes("403") || error.message.includes("Forbidden")) {
+        errorMessage.value = "权限不足，请确认已登录且有应用管理员权限";
+      } else if (error.message.includes("401") || error.message.includes("Unauthorized")) {
+        errorMessage.value = "未登录或登录已过期，请刷新页面重新登录";
+      } else {
+        errorMessage.value = error.message;
+      }
+    } else {
+      errorMessage.value = "操作失败";
+    }
   } finally {
     loading.value = false;
   }
@@ -267,7 +280,10 @@ function handleLinkRepositoryChange(repositoryId: string) {
 
 async function createRepository() {
   const englishName = normalizeRepositoryEnglishName(repoEnglishName.value);
-  if (!englishName) return;
+  if (!englishName) {
+    errorMessage.value = "版本库英文名称只能输入 1 到 29 位英文字母";
+    return;
+  }
   await run(async () => {
     const repository = await api.createRepository({
       gitUrl: repoGitUrl.value.trim(),
@@ -301,7 +317,10 @@ function cancelEditRepository() {
 
 async function saveRepository() {
   const englishName = normalizeRepositoryEnglishName(editRepositoryEnglishName.value);
-  if (!englishName) return;
+  if (!englishName) {
+    errorMessage.value = "版本库英文名称只能输入 1 到 29 位英文字母";
+    return;
+  }
   await run(async () => {
     await api.updateRepository(editRepositoryId.value, {
       name: editRepositoryName.value.trim(),

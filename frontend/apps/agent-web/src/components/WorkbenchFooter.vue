@@ -112,7 +112,7 @@ function openCreateVersionDialog(template: AppWorkspaceTemplate) {
 function confirmCreateVersion() {
   const target = createVersionTarget.value;
   if (!target || !createVersionValue.value) return;
-  // value-format 是 "yyyy-MM"（Element Plus 不能正确解析 "yyyy年M月" 格式串），
+  // value-format 是 "YYYY-MM"（Element Plus 不能正确解析 "yyyy年M月" 格式串），
   // 这里把 "2026-08" 转换成 "2026年8月"，再透传给后端，让前端用户感受到的格式与
   // 提交到后端的版本号一致。
   const match = createVersionValue.value.match(/^(\d{4})-(\d{1,2})$/);
@@ -488,7 +488,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   </footer>
   <!--
     「+新增版本」弹窗：使用 el-dialog 居中显示，与两级菜单 hover 状态解耦。
-    时间选择器 type="month" + format="yyyy-MM" + value-format="yyyy-MM"：
+    时间选择器 type="month" + format="YYYY-MM" + value-format="YYYY-MM"：
     Element Plus 对 "yyyy年M月" 格式串解析有 bug，会把格式串当作占位符显示成
     "yyyy年1月"，所以这里用标准格式显示；提交时把 "2026-08" 转换成 "2026年8月" 再透传给后端。
   -->
@@ -504,8 +504,8 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
       <ElDatePicker
         v-model="createVersionValue"
         type="month"
-        format="yyyy-MM"
-        value-format="yyyy-MM"
+        format="YYYY-MM"
+        value-format="YYYY-MM"
         placeholder="请选择月份"
         style="width: 100%"
       />

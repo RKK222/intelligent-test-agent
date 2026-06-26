@@ -1,5 +1,6 @@
 package com.icbc.testagent.common.git;
 
+import com.icbc.testagent.common.error.PlatformException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -65,6 +66,21 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 判断目录是否是 Git 仓库；该方法用于接管公共配置目录前做冲突校验。
+     */
+    public boolean isGitRepository(Path repoRoot) {
+        try {
+            GitCommandResult result = executor.execute(
+                    List.of("git", "-C", repoRoot.toString(), "rev-parse", "--is-inside-work-tree"),
+                    null,
+                    DEFAULT_TIMEOUT);
+            return "true".equalsIgnoreCase(result.stdoutText().trim());
+        } catch (PlatformException exception) {
+            return false;
+        }
+    }
+
+    /**
      * 读取本地仓库当前分支，用于接管已有磁盘目录时校验分支是否符合记录。
      */
     public String currentBranch(Path repoRoot) {
@@ -119,6 +135,33 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 切换到本地分支；本地不存在时基于 origin/branch 创建 tracking 分支。
+     */
+    public void checkoutTrackingBranch(Path repoRoot, String branch, String privateKey) {
+        try {
+            executor.execute(
+                    List.of("git", "-C", repoRoot.toString(), "checkout", branch),
+                    privateKey,
+                    DEFAULT_TIMEOUT);
+        } catch (PlatformException exception) {
+            executor.execute(
+                    List.of("git", "-C", repoRoot.toString(), "checkout", "-B", branch, "origin/" + branch),
+                    privateKey,
+                    DEFAULT_TIMEOUT);
+        }
+    }
+
+    /**
+     * 将 worktree 对应分支合并回主配置仓库当前分支，调用方负责提前 pull 和 clean 校验。
+     */
+    public void mergeBranch(Path repoRoot, String branch, String privateKey) {
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "merge", "--no-ff", branch),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
      * 以 fast-forward only 模式拉取指定远端分支，避免自动 merge 产生不可预期的工作区差异。
      */
     public void pullFastForward(Path repoRoot, String branch, String privateKey) {
@@ -134,6 +177,76 @@ public class GitWorkspaceService {
     public void fetch(Path repoRoot, String privateKey) {
         executor.execute(
                 List.of("git", "-C", repoRoot.toString(), "fetch", "origin"),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 暂存指定文件；空列表时不执行 Git 命令。
+     */
+    public void stageFiles(Path repoRoot, List<String> files, String privateKey) {
+        if (files == null || files.isEmpty()) {
+            return;
+        }
+        executor.execute(addCommand(repoRoot, files), privateKey, DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 从暂存区移除指定文件；空列表时不执行 Git 命令。
+     */
+    public void unstageFiles(Path repoRoot, List<String> files, String privateKey) {
+        if (files == null || files.isEmpty()) {
+            return;
+        }
+        java.util.ArrayList<String> command = new java.util.ArrayList<>();
+        command.add("git");
+        command.add("-C");
+        command.add(repoRoot.toString());
+        command.add("restore");
+        command.add("--staged");
+        command.add("--");
+        command.addAll(files);
+        executor.execute(List.copyOf(command), privateKey, DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 返回工作树 porcelain 状态，由业务层转换成前端 diff 文件列表。
+     */
+    public String statusPorcelain(Path repoRoot) {
+        GitCommandResult result = executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "status", "--porcelain"),
+                null,
+                DEFAULT_TIMEOUT);
+        return result.stdoutText();
+    }
+
+    /**
+     * 返回单个文件工作树 diff；staged=true 时返回暂存区 diff。
+     */
+    public String diff(Path repoRoot, String file, boolean staged) {
+        List<String> command = staged
+                ? List.of("git", "-C", repoRoot.toString(), "diff", "--cached", "--", file)
+                : List.of("git", "-C", repoRoot.toString(), "diff", "--", file);
+        return executor.execute(command, null, DEFAULT_TIMEOUT).stdoutText();
+    }
+
+    /**
+     * 提交当前暂存区；调用方负责先 stage 和校验 message。
+     */
+    public void commitStaged(Path repoRoot, String message, String privateKey) {
+        executor.execute(List.of("git", "-C", repoRoot.toString(), "commit", "-m", message), privateKey, DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 删除 worktree 目录并清理 Git worktree 元数据。
+     */
+    public void removeWorktree(Path repoRoot, Path worktreeRoot, String privateKey) {
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "worktree", "remove", "--force", worktreeRoot.toString()),
+                privateKey,
+                DEFAULT_TIMEOUT);
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "worktree", "prune"),
                 privateKey,
                 DEFAULT_TIMEOUT);
     }

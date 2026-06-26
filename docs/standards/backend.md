@@ -4,7 +4,7 @@
 
 ## 工程原则
 
-1. 后端是 Maven multi-module 工程，Java 21、Spring Boot 4.1.0、Spring WebFlux、Log4j2、Micrometer、Druid 连接池。
+1. 后端是 Maven multi-module 工程，Java 21、Spring Boot 4.1.0、Spring WebFlux、Log4j2、Micrometer、Druid 连接池、MyBatis XML mapper。
 2. 只有 `test-agent-app` 是可运行 Spring Boot 服务包，其余 `test-agent-*` 模块只产出 library jar。
 3. 新增后端文件前必须先按 `docs/architecture/dependency-rules.md` 列出现有合适工程；没有合适工程时按业务边界新建 Maven module。
 4. 业务代码优先遵守模块 README 和 `docs/architecture/dependency-rules.md` 的边界。
@@ -78,6 +78,7 @@
 
 1. 避免 N+1 查询，高频查询必须有索引，批量写入使用批处理或明确事务边界，查询只取需要字段。
 2. JDBC 连接池统一使用 Druid，通过 `TEST_AGENT_DB_POOL_INITIAL_SIZE`、`TEST_AGENT_DB_POOL_MIN_IDLE`、`TEST_AGENT_DB_POOL_MAX_ACTIVE`、`TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS` 配置；默认保留 `validation-query=SELECT 1` 和借出连接校验，`TEST_AGENT_DB_POOL_TEST_ON_BORROW` 只允许在明确评估数据库稳定性后关闭；不得在代码中硬编码环境容量。
+3. 新增或修改关系型数据库 SQL 必须通过 MyBatis XML mapper 实现，mapper 接口只能声明方法和 `@Param`，禁止使用 MyBatis 注解 SQL；存量 `Jdbc*Repository` 仅作为迁移窗口保留，触及其 SQL 时迁移到 MyBatis XML。
 
 ### opencode 调用
 
@@ -98,6 +99,7 @@
 3. 新字段优先允许空值或提供默认值；删除字段必须先完成读取兼容和数据迁移，再分阶段删除；枚举值、状态值、唯一约束和索引变更必须评估历史数据。
 4. 新增表、字段、索引、约束必须有 migration 测试或集成验证；数据迁移脚本必须验证成功路径和关键失败场景；Repository 变更必须验证映射字段、查询条件、分页和排序。
 5. 当前 migration 清单与表结构见 `docs/deployment/database.md`。
+6. MyBatis mapper、行模型和 Repository 实现属于 `test-agent-persistence` 内部细节，业务模块只能依赖 `test-agent-domain` 的 Repository 端口。
 
 ## 测试
 
@@ -108,6 +110,7 @@
 - Controller/API：验证参数校验、状态码、统一错误格式、traceId、鉴权和限流。
 - Domain：验证状态机、领域规则、值对象约束和边界条件。
 - Persistence：验证 Repository 映射、唯一约束、事务、Flyway migration。
+- MyBatis：验证 XML mapper 查询、更新、动态条件和分页；源码约束测试必须阻止新增 JDBC SQL 和 MyBatis 注解 SQL。
 - Event/SSE：验证事件类型、seq 单调递增、`Last-Event-ID` 续传、断线重连。
 - Agent runtime：验证 agentId 规范化、默认 opencode 命中、未知 agent 统一错误和运行时调用指标。
 - Opencode client facade：使用 mock opencode server 验证错误转换、超时、重试和事件映射；只有 `GeneratedOpencodeSdkGateway` 允许直接依赖 generated SDK。

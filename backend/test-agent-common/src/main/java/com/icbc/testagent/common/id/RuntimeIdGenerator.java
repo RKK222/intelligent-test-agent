@@ -126,6 +126,13 @@ public final class RuntimeIdGenerator {
     }
 
     /**
+     * 生成 Agent 配置 worktree 记录 ID，返回值固定使用 {@code agw_} 前缀。
+     */
+    public static String agentConfigWorktreeId() {
+        return prefixed("agw_");
+    }
+
+    /**
      * 生成后端 Java 进程 ID，返回值固定使用 {@code bjp_} 前缀。
      */
     public static String backendProcessId() {

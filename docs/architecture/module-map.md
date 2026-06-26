@@ -45,12 +45,12 @@ Browser
 | `test-agent-agent-runtime` | 定义 `AgentRuntime`、`AgentRuntimeRegistry`、统一日志/指标包装、`OpencodeAgentRuntime` 适配器和未注册的 `OtherAgentRuntime` 抽象占位。 |
 | `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/删除、受控目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、agent 和 skill 管理业务。 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、当前用户 opencode 进程状态/初始化契约、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、超级管理员运行管理快照聚合、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
-| `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、登录认证和 Token 管理。 |
+| `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、登录认证和 Token 管理，以及用户管理（测试）查询/新增用户。 |
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、代码库英文名与应用关联、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务。 |
 | `test-agent-scheduler` | 通用分布式定时任务框架，负责任务注册、Cron 计算、Redis 锁、后台扫描、统一运行记录、Cron 调整、手动触发和协作式停止管理服务；具体业务任务放回所属业务模块。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界（当前为空骨架）。 |
 | `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、workspace 文件 WebSocket ticket/RPC 入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理和定时任务管理入口、trace Web 入口。 |
-| `test-agent-persistence` | 数据库、Flyway、Repository、Redis 可选适配，包括 workspace 服务器归属、通用参数表、工作空间创建进度表、应用版本副本表、opencode 用户进程管理表、scheduler 表与 Repository 映射。 |
+| `test-agent-persistence` | 数据库、MyBatis XML mapper、Flyway、Repository、Redis 可选适配，包括 workspace 服务器归属、通用参数表、工作空间创建进度表、应用版本副本表、opencode 用户进程管理表、scheduler 表与 Repository 映射。 |
 | `test-agent-event` | RunEvent、SSE、事件转换、事件回放，以及 Redis/Noop 通用服务器广播适配。 |
 | `test-agent-test-support` | 测试 fixture、mock server、集成测试支撑。 |
 | `test-agent-app` | 唯一启动入口和可部署服务包，只放启动、装配、profile、migration、health 和日志。 |
@@ -61,7 +61,7 @@ Browser
 
 | 包 | 职责 |
 |---|---|
-| `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、服务器工作空间选择、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、设置模态（含版本库英文名和工作空间创建进度）、超级管理员系统管理容器（定时任务管理 + 运行管理）和全局错误提示。 |
+| `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、服务器工作空间选择、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、设置模态（含版本库英文名、工作空间创建进度和用户管理（测试）页签）、超级管理员系统管理容器（定时任务管理 + 运行管理）和全局错误提示。 |
 | `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、受控目录选择、workspace 文件 WebSocket route/ticket/RPC、用户 opencode 进程状态/初始化、运行管理 overview、定时任务管理、配置管理、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询和默认 `opencode` 的 agent URL 前缀。 |
 | `packages/event-stream-client` | RunEvent SSE client，负责按默认 `opencode` agent URL 连接、自动重连、事件解析、去重和取消订阅。 |
 | `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板和工作台级 Pinia 状态。 |

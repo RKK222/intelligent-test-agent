@@ -57,7 +57,7 @@ tools/dev-frontend-check.sh
 
 ## 本地联调
 
-推荐从仓库根目录使用一键脚本重启三服务，脚本会按 `.env.local` 管理本地 `opencode serve`、后端和前端：
+推荐从仓库根目录使用一键脚本重启三服务，脚本会按「后端 → opencode-manager → 前端」顺序逐个先 kill 原进程再启动，本地默认启动 Go `opencode-manager`（由它派生 opencode 子进程，不再单独启动 `opencode serve`）：
 
 ```bash
 TEST_AGENT_BASE_URL=http://192.168.100.115:8080 \

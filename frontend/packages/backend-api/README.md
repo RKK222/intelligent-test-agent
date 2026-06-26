@@ -17,9 +17,11 @@
 - Session message 和 Run 响应透传可选 `parts`、`tokens`、`costUsd` 等新增字段，旧后端缺字段时保持兼容。
 - 暴露配置管理和个人 SSH key API 方法，统一走 `/api/internal/platform/configuration-management`，不直连 Git 服务或 opencode server；代码库新增/编辑 payload 包含 `englishName`，应用工作空间创建支持 `operationId`/`version` 并通过 `getWorkspaceCreateOperation(operationId)` 轮询后端进度。
 - 暴露应用版本工作区和个人工作区 API 方法，统一走 `/api/internal/platform/workspace-management`，包括成员应用、模板、版本、个人空间、最近使用、diff、同步和版本工作区 `gitPullWorkspaceVersion(versionId)`；版本响应透传目标 commit 与服务器副本状态字段。
+- 暴露 Agent 配置管理 API 方法，统一走 `/api/internal/platform/workspace-management/agent-config`，包括公共/工作空间 status、文件读写、公共配置更新、worktree、diff、stage/unstage、commit、publish、operation ticket 和 WebSocket progress helper；不直连 Git 仓库或 opencode server。
 - 暴露当前用户 opencode 进程状态与初始化方法：`getMyOpencodeProcess()`、`initializeMyOpencodeProcess()`，统一走默认 `opencode` 的 agent-scoped URL。
 - 暴露超级管理员运行管理只读方法：`getOpencodeRuntimeManagementOverview(params)`，统一走 `/api/internal/platform/opencode-runtime/management/overview`，自动携带用户 Bearer Token；新筛选参数使用 `username`，`userId` 仅保留后端兼容。
 - 暴露超级管理员定时任务管理方法：任务分页/详情/更新/手动触发、运行记录分页/详情/停止，统一走 `/api/internal/platform/scheduler-management`，自动携带用户 Bearer Token。
+- 暴露超级管理员用户管理（测试）方法：用户分页查询、创建用户（默认密码 123456）、角色列表，统一走 `/api/internal/platform/system-management`，自动携带用户 Bearer Token；仅用于研发测试便捷造号。
 - `startRun` 同时支持旧 `(sessionId, prompt)` 参数和对象 payload（`parts`、`messageId`、`agent`、`model`、`variant`、`mode`）。
 - 暴露 opencode Web App 标准运行态方法：Agent/Model/Provider/Command/Reference 目录、config、provider auth/OAuth、worktree、Session active-run/children/todo/diff/abort/fork/compact/revert/command/shell/share、permission/question、fs/vcs/lsp/mcp status/resources/tools/auth 和 terminal ticket；除 terminal ticket 外均按 agent URL 调用。
 - Command catalog 映射会保留 opencode runtime 的 `source/hints` 可选字段，供 frontend-opencode 生成 slash command 参数表单。

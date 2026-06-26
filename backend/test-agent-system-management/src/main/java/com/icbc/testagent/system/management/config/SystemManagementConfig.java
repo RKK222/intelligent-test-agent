@@ -7,6 +7,7 @@ import com.icbc.testagent.domain.user.UserLoginLogRepository;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.system.management.auth.AuthApplicationService;
 import com.icbc.testagent.system.management.user.UserDomainService;
+import com.icbc.testagent.system.management.user.UserManagementApplicationService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -38,6 +39,22 @@ public class SystemManagementConfig {
                 userDomainService,
                 tokenStore,
                 loginLogRepository,
+                userRoleRepository,
+                dictionaryRepository);
+    }
+
+    /**
+     * 用户管理（测试）应用服务 Bean，用于查询用户、创建测试用户和查询可选角色。
+     */
+    @Bean
+    public UserManagementApplicationService userManagementApplicationService(
+            UserDomainService userDomainService,
+            UserRepository userRepository,
+            UserRoleRepository userRoleRepository,
+            DictionaryRepository dictionaryRepository) {
+        return new UserManagementApplicationService(
+                userDomainService,
+                userRepository,
                 userRoleRepository,
                 dictionaryRepository);
     }

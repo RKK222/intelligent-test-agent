@@ -5,7 +5,8 @@ import type { FileContent } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import PublicDirectoryPanel from "./PublicDirectoryPanel.vue";
-import { FolderTree, Layers } from "lucide-vue-next";
+import AgentConfigPanel from "./AgentConfigPanel.vue";
+import { Bot, FolderTree, Layers } from "lucide-vue-next";
 
 defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
@@ -25,6 +26,8 @@ defineProps<FileExplorerProps & {
   publicDirectoryWritable?: boolean;
   /** 后端 base url，透传给 PublicDirectoryPanel */
   apiBaseUrl?: string;
+  /** 当前运行态 Workspace ID，透传给 AgentConfigPanel */
+  workspaceId?: string;
   /** 是否显示超级管理员服务器工作空间切换入口 */
   showServerWorkspaceSwitch?: boolean;
 }>();
@@ -42,12 +45,13 @@ const emit = defineEmits<{
   createVersion: [payload: { template: AppWorkspaceTemplate; version: string }];
   // 公共目录下打开文件：path + 只读/可写 由父组件决定如何渲染 tab
   openPublicFile: [payload: { path: string; content: FileContent; readonly: boolean }];
+  openAgentFile: [payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null }];
   openServerWorkspacePicker: [];
 }>();
 
 // 视图模式：workspace（默认）展示 FileExplorer；public 展示 PublicDirectoryPanel。
 // 切换时通过 v-if 卸载不活跃的组件，避免两个面板相互竞争滚动区域。
-type ViewMode = "workspace" | "public";
+type ViewMode = "workspace" | "public" | "agent";
 const viewMode = ref<ViewMode>("workspace");
 const showPublicTab = computed(() => true); // 后端未配置时面板自身会展示空态，这里始终可点。
 </script>
@@ -76,6 +80,16 @@ const showPublicTab = computed(() => true); // 后端未配置时面板自身会
         <Layers class="h-3.5 w-3.5" :stroke-width="1.5" />
         <span>公共目录</span>
       </button>
+      <button
+        type="button"
+        :class="['figma-fe-toolbar-tab', viewMode === 'agent' && 'is-active']"
+        title="Agent"
+        aria-label="Agent"
+        @click="viewMode = 'agent'"
+      >
+        <Bot class="h-3.5 w-3.5" :stroke-width="1.5" />
+        <span>Agent</span>
+      </button>
     </div>
     <div class="figma-fe-body">
       <FileExplorer
@@ -93,10 +107,17 @@ const showPublicTab = computed(() => true); // 后端未配置时面板自身会
         @refresh="emit('refresh')"
       />
       <PublicDirectoryPanel
-        v-else
+        v-else-if="viewMode === 'public'"
         :can-write="!!publicDirectoryWritable"
         :base-url="apiBaseUrl ?? ''"
         @open-file="emit('openPublicFile', $event)"
+      />
+      <AgentConfigPanel
+        v-else
+        :base-url="apiBaseUrl ?? ''"
+        :workspace-id="workspaceId"
+        :can-write="!!publicDirectoryWritable"
+        @open-file="emit('openAgentFile', $event)"
       />
     </div>
     <WorkbenchFooter

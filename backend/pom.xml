@@ -44,6 +44,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <druid.version>1.2.28</druid.version>
+        <mybatis-spring-boot.version>4.0.1</mybatis-spring-boot.version>
         <spring-boot.version>4.1.0</spring-boot.version>
         <start-class>com.icbc.testagent.app.TestAgentApplication</start-class>
     </properties>
@@ -211,6 +212,11 @@
                 <groupId>com.alibaba</groupId>
                 <artifactId>druid-spring-boot-4-starter</artifactId>
                 <version>${druid.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.mybatis.spring.boot</groupId>
+                <artifactId>mybatis-spring-boot-starter</artifactId>
+                <version>${mybatis-spring-boot.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

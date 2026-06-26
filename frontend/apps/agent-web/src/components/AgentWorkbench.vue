@@ -578,6 +578,18 @@ const createWorkspaceMutation = useMutation({
 
 const saveMutation = useMutation({
   mutationFn: async (tab: NonNullable<typeof activeTab.value>) => {
+    if (isAgentFilePath(tab.path)) {
+      const agent = agentFileInfo(tab.path);
+      if (agent.scope === "PUBLIC") {
+        await api.writePublicAgentFile(agent.path, tab.content, agent.worktreeId);
+      } else {
+        if (!selectedWorkspace.value) {
+          throw new Error("未选择 Workspace");
+        }
+        await api.writeWorkspaceAgentFile(selectedWorkspace.value.workspaceId, agent.path, tab.content, agent.worktreeId);
+      }
+      return tab;
+    }
     if (isPublicFilePath(tab.path)) {
       // 公共目录写：仅 SUPER_ADMIN 角色可调（服务端二次校验），前端不暴露给普通用户。
       await api.writePublicFile(publicFilePath(tab.path), tab.content);
@@ -600,11 +612,33 @@ const saveMutation = useMutation({
 
 // 公共文件 tab.path 用 "public:<相对路径>" 表示；与工作区路径空间隔离，避免编辑器 activePath 撞名。
 const PUBLIC_FILE_PREFIX = "public:";
+const AGENT_PUBLIC_FILE_PREFIX = "agent-public:";
+const AGENT_WORKSPACE_FILE_PREFIX = "agent-workspace:";
 function isPublicFilePath(path: string): boolean {
   return path.startsWith(PUBLIC_FILE_PREFIX);
 }
 function publicFilePath(tabPath: string): string {
   return tabPath.startsWith(PUBLIC_FILE_PREFIX) ? tabPath.slice(PUBLIC_FILE_PREFIX.length) : tabPath;
+}
+function isAgentFilePath(path: string): boolean {
+  return path.startsWith(AGENT_PUBLIC_FILE_PREFIX) || path.startsWith(AGENT_WORKSPACE_FILE_PREFIX);
+}
+function agentTabPath(scope: "PUBLIC" | "WORKSPACE", path: string, worktreeId?: string | null): string {
+  const prefix = scope === "PUBLIC" ? AGENT_PUBLIC_FILE_PREFIX : AGENT_WORKSPACE_FILE_PREFIX;
+  return `${prefix}${encodeURIComponent(worktreeId ?? "")}:${encodeURIComponent(path)}`;
+}
+function agentFileInfo(tabPath: string): { scope: "PUBLIC" | "WORKSPACE"; path: string; worktreeId?: string } {
+  const scope: "PUBLIC" | "WORKSPACE" = tabPath.startsWith(AGENT_PUBLIC_FILE_PREFIX) ? "PUBLIC" : "WORKSPACE";
+  const prefix = scope === "PUBLIC" ? AGENT_PUBLIC_FILE_PREFIX : AGENT_WORKSPACE_FILE_PREFIX;
+  const rest = tabPath.slice(prefix.length);
+  const separator = rest.indexOf(":");
+  const rawWorktree = separator >= 0 ? rest.slice(0, separator) : "";
+  const rawPath = separator >= 0 ? rest.slice(separator + 1) : rest;
+  return {
+    scope,
+    path: decodeURIComponent(rawPath),
+    worktreeId: rawWorktree ? decodeURIComponent(rawWorktree) : undefined
+  };
 }
 
 const startRunMutation = useMutation({
@@ -1315,6 +1349,19 @@ async function openPublicFile(payload: { path: string; content: FileContent; rea
   });
 }
 
+async function openAgentFile(payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null }) {
+  centerMode.value = "editor";
+  const tabPath = agentTabPath(payload.scope, payload.path, payload.worktreeId);
+  workbench.openTab({
+    id: `${payload.scope.toLowerCase()}:agent:file:${payload.worktreeId ?? "direct"}:${payload.path}`,
+    path: tabPath,
+    title: payload.path.split(/[\\/]+/).filter(Boolean).at(-1) ?? payload.path,
+    content: payload.content.content,
+    savedContent: payload.content.content,
+    readonly: payload.readonly
+  });
+}
+
 function toggleDirectory(path: string) {
   // 同一目录正在加载时再次点击，会让 path 先被加入、再被移除，表现为"点击没反应"。
   // 这里直接吞掉二次点击，让加载指示（旋转图标）有足够时间呈现给用户。
@@ -1847,6 +1894,7 @@ async function handleLogout() {
           :creating-version="creatingVersion"
           :public-directory-writable="isSuperAdmin"
           :api-base-url="apiBaseUrl"
+          :workspace-id="selectedWorkspace.workspaceId"
           :show-server-workspace-switch="isSuperAdmin"
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
@@ -1856,6 +1904,7 @@ async function handleLogout() {
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"
           @open-public-file="openPublicFile"
+          @open-agent-file="openAgentFile"
           @open-server-workspace-picker="openServerWorkspacePicker"
         />
         <div v-else class="managed-workspace-empty">

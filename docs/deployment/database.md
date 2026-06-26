@@ -2,6 +2,12 @@
 
 本文档记录当前数据库结构和兼容策略。任何新增或修改 migration 都必须同步更新本文件。
 
+## 数据访问规范
+
+- 关系型数据库连接池继续统一使用 Druid，migration 继续由 Flyway 管理。
+- 新增或修改关系型数据库 SQL 必须通过 `test-agent-persistence` 的 MyBatis XML mapper 实现；mapper 接口只声明方法，禁止写注解 SQL。
+- 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository` 已作为 MyBatis 试点迁移。
+
 ## V1 核心表
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V1__create_core_tables.sql` 创建以下表：
@@ -252,7 +258,7 @@
 
 - 不迁移、不删除既有手动 `workspaces`、sessions、runs；新增托管工作区只是在创建版本或个人空间时新增运行态 `workspaces` 记录。
 - `application_workspaces.branch` 继续保留作为模板创建和目录选择兼容字段；版本实际分支以 `application_workspace_versions.branch` 为准。
-- 应用版本和个人工作区物理根目录优先由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定；缺失时回退业务配置 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT` 下的 `appworkspace`、`personalworktree` 子目录。数据库只记录最终路径，不负责创建或清理目录。
+- 应用版本和个人工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定，`common_parameters` 为唯一事实源，缺失时直接抛业务异常（不再回退 yaml 或代码默认值）。数据库只记录最终路径，不负责创建或清理目录。
 
 ## V20260626150000 通用参数与工作空间创建进度
 
@@ -266,11 +272,10 @@
 | `code_repositories.english_name` | 代码库英文名称，可空兼容历史数据，非空唯一，最大 29 字符。 |
 | `workspace_create_operations` | 设置页创建应用工作空间的进度表，按 `operation_id` 记录状态、当前步骤、错误信息、关联应用/用户/模板/版本和 traceId。 |
 
-`common_parameters` 初始化 10 条 opencode 路径参数：
+`common_parameters` 初始化 8 条 opencode 路径参数：
 
 | 参数 | Linux 默认值 | Windows 默认值 |
 |---|---|---|
-| `OPENCODE_WORKSPACE_ROOT` | `/data/.testagent/agent-opencode/workspace/` | `D:/data/.testagent/agent-opencode/workspace/` |
 | `OPENCODE_PUBLIC_CONFIG_DIR` | `/data/.testagent/agent-opencode/.config/opencode/` | `D:/data/.testagent/agent-opencode/.config/opencode/` |
 | `OPENCODE_SESSION_DIR` | `/data/.testagent/agent-opencode/.session/` | `D:/data/.testagent/agent-opencode/.session/` |
 | `OPENCODE_APP_WORKSPACE_ROOT` | `/data/.testagent/agent-opencode/workspace/appworkspace/` | `D:/data/.testagent/agent-opencode/workspace/appworkspace/` |
@@ -280,8 +285,39 @@
 
 - 历史代码库的 `english_name` 保持 `null`；列表和详情响应允许返回 `null`，但新增/编辑代码库时必须提供合法英文名。
 - 缺少英文名的历史代码库不能创建新的应用版本工作区，后端返回 `VALIDATION_ERROR`，避免新路径规则下目录冲突。
-- 通用参数读取按 `当前平台 -> all -> 代码 fallback` 顺序选择；默认迁移只写入 `windows` 和 `linux` 平台值。
+- 通用参数读取按 `当前平台 -> all` 顺序选择，命中即用；未命中或值为空时抛 `INTERNAL_ERROR` 业务异常（`通用参数未配置：<参数英文名>`），强制运维在 `common_parameters` 表中补配。`OPENCODE_PUBLIC_AGENT_GIT_URL` 例外，其缺失或为 `UNCONFIGURED` 时视为公共级功能未启用，不抛异常。
 - `workspace_create_operations` 只服务 HTTP 轮询进度，不写入 `run_events`，也不参与 RunEvent SSE 续传。
+
+## V20260626180000 删除废弃参数 OPENCODE_WORKSPACE_ROOT
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260626180000__drop_deprecated_opencode_workspace_root_parameter.sql` 删除 `common_parameters` 中无消费方的 `OPENCODE_WORKSPACE_ROOT`（linux/windows 各一行）。该参数仅为 `OPENCODE_APP_WORKSPACE_ROOT` / `OPENCODE_PERSONAL_WORKTREE_ROOT` 的父目录，子目录参数已独立维护全路径，父参数不再需要。
+
+## V20260626170000 公共 Agent 配置管理
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260626170000__add_agent_config_management.sql` 增加公共 Agent 配置参数、worktree 记录和 Git 长操作进度表。
+
+新增通用参数：
+
+| 参数 | Linux 默认值 | Windows 默认值 / all 默认值 |
+|---|---|---|
+| `OPENCODE_PUBLIC_AGENT_GIT_URL` | `UNCONFIGURED`（platform=`all`） | `UNCONFIGURED` |
+| `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` | `/data/.testagent/agent-opencode/.config/` | `D:/data/.testagent/agent-opencode/.config/` |
+| `OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT` | `/data/.testagent/agent-opencode/.configdev/` | `D:/data/.testagent/agent-opencode/.configdev/` |
+
+新增表：
+
+| 表 | 说明 |
+|---|---|
+| `agent_config_worktrees` | 公共级/工作空间级 Agent 配置 worktree 记录，包含 scope、workspaceId、worktreeName、branch、rootPath、createdBy、status 和时间戳。 |
+| `agent_config_operations` | Agent 配置 Git 长操作进度快照，包含 operationId、scope、action、status、currentStep、错误信息、traceId、branch、commitHash 和时间戳。 |
+
+兼容策略：
+
+- `OPENCODE_PUBLIC_AGENT_GIT_URL` 默认 `UNCONFIGURED`，功能只读展示但禁用 Git 更新/发布；运维更新参数值后启用。
+- scope/status 枚举由领域对象校验，数据库保存字符串并保留非空约束，避免 H2 与 PostgreSQL 在同名列 check 表达式上的兼容差异。
+- 公共 agent 标准目录是 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT/opencode/agents/`；读兼容 legacy `opencode/agent/`，写入标准目录。
+- 工作空间级标准目录是 `{workspace.rootPath}/.opencode/agents/`；读兼容 `.opencode/agent/`，写入标准目录。
+- Agent 配置 operation 供 WebSocket snapshot 和历史查询使用，不写入 `run_events`，也不参与 RunEvent SSE 续传。
 
 ## V20260626120900 应用版本工作区服务器副本
 
@@ -588,3 +624,54 @@ V17 及以前保留既有数字版本，已在本地或共享库执行过的 mig
 - 全部插入语句使用 `where not exists` / `where exists` 保护，重复执行迁移不会破坏数据或产生重复行。
 - 仅在 `users.user_id = 'usr_test_dev'`（V5 默认开发用户）存在时才插入 `opencode_server_processes` 与 `user_opencode_process_bindings`；生产环境无该用户时整段种子不写用户进程相关表，仅保留拓扑种子，便于后续手工绑定。
 - 容器 `current_processes = 1` 反映当前已有一个用户进程；若需要新增第二个用户，需要先把 `current_processes` 与 `max_processes` 调大并扩展端口池，或先解除已有绑定。
+
+## V20260626210000 数据库表和字段中文注释
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260626210000__add_chinese_comments_for_all_tables.sql` 为项目中所有数据库表和字段添加中文注释：
+
+### 添加注释的表
+
+| 表 | 说明 |
+|---|---|
+| `workspaces` | 平台工作区表，包含业务ID、名称、根路径、服务器归属、状态等信息 |
+| `sessions` | 智能体会话表，关联workspace，包含标题、状态、来源等信息 |
+| `runs` | 运行记录表，关联session/workspace，记录Run状态、token消耗等信息 |
+| `run_events` | RunEvent事件流表，append-only，按(run_id, seq)唯一并支持增量回放 |
+| `execution_nodes` | opencode执行节点表，包含baseUrl、健康状态、运行容量、权重、心跳和能力标签 |
+| `routing_decisions` | Run到ExecutionNode的路由决策审计记录表 |
+| `session_messages` | 会话消息表，记录用户与助手的对话内容 |
+| `agent_session_bindings` | 通用agent远端会话绑定表 |
+| `users` | 平台用户表，包含统一认证号、用户名、BCrypt密码哈希、所属机构/研发部/部门 |
+| `user_login_logs` | 用户登录日志表，记录登录时间、IP、User-Agent和结果 |
+| `dictionaries` | 通用字典表，存储应用角色等字典数据 |
+| `user_roles` | 用户角色对照关系表 |
+| `applications` | 应用定义表，由外部系统同步 |
+| `application_members` | 应用成员关系表 |
+| `code_repositories` | 代码库配置表 |
+| `application_repository_links` | 应用与代码库多对多关联表 |
+| `application_workspaces` | 应用级工作空间配置表 |
+| `user_ssh_keys` | 用户个人SSH私钥配置表 |
+| `application_workspace_versions` | 应用工作空间模板的版本实例表 |
+| `personal_workspaces` | 用户基于应用版本工作区派生的git worktree表 |
+| `user_global_workspace_preferences` | 用户全局最近使用的托管运行态Workspace表 |
+| `user_application_workspace_preferences` | 用户在某应用下最近使用的托管运行态Workspace表 |
+| `workspace_sync_records` | 个人工作区与应用版本工作区同步审计表 |
+| `user_workspace_branch_preferences` | 用户工作区分支偏好表 |
+| `ai_model_configs` | AI模型配置表 |
+| `linux_servers` | 后端Linux服务器节点表 |
+| `backend_java_processes` | 后端Java进程实例表 |
+| `opencode_containers` | opencode容器表 |
+| `opencode_container_managers` | opencode容器管理进程表 |
+| `opencode_manager_backend_connections` | 管理进程到后端Java进程的控制面连接状态表 |
+| `opencode_server_processes` | 用户专属opencode server进程表 |
+| `user_opencode_process_bindings` | 用户到agent/opencode进程的当前绑定表 |
+| `scheduled_tasks` | 定时任务定义表 |
+| `scheduled_task_plans` | 用户级Cron计划预留表 |
+| `scheduled_task_runs` | 定时任务运行记录表 |
+
+### 字段注释原则
+
+- 业务ID字段均标注格式，如：`wks_xxx`、`ses_xxx`、`run_xxx`、`msg_xxx`
+- 状态、来源类型等枚举字段标注可选值，如：`ACTIVE/ARCHIVED`、`MANUAL/SCHEDULED_TASK`
+- JSON字段标注结构样例，如：`{"tools": ["git", "docker"]}`、`["text","image"]`
+- 已有中文注释的表（`common_parameters`、`workspace_create_operations`、`agent_config_worktrees`、`agent_config_operations`、`application_workspace_version_replicas`）不再重复添加

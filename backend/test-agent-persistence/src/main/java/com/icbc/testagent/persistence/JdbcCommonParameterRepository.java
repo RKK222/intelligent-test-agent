@@ -3,16 +3,23 @@ package com.icbc.testagent.persistence;
 import com.icbc.testagent.domain.configuration.CommonParameter;
 import com.icbc.testagent.domain.configuration.CommonParameterRepository;
 import com.icbc.testagent.domain.configuration.ParameterPlatform;
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.stereotype.Repository;
 
 /**
- * 通用参数 JDBC Repository，按参数英文名和平台提供只读查询。
+ * 通用参数存量 JDBC Repository，仅保留给旧集成测试直接构造使用。
+ *
+ * <p>生产环境的 CommonParameterRepository Bean 已迁移到 MyBatis 实现；
+ * 后续通用参数 SQL 变更必须写入 MyBatis XML mapper。
  */
-@Repository
 public class JdbcCommonParameterRepository extends JdbcRepositorySupport implements CommonParameterRepository {
+
+    private static final String SELECT_COLUMNS = """
+            parameter_id, parameter_english, parameter_chinese, parameter_value, platform, created_at, updated_at
+            """;
 
     private final JdbcClient jdbcClient;
 
@@ -32,13 +39,46 @@ public class JdbcCommonParameterRepository extends JdbcRepositorySupport impleme
     @Override
     public Optional<CommonParameter> findByEnglishNameAndPlatform(String englishName, ParameterPlatform platform) {
         return jdbcClient.sql("""
-                        select parameter_id, parameter_english, parameter_chinese, parameter_value, platform, created_at, updated_at
-                        from common_parameters
+                        select %s from common_parameters
                         where parameter_english = :englishName and platform = :platform
-                        """)
+                        """.formatted(SELECT_COLUMNS))
                 .param("englishName", englishName)
                 .param("platform", platform.value())
                 .query(mapper)
                 .optional();
+    }
+
+    @Override
+    public List<CommonParameter> findAll() {
+        return jdbcClient.sql("""
+                        select %s from common_parameters
+                        order by parameter_english, platform
+                        """.formatted(SELECT_COLUMNS))
+                .query(mapper)
+                .list();
+    }
+
+    @Override
+    public Optional<CommonParameter> findByParameterId(String parameterId) {
+        return jdbcClient.sql("""
+                        select %s from common_parameters
+                        where parameter_id = :parameterId
+                        """.formatted(SELECT_COLUMNS))
+                .param("parameterId", parameterId)
+                .query(mapper)
+                .optional();
+    }
+
+    @Override
+    public int updateValue(String parameterId, String newValue, Instant updatedAt) {
+        return jdbcClient.sql("""
+                        update common_parameters
+                        set parameter_value = :value, updated_at = :updatedAt
+                        where parameter_id = :parameterId
+                        """)
+                .param("value", newValue)
+                .param("updatedAt", timestamp(updatedAt))
+                .param("parameterId", parameterId)
+                .update();
     }
 }

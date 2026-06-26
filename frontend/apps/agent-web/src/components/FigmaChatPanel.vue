@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
+  AlertTriangle,
   ArrowUpRight,
+  CheckCircle,
   ChevronDown,
   ChevronRight,
   Eye,
   EyeOff,
   History,
   ListTodo,
+  MinusCircle,
   PanelRightClose,
   Plus,
   Send,
@@ -20,6 +23,7 @@ import type { AgentMessage } from '@test-agent/shared-types'
 import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
+import { MarkdownView } from '@test-agent/agent-chat'
 
 type ChatMessageInput = AgentMessage & { content?: string }
 
@@ -29,13 +33,21 @@ type ChatMessage = {
   content: string
   meta?: string
   parts?: unknown[]
+  _error?: boolean
 }
 
 function partText(part: unknown): string {
   if (part && typeof part === 'object') {
-    // reasoning 和 tool 不进入气泡正文
     const pType = (part as { type?: string }).type
-    if (pType === 'reasoning' || pType === 'tool') return ''
+    // reasoning 不进入气泡正文
+    if (pType === 'reasoning') return ''
+    // tool part：提取执行结果（如 bash 命令输出、文件读取内容等）进入气泡
+    if (pType === 'tool') {
+      const state = (part as { state?: { output?: string; error?: string } }).state
+      if (state?.output) return state.output + '\n'
+      if (state?.error) return state.error + '\n'
+      return ''
+    }
     if ('text' in part) {
       const text = (part as { text?: unknown }).text
       return typeof text === 'string' ? text : ''
@@ -126,6 +138,8 @@ const emit =
 
 const localInput = ref(props.inputValue ?? '')
 const inputComposing = ref(false)
+const wasStopped = ref(false)
+const wasCompleted = ref(false)
 
 // ===== 文件变更抽屉 =====
 // 抽屉默认选中第一个文件；打开后通过 fileChanges 变化自动跟随到最新一个文件（与原有的“跟随最近一次变化”心智一致）。
@@ -308,13 +322,37 @@ function highlightCode(code: string, filePath: string): string {
   const ext = (filePath.split('.').pop() ?? '').toLowerCase()
   let lang: string = ext
   if (ext === 'vue' || ext === 'svelte') lang = 'html'
-  else if (ext === 'ts' || ext === 'tsx' || ext === 'js' || ext === 'jsx' || ext === 'mjs' || ext === 'cjs') lang = 'js'
+  else if (
+    ext === 'ts' ||
+    ext === 'tsx' ||
+    ext === 'js' ||
+    ext === 'jsx' ||
+    ext === 'mjs' ||
+    ext === 'cjs'
+  )
+    lang = 'js'
   else if (ext === 'json' || ext === 'jsonc' || ext === 'json5') lang = 'json'
-  else if (ext === 'css' || ext === 'scss' || ext === 'less' || ext === 'sass' || ext === 'styl') lang = 'css'
+  else if (
+    ext === 'css' ||
+    ext === 'scss' ||
+    ext === 'less' ||
+    ext === 'sass' ||
+    ext === 'styl'
+  )
+    lang = 'css'
   else if (ext === 'md' || ext === 'mdx' || ext === 'markdown') lang = 'md'
   else if (ext === 'yaml' || ext === 'yml') lang = 'yaml'
   else if (ext === 'sh' || ext === 'bash' || ext === 'zsh') lang = 'bash'
-  else if (ext === 'py' || ext === 'rb' || ext === 'go' || ext === 'rs' || ext === 'java' || ext === 'kt' || ext === 'swift') lang = 'code'
+  else if (
+    ext === 'py' ||
+    ext === 'rb' ||
+    ext === 'go' ||
+    ext === 'rs' ||
+    ext === 'java' ||
+    ext === 'kt' ||
+    ext === 'swift'
+  )
+    lang = 'code'
   else if (ext === 'sql') lang = 'sql'
   else if (ext === 'xml' || ext === 'svg') lang = 'xml'
   else if (ext === 'html' || ext === 'htm') lang = 'html'
@@ -338,9 +376,18 @@ function highlightCode(code: string, filePath: string): string {
     return escaped
       .replace(/(\/\/[^\n]*)/g, '<span class="ch">$1</span>')
       .replace(/(&quot;.*?&quot;)(?=\s*:)/g, '<span class="na">$1</span>')
-      .replace(/(&quot;.*?&quot;|&#39;.*?&#39;|`[^`]*`)/g, '<span class="s">$1</span>')
-      .replace(/\b(true|false|null|undefined|NaN|Infinity)\b/g, '<span class="nb">$1</span>')
-      .replace(/\b(const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|class|extends|import|export|from|default|async|await|try|catch|throw|finally|typeof|instanceof|in|of|yield|static|get|set|as|type|interface|enum|implements|abstract|private|public|protected|readonly)\b/g, '<span class="k">$1</span>')
+      .replace(
+        /(&quot;.*?&quot;|&#39;.*?&#39;|`[^`]*`)/g,
+        '<span class="s">$1</span>'
+      )
+      .replace(
+        /\b(true|false|null|undefined|NaN|Infinity)\b/g,
+        '<span class="nb">$1</span>'
+      )
+      .replace(
+        /\b(const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|class|extends|import|export|from|default|async|await|try|catch|throw|finally|typeof|instanceof|in|of|yield|static|get|set|as|type|interface|enum|implements|abstract|private|public|protected|readonly)\b/g,
+        '<span class="k">$1</span>'
+      )
       .replace(/\b(\d+\.?\d*(?:e[+-]?\d+)?)\b/g, '<span class="m">$1</span>')
   }
   if (lang === 'css') {
@@ -362,7 +409,10 @@ function highlightCode(code: string, filePath: string): string {
     return escaped
       .replace(/^(#.*)$/gm, '<span class="ch">$1</span>')
       .replace(/(&quot;.*?&quot;|&#39;.*?&#39;)/g, '<span class="s">$1</span>')
-      .replace(/\b(ls|cd|cat|echo|find|grep|mkdir|rm|mv|cp|touch|head|tail|tree|wc|file|stat|npm|pnpm|yarn|node|python|git|docker|curl|wget|chmod|chown|export|source|set|unset|env|which|if|then|else|fi|for|do|done|while|case|esac|function|return|exit|exec|xargs|sort|uniq|cut|tr|sed|awk|diff|cmp|make)\b/g, '<span class="k">$1</span>')
+      .replace(
+        /\b(ls|cd|cat|echo|find|grep|mkdir|rm|mv|cp|touch|head|tail|tree|wc|file|stat|npm|pnpm|yarn|node|python|git|docker|curl|wget|chmod|chown|export|source|set|unset|env|which|if|then|else|fi|for|do|done|while|case|esac|function|return|exit|exec|xargs|sort|uniq|cut|tr|sed|awk|diff|cmp|make)\b/g,
+        '<span class="k">$1</span>'
+      )
       .replace(/(\s|^)(--?[\w-]+)/g, '$1<span class="m">$2</span>')
   }
   if (lang === 'yaml') {
@@ -370,28 +420,46 @@ function highlightCode(code: string, filePath: string): string {
       .replace(/^(#.*)$/gm, '<span class="ch">$1</span>')
       .replace(/(&quot;.*?&quot;|&#39;.*?&#39;)/g, '<span class="s">$1</span>')
       .replace(/^(\s*)([\w-]+)(?=\s*:)/gm, '$1<span class="na">$2</span>')
-      .replace(/\b(true|false|null|yes|no|on|off)\b/g, '<span class="nb">$1</span>')
+      .replace(
+        /\b(true|false|null|yes|no|on|off)\b/g,
+        '<span class="nb">$1</span>'
+      )
   }
   if (lang === 'sql') {
     return escaped
       .replace(/(--[^\n]*)/g, '<span class="ch">$1</span>')
       .replace(/(&#39;.*?&#39;)/g, '<span class="s">$1</span>')
-      .replace(/\b(SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TABLE|INDEX|INTO|VALUES|SET|AND|OR|NOT|IN|LIKE|BETWEEN|JOIN|LEFT|RIGHT|INNER|OUTER|ON|AS|ORDER|BY|GROUP|HAVING|LIMIT|OFFSET|UNION|ALL|DISTINCT|COUNT|SUM|AVG|MIN|MAX|CASE|WHEN|THEN|ELSE|END|NULL|PRIMARY|KEY|FOREIGN|REFERENCES|CASCADE|DEFAULT|CHECK|UNIQUE|CONSTRAINT|EXISTS|IF|BEGIN|COMMIT|ROLLBACK|TRANSACTION)\b/gi, '<span class="k">$1</span>')
+      .replace(
+        /\b(SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TABLE|INDEX|INTO|VALUES|SET|AND|OR|NOT|IN|LIKE|BETWEEN|JOIN|LEFT|RIGHT|INNER|OUTER|ON|AS|ORDER|BY|GROUP|HAVING|LIMIT|OFFSET|UNION|ALL|DISTINCT|COUNT|SUM|AVG|MIN|MAX|CASE|WHEN|THEN|ELSE|END|NULL|PRIMARY|KEY|FOREIGN|REFERENCES|CASCADE|DEFAULT|CHECK|UNIQUE|CONSTRAINT|EXISTS|IF|BEGIN|COMMIT|ROLLBACK|TRANSACTION)\b/gi,
+        '<span class="k">$1</span>'
+      )
       .replace(/\b(\d+\.?\d*)\b/g, '<span class="m">$1</span>')
   }
   if (lang === 'graphql') {
     return escaped
       .replace(/(#[^\n]*)/g, '<span class="ch">$1</span>')
       .replace(/(&quot;.*?&quot;)/g, '<span class="s">$1</span>')
-      .replace(/\b(query|mutation|subscription|fragment|on|type|input|enum|interface|union|scalar|schema|extend|directive|implements)\b/g, '<span class="k">$1</span>')
+      .replace(
+        /\b(query|mutation|subscription|fragment|on|type|input|enum|interface|union|scalar|schema|extend|directive|implements)\b/g,
+        '<span class="k">$1</span>'
+      )
       .replace(/\b(true|false|null)\b/g, '<span class="nb">$1</span>')
   }
   if (lang === 'code') {
     return escaped
       .replace(/(\/\/[^\n]*|#[^\n]*)/g, '<span class="ch">$1</span>')
-      .replace(/(&quot;.*?&quot;|&#39;.*?&#39;|""".*?""")/g, '<span class="s">$1</span>')
-      .replace(/\b(def|class|function|return|if|else|elif|for|while|import|from|as|try|except|raise|pass|break|continue|with|yield|lambda|async|await|fn|let|mut|pub|struct|impl|enum|trait|mod|use|self|super|where|match|loop|move|ref|unsafe|extern|crate|public|private|protected|static|final|void|int|string|bool|float|double|var|val|fun|object|package|new|this|throw|throws|catch|finally|extends|implements|abstract|interface|override|virtual|sealed|internal|namespace|using|global|require|module|export|default|type|const|interface|declare|readonly|keyof|infer|extends|implements)\b/g, '<span class="k">$1</span>')
-      .replace(/\b(true|false|null|nil|None|True|False|undefined)\b/g, '<span class="nb">$1</span>')
+      .replace(
+        /(&quot;.*?&quot;|&#39;.*?&#39;|""".*?""")/g,
+        '<span class="s">$1</span>'
+      )
+      .replace(
+        /\b(def|class|function|return|if|else|elif|for|while|import|from|as|try|except|raise|pass|break|continue|with|yield|lambda|async|await|fn|let|mut|pub|struct|impl|enum|trait|mod|use|self|super|where|match|loop|move|ref|unsafe|extern|crate|public|private|protected|static|final|void|int|string|bool|float|double|var|val|fun|object|package|new|this|throw|throws|catch|finally|extends|implements|abstract|interface|override|virtual|sealed|internal|namespace|using|global|require|module|export|default|type|const|interface|declare|readonly|keyof|infer|extends|implements)\b/g,
+        '<span class="k">$1</span>'
+      )
+      .replace(
+        /\b(true|false|null|nil|None|True|False|undefined)\b/g,
+        '<span class="nb">$1</span>'
+      )
       .replace(/\b(\d+\.?\d*(?:e[+-]?\d+)?)\b/g, '<span class="m">$1</span>')
   }
   return escaped
@@ -409,9 +477,19 @@ function messageFileOps(msg: ChatMessageInput): FileOperation[] {
     if (FILE_READ_TOOLS.has(toolName)) {
       ops.push({ toolName, filePath, opType: 'read' })
     } else if (FILE_WRITE_TOOLS.has(toolName)) {
-      ops.push({ toolName, filePath, opType: 'write', content: toolInputContent(input) })
+      ops.push({
+        toolName,
+        filePath,
+        opType: 'write',
+        content: toolInputContent(input),
+      })
     } else if (FILE_EDIT_TOOLS.has(toolName)) {
-      ops.push({ toolName, filePath, opType: 'edit', content: toolInputContent(input) })
+      ops.push({
+        toolName,
+        filePath,
+        opType: 'edit',
+        content: toolInputContent(input),
+      })
     }
   }
   return ops
@@ -462,6 +540,7 @@ const reasoningHtml = computed(() =>
     .replace(/\[(\w+)\]/g, '<strong>[$1]</strong>')
 )
 
+// 渲染 markdown 内容，返回安全的 HTML
 // 把 unified diff 文本按行解析为带 kind 的结构，供右侧 git-merge 风格渲染使用。
 // 解析规则与 git apply 一致：每行首字符决定 kind；hunk header "@@" 重置行号计数器。
 // 没有 patch 文本（部分 diff.proposed 事件只带 path/additions/deletions）时返回空数组，由模板降级展示空态。
@@ -630,13 +709,34 @@ watch(
   (now, prev) => {
     if (now && !prev) {
       thinkingExpanded.value = false
+      wasCompleted.value = false
+    }
+    if (!now && prev && !wasStopped.value) {
+      wasCompleted.value = true
     }
   }
 )
 
 const displayMessages = computed<ChatMessage[]>(() => {
-  return (props.messages || [])
+  const raw = (props.messages || [])
     .map((m, index): ChatMessage | null => {
+      // card 消息：run 失败等事件转为助手气泡展示
+      if (m.role === 'card') {
+        const card = m as { role: 'card'; cardType?: string; title?: string; payload?: Record<string, unknown> }
+        if (card.cardType === 'event') {
+          const err = card.payload?.error as { name?: string; message?: string } | undefined
+          const detail = err?.message || err?.name || ''
+          return {
+            id: m.messageId ?? m.id ?? `card-${index}`,
+            role: 'assistant' as const,
+            content: detail,
+            meta: m.createdAt ? formatTime(m.createdAt) : undefined,
+            parts: [],
+            _error: true,
+          }
+        }
+        return null
+      }
       if (m.role !== 'user' && m.role !== 'assistant') return null
       let text = ''
       if (typeof m.content === 'string' && m.content) {
@@ -647,17 +747,31 @@ const displayMessages = computed<ChatMessage[]>(() => {
         text = m.parts.map((p) => partText(p)).join('')
       }
       const hasTools = hasToolParts(m as AgentMessage)
-      // 思考中有 tool part 的助手消息即使没有文本也保留，以显示文件操作状态
-      if (!text.trim() && !(props.running && hasTools)) return null
+      // 有 tool part 的消息即使没有文本也保留，不因 running 状态变化而消失
+      if (!text.trim() && !hasTools) return null
       return {
         id: m.messageId ?? m.id ?? `${m.role}-${index}`,
         role: m.role,
         content: text,
         meta: m.createdAt ? formatTime(m.createdAt) : undefined,
-        parts: (m as AgentMessage).parts,
+        parts: [...((m as AgentMessage).parts || [])],
       }
     })
     .filter((m): m is ChatMessage => m !== null)
+
+  // 合并连续的 assistant 消息为一个对话气泡，避免工具操作分散成多条回复
+  const merged: ChatMessage[] = []
+  for (const msg of raw) {
+    const last = merged.length > 0 ? merged[merged.length - 1] : null
+    if (msg.role === 'assistant' && last && last.role === 'assistant') {
+      last.content = [last.content, msg.content].filter(Boolean).join('\n')
+      last.parts = [...last.parts, ...msg.parts]
+      if (msg.meta) last.meta = msg.meta
+    } else {
+      merged.push(msg)
+    }
+  }
+  return merged
 })
 
 const lastAssistant = computed(() => {
@@ -735,15 +849,39 @@ const hasTaskUsageDisplay = computed(
 
 const scrollEl = ref<HTMLElement | null>(null)
 
+// 滚动到底部，使用 setTimeout 确保 DOM 完全更新
+function scrollToBottom() {
+  setTimeout(() => {
+    if (scrollEl.value) {
+      scrollEl.value.scrollTop = scrollEl.value.scrollHeight
+    }
+  }, 50)
+}
+
+// 监听消息变化（数量或内容），流式回复时消息内容增长但数量不变，也需要滚动
 watch(
-  () => props.messages.length,
-  () =>
-    nextTick(() =>
-      scrollEl.value?.scrollTo({
-        top: scrollEl.value.scrollHeight,
-        behavior: 'smooth',
-      })
-    )
+  () => {
+    const msgs = props.messages
+    if (!msgs || msgs.length === 0) return '0:0'
+    const last = msgs[msgs.length - 1]
+    if (last.role !== 'user' && last.role !== 'assistant')
+      return `${msgs.length}:0`
+    const lastLen =
+      typeof last.content === 'string'
+        ? last.content.length
+        : typeof (last as { text?: string }).text === 'string'
+        ? (last as { text?: string }).text?.length ?? 0
+        : Array.isArray((last as { parts?: unknown[] }).parts)
+        ? ((last as { parts?: unknown[] }).parts ?? []).reduce(
+            (n: number, p: unknown) => n + (partText(p)?.length || 0),
+            0
+          )
+        : 0
+    return `${msgs.length}:${lastLen}`
+  },
+  () => {
+    nextTick(scrollToBottom)
+  }
 )
 
 function formatTime(iso: string) {
@@ -758,12 +896,15 @@ function formatTime(iso: string) {
 function submit() {
   const text = localInput.value.trim()
   if (!text || props.running) return
+  wasStopped.value = false
+  wasCompleted.value = false
   emit('send', text)
   localInput.value = ''
   emit('update:inputValue', '')
 }
 
 function stop() {
+  wasStopped.value = true
   emit('stop')
 }
 
@@ -805,7 +946,9 @@ function onCompositionEnd() {
             </div>
           </div>
           <div class="figma-chat-bubble figma-chat-bubble--user">
-            <div class="figma-chat-bubble-content">{{ message.content }}</div>
+            <div class="figma-chat-bubble-content">
+              {{ message.content }}
+            </div>
           </div>
         </div>
 
@@ -818,7 +961,12 @@ function onCompositionEnd() {
             <div v-if="message.meta" class="figma-chat-bubble-meta">
               测试智能体 · {{ message.meta }}
             </div>
-            <div class="figma-chat-bubble figma-chat-bubble--assistant">
+            <div
+              :class="[
+                'figma-chat-bubble figma-chat-bubble--assistant',
+                message._error && 'figma-chat-bubble--error',
+              ]"
+            >
               <div class="figma-chat-bubble-content">
                 <template
                   v-if="
@@ -919,7 +1067,12 @@ function onCompositionEnd() {
                         <pre
                           v-if="op.content"
                           class="figma-chat-write-preview"
-                          v-html="highlightCode(op.content, op.filePath).slice(0, 4000) + (op.content.length > 2000 ? '...' : '')"
+                          v-html="
+                            highlightCode(op.content, op.filePath).slice(
+                              0,
+                              4000
+                            ) + (op.content.length > 2000 ? '...' : '')
+                          "
                         ></pre>
                       </li>
                     </ul>
@@ -967,18 +1120,45 @@ function onCompositionEnd() {
                         <pre
                           v-if="op.content"
                           class="figma-chat-write-preview"
-                          v-html="highlightCode(op.content, op.filePath).slice(0, 4000) + (op.content.length > 2000 ? '...' : '')"
+                          v-html="
+                            highlightCode(op.content, op.filePath).slice(
+                              0,
+                              4000
+                            ) + (op.content.length > 2000 ? '...' : '')
+                          "
                         ></pre>
                       </li>
                     </ul>
                   </div>
                 </template>
-                {{ message.content }}
+                <div v-if="message._error" class="figma-chat-error-row">
+                  <AlertTriangle :size="14" class="figma-chat-error-icon" />
+                  <span class="figma-chat-error-text">{{ message.content }}</span>
+                </div>
+                <MarkdownView v-else :source="message.content" />
               </div>
             </div>
           </div>
         </div>
       </template>
+
+      <!-- 手动终止提示 -->
+      <div
+        v-if="wasStopped && !running && displayMessages.length > 0"
+        class="figma-chat-stopped"
+      >
+        <MinusCircle :size="14" class="figma-chat-stopped-icon" />
+        <span>已手动终止</span>
+      </div>
+
+      <!-- 对话完成提示 -->
+      <div
+        v-if="wasCompleted && !running && displayMessages.length > 0"
+        class="figma-chat-completed"
+      >
+        <CheckCircle :size="14" class="figma-chat-completed-icon" />
+        <span>任务完成</span>
+      </div>
 
       <!-- 空态 -->
       <div v-if="displayMessages.length === 0" class="figma-chat-empty">
@@ -1008,7 +1188,11 @@ function onCompositionEnd() {
       </div>
 
       <!-- 运行中状态 -->
-      <div v-if="running" class="figma-chat-status" :style="{ marginTop: reasoningText ? '-20px' : '0' }">
+      <div
+        v-if="running"
+        class="figma-chat-status"
+        :style="{ marginTop: reasoningText ? '-10px' : '0' }"
+      >
         <!-- <div class="figma-chat-status-dot" /> -->
         <span>思考中...</span>
         <button
@@ -1490,7 +1674,7 @@ function onCompositionEnd() {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 18px 18px 12px;
+  padding: 12px 12px 6px;
   background: #fff;
   display: flex;
   flex-direction: column;
@@ -1602,17 +1786,46 @@ function onCompositionEnd() {
 }
 
 .figma-chat-bubble--user {
+  display: block;
   background: #f4f4f5;
   color: #111;
-  max-width: 80%;
   border-top-right-radius: 2px;
 }
 
 .figma-chat-bubble--assistant {
+  display: block;
   background: transparent;
   padding: 0;
   color: #333;
   border-top-left-radius: 2px;
+}
+
+.figma-chat-bubble--error {
+  display: block;
+  background: rgba(235, 94, 83, 0.06);
+  border: 1px solid rgba(235, 94, 83, 0.25);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.figma-chat-error-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.figma-chat-error-icon {
+  flex-shrink: 0;
+  color: #eb5e53;
+  margin-top: 2px;
+}
+
+.figma-chat-error-text {
+  font-size: 13px;
+  line-height: 20px;
+  color: #8a2f29;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .figma-chat-bubble-content {
@@ -1698,14 +1911,32 @@ function onCompositionEnd() {
   overflow-y: auto;
   user-select: none;
 }
-.figma-chat-write-preview :deep(.ch) { color: #6b7280; font-style: italic; }
-.figma-chat-write-preview :deep(.kt) { color: #7c3aed; }
-.figma-chat-write-preview :deep(.na) { color: #1d4ed8; }
-.figma-chat-write-preview :deep(.s)  { color: #059669; }
-.figma-chat-write-preview :deep(.k)  { color: #7c3aed; font-weight: 600; }
-.figma-chat-write-preview :deep(.nb) { color: #d97706; }
-.figma-chat-write-preview :deep(.m)  { color: #0891b2; }
-.figma-chat-write-preview :deep(.nc) { color: #c2410c; }
+.figma-chat-write-preview :deep(.ch) {
+  color: #6b7280;
+  font-style: italic;
+}
+.figma-chat-write-preview :deep(.kt) {
+  color: #7c3aed;
+}
+.figma-chat-write-preview :deep(.na) {
+  color: #1d4ed8;
+}
+.figma-chat-write-preview :deep(.s) {
+  color: #059669;
+}
+.figma-chat-write-preview :deep(.k) {
+  color: #7c3aed;
+  font-weight: 600;
+}
+.figma-chat-write-preview :deep(.nb) {
+  color: #d97706;
+}
+.figma-chat-write-preview :deep(.m) {
+  color: #0891b2;
+}
+.figma-chat-write-preview :deep(.nc) {
+  color: #c2410c;
+}
 
 .figma-chat-bubble-meta {
   margin-top: 4px;
@@ -1842,6 +2073,38 @@ function onCompositionEnd() {
   white-space: pre-wrap;
   word-break: break-word;
   font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+.figma-chat-stopped {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 30px;
+  font-size: 12px;
+  color: #555;
+  font-weight: 500;
+  align-self: flex-start;
+}
+
+.figma-chat-stopped-icon {
+  flex-shrink: 0;
+  color: #555;
+}
+
+.figma-chat-completed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 30px;
+  font-size: 12px;
+  /* color: #18a978; */
+  font-weight: 500;
+  align-self: flex-start;
+}
+
+.figma-chat-completed-icon {
+  flex-shrink: 0;
+  color: #18a978;
 }
 
 @keyframes figma-chat-pulse {
@@ -2681,5 +2944,28 @@ function onCompositionEnd() {
   color: #aaa;
   max-width: 240px;
   line-height: 18px;
+}
+
+/* markdown 内容去除 github-markdown-css 自带的背景色，适配聊天气泡 */
+.figma-chat-bubble-content :deep(.markdown-body) {
+  background: transparent;
+  color: inherit;
+  font-size: inherit;
+}
+
+.figma-chat-bubble-content :deep(.markdown-body pre) {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.figma-chat-bubble-content :deep(.markdown-body code) {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.figma-chat-bubble-content :deep(.markdown-body table tr:nth-child(2n)) {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.figma-chat-bubble-content :deep(.markdown-body blockquote) {
+  background: transparent;
 }
 </style>

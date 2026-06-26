@@ -1,5 +1,13 @@
 import type {
   AgentInfo,
+  AgentConfigCommitPayload,
+  AgentConfigDiff,
+  AgentConfigOperation,
+  AgentConfigOperationTicketResponse,
+  AgentConfigProgressEvent,
+  AgentConfigStatus,
+  AgentConfigWorktree,
+  AgentConfigWorktreePayload,
   AddSshKeyPayload,
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
@@ -14,10 +22,14 @@ import type {
   CreatePersonalWorkspacePayload,
   CreateRepositoryPayload,
   CreateWorkspaceVersionPayload,
+  CreateUserPayload,
   CurrentUser,
   FileContent,
   FileStatus,
   FileTreeEntry,
+  GeneralParameter,
+  GeneralParameterListParams,
+  GeneralParameterUpdatePayload,
   LoginRequest,
   LoginResponse,
   ManagedApplication,
@@ -32,6 +44,7 @@ import type {
   PromptPart,
   ProviderInfo,
   QuestionRequest,
+  RoleOption,
   Run,
   RunDiff,
   RunDiffAction,
@@ -51,6 +64,7 @@ import type {
   TerminalTicketResponse,
   TodoItem,
   UpdateRepositoryPayload,
+  UserManagementUser,
   UserOpencodeProcess,
   Workspace,
   WorkspaceBackendServer,
@@ -75,6 +89,7 @@ type WorkspaceWebSocketLike = {
 };
 
 export type WorkspaceWebSocketFactory = (url: string) => WorkspaceWebSocketLike;
+export type AgentConfigProgressHandler = (event: AgentConfigProgressEvent) => void;
 
 export type BackendApiClientOptions = {
   baseUrl?: string;
@@ -138,8 +153,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const agentBase = `/api/internal/agent/${encodeURIComponent(agentId)}`;
   const configurationBase = "/api/internal/platform/configuration-management";
   const workspaceManagementBase = "/api/internal/platform/workspace-management";
+  const agentConfigBase = `${workspaceManagementBase}/agent-config`;
   const opencodeRuntimeManagementBase = "/api/internal/platform/opencode-runtime/management";
   const schedulerManagementBase = "/api/internal/platform/scheduler-management";
+  const systemManagementBase = "/api/internal/platform/system-management";
+  const commonParameterBase = `${configurationBase}/common-parameters`;
   const fetcher = options.fetcher ?? fetch;
   const webSocketFactory: WorkspaceWebSocketFactory =
     options.webSocketFactory ??
@@ -407,6 +425,111 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "PUT",
         body: JSON.stringify({ path, content })
       }),
+    getPublicAgentConfigStatus: () => request<AgentConfigStatus>(`${agentConfigBase}/public/status`),
+    getWorkspaceAgentConfigStatus: (workspaceId: string) =>
+      request<AgentConfigStatus>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/status`),
+    listPublicAgentBranches: () => request<string[]>(`${agentConfigBase}/public/branches`),
+    updatePublicAgentConfig: (branch: string, operationId?: string) =>
+      request<AgentConfigOperation>(`${agentConfigBase}/public/update`, {
+        method: "POST",
+        body: JSON.stringify({ branch, operationId })
+      }),
+    listPublicAgentFiles: async (path = "", worktreeId?: string | null) => {
+      const entries = await request<BackendFileTreeEntry[]>(`${agentConfigBase}/public/files${query({ path, worktreeId })}`);
+      return entries.map(toFileTreeEntry);
+    },
+    readPublicAgentFile: async (path: string, worktreeId?: string | null) => {
+      const file = await request<BackendFileContent>(`${agentConfigBase}/public/files/content${query({ path, worktreeId })}`);
+      return { ...file, encoding: "utf-8", readonly: false } satisfies FileContent;
+    },
+    writePublicAgentFile: (path: string, content: string, worktreeId?: string | null) =>
+      request<void>(`${agentConfigBase}/public/files/content`, {
+        method: "PUT",
+        body: JSON.stringify({ path, content, worktreeId })
+      }),
+    createPublicAgentWorktree: (payload: AgentConfigWorktreePayload) =>
+      request<AgentConfigWorktree>(`${agentConfigBase}/public/worktrees`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    getPublicAgentDiff: (worktreeId?: string | null) =>
+      request<AgentConfigDiff>(`${agentConfigBase}/public/diff${query({ worktreeId })}`),
+    stagePublicAgentFiles: (files: string[], worktreeId?: string | null) =>
+      request<void>(`${agentConfigBase}/public/stage`, { method: "POST", body: JSON.stringify({ files, worktreeId }) }),
+    unstagePublicAgentFiles: (files: string[], worktreeId?: string | null) =>
+      request<void>(`${agentConfigBase}/public/unstage`, { method: "POST", body: JSON.stringify({ files, worktreeId }) }),
+    commitPublicAgentConfig: (payload: AgentConfigCommitPayload) =>
+      request<AgentConfigOperation>(`${agentConfigBase}/public/commit`, { method: "POST", body: JSON.stringify(payload) }),
+    publishPublicAgentConfig: (worktreeId?: string | null, operationId?: string) =>
+      request<AgentConfigOperation>(`${agentConfigBase}/public/publish`, {
+        method: "POST",
+        body: JSON.stringify({ worktreeId, operationId })
+      }),
+    listWorkspaceAgentFiles: async (workspaceId: string, path = "", worktreeId?: string | null) => {
+      const entries = await request<BackendFileTreeEntry[]>(
+        `${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/files${query({ path, worktreeId })}`
+      );
+      return entries.map(toFileTreeEntry);
+    },
+    readWorkspaceAgentFile: async (workspaceId: string, path: string, worktreeId?: string | null) => {
+      const file = await request<BackendFileContent>(
+        `${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/files/content${query({ path, worktreeId })}`
+      );
+      return { ...file, encoding: "utf-8", readonly: false } satisfies FileContent;
+    },
+    writeWorkspaceAgentFile: (workspaceId: string, path: string, content: string, worktreeId?: string | null) =>
+      request<void>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/files/content`, {
+        method: "PUT",
+        body: JSON.stringify({ path, content, worktreeId })
+      }),
+    createWorkspaceAgentWorktree: (workspaceId: string, payload: AgentConfigWorktreePayload) =>
+      request<AgentConfigWorktree>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/worktrees`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    getWorkspaceAgentDiff: (workspaceId: string, worktreeId?: string | null) =>
+      request<AgentConfigDiff>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/diff${query({ worktreeId })}`),
+    stageWorkspaceAgentFiles: (workspaceId: string, files: string[], worktreeId?: string | null) =>
+      request<void>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/stage`, {
+        method: "POST",
+        body: JSON.stringify({ files, worktreeId })
+      }),
+    unstageWorkspaceAgentFiles: (workspaceId: string, files: string[], worktreeId?: string | null) =>
+      request<void>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/unstage`, {
+        method: "POST",
+        body: JSON.stringify({ files, worktreeId })
+      }),
+    commitWorkspaceAgentConfig: (workspaceId: string, payload: AgentConfigCommitPayload) =>
+      request<AgentConfigOperation>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/commit`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    publishWorkspaceAgentConfig: (workspaceId: string, worktreeId?: string | null, operationId?: string) =>
+      request<AgentConfigOperation>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/publish`, {
+        method: "POST",
+        body: JSON.stringify({ worktreeId, operationId })
+      }),
+    getAgentConfigOperation: (operationId: string) =>
+      request<AgentConfigOperation | null>(`${agentConfigBase}/operations/${encodeURIComponent(operationId)}`),
+    createAgentConfigOperationTicket: (operationId: string) =>
+      request<AgentConfigOperationTicketResponse>(`${agentConfigBase}/operations/${encodeURIComponent(operationId)}/tickets`, { method: "POST" }),
+    connectAgentConfigProgress: async (operationId: string, onEvent: AgentConfigProgressHandler) => {
+      const ticket = await request<AgentConfigOperationTicketResponse>(
+        `${agentConfigBase}/operations/${encodeURIComponent(operationId)}/tickets`,
+        { method: "POST" }
+      );
+      const socket = webSocketFactory(toWebSocketUrl(baseUrl, ticket.webSocketUrl));
+      socket.onmessage = (event) => onEvent(JSON.parse(event.data) as AgentConfigProgressEvent);
+      socket.onerror = () =>
+        onEvent({
+          type: "failed",
+          operationId,
+          status: "FAILED",
+          errorCode: "WEBSOCKET_ERROR",
+          errorMessage: "Agent 配置进度连接失败"
+        });
+      return socket;
+    },
     listAllSessions: (page = 1, size = 20, q?: string) => request<PageResponse<Session>>(`/api/sessions${query({ page, size, q })}`),
     listSessions: (workspaceId: string, page = 1, size = 20) =>
       request<PageResponse<Session>>(`/api/workspaces/${workspaceId}/sessions?page=${page}&size=${size}`),
@@ -457,6 +580,15 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<ScheduledTaskManagementRun>(`${schedulerManagementBase}/runs/${encodeURIComponent(taskRunId)}`),
     stopScheduledTaskRun: (taskRunId: string) =>
       request<ScheduledTaskManagementRun>(`${schedulerManagementBase}/runs/${encodeURIComponent(taskRunId)}/stop`, { method: "POST" }),
+    listGeneralParameters: (params: GeneralParameterListParams = {}) =>
+      request<PageResponse<GeneralParameter>>(
+        `${commonParameterBase}${query({ platform: params.platform, page: params.page, size: params.size })}`
+      ),
+    updateGeneralParameter: (parameterId: string, payload: GeneralParameterUpdatePayload) =>
+      request<GeneralParameter>(`${commonParameterBase}/${encodeURIComponent(parameterId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload)
+      }),
     getRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}`)),
     cancelRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}/cancel`), { method: "POST" }),
     getRunDiff: (runId: string) => request<RunDiff>(agentPath(`/runs/${encodeURIComponent(runId)}/diff`)),
@@ -613,6 +745,18 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       }),
     searchUsers: (keyword?: string, page = 1, size = 20) =>
       request<PageResponse<PlatformUserSummary>>(`${configurationBase}/users${query({ keyword, page, size })}`),
+
+    // ---- 用户管理（测试）API ----
+
+    /** 分页查询用户列表（仅 SUPER_ADMIN）。 */
+    listUsers: (keyword?: string, page = 1, size = 50) =>
+      request<PageResponse<UserManagementUser>>(`${systemManagementBase}/users${query({ keyword, page, size })}`),
+    /** 创建测试用户，密码由后端注入默认值 123456。 */
+    createUser: (payload: CreateUserPayload) =>
+      request<UserManagementUser>(`${systemManagementBase}/users`, { method: "POST", body: JSON.stringify(payload) }),
+    /** 查询可选角色列表，供新增用户下拉选择。 */
+    listRoles: () => request<RoleOption[]>(`${systemManagementBase}/roles`),
+
     listRepositories: (page = 1, size = 50) =>
       request<PageResponse<CodeRepositoryConfig>>(`${configurationBase}/repositories${query({ page, size })}`),
     createRepository: (payload: CreateRepositoryPayload) =>
@@ -695,6 +839,16 @@ type BackendFileStatus = {
   size: number;
   lastModifiedAt?: string;
 };
+
+function toFileTreeEntry(entry: BackendFileTreeEntry): FileTreeEntry {
+  return {
+    path: entry.path,
+    name: entry.name,
+    type: entry.directory ? "directory" : "file",
+    size: entry.size,
+    modifiedAt: entry.lastModifiedAt
+  };
+}
 
 class WorkspaceFileSocketClient {
   private readonly socket: WorkspaceWebSocketLike;
@@ -1005,10 +1159,10 @@ function normalizeFailure(body: unknown, fallbackTraceId: string, status: number
   };
 }
 
-function query(values: Record<string, string | number | undefined>) {
+function query(values: Record<string, string | number | null | undefined>) {
   const params = new URLSearchParams();
   Object.entries(values).forEach(([key, value]) => {
-    if (value !== undefined && value !== "") {
+    if (value !== undefined && value !== null && value !== "") {
       params.set(key, String(value));
     }
   });

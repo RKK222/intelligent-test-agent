@@ -48,8 +48,6 @@ public class UserOpencodeProcessAssignmentService {
     private static final int CONTAINER_CANDIDATE_LIMIT = 100;
     private static final String PARAM_OPENCODE_SESSION_DIR = "OPENCODE_SESSION_DIR";
     private static final String PARAM_OPENCODE_PUBLIC_CONFIG_DIR = "OPENCODE_PUBLIC_CONFIG_DIR";
-    private static final String DEFAULT_SESSION_DIR = "/data/.testagent/agent-opencode/.session/";
-    private static final String DEFAULT_CONFIG_PATH = "/data/.testagent/agent-opencode/.config/opencode/";
     private static final String LOCAL_DIRECT_PROCESS_ID = "ocp_local_direct";
     private static final String LOCAL_DIRECT_CONTAINER_ID = "ctr_local_direct";
     private static final CommonParameterRepository EMPTY_PARAMETER_REPOSITORY = (englishName, platform) -> Optional.empty();
@@ -83,6 +81,18 @@ public class UserOpencodeProcessAssignmentService {
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessHeartbeatStore heartbeatStore) {
         this(repository, EMPTY_PARAMETER_REPOSITORY, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, LocalDirectSettings.disabled());
+    }
+
+    /**
+     * 测试构造器：允许注入通用参数仓库（工作区/session 路径参数从 common_parameters 读取）。
+     */
+    UserOpencodeProcessAssignmentService(
+            OpencodeProcessManagementRepository repository,
+            CommonParameterRepository commonParameterRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            BackendJavaProcessLifecycleService backendLifecycle) {
+        this(repository, commonParameterRepository, executionNodeRepository, gateway, backendLifecycle, disabledHeartbeatStore(), LocalDirectSettings.disabled());
     }
 
     /**
@@ -424,19 +434,27 @@ public class UserOpencodeProcessAssignmentService {
     }
 
     private String sessionPath(int port) {
-        return ensureTrailingSlash(configuredParameter(PARAM_OPENCODE_SESSION_DIR, DEFAULT_SESSION_DIR)) + port;
+        return ensureTrailingSlash(configuredParameter(PARAM_OPENCODE_SESSION_DIR)) + port;
     }
 
     private String configPath() {
-        return ensureTrailingSlash(configuredParameter(PARAM_OPENCODE_PUBLIC_CONFIG_DIR, DEFAULT_CONFIG_PATH));
+        return ensureTrailingSlash(configuredParameter(PARAM_OPENCODE_PUBLIC_CONFIG_DIR));
     }
 
-    private String configuredParameter(String englishName, String fallback) {
+    /**
+     * 从 common_parameters 读取必填参数，缺失或空白时抛异常。
+     * common_parameters 为唯一事实源，不在 yaml/代码常量预留 fallback。
+     */
+    private String configuredParameter(String englishName) {
         ParameterPlatform platform = ParameterPlatform.current();
         return commonParameterRepository.findByEnglishNameAndPlatform(englishName, platform)
                 .or(() -> commonParameterRepository.findByEnglishNameAndPlatform(englishName, ParameterPlatform.ALL))
                 .map(CommonParameter::parameterValue)
-                .orElse(fallback);
+                .filter(value -> value != null && !value.isBlank())
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.INTERNAL_ERROR,
+                        "通用参数未配置：" + englishName,
+                        Map.of("parameter", englishName)));
     }
 
     private String ensureTrailingSlash(String value) {

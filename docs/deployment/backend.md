@@ -17,6 +17,8 @@
 ```text
 /data/.testagent/agent-opencode/.session/            # 用户进程 XDG_DATA_HOME 根目录，按端口分目录
 /data/.testagent/agent-opencode/.config/opencode/    # 公共 agent、插件、skill 等配置
+/data/.testagent/agent-opencode/.config/             # 公共 Agent Git 仓库根目录，由 OPENCODE_PUBLIC_CONFIG_GIT_ROOT 控制
+/data/.testagent/agent-opencode/.configdev/          # 公共 Agent Git worktree 根目录
 /data/.testagent/agent-opencode/workspace/           # 应用版本工作区和个人 worktree 根目录
 /data/.testagent/agent-opencode/manager              # manager 本地 state 和日志
 ```
@@ -56,7 +58,9 @@ opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 
 opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http://{linuxServerIp}:{port}` 访问。生产部署必须通过容器网络、主机防火墙或网关限制端口池访问面，不得把用户进程端口暴露到不可信网络。
 
-后端创建用户进程、应用版本工作区和个人 worktree 时优先读取数据库 `common_parameters` 中当前平台的 opencode 路径参数：`OPENCODE_SESSION_DIR`、`OPENCODE_PUBLIC_CONFIG_DIR`、`OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT`。缺失时分别回退到上表 Linux 默认路径或 `test-agent.managed-workspace.root` 下的子目录；Windows 默认值在迁移中按 `D:/data/.testagent/agent-opencode/...` 初始化。
+后端创建用户进程、应用版本工作区和个人 worktree 时读取数据库 `common_parameters` 中当前平台的 opencode 路径参数：`OPENCODE_SESSION_DIR`、`OPENCODE_PUBLIC_CONFIG_DIR`、`OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT`。`common_parameters` 为唯一事实源，缺失或值为空时抛 `INTERNAL_ERROR` 业务异常，不在 yaml 或代码常量预留 fallback；Windows 默认值在迁移中按 `D:/data/.testagent/agent-opencode/...` 初始化。
+
+公共 Agent 配置额外读取 `OPENCODE_PUBLIC_AGENT_GIT_URL`、`OPENCODE_PUBLIC_CONFIG_GIT_ROOT`、`OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT`。Git 地址默认为 `UNCONFIGURED`，未配置前公共 Agent 只读 status 可用，更新、worktree、commit、publish 均被禁用。公共配置实际 opencode agent 目录为 `{OPENCODE_PUBLIC_CONFIG_GIT_ROOT}/opencode/agents/`，读兼容 `{OPENCODE_PUBLIC_CONFIG_GIT_ROOT}/opencode/agent/`；worktree 模式目录在 `{OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT}/{worktreeName-yyyymmdd}` 下创建。
 
 启用用户进程模型后，已登录用户的 Run 和 opencode runtime 代理都会优先使用当前用户绑定的 `READY` 进程；用户未初始化或健康检测失败时返回平台 `OPENCODE_UNAVAILABLE`，由前端提示初始化。无用户主体的 static-token 兼容调用仍可使用配置 seed 写入的固定 `execution_nodes`，用于旧集成或本地探测。Session 级 runtime 代理发现绑定节点不是当前用户进程节点时，会在当前进程上创建新的远端 session 并覆盖绑定，不会删除旧远端 session。
 
@@ -87,6 +91,8 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 |---|---|---|---|
 | `/data/.testagent/agent-opencode/.session/{port}` | Linux 服务器本地盘并挂载到容器 | 用户进程 `XDG_DATA_HOME` | 不能跨 Linux 服务器共享；备份/清理必须按端口和用户绑定关系执行。 |
 | `/data/.testagent/agent-opencode/.config/opencode/` | Linux 服务器本地盘并挂载到容器 | 公共 agent、插件、skill 配置 | 多容器共享只读或受控写入；变更前先备份。 |
+| `/data/.testagent/agent-opencode/.config/` | Linux 服务器本地盘 | 公共 Agent 配置 Git 根目录 | 由 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` 控制；Git origin 必须与参数一致，更新前要求工作树 clean。 |
+| `/data/.testagent/agent-opencode/.configdev/` | Linux 服务器本地盘 | 公共 Agent 配置 Git worktree 根目录 | 由 `OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT` 控制；发布时先 merge 回公共配置当前分支再 push。 |
 | `/data/.testagent/agent-opencode/workspace/appworkspace/` | Linux 服务器本地盘 | 应用版本工作区根目录 | 默认由 `common_parameters.OPENCODE_APP_WORKSPACE_ROOT` 控制；目录片段为版本 + 代码库英文名。 |
 | `/data/.testagent/agent-opencode/workspace/personalworktree/` | Linux 服务器本地盘 | 个人 git worktree 根目录 | 默认由 `common_parameters.OPENCODE_PERSONAL_WORKTREE_ROOT` 控制；目录片段包含版本、统一认证号、代码库英文名和个人空间 ID。 |
 | `/data/.testagent/agent-opencode/manager/processes/{port}.json` | 容器挂载目录 | manager 本地进程状态 | 用于 stop/list/restart；容器重启后继续识别已有 state。 |
@@ -198,6 +204,8 @@ tools/verify-opencode-process-deployment.sh --backend-url http://127.0.0.1:8080
 ```
 
 `deploy/local/docker-compose.yml` 默认启动备用 Postgres，映射到 `127.0.0.1:15432`；Redis 是可选 profile，默认映射到 `127.0.0.1:16379`。脚本只读取环境变量，不生成或写入密钥。
+
+仓库根目录的 `restart-dev-services.sh` 是三服务一键重启入口：按「后端 → opencode-manager → 前端」的依赖顺序，**逐个先 kill 原进程再启动**。当 `TEST_AGENT_OPENCODE_BASE_URL` 是本地地址时，脚本默认启动 Go `opencode-manager`（`run` 长运行模式），不再单独启动 standalone `opencode serve`——用户进程由 manager 自行派生，避免 4096 端口冲突。manager 与后端共享的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 未设置时默认 `local-manager-token`（与 `application-guo.yml` 一致），本地无需手配 `.env.local`；设 `TEST_AGENT_START_OPENCODE_MANAGER=false` 可跳过 manager。
 
 ## dotenv 示例
 

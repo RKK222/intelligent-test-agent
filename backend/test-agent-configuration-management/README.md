@@ -33,6 +33,7 @@
 - `ConfigurationManagementApplicationService`：配置管理编排服务。
 - 代码库新增/编辑会校验 `englishName` 为 1 到 29 位英文字母、非空唯一，并统一小写；历史数据允许为空，但后续创建应用版本工作区会被 workspace-management 拒绝。
 - `SshKeyEncryptionService`：包装 common 模块的 SSH 私钥 AES-GCM 加解密和 SHA-256 指纹生成能力，保持配置管理业务入口稳定。
+- `CommonParameterManagementApplicationService`：通用参数管理编排服务，提供分页列表查询（可按平台过滤）与「仅修改 value」更新；不提供新增/删除，参数不存在抛 `NOT_FOUND`，空值抛 `VALIDATION_ERROR`。
 - `ConfigurationManagementResponses`：对 API 层安全暴露的响应模型，不包含私钥明文或密文。
 
 ## 配置项

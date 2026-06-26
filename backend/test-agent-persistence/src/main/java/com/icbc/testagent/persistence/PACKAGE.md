@@ -2,7 +2,7 @@
 
 ## 职责
 
-持久化包，负责数据库映射、Repository 实现、Flyway migration 协作、Redis 可选适配和查询优化。
+持久化包，负责数据库映射、Repository 实现、MyBatis XML mapper、Flyway migration 协作、Redis 可选适配和查询优化。
 
 ## 不负责
 
@@ -13,6 +13,9 @@
 ## 主要程序清单
 
 - `package-info.java`：说明 persistence 包是持久化适配边界。
+- `mybatis.MyBatisPersistenceConfig`：扫描 persistence 内部 MyBatis mapper。
+- `mybatis.CommonParameterMapper` / `mybatis/CommonParameterMapper.xml`：通用参数 MyBatis 试点 SQL。
+- `mybatis.MyBatisCommonParameterRepository`：通用参数领域端口的生产 Bean。
 - `JdbcWorkspaceRepository`：实现 Workspace 持久化端口。
 - `JdbcSessionRepository`：实现 Session 持久化端口，并保存平台 session 到远端 opencode session/node 的内部映射。
 - `JdbcSessionRepository.findPage`：全局 ACTIVE session 查询按置顶、更新时间和自增 ID 排序；空搜索不绑定可空 query pattern，兼容 PostgreSQL 参数类型推断。
@@ -23,7 +26,7 @@
 - `JdbcExecutionNodeRepository`：实现执行节点保存和可路由节点查询。
 - `JdbcRoutingDecisionRepository`：实现路由决策保存和查询。
 - `JdbcOpencodeProcessManagementRepository`：实现 opencode 用户进程管理拓扑、用户进程、用户绑定持久化，以及运行管理页拓扑列表、连接列表、进程分页筛选和绑定关联查询。
-- `JdbcCommonParameterRepository`：实现通用参数读取端口，用于 opencode session/config/app workspace/personal worktree 路径等平台参数。
+- `JdbcCommonParameterRepository`：通用参数存量 JDBC 实现，不再作为生产 Spring Bean，仅保留旧集成测试直接构造。
 - `JdbcWorkspaceCreateOperationRepository`：实现设置页创建应用工作空间进度记录，供配置管理 HTTP 轮询接口读取。
 - `JdbcScheduledTaskRepository`：实现定时任务定义、用户计划和运行记录持久化，支持 due task、pending run 和管理页分页筛选查询。
 - `db/migration/V1__create_core_tables.sql`：创建核心业务表和索引。
@@ -44,7 +47,8 @@
 
 - `test-agent-common`。
 - `test-agent-domain`。
-- Spring Data JDBC。
+- MyBatis Spring Boot starter。
+- Spring Data JDBC（仅存量 `Jdbc*Repository` 迁移窗口）。
 - Flyway。
 - PostgreSQL driver。
 - Druid Spring Boot starter。
@@ -79,6 +83,7 @@
 - OpencodeProcessManagement 测试必须覆盖拓扑读写、健康容器查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
 - ScheduledTask 测试必须覆盖任务定义、用户计划、运行记录、分页筛选和来源字段读写。
 - CommonParameter 和 WorkspaceCreateOperation 测试必须覆盖平台优先级、默认路径 seed、进度步骤更新、成功/失败状态和按用户隔离查询。
+- MyBatis 试点测试必须覆盖 XML mapper 查询和更新；源码约束测试必须阻止新增 JDBC SQL 和 MyBatis 注解 SQL。
 - Druid 连接池配置测试；当前验证 `spring.datasource.druid.*` 可绑定为 Druid DataSource，且 Web 控制台默认关闭。
 - Flyway migration 命名测试必须覆盖版本唯一性；V17 之后新增 migration 只能使用 `VyyyyMMddHHmmss__description.sql`。
 
@@ -88,3 +93,10 @@
 - `docs/standards/backend.md`。
 - `docs/deployment/database.md`，如果存在。
 - API 或事件文档中暴露的数据字段。
+
+## MyBatis 规范
+
+- 新增或修改关系型数据库 SQL 必须写在 `src/main/resources/mybatis/**/*.xml`。
+- Mapper 接口只声明方法和 `@Param`，禁止使用 `@Select`、`@Insert`、`@Update`、`@Delete` 等注解 SQL。
+- MyBatis mapper、行模型和 Repository 实现均为 persistence 内部细节，业务模块只能依赖 domain 端口。
+- 存量 `Jdbc*Repository` 仅保留迁移窗口；触及其 SQL 时必须迁移到 MyBatis XML。

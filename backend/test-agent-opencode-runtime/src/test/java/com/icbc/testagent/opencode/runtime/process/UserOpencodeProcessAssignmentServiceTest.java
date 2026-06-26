@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.domain.configuration.CommonParameter;
+import com.icbc.testagent.domain.configuration.CommonParameterRepository;
+import com.icbc.testagent.domain.configuration.ParameterPlatform;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
@@ -72,8 +75,8 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(response.baseUrl()).isEqualTo("http://10.8.0.13:4200");
         assertThat(gateway.startCommands).hasSize(1);
         assertThat(gateway.startCommands.getFirst().containerId()).isEqualTo(new OpencodeContainerId("ctr_idle"));
-        assertThat(gateway.startCommands.getFirst().sessionPath()).isEqualTo("/data/.testagent/agent-opencode/.session/4200");
-        assertThat(gateway.startCommands.getFirst().configPath()).isEqualTo("/data/.testagent/agent-opencode/.config/opencode/");
+        assertThat(gateway.startCommands.getFirst().sessionPath()).isEqualTo(SESSION_DIR + "4200");
+        assertThat(gateway.startCommands.getFirst().configPath()).isEqualTo(CONFIG_DIR);
         assertThat(repository.findUserBinding(USER_ID, "opencode")).get()
                 .extracting(UserOpencodeProcessBinding::linuxServerId)
                 .isEqualTo(new LinuxServerId("10.8.0.13"));
@@ -243,6 +246,7 @@ class UserOpencodeProcessAssignmentServiceTest {
     private static UserOpencodeProcessAssignmentService service(FakeRepository repository, RecordingGateway gateway) {
         return new UserOpencodeProcessAssignmentService(
                 repository,
+                commonParameters(),
                 repository,
                 gateway,
                 new BackendJavaProcessLifecycleService(
@@ -257,11 +261,29 @@ class UserOpencodeProcessAssignmentServiceTest {
                                 100)));
     }
 
+    private static final String SESSION_DIR = "/tmp/testagent/.session/";
+    private static final String CONFIG_DIR = "/tmp/testagent/.config/opencode/";
+
+    private static CommonParameterRepository commonParameters() {
+        Map<String, String> parameters = Map.of(
+                "OPENCODE_SESSION_DIR", SESSION_DIR,
+                "OPENCODE_PUBLIC_CONFIG_DIR", CONFIG_DIR);
+        return (englishName, platform) -> Optional.ofNullable(parameters.get(englishName))
+                .map(value -> new CommonParameter(
+                        "param_" + englishName.toLowerCase(),
+                        englishName,
+                        englishName,
+                        value,
+                        platform,
+                        NOW,
+                        NOW));
+    }
+
     private static UserOpencodeProcessAssignmentService serviceLocalDirect(
             FakeRepository repository, RecordingGateway gateway, String baseUrl) {
         return new UserOpencodeProcessAssignmentService(
                 repository,
-                (englishName, platform) -> Optional.empty(),
+                commonParameters(),
                 repository,
                 gateway,
                 new BackendJavaProcessLifecycleService(

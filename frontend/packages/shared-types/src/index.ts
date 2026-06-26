@@ -98,6 +98,90 @@ export type WorkspaceFileSocketTicketResponse = {
   webSocketUrl: string;
 };
 
+export type AgentConfigScope = "PUBLIC" | "WORKSPACE" | string;
+
+export type AgentConfigStatus = {
+  scope: AgentConfigScope;
+  enabled: boolean;
+  writable: boolean;
+  gitUrl?: string | null;
+  gitRootPath?: string | null;
+  agentDirectory: string;
+  currentBranch?: string | null;
+  commitHash?: string | null;
+};
+
+export type AgentConfigWorktree = {
+  worktreeId: string;
+  scope: AgentConfigScope;
+  workspaceId?: string | null;
+  worktreeName: string;
+  branch: string;
+  rootPath: string;
+  agentDirectory: string;
+  status: "ACTIVE" | "PUBLISHED" | "REMOVED" | string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgentConfigDiffFile = {
+  path: string;
+  status: string;
+  staged: boolean;
+  patch: string;
+};
+
+export type AgentConfigDiff = {
+  files: AgentConfigDiffFile[];
+};
+
+export type AgentConfigOperation = {
+  operationId: string;
+  scope: AgentConfigScope;
+  workspaceId?: string | null;
+  action: string;
+  status: "RUNNING" | "SUCCEEDED" | "FAILED" | string;
+  currentStep: string;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  branch?: string | null;
+  commitHash?: string | null;
+  traceId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AgentConfigProgressEvent = {
+  type: "snapshot" | "step" | "completed" | "failed" | string;
+  operationId?: string;
+  operation?: AgentConfigOperation | null;
+  status?: string;
+  currentStep?: string;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  commitHash?: string | null;
+  traceId?: string;
+  occurredAt?: string;
+};
+
+export type AgentConfigOperationTicketResponse = {
+  ticket: string;
+  expiresAt: string;
+  webSocketUrl: string;
+};
+
+export type AgentConfigWorktreePayload = {
+  baseName: string;
+  branch: string;
+  operationId?: string;
+};
+
+export type AgentConfigCommitPayload = {
+  message: string;
+  worktreeId?: string | null;
+  operationId?: string;
+};
+
 export type Session = {
   sessionId: string;
   workspaceId: string;
@@ -367,6 +451,26 @@ export type ScheduledTaskRunListParams = {
   requestedByUserId?: string;
   page?: number;
   size?: number;
+};
+
+export type GeneralParameter = {
+  parameterId: string;
+  englishName: string;
+  chineseName: string;
+  parameterValue: string;
+  platform: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GeneralParameterListParams = {
+  platform?: string;
+  page?: number;
+  size?: number;
+};
+
+export type GeneralParameterUpdatePayload = {
+  value: string;
 };
 
 export type RunEventType =

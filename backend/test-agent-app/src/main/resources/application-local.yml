@@ -33,8 +33,6 @@ test-agent:
     enabled: ${TEST_AGENT_RATE_LIMIT_ENABLED:false}
     capacity: ${TEST_AGENT_RATE_LIMIT_CAPACITY:120}
     window: ${TEST_AGENT_RATE_LIMIT_WINDOW:1m}
-  managed-workspace:
-    root: ${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}
   model-catalog:
     source: ${TEST_AGENT_MODEL_CATALOG_SOURCE:bailian}
     external:

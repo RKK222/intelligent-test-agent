@@ -3,6 +3,7 @@ import { computed, type Component } from "vue";
 import type { CurrentUser } from "@test-agent/shared-types";
 import SettingsAppWorkspacePanel from "./SettingsAppWorkspacePanel.vue";
 import SettingsPersonalPanel from "./SettingsPersonalPanel.vue";
+import SettingsUserManagementPanel from "./SettingsUserManagementPanel.vue";
 
 type PanelDef = { title: string; component: Component };
 
@@ -13,7 +14,8 @@ const props = defineProps<{
 
 const panels: Record<string, PanelDef> = {
   appWorkspace: { title: "应用与工作空间管理", component: SettingsAppWorkspacePanel },
-  personal: { title: "个人设置", component: SettingsPersonalPanel }
+  personal: { title: "个人设置", component: SettingsPersonalPanel },
+  userManagement: { title: "用户管理（测试）", component: SettingsUserManagementPanel }
 };
 
 const current = computed<PanelDef>(() => panels[props.activeKey] ?? panels.appWorkspace);
