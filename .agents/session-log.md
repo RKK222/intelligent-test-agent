@@ -697,7 +697,17 @@
 - Result: 脚本运行后按依赖顺序逐个重启三服务，本地默认启动 Go opencode-manager 并由其派生 opencode 子进程，不再单独启动 standalone `opencode serve`。
 - Verification: `bash -n`/`sh -n` 通过；`./tools/verify-dev-scripts.sh` 全绿（含两个隔离 env 用例与 sh 重进 bash 断言）。
 
-### 2026-06-26 - FigmaChatPanel 进程状态圆点：缩小实心 + 可拖动
+### 2026-06-26 - 将 SSH key 加密密钥独立到 .key 文件
+
+- Why: SSH key 加密密钥 `test-agent.security.ssh-key-encryption-key` 原先在 `application-guo.yml` 中硬编码，local 等 profile 未配置时抛"SSH key 加密密钥未配置"错误。
+- What:
+  - 新建 `backend/test-agent-app/src/main/resources/ssh-key.key` 文件（properties 格式），放置 AES-256 加密密钥。
+  - `TestAgentApplication.java` 添加 `@PropertySource("classpath:ssh-key.key")`，Spring 自动加载到 Environment。
+  - 删除 `application-guo.yml` 中冗余的 `ssh-key-encryption-key` 配置行。
+  - 三个 `@Value` 注入点（`SshKeyEncryptionService`、`AgentConfigApplicationService`、`ManagedWorkspaceApplicationService`）零改动。
+  - `*.key` 已在 `.gitignore` 中，密钥文件不提交仓库。
+- How: properties 格式 `.key` 文件，`@PropertySource` 自动解析；env var `TEST_AGENT_SSH_KEY_ENCRYPTION_KEY` 优先级高于 `.key` 文件，生产仍可用 env 覆盖。
+- Result: 编译通过，`SshKeyEncryptionServiceTest` 和 `SshKeyCryptoServiceTest` 全部通过；密钥统一由 `.key` 文件承载，后续其他密钥也按此模式加入。
 
 - Why: 收起态的小绿点原本实色范围过大，视觉上"实心"占比偏高且位置固定在右下角，用户希望实心范围更小、并支持拖动到任意位置。
 - What: `frontend/apps/agent-web/src/components/FigmaChatPanel.vue` 中 `.figma-chat-process-dot` 的 `radial-gradient` 第二段 stop 由 `55%` 提前到 `25%`（is-ready / is-blocking 同步），实心向边缘过渡更早，中间高亮区域显著缩小；`.figma-chat-process-dot` 由 `position: relative` + flex 容器定位改为 `position: fixed`，位置通过 CSS 变量 `--figma-process-dot-x/y` 经 `transform: translate3d` 承载（避免与 `:hover` 的 `scale(1.15)` 互相覆盖），`cursor: grab / grabbing`，新增 `is-dragging` 状态；模板绑定 `:style="processStatusDotStyle"`、`@pointerdown="onProcessStatusDotPointerDown"`、`@click="handleProcessStatusDotClick"`（点击和拖动通过 4px 阈值区分，拖动产生的 click 不会触发 toggle）；script 新增 `processStatusDotPos` 状态、`loadProcessDotPos`/`saveProcessDotPos` 持久化到 `localStorage('figma-chat-process-dot-pos')`、`clampProcessDotPos` 边界裁剪、`onProcessStatusDotResize` 窗口变化时夹紧；`onMounted` 读位置、注册 resize 监听，`onBeforeUnmount` 解绑 pointer/resize 监听。
