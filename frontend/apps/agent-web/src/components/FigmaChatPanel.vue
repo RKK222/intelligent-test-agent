@@ -2224,7 +2224,7 @@ function onCompositionEnd() {
 .figma-chat-composer {
   flex-shrink: 0;
   padding: 8px 10px 10px;
-  background: #f5f5f5;
+  background: transparent;
 }
 
 /* 统一输入卡片：圆角边框容器，textarea + 底部工具行整合在一起 */

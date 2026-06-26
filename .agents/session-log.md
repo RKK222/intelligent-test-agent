@@ -36,6 +36,17 @@
 - Result: 标题行更紧凑、右侧文案贴到修改区最右侧；Monaco diff overview ruler 视觉宽度从 30px 压到 6px，与普通细滚动条对齐。`packages/diff-viewer/tests` 4/4 通过。
 - Verification: `corepack pnpm exec vitest run packages/diff-viewer/tests`；`git diff --check`；浏览器需硬刷新（Cmd+Shift+R）以避免 HMR / 缓存沿用旧 CSS。
 
+### 2026-06-26 - DiffViewer 第三轮：composer 底色、右侧 padding、diffOverview left 修正
+
+- Why: 用户用 DevTools 框选三个 div 反馈：(1) `figma-chat-composer` 底色 #f5f5f5 与 `.figma-chat-scroll`/`.figma-chat-root`（#fff）不一致，对话区又是"一会灰一会白"；(2) 标题行右列还有 `pr-0.5`，没贴到最右；(3) `.diffOverview` 已被压成 6px 但仍靠 Monaco 算的 `left = width - 30` 偏移，右侧留出 ~24px 空隙。
+- What:
+  - `FigmaChatPanel.vue`：`.figma-chat-composer` 的 `background` 从 `#f5f5f5` 改为 `transparent`，让 root (#fff) 透出来，整条对话（消息 / 输入框 / 工具行）统一单一底色。
+  - `DiffViewer.vue` 标题行右列：删除 `pr-0.5`，让 `▶ 本地修改 · 可编辑（Cmd+S 保存）` 真正贴到右边缘；统一视图同步去掉 `pr-0.5`。
+  - `DiffViewer.vue` scoped 样式：`.diffOverview` 增加 `left: auto !important; right: 2px !important;` 把它从 Monaco 的 `left` 锚定切到 `right` 锚定，宽度变 6px 后视觉上也贴到容器右边。
+- How: 全部为 CSS / Tailwind class 微调，不动业务逻辑。`left: auto` + `right` 是 CSS 定位的标准做法，能在 inline `left` 被 Monaco 重写时仍由 `right` 决定最终位置。
+- Result: 对话区所有层（root / scroll / composer）都显示同一个白色；标题行右侧文案贴边；diff overview ruler 真正贴右且细线化。`packages/diff-viewer/tests` 4/4 通过。
+- Verification: `corepack pnpm exec vitest run packages/diff-viewer/tests`；`git diff --check`；浏览器需硬刷新（Cmd+Shift+R）以让 HMR 后的 scoped style 重新挂载。
+
 ### 2026-06-26 - UI 三项改版：Diff light 主题、三栏底部 Footer 对齐、聊天输入卡片化
 
 - Why: 用户要求 (1) Monaco Diff 编辑器切为 light 风格与工作台白色主题匹配；(2) 不管切换到哪个功能，底部那一行应该都存在且高度一致；(3) 聊天面板输入框加宽，把模型选择、新建对话、附件上传挪到输入框内部下方，整体像现代 ChatGPT 风格。

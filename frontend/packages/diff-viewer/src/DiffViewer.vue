@@ -348,12 +348,12 @@ onBeforeUnmount(() => {
           <div class="flex items-center gap-1 font-semibold text-slate-700">
             <span class="text-rose-500 font-bold">◀</span> 基线版本（只读，历史提交代码）
           </div>
-          <div class="flex items-center justify-end gap-1 border-l border-slate-200 pl-2 font-semibold text-slate-700 pr-0.5">
+          <div class="flex items-center justify-end gap-1 border-l border-slate-200 pl-2 font-semibold text-slate-700">
             <span class="text-emerald-500 font-bold">▶</span> 本地修改 · 可编辑（Cmd+S 保存）
           </div>
         </div>
         <div v-else-if="(source === 'vcs' || source === 'agent') && viewMode === 'unified'" class="border-b border-slate-200 bg-[#f8fafc] px-3 py-0.5 text-[10.5px] text-slate-700 font-semibold">
-          <div class="flex items-center justify-end gap-1 pr-0.5">
+          <div class="flex items-center justify-end gap-1">
             <span class="text-emerald-500 font-bold">▶</span> 统一视图 · 可直接编辑（Cmd+S 保存）
           </div>
         </div>
@@ -390,9 +390,12 @@ onBeforeUnmount(() => {
 
 /* Monaco diff overview 视口（diffViewport）原本默认 30×20px，太粗。
    Monaco 内部用 inline style 强制设 30px (ENTIRE_DIFF_OVERVIEW_WIDTH = ONE_OVERVIEW_WIDTH * 2 = 15 * 2)，
-   必须用 !important 才能压过。父容器 .diffOverview 也是 30px，需要一起压。 */
+   必须用 !important 才能压过。父容器 .diffOverview 也是 30px，需要一起压。
+   同时 Monaco 按原 30px 算 left = width - 30，会导致 .diffOverview 右边留出 24px 空隙；
+   把 left 强制 auto、改用 right 锚定到容器右边。 */
 :deep(.monaco-diff-editor .diffOverview) {
   width: 6px !important;
+  left: auto !important;
   right: 2px !important;
 }
 :deep(.monaco-diff-editor .diffViewport) {
