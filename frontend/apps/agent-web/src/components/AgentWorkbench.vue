@@ -127,6 +127,7 @@ const chatTitle = ref("生成测试案例");
 const chatStartedAt = ref<number | null>(null);
 const accumulatedTokens = ref(0);
 const accumulatedReasoningMs = ref(0);
+const totalDurationMs = ref(0);
 let lastDuration: string | undefined;
 let lastTokens = 0;
 let lastThoughtForMs = 0;
@@ -752,10 +753,10 @@ function parseDurationStringToMs(input: string): number {
 
 // 任务消耗：duration 优先用 chatStartedAt 实时计算（每秒刷新），结束后回退 lastDuration。
 // tokens/thoughtFor 优先用累计值，fallback 到 run 终态事件 payload 中的字段以保持向后兼容。
-const taskUsage = computed<{ duration?: string; tokens?: number; thoughtFor?: string }>(() => {
+const taskUsage = computed<{ duration?: string; tokens?: number; thoughtFor?: string; totalDuration?: string }>(() => {
   // 引用 nowTick 以触发每秒重算
   void nowTick.value;
-  const usage: { duration?: string; tokens?: number; thoughtFor?: string } = {};
+  const usage: { duration?: string; tokens?: number; thoughtFor?: string; totalDuration?: string } = {};
   if (chatStartedAt.value) {
     usage.duration = formatDurationMs(Date.now() - chatStartedAt.value);
   } else if (lastDuration) {
@@ -768,6 +769,13 @@ const taskUsage = computed<{ duration?: string; tokens?: number; thoughtFor?: st
   const reasoningMs = accumulatedReasoningMs.value > 0 ? accumulatedReasoningMs.value : lastThoughtForMs;
   if (reasoningMs > 0) {
     usage.thoughtFor = formatDurationMs(reasoningMs);
+  }
+  // 累计时间 = 已完成各轮耗时 + 当前轮实时耗时
+  const finishedMs = totalDurationMs.value;
+  const currentMs = chatStartedAt.value ? Date.now() - chatStartedAt.value : 0;
+  const total = finishedMs + currentMs;
+  if (total > 0) {
+    usage.totalDuration = formatDurationMs(total);
   }
   return usage;
 });
@@ -990,6 +998,7 @@ function resetWorkspaceState() {
   chatStartedAt.value = null;
   accumulatedTokens.value = 0;
   accumulatedReasoningMs.value = 0;
+  totalDurationMs.value = 0;
   lastDuration = undefined;
   lastTokens = 0;
   lastThoughtForMs = 0;
@@ -1439,6 +1448,7 @@ function handleStopRun() {
   }
   cancelRunMutation.mutate();
   if (chatStartedAt.value) {
+    totalDurationMs.value += Date.now() - chatStartedAt.value;
     lastDuration = formatDurationMs(Date.now() - chatStartedAt.value);
     chatStartedAt.value = null;
     // 触发 taskUsage 重新计算（duration 从 live 切到 last）
@@ -1489,6 +1499,7 @@ function handleRunEvent(event: RunEvent) {
     // 计算任务消耗统计：duration 由 chatStartedAt 锁定，tokens/thoughtFor 仍优先取累计值；
     // 如果后端 payload 直接带上 tokens 或 thoughtFor 字段，则覆盖一次（向后兼容未来后端实现）。
     if (chatStartedAt.value) {
+      totalDurationMs.value += Date.now() - chatStartedAt.value;
       lastDuration = formatDurationMs(Date.now() - chatStartedAt.value);
       chatStartedAt.value = null;
     }

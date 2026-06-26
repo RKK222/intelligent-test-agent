@@ -178,7 +178,7 @@ onBeforeUnmount(() => {
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
   margin: 0.4em 0;
-  padding-left: 1.4em;
+  padding-left: 0;
 }
 
 .markdown-body :deep(li) {
