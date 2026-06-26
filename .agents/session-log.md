@@ -829,3 +829,10 @@
 - What: 保留 `V17__seed_local_opencode_machine_for_default_user.sql` 作为 Flyway 历史文件，新增 `V20260627000000__cleanup_loopback_linux_server_seed.sql` 清理 `linux_servers`、backend/opencode 进程拓扑、用户绑定和 manager-backend 连接中 `linux_server_id='127.0.0.1'` 的历史数据；同步持久化 README、PACKAGE 和数据库部署文档。
 - How: 集成测试从完整迁移链断言 V17 loopback 种子最终不存在，并从 `target("17")` 的历史状态补一条本地 backend connection 后跑全量迁移，验证清理脚本按外键顺序删干净。
 - Result: V17 文件不直接改动，避免已应用历史库 Flyway validate 失败；`JdbcRepositoryIntegrationTest` 全部通过。`FlywayMigrationNamingTest` 仍被既有 `V18__create_scheduler_framework_tables.sql` 阻断，需后续单独处理该历史命名问题。
+
+### 2026-06-26 - 修复 Flyway V10/V13 历史迁移校验失败
+
+- Why: 启动时报 `Migration checksum mismatch for migration version 10` 和 `applied migration not resolved locally: 13`，根因是 `V10__seed_fcoss_application.sql` / `V13__seed_fcoss_more_workspaces.sql` 被从工作区移除，同时 SSH key 的 `encrypted_aes_key` schema 变更错误复用了已落库的 V10 版本。
+- What: 恢复 V10/V13 历史 seed migration 的解析；删除 `V10__add_encrypted_aes_key_to_user_ssh_keys.sql`，改为 `V20260627010000__add_encrypted_aes_key_to_user_ssh_keys.sql`；`FlywayMigrationNamingTest` 增加历史 seed 文件必须存在、V10 不得复用的断言，并把已发布的 V18 作为历史例外保留。
+- How: 先运行新增测试确认当前坏状态会失败；再恢复历史迁移、移动 SSH key 列变更到时间戳 migration，并用 `mvn -pl test-agent-persistence clean test -Dtest=JdbcRepositoryIntegrationTest,FlywayMigrationNamingTest -Dsurefire.failIfNoSpecifiedTests=false` 验证完整迁移链。
+- Result: 持久化模块 26 个目标测试通过；后续已落库 migration 禁止删除、重命名、改写或复用版本号，schema 变更必须走新的时间戳 migration。

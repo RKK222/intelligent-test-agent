@@ -16,18 +16,13 @@ class FlywayMigrationNamingTest {
 
     private static final Pattern MIGRATION_FILE = Pattern.compile("^V([^_]+)__(.+)\\.sql$");
     private static final Pattern TIMESTAMP_VERSION = Pattern.compile("^\\d{14}$");
+    private static final List<String> APPLIED_LEGACY_SEED_MIGRATIONS = List.of(
+            "V10__seed_fcoss_application.sql",
+            "V13__seed_fcoss_more_workspaces.sql");
 
     @Test
     void migrationVersionsAreUniqueAndTimestampedAfterLegacySequence() throws IOException {
-        Path migrationDir = locateMigrationDir();
-        List<String> fileNames;
-        try (var stream = Files.list(migrationDir)) {
-            fileNames = stream
-                    .map(path -> path.getFileName().toString())
-                    .filter(name -> name.startsWith("V") && name.endsWith(".sql"))
-                    .sorted()
-                    .toList();
-        }
+        List<String> fileNames = migrationFileNames();
 
         Map<String, List<String>> byVersion = fileNames.stream()
                 .collect(Collectors.groupingBy(FlywayMigrationNamingTest::versionOf));
@@ -43,8 +38,31 @@ class FlywayMigrationNamingTest {
                 .filter(name -> !TIMESTAMP_VERSION.matcher(versionOf(name)).matches())
                 .toList();
         assertThat(invalidNewVersions)
-                .as("Migrations after legacy V17 must use VyyyyMMddHHmmss__description.sql")
+                .as("Migrations after legacy V18 must use VyyyyMMddHHmmss__description.sql")
                 .isEmpty();
+    }
+
+    @Test
+    void appliedLegacySeedMigrationsRemainResolved() throws IOException {
+        List<String> fileNames = migrationFileNames();
+
+        assertThat(fileNames)
+                .as("Applied legacy seed migrations must remain in source to keep Flyway validate compatible")
+                .containsAll(APPLIED_LEGACY_SEED_MIGRATIONS);
+        assertThat(fileNames)
+                .as("V10 is already occupied by F-COSS seed; SSH key schema changes must use a timestamp version")
+                .doesNotContain("V10__add_encrypted_aes_key_to_user_ssh_keys.sql");
+    }
+
+    private static List<String> migrationFileNames() throws IOException {
+        Path migrationDir = locateMigrationDir();
+        try (var stream = Files.list(migrationDir)) {
+            return stream
+                    .map(path -> path.getFileName().toString())
+                    .filter(name -> name.startsWith("V") && name.endsWith(".sql"))
+                    .sorted()
+                    .toList();
+        }
     }
 
     /**
@@ -74,6 +92,7 @@ class FlywayMigrationNamingTest {
         if (version.length() > 2 || !version.chars().allMatch(Character::isDigit)) {
             return false;
         }
-        return Integer.parseInt(version) <= 17;
+        // V18 已在历史分支中发布过，不能删除或改名；后续新增仍必须使用时间戳版本。
+        return Integer.parseInt(version) <= 18;
     }
 }

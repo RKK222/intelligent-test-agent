@@ -261,9 +261,9 @@
 - `application_workspaces.branch` 继续保留作为模板创建和目录选择兼容字段；版本实际分支以 `application_workspace_versions.branch` 为准。
 - 应用版本和个人工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定，`common_parameters` 为唯一事实源，缺失时直接抛业务异常（不再回退 yaml 或代码默认值）。数据库只记录最终路径，不负责创建或清理目录。
 
-## V10 user_ssh_keys 新增 encrypted_aes_key 列
+## V20260627010000 user_ssh_keys 新增 encrypted_aes_key 列
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V10__add_encrypted_aes_key_to_user_ssh_keys.sql` 为 `user_ssh_keys` 表新增 `encrypted_aes_key text` 列，承载混合加密方案中 RSA-OAEP 加密后的临时 AES 密钥。
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260627010000__add_encrypted_aes_key_to_user_ssh_keys.sql` 为 `user_ssh_keys` 表新增 `encrypted_aes_key text` 列，承载混合加密方案中 RSA-OAEP 加密后的临时 AES 密钥。该 migration 必须使用时间戳版本，不能复用已落库的 `V10__seed_fcoss_application.sql`，否则会触发 Flyway checksum mismatch。
 
 兼容策略：
 
@@ -655,7 +655,7 @@ V10 种子数据对 F-COSS 的影响：
 
 ## 后续 migration 版本规则
 
-V17 及以前保留既有数字版本，已在本地或共享库执行过的 migration 禁止重命名。V17 之后新增 migration 必须使用 `VyyyyMMddHHmmss__description.sql`，时间戳按开发者创建迁移时的本地时间确定；多人并行开发时不得再抢占 `V18`、`V19` 这类顺序数字版本。提交前需运行持久化模块 migration 命名测试，确认版本唯一且时间戳规则生效。
+V18 及以前保留既有数字版本，已在本地或共享库执行过的 migration 禁止删除、重命名或改写。V18 之后新增 migration 必须使用 `VyyyyMMddHHmmss__description.sql`，时间戳按开发者创建迁移时的本地时间确定；多人并行开发时不得再抢占 `V19`、`V20` 这类顺序数字版本。提交前需运行持久化模块 migration 命名测试，确认版本唯一、历史已落库 migration 仍可解析且时间戳规则生效。
 
 ## V20260626210000 数据库表和字段中文注释
 
