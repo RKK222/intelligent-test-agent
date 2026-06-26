@@ -696,3 +696,11 @@
 - How: token 默认值让 local/test/guo 三个 profile 的后端 `manager-control.token` 与 manager 自动匹配（guo 硬编码 local-manager-token，local/test 从同一环境变量读取）；per-service 停止复用现有 `stop_pids`/`stop_screen_session`；构建仍前置，失败不动现有服务。
 - Result: 脚本运行后按依赖顺序逐个重启三服务，本地默认启动 Go opencode-manager 并由其派生 opencode 子进程，不再单独启动 standalone `opencode serve`。
 - Verification: `bash -n`/`sh -n` 通过；`./tools/verify-dev-scripts.sh` 全绿（含两个隔离 env 用例与 sh 重进 bash 断言）。
+
+### 2026-06-26 - FigmaChatPanel 进程状态圆点：缩小实心 + 可拖动
+
+- Why: 收起态的小绿点原本实色范围过大，视觉上"实心"占比偏高且位置固定在右下角，用户希望实心范围更小、并支持拖动到任意位置。
+- What: `frontend/apps/agent-web/src/components/FigmaChatPanel.vue` 中 `.figma-chat-process-dot` 的 `radial-gradient` 第二段 stop 由 `55%` 提前到 `25%`（is-ready / is-blocking 同步），实心向边缘过渡更早，中间高亮区域显著缩小；`.figma-chat-process-dot` 由 `position: relative` + flex 容器定位改为 `position: fixed`，位置通过 CSS 变量 `--figma-process-dot-x/y` 经 `transform: translate3d` 承载（避免与 `:hover` 的 `scale(1.15)` 互相覆盖），`cursor: grab / grabbing`，新增 `is-dragging` 状态；模板绑定 `:style="processStatusDotStyle"`、`@pointerdown="onProcessStatusDotPointerDown"`、`@click="handleProcessStatusDotClick"`（点击和拖动通过 4px 阈值区分，拖动产生的 click 不会触发 toggle）；script 新增 `processStatusDotPos` 状态、`loadProcessDotPos`/`saveProcessDotPos` 持久化到 `localStorage('figma-chat-process-dot-pos')`、`clampProcessDotPos` 边界裁剪、`onProcessStatusDotResize` 窗口变化时夹紧；`onMounted` 读位置、注册 resize 监听，`onBeforeUnmount` 解绑 pointer/resize 监听。
+- How: 仅在 `FigmaChatPanel.vue` 内单文件改动，不动 store/props/emit；展开态面板 `figma-chat-process-status` 不受拖动逻辑影响，行为保持原样。
+- Result: 收起态圆点实心范围明显收窄（虚化晕圈占比更大），鼠标可拖动到视口任意位置，刷新后位置保留；普通点击仍展开为状态卡片，拖动距离 > 4px 不会误触发 toggle。
+- Verification: `corepack pnpm --filter @test-agent/agent-web typecheck` 未引入新错误（既有 pre-existing `ChatMessage`/`runtime-reducer` 报错与本次无关）；浏览器实测点开 → 展开为「opencode 进程可用 http://192.168.100.115:4096」流程正常。

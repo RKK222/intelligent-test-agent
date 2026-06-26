@@ -621,6 +621,169 @@ function toggleProcessStatus() {
   processStatusCollapsed.value = !processStatusCollapsed.value
 }
 
+// 收起态小圆点：可拖动改变位置，位置持久化到 localStorage。
+// 区分拖动和点击：只有未发生明显位移的 pointerup 才视为点击展开。
+const PROCESS_DOT_POS_KEY = 'figma-chat-process-dot-pos'
+const PROCESS_DOT_SIZE = 12
+const PROCESS_DOT_MARGIN = 16
+const PROCESS_DOT_DRAG_THRESHOLD = 4
+const processStatusDotPos = ref<{ x: number; y: number } | null>(null)
+const isDraggingProcessDot = ref(false)
+const didDragProcessDot = ref(false)
+let dragPointerId: number | null = null
+let dragStartX = 0
+let dragStartY = 0
+let dragOriginX = 0
+let dragOriginY = 0
+
+function clampProcessDotPos(x: number, y: number) {
+  if (typeof window === 'undefined') return { x, y }
+  const maxX = Math.max(
+    PROCESS_DOT_MARGIN,
+    window.innerWidth - PROCESS_DOT_SIZE - PROCESS_DOT_MARGIN
+  )
+  const maxY = Math.max(
+    PROCESS_DOT_MARGIN,
+    window.innerHeight - PROCESS_DOT_SIZE - PROCESS_DOT_MARGIN
+  )
+  return {
+    x: Math.min(Math.max(x, PROCESS_DOT_MARGIN), maxX),
+    y: Math.min(Math.max(y, PROCESS_DOT_MARGIN), maxY),
+  }
+}
+
+function defaultProcessDotPos() {
+  if (typeof window === 'undefined') {
+    return { x: PROCESS_DOT_MARGIN, y: PROCESS_DOT_MARGIN }
+  }
+  return clampProcessDotPos(
+    window.innerWidth - PROCESS_DOT_SIZE - PROCESS_DOT_MARGIN,
+    window.innerHeight - PROCESS_DOT_SIZE - PROCESS_DOT_MARGIN
+  )
+}
+
+function loadProcessDotPos() {
+  if (typeof window === 'undefined') return
+  try {
+    const raw = window.localStorage.getItem(PROCESS_DOT_POS_KEY)
+    if (!raw) {
+      processStatusDotPos.value = defaultProcessDotPos()
+      return
+    }
+    const parsed = JSON.parse(raw) as { x?: number; y?: number }
+    if (
+      typeof parsed?.x === 'number' &&
+      typeof parsed?.y === 'number' &&
+      Number.isFinite(parsed.x) &&
+      Number.isFinite(parsed.y)
+    ) {
+      processStatusDotPos.value = clampProcessDotPos(parsed.x, parsed.y)
+    } else {
+      processStatusDotPos.value = defaultProcessDotPos()
+    }
+  } catch {
+    processStatusDotPos.value = defaultProcessDotPos()
+  }
+}
+
+function saveProcessDotPos() {
+  if (typeof window === 'undefined' || !processStatusDotPos.value) return
+  try {
+    window.localStorage.setItem(
+      PROCESS_DOT_POS_KEY,
+      JSON.stringify(processStatusDotPos.value)
+    )
+  } catch {
+    // 忽略 localStorage 写入失败（如隐私模式）
+  }
+}
+
+const processStatusDotStyle = computed(() => {
+  const pos = processStatusDotPos.value ?? defaultProcessDotPos()
+  return {
+    '--figma-process-dot-x': `${pos.x}px`,
+    '--figma-process-dot-y': `${pos.y}px`,
+  } as Record<string, string>
+})
+
+function onProcessDotPointerMove(event: PointerEvent) {
+  if (!isDraggingProcessDot.value) return
+  if (dragPointerId !== event.pointerId) return
+  const dx = event.clientX - dragStartX
+  const dy = event.clientY - dragStartY
+  if (
+    !didDragProcessDot.value &&
+    Math.hypot(dx, dy) >= PROCESS_DOT_DRAG_THRESHOLD
+  ) {
+    didDragProcessDot.value = true
+  }
+  if (didDragProcessDot.value) {
+    processStatusDotPos.value = clampProcessDotPos(
+      dragOriginX + dx,
+      dragOriginY + dy
+    )
+  }
+}
+
+function onProcessDotPointerEnd(event: PointerEvent) {
+  if (dragPointerId !== event.pointerId) return
+  if (isDraggingProcessDot.value) {
+    isDraggingProcessDot.value = false
+    if (didDragProcessDot.value) {
+      saveProcessDotPos()
+    }
+  }
+  dragPointerId = null
+  window.removeEventListener('pointermove', onProcessDotPointerMove)
+  window.removeEventListener('pointerup', onProcessDotPointerEnd)
+  window.removeEventListener('pointercancel', onProcessDotPointerEnd)
+}
+
+function onProcessStatusDotPointerDown(event: PointerEvent) {
+  if (event.button !== 0 && event.pointerType === 'mouse') return
+  const target = event.currentTarget as HTMLButtonElement | null
+  target?.setPointerCapture?.(event.pointerId)
+  dragPointerId = event.pointerId
+  const origin = processStatusDotPos.value ?? defaultProcessDotPos()
+  dragStartX = event.clientX
+  dragStartY = event.clientY
+  dragOriginX = origin.x
+  dragOriginY = origin.y
+  didDragProcessDot.value = false
+  isDraggingProcessDot.value = true
+  window.addEventListener('pointermove', onProcessDotPointerMove)
+  window.addEventListener('pointerup', onProcessDotPointerEnd)
+  window.addEventListener('pointercancel', onProcessDotPointerEnd)
+}
+
+function handleProcessStatusDotClick() {
+  // 拖动产生的 pointerup 会触发 click，这里通过阈值标记过滤掉真实拖动
+  if (didDragProcessDot.value) {
+    didDragProcessDot.value = false
+    return
+  }
+  toggleProcessStatus()
+}
+
+onMounted(() => {
+  loadProcessDotPos()
+  window.addEventListener('resize', onProcessStatusDotResize)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onProcessStatusDotResize)
+  window.removeEventListener('pointermove', onProcessDotPointerMove)
+  window.removeEventListener('pointerup', onProcessDotPointerEnd)
+  window.removeEventListener('pointercancel', onProcessDotPointerEnd)
+})
+
+function onProcessStatusDotResize() {
+  if (!processStatusDotPos.value) return
+  processStatusDotPos.value = clampProcessDotPos(
+    processStatusDotPos.value.x,
+    processStatusDotPos.value.y
+  )
+}
+
 // 抽屉可见文件列表（按 props 顺序）；选中态基于 drawerSelectedPath。
 const drawerFiles = computed(() => props.fileChanges ?? [])
 
@@ -1265,17 +1428,20 @@ function onCompositionEnd() {
       </span>
     </div>
 
-    <!-- 收起态：右下角一个小圆点，带渐变虚化；点击展开 -->
+    <!-- 收起态：右下角一个小圆点，带渐变虚化；点击展开，支持拖动改位置 -->
     <button
       v-if="processStatusVisible && processStatusCollapsed"
       type="button"
       :class="[
         'figma-chat-process-dot',
         processReady ? 'is-ready' : 'is-blocking',
+        isDraggingProcessDot && 'is-dragging',
       ]"
+      :style="processStatusDotStyle"
       :title="processStatusTitle"
       :aria-label="`展开进程状态：${processStatusTitle}`"
-      @click="toggleProcessStatus"
+      @click="handleProcessStatusDotClick"
+      @pointerdown="onProcessStatusDotPointerDown"
     />
 
     <!-- 展开态：原状态卡片；点击收起回圆点 -->
@@ -2200,7 +2366,7 @@ function onCompositionEnd() {
   transform: scale(0.99);
 }
 
-/* 收起态：右下角一颗带虚化渐变的小圆点；点击展开 */
+/* 收起态：右下角一颗带虚化渐变的小圆点；点击展开，支持拖动改位置 */
 .figma-chat-process-dot {
   flex-shrink: 0;
   align-self: flex-end;
@@ -2208,12 +2374,35 @@ function onCompositionEnd() {
   height: 12px;
   border-radius: 9999px;
   border: none;
-  margin: 0 16px 8px;
+  margin: 0;
   padding: 0;
-  cursor: pointer;
-  position: relative;
+  cursor: grab;
+  position: fixed;
+  left: 0;
+  top: 0;
+  /* 通过 CSS 变量承载位置，避免 :hover 的 transform: scale 覆盖 translate */
+  transform: translate3d(
+    var(--figma-process-dot-x, 0px),
+    var(--figma-process-dot-y, 0px),
+    0
+  );
   outline: none;
+  touch-action: none;
+  z-index: 50;
   transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.figma-chat-process-dot:hover {
+  transform: translate3d(
+      var(--figma-process-dot-x, 0px),
+      var(--figma-process-dot-y, 0px),
+      0
+    )
+    scale(1.15);
+}
+.figma-chat-process-dot:active,
+.figma-chat-process-dot.is-dragging {
+  cursor: grabbing;
+  transition: none;
 }
 .figma-chat-process-dot::after {
   content: "";
@@ -2226,14 +2415,11 @@ function onCompositionEnd() {
   z-index: -1;
   pointer-events: none;
 }
-.figma-chat-process-dot:hover {
-  transform: scale(1.15);
-}
 .figma-chat-process-dot.is-ready {
   background: radial-gradient(
     circle at 35% 35%,
     #34d399 0%,
-    rgba(24, 169, 120, 0.85) 55%,
+    rgba(24, 169, 120, 0.85) 25%,
     rgba(24, 169, 120, 0.25) 100%
   );
   box-shadow: 0 0 6px rgba(24, 169, 120, 0.45);
@@ -2242,7 +2428,7 @@ function onCompositionEnd() {
   background: radial-gradient(
     circle at 35% 35%,
     #fb7185 0%,
-    rgba(235, 94, 83, 0.85) 55%,
+    rgba(235, 94, 83, 0.85) 25%,
     rgba(235, 94, 83, 0.25) 100%
   );
   box-shadow: 0 0 6px rgba(235, 94, 83, 0.45);
