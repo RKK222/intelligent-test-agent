@@ -19,7 +19,7 @@ import {
   User,
   X,
 } from 'lucide-vue-next'
-import type { AgentMessage } from '@test-agent/shared-types'
+import type { AgentMessage, MessagePart } from '@test-agent/shared-types'
 import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
@@ -32,7 +32,7 @@ type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
   meta?: string
-  parts?: unknown[]
+  parts: MessagePart[]
   _error?: boolean
 }
 
@@ -60,6 +60,8 @@ function hasToolParts(msg: AgentMessage): boolean {
   if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return false
   return msg.parts.some((p) => p.type === 'tool')
 }
+
+type FileOperationMessage = Pick<ChatMessage, 'role' | 'parts'>
 
 export type FileChangeStat = {
   path: string
@@ -465,7 +467,7 @@ function highlightCode(code: string, filePath: string): string {
   return escaped
 }
 // 从单条消息提取文件操作明细
-function messageFileOps(msg: ChatMessageInput): FileOperation[] {
+function messageFileOps(msg: FileOperationMessage): FileOperation[] {
   if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return []
   const ops: FileOperation[] = []
   for (const p of msg.parts) {
@@ -494,7 +496,7 @@ function messageFileOps(msg: ChatMessageInput): FileOperation[] {
   }
   return ops
 }
-function messageReadCount(msg: ChatMessageInput): number {
+function messageReadCount(msg: FileOperationMessage): number {
   if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return 0
   let count = 0
   for (const p of msg.parts) {
@@ -506,7 +508,7 @@ function messageReadCount(msg: ChatMessageInput): number {
   }
   return count
 }
-function messageWriteCount(msg: ChatMessageInput): number {
+function messageWriteCount(msg: FileOperationMessage): number {
   if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return 0
   let count = 0
   for (const p of msg.parts) {
@@ -518,7 +520,7 @@ function messageWriteCount(msg: ChatMessageInput): number {
   }
   return count
 }
-function messageEditCount(msg: ChatMessageInput): number {
+function messageEditCount(msg: FileOperationMessage): number {
   if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return 0
   let count = 0
   for (const p of msg.parts) {
@@ -727,7 +729,7 @@ const displayMessages = computed<ChatMessage[]>(() => {
           const err = card.payload?.error as { name?: string; message?: string } | undefined
           const detail = err?.message || err?.name || ''
           return {
-            id: m.messageId ?? m.id ?? `card-${index}`,
+            id: m.id ?? `card-${index}`,
             role: 'assistant' as const,
             content: detail,
             meta: m.createdAt ? formatTime(m.createdAt) : undefined,
@@ -754,7 +756,7 @@ const displayMessages = computed<ChatMessage[]>(() => {
         role: m.role,
         content: text,
         meta: m.createdAt ? formatTime(m.createdAt) : undefined,
-        parts: [...((m as AgentMessage).parts || [])],
+        parts: m.role === 'assistant' ? [...(m.parts ?? [])] : [],
       }
     })
     .filter((m): m is ChatMessage => m !== null)

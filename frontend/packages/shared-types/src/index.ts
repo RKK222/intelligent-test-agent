@@ -889,6 +889,27 @@ export type PlatformUserSummary = {
 
 export type ApplicationMember = PlatformUserSummary;
 
+export type UserManagementUser = PlatformUserSummary & {
+  status: string;
+  roles: string[];
+  roleLabels?: string[];
+  createdAt: string;
+};
+
+export type CreateUserPayload = {
+  unifiedAuthId: string;
+  username: string;
+  role: string;
+  organization?: string | null;
+  rdDepartment?: string | null;
+  department?: string | null;
+};
+
+export type RoleOption = {
+  roleCode: string;
+  roleLabel: string;
+};
+
 export type CodeRepositoryConfig = {
   repositoryId: string;
   gitUrl: string;

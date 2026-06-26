@@ -289,14 +289,15 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
   const role = text(raw.role) === "user" ? "user" : "assistant";
   const index = messages.findIndex((item) => item.id === messageId || (item.role !== "card" && item.messageId === messageId));
   const existing = index >= 0 ? messages[index] : undefined;
-  const message = {
+  const base = {
     id: messageId,
-    role,
     messageId,
     text: text(raw.text) ?? text(raw.content) ?? "",
     createdAt: text(raw.createdAt) ?? event.occurredAt,
-    parts: existing && existing.role === "assistant" ? existing.parts : undefined,
-  } satisfies Extract<AgentMessage, { role: "assistant" | "user" }>;
+  };
+  const message: AgentMessage = role === "user"
+    ? { ...base, role: "user" }
+    : { ...base, role: "assistant", parts: existing && existing.role === "assistant" ? existing.parts : undefined };
   return replaceOrAppendMessage(messages, index, message);
 }
 
