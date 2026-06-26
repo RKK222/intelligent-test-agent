@@ -150,7 +150,7 @@ public class ModelCatalogApplicationService {
                     .uri(URI.create(stripTrailingSlash(provider.getBaseUrl()) + "/models"))
                     .timeout(Duration.ofSeconds(10))
                     .header("Accept", "application/json");
-            String apiKey = System.getenv(provider.getApiKeyEnv());
+            String apiKey = resolveApiKey(provider);
             if (apiKey != null && !apiKey.isBlank()) {
                 builder.header("Authorization", "Bearer " + apiKey);
             }
@@ -237,9 +237,13 @@ public class ModelCatalogApplicationService {
         if ("internal".equals(properties.getSource())) {
             headers.put("environment", "test");
         }
+        String apiKey = resolveApiKey(provider);
         String envRef = "{env:" + provider.getApiKeyEnv() + "}";
+        if ("bearer".equals(provider.getAuthMode()) && apiKey != null && !apiKey.isBlank()) {
+            options.put("apiKey", apiKey);
+        }
         if ("auth-token".equals(provider.getAuthMode())) {
-            headers.put("Auth-Token", envRef);
+            headers.put("Auth-Token", apiKey == null || apiKey.isBlank() ? envRef : apiKey);
         }
         if (!headers.isEmpty()) {
             options.put("headers", headers);
@@ -253,6 +257,13 @@ public class ModelCatalogApplicationService {
                         "api", stripTrailingSlash(provider.getBaseUrl()),
                         "options", options,
                         "models", models)));
+    }
+
+    private String resolveApiKey(ModelCatalogProperties.Provider provider) {
+        if (provider.getApiKey() != null && !provider.getApiKey().isBlank()) {
+            return provider.getApiKey();
+        }
+        return System.getenv(provider.getApiKeyEnv());
     }
 
     private Map<String, Object> toOpenCodeModelConfig(AiModelConfig model) {

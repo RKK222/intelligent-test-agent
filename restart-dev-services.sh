@@ -395,18 +395,33 @@ seed_demo_workspaces() {
 
   local source_dir="${ROOT_DIR}/test-workspaces/F-COSS"
   local version dest
-  if [[ ! -d "${source_dir}" ]]; then
-    echo "Skipping demo workspace seed: ${source_dir} not found."
-    return
-  fi
 
+  # V10 种子数据：F-COSS 主服务两个版本（src/main 子目录）
   for version in 20260620 20260701; do
     dest="/tmp/test-agent/fcoss/${version}"
-    mkdir -p "${dest}"
-    if [[ ! -e "${dest}/README.md" ]]; then
-      cp -R "${source_dir}/." "${dest}/"
-    fi
     mkdir -p "${dest}/src/main"
+    if [[ -d "${source_dir}" ]] && [[ ! -e "${dest}/README.md" ]]; then
+      cp -R "${source_dir}/." "${dest}/"
+    elif [[ ! -e "${dest}/README.md" ]]; then
+      echo "# F-COSS Demo Workspace" > "${dest}/README.md"
+    fi
+  done
+
+  # V13 种子数据：F-COSS 移动端（src/mobile）、数据同步（sync）、报表（reports）
+  local workspace_dirs=(
+    "/tmp/test-agent/fcoss/mobile/20260705:src/mobile"
+    "/tmp/test-agent/fcoss/sync/20260710:sync"
+    "/tmp/test-agent/fcoss/report/20260715:reports"
+  )
+  for entry in "${workspace_dirs[@]}"; do
+    dest="${entry%%:*}"
+    local sub_dir="${entry##*:}"
+    mkdir -p "${dest}/${sub_dir}"
+    if [[ -d "${source_dir}" ]] && [[ ! -e "${dest}/README.md" ]]; then
+      cp -R "${source_dir}/." "${dest}/"
+    elif [[ ! -e "${dest}/README.md" ]]; then
+      echo "# F-COSS Demo Workspace" > "${dest}/README.md"
+    fi
   done
 }
 

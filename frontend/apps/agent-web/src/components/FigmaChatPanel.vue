@@ -28,14 +28,25 @@ type ChatMessage = {
   role: 'user' | 'assistant'
   content: string
   meta?: string
+  parts?: unknown[]
 }
 
 function partText(part: unknown): string {
-  if (part && typeof part === 'object' && 'text' in part) {
-    const text = (part as { text?: unknown }).text
-    return typeof text === 'string' ? text : ''
+  if (part && typeof part === 'object') {
+    // reasoning 和 tool 不进入气泡正文
+    const pType = (part as { type?: string }).type
+    if (pType === 'reasoning' || pType === 'tool') return ''
+    if ('text' in part) {
+      const text = (part as { text?: unknown }).text
+      return typeof text === 'string' ? text : ''
+    }
   }
   return ''
+}
+
+function hasToolParts(msg: AgentMessage): boolean {
+  if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return false
+  return msg.parts.some((p) => p.type === 'tool')
 }
 
 export type FileChangeStat = {
@@ -128,6 +139,80 @@ const attachmentDialogOpen = ref(false)
 // 仍然会看到完整的 del+add 列表，但能配合新增的 toggle 切换为完整上下文做核对。
 const showContext = ref(false)
 const thinkingExpanded = ref(false)
+// 文件操作清单展开/收起（按消息ID+类型独立控制）
+const expandedFileKeys = ref(new Set<string>())
+function toggleFileExpanded(msgId: string, opType: string) {
+  const key = `${msgId}:${opType}`
+  const next = new Set(expandedFileKeys.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  expandedFileKeys.value = next
+}
+function isFileExpanded(msgId: string, opType: string) {
+  return expandedFileKeys.value.has(`${msgId}:${opType}`)
+}
+
+// 从 tool input 中提取文件路径，bash 命令则尝试从 command 中解析
+function toolFilePath(
+  toolName: string,
+  input: Record<string, unknown> | undefined
+): string {
+  if (!input) return ''
+  const direct =
+    (typeof input.filePath === 'string' && input.filePath) ||
+    (typeof input.path === 'string' && input.path) ||
+    (typeof input.file_path === 'string' && input.file_path) ||
+    (typeof input.file === 'string' && input.file) ||
+    (typeof input.directory === 'string' && input.directory) ||
+    (typeof input.target === 'string' && input.target) ||
+    ''
+  if (direct && direct !== 'null') return direct
+  // bash 命令：从 command 字符串中提取路径参数
+  if (toolName === 'bash' && typeof input.command === 'string') {
+    const cmd = input.command
+    const parts = cmd.split(/\s+/)
+    // 从后往前找第一个像路径的参数（含 /、扩展名、或者不是 flag/关键字）
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i]
+      if (p === 'null') continue
+      if (p.includes('/') || p.includes('.') || p === '.' || p === '..') {
+        return p
+      }
+    }
+    // 没有明显的路径特征时，取最后一个非 flag、非管道/重定向符号的参数
+    const skipKeywords = new Set([
+      '&&',
+      '||',
+      '|',
+      '>',
+      '>>',
+      '<',
+      '<<',
+      ';',
+      '&',
+    ])
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const p = parts[i]
+      if (
+        p.startsWith('-') ||
+        p.startsWith('"') ||
+        p.startsWith("'") ||
+        skipKeywords.has(p)
+      )
+        continue
+      // 跳过常见命令名
+      if (
+        i === 0 &&
+        /^(ls|cd|cat|echo|find|grep|mkdir|rm|mv|cp|touch|head|tail|tree|wc|file|stat|dirname|basename|realpath|readlink|source|export|set|unset|env|which|type|command|exec|xargs|sort|uniq|cut|tr|sed|awk|diff|cmp|chmod|chown|chgrp)$/.test(
+          p
+        )
+      )
+        continue
+      return p
+    }
+  }
+  return ''
+}
 
 // 从最新消息中提取思考过程（reasoning + tool 操作摘要）
 function toolSummary(
@@ -136,15 +221,7 @@ function toolSummary(
 ): string {
   const name = toolName || 'tool'
   if (!input) return `[${name}]`
-  // 优先展示文件路径（filePath 是 opencode 主字段名）
-  const file =
-    (typeof input.filePath === 'string' && input.filePath) ||
-    (typeof input.path === 'string' && input.path) ||
-    (typeof input.file_path === 'string' && input.file_path) ||
-    (typeof input.file === 'string' && input.file) ||
-    (typeof input.directory === 'string' && input.directory) ||
-    (typeof input.target === 'string' && input.target) ||
-    ''
+  const file = toolFilePath(toolName, input)
   if (file) return `[${name}] ${file}`
   // bash / 命令类工具：展示描述或命令
   const desc = typeof input.description === 'string' ? input.description : ''
@@ -197,6 +274,185 @@ const thinkingLines = computed(() => {
   }
   return lines
 })
+// 统计 message.updated 事件中 tool part 的文件操作
+type FileOperation = {
+  toolName: string
+  filePath: string
+  opType: 'read' | 'write' | 'edit'
+  content?: string
+}
+const FILE_READ_TOOLS = new Set(['read', 'grep', 'glob', 'bash'])
+const FILE_WRITE_TOOLS = new Set(['write', 'create_file'])
+const FILE_EDIT_TOOLS = new Set([
+  'edit',
+  'apply_patch',
+  'str_replace',
+  'multi_edit',
+])
+// 从 tool input 中提取文件内容（write 工具用 content/text，edit 工具用 newText/new_str）
+function toolInputContent(input: Record<string, unknown> | undefined): string {
+  if (!input) return ''
+  return (
+    (typeof input.content === 'string' && input.content) ||
+    (typeof input.text === 'string' && input.text) ||
+    (typeof input.body === 'string' && input.body) ||
+    (typeof input.newText === 'string' && input.newText) ||
+    (typeof input.new_str === 'string' && input.new_str) ||
+    (typeof input.newString === 'string' && input.newString) ||
+    ''
+  )
+}
+
+// 根据文件扩展名推断语言，返回高亮后的 HTML 片段
+function highlightCode(code: string, filePath: string): string {
+  const ext = (filePath.split('.').pop() ?? '').toLowerCase()
+  let lang: string = ext
+  if (ext === 'vue' || ext === 'svelte') lang = 'html'
+  else if (ext === 'ts' || ext === 'tsx' || ext === 'js' || ext === 'jsx' || ext === 'mjs' || ext === 'cjs') lang = 'js'
+  else if (ext === 'json' || ext === 'jsonc' || ext === 'json5') lang = 'json'
+  else if (ext === 'css' || ext === 'scss' || ext === 'less' || ext === 'sass' || ext === 'styl') lang = 'css'
+  else if (ext === 'md' || ext === 'mdx' || ext === 'markdown') lang = 'md'
+  else if (ext === 'yaml' || ext === 'yml') lang = 'yaml'
+  else if (ext === 'sh' || ext === 'bash' || ext === 'zsh') lang = 'bash'
+  else if (ext === 'py' || ext === 'rb' || ext === 'go' || ext === 'rs' || ext === 'java' || ext === 'kt' || ext === 'swift') lang = 'code'
+  else if (ext === 'sql') lang = 'sql'
+  else if (ext === 'xml' || ext === 'svg') lang = 'xml'
+  else if (ext === 'html' || ext === 'htm') lang = 'html'
+  else if (ext === 'graphql' || ext === 'gql') lang = 'graphql'
+  else lang = ''
+
+  const escaped = code
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  if (lang === 'html' || lang === 'xml') {
+    return escaped
+      .replace(/(&lt;\!--[\s\S]*?--&gt;)/g, '<span class="ch">$1</span>')
+      .replace(/(&lt;\/?)([\w-]+)/g, '$1<span class="kt">$2</span>')
+      .replace(/(\s+)([\w-]+)(=)/g, '$1<span class="na">$2</span>$3')
+      .replace(/(=)(&quot;|&#39;)(.*?)(\2)/g, '$1$2<span class="s">$3</span>$4')
+      .replace(/(&lt;!--[\s\S]*?--&gt;)/g, '<span class="ch">$1</span>')
+  }
+  if (lang === 'js' || lang === 'json') {
+    return escaped
+      .replace(/(\/\/[^\n]*)/g, '<span class="ch">$1</span>')
+      .replace(/(&quot;.*?&quot;)(?=\s*:)/g, '<span class="na">$1</span>')
+      .replace(/(&quot;.*?&quot;|&#39;.*?&#39;|`[^`]*`)/g, '<span class="s">$1</span>')
+      .replace(/\b(true|false|null|undefined|NaN|Infinity)\b/g, '<span class="nb">$1</span>')
+      .replace(/\b(const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|class|extends|import|export|from|default|async|await|try|catch|throw|finally|typeof|instanceof|in|of|yield|static|get|set|as|type|interface|enum|implements|abstract|private|public|protected|readonly)\b/g, '<span class="k">$1</span>')
+      .replace(/\b(\d+\.?\d*(?:e[+-]?\d+)?)\b/g, '<span class="m">$1</span>')
+  }
+  if (lang === 'css') {
+    return escaped
+      .replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="ch">$1</span>')
+      .replace(/([.#@][\w-]+)/g, '<span class="nc">$1</span>')
+      .replace(/(&quot;.*?&quot;|&#39;.*?&#39;)/g, '<span class="s">$1</span>')
+      .replace(/(:[\s]*)([^;{}]+)/g, '$1<span class="m">$2</span>')
+      .replace(/\b([\w-]+)(?=\s*:)/g, '<span class="na">$1</span>')
+  }
+  if (lang === 'md') {
+    return escaped
+      .replace(/^(#{1,6}\s+.+)$/gm, '<span class="k">$1</span>')
+      .replace(/(`[^`]+`)/g, '<span class="s">$1</span>')
+      .replace(/(\*\*[^*]+\*\*|__[^_]+__)/g, '<span class="nb">$1</span>')
+      .replace(/^(\s*[-*+>]\s+.+)$/gm, '<span class="na">$1</span>')
+  }
+  if (lang === 'bash') {
+    return escaped
+      .replace(/^(#.*)$/gm, '<span class="ch">$1</span>')
+      .replace(/(&quot;.*?&quot;|&#39;.*?&#39;)/g, '<span class="s">$1</span>')
+      .replace(/\b(ls|cd|cat|echo|find|grep|mkdir|rm|mv|cp|touch|head|tail|tree|wc|file|stat|npm|pnpm|yarn|node|python|git|docker|curl|wget|chmod|chown|export|source|set|unset|env|which|if|then|else|fi|for|do|done|while|case|esac|function|return|exit|exec|xargs|sort|uniq|cut|tr|sed|awk|diff|cmp|make)\b/g, '<span class="k">$1</span>')
+      .replace(/(\s|^)(--?[\w-]+)/g, '$1<span class="m">$2</span>')
+  }
+  if (lang === 'yaml') {
+    return escaped
+      .replace(/^(#.*)$/gm, '<span class="ch">$1</span>')
+      .replace(/(&quot;.*?&quot;|&#39;.*?&#39;)/g, '<span class="s">$1</span>')
+      .replace(/^(\s*)([\w-]+)(?=\s*:)/gm, '$1<span class="na">$2</span>')
+      .replace(/\b(true|false|null|yes|no|on|off)\b/g, '<span class="nb">$1</span>')
+  }
+  if (lang === 'sql') {
+    return escaped
+      .replace(/(--[^\n]*)/g, '<span class="ch">$1</span>')
+      .replace(/(&#39;.*?&#39;)/g, '<span class="s">$1</span>')
+      .replace(/\b(SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TABLE|INDEX|INTO|VALUES|SET|AND|OR|NOT|IN|LIKE|BETWEEN|JOIN|LEFT|RIGHT|INNER|OUTER|ON|AS|ORDER|BY|GROUP|HAVING|LIMIT|OFFSET|UNION|ALL|DISTINCT|COUNT|SUM|AVG|MIN|MAX|CASE|WHEN|THEN|ELSE|END|NULL|PRIMARY|KEY|FOREIGN|REFERENCES|CASCADE|DEFAULT|CHECK|UNIQUE|CONSTRAINT|EXISTS|IF|BEGIN|COMMIT|ROLLBACK|TRANSACTION)\b/gi, '<span class="k">$1</span>')
+      .replace(/\b(\d+\.?\d*)\b/g, '<span class="m">$1</span>')
+  }
+  if (lang === 'graphql') {
+    return escaped
+      .replace(/(#[^\n]*)/g, '<span class="ch">$1</span>')
+      .replace(/(&quot;.*?&quot;)/g, '<span class="s">$1</span>')
+      .replace(/\b(query|mutation|subscription|fragment|on|type|input|enum|interface|union|scalar|schema|extend|directive|implements)\b/g, '<span class="k">$1</span>')
+      .replace(/\b(true|false|null)\b/g, '<span class="nb">$1</span>')
+  }
+  if (lang === 'code') {
+    return escaped
+      .replace(/(\/\/[^\n]*|#[^\n]*)/g, '<span class="ch">$1</span>')
+      .replace(/(&quot;.*?&quot;|&#39;.*?&#39;|""".*?""")/g, '<span class="s">$1</span>')
+      .replace(/\b(def|class|function|return|if|else|elif|for|while|import|from|as|try|except|raise|pass|break|continue|with|yield|lambda|async|await|fn|let|mut|pub|struct|impl|enum|trait|mod|use|self|super|where|match|loop|move|ref|unsafe|extern|crate|public|private|protected|static|final|void|int|string|bool|float|double|var|val|fun|object|package|new|this|throw|throws|catch|finally|extends|implements|abstract|interface|override|virtual|sealed|internal|namespace|using|global|require|module|export|default|type|const|interface|declare|readonly|keyof|infer|extends|implements)\b/g, '<span class="k">$1</span>')
+      .replace(/\b(true|false|null|nil|None|True|False|undefined)\b/g, '<span class="nb">$1</span>')
+      .replace(/\b(\d+\.?\d*(?:e[+-]?\d+)?)\b/g, '<span class="m">$1</span>')
+  }
+  return escaped
+}
+// 从单条消息提取文件操作明细
+function messageFileOps(msg: ChatMessageInput): FileOperation[] {
+  if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return []
+  const ops: FileOperation[] = []
+  for (const p of msg.parts) {
+    if (p.type !== 'tool') continue
+    const toolName = (p.toolName ?? '').toLowerCase()
+    const input = p.input as Record<string, unknown> | undefined
+    const filePath = toolFilePath(toolName, input)
+    if (!filePath) continue
+    if (FILE_READ_TOOLS.has(toolName)) {
+      ops.push({ toolName, filePath, opType: 'read' })
+    } else if (FILE_WRITE_TOOLS.has(toolName)) {
+      ops.push({ toolName, filePath, opType: 'write', content: toolInputContent(input) })
+    } else if (FILE_EDIT_TOOLS.has(toolName)) {
+      ops.push({ toolName, filePath, opType: 'edit', content: toolInputContent(input) })
+    }
+  }
+  return ops
+}
+function messageReadCount(msg: ChatMessageInput): number {
+  if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return 0
+  let count = 0
+  for (const p of msg.parts) {
+    if (
+      p.type === 'tool' &&
+      FILE_READ_TOOLS.has((p.toolName ?? '').toLowerCase())
+    )
+      count += 1
+  }
+  return count
+}
+function messageWriteCount(msg: ChatMessageInput): number {
+  if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return 0
+  let count = 0
+  for (const p of msg.parts) {
+    if (
+      p.type === 'tool' &&
+      FILE_WRITE_TOOLS.has((p.toolName ?? '').toLowerCase())
+    )
+      count += 1
+  }
+  return count
+}
+function messageEditCount(msg: ChatMessageInput): number {
+  if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return 0
+  let count = 0
+  for (const p of msg.parts) {
+    if (
+      p.type === 'tool' &&
+      FILE_EDIT_TOOLS.has((p.toolName ?? '').toLowerCase())
+    )
+      count += 1
+  }
+  return count
+}
+
 const reasoningText = computed(() => thinkingLines.value.join('\n'))
 const reasoningHtml = computed(() =>
   reasoningText.value
@@ -372,7 +628,9 @@ watch(
 watch(
   () => props.running,
   (now, prev) => {
-    if (now && !prev) thinkingExpanded.value = false
+    if (now && !prev) {
+      thinkingExpanded.value = false
+    }
   }
 )
 
@@ -381,19 +639,22 @@ const displayMessages = computed<ChatMessage[]>(() => {
     .map((m, index): ChatMessage | null => {
       if (m.role !== 'user' && m.role !== 'assistant') return null
       let text = ''
-      if (typeof m.content === 'string') {
+      if (typeof m.content === 'string' && m.content) {
         text = m.content
-      } else if (typeof m.text === 'string') {
+      } else if (typeof m.text === 'string' && m.text) {
         text = m.text
       } else if (Array.isArray(m.parts)) {
         text = m.parts.map((p) => partText(p)).join('')
       }
-      if (!text.trim()) return null
+      const hasTools = hasToolParts(m as AgentMessage)
+      // 思考中有 tool part 的助手消息即使没有文本也保留，以显示文件操作状态
+      if (!text.trim() && !(props.running && hasTools)) return null
       return {
         id: m.messageId ?? m.id ?? `${m.role}-${index}`,
         role: m.role,
         content: text,
         meta: m.createdAt ? formatTime(m.createdAt) : undefined,
+        parts: (m as AgentMessage).parts,
       }
     })
     .filter((m): m is ChatMessage => m !== null)
@@ -559,6 +820,159 @@ function onCompositionEnd() {
             </div>
             <div class="figma-chat-bubble figma-chat-bubble--assistant">
               <div class="figma-chat-bubble-content">
+                <template
+                  v-if="
+                    messageReadCount(message) > 0 ||
+                    messageWriteCount(message) > 0 ||
+                    messageEditCount(message) > 0
+                  "
+                >
+                  <!-- 探索 -->
+                  <div
+                    v-if="messageReadCount(message) > 0"
+                    class="figma-chat-file-summary"
+                  >
+                    <div
+                      class="figma-chat-file-summary-row"
+                      @click="toggleFileExpanded(message.id, 'read')"
+                    >
+                      <span>{{
+                        running && message.id === lastAssistant?.id
+                          ? '正在探索'
+                          : '已探索'
+                      }}</span>
+                      <span style="color: #a1a5b1"
+                        >读取 {{ messageReadCount(message) }} 次</span
+                      >
+                      <ChevronRight
+                        v-if="!isFileExpanded(message.id, 'read')"
+                        class="figma-chat-read-chevron"
+                        :size="14"
+                      />
+                      <ChevronDown
+                        v-else
+                        class="figma-chat-read-chevron"
+                        :size="14"
+                      />
+                    </div>
+                    <ul
+                      v-if="isFileExpanded(message.id, 'read')"
+                      class="figma-chat-file-list"
+                    >
+                      <li
+                        v-for="(op, i) in messageFileOps(message).filter(
+                          (o) => o.opType === 'read'
+                        )"
+                        :key="i"
+                        class="figma-chat-file-item"
+                      >
+                        <span
+                          class="figma-chat-file-tag figma-chat-file-tag--read"
+                          >读取</span
+                        >
+                        <span class="figma-chat-file-path">{{
+                          op.filePath.split('/').pop()
+                        }}</span>
+                      </li>
+                    </ul>
+                  </div>
+                  <!-- 写入 -->
+                  <div
+                    v-if="messageWriteCount(message) > 0"
+                    class="figma-chat-file-summary"
+                  >
+                    <div
+                      class="figma-chat-file-summary-row"
+                      @click="toggleFileExpanded(message.id, 'write')"
+                    >
+                      <span
+                        >写入<span style="color: #a1a5b1; margin-left: 4px">
+                          {{
+                            messageFileOps(message)
+                              .filter((o) => o.opType === 'write')
+                              .map((o) => o.filePath.split('/').pop())
+                              .join('  ')
+                          }}</span
+                        ></span
+                      >
+                      <ChevronRight
+                        v-if="!isFileExpanded(message.id, 'write')"
+                        class="figma-chat-read-chevron"
+                        :size="14"
+                      />
+                      <ChevronDown
+                        v-else
+                        class="figma-chat-read-chevron"
+                        :size="14"
+                      />
+                    </div>
+                    <ul
+                      v-if="isFileExpanded(message.id, 'write')"
+                      class="figma-chat-file-list"
+                    >
+                      <li
+                        v-for="(op, i) in messageFileOps(message).filter(
+                          (o) => o.opType === 'write'
+                        )"
+                        :key="i"
+                      >
+                        <pre
+                          v-if="op.content"
+                          class="figma-chat-write-preview"
+                          v-html="highlightCode(op.content, op.filePath).slice(0, 4000) + (op.content.length > 2000 ? '...' : '')"
+                        ></pre>
+                      </li>
+                    </ul>
+                  </div>
+                  <!-- 编写 -->
+                  <div
+                    v-if="messageEditCount(message) > 0"
+                    class="figma-chat-file-summary"
+                  >
+                    <div
+                      class="figma-chat-file-summary-row"
+                      @click="toggleFileExpanded(message.id, 'edit')"
+                    >
+                      <span
+                        >编写<span style="color: #a1a5b1; margin-left: 4px">
+                          {{
+                            messageFileOps(message)
+                              .filter((o) => o.opType === 'edit')
+                              .map((o) => o.filePath.split('/').pop())
+                              .join('  ')
+                          }}</span
+                        ></span
+                      >
+                      <ChevronRight
+                        v-if="!isFileExpanded(message.id, 'edit')"
+                        class="figma-chat-read-chevron"
+                        :size="14"
+                      />
+                      <ChevronDown
+                        v-else
+                        class="figma-chat-read-chevron"
+                        :size="14"
+                      />
+                    </div>
+                    <ul
+                      v-if="isFileExpanded(message.id, 'edit')"
+                      class="figma-chat-file-list"
+                    >
+                      <li
+                        v-for="(op, i) in messageFileOps(message).filter(
+                          (o) => o.opType === 'edit'
+                        )"
+                        :key="i"
+                      >
+                        <pre
+                          v-if="op.content"
+                          class="figma-chat-write-preview"
+                          v-html="highlightCode(op.content, op.filePath).slice(0, 4000) + (op.content.length > 2000 ? '...' : '')"
+                        ></pre>
+                      </li>
+                    </ul>
+                  </div>
+                </template>
                 {{ message.content }}
               </div>
             </div>
@@ -594,9 +1008,9 @@ function onCompositionEnd() {
       </div>
 
       <!-- 运行中状态 -->
-      <div v-if="running" class="figma-chat-status">
-        <div class="figma-chat-status-dot" />
-        <span>智能体正在思考...</span>
+      <div v-if="running" class="figma-chat-status" :style="{ marginTop: reasoningText ? '-20px' : '0' }">
+        <!-- <div class="figma-chat-status-dot" /> -->
+        <span>思考中...</span>
         <button
           v-if="reasoningText"
           type="button"
@@ -1207,6 +1621,92 @@ function onCompositionEnd() {
   color: inherit;
 }
 
+.figma-chat-file-summary {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  cursor: pointer;
+  user-select: none;
+}
+.figma-chat-file-summary-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  line-height: 20px;
+  color: #000;
+  font-weight: 600;
+}
+.figma-chat-read-chevron {
+  flex-shrink: 0;
+  color: #6b7280;
+}
+.figma-chat-file-list {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.figma-chat-file-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 18px;
+}
+.figma-chat-file-tag {
+  flex-shrink: 0;
+  padding: 0 2px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 18px;
+  font-weight: 500;
+}
+.figma-chat-file-tag--read,
+.figma-chat-file-tag--write,
+.figma-chat-file-tag--edit {
+  /* background: #f3f4f6; */
+  color: #1f2937;
+}
+.figma-chat-file-path {
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.figma-chat-file-item-write {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.figma-chat-write-preview {
+  margin: 0;
+  padding: 6px 8px;
+  background: #f8f8f8;
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Cascadia Mono', monospace;
+  font-size: 11px;
+  line-height: 17px;
+  color: #374151;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 120px;
+  overflow-y: auto;
+  user-select: none;
+}
+.figma-chat-write-preview :deep(.ch) { color: #6b7280; font-style: italic; }
+.figma-chat-write-preview :deep(.kt) { color: #7c3aed; }
+.figma-chat-write-preview :deep(.na) { color: #1d4ed8; }
+.figma-chat-write-preview :deep(.s)  { color: #059669; }
+.figma-chat-write-preview :deep(.k)  { color: #7c3aed; font-weight: 600; }
+.figma-chat-write-preview :deep(.nb) { color: #d97706; }
+.figma-chat-write-preview :deep(.m)  { color: #0891b2; }
+.figma-chat-write-preview :deep(.nc) { color: #c2410c; }
+
 .figma-chat-bubble-meta {
   margin-top: 4px;
   font-size: 12px;
@@ -1287,11 +1787,13 @@ function onCompositionEnd() {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  background: #fafafa;
+  padding-left: 30px;
+  margin-top: -20px;
+  /* background: #fafafa; */
   border-radius: 8px;
   font-size: 12px;
-  color: #666;
+  color: #000;
+  font-weight: 600;
   align-self: flex-start;
 }
 
@@ -1316,11 +1818,6 @@ function onCompositionEnd() {
   color: #999;
   cursor: pointer;
   transition: background-color 0.14s ease, color 0.14s ease;
-}
-
-.figma-chat-thinking-toggle:hover {
-  background: #e8e8e8;
-  color: #666;
 }
 
 .figma-chat-thinking-chevron {

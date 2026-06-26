@@ -5,7 +5,8 @@ spring:
   datasource:
     druid:
       driver-class-name: org.postgresql.Driver
-      url: jdbc:postgresql://192.168.100.194:5432/test_agent?sslmode=disable
+      # PostgreSQL 通过本机 loopback 映射暴露；局域网 IP 端口可连但 JDBC 握手会被对端断开。
+      url: jdbc:postgresql://127.0.0.1:15432/testagent?sslmode=disable
       username: testagent
       password: testagent
   flyway:
@@ -13,15 +14,15 @@ spring:
     locations: classpath:db/migration
   data:
     redis:
-      host: 127.0.0.1
-      port: 6379
+      host: 192.168.100.115
+      port: 16379
       password: ""
       timeout: 1s
 
 test-agent:
   security:
     api-token: ""
-    cors-allowed-origins: ${TEST_AGENT_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}
+    cors-allowed-origins: ${TEST_AGENT_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000,http://192.168.100.115:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}
     ssh-key-encryption-key: "r7Nk2Vm8Qp4Xs9Jw3Lt6Yb1Af5Dg0Hc8Ei2Ko4Um6Pw="
   rate-limit:
     enabled: false
@@ -31,7 +32,9 @@ test-agent:
     max-file-bytes: 1048576
     max-directory-entries: 1000
   workspace-picker:
-    allowed-roots: "D:/workspace"
+    allowed-roots:
+      - /Users/kaka/Desktop
+      - D:/workspace
   # 公共目录：所有登录用户可浏览/读取，SUPER_ADMIN 额外可写；留空表示禁用。
   public-directory:
     path: ${TEST_AGENT_PUBLIC_DIRECTORY_PATH:D:/agents}
@@ -39,28 +42,45 @@ test-agent:
     root: ${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}
   redis:
     enabled: true
-    host: 127.0.0.1
-    port: 6379
+    host: 192.168.100.115
+    port: 16379
     password: ""
+  model-catalog:
+    source: bailian
+    external:
+      provider-id: modelstudio
+      name: Model Studio Coding Plan
+      base-url: https://coding.dashscope.aliyuncs.com/v1
+      api-key-env: MODELSTUDIO_API_KEY
+      api-key: sk-sp-ffacbe80d6a24711b216456f41be0d07
+      auth-mode: bearer
+      default-model: qwen3.5-plus
+    internal:
+      provider-id: icbc-openai
+      name: ICBC OpenAI
+      base-url: http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1
+      api-key-env: ICBC_OPENAI_AUTH_TOKEN
+      auth-mode: auth-token
+      default-model: DeepSeek-V4-Flash-W8A8
   opencode:
     # 本地开发通常没有 opencode-manager 容器在跑；用 local 网关直连 baseUrl 做 health/start 占位。
     # production profile 不会继承该值（默认 socket）。
     manager-control:
-      gateway-mode: ${TEST_AGENT_OPENCODE_GATEWAY_MODE:local}
-      token: ${TEST_AGENT_OPENCODE_MANAGER_TOKEN:}
-      listen-url: ${TEST_AGENT_BACKEND_LISTEN_URL:http://127.0.0.1:8080}
-      linux-server-id: ${TEST_AGENT_LINUX_SERVER_ID:127.0.0.1}
+      gateway-mode: local
+      token: local-manager-token
+      listen-url: http://192.168.100.115:8080
+      linux-server-id: 192.168.100.115
       heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:10s}
       backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:30s}
       command-timeout: ${TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT:10s}
       backend-discovery-limit: ${TEST_AGENT_BACKEND_DISCOVERY_LIMIT:100}
     # 本地开发短路：直接返回合成 READY，跳过 database topology / binding / health。
-    # 任何调用方都不会被 manager / V17 容器状态阻塞，默认连 127.0.0.1:4096。
-    local-direct: ${TEST_AGENT_OPENCODE_LOCAL_DIRECT:true}
-    local-direct-base-url: ${TEST_AGENT_OPENCODE_BASE_URL:http://127.0.0.1:4096}
+    # 任何调用方都不会被 manager / V17 容器状态阻塞，直接连下方配置的 opencode baseUrl。
+    local-direct: true
+    local-direct-base-url: http://192.168.100.115:4096
     nodes:
       - id: node_local_opencode
-        base-url: http://127.0.0.1:4096
+        base-url: http://192.168.100.115:4096
         max-runs: 4
         weight: 100
         capabilities:

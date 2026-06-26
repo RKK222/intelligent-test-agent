@@ -44,6 +44,42 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
+    void guoProfileCorsAllowsDefaultLanFrontendOriginForIdeaStartup() {
+        profileContextRunner
+                .withPropertyValues("spring.profiles.active=guo")
+                .run(context -> {
+                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
+
+                    assertThat(properties.getSecurity().getCorsAllowedOrigins())
+                            .contains("http://192.168.100.115:3000", "http://127.0.0.1:3000");
+                });
+    }
+
+    @Test
+    void guoProfileBindsIdeaRunnableServiceConfigurationFromYaml() {
+        profileContextRunner
+                .withPropertyValues("spring.profiles.active=guo")
+                .run(context -> {
+                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
+
+                    assertThat(context.getEnvironment().getProperty("spring.datasource.druid.url"))
+                            .isEqualTo("jdbc:postgresql://127.0.0.1:15432/testagent?sslmode=disable");
+                    assertThat(context.getEnvironment().getProperty("test-agent.model-catalog.external.api-key"))
+                            .isNotBlank();
+                    assertThat(properties.getRedis().getHost()).isEqualTo("192.168.100.115");
+                    assertThat(properties.getRedis().getPort()).isEqualTo(16379);
+                    assertThat(properties.getWorkspacePicker().getAllowedRoots())
+                            .contains("/Users/kaka/Desktop", "D:/workspace");
+                    assertThat(properties.getOpencode().getManagerControl().getToken()).isEqualTo("local-manager-token");
+                    assertThat(properties.getOpencode().getManagerControl().getGatewayMode()).isEqualTo("local");
+                    assertThat(properties.getOpencode().getLocalDirectBaseUrl()).isEqualTo("http://192.168.100.115:4096");
+                    assertThat(properties.getOpencode().getNodes()).hasSize(1);
+                    assertThat(properties.getOpencode().getNodes().getFirst().getBaseUrl())
+                            .isEqualTo("http://192.168.100.115:4096");
+                });
+    }
+
+    @Test
     void defaultDruidConfigValidatesBorrowedConnections() {
         profileContextRunner.run(context -> {
             assertThat(context.getEnvironment().getProperty("spring.datasource.druid.validation-query"))

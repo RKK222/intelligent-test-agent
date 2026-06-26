@@ -59,6 +59,8 @@
 
 脚本默认使用 `local` profile、读取 `.env.local`、先编译后端和自研前端，再重启 `test-agent-app` 与 `frontend/apps/agent-web`。需要连接 `guo` 环境时显式传入 `--profile guo` 和对应 dotenv 文件。服务日志写入 `.tmp/dev-services/`，不得打印 dotenv 中的敏感值。
 
+仅启动 Java 后端时，Windows 开发人员优先使用 IDEA Run Configuration `TestAgentApplication guo`。该配置读取 `application-guo.yml`，不要求执行 shell 或读取 `.env.local`。
+
 开发脚本变更后，必须运行轻量校验，确认根目录重启脚本在 Bash 入口和误用 `sh` 入口下都不会解析失败：
 
 ```bash

@@ -79,6 +79,7 @@ public class ModelCatalogProperties {
         private String name;
         private String baseUrl;
         private String apiKeyEnv;
+        private String apiKey;
         private String authMode;
         private String defaultModel;
         private List<Model> models;
@@ -99,6 +100,7 @@ public class ModelCatalogProperties {
             this.name = name;
             this.baseUrl = baseUrl;
             this.apiKeyEnv = apiKeyEnv;
+            this.apiKey = "";
             this.authMode = authMode;
             this.defaultModel = defaultModel;
             this.models = models == null ? new ArrayList<>() : new ArrayList<>(models);
@@ -134,6 +136,20 @@ public class ModelCatalogProperties {
 
         public void setApiKeyEnv(String apiKeyEnv) {
             this.apiKeyEnv = apiKeyEnv;
+        }
+
+        /**
+         * 返回 yml 中直接配置的 provider API Key。本地 IDEA 启动可用它替代 shell 环境变量。
+         */
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        /**
+         * 绑定 yml 中直接配置的 provider API Key，空白值会按未配置处理。
+         */
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey == null ? "" : apiKey.trim();
         }
 
         public String getAuthMode() {

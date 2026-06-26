@@ -2,6 +2,24 @@
 
 ## Entries
 
+### 2026-06-26 - 修复 guo 直启 CORS 并确认数据库 loopback
+
+- Why: IDEA 直启后前端从 `http://192.168.100.115:3000` 访问后端登录接口预检被拒；同时配置中数据库地址一处像 `127.0.0.1`、一处像 `192.168.100.115`，容易误判为可统一改成局域网 IP。
+- What: `application-guo.yml` 的默认 CORS origin 增加 `http://192.168.100.115:3000`；数据库 URL 保持 `127.0.0.1:15432` 并补充注释说明；配置绑定测试增加 guo profile 默认允许局域网前端 origin 的断言。
+- How: 用真实 `OPTIONS /api/auth/login` 复现 115 前端 origin 被拒；尝试将 PostgreSQL JDBC 改成 `192.168.100.115:15432` 后后端启动失败，日志显示 JDBC 握手阶段 EOF，因此回退到 loopback。
+- Result: 后端用 `guo` profile 可启动；`127.0.0.1:8080` 与 `192.168.100.115:8080` health 均为 UP，`192.168.100.115:3000` 前端返回 200，登录预检返回 `Access-Control-Allow-Origin: http://192.168.100.115:3000`。
+- Verification: `mvn -pl test-agent-app -am -Dtest=TestAgentRuntimePropertiesBindingTest -Dsurefire.failIfNoSpecifiedTests=false test`；显式 JDK 25 执行 `mvn clean package -DskipTests`；screen 后台启动 `java -jar test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar --spring.profiles.active=guo`；115/127 health、frontend HEAD 和 login CORS preflight curl。
+- Next: `guo` 本地配置中 PostgreSQL 保持 `127.0.0.1:15432`；`192.168.100.115` 继续用于前端、后端局域网入口、Redis/opencode 等本机对外监听服务。
+
+### 2026-06-26 - IDEA 启动配置承接 guo 本地参数
+
+- Why: Windows 开发人员不能依赖 shell/dotenv 启动 Java 后端，需要 IDEA 可直接运行，并把 `.env.local` 中 Java 进程依赖的配置落到 yml。
+- What: 新增可提交的 IDEA Run Configuration `TestAgentApplication guo`；`application-guo.yml` 内置数据库、Redis、opencode、manager token、模型来源和模型 key 配置；模型 provider 支持 `test-agent.model-catalog.<external|internal>.api-key` yml 直配，未配置时仍回退环境变量。
+- How: 保留 shell 脚本的 `.env.local` 覆盖能力和 script-only 变量边界，只扩展 Java 运行态配置读取；补充 guo profile 绑定测试和 provider api-key 优先测试。
+- Result: IDEA 选择 `TestAgentApplication guo` 后用 JDK 21+ 即可启动 Java 后端，不需要执行 shell 或读取 `.env.local`。
+- Verification: `mvn -pl test-agent-opencode-runtime -am -Dtest=ModelCatalogApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`；`mvn -pl test-agent-app -am -Dtest=TestAgentRuntimePropertiesBindingTest -Dsurefire.failIfNoSpecifiedTests=false test`；`mvn clean package -DskipTests`；临时 `java -jar ... --spring.profiles.active=guo --server.port=18080` 启动后 `curl http://127.0.0.1:18080/actuator/health` 返回 UP；`git diff --check`。
+- Next: 如果共享该 yml 到更广范围，先评估是否需要把真实本地密钥改为占位或私有配置源。
+
 ### 2026-06-25 - 定时任务系统管理与协作式停止
 
 - Why: 超级管理员需要在前端查看定时任务当前状态和历史记录，调整 Cron，手工启动未执行任务，并能对正在执行的任务发起停止；现有运行管理入口也需要改为系统管理并承载两个二级管理项。
@@ -248,22 +266,6 @@
 - Verification: `corepack pnpm --filter @test-agent/agent-web typecheck` 通过；`corepack pnpm --filter @test-agent/agent-web lint` 通过；`backend` 端因 `JdbcUserRepository.findPage` 无现成单测覆盖（`grep` 全仓也未发现 `users.findPage` 调用），改动只扩 SQL 条件、不动接口与契约，暂无新增单测；后续如需补 `JdbcRepositoryIntegrationTest` 一条按 userId / unifiedAuthId / username 各自命中一条的断言。
 - Next: 等用户验收；若用户希望"搜索"按钮文案在已选中也保留作为兜底，可以再保留一个无副作用的"重新搜索"按钮，避免按钮消失带来的"还能不能搜"歧义。
 
-### 2026-06-25 - 新增分布式定时任务框架
-
-- Why: 后端需要一个分布式多节点安全的定时任务框架，避免同一任务在多个节点重复执行，并统一持久化任务定义、用户计划预留和运行审计记录；本轮只落框架，不新增具体业务任务。
-- What:
-  - 新增 `backend/test-agent-scheduler` Maven module，提供 `ScheduledTaskHandler`、`ScheduledTaskContext`、`ScheduledTaskResult`、Cron 计算、启动注册同步、Redis `SET NX PX` + Lua token 续租/释放锁、后台 runner、管理服务和默认关闭配置。
-  - 扩展 domain：新增 `scheduler` 聚合和值对象；`Session`、`Run`、`SessionMessage` 增加 `ConversationSourceType`、`sourceRefId` 和用户来源字段，默认保持 `MANUAL`。
-  - 扩展 persistence：新增 `V15__create_scheduler_framework_tables.sql`，创建 `scheduled_tasks`、`scheduled_task_plans`、`scheduled_task_runs`，并给 `sessions`、`runs`、`session_messages` 增加来源预留字段；新增 `JdbcScheduledTaskRepository`。同时把 F-COSS seed migration 从重复的 `V10__seed_fcoss_application.sql` 调整为 `V10_1__seed_fcoss_application.sql`，避免 Flyway 版本冲突。
-  - 扩展 API/app：新增 `/api/internal/platform/scheduler-management` 超级管理员管理 API；app 依赖 scheduler，并在 `application.yml` 中增加 `TEST_AGENT_SCHEDULER_*` 配置入口，默认 `enabled=false`。
-  - 修复一个阻断 `test-agent-api -am` 编译的既有调用问题：`RunApplicationService.subscribeAgentEvents(...)` 调用补传 `resolvedAgentId`。
-  - 文档同步更新 backend/module README/PACKAGE、API、架构依赖、数据库、部署、安全文档。
-- How: 按 domain → persistence → scheduler module → API → app/config → docs 的顺序推进；互斥只使用 Redis 锁，不提供本机或数据库锁 fallback；runner 对 due cron 只补一次并把下次触发时间推进到当前时间之后，重叠触发写入 `SKIPPED + skipReason`。
-- Result: 框架已可注册 handler Bean、同步任务定义、异步执行 Cron/管理员手动触发、统一记录运行状态；普通用户级 Cron 计划只落库和领域模型，不开放 HTTP API，不创建定时会话/Run。
-- Pitfalls: 工作区存在无关的 `requirements/todo/deployment.md` 修改，属于历史需求草案，不作为编码依据，也不会纳入本次提交。scheduler 启用时如果 `test-agent.redis.enabled=false` 或缺少 `StringRedisTemplate` 会启动失败，这是预期安全边界。
-- Verification: `mvn -pl test-agent-domain -am test`、`mvn -pl test-agent-common test`、`mvn -pl test-agent-persistence -am test`、`mvn -pl test-agent-scheduler -am test`、`mvn -pl test-agent-api -am test`、`mvn -pl test-agent-app -am test` 均通过；提交前已补跑 `mvn test`，全量后端测试通过。
-- Next: 如后续要新增具体业务定时任务，应放在所属业务模块实现 `ScheduledTaskHandler`；如要开放用户级计划 API，需要先补权限、配额、payload 安全和后台会话发送设计。
-
 ### 2026-06-25 - Fix el-date-picker month cells to show "1月/2月/…" in Chinese
 
 - Why: 用户反馈「+新增版本」弹窗里的 el-date-picker (type=month) 打开后，月份单元格里显示英文 "Jan/Feb/…"，希望显示中文 "1月/2月/3月/…"，与项目里其他中文文案风格一致。
@@ -434,10 +436,18 @@
 - Verification: `pnpm -F @test-agent/agent-web typecheck` 通过；`pnpm -F @test-agent/agent-web test` 通过。
 - Next: 如果未来要把这个树形组件抽成通用组件（公共目录 + 工作区文件树共用），需要明确 props 的"未加载 vs 空"语义约定，避免类似 bug。
 
-### 2026-06-25 - 整理 Flyway 版本冲突并修复 local-direct 对话启动 500
+### 2026-06-25 - 修复切换报表时文件树加载失败（工作区根目录不存在）
 
-- Why: 更新代码后本地 115 启动先后被 Flyway migration 冲突挡住：`V15__create_scheduler_framework_tables.sql` 与 `V15__add_opencode_process_id_check_constraints.sql` 重号；随后因已落库的 `V10__seed_fcoss_application.sql` 被源码改成 `V10_1__...` 触发 Flyway validate。服务启动后，对话发送又在 `routing_decisions.execution_node_id=node_ocp_local_direct` 上触发外键失败，因为 local-direct 合成节点没有先写入 `execution_nodes`。
+- Why: 切换 F-COSS 报表等 workspace 时前端报错 `VALIDATION_ERROR: 工作区根目录不存在`。根因：种子数据（V10/V13 Flyway migration）在数据库中写入了 `/tmp/test-agent/fcoss/...` 路径作为 workspace 的 `root_path`，但 macOS 重启后 `/tmp` 会被清理，导致物理目录不存在；`WorkspaceFileService.rootRealPath()` 调用 `Path.of(rootPath).toRealPath()` 时目录已不存在即抛异常。
 - What:
+  - `restart-dev-services.sh` 的 `seed_demo_workspaces()` 函数原来只覆盖 V10 的两个版本目录（`20260620`、`20260701`），缺少 V13 新增的三个工作空间（`mobile/20260705`、`sync/20260710`、`report/20260715`）及其子目录（`src/mobile`、`sync`、`reports`）。补全了这三个目录的创建逻辑。
+  - 新建 `test-workspaces/F-COSS/README.md` 种子占位文件（原来 `source_dir` 不存在，函数直接跳过）。
+  - `.env.local` 添加 `MODELSTUDIO_API_KEY`（用户明确要求）。
+- How: `seed_demo_workspaces()` 新增 `workspace_dirs` 数组，遍历 V13 种子数据对应的三个 `(root_path, workspace_root_path 子目录)` 对；创建 `test-workspaces/F-COSS/` 目录确保 `cp -R` 不跳过。
+- Result: 所有 5 个 workspace 的 `/api/workspaces/{id}/files` API 均返回 `success:true`，不再报 `VALIDATION_ERROR`；`restart-dev-services.sh` 重新运行也能正确创建全部目录。
+- Pitfalls: `/tmp` 在 macOS 重启后会被清理，如果只用 `dev-backend-run.sh` 启动后端而不走 `restart-dev-services.sh`，目录仍可能缺失——需要手动创建或重新运行 `seed_demo_workspaces`。
+- Verification: `GET /api/workspaces/wrk_fcoss_report_20260715/files` 等 5 个 API 全部正常返回；`find /tmp/test-agent/fcoss -type d` 显示完整目录结构。
+- Next: 如果将来种子数据路径从 `/tmp` 改到项目 `.tmp/workspace` 下，则不再受 macOS 清理 `/tmp` 影响。
   - 恢复已落库的 `V10__seed_fcoss_application.sql` 文件名，避免本地和已部署库出现 "applied migration not resolved locally: 10"。
   - 将新调度框架 migration 改为 `V20260625184300__create_scheduler_framework_tables.sql`；约定 V17 及以前为历史连续版本，后续新增脚本统一用 `VyyyyMMddHHmmss__description.sql`，按个人更新时间戳确定版本号。
   - 新增 `FlywayMigrationNamingTest`，校验 migration 版本唯一，并阻止 V17 之后继续新增 V18/V19 这类顺序号。
@@ -448,3 +458,13 @@
 - Pitfalls: 本地 `POST /api/sessions` 当前 DTO 要求 `title` 非空，curl 复测时需要带 `title`；`test-agent.opencode.local-direct=true` 下 `status/initialize/requireReadyProcess` 仍不写 topology，但后续 Run 审计表和 binding 表有外键，不能跳过兼容 `ExecutionNode`。
 - Verification: `mvn -pl test-agent-opencode-runtime -am test -Dtest=RunApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false` 19/19 通过；`mvn -pl test-agent-persistence -am clean test -Dtest=FlywayMigrationNamingTest,JdbcRepositoryIntegrationTest#scheduledTaskRepositoryPersistsDefinitionsPlansAndRunRecords -Dsurefire.failIfNoSpecifiedTests=false` 2/2 通过；`./restart-dev-services.sh --profile guo --env-file .env.local --skip-frontend-build` 构建并重启成功；curl 健康检查、CORS 预检、登录、创建 session、发送对话链路通过。
 - Next: 后续多人新增 Flyway 脚本时直接用当前时间戳版本，不要再把已落库的历史 migration 改名；前端 `AgentWorkbench.vue` 已通过 `api.createSession(workspaceId, title)` 传标题，curl/脚本直调 `/api/sessions` 时也要带 `title`。
+
+### 2026-06-25 - 本地 PostgreSQL JDBC 使用 127.0.0.1，页面访问继续使用 192.168.100.115
+
+- Why: 使用 `.env.local` 直接启动时后端在 Druid 初始化阶段报 `org.postgresql.util.PSQLException: 尝试连线已失败`，底层是 `java.io.EOFException`，发生在 PostgreSQL JDBC 认证阶段；因此 8080/3000 都没有监听。
+- What: 经用户确认，将 `.env.local` 的 `SPRING_DATASOURCE_DRUID_URL` 从 `jdbc:postgresql://192.168.100.115:15432/testagent?sslmode=disable` 改为 `jdbc:postgresql://127.0.0.1:15432/testagent?sslmode=disable`。前后端对外访问地址仍通过 `TEST_AGENT_BASE_URL=http://192.168.100.115:8080` 和 `TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000` 维持 115。
+- How: 对照验证显示 `psql` 连 `192.168.100.115:15432` 成功，PostgreSQL JDBC 连同一地址会 EOF；同一 JDBC 驱动连 `127.0.0.1:15432` 成功。容器 `pg_hba.conf` 中 `127.0.0.1/32` 命中 `trust`，而 115 进入 Docker 后来源为 `172.18.0.1`，命中 `scram-sha-256`。为本地稳定启动，依赖服务走 localhost，浏览器访问继续走局域网 IP。
+- Result: 使用正式 `.env.local` 执行 `./restart-dev-services.sh --profile guo --env-file .env.local --skip-frontend-build` 后端 readiness 和前端 3000 均通过；登录 CORS 预检返回 `Access-Control-Allow-Origin: http://192.168.100.115:3000`；发送对话返回 200，创建 `run_ac72bbb784454f7f9e5aa86de7c45ef7` 且状态 `RUNNING`。
+- Pitfalls: `.env.local` 是忽略文件，不会随 git 提交传播；其他机器如果仍把 JDBC URL 指向本机局域网 IP，可能复现同类 JDBC SCRAM EOF。不要把前端 API 地址改成 127，否则移动设备或其他机器访问 115 页面时会打到自己的 localhost。
+- Verification: `curl http://192.168.100.115:8080/actuator/health` 返回 `UP`；`curl -I http://192.168.100.115:3000` 返回 200；CORS 预检通过；curl 登录、创建 session、发送 run 链路通过。
+- Next: 若后续要坚持数据库也用 115，需要调整本地 Postgres 容器认证/监听策略，而不是改应用代码。
