@@ -26,6 +26,16 @@
 - Result: 右侧标签简明贴右；Monaco diff 滚动条细线化与 Monaco Editor 一致；用户气泡不再独立染色，整条对话底色统一。`packages/diff-viewer/tests` 4/4 通过；`@test-agent/diff-viewer` typecheck 通过；FigmaChatPanel 既有 2 条失败与本次改动无关（pre-existing `role` 类型推断问题）。
 - Verification: `corepack pnpm exec vitest run packages/diff-viewer/tests`；`corepack pnpm --filter @test-agent/diff-viewer typecheck`；`git diff --check`。
 
+### 2026-06-26 - DiffViewer 跟进：标题行进一步精简、diffViewport 强制细线化
+
+- Why: 用户反馈"完全没有效果"。经 DevTools 检视，标题行右侧文案已生效，但 `pl-4` 让内容仍与左边框有间距、且行高过大；Monaco 滚动条对应的 DOM 是 `.diffViewport`（默认 30×20px，由 Monaco 内部 `ENTIRE_DIFF_OVERVIEW_WIDTH = ONE_OVERVIEW_WIDTH * 2 = 15 * 2` 写死 inline style），单靠 `scrollbar.verticalScrollbarSize` 选项无法影响它。
+- What:
+  - `frontend/packages/diff-viewer/src/DiffViewer.vue` 标题行：`px-4` → `px-3`、`py-1.5` → `py-0.5`、`text-[11px]` → `text-[10.5px]`、`gap-1.5` → `gap-1`，右列 `pl-4` → `pl-2` 并追加 `pr-0.5` 贴最右，统一视图同步。
+  - 新增 scoped 样式覆盖 Monaco diff overview：`:deep(.monaco-diff-editor .diffOverview)` 与 `:deep(.monaco-diff-editor .diffViewport)` 都用 `width: 6px !important` 覆盖 inline 30px；height 由 `state.getSliderSize()` 算出后又被 `setHeight` 写 inline，CSS `height` 不会跟动，但 width 压住后视觉上即变细线；`:hover` / `:active` 分支同步压回 6px 防止 hover 时反弹。
+- How: 标题行为 Tailwind class 调整；新增规则都在 `<style scoped>` 顶部独立注释块，`.diffOverview` 与 `.diffViewport` 都用 `!important` 压过 Monaco 写死的 inline style。`.slider` 的 `border-radius: 3px` 保留与细线视觉一致。
+- Result: 标题行更紧凑、右侧文案贴到修改区最右侧；Monaco diff overview ruler 视觉宽度从 30px 压到 6px，与普通细滚动条对齐。`packages/diff-viewer/tests` 4/4 通过。
+- Verification: `corepack pnpm exec vitest run packages/diff-viewer/tests`；`git diff --check`；浏览器需硬刷新（Cmd+Shift+R）以避免 HMR / 缓存沿用旧 CSS。
+
 ### 2026-06-26 - UI 三项改版：Diff light 主题、三栏底部 Footer 对齐、聊天输入卡片化
 
 - Why: 用户要求 (1) Monaco Diff 编辑器切为 light 风格与工作台白色主题匹配；(2) 不管切换到哪个功能，底部那一行应该都存在且高度一致；(3) 聊天面板输入框加宽，把模型选择、新建对话、附件上传挪到输入框内部下方，整体像现代 ChatGPT 风格。

@@ -344,16 +344,16 @@ onBeforeUnmount(() => {
       </div>
       <div class="flex min-h-0 flex-1 flex-col min-w-0">
         <!-- Diff Panels Header Hints -->
-        <div v-if="(source === 'vcs' || source === 'agent') && viewMode === 'split'" class="grid grid-cols-2 border-b border-slate-200 bg-[#f8fafc] px-4 py-1.5 text-[11px] text-slate-500">
-          <div class="flex items-center gap-1.5 font-semibold text-slate-700">
+        <div v-if="(source === 'vcs' || source === 'agent') && viewMode === 'split'" class="grid grid-cols-2 border-b border-slate-200 bg-[#f8fafc] px-3 py-0.5 text-[10.5px] text-slate-500">
+          <div class="flex items-center gap-1 font-semibold text-slate-700">
             <span class="text-rose-500 font-bold">◀</span> 基线版本（只读，历史提交代码）
           </div>
-          <div class="flex items-center justify-end gap-1.5 border-l border-slate-200 pl-4 font-semibold text-slate-700">
+          <div class="flex items-center justify-end gap-1 border-l border-slate-200 pl-2 font-semibold text-slate-700 pr-0.5">
             <span class="text-emerald-500 font-bold">▶</span> 本地修改 · 可编辑（Cmd+S 保存）
           </div>
         </div>
-        <div v-else-if="(source === 'vcs' || source === 'agent') && viewMode === 'unified'" class="border-b border-slate-200 bg-[#f8fafc] px-4 py-1.5 text-[11px] text-slate-700 font-semibold">
-          <div class="flex items-center justify-end gap-1.5">
+        <div v-else-if="(source === 'vcs' || source === 'agent') && viewMode === 'unified'" class="border-b border-slate-200 bg-[#f8fafc] px-3 py-0.5 text-[10.5px] text-slate-700 font-semibold">
+          <div class="flex items-center justify-end gap-1 pr-0.5">
             <span class="text-emerald-500 font-bold">▶</span> 统一视图 · 可直接编辑（Cmd+S 保存）
           </div>
         </div>
@@ -364,3 +364,47 @@ onBeforeUnmount(() => {
     <FeedbackBanner :feedback="feedback" />
   </div>
 </template>
+
+<style scoped>
+/* Monaco diff editor 内部滚动条细线化：
+   - globals.css 里 ::-webkit-scrollbar 强制 10px 会覆盖 Monaco 内部滚动条
+   - 需要在 scoped 样式里用 :deep() 显式压回 6px
+   - 同时约束 .slider 让最小尺寸不要反弹 */
+:deep(.monaco-scrollable-element)::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+:deep(.monaco-scrollable-element)::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 3px;
+}
+:deep(.monaco-scrollable-element)::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.4);
+}
+:deep(.monaco-scrollable-element)::-webkit-scrollbar-track {
+  background: transparent;
+}
+:deep(.monaco-scrollable-element) .slider {
+  border-radius: 3px !important;
+}
+
+/* Monaco diff overview 视口（diffViewport）原本默认 30×20px，太粗。
+   Monaco 内部用 inline style 强制设 30px (ENTIRE_DIFF_OVERVIEW_WIDTH = ONE_OVERVIEW_WIDTH * 2 = 15 * 2)，
+   必须用 !important 才能压过。父容器 .diffOverview 也是 30px，需要一起压。 */
+:deep(.monaco-diff-editor .diffOverview) {
+  width: 6px !important;
+  right: 2px !important;
+}
+:deep(.monaco-diff-editor .diffViewport) {
+  width: 6px !important;
+  height: 14px !important;
+  border-radius: 3px !important;
+  right: 2px !important;
+}
+:deep(.monaco-diff-editor .diffViewport:hover) {
+  width: 6px !important;
+}
+:deep(.monaco-diff-editor .diffViewport:active) {
+  width: 6px !important;
+}
+</style>
