@@ -10,15 +10,12 @@ import com.icbc.testagent.opencode.runtime.process.WorkspaceBackendServerRespons
 import com.icbc.testagent.opencode.runtime.process.WorkspaceFileRouteResponse;
 import com.icbc.testagent.opencode.runtime.process.WorkspaceFileRoutingService;
 import java.util.List;
-import java.util.function.Function;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
-import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 /**
  * 工作空间文件 WebSocket HTTP 入口，负责路由发现、后端服务器列表和短期 ticket 签发。
@@ -46,43 +43,40 @@ public class WorkspaceFileSocketController {
             "/api/workspaces/{workspaceId}/file-ws-route",
             "/api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route"
     })
-    public Mono<ApiResponse<WorkspaceFileRouteResponse>> routeWorkspace(
+    public ApiResponse<WorkspaceFileRouteResponse> routeWorkspace(
             @PathVariable String workspaceId,
             ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
         AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
-        return blocking(exchange, traceId -> routingService.routeWorkspace(
+        return ApiResponse.ok(routingService.routeWorkspace(
                 principal.userId(),
                 "opencode",
                 new WorkspaceId(workspaceId),
-                traceId));
+                traceId), traceId);
     }
 
     /**
      * 超级管理员列出可直连的后端服务器，用于跨服务器工作空间选择器。
      */
     @GetMapping("/api/internal/platform/workspace-management/backend-servers")
-    public Mono<ApiResponse<List<WorkspaceBackendServerResponse>>> listBackendServers(ServerWebExchange exchange) {
+    public ApiResponse<List<WorkspaceBackendServerResponse>> listBackendServers(ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
         AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
-        return blocking(exchange, traceId -> routingService.listBackendServers(principal.userId(), "opencode", traceId));
+        return ApiResponse.ok(routingService.listBackendServers(principal.userId(), "opencode", traceId), traceId);
     }
 
     /**
      * 在目标后端签发文件 WebSocket 一次性 ticket。
      */
     @PostMapping("/api/internal/platform/workspace-management/file-ws/tickets")
-    public Mono<ApiResponse<WorkspaceFileSocketDtos.TicketResponse>> createTicket(
+    public ApiResponse<WorkspaceFileSocketDtos.TicketResponse> createTicket(
             @RequestBody(required = false) WorkspaceFileSocketDtos.TicketRequest request,
             ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
         AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
         WorkspaceFileSocketDtos.TicketRequest resolved = request == null
                 ? new WorkspaceFileSocketDtos.TicketRequest(null, null, null)
                 : request;
-        return blocking(exchange, traceId -> ticketService.createTicket(principal, resolved, traceId));
-    }
-
-    private <T> Mono<ApiResponse<T>> blocking(ServerWebExchange exchange, Function<String, T> action) {
-        String traceId = RuntimeApiSupport.traceId(exchange);
-        return Mono.fromCallable(() -> ApiResponse.ok(action.apply(traceId), traceId))
-                .subscribeOn(Schedulers.boundedElastic());
+        return ApiResponse.ok(ticketService.createTicket(principal, resolved, traceId), traceId);
     }
 }
