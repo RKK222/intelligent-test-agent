@@ -681,6 +681,7 @@ class JdbcRepositoryIntegrationTest {
                 "work",
                 "SHA256:abc",
                 "cipher",
+                "aesCipher",
                 "nonce",
                 NOW));
         assertThat(configurationManagement.findSshKeys(userId)).extracting(UserSshKey::name).containsExactly("work");
@@ -690,6 +691,7 @@ class JdbcRepositoryIntegrationTest {
                         "second",
                         "SHA256:def",
                         "cipher2",
+                        "aesCipher2",
                         "nonce2",
                         NOW)))
                 .isInstanceOf(DataIntegrityViolationException.class);
@@ -1059,15 +1061,13 @@ class JdbcRepositoryIntegrationTest {
         assertThat(opencodeProcesses.findUserBinding(new UserId("usr_process_user"), " OPENCODE ")).contains(binding);
         assertThat(opencodeProcesses.findOccupiedPorts(new LinuxServerId("10.8.0.12"), new OpencodeContainerId("ctr_01")))
                 .containsExactly(4096);
-        // V17 migration 在每个集成测试 setUp 阶段会再种入本地 opencode 机器与默认开发用户的进程，
-        // 因此这些列举/计数断言需要容忍 V17 的种子行，单独断言"测试用例自己创建的行"仍可定位。
         assertThat(opencodeProcesses.findOpencodeServerProcesses(10)).contains(process);
         assertThat(opencodeProcesses.findLinuxServers(500)).contains(linuxServer);
         assertThat(opencodeProcesses.findBackendJavaProcesses(500)).containsExactly(backendProcess);
         assertThat(opencodeProcesses.findContainers(500)).contains(container);
         assertThat(opencodeProcesses.findContainerManagers(500)).contains(manager);
         assertThat(opencodeProcesses.findManagerBackendConnections(500)).containsExactly(connection);
-        assertThat(opencodeProcesses.countUserBindings()).isEqualTo(2);
+        assertThat(opencodeProcesses.countUserBindings()).isEqualTo(1);
         assertThat(opencodeProcesses.findUserBindingsByProcessIds(List.of(process.processId())))
                 .containsEntry(process.processId(), binding);
         OpencodeServerProcessFilter filter = new OpencodeServerProcessFilter(
@@ -1474,100 +1474,67 @@ class JdbcRepositoryIntegrationTest {
     }
 
     @Test
-    void v17SeedLocalOpencodeMachineForDefaultUserIsIdempotent() {
-        // V17 已在 setUp 阶段通过 Flyway 应用一次；这里验证种子行已写入。
+    void v17LoopbackSeedIsRemovedByCleanupMigration() {
+        // 全量迁移会先执行历史 V17，再执行后续清理脚本；最终运行态数据库不应保留 127.0.0.1 种子拓扑。
         assertThat(opencodeProcesses.findLinuxServerById(new LinuxServerId("127.0.0.1")))
-                .isPresent()
-                .get()
-                .extracting(LinuxServer::status)
-                .isEqualTo(LinuxServerStatus.READY);
+                .isEmpty();
         assertThat(opencodeProcesses.findContainerById(new OpencodeContainerId("ctr_local_4096")))
-                .isPresent();
+                .isEmpty();
         assertThat(opencodeProcesses.findContainerManagerById(new ContainerManagerId("mgr_local_4096")))
-                .isPresent()
-                .get()
-                .extracting(OpencodeContainerManager::connectionStatus)
-                .isEqualTo(ManagerConnectionStatus.CONNECTED);
+                .isEmpty();
         assertThat(opencodeProcesses.findOpencodeServerProcessById(new OpencodeProcessId("ocp_local_user_dev")))
-                .isPresent()
-                .get()
-                .extracting(OpencodeServerProcess::baseUrl)
-                .isEqualTo("http://127.0.0.1:4096");
+                .isEmpty();
         assertThat(opencodeProcesses.findUserBinding(new UserId("usr_test_dev"), "opencode"))
-                .isPresent();
-
-        // 重新执行 V17 也不应破坏数据或产生重复行。
-        Flyway.configure()
-                .dataSource(database)
-                .locations("classpath:db/migration")
-                .target("17")
-                .load()
-                .migrate();
-        Flyway.configure()
-                .dataSource(database)
-                .locations("classpath:db/migration")
-                .target("17")
-                .load()
-                .migrate();
-        assertThat(opencodeProcesses.findContainerManagerById(new ContainerManagerId("mgr_local_4096")))
-                .isPresent();
-        assertThat(opencodeProcesses.findOpencodeServerProcessById(new OpencodeProcessId("ocp_local_user_dev")))
-                .isPresent();
-        assertThat(opencodeProcesses.findUserBinding(new UserId("usr_test_dev"), "opencode"))
-                .isPresent();
+                .isEmpty();
+        assertThat(countRows(jdbcClient, "select count(*) from opencode_manager_backend_connections")).isZero();
+        assertThat(countRows(jdbcClient, "select count(*) from backend_java_processes where linux_server_id = '127.0.0.1'"))
+                .isZero();
+        assertThat(countRows(jdbcClient, "select count(*) from linux_servers where linux_server_id = '127.0.0.1'"))
+                .isZero();
     }
 
     @Test
-    void v17SeedReusesExistingLocalOpencodePortProcess() {
+    void cleanupMigrationRemovesHistoricalLoopbackTopology() {
         EmbeddedDatabase migrationDatabase = new EmbeddedDatabaseBuilder()
                 .setType(EmbeddedDatabaseType.H2)
-                .setName("testagent_v17_existing_port;MODE=PostgreSQL;DATABASE_TO_UPPER=false")
+                .setName("testagent_v17_cleanup;MODE=PostgreSQL;DATABASE_TO_UPPER=false")
                 .build();
         try {
             Flyway.configure()
                     .dataSource(migrationDatabase)
                     .locations("classpath:db/migration")
-                    .target("16")
+                    .target("17")
                     .load()
                     .migrate();
             JdbcClient migrationJdbc = JdbcClient.create(migrationDatabase);
 
-            // 复现历史本地库：V17 尚未应用，但 127.0.0.1:4096 已有旧进程记录。
+            assertThat(countRows(migrationJdbc, "select count(*) from linux_servers where linux_server_id = '127.0.0.1'"))
+                    .isEqualTo(1);
+            assertThat(countRows(migrationJdbc, "select count(*) from opencode_server_processes where linux_server_id = '127.0.0.1'"))
+                    .isEqualTo(1);
+            assertThat(countRows(migrationJdbc, "select count(*) from user_opencode_process_bindings where linux_server_id = '127.0.0.1'"))
+                    .isEqualTo(1);
+
+            // V17 本身不写 backend 进程连接；这里补一条历史本地连接，覆盖清理脚本的跨表删除路径。
             migrationJdbc.sql("""
-                            insert into linux_servers (
-                                linux_server_id, name, status, capacity_summary_json,
-                                last_heartbeat_at, trace_id, created_at, updated_at
+                            insert into backend_java_processes (
+                                backend_process_id, linux_server_id, listen_url, status,
+                                started_at, last_heartbeat_at, trace_id, created_at, updated_at
                             )
                             values (
-                                '127.0.0.1', 'local-opencode-host', 'READY', '{}',
-                                now(), 'trace_existing_local_4096', now(), now()
+                                'bjp_local_cleanup', '127.0.0.1', 'http://127.0.0.1:8080', 'READY',
+                                now(), now(), 'trace_cleanup_local_4096', now(), now()
                             )
                             """)
                     .update();
             migrationJdbc.sql("""
-                            insert into opencode_containers (
-                                container_id, linux_server_id, container_name,
-                                port_start, port_end, max_processes, current_processes,
-                                status, last_heartbeat_at, trace_id, created_at, updated_at
+                            insert into opencode_manager_backend_connections (
+                                manager_id, backend_process_id, status,
+                                connected_at, last_heartbeat_at, trace_id, updated_at
                             )
                             values (
-                                'ctr_local_4096', '127.0.0.1', 'local-opencode',
-                                4096, 4096, 1, 1,
-                                'READY', now(), 'trace_existing_local_4096', now(), now()
-                            )
-                            """)
-                    .update();
-            migrationJdbc.sql("""
-                            insert into opencode_server_processes (
-                                process_id, user_id, linux_server_id, container_id, port, pid, base_url,
-                                status, session_path, config_path, started_at, last_health_check_at,
-                                health_message, trace_id, created_at, updated_at
-                            )
-                            values (
-                                'ocp_existing_local_4096', 'usr_test_dev', '127.0.0.1', 'ctr_local_4096',
-                                4096, null, 'http://127.0.0.1:4096',
-                                'RUNNING', '/data/opencode/session/4096', '/data/opencode/.config/opencode/',
-                                now(), now(), 'existing before V17', 'trace_existing_local_4096', now(), now()
+                                'mgr_local_4096', 'bjp_local_cleanup', 'CONNECTED',
+                                now(), now(), 'trace_cleanup_local_4096', now()
                             )
                             """)
                     .update();
@@ -1578,25 +1545,26 @@ class JdbcRepositoryIntegrationTest {
                     .load()
                     .migrate();
 
-            Integer processCount = migrationJdbc.sql("""
-                            select count(*)
-                            from opencode_server_processes
-                            where linux_server_id = '127.0.0.1' and port = 4096
-                            """)
-                    .query(Integer.class)
-                    .single();
-            String boundProcessId = migrationJdbc.sql("""
-                            select process_id
-                            from user_opencode_process_bindings
-                            where user_id = 'usr_test_dev' and agent_id = 'opencode'
-                            """)
-                    .query(String.class)
-                    .single();
-
-            assertThat(processCount).isEqualTo(1);
-            assertThat(boundProcessId).isEqualTo("ocp_existing_local_4096");
+            assertThat(countRows(migrationJdbc, "select count(*) from opencode_manager_backend_connections")).isZero();
+            assertThat(countRows(migrationJdbc, "select count(*) from user_opencode_process_bindings where linux_server_id = '127.0.0.1'"))
+                    .isZero();
+            assertThat(countRows(migrationJdbc, "select count(*) from opencode_server_processes where linux_server_id = '127.0.0.1'"))
+                    .isZero();
+            assertThat(countRows(migrationJdbc, "select count(*) from opencode_container_managers where linux_server_id = '127.0.0.1'"))
+                    .isZero();
+            assertThat(countRows(migrationJdbc, "select count(*) from opencode_containers where linux_server_id = '127.0.0.1'"))
+                    .isZero();
+            assertThat(countRows(migrationJdbc, "select count(*) from backend_java_processes where linux_server_id = '127.0.0.1'"))
+                    .isZero();
+            assertThat(countRows(migrationJdbc, "select count(*) from linux_servers where linux_server_id = '127.0.0.1'"))
+                    .isZero();
         } finally {
             migrationDatabase.shutdown();
         }
     }
+
+    private static Integer countRows(JdbcClient jdbc, String sql) {
+        return jdbc.sql(sql).query(Integer.class).single();
+    }
+
 }

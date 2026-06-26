@@ -43,12 +43,11 @@
 - `V14__create_opencode_process_management_tables.sql`：创建 Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程和用户绑定表。
 - `V15__add_opencode_process_id_check_constraints.sql`：为 opencode 进程管理表加 `process_id` 前缀、IPv4、状态、port、baseUrl 形状等 CHECK 约束。
 - `V20260625184300__create_scheduler_framework_tables.sql`：创建 scheduler 任务定义、用户级计划、运行记录表，并给 sessions/runs/session_messages 增加来源预留字段；V17 之后新增 migration 统一使用 14 位时间戳版本，避免多人并行开发抢数字版本。
-- `V17__seed_local_opencode_machine_for_default_user.sql`：本地开发环境预置一台 `127.0.0.1` 的 opencode 机器并绑定默认开发用户。
+- `V17__seed_local_opencode_machine_for_default_user.sql`：历史本地开发种子脚本，曾预置一台 `127.0.0.1` 的 opencode 机器并绑定默认开发用户；该版本已可能被历史库应用，禁止删除、重命名或直接改写。
+- `V20260627000000__cleanup_loopback_linux_server_seed.sql`：清理 V17 留下的 `127.0.0.1` loopback opencode 拓扑、用户进程、绑定和关联的 manager-backend 连接。
 - `V20260626090000__add_workspace_linux_server_id.sql`：为 `workspaces` 增加可空 `linux_server_id` 和索引，新增工作区写当前服务器，历史空值由业务层在同服务器文件 WebSocket ticket 校验成功后回填。
 - `V20260626150000__add_common_parameters_and_workspace_create_operations.sql`：创建通用参数表、初始化 Linux/Windows opencode 路径参数，为 `code_repositories` 增加可空唯一 `english_name`，并创建设置页工作空间创建进度表。
-- `V14__create_opencode_process_management_tables.sql`：创建 Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程和用户绑定表。V10 已用于 F-COSS 本地种子数据，运行管理表使用后续版本避免 Flyway 版本冲突。
-- `V17__seed_local_opencode_machine_for_default_user.sql`：本地开发环境预置一台 `127.0.0.1` 的 opencode 机器（Linux 服务器 + 容器 + 管理进程）并把默认开发用户 `usr_test_dev` 绑定到端口 4096 的本地 opencode server，重复执行安全；如果历史本地库已存在同一 `linux_server_id + port` 的 opencode 进程，迁移会复用该进程完成默认用户绑定，避免端口唯一约束导致启动失败；`OpencodeManagerBackendConnection` 的 `backend_process_id` 由后端 `BackendJavaProcessLifecycleService.registerHeartbeat` 在启动时按本实例 ID 自举补齐。
-- 在 `application-local.yml` 启用 `test-agent.opencode.manager-control.gateway-mode=local`（`TEST_AGENT_OPENCODE_GATEWAY_MODE` 覆盖）后，`LocalOpencodeProcessManagerGateway` 直连 `opencode_server_processes.baseUrl` 跑 HTTP GET 做健康检测，`startProcess` 走占位返回；该模式配合 V17 可让前台 `888888888` 登录后右侧对话窗口的 opencode 进程状态落到 READY，不必额外启动 opencode-manager 容器。生产 profile 不配置此开关时，`SocketOpencodeProcessManagerGateway` 走 manager WebSocket，行为与 V17 之前完全一致。
+- 在 `application-local.yml` 启用 `test-agent.opencode.manager-control.gateway-mode=local`（`TEST_AGENT_OPENCODE_GATEWAY_MODE` 覆盖）后，`LocalOpencodeProcessManagerGateway` 直连真实 `opencode_server_processes.baseUrl` 跑 HTTP GET 做健康检测，`startProcess` 走占位返回；本地开箱即用状态由 `local-direct` 或真实 manager/backend 心跳注册承载，不再由 V17 seed 承载。生产 profile 不配置此开关时，`SocketOpencodeProcessManagerGateway` 走 manager WebSocket。
 - `JdbcWorkspaceRepository` 映射 `linux_server_id`，其余核心仓储包括 `JdbcSessionRepository`、`JdbcRunRepository`、`JdbcRunEventRepository`、`JdbcExecutionNodeRepository`、`JdbcRoutingDecisionRepository`。
 - `JdbcAgentSessionBindingRepository`：实现按 `(sessionId, agentId)` 和 `(agentId, remoteSessionId)` 查询、upsert 通用远端 session 绑定。
 - `JdbcSessionMessageRepository`：实现会话消息保存、按远端 messageId 幂等查询、分页和计数。
@@ -77,7 +76,7 @@
 - AgentSessionBinding 覆盖 upsert、按 agent 查询、远端 session 唯一约束和从旧 opencode 字段回填。
 - ConfigurationManagement 覆盖 V7 migration、V8 默认用户授权、成员逻辑删除恢复、应用与仓库多对多关联、代码库英文名保存/查询、通用参数默认值、工作空间创建进度表、应用工作空间保存和用户单 SSH key 唯一约束。
 - ManagedWorkspace 覆盖 V9/V20260626120900 migration、版本工作区唯一性、每服务器副本 upsert、目标 commit、个人空间名称唯一性、最近使用偏好和同步审计保存。
-- OpencodeProcessManagement 覆盖 V14 migration、拓扑读写、健康容器查询、运行管理拓扑列表、manager-backend 连接列表、opencode server 进程分页筛选、绑定关联查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
+- OpencodeProcessManagement 覆盖 V14 migration、V17 loopback 种子清理、拓扑读写、健康容器查询、运行管理拓扑列表、manager-backend 连接列表、opencode server 进程分页筛选、绑定关联查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
 - ScheduledTask 覆盖时间戳 migration、三张 scheduler 表、运行记录分页筛选、due task 查询和会话来源预留字段读写。
 - Session 全局分页在空搜索条件下不会绑定可空 query pattern，避免 PostgreSQL 无法推断 null 参数类型。
 - ExecutionNode 覆盖可路由节点过滤：仅 READY 且 `running_runs < max_runs`，并按负载、权重、更新时间稳定排序。

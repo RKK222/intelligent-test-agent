@@ -40,7 +40,8 @@
 - `db/migration/V15__add_opencode_process_id_check_constraints.sql`：为 opencode 进程管理表加 `process_id` 前缀、IPv4、状态、port、baseUrl 形状等 CHECK 约束。
 - `db/migration/V20260625184300__create_scheduler_framework_tables.sql`：创建 scheduler 表并为 sessions/runs/session_messages 增加来源预留字段。
 - `db/migration/V20260626150000__add_common_parameters_and_workspace_create_operations.sql`：创建通用参数表、代码库英文名字段和工作空间创建进度表。
-- `db/migration/V17__seed_local_opencode_machine_for_default_user.sql`：本地开发环境预置一台 `127.0.0.1` 的 opencode 机器并绑定默认开发用户。
+- `db/migration/V17__seed_local_opencode_machine_for_default_user.sql`：历史本地开发种子脚本，曾预置一台 `127.0.0.1` 的 opencode 机器并绑定默认开发用户；该版本只做 Flyway 历史保留，禁止删除、重命名或直接改写。
+- `db/migration/V20260627000000__cleanup_loopback_linux_server_seed.sql`：清理 V17 留下的 `127.0.0.1` loopback opencode 拓扑、用户进程、绑定和关联 manager-backend 连接。
 - 后续可新增 SQL 查询、migration 相关适配、Redis 限流、缓存或运行心跳实现。
 - 新增 migration 禁止写入测试、演示、个人开发或环境专属数据；这类数据应进入 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本。
 
@@ -81,7 +82,7 @@
 - RunEvent 测试必须覆盖同一 run 的并发 append，防止 stream 事件和取消事件同时落库时重复分配 seq。
 - SessionMessage/Run 测试必须覆盖 token/cost 字段、parts_json、远端 messageId 幂等查询和 active-run 查询。
 - ExecutionNode 测试必须覆盖可路由节点过滤和排序，防止不可用或满载节点被派发。
-- OpencodeProcessManagement 测试必须覆盖拓扑读写、健康容器查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
+- OpencodeProcessManagement 测试必须覆盖拓扑读写、V17 loopback 种子清理、健康容器查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
 - ScheduledTask 测试必须覆盖任务定义、用户计划、运行记录、分页筛选和来源字段读写。
 - CommonParameter 和 WorkspaceCreateOperation 测试必须覆盖平台优先级、默认路径 seed、进度步骤更新、成功/失败状态和按用户隔离查询。
 - MyBatis 试点测试必须覆盖 XML mapper 查询和更新；源码约束测试必须阻止新增 JDBC SQL 和 MyBatis 注解 SQL。

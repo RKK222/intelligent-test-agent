@@ -596,13 +596,13 @@ V10 种子数据对 F-COSS 的影响：
 - 远端 opencode 不可用时，消息查询回退读取数据库快照，不要求 V10 字段非空。
 - `run_id` 外键引用 `runs.run_id`，字段可空，避免历史消息迁移失败。
 
-## V17 本地 opencode 机器与默认开发用户进程种子
+## V17 本地 opencode 机器与默认开发用户进程种子（历史）
 
-`backend/test-agent-persistence/src/main/resources/db/migration/V17__seed_local_opencode_machine_for_default_user.sql` 为本地开发环境预置一个 "本地 opencode 机器"（Linux 服务器 + 容器 + 管理进程）和默认开发用户 `usr_test_dev`（用户名 `888888888`）的进程绑定，让前台登录后右侧对话窗口不再因 "没有可用的 opencode 容器" 而直接报错。
+`backend/test-agent-persistence/src/main/resources/db/migration/V17__seed_local_opencode_machine_for_default_user.sql` 曾为本地开发环境预置一个 "本地 opencode 机器"（Linux 服务器 + 容器 + 管理进程）和默认开发用户 `usr_test_dev`（用户名 `888888888`）的进程绑定。该 migration 已可能在历史本地库或共享库执行过，禁止删除、重命名或直接改写，否则会破坏 Flyway validate。
 
 兼容历史本地库时，V17 不只按固定 `process_id='ocp_local_user_dev'` 判断是否已种子化，也会检查 `linux_server_id='127.0.0.1' and port=4096` 是否已有 opencode 进程。若同端口已有旧进程，迁移复用该进程写入默认用户绑定，不再插入新的 `ocp_local_user_dev`，避免 `uk_opencode_server_processes_linux_port` 唯一约束阻塞本地启动。
 
-种子数据：
+历史种子数据：
 
 | 表 | 关键字段 | 值 |
 |---|---|---|
@@ -614,27 +614,48 @@ V10 种子数据对 F-COSS 的影响：
 
 说明：
 
-- `linux_server_id = 127.0.0.1` 与默认 `TEST_AGENT_LINUX_SERVER_ID`（即 `ManagerControlSettings.linuxServerId`）保持一致；容器端口 `4096` 与默认 `TEST_AGENT_OPENCODE_BASE_URL` 监听端口一致。
 - `opencode_server_processes.base_url` 满足 V15 校验 `= 'http://' || linux_server_id || ':' || port`。
 - `process_id` 以 `ocp_` 开头（V15 校验），`manager_id` 以 `mgr_` 开头（V15 校验）。
 - `OpencodeManagerBackendConnection` 的 `backend_process_id` 形如 `bjp_xxx`，由后端 `BackendJavaProcessLifecycleService.registerHeartbeat` 在启动时为本实例补齐，因此 migration 不预置该行。
 - 补齐逻辑详见 `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/process/socket/BackendJavaProcessLifecycleService.java#bootstrapLocalManagerConnections`，仅在 (manager, backend) 组合不存在连接行时插入；已有行只更新 `last_heartbeat_at` / `status`，与 `ManagerControlApplicationService.register/heartbeat` 协调更新。
+- 后续完整迁移会执行 `V20260627000000__cleanup_loopback_linux_server_seed.sql` 清理这些 `127.0.0.1` 行；本地开发不再依赖 V17 数据，必须通过 `local-direct` 或真实 manager/backend 心跳注册获得运行态拓扑。
 
-健康检测/启动网关选择：
+兼容策略：
+
+- V17 自身仍保留既有幂等写法，保证只迁移到 `target=17` 的历史库行为不变。
+- 仅在 `users.user_id = 'usr_test_dev'`（V5 默认开发用户）存在时才插入 `opencode_server_processes` 与 `user_opencode_process_bindings`；生产环境无该用户时整段种子不写用户进程相关表。
+
+## V20260627000000 清理 V17 本地 loopback 种子数据
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260627000000__cleanup_loopback_linux_server_seed.sql` 用于清理 V17 预置的 `linux_server_id='127.0.0.1'` 本地 opencode 种子拓扑。该脚本只删除历史测试/本地开发数据，不删除默认用户、角色字典或真实 IP 服务器行。
+
+清理范围：
+
+| 表 | 清理条件 |
+|---|---|
+| `opencode_manager_backend_connections` | `manager_id` 属于 `127.0.0.1` 的 manager，或 `backend_process_id` 属于 `127.0.0.1` 的后端进程 |
+| `user_opencode_process_bindings` | `linux_server_id = '127.0.0.1'` |
+| `opencode_server_processes` | `linux_server_id = '127.0.0.1'` |
+| `opencode_container_managers` | `linux_server_id = '127.0.0.1'` |
+| `opencode_containers` | `linux_server_id = '127.0.0.1'` |
+| `backend_java_processes` | `linux_server_id = '127.0.0.1'` |
+| `linux_servers` | `linux_server_id = '127.0.0.1'` |
+
+约束：
+
+- 外键未配置级联删除，脚本按子表到父表顺序删除。
+- 全部使用 `delete where` 条件，重复执行不会报错。
+- 不把测试、演示、个人开发或环境专属数据继续写入 Flyway；本地初始化数据应放在测试 fixture、mock、`test-agent-test-support` 或显式本地开发脚本中。
+
+本地开发健康检测/启动网关选择：
 
 - 默认 `test-agent.opencode.manager-control.gateway-mode=socket`（生产）：`SocketOpencodeProcessManagerGateway` 走 manager WebSocket，本地没起 manager 时 health/start 都会返回 `OPENCODE_UNAVAILABLE`，前端状态会落到 "opencode 进程健康检测失败，需要重新初始化"。
 - `application-local.yml` 默认 `gateway-mode=local`（受 `TEST_AGENT_OPENCODE_GATEWAY_MODE` 覆盖）：`LocalOpencodeProcessManagerGateway` 直连 `baseUrl` 跑 HTTP GET，`startProcess` 走占位返回；本机 127.0.0.1:4096 真的在跑 opencode server 时，前台状态会从 UNAVAILABLE 升级为 READY。
-- `local-direct` 完全短路：`application-local.yml` / `application-guo.yml` 默认 `test-agent.opencode.local-direct=true`（受 `TEST_AGENT_OPENCODE_LOCAL_DIRECT` 覆盖），`UserOpencodeProcessAssignmentService` 在 `status` / `initialize` / `requireReadyProcess` 三个入口跳过 database topology / user binding / manager health 校验链路，合成指向 `test-agent.opencode.local-direct-base-url`（默认 `http://127.0.0.1:4096`）的 READY 进程对象；无论 V17 种子 / 真实 opencode server / manager 状态如何，本地登录后状态接口都直接落到 READY。生产请把 `local-direct` 设回 `false`（也是 Java 字段默认值），保留 topology / health 校验。
+- `local-direct` 完全短路：`application-local.yml` / `application-guo.yml` 默认 `test-agent.opencode.local-direct=true`（受 `TEST_AGENT_OPENCODE_LOCAL_DIRECT` 覆盖），`UserOpencodeProcessAssignmentService` 在 `status` / `initialize` / `requireReadyProcess` 三个入口跳过 database topology / user binding / manager health 校验链路，合成指向 `test-agent.opencode.local-direct-base-url`（默认 `http://127.0.0.1:4096`）的 READY 进程对象；无论是否存在 V17 历史种子、真实 opencode server 或 manager 状态如何，本地登录后状态接口都直接落到 READY。生产请把 `local-direct` 设回 `false`（也是 Java 字段默认值），保留 topology / health 校验。
 
 ## 后续 migration 版本规则
 
 V17 及以前保留既有数字版本，已在本地或共享库执行过的 migration 禁止重命名。V17 之后新增 migration 必须使用 `VyyyyMMddHHmmss__description.sql`，时间戳按开发者创建迁移时的本地时间确定；多人并行开发时不得再抢占 `V18`、`V19` 这类顺序数字版本。提交前需运行持久化模块 migration 命名测试，确认版本唯一且时间戳规则生效。
-
-兼容策略：
-
-- 全部插入语句使用 `where not exists` / `where exists` 保护，重复执行迁移不会破坏数据或产生重复行。
-- 仅在 `users.user_id = 'usr_test_dev'`（V5 默认开发用户）存在时才插入 `opencode_server_processes` 与 `user_opencode_process_bindings`；生产环境无该用户时整段种子不写用户进程相关表，仅保留拓扑种子，便于后续手工绑定。
-- 容器 `current_processes = 1` 反映当前已有一个用户进程；若需要新增第二个用户，需要先把 `current_processes` 与 `max_processes` 调大并扩展端口池，或先解除已有绑定。
 
 ## V20260626210000 数据库表和字段中文注释
 

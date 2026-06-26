@@ -822,3 +822,10 @@
 - What: 在 `AGENTS.md`、后端规范、数据库部署文档、自检清单以及 `test-agent-persistence` README/PACKAGE 说明中新增规则：Flyway 仅承载结构变更、历史数据兼容迁移和生产必需基础字典/系统参数；测试数据放测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程。
 - How: 仅修改稳定文档，不触碰当前工作区已有后端代码、配置和未提交 migration；同时整理 `AGENTS.md` 强制规则编号，删除重复的 session-log 规则副本。
 - Result: 后续新增 migration 时，入口规范、后端规范、数据库文档、包级说明和提交前自检都会阻止把测试数据带入 Flyway。
+
+### 2026-06-26 - 清理 V17 本地 loopback opencode 种子
+
+- Why: V17 曾写入 `127.0.0.1` 本地 opencode 拓扑和默认用户绑定，后端改为真实 IP/心跳注册与 `local-direct` 后，这批数据会变成运行管理里的历史脏数据。
+- What: 保留 `V17__seed_local_opencode_machine_for_default_user.sql` 作为 Flyway 历史文件，新增 `V20260627000000__cleanup_loopback_linux_server_seed.sql` 清理 `linux_servers`、backend/opencode 进程拓扑、用户绑定和 manager-backend 连接中 `linux_server_id='127.0.0.1'` 的历史数据；同步持久化 README、PACKAGE 和数据库部署文档。
+- How: 集成测试从完整迁移链断言 V17 loopback 种子最终不存在，并从 `target("17")` 的历史状态补一条本地 backend connection 后跑全量迁移，验证清理脚本按外键顺序删干净。
+- Result: V17 文件不直接改动，避免已应用历史库 Flyway validate 失败；`JdbcRepositoryIntegrationTest` 全部通过。`FlywayMigrationNamingTest` 仍被既有 `V18__create_scheduler_framework_tables.sql` 阻断，需后续单独处理该历史命名问题。
