@@ -8,6 +8,15 @@
 - What: `FigmaChatPanel` 改为仅 READY 时收起为圆点，非 READY 状态自动展开并显示初始化按钮；`AgentWorkbench` 的进程查询改按登录态启用，loading 只在首次取数时阻塞；补充非 READY 初始化按钮组件测试。按现有 `.env.test` / 200 数据库联调环境重启 `test-agent-opencode-manager`，重新初始化 wr 的 4096 进程。
 - How: 先用 3000 页面和 `/api/internal/agent/opencode/processes/me` 复现 NEEDS_INITIALIZATION；确认 200 库 wr 绑定 `ocp_e295...` 处于 UNHEALTHY 且 4096 无监听；重启 manager 后调用初始化 API，manager 派生新的 opencode 进程。
 - Result: 3000 页面显示 `opencode 进程可用` READY 圆点；真实发送“只回复 OK”后 run 进入 `SUCCEEDED`，SSE 正常打开并返回 `OK`。聚焦 Vitest 与 Playwright 初始化门禁用例均通过；当前服务仍是 `.env.test` + 192.168.100.200 数据库联调态。
+### 2026-06-26 - 优化工作台底部工作空间切换按钮文案与图标
+
+- Why: 增强用户体验，当未选中具体工作空间版本时，底部工作区切换按钮默认文案不应为动态的应用名后缀（如 `F-COSS 工作空间`），而应统一为 `切换工作空间`，并且图标应从 `Layers` 改为更具表达力的 `ArrowLeftRight` 双向箭头。
+- What: 修改 `frontend/apps/agent-web/src/components/WorkbenchFooter.vue`：
+  - 将 `lucide-vue-next` 的 `Layers` 图标替换为 `ArrowLeftRight`。
+  - 在 `triggerLabel` 计算属性的 fallback 分支，将 `props.appName ? `${props.appName} 工作空间` : "应用工作空间"` 直接改为返回 `"切换工作空间"`。
+  - 在 template 中更新图标组件 `<Layers>` 为 `<ArrowLeftRight>`。
+- How: 仅修改前端组件的 Vue 模版及 computed 计算属性，不改动 TypeScript 业务逻辑，且不改变 Props 结构。
+- Result: 按钮成功展示“切换工作空间”与双向箭头图标，符合界面重构意图；运行 `apps/agent-web/tests/WorkbenchFooter.test.ts` 以及 `@test-agent/agent-web` 的类型检查（typecheck）均完全通过。
 
 ### 2026-06-26 - 后端启动禁用本机 JVM 代理
 

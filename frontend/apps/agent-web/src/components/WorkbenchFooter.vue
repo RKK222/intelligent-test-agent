@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
-import { Layers, Plus, Save, ServerCog } from "lucide-vue-next";
+import { ArrowLeftRight, Plus, Save, ServerCog } from "lucide-vue-next";
 import { ElDatePicker, ElDialog } from "element-plus";
 import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
 import type { BackendApiClient } from "@test-agent/backend-api";
@@ -244,7 +244,7 @@ const triggerLabel = computed(() => {
   if (selectedVersion.value && selectedTemplate.value) {
     return `${selectedTemplate.value.workspaceName} / ${selectedVersion.value.version}`;
   }
-  return props.appName ? `${props.appName} 工作空间` : "应用工作空间";
+  return "切换工作空间";
 });
 
 function toggleMenu() {
@@ -374,7 +374,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
           aria-haspopup="menu"
           @click.stop="toggleMenu"
         >
-          <Layers class="ta-workbench-footer-icon" />
+          <ArrowLeftRight class="ta-workbench-footer-icon" />
           <span class="ta-workbench-footer-branch-label">{{ triggerLabel }}</span>
         </button>
         <!--
