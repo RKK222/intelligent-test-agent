@@ -462,6 +462,7 @@ const reasoningHtml = computed(() =>
     .replace(/\[(\w+)\]/g, '<strong>[$1]</strong>')
 )
 
+// 渲染 markdown 内容，返回安全的 HTML
 // 把 unified diff 文本按行解析为带 kind 的结构，供右侧 git-merge 风格渲染使用。
 // 解析规则与 git apply 一致：每行首字符决定 kind；hunk header "@@" 重置行号计数器。
 // 没有 patch 文本（部分 diff.proposed 事件只带 path/additions/deletions）时返回空数组，由模板降级展示空态。
@@ -735,15 +736,38 @@ const hasTaskUsageDisplay = computed(
 
 const scrollEl = ref<HTMLElement | null>(null)
 
+// 滚动到底部，使用 setTimeout 确保 DOM 完全更新
+function scrollToBottom() {
+  setTimeout(() => {
+    if (scrollEl.value) {
+      scrollEl.value.scrollTop = scrollEl.value.scrollHeight
+    }
+  }, 50)
+}
+
+// 监听消息变化（数量或内容），流式回复时消息内容增长但数量不变，也需要滚动
 watch(
-  () => props.messages.length,
-  () =>
-    nextTick(() =>
-      scrollEl.value?.scrollTo({
-        top: scrollEl.value.scrollHeight,
-        behavior: 'smooth',
-      })
-    )
+  () => {
+    const msgs = props.messages
+    if (!msgs || msgs.length === 0) return '0:0'
+    const last = msgs[msgs.length - 1]
+    if (last.role !== 'user' && last.role !== 'assistant') return `${msgs.length}:0`
+    const lastLen =
+      typeof last.content === 'string'
+        ? last.content.length
+        : typeof (last as { text?: string }).text === 'string'
+          ? ((last as { text?: string }).text?.length ?? 0)
+          : Array.isArray((last as { parts?: unknown[] }).parts)
+            ? ((last as { parts?: unknown[] }).parts ?? []).reduce(
+                (n: number, p: unknown) => n + (partText(p)?.length || 0),
+                0
+              )
+            : 0
+    return `${msgs.length}:${lastLen}`
+  },
+  () => {
+    nextTick(scrollToBottom)
+  }
 )
 
 function formatTime(iso: string) {
