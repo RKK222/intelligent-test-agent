@@ -614,6 +614,13 @@ const processStatusText = computed(() => {
   return props.processStatus.baseUrl ?? props.processStatus.message
 })
 
+// 进程状态卡片可折叠：默认收起为右下角一个小圆点（带渐变虚化），
+// 点击展开/收起，节省聊天面板纵向空间
+const processStatusCollapsed = ref(true)
+function toggleProcessStatus() {
+  processStatusCollapsed.value = !processStatusCollapsed.value
+}
+
 // 抽屉可见文件列表（按 props 顺序）；选中态基于 drawerSelectedPath。
 const drawerFiles = computed(() => props.fileChanges ?? [])
 
@@ -1258,12 +1265,32 @@ function onCompositionEnd() {
       </span>
     </div>
 
+    <!-- 收起态：右下角一个小圆点，带渐变虚化；点击展开 -->
+    <button
+      v-if="processStatusVisible && processStatusCollapsed"
+      type="button"
+      :class="[
+        'figma-chat-process-dot',
+        processReady ? 'is-ready' : 'is-blocking',
+      ]"
+      :title="processStatusTitle"
+      :aria-label="`展开进程状态：${processStatusTitle}`"
+      @click="toggleProcessStatus"
+    />
+
+    <!-- 展开态：原状态卡片；点击收起回圆点 -->
     <div
-      v-if="processStatusVisible"
+      v-else-if="processStatusVisible"
       :class="[
         'figma-chat-process-status',
         processReady ? 'is-ready' : 'is-blocking',
       ]"
+      role="button"
+      tabindex="0"
+      :title="`收起进程状态`"
+      @click="toggleProcessStatus"
+      @keydown.enter.prevent="toggleProcessStatus"
+      @keydown.space.prevent="toggleProcessStatus"
     >
       <div class="figma-chat-process-copy">
         <span class="figma-chat-process-title">{{ processStatusTitle }}</span>
@@ -1278,7 +1305,7 @@ function onCompositionEnd() {
         :disabled="
           processInitializing || processLoading || !processStatus.initializable
         "
-        @click="emit('initialize-process')"
+        @click.stop="emit('initialize-process')"
       >
         {{ processInitializing ? '初始化中' : '初始化进程' }}
       </button>
@@ -2162,6 +2189,63 @@ function onCompositionEnd() {
   border-radius: 6px;
   background: #fafafa;
   color: #333;
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.figma-chat-process-status:hover {
+  opacity: 0.92;
+}
+.figma-chat-process-status:active {
+  transform: scale(0.99);
+}
+
+/* 收起态：右下角一颗带虚化渐变的小圆点；点击展开 */
+.figma-chat-process-dot {
+  flex-shrink: 0;
+  align-self: flex-end;
+  width: 12px;
+  height: 12px;
+  border-radius: 9999px;
+  border: none;
+  margin: 0 16px 8px;
+  padding: 0;
+  cursor: pointer;
+  position: relative;
+  outline: none;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.figma-chat-process-dot::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 9999px;
+  background: inherit;
+  filter: blur(8px);
+  opacity: 0.55;
+  z-index: -1;
+  pointer-events: none;
+}
+.figma-chat-process-dot:hover {
+  transform: scale(1.15);
+}
+.figma-chat-process-dot.is-ready {
+  background: radial-gradient(
+    circle at 35% 35%,
+    #34d399 0%,
+    rgba(24, 169, 120, 0.85) 55%,
+    rgba(24, 169, 120, 0.25) 100%
+  );
+  box-shadow: 0 0 6px rgba(24, 169, 120, 0.45);
+}
+.figma-chat-process-dot.is-blocking {
+  background: radial-gradient(
+    circle at 35% 35%,
+    #fb7185 0%,
+    rgba(235, 94, 83, 0.85) 55%,
+    rgba(235, 94, 83, 0.25) 100%
+  );
+  box-shadow: 0 0 6px rgba(235, 94, 83, 0.45);
 }
 
 .figma-chat-process-status.is-ready {

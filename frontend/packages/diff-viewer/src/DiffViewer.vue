@@ -150,8 +150,8 @@ async function initMonaco(el: HTMLElement) {
     scrollbar: {
       vertical: "visible",
       horizontal: "visible",
-      verticalScrollbarSize: 6,
-      horizontalScrollbarSize: 6,
+      verticalScrollbarSize: 4,
+      horizontalScrollbarSize: 4,
       useShadows: false
     }
   });
@@ -253,7 +253,7 @@ onBeforeUnmount(() => {
     <div class="flex flex-1 items-center justify-center text-center text-[12px]">暂无 Diff</div>
   </div>
   <div v-else class="flex h-full min-h-0 flex-col bg-white">
-    <div class="flex min-h-10 flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-1">
+    <div class="flex min-h-10 flex-wrap items-center gap-2 bg-slate-50 px-3 py-1">
       <div v-if="source !== 'vcs' && source !== 'agent'" class="flex items-center gap-1">
         <select :value="source" class="h-8 rounded border border-slate-200 bg-white px-2 text-[12px] text-slate-700 focus:outline-none focus:border-slate-400" @change="emit('sourceChange', ($event.target as HTMLSelectElement).value as 'run' | 'session' | 'vcs' | 'agent')">
           <option value="run">Run</option>
@@ -344,17 +344,20 @@ onBeforeUnmount(() => {
       </div>
       <div class="flex min-h-0 flex-1 flex-col min-w-0">
         <!-- Diff Panels Header Hints -->
-        <div v-if="(source === 'vcs' || source === 'agent') && viewMode === 'split'" class="grid grid-cols-2 border-b border-slate-200 bg-[#f8fafc] px-3 py-0.5 text-[10.5px] text-slate-500">
-          <div class="flex items-center gap-1 font-semibold text-slate-700">
-            <span class="text-rose-500 font-bold">◀</span> 基线版本（只读，历史提交代码）
-          </div>
-          <div class="flex items-center justify-end gap-1 border-l border-slate-200 pl-2 font-semibold text-slate-700">
+        <div v-if="(source === 'vcs' || source === 'agent') && viewMode === 'split'" class="flex items-center justify-center gap-2 bg-[#fafafa] px-3 py-1 text-[11px] text-slate-500 font-semibold">
+          <span class="flex items-center gap-1 text-slate-700">
+            <span class="text-rose-500 font-bold">◀</span> 基线版本（只读）
+          </span>
+          <span class="text-slate-300 select-none">|</span>
+          <span class="flex items-center gap-1 text-slate-700">
             <span class="text-emerald-500 font-bold">▶</span> 本地修改 · 可编辑（Cmd+S 保存）
-          </div>
+          </span>
         </div>
-        <div v-else-if="(source === 'vcs' || source === 'agent') && viewMode === 'unified'" class="border-b border-slate-200 bg-[#f8fafc] px-3 py-0.5 text-[10.5px] text-slate-700 font-semibold">
-          <div class="flex items-center justify-end gap-1">
-            <span class="text-emerald-500 font-bold">▶</span> 统一视图 · 可直接编辑（Cmd+S 保存）
+        <div v-else-if="(source === 'vcs' || source === 'agent') && viewMode === 'unified'" class="bg-[#fafafa] px-3 py-1 text-[11px] text-slate-700 font-semibold">
+          <div class="flex items-center justify-center gap-2">
+            <span class="flex items-center gap-1">
+              <span class="text-emerald-500 font-bold">▶</span> 统一视图 · 可直接编辑（Cmd+S 保存）
+            </span>
           </div>
         </div>
         <!-- Monaco Container -->
@@ -368,15 +371,15 @@ onBeforeUnmount(() => {
 <style scoped>
 /* Monaco diff editor 内部滚动条细线化：
    - globals.css 里 ::-webkit-scrollbar 强制 10px 会覆盖 Monaco 内部滚动条
-   - 需要在 scoped 样式里用 :deep() 显式压回 6px
+   - 需要在 scoped 样式里用 :deep() 显式压回 4px
    - 同时约束 .slider 让最小尺寸不要反弹 */
 :deep(.monaco-scrollable-element)::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 4px;
+  height: 4px;
 }
 :deep(.monaco-scrollable-element)::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.25);
-  border-radius: 3px;
+  border-radius: 2px;
 }
 :deep(.monaco-scrollable-element)::-webkit-scrollbar-thumb:hover {
   background: rgba(0, 0, 0, 0.4);
@@ -385,29 +388,43 @@ onBeforeUnmount(() => {
   background: transparent;
 }
 :deep(.monaco-scrollable-element) .slider {
-  border-radius: 3px !important;
+  border-radius: 2px !important;
+  width: 4px !important;
+}
+:deep(.monaco-scrollable-element) > .scrollbar {
+  width: 4px !important;
+}
+:deep(.monaco-scrollable-element) > .scrollbar.vertical {
+  width: 4px !important;
 }
 
 /* Monaco diff overview 视口（diffViewport）原本默认 30×20px，太粗。
    Monaco 内部用 inline style 强制设 30px (ENTIRE_DIFF_OVERVIEW_WIDTH = ONE_OVERVIEW_WIDTH * 2 = 15 * 2)，
    必须用 !important 才能压过。父容器 .diffOverview 也是 30px，需要一起压。
-   同时 Monaco 按原 30px 算 left = width - 30，会导致 .diffOverview 右边留出 24px 空隙；
-   把 left 强制 auto、改用 right 锚定到容器右边。 */
+   同时 Monaco 按原 30px 算 left = width - 30，会导致 .diffOverview 右边留出 ~26px 空隙；
+   把 left 强制 auto、改用 right 锚定到容器右边（right: 0 完全贴边，不留缝）。 */
 :deep(.monaco-diff-editor .diffOverview) {
-  width: 6px !important;
+  width: 4px !important;
   left: auto !important;
-  right: 2px !important;
+  right: 0 !important;
 }
 :deep(.monaco-diff-editor .diffViewport) {
-  width: 6px !important;
+  width: 4px !important;
   height: 14px !important;
-  border-radius: 3px !important;
-  right: 2px !important;
+  border-radius: 2px !important;
+  right: 0 !important;
 }
 :deep(.monaco-diff-editor .diffViewport:hover) {
-  width: 6px !important;
+  width: 4px !important;
 }
 :deep(.monaco-diff-editor .diffViewport:active) {
-  width: 6px !important;
+  width: 4px !important;
+}
+
+/* 隐藏 diff 编辑器两侧的 overview ruler 画布（original / modified 各一），
+   它们在内容很少时会露出宽 15px 的灰白色块，跟 .diffViewport 重复，视觉上太重。 */
+:deep(.monaco-diff-editor canvas.diffOverviewRuler.original),
+:deep(.monaco-diff-editor canvas.diffOverviewRuler.modified) {
+  display: none !important;
 }
 </style>

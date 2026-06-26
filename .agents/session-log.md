@@ -47,6 +47,27 @@
 - Result: 对话区所有层（root / scroll / composer）都显示同一个白色；标题行右侧文案贴边；diff overview ruler 真正贴右且细线化。`packages/diff-viewer/tests` 4/4 通过。
 - Verification: `corepack pnpm exec vitest run packages/diff-viewer/tests`；`git diff --check`；浏览器需硬刷新（Cmd+Shift+R）以让 HMR 后的 scoped style 重新挂载。
 
+### 2026-06-26 - DiffViewer 第四轮：标签居中、隐藏 overviewRuler 画布、滚动条再细
+
+- Why: 用户用 DevTools 框选元素反馈：(1) 标题行"◀ 基线版本"和"▶ 本地修改"应放到 diff 两个文件**中间**（不再左右两列），但箭头保留；(2) 右侧还能看到两个 `canvas.diffOverviewRuler`（original / modified 各一，宽 15px）露出灰白块，等于多了一根"下滑"；(3) 标题行 `border-slate-200` 上下两根线太丑，应对齐项目里其他分隔线色号（#e4e4e7 居多）和字号（11px / 12px）。
+- What:
+  - `DiffViewer.vue` 标题行：layout 从 `grid grid-cols-2` 改为 `flex items-center justify-center`，两个标签用 `|` 分隔符居中并列；去掉 `border-b border-slate-200` 上下边框，背景由 `#f8fafc` 改为更柔和的 `#fafafa`；字号 `text-[10.5px]` → `text-[11px]`、padding `py-0.5` → `py-1` 与 `globals.css` 内 `font-size: 11px/12px` 的小标签风格对齐；统一视图同步。
+  - Monaco 滚动条：`verticalScrollbarSize: 6` → `4`，`.monaco-scrollable-element` / `.slider` / `> .scrollbar` 全部压到 4px，与细线视觉保持一致。
+  - 新增 scoped 样式隐藏两个 overview ruler 画布：`:deep(.monaco-diff-editor canvas.diffOverviewRuler.original)` 与 `.modified` 都 `display: none !important`，避免它们在内容少时露出 15px 宽灰白条。
+- How: 布局从 grid 改 flex，分隔符用一个轻量 `text-slate-300 select-none` 的 `|` 字符，节省组件引用；canvas 隐藏用 `!important` 避免被 Monaco 重渲染时再出现。字号 / 色号参考 `FigmaFileExplorer.vue:286,348`、`WorkbenchFooter.vue:716,732`、`AgentConfigPanel.vue:485` 等。
+- Result: 标题行居中并列、无明显边框线、字号与项目其他小标签一致；右侧不再有多余的 overviewRuler 画布；滚动条统一 4px。`packages/diff-viewer/tests` 4/4 通过。
+- Verification: `corepack pnpm exec vitest run packages/diff-viewer/tests`；`git diff --check`；浏览器需硬刷新（Cmd+Shift+R）让 HMR 后的 scoped style 重新挂载。
+
+### 2026-06-26 - DiffViewer 第四轮：overview ruler 隐藏、slider 贴边、toolbar 去边框、进程状态可折叠圆点
+
+- Why: 用户用 DevTools 框选：两个 `canvas.diffOverviewRuler`（original / modified 各 15px 宽）跟 `.diffViewport` 重复显得很重；slider 离右边还有 2px；工具栏 `border-b` 太抢眼；进程状态卡片占纵向空间，希望默认收起为带渐变虚化的小圆点，点击展开。
+- What:
+  - `DiffViewer.vue`：工具栏 `border-b border-slate-200` 去掉，背景与下方合并；scoped 样式新增 `:deep(.monaco-diff-editor canvas.diffOverviewRuler.original/modified) { display: none !important }` 隐藏两幅画布；`.diffOverview` 与 `.diffViewport` 的 `right: 2px` 改 `right: 0` 完全贴边。
+  - `FigmaChatPanel.vue`：新增 `processStatusCollapsed` ref（默认 `true`）+ `toggleProcessStatus`；template 拆为两段——收起态 `<button class="figma-chat-process-dot">`、展开态保留原 `.figma-chat-process-status` 卡片并整体可点击收起；样式新增 `.figma-chat-process-dot`：12×12 圆点 + `::after` 虚化渐变（filter: blur(8px)），`is-ready` 绿（#34d399 → rgba(24,169,120,.25) radial-gradient），`is-blocking` 红，hover scale(1.15)。状态卡本身加 `cursor: pointer` 和 `role="button"`/`tabindex="0"` 支持键盘。
+- How: 收起/展开纯前端状态，不动 store / props。dot 的虚化用 `::after` + `filter: blur`，不依赖额外 DOM，背景 `inherit` 保持跟 dot 主色一致。
+- Result: overview ruler 画布消失、slider 完全贴右、工具栏去线、进程状态默认一颗右下角圆点可点开。`packages/diff-viewer/tests` 4/4；`FigmaChatPanel` 既有 2 条失败 pre-existing（已 `git stash` 验证），本次无新增回归。
+- Verification: `corepack pnpm exec vitest run packages/diff-viewer/tests`；`git diff --check`；浏览器需硬刷新（Cmd+Shift+R）让 scoped CSS 重新挂载。
+
 ### 2026-06-26 - UI 三项改版：Diff light 主题、三栏底部 Footer 对齐、聊天输入卡片化
 
 - Why: 用户要求 (1) Monaco Diff 编辑器切为 light 风格与工作台白色主题匹配；(2) 不管切换到哪个功能，底部那一行应该都存在且高度一致；(3) 聊天面板输入框加宽，把模型选择、新建对话、附件上传挪到输入框内部下方，整体像现代 ChatGPT 风格。
