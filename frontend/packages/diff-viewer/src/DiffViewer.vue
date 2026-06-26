@@ -111,10 +111,11 @@ async function initMonaco(el: HTMLElement) {
     }
   });
 
+  const isVcsOrAgent = props.source === "vcs" || props.source === "agent";
   const inst = monacoLib.editor.createDiffEditor(el, {
-    readOnly: !(props.source === "vcs" || props.source === "agent"),
+    readOnly: !isVcsOrAgent,
     originalEditable: false,
-    renderSideBySide: props.viewMode === "split",
+    renderSideBySide: isVcsOrAgent ? true : props.viewMode === "split",
     minimap: { enabled: false },
     automaticLayout: true,
     scrollBeyondLastLine: false,
@@ -181,9 +182,13 @@ watch(
 );
 
 watch(
-  () => props.viewMode,
-  (mode) => {
-    diffEditor.value?.updateOptions({ renderSideBySide: mode === "split" });
+  () => [props.source, props.viewMode] as const,
+  ([src, mode]) => {
+    const isVcsOrAgent = src === "vcs" || src === "agent";
+    diffEditor.value?.updateOptions({
+      readOnly: !isVcsOrAgent,
+      renderSideBySide: isVcsOrAgent ? true : mode === "split"
+    });
   }
 );
 
