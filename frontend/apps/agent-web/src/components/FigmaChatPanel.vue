@@ -1219,41 +1219,7 @@ function onCompositionEnd() {
       </div>
     </div>
 
-    <!-- 文件变更提示（位于任务消耗上方）。点击后弹出右侧抽屉，列出本次变更文件并展示 diff。 -->
-    <button
-      v-if="hasFileChanges"
-      type="button"
-      class="figma-chat-changes-card"
-      :title="`${fileChanges?.length} 个文件已更改，点击查看 diff`"
-      :aria-expanded="drawerOpen"
-      aria-haspopup="dialog"
-      @click="openChangesDrawer"
-    >
-      <span class="figma-chat-changes-icon" aria-hidden="true">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-          <path
-            d="M7 18C4.79 18 3 16.21 3 14C3 11.95 4.5 10.27 6.5 10.03C6.97 7.64 9.05 5.85 11.57 5.85C13.95 5.85 15.94 7.42 16.55 9.6C16.97 9.45 17.42 9.36 17.9 9.36C20.18 9.36 22 11.18 22 13.46C22 15.74 20.18 17.56 17.9 17.56"
-            stroke="white"
-            stroke-width="1.6"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          />
-        </svg>
-      </span>
-      <span class="figma-chat-changes-title"
-        >{{ fileChanges?.length }} 个文件已更改</span
-      >
-      <span class="figma-chat-changes-spacer" />
-      <span class="figma-chat-changes-stats">
-        <span v-if="totalAdditions" class="figma-chat-add"
-          >+{{ totalAdditions }}</span
-        >
-        <span v-if="totalDeletions" class="figma-chat-del"
-          >-{{ totalDeletions }}</span
-        >
-      </span>
-      <ArrowUpRight class="figma-chat-changes-arrow" :size="16" />
-    </button>
+
 
     <!-- 任务消耗提示（位于输入框上方） -->
     <div v-if="hasTaskUsageDisplay" class="figma-chat-usage">
