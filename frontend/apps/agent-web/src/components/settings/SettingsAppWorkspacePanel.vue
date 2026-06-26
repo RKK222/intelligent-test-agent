@@ -106,6 +106,10 @@ async function run(action: () => Promise<void>) {
       // 将 fetch 错误转换为更友好的提示
       if (error.message.includes("fetch") || error.message.includes("Failed to fetch")) {
         errorMessage.value = "网络请求失败，请检查网络连接或刷新页面重试";
+      } else if (error.message.includes("403") || error.message.includes("Forbidden")) {
+        errorMessage.value = "权限不足，请确认已登录且有应用管理员权限";
+      } else if (error.message.includes("401") || error.message.includes("Unauthorized")) {
+        errorMessage.value = "未登录或登录已过期，请刷新页面重新登录";
       } else {
         errorMessage.value = error.message;
       }
