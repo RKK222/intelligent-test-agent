@@ -704,7 +704,7 @@ onUnmounted(() => {
 }
 
 .figma-files-resize-handle {
-  width: 4px;
+  width: 6px;
   flex-shrink: 0;
   cursor: col-resize;
   position: relative;
@@ -765,7 +765,7 @@ onUnmounted(() => {
 }
 
 .figma-chat-resize-handle {
-  width: 4px;
+  width: 6px;
   flex-shrink: 0;
   cursor: col-resize;
   position: relative;

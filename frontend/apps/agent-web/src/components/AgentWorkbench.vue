@@ -33,7 +33,12 @@ import type {
 import { TerminalPanel } from "@test-agent/terminal";
 import { TestRunnerPanel } from "@test-agent/test-runner";
 import { type Feedback } from "@test-agent/ui-kit";
-import { useWorkbenchStore } from "@test-agent/workbench-shell";
+import {
+  useWorkbenchStore,
+  mockVcsDiffFiles,
+  mockPublicAgentDiffs,
+  mockWorkspaceAgentDiffs
+} from "@test-agent/workbench-shell";
 import { useAuthStore } from "../stores/authStore";
 import FigmaShell from "./FigmaShell.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
@@ -1754,6 +1759,33 @@ async function loadDiffSource(source: "run" | "session" | "vcs" | "agent") {
   centerMode.value = "diff";
   try {
     let nextFiles: RunDiffFile[] = [];
+    if (workbench.useMockTestData) {
+      if (source === "vcs") {
+        nextFiles = JSON.parse(JSON.stringify(mockVcsDiffFiles));
+      } else if (source === "agent") {
+        const mappedPub = mockPublicAgentDiffs.map((f) => ({
+          path: f.path,
+          status: f.status,
+          additions: 0,
+          deletions: 0,
+          patch: f.patch
+        }));
+        const mappedWks = mockWorkspaceAgentDiffs.map((f) => ({
+          path: f.path,
+          status: f.status,
+          additions: 0,
+          deletions: 0,
+          patch: f.patch
+        }));
+        nextFiles = [...mappedPub, ...mappedWks];
+      }
+      diffFiles.value = nextFiles;
+      if (!workbench.selectedDiffPath || !nextFiles.some((f) => f.path === workbench.selectedDiffPath)) {
+        workbench.setSelectedDiffPath(nextFiles[0]?.path);
+      }
+      return;
+    }
+
     if (source === "run") {
       nextFiles = run.value ? (await api.getRunDiff(run.value.runId)).files : [];
     } else if (source === "session") {

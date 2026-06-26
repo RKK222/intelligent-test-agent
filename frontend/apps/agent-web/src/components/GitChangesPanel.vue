@@ -13,7 +13,12 @@ import {
   Loader2
 } from "lucide-vue-next";
 import { createBackendApiClient, BackendApiError } from "@test-agent/backend-api";
-import { useWorkbenchStore } from "@test-agent/workbench-shell";
+import {
+  useWorkbenchStore,
+  mockVcsDiffFiles,
+  mockPublicAgentDiffs,
+  mockWorkspaceAgentDiffs
+} from "@test-agent/workbench-shell";
 import type {
   AgentConfigDiffFile,
   AgentConfigProgressEvent,
@@ -106,11 +111,25 @@ watch(
   { immediate: true }
 );
 
+function toggleMockTestData() {
+  workbench.useMockTestData = !workbench.useMockTestData;
+  stagedWorkspacePaths.value.clear();
+  void refreshChanges();
+}
+
 async function refreshChanges() {
   if (loading.value) return;
   loading.value = true;
   errorMessage.value = "";
   try {
+    if (workbench.useMockTestData) {
+      workspaceDiffFiles.value = JSON.parse(JSON.stringify(mockVcsDiffFiles));
+      publicAgentDiffs.value = JSON.parse(JSON.stringify(mockPublicAgentDiffs));
+      workspaceAgentDiffs.value = JSON.parse(JSON.stringify(mockWorkspaceAgentDiffs));
+      loading.value = false;
+      return;
+    }
+
     // 1. Fetch workspace changes (VCS)
     if (props.workspaceId) {
       const vcs = await api.getVcsDiffFiles(props.workspaceId);
@@ -155,11 +174,22 @@ function unstageWorkspaceFile(path: string) {
   stagedWorkspacePaths.value.delete(path);
 }
 
-// Stage agent file (real)
+// Stage agent file (real / mock)
 async function stageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" }) {
   if (!props.canWrite) return;
   errorMessage.value = "";
   try {
+    if (workbench.useMockTestData) {
+      if (file.scope === "PUBLIC") {
+        const found = publicAgentDiffs.value.find((f) => f.path === file.path);
+        if (found) found.staged = true;
+      } else {
+        const found = workspaceAgentDiffs.value.find((f) => f.path === file.path);
+        if (found) found.staged = true;
+      }
+      return;
+    }
+
     if (file.scope === "PUBLIC") {
       await api.stagePublicAgentFiles([file.path], workbench.publicWorktree?.worktreeId);
     } else {
@@ -171,11 +201,22 @@ async function stageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | "W
   }
 }
 
-// Unstage agent file (real)
+// Unstage agent file (real / mock)
 async function unstageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" }) {
   if (!props.canWrite) return;
   errorMessage.value = "";
   try {
+    if (workbench.useMockTestData) {
+      if (file.scope === "PUBLIC") {
+        const found = publicAgentDiffs.value.find((f) => f.path === file.path);
+        if (found) found.staged = false;
+      } else {
+        const found = workspaceAgentDiffs.value.find((f) => f.path === file.path);
+        if (found) found.staged = false;
+      }
+      return;
+    }
+
     if (file.scope === "PUBLIC") {
       await api.unstagePublicAgentFiles([file.path], workbench.publicWorktree?.worktreeId);
     } else {
@@ -206,6 +247,31 @@ async function handleCommit(push = false) {
   progressMessage.value = "";
 
   try {
+    if (workbench.useMockTestData) {
+      progressMessage.value = "正在提交变更 (测试模式)...";
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      if (push) {
+        progressMessage.value = "正在推送变更到远程分支 (测试模式)...";
+        await new Promise((resolve) => setTimeout(resolve, 800));
+      }
+      // Clear all staged paths
+      stagedWorkspacePaths.value.clear();
+      publicAgentDiffs.value.forEach((f) => {
+        f.staged = false;
+      });
+      workspaceAgentDiffs.value.forEach((f) => {
+        f.staged = false;
+      });
+      
+      commitMessage.value = "";
+      progressMessage.value = push ? "提交并推送成功！(测试数据)" : "提交成功！(测试数据)";
+      setTimeout(() => {
+        progressMessage.value = "";
+      }, 2000);
+      committing.value = false;
+      return;
+    }
+
     // 1. Commit Workspace changes (simulate)
     if (workspaceStaged.value.length > 0) {
       progressMessage.value = "正在提交应用工作空间变更...";
@@ -337,10 +403,18 @@ defineExpose({
         <div class="git-section-header" @click="unstagedExpanded = !unstagedExpanded">
           <ChevronDown v-if="unstagedExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
           <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-          <span class="git-section-title">UNSTAGED ({{ totalUnstagedCount }})</span>
+          <span class="git-section-title">UNSTAGED (未暂存) ({{ totalUnstagedCount }})</span>
           <button
             type="button"
-            class="git-refresh-btn ml-auto"
+            class="git-demo-btn ml-auto mr-1.5 px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 text-[10px] font-medium transition-colors"
+            title="构造演示/测试数据以展示 diff 和 VCS 面板交互效果"
+            @click.stop="toggleMockTestData"
+          >
+            {{ workbench.useMockTestData ? '清除测试数据' : '加载测试数据' }}
+          </button>
+          <button
+            type="button"
+            class="git-refresh-btn"
             title="刷新变更列表"
             @click.stop="refreshChanges"
             :disabled="loading"
@@ -424,7 +498,7 @@ defineExpose({
         <div class="git-section-header" @click="stagedExpanded = !stagedExpanded">
           <ChevronDown v-if="stagedExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
           <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-          <span class="git-section-title">STAGED ({{ totalStagedCount }})</span>
+          <span class="git-section-title">STAGED (已暂存) ({{ totalStagedCount }})</span>
         </div>
 
         <div v-show="stagedExpanded" class="git-section-content pl-2">
@@ -510,15 +584,15 @@ defineExpose({
 
       <!-- Checkboxes toolbar -->
       <div class="git-options-row">
-        <label class="git-option-label">
+        <label class="git-option-label" title="在提交说明末尾添加签名信息 (Signed-off-by)">
           <input type="checkbox" v-model="signOff" :disabled="committing" />
           <span>SignOff</span>
         </label>
-        <label class="git-option-label">
+        <label class="git-option-label" title="绕过 pre-commit 和 commit-msg 校验钩子 (no-verify)">
           <input type="checkbox" v-model="noVerify" :disabled="committing" />
           <span>No-Verify</span>
         </label>
-        <label class="git-option-label">
+        <label class="git-option-label" title="修补/追加到上一次提交上 (amend)">
           <input type="checkbox" v-model="amend" :disabled="committing" />
           <span>Amend</span>
         </label>

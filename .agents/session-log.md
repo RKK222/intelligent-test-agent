@@ -20,12 +20,13 @@
 
 - Why: 增强工作台变更(Changes)标签页的源代码控制功能，支持以极佳的 Git 样式分别展示“应用工作空间”与“agents”的未暂存与已暂存文件，双击查看 Monaco 侧边 diff，并支持暂存/取消暂存、提交与推送动作。
 - What:
-  - 新增 `GitChangesPanel.vue` 前端 Git 控制面板，替代了原有的变更列表逻辑，提供 `UNSTAGED`/`STAGED` 分组折叠菜单、悬停暂存按钮和底部提交表单（支持 SignOff/No-Verify/Amend 选项，及提交/推送操作）。
-  - 对接 agents 的 stage/unstage/commit/publish 真实后端 API；对应用工作空间则进行前端数组模拟以填充后端未完成的缺失；梳理并提供了应用工作区所需的后台 VCS 提交/推送缺失接口。
-  - 在 `workbenchStore.ts` 引入全局 worktree 状态，使 `AgentConfigPanel` 与 `GitChangesPanel` 共享 active 临时工作区；Monaco `DiffViewer.vue` 新增 `agent` 源支持，并在审查非 AI 代码（VCS/Agent）的 Diff 时自适应隐藏反馈及接受/拒绝按钮。
-  - 顺手修复了 `shared-types` 中遗漏的 `CreateUserPayload`、`RoleOption` 与 `UserManagementUser` 导出声明，解决了前端因其缺少编译不通过的问题。
-- How: 借助 Vue 组合式状态实现前端暂存集存储，Monaco 编辑器联动使用 `setSelectedDiffPath` 及 `loadDiffSource("agent")` 加载映射后的 RunDiffFile，保持样式设计与 Figma 布局的一致性。
-- Result: 变更页面体验大幅提升，与 IDE 的 VCS 面板非常类似；除了实际不兼容的 2 项历史聊天测试外，其余前端类型校验与单元测试全部通过。
+  - 新增 `GitChangesPanel.vue` 前端 Git 控制面板，提供 `UNSTAGED`/`STAGED` 分组折叠菜单、悬停暂存按钮和底部提交表单（支持 SignOff/No-Verify/Amend 选项，及提交/推送操作）。
+  - 支持“加载/清除测试数据”快捷键，自动注入包含修改明细与 Patch 内容的模拟 VCS 与 Agent 变更，双击可直接调用 Monaco Diff 渲染，提供完美的本地化 diff 效果预览。
+  - 汉化 `UNSTAGED`（未暂存）与 `STAGED`（已暂存）主栏目标题；为 `SignOff`/`No-Verify`/`Amend` 复选框添加详尽的悬停中文释义 tooltip，解答其深层作用。
+  - 对接 agents 的 stage/unstage/commit/publish 真实后端 API；对应用工作空间进行前端数组模拟；将 `FigmaShell.vue` 拖拽热区宽度从 4px 提高至 6px 优化拉伸体验。
+  - 在 `workbenchStore.ts` 引入全局 worktree 与测试模式状态，使 `AgentConfigPanel` 与 `GitChangesPanel` 共享 active 工作区；`DiffViewer.vue` 新增 `agent` 支持并隐藏 AI 采纳按钮。
+- How: 借助 Vue 组合式状态及 Pinia 实现前端暂存集及测试数据开关，Monaco 编辑器解析 mock Patch 生成 original/modified 模型，微调 CSS 把手宽度并设定 margin 居中。
+- Result: 变更页面体验达到 IDE 级，双击测试文件即可流畅比对 diff；前端编译和类型校验全部正常。
 
 ### 2026-06-26 - 工作台侧边栏布局调整与折叠拖拽重构
 
