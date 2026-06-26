@@ -39,6 +39,38 @@ const emit = defineEmits<{
 const workbench = useWorkbenchStore();
 const api = createBackendApiClient({ baseUrl: props.apiBaseUrl ?? "" });
 
+// Resizing unstaged / staged boundary
+const unstagedHeight = ref<number | null>(null);
+const resizingUnstaged = ref(false);
+let dragStartY = 0;
+let dragStartHeight = 0;
+
+function onUnstagedResizeStart(event: MouseEvent) {
+  resizingUnstaged.value = true;
+  dragStartY = event.clientY;
+  const el = document.querySelector(".git-unstaged-section") as HTMLElement;
+  dragStartHeight = el ? el.offsetHeight : 250;
+  
+  document.addEventListener("mousemove", onUnstagedResizeMove);
+  document.addEventListener("mouseup", onUnstagedResizeEnd);
+  document.body.style.cursor = "row-resize";
+  document.body.style.userSelect = "none";
+}
+
+function onUnstagedResizeMove(event: MouseEvent) {
+  if (!resizingUnstaged.value) return;
+  const deltaY = event.clientY - dragStartY;
+  unstagedHeight.value = Math.max(80, dragStartHeight + deltaY);
+}
+
+function onUnstagedResizeEnd() {
+  resizingUnstaged.value = false;
+  document.removeEventListener("mousemove", onUnstagedResizeMove);
+  document.removeEventListener("mouseup", onUnstagedResizeEnd);
+  document.body.style.cursor = "";
+  document.body.style.userSelect = "";
+}
+
 // Section Expand States
 const unstagedExpanded = ref(true);
 const stagedExpanded = ref(true);
@@ -46,6 +78,15 @@ const workspaceUnstagedExpanded = ref(true);
 const workspaceStagedExpanded = ref(true);
 const agentsUnstagedExpanded = ref(true);
 const agentsStagedExpanded = ref(true);
+
+const unstagedStyle = computed(() => {
+  if (!unstagedExpanded.value) return {};
+  if (!stagedExpanded.value) return { flex: "1", minHeight: "0" };
+  return {
+    height: unstagedHeight.value ? `${unstagedHeight.value}px` : "50%",
+    flex: "0 0 auto"
+  };
+});
 
 // Loading & Status
 const loading = ref(false);
@@ -399,7 +440,7 @@ defineExpose({
     <!-- Scrollable file list area -->
     <div class="git-lists-container">
       <!-- 1. UNSTAGED SECTION -->
-      <div class="git-section" :class="{ 'is-collapsed': !unstagedExpanded }">
+      <div class="git-section git-unstaged-section" :style="unstagedStyle" :class="{ 'is-collapsed': !unstagedExpanded }">
         <div class="git-section-header" @click="unstagedExpanded = !unstagedExpanded">
           <ChevronDown v-if="unstagedExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
           <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
@@ -438,7 +479,7 @@ defineExpose({
                 v-for="file in workspaceUnstaged"
                 :key="file.path"
                 class="git-file-row group"
-                @dblclick="handleOpenFileDiff(file.path, 'vcs')"
+                @click="handleOpenFileDiff(file.path, 'vcs')"
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
                 <span class="git-file-name" :title="file.path">{{ file.path }}</span>
@@ -471,7 +512,7 @@ defineExpose({
                 v-for="file in agentsUnstaged"
                 :key="file.path"
                 class="git-file-row group"
-                @dblclick="handleOpenFileDiff(file.path, 'agent', file.scope)"
+                @click="handleOpenFileDiff(file.path, 'agent', file.scope)"
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
                 <span class="git-file-name" :title="file.path">
@@ -493,8 +534,17 @@ defineExpose({
         </div>
       </div>
 
+      <!-- Resizer divider between UNSTAGED and STAGED -->
+      <div
+        v-if="unstagedExpanded && stagedExpanded"
+        class="git-pane-resize-handle"
+        @mousedown="onUnstagedResizeStart"
+        role="separator"
+        aria-orientation="horizontal"
+      />
+
       <!-- 2. STAGED SECTION -->
-      <div class="git-section border-t border-[#e4e4e7]" :class="{ 'is-collapsed': !stagedExpanded }">
+      <div class="git-section staged-section border-t border-[#e4e4e7]" :class="{ 'is-collapsed': !stagedExpanded }">
         <div class="git-section-header" @click="stagedExpanded = !stagedExpanded">
           <ChevronDown v-if="stagedExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
           <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
@@ -516,7 +566,7 @@ defineExpose({
                 v-for="file in workspaceStaged"
                 :key="file.path"
                 class="git-file-row group"
-                @dblclick="handleOpenFileDiff(file.path, 'vcs')"
+                @click="handleOpenFileDiff(file.path, 'vcs')"
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
                 <span class="git-file-name" :title="file.path">{{ file.path }}</span>
@@ -549,7 +599,7 @@ defineExpose({
                 v-for="file in agentsStaged"
                 :key="file.path"
                 class="git-file-row group"
-                @dblclick="handleOpenFileDiff(file.path, 'agent', file.scope)"
+                @click="handleOpenFileDiff(file.path, 'agent', file.scope)"
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
                 <span class="git-file-name" :title="file.path">
@@ -656,14 +706,46 @@ defineExpose({
 .git-lists-container {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .git-section {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+
+.git-section.staged-section {
+  flex: 1;
+  min-height: 0;
+}
+
+.git-pane-resize-handle {
+  height: 4px;
+  background: transparent;
+  cursor: row-resize;
+  position: relative;
+  z-index: 5;
+  flex-shrink: 0;
+  margin: -2px 0;
+}
+
+.git-pane-resize-handle::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+  margin-top: -0.5px;
+  background: #e4e4e7;
+  transition: background-color 0.14s ease;
+}
+
+.git-pane-resize-handle:hover::after {
+  background: #bbb;
 }
 
 .git-section-header {
@@ -706,6 +788,9 @@ defineExpose({
 .git-section-content {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .git-sub-section {
