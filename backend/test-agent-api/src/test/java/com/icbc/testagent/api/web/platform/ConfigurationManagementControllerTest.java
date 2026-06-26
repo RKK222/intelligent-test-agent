@@ -84,7 +84,7 @@ class ConfigurationManagementControllerTest {
     @Test
     void personalSshKeyResponseDoesNotExposePrivateKey() {
         ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
-        when(service.addSshKey(eq(USER_ID), eq("work"), anyString()))
+        when(service.addSshKey(eq(USER_ID), eq("work"), anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(new SshKeyResponse("ssh_123", "work", "SHA256:abc", Instant.parse("2026-06-23T00:00:00Z")));
         WebTestClient client = client(service, List.of());
 
@@ -93,7 +93,7 @@ class ConfigurationManagementControllerTest {
                 .header("X-Trace-Id", TRACE_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
-                        {"name":"work","privateKey":"-----BEGIN OPENSSH PRIVATE KEY-----\\nsecret\\n-----END OPENSSH PRIVATE KEY-----"}
+                        {"name":"work","encryptedPrivateKey":"enc","encryptedAesKey":"aes","encryptionNonce":"nonce","fingerprint":"SHA256:abc"}
                         """)
                 .exchange()
                 .expectStatus().isOk()
@@ -101,6 +101,23 @@ class ConfigurationManagementControllerTest {
                 .jsonPath("$.data.sshKeyId").isEqualTo("ssh_123")
                 .jsonPath("$.data.fingerprint").isEqualTo("SHA256:abc")
                 .jsonPath("$.data.privateKey").doesNotExist();
+    }
+
+    @Test
+    void sshKeyPublicKeyEndpointReturnsSpkiBase64() {
+        WebTestClient client = client(
+                org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class),
+                org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class),
+                org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class),
+                List.of());
+
+        client.get()
+                .uri("/api/internal/platform/configuration-management/ssh-key/public-key")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.publicKey").isNotEmpty();
     }
 
     @Test
@@ -190,7 +207,8 @@ class ConfigurationManagementControllerTest {
         return WebTestClient.bindToController(new ConfigurationManagementController(
                         service,
                         workspaceService,
-                        assignmentService))
+                        assignmentService,
+                        new com.icbc.testagent.common.git.RsaKeyService()))
                 .webFilter(new TraceIdWebFilter())
                 .webFilter((exchange, chain) -> {
                     exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, principal);

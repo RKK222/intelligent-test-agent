@@ -13,6 +13,7 @@ public record UserSshKey(
         String name,
         String fingerprint,
         String encryptedPrivateKey,
+        String encryptedAesKey,
         String encryptionNonce,
         Instant createdAt) {
 
@@ -27,5 +28,6 @@ public record UserSshKey(
         if (name.isBlank() || fingerprint.isBlank() || encryptedPrivateKey.isBlank() || encryptionNonce.isBlank()) {
             throw new IllegalArgumentException("ssh key fields must not be blank");
         }
+        // encryptedAesKey may be null for pre-migration keys; callers must handle
     }
 }

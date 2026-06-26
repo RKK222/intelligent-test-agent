@@ -4,7 +4,7 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
-import com.icbc.testagent.common.git.SshKeyCryptoService;
+import com.icbc.testagent.common.git.SshKeyEncryptionService;
 import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastEvent;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastHandler;
@@ -60,7 +60,6 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -95,7 +94,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private final UserRepository userRepository;
     private final GitRemoteService gitRemoteService;
     private final GitWorkspaceService gitWorkspaceService;
-    private final SshKeyCryptoService sshKeyCryptoService;
+    private final SshKeyEncryptionService sshKeyEncryptionService;
     private final WorkspaceServerIdentity serverIdentity;
     private final ServerBroadcastPublisher broadcastPublisher;
     private final String broadcastInstanceId;
@@ -114,7 +113,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             UserRepository userRepository,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
-            @Value("${test-agent.security.ssh-key-encryption-key:${TEST_AGENT_SSH_KEY_ENCRYPTION_KEY:}}") String encryptionKey) {
+            SshKeyEncryptionService sshKeyEncryptionService) {
         this(
                 configurationRepository,
                 commonParameterRepository,
@@ -124,7 +123,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 userRepository,
                 new GitRemoteService(),
                 new GitWorkspaceService(),
-                new SshKeyCryptoService(encryptionKey),
+                sshKeyEncryptionService,
                 serverIdentity,
                 broadcastPublisher);
     }
@@ -139,7 +138,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             UserRepository userRepository,
             GitRemoteService gitRemoteService,
             GitWorkspaceService gitWorkspaceService,
-            SshKeyCryptoService sshKeyCryptoService) {
+            SshKeyEncryptionService sshKeyEncryptionService) {
         this(
                 configurationRepository,
                 EMPTY_PARAMETER_REPOSITORY,
@@ -149,7 +148,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 userRepository,
                 gitRemoteService,
                 gitWorkspaceService,
-                sshKeyCryptoService,
+                sshKeyEncryptionService,
                 new WorkspaceServerIdentity("127.0.0.1"),
                 NOOP_BROADCAST_PUBLISHER);
     }
@@ -164,7 +163,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             UserRepository userRepository,
             GitRemoteService gitRemoteService,
             GitWorkspaceService gitWorkspaceService,
-            SshKeyCryptoService sshKeyCryptoService,
+            SshKeyEncryptionService sshKeyEncryptionService,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher) {
         this(
@@ -176,7 +175,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 userRepository,
                 gitRemoteService,
                 gitWorkspaceService,
-                sshKeyCryptoService,
+                sshKeyEncryptionService,
                 serverIdentity,
                 broadcastPublisher);
     }
@@ -193,7 +192,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             UserRepository userRepository,
             GitRemoteService gitRemoteService,
             GitWorkspaceService gitWorkspaceService,
-            SshKeyCryptoService sshKeyCryptoService,
+            SshKeyEncryptionService sshKeyEncryptionService,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher) {
         this(
@@ -205,7 +204,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 userRepository,
                 gitRemoteService,
                 gitWorkspaceService,
-                sshKeyCryptoService,
+                sshKeyEncryptionService,
                 serverIdentity,
                 broadcastPublisher);
     }
@@ -219,7 +218,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             UserRepository userRepository,
             GitRemoteService gitRemoteService,
             GitWorkspaceService gitWorkspaceService,
-            SshKeyCryptoService sshKeyCryptoService,
+            SshKeyEncryptionService sshKeyEncryptionService,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
@@ -230,7 +229,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.gitRemoteService = Objects.requireNonNull(gitRemoteService, "gitRemoteService must not be null");
         this.gitWorkspaceService = Objects.requireNonNull(gitWorkspaceService, "gitWorkspaceService must not be null");
-        this.sshKeyCryptoService = Objects.requireNonNull(sshKeyCryptoService, "sshKeyCryptoService must not be null");
+        this.sshKeyEncryptionService = Objects.requireNonNull(sshKeyEncryptionService, "sshKeyEncryptionService must not be null");
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
         this.broadcastPublisher = Objects.requireNonNull(broadcastPublisher, "broadcastPublisher must not be null");
         this.broadcastInstanceId = this.broadcastPublisher.instanceId();
@@ -1174,7 +1173,17 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         UserSshKey sshKey = configurationRepository.findSshKeys(userId).stream()
                 .findFirst()
                 .orElseThrow(() -> new PlatformException(ErrorCode.FORBIDDEN, "当前用户未配置 SSH key"));
-        return sshKeyCryptoService.decrypt(sshKey.encryptedPrivateKey(), sshKey.encryptionNonce());
+
+        if (sshKey.encryptedAesKey() == null || sshKey.encryptedAesKey().isBlank()) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR,
+                    "SSH key 使用的旧版加密格式，请重新添加",
+                    Map.of("sshKeyId", sshKey.sshKeyId().value()));
+        }
+
+        return sshKeyEncryptionService.decrypt(
+                sshKey.encryptedPrivateKey(),
+                sshKey.encryptedAesKey(),
+                sshKey.encryptionNonce());
     }
 
     private Path appRepoRoot(String version, CodeRepository repository) {

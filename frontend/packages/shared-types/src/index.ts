@@ -1028,6 +1028,11 @@ export type SshKeyMetadata = {
   createdAt: string;
 };
 
+/** 服务端 RSA 公钥响应，前端用于混合加密 SSH 私钥。 */
+export type SshKeyPublicKeyResponse = {
+  publicKey: string;
+};
+
 export type CreateRepositoryPayload = {
   gitUrl: string;
   name: string;
@@ -1056,7 +1061,10 @@ export type RenameApplicationWorkspacePayload = {
 
 export type AddSshKeyPayload = {
   name: string;
-  privateKey: string;
+  encryptedPrivateKey: string;
+  encryptedAesKey: string;
+  encryptionNonce: string;
+  fingerprint: string;
 };
 
 export type CreateWorkspaceVersionPayload = {

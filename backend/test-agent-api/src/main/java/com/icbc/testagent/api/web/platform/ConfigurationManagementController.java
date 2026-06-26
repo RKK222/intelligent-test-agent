@@ -3,12 +3,14 @@ package com.icbc.testagent.api.web.platform;
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.common.api.ApiResponse;
+import com.icbc.testagent.common.git.RsaKeyService;
 import com.icbc.testagent.configuration.management.ConfigurationManagementApplicationService;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.workspace.ManagedWorkspaceApplicationService;
 import java.net.URI;
+import java.util.Map;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -32,14 +34,25 @@ public class ConfigurationManagementController {
     private final ConfigurationManagementApplicationService service;
     private final ManagedWorkspaceApplicationService workspaceService;
     private final UserOpencodeProcessAssignmentService processAssignmentService;
+    private final RsaKeyService rsaKeyService;
 
     public ConfigurationManagementController(
             ConfigurationManagementApplicationService service,
             ManagedWorkspaceApplicationService workspaceService,
-            UserOpencodeProcessAssignmentService processAssignmentService) {
+            UserOpencodeProcessAssignmentService processAssignmentService,
+            RsaKeyService rsaKeyService) {
         this.service = service;
         this.workspaceService = workspaceService;
         this.processAssignmentService = processAssignmentService;
+        this.rsaKeyService = rsaKeyService;
+    }
+
+    /**
+     * 返回 RSA 公钥（SPKI Base64），供前端混合加密 SSH 私钥时使用。无需鉴权。
+     */
+    @GetMapping("/ssh-key/public-key")
+    public ApiResponse<Object> getSshKeyPublicKey(ServerWebExchange exchange) {
+        return ok(exchange, Map.of("publicKey", rsaKeyService.getPublicKeyBase64()));
     }
 
     @GetMapping("/applications")
@@ -238,7 +251,13 @@ public class ConfigurationManagementController {
             @RequestBody ConfigurationManagementDtos.AddSshKeyRequest request,
             ServerWebExchange exchange) {
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
-        return ok(exchange, service.addSshKey(userId, request.name(), request.privateKey()));
+        return ok(exchange, service.addSshKey(
+                userId,
+                request.name(),
+                request.encryptedPrivateKey(),
+                request.encryptedAesKey(),
+                request.encryptionNonce(),
+                request.fingerprint()));
     }
 
     @DeleteMapping("/personal/ssh-keys/{sshKeyId}")

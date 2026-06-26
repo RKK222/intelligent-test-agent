@@ -5,34 +5,68 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
-import java.util.Base64;
+import com.icbc.testagent.common.git.SshKeyEncryptionService;
 import org.junit.jupiter.api.Test;
 
+/**
+ * 混合解密服务测试：通过 {@link SshKeyTestFixtures} 模拟前端加密，
+ * 验证服务端 RSA+AES 解密和指纹校验流程。
+ */
 class SshKeyEncryptionServiceTest {
 
-    private static final String PRIVATE_KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----\n";
+    private static final String PRIVATE_KEY =
+            "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----\n";
+
+    private final SshKeyTestFixtures fixtures = new SshKeyTestFixtures();
 
     @Test
-    void encryptsAndDecryptsPrivateKeyWithConfiguredAesGcmKey() {
-        SshKeyEncryptionService service = new SshKeyEncryptionService(base64AesKey());
+    void decryptsHybridEncryptedPrivateKey() {
+        SshKeyTestFixtures.EncryptedPayload payload = fixtures.encryptPayload(PRIVATE_KEY);
+        SshKeyEncryptionService service = fixtures.encryptionService();
 
-        SshKeyEncryptionService.EncryptedPrivateKey encrypted = service.encrypt(PRIVATE_KEY);
+        String plaintext = service.decrypt(
+                payload.encryptedPrivateKey(),
+                payload.encryptedAesKey(),
+                payload.encryptionNonce());
 
-        assertThat(encrypted.encryptedPrivateKey()).doesNotContain("secret");
-        assertThat(service.decrypt(encrypted.encryptedPrivateKey(), encrypted.encryptionNonce())).isEqualTo(PRIVATE_KEY);
-        assertThat(service.fingerprint(PRIVATE_KEY)).startsWith("SHA256:");
+        assertThat(plaintext).isEqualTo(PRIVATE_KEY);
     }
 
     @Test
-    void missingEncryptionKeyFailsWithoutDefaultSecret() {
-        SshKeyEncryptionService service = new SshKeyEncryptionService("");
+    void decryptAndVerifyAcceptsMatchingFingerprint() {
+        SshKeyTestFixtures.EncryptedPayload payload = fixtures.encryptPayload(PRIVATE_KEY);
+        SshKeyEncryptionService service = fixtures.encryptionService();
 
-        assertThatThrownBy(() -> service.encrypt(PRIVATE_KEY))
-                .isInstanceOf(PlatformException.class)
-                .satisfies(error -> assertThat(((PlatformException) error).errorCode()).isEqualTo(ErrorCode.INTERNAL_ERROR));
+        String plaintext = service.decryptAndVerify(
+                payload.encryptedPrivateKey(),
+                payload.encryptedAesKey(),
+                payload.encryptionNonce(),
+                payload.fingerprint());
+
+        assertThat(plaintext).isEqualTo(PRIVATE_KEY);
     }
 
-    static String base64AesKey() {
-        return Base64.getEncoder().encodeToString("0123456789abcdef0123456789abcdef".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    @Test
+    void decryptAndVerifyRejectsTamperedFingerprint() {
+        SshKeyTestFixtures.EncryptedPayload payload = fixtures.encryptPayload(PRIVATE_KEY);
+        SshKeyEncryptionService service = fixtures.encryptionService();
+
+        assertThatThrownBy(() -> service.decryptAndVerify(
+                payload.encryptedPrivateKey(),
+                payload.encryptedAesKey(),
+                payload.encryptionNonce(),
+                "SHA256:tampered"))
+                .isInstanceOfSatisfying(PlatformException.class, error ->
+                        assertThat(error.errorCode()).isEqualTo(ErrorCode.INTERNAL_ERROR));
+    }
+
+    @Test
+    void fingerprintMatchesBackendFormat() {
+        String fingerprint = fixtures.encryptionService().fingerprint(PRIVATE_KEY);
+
+        assertThat(fingerprint).startsWith("SHA256:");
+        // URL-safe Base64 不带 padding，不应出现 + / =
+        String body = fingerprint.substring("SHA256:".length());
+        assertThat(body).doesNotContain("+").doesNotContain("/").doesNotContain("=");
     }
 }

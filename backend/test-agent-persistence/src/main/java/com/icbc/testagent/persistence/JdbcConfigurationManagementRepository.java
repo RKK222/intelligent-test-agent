@@ -66,6 +66,7 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
             rs.getString("name"),
             rs.getString("fingerprint"),
             rs.getString("encrypted_private_key"),
+            rs.getString("encrypted_aes_key"),
             rs.getString("encryption_nonce"),
             instant(rs, "created_at"));
 
@@ -425,7 +426,7 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
     @Override
     public List<UserSshKey> findSshKeys(UserId userId) {
         return jdbcClient.sql("""
-                        select ssh_key_id, user_id, name, fingerprint, encrypted_private_key, encryption_nonce, created_at
+                        select ssh_key_id, user_id, name, fingerprint, encrypted_private_key, encrypted_aes_key, encryption_nonce, created_at
                         from user_ssh_keys
                         where user_id = :userId
                         order by created_at desc
@@ -438,7 +439,7 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
     @Override
     public Optional<UserSshKey> findSshKey(UserId userId, SshKeyId sshKeyId) {
         return jdbcClient.sql("""
-                        select ssh_key_id, user_id, name, fingerprint, encrypted_private_key, encryption_nonce, created_at
+                        select ssh_key_id, user_id, name, fingerprint, encrypted_private_key, encrypted_aes_key, encryption_nonce, created_at
                         from user_ssh_keys
                         where user_id = :userId and ssh_key_id = :sshKeyId
                         """)
@@ -452,10 +453,10 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
     public UserSshKey saveSshKey(UserSshKey sshKey) {
         jdbcClient.sql("""
                         insert into user_ssh_keys(
-                            ssh_key_id, user_id, name, fingerprint, encrypted_private_key, encryption_nonce, created_at
+                            ssh_key_id, user_id, name, fingerprint, encrypted_private_key, encrypted_aes_key, encryption_nonce, created_at
                         )
                         values (
-                            :sshKeyId, :userId, :name, :fingerprint, :encryptedPrivateKey, :encryptionNonce, :createdAt
+                            :sshKeyId, :userId, :name, :fingerprint, :encryptedPrivateKey, :encryptedAesKey, :encryptionNonce, :createdAt
                         )
                         """)
                 .param("sshKeyId", sshKey.sshKeyId().value())
@@ -463,6 +464,7 @@ public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport
                 .param("name", sshKey.name())
                 .param("fingerprint", sshKey.fingerprint())
                 .param("encryptedPrivateKey", sshKey.encryptedPrivateKey())
+                .param("encryptedAesKey", sshKey.encryptedAesKey())
                 .param("encryptionNonce", sshKey.encryptionNonce())
                 .param("createdAt", timestamp(sshKey.createdAt()))
                 .update();

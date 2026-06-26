@@ -2,14 +2,15 @@ package com.icbc.testagent.configuration.management;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.git.GitRemoteService;
+import com.icbc.testagent.common.git.SshKeyEncryptionService;
 import com.icbc.testagent.domain.configuration.CodeRepository;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
@@ -29,6 +30,8 @@ class ConfigurationManagementApplicationServiceTest {
     private static final Instant NOW = Instant.parse("2026-06-23T00:00:00Z");
     private static final String PRIVATE_KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----\n";
 
+    private final SshKeyTestFixtures sshKeyFixtures = new SshKeyTestFixtures();
+
     @Test
     void createRepositoryNormalizesEnglishNameBeforeSaving() {
         ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
@@ -36,7 +39,7 @@ class ConfigurationManagementApplicationServiceTest {
                 repository,
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
-                new SshKeyEncryptionService(SshKeyEncryptionServiceTest.base64AesKey()));
+                sshKeyFixtures.encryptionService());
         when(repository.findRepositoryByGitUrl("https://gitee.com/demo/repo.git")).thenReturn(Optional.empty());
         when(repository.findRepositoryByEnglishName("demo")).thenReturn(Optional.empty());
         when(repository.saveRepository(argThat(saved -> "demo".equals(saved.englishName()))))
@@ -58,7 +61,7 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(ConfigurationManagementRepository.class),
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
-                new SshKeyEncryptionService(SshKeyEncryptionServiceTest.base64AesKey()));
+                sshKeyFixtures.encryptionService());
 
         assertThatThrownBy(() -> service.createRepository(
                 "https://gitee.com/demo/repo.git",
@@ -94,7 +97,7 @@ class ConfigurationManagementApplicationServiceTest {
                 repository,
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
-                new SshKeyEncryptionService(SshKeyEncryptionServiceTest.base64AesKey()));
+                sshKeyFixtures.encryptionService());
 
         assertThatThrownBy(() -> service.updateRepository("repo_123", "演示库", "Demo", false))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
@@ -106,21 +109,15 @@ class ConfigurationManagementApplicationServiceTest {
         ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
         UserRepository userRepository = org.mockito.Mockito.mock(UserRepository.class);
         GitRemoteService gitRemoteService = org.mockito.Mockito.mock(GitRemoteService.class);
-        SshKeyEncryptionService encryptionService = new SshKeyEncryptionService(SshKeyEncryptionServiceTest.base64AesKey());
+        SshKeyEncryptionService encryptionService = sshKeyFixtures.encryptionService();
         GitCloneCacheService gitCloneCacheService = createTestCacheService();
-        SshKeyEncryptionService.EncryptedPrivateKey encrypted = encryptionService.encrypt(PRIVATE_KEY);
+        UserSshKey storedKey = sshKeyFixtures.encryptedSshKey(
+                new SshKeyId("ssh_123"), new UserId("usr_123"), "work", PRIVATE_KEY, NOW);
         CodeRepository codeRepository = codeRepository("git@gitee.com:demo/repo.git");
         UserId userId = new UserId("usr_123");
 
         when(repository.findRepository(codeRepository.repositoryId())).thenReturn(java.util.Optional.of(codeRepository));
-        when(repository.findSshKeys(userId)).thenReturn(List.of(new UserSshKey(
-                new SshKeyId("ssh_123"),
-                userId,
-                "work",
-                encryptionService.fingerprint(PRIVATE_KEY),
-                encrypted.encryptedPrivateKey(),
-                encrypted.encryptionNonce(),
-                NOW)));
+        when(repository.findSshKeys(userId)).thenReturn(List.of(storedKey));
         when(gitRemoteService.listBranches(eq(codeRepository.gitUrl()), eq(PRIVATE_KEY))).thenReturn(List.of("main"));
 
         ConfigurationManagementApplicationService service =
@@ -134,24 +131,49 @@ class ConfigurationManagementApplicationServiceTest {
     void addSshKeyRejectsSecondKeyForSameUser() {
         ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
         UserId userId = new UserId("usr_123");
-        when(repository.findSshKeys(userId)).thenReturn(List.of(new UserSshKey(
-                new SshKeyId("ssh_123"),
-                userId,
-                "existing",
-                "SHA256:abc",
-                "cipher",
-                "nonce",
-                NOW)));
+        when(repository.findSshKeys(userId)).thenReturn(List.of(sshKeyFixtures.encryptedSshKey(
+                new SshKeyId("ssh_123"), userId, "existing", PRIVATE_KEY, NOW)));
         ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
                 repository,
                 org.mockito.Mockito.mock(UserRepository.class),
                 org.mockito.Mockito.mock(GitRemoteService.class),
                 createTestCacheService(),
-                new SshKeyEncryptionService(SshKeyEncryptionServiceTest.base64AesKey()));
+                sshKeyFixtures.encryptionService());
 
-        assertThatThrownBy(() -> service.addSshKey(userId, "work", PRIVATE_KEY))
+        SshKeyTestFixtures.EncryptedPayload payload = sshKeyFixtures.encryptPayload(PRIVATE_KEY);
+        assertThatThrownBy(() -> service.addSshKey(
+                userId, "work", payload.encryptedPrivateKey(), payload.encryptedAesKey(),
+                payload.encryptionNonce(), payload.fingerprint()))
                 .isInstanceOf(PlatformException.class)
                 .satisfies(error -> assertThat(((PlatformException) error).errorCode()).isEqualTo(ErrorCode.CONFLICT));
+    }
+
+    @Test
+    void addSshKeyStoresEncryptedPayloadAndVerifiesFingerprint() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        UserId userId = new UserId("usr_123");
+        when(repository.findSshKeys(userId)).thenReturn(List.of());
+        when(repository.saveSshKey(argThat(saved -> saved != null)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                org.mockito.Mockito.mock(UserRepository.class),
+                org.mockito.Mockito.mock(GitRemoteService.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService());
+
+        SshKeyTestFixtures.EncryptedPayload payload = sshKeyFixtures.encryptPayload(PRIVATE_KEY);
+        ConfigurationManagementResponses.SshKeyResponse response = service.addSshKey(
+                userId, "work", payload.encryptedPrivateKey(), payload.encryptedAesKey(),
+                payload.encryptionNonce(), payload.fingerprint());
+
+        assertThat(response.name()).isEqualTo("work");
+        assertThat(response.fingerprint()).isEqualTo(payload.fingerprint());
+        verify(repository).saveSshKey(argThat(saved ->
+                "work".equals(saved.name())
+                        && payload.encryptedPrivateKey().equals(saved.encryptedPrivateKey())
+                        && payload.encryptedAesKey().equals(saved.encryptedAesKey())
+                        && payload.encryptionNonce().equals(saved.encryptionNonce())));
     }
 
     private static GitCloneCacheService createTestCacheService() {

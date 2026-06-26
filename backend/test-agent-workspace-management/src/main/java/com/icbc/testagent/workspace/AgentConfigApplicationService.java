@@ -4,7 +4,7 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
-import com.icbc.testagent.common.git.SshKeyCryptoService;
+import com.icbc.testagent.common.git.SshKeyEncryptionService;
 import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastEvent;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastHandler;
@@ -41,7 +41,6 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 /**
@@ -81,7 +80,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private final AgentConfigRepository agentConfigRepository;
     private final GitRemoteService gitRemoteService;
     private final GitWorkspaceService gitWorkspaceService;
-    private final SshKeyCryptoService sshKeyCryptoService;
+    private final SshKeyEncryptionService sshKeyEncryptionService;
     private final WorkspaceFileService fileService;
     private final WorkspaceServerIdentity serverIdentity;
     private final ServerBroadcastPublisher broadcastPublisher;
@@ -101,7 +100,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
             ObjectProvider<AgentConfigProgressSink> progressSinkProvider,
-            @Value("${test-agent.security.ssh-key-encryption-key:${TEST_AGENT_SSH_KEY_ENCRYPTION_KEY:}}") String encryptionKey) {
+            SshKeyEncryptionService sshKeyEncryptionService) {
         this(
                 commonParameterRepository,
                 configurationRepository,
@@ -109,7 +108,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 agentConfigRepository,
                 new GitRemoteService(),
                 new GitWorkspaceService(),
-                new SshKeyCryptoService(encryptionKey),
+                sshKeyEncryptionService,
                 fileService,
                 serverIdentity,
                 broadcastPublisher,
@@ -124,7 +123,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             AgentConfigRepository agentConfigRepository,
             GitRemoteService gitRemoteService,
             GitWorkspaceService gitWorkspaceService,
-            SshKeyCryptoService sshKeyCryptoService,
+            SshKeyEncryptionService sshKeyEncryptionService,
             WorkspaceFileService fileService,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
@@ -136,7 +135,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         this.agentConfigRepository = Objects.requireNonNull(agentConfigRepository, "agentConfigRepository must not be null");
         this.gitRemoteService = Objects.requireNonNull(gitRemoteService, "gitRemoteService must not be null");
         this.gitWorkspaceService = Objects.requireNonNull(gitWorkspaceService, "gitWorkspaceService must not be null");
-        this.sshKeyCryptoService = Objects.requireNonNull(sshKeyCryptoService, "sshKeyCryptoService must not be null");
+        this.sshKeyEncryptionService = Objects.requireNonNull(sshKeyEncryptionService, "sshKeyEncryptionService must not be null");
         this.fileService = Objects.requireNonNull(fileService, "fileService must not be null");
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
         this.broadcastPublisher = broadcastPublisher == null ? NOOP_BROADCAST : broadcastPublisher;
@@ -582,7 +581,17 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                     Map.of("keyCount", keys.size()));
         }
         UserSshKey key = keys.get(0);
-        return sshKeyCryptoService.decrypt(key.encryptedPrivateKey(), key.encryptionNonce());
+
+        if (key.encryptedAesKey() == null || key.encryptedAesKey().isBlank()) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR,
+                    "SSH key 使用的旧版加密格式，请重新添加",
+                    Map.of("sshKeyId", key.sshKeyId().value()));
+        }
+
+        return sshKeyEncryptionService.decrypt(
+                key.encryptedPrivateKey(),
+                key.encryptedAesKey(),
+                key.encryptionNonce());
     }
 
     private Path publicAgentRootForRead(String worktreeId) {

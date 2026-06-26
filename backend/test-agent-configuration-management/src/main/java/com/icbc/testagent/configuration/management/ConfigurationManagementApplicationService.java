@@ -10,6 +10,7 @@ import com.icbc.testagent.configuration.management.ConfigurationManagementRespon
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.ApplicationResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.ApplicationWorkspaceResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.CodeRepositoryResponse;
+import com.icbc.testagent.common.git.SshKeyEncryptionService;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.SshKeyResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.UserResponse;
 import com.icbc.testagent.domain.configuration.ApplicationDefinition;
@@ -271,19 +272,22 @@ public class ConfigurationManagementApplicationService {
                 .toList();
     }
 
-    public SshKeyResponse addSshKey(UserId userId, String name, String privateKey) {
+    public SshKeyResponse addSshKey(UserId userId, String name, String encryptedPrivateKey,
+                                      String encryptedAesKey, String encryptionNonce, String fingerprint) {
         if (!configurationRepository.findSshKeys(userId).isEmpty()) {
             throw new PlatformException(ErrorCode.CONFLICT, "每个用户最多只能保存一把 SSH key");
         }
-        String normalizedPrivateKey = normalizePrivateKey(privateKey);
-        SshKeyEncryptionService.EncryptedPrivateKey encrypted = sshKeyEncryptionService.encrypt(normalizedPrivateKey);
+        // 解密并校验指纹，验证前端传来的密文未被篡改
+        sshKeyEncryptionService.decryptAndVerify(encryptedPrivateKey, encryptedAesKey, encryptionNonce, fingerprint);
+
         UserSshKey sshKey = new UserSshKey(
                 new SshKeyId(RuntimeIdGenerator.sshKeyId()),
                 userId,
                 requireText(name, "SSH key 名称不能为空", "name"),
-                sshKeyEncryptionService.fingerprint(normalizedPrivateKey),
-                encrypted.encryptedPrivateKey(),
-                encrypted.encryptionNonce(),
+                fingerprint,
+                encryptedPrivateKey,
+                encryptedAesKey,
+                encryptionNonce,
                 Instant.now());
         return sshKeyResponse(configurationRepository.saveSshKey(sshKey));
     }
@@ -299,7 +303,17 @@ public class ConfigurationManagementApplicationService {
         UserSshKey sshKey = configurationRepository.findSshKeys(currentUserId).stream()
                 .findFirst()
                 .orElseThrow(() -> new PlatformException(ErrorCode.FORBIDDEN, "当前用户未配置 SSH key"));
-        return sshKeyEncryptionService.decrypt(sshKey.encryptedPrivateKey(), sshKey.encryptionNonce());
+
+        if (sshKey.encryptedAesKey() == null || sshKey.encryptedAesKey().isBlank()) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR,
+                    "SSH key 使用的旧版加密格式，请重新添加",
+                    Map.of("sshKeyId", sshKey.sshKeyId().value()));
+        }
+
+        return sshKeyEncryptionService.decrypt(
+                sshKey.encryptedPrivateKey(),
+                sshKey.encryptedAesKey(),
+                sshKey.encryptionNonce());
     }
 
     private void ensureRepositoryLinked(ApplicationId appId, CodeRepositoryId repositoryId) {

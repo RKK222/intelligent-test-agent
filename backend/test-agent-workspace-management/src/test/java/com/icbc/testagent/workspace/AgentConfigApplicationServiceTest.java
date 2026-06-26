@@ -8,7 +8,6 @@ import static org.mockito.Mockito.when;
 
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
-import com.icbc.testagent.common.git.SshKeyCryptoService;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastEvent;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastPublisher;
@@ -46,6 +45,8 @@ class AgentConfigApplicationServiceTest {
     private static final UserId ADMIN = new UserId("usr_admin");
     private static final Instant NOW = Instant.parse("2026-06-26T10:00:00Z");
     private static final String PRIVATE_KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----\n";
+
+    private final SshKeyTestFixtures sshKeyFixtures = new SshKeyTestFixtures();
 
     @TempDir
     Path root;
@@ -207,7 +208,7 @@ class AgentConfigApplicationServiceTest {
                 agentConfigs,
                 new GitRemoteService(),
                 git,
-                new SshKeyCryptoService(aesKey()),
+                sshKeyFixtures.encryptionService(),
                 new WorkspaceFileService(),
                 new WorkspaceServerIdentity("linux-1"),
                 publisher,
@@ -228,20 +229,7 @@ class AgentConfigApplicationServiceTest {
     }
 
     private UserSshKey encryptedSshKey() {
-        SshKeyCryptoService crypto = new SshKeyCryptoService(aesKey());
-        SshKeyCryptoService.EncryptedPrivateKey encrypted = crypto.encrypt(PRIVATE_KEY);
-        return new UserSshKey(
-                new SshKeyId("ssh_admin"),
-                ADMIN,
-                "admin",
-                crypto.fingerprint(PRIVATE_KEY),
-                encrypted.encryptedPrivateKey(),
-                encrypted.encryptionNonce(),
-                NOW);
-    }
-
-    private static String aesKey() {
-        return java.util.Base64.getEncoder().encodeToString("0123456789abcdef".getBytes());
+        return sshKeyFixtures.encryptedSshKey(new SshKeyId("ssh_admin"), ADMIN, "admin", PRIVATE_KEY, NOW);
     }
 
     private static final class RecordingGitWorkspaceService extends GitWorkspaceService {

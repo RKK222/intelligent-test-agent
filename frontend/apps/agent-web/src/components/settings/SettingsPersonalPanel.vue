@@ -3,6 +3,7 @@ import { inject, onMounted, ref } from "vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type { CurrentUser, SshKeyMetadata } from "@test-agent/shared-types";
 import { Key, Delete } from "@element-plus/icons-vue";
+import { encryptSshKey } from "../../utils/ssh-crypto";
 
 // SettingsPanel 统一向所有面板传入 currentUser；个人设置面板目前不依赖该字段，
 // 但保留 prop 以避免 Vue 透传告警，类型与 SettingsAppWorkspacePanel 保持一致。
@@ -38,7 +39,16 @@ async function loadSshKeys() {
 
 async function addSshKey() {
   await run(async () => {
-    await api.addPersonalSshKey({ name: sshKeyName.value.trim(), privateKey: sshPrivateKey.value });
+    // 先获取服务端 RSA 公钥，再在浏览器端完成混合加密后传输密文
+    const { publicKey } = await api.getSshKeyPublicKey();
+    const encrypted = await encryptSshKey(sshPrivateKey.value, publicKey);
+    await api.addPersonalSshKey({
+      name: sshKeyName.value.trim(),
+      encryptedPrivateKey: encrypted.encryptedPrivateKey,
+      encryptedAesKey: encrypted.encryptedAesKey,
+      encryptionNonce: encrypted.encryptionNonce,
+      fingerprint: encrypted.fingerprint,
+    });
     sshKeyName.value = "";
     sshPrivateKey.value = "";
     await loadSshKeys();

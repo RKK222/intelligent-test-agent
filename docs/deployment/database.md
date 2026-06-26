@@ -207,7 +207,7 @@
 | `code_repositories` | 代码库配置，`git_url` 全局唯一且创建后不可编辑。 |
 | `application_repository_links` | 应用与代码库多对多关联。 |
 | `application_workspaces` | 应用级工作空间配置，与运行态 `workspaces` 表独立。 |
-| `user_ssh_keys` | 用户个人 SSH 私钥配置，私钥密文、nonce、指纹和名称。 |
+| `user_ssh_keys` | 用户个人 SSH 私钥配置，私钥密文、RSA 加密的临时 AES 密钥、nonce、指纹和名称。 |
 
 关键约束：
 
@@ -259,6 +259,16 @@
 - 不迁移、不删除既有手动 `workspaces`、sessions、runs；新增托管工作区只是在创建版本或个人空间时新增运行态 `workspaces` 记录。
 - `application_workspaces.branch` 继续保留作为模板创建和目录选择兼容字段；版本实际分支以 `application_workspace_versions.branch` 为准。
 - 应用版本和个人工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定，`common_parameters` 为唯一事实源，缺失时直接抛业务异常（不再回退 yaml 或代码默认值）。数据库只记录最终路径，不负责创建或清理目录。
+
+## V10 user_ssh_keys 新增 encrypted_aes_key 列
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V10__add_encrypted_aes_key_to_user_ssh_keys.sql` 为 `user_ssh_keys` 表新增 `encrypted_aes_key text` 列，承载混合加密方案中 RSA-OAEP 加密后的临时 AES 密钥。
+
+兼容策略：
+
+- 旧记录的 `encrypted_aes_key` 为 `NULL`，应用层在解密时检测到 NULL 抛「SSH key 使用的旧版加密格式，请重新添加」，提示用户通过新版前端重新添加。
+- 新增 SSH key 时前端先用 `GET /api/internal/platform/configuration-management/ssh-key/public-key` 取服务端 RSA 公钥，再 AES-256-GCM 加密私钥、RSA-OAEP/SHA-256 加密临时 AES 密钥，连同 nonce、指纹一起提交；服务端 RSA 私钥（`classpath:rsa-private.key`）解密并校验指纹后落库。
+- 静态 AES 密钥配置 `test-agent.security.ssh-key-encryption-key` / `TEST_AGENT_SSH_KEY_ENCRYPTION_KEY` 不再使用，迁移到 RSA 私钥文件。
 
 ## V20260626150000 通用参数与工作空间创建进度
 

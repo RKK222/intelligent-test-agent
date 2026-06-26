@@ -7,7 +7,6 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
-import com.icbc.testagent.common.git.SshKeyCryptoService;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastEvent;
@@ -56,6 +55,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class ManagedWorkspaceApplicationServiceTest {
+
+    private final SshKeyTestFixtures sshKeyFixtures = new SshKeyTestFixtures();
 
     @TempDir
     Path root;
@@ -371,7 +372,7 @@ class ManagedWorkspaceApplicationServiceTest {
                 new FakeUserRepository(),
                 new FakeGitRemoteService(List.of("feature_testagent_20260707")),
                 git,
-                new SshKeyCryptoService(java.util.Base64.getEncoder().encodeToString("0123456789abcdef".getBytes())),
+                sshKeyFixtures.encryptionService(),
                 new WorkspaceServerIdentity("127.0.0.1"),
                 publisher);
     }
@@ -391,7 +392,7 @@ class ManagedWorkspaceApplicationServiceTest {
                 new FakeUserRepository(),
                 new FakeGitRemoteService(branches),
                 git,
-                new SshKeyCryptoService(java.util.Base64.getEncoder().encodeToString("0123456789abcdef".getBytes())),
+                sshKeyFixtures.encryptionService(),
                 new WorkspaceServerIdentity("127.0.0.1"),
                 new RecordingBroadcastPublisher());
     }

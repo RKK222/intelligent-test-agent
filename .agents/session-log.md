@@ -716,6 +716,21 @@
 - How: properties 格式 `.key` 文件，`@PropertySource` 自动解析；env var `TEST_AGENT_SSH_KEY_ENCRYPTION_KEY` 优先级高于 `.key` 文件，生产仍可用 env 覆盖。
 - Result: 编译通过，`SshKeyEncryptionServiceTest` 和 `SshKeyCryptoServiceTest` 全部通过；密钥统一由 `.key` 文件承载，后续其他密钥也按此模式加入。
 
+### 2026-06-26 - SSH key 改为前端混合加密（RSA + AES-256-GCM）
+
+- Why: 原 SSH 私钥明文从前端传输到后端再 AES 加密存储，静态 AES 密钥泄露即可解密全库；用户要求前端密文传输、并改非对称方案。最终定为混合加密：前端 AES 加密私钥、RSA 加密临时 AES 密钥，后端 RSA 解密。
+- What:
+  - 新增 `test-agent-common` 的 `RsaKeyService`（加载 `classpath:rsa-private.key` PEM，缺失自动生成临时密钥）和重写 `SshKeyEncryptionService`（RSA 解密 AES 密钥 + AES-GCM 解密私钥 + 指纹校验），二者为纯 Java 类，由 `test-agent-app` 的 `SshKeyConfig` 装配 `@Bean`。
+  - `UserSshKey` 新增 `encryptedAesKey` 字段；Flyway `V10` 给 `user_ssh_keys` 加 `encrypted_aes_key` 列；JDBC Repository 同步列。
+  - `ConfigurationManagementApplicationService.addSshKey` 改为接受前端密文 payload 并 `decryptAndVerify` 校验；`privateKeyFor`/`decryptSingleSshKey` 改混合解密，旧记录（`encryptedAesKey` 为 null）友好报错提示重新添加。
+  - `ManagedWorkspaceApplicationService`/`AgentConfigApplicationService` 的 `SshKeyCryptoService` 字段改为 `SshKeyEncryptionService`，移除 `@Value` 静态 AES 密钥注入。
+  - API 新增 `GET /ssh-key/public-key`（免鉴权返回 RSA 公钥 SPKI Base64）；`AddSshKeyRequest` 改为 `name/encryptedPrivateKey/encryptedAesKey/encryptionNonce/fingerprint`。
+  - 前端新增 `utils/ssh-crypto.ts`（Web Crypto API 混合加密，指纹用 url-safe base64 no-padding 与后端对齐）；`SettingsPersonalPanel.vue` 提交前先取公钥再加密；`backend-api` 加 `getSshKeyPublicKey`；`shared-types` 更新 `AddSshKeyPayload` 并新增 `SshKeyPublicKeyResponse`。
+  - 删除旧 `ssh-key.key`（AES 密钥）和 `@PropertySource`，新增 `rsa-private.key`（PEM，force-add 入库）。
+- How: RSA-2048 + OAEP/SHA-256（只加密 32 字节 AES 密钥，无大小限制问题）；AES 密钥每次前端随机生成、不落服务端配置，只以 RSA 加密形态存库；Web Crypto AES-GCM 输出（密文+tag）与 Java GCM doFinal 期望格式一致。`test-agent-common` 无 SLF4J 编译依赖，RsaKeyService 用 `java.util.logging`。
+- Result: 后端 4 个相关模块测试全绿（含新增公钥端点、混合解密、指纹校验、addSshKey 存储验证用例），前端 `backend-api` 25 测试全绿，`agent-web` typecheck 通过。旧 SSH key 记录需用户重新添加。
+- Pitfalls: `SshKeyEncryptionService` 原在 configuration-management 模块，workspace-management 不依赖该模块无法引用；移到 `test-agent-common` 作纯 Java 类 + app 模块 `@Bean` 装配解决。指纹格式后端用 `getUrlEncoder().withoutPadding()`，前端必须对应转 url-safe 去填充，否则校验失败。
+
 - Why: 收起态的小绿点原本实色范围过大，视觉上"实心"占比偏高且位置固定在右下角，用户希望实心范围更小、并支持拖动到任意位置。
 - What: `frontend/apps/agent-web/src/components/FigmaChatPanel.vue` 中 `.figma-chat-process-dot` 的 `radial-gradient` 第二段 stop 由 `55%` 提前到 `25%`（is-ready / is-blocking 同步），实心向边缘过渡更早，中间高亮区域显著缩小；`.figma-chat-process-dot` 由 `position: relative` + flex 容器定位改为 `position: fixed`，位置通过 CSS 变量 `--figma-process-dot-x/y` 经 `transform: translate3d` 承载（避免与 `:hover` 的 `scale(1.15)` 互相覆盖），`cursor: grab / grabbing`，新增 `is-dragging` 状态；模板绑定 `:style="processStatusDotStyle"`、`@pointerdown="onProcessStatusDotPointerDown"`、`@click="handleProcessStatusDotClick"`（点击和拖动通过 4px 阈值区分，拖动产生的 click 不会触发 toggle）；script 新增 `processStatusDotPos` 状态、`loadProcessDotPos`/`saveProcessDotPos` 持久化到 `localStorage('figma-chat-process-dot-pos')`、`clampProcessDotPos` 边界裁剪、`onProcessStatusDotResize` 窗口变化时夹紧；`onMounted` 读位置、注册 resize 监听，`onBeforeUnmount` 解绑 pointer/resize 监听。
 - How: 仅在 `FigmaChatPanel.vue` 内单文件改动，不动 store/props/emit；展开态面板 `figma-chat-process-status` 不受拖动逻辑影响，行为保持原样。

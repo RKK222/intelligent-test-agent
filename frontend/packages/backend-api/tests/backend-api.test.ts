@@ -502,7 +502,13 @@ describe("backend-api", () => {
     );
     const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
 
-    const response = await client.addPersonalSshKey({ name: "work", privateKey: "-----BEGIN OPENSSH PRIVATE KEY-----" });
+    const response = await client.addPersonalSshKey({
+      name: "work",
+      encryptedPrivateKey: "-----ENCRYPTED-----",
+      encryptedAesKey: "-----AES-----",
+      encryptionNonce: "-----NONCE-----",
+      fingerprint: "SHA256:abc"
+    });
 
     expect(response).toEqual({ sshKeyId: "ssh_1", name: "work", fingerprint: "SHA256:abc", createdAt: "2026-06-23T00:00:00Z" });
     expect(response).not.toHaveProperty("privateKey");

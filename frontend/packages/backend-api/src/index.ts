@@ -59,6 +59,7 @@ import type {
   Session,
   SessionMessage,
   SshKeyMetadata,
+  SshKeyPublicKeyResponse,
   SyncWorkspacePayload,
   TerminalTicketRequest,
   TerminalTicketResponse,
@@ -811,6 +812,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "DELETE"
       }),
     listPersonalSshKeys: () => request<SshKeyMetadata[]>(`${configurationBase}/personal/ssh-keys`),
+    /** 获取服务端 RSA 公钥（SPKI Base64），供前端混合加密 SSH 私钥。 */
+    getSshKeyPublicKey: () => request<SshKeyPublicKeyResponse>(`${configurationBase}/ssh-key/public-key`),
     addPersonalSshKey: (payload: AddSshKeyPayload) =>
       request<SshKeyMetadata>(`${configurationBase}/personal/ssh-keys`, { method: "POST", body: JSON.stringify(payload) }),
     deletePersonalSshKey: (sshKeyId: string) =>

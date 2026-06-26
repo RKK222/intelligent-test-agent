@@ -2,13 +2,8 @@ package com.icbc.testagent.app;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.context.annotation.PropertySource;
-import org.springframework.context.annotation.PropertySources;
 
 @SpringBootApplication(scanBasePackages = "com.icbc.testagent")
-@PropertySources({
-    @PropertySource(value = "classpath:ssh-key.key", ignoreResourceNotFound = true)
-})
 public class TestAgentApplication {
 
     /**
