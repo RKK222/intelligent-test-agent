@@ -45,7 +45,8 @@ function partText(part: unknown): string {
     if (pType === 'reasoning') return ''
     // tool part：提取执行结果（如 bash 命令输出、文件读取内容等）进入气泡
     if (pType === 'tool') {
-      const state = (part as { state?: { output?: string; error?: string } }).state
+      const state = (part as { state?: { output?: string; error?: string } })
+        .state
       if (state?.output) return state.output + '\n'
       if (state?.error) return state.error + '\n'
       return ''
@@ -239,12 +240,12 @@ type ChoiceOption = { index: number; label: string }
 const selectedChoice = ref<number | null>(null)
 const choiceCustomInput = ref('')
 const choiceDismissed = ref(false)
+const choiceStep = ref<'select' | 'supplement'>('select')
+const supplementText = ref('')
 
 const choiceOptions = computed<ChoiceOption[]>(() => {
   if (props.running) return []
-  const last = displayMessages.value
-    .filter(m => m.role === 'assistant')
-    .pop()
+  const last = displayMessages.value.filter((m) => m.role === 'assistant').pop()
   if (!last) return []
   const text = last.content
   if (!text) return []
@@ -252,6 +253,7 @@ const choiceOptions = computed<ChoiceOption[]>(() => {
   clean = clean.replace(/\*\*([^*]+)\*\*/g, '$1')
   clean = clean.replace(/\*([^*]+)\*/g, '$1')
   clean = clean.replace(/^[-\s>#*]+/gm, '')
+  console.log('[choice] last assistant content (前200字):', clean.slice(0, 200))
   const lines = clean.split('\n')
   const opts: ChoiceOption[] = []
   for (const line of lines) {
@@ -261,7 +263,18 @@ const choiceOptions = computed<ChoiceOption[]>(() => {
     if (!m) {
       m = trimmed.match(/^([一二三四五六七八九十]+)[、\.\s]\s*(.+)/)
       if (m) {
-        const map: Record<string, number> = { '一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10 }
+        const map: Record<string, number> = {
+          一: 1,
+          二: 2,
+          三: 3,
+          四: 4,
+          五: 5,
+          六: 6,
+          七: 7,
+          八: 8,
+          九: 9,
+          十: 10,
+        }
         const idx = map[m[1]]
         if (idx) m = [m[0], String(idx), m[2]]
         else m = null
@@ -272,19 +285,18 @@ const choiceOptions = computed<ChoiceOption[]>(() => {
       if (label) opts.push({ index: parseInt(m[1]), label })
     }
   }
+  console.log('[choice] detected opts:', opts)
   if (opts.length < 2) return []
   for (let i = 0; i < opts.length; i++) {
     if (opts[i].index !== i + 1) return []
   }
-  const tail = lines.slice(-4).join(' ')
-  const hasChoiceHint = /(选|哪个|choose|select|pick|你希望|你想|你倾向|哪个方案|哪一种|怎么选)/i.test(tail) || /[？?]\s*$/.test(tail.trim())
-  if (!hasChoiceHint) return []
+  console.log('[choice] showing panel with', opts.length, 'options')
   return opts
 })
 
 const choiceQuestion = computed(() => {
   if (choiceOptions.value.length === 0) return ''
-  const last = displayMessages.value.filter(m => m.role === 'assistant').pop()
+  const last = displayMessages.value.filter((m) => m.role === 'assistant').pop()
   if (!last) return ''
   const text = last.content
   const firstOpt = choiceOptions.value[0]
@@ -297,7 +309,10 @@ const choiceQuestion = computed(() => {
 })
 
 const showChoicePanel = computed(
-  () => !wasStopped.value && !choiceDismissed.value && choiceOptions.value.length >= 2
+  () =>
+    !wasStopped.value &&
+    !choiceDismissed.value &&
+    choiceOptions.value.length >= 2
 )
 
 function selectChoice(index: number) {
@@ -306,12 +321,28 @@ function selectChoice(index: number) {
 }
 
 function confirmChoice() {
-  if (selectedChoice.value !== null) {
-    const opt = choiceOptions.value.find(o => o.index === selectedChoice.value)
-    if (opt) emit('send', `${opt.index}. ${opt.label}`)
-  } else if (choiceCustomInput.value.trim()) {
-    emit('send', choiceCustomInput.value.trim())
+  if (selectedChoice.value !== null || choiceCustomInput.value.trim()) {
+    choiceStep.value = 'supplement'
   }
+}
+
+function backToChoice() {
+  choiceStep.value = 'select'
+  supplementText.value = ''
+}
+
+function submitSupplement() {
+  const parts: string[] = []
+  if (selectedChoice.value !== null) {
+    const opt = choiceOptions.value.find(
+      (o) => o.index === selectedChoice.value
+    )
+    if (opt) parts.push(`${opt.index}. ${opt.label}`)
+  } else if (choiceCustomInput.value.trim()) {
+    parts.push(choiceCustomInput.value.trim())
+  }
+  if (supplementText.value.trim()) parts.push(supplementText.value.trim())
+  if (parts.length > 0) emit('send', parts.join('\n'))
   resetChoice()
 }
 
@@ -323,6 +354,8 @@ function cancelChoice() {
 function resetChoice() {
   selectedChoice.value = null
   choiceCustomInput.value = ''
+  choiceStep.value = 'select'
+  supplementText.value = ''
 }
 
 // ===== 文件变更抽屉 =====
@@ -1092,9 +1125,16 @@ const displayMessages = computed<ChatMessage[]>(() => {
     .map((m, index): ChatMessage | null => {
       // card 消息：run 失败等事件转为助手气泡展示
       if (m.role === 'card') {
-        const card = m as { role: 'card'; cardType?: string; title?: string; payload?: Record<string, unknown> }
+        const card = m as {
+          role: 'card'
+          cardType?: string
+          title?: string
+          payload?: Record<string, unknown>
+        }
         if (card.cardType === 'event') {
-          const err = card.payload?.error as { name?: string; message?: string } | undefined
+          const err = card.payload?.error as
+            | { name?: string; message?: string }
+            | undefined
           const detail = err?.message || err?.name || ''
           return {
             id: m.id ?? `card-${index}`,
@@ -1511,7 +1551,9 @@ function onCompositionEnd() {
                 </template>
                 <div v-if="message._error" class="figma-chat-error-row">
                   <AlertTriangle :size="14" class="figma-chat-error-icon" />
-                  <span class="figma-chat-error-text">{{ message.content }}</span>
+                  <span class="figma-chat-error-text">{{
+                    message.content
+                  }}</span>
                 </div>
                 <MarkdownView v-else :source="message.content" />
               </div>
@@ -1540,7 +1582,9 @@ function onCompositionEnd() {
 
       <!-- 对话完成提示 -->
       <div
-        v-if="wasCompleted && !wasFailed && !running && displayMessages.length > 0"
+        v-if="
+          wasCompleted && !wasFailed && !running && displayMessages.length > 0
+        "
         class="figma-chat-completed"
       >
         <CheckCircle :size="14" class="figma-chat-completed-icon" />
@@ -1604,8 +1648,6 @@ function onCompositionEnd() {
       </div>
     </div>
 
-
-
     <!-- 任务消耗提示（位于输入框上方） -->
     <div v-if="hasTaskUsageDisplay" class="figma-chat-usage">
       <img
@@ -1626,15 +1668,18 @@ function onCompositionEnd() {
           "
           >(</template
         >
-        <template v-if="taskUsage?.duration">{{ taskUsage.duration }}</template>
+        <template v-if="taskUsage?.totalDuration">
+          · {{ taskUsage.totalDuration }}</template
+        >
+
         <template v-if="displayTokens !== undefined">
           · ↓ {{ displayTokens }} tokens</template
         >
         <template v-if="taskUsage?.thoughtFor">
           · thought for {{ taskUsage.thoughtFor }}</template
         >
-        <template v-if="taskUsage?.totalDuration">
-          · 累计 {{ taskUsage.totalDuration }}</template
+        <template v-if="taskUsage?.duration"
+          >· thought for {{ taskUsage.duration }}</template
         >
         <template
           v-if="
@@ -1699,36 +1744,154 @@ function onCompositionEnd() {
     </div>
 
     <!-- 任务面板：运行中显示工具操作进度 -->
-    <div v-if="running && liveTaskParts.length > 0" class="figma-chat-task-panel">
+    <div
+      v-if="running && liveTaskParts.length > 0"
+      class="figma-chat-task-panel"
+    >
       <div class="figma-chat-task-summary">
-        已完成 {{ liveTaskParts.filter(t => t.status === 'completed').length }} 个任务 共（{{ liveTaskParts.length }} 个）
+        已完成
+        {{ liveTaskParts.filter((t) => t.status === 'completed').length }}
+        个任务 共（{{ liveTaskParts.length }} 个）
       </div>
-      <div v-for="tp in liveTaskParts" :key="tp.partId" :class="['figma-chat-task-row', `figma-chat-task-row--${tp.status}`]">
-        <Loader2 v-if="tp.status === 'running'" :size="12" class="figma-chat-task-icon figma-chat-task-icon--running" />
-        <CheckCircle v-else-if="tp.status === 'completed'" :size="12" class="figma-chat-task-icon figma-chat-task-icon--completed" />
-        <X v-else-if="tp.status === 'error'" :size="12" class="figma-chat-task-icon figma-chat-task-icon--error" />
-        <Circle v-else :size="12" class="figma-chat-task-icon figma-chat-task-icon--pending" />
+      <div
+        v-for="tp in liveTaskParts"
+        :key="tp.partId"
+        :class="['figma-chat-task-row', `figma-chat-task-row--${tp.status}`]"
+      >
+        <Loader2
+          v-if="tp.status === 'running'"
+          :size="12"
+          class="figma-chat-task-icon figma-chat-task-icon--running"
+        />
+        <CheckCircle
+          v-else-if="tp.status === 'completed'"
+          :size="12"
+          class="figma-chat-task-icon figma-chat-task-icon--completed"
+        />
+        <X
+          v-else-if="tp.status === 'error'"
+          :size="12"
+          class="figma-chat-task-icon figma-chat-task-icon--error"
+        />
+        <Circle
+          v-else
+          :size="12"
+          class="figma-chat-task-icon figma-chat-task-icon--pending"
+        />
         <span class="figma-chat-task-label">{{ tp.label }}</span>
-        <span v-if="tp.detail" class="figma-chat-task-detail">{{ tp.detail }}</span>
+        <span v-if="tp.detail" class="figma-chat-task-detail">{{
+          tp.detail
+        }}</span>
       </div>
     </div>
     <!-- 选择题面板：替换输入区域 -->
     <div v-if="showChoicePanel" class="figma-chat-choice-panel">
-      <div v-if="choiceQuestion" class="figma-chat-choice-question">{{ choiceQuestion }}</div>
-      <div class="figma-chat-choice-list">
-        <div v-for="opt in choiceOptions" :key="opt.index" :class="['figma-chat-choice-row', selectedChoice === opt.index && 'figma-chat-choice-row--selected']" @click="selectChoice(opt.index)">
-          <span class="figma-chat-choice-index">{{ opt.index }}</span>
-          <span class="figma-chat-choice-label">{{ opt.label }}</span>
+      <!-- Step 1: 选择选项 -->
+      <template v-if="choiceStep === 'select'">
+        <div class="figma-chat-choice-header">
+          <div v-if="choiceQuestion" class="figma-chat-choice-question">
+            {{ choiceQuestion }}
+          </div>
+          <button
+            type="button"
+            class="figma-chat-choice-close"
+            @click="cancelChoice"
+          >
+            <X :size="14" />
+          </button>
         </div>
-        <div :class="['figma-chat-choice-row figma-chat-choice-row--other', selectedChoice === null && choiceCustomInput !== '' && 'figma-chat-choice-row--selected']">
-          <span class="figma-chat-choice-index">#</span>
-          <input v-model="choiceCustomInput" class="figma-chat-choice-input" placeholder="其他..." @focus="selectedChoice = null" />
+        <div class="figma-chat-choice-list">
+          <div
+            v-for="opt in choiceOptions"
+            :key="opt.index"
+            :class="[
+              'figma-chat-choice-row',
+              selectedChoice === opt.index && 'figma-chat-choice-row--selected',
+            ]"
+            @click="selectChoice(opt.index)"
+          >
+            <span class="figma-chat-choice-index">{{ opt.index }}</span>
+            <span class="figma-chat-choice-label">{{ opt.label }}</span>
+          </div>
+          <div
+            :class="[
+              'figma-chat-choice-row figma-chat-choice-row--other',
+              selectedChoice === null &&
+                choiceCustomInput !== '' &&
+                'figma-chat-choice-row--selected',
+            ]"
+          >
+            <span class="figma-chat-choice-index">#</span>
+            <input
+              v-model="choiceCustomInput"
+              class="figma-chat-choice-input"
+              placeholder="其他..."
+              @focus="selectedChoice = null"
+            />
+          </div>
         </div>
-      </div>
-      <div class="figma-chat-choice-actions">
-        <button type="button" class="figma-chat-choice-cancel" @click="cancelChoice">取消</button>
-        <button type="button" class="figma-chat-choice-confirm" :disabled="selectedChoice === null && !choiceCustomInput.trim()" @click="confirmChoice">确认</button>
-      </div>
+        <div class="figma-chat-choice-actions">
+          <button
+            type="button"
+            class="figma-chat-choice-cancel"
+            @click="cancelChoice"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="figma-chat-choice-confirm"
+            :disabled="selectedChoice === null && !choiceCustomInput.trim()"
+            @click="confirmChoice"
+          >
+            确认
+          </button>
+        </div>
+      </template>
+      <!-- Step 2: 补充信息 -->
+      <template v-else>
+        <div class="figma-chat-choice-header">
+          <div class="figma-chat-supplement-title">
+            是否有更多需要补充的信息
+          </div>
+          <button
+            type="button"
+            class="figma-chat-choice-close"
+            @click="cancelChoice"
+          >
+            <X :size="14" />
+          </button>
+        </div>
+        <textarea
+          v-model="supplementText"
+          class="figma-chat-supplement-textarea"
+          placeholder="补充说明（可选）..."
+          rows="3"
+        />
+        <div class="figma-chat-choice-actions">
+          <button
+            type="button"
+            class="figma-chat-choice-cancel"
+            @click="cancelChoice"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="figma-chat-supplement-back"
+            @click="backToChoice"
+          >
+            上一步
+          </button>
+          <button
+            type="button"
+            class="figma-chat-choice-confirm"
+            @click="submitSupplement"
+          >
+            确认
+          </button>
+        </div>
+      </template>
     </div>
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div v-else class="figma-chat-composer">
@@ -2612,12 +2775,40 @@ function onCompositionEnd() {
   border-radius: 8px;
 }
 
+.figma-chat-choice-header {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 10px;
+  justify-content: space-between;
+}
+
 .figma-chat-choice-question {
   font-size: 13px;
   font-weight: 700;
   color: #1a1a1a;
   padding: 6px 2px 4px;
   line-height: 1.45;
+  flex: 1;
+}
+
+.figma-chat-choice-close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: none;
+  background: transparent;
+  color: #999;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.figma-chat-choice-close:hover {
+  background: #f0f1f4;
+  color: #555;
 }
 
 .figma-chat-choice-list {
@@ -2722,6 +2913,50 @@ function onCompositionEnd() {
 .figma-chat-choice-confirm:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+/* ---- 选择面板第二步：补充信息 ---- */
+.figma-chat-supplement-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+  padding: 4px 2px 8px;
+}
+
+.figma-chat-supplement-textarea {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #f5f5f5;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #333;
+  outline: none;
+  resize: none;
+  font-family: inherit;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+}
+
+.figma-chat-supplement-textarea:focus {
+  border-color: #3366ff;
+  background: #fff;
+}
+
+.figma-chat-supplement-back {
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  border: none;
+  background: #f0f1f4;
+  color: #666;
+  transition: background 0.12s;
+}
+
+.figma-chat-supplement-back:hover {
+  background: #e4e5e9;
 }
 
 @keyframes figma-chat-pulse {
@@ -2855,7 +3090,7 @@ function onCompositionEnd() {
   transition: none;
 }
 .figma-chat-process-dot::after {
-  content: "";
+  content: '';
   position: absolute;
   inset: -6px;
   border-radius: 9999px;
@@ -3017,7 +3252,8 @@ function onCompositionEnd() {
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease,
+    color 0.12s ease;
 }
 
 .figma-chat-card-btn:hover:not(:disabled) {
