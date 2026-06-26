@@ -136,7 +136,7 @@ const breadcrumbs = computed(() => {
         role="dialog"
         aria-modal="true"
         aria-label="选择服务器工作空间"
-        class="flex h-[580px] w-[840px] max-h-[calc(100vh-48px)] max-w-[calc(100vw-24px)] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl"
+        class="flex h-[75vh] w-[1000px] max-h-[calc(100vh-48px)] max-w-[calc(100vw-24px)] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl"
       >
         <header class="flex h-12 shrink-0 items-center justify-between border-b border-[var(--ta-border)] px-4">
           <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">选择服务器工作空间</h2>
@@ -260,6 +260,13 @@ const breadcrumbs = computed(() => {
                     @navigate="(path) => emit('navigate', path)"
                   />
                 </template>
+              </div>
+              <!-- macOS Finder-style path status bar -->
+              <div class="flex items-center gap-1.5 px-3 py-1.5 bg-[#fafafa] border-t border-[var(--ta-border)] text-[10.5px] text-gray-400 font-mono select-all shrink-0">
+                <span class="font-sans font-medium text-gray-500">当前路径:</span>
+                <span class="truncate" :title="directory?.path ?? selectedServer?.defaultDirectory ?? ''">
+                  {{ directory?.path ?? selectedServer?.defaultDirectory ?? "—" }}
+                </span>
               </div>
             </div>
           </main>

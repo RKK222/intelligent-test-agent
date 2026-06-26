@@ -6,13 +6,14 @@
 
 - Why: 用户反馈服务器工作空间目录选择器布局简易，希望参考 macOS Finder 的文件管理风格进行界面优化，且要求解决文件夹选中后窗口尺寸跳动问题、精简多余列信息、并支持通过点击左侧折叠箭头 inline 展开子目录结构。
 - What:
-  - 窗口尺寸固定：锁定了 `ServerWorkspacePickerDialog.vue` 弹窗的物理尺寸为 `h-[580px] w-[840px]`，保证在任何文件夹切换、加载、或空状态下高度和宽度保持绝对稳定。
+  - 窗口尺寸与宽高比例调整：调整弹窗高度控制为主界面的 75% (`h-[75vh]`)，并在之前宽度基础上增加了 20% (`w-[1000px]`)，同时保证尺寸在任何文件夹切换下绝对稳定。
   - 列信息精简与一整行显示：去掉了原 Finder 风格中多余的“修改日期”、“大小”和“种类”列，让文件夹名称占满整行，视觉更聚焦。
   - 折叠展开与单点跳转交互（引入新组件 [ServerWorkspaceDirectoryNode.vue](file:///Users/huang/workspace/intelligent-test-agent-gitee/frontend/apps/agent-web/src/components/ServerWorkspaceDirectoryNode.vue)）：
     - 文件夹左侧的 chevron 旋转箭头 `>` 为折叠/展开开关。点击 `>` 将 inline 展开显示子目录树而不发生全局页面跳转；
     - 点击文件夹名称文字或图标时，才会执行全局的下一级目录导航（向父组件发出 `navigate` 并更新顶部面包屑）。
   - 路径导航与工具栏：包括后退/前进按钮、面包屑 Location Bar 以及“选择此目录”主按钮。
   - 面包屑自动滚动：为 Location Bar 面包屑容器添加了自动向右端滚动的 watch 监听器，在目录切换或弹窗首次打开时自动滚动到最右端，确保在层级较深时最新/当前目录始终可见。
+  - 任务栏状态栏：在目录树列表框底部增加了一个 macOS Finder 风格的状态栏，用较小字体 (`text-[10.5px]`) 与等宽字体 (`font-mono`) 展示当前的完整路径，并支持直接选定复制 (`select-all`)。
 - How: 拆分出递归组件 `ServerWorkspaceDirectoryNode.vue`，利用 computed/refs 管理各层级文件夹独立的展开、加载与缓存状态。
 - Result: 对齐 macOS Finder 体验，解决了布局尺寸抖动，实现了完美的树状文件夹折叠展开浏览。类型检查及单元测试完全通过。
 
