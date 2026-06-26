@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -32,6 +33,7 @@ public class CommonParameterManagementApplicationService {
     /**
      * 注入通用参数领域端口；使用系统默认时钟记录更新时间。
      */
+    @Autowired
     public CommonParameterManagementApplicationService(CommonParameterRepository repository) {
         this(repository, Clock.systemUTC());
     }
