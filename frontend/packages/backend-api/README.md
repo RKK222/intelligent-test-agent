@@ -21,6 +21,7 @@
 - 暴露当前用户 opencode 进程状态与初始化方法：`getMyOpencodeProcess()`、`initializeMyOpencodeProcess()`，统一走默认 `opencode` 的 agent-scoped URL。
 - 暴露超级管理员运行管理只读方法：`getOpencodeRuntimeManagementOverview(params)`，统一走 `/api/internal/platform/opencode-runtime/management/overview`，自动携带用户 Bearer Token；新筛选参数使用 `username`，`userId` 仅保留后端兼容。
 - 暴露超级管理员定时任务管理方法：任务分页/详情/更新/手动触发、运行记录分页/详情/停止，统一走 `/api/internal/platform/scheduler-management`，自动携带用户 Bearer Token。
+- 暴露超级管理员用户管理（测试）方法：用户分页查询、创建用户（默认密码 123456）、角色列表，统一走 `/api/internal/platform/system-management`，自动携带用户 Bearer Token；仅用于研发测试便捷造号。
 - `startRun` 同时支持旧 `(sessionId, prompt)` 参数和对象 payload（`parts`、`messageId`、`agent`、`model`、`variant`、`mode`）。
 - 暴露 opencode Web App 标准运行态方法：Agent/Model/Provider/Command/Reference 目录、config、provider auth/OAuth、worktree、Session active-run/children/todo/diff/abort/fork/compact/revert/command/shell/share、permission/question、fs/vcs/lsp/mcp status/resources/tools/auth 和 terminal ticket；除 terminal ticket 外均按 agent URL 调用。
 - Command catalog 映射会保留 opencode runtime 的 `source/hints` 可选字段，供 frontend-opencode 生成 slash command 参数表单。

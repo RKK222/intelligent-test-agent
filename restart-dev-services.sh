@@ -575,8 +575,8 @@ build_backend() {
     return
   fi
 
-  echo "Building backend: mvn clean package -DskipTests"
-  (cd "${BACKEND_DIR}" && mvn clean package -DskipTests)
+  echo "Building backend: mvn clean package -Dmaven.test.skip=true"
+  (cd "${BACKEND_DIR}" && mvn clean package -Dmaven.test.skip=true)
 }
 
 build_frontend() {

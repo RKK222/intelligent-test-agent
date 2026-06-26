@@ -453,6 +453,26 @@ export type ScheduledTaskRunListParams = {
   size?: number;
 };
 
+export type GeneralParameter = {
+  parameterId: string;
+  englishName: string;
+  chineseName: string;
+  parameterValue: string;
+  platform: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GeneralParameterListParams = {
+  platform?: string;
+  page?: number;
+  size?: number;
+};
+
+export type GeneralParameterUpdatePayload = {
+  value: string;
+};
+
 export type RunEventType =
   | "run.created"
   | "run.started"

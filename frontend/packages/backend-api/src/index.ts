@@ -22,10 +22,14 @@ import type {
   CreatePersonalWorkspacePayload,
   CreateRepositoryPayload,
   CreateWorkspaceVersionPayload,
+  CreateUserPayload,
   CurrentUser,
   FileContent,
   FileStatus,
   FileTreeEntry,
+  GeneralParameter,
+  GeneralParameterListParams,
+  GeneralParameterUpdatePayload,
   LoginRequest,
   LoginResponse,
   ManagedApplication,
@@ -40,6 +44,7 @@ import type {
   PromptPart,
   ProviderInfo,
   QuestionRequest,
+  RoleOption,
   Run,
   RunDiff,
   RunDiffAction,
@@ -59,6 +64,7 @@ import type {
   TerminalTicketResponse,
   TodoItem,
   UpdateRepositoryPayload,
+  UserManagementUser,
   UserOpencodeProcess,
   Workspace,
   WorkspaceBackendServer,
@@ -150,6 +156,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const agentConfigBase = `${workspaceManagementBase}/agent-config`;
   const opencodeRuntimeManagementBase = "/api/internal/platform/opencode-runtime/management";
   const schedulerManagementBase = "/api/internal/platform/scheduler-management";
+  const systemManagementBase = "/api/internal/platform/system-management";
+  const commonParameterBase = `${configurationBase}/common-parameters`;
   const fetcher = options.fetcher ?? fetch;
   const webSocketFactory: WorkspaceWebSocketFactory =
     options.webSocketFactory ??
@@ -572,6 +580,15 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<ScheduledTaskManagementRun>(`${schedulerManagementBase}/runs/${encodeURIComponent(taskRunId)}`),
     stopScheduledTaskRun: (taskRunId: string) =>
       request<ScheduledTaskManagementRun>(`${schedulerManagementBase}/runs/${encodeURIComponent(taskRunId)}/stop`, { method: "POST" }),
+    listGeneralParameters: (params: GeneralParameterListParams = {}) =>
+      request<PageResponse<GeneralParameter>>(
+        `${commonParameterBase}${query({ platform: params.platform, page: params.page, size: params.size })}`
+      ),
+    updateGeneralParameter: (parameterId: string, payload: GeneralParameterUpdatePayload) =>
+      request<GeneralParameter>(`${commonParameterBase}/${encodeURIComponent(parameterId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload)
+      }),
     getRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}`)),
     cancelRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}/cancel`), { method: "POST" }),
     getRunDiff: (runId: string) => request<RunDiff>(agentPath(`/runs/${encodeURIComponent(runId)}/diff`)),
@@ -728,6 +745,18 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       }),
     searchUsers: (keyword?: string, page = 1, size = 20) =>
       request<PageResponse<PlatformUserSummary>>(`${configurationBase}/users${query({ keyword, page, size })}`),
+
+    // ---- 用户管理（测试）API ----
+
+    /** 分页查询用户列表（仅 SUPER_ADMIN）。 */
+    listUsers: (keyword?: string, page = 1, size = 50) =>
+      request<PageResponse<UserManagementUser>>(`${systemManagementBase}/users${query({ keyword, page, size })}`),
+    /** 创建测试用户，密码由后端注入默认值 123456。 */
+    createUser: (payload: CreateUserPayload) =>
+      request<UserManagementUser>(`${systemManagementBase}/users`, { method: "POST", body: JSON.stringify(payload) }),
+    /** 查询可选角色列表，供新增用户下拉选择。 */
+    listRoles: () => request<RoleOption[]>(`${systemManagementBase}/roles`),
+
     listRepositories: (page = 1, size = 50) =>
       request<PageResponse<CodeRepositoryConfig>>(`${configurationBase}/repositories${query({ page, size })}`),
     createRepository: (payload: CreateRepositoryPayload) =>

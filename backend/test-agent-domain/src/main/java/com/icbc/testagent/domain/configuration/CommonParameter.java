@@ -28,4 +28,12 @@ public record CommonParameter(
             throw new IllegalArgumentException("updatedAt must not be before createdAt");
         }
     }
+
+    /**
+     * 返回替换了参数值与更新时间的新实例，复用 compact 构造器校验，
+     * 保证新值非空且更新时间不早于创建时间；供管理端「仅修改 value」场景使用。
+     */
+    public CommonParameter withValue(String newValue, Instant updatedAt) {
+        return new CommonParameter(parameterId, englishName, chineseName, newValue, platform, createdAt, updatedAt);
+    }
 }

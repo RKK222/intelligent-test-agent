@@ -624,3 +624,54 @@ V17 及以前保留既有数字版本，已在本地或共享库执行过的 mig
 - 全部插入语句使用 `where not exists` / `where exists` 保护，重复执行迁移不会破坏数据或产生重复行。
 - 仅在 `users.user_id = 'usr_test_dev'`（V5 默认开发用户）存在时才插入 `opencode_server_processes` 与 `user_opencode_process_bindings`；生产环境无该用户时整段种子不写用户进程相关表，仅保留拓扑种子，便于后续手工绑定。
 - 容器 `current_processes = 1` 反映当前已有一个用户进程；若需要新增第二个用户，需要先把 `current_processes` 与 `max_processes` 调大并扩展端口池，或先解除已有绑定。
+
+## V20260626210000 数据库表和字段中文注释
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260626210000__add_chinese_comments_for_all_tables.sql` 为项目中所有数据库表和字段添加中文注释：
+
+### 添加注释的表
+
+| 表 | 说明 |
+|---|---|
+| `workspaces` | 平台工作区表，包含业务ID、名称、根路径、服务器归属、状态等信息 |
+| `sessions` | 智能体会话表，关联workspace，包含标题、状态、来源等信息 |
+| `runs` | 运行记录表，关联session/workspace，记录Run状态、token消耗等信息 |
+| `run_events` | RunEvent事件流表，append-only，按(run_id, seq)唯一并支持增量回放 |
+| `execution_nodes` | opencode执行节点表，包含baseUrl、健康状态、运行容量、权重、心跳和能力标签 |
+| `routing_decisions` | Run到ExecutionNode的路由决策审计记录表 |
+| `session_messages` | 会话消息表，记录用户与助手的对话内容 |
+| `agent_session_bindings` | 通用agent远端会话绑定表 |
+| `users` | 平台用户表，包含统一认证号、用户名、BCrypt密码哈希、所属机构/研发部/部门 |
+| `user_login_logs` | 用户登录日志表，记录登录时间、IP、User-Agent和结果 |
+| `dictionaries` | 通用字典表，存储应用角色等字典数据 |
+| `user_roles` | 用户角色对照关系表 |
+| `applications` | 应用定义表，由外部系统同步 |
+| `application_members` | 应用成员关系表 |
+| `code_repositories` | 代码库配置表 |
+| `application_repository_links` | 应用与代码库多对多关联表 |
+| `application_workspaces` | 应用级工作空间配置表 |
+| `user_ssh_keys` | 用户个人SSH私钥配置表 |
+| `application_workspace_versions` | 应用工作空间模板的版本实例表 |
+| `personal_workspaces` | 用户基于应用版本工作区派生的git worktree表 |
+| `user_global_workspace_preferences` | 用户全局最近使用的托管运行态Workspace表 |
+| `user_application_workspace_preferences` | 用户在某应用下最近使用的托管运行态Workspace表 |
+| `workspace_sync_records` | 个人工作区与应用版本工作区同步审计表 |
+| `user_workspace_branch_preferences` | 用户工作区分支偏好表 |
+| `ai_model_configs` | AI模型配置表 |
+| `linux_servers` | 后端Linux服务器节点表 |
+| `backend_java_processes` | 后端Java进程实例表 |
+| `opencode_containers` | opencode容器表 |
+| `opencode_container_managers` | opencode容器管理进程表 |
+| `opencode_manager_backend_connections` | 管理进程到后端Java进程的控制面连接状态表 |
+| `opencode_server_processes` | 用户专属opencode server进程表 |
+| `user_opencode_process_bindings` | 用户到agent/opencode进程的当前绑定表 |
+| `scheduled_tasks` | 定时任务定义表 |
+| `scheduled_task_plans` | 用户级Cron计划预留表 |
+| `scheduled_task_runs` | 定时任务运行记录表 |
+
+### 字段注释原则
+
+- 业务ID字段均标注格式，如：`wks_xxx`、`ses_xxx`、`run_xxx`、`msg_xxx`
+- 状态、来源类型等枚举字段标注可选值，如：`ACTIVE/ARCHIVED`、`MANUAL/SCHEDULED_TASK`
+- JSON字段标注结构样例，如：`{"tools": ["git", "docker"]}`、`["text","image"]`
+- 已有中文注释的表（`common_parameters`、`workspace_create_operations`、`agent_config_worktrees`、`agent_config_operations`、`application_workspace_version_replicas`）不再重复添加
