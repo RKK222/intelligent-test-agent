@@ -721,3 +721,10 @@
 - How: 仅在 `FigmaChatPanel.vue` 内单文件改动，不动 store/props/emit；展开态面板 `figma-chat-process-status` 不受拖动逻辑影响，行为保持原样。
 - Result: 收起态圆点实心范围明显收窄（虚化晕圈占比更大），鼠标可拖动到视口任意位置，刷新后位置保留；普通点击仍展开为状态卡片，拖动距离 > 4px 不会误触发 toggle。
 - Verification: `corepack pnpm --filter @test-agent/agent-web typecheck` 未引入新错误（既有 pre-existing `ChatMessage`/`runtime-reducer` 报错与本次无关）；浏览器实测点开 → 展开为「opencode 进程可用 http://192.168.100.115:4096」流程正常。
+
+### 2026-06-26 - 修复 agent-web workspace 类型解析失败
+
+- Why: `corepack pnpm --filter @test-agent/agent-web build` 在 `workbench-shell/src/workbenchStore.ts` 报 `Cannot find module '@test-agent/shared-types'`；排查发现本地 `workbench-shell/node_modules/@test-agent/shared-types` 链接缺失，同时 `agent-web` 继承的 `baseUrl` 是 `frontend`，但 app tsconfig 把 `@test-agent/*` 写成了 app 相对路径。
+- What: 运行 `corepack pnpm install --frozen-lockfile` 补齐本地 workspace 链接；将 `frontend/apps/agent-web/tsconfig.json` 的 `@/*` 和 `@test-agent/*` paths 改为以继承后的 `frontend` baseUrl 为基准，分别指向 `apps/agent-web/src/*` 与 `packages/*/src`。
+- How: 先复现原始 TS2307，再检查 `vue-tsc --showConfig`、package lock 和 package-local `node_modules`，确认解析链路后只改 tsconfig alias，不改 Vite alias、不新增依赖。
+- Result: `@test-agent/shared-types` 在 `agent-web` 类型检查中稳定解析到 `frontend/packages/shared-types/src`；`@test-agent/agent-web` build、`@test-agent/shared-types` typecheck、`@test-agent/workbench-shell` typecheck 均通过。

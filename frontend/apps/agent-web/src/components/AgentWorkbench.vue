@@ -37,7 +37,8 @@ import {
   useWorkbenchStore,
   mockVcsDiffFiles,
   mockPublicAgentDiffs,
-  mockWorkspaceAgentDiffs
+  mockWorkspaceAgentDiffs,
+  type EditorTab
 } from "@test-agent/workbench-shell";
 import { useAuthStore } from "../stores/authStore";
 import FigmaShell from "./FigmaShell.vue";
@@ -209,7 +210,7 @@ function dispatchChat(action: Parameters<typeof reduceAgentChatRuntime>[1]) {
 const tabs = computed(() => workbench.tabs);
 const activePath = computed(() => workbench.activePath);
 const selectedDiffPath = computed(() => workbench.selectedDiffPath);
-const activeTab = computed(() => tabs.value.find((tab) => tab.path === activePath.value));
+const activeTab = computed(() => tabs.value.find((tab: EditorTab) => tab.path === activePath.value));
 const breadcrumbDisplay = computed(() => {
   if (!activePath.value) return "";
   return activePath.value.split(/[\\/]+/).filter(Boolean).join(" › ");
@@ -1597,7 +1598,7 @@ async function openLivePreview(relPath: string) {
   }
   expandPathToFile(relPath);
   refreshParentDirectory(relPath);
-  const existing = tabs.value.find((tab) => tab.path === relPath);
+  const existing = tabs.value.find((tab: EditorTab) => tab.path === relPath);
   if (existing && !existing.livePreview && existing.content !== existing.savedContent) {
     workbench.setActivePath(relPath);
     centerMode.value = "editor";
@@ -1910,7 +1911,7 @@ const saveDiffFileMutation = useMutation({
     return { path, content };
   },
   onSuccess: async ({ path, content }) => {
-    const tab = workbench.tabs.find((t) => t.path === path);
+    const tab = workbench.tabs.find((t: EditorTab) => t.path === path);
     if (tab) {
       workbench.markTabSaved(path, content);
     }

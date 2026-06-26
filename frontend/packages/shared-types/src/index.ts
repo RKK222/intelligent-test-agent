@@ -894,6 +894,7 @@ export type UserManagementUser = PlatformUserSummary & {
   roles: string[];
   roleLabels?: string[];
   createdAt: string;
+  updatedAt?: string;
 };
 
 export type CreateUserPayload = {
@@ -1070,32 +1071,4 @@ export type CreatePersonalWorkspacePayload = {
 export type SyncWorkspacePayload = {
   files: string[];
   force?: boolean;
-};
-
-export type CreateUserPayload = {
-  unifiedAuthId: string;
-  username: string;
-  role: string;
-  organization?: string | null;
-  rdDepartment?: string | null;
-  department?: string | null;
-};
-
-export type RoleOption = {
-  roleCode: string;
-  roleLabel: string;
-};
-
-export type UserManagementUser = {
-  userId: string;
-  unifiedAuthId: string;
-  username: string;
-  organization?: string | null;
-  rdDepartment?: string | null;
-  department?: string | null;
-  status: string;
-  roleLabels?: string[];
-  roles?: string[];
-  createdAt?: string;
-  updatedAt?: string;
 };

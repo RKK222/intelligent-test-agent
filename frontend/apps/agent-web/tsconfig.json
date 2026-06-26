@@ -6,8 +6,8 @@
     "jsx": "preserve",
     "types": ["node", "vite/client"],
     "paths": {
-      "@/*": ["./src/*"],
-      "@test-agent/*": ["../../packages/*/src"]
+      "@/*": ["apps/agent-web/src/*"],
+      "@test-agent/*": ["packages/*/src"]
     }
   },
   "include": ["**/*.ts", "**/*.vue"],
