@@ -117,4 +117,27 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("当前仅展示前端样式，暂未连接后台上传能力");
     expect(wrapper.emitted("download-files")).toBeUndefined();
   });
+
+  it("shows the initialization action when the opencode process needs initialization", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processRequired: true,
+        processStatus: {
+          status: "NEEDS_INITIALIZATION",
+          initializable: true,
+          message: "需要初始化 opencode 进程"
+        }
+      }
+    });
+
+    expect(wrapper.text()).toContain("需要初始化 opencode 进程");
+
+    const initButton = wrapper.get(".figma-chat-process-init");
+    expect(initButton.text()).toBe("初始化进程");
+
+    await initButton.trigger("click");
+
+    expect(wrapper.emitted("initialize-process")).toEqual([[]]);
+  });
 });

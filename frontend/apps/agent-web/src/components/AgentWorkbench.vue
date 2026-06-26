@@ -406,7 +406,7 @@ const vcsStatusQuery = useQuery({
 });
 const opencodeProcessQuery = useQuery({
   queryKey: ["runtime", "opencode-process", "me"],
-  enabled: () => Boolean(authStore.currentUser),
+  enabled: () => authStore.isAuthenticated(),
   queryFn: () => api.getMyOpencodeProcess(),
   retry: false
 });
@@ -2159,7 +2159,7 @@ async function handleLogout() {
           :readonly-reason="readonlySessionReason"
           :process-status="opencodeProcessStatus"
           process-required
-          :process-loading="opencodeProcessQuery.isPending.value"
+          :process-loading="opencodeProcessQuery.isFetching.value && !opencodeProcessStatus"
           :process-initializing="initializeOpencodeProcessMutation.isPending.value"
           :permissions="chatState.permissions"
           :questions="chatState.questions"

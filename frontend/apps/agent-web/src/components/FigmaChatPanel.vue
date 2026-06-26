@@ -799,6 +799,17 @@ const processStatusText = computed(() => {
 // 进程状态卡片可折叠：默认收起为右下角一个小圆点（带渐变虚化），
 // 点击展开/收起，节省聊天面板纵向空间
 const processStatusCollapsed = ref(true)
+const processStatusDotVisible = computed(
+  () => processStatusVisible.value && processStatusCollapsed.value && processReady.value
+)
+watch(
+  () => props.processStatus?.status,
+  (status) => {
+    if (status && status !== 'READY') {
+      processStatusCollapsed.value = false
+    }
+  }
+)
 function toggleProcessStatus() {
   processStatusCollapsed.value = !processStatusCollapsed.value
 }
@@ -1639,7 +1650,7 @@ function onCompositionEnd() {
 
     <!-- 收起态：右下角一个小圆点，带渐变虚化；点击展开，支持拖动改位置 -->
     <button
-      v-if="processStatusVisible && processStatusCollapsed"
+      v-if="processStatusDotVisible"
       type="button"
       :class="[
         'figma-chat-process-dot',
@@ -1663,6 +1674,7 @@ function onCompositionEnd() {
       role="button"
       tabindex="0"
       :title="`收起进程状态`"
+      aria-label="收起进程状态"
       @click="toggleProcessStatus"
       @keydown.enter.prevent="toggleProcessStatus"
       @keydown.space.prevent="toggleProcessStatus"
