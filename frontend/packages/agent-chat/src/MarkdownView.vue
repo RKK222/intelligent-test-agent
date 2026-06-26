@@ -1,12 +1,12 @@
 <script lang="ts">
 export type MarkdownViewProps = {
   // 待渲染的 Markdown 源码；空串/纯空白时显示占位
-  source: string;
+  source: string
   // 自定义容器 class，便于嵌套到不同色块的卡片里
-  bodyClass?: string;
+  bodyClass?: string
   // 是否对 fence 默认语言做高亮（关闭可避免 highlight.js bundle 加载）
-  highlight?: boolean;
-};
+  highlight?: boolean
+}
 </script>
 
 <script setup lang="ts">
@@ -15,107 +15,119 @@ export type MarkdownViewProps = {
 // - html:false + DOMPurify 兜底，保证渲染出来的 HTML 不含脚本/危险链接
 // - 与 MarkdownPreview.vue（编辑器预览）解耦：去掉源码行号、滚动联动和 gutter，
 //   让本组件专注于"消息气泡里的小型 markdown 卡片"
-import { onBeforeUnmount, ref, shallowRef, watch } from "vue";
-import "github-markdown-css/github-markdown.css";
+import { onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import 'github-markdown-css/github-markdown.css'
 
 const props = withDefaults(defineProps<MarkdownViewProps>(), {
-  bodyClass: "",
-  highlight: true
-});
+  bodyClass: '',
+  highlight: true,
+})
 
-const html = ref("");
-const loading = ref(true);
-const error = ref<string | null>(null);
+const html = ref('')
+const loading = ref(true)
+const error = ref<string | null>(null)
 // shallowRef 避免对大段 HTML 做深度代理
-const mdRef = shallowRef<{ render: (src: string) => string } | null>(null);
-const purifyRef = shallowRef<{ sanitize: (dirty: string) => string } | null>(null);
+const mdRef = shallowRef<{ render: (src: string) => string } | null>(null)
+const purifyRef =
+  shallowRef<{ sanitize: (dirty: string) => string } | null>(null)
 
-let renderTimer: ReturnType<typeof setTimeout> | null = null;
+let renderTimer: ReturnType<typeof setTimeout> | null = null
 
 // 懒加载三件套；只在首个 MarkdownView 挂载时触发一次，后续实例复用缓存的句柄
 async function ensureLibs() {
   if (mdRef.value && purifyRef.value) {
-    return;
+    return
   }
   const [MarkdownIt, DOMPurifyMod, hljsMod] = await Promise.all([
-    import("markdown-it"),
-    import("dompurify"),
-    props.highlight ? import("highlight.js") : Promise.resolve(null)
-  ]);
+    import('markdown-it'),
+    import('dompurify'),
+    props.highlight ? import('highlight.js') : Promise.resolve(null),
+  ])
   const md = new MarkdownIt.default({
     html: false, // 不直接内联原始 HTML，统一交给 DOMPurify
     linkify: true,
-    typographer: false
-  });
+    typographer: false,
+  })
   if (props.highlight && hljsMod) {
     // fence 默认不会把 token attrs 渲染到 <pre>，覆盖渲染以带上 hljs 高亮
     md.renderer.rules.fence = (tokens, idx, _options, _env, slf) => {
-      const token = tokens[idx];
-      const lang = token.info ? token.info.trim() : "";
-      const attrs = slf.renderAttrs(token);
-      let code: string;
+      const token = tokens[idx]
+      const lang = token.info ? token.info.trim() : ''
+      const attrs = slf.renderAttrs(token)
+      let code: string
       if (lang && hljsMod.default.getLanguage(lang)) {
         try {
-          code = hljsMod.default.highlight(token.content, { language: lang }).value;
-          return `<pre${attrs}><code class="hljs language-${lang}">${code}</code></pre>`;
+          code = hljsMod.default.highlight(token.content, {
+            language: lang,
+          }).value
+          return `<pre${attrs}><code class="hljs language-${lang}">${code}</code></pre>`
         } catch {
           // fallthrough 到纯文本转义
         }
       }
-      code = md.utils.escapeHtml(token.content);
-      return `<pre${attrs}><code class="hljs">${code}</code></pre>`;
-    };
+      code = md.utils.escapeHtml(token.content)
+      return `<pre${attrs}><code class="hljs">${code}</code></pre>`
+    }
   }
-  mdRef.value = md;
-  purifyRef.value = DOMPurifyMod.default;
+  mdRef.value = md
+  purifyRef.value = DOMPurifyMod.default
 }
 
 async function render() {
   try {
-    await ensureLibs();
-    const raw = mdRef.value?.render(props.source ?? "") ?? "";
-    html.value = purifyRef.value?.sanitize(raw) ?? "";
-    error.value = null;
+    await ensureLibs()
+    const raw = mdRef.value?.render(props.source ?? '') ?? ''
+    html.value = purifyRef.value?.sanitize(raw) ?? ''
+    error.value = null
   } catch (err) {
     // 渲染失败时降级为转义后的纯文本，避免气泡里出现空白
-    error.value = err instanceof Error ? err.message : "render failed";
-    html.value = "";
+    error.value = err instanceof Error ? err.message : 'render failed'
+    html.value = ''
   } finally {
-    loading.value = false;
+    loading.value = false
   }
 }
 
 // 内容变化时合并多次连续输入，150ms 后统一渲染一次
 function scheduleRender() {
   if (renderTimer) {
-    clearTimeout(renderTimer);
+    clearTimeout(renderTimer)
   }
   renderTimer = setTimeout(() => {
-    void render();
-  }, 150);
+    void render()
+  }, 150)
 }
 
 watch(
   () => props.source,
   () => scheduleRender(),
   { immediate: true }
-);
+)
 
 onBeforeUnmount(() => {
   if (renderTimer) {
-    clearTimeout(renderTimer);
+    clearTimeout(renderTimer)
   }
-});
+})
 </script>
 
 <template>
-  <div
-    :class="['ta-md-view min-w-0', bodyClass]"
-    data-testid="md-view"
-  >
-    <div v-if="loading" class="text-[12px] text-[var(--ta-chat-muted)]">渲染中…</div>
-    <div v-else-if="error" class="whitespace-pre-wrap text-[12px] text-[var(--ta-chat-muted)]">{{ source }}</div>
-    <div v-else-if="!source.trim()" class="text-[12px] text-[var(--ta-chat-muted)]">无内容</div>
+  <div :class="['ta-md-view min-w-0', bodyClass]" data-testid="md-view">
+    <div v-if="loading" class="text-[12px] text-[var(--ta-chat-muted)]">
+      渲染中…
+    </div>
+    <div
+      v-else-if="error"
+      class="whitespace-pre-wrap text-[12px] text-[var(--ta-chat-muted)]"
+    >
+      {{ source }}
+    </div>
+    <div
+      v-else-if="!source.trim()"
+      class="text-[12px] text-[var(--ta-chat-muted)]"
+    >
+      无内容
+    </div>
     <!-- 经 DOMPurify 消毒后的 HTML，可安全注入；.markdown-body 提供基础排版 -->
     <div v-else v-html="html" class="markdown-body min-w-0" />
   </div>
@@ -144,12 +156,20 @@ onBeforeUnmount(() => {
   margin: 0.6em 0 0.4em;
 }
 
-.markdown-body :deep(h1) { font-size: 1.15em; }
-.markdown-body :deep(h2) { font-size: 1.08em; }
-.markdown-body :deep(h3) { font-size: 1.02em; }
+.markdown-body :deep(h1) {
+  font-size: 1.15em;
+}
+.markdown-body :deep(h2) {
+  font-size: 1.08em;
+}
+.markdown-body :deep(h3) {
+  font-size: 1.02em;
+}
 .markdown-body :deep(h4),
 .markdown-body :deep(h5),
-.markdown-body :deep(h6) { font-size: 0.98em; }
+.markdown-body :deep(h6) {
+  font-size: 0.98em;
+}
 
 .markdown-body :deep(p) {
   margin: 0.4em 0;
@@ -207,7 +227,7 @@ onBeforeUnmount(() => {
   padding: 0.1em 0.35em;
   border-radius: 3px;
   font-size: 0.92em;
-  font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-family: Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
 }
 
 .markdown-body :deep(pre) {
