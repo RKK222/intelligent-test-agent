@@ -126,7 +126,6 @@ class TestAgentRuntimePropertiesBindingTest {
 
             assertThat(managerControl.getToken()).isEmpty();
             assertThat(managerControl.getListenUrl()).isEqualTo("http://127.0.0.1:8080");
-            assertThat(managerControl.getLinuxServerId()).isEqualTo("127.0.0.1");
             assertThat(managerControl.getCommandTimeout()).isEqualTo(Duration.ofSeconds(10));
         });
     }
@@ -172,7 +171,6 @@ class TestAgentRuntimePropertiesBindingTest {
                         "test-agent.opencode.nodes[0].capabilities=chat,diff",
                         "test-agent.opencode.manager-control.token=manager-secret",
                         "test-agent.opencode.manager-control.listen-url=http://10.8.0.21:8080",
-                        "test-agent.opencode.manager-control.linux-server-id=10.8.0.21",
                         "test-agent.opencode.manager-control.command-timeout=7s")
                 .run(context -> {
                     TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
@@ -200,7 +198,6 @@ class TestAgentRuntimePropertiesBindingTest {
                             .containsExactly("chat", "diff");
                     assertThat(properties.getOpencode().getManagerControl().getToken()).isEqualTo("manager-secret");
                     assertThat(properties.getOpencode().getManagerControl().getListenUrl()).isEqualTo("http://10.8.0.21:8080");
-                    assertThat(properties.getOpencode().getManagerControl().getLinuxServerId()).isEqualTo("10.8.0.21");
                     assertThat(properties.getOpencode().getManagerControl().getCommandTimeout()).isEqualTo(Duration.ofSeconds(7));
                     // gatewayMode 未显式配置时回退为默认 socket，避免空字符串污染网关激活条件。
                     assertThat(properties.getOpencode().getManagerControl().getGatewayMode()).isEqualTo("socket");
@@ -281,8 +278,7 @@ class TestAgentRuntimePropertiesBindingTest {
                         "TEST_AGENT_OPENCODE_MAX_RUNS=6",
                         "TEST_AGENT_OPENCODE_WEIGHT=80",
                         "TEST_AGENT_OPENCODE_MANAGER_TOKEN=manager-secret",
-                        "TEST_AGENT_BACKEND_LISTEN_URL=http://10.8.0.21:8080",
-                        "TEST_AGENT_LINUX_SERVER_ID=10.8.0.21")
+                        "TEST_AGENT_BACKEND_LISTEN_URL=http://10.8.0.21:8080")
                 .run(context -> {
                     TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
 
@@ -296,7 +292,6 @@ class TestAgentRuntimePropertiesBindingTest {
                     assertThat(node.getWeight()).isEqualTo(80);
                     assertThat(properties.getOpencode().getManagerControl().getToken()).isEqualTo("manager-secret");
                     assertThat(properties.getOpencode().getManagerControl().getListenUrl()).isEqualTo("http://10.8.0.21:8080");
-                    assertThat(properties.getOpencode().getManagerControl().getLinuxServerId()).isEqualTo("10.8.0.21");
                 });
     }
 
@@ -318,8 +313,7 @@ class TestAgentRuntimePropertiesBindingTest {
                         "TEST_AGENT_OPENCODE_MAX_RUNS=12",
                         "TEST_AGENT_OPENCODE_WEIGHT=100",
                         "TEST_AGENT_OPENCODE_MANAGER_TOKEN=manager-secret",
-                        "TEST_AGENT_BACKEND_LISTEN_URL=http://10.8.0.22:8080",
-                        "TEST_AGENT_LINUX_SERVER_ID=10.8.0.22")
+                        "TEST_AGENT_BACKEND_LISTEN_URL=http://10.8.0.22:8080")
                 .run(context -> {
                     TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
 
@@ -339,7 +333,6 @@ class TestAgentRuntimePropertiesBindingTest {
                     assertThat(node.getWeight()).isEqualTo(100);
                     assertThat(properties.getOpencode().getManagerControl().getToken()).isEqualTo("manager-secret");
                     assertThat(properties.getOpencode().getManagerControl().getListenUrl()).isEqualTo("http://10.8.0.22:8080");
-                    assertThat(properties.getOpencode().getManagerControl().getLinuxServerId()).isEqualTo("10.8.0.22");
                 });
     }
 }

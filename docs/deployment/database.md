@@ -633,10 +633,10 @@ V10 种子数据对 F-COSS 的影响：
 
 | 表 | 清理条件 |
 |---|---|
-| `opencode_manager_backend_connections` | `manager_id` 属于 `127.0.0.1` 的 manager，或 `backend_process_id` 属于 `127.0.0.1` 的后端进程 |
-| `user_opencode_process_bindings` | `linux_server_id = '127.0.0.1'` |
-| `opencode_server_processes` | `linux_server_id = '127.0.0.1'` |
-| `opencode_container_managers` | `linux_server_id = '127.0.0.1'` |
+| `opencode_manager_backend_connections` | `manager_id` 属于 `127.0.0.1` 的 manager / loopback container，或 `backend_process_id` 属于 `127.0.0.1` 的后端进程 |
+| `user_opencode_process_bindings` | `linux_server_id = '127.0.0.1'`，或绑定的进程引用 loopback container |
+| `opencode_server_processes` | `linux_server_id = '127.0.0.1'`，或 `container_id` 引用 loopback container |
+| `opencode_container_managers` | `linux_server_id = '127.0.0.1'`，或 `container_id` 引用 loopback container |
 | `opencode_containers` | `linux_server_id = '127.0.0.1'` |
 | `backend_java_processes` | `linux_server_id = '127.0.0.1'` |
 | `linux_servers` | `linux_server_id = '127.0.0.1'` |
@@ -644,6 +644,7 @@ V10 种子数据对 F-COSS 的影响：
 约束：
 
 - 外键未配置级联删除，脚本按子表到父表顺序删除。
+- 历史库可能存在进程自身 `linux_server_id` 不是 `127.0.0.1`、但 `container_id` 仍指向 V17 loopback container 的脏数据，清理脚本必须先删这类进程和绑定再删容器。
 - 全部使用 `delete where` 条件，重复执行不会报错。
 - 不把测试、演示、个人开发或环境专属数据继续写入 Flyway；本地初始化数据应放在测试 fixture、mock、`test-agent-test-support` 或显式本地开发脚本中。
 

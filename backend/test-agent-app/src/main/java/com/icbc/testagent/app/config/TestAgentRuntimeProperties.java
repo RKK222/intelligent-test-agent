@@ -391,7 +391,6 @@ public class TestAgentRuntimeProperties {
     public static class ManagerControl {
         private String token = "";
         private String listenUrl = "http://127.0.0.1:8080";
-        private String linuxServerId = "127.0.0.1";
         private Duration heartbeatInterval = Duration.ofSeconds(10);
         private Duration backendStaleAfter = Duration.ofSeconds(30);
         private Duration commandTimeout = Duration.ofSeconds(10);
@@ -428,20 +427,6 @@ public class TestAgentRuntimeProperties {
          */
         public void setListenUrl(String listenUrl) {
             this.listenUrl = listenUrl;
-        }
-
-        /**
-         * 返回当前后端 Java 进程所在 Linux 服务器 IP。
-         */
-        public String getLinuxServerId() {
-            return linuxServerId;
-        }
-
-        /**
-         * 绑定当前后端 Java 进程所在 Linux 服务器 IP。
-         */
-        public void setLinuxServerId(String linuxServerId) {
-            this.linuxServerId = linuxServerId;
         }
 
         /**

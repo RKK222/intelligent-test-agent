@@ -62,6 +62,8 @@ opencode-manager list --trace-id trace_1234567890abcdef
 
 `health` 先检查 PID 是否存在，再请求 `http://127.0.0.1:{port}/global/health`，失败时回退 `/doc`。
 
+`start` 对已经写入本地 state 且健康的端口保持幂等：重复启动同一端口会返回 `STARTED` 和既有 PID，不会再拉起第二个 opencode server。若该端口已有 state 但健康检查失败，`start` 返回 `FAILED`，需要先用 `health`、`restart` 或 `stop` 排查/清理。
+
 ## WebSocket 控制面
 
 长运行模式：

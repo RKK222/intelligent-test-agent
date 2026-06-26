@@ -1041,6 +1041,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 - 已有绑定但进程不可用时固定原 `linuxServerId`，只在该 Linux 服务器内选择当前后端已连接的进程数最少容器。
 - 端口从容器端口范围内选择第一个未被当前运行进程占用的端口。
 - 启动参数优先读取通用参数：`XDG_DATA_HOME={OPENCODE_SESSION_DIR}/{port}`、`OPENCODE_CONFIG_DIR={OPENCODE_PUBLIC_CONFIG_DIR}`；缺失时分别回退 `/data/.testagent/agent-opencode/.session/{port}` 和 `/data/.testagent/agent-opencode/.config/opencode/`。
+- 若 manager 本地 state 已托管目标端口且健康，`start` 命令按幂等成功处理，后端继续补齐用户进程绑定、进程快照和兼容 `execution_nodes` 投影；若该 state 不健康，仍按 manager 失败结果返回统一 opencode 错误。
 - 初始化成功后会同步写入用户进程绑定、进程快照，以及兼容旧运行链路的 `execution_nodes` 投影。
 
 `DELETE` 行为：

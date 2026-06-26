@@ -147,10 +147,16 @@ func (m *Manager) Start(ctx context.Context, request StartRequest) (Result, erro
 	if err != nil {
 		return failed(request.Port, request.TraceID, err), err
 	}
-	if _, ok, err := m.store.Get(request.Port); err != nil {
+	if record, ok, err := m.store.Get(request.Port); err != nil {
 		return failed(request.Port, request.TraceID, err), err
 	} else if ok {
-		err := fmt.Errorf("port %d is already managed", request.Port)
+		record.TraceID = request.TraceID
+		// start 命令需要对健康的既有 state 幂等，便于后端在数据库记录丢失时补齐平台进程快照。
+		checked := m.checker.Check(ctx, record)
+		if checked.Status == health.StatusHealthy {
+			return result(StatusStarted, record, "opencode server already managed and healthy", request.TraceID), nil
+		}
+		err := fmt.Errorf("port %d is already managed but unhealthy: %s", request.Port, checked.Message)
 		return failed(request.Port, request.TraceID, err), err
 	}
 	records, err := m.store.List()

@@ -2,6 +2,8 @@ package process
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -36,11 +38,18 @@ func TestBuildStartSpecUsesFixedOpencodeServeCommand(t *testing.T) {
 	}
 }
 
-func TestManagerStartWritesStateAndRejectsOccupiedPort(t *testing.T) {
+func TestManagerStartWritesStateAndReusesHealthyManagedPort(t *testing.T) {
 	cfg := testConfig(t)
 	store := state.NewFileStore(t.TempDir())
 	starter := &fakeStarter{pid: 12345}
-	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{ProcessAlive: func(pid int) bool { return true }})
+	healthServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer healthServer.Close()
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{
+		ProcessAlive: func(pid int) bool { return true },
+		ProbeBaseURL: healthServer.URL,
+	})
 
 	result, err := manager.Start(context.Background(), StartRequest{Port: 4096, TraceID: "trace_1234567890abcdef"})
 	if err != nil {
@@ -52,8 +61,15 @@ func TestManagerStartWritesStateAndRejectsOccupiedPort(t *testing.T) {
 	if len(starter.specs) != 1 {
 		t.Fatalf("expected one start spec, got %d", len(starter.specs))
 	}
-	if _, err := manager.Start(context.Background(), StartRequest{Port: 4096, TraceID: "trace_1234567890abcdef"}); err == nil {
-		t.Fatalf("expected occupied port error")
+	reused, err := manager.Start(context.Background(), StartRequest{Port: 4096, TraceID: "trace_1234567890abcdef"})
+	if err != nil {
+		t.Fatalf("Start should reuse healthy managed port, got error: %v", err)
+	}
+	if reused.Status != StatusStarted || reused.PID != 12345 {
+		t.Fatalf("unexpected reused result %#v", reused)
+	}
+	if len(starter.specs) != 1 {
+		t.Fatalf("expected duplicate start to reuse existing process, got %d starts", len(starter.specs))
 	}
 }
 

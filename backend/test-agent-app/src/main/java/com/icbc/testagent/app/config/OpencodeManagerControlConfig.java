@@ -1,5 +1,6 @@
 package com.icbc.testagent.app.config;
 
+import com.icbc.testagent.common.net.LinuxServerIpResolver;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.observability.TraceIdSupport;
 import com.icbc.testagent.opencode.runtime.process.LocalDirectSettings;
@@ -22,15 +23,29 @@ import org.springframework.context.annotation.Configuration;
 public class OpencodeManagerControlConfig {
 
     /**
-     * 将 app 配置转换为 runtime/API 可复用的控制面 settings。
+     * 探测当前后端所在 Linux 服务器真实内网 IPv4 地址，作为运行管理与工作区登记的服务器身份来源。
+     *
+     * <p>启动时强制自动探测，探测失败直接抛异常让启动中断；不再读取任何配置项。
      */
     @Bean
-    ManagerControlSettings managerControlSettings(TestAgentRuntimeProperties properties) {
+    LinuxServerIpResolver linuxServerIpResolver() {
+        return new LinuxServerIpResolver();
+    }
+
+    /**
+     * 将 app 配置转换为 runtime/API 可复用的控制面 settings。
+     *
+     * <p>Linux 服务器 ID 由 {@link LinuxServerIpResolver} 自动探测真实内网 IP 得到，
+     * 不再来自配置项。
+     */
+    @Bean
+    ManagerControlSettings managerControlSettings(
+            TestAgentRuntimeProperties properties, LinuxServerIpResolver linuxServerIpResolver) {
         TestAgentRuntimeProperties.ManagerControl control = properties.getOpencode().getManagerControl();
         return new ManagerControlSettings(
                 control.getToken(),
                 control.getListenUrl(),
-                new LinuxServerId(control.getLinuxServerId()),
+                new LinuxServerId(linuxServerIpResolver.resolve()),
                 control.getHeartbeatInterval(),
                 control.getBackendStaleAfter(),
                 control.getCommandTimeout(),

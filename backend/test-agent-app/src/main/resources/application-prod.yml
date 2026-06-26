@@ -47,7 +47,6 @@ test-agent:
     manager-control:
       token: ${TEST_AGENT_OPENCODE_MANAGER_TOKEN}
       listen-url: ${TEST_AGENT_BACKEND_LISTEN_URL}
-      linux-server-id: ${TEST_AGENT_LINUX_SERVER_ID}
       heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:10s}
       backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:30s}
       command-timeout: ${TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT:10s}

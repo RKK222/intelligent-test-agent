@@ -310,17 +310,16 @@ apply_detected_runtime_ip_defaults() {
     return
   fi
 
-  if [[ -z "${TEST_AGENT_LINUX_SERVER_ID:-}" ]]; then
-    export TEST_AGENT_LINUX_SERVER_ID="${local_ipv4}"
-    echo "Defaulting TEST_AGENT_LINUX_SERVER_ID to detected local IPv4: ${TEST_AGENT_LINUX_SERVER_ID}"
-  fi
+  # 后端 Java 进程的 Linux 服务器 IP 现由后端启动时自动探测（LinuxServerIpResolver），
+  # 不再读取 TEST_AGENT_LINUX_SERVER_ID；这里只补全直连地址和 manager 容器所需的服务器 IP。
   if [[ -z "${TEST_AGENT_BACKEND_LISTEN_URL:-}" ]]; then
     backend_port="$(url_port "${backend_url}")"
     export TEST_AGENT_BACKEND_LISTEN_URL="http://${local_ipv4}:${backend_port}"
     echo "Defaulting TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4: ${TEST_AGENT_BACKEND_LISTEN_URL}"
   fi
   if [[ -z "${OPENCODE_MANAGER_LINUX_SERVER_ID:-}" ]]; then
-    export OPENCODE_MANAGER_LINUX_SERVER_ID="${TEST_AGENT_LINUX_SERVER_ID}"
+    export OPENCODE_MANAGER_LINUX_SERVER_ID="${local_ipv4}"
+    echo "Defaulting OPENCODE_MANAGER_LINUX_SERVER_ID to detected local IPv4: ${OPENCODE_MANAGER_LINUX_SERVER_ID}"
   fi
 }
 

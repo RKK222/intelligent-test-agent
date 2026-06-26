@@ -454,8 +454,7 @@ class JdbcRepositoryIntegrationTest {
         sessionMessages.save(sessionMessage("msg_1234567890abcdef", "first"));
         sessionMessages.save(sessionMessage("msg_2234567890abcdef", "second"));
 
-        // V10 种子会预先写入 F-COSS 的运行态 Workspace，因此这里只断言"测试创建的工作区在分页结果里"
-        // 而非"分页结果只有这一条"，避免后续种子数据扩张再次破坏该测试。
+        // 分页结果只断言"测试创建的工作区在结果里"，避免后续种子数据扩张再次破坏该测试。
         assertThat(workspaces.findPage(new PageRequest(1, 10)).items())
                 .extracting(Workspace::workspaceId)
                 .contains(workspace.workspaceId());
@@ -1538,6 +1537,54 @@ class JdbcRepositoryIntegrationTest {
                             )
                             """)
                     .update();
+            migrationJdbc.sql("""
+                            insert into users (
+                                user_id, unified_auth_id, username, password_hash,
+                                organization, rd_department, department, status, created_at, updated_at
+                            )
+                            values (
+                                'usr_cross_loopback_container', 'DEV_CROSS_LOOPBACK_CONTAINER', 'cross-loopback-container',
+                                'hash', '测试机构', '测试研发部', '测试部门', 'ACTIVE', now(), now()
+                            )
+                            """)
+                    .update();
+            migrationJdbc.sql("""
+                            insert into linux_servers (
+                                linux_server_id, name, status, capacity_summary_json,
+                                last_heartbeat_at, trace_id, created_at, updated_at
+                            )
+                            values (
+                                '10.8.0.12', 'backend-a', 'READY', '{}',
+                                now(), 'trace_cross_loopback_container', now(), now()
+                            )
+                            """)
+                    .update();
+            // 复现历史脏数据：进程自身不在 127.0.0.1，但仍引用 V17 的 loopback container。
+            migrationJdbc.sql("""
+                            insert into opencode_server_processes (
+                                process_id, user_id, linux_server_id, container_id, port, pid, base_url,
+                                status, session_path, config_path, started_at, last_health_check_at,
+                                health_message, trace_id, created_at, updated_at
+                            )
+                            values (
+                                'ocp_cross_loopback_container', 'usr_cross_loopback_container', '10.8.0.12',
+                                'ctr_local_4096', 4097, null, 'http://10.8.0.12:4097',
+                                'RUNNING', '/data/opencode/session/4097', '/data/opencode/.config/opencode/',
+                                now(), now(), 'cross server but loopback container', 'trace_cross_loopback_container', now(), now()
+                            )
+                            """)
+                    .update();
+            migrationJdbc.sql("""
+                            insert into user_opencode_process_bindings (
+                                user_id, agent_id, process_id, linux_server_id, port,
+                                status, trace_id, created_at, updated_at
+                            )
+                            values (
+                                'usr_cross_loopback_container', 'opencode', 'ocp_cross_loopback_container',
+                                '10.8.0.12', 4097, 'ACTIVE', 'trace_cross_loopback_container', now(), now()
+                            )
+                            """)
+                    .update();
 
             Flyway.configure()
                     .dataSource(migrationDatabase)
@@ -1549,6 +1596,8 @@ class JdbcRepositoryIntegrationTest {
             assertThat(countRows(migrationJdbc, "select count(*) from user_opencode_process_bindings where linux_server_id = '127.0.0.1'"))
                     .isZero();
             assertThat(countRows(migrationJdbc, "select count(*) from opencode_server_processes where linux_server_id = '127.0.0.1'"))
+                    .isZero();
+            assertThat(countRows(migrationJdbc, "select count(*) from opencode_server_processes where container_id = 'ctr_local_4096'"))
                     .isZero();
             assertThat(countRows(migrationJdbc, "select count(*) from opencode_container_managers where linux_server_id = '127.0.0.1'"))
                     .isZero();

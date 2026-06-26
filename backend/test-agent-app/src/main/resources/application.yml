@@ -80,7 +80,6 @@ test-agent:
     manager-control:
       token: ${TEST_AGENT_OPENCODE_MANAGER_TOKEN:}
       listen-url: ${TEST_AGENT_BACKEND_LISTEN_URL:http://127.0.0.1:8080}
-      linux-server-id: ${TEST_AGENT_LINUX_SERVER_ID:127.0.0.1}
       heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:10s}
       backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:30s}
       command-timeout: ${TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT:10s}

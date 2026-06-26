@@ -62,7 +62,6 @@ test-agent:
       gateway-mode: local
       token: local-manager-token
       listen-url: http://127.0.0.1:8080
-      linux-server-id: 127.0.0.1
       heartbeat-interval: 10s
       backend-stale-after: 30s
       command-timeout: 10s

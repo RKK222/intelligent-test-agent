@@ -137,6 +137,7 @@ opencode 容器扩容流程：
 |---|---|---|
 | 用户初始化返回 `OPENCODE_UNAVAILABLE` | 运行管理页查看是否有 `READY` 容器和 `CONNECTED` manager；检查 manager discovery 是否成功 | 恢复 manager WebSocket 连接或启动有空余端口的容器。 |
 | 用户初始化返回 `OPENCODE_TIMEOUT` | 查看 `{stateDir}/logs/{port}.log`、后端命令超时配置、opencode CLI 是否卡住 | 先保留日志，再 stop/restart 目标端口或扩容新容器。 |
+| 用户初始化返回 `OPENCODE_BAD_GATEWAY` 且包含 `already managed but unhealthy` | 目标端口已有 manager 本地 state，但 PID 或 HTTP 健康检查失败 | 先查看 `{stateDir}/processes/{port}.json` 和 `{stateDir}/logs/{port}.log`；确认无业务流量后用 manager `restart` 或 `stop` 清理该端口。健康的已托管端口会被幂等复用，不会再因 `already managed` 初始化失败。 |
 | 进程健康异常后没有同服务器重建 | 检查原 `linuxServerId` 下是否还有 `READY` 且有容量的容器 | 在同一 Linux 服务器上恢复或扩容容器；不要把该用户迁移到其他服务器，否则 session 目录不可用。 |
 | 后端扩容后 manager 未连接新实例 | 检查新后端 `listenUrl/webSocketUrl` 是否是容器可达直连地址；检查 manager token | 修正 `TEST_AGENT_BACKEND_LISTEN_URL` 或 token 后等待下一轮 discovery。 |
 | 管理页看不到数据 | 确认登录用户有 `SUPER_ADMIN`；检查 V10 表是否存在；检查后端/manager 心跳 | 非超管前端菜单隐藏且后端返回 `FORBIDDEN` 是预期行为。 |
