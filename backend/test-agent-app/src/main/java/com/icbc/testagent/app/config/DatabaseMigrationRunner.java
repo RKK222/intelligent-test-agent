@@ -43,6 +43,7 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         Flyway.configure()
                 .dataSource(dataSource)
                 .locations(locations)
+                .outOfOrder(true)
                 .load()
                 .migrate();
     }

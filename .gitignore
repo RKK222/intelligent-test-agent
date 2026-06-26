@@ -67,3 +67,9 @@ opencode-manager/bin/
 
 # 测试工作区（开发测试用，不提交）
 test-workspaces/
+/backend/.idea/.gitignore
+/backend/.idea/compiler.xml
+/backend/.idea/encodings.xml
+/backend/.idea/jarRepositories.xml
+/backend/.idea/misc.xml
+/backend/.idea/vcs.xml
