@@ -737,6 +737,9 @@
   - 为步骤卡片引入了 `:class` 状态绑定，能够基于当前填写的状态自动呈现已完成 (is-completed)、进行中 (is-active)、已禁用 (is-disabled) 三种视觉状态。
   - 重写了 steps 的 CSS，将 controls 设为 `align-items: flex-end`，从而保证无论标签如何折行，输入/选择框都会和右侧的执行动作按钮底端对齐；同时给运行中的进度圆点加入了呼吸灯动画 (`ta-progress-pulse`)。
   - 在 script 中增加了对 `workspaceRepositoryId` 和 `workspaceBranch` 的 watcher，当用户更改上游版本库或分支时，能自动清空下游已选值及列表，防止出现脏数据和不一致状态。
+  - 为 steps 引入了 `ta-workspace-step-inputs` 包装容器，显式设置 label 的固定宽度（320px/240px/180px/140px）并且让 element 控件宽度 100%，消除因为 inline-flex 宽度计算导致的下拉框坍缩现象。
+  - 在 controls 容器上使用 `justify-content: space-between` 和 `width: 100%`，把动作按钮推到最右侧，实现动作按钮在最右端纵向对齐的布局。
+  - 在 `ta-workspace-step-heading` 样式上添加了 `white-space: nowrap`，防止步骤标题文字产生意外折行。
 - How: 仅在 `SettingsAppWorkspacePanel.vue` 中进行模板和 CSS 修改，不改变任何已有的功能 API、DOM 核心层级和已有测试断言所需的类名与文本，确保完全向下兼容。
-- Result: "创建工作空间"区域改为了精致的纵向时间线步骤设计。当前步骤高亮为蓝色，已完成步骤显示为绿色，未来步骤半透明置灰。所有输入组件与按钮均底部对齐，无错位现象；且上游切换时，下游会自动清空并置灰，体验极其顺畅。
-- Verification: 运行 `corepack pnpm test apps/agent-web/tests/settings-app-workspace-panel.test.ts` 11/11 全部通过；运行 `corepack pnpm --filter @test-agent/agent-web typecheck` 通过；没有破坏任何既有的 test 断言或结构。
+- Result: "创建工作空间"区域改为了精致的纵向时间线步骤设计。当前步骤高亮为蓝色，已完成步骤显示为绿色，未来步骤半透明置灰。所有输入组件与按钮均底部对齐，无错位现象；且上游切换时，下游会自动清空并置灰，体验极其顺畅。同时步骤标题禁止折行，输入框宽度稳定且合理，所有的操作按钮全部靠右对齐。
+- Verification: 运行 `corepack pnpm test apps/agent-web/tests/settings-app-workspace-panel.test.ts` 11/11 全部通过；运行 `corepack pnpm --filter @test-agent/agent-web typecheck` 通过；没有破坏任何既有的 test断言或结构。
