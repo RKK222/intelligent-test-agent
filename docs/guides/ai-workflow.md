@@ -72,7 +72,8 @@ tools/verify-dev-scripts.sh
 ## 8. 自检与提交
 
 1. 完成前按 `docs/guides/self-checklist.md` 自检，并在回复中说明验证结果。
-2. 如果本次会话收尾时确有值得保留给后续开发者和智能体的新增信息，统一更新 `.agents/session-log.md`，用 `Why / What / How / Result` 记录交接信息；同一会话内的零散改动合并为一条，不按文件或步骤频繁追加。
-3. 自检通过后提交 git，commit message 使用中文并准确概括修改。
-4. `.agents/session-log.md` 属于仓库内容，应随本次提交一起保留；如需要同步到远程，随代码一并 push。
-5. 只暂存本次任务相关文件，工作区无关改动保持原状。
+2. 提交前必须回顾 `.agents/session-log.md` 中所有人记录的近期变更、坑点和未完成事项，确认本次暂存内容不会覆盖、丢弃或误合并其他开发者/智能体已经提交的成果。
+3. 如果本次会话收尾时确有值得保留给后续开发者和智能体的新增信息，统一更新 `.agents/session-log.md`，用 `Why / What / How / Result` 记录交接信息；同一会话内的零散改动合并为一条，不按文件或步骤频繁追加。
+4. 自检通过后提交 git，commit message 使用中文并准确概括修改。
+5. `.agents/session-log.md` 属于仓库内容，应随本次提交一起保留；如需要同步到远程，随代码一并 push。
+6. 只暂存本次任务相关文件，工作区无关改动保持原状。
