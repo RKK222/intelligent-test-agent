@@ -48,6 +48,8 @@
 | `workspace-management` | `/api/internal/platform/workspace-management/workspace-directories` | `/api/workspace-directories` |
 | `workspace-management` | `/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/content` | `/api/workspaces/{workspaceId}/files/content` |
 | `workspace-management` | `/api/internal/platform/workspace-management/file-ws/tickets` | 无旧 URL |
+| `workspace-management` | `/api/internal/platform/workspace-management/agent-config/public/status` | 无旧 URL |
+| `workspace-management` | `/api/internal/platform/workspace-management/agent-config/operations/{operationId}/tickets` | 无旧 URL |
 | `workspace-management` | `/api/internal/platform/workspace-management/backend-servers` | 无旧 URL |
 | `workspace-management` | `/api/internal/platform/workspace-management/applications` | 无旧 URL |
 | `workspace-management` | `/api/internal/platform/workspace-management/applications/{appId}/workspace-templates/{templateId}/versions` | 无旧 URL |
@@ -153,6 +155,80 @@
 - opencode 后端内部封装能力。
 - Public API。
 - 健康检查和观测性 API。
+
+## Agent 配置管理 API
+
+Base URL：`/api/internal/platform/workspace-management/agent-config`。该能力管理工作台左侧 Agent 栏目中的“公共级”和“工作空间级”配置文件。公共级 Git 根目录来自通用参数 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT`，标准 agent 目录为其下 `opencode/agents/`，读取兼容 legacy `opencode/agent/`；工作空间级标准目录为 `{workspace.rootPath}/.opencode/agents/`，读取兼容 `.opencode/agent/`。写入始终落到标准复数目录。
+
+鉴权：
+
+- `GET status/files/content`：任意已登录用户可读。
+- 公共级和工作空间级的写入、更新、worktree、diff、stage、commit、publish：要求 `SUPER_ADMIN`。
+- 所有 SSH Git 操作使用当前登录 `SUPER_ADMIN` 保存的唯一 SSH key；未配置或配置多把时返回 `VALIDATION_ERROR`。
+
+公共级接口：
+
+| 方法 | 路径 | 用途 |
+|---|---|---|
+| `GET` | `/public/status` | 查询公共 Agent Git 是否启用、根目录、agent 目录、当前分支和 commit。 |
+| `GET` | `/public/branches` | 查询公共 Agent Git 远端分支。 |
+| `POST` | `/public/update` | 按分支 clone/fetch/checkout/pull 公共配置并广播其他服务器同步。 |
+| `GET` | `/public/files?path=&worktreeId=` | 列出公共 agent 目录一层子项。 |
+| `GET` | `/public/files/content?path=&worktreeId=` | 读取公共 agent 文件。 |
+| `PUT` | `/public/files/content` | 写入公共 agent 文件。 |
+| `POST` | `/public/worktrees` | 创建公共配置 git worktree，后端自动拼接 `-yyyyMMdd`。 |
+| `GET` | `/public/diff?worktreeId=` | 查询 Git 变更文件和 patch。 |
+| `POST` | `/public/stage` / `/public/unstage` | 暂存或取消暂存文件。 |
+| `POST` | `/public/commit` | 提交当前暂存区。 |
+| `POST` | `/public/publish` | 直接模式 push；worktree 模式先 pull 主目录、merge 本地 worktree 分支、push，再广播同步。 |
+
+工作空间级接口把同名能力挂在 `/workspaces/{workspaceId}/...`，其中 `files/content/diff/stage/unstage/commit/publish/worktrees/status` 的语义与公共级一致；物理目录为当前运行态 Workspace 或指定 worktree 下的 `.opencode/agents/`。
+
+长操作进度：
+
+| 方法/路径 | 用途 |
+|---|---|
+| `POST /operations/{operationId}/tickets` | 为 Agent 配置进度 WebSocket 签发一次性 ticket。 |
+| `WS /operations/{operationId}/ws?ticket=agt_...` | 推送 `snapshot`、`step`、`completed`、`failed` 消息。 |
+| `GET /operations/{operationId}` | 查询当前 operation 快照。 |
+
+`POST /public/update` 请求体：
+
+```json
+{ "branch": "main", "operationId": "aco_1234567890abcdef" }
+```
+
+`POST /public/worktrees` 请求体：
+
+```json
+{ "baseName": "change-agent-md", "branch": "main", "operationId": "aco_1234567890abcdef" }
+```
+
+`POST /public/stage` 请求体：
+
+```json
+{ "files": ["opencode/agents/review.md"], "worktreeId": "agw_..." }
+```
+
+进度 WebSocket 消息：
+
+```json
+{
+  "type": "step",
+  "operationId": "aco_1234567890abcdef",
+  "status": "RUNNING",
+  "currentStep": "PUSHING",
+  "traceId": "trace_...",
+  "occurredAt": "2026-06-26T00:00:00Z"
+}
+```
+
+兼容性：
+
+- 公共 Git 地址参数 `OPENCODE_PUBLIC_AGENT_GIT_URL` 默认 `UNCONFIGURED`，此时公共 Git 更新、分支、worktree、diff/commit/publish 返回禁用或校验错误；只读 status 仍可返回目录信息。
+- 已有目录不是 Git 仓库、origin 与参数不一致、工作树不干净时返回 `CONFLICT`，不会覆盖本地修改。
+- Agent 配置进度不走 RunEvent SSE，也不写入 `run_events`；浏览器只通过 ticket WebSocket 或 `GET /operations/{operationId}` 查看。
+- 内部服务器广播事件 `agent-config.public-sync-requested` 的 payload 只包含 `branch`、`commitHash`、`reason`，envelope 继续携带 `traceId`，不携带文件内容、私钥、token、Authorization 或 Cookie。
 
 ## 认证 API
 

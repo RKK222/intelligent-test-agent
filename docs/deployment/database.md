@@ -283,6 +283,33 @@
 - 通用参数读取按 `当前平台 -> all -> 代码 fallback` 顺序选择；默认迁移只写入 `windows` 和 `linux` 平台值。
 - `workspace_create_operations` 只服务 HTTP 轮询进度，不写入 `run_events`，也不参与 RunEvent SSE 续传。
 
+## V20260626170000 公共 Agent 配置管理
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260626170000__add_agent_config_management.sql` 增加公共 Agent 配置参数、worktree 记录和 Git 长操作进度表。
+
+新增通用参数：
+
+| 参数 | Linux 默认值 | Windows 默认值 / all 默认值 |
+|---|---|---|
+| `OPENCODE_PUBLIC_AGENT_GIT_URL` | `UNCONFIGURED`（platform=`all`） | `UNCONFIGURED` |
+| `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` | `/data/.testagent/agent-opencode/.config/` | `D:/data/.testagent/agent-opencode/.config/` |
+| `OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT` | `/data/.testagent/agent-opencode/.configdev/` | `D:/data/.testagent/agent-opencode/.configdev/` |
+
+新增表：
+
+| 表 | 说明 |
+|---|---|
+| `agent_config_worktrees` | 公共级/工作空间级 Agent 配置 worktree 记录，包含 scope、workspaceId、worktreeName、branch、rootPath、createdBy、status 和时间戳。 |
+| `agent_config_operations` | Agent 配置 Git 长操作进度快照，包含 operationId、scope、action、status、currentStep、错误信息、traceId、branch、commitHash 和时间戳。 |
+
+兼容策略：
+
+- `OPENCODE_PUBLIC_AGENT_GIT_URL` 默认 `UNCONFIGURED`，功能只读展示但禁用 Git 更新/发布；运维更新参数值后启用。
+- scope/status 枚举由领域对象校验，数据库保存字符串并保留非空约束，避免 H2 与 PostgreSQL 在同名列 check 表达式上的兼容差异。
+- 公共 agent 标准目录是 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT/opencode/agents/`；读兼容 legacy `opencode/agent/`，写入标准目录。
+- 工作空间级标准目录是 `{workspace.rootPath}/.opencode/agents/`；读兼容 `.opencode/agent/`，写入标准目录。
+- Agent 配置 operation 供 WebSocket snapshot 和历史查询使用，不写入 `run_events`，也不参与 RunEvent SSE 续传。
+
 ## V20260626120900 应用版本工作区服务器副本
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260626120900__add_managed_workspace_replicas.sql` 为多服务器应用版本工作区同步增加 commit 与副本记录：

@@ -5,6 +5,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.agent.AgentSessionBinding;
+import com.icbc.testagent.domain.configuration.AgentConfigOperation;
+import com.icbc.testagent.domain.configuration.AgentConfigOperationStatus;
+import com.icbc.testagent.domain.configuration.AgentConfigOperationStep;
+import com.icbc.testagent.domain.configuration.AgentConfigScope;
+import com.icbc.testagent.domain.configuration.AgentConfigWorktree;
+import com.icbc.testagent.domain.configuration.AgentConfigWorktreeStatus;
 import com.icbc.testagent.domain.configuration.ApplicationId;
 import com.icbc.testagent.domain.configuration.ApplicationMember;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspace;
@@ -125,6 +131,7 @@ class JdbcRepositoryIntegrationTest {
     private JdbcConfigurationManagementRepository configurationManagement;
     private JdbcCommonParameterRepository commonParameters;
     private JdbcWorkspaceCreateOperationRepository workspaceCreateOperations;
+    private JdbcAgentConfigRepository agentConfigs;
     private JdbcManagedWorkspaceRepository managedWorkspaces;
     private JdbcOpencodeProcessManagementRepository opencodeProcesses;
     private JdbcScheduledTaskRepository scheduledTasks;
@@ -152,6 +159,7 @@ class JdbcRepositoryIntegrationTest {
         configurationManagement = new JdbcConfigurationManagementRepository(jdbcClient);
         commonParameters = new JdbcCommonParameterRepository(jdbcClient);
         workspaceCreateOperations = new JdbcWorkspaceCreateOperationRepository(jdbcClient);
+        agentConfigs = new JdbcAgentConfigRepository(jdbcClient);
         managedWorkspaces = new JdbcManagedWorkspaceRepository(jdbcClient, objectMapper);
         opencodeProcesses = new JdbcOpencodeProcessManagementRepository(jdbcClient, objectMapper);
         scheduledTasks = new JdbcScheduledTaskRepository(jdbcClient, objectMapper);
@@ -730,6 +738,61 @@ class JdbcRepositoryIntegrationTest {
                     assertThat(saved.workspaceId()).isEqualTo(new ApplicationWorkspaceId("awp_1234567890abcdef"));
                     assertThat(saved.versionId()).isEqualTo(new ApplicationWorkspaceVersionId("awv_1234567890abcdef"));
                 });
+
+        assertThat(commonParameters.findByEnglishNameAndPlatform("OPENCODE_PUBLIC_AGENT_GIT_URL", ParameterPlatform.ALL))
+                .map(CommonParameter::parameterValue)
+                .contains("UNCONFIGURED");
+        assertThat(commonParameters.findByEnglishNameAndPlatform("OPENCODE_PUBLIC_CONFIG_GIT_ROOT", ParameterPlatform.LINUX))
+                .map(CommonParameter::parameterValue)
+                .contains("/data/.testagent/agent-opencode/.config/");
+
+        workspaces.save(new Workspace(
+                new WorkspaceId("wrk_agentcfg"),
+                "Agent Config Workspace",
+                "/tmp/agentcfg",
+                WorkspaceStatus.ACTIVE,
+                NOW,
+                NOW,
+                "linux-1",
+                "trace_agentcfg"));
+        AgentConfigOperation agentOperation = agentConfigs.saveOperation(new AgentConfigOperation(
+                "aco_test_1234567890",
+                AgentConfigScope.WORKSPACE,
+                new WorkspaceId("wrk_agentcfg"),
+                "publish",
+                AgentConfigOperationStatus.RUNNING,
+                AgentConfigOperationStep.PUSHING,
+                null,
+                null,
+                "trace_agent_1234567890",
+                "main",
+                null,
+                NOW,
+                NOW));
+        agentConfigs.saveOperation(agentOperation.succeeded("commit_agent", NOW.plusSeconds(1)));
+
+        AgentConfigWorktree worktree = agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_test_1234567890",
+                AgentConfigScope.WORKSPACE,
+                new WorkspaceId("wrk_agentcfg"),
+                "change-agent-20260626",
+                "change-agent-20260626",
+                "/tmp/worktree",
+                new UserId("usr_1234567890abcdef"),
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+
+        assertThat(agentConfigs.findOperation("aco_test_1234567890"))
+                .get()
+                .satisfies(saved -> {
+                    assertThat(saved.status()).isEqualTo(AgentConfigOperationStatus.SUCCEEDED);
+                    assertThat(saved.commitHash()).isEqualTo("commit_agent");
+                });
+        assertThat(agentConfigs.findWorktree(worktree.worktreeId())).contains(worktree);
+        assertThat(agentConfigs.findWorktrees(AgentConfigScope.WORKSPACE, new WorkspaceId("wrk_agentcfg"), new UserId("usr_1234567890abcdef")))
+                .extracting(AgentConfigWorktree::worktreeName)
+                .containsExactly("change-agent-20260626");
     }
 
     @Test

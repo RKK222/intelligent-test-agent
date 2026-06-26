@@ -35,7 +35,7 @@ class ConfigurationManagementApplicationServiceTest {
         ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
                 repository,
                 org.mockito.Mockito.mock(UserRepository.class),
-                org.mockito.Mockito.mock(GitRemoteService.class),
+                createTestCacheService(),
                 new SshKeyEncryptionService(SshKeyEncryptionServiceTest.base64AesKey()));
         when(repository.findRepositoryByGitUrl("https://gitee.com/demo/repo.git")).thenReturn(Optional.empty());
         when(repository.findRepositoryByEnglishName("demo")).thenReturn(Optional.empty());
@@ -57,7 +57,7 @@ class ConfigurationManagementApplicationServiceTest {
         ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
                 org.mockito.Mockito.mock(ConfigurationManagementRepository.class),
                 org.mockito.Mockito.mock(UserRepository.class),
-                org.mockito.Mockito.mock(GitRemoteService.class),
+                createTestCacheService(),
                 new SshKeyEncryptionService(SshKeyEncryptionServiceTest.base64AesKey()));
 
         assertThatThrownBy(() -> service.createRepository(
@@ -93,7 +93,7 @@ class ConfigurationManagementApplicationServiceTest {
         ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
                 repository,
                 org.mockito.Mockito.mock(UserRepository.class),
-                org.mockito.Mockito.mock(GitRemoteService.class),
+                createTestCacheService(),
                 new SshKeyEncryptionService(SshKeyEncryptionServiceTest.base64AesKey()));
 
         assertThatThrownBy(() -> service.updateRepository("repo_123", "演示库", "Demo", false))
