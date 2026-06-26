@@ -5,6 +5,7 @@ import type { BackendApiClient } from "@test-agent/backend-api";
 import type { OpencodeRuntimeManagementOverview } from "@test-agent/shared-types";
 import RuntimeManagementPanel from "../src/components/settings/RuntimeManagementPanel.vue";
 import SettingsMenu from "../src/components/settings/SettingsMenu.vue";
+import SettingsPanel from "../src/components/settings/SettingsPanel.vue";
 
 function createQueryClient() {
   return new QueryClient({
@@ -100,6 +101,8 @@ describe("runtime management settings", () => {
       }
     });
 
+    expect(superAdmin.getByText("应用与工作空间管理")).toBeTruthy();
+    expect(superAdmin.queryByText("应用与工作区")).toBeNull();
     expect(superAdmin.queryByText("运行管理")).toBeNull();
     superAdmin.unmount();
 
@@ -115,6 +118,29 @@ describe("runtime management settings", () => {
       }
     });
     expect(appAdmin.queryByText("运行管理")).toBeNull();
+  });
+
+  it("renders the application workspace management panel title", () => {
+    const view = render(SettingsPanel, {
+      props: {
+        activeKey: "appWorkspace",
+        currentUser: {
+          userId: "usr_admin",
+          username: "admin",
+          unifiedAuthId: "AUTH_1",
+          roles: ["SUPER_ADMIN"]
+        }
+      },
+      global: {
+        stubs: {
+          SettingsAppWorkspacePanel: { template: "<div />" },
+          SettingsPersonalPanel: { template: "<div />" }
+        }
+      }
+    });
+
+    expect(view.getByText("应用与工作空间管理")).toBeTruthy();
+    expect(view.queryByText("应用与工作区")).toBeNull();
   });
 
   it("loads runtime management overview and renders empty state", async () => {

@@ -175,15 +175,19 @@ function renderPanel(api = createApi()) {
 
 describe("SettingsAppWorkspacePanel repository settings", () => {
   it("uses version-library wording and adds a dedicated management tab", async () => {
-    const { findByText, getByText, queryByText } = renderPanel();
+    const { container, findByText, getByText, queryByText } = renderPanel();
 
     await findByText("应用人员管理");
     expect(getByText("版本库管理")).toBeTruthy();
 
     await fireEvent.click(getByText("应用与版本库关联"));
 
-    expect(await findByText("关联版本库到当前应用")).toBeTruthy();
-    expect(getByText("版本库与应用双向关联")).toBeTruthy();
+    expect(await findByText("按应用关联版本库")).toBeTruthy();
+    expect(container.querySelector(".ta-section-title-app")?.textContent).toBe("F-COSS");
+    expect(getByText("按版本库管理应用")).toBeTruthy();
+    expect(container.querySelector('[role="separator"][aria-label="版本库关联模式分隔符"]')).toBeTruthy();
+    expect(queryByText("关联版本库到当前应用")).toBeNull();
+    expect(queryByText("版本库与应用双向关联")).toBeNull();
     expect(queryByText("编辑版本库")).toBeNull();
     expect(queryByText("新增版本库")).toBeNull();
     expect(queryByText("应用与代码库关联")).toBeNull();

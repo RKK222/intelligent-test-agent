@@ -443,7 +443,10 @@ watch(selectedAppId, async (appId) => {
       <!-- 版本库关联 -->
       <div v-if="selectedAppId && appTab === 'repositories'" class="ta-panel-content">
         <div class="ta-section">
-          <h4 class="ta-section-title">关联版本库到当前应用</h4>
+          <div class="ta-section-title-row">
+            <h4 class="ta-section-title">按应用关联版本库</h4>
+            <span v-if="selectedApp" class="ta-section-title-app">{{ selectedApp.appName }}</span>
+          </div>
           <div class="ta-inline-form">
             <el-select v-model="linkRepositoryId" placeholder="选择版本库" style="width: 360px" @change="handleLinkRepositoryChange">
               <el-option v-for="repo in repositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
@@ -464,8 +467,10 @@ watch(selectedAppId, async (appId) => {
           </div>
         </div>
 
+        <div class="ta-mode-divider" role="separator" aria-label="版本库关联模式分隔符"></div>
+
         <div class="ta-section">
-          <h4 class="ta-section-title">版本库与应用双向关联</h4>
+          <h4 class="ta-section-title">按版本库管理应用</h4>
           <div class="ta-inline-form">
             <el-select v-model="selectedRepositoryForApps" placeholder="选择版本库" style="width: 360px" @change="loadRepositoryApplications">
               <el-option v-for="repo in repositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
@@ -625,6 +630,32 @@ watch(selectedAppId, async (appId) => {
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+.ta-section-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ta-section-title-app {
+  display: inline-flex;
+  align-items: center;
+  max-width: 240px;
+  min-width: 0;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: #f0f6ff;
+  color: #3366ff;
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ta-mode-divider {
+  border-top: 1px solid #dcdfe6;
+  margin: 8px 0 6px;
 }
 .ta-item-list {
   display: flex;

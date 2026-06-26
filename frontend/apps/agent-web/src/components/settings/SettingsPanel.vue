@@ -12,7 +12,7 @@ const props = defineProps<{
 }>();
 
 const panels: Record<string, PanelDef> = {
-  appWorkspace: { title: "应用与工作区", component: SettingsAppWorkspacePanel },
+  appWorkspace: { title: "应用与工作空间管理", component: SettingsAppWorkspacePanel },
   personal: { title: "个人设置", component: SettingsPersonalPanel }
 };
 

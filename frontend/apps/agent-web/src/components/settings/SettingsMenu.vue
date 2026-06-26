@@ -17,7 +17,7 @@ const emit = defineEmits<{
 type MenuItem = { key: MenuKey; label: string; icon: Component };
 
 const items = computed<MenuItem[]>(() => {
-  const menuItems: MenuItem[] = [{ key: "appWorkspace", label: "应用与工作区", icon: Setting }];
+  const menuItems: MenuItem[] = [{ key: "appWorkspace", label: "应用与工作空间管理", icon: Setting }];
   menuItems.push({ key: "personal", label: "个人设置", icon: User });
   return menuItems;
 });
