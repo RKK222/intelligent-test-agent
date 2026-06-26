@@ -4,6 +4,7 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import java.nio.file.Path;
 import java.util.Map;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -19,6 +20,7 @@ public class WorkspaceServerIdentity {
     /**
      * 从配置解析当前后端所在 Linux 服务器 ID；默认目录使用当前 Java 进程运行目录。
      */
+    @Autowired
     public WorkspaceServerIdentity(
             @Value("${test-agent.workspace.server-id:${test-agent.opencode.manager-control.linux-server-id:127.0.0.1}}")
             String linuxServerId) {
