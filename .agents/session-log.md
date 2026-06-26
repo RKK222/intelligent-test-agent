@@ -18,15 +18,16 @@
 ### 2026-06-26 - 工作台侧边栏布局调整与一级目录可折叠重构
 ### 2026-06-26 - 工作区变更管理面板(Git Source Control)重构与美化
 
-- Why: 增强工作台变更标签页，支持以极佳的 Git 样式展示未暂存与已暂存文件，并支持暂存、提交、推送及手工拉伸。在 Diff 展现上采用极简的 Monaco 对照视图。
+- Why: 增强工作台变更标签页，支持以极佳的 Git 样式展示未暂存与已暂存文件，并支持暂存、提交、推送及手工拉伸。在 Diff 展现上采用极简的 Monaco 对照视图，并且支持差异文件的行内实时编辑修改。
 - What:
   - 移除了 commit 选项复选框（SignOff、No-Verify、Amend），简化了提交表单。
   - 重构了 `DiffViewer.vue`：当审查应用工作区或 Agent 变更时，隐藏左侧的文件与 Hunks 列表，隐藏头部 VCS、Split/Unified 下拉框、刷新按钮及 VCS Diff 标题，只保留 Monaco 对比和 Hunk 导航。
   - 实现了单击列表文件即可显示对应文件的实际 Diff 对比效果，并修复了 Diff 文件选择被覆盖重置的 bug。
   - 修复了 `DiffViewer.vue` 中由于初始 `files` 列表为空导致 Monaco 编辑器容器未在 DOM 中渲染，从而使 Monaco 未能成功初始化的问题。
+  - 支持在 VCS/Agent 差异对比模式下直接对右侧（Modified 修改侧）代码进行编辑，并在头部提供了未保存修改的状态指示灯与“保存 (Cmd+S)”按钮，支持通过快捷键 `Ctrl+S` / `Cmd+S` 直接保存修改回写后端文件。
   - 在“未暂存”与“已暂存”面板间加入了拖拽调节高度的分栏分割线。
-- How: 在 `DiffViewer.vue` 与 `GitChangesPanel.vue` 中对多余的 UI 元素增加 `v-if` 条件过滤，清除 commit 复选框。同时在 `DiffViewer.vue` 中将 `onMounted` 内的 Monaco 初始化逻辑改为了对 `containerEl` 的 `watch` 侦听器，动态在容器 DOM 渲染后挂载 Monaco 差异编辑器，并在容器销毁时安全释放其内存资源。
-- Result: Diff 视图变得极简专业，在首次加载、切换文件或更新列表时，Monaco 对照视图均能秒级流畅呈现实际差异；前端编译与校验全部通过。
+- How: 在 `DiffViewer.vue` 与 `GitChangesPanel.vue` 中对多余的 UI 元素增加 `v-if` 条件过滤，清除 commit 复选框。将 `DiffViewer.vue` 的 `onMounted` 逻辑重构为对 `containerEl` 的 `watch` 侦听器，动态在 DOM 渲染后挂载 Monaco 差异编辑器，并在容器销毁时安全释放资源；配置 Monaco 差异编辑器对 vcs/agent 来源设置 `readOnly: false` 并绑定 Cmd+S 键盘快捷键触发保存事件；在 `AgentWorkbench.vue` 中处理 `@save-file` 事件，在写盘成功后刷新 diff files 数据源。
+- Result: Diff 视图变得极简专业且功能强大，支持首次加载时的稳定挂载，并在差异对照视图下提供了直观的即时修改、保存回写及实时 diff 重算渲染，用户体验媲美原生 IDE。前端编译与校验全部通过。
 
 
 ### 2026-06-26 - 工作台侧边栏布局调整与折叠拖拽重构

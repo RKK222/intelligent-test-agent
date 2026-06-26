@@ -4,7 +4,7 @@ import { useRouter } from "vue-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
 import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api";
-import { DiffViewer } from "@test-agent/diff-viewer";
+import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
 import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
 import { subscribeRunEvents } from "@test-agent/event-stream-client";
 import { Code2, MessageSquare, Monitor } from "lucide-vue-next";
@@ -1839,6 +1839,79 @@ async function handleOpenDiff(payload: string | { path: string; source: "vcs" | 
   }
 }
 
+function generateEntireFilePatch(path: string, original: string, modified: string): string {
+  const originalLines = original.split("\n");
+  const modifiedLines = modified.split("\n");
+  let patch = `--- a/${path}\n+++ b/${path}\n@@ -1,${originalLines.length} +1,${modifiedLines.length} @@\n`;
+  for (const line of originalLines) {
+    patch += `-${line}\n`;
+  }
+  for (const line of modifiedLines) {
+    patch += `+${line}\n`;
+  }
+  return patch;
+}
+
+const saveDiffFileMutation = useMutation({
+  mutationFn: async ({ path, content }: { path: string; content: string }) => {
+    if (workbench.useMockTestData) {
+      const vcsFile = mockVcsDiffFiles.find((f) => f.path === path);
+      if (vcsFile) {
+        const parsedOld = parseUnifiedPatch(vcsFile.patch);
+        vcsFile.patch = generateEntireFilePatch(path, parsedOld.original, content);
+      }
+      const pubAgentFile = mockPublicAgentDiffs.find((f) => f.path === path);
+      if (pubAgentFile) {
+        const parsedOld = parseUnifiedPatch(pubAgentFile.patch);
+        pubAgentFile.patch = generateEntireFilePatch(path, parsedOld.original, content);
+      }
+      const wksAgentFile = mockWorkspaceAgentDiffs.find((f) => f.path === path);
+      if (wksAgentFile) {
+        const parsedOld = parseUnifiedPatch(wksAgentFile.patch);
+        wksAgentFile.patch = generateEntireFilePatch(path, parsedOld.original, content);
+      }
+      return { path, content };
+    }
+
+    if (isAgentFilePath(path)) {
+      const agent = agentFileInfo(path);
+      if (agent.scope === "PUBLIC") {
+        await api.writePublicAgentFile(agent.path, content, agent.worktreeId);
+      } else {
+        if (!selectedWorkspace.value) {
+          throw new Error("未选择 Workspace");
+        }
+        await api.writeWorkspaceAgentFile(selectedWorkspace.value.workspaceId, agent.path, content, agent.worktreeId);
+      }
+      return { path, content };
+    }
+    if (isPublicFilePath(path)) {
+      await api.writePublicFile(publicFilePath(path), content);
+      return { path, content };
+    }
+    if (!selectedWorkspace.value) {
+      throw new Error("未选择 Workspace");
+    }
+    await api.writeFile(selectedWorkspace.value.workspaceId, path, content);
+    return { path, content };
+  },
+  onSuccess: async ({ path, content }) => {
+    const tab = workbench.tabs.find((t) => t.path === path);
+    if (tab) {
+      workbench.markTabSaved(path, content);
+    }
+    feedback.value = { kind: "success", title: "文件已保存", description: path };
+    await loadDiffSource(diffSource.value);
+  },
+  onError: (error) => {
+    feedback.value = errorFeedback("保存文件失败", error);
+  }
+});
+
+function handleSaveDiffFile(path: string, content: string) {
+  saveDiffFileMutation.mutate({ path, content });
+}
+
 async function switchSession(sessionId: string) {
   const selected = sessionsQuery.data.value?.items.find((item) => item.sessionId === sessionId) ?? (await api.getSession(sessionId));
   let readonlyReason = "";
@@ -2007,6 +2080,7 @@ async function handleLogout() {
           @reject-run="rejectDiffMutation.mutate()"
           @current-file-feedback="onCurrentFileFeedback"
           @use-hunk-context="onUseHunkContext"
+          @save-file="handleSaveDiffFile"
         />
         <div v-else-if="centerMode === 'system'" class="managed-runtime-container">
           <SystemManagementWrapper :current-user="authStore.currentUser" />

@@ -36,6 +36,7 @@ const emit = defineEmits<{
   rejectRun: [];
   currentFileFeedback: [action: "accept-current" | "reject-current", path: string];
   useHunkContext: [part: FilePromptPart];
+  saveFile: [path: string, content: string];
 }>();
 
 const selected = computed(() => props.files.find((f) => f.path === props.selectedPath) ?? props.files[0]);
@@ -43,6 +44,8 @@ const parsed = computed(() => parseUnifiedPatch(selected.value?.patch ?? ""));
 const hunks = computed(() => (selected.value ? parseDiffHunks(selected.value) : []));
 const selectedHunkIndex = ref(0);
 const selectedHunk = computed(() => hunks.value[selectedHunkIndex.value] ?? hunks.value[0]);
+
+const isDirty = ref(false);
 
 const containerEl = ref<HTMLElement | null>(null);
 const diffEditor = shallowRef<monaco.editor.IDiffEditor | null>(null);
@@ -66,6 +69,7 @@ watch(
   () => [selected.value?.path, selected.value?.patch],
   () => {
     selectedHunkIndex.value = 0;
+    isDirty.value = false;
   }
 );
 watch(
@@ -100,8 +104,16 @@ async function initMonaco(el: HTMLElement) {
   const lang = diffLanguage(selected.value?.path);
   originalModel = monacoLib.editor.createModel(parsed.value.original, lang);
   modifiedModel = monacoLib.editor.createModel(parsed.value.modified, lang);
+
+  modifiedModel.onDidChangeContent(() => {
+    if (modifiedModel && parsed.value) {
+      isDirty.value = modifiedModel.getValue() !== parsed.value.modified;
+    }
+  });
+
   const inst = monacoLib.editor.createDiffEditor(el, {
-    readOnly: true,
+    readOnly: !(props.source === "vcs" || props.source === "agent"),
+    originalEditable: false,
     renderSideBySide: props.viewMode === "split",
     minimap: { enabled: false },
     automaticLayout: true,
@@ -110,6 +122,11 @@ async function initMonaco(el: HTMLElement) {
     lineHeight: 21
   });
   inst.setModel({ original: originalModel, modified: modifiedModel });
+
+  inst.addCommand(monacoLib.KeyMod.CtrlCmd | monacoLib.KeyCode.KeyS, () => {
+    handleSave();
+  });
+
   diffEditor.value = inst;
 }
 
@@ -134,13 +151,21 @@ watch(
   { immediate: true }
 );
 
+function handleSave() {
+  if (!isDirty.value || !selected.value) return;
+  emit("saveFile", selected.value.path, modifiedModel?.getValue() ?? "");
+}
+
 // patch 变化时更新模型内容
 watch(
   parsed,
   (val) => {
     if (!originalModel || !modifiedModel) return;
     if (originalModel.getValue() !== val.original) originalModel.setValue(val.original);
-    if (modifiedModel.getValue() !== val.modified) modifiedModel.setValue(val.modified);
+    if (!isDirty.value && modifiedModel.getValue() !== val.modified) {
+      modifiedModel.setValue(val.modified);
+    }
+    isDirty.value = modifiedModel.getValue() !== val.modified;
   }
 );
 
@@ -200,7 +225,21 @@ onBeforeUnmount(() => {
         <Button size="sm" variant="secondary" @click="emit('refresh')">刷新</Button>
       </div>
       <div v-if="source !== 'vcs' && source !== 'agent'" class="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-200">{{ sourceTitle(source) }}</div>
-      <div v-else class="min-w-0 flex-1" />
+      <div v-else class="min-w-0 flex-1 flex items-center gap-2">
+        <span class="font-mono text-[12px] text-slate-400 truncate max-w-[200px] sm:max-w-[400px]" :title="selected?.path">
+          {{ selected?.path }}
+        </span>
+        <span v-if="isDirty" class="h-1.5 w-1.5 rounded-full bg-amber-500" title="未保存的修改" />
+        <Button 
+          v-if="isDirty" 
+          size="sm" 
+          variant="primary" 
+          class="bg-amber-600 hover:bg-amber-700 border-none text-white h-6 py-0 px-2 text-[10px] font-semibold flex items-center gap-1 shadow-sm transition-all"
+          @click="handleSave"
+        >
+          保存 (Cmd+S)
+        </Button>
+      </div>
       <div class="flex items-center gap-1">
         <Button type="button" size="icon" variant="secondary" title="上一处 hunk" :disabled="hunks.length === 0" @click="moveHunk('previous')">
           <ChevronUp class="h-4 w-4" />
