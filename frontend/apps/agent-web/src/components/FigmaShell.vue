@@ -35,7 +35,7 @@ const props = withDefaults(
 
 const leftPanelOpen = ref(true);
 const leftPanelWidth = ref(262);
-const rightPanelWidth = ref(320);
+const rightPanelWidth = ref(380);
 const resizing = ref<"left" | "right" | null>(null);
 let resizeStartX = 0;
 let resizeStartWidth = 0;

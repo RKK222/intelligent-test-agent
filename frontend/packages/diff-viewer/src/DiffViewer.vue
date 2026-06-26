@@ -37,6 +37,7 @@ const emit = defineEmits<{
   currentFileFeedback: [action: "accept-current" | "reject-current", path: string];
   useHunkContext: [part: FilePromptPart];
   saveFile: [path: string, content: string];
+  dirtyChange: [dirty: boolean];
 }>();
 
 const selected = computed(() => props.files.find((f) => f.path === props.selectedPath) ?? props.files[0]);
@@ -97,24 +98,28 @@ function moveHunk(direction: "previous" | "next") {
   }
 }
 
+watch(isDirty, (newVal) => {
+  emit("dirtyChange", newVal);
+});
+
 async function initMonaco(el: HTMLElement) {
   if (diffEditor.value) return;
   const mod = await import("./monaco-env");
   monacoLib = mod.monaco;
-  // Define premium dark theme matching the slate layout
-  monacoLib.editor.defineTheme("ta-diff-dark", {
-    base: "vs-dark",
+  // Define premium light theme matching the light layout
+  monacoLib.editor.defineTheme("ta-diff-light", {
+    base: "vs",
     inherit: true,
     rules: [],
     colors: {
-      "editor.background": "#020617",       // Matching the Slate-950 (#020617) perfectly
-      "editor.lineHighlightBackground": "#1e293b44",
-      "diffEditor.insertedLineBackground": "#10b98110", // soft emerald green (6% opacity)
-      "diffEditor.insertedTextBackground": "#10b98130", // emerald green text block (19% opacity)
-      "diffEditor.removedLineBackground": "#ef444410",   // soft rose red (6% opacity)
-      "diffEditor.removedTextBackground": "#ef444430",   // rose red text block (19% opacity)
-      "editorLineNumber.foreground": "#475569",
-      "editorLineNumber.activeForeground": "#94a3b8",
+      "editor.background": "#ffffff",
+      "editor.lineHighlightBackground": "#f1f5f9aa",
+      "diffEditor.insertedLineBackground": "#10b98118", // soft emerald green (9% opacity)
+      "diffEditor.insertedTextBackground": "#10b98138", // emerald green text block (22% opacity)
+      "diffEditor.removedLineBackground": "#ef444418",   // soft rose red (9% opacity)
+      "diffEditor.removedTextBackground": "#ef444438",   // rose red text block (22% opacity)
+      "editorLineNumber.foreground": "#94a3b8",
+      "editorLineNumber.activeForeground": "#475569",
       "editor.scrollbar.shadow": "#00000000"
     }
   });
@@ -131,7 +136,7 @@ async function initMonaco(el: HTMLElement) {
 
   const isVcsOrAgent = props.source === "vcs" || props.source === "agent";
   const inst = monacoLib.editor.createDiffEditor(el, {
-    theme: "ta-diff-dark",
+    theme: "ta-diff-light",
     readOnly: !isVcsOrAgent,
     originalEditable: false,
     renderSideBySide: isVcsOrAgent ? true : props.viewMode === "split",
@@ -177,6 +182,11 @@ function handleSave() {
   emit("saveFile", selected.value.path, modifiedModel?.getValue() ?? "");
 }
 
+defineExpose({
+  handleSave,
+  isDirty
+});
+
 // patch 变化时更新模型内容
 watch(
   parsed,
@@ -218,15 +228,15 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="!files.length" class="flex h-full min-h-0 flex-col bg-[var(--ta-panel-2)] text-slate-500">
-    <div class="flex items-center gap-1 px-3 py-1">
-      <select :value="source" class="h-8 rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200" @change="emit('sourceChange', ($event.target as HTMLSelectElement).value as 'run' | 'session' | 'vcs' | 'agent')">
+  <div v-if="!files.length" class="flex h-full min-h-0 flex-col bg-white text-slate-500">
+    <div class="flex items-center gap-1 px-3 py-1 border-b border-slate-200 bg-slate-50">
+      <select :value="source" class="h-8 rounded border border-slate-200 bg-white px-2 text-[12px] text-slate-700 focus:outline-none focus:border-slate-400" @change="emit('sourceChange', ($event.target as HTMLSelectElement).value as 'run' | 'session' | 'vcs' | 'agent')">
         <option value="run">Run</option>
         <option value="session">Session</option>
         <option value="vcs">VCS</option>
         <option value="agent">Agent Config</option>
       </select>
-      <select :value="viewMode" class="h-8 rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200" @change="emit('viewModeChange', ($event.target as HTMLSelectElement).value as 'split' | 'unified')">
+      <select :value="viewMode" class="h-8 rounded border border-slate-200 bg-white px-2 text-[12px] text-slate-700 focus:outline-none focus:border-slate-400" @change="emit('viewModeChange', ($event.target as HTMLSelectElement).value as 'split' | 'unified')">
         <option value="split">Split</option>
         <option value="unified">Unified</option>
       </select>
@@ -234,24 +244,24 @@ onBeforeUnmount(() => {
     </div>
     <div class="flex flex-1 items-center justify-center text-center text-[12px]">暂无 Diff</div>
   </div>
-  <div v-else class="flex h-full min-h-0 flex-col bg-[var(--ta-panel-2)]">
-    <div class="flex min-h-10 flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-950 px-3 py-1">
+  <div v-else class="flex h-full min-h-0 flex-col bg-white">
+    <div class="flex min-h-10 flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-1">
       <div v-if="source !== 'vcs' && source !== 'agent'" class="flex items-center gap-1">
-        <select :value="source" class="h-8 rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200" @change="emit('sourceChange', ($event.target as HTMLSelectElement).value as 'run' | 'session' | 'vcs' | 'agent')">
+        <select :value="source" class="h-8 rounded border border-slate-200 bg-white px-2 text-[12px] text-slate-700 focus:outline-none focus:border-slate-400" @change="emit('sourceChange', ($event.target as HTMLSelectElement).value as 'run' | 'session' | 'vcs' | 'agent')">
           <option value="run">Run</option>
           <option value="session">Session</option>
           <option value="vcs">VCS</option>
           <option value="agent">Agent Config</option>
         </select>
-        <select :value="viewMode" class="h-8 rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200" @change="emit('viewModeChange', ($event.target as HTMLSelectElement).value as 'split' | 'unified')">
+        <select :value="viewMode" class="h-8 rounded border border-slate-200 bg-white px-2 text-[12px] text-slate-700 focus:outline-none focus:border-slate-400" @change="emit('viewModeChange', ($event.target as HTMLSelectElement).value as 'split' | 'unified')">
           <option value="split">Split</option>
           <option value="unified">Unified</option>
         </select>
         <Button size="sm" variant="secondary" @click="emit('refresh')">刷新</Button>
       </div>
-      <div v-if="source !== 'vcs' && source !== 'agent'" class="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-200">{{ sourceTitle(source) }}</div>
+      <div v-if="source !== 'vcs' && source !== 'agent'" class="min-w-0 flex-1 truncate text-[12px] font-semibold text-slate-700">{{ sourceTitle(source) }}</div>
       <div v-else class="min-w-0 flex-1 flex items-center gap-2">
-        <span class="font-mono text-[12px] text-slate-400 truncate max-w-[200px] sm:max-w-[400px]" :title="selected?.path">
+        <span class="font-mono text-[12px] text-slate-600 truncate max-w-[200px] sm:max-w-[400px]" :title="selected?.path">
           {{ selected?.path }}
         </span>
         <span v-if="isDirty" class="h-1.5 w-1.5 rounded-full bg-amber-500" title="未保存的修改" />
@@ -272,7 +282,7 @@ onBeforeUnmount(() => {
         <Button type="button" size="icon" variant="secondary" title="下一处 hunk" :disabled="hunks.length === 0" @click="moveHunk('next')">
           <ChevronDown class="h-4 w-4" />
         </Button>
-        <span class="min-w-[52px] text-center font-mono text-[11px] text-slate-500">
+        <span class="min-w-[52px] text-center font-mono text-[11px] text-slate-600">
           {{ selectedHunk ? `${selectedHunk.index + 1}/${hunks.length}` : "0/0" }}
         </span>
         <Button v-if="source !== 'vcs' && source !== 'agent'" type="button" size="icon" variant="secondary" title="引用 hunk" :disabled="!selected || !selectedHunk" @click="selected && selectedHunk && emit('useHunkContext', hunkToPromptPart(selected, selectedHunk))">
@@ -293,21 +303,21 @@ onBeforeUnmount(() => {
       </template>
     </div>
     <div :class="cn('grid min-h-0 flex-1', (source === 'vcs' || source === 'agent') ? 'grid-cols-1' : 'grid-cols-[260px_minmax(0,1fr)]')">
-      <div v-if="source !== 'vcs' && source !== 'agent'" class="min-h-0 overflow-auto border-r border-slate-800 bg-[var(--ta-panel)] p-2">
+      <div v-if="source !== 'vcs' && source !== 'agent'" class="min-h-0 overflow-auto border-r border-slate-200 bg-[#fafafa] p-2">
         <button
           v-for="file in files"
           :key="file.path"
           type="button"
           :class="cn(
             'mb-1 flex w-full items-center gap-2 rounded-md border border-transparent px-2 py-2 text-left hover:bg-[#e7e9ed]',
-            selected?.path === file.path && 'border-[#2f4a8f] bg-[rgba(96,165,250,.12)]'
+            selected?.path === file.path && 'border-[#2f4a8f] bg-[rgba(96,165,250,.12)] text-[#2f4a8f] font-semibold'
           )"
           @click="emit('selectFile', file.path)"
         >
           <Badge :tone="file.status === 'deleted' ? 'danger' : file.status === 'added' ? 'success' : 'warning'">{{ file.status }}</Badge>
-          <span class="min-w-0 flex-1 truncate font-mono text-[12px] text-slate-200">{{ file.path }}</span>
+          <span :class="cn('min-w-0 flex-1 truncate font-mono text-[12px] text-slate-700', selected?.path === file.path && 'text-[#2f4a8f]')">{{ file.path }}</span>
         </button>
-        <div v-if="hunks.length" class="mt-3 border-t border-slate-800 pt-2">
+        <div v-if="hunks.length" class="mt-3 border-t border-slate-200 pt-2">
           <div class="mb-1 px-1 text-[11px] font-semibold uppercase text-slate-500">Hunks</div>
           <button
             v-for="hunk in hunks"
@@ -319,22 +329,22 @@ onBeforeUnmount(() => {
             )"
             @click="selectedHunkIndex = hunk.index"
           >
-            <div class="font-mono text-slate-200">+{{ hunk.newStart }},{{ hunk.newLines }}</div>
+            <div :class="cn('font-mono text-slate-700', selectedHunk?.index === hunk.index && 'text-[#0891b2] font-semibold')">+{{ hunk.newStart }},{{ hunk.newLines }}</div>
             <div class="truncate text-slate-500">{{ hunk.heading || hunk.patch.split('\n')[0] }}</div>
           </button>
         </div>
       </div>
       <div class="flex min-h-0 flex-1 flex-col min-w-0">
         <!-- Diff Panels Header Hints -->
-        <div v-if="(source === 'vcs' || source === 'agent') && viewMode === 'split'" class="grid grid-cols-2 border-b border-slate-800 bg-[#0d1324] px-4 py-1.5 text-[11px] text-slate-400">
-          <div class="flex items-center gap-1.5 font-semibold text-slate-300">
+        <div v-if="(source === 'vcs' || source === 'agent') && viewMode === 'split'" class="grid grid-cols-2 border-b border-slate-200 bg-[#f8fafc] px-4 py-1.5 text-[11px] text-slate-500">
+          <div class="flex items-center gap-1.5 font-semibold text-slate-700">
             <span class="text-rose-500 font-bold">◀</span> 基线版本 (只读，历史提交代码)
           </div>
-          <div class="flex items-center gap-1.5 border-l border-slate-800 pl-4 font-semibold text-slate-300">
+          <div class="flex items-center gap-1.5 border-l border-slate-200 pl-4 font-semibold text-slate-700">
             <span class="text-emerald-500 font-bold">▶</span> 本地修改 (可编辑，编辑完成后按 Cmd+S 保存)
           </div>
         </div>
-        <div v-else-if="(source === 'vcs' || source === 'agent') && viewMode === 'unified'" class="border-b border-slate-800 bg-[#0d1324] px-4 py-1.5 text-[11px] text-slate-300 font-semibold">
+        <div v-else-if="(source === 'vcs' || source === 'agent') && viewMode === 'unified'" class="border-b border-slate-200 bg-[#f8fafc] px-4 py-1.5 text-[11px] text-slate-700 font-semibold">
           <div class="flex items-center gap-1.5">
             <span class="text-emerald-500 font-bold">▶</span> 统一视图 (可直接在此编辑修改，编辑完成后按 Cmd+S 保存)
           </div>

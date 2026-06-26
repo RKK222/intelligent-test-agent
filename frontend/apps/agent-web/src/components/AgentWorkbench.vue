@@ -49,6 +49,7 @@ import WorkspaceBootstrap from "./WorkspaceBootstrap.vue";
 import WorkspaceDirectoryPickerDialog from "./WorkspaceDirectoryPickerDialog.vue";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
+import WorkbenchFooter from "./WorkbenchFooter.vue";
 import { notifyFeedback } from "./notify";
 import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, type FollowUpDraft } from "./follow-up-queue";
 import {
@@ -106,6 +107,8 @@ const diffSource = ref<"run" | "session" | "vcs" | "agent">("run");
 const diffViewMode = ref<"split" | "unified">("split");
 const centerMode = ref<"editor" | "diff" | "system">("editor");
 const feedback = ref<Feedback | null>(null);
+const diffViewerRef = ref<InstanceType<typeof DiffViewer> | null>(null);
+const isDiffDirty = ref(false);
 const sessionSearch = ref("");
 const followUpQueue = ref<FollowUpDraft[]>([]);
 const diffContextParts = ref<PromptPart[]>([]);
@@ -2063,28 +2066,43 @@ async function handleLogout() {
 
     <template #editor>
       <main class="managed-editor-main">
-        <DiffViewer
-          v-if="centerMode === 'diff'"
-          :files="diffFiles"
-          :selected-path="selectedDiffPath"
-          :source="diffSource"
-          :view-mode="diffViewMode"
-          :accepting="acceptDiffMutation.isPending.value"
-          :rejecting="rejectDiffMutation.isPending.value"
-          :feedback="feedback"
-          @select-file="(path: string) => workbench.setSelectedDiffPath(path)"
-          @source-change="(source: 'run' | 'session' | 'vcs' | 'agent') => loadDiffSource(source)"
-          @view-mode-change="(mode: 'split' | 'unified') => (diffViewMode = mode)"
-          @refresh="loadDiffSource(diffSource)"
-          @accept-run="acceptDiffMutation.mutate()"
-          @reject-run="rejectDiffMutation.mutate()"
-          @current-file-feedback="onCurrentFileFeedback"
-          @use-hunk-context="onUseHunkContext"
-          @save-file="handleSaveDiffFile"
-        />
-        <div v-else-if="centerMode === 'system'" class="managed-runtime-container">
-          <SystemManagementWrapper :current-user="authStore.currentUser" />
-        </div>
+        <template v-if="centerMode === 'diff'">
+          <div class="flex-1 min-h-0 min-w-0">
+            <DiffViewer
+              ref="diffViewerRef"
+              :files="diffFiles"
+              :selected-path="selectedDiffPath"
+              :source="diffSource"
+              :view-mode="diffViewMode"
+              :accepting="acceptDiffMutation.isPending.value"
+              :rejecting="rejectDiffMutation.isPending.value"
+              :feedback="feedback"
+              @select-file="(path: string) => workbench.setSelectedDiffPath(path)"
+              @source-change="(source: 'run' | 'session' | 'vcs' | 'agent') => loadDiffSource(source)"
+              @view-mode-change="(mode: 'split' | 'unified') => (diffViewMode = mode)"
+              @refresh="loadDiffSource(diffSource)"
+              @accept-run="acceptDiffMutation.mutate()"
+              @reject-run="rejectDiffMutation.mutate()"
+              @current-file-feedback="onCurrentFileFeedback"
+              @use-hunk-context="onUseHunkContext"
+              @save-file="handleSaveDiffFile"
+              @dirty-change="(dirty: boolean) => (isDiffDirty = dirty)"
+            />
+          </div>
+          <WorkbenchFooter
+            :write-path="selectedDiffPath"
+            :dirty="isDiffDirty"
+            :saving="saveDiffFileMutation.isPending.value"
+            show-save
+            @save="() => diffViewerRef?.handleSave()"
+          />
+        </template>
+        <template v-else-if="centerMode === 'system'">
+          <div class="managed-runtime-container">
+            <SystemManagementWrapper :current-user="authStore.currentUser" />
+          </div>
+          <WorkbenchFooter />
+        </template>
         <FigmaEditorArea
           v-else
           :tabs="tabs"

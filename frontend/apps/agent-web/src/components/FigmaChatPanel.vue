@@ -1318,8 +1318,9 @@ function onCompositionEnd() {
       </button>
     </div>
 
+    <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div class="figma-chat-composer">
-      <div class="figma-chat-input-row">
+      <div class="figma-chat-input-card">
         <textarea
           v-model="localInput"
           class="figma-chat-textarea"
@@ -1330,63 +1331,68 @@ function onCompositionEnd() {
           @compositionstart="onCompositionStart"
           @compositionend="onCompositionEnd"
         />
-        <button
-          v-if="!running"
-          type="button"
-          class="figma-chat-send figma-chat-send--inline"
-          :disabled="!localInput.trim() || !processReady"
-          aria-label="发送"
-          @click="submit"
-        >
-          <Send class="figma-chat-send-icon" />
-        </button>
-        <button
-          v-else
-          type="button"
-          class="figma-chat-stop figma-chat-send--inline"
-          :disabled="stopDisabled"
-          :title="stopDisabledReason || '停止执行'"
-          aria-label="停止执行"
-          @click="stop"
-        >
-          <Square class="figma-chat-stop-icon" fill="currentColor" />
-        </button>
-      </div>
-      <div class="figma-chat-composer-actions">
-        <button
-          type="button"
-          class="figma-chat-icon-btn figma-chat-attachment-btn"
-          aria-label="上传附件"
-          title="上传附件"
-          @click="openAttachmentDialog"
-        >
-          <Upload class="figma-chat-btn-icon" />
-        </button>
-        <div class="figma-chat-composer-spacer" />
-        <button
-          type="button"
-          class="figma-chat-icon-btn figma-chat-model-btn"
-          :disabled="modelPickerDisabled"
-          title="切换模型"
-          aria-label="切换模型"
-          @click="emit('open-model-picker')"
-        >
-          <span class="figma-chat-model-label">{{
-            selectedModelLabel || '选择模型'
-          }}</span>
-          <ChevronDown class="figma-chat-btn-icon" />
-        </button>
-        <button
-          type="button"
-          class="figma-chat-icon-btn figma-chat-new-btn"
-          :disabled="running || !processReady"
-          @click="emit('new-conversation')"
-        >
-          <Plus class="figma-chat-btn-icon" />
-          <span>新建对话</span>
-        </button>
+        <div class="figma-chat-card-actions">
+          <!-- 左侧：附件上传 -->
+          <button
+            type="button"
+            class="figma-chat-card-btn figma-chat-attachment-btn"
+            aria-label="上传附件"
+            title="上传附件"
+            @click="openAttachmentDialog"
+          >
+            <Upload class="figma-chat-btn-icon" />
+          </button>
+          <!-- 中间：模型选择 -->
+          <button
+            type="button"
+            class="figma-chat-card-btn figma-chat-model-btn"
+            :disabled="modelPickerDisabled"
+            title="切换模型"
+            aria-label="切换模型"
+            @click="emit('open-model-picker')"
+          >
+            <span class="figma-chat-model-label">{{
+              selectedModelLabel || '选择模型'
+            }}</span>
+            <ChevronDown class="figma-chat-btn-icon" />
+          </button>
+          <div class="figma-chat-card-spacer" />
+          <!-- 右侧：新建对话 + 发送/停止 -->
+          <button
+            type="button"
+            class="figma-chat-card-btn figma-chat-new-btn"
+            :disabled="running || !processReady"
+            @click="emit('new-conversation')"
+          >
+            <Plus class="figma-chat-btn-icon" />
+            <span>新建对话</span>
+          </button>
+          <button
+            v-if="!running"
+            type="button"
+            class="figma-chat-send-card"
+            :disabled="!localInput.trim() || !processReady"
+            aria-label="发送"
+            @click="submit"
+          >
+            <Send class="figma-chat-send-icon" />
+          </button>
+          <button
+            v-else
+            type="button"
+            class="figma-chat-stop-card"
+            :disabled="stopDisabled"
+            :title="stopDisabledReason || '停止执行'"
+            aria-label="停止执行"
+            @click="stop"
+          >
+            <Square class="figma-chat-stop-icon" fill="currentColor" />
+          </button>
+        </div>
       </div>
     </div>
+    <!-- 与左侧面板、中心面板底部栏等高的常驻 footer -->
+    <div class="figma-chat-footer" />
 
     <div
       v-if="attachmentDialogOpen"
@@ -2251,176 +2257,180 @@ function onCompositionEnd() {
 /* ---- Composer ---- */
 .figma-chat-composer {
   flex-shrink: 0;
-  padding: 8px 12px 12px;
-  background: #fff;
+  padding: 8px 10px 10px;
+  background: #f5f5f5;
 }
 
-.figma-chat-input-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
-  align-items: center;
-  gap: 8px;
+/* 统一输入卡片：圆角边框容器，textarea + 底部工具行整合在一起 */
+.figma-chat-input-card {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #d4d4d4;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.figma-chat-input-card:focus-within {
+  border-color: #3366ff;
+  box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
 }
 
 .figma-chat-textarea {
   width: 100%;
-  min-height: 56px;
-  max-height: 120px;
-  padding: 8px 10px;
+  min-height: 64px;
+  max-height: 140px;
+  padding: 10px 12px 6px;
   font-family: 'Inter', 'PingFang SC', sans-serif;
   font-size: 14px;
   line-height: 20px;
   color: #111;
-  background: #fff;
-  border: 1px solid #ddd;
-  border-radius: 8px;
+  background: transparent;
+  border: none;
   resize: none;
   outline: none;
   box-sizing: border-box;
-  align-self: stretch;
-  transition: border-color 0.12s ease;
-}
-
-.figma-chat-textarea:focus {
-  border-color: #999;
 }
 
 .figma-chat-textarea:disabled {
-  background: #fafafa;
   color: #999;
   cursor: not-allowed;
 }
 
 .figma-chat-textarea::placeholder {
-  color: rgba(51, 51, 51, 0.5);
+  color: rgba(51, 51, 51, 0.38);
 }
 
-.figma-chat-composer-actions {
+/* 底部工具行（附件、模型、新建对话、发送/停止） */
+.figma-chat-card-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-top: 8px;
+  gap: 4px;
+  padding: 4px 8px 8px;
+  border-top: 1px solid #f0f0f0;
 }
 
-.figma-chat-composer-spacer {
+.figma-chat-card-spacer {
   flex: 1;
 }
 
-.figma-chat-icon-btn {
+/* 工具行小按钮（附件、模型、新建对话） */
+.figma-chat-card-btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 24px;
+  height: 26px;
   padding: 0 8px;
-  border: 1px solid #d7d7d7;
+  border: 1px solid transparent;
   border-radius: 6px;
-  background: #fff;
+  background: transparent;
   color: #555;
   font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  opacity: 0.85;
-  transition: opacity 0.12s ease, background-color 0.12s ease,
-    border-color 0.12s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
-.figma-chat-icon-btn:not(:disabled):hover {
-  opacity: 1;
-  background: #f5f5f5;
-  border-color: #b5b5b5;
+.figma-chat-card-btn:hover:not(:disabled) {
+  background: #f0f0f0;
+  border-color: #d4d4d4;
+  color: #333;
 }
 
-.figma-chat-icon-btn:disabled {
+.figma-chat-card-btn:disabled {
   cursor: not-allowed;
   opacity: 0.4;
 }
 
-.figma-chat-new-btn {
-  background: #fff;
-  border-color: #d7d7d7;
-  color: #555;
-}
-
 .figma-chat-attachment-btn {
   width: 28px;
-  height: 28px;
-  justify-content: center;
+  height: 26px;
   padding: 0;
+  justify-content: center;
 }
 
 .figma-chat-model-btn {
-  max-width: 156px;
+  max-width: 150px;
   min-width: 0;
 }
 
 .figma-chat-model-label {
   min-width: 0;
-  max-width: 112px;
+  max-width: 108px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.figma-chat-new-btn {
+  color: #555;
+}
+
 .figma-chat-btn-icon {
   width: 12px;
   height: 12px;
+  flex-shrink: 0;
 }
 
-.figma-chat-send,
-.figma-chat-stop {
-  display: flex;
+/* 卡片内发送 / 停止按钮 */
+.figma-chat-send-card,
+.figma-chat-stop-card {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
   border: none;
+  border-radius: 999px;
   cursor: pointer;
   transition: background-color 0.12s ease, opacity 0.12s ease;
+  flex-shrink: 0;
 }
 
-.figma-chat-send--inline {
-  width: 32px;
-  height: 32px;
-  align-self: center;
-  border-radius: 999px;
-}
-
-.figma-chat-send {
+.figma-chat-send-card {
   background: #3366ff;
   color: #fff;
-  border-radius: 50%;
-  opacity: 0.5;
+  opacity: 0.45;
 }
 
-.figma-chat-send:not(:disabled) {
+.figma-chat-send-card:not(:disabled) {
   opacity: 1;
 }
 
-.figma-chat-send:not(:disabled):hover {
+.figma-chat-send-card:not(:disabled):hover {
   background: #2855e0;
 }
 
-.figma-chat-stop {
+.figma-chat-stop-card {
   background: #fff;
   color: #3366ff;
   border: 1.5px solid #3366ff;
-  border-radius: 999px;
 }
 
-.figma-chat-stop:hover {
+.figma-chat-stop-card:hover {
   background: #f0f4ff;
 }
 
-.figma-chat-stop:disabled {
+.figma-chat-stop-card:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
 
 .figma-chat-send-icon,
 .figma-chat-stop-icon {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
+}
+
+/* ---- 常驻底部 footer（与左侧面板、中心面板底栏等高对齐） ---- */
+.figma-chat-footer {
+  flex-shrink: 0;
+  height: 36px;
+  background: #fff;
+  border-top: 1px solid #ddd;
 }
 
 /* ---- Attachment Dialog ---- */
