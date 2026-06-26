@@ -20,6 +20,16 @@ run_check() {
 run_check "restart script bash syntax" bash -n "${ROOT_DIR}/restart-dev-services.sh"
 run_check "restart script sh parse guard" sh -n "${ROOT_DIR}/restart-dev-services.sh"
 run_check "restart script sh help entry" sh "${ROOT_DIR}/restart-dev-services.sh" --help
+
+restart_help="$(sh "${ROOT_DIR}/restart-dev-services.sh" --help)"
+if [[ "${restart_help}" != *"backend profile: test"* ]]; then
+  echo "${restart_help}" >&2
+  fail "restart script help should document test as the default profile"
+fi
+if [[ "${restart_help}" != *"backend env:     .env.test"* ]]; then
+  echo "${restart_help}" >&2
+  fail "restart script help should document .env.test as the default dotenv file"
+fi
 run_check "opencode process deployment smoke script bash syntax" bash -n "${ROOT_DIR}/tools/verify-opencode-process-deployment.sh"
 run_check "opencode process deployment smoke script help" bash "${ROOT_DIR}/tools/verify-opencode-process-deployment.sh" --help
 
@@ -42,7 +52,8 @@ printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "-list" ]]; then exit 1; fi\nexit
 printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/curl"
 printf '#!/usr/bin/env bash\necho "   interface: en0"\n' >"${tmp_dir}/bin/route"
 printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "getifaddr" && "${2:-}" == "en0" ]]; then echo "10.8.0.115"; exit 0; fi\nexit 1\n' >"${tmp_dir}/bin/ipconfig"
-chmod +x "${tmp_dir}/bin/ps" "${tmp_dir}/bin/screen" "${tmp_dir}/bin/curl" "${tmp_dir}/bin/route" "${tmp_dir}/bin/ipconfig"
+printf '#!/usr/bin/env bash\necho "go should not run for remote opencode base URL" >&2\nexit 99\n' >"${tmp_dir}/bin/go"
+chmod +x "${tmp_dir}/bin/ps" "${tmp_dir}/bin/screen" "${tmp_dir}/bin/curl" "${tmp_dir}/bin/route" "${tmp_dir}/bin/ipconfig" "${tmp_dir}/bin/go"
 printf 'PLACEHOLDER=1\n' >"${tmp_dir}/env.local"
 
 set +e
@@ -87,6 +98,30 @@ restart_frontend_output="$(
 if [[ "${restart_frontend_output}" != *"Starting frontend on 0.0.0.0:3000"* ]]; then
   echo "${restart_frontend_output}" >&2
   fail "restart script should bind frontend to 0.0.0.0 for non-loopback access URLs"
+fi
+
+printf 'TEST_AGENT_OPENCODE_BASE_URL=http://10.8.0.115:4096\n' >"${tmp_dir}/env-remote-opencode.local"
+set +e
+restart_remote_opencode_output="$(
+  PATH="${tmp_dir}/bin:${PATH}" sh "${ROOT_DIR}/restart-dev-services.sh" \
+    --skip-backend-build \
+    --skip-frontend-build \
+    --env-file "${tmp_dir}/env-remote-opencode.local" \
+    --log-dir "${tmp_dir}/logs" 2>&1
+)"
+restart_remote_opencode_status=$?
+set -e
+if [[ "${restart_remote_opencode_status}" -ne 0 ]]; then
+  echo "${restart_remote_opencode_output}" >&2
+  fail "restart script should skip manager build/start for remote opencode base URL"
+fi
+if [[ "${restart_remote_opencode_output}" == *"go should not run"* ]]; then
+  echo "${restart_remote_opencode_output}" >&2
+  fail "restart script should not build opencode-manager for remote opencode base URL"
+fi
+if [[ "${restart_remote_opencode_output}" != *"Skipping opencode-manager startup."* ]]; then
+  echo "${restart_remote_opencode_output}" >&2
+  fail "restart script should report skipped opencode-manager startup for remote opencode base URL"
 fi
 
 echo "Development script verification passed."

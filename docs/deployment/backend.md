@@ -83,7 +83,7 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 - `OPENCODE_MANAGER_MAX_PROCESSES` 不得超过 `OPENCODE_MANAGER_PORT_END - OPENCODE_MANAGER_PORT_START + 1`。
 - 建议每个容器预留 1 到 2 个端口作为故障排查或滚动扩容缓冲，不要把端口池全部按理论最大值打满。
 - `OPENCODE_MANAGER_LINUX_SERVER_ID` 必须与后端写入的 `TEST_AGENT_LINUX_SERVER_ID` 使用同一 IPv4 表达，否则用户进程 `baseUrl` 和同服务器重建规则会不一致。
-- 本地 `./restart-dev-services.sh --env-file .env.local` 在未显式配置 `TEST_AGENT_LINUX_SERVER_ID` / `TEST_AGENT_BACKEND_LISTEN_URL` / `OPENCODE_MANAGER_LINUX_SERVER_ID` 时，会使用默认路由网卡的 IPv4 自动填充；生产和多机部署仍建议显式配置，避免网卡切换造成实例标识变化。
+- 本地或测试环境执行 `./restart-dev-services.sh` 时，在未显式配置 `TEST_AGENT_LINUX_SERVER_ID` / `TEST_AGENT_BACKEND_LISTEN_URL` / `OPENCODE_MANAGER_LINUX_SERVER_ID` 时，会使用默认路由网卡的 IPv4 自动填充；生产和多机部署仍建议显式配置，避免网卡切换造成实例标识变化。
 
 目录和日志规划：
 
@@ -205,7 +205,7 @@ tools/verify-opencode-process-deployment.sh --backend-url http://127.0.0.1:8080
 
 `deploy/local/docker-compose.yml` 默认启动备用 Postgres，映射到 `127.0.0.1:15432`；Redis 是可选 profile，默认映射到 `127.0.0.1:16379`。脚本只读取环境变量，不生成或写入密钥。
 
-仓库根目录的 `restart-dev-services.sh` 是三服务一键重启入口：按「后端 → opencode-manager → 前端」的依赖顺序，**逐个先 kill 原进程再启动**。当 `TEST_AGENT_OPENCODE_BASE_URL` 是本地地址时，脚本默认启动 Go `opencode-manager`（`run` 长运行模式），不再单独启动 standalone `opencode serve`——用户进程由 manager 自行派生，避免 4096 端口冲突。manager 与后端共享的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 未设置时默认 `local-manager-token`（与 `application-guo.yml` 一致），本地无需手配 `.env.local`；设 `TEST_AGENT_START_OPENCODE_MANAGER=false` 可跳过 manager。
+仓库根目录的 `restart-dev-services.sh` 是三服务一键重启入口：默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」的依赖顺序，**逐个先 kill 原进程再启动**。当 `TEST_AGENT_OPENCODE_BASE_URL` 是本地地址时，脚本默认启动 Go `opencode-manager`（`run` 长运行模式），不再单独启动 standalone `opencode serve`——用户进程由 manager 自行派生，避免 4096 端口冲突。manager 与后端共享的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 未设置时默认 `local-manager-token`（与 `application-guo.yml` 一致），本地无需手配 manager token；设 `TEST_AGENT_START_OPENCODE_MANAGER=false` 可跳过 manager。需要使用本地离线或个人调试配置时，显式传入 `--profile local --env-file .env.local` 或 `--profile guo --env-file .env.guo`。
 
 ## dotenv 示例
 
@@ -245,7 +245,7 @@ ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
 
 配置 `TEST_AGENT_API_TOKEN` 后，`/api/**` 要求 `Authorization: Bearer <token>`；未配置时本地默认放行。
 
-本地 profile 默认允许主前端和 `frontend-opencode` 的 Vite dev/preview/real E2E origin。`guo` profile 同样支持通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 覆盖；使用根目录 `restart-dev-services.sh` 并设置 `TEST_AGENT_FRONTEND_URL=http://<lan-ip>:3000` 时，脚本会把该局域网前端 origin 追加进 CORS 白名单。生产必须设置 `TEST_AGENT_CORS_ALLOWED_ORIGINS`，不要沿用本地端口白名单。
+本地和测试 profile 默认允许主前端和 `frontend-opencode` 的 Vite dev/preview/real E2E origin。`guo` profile 同样支持通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 覆盖；使用根目录 `restart-dev-services.sh` 并设置 `TEST_AGENT_FRONTEND_URL=http://<lan-ip>:3000` 时，脚本会把该局域网前端 origin 追加进 CORS 白名单。生产必须设置 `TEST_AGENT_CORS_ALLOWED_ORIGINS`，不要沿用本地端口白名单。
 
 ## 测试环境 profile
 

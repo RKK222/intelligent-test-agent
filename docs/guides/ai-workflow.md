@@ -57,7 +57,7 @@
 ./restart-dev-services.sh
 ```
 
-脚本默认使用 `local` profile、读取 `.env.local`、先编译后端和自研前端，再重启 `test-agent-app` 与 `frontend/apps/agent-web`。需要连接 `guo` 环境时显式传入 `--profile guo` 和对应 dotenv 文件。服务日志写入 `.tmp/dev-services/`，不得打印 dotenv 中的敏感值。
+脚本默认使用 `test` profile、读取 `.env.test`、先编译后端和自研前端，再按「后端 → opencode-manager → 前端」逐个 kill 旧进程并启动新进程。需要连接 `local` 或 `guo` 环境时显式传入 `--profile local|guo` 和对应 dotenv 文件。服务日志写入 `.tmp/dev-services/`，不得打印 dotenv 中的敏感值。
 
 仅启动 Java 后端时，Windows 开发人员优先使用 IDEA Run Configuration `TestAgentApplication guo`。该配置读取 `application-guo.yml`，不要求执行 shell 或读取 `.env.local`。
 

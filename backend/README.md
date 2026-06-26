@@ -111,7 +111,7 @@ cp .env.local.example .env.local
 | `TEST_AGENT_BAILIAN_BASE_URL` | 外网百炼 OpenAI-compatible base URL，默认 `https://coding.dashscope.aliyuncs.com/v1`。 |
 | `TEST_AGENT_ICBC_OPENAI_BASE_URL` | 企业内 OpenAI-compatible base URL，默认与 openclaw 企业 patch 中的 `icbc-openai` 地址一致。 |
 
-`guo` profile 的 IDEA 启动路径已把上述本地 Java 运行参数写入 yml；继续使用 `tools/dev-backend-run.sh` 或 `restart-dev-services.sh` 时，`.env.local` 仍可覆盖 yml，便于 macOS/Linux 联调脚本启动前后端和 opencode。
+`guo` profile 的 IDEA 启动路径已把上述本地 Java 运行参数写入 yml；继续使用 `tools/dev-backend-run.sh` 或 `restart-dev-services.sh --profile guo --env-file .env.local` 时，`.env.local` 仍可覆盖 yml，便于 macOS/Linux 联调脚本启动前后端和 opencode。根目录一键脚本不带参数时默认读取 `.env.test` 并启动 `test` profile。
 
 验证后端启动成功：
 ```bash

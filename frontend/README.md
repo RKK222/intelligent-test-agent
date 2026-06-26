@@ -57,7 +57,13 @@ tools/dev-frontend-check.sh
 
 ## 本地联调
 
-推荐从仓库根目录使用一键脚本重启三服务，脚本会按「后端 → opencode-manager → 前端」顺序逐个先 kill 原进程再启动，本地默认启动 Go `opencode-manager`（由它派生 opencode 子进程，不再单独启动 `opencode serve`）：
+推荐从仓库根目录使用一键脚本重启三服务，脚本默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」顺序逐个先 kill 原进程再启动；当 `TEST_AGENT_OPENCODE_BASE_URL` 是本地地址时默认启动 Go `opencode-manager`（由它派生 opencode 子进程，不再单独启动 `opencode serve`）：
+
+```bash
+./restart-dev-services.sh
+```
+
+连接 `guo` 或其他个人调试环境时显式覆盖 profile 和 dotenv：
 
 ```bash
 TEST_AGENT_BASE_URL=http://192.168.100.115:8080 \
@@ -67,7 +73,7 @@ TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000 \
 
 脚本会从 `TEST_AGENT_FRONTEND_URL` 推导前端监听 host/port，并把 `TEST_AGENT_BASE_URL` 注入为 Vite 的 `VITE_TEST_AGENT_API_BASE_URL`；需要通过局域网地址访问时，可在启动前设置 `TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000` 和 `TEST_AGENT_BASE_URL=http://192.168.100.115:8080`，后端 CORS 未显式配置时会自动包含该前端 origin。
 
-本机存在多个 opencode 版本时，在 `.env.local` 指定 `TEST_AGENT_OPENCODE_BIN`，避免 PATH 命中旧版本。例如：
+本机存在多个 opencode 版本时，在当前使用的 dotenv（默认 `.env.test`，或显式 `--env-file` 指定的文件）里指定 `TEST_AGENT_OPENCODE_BIN`，避免 PATH 命中旧版本。例如：
 
 ```bash
 TEST_AGENT_OPENCODE_BIN=${HOME}/.opencode/bin/opencode

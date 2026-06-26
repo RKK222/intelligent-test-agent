@@ -364,7 +364,7 @@ V10 种子数据对 F-COSS 的影响：
 
 ## opencode 用户进程管理表版本调整
 
-opencode 用户进程管理表曾在设计阶段使用 V10 版本号；实际仓库中 V10 保留给 F-COSS seed，消息/Run 消耗字段迁移使用 V16，最终表结构迁移以 `V14__create_opencode_process_management_tables.sql` 为准。该迁移都是新增表，不修改旧 `execution_nodes` 或 `sessions.opencode_*` 字段：
+设计阶段曾使用“V10 opencode 用户进程管理表”这一版本描述；实际仓库中 V10 保留给 F-COSS seed，消息/Run 消耗字段迁移使用 V16，最终表结构迁移以 `V14__create_opencode_process_management_tables.sql` 为准。该迁移都是新增表，不修改旧 `execution_nodes` 或 `sessions.opencode_*` 字段：
 
 | 表 | 说明 |
 |---|---|

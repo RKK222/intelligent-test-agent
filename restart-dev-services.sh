@@ -19,7 +19,7 @@ FRONTEND_SCREEN_SESSION="test-agent-frontend"
 OPENCODE_SCREEN_SESSION="test-agent-opencode"
 OPENCODE_MANAGER_SCREEN_SESSION="test-agent-opencode-manager"
 
-profile="local"
+profile="test"
 env_file=""
 skip_backend_build=false
 skip_frontend_build=false
@@ -41,16 +41,16 @@ Services managed by this script:
   frontend          agent-web Vite dev server (corepack pnpm dev).
 
 Defaults:
-  backend profile: local
-  backend env:     .env.local
+  backend profile: test
+  backend env:     .env.test
   backend URL:     TEST_AGENT_BASE_URL or http://127.0.0.1:8080
   frontend URL:    TEST_AGENT_FRONTEND_URL or http://127.0.0.1:3000
-  manager token:   TEST_AGENT_OPENCODE_MANAGER_TOKEN or local-manager-token (local dev default)
+  manager token:   TEST_AGENT_OPENCODE_MANAGER_TOKEN or local-manager-token (dev/test default)
   logs:            .tmp/dev-services/
   screen sessions: test-agent-backend, test-agent-frontend, test-agent-opencode-manager when screen is available
 
 Options:
-  --profile              Backend Spring profile, local, test, or guo. Default: local.
+  --profile              Backend Spring profile, local, test, or guo. Default: test.
   --env-file             Backend dotenv file. Relative paths are resolved from the repo root.
   --log-dir              Service log directory. Relative paths are resolved from the repo root.
   --skip-backend-build   Restart backend without running Maven package first.
@@ -326,10 +326,9 @@ should_start_opencode_manager() {
       return 1
       ;;
     auto|"")
-      # token 已有默认值，这里改用 TEST_AGENT_OPENCODE_BASE_URL 是否配置作为「真实本地环境」判据：
-      # 真实本地必然配置了该地址（start_backend 也会强制校验），而校验环境的占位 env 不会配置，
-      # 从而避免在无 go 工具的校验环境里触发 build_opencode_manager。
-      [[ -n "${TEST_AGENT_OPENCODE_BASE_URL:-}" ]] && is_local_opencode_url "${backend_url}"
+      # token 已有默认值，这里改用 TEST_AGENT_OPENCODE_BASE_URL 是否配置且指向本机作为启动判据；
+      # 校验环境的占位 env 不配置该地址，远端 opencode 环境也不应拉起本地 manager。
+      [[ -n "${TEST_AGENT_OPENCODE_BASE_URL:-}" ]] && is_local_opencode_url "${TEST_AGENT_OPENCODE_BASE_URL}"
       ;;
     *)
       echo "Invalid TEST_AGENT_START_OPENCODE_MANAGER: ${TEST_AGENT_START_OPENCODE_MANAGER}" >&2
@@ -756,7 +755,7 @@ apply_frontend_origin_defaults
 apply_detected_runtime_ip_defaults
 export SPRING_PROFILES_ACTIVE="${profile}"
 
-# 本地开发默认给 opencode-manager 一个与后端共享的 token，避免每次手配 .env.local。
+# 开发和测试默认给 opencode-manager 一个与后端共享的 token，避免每次手配本机 dotenv。
 # 与 application-guo.yml 的 local-manager-token 约定一致；local/test profile 后端从同一环境变量读取，自动匹配。
 if [[ -z "${TEST_AGENT_OPENCODE_MANAGER_TOKEN:-}" ]]; then
   export TEST_AGENT_OPENCODE_MANAGER_TOKEN="local-manager-token"
