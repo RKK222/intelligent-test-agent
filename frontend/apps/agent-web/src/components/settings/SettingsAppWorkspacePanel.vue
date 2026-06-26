@@ -677,7 +677,7 @@ onBeforeUnmount(() => {
             <div class="ta-workspace-step" :class="{ 'is-completed': branches.length > 0, 'is-active': branches.length === 0 }">
               <div class="ta-workspace-step-heading">
                 <span class="ta-workspace-step-index">1</span>
-                <span class="ta-workspace-step-title">第一步：刷新分支</span>
+                <span class="ta-workspace-step-title">刷新分支</span>
               </div>
               <div class="ta-workspace-step-controls">
                 <div class="ta-workspace-step-inputs">
@@ -695,7 +695,7 @@ onBeforeUnmount(() => {
             <div class="ta-workspace-step" :class="{ 'is-disabled': branches.length === 0, 'is-completed': branches.length > 0 && directories.length > 0, 'is-active': branches.length > 0 && directories.length === 0 }">
               <div class="ta-workspace-step-heading">
                 <span class="ta-workspace-step-index">2</span>
-                <span class="ta-workspace-step-title">第二步：加载目录</span>
+                <span class="ta-workspace-step-title">加载目录</span>
               </div>
               <div class="ta-workspace-step-controls">
                 <div class="ta-workspace-step-inputs">
@@ -713,7 +713,7 @@ onBeforeUnmount(() => {
             <div class="ta-workspace-step" :class="{ 'is-disabled': directories.length === 0, 'is-active': directories.length > 0 }">
               <div class="ta-workspace-step-heading">
                 <span class="ta-workspace-step-index">3</span>
-                <span class="ta-workspace-step-title">第三步：创建工作空间</span>
+                <span class="ta-workspace-step-title">创建工作空间</span>
               </div>
               <div class="ta-workspace-step-controls">
                 <div class="ta-workspace-step-inputs">
@@ -867,18 +867,18 @@ onBeforeUnmount(() => {
   content: "";
   position: absolute;
   left: 36px;
-  top: 40px;
-  bottom: 40px;
+  top: 32px;
+  bottom: 32px;
   width: 2px;
   background: #e4e7ed;
   z-index: 1;
 }
 .ta-workspace-step {
   display: grid;
-  grid-template-columns: 180px minmax(0, 1fr);
+  grid-template-columns: 140px minmax(0, 1fr);
   align-items: flex-start;
   gap: 16px;
-  padding: 20px 24px;
+  padding: 12px 24px;
   position: relative;
   transition: all 0.25s ease;
 }

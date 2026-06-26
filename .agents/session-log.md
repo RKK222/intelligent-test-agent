@@ -731,7 +731,7 @@
 
 ### 2026-06-26 - 优化设置页创建工作空间区域的视觉样式
 
-- Why: 设置页"工作空间管理"下的"创建工作空间"区域原来是三个散乱的、带边框的卡片，并且当输入标签存在时，输入框和右侧的动作按钮没有底齐，导致视觉上严重错位，整体不够美观。
+- Why: 设置页"工作空间管理"下的"创建工作空间"区域原来是三个散乱的、带边框的卡片，并且当输入标签存在时，输入框和右侧的动作按钮没有底齐，导致视觉上严重错位，整体不够美观。用户后续提出希望去掉“第一步/第二步/第三步”文字前缀并使高度更加紧凑。
 - What: 
   - `SettingsAppWorkspacePanel.vue` 中将三个步骤项改造成统一的卡片布局，左侧以一条纵向时间线 (Timeline) 贯穿 3 个步骤圆形数字徽标。
   - 为步骤卡片引入了 `:class` 状态绑定，能够基于当前填写的状态自动呈现已完成 (is-completed)、进行中 (is-active)、已禁用 (is-disabled) 三种视觉状态。
@@ -740,8 +740,11 @@
   - 为 steps 引入了 `ta-workspace-step-inputs` 包装容器，显式设置 label 的固定宽度（320px/240px/180px/140px）并且让 element 控件宽度 100%，消除因为 inline-flex 宽度计算导致的下拉框坍缩现象。
   - 在 controls 容器上使用 `justify-content: space-between` 和 `width: 100%`，把动作按钮推到最右侧，实现动作按钮在最右端纵向对齐的布局。
   - 在 `ta-workspace-step-heading` 样式上添加了 `white-space: nowrap`，防止步骤标题文字产生意外折行。
-- How: 仅在 `SettingsAppWorkspacePanel.vue` 中进行模板和 CSS 修改，不改变任何已有的功能 API、DOM 核心层级和已有测试断言所需的类名与文本，确保完全向下兼容。
-- Result: "创建工作空间"区域改为了精致的纵向时间线步骤设计。当前步骤高亮为蓝色，已完成步骤显示为绿色，未来步骤半透明置灰。所有输入组件与按钮均底部对齐，无错位现象；且上游切换时，下游会自动清空并置灰，体验极其顺畅。同时步骤标题禁止折行，输入框宽度稳定且合理，所有的操作按钮全部靠右对齐。
+  - 去掉了步骤标题中的“第一步：”、“第二步：”、“第三步：”前缀文字。
+  - 将 steps 容器的上下 padding 从 `20px` 压缩为 `12px`；第一列网格列宽由 `180px` 缩窄为 `140px`，并将引导线的 `top`/`bottom` 位置相应调整为 `32px`，从而使整体界面高度更加紧凑。
+  - 同步修改了 `settings-app-workspace-panel.test.ts`，去掉了步骤断言的前缀；并使用 `getAllByText` 和 `.find(el => el.tagName === "BUTTON")` 等更加精准的 DOM 筛选逻辑以消除文字重复带来的获取歧义。
+- How: 仅在 `SettingsAppWorkspacePanel.vue` 和 `settings-app-workspace-panel.test.ts` 中修改，不改变任何已有的功能 API，确保完全向下兼容。
+- Result: "创建工作空间"区域改为了精致的纵向时间线步骤设计。步骤标题不再有“第X步：”前缀，高度和列宽显著收窄，整体布局紧凑而精美。所有的输入控件合理加宽，右侧按钮对齐。
 - Verification: 运行 `corepack pnpm test apps/agent-web/tests/settings-app-workspace-panel.test.ts` 11/11 全部通过；运行 `corepack pnpm --filter @test-agent/agent-web typecheck` 通过；没有破坏任何既有的 test断言或结构。
 
 ### 2026-06-26 - 通用参数管理参数值修改改为弹窗修改

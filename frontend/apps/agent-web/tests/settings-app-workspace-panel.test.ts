@@ -307,21 +307,22 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
   });
 
   it("shows workspace creation as three labeled steps", async () => {
-    const { container, findByText, getByText, queryByText } = renderPanel();
+    const { container, findByText, getByText, queryByText, getAllByText } = renderPanel();
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("工作空间管理"));
 
-    const createSection = getByText("创建工作空间").closest(".ta-section");
+    const createSection = getAllByText("创建工作空间").find(el => el.tagName === "H4")?.closest(".ta-section");
     expect(createSection).toBeTruthy();
-    const createSectionText = createSection?.textContent ?? "";
-    expect(createSectionText.indexOf("第一步：刷新分支")).toBeLessThan(createSectionText.indexOf("第二步：加载目录"));
-    expect(createSectionText.indexOf("第二步：加载目录")).toBeLessThan(createSectionText.indexOf("第三步：创建工作空间"));
+    const steps = container.querySelectorAll(".ta-workspace-step");
+    expect(steps[0].textContent).toContain("刷新分支");
+    expect(steps[1].textContent).toContain("加载目录");
+    expect(steps[2].textContent).toContain("创建工作空间");
     expect(within(createSection as HTMLElement).getByText("已关联版本库")).toBeTruthy();
     expect(within(createSection as HTMLElement).getByText("分支")).toBeTruthy();
     expect(within(createSection as HTMLElement).getByText("目录")).toBeTruthy();
     expect(within(createSection as HTMLElement).getByText("工作空间名称")).toBeTruthy();
-    expect(within(createSection as HTMLElement).getByText("刷新分支")).toBeTruthy();
+    expect(within(createSection as HTMLElement).getAllByText("刷新分支").length).toBeGreaterThan(0);
     expect(queryByText("加载分支")).toBeNull();
     expect(container.querySelectorAll(".ta-workspace-step").length).toBe(3);
   });
@@ -331,12 +332,12 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature_testagent_20260707"]);
     api.listRepositoryDirectories = vi.fn().mockResolvedValue(["F-WRTESTAPP/workspace"]);
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("12345678-1234-1234-1234-123456789abc");
-    const { findByText, getByText } = renderPanel(api);
+    const { findByText, getByText, getAllByText } = renderPanel(api);
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("工作空间管理"));
-    await fireEvent.click(getByText("刷新分支"));
-    await fireEvent.click(getByText("加载目录"));
+    await fireEvent.click(getAllByText("刷新分支").find(el => el.tagName === "BUTTON")!);
+    await fireEvent.click(getAllByText("加载目录").find(el => el.tagName === "BUTTON")!);
     await fireEvent.click(getByText("创建"));
 
     await waitFor(() => expect(api.createApplicationWorkspace).toHaveBeenCalledWith("F-COSS", {
@@ -355,12 +356,12 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     api.listRepositoryBranches = vi.fn().mockResolvedValue(["feature/demo"]);
     api.listRepositoryDirectories = vi.fn().mockResolvedValue(["src"]);
     vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue("22345678-1234-1234-1234-123456789abc");
-    const { findByText, getByPlaceholderText, getByText } = renderPanel(api);
+    const { findByText, getByPlaceholderText, getByText, getAllByText } = renderPanel(api);
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("工作空间管理"));
-    await fireEvent.click(getByText("刷新分支"));
-    await fireEvent.click(getByText("加载目录"));
+    await fireEvent.click(getAllByText("刷新分支").find(el => el.tagName === "BUTTON")!);
+    await fireEvent.click(getAllByText("加载目录").find(el => el.tagName === "BUTTON")!);
     expect(await findByText("非标准库版本")).toBeTruthy();
 
     await fireEvent.update(getByPlaceholderText("yyyyMMdd"), "20260707");
