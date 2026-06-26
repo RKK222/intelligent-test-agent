@@ -146,7 +146,15 @@ export function reduceAgentChatRuntime(
     return { ...state, status: text(event.payload.status) ?? state.status };
   }
   if (event.type === "run.started" || event.type === "run.created" || event.type === "run.cancelling" || event.type === "run.succeeded" || event.type === "run.failed" || event.type === "run.cancelled") {
-    return { ...state, status: runStatusFromEvent(event) };
+    let messages = state.messages;
+    // run.failed 时追加错误卡片，并清理最近的空 assistant 消息
+    if (event.type === "run.failed") {
+      const errorInfo = extractErrorInfo(event.payload);
+      // 移除最后一条没有实际内容的 assistant 消息
+      messages = removeEmptyAssistant(messages);
+      messages = appendCard(messages, "event", "⚠️ Run 执行失败", { error: errorInfo, type: "run.failed" }, event);
+    }
+    return { ...state, status: runStatusFromEvent(event), messages };
   }
   return state;
 }
@@ -226,7 +234,7 @@ function mergeTextualPart(current: MessagePart | undefined, partId: string, part
 }
 
 function upsertPart(messages: AgentMessage[], event: RunEvent) {
-  const raw = record(event.payload.part) ?? event.payload;
+  const raw = record(event.payload.part) ?? record(event.payload.message) ?? event.payload;
   const messageId = text(event.payload.messageId) ?? text(event.payload.messageID) ?? text(raw.messageId) ?? text(raw.messageID);
   const partId = text(raw.partId) ?? text(raw.partID) ?? text(raw.id);
   if (!messageId || !partId) {
@@ -276,7 +284,7 @@ function removePart(messages: AgentMessage[], event: RunEvent) {
 }
 
 function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown>, event: RunEvent) {
-  const raw = record(payload.message) ?? payload;
+  const raw = record(payload.message) ?? record(payload.info) ?? payload;
   const messageId = text(raw.messageId) ?? text(raw.messageID) ?? text(raw.id) ?? `message-${event.seq}`;
   const role = text(raw.role) === "user" ? "user" : "assistant";
   const index = messages.findIndex((item) => item.id === messageId || (item.role !== "card" && item.messageId === messageId));
@@ -590,6 +598,39 @@ function diffFilesFromPayload(payload: Record<string, unknown>): RunDiffFile[] {
       status: text(item.status) ?? "modified"
     }))
     .filter((item) => item.path.length > 0);
+}
+
+function extractErrorInfo(payload: Record<string, unknown>): { message: string; statusCode?: number; name?: string } {
+  const error = record(payload.error);
+  const errorData = record(error?.data);
+  return {
+    message: text(error?.message) ?? text(errorData?.message) ?? text(payload.message) ?? "未知错误",
+    statusCode: number(errorData?.statusCode) ?? number(error?.statusCode),
+    name: text(error?.name) ?? text(errorData?.name) ?? "Error"
+  };
+}
+
+// 移除最后一条没有实际内容的 assistant 消息（空文本且没有有效的 parts）
+function removeEmptyAssistant(messages: AgentMessage[]): AgentMessage[] {
+  if (messages.length === 0) return messages;
+  const last = messages[messages.length - 1];
+  if (last.role !== "assistant") return messages;
+  // 检查是否有实际内容
+  const hasText = last.text && last.text.trim().length > 0;
+  const hasValidParts = last.parts && last.parts.some(p => {
+    if (p.type === "text" || p.type === "reasoning") {
+      return p.text && p.text.trim().length > 0;
+    }
+    if (p.type === "tool") {
+      return p.toolName || p.input || p.output;
+    }
+    return false;
+  });
+  // 如果没有实际内容，移除这条消息
+  if (!hasText && !hasValidParts) {
+    return messages.slice(0, -1);
+  }
+  return messages;
 }
 
 function upsertById<T extends { requestId: string }>(items: T[], item: T) {

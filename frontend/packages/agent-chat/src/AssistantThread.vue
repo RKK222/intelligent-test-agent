@@ -152,29 +152,27 @@ onBeforeUnmount(() => {
           :default-open="shouldOpenCardByDefault(message, defaultOpenCardIds)"
           @open-diff="emit('openDiff')"
         />
-        <div v-else :class="message.role === 'user' ? 'flex justify-end gap-2' : 'flex justify-start gap-2'">
+        <div v-else-if="message.role === 'assistant'" class="flex justify-start gap-2">
           <span
-            v-if="message.role !== 'user'"
             class="mt-6 flex h-8 w-8 shrink-0 items-center justify-center rounded border border-[var(--ta-chat-border)] bg-[var(--ta-chat-detail-bg)] text-[var(--ta-chat-subtle)]"
             aria-hidden="true"
           >
             <Bot class="h-4 w-4" />
           </span>
-          <div
-            :class="message.role === 'user'
-              ? 'max-w-[78%] rounded-md bg-[var(--ta-chat-user-bg)] px-3 py-2 text-[var(--ta-chat-text)]'
-              : 'max-w-[calc(100%_-_44px)] rounded-md border border-[var(--ta-chat-border)] bg-[var(--ta-chat-message-bg)] px-3 py-3'"
-          >
+          <div class="max-w-[calc(100%_-_44px)] rounded-md border border-[var(--ta-chat-border)] bg-[var(--ta-chat-message-bg)] px-3 py-3">
             <MessageParts
-              v-if="message.role === 'assistant' && message.parts?.length"
+              v-if="message.parts?.length"
               :parts="message.parts"
               :fallback-text="message.text"
             />
-            <p v-else-if="message.role === 'user'" class="m-0 whitespace-pre-wrap text-[13px] leading-6 text-[var(--ta-chat-text)]">{{ message.text }}</p>
             <PlainAnswer v-else :text="message.text" />
           </div>
+        </div>
+        <div v-else class="flex justify-end gap-2">
+          <div class="max-w-[78%] rounded-md bg-[var(--ta-chat-user-bg)] px-3 py-2 text-[var(--ta-chat-text)]">
+            <p class="m-0 whitespace-pre-wrap text-[13px] leading-6 text-[var(--ta-chat-text)]">{{ message.text }}</p>
+          </div>
           <span
-            v-if="message.role === 'user'"
             class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[var(--ta-control-strong)] text-[var(--ta-subtle)]"
             aria-hidden="true"
           >
