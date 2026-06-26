@@ -20,7 +20,7 @@ const props = defineProps<{
 
 const api = inject<BackendApiClient>("api")!;
 
-const appTab = ref<"members" | "repositories" | "workspaces">("members");
+const appTab = ref<"members" | "repositoryManagement" | "repositories" | "workspaces">("members");
 const loading = ref(false);
 const errorMessage = ref("");
 
@@ -43,6 +43,7 @@ const selectedUser = ref<PlatformUserSummary | null>(null);
 
 // 版本库
 const repositories = ref<CodeRepositoryConfig[]>([]);
+const repositoryTotal = ref(0);
 const appRepositories = ref<CodeRepositoryConfig[]>([]);
 const repoGitUrl = ref("");
 const repoName = ref("");
@@ -99,6 +100,7 @@ function clearAppContext() {
   selectedUser.value = null;
   userKeyword.value = "";
   repositories.value = [];
+  repositoryTotal.value = 0;
   appRepositories.value = [];
   repositoryApplications.value = [];
   workspaces.value = [];
@@ -183,6 +185,7 @@ async function loadRepositories() {
     selectedAppId.value ? api.listApplicationRepositories(selectedAppId.value) : Promise.resolve([])
   ]);
   repositories.value = all.items;
+  repositoryTotal.value = all.total;
   appRepositories.value = linked;
   if (!workspaceRepositoryId.value || !linked.some((item) => item.repositoryId === workspaceRepositoryId.value)) {
     workspaceRepositoryId.value = linked[0]?.repositoryId ?? "";
@@ -212,6 +215,7 @@ async function openRepositoryCreateSection() {
 function handleLinkRepositoryChange(repositoryId: string) {
   if (repositoryId === ADD_REPOSITORY_OPTION_VALUE) {
     linkRepositoryId.value = lastLinkRepositoryId.value;
+    appTab.value = "repositoryManagement";
     void openRepositoryCreateSection();
     return;
   }
@@ -378,6 +382,7 @@ watch(selectedAppId, async (appId) => {
         <el-radio-group v-model="appTab" class="ta-sub-tab-group">
           <el-radio-button value="members">应用人员管理</el-radio-button>
           <el-radio-button value="repositories">应用与版本库关联</el-radio-button>
+          <el-radio-button value="repositoryManagement">版本库管理</el-radio-button>
           <el-radio-button value="workspaces">工作空间管理</el-radio-button>
         </el-radio-group>
       </div>
@@ -435,7 +440,7 @@ watch(selectedAppId, async (appId) => {
         </div>
       </div>
 
-      <!-- 版本库管理 -->
+      <!-- 版本库关联 -->
       <div v-if="selectedAppId && appTab === 'repositories'" class="ta-panel-content">
         <div class="ta-section">
           <h4 class="ta-section-title">关联版本库到当前应用</h4>
@@ -478,9 +483,18 @@ watch(selectedAppId, async (appId) => {
             </div>
           </div>
         </div>
+      </div>
 
+      <!-- 版本库管理 -->
+      <div v-if="selectedAppId && appTab === 'repositoryManagement'" class="ta-panel-content">
         <div class="ta-section">
-          <h4 class="ta-section-title">编辑版本库</h4>
+          <div class="ta-section-header">
+            <h4 class="ta-section-title">已有版本库</h4>
+            <div class="ta-section-actions">
+              <span class="ta-count-badge">共 {{ repositoryTotal }} 个版本库</span>
+              <el-button :disabled="loading" @click="loadRepositories">刷新</el-button>
+            </div>
+          </div>
           <div v-for="repo in repositories" :key="repo.repositoryId" class="ta-item-row ta-edit-item">
             <div>
               <span class="ta-item-title">{{ repo.name }}</span>
@@ -589,6 +603,22 @@ watch(selectedAppId, async (appId) => {
   font-weight: 600;
   color: #18181b;
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+.ta-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ta-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.ta-count-badge {
+  font-size: 12px;
+  color: #606266;
 }
 .ta-inline-form {
   display: flex;

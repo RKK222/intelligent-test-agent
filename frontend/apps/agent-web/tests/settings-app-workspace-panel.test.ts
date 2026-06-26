@@ -174,16 +174,18 @@ function renderPanel(api = createApi()) {
 }
 
 describe("SettingsAppWorkspacePanel repository settings", () => {
-  it("uses version-library wording on repository management surface", async () => {
+  it("uses version-library wording and adds a dedicated management tab", async () => {
     const { findByText, getByText, queryByText } = renderPanel();
 
     await findByText("应用人员管理");
+    expect(getByText("版本库管理")).toBeTruthy();
+
     await fireEvent.click(getByText("应用与版本库关联"));
 
     expect(await findByText("关联版本库到当前应用")).toBeTruthy();
     expect(getByText("版本库与应用双向关联")).toBeTruthy();
-    expect(getByText("编辑版本库")).toBeTruthy();
-    expect(getByText("新增版本库")).toBeTruthy();
+    expect(queryByText("编辑版本库")).toBeNull();
+    expect(queryByText("新增版本库")).toBeNull();
     expect(queryByText("应用与代码库关联")).toBeNull();
     expect(queryByText("新增代码库")).toBeNull();
   });
@@ -199,18 +201,38 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect(within(repositorySelect).getByText("添加版本库")).toBeTruthy();
   });
 
-  it("keeps the create form at the bottom and focuses it from the select create option", async () => {
+  it("switches to repository management and focuses create form from the select create option", async () => {
     const { findByText, getAllByLabelText, getAllByTitle, getByPlaceholderText, getByText } = renderPanel();
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("应用与版本库关联"));
 
-    const editSectionTitle = getByText("编辑版本库");
-    const createSectionTitle = getByText("新增版本库");
-    expect(editSectionTitle.compareDocumentPosition(createSectionTitle)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-
     await fireEvent.update(getAllByLabelText("选择版本库")[0], selectCreateRepositoryValue);
+    expect(await findByText("已有版本库")).toBeTruthy();
+    expect(getByText("共 2 个版本库")).toBeTruthy();
     await waitFor(() => expect(document.activeElement).toBe(getByPlaceholderText("Git URL")));
     expect(getAllByTitle("标准代码库是指测试自己去git申请，专门用于测试智能体的版本库。").length).toBeGreaterThan(0);
+  });
+
+  it("shows repository count and creates repositories in management tab", async () => {
+    const api = createApi();
+    const { findByText, getByPlaceholderText, getByText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("版本库管理"));
+
+    expect(await findByText("共 2 个版本库")).toBeTruthy();
+    expect(getByText("已有版本库")).toBeTruthy();
+    expect(getByText("新增版本库")).toBeTruthy();
+
+    await fireEvent.update(getByPlaceholderText("Git URL"), "https://gitee.com/mimo/new-repo.git");
+    await fireEvent.update(getByPlaceholderText("中文名称"), "新增测试库");
+    await fireEvent.click(getByText("新增"));
+
+    await waitFor(() => expect(api.createRepository).toHaveBeenCalledWith({
+      gitUrl: "https://gitee.com/mimo/new-repo.git",
+      name: "新增测试库",
+      standard: false
+    }));
   });
 });
