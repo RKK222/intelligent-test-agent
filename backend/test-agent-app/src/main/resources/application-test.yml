@@ -22,8 +22,6 @@ test-agent:
     enabled: ${TEST_AGENT_REDIS_ENABLED:false}
     host: ${TEST_AGENT_REDIS_HOST:}
     port: ${TEST_AGENT_REDIS_PORT:6379}
-  managed-workspace:
-    root: ${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}
   # 公共目录：base 协商默认 /data/agents-pub；env 可覆盖或留空禁用。
   public-directory:
     path: ${TEST_AGENT_PUBLIC_DIRECTORY_PATH:/data/agents-pub}

@@ -98,10 +98,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private final WorkspaceServerIdentity serverIdentity;
     private final ServerBroadcastPublisher broadcastPublisher;
     private final String broadcastInstanceId;
-    private final Path managedRoot;
 
     /**
-     * Spring 构造器：绑定托管工作区根目录、通用参数和 SSH key 加密密钥。
+     * Spring 构造器：注入通用参数仓库和 SSH key 加密密钥。
+     * 工作区根目录统一从 common_parameters 读取，不再在 yaml 预留 fallback。
      */
     @Autowired
     public ManagedWorkspaceApplicationService(
@@ -113,7 +113,6 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             UserRepository userRepository,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
-            @Value("${test-agent.managed-workspace.root:${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}}") String managedRoot,
             @Value("${test-agent.security.ssh-key-encryption-key:${TEST_AGENT_SSH_KEY_ENCRYPTION_KEY:}}") String encryptionKey) {
         this(
                 configurationRepository,
@@ -126,12 +125,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 new GitWorkspaceService(),
                 new SshKeyCryptoService(encryptionKey),
                 serverIdentity,
-                broadcastPublisher,
-                managedRoot);
+                broadcastPublisher);
     }
 
     /**
-     * 测试构造器：允许注入 fake Git 服务和临时根目录。
+     * 测试构造器：允许注入 fake Git 服务。
      */
     ManagedWorkspaceApplicationService(
             ConfigurationManagementRepository configurationRepository,
@@ -140,8 +138,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             UserRepository userRepository,
             GitRemoteService gitRemoteService,
             GitWorkspaceService gitWorkspaceService,
-            SshKeyCryptoService sshKeyCryptoService,
-            String managedRoot) {
+            SshKeyCryptoService sshKeyCryptoService) {
         this(
                 configurationRepository,
                 EMPTY_PARAMETER_REPOSITORY,
@@ -153,12 +150,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 gitWorkspaceService,
                 sshKeyCryptoService,
                 new WorkspaceServerIdentity("127.0.0.1"),
-                NOOP_BROADCAST_PUBLISHER,
-                managedRoot);
+                NOOP_BROADCAST_PUBLISHER);
     }
 
     /**
-     * 测试构造器：允许注入 fake Git 服务、服务器身份和临时根目录。
+     * 测试构造器：允许注入 fake Git 服务、服务器身份和广播发布器。
      */
     ManagedWorkspaceApplicationService(
             ConfigurationManagementRepository configurationRepository,
@@ -169,8 +165,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             GitWorkspaceService gitWorkspaceService,
             SshKeyCryptoService sshKeyCryptoService,
             WorkspaceServerIdentity serverIdentity,
-            ServerBroadcastPublisher broadcastPublisher,
-            String managedRoot) {
+            ServerBroadcastPublisher broadcastPublisher) {
         this(
                 configurationRepository,
                 EMPTY_PARAMETER_REPOSITORY,
@@ -182,8 +177,36 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 gitWorkspaceService,
                 sshKeyCryptoService,
                 serverIdentity,
-                broadcastPublisher,
-                managedRoot);
+                broadcastPublisher);
+    }
+
+    /**
+     * 测试构造器：允许注入 fake Git 服务、通用参数仓库、服务器身份和广播发布器。
+     * operation 进度仓库使用 noop 实现，工作区根目录从 common_parameters 读取。
+     */
+    ManagedWorkspaceApplicationService(
+            ConfigurationManagementRepository configurationRepository,
+            CommonParameterRepository commonParameterRepository,
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            WorkspaceRepository workspaceRepository,
+            UserRepository userRepository,
+            GitRemoteService gitRemoteService,
+            GitWorkspaceService gitWorkspaceService,
+            SshKeyCryptoService sshKeyCryptoService,
+            WorkspaceServerIdentity serverIdentity,
+            ServerBroadcastPublisher broadcastPublisher) {
+        this(
+                configurationRepository,
+                commonParameterRepository,
+                NOOP_OPERATION_REPOSITORY,
+                managedWorkspaceRepository,
+                workspaceRepository,
+                userRepository,
+                gitRemoteService,
+                gitWorkspaceService,
+                sshKeyCryptoService,
+                serverIdentity,
+                broadcastPublisher);
     }
 
     ManagedWorkspaceApplicationService(
@@ -197,8 +220,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             GitWorkspaceService gitWorkspaceService,
             SshKeyCryptoService sshKeyCryptoService,
             WorkspaceServerIdentity serverIdentity,
-            ServerBroadcastPublisher broadcastPublisher,
-            String managedRoot) {
+            ServerBroadcastPublisher broadcastPublisher) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
         this.commonParameterRepository = Objects.requireNonNull(commonParameterRepository, "commonParameterRepository must not be null");
         this.workspaceCreateOperationRepository = Objects.requireNonNull(workspaceCreateOperationRepository, "workspaceCreateOperationRepository must not be null");
@@ -211,7 +233,6 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
         this.broadcastPublisher = Objects.requireNonNull(broadcastPublisher, "broadcastPublisher must not be null");
         this.broadcastInstanceId = this.broadcastPublisher.instanceId();
-        this.managedRoot = resolveManagedRoot(managedRoot);
     }
 
     public List<ManagedWorkspaceResponses.ManagedApplicationResponse> listApplications(UserId userId) {
@@ -1152,7 +1173,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private Path appRepoRoot(String version, CodeRepository repository) {
         // 路径片段统一走 sanitizeVersionForBranchAndPath：yyyy年M月 → yyyy-MM，避免路径里出现中文。
         String pathFragment = sanitizeVersionForBranchAndPath(version);
-        return configuredPath(PARAM_OPENCODE_APP_WORKSPACE_ROOT, managedRoot.resolve("appworkspace"))
+        return configuredPath(PARAM_OPENCODE_APP_WORKSPACE_ROOT)
                 .resolve(pathFragment)
                 .resolve(requireRepositoryEnglishName(repository))
                 .normalize();
@@ -1160,7 +1181,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     private Path personalRepoRoot(ApplicationWorkspaceVersion version, User user, PersonalWorkspaceId personalId) {
         CodeRepository repository = existingRepository(version.repositoryId());
-        return configuredPath(PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT, managedRoot.resolve("personalworktree"))
+        return configuredPath(PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT)
                 .resolve(sanitizeVersionForBranchAndPath(version.version()))
                 .resolve(sanitizePathPart(user.unifiedAuthId()))
                 .resolve(requireRepositoryEnglishName(repository))
@@ -1168,13 +1189,21 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .normalize();
     }
 
-    private Path configuredPath(String parameterEnglishName, Path fallback) {
+    /**
+     * 从 common_parameters 读取必填路径参数，缺失或空白时抛异常。
+     * common_parameters 为唯一事实源，不在 yaml 或代码常量预留 fallback。
+     */
+    private Path configuredPath(String parameterEnglishName) {
         ParameterPlatform platform = ParameterPlatform.current();
         return commonParameterRepository.findByEnglishNameAndPlatform(parameterEnglishName, platform)
                 .or(() -> commonParameterRepository.findByEnglishNameAndPlatform(parameterEnglishName, ParameterPlatform.ALL))
                 .map(CommonParameter::parameterValue)
+                .filter(value -> value != null && !value.isBlank())
                 .map(Path::of)
-                .orElse(fallback)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.INTERNAL_ERROR,
+                        "通用参数未配置：" + parameterEnglishName,
+                        Map.of("parameter", parameterEnglishName)))
                 .toAbsolutePath()
                 .normalize();
     }
@@ -1370,13 +1399,6 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.CONFLICT, "工作区目录不可用", Map.of("path", path.toString()), exception);
         }
-    }
-
-    private Path resolveManagedRoot(String configuredRoot) {
-        String root = configuredRoot == null || configuredRoot.isBlank()
-                ? Path.of(System.getProperty("user.home"), "test-agent-data").toString()
-                : configuredRoot.trim();
-        return Path.of(root).toAbsolutePath().normalize();
     }
 
     private WorkspaceCreateProgress createProgress(

@@ -744,7 +744,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 - `yyyy年M月` 格式入库时 `version` 字段保留原值；派生分支名/路径时转 `yyyy-MM`（如 `2024年1月` → `2024-01`），避免 git ref / 路径里出现中文。
 - 标准代码库分支固定为 `feature_testagent_{branchFragment}`，其中 `branchFragment` 是 `version` 经 `sanitizeVersionForBranchAndPath` 转换后的值；后端会用当前用户 SSH key 先查分支；不存在时返回 `CONFLICT`。
 - 非标准代码库必须传入 `branch`，后端按该分支 clone。
-- 应用版本工作区物理仓库根目录优先读取通用参数 `OPENCODE_APP_WORKSPACE_ROOT`，缺失时回退 `${test-agent.managed-workspace.root}/appworkspace`；最终仓库目录为 `{root}/{branchFragment}/{repository.englishName}`，opencode root 为仓库目录下模板 `directoryPath`。
+- 应用版本工作区物理仓库根目录读取通用参数 `OPENCODE_APP_WORKSPACE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终仓库目录为 `{root}/{branchFragment}/{repository.englishName}`，opencode root 为仓库目录下模板 `directoryPath`。
 - 历史代码库若缺少 `englishName`，创建或接管应用版本工作区会返回 `VALIDATION_ERROR`，需要先在版本库管理补齐英文名称。
 - 磁盘目录已存在时，后端校验 origin URL 和当前分支，匹配则接管，不覆盖、不删除；不匹配返回 `CONFLICT`。
 - SSH Git 操作只使用当前登录用户保存的唯一 SSH key；HTTPS 不额外支持账号或 token。
@@ -791,7 +791,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-个人工作区基于应用版本仓库创建 git worktree，分支名为 `{应用版本分支}_{统一认证号}_{personalWorkspaceId}`。物理根目录优先读取通用参数 `OPENCODE_PERSONAL_WORKTREE_ROOT`，缺失时回退 `${test-agent.managed-workspace.root}/personalworktree`；最终目录包含 `{branchFragment}/{统一认证号}/{repository.englishName}/{personalWorkspaceId}`，前端只展示 `workspaceName`。同一用户在同一应用版本下 `workspaceName` 唯一。
+个人工作区基于应用版本仓库创建 git worktree，分支名为 `{应用版本分支}_{统一认证号}_{personalWorkspaceId}`。物理根目录读取通用参数 `OPENCODE_PERSONAL_WORKTREE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终目录包含 `{branchFragment}/{统一认证号}/{repository.englishName}/{personalWorkspaceId}`，前端只展示 `workspaceName`。同一用户在同一应用版本下 `workspaceName` 唯一。
 
 同步请求体：
 

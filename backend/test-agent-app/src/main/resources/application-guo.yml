@@ -36,8 +36,6 @@ test-agent:
       - D:/workspace
   public-directory:
     path: D:/agents
-  managed-workspace:
-    root: ""
   redis:
     enabled: true
     host: 192.168.100.200

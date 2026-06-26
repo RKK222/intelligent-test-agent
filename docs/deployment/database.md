@@ -252,7 +252,7 @@
 
 - 不迁移、不删除既有手动 `workspaces`、sessions、runs；新增托管工作区只是在创建版本或个人空间时新增运行态 `workspaces` 记录。
 - `application_workspaces.branch` 继续保留作为模板创建和目录选择兼容字段；版本实际分支以 `application_workspace_versions.branch` 为准。
-- 应用版本和个人工作区物理根目录优先由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定；缺失时回退业务配置 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT` 下的 `appworkspace`、`personalworktree` 子目录。数据库只记录最终路径，不负责创建或清理目录。
+- 应用版本和个人工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定，`common_parameters` 为唯一事实源，缺失时直接抛业务异常（不再回退 yaml 或代码默认值）。数据库只记录最终路径，不负责创建或清理目录。
 
 ## V20260626150000 通用参数与工作空间创建进度
 
@@ -266,11 +266,10 @@
 | `code_repositories.english_name` | 代码库英文名称，可空兼容历史数据，非空唯一，最大 29 字符。 |
 | `workspace_create_operations` | 设置页创建应用工作空间的进度表，按 `operation_id` 记录状态、当前步骤、错误信息、关联应用/用户/模板/版本和 traceId。 |
 
-`common_parameters` 初始化 10 条 opencode 路径参数：
+`common_parameters` 初始化 8 条 opencode 路径参数：
 
 | 参数 | Linux 默认值 | Windows 默认值 |
 |---|---|---|
-| `OPENCODE_WORKSPACE_ROOT` | `/data/.testagent/agent-opencode/workspace/` | `D:/data/.testagent/agent-opencode/workspace/` |
 | `OPENCODE_PUBLIC_CONFIG_DIR` | `/data/.testagent/agent-opencode/.config/opencode/` | `D:/data/.testagent/agent-opencode/.config/opencode/` |
 | `OPENCODE_SESSION_DIR` | `/data/.testagent/agent-opencode/.session/` | `D:/data/.testagent/agent-opencode/.session/` |
 | `OPENCODE_APP_WORKSPACE_ROOT` | `/data/.testagent/agent-opencode/workspace/appworkspace/` | `D:/data/.testagent/agent-opencode/workspace/appworkspace/` |
@@ -280,8 +279,12 @@
 
 - 历史代码库的 `english_name` 保持 `null`；列表和详情响应允许返回 `null`，但新增/编辑代码库时必须提供合法英文名。
 - 缺少英文名的历史代码库不能创建新的应用版本工作区，后端返回 `VALIDATION_ERROR`，避免新路径规则下目录冲突。
-- 通用参数读取按 `当前平台 -> all -> 代码 fallback` 顺序选择；默认迁移只写入 `windows` 和 `linux` 平台值。
+- 通用参数读取按 `当前平台 -> all` 顺序选择，命中即用；未命中或值为空时抛 `INTERNAL_ERROR` 业务异常（`通用参数未配置：<参数英文名>`），强制运维在 `common_parameters` 表中补配。`OPENCODE_PUBLIC_AGENT_GIT_URL` 例外，其缺失或为 `UNCONFIGURED` 时视为公共级功能未启用，不抛异常。
 - `workspace_create_operations` 只服务 HTTP 轮询进度，不写入 `run_events`，也不参与 RunEvent SSE 续传。
+
+## V20260626180000 删除废弃参数 OPENCODE_WORKSPACE_ROOT
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260626180000__drop_deprecated_opencode_workspace_root_parameter.sql` 删除 `common_parameters` 中无消费方的 `OPENCODE_WORKSPACE_ROOT`（linux/windows 各一行）。该参数仅为 `OPENCODE_APP_WORKSPACE_ROOT` / `OPENCODE_PERSONAL_WORKTREE_ROOT` 的父目录，子目录参数已独立维护全路径，父参数不再需要。
 
 ## V20260626170000 公共 Agent 配置管理
 

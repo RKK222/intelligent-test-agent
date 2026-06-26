@@ -19,7 +19,10 @@ import com.icbc.testagent.domain.configuration.ApplicationWorkspace;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.icbc.testagent.domain.configuration.CodeRepository;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
+import com.icbc.testagent.domain.configuration.CommonParameter;
+import com.icbc.testagent.domain.configuration.CommonParameterRepository;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
+import com.icbc.testagent.domain.configuration.ParameterPlatform;
 import com.icbc.testagent.domain.configuration.SshKeyId;
 import com.icbc.testagent.domain.configuration.UserSshKey;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
@@ -47,6 +50,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -358,8 +362,10 @@ class ManagedWorkspaceApplicationServiceTest {
             FakeWorkspaceRepository workspaces,
             FakeGitWorkspaceService git,
             ServerBroadcastPublisher publisher) {
+        CommonParameterRepository commonParameters = commonParameters();
         return new ManagedWorkspaceApplicationService(
                 configuration,
+                commonParameters,
                 managed,
                 workspaces,
                 new FakeUserRepository(),
@@ -367,8 +373,7 @@ class ManagedWorkspaceApplicationServiceTest {
                 git,
                 new SshKeyCryptoService(java.util.Base64.getEncoder().encodeToString("0123456789abcdef".getBytes())),
                 new WorkspaceServerIdentity("127.0.0.1"),
-                publisher,
-                root.toString());
+                publisher);
     }
 
     private ManagedWorkspaceApplicationService serviceWithBranches(
@@ -377,8 +382,10 @@ class ManagedWorkspaceApplicationServiceTest {
             FakeWorkspaceRepository workspaces,
             FakeGitWorkspaceService git,
             List<String> branches) {
+        CommonParameterRepository commonParameters = commonParameters();
         return new ManagedWorkspaceApplicationService(
                 configuration,
+                commonParameters,
                 managed,
                 workspaces,
                 new FakeUserRepository(),
@@ -386,8 +393,25 @@ class ManagedWorkspaceApplicationServiceTest {
                 git,
                 new SshKeyCryptoService(java.util.Base64.getEncoder().encodeToString("0123456789abcdef".getBytes())),
                 new WorkspaceServerIdentity("127.0.0.1"),
-                new RecordingBroadcastPublisher(),
-                root.toString());
+                new RecordingBroadcastPublisher());
+    }
+
+    /**
+     * 内存通用参数仓库：把工作区根目录参数指向 @TempDir 下的子目录，common_parameters 为唯一来源。
+     */
+    private CommonParameterRepository commonParameters() {
+        Map<String, String> parameters = Map.of(
+                "OPENCODE_APP_WORKSPACE_ROOT", root.resolve("appworkspace").toString(),
+                "OPENCODE_PERSONAL_WORKTREE_ROOT", root.resolve("personalworktree").toString());
+        return (englishName, platform) -> Optional.ofNullable(parameters.get(englishName))
+                .map(value -> new CommonParameter(
+                        "param_" + englishName.toLowerCase(),
+                        englishName,
+                        englishName,
+                        value,
+                        platform,
+                        Instant.EPOCH,
+                        Instant.EPOCH));
     }
 
     private static final class RecordingBroadcastPublisher implements ServerBroadcastPublisher {

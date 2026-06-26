@@ -57,9 +57,6 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private static final String PARAM_PUBLIC_CONFIG_WORKTREE_ROOT = "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT";
     private static final String PARAM_PERSONAL_WORKTREE_ROOT = "OPENCODE_PERSONAL_WORKTREE_ROOT";
     private static final String UNCONFIGURED = "UNCONFIGURED";
-    private static final String PUBLIC_CONFIG_GIT_ROOT_FALLBACK = "/data/.testagent/agent-opencode/.config/";
-    private static final String PUBLIC_CONFIG_WORKTREE_ROOT_FALLBACK = "/data/.testagent/agent-opencode/.configdev/";
-    private static final String PERSONAL_WORKTREE_ROOT_FALLBACK = "/data/.testagent/agent-opencode/workspace/personalworktree/";
     private static final String PUBLIC_AGENT_RELATIVE_ROOT = "opencode/agents";
     private static final String PUBLIC_AGENT_LEGACY_RELATIVE_ROOT = "opencode/agent";
     private static final String WORKSPACE_AGENT_RELATIVE_ROOT = ".opencode/agents";
@@ -322,7 +319,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         try {
             ensureExistingCleanRepository(repoRoot, null);
             progress.step(AgentConfigOperationStep.CREATING_WORKTREE);
-            Path worktreeBase = Path.of(parameter(PARAM_PERSONAL_WORKTREE_ROOT, PERSONAL_WORKTREE_ROOT_FALLBACK))
+            Path worktreeBase = Path.of(requiredParameter(PARAM_PERSONAL_WORKTREE_ROOT))
                     .resolve("agentconfig")
                     .resolve(workspace.workspaceId().value())
                     .normalize();
@@ -665,19 +662,38 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     private PublicConfig publicConfig() {
-        String gitUrl = parameter(PARAM_PUBLIC_AGENT_GIT_URL, UNCONFIGURED);
-        Path gitRoot = Path.of(parameter(PARAM_PUBLIC_CONFIG_GIT_ROOT, PUBLIC_CONFIG_GIT_ROOT_FALLBACK)).normalize();
-        Path worktreeRoot = Path.of(parameter(PARAM_PUBLIC_CONFIG_WORKTREE_ROOT, PUBLIC_CONFIG_WORKTREE_ROOT_FALLBACK)).normalize();
+        // gitUrl 缺失或为 UNCONFIGURED 均视为公共级功能未启用（合法语义，不抛异常）。
+        String gitUrl = optionalParameter(PARAM_PUBLIC_AGENT_GIT_URL, UNCONFIGURED);
+        Path gitRoot = Path.of(requiredParameter(PARAM_PUBLIC_CONFIG_GIT_ROOT)).normalize();
+        Path worktreeRoot = Path.of(requiredParameter(PARAM_PUBLIC_CONFIG_WORKTREE_ROOT)).normalize();
         return new PublicConfig(gitUrl, gitRoot, worktreeRoot);
     }
 
-    private String parameter(String englishName, String fallback) {
+    /**
+     * 读取可选参数：缺失或空白时回退到 defaultValue，用于语义性的"未配置"开关值。
+     */
+    private String optionalParameter(String englishName, String defaultValue) {
         ParameterPlatform current = ParameterPlatform.current();
         return commonParameterRepository.findByEnglishNameAndPlatform(englishName, current)
                 .or(() -> commonParameterRepository.findByEnglishNameAndPlatform(englishName, ParameterPlatform.ALL))
                 .map(parameter -> parameter.parameterValue())
                 .filter(value -> !value.isBlank())
-                .orElse(fallback);
+                .orElse(defaultValue);
+    }
+
+    /**
+     * 读取必填参数：common_parameters 为唯一事实源，缺失或空白时抛异常，不在 yaml/代码预留 fallback。
+     */
+    private String requiredParameter(String englishName) {
+        ParameterPlatform current = ParameterPlatform.current();
+        return commonParameterRepository.findByEnglishNameAndPlatform(englishName, current)
+                .or(() -> commonParameterRepository.findByEnglishNameAndPlatform(englishName, ParameterPlatform.ALL))
+                .map(parameter -> parameter.parameterValue())
+                .filter(value -> !value.isBlank())
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.INTERNAL_ERROR,
+                        "通用参数未配置：" + englishName,
+                        Map.of("parameter", englishName)));
     }
 
     private AgentConfigProgress startProgress(
