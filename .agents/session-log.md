@@ -16,6 +16,18 @@
 - How: 先用 `corepack pnpm --filter @test-agent/agent-web build` 复现附件中的 TypeScript 错误，再按错误源头最小修复类型定义和联合类型收窄，不改 `restart-dev-services.sh`。
 - Result: `corepack pnpm --filter @test-agent/agent-web build`、相关 Vitest、`backend-api`/`agent-chat` typecheck 和 `tools/verify-dev-scripts.sh` 均通过；未执行完整一键重启，避免主动停止当前服务。
 ### 2026-06-26 - 工作台侧边栏布局调整与一级目录可折叠重构
+### 2026-06-26 - UI 三项改版：Diff light 主题、三栏底部 Footer 对齐、聊天输入卡片化
+
+- Why: 用户要求 (1) Monaco Diff 编辑器切为 light 风格与工作台白色主题匹配；(2) 不管切换到哪个功能，底部那一行应该都存在且高度一致；(3) 聊天面板输入框加宽，把模型选择、新建对话、附件上传挪到输入框内部下方，整体像现代 ChatGPT 风格。
+- What:
+  - `DiffViewer.vue`：定义 `ta-diff-light` Monaco 主题（白底，绿 `#10b981` / 红 `#ef4444` 差异色），所有暗色 CSS 类改为浅色版本，左右分栏头部提示文案优化，"保存 (Cmd+S)"按钮改为 amber 风格。
+  - `AgentWorkbench.vue`：diff 模式底部加 `<WorkbenchFooter :write-path="..." :dirty="..." show-save>`，system 模式底部加空白 `<WorkbenchFooter />`，保证三栏底部 36px 高度线条持续存在。
+  - `FigmaShell.vue`：右侧聊天面板默认宽度从 320px → 380px。
+  - `FigmaChatPanel.vue`：将 `figma-chat-composer` 内部重构为统一 `figma-chat-input-card` 圆角卡片，卡片内 textarea 占满宽，底部工具行（附件 Upload、模型选择 ChevronDown、新建对话 Plus、发送/停止圆形按钮）横排；卡片聚焦时蓝色描边；卡片外背景改为 `#f5f5f5`；根部末尾追加 `figma-chat-footer`（36px 白底带顶边框）与左中面板底栏高度对齐。
+- How: 纯 template + scoped CSS 改动，未修改任何 TypeScript 业务逻辑。既有 `isDirty`、`handleSave`、`dirtyChange` emit 均已在上轮实现，本轮直接连接到 footer。
+- Result: 三栏底部线条高度一致；Monaco Diff 呈 light 白底风格；聊天输入区整合为现代卡片样式，所有操作按钮集中在一个统一容器内。TypeScript 中仍有来自 `packages/agent-chat/src/runtime-reducer.ts` 和 `FigmaChatPanel.vue` 的既有类型错误（role 类型推断问题，与本次改动无关）。
+- Pitfalls: 上轮已将 `WorkbenchFooter` 和 diff light 代码写入 Vue 文件，但本轮才真正确认已生效；session 上下文切换点注意确认已有实现不要重复。
+
 ### 2026-06-26 - 工作区变更管理面板(Git Source Control)重构与美化
 
 - Why: 增强工作台变更标签页，支持以极佳的 Git 样式展示未暂存与已暂存文件，并支持暂存、提交、推送及手工拉伸。在 Diff 展现上采用极简的 Monaco 左右对比（Side-by-Side Split）视图，并且支持差异文件的行内实时编辑修改。
