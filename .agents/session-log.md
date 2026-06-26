@@ -16,6 +16,17 @@
 - How: 先用 `corepack pnpm --filter @test-agent/agent-web build` 复现附件中的 TypeScript 错误，再按错误源头最小修复类型定义和联合类型收窄，不改 `restart-dev-services.sh`。
 - Result: `corepack pnpm --filter @test-agent/agent-web build`、相关 Vitest、`backend-api`/`agent-chat` typecheck 和 `tools/verify-dev-scripts.sh` 均通过；未执行完整一键重启，避免主动停止当前服务。
 ### 2026-06-26 - 工作台侧边栏布局调整与一级目录可折叠重构
+### 2026-06-26 - 工作区变更管理面板(Git Source Control)重构与美化
+
+- Why: 增强工作台变更(Changes)标签页的源代码控制功能，支持以极佳的 Git 样式分别展示“应用工作空间”与“agents”的未暂存与已暂存文件，双击查看 Monaco 侧边 diff，并支持暂存/取消暂存、提交与推送动作。
+- What:
+  - 新增 `GitChangesPanel.vue` 前端 Git 控制面板，替代了原有的变更列表逻辑，提供 `UNSTAGED`/`STAGED` 分组折叠菜单、悬停暂存按钮和底部提交表单（支持 SignOff/No-Verify/Amend 选项，及提交/推送操作）。
+  - 对接 agents 的 stage/unstage/commit/publish 真实后端 API；对应用工作空间则进行前端数组模拟以填充后端未完成的缺失；梳理并提供了应用工作区所需的后台 VCS 提交/推送缺失接口。
+  - 在 `workbenchStore.ts` 引入全局 worktree 状态，使 `AgentConfigPanel` 与 `GitChangesPanel` 共享 active 临时工作区；Monaco `DiffViewer.vue` 新增 `agent` 源支持，并在审查非 AI 代码（VCS/Agent）的 Diff 时自适应隐藏反馈及接受/拒绝按钮。
+  - 顺手修复了 `shared-types` 中遗漏的 `CreateUserPayload`、`RoleOption` 与 `UserManagementUser` 导出声明，解决了前端因其缺少编译不通过的问题。
+- How: 借助 Vue 组合式状态实现前端暂存集存储，Monaco 编辑器联动使用 `setSelectedDiffPath` 及 `loadDiffSource("agent")` 加载映射后的 RunDiffFile，保持样式设计与 Figma 布局的一致性。
+- Result: 变更页面体验大幅提升，与 IDE 的 VCS 面板非常类似；除了实际不兼容的 2 项历史聊天测试外，其余前端类型校验与单元测试全部通过。
+
 ### 2026-06-26 - 工作台侧边栏布局调整与折叠拖拽重构
 
 - Why: 用户要求调整工作台文件区侧边栏的布局，移除顶部的“工作区”、“公共目录”、“Agent”切换按钮，并将“应用工作空间”（原工作区目录）和“agents”（原 Agent 面板）作为可折叠展开的一级目录。同时，修复浮动侧边栏折叠按钮在无工具栏情况下的重叠冲突，实现两一级目录间的上下拉动拖拽缩放，添加悬停显示工作区真实名称，以及移除 agents 底部多余的 git 发布提交模块。要求将切换工具栏（FolderTree/Search/GitBranch 切换栏）移到侧边栏最顶端以控制下面层级。

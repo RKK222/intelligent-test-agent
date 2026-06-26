@@ -97,7 +97,7 @@ const selectedModel = ref("");
 const promptMode = ref("build");
 const logs = ref<string[]>([]);
 const diffFiles = ref<RunDiffFile[]>([]);
-const diffSource = ref<"run" | "session" | "vcs">("run");
+const diffSource = ref<"run" | "session" | "vcs" | "agent">("run");
 const diffViewMode = ref<"split" | "unified">("split");
 const centerMode = ref<"editor" | "diff" | "system">("editor");
 const feedback = ref<Feedback | null>(null);
@@ -1749,26 +1749,59 @@ function applyToolChangeToDiff(part: Extract<MessagePart, { type: "tool" }>, raw
   workbench.setSelectedDiffPath(relPath);
 }
 
-async function loadDiffSource(source: "run" | "session" | "vcs") {
+async function loadDiffSource(source: "run" | "session" | "vcs" | "agent") {
   diffSource.value = source;
   centerMode.value = "diff";
   try {
-    const nextFiles =
-      source === "run"
-        ? run.value
-          ? (await api.getRunDiff(run.value.runId)).files
-          : []
-        : source === "session"
-          ? session.value
-            ? (await api.getSessionDiff(session.value.sessionId)).files
-            : []
-          : selectedWorkspace.value
-            ? (await api.getVcsDiffFiles(selectedWorkspace.value.workspaceId)).files
-            : [];
+    let nextFiles: RunDiffFile[] = [];
+    if (source === "run") {
+      nextFiles = run.value ? (await api.getRunDiff(run.value.runId)).files : [];
+    } else if (source === "session") {
+      nextFiles = session.value ? (await api.getSessionDiff(session.value.sessionId)).files : [];
+    } else if (source === "vcs") {
+      nextFiles = selectedWorkspace.value ? (await api.getVcsDiffFiles(selectedWorkspace.value.workspaceId)).files : [];
+    } else if (source === "agent") {
+      const pubDiff = await api.getPublicAgentDiff(workbench.publicWorktree?.worktreeId).catch(() => ({ files: [] }));
+      const mappedPub = pubDiff.files.map((f) => ({
+        path: f.path,
+        status: f.status,
+        additions: 0,
+        deletions: 0,
+        patch: f.patch
+      }));
+
+      let mappedWks: RunDiffFile[] = [];
+      if (selectedWorkspace.value) {
+        const wksDiff = await api.getWorkspaceAgentDiff(selectedWorkspace.value.workspaceId, workbench.workspaceWorktree?.worktreeId).catch(() => ({ files: [] }));
+        mappedWks = wksDiff.files.map((f) => ({
+          path: f.path,
+          status: f.status,
+          additions: 0,
+          deletions: 0,
+          patch: f.patch
+        }));
+      }
+      nextFiles = [...mappedPub, ...mappedWks];
+    }
     diffFiles.value = nextFiles;
     workbench.setSelectedDiffPath(nextFiles[0]?.path);
   } catch (error) {
     feedback.value = errorFeedback("加载 Diff 失败", error);
+  }
+}
+
+async function handleOpenDiff(payload: string | { path: string; source: "vcs" | "agent"; scope?: "PUBLIC" | "WORKSPACE" }) {
+  if (typeof payload === "string") {
+    await loadDiffSource("vcs");
+    workbench.setSelectedDiffPath(payload);
+  } else {
+    if (payload.source === "vcs") {
+      await loadDiffSource("vcs");
+      workbench.setSelectedDiffPath(payload.path);
+    } else {
+      await loadDiffSource("agent");
+      workbench.setSelectedDiffPath(payload.path);
+    }
   }
 }
 
@@ -1900,7 +1933,7 @@ async function handleLogout() {
           :show-server-workspace-switch="isSuperAdmin"
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
-          @open-diff="(path: string) => { workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
+          @open-diff="handleOpenDiff"
           @refresh="loadDirectory('')"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
@@ -1933,7 +1966,7 @@ async function handleLogout() {
           :rejecting="rejectDiffMutation.isPending.value"
           :feedback="feedback"
           @select-file="(path: string) => workbench.setSelectedDiffPath(path)"
-          @source-change="(source: 'run' | 'session' | 'vcs') => loadDiffSource(source)"
+          @source-change="(source: 'run' | 'session' | 'vcs' | 'agent') => loadDiffSource(source)"
           @view-mode-change="(mode: 'split' | 'unified') => (diffViewMode = mode)"
           @refresh="loadDiffSource(diffSource)"
           @accept-run="acceptDiffMutation.mutate()"

@@ -6,7 +6,7 @@ import type { Feedback } from "@test-agent/ui-kit";
 export type DiffViewerProps = {
   files: RunDiffFile[];
   selectedPath?: string;
-  source?: "run" | "session" | "vcs";
+  source?: "run" | "session" | "vcs" | "agent";
   viewMode?: "split" | "unified";
   accepting?: boolean;
   rejecting?: boolean;
@@ -29,7 +29,7 @@ const props = withDefaults(defineProps<DiffViewerProps>(), {
 });
 const emit = defineEmits<{
   selectFile: [path: string];
-  sourceChange: [source: "run" | "session" | "vcs"];
+  sourceChange: [source: "run" | "session" | "vcs" | "agent"];
   viewModeChange: [mode: "split" | "unified"];
   refresh: [];
   acceptRun: [];
@@ -54,9 +54,10 @@ function diffLanguage(path?: string): string {
   return path?.endsWith(".py") ? "python" : "typescript";
 }
 
-function sourceTitle(source: "run" | "session" | "vcs") {
+function sourceTitle(source: "run" | "session" | "vcs" | "agent") {
   if (source === "session") return "Session Diff";
   if (source === "vcs") return "VCS Diff";
+  if (source === "agent") return "Agent Config Diff";
   return "Run Diff";
 }
 
@@ -153,10 +154,11 @@ onBeforeUnmount(() => {
 <template>
   <div v-if="!files.length" class="flex h-full min-h-0 flex-col bg-[var(--ta-panel-2)] text-slate-500">
     <div class="flex items-center gap-1 px-3 py-1">
-      <select :value="source" class="h-8 rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200" @change="emit('sourceChange', ($event.target as HTMLSelectElement).value as 'run' | 'session' | 'vcs')">
+      <select :value="source" class="h-8 rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200" @change="emit('sourceChange', ($event.target as HTMLSelectElement).value as 'run' | 'session' | 'vcs' | 'agent')">
         <option value="run">Run</option>
         <option value="session">Session</option>
         <option value="vcs">VCS</option>
+        <option value="agent">Agent Config</option>
       </select>
       <select :value="viewMode" class="h-8 rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200" @change="emit('viewModeChange', ($event.target as HTMLSelectElement).value as 'split' | 'unified')">
         <option value="split">Split</option>
@@ -169,10 +171,11 @@ onBeforeUnmount(() => {
   <div v-else class="flex h-full min-h-0 flex-col bg-[var(--ta-panel-2)]">
     <div class="flex min-h-10 flex-wrap items-center gap-2 border-b border-slate-800 bg-slate-950 px-3 py-1">
       <div class="flex items-center gap-1">
-        <select :value="source" class="h-8 rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200" @change="emit('sourceChange', ($event.target as HTMLSelectElement).value as 'run' | 'session' | 'vcs')">
+        <select :value="source" class="h-8 rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200" @change="emit('sourceChange', ($event.target as HTMLSelectElement).value as 'run' | 'session' | 'vcs' | 'agent')">
           <option value="run">Run</option>
           <option value="session">Session</option>
           <option value="vcs">VCS</option>
+          <option value="agent">Agent Config</option>
         </select>
         <select :value="viewMode" class="h-8 rounded border border-slate-800 bg-slate-950 px-2 text-[12px] text-slate-200" @change="emit('viewModeChange', ($event.target as HTMLSelectElement).value as 'split' | 'unified')">
           <option value="split">Split</option>
@@ -191,20 +194,22 @@ onBeforeUnmount(() => {
         <span class="min-w-[52px] text-center font-mono text-[11px] text-slate-500">
           {{ selectedHunk ? `${selectedHunk.index + 1}/${hunks.length}` : "0/0" }}
         </span>
-        <Button type="button" size="icon" variant="secondary" title="引用 hunk" :disabled="!selected || !selectedHunk" @click="selected && selectedHunk && emit('useHunkContext', hunkToPromptPart(selected, selectedHunk))">
+        <Button v-if="source !== 'vcs' && source !== 'agent'" type="button" size="icon" variant="secondary" title="引用 hunk" :disabled="!selected || !selectedHunk" @click="selected && selectedHunk && emit('useHunkContext', hunkToPromptPart(selected, selectedHunk))">
           <MessageSquareQuote class="h-4 w-4" />
         </Button>
       </div>
-      <Button size="sm" variant="secondary" :disabled="!selected" @click="selected && emit('currentFileFeedback', 'accept-current', selected.path)">当前文件接受</Button>
-      <Button size="sm" variant="secondary" :disabled="!selected" @click="selected && emit('currentFileFeedback', 'reject-current', selected.path)">当前文件拒绝</Button>
-      <Button size="sm" variant="primary" :disabled="accepting" @click="emit('acceptRun')">
-        <Check class="h-4 w-4" />
-        接受全部
-      </Button>
-      <Button size="sm" variant="danger" :disabled="rejecting" @click="emit('rejectRun')">
-        <RotateCcw class="h-4 w-4" />
-        拒绝全部
-      </Button>
+      <template v-if="source !== 'vcs' && source !== 'agent'">
+        <Button size="sm" variant="secondary" :disabled="!selected" @click="selected && emit('currentFileFeedback', 'accept-current', selected.path)">当前文件接受</Button>
+        <Button size="sm" variant="secondary" :disabled="!selected" @click="selected && emit('currentFileFeedback', 'reject-current', selected.path)">当前文件拒绝</Button>
+        <Button size="sm" variant="primary" :disabled="accepting" @click="emit('acceptRun')">
+          <Check class="h-4 w-4" />
+          接受全部
+        </Button>
+        <Button size="sm" variant="danger" :disabled="rejecting" @click="emit('rejectRun')">
+          <RotateCcw class="h-4 w-4" />
+          拒绝全部
+        </Button>
+      </template>
     </div>
     <div class="grid min-h-0 flex-1 grid-cols-[260px_minmax(0,1fr)]">
       <div class="min-h-0 overflow-auto border-r border-slate-800 bg-[var(--ta-panel)] p-2">

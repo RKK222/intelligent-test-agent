@@ -9,6 +9,7 @@
     "typecheck": "vue-tsc --noEmit --pretty false"
   },
   "dependencies": {
+    "@test-agent/shared-types": "workspace:*",
     "@test-agent/ui-kit": "workspace:*",
     "dockview-vue": "6.6.1",
     "lucide-vue-next": "1.0.0",

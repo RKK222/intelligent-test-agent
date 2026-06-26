@@ -14,6 +14,7 @@ import {
   Users
 } from "lucide-vue-next";
 import { createBackendApiClient, BackendApiError } from "@test-agent/backend-api";
+import { useWorkbenchStore } from "@test-agent/workbench-shell";
 import type {
   AgentConfigDiffFile,
   AgentConfigProgressEvent,
@@ -36,6 +37,7 @@ const emit = defineEmits<{
   openFile: [payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null }];
 }>();
 
+const workbench = useWorkbenchStore();
 const api = createBackendApiClient({ baseUrl: props.baseUrl });
 
 type Scope = "PUBLIC" | "WORKSPACE";
@@ -51,8 +53,16 @@ const diffFiles = ref<AgentConfigDiffFile[]>([]);
 const selectedDiffPath = ref("");
 const commitMessage = ref("");
 const progressEvents = ref<AgentConfigProgressEvent[]>([]);
-const publicWorktree = ref<AgentConfigWorktree | null>(null);
-const workspaceWorktree = ref<AgentConfigWorktree | null>(null);
+
+const publicWorktree = computed<AgentConfigWorktree | null>({
+  get: () => workbench.publicWorktree,
+  set: (val) => { workbench.publicWorktree = val; }
+});
+const workspaceWorktree = computed<AgentConfigWorktree | null>({
+  get: () => workbench.workspaceWorktree,
+  set: (val) => { workbench.workspaceWorktree = val; }
+});
+
 const busy = ref(false);
 const activeWorktree = computed(() => activeScope.value === "PUBLIC" ? publicWorktree.value : workspaceWorktree.value);
 const selectedDiff = computed(() => diffFiles.value.find((file) => file.path === selectedDiffPath.value) ?? diffFiles.value[0]);
@@ -63,7 +73,9 @@ watch(
   () => props.workspaceId,
   () => {
     entriesByScope.value = { PUBLIC: entriesByScope.value.PUBLIC, WORKSPACE: {} };
-    workspaceWorktree.value = null;
+    if (workbench.workspaceWorktree) {
+      workbench.workspaceWorktree = null;
+    }
     void refreshStatus();
     if (rootExpanded.value.has("WORKSPACE")) {
       void loadDirectory("WORKSPACE", "");

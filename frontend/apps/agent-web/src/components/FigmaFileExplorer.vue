@@ -5,6 +5,7 @@ import type { FileContent } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
+import GitChangesPanel from "./GitChangesPanel.vue";
 import { ChevronDown, ChevronRight, FolderTree, GitBranch, RefreshCw, Search } from "lucide-vue-next";
 
 defineProps<FileExplorerProps & {
@@ -34,7 +35,7 @@ defineProps<FileExplorerProps & {
 const emit = defineEmits<{
   toggleDirectory: [path: string];
   openFile: [path: string];
-  openDiff: [path: string];
+  openDiff: [payload: string | { path: string; source: "vcs" | "agent"; scope?: "PUBLIC" | "WORKSPACE" }];
   refresh: [];
   // 选择某个应用版本后由父组件切换运行态 Workspace
   selectVersion: [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
@@ -51,6 +52,7 @@ const emit = defineEmits<{
 const workspaceExpanded = ref(true);
 const agentsExpanded = ref(true);
 const agentConfigPanelRef = ref<InstanceType<typeof AgentConfigPanel> | null>(null);
+const gitChangesPanelRef = ref<InstanceType<typeof GitChangesPanel> | null>(null);
 
 const tab = ref<ExplorerTab>("explorer");
 const workspaceHeight = ref<number | null>(null);
@@ -96,6 +98,20 @@ function onResizeEnd() {
 function refreshAgents() {
   agentConfigPanelRef.value?.refreshAll();
 }
+
+function refreshChanges() {
+  gitChangesPanelRef.value?.refreshChanges();
+}
+
+function refreshAll() {
+  refreshAgents();
+  refreshChanges();
+}
+
+defineExpose({
+  refreshAll,
+  refreshChanges
+});
 </script>
 
 <template>
@@ -134,100 +150,110 @@ function refreshAgents() {
 
     <!-- Sibling collapsible sections under the body -->
     <div class="figma-fe-body">
-      <!-- Section 1: 应用工作空间 -->
-      <div
-        class="figma-fe-section figma-fe-section-workspace"
-        :class="{ 'is-expanded': workspaceExpanded }"
-        :style="workspaceStyle"
-      >
-        <div class="figma-fe-section-header">
-          <button
-            type="button"
-            class="figma-fe-section-header-trigger"
-            @click="workspaceExpanded = !workspaceExpanded"
-          >
-            <ChevronDown v-if="workspaceExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
-            <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-            <span class="figma-fe-section-title" :title="workspaceName">应用工作空间</span>
-          </button>
-          <div class="figma-fe-section-actions" v-if="workspaceExpanded">
-            <button
-              v-if="tab === 'explorer'"
-              type="button"
-              class="figma-fe-section-action-btn"
-              title="刷新文件树"
-              aria-label="刷新文件树"
-              @click="emit('refresh')"
-            >
-              <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.5" />
-            </button>
-          </div>
-        </div>
-        <div v-show="workspaceExpanded" class="figma-fe-section-content">
-          <FileExplorer
-            :workspace-name="workspaceName"
-            :workspace-root-path="workspaceRootPath"
-            :entries-by-directory="entriesByDirectory"
-            :expanded-directories="expandedDirectories"
-            :active-path="activePath"
-            :changed-files="changedFiles"
-            :loading-path="loadingPath"
-            :hide-header="true"
-            :hide-tabbar="true"
-            :active-tab="tab"
-            @toggle-directory="emit('toggleDirectory', $event)"
-            @open-file="emit('openFile', $event)"
-            @open-diff="emit('openDiff', $event)"
-            @refresh="emit('refresh')"
-          />
-        </div>
-      </div>
-
-      <!-- Resizer divider: only show if both sections are expanded -->
-      <div
-        v-if="workspaceExpanded && agentsExpanded"
-        class="figma-fe-resize-handle"
-        @mousedown="onResizeStart"
-        role="separator"
-        aria-orientation="horizontal"
+      <GitChangesPanel
+        v-if="tab === 'changes'"
+        ref="gitChangesPanelRef"
+        :workspace-id="workspaceId"
+        :api-base-url="apiBaseUrl"
+        :can-write="!!publicDirectoryWritable"
+        @open-diff="(payload) => emit('openDiff', payload)"
       />
-
-      <!-- Section 2: agents -->
-      <div class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
-        <div class="figma-fe-section-header">
-          <button
-            type="button"
-            class="figma-fe-section-header-trigger"
-            @click="agentsExpanded = !agentsExpanded"
-          >
-            <ChevronDown v-if="agentsExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
-            <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-            <span class="figma-fe-section-title">agents</span>
-          </button>
-          <div class="figma-fe-section-actions" v-if="agentsExpanded">
+      <template v-else>
+        <!-- Section 1: 应用工作空间 -->
+        <div
+          class="figma-fe-section figma-fe-section-workspace"
+          :class="{ 'is-expanded': workspaceExpanded }"
+          :style="workspaceStyle"
+        >
+          <div class="figma-fe-section-header">
             <button
               type="button"
-              class="figma-fe-section-action-btn"
-              title="刷新"
-              aria-label="刷新"
-              @click="refreshAgents"
+              class="figma-fe-section-header-trigger"
+              @click="workspaceExpanded = !workspaceExpanded"
             >
-              <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.5" />
+              <ChevronDown v-if="workspaceExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
+              <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+              <span class="figma-fe-section-title" :title="workspaceName">应用工作空间</span>
             </button>
+            <div class="figma-fe-section-actions" v-if="workspaceExpanded">
+              <button
+                v-if="tab === 'explorer'"
+                type="button"
+                class="figma-fe-section-action-btn"
+                title="刷新文件树"
+                aria-label="刷新文件树"
+                @click="emit('refresh')"
+              >
+                <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.5" />
+              </button>
+            </div>
+          </div>
+          <div v-show="workspaceExpanded" class="figma-fe-section-content">
+            <FileExplorer
+              :workspace-name="workspaceName"
+              :workspace-root-path="workspaceRootPath"
+              :entries-by-directory="entriesByDirectory"
+              :expanded-directories="expandedDirectories"
+              :active-path="activePath"
+              :changed-files="changedFiles"
+              :loading-path="loadingPath"
+              :hide-header="true"
+              :hide-tabbar="true"
+              :active-tab="tab"
+              @toggle-directory="emit('toggleDirectory', $event)"
+              @open-file="emit('openFile', $event)"
+              @open-diff="emit('openDiff', $event)"
+              @refresh="emit('refresh')"
+            />
           </div>
         </div>
-        <div v-show="agentsExpanded" class="figma-fe-section-content">
-          <AgentConfigPanel
-            ref="agentConfigPanelRef"
-            :base-url="apiBaseUrl ?? ''"
-            :workspace-id="workspaceId"
-            :can-write="!!publicDirectoryWritable"
-            :hide-header="true"
-            :hide-git-ops="true"
-            @open-file="emit('openAgentFile', $event)"
-          />
+
+        <!-- Resizer divider: only show if both sections are expanded -->
+        <div
+          v-if="workspaceExpanded && agentsExpanded"
+          class="figma-fe-resize-handle"
+          @mousedown="onResizeStart"
+          role="separator"
+          aria-orientation="horizontal"
+        />
+
+        <!-- Section 2: agents -->
+        <div class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
+          <div class="figma-fe-section-header">
+            <button
+              type="button"
+              class="figma-fe-section-header-trigger"
+              @click="agentsExpanded = !agentsExpanded"
+            >
+              <ChevronDown v-if="agentsExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
+              <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+              <span class="figma-fe-section-title">agents</span>
+            </button>
+            <div class="figma-fe-section-actions" v-if="agentsExpanded">
+              <button
+                type="button"
+                class="figma-fe-section-action-btn"
+                title="刷新"
+                aria-label="刷新"
+                @click="refreshAgents"
+              >
+                <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.5" />
+              </button>
+            </div>
+          </div>
+          <div v-show="agentsExpanded" class="figma-fe-section-content">
+            <AgentConfigPanel
+              ref="agentConfigPanelRef"
+              :base-url="apiBaseUrl ?? ''"
+              :workspace-id="workspaceId"
+              :can-write="!!publicDirectoryWritable"
+              :hide-header="true"
+              :hide-git-ops="true"
+              @open-file="emit('openAgentFile', $event)"
+            />
+          </div>
         </div>
-      </div>
+      </template>
     </div>
     <WorkbenchFooter
       :app-name="appName"

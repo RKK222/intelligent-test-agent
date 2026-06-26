@@ -1,3 +1,4 @@
+import type { AgentConfigWorktree } from "@test-agent/shared-types";
 import { defineStore } from "pinia";
 import { ref } from "vue";
 
@@ -17,6 +18,8 @@ export const useWorkbenchStore = defineStore("workbench", () => {
   const tabs = ref<EditorTab[]>([]);
   const activePath = ref<string | undefined>(undefined);
   const selectedDiffPath = ref<string | undefined>(undefined);
+  const publicWorktree = ref<AgentConfigWorktree | null>(null);
+  const workspaceWorktree = ref<AgentConfigWorktree | null>(null);
 
   function setActivePath(path?: string) {
     activePath.value = path;
@@ -56,12 +59,16 @@ export const useWorkbenchStore = defineStore("workbench", () => {
     tabs.value = [];
     activePath.value = undefined;
     selectedDiffPath.value = undefined;
+    publicWorktree.value = null;
+    workspaceWorktree.value = null;
   }
 
   return {
     tabs,
     activePath,
     selectedDiffPath,
+    publicWorktree,
+    workspaceWorktree,
     setActivePath,
     setSelectedDiffPath,
     openTab,
