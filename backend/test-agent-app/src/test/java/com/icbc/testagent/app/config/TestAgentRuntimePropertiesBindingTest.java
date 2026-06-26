@@ -44,6 +44,18 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
+    void guoProfileCorsAllowsDefaultLanFrontendOriginForIdeaStartup() {
+        profileContextRunner
+                .withPropertyValues("spring.profiles.active=guo")
+                .run(context -> {
+                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
+
+                    assertThat(properties.getSecurity().getCorsAllowedOrigins())
+                            .contains("http://192.168.100.115:3000", "http://127.0.0.1:3000");
+                });
+    }
+
+    @Test
     void guoProfileBindsIdeaRunnableServiceConfigurationFromYaml() {
         profileContextRunner
                 .withPropertyValues("spring.profiles.active=guo")

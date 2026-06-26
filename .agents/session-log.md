@@ -2,6 +2,15 @@
 
 ## Entries
 
+### 2026-06-26 - 修复 guo 直启 CORS 并确认数据库 loopback
+
+- Why: IDEA 直启后前端从 `http://192.168.100.115:3000` 访问后端登录接口预检被拒；同时配置中数据库地址一处像 `127.0.0.1`、一处像 `192.168.100.115`，容易误判为可统一改成局域网 IP。
+- What: `application-guo.yml` 的默认 CORS origin 增加 `http://192.168.100.115:3000`；数据库 URL 保持 `127.0.0.1:15432` 并补充注释说明；配置绑定测试增加 guo profile 默认允许局域网前端 origin 的断言。
+- How: 用真实 `OPTIONS /api/auth/login` 复现 115 前端 origin 被拒；尝试将 PostgreSQL JDBC 改成 `192.168.100.115:15432` 后后端启动失败，日志显示 JDBC 握手阶段 EOF，因此回退到 loopback。
+- Result: 后端用 `guo` profile 可启动；`127.0.0.1:8080` 与 `192.168.100.115:8080` health 均为 UP，`192.168.100.115:3000` 前端返回 200，登录预检返回 `Access-Control-Allow-Origin: http://192.168.100.115:3000`。
+- Verification: `mvn -pl test-agent-app -am -Dtest=TestAgentRuntimePropertiesBindingTest -Dsurefire.failIfNoSpecifiedTests=false test`；显式 JDK 25 执行 `mvn clean package -DskipTests`；screen 后台启动 `java -jar test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar --spring.profiles.active=guo`；115/127 health、frontend HEAD 和 login CORS preflight curl。
+- Next: `guo` 本地配置中 PostgreSQL 保持 `127.0.0.1:15432`；`192.168.100.115` 继续用于前端、后端局域网入口、Redis/opencode 等本机对外监听服务。
+
 ### 2026-06-26 - IDEA 启动配置承接 guo 本地参数
 
 - Why: Windows 开发人员不能依赖 shell/dotenv 启动 Java 后端，需要 IDEA 可直接运行，并把 `.env.local` 中 Java 进程依赖的配置落到 yml。

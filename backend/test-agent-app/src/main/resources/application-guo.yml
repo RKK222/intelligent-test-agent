@@ -5,6 +5,7 @@ spring:
   datasource:
     druid:
       driver-class-name: org.postgresql.Driver
+      # PostgreSQL 通过本机 loopback 映射暴露；局域网 IP 端口可连但 JDBC 握手会被对端断开。
       url: jdbc:postgresql://127.0.0.1:15432/testagent?sslmode=disable
       username: testagent
       password: testagent
@@ -21,7 +22,7 @@ spring:
 test-agent:
   security:
     api-token: ""
-    cors-allowed-origins: ${TEST_AGENT_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}
+    cors-allowed-origins: ${TEST_AGENT_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000,http://192.168.100.115:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}
     ssh-key-encryption-key: "r7Nk2Vm8Qp4Xs9Jw3Lt6Yb1Af5Dg0Hc8Ei2Ko4Um6Pw="
   rate-limit:
     enabled: false
