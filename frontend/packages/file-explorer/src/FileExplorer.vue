@@ -11,9 +11,11 @@ export type FileExplorerProps = {
   statuses?: Record<string, FileStatus>;
   loadingPath?: Set<string>;
   hideHeader?: boolean;
+  hideTabbar?: boolean;
+  activeTab?: ExplorerTab;
 };
 
-type ExplorerTab = "explorer" | "search" | "changes";
+export type ExplorerTab = "explorer" | "search" | "changes";
 </script>
 
 <script setup lang="ts">
@@ -24,6 +26,7 @@ import { filterLoadedFiles } from "./filterLoadedFiles";
 import DirectoryRows from "./DirectoryRows.vue";
 
 const props = withDefaults(defineProps<FileExplorerProps>(), { workspaceName: "Workspace" });
+const computedTab = computed(() => props.activeTab ?? tab.value);
 const emit = defineEmits<{
   toggleDirectory: [path: string];
   openFile: [path: string];
@@ -56,7 +59,7 @@ const changeStats = computed(() => {
 
 <template>
   <div class="flex h-full min-h-0 flex-col bg-[var(--ta-panel)]">
-    <div class="ta-icon-tabbar" role="tablist" aria-label="工作区面板">
+    <div v-if="!hideTabbar" class="ta-icon-tabbar" role="tablist" aria-label="工作区面板">
       <button
         type="button"
         :class="['ta-icon-tab', tab === 'explorer' && 'is-active']"
@@ -86,7 +89,7 @@ const changeStats = computed(() => {
         <span v-if="changedFiles.length" class="ml-1 text-[10px]">{{ changedFiles.length }}</span>
       </button>
     </div>
-    <div v-if="tab === 'explorer'" class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2 text-[14px]">
+    <div v-if="computedTab === 'explorer'" class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2 text-[14px]">
       <div v-if="!hideHeader" class="mb-1 flex h-7 items-center justify-between rounded px-2 text-[12px] font-semibold text-[var(--ta-muted)]">
         <span class="min-w-0 truncate" :title="workspaceName">{{ workspaceName }}</span>
         <div class="flex shrink-0 items-center gap-1">
@@ -113,7 +116,7 @@ const changeStats = computed(() => {
         @open-file="emit('openFile', $event)"
       />
     </div>
-    <div v-else-if="tab === 'search'" class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
+    <div v-else-if="computedTab === 'search'" class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
       <div class="relative">
         <Search class="pointer-events-none absolute left-2 top-2 h-4 w-4 text-[var(--ta-muted)]" :stroke-width="1.5" />
         <Input v-model="keyword" class="pl-7" placeholder="过滤已加载文件名" />
@@ -131,7 +134,7 @@ const changeStats = computed(() => {
         </button>
       </div>
     </div>
-    <div v-else-if="tab === 'changes'" class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
+    <div v-else-if="computedTab === 'changes'" class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
       <div class="space-y-1">
         <button
           v-for="file in changedFiles"

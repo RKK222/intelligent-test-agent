@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { FileExplorer, type FileExplorerProps } from "@test-agent/file-explorer";
+import { FileExplorer, type FileExplorerProps, type ExplorerTab } from "@test-agent/file-explorer";
 import type { FileContent } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
-import { ChevronDown, ChevronRight, RefreshCw } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, FolderTree, GitBranch, RefreshCw, Search } from "lucide-vue-next";
 
 defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
@@ -52,6 +52,7 @@ const workspaceExpanded = ref(true);
 const agentsExpanded = ref(true);
 const agentConfigPanelRef = ref<InstanceType<typeof AgentConfigPanel> | null>(null);
 
+const tab = ref<ExplorerTab>("explorer");
 const workspaceHeight = ref<number | null>(null);
 const resizing = ref(false);
 let dragStartY = 0;
@@ -99,6 +100,39 @@ function refreshAgents() {
 
 <template>
   <div class="figma-file-explorer">
+    <!-- Tabbar is at the very top of the entire sidebar pane -->
+    <div class="ta-icon-tabbar" role="tablist" aria-label="工作区面板">
+      <button
+        type="button"
+        :class="['ta-icon-tab', tab === 'explorer' && 'is-active']"
+        title="文件树"
+        aria-label="文件树"
+        @click="tab = 'explorer'"
+      >
+        <FolderTree class="h-4 w-4" :stroke-width="1.5" />
+      </button>
+      <button
+        type="button"
+        :class="['ta-icon-tab', tab === 'search' && 'is-active']"
+        title="搜索"
+        aria-label="搜索"
+        @click="tab = 'search'"
+      >
+        <Search class="h-4 w-4" :stroke-width="1.5" />
+      </button>
+      <button
+        type="button"
+        :class="['ta-icon-tab', tab === 'changes' && 'is-active']"
+        title="变更"
+        aria-label="变更"
+        @click="tab = 'changes'"
+      >
+        <GitBranch class="h-4 w-4" :stroke-width="1.5" />
+        <span v-if="changedFiles.length" class="ml-1 text-[10px]">{{ changedFiles.length }}</span>
+      </button>
+    </div>
+
+    <!-- Sibling collapsible sections under the body -->
     <div class="figma-fe-body">
       <!-- Section 1: 应用工作空间 -->
       <div
@@ -118,6 +152,7 @@ function refreshAgents() {
           </button>
           <div class="figma-fe-section-actions" v-if="workspaceExpanded">
             <button
+              v-if="tab === 'explorer'"
               type="button"
               class="figma-fe-section-action-btn"
               title="刷新文件树"
@@ -138,6 +173,8 @@ function refreshAgents() {
             :changed-files="changedFiles"
             :loading-path="loadingPath"
             :hide-header="true"
+            :hide-tabbar="true"
+            :active-tab="tab"
             @toggle-directory="emit('toggleDirectory', $event)"
             @open-file="emit('openFile', $event)"
             @open-diff="emit('openDiff', $event)"
@@ -216,6 +253,37 @@ function refreshAgents() {
   min-height: 0;
 }
 
+.ta-icon-tabbar {
+  display: flex;
+  height: 38px;
+  background: #fafafa;
+  border-bottom: 1px solid #e4e4e7;
+  padding-right: 36px; /* Make space for the absolutely-positioned sidebar toggle button */
+  flex-shrink: 0;
+}
+
+.ta-icon-tab {
+  display: inline-flex;
+  min-width: 0;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 2px solid transparent;
+  color: #71717a;
+  cursor: pointer;
+  transition: color 0.14s ease, background-color 0.14s ease, border-color 0.14s ease;
+}
+
+.ta-icon-tab:hover {
+  background: #f4f4f5;
+  color: #18181b;
+}
+
+.ta-icon-tab.is-active {
+  border-bottom-color: #18181b;
+  color: #18181b;
+}
+
 .figma-fe-body {
   display: flex;
   flex-direction: column;
@@ -288,11 +356,6 @@ function refreshAgents() {
   gap: 4px;
 }
 
-/* Avoid overlapping with the absolutely-positioned sidebar floating toggle button in the first header */
-.figma-fe-section:first-child .figma-fe-section-actions {
-  margin-right: 32px;
-}
-
 .figma-fe-section-action-btn {
   display: inline-flex;
   align-items: center;
@@ -352,15 +415,6 @@ function refreshAgents() {
 
 .figma-fe-resize-handle:active {
   background: rgba(0, 0, 0, 0.06);
-}
-
-.figma-fe-body :deep(.ta-icon-tabbar) {
-  height: 38px;
-  background: #fafafa;
-}
-
-.figma-fe-body :deep(.ta-icon-tab) {
-  font-size: 11px;
 }
 
 .figma-fe-body :deep(.bg-\[var\(--ta-panel\)\]) {
