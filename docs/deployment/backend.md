@@ -192,7 +192,7 @@ tools/dev-backend-run.sh --profile guo
 
 脚本默认读取 `.env.local`，`--profile test` 读取 `.env.test`，`--profile guo` 读取 `.env.guo`，也可以通过 `--env-file <path>` 覆盖。脚本只解析 `KEY=VALUE` 行，不执行 dotenv 文件内容；生产容器仍通过外部环境变量或配置中心注入配置。
 
-`tools/dev-backend-run.sh` 是本地启动后端的统一入口：默认读取仓库根目录未跟踪的 `.env.local` 并启动 `local` profile；传入 `--profile test` 时读取 `.env.test` 并启动 `test` profile，传入 `--profile guo` 时读取 `.env.guo` 并启动 `guo` profile。`.env.local`、`.env.test` 和 `.env.guo` 已被 `.gitignore` 排除，真实数据库密码只允许写入这些本机文件。
+`tools/dev-backend-run.sh` 是本地启动后端的统一入口：默认读取仓库根目录未跟踪的 `.env.local` 并启动 `local` profile；传入 `--profile test` 时读取 `.env.test` 并启动 `test` profile，传入 `--profile guo` 时读取 `.env.guo` 并启动 `guo` profile。脚本会清空后端 JVM 的 HTTP/HTTPS/FTP/SOCKS 代理系统属性，避免 macOS 或本机代理影响 JDBC 与 Redis 直连；需要代理的外部 HTTP 调用应在应用配置层显式处理。`.env.local`、`.env.test` 和 `.env.guo` 已被 `.gitignore` 排除，真实数据库密码只允许写入这些本机文件。
 
 其他本地脚本：
 
@@ -205,7 +205,7 @@ tools/verify-opencode-process-deployment.sh --backend-url http://127.0.0.1:8080
 
 `deploy/local/docker-compose.yml` 默认启动备用 Postgres，映射到 `127.0.0.1:15432`；Redis 是可选 profile，默认映射到 `127.0.0.1:16379`。脚本只读取环境变量，不生成或写入密钥。
 
-仓库根目录的 `restart-dev-services.sh` 是三服务一键重启入口：默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」的依赖顺序，**逐个先 kill 原进程再启动**。当 `TEST_AGENT_OPENCODE_BASE_URL` 是本地地址时，脚本默认启动 Go `opencode-manager`（`run` 长运行模式），不再单独启动 standalone `opencode serve`——用户进程由 manager 自行派生，避免 4096 端口冲突。manager 与后端共享的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 未设置时默认 `local-manager-token`（与 `application-guo.yml` 一致），本地无需手配 manager token；设 `TEST_AGENT_START_OPENCODE_MANAGER=false` 可跳过 manager。需要使用本地离线或个人调试配置时，显式传入 `--profile local --env-file .env.local` 或 `--profile guo --env-file .env.guo`。
+仓库根目录的 `restart-dev-services.sh` 是三服务一键重启入口：默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」的依赖顺序，**逐个先 kill 原进程再启动**。脚本启动后端 Java 进程时同样清空 JVM 代理系统属性，确保测试库和 Redis 使用直连网络。当 `TEST_AGENT_OPENCODE_BASE_URL` 是本地地址时，脚本默认启动 Go `opencode-manager`（`run` 长运行模式），不再单独启动 standalone `opencode serve`——用户进程由 manager 自行派生，避免 4096 端口冲突。manager 与后端共享的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 未设置时默认 `local-manager-token`（与 `application-guo.yml` 一致），本地无需手配 manager token；设 `TEST_AGENT_START_OPENCODE_MANAGER=false` 可跳过 manager。需要使用本地离线或个人调试配置时，显式传入 `--profile local --env-file .env.local` 或 `--profile guo --env-file .env.guo`。
 
 ## dotenv 示例
 

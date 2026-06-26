@@ -25,6 +25,18 @@ USAGE
 
 profile="local"
 env_file=""
+# 后端需要直连数据库和 Redis，显式清空 JVM 从系统继承的代理属性。
+BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
+  "-Djava.net.useSystemProxies=false"
+  "-Dhttp.proxyHost="
+  "-Dhttp.proxyPort="
+  "-Dhttps.proxyHost="
+  "-Dhttps.proxyPort="
+  "-Dftp.proxyHost="
+  "-Dftp.proxyPort="
+  "-DsocksProxyHost="
+  "-DsocksProxyPort="
+)
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -134,8 +146,9 @@ fi
 
 echo "Starting backend with profile '${profile}' using $(basename "${env_file}")."
 echo "Sensitive environment values are loaded but not printed."
+echo "Backend JVM proxy settings are disabled for direct DB/Redis connections."
 
 cd "${ROOT_DIR}/backend"
 mvn -pl test-agent-app -am -DskipTests package
-exec java -jar "${ROOT_DIR}/backend/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar" \
+exec java "${BACKEND_JAVA_DIRECT_NETWORK_ARGS[@]}" -jar "${ROOT_DIR}/backend/test-agent-app/target/test-agent-app-0.1.0-SNAPSHOT.jar" \
   --spring.profiles.active="${profile}"

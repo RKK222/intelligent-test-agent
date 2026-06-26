@@ -23,6 +23,18 @@ profile="test"
 env_file=""
 skip_backend_build=false
 skip_frontend_build=false
+# 后端需要直连数据库和 Redis，显式清空 JVM 从系统继承的代理属性。
+BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
+  "-Djava.net.useSystemProxies=false"
+  "-Dhttp.proxyHost="
+  "-Dhttp.proxyPort="
+  "-Dhttps.proxyHost="
+  "-Dhttps.proxyPort="
+  "-Dftp.proxyHost="
+  "-Dftp.proxyPort="
+  "-DsocksProxyHost="
+  "-DsocksProxyPort="
+)
 
 usage() {
   cat <<'USAGE'
@@ -605,16 +617,18 @@ start_backend() {
 
   mkdir -p "${LOG_DIR}"
   echo "Starting backend with profile '${profile}'. Logs: ${LOG_DIR}/backend.log"
+  echo "Backend JVM proxy settings are disabled for direct DB/Redis connections."
   : >"${LOG_DIR}/backend.log"
   if command -v screen >/dev/null 2>&1; then
-    local backend_cmd
-    printf -v backend_cmd 'cd %q && exec java -jar %q --spring.profiles.active=%q >>%q 2>&1' \
-      "${BACKEND_DIR}" "${BACKEND_JAR}" "${profile}" "${LOG_DIR}/backend.log"
+    local backend_cmd proxy_args
+    printf -v proxy_args '%q ' "${BACKEND_JAVA_DIRECT_NETWORK_ARGS[@]}"
+    printf -v backend_cmd 'cd %q && exec java %s-jar %q --spring.profiles.active=%q >>%q 2>&1' \
+      "${BACKEND_DIR}" "${proxy_args}" "${BACKEND_JAR}" "${profile}" "${LOG_DIR}/backend.log"
     screen -dmS "${BACKEND_SCREEN_SESSION}" bash -lc "${backend_cmd}"
   else
     (
       cd "${BACKEND_DIR}"
-      nohup java -jar "${BACKEND_JAR}" --spring.profiles.active="${profile}" \
+      nohup java "${BACKEND_JAVA_DIRECT_NETWORK_ARGS[@]}" -jar "${BACKEND_JAR}" --spring.profiles.active="${profile}" \
         >>"${LOG_DIR}/backend.log" 2>&1 &
       echo "$!" >"${LOG_DIR}/backend.pid"
     )

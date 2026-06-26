@@ -20,6 +20,7 @@ run_check() {
 run_check "restart script bash syntax" bash -n "${ROOT_DIR}/restart-dev-services.sh"
 run_check "restart script sh parse guard" sh -n "${ROOT_DIR}/restart-dev-services.sh"
 run_check "restart script sh help entry" sh "${ROOT_DIR}/restart-dev-services.sh" --help
+run_check "dev backend script bash syntax" bash -n "${ROOT_DIR}/tools/dev-backend-run.sh"
 
 restart_help="$(sh "${ROOT_DIR}/restart-dev-services.sh" --help)"
 if [[ "${restart_help}" != *"backend profile: test"* ]]; then
@@ -47,8 +48,9 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -p "${tmp_dir}/bin" "${tmp_dir}/logs"
+screen_calls="${tmp_dir}/screen.calls"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/ps"
-printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "-list" ]]; then exit 1; fi\nexit 0\n' >"${tmp_dir}/bin/screen"
+printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "-list" ]]; then exit 1; fi\nprintf "%%s\\n" "$*" >>%q\nexit 0\n' "${screen_calls}" >"${tmp_dir}/bin/screen"
 printf '#!/usr/bin/env bash\nexit 0\n' >"${tmp_dir}/bin/curl"
 printf '#!/usr/bin/env bash\necho "   interface: en0"\n' >"${tmp_dir}/bin/route"
 printf '#!/usr/bin/env bash\nif [[ "${1:-}" == "getifaddr" && "${2:-}" == "en0" ]]; then echo "10.8.0.115"; exit 0; fi\nexit 1\n' >"${tmp_dir}/bin/ipconfig"
@@ -122,6 +124,20 @@ fi
 if [[ "${restart_remote_opencode_output}" != *"Skipping opencode-manager startup."* ]]; then
   echo "${restart_remote_opencode_output}" >&2
   fail "restart script should report skipped opencode-manager startup for remote opencode base URL"
+fi
+if [[ "$(cat "${screen_calls}" 2>/dev/null || true)" != *"-Djava.net.useSystemProxies=false"* ]]; then
+  cat "${screen_calls}" >&2 || true
+  fail "restart script backend launch should disable JVM system proxies"
+fi
+if [[ "$(cat "${screen_calls}" 2>/dev/null || true)" != *"-DsocksProxyHost="* ]]; then
+  cat "${screen_calls}" >&2 || true
+  fail "restart script backend launch should clear JVM SOCKS proxy host"
+fi
+if [[ "$(sed -n '1,220p' "${ROOT_DIR}/tools/dev-backend-run.sh")" != *"-Djava.net.useSystemProxies=false"* ]]; then
+  fail "dev backend script should disable JVM system proxies"
+fi
+if [[ "$(sed -n '1,220p' "${ROOT_DIR}/tools/dev-backend-run.sh")" != *"-DsocksProxyHost="* ]]; then
+  fail "dev backend script should clear JVM SOCKS proxy host"
 fi
 
 echo "Development script verification passed."
