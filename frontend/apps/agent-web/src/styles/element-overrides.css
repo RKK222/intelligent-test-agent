@@ -5,7 +5,7 @@
   --el-color-warning: #e6a700;
   --el-color-error: #e5484d;
   --el-border-radius-base: 8px;
-  --el-font-family: "PingFang SC", "Inter", "Microsoft YaHei", system-ui, sans-serif;
+  --el-font-family: "Geist", "Noto Sans SC", sans-serif;
 }
 
 /* Message 气泡：顶部居中、深色卡片 */
@@ -49,5 +49,5 @@
   margin-top: 2px;
   color: rgba(244, 244, 245, 0.4);
   font-size: 11px;
-  font-family: "JetBrains Mono", monospace;
+  font-family: "Geist Mono", monospace;
 }

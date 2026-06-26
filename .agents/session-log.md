@@ -2,6 +2,23 @@
 
 ## Entries
 
+### 2026-06-26 - 全局字体与排版样式优化
+
+- Why: 统一平台视觉体验，提升可读性。用户要求将默认字体替换为 Geist 族与 Noto Sans SC 组合，并规范化标题、正文、说明及代码块的字号字重参数。
+- What:
+  - 引入网络字体：在 `index.html` 中配置 Google Fonts 加载 `'Geist'`、`'Geist Mono'`、`'Noto Sans SC'` 三种字体，且在 `globals.css` 中添加 `@import url` 的后备引入。
+  - 主题配置更新：在 `globals.css` 中的 Tailwind `@theme` 区声明 `--font-sans`（映射到 Geist & Noto Sans SC）与 `--font-mono`（映射到 Geist Mono），重映射底层组件工具类。
+  - Element Plus 覆写更新：修改 `element-overrides.css` 对应变量，将 `--el-font-family` 切换为 Geist & Noto Sans SC，代码字体覆写为 Geist Mono。
+  - 标签样式统一与尺寸微调：
+    - `html`, `body` 采用新字族；
+    - `body` 基础字号从 `14px` 放大到 `16px`（对应“正文/默认聊天内容”字号为 16px，字重 400）；
+    - `button`, `.el-button` 设置字号为 `14px`，字重 `500`；
+    - `input`, `textarea`, `select`, `.el-input`, `.el-textarea` 默认字号为 `16px`，字重 `400`；
+    - `pre`, `code`, `.ta-codeblock`, `.font-mono` 使用 `Geist Mono` 字体，字号为 `14px`，字重 `400`；
+    - 统一标题标签：`h1` / `.ta-welcome-h1` 设为 `28-32px`/700，`h2` / `.ta-display` 设为 `24px`/600，`h3` 设为 `20px`/600。
+- How: 仅修改 `index.html` 外部引用以及 `element-overrides.css`/`globals.css` 基础样式覆盖，不干扰前端组件具体实现。
+- Result: 页面字体完美替换为 Geist 系列与 Noto 简体中文，排版尺寸符合统一规范。类型检查与单元测试完全通过。
+
 ### 2026-06-26 - 服务器工作空间目录选择器优化为 macOS Finder 风格
 
 - Why: 用户反馈服务器工作空间目录选择器布局简易，希望参考 macOS Finder 的文件管理风格进行界面优化，且要求解决文件夹选中后窗口尺寸跳动问题、精简多余列信息、并支持通过点击左侧折叠箭头 inline 展开子目录结构。
