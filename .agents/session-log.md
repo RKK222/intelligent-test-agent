@@ -743,3 +743,16 @@
 - How: 仅在 `SettingsAppWorkspacePanel.vue` 中进行模板和 CSS 修改，不改变任何已有的功能 API、DOM 核心层级和已有测试断言所需的类名与文本，确保完全向下兼容。
 - Result: "创建工作空间"区域改为了精致的纵向时间线步骤设计。当前步骤高亮为蓝色，已完成步骤显示为绿色，未来步骤半透明置灰。所有输入组件与按钮均底部对齐，无错位现象；且上游切换时，下游会自动清空并置灰，体验极其顺畅。同时步骤标题禁止折行，输入框宽度稳定且合理，所有的操作按钮全部靠右对齐。
 - Verification: 运行 `corepack pnpm test apps/agent-web/tests/settings-app-workspace-panel.test.ts` 11/11 全部通过；运行 `corepack pnpm --filter @test-agent/agent-web typecheck` 通过；没有破坏任何既有的 test断言或结构。
+
+### 2026-06-26 - 通用参数管理参数值修改改为弹窗修改
+
+- Why: 通用参数管理页面中的参数值原为表格行内 input 框输入，容易产生误触且对长路径参数的展示和编辑不够友好，用户要求点击参数值后弹出 DIV (Dialog) 进行修改。
+- What:
+  - `GeneralParamManagementPanel.vue` 中移除表格行内 `el-input`，改为带 Code 样式的可点击药丸组件 `.ta-common-param-val-cell`，当 hover 时变蓝并显示“点击修改”提示。
+  - 在 script 中移除与行内草稿相关的 `valueDrafts`、行内 dirty 检查、行内 reset 及行内 saveValue 函数，删除 rows 数据变化时的 watcher 监听。
+  - 引入了 Element Plus 的 `el-dialog` 编辑框，放置在模板底部；当点击参数值或“编辑”按钮时，触发 `openEditDialog(param)` 在弹窗内显示参数的英文名、中文名、适用平台和可拉伸的多行 textarea 输入框。
+  - 在 Dialog footer 中放置“取消”和“保存”按钮，并通过 `isDialogValueDirty` 属性控制保存按钮的禁用状态，保存成功后自动 invalid 缓存刷新数据并关闭 Dialog。
+  - 在 table 中把操作栏的“保存”和“重置”按钮替换为了单个“编辑”按钮，统一点开编辑弹窗的入口。
+- How: 仅修改 `GeneralParamManagementPanel.vue` 单一文件，移除已废弃的行内编辑逻辑，不改动任何后端 DTO 或 HTTP 接口契约，完全向下兼容。
+- Result: 通用参数列表不再直接暴露 input 框，改为了精美的只读气泡形态。点击参数气泡或右侧“编辑”按钮即可弹出系统级 Dialog，提供多行宽敞的文本域编辑路径参数，修改体验更加高级和安全。
+- Verification: 运行 `corepack pnpm test apps/agent-web/tests/settings-app-workspace-panel.test.ts` 11/11 通过。因本地工作区其他开发者引入了未提交的 SSH 秘钥加密变动导致 `SettingsPersonalPanel.vue` 报错，排查确认本组件 `GeneralParamManagementPanel.vue` 自身无任何 TS 类型错误。

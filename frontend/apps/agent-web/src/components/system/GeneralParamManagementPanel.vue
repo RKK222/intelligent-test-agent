@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from "vue";
+import { computed, inject, ref } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Refresh, Search } from "@element-plus/icons-vue";
-import { ElMessage } from "element-plus";
+import { Edit, Refresh, Search } from "@element-plus/icons-vue";
+import { ElMessage, ElDialog, ElButton, ElInput, ElForm, ElFormItem } from "element-plus";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type { CurrentUser, GeneralParameter } from "@test-agent/shared-types";
 
@@ -17,8 +17,12 @@ const page = ref(1);
 const size = ref(50);
 const draftPlatform = ref("");
 const activePlatform = ref("");
-const valueDrafts = ref<Record<string, string>>({});
-const savingId = ref<string>("");
+
+// 编辑通用参数相关状态
+const editDialogOpen = ref(false);
+const editingParam = ref<GeneralParameter | null>(null);
+const editingValue = ref("");
+const saving = ref(false);
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 
@@ -40,18 +44,6 @@ const total = computed(() => query.data.value?.total ?? 0);
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / size.value)));
 const isFetching = computed(() => query.isFetching.value);
 const errorMessage = computed(() => formatError(query.error.value));
-
-watch(
-  rows,
-  (items) => {
-    const drafts = { ...valueDrafts.value };
-    items.forEach((param) => {
-      drafts[param.parameterId] ??= param.parameterValue;
-    });
-    valueDrafts.value = drafts;
-  },
-  { immediate: true }
-);
 
 const updateMutation = useMutation({
   mutationFn: ({ parameterId, value }: { parameterId: string; value: string }) =>
@@ -87,26 +79,39 @@ function nextPage() {
   page.value = Math.min(totalPages.value, page.value + 1);
 }
 
-function isDirty(param: GeneralParameter) {
-  const draft = valueDrafts.value[param.parameterId]?.trim();
-  return !!draft && draft !== param.parameterValue;
+// Dialog 编辑逻辑
+const isDialogValueDirty = computed(() => {
+  if (!editingParam.value) return false;
+  const val = editingValue.value.trim();
+  return !!val && val !== editingParam.value.parameterValue;
+});
+
+function openEditDialog(param: GeneralParameter) {
+  editingParam.value = param;
+  editingValue.value = param.parameterValue;
+  editDialogOpen.value = true;
 }
 
-function resetDraft(param: GeneralParameter) {
-  valueDrafts.value = { ...valueDrafts.value, [param.parameterId]: param.parameterValue };
+function closeEditDialog() {
+  editDialogOpen.value = false;
+  editingParam.value = null;
+  editingValue.value = "";
 }
 
-async function saveValue(param: GeneralParameter) {
-  const value = valueDrafts.value[param.parameterId]?.trim();
-  if (!value || value === param.parameterValue) {
-    return;
-  }
-  savingId.value = param.parameterId;
+async function submitEdit() {
+  if (!editingParam.value) return;
+  const value = editingValue.value.trim();
+  if (!value || value === editingParam.value.parameterValue) return;
+
+  saving.value = true;
   try {
-    await updateMutation.mutateAsync({ parameterId: param.parameterId, value });
-    ElMessage.success(`已更新参数：${param.englishName}`);
+    await updateMutation.mutateAsync({ parameterId: editingParam.value.parameterId, value });
+    ElMessage.success(`已更新参数：${editingParam.value.englishName}`);
+    closeEditDialog();
+  } catch (err) {
+    // Error is handled by mutation onError
   } finally {
-    savingId.value = "";
+    saving.value = false;
   }
 }
 
@@ -177,28 +182,19 @@ function formatError(error: unknown) {
               <td>{{ param.chineseName }}</td>
               <td><span class="ta-common-param-tag">{{ param.platform }}</span></td>
               <td>
-                <el-input
-                  v-model="valueDrafts[param.parameterId]"
-                  size="small"
-                  placeholder="参数值不能为空"
-                  :disabled="savingId === param.parameterId"
-                />
+                <div class="ta-common-param-val-cell" @click="openEditDialog(param)" title="点击修改参数值">
+                  <code class="ta-common-param-val-code">{{ param.parameterValue }}</code>
+                  <span class="ta-common-param-edit-hint">点击修改</span>
+                </div>
               </td>
               <td>{{ formatDate(param.updatedAt) }}</td>
               <td class="ta-common-param-actions">
                 <el-button
                   size="small"
                   type="primary"
-                  :disabled="!isDirty(param)"
-                  :loading="savingId === param.parameterId"
-                  @click="saveValue(param)"
-                >保存</el-button>
-                <el-button
-                  size="small"
-                  text
-                  :disabled="!isDirty(param) || savingId === param.parameterId"
-                  @click="resetDraft(param)"
-                >重置</el-button>
+                  plain
+                  @click="openEditDialog(param)"
+                >编辑</el-button>
               </td>
             </tr>
           </tbody>
@@ -212,6 +208,56 @@ function formatError(error: unknown) {
           <el-button size="small" :disabled="page >= totalPages" @click="nextPage">下一页</el-button>
         </div>
       </footer>
+
+      <!-- 编辑通用参数 Dialog -->
+      <el-dialog
+        v-model="editDialogOpen"
+        title="修改通用参数"
+        width="560px"
+        destroy-on-close
+        :close-on-click-modal="false"
+        class="ta-common-param-dialog"
+      >
+        <div v-if="editingParam" class="ta-common-param-form">
+          <div class="ta-dialog-form-item">
+            <span class="ta-dialog-form-label">参数英文名</span>
+            <div class="ta-dialog-form-value ta-common-param-mono">{{ editingParam.englishName }}</div>
+          </div>
+          <div class="ta-dialog-form-item">
+            <span class="ta-dialog-form-label">参数中文名</span>
+            <div class="ta-dialog-form-value">{{ editingParam.chineseName }}</div>
+          </div>
+          <div class="ta-dialog-form-item">
+            <span class="ta-dialog-form-label">适用平台</span>
+            <div class="ta-dialog-form-value">
+              <span class="ta-common-param-tag">{{ editingParam.platform }}</span>
+            </div>
+          </div>
+          <div class="ta-dialog-form-item">
+            <span class="ta-dialog-form-label">参数值</span>
+            <el-input
+              v-model="editingValue"
+              type="textarea"
+              :rows="4"
+              placeholder="参数值不能为空"
+              :disabled="saving"
+            />
+          </div>
+        </div>
+        <template #footer>
+          <div class="ta-dialog-footer">
+            <el-button @click="closeEditDialog" :disabled="saving">取消</el-button>
+            <el-button
+              type="primary"
+              :loading="saving"
+              :disabled="!isDialogValueDirty"
+              @click="submitEdit"
+            >
+              保存
+            </el-button>
+          </div>
+        </template>
+      </el-dialog>
     </template>
   </section>
 </template>
@@ -319,5 +365,76 @@ function formatError(error: unknown) {
   justify-content: space-between;
   font-size: 12px;
   color: #6b7280;
+}
+.ta-common-param-val-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  cursor: pointer;
+  max-width: 320px;
+  transition: all 0.2s ease;
+}
+.ta-common-param-val-cell:hover {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+.ta-common-param-val-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: #374151;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ta-common-param-val-cell:hover .ta-common-param-val-code {
+  color: #1d4ed8;
+}
+.ta-common-param-edit-hint {
+  font-size: 11px;
+  color: #9ca3af;
+  flex-shrink: 0;
+}
+.ta-common-param-val-cell:hover .ta-common-param-edit-hint {
+  color: #3b82f6;
+}
+
+/* Dialog Form Styling */
+.ta-common-param-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 0;
+}
+.ta-dialog-form-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ta-dialog-form-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #4b5563;
+}
+.ta-dialog-form-value {
+  font-size: 13px;
+  color: #1f2937;
+  padding: 6px 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+}
+.ta-dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 </style>
