@@ -479,6 +479,18 @@ watch(selectedAppId, async (appId) => {
   await loadAppContext();
 });
 
+watch(workspaceRepositoryId, () => {
+  branches.value = [];
+  workspaceBranch.value = "";
+  directories.value = [];
+  workspaceDirectory.value = "";
+});
+
+watch(workspaceBranch, () => {
+  directories.value = [];
+  workspaceDirectory.value = "";
+});
+
 onBeforeUnmount(() => {
   stopWorkspaceCreatePolling();
 });
@@ -662,7 +674,7 @@ onBeforeUnmount(() => {
         <div class="ta-section">
           <h4 class="ta-section-title">创建工作空间</h4>
           <div class="ta-workspace-create-steps">
-            <div class="ta-workspace-step">
+            <div class="ta-workspace-step" :class="{ 'is-completed': branches.length > 0, 'is-active': branches.length === 0 }">
               <div class="ta-workspace-step-heading">
                 <span class="ta-workspace-step-index">1</span>
                 <span class="ta-workspace-step-title">第一步：刷新分支</span>
@@ -678,7 +690,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div class="ta-workspace-step">
+            <div class="ta-workspace-step" :class="{ 'is-disabled': branches.length === 0, 'is-completed': branches.length > 0 && directories.length > 0, 'is-active': branches.length > 0 && directories.length === 0 }">
               <div class="ta-workspace-step-heading">
                 <span class="ta-workspace-step-index">2</span>
                 <span class="ta-workspace-step-title">第二步：加载目录</span>
@@ -694,7 +706,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
 
-            <div class="ta-workspace-step">
+            <div class="ta-workspace-step" :class="{ 'is-disabled': directories.length === 0, 'is-active': directories.length > 0 }">
               <div class="ta-workspace-step-heading">
                 <span class="ta-workspace-step-index">3</span>
                 <span class="ta-workspace-step-title">第三步：创建工作空间</span>
@@ -838,62 +850,121 @@ onBeforeUnmount(() => {
 .ta-workspace-create-steps {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  background: #ffffff;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.03);
+  padding: 8px 0;
+  position: relative;
+}
+.ta-workspace-create-steps::before {
+  content: "";
+  position: absolute;
+  left: 36px;
+  top: 40px;
+  bottom: 40px;
+  width: 2px;
+  background: #e4e7ed;
+  z-index: 1;
 }
 .ta-workspace-step {
   display: grid;
-  grid-template-columns: 128px minmax(0, 1fr);
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
-  background: #fafcff;
+  grid-template-columns: 180px minmax(0, 1fr);
+  align-items: flex-start;
+  gap: 16px;
+  padding: 20px 24px;
+  position: relative;
+  transition: all 0.25s ease;
+}
+.ta-workspace-step:not(:last-child) {
+  border-bottom: 1px solid #f0f2f5;
+}
+.ta-workspace-step:hover {
+  background: #fbfcfe;
 }
 .ta-workspace-step-heading {
   display: flex;
   align-items: center;
   gap: 8px;
   min-width: 0;
+  position: relative;
+  z-index: 2;
+  height: 32px;
 }
 .ta-workspace-step-index {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
-  background: #3366ff;
-  color: #ffffff;
+  background: #e4e7ed;
+  color: #909399;
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
+  position: relative;
+  z-index: 2;
+  box-shadow: 0 0 0 4px #ffffff;
+  transition: all 0.25s ease;
 }
 .ta-workspace-step-title {
   min-width: 0;
   font-size: 13px;
   font-weight: 600;
-  color: #18181b;
+  color: #303133;
   white-space: nowrap;
+  transition: all 0.25s ease;
 }
 .ta-workspace-step-controls {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-end;
+  gap: 12px;
   flex-wrap: wrap;
   min-width: 0;
 }
 .ta-workspace-step .ta-form-field {
-  flex-wrap: wrap;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
 }
+
+/* Step states styling */
+.ta-workspace-step.is-disabled {
+  opacity: 0.55;
+}
+.ta-workspace-step.is-disabled .ta-workspace-step-controls {
+  pointer-events: none;
+}
+.ta-workspace-step.is-active .ta-workspace-step-index {
+  background: #3366ff;
+  color: #ffffff;
+  box-shadow: 0 0 0 4px rgba(51, 102, 255, 0.15), 0 0 0 8px #ffffff;
+}
+.ta-workspace-step.is-active .ta-workspace-step-title {
+  color: #18181b;
+}
+.ta-workspace-step.is-completed .ta-workspace-step-index {
+  background: #19a15f;
+  color: #ffffff;
+  box-shadow: 0 0 0 4px rgba(25, 161, 95, 0.15), 0 0 0 8px #ffffff;
+}
+.ta-workspace-step.is-completed .ta-workspace-step-title {
+  color: #19a15f;
+}
+
 .ta-workspace-progress {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 10px 12px;
+  padding: 12px 16px;
   border: 1px solid #ebeef5;
-  border-radius: 6px;
+  border-radius: 8px;
   background: #ffffff;
+  margin-top: 16px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.02);
 }
 .ta-workspace-progress-step {
   display: inline-flex;
@@ -909,8 +980,25 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: #dcdfe6;
 }
+
+@keyframes ta-progress-pulse {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.25);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+}
 .ta-workspace-progress-step.is-running .ta-progress-dot {
   background: #3366ff;
+  animation: ta-progress-pulse 1.5s infinite ease-in-out;
+  box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.2);
 }
 .ta-workspace-progress-step.is-succeeded .ta-progress-dot {
   background: #19a15f;
@@ -930,6 +1018,12 @@ onBeforeUnmount(() => {
   .ta-workspace-step {
     grid-template-columns: 1fr;
     align-items: flex-start;
+  }
+  .ta-workspace-create-steps::before {
+    display: none;
+  }
+  .ta-workspace-step-index {
+    box-shadow: none !important;
   }
 }
 .ta-section-title-row {

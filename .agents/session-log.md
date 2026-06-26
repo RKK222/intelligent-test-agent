@@ -728,3 +728,15 @@
 - What: 运行 `corepack pnpm install --frozen-lockfile` 补齐本地 workspace 链接；将 `frontend/apps/agent-web/tsconfig.json` 的 `@/*` 和 `@test-agent/*` paths 改为以继承后的 `frontend` baseUrl 为基准，分别指向 `apps/agent-web/src/*` 与 `packages/*/src`。
 - How: 先复现原始 TS2307，再检查 `vue-tsc --showConfig`、package lock 和 package-local `node_modules`，确认解析链路后只改 tsconfig alias，不改 Vite alias、不新增依赖。
 - Result: `@test-agent/shared-types` 在 `agent-web` 类型检查中稳定解析到 `frontend/packages/shared-types/src`；`@test-agent/agent-web` build、`@test-agent/shared-types` typecheck、`@test-agent/workbench-shell` typecheck 均通过。
+
+### 2026-06-26 - 优化设置页创建工作空间区域的视觉样式
+
+- Why: 设置页"工作空间管理"下的"创建工作空间"区域原来是三个散乱的、带边框的卡片，并且当输入标签存在时，输入框和右侧的动作按钮没有底齐，导致视觉上严重错位，整体不够美观。
+- What: 
+  - `SettingsAppWorkspacePanel.vue` 中将三个步骤项改造成统一的卡片布局，左侧以一条纵向时间线 (Timeline) 贯穿 3 个步骤圆形数字徽标。
+  - 为步骤卡片引入了 `:class` 状态绑定，能够基于当前填写的状态自动呈现已完成 (is-completed)、进行中 (is-active)、已禁用 (is-disabled) 三种视觉状态。
+  - 重写了 steps 的 CSS，将 controls 设为 `align-items: flex-end`，从而保证无论标签如何折行，输入/选择框都会和右侧的执行动作按钮底端对齐；同时给运行中的进度圆点加入了呼吸灯动画 (`ta-progress-pulse`)。
+  - 在 script 中增加了对 `workspaceRepositoryId` 和 `workspaceBranch` 的 watcher，当用户更改上游版本库或分支时，能自动清空下游已选值及列表，防止出现脏数据和不一致状态。
+- How: 仅在 `SettingsAppWorkspacePanel.vue` 中进行模板和 CSS 修改，不改变任何已有的功能 API、DOM 核心层级和已有测试断言所需的类名与文本，确保完全向下兼容。
+- Result: "创建工作空间"区域改为了精致的纵向时间线步骤设计。当前步骤高亮为蓝色，已完成步骤显示为绿色，未来步骤半透明置灰。所有输入组件与按钮均底部对齐，无错位现象；且上游切换时，下游会自动清空并置灰，体验极其顺畅。
+- Verification: 运行 `corepack pnpm test apps/agent-web/tests/settings-app-workspace-panel.test.ts` 11/11 全部通过；运行 `corepack pnpm --filter @test-agent/agent-web typecheck` 通过；没有破坏任何既有的 test 断言或结构。
