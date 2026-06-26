@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, inject, ref, watch } from "vue";
+import { computed, inject, nextTick, ref, watch } from "vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
   ApplicationDefinition,
@@ -9,7 +9,10 @@ import type {
   CurrentUser,
   PlatformUserSummary
 } from "@test-agent/shared-types";
-import { CirclePlus, Link, Delete } from "@element-plus/icons-vue";
+import { CirclePlus, Delete, InfoFilled, Link } from "@element-plus/icons-vue";
+
+const ADD_REPOSITORY_OPTION_VALUE = "__create_repository__";
+const STANDARD_REPOSITORY_TOOLTIP = "标准代码库是指测试自己去git申请，专门用于测试智能体的版本库。";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -38,19 +41,22 @@ const userKeyword = ref("");
 // 当前从下拉中选中的候选用户；为空时主按钮显示"搜索"，非空时显示"添加"
 const selectedUser = ref<PlatformUserSummary | null>(null);
 
-// 代码库
+// 版本库
 const repositories = ref<CodeRepositoryConfig[]>([]);
 const appRepositories = ref<CodeRepositoryConfig[]>([]);
 const repoGitUrl = ref("");
 const repoName = ref("");
 const repoStandard = ref(false);
 const linkRepositoryId = ref("");
+const lastLinkRepositoryId = ref("");
 const editRepositoryId = ref("");
 const editRepositoryName = ref("");
 const editRepositoryStandard = ref(false);
 const selectedRepositoryForApps = ref("");
 const repositoryApplications = ref<ApplicationDefinition[]>([]);
 const linkAppId = ref("");
+const repositoryCreateSectionRef = ref<HTMLElement | null>(null);
+const repoGitUrlInputRef = ref<{ focus: () => void } | null>(null);
 
 // 工作空间
 const workspaces = ref<ApplicationWorkspaceConfig[]>([]);
@@ -170,7 +176,7 @@ async function removeMember(userId: string) {
   });
 }
 
-// 代码库管理
+// 版本库管理
 async function loadRepositories() {
   const [all, linked] = await Promise.all([
     api.listRepositories(1, 100),
@@ -189,6 +195,29 @@ async function loadRepositories() {
   }
 }
 
+function formatRepositoryOption(repository: CodeRepositoryConfig) {
+  return `${repository.name}(${repository.gitUrl})`;
+}
+
+// 下拉中的“添加版本库”只作为入口，不改变当前待关联版本库选择。
+async function openRepositoryCreateSection() {
+  await nextTick();
+  repositoryCreateSectionRef.value?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  // Element Plus 下拉关闭会回收焦点，延迟聚焦才能稳定落到 Git URL 输入框。
+  window.setTimeout(() => {
+    repoGitUrlInputRef.value?.focus();
+  }, 80);
+}
+
+function handleLinkRepositoryChange(repositoryId: string) {
+  if (repositoryId === ADD_REPOSITORY_OPTION_VALUE) {
+    linkRepositoryId.value = lastLinkRepositoryId.value;
+    void openRepositoryCreateSection();
+    return;
+  }
+  lastLinkRepositoryId.value = repositoryId;
+}
+
 async function createRepository() {
   await run(async () => {
     const repository = await api.createRepository({
@@ -200,6 +229,7 @@ async function createRepository() {
     repoName.value = "";
     repoStandard.value = false;
     linkRepositoryId.value = repository.repositoryId;
+    lastLinkRepositoryId.value = repository.repositoryId;
     await loadRepositories();
   });
 }
@@ -347,7 +377,7 @@ watch(selectedAppId, async (appId) => {
       <div class="ta-sub-tabs" v-if="selectedAppId">
         <el-radio-group v-model="appTab" class="ta-sub-tab-group">
           <el-radio-button value="members">应用人员管理</el-radio-button>
-          <el-radio-button value="repositories">应用与代码库关联</el-radio-button>
+          <el-radio-button value="repositories">应用与版本库关联</el-radio-button>
           <el-radio-button value="workspaces">工作空间管理</el-radio-button>
         </el-radio-group>
       </div>
@@ -405,23 +435,14 @@ watch(selectedAppId, async (appId) => {
         </div>
       </div>
 
-      <!-- 代码库管理 -->
+      <!-- 版本库管理 -->
       <div v-if="selectedAppId && appTab === 'repositories'" class="ta-panel-content">
         <div class="ta-section">
-          <h4 class="ta-section-title">新增代码库</h4>
+          <h4 class="ta-section-title">关联版本库到当前应用</h4>
           <div class="ta-inline-form">
-            <el-input v-model="repoGitUrl" placeholder="Git URL" style="width: 240px" />
-            <el-input v-model="repoName" placeholder="中文名称" style="width: 160px" />
-            <el-checkbox v-model="repoStandard">标准库</el-checkbox>
-            <el-button type="primary" :disabled="loading" @click="createRepository">新增</el-button>
-          </div>
-        </div>
-
-        <div class="ta-section">
-          <h4 class="ta-section-title">关联代码库到当前应用</h4>
-          <div class="ta-inline-form">
-            <el-select v-model="linkRepositoryId" placeholder="选择代码库" style="width: 240px">
-              <el-option v-for="repo in repositories" :key="repo.repositoryId" :label="repo.name" :value="repo.repositoryId" />
+            <el-select v-model="linkRepositoryId" placeholder="选择版本库" style="width: 360px" @change="handleLinkRepositoryChange">
+              <el-option v-for="repo in repositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
+              <el-option :label="'添加版本库'" :value="ADD_REPOSITORY_OPTION_VALUE" />
             </el-select>
             <el-button type="primary" :disabled="loading || !linkRepositoryId" @click="linkRepository">
               <el-icon><Link /></el-icon> 关联
@@ -439,10 +460,10 @@ watch(selectedAppId, async (appId) => {
         </div>
 
         <div class="ta-section">
-          <h4 class="ta-section-title">代码库与应用双向关联</h4>
+          <h4 class="ta-section-title">版本库与应用双向关联</h4>
           <div class="ta-inline-form">
-            <el-select v-model="selectedRepositoryForApps" placeholder="选择代码库" style="width: 240px" @change="loadRepositoryApplications">
-              <el-option v-for="repo in repositories" :key="repo.repositoryId" :label="repo.name" :value="repo.repositoryId" />
+            <el-select v-model="selectedRepositoryForApps" placeholder="选择版本库" style="width: 360px" @change="loadRepositoryApplications">
+              <el-option v-for="repo in repositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
             </el-select>
             <el-button :disabled="loading || !selectedRepositoryForApps" @click="loadRepositoryApplications">刷新</el-button>
           </div>
@@ -459,7 +480,7 @@ watch(selectedAppId, async (appId) => {
         </div>
 
         <div class="ta-section">
-          <h4 class="ta-section-title">编辑代码库</h4>
+          <h4 class="ta-section-title">编辑版本库</h4>
           <div v-for="repo in repositories" :key="repo.repositoryId" class="ta-item-row ta-edit-item">
             <div>
               <span class="ta-item-title">{{ repo.name }}</span>
@@ -471,7 +492,27 @@ watch(selectedAppId, async (appId) => {
           <div v-if="editRepositoryId" class="ta-inline-form ta-edit-form">
             <el-input v-model="editRepositoryName" placeholder="名称" style="width: 200px" />
             <el-checkbox v-model="editRepositoryStandard">标准库</el-checkbox>
+            <el-tooltip :content="STANDARD_REPOSITORY_TOOLTIP" placement="top">
+              <el-icon class="ta-help-icon" :title="STANDARD_REPOSITORY_TOOLTIP" aria-label="标准库说明">
+                <InfoFilled />
+              </el-icon>
+            </el-tooltip>
             <el-button type="primary" :disabled="loading" @click="saveRepository">保存</el-button>
+          </div>
+        </div>
+
+        <div ref="repositoryCreateSectionRef" class="ta-section">
+          <h4 class="ta-section-title">新增版本库</h4>
+          <div class="ta-inline-form">
+            <el-input ref="repoGitUrlInputRef" v-model="repoGitUrl" placeholder="Git URL" style="width: 240px" />
+            <el-input v-model="repoName" placeholder="中文名称" style="width: 160px" />
+            <el-checkbox v-model="repoStandard">标准库</el-checkbox>
+            <el-tooltip :content="STANDARD_REPOSITORY_TOOLTIP" placement="top">
+              <el-icon class="ta-help-icon" :title="STANDARD_REPOSITORY_TOOLTIP" aria-label="标准库说明">
+                <InfoFilled />
+              </el-icon>
+            </el-tooltip>
+            <el-button type="primary" :disabled="loading" @click="createRepository">新增</el-button>
           </div>
         </div>
       </div>
@@ -481,8 +522,8 @@ watch(selectedAppId, async (appId) => {
         <div class="ta-section">
           <h4 class="ta-section-title">创建工作空间</h4>
           <div class="ta-inline-form">
-            <el-select v-model="workspaceRepositoryId" placeholder="选择已关联代码库" style="width: 200px">
-              <el-option v-for="repo in appRepositories" :key="repo.repositoryId" :label="repo.name" :value="repo.repositoryId" />
+            <el-select v-model="workspaceRepositoryId" placeholder="选择已关联版本库" style="width: 360px">
+              <el-option v-for="repo in appRepositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
             </el-select>
             <el-button :disabled="loading || !workspaceRepositoryId" @click="loadBranches">加载分支</el-button>
           </div>
@@ -588,6 +629,10 @@ watch(selectedAppId, async (appId) => {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+}
+.ta-help-icon {
+  color: #909399;
+  cursor: help;
 }
 .ta-empty-hint {
   font-size: 13px;
