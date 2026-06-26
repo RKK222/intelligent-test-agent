@@ -18,7 +18,9 @@ pom.xml.versionsBackup
 pom.xml.next
 
 # ===== IDE =====
-.idea/
+.idea/*
+!.idea/runConfigurations/
+!.idea/runConfigurations/*.xml
 *.iml
 *.ipr
 *.iws

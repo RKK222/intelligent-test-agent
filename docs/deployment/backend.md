@@ -385,9 +385,11 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 | `TEST_AGENT_MODEL_CATALOG_SOURCE` | local: `bailian`；test/prod: `internal` | 模型目录来源。`opencode` 保持旧代理，`bailian` 直连百炼 `/models`，`internal` 从数据库读取企业内模型。 |
 | `TEST_AGENT_BAILIAN_BASE_URL` | `https://coding.dashscope.aliyuncs.com/v1` | 外网百炼 OpenAI-compatible base URL。 |
 | `TEST_AGENT_BAILIAN_API_KEY_ENV` | `MODELSTUDIO_API_KEY` | 外网百炼密钥所在环境变量名。 |
+| `test-agent.model-catalog.external.api-key` | 空 | 外网百炼密钥的 yml 直配值；本地 IDEA 启动优先使用该值，未配置时回退到 `TEST_AGENT_BAILIAN_API_KEY_ENV` 指向的环境变量。 |
 | `TEST_AGENT_BAILIAN_DEFAULT_MODEL` | `qwen3.5-plus` | 外网模式同步给 opencode 的默认模型。 |
 | `TEST_AGENT_ICBC_OPENAI_BASE_URL` | `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1` | 企业内 OpenAI-compatible base URL，与 openclaw 企业 patch 保持一致。 |
 | `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` | `ICBC_OPENAI_AUTH_TOKEN` | 企业内 token 所在环境变量名。 |
+| `test-agent.model-catalog.internal.api-key` | 空 | 企业内 token 的 yml 直配值；未配置时回退到 `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` 指向的环境变量。 |
 | `TEST_AGENT_ICBC_OPENAI_AUTH_MODE` | `auth-token` | 企业内调用鉴权头模式，默认写入 `Auth-Token`。 |
 | `TEST_AGENT_INTERNAL_DEFAULT_MODEL` | `DeepSeek-V4-Flash-W8A8` | 企业内默认模型，前端模型切换会优先选中该模型。 |
 `DatabaseMigrationRunner` 会在启动时执行 Flyway migration；`ExecutionNodeSeeder` 会把配置中的 opencode node 写入 `execution_nodes` 作为兼容 Run 路由来源。启用用户进程模型后，`BackendJavaProcessLifecycleRunner` 会在启动和心跳时写入 `linux_servers`、`backend_java_processes`，`opencode-manager` WebSocket 注册和心跳会写入 `opencode_containers`、`opencode_container_managers` 和 `opencode_manager_backend_connections`。

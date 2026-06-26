@@ -80,6 +80,14 @@ cd backend
 SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -pl test-agent-app
 ```
 
+Windows 开发人员可直接使用已提交的 IDEA 运行配置 `TestAgentApplication guo`：
+
+1. 用 IDEA 导入 `backend/pom.xml`。
+2. 选择 Run Configuration `TestAgentApplication guo`。
+3. 使用 JDK 21+ 启动。
+
+该配置通过 `-Dspring.profiles.active=guo` 读取 `test-agent-app/src/main/resources/application-guo.yml`，不依赖 shell 启动脚本或 `.env.local`。`guo` profile 已内置 Java 进程需要的数据库、Redis、opencode、manager token、模型来源和模型 key 配置；`TEST_AGENT_OPENCODE_BIN`、`TEST_AGENT_START_OPENCODE` 等只服务于根目录 shell 编排脚本，不属于 Java 进程配置。
+
 ### 环境变量配置
 
 首次运行前，复制环境变量模板：
@@ -101,6 +109,8 @@ cp .env.local.example .env.local
 | `ICBC_OPENAI_AUTH_TOKEN` | 企业内 `icbc-openai` 访问 token；变量名可通过 `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` 改为其他环境变量名。 |
 | `TEST_AGENT_BAILIAN_BASE_URL` | 外网百炼 OpenAI-compatible base URL，默认 `https://coding.dashscope.aliyuncs.com/v1`。 |
 | `TEST_AGENT_ICBC_OPENAI_BASE_URL` | 企业内 OpenAI-compatible base URL，默认与 openclaw 企业 patch 中的 `icbc-openai` 地址一致。 |
+
+`guo` profile 的 IDEA 启动路径已把上述本地 Java 运行参数写入 yml；继续使用 `tools/dev-backend-run.sh` 或 `restart-dev-services.sh` 时，`.env.local` 仍可覆盖 yml，便于 macOS/Linux 联调脚本启动前后端和 opencode。
 
 验证后端启动成功：
 ```bash

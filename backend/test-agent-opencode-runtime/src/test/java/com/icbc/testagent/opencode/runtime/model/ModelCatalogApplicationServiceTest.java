@@ -96,6 +96,23 @@ class ModelCatalogApplicationServiceTest {
                 .doesNotContain("providers=");
     }
 
+    @Test
+    void syncProviderConfigUsesConfiguredApiKeyBeforeEnvironmentReference() {
+        ModelCatalogProperties properties = new ModelCatalogProperties();
+        properties.setSource("bailian");
+        properties.getExternal().setApiKey("configured-model-key");
+        FakeModelRepository repository = new FakeModelRepository();
+        ModelCatalogApplicationService service = new ModelCatalogApplicationService(properties, repository, objectMapper);
+        RecordingRuntime runtime = new RecordingRuntime();
+
+        service.syncProviderConfig(runtime, node(), "trace_model_key_test");
+
+        assertThat(runtime.command).isNotNull();
+        assertThat(runtime.command.body()).asString()
+                .contains("apiKey=configured-model-key")
+                .doesNotContain("{env:MODELSTUDIO_API_KEY}");
+    }
+
     private ExecutionNode node() {
         Instant now = Instant.now();
         return new ExecutionNode(
