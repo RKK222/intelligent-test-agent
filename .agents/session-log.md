@@ -25,9 +25,10 @@
   - 实现了单击列表文件即可显示对应文件的实际 Diff 对比效果，并修复了 Diff 文件选择被覆盖重置的 bug。
   - 修复了 `DiffViewer.vue` 中由于初始 `files` 列表为空导致 Monaco 编辑器容器未在 DOM 中渲染，从而使 Monaco 未能成功初始化的问题。
   - 支持在 VCS/Agent 差异对比模式下直接对右侧（Modified 修改侧）代码进行编辑，并在头部提供了未保存修改的状态指示灯与“保存 (Cmd+S)”按钮，支持通过快捷键 `Ctrl+S` / `Cmd+S` 直接保存修改回写后端文件。
+  - 修复了当对话框面板展开导致编辑器宽度变窄时，Monaco 差异编辑器默认自动折叠为单栏（Unified/Inline）视图的问题，确保其始终保持左右对照。
   - 在“未暂存”与“已暂存”面板间加入了拖拽调节高度的分栏分割线。
-- How: 在 `DiffViewer.vue` 与 `GitChangesPanel.vue` 中对多余的 UI 元素增加 `v-if` 条件过滤，清除 commit 复选框。将 `DiffViewer.vue` 的 `onMounted` 逻辑重构为对 `containerEl` 的 `watch` 侦听器，动态在 DOM 渲染后挂载 Monaco 差异编辑器，并在容器销毁时安全释放资源；配置 Monaco 差异编辑器对 vcs/agent 来源设置 `readOnly: false`，强制设置 `renderSideBySide: true` 左右分栏对比，并绑定 Cmd+S 键盘快捷键触发保存事件；在 `AgentWorkbench.vue` 中处理 `@save-file` 事件，在写盘成功后刷新 diff files 数据源。
-- Result: Diff 视图变得极简专业且功能强大，支持首次加载时的稳定挂载，并在差异左右对照视图下提供了直观 of 即时修改、保存回写及实时 diff 重算渲染，用户体验媲美原生 IDE。前端编译与校验全部通过。
+- How: 在 `DiffViewer.vue` 与 `GitChangesPanel.vue` 中对多余的 UI 元素增加 `v-if` 条件过滤，清除 commit 复选框。将 `DiffViewer.vue` 的 `onMounted` 逻辑重构为对 `containerEl` 的 `watch` 侦听器，动态在 DOM 渲染后挂载 Monaco 差异编辑器，并在容器销毁时安全释放资源；配置 Monaco 差异编辑器对 vcs/agent 来源设置 `readOnly: false`，强制设置 `renderSideBySide: true` 左右分栏对比，并将 `useInlineViewWhenSpaceIsLimited` 显式配置为 `false` 以禁用窄宽度下的自动折叠降级，绑定 Cmd+S 键盘快捷键触发保存事件；在 `AgentWorkbench.vue` 中处理 `@save-file` 事件，在写盘成功后刷新 diff files 数据源。
+- Result: Diff 视图变得极简专业且功能强大，支持首次加载时的稳定挂载，并在差异左右对照视图下提供了直观 of 即时修改、保存回写及实时 diff 重算渲染，在对话框拉伸或隐藏时始终保持清晰的左右对照版式，用户体验比肩专业开发工具。前端编译与校验全部通过。
 
 
 ### 2026-06-26 - 工作台侧边栏布局调整与折叠拖拽重构

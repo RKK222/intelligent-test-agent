@@ -116,6 +116,7 @@ async function initMonaco(el: HTMLElement) {
     readOnly: !isVcsOrAgent,
     originalEditable: false,
     renderSideBySide: isVcsOrAgent ? true : props.viewMode === "split",
+    useInlineViewWhenSpaceIsLimited: false,
     minimap: { enabled: false },
     automaticLayout: true,
     scrollBeyondLastLine: false,
