@@ -7,7 +7,8 @@
 ## 技术栈
 
 - Java 21
-- Spring Data JDBC
+- MyBatis XML mapper
+- Spring Data JDBC（仅存量 `Jdbc*Repository` 迁移窗口）
 - PostgreSQL
 - Flyway Core + PostgreSQL database support
 - Druid JDBC 连接池
@@ -18,7 +19,7 @@
 
 - Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用配置管理、应用版本工作区、个人工作区和定时任务框架等持久化；运行态 Workspace 记录可空 `linux_server_id` 以支持文件 WebSocket 同服务器校验和 legacy 回填。
 - Flyway migration，包含 PostgreSQL 16 所需的 Flyway database support。
-- Repository 实现和数据库映射。
+- Repository 实现和数据库映射；新增或修改关系型 SQL 必须通过 MyBatis XML mapper。
 - Redis 限流、幂等、缓存或运行心跳能力的可选适配。
 
 ## 建表规范
@@ -52,7 +53,8 @@
 - `JdbcAgentSessionBindingRepository`：实现按 `(sessionId, agentId)` 和 `(agentId, remoteSessionId)` 查询、upsert 通用远端 session 绑定。
 - `JdbcSessionMessageRepository`：实现会话消息保存、按远端 messageId 幂等查询、分页和计数。
 - `JdbcConfigurationManagementRepository`：实现配置管理表的应用只读查询、成员逻辑删除、仓库关联、工作空间和个人 SSH key 元数据持久化。
-- `JdbcCommonParameterRepository`：实现通用参数读取端口，按参数英文名和平台读取 opencode 路径等配置。
+- `MyBatisCommonParameterRepository`：当前 MyBatis 试点实现，按参数英文名和平台读取、列出并更新通用参数；SQL 位于 `src/main/resources/mybatis/CommonParameterMapper.xml`。
+- `JdbcCommonParameterRepository`：通用参数存量 JDBC 实现已不再作为 Spring Bean，仅保留给旧集成测试直接构造；后续通用参数 SQL 变更必须改 MyBatis XML。
 - `JdbcWorkspaceCreateOperationRepository`：实现设置页创建应用工作空间进度保存、步骤更新、成功/失败记录和按 `operationId` 查询。
 - `JdbcManagedWorkspaceRepository`：实现应用版本工作区、每服务器副本、目标 commit、个人工作区、最近使用偏好和同步审计持久化。
 - `JdbcOpencodeProcessManagementRepository`：实现 opencode 用户进程管理拓扑、用户进程、用户绑定持久化，以及超级管理员运行管理页需要的拓扑列表、连接列表、进程分页筛选和绑定关联查询。
@@ -67,6 +69,8 @@
 ## 测试覆盖
 
 - `JdbcRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖 Workspace（含 `linux_server_id`）、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision 的保存和读取。
+- `MyBatisCommonParameterRepositoryIntegrationTest` 使用 H2 PostgreSQL 模式执行 Flyway migration，覆盖通用参数 MyBatis XML 查询、列表、按 ID 查询和仅更新 value。
+- `PersistenceSqlConventionTest` 固化持久层 SQL 规则：存量 JDBC 文件只允许留在白名单，MyBatis mapper 不得使用注解 SQL。
 - SessionMessage/Run 覆盖 V16 token/cost 字段读写、parts_json 兼容、按 `(sessionId, remoteMessageId)` 查询以及最近非终态 Run 查询。
 - RunEvent 覆盖 append-only seq 单调递增、并发追加唯一性、`runId + lastSeq` 增量读取和 `(run_id, seq)` 唯一约束。
 - Session 覆盖远端 opencode 映射、全局搜索、置顶排序、工作区会话分页和归档过滤。
@@ -83,7 +87,8 @@
 
 - `test-agent-common`。
 - `test-agent-domain`。
-- Spring Data JDBC。
+- MyBatis Spring Boot starter。
+- Spring Data JDBC（仅存量 `Jdbc*Repository` 迁移窗口）。
 - Flyway、Flyway PostgreSQL database support、PostgreSQL、Druid、Redis。
 
 ## 禁止依赖
@@ -95,6 +100,7 @@
 ## 后续 AI 编码指引
 
 新增表结构、Repository、数据库映射和 migration 时改这里。V17 之后新增 migration 文件名必须使用 `VyyyyMMddHHmmss__description.sql`，时间戳按提交者创建迁移时的本地时间确定，不再使用顺序数字版本。不要把任务状态机或 HTTP API 编排逻辑放进本模块。
+新增或修改关系型 SQL 必须新增/调整 `mybatis/*.xml` 与 `com.icbc.testagent.persistence.mybatis` 内部 mapper，不能继续扩展 `Jdbc*Repository` 或使用 MyBatis 注解 SQL；存量 JDBC 仓储后续按触点分批迁移。
 JSON payload/capabilities 当前以文本列保存，未来切换 PostgreSQL JSONB 必须同步兼容策略和测试。
 `ai_model_configs` 只保存平台托管的企业内模型目录，不保存模型调用密钥；密钥仍通过环境变量或配置中心注入，并由 runtime 模块同步到 opencode provider 配置引用。
 `agent_session_bindings` 是新链路的 agent 远端 session 绑定主数据源；Session 的 `opencode_session_id` 与 `opencode_execution_node_id` 仅作为 `opencode` 兼容字段，新增 agent 不得继续扩展 `sessions` 列，新增查询或导出时不得默认暴露给前端 DTO；`pinned` 是平台 Session API 字段，默认旧数据未置顶。

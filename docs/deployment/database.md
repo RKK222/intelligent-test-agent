@@ -2,6 +2,12 @@
 
 本文档记录当前数据库结构和兼容策略。任何新增或修改 migration 都必须同步更新本文件。
 
+## 数据访问规范
+
+- 关系型数据库连接池继续统一使用 Druid，migration 继续由 Flyway 管理。
+- 新增或修改关系型数据库 SQL 必须通过 `test-agent-persistence` 的 MyBatis XML mapper 实现；mapper 接口只声明方法，禁止写注解 SQL。
+- 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository` 已作为 MyBatis 试点迁移。
+
 ## V1 核心表
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V1__create_core_tables.sql` 创建以下表：

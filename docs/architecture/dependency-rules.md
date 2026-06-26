@@ -86,6 +86,7 @@ test-agent-event
 8. generated SDK DTO 不得进入 domain，不得直接返回给前端。
 9. `test-agent-test-support` 不得被生产代码依赖。
 10. 除 `test-agent-opencode-client` 外，人工维护业务模块不得 import `com.example.opencode.sdk.*`。
+11. 业务模块不得直接访问 MyBatis mapper、MyBatis 行模型或 `test-agent-persistence` 内部实现；只能通过 domain 端口调用持久化能力。
 
 ## 业务工程归属
 
@@ -100,6 +101,7 @@ test-agent-event
 - 非 opencode 的外部系统联动：`test-agent-integration`。
 - Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、trace Web 入口：`test-agent-api`。
 - 启动、profile、migration、health、日志和运行装配：`test-agent-app`。
+- 关系型数据库 SQL：`test-agent-persistence` 的 MyBatis XML mapper；存量 `Jdbc*Repository` 只保留迁移窗口，不承接新 SQL。
 
 如果没有合适工程，按业务边界新建 Maven module，并同步 `backend/README.md`、模块 README、包级说明和本文件。
 

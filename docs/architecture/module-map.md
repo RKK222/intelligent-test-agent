@@ -50,7 +50,7 @@ Browser
 | `test-agent-scheduler` | 通用分布式定时任务框架，负责任务注册、Cron 计算、Redis 锁、后台扫描、统一运行记录、Cron 调整、手动触发和协作式停止管理服务；具体业务任务放回所属业务模块。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界（当前为空骨架）。 |
 | `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、workspace 文件 WebSocket ticket/RPC 入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理和定时任务管理入口、trace Web 入口。 |
-| `test-agent-persistence` | 数据库、Flyway、Repository、Redis 可选适配，包括 workspace 服务器归属、通用参数表、工作空间创建进度表、应用版本副本表、opencode 用户进程管理表、scheduler 表与 Repository 映射。 |
+| `test-agent-persistence` | 数据库、MyBatis XML mapper、Flyway、Repository、Redis 可选适配，包括 workspace 服务器归属、通用参数表、工作空间创建进度表、应用版本副本表、opencode 用户进程管理表、scheduler 表与 Repository 映射。 |
 | `test-agent-event` | RunEvent、SSE、事件转换、事件回放，以及 Redis/Noop 通用服务器广播适配。 |
 | `test-agent-test-support` | 测试 fixture、mock server、集成测试支撑。 |
 | `test-agent-app` | 唯一启动入口和可部署服务包，只放启动、装配、profile、migration、health 和日志。 |

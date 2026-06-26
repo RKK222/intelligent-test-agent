@@ -13,6 +13,7 @@
 - Log4j2
 - Micrometer
 - Druid JDBC 连接池
+- MyBatis XML mapper
 - OpenAPI Generator 生成的 opencode Java SDK
 
 ## 模块说明
@@ -32,7 +33,7 @@
 | `test-agent-scheduler` | 分布式定时任务框架，提供任务注册、Cron 调度、Redis 锁、运行记录、Cron 调整、手动触发和协作式停止管理服务，不包含具体业务任务 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界，目前为空骨架 |
 | `test-agent-api` | HTTP/SSE/WebSocket API 定义、DTO、鉴权、限流、traceId 和统一异常入口 |
-| `test-agent-persistence` | 持久化、迁移、Redis/PostgreSQL 访问，包括 opencode 用户进程管理表映射 |
+| `test-agent-persistence` | 持久化、MyBatis XML mapper、迁移、Redis/PostgreSQL 访问，包括 opencode 用户进程管理表映射 |
 | `test-agent-event` | RunEvent、SSE、事件转换与回放 |
 | `test-agent-test-support` | 测试支撑、fixture、mock server |
 | `test-agent-app` | 唯一启动入口和唯一可部署后端服务包，不承载业务逻辑 |
@@ -172,7 +173,8 @@ mvn test
 - Workspace、文件、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、agent、skill 管理业务放在 `test-agent-workspace-management`。
 - 多 agent 运行时接口、`agentId` 选择、日志/指标包装和具体 agent 适配器放在 `test-agent-agent-runtime`。
 - Session、Run、RunEvent、agent runtime 调用、Diff/revert、terminal 业务放在 `test-agent-opencode-runtime`。
-- Model 目录与 opencode provider 同步逻辑放在 `test-agent-opencode-runtime`；企业内模型主数据端口放在 `test-agent-domain`，JDBC/Flyway 实现放在 `test-agent-persistence`。
+- Model 目录与 opencode provider 同步逻辑放在 `test-agent-opencode-runtime`；企业内模型主数据端口放在 `test-agent-domain`，MyBatis/Flyway 实现放在 `test-agent-persistence`。
+- 新增或修改关系型数据库 SQL 必须放在 `test-agent-persistence` 的 MyBatis XML mapper 中；存量 `Jdbc*Repository` 只保留迁移窗口，不承接新 SQL。
 - 用户、角色、权限等平台内部管理放在 `test-agent-system-management`。
 - 应用配置、应用人员、代码库英文名与关联、应用工作空间模板和个人 SSH key 管理放在 `test-agent-configuration-management`；应用版本工作区运行编排和工作空间创建进度放在 `test-agent-workspace-management`。
 - 通用分布式定时任务框架和超级管理员定时任务管理服务放在 `test-agent-scheduler`；具体业务任务实现放回所属业务模块，通过 `ScheduledTaskHandler` Bean 注册，并在长循环中检查 `ScheduledTaskContext` 的停止请求。
