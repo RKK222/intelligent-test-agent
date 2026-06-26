@@ -101,6 +101,24 @@ async function initMonaco(el: HTMLElement) {
   if (diffEditor.value) return;
   const mod = await import("./monaco-env");
   monacoLib = mod.monaco;
+  // Define premium dark theme matching the slate layout
+  monacoLib.editor.defineTheme("ta-diff-dark", {
+    base: "vs-dark",
+    inherit: true,
+    rules: [],
+    colors: {
+      "editor.background": "#020617",       // Matching the Slate-950 (#020617) perfectly
+      "editor.lineHighlightBackground": "#1e293b44",
+      "diffEditor.insertedLineBackground": "#10b98110", // soft emerald green (6% opacity)
+      "diffEditor.insertedTextBackground": "#10b98130", // emerald green text block (19% opacity)
+      "diffEditor.removedLineBackground": "#ef444410",   // soft rose red (6% opacity)
+      "diffEditor.removedTextBackground": "#ef444430",   // rose red text block (19% opacity)
+      "editorLineNumber.foreground": "#475569",
+      "editorLineNumber.activeForeground": "#94a3b8",
+      "editor.scrollbar.shadow": "#00000000"
+    }
+  });
+
   const lang = diffLanguage(selected.value?.path);
   originalModel = monacoLib.editor.createModel(parsed.value.original, lang);
   modifiedModel = monacoLib.editor.createModel(parsed.value.modified, lang);
@@ -113,6 +131,7 @@ async function initMonaco(el: HTMLElement) {
 
   const isVcsOrAgent = props.source === "vcs" || props.source === "agent";
   const inst = monacoLib.editor.createDiffEditor(el, {
+    theme: "ta-diff-dark",
     readOnly: !isVcsOrAgent,
     originalEditable: false,
     renderSideBySide: isVcsOrAgent ? true : props.viewMode === "split",
@@ -305,7 +324,24 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-      <div ref="containerEl" class="min-w-0" />
+      <div class="flex min-h-0 flex-1 flex-col min-w-0">
+        <!-- Diff Panels Header Hints -->
+        <div v-if="(source === 'vcs' || source === 'agent') && viewMode === 'split'" class="grid grid-cols-2 border-b border-slate-800 bg-[#0d1324] px-4 py-1.5 text-[11px] text-slate-400">
+          <div class="flex items-center gap-1.5 font-semibold text-slate-300">
+            <span class="text-rose-500 font-bold">◀</span> 基线版本 (只读，历史提交代码)
+          </div>
+          <div class="flex items-center gap-1.5 border-l border-slate-800 pl-4 font-semibold text-slate-300">
+            <span class="text-emerald-500 font-bold">▶</span> 本地修改 (可编辑，编辑完成后按 Cmd+S 保存)
+          </div>
+        </div>
+        <div v-else-if="(source === 'vcs' || source === 'agent') && viewMode === 'unified'" class="border-b border-slate-800 bg-[#0d1324] px-4 py-1.5 text-[11px] text-slate-300 font-semibold">
+          <div class="flex items-center gap-1.5">
+            <span class="text-emerald-500 font-bold">▶</span> 统一视图 (可直接在此编辑修改，编辑完成后按 Cmd+S 保存)
+          </div>
+        </div>
+        <!-- Monaco Container -->
+        <div ref="containerEl" class="min-w-0 flex-1 min-h-0" />
+      </div>
     </div>
     <FeedbackBanner :feedback="feedback" />
   </div>

@@ -18,51 +18,215 @@ export const mockVcsDiffFiles: RunDiffFile[] = [
   {
     path: "frontend/apps/agent-web/src/components/FigmaFileExplorer.vue",
     status: "modified",
-    additions: 12,
-    deletions: 5,
+    additions: 15,
+    deletions: 8,
     patch: `--- a/frontend/apps/agent-web/src/components/FigmaFileExplorer.vue
 +++ b/frontend/apps/agent-web/src/components/FigmaFileExplorer.vue
-@@ -60,6 +60,12 @@
- let dragStartY = 0;
- let dragStartHeight = 0;
+ <script setup lang="ts">
+ import { ref, computed, onMounted } from "vue";
+ import { Folder, File, ChevronDown, ChevronRight, GitBranch } from "lucide-vue-next";
+ import { useWorkbenchStore } from "@test-agent/workbench-shell";
  
-+// MIMO Test Agent Layout Config
+ const props = defineProps<{
+   workspaceId: string;
+   apiBaseUrl: string;
+ }>();
+ 
+ const workbench = useWorkbenchStore();
+ const workspaceExpanded = ref(true);
+ const agentsExpanded = ref(true);
+ 
+-const sidebarWidth = ref(260);
+-const minWidth = ref(150);
+-const activeTab = ref("files");
 +const sidebarMinWidth = 200;
 +const sidebarMaxWidth = 600;
-+const resizableDividerClass = "figma-files-resize-handle";
-+
- const workspaceHeight = ref(300);
--const activeTab = ref("files");
-+const activeTab = ref("changes");`
++const activeTab = ref("changes");
++const isDragging = ref(false);
+ 
+ function handleTabChange(tab: string) {
+-  activeTab.value = tab;
++  if (tab === "changes") {
++    workbench.setSelectedDiffPath("frontend/apps/agent-web/src/components/FigmaFileExplorer.vue");
++  }
++  activeTab.value = tab;
+ }
+ 
+ onMounted(() => {
+   console.log("FigmaFileExplorer mounted");
+ });
+ </script>
+ 
+ <template>
+   <div class="figma-fe-root">
+     <div class="ta-icon-tabbar flex items-center border-b border-slate-800 bg-slate-950 px-2 py-1">
+       <button
+         type="button"
+-        :class="['ta-icon-tab', activeTab === 'files' && 'is-active']"
+-        @click="handleTabChange('files')"
++        :class="['ta-icon-tab', activeTab === 'explorer' && 'is-active']"
++        @click="handleTabChange('explorer')"
+       >
+         <Folder class="h-4 w-4" />
+       </button>
+       <button
+         type="button"
+         :class="['ta-icon-tab', activeTab === 'changes' && 'is-active']"
+         @click="handleTabChange('changes')"
+       >
+         <GitBranch class="h-4 w-4" />
+       </button>
+     </div>
+     
+     <div class="figma-fe-body flex-1 overflow-auto">
+       <div v-if="activeTab === 'changes'" class="h-full">
+         <div class="changes-title px-3 py-2 text-[11px] uppercase font-semibold text-slate-500">Source Control</div>
+         <div class="px-3 py-1 text-[12px] text-slate-300">Click a file below to edit and save:</div>
+       </div>
+       <div v-else class="workspace-files">
+         <div class="flex items-center px-3 py-1.5 hover:bg-slate-800 cursor-pointer">
+           <ChevronDown class="h-4 w-4 text-slate-400 mr-1" />
+           <span class="text-[12px] font-semibold text-slate-200">应用工作空间</span>
+         </div>
+       </div>
+     </div>
+   </div>
+ </template>
+ 
+ <style scoped>
+ .figma-fe-root {
+   display: flex;
+   flex-direction: column;
+   height: 100%;
+   background: #020617;
+   border-right: 1px solid #1e293b;
+ }
+ .ta-icon-tab {
+   height: 32px;
+   padding: 0 12px;
+   color: #64748b;
+   border-bottom: 2px solid transparent;
+ }
+ .ta-icon-tab.is-active {
+   color: #3b82f6;
+   border-bottom-color: #3b82f6;
+ }
+ </style>`
   },
   {
     path: "frontend/packages/workbench-shell/src/workbenchStore.ts",
     status: "modified",
-    additions: 8,
-    deletions: 2,
+    additions: 12,
+    deletions: 4,
     patch: `--- a/frontend/packages/workbench-shell/src/workbenchStore.ts
 +++ b/frontend/packages/workbench-shell/src/workbenchStore.ts
-@@ -17,2 +17,8 @@
+ import { defineStore } from "pinia";
+ import { ref, computed } from "vue";
+ 
+ export interface EditorTab {
+   path: string;
+   content: string;
+   savedContent: string;
+   readonly?: boolean;
+ }
+ 
  export const useWorkbenchStore = defineStore("workbench", () => {
    const tabs = ref<EditorTab[]>([]);
-+  // Mock VCS Diff Data for UI presentation
-+  const useMockTestData = ref(false);
-+  const toggleMockTestData = () => {
+   const activePath = ref<string | undefined>(undefined);
+   const selectedDiffPath = ref<string | undefined>(undefined);
+-  const useMockTestData = ref(false);
+-  
+-  function toggleMock() {
+-    useMockTestData.value = !useMockTestData.value;
+-  }
++  const useMockTestData = ref(true);
++  const gitStatusMessage = ref("");
++  const changesCount = computed(() => mockVcsDiffFiles.length);
++
++  function toggleMockTestData() {
 +    useMockTestData.value = !useMockTestData.value;
-+  };
-   const activePath = ref<string | undefined>(undefined);`
++  }
+ 
+   function openTab(tab: EditorTab) {
+     const exists = tabs.value.some((t) => t.path === tab.path);
+     if (!exists) {
+       tabs.value.push(tab);
+     }
+     activePath.value = tab.path;
+   }
+ 
+   function closeTab(path: string) {
+     tabs.value = tabs.value.filter((t) => t.path !== path);
+     if (activePath.value === path) {
+       activePath.value = tabs.value[tabs.value.length - 1]?.path;
+     }
+   }
+ 
+   return {
+     tabs,
+     activePath,
+     selectedDiffPath,
+     useMockTestData,
++    gitStatusMessage,
++    changesCount,
++    toggleMockTestData,
+     openTab,
+     closeTab
+   };
+ });`
   },
   {
     path: "frontend/apps/agent-web/src/components/GitChangesPanel.vue",
     status: "untracked",
-    additions: 831,
+    additions: 45,
     deletions: 0,
     patch: `--- /dev/null
 +++ b/frontend/apps/agent-web/src/components/GitChangesPanel.vue
-@@ -0,0 +1,5 @@
++<script setup lang="ts">
++import { ref, computed } from "vue";
++import { ChevronDown, Play, Plus, Check } from "lucide-vue-next";
++import { useWorkbenchStore } from "@test-agent/workbench-shell";
++
++const workbench = useWorkbenchStore();
++const commitMessage = ref("");
++const unstagedExpanded = ref(true);
++const stagedExpanded = ref(true);
++
++function handleCommit() {
++  if (!commitMessage.value.trim()) return;
++  console.log("Committing changes:", commitMessage.value);
++  commitMessage.value = "";
++}
++</script>
++
 +<template>
-+  <div class="git-changes-panel">
-+    <!-- Premium Git Panel implementation -->
++  <div class="git-changes-panel flex flex-col h-full bg-[#020617] text-slate-300">
++    <div class="panel-section border-b border-slate-800 p-3">
++      <div class="section-title flex items-center justify-between mb-2">
++        <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Unstaged Changes</span>
++      </div>
++      <div class="file-list space-y-1">
++        <div class="file-item flex items-center justify-between p-1.5 rounded hover:bg-slate-900 cursor-pointer">
++          <span class="font-mono text-[12px]">FigmaFileExplorer.vue</span>
++          <span class="text-[11px] text-amber-500">M</span>
++        </div>
++      </div>
++    </div>
++    
++    <div class="commit-form p-3 border-t border-slate-800 mt-auto bg-slate-950">
++      <textarea 
++        v-model="commitMessage"
++        class="w-full bg-slate-900 border border-slate-800 rounded p-2 text-[12px] text-white focus:outline-none focus:border-blue-500"
++        placeholder="Commit message (Chinese)..."
++        rows="3"
++      ></textarea>
++      <button 
++        class="btn-commit w-full bg-blue-600 hover:bg-blue-700 text-white rounded py-2 mt-2 text-[12px] font-semibold"
++        @click="handleCommit"
++      >
++        Commit to main
++      </button>
++    </div>
 +  </div>
 +</template>`
   }
@@ -82,11 +246,21 @@ export const mockPublicAgentDiffs: MockAgentConfigDiffFile[] = [
     staged: false,
     patch: `--- a/opencode/agents/public_agent_test.json
 +++ b/opencode/agents/public_agent_test.json
-@@ -2,4 +2,4 @@
  {
    "id": "public_agent",
--  "name": "Old Public Agent",
+-  "name": "Old Public Agent Name",
+-  "description": "This is the original description of the public agent config.",
+-  "version": "1.0.0",
 +  "name": "Premium Public Agent (MIMO)",
++  "description": "This is the updated premium description of the public agent config.",
++  "version": "2.0.0",
+   "parameters": {
+     "temperature": 0.7,
+     "maxTokens": 2048,
+-    "stream": false
++    "stream": true
+   },
+   "system_prompt": "You are a professional coding assistant.",
    "enabled": true
  }`
   }
@@ -99,11 +273,21 @@ export const mockWorkspaceAgentDiffs: MockAgentConfigDiffFile[] = [
     staged: false,
     patch: `--- a/.opencode/agents/workspace_agent_test.json
 +++ b/.opencode/agents/workspace_agent_test.json
-@@ -2,4 +2,4 @@
  {
    "id": "workspace_agent",
--  "name": "Old Workspace Agent",
+-  "name": "Old Workspace Agent Name",
+-  "description": "This is the original description of the workspace agent config.",
+-  "version": "1.0.0",
 +  "name": "Premium Workspace Agent (MIMO)",
++  "description": "This is the updated premium description of the workspace agent config.",
++  "version": "2.0.0",
+   "parameters": {
+     "temperature": 0.5,
+     "maxTokens": 4096,
+-    "stream": false
++    "stream": true
+   },
+   "system_prompt": "You are a professional test agent working on workspaces.",
    "enabled": true
  }`
   }
