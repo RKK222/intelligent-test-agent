@@ -1749,7 +1749,7 @@ function onCompositionEnd() {
 
 .figma-chat-avatar--user {
   margin-top: 0;
-  background: #f4f4f5;
+  background: transparent;
   border-radius: 6px;
   color: #a1a5b1;
 }
@@ -1761,7 +1761,7 @@ function onCompositionEnd() {
 
 .figma-chat-bubble--user {
   display: block;
-  background: #f4f4f5;
+  background: transparent;
   color: #111;
   border-top-right-radius: 2px;
 }

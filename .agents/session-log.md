@@ -16,6 +16,16 @@
 - How: 先用 `corepack pnpm --filter @test-agent/agent-web build` 复现附件中的 TypeScript 错误，再按错误源头最小修复类型定义和联合类型收窄，不改 `restart-dev-services.sh`。
 - Result: `corepack pnpm --filter @test-agent/agent-web build`、相关 Vitest、`backend-api`/`agent-chat` typecheck 和 `tools/verify-dev-scripts.sh` 均通过；未执行完整一键重启，避免主动停止当前服务。
 ### 2026-06-26 - 工作台侧边栏布局调整与一级目录可折叠重构
+### 2026-06-26 - DiffViewer 标签精简与 Monaco 滚动条细线化、聊天气泡底色统一
+
+- Why: 用户截图标注 (1) DiffViewer 右侧「本地修改 (可编辑，编辑完成后按 Cmd+S 保存)」文案过长且未贴右；(2) Monaco diff 视图右侧滚动条太粗、抢视觉；(3) 右侧对话气泡底色在用户消息（#f4f4f5 灰）与背景（#fff 白）之间反复切换，希望统一。
+- What:
+  - `frontend/packages/diff-viewer/src/DiffViewer.vue`：split 视图右侧列加 `justify-end` 贴右，统一文案为「本地修改 · 可编辑（Cmd+S 保存）」，基线/统一视图同步精简为「基线版本（只读，历史提交代码）」「统一视图 · 可直接编辑（Cmd+S 保存）」，全角括号替换半角；Monaco diff editor 初始化选项新增 `scrollbar: { vertical: "visible", horizontal: "visible", verticalScrollbarSize: 6, horizontalScrollbarSize: 6, useShadows: false }`，与普通编辑器对齐。
+  - `frontend/apps/agent-web/src/components/FigmaChatPanel.vue`：`.figma-chat-bubble--user` 与 `.figma-chat-avatar--user` 的 `background` 由 `#f4f4f5` 改为 `transparent`，让用户气泡与背景同色，整条对话保持单一底色。
+- How: 仅模板 + scoped CSS / Monaco 配置改动，不动 TypeScript 业务逻辑、emit、store。Monaco scrollbar 配置是单点插入 initMonaco，未影响 `viewMode` / `source` watch 的后续 updateOptions 流程。
+- Result: 右侧标签简明贴右；Monaco diff 滚动条细线化与 Monaco Editor 一致；用户气泡不再独立染色，整条对话底色统一。`packages/diff-viewer/tests` 4/4 通过；`@test-agent/diff-viewer` typecheck 通过；FigmaChatPanel 既有 2 条失败与本次改动无关（pre-existing `role` 类型推断问题）。
+- Verification: `corepack pnpm exec vitest run packages/diff-viewer/tests`；`corepack pnpm --filter @test-agent/diff-viewer typecheck`；`git diff --check`。
+
 ### 2026-06-26 - UI 三项改版：Diff light 主题、三栏底部 Footer 对齐、聊天输入卡片化
 
 - Why: 用户要求 (1) Monaco Diff 编辑器切为 light 风格与工作台白色主题匹配；(2) 不管切换到哪个功能，底部那一行应该都存在且高度一致；(3) 聊天面板输入框加宽，把模型选择、新建对话、附件上传挪到输入框内部下方，整体像现代 ChatGPT 风格。

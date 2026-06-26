@@ -145,7 +145,15 @@ async function initMonaco(el: HTMLElement) {
     automaticLayout: true,
     scrollBeyondLastLine: false,
     fontSize: 13,
-    lineHeight: 21
+    lineHeight: 21,
+    // 滚动条细线化：与普通编辑器对齐，避免与浅色 chrome 抢视觉
+    scrollbar: {
+      vertical: "visible",
+      horizontal: "visible",
+      verticalScrollbarSize: 6,
+      horizontalScrollbarSize: 6,
+      useShadows: false
+    }
   });
   inst.setModel({ original: originalModel, modified: modifiedModel });
 
@@ -338,15 +346,15 @@ onBeforeUnmount(() => {
         <!-- Diff Panels Header Hints -->
         <div v-if="(source === 'vcs' || source === 'agent') && viewMode === 'split'" class="grid grid-cols-2 border-b border-slate-200 bg-[#f8fafc] px-4 py-1.5 text-[11px] text-slate-500">
           <div class="flex items-center gap-1.5 font-semibold text-slate-700">
-            <span class="text-rose-500 font-bold">◀</span> 基线版本 (只读，历史提交代码)
+            <span class="text-rose-500 font-bold">◀</span> 基线版本（只读，历史提交代码）
           </div>
-          <div class="flex items-center gap-1.5 border-l border-slate-200 pl-4 font-semibold text-slate-700">
-            <span class="text-emerald-500 font-bold">▶</span> 本地修改 (可编辑，编辑完成后按 Cmd+S 保存)
+          <div class="flex items-center justify-end gap-1.5 border-l border-slate-200 pl-4 font-semibold text-slate-700">
+            <span class="text-emerald-500 font-bold">▶</span> 本地修改 · 可编辑（Cmd+S 保存）
           </div>
         </div>
         <div v-else-if="(source === 'vcs' || source === 'agent') && viewMode === 'unified'" class="border-b border-slate-200 bg-[#f8fafc] px-4 py-1.5 text-[11px] text-slate-700 font-semibold">
-          <div class="flex items-center gap-1.5">
-            <span class="text-emerald-500 font-bold">▶</span> 统一视图 (可直接在此编辑修改，编辑完成后按 Cmd+S 保存)
+          <div class="flex items-center justify-end gap-1.5">
+            <span class="text-emerald-500 font-bold">▶</span> 统一视图 · 可直接编辑（Cmd+S 保存）
           </div>
         </div>
         <!-- Monaco Container -->
