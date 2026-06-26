@@ -34,6 +34,9 @@ function createApi(): Partial<BackendApiClient> {
     listApplicationRepositories: vi.fn().mockResolvedValue([repositories[0]]),
     listRepositoryApplications: vi.fn().mockResolvedValue([]),
     listApplicationWorkspaces: vi.fn().mockResolvedValue([]),
+    listRepositoryBranches: vi.fn().mockResolvedValue(["main"]),
+    listRepositoryDirectories: vi.fn().mockResolvedValue(["tests"]),
+    createApplicationWorkspace: vi.fn().mockResolvedValue({}),
     createRepository: vi.fn().mockResolvedValue(repositories[1]),
     updateRepository: vi.fn().mockResolvedValue(repositories[0]),
     removeApplicationMember: vi.fn().mockResolvedValue(undefined),
@@ -272,6 +275,26 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
 
     expect(queryByText("取消")).toBeNull();
     expect(queryByPlaceholderText("名称")).toBeNull();
+  });
+
+  it("shows workspace creation as three labeled steps", async () => {
+    const { container, findByText, getByText, queryByText } = renderPanel();
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("工作空间管理"));
+
+    const createSection = getByText("创建工作空间").closest(".ta-section");
+    expect(createSection).toBeTruthy();
+    const createSectionText = createSection?.textContent ?? "";
+    expect(createSectionText.indexOf("第一步：刷新分支")).toBeLessThan(createSectionText.indexOf("第二步：加载目录"));
+    expect(createSectionText.indexOf("第二步：加载目录")).toBeLessThan(createSectionText.indexOf("第三步：创建工作空间"));
+    expect(within(createSection as HTMLElement).getByText("已关联版本库")).toBeTruthy();
+    expect(within(createSection as HTMLElement).getByText("分支")).toBeTruthy();
+    expect(within(createSection as HTMLElement).getByText("目录")).toBeTruthy();
+    expect(within(createSection as HTMLElement).getByText("工作空间名称")).toBeTruthy();
+    expect(within(createSection as HTMLElement).getByText("刷新分支")).toBeTruthy();
+    expect(queryByText("加载分支")).toBeNull();
+    expect(container.querySelectorAll(".ta-workspace-step").length).toBe(3);
   });
 
   it("confirms before removing an application member", async () => {

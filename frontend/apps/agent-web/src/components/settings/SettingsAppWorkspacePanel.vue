@@ -543,24 +543,58 @@ watch(selectedAppId, async (appId) => {
       <div v-if="selectedAppId && appTab === 'workspaces'" class="ta-panel-content">
         <div class="ta-section">
           <h4 class="ta-section-title">创建工作空间</h4>
-          <div class="ta-inline-form">
-            <el-select v-model="workspaceRepositoryId" placeholder="选择已关联版本库" style="width: 360px">
-              <el-option v-for="repo in appRepositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
-            </el-select>
-            <el-button :disabled="loading || !workspaceRepositoryId" @click="loadBranches">加载分支</el-button>
-          </div>
-          <div class="ta-inline-form">
-            <el-select v-model="workspaceBranch" placeholder="选择分支" style="width: 200px">
-              <el-option v-for="branch in branches" :key="branch" :label="branch" :value="branch" />
-            </el-select>
-            <el-button :disabled="loading || !workspaceBranch" @click="loadDirectories">加载目录</el-button>
-          </div>
-          <div class="ta-inline-form">
-            <el-select v-model="workspaceDirectory" placeholder="选择目录" style="width: 200px">
-              <el-option v-for="dir in directories" :key="dir" :label="dir" :value="dir" />
-            </el-select>
-            <el-input v-model="workspaceName" placeholder="工作空间名称" style="width: 180px" />
-            <el-button type="primary" :disabled="loading || !workspaceDirectory" @click="createWorkspace">创建</el-button>
+          <div class="ta-workspace-create-steps">
+            <div class="ta-workspace-step">
+              <div class="ta-workspace-step-heading">
+                <span class="ta-workspace-step-index">1</span>
+                <span class="ta-workspace-step-title">第一步：刷新分支</span>
+              </div>
+              <div class="ta-workspace-step-controls">
+                <label class="ta-form-field">
+                  <span class="ta-form-label">已关联版本库</span>
+                  <el-select v-model="workspaceRepositoryId" placeholder="选择已关联版本库" style="width: min(360px, 100%)">
+                    <el-option v-for="repo in appRepositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
+                  </el-select>
+                </label>
+                <el-button :disabled="loading || !workspaceRepositoryId" @click="loadBranches">刷新分支</el-button>
+              </div>
+            </div>
+
+            <div class="ta-workspace-step">
+              <div class="ta-workspace-step-heading">
+                <span class="ta-workspace-step-index">2</span>
+                <span class="ta-workspace-step-title">第二步：加载目录</span>
+              </div>
+              <div class="ta-workspace-step-controls">
+                <label class="ta-form-field">
+                  <span class="ta-form-label">分支</span>
+                  <el-select v-model="workspaceBranch" placeholder="选择分支" style="width: min(240px, 100%)">
+                    <el-option v-for="branch in branches" :key="branch" :label="branch" :value="branch" />
+                  </el-select>
+                </label>
+                <el-button :disabled="loading || !workspaceBranch" @click="loadDirectories">加载目录</el-button>
+              </div>
+            </div>
+
+            <div class="ta-workspace-step">
+              <div class="ta-workspace-step-heading">
+                <span class="ta-workspace-step-index">3</span>
+                <span class="ta-workspace-step-title">第三步：创建工作空间</span>
+              </div>
+              <div class="ta-workspace-step-controls">
+                <label class="ta-form-field">
+                  <span class="ta-form-label">目录</span>
+                  <el-select v-model="workspaceDirectory" placeholder="选择目录" style="width: min(240px, 100%)">
+                    <el-option v-for="dir in directories" :key="dir" :label="dir" :value="dir" />
+                  </el-select>
+                </label>
+                <label class="ta-form-field">
+                  <span class="ta-form-label">工作空间名称</span>
+                  <el-input v-model="workspaceName" placeholder="工作空间名称" style="width: min(180px, 100%)" />
+                </label>
+                <el-button type="primary" :disabled="loading || !workspaceDirectory" @click="createWorkspace">创建</el-button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -663,6 +697,63 @@ watch(selectedAppId, async (appId) => {
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
+}
+.ta-workspace-create-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ta-workspace-step {
+  display: grid;
+  grid-template-columns: 128px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  background: #fafcff;
+}
+.ta-workspace-step-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ta-workspace-step-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #3366ff;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+.ta-workspace-step-title {
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #18181b;
+  white-space: nowrap;
+}
+.ta-workspace-step-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.ta-workspace-step .ta-form-field {
+  flex-wrap: wrap;
+}
+@media (max-width: 720px) {
+  .ta-workspace-step {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
 }
 .ta-section-title-row {
   display: flex;
