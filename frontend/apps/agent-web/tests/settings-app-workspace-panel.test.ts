@@ -1,5 +1,5 @@
 import { defineComponent, h, inject, provide } from "vue";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor, within } from "@testing-library/vue";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type { CodeRepositoryConfig } from "@test-agent/shared-types";
@@ -35,7 +35,9 @@ function createApi(): Partial<BackendApiClient> {
     listRepositoryApplications: vi.fn().mockResolvedValue([]),
     listApplicationWorkspaces: vi.fn().mockResolvedValue([]),
     createRepository: vi.fn().mockResolvedValue(repositories[1]),
-    updateRepository: vi.fn().mockResolvedValue(repositories[0])
+    updateRepository: vi.fn().mockResolvedValue(repositories[0]),
+    removeApplicationMember: vi.fn().mockResolvedValue(undefined),
+    unlinkApplicationRepository: vi.fn().mockResolvedValue(undefined)
   };
 }
 
@@ -175,6 +177,10 @@ function renderPanel(api = createApi()) {
 }
 
 describe("SettingsAppWorkspacePanel repository settings", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("uses version-library wording and adds a dedicated management tab", async () => {
     const { container, findByText, getByText, queryByText } = renderPanel();
 
@@ -266,5 +272,53 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
 
     expect(queryByText("取消")).toBeNull();
     expect(queryByPlaceholderText("名称")).toBeNull();
+  });
+
+  it("confirms before removing an application member", async () => {
+    const api = createApi();
+    api.listApplicationMembers = vi.fn().mockResolvedValue([
+      {
+        userId: "usr_member",
+        username: "成员用户",
+        unifiedAuthId: "AUTH_MEMBER",
+        roles: []
+      }
+    ]);
+    const { findByText, getByLabelText, getByText, queryByText } = renderPanel(api);
+
+    expect(await findByText("成员用户")).toBeTruthy();
+
+    await fireEvent.click(getByLabelText("移除成员"));
+    expect(await findByText("确认移除成员")).toBeTruthy();
+    expect(getByText("确认移除成员[成员用户]吗？")).toBeTruthy();
+    expect(api.removeApplicationMember).not.toHaveBeenCalled();
+
+    await fireEvent.click(getByText("取消"));
+    expect(queryByText("确认移除成员[成员用户]吗？")).toBeNull();
+
+    await fireEvent.click(getByLabelText("移除成员"));
+    await fireEvent.click(getByText("确认移除"));
+    await waitFor(() => expect(api.removeApplicationMember).toHaveBeenCalledWith("F-COSS", "usr_member"));
+  });
+
+  it("confirms before unlinking a repository from the selected application", async () => {
+    const api = createApi();
+    const { findByText, getByText, queryByText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("应用与版本库关联"));
+    expect(await findByText("F-WRTESTAPP 本地测试库")).toBeTruthy();
+
+    await fireEvent.click(getByText("解除"));
+    expect(await findByText("确认解除关联")).toBeTruthy();
+    expect(getByText("确认解除版本库[F-WRTESTAPP 本地测试库]与当前应用的关联吗？")).toBeTruthy();
+    expect(api.unlinkApplicationRepository).not.toHaveBeenCalled();
+
+    await fireEvent.click(getByText("取消"));
+    expect(queryByText("确认解除版本库[F-WRTESTAPP 本地测试库]与当前应用的关联吗？")).toBeNull();
+
+    await fireEvent.click(getByText("解除"));
+    await fireEvent.click(getByText("确认解除"));
+    await waitFor(() => expect(api.unlinkApplicationRepository).toHaveBeenCalledWith("F-COSS", "repo_wr"));
   });
 });

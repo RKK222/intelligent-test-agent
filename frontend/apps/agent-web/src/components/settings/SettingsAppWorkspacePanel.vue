@@ -14,6 +14,10 @@ import { CirclePlus, Delete, InfoFilled, Link } from "@element-plus/icons-vue";
 const ADD_REPOSITORY_OPTION_VALUE = "__create_repository__";
 const STANDARD_REPOSITORY_TOOLTIP = "标准代码库是指测试自己去git申请，专门用于测试智能体的版本库。";
 
+type PendingDangerAction =
+  | { type: "remove-member"; member: ApplicationMember }
+  | { type: "unlink-repository"; repository: CodeRepositoryConfig };
+
 const props = defineProps<{
   currentUser: CurrentUser | null;
 }>();
@@ -23,6 +27,7 @@ const api = inject<BackendApiClient>("api")!;
 const appTab = ref<"members" | "repositoryManagement" | "repositories" | "workspaces">("members");
 const loading = ref(false);
 const errorMessage = ref("");
+const pendingDangerAction = ref<PendingDangerAction | null>(null);
 
 // 应用选择
 const applications = ref<ApplicationDefinition[]>([]);
@@ -33,6 +38,22 @@ const currentRoles = computed(() => props.currentUser?.roles ?? []);
 const currentRoleLabel = computed(() => (currentRoles.value.length ? currentRoles.value.join(",") : "无角色"));
 const hasAppSettingsPermission = computed(() => currentRoles.value.includes("APP_ADMIN") || currentRoles.value.includes("SUPER_ADMIN"));
 const selectedApp = computed(() => applications.value.find((item) => item.appId === selectedAppId.value));
+const pendingDangerTitle = computed(() => {
+  if (!pendingDangerAction.value) return "";
+  return pendingDangerAction.value.type === "remove-member" ? "确认移除成员" : "确认解除关联";
+});
+const pendingDangerMessage = computed(() => {
+  const action = pendingDangerAction.value;
+  if (!action) return "";
+  if (action.type === "remove-member") {
+    return `确认移除成员[${action.member.username}]吗？`;
+  }
+  return `确认解除版本库[${action.repository.name}]与当前应用的关联吗？`;
+});
+const pendingDangerConfirmText = computed(() => {
+  if (!pendingDangerAction.value) return "确认";
+  return pendingDangerAction.value.type === "remove-member" ? "确认移除" : "确认解除";
+});
 
 // 成员管理
 const members = ref<ApplicationMember[]>([]);
@@ -93,6 +114,7 @@ async function loadApplications() {
 function clearAppContext() {
   applications.value = [];
   selectedAppId.value = "";
+  pendingDangerAction.value = null;
   members.value = [];
   selectedUser.value = null;
   userKeyword.value = "";
@@ -167,10 +189,31 @@ async function addSelectedMember() {
   });
 }
 
-async function removeMember(userId: string) {
+async function removeMember(member: ApplicationMember) {
+  pendingDangerAction.value = { type: "remove-member", member };
+}
+
+function cancelDangerAction() {
+  if (loading.value) return;
+  pendingDangerAction.value = null;
+}
+
+// 破坏性操作必须使用页面内确认框，避免浏览器原生模态框打断设置面板体验。
+async function confirmDangerAction() {
+  const action = pendingDangerAction.value;
+  if (!action) return;
+  pendingDangerAction.value = null;
+  if (action.type === "remove-member") {
+    await run(async () => {
+      await api.removeApplicationMember(selectedAppId.value, action.member.userId);
+      await loadMembers();
+    });
+    return;
+  }
   await run(async () => {
-    await api.removeApplicationMember(selectedAppId.value, userId);
-    await loadMembers();
+    await api.unlinkApplicationRepository(selectedAppId.value, action.repository.repositoryId);
+    await loadRepositories();
+    await loadWorkspaces();
   });
 }
 
@@ -258,12 +301,8 @@ async function linkRepository() {
   });
 }
 
-async function unlinkRepository(repositoryId: string) {
-  await run(async () => {
-    await api.unlinkApplicationRepository(selectedAppId.value, repositoryId);
-    await loadRepositories();
-    await loadWorkspaces();
-  });
+async function unlinkRepository(repository: CodeRepositoryConfig) {
+  pendingDangerAction.value = { type: "unlink-repository", repository };
 }
 
 // 工作空间管理
@@ -330,6 +369,7 @@ watch(() => props.currentUser, async (user) => {
 
 watch(selectedAppId, async (appId) => {
   if (!appId || !hasAppSettingsPermission.value) return;
+  pendingDangerAction.value = null;
   await loadAppContext();
 });
 </script>
@@ -404,7 +444,7 @@ watch(selectedAppId, async (appId) => {
                 <div class="ta-item-title">{{ member.username }}</div>
                 <div class="ta-item-subtitle">{{ member.userId }} · {{ member.unifiedAuthId }}</div>
               </div>
-              <el-button size="small" type="danger" plain :disabled="loading" @click="removeMember(member.userId)">
+              <el-button size="small" type="danger" plain aria-label="移除成员" :disabled="loading" @click="removeMember(member)">
                 <el-icon><Delete /></el-icon>
               </el-button>
             </div>
@@ -434,7 +474,7 @@ watch(selectedAppId, async (appId) => {
                 <div class="ta-item-title">{{ repo.name }}</div>
                 <div class="ta-item-subtitle">{{ repo.gitUrl }}</div>
               </div>
-              <el-button size="small" type="danger" plain :disabled="loading" @click="unlinkRepository(repo.repositoryId)">解除</el-button>
+              <el-button size="small" type="danger" plain :disabled="loading" @click="unlinkRepository(repo)">解除</el-button>
             </div>
           </div>
         </div>
@@ -544,6 +584,17 @@ watch(selectedAppId, async (appId) => {
 
       <div v-if="selectedAppId === '' && hasAppSettingsPermission" class="ta-empty-hint">
         暂无启用应用
+      </div>
+
+      <div v-if="pendingDangerAction" class="ta-danger-confirm-mask" @click.self="cancelDangerAction">
+        <div class="ta-danger-confirm" role="dialog" aria-modal="true" aria-labelledby="ta-danger-confirm-title">
+          <h4 id="ta-danger-confirm-title" class="ta-danger-confirm-title">{{ pendingDangerTitle }}</h4>
+          <p class="ta-danger-confirm-message">{{ pendingDangerMessage }}</p>
+          <div class="ta-danger-confirm-actions">
+            <el-button :disabled="loading" @click="cancelDangerAction">取消</el-button>
+            <el-button type="danger" :disabled="loading" @click="confirmDangerAction">{{ pendingDangerConfirmText }}</el-button>
+          </div>
+        </div>
       </div>
     </template>
   </div>
@@ -696,5 +747,42 @@ watch(selectedAppId, async (appId) => {
   white-space: nowrap;
   font-size: 13px;
   color: #18181b;
+}
+.ta-danger-confirm-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 2200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 35%);
+}
+.ta-danger-confirm {
+  width: min(360px, 100%);
+  padding: 18px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 48px rgb(15 23 42 / 18%);
+}
+.ta-danger-confirm-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #18181b;
+}
+.ta-danger-confirm-message {
+  margin: 10px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #606266;
+  overflow-wrap: anywhere;
+}
+.ta-danger-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
 }
 </style>
