@@ -28,6 +28,7 @@ const props = defineProps<{
   baseUrl: string;
   workspaceId?: string;
   canWrite: boolean;
+  hideHeader?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -305,11 +306,15 @@ function errorMessageFor(error: unknown, fallback: string): string {
   if (error instanceof Error) return `${fallback}：${error.message}`;
   return fallback;
 }
+
+defineExpose({
+  refreshAll
+});
 </script>
 
 <template>
   <div class="agent-config-panel">
-    <div class="agent-config-header">
+    <div v-if="!hideHeader" class="agent-config-header">
       <span>Agent</span>
       <button type="button" class="agent-icon-btn" title="刷新" aria-label="刷新" @click="refreshAll">
         <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.5" />

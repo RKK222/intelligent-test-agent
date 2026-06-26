@@ -1,12 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { ref } from "vue";
 import { FileExplorer, type FileExplorerProps } from "@test-agent/file-explorer";
 import type { FileContent } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
-import PublicDirectoryPanel from "./PublicDirectoryPanel.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
-import { Bot, FolderTree, Layers } from "lucide-vue-next";
+import { ChevronDown, ChevronRight, RefreshCw } from "lucide-vue-next";
 
 defineProps<FileExplorerProps & {
   workspaceRootPath?: string;
@@ -49,76 +48,95 @@ const emit = defineEmits<{
   openServerWorkspacePicker: [];
 }>();
 
-// 视图模式：workspace（默认）展示 FileExplorer；public 展示 PublicDirectoryPanel。
-// 切换时通过 v-if 卸载不活跃的组件，避免两个面板相互竞争滚动区域。
-type ViewMode = "workspace" | "public" | "agent";
-const viewMode = ref<ViewMode>("workspace");
-const showPublicTab = computed(() => true); // 后端未配置时面板自身会展示空态，这里始终可点。
+const workspaceExpanded = ref(true);
+const agentsExpanded = ref(true);
+const agentConfigPanelRef = ref<InstanceType<typeof AgentConfigPanel> | null>(null);
+
+function refreshAgents() {
+  agentConfigPanelRef.value?.refreshAll();
+}
 </script>
 
 <template>
   <div class="figma-file-explorer">
-    <div class="figma-fe-toolbar" role="tablist" aria-label="文件视图切换">
-      <button
-        type="button"
-        :class="['figma-fe-toolbar-tab', viewMode === 'workspace' && 'is-active']"
-        title="工作区文件"
-        aria-label="工作区文件"
-        @click="viewMode = 'workspace'"
-      >
-        <FolderTree class="h-3.5 w-3.5" :stroke-width="1.5" />
-        <span>工作区</span>
-      </button>
-      <button
-        v-if="showPublicTab"
-        type="button"
-        :class="['figma-fe-toolbar-tab', viewMode === 'public' && 'is-active']"
-        title="公共目录（后端固定路径）"
-        aria-label="公共目录"
-        @click="viewMode = 'public'"
-      >
-        <Layers class="h-3.5 w-3.5" :stroke-width="1.5" />
-        <span>公共目录</span>
-      </button>
-      <button
-        type="button"
-        :class="['figma-fe-toolbar-tab', viewMode === 'agent' && 'is-active']"
-        title="Agent"
-        aria-label="Agent"
-        @click="viewMode = 'agent'"
-      >
-        <Bot class="h-3.5 w-3.5" :stroke-width="1.5" />
-        <span>Agent</span>
-      </button>
-    </div>
     <div class="figma-fe-body">
-      <FileExplorer
-        v-if="viewMode === 'workspace'"
-        :workspace-name="workspaceName"
-        :workspace-root-path="workspaceRootPath"
-        :entries-by-directory="entriesByDirectory"
-        :expanded-directories="expandedDirectories"
-        :active-path="activePath"
-        :changed-files="changedFiles"
-        :loading-path="loadingPath"
-        @toggle-directory="emit('toggleDirectory', $event)"
-        @open-file="emit('openFile', $event)"
-        @open-diff="emit('openDiff', $event)"
-        @refresh="emit('refresh')"
-      />
-      <PublicDirectoryPanel
-        v-else-if="viewMode === 'public'"
-        :can-write="!!publicDirectoryWritable"
-        :base-url="apiBaseUrl ?? ''"
-        @open-file="emit('openPublicFile', $event)"
-      />
-      <AgentConfigPanel
-        v-else
-        :base-url="apiBaseUrl ?? ''"
-        :workspace-id="workspaceId"
-        :can-write="!!publicDirectoryWritable"
-        @open-file="emit('openAgentFile', $event)"
-      />
+      <!-- Section 1: 应用工作空间 -->
+      <div class="figma-fe-section" :class="{ 'is-expanded': workspaceExpanded }">
+        <div class="figma-fe-section-header">
+          <button
+            type="button"
+            class="figma-fe-section-header-trigger"
+            @click="workspaceExpanded = !workspaceExpanded"
+          >
+            <ChevronDown v-if="workspaceExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
+            <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+            <span class="figma-fe-section-title">应用工作空间</span>
+          </button>
+          <div class="figma-fe-section-actions" v-if="workspaceExpanded">
+            <button
+              type="button"
+              class="figma-fe-section-action-btn"
+              title="刷新文件树"
+              aria-label="刷新文件树"
+              @click="emit('refresh')"
+            >
+              <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.5" />
+            </button>
+          </div>
+        </div>
+        <div v-show="workspaceExpanded" class="figma-fe-section-content">
+          <FileExplorer
+            :workspace-name="workspaceName"
+            :workspace-root-path="workspaceRootPath"
+            :entries-by-directory="entriesByDirectory"
+            :expanded-directories="expandedDirectories"
+            :active-path="activePath"
+            :changed-files="changedFiles"
+            :loading-path="loadingPath"
+            :hide-header="true"
+            @toggle-directory="emit('toggleDirectory', $event)"
+            @open-file="emit('openFile', $event)"
+            @open-diff="emit('openDiff', $event)"
+            @refresh="emit('refresh')"
+          />
+        </div>
+      </div>
+
+      <!-- Section 2: agents -->
+      <div class="figma-fe-section" :class="{ 'is-expanded': agentsExpanded }">
+        <div class="figma-fe-section-header">
+          <button
+            type="button"
+            class="figma-fe-section-header-trigger"
+            @click="agentsExpanded = !agentsExpanded"
+          >
+            <ChevronDown v-if="agentsExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
+            <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+            <span class="figma-fe-section-title">agents</span>
+          </button>
+          <div class="figma-fe-section-actions" v-if="agentsExpanded">
+            <button
+              type="button"
+              class="figma-fe-section-action-btn"
+              title="刷新"
+              aria-label="刷新"
+              @click="refreshAgents"
+            >
+              <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.5" />
+            </button>
+          </div>
+        </div>
+        <div v-show="agentsExpanded" class="figma-fe-section-content">
+          <AgentConfigPanel
+            ref="agentConfigPanelRef"
+            :base-url="apiBaseUrl ?? ''"
+            :workspace-id="workspaceId"
+            :can-write="!!publicDirectoryWritable"
+            :hide-header="true"
+            @open-file="emit('openAgentFile', $event)"
+          />
+        </div>
+      </div>
     </div>
     <WorkbenchFooter
       :app-name="appName"
@@ -144,47 +162,103 @@ const showPublicTab = computed(() => true); // 后端未配置时面板自身会
   min-height: 0;
 }
 
-.figma-fe-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  height: 32px;
-  padding: 0 8px;
-  border-bottom: 1px solid #e4e4e7;
-  background: #fafafa;
-  flex-shrink: 0;
-}
-
-.figma-fe-toolbar-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 22px;
-  padding: 0 8px;
-  border: 0.8px solid transparent;
-  border-radius: 6px;
-  background: transparent;
-  color: #555;
-  font-size: 12px;
-  cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
-}
-
-.figma-fe-toolbar-tab:hover {
-  background: #f0f0f0;
-  color: #18181b;
-}
-
-.figma-fe-toolbar-tab.is-active {
-  background: #fff;
-  border-color: #dfdfdf;
-  color: #18181b;
-}
-
 .figma-fe-body {
+  display: flex;
+  flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  background: #fafafa;
+}
+
+.figma-fe-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.figma-fe-section.is-expanded {
+  flex: 1;
+}
+
+.figma-fe-section:not(.is-expanded) {
+  flex: 0 0 auto;
+}
+
+/* Border separator between sections */
+.figma-fe-section + .figma-fe-section {
+  border-top: 1px solid #e4e4e7;
+}
+
+.figma-fe-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding: 0 8px;
+  background: #fafafa;
+  border-bottom: 1px solid #e4e4e7;
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.figma-fe-section-header-trigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: #555;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+}
+
+.figma-fe-section-header-trigger:hover {
+  color: #18181b;
+}
+
+.figma-fe-section-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figma-fe-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.figma-fe-section-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: #71717a;
+  cursor: pointer;
+  transition: background-color 0.1s, color 0.1s;
+}
+
+.figma-fe-section-action-btn:hover {
+  background: #e4e4e7;
+  color: #18181b;
+}
+
+.figma-fe-section-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .figma-fe-body :deep(.ta-icon-tabbar) {

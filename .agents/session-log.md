@@ -15,6 +15,12 @@
 - What: 补齐 `shared-types` 中用户管理（测试）DTO：`UserManagementUser`、`CreateUserPayload`、`RoleOption`；修正 `FigmaChatPanel.vue` 中展示消息与原始 `AgentMessage` 联合类型混用；修正 `runtime-reducer.ts` 按 user/assistant 分支构造 `AgentMessage`。
 - How: 先用 `corepack pnpm --filter @test-agent/agent-web build` 复现附件中的 TypeScript 错误，再按错误源头最小修复类型定义和联合类型收窄，不改 `restart-dev-services.sh`。
 - Result: `corepack pnpm --filter @test-agent/agent-web build`、相关 Vitest、`backend-api`/`agent-chat` typecheck 和 `tools/verify-dev-scripts.sh` 均通过；未执行完整一键重启，避免主动停止当前服务。
+### 2026-06-26 - 工作台侧边栏布局调整与一级目录可折叠重构
+
+- Why: 用户要求调整工作台文件区侧边栏的布局，移除顶部的“工作区”、“公共目录”、“Agent”切换按钮，并将“应用工作空间”（原工作区目录）和“agents”（原 Agent 面板）作为可独立折叠展开的一级目录。
+- What: 移除了 `FigmaFileExplorer.vue` 顶部的 `.figma-fe-toolbar`；改用垂直 Flexbox 布局承载“应用工作空间”和“agents”两个 collapsible Section，同时在 `FileExplorer.vue` 和 `AgentConfigPanel.vue` 中实现了 `hideHeader` 隐藏内部冗余标题，并在目录标题右侧增加了对应的刷新按钮。
+- How: 展开的一级目录分配 `flex: 1; min-height: 0` 保证内部滚动，折叠的目录分配 `flex: 0 0 auto`。将 Refresh 和 expose 逻辑连接，使操作更加连贯。
+- Result: 侧边栏视觉精简，无冗余头部，整体高度在目录折叠/展开时动态分配，且所有 124 项前端单元测试通过。
 
 ### 2026-06-26 - 一键重启脚本默认切到 test 环境
 

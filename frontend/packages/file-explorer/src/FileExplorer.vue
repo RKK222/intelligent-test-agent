@@ -10,6 +10,7 @@ export type FileExplorerProps = {
   changedFiles: RunDiffFile[];
   statuses?: Record<string, FileStatus>;
   loadingPath?: Set<string>;
+  hideHeader?: boolean;
 };
 
 type ExplorerTab = "explorer" | "search" | "changes";
@@ -86,7 +87,7 @@ const changeStats = computed(() => {
       </button>
     </div>
     <div v-if="tab === 'explorer'" class="min-h-0 flex-1 overflow-auto px-2 py-2 text-[14px]">
-      <div class="mb-1 flex h-7 items-center justify-between rounded px-2 text-[12px] font-semibold text-[var(--ta-muted)]">
+      <div v-if="!hideHeader" class="mb-1 flex h-7 items-center justify-between rounded px-2 text-[12px] font-semibold text-[var(--ta-muted)]">
         <span class="min-w-0 truncate" :title="workspaceName">{{ workspaceName }}</span>
         <div class="flex shrink-0 items-center gap-1">
           <button
