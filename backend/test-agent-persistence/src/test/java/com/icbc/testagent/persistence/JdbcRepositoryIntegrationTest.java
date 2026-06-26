@@ -18,7 +18,10 @@ import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
+import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
+import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplicaId;
 import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceStatus;
+import com.icbc.testagent.domain.managedworkspace.WorkspaceReplicaSyncStatus;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspaceId;
 import com.icbc.testagent.domain.managedworkspace.UserWorkspacePreference;
@@ -710,6 +713,7 @@ class JdbcRepositoryIntegrationTest {
                 WorkspaceStatus.ACTIVE,
                 NOW,
                 NOW,
+                "10.8.0.11",
                 "trace_1234567890abcdef");
         Workspace personalRuntime = new Workspace(
                 new WorkspaceId("wrk_psw_managed"),
@@ -736,6 +740,25 @@ class JdbcRepositoryIntegrationTest {
                 ManagedWorkspaceStatus.ACTIVE,
                 NOW,
                 NOW));
+        managedWorkspaces.updateVersionTargetCommit(version.versionId(), "abc123", NOW.plusSeconds(2));
+        ApplicationWorkspaceVersion updatedVersion = managedWorkspaces.findVersion(version.versionId()).orElseThrow();
+        assertThat(updatedVersion.targetCommitHash()).isEqualTo("abc123");
+        assertThat(updatedVersion.targetCommitUpdatedAt()).isEqualTo(NOW.plusSeconds(2));
+
+        ApplicationWorkspaceVersionReplica replica = managedWorkspaces.saveVersionReplica(new ApplicationWorkspaceVersionReplica(
+                new ApplicationWorkspaceVersionReplicaId("awr_managed_10_8_0_11"),
+                version.versionId(),
+                "10.8.0.11",
+                version.repoRootPath(),
+                version.workspaceRootPath(),
+                applicationRuntime.workspaceId(),
+                "abc123",
+                WorkspaceReplicaSyncStatus.READY,
+                null,
+                NOW.plusSeconds(3),
+                "trace_1234567890abcdef",
+                NOW,
+                NOW.plusSeconds(3)));
         PersonalWorkspace personal = managedWorkspaces.savePersonalWorkspace(new PersonalWorkspace(
                 new PersonalWorkspaceId("psw_managed"),
                 version.versionId(),
@@ -765,9 +788,11 @@ class JdbcRepositoryIntegrationTest {
                 "trace_1234567890abcdef",
                 NOW));
 
-        assertThat(managedWorkspaces.findVersions(template.workspaceId())).containsExactly(version);
-        assertThat(managedWorkspaces.findVersionByTemplateAndVersion(template.workspaceId(), "20260707")).contains(version);
-        assertThat(managedWorkspaces.findVersionByRuntimeWorkspace(applicationRuntime.workspaceId())).contains(version);
+        assertThat(managedWorkspaces.findVersions(template.workspaceId())).containsExactly(updatedVersion);
+        assertThat(managedWorkspaces.findVersionByTemplateAndVersion(template.workspaceId(), "20260707")).contains(updatedVersion);
+        assertThat(managedWorkspaces.findVersionByRuntimeWorkspace(applicationRuntime.workspaceId())).contains(updatedVersion);
+        assertThat(managedWorkspaces.findVersionReplica(version.versionId(), "10.8.0.11")).contains(replica);
+        assertThat(managedWorkspaces.findVersionReplicaByRuntimeWorkspace(applicationRuntime.workspaceId())).contains(replica);
         assertThat(managedWorkspaces.findPersonalWorkspaces(version.versionId(), userId)).containsExactly(personal);
         assertThat(managedWorkspaces.findPersonalWorkspaceByRuntimeWorkspace(personalRuntime.workspaceId())).contains(personal);
         assertThat(managedWorkspaces.findGlobalPreference(userId).map(UserWorkspacePreference::workspaceId))

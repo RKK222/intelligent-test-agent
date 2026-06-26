@@ -98,6 +98,13 @@ public final class RuntimeIdGenerator {
     }
 
     /**
+     * 生成应用版本工作区服务器副本 ID，返回值固定使用 {@code awr_} 前缀。
+     */
+    public static String applicationWorkspaceVersionReplicaId() {
+        return prefixed("awr_");
+    }
+
+    /**
      * 生成个人工作区 ID，返回值固定使用 {@code psw_} 前缀。
      */
     public static String personalWorkspaceId() {
@@ -109,6 +116,13 @@ public final class RuntimeIdGenerator {
      */
     public static String workspaceSyncRecordId() {
         return prefixed("sync_");
+    }
+
+    /**
+     * 生成服务器广播事件 ID，返回值固定使用 {@code sbe_} 前缀。
+     */
+    public static String serverBroadcastEventId() {
+        return prefixed("sbe_");
     }
 
     /**

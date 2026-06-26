@@ -253,6 +253,28 @@
 - `application_workspaces.branch` 继续保留作为模板创建和目录选择兼容字段；版本实际分支以 `application_workspace_versions.branch` 为准。
 - 物理路径默认由业务配置 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT` 决定，数据库只记录最终路径，不负责创建或清理目录。
 
+## V20260626120900 应用版本工作区服务器副本
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260626120900__add_managed_workspace_replicas.sql` 为多服务器应用版本工作区同步增加 commit 与副本记录：
+
+| 表/字段 | 说明 |
+|---|---|
+| `application_workspace_versions.target_commit_hash` | 当前应用版本所有服务器副本应同步到的目标 Git commit hash，可空兼容历史数据。 |
+| `application_workspace_versions.target_commit_updated_at` | 目标 commit 最近更新时间，可空兼容历史数据。 |
+| `application_workspace_version_replicas` | 每台 Linux 服务器上的应用版本副本，记录副本路径、运行态 Workspace、当前 commit、同步状态和最近错误。 |
+
+关键约束：
+
+- `application_workspace_version_replicas(version_id, linux_server_id)` 唯一，保证同一应用版本在同一服务器只有一个副本。
+- `runtime_workspace_id` 唯一并引用 `workspaces.workspace_id`，确保每个副本对应独立运行态 Workspace。
+- `sync_status` 取值由业务枚举控制：`PENDING`、`SYNCING`、`READY`、`FAILED`。
+
+兼容策略：
+
+- 旧 `application_workspace_versions.runtime_workspace_id/repo_root_path/workspace_root_path` 保留，作为首次创建节点和旧响应兼容字段。
+- migration 只对已具备 `workspaces.linux_server_id` 的历史应用版本回填副本；`current_commit_hash` 为空，由启动/周期补偿任务读取本机 Git HEAD 后更新。
+- `target_commit_hash` 为空的历史版本在首次本机副本校验成功后由业务层回填为当前 HEAD；随后各服务器通过内部广播和补偿扫描追平。
+
 ## 用户 → 应用 → 工作空间 默认进入行为
 
 `user_application_workspace_preferences` 与 `user_global_workspace_preferences` 是前端"用户进入平台时默认工作空间"的持久化依据：

@@ -10,6 +10,8 @@ import com.icbc.testagent.common.git.GitWorkspaceService;
 import com.icbc.testagent.common.git.SshKeyCryptoService;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
+import com.icbc.testagent.domain.broadcast.ServerBroadcastEvent;
+import com.icbc.testagent.domain.broadcast.ServerBroadcastPublisher;
 import com.icbc.testagent.domain.configuration.ApplicationDefinition;
 import com.icbc.testagent.domain.configuration.ApplicationId;
 import com.icbc.testagent.domain.configuration.ApplicationMember;
@@ -22,11 +24,14 @@ import com.icbc.testagent.domain.configuration.SshKeyId;
 import com.icbc.testagent.domain.configuration.UserSshKey;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
+import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
+import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplicaId;
 import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspaceId;
 import com.icbc.testagent.domain.managedworkspace.UserWorkspaceBranchPreference;
 import com.icbc.testagent.domain.managedworkspace.UserWorkspacePreference;
+import com.icbc.testagent.domain.managedworkspace.WorkspaceReplicaSyncStatus;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncDirection;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncRecord;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncStatus;
@@ -73,8 +78,42 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.clonedBranch).isEqualTo("feature_testagent_20260707");
         assertThat(workspaces.saved).hasSize(1);
         assertThat(managed.versions).hasSize(1);
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_base");
+        assertThat(managed.replicas).hasSize(1);
+        assertThat(managed.replicas.get(0).linuxServerId()).isEqualTo("127.0.0.1");
+        assertThat(managed.replicas.get(0).currentCommitHash()).isEqualTo("commit_base");
         assertThat(managed.globalPreference).isNotNull();
         assertThat(managed.applicationPreference).isNotNull();
+    }
+
+    @Test
+    void createsVersionForTargetServerAndBroadcastsSyncRequest() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git, publisher);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse response = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_1234567890abcdef");
+
+        assertThat(response.targetCommitHash()).isEqualTo("commit_base");
+        assertThat(response.replicaCommitHash()).isEqualTo("commit_base");
+        assertThat(response.replicaLinuxServerId()).isEqualTo("127.0.0.1");
+        assertThat(response.replicaStatus()).isEqualTo(WorkspaceReplicaSyncStatus.READY.name());
+        assertThat(publisher.events).hasSize(1);
+        assertThat(publisher.events.get(0).type()).isEqualTo("workspace.version.sync-requested");
+        assertThat(publisher.events.get(0).originInstanceId()).isEqualTo("instance-test");
+        assertThat(publisher.events.get(0).originLinuxServerId()).isEqualTo("127.0.0.1");
+        assertThat(publisher.events.get(0).payload()).containsEntry("versionId", response.versionId());
+        assertThat(publisher.events.get(0).payload()).containsEntry("targetCommitHash", "commit_base");
     }
 
     @Test
@@ -207,9 +246,43 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.committedFiles).containsExactly("F-GCMS/workspace/case.txt");
         assertThat(git.pushedBranch).isEqualTo("feature_testagent_20260707");
         assertThat(git.pushedForce).isTrue();
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_after_push");
+        assertThat(managed.replicas.get(0).currentCommitHash()).isEqualTo("commit_after_push");
         assertThat(managed.syncRecords).hasSize(1);
         assertThat(managed.syncRecords.get(0).direction()).isEqualTo(WorkspaceSyncDirection.PERSONAL_TO_APPLICATION);
         assertThat(managed.syncRecords.get(0).traceId()).isEqualTo("trace_sync");
+    }
+
+    @Test
+    void gitPullVersionUpdatesTargetCommitAndBroadcastsReplicaSync() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git, publisher);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_version");
+        publisher.events.clear();
+        git.nextHeadCommit = "commit_after_pull";
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse response = service.gitPullVersion(
+                version.versionId(),
+                new UserId("usr_1"),
+                "127.0.0.1",
+                "trace_pull");
+
+        assertThat(git.pulledBranch).isEqualTo("feature_testagent_20260707");
+        assertThat(response.targetCommitHash()).isEqualTo("commit_after_pull");
+        assertThat(response.replicaCommitHash()).isEqualTo("commit_after_pull");
+        assertThat(publisher.events).hasSize(1);
+        assertThat(publisher.events.get(0).payload()).containsEntry("reason", "GIT_PULLED");
     }
 
     @Test
@@ -276,6 +349,15 @@ class ManagedWorkspaceApplicationServiceTest {
             FakeManagedWorkspaceRepository managed,
             FakeWorkspaceRepository workspaces,
             FakeGitWorkspaceService git) {
+        return service(configuration, managed, workspaces, git, new RecordingBroadcastPublisher());
+    }
+
+    private ManagedWorkspaceApplicationService service(
+            FakeConfigurationRepository configuration,
+            FakeManagedWorkspaceRepository managed,
+            FakeWorkspaceRepository workspaces,
+            FakeGitWorkspaceService git,
+            ServerBroadcastPublisher publisher) {
         return new ManagedWorkspaceApplicationService(
                 configuration,
                 managed,
@@ -284,6 +366,8 @@ class ManagedWorkspaceApplicationServiceTest {
                 new FakeGitRemoteService(List.of("feature_testagent_20260707")),
                 git,
                 new SshKeyCryptoService(java.util.Base64.getEncoder().encodeToString("0123456789abcdef".getBytes())),
+                new WorkspaceServerIdentity("127.0.0.1"),
+                publisher,
                 root.toString());
     }
 
@@ -301,7 +385,23 @@ class ManagedWorkspaceApplicationServiceTest {
                 new FakeGitRemoteService(branches),
                 git,
                 new SshKeyCryptoService(java.util.Base64.getEncoder().encodeToString("0123456789abcdef".getBytes())),
+                new WorkspaceServerIdentity("127.0.0.1"),
+                new RecordingBroadcastPublisher(),
                 root.toString());
+    }
+
+    private static final class RecordingBroadcastPublisher implements ServerBroadcastPublisher {
+        private final List<ServerBroadcastEvent> events = new ArrayList<>();
+
+        @Override
+        public String instanceId() {
+            return "instance-test";
+        }
+
+        @Override
+        public void publish(ServerBroadcastEvent event) {
+            events.add(event);
+        }
     }
 
     private static final class FakeGitRemoteService extends GitRemoteService {
@@ -324,6 +424,8 @@ class ManagedWorkspaceApplicationServiceTest {
         private List<String> committedFiles = List.of();
         private String pushedBranch;
         private boolean pushedForce;
+        private String pulledBranch;
+        private String nextHeadCommit = "commit_base";
 
         private FakeGitWorkspaceService(String directoryPath) {
             this.directoryPath = directoryPath;
@@ -351,18 +453,29 @@ class ManagedWorkspaceApplicationServiceTest {
 
         @Override
         public String headCommit(Path repoRoot) {
-            return "commit_base";
+            return nextHeadCommit;
         }
 
         @Override
         public void commitFiles(Path repoRoot, List<String> files, String message, String privateKey) {
             this.committedFiles = List.copyOf(files);
+            this.nextHeadCommit = "commit_after_push";
         }
 
         @Override
         public void push(Path repoRoot, String branch, boolean force, String privateKey) {
             this.pushedBranch = branch;
             this.pushedForce = force;
+        }
+
+        @Override
+        public boolean isWorktreeClean(Path repoRoot) {
+            return true;
+        }
+
+        @Override
+        public void pullFastForward(Path repoRoot, String branch, String privateKey) {
+            this.pulledBranch = branch;
         }
     }
 
@@ -416,6 +529,7 @@ class ManagedWorkspaceApplicationServiceTest {
 
     private static final class FakeManagedWorkspaceRepository implements ManagedWorkspaceRepository {
         private final List<ApplicationWorkspaceVersion> versions = new ArrayList<>();
+        private final List<ApplicationWorkspaceVersionReplica> replicas = new ArrayList<>();
         private final List<PersonalWorkspace> personals = new ArrayList<>();
         private final List<WorkspaceSyncRecord> syncRecords = new ArrayList<>();
         private UserWorkspacePreference globalPreference;
@@ -427,6 +541,25 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override public Optional<ApplicationWorkspaceVersion> findVersion(ApplicationWorkspaceVersionId versionId) { return versions.stream().findFirst(); }
         @Override public Optional<ApplicationWorkspaceVersion> findVersionByTemplateAndVersion(ApplicationWorkspaceId applicationWorkspaceId, String version) { return Optional.empty(); }
         @Override public ApplicationWorkspaceVersion saveVersion(ApplicationWorkspaceVersion version) { versions.add(version); return version; }
+        @Override public ApplicationWorkspaceVersion updateVersionTargetCommit(ApplicationWorkspaceVersionId versionId, String targetCommitHash, Instant updatedAt) {
+            ApplicationWorkspaceVersion current = findVersion(versionId).orElseThrow();
+            ApplicationWorkspaceVersion updated = current.withTargetCommit(targetCommitHash, updatedAt);
+            versions.clear();
+            versions.add(updated);
+            return updated;
+        }
+        @Override public ApplicationWorkspaceVersionReplica saveVersionReplica(ApplicationWorkspaceVersionReplica replica) {
+            replicas.removeIf(item -> item.versionId().equals(replica.versionId()) && item.linuxServerId().equals(replica.linuxServerId()));
+            replicas.add(replica);
+            return replica;
+        }
+        @Override public Optional<ApplicationWorkspaceVersionReplica> findVersionReplica(ApplicationWorkspaceVersionId versionId, String linuxServerId) {
+            return replicas.stream().filter(item -> item.versionId().equals(versionId) && item.linuxServerId().equals(linuxServerId)).findFirst();
+        }
+        @Override public Optional<ApplicationWorkspaceVersionReplica> findVersionReplicaByRuntimeWorkspace(WorkspaceId workspaceId) {
+            return replicas.stream().filter(item -> item.runtimeWorkspaceId().equals(workspaceId)).findFirst();
+        }
+        @Override public List<ApplicationWorkspaceVersion> findActiveVersionsMissingReadyReplica(String linuxServerId) { return versions; }
         @Override public List<PersonalWorkspace> findPersonalWorkspaces(ApplicationWorkspaceVersionId versionId, UserId userId) { return personals; }
         @Override public Optional<PersonalWorkspace> findPersonalWorkspace(PersonalWorkspaceId personalWorkspaceId) { return personals.stream().filter(item -> item.personalWorkspaceId().equals(personalWorkspaceId)).findFirst(); }
         @Override public Optional<PersonalWorkspace> findPersonalWorkspaceByRuntimeWorkspace(WorkspaceId workspaceId) { return personals.stream().filter(item -> item.runtimeWorkspaceId().equals(workspaceId)).findFirst(); }

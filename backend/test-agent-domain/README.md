@@ -12,7 +12,7 @@
 
 ## 主要职责
 
-- Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用配置管理、应用版本工作区、个人工作区和定时任务框架等领域对象。
+- Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用配置管理、应用版本工作区、应用版本服务器副本、个人工作区、服务器广播和定时任务框架等领域对象。
 - Run 状态机、路由决策值对象、领域服务接口。
 - 保持业务规则与基础设施分离。
 
@@ -27,7 +27,8 @@
 - RoutingDecision：`RoutingDecision`、`RoutingReason`、`ExecutionNodeRouter`。
 - OpencodeProcess：`LinuxServer`、`BackendJavaProcess`、`OpencodeContainer`、`OpencodeContainerManager`、`OpencodeManagerBackendConnection`、`OpencodeServerProcess`、`OpencodeServerProcessFilter`、`UserOpencodeProcessBinding`、`OpencodeProcessManagementRepository` 和 `OpencodeProcessHeartbeatStore`；只表达 Linux 服务器、容器、管理进程、用户专属 opencode 进程拓扑、查询筛选和运行心跳端口，不直接发起进程操作或 socket 通信。
 - Configuration：`ApplicationDefinition`、`ApplicationMember`、`CodeRepository`、`ApplicationRepositoryLink`、`ApplicationWorkspace`、`UserSshKey`，与运行态 Workspace/Session/Run 解耦。
-- ManagedWorkspace：`ApplicationWorkspaceVersion`、`PersonalWorkspace`、`UserWorkspacePreference`、`WorkspaceSyncRecord`，把应用工作空间模板落为运行态 Workspace 并记录个人 worktree 与同步审计。
+- ManagedWorkspace：`ApplicationWorkspaceVersion`、`ApplicationWorkspaceVersionReplica`、`PersonalWorkspace`、`UserWorkspacePreference`、`WorkspaceSyncRecord`，把应用工作空间模板落为运行态 Workspace，记录每服务器副本 commit/status、个人 worktree 与同步审计。
+- Broadcast：`ServerBroadcastEvent`、`ServerBroadcastPublisher`、`ServerBroadcastHandler`，定义后端实例之间广播事件的领域端口，不绑定 Redis 或其他传输。
 - Scheduler：`ScheduledTask`、`ScheduledTaskPlan`、`ScheduledTaskRun`、状态枚举和值对象；用户级计划仅作为后续定时会话能力预留。
 - Repository 端口：Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、OpencodeProcessManagement、ConfigurationManagement、ManagedWorkspace、ScheduledTask 持久化端口。
 

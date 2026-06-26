@@ -42,7 +42,7 @@ Token 校验流程：
 5. 个人 Git SSH 私钥必须使用 AES-GCM 加密后落库，加密密钥来自 `TEST_AGENT_SSH_KEY_ENCRYPTION_KEY` 或 `test-agent.security.ssh-key-encryption-key`，要求为 Base64 编码的 16/24/32 字节 AES key；不得提供硬编码默认值。
 6. SSH key API 只能返回 `sshKeyId/name/fingerprint/createdAt` 元信息，禁止回显私钥明文或密文。指纹基于规范化私钥内容的 SHA-256 生成。
 7. Git SSH 远端命令只允许使用当前登录用户保存的唯一 SSH key。临时私钥文件必须设置最小可行权限并在命令结束后清理；Git 命令环境必须禁用交互式凭据提示。
-8. 应用版本工作区和个人工作区的 Git clone/worktree/diff/push 仍只允许使用当前登录用户保存的唯一 SSH key；不得回退到机器账号、部署用户默认 SSH key 或其他用户 key。托管根目录来自 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT`，磁盘目录已存在时只能在校验目标 origin URL 和分支匹配后接管，不得覆盖或删除未知目录。
+8. 应用版本工作区和个人工作区的 Git clone/worktree/diff/push/pull/副本同步仍只允许使用当前登录用户保存的唯一 SSH key；不得回退到机器账号、部署用户默认 SSH key 或其他用户 key。托管根目录来自 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT`，磁盘目录已存在时只能在校验目标 origin URL 和分支匹配后接管，不得覆盖或删除未知目录。跨服务器副本同步在 `fetch/reset --hard` 前必须确认工作树无未提交变更，否则标记副本 `FAILED` 并拒绝静默覆盖。
 9. opencode-manager 控制面必须使用独立 manager token，配置键为 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN`；不得复用用户 JWT、普通 `TEST_AGENT_API_TOKEN` 或 opencode server 密钥。生产环境该 token 必须由环境变量或配置中心注入，示例只能使用占位值。
 10. 超级管理员运行管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端菜单可见性只作为体验优化，不能作为权限边界。
 11. 定时任务管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端系统管理菜单可见性只作为体验优化。管理员手动触发运行记录必须写入 `requestedByUserId` 和 traceId，停止正在执行的运行记录必须写入 `stopRequestedAt`、`stopRequestedByUserId` 和 `stopReason`。scheduler 启用时必须使用 Redis 分布式锁，不得回退到本机锁或数据库锁，以免分布式多节点重复执行。
@@ -80,6 +80,15 @@ Token 校验流程：
 5. `directory.list` 只允许 `directory-picker` ticket；跨服务器目录浏览仅 `SUPER_ADMIN` 可创建 ticket，普通用户只能浏览当前 agent 同服务器目录。
 6. `workspace.create` 必须要求 `SUPER_ADMIN`，并且选择服务器与当前 agent 服务器一致；不一致时前端禁用输入，后端仍必须返回 `CONFLICT` 或 `FORBIDDEN`。
 7. 日志和错误响应不得输出 ticket、Authorization、Cookie、完整用户输入、完整文件内容或敏感路径片段；审计只记录 traceId、workspaceId、服务器 ID、操作类型、路径摘要和错误码等必要字段。
+
+## 服务器广播安全
+
+后端内部服务器广播用于跨后端实例同步业务状态，不是浏览器 API 或 SSE。实现和后续扩展必须满足：
+
+1. 广播 payload 只允许包含业务 ID、事件原因、服务器 ID、版本号、分支名、目标 commit hash 和 traceId 等必要字段；禁止携带 SSH 私钥、token、Authorization、Cookie、文件内容、完整用户输入或大段错误堆栈。
+2. Redis pub/sub 仅作为同一可信后端集群内的实时增强通道；生产必须使用受控内网 Redis，并通过外部配置开启 `test-agent.server-broadcast.enabled=true`，不得在代码或示例中硬编码 Redis 密码或生产地址。
+3. 消费端必须跳过本服务器来源事件，并在业务层做幂等校验；广播失败不能影响本机已完成的 Git/数据库主流程，漏消息由数据库目标 commit 与本机补偿扫描恢复。
+4. 日志只记录 `eventId`、`type`、`traceId`、`versionId`、`linuxServerId` 和错误码等低敏字段，不能输出私钥、token、完整路径中的敏感片段或原始第三方错误详情。
 
 ## PTY WebSocket 安全例外
 

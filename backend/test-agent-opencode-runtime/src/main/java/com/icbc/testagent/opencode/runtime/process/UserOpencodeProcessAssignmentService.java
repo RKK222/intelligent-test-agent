@@ -215,7 +215,7 @@ public class UserOpencodeProcessAssignmentService {
         Instant now = Instant.now();
         if (localDirectSettings.enabled()) {
             OpencodeServerProcess process = synthesizeLocalDirectProcess(userId, now, traceId);
-            return new UserOpencodeProcessAssignment(projectExecutionNode(process, now, traceId));
+            return new UserOpencodeProcessAssignment(projectExecutionNode(process, now, traceId), process.linuxServerId().value());
         }
         UserOpencodeProcessBinding binding = repository.findUserBinding(userId, OPENCODE_AGENT_ID)
                 .filter(item -> item.status() == UserOpencodeProcessBindingStatus.ACTIVE)
@@ -233,7 +233,7 @@ public class UserOpencodeProcessAssignmentService {
         heartbeatStore.recordOpencodeHeartbeat(refreshed.processId(), now);
         ExecutionNode node = projectExecutionNode(refreshed, now, traceId);
         executionNodeRepository.save(node);
-        return new UserOpencodeProcessAssignment(node);
+        return new UserOpencodeProcessAssignment(node, refreshed.linuxServerId().value());
     }
 
     private Optional<OpencodeServerProcess> activeProcess(UserOpencodeProcessBinding binding) {

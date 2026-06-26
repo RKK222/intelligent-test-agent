@@ -38,20 +38,20 @@ Browser
 | 模块 | 职责 |
 |---|---|
 | `test-agent-common` | 公共异常、统一响应 `ApiResponse`/`ApiErrorResponse`、TraceId、分页、校验、时间工具。 |
-| `test-agent-domain` | Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑等纯领域模型与状态机，不依赖 Spring Web/Persistence/generated SDK。 |
+| `test-agent-domain` | Workspace、Session、AgentSessionBinding、Run、RunEvent、ExecutionNode、RoutingDecision、通用服务器广播 envelope/端口、opencode 用户进程管理拓扑等纯领域模型与状态机，不依赖 Spring Web/Persistence/generated SDK。 |
 | `test-agent-observability` | traceId、结构化日志、Micrometer 指标、观测性工具。 |
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK，禁止手改。 |
 | `test-agent-opencode-client` | 封装 generated SDK，提供 `OpencodeClientFacade`，是业务访问 opencode 的唯一门面。 |
 | `test-agent-agent-runtime` | 定义 `AgentRuntime`、`AgentRuntimeRegistry`、统一日志/指标包装、`OpencodeAgentRuntime` 适配器和未注册的 `OtherAgentRuntime` 抽象占位。 |
-| `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/删除、受控目录选择、git/diff、应用版本工作区、个人工作区、agent 和 skill 管理业务。 |
+| `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/删除、受控目录选择、git/diff、应用版本工作区、每服务器版本副本、个人工作区、agent 和 skill 管理业务。 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、当前用户 opencode 进程状态/初始化契约、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、超级管理员运行管理快照聚合、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
 | `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、登录认证和 Token 管理。 |
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、应用与代码库关联、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务。 |
 | `test-agent-scheduler` | 通用分布式定时任务框架，负责任务注册、Cron 计算、Redis 锁、后台扫描、统一运行记录、Cron 调整、手动触发和协作式停止管理服务；具体业务任务放回所属业务模块。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界（当前为空骨架）。 |
 | `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、workspace 文件 WebSocket ticket/RPC 入口、manager 控制面入口、超级管理员运行管理和定时任务管理入口、trace Web 入口。 |
-| `test-agent-persistence` | 数据库、Flyway、Repository、Redis 可选适配，包括 workspace 服务器归属、opencode 用户进程管理表、scheduler 表与 Repository 映射。 |
-| `test-agent-event` | RunEvent、SSE、事件转换、事件回放。 |
+| `test-agent-persistence` | 数据库、Flyway、Repository、Redis 可选适配，包括 workspace 服务器归属、应用版本副本表、opencode 用户进程管理表、scheduler 表与 Repository 映射。 |
+| `test-agent-event` | RunEvent、SSE、事件转换、事件回放，以及 Redis/Noop 通用服务器广播适配。 |
 | `test-agent-test-support` | 测试 fixture、mock server、集成测试支撑。 |
 | `test-agent-app` | 唯一启动入口和可部署服务包，只放启动、装配、profile、migration、health 和日志。 |
 

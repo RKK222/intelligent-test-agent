@@ -550,6 +550,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/applications/{appId}/workspace-templates` | 查询应用工作空间模板，即配置表 `application_workspaces`。 |
 | `GET` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 查询模板下已创建的应用版本工作区。 |
 | `POST` | `/applications/{appId}/workspace-templates/{templateId}/versions` | 创建或接管应用版本工作区，并创建运行态 Workspace。 |
+| `POST` | `/workspace-versions/{versionId}/git-pull` | 在当前用户 READY opencode agent 所在服务器对应用版本工作区执行 `git pull --ff-only`，成功后广播其他服务器同步到同一 commit。 |
 | `GET` | `/workspace-versions/{versionId}/personal-workspaces` | 查询当前用户基于某版本派生的个人工作区。 |
 | `POST` | `/workspace-versions/{versionId}/personal-workspaces` | 基于应用版本工作区创建 git worktree 个人工作区。 |
 | `GET` | `/recent-workspace` | 查询当前用户全局最近使用的托管运行态 Workspace。 |
@@ -580,6 +581,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 - 应用版本工作区物理仓库目录为 `appworkspace/{branchFragment}/{repositoryId}`，opencode root 为仓库目录下模板 `directoryPath`。
 - 磁盘目录已存在时，后端校验 origin URL 和当前分支，匹配则接管，不覆盖、不删除；不匹配返回 `CONFLICT`。
 - SSH Git 操作只使用当前登录用户保存的唯一 SSH key；HTTPS 不额外支持账号或 token。
+- 多服务器部署下，版本主记录保存 `targetCommitHash`，每台服务器通过 `application_workspace_version_replicas` 记录本机副本路径、运行态 Workspace、当前 commit 和同步状态。`runtimeWorkspace` 返回当前用户 READY 的 opencode agent 所在服务器副本；目标副本未就绪时返回 `CONFLICT`。
 
 `ApplicationWorkspaceVersionResponse`：
 
@@ -598,14 +600,21 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
     "name": "F-GCMS-20260707",
     "rootPath": "/data/appworkspace/20260707/repo_.../F-GCMS/workspace",
     "status": "ACTIVE",
+    "linuxServerId": "10.8.0.12",
     "createdAt": "2026-06-23T00:00:00Z",
     "updatedAt": "2026-06-23T00:00:00Z"
   },
   "status": "ACTIVE",
+  "targetCommitHash": "abc123...",
+  "replicaCommitHash": "abc123...",
+  "replicaLinuxServerId": "10.8.0.12",
+  "replicaStatus": "READY",
   "createdAt": "2026-06-23T00:00:00Z",
   "updatedAt": "2026-06-23T00:00:00Z"
 }
 ```
+
+`POST /workspace-versions/{versionId}/git-pull` 无请求体。后端先解析当前登录用户的 READY opencode agent 所在 `linuxServerId`，再在同服务器应用版本副本上执行 `git pull --ff-only origin {branch}`。工作树存在未提交变更、非 fast-forward、目标服务器副本缺失或 SSH key 不可用时返回统一错误；成功后更新 `targetCommitHash` 与本机副本 `replicaCommitHash`，并通过内部服务器广播要求其他服务器同步到同一 commit。
 
 `POST /workspace-versions/{versionId}/personal-workspaces` 请求体：
 
@@ -626,7 +635,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`sync-to-application.force=true` 时使用 `--force-with-lease` 覆盖远端；失败、冲突或认证问题使用统一 Git/冲突错误码返回，并记录同步审计。应用版本工作区与个人工作区同步不新增 RunEvent/SSE 事件。
+`sync-to-application.force=true` 时使用 `--force-with-lease` 覆盖远端；失败、冲突或认证问题使用统一 Git/冲突错误码返回，并记录同步审计。同步成功后更新应用版本 `targetCommitHash` 与当前服务器副本 `replicaCommitHash`，并通过内部服务器广播要求其他服务器同步。应用版本工作区与个人工作区同步不新增 RunEvent/SSE 事件。
 
 前端两级菜单（应用工作空间→版本）使用说明：
 

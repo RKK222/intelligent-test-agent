@@ -7,12 +7,15 @@ import com.icbc.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionId;
+import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
+import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplicaId;
 import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceStatus;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspaceId;
 import com.icbc.testagent.domain.managedworkspace.UserWorkspaceBranchPreference;
 import com.icbc.testagent.domain.managedworkspace.UserWorkspacePreference;
+import com.icbc.testagent.domain.managedworkspace.WorkspaceReplicaSyncStatus;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncDirection;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncRecord;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncRecordId;
@@ -49,6 +52,23 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
             new WorkspaceId(rs.getString("runtime_workspace_id")),
             new UserId(rs.getString("created_by_user_id")),
             ManagedWorkspaceStatus.valueOf(rs.getString("status")),
+            rs.getString("target_commit_hash"),
+            instant(rs, "target_commit_updated_at"),
+            instant(rs, "created_at"),
+            instant(rs, "updated_at"));
+
+    private final RowMapper<ApplicationWorkspaceVersionReplica> replicaMapper = (rs, rowNum) -> new ApplicationWorkspaceVersionReplica(
+            new ApplicationWorkspaceVersionReplicaId(rs.getString("replica_id")),
+            new ApplicationWorkspaceVersionId(rs.getString("version_id")),
+            rs.getString("linux_server_id"),
+            rs.getString("repo_root_path"),
+            rs.getString("workspace_root_path"),
+            new WorkspaceId(rs.getString("runtime_workspace_id")),
+            rs.getString("current_commit_hash"),
+            WorkspaceReplicaSyncStatus.valueOf(rs.getString("sync_status")),
+            rs.getString("last_error"),
+            instant(rs, "last_synced_at"),
+            rs.getString("trace_id"),
             instant(rs, "created_at"),
             instant(rs, "updated_at"));
 
@@ -97,7 +117,7 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
         return jdbcClient.sql("""
                         select version_id, application_workspace_id, app_id, repository_id, version, branch,
                                repo_root_path, workspace_root_path, runtime_workspace_id, created_by_user_id,
-                               status, created_at, updated_at
+                               status, target_commit_hash, target_commit_updated_at, created_at, updated_at
                         from application_workspace_versions
                         where application_workspace_id = :applicationWorkspaceId
                         order by version desc, updated_at desc
@@ -112,7 +132,7 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
         return jdbcClient.sql("""
                         select version_id, application_workspace_id, app_id, repository_id, version, branch,
                                repo_root_path, workspace_root_path, runtime_workspace_id, created_by_user_id,
-                               status, created_at, updated_at
+                               status, target_commit_hash, target_commit_updated_at, created_at, updated_at
                         from application_workspace_versions
                         where app_id = :appId
                         order by updated_at desc
@@ -145,12 +165,12 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
                         insert into application_workspace_versions(
                             version_id, application_workspace_id, app_id, repository_id, version, branch,
                             repo_root_path, workspace_root_path, runtime_workspace_id, created_by_user_id,
-                            status, created_at, updated_at
+                            status, target_commit_hash, target_commit_updated_at, created_at, updated_at
                         )
                         values (
                             :versionId, :applicationWorkspaceId, :appId, :repositoryId, :version, :branch,
                             :repoRootPath, :workspaceRootPath, :runtimeWorkspaceId, :createdByUserId,
-                            :status, :createdAt, :updatedAt
+                            :status, :targetCommitHash, :targetCommitUpdatedAt, :createdAt, :updatedAt
                         )
                         """)
                 .param("versionId", version.versionId().value())
@@ -164,10 +184,135 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
                 .param("runtimeWorkspaceId", version.runtimeWorkspaceId().value())
                 .param("createdByUserId", version.createdBy().value())
                 .param("status", version.status().name())
+                .param("targetCommitHash", version.targetCommitHash())
+                .param("targetCommitUpdatedAt", timestamp(version.targetCommitUpdatedAt()))
                 .param("createdAt", timestamp(version.createdAt()))
                 .param("updatedAt", timestamp(version.updatedAt()))
                 .update();
         return version;
+    }
+
+    @Override
+    public ApplicationWorkspaceVersion updateVersionTargetCommit(
+            ApplicationWorkspaceVersionId versionId,
+            String targetCommitHash,
+            java.time.Instant updatedAt) {
+        jdbcClient.sql("""
+                        update application_workspace_versions
+                        set target_commit_hash = :targetCommitHash,
+                            target_commit_updated_at = :targetCommitUpdatedAt,
+                            updated_at = :updatedAt
+                        where version_id = :versionId
+                        """)
+                .param("versionId", versionId.value())
+                .param("targetCommitHash", targetCommitHash)
+                .param("targetCommitUpdatedAt", timestamp(updatedAt))
+                .param("updatedAt", timestamp(updatedAt))
+                .update();
+        return findVersion(versionId).orElseThrow();
+    }
+
+    @Override
+    public ApplicationWorkspaceVersionReplica saveVersionReplica(ApplicationWorkspaceVersionReplica replica) {
+        Optional<ApplicationWorkspaceVersionReplica> existing = findVersionReplica(replica.versionId(), replica.linuxServerId());
+        if (existing.isPresent()) {
+            jdbcClient.sql("""
+                            update application_workspace_version_replicas
+                            set repo_root_path = :repoRootPath,
+                                workspace_root_path = :workspaceRootPath,
+                                runtime_workspace_id = :runtimeWorkspaceId,
+                                current_commit_hash = :currentCommitHash,
+                                sync_status = :syncStatus,
+                                last_error = :lastError,
+                                last_synced_at = :lastSyncedAt,
+                                trace_id = :traceId,
+                                updated_at = :updatedAt
+                            where version_id = :versionId and linux_server_id = :linuxServerId
+                            """)
+                    .param("versionId", replica.versionId().value())
+                    .param("linuxServerId", replica.linuxServerId())
+                    .param("repoRootPath", replica.repoRootPath())
+                    .param("workspaceRootPath", replica.workspaceRootPath())
+                    .param("runtimeWorkspaceId", replica.runtimeWorkspaceId().value())
+                    .param("currentCommitHash", replica.currentCommitHash())
+                    .param("syncStatus", replica.syncStatus().name())
+                    .param("lastError", replica.lastError())
+                    .param("lastSyncedAt", timestamp(replica.lastSyncedAt()))
+                    .param("traceId", replica.traceId())
+                    .param("updatedAt", timestamp(replica.updatedAt()))
+                    .update();
+            return findVersionReplica(replica.versionId(), replica.linuxServerId()).orElseThrow();
+        }
+        jdbcClient.sql("""
+                        insert into application_workspace_version_replicas(
+                            replica_id, version_id, linux_server_id, repo_root_path, workspace_root_path,
+                            runtime_workspace_id, current_commit_hash, sync_status, last_error, last_synced_at,
+                            trace_id, created_at, updated_at
+                        )
+                        values (
+                            :replicaId, :versionId, :linuxServerId, :repoRootPath, :workspaceRootPath,
+                            :runtimeWorkspaceId, :currentCommitHash, :syncStatus, :lastError, :lastSyncedAt,
+                            :traceId, :createdAt, :updatedAt
+                        )
+                        """)
+                .param("replicaId", replica.replicaId().value())
+                .param("versionId", replica.versionId().value())
+                .param("linuxServerId", replica.linuxServerId())
+                .param("repoRootPath", replica.repoRootPath())
+                .param("workspaceRootPath", replica.workspaceRootPath())
+                .param("runtimeWorkspaceId", replica.runtimeWorkspaceId().value())
+                .param("currentCommitHash", replica.currentCommitHash())
+                .param("syncStatus", replica.syncStatus().name())
+                .param("lastError", replica.lastError())
+                .param("lastSyncedAt", timestamp(replica.lastSyncedAt()))
+                .param("traceId", replica.traceId())
+                .param("createdAt", timestamp(replica.createdAt()))
+                .param("updatedAt", timestamp(replica.updatedAt()))
+                .update();
+        return replica;
+    }
+
+    @Override
+    public Optional<ApplicationWorkspaceVersionReplica> findVersionReplica(
+            ApplicationWorkspaceVersionId versionId,
+            String linuxServerId) {
+        return jdbcClient.sql(replicaSelect("where version_id = :versionId and linux_server_id = :linuxServerId"))
+                .param("versionId", versionId.value())
+                .param("linuxServerId", linuxServerId)
+                .query(replicaMapper)
+                .optional();
+    }
+
+    @Override
+    public Optional<ApplicationWorkspaceVersionReplica> findVersionReplicaByRuntimeWorkspace(WorkspaceId workspaceId) {
+        return jdbcClient.sql(replicaSelect("where runtime_workspace_id = :workspaceId"))
+                .param("workspaceId", workspaceId.value())
+                .query(replicaMapper)
+                .optional();
+    }
+
+    @Override
+    public List<ApplicationWorkspaceVersion> findActiveVersionsMissingReadyReplica(String linuxServerId) {
+        return jdbcClient.sql("""
+                        select v.version_id, v.application_workspace_id, v.app_id, v.repository_id, v.version, v.branch,
+                               v.repo_root_path, v.workspace_root_path, v.runtime_workspace_id, v.created_by_user_id,
+                               v.status, v.target_commit_hash, v.target_commit_updated_at, v.created_at, v.updated_at
+                        from application_workspace_versions v
+                        left join application_workspace_version_replicas r
+                          on r.version_id = v.version_id and r.linux_server_id = :linuxServerId
+                        where v.status = :status
+                          and (
+                            r.replica_id is null
+                            or r.sync_status <> :readyStatus
+                            or (v.target_commit_hash is not null and (r.current_commit_hash is null or r.current_commit_hash <> v.target_commit_hash))
+                          )
+                        order by v.updated_at asc
+                        """)
+                .param("linuxServerId", linuxServerId)
+                .param("status", ManagedWorkspaceStatus.ACTIVE.name())
+                .param("readyStatus", WorkspaceReplicaSyncStatus.READY.name())
+                .query(versionMapper)
+                .list();
     }
 
     @Override
@@ -229,7 +374,21 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
 
     @Override
     public Optional<ApplicationWorkspaceVersion> findVersionByRuntimeWorkspace(WorkspaceId workspaceId) {
-        return jdbcClient.sql(versionSelect("where runtime_workspace_id = :workspaceId"))
+        Optional<ApplicationWorkspaceVersion> direct = jdbcClient.sql(versionSelect("where runtime_workspace_id = :workspaceId"))
+                .param("workspaceId", workspaceId.value())
+                .query(versionMapper)
+                .optional();
+        if (direct.isPresent()) {
+            return direct;
+        }
+        return jdbcClient.sql("""
+                        select v.version_id, v.application_workspace_id, v.app_id, v.repository_id, v.version, v.branch,
+                               v.repo_root_path, v.workspace_root_path, v.runtime_workspace_id, v.created_by_user_id,
+                               v.status, v.target_commit_hash, v.target_commit_updated_at, v.created_at, v.updated_at
+                        from application_workspace_versions v
+                        join application_workspace_version_replicas r on r.version_id = v.version_id
+                        where r.runtime_workspace_id = :workspaceId
+                        """)
                 .param("workspaceId", workspaceId.value())
                 .query(versionMapper)
                 .optional();
@@ -394,8 +553,17 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
         return """
                 select version_id, application_workspace_id, app_id, repository_id, version, branch,
                        repo_root_path, workspace_root_path, runtime_workspace_id, created_by_user_id,
-                       status, created_at, updated_at
+                       status, target_commit_hash, target_commit_updated_at, created_at, updated_at
                 from application_workspace_versions
+                """ + whereClause;
+    }
+
+    private String replicaSelect(String whereClause) {
+        return """
+                select replica_id, version_id, linux_server_id, repo_root_path, workspace_root_path,
+                       runtime_workspace_id, current_commit_hash, sync_status, last_error, last_synced_at,
+                       trace_id, created_at, updated_at
+                from application_workspace_version_replicas
                 """ + whereClause;
     }
 

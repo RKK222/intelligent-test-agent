@@ -6,7 +6,7 @@
 
 ## 主要程序清单
 
-- `index.ts`：`createBackendApiClient`、`BackendApiError` 和 API 方法集合；`agentId?: string` 默认 `opencode`，Run、Diff 和 runtime 相关方法拼接 `/api/internal/agent/{agentId}/...`；`startRun` 兼容旧 prompt string 与对象 payload，`getActiveRun(sessionId)` 用于刷新后恢复非终态 RunEvent SSE，并封装 runtime 目录、session/message 操作、Session 全局搜索/置顶/删除、运行管理 overview、配置管理、应用版本工作区、个人工作区、permission/question、fs/vcs/lsp/mcp status/resources/tools 和 terminal ticket 方法；SessionMessage/Run 的 `parts/tokens/costUsd` 等新增字段只透传为可选字段；Command catalog 映射需保留 `source/hints` 等可选字段，兼容旧 payload。
+- `index.ts`：`createBackendApiClient`、`BackendApiError` 和 API 方法集合；`agentId?: string` 默认 `opencode`，Run、Diff 和 runtime 相关方法拼接 `/api/internal/agent/{agentId}/...`；`startRun` 兼容旧 prompt string 与对象 payload，`getActiveRun(sessionId)` 用于刷新后恢复非终态 RunEvent SSE，并封装 runtime 目录、session/message 操作、Session 全局搜索/置顶/删除、运行管理 overview、配置管理、应用版本工作区、个人工作区、版本工作区 git pull、permission/question、fs/vcs/lsp/mcp status/resources/tools 和 terminal ticket 方法；SessionMessage/Run 的 `parts/tokens/costUsd` 等新增字段只透传为可选字段；Command catalog 映射需保留 `source/hints` 等可选字段，兼容旧 payload。
 
 ## 允许依赖
 

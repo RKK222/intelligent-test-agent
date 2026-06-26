@@ -3,6 +3,7 @@ package com.icbc.testagent.workspace;
 import com.icbc.testagent.domain.configuration.ApplicationDefinition;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspace;
 import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersion;
+import com.icbc.testagent.domain.managedworkspace.ApplicationWorkspaceVersionReplica;
 import com.icbc.testagent.domain.managedworkspace.PersonalWorkspace;
 import com.icbc.testagent.domain.managedworkspace.UserWorkspaceBranchPreference;
 import com.icbc.testagent.domain.workspace.Workspace;
@@ -76,9 +77,53 @@ public final class ManagedWorkspaceResponses {
             String workspaceRootPath,
             WorkspaceRuntimeResponse runtimeWorkspace,
             String status,
+            String targetCommitHash,
+            String replicaCommitHash,
+            String replicaLinuxServerId,
+            String replicaStatus,
             Instant createdAt,
             Instant updatedAt) {
+
+        public ApplicationWorkspaceVersionResponse(
+                String versionId,
+                String applicationWorkspaceId,
+                String appId,
+                String repositoryId,
+                String version,
+                String branch,
+                String repoRootPath,
+                String workspaceRootPath,
+                WorkspaceRuntimeResponse runtimeWorkspace,
+                String status,
+                Instant createdAt,
+                Instant updatedAt) {
+            this(
+                    versionId,
+                    applicationWorkspaceId,
+                    appId,
+                    repositoryId,
+                    version,
+                    branch,
+                    repoRootPath,
+                    workspaceRootPath,
+                    runtimeWorkspace,
+                    status,
+                    null,
+                    null,
+                    null,
+                    null,
+                    createdAt,
+                    updatedAt);
+        }
+
         public static ApplicationWorkspaceVersionResponse from(ApplicationWorkspaceVersion version, Workspace workspace) {
+            return from(version, null, workspace);
+        }
+
+        public static ApplicationWorkspaceVersionResponse from(
+                ApplicationWorkspaceVersion version,
+                ApplicationWorkspaceVersionReplica replica,
+                Workspace workspace) {
             return new ApplicationWorkspaceVersionResponse(
                     version.versionId().value(),
                     version.applicationWorkspaceId().value(),
@@ -90,6 +135,10 @@ public final class ManagedWorkspaceResponses {
                     version.workspaceRootPath(),
                     WorkspaceRuntimeResponse.from(workspace),
                     version.status().name(),
+                    version.targetCommitHash(),
+                    replica == null ? null : replica.currentCommitHash(),
+                    replica == null ? null : replica.linuxServerId(),
+                    replica == null ? null : replica.syncStatus().name(),
                     version.createdAt(),
                     version.updatedAt());
         }

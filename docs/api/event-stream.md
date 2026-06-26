@@ -89,13 +89,49 @@
 
 应用配置管理和个人 SSH key 管理不产生 RunEvent，也不新增 SSE 事件类型。`/api/internal/platform/configuration-management/**` 只维护配置数据，不触发 clone、Session、Run 或运行态事件流。
 
-应用版本工作区和个人工作区管理接口也不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/applications/**`、`/workspace-versions/**`、`/personal-workspaces/**` 会执行 Git clone/worktree/diff/push 并创建或切换运行态 `Workspace` 配置，但不会启动 Session/Run；后续 opencode 对话仍只通过 Run API 产生 RunEvent。
+应用版本工作区和个人工作区管理接口也不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/applications/**`、`/workspace-versions/**`、`/personal-workspaces/**` 会执行 Git clone/worktree/diff/push 并创建或切换运行态 `Workspace` 配置，但不会启动 Session/Run；后续 opencode 对话仍只通过 Run API 产生 RunEvent。多服务器下应用版本工作区同步使用后端内部服务器广播，不暴露给浏览器 SSE。
 
 opencode-manager discovery API 和 `/api/internal/platform/opencode-runtime/manager/ws` 控制面 WebSocket 不产生 RunEvent/SSE，不向前端广播注册、心跳或命令结果。
 
 超级管理员运行管理页调用的 `GET /api/internal/platform/opencode-runtime/management/overview` 只读取数据库中的运行态快照，不新增 SSE 事件类型，也不向 RunEvent 流发布拓扑、连接或进程状态变化。
 
 超级管理员定时任务管理页调用的 `/api/internal/platform/scheduler-management/**` 只维护 scheduler 任务定义和运行记录，不新增 SSE 事件类型，也不向 RunEvent 流发布任务状态变化；页面刷新通过 HTTP 查询完成。
+
+## Internal Server Broadcast
+
+内部服务器广播不是浏览器事件流。它用于一台后端把跨服务器业务事件 fan-out 到其他后端实例，当前稳定事件为应用版本工作区副本同步。
+
+传输：
+
+- 默认空实现；多服务器部署通过 `test-agent.server-broadcast.enabled=true` 开启 Redis pub/sub。
+- 默认 channel：`test-agent:server-broadcast`，可通过 `test-agent.server-broadcast.channel` 覆盖。
+- Redis 广播是实时增强通道，不保证持久投递；应用版本工作区通过数据库 `target_commit_hash` 和本机补偿扫描恢复漏消息。
+
+事件 envelope：
+
+```json
+{
+  "eventId": "sbe_...",
+  "type": "workspace.version.sync-requested",
+  "originInstanceId": "10.8.0.11-...",
+  "originLinuxServerId": "10.8.0.11",
+  "traceId": "trace_...",
+  "occurredAt": "2026-06-26T00:00:00Z",
+  "payload": {
+    "reason": "CREATED",
+    "versionId": "awv_...",
+    "applicationWorkspaceId": "awp_...",
+    "appId": "app_...",
+    "repositoryId": "repo_...",
+    "version": "20260707",
+    "branch": "feature_testagent_20260707",
+    "userId": "usr_...",
+    "targetCommitHash": "abc123..."
+  }
+}
+```
+
+`workspace.version.sync-requested` 的 `reason` 当前包括 `CREATED`、`EXISTING_VERSION`、`SYNC_TO_APPLICATION`、`GIT_PULL_REQUESTED`、`GIT_PULLED`。payload 不允许携带 SSH 私钥、token、Authorization、Cookie 或文件内容；远端节点使用 `userId` 在本机业务服务内读取该用户已加密保存的 SSH key，并在当前服务器上 clone/fetch/reset 到目标 commit。消费者必须跳过 `originLinuxServerId` 与本机相同的事件，避免本机重复执行。
 
 ## Workspace File WebSocket
 

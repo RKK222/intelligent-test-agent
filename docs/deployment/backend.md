@@ -68,7 +68,7 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 | 用户 opencode server 进程 | 每个用户 1 个当前绑定 | 由 manager 按端口启动 | `baseUrl` 固定为 `http://{linuxServerIp}:{port}`，session 持久化在对应 Linux 服务器。 |
 | 前端访问入口 | 1 个负载均衡域名 | `VITE_TEST_AGENT_API_BASE_URL` | 浏览器只访问平台后端，不直连 opencode server 或 manager。 |
 
-后端实例之间不需要互连；每个 manager 会通过 discovery API 获得所有 READY 后端实例，并与每个后端实例建立 WebSocket 控制连接。后端扩容时，新实例启动并写入 `backend_java_processes` 后，manager 下一轮 discovery 会自动连接它。
+后端实例之间不需要直接 HTTP 互连；每个 manager 会通过 discovery API 获得所有 READY 后端实例，并与每个后端实例建立 WebSocket 控制连接。后端扩容时，新实例启动并写入 `backend_java_processes` 后，manager 下一轮 discovery 会自动连接它。应用版本工作区副本的实时同步通过共享 Redis pub/sub 广播触发，所有后端需要连接同一个 Redis，并显式开启 `TEST_AGENT_SERVER_BROADCAST_ENABLED=true`（对应配置 `test-agent.server-broadcast.enabled=true`）；未开启时退化为单机 Noop 广播，只依赖本机副本记录和补偿扫描。
 
 端口池规划必须满足：
 
@@ -95,6 +95,10 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 | `TEST_AGENT_BACKEND_STALE_AFTER` | `30s` | discovery 只返回未过期 READY 后端实例；应至少大于心跳间隔 3 倍。 |
 | `TEST_AGENT_BACKEND_DISCOVERY_LIMIT` | `100` | manager discovery 返回后端实例上限。 |
 | `TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT` | `10s` | 后端等待 manager 命令结果的超时。 |
+| `TEST_AGENT_SERVER_BROADCAST_ENABLED` | `false` / 多机 `true` | 开启 Redis 服务器广播，应用版本创建、同步和 git pull 后广播目标 commit 给其他后端。 |
+| `TEST_AGENT_SERVER_BROADCAST_CHANNEL` | `test-agent:server-broadcast` | 服务器广播 Redis channel；同一集群必须一致。 |
+| `TEST_AGENT_MANAGED_WORKSPACE_REPLICA_RECONCILER_ENABLED` | `true` | 启用应用版本工作区本机副本补偿扫描，补齐漏消息或落后 commit。 |
+| `TEST_AGENT_MANAGED_WORKSPACE_REPLICA_RECONCILER_INTERVAL` | `60s` | 副本补偿扫描间隔，最小按 10 秒执行。 |
 | `OPENCODE_MANAGER_DISCOVERY_INTERVAL` | `10s` | manager 发现新增后端实例的间隔。 |
 | `OPENCODE_MANAGER_HEARTBEAT_INTERVAL` | `10s` | manager 刷新容器、manager 和连接状态的间隔。 |
 | `OPENCODE_MANAGER_RECONNECT_INTERVAL` | `5s` | manager WebSocket 断线重连间隔。 |

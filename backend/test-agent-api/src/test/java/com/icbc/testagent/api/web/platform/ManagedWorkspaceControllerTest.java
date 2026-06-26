@@ -8,7 +8,12 @@ import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.GlobalExceptionHandler;
 import com.icbc.testagent.api.web.common.TraceIdWebFilter;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
+import com.icbc.testagent.domain.node.ExecutionNode;
+import com.icbc.testagent.domain.node.ExecutionNodeId;
+import com.icbc.testagent.domain.node.ExecutionNodeStatus;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.workspace.ManagedWorkspaceApplicationService;
 import com.icbc.testagent.workspace.ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse;
 import com.icbc.testagent.workspace.ManagedWorkspaceResponses.BranchPreferenceResponse;
@@ -17,6 +22,7 @@ import com.icbc.testagent.workspace.ManagedWorkspaceResponses.WorkspaceRuntimeRe
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -50,9 +56,11 @@ class ManagedWorkspaceControllerTest {
                 "F-GCMS-20260707",
                 "/data/appworkspace/20260707/repo/F-GCMS/workspace",
                 "ACTIVE",
+                "10.8.0.12",
                 Instant.parse("2026-06-23T00:00:00Z"),
                 Instant.parse("2026-06-23T00:00:00Z"));
-        when(service.createVersion(eq("app_gcms"), eq("aws_123"), eq("20260707"), eq("feature_testagent_20260707"), eq(USER_ID), eq(TRACE_ID)))
+        UserOpencodeProcessAssignmentService assignmentService = readyAssignmentService("10.8.0.12");
+        when(service.createVersion(eq("app_gcms"), eq("aws_123"), eq("20260707"), eq("feature_testagent_20260707"), eq(USER_ID), eq("10.8.0.12"), eq(TRACE_ID)))
                 .thenReturn(new ApplicationWorkspaceVersionResponse(
                         "awv_123",
                         "aws_123",
@@ -67,7 +75,7 @@ class ManagedWorkspaceControllerTest {
                         Instant.parse("2026-06-23T00:00:00Z"),
                         Instant.parse("2026-06-23T00:00:00Z")));
 
-        client(service).post()
+        client(service, assignmentService).post()
                 .uri("/api/internal/platform/workspace-management/applications/app_gcms/workspace-templates/aws_123/versions")
                 .header("X-Trace-Id", TRACE_ID)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -82,6 +90,37 @@ class ManagedWorkspaceControllerTest {
     }
 
     @Test
+    void gitPullVersionPassesAgentLinuxServerId() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        UserOpencodeProcessAssignmentService assignmentService = readyAssignmentService("10.8.0.12");
+        WorkspaceRuntimeResponse runtime = runtimeWorkspace();
+        when(service.gitPullVersion(eq("awv_123"), eq(USER_ID), eq("10.8.0.12"), eq(TRACE_ID)))
+                .thenReturn(new ApplicationWorkspaceVersionResponse(
+                        "awv_123",
+                        "aws_123",
+                        "app_gcms",
+                        "repo_123",
+                        "20260707",
+                        "feature_testagent_20260707",
+                        "/data/appworkspace/20260707/repo",
+                        "/data/appworkspace/20260707/repo/F-GCMS/workspace",
+                        runtime,
+                        "ACTIVE",
+                        Instant.parse("2026-06-23T00:00:00Z"),
+                        Instant.parse("2026-06-23T00:00:00Z")));
+
+        client(service, assignmentService).post()
+                .uri("/api/internal/platform/workspace-management/workspace-versions/awv_123/git-pull")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.versionId").isEqualTo("awv_123");
+
+        verify(service).gitPullVersion("awv_123", USER_ID, "10.8.0.12", TRACE_ID);
+    }
+
+    @Test
     void markRecentWorkspaceReturnsRuntimeWorkspace() {
         ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
         when(service.markRecentWorkspace("wks_123", USER_ID))
@@ -90,6 +129,7 @@ class ManagedWorkspaceControllerTest {
                         "F-GCMS-20260707",
                         "/data/workspace",
                         "ACTIVE",
+                        "127.0.0.1",
                         Instant.parse("2026-06-23T00:00:00Z"),
                         Instant.parse("2026-06-23T00:00:00Z")));
 
@@ -160,6 +200,12 @@ class ManagedWorkspaceControllerTest {
     }
 
     private WebTestClient client(ManagedWorkspaceApplicationService service) {
+        return client(service, readyAssignmentService("127.0.0.1"));
+    }
+
+    private WebTestClient client(
+            ManagedWorkspaceApplicationService service,
+            UserOpencodeProcessAssignmentService assignmentService) {
         AuthPrincipal principal = new AuthPrincipal(
                 "token",
                 USER_ID,
@@ -168,7 +214,7 @@ class ManagedWorkspaceControllerTest {
                 List.of("USER"),
                 Instant.parse("2026-06-23T00:00:00Z"),
                 Instant.parse("2026-06-24T00:00:00Z"));
-        return WebTestClient.bindToController(new ManagedWorkspaceController(service))
+        return WebTestClient.bindToController(new ManagedWorkspaceController(service, assignmentService))
                 .webFilter(new TraceIdWebFilter())
                 .webFilter((exchange, chain) -> {
                     exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, principal);
@@ -176,5 +222,36 @@ class ManagedWorkspaceControllerTest {
                 })
                 .controllerAdvice(new GlobalExceptionHandler())
                 .build();
+    }
+
+    private static UserOpencodeProcessAssignmentService readyAssignmentService(String linuxServerId) {
+        UserOpencodeProcessAssignmentService assignmentService = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        when(assignmentService.requireReadyProcess(eq(USER_ID), eq("opencode"), eq(TRACE_ID)))
+                .thenReturn(new UserOpencodeProcessAssignment(
+                        new ExecutionNode(
+                                new ExecutionNodeId("node_1234567890abcdef"),
+                                "http://" + linuxServerId + ":4096",
+                                ExecutionNodeStatus.READY,
+                                0,
+                                4,
+                                100,
+                                Instant.parse("2026-06-23T00:00:00Z"),
+                                Set.of("opencode"),
+                                Instant.parse("2026-06-23T00:00:00Z"),
+                                Instant.parse("2026-06-23T00:00:00Z"),
+                                TRACE_ID),
+                        linuxServerId));
+        return assignmentService;
+    }
+
+    private static WorkspaceRuntimeResponse runtimeWorkspace() {
+        return new WorkspaceRuntimeResponse(
+                "wks_123",
+                "F-GCMS-20260707",
+                "/data/appworkspace/20260707/repo/F-GCMS/workspace",
+                "ACTIVE",
+                "10.8.0.12",
+                Instant.parse("2026-06-23T00:00:00Z"),
+                Instant.parse("2026-06-23T00:00:00Z"));
     }
 }

@@ -822,6 +822,10 @@ export type ApplicationWorkspaceVersion = {
   workspaceRootPath: string;
   runtimeWorkspace: ManagedWorkspaceRuntime;
   status: string;
+  targetCommitHash?: string | null;
+  replicaCommitHash?: string | null;
+  replicaLinuxServerId?: string | null;
+  replicaStatus?: string | null;
   createdAt: string;
   updatedAt: string;
 };

@@ -73,6 +73,43 @@ class GitWorkspaceServiceTest {
                 null));
     }
 
+    @Test
+    void pullsCurrentBranchWithFastForwardOnly() {
+        RecordingExecutor executor = new RecordingExecutor("");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        service.pullFastForward(tempDir, "feature_testagent_20260707", "PRIVATE KEY");
+
+        assertThat(executor.calls).containsExactly(new Call(
+                List.of("git", "-C", tempDir.toString(), "pull", "--ff-only", "origin", "feature_testagent_20260707"),
+                "PRIVATE KEY"));
+    }
+
+    @Test
+    void fetchesAndResetsToExactCommitForReplicaSync() {
+        RecordingExecutor executor = new RecordingExecutor("");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        service.fetch(tempDir, "PRIVATE KEY");
+        service.resetHardToCommit(tempDir, "abc123def456");
+
+        assertThat(executor.calls).containsExactly(
+                new Call(List.of("git", "-C", tempDir.toString(), "fetch", "origin"), "PRIVATE KEY"),
+                new Call(List.of("git", "-C", tempDir.toString(), "reset", "--hard", "abc123def456"), null));
+    }
+
+    @Test
+    void reportsCleanWorktreeFromPorcelainStatus() {
+        RecordingExecutor executor = new RecordingExecutor("\n");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        assertThat(service.isWorktreeClean(tempDir)).isTrue();
+
+        assertThat(executor.calls).containsExactly(new Call(
+                List.of("git", "-C", tempDir.toString(), "status", "--porcelain"),
+                null));
+    }
+
     private static final class RecordingExecutor implements GitCommandExecutor {
         private final String stdout;
         private final List<Call> calls = new ArrayList<>();

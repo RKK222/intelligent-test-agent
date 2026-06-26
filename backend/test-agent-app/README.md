@@ -14,7 +14,7 @@
 
 - 启动 `TestAgentApplication`，扫描 `com.icbc.testagent` 下的后端组件。
 - 承载运行时 profile、配置绑定、日志配置、Actuator health、Flyway migration 入口、opencode execution node seed，以及 Java/opencode 运行心跳周期任务装配。
-- 组装 `test-agent-api`、业务模块、persistence、event、opencode-client 等 library jar，形成单一部署包。
+- 组装 `test-agent-api`、业务模块、persistence、event、opencode-client 等 library jar，形成单一部署包；多服务器部署时由 event 模块装配 Redis 服务器广播，workspace-management 模块执行应用版本工作区副本补偿。
 - 装配 `test-agent-scheduler`，默认关闭后台扫描；启用后由 scheduler 模块校验 Redis 必需。
 - 保持生产容器只运行 Java 进程；PostgreSQL、Redis 和 opencode server 均由外部配置注入。
 
@@ -48,7 +48,8 @@
 - `application-prod.yml`：数据库、API token、CORS、Redis 和 opencode baseUrl 均通过环境变量注入，不提供真实密钥默认值。
 - `application.yml`：`test-agent.scheduler.enabled` 默认 `false`，可通过 `TEST_AGENT_SCHEDULER_ENABLED` 显式启用。
 - Workspace 目录选择器允许根目录通过 `test-agent.workspace-picker.allowed-roots` / `TEST_AGENT_WORKSPACE_PICKER_ROOTS` 配置，逗号分隔，默认 `${user.home}/workspace`。
-- 应用版本工作区物理根目录通过 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT` 配置，未配置时业务层回退到 `${user.home}/test-agent-data`。
+- 应用版本工作区物理根目录通过 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT` 配置，未配置时业务层回退到 `${user.home}/test-agent-data`；副本补偿器默认开启，可用 `test-agent.managed-workspace.replica-reconciler.enabled=false` 关闭，扫描间隔默认 60 秒。
+- 多服务器应用版本工作区副本实时同步需要共享 Redis，并显式开启 `test-agent.server-broadcast.enabled=true`；默认 channel 为 `test-agent:server-broadcast`。
 - `com.h2database:h2` 仅以 test scope 存在，用于 Docker 不可用时的无持久化启动冒烟；正式 local profile 仍以 PostgreSQL/Flyway 为准。
 
 ## 测试覆盖

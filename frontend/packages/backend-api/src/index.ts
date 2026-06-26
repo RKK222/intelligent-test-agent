@@ -296,6 +296,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates/${encodeURIComponent(templateId)}/versions`,
         { method: "POST", body: JSON.stringify(payload) }
       ),
+    gitPullWorkspaceVersion: (versionId: string) =>
+      request<ApplicationWorkspaceVersion>(
+        `${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/git-pull`,
+        { method: "POST" }
+      ),
     listPersonalWorkspaces: (versionId: string) =>
       request<PersonalWorkspace[]>(`${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/personal-workspaces`),
     createPersonalWorkspace: (versionId: string, payload: CreatePersonalWorkspacePayload) =>

@@ -370,34 +370,36 @@ describe("backend-api", () => {
   });
 
   it("maps managed workspace APIs through platform URLs", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          success: true,
-          traceId: "trace_fixed",
-          data: {
-            versionId: "awv_1",
-            applicationWorkspaceId: "aws_1",
-            appId: "app_gcms",
-            repositoryId: "repo_1",
-            version: "20260707",
-            branch: "feature_testagent_20260707",
-            repoRootPath: "/data/appworkspace/20260707/repo_1",
-            workspaceRootPath: "/data/appworkspace/20260707/repo_1/F-GCMS/workspace",
-            runtimeWorkspace: {
-              workspaceId: "wks_1",
-              name: "F-GCMS-20260707",
-              rootPath: "/data/appworkspace/20260707/repo_1/F-GCMS/workspace",
-              status: "ACTIVE",
-              createdAt: "2026-06-23T00:00:00Z",
-              updatedAt: "2026-06-23T00:00:00Z"
-            },
-            status: "ACTIVE",
-            createdAt: "2026-06-23T00:00:00Z",
-            updatedAt: "2026-06-23T00:00:00Z"
-          }
-        }),
-        { status: 200 }
+    const versionResponse = {
+      versionId: "awv_1",
+      applicationWorkspaceId: "aws_1",
+      appId: "app_gcms",
+      repositoryId: "repo_1",
+      version: "20260707",
+      branch: "feature_testagent_20260707",
+      repoRootPath: "/data/appworkspace/20260707/repo_1",
+      workspaceRootPath: "/data/appworkspace/20260707/repo_1/F-GCMS/workspace",
+      runtimeWorkspace: {
+        workspaceId: "wks_1",
+        name: "F-GCMS-20260707",
+        rootPath: "/data/appworkspace/20260707/repo_1/F-GCMS/workspace",
+        status: "ACTIVE",
+        createdAt: "2026-06-23T00:00:00Z",
+        updatedAt: "2026-06-23T00:00:00Z"
+      },
+      status: "ACTIVE",
+      targetCommitHash: "abc123",
+      replicaCommitHash: "abc123",
+      replicaLinuxServerId: "10.8.0.12",
+      replicaStatus: "READY",
+      createdAt: "2026-06-23T00:00:00Z",
+      updatedAt: "2026-06-23T00:00:00Z"
+    };
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: versionResponse }), {
+          status: 200
+        })
       )
     );
     const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
@@ -414,6 +416,16 @@ describe("backend-api", () => {
       version: "20260707",
       branch: "feature_testagent_20260707"
     });
+
+    await expect(client.gitPullWorkspaceVersion("awv_1")).resolves.toMatchObject({
+      versionId: "awv_1",
+      targetCommitHash: "abc123",
+      replicaLinuxServerId: "10.8.0.12"
+    });
+    expect(fetcher.mock.calls[1]?.[0]).toBe(
+      "http://api/api/internal/platform/workspace-management/workspace-versions/awv_1/git-pull"
+    );
+    expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
   });
 
   it("does not expose SSH private key content from personal key responses", async () => {

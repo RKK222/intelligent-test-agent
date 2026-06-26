@@ -4,6 +4,7 @@ import com.icbc.testagent.domain.configuration.ApplicationId;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,6 +22,21 @@ public interface ManagedWorkspaceRepository {
     Optional<ApplicationWorkspaceVersion> findVersionByTemplateAndVersion(ApplicationWorkspaceId applicationWorkspaceId, String version);
 
     ApplicationWorkspaceVersion saveVersion(ApplicationWorkspaceVersion version);
+
+    ApplicationWorkspaceVersion updateVersionTargetCommit(
+            ApplicationWorkspaceVersionId versionId,
+            String targetCommitHash,
+            Instant updatedAt);
+
+    ApplicationWorkspaceVersionReplica saveVersionReplica(ApplicationWorkspaceVersionReplica replica);
+
+    Optional<ApplicationWorkspaceVersionReplica> findVersionReplica(
+            ApplicationWorkspaceVersionId versionId,
+            String linuxServerId);
+
+    Optional<ApplicationWorkspaceVersionReplica> findVersionReplicaByRuntimeWorkspace(WorkspaceId workspaceId);
+
+    List<ApplicationWorkspaceVersion> findActiveVersionsMissingReadyReplica(String linuxServerId);
 
     List<PersonalWorkspace> findPersonalWorkspaces(ApplicationWorkspaceVersionId versionId, UserId userId);
 

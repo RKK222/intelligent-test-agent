@@ -4,7 +4,10 @@ import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.workspace.ManagedWorkspaceApplicationService;
+import java.net.URI;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -21,9 +24,13 @@ import org.springframework.web.server.ServerWebExchange;
 public class ManagedWorkspaceController {
 
     private final ManagedWorkspaceApplicationService service;
+    private final UserOpencodeProcessAssignmentService processAssignmentService;
 
-    public ManagedWorkspaceController(ManagedWorkspaceApplicationService service) {
+    public ManagedWorkspaceController(
+            ManagedWorkspaceApplicationService service,
+            UserOpencodeProcessAssignmentService processAssignmentService) {
         this.service = service;
+        this.processAssignmentService = processAssignmentService;
     }
 
     @GetMapping("/applications")
@@ -55,6 +62,18 @@ public class ManagedWorkspaceController {
                 request.version(),
                 request.branch(),
                 userId(exchange),
+                agentLinuxServerId(exchange),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
+    @PostMapping("/workspace-versions/{versionId}/git-pull")
+    public ApiResponse<Object> gitPullVersion(
+            @PathVariable String versionId,
+            ServerWebExchange exchange) {
+        return ok(exchange, service.gitPullVersion(
+                versionId,
+                userId(exchange),
+                agentLinuxServerId(exchange),
                 RuntimeApiSupport.traceId(exchange)));
     }
 
@@ -146,6 +165,21 @@ public class ManagedWorkspaceController {
 
     private UserId userId(ServerWebExchange exchange) {
         return AuthWebSupport.getAuthPrincipal(exchange).userId();
+    }
+
+    private String agentLinuxServerId(ServerWebExchange exchange) {
+        UserOpencodeProcessAssignment assignment = processAssignmentService.requireReadyProcess(
+                userId(exchange),
+                "opencode",
+                RuntimeApiSupport.traceId(exchange));
+        if (assignment.linuxServerId() != null) {
+            return assignment.linuxServerId();
+        }
+        try {
+            return URI.create(assignment.node().baseUrl()).getHost();
+        } catch (RuntimeException exception) {
+            return null;
+        }
     }
 
     private ApiResponse<Object> ok(ServerWebExchange exchange, Object data) {

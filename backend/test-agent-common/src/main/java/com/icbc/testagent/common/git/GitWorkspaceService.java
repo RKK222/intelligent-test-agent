@@ -118,6 +118,47 @@ public class GitWorkspaceService {
         executor.execute(command, privateKey, PUSH_TIMEOUT);
     }
 
+    /**
+     * 以 fast-forward only 模式拉取指定远端分支，避免自动 merge 产生不可预期的工作区差异。
+     */
+    public void pullFastForward(Path repoRoot, String branch, String privateKey) {
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "pull", "--ff-only", "origin", branch),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 获取 origin 最新引用；副本同步先 fetch，再 reset 到明确 commit。
+     */
+    public void fetch(Path repoRoot, String privateKey) {
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "fetch", "origin"),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 将托管副本硬重置到目标 commit；调用方必须先确认这是受控副本且工作树干净。
+     */
+    public void resetHardToCommit(Path repoRoot, String commitHash) {
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "reset", "--hard", commitHash),
+                null,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 判断工作树是否无未提交变更；用于远端副本同步前避免静默覆盖本地修改。
+     */
+    public boolean isWorktreeClean(Path repoRoot) {
+        GitCommandResult result = executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "status", "--porcelain"),
+                null,
+                DEFAULT_TIMEOUT);
+        return result.stdoutText().trim().isEmpty();
+    }
+
     private List<String> addCommand(Path repoRoot, List<String> files) {
         java.util.ArrayList<String> command = new java.util.ArrayList<>();
         command.add("git");
