@@ -487,7 +487,8 @@ defineExpose({
 }
 .agent-tree {
   min-height: 160px;
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 8px;
 }
 .agent-root-row {
