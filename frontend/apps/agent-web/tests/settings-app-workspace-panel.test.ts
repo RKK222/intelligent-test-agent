@@ -34,7 +34,8 @@ function createApi(): Partial<BackendApiClient> {
     listApplicationRepositories: vi.fn().mockResolvedValue([repositories[0]]),
     listRepositoryApplications: vi.fn().mockResolvedValue([]),
     listApplicationWorkspaces: vi.fn().mockResolvedValue([]),
-    createRepository: vi.fn().mockResolvedValue(repositories[1])
+    createRepository: vi.fn().mockResolvedValue(repositories[1]),
+    updateRepository: vi.fn().mockResolvedValue(repositories[0])
   };
 }
 
@@ -178,14 +179,18 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     const { container, findByText, getByText, queryByText } = renderPanel();
 
     await findByText("应用人员管理");
+    const tabs = Array.from(container.querySelectorAll(".ta-sub-tab-group button")).map((item) => item.textContent?.trim());
+    expect(tabs).toEqual(["应用人员管理", "版本库管理", "应用与版本库关联", "工作空间管理"]);
     expect(getByText("版本库管理")).toBeTruthy();
 
     await fireEvent.click(getByText("应用与版本库关联"));
 
     expect(await findByText("按应用关联版本库")).toBeTruthy();
     expect(container.querySelector(".ta-section-title-app")?.textContent).toBe("F-COSS");
-    expect(getByText("按版本库管理应用")).toBeTruthy();
-    expect(container.querySelector('[role="separator"][aria-label="版本库关联模式分隔符"]')).toBeTruthy();
+    expect(queryByText("按版本库管理应用")).toBeNull();
+    expect(queryByText("应用 ID")).toBeNull();
+    expect(queryByText("关联应用")).toBeNull();
+    expect(container.querySelector('[role="separator"][aria-label="版本库关联模式分隔符"]')).toBeNull();
     expect(queryByText("关联版本库到当前应用")).toBeNull();
     expect(queryByText("版本库与应用双向关联")).toBeNull();
     expect(queryByText("编辑版本库")).toBeNull();
@@ -238,5 +243,28 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
       name: "新增测试库",
       standard: false
     }));
+  });
+
+  it("labels repository management forms and cancels repository editing", async () => {
+    const { container, findByText, getAllByText, getByPlaceholderText, getByText, queryByPlaceholderText, queryByText } = renderPanel();
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("版本库管理"));
+
+    expect(await findByText("版本库地址")).toBeTruthy();
+    expect(getAllByText("版本库名称").length).toBeGreaterThanOrEqual(1);
+    const createNameRow = container.querySelector(".ta-repository-create-name-row");
+    expect(createNameRow?.textContent).toContain("版本库名称");
+    expect(createNameRow?.querySelector("input")?.getAttribute("placeholder")).toBe("中文名称");
+
+    await fireEvent.click(getAllByText("编辑")[0]);
+    expect(getByText("取消")).toBeTruthy();
+    expect(getAllByText("版本库名称").length).toBeGreaterThanOrEqual(2);
+
+    await fireEvent.update(getByPlaceholderText("名称"), "临时名称");
+    await fireEvent.click(getByText("取消"));
+
+    expect(queryByText("取消")).toBeNull();
+    expect(queryByPlaceholderText("名称")).toBeNull();
   });
 });

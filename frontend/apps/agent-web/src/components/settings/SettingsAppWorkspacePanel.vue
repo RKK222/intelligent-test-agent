@@ -53,9 +53,6 @@ const lastLinkRepositoryId = ref("");
 const editRepositoryId = ref("");
 const editRepositoryName = ref("");
 const editRepositoryStandard = ref(false);
-const selectedRepositoryForApps = ref("");
-const repositoryApplications = ref<ApplicationDefinition[]>([]);
-const linkAppId = ref("");
 const repositoryCreateSectionRef = ref<HTMLElement | null>(null);
 const repoGitUrlInputRef = ref<{ focus: () => void } | null>(null);
 
@@ -102,7 +99,6 @@ function clearAppContext() {
   repositories.value = [];
   repositoryTotal.value = 0;
   appRepositories.value = [];
-  repositoryApplications.value = [];
   workspaces.value = [];
   branches.value = [];
   directories.value = [];
@@ -190,12 +186,6 @@ async function loadRepositories() {
   if (!workspaceRepositoryId.value || !linked.some((item) => item.repositoryId === workspaceRepositoryId.value)) {
     workspaceRepositoryId.value = linked[0]?.repositoryId ?? "";
   }
-  if (!selectedRepositoryForApps.value && all.items[0]) {
-    selectedRepositoryForApps.value = all.items[0].repositoryId;
-  }
-  if (selectedRepositoryForApps.value) {
-    repositoryApplications.value = await api.listRepositoryApplications(selectedRepositoryForApps.value);
-  }
 }
 
 function formatRepositoryOption(repository: CodeRepositoryConfig) {
@@ -244,13 +234,19 @@ function startEditRepository(repository: CodeRepositoryConfig) {
   editRepositoryStandard.value = repository.standard;
 }
 
+function cancelEditRepository() {
+  editRepositoryId.value = "";
+  editRepositoryName.value = "";
+  editRepositoryStandard.value = false;
+}
+
 async function saveRepository() {
   await run(async () => {
     await api.updateRepository(editRepositoryId.value, {
       name: editRepositoryName.value.trim(),
       standard: editRepositoryStandard.value
     });
-    editRepositoryId.value = "";
+    cancelEditRepository();
     await loadRepositories();
   });
 }
@@ -267,30 +263,6 @@ async function unlinkRepository(repositoryId: string) {
     await api.unlinkApplicationRepository(selectedAppId.value, repositoryId);
     await loadRepositories();
     await loadWorkspaces();
-  });
-}
-
-async function loadRepositoryApplications() {
-  if (!selectedRepositoryForApps.value) { repositoryApplications.value = []; return; }
-  await run(async () => {
-    repositoryApplications.value = await api.listRepositoryApplications(selectedRepositoryForApps.value);
-  });
-}
-
-async function linkApplication() {
-  await run(async () => {
-    await api.linkRepositoryApplication(selectedRepositoryForApps.value, linkAppId.value.trim());
-    linkAppId.value = "";
-    await loadRepositoryApplications();
-    await loadRepositories();
-  });
-}
-
-async function unlinkApplication(appId: string) {
-  await run(async () => {
-    await api.unlinkRepositoryApplication(selectedRepositoryForApps.value, appId);
-    await loadRepositoryApplications();
-    await loadRepositories();
   });
 }
 
@@ -381,8 +353,8 @@ watch(selectedAppId, async (appId) => {
       <div class="ta-sub-tabs" v-if="selectedAppId">
         <el-radio-group v-model="appTab" class="ta-sub-tab-group">
           <el-radio-button value="members">应用人员管理</el-radio-button>
-          <el-radio-button value="repositories">应用与版本库关联</el-radio-button>
           <el-radio-button value="repositoryManagement">版本库管理</el-radio-button>
+          <el-radio-button value="repositories">应用与版本库关联</el-radio-button>
           <el-radio-button value="workspaces">工作空间管理</el-radio-button>
         </el-radio-group>
       </div>
@@ -467,27 +439,6 @@ watch(selectedAppId, async (appId) => {
           </div>
         </div>
 
-        <div class="ta-mode-divider" role="separator" aria-label="版本库关联模式分隔符"></div>
-
-        <div class="ta-section">
-          <h4 class="ta-section-title">按版本库管理应用</h4>
-          <div class="ta-inline-form">
-            <el-select v-model="selectedRepositoryForApps" placeholder="选择版本库" style="width: 360px" @change="loadRepositoryApplications">
-              <el-option v-for="repo in repositories" :key="repo.repositoryId" :label="formatRepositoryOption(repo)" :value="repo.repositoryId" />
-            </el-select>
-            <el-button :disabled="loading || !selectedRepositoryForApps" @click="loadRepositoryApplications">刷新</el-button>
-          </div>
-          <div class="ta-inline-form">
-            <el-input v-model="linkAppId" placeholder="应用 ID" style="width: 240px" @keyup.enter="linkApplication" />
-            <el-button type="primary" :disabled="loading || !selectedRepositoryForApps || !linkAppId.trim()" @click="linkApplication">关联应用</el-button>
-          </div>
-          <div class="ta-item-list">
-            <div v-for="app in repositoryApplications" :key="app.appId" class="ta-item-row">
-              <span>{{ app.appName }} · {{ app.appId }}</span>
-              <el-button size="small" type="danger" plain :disabled="loading" @click="unlinkApplication(app.appId)">解除</el-button>
-            </div>
-          </div>
-        </div>
       </div>
 
       <!-- 版本库管理 -->
@@ -509,7 +460,10 @@ watch(selectedAppId, async (appId) => {
             <el-button size="small" @click="startEditRepository(repo)">编辑</el-button>
           </div>
           <div v-if="editRepositoryId" class="ta-inline-form ta-edit-form">
-            <el-input v-model="editRepositoryName" placeholder="名称" style="width: 200px" />
+            <label class="ta-form-field">
+              <span class="ta-form-label">版本库名称</span>
+              <el-input v-model="editRepositoryName" placeholder="名称" style="width: 240px" />
+            </label>
             <el-checkbox v-model="editRepositoryStandard">标准库</el-checkbox>
             <el-tooltip :content="STANDARD_REPOSITORY_TOOLTIP" placement="top">
               <el-icon class="ta-help-icon" :title="STANDARD_REPOSITORY_TOOLTIP" aria-label="标准库说明">
@@ -517,21 +471,30 @@ watch(selectedAppId, async (appId) => {
               </el-icon>
             </el-tooltip>
             <el-button type="primary" :disabled="loading" @click="saveRepository">保存</el-button>
+            <el-button :disabled="loading" @click="cancelEditRepository">取消</el-button>
           </div>
         </div>
 
         <div ref="repositoryCreateSectionRef" class="ta-section">
           <h4 class="ta-section-title">新增版本库</h4>
-          <div class="ta-inline-form">
-            <el-input ref="repoGitUrlInputRef" v-model="repoGitUrl" placeholder="Git URL" style="width: 240px" />
-            <el-input v-model="repoName" placeholder="中文名称" style="width: 160px" />
-            <el-checkbox v-model="repoStandard">标准库</el-checkbox>
-            <el-tooltip :content="STANDARD_REPOSITORY_TOOLTIP" placement="top">
-              <el-icon class="ta-help-icon" :title="STANDARD_REPOSITORY_TOOLTIP" aria-label="标准库说明">
-                <InfoFilled />
-              </el-icon>
-            </el-tooltip>
-            <el-button type="primary" :disabled="loading" @click="createRepository">新增</el-button>
+          <div class="ta-repository-create-form">
+            <label class="ta-form-field">
+              <span class="ta-form-label">版本库地址</span>
+              <el-input ref="repoGitUrlInputRef" v-model="repoGitUrl" placeholder="Git URL" style="width: 300px" />
+            </label>
+            <div class="ta-inline-form ta-repository-create-name-row">
+              <label class="ta-form-field">
+                <span class="ta-form-label">版本库名称</span>
+                <el-input v-model="repoName" placeholder="中文名称" style="width: 200px" />
+              </label>
+              <el-checkbox v-model="repoStandard">标准库</el-checkbox>
+              <el-tooltip :content="STANDARD_REPOSITORY_TOOLTIP" placement="top">
+                <el-icon class="ta-help-icon" :title="STANDARD_REPOSITORY_TOOLTIP" aria-label="标准库说明">
+                  <InfoFilled />
+                </el-icon>
+              </el-tooltip>
+              <el-button type="primary" :disabled="loading" @click="createRepository">新增</el-button>
+            </div>
           </div>
         </div>
       </div>
@@ -631,6 +594,25 @@ watch(selectedAppId, async (appId) => {
   gap: 8px;
   flex-wrap: wrap;
 }
+.ta-form-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ta-form-label {
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: #606266;
+  line-height: 1;
+}
+.ta-repository-create-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
 .ta-section-title-row {
   display: flex;
   align-items: center;
@@ -652,10 +634,6 @@ watch(selectedAppId, async (appId) => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.ta-mode-divider {
-  border-top: 1px solid #dcdfe6;
-  margin: 8px 0 6px;
 }
 .ta-item-list {
   display: flex;
