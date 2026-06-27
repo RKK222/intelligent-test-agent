@@ -1401,6 +1401,13 @@ function toggleDirectory(path: string) {
 }
 
 function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
+  // 解析技能标记 __SKILL__<name>__PROMPT__<prompt>
+  let skillPrompt: string | undefined
+  const skillMatch = prompt.match(/^__SKILL__(.+?)__PROMPT__(.+)$/s)
+  if (skillMatch) {
+    skillPrompt = skillMatch[2].trim()
+    // 保持原始 prompt 用于消息展示，skillPrompt 用于发给 AI
+  }
   if (readonlySessionReason.value) {
     feedback.value = { kind: "info", title: "当前会话只读", description: readonlySessionReason.value };
     return;
@@ -1435,11 +1442,12 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     feedback.value = { kind: "info", title: "Prompt 已排队", description: `等待当前 Run 完成后继续执行，队列 ${followUpQueue.value.length} 条` };
     return;
   }
+  const aiPrompt = skillPrompt ?? displayPrompt
   if (command && session.value) {
-    commandMutation.mutate({ ...command, prompt: displayPrompt });
+    commandMutation.mutate({ ...command, prompt: aiPrompt });
     return;
   }
-  startRunMutation.mutate({ prompt: displayPrompt, parts });
+  startRunMutation.mutate({ prompt: aiPrompt, parts });
 }
 
 function handleStopRun() {

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   AlertTriangle,
   ArrowUpRight,
+  BookOpen,
   CheckCircle,
   ChevronDown,
   ChevronRight,
@@ -36,6 +37,7 @@ type ChatMessage = {
   meta?: string
   parts: MessagePart[]
   _error?: boolean
+  _skillName?: string
 }
 
 function partText(part: unknown): string {
@@ -356,6 +358,80 @@ function resetChoice() {
   choiceCustomInput.value = ''
   choiceStep.value = 'select'
   supplementText.value = ''
+}
+
+// ===== 技能面板 =====
+type SkillItem = { name: string; description: string; prompt: string }
+
+const skills: SkillItem[] = [
+  {
+    name: '生成测试用例',
+    description: '根据代码逻辑自动生成单元测试',
+    prompt: '请为以下代码生成完整的单元测试用例',
+  },
+  {
+    name: '代码审查',
+    description: '检查代码质量、安全漏洞和最佳实践',
+    prompt: '请对以下代码进行代码审查，指出潜在的问题',
+  },
+  {
+    name: '修复 Bug',
+    description: '分析错误日志并给出修复方案',
+    prompt: '请分析以下错误并给出修复方案',
+  },
+  {
+    name: '解释代码',
+    description: '解读复杂代码逻辑和设计思路',
+    prompt: '请详细解释以下代码的逻辑和设计思路',
+  },
+  {
+    name: '重构建议',
+    description: '提出代码重构和优化建议',
+    prompt: '请对以下代码提出重构和优化建议',
+  },
+  {
+    name: 'API 文档生成',
+    description: '根据代码生成 API 接口文档',
+    prompt: '请根据以下代码生成 API 接口文档',
+  },
+]
+
+const showSkillPanel = ref(false)
+const skillFilterText = ref('')
+
+const filteredSkills = computed(() => {
+  const q = skillFilterText.value.toLowerCase()
+  if (!q) return skills
+  return skills.filter(
+    (s) =>
+      s.name.toLowerCase().includes(q) ||
+      s.description.toLowerCase().includes(q)
+  )
+})
+
+function onSkillInput(text: string) {
+  const trimmed = text.trimStart()
+  if (trimmed.startsWith('/') && !props.running && !showChoicePanel.value) {
+    const afterSlash = trimmed.slice(1)
+    skillFilterText.value = afterSlash
+    showSkillPanel.value = true
+  } else {
+    showSkillPanel.value = false
+    skillFilterText.value = ''
+  }
+}
+
+function selectSkill(skill: SkillItem) {
+  emit('send', `__SKILL__${skill.name}__PROMPT__${skill.prompt}`)
+  showSkillPanel.value = false
+  skillFilterText.value = ''
+  localInput.value = ''
+  emit('update:inputValue', '')
+}
+
+function dismissSkillPanel() {
+  showSkillPanel.value = false
+  skillFilterText.value = ''
 }
 
 // ===== 文件变更抽屉 =====
@@ -833,7 +909,10 @@ const processStatusText = computed(() => {
 // 点击展开/收起，节省聊天面板纵向空间
 const processStatusCollapsed = ref(true)
 const processStatusDotVisible = computed(
-  () => processStatusVisible.value && processStatusCollapsed.value && processReady.value
+  () =>
+    processStatusVisible.value &&
+    processStatusCollapsed.value &&
+    processReady.value
 )
 watch(
   () => props.processStatus?.status,
@@ -1102,6 +1181,8 @@ watch(
   }
 )
 
+watch(localInput, (v) => onSkillInput(v))
+
 watch(
   () => props.running,
   (now, prev) => {
@@ -1156,6 +1237,13 @@ const displayMessages = computed<ChatMessage[]>(() => {
       } else if (Array.isArray(m.parts)) {
         text = m.parts.map((p) => partText(p)).join('')
       }
+      // 检测技能消息标记 __SKILL__<name>__PROMPT__<prompt>
+      let skillName: string | undefined
+      const skillMatch = text.match(/^__SKILL__(.+?)__PROMPT__(.+)$/s)
+      if (skillMatch) {
+        skillName = skillMatch[1]
+        text = skillMatch[2]
+      }
       const hasTools = hasToolParts(m as AgentMessage)
       // 有 tool part 的消息即使没有文本也保留，不因 running 状态变化而消失
       if (!text.trim() && !hasTools) return null
@@ -1163,6 +1251,7 @@ const displayMessages = computed<ChatMessage[]>(() => {
         id: m.messageId ?? m.id ?? `${m.role}-${index}`,
         role: m.role,
         content: text,
+        _skillName: skillName,
         meta: m.createdAt ? formatTime(m.createdAt) : undefined,
         parts: m.role === 'assistant' ? [...(m.parts ?? [])] : [],
       }
@@ -1364,7 +1453,11 @@ function onCompositionEnd() {
             </div>
           </div>
           <div class="figma-chat-bubble figma-chat-bubble--user">
-            <div class="figma-chat-bubble-content">
+            <div v-if="message._skillName" class="figma-chat-skill-msg">
+              <BookOpen :size="14" class="figma-chat-skill-msg-icon" />
+              <span>{{ message._skillName }}</span>
+            </div>
+            <div v-else class="figma-chat-bubble-content">
               {{ message.content }}
             </div>
           </div>
@@ -1669,7 +1762,7 @@ function onCompositionEnd() {
           >(</template
         >
         <template v-if="taskUsage?.totalDuration">
-          · {{ taskUsage.totalDuration }}</template
+          {{ taskUsage.totalDuration }}</template
         >
 
         <template v-if="displayTokens !== undefined">
@@ -1741,6 +1834,38 @@ function onCompositionEnd() {
       >
         {{ processInitializing ? '初始化中' : '初始化进程' }}
       </button>
+    </div>
+
+    <!-- 技能面板：输入 / 触发 -->
+    <div v-if="showSkillPanel" class="figma-chat-skill-panel">
+      <div class="figma-chat-choice-header">
+        <div class="figma-chat-choice-question">技能</div>
+        <button
+          type="button"
+          class="figma-chat-choice-close"
+          @click="dismissSkillPanel"
+        >
+          <X :size="14" />
+        </button>
+      </div>
+      <div class="figma-chat-skill-list">
+        <div
+          v-for="skill in filteredSkills"
+          :key="skill.name"
+          class="figma-chat-skill-row"
+          @click="selectSkill(skill)"
+        >
+          <BookOpen :size="16" class="figma-chat-skill-icon" />
+          <div class="figma-chat-skill-info">
+            <span class="figma-chat-skill-name">{{ skill.name }}</span
+            >&nbsp;&nbsp;
+            <span class="figma-chat-skill-desc"> {{ skill.description }}</span>
+          </div>
+        </div>
+        <div v-if="filteredSkills.length === 0" class="figma-chat-skill-empty">
+          无匹配技能
+        </div>
+      </div>
     </div>
 
     <!-- 任务面板：运行中显示工具操作进度 -->
@@ -2959,6 +3084,77 @@ function onCompositionEnd() {
   background: #e4e5e9;
 }
 
+/* ---- 技能面板 ---- */
+.figma-chat-skill-panel {
+  padding: 2px 10px 6px;
+  border: 1px solid var(--ta-chat-border, #d7d7d7);
+  border-radius: 8px;
+  margin: 0 10px 4px;
+}
+
+.figma-chat-skill-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.figma-chat-skill-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.12s;
+}
+
+.figma-chat-skill-row:hover {
+  background: #f0f1f4;
+}
+
+.figma-chat-skill-icon {
+  flex-shrink: 0;
+  color: #3366ff;
+}
+
+.figma-chat-skill-info {
+  min-width: 0;
+}
+
+.figma-chat-skill-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+  line-height: 18px;
+}
+
+.figma-chat-skill-desc {
+  font-size: 11px;
+  color: #999;
+  line-height: 15px;
+}
+
+.figma-chat-skill-empty {
+  padding: 8px 4px;
+  font-size: 12px;
+  color: #999;
+  text-align: center;
+}
+
+.figma-chat-skill-msg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #3366ff;
+  font-weight: 500;
+}
+
+.figma-chat-skill-msg-icon {
+  flex-shrink: 0;
+}
+
 @keyframes figma-chat-pulse {
   0%,
   100% {
@@ -3303,17 +3499,17 @@ function onCompositionEnd() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 22px;
+  height: 22px;
   border: none;
-  border-radius: 999px;
+  border-radius: 6px;
   cursor: pointer;
   transition: background-color 0.12s ease, opacity 0.12s ease;
   flex-shrink: 0;
 }
 
 .figma-chat-send-card {
-  background: #3366ff;
+  background: #9bb3da;
   color: #fff;
   opacity: 0.45;
 }
@@ -3323,17 +3519,16 @@ function onCompositionEnd() {
 }
 
 .figma-chat-send-card:not(:disabled):hover {
-  background: #2855e0;
+  background: #4a5d78;
 }
 
 .figma-chat-stop-card {
-  background: #fff;
-  color: #3366ff;
-  border: 1.5px solid #3366ff;
+  background: #ffe8e8;
+  color: #d1423a;
 }
 
 .figma-chat-stop-card:hover {
-  background: #f0f4ff;
+  background: #ffd0d0;
 }
 
 .figma-chat-stop-card:disabled {
@@ -3343,8 +3538,8 @@ function onCompositionEnd() {
 
 .figma-chat-send-icon,
 .figma-chat-stop-icon {
-  width: 11px;
-  height: 11px;
+  width: 14px;
+  height: 14px;
 }
 
 /* ---- 常驻底部 footer（与左侧面板、中心面板底栏等高对齐） ---- */
