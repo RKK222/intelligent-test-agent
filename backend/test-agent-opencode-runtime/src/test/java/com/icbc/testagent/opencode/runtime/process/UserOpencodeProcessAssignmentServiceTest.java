@@ -13,9 +13,11 @@ import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
+import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.ContainerManagerId;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
+import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.ManagerConnectionStatus;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
@@ -58,6 +60,8 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.NEEDS_INITIALIZATION);
         assertThat(response.initializable()).isTrue();
         assertThat(response.processId()).isNull();
+        assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.UNASSIGNED);
+        assertThat(response.serviceAddress()).isNull();
         assertThat(response.message()).contains("初始化");
     }
 
@@ -98,6 +102,26 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
         assertThat(response.processId()).isEqualTo("ocp_existing");
         assertThat(response.baseUrl()).isEqualTo("http://10.8.0.12:4096");
+        assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.RUNNING);
+        assertThat(response.serviceAddress()).isEqualTo("10.8.0.12:4096");
+    }
+
+    @org.junit.jupiter.api.Test
+    void statusReportsNotRunningWhenBoundProcessHealthFails() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4100, 4, 1));
+        OpencodeServerProcess process = process("ocp_existing", USER_ID, "10.8.0.12", "ctr_idle", 4096, OpencodeServerProcessStatus.RUNNING);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, process.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.unhealthy("down");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.NEEDS_INITIALIZATION);
+        assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.NOT_RUNNING);
+        assertThat(response.serviceAddress()).isEqualTo("10.8.0.12:4096");
     }
 
     @org.junit.jupiter.api.Test
@@ -192,6 +216,8 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(response.port()).isEqualTo(4096);
         assertThat(response.linuxServerId()).isEqualTo("127.0.0.1");
         assertThat(response.processId()).isEqualTo("ocp_local_direct");
+        assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.RUNNING);
+        assertThat(response.serviceAddress()).isEqualTo("127.0.0.1:4096");
         assertThat(response.message()).contains("本地开发模式");
         // 短路模式下不允许触发 gateway 健康检测，也不应写库。
         assertThat(gateway.startCommands).isEmpty();
@@ -297,9 +323,12 @@ class UserOpencodeProcessAssignmentServiceTest {
                                 Duration.ofSeconds(5),
                                 100)),
                 new OpencodeProcessHeartbeatStore() {
-                    @Override public boolean enabled() { return false; }
                     @Override public void recordBackendHeartbeat(com.icbc.testagent.domain.opencodeprocess.BackendProcessId backendProcessId, Instant heartbeatAt) { }
+                    @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) { }
+                    @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { }
                     @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
+                    @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.of(); }
+                    @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
                     @Override public Set<com.icbc.testagent.domain.opencodeprocess.BackendProcessId> liveBackendProcessIds() { return Set.of(); }
                     @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
                     @Override public void cleanupExpiredHeartbeats() { }

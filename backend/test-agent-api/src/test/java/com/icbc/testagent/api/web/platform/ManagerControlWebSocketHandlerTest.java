@@ -17,9 +17,11 @@ import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlMessage;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlMessageCodec;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerPendingCommandRegistry;
+import com.icbc.testagent.opencode.runtime.process.socket.OpencodeManagerConfigSyncService;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.Principal;
+import java.time.Instant;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -97,7 +99,16 @@ class ManagerControlWebSocketHandlerTest {
                 heartbeat.portEnd(),
                 heartbeat.maxProcesses(),
                 heartbeat.currentProcesses(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
                 heartbeat.capabilities(),
+                null,
+                null,
                 null,
                 null,
                 null,
@@ -141,6 +152,44 @@ class ManagerControlWebSocketHandlerTest {
         verify(controlService).disconnect(new ContainerManagerId("mgr_1234567890abcdef"), "trace_1234567890abcdef");
     }
 
+    @Test
+    void handlesManagerHeartbeatAndBackendListRequest() {
+        ManagerControlApplicationService controlService = Mockito.mock(ManagerControlApplicationService.class);
+        ManagerControlMessage heartbeat = ManagerControlMessage.managerHeartbeat(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                4,
+                1,
+                Map.of("health", true),
+                List.of("bjp_1234567890abcdef"),
+                "trace_1234567890abcdef");
+        ManagerControlMessage request = ManagerControlMessage.backendListRequest("trace_1234567890abcdef");
+        when(controlService.backendListResponse("trace_1234567890abcdef")).thenReturn(
+                ManagerControlMessage.backendListResponse(
+                        List.of(new com.icbc.testagent.opencode.runtime.process.socket.ManagerBackendEndpoint(
+                                "bjp_1234567890abcdef",
+                                "10.8.0.12",
+                                "http://10.8.0.12:8080",
+                                "ws://10.8.0.12:8080/api/internal/platform/opencode-runtime/manager/ws",
+                                Instant.parse("2026-06-24T00:00:00Z"))),
+                        "trace_1234567890abcdef"));
+        FakeWebSocketSession session = FakeWebSocketSession.withToken(
+                "secret-token",
+                List.of(codec.encode(heartbeat), codec.encode(request)));
+
+        handler(controlService, new ManagerPendingCommandRegistry()).handle(session).block(Duration.ofSeconds(1));
+
+        assertThat(session.sentText()).hasSize(1);
+        assertThat(codec.decode(session.sentText().getFirst()).type())
+                .isEqualTo(com.icbc.testagent.opencode.runtime.process.socket.ManagerControlProtocol.TYPE_BACKEND_LIST_RESPONSE);
+        verify(controlService).managerHeartbeat(heartbeat);
+        verify(controlService).backendListResponse("trace_1234567890abcdef");
+    }
+
     private ManagerControlWebSocketHandler handler(
             ManagerControlApplicationService controlService,
             ManagerPendingCommandRegistry pendingCommands) {
@@ -152,7 +201,8 @@ class ManagerControlWebSocketHandlerTest {
                 controlService,
                 backendLifecycle,
                 new ManagerConnectionRegistry(),
-                pendingCommands);
+                pendingCommands,
+                Mockito.mock(OpencodeManagerConfigSyncService.class));
     }
 
     private static ManagerControlSettings settings() {

@@ -2,6 +2,7 @@ package com.icbc.testagent.configuration.management;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -15,6 +16,7 @@ import com.icbc.testagent.configuration.management.CommonParameterManagementAppl
 import com.icbc.testagent.configuration.management.CommonParameterManagementResponses.CommonParameterResponse;
 import com.icbc.testagent.domain.configuration.CommonParameter;
 import com.icbc.testagent.domain.configuration.CommonParameterRepository;
+import com.icbc.testagent.domain.configuration.CommonParameterUpdatedEvent;
 import com.icbc.testagent.domain.configuration.ParameterPlatform;
 import java.time.Clock;
 import java.time.Instant;
@@ -22,6 +24,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.ApplicationEventPublisher;
 
 class CommonParameterManagementApplicationServiceTest {
 
@@ -38,7 +41,7 @@ class CommonParameterManagementApplicationServiceTest {
                 parameter("param_opencode_public_agent_git_url_all", "OPENCODE_PUBLIC_AGENT_GIT_URL", "https://x.git", ParameterPlatform.ALL),
                 parameter("param_opencode_session_dir_linux", "OPENCODE_SESSION_DIR", "/opt/sess", ParameterPlatform.LINUX),
                 parameter("param_opencode_session_dir_windows", "OPENCODE_SESSION_DIR", "C:\\sess", ParameterPlatform.WINDOWS)));
-        CommonParameterManagementApplicationService service = new CommonParameterManagementApplicationService(repository, FIXED_CLOCK);
+        CommonParameterManagementApplicationService service = newService(repository);
 
         PageResponse<CommonParameterResponse> linuxPage = service.find(
                 new CommonParameterFilter(ParameterPlatform.LINUX), new PageRequest(1, 10));
@@ -71,20 +74,22 @@ class CommonParameterManagementApplicationServiceTest {
                 .thenReturn(Optional.of(existing))
                 .thenReturn(Optional.of(updated));
         when(repository.updateValue(eq("param_opencode_workspace_root_linux"), eq("/new"), eq(UPDATED_AT))).thenReturn(1);
-        CommonParameterManagementApplicationService service = new CommonParameterManagementApplicationService(repository, FIXED_CLOCK);
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        CommonParameterManagementApplicationService service = newService(repository, publisher);
 
         CommonParameterResponse response = service.updateValue("param_opencode_workspace_root_linux", "/new", "trace_test");
 
         assertThat(response.parameterValue()).isEqualTo("/new");
         assertThat(response.updatedAt()).isEqualTo(UPDATED_AT);
         verify(repository).updateValue("param_opencode_workspace_root_linux", "/new", UPDATED_AT);
+        verify(publisher).publishEvent(any(CommonParameterUpdatedEvent.class));
     }
 
     @Test
     void updateValueThrowsNotFoundWhenParameterMissing() {
         CommonParameterRepository repository = mock(CommonParameterRepository.class);
         when(repository.findByParameterId("param_missing")).thenReturn(Optional.empty());
-        CommonParameterManagementApplicationService service = new CommonParameterManagementApplicationService(repository, FIXED_CLOCK);
+        CommonParameterManagementApplicationService service = newService(repository);
 
         assertThatThrownBy(() -> service.updateValue("param_missing", "/new", "trace_test"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
@@ -96,7 +101,7 @@ class CommonParameterManagementApplicationServiceTest {
         CommonParameterRepository repository = mock(CommonParameterRepository.class);
         when(repository.findByParameterId("param_opencode_workspace_root_linux"))
                 .thenReturn(Optional.of(parameter("param_opencode_workspace_root_linux", "OPENCODE_WORKSPACE_ROOT", "/old", ParameterPlatform.LINUX)));
-        CommonParameterManagementApplicationService service = new CommonParameterManagementApplicationService(repository, FIXED_CLOCK);
+        CommonParameterManagementApplicationService service = newService(repository);
 
         assertThatThrownBy(() -> service.updateValue("param_opencode_workspace_root_linux", "  ", "trace_test"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
@@ -109,11 +114,20 @@ class CommonParameterManagementApplicationServiceTest {
         when(repository.findByParameterId("param_opencode_workspace_root_linux"))
                 .thenReturn(Optional.of(parameter("param_opencode_workspace_root_linux", "OPENCODE_WORKSPACE_ROOT", "/old", ParameterPlatform.LINUX)));
         when(repository.updateValue(eq("param_opencode_workspace_root_linux"), eq("/new"), eq(UPDATED_AT))).thenReturn(0);
-        CommonParameterManagementApplicationService service = new CommonParameterManagementApplicationService(repository, FIXED_CLOCK);
+        CommonParameterManagementApplicationService service = newService(repository);
 
         assertThatThrownBy(() -> service.updateValue("param_opencode_workspace_root_linux", "/new", "trace_test"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
+    }
+
+    private static CommonParameterManagementApplicationService newService(CommonParameterRepository repository) {
+        return newService(repository, mock(ApplicationEventPublisher.class));
+    }
+
+    private static CommonParameterManagementApplicationService newService(
+            CommonParameterRepository repository, ApplicationEventPublisher publisher) {
+        return new CommonParameterManagementApplicationService(repository, publisher, FIXED_CLOCK);
     }
 
     private static CommonParameter parameter(String parameterId, String english, String value, ParameterPlatform platform) {

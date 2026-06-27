@@ -19,7 +19,6 @@ management:
 
 test-agent:
   redis:
-    enabled: ${TEST_AGENT_REDIS_ENABLED:false}
     host: ${TEST_AGENT_REDIS_HOST:}
     port: ${TEST_AGENT_REDIS_PORT:6379}
   # 公共目录：base 协商默认 /data/agents-pub；env 可覆盖或留空禁用。
@@ -45,8 +44,8 @@ test-agent:
     manager-control:
       token: ${TEST_AGENT_OPENCODE_MANAGER_TOKEN:}
       listen-url: ${TEST_AGENT_BACKEND_LISTEN_URL:http://127.0.0.1:8080}
-      heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:10s}
-      backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:30s}
+      heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:5s}
+      backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:10s}
       command-timeout: ${TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT:10s}
       backend-discovery-limit: ${TEST_AGENT_BACKEND_DISCOVERY_LIMIT:100}
     nodes:

@@ -271,6 +271,19 @@
 - 新增 SSH key 时前端先用 `GET /api/internal/platform/configuration-management/ssh-key/public-key` 取服务端 RSA 公钥，再 AES-256-GCM 加密私钥、RSA-OAEP/SHA-256 加密临时 AES 密钥，连同 nonce、指纹一起提交；服务端 RSA 私钥（`classpath:rsa-private.key`）解密并校验指纹后落库。
 - 静态 AES 密钥配置 `test-agent.security.ssh-key-encryption-key` / `TEST_AGENT_SSH_KEY_ENCRYPTION_KEY` 不再使用，迁移到 RSA 私钥文件。
 
+## V20260627020000 通用参数种子 OPENCODE_MANAGER_MAX_PROCESSES
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260627020000__seed_opencode_manager_max_processes_param.sql` 初始化生产必需通用参数：
+
+| 参数 | 平台 | 默认值 | 说明 |
+|---|---|---|---|
+| `OPENCODE_MANAGER_MAX_PROCESSES` | `all` | `8` | opencode-manager 容器运行时最大进程数，后端可通过控制面下发，manager 按自身端口池容量裁剪。 |
+
+兼容策略：
+
+- 使用独立时间戳版本 `20260627020000`，不得复用已存在的 `20260627010000` SSH key migration 版本。
+- 该参数属于生产运行所需系统参数，不是测试或演示数据；如果运维需要调整默认值，应通过通用参数管理或显式 SQL 更新现有记录，不改写已发布 migration。
+
 ## V20260626150000 通用参数与工作空间创建进度
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260626150000__add_common_parameters_and_workspace_create_operations.sql` 增加通用参数、代码库英文名和设置页创建工作空间进度表。
@@ -379,11 +392,11 @@ V10 种子数据对 F-COSS 的影响：
 
 | 表 | 说明 |
 |---|---|
-| `linux_servers` | Linux 服务器快照，`linux_server_id` 当前直接保存服务器 IPv4，记录状态、最后心跳和容量摘要 JSON。 |
-| `backend_java_processes` | 后端 Java 实例，记录所属 Linux IP、实例直连地址、状态、启动时间和最后心跳。 |
+| `linux_servers` | Linux 服务器持久拓扑快照，`linux_server_id` 当前直接保存服务器 IPv4，记录状态、历史心跳字段和容量摘要 JSON；在线状态以 Redis Java 快照为准。 |
+| `backend_java_processes` | 后端 Java 实例持久拓扑，记录所属 Linux IP、实例直连地址、状态、启动时间和历史心跳字段；在线状态以 Redis Java 快照为准。 |
 | `opencode_containers` | opencode 容器，记录所属 Linux 服务器、容器名称、独立端口池、最大进程数、当前进程数和状态。 |
-| `opencode_container_managers` | 容器管理进程，每个容器最多一个 manager，记录协议版本、连接状态、能力 JSON 和最后心跳。 |
-| `opencode_manager_backend_connections` | manager 与后端 Java 实例的 WebSocket 连接快照，按 `(manager_id, backend_process_id)` 唯一。 |
+| `opencode_container_managers` | 容器管理进程，每个容器最多一个 manager，记录协议版本、连接状态、能力 JSON 和历史心跳字段；在线状态以 Redis manager 快照为准。 |
+| `opencode_manager_backend_connections` | manager 与后端 Java 实例的持久 WebSocket 连接拓扑，按 `(manager_id, backend_process_id)` 唯一；在线连接视图以 Redis manager 快照中的连接列表为准。 |
 | `opencode_server_processes` | 用户专属 opencode server 进程，记录用户、Linux 服务器、容器、主机直通端口、PID、`base_url`、启动路径和健康状态。 |
 | `user_opencode_process_bindings` | 用户到 opencode 进程的当前绑定，按 `(user_id, agent_id)` 唯一，首期 `agent_id='opencode'`。 |
 
@@ -400,7 +413,7 @@ V10 种子数据对 F-COSS 的影响：
 - 旧 `execution_nodes` 继续保留，供无用户主体的 static-token 兼容调用和本地固定节点探测使用。
 - `agent_session_bindings` 继续作为平台 Session 到远端 session/node 的主绑定表；用户进程模型只会在 binding 指向的节点与当前用户进程不一致时覆盖当前绑定，不删除旧远端 session。
 - 应用回滚时可保留这些新增表；如需完整回退 Web 用户对话到固定节点模式，应回滚后端和前端镜像，而不是删除 V10 表或清理 `/data/.testagent/agent-opencode/.session/{port}`。
-- 后端启动/心跳更新 `linux_servers`、`backend_java_processes`；manager WebSocket 注册和心跳更新 `opencode_containers`、`opencode_container_managers` 和 `opencode_manager_backend_connections`。
+- 后端启动或拓扑变化时更新 `linux_servers`、`backend_java_processes`，Java 进程在线心跳写入 Redis 快照，TTL 为 10 秒；manager WebSocket 注册更新 `opencode_containers`、`opencode_container_managers` 和 `opencode_manager_backend_connections` 的持久拓扑，`managerHeartbeat` 只写 Redis manager 快照，TTL 为 10 秒。
 
 ## V10 F-COSS 应用开发种子数据
 
@@ -445,10 +458,10 @@ V10 种子数据对 F-COSS 的影响：
 
 | 表 | 说明 |
 |---|---|
-| `linux_servers` | 后端 Linux 服务器节点，记录状态、容量摘要和心跳。 |
-| `backend_java_processes` | 后端 Java 进程实例，记录监听地址、所属 Linux 服务器和心跳。 |
+| `linux_servers` | 后端 Linux 服务器节点，记录状态、容量摘要和历史心跳字段；在线视图读取 Redis 快照。 |
+| `backend_java_processes` | 后端 Java 进程实例，记录监听地址、所属 Linux 服务器和历史心跳字段；在线视图读取 Redis 快照。 |
 | `opencode_containers` | opencode 容器，记录端口池、容量、当前进程数和状态。 |
-| `opencode_container_managers` | 容器内管理进程，记录协议版本、连接状态、能力和心跳。 |
+| `opencode_container_managers` | 容器内管理进程，记录协议版本、连接状态、能力和历史心跳字段；在线视图读取 Redis 快照。 |
 | `opencode_manager_backend_connections` | 管理进程到后端 Java 进程的控制面连接状态。 |
 | `opencode_server_processes` | 用户专属 opencode server 进程，记录用户、端口、PID、session/config 路径和健康状态。 |
 | `user_opencode_process_bindings` | 用户到 agent/opencode 进程的唯一绑定。 |
@@ -617,7 +630,7 @@ V10 种子数据对 F-COSS 的影响：
 - `opencode_server_processes.base_url` 满足 V15 校验 `= 'http://' || linux_server_id || ':' || port`。
 - `process_id` 以 `ocp_` 开头（V15 校验），`manager_id` 以 `mgr_` 开头（V15 校验）。
 - `OpencodeManagerBackendConnection` 的 `backend_process_id` 形如 `bjp_xxx`，由后端 `BackendJavaProcessLifecycleService.registerHeartbeat` 在启动时为本实例补齐，因此 migration 不预置该行。
-- 补齐逻辑详见 `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/process/socket/BackendJavaProcessLifecycleService.java#bootstrapLocalManagerConnections`，仅在 (manager, backend) 组合不存在连接行时插入；已有行只更新 `last_heartbeat_at` / `status`，与 `ManagerControlApplicationService.register/heartbeat` 协调更新。
+- 补齐逻辑详见 `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/process/socket/BackendJavaProcessLifecycleService.java#bootstrapLocalManagerConnections`，仅在 (manager, backend) 组合不存在连接行时插入；已有行只更新兼容字段 `last_heartbeat_at` / `status`。真实 manager 连上后由 `ManagerControlApplicationService.register` 维护持久连接行，在线连接状态由 Redis manager 快照表达。
 - 后续完整迁移会执行 `V20260627000000__cleanup_loopback_linux_server_seed.sql` 清理这些 `127.0.0.1` 行；本地开发不再依赖 V17 数据，必须通过 `local-direct` 或真实 manager/backend 心跳注册获得运行态拓扑。
 
 兼容策略：

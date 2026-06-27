@@ -2,6 +2,8 @@ package com.icbc.testagent.api.web.platform;
 
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.icbc.testagent.api.web.common.AuthWebSupport;
@@ -33,8 +35,15 @@ import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatu
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementOpencodeProcess;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementOverview;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementBackendMetricHistory;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementBackendMetricSample;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementBackendProcess;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementContainerMetricHistory;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementContainerMetricSample;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementContainer;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementQueryService;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementSummary;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -146,6 +155,170 @@ class RuntimeManagementControllerTest {
                 .jsonPath("$.details.linuxServerId").isEqualTo("not-an-ip");
     }
 
+    @Test
+    void superAdminCanQueryRuntimeMetricHistory() {
+        RuntimeManagementQueryService service = org.mockito.Mockito.mock(RuntimeManagementQueryService.class);
+        when(service.containerMetrics(
+                        eq(new OpencodeContainerId("ctr_01")),
+                        eq(Duration.ofMinutes(30)),
+                        eq(720),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new RuntimeManagementContainerMetricHistory(
+                        NOW,
+                        new OpencodeContainerId("ctr_01"),
+                        NOW.minusSeconds(3600),
+                        NOW,
+                        List.of(new RuntimeManagementContainerMetricSample(
+                                NOW,
+                                4,
+                                2,
+                                "cgroup",
+                                12.5,
+                                1024L,
+                                512L,
+                                50.0,
+                                128.0,
+                                256.0))));
+        when(service.backendProcessMetrics(
+                        eq(new BackendProcessId("bjp_1234567890abcdef")),
+                        eq(Duration.ofMinutes(30)),
+                        eq(720),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new RuntimeManagementBackendMetricHistory(
+                        NOW,
+                        new BackendProcessId("bjp_1234567890abcdef"),
+                        NOW.minusSeconds(3600),
+                        NOW,
+                        List.of(new RuntimeManagementBackendMetricSample(
+                                NOW,
+                                22.5,
+                                2048L,
+                                1024L,
+                                50.0,
+                                4096L,
+                                1024L,
+                                25.0,
+                                300L,
+                                400L,
+                                500L,
+                                7L,
+                                42))));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/management/containers/ctr_01/metrics?windowMinutes=30&hours=48&maxPoints=720")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.containerId").isEqualTo("ctr_01")
+                .jsonPath("$.data.samples[0].cpuUsagePercent").isEqualTo(12.5);
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/management/backend-processes/bjp_1234567890abcdef/metrics?windowMinutes=30&maxPoints=720")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.backendProcessId").isEqualTo("bjp_1234567890abcdef")
+                .jsonPath("$.data.samples[0].jvmThreadsLive").isEqualTo(42);
+    }
+
+    @Test
+    void metricHistoryAcceptsOnlyPresetWindowMinutes() {
+        RuntimeManagementQueryService service = org.mockito.Mockito.mock(RuntimeManagementQueryService.class);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+        int[] allowedWindows = {1, 30, 60, 360, 720, 1440};
+        for (int windowMinutes : allowedWindows) {
+            when(service.containerMetrics(
+                            eq(new OpencodeContainerId("ctr_01")),
+                            eq(Duration.ofMinutes(windowMinutes)),
+                            eq(720),
+                            eq("trace_1234567890abcdef")))
+                    .thenReturn(new RuntimeManagementContainerMetricHistory(
+                            NOW,
+                            new OpencodeContainerId("ctr_01"),
+                            NOW.minus(Duration.ofMinutes(windowMinutes)),
+                            NOW,
+                            List.of()));
+
+            client.get()
+                    .uri("/api/internal/platform/opencode-runtime/management/containers/ctr_01/metrics?windowMinutes=" + windowMinutes)
+                    .header("X-Trace-Id", "trace_1234567890abcdef")
+                    .exchange()
+                    .expectStatus().isOk();
+            verify(service).containerMetrics(
+                    eq(new OpencodeContainerId("ctr_01")),
+                    eq(Duration.ofMinutes(windowMinutes)),
+                    eq(720),
+                    eq("trace_1234567890abcdef"));
+            reset(service);
+        }
+
+        for (int windowMinutes : new int[] {0, 2, 3000}) {
+            client.get()
+                    .uri("/api/internal/platform/opencode-runtime/management/containers/ctr_01/metrics?windowMinutes=" + windowMinutes)
+                    .header("X-Trace-Id", "trace_1234567890abcdef")
+                    .exchange()
+                    .expectStatus().isBadRequest()
+                    .expectBody()
+                    .jsonPath("$.code").isEqualTo("VALIDATION_ERROR")
+                    .jsonPath("$.details.windowMinutes").isEqualTo(windowMinutes);
+        }
+    }
+
+    @Test
+    void metricHistoryDefaultsToOneHourAndKeepsLegacyHoursCompatibility() {
+        RuntimeManagementQueryService service = org.mockito.Mockito.mock(RuntimeManagementQueryService.class);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+        when(service.containerMetrics(
+                        eq(new OpencodeContainerId("ctr_01")),
+                        eq(Duration.ofMinutes(60)),
+                        eq(720),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new RuntimeManagementContainerMetricHistory(
+                        NOW,
+                        new OpencodeContainerId("ctr_01"),
+                        NOW.minus(Duration.ofHours(1)),
+                        NOW,
+                        List.of()));
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/management/containers/ctr_01/metrics")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk();
+        verify(service).containerMetrics(
+                eq(new OpencodeContainerId("ctr_01")),
+                eq(Duration.ofMinutes(60)),
+                eq(720),
+                eq("trace_1234567890abcdef"));
+        reset(service);
+
+        when(service.containerMetrics(
+                        eq(new OpencodeContainerId("ctr_01")),
+                        eq(Duration.ofHours(6)),
+                        eq(720),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new RuntimeManagementContainerMetricHistory(
+                        NOW,
+                        new OpencodeContainerId("ctr_01"),
+                        NOW.minus(Duration.ofHours(6)),
+                        NOW,
+                        List.of()));
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/management/containers/ctr_01/metrics?hours=6")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk();
+        verify(service).containerMetrics(
+                eq(new OpencodeContainerId("ctr_01")),
+                eq(Duration.ofHours(6)),
+                eq(720),
+                eq("trace_1234567890abcdef"));
+    }
+
     private static WebTestClient client(RuntimeManagementQueryService service, List<String> roles) {
         AuthPrincipal principal = new AuthPrincipal(
                 "token",
@@ -248,8 +421,8 @@ class RuntimeManagementControllerTest {
                 NOW,
                 new RuntimeManagementSummary(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1),
                 List.of(linuxServer),
-                List.of(backendProcess),
-                List.of(container),
+                List.of(new RuntimeManagementBackendProcess(backendProcess, null)),
+                List.of(new RuntimeManagementContainer(container, null)),
                 List.of(manager),
                 List.of(connection),
                 new PageResponse<>(List.of(new RuntimeManagementOpencodeProcess(process, Optional.of(binding), Optional.of("process-user"))), 1, 20, 1));

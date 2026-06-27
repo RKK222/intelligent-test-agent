@@ -27,12 +27,12 @@
 
 ```dotenv
 OPENCODE_MANAGER_CONTAINER_ID=ctr_01
-OPENCODE_MANAGER_LINUX_SERVER_ID=10.8.0.12
+OPENCODE_MANAGER_SERVER_IP_FILE=/data/.testagent/.serverip
 OPENCODE_MANAGER_PORT_START=4096
 OPENCODE_MANAGER_PORT_END=4100
 OPENCODE_MANAGER_MAX_PROCESSES=5
 OPENCODE_MANAGER_ID=mgr_1234567890abcdef
-OPENCODE_MANAGER_BACKEND_DISCOVERY_URL=http://10.8.0.21:8080/api/internal/platform/opencode-runtime/manager-backends
+OPENCODE_MANAGER_BACKEND_PORT=8080
 OPENCODE_MANAGER_TOKEN=<manager-control-token>
 OPENCODE_BIN=opencode
 OPENCODE_MANAGER_STATE_DIR=/data/.testagent/agent-opencode/manager
@@ -46,7 +46,9 @@ OPENCODE_CONFIG_DIR=/data/.testagent/agent-opencode/.config/opencode/
 opencode-manager run
 ```
 
-`run` 会按 `OPENCODE_MANAGER_BACKEND_DISCOVERY_URL` 周期发现后端实例，并用 `Authorization: Bearer <OPENCODE_MANAGER_TOKEN>` 与每个实例建立 `/api/internal/platform/opencode-runtime/manager/ws` WebSocket 长连接。后端扩容后，manager 在下一轮 discovery 中自动连接新实例。生产必须把 discovery URL 指向 manager 可访问的某个后端直连地址或内部服务发现地址；后端返回给 manager 的 `webSocketUrl` 由各实例自己的直连 `listen-url` 生成，不能只配置负载均衡地址。
+`run` 不再通过 HTTP discovery 与 Java 后端交互。manager 会先用 `OPENCODE_MANAGER_SERVER_IP_FILE` 解析出的服务器 IPv4 和 `OPENCODE_MANAGER_BACKEND_PORT`（默认 `8080`）派生 seed WebSocket：`ws://{serverIp}:{port}/api/internal/platform/opencode-runtime/manager/ws`，并用 `Authorization: Bearer <OPENCODE_MANAGER_TOKEN>` 建立控制连接。后端扩容后，manager 每 10 秒通过任一已连接 socket 发送 `backendListRequest`，Java 从 Redis 当前存活后端快照返回 `backendListResponse`，manager 自动补连尚未连接的后端实例；所有 socket 断开时，manager 每 10 秒按 seed 地址无限重连。
+
+非 Windows 环境下，manager 启动时不再探测容器网卡 IP，也不再依赖 `OPENCODE_MANAGER_LINUX_SERVER_ID`。Java 后端先把当前服务器 IPv4 写入 `/data/.testagent/.serverip`（可用 `TEST_AGENT_SERVER_IP_FILE` / `test-agent.opencode.manager-control.server-ip-file` 覆盖），manager 读取同一路径；文件不存在时每 1 秒重试，最多 30 秒。文件内容必须是单行 IPv4，非法内容或超时会让 manager 安全失败。Windows 本机开发态跳过 `.serverip` 等待，直接使用本机非回环 IPv4，并用机器名作为容器标识。
 
 启动单个用户进程时，manager 会执行：
 
@@ -70,20 +72,20 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 
 | 角色 | 部署数量 | 关键配置 | 说明 |
 |---|---:|---|---|
-| 后端 Java 实例 | 每台 Linux 服务器 1 个或按容量水平扩展 | `TEST_AGENT_BACKEND_LISTEN_URL`、`TEST_AGENT_LINUX_SERVER_ID`、`TEST_AGENT_OPENCODE_MANAGER_TOKEN` | `listen-url` 必须是 manager 可直连的实例地址，不能只填负载均衡地址；`linux-server-id` 当前使用 IPv4。 |
-| opencode 容器 | 每台 Linux 服务器多个 | `OPENCODE_MANAGER_CONTAINER_ID`、端口池、挂载目录 | 每个容器运行 1 个 `opencode-manager run`。 |
+| 后端 Java 实例 | 每台 Linux 服务器 1 个或按容量水平扩展 | `TEST_AGENT_BACKEND_LISTEN_URL`、`TEST_AGENT_SERVER_IP_FILE`、`TEST_AGENT_OPENCODE_MANAGER_TOKEN` | `listen-url` 必须是 manager 可直连的实例地址；非回环 IPv4 会作为服务器身份并写入 `.serverip`。 |
+| opencode 容器 | 每台 Linux 服务器多个 | `OPENCODE_MANAGER_SERVER_IP_FILE`、`OPENCODE_MANAGER_CONTAINER_ID`、端口池、挂载目录 | 每个容器运行 1 个 `opencode-manager run`；`containerId` 标识容器，`linuxServerId` 来自 `.serverip`。 |
 | 用户 opencode server 进程 | 每个用户 1 个当前绑定 | 由 manager 按端口启动 | `baseUrl` 固定为 `http://{linuxServerIp}:{port}`，session 持久化在对应 Linux 服务器。 |
 | 前端访问入口 | 1 个负载均衡域名 | `VITE_TEST_AGENT_API_BASE_URL` | 浏览器只访问平台后端，不直连 opencode server 或 manager。 |
 
-后端实例之间不需要直接 HTTP 互连；每个 manager 会通过 discovery API 获得所有 READY 后端实例，并与每个后端实例建立 WebSocket 控制连接。后端扩容时，新实例启动并写入 `backend_java_processes` 后，manager 下一轮 discovery 会自动连接它。应用版本工作区副本的实时同步通过共享 Redis pub/sub 广播触发，所有后端需要连接同一个 Redis，并显式开启 `TEST_AGENT_SERVER_BROADCAST_ENABLED=true`（对应配置 `test-agent.server-broadcast.enabled=true`）；未开启时退化为单机 Noop 广播，只依赖本机副本记录和补偿扫描。
+后端实例之间不需要直接 HTTP 互连；每个 manager 只通过 WebSocket 控制面与 Java 通信。后端扩容时，新实例启动后每 5 秒把 Java 后端快照写入 Redis，已连接 manager 下一轮 `backendListRequest` 会收到新实例的 `webSocketUrl` 并自动连接。应用版本工作区副本的实时同步通过共享 Redis pub/sub 广播触发，所有后端需要连接同一个 Redis，并显式开启 `TEST_AGENT_SERVER_BROADCAST_ENABLED=true`（对应配置 `test-agent.server-broadcast.enabled=true`）；未开启时退化为单机 Noop 广播，只依赖本机副本记录和补偿扫描。
 
 端口池规划必须满足：
 
 - 同一 Linux 服务器上所有 opencode 容器的主机可访问端口范围不能重叠，数据库约束 `opencode_server_processes(linux_server_id, port)` 会拒绝同一服务器端口重复。
 - `OPENCODE_MANAGER_MAX_PROCESSES` 不得超过 `OPENCODE_MANAGER_PORT_END - OPENCODE_MANAGER_PORT_START + 1`。
 - 建议每个容器预留 1 到 2 个端口作为故障排查或滚动扩容缓冲，不要把端口池全部按理论最大值打满。
-- `OPENCODE_MANAGER_LINUX_SERVER_ID` 必须与后端写入的 `TEST_AGENT_LINUX_SERVER_ID` 使用同一 IPv4 表达，否则用户进程 `baseUrl` 和同服务器重建规则会不一致。
-- 本地或测试环境执行 `./restart-dev-services.sh` 时，在未显式配置 `TEST_AGENT_LINUX_SERVER_ID` / `TEST_AGENT_BACKEND_LISTEN_URL` / `OPENCODE_MANAGER_LINUX_SERVER_ID` 时，会使用默认路由网卡的 IPv4 自动填充；生产和多机部署仍建议显式配置，避免网卡切换造成实例标识变化。
+- `.serverip` 固定语义是“当前服务器 IPv4”，不是容器 IP，不承载 token、URL 或 JSON；用户进程 `baseUrl` 和同服务器重建规则都使用该 IPv4。
+- 本地或测试环境执行 `./restart-dev-services.sh` 时，脚本默认把 Java 和 manager 的 server IP 文件都指向 `.tmp/dev-services/.serverip`，避免 mac/Linux 本地写 `/data` 权限问题；未显式配置 `TEST_AGENT_BACKEND_LISTEN_URL` 时，会使用默认路由网卡 IPv4 补全后端直连地址。
 
 目录和日志规划：
 
@@ -102,45 +104,46 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 
 | 参数 | 默认/建议 | 说明 |
 |---|---|---|
-| `TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL` | `10s` | 后端实例刷新 `linux_servers` 和 `backend_java_processes` 的间隔。 |
-| `TEST_AGENT_BACKEND_STALE_AFTER` | `30s` | discovery 只返回未过期 READY 后端实例；应至少大于心跳间隔 3 倍。 |
-| `TEST_AGENT_BACKEND_DISCOVERY_LIMIT` | `100` | manager discovery 返回后端实例上限。 |
+| `TEST_AGENT_REDIS_HOST` / `TEST_AGENT_REDIS_PORT` / `TEST_AGENT_REDIS_PASSWORD` | 部署 Redis 地址 | Redis 是系统必需依赖；用户进程运行管理、manager 控制面、Token 存储和 scheduler 均使用同一 Redis。 |
+| `TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL` | `5s` | 后端实例写入 Redis Java 快照的间隔。 |
+| `TEST_AGENT_BACKEND_STALE_AFTER` | `10s` | Java/manager Redis 快照 TTL；不再作为数据库心跳回退窗口使用。 |
+| `TEST_AGENT_BACKEND_DISCOVERY_LIMIT` | `100` | `backendListResponse` 和兼容诊断端点返回后端实例上限。 |
 | `TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT` | `10s` | 后端等待 manager 命令结果的超时。 |
 | `TEST_AGENT_SERVER_BROADCAST_ENABLED` | `false` / 多机 `true` | 开启 Redis 服务器广播，应用版本创建、同步和 git pull 后广播目标 commit 给其他后端。 |
 | `TEST_AGENT_SERVER_BROADCAST_CHANNEL` | `test-agent:server-broadcast` | 服务器广播 Redis channel；同一集群必须一致。 |
 | `TEST_AGENT_MANAGED_WORKSPACE_REPLICA_RECONCILER_ENABLED` | `true` | 启用应用版本工作区本机副本补偿扫描，补齐漏消息或落后 commit。 |
 | `TEST_AGENT_MANAGED_WORKSPACE_REPLICA_RECONCILER_INTERVAL` | `60s` | 副本补偿扫描间隔，最小按 10 秒执行。 |
-| `OPENCODE_MANAGER_DISCOVERY_INTERVAL` | `10s` | manager 发现新增后端实例的间隔。 |
-| `OPENCODE_MANAGER_HEARTBEAT_INTERVAL` | `10s` | manager 刷新容器、manager 和连接状态的间隔。 |
-| `OPENCODE_MANAGER_RECONNECT_INTERVAL` | `5s` | manager WebSocket 断线重连间隔。 |
+| `OPENCODE_MANAGER_DISCOVERY_INTERVAL` | `10s` | manager 通过已连接 socket 发送 `backendListRequest` 的间隔。 |
+| `OPENCODE_MANAGER_HEARTBEAT_INTERVAL` | `5s` | manager 通过任一已连接 socket 发送 `managerHeartbeat` 的间隔；心跳同时携带容器 CPU、内存、磁盘 IO 和本地 opencode 进程明细。 |
+| `OPENCODE_MANAGER_RECONNECT_INTERVAL` | `10s` | 所有 socket 断开后重连 seed WebSocket 的间隔，不设总超时。 |
 
 ## 扩容、故障处理与回滚
 
 后端 Java 扩容流程：
 
-1. 为新实例配置唯一的 `TEST_AGENT_BACKEND_LISTEN_URL=http://<backend-ip>:<port>` 和 `TEST_AGENT_LINUX_SERVER_ID=<backend-ip>`。
-2. 使用同一个 `TEST_AGENT_OPENCODE_MANAGER_TOKEN`，并确认该地址可从所有 opencode 容器访问。
+1. 为新实例配置唯一的 `TEST_AGENT_BACKEND_LISTEN_URL=http://<backend-ip>:<port>`；如果该地址是非回环 IPv4，后端会优先使用它作为服务器身份并写入 `.serverip`。
+2. 使用同一个 `TEST_AGENT_OPENCODE_MANAGER_TOKEN`，并确认该地址和 `TEST_AGENT_SERVER_IP_FILE` 所在挂载路径可从同服务器 opencode 容器访问。
 3. 启动新后端，检查 `/actuator/health` 返回 `UP`。
-4. 使用 manager token 调 `GET /api/internal/platform/opencode-runtime/manager-backends`，确认返回包含新 `backendProcessId` 和 `webSocketUrl`。
-5. 等待一个 discovery 周期后，在超级管理员运行管理页确认 manager-backend 连接出现并为 `CONNECTED`。
+4. 等待 5 到 10 秒，确认超级管理员运行管理页能看到新的 Java 后端 Redis 快照。
+5. 已连接 manager 会在下一次 `backendListRequest` 后自动补连新实例；运行管理页中对应 manager-backend 连接应出现并为 `CONNECTED`，点击后端 Java 进程可看到 Redis 中保留的近 48 小时服务器/JVM 监控趋势。
 
 opencode 容器扩容流程：
 
 1. 在同一 Linux 服务器上分配不与既有容器重叠的端口池。
 2. 按上文挂载 `/data/.testagent/agent-opencode/.session/`、`/data/.testagent/agent-opencode/.config/opencode/`、`/data/.testagent/agent-opencode/workspace/` 和 `/data/.testagent/agent-opencode/manager`。
-3. 配置新的 `OPENCODE_MANAGER_CONTAINER_ID`、`OPENCODE_MANAGER_ID` 和端口池环境变量。
-4. 启动 `opencode-manager run`，检查运行管理页中 `containers`、`managers` 和 `managerBackendConnections` 均出现对应记录。
+3. 配置新的 `OPENCODE_MANAGER_CONTAINER_ID`、`OPENCODE_MANAGER_ID`、`OPENCODE_MANAGER_SERVER_IP_FILE` 和端口池环境变量；如果不配置 `OPENCODE_MANAGER_CONTAINER_ID`，Linux 容器会使用 `/etc/hostname` 或 `HOSTNAME`。
+4. 启动 `opencode-manager run`，检查运行管理页中 `containers`、`managers` 和 `managerBackendConnections` 均出现对应记录，容器行展示最新 CPU、内存和已用内存。
 
 常见故障处理：
 
 | 现象 | 排查顺序 | 处理 |
 |---|---|---|
-| 用户初始化返回 `OPENCODE_UNAVAILABLE` | 运行管理页查看是否有 `READY` 容器和 `CONNECTED` manager；检查 manager discovery 是否成功 | 恢复 manager WebSocket 连接或启动有空余端口的容器。 |
+| 用户初始化返回 `OPENCODE_UNAVAILABLE` | 运行管理页查看是否有 Redis 在线的 `READY` 容器和 `CONNECTED` manager；检查 Redis、manager WebSocket 连接和 `managerHeartbeat` | 恢复 Redis/manager WebSocket 连接或启动有空余端口的容器。 |
 | 用户初始化返回 `OPENCODE_TIMEOUT` | 查看 `{stateDir}/logs/{port}.log`、后端命令超时配置、opencode CLI 是否卡住 | 先保留日志，再 stop/restart 目标端口或扩容新容器。 |
 | 用户初始化返回 `OPENCODE_BAD_GATEWAY` 且包含 `already managed but unhealthy` | 目标端口已有 manager 本地 state，但 PID 或 HTTP 健康检查失败 | 先查看 `{stateDir}/processes/{port}.json` 和 `{stateDir}/logs/{port}.log`；确认无业务流量后用 manager `restart` 或 `stop` 清理该端口。健康的已托管端口会被幂等复用，不会再因 `already managed` 初始化失败。 |
 | 进程健康异常后没有同服务器重建 | 检查原 `linuxServerId` 下是否还有 `READY` 且有容量的容器 | 在同一 Linux 服务器上恢复或扩容容器；不要把该用户迁移到其他服务器，否则 session 目录不可用。 |
-| 后端扩容后 manager 未连接新实例 | 检查新后端 `listenUrl/webSocketUrl` 是否是容器可达直连地址；检查 manager token | 修正 `TEST_AGENT_BACKEND_LISTEN_URL` 或 token 后等待下一轮 discovery。 |
-| 管理页看不到数据 | 确认登录用户有 `SUPER_ADMIN`；检查 V10 表是否存在；检查后端/manager 心跳 | 非超管前端菜单隐藏且后端返回 `FORBIDDEN` 是预期行为。 |
+| 后端扩容后 manager 未连接新实例 | 检查新后端是否写入 Redis Java 快照；检查 `listenUrl/webSocketUrl` 是否是容器可达直连地址；检查 manager token | 修正 Redis、`TEST_AGENT_BACKEND_LISTEN_URL` 或 token 后等待下一轮 `backendListRequest`。 |
+| 管理页看不到数据 | 确认登录用户有 `SUPER_ADMIN`；检查 Redis 是否启用可用；检查 Java/manager Redis 心跳快照 | 非超管前端菜单隐藏且后端返回 `FORBIDDEN` 是预期行为。 |
 
 回滚策略：
 
@@ -160,7 +163,7 @@ tools/verify-opencode-process-deployment.sh \
   --auth-token <super-admin-user-jwt>
 ```
 
-该脚本只检查 `/actuator/health`、manager discovery 和超级管理员 overview，不会启动、停止、重启或健康检测用户进程。未提供 token 时对应高权限接口会被跳过；生产验收建议传入两个 token，并在 shell history 策略中避免保存真实值。
+该脚本只检查 `/actuator/health`、manager 兼容诊断端点和超级管理员 overview，不会启动、停止、重启或健康检测用户进程。未提供 token 时对应高权限接口会被跳过；生产验收建议传入两个 token，并在 shell history 策略中避免保存真实值。
 
 手工验收清单：
 
@@ -168,7 +171,7 @@ tools/verify-opencode-process-deployment.sh \
 2. 复用绑定：同一用户退出再登录，状态为 `READY`，`processId/linuxServerId/port/baseUrl` 不变化。
 3. Run 防绕过：用户未初始化或进程不可用时，前端禁用发送；直接调用 Run API 返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run。
 4. 原服务器重建：停止当前用户进程或让 health 失败后重新初始化，新的进程仍位于原 `linuxServerId` 下的可用容器。
-5. 后端扩容：新增后端实例后，manager discovery 返回新实例，运行管理页出现新的 manager-backend `CONNECTED` 连接。
+5. 后端扩容：新增后端实例后，Redis 出现新 Java 快照，manager 下一次 `backendListRequest` 自动补连，运行管理页出现新的 manager-backend `CONNECTED` 连接。
 6. 管理页展示：`SUPER_ADMIN` 能看到 Linux 服务器、后端进程、容器、manager、连接、opencode 进程和绑定状态；`APP_ADMIN` 和普通用户菜单不可见，直接访问 API 返回 `FORBIDDEN`。
 7. 固定节点兼容：使用无用户主体的 static-token 兼容调用时，旧 `execution_nodes` fallback 仍可用于本地探测或旧集成。
 8. 日志脱敏：后端日志、manager 日志和 opencode server 日志不出现 `Authorization`、token、Cookie 或完整 prompt。
@@ -206,7 +209,7 @@ tools/verify-opencode-process-deployment.sh --backend-url http://127.0.0.1:8080
 
 `deploy/local/docker-compose.yml` 默认启动备用 Postgres，映射到 `127.0.0.1:15432`；Redis 是可选 profile，默认映射到 `127.0.0.1:16379`。脚本只读取环境变量，不生成或写入密钥。
 
-仓库根目录的 `restart-dev-services.sh` 是三服务一键重启入口：默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」的依赖顺序，**逐个先 kill 原进程再启动**。脚本启动后端 Java 进程时同样清空 JVM 代理系统属性，确保测试库和 Redis 使用直连网络。当 `TEST_AGENT_OPENCODE_BASE_URL` 是本地地址时，脚本默认启动 Go `opencode-manager`（`run` 长运行模式），不再单独启动 standalone `opencode serve`——用户进程由 manager 自行派生，避免 4096 端口冲突。manager 与后端共享的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 未设置时默认 `local-manager-token`（与 `application-guo.yml` 一致），本地无需手配 manager token；设 `TEST_AGENT_START_OPENCODE_MANAGER=false` 可跳过 manager。需要使用本地离线或个人调试配置时，显式传入 `--profile local --env-file .env.local` 或 `--profile guo --env-file .env.guo`。
+仓库根目录的 `restart-dev-services.sh` 是三服务一键重启入口：默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」的依赖顺序，**逐个先 kill 原进程再启动**。脚本启动后端 Java 进程时同样清空 JVM 代理系统属性，确保测试库和 Redis 使用直连网络。当 `TEST_AGENT_OPENCODE_BASE_URL` 是本地地址时，脚本默认启动 Go `opencode-manager`（`run` 长运行模式），不再单独启动 standalone `opencode serve`——用户进程由 manager 自行派生，避免 4096 端口冲突。脚本会把 `TEST_AGENT_SERVER_IP_FILE` 和 `OPENCODE_MANAGER_SERVER_IP_FILE` 默认指向 `.tmp/dev-services/.serverip`，后端先写入服务器 IPv4，manager 再读取同一路径；不再注入 `OPENCODE_MANAGER_LINUX_SERVER_ID`。manager 与后端共享的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 未设置时默认 `local-manager-token`（与 `application-guo.yml` 一致），本地无需手配 manager token；设 `TEST_AGENT_START_OPENCODE_MANAGER=false` 可跳过 manager。需要使用本地离线或个人调试配置时，显式传入 `--profile local --env-file .env.local` 或 `--profile guo --env-file .env.guo`。
 
 ## dotenv 示例
 
@@ -264,7 +267,7 @@ export TEST_AGENT_MODEL_CATALOG_SOURCE=internal
 export ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
 export TEST_AGENT_OPENCODE_MANAGER_TOKEN=<manager-control-token>
 export TEST_AGENT_BACKEND_LISTEN_URL=http://<this-backend-ip>:8080
-export TEST_AGENT_LINUX_SERVER_ID=<this-backend-ip>
+export TEST_AGENT_SERVER_IP_FILE=/data/.testagent/.serverip
 ```
 
 启用该 profile 后，Spring Boot 通过 Druid 管理 JDBC 连接池，并使用 `test-agent-persistence` 中的 Flyway migration 初始化或校验数据库结构；Actuator `health` 包含数据库健康检查；Druid Web 控制台默认关闭，不提供 `/druid/*` 管理入口。
@@ -279,7 +282,7 @@ V17 migration（`backend/test-agent-persistence/src/main/resources/db/migration/
 - `opencode_server_processes`：`ocp_local_user_dev`，绑用户 `usr_test_dev`（默认开发用户 `888888888`），端口 `4096`，`base_url = http://127.0.0.1:4096`。
 - `user_opencode_process_bindings`：`(usr_test_dev, opencode) -> ocp_local_user_dev`，状态 `ACTIVE`。
 
-`opencode_manager_backend_connections` 的 `backend_process_id` 形如 `bjp_xxx`，是后端 Java 实例 ID；后端启动时由 `BackendJavaProcessLifecycleService.registerHeartbeat` 在为本实例写心跳时补齐 `(mgr_local_4096, bjp_xxx)` 这一行，状态 `CONNECTED`。该自举仅在 (manager, backend) 组合尚无连接行时插入；后续 manager WebSocket 真正连上后由 `ManagerControlApplicationService` 继续维护。
+`opencode_manager_backend_connections` 的 `backend_process_id` 形如 `bjp_xxx`，是后端 Java 实例 ID；后端启动时由 `BackendJavaProcessLifecycleService.registerHeartbeat` 在拓扑落库阶段补齐 `(mgr_local_4096, bjp_xxx)` 这一行，状态 `CONNECTED`。该自举仅在 (manager, backend) 组合尚无连接行时插入；真实 manager WebSocket 连上后由 `ManagerControlApplicationService.register` 维护持久连接行，在线连接视图由 Redis manager 快照表达。
 
 `local` profile 默认 `test-agent.opencode.manager-control.gateway-mode=local`（受 `TEST_AGENT_OPENCODE_GATEWAY_MODE` 覆盖），加载 `LocalOpencodeProcessManagerGateway`：
 
@@ -328,7 +331,7 @@ TEST_AGENT_MODEL_CATALOG_SOURCE=internal
 ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=<manager-control-token>
 TEST_AGENT_BACKEND_LISTEN_URL=http://<this-backend-ip>:8080
-TEST_AGENT_LINUX_SERVER_ID=<this-backend-ip>
+TEST_AGENT_SERVER_IP_FILE=/data/.testagent/.serverip
 ```
 
 可选运行参数：
@@ -337,23 +340,21 @@ TEST_AGENT_LINUX_SERVER_ID=<this-backend-ip>
 TEST_AGENT_OPENCODE_NODE_ID=node_prod_opencode
 TEST_AGENT_OPENCODE_MAX_RUNS=4
 TEST_AGENT_OPENCODE_WEIGHT=100
-TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL=10s
-TEST_AGENT_BACKEND_STALE_AFTER=30s
+TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL=5s
+TEST_AGENT_BACKEND_STALE_AFTER=10s
 TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT=10s
 TEST_AGENT_BACKEND_DISCOVERY_LIMIT=100
 TEST_AGENT_DB_POOL_INITIAL_SIZE=1
 TEST_AGENT_DB_POOL_MIN_IDLE=1
 TEST_AGENT_DB_POOL_MAX_ACTIVE=10
 TEST_AGENT_DB_POOL_MAX_WAIT_MILLIS=30000
-TEST_AGENT_REDIS_ENABLED=false
 TEST_AGENT_INTERNAL_DEFAULT_MODEL=DeepSeek-V4-Flash-W8A8
 TEST_AGENT_ICBC_OPENAI_BASE_URL=http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1
 ```
 
-Redis 只有在启用时才需要提供外部地址：
+Redis 是系统必需依赖，生产部署必须提供外部地址：
 
 ```bash
-TEST_AGENT_REDIS_ENABLED=true
 TEST_AGENT_REDIS_HOST=<redis-host>
 TEST_AGENT_REDIS_PORT=6379
 TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true
@@ -364,9 +365,11 @@ TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT=50
 TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
 ```
 
-`TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED` 只控制 RunEvent 跨实例实时 fan-out；数据库 `run_events` replay、`Last-Event-ID` 和 `session_messages` 快照仍是恢复基线。Redis 不可用或该开关为 `false` 时，后端自动退回本机 live bus + DB replay。
+运行管理在线态和监控历史都只使用 Redis，不写入关系型数据库。Java/manager latest snapshot TTL 固定为 10 秒；指标历史使用 ZSET key `test-agent:runtime-metrics:server:{linuxServerId}`、`test-agent:runtime-metrics:backend:{backendProcessId}` 与 `test-agent:runtime-metrics:container:{containerId}`，每 5 秒追加原始样本，保留近 48 小时，key 过期兜底约 49 小时；运行管理 API 默认查询近 1 小时，前端提供 1 分钟、30 分钟、1 小时、6 小时、12 小时、24 小时、48 小时预设窗口。Java 服务器 CPU、内存和磁盘容量按 `linuxServerId` 连续保存，Java 后端重启后仍可查询同服务器历史；JVM 内存、GC 和线程按 `backendProcessId` 保存，只代表当前 Java 进程。Redis 历史只保证 Java 后端重启后连续；若 Redis 自身重启且未启用 AOF/RDB，历史样本会丢失。Java 指标来自 JDK MXBean 和当前工作目录所在文件系统；Go manager 使用 `gopsutil/v4` 与 `opencontainers/cgroups`，Linux 生产态优先按当前进程 cgroup v2/v1 子路径采集容器 CPU、内存和磁盘 IO，`metricsSource=cgroup`；cgroup 不可读时降级当前 manager 进程 CPU/内存，`metricsSource=process`；macOS/Windows 开发态同样使用进程指标；完全不可采集时 `metricsSource=unavailable`。采集失败只影响指标字段，不阻断心跳。
 
-`TEST_AGENT_SCHEDULER_ENABLED` 默认 `false`。启用 scheduler 后必须同时设置 `TEST_AGENT_REDIS_ENABLED=true` 并提供可用 Redis；scheduler 使用 Redis `SET NX PX` + Lua token 校验作为唯一分布式互斥实现，不降级为本机锁或数据库锁。当前只提供框架和超级管理员管理 API，不内置具体业务任务。
+`TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED` 只控制 RunEvent 跨实例实时 fan-out；数据库 `run_events` replay、`Last-Event-ID` 和 `session_messages` 快照仍是恢复基线。该开关关闭时 RunEvent 自动退回本机 live bus + DB replay，但用户进程运行管理、manager 心跳、Token 存储、scheduler 和运行指标历史仍直接依赖 Redis。
+
+`TEST_AGENT_SCHEDULER_ENABLED` 默认 `false`。启用 scheduler 后会使用 Redis `SET NX PX` + Lua token 校验作为唯一分布式互斥实现，不降级为本机锁或数据库锁。当前只提供框架和超级管理员管理 API，不内置具体业务任务。
 
 ## 运行示例
 
@@ -383,7 +386,7 @@ docker run --rm -p 8080:8080 \
   -e ICBC_OPENAI_AUTH_TOKEN=change-me \
   -e TEST_AGENT_OPENCODE_MANAGER_TOKEN=change-me-manager-token \
   -e TEST_AGENT_BACKEND_LISTEN_URL=http://10.8.0.21:8080 \
-  -e TEST_AGENT_LINUX_SERVER_ID=10.8.0.21 \
+  -e TEST_AGENT_SERVER_IP_FILE=/data/.testagent/.serverip \
   test-agent-backend:local
 ```
 
@@ -410,4 +413,4 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 | `test-agent.model-catalog.internal.api-key` | 空 | 企业内 token 的 yml 直配值；未配置时回退到 `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` 指向的环境变量。 |
 | `TEST_AGENT_ICBC_OPENAI_AUTH_MODE` | `auth-token` | 企业内调用鉴权头模式，默认写入 `Auth-Token`。 |
 | `TEST_AGENT_INTERNAL_DEFAULT_MODEL` | `DeepSeek-V4-Flash-W8A8` | 企业内默认模型，前端模型切换会优先选中该模型。 |
-`DatabaseMigrationRunner` 会在启动时执行 Flyway migration；`ExecutionNodeSeeder` 会把配置中的 opencode node 写入 `execution_nodes` 作为兼容 Run 路由来源。启用用户进程模型后，`BackendJavaProcessLifecycleRunner` 会在启动和心跳时写入 `linux_servers`、`backend_java_processes`，`opencode-manager` WebSocket 注册和心跳会写入 `opencode_containers`、`opencode_container_managers` 和 `opencode_manager_backend_connections`。
+`DatabaseMigrationRunner` 会在启动时执行 Flyway migration；`ExecutionNodeSeeder` 会把配置中的 opencode node 写入 `execution_nodes` 作为兼容 Run 路由来源。启用用户进程模型后，`BackendJavaProcessLifecycleRunner` 会在启动和拓扑变化时写入 `linux_servers`、`backend_java_processes`，并每 5 秒写入 Redis Java 快照、按 `linuxServerId` 保存的服务器资源指标历史和按 `backendProcessId` 保存的 JVM 指标历史；`opencode-manager` WebSocket 注册会保留容器、manager 和连接持久拓扑，`managerHeartbeat` 每 5 秒经 WebSocket 写入 Redis manager 快照和容器资源指标历史，latest snapshot TTL 为 10 秒，历史指标保留近 48 小时。

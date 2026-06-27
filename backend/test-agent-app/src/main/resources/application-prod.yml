@@ -21,7 +21,6 @@ test-agent:
     capacity: ${TEST_AGENT_RATE_LIMIT_CAPACITY:120}
     window: ${TEST_AGENT_RATE_LIMIT_WINDOW:1m}
   redis:
-    enabled: ${TEST_AGENT_REDIS_ENABLED:false}
     host: ${TEST_AGENT_REDIS_HOST:}
     port: ${TEST_AGENT_REDIS_PORT:6379}
   # 公共目录：base 协商默认 /data/agents-pub；生产部署必须显式 env 覆盖到实际挂载目录。
@@ -47,8 +46,8 @@ test-agent:
     manager-control:
       token: ${TEST_AGENT_OPENCODE_MANAGER_TOKEN}
       listen-url: ${TEST_AGENT_BACKEND_LISTEN_URL}
-      heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:10s}
-      backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:30s}
+      heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:5s}
+      backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:10s}
       command-timeout: ${TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT:10s}
       backend-discovery-limit: ${TEST_AGENT_BACKEND_DISCOVERY_LIMIT:100}
     nodes:

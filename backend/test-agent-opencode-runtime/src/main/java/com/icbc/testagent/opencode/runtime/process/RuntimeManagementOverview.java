@@ -1,9 +1,7 @@
 package com.icbc.testagent.opencode.runtime.process;
 
 import com.icbc.testagent.common.pagination.PageResponse;
-import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
-import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerManager;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnection;
 import java.time.Instant;
@@ -17,8 +15,8 @@ public record RuntimeManagementOverview(
         Instant generatedAt,
         RuntimeManagementSummary summary,
         List<LinuxServer> linuxServers,
-        List<BackendJavaProcess> backendProcesses,
-        List<OpencodeContainer> containers,
+        List<RuntimeManagementBackendProcess> backendProcesses,
+        List<RuntimeManagementContainer> containers,
         List<OpencodeContainerManager> managers,
         List<OpencodeManagerBackendConnection> managerBackendConnections,
         PageResponse<RuntimeManagementOpencodeProcess> opencodeProcesses) {

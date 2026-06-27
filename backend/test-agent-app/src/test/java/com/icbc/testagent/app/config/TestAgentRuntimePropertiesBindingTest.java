@@ -3,6 +3,7 @@ package com.icbc.testagent.app.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.icbc.testagent.scheduler.SchedulerProperties;
+import java.nio.file.Path;
 import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
@@ -27,56 +28,6 @@ class TestAgentRuntimePropertiesBindingTest {
             assertThat(properties.getSecurity().getCorsAllowedOrigins())
                     .contains("http://localhost:3000", "http://127.0.0.1:3000", "http://127.0.0.1:4187");
         });
-    }
-
-    @Test
-    void guoProfileCorsAllowsEnvironmentOverrideForLanFrontendOrigin() {
-        profileContextRunner
-                .withPropertyValues(
-                        "spring.profiles.active=guo",
-                        "TEST_AGENT_CORS_ALLOWED_ORIGINS=http://192.168.100.115:3000,http://127.0.0.1:3000")
-                .run(context -> {
-                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
-
-                    assertThat(properties.getSecurity().getCorsAllowedOrigins())
-                            .containsExactly("http://192.168.100.115:3000", "http://127.0.0.1:3000");
-                });
-    }
-
-    @Test
-    void guoProfileCorsAllowsDefaultLanFrontendOriginForIdeaStartup() {
-        profileContextRunner
-                .withPropertyValues("spring.profiles.active=guo")
-                .run(context -> {
-                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
-
-                    assertThat(properties.getSecurity().getCorsAllowedOrigins())
-                            .contains("http://192.168.100.115:3000", "http://127.0.0.1:3000");
-                });
-    }
-
-    @Test
-    void guoProfileBindsIdeaRunnableServiceConfigurationFromYaml() {
-        profileContextRunner
-                .withPropertyValues("spring.profiles.active=guo")
-                .run(context -> {
-                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
-
-                    assertThat(context.getEnvironment().getProperty("spring.datasource.druid.url"))
-                            .isEqualTo("jdbc:postgresql://127.0.0.1:15432/testagent?sslmode=disable");
-                    assertThat(context.getEnvironment().getProperty("test-agent.model-catalog.external.api-key"))
-                            .isNotBlank();
-                    assertThat(properties.getRedis().getHost()).isEqualTo("192.168.100.115");
-                    assertThat(properties.getRedis().getPort()).isEqualTo(16379);
-                    assertThat(properties.getWorkspacePicker().getAllowedRoots())
-                            .contains("/Users/kaka/Desktop", "D:/workspace");
-                    assertThat(properties.getOpencode().getManagerControl().getToken()).isEqualTo("local-manager-token");
-                    assertThat(properties.getOpencode().getManagerControl().getGatewayMode()).isEqualTo("local");
-                    assertThat(properties.getOpencode().getLocalDirectBaseUrl()).isEqualTo("http://192.168.100.115:4096");
-                    assertThat(properties.getOpencode().getNodes()).hasSize(1);
-                    assertThat(properties.getOpencode().getNodes().getFirst().getBaseUrl())
-                            .isEqualTo("http://192.168.100.115:4096");
-                });
     }
 
     @Test
@@ -126,7 +77,10 @@ class TestAgentRuntimePropertiesBindingTest {
 
             assertThat(managerControl.getToken()).isEmpty();
             assertThat(managerControl.getListenUrl()).isEqualTo("http://127.0.0.1:8080");
+            assertThat(managerControl.getHeartbeatInterval()).isEqualTo(Duration.ofSeconds(5));
+            assertThat(managerControl.getBackendStaleAfter()).isEqualTo(Duration.ofSeconds(10));
             assertThat(managerControl.getCommandTimeout()).isEqualTo(Duration.ofSeconds(10));
+            assertThat(managerControl.getServerIpFile()).isEqualTo(Path.of("/data/.testagent/.serverip"));
         });
     }
 
@@ -151,7 +105,6 @@ class TestAgentRuntimePropertiesBindingTest {
                         "test-agent.rate-limit.enabled=true",
                         "test-agent.rate-limit.capacity=5",
                         "test-agent.rate-limit.window=2s",
-                        "test-agent.redis.enabled=true",
                         "test-agent.redis.host=localhost",
                         "test-agent.redis.port=16379",
                         "test-agent.terminal.max-input-bytes=1024",
@@ -171,6 +124,9 @@ class TestAgentRuntimePropertiesBindingTest {
                         "test-agent.opencode.nodes[0].capabilities=chat,diff",
                         "test-agent.opencode.manager-control.token=manager-secret",
                         "test-agent.opencode.manager-control.listen-url=http://10.8.0.21:8080",
+                        "test-agent.opencode.manager-control.server-ip-file=/tmp/testagent/.serverip",
+                        "test-agent.opencode.manager-control.heartbeat-interval=4s",
+                        "test-agent.opencode.manager-control.backend-stale-after=9s",
                         "test-agent.opencode.manager-control.command-timeout=7s")
                 .run(context -> {
                     TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
@@ -181,7 +137,6 @@ class TestAgentRuntimePropertiesBindingTest {
                     assertThat(properties.getRateLimit().isEnabled()).isTrue();
                     assertThat(properties.getRateLimit().getCapacity()).isEqualTo(5);
                     assertThat(properties.getRateLimit().getWindow()).isEqualTo(Duration.ofSeconds(2));
-                    assertThat(properties.getRedis().isEnabled()).isTrue();
                     assertThat(properties.getRedis().getPort()).isEqualTo(16379);
                     assertThat(properties.getTerminal().getMaxInputBytes()).isEqualTo(1024);
                     assertThat(properties.getTerminal().getInputMessagesPerWindow()).isEqualTo(8);
@@ -198,9 +153,25 @@ class TestAgentRuntimePropertiesBindingTest {
                             .containsExactly("chat", "diff");
                     assertThat(properties.getOpencode().getManagerControl().getToken()).isEqualTo("manager-secret");
                     assertThat(properties.getOpencode().getManagerControl().getListenUrl()).isEqualTo("http://10.8.0.21:8080");
+                    assertThat(properties.getOpencode().getManagerControl().getServerIpFile())
+                            .isEqualTo(Path.of("/tmp/testagent/.serverip"));
+                    assertThat(properties.getOpencode().getManagerControl().getHeartbeatInterval()).isEqualTo(Duration.ofSeconds(4));
+                    assertThat(properties.getOpencode().getManagerControl().getBackendStaleAfter()).isEqualTo(Duration.ofSeconds(9));
                     assertThat(properties.getOpencode().getManagerControl().getCommandTimeout()).isEqualTo(Duration.ofSeconds(7));
                     // gatewayMode 未显式配置时回退为默认 socket，避免空字符串污染网关激活条件。
                     assertThat(properties.getOpencode().getManagerControl().getGatewayMode()).isEqualTo("socket");
+                });
+    }
+
+    @Test
+    void serverIpFileCanBeBoundFromEnvironmentStyleValue() {
+        profileContextRunner
+                .withPropertyValues("TEST_AGENT_SERVER_IP_FILE=/tmp/dev-services/.serverip")
+                .run(context -> {
+                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
+
+                    assertThat(properties.getOpencode().getManagerControl().getServerIpFile())
+                            .isEqualTo(Path.of("/tmp/dev-services/.serverip"));
                 });
     }
 
@@ -305,7 +276,6 @@ class TestAgentRuntimePropertiesBindingTest {
                         "TEST_AGENT_DB_PASSWORD=secret",
                         "TEST_AGENT_API_TOKEN=api-token",
                         "TEST_AGENT_CORS_ALLOWED_ORIGINS=https://agent.example.com",
-                        "TEST_AGENT_REDIS_ENABLED=true",
                         "TEST_AGENT_REDIS_HOST=prod-redis.example.internal",
                         "TEST_AGENT_REDIS_PORT=6379",
                         "TEST_AGENT_OPENCODE_NODE_ID=node_prod_opencode",
@@ -322,7 +292,6 @@ class TestAgentRuntimePropertiesBindingTest {
                     assertThat(properties.getSecurity().getApiToken()).isEqualTo("api-token");
                     assertThat(properties.getSecurity().getCorsAllowedOrigins())
                             .containsExactly("https://agent.example.com");
-                    assertThat(properties.getRedis().isEnabled()).isTrue();
                     assertThat(properties.getRedis().getHost()).isEqualTo("prod-redis.example.internal");
                     assertThat(properties.getRedis().getPort()).isEqualTo(6379);
                     assertThat(properties.getOpencode().getNodes()).hasSize(1);

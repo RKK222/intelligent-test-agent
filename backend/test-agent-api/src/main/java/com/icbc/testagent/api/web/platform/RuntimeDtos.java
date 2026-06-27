@@ -171,7 +171,7 @@ final class RuntimeDtos {
     }
 
     /**
-     * manager discovery 返回的后端实例直连端点 DTO。
+     * manager 后端列表响应和兼容诊断接口返回的后端实例直连端点 DTO。
      */
     record ManagerBackendResponse(
             String backendProcessId,
@@ -354,7 +354,9 @@ final class RuntimeDtos {
             String containerId,
             Integer port,
             String baseUrl,
-            Instant checkedAt) {
+            Instant checkedAt,
+            String serviceStatus,
+            String serviceAddress) {
 
         /**
          * 从应用层响应映射为 HTTP DTO，避免 Controller 泄露内部枚举对象。
@@ -369,7 +371,9 @@ final class RuntimeDtos {
                     response.containerId(),
                     response.port(),
                     response.baseUrl(),
-                    response.checkedAt());
+                    response.checkedAt(),
+                    response.serviceStatus().name(),
+                    response.serviceAddress());
         }
     }
 

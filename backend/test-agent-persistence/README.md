@@ -12,7 +12,7 @@
 - PostgreSQL
 - Flyway Core + PostgreSQL database support
 - Druid JDBC 连接池
-- Redis optional
+- Redis required
 - Maven library jar
 
 ## 主要职责
@@ -20,7 +20,7 @@
 - Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、应用配置管理、应用版本工作区、个人工作区和定时任务框架等持久化；运行态 Workspace 记录可空 `linux_server_id` 以支持文件 WebSocket 同服务器校验和 legacy 回填。
 - Flyway migration，包含 PostgreSQL 16 所需的 Flyway database support。
 - Repository 实现和数据库映射；新增或修改关系型 SQL 必须通过 MyBatis XML mapper。
-- Redis 限流、幂等、缓存或运行心跳能力的可选适配。
+- Redis 限流、幂等、缓存和运行心跳能力适配；用户进程运行管理与 manager 控制面在线状态依赖 Redis。
 
 ## 建表规范
 
@@ -47,6 +47,7 @@
 - `V17__seed_local_opencode_machine_for_default_user.sql`：历史本地开发种子脚本，曾预置一台 `127.0.0.1` 的 opencode 机器并绑定默认开发用户；该版本已可能被历史库应用，禁止删除、重命名或直接改写。
 - `V20260627000000__cleanup_loopback_linux_server_seed.sql`：清理 V17 留下的 `127.0.0.1` loopback opencode 拓扑、用户进程、绑定和关联的 manager-backend 连接。
 - `V20260627010000__add_encrypted_aes_key_to_user_ssh_keys.sql`：为 `user_ssh_keys` 增加 `encrypted_aes_key` 列；V10 已被 F-COSS seed 占用，后续 schema 变更不得复用 V10。
+- `V20260627020000__seed_opencode_manager_max_processes_param.sql`：初始化生产必需通用参数 `OPENCODE_MANAGER_MAX_PROCESSES`，供后端向 opencode-manager 下发运行时最大进程数。
 - `V20260626090000__add_workspace_linux_server_id.sql`：为 `workspaces` 增加可空 `linux_server_id` 和索引，新增工作区写当前服务器，历史空值由业务层在同服务器文件 WebSocket ticket 校验成功后回填。
 - `V20260626150000__add_common_parameters_and_workspace_create_operations.sql`：创建通用参数表、初始化 Linux/Windows opencode 路径参数，为 `code_repositories` 增加可空唯一 `english_name`，并创建设置页工作空间创建进度表。
 - 在 `application-local.yml` 启用 `test-agent.opencode.manager-control.gateway-mode=local`（`TEST_AGENT_OPENCODE_GATEWAY_MODE` 覆盖）后，`LocalOpencodeProcessManagerGateway` 直连真实 `opencode_server_processes.baseUrl` 跑 HTTP GET 做健康检测，`startProcess` 走占位返回；本地开箱即用状态由 `local-direct` 或真实 manager/backend 心跳注册承载，不再由 V17 seed 承载。生产 profile 不配置此开关时，`SocketOpencodeProcessManagerGateway` 走 manager WebSocket。
@@ -59,7 +60,7 @@
 - `JdbcWorkspaceCreateOperationRepository`：实现设置页创建应用工作空间进度保存、步骤更新、成功/失败记录和按 `operationId` 查询。
 - `JdbcManagedWorkspaceRepository`：实现应用版本工作区、每服务器副本、目标 commit、个人工作区、最近使用偏好和同步审计持久化。
 - `JdbcOpencodeProcessManagementRepository`：实现 opencode 用户进程管理拓扑、用户进程、用户绑定持久化，以及超级管理员运行管理页需要的拓扑列表、连接列表、进程分页筛选和绑定关联查询。
-- `RedisOpencodeProcessHeartbeatStore`：在 Redis 启用时保存 Java 后端和 opencode server 进程运行心跳，心跳 key 5 分钟 TTL，供运行管理页跨后端实例识别活进程；Redis 未启用时由 `NoopOpencodeProcessHeartbeatStore` 降级。
+- `RedisOpencodeProcessHeartbeatStore`：保存 Java 后端运行快照、manager 运行快照和 opencode server 进程运行心跳。Java/manager 快照 TTL 固定 10 秒，供运行管理页和 manager 后端列表发现识别在线实例；Java 服务器级指标按 `test-agent:runtime-metrics:server:{linuxServerId}` 保存，JVM 指标按 `test-agent:runtime-metrics:backend:{backendProcessId}` 保存，容器指标按 `test-agent:runtime-metrics:container:{containerId}` 保存；opencode server 进程心跳 key 保留 5 分钟 TTL。Redis 是系统必需依赖，不再提供 no-op 心跳存储。
 - `JdbcScheduledTaskRepository`：实现 scheduler 任务定义、用户计划、运行记录、due task 查询和 pending run 查询。
 - RunEvent append-only：持久化层分配 `eventId` 和同一 run 内单调递增 `seq`，并发追加时通过 `(run_id, seq)` 唯一约束冲突后重读重试，支持 `runId + lastSeq` 增量读取。
 
@@ -79,6 +80,7 @@
 - ConfigurationManagement 覆盖 V7 migration、V8 默认用户授权、成员逻辑删除恢复、应用与仓库多对多关联、代码库英文名保存/查询、通用参数默认值、工作空间创建进度表、应用工作空间保存和用户单 SSH key 唯一约束。
 - ManagedWorkspace 覆盖 V9/V20260626120900 migration、版本工作区唯一性、每服务器副本 upsert、目标 commit、个人空间名称唯一性、最近使用偏好和同步审计保存。
 - OpencodeProcessManagement 覆盖 V14 migration、V17 loopback 种子清理、拓扑读写、健康容器查询、运行管理拓扑列表、manager-backend 连接列表、opencode server 进程分页筛选、绑定关联查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
+- RedisOpencodeProcessHeartbeatStore 覆盖 Java/manager 运行快照写入 Redis 的 key、索引、10 秒 TTL，以及服务器级/JVM/容器指标历史 key。
 - ScheduledTask 覆盖时间戳 migration、三张 scheduler 表、运行记录分页筛选、due task 查询和会话来源预留字段读写。
 - Session 全局分页在空搜索条件下不会绑定可空 query pattern，避免 PostgreSQL 无法推断 null 参数类型。
 - ExecutionNode 覆盖可路由节点过滤：仅 READY 且 `running_runs < max_runs`，并按负载、权重、更新时间稳定排序。

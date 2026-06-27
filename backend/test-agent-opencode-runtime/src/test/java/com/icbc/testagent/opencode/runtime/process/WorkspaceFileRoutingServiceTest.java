@@ -2,8 +2,6 @@ package com.icbc.testagent.opencode.runtime.process;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
@@ -12,8 +10,11 @@ import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
+import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
+import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
-import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import com.icbc.testagent.domain.opencodeprocess.LinuxServerStatus;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
@@ -25,6 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -40,12 +42,12 @@ class WorkspaceFileRoutingServiceTest {
     void routesWorkspaceFilesToBackendOnSameLinuxServer() {
         WorkspaceRepository workspaceRepository = Mockito.mock(WorkspaceRepository.class);
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
-        OpencodeProcessManagementRepository processRepository = Mockito.mock(OpencodeProcessManagementRepository.class);
+        OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
         when(workspaceRepository.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace("10.8.0.12")));
         when(assignmentService.status(USER_ID, "opencode", TRACE_ID)).thenReturn(process("10.8.0.12"));
-        when(processRepository.findReadyBackendJavaProcesses(any(), anyInt())).thenReturn(List.of(backend("10.8.0.12")));
+        when(heartbeatStore.liveBackendSnapshots()).thenReturn(List.of(backendSnapshot("10.8.0.12")));
 
-        WorkspaceFileRouteResponse response = service(workspaceRepository, assignmentService, processRepository)
+        WorkspaceFileRouteResponse response = service(workspaceRepository, assignmentService, heartbeatStore)
                 .routeWorkspace(USER_ID, "opencode", WORKSPACE_ID, TRACE_ID);
 
         assertThat(response.linuxServerId()).isEqualTo("10.8.0.12");
@@ -57,11 +59,11 @@ class WorkspaceFileRoutingServiceTest {
     void rejectsWorkspaceFilesWhenWorkspaceAndAgentAreOnDifferentLinuxServers() {
         WorkspaceRepository workspaceRepository = Mockito.mock(WorkspaceRepository.class);
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
-        OpencodeProcessManagementRepository processRepository = Mockito.mock(OpencodeProcessManagementRepository.class);
+        OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
         when(workspaceRepository.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace("10.8.0.12")));
         when(assignmentService.status(eq(USER_ID), eq("opencode"), eq(TRACE_ID))).thenReturn(process("10.8.0.13"));
 
-        assertThatThrownBy(() -> service(workspaceRepository, assignmentService, processRepository)
+        assertThatThrownBy(() -> service(workspaceRepository, assignmentService, heartbeatStore)
                         .routeWorkspace(USER_ID, "opencode", WORKSPACE_ID, TRACE_ID))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
@@ -70,17 +72,17 @@ class WorkspaceFileRoutingServiceTest {
     private static WorkspaceFileRoutingService service(
             WorkspaceRepository workspaceRepository,
             UserOpencodeProcessAssignmentService assignmentService,
-            OpencodeProcessManagementRepository processRepository) {
+            OpencodeProcessHeartbeatStore heartbeatStore) {
         return new WorkspaceFileRoutingService(
                 workspaceRepository,
                 assignmentService,
-                processRepository,
+                heartbeatStore,
                 new ManagerControlSettings(
                         "secret-token",
                         "http://10.8.0.12:8080",
                         new LinuxServerId("10.8.0.12"),
+                        Duration.ofSeconds(5),
                         Duration.ofSeconds(10),
-                        Duration.ofSeconds(30),
                         Duration.ofSeconds(10),
                         100),
                 Clock.fixed(NOW, ZoneOffset.UTC));
@@ -122,5 +124,19 @@ class WorkspaceFileRoutingServiceTest {
                 NOW,
                 NOW,
                 TRACE_ID);
+    }
+
+    private static BackendRuntimeSnapshot backendSnapshot(String linuxServerId) {
+        return new BackendRuntimeSnapshot(
+                new LinuxServer(
+                        new LinuxServerId(linuxServerId),
+                        linuxServerId,
+                        LinuxServerStatus.READY,
+                        Map.of("backendWorkingDirectory", "/workspace/" + linuxServerId),
+                        NOW,
+                        NOW,
+                        NOW,
+                        TRACE_ID),
+                backend(linuxServerId));
     }
 }

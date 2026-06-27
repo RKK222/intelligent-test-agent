@@ -19,7 +19,9 @@ public class ManagerControlMessageCodec {
      * 注入应用共享 ObjectMapper。
      */
     public ManagerControlMessageCodec(ObjectMapper objectMapper) {
-        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null")
+                .copy()
+                .findAndRegisterModules();
     }
 
     /**

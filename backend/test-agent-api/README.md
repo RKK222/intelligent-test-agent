@@ -18,8 +18,8 @@
 - RunEvent SSE 建连时先委托 runtime 恢复 opencode projected messages，再进入 durable replay 与 live bus 合流。
 - 暴露 Workspace 文件 WebSocket 路由、ticket 和 WebSocket RPC 入口：Controller/Handler 只做鉴权、`SUPER_ADMIN` 校验、ticket、Origin、traceId、协议 envelope 和统一错误包装，文件系统操作继续委托 `test-agent-workspace-management`。
 - 暴露 Agent 配置管理 HTTP 和进度 WebSocket 入口：Controller 只做认证、`SUPER_ADMIN` 写权限、DTO 和 traceId 转换；进度 WebSocket 使用一次性 ticket、Origin 白名单和 `snapshot/step/completed/failed` envelope，业务逻辑委托 `test-agent-workspace-management`。
-- 暴露 opencode-manager discovery API 和 WebSocket 控制面入口，入口只做 manager token 鉴权、DTO/消息适配和 traceId 处理。
-- 暴露超级管理员只读运行管理 overview API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选参数校验、用户名筛选参数透传、DTO 映射和 traceId 处理。
+- 暴露 opencode-manager 兼容诊断 API 和 WebSocket 控制面入口，入口只做 manager token 鉴权、DTO/消息适配和 traceId 处理；Go manager 运行路径不通过 HTTP 与 Java 交互，后端列表发现走 WebSocket `backendListRequest/backendListResponse`。
+- 暴露超级管理员只读运行管理 overview 与容器/后端指标历史 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选/历史查询参数校验、用户名筛选参数透传、DTO 映射和 traceId 处理；指标历史主参数为 `windowMinutes`，`hours` 仅兼容旧客户端。
 - 暴露超级管理员定时任务管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选参数校验、DTO 映射和 traceId 处理。
 - Session 消息查询优先委托 runtime 刷新 agent projected messages，失败时返回数据库快照；active-run API 供前端刷新后恢复 SSE。
 - 本地 CORS 默认允许主前端和 `frontend-opencode` Vite/Preview/E2E 端口；生产必须通过 `TEST_AGENT_CORS_ALLOWED_ORIGINS` 显式收敛。
@@ -47,9 +47,10 @@
 ## 测试覆盖
 
 - `RuntimeControllerTest` 覆盖 Workspace、目录选择、Session、Run、Diff、agent-scoped Run URL、RunEvent SSE 恢复快照和内部平台兼容 URL。
-- `RuntimeManagementControllerTest` 覆盖运行管理 overview API 的 `SUPER_ADMIN` 成功、用户名筛选/响应映射、非超级管理员拒绝、未认证、非法分页/状态参数和 traceId。
+- `RuntimeManagementControllerTest` 覆盖运行管理 overview 与指标历史 API 的 `SUPER_ADMIN` 成功、用户名筛选/响应映射、`windowMinutes` 预设窗口、`hours` 兼容、历史参数默认值与上限、非超级管理员拒绝、未认证、非法分页/状态参数和 traceId。
 - `SchedulerManagementControllerTest` 覆盖定时任务管理 API 的 `SUPER_ADMIN` 成功、`APP_ADMIN`/匿名拒绝、非法状态参数、任务 patch、手动触发和运行记录查询。
-- `ManagerBackendDiscoveryControllerTest` 覆盖 manager token 鉴权、统一响应、traceId 和 READY 后端实例 DTO。
+- `ManagerBackendDiscoveryControllerTest` 覆盖 manager token 鉴权、统一响应、traceId 和 Redis 在线后端实例 DTO；该接口仅作兼容诊断。
+- `ManagerControlWebSocketHandlerTest` 覆盖 `register`、`managerHeartbeat`、`backendListRequest`、命令结果和错误 envelope 的 WebSocket 入口适配。
 - `PlatformOpencodeRuntimeControllerTest` 覆盖旧 `/api/...` 与 `/api/internal/platform/...` 的 opencode runtime 代理入口、MCP tools、permission reply、session share、traceId 和可选用户主体透传。
 - `AgentOpencodeRuntimeControllerTest` 覆盖 `/api/internal/agent/{agentId}/...` 原始 opencode 路径兼容、agentId、traceId 和可选用户主体透传。
 - `AuthWebSupportTest` 覆盖可选认证主体读取，确保 static-token 兼容入口不会因缺少用户主体抛错。

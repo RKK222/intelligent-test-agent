@@ -8,9 +8,11 @@ import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
+import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.ContainerManagerId;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
+import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerManager;
@@ -131,9 +133,12 @@ class OpencodeProcessHeartbeatMaintenanceServiceTest {
         private final List<OpencodeProcessId> opencodeHeartbeats = new ArrayList<>();
         private boolean cleanupCalled;
 
-        @Override public boolean enabled() { return true; }
         @Override public void recordBackendHeartbeat(BackendProcessId backendProcessId, Instant heartbeatAt) {}
+        @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) {}
+        @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) {}
         @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { opencodeHeartbeats.add(processId); }
+        @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.of(); }
+        @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
         @Override public Set<BackendProcessId> liveBackendProcessIds() { return Set.of(); }
         @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.copyOf(opencodeHeartbeats); }
         @Override public void cleanupExpiredHeartbeats() { cleanupCalled = true; }

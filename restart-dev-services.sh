@@ -310,16 +310,26 @@ apply_detected_runtime_ip_defaults() {
     return
   fi
 
-  # 后端 Java 进程的 Linux 服务器 IP 现由后端启动时自动探测（LinuxServerIpResolver），
-  # 不再读取 TEST_AGENT_LINUX_SERVER_ID；这里只补全直连地址和 manager 容器所需的服务器 IP。
+  # 后端 Java 进程会把最终服务器 IP 写入 TEST_AGENT_SERVER_IP_FILE；
+  # 这里仅补全 manager 可直连的后端 listen-url。
   if [[ -z "${TEST_AGENT_BACKEND_LISTEN_URL:-}" ]]; then
     backend_port="$(url_port "${backend_url}")"
     export TEST_AGENT_BACKEND_LISTEN_URL="http://${local_ipv4}:${backend_port}"
     echo "Defaulting TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4: ${TEST_AGENT_BACKEND_LISTEN_URL}"
   fi
-  if [[ -z "${OPENCODE_MANAGER_LINUX_SERVER_ID:-}" ]]; then
-    export OPENCODE_MANAGER_LINUX_SERVER_ID="${local_ipv4}"
-    echo "Defaulting OPENCODE_MANAGER_LINUX_SERVER_ID to detected local IPv4: ${OPENCODE_MANAGER_LINUX_SERVER_ID}"
+}
+
+apply_server_ip_file_defaults() {
+  if [[ -z "${TEST_AGENT_SERVER_IP_FILE:-}" ]]; then
+    export TEST_AGENT_SERVER_IP_FILE="${LOG_DIR}/.serverip"
+    echo "Defaulting TEST_AGENT_SERVER_IP_FILE to local dev path: ${TEST_AGENT_SERVER_IP_FILE}"
+  fi
+  if [[ -z "${OPENCODE_MANAGER_SERVER_IP_FILE:-}" ]]; then
+    export OPENCODE_MANAGER_SERVER_IP_FILE="${TEST_AGENT_SERVER_IP_FILE}"
+    echo "Defaulting OPENCODE_MANAGER_SERVER_IP_FILE to TEST_AGENT_SERVER_IP_FILE: ${OPENCODE_MANAGER_SERVER_IP_FILE}"
+  fi
+  if [[ -z "${OPENCODE_MANAGER_BACKEND_PORT:-}" ]]; then
+    export OPENCODE_MANAGER_BACKEND_PORT="$(url_port "${backend_url}")"
   fi
 }
 
@@ -615,6 +625,7 @@ start_backend() {
   fi
 
   mkdir -p "${LOG_DIR}"
+  rm -f "${TEST_AGENT_SERVER_IP_FILE}" >/dev/null 2>&1 || true
   echo "Starting backend with profile '${profile}'. Logs: ${LOG_DIR}/backend.log"
   echo "Backend JVM proxy settings are disabled for direct DB/Redis connections."
   : >"${LOG_DIR}/backend.log"
@@ -680,7 +691,7 @@ start_opencode_manager() {
     return
   fi
 
-  local bin port_start port_end max_processes manager_id container_id linux_server_id manager_state_dir manager_session_root opencode_config_dir discovery_url version
+  local bin port_start port_end max_processes manager_id container_id manager_state_dir manager_session_root opencode_config_dir server_ip_file backend_port version
   bin="$(opencode_bin)"
   if [[ -z "${bin}" || ! -x "${bin}" ]]; then
     echo "opencode binary not found or not executable. Set TEST_AGENT_OPENCODE_BIN in ${env_file}." >&2
@@ -692,11 +703,11 @@ start_opencode_manager() {
   max_processes="${OPENCODE_MANAGER_MAX_PROCESSES:-$((port_end - port_start + 1))}"
   manager_id="${OPENCODE_MANAGER_ID:-mgr_local_opencode}"
   container_id="${OPENCODE_MANAGER_CONTAINER_ID:-ctr_local_opencode}"
-  linux_server_id="${OPENCODE_MANAGER_LINUX_SERVER_ID:-127.0.0.1}"
   manager_state_dir="${OPENCODE_MANAGER_STATE_DIR:-${LOG_DIR}/opencode-manager-state}"
   manager_session_root="${OPENCODE_SESSION_ROOT:-${LOG_DIR}/opencode-manager-session}"
   opencode_config_dir="${OPENCODE_CONFIG_DIR:-${HOME}/.config/opencode/}"
-  discovery_url="${OPENCODE_MANAGER_BACKEND_DISCOVERY_URL:-${backend_url%/}/api/internal/platform/opencode-runtime/manager-backends}"
+  server_ip_file="${OPENCODE_MANAGER_SERVER_IP_FILE:-${TEST_AGENT_SERVER_IP_FILE}}"
+  backend_port="${OPENCODE_MANAGER_BACKEND_PORT:-$(url_port "${backend_url}")}"
   version="$("${bin}" --version 2>/dev/null || true)"
 
   mkdir -p "${LOG_DIR}" "${manager_state_dir}" "${manager_session_root}"
@@ -704,28 +715,28 @@ start_opencode_manager() {
   : >"${LOG_DIR}/opencode-manager.log"
   if command -v screen >/dev/null 2>&1; then
     local manager_cmd
-    printf -v manager_cmd 'cd %q && export OPENCODE_MANAGER_CONTAINER_ID=%q OPENCODE_MANAGER_LINUX_SERVER_ID=%q OPENCODE_MANAGER_PORT_START=%q OPENCODE_MANAGER_PORT_END=%q OPENCODE_MANAGER_MAX_PROCESSES=%q OPENCODE_MANAGER_ID=%q OPENCODE_MANAGER_BACKEND_DISCOVERY_URL=%q OPENCODE_MANAGER_TOKEN="$TEST_AGENT_OPENCODE_MANAGER_TOKEN" OPENCODE_MANAGER_STATE_DIR=%q OPENCODE_SESSION_ROOT=%q OPENCODE_CONFIG_DIR=%q OPENCODE_BIN=%q OPENCODE_ALLOWED_CORS=%q OPENCODE_MANAGER_DISCOVERY_INTERVAL="${OPENCODE_MANAGER_DISCOVERY_INTERVAL:-2s}" OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-2s}" OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-1s}" && exec ./opencode-manager/bin/opencode-manager run >>%q 2>&1' \
-      "${ROOT_DIR}" "${container_id}" "${linux_server_id}" "${port_start}" "${port_end}" "${max_processes}" "${manager_id}" "${discovery_url}" "${manager_state_dir}" "${manager_session_root}" "${opencode_config_dir}" "${bin}" "http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}" "${LOG_DIR}/opencode-manager.log"
+    printf -v manager_cmd 'cd %q && export OPENCODE_MANAGER_CONTAINER_ID=%q OPENCODE_MANAGER_SERVER_IP_FILE=%q OPENCODE_MANAGER_BACKEND_PORT=%q OPENCODE_MANAGER_PORT_START=%q OPENCODE_MANAGER_PORT_END=%q OPENCODE_MANAGER_MAX_PROCESSES=%q OPENCODE_MANAGER_ID=%q OPENCODE_MANAGER_TOKEN="$TEST_AGENT_OPENCODE_MANAGER_TOKEN" OPENCODE_MANAGER_STATE_DIR=%q OPENCODE_SESSION_ROOT=%q OPENCODE_CONFIG_DIR=%q OPENCODE_BIN=%q OPENCODE_ALLOWED_CORS=%q OPENCODE_MANAGER_DISCOVERY_INTERVAL="${OPENCODE_MANAGER_DISCOVERY_INTERVAL:-10s}" OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}" OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}" && exec ./opencode-manager/bin/opencode-manager run >>%q 2>&1' \
+      "${ROOT_DIR}" "${container_id}" "${server_ip_file}" "${backend_port}" "${port_start}" "${port_end}" "${max_processes}" "${manager_id}" "${manager_state_dir}" "${manager_session_root}" "${opencode_config_dir}" "${bin}" "http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}" "${LOG_DIR}/opencode-manager.log"
     screen -dmS "${OPENCODE_MANAGER_SCREEN_SESSION}" bash -lc "${manager_cmd}"
   else
     (
       cd "${ROOT_DIR}"
       export OPENCODE_MANAGER_CONTAINER_ID="${container_id}"
-      export OPENCODE_MANAGER_LINUX_SERVER_ID="${linux_server_id}"
+      export OPENCODE_MANAGER_SERVER_IP_FILE="${server_ip_file}"
+      export OPENCODE_MANAGER_BACKEND_PORT="${backend_port}"
       export OPENCODE_MANAGER_PORT_START="${port_start}"
       export OPENCODE_MANAGER_PORT_END="${port_end}"
       export OPENCODE_MANAGER_MAX_PROCESSES="${max_processes}"
       export OPENCODE_MANAGER_ID="${manager_id}"
-      export OPENCODE_MANAGER_BACKEND_DISCOVERY_URL="${discovery_url}"
       export OPENCODE_MANAGER_TOKEN="${TEST_AGENT_OPENCODE_MANAGER_TOKEN}"
       export OPENCODE_MANAGER_STATE_DIR="${manager_state_dir}"
       export OPENCODE_SESSION_ROOT="${manager_session_root}"
       export OPENCODE_CONFIG_DIR="${opencode_config_dir}"
       export OPENCODE_BIN="${bin}"
       export OPENCODE_ALLOWED_CORS="http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}"
-      export OPENCODE_MANAGER_DISCOVERY_INTERVAL="${OPENCODE_MANAGER_DISCOVERY_INTERVAL:-2s}"
-      export OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-2s}"
-      export OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-1s}"
+      export OPENCODE_MANAGER_DISCOVERY_INTERVAL="${OPENCODE_MANAGER_DISCOVERY_INTERVAL:-10s}"
+      export OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}"
+      export OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}"
       nohup ./opencode-manager/bin/opencode-manager run >>"${LOG_DIR}/opencode-manager.log" 2>&1 &
       echo "$!" >"${LOG_DIR}/opencode-manager.pid"
     )
@@ -766,6 +777,7 @@ frontend_url="${TEST_AGENT_FRONTEND_URL:-${frontend_url}}"
 derive_frontend_runtime_settings
 apply_frontend_origin_defaults
 apply_detected_runtime_ip_defaults
+apply_server_ip_file_defaults
 export SPRING_PROFILES_ACTIVE="${profile}"
 
 # 开发和测试默认给 opencode-manager 一个与后端共享的 token，避免每次手配本机 dotenv。

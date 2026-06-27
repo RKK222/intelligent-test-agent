@@ -43,4 +43,27 @@ class ManagerConnectionRegistryTest {
                 .extracting(error -> ((PlatformException) error).errorCode())
                 .isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
     }
+
+    @Test
+    void broadcastReachesAllConnectionsAndSurvivesSenderFailure() {
+        ManagerConnectionRegistry registry = new ManagerConnectionRegistry();
+        List<ManagerControlMessage> firstSent = new ArrayList<>();
+        List<ManagerControlMessage> secondSent = new ArrayList<>();
+        OpencodeContainerId containerA = new OpencodeContainerId("ctr_a");
+        OpencodeContainerId containerB = new OpencodeContainerId("ctr_b");
+
+        registry.register(new ContainerManagerId("mgr_a"), containerA, new BackendProcessId("bjp_a"), firstSent::add);
+        // 第二个 sender 故意抛异常，验证不中断其余连接广播。
+        registry.register(new ContainerManagerId("mgr_b"), containerB, new BackendProcessId("bjp_b"), message -> {
+            throw new IllegalStateException("sink closed");
+        });
+
+        ManagerControlMessage message = ManagerControlMessage.configUpdate(8, "trace_broadcast");
+        int sent = registry.broadcast(message);
+
+        assertThat(sent).isEqualTo(1);
+        assertThat(firstSent).containsExactly(message);
+        assertThat(secondSent).isEmpty();
+        assertThat(registry.connectedContainerIds()).containsExactlyInAnyOrder(containerA, containerB);
+    }
 }

@@ -19,7 +19,7 @@
 - `config.DatabaseMigrationRunner`：运行态 Flyway migration 入口。
 - `config.ExecutionNodeSeeder`：opencode execution node seed。
 - `config.RuntimeJsonConfig`：应用运行态共享 Jackson ObjectMapper 配置。
-- `config.OpencodeNodesHealthIndicator`、`config.RedisOptionalHealthIndicator`：本地集成健康检查。
+- `config.OpencodeNodesHealthIndicator`、`config.RedisHealthIndicator`：本地集成健康检查。
 
 ## 允许依赖
 
@@ -50,7 +50,7 @@
 ## 测试位置
 
 - `backend/test-agent-app/src/test/java` 只保留启动装配、profile、health、migration 和模块边界测试。
-- opencode health 测试必须验证整体 UP/DOWN 聚合和错误详情脱敏；Redis health 测试必须覆盖 disabled 场景。
+- opencode health 测试必须验证整体 UP/DOWN 聚合和错误详情脱敏；Redis health 测试必须覆盖必需依赖不可达场景。
 - profile 配置测试必须覆盖 test/prod 外部服务注入，不允许把真实密钥或固定主机写死在代码。
 - API 与业务行为测试迁移到对应模块。
 

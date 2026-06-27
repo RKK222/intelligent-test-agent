@@ -35,7 +35,7 @@
 | `/api/...` | 旧兼容入口，当前前端和历史调用方继续可用。 |
 | `/api/internal/platform/{business-project}/{business}/...` | 前端调用平台自身能力的新入口。 |
 | `/api/internal/agent/{agentId}/...` | 与具体 agent 交互的新入口，`agentId` 由前端 URL 传递；当前唯一可运行值为 `opencode`。 |
-| `/api/internal/platform/opencode-runtime/manager-backends` | opencode-manager 后端发现入口，使用独立 manager token。 |
+| `/api/internal/platform/opencode-runtime/manager-backends` | opencode-manager 兼容诊断入口，使用独立 manager token；Go manager 运行路径不调用。 |
 | `/api/internal/platform/opencode-runtime/management/overview` | 超级管理员只读运行管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
 | `/api/internal/platform/scheduler-management` | 超级管理员定时任务管理入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
 | `/api/internal/platform/system-management` | 超级管理员用户管理（测试）入口，使用用户 JWT 且要求 `SUPER_ADMIN`。 |
@@ -551,6 +551,12 @@ Base URL：`/api/internal/platform/configuration-management/common-parameters`
 
 兼容性：新增接口，对既有按 `findByEnglishNameAndPlatform` 读取的消费方无影响；不涉及表结构变更。
 
+### `OPENCODE_MANAGER_MAX_PROCESSES` 参数
+
+通用参数表中的 `OPENCODE_MANAGER_MAX_PROCESSES`（`platform=all`，全局单值）是 opencode manager 的最大并发进程数权威来源。manager 通过 WebSocket 控制面连入后端时，后端在注册成功后立即向该 manager 下发当前值（`configUpdate` 控制帧）；前端修改该参数后，`PATCH` 触发 `CommonParameterUpdatedEvent`，后端经控制面 WebSocket 把新值广播给当前实例持有的所有 manager 连接（全互联拓扑下可触达全部 manager）。
+
+manager 收到后按自身端口池容量 `PortEnd-PortStart+1` 做 clamp（超上限 clamp 到容量、`<1` 拒绝）并热更新，后续 heartbeat 上报生效值，`opencode_containers.max_processes` 随之同步。参数缺失或非数字时后端跳过下发，manager 继续使用 env `OPENCODE_MANAGER_MAX_PROCESSES` 启动兜底值。该下发通道是后端→manager 控制帧，不产生 RunEvent/SSE，不向前端推送。
+
 ## 限流
 
 Phase 02/03 不新增对外 HTTP API，也不新增 Controller。新增的 Workspace、Session、Run、RunEvent、ExecutionNode、RoutingDecision 字段目前只作为后端内部领域和持久化边界使用，Phase 04 暴露 Runtime API 时再在本文件固化请求/响应 DTO。
@@ -1021,6 +1027,8 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
   "containerId": "ctr_...",
   "port": 4096,
   "baseUrl": "http://10.0.0.12:4096",
+  "serviceStatus": "RUNNING",
+  "serviceAddress": "10.0.0.12:4096",
   "checkedAt": "2026-06-24T08:00:00Z"
 }
 ```
@@ -1031,6 +1039,8 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 - `initializable`：当前状态是否允许前端展示初始化动作；无当前后端可连接的健康容器时为 `false`。
 - `bindingClearable`：当 `status=UNAVAILABLE` 时，如果后端检测到 `execution_nodes` 中仍有可路由的固定节点（例如本地启动的 opencode）作为兜底，会把 `bindingClearable` 置为 `true`，前端可以展示"重置绑定"按钮。
 - `localFallback`：当 `status=READY` 时，如果响应已经回退到 `execution_nodes` 中的固定节点而非用户专属进程，`localFallback` 为 `true`；此时 `baseUrl` 来自固定节点，前端可以直接发起对话。
+- `serviceStatus`：头像菜单使用的服务展示状态，取值为 `UNASSIGNED`（未分配）、`RUNNING`（运行中）、`NOT_RUNNING`（未运行）；该字段不改变 `status` 的对话门禁语义。
+- `serviceAddress`：头像菜单展示地址，格式为 `{服务器ip}:{内部opencode端口}`；仅当前用户已有 ACTIVE 分配或 local-direct 合成进程时返回。
 - `message`：面向用户的状态说明或失败原因；命中 `localFallback` 时通常包含"回退到本地 opencode 节点"。
 - `processId`、`linuxServerId`、`containerId`、`port`、`baseUrl`：仅在已有或成功初始化进程时返回；`baseUrl` 固定为 `http://{linuxServerId}:{port}`。
 - `checkedAt`：本次状态计算时间。
@@ -1052,14 +1062,16 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 ### opencode-manager 控制面 API
 
-控制面只供容器内 `opencode-manager` 使用，不复用用户 JWT 或普通 API token。后端通过 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 配置独立 manager token；manager 调用 discovery API 和 WebSocket upgrade 时必须携带 `Authorization: Bearer <token>`。token 缺失或错误返回统一 `UNAUTHENTICATED`。
+控制面只供容器内 `opencode-manager` 使用，不复用用户 JWT 或普通 API token。后端通过 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 配置独立 manager token；manager 建立 WebSocket upgrade 时必须携带 `Authorization: Bearer <token>`。token 缺失或错误返回统一 `UNAUTHENTICATED`。Go manager 运行路径不得通过 HTTP 与 Java 交互，`manager-backends` 仅保留为只读诊断/兼容接口。
+
+后端 Java 启动时会把当前服务器 IPv4 写入 `test-agent.opencode.manager-control.server-ip-file` / `TEST_AGENT_SERVER_IP_FILE`（默认 `/data/.testagent/.serverip`）。Go manager 在非 Windows 环境启动时读取同一路径（`OPENCODE_MANAGER_SERVER_IP_FILE`，默认相同），最多等待 30 秒；因此 WebSocket `register` / `heartbeat` 中的 `linuxServerId` 表示服务器 IPv4，不表示容器网卡 IP。`containerId` 继续表示容器身份，未显式配置时 Linux/Unix 来自 `/etc/hostname` 或 `HOSTNAME`，Windows 本机开发态使用机器名。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| `GET` | `/api/internal/platform/opencode-runtime/manager-backends` | 查询 READY 且心跳未过期的后端实例。 |
+| `GET` | `/api/internal/platform/opencode-runtime/manager-backends` | 兼容诊断：查询 Redis 中仍在线的后端实例；Go manager 不使用该 HTTP 接口。 |
 | `WS` | `/api/internal/platform/opencode-runtime/manager/ws` | manager 与当前后端实例建立 JSON WebSocket 长连接。 |
 
-Discovery 响应 `data`：
+兼容诊断响应 `data`：
 
 ```json
 [
@@ -1073,15 +1085,17 @@ Discovery 响应 `data`：
 ]
 ```
 
-WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelope，稳定 `type` 包括 `register`、`registered`、`heartbeat`、`command`、`commandResult`、`error`。后端命令使用 `commandId=mcmd_...`，manager 回包必须带同一 `commandId` 和 `traceId`。当前命令集合为 `start`、`health`、`stop`、`restart`，其中用户初始化和健康检测链路使用 `start`、`health`；人工 stop/restart API 留到后续操作批次。
+WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelope，稳定 `type` 包括 `register`、`registered`、`managerHeartbeat`、`backendListRequest`、`backendListResponse`、`command`、`commandResult`、`error`；旧 `heartbeat` 只作为兼容消息，不作为新运行路径主入口。`managerHeartbeat` 每 5 秒由 manager 通过任一已连接 socket 发送一次，后端写入 Redis manager 快照，TTL 为 10 秒，同时把容器资源指标追加到 Redis 48 小时历史 ZSET；资源指标可带 `metricsSource=cgroup|process|unavailable`，其中 `cgroup` 表示 Linux 容器 cgroup 指标，`process` 表示开发态或降级的 manager 进程指标，`unavailable` 表示当前平台不可采集。`backendListRequest` 每 10 秒由 manager 通过任一已连接 socket 发送，后端从 Redis Java 快照返回当前在线后端的 `webSocketUrl`。后端命令使用 `commandId=mcmd_...`，manager 回包必须带同一 `commandId` 和 `traceId`。当前命令集合为 `start`、`health`、`stop`、`restart`，其中用户初始化和健康检测链路使用 `start`、`health`；人工 stop/restart API 留到后续操作批次。
 
 ### opencode runtime 运行管理 API
 
-运行管理 API 是只读高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`，非法分页或状态参数返回 `VALIDATION_ERROR`。本接口不触发 stop/restart 操作；管理页展示当前活跃的 Java 后端、opencode server、容器和 manager 运行态，僵死或 5 分钟内没有心跳/健康确认的进程不进入响应。
+运行管理 API 是只读高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`，非法分页或状态参数返回 `VALIDATION_ERROR`。本接口不触发 stop/restart 操作；管理页展示当前 Redis 中仍在线的 Java 后端、容器、manager 和 manager-backend 连接，并按 Redis opencode 进程健康心跳筛选用户进程。Redis 不可用时接口不会回退数据库 heartbeat 字段。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
 | `GET` | `/api/internal/platform/opencode-runtime/management/overview` | 查询 Linux 服务器、后端 Java 进程、容器、管理进程、manager-backend 连接、用户 opencode server 进程和绑定状态。 |
+| `GET` | `/api/internal/platform/opencode-runtime/management/containers/{containerId}/metrics` | 查询指定容器 Redis 中近 48 小时运行指标历史。 |
+| `GET` | `/api/internal/platform/opencode-runtime/management/backend-processes/{backendProcessId}/metrics` | 查询指定后端 Java 进程 Redis 中近 48 小时运行指标历史。 |
 
 查询参数：
 
@@ -1090,10 +1104,18 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
 | `page` | opencode server 进程分页页码，默认 `1`。 |
 | `size` | opencode server 进程分页大小，默认 `20`，上限沿用平台 `PageRequest` 的 `200`。 |
 | `status` | 可选进程状态；当前活进程视图只返回 `RUNNING` opencode server 进程，非 `RUNNING` 状态会返回空进程页。 |
-| `linuxServerId` | 可选 Linux 服务器 ID，当前等于服务器 IPv4。 |
-| `containerId` | 可选容器 ID。 |
+| `linuxServerId` | 可选 Linux 服务器 ID，当前等于 Java 写入 `.serverip` 的服务器 IPv4。 |
+| `containerId` | 可选容器 ID；Windows 本机开发态为机器名。 |
 | `username` | 可选用户名，运行管理页按用户名筛选和展示。 |
 | `userId` | 可选用户 ID，保留给旧客户端兼容；新客户端应使用 `username`。 |
+
+指标历史查询参数：
+
+| 参数 | 说明 |
+|---|---|
+| `windowMinutes` | 可选历史窗口分钟数，默认 `60`；只允许 `1`、`30`、`60`、`360`、`720`、`1440`、`2880`，分别对应 1 分钟、30 分钟、1 小时、6 小时、12 小时、24 小时、48 小时。传入时优先于兼容参数 `hours`。 |
+| `hours` | 兼容旧客户端的可选历史窗口小时数，最大 `48`，最小 `1`；新客户端应使用 `windowMinutes`。 |
+| `maxPoints` | 可选最大返回点数，默认 `720`，最大 `2000`。Redis 保存每 5 秒原始样本，接口在超出上限时按时间桶降采样。 |
 
 响应 `data`：
 
@@ -1127,7 +1149,30 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
     }
   ],
   "backendProcesses": [],
-  "containers": [],
+  "containers": [
+    {
+      "containerId": "ctr_...",
+      "linuxServerId": "10.8.0.21",
+      "containerName": "opencode-a",
+      "portStart": 4096,
+      "portEnd": 4100,
+      "maxProcesses": 8,
+      "currentProcesses": 3,
+      "availableCapacity": 5,
+      "metricsSource": "cgroup",
+      "cpuUsagePercent": 12.5,
+      "memoryMaxBytes": 1073741824,
+      "memoryUsedBytes": 536870912,
+      "memoryUsagePercent": 50.0,
+      "diskReadBytesPerSecond": 1024.0,
+      "diskWriteBytesPerSecond": 2048.0,
+      "status": "READY",
+      "lastHeartbeatAt": "2026-06-24T08:00:00Z",
+      "createdAt": "2026-06-24T07:00:00Z",
+      "updatedAt": "2026-06-24T08:00:00Z",
+      "traceId": "trace_..."
+    }
+  ],
   "managers": [],
   "managerBackendConnections": [],
   "opencodeProcesses": {
@@ -1162,7 +1207,7 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
 }
 ```
 
-拓扑列表固定最多返回 500 条，避免管理页一次性读取过多连接和进程快照。Java 后端和 opencode server 进程通过 Redis 运行心跳做跨实例活跃判定；Redis 未启用时回退到数据库最近心跳/健康检查时间。后端实例注册会持续写入当前 Java 进程心跳，opencode server 由后端每 3 分钟通过 manager health 命令确认并刷新心跳，Redis 心跳 key 5 分钟过期，索引清理每 5 分钟执行一次。`opencodeProcesses.items[]` 的 `bindingAgentId`、`bindingStatus`、`bindingUpdatedAt` 仅在该进程仍是当前用户绑定时返回，否则为 `null`。
+后端 Java 进程行会额外返回 `cpuUsagePercent`、`memoryMaxBytes`、`memoryUsedBytes`、`memoryUsagePercent`、`diskMaxBytes`、`diskUsedBytes`、`diskUsagePercent`、`jvmMemoryUsedBytes`、`jvmMemoryCommittedBytes`、`jvmMemoryMaxBytes`、`jvmGcPauseMillis`、`jvmThreadsLive`，字段不可采集时为 `null`。容器行和容器 history 样本可返回 `metricsSource`，取值为 `cgroup`、`process`、`unavailable` 或旧样本的 `null`；容器 history 样本包含 `sampledAt/maxProcesses/currentProcesses/metricsSource/cpuUsagePercent/memoryMaxBytes/memoryUsedBytes/memoryUsagePercent/diskReadBytesPerSecond/diskWriteBytesPerSecond`；后端 history 样本保持 overview 后端指标同名字段，但服务器 CPU、内存、磁盘来自 `test-agent:runtime-metrics:server:{linuxServerId}`，JVM 指标来自 `test-agent:runtime-metrics:backend:{backendProcessId}`，因此同一服务器上的 Java 后端重启后服务器资源趋势可继续按 `linuxServerId` 查询，JVM 趋势仍只表示当前 Java 进程。拓扑列表固定最多返回 500 条，避免管理页一次性读取过多连接和进程快照。Java 后端每 5 秒写入 Redis Java 快照，Go manager 每 5 秒通过 WebSocket 写入 Redis manager 快照，两类快照 TTL 固定 10 秒；数据库中的历史 heartbeat 字段保留兼容但不参与在线判断。Java/manager 运行指标历史写入 Redis ZSET，保留近 48 小时原始 5 秒样本，history API 默认查询近 1 小时，前端使用 `windowMinutes` 在 1 分钟到 48 小时预设之间切换，超出 `maxPoints` 时按时间桶降采样。Redis 历史只保证 Java 后端重启后连续；若 Redis 自身重启且未启用 AOF/RDB，历史样本会丢失。opencode server 由后端每 3 分钟通过 manager health 命令确认并刷新 Redis 进程心跳，Redis 进程心跳 key 5 分钟过期，索引清理每 5 分钟执行一次。`opencodeProcesses.items[]` 的 `bindingAgentId`、`bindingStatus`、`bindingUpdatedAt` 仅在该进程仍是当前用户绑定时返回，否则为 `null`。
 
 ### scheduler-management 定时任务管理 API
 
@@ -1608,7 +1653,7 @@ Diff API 属于平台 Run 级能力。Controller 只调用 `RunDiffApplicationSe
 
 ### 健康检查
 
-Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring Boot/Druid 数据源；opencode nodes 由 `OpencodeNodesHealthIndicator` 调用 facade `health`；Redis 未启用时返回 disabled，启用后做 TCP 连通检查。
+Actuator health 由 Spring Boot Actuator 提供，数据库健康使用 Spring Boot/Druid 数据源；opencode nodes 由 `OpencodeNodesHealthIndicator` 调用 facade `health`；Redis 是系统必需依赖，健康检查会做 TCP 连通探测。
 
 ### 兼容性
 

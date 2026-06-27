@@ -3,9 +3,10 @@ package com.icbc.testagent.opencode.runtime.process;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
+import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
-import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
@@ -33,7 +34,7 @@ public class WorkspaceFileRoutingService {
 
     private final WorkspaceRepository workspaceRepository;
     private final UserOpencodeProcessAssignmentService assignmentService;
-    private final OpencodeProcessManagementRepository processRepository;
+    private final OpencodeProcessHeartbeatStore heartbeatStore;
     private final ManagerControlSettings settings;
     private final Clock clock;
 
@@ -44,9 +45,9 @@ public class WorkspaceFileRoutingService {
     public WorkspaceFileRoutingService(
             WorkspaceRepository workspaceRepository,
             UserOpencodeProcessAssignmentService assignmentService,
-            OpencodeProcessManagementRepository processRepository,
+            OpencodeProcessHeartbeatStore heartbeatStore,
             ManagerControlSettings settings) {
-        this(workspaceRepository, assignmentService, processRepository, settings, Clock.systemUTC());
+        this(workspaceRepository, assignmentService, heartbeatStore, settings, Clock.systemUTC());
     }
 
     /**
@@ -55,12 +56,12 @@ public class WorkspaceFileRoutingService {
     public WorkspaceFileRoutingService(
             WorkspaceRepository workspaceRepository,
             UserOpencodeProcessAssignmentService assignmentService,
-            OpencodeProcessManagementRepository processRepository,
+            OpencodeProcessHeartbeatStore heartbeatStore,
             ManagerControlSettings settings,
             Clock clock) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
-        this.processRepository = Objects.requireNonNull(processRepository, "processRepository must not be null");
+        this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
@@ -106,12 +107,12 @@ public class WorkspaceFileRoutingService {
         } catch (PlatformException ignored) {
             agentLinuxServerId = null;
         }
+        List<BackendRuntimeSnapshot> snapshots = liveBackendSnapshots();
         Map<String, LinuxServer> servers = new LinkedHashMap<>();
-        for (LinuxServer server : processRepository.findLinuxServers(BACKEND_LIMIT)) {
-            servers.put(server.linuxServerId().value(), server);
-        }
         Map<String, BackendJavaProcess> backendByServer = new LinkedHashMap<>();
-        for (BackendJavaProcess backend : readyBackends()) {
+        for (BackendRuntimeSnapshot snapshot : snapshots) {
+            servers.putIfAbsent(snapshot.linuxServer().linuxServerId().value(), snapshot.linuxServer());
+            BackendJavaProcess backend = snapshot.backendProcess();
             backendByServer.putIfAbsent(backend.linuxServerId().value(), backend);
         }
         backendByServer.putIfAbsent(settings.linuxServerId().value(), currentBackend());
@@ -157,8 +158,15 @@ public class WorkspaceFileRoutingService {
     }
 
     private List<BackendJavaProcess> readyBackends() {
-        Instant minHeartbeatAt = Instant.now(clock).minus(settings.backendStaleAfter());
-        return processRepository.findReadyBackendJavaProcesses(minHeartbeatAt, BACKEND_LIMIT);
+        return liveBackendSnapshots().stream()
+                .map(BackendRuntimeSnapshot::backendProcess)
+                .toList();
+    }
+
+    private List<BackendRuntimeSnapshot> liveBackendSnapshots() {
+        return heartbeatStore.liveBackendSnapshots().stream()
+                .limit(BACKEND_LIMIT)
+                .toList();
     }
 
     private BackendJavaProcess currentBackend() {

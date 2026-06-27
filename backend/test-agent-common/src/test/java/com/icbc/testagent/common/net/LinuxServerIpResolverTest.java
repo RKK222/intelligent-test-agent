@@ -90,4 +90,20 @@ class LinuxServerIpResolverTest {
 
         assertThat(resolver.resolve()).isEqualTo("192.168.1.20");
     }
+
+    @Test
+    void preferNonLoopbackListenUrlIpv4OverDetectedInterface() {
+        LinuxServerIpResolver resolver = new LinuxServerIpResolver(
+                () -> List.of(new InterfaceInfo("eth0", true, false, false, List.of("192.168.1.20"))));
+
+        assertThat(resolver.resolveForListenUrl("http://10.8.0.21:8080")).isEqualTo("10.8.0.21");
+    }
+
+    @Test
+    void loopbackListenUrlFallsBackToDetectedInterface() {
+        LinuxServerIpResolver resolver = new LinuxServerIpResolver(
+                () -> List.of(new InterfaceInfo("eth0", true, false, false, List.of("192.168.1.20"))));
+
+        assertThat(resolver.resolveForListenUrl("http://127.0.0.1:8080")).isEqualTo("192.168.1.20");
+    }
 }

@@ -7,21 +7,27 @@ import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
+import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeMetricSample;
+import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
+import com.icbc.testagent.domain.opencodeprocess.ContainerRuntimeMetricSample;
 import com.icbc.testagent.domain.opencodeprocess.ContainerManagerId;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerStatus;
 import com.icbc.testagent.domain.opencodeprocess.ManagerConnectionStatus;
+import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerManager;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerStatus;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnection;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
+import com.icbc.testagent.domain.opencodeprocess.ServerRuntimeMetricSample;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.icbc.testagent.domain.user.User;
@@ -29,12 +35,15 @@ import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.domain.user.UserStatus;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class RuntimeManagementQueryServiceTest {
@@ -60,10 +69,7 @@ class RuntimeManagementQueryServiceTest {
         repository.processes.add(process);
         repository.bindings.put(process.processId(), binding);
         repository.users.put(process.userId(), user(process.userId(), "process-user"));
-        RuntimeManagementQueryService service = new RuntimeManagementQueryService(
-                repository,
-                repository,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+        RuntimeManagementQueryService service = service(repository, heartbeatFromRepository(repository));
 
         RuntimeManagementOverview overview = service.overview(
                 new OpencodeServerProcessFilter(
@@ -81,8 +87,8 @@ class RuntimeManagementQueryServiceTest {
         assertThat(overview.summary().runningOpencodeProcesses()).isEqualTo(1);
         assertThat(overview.summary().userBindings()).isEqualTo(1);
         assertThat(overview.linuxServers()).containsExactly(linuxServer);
-        assertThat(overview.backendProcesses()).containsExactly(backendProcess);
-        assertThat(overview.containers()).containsExactly(container);
+        assertThat(overview.backendProcesses()).extracting(RuntimeManagementBackendProcess::process).containsExactly(backendProcess);
+        assertThat(overview.containers()).extracting(RuntimeManagementContainer::container).containsExactly(container);
         assertThat(overview.managers()).containsExactly(manager);
         assertThat(overview.managerBackendConnections()).containsExactly(connection);
         assertThat(overview.opencodeProcesses().items()).hasSize(1);
@@ -96,10 +102,8 @@ class RuntimeManagementQueryServiceTest {
 
     @Test
     void overviewHandlesEmptyTopology() {
-        RuntimeManagementQueryService service = new RuntimeManagementQueryService(
-                new FakeRepository(),
-                new FakeRepository(),
-                Clock.fixed(NOW, ZoneOffset.UTC));
+        FakeRepository repository = new FakeRepository();
+        RuntimeManagementQueryService service = service(repository, new RedisSnapshotHeartbeatStore());
 
         RuntimeManagementOverview overview = service.overview(OpencodeServerProcessFilter.empty(), new PageRequest(1, 20), TRACE_ID);
 
@@ -110,15 +114,225 @@ class RuntimeManagementQueryServiceTest {
     }
 
     @Test
+    void metricHistoryReadsRedisSamplesAndDownsamplesByTimeBucket() {
+        FakeRepository repository = new FakeRepository();
+        RedisSnapshotHeartbeatStore heartbeatStore = new RedisSnapshotHeartbeatStore();
+        heartbeatStore.containerSamples.add(new ContainerRuntimeMetricSample(
+                NOW.minusSeconds(3600),
+                4,
+                1,
+                "cgroup",
+                10.0,
+                100L,
+                20L,
+                20.0,
+                100.0,
+                200.0));
+        heartbeatStore.containerSamples.add(new ContainerRuntimeMetricSample(
+                NOW.minusSeconds(1800),
+                4,
+                3,
+                "process",
+                30.0,
+                100L,
+                60L,
+                60.0,
+                300.0,
+                600.0));
+        RuntimeManagementQueryService service = service(repository, heartbeatStore);
+
+        RuntimeManagementContainerMetricHistory history = service.containerMetrics(
+                new OpencodeContainerId("ctr_01"),
+                Duration.ofHours(1),
+                1,
+                TRACE_ID);
+
+        assertThat(history.samples()).hasSize(1);
+        RuntimeManagementContainerMetricSample sample = history.samples().getFirst();
+        assertThat(sample.cpuUsagePercent()).isEqualTo(20.0);
+        assertThat(sample.currentProcesses()).isEqualTo(3);
+        assertThat(sample.metricsSource()).isEqualTo("process");
+        assertThat(sample.memoryUsedBytes()).isEqualTo(40L);
+    }
+
+    @Test
+    void metricHistoryUsesMinuteWindowForRedisQueryRange() {
+        RedisSnapshotHeartbeatStore heartbeatStore = new RedisSnapshotHeartbeatStore();
+        RuntimeManagementQueryService service = service(new FakeRepository(), heartbeatStore);
+
+        RuntimeManagementContainerMetricHistory history = service.containerMetrics(
+                new OpencodeContainerId("ctr_01"),
+                Duration.ofMinutes(1),
+                720,
+                TRACE_ID);
+
+        assertThat(history.from()).isEqualTo(NOW.minus(Duration.ofMinutes(1)));
+        assertThat(history.to()).isEqualTo(NOW);
+        assertThat(heartbeatStore.lastContainerFrom).isEqualTo(NOW.minus(Duration.ofMinutes(1)));
+        assertThat(heartbeatStore.lastContainerTo).isEqualTo(NOW);
+    }
+
+    @Test
+    void backendMetricHistoryKeepsServerMetricsAcrossBackendProcessRestart() {
+        FakeRepository repository = new FakeRepository();
+        BackendProcessId currentBackendId = new BackendProcessId("bjp_2234567890abcdef");
+        BackendJavaProcess currentBackend = new BackendJavaProcess(
+                currentBackendId,
+                new LinuxServerId("10.8.0.12"),
+                "http://10.8.0.12:8080",
+                BackendJavaProcessStatus.READY,
+                NOW,
+                NOW,
+                NOW,
+                NOW,
+                TRACE_ID);
+        repository.backendProcesses.put(currentBackendId, currentBackend);
+        RedisSnapshotHeartbeatStore heartbeatStore = new RedisSnapshotHeartbeatStore();
+        heartbeatStore.backendSnapshots.add(new BackendRuntimeSnapshot(linuxServer(), currentBackend));
+        heartbeatStore.serverSamples.add(new ServerRuntimeMetricSample(
+                NOW.minusSeconds(40),
+                55.0,
+                1600L,
+                800L,
+                50.0,
+                10000L,
+                6000L,
+                60.0));
+        heartbeatStore.backendSamples.add(new BackendRuntimeMetricSample(
+                NOW.minusSeconds(20),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                300L,
+                400L,
+                500L,
+                7L,
+                42));
+        RuntimeManagementQueryService service = service(repository, heartbeatStore);
+
+        RuntimeManagementBackendMetricHistory history = service.backendProcessMetrics(
+                currentBackendId,
+                Duration.ofMinutes(1),
+                720,
+                TRACE_ID);
+
+        assertThat(heartbeatStore.lastServerLinuxServerId).isEqualTo(new LinuxServerId("10.8.0.12"));
+        assertThat(history.samples()).hasSize(2);
+        RuntimeManagementBackendMetricSample serverSample = history.samples().get(0);
+        assertThat(serverSample.cpuUsagePercent()).isEqualTo(55.0);
+        assertThat(serverSample.diskUsagePercent()).isEqualTo(60.0);
+        assertThat(serverSample.jvmThreadsLive()).isNull();
+        RuntimeManagementBackendMetricSample jvmSample = history.samples().get(1);
+        assertThat(jvmSample.cpuUsagePercent()).isNull();
+        assertThat(jvmSample.jvmThreadsLive()).isEqualTo(42);
+    }
+
+    @Test
+    void backendMetricHistoryFallsBackToLegacyBackendSamplesWhenServerHistoryMissing() {
+        FakeRepository repository = new FakeRepository();
+        repository.backendProcesses.put(backendProcess().backendProcessId(), backendProcess());
+        RedisSnapshotHeartbeatStore heartbeatStore = new RedisSnapshotHeartbeatStore();
+        heartbeatStore.backendSamples.add(new BackendRuntimeMetricSample(
+                NOW.minusSeconds(20),
+                33.0,
+                1600L,
+                800L,
+                50.0,
+                10000L,
+                6000L,
+                60.0,
+                300L,
+                400L,
+                500L,
+                7L,
+                42));
+        RuntimeManagementQueryService service = service(repository, heartbeatStore);
+
+        RuntimeManagementBackendMetricHistory history = service.backendProcessMetrics(
+                backendProcess().backendProcessId(),
+                Duration.ofMinutes(1),
+                720,
+                TRACE_ID);
+
+        assertThat(history.samples()).hasSize(1);
+        assertThat(history.samples().getFirst().cpuUsagePercent()).isEqualTo(33.0);
+        assertThat(history.samples().getFirst().jvmThreadsLive()).isEqualTo(42);
+    }
+
+    @Test
+    void overviewUsesRedisRuntimeSnapshotsInsteadOfDatabaseHeartbeatFields() {
+        FakeRepository repository = new FakeRepository();
+        LinuxServer dbStaleServer = new LinuxServer(
+                new LinuxServerId("10.8.0.99"),
+                "10.8.0.99",
+                LinuxServerStatus.READY,
+                Map.of(),
+                NOW.minusSeconds(600),
+                NOW.minusSeconds(600),
+                NOW.minusSeconds(600),
+                TRACE_ID);
+        repository.linuxServers.put(dbStaleServer.linuxServerId(), dbStaleServer);
+        OpencodeServerProcess liveProcess = process("ocp_1234567890abcdef", "usr_1234567890abcdef", OpencodeServerProcessStatus.RUNNING);
+        repository.processes.add(liveProcess);
+        repository.users.put(liveProcess.userId(), user(liveProcess.userId(), "process-user"));
+
+        RedisSnapshotHeartbeatStore heartbeatStore = new RedisSnapshotHeartbeatStore();
+        heartbeatStore.backendSnapshots.add(new BackendRuntimeSnapshot(linuxServer(), backendProcess()));
+        heartbeatStore.managerSnapshots.add(new ManagerRuntimeSnapshot(
+                container(),
+                manager(),
+                List.of(connection())));
+        heartbeatStore.liveOpencodeProcessIds.add(liveProcess.processId());
+        RuntimeManagementQueryService service = new RuntimeManagementQueryService(
+                repository,
+                repository,
+                heartbeatStore,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+
+        RuntimeManagementOverview overview = service.overview(
+                OpencodeServerProcessFilter.empty(),
+                new PageRequest(1, 20),
+                TRACE_ID);
+
+        assertThat(overview.linuxServers()).containsExactly(linuxServer());
+        assertThat(overview.backendProcesses()).extracting(RuntimeManagementBackendProcess::process).containsExactly(backendProcess());
+        assertThat(overview.containers()).extracting(RuntimeManagementContainer::container).containsExactly(container());
+        assertThat(overview.managers()).containsExactly(manager());
+        assertThat(overview.managerBackendConnections()).containsExactly(connection());
+        assertThat(overview.opencodeProcesses().items()).extracting(row -> row.process().processId())
+                .containsExactly(liveProcess.processId());
+        assertThat(overview.summary().readyBackendProcesses()).isEqualTo(1);
+        assertThat(overview.summary().connectedManagers()).isEqualTo(1);
+    }
+
+    @Test
+    void overviewReturnsEmptyRuntimeRowsWhenRedisHasNoSnapshots() {
+        RuntimeManagementQueryService service = new RuntimeManagementQueryService(
+                new FakeRepository(),
+                new FakeRepository(),
+                disabledHeartbeatStore(),
+                Clock.fixed(NOW, ZoneOffset.UTC));
+
+        RuntimeManagementOverview overview =
+                service.overview(OpencodeServerProcessFilter.empty(), new PageRequest(1, 20), TRACE_ID);
+
+        assertThat(overview.linuxServers()).isEmpty();
+        assertThat(overview.backendProcesses()).isEmpty();
+        assertThat(overview.containers()).isEmpty();
+        assertThat(overview.managers()).isEmpty();
+    }
+
+    @Test
     void overviewCountsRunningProcessesAcrossAllPages() {
         FakeRepository repository = new FakeRepository();
         repository.processes.add(process("ocp_1111111111111111", "usr_1111111111111111", OpencodeServerProcessStatus.RUNNING));
         repository.processes.add(process("ocp_2222222222222222", "usr_2222222222222222", OpencodeServerProcessStatus.RUNNING));
         repository.processes.add(process("ocp_3333333333333333", "usr_3333333333333333", OpencodeServerProcessStatus.STOPPED));
-        RuntimeManagementQueryService service = new RuntimeManagementQueryService(
-                repository,
-                repository,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+        RuntimeManagementQueryService service = service(repository, heartbeatFromRepository(repository));
 
         RuntimeManagementOverview overview = service.overview(OpencodeServerProcessFilter.empty(), new PageRequest(1, 1), TRACE_ID);
 
@@ -132,10 +346,7 @@ class RuntimeManagementQueryServiceTest {
         FakeRepository repository = new FakeRepository();
         repository.processes.add(process("ocp_1111111111111111", "usr_1111111111111111", OpencodeServerProcessStatus.RUNNING));
         repository.processes.add(process("ocp_2222222222222222", "usr_2222222222222222", OpencodeServerProcessStatus.FAILED));
-        RuntimeManagementQueryService service = new RuntimeManagementQueryService(
-                repository,
-                repository,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+        RuntimeManagementQueryService service = service(repository, heartbeatFromRepository(repository));
 
         RuntimeManagementOverview overview = service.overview(
                 new OpencodeServerProcessFilter(OpencodeServerProcessStatus.FAILED, null, null, null),
@@ -195,10 +406,10 @@ class RuntimeManagementQueryServiceTest {
         repository.processes.add(liveProcess);
         repository.processes.add(staleProcess);
         repository.users.put(liveProcess.userId(), user(liveProcess.userId(), "wr"));
-        RuntimeManagementQueryService service = new RuntimeManagementQueryService(
-                repository,
-                repository,
-                Clock.fixed(NOW, ZoneOffset.UTC));
+        RedisSnapshotHeartbeatStore heartbeatStore = new RedisSnapshotHeartbeatStore();
+        heartbeatStore.backendSnapshots.add(new BackendRuntimeSnapshot(liveServer, liveBackend));
+        heartbeatStore.liveOpencodeProcessIds.add(liveProcess.processId());
+        RuntimeManagementQueryService service = service(repository, heartbeatStore);
 
         RuntimeManagementOverview overview = service.overview(
                 OpencodeServerProcessFilter.byUsername("wr"),
@@ -206,7 +417,7 @@ class RuntimeManagementQueryServiceTest {
                 TRACE_ID);
 
         assertThat(overview.linuxServers()).containsExactly(liveServer);
-        assertThat(overview.backendProcesses()).containsExactly(liveBackend);
+        assertThat(overview.backendProcesses()).extracting(RuntimeManagementBackendProcess::process).containsExactly(liveBackend);
         assertThat(overview.opencodeProcesses().items()).extracting(row -> row.process().processId())
                 .containsExactly(liveProcess.processId());
         assertThat(overview.opencodeProcesses().total()).isEqualTo(1);
@@ -329,6 +540,40 @@ class RuntimeManagementQueryServiceTest {
                 NOW);
     }
 
+    private static RuntimeManagementQueryService service(
+            FakeRepository repository,
+            OpencodeProcessHeartbeatStore heartbeatStore) {
+        return new RuntimeManagementQueryService(
+                repository,
+                repository,
+                heartbeatStore,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private static RedisSnapshotHeartbeatStore heartbeatFromRepository(FakeRepository repository) {
+        RedisSnapshotHeartbeatStore heartbeatStore = new RedisSnapshotHeartbeatStore();
+        for (BackendJavaProcess backendProcess : repository.backendProcesses.values()) {
+            LinuxServer linuxServer = repository.linuxServers.get(backendProcess.linuxServerId());
+            if (linuxServer != null) {
+                heartbeatStore.backendSnapshots.add(new BackendRuntimeSnapshot(linuxServer, backendProcess));
+            }
+        }
+        for (OpencodeContainerManager manager : repository.managers.values()) {
+            OpencodeContainer container = repository.containers.get(manager.containerId());
+            if (container != null) {
+                List<OpencodeManagerBackendConnection> connections = repository.connections.stream()
+                        .filter(connection -> connection.managerId().equals(manager.managerId()))
+                        .toList();
+                heartbeatStore.managerSnapshots.add(new ManagerRuntimeSnapshot(container, manager, connections));
+            }
+        }
+        repository.processes.stream()
+                .filter(process -> process.status() == OpencodeServerProcessStatus.RUNNING)
+                .map(OpencodeServerProcess::processId)
+                .forEach(heartbeatStore.liveOpencodeProcessIds::add);
+        return heartbeatStore;
+    }
+
     private static final class FakeRepository implements OpencodeProcessManagementRepository, UserRepository {
         private final Map<LinuxServerId, LinuxServer> linuxServers = new LinkedHashMap<>();
         private final Map<BackendProcessId, BackendJavaProcess> backendProcesses = new LinkedHashMap<>();
@@ -419,5 +664,69 @@ class RuntimeManagementQueryServiceTest {
                     .filter(process -> filter.userId() == null || process.userId().equals(filter.userId()))
                     .toList();
         }
+    }
+
+    private static OpencodeProcessHeartbeatStore disabledHeartbeatStore() {
+        return new OpencodeProcessHeartbeatStore() {
+            @Override public void recordBackendHeartbeat(BackendProcessId backendProcessId, Instant heartbeatAt) { }
+            @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) { }
+            @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { }
+            @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
+            @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.of(); }
+            @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
+            @Override public Set<BackendProcessId> liveBackendProcessIds() { return Set.of(); }
+            @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
+            @Override public void cleanupExpiredHeartbeats() { }
+        };
+    }
+
+    private static final class RedisSnapshotHeartbeatStore implements OpencodeProcessHeartbeatStore {
+        private final List<BackendRuntimeSnapshot> backendSnapshots = new java.util.ArrayList<>();
+        private final List<ManagerRuntimeSnapshot> managerSnapshots = new java.util.ArrayList<>();
+        private final List<ContainerRuntimeMetricSample> containerSamples = new java.util.ArrayList<>();
+        private final List<BackendRuntimeMetricSample> backendSamples = new java.util.ArrayList<>();
+        private final List<ServerRuntimeMetricSample> serverSamples = new java.util.ArrayList<>();
+        private final Set<BackendProcessId> liveBackendProcessIds = new LinkedHashSet<>();
+        private final Set<OpencodeProcessId> liveOpencodeProcessIds = new LinkedHashSet<>();
+        private Instant lastContainerFrom;
+        private Instant lastContainerTo;
+        private LinuxServerId lastServerLinuxServerId;
+
+        @Override public void recordBackendHeartbeat(BackendProcessId backendProcessId, Instant heartbeatAt) {
+            liveBackendProcessIds.add(backendProcessId);
+        }
+        @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) {
+            backendSnapshots.add(snapshot);
+            liveBackendProcessIds.add(snapshot.backendProcess().backendProcessId());
+        }
+        @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) {
+            managerSnapshots.add(snapshot);
+        }
+        @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) {
+            liveOpencodeProcessIds.add(processId);
+        }
+        @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.copyOf(backendSnapshots); }
+        @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.copyOf(managerSnapshots); }
+        @Override public List<ContainerRuntimeMetricSample> containerMetricSamples(OpencodeContainerId containerId, Instant from, Instant to) {
+            lastContainerFrom = from;
+            lastContainerTo = to;
+            return containerSamples.stream()
+                    .filter(sample -> !sample.sampledAt().isBefore(from) && !sample.sampledAt().isAfter(to))
+                    .toList();
+        }
+        @Override public List<BackendRuntimeMetricSample> backendMetricSamples(BackendProcessId backendProcessId, Instant from, Instant to) {
+            return backendSamples.stream()
+                    .filter(sample -> !sample.sampledAt().isBefore(from) && !sample.sampledAt().isAfter(to))
+                    .toList();
+        }
+        @Override public List<ServerRuntimeMetricSample> serverMetricSamples(LinuxServerId linuxServerId, Instant from, Instant to) {
+            lastServerLinuxServerId = linuxServerId;
+            return serverSamples.stream()
+                    .filter(sample -> !sample.sampledAt().isBefore(from) && !sample.sampledAt().isAfter(to))
+                    .toList();
+        }
+        @Override public Set<BackendProcessId> liveBackendProcessIds() { return Set.copyOf(liveBackendProcessIds); }
+        @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.copyOf(liveOpencodeProcessIds); }
+        @Override public void cleanupExpiredHeartbeats() { }
     }
 }

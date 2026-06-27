@@ -1,27 +1,147 @@
 package config
 
-import "testing"
+import (
+	"errors"
+	"os"
+	"strings"
+	"testing"
+	"time"
+)
 
-func TestLoadFromEnvRequiresContainerAndLinuxServer(t *testing.T) {
-	t.Setenv("OPENCODE_MANAGER_PORT_START", "4096")
-	t.Setenv("OPENCODE_MANAGER_PORT_END", "4100")
-	t.Setenv("OPENCODE_MANAGER_MAX_PROCESSES", "4")
+func TestLoadFromEnvReadsServerIPFileOnNonWindows(t *testing.T) {
+	setBaseManagerEnv(t)
+	t.Setenv("OPENCODE_MANAGER_SERVER_IP_FILE", "/tmp/testagent/.serverip")
+	t.Setenv("OPENCODE_MANAGER_LINUX_SERVER_ID", "10.9.0.99")
 
-	_, err := LoadFromEnv()
+	cfg, err := loadFromEnvWithRuntime(testRuntime("linux", map[string]string{
+		"/tmp/testagent/.serverip": "10.8.0.12\n",
+		"/etc/hostname":            "container-abc123\n",
+	}))
+	if err != nil {
+		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
+	}
 
-	if err == nil {
-		t.Fatalf("expected missing required env error")
+	if cfg.LinuxServerID != "10.8.0.12" {
+		t.Fatalf("expected server IP from .serverip file, got %q", cfg.LinuxServerID)
+	}
+	if cfg.ContainerID != "container-abc123" {
+		t.Fatalf("expected container id from /etc/hostname, got %q", cfg.ContainerID)
+	}
+}
+
+func TestLoadFromEnvWaitsForDelayedServerIPFile(t *testing.T) {
+	setBaseManagerEnv(t)
+	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
+
+	readAttempts := 0
+	rt := testRuntime("linux", nil)
+	rt.serverIPWait = 30 * time.Second
+	rt.serverIPPoll = time.Second
+	rt.readFile = func(path string) ([]byte, error) {
+		if path != defaultServerIPFile {
+			return nil, os.ErrNotExist
+		}
+		readAttempts++
+		if readAttempts < 4 {
+			return nil, os.ErrNotExist
+		}
+		return []byte("10.8.0.21\n"), nil
+	}
+
+	cfg, err := loadFromEnvWithRuntime(rt)
+	if err != nil {
+		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
+	}
+
+	if cfg.LinuxServerID != "10.8.0.21" {
+		t.Fatalf("expected delayed server IP file to be used, got %q", cfg.LinuxServerID)
+	}
+	if readAttempts != 4 {
+		t.Fatalf("expected four server IP file read attempts, got %d", readAttempts)
+	}
+}
+
+func TestLoadFromEnvFailsWhenServerIPFileTimesOut(t *testing.T) {
+	setBaseManagerEnv(t)
+	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
+
+	rt := testRuntime("linux", nil)
+	rt.serverIPWait = 2 * time.Second
+	rt.serverIPPoll = time.Second
+
+	_, err := loadFromEnvWithRuntime(rt)
+
+	if err == nil || !strings.Contains(err.Error(), ".serverip") {
+		t.Fatalf("expected safe timeout error for missing .serverip file, got %v", err)
+	}
+}
+
+func TestLoadFromEnvFailsWhenServerIPFileContainsInvalidIPv4(t *testing.T) {
+	setBaseManagerEnv(t)
+	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
+
+	_, err := loadFromEnvWithRuntime(testRuntime("linux", map[string]string{
+		defaultServerIPFile: "not-an-ip\n",
+	}))
+
+	if err == nil || !strings.Contains(err.Error(), "invalid IPv4") {
+		t.Fatalf("expected invalid IPv4 error, got %v", err)
+	}
+}
+
+func TestLoadFromEnvWindowsUsesLocalIPv4AndMachineName(t *testing.T) {
+	setBaseManagerEnv(t)
+	rt := testRuntime("windows", nil)
+	rt.hostname = func() (string, error) {
+		return "WIN-DEV-01", nil
+	}
+	rt.localIPv4 = func() (string, error) {
+		return "192.168.10.25", nil
+	}
+	rt.readFile = func(path string) ([]byte, error) {
+		t.Fatalf("windows branch must not read server IP file %q", path)
+		return nil, errors.New("unexpected read")
+	}
+
+	cfg, err := loadFromEnvWithRuntime(rt)
+	if err != nil {
+		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
+	}
+
+	if cfg.LinuxServerID != "192.168.10.25" {
+		t.Fatalf("expected Windows local IPv4, got %q", cfg.LinuxServerID)
+	}
+	if cfg.ContainerID != "WIN-DEV-01" {
+		t.Fatalf("expected Windows container id to be hostname, got %q", cfg.ContainerID)
+	}
+}
+
+func TestLoadFromEnvFailsWhenContainerIDCannotBeResolved(t *testing.T) {
+	setBaseManagerEnv(t)
+	t.Setenv("HOSTNAME", " ")
+
+	rt := testRuntime("linux", map[string]string{
+		defaultServerIPFile: "10.8.0.12\n",
+		"/etc/hostname":     " \n",
+	})
+
+	_, err := loadFromEnvWithRuntime(rt)
+
+	if err == nil || !strings.Contains(err.Error(), "OPENCODE_MANAGER_CONTAINER_ID") {
+		t.Fatalf("expected missing container id error, got %v", err)
 	}
 }
 
 func TestLoadFromEnvValidatesPortRangeAndCapacity(t *testing.T) {
+	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
-	t.Setenv("OPENCODE_MANAGER_LINUX_SERVER_ID", "10.8.0.12")
 	t.Setenv("OPENCODE_MANAGER_PORT_START", "4100")
 	t.Setenv("OPENCODE_MANAGER_PORT_END", "4096")
 	t.Setenv("OPENCODE_MANAGER_MAX_PROCESSES", "4")
 
-	_, err := LoadFromEnv()
+	_, err := loadFromEnvWithRuntime(testRuntime("linux", map[string]string{
+		defaultServerIPFile: "10.8.0.12\n",
+	}))
 	if err == nil {
 		t.Fatalf("expected invalid port range error")
 	}
@@ -30,23 +150,24 @@ func TestLoadFromEnvValidatesPortRangeAndCapacity(t *testing.T) {
 	t.Setenv("OPENCODE_MANAGER_PORT_END", "4097")
 	t.Setenv("OPENCODE_MANAGER_MAX_PROCESSES", "3")
 
-	_, err = LoadFromEnv()
+	_, err = loadFromEnvWithRuntime(testRuntime("linux", map[string]string{
+		defaultServerIPFile: "10.8.0.12\n",
+	}))
 	if err == nil {
 		t.Fatalf("expected max processes to be limited by available ports")
 	}
 }
 
 func TestLoadFromEnvAppliesDefaultsAndCors(t *testing.T) {
+	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
-	t.Setenv("OPENCODE_MANAGER_LINUX_SERVER_ID", "10.8.0.12")
-	t.Setenv("OPENCODE_MANAGER_PORT_START", "4096")
-	t.Setenv("OPENCODE_MANAGER_PORT_END", "4100")
-	t.Setenv("OPENCODE_MANAGER_MAX_PROCESSES", "4")
 	t.Setenv("OPENCODE_ALLOWED_CORS", "http://localhost:3000,http://127.0.0.1:3000")
 
-	cfg, err := LoadFromEnv()
+	cfg, err := loadFromEnvWithRuntime(testRuntime("linux", map[string]string{
+		defaultServerIPFile: "10.8.0.12\n",
+	}))
 	if err != nil {
-		t.Fatalf("LoadFromEnv returned error: %v", err)
+		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
 	}
 
 	if cfg.OpencodeBin != "opencode" {
@@ -63,5 +184,36 @@ func TestLoadFromEnvAppliesDefaultsAndCors(t *testing.T) {
 	}
 	if len(cfg.AllowedCORS) != 2 {
 		t.Fatalf("expected two CORS origins, got %#v", cfg.AllowedCORS)
+	}
+}
+
+func setBaseManagerEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("HOSTNAME", "")
+	t.Setenv("OPENCODE_MANAGER_PORT_START", "4096")
+	t.Setenv("OPENCODE_MANAGER_PORT_END", "4100")
+	t.Setenv("OPENCODE_MANAGER_MAX_PROCESSES", "4")
+}
+
+func testRuntime(goos string, files map[string]string) configRuntime {
+	return configRuntime{
+		goos: goos,
+		readFile: func(path string) ([]byte, error) {
+			if files != nil {
+				if value, ok := files[path]; ok {
+					return []byte(value), nil
+				}
+			}
+			return nil, os.ErrNotExist
+		},
+		hostname: func() (string, error) {
+			return "", nil
+		},
+		localIPv4: func() (string, error) {
+			return "10.8.0.12", nil
+		},
+		sleep:        func(time.Duration) {},
+		serverIPWait: defaultServerIPWait,
+		serverIPPoll: defaultServerIPPoll,
 	}
 }

@@ -32,16 +32,21 @@ function selectMenu(key: SystemMenuKey) {
     <div v-if="!hasSuperAdmin" class="ta-system-placeholder">当前账号无系统管理权限</div>
     <template v-else>
       <nav class="ta-system-menu" aria-label="系统管理导航">
-        <button
+        <el-tooltip
           v-for="item in items"
           :key="item.key"
-          type="button"
-          :class="['ta-system-menu-item', { 'is-active': activeKey === item.key }]"
-          @click="selectMenu(item.key)"
+          :content="item.label"
+          placement="right"
         >
-          <component :is="item.icon" class="ta-system-menu-icon" :stroke-width="1.6" />
-          <span>{{ item.label }}</span>
-        </button>
+          <button
+            type="button"
+            :class="['ta-system-menu-item', { 'is-active': activeKey === item.key }]"
+            @click="selectMenu(item.key)"
+          >
+            <component :is="item.icon" class="ta-system-menu-icon" :stroke-width="1.6" />
+            <span class="ta-system-menu-text">{{ item.label }}</span>
+          </button>
+        </el-tooltip>
       </nav>
       <div class="ta-system-content">
         <ScheduledTaskManagementPanel v-if="activeKey === 'scheduler'" :current-user="currentUser" />
@@ -71,9 +76,12 @@ function selectMenu(key: SystemMenuKey) {
   font-size: 13px;
 }
 .ta-system-menu {
-  width: 180px;
+  width: 52px;
   flex-shrink: 0;
-  padding: 12px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 12px 0;
   border-right: 1px solid #e5e7eb;
   background: #fff;
   box-sizing: border-box;
@@ -81,18 +89,17 @@ function selectMenu(key: SystemMenuKey) {
 .ta-system-menu-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  width: 100%;
+  justify-content: center;
+  width: 36px;
   height: 36px;
-  margin: 0 0 4px;
-  padding: 0 10px;
+  margin: 0 0 8px;
+  padding: 0;
   border: 0;
   border-radius: 6px;
   background: transparent;
   color: #4b5563;
-  font-size: 13px;
-  text-align: left;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 .ta-system-menu-item:hover,
 .ta-system-menu-item:focus-visible {
@@ -103,11 +110,21 @@ function selectMenu(key: SystemMenuKey) {
 .ta-system-menu-item.is-active {
   background: #e8f0ff;
   color: #2563eb;
-  font-weight: 600;
 }
 .ta-system-menu-icon {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
+}
+.ta-system-menu-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 .ta-system-content {
   flex: 1;

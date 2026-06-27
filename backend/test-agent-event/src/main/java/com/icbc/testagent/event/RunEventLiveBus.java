@@ -17,7 +17,7 @@ import reactor.core.publisher.Sinks;
  * RunEvent 单机实时通道。它只服务当前进程内已连接的 SSE 订阅，断线恢复仍以 durable 回放或 opencode snapshot 为准。
  *
  * <p>基于 Reactor {@link Sinks.Many}（multicast + directBestEffort）服务本机订阅；配置 Redis 广播时会额外发布到共享通道，
- * 由其它实例转发给其本机 SSE 客户端。Redis 未启用或不可用时，落在其他实例的 durable 事件仍由 replay 轮询兜底，
+ * 由其它实例转发给其本机 SSE 客户端。Redis 广播未启用或不可用时，落在其他实例的 durable 事件仍由 replay 轮询兜底，
  * transient 消息内容事件由建连时的 opencode session snapshot 恢复兜底，不会丢数据但实时性下降。
  *
  * <p>{@code FAIL_ZERO_SUBSCRIBER}（无在线订阅）静默丢弃，因为没有 SSE 连接需要即时送达；

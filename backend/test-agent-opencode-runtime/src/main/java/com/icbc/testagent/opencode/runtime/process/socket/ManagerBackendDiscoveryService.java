@@ -1,53 +1,40 @@
 package com.icbc.testagent.opencode.runtime.process.socket;
 
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
-import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
-import java.time.Clock;
-import java.time.Instant;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import java.util.List;
 import java.util.Objects;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * manager discovery 查询服务，只返回仍在心跳窗口内的 READY 后端实例。
+ * manager 后端列表查询服务，只返回 Redis 快照中仍在线的 Java 后端实例。
  */
 @Service
 public class ManagerBackendDiscoveryService {
 
-    private final OpencodeProcessManagementRepository repository;
+    private final OpencodeProcessHeartbeatStore heartbeatStore;
     private final ManagerControlSettings settings;
-    private final Clock clock;
 
     /**
-     * 生产构造器使用系统时钟。
+     * 生产构造器通过 Redis 心跳快照发现当前存活后端。
      */
     @Autowired
     public ManagerBackendDiscoveryService(
-            OpencodeProcessManagementRepository repository,
+            OpencodeProcessHeartbeatStore heartbeatStore,
             ManagerControlSettings settings) {
-        this(repository, settings, Clock.systemUTC());
-    }
-
-    /**
-     * 测试构造器允许固定时钟。
-     */
-    public ManagerBackendDiscoveryService(
-            OpencodeProcessManagementRepository repository,
-            ManagerControlSettings settings,
-            Clock clock) {
-        this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
-        this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
     /**
      * 查询后端实例直连地址并派生 WebSocket URL。
      */
     public List<ManagerBackendEndpoint> discover(String traceId) {
-        Instant minHeartbeatAt = Instant.now(clock).minus(settings.backendStaleAfter());
-        return repository.findReadyBackendJavaProcesses(minHeartbeatAt, settings.backendDiscoveryLimit())
+        return heartbeatStore.liveBackendSnapshots()
                 .stream()
+                .limit(settings.backendDiscoveryLimit())
+                .map(snapshot -> snapshot.backendProcess())
                 .map(this::endpoint)
                 .toList();
     }

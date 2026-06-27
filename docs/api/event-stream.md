@@ -93,9 +93,9 @@
 
 Agent 配置管理接口不产生 RunEvent/SSE。`/api/internal/platform/workspace-management/agent-config/**` 的公共级/工作空间级 Git 更新、worktree、commit、publish 进度通过 ticket 保护的 WebSocket `/operations/{operationId}/ws?ticket=...` 推送 `snapshot`、`step`、`completed`、`failed`，也可通过 `GET /operations/{operationId}` 查询快照；该进度不写入 `run_events`，不参与 RunEvent `Last-Event-ID` 续传。
 
-opencode-manager discovery API 和 `/api/internal/platform/opencode-runtime/manager/ws` 控制面 WebSocket 不产生 RunEvent/SSE，不向前端广播注册、心跳或命令结果。
+opencode-manager 兼容诊断 API 和 `/api/internal/platform/opencode-runtime/manager/ws` 控制面 WebSocket 不产生 RunEvent/SSE，不向前端广播注册、Redis 心跳、后端列表发现或命令结果。控制面除 `command`/`commandResult`/`backendListResponse` 等帧外，还包含后端→manager 的 `configUpdate` 控制帧：当 `common_parameters` 中的 `OPENCODE_MANAGER_MAX_PROCESSES` 被前端修改或 manager 新注册时，后端经该帧下发最大进程数，manager 热更新（按端口池 clamp）并经 heartbeat 回报生效值；该帧不进入 RunEvent 流，不向前端推送。
 
-超级管理员运行管理页调用的 `GET /api/internal/platform/opencode-runtime/management/overview` 只读取数据库中的运行态快照，不新增 SSE 事件类型，也不向 RunEvent 流发布拓扑、连接或进程状态变化。
+超级管理员运行管理页调用的 `GET /api/internal/platform/opencode-runtime/management/overview` 读取 Redis 中仍在线的 Java/manager 运行快照和 opencode 进程心跳；点击容器或后端 Java 进程后调用运行管理 metrics history HTTP API 读取 Redis 48 小时指标历史。运行管理不新增 SSE 事件类型，也不向 RunEvent 流发布拓扑、连接、进程状态或监控指标变化。
 
 超级管理员定时任务管理页调用的 `/api/internal/platform/scheduler-management/**` 只维护 scheduler 任务定义和运行记录，不新增 SSE 事件类型，也不向 RunEvent 流发布任务状态变化；页面刷新通过 HTTP 查询完成。
 

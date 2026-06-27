@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -98,17 +99,45 @@ type Manager struct {
 	starter  Starter
 	signaler Signaler
 	checker  health.Checker
+
+	// maxProcesses 是运行时最大并发进程数，可由后端通过 configUpdate 热更新；
+	// 初始值取自 cfg.MaxProcesses（env 兜底），后端下发值覆盖。
+	maxProcesses atomic.Int64
 }
 
 // NewManager 创建本地进程管理器；后续 socket 控制面可以复用该库。
 func NewManager(cfg config.Config, store Store, starter Starter, signaler Signaler, checker health.Checker) *Manager {
-	return &Manager{
+	m := &Manager{
 		cfg:      cfg,
 		store:    store,
 		starter:  starter,
 		signaler: signaler,
 		checker:  checker,
 	}
+	m.maxProcesses.Store(int64(cfg.MaxProcesses))
+	return m
+}
+
+// MaxProcesses 返回当前生效的最大并发进程数，供 topologyMessage 上报后端。
+func (m *Manager) MaxProcesses() int {
+	return int(m.maxProcesses.Load())
+}
+
+// SetMaxProcesses 应用后端下发的运行时最大进程数。
+// v < 1 视为非法不予应用；v 超过本容器端口池容量时 clamp 到容量上限，
+// 保证 maxProcesses 恒满足 1..(PortEnd-PortStart+1) 的不变量。
+// 返回最终生效值与应用错误（非法值时 err 非 nil 且不变更当前值）。
+func (m *Manager) SetMaxProcesses(v int) (int, error) {
+	if v < 1 {
+		return m.MaxProcesses(), fmt.Errorf("maxProcesses must be >= 1, got %d", v)
+	}
+	availablePorts := m.cfg.PortEnd - m.cfg.PortStart + 1
+	applied := v
+	if applied > availablePorts {
+		applied = availablePorts
+	}
+	m.maxProcesses.Store(int64(applied))
+	return applied, nil
 }
 
 // BuildStartSpec 构造固定的 opencode serve 命令和启动环境。
@@ -163,7 +192,7 @@ func (m *Manager) Start(ctx context.Context, request StartRequest) (Result, erro
 	if err != nil {
 		return failed(request.Port, request.TraceID, err), err
 	}
-	if len(records) >= m.cfg.MaxProcesses {
+	if len(records) >= m.MaxProcesses() {
 		err := fmt.Errorf("container max processes reached")
 		return failed(request.Port, request.TraceID, err), err
 	}

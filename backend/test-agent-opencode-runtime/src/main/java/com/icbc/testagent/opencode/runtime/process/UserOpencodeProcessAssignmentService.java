@@ -10,7 +10,9 @@ import com.icbc.testagent.domain.node.ExecutionNodeStatus;
 import com.icbc.testagent.domain.configuration.CommonParameter;
 import com.icbc.testagent.domain.configuration.CommonParameterRepository;
 import com.icbc.testagent.domain.configuration.ParameterPlatform;
+import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
+import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
@@ -125,7 +127,8 @@ public class UserOpencodeProcessAssignmentService {
         if (localDirectSettings.enabled()) {
             return localDirectStatus(userId, now, traceId);
         }
-        Optional<UserOpencodeProcessBinding> binding = repository.findUserBinding(userId, OPENCODE_AGENT_ID);
+        Optional<UserOpencodeProcessBinding> binding = repository.findUserBinding(userId, OPENCODE_AGENT_ID)
+                .filter(item -> item.status() == UserOpencodeProcessBindingStatus.ACTIVE);
         if (binding.isEmpty()) {
             return hasInitializableContainer()
                     ? needsInitialization("需要初始化 opencode 进程", now)
@@ -134,8 +137,8 @@ public class UserOpencodeProcessAssignmentService {
         Optional<OpencodeServerProcess> process = activeProcess(binding.get());
         if (process.isEmpty()) {
             return canRebuildOn(binding.get().linuxServerId())
-                    ? needsInitialization("opencode 进程不可用，需要重新初始化", now)
-                    : unavailable("原 Linux 服务器没有可用的 opencode 容器", now);
+                    ? needsInitialization("opencode 进程不可用，需要重新初始化", binding.get(), now)
+                    : unavailable("原 Linux 服务器没有可用的 opencode 容器", binding.get(), now);
         }
         OpencodeServerProcess current = process.get();
         OpencodeProcessHealthResult health = checkHealth(current, traceId);
@@ -147,8 +150,8 @@ public class UserOpencodeProcessAssignmentService {
         }
         repository.saveOpencodeServerProcess(refreshProcess(current, OpencodeServerProcessStatus.UNHEALTHY, health.message(), now, traceId));
         return canRebuildOn(binding.get().linuxServerId())
-                ? needsInitialization("opencode 进程健康检测失败，需要重新初始化", now)
-                : unavailable("opencode 进程健康检测失败，且原 Linux 服务器没有可用容器", now);
+                ? needsInitialization("opencode 进程健康检测失败，需要重新初始化", current, now)
+                : unavailable("opencode 进程健康检测失败，且原 Linux 服务器没有可用容器", current, now);
     }
 
     /**
@@ -472,7 +475,9 @@ public class UserOpencodeProcessAssignmentService {
                 process.containerId().value(),
                 process.port(),
                 process.baseUrl(),
-                checkedAt);
+                checkedAt,
+                UserOpencodeServiceStatus.RUNNING,
+                serviceAddress(process));
     }
 
     private UserOpencodeProcessStatusResponse needsInitialization(String message, Instant checkedAt) {
@@ -485,7 +490,45 @@ public class UserOpencodeProcessAssignmentService {
                 null,
                 null,
                 null,
-                checkedAt);
+                checkedAt,
+                UserOpencodeServiceStatus.UNASSIGNED,
+                null);
+    }
+
+    private UserOpencodeProcessStatusResponse needsInitialization(
+            String message,
+            UserOpencodeProcessBinding binding,
+            Instant checkedAt) {
+        return new UserOpencodeProcessStatusResponse(
+                UserOpencodeProcessAvailability.NEEDS_INITIALIZATION,
+                true,
+                message,
+                null,
+                null,
+                null,
+                null,
+                null,
+                checkedAt,
+                UserOpencodeServiceStatus.NOT_RUNNING,
+                serviceAddress(binding));
+    }
+
+    private UserOpencodeProcessStatusResponse needsInitialization(
+            String message,
+            OpencodeServerProcess process,
+            Instant checkedAt) {
+        return new UserOpencodeProcessStatusResponse(
+                UserOpencodeProcessAvailability.NEEDS_INITIALIZATION,
+                true,
+                message,
+                null,
+                null,
+                null,
+                null,
+                null,
+                checkedAt,
+                UserOpencodeServiceStatus.NOT_RUNNING,
+                serviceAddress(process));
     }
 
     private UserOpencodeProcessStatusResponse unavailable(String message, Instant checkedAt) {
@@ -498,7 +541,59 @@ public class UserOpencodeProcessAssignmentService {
                 null,
                 null,
                 null,
-                checkedAt);
+                checkedAt,
+                UserOpencodeServiceStatus.UNASSIGNED,
+                null);
+    }
+
+    private UserOpencodeProcessStatusResponse unavailable(
+            String message,
+            UserOpencodeProcessBinding binding,
+            Instant checkedAt) {
+        return new UserOpencodeProcessStatusResponse(
+                UserOpencodeProcessAvailability.UNAVAILABLE,
+                false,
+                message,
+                null,
+                null,
+                null,
+                null,
+                null,
+                checkedAt,
+                UserOpencodeServiceStatus.NOT_RUNNING,
+                serviceAddress(binding));
+    }
+
+    private UserOpencodeProcessStatusResponse unavailable(
+            String message,
+            OpencodeServerProcess process,
+            Instant checkedAt) {
+        return new UserOpencodeProcessStatusResponse(
+                UserOpencodeProcessAvailability.UNAVAILABLE,
+                false,
+                message,
+                null,
+                null,
+                null,
+                null,
+                null,
+                checkedAt,
+                UserOpencodeServiceStatus.NOT_RUNNING,
+                serviceAddress(process));
+    }
+
+    private String serviceAddress(UserOpencodeProcessBinding binding) {
+        if (binding == null || binding.linuxServerId() == null) {
+            return null;
+        }
+        return binding.linuxServerId().value() + ":" + binding.port();
+    }
+
+    private String serviceAddress(OpencodeServerProcess process) {
+        if (process == null || process.linuxServerId() == null) {
+            return null;
+        }
+        return process.linuxServerId().value() + ":" + process.port();
     }
 
     private void validateAgent(String agentId) {
@@ -513,9 +608,12 @@ public class UserOpencodeProcessAssignmentService {
 
     private static OpencodeProcessHeartbeatStore disabledHeartbeatStore() {
         return new OpencodeProcessHeartbeatStore() {
-            @Override public boolean enabled() { return false; }
             @Override public void recordBackendHeartbeat(com.icbc.testagent.domain.opencodeprocess.BackendProcessId backendProcessId, Instant heartbeatAt) { }
+            @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) { }
+            @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { }
             @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
+            @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.of(); }
+            @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
             @Override public Set<com.icbc.testagent.domain.opencodeprocess.BackendProcessId> liveBackendProcessIds() { return Set.of(); }
             @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
             @Override public void cleanupExpiredHeartbeats() { }

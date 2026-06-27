@@ -8,7 +8,7 @@
 
 - `cmd/opencode-manager`：CLI 协议适配、参数解析和 JSON 输出。
 - `internal/config`：环境变量解析、端口池和路径校验。
-- `internal/control`：后端 discovery client、WebSocket JSON 控制协议、注册、心跳、命令分发和重连循环。
+- `internal/control`：WebSocket JSON 控制协议、seed 连接、Redis 心跳上报、后端列表请求、命令分发和断线重连循环。
 - `internal/state`：本地 state 文件读写，维护端口到 PID 的索引。
 - `internal/health`：PID 存活和 opencode HTTP 健康探测。
 - `internal/process`：启动、停止、重启、健康检测和列表编排。

@@ -37,6 +37,9 @@ import type {
   ModelInfo,
   OpencodeRuntimeManagementOverview,
   OpencodeRuntimeManagementOverviewParams,
+  OpencodeRuntimeMetricHistoryParams,
+  OpencodeRuntimeContainerMetricHistory,
+  OpencodeRuntimeBackendMetricHistory,
   PageResponse,
   PlatformUserSummary,
   PersonalWorkspace,
@@ -553,6 +556,14 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<UserOpencodeProcess>(agentPath("/processes/me/initialize"), { method: "POST" }),
     getOpencodeRuntimeManagementOverview: (params: OpencodeRuntimeManagementOverviewParams = {}) =>
       request<OpencodeRuntimeManagementOverview>(`${opencodeRuntimeManagementBase}/overview${query({ ...params })}`),
+    getOpencodeRuntimeContainerMetrics: (containerId: string, params: OpencodeRuntimeMetricHistoryParams = {}) =>
+      request<OpencodeRuntimeContainerMetricHistory>(
+        `${opencodeRuntimeManagementBase}/containers/${encodeURIComponent(containerId)}/metrics${query({ ...params })}`
+      ),
+    getOpencodeRuntimeBackendProcessMetrics: (backendProcessId: string, params: OpencodeRuntimeMetricHistoryParams = {}) =>
+      request<OpencodeRuntimeBackendMetricHistory>(
+        `${opencodeRuntimeManagementBase}/backend-processes/${encodeURIComponent(backendProcessId)}/metrics${query({ ...params })}`
+      ),
     listScheduledTasks: (params: ScheduledTaskListParams = {}) =>
       request<PageResponse<ScheduledTaskManagementTask>>(
         `${schedulerManagementBase}/tasks${query({ page: params.page, size: params.size })}`

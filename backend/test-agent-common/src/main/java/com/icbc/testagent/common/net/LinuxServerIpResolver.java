@@ -3,6 +3,7 @@ package com.icbc.testagent.common.net;
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
+import java.net.URI;
 import java.net.SocketException;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -51,6 +52,20 @@ public final class LinuxServerIpResolver {
      * 返回探测到的真实内网 IPv4 地址。
      */
     public String resolve() {
+        return resolved;
+    }
+
+    /**
+     * 优先使用后端 listen-url 中声明的非回环 IPv4，确保 Java 自身注册和写出的 .serverip 来自同一结果。
+     *
+     * <p>本地开发常见的 127.0.0.1 / localhost / 0.0.0.0 只表示绑定入口，不能作为服务器身份；
+     * 此类地址会回退到启动时缓存的真实网卡探测结果。
+     */
+    public String resolveForListenUrl(String listenUrl) {
+        String host = extractHost(listenUrl);
+        if (isUsableListenHost(host)) {
+            return host;
+        }
         return resolved;
     }
 
@@ -151,6 +166,42 @@ public final class LinuxServerIpResolver {
             }
         }
         return false;
+    }
+
+    private static String extractHost(String listenUrl) {
+        if (listenUrl == null || listenUrl.isBlank()) {
+            return "";
+        }
+        try {
+            return URI.create(listenUrl.trim()).getHost();
+        } catch (IllegalArgumentException ignored) {
+            return "";
+        }
+    }
+
+    private static boolean isUsableListenHost(String host) {
+        return isIpv4Literal(host) && !isLoopback(host) && !isLinkLocal(host) && !"0.0.0.0".equals(host);
+    }
+
+    private static boolean isIpv4Literal(String host) {
+        if (host == null) {
+            return false;
+        }
+        String[] parts = host.split("\\.");
+        if (parts.length != 4) {
+            return false;
+        }
+        for (String part : parts) {
+            try {
+                int value = Integer.parseInt(part);
+                if (value < 0 || value > 255) {
+                    return false;
+                }
+            } catch (NumberFormatException e) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String describe(List<InterfaceInfo> interfaces) {

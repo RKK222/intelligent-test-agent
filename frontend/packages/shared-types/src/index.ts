@@ -223,9 +223,14 @@ export type Run = {
 };
 
 export type UserOpencodeProcessStatus = "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE" | string;
+export type UserOpencodeServiceStatus = "UNASSIGNED" | "RUNNING" | "NOT_RUNNING" | string;
 
 export type UserOpencodeProcess = {
   status: UserOpencodeProcessStatus;
+  /** 头像菜单展示状态：未分配、运行中、未运行。旧后端缺失时前端从 status/baseUrl 推断。 */
+  serviceStatus?: UserOpencodeServiceStatus;
+  /** 头像菜单展示地址，格式为 服务器IP:内部opencode端口。 */
+  serviceAddress?: string | null;
   initializable: boolean;
   /** 用户绑定指向的 Linux 服务器已无可用容器，但本地仍有可路由节点时为 true。 */
   bindingClearable?: boolean;
@@ -285,6 +290,18 @@ export type OpencodeRuntimeBackendProcess = {
   status: string;
   startedAt?: string | null;
   lastHeartbeatAt?: string | null;
+  cpuUsagePercent?: number | null;
+  memoryMaxBytes?: number | null;
+  memoryUsedBytes?: number | null;
+  memoryUsagePercent?: number | null;
+  diskMaxBytes?: number | null;
+  diskUsedBytes?: number | null;
+  diskUsagePercent?: number | null;
+  jvmMemoryUsedBytes?: number | null;
+  jvmMemoryCommittedBytes?: number | null;
+  jvmMemoryMaxBytes?: number | null;
+  jvmGcPauseMillis?: number | null;
+  jvmThreadsLive?: number | null;
   createdAt: string;
   updatedAt: string;
   traceId: string;
@@ -299,6 +316,13 @@ export type OpencodeRuntimeContainer = {
   maxProcesses: number;
   currentProcesses: number;
   availableCapacity: number;
+  metricsSource?: string | null;
+  cpuUsagePercent?: number | null;
+  memoryMaxBytes?: number | null;
+  memoryUsedBytes?: number | null;
+  memoryUsagePercent?: number | null;
+  diskReadBytesPerSecond?: number | null;
+  diskWriteBytesPerSecond?: number | null;
   status: string;
   lastHeartbeatAt?: string | null;
   createdAt: string;
@@ -361,6 +385,57 @@ export type OpencodeRuntimeManagementOverview = {
   managers: OpencodeRuntimeManager[];
   managerBackendConnections: OpencodeRuntimeManagerBackendConnection[];
   opencodeProcesses: PageResponse<OpencodeRuntimeProcess>;
+};
+
+export type OpencodeRuntimeMetricHistoryParams = {
+  windowMinutes?: number;
+  hours?: number;
+  maxPoints?: number;
+};
+
+export type OpencodeRuntimeContainerMetricSample = {
+  sampledAt: string;
+  maxProcesses: number;
+  currentProcesses: number;
+  metricsSource?: string | null;
+  cpuUsagePercent?: number | null;
+  memoryMaxBytes?: number | null;
+  memoryUsedBytes?: number | null;
+  memoryUsagePercent?: number | null;
+  diskReadBytesPerSecond?: number | null;
+  diskWriteBytesPerSecond?: number | null;
+};
+
+export type OpencodeRuntimeContainerMetricHistory = {
+  generatedAt: string;
+  containerId: string;
+  from: string;
+  to: string;
+  samples: OpencodeRuntimeContainerMetricSample[];
+};
+
+export type OpencodeRuntimeBackendMetricSample = {
+  sampledAt: string;
+  cpuUsagePercent?: number | null;
+  memoryMaxBytes?: number | null;
+  memoryUsedBytes?: number | null;
+  memoryUsagePercent?: number | null;
+  diskMaxBytes?: number | null;
+  diskUsedBytes?: number | null;
+  diskUsagePercent?: number | null;
+  jvmMemoryUsedBytes?: number | null;
+  jvmMemoryCommittedBytes?: number | null;
+  jvmMemoryMaxBytes?: number | null;
+  jvmGcPauseMillis?: number | null;
+  jvmThreadsLive?: number | null;
+};
+
+export type OpencodeRuntimeBackendMetricHistory = {
+  generatedAt: string;
+  backendProcessId: string;
+  from: string;
+  to: string;
+  samples: OpencodeRuntimeBackendMetricSample[];
 };
 
 // ---- 定时任务管理类型 ----

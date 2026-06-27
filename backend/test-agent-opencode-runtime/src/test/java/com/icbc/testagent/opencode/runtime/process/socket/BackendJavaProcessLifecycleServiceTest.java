@@ -5,15 +5,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
+import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.ContainerManagerId;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerStatus;
 import com.icbc.testagent.domain.opencodeprocess.ManagerConnectionStatus;
+import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerManager;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnection;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
@@ -27,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class BackendJavaProcessLifecycleServiceTest {
@@ -36,6 +40,7 @@ class BackendJavaProcessLifecycleServiceTest {
         FakeRepository repository = new FakeRepository();
         BackendJavaProcessLifecycleService service = new BackendJavaProcessLifecycleService(
                 repository,
+                new RecordingHeartbeatStore(),
                 new ManagerControlSettings(
                         "secret-token",
                         "http://10.8.0.21:8080",
@@ -58,6 +63,33 @@ class BackendJavaProcessLifecycleServiceTest {
     }
 
     @Test
+    void periodicHeartbeatRefreshesRedisSnapshotWithoutUpdatingDatabaseHeartbeat() {
+        FakeRepository repository = new FakeRepository();
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        BackendJavaProcessLifecycleService service = new BackendJavaProcessLifecycleService(
+                repository,
+                heartbeatStore,
+                new ManagerControlSettings(
+                        "secret-token",
+                        "http://10.8.0.21:8080",
+                        new LinuxServerId("10.8.0.21"),
+                        Duration.ofSeconds(5),
+                        Duration.ofSeconds(10),
+                        Duration.ofSeconds(5),
+                        100),
+                Clock.fixed(Instant.parse("2026-06-24T00:00:00Z"), ZoneOffset.UTC));
+
+        service.registerHeartbeat("trace_first_heartbeat");
+        service.registerHeartbeat("trace_second_heartbeat");
+
+        assertThat(repository.savedBackendCount).isEqualTo(1);
+        assertThat(repository.savedLinuxServerCount).isEqualTo(1);
+        assertThat(heartbeatStore.backendSnapshots).hasSize(2);
+        assertThat(heartbeatStore.backendSnapshots.getLast().backendProcess().lastHeartbeatAt())
+                .isEqualTo(Instant.parse("2026-06-24T00:00:00Z"));
+    }
+
+    @Test
     void heartbeatBootstrapsLocalManagerBackendConnectionWhenMissing() {
         FakeRepository repository = new FakeRepository();
         // 模拟 V17 在数据库预置的同服务器 CONNECTED manager
@@ -74,6 +106,7 @@ class BackendJavaProcessLifecycleServiceTest {
                 "trace_seed_local_opencode_machine"));
         BackendJavaProcessLifecycleService service = new BackendJavaProcessLifecycleService(
                 repository,
+                new RecordingHeartbeatStore(),
                 new ManagerControlSettings(
                         "secret-token",
                         "http://127.0.0.1:8080",
@@ -112,6 +145,7 @@ class BackendJavaProcessLifecycleServiceTest {
                 "trace_seed_other"));
         BackendJavaProcessLifecycleService service = new BackendJavaProcessLifecycleService(
                 repository,
+                new RecordingHeartbeatStore(),
                 new ManagerControlSettings(
                         "secret-token",
                         "http://127.0.0.1:8080",
@@ -130,12 +164,22 @@ class BackendJavaProcessLifecycleServiceTest {
     private static final class FakeRepository implements OpencodeProcessManagementRepository {
         private LinuxServer linuxServer;
         private BackendJavaProcess backend;
+        private int savedLinuxServerCount;
+        private int savedBackendCount;
         private final List<OpencodeContainerManager> containerManagers = new ArrayList<>();
         private final List<OpencodeManagerBackendConnection> savedConnections = new ArrayList<>();
 
-        @Override public LinuxServer saveLinuxServer(LinuxServer linuxServer) { this.linuxServer = linuxServer; return linuxServer; }
+        @Override public LinuxServer saveLinuxServer(LinuxServer linuxServer) {
+            savedLinuxServerCount++;
+            this.linuxServer = linuxServer;
+            return linuxServer;
+        }
         @Override public Optional<LinuxServer> findLinuxServerById(LinuxServerId linuxServerId) { return Optional.ofNullable(linuxServer); }
-        @Override public BackendJavaProcess saveBackendJavaProcess(BackendJavaProcess backendJavaProcess) { this.backend = backendJavaProcess; return backendJavaProcess; }
+        @Override public BackendJavaProcess saveBackendJavaProcess(BackendJavaProcess backendJavaProcess) {
+            savedBackendCount++;
+            this.backend = backendJavaProcess;
+            return backendJavaProcess;
+        }
         @Override public Optional<BackendJavaProcess> findBackendJavaProcessById(BackendProcessId backendProcessId) { return Optional.ofNullable(backend); }
         @Override public List<BackendJavaProcess> findReadyBackendJavaProcesses(Instant minHeartbeatAt, int limit) { return List.of(); }
         @Override public OpencodeContainer saveContainer(OpencodeContainer container) { return container; }
@@ -158,5 +202,19 @@ class BackendJavaProcessLifecycleServiceTest {
         @Override public Optional<UserOpencodeProcessBinding> findUserBinding(UserId userId, String agentId) { return Optional.empty(); }
         @Override public List<OpencodeServerProcess> findOpencodeServerProcesses(int limit) { return List.of(); }
         @Override public List<OpencodeContainerManager> findContainerManagers(int limit) { return new ArrayList<>(containerManagers); }
+    }
+
+    private static final class RecordingHeartbeatStore implements OpencodeProcessHeartbeatStore {
+        private final List<BackendRuntimeSnapshot> backendSnapshots = new ArrayList<>();
+
+        @Override public void recordBackendHeartbeat(BackendProcessId backendProcessId, Instant heartbeatAt) { }
+        @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) { backendSnapshots.add(snapshot); }
+        @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { }
+        @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
+        @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.copyOf(backendSnapshots); }
+        @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
+        @Override public Set<BackendProcessId> liveBackendProcessIds() { return Set.of(); }
+        @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
+        @Override public void cleanupExpiredHeartbeats() { }
     }
 }

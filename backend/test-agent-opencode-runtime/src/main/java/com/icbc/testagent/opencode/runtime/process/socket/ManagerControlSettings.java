@@ -23,8 +23,8 @@ public record ManagerControlSettings(
         token = token == null ? "" : token.trim();
         listenUrl = requireText(listenUrl, "listenUrl");
         Objects.requireNonNull(linuxServerId, "linuxServerId must not be null");
-        heartbeatInterval = positive(heartbeatInterval, Duration.ofSeconds(10));
-        backendStaleAfter = positive(backendStaleAfter, Duration.ofSeconds(30));
+        heartbeatInterval = positive(heartbeatInterval, Duration.ofSeconds(5));
+        backendStaleAfter = positive(backendStaleAfter, Duration.ofSeconds(10));
         commandTimeout = positive(commandTimeout, Duration.ofSeconds(10));
         if (backendDiscoveryLimit < 1 || backendDiscoveryLimit > 500) {
             backendDiscoveryLimit = 100;

@@ -5,9 +5,12 @@ import { Refresh, Search } from "@element-plus/icons-vue";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type {
   CurrentUser,
+  OpencodeRuntimeBackendMetricHistory,
+  OpencodeRuntimeContainerMetricHistory,
   OpencodeRuntimeManagementOverview,
   OpencodeRuntimeManagementOverviewParams
 } from "@test-agent/shared-types";
+import RuntimeMetricChart from "./RuntimeMetricChart.vue";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -27,6 +30,8 @@ const draftFilters = ref<FilterDraft>({ status: "", linuxServerId: "", container
 const activeFilters = ref<FilterDraft>({ status: "", linuxServerId: "", containerId: "", username: "" });
 const page = ref(1);
 const size = ref(20);
+const selectedMetricsTarget = ref<{ type: "container" | "backend"; id: string; title: string } | null>(null);
+const selectedWindowMinutes = ref(60);
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const overviewParams = computed<OpencodeRuntimeManagementOverviewParams>(() => ({
@@ -45,12 +50,42 @@ const overviewQuery = useQuery<OpencodeRuntimeManagementOverview, Error>({
   queryFn: () => api.getOpencodeRuntimeManagementOverview(overviewParams.value)
 });
 
+const metricsQuery = useQuery<OpencodeRuntimeContainerMetricHistory | OpencodeRuntimeBackendMetricHistory, Error>({
+  queryKey: computed(() => ["opencode-runtime-metrics", selectedMetricsTarget.value?.type, selectedMetricsTarget.value?.id, selectedWindowMinutes.value]),
+  enabled: () => hasSuperAdmin.value && selectedMetricsTarget.value !== null,
+  retry: false,
+  refetchInterval: 5000,
+  queryFn: () => {
+    const target = selectedMetricsTarget.value;
+    if (!target) {
+      throw new Error("未选择监控对象");
+    }
+    const params = { windowMinutes: selectedWindowMinutes.value, maxPoints: 720 };
+    if (target.type === "container") {
+      return api.getOpencodeRuntimeContainerMetrics(target.id, params);
+    }
+    return api.getOpencodeRuntimeBackendProcessMetrics(target.id, params);
+  }
+});
+
 const overview = computed(() => overviewQuery.data.value);
 const summary = computed(() => overview.value?.summary);
 const processPage = computed(() => overview.value?.opencodeProcesses);
 const processRows = computed(() => processPage.value?.items ?? []);
 const isLoading = computed(() => overviewQuery.isLoading.value);
 const isFetching = computed(() => overviewQuery.isFetching.value);
+const metricHistory = computed(() => metricsQuery.data.value);
+const metricSamples = computed(() => metricHistory.value?.samples ?? []);
+const metricErrorMessage = computed(() => {
+  const error = metricsQuery.error.value;
+  if (!error) {
+    return "";
+  }
+  if (error instanceof BackendApiError) {
+    return `${error.message}（${error.code}）`;
+  }
+  return error.message || "监控历史加载失败";
+});
 const errorMessage = computed(() => {
   const error = overviewQuery.error.value;
   if (!error) {
@@ -87,6 +122,9 @@ function clearFilters() {
 
 function refresh() {
   void overviewQuery.refetch();
+  if (selectedMetricsTarget.value) {
+    void metricsQuery.refetch();
+  }
 }
 
 function prevPage() {
@@ -136,6 +174,66 @@ function compactRecord(value?: Record<string, unknown> | null) {
     .slice(0, 4)
     .map(([key, item]) => `${key}: ${String(item)}`)
     .join(" / ");
+}
+
+function selectContainer(containerId: string) {
+  if (selectedMetricsTarget.value?.type === "container" && selectedMetricsTarget.value.id === containerId) {
+    selectedMetricsTarget.value = null;
+  } else {
+    selectedMetricsTarget.value = { type: "container", id: containerId, title: "容器监控趋势" };
+  }
+}
+
+function selectBackendProcess(backendProcessId: string) {
+  if (selectedMetricsTarget.value?.type === "backend" && selectedMetricsTarget.value.id === backendProcessId) {
+    selectedMetricsTarget.value = null;
+  } else {
+    selectedMetricsTarget.value = { type: "backend", id: backendProcessId, title: "后端监控趋势" };
+  }
+}
+
+function formatPercent(value?: number | null) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  const rounded = Math.round(value * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}%`;
+}
+
+function formatBytes(value?: number | null) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "-";
+  }
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let next = value;
+  let unitIndex = 0;
+  while (Math.abs(next) >= 1024 && unitIndex < units.length - 1) {
+    next /= 1024;
+    unitIndex += 1;
+  }
+  if (unitIndex === 0) {
+    return `${Math.round(next)} ${units[unitIndex]}`;
+  }
+  return `${next.toFixed(next >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
+function formatBytesRate(value?: number | null) {
+  const formatted = formatBytes(value);
+  return formatted === "-" ? "-" : `${formatted}/s`;
+}
+
+function formatMetricsSource(value?: string | null) {
+  if (!value) {
+    return "-";
+  }
+  if (value === "unavailable") {
+    return "不可采集";
+  }
+  return value;
+}
+
+function activeRowClass(type: "container" | "backend", id: string) {
+  return selectedMetricsTarget.value?.type === type && selectedMetricsTarget.value.id === id ? "is-selected" : "";
 }
 </script>
 
@@ -199,19 +297,78 @@ function compactRecord(value?: Record<string, unknown> | null) {
               <div class="ta-runtime-block-scroll">
                 <table class="ta-runtime-table">
                   <thead>
-                    <tr><th>进程</th><th>服务器</th><th>状态</th><th>直连地址</th><th>心跳</th></tr>
+                    <tr><th>进程</th><th>服务器</th><th>状态</th><th>CPU</th><th>内存</th><th>磁盘</th><th>JVM</th><th>心跳</th></tr>
                   </thead>
                   <tbody>
-                    <tr v-if="!overview?.backendProcesses.length"><td colspan="5" class="is-empty">暂无后端进程</td></tr>
-                    <tr v-for="process in overview?.backendProcesses ?? []" :key="process.backendProcessId">
+                    <tr v-if="!overview?.backendProcesses.length"><td colspan="8" class="is-empty">暂无后端进程</td></tr>
+                    <tr
+                      v-for="process in overview?.backendProcesses ?? []"
+                      :key="process.backendProcessId"
+                      :class="activeRowClass('backend', process.backendProcessId)"
+                      tabindex="0"
+                      @click="selectBackendProcess(process.backendProcessId)"
+                      @keydown.enter="selectBackendProcess(process.backendProcessId)"
+                    >
                       <td class="is-compact">{{ process.backendProcessId }}</td>
                       <td>{{ process.linuxServerId }}</td>
                       <td><span :class="['ta-status', statusClass(process.status)]">{{ process.status }}</span></td>
-                      <td class="is-compact">{{ process.listenUrl }}</td>
+                      <td>{{ formatPercent(process.cpuUsagePercent) }}</td>
+                      <td>{{ formatPercent(process.memoryUsagePercent) }} / {{ formatBytes(process.memoryUsedBytes) }}</td>
+                      <td>{{ formatPercent(process.diskUsagePercent) }} / {{ formatBytes(process.diskUsedBytes) }}</td>
+                      <td>{{ formatBytes(process.jvmMemoryUsedBytes) }} / {{ process.jvmThreadsLive ?? "-" }} 线程</td>
                       <td>{{ formatDate(process.lastHeartbeatAt) }}</td>
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            </div>
+
+            <!-- 后端趋势图按指标归属区分服务器级资源与当前 JVM 进程。 -->
+            <div v-if="selectedMetricsTarget && selectedMetricsTarget.type === 'backend'" class="ta-runtime-metrics-panel">
+              <header class="ta-runtime-section-header">
+                <h4>{{ selectedMetricsTarget.title }}</h4>
+                <div class="ta-runtime-metrics-actions">
+                  <el-radio-group v-model="selectedWindowMinutes" size="small">
+                    <el-radio-button :value="1">1分钟</el-radio-button>
+                    <el-radio-button :value="30">30分钟</el-radio-button>
+                    <el-radio-button :value="60">1小时</el-radio-button>
+                    <el-radio-button :value="360">6小时</el-radio-button>
+                    <el-radio-button :value="720">12小时</el-radio-button>
+                    <el-radio-button :value="1440">24小时</el-radio-button>
+                    <el-radio-button :value="2880">48小时</el-radio-button>
+                  </el-radio-group>
+                  <span>{{ selectedMetricsTarget.id }} · {{ metricSamples.length }} 点</span>
+                </div>
+              </header>
+              <div v-if="metricErrorMessage" class="ta-runtime-alert" role="alert">{{ metricErrorMessage }}</div>
+              <div v-else-if="metricsQuery.isLoading.value" class="ta-runtime-placeholder">正在加载监控趋势...</div>
+              <div v-else class="ta-runtime-chart-grid">
+                <RuntimeMetricChart
+                  title="服务器 CPU / 内存 / 磁盘"
+                  :samples="metricSamples"
+                  :series="[
+                    { name: 'CPU %', field: 'cpuUsagePercent' },
+                    { name: '内存 %', field: 'memoryUsagePercent' },
+                    { name: '磁盘 %', field: 'diskUsagePercent' }
+                  ]"
+                />
+                <RuntimeMetricChart
+                  title="JVM 内存（当前进程）"
+                  :samples="metricSamples"
+                  :series="[
+                    { name: 'used', field: 'jvmMemoryUsedBytes' },
+                    { name: 'committed', field: 'jvmMemoryCommittedBytes' },
+                    { name: 'max', field: 'jvmMemoryMaxBytes' }
+                  ]"
+                />
+                <RuntimeMetricChart
+                  title="JVM GC / 线程（当前进程）"
+                  :samples="metricSamples"
+                  :series="[
+                    { name: 'GC pause ms', field: 'jvmGcPauseMillis' },
+                    { name: 'live threads', field: 'jvmThreadsLive' }
+                  ]"
+                />
               </div>
             </div>
 
@@ -220,20 +377,78 @@ function compactRecord(value?: Record<string, unknown> | null) {
               <div class="ta-runtime-block-scroll">
                 <table class="ta-runtime-table">
                   <thead>
-                    <tr><th>容器</th><th>服务器</th><th>状态</th><th>端口池</th><th>容量</th><th>心跳</th></tr>
+                    <tr><th>容器</th><th>服务器</th><th>状态</th><th>端口池</th><th>容量</th><th>来源</th><th>CPU</th><th>内存率</th><th>已用内存</th><th>心跳</th></tr>
                   </thead>
                   <tbody>
-                    <tr v-if="!overview?.containers.length"><td colspan="6" class="is-empty">暂无容器</td></tr>
-                    <tr v-for="container in overview?.containers ?? []" :key="container.containerId">
+                    <tr v-if="!overview?.containers.length"><td colspan="10" class="is-empty">暂无容器</td></tr>
+                    <tr
+                      v-for="container in overview?.containers ?? []"
+                      :key="container.containerId"
+                      :class="activeRowClass('container', container.containerId)"
+                      tabindex="0"
+                      @click="selectContainer(container.containerId)"
+                      @keydown.enter="selectContainer(container.containerId)"
+                    >
                       <td class="is-compact">{{ container.containerId }}</td>
                       <td>{{ container.linuxServerId }}</td>
                       <td><span :class="['ta-status', statusClass(container.status)]">{{ container.status }}</span></td>
                       <td>{{ container.portStart }}-{{ container.portEnd }}</td>
                       <td>{{ container.currentProcesses }}/{{ container.maxProcesses }}</td>
+                      <td>{{ formatMetricsSource(container.metricsSource) }}</td>
+                      <td>{{ formatPercent(container.cpuUsagePercent) }}</td>
+                      <td>{{ formatPercent(container.memoryUsagePercent) }}</td>
+                      <td>{{ formatBytes(container.memoryUsedBytes) }}</td>
                       <td>{{ formatDate(container.lastHeartbeatAt) }}</td>
                     </tr>
                   </tbody>
                 </table>
+              </div>
+            </div>
+
+            <!-- 容器趋势图展示 manager 心跳上报的容器级采样。 -->
+            <div v-if="selectedMetricsTarget && selectedMetricsTarget.type === 'container'" class="ta-runtime-metrics-panel">
+              <header class="ta-runtime-section-header">
+                <h4>{{ selectedMetricsTarget.title }}</h4>
+                <div class="ta-runtime-metrics-actions">
+                  <el-radio-group v-model="selectedWindowMinutes" size="small">
+                    <el-radio-button :value="1">1分钟</el-radio-button>
+                    <el-radio-button :value="30">30分钟</el-radio-button>
+                    <el-radio-button :value="60">1小时</el-radio-button>
+                    <el-radio-button :value="360">6小时</el-radio-button>
+                    <el-radio-button :value="720">12小时</el-radio-button>
+                    <el-radio-button :value="1440">24小时</el-radio-button>
+                    <el-radio-button :value="2880">48小时</el-radio-button>
+                  </el-radio-group>
+                  <span>{{ selectedMetricsTarget.id }} · {{ metricSamples.length }} 点</span>
+                </div>
+              </header>
+              <div v-if="metricErrorMessage" class="ta-runtime-alert" role="alert">{{ metricErrorMessage }}</div>
+              <div v-else-if="metricsQuery.isLoading.value" class="ta-runtime-placeholder">正在加载监控趋势...</div>
+              <div v-else class="ta-runtime-chart-grid">
+                <RuntimeMetricChart
+                  title="CPU / 内存"
+                  :samples="metricSamples"
+                  :series="[
+                    { name: 'CPU %', field: 'cpuUsagePercent' },
+                    { name: '内存 %', field: 'memoryUsagePercent' }
+                  ]"
+                />
+                <RuntimeMetricChart
+                  title="进程容量"
+                  :samples="metricSamples"
+                  :series="[
+                    { name: '当前进程', field: 'currentProcesses' },
+                    { name: '最大进程', field: 'maxProcesses' }
+                  ]"
+                />
+                <RuntimeMetricChart
+                  title="磁盘 IO"
+                  :samples="metricSamples"
+                  :series="[
+                    { name: '读取 B/s', field: 'diskReadBytesPerSecond' },
+                    { name: '写入 B/s', field: 'diskWriteBytesPerSecond' }
+                  ]"
+                />
               </div>
             </div>
 
@@ -428,7 +643,7 @@ function compactRecord(value?: Record<string, unknown> | null) {
 }
 .ta-runtime-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 .ta-runtime-block {
@@ -484,6 +699,13 @@ function compactRecord(value?: Record<string, unknown> | null) {
 .ta-runtime-table tr:last-child td {
   border-bottom: 0;
 }
+.ta-runtime-table tbody tr[tabindex="0"] {
+  cursor: pointer;
+}
+.ta-runtime-table tbody tr[tabindex="0"]:hover,
+.ta-runtime-table tbody tr.is-selected {
+  background: #f4f8ff;
+}
 .ta-runtime-table .is-empty {
   height: 44px;
   color: #909399;
@@ -530,9 +752,25 @@ function compactRecord(value?: Record<string, unknown> | null) {
   color: #606266;
   font-size: 12px;
 }
+.ta-runtime-metrics-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ta-runtime-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.ta-runtime-metrics-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 @media (max-width: 900px) {
   .ta-runtime-summary,
-  .ta-runtime-grid {
+  .ta-runtime-grid,
+  .ta-runtime-chart-grid {
     grid-template-columns: 1fr;
   }
   .ta-runtime-filter {

@@ -51,7 +51,7 @@
 - `test-agent.scheduler.due-task-limit` / `TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT`：单轮扫描 due task 上限，默认 `50`。
 - `test-agent.scheduler.manual-run-limit` / `TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT`：单轮扫描手动 pending run 上限，默认 `50`。
 
-启用 scheduler 时必须同时启用 `test-agent.redis.enabled=true` 并装配 `StringRedisTemplate`。Redis 不可用时不降级为本机锁。
+启用 scheduler 时必须装配 `StringRedisTemplate`。Redis 不可用时不降级为本机锁。
 
 ## 测试覆盖
 

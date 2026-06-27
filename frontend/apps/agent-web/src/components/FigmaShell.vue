@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref } from "vue";
+import { computed, onUnmounted, ref, watch, type CSSProperties } from "vue";
 import { ChevronDown, LogOut, ShieldCheck, UserRound } from "lucide-vue-next";
+import type { UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.svg";
 import panelCloseUrl from "../assets/figma/panel-close.svg";
 
@@ -19,6 +20,9 @@ const props = withDefaults(
     selectedAppId?: string;
     currentUserName?: string;
     currentUserRoleLabels?: string[];
+    opencodeProcessStatus?: UserOpencodeProcess | null;
+    opencodeProcessLoading?: boolean;
+    showLeftPanel?: boolean;
     showRightPanel?: boolean;
   }>(),
   {
@@ -29,13 +33,27 @@ const props = withDefaults(
       { id: "ms-runner", name: "MS-Runner", description: "质谱批量回归任务" }
     ],
     selectedAppId: "fgcms-psn",
+    showLeftPanel: true,
     showRightPanel: true
   }
 );
 
-const leftPanelOpen = ref(true);
+const leftPanelOpen = ref(props.showLeftPanel);
+watch(() => props.showLeftPanel, (newVal) => {
+  leftPanelOpen.value = newVal;
+});
 const leftPanelWidth = ref(262);
+const leftPanelStyle = computed<CSSProperties>(() => ({
+  width: leftPanelOpen.value ? `${leftPanelWidth.value}px` : "0px",
+  opacity: leftPanelOpen.value ? 1 : 0,
+  pointerEvents: leftPanelOpen.value ? ("auto" as const) : ("none" as const)
+}));
 const rightPanelWidth = ref(380);
+const rightPanelStyle = computed<CSSProperties>(() => ({
+  width: props.showRightPanel ? `${rightPanelWidth.value}px` : "0px",
+  opacity: props.showRightPanel ? 1 : 0,
+  pointerEvents: props.showRightPanel ? ("auto" as const) : ("none" as const)
+}));
 const resizing = ref<"left" | "right" | null>(null);
 let resizeStartX = 0;
 let resizeStartWidth = 0;
@@ -50,6 +68,7 @@ const emit = defineEmits<{
   (e: "toggle-right-panel"): void;
   (e: "select-app", appId: string): void;
   (e: "logout"): void;
+  (e: "refresh-opencode-process"): void;
 }>();
 
 const appMenuOpen = ref(false);
@@ -74,8 +93,12 @@ function closeAppMenu() {
 }
 
 function toggleUserMenu() {
-  userMenuOpen.value = !userMenuOpen.value;
+  const nextOpen = !userMenuOpen.value;
+  userMenuOpen.value = nextOpen;
   appMenuOpen.value = false;
+  if (nextOpen) {
+    emit("refresh-opencode-process");
+  }
 }
 
 function closeUserMenu() {
@@ -113,6 +136,39 @@ const userRoleText = computed(() => {
 const userInitial = computed(() => {
   const first = userName.value.trim().charAt(0);
   return first ? first.toUpperCase() : "?";
+});
+
+function serviceAddressFromBaseUrl(baseUrl?: string) {
+  if (!baseUrl) return "";
+  try {
+    const url = new URL(baseUrl);
+    return url.hostname && url.port ? `${url.hostname}:${url.port}` : "";
+  } catch {
+    return "";
+  }
+}
+
+function opencodeServiceAddress(process?: UserOpencodeProcess | null) {
+  if (!process) return "";
+  if (process.serviceAddress?.trim()) return process.serviceAddress.trim();
+  if (process.linuxServerId && process.port) return `${process.linuxServerId}:${process.port}`;
+  return serviceAddressFromBaseUrl(process.baseUrl);
+}
+
+const opencodeServiceDisplay = computed(() => {
+  if (props.opencodeProcessLoading) {
+    return { tone: "checking", text: "正在查询" };
+  }
+  const process = props.opencodeProcessStatus;
+  const address = opencodeServiceAddress(process);
+  const serviceStatus = process?.serviceStatus ?? (process?.status === "READY" ? "RUNNING" : address ? "NOT_RUNNING" : "UNASSIGNED");
+  if (serviceStatus === "RUNNING") {
+    return { tone: "running", text: address ? `运行中(${address})` : "运行中" };
+  }
+  if (serviceStatus === "NOT_RUNNING") {
+    return { tone: "stopped", text: address ? `未运行(${address})` : "未运行" };
+  }
+  return { tone: "unassigned", text: "待分配专属进程" };
 });
 
 function onAppMenuBlur(event: FocusEvent) {
@@ -224,6 +280,15 @@ onUnmounted(() => {
               <ShieldCheck class="figma-user-menu-icon" />
               <span class="figma-user-menu-role-text" :title="userRoleText">{{ userRoleText }}</span>
             </div>
+            <div
+              class="figma-user-menu-service"
+              :class="`figma-user-menu-service--${opencodeServiceDisplay.tone}`"
+              role="status"
+              aria-label="opencode 服务状态"
+            >
+              <span class="figma-user-menu-service-dot" aria-hidden="true" />
+              <span class="figma-user-menu-service-text" :title="opencodeServiceDisplay.text">{{ opencodeServiceDisplay.text }}</span>
+            </div>
             <div class="figma-user-menu-summary">
               <UserRound class="figma-user-menu-icon" />
               <span class="figma-user-menu-name">{{ userName }}</span>
@@ -241,6 +306,7 @@ onUnmounted(() => {
       <!-- Floating left sidebar toggle button -->
       <div 
         class="figma-sidebar-toggle-floating"
+        :class="{ 'is-resizing': resizing === 'left' }"
         :style="{ left: leftPanelOpen ? `${leftPanelWidth + 48 - 32}px` : '54px' }"
       >
         <button
@@ -286,7 +352,7 @@ onUnmounted(() => {
       </aside>
 
       <div class="figma-panel-group">
-        <div v-if="leftPanelOpen" class="figma-panel-left" :style="{ width: `${leftPanelWidth}px` }">
+        <div class="figma-panel-left" :class="{ 'is-resizing': resizing === 'left' }" :style="leftPanelStyle">
           <slot name="files" />
         </div>
         <div
@@ -300,8 +366,9 @@ onUnmounted(() => {
         <div class="figma-panel-center">
           <slot name="editor" />
         </div>
-        <div v-if="showRightPanel" class="figma-chat-panel-wrapper">
+        <div class="figma-chat-panel-wrapper" :class="{ 'is-resizing': resizing === 'right' }" :style="rightPanelStyle">
           <div
+            v-if="showRightPanel"
             class="figma-chat-resize-handle"
             @mousedown="onResizeStart('right', $event)"
             aria-label="拖拽调整对话窗口宽度"
@@ -556,7 +623,8 @@ onUnmounted(() => {
 
 .figma-user-menu-summary,
 .figma-user-menu-item,
-.figma-user-menu-role {
+.figma-user-menu-role,
+.figma-user-menu-service {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -592,6 +660,54 @@ onUnmounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.figma-user-menu-service {
+  color: #71717a;
+  font-size: 12px;
+  cursor: default;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.figma-user-menu-service-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #a1a1aa;
+  flex-shrink: 0;
+}
+
+.figma-user-menu-service-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figma-user-menu-service--running {
+  color: #15803d;
+}
+
+.figma-user-menu-service--running .figma-user-menu-service-dot {
+  background: #22c55e;
+}
+
+.figma-user-menu-service--stopped {
+  color: #b91c1c;
+}
+
+.figma-user-menu-service--stopped .figma-user-menu-service-dot {
+  background: #ef4444;
+}
+
+.figma-user-menu-service--checking,
+.figma-user-menu-service--unassigned {
+  color: #71717a;
+}
+
+.figma-user-menu-service--checking .figma-user-menu-service-dot,
+.figma-user-menu-service--unassigned .figma-user-menu-service-dot {
+  background: #a1a1aa;
 }
 
 .figma-user-menu-summary {
@@ -701,6 +817,10 @@ onUnmounted(() => {
   flex-direction: column;
   min-height: 0;
   overflow: hidden;
+  transition: width 0.25s ease, opacity 0.25s ease;
+}
+.figma-panel-left.is-resizing {
+  transition: none !important;
 }
 
 .figma-files-resize-handle {
@@ -753,6 +873,10 @@ onUnmounted(() => {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  transition: width 0.25s ease, opacity 0.25s ease;
+}
+.figma-chat-panel-wrapper.is-resizing {
+  transition: none !important;
 }
 
 .figma-panel-right {
@@ -888,7 +1012,10 @@ onUnmounted(() => {
   position: absolute;
   top: 5px;
   z-index: 40;
-  transition: left 0.15s ease;
+  transition: left 0.25s ease;
+}
+.figma-sidebar-toggle-floating.is-resizing {
+  transition: none !important;
 }
 .figma-sidebar-toggle-floating--right {
   right: 8px;

@@ -21,7 +21,7 @@ Token 校验流程：
 
 本地占位策略：
 
-- 未配置 Redis 时，`TokenStore` 回退到 `InMemoryTokenStore`，Token 信息仅存储在本地内存，重启后丢失。
+- Redis 是系统必需依赖，用户 Token、运行心跳、调度锁和运行指标均不提供内存降级。
 - 未配置 `TEST_AGENT_API_TOKEN` 时，`/api/**` 默认放行，便于本地联调。
 - 配置 `TEST_AGENT_API_TOKEN` 后，`/api/**` 必须携带 `Authorization: Bearer <token>`。
 - 鉴权失败返回统一错误格式，错误码 `UNAUTHENTICATED`，不得回显 token。
@@ -57,7 +57,7 @@ Token 校验流程：
 - 文件路径中的隐私片段。
 - 过大的请求体和响应体。
 
-日志配置必须对可变 message、thread 和 traceId 做 CRLF 编码，避免换行注入伪造日志记录。opencode 节点 health、Redis optional health、scheduler 运行记录日志和 opencode-manager 控制面日志必须避免输出 token、完整 Authorization header、Cookie、用户输入或完整 prompt。
+日志配置必须对可变 message、thread 和 traceId 做 CRLF 编码，避免换行注入伪造日志记录。opencode 节点 health、Redis health、scheduler 运行记录日志和 opencode-manager 控制面日志必须避免输出 token、完整 Authorization header、Cookie、用户输入或完整 prompt。
 
 ## Web 安全
 
@@ -66,7 +66,7 @@ Token 校验流程：
 3. Druid Web 控制台默认关闭；如后续启用，必须通过环境变量配置账号、密码和访问 allowlist，并同步 API、运维和安全文档。
 4. 旧 `/api/...`、新 `/api/internal/platform/...` 和 `/api/internal/agent/opencode/...` 共享同一鉴权、限流、CORS、traceId 与错误格式。Workspace 文件 API 和文件 WebSocket RPC 必须把所有请求路径归一化到注册的 workspace root 内，路径穿越或越权访问返回 `FORBIDDEN`。
 5. Workspace 目录选择器只能浏览 `test-agent.workspace-picker.allowed-roots` / `TEST_AGENT_WORKSPACE_PICKER_ROOTS` 声明的本机根目录，默认 `${user.home}/workspace`；越出允许根目录返回 `FORBIDDEN`，缺失或非目录返回 `VALIDATION_ERROR`，前端不得直接调用浏览器、本地插件或 opencode server 枚举任意磁盘路径。超级管理员服务器工作空间选择器只能通过目标后端签发的文件 WebSocket ticket 浏览目录。
-6. opencode-manager WebSocket 控制面只允许容器内 manager 使用独立 token 访问，不接受浏览器用户 token；后端 discovery 返回的 `listenUrl`/`webSocketUrl` 必须是 manager 可访问的后端实例直连地址，不应暴露到公网或不可信网络。
+6. opencode-manager WebSocket 控制面只允许容器内 manager 使用独立 token 访问，不接受浏览器用户 token；manager 不得通过 HTTP 与 Java 后端交互，后端列表发现只通过 WebSocket `backendListRequest/backendListResponse` 完成。返回给 manager 的 `listenUrl`/`webSocketUrl` 必须是 manager 可访问的后端实例直连地址，不应暴露到公网或不可信网络。
 7. 用户专属 opencode server 默认监听 `0.0.0.0:{port}` 且不设置 Basic Auth，生产必须用容器网络、主机防火墙或内网网关限制端口池访问面；浏览器和外部系统不得直接访问这些端口。
 8. `tools/verify-opencode-process-deployment.sh` 只用于只读 smoke check；传入的 manager token 和 `SUPER_ADMIN` 用户 token 不会由脚本打印。生产执行时应使用临时 shell、禁用命令历史或通过安全变量注入，避免 token 留在 history 中。
 

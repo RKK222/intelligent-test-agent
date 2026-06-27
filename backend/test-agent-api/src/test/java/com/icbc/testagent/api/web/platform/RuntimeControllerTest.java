@@ -351,7 +351,9 @@ class RuntimeControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data.status").isEqualTo("READY")
-                .jsonPath("$.data.baseUrl").isEqualTo("http://10.8.0.12:4096");
+                .jsonPath("$.data.baseUrl").isEqualTo("http://10.8.0.12:4096")
+                .jsonPath("$.data.serviceStatus").isEqualTo("RUNNING")
+                .jsonPath("$.data.serviceAddress").isEqualTo("10.8.0.12:4096");
 
         client.post()
                 .uri("/api/internal/agent/opencode/processes/me/initialize")
@@ -360,7 +362,9 @@ class RuntimeControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data.status").isEqualTo("READY")
-                .jsonPath("$.data.processId").isEqualTo("ocp_1234567890abcdef");
+                .jsonPath("$.data.processId").isEqualTo("ocp_1234567890abcdef")
+                .jsonPath("$.data.serviceStatus").isEqualTo("RUNNING")
+                .jsonPath("$.data.serviceAddress").isEqualTo("10.8.0.12:4096");
     }
 
     @Test

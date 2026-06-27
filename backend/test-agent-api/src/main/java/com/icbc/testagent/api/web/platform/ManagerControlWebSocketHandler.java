@@ -14,6 +14,7 @@ import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlMessageC
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlProtocol;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerPendingCommandRegistry;
+import com.icbc.testagent.opencode.runtime.process.socket.OpencodeManagerConfigSyncService;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import org.springframework.http.HttpHeaders;
@@ -36,6 +37,7 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
     private final BackendJavaProcessLifecycleService backendLifecycle;
     private final ManagerConnectionRegistry connections;
     private final ManagerPendingCommandRegistry pendingCommands;
+    private final OpencodeManagerConfigSyncService configSyncService;
 
     /**
      * 注入控制面依赖，业务写库和命令等待均委托 runtime 模块。
@@ -46,13 +48,15 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
             ManagerControlApplicationService controlService,
             BackendJavaProcessLifecycleService backendLifecycle,
             ManagerConnectionRegistry connections,
-            ManagerPendingCommandRegistry pendingCommands) {
+            ManagerPendingCommandRegistry pendingCommands,
+            OpencodeManagerConfigSyncService configSyncService) {
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
         this.codec = Objects.requireNonNull(codec, "codec must not be null");
         this.controlService = Objects.requireNonNull(controlService, "controlService must not be null");
         this.backendLifecycle = Objects.requireNonNull(backendLifecycle, "backendLifecycle must not be null");
         this.connections = Objects.requireNonNull(connections, "connections must not be null");
         this.pendingCommands = Objects.requireNonNull(pendingCommands, "pendingCommands must not be null");
+        this.configSyncService = Objects.requireNonNull(configSyncService, "configSyncService must not be null");
     }
 
     /**
@@ -107,10 +111,20 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
             containerRef.set(containerId);
             connections.register(managerId, containerId, backendLifecycle.backendProcessId(), outboundMessage -> outbound.tryEmitNext(outboundMessage));
             outbound.tryEmitNext(registered);
+            // 连接入注册表后，立即把通用参数表中的最大进程数下发给该 manager，使其采用权威值而非 env 兜底。
+            configSyncService.pushCurrentMaxTo(containerId);
             return Mono.empty();
         }
         if (ManagerControlProtocol.TYPE_HEARTBEAT.equals(message.type())) {
             controlService.heartbeat(message);
+            return Mono.empty();
+        }
+        if (ManagerControlProtocol.TYPE_MANAGER_HEARTBEAT.equals(message.type())) {
+            controlService.managerHeartbeat(message);
+            return Mono.empty();
+        }
+        if (ManagerControlProtocol.TYPE_BACKEND_LIST_REQUEST.equals(message.type())) {
+            outbound.tryEmitNext(controlService.backendListResponse(message.traceId()));
             return Mono.empty();
         }
         if (ManagerControlProtocol.TYPE_COMMAND_RESULT.equals(message.type()) || ManagerControlProtocol.TYPE_ERROR.equals(message.type())) {

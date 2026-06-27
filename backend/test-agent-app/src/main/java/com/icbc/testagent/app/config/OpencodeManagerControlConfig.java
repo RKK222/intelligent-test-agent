@@ -23,9 +23,10 @@ import org.springframework.context.annotation.Configuration;
 public class OpencodeManagerControlConfig {
 
     /**
-     * 探测当前后端所在 Linux 服务器真实内网 IPv4 地址，作为运行管理与工作区登记的服务器身份来源。
+     * 探测当前后端所在 Linux 服务器真实内网 IPv4 地址，作为 listen-url 为本地地址时的回退来源。
      *
-     * <p>启动时强制自动探测，探测失败直接抛异常让启动中断；不再读取任何配置项。
+     * <p>启动时强制自动探测，探测失败直接抛异常让启动中断；最终服务器身份会优先采用
+     * listen-url 中的非回环 IPv4。
      */
     @Bean
     LinuxServerIpResolver linuxServerIpResolver() {
@@ -35,8 +36,8 @@ public class OpencodeManagerControlConfig {
     /**
      * 将 app 配置转换为 runtime/API 可复用的控制面 settings。
      *
-     * <p>Linux 服务器 ID 由 {@link LinuxServerIpResolver} 自动探测真实内网 IP 得到，
-     * 不再来自配置项。
+     * <p>Linux 服务器 ID 优先来自 listen-url 的非回环 IPv4；listen-url 是 127.0.0.1 /
+     * localhost / 0.0.0.0 时回退到 {@link LinuxServerIpResolver} 的真实网卡探测结果。
      */
     @Bean
     ManagerControlSettings managerControlSettings(
@@ -45,11 +46,19 @@ public class OpencodeManagerControlConfig {
         return new ManagerControlSettings(
                 control.getToken(),
                 control.getListenUrl(),
-                new LinuxServerId(linuxServerIpResolver.resolve()),
+                new LinuxServerId(linuxServerIpResolver.resolveForListenUrl(control.getListenUrl())),
                 control.getHeartbeatInterval(),
                 control.getBackendStaleAfter(),
                 control.getCommandTimeout(),
                 control.getBackendDiscoveryLimit());
+    }
+
+    /**
+     * 创建服务器 IP 文件写入器，供生产 socket 控制面启动时发布 .serverip。
+     */
+    @Bean
+    ServerIpFileWriter serverIpFileWriter(TestAgentRuntimeProperties properties) {
+        return new ServerIpFileWriter(properties.getOpencode().getManagerControl().getServerIpFile());
     }
 
     /**
@@ -72,8 +81,11 @@ public class OpencodeManagerControlConfig {
     BackendJavaProcessLifecycleRunner backendJavaProcessLifecycleRunner(
             BackendJavaProcessLifecycleService lifecycleService,
             OpencodeProcessHeartbeatMaintenanceService heartbeatMaintenanceService,
-            ManagerControlSettings settings) {
-        return new BackendJavaProcessLifecycleRunner(lifecycleService, heartbeatMaintenanceService, settings);
+            ManagerControlSettings settings,
+            LocalDirectSettings localDirectSettings,
+            ServerIpFileWriter serverIpFileWriter) {
+        return new BackendJavaProcessLifecycleRunner(
+                lifecycleService, heartbeatMaintenanceService, settings, localDirectSettings, serverIpFileWriter);
     }
 
     /**
@@ -84,19 +96,28 @@ public class OpencodeManagerControlConfig {
         private final BackendJavaProcessLifecycleService lifecycleService;
         private final OpencodeProcessHeartbeatMaintenanceService heartbeatMaintenanceService;
         private final ManagerControlSettings settings;
+        private final LocalDirectSettings localDirectSettings;
+        private final ServerIpFileWriter serverIpFileWriter;
         private ScheduledExecutorService executor;
 
         BackendJavaProcessLifecycleRunner(
                 BackendJavaProcessLifecycleService lifecycleService,
                 OpencodeProcessHeartbeatMaintenanceService heartbeatMaintenanceService,
-                ManagerControlSettings settings) {
+                ManagerControlSettings settings,
+                LocalDirectSettings localDirectSettings,
+                ServerIpFileWriter serverIpFileWriter) {
             this.lifecycleService = lifecycleService;
             this.heartbeatMaintenanceService = heartbeatMaintenanceService;
             this.settings = settings;
+            this.localDirectSettings = localDirectSettings;
+            this.serverIpFileWriter = serverIpFileWriter;
         }
 
         @Override
         public void run(ApplicationArguments args) {
+            if (!localDirectSettings.enabled()) {
+                serverIpFileWriter.write(settings.linuxServerId().value());
+            }
             lifecycleService.registerHeartbeat(TraceIdSupport.generate());
             executor = Executors.newScheduledThreadPool(2, runnable -> {
                 Thread thread = new Thread(runnable, "opencode-manager-backend-heartbeat");

@@ -7,6 +7,7 @@ import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.configuration.management.CommonParameterManagementResponses.CommonParameterResponse;
 import com.icbc.testagent.domain.configuration.CommonParameter;
 import com.icbc.testagent.domain.configuration.CommonParameterRepository;
+import com.icbc.testagent.domain.configuration.CommonParameterUpdatedEvent;
 import com.icbc.testagent.domain.configuration.ParameterPlatform;
 import java.time.Clock;
 import java.time.Instant;
@@ -16,6 +17,7 @@ import java.util.Objects;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
 /**
@@ -28,21 +30,25 @@ public class CommonParameterManagementApplicationService {
     private static final Logger LOGGER = LoggerFactory.getLogger(CommonParameterManagementApplicationService.class);
 
     private final CommonParameterRepository repository;
+    private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
 
     /**
      * 注入通用参数领域端口；使用系统默认时钟记录更新时间。
      */
     @Autowired
-    public CommonParameterManagementApplicationService(CommonParameterRepository repository) {
-        this(repository, Clock.systemUTC());
+    public CommonParameterManagementApplicationService(
+            CommonParameterRepository repository, ApplicationEventPublisher eventPublisher) {
+        this(repository, eventPublisher, Clock.systemUTC());
     }
 
     /**
      * 测试可注入可控时钟，便于断言更新时间。
      */
-    CommonParameterManagementApplicationService(CommonParameterRepository repository, Clock clock) {
+    CommonParameterManagementApplicationService(
+            CommonParameterRepository repository, ApplicationEventPublisher eventPublisher, Clock clock) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -90,6 +96,9 @@ public class CommonParameterManagementApplicationService {
                 .map(CommonParameterResponse::from)
                 .orElse(CommonParameterResponse.from(updated));
         LOGGER.info("通用参数 value 已更新 traceId={} parameterId={}", traceId, normalizedParameterId);
+        // 事务提交后发布事件，供下游模块（如向 opencode manager 下发运行时配置）监听联动。
+        eventPublisher.publishEvent(new CommonParameterUpdatedEvent(
+                existing.englishName(), existing.platform(), updated.parameterValue(), normalizedParameterId, traceId));
         return response;
     }
 

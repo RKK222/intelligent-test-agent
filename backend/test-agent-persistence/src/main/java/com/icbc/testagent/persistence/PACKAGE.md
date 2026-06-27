@@ -2,7 +2,7 @@
 
 ## 职责
 
-持久化包，负责数据库映射、Repository 实现、MyBatis XML mapper、Flyway migration 协作、Redis 可选适配和查询优化。
+持久化包，负责数据库映射、Repository 实现、MyBatis XML mapper、Flyway migration 协作、Redis 必需适配和查询优化。
 
 ## 不负责
 
@@ -44,6 +44,7 @@
 - `db/migration/V17__seed_local_opencode_machine_for_default_user.sql`：历史本地开发种子脚本，曾预置一台 `127.0.0.1` 的 opencode 机器并绑定默认开发用户；该版本只做 Flyway 历史保留，禁止删除、重命名或直接改写。
 - `db/migration/V20260627000000__cleanup_loopback_linux_server_seed.sql`：清理 V17 留下的 `127.0.0.1` loopback opencode 拓扑、用户进程、绑定和关联 manager-backend 连接。
 - `db/migration/V20260627010000__add_encrypted_aes_key_to_user_ssh_keys.sql`：为 `user_ssh_keys` 增加 `encrypted_aes_key` 列，禁止复用已落库的 V10。
+- `db/migration/V20260627020000__seed_opencode_manager_max_processes_param.sql`：初始化 `OPENCODE_MANAGER_MAX_PROCESSES` 通用参数，供 manager 运行时最大进程数配置使用。
 - 后续可新增 SQL 查询、migration 相关适配、Redis 限流、缓存或运行心跳实现。
 - 新增 migration 禁止写入测试、演示、个人开发或环境专属数据；这类数据应进入 `test-agent-test-support`、测试 fixture、mock 数据或显式本地开发脚本。
 
@@ -56,7 +57,7 @@
 - Flyway。
 - PostgreSQL driver。
 - Druid Spring Boot starter。
-- Redis 客户端或 Spring Data Redis。
+- Redis 客户端或 Spring Data Redis（系统必需依赖）。
 
 ## 禁止依赖
 

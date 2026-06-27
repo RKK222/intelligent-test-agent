@@ -89,6 +89,66 @@ func TestManagerStartRejectsWhenMaxProcessesReached(t *testing.T) {
 	}
 }
 
+func TestManagerSetMaxProcessesAppliesWithinRange(t *testing.T) {
+	manager := NewManager(testConfig(t), state.NewFileStore(t.TempDir()), &fakeStarter{pid: 12345}, fakeSignaler{}, health.Checker{})
+	if manager.MaxProcesses() != 4 {
+		t.Fatalf("expected initial max 4, got %d", manager.MaxProcesses())
+	}
+	applied, err := manager.SetMaxProcesses(3)
+	if err != nil || applied != 3 {
+		t.Fatalf("SetMaxProcesses(3) applied=%d err=%v", applied, err)
+	}
+	if manager.MaxProcesses() != 3 {
+		t.Fatalf("expected runtime max 3, got %d", manager.MaxProcesses())
+	}
+}
+
+func TestManagerSetMaxProcessesClampsToPortCapacity(t *testing.T) {
+	// testConfig 端口池 4096..4100 共 5 个端口，下发 99 必须 clamp 到 5。
+	manager := NewManager(testConfig(t), state.NewFileStore(t.TempDir()), &fakeStarter{pid: 12345}, fakeSignaler{}, health.Checker{})
+	applied, err := manager.SetMaxProcesses(99)
+	if err != nil || applied != 5 {
+		t.Fatalf("SetMaxProcesses(99) applied=%d err=%v", applied, err)
+	}
+	if manager.MaxProcesses() != 5 {
+		t.Fatalf("expected clamped max 5, got %d", manager.MaxProcesses())
+	}
+}
+
+func TestManagerSetMaxProcessesRejectsBelowOne(t *testing.T) {
+	manager := NewManager(testConfig(t), state.NewFileStore(t.TempDir()), &fakeStarter{pid: 12345}, fakeSignaler{}, health.Checker{})
+	original := manager.MaxProcesses()
+	applied, err := manager.SetMaxProcesses(0)
+	if err == nil {
+		t.Fatalf("expected error for maxProcesses=0")
+	}
+	if applied != original {
+		t.Fatalf("expected unchanged value %d, got %d", original, applied)
+	}
+	if manager.MaxProcesses() != original {
+		t.Fatalf("maxProcesses must not change on rejected update, got %d", manager.MaxProcesses())
+	}
+}
+
+func TestManagerStartRespectsRuntimeMaxProcesses(t *testing.T) {
+	// 初始 max=4，运行时下调到 1；已存在 1 条记录后，再 Start 必须因运行时上限失败。
+	cfg := testConfig(t)
+	store := state.NewFileStore(t.TempDir())
+	_ = store.Save(state.ProcessRecord{Port: 4097, PID: 22345, StartedAt: time.Now().UTC(), TraceID: "trace_old"})
+	manager := NewManager(cfg, store, &fakeStarter{pid: 12345}, fakeSignaler{}, health.Checker{})
+	if _, err := manager.SetMaxProcesses(1); err != nil {
+		t.Fatalf("SetMaxProcesses(1) failed: %v", err)
+	}
+
+	result, err := manager.Start(context.Background(), StartRequest{Port: 4096, TraceID: "trace_1234567890abcdef"})
+	if err == nil {
+		t.Fatalf("expected runtime max processes error")
+	}
+	if result.Status != StatusFailed {
+		t.Fatalf("expected failed result, got %#v", result)
+	}
+}
+
 func TestManagerStopTerminatesProcessAndRemovesState(t *testing.T) {
 	cfg := testConfig(t)
 	store := state.NewFileStore(t.TempDir())

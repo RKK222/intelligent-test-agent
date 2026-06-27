@@ -8,6 +8,8 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -15,6 +17,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class ManagerConnectionRegistry {
+
+    private static final Logger log = LoggerFactory.getLogger(ManagerConnectionRegistry.class);
 
     private final ConcurrentMap<OpencodeContainerId, ManagerConnection> connections = new ConcurrentHashMap<>();
 
@@ -47,6 +51,33 @@ public class ManagerConnectionRegistry {
             throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "opencode 管理进程未连接");
         }
         connection.sender().send(message);
+    }
+
+    /**
+     * 向当前后端实例持有的所有 manager 连接广播消息（如运行时配置下发）。
+     * 单条连接发送异常不中断其余连接的广播；返回已发送的连接数。
+     * 全互联拓扑下每台 Java 实例各自向本地连接广播即可触达所有 manager。
+     */
+    public int broadcast(ManagerControlMessage message) {
+        Objects.requireNonNull(message, "message must not be null");
+        int sent = 0;
+        for (ManagerConnection connection : connections.values()) {
+            try {
+                connection.sender().send(message);
+                sent++;
+            } catch (RuntimeException exception) {
+                // 单个死 sink 不应中断对其他 manager 的广播。
+                log.warn("向 manager 广播消息失败 containerId={} type={}", connection.containerId(), message.type(), exception);
+            }
+        }
+        return sent;
+    }
+
+    /**
+     * 返回当前已注册连接的容器 ID 快照，供测试与诊断使用。
+     */
+    public java.util.Set<OpencodeContainerId> connectedContainerIds() {
+        return java.util.Set.copyOf(connections.keySet());
     }
 
     /**

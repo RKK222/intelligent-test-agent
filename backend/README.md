@@ -104,9 +104,10 @@ cp .env.local.example .env.local
 | 变量 | 说明 |
 |------|------|
 | `TEST_AGENT_LOCAL_DB_*` | 本地 PostgreSQL 连接信息 |
-| `TEST_AGENT_REDIS_ENABLED` | 是否启用 Redis（本地可设为 false） |
-| `TEST_AGENT_SCHEDULER_ENABLED` | 是否启用定时任务后台扫描，默认 false；启用时必须同时启用 Redis。 |
+| `TEST_AGENT_REDIS_HOST` / `TEST_AGENT_REDIS_PORT` / `TEST_AGENT_REDIS_PASSWORD` | Redis 连接信息；Redis 是系统必需依赖。 |
+| `TEST_AGENT_SCHEDULER_ENABLED` | 是否启用定时任务后台扫描，默认 false；启用时使用同一 Redis。 |
 | `TEST_AGENT_OPENCODE_BASE_URL` | OpenCode 服务地址 |
+| `TEST_AGENT_SERVER_IP_FILE` | Java 后端写给 Go manager 读取的服务器 IPv4 文件，默认 `/data/.testagent/.serverip`；一键脚本本地默认改写到 `.tmp/dev-services/.serverip`。 |
 | `TEST_AGENT_MODEL_CATALOG_SOURCE` | 模型目录来源：`opencode` 保持旧代理，`bailian` 直连百炼 `/models`，`internal` 从数据库读取企业内模型。local 默认 `bailian`，test/prod 默认 `internal`。 |
 | `MODELSTUDIO_API_KEY` | 外网百炼 Model Studio Coding Plan API Key；变量名可通过 `TEST_AGENT_BAILIAN_API_KEY_ENV` 改为其他环境变量名。 |
 | `ICBC_OPENAI_AUTH_TOKEN` | 企业内 `icbc-openai` 访问 token；变量名可通过 `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` 改为其他环境变量名。 |

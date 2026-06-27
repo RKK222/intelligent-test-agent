@@ -66,7 +66,6 @@ test-agent:
   public-directory:
     path: ${TEST_AGENT_PUBLIC_DIRECTORY_PATH:/data/agents-pub}
   redis:
-    enabled: ${TEST_AGENT_REDIS_ENABLED:true}
     host: ${TEST_AGENT_REDIS_HOST:127.0.0.1}
     port: ${TEST_AGENT_REDIS_PORT:6379}
     password: ${TEST_AGENT_REDIS_PASSWORD:}
@@ -80,10 +79,11 @@ test-agent:
     manager-control:
       token: ${TEST_AGENT_OPENCODE_MANAGER_TOKEN:}
       listen-url: ${TEST_AGENT_BACKEND_LISTEN_URL:http://127.0.0.1:8080}
-      heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:10s}
-      backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:30s}
+      heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:5s}
+      backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:10s}
       command-timeout: ${TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT:10s}
       backend-discovery-limit: ${TEST_AGENT_BACKEND_DISCOVERY_LIMIT:100}
+      server-ip-file: ${TEST_AGENT_SERVER_IP_FILE:/data/.testagent/.serverip}
     nodes: []
   # Git 浅克隆缓存配置，用于加载远端仓库目录结构
   git-clone-cache:

@@ -44,12 +44,12 @@ Browser
 | `test-agent-opencode-client` | 封装 generated SDK，提供 `OpencodeClientFacade`，是业务访问 opencode 的唯一门面。 |
 | `test-agent-agent-runtime` | 定义 `AgentRuntime`、`AgentRuntimeRegistry`、统一日志/指标包装、`OpencodeAgentRuntime` 适配器和未注册的 `OtherAgentRuntime` 抽象占位。 |
 | `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/删除、受控目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、agent 和 skill 管理业务。 |
-| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、当前用户 opencode 进程状态/初始化契约、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、超级管理员运行管理快照聚合、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
+| `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、当前用户 opencode 进程状态/初始化契约、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、超级管理员运行管理 Redis 快照聚合和 48 小时指标历史查询、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
 | `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、登录认证和 Token 管理，以及用户管理（测试）查询/新增用户。 |
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、代码库英文名与应用关联、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务。 |
 | `test-agent-scheduler` | 通用分布式定时任务框架，负责任务注册、Cron 计算、Redis 锁、后台扫描、统一运行记录、Cron 调整、手动触发和协作式停止管理服务；具体业务任务放回所属业务模块。 |
 | `test-agent-integration` | 非 opencode 外部系统联动业务边界（当前为空骨架）。 |
-| `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、workspace 文件 WebSocket ticket/RPC 入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理和定时任务管理入口、trace Web 入口。 |
+| `test-agent-api` | Controller、WebSocket 入口适配、请求/响应 DTO、统一异常、鉴权、限流、workspace 文件 WebSocket ticket/RPC 入口、工作空间创建进度轮询入口、manager 控制面入口、超级管理员运行管理 overview/指标历史和定时任务管理入口、trace Web 入口。 |
 | `test-agent-persistence` | 数据库、MyBatis XML mapper、Flyway、Repository、Redis 可选适配，包括 workspace 服务器归属、通用参数表、工作空间创建进度表、应用版本副本表、opencode 用户进程管理表、scheduler 表与 Repository 映射。 |
 | `test-agent-event` | RunEvent、SSE、事件转换、事件回放，以及 Redis/Noop 通用服务器广播适配。 |
 | `test-agent-test-support` | 测试 fixture、mock server、集成测试支撑。 |
@@ -61,8 +61,8 @@ Browser
 
 | 包 | 职责 |
 |---|---|
-| `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、服务器工作空间选择、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、设置模态（含版本库英文名、工作空间创建进度和用户管理（测试）页签）、超级管理员系统管理容器（定时任务管理 + 运行管理）和全局错误提示。 |
-| `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、受控目录选择、workspace 文件 WebSocket route/ticket/RPC、用户 opencode 进程状态/初始化、运行管理 overview、定时任务管理、配置管理、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询和默认 `opencode` 的 agent URL 前缀。 |
+| `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、服务器工作空间选择、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、设置模态（含版本库英文名、工作空间创建进度和用户管理（测试）页签）、超级管理员系统管理容器（定时任务管理 + 运行管理最新指标与 ECharts 趋势）和全局错误提示。 |
+| `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、受控目录选择、workspace 文件 WebSocket route/ticket/RPC、用户 opencode 进程状态/初始化、运行管理 overview 与指标历史、定时任务管理、配置管理、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询和默认 `opencode` 的 agent URL 前缀。 |
 | `packages/event-stream-client` | RunEvent SSE client，负责按默认 `opencode` agent URL 连接、自动重连、事件解析、去重和取消订阅。 |
 | `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板和工作台级 Pinia 状态。 |
 | `packages/file-explorer` | 文件树、选择 Workspace 目录事件、已加载文件名过滤、变更列表和打开文件入口。 |
@@ -101,7 +101,7 @@ packages/event-stream-client -> packages/shared-types
 
 ## 前后端调用边界
 
-1. `packages/backend-api` 是前端访问后端的唯一入口，负责统一 base URL、鉴权头、traceId、请求超时、统一解析成功/错误响应、将后端统一错误格式转换为前端错误对象，并为 `@tanstack/vue-query` 提供稳定 query key 和 mutation 方法；agent 相关能力默认拼接 `/api/internal/agent/opencode/...`，包括用户 opencode 进程状态、初始化和 runtime 代理；工作区文件操作先经 `/api/workspaces/{workspaceId}/file-ws-route` 路由，再连接目标后端文件 WebSocket；运行管理能力拼接 `/api/internal/platform/opencode-runtime/management/...`；定时任务管理能力拼接 `/api/internal/platform/scheduler-management/...`；配置管理能力拼接 `/api/internal/platform/configuration-management/...`，包括工作空间创建进度轮询；应用版本工作区能力拼接 `/api/internal/platform/workspace-management/...`；`getActiveRun(sessionId)` 用于刷新后恢复非终态 RunEvent 订阅；可通过 `agentId` 切换 agent；不得直连 opencode server、不得保存 UI 状态、不得吞掉后端错误。
+1. `packages/backend-api` 是前端访问后端的唯一入口，负责统一 base URL、鉴权头、traceId、请求超时、统一解析成功/错误响应、将后端统一错误格式转换为前端错误对象，并为 `@tanstack/vue-query` 提供稳定 query key 和 mutation 方法；agent 相关能力默认拼接 `/api/internal/agent/opencode/...`，包括用户 opencode 进程状态、初始化和 runtime 代理；工作区文件操作先经 `/api/workspaces/{workspaceId}/file-ws-route` 路由，再连接目标后端文件 WebSocket；运行管理 overview 和指标历史能力拼接 `/api/internal/platform/opencode-runtime/management/...`；定时任务管理能力拼接 `/api/internal/platform/scheduler-management/...`；配置管理能力拼接 `/api/internal/platform/configuration-management/...`，包括工作空间创建进度轮询；应用版本工作区能力拼接 `/api/internal/platform/workspace-management/...`；`getActiveRun(sessionId)` 用于刷新后恢复非终态 RunEvent 订阅；可通过 `agentId` 切换 agent；不得直连 opencode server、不得保存 UI 状态、不得吞掉后端错误。
 2. `packages/event-stream-client` 是前端消费实时事件的唯一入口，负责建立/关闭 agent-scoped SSE 连接、断线续传（首次续传 `?lastEventId=`，后端保留 `Last-Event-ID` header 兼容）、重复事件幂等保护、向上层输出类型化事件；不得直接修改 Vue 组件状态、不得访问 opencode server。
 3. 后端 HTTP DTO 映射到 `shared-types` 或 `backend-api` 内部类型；RunEvent 事件类型映射到 `shared-types`；页面展示模型必须由 API DTO 或 RunEvent 明确转换而来。
 4. 新增字段必须默认可选，前端能处理旧响应缺字段；废弃字段必须保留过渡期；新事件类型前端必须有安全展示或忽略策略。

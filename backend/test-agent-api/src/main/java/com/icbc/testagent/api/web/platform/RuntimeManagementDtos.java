@@ -1,6 +1,8 @@
 package com.icbc.testagent.api.web.platform;
 
 import com.icbc.testagent.common.pagination.PageResponse;
+import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeMetrics;
+import com.icbc.testagent.domain.opencodeprocess.ContainerRuntimeMetrics;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
@@ -8,6 +10,12 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerManager;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnection;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementBackendMetricHistory;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementBackendMetricSample;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementBackendProcess;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementContainer;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementContainerMetricHistory;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementContainerMetricSample;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementOpencodeProcess;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementOverview;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementSummary;
@@ -112,11 +120,25 @@ final class RuntimeManagementDtos {
             String status,
             Instant startedAt,
             Instant lastHeartbeatAt,
+            Double cpuUsagePercent,
+            Long memoryMaxBytes,
+            Long memoryUsedBytes,
+            Double memoryUsagePercent,
+            Long diskMaxBytes,
+            Long diskUsedBytes,
+            Double diskUsagePercent,
+            Long jvmMemoryUsedBytes,
+            Long jvmMemoryCommittedBytes,
+            Long jvmMemoryMaxBytes,
+            Long jvmGcPauseMillis,
+            Integer jvmThreadsLive,
             Instant createdAt,
             Instant updatedAt,
             String traceId) {
 
-        static BackendProcessResponse from(BackendJavaProcess process) {
+        static BackendProcessResponse from(RuntimeManagementBackendProcess row) {
+            BackendJavaProcess process = row.process();
+            BackendRuntimeMetrics metrics = row.metrics();
             return new BackendProcessResponse(
                     process.backendProcessId().value(),
                     process.linuxServerId().value(),
@@ -124,6 +146,18 @@ final class RuntimeManagementDtos {
                     process.status().name(),
                     process.startedAt(),
                     process.lastHeartbeatAt(),
+                    metrics == null ? null : metrics.cpuUsagePercent(),
+                    metrics == null ? null : metrics.memoryMaxBytes(),
+                    metrics == null ? null : metrics.memoryUsedBytes(),
+                    metrics == null ? null : metrics.memoryUsagePercent(),
+                    metrics == null ? null : metrics.diskMaxBytes(),
+                    metrics == null ? null : metrics.diskUsedBytes(),
+                    metrics == null ? null : metrics.diskUsagePercent(),
+                    metrics == null ? null : metrics.jvmMemoryUsedBytes(),
+                    metrics == null ? null : metrics.jvmMemoryCommittedBytes(),
+                    metrics == null ? null : metrics.jvmMemoryMaxBytes(),
+                    metrics == null ? null : metrics.jvmGcPauseMillis(),
+                    metrics == null ? null : metrics.jvmThreadsLive(),
                     process.createdAt(),
                     process.updatedAt(),
                     process.traceId());
@@ -139,13 +173,22 @@ final class RuntimeManagementDtos {
             int maxProcesses,
             int currentProcesses,
             int availableCapacity,
+            String metricsSource,
+            Double cpuUsagePercent,
+            Long memoryMaxBytes,
+            Long memoryUsedBytes,
+            Double memoryUsagePercent,
+            Double diskReadBytesPerSecond,
+            Double diskWriteBytesPerSecond,
             String status,
             Instant lastHeartbeatAt,
             Instant createdAt,
             Instant updatedAt,
             String traceId) {
 
-        static ContainerResponse from(OpencodeContainer container) {
+        static ContainerResponse from(RuntimeManagementContainer row) {
+            OpencodeContainer container = row.container();
+            ContainerRuntimeMetrics metrics = row.metrics();
             return new ContainerResponse(
                     container.containerId().value(),
                     container.linuxServerId().value(),
@@ -155,6 +198,13 @@ final class RuntimeManagementDtos {
                     container.maxProcesses(),
                     container.currentProcesses(),
                     container.availableCapacity(),
+                    metrics == null ? null : metrics.metricsSource(),
+                    metrics == null ? null : metrics.cpuUsagePercent(),
+                    metrics == null ? null : metrics.memoryMaxBytes(),
+                    metrics == null ? null : metrics.memoryUsedBytes(),
+                    metrics == null ? null : metrics.memoryUsagePercent(),
+                    metrics == null ? null : metrics.diskReadBytesPerSecond(),
+                    metrics == null ? null : metrics.diskWriteBytesPerSecond(),
                     container.status().name(),
                     container.lastHeartbeatAt(),
                     container.createdAt(),
@@ -257,6 +307,100 @@ final class RuntimeManagementDtos {
                     binding == null ? null : binding.agentId(),
                     binding == null ? null : binding.status().name(),
                     binding == null ? null : binding.updatedAt());
+        }
+    }
+
+    record ContainerMetricHistoryResponse(
+            Instant generatedAt,
+            String containerId,
+            Instant from,
+            Instant to,
+            List<ContainerMetricSampleResponse> samples) {
+
+        static ContainerMetricHistoryResponse from(RuntimeManagementContainerMetricHistory history) {
+            return new ContainerMetricHistoryResponse(
+                    history.generatedAt(),
+                    history.containerId().value(),
+                    history.from(),
+                    history.to(),
+                    history.samples().stream().map(ContainerMetricSampleResponse::from).toList());
+        }
+    }
+
+    record ContainerMetricSampleResponse(
+            Instant sampledAt,
+            int maxProcesses,
+            int currentProcesses,
+            String metricsSource,
+            Double cpuUsagePercent,
+            Long memoryMaxBytes,
+            Long memoryUsedBytes,
+            Double memoryUsagePercent,
+            Double diskReadBytesPerSecond,
+            Double diskWriteBytesPerSecond) {
+
+        static ContainerMetricSampleResponse from(RuntimeManagementContainerMetricSample sample) {
+            return new ContainerMetricSampleResponse(
+                    sample.sampledAt(),
+                    sample.maxProcesses(),
+                    sample.currentProcesses(),
+                    sample.metricsSource(),
+                    sample.cpuUsagePercent(),
+                    sample.memoryMaxBytes(),
+                    sample.memoryUsedBytes(),
+                    sample.memoryUsagePercent(),
+                    sample.diskReadBytesPerSecond(),
+                    sample.diskWriteBytesPerSecond());
+        }
+    }
+
+    record BackendMetricHistoryResponse(
+            Instant generatedAt,
+            String backendProcessId,
+            Instant from,
+            Instant to,
+            List<BackendMetricSampleResponse> samples) {
+
+        static BackendMetricHistoryResponse from(RuntimeManagementBackendMetricHistory history) {
+            return new BackendMetricHistoryResponse(
+                    history.generatedAt(),
+                    history.backendProcessId().value(),
+                    history.from(),
+                    history.to(),
+                    history.samples().stream().map(BackendMetricSampleResponse::from).toList());
+        }
+    }
+
+    record BackendMetricSampleResponse(
+            Instant sampledAt,
+            Double cpuUsagePercent,
+            Long memoryMaxBytes,
+            Long memoryUsedBytes,
+            Double memoryUsagePercent,
+            Long diskMaxBytes,
+            Long diskUsedBytes,
+            Double diskUsagePercent,
+            Long jvmMemoryUsedBytes,
+            Long jvmMemoryCommittedBytes,
+            Long jvmMemoryMaxBytes,
+            Long jvmGcPauseMillis,
+            Integer jvmThreadsLive) {
+
+        static BackendMetricSampleResponse from(RuntimeManagementBackendMetricSample sample) {
+            return new BackendMetricSampleResponse(
+                    sample.sampledAt(),
+                    sample.cpuUsagePercent(),
+                    sample.memoryMaxBytes(),
+                    sample.memoryUsedBytes(),
+                    sample.memoryUsagePercent(),
+                    sample.diskMaxBytes(),
+                    sample.diskUsedBytes(),
+                    sample.diskUsagePercent(),
+                    sample.jvmMemoryUsedBytes(),
+                    sample.jvmMemoryCommittedBytes(),
+                    sample.jvmMemoryMaxBytes(),
+                    sample.jvmGcPauseMillis(),
+                    sample.jvmThreadsLive());
         }
     }
 }

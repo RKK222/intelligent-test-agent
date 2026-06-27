@@ -6,7 +6,7 @@ import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
 
 /**
- * 默认远端广播空实现，Redis 未启用或不可用时保持既有单机 live bus 行为。
+ * 默认远端广播空实现，Redis 广播未启用或不可用时保持既有单机 live bus 行为。
  */
 @Component
 @ConditionalOnMissingBean(RunEventRemotePublisher.class)

@@ -1,10 +1,14 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -16,10 +20,65 @@ const (
 	defaultSessionRoot = "/data/opencode/session"
 	defaultConfigDir   = "/data/opencode/.config/opencode/"
 
-	defaultDiscoveryInterval = 10 * time.Second
-	defaultHeartbeatInterval = 10 * time.Second
-	defaultReconnectInterval = 5 * time.Second
+	defaultServerIPFile = "/data/.testagent/.serverip"
+
+	defaultBackendPort          = 8080
+	defaultBackendWebSocketPath = "/api/internal/platform/opencode-runtime/manager/ws"
+	defaultDiscoveryInterval    = 10 * time.Second
+	defaultHeartbeatInterval    = 5 * time.Second
+	defaultReconnectInterval    = 10 * time.Second
+	defaultServerIPWait         = 30 * time.Second
+	defaultServerIPPoll         = time.Second
 )
+
+// configRuntime 封装少量操作系统能力，便于单元测试覆盖 Windows/非 Windows 分支。
+type configRuntime struct {
+	goos         string
+	readFile     func(string) ([]byte, error)
+	hostname     func() (string, error)
+	localIPv4    func() (string, error)
+	sleep        func(time.Duration)
+	serverIPWait time.Duration
+	serverIPPoll time.Duration
+}
+
+func defaultConfigRuntime() configRuntime {
+	return configRuntime{
+		goos:         runtime.GOOS,
+		readFile:     os.ReadFile,
+		hostname:     os.Hostname,
+		localIPv4:    detectLocalIPv4,
+		sleep:        time.Sleep,
+		serverIPWait: defaultServerIPWait,
+		serverIPPoll: defaultServerIPPoll,
+	}
+}
+
+func (r configRuntime) withDefaults() configRuntime {
+	defaults := defaultConfigRuntime()
+	if r.goos == "" {
+		r.goos = defaults.goos
+	}
+	if r.readFile == nil {
+		r.readFile = defaults.readFile
+	}
+	if r.hostname == nil {
+		r.hostname = defaults.hostname
+	}
+	if r.localIPv4 == nil {
+		r.localIPv4 = defaults.localIPv4
+	}
+	if r.sleep == nil {
+		r.sleep = defaults.sleep
+	}
+	if r.serverIPWait <= 0 {
+		r.serverIPWait = defaults.serverIPWait
+	}
+	if r.serverIPPoll <= 0 {
+		r.serverIPPoll = defaults.serverIPPoll
+	}
+	return r
+}
 
 // Config 描述单个容器内 opencode-manager 的静态运行边界。
 type Config struct {
@@ -39,7 +98,7 @@ type Config struct {
 type ControlConfig struct {
 	Config
 	ManagerID           string
-	BackendDiscoveryURL string
+	BackendWebSocketURL string
 	Token               string
 	DiscoveryInterval   time.Duration
 	HeartbeatInterval   time.Duration
@@ -48,6 +107,11 @@ type ControlConfig struct {
 
 // LoadFromEnv 从环境变量读取容器拓扑、端口池和路径配置。
 func LoadFromEnv() (Config, error) {
+	return loadFromEnvWithRuntime(defaultConfigRuntime())
+}
+
+func loadFromEnvWithRuntime(rt configRuntime) (Config, error) {
+	rt = rt.withDefaults()
 	portStart, err := requiredInt("OPENCODE_MANAGER_PORT_START")
 	if err != nil {
 		return Config{}, err
@@ -60,10 +124,18 @@ func LoadFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	containerID, err := resolveContainerID(rt)
+	if err != nil {
+		return Config{}, err
+	}
+	serverIP, err := resolveServerIP(rt)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
-		ContainerID:   strings.TrimSpace(os.Getenv("OPENCODE_MANAGER_CONTAINER_ID")),
-		LinuxServerID: strings.TrimSpace(os.Getenv("OPENCODE_MANAGER_LINUX_SERVER_ID")),
+		ContainerID:   containerID,
+		LinuxServerID: serverIP,
 		PortStart:     portStart,
 		PortEnd:       portEnd,
 		MaxProcesses:  maxProcesses,
@@ -81,14 +153,22 @@ func LoadFromEnv() (Config, error) {
 
 // LoadControlFromEnv 读取长运行 WebSocket 控制面所需配置。
 func LoadControlFromEnv() (ControlConfig, error) {
-	base, err := LoadFromEnv()
+	return loadControlFromEnvWithRuntime(defaultConfigRuntime())
+}
+
+func loadControlFromEnvWithRuntime(rt configRuntime) (ControlConfig, error) {
+	base, err := loadFromEnvWithRuntime(rt)
+	if err != nil {
+		return ControlConfig{}, err
+	}
+	webSocketURL, err := derivedBackendWebSocketURL(base.LinuxServerID)
 	if err != nil {
 		return ControlConfig{}, err
 	}
 	cfg := ControlConfig{
 		Config:              base,
 		ManagerID:           strings.TrimSpace(os.Getenv("OPENCODE_MANAGER_ID")),
-		BackendDiscoveryURL: strings.TrimSpace(os.Getenv("OPENCODE_MANAGER_BACKEND_DISCOVERY_URL")),
+		BackendWebSocketURL: webSocketURL,
 		Token:               strings.TrimSpace(os.Getenv("OPENCODE_MANAGER_TOKEN")),
 		DiscoveryInterval:   durationDefault("OPENCODE_MANAGER_DISCOVERY_INTERVAL", defaultDiscoveryInterval),
 		HeartbeatInterval:   durationDefault("OPENCODE_MANAGER_HEARTBEAT_INTERVAL", defaultHeartbeatInterval),
@@ -105,8 +185,8 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.ContainerID) == "" {
 		return fmt.Errorf("OPENCODE_MANAGER_CONTAINER_ID is required")
 	}
-	if strings.TrimSpace(c.LinuxServerID) == "" {
-		return fmt.Errorf("OPENCODE_MANAGER_LINUX_SERVER_ID is required")
+	if !isUsableIPv4(c.LinuxServerID) {
+		return fmt.Errorf("linux server id must be a non-loopback IPv4")
 	}
 	if c.PortStart < 1 || c.PortEnd > 65535 || c.PortStart > c.PortEnd {
 		return fmt.Errorf("port range must be between 1 and 65535")
@@ -146,12 +226,12 @@ func (c ControlConfig) ValidateControl() error {
 	if !strings.HasPrefix(strings.TrimSpace(c.ManagerID), "mgr_") {
 		return fmt.Errorf("OPENCODE_MANAGER_ID must start with mgr_")
 	}
-	if strings.TrimSpace(c.BackendDiscoveryURL) == "" {
-		return fmt.Errorf("OPENCODE_MANAGER_BACKEND_DISCOVERY_URL is required")
+	if strings.TrimSpace(c.BackendWebSocketURL) == "" {
+		return fmt.Errorf("backend WebSocket URL must not be blank")
 	}
-	parsed, err := url.Parse(c.BackendDiscoveryURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-		return fmt.Errorf("OPENCODE_MANAGER_BACKEND_DISCOVERY_URL must be an absolute URL")
+	parsed, err := url.Parse(c.BackendWebSocketURL)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "ws" && parsed.Scheme != "wss") {
+		return fmt.Errorf("backend WebSocket URL must be an absolute ws:// or wss:// URL")
 	}
 	if strings.TrimSpace(c.Token) == "" {
 		return fmt.Errorf("OPENCODE_MANAGER_TOKEN is required")
@@ -165,11 +245,11 @@ func (c ControlConfig) ValidateControl() error {
 // String 返回脱敏后的控制配置摘要，禁止暴露 manager token。
 func (c ControlConfig) String() string {
 	return fmt.Sprintf(
-		"managerId=%s containerId=%s linuxServerId=%s discoveryUrl=%s token=<redacted> discoveryInterval=%s heartbeatInterval=%s reconnectInterval=%s",
+		"managerId=%s containerId=%s linuxServerId=%s webSocketUrl=%s token=<redacted> discoveryInterval=%s heartbeatInterval=%s reconnectInterval=%s",
 		c.ManagerID,
 		c.ContainerID,
 		c.LinuxServerID,
-		c.BackendDiscoveryURL,
+		c.BackendWebSocketURL,
 		c.DiscoveryInterval,
 		c.HeartbeatInterval,
 		c.ReconnectInterval,
@@ -184,6 +264,152 @@ func (c Config) SessionPath(port int) string {
 // LogPath 返回指定端口 opencode server 的本地日志路径。
 func (c Config) LogPath(port int) string {
 	return filepath.Join(c.StateDir, "logs", fmt.Sprintf("%d.log", port))
+}
+
+func resolveServerIP(rt configRuntime) (string, error) {
+	if strings.EqualFold(rt.goos, "windows") {
+		ip, err := rt.localIPv4()
+		if err != nil {
+			return "", fmt.Errorf("detect Windows local IPv4 failed: %w", err)
+		}
+		ip = strings.TrimSpace(ip)
+		if !isUsableIPv4(ip) {
+			return "", fmt.Errorf("detected Windows local IPv4 is invalid")
+		}
+		return ip, nil
+	}
+
+	path := envDefault("OPENCODE_MANAGER_SERVER_IP_FILE", defaultServerIPFile)
+	return waitForServerIPFile(rt, path)
+}
+
+func waitForServerIPFile(rt configRuntime, path string) (string, error) {
+	attempts := int(rt.serverIPWait / rt.serverIPPoll)
+	if rt.serverIPWait%rt.serverIPPoll != 0 {
+		attempts++
+	}
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	for attempt := 0; attempt <= attempts; attempt++ {
+		raw, err := rt.readFile(path)
+		if err == nil {
+			ip := strings.TrimSpace(string(raw))
+			if !isUsableIPv4(ip) {
+				return "", fmt.Errorf("server IP file .serverip contains invalid IPv4")
+			}
+			return ip, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("read server IP file .serverip failed: %w", err)
+		}
+		if attempt < attempts {
+			rt.sleep(rt.serverIPPoll)
+		}
+	}
+	return "", fmt.Errorf("server IP file .serverip was not available within %s", rt.serverIPWait)
+}
+
+func resolveContainerID(rt configRuntime) (string, error) {
+	if configured := normalizeIdentifier(os.Getenv("OPENCODE_MANAGER_CONTAINER_ID")); configured != "" {
+		return configured, nil
+	}
+	if strings.EqualFold(rt.goos, "windows") {
+		hostname, err := rt.hostname()
+		if err != nil {
+			return "", fmt.Errorf("OPENCODE_MANAGER_CONTAINER_ID is required and Windows hostname lookup failed: %w", err)
+		}
+		if id := normalizeIdentifier(hostname); id != "" {
+			return id, nil
+		}
+		return "", fmt.Errorf("OPENCODE_MANAGER_CONTAINER_ID is required and Windows hostname is blank")
+	}
+	if raw, err := rt.readFile("/etc/hostname"); err == nil {
+		if id := normalizeIdentifier(string(raw)); id != "" {
+			return id, nil
+		}
+	}
+	if id := normalizeIdentifier(os.Getenv("HOSTNAME")); id != "" {
+		return id, nil
+	}
+	return "", fmt.Errorf("OPENCODE_MANAGER_CONTAINER_ID is required or /etc/hostname must contain a container id")
+}
+
+func derivedBackendWebSocketURL(serverIP string) (string, error) {
+	rawPort := envDefault("OPENCODE_MANAGER_BACKEND_PORT", strconv.Itoa(defaultBackendPort))
+	port, err := strconv.Atoi(rawPort)
+	if err != nil || port < 1 || port > 65535 {
+		return "", fmt.Errorf("OPENCODE_MANAGER_BACKEND_PORT must be an integer between 1 and 65535")
+	}
+	return fmt.Sprintf("ws://%s:%d%s", serverIP, port, defaultBackendWebSocketPath), nil
+}
+
+func detectLocalIPv4() (string, error) {
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return "", err
+	}
+	candidates := make([]string, 0)
+	for _, nif := range interfaces {
+		if nif.Flags&net.FlagUp == 0 || nif.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := nif.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ip := ipv4FromAddr(addr)
+			if isUsableIPv4(ip) {
+				candidates = append(candidates, ip)
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return "", fmt.Errorf("no non-loopback IPv4 address found")
+	}
+	sort.Strings(candidates)
+	return candidates[0], nil
+}
+
+func ipv4FromAddr(addr net.Addr) string {
+	switch value := addr.(type) {
+	case *net.IPNet:
+		if ip := value.IP.To4(); ip != nil {
+			return ip.String()
+		}
+	case *net.IPAddr:
+		if ip := value.IP.To4(); ip != nil {
+			return ip.String()
+		}
+	}
+	return ""
+}
+
+func isUsableIPv4(value string) bool {
+	ip := net.ParseIP(strings.TrimSpace(value)).To4()
+	if ip == nil {
+		return false
+	}
+	if ip[0] == 0 || ip[0] == 127 {
+		return false
+	}
+	if ip[0] == 169 && ip[1] == 254 {
+		return false
+	}
+	if ip[0] >= 224 {
+		return false
+	}
+	return true
+}
+
+func normalizeIdentifier(value string) string {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Join(fields, "-")
 }
 
 func requiredInt(name string) (int, error) {

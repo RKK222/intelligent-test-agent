@@ -1,9 +1,9 @@
 package com.icbc.testagent.app.config;
 
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.nio.file.Path;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
@@ -237,28 +237,13 @@ public class TestAgentRuntimeProperties {
     }
 
     /**
-     * 可选 Redis 健康检查和后续缓存能力配置项。
+     * Redis 连接配置项；Redis 是系统必需依赖。
      */
     public static class Redis {
-        private boolean enabled = false;
         private String host = "127.0.0.1";
         private int port = 6379;
         private String password;
         private Duration timeout = Duration.ofSeconds(1);
-
-        /**
-         * 返回是否启用 Redis 探测。
-         */
-        public boolean isEnabled() {
-            return enabled;
-        }
-
-        /**
-         * 绑定是否启用 Redis 探测。
-         */
-        public void setEnabled(boolean enabled) {
-            this.enabled = enabled;
-        }
 
         /**
          * 返回 Redis 主机名。
@@ -391,10 +376,11 @@ public class TestAgentRuntimeProperties {
     public static class ManagerControl {
         private String token = "";
         private String listenUrl = "http://127.0.0.1:8080";
-        private Duration heartbeatInterval = Duration.ofSeconds(10);
-        private Duration backendStaleAfter = Duration.ofSeconds(30);
+        private Duration heartbeatInterval = Duration.ofSeconds(5);
+        private Duration backendStaleAfter = Duration.ofSeconds(10);
         private Duration commandTimeout = Duration.ofSeconds(10);
         private int backendDiscoveryLimit = 100;
+        private Path serverIpFile = Path.of("/data/.testagent/.serverip");
         /**
          * 控制面网关模式：socket=生产 WebSocket；local=本地直连 baseUrl 的开发态占位，
          * 不依赖 opencode-manager 长连接。默认 socket。
@@ -444,14 +430,14 @@ public class TestAgentRuntimeProperties {
         }
 
         /**
-         * 返回 manager discovery 认为后端实例仍可用的心跳窗口。
+         * 返回 Redis Java/manager 运行快照 TTL。
          */
         public Duration getBackendStaleAfter() {
             return backendStaleAfter;
         }
 
         /**
-         * 绑定后端实例心跳过期窗口。
+         * 绑定 Redis Java/manager 运行快照 TTL。
          */
         public void setBackendStaleAfter(Duration backendStaleAfter) {
             this.backendStaleAfter = backendStaleAfter;
@@ -472,17 +458,31 @@ public class TestAgentRuntimeProperties {
         }
 
         /**
-         * 返回 discovery API 最多返回的后端实例数。
+         * 返回 WebSocket 后端列表和兼容诊断端点最多返回的后端实例数。
          */
         public int getBackendDiscoveryLimit() {
             return backendDiscoveryLimit;
         }
 
         /**
-         * 绑定 discovery API 返回上限。
+         * 绑定 WebSocket 后端列表和兼容诊断端点返回上限。
          */
         public void setBackendDiscoveryLimit(int backendDiscoveryLimit) {
             this.backendDiscoveryLimit = backendDiscoveryLimit;
+        }
+
+        /**
+         * 返回 Java 后端写给 Go manager 读取的服务器 IPv4 文件路径。
+         */
+        public Path getServerIpFile() {
+            return serverIpFile;
+        }
+
+        /**
+         * 绑定服务器 IPv4 文件路径，空值回退到生产默认 /data/.testagent/.serverip。
+         */
+        public void setServerIpFile(Path serverIpFile) {
+            this.serverIpFile = serverIpFile == null ? Path.of("/data/.testagent/.serverip") : serverIpFile;
         }
 
         /**

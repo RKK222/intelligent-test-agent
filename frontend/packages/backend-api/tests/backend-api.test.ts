@@ -71,6 +71,8 @@ describe("backend-api", () => {
               containerId: "ctr_01",
               port: 4096,
               baseUrl: "http://10.8.0.12:4096",
+              serviceStatus: "RUNNING",
+              serviceAddress: "10.8.0.12:4096",
               checkedAt: "2026-06-24T00:00:01Z"
             }
           }),
@@ -87,7 +89,9 @@ describe("backend-api", () => {
     await expect(client.getMyOpencodeProcess()).resolves.toMatchObject({ status: "NEEDS_INITIALIZATION", initializable: true });
     await expect(client.initializeMyOpencodeProcess()).resolves.toMatchObject({
       status: "READY",
-      baseUrl: "http://10.8.0.12:4096"
+      baseUrl: "http://10.8.0.12:4096",
+      serviceStatus: "RUNNING",
+      serviceAddress: "10.8.0.12:4096"
     });
 
     expect(fetcher.mock.calls[0]?.[0]).toBe("http://api/api/internal/agent/opencode/processes/me");
@@ -181,6 +185,69 @@ describe("backend-api", () => {
     );
     const headers = fetcher.mock.calls[0]?.[1]?.headers as Headers;
     expect(headers.get("Authorization")).toBe("Bearer token_123");
+  });
+
+  it("maps opencode runtime metric history APIs through platform URL", async () => {
+    const fetcher = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            generatedAt: "2026-06-24T00:00:00Z",
+            containerId: "ctr_01",
+            from: "2026-06-22T00:00:00Z",
+            to: "2026-06-24T00:00:00Z",
+            samples: [
+              {
+                sampledAt: "2026-06-24T00:00:00Z",
+                cpuUsagePercent: 12.5,
+                memoryUsagePercent: 50,
+                memoryUsedBytes: 512
+              }
+            ]
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token_123",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.getOpencodeRuntimeContainerMetrics("ctr_01", { windowMinutes: 30, maxPoints: 720 })).resolves.toMatchObject({
+      containerId: "ctr_01",
+      samples: [{ cpuUsagePercent: 12.5 }]
+    });
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api/api/internal/platform/opencode-runtime/management/containers/ctr_01/metrics?windowMinutes=30&maxPoints=720"
+    );
+
+    fetcher.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            generatedAt: "2026-06-24T00:00:00Z",
+            backendProcessId: "bjp_1234567890abcdef",
+            from: "2026-06-22T00:00:00Z",
+            to: "2026-06-24T00:00:00Z",
+            samples: [{ sampledAt: "2026-06-24T00:00:00Z", jvmThreadsLive: 42 }]
+          }
+        }),
+        { status: 200 }
+      )
+    );
+
+    await expect(client.getOpencodeRuntimeBackendProcessMetrics("bjp_1234567890abcdef")).resolves.toMatchObject({
+      backendProcessId: "bjp_1234567890abcdef",
+      samples: [{ jvmThreadsLive: 42 }]
+    });
+    expect(fetcher.mock.calls[1]?.[0]).toBe(
+      "http://api/api/internal/platform/opencode-runtime/management/backend-processes/bjp_1234567890abcdef/metrics"
+    );
   });
 
   it("maps scheduler management APIs through platform URL", async () => {

@@ -67,7 +67,7 @@ func runSupervisor() int {
 	)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	supervisor := control.NewSupervisor(cfg, manager, nil)
+	supervisor := control.NewSupervisor(cfg, manager)
 	if err := supervisor.Run(ctx); err != nil && ctx.Err() == nil {
 		writeJSON(process.Result{Status: process.StatusFailed, Message: err.Error()})
 		return 1

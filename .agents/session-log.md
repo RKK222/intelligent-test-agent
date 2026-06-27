@@ -2,6 +2,99 @@
 
 ## Entries
 
+### 2026-06-27 - 运行管理服务器指标历史连续性复核与类型修复
+
+- Why: 用户要求实现 Java 重启后服务器 CPU/内存/磁盘历史连续性；复核当前 HEAD 时确认 server-key 实现和文档已存在，但前端 typecheck 被侧栏样式对象的 `pointerEvents` 类型推断阻塞。
+- What: 确认 `test-agent:runtime-metrics:server:{linuxServerId}` 保存服务器 CPU/内存/磁盘，`test-agent:runtime-metrics:backend:{backendProcessId}` 保存当前 JVM 指标，Redis 自身重启后的历史保留依赖 AOF/RDB；最小修复 `FigmaShell.vue` 中左右侧栏 style computed 的 `CSSProperties` 类型标注。
+- How: 运行后端目标 Maven 测试、运行管理 Vitest 和 `@test-agent/agent-web` typecheck，定位并修复 `pointerEvents` 推断问题。
+- Result: 运行管理指标连续性实现已在当前分支具备；本次补齐验证并解除前端类型检查阻塞。
+
+### 2026-06-27 - 运行管理指标趋势图 5秒定时轮询平滑刷新优化
+
+- Why: 确保监控指标趋势图展开时的数据保持实时性的同时，避免每次后台定时刷新导致整个图表闪烁/重新加载。
+- What: 修改 `frontend/apps/agent-web/src/components/settings/RuntimeManagementPanel.vue`：
+  - 在 `metricsQuery` 查询配置中，声明式追加 `refetchInterval: 5000` 选项。
+  - 将模板中指标面板加载占位符的 `v-else-if="metricsQuery.isFetching.value"` 修改为 `v-else-if="metricsQuery.isLoading.value"`，使占位符仅在初次无缓存加载时显示，后台重刷时保持图表渲染。
+- How: 结合 Vue Query 的 `refetchInterval` 选项与 `isLoading` （只在初次加载时为 true）特性，避免在后台重刷时销毁并重建图表 DOM 容器，实现数据平滑更新。
+- Result: 趋势图展示期间保持每 5 秒自动无缝刷新，ECharts 动线平滑渲染且不产生任何闪烁或闪退，前端类型校验和 Vitest 单元测试全部通过。
+
+### 2026-06-27 - 运行管理指标趋势图再次点击折叠收起优化
+
+- Why: 增强指标监控交互的便利性，在拓扑列表中的后端进程行或容器行已经被选中（趋势图已展示）的情况下，再次点击该行应折叠/隐藏对应的指标趋势图。
+- What: 修改 `frontend/apps/agent-web/src/components/settings/RuntimeManagementPanel.vue`：
+  - 修改 `selectContainer` 与 `selectBackendProcess` 点击处理函数：如果被点击的 ID 与当前处于选中状态的 ID 一致，则将选中的监控对象 `selectedMetricsTarget` 设为 `null`，从而触发趋势图组件的销毁；否则切换至新行并更新趋势图。
+- How: 增加对选中行 ID 的条件对比逻辑，实现列表行点击的 Toggle 展开/折叠自锁切换效果。
+- Result: 允许再次点击同一行来快速收缩指标趋势图，操作体验更加平滑；前端编译和 Vitest 单元测试全部通过。
+
+### 2026-06-27 - 进入系统管理自动折叠左右侧栏及自动恢复
+
+- Why: 满足用户对系统管理纯净专注视图的交互要求，在进入系统管理面板时，自动收起左侧工作空间（目录树）与右侧聊天对话面板；当切回编辑器时，能够自动恢复进入前的折叠/展开状态。
+- What:
+  - 修改 `frontend/apps/agent-web/src/components/FigmaShell.vue`：新增 `showLeftPanel` 属性并监听变化，使左侧侧边栏能被父组件驱动和同步状态。
+  - 修改 `frontend/apps/agent-web/src/components/AgentWorkbench.vue`：
+    - 提升左侧展开状态 `leftPanelOpen` 为 workbench 级 ref，并新增备份状态的 `savedLeftPanelOpen` 和 `savedRightPanelOpen`。
+    - 监听 `centerMode`：当切入 `system` 模式时，自动备份当前左右侧栏状态，并将其置为 `false`；从 `system` 模式切出时，恢复备份的状态值。
+    - 绑定 `FigmaShell` 的 `:show-left-panel` 与 `@toggle-left-panel` 事件。
+    - 简化“系统管理”按钮的点击事件，使其与 watch 逻辑解耦。
+- How: 状态提升加 Vue watch 切换钩子，非入侵式管理侧栏视图联动。
+- Result: 进入管理页面自动收起侧栏，返回编辑器自动复原，页面响应迅速；类型检查与单元测试全部通过。
+
+### 2026-06-27 - 系统管理侧边栏菜单图标化与悬浮提示优化
+
+- Why: 优化系统管理侧边栏导航，仅保留图标以使菜单栏紧凑，并通过悬浮气泡（Tooltip）展示菜单对应的文字，从而提升整体视觉的现代感和空间利用率。
+- What: 修改 `frontend/apps/agent-web/src/components/system/SystemManagementPanel.vue`：
+  - 将导航按钮包裹在 Element Plus 的 `el-tooltip` 组件中，悬浮方向设为 `right`，显示对应菜单 label。
+  - 使用无障碍隐藏类 `ta-system-menu-text` 把 `span` 从视觉上隐藏，但不破坏 DOM 结构与自动化测试兼容性。
+  - 将 `.ta-system-menu` 宽度由 `180px` 缩减为 `52px`，内含按钮全部设为居中的 `36px * 36px` 规格，图标尺寸调整为 `18px`。
+- How: 结合 Element Plus Tooltip 组件与 Visually Hidden CSS 类，以非破坏性方式达成紧凑的悬浮侧边栏交互。
+- Result: 页面导航区整洁且切换正常，测试与 TypeScript 校验均完全通过。
+
+### 2026-06-27 - 运行管理指标趋势图展示位置优化
+
+- Why: 在拓扑状态面板上，当选中某个后端 Java 进程或容器时，对应的指标趋势图应直接出现在该列表的下方，而不是始终在整个页面的最下面，从而提升监控数据的关联性和视觉交互体验。
+- What: 修改 `frontend/apps/agent-web/src/components/settings/RuntimeManagementPanel.vue`：
+  - 将原先始终渲染在最底部的指标趋势面板（`ta-runtime-metrics-panel`）移除。
+  - 在 `.ta-runtime-grid` 的 `后端 Java 进程` 列表组件下方直接添加条件渲染的后端指标趋势图组件（当 `selectedMetricsTarget.type === 'backend'` 时显示）。
+  - 在 `容器` 列表组件下方直接添加条件渲染的容器指标趋势图组件（当 `selectedMetricsTarget.type === 'container'` 时显示）。
+- How: 充分利用网格布局单列堆叠的特性，将条件渲染的趋势图面板作为列表块的兄弟节点插入网格中，使其在被选中时自动且顺畅地向下展开。
+- Result: 点击对应列表项后，趋势图会即时且准确地展现在相应列表的正下方，页面结构更符合直觉；类型检查（typecheck）和单元测试全部通过。
+
+### 2026-06-27 - 运行管理拓扑状态列表布局调整
+
+- Why: 拓扑状态下 Linux 服务器、后端 Java 进程、容器、管理进程原先采用 2 列网格并排布局，列表内容较多时横向挤压严重，需要改为每个列表独占一行（100% 宽度）。
+- What: 修改 `frontend/apps/agent-web/src/components/settings/RuntimeManagementPanel.vue`：
+  - 将 `.ta-runtime-grid` 的 `grid-template-columns` 从 `repeat(2, minmax(0, 1fr))` 改为 `1fr`，使所有列表块（包括原先未设置 `is-wide` 属性的 4 个列表）均占满一行。
+- How: 仅调整布局的 CSS 网格规格，不修改模板结构或 DOM 标签，不改动任何业务逻辑。
+- Result: 四个拓扑列表及底部的连接列表均呈现独占整行的效果，解决多列挤压带来的表格横向滚动体验问题。类型检查与单元测试完全通过。
+
+### 2026-06-27 - manager 最大进程数改为通用参数下发
+
+- Why: 此前 `MaxProcesses` 只能由 Go manager 启动时从 env `OPENCODE_MANAGER_MAX_PROCESSES` 读取（不可变），改上限需改 env 并重启 manager，无法在线调整。需把最大进程数纳入通用参数表在线可调，前端修改后实时推送给所有 manager。
+- What: `common_parameters` 新增全局参数 `OPENCODE_MANAGER_MAX_PROCESSES`（`platform=all`，默认 8，migration `V20260627020000`，时间戳避让 SSH key 的 `V20260627010000`）。Go 侧 `process.Manager` 用 `atomic.Int64` 持有运行时上限，新增 `MaxProcesses()`/`SetMaxProcesses()`（按端口池 clamp、`<1` 拒绝），`Start` 容量判断与 `topologyMessage` 改读生效值；`protocol.go` 新增 `configUpdate` 类型，`supervisor.go` `readLoop` 处理该帧并热更新。Java 侧新增 `ManagerControlProtocol.TYPE_CONFIG_UPDATE` + `ManagerControlMessage.configUpdate` 工厂、`ManagerConnectionRegistry.broadcast`、`OpencodeManagerConfigSyncService`（读参数→register 补推/事件广播）、`CommonParameterUpdatedEvent`（domain）；`CommonParameterManagementApplicationService.updateValue` 发布事件；`ManagerControlWebSocketHandler` register 后补推。env 降为启动兜底。
+- How: Go `go test ./...` 全绿（含 SetMaxProcesses clamp、Start 运行时容量、configUpdate 应用+heartbeat 上报生效值）；Java `mvn clean test` 全绿（含 `OpencodeManagerConfigSyncServiceTest`、`ManagerConnectionRegistry.broadcast`、`CommonParameterManagementApplicationServiceTest` 事件发布断言、handler 构造器适配）；同步 http-api/event-stream/database.md 与 opencode-manager/opencode-runtime README。
+- Result: 前端在「通用参数管理」改 `OPENCODE_MANAGER_MAX_PROCESSES` 即可经 WS 控制面广播给所有 manager 热更新；manager 注册时自动获取权威值；后端不可达或参数缺失时回退 env，旧 manager 不识别 `configUpdate` 静默忽略，向后兼容。本条实现先前 session-log 中「migration 版本冲突」条目描述的重命名结果。
+
+### 2026-06-26 - 头像菜单未分配进程状态文案修改
+
+- Why: 增强交互指向性与文案表意清晰度，头像菜单中原先展示的“未分配”文案需要调整为更明确的“待分配专属进程”文案。
+- What: 修改 `frontend/apps/agent-web/src/components/FigmaShell.vue` 中头像菜单 opencode 状态逻辑的未分配分支返回值，将 `text: "未分配"` 变更为 `text: "待分配专属进程"`。
+- How: 仅修改组件内部的 computed 渲染文本，不影响底层 tone 状态码及后端的任何流程与数据。
+- Result: 头像下拉菜单在未分配 opencode 进程时显示“待分配专属进程”，排版整齐，编译及测试全部通过。
+
+### 2026-06-26 - 用户头像菜单实时显示 opencode 服务状态
+
+- Why: 用户需要点击右上角头像时实时查看当前账号的 opencode 服务分配与健康状态，区分未分配、运行中和未运行，并展示服务器 IP 与内部端口。
+- What: `/api/internal/agent/{agentId}/processes/me` 兼容新增 `serviceStatus` / `serviceAddress`，后端复用现有 manager/local gateway 健康检测链路计算 `UNASSIGNED`、`RUNNING`、`NOT_RUNNING`；前端头像菜单打开时强制 refetch 当前用户进程状态，并用灰/绿/红显示“未分配 / 运行中(ip:port) / 未运行(ip:port)”。
+- How: 在 `UserOpencodeProcessStatusResponse` 增加兼容构造器与头像菜单状态枚举，`UserOpencodeProcessAssignmentService.status` 对无 ACTIVE 绑定返回未分配，对绑定进程健康失败/缺失返回未运行；`FigmaShell` 新增状态行和刷新事件，`AgentWorkbench` 传入现有 Vue Query 数据与 refetch。
+- Result: 不新增数据库 migration，不修改环境文件，不改变右侧聊天面板依赖的 `READY / NEEDS_INITIALIZATION / UNAVAILABLE` 门禁语义；目标后端测试、`backend-api` Vitest、`backend-api`/`agent-web` typecheck 和头像菜单 Playwright 用例通过。
+
+### 2026-06-26 - opencode-manager 改为读取 Java 写出的服务器 IP 文件
+
+- Why: Go manager 运行在容器内时无法可靠识别宿主服务器 IP，继续用容器网卡 IP 会导致后端统计服务器容器数、同服务器重建和 `baseUrl=http://{linuxServerId}:{port}` 规则失真。
+- What: Java 后端在 socket 控制面启动时把解析出的服务器 IPv4 写入 `.serverip`（默认 `/data/.testagent/.serverip`，本地脚本改到 `.tmp/dev-services/.serverip`）；Go manager 非 Windows 启动读取该文件并最多等待 30 秒，Windows 本机开发态直接探测本机非回环 IPv4；`OPENCODE_MANAGER_LINUX_SERVER_ID` 不再由脚本注入。
+- How: `LinuxServerIpResolver` 增加 listen-url 非回环 IPv4 优先逻辑，`ServerIpFileWriter` 负责单行覆盖写入；Go 配置加载改为可注入运行时，覆盖 `.serverip`、Windows、containerId 和 discovery URL 派生分支；同步一键脚本、脚本校验和 opencode-manager/API/部署文档。
+- Result: manager 上报的 `linuxServerId` 固定为服务器 IPv4，`containerId` 只表示容器或 Windows 机器名。本次不涉及数据库 schema；`TestAgentRuntimePropertiesBindingTest` 中 3 个 guo profile 断言仍是既有失败（session log 早前已记录），与本次 `.serverip` 改动无关。
+
 ### 2026-06-26 - 全局字体与排版样式优化
 
 - Why: 统一平台视觉体验，提升可读性。用户要求将默认字体替换为 Geist 族与 Noto Sans SC 组合，并规范化标题、正文、说明及代码块的字号字重参数。
@@ -843,3 +936,74 @@
 - What: 清理脚本删除 user binding、opencode server process、container manager 和 manager-backend connection 时，同时按 `linux_server_id='127.0.0.1'` 与引用 loopback container 两条路径定位待删数据。
 - How: 在 `JdbcRepositoryIntegrationTest#cleanupMigrationRemovesHistoricalLoopbackTopology` 中插入“非 loopback server 进程引用 loopback container”的历史脏数据，先确认原脚本外键失败，再补齐删除条件。
 - Result: 定向迁移用例通过；后续写历史拓扑清理时不能只看子表自己的 `linux_server_id`，还要沿外键反查父级 loopback 资源。
+
+### 2026-06-26 - 运行心跳改为 Redis 快照并移除 manager HTTP 发现路径
+
+- Why: Java 后端和 Go manager 的在线状态不应继续写入或依赖数据库 heartbeat 字段；Go manager 需要在所有 Java 连接断开后通过 `.serverip + backend port` 持续重连，并且控制面交互只能走 WebSocket。
+- What: 新增 Java backend/manager Redis 运行快照，TTL 10 秒，Java 与 manager 心跳间隔改为 5 秒；运行管理、manager 后端列表响应和 Workspace 文件后端路由改读 Redis 快照。Go manager 删除 HTTP discovery client，启动派生 seed WebSocket，断线后每 10 秒无限重连，有连接时每 10 秒通过 `backendListRequest` 补连缺失 Java 后端，每 5 秒通过任一 socket 发送 `managerHeartbeat`。
+- How: WebSocket 协议新增 `managerHeartbeat`、`backendListRequest`、`backendListResponse`；Redis store 保存 JSON 快照并新增 `jackson-datatype-jsr310` 依赖支持 `Instant`；本地脚本不再注入 HTTP discovery URL，文档同步 Redis 强依赖、WebSocket-only 控制面、5 秒心跳和 10 秒 TTL。
+- Result: Go 全量测试、脚本校验、Redis/运行管理/manager WebSocket 聚焦 Maven 测试通过；完整 Maven 目标集合仍只失败于既有 3 个 guo profile 配置断言（session log 已记录），与本次 Redis/WebSocket 改动无关。
+
+### 2026-06-27 - 运行管理新增 Redis 指标历史和趋势图
+
+- Why: 超级管理员运行管理需要查看容器和 Java 后端的最新资源指标，并在点击行后追踪近 48 小时 CPU、内存、磁盘 IO、进程容量和 JVM 指标趋势；在线态仍由 Redis latest snapshot TTL 决定。
+- What: 扩展 managerHeartbeat 和 Java backend heartbeat，latest snapshot 保持 10 秒 TTL，同时向 Redis ZSET 写入近 48 小时原始 5 秒指标样本；新增容器/后端 metrics history HTTP API，运行管理 overview 增加最新指标字段，前端运行管理按需加载 ECharts 展示趋势。
+- How: Go manager 使用 Linux cgroup v2/v1 和 procfs 只读采集容器 CPU、内存、磁盘 IO，并把本地 opencode 进程明细随 latest snapshot 上报；Java 后端通过 JDK MXBean 和当前工作目录文件系统采集服务器/JVM 指标；history API 对超过 `maxPoints` 的样本按时间桶降采样。文档同步 API、事件边界、部署说明、backend/frontend README 和 module map。
+- Result: `go test ./...`、后端指定 Maven reactor、运行管理相关前端测试和 `corepack pnpm typecheck` 通过；`corepack pnpm test` 仍失败于既有 `apps/agent-web/tests/FigmaChatPanel.test.ts` 两个历史消息渲染断言，和本次运行管理改动无关。
+
+### 2026-06-27 - Redis disabled 时跳过后端心跳 runner
+
+- Why: `test-agent.redis.enabled=false` 或 prod 默认未显式启用 Redis 时，`BackendJavaProcessLifecycleRunner` 启动阶段无条件调用 `registerHeartbeat()`，触发 `Redis 运行心跳未启用` 并中断整个 Spring Boot 启动；这与 Redis optional health 的“应用可启动、运行管理/manager 链路 fail fast”边界不一致。
+- What: `BackendJavaProcessLifecycleService` 暴露 `heartbeatEnabled()`，app runner 在 Redis 心跳未启用时跳过 `.serverip` 写入、Java backend snapshot 注册和周期调度；只有成功启动生命周期后，销毁阶段才标记本 backend offline。
+- How: 新增 `OpencodeManagerControlConfigTest` 覆盖 disabled heartbeat store 下 runner 不抛错、不写 `.serverip`、不注册心跳、不 mark offline；同步 app README 和部署文档说明 Redis disabled 语义。
+- Result: 聚焦 Maven 回归和后端目标集合通过；生产启用用户进程模型仍需设置 `TEST_AGENT_REDIS_ENABLED=true`，否则运行管理与 manager 控制链路保持 fail fast。
+
+### 2026-06-27 - 移除 Redis 启用开关和内存降级
+
+- Why: Redis 已被明确为系统必需依赖，继续保留 `test-agent.redis.enabled` / `TEST_AGENT_REDIS_ENABLED` 会制造“可关闭 Redis”的错误心智，并导致启动路径出现旧的未启用判断。
+- What: 删除 Redis 启用开关配置、运行心跳 `enabled()` 端口、Noop 心跳存储和内存 TokenStore fallback；Java backend 生命周期、运行管理、manager socket、用户进程分配、workspace 路由和 scheduler 均默认依赖 Redis Bean，不再检查“Redis 未启用”分支。
+- How: 将 Redis heartbeat store、TokenStore 和 health indicator 改为必需 Redis 实现；`SchedulerStartupValidator` 只校验启用 scheduler 时存在 `StringRedisTemplate`；配置绑定和文档同步移除开关说明，测试改为验证即使传入旧开关也不会改变 Redis 必需行为。
+- Result: Redis 不再有独立启用参数；旧的 `Redis disabled 时跳过后端心跳 runner` 决策已被本次变更取代。聚焦测试通过；完整 Maven 回归仍被工作区未跟踪 migration `V20260627010000__seed_opencode_manager_max_processes_param.sql` 与已存在 migration 版本重复阻塞，未纳入本次提交。
+
+### 2026-06-27 - 修复 manager 最大进程数参数 migration 版本冲突
+
+- Why: app fat jar 启动时报 Flyway `Found more than one migration with version 20260627010000`，根因是 opencode-manager 最大进程数参数 seed 曾使用与 SSH key `encrypted_aes_key` schema migration 相同的时间戳版本，旧打包产物里同时包含两份 `20260627010000` migration。
+- What: 将 manager 最大进程数系统参数 migration 固化为 `V20260627020000__seed_opencode_manager_max_processes_param.sql`，初始化 `common_parameters.OPENCODE_MANAGER_MAX_PROCESSES=8/all`；同步 persistence README/PACKAGE 和数据库部署文档。
+- How: 运行 Flyway 命名测试和 H2 迁移集成测试验证版本唯一，再重新打包 `test-agent-app`，检查嵌套 `test-agent-persistence` jar 只包含 `V20260627010000__add_encrypted_aes_key_to_user_ssh_keys.sql` 与 `V20260627020000__seed_opencode_manager_max_processes_param.sql`。
+- Result: 重复版本错误消除；后续若修改该默认值，应通过通用参数管理或新的兼容 migration，不得改写已发布文件。
+
+### 2026-06-27 - 修复运行管理趋势图 UTC 时间直显
+
+- Why: 运行管理趋势图 X 轴直接截取后端 `Instant` ISO 字符串，导致 UTC `2026-06-26T17:28:00Z` 在东八区页面显示为 `06-26T17:28`，与列表心跳的本地时间显示不一致。
+- What: 抽出图表采样时间格式化函数，先解析时间再按浏览器本地时区显示为 `MM/DD HH:mm`，非法时间显示 `-`。
+- How: `RuntimeMetricChart.vue` 改用统一格式化函数，前端运行管理测试覆盖 `2026-06-26T17:28:00Z` 显示为 `06/27 01:28`。
+- Result: 运行管理趋势图时间轴与列表心跳时间使用同一本地时区语义；不改后端 API、Redis 样本或历史查询范围。
+
+### 2026-06-27 - 运行管理指标历史改为分钟级窗口并支持48小时自定义
+
+- Why: 原 `hours` 参数只能表达整数小时且最小 1 小时，无法支持运行管理趋势图的 1 分钟、30 分钟短窗口，同时用户也需要能自主调整/查看最大 48 小时（2880 分钟）的历史图表。
+- What: 
+  - 指标 history API 新增 `windowMinutes` 主参数，允许 `1/30/60/360/720/1440/2880`，默认 60 分钟；旧 `hours` 保留兼容但前端不再使用。
+  - 前端 `RuntimeManagementPanel.vue` 在 radio-group 按钮组中新增 `48小时` (value = 2880) 选项。
+  - 后端 `RuntimeManagementController.java` 中的 `ALLOWED_METRIC_WINDOW_MINUTES` 集合追加 `2880`。
+  - 单元测试与 API 文档同步更新。
+- How: 在后端校验白名单和前端 UI 按钮中同步加入 2880 分钟，调整测试断言值，并更新 HTTP API 文档。
+- Result: 趋势图支持 1分钟/30分钟/1小时/6小时/12小时/24小时/48小时 自定义切换，单元测试及编译通过。
+
+### 2026-06-27 - 左右侧边栏收起与展开渐进式动画优化
+
+- Why: 提升侧边栏折叠与展开的交互流畅度和视觉质感，当用户点击折叠/展开左右侧栏按钮时，侧面板应平滑过渡，而不是瞬间消失或跳变。
+- What: 修改 `frontend/apps/agent-web/src/components/FigmaShell.vue`：
+  - 定义 `leftPanelStyle` 与 `rightPanelStyle` 响应式计算样式，控制宽度从设定的宽度到 `0px`，不透明度从 `1` 到 `0`，指针事件从 `auto` 到 `none`。
+  - 在模板中分别移除 `.figma-panel-left` 和 `.figma-chat-panel-wrapper` 的 `v-if` 条件渲染限制（但保留内部 resize handle 的 `v-if`），改由计算样式动态驱动宽度和显示。
+  - 为面板及容器增加 `.is-resizing` 类，在用户处于手动拖拽调整宽度期间屏蔽 CSS 过渡动画（`transition: none !important`），避免拖拽滞后。
+  - 在 CSS 中为 `.figma-panel-left`、`.figma-chat-panel-wrapper` 与左侧浮动按钮 `.figma-sidebar-toggle-floating` 配置 `0.25s` 的渐进式过渡动画。
+- How: 用 CSS transition 替换硬性的 Vue DOM 节点移除/插入逻辑，辅以 active resizing 变量进行 class 动态控制来实现丝滑的过渡与零延迟的手工拖拽。
+- Result: 左右侧边栏在折叠和展开发生时，均呈现出完美的 0.25s 渐变动画效果，且不影响手动拖拽的流畅度；前端类型校验和单元测试全部通过。
+
+### 2026-06-27 - 修复 FigmaChatPanel 历史消息单元测试异步渲染失败
+
+- Why: `MarkdownView` 内部用 150ms 定时器 + 动态 import markdown-it/dompurify/hljs 异步渲染正文，`FigmaChatPanel.test.ts` 的两个用例 mount 后同步读取 `wrapper.text()` 做断言时仍停在“渲染中…”占位，导致“历史消息按序渲染”和“空助手消息不渲染”两个用例既有失败。
+- What: 在测试文件中新增同步直出 `source` 的 `MarkdownView` 桩，并给这两个 mount 调用加 `global.stubs`，让正文断言与 MarkdownView 渲染时序解耦。
+- How: 桩组件只渲染 `<div class="ta-md-view">{{ source }}</div>`，保留 `.figma-chat-assistant` 结构与 meta 行，不影响用例里的元素数量和时间断言。
+- Result: 22 个测试文件 / 131 个用例全部通过；不涉及 API、事件、数据库或后端，仅测试文件改动。

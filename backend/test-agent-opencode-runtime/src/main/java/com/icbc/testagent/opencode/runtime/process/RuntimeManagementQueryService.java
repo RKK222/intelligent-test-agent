@@ -2,29 +2,34 @@ package com.icbc.testagent.opencode.runtime.process;
 
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
-import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
-import com.icbc.testagent.domain.opencodeprocess.LinuxServerStatus;
-import com.icbc.testagent.domain.opencodeprocess.ManagerConnectionStatus;
+import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeMetricSample;
+import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
+import com.icbc.testagent.domain.opencodeprocess.ContainerRuntimeMetricSample;
+import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
+import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
-import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerStatus;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
+import com.icbc.testagent.domain.opencodeprocess.ServerRuntimeMetricSample;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
-import java.time.Duration;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
-import java.util.Collections;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -36,7 +41,6 @@ public class RuntimeManagementQueryService {
 
     private static final int TOPOLOGY_LIMIT = 500;
     private static final int PROCESS_SCAN_LIMIT = 200;
-    private static final Duration LIVE_WINDOW = Duration.ofMinutes(5);
 
     private final OpencodeProcessManagementRepository repository;
     private final UserRepository userRepository;
@@ -93,34 +97,34 @@ public class RuntimeManagementQueryService {
             PageRequest pageRequest,
             String traceId) {
         Instant now = Instant.now(clock);
-        Instant minLiveAt = now.minus(LIVE_WINDOW);
-        Set<BackendProcessId> liveBackendIds = heartbeatStore.enabled() ? heartbeatStore.liveBackendProcessIds() : Collections.emptySet();
-        Set<OpencodeProcessId> liveProcessIds = heartbeatStore.enabled() ? heartbeatStore.liveOpencodeProcessIds() : Collections.emptySet();
-        var linuxServers = repository.findLinuxServers(TOPOLOGY_LIMIT).stream()
-                .filter(server -> server.status() == LinuxServerStatus.READY)
-                .filter(server -> !server.lastHeartbeatAt().isBefore(minLiveAt))
+        Set<OpencodeProcessId> liveProcessIds = heartbeatStore.liveOpencodeProcessIds();
+        List<BackendRuntimeSnapshot> backendSnapshots = heartbeatStore.liveBackendSnapshots().stream()
+                .limit(TOPOLOGY_LIMIT)
                 .toList();
-        var backendProcesses = repository.findBackendJavaProcesses(TOPOLOGY_LIMIT).stream()
-                .filter(process -> process.status() == BackendJavaProcessStatus.READY)
-                .filter(process -> heartbeatStore.enabled()
-                        ? liveBackendIds.contains(process.backendProcessId())
-                        : !process.lastHeartbeatAt().isBefore(minLiveAt))
+        List<ManagerRuntimeSnapshot> managerSnapshots = heartbeatStore.liveManagerSnapshots().stream()
+                .limit(TOPOLOGY_LIMIT)
                 .toList();
-        var containers = repository.findContainers(TOPOLOGY_LIMIT).stream()
-                .filter(container -> container.status() == OpencodeContainerStatus.READY)
-                .filter(container -> !container.lastHeartbeatAt().isBefore(minLiveAt))
+        var linuxServersById = new LinkedHashMap<com.icbc.testagent.domain.opencodeprocess.LinuxServerId, com.icbc.testagent.domain.opencodeprocess.LinuxServer>();
+        for (BackendRuntimeSnapshot snapshot : backendSnapshots) {
+            linuxServersById.putIfAbsent(snapshot.linuxServer().linuxServerId(), snapshot.linuxServer());
+        }
+        var linuxServers = linuxServersById.values().stream().toList();
+        var backendProcesses = backendSnapshots.stream()
+                .map(snapshot -> new RuntimeManagementBackendProcess(snapshot.backendProcess(), snapshot.metrics()))
                 .toList();
-        var managers = repository.findContainerManagers(TOPOLOGY_LIMIT).stream()
-                .filter(manager -> manager.connectionStatus() == ManagerConnectionStatus.CONNECTED)
-                .filter(manager -> !manager.lastHeartbeatAt().isBefore(minLiveAt))
+        var containers = managerSnapshots.stream()
+                .map(snapshot -> new RuntimeManagementContainer(snapshot.container(), snapshot.metrics()))
                 .toList();
-        var connections = repository.findManagerBackendConnections(TOPOLOGY_LIMIT).stream()
-                .filter(connection -> connection.status() == ManagerConnectionStatus.CONNECTED)
-                .filter(connection -> !connection.lastHeartbeatAt().isBefore(minLiveAt))
+        var managers = managerSnapshots.stream()
+                .map(ManagerRuntimeSnapshot::manager)
+                .toList();
+        var connections = managerSnapshots.stream()
+                .flatMap(snapshot -> snapshot.connections().stream())
+                .limit(TOPOLOGY_LIMIT)
                 .toList();
         Optional<OpencodeServerProcessFilter> resolvedFilter = resolveFilter(filter);
         PageResponse<OpencodeServerProcess> processPage = resolvedFilter
-                .map(item -> liveProcessPage(item, pageRequest, minLiveAt, liveProcessIds))
+                .map(item -> liveProcessPage(item, pageRequest, liveProcessIds))
                 .orElseGet(() -> new PageResponse<>(List.of(), pageRequest.page(), pageRequest.size(), 0));
         Map<OpencodeProcessId, UserOpencodeProcessBinding> bindings = repository.findUserBindingsByProcessIds(
                 processPage.items().stream().map(OpencodeServerProcess::processId).toList());
@@ -157,10 +161,92 @@ public class RuntimeManagementQueryService {
                 new PageResponse<>(rows, processPage.page(), processPage.size(), processPage.total()));
     }
 
+    /**
+     * 查询单个容器指定时间窗口内的运行指标历史，并按 maxPoints 做时间桶降采样。
+     */
+    public RuntimeManagementContainerMetricHistory containerMetrics(
+            OpencodeContainerId containerId,
+            Duration window,
+            int maxPoints,
+            String traceId) {
+        Instant to = Instant.now(clock);
+        Instant from = to.minus(window);
+        List<ContainerRuntimeMetricSample> rawSamples = heartbeatStore.containerMetricSamples(containerId, from, to);
+        return new RuntimeManagementContainerMetricHistory(
+                to,
+                containerId,
+                from,
+                to,
+                downsampleContainerSamples(rawSamples, from, to, maxPoints));
+    }
+
+    /**
+     * 查询单个后端 Java 进程指定时间窗口内的运行指标历史，并按 maxPoints 做时间桶降采样。
+     */
+    public RuntimeManagementBackendMetricHistory backendProcessMetrics(
+            BackendProcessId backendProcessId,
+            Duration window,
+            int maxPoints,
+            String traceId) {
+        Instant to = Instant.now(clock);
+        Instant from = to.minus(window);
+        List<BackendRuntimeMetricSample> backendSamples = heartbeatStore.backendMetricSamples(backendProcessId, from, to);
+        List<ServerRuntimeMetricSample> serverSamples = resolveBackendLinuxServerId(backendProcessId)
+                .map(linuxServerId -> heartbeatStore.serverMetricSamples(linuxServerId, from, to))
+                .orElse(List.of());
+        List<BackendRuntimeMetricSample> rawSamples = mergeBackendMetricSamples(serverSamples, backendSamples);
+        return new RuntimeManagementBackendMetricHistory(
+                to,
+                backendProcessId,
+                from,
+                to,
+                downsampleBackendSamples(rawSamples, from, to, maxPoints));
+    }
+
+    private Optional<LinuxServerId> resolveBackendLinuxServerId(BackendProcessId backendProcessId) {
+        for (BackendRuntimeSnapshot snapshot : heartbeatStore.liveBackendSnapshots()) {
+            if (snapshot.backendProcess().backendProcessId().equals(backendProcessId)) {
+                return Optional.of(snapshot.backendProcess().linuxServerId());
+            }
+        }
+        return repository.findBackendJavaProcessById(backendProcessId)
+                .map(process -> process.linuxServerId());
+    }
+
+    private List<BackendRuntimeMetricSample> mergeBackendMetricSamples(
+            List<ServerRuntimeMetricSample> serverSamples,
+            List<BackendRuntimeMetricSample> backendSamples) {
+        if (serverSamples.isEmpty()) {
+            return backendSamples;
+        }
+        Map<Instant, BackendMetricAccumulator> bySampledAt = new TreeMap<>();
+        for (ServerRuntimeMetricSample sample : serverSamples) {
+            BackendMetricAccumulator accumulator = bySampledAt.computeIfAbsent(sample.sampledAt(), BackendMetricAccumulator::new);
+            accumulator.cpuUsagePercent = sample.cpuUsagePercent();
+            accumulator.memoryMaxBytes = sample.memoryMaxBytes();
+            accumulator.memoryUsedBytes = sample.memoryUsedBytes();
+            accumulator.memoryUsagePercent = sample.memoryUsagePercent();
+            accumulator.diskMaxBytes = sample.diskMaxBytes();
+            accumulator.diskUsedBytes = sample.diskUsedBytes();
+            accumulator.diskUsagePercent = sample.diskUsagePercent();
+        }
+        for (BackendRuntimeMetricSample sample : backendSamples) {
+            BackendMetricAccumulator accumulator = bySampledAt.computeIfAbsent(sample.sampledAt(), BackendMetricAccumulator::new);
+            // server:{linuxServerId} 是服务器级指标权威来源；backend:{backendProcessId} 只合并当前 JVM 指标。
+            accumulator.jvmMemoryUsedBytes = sample.jvmMemoryUsedBytes();
+            accumulator.jvmMemoryCommittedBytes = sample.jvmMemoryCommittedBytes();
+            accumulator.jvmMemoryMaxBytes = sample.jvmMemoryMaxBytes();
+            accumulator.jvmGcPauseMillis = sample.jvmGcPauseMillis();
+            accumulator.jvmThreadsLive = sample.jvmThreadsLive();
+        }
+        return bySampledAt.values().stream()
+                .map(BackendMetricAccumulator::toSample)
+                .toList();
+    }
+
     private PageResponse<OpencodeServerProcess> liveProcessPage(
             OpencodeServerProcessFilter filter,
             PageRequest pageRequest,
-            Instant minLiveAt,
             Set<OpencodeProcessId> liveProcessIds) {
         if (filter.status() != null && filter.status() != OpencodeServerProcessStatus.RUNNING) {
             return new PageResponse<>(List.of(), pageRequest.page(), pageRequest.size(), 0);
@@ -173,9 +259,7 @@ public class RuntimeManagementQueryService {
         List<OpencodeServerProcess> liveProcesses = repository.findOpencodeServerProcesses(runningFilter, new PageRequest(1, PROCESS_SCAN_LIMIT))
                 .items()
                 .stream()
-                .filter(process -> heartbeatStore.enabled()
-                        ? liveProcessIds.contains(process.processId())
-                        : !process.lastHealthCheckAt().isBefore(minLiveAt))
+                .filter(process -> liveProcessIds.contains(process.processId()))
                 .toList();
         List<OpencodeServerProcess> pageItems = liveProcesses.stream()
                 .skip(pageRequest.offset())
@@ -201,11 +285,176 @@ public class RuntimeManagementQueryService {
         return userRepository.findByUserId(userId).map(user -> user.username());
     }
 
+    private List<RuntimeManagementContainerMetricSample> downsampleContainerSamples(
+            List<ContainerRuntimeMetricSample> samples,
+            Instant from,
+            Instant to,
+            int maxPoints) {
+        if (samples.size() <= maxPoints) {
+            return samples.stream().map(this::containerMetricSample).toList();
+        }
+        List<List<ContainerRuntimeMetricSample>> buckets = containerBuckets(samples, from, to, maxPoints);
+        List<RuntimeManagementContainerMetricSample> result = new ArrayList<>();
+        for (List<ContainerRuntimeMetricSample> bucket : buckets) {
+            if (bucket.isEmpty()) {
+                continue;
+            }
+            ContainerRuntimeMetricSample last = bucket.get(bucket.size() - 1);
+            result.add(new RuntimeManagementContainerMetricSample(
+                    last.sampledAt(),
+                    last.maxProcesses(),
+                    last.currentProcesses(),
+                    last.metricsSource(),
+                    averageDouble(bucket.stream().map(ContainerRuntimeMetricSample::cpuUsagePercent).toList()),
+                    averageLong(bucket.stream().map(ContainerRuntimeMetricSample::memoryMaxBytes).toList()),
+                    averageLong(bucket.stream().map(ContainerRuntimeMetricSample::memoryUsedBytes).toList()),
+                    averageDouble(bucket.stream().map(ContainerRuntimeMetricSample::memoryUsagePercent).toList()),
+                    averageDouble(bucket.stream().map(ContainerRuntimeMetricSample::diskReadBytesPerSecond).toList()),
+                    averageDouble(bucket.stream().map(ContainerRuntimeMetricSample::diskWriteBytesPerSecond).toList())));
+        }
+        return result;
+    }
+
+    private List<RuntimeManagementBackendMetricSample> downsampleBackendSamples(
+            List<BackendRuntimeMetricSample> samples,
+            Instant from,
+            Instant to,
+            int maxPoints) {
+        if (samples.size() <= maxPoints) {
+            return samples.stream().map(this::backendMetricSample).toList();
+        }
+        List<List<BackendRuntimeMetricSample>> buckets = backendBuckets(samples, from, to, maxPoints);
+        List<RuntimeManagementBackendMetricSample> result = new ArrayList<>();
+        for (List<BackendRuntimeMetricSample> bucket : buckets) {
+            if (bucket.isEmpty()) {
+                continue;
+            }
+            BackendRuntimeMetricSample last = bucket.get(bucket.size() - 1);
+            result.add(new RuntimeManagementBackendMetricSample(
+                    last.sampledAt(),
+                    averageDouble(bucket.stream().map(BackendRuntimeMetricSample::cpuUsagePercent).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::memoryMaxBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::memoryUsedBytes).toList()),
+                    averageDouble(bucket.stream().map(BackendRuntimeMetricSample::memoryUsagePercent).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::diskMaxBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::diskUsedBytes).toList()),
+                    averageDouble(bucket.stream().map(BackendRuntimeMetricSample::diskUsagePercent).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmMemoryUsedBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmMemoryCommittedBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmMemoryMaxBytes).toList()),
+                    averageLong(bucket.stream().map(BackendRuntimeMetricSample::jvmGcPauseMillis).toList()),
+                    averageInteger(bucket.stream().map(BackendRuntimeMetricSample::jvmThreadsLive).toList())));
+        }
+        return result;
+    }
+
+    private List<List<ContainerRuntimeMetricSample>> containerBuckets(
+            List<ContainerRuntimeMetricSample> samples,
+            Instant from,
+            Instant to,
+            int maxPoints) {
+        List<List<ContainerRuntimeMetricSample>> buckets = emptyBuckets(maxPoints);
+        long bucketMillis = bucketMillis(from, to, maxPoints);
+        for (ContainerRuntimeMetricSample sample : samples) {
+            buckets.get(bucketIndex(sample.sampledAt(), from, bucketMillis, maxPoints)).add(sample);
+        }
+        return buckets;
+    }
+
+    private List<List<BackendRuntimeMetricSample>> backendBuckets(
+            List<BackendRuntimeMetricSample> samples,
+            Instant from,
+            Instant to,
+            int maxPoints) {
+        List<List<BackendRuntimeMetricSample>> buckets = emptyBuckets(maxPoints);
+        long bucketMillis = bucketMillis(from, to, maxPoints);
+        for (BackendRuntimeMetricSample sample : samples) {
+            buckets.get(bucketIndex(sample.sampledAt(), from, bucketMillis, maxPoints)).add(sample);
+        }
+        return buckets;
+    }
+
+    private <T> List<List<T>> emptyBuckets(int maxPoints) {
+        List<List<T>> buckets = new ArrayList<>(maxPoints);
+        for (int index = 0; index < maxPoints; index++) {
+            buckets.add(new ArrayList<>());
+        }
+        return buckets;
+    }
+
+    private long bucketMillis(Instant from, Instant to, int maxPoints) {
+        long spanMillis = Math.max(1, Duration.between(from, to).toMillis());
+        return Math.max(1, (long) Math.ceil((double) spanMillis / maxPoints));
+    }
+
+    private int bucketIndex(Instant sampledAt, Instant from, long bucketMillis, int maxPoints) {
+        long offset = Math.max(0, Duration.between(from, sampledAt).toMillis());
+        return (int) Math.min(maxPoints - 1L, offset / bucketMillis);
+    }
+
+    private RuntimeManagementContainerMetricSample containerMetricSample(ContainerRuntimeMetricSample sample) {
+        return new RuntimeManagementContainerMetricSample(
+                sample.sampledAt(),
+                sample.maxProcesses(),
+                sample.currentProcesses(),
+                sample.metricsSource(),
+                sample.cpuUsagePercent(),
+                sample.memoryMaxBytes(),
+                sample.memoryUsedBytes(),
+                sample.memoryUsagePercent(),
+                sample.diskReadBytesPerSecond(),
+                sample.diskWriteBytesPerSecond());
+    }
+
+    private RuntimeManagementBackendMetricSample backendMetricSample(BackendRuntimeMetricSample sample) {
+        return new RuntimeManagementBackendMetricSample(
+                sample.sampledAt(),
+                sample.cpuUsagePercent(),
+                sample.memoryMaxBytes(),
+                sample.memoryUsedBytes(),
+                sample.memoryUsagePercent(),
+                sample.diskMaxBytes(),
+                sample.diskUsedBytes(),
+                sample.diskUsagePercent(),
+                sample.jvmMemoryUsedBytes(),
+                sample.jvmMemoryCommittedBytes(),
+                sample.jvmMemoryMaxBytes(),
+                sample.jvmGcPauseMillis(),
+                sample.jvmThreadsLive());
+    }
+
+    private Double averageDouble(List<Double> values) {
+        List<Double> present = values.stream().filter(Objects::nonNull).toList();
+        if (present.isEmpty()) {
+            return null;
+        }
+        return present.stream().mapToDouble(Double::doubleValue).average().orElse(0);
+    }
+
+    private Long averageLong(List<Long> values) {
+        List<Long> present = values.stream().filter(Objects::nonNull).toList();
+        if (present.isEmpty()) {
+            return null;
+        }
+        return Math.round(present.stream().mapToLong(Long::longValue).average().orElse(0));
+    }
+
+    private Integer averageInteger(List<Integer> values) {
+        List<Integer> present = values.stream().filter(Objects::nonNull).toList();
+        if (present.isEmpty()) {
+            return null;
+        }
+        return (int) Math.round(present.stream().mapToInt(Integer::intValue).average().orElse(0));
+    }
+
     private static OpencodeProcessHeartbeatStore disabledHeartbeatStore() {
         return new OpencodeProcessHeartbeatStore() {
-            @Override public boolean enabled() { return false; }
             @Override public void recordBackendHeartbeat(BackendProcessId backendProcessId, Instant heartbeatAt) { }
+            @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) { }
+            @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { }
             @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
+            @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.of(); }
+            @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
             @Override public Set<BackendProcessId> liveBackendProcessIds() { return Set.of(); }
             @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
             @Override public void cleanupExpiredHeartbeats() { }
@@ -224,5 +473,42 @@ public class RuntimeManagementQueryService {
             @Override public boolean existsByUsername(String username) { return false; }
             @Override public boolean existsByUnifiedAuthId(String unifiedAuthId) { return false; }
         };
+    }
+
+    private static final class BackendMetricAccumulator {
+        private final Instant sampledAt;
+        private Double cpuUsagePercent;
+        private Long memoryMaxBytes;
+        private Long memoryUsedBytes;
+        private Double memoryUsagePercent;
+        private Long diskMaxBytes;
+        private Long diskUsedBytes;
+        private Double diskUsagePercent;
+        private Long jvmMemoryUsedBytes;
+        private Long jvmMemoryCommittedBytes;
+        private Long jvmMemoryMaxBytes;
+        private Long jvmGcPauseMillis;
+        private Integer jvmThreadsLive;
+
+        private BackendMetricAccumulator(Instant sampledAt) {
+            this.sampledAt = sampledAt;
+        }
+
+        private BackendRuntimeMetricSample toSample() {
+            return new BackendRuntimeMetricSample(
+                    sampledAt,
+                    cpuUsagePercent,
+                    memoryMaxBytes,
+                    memoryUsedBytes,
+                    memoryUsagePercent,
+                    diskMaxBytes,
+                    diskUsedBytes,
+                    diskUsagePercent,
+                    jvmMemoryUsedBytes,
+                    jvmMemoryCommittedBytes,
+                    jvmMemoryMaxBytes,
+                    jvmGcPauseMillis,
+                    jvmThreadsLive);
+        }
     }
 }

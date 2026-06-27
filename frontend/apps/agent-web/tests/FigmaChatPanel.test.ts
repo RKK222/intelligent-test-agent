@@ -2,6 +2,14 @@ import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import FigmaChatPanel from "../src/components/FigmaChatPanel.vue";
 
+// MarkdownView 内部用 150ms 定时器 + 动态 import 异步渲染正文，
+// 单测同步断言时会停在“渲染中…”占位。这里桩成同步直出 source，
+// 让历史消息正文断言稳定且与渲染时序解耦。
+const markdownViewStub = {
+  props: ["source"],
+  template: '<div class="ta-md-view">{{ source }}</div>',
+};
+
 describe("FigmaChatPanel", () => {
   it("sends the trimmed prompt and clears the composer when the process is ready", async () => {
     const wrapper = mount(FigmaChatPanel, {
@@ -47,7 +55,8 @@ describe("FigmaChatPanel", () => {
           { id: "a2", messageId: "a2", role: "assistant", text: "第二轮助手回答", createdAt: "2026-06-25T09:03:00.000Z" }
         ],
         processStatus: { status: "READY", initializable: false, message: "ready" }
-      }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
     const text = wrapper.text();
@@ -77,7 +86,8 @@ describe("FigmaChatPanel", () => {
           { id: "a1", messageId: "a1", role: "assistant", text: "在的，有什么可以帮你的？", createdAt: "2026-06-25T09:01:00.000Z" }
         ],
         processStatus: { status: "READY", initializable: false, message: "ready" }
-      }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
     expect(wrapper.findAll(".figma-chat-assistant")).toHaveLength(1);

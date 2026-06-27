@@ -116,7 +116,25 @@ const diffContextParts = ref<PromptPart[]>([]);
 const editorSelection = ref<EditorSelectionContext | undefined>(undefined);
 const bottomMode = ref<"run" | "terminal">("run");
 const bottomDrawerOpen = ref(false);
+const leftPanelOpen = ref(true);
 const rightPanelOpen = ref(true);
+const savedLeftPanelOpen = ref(true);
+const savedRightPanelOpen = ref(true);
+
+watch(centerMode, (newMode, oldMode) => {
+  if (newMode === "system") {
+    if (oldMode !== "system") {
+      savedLeftPanelOpen.value = leftPanelOpen.value;
+      savedRightPanelOpen.value = rightPanelOpen.value;
+    }
+    leftPanelOpen.value = false;
+    rightPanelOpen.value = false;
+  } else if (oldMode === "system") {
+    leftPanelOpen.value = savedLeftPanelOpen.value;
+    rightPanelOpen.value = savedRightPanelOpen.value;
+  }
+});
+
 const selectedAppId = ref<string | undefined>(undefined);
 const readonlySessionReason = ref("");
 const modelPickerOpen = ref(false);
@@ -1988,14 +2006,18 @@ async function handleLogout() {
   <FigmaShell
     :workspace-name="selectedWorkspace?.name"
     :bottom-open="bottomDrawerOpen"
+    :show-left-panel="leftPanelOpen"
     :show-right-panel="rightPanelOpen"
     :apps="shellApps"
     :selected-app-id="selectedAppId"
     :current-user-name="authStore.currentUser?.username"
     :current-user-role-labels="authStore.currentUser?.roleLabels"
-    @toggle-left-panel="() => {}"
+    :opencode-process-status="opencodeProcessStatus"
+    :opencode-process-loading="opencodeProcessQuery.isFetching.value"
+    @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
     @select-app="handleSelectApp"
+    @refresh-opencode-process="() => { void opencodeProcessQuery.refetch(); }"
     @logout="handleLogout"
   >
     <template #activity>
@@ -2018,7 +2040,6 @@ async function handleLogout() {
             title="系统管理"
             @click="
               centerMode = 'system';
-              rightPanelOpen = false;
               bottomDrawerOpen = false;
             "
           >
