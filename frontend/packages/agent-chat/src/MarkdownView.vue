@@ -142,7 +142,7 @@ onBeforeUnmount(() => {
   color: var(--ta-chat-text);
   font-family: inherit;
   font-size: 13px;
-  line-height: 1.35;
+  line-height: 1.32;
   letter-spacing: -0.01em;
 }
 
@@ -154,14 +154,14 @@ onBeforeUnmount(() => {
 .markdown-body :deep(h6) {
   color: var(--ta-chat-text);
   border-color: var(--ta-chat-border);
-  margin: 0.6em 0 0.4em;
+  margin: 6px 0 2px !important;
 }
 
 .markdown-body :deep(h1) {
-  font-size: 1.15em;
+  font-size: 1.12em;
 }
 .markdown-body :deep(h2) {
-  font-size: 1.08em;
+  font-size: 1.06em;
 }
 .markdown-body :deep(h3) {
   font-size: 1.02em;
@@ -173,17 +173,17 @@ onBeforeUnmount(() => {
 }
 
 .markdown-body :deep(p) {
-  margin: 4px 0 !important;
+  margin: 2px 0 !important;
 }
 
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
-  margin: 4px 0 !important;
+  margin: 2px 0 !important;
   padding-left: 0;
 }
 
 .markdown-body :deep(li) {
-  margin: 2px 0 !important;
+  margin: 1px 0 !important;
 }
 
 .markdown-body :deep(a) {
@@ -196,22 +196,22 @@ onBeforeUnmount(() => {
   color: var(--ta-chat-muted);
   border-left: 3px solid var(--ta-chat-border);
   padding: 0.2em 0.8em;
-  margin: 0.4em 0;
+  margin: 2px 0 !important;
   background: var(--ta-chat-process-bg, transparent);
   border-radius: 0 4px 4px 0;
 }
 
 .markdown-body :deep(table) {
   border-collapse: collapse;
-  margin: 6px 0 !important;
-  line-height: 1.3 !important;
+  margin: 4px 0 !important;
+  line-height: 1.25 !important;
   font-size: 12px;
 }
 
 .markdown-body :deep(table th),
 .markdown-body :deep(table td) {
   border: 1px solid var(--ta-chat-border);
-  padding: 3px 6px !important;
+  padding: 2px 5px !important;
 }
 
 .markdown-body :deep(table tr:nth-child(2n)) {
@@ -222,7 +222,7 @@ onBeforeUnmount(() => {
   background: var(--ta-chat-border);
   height: 1px;
   border: 0;
-  margin: 0.6em 0;
+  margin: 4px 0 !important;
 }
 
 .markdown-body :deep(code) {
@@ -237,12 +237,12 @@ onBeforeUnmount(() => {
   background: var(--ta-chat-detail-bg);
   border: 1px solid var(--ta-chat-border);
   border-radius: 6px;
-  padding: 8px 10px;
-  margin: 0.4em 0;
+  padding: 6px 8px !important;
+  margin: 4px 0 !important;
   overflow: auto;
   max-height: 320px;
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.4;
 }
 
 .markdown-body :deep(pre code) {

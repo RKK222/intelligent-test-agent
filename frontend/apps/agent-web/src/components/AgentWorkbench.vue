@@ -704,7 +704,6 @@ const initializeOpencodeProcessMutation = useMutation({
   mutationFn: () => api.initializeMyOpencodeProcess(),
   onSuccess: (status) => {
     queryClient.setQueryData(["runtime", "opencode-process", "me"], status);
-    feedback.value = { kind: "success", title: "opencode 进程已初始化", description: status.baseUrl ?? status.message };
   },
   onError: (error) => {
     feedback.value = errorFeedback("初始化 opencode 进程失败", error);

@@ -4,15 +4,17 @@
 
 ### 2026-06-28 - 对话框拉宽、用户气泡底色圆角优化与字间距紧凑化
 
-- Why: 优化首页 Agent 对话面板的视觉与排版。用户要求：(1) 将首页右侧对话框的默认宽度拉宽；(2) 给用户发出的对话框加一个浅灰底色及圆角样式（对齐截图图 1）；(3) 将智能体输出的每行字间距与行高调少/调紧凑一点，以改善原本略显松散的布局（尤其是出现表格时的间距）。
+- Why: 优化首页 Agent 对话面板的视觉与排版，响应用户进一步反馈：(1) 将首页右侧对话框的默认宽度拉宽；(2) 给用户发出的对话框加一个浅灰底色及圆角样式（对齐截图图 1）；(3) 智能体输出各元素行距排版依然较松散，需全方位收紧以彻底紧凑排版；(4) 去除 opencode 进程初始化成功时重复弹出的左下角 feedback toast 通知，仅保留右上角绿色状态提示。
 - What:
   - `FigmaShell.vue`：将右侧对话面板默认宽度 `rightPanelWidth` 变量值由 `380` 变更为 `450`（对应拉宽默认宽度）。
   - `globals.css`：将 `--ta-chat-user-bg` 颜色由 `#dddddd` 修改为浅灰色 `#f2f2f2`，并在 Tailwind v4 的 `@theme` 内映射为 `--color-ta-chat-user-bg: var(--ta-chat-user-bg);`。
   - `AssistantThread.vue` / `FigmaChatPanel.vue`：将用户消息气泡样式由 `transparent` / `rounded-md` 变更为具有大圆角的亮灰色气泡（`.figma-chat-bubble--user` 新增 `background: var(--ta-chat-user-bg); border-radius: 12px`），完美在各聊天面板呈现图 1 的底色气泡效果。
+  - `AgentWorkbench.vue`：移除 `initializeOpencodeProcessMutation` 成功回调中对 `feedback.value` 赋值成功 toast 的调用，避免弹出多余重复通知。
   - `AnswerPart.vue` / `PlainAnswer.vue` / `ReasoningPartBlock.vue`：将智能体回答及思考的容器、raw 文本 block 上的行高类由 `leading-6`、`leading-[1.55]` 统一修改为 `leading-[1.4] tracking-[-0.01em]`。
-  - `MarkdownView.vue`：修改 `.markdown-body` 样式的行高 `line-height: 1.35;`、段落 `margin: 4px 0 !important;`、列表 `margin: 2px 0 !important;`，特别将表格 `table` 的 margin 缩短、行高改至极密 `1.3`，并将单元格 `padding` 压紧至 `3px 6px !important`，以极佳的排版紧凑度渲染大篇幅与大表格。
-- How: 纯 CSS/Tailwind 样式参数微调与 UI 属性默认值调整，保留全部业务逻辑。
-- Result: 首页聊天面板默认展现更宽大舒服；用户气泡呈亮色圆润浅灰底色（对比头像更柔和，完美对齐图 1）；智能体最终回答、Markdown 文本以及大表格间距布局非常紧凑精致。前端 lint 校验与 Vitest 全部通过。
+  - `MarkdownView.vue`：修改 `.markdown-body` 样式的行高 `line-height: 1.32;`、段落 `margin: 2px 0 !important;`、列表 `margin: 2px 0 !important;` 且 `li` 设为 `1px 0 !important;`，特别将表格 `table` 的 margin 缩短、行高改至极密 `1.25` 且字号为 `12px`，并将单元格 `padding` 压紧至 `2px 5px !important`，代码块 `pre` padding/margin 亦做等比紧凑。
+- How: 纯 CSS/Tailwind 样式参数微调与 UI 属性及逻辑回调默认值调整，保留全部业务逻辑。
+- Result: 首页聊天面板默认展现更宽大舒服；用户气泡呈亮色圆润浅灰底色（对比头像更柔和，完美对齐图 1）；智能体最终回答、Markdown 文本以及大表格、列表间距布局彻底紧凑精致。前端已初始化 toast 去除，右上角进程状态提示绿卡完美保留。前端 lint 校验与 Vitest 全部通过。
+
 
 
 ### 2026-06-27 - 运行管理服务器指标历史连续性复核与类型修复
