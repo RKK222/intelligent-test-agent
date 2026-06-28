@@ -70,7 +70,8 @@
 - Why: 本地 macOS 开发环境无法创建工作空间，报错 `/data: Read-only file system`。`ParameterPlatform` 枚举只有 WINDOWS、LINUX、ALL，没有 MACOS，导致 macOS 被当作 Linux 处理，使用 `/data/...` 路径。
 - What:
   - `ParameterPlatform.java`：添加 `MACOS` 枚举值，修改 `current()` 方法识别 macOS（`osName.startsWith("mac")`）。
-  - Flyway `V20260628223000__add_macos_platform_support.sql`：修改数据库约束添加 `macos`，添加 macOS 平台的 `common_parameters` 配置（本地开发路径 `.tmp/dev-services/...`）。
+  - Flyway `V20260628223000__add_macos_platform_support.sql`：修改数据库约束添加 `macos`，添加 macOS 平台的 `common_parameters` 配置。
+  - 数据库配置：macOS 本地开发路径需要使用**绝对路径**，因为后端进程工作目录在 `backend` 子目录下，相对路径会解析错误。
 - How: 枚举扩展 + 数据库约束修改 + 平台配置插入；未改业务逻辑或 API。
 - Result: macOS 本地开发环境可正常使用本地路径，不再尝试访问 `/data`。
 
