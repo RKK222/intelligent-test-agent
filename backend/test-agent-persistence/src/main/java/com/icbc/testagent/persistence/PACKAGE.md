@@ -25,7 +25,7 @@
 - `JdbcRunEventRepository`：实现 RunEvent append-only 追加和增量读取；并发追加时依赖 `(run_id, seq)` 唯一约束冲突后重试来保持 seq 单调且不重复。
 - `JdbcExecutionNodeRepository`：实现执行节点保存和可路由节点查询。
 - `JdbcRoutingDecisionRepository`：实现路由决策保存和查询。
-- `JdbcOpencodeProcessManagementRepository`：实现 opencode 用户进程管理拓扑、用户进程、用户绑定持久化，以及运行管理页拓扑列表、连接列表、进程分页筛选和绑定关联查询。
+- `JdbcOpencodeProcessManagementRepository`：实现 opencode 用户进程管理拓扑、用户进程、用户绑定持久化，以及运行管理页拓扑列表、连接列表、进程分页筛选和绑定关联查询；读取历史用户进程时会兼容 `updated_at < created_at` 的脏数据并按 `created_at` 归一化，避免旧记录阻断状态查询和重新初始化。
 - `JdbcCommonParameterRepository`：通用参数存量 JDBC 实现，不再作为生产 Spring Bean，仅保留旧集成测试直接构造。
 - `JdbcWorkspaceCreateOperationRepository`：实现设置页创建应用工作空间进度记录，供配置管理 HTTP 轮询接口读取。
 - `JdbcScheduledTaskRepository`：实现定时任务定义、用户计划和运行记录持久化，支持 due task、pending run 和管理页分页筛选查询。
@@ -85,7 +85,7 @@
 - RunEvent 测试必须覆盖同一 run 的并发 append，防止 stream 事件和取消事件同时落库时重复分配 seq。
 - SessionMessage/Run 测试必须覆盖 token/cost 字段、parts_json、远端 messageId 幂等查询和 active-run 查询。
 - ExecutionNode 测试必须覆盖可路由节点过滤和排序，防止不可用或满载节点被派发。
-- OpencodeProcessManagement 测试必须覆盖拓扑读写、V17 loopback 种子清理、健康容器查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
+- OpencodeProcessManagement 测试必须覆盖拓扑读写、V17 loopback 种子清理、历史用户进程时间戳归一化、健康容器查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。
 - ScheduledTask 测试必须覆盖任务定义、用户计划、运行记录、分页筛选和来源字段读写。
 - CommonParameter 和 WorkspaceCreateOperation 测试必须覆盖平台优先级、默认路径 seed、进度步骤更新、成功/失败状态和按用户隔离查询。
 - MyBatis 试点测试必须覆盖 XML mapper 查询和更新；源码约束测试必须阻止新增 JDBC SQL 和 MyBatis 注解 SQL。

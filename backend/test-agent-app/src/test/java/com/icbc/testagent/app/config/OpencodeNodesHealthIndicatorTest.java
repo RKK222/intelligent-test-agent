@@ -50,6 +50,22 @@ class OpencodeNodesHealthIndicatorTest {
                 });
     }
 
+    @Test
+    void socketManagerModeSkipsLegacyConfiguredNodeProbe() {
+        TestAgentRuntimeProperties properties = propertiesWithNode("node_test_opencode", "http://127.0.0.1:4096");
+        properties.getOpencode().getManagerControl().setGatewayMode("socket");
+        properties.getOpencode().setLocalDirect(false);
+        OpencodeClientFacade facade = org.mockito.Mockito.mock(OpencodeClientFacade.class);
+        when(facade.health(any()))
+                .thenReturn(Mono.error(new IllegalStateException("connection failed")));
+
+        var health = new OpencodeNodesHealthIndicator(properties, facade).health();
+
+        assertThat(health.getStatus()).isEqualTo(Status.UP);
+        assertThat(health.getDetails()).containsEntry("mode", "manager-socket");
+        assertThat(health.getDetails()).containsEntry("skipped", true);
+    }
+
     @SuppressWarnings("unchecked")
     private static List<Map<String, Object>> nodeDetails(Map<String, Object> details) {
         return (List<Map<String, Object>>) details.get("nodes");
@@ -57,6 +73,7 @@ class OpencodeNodesHealthIndicatorTest {
 
     private static TestAgentRuntimeProperties propertiesWithNode(String nodeId, String baseUrl) {
         TestAgentRuntimeProperties properties = new TestAgentRuntimeProperties();
+        properties.getOpencode().setLocalDirect(true);
         TestAgentRuntimeProperties.Node node = new TestAgentRuntimeProperties.Node();
         node.setId(nodeId);
         node.setBaseUrl(baseUrl);

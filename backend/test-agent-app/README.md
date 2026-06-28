@@ -32,7 +32,7 @@
 - `config.DatabaseMigrationRunner`：启动时执行 `classpath:db/migration`，确保空库先完成 Flyway migration。
 - `config.ExecutionNodeSeeder`：从配置 seed opencode execution node。
 - `config.OpencodeManagerControlConfig`：绑定 manager 控制面 token、后端实例直连地址、服务器 IP 文件、5 秒 Java 心跳、10 秒 Redis 快照 TTL 和命令超时；Redis 心跳启用时启动后端实例注册/心跳，未启用时跳过该 runner，运行管理和 manager 控制面仍在业务入口 fail fast。生产 socket 模式会把当前服务器 IPv4 写入 `.serverip` 供 Go manager 读取，并把 `test-agent.opencode.local-direct` / `local-direct-base-url` 绑成 runtime 的 `LocalDirectSettings`（`local` profile 默认开启短路）。
-- `config.OpencodeNodesHealthIndicator`、`config.RedisHealthIndicator`：运行态健康检查。
+- `config.OpencodeNodesHealthIndicator`、`config.RedisHealthIndicator`：运行态健康检查；manager/socket 用户进程模式下跳过旧固定 opencode node 探测，避免旧 IP 或空端口把整体 Actuator health 误判为 DOWN。
 - `config.RuntimeJsonConfig`：应用运行态共享 Jackson 配置。
 - `log4j2-spring.xml`：Log4j2 控制台日志配置，默认输出 `key=value` 结构化字段并对 message、thread 和 traceId 做 CRLF 编码。
 - `backend/Dockerfile`：只构建并运行 `test-agent-app` Java 进程，不包含 PostgreSQL、Redis 或 opencode server。
@@ -58,7 +58,7 @@
 - `TestAgentRuntimePropertiesBindingTest` 覆盖默认值、local/test/prod profile 配置绑定、目录选择根、终端安全阈值、Redis、scheduler 默认关闭、opencode 节点、manager 控制面 server-ip-file、5 秒心跳、10 秒 TTL、gateway-mode 与本地短路开关（`local-direct` / `local-direct-base-url`）。
 - `ServerIpFileWriterTest` 覆盖 `.serverip` 父目录创建、旧内容覆盖和单行 IPv4 写入。
 - `ExecutionNodeSeederTest` 覆盖启动时从配置 seed opencode execution node。
-- `OpencodeNodesHealthIndicatorTest` 覆盖全部节点可用时 UP、节点异常时 DOWN，且健康详情只暴露安全错误类别。
+- `OpencodeNodesHealthIndicatorTest` 覆盖全部节点可用时 UP、节点异常时 DOWN、manager/socket 模式跳过旧固定节点探测，且健康详情只暴露安全错误类别。
 - `RedisHealthIndicatorTest` 覆盖 Redis 必需依赖的 TCP 健康检查。
 - `LoggingFrameworkBindingTest` 覆盖运行态使用 Log4j2 作为 SLF4J 实际绑定。
 

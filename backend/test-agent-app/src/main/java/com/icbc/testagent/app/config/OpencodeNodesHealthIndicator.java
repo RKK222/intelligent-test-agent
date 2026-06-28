@@ -41,6 +41,12 @@ public class OpencodeNodesHealthIndicator implements HealthIndicator {
      */
     @Override
     public Health health() {
+        if (usesManagerSocketProcesses()) {
+            return Health.up()
+                    .withDetail("mode", "manager-socket")
+                    .withDetail("skipped", true)
+                    .build();
+        }
         List<Map<String, Object>> nodes = new ArrayList<>();
         boolean allAvailable = true;
         for (TestAgentRuntimeProperties.Node configured : properties.getOpencode().getNodes()) {
@@ -84,5 +90,14 @@ public class OpencodeNodesHealthIndicator implements HealthIndicator {
                 now,
                 now,
                 "trace_healthcheck");
+    }
+
+    /**
+     * manager/socket 模式下用户进程由 manager 动态创建，配置节点只保留给 static-token fallback，
+     * 不再用它决定整体 Actuator health，避免旧 IP 或空端口导致重启后健康检查误报 DOWN。
+     */
+    private boolean usesManagerSocketProcesses() {
+        return "socket".equalsIgnoreCase(properties.getOpencode().getManagerControl().getGatewayMode())
+                && !properties.getOpencode().isLocalDirect();
     }
 }

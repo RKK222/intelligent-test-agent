@@ -108,23 +108,31 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
                     instant(rs, "updated_at"),
                     rs.getString("trace_id"));
 
-    private final RowMapper<OpencodeServerProcess> processRowMapper = (rs, rowNum) -> new OpencodeServerProcess(
-            new OpencodeProcessId(rs.getString("process_id")),
-            new UserId(rs.getString("user_id")),
-            new LinuxServerId(rs.getString("linux_server_id")),
-            new OpencodeContainerId(rs.getString("container_id")),
-            rs.getInt("port"),
-            longObject(rs.getObject("pid")),
-            rs.getString("base_url"),
-            OpencodeServerProcessStatus.valueOf(rs.getString("status")),
-            rs.getString("session_path"),
-            rs.getString("config_path"),
-            instant(rs, "started_at"),
-            instant(rs, "last_health_check_at"),
-            rs.getString("health_message"),
-            instant(rs, "created_at"),
-            instant(rs, "updated_at"),
-            rs.getString("trace_id"));
+    private final RowMapper<OpencodeServerProcess> processRowMapper = (rs, rowNum) -> {
+        Instant createdAt = instant(rs, "created_at");
+        Instant updatedAt = instant(rs, "updated_at");
+        if (updatedAt != null && createdAt != null && updatedAt.isBefore(createdAt)) {
+            // 兼容历史脏数据，避免旧进程记录阻断用户重新初始化 opencode。
+            updatedAt = createdAt;
+        }
+        return new OpencodeServerProcess(
+                new OpencodeProcessId(rs.getString("process_id")),
+                new UserId(rs.getString("user_id")),
+                new LinuxServerId(rs.getString("linux_server_id")),
+                new OpencodeContainerId(rs.getString("container_id")),
+                rs.getInt("port"),
+                longObject(rs.getObject("pid")),
+                rs.getString("base_url"),
+                OpencodeServerProcessStatus.valueOf(rs.getString("status")),
+                rs.getString("session_path"),
+                rs.getString("config_path"),
+                instant(rs, "started_at"),
+                instant(rs, "last_health_check_at"),
+                rs.getString("health_message"),
+                createdAt,
+                updatedAt,
+                rs.getString("trace_id"));
+    };
 
     private final RowMapper<UserOpencodeProcessBinding> bindingRowMapper =
             (rs, rowNum) -> new UserOpencodeProcessBinding(

@@ -2,6 +2,7 @@ package com.icbc.testagent.opencode.runtime.process.socket;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import java.util.Objects;
@@ -21,7 +22,9 @@ public class ManagerControlMessageCodec {
     public ManagerControlMessageCodec(ObjectMapper objectMapper) {
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null")
                 .copy()
-                .findAndRegisterModules();
+                .findAndRegisterModules()
+                // Go manager 使用 time.Time 解码控制面时间字段，必须发送 RFC3339 字符串而不是 Jackson 时间戳。
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 
     /**

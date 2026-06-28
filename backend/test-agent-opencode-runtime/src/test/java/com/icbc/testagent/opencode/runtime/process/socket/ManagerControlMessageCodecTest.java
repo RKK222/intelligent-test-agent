@@ -2,6 +2,7 @@ package com.icbc.testagent.opencode.runtime.process.socket;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.List;
@@ -85,12 +86,30 @@ class ManagerControlMessageCodecTest {
                         Instant.parse("2026-06-24T00:00:00Z"))),
                 "trace_1234567890abcdef");
 
-        ManagerControlMessage decoded = codec.decode(codec.encode(response));
+        String encoded = codec.encode(response);
+        ManagerControlMessage decoded = codec.decode(encoded);
 
         assertThat(decoded.type()).isEqualTo(ManagerControlProtocol.TYPE_BACKEND_LIST_RESPONSE);
         assertThat(decoded.backendEndpoints()).singleElement().satisfies(endpoint -> {
             assertThat(endpoint.backendProcessId()).isEqualTo("bjp_1234567890abcdef");
             assertThat(endpoint.webSocketUrl()).isEqualTo("ws://10.8.0.12:8080/api/internal/platform/opencode-runtime/manager/ws");
         });
+        assertThat(readLastHeartbeatAt(encoded).isTextual()).isTrue();
+        assertThat(readLastHeartbeatAt(encoded).asText()).isEqualTo("2026-06-24T00:00:00Z");
+    }
+
+    /**
+     * Go manager 使用 time.Time 解码后端列表，控制面时间字段必须保持 RFC3339 字符串。
+     */
+    private JsonNode readLastHeartbeatAt(String encoded) {
+        try {
+            return new ObjectMapper()
+                    .readTree(encoded)
+                    .path("backendEndpoints")
+                    .get(0)
+                    .path("lastHeartbeatAt");
+        } catch (Exception exception) {
+            throw new AssertionError("后端列表响应 JSON 解析失败", exception);
+        }
     }
 }

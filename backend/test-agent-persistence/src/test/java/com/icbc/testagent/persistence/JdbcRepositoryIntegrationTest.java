@@ -1081,6 +1081,52 @@ class JdbcRepositoryIntegrationTest {
     }
 
     @Test
+    void opencodeProcessRepositoryNormalizesLegacyProcessUpdatedAtBeforeCreatedAt() {
+        users.save(processUser("usr_process_user", "process-user"));
+        opencodeProcesses.saveLinuxServer(linuxServer());
+        opencodeProcesses.saveContainer(opencodeContainer());
+
+        Instant createdAt = NOW.plusSeconds(3600);
+        Instant invalidUpdatedAt = NOW;
+        jdbcClient.sql("""
+                        insert into opencode_server_processes(
+                            process_id, user_id, linux_server_id, container_id, port, pid, base_url,
+                            status, session_path, config_path, started_at, last_health_check_at,
+                            health_message, trace_id, created_at, updated_at
+                        )
+                        values (
+                            :processId, :userId, :linuxServerId, :containerId, :port, :pid, :baseUrl,
+                            :status, :sessionPath, :configPath, :startedAt, :lastHealthCheckAt,
+                            :healthMessage, :traceId, :createdAt, :updatedAt
+                        )
+                        """)
+                .param("processId", "ocp_legacy_bad_timestamp")
+                .param("userId", "usr_process_user")
+                .param("linuxServerId", "10.8.0.12")
+                .param("containerId", "ctr_01")
+                .param("port", 4096)
+                .param("pid", 12345L)
+                .param("baseUrl", "http://10.8.0.12:4096")
+                .param("status", OpencodeServerProcessStatus.RUNNING.name())
+                .param("sessionPath", "/data/opencode/session/4096")
+                .param("configPath", "/data/opencode/.config/opencode/")
+                .param("startedAt", Timestamp.from(NOW))
+                .param("lastHealthCheckAt", Timestamp.from(NOW))
+                .param("healthMessage", "legacy")
+                .param("traceId", "trace_legacy_bad_ts")
+                .param("createdAt", Timestamp.from(createdAt))
+                .param("updatedAt", Timestamp.from(invalidUpdatedAt))
+                .update();
+
+        OpencodeServerProcess process = opencodeProcesses
+                .findOpencodeServerProcessById(new OpencodeProcessId("ocp_legacy_bad_timestamp"))
+                .orElseThrow();
+
+        assertThat(process.createdAt()).isEqualTo(createdAt);
+        assertThat(process.updatedAt()).isEqualTo(createdAt);
+    }
+
+    @Test
     void opencodeProcessManagementPagesAndFiltersServerProcesses() {
         users.save(processUser("usr_process_user", "process-user"));
         users.save(processUser("usr_process_second", "process-second"));
