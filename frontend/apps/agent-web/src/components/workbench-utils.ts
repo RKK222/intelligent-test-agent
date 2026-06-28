@@ -259,13 +259,26 @@ export function historyItems(run: Run | null, sessions: Session[]) {
 }
 
 export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMessage[] {
-  return messages.map((message) => ({
-    id: message.messageId,
-    messageId: message.messageId,
-    role: message.role === "USER" ? "user" : "assistant",
-    text: message.content,
-    createdAt: message.createdAt
-  }));
+  return messages.map((message) => {
+    const role = message.role === "USER" ? "user" : "assistant";
+    if (role === "user") {
+      return {
+        id: message.messageId,
+        messageId: message.messageId,
+        role: "user",
+        text: message.content,
+        createdAt: message.createdAt
+      };
+    }
+    return {
+      id: message.messageId,
+      messageId: message.messageId,
+      role: "assistant",
+      text: message.content,
+      parts: message.parts ?? [],
+      createdAt: message.createdAt
+    };
+  });
 }
 
 export function modelValue(model: ModelInfo) {

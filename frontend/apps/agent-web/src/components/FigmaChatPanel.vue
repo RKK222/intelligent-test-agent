@@ -1464,8 +1464,8 @@ function onCompositionEnd() {
 <template>
   <div class="figma-chat-root">
     <header class="figma-chat-header">
-      <h2 class="figma-chat-title">{{ title || '生成测试案例' }}</h2>
-      <div class="figma-chat-header-actions">
+      <div class="figma-chat-header-left">
+        <h2 class="figma-chat-title">{{ title || '生成测试案例' }}</h2>
         <button
           type="button"
           class="figma-chat-header-btn"
@@ -2429,16 +2429,16 @@ function onCompositionEnd() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 16px;
+  padding: 0 56px 0 16px;
   height: 48px;
   border-bottom: 1px solid var(--ta-border);
   background: var(--ta-surface);
   user-select: none;
 }
-.figma-chat-header-actions {
+.figma-chat-header-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
 }
 .figma-chat-header-btn {
   display: flex;
@@ -2582,16 +2582,6 @@ function onCompositionEnd() {
 }
 
 /* ---- Header ---- */
-.figma-chat-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 36px;
-  flex-shrink: 0;
-  padding: 0 6px 0 14px;
-  background: #fff;
-  border-bottom: 1px solid #ddd;
-}
 
 .figma-chat-title {
   font-size: 14px;
