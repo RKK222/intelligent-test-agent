@@ -56,6 +56,14 @@
 - What: 后端补齐 Session/Run/用户消息归因字段，新增 `ai_message_feedbacks`、`runs.agent_id/model_id`、hourly/daily rollup、duration histogram、watermark/job/DB lock 表；新增反馈领域对象、MyBatis mapper、服务和 `/messages/{messageId}/feedback` API；新增 analytics rollup runner、查询服务、SUPER_ADMIN analytics API 与 CSV 导出。前端在助手消息下方新增满意/不满意反馈入口，系统管理新增“运营分析”页，覆盖筛选、概览、趋势、热力、排行、满意度、异常明细和导出；同步 API、事件、数据库、backend/frontend README。
 - How: 主链路只写事实数据，统计由定时 rollup 持 DB 锁重算最近 hourly/daily，API 只读 rollup 并返回 freshness/stale 状态；MyBatis XML 承载新增 SQL；满意度按 `positive/(positive+negative)`，无反馈返回 `null`，p95 用 histogram 近似；CSV/看板不输出 cost/costUsd。提交时需要继续排除既有无关脏文件：`frontend/apps/agent-web/vite.config.ts`、`frontend/packages/diff-viewer/*`、`frontend/packages/editor/*`。
 - Result: 后端完整 `mvn -q test` 通过；在临时 stash 无关脏文件、只保留本次 staged 内容的提交态下，前端相关包 typecheck 通过，workspace 级 `corepack pnpm test` 27 个文件 169/169 通过。带回既有未暂存 editor Monaco 改动时曾因 mock 缺少 `loadMonaco` 出现 unhandled rejection，已确认不纳入本次提交。
+### 2026-06-28 - 修复 SSH key RSA 解密失败与版本库英文名称为空问题
+
+- Why: 个人设置页添加 SSH key 报错 "RSA decryption failed"；后台持续报错"版本库英文名称不能为空"。
+- What:
+  - `RsaKeyService.java`：显式指定 OAEP MGF1 使用 SHA-256，与前端 Web Crypto API `RSA-OAEP (hash: "SHA-256")` 保持一致。Java `OAEPWithSHA-256AndMGF1Padding` 名称有误导性，其 MGF1 默认使用 SHA-1，而 Web Crypto API 的 MGF1 与主哈希一致（SHA-256），导致前后端不匹配。
+  - 数据库 `code_repositories` 表：补充三个版本库的 `english_name` 字段（intelligent-test-agent、fcoss-main、mimoagent）。
+- How: 修改后端解密参数配置，补全数据库缺失字段；未改 API、前端代码或数据库结构。
+- Result: SSH key 前端加密后后端可正确解密；后台工作空间副本同步任务不再报错。
 
 ### 2026-06-28 - 完成态历史助手快照与实时 user part 误拼修复
 
