@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * Session HTTP Controller，保持请求/响应 DTO 与领域模型分离。
@@ -152,13 +154,15 @@ public class SessionController {
      * 分页列出会话消息，返回值在边界层转换为稳定的 API DTO。
      */
     @GetMapping({"/api/sessions/{sessionId}/messages", "/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages"})
-    public ApiResponse<PageResponse<RuntimeDtos.SessionMessageResponse>> listMessages(
+    public Mono<ApiResponse<PageResponse<RuntimeDtos.SessionMessageResponse>>> listMessages(
             @PathVariable String sessionId,
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
-        return ApiResponse.ok(RuntimeDtos.messagePage(sessionService.listMessages(
-                new SessionId(sessionId), RuntimeApiSupport.pageRequest(page, size), traceId)), traceId);
+        // 历史消息查询会同步刷新远端快照，必须整体 offload，避免在 Reactor 事件线程调用 block()。
+        return Mono.fromCallable(() -> ApiResponse.ok(RuntimeDtos.messagePage(sessionService.listMessages(
+                        new SessionId(sessionId), RuntimeApiSupport.pageRequest(page, size), traceId)), traceId))
+                .subscribeOn(Schedulers.boundedElastic());
     }
 }

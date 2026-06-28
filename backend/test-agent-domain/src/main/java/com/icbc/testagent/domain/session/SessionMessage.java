@@ -101,7 +101,16 @@ public record SessionMessage(
         Objects.requireNonNull(messageId, "messageId must not be null");
         Objects.requireNonNull(sessionId, "sessionId must not be null");
         Objects.requireNonNull(role, "role must not be null");
-        content = DomainValidation.requireText(content, "content");
+        // assistant 的工具步骤可能没有正文，但 partsJson 仍需落库供历史文档和文件变更恢复。
+        if (role == SessionMessageRole.ASSISTANT
+                && content != null
+                && content.isBlank()
+                && partsJson != null
+                && !partsJson.isBlank()) {
+            content = "";
+        } else {
+            content = DomainValidation.requireText(content, "content");
+        }
         createdAt = DomainValidation.requireInstant(createdAt, "createdAt");
         traceId = DomainValidation.requireText(traceId, "traceId");
         if (agentId != null) {

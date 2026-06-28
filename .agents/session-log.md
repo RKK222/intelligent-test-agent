@@ -2,6 +2,16 @@
 
 ## Entries
 
+### 2026-06-28 - 完成态历史助手快照与实时 user part 误拼修复
+
+- Why: 真实页面复现完成态 Session `#89d405` 只剩用户消息；数据库对应会话只有 USER 行。后端日志同时显示历史查询在 Reactor `parallel-*` 线程调用 `.block()` 必然失败。进一步直连 opencode 发现 `/api/session/{id}/message` 只返回 `agent-switched/model-switched`，完整 user/assistant 消息实际来自 `/session/{id}/message`；真实新任务还确认 user 的实时 `message.updated + message.part.updated` 会被 reducer 误建成 assistant，从而把提示词拼入回答并表现为多余空行/重复内容。
+- What:
+  - `GeneratedOpencodeSdkGateway` 改读标准 `/session/{sessionID}/message` envelope；因 generated `Message` union 把 user 收窄错误，仍只在 client 适配器内使用 generated `ApiClient` + 稳定 JSON Map，不手改 generated SDK。
+  - 历史消息 Controller 将包含远端刷新和同步仓储访问的调用整体 offload 到 bounded-elastic；终态快照只把 text part 写入 assistant 正文，不再混入 reasoning/tool output。无 text 的工具/文件步骤允许以空正文 + `partsJson` 保存，保留历史文档和文件变更恢复信息。
+  - SSE 初始恢复只重放 assistant；前端 reducer 把 opencode 后续重发的远端 user message/part 合并回当前乐观 user 消息，不再创建 assistant 或污染最终回答。
+- How: 先用真实数据库、后端日志、标准/旧消息端点和浏览器 DOM 定位，再分别补 gateway、快照正文、Reactor offload、assistant-only recovery、user part reducer 的失败用例；未修改 `.env.local`，未变更 API 路径/字段、事件类型、数据库结构或鉴权策略。
+- Result: 后端 18 模块 `mvn test` 全部 `BUILD SUCCESS`；前端 Vitest 22 文件 138/138、全 workspace typecheck、生产 build通过；标题/历史文档定向 Playwright 4/4。使用 `.env.test` 重启三服务后，真实任务“请只回复：最终空行验证通过”运行完成只显示 assistant“最终空行验证通过”，刷新并从历史切回仍显示该输出和 `SUCCEEDED`。修复前已经完成且从未落下 assistant DB 快照的旧会话，若原远端 session 已不可路由，无法凭空补回历史正文；修复后的任务会在完成时落库。
+
 ### 2026-06-28 - 历史文档恢复、首条消息标题与对话空行修复（纠正前次完成结论）
 
 - Why: 前次记录宣称历史文档和空行已解决，但真实页面仍无法看到历史生成文档，Session 标题仍是 `Agent HH:mm:ss`，连续助手快照仍会在边界多插换行；同时前次把 delta 事件全局豁免去重，违反 `docs/api/event-stream.md` 中 transient 也按稳定 `eventId` 去重的契约。

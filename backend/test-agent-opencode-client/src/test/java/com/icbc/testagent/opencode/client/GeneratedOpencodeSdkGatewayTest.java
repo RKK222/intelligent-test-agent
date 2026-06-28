@@ -325,26 +325,43 @@ class GeneratedOpencodeSdkGatewayTest {
     }
 
     @Test
-    void gatewayReadsSessionMessagesUsingGeneratedMessagesApi() throws Exception {
+    void gatewayReadsSessionMessagesUsingGeneratedSessionApi() throws Exception {
         AtomicReference<RequestSnapshot> request = new AtomicReference<>();
         HttpServer server = startServer(exchange -> {
             request.set(snapshot(exchange));
             respond(exchange, 200, "application/json", """
-                    {
-                      "data": [
-                        {
+                    [
+                      {
+                        "info": {
                           "id": "msg_remote1234567890abcdef",
-                          "type": "assistant",
+                          "sessionID": "ses_remote1234567890abcdef",
+                          "role": "assistant",
+                          "time": {"created": 1781846400000},
+                          "parentID": "msg_user1234567890abcdef",
+                          "modelID": "claude-sonnet-4-5",
+                          "providerID": "anthropic",
+                          "mode": "build",
                           "agent": "build",
-                          "model": {"id": "claude-sonnet-4-5", "providerID": "anthropic"},
-                          "content": [
-                            {"type": "text", "id": "part_text_1", "text": "hello"}
-                          ],
-                          "time": {"created": 1781846400000}
-                        }
-                      ],
-                      "cursor": {"previous": "previous_cursor", "next": "next_cursor"}
-                    }
+                          "path": {"cwd": "/tmp/demo", "root": "/tmp/demo"},
+                          "cost": 0,
+                          "tokens": {
+                            "input": 1,
+                            "output": 2,
+                            "reasoning": 0,
+                            "cache": {"read": 0, "write": 0}
+                          }
+                        },
+                        "parts": [
+                          {
+                            "id": "part_text_1",
+                            "sessionID": "ses_remote1234567890abcdef",
+                            "messageID": "msg_remote1234567890abcdef",
+                            "type": "text",
+                            "text": "hello"
+                          }
+                        ]
+                      }
+                    ]
                     """);
         });
 
@@ -353,18 +370,18 @@ class GeneratedOpencodeSdkGatewayTest {
                     .sessionMessages(node(server), REMOTE_SESSION_ID, 100, "asc", null, TRACE_ID)
                     .block(Duration.ofSeconds(5));
 
-            assertThat(result.previousCursor()).isEqualTo("previous_cursor");
-            assertThat(result.nextCursor()).isEqualTo("next_cursor");
+            assertThat(result.previousCursor()).isNull();
+            assertThat(result.nextCursor()).isNull();
             assertThat(result.messages()).singleElement().satisfies(message -> {
                 assertThat(message.message()).containsEntry("id", "msg_remote1234567890abcdef");
+                assertThat(message.message()).containsEntry("role", "assistant");
                 assertThat(message.parts()).singleElement().satisfies(part ->
                         assertThat(part).containsEntry("text", "hello"));
             });
             assertThat(request.get().method()).isEqualTo("GET");
-            assertThat(request.get().path()).isEqualTo("/api/session/" + REMOTE_SESSION_ID + "/message");
+            assertThat(request.get().path()).isEqualTo("/session/" + REMOTE_SESSION_ID + "/message");
             assertThat(request.get().query()).containsEntry("limit", List.of("100"));
-            assertThat(request.get().query()).containsEntry("order", List.of("asc"));
-            assertThat(request.get().query()).doesNotContainKey("cursor");
+            assertThat(request.get().query()).doesNotContainKeys("directory", "workspace", "before");
             assertThat(request.get().traceId()).isEqualTo(TRACE_ID);
         } finally {
             server.stop(0);

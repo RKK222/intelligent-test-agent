@@ -99,6 +99,46 @@ class RunMessageRecoveryServiceTest {
     }
 
     @Test
+    void recoveryDoesNotReplayUserPartsAsAssistantParts() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.result = new OpencodeSessionMessagesResult(
+                List.of(
+                        new OpencodeSessionMessage(
+                                Map.of("id", "msg_user_1", "role", "user"),
+                                List.of(Map.of(
+                                        "id", "part_user_1",
+                                        "messageID", "msg_user_1",
+                                        "type", "text",
+                                        "text", "用户提示词"))),
+                        new OpencodeSessionMessage(
+                                Map.of("id", "msg_assistant_1", "role", "assistant"),
+                                List.of(Map.of(
+                                        "id", "part_assistant_1",
+                                        "messageID", "msg_assistant_1",
+                                        "type", "text",
+                                        "text", "助手回答")))),
+                null,
+                null);
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        List<RunEventSsePayload> payloads = service.recover(RUN_ID, "trace_1234567890abcdef")
+                .collectList()
+                .block(Duration.ofSeconds(2));
+
+        assertThat(payloads).extracting(RunEventSsePayload::type)
+                .containsExactly("message.updated", "message.part.updated");
+        Map<?, ?> messagePayload = (Map<?, ?>) payloads.get(0).payload().get("message");
+        Map<?, ?> partPayload = (Map<?, ?>) payloads.get(1).payload().get("part");
+        assertThat(messagePayload.get("id")).isEqualTo("msg_assistant_1");
+        assertThat(partPayload.get("text")).isEqualTo("助手回答");
+    }
+
+    @Test
     void recoverySkipsWhenSessionHasNoOpencodeMapping() {
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         RunMessageRecoveryService service = new RunMessageRecoveryService(

@@ -3,6 +3,7 @@ package com.icbc.testagent.domain.session;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.icbc.testagent.domain.run.TokenUsage;
 import com.icbc.testagent.domain.user.UserId;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
@@ -37,6 +38,27 @@ class SessionMessageTest {
                 "trace_1234567890abcdef"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("content");
+    }
+
+    @Test
+    void assistantMessageAllowsBlankContentWhenStructuredPartsExist() {
+        SessionMessage message = new SessionMessage(
+                new SessionMessageId("msg_1234567890abcdef"),
+                new SessionId("ses_1234567890abcdef"),
+                SessionMessageRole.ASSISTANT,
+                "",
+                NOW,
+                "trace_1234567890abcdef",
+                null,
+                "opencode",
+                "msg_remote1234567890abcdef",
+                "[{\"type\":\"tool\",\"id\":\"part_1\"}]",
+                TokenUsage.empty(),
+                null,
+                NOW);
+
+        assertThat(message.content()).isEmpty();
+        assertThat(message.partsJson()).contains("\"type\":\"tool\"");
     }
 
     @Test

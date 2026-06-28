@@ -240,6 +240,16 @@ function upsertPart(messages: AgentMessage[], event: RunEvent) {
   if (!messageId || !partId) {
     return messages;
   }
+  const exactMessageIndex = messages.findIndex(
+    (message) => message.role !== "card" && (message.messageId === messageId || message.id === messageId)
+  );
+  const exactMessage = exactMessageIndex >= 0 ? messages[exactMessageIndex] : undefined;
+  if (exactMessage?.role === "user") {
+    const userText = text(raw.text) ?? text(raw.content);
+    return userText === undefined
+      ? messages
+      : replaceOrAppendMessage(messages, exactMessageIndex, { ...exactMessage, text: userText });
+  }
   const exact = findAssistantMessage(messages, messageId);
   const lastIdx = exact.message ? -1 : findLastAssistantInCurrentTurn(messages);
   const assistant: Extract<AgentMessage, { role: "assistant" }> =
@@ -287,16 +297,28 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
   const raw = record(payload.message) ?? record(payload.info) ?? payload;
   const messageId = text(raw.messageId) ?? text(raw.messageID) ?? text(raw.id) ?? `message-${event.seq}`;
   const role = text(raw.role) === "user" ? "user" : "assistant";
-  const index = messages.findIndex((item) => item.id === messageId || (item.role !== "card" && item.messageId === messageId));
+  const incomingText = text(raw.text) ?? text(raw.content);
+  let index = messages.findIndex((item) => item.id === messageId || (item.role !== "card" && item.messageId === messageId));
+  if (role === "user" && index < 0) {
+    const pendingUserIndex = findLastUserInCurrentTurn(messages);
+    const pendingUser = pendingUserIndex >= 0 ? messages[pendingUserIndex] : undefined;
+    if (pendingUser?.role === "user" && (incomingText === undefined || pendingUser.text === incomingText)) {
+      index = pendingUserIndex;
+    }
+  }
   const existing = index >= 0 ? messages[index] : undefined;
   const base = {
     id: messageId,
     messageId,
-    text: text(raw.text) ?? text(raw.content) ?? "",
+    text: incomingText ?? (existing && existing.role !== "card" ? existing.text : ""),
     createdAt: text(raw.createdAt) ?? event.occurredAt,
   };
   const message: AgentMessage = role === "user"
-    ? { ...base, role: "user" }
+    ? {
+        ...base,
+        role: "user",
+        parts: existing?.role === "user" ? existing.parts : undefined
+      }
     : { ...base, role: "assistant", parts: existing && existing.role === "assistant" ? existing.parts : undefined };
   return replaceOrAppendMessage(messages, index, message);
 }
@@ -315,6 +337,15 @@ function findLastAssistantInCurrentTurn(messages: AgentMessage[]): number {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     if (messages[i].role === "assistant") return i;
     if (messages[i].role === "user") return -1;
+  }
+  return -1;
+}
+
+// opencode 会在平台已写入乐观 user 消息后再次发送远端 user message；当前轮内复用该消息，避免重复气泡。
+function findLastUserInCurrentTurn(messages: AgentMessage[]): number {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role === "assistant") return -1;
+    if (messages[i].role === "user") return i;
   }
   return -1;
 }

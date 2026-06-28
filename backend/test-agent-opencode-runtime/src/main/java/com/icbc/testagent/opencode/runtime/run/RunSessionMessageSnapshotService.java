@@ -166,8 +166,9 @@ public class RunSessionMessageSnapshotService {
             return Optional.empty();
         }
         String remoteMessageId = firstText(projected.message(), "messageID", "messageId", "id").orElse(null);
-        String content = content(projected).orElse(null);
-        if (content == null) {
+        String serializedParts = partsJson(projected.parts()).orElse(null);
+        Optional<String> projectedContent = content(projected);
+        if (projectedContent.isEmpty() && serializedParts == null) {
             return Optional.empty();
         }
         Optional<SessionMessage> existing = sessionMessageRepository.findBySessionIdAndRemoteMessageId(sessionId, remoteMessageId);
@@ -177,13 +178,13 @@ public class RunSessionMessageSnapshotService {
                 existing.map(SessionMessage::messageId).orElseGet(() -> new SessionMessageId(RuntimeIdGenerator.messageId())),
                 sessionId,
                 SessionMessageRole.ASSISTANT,
-                content,
+                projectedContent.orElse(""),
                 existing.map(SessionMessage::createdAt).orElse(now),
                 traceId,
                 run == null ? existing.map(SessionMessage::runId).orElse(null) : run.runId(),
                 agentId,
                 remoteMessageId,
-                partsJson(projected.parts()).orElse(null),
+                serializedParts,
                 usage.tokenUsage(),
                 usage.costUsd(),
                 now);
@@ -199,14 +200,13 @@ public class RunSessionMessageSnapshotService {
     private Optional<String> content(AgentSessionMessage message) {
         List<String> texts = new ArrayList<>();
         for (Map<String, Object> part : message.parts()) {
-            textFromValue(part.get("text"))
-                    .or(() -> textFromValue(part.get("content")))
-                    .or(() -> textFromValue(part.get("delta")))
-                    .or(() -> mapValue(part.get("state")).flatMap(state ->
-                            textFromValue(state.get("output"))
-                                    .or(() -> textFromValue(state.get("text")))
-                                    .or(() -> textFromValue(state.get("content")))))
-                    .ifPresent(texts::add);
+            String partType = firstText(part, "type", "partType").orElse("");
+            if ("text".equalsIgnoreCase(partType)) {
+                textFromValue(part.get("text"))
+                        .or(() -> textFromValue(part.get("content")))
+                        .or(() -> textFromValue(part.get("delta")))
+                        .ifPresent(texts::add);
+            }
         }
         if (!texts.isEmpty()) {
             return Optional.of(String.join("\n", texts));

@@ -55,6 +55,56 @@ describe("agent-chat runtime reducer", () => {
     ]);
   });
 
+  it("keeps live user message parts out of the assistant response", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "请只回复：空行验证通过",
+      createdAt: "2026-06-19T00:00:00Z"
+    });
+    const withRemoteUser = reduceAgentChatRuntime(submitted, {
+      type: "event",
+      event: event("message.updated", {
+        message: { id: "msg_user_1", role: "user" }
+      })
+    });
+    const withRemoteUserPart = reduceAgentChatRuntime(withRemoteUser, {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_user_1",
+        part: {
+          id: "part_user_1",
+          messageID: "msg_user_1",
+          type: "text",
+          text: "请只回复：空行验证通过"
+        }
+      })
+    });
+    const withAssistant = reduceAgentChatRuntime(withRemoteUserPart, {
+      type: "event",
+      event: event("message.updated", {
+        message: { id: "msg_assistant_1", role: "assistant" }
+      })
+    });
+    const completed = reduceAgentChatRuntime(withAssistant, {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_assistant_1",
+        part: {
+          id: "part_assistant_1",
+          messageID: "msg_assistant_1",
+          type: "text",
+          text: "空行验证通过"
+        }
+      })
+    });
+
+    expect(completed.messages).toMatchObject([
+      { role: "user", messageId: "msg_user_1", text: "请只回复：空行验证通过" },
+      { role: "assistant", messageId: "msg_assistant_1", text: "空行验证通过" }
+    ]);
+    expect(completed.messages).toHaveLength(2);
+  });
+
   it("normalizes opencode tool state from nested message part updates", () => {
     const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",

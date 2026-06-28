@@ -130,6 +130,10 @@ public class RunMessageRecoveryService {
         List<RunEventSsePayload> events = new ArrayList<>();
         for (AgentSessionMessage message : messages) {
             Map<String, Object> messagePayload = normalizeMessage(message.message());
+            if (!"assistant".equalsIgnoreCase(text(messagePayload.get("role")))) {
+                // 平台已在 Run 启动前保存 user 消息；重复回放 user part 会被前端当作 assistant part 拼进正文。
+                continue;
+            }
             String messageId = text(messagePayload.get("id"));
             events.add(transientPayload(
                     runId,

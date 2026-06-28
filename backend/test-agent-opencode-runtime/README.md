@@ -20,7 +20,7 @@
 - `UserOpencodeProcessAssignmentService` 对已有 binding 的用户仍优先在原 `linux_server_id` 上重建；当原服务器没有当前后端已连接的健康容器时，会 fallback 到当前后端任意健康容器，并在初始化成功后把 binding 迁移到新 `linuxServerId`，避免本地换 IP、换测试库或 manager 迁移后旧用户被旧 binding 锁死。端口选择按数据库唯一约束 `(linux_server_id, port)` 在同服务器全局避让所有历史进程行，包含其它容器和非运行态脏数据。
 - `UserOpencodeProcessAssignmentService` 创建或合成用户 opencode 进程时，session/config 路径优先读取 `common_parameters.OPENCODE_SESSION_DIR` 和 `common_parameters.OPENCODE_PUBLIC_CONFIG_DIR`；缺失时回退 `/data/.testagent/agent-opencode/.session/` 和 `/data/.testagent/agent-opencode/.config/opencode/`。
 - RunEvent 持久化策略、实时发布和 agent projected messages 恢复。
-- Run 终态/取消后的 session_messages 快照持久化，包含 assistant 输出、message parts 和 token/cost。
+- Run 终态/取消后的 `session_messages` 快照持久化，包含 assistant 可见 text、完整 message parts 和 token/cost；reasoning/tool output 不拼入回答正文，无 text 的工具步骤以空正文加结构化 parts 保存。
 - 从完成态 `write`/`edit`/`apply_patch` tool part 派生运行中 `diff.proposed`，供前端实时追踪文件变化和行数统计。
 - Run Diff 查询、接受和拒绝。
 - agent runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth；opencode 原路径作为当前标准适配形态。
@@ -41,14 +41,14 @@
 
 ## 测试覆盖
 
-- `RunApplicationServiceTest` 覆盖 Run 创建、通用 binding 保存/复用、远端 session 懒创建/复用、用户进程节点 upsert、用户进程 binding 不一致自动重建、sticky node、prompt parts、终态事件、终态消息快照/token 持久化、瞬态消息事件、tool part 实时 Diff 派生和取消编排。
+- `RunApplicationServiceTest` 覆盖 Run 创建、通用 binding 保存/复用、远端 session 懒创建/复用、用户进程节点 upsert、用户进程 binding 不一致自动重建、sticky node、prompt parts、终态事件、终态消息快照/token 持久化、reasoning/tool output 与可见正文隔离、瞬态消息事件、tool part 实时 Diff 派生和取消编排。
 - `UserOpencodeProcessAssignmentServiceTest` 覆盖未绑定状态、READY 复用、头像菜单未分配/运行中/未运行服务状态、同服务器重建、换 IP 后 fallback 到全局健康容器、端口选择、同服务器历史脏行端口避让、manager 不可用、通用参数 session/config 路径读取、绑定/节点投影，以及本地短路模式（`local-direct=true`）下 `status` / `initialize` / `requireReadyProcess` 完全跳过 database 与 gateway 直返合成 READY 的行为。
 - `WorkspaceFileRoutingServiceTest` 覆盖同服务器 workspace 通过 Redis 后端快照路由到目标后端、workspace 与 agent 不同服务器时拒绝、本地旧 `linux_server_id` 安全回绑，以及旧服务器仍在线时不回绑。
 - `RuntimeManagementQueryServiceTest` 覆盖运行管理 Redis 快照聚合、活跃进程过滤、用户名筛选、绑定状态合并、空数据、分钟级时间窗口、容器/后端指标历史降采样，以及同一 `linuxServerId` 下 Java 重启后的服务器指标连续查询。
 - `ManagerControlMessageCodecTest`、`ManagerControlApplicationServiceTest`、`ManagerConnectionRegistryTest`、`SocketOpencodeProcessManagerGatewayTest`、`BackendJavaProcessLifecycleServiceTest`、`LocalOpencodeProcessManagerGatewayTest`、`OpencodeManagerConfigSyncServiceTest` 覆盖 manager 控制面消息、Redis manager 心跳、后端列表响应、连接路由、命令等待、后端实例心跳、本地 manager-backend 连接自举、local 网关的 HTTP 健康检查与 start 占位，以及最大进程数 `configUpdate` 下发/广播/参数过滤。
 - `RunDiffApplicationServiceTest` 覆盖 Diff 事件优先读取、agent runtime Diff fallback、接受/拒绝动作和缺失 messageID 冲突。
 - `RunEventPersistencePolicyTest` 覆盖消息投影只走实时通道、关键状态事件持久化、tool payload 清洗和 rawPayload 移除。
-- `RunMessageRecoveryServiceTest` 覆盖 agent projected messages 恢复为 transient SSE snapshot，以及未绑定/远端失败时降级为空。
+- `RunMessageRecoveryServiceTest` 覆盖 agent session messages 中 assistant 恢复为 transient SSE snapshot、user part 不重复回放，以及未绑定/远端失败时降级为空。
 - `SessionApplicationServiceTest` 覆盖 Session 创建前 Workspace 校验、归档隐藏、标题/置顶更新、消息追加默认 role 和消息列表 DB fallback。
 - `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
 - `ModelCatalogApplicationServiceTest` 覆盖企业内模型 seed、`DeepSeek-V4-Flash-W8A8` 默认模型和 opencode provider 配置同步请求。
@@ -73,7 +73,7 @@
 ## 后续 AI 编码指引
 
 新增与会话、运行、事件、Diff、permission/question、runtime catalog、terminal 相关业务编排时改这里；新增 agent 适配器应放在 `test-agent-agent-runtime`。Controller 和 URL 映射必须放在 `test-agent-api`。
-高频文本 delta、message projection 和大段 tool/bash 输出不应写入 `run_events`；消息内容刷新恢复优先从 agent projected messages 拉取并 upsert 到 `session_messages`，agent 不可用时回退数据库快照。Run 状态、Diff、permission/question 等平台关键事件继续依赖 durable RunEvent。
+高频文本 delta、message projection 和大段 tool/bash 输出不应写入 `run_events`；消息内容刷新恢复优先从 agent 标准 session messages 拉取并 upsert 到 `session_messages`，历史查询的远端刷新必须在 bounded-elastic 线程执行，agent 不可用时回退数据库快照。Run 状态、Diff、permission/question 等平台关键事件继续依赖 durable RunEvent。
 生产 `OpencodeProcessManagerGateway` 通过 manager WebSocket 控制面下发 `start`/`health` 命令；无连接、超时或异常必须转换为平台 opencode 错误码。测试仍可使用 fake gateway 固定初始化和健康检查结果。
 `OpencodeManagerConfigSyncService` 把通用参数表中的全局 `OPENCODE_MANAGER_MAX_PROCESSES`（`platform=all`）经控制面 WebSocket 下发给已连接 manager：manager 注册成功后立即向该容器补推一帧 `configUpdate`；前端修改参数触发 `CommonParameterUpdatedEvent`，由 `ManagerConnectionRegistry.broadcast` 推给当前实例持有的所有连接（全互联拓扑下可触达全部 manager）。参数缺失或非数字时跳过下发，manager 继续使用 env 兜底；`opencode_containers.max_processes` 仍由 manager heartbeat 回报的生效值同步。
 runtime 代理入口有认证用户时必须通过 `AgentRuntimeTargetResolver` 使用用户专属 opencode 进程；无用户主体的 static-token 或本地兼容调用才允许使用固定 `execution_nodes` fallback。

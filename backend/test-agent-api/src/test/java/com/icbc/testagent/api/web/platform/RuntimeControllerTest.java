@@ -49,12 +49,14 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.test.web.reactive.server.WebTestClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 class RuntimeControllerTest {
 
@@ -614,6 +616,33 @@ class RuntimeControllerTest {
                 .expectBody()
                 .jsonPath("$.data.items[0].title").isEqualTo("Demo session")
                 .jsonPath("$.data.items[0].pinned").isEqualTo(true);
+    }
+
+    @Test
+    void sessionControllerOffloadsMessageSnapshotRefreshFromReactorThread() {
+        SessionApplicationService service = org.mockito.Mockito.mock(SessionApplicationService.class);
+        AtomicBoolean calledOnNonBlockingThread = new AtomicBoolean(true);
+        when(service.listMessages(
+                        eq(new SessionId("ses_1234567890abcdef")),
+                        any(),
+                        eq("trace_1234567890abcdef")))
+                .thenAnswer(ignored -> {
+                    calledOnNonBlockingThread.set(Schedulers.isInNonBlockingThread());
+                    return new PageResponse<>(List.of(), 1, 20, 0);
+                });
+        WebTestClient client = WebTestClient.bindToController(new SessionController(service))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.get()
+                .uri("/api/sessions/ses_1234567890abcdef/messages?page=1&size=20")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.items").isArray();
+
+        assertThat(calledOnNonBlockingThread).isFalse();
     }
 
     private static org.springframework.web.server.WebFilter authenticatedUserFilter() {

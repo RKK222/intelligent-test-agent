@@ -3,18 +3,15 @@ package com.icbc.testagent.opencode.client;
 import com.example.opencode.sdk.ApiClient;
 import com.example.opencode.sdk.api.EventApi;
 import com.example.opencode.sdk.api.GlobalApi;
-import com.example.opencode.sdk.api.MessagesApi;
 import com.example.opencode.sdk.api.SessionApi;
 import com.example.opencode.sdk.model.SnapshotFileDiff;
-import com.example.opencode.sdk.model.SessionMessage;
-import com.example.opencode.sdk.model.SessionMessagesResponse;
-import com.example.opencode.sdk.model.SessionsResponseCursor;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.observability.TraceConstants;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -319,13 +316,35 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String cursor,
             String traceId) {
         ApiClient apiClient = apiClient(node, traceId);
-        return new MessagesApi(apiClient)
-                .v2SessionMessages(
-                        opencodeSessionId,
-                        BigDecimal.valueOf(limit),
-                        optionalText(order),
-                        optionalText(cursor))
-                .map(this::toSessionMessagesResult);
+        ParameterizedTypeReference<List<Map<String, Object>>> returnType = new ParameterizedTypeReference<>() {
+        };
+        Map<String, Object> pathParams = new HashMap<>();
+        pathParams.put("sessionID", opencodeSessionId);
+        MultiValueMap<String, String> queryParams = new LinkedMultiValueMap<>();
+        queryParams.putAll(apiClient.parameterToMultiValueMap(null, "limit", limit));
+        queryParams.putAll(apiClient.parameterToMultiValueMap(null, "before", optionalText(cursor)));
+        HttpHeaders headerParams = new HttpHeaders();
+        MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<>();
+        MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<>();
+        List<MediaType> accepts = apiClient.selectHeaderAccept(new String[]{"application/json"});
+        MediaType contentType = apiClient.selectHeaderContentType(new String[]{});
+        // generated Message/Part union 会把 user 误收窄成 assistant，使用同一 generated ApiClient 读取稳定原始 JSON。
+        return apiClient.invokeAPI(
+                        "/session/{sessionID}/message",
+                        HttpMethod.GET,
+                        pathParams,
+                        queryParams,
+                        null,
+                        headerParams,
+                        cookieParams,
+                        formParams,
+                        accepts,
+                        contentType,
+                        new String[]{},
+                        returnType)
+                .bodyToMono(returnType)
+                .defaultIfEmpty(List.of())
+                .map(messages -> toSessionMessagesResult(messages, order));
     }
 
     /**
@@ -374,50 +393,67 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
     }
 
     /**
-     * 将 generated messages 响应转换为平台结果，并保留分页 cursor 的不透明字符串。
+     * 将标准 session message envelope 转换为平台结果，并按调用方要求调整顺序。
      */
-    private OpencodeSessionMessagesResult toSessionMessagesResult(SessionMessagesResponse response) {
-        List<OpencodeSessionMessage> messages = response == null || response.getData() == null
-                ? List.of()
-                : response.getData().stream()
-                        .map(this::toSessionMessage)
-                        .toList();
-        SessionsResponseCursor cursor = response == null ? null : response.getCursor();
-        return new OpencodeSessionMessagesResult(
-                messages,
-                cursor == null ? null : cursor.getPrevious(),
-                cursor == null ? null : cursor.getNext());
+    private OpencodeSessionMessagesResult toSessionMessagesResult(
+            List<Map<String, Object>> response,
+            String order) {
+        List<OpencodeSessionMessage> messages = new ArrayList<>();
+        for (Map<String, Object> envelope : response) {
+            Map<String, Object> info = stringObjectMap(envelope.get("info"));
+            if (info.isEmpty()) {
+                continue;
+            }
+            messages.add(toSessionMessage(info, envelope.get("parts")));
+        }
+        if ("desc".equalsIgnoreCase(order)) {
+            Collections.reverse(messages);
+        }
+        return new OpencodeSessionMessagesResult(List.copyOf(messages), null, null);
     }
 
     /**
      * 规范化单条 session message，补充 messageID/messageId 和 role 兼容字段。
      */
-    private OpencodeSessionMessage toSessionMessage(SessionMessage message) {
-        Map<String, Object> raw = objectMapper.convertValue(message, new TypeReference<Map<String, Object>>() {
-        });
+    private OpencodeSessionMessage toSessionMessage(Map<String, Object> raw, Object rawParts) {
         LinkedHashMap<String, Object> normalized = new LinkedHashMap<>(raw);
         String messageId = stringValue(raw.get("id"));
         if (messageId != null) {
             normalized.putIfAbsent("messageID", messageId);
             normalized.putIfAbsent("messageId", messageId);
         }
-        String type = stringValue(raw.get("type"));
-        normalized.putIfAbsent("role", "user".equals(type) ? "user" : "assistant");
-        return new OpencodeSessionMessage(immutableWithoutNulls(normalized), partsFromContent(raw, messageId));
+        return new OpencodeSessionMessage(
+                immutableWithoutNulls(normalized),
+                partsFromList(rawParts, messageId));
     }
 
     /**
-     * 从 opencode message content 中抽取 part 列表，非列表内容按空列表处理。
+     * 从 opencode message envelope 中抽取 part 列表，非列表内容按空列表处理。
      */
-    private List<Map<String, Object>> partsFromContent(Map<String, Object> raw, String messageId) {
-        Object content = raw.get("content");
-        if (!(content instanceof List<?> list)) {
+    private List<Map<String, Object>> partsFromList(Object rawParts, String messageId) {
+        if (!(rawParts instanceof List<?> list)) {
             return List.of();
         }
         return list.stream()
                 .filter(item -> item instanceof Map<?, ?>)
                 .map(item -> normalizePart((Map<?, ?>) item, messageId))
                 .toList();
+    }
+
+    /**
+     * 把原始 JSON 对象安全收敛为字符串键 Map。
+     */
+    private Map<String, Object> stringObjectMap(Object value) {
+        if (!(value instanceof Map<?, ?> raw)) {
+            return Map.of();
+        }
+        LinkedHashMap<String, Object> result = new LinkedHashMap<>();
+        raw.forEach((key, item) -> {
+            if (key instanceof String name && item != null) {
+                result.put(name, item);
+            }
+        });
+        return Map.copyOf(result);
     }
 
     /**

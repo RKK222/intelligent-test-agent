@@ -408,22 +408,42 @@ class RunApplicationServiceTest {
         FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         facade.sessionMessagesResult = new OpencodeSessionMessagesResult(
-                List.of(new OpencodeSessionMessage(
-                        Map.of(
-                                "id", "msg_remote_1234567890abcdef",
-                                "type", "assistant",
-                                "role", "assistant",
-                                "cost", new BigDecimal("0.25000000"),
-                                "tokens", Map.of(
-                                        "input", 11,
-                                        "output", 12,
-                                        "reasoning", 3,
-                                        "cache", Map.of("read", 4, "write", 5))),
-                        List.of(Map.of(
-                                "id", "part_1",
-                                "messageID", "msg_remote_1234567890abcdef",
-                                "type", "text",
-                                "text", "assistant answer")))),
+                List.of(
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_remote_tools_1234567890abcdef",
+                                        "type", "assistant",
+                                        "role", "assistant"),
+                                List.of(
+                                        Map.of(
+                                                "id", "part_reasoning",
+                                                "messageID", "msg_remote_tools_1234567890abcdef",
+                                                "type", "reasoning",
+                                                "text", "内部推理不应进入回答"),
+                                        Map.of(
+                                                "id", "part_tool",
+                                                "messageID", "msg_remote_tools_1234567890abcdef",
+                                                "type", "tool",
+                                                "tool", "bash",
+                                                "state", Map.of(
+                                                        "status", "completed",
+                                                        "output", "line 1\n\n\nline 2")))),
+                        new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_remote_1234567890abcdef",
+                                        "type", "assistant",
+                                        "role", "assistant",
+                                        "cost", new BigDecimal("0.25000000"),
+                                        "tokens", Map.of(
+                                                "input", 11,
+                                                "output", 12,
+                                                "reasoning", 3,
+                                                "cache", Map.of("read", 4, "write", 5))),
+                                List.of(Map.of(
+                                        "id", "part_1",
+                                        "messageID", "msg_remote_1234567890abcdef",
+                                        "type", "text",
+                                        "text", "assistant answer")))),
                 null,
                 null);
         facade.streamEvents = command -> Flux.just(new RunEventDraft(
@@ -446,7 +466,7 @@ class RunApplicationServiceTest {
         Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
 
         awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
-        awaitMessageCount(messages, 2);
+        awaitMessageCount(messages, 3);
         TokenUsage expectedUsage = new TokenUsage(11L, 12L, 3L, 4L, 5L);
         assertThat(service.getRun(run.runId()).tokenUsage()).isEqualTo(expectedUsage);
         assertThat(service.getRun(run.runId()).costUsd()).isEqualByComparingTo("0.25000000");
@@ -454,7 +474,13 @@ class RunApplicationServiceTest {
             assertThat(user.role()).isEqualTo(com.icbc.testagent.domain.session.SessionMessageRole.USER);
             assertThat(user.runId()).isEqualTo(run.runId());
         });
-        assertThat(messages.saved.get(1)).satisfies(assistant -> {
+        assertThat(messages.saved.get(1)).satisfies(toolSnapshot -> {
+            assertThat(toolSnapshot.role()).isEqualTo(com.icbc.testagent.domain.session.SessionMessageRole.ASSISTANT);
+            assertThat(toolSnapshot.content()).isEmpty();
+            assertThat(toolSnapshot.partsJson()).contains("\"part_tool\"");
+            assertThat(toolSnapshot.partsJson()).contains("line 1\\n\\n\\nline 2");
+        });
+        assertThat(messages.saved.get(2)).satisfies(assistant -> {
             assertThat(assistant.role()).isEqualTo(com.icbc.testagent.domain.session.SessionMessageRole.ASSISTANT);
             assertThat(assistant.runId()).isEqualTo(run.runId());
             assertThat(assistant.agentId()).isEqualTo("opencode");

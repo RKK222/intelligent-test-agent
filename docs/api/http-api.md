@@ -954,7 +954,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-`GET /api/sessions/{sessionId}/messages` 会先在存在 agent binding 时尝试读取当前 agent projected messages 并 upsert 到 `session_messages`；如果 opencode 进程不可用、超时或远端 session 不存在，接口回退返回数据库快照，不向前端暴露 generated SDK DTO。
+`GET /api/sessions/{sessionId}/messages` 会先在存在 agent binding 时，从 bounded-elastic 线程读取当前 agent 标准 session messages 并 upsert 到 `session_messages`；如果 opencode 进程不可用、超时或远端 session 不存在，接口回退返回数据库快照，不向前端暴露 generated SDK DTO。assistant 的 `content` 只保存可见 text part，不混入 reasoning 或 tool output；仅包含工具/文件 parts 的 assistant 消息允许 `content=""`，结构化内容仍由 `parts` 返回。
 
 `SessionMessageResponse` 基础字段：`messageId`、`sessionId`、`role`、`content`、`createdAt`。当前 role 使用 `USER`、`ASSISTANT`、`SYSTEM`。
 
@@ -1361,7 +1361,7 @@ Base URL：`/api/internal/platform/scheduler-management`
 - Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt_async` 请求体。
 
 启动流程会先校验当前认证用户是否已有 `READY` opencode 进程；未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run。校验通过后追加用户消息，创建 `PENDING` Run，并使用当前用户进程投影出的 `executionNodeId = "node_" + processId` 和 `baseUrl = http://{linuxServerId}:{port}` 作为本次运行目标。若 `(sessionId, agentId)` 的既有 `agent_session_bindings` 指向的节点不是当前用户进程节点，后端会重新创建远端 session 并覆盖绑定；旧 `sessions.opencode_*` 字段只作为 `opencode` 兼容回填来源。无用户主体的兼容调用（例如 static API token、本地放行或旧系统集成）继续走固定 `execution_nodes` 路由，不要求用户进程。
-Run 进入成功、失败或取消终态后，后端会尝试拉取 agent projected messages，将 assistant 输出、parts、token/cost 快照 upsert 到 `session_messages`，并把同一份 token/cost 写入 `runs`；拉取失败时保留数据库已有快照。
+Run 进入成功、失败或取消终态后，后端会尝试拉取 agent 标准 session messages，将 assistant 可见 text、完整 parts、token/cost 快照 upsert 到 `session_messages`，并把同一份 token/cost 写入 `runs`；reasoning 和 tool output 不拼入可见正文，拉取失败时保留数据库已有快照。
 
 ### system-management 用户管理（测试）API
 
@@ -1540,7 +1540,7 @@ Session 运行态接口：
 
 `GET /api/internal/agent/{agentId}/runs/{runId}/events` 返回 `text/event-stream`，旧 `GET /api/runs/{runId}/events` 和平台内部 URL 继续兼容。`event` 使用稳定 wire name。durable RunEvent 使用 `seq` 作为 SSE `id`，可通过 `Last-Event-ID` 续传；transient live output 不设置 SSE `id`，payload `seq=0`，不参与续传。浏览器原生 `EventSource` 首次续传可使用 `?lastEventId={seq}`，后端 header 优先、query 兜底。
 
-SSE 建连时，后端会先尝试从当前 Run 绑定的 agent remote session 拉取消息快照，并转换为 transient `message.updated` / `message.part.updated` 发给前端；当前 `opencode` 实现读取 projected messages。随后进入 `run_events` durable replay 与 live bus 合流。消息内容、文本 delta、大段日志和 bash/tool output 不从本平台数据库恢复；如果远端 session 不可用或拉取失败，后端跳过消息恢复，不阻断 Run 状态、Diff、permission/question 等 durable RunEvent 回放。
+SSE 建连时，后端会先尝试从当前 Run 绑定的 agent remote session 拉取标准 session messages，并仅把 assistant 消息转换为 transient `message.updated` / `message.part.updated` 发给前端；user 消息已在 Run 启动前由平台保存，不重复回放其 text part，避免被前端误拼进 assistant 正文。随后进入 `run_events` durable replay 与 live bus 合流。高频文本 delta、大段日志和 bash/tool output 不写入 `run_events`；如果远端 session 不可用或拉取失败，后端跳过消息恢复，不阻断 Run 状态、Diff、permission/question 等 durable RunEvent 回放。
 
 PTY WebSocket 不在上述默认 HTTP/SSE 契约内，已按 `docs/standards/security.md` 增加后端受控例外入口，前端仍不得直连 opencode server、SSH、sidecar 或任意主机。
 

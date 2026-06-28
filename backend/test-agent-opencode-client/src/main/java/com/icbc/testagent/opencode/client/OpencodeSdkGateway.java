@@ -94,7 +94,7 @@ public interface OpencodeSdkGateway {
             String traceId);
 
     /**
-     * 调用 generated messages API，读取远端 projected messages。
+     * 通过 generated ApiClient 读取远端标准 session messages。
      */
     Mono<OpencodeSessionMessagesResult> sessionMessages(
             ExecutionNode node,
