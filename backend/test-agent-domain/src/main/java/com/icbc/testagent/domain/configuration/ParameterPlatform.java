@@ -8,6 +8,7 @@ import java.util.Locale;
 public enum ParameterPlatform {
     WINDOWS("windows"),
     LINUX("linux"),
+    MACOS("macos"),
     ALL("all");
 
     private final String value;
@@ -35,6 +36,12 @@ public enum ParameterPlatform {
 
     public static ParameterPlatform current() {
         String osName = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        return osName.startsWith("windows") ? WINDOWS : LINUX;
+        if (osName.startsWith("windows")) {
+            return WINDOWS;
+        } else if (osName.startsWith("mac")) {
+            return MACOS;
+        } else {
+            return LINUX;
+        }
     }
 }

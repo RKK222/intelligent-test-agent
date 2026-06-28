@@ -65,6 +65,15 @@
 - How: 修改后端解密参数配置，补全数据库缺失字段；未改 API、前端代码或数据库结构。
 - Result: SSH key 前端加密后后端可正确解密；后台工作空间副本同步任务不再报错。
 
+### 2026-06-28 - 添加 macOS 平台支持
+
+- Why: 本地 macOS 开发环境无法创建工作空间，报错 `/data: Read-only file system`。`ParameterPlatform` 枚举只有 WINDOWS、LINUX、ALL，没有 MACOS，导致 macOS 被当作 Linux 处理，使用 `/data/...` 路径。
+- What:
+  - `ParameterPlatform.java`：添加 `MACOS` 枚举值，修改 `current()` 方法识别 macOS（`osName.startsWith("mac")`）。
+  - Flyway `V20260628223000__add_macos_platform_support.sql`：修改数据库约束添加 `macos`，添加 macOS 平台的 `common_parameters` 配置（本地开发路径 `.tmp/dev-services/...`）。
+- How: 枚举扩展 + 数据库约束修改 + 平台配置插入；未改业务逻辑或 API。
+- Result: macOS 本地开发环境可正常使用本地路径，不再尝试访问 `/data`。
+
 ### 2026-06-28 - 完成态历史助手快照与实时 user part 误拼修复
 
 - Why: 真实页面复现完成态 Session `#89d405` 只剩用户消息；数据库对应会话只有 USER 行。后端日志同时显示历史查询在 Reactor `parallel-*` 线程调用 `.block()` 必然失败。进一步直连 opencode 发现 `/api/session/{id}/message` 只返回 `agent-switched/model-switched`，完整 user/assistant 消息实际来自 `/session/{id}/message`；真实新任务还确认 user 的实时 `message.updated + message.part.updated` 会被 reducer 误建成 assistant，从而把提示词拼入回答并表现为多余空行/重复内容。
