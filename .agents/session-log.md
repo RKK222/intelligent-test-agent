@@ -4,14 +4,14 @@
 
 ### 2026-06-28 - 事件流 transient 文本防重修复与历史对话管理抽屉实现及深度适配
 
-- Why: 响应用户需求及进一步精准反馈：(1) 修正智能体输出流式增量中丢失分段/排版破碎产生多余空行的问题；(2) 解决历史对话看不到的问题，提供质感极佳的交互与样式以便用户查看历史并一键切换；(3) 修复历史对话按钮与工作台外部缩进按钮重叠的问题；(4) 修复切换历史对话后仅显示用户消息、智能体返回内容丢失的问题。
+- Why: 响应用户需求及进一步精准反馈：(1) 修正智能体输出流式增量中丢失分段/排版破碎产生多余空行的问题；(2) 解决历史对话看不到的问题，提供质感极佳的交互与样式以便用户查看历史并一键切换；(3) 修复历史对话按钮与工作台外部缩进按钮重叠的问题；(4) 修复切换历史对话后仅显示用户消息、智能体返回内容丢失的问题；(5) 修复新建对话按钮失效的问题；(6) 解决切换历史对话后，智能体生成的修改过的文件（文档）没有被恢复展示的缺陷。
 - What:
-  - `event-stream-client/src/index.ts`：修复 `handleEvent` 去重逻辑，正确区分并放行无真实 `eventId` 且 `seq=0` 的 transient 流式增量事件，防止文本被错误过滤。
+  - `event-stream-client/src/index.ts`：进一步完善流式增量去重策略。对打字机瞬态消息包事件（`assistant.message.delta` 和 `message.part.delta`）实施全局去重豁免，放行所有顺序增量，从根本上杜绝因 eventId 重复导致内容字符被拦截剥碎产生的多余空行 Bug。
   - `FigmaChatPanel.vue`：将「历史对话」按钮紧凑移至左侧标题栏右侧，并为右侧栏预留 56px 边距，杜绝与悬浮缩进按钮重叠；新增历史对话侧滑蒙层抽屉，包含即时关键词过滤模糊搜索、会话列表圆角卡片展示及创建时间和短 ID 标识；新增 `select-session` 事件发出。
-  - `AgentWorkbench.vue`：绑定 `FigmaChatPanel` 的 `select-session` 到已具备的 `switchSession` 处理函数。
+  - `AgentWorkbench.vue`：绑定 `FigmaChatPanel` 的 `select-session` 并重构 `switchSession`。引入根据最新历史消息 `runId` 自动调取 `api.getRun` 与 `api.getRunDiff` 进行状态和文件变更恢复的底层加载链路，完全呈现历史生成的测试文档；实现 `handleNewConversation` 处理函数并绑定 `@new-conversation` 事件，解决新建对话按钮失效的缺陷。
   - `workbench-utils.ts`：修复 `messagesFromSessionMessages` 映射逻辑，为 assistant 消息正确填充 `parts: message.parts ?? []`，解决智能体响应无内容时直接被忽略丢弃的深层 Bug。
-- How: 后端未提供显式 eventId 且 seq=0 时不丢弃事件；头部操作栏采用左侧聚合与右侧隔离设计防重叠；恢复历史会话时保障智能体输出的 parts 分段无缝映射至 `AgentMessage` 模型。
-- Result: 彻底解决内容丢失导致排版多余空行的问题；历史对话按钮展示美观且零重叠；切换历史对话后用户指令与智能体执行的全部步骤及返回内容均完美展示。Vitest 与前端类型检查（typecheck）全部通过。
+- How: 瞬态 delta 事件不进行 deduplicate 防重；头部操作栏采用左侧聚合与右侧隔离设计防重叠；恢复历史会话时保障智能体输出的 parts 分段无缝映射至 `AgentMessage` 模型，并同步重新拉取关联 Run 及其 Diff 文件进行工作台编辑器复原。
+- Result: 彻底解决内容丢失导致排版多余空行的问题；历史对话按钮展示美观且零重叠；切换历史对话后用户指令与智能体执行的全部步骤、返回内容以及生成的测试文档全部完美展示，新建对话按钮完全恢复正常。Vitest 与前端类型检查（typecheck）全部通过。
 
 ### 2026-06-28 - 对话框拉宽、用户气泡底色圆角优化与字间距紧凑化
 

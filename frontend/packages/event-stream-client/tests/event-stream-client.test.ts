@@ -74,8 +74,22 @@ describe("event-stream-client", () => {
       type: "message.part.delta",
       payload: { delta: "lo" }
     });
+    source.emit("assistant.message.delta", {
+      eventId: "same_evt_id",
+      runId: "run_1",
+      seq: 1,
+      type: "assistant.message.delta",
+      payload: { delta: "a" }
+    });
+    source.emit("assistant.message.delta", {
+      eventId: "same_evt_id",
+      runId: "run_1",
+      seq: 2,
+      type: "assistant.message.delta",
+      payload: { delta: "b" }
+    });
 
-    expect(received).toEqual(["evt_1", "evt_live_1", "evt_live_2"]);
+    expect(received).toEqual(["evt_1", "evt_live_1", "evt_live_2", "same_evt_id", "same_evt_id"]);
     expect(statuses).toEqual(["connecting", "open"]);
 
     subscription.close();

@@ -1985,10 +1985,37 @@ async function switchSession(sessionId: string) {
   try {
     const page = await api.listSessionMessages(sessionId, 1, 100);
     dispatchChat({ type: "reset", messages: messagesFromSessionMessages(page.items) });
+
+    // 寻找最新的 runId 从而恢复 Run 状态与文件 Diff
+    const lastMsgWithRunId = [...page.items].reverse().find((m) => m.runId);
+    if (lastMsgWithRunId?.runId) {
+      try {
+        const [runDetail, diffDetail] = await Promise.all([
+          api.getRun(lastMsgWithRunId.runId),
+          api.getRunDiff(lastMsgWithRunId.runId).catch(() => ({ files: [] }))
+        ]);
+        run.value = runDetail;
+        diffFiles.value = diffDetail.files ?? [];
+      } catch (runErr) {
+        console.error("加载关联 Run 失败", runErr);
+      }
+    } else {
+      run.value = null;
+      diffFiles.value = [];
+    }
+
     feedback.value = { kind: "info", title: "已切换 Session", description: selected.title };
   } catch (error) {
     feedback.value = errorFeedback("加载 Session 消息失败", error);
   }
+}
+
+function handleNewConversation() {
+  session.value = null;
+  run.value = null;
+  dispatchChat({ type: "reset" });
+  readonlySessionReason.value = "";
+  diffFiles.value = [];
 }
 
 function onCurrentFileFeedback(action: "accept-current" | "reject-current", path: string) {
@@ -2208,7 +2235,7 @@ async function handleLogout() {
           placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
           @send="(text: string) => handleSend(text)"
           @stop="handleStopRun"
-          @new-conversation="() => handleSend('')"
+          @new-conversation="handleNewConversation"
           @open-model-picker="modelPickerOpen = true"
           @initialize-process="() => initializeOpencodeProcessMutation.mutate()"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"

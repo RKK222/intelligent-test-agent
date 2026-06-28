@@ -79,19 +79,24 @@ export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventS
     }
     // 如果 eventId 是 fallback 的 runId:seq，说明后端未提供显式 eventId
     const isFallback = parsed.eventId === `${parsed.runId}:${parsed.seq}`;
-    // 优先按真实 eventId 去重，兼容旧事件回退 runId + seq；seq=0 transient 文本事件不能因为相同 seq 被错误丢弃
-    if (!isFallback) {
-      const key = `event:${parsed.eventId}`;
-      if (seen.has(key)) {
-        return;
+    // 流式增量打字机事件无需去重，避免相同 eventId 导致增量文本包被吃掉产生空行
+    const skipDeduplicate = parsed.type === "assistant.message.delta" || parsed.type === "message.part.delta";
+
+    if (!skipDeduplicate) {
+      // 优先按真实 eventId 去重，兼容旧事件回退 runId + seq；seq=0 transient 文本事件不能因为相同 seq 被错误丢弃
+      if (!isFallback) {
+        const key = `event:${parsed.eventId}`;
+        if (seen.has(key)) {
+          return;
+        }
+        seen.add(key);
+      } else if (parsed.seq > 0) {
+        const key = `seq:${parsed.runId}:${parsed.seq}`;
+        if (seen.has(key)) {
+          return;
+        }
+        seen.add(key);
       }
-      seen.add(key);
-    } else if (parsed.seq > 0) {
-      const key = `seq:${parsed.runId}:${parsed.seq}`;
-      if (seen.has(key)) {
-        return;
-      }
-      seen.add(key);
     }
     options.onEvent(parsed);
   };
