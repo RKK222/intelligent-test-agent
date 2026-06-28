@@ -1013,4 +1013,16 @@
 - Why: 切换 IP/数据库后重启，Go `opencode-manager` 会反复断开 Java 控制面连接并导致 opencode 不可用；同时 `test` profile 的完整 Actuator health 被旧固定 opencode node 探测打成 DOWN。
 - What: `ManagerControlMessageCodec` 禁用 Jackson 时间戳序列化，确保 WebSocket 控制面发给 Go manager 的 `Instant` 是 RFC3339 字符串；`OpencodeNodesHealthIndicator` 在 manager/socket 且非 local-direct 模式下跳过 legacy 固定节点探测，只保留该探测给 local-direct/static-token fallback；`JdbcOpencodeProcessManagementRepository` 读取历史用户进程时归一化 `updated_at < created_at` 的脏数据，避免旧记录让 wr 用户状态接口直接 400。
 - How: 用定向单测先复现 `lastHeartbeatAt` 非字符串、manager/socket 仍探测 `127.0.0.1:4096`、历史进程时间戳阻断 Repository 映射的坏状态，再修复实现；同步 `test-agent-app`、`test-agent-opencode-runtime`、`test-agent-persistence` README/PACKAGE、数据库和后端规范文档；本地重启技能改为默认 `.env.test` + profile `test`。
-- Result: `test` 环境重启后 `/actuator/health` 与 readiness 均为 UP，前端 3000 可访问，manager 日志等待多个发现周期无 `Time.UnmarshalJSON` 或 websocket 断连；wr 用户状态接口可返回 `NEEDS_INITIALIZATION` 并在初始化后恢复 READY。初始化后立即查询仍可能遇到 opencode HTTP 服务短暂 warm-up 窗口，最终状态已验证为 READY；相关 Maven reactor 测试通过。
+- Result: `test` 环境重启后 `/actuator/health` 与 readiness 均为 UP，前端 3000 可访问，manager 日志等待多个发现周期无 `Time.UnmarshalJSON` 或 websocket 断连；wr 用户状态接口可返回 `NEEDS_INITIALIZATION` 并在初始化后恢复 READY。初始化后立即查询仍可能遇到 opencode HTTP服务短暂 warm-up 窗口，最终状态已验证为 READY；相关 Maven reactor 测试通过。
+
+### 2026-06-28 - 分支与目录选择框变更为可输可选并隐藏以点开头的目录
+
+- Why: 用户要求在「工作空间管理」中创建工作空间时的分支和目录两个选择框支持可输可选（即既可快速搜索过滤，也可直接回车输入自定义路径）。同时，为避免干扰正常的目录选择，以 `.` 开头的隐藏文件/文件夹（如 `.github`, `.vscode`）默认应该在目录列表中隐藏，只有在用户输入内容进行过滤或主动输入时才可展示与选择。
+- What:
+  - 修改 `frontend/apps/agent-web/src/components/settings/SettingsAppWorkspacePanel.vue` 中的两个 `el-select`。
+  - 为分支选择和目录选择下拉框添加 `filterable`、`allow-create` 与 `default-first-option` 属性，使其支持快速检索过滤与自定义输入。
+  - 新增 `directorySearchQuery` 状态，监听目录下拉框的 `filter-method` 与 `visible-change` 事件，在用户输入时保存查询，在下拉框关闭时重置查询。
+  - 新增 `filteredDirectories` 计算属性，用于对 `directories` 进行过滤。如果目录路径段以 `.` 开头，则仅在 `directorySearchQuery` 非空且包含匹配子串时才显示；否则该隐藏目录将默认被剔除。
+- How: 纯前端代码更新，使用 Element Plus 特性配合 Vue computed 属性实现精细的选项隐藏逻辑，无后端及 API 变更。
+- Result: 单元测试 `settings-app-workspace-panel.test.ts` 全部通过，`pnpm typecheck` 与 `pnpm lint` 校验通过，完全符合可输可选与隐藏目录展示需求。
+

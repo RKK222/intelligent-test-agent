@@ -491,6 +491,35 @@ watch(workspaceBranch, () => {
   workspaceDirectory.value = "";
 });
 
+const directorySearchQuery = ref("");
+
+function handleDirectoryFilter(val: string) {
+  directorySearchQuery.value = val;
+}
+
+function handleDirectoryVisibleChange(visible: boolean) {
+  if (!visible) {
+    directorySearchQuery.value = "";
+  }
+}
+
+const filteredDirectories = computed(() => {
+  const query = directorySearchQuery.value.trim().toLowerCase();
+  return directories.value.filter(dir => {
+    const isHidden = dir.split(/[/\\]/).some(segment => segment.startsWith('.'));
+    if (isHidden) {
+      if (!query) {
+        return false;
+      }
+      return dir.toLowerCase().includes(query);
+    }
+    if (!query) {
+      return true;
+    }
+    return dir.toLowerCase().includes(query);
+  });
+});
+
 onBeforeUnmount(() => {
   stopWorkspaceCreatePolling();
 });
@@ -701,7 +730,14 @@ onBeforeUnmount(() => {
                 <div class="ta-workspace-step-inputs">
                   <label class="ta-form-field" style="width: 240px">
                     <span class="ta-form-label">分支</span>
-                    <el-select v-model="workspaceBranch" placeholder="选择分支" style="width: 100%">
+                    <el-select
+                      v-model="workspaceBranch"
+                      filterable
+                      allow-create
+                      default-first-option
+                      placeholder="选择或输入分支"
+                      style="width: 100%"
+                    >
                       <el-option v-for="branch in branches" :key="branch" :label="branch" :value="branch" />
                     </el-select>
                   </label>
@@ -719,8 +755,17 @@ onBeforeUnmount(() => {
                 <div class="ta-workspace-step-inputs">
                   <label class="ta-form-field" style="width: 240px">
                     <span class="ta-form-label">目录</span>
-                    <el-select v-model="workspaceDirectory" placeholder="选择目录" style="width: 100%">
-                      <el-option v-for="dir in directories" :key="dir" :label="dir" :value="dir" />
+                    <el-select
+                      v-model="workspaceDirectory"
+                      filterable
+                      allow-create
+                      default-first-option
+                      :filter-method="handleDirectoryFilter"
+                      @visible-change="handleDirectoryVisibleChange"
+                      placeholder="选择或输入目录"
+                      style="width: 100%"
+                    >
+                      <el-option v-for="dir in filteredDirectories" :key="dir" :label="dir" :value="dir" />
                     </el-select>
                   </label>
                   <label class="ta-form-field" style="width: 180px">
