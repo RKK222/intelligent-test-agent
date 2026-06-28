@@ -922,16 +922,6 @@ onBeforeUnmount(() => {
   padding: 8px 0;
   position: relative;
 }
-.ta-workspace-create-steps::before {
-  content: "";
-  position: absolute;
-  left: 36px;
-  top: 32px;
-  bottom: 32px;
-  width: 2px;
-  background: #e4e7ed;
-  z-index: 1;
-}
 .ta-workspace-step {
   display: grid;
   grid-template-columns: 140px minmax(0, 1fr);

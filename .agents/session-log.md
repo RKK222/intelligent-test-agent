@@ -1017,15 +1017,16 @@
 
 ### 2026-06-28 - 分支与目录选择框变更为可输可选、隐藏以点开头的目录，并添加刷新进度条
 
-- Why: 用户要求在「工作空间管理」中创建工作空间时的分支和目录两个选择框支持可输可选（即既可快速搜索过滤，也可直接回车输入自定义路径）。同时，以 `.` 开头的隐藏文件/文件夹默认应该在目录列表中隐藏，只有在用户输入内容进行过滤或主动输入时才可展示。此外，用户希望在刷新分支和加载目录时能显式提供进度反馈（进度条与按钮加载状态）。
+- Why: 用户要求在「工作空间管理」中创建工作空间时的分支和目录两个选择框支持可输可选（即既可快速搜索过滤，也可直接回车输入自定义路径）。同时，以 `.` 开头的隐藏文件/文件夹默认应该在目录列表中隐藏，只有在用户输入内容进行过滤或主动输入时才可展示。此外，用户希望在刷新分支和加载目录时能显式提供进度反馈（进度条与按钮加载状态）。并且，为彻底解决竖线穿过数字圈圈的问题，直接将竖线移除。
 - What:
   - 修改 `frontend/apps/agent-web/src/components/settings/SettingsAppWorkspacePanel.vue`。
   - 为分支选择和目录选择下拉框添加 `filterable`、`allow-create` 与 `default-first-option` 属性，使其支持检索与输入。
   - 新增 `directorySearchQuery` 状态，监听目录下拉框事件，在输入时更新过滤词，关闭时重置。
   - 新增 `filteredDirectories` 计算属性，用于默认过滤以 `.` 开头的路径。
   - 引入 `loadingBranches` 与 `loadingDirectories` 加载状态，在「刷新分支」与「加载目录」异步接口调用期间启用按钮的 `:loading` 状态，并在对应步骤底部渲染一个绝对定位的动画进度条（使用 `el-progress` 不确定进度条模式）。
+  - 删除了 `.ta-workspace-create-steps::before` 样式块，彻底移除了步骤背景竖线，解决了竖线穿过数字圈圈的遮挡问题。
   - 在 `settings-app-workspace-panel.test.ts` 中注册 `ElProgress` stub，消除 Vitest 运行时的组件解析警告。
-- How: 纯前端代码更新，使用 Element Plus 的 filterable / allow-create / el-progress 配合 Vue computed 过滤来实现。
+- How: 纯前端代码更新，使用 Element Plus 的 filterable / allow-create / el-progress 配合 Vue computed 过滤并移除背景伪元素竖线来实现。
 - Result: 单元测试 `settings-app-workspace-panel.test.ts` 全部通过，`pnpm typecheck` 与 `pnpm lint` 校验通过，界面交互逻辑流畅，无任何未解析组件警告。
 
 ### 2026-06-28 - 「应用工作空间」标题栏手动刷新按钮失效修复
