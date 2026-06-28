@@ -11,9 +11,9 @@
   - `AssistantThread.vue` / `FigmaChatPanel.vue`：将用户消息气泡样式由 `transparent` / `rounded-md` 变更为具有大圆角的亮灰色气泡（`.figma-chat-bubble--user` 新增 `background: var(--ta-chat-user-bg); border-radius: 12px`），完美在各聊天面板呈现图 1 的底色气泡效果。
   - `AgentWorkbench.vue`：移除 `initializeOpencodeProcessMutation` 成功回调中对 `feedback.value` 赋值成功 toast 的调用，避免弹出多余重复通知。
   - `AnswerPart.vue` / `PlainAnswer.vue` / `ReasoningPartBlock.vue`：将智能体回答及思考的容器、raw 文本 block 上的行高类由 `leading-6`、`leading-[1.55]` 统一修改为 `leading-[1.4] tracking-[-0.01em]`。
-  - `MarkdownView.vue`：修改 `.markdown-body` 样式的行高 `line-height: 1.32;`、段落 `margin: 2px 0 !important;`、列表 `margin: 2px 0 !important;` 且 `li` 设为 `1px 0 !important;`，特别将表格 `table` 的 margin 缩短、行高改至极密 `1.25` 且字号为 `12px`，并将单元格 `padding` 压紧至 `2px 5px !important`，代码块 `pre` padding/margin 亦做等比紧凑；增加换行正则清洗，自动把文本中 3 个及以上的连续换行 `\n\n\n+` 替换为 `\n\n`。
-- How: 纯 CSS/Tailwind 样式参数微调与 UI 属性及逻辑回调默认值调整，并在 Markdown 渲染器解析前通过正则拦截多换行，保留全部业务逻辑。
-- Result: 首页聊天面板默认展现更宽大舒服；用户气泡呈亮色圆润浅灰底色（对比头像更柔和，完美对齐图 1）；智能体最终回答、Markdown 文本以及大表格、列表间距布局彻底紧凑精致，多换行自动过滤清除。前端已初始化 toast 去除，右上角进程状态提示绿卡完美保留。前端 lint 校验与 Vitest 全部通过。
+  - `MarkdownView.vue`：修改 `.markdown-body` 样式的行高 `line-height: 1.32;`、段落 `margin: 2px 0 !important;`、列表 `margin: 2px 0 !important;` 且 `li` 设为 `1px 0 !important;`，特别将表格 `table` 的 margin 缩短、行高改至极密 `1.25` 且字号为 `12px`，并将单元格 `padding` 压紧至 `2px 5px !important`，代码块 `pre` padding/margin 亦做等比紧凑。
+- How: 纯 CSS/Tailwind 样式参数微调与 UI 属性及逻辑回调默认值调整，保留全部业务逻辑。
+- Result: 首页聊天面板默认展现更宽大舒服；用户气泡呈亮色圆润浅灰底色（对比头像更柔和，完美对齐图 1）；智能体最终回答、Markdown 文本以及大表格、列表间距布局彻底紧凑精致。前端已初始化 toast 去除，右上角进程状态提示绿卡完美保留。前端 lint 校验与 Vitest 全部通过。
 
 
 

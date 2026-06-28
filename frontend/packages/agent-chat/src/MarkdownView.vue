@@ -76,9 +76,7 @@ async function ensureLibs() {
 async function render() {
   try {
     await ensureLibs()
-    // 对连续 3 个及以上的换行做清洗收缩，避免模型因多打空行导致渲染拉开很大
-    const cleanedSource = (props.source ?? '').replace(/\n{3,}/g, '\n\n')
-    const raw = mdRef.value?.render(cleanedSource) ?? ''
+    const raw = mdRef.value?.render(props.source ?? '') ?? ''
     html.value = purifyRef.value?.sanitize(raw) ?? ''
     error.value = null
   } catch (err) {
