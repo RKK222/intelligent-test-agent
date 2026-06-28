@@ -48,7 +48,7 @@ const leftPanelStyle = computed<CSSProperties>(() => ({
   opacity: leftPanelOpen.value ? 1 : 0,
   pointerEvents: leftPanelOpen.value ? ("auto" as const) : ("none" as const)
 }));
-const rightPanelWidth = ref(380);
+const rightPanelWidth = ref(450);
 const rightPanelStyle = computed<CSSProperties>(() => ({
   width: props.showRightPanel ? `${rightPanelWidth.value}px` : "0px",
   opacity: props.showRightPanel ? 1 : 0,

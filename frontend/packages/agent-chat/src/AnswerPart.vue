@@ -57,12 +57,12 @@ const streaming = computed(() => (props.part.status ?? "").toLowerCase() === "ru
     <MarkdownView
       v-if="!showRaw"
       :source="part.text"
-      body-class="text-[13px] leading-6 text-[var(--ta-chat-text)]"
+      body-class="text-[13px] leading-[1.4] tracking-[-0.01em] text-[var(--ta-chat-text)]"
     />
     <pre
       v-else
       data-testid="answer-part-raw"
-      class="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded border border-[var(--ta-chat-border)] bg-[var(--ta-chat-detail-bg)] p-2 font-mono text-[12px] leading-[1.55] text-[var(--ta-chat-text)]"
+      class="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded border border-[var(--ta-chat-border)] bg-[var(--ta-chat-detail-bg)] p-2 font-mono text-[12px] leading-[1.4] tracking-[-0.01em] text-[var(--ta-chat-text)]"
     >{{ part.text }}</pre>
   </div>
 </template>

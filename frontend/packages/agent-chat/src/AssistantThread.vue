@@ -169,7 +169,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div v-else class="flex justify-end gap-2">
-          <div class="max-w-[78%] rounded-md bg-[var(--ta-chat-user-bg)] px-3 py-2 text-[var(--ta-chat-text)]">
+          <div class="max-w-[78%] rounded-xl bg-ta-chat-user-bg px-3 py-2 text-[var(--ta-chat-text)]">
             <p class="m-0 whitespace-pre-wrap text-[13px] leading-6 text-[var(--ta-chat-text)]">{{ message.text }}</p>
           </div>
           <span

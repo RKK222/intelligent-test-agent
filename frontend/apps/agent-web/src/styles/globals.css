@@ -35,7 +35,7 @@
   --ta-chat-bg: #f5f5f5;
   --ta-chat-surface: #ffffff;
   --ta-chat-message-bg: #ffffff;
-  --ta-chat-user-bg: #dddddd;
+  --ta-chat-user-bg: #f2f2f2;
   --ta-chat-answer-bg: #ffffff;
   --ta-chat-process-bg: #f5f5f5;
   --ta-chat-detail-bg: #eeeeee;
@@ -124,6 +124,8 @@
   --color-surface: #ffffff;
   --color-success: #3f7a5a;
   --color-warning: #946015;
+
+  --color-ta-chat-user-bg: var(--ta-chat-user-bg);
 }
 
 * {

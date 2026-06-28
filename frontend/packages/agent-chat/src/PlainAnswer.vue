@@ -11,6 +11,6 @@ defineProps<PlainAnswerProps>();
     data-testid="answer-part"
     class="rounded-md border border-[var(--ta-chat-answer-border)] bg-[var(--ta-chat-answer-bg)] px-3 py-2.5"
   >
-    <div class="whitespace-pre-wrap text-[13px] leading-6 text-[var(--ta-chat-text)]">{{ text }}</div>
+    <div class="whitespace-pre-wrap text-[13px] leading-[1.4] tracking-[-0.01em] text-[var(--ta-chat-text)]">{{ text }}</div>
   </div>
 </template>

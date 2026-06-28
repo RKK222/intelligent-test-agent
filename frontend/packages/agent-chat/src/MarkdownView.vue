@@ -142,7 +142,8 @@ onBeforeUnmount(() => {
   color: var(--ta-chat-text);
   font-family: inherit;
   font-size: 13px;
-  line-height: 1.65;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
 }
 
 .markdown-body :deep(h1),

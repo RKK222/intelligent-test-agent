@@ -80,12 +80,12 @@ const durationLabel = computed(() => {
       <MarkdownView
         v-if="!showRaw"
         :source="part.text || '暂无详细思考内容'"
-        body-class="max-h-44 overflow-auto pr-1 text-[12px] leading-6 text-[var(--ta-chat-muted)]"
+        body-class="max-h-44 overflow-auto pr-1 text-[12px] leading-[1.4] tracking-[-0.01em] text-[var(--ta-chat-muted)]"
       />
       <pre
         v-else
         data-testid="reasoning-part-raw"
-        class="max-h-44 overflow-auto whitespace-pre-wrap rounded border border-[var(--ta-chat-border)] bg-[var(--ta-chat-detail-bg)] p-2 text-[12px] leading-6 text-[var(--ta-chat-muted)]"
+        class="max-h-44 overflow-auto whitespace-pre-wrap rounded border border-[var(--ta-chat-border)] bg-[var(--ta-chat-detail-bg)] p-2 text-[12px] leading-[1.4] tracking-[-0.01em] text-[var(--ta-chat-muted)]"
       >{{ part.text || "暂无详细思考内容" }}</pre>
     </div>
   </ProcessDisclosure>
