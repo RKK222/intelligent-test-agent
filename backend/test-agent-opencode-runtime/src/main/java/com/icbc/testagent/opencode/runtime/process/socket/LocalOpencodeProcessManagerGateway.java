@@ -2,6 +2,8 @@ package com.icbc.testagent.opencode.runtime.process.socket;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.opencode.runtime.process.OpencodeProcessControlCommand;
+import com.icbc.testagent.opencode.runtime.process.OpencodeProcessControlResult;
 import com.icbc.testagent.opencode.runtime.process.OpencodeProcessHealthCommand;
 import com.icbc.testagent.opencode.runtime.process.OpencodeProcessHealthResult;
 import com.icbc.testagent.opencode.runtime.process.OpencodeProcessManagerGateway;
@@ -93,5 +95,19 @@ public class LocalOpencodeProcessManagerGateway implements OpencodeProcessManage
             }
             return OpencodeProcessHealthResult.unhealthy(unavailable.getMessage());
         }
+    }
+
+    @Override
+    public OpencodeProcessControlResult restartProcess(OpencodeProcessControlCommand command) {
+        throw unsupportedControlCommand();
+    }
+
+    @Override
+    public OpencodeProcessControlResult stopProcess(OpencodeProcessControlCommand command) {
+        throw unsupportedControlCommand();
+    }
+
+    private PlatformException unsupportedControlCommand() {
+        return new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "本地 opencode manager 网关不支持运行管理重启/停止");
     }
 }

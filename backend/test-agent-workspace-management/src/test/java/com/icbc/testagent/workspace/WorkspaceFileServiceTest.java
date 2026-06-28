@@ -84,4 +84,42 @@ class WorkspaceFileServiceTest {
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
     }
+
+    @Test
+    void searchFilesReturnsFilesWhoseNameContainsQueryCaseInsensitively() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.createDirectories(root.resolve("src/components"));
+        Files.writeString(root.resolve("src/components/AgentConfig.vue"), "a");
+        Files.writeString(root.resolve("src/components/Button.vue"), "b");
+        Files.writeString(root.resolve("README.md"), "c");
+
+        // 子串匹配，不区分大小写：query=conf 只命中 AgentConfig.vue
+        var results = service.searchFiles(root.toString(), "conf");
+
+        assertThat(results).extracting(FileSearchResultResponse::name).containsExactly("AgentConfig.vue");
+        FileSearchResultResponse hit = results.get(0);
+        assertThat(hit.path()).isEqualTo("src/components/AgentConfig.vue");
+        assertThat(hit.directory()).isEqualTo("src/components");
+    }
+
+    @Test
+    void searchFilesSkipsBlacklistedDirectories() throws Exception {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+        Files.createDirectories(root.resolve("node_modules"));
+        Files.writeString(root.resolve("node_modules/config.js"), "x");
+        Files.writeString(root.resolve("config.json"), "y");
+
+        var results = service.searchFiles(root.toString(), "config");
+
+        // node_modules 被跳过，只命中根目录下的 config.json
+        assertThat(results).extracting(FileSearchResultResponse::name).containsExactly("config.json");
+    }
+
+    @Test
+    void searchFilesReturnsEmptyForBlankQuery() {
+        WorkspaceFileService service = new WorkspaceFileService(1024 * 1024, 1000);
+
+        assertThat(service.searchFiles(root.toString(), "")).isEmpty();
+        assertThat(service.searchFiles(root.toString(), "   ")).isEmpty();
+    }
 }

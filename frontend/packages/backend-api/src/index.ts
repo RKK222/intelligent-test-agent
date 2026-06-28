@@ -2,11 +2,13 @@ import type {
   AgentInfo,
   AgentConfigCommitPayload,
   AgentConfigDiff,
+  AgentConfigFileRoute,
   AgentConfigOperation,
   AgentConfigOperationTicketResponse,
   AgentConfigProgressEvent,
   AgentConfigStatus,
   AgentConfigWorktree,
+  AgentConfigWorktreeOption,
   AgentConfigWorktreePayload,
   AddSshKeyPayload,
   ApplicationWorkspaceTemplate,
@@ -18,6 +20,7 @@ import type {
   ApiResponse,
   CodeRepositoryConfig,
   CommandInfo,
+  CommonParameterChangeLog,
   CreateApplicationWorkspacePayload,
   CreatePersonalWorkspacePayload,
   CreateRepositoryPayload,
@@ -25,11 +28,13 @@ import type {
   CreateUserPayload,
   CurrentUser,
   FileContent,
+  FileSearchResult,
   FileStatus,
   FileTreeEntry,
   GeneralParameter,
   GeneralParameterListParams,
   GeneralParameterUpdatePayload,
+  CommonParameterLoadSnapshot,
   LoginRequest,
   LoginResponse,
   ManagedApplication,
@@ -40,11 +45,15 @@ import type {
   OpencodeRuntimeMetricHistoryParams,
   OpencodeRuntimeContainerMetricHistory,
   OpencodeRuntimeBackendMetricHistory,
+  OpencodeRuntimeManagedProcessCommandResult,
+  OpencodeRuntimeManagementUserProcessParams,
+  OpencodeRuntimeProcess,
   PageResponse,
   PlatformUserSummary,
   PersonalWorkspace,
   PermissionRequest,
   PromptPart,
+  PublicAgentRepositoryStatus,
   ProviderInfo,
   QuestionRequest,
   RoleOption,
@@ -243,6 +252,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
 
   const agentPath = (path: string) => `${agentBase}${path}`;
   const workspaceFileSockets = new Map<string, WorkspaceFileSocketClient>();
+  const agentConfigFileSockets = new Map<string, WorkspaceFileSocketClient>();
 
   async function workspaceFileRpc<T>(workspaceId: string, op: string, params: Record<string, unknown>): Promise<T> {
     const client = await ensureWorkspaceFileClient(workspaceId);
@@ -299,6 +309,72 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     );
     await client.ready();
     return client;
+  }
+
+  async function agentConfigFileRpc<T>(
+    scope: "PUBLIC" | "WORKSPACE",
+    op: string,
+    params: Record<string, unknown>,
+    routeContext: { workspaceId?: string; worktreeId?: string | null; linuxServerId?: string | null } = {}
+  ): Promise<T> {
+    const client = await ensureAgentConfigFileClient(scope, routeContext);
+    return client.request<T>(op, {
+      scope,
+      workspaceId: routeContext.workspaceId,
+      worktreeId: routeContext.worktreeId ?? undefined,
+      ...params
+    });
+  }
+
+  async function ensureAgentConfigFileClient(
+    scope: "PUBLIC" | "WORKSPACE",
+    context: { workspaceId?: string; worktreeId?: string | null; linuxServerId?: string | null }
+  ): Promise<WorkspaceFileSocketClient> {
+    const cacheKey = agentConfigSocketKey(scope, context);
+    const existing = agentConfigFileSockets.get(cacheKey);
+    if (existing?.open) {
+      return existing;
+    }
+    existing?.close();
+    const routePayload = {
+      scope,
+      workspaceId: context.workspaceId,
+      worktreeId: context.worktreeId ?? undefined,
+      linuxServerId: context.linuxServerId ?? undefined
+    };
+    const route = await request<AgentConfigFileRoute>(`${agentConfigBase}/file-ws-route`, {
+      method: "POST",
+      body: JSON.stringify(routePayload)
+    });
+    const ticket = await requestFrom<WorkspaceFileSocketTicketResponse>(
+      route.baseUrl.replace(/\/$/, ""),
+      "/api/internal/platform/workspace-management/file-ws/tickets",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          workspaceId: scope === "WORKSPACE" ? context.workspaceId : undefined,
+          linuxServerId: route.linuxServerId,
+          mode: "agent-config",
+          scope,
+          worktreeId: context.worktreeId ?? undefined
+        } satisfies WorkspaceFileSocketTicketRequest)
+      }
+    );
+    const client = new WorkspaceFileSocketClient(
+      toWebSocketUrl(route.baseUrl, ticket.webSocketUrl),
+      webSocketFactory,
+      () => agentConfigFileSockets.delete(cacheKey)
+    );
+    agentConfigFileSockets.set(cacheKey, client);
+    await client.ready();
+    return client;
+  }
+
+  function agentConfigSocketKey(
+    scope: "PUBLIC" | "WORKSPACE",
+    context: { workspaceId?: string; worktreeId?: string | null; linuxServerId?: string | null }
+  ) {
+    return [scope, context.workspaceId ?? "", context.worktreeId ?? "", context.linuxServerId ?? ""].join(":");
   }
 
   return {
@@ -384,6 +460,16 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     },
     deleteWorkspaceFile: (workspaceId: string, path: string) =>
       workspaceFileRpc<void>(workspaceId, "workspace.delete", { path }),
+    searchFiles: async (workspaceId: string, query: string) => {
+      const results = await workspaceFileRpc<BackendFileSearchResult[]>(workspaceId, "workspace.search", { query });
+      return results.map((result) => ({
+        path: result.path,
+        name: result.name,
+        directory: result.directory,
+        size: result.size,
+        modifiedAt: result.lastModifiedAt
+      })) satisfies FileSearchResult[];
+    },
     listWorkspaceBackendServers: () =>
       request<WorkspaceBackendServer[]>(`${workspaceManagementBase}/backend-servers`),
     createWorkspaceFileSocketTicket: (targetBaseUrl: string, payload: WorkspaceFileSocketTicketRequest) =>
@@ -433,24 +519,47 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     getWorkspaceAgentConfigStatus: (workspaceId: string) =>
       request<AgentConfigStatus>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/status`),
     listPublicAgentBranches: () => request<string[]>(`${agentConfigBase}/public/branches`),
+    listPublicAgentRepositories: () => request<PublicAgentRepositoryStatus[]>(`${agentConfigBase}/public/repositories`),
+    listPublicAgentWorktrees: (linuxServerId: string) =>
+      request<AgentConfigWorktreeOption[]>(`${agentConfigBase}/public/worktrees${query({ linuxServerId })}`),
+    initializePublicAgentRepository: (linuxServerId: string, branch: string, operationId?: string) =>
+      request<PublicAgentRepositoryStatus>(
+        `${agentConfigBase}/public/repositories/${encodeURIComponent(linuxServerId)}/initialize`,
+        {
+          method: "POST",
+          body: JSON.stringify({ branch, operationId })
+        }
+      ),
     updatePublicAgentConfig: (branch: string, operationId?: string) =>
       request<AgentConfigOperation>(`${agentConfigBase}/public/update`, {
         method: "POST",
         body: JSON.stringify({ branch, operationId })
       }),
-    listPublicAgentFiles: async (path = "", worktreeId?: string | null) => {
-      const entries = await request<BackendFileTreeEntry[]>(`${agentConfigBase}/public/files${query({ path, worktreeId })}`);
+    listPublicAgentFiles: async (path = "", worktreeId?: string | null, linuxServerId?: string | null) => {
+      const entries = await agentConfigFileRpc<BackendFileTreeEntry[]>(
+        "PUBLIC",
+        "agent-config.list",
+        { path },
+        { worktreeId, linuxServerId }
+      );
       return entries.map(toFileTreeEntry);
     },
-    readPublicAgentFile: async (path: string, worktreeId?: string | null) => {
-      const file = await request<BackendFileContent>(`${agentConfigBase}/public/files/content${query({ path, worktreeId })}`);
+    readPublicAgentFile: async (path: string, worktreeId?: string | null, linuxServerId?: string | null) => {
+      const file = await agentConfigFileRpc<BackendFileContent>(
+        "PUBLIC",
+        "agent-config.read",
+        { path },
+        { worktreeId, linuxServerId }
+      );
       return { ...file, encoding: "utf-8", readonly: false } satisfies FileContent;
     },
-    writePublicAgentFile: (path: string, content: string, worktreeId?: string | null) =>
-      request<void>(`${agentConfigBase}/public/files/content`, {
-        method: "PUT",
-        body: JSON.stringify({ path, content, worktreeId })
-      }),
+    writePublicAgentFile: (path: string, content: string, worktreeId?: string | null, linuxServerId?: string | null) =>
+      agentConfigFileRpc<void>(
+        "PUBLIC",
+        "agent-config.write",
+        { path, content },
+        { worktreeId, linuxServerId }
+      ),
     createPublicAgentWorktree: (payload: AgentConfigWorktreePayload) =>
       request<AgentConfigWorktree>(`${agentConfigBase}/public/worktrees`, {
         method: "POST",
@@ -470,22 +579,30 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         body: JSON.stringify({ worktreeId, operationId })
       }),
     listWorkspaceAgentFiles: async (workspaceId: string, path = "", worktreeId?: string | null) => {
-      const entries = await request<BackendFileTreeEntry[]>(
-        `${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/files${query({ path, worktreeId })}`
+      const entries = await agentConfigFileRpc<BackendFileTreeEntry[]>(
+        "WORKSPACE",
+        "agent-config.list",
+        { path },
+        { workspaceId, worktreeId }
       );
       return entries.map(toFileTreeEntry);
     },
     readWorkspaceAgentFile: async (workspaceId: string, path: string, worktreeId?: string | null) => {
-      const file = await request<BackendFileContent>(
-        `${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/files/content${query({ path, worktreeId })}`
+      const file = await agentConfigFileRpc<BackendFileContent>(
+        "WORKSPACE",
+        "agent-config.read",
+        { path },
+        { workspaceId, worktreeId }
       );
       return { ...file, encoding: "utf-8", readonly: false } satisfies FileContent;
     },
     writeWorkspaceAgentFile: (workspaceId: string, path: string, content: string, worktreeId?: string | null) =>
-      request<void>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/files/content`, {
-        method: "PUT",
-        body: JSON.stringify({ path, content, worktreeId })
-      }),
+      agentConfigFileRpc<void>(
+        "WORKSPACE",
+        "agent-config.write",
+        { path, content },
+        { workspaceId, worktreeId }
+      ),
     createWorkspaceAgentWorktree: (workspaceId: string, payload: AgentConfigWorktreePayload) =>
       request<AgentConfigWorktree>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/worktrees`, {
         method: "POST",
@@ -556,6 +673,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<UserOpencodeProcess>(agentPath("/processes/me/initialize"), { method: "POST" }),
     getOpencodeRuntimeManagementOverview: (params: OpencodeRuntimeManagementOverviewParams = {}) =>
       request<OpencodeRuntimeManagementOverview>(`${opencodeRuntimeManagementBase}/overview${query({ ...params })}`),
+    getOpencodeRuntimeManagementUserProcesses: (params: OpencodeRuntimeManagementUserProcessParams) =>
+      request<PageResponse<OpencodeRuntimeProcess>>(`${opencodeRuntimeManagementBase}/user-processes${query({ ...params })}`),
     getOpencodeRuntimeContainerMetrics: (containerId: string, params: OpencodeRuntimeMetricHistoryParams = {}) =>
       request<OpencodeRuntimeContainerMetricHistory>(
         `${opencodeRuntimeManagementBase}/containers/${encodeURIComponent(containerId)}/metrics${query({ ...params })}`
@@ -563,6 +682,16 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     getOpencodeRuntimeBackendProcessMetrics: (backendProcessId: string, params: OpencodeRuntimeMetricHistoryParams = {}) =>
       request<OpencodeRuntimeBackendMetricHistory>(
         `${opencodeRuntimeManagementBase}/backend-processes/${encodeURIComponent(backendProcessId)}/metrics${query({ ...params })}`
+      ),
+    restartOpencodeRuntimeManagedProcess: (containerId: string, port: number) =>
+      request<OpencodeRuntimeManagedProcessCommandResult>(
+        `${opencodeRuntimeManagementBase}/containers/${encodeURIComponent(containerId)}/processes/${encodeURIComponent(String(port))}/restart`,
+        { method: "POST" }
+      ),
+    stopOpencodeRuntimeManagedProcess: (containerId: string, port: number) =>
+      request<OpencodeRuntimeManagedProcessCommandResult>(
+        `${opencodeRuntimeManagementBase}/containers/${encodeURIComponent(containerId)}/processes/${encodeURIComponent(String(port))}/stop`,
+        { method: "POST" }
       ),
     listScheduledTasks: (params: ScheduledTaskListParams = {}) =>
       request<PageResponse<ScheduledTaskManagementTask>>(
@@ -601,6 +730,10 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "PATCH",
         body: JSON.stringify(payload)
       }),
+    listCommonParameterLoadSnapshots: () =>
+      request<CommonParameterLoadSnapshot[]>(`${commonParameterBase}/load-snapshots`),
+    listCommonParameterChangeLogs: (parameterId: string) =>
+      request<CommonParameterChangeLog[]>(`${commonParameterBase}/${encodeURIComponent(parameterId)}/change-logs`),
     getRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}`)),
     cancelRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}/cancel`), { method: "POST" }),
     getRunDiff: (runId: string) => request<RunDiff>(agentPath(`/runs/${encodeURIComponent(runId)}/diff`)),
@@ -850,6 +983,14 @@ type BackendFileStatus = {
   path: string;
   exists: boolean;
   directory: boolean;
+  size: number;
+  lastModifiedAt?: string;
+};
+
+type BackendFileSearchResult = {
+  path: string;
+  name: string;
+  directory: string;
   size: number;
   lastModifiedAt?: string;
 };

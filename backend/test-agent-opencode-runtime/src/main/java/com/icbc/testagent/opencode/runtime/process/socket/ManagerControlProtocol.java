@@ -15,7 +15,9 @@ public final class ManagerControlProtocol {
     public static final String TYPE_COMMAND = "command";
     public static final String TYPE_COMMAND_RESULT = "commandResult";
     public static final String TYPE_ERROR = "error";
-    /** 后端→manager 下发运行时配置（当前为最大进程数），manager 热更新并按端口池 clamp。 */
+    /** manager→后端请求当前公共参数运行配置。 */
+    public static final String TYPE_CONFIG_REQUEST = "configRequest";
+    /** 后端→manager 下发运行时配置，manager 热更新路径并按端口池 clamp 最大进程数。 */
     public static final String TYPE_CONFIG_UPDATE = "configUpdate";
 
     /**

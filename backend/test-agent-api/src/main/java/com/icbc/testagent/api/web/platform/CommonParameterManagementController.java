@@ -6,6 +6,9 @@ import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.configuration.management.CommonParameterManagementApplicationService;
 import com.icbc.testagent.configuration.management.CommonParameterManagementApplicationService.CommonParameterFilter;
+import com.icbc.testagent.configuration.management.CommonParameterManagementResponses.ChangeLogResponse;
+import com.icbc.testagent.configuration.management.CommonParameterManagementResponses.LoadSnapshotResponse;
+import com.icbc.testagent.configuration.management.CommonParameterLoadSnapshotQueryService;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.dictionary.Dictionary;
 import java.util.Objects;
@@ -29,12 +32,16 @@ import reactor.core.scheduler.Schedulers;
 public class CommonParameterManagementController {
 
     private final CommonParameterManagementApplicationService service;
+    private final CommonParameterLoadSnapshotQueryService loadSnapshotQueryService;
 
     /**
-     * 注入通用参数管理应用服务。
+     * 注入通用参数管理应用服务与每进程加载快照查询服务。
      */
-    public CommonParameterManagementController(CommonParameterManagementApplicationService service) {
+    public CommonParameterManagementController(
+            CommonParameterManagementApplicationService service,
+            CommonParameterLoadSnapshotQueryService loadSnapshotQueryService) {
         this.service = Objects.requireNonNull(service, "service must not be null");
+        this.loadSnapshotQueryService = Objects.requireNonNull(loadSnapshotQueryService, "loadSnapshotQueryService must not be null");
     }
 
     /**
@@ -61,10 +68,36 @@ public class CommonParameterManagementController {
             @PathVariable String parameterId,
             @RequestBody(required = false) CommonParameterManagementDtos.UpdateValueRequest request,
             ServerWebExchange exchange) {
-        requireSuperAdmin(exchange);
+        AuthPrincipal principal = requireSuperAdmin(exchange);
         String traceId = RuntimeApiSupport.traceId(exchange);
         String newValue = request == null ? null : request.value();
-        return blocking(traceId, () -> service.updateValue(parameterId, newValue, traceId));
+        String userId = principal.userId() != null ? principal.userId().value() : null;
+        String username = principal.username();
+        return blocking(traceId, () -> service.updateValue(parameterId, newValue, traceId, userId, username));
+    }
+
+    /**
+     * 查询指定通用参数的修改历史记录。
+     */
+    @GetMapping("/{parameterId}/change-logs")
+    public Mono<ApiResponse<Object>> getChangeLogs(
+            @PathVariable String parameterId,
+            ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        return blocking(traceId, () -> service.findChangeLogs(parameterId));
+    }
+
+    /**
+     * 查询每个后端 Java 进程加载的通用参数值（原始值与展开值），仅限 SUPER_ADMIN。
+     */
+    @GetMapping("/load-snapshots")
+    public Mono<ApiResponse<Object>> loadSnapshots(ServerWebExchange exchange) {
+        requireSuperAdmin(exchange);
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        return blocking(traceId, () -> loadSnapshotQueryService.list().stream()
+                .map(LoadSnapshotResponse::from)
+                .toList());
     }
 
     private AuthPrincipal requireSuperAdmin(ServerWebExchange exchange) {

@@ -14,10 +14,24 @@ final class AgentConfigDtos {
     record BranchRequest(String branch, String operationId) {
     }
 
-    record WorktreeRequest(String baseName, String branch, String operationId) {
+    record WorktreeRequest(String baseName, String branch, String operationId, String linuxServerId) {
     }
 
     record FileContentRequest(String path, String content, String worktreeId) {
+    }
+
+    record FileRouteRequest(String scope, String workspaceId, String worktreeId, String linuxServerId) {
+    }
+
+    record FileRouteResponse(
+            String scope,
+            String workspaceId,
+            String worktreeId,
+            String linuxServerId,
+            String baseUrl,
+            String webSocketPath,
+            boolean sameServer,
+            String message) {
     }
 
     record StageRequest(List<String> files, String worktreeId) {

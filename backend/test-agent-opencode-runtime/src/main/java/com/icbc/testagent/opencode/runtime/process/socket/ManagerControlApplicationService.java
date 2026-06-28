@@ -141,6 +141,7 @@ public class ManagerControlApplicationService {
                         process.sessionPath(),
                         process.configPath(),
                         process.startedAt(),
+                        process.startCommand(),
                         process.traceId()))
                 .toList();
         heartbeatStore.recordManagerSnapshot(new ManagerRuntimeSnapshot(container, manager, connections, metrics, managedProcesses));

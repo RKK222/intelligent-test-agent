@@ -73,7 +73,7 @@ public class WorkspaceFileRoutingService {
     public WorkspaceFileRouteResponse routeWorkspace(UserId userId, String agentId, WorkspaceId workspaceId, String traceId) {
         Workspace workspace = workspaceRepository.findById(workspaceId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value())));
-        UserOpencodeProcessStatusResponse process = assignmentService.status(userId, agentId, traceId);
+        UserOpencodeProcessFileRoutingAffinity process = assignmentService.fileRoutingAffinity(userId, agentId, traceId);
         String agentLinuxServerId = readyLinuxServerId(process, workspaceId.value());
         String workspaceLinuxServerId = workspace.linuxServerId() == null ? agentLinuxServerId : workspace.linuxServerId();
         if (!workspaceLinuxServerId.equals(agentLinuxServerId)) {
@@ -177,7 +177,7 @@ public class WorkspaceFileRoutingService {
                 .toList();
     }
 
-    private String readyLinuxServerId(UserOpencodeProcessStatusResponse process, String workspaceId) {
+    private String readyLinuxServerId(UserOpencodeProcessFileRoutingAffinity process, String workspaceId) {
         if (process.status() != UserOpencodeProcessAvailability.READY || process.linuxServerId() == null || process.linuxServerId().isBlank()) {
             throw new PlatformException(
                     ErrorCode.OPENCODE_UNAVAILABLE,

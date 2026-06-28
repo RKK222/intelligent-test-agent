@@ -8,6 +8,7 @@ import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.ContainerRuntimeMetricSample;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
+import com.icbc.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
@@ -17,6 +18,7 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessFilter;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.ServerRuntimeMetricSample;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
+import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
 import java.time.Clock;
@@ -24,6 +26,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -44,6 +47,7 @@ public class RuntimeManagementQueryService {
 
     private final OpencodeProcessManagementRepository repository;
     private final UserRepository userRepository;
+    private final OpencodeProcessManagerGateway gateway;
     private final OpencodeProcessHeartbeatStore heartbeatStore;
     private final Clock clock;
 
@@ -54,15 +58,16 @@ public class RuntimeManagementQueryService {
     public RuntimeManagementQueryService(
             OpencodeProcessManagementRepository repository,
             UserRepository userRepository,
+            OpencodeProcessManagerGateway gateway,
             OpencodeProcessHeartbeatStore heartbeatStore) {
-        this(repository, userRepository, heartbeatStore, Clock.systemUTC());
+        this(repository, userRepository, gateway, heartbeatStore, Clock.systemUTC());
     }
 
     /**
      * 测试构造器允许固定时钟，避免快照时间不稳定。
      */
     public RuntimeManagementQueryService(OpencodeProcessManagementRepository repository, Clock clock) {
-        this(repository, disabledUserRepository(), disabledHeartbeatStore(), clock);
+        this(repository, disabledUserRepository(), new UnavailableOpencodeProcessManagerGateway(), disabledHeartbeatStore(), clock);
     }
 
     /**
@@ -72,7 +77,7 @@ public class RuntimeManagementQueryService {
             OpencodeProcessManagementRepository repository,
             UserRepository userRepository,
             Clock clock) {
-        this(repository, userRepository, disabledHeartbeatStore(), clock);
+        this(repository, userRepository, new UnavailableOpencodeProcessManagerGateway(), disabledHeartbeatStore(), clock);
     }
 
     /**
@@ -83,8 +88,21 @@ public class RuntimeManagementQueryService {
             UserRepository userRepository,
             OpencodeProcessHeartbeatStore heartbeatStore,
             Clock clock) {
+        this(repository, userRepository, new UnavailableOpencodeProcessManagerGateway(), heartbeatStore, clock);
+    }
+
+    /**
+     * 完整测试构造器允许替换时钟、心跳端口和 manager 网关。
+     */
+    public RuntimeManagementQueryService(
+            OpencodeProcessManagementRepository repository,
+            UserRepository userRepository,
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            Clock clock) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
+        this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
@@ -115,9 +133,7 @@ public class RuntimeManagementQueryService {
         var containers = managerSnapshots.stream()
                 .map(snapshot -> new RuntimeManagementContainer(snapshot.container(), snapshot.metrics()))
                 .toList();
-        var managers = managerSnapshots.stream()
-                .map(ManagerRuntimeSnapshot::manager)
-                .toList();
+        var managers = runtimeManagers(managerSnapshots);
         var connections = managerSnapshots.stream()
                 .flatMap(snapshot -> snapshot.connections().stream())
                 .limit(TOPOLOGY_LIMIT)
@@ -159,6 +175,45 @@ public class RuntimeManagementQueryService {
                 managers,
                 connections,
                 new PageResponse<>(rows, processPage.page(), processPage.size(), processPage.total()));
+    }
+
+    /**
+     * 按用户关键字查询 opencode server 进程，并通过 manager 主动探测 PID 与 HTTP 健康状态。
+     */
+    public PageResponse<RuntimeManagementOpencodeProcess> userProcesses(
+            String keyword,
+            PageRequest pageRequest,
+            String traceId) {
+        List<com.icbc.testagent.domain.user.User> users = resolveUsers(keyword);
+        if (users.isEmpty()) {
+            return new PageResponse<>(List.of(), pageRequest.page(), pageRequest.size(), 0);
+        }
+        Map<UserId, String> usernames = new LinkedHashMap<>();
+        List<OpencodeServerProcess> processes = new ArrayList<>();
+        for (com.icbc.testagent.domain.user.User user : users) {
+            usernames.put(user.userId(), user.username());
+            processes.addAll(repository.findOpencodeServerProcesses(
+                    new OpencodeServerProcessFilter(null, null, null, user.userId()),
+                    new PageRequest(1, PROCESS_SCAN_LIMIT)).items());
+        }
+        List<OpencodeServerProcess> ordered = processes.stream()
+                .distinct()
+                .sorted((left, right) -> right.updatedAt().compareTo(left.updatedAt()))
+                .toList();
+        List<OpencodeServerProcess> pageItems = ordered.stream()
+                .skip(pageRequest.offset())
+                .limit(pageRequest.size())
+                .toList();
+        Map<OpencodeProcessId, UserOpencodeProcessBinding> bindings = repository.findUserBindingsByProcessIds(
+                pageItems.stream().map(OpencodeServerProcess::processId).toList());
+        List<RuntimeManagementOpencodeProcess> rows = pageItems.stream()
+                .map(process -> probeUserProcess(
+                        process,
+                        Optional.ofNullable(bindings.get(process.processId())),
+                        Optional.ofNullable(usernames.get(process.userId())),
+                        traceId))
+                .toList();
+        return new PageResponse<>(rows, pageRequest.page(), pageRequest.size(), ordered.size());
     }
 
     /**
@@ -268,6 +323,99 @@ public class RuntimeManagementQueryService {
         return new PageResponse<>(pageItems, pageRequest.page(), pageRequest.size(), liveProcesses.size());
     }
 
+    private List<RuntimeManagementManager> runtimeManagers(List<ManagerRuntimeSnapshot> managerSnapshots) {
+        Map<ManagedProcessKey, List<OpencodeServerProcess>> candidatesByKey = managedProcessCandidates(managerSnapshots);
+        List<OpencodeProcessId> processIds = candidatesByKey.values().stream()
+                .flatMap(List::stream)
+                .map(OpencodeServerProcess::processId)
+                .distinct()
+                .toList();
+        Map<OpencodeProcessId, UserOpencodeProcessBinding> bindings = processIds.isEmpty()
+                ? Map.of()
+                : repository.findUserBindingsByProcessIds(processIds);
+        return managerSnapshots.stream()
+                .map(snapshot -> new RuntimeManagementManager(
+                        snapshot.manager(),
+                        enrichManagedProcesses(snapshot, candidatesByKey, bindings)))
+                .toList();
+    }
+
+    private Map<ManagedProcessKey, List<OpencodeServerProcess>> managedProcessCandidates(
+            List<ManagerRuntimeSnapshot> managerSnapshots) {
+        Map<ContainerKey, Set<Integer>> portsByContainer = new LinkedHashMap<>();
+        for (ManagerRuntimeSnapshot snapshot : managerSnapshots) {
+            ContainerKey key = new ContainerKey(
+                    snapshot.manager().linuxServerId(),
+                    snapshot.manager().containerId());
+            for (ManagedOpencodeProcessSnapshot process : snapshot.managedProcesses()) {
+                portsByContainer.computeIfAbsent(key, ignored -> new LinkedHashSet<>()).add(process.port());
+            }
+        }
+        Map<ManagedProcessKey, List<OpencodeServerProcess>> candidatesByKey = new LinkedHashMap<>();
+        for (Map.Entry<ContainerKey, Set<Integer>> entry : portsByContainer.entrySet()) {
+            if (entry.getValue().isEmpty()) {
+                continue;
+            }
+            ContainerKey containerKey = entry.getKey();
+            List<OpencodeServerProcess> candidates = repository.findOpencodeServerProcesses(
+                            new OpencodeServerProcessFilter(
+                                    null,
+                                    containerKey.linuxServerId(),
+                                    containerKey.containerId(),
+                                    null),
+                            new PageRequest(1, PROCESS_SCAN_LIMIT))
+                    .items();
+            for (OpencodeServerProcess candidate : candidates) {
+                if (!entry.getValue().contains(candidate.port())) {
+                    continue;
+                }
+                ManagedProcessKey key = new ManagedProcessKey(
+                        candidate.linuxServerId(),
+                        candidate.containerId(),
+                        candidate.port());
+                candidatesByKey.computeIfAbsent(key, ignored -> new ArrayList<>()).add(candidate);
+            }
+        }
+        return candidatesByKey;
+    }
+
+    private List<RuntimeManagementManagedProcess> enrichManagedProcesses(
+            ManagerRuntimeSnapshot snapshot,
+            Map<ManagedProcessKey, List<OpencodeServerProcess>> candidatesByKey,
+            Map<OpencodeProcessId, UserOpencodeProcessBinding> bindings) {
+        List<RuntimeManagementManagedProcess> rows = new ArrayList<>();
+        for (ManagedOpencodeProcessSnapshot managedProcess : snapshot.managedProcesses()) {
+            ManagedProcessKey key = new ManagedProcessKey(
+                    snapshot.manager().linuxServerId(),
+                    snapshot.manager().containerId(),
+                    managedProcess.port());
+            List<OpencodeServerProcess> candidates = candidatesByKey.getOrDefault(key, List.of());
+            Optional<OpencodeServerProcess> activeCandidate = candidates.stream()
+                    .filter(candidate -> isActiveBinding(bindings.get(candidate.processId())))
+                    .findFirst();
+            if (activeCandidate.isPresent()) {
+                OpencodeServerProcess process = activeCandidate.get();
+                UserOpencodeProcessBinding binding = bindings.get(process.processId());
+                rows.add(RuntimeManagementManagedProcess.bound(
+                        managedProcess,
+                        process,
+                        binding,
+                        username(binding.userId())));
+                continue;
+            }
+            if (!candidates.isEmpty()) {
+                rows.add(RuntimeManagementManagedProcess.unbound(managedProcess, candidates.getFirst()));
+            } else {
+                rows.add(RuntimeManagementManagedProcess.unbound(managedProcess));
+            }
+        }
+        return rows;
+    }
+
+    private boolean isActiveBinding(UserOpencodeProcessBinding binding) {
+        return binding != null && binding.status() == UserOpencodeProcessBindingStatus.ACTIVE;
+    }
+
     private Optional<OpencodeServerProcessFilter> resolveFilter(OpencodeServerProcessFilter filter) {
         OpencodeServerProcessFilter source = filter == null ? OpencodeServerProcessFilter.empty() : filter;
         if (source.username() == null) {
@@ -279,6 +427,109 @@ public class RuntimeManagementQueryService {
                         source.linuxServerId(),
                         source.containerId(),
                         user.userId()));
+    }
+
+    private List<com.icbc.testagent.domain.user.User> resolveUsers(String keyword) {
+        String normalized = keyword == null ? "" : keyword.trim();
+        if (normalized.isBlank()) {
+            return List.of();
+        }
+        Map<UserId, com.icbc.testagent.domain.user.User> users = new LinkedHashMap<>();
+        try {
+            userRepository.findByUserId(new UserId(normalized)).ifPresent(user -> users.put(user.userId(), user));
+        } catch (IllegalArgumentException ignored) {
+            // 关键字不是合法 userId 时继续按用户名和统一认证号查找。
+        }
+        userRepository.findByUsername(normalized).ifPresent(user -> users.put(user.userId(), user));
+        userRepository.findByUnifiedAuthId(normalized).ifPresent(user -> users.put(user.userId(), user));
+        userRepository.findPage(normalized, new PageRequest(1, 50))
+                .items()
+                .forEach(user -> users.put(user.userId(), user));
+        return users.values().stream().toList();
+    }
+
+    private RuntimeManagementOpencodeProcess probeUserProcess(
+            OpencodeServerProcess process,
+            Optional<UserOpencodeProcessBinding> binding,
+            Optional<String> username,
+            String traceId) {
+        Instant checkedAt = Instant.now(clock);
+        try {
+            OpencodeProcessHealthResult health = gateway.checkHealth(new OpencodeProcessHealthCommand(
+                    process.processId(),
+                    process.baseUrl(),
+                    traceId));
+            if (health.healthy()) {
+                OpencodeServerProcess running = updateProcessProbeSnapshot(
+                        process,
+                        OpencodeServerProcessStatus.RUNNING,
+                        checkedAt,
+                        health.message(),
+                        traceId);
+                heartbeatStore.recordOpencodeHeartbeat(running.processId(), checkedAt);
+                return new RuntimeManagementOpencodeProcess(
+                        running,
+                        binding,
+                        username,
+                        "RUNNING",
+                        "HEALTHY",
+                        false);
+            }
+            OpencodeServerProcessStatus status = notRunningMessage(health.message())
+                    ? OpencodeServerProcessStatus.STOPPED
+                    : OpencodeServerProcessStatus.UNHEALTHY;
+            OpencodeServerProcess unhealthy = updateProcessProbeSnapshot(
+                    process,
+                    status,
+                    checkedAt,
+                    health.message(),
+                    traceId);
+            String probeStatus = status == OpencodeServerProcessStatus.STOPPED ? "NOT_RUNNING" : "UNHEALTHY";
+            return new RuntimeManagementOpencodeProcess(unhealthy, binding, username, probeStatus, probeStatus, true);
+        } catch (RuntimeException exception) {
+            OpencodeServerProcess failed = updateProcessProbeSnapshot(
+                    process,
+                    OpencodeServerProcessStatus.FAILED,
+                    checkedAt,
+                    exception.getMessage(),
+                    traceId);
+            return new RuntimeManagementOpencodeProcess(failed, binding, username, "CHECK_FAILED", "CHECK_FAILED", true);
+        }
+    }
+
+    private OpencodeServerProcess updateProcessProbeSnapshot(
+            OpencodeServerProcess process,
+            OpencodeServerProcessStatus status,
+            Instant checkedAt,
+            String healthMessage,
+            String traceId) {
+        OpencodeServerProcess updated = new OpencodeServerProcess(
+                process.processId(),
+                process.userId(),
+                process.linuxServerId(),
+                process.containerId(),
+                process.port(),
+                process.pid(),
+                process.baseUrl(),
+                status,
+                process.sessionPath(),
+                process.configPath(),
+                process.startedAt(),
+                checkedAt,
+                healthMessage,
+                process.createdAt(),
+                checkedAt,
+                traceId);
+        return repository.saveOpencodeServerProcess(updated);
+    }
+
+    private boolean notRunningMessage(String message) {
+        String normalized = message == null ? "" : message.toLowerCase(java.util.Locale.ROOT);
+        return normalized.contains("pid is not alive")
+                || normalized.contains("process is not running")
+                || normalized.contains("process not found")
+                || normalized.contains("state not found")
+                || normalized.contains("already stopped");
     }
 
     private Optional<String> username(UserId userId) {
@@ -473,6 +724,12 @@ public class RuntimeManagementQueryService {
             @Override public boolean existsByUsername(String username) { return false; }
             @Override public boolean existsByUnifiedAuthId(String unifiedAuthId) { return false; }
         };
+    }
+
+    private record ContainerKey(LinuxServerId linuxServerId, OpencodeContainerId containerId) {
+    }
+
+    private record ManagedProcessKey(LinuxServerId linuxServerId, OpencodeContainerId containerId, int port) {
     }
 
     private static final class BackendMetricAccumulator {

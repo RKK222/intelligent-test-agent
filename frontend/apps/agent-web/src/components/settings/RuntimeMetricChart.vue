@@ -11,6 +11,7 @@ const props = defineProps<{
   title: string;
   samples: Record<string, unknown>[];
   series: MetricSeries[];
+  yAxisUnit?: string;
 }>();
 
 const chartEl = ref<HTMLDivElement | null>(null);
@@ -36,13 +37,29 @@ function chartOption() {
       boundaryGap: false,
       data: props.samples.map((sample) => formatMetricSampleTime(sample.sampledAt))
     },
-    yAxis: { type: "value", scale: true },
+    yAxis: {
+      type: "value",
+      scale: true,
+      axisLabel: props.yAxisUnit
+        ? { formatter: `{value} ${props.yAxisUnit}` }
+        : undefined
+    },
     series: props.series.map((item) => ({
       name: item.name,
       type: "line",
       showSymbol: false,
       connectNulls: false,
-      data: props.samples.map((sample) => valueOf(sample, item.field))
+      data: props.samples.map((sample) => {
+        const val = valueOf(sample, item.field);
+        if (val === null) return null;
+        if (props.yAxisUnit === "G") {
+          return val / (1024 * 1024 * 1024);
+        }
+        return val;
+      }),
+      valueFormatter: props.yAxisUnit === "G"
+        ? (val: unknown) => `${parseFloat(Number(val).toFixed(2))} G`
+        : undefined
     }))
   };
 }

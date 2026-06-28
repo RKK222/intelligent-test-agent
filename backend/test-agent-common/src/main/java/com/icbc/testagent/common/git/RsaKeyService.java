@@ -8,12 +8,16 @@ import java.security.KeyFactory;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.interfaces.RSAPrivateCrtKey;
+import java.security.spec.AlgorithmParameterSpec;
+import java.security.spec.MGF1ParameterSpec;
 import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.RSAPublicKeySpec;
 import java.util.Base64;
 import java.util.Map;
 import java.util.logging.Logger;
 import javax.crypto.Cipher;
+import javax.crypto.spec.OAEPParameterSpec;
+import javax.crypto.spec.PSource;
 
 /**
  * 非对称密钥服务：加载 RSA 私钥文件（classpath:rsa-private.key），推导出公钥，
@@ -29,6 +33,11 @@ public class RsaKeyService {
     private static final Logger LOGGER = Logger.getLogger(RsaKeyService.class.getName());
     private static final String RSA_ALGORITHM = "RSA";
     private static final String CIPHER_TRANSFORMATION = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding";
+    private static final OAEPParameterSpec WEB_CRYPTO_OAEP_SHA256 = new OAEPParameterSpec(
+            "SHA-256",
+            "MGF1",
+            MGF1ParameterSpec.SHA256,
+            PSource.PSpecified.DEFAULT);
 
     private final PrivateKey privateKey;
     private final PublicKey publicKey;
@@ -69,11 +78,10 @@ public class RsaKeyService {
     /** 使用 RSA 私钥解密数据。 */
     public byte[] decrypt(byte[] encryptedData) {
         try {
-            Cipher cipher = Cipher.getInstance(CIPHER_TRANSFORMATION);
-            cipher.init(Cipher.DECRYPT_MODE, privateKey);
-            return cipher.doFinal(encryptedData);
+            return decrypt(encryptedData, WEB_CRYPTO_OAEP_SHA256);
         } catch (PlatformException e) {
-            throw e;
+            // 兼容历史 Java 夹具或旧密文：SunJCE transformation 默认 MGF1 参数可能不是 SHA-256。
+            return decrypt(encryptedData, null);
         } catch (Exception e) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "RSA decryption failed", Map.of(), e);
         }
@@ -82,6 +90,20 @@ public class RsaKeyService {
     /** 返回公钥对象，供测试中模拟前端加密。 */
     public PublicKey getPublicKey() {
         return publicKey;
+    }
+
+    private byte[] decrypt(byte[] encryptedData, AlgorithmParameterSpec parameterSpec) {
+        try {
+            Cipher cipher = Cipher.getInstance(CIPHER_TRANSFORMATION);
+            if (parameterSpec == null) {
+                cipher.init(Cipher.DECRYPT_MODE, privateKey);
+            } else {
+                cipher.init(Cipher.DECRYPT_MODE, privateKey, parameterSpec);
+            }
+            return cipher.doFinal(encryptedData);
+        } catch (Exception e) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "RSA decryption failed", Map.of(), e);
+        }
     }
 
     private static PrivateKey parsePkcs8PrivateKey(String pem) {

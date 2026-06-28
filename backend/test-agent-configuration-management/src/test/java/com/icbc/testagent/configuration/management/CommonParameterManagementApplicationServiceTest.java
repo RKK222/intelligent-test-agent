@@ -15,6 +15,8 @@ import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.configuration.management.CommonParameterManagementApplicationService.CommonParameterFilter;
 import com.icbc.testagent.configuration.management.CommonParameterManagementResponses.CommonParameterResponse;
 import com.icbc.testagent.domain.configuration.CommonParameter;
+import com.icbc.testagent.domain.configuration.CommonParameterChangeLog;
+import com.icbc.testagent.domain.configuration.CommonParameterChangeLogRepository;
 import com.icbc.testagent.domain.configuration.CommonParameterRepository;
 import com.icbc.testagent.domain.configuration.CommonParameterUpdatedEvent;
 import com.icbc.testagent.domain.configuration.ParameterPlatform;
@@ -75,13 +77,15 @@ class CommonParameterManagementApplicationServiceTest {
                 .thenReturn(Optional.of(updated));
         when(repository.updateValue(eq("param_opencode_workspace_root_linux"), eq("/new"), eq(UPDATED_AT))).thenReturn(1);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
-        CommonParameterManagementApplicationService service = newService(repository, publisher);
+        CommonParameterChangeLogRepository changeLogRepository = mock(CommonParameterChangeLogRepository.class);
+        CommonParameterManagementApplicationService service = newService(repository, changeLogRepository, publisher);
 
-        CommonParameterResponse response = service.updateValue("param_opencode_workspace_root_linux", "/new", "trace_test");
+        CommonParameterResponse response = service.updateValue("param_opencode_workspace_root_linux", "/new", "trace_test", "usr_test", "testuser");
 
         assertThat(response.parameterValue()).isEqualTo("/new");
         assertThat(response.updatedAt()).isEqualTo(UPDATED_AT);
         verify(repository).updateValue("param_opencode_workspace_root_linux", "/new", UPDATED_AT);
+        verify(changeLogRepository).save(any(CommonParameterChangeLog.class));
         verify(publisher).publishEvent(any(CommonParameterUpdatedEvent.class));
     }
 
@@ -91,7 +95,7 @@ class CommonParameterManagementApplicationServiceTest {
         when(repository.findByParameterId("param_missing")).thenReturn(Optional.empty());
         CommonParameterManagementApplicationService service = newService(repository);
 
-        assertThatThrownBy(() -> service.updateValue("param_missing", "/new", "trace_test"))
+        assertThatThrownBy(() -> service.updateValue("param_missing", "/new", "trace_test", "usr_test", "testuser"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
     }
@@ -103,7 +107,7 @@ class CommonParameterManagementApplicationServiceTest {
                 .thenReturn(Optional.of(parameter("param_opencode_workspace_root_linux", "OPENCODE_WORKSPACE_ROOT", "/old", ParameterPlatform.LINUX)));
         CommonParameterManagementApplicationService service = newService(repository);
 
-        assertThatThrownBy(() -> service.updateValue("param_opencode_workspace_root_linux", "  ", "trace_test"))
+        assertThatThrownBy(() -> service.updateValue("param_opencode_workspace_root_linux", "  ", "trace_test", "usr_test", "testuser"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
     }
@@ -116,18 +120,20 @@ class CommonParameterManagementApplicationServiceTest {
         when(repository.updateValue(eq("param_opencode_workspace_root_linux"), eq("/new"), eq(UPDATED_AT))).thenReturn(0);
         CommonParameterManagementApplicationService service = newService(repository);
 
-        assertThatThrownBy(() -> service.updateValue("param_opencode_workspace_root_linux", "/new", "trace_test"))
+        assertThatThrownBy(() -> service.updateValue("param_opencode_workspace_root_linux", "/new", "trace_test", "usr_test", "testuser"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
     }
 
     private static CommonParameterManagementApplicationService newService(CommonParameterRepository repository) {
-        return newService(repository, mock(ApplicationEventPublisher.class));
+        return newService(repository, mock(CommonParameterChangeLogRepository.class), mock(ApplicationEventPublisher.class));
     }
 
     private static CommonParameterManagementApplicationService newService(
-            CommonParameterRepository repository, ApplicationEventPublisher publisher) {
-        return new CommonParameterManagementApplicationService(repository, publisher, FIXED_CLOCK);
+            CommonParameterRepository repository,
+            CommonParameterChangeLogRepository changeLogRepository,
+            ApplicationEventPublisher publisher) {
+        return new CommonParameterManagementApplicationService(repository, changeLogRepository, publisher, FIXED_CLOCK);
     }
 
     private static CommonParameter parameter(String parameterId, String english, String value, ParameterPlatform platform) {

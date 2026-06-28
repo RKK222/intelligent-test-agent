@@ -117,6 +117,69 @@ class ManagerControlApplicationServiceTest {
         });
     }
 
+    @Test
+    void managerHeartbeatMapsManagedProcessStartCommandToRedisSnapshot() {
+        FakeRepository repository = new FakeRepository();
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        BackendJavaProcessLifecycleService backendLifecycle = backendLifecycle(repository, heartbeatStore);
+        ManagerControlApplicationService service = new ManagerControlApplicationService(
+                repository,
+                heartbeatStore,
+                backendLifecycle,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        String startCommand = "XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs";
+        ManagerControlMessage heartbeat = new ManagerControlMessage(
+                ManagerControlProtocol.TYPE_MANAGER_HEARTBEAT,
+                ManagerControlProtocol.VERSION,
+                "trace_1234567890abcdef",
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                5,
+                1,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of(new ManagerManagedProcess(
+                        4096,
+                        12345L,
+                        "http://10.8.0.12:4096",
+                        "/data/opencode/session/4096",
+                        "/data/opencode/.config/opencode/",
+                        NOW,
+                        startCommand,
+                        "trace_process")),
+                Map.of("commands", List.of("start", "health")),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of("bjp_1234567890abcdef"),
+                null,
+                "cgroup");
+
+        service.managerHeartbeat(heartbeat);
+
+        assertThat(heartbeatStore.managerSnapshots).singleElement().satisfies(snapshot ->
+                assertThat(snapshot.managedProcesses()).singleElement().satisfies(process ->
+                        assertThat(process.startCommand()).isEqualTo(startCommand)));
+    }
+
     private static BackendJavaProcessLifecycleService backendLifecycle(
             FakeRepository repository,
             OpencodeProcessHeartbeatStore heartbeatStore) {

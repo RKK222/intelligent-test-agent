@@ -127,6 +127,16 @@ class OpencodeProcessHeartbeatMaintenanceServiceTest {
         public OpencodeProcessStartResult startProcess(OpencodeProcessStartCommand command) {
             throw new UnsupportedOperationException("startProcess is not used");
         }
+
+        @Override
+        public OpencodeProcessControlResult restartProcess(OpencodeProcessControlCommand command) {
+            throw new UnsupportedOperationException("restartProcess is not used");
+        }
+
+        @Override
+        public OpencodeProcessControlResult stopProcess(OpencodeProcessControlCommand command) {
+            throw new UnsupportedOperationException("stopProcess is not used");
+        }
     }
 
     private static final class FakeHeartbeatStore implements OpencodeProcessHeartbeatStore {

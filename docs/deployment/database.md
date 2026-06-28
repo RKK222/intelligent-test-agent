@@ -6,7 +6,7 @@
 
 - 关系型数据库连接池继续统一使用 Druid，migration 继续由 Flyway 管理。
 - 新增或修改关系型数据库 SQL 必须通过 `test-agent-persistence` 的 MyBatis XML mapper 实现；mapper 接口只声明方法，禁止写注解 SQL。
-- 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository` 已作为 MyBatis 试点迁移。
+- 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository` 与 Agent 配置 `AgentConfigRepository` 已迁移到 MyBatis XML。
 - Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止通过 Flyway 写入测试、演示、个人开发或环境专属数据（例如样例应用/工作区、默认开发账号、默认本地进程绑定）。此类数据必须放在测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程中。历史已存在的开发种子迁移仅为兼容已落库环境保留，后续不得新增同类迁移。
 
 ## V1 核心表
@@ -284,6 +284,16 @@
 - 使用独立时间戳版本 `20260627020000`，不得复用已存在的 `20260627010000` SSH key migration 版本。
 - 该参数属于生产运行所需系统参数，不是测试或演示数据；如果运维需要调整默认值，应通过通用参数管理或显式 SQL 更新现有记录，不改写已发布 migration。
 
+## V20260627214000 user_roles identity 序列兼容修复
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260627214000__reset_user_roles_identity_sequence.sql` 将 `user_roles.id` identity 起点重置到 `1000000`，兼容历史库或人工数据导入后序列值落后于已有主键，导致新增用户授予角色时报 `user_roles_pkey` 冲突的问题。
+
+兼容策略：
+
+- `user_roles.id` 是数据库 surrogate PK，不对 API 暴露；业务唯一性仍由 `(user_id, dict_id)` 约束保证。
+- 迁移只调整 identity 后续发号起点，不写入测试、演示或环境专属数据，不修改已有角色关系。
+- `test-agent-system-management` 的创建用户流程在业务服务层使用事务，确保用户和角色要么同时写入成功，要么同时回滚，避免角色写入失败时留下无角色用户。
+
 ## V20260626150000 通用参数与工作空间创建进度
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260626150000__add_common_parameters_and_workspace_create_operations.sql` 增加通用参数、代码库英文名和设置页创建工作空间进度表。
@@ -316,6 +326,20 @@
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260626180000__drop_deprecated_opencode_workspace_root_parameter.sql` 删除 `common_parameters` 中无消费方的 `OPENCODE_WORKSPACE_ROOT`（linux/windows 各一行）。该参数仅为 `OPENCODE_APP_WORKSPACE_ROOT` / `OPENCODE_PERSONAL_WORKTREE_ROOT` 的父目录，子目录参数已独立维护全路径，父参数不再需要。
 
+## 通用参数内存缓存与加载快照（无 schema 变更）
+
+通用参数值支持变量引用 `${englishName}`，在应用层读取时展开；`${NAME}` 先按通用参数引用解析，未命中时再读取 Java 后端进程环境变量，`$NAME` 直接读取环境变量；路径值开头的 `$HOME` 和 `~/` 会展开为当前用户主目录，**不涉及表结构变更**（`parameter_value` 已为 `text`）。所有通用参数在后端启动时全量加载到内存（`InMemoryCommonParameterValues`），消费方走内存读取；`PATCH` 修改后由 `CommonParameterCacheRefresher` reload 内存并发布 `common-parameter.refresh-requested` 跨实例广播，通知其他后端实例刷新内存。
+
+每台后端 Java 实例刷新内存缓存后，把自己的加载快照（原始值 + 展开值 + 解析状态）写入 Redis，供管理端 `GET /api/internal/platform/configuration-management/common-parameters/load-snapshots` 聚合展示：
+
+| Redis key | 类型 | TTL | 用途 |
+|---|---|---|---|
+| `test-agent:common-param-snapshot:backend:{backendProcessId}` | String(JSON) | 30 秒 | 单个后端进程加载的通用参数快照 |
+| `test-agent:common-param-snapshot:index:backend` | Set | - | 存活快照的后端进程 ID 索引 |
+
+进程崩溃后快照 30 秒内自动消失，与运行心跳 10 秒 TTL 不同步可接受（参数展示非实时关键）。广播总线未启用（`test-agent.server-broadcast.enabled=false`）或 Redis 故障时，仅本地实例刷新内存，全互联拓扑下各实例各自读库仍能最终一致，但跨实例 manager 下发需等待本实例下次刷新。
+
+
 ## V20260626170000 公共 Agent 配置管理
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260626170000__add_agent_config_management.sql` 增加公共 Agent 配置参数、worktree 记录和 Git 长操作进度表。
@@ -332,7 +356,7 @@
 
 | 表 | 说明 |
 |---|---|
-| `agent_config_worktrees` | 公共级/工作空间级 Agent 配置 worktree 记录，包含 scope、workspaceId、worktreeName、branch、rootPath、createdBy、status 和时间戳。 |
+| `agent_config_worktrees` | 公共级/工作空间级 Agent 配置 worktree 记录，包含 scope、workspaceId、worktreeName、branch、rootPath、createdBy、status 和时间戳。后续迁移追加 `linux_server_id` 记录所在服务器。 |
 | `agent_config_operations` | Agent 配置 Git 长操作进度快照，包含 operationId、scope、action、status、currentStep、错误信息、traceId、branch、commitHash 和时间戳。 |
 
 兼容策略：
@@ -340,8 +364,28 @@
 - `OPENCODE_PUBLIC_AGENT_GIT_URL` 默认 `UNCONFIGURED`，功能只读展示但禁用 Git 更新/发布；运维更新参数值后启用。
 - scope/status 枚举由领域对象校验，数据库保存字符串并保留非空约束，避免 H2 与 PostgreSQL 在同名列 check 表达式上的兼容差异。
 - 公共 agent 标准目录是 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT/opencode/agents/`；读兼容 legacy `opencode/agent/`，写入标准目录。
+- 公共配置 Git 根目录首次使用时允许缺失或为空目录，初始化/公共更新流程会按所选分支 clone；公共 worktree 创建不再 clone，必须选择已初始化服务器，已有非空非 Git 目录不会被覆盖。
 - 工作空间级标准目录是 `{workspace.rootPath}/.opencode/agents/`；读兼容 `.opencode/agent/`，写入标准目录。
 - Agent 配置 operation 供 WebSocket snapshot 和历史查询使用，不写入 `run_events`，也不参与 RunEvent SSE 续传。
+
+## V20260628194000 Agent 配置 worktree 服务器归属
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260628194000__add_agent_config_worktree_server.sql` 为 Agent 配置 worktree 增加分布式部署下的服务器归属字段。
+
+| 表 | 字段 | 说明 |
+|---|---|---|
+| `agent_config_worktrees` | `linux_server_id` | Agent 配置 worktree 所在 Linux 服务器 ID；历史记录允许为空。 |
+
+索引：
+
+- `idx_agent_config_worktrees_linux_server(linux_server_id, status, updated_at)` 支撑按服务器归属查询、排查和后续清理。
+
+兼容策略：
+
+- 新建公共和工作空间 Agent worktree 均写入当前目标服务器 `linuxServerId`。
+- 公共 worktree 后续文件、diff、stage、commit、publish 依据该字段由当前后端代理到目标服务器执行；浏览器不直连目标服务器。
+- 历史空值记录按当前服务器兼容执行；如果本地目录不存在或归属无法确认，管理员重新创建 worktree。
+- AgentConfig 持久化实现已迁到 MyBatis XML：`AgentConfigMapper.xml` 维护 SQL，`JdbcAgentConfigRepository` 仅保留为迁移窗口类，不再注册为 Spring Repository。
 
 ## V20260626120900 应用版本工作区服务器副本
 
@@ -671,6 +715,33 @@ V10 种子数据对 F-COSS 的影响：
 ## 后续 migration 版本规则
 
 V18 及以前保留既有数字版本，已在本地或共享库执行过的 migration 禁止删除、重命名或改写。V18 之后新增 migration 必须使用 `VyyyyMMddHHmmss__description.sql`，时间戳按开发者创建迁移时的本地时间确定；多人并行开发时不得再抢占 `V19`、`V20` 这类顺序数字版本。提交前需运行持久化模块 migration 命名测试，确认版本唯一、历史已落库 migration 仍可解析且时间戳规则生效。
+
+## V20260628100000 通用参数修改日志表
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260628100000__add_common_parameter_change_logs.sql` 创建通用参数修改日志表，用于记录每次参数值修改的审计信息：
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 数据库自增 surrogate PK，不对 API 暴露。 |
+| `log_id` | 日志业务 ID，使用 `log_` 前缀。 |
+| `parameter_id` | 关联参数业务 ID，外键引用 `common_parameters.parameter_id`。 |
+| `old_value` | 修改前的参数值，可为空。 |
+| `new_value` | 修改后的参数值。 |
+| `changed_by_user_id` | 修改用户 ID，可为空（兼容 static token 场景）。 |
+| `changed_by_username` | 修改用户名，可为空。 |
+| `trace_id` | 链路 traceId。 |
+| `created_at` | 修改时间。 |
+
+约束和索引：
+
+- `fk_common_parameter_change_logs_parameter` 外键保证日志关联的参数存在。
+- `idx_common_parameter_change_logs_parameter` 支撑按参数查询修改历史并按时间倒序排列。
+
+兼容策略：
+
+- 新增表，不影响现有 `common_parameters` 数据。
+- 修改参数值时自动写入日志，无需人工干预。
+- 日志表只追加，不提供删除接口，满足审计要求。
 
 ## V20260626210000 数据库表和字段中文注释
 

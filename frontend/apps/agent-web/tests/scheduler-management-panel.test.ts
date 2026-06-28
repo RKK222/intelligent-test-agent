@@ -7,6 +7,7 @@ import type {
   CurrentUser,
   OpencodeRuntimeManagementOverview,
   PageResponse,
+  PublicAgentRepositoryStatus,
   ScheduledTaskManagementRun,
   ScheduledTaskManagementTask
 } from "@test-agent/shared-types";
@@ -89,6 +90,20 @@ const emptyRuntimeOverview: OpencodeRuntimeManagementOverview = {
   opencodeProcesses: { items: [], page: 1, size: 20, total: 0 }
 };
 
+const publicRepository: PublicAgentRepositoryStatus = {
+  linuxServerId: "linux-1",
+  serverName: "linux-1",
+  gitRootPath: "/data/opencode-public-config",
+  configDirPath: "/data/opencode-public-config/opencode",
+  worktreeRootPath: "/data/opencode-public-worktrees",
+  status: "UNINITIALIZED",
+  initialized: false,
+  initializationAllowed: true,
+  currentBranch: null,
+  commitHash: null,
+  message: "未初始化"
+};
+
 function pageOf<T>(items: T[]): PageResponse<T> {
   return { items, page: 1, size: 20, total: items.length };
 }
@@ -102,6 +117,16 @@ function api(overrides: Partial<BackendApiClient> = {}) {
     getScheduledTaskRun: vi.fn().mockResolvedValue(runningRun),
     stopScheduledTaskRun: vi.fn().mockResolvedValue({ ...runningRun, status: "STOPPING", statusLabel: "停止中" }),
     getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyRuntimeOverview),
+    listPublicAgentRepositories: vi.fn().mockResolvedValue([publicRepository]),
+    listPublicAgentBranches: vi.fn().mockResolvedValue(["main", "develop"]),
+    initializePublicAgentRepository: vi.fn().mockResolvedValue({
+      ...publicRepository,
+      status: "READY",
+      initialized: true,
+      currentBranch: "main",
+      commitHash: "abc1234",
+      message: "已初始化"
+    }),
     ...overrides
   } as Partial<BackendApiClient> as BackendApiClient;
 }
@@ -174,6 +199,26 @@ describe("scheduler management panel", () => {
 
     await waitFor(() => expect(backendApi.getOpencodeRuntimeManagementOverview).toHaveBeenCalled());
     expect(await view.findByText("暂无 opencode 进程")).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("system management exposes config management and initializes public opencode repository", async () => {
+    const backendApi = api();
+    const view = renderWithApi(SystemManagementPanel, backendApi);
+
+    await fireEvent.click(view.getByText("配置管理"));
+
+    expect(await view.findByText("opencode公共配置管理")).toBeTruthy();
+    expect(await view.findByText("/data/opencode-public-config")).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "初始化" }));
+
+    await waitFor(() => expect(backendApi.listPublicAgentBranches).toHaveBeenCalled());
+    await fireEvent.click(view.getByRole("button", { name: "确定" }));
+
+    await waitFor(() =>
+      expect(backendApi.initializePublicAgentRepository).toHaveBeenCalledWith("linux-1", "main", expect.stringMatching(/^aco_/))
+    );
+    expect(await view.findByText("服务器 linux-1 公共配置仓库已初始化")).toBeTruthy();
     view.queryClient.clear();
   });
 });

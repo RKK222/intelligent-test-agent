@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { FileExplorer, type FileExplorerProps, type ExplorerTab } from "@test-agent/file-explorer";
-import type { FileContent } from "@test-agent/shared-types";
+import type { FileContent, FileSearchResult } from "@test-agent/shared-types";
 import type { AppWorkspaceTemplate, AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import AgentConfigPanel from "./AgentConfigPanel.vue";
@@ -30,6 +30,12 @@ defineProps<FileExplorerProps & {
   workspaceId?: string;
   /** 是否显示超级管理员服务器工作空间切换入口 */
   showServerWorkspaceSwitch?: boolean;
+  /** 搜索结果列表 */
+  searchResults?: FileSearchResult[];
+  /** 搜索加载中 */
+  searchLoading?: boolean;
+  /** 搜索关键字 */
+  searchKeyword?: string;
 }>();
 
 const emit = defineEmits<{
@@ -47,6 +53,8 @@ const emit = defineEmits<{
   openPublicFile: [payload: { path: string; content: FileContent; readonly: boolean }];
   openAgentFile: [payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null }];
   openServerWorkspacePicker: [];
+  // 搜索事件
+  search: [keyword: string];
 }>();
 
 const workspaceExpanded = ref(true);
@@ -173,18 +181,19 @@ defineExpose({
             >
               <ChevronDown v-if="workspaceExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-              <span class="figma-fe-section-title" :title="workspaceName">应用工作空间</span>
+              <span class="figma-fe-section-title" :title="workspaceName">工作空间</span>
             </button>
             <div class="figma-fe-section-actions" v-if="workspaceExpanded">
-              <button
+               <button
                 v-if="tab === 'explorer'"
                 type="button"
                 class="figma-fe-section-action-btn"
                 title="刷新文件树"
                 aria-label="刷新文件树"
+                :disabled="loadingPath?.has('')"
                 @click="emit('refresh')"
               >
-                <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.5" />
+                <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loadingPath?.has('') }" :stroke-width="1.5" />
               </button>
             </div>
           </div>
@@ -200,10 +209,14 @@ defineExpose({
               :hide-header="true"
               :hide-tabbar="true"
               :active-tab="tab"
+              :search-results="searchResults"
+              :search-loading="searchLoading"
+              :search-keyword="searchKeyword"
               @toggle-directory="emit('toggleDirectory', $event)"
               @open-file="emit('openFile', $event)"
               @open-diff="emit('openDiff', $event)"
               @refresh="emit('refresh')"
+              @search="emit('search', $event)"
             />
           </div>
         </div>
@@ -227,17 +240,18 @@ defineExpose({
             >
               <ChevronDown v-if="agentsExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-              <span class="figma-fe-section-title">agents</span>
+              <span class="figma-fe-section-title">Agents</span>
             </button>
             <div class="figma-fe-section-actions" v-if="agentsExpanded">
-              <button
+               <button
                 type="button"
                 class="figma-fe-section-action-btn"
                 title="刷新"
                 aria-label="刷新"
+                :disabled="agentConfigPanelRef?.busy"
                 @click="refreshAgents"
               >
-                <RefreshCw class="h-3.5 w-3.5" :stroke-width="1.5" />
+                <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': agentConfigPanelRef?.busy }" :stroke-width="1.5" />
               </button>
             </div>
           </div>
@@ -399,6 +413,15 @@ defineExpose({
 .figma-fe-section-action-btn:hover {
   background: #e4e4e7;
   color: #18181b;
+}
+
+.figma-fe-section-action-btn:active {
+  background: #d4d4d8;
+}
+
+.figma-fe-section-action-btn:disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .figma-fe-section-content {

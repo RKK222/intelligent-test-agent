@@ -16,6 +16,9 @@ import com.icbc.testagent.opencode.runtime.process.RuntimeManagementBackendProce
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementContainer;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementContainerMetricHistory;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementContainerMetricSample;
+import com.icbc.testagent.opencode.runtime.process.OpencodeProcessControlResult;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementManager;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementManagedProcess;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementOpencodeProcess;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementOverview;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementSummary;
@@ -29,6 +32,14 @@ import java.util.Map;
 final class RuntimeManagementDtos {
 
     private RuntimeManagementDtos() {
+    }
+
+    static PageResponse<OpencodeProcessResponse> opencodeProcessPage(PageResponse<RuntimeManagementOpencodeProcess> processPage) {
+        return new PageResponse<>(
+                processPage.items().stream().map(OpencodeProcessResponse::from).toList(),
+                processPage.page(),
+                processPage.size(),
+                processPage.total());
     }
 
     record OverviewResponse(
@@ -223,9 +234,11 @@ final class RuntimeManagementDtos {
             Instant lastHeartbeatAt,
             Instant createdAt,
             Instant updatedAt,
-            String traceId) {
+            String traceId,
+            List<ManagedProcessResponse> managedProcesses) {
 
-        static ManagerResponse from(OpencodeContainerManager manager) {
+        static ManagerResponse from(RuntimeManagementManager row) {
+            OpencodeContainerManager manager = row.manager();
             return new ManagerResponse(
                     manager.managerId().value(),
                     manager.containerId().value(),
@@ -236,7 +249,76 @@ final class RuntimeManagementDtos {
                     manager.lastHeartbeatAt(),
                     manager.createdAt(),
                     manager.updatedAt(),
-                    manager.traceId());
+                    manager.traceId(),
+                    row.managedProcesses().stream().map(ManagedProcessResponse::from).toList());
+        }
+    }
+
+    record ManagedProcessResponse(
+            int port,
+            Long pid,
+            String baseUrl,
+            String sessionPath,
+            String configPath,
+            Instant startedAt,
+            String startCommand,
+            String traceId,
+            String ownership,
+            String processId,
+            String processStatus,
+            String healthMessage,
+            String userId,
+            String username,
+            String bindingAgentId,
+            String bindingStatus,
+            Instant bindingUpdatedAt) {
+
+        static ManagedProcessResponse from(RuntimeManagementManagedProcess process) {
+            return new ManagedProcessResponse(
+                    process.port(),
+                    process.pid(),
+                    process.baseUrl(),
+                    process.sessionPath(),
+                    process.configPath(),
+                    process.startedAt(),
+                    process.startCommand(),
+                    process.traceId(),
+                    process.ownership() == null ? null : process.ownership().name(),
+                    process.processId() == null ? null : process.processId().value(),
+                    process.processStatus() == null ? null : process.processStatus().name(),
+                    process.healthMessage(),
+                    process.userId() == null ? null : process.userId().value(),
+                    process.username().orElse(null),
+                    process.bindingAgentId(),
+                    process.bindingStatus() == null ? null : process.bindingStatus().name(),
+                    process.bindingUpdatedAt());
+        }
+    }
+
+    record ManagedProcessCommandResponse(
+            String command,
+            String status,
+            int port,
+            Long pid,
+            String baseUrl,
+            String sessionPath,
+            String configPath,
+            Boolean healthy,
+            String message,
+            String traceId) {
+
+        static ManagedProcessCommandResponse from(OpencodeProcessControlResult result) {
+            return new ManagedProcessCommandResponse(
+                    result.command(),
+                    result.status(),
+                    result.port(),
+                    result.pid(),
+                    result.baseUrl(),
+                    result.sessionPath(),
+                    result.configPath(),
+                    result.healthy(),
+                    result.message(),
+                    result.traceId());
         }
     }
 
@@ -281,7 +363,10 @@ final class RuntimeManagementDtos {
             String traceId,
             String bindingAgentId,
             String bindingStatus,
-            Instant bindingUpdatedAt) {
+            Instant bindingUpdatedAt,
+            String managerStatus,
+            String healthStatus,
+            boolean restartable) {
 
         static OpencodeProcessResponse from(RuntimeManagementOpencodeProcess row) {
             OpencodeServerProcess process = row.process();
@@ -306,7 +391,10 @@ final class RuntimeManagementDtos {
                     process.traceId(),
                     binding == null ? null : binding.agentId(),
                     binding == null ? null : binding.status().name(),
-                    binding == null ? null : binding.updatedAt());
+                    binding == null ? null : binding.updatedAt(),
+                    row.managerStatus(),
+                    row.healthStatus(),
+                    row.restartable());
         }
     }
 

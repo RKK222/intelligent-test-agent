@@ -19,6 +19,7 @@
 4. `test-agent-agent-runtime` 负责 agentId 选择、运行时接口、日志/指标包装和具体 agent 适配；opencode facade 对外只暴露平台 command/result 和 `RunEventDraft`，不返回 generated SDK DTO。
 5. `test-agent-domain` 不依赖 Spring Web、Persistence、generated SDK。
 6. `test-agent-app` 不得新增 Controller、WebFilter、WebSocket handler 或业务源码包。
+7. 工作区文件和 Agent 配置文件的跨服务器目录列表、读取、写入必须走平台文件 WebSocket route/ticket/RPC；不得为文件操作新增后端到后端 HTTP 代理，Git、初始化、进度查询、公共 worktree 元数据列表等非文件操作除外。公共 Agent 直接目录模式必须通过 route/ticket 绑定 `linuxServerId`，公共 worktree 模式必须通过落库 `worktreeId -> linuxServerId` 绑定目标服务器。
 
 ## DTO 与模型
 

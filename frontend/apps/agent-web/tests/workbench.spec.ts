@@ -79,6 +79,27 @@ test("user avatar menu logs out and returns to login", async ({ page }) => {
   await expect.poll(() => page.evaluate(() => localStorage.getItem("test-agent.auth.token"))).toBeNull();
 });
 
+test("login redirects to workbench and clears the initial opencode process checking state", async ({ page }) => {
+  const loginRequests: Array<{ username?: string; password?: string }> = [];
+  const processStatusRequests: string[] = [];
+  await mockBackendApi(page, {
+    skipInitialAuthToken: true,
+    loginRequests,
+    processStatusRequests
+  });
+
+  await page.goto("/login", { waitUntil: "domcontentloaded" });
+  await page.getByPlaceholder("用户名").fill("888888888");
+  await page.getByPlaceholder("密码").fill("123456");
+  await page.getByRole("button", { name: "登录" }).click();
+
+  await expect.poll(() => loginRequests).toEqual([{ username: "888888888", password: "123456" }]);
+  await expect.poll(() => processStatusRequests.length).toBeGreaterThanOrEqual(1);
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("登录后发送任务");
+  await expect(page.getByRole("button", { name: "发送" })).toBeEnabled();
+  await expect(page.getByText("正在检查 opencode 进程")).toHaveCount(0);
+});
+
 test("admin application fallback runs after auth roles arrive", async ({ page }) => {
   let releaseAuthMe!: () => void;
   const configurationApplicationRequests: string[] = [];
@@ -684,14 +705,18 @@ async function mockBackendApi(
     sessionMessages?: Array<Record<string, unknown>>;
     historyRun?: Record<string, unknown>;
     historyDiffFiles?: Array<Record<string, unknown>>;
+    skipInitialAuthToken?: boolean;
+    loginRequests?: Array<{ username?: string; password?: string }>;
   } = {}
 ) {
   await page.exposeFunction("__taRecordWorkspaceFileRequest", (workspaceId: string, path: string) => {
     capture.fileRequests?.push({ workspaceId, path });
   });
-  await page.addInitScript(() => {
-    localStorage.setItem("test-agent.auth.token", "test-token");
-  });
+  if (!capture.skipInitialAuthToken) {
+    await page.addInitScript(() => {
+      localStorage.setItem("test-agent.auth.token", "test-token");
+    });
+  }
   await page.addInitScript(({ fileContents }) => {
     const recordFileRequest = (workspaceId: string, path: string) => {
       const win = window as Window & {
@@ -811,6 +836,16 @@ async function mockBackendApi(
     const method = route.request().method();
     if (method === "OPTIONS") {
       await route.fulfill({ status: 204, headers: corsHeaders() });
+      return;
+    }
+    if (method === "POST" && url.pathname === "/api/auth/login") {
+      const body = JSON.parse(route.request().postData() ?? "{}") as { username?: string; password?: string };
+      capture.loginRequests?.push({ username: body.username, password: body.password });
+      await route.fulfill(json({
+        token: "test-token",
+        tokenType: "Bearer",
+        expiresAt: "2026-06-24T01:00:00Z"
+      }));
       return;
     }
     if (method === "GET" && url.pathname === "/api/auth/me") {

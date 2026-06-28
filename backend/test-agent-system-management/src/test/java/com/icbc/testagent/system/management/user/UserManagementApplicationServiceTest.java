@@ -29,6 +29,7 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.transaction.annotation.Transactional;
 
 class UserManagementApplicationServiceTest {
 
@@ -146,6 +147,17 @@ class UserManagementApplicationServiceTest {
                 "AUTH_4", "alice", null, null, null, "USER")))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+    }
+
+    @Test
+    void createUserHasTransactionBoundaryToAvoidOrphanUserWhenRoleGrantFails() throws NoSuchMethodException {
+        Transactional transactional = UserManagementApplicationService.class
+                .getMethod("createUser", CreateUserCommand.class)
+                .getAnnotation(Transactional.class);
+
+        assertThat(transactional)
+                .as("创建用户包含 users 与 user_roles 两次写入，必须同事务提交或回滚")
+                .isNotNull();
     }
 
     @Test

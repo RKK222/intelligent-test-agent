@@ -99,6 +99,15 @@ fi
 if grep -q "OPENCODE_MANAGER_BACKEND_DISCOVERY_URL" "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script should not inject legacy HTTP discovery URL"
 fi
+if grep -q "OPENCODE_MANAGER_MAX_PROCESSES" "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script should not inject manager max processes; run mode reads common_parameters via WebSocket"
+fi
+if grep -q "OPENCODE_SESSION_ROOT" "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script should not inject manager session root; run mode reads OPENCODE_SESSION_DIR from common_parameters"
+fi
+if grep -q "OPENCODE_CONFIG_DIR" "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script should not inject manager config dir; run mode reads OPENCODE_PUBLIC_CONFIG_DIR from common_parameters"
+fi
 
 printf 'TEST_AGENT_BASE_URL=http://10.8.0.115:8080\nTEST_AGENT_FRONTEND_URL=http://10.8.0.115:3000\nTEST_AGENT_OPENCODE_BASE_URL=http://10.8.0.115:4096\nTEST_AGENT_START_OPENCODE_MANAGER=false\n' >"${tmp_dir}/env-frontend-host.local"
 restart_frontend_output="$(

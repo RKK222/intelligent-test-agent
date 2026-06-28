@@ -7,9 +7,7 @@ import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.node.ExecutionNodeStatus;
-import com.icbc.testagent.domain.configuration.CommonParameter;
-import com.icbc.testagent.domain.configuration.CommonParameterRepository;
-import com.icbc.testagent.domain.configuration.ParameterPlatform;
+import com.icbc.testagent.domain.configuration.CommonParameterValues;
 import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
@@ -52,10 +50,36 @@ public class UserOpencodeProcessAssignmentService {
     private static final String PARAM_OPENCODE_PUBLIC_CONFIG_DIR = "OPENCODE_PUBLIC_CONFIG_DIR";
     private static final String LOCAL_DIRECT_PROCESS_ID = "ocp_local_direct";
     private static final String LOCAL_DIRECT_CONTAINER_ID = "ctr_local_direct";
-    private static final CommonParameterRepository EMPTY_PARAMETER_REPOSITORY = (englishName, platform) -> Optional.empty();
+    private static final CommonParameterValues EMPTY_PARAMETER_VALUES = new CommonParameterValues() {
+        @Override
+        public java.util.Optional<String> resolvedValue(String englishName) {
+            return java.util.Optional.empty();
+        }
+
+        @Override
+        public java.util.Optional<String> resolvedValue(String englishName, com.icbc.testagent.domain.configuration.ParameterPlatform platform) {
+            return java.util.Optional.empty();
+        }
+
+        @Override
+        public java.util.Optional<com.icbc.testagent.domain.configuration.CommonParameter> raw(
+                String englishName, com.icbc.testagent.domain.configuration.ParameterPlatform platform) {
+            return java.util.Optional.empty();
+        }
+
+        @Override
+        public java.util.List<com.icbc.testagent.domain.configuration.CommonParameter> findAll() {
+            return java.util.List.of();
+        }
+
+        @Override
+        public java.util.List<com.icbc.testagent.domain.configuration.ResolvedParameter> resolvedAll() {
+            return java.util.List.of();
+        }
+    };
 
     private final OpencodeProcessManagementRepository repository;
-    private final CommonParameterRepository commonParameterRepository;
+    private final CommonParameterValues commonParameterValues;
     private final ExecutionNodeRepository executionNodeRepository;
     private final OpencodeProcessManagerGateway gateway;
     private final BackendJavaProcessLifecycleService backendLifecycle;
@@ -82,7 +106,7 @@ public class UserOpencodeProcessAssignmentService {
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessHeartbeatStore heartbeatStore) {
-        this(repository, EMPTY_PARAMETER_REPOSITORY, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, LocalDirectSettings.disabled());
+        this(repository, EMPTY_PARAMETER_VALUES, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, LocalDirectSettings.disabled());
     }
 
     /**
@@ -90,11 +114,11 @@ public class UserOpencodeProcessAssignmentService {
      */
     UserOpencodeProcessAssignmentService(
             OpencodeProcessManagementRepository repository,
-            CommonParameterRepository commonParameterRepository,
+            CommonParameterValues commonParameterValues,
             ExecutionNodeRepository executionNodeRepository,
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle) {
-        this(repository, commonParameterRepository, executionNodeRepository, gateway, backendLifecycle, disabledHeartbeatStore(), LocalDirectSettings.disabled());
+        this(repository, commonParameterValues, executionNodeRepository, gateway, backendLifecycle, disabledHeartbeatStore(), LocalDirectSettings.disabled());
     }
 
     /**
@@ -103,14 +127,14 @@ public class UserOpencodeProcessAssignmentService {
     @Autowired
     public UserOpencodeProcessAssignmentService(
             OpencodeProcessManagementRepository repository,
-            CommonParameterRepository commonParameterRepository,
+            CommonParameterValues commonParameterValues,
             ExecutionNodeRepository executionNodeRepository,
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessHeartbeatStore heartbeatStore,
             LocalDirectSettings localDirectSettings) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
-        this.commonParameterRepository = Objects.requireNonNull(commonParameterRepository, "commonParameterRepository must not be null");
+        this.commonParameterValues = Objects.requireNonNull(commonParameterValues, "commonParameterValues must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.backendLifecycle = Objects.requireNonNull(backendLifecycle, "backendLifecycle must not be null");
@@ -152,6 +176,36 @@ public class UserOpencodeProcessAssignmentService {
         return canRebuild(binding.get().linuxServerId())
                 ? needsInitialization("opencode 进程健康检测失败，需要重新初始化", current, now)
                 : unavailable("opencode 进程健康检测失败，且当前没有可用容器", current, now);
+    }
+
+    /**
+     * 文件 WebSocket 路由只需要知道用户进程所属服务器，不应触发 manager health/start 命令。
+     *
+     * <p>返回 READY 仅表示存在可用于服务器归属判断的 ACTIVE binding 与可恢复进程记录；
+     * Run、初始化、头像状态等链路仍必须调用 {@link #status(UserId, String, String)}
+     * 或 {@link #requireReadyProcess(UserId, String, String)} 做强健康检查。
+     */
+    public UserOpencodeProcessFileRoutingAffinity fileRoutingAffinity(UserId userId, String agentId, String traceId) {
+        validateAgent(agentId);
+        Instant now = Instant.now();
+        if (localDirectSettings.enabled()) {
+            OpencodeServerProcess process = synthesizeLocalDirectProcess(userId, now, traceId);
+            return readyAffinity(process, "本地开发模式：直连 " + localDirectSettings.baseUrl(), now);
+        }
+        Optional<UserOpencodeProcessBinding> binding = repository.findUserBinding(userId, OPENCODE_AGENT_ID)
+                .filter(item -> item.status() == UserOpencodeProcessBindingStatus.ACTIVE);
+        if (binding.isEmpty()) {
+            return hasInitializableContainer()
+                    ? needsInitializationAffinity("需要初始化 opencode 进程", now)
+                    : unavailableAffinity("没有可用的 opencode 容器", now);
+        }
+        Optional<OpencodeServerProcess> process = activeProcess(binding.get());
+        if (process.isEmpty()) {
+            return canRebuildOn(binding.get().linuxServerId())
+                    ? needsInitializationAffinity("opencode 进程不可用，需要重新初始化", binding.get(), now)
+                    : unavailableAffinity("原 Linux 服务器没有可用的 opencode 容器", binding.get(), now);
+        }
+        return readyAffinity(process.get(), "文件路由服务器归属可用", now);
     }
 
     /**
@@ -328,7 +382,10 @@ public class UserOpencodeProcessAssignmentService {
                 .orElseThrow(() -> unavailableException("没有可用的 opencode 容器或端口"));
     }
 
-    private OpencodeProcessStartCommand startCommand(UserId userId, OpencodeContainer container, String traceId) {
+    private OpencodeProcessStartCommand startCommand(
+            UserId userId,
+            OpencodeContainer container,
+            String traceId) {
         int port = firstAvailablePort(container)
                 .orElseThrow(() -> unavailableException("没有可用的 opencode 端口"));
         String baseUrl = "http://" + container.linuxServerId().value() + ":" + port;
@@ -467,15 +524,12 @@ public class UserOpencodeProcessAssignmentService {
     }
 
     /**
-     * 从 common_parameters 读取必填参数，缺失或空白时抛异常。
+     * 从通用参数内存缓存读取必填参数（已展开变量引用），缺失或空白时抛异常。
      * common_parameters 为唯一事实源，不在 yaml/代码常量预留 fallback。
      */
     private String configuredParameter(String englishName) {
-        ParameterPlatform platform = ParameterPlatform.current();
-        return commonParameterRepository.findByEnglishNameAndPlatform(englishName, platform)
-                .or(() -> commonParameterRepository.findByEnglishNameAndPlatform(englishName, ParameterPlatform.ALL))
-                .map(CommonParameter::parameterValue)
-                .filter(value -> value != null && !value.isBlank())
+        return commonParameterValues.resolvedValue(englishName)
+                .filter(value -> !value.isBlank())
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.INTERNAL_ERROR,
                         "通用参数未配置：" + englishName,
@@ -502,6 +556,22 @@ public class UserOpencodeProcessAssignmentService {
                 serviceAddress(process));
     }
 
+    private UserOpencodeProcessFileRoutingAffinity readyAffinity(
+            OpencodeServerProcess process,
+            String message,
+            Instant checkedAt) {
+        return new UserOpencodeProcessFileRoutingAffinity(
+                UserOpencodeProcessAvailability.READY,
+                false,
+                message,
+                process.processId().value(),
+                process.linuxServerId().value(),
+                process.containerId().value(),
+                process.port(),
+                serviceAddress(process),
+                checkedAt);
+    }
+
     private UserOpencodeProcessStatusResponse needsInitialization(String message, Instant checkedAt) {
         return new UserOpencodeProcessStatusResponse(
                 UserOpencodeProcessAvailability.NEEDS_INITIALIZATION,
@@ -515,6 +585,19 @@ public class UserOpencodeProcessAssignmentService {
                 checkedAt,
                 UserOpencodeServiceStatus.UNASSIGNED,
                 null);
+    }
+
+    private UserOpencodeProcessFileRoutingAffinity needsInitializationAffinity(String message, Instant checkedAt) {
+        return new UserOpencodeProcessFileRoutingAffinity(
+                UserOpencodeProcessAvailability.NEEDS_INITIALIZATION,
+                true,
+                message,
+                null,
+                null,
+                null,
+                null,
+                null,
+                checkedAt);
     }
 
     private UserOpencodeProcessStatusResponse needsInitialization(
@@ -533,6 +616,22 @@ public class UserOpencodeProcessAssignmentService {
                 checkedAt,
                 UserOpencodeServiceStatus.NOT_RUNNING,
                 serviceAddress(binding));
+    }
+
+    private UserOpencodeProcessFileRoutingAffinity needsInitializationAffinity(
+            String message,
+            UserOpencodeProcessBinding binding,
+            Instant checkedAt) {
+        return new UserOpencodeProcessFileRoutingAffinity(
+                UserOpencodeProcessAvailability.NEEDS_INITIALIZATION,
+                true,
+                message,
+                null,
+                null,
+                null,
+                null,
+                serviceAddress(binding),
+                checkedAt);
     }
 
     private UserOpencodeProcessStatusResponse needsInitialization(
@@ -568,6 +667,19 @@ public class UserOpencodeProcessAssignmentService {
                 null);
     }
 
+    private UserOpencodeProcessFileRoutingAffinity unavailableAffinity(String message, Instant checkedAt) {
+        return new UserOpencodeProcessFileRoutingAffinity(
+                UserOpencodeProcessAvailability.UNAVAILABLE,
+                false,
+                message,
+                null,
+                null,
+                null,
+                null,
+                null,
+                checkedAt);
+    }
+
     private UserOpencodeProcessStatusResponse unavailable(
             String message,
             UserOpencodeProcessBinding binding,
@@ -584,6 +696,22 @@ public class UserOpencodeProcessAssignmentService {
                 checkedAt,
                 UserOpencodeServiceStatus.NOT_RUNNING,
                 serviceAddress(binding));
+    }
+
+    private UserOpencodeProcessFileRoutingAffinity unavailableAffinity(
+            String message,
+            UserOpencodeProcessBinding binding,
+            Instant checkedAt) {
+        return new UserOpencodeProcessFileRoutingAffinity(
+                UserOpencodeProcessAvailability.UNAVAILABLE,
+                false,
+                message,
+                null,
+                null,
+                null,
+                null,
+                serviceAddress(binding),
+                checkedAt);
     }
 
     private UserOpencodeProcessStatusResponse unavailable(

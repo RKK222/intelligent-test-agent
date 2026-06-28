@@ -16,11 +16,12 @@ import com.icbc.testagent.domain.configuration.AgentConfigRepository;
 import com.icbc.testagent.domain.configuration.AgentConfigScope;
 import com.icbc.testagent.domain.configuration.AgentConfigWorktree;
 import com.icbc.testagent.domain.configuration.AgentConfigWorktreeStatus;
-import com.icbc.testagent.domain.configuration.CommonParameterRepository;
+import com.icbc.testagent.domain.configuration.CommonParameterValues;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
-import com.icbc.testagent.domain.configuration.ParameterPlatform;
 import com.icbc.testagent.domain.configuration.UserSshKey;
+import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
@@ -53,6 +54,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
 
     private static final String PARAM_PUBLIC_AGENT_GIT_URL = "OPENCODE_PUBLIC_AGENT_GIT_URL";
     private static final String PARAM_PUBLIC_CONFIG_GIT_ROOT = "OPENCODE_PUBLIC_CONFIG_GIT_ROOT";
+    private static final String PARAM_PUBLIC_CONFIG_DIR = "OPENCODE_PUBLIC_CONFIG_DIR";
     private static final String PARAM_PUBLIC_CONFIG_WORKTREE_ROOT = "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT";
     private static final String PARAM_PERSONAL_WORKTREE_ROOT = "OPENCODE_PERSONAL_WORKTREE_ROOT";
     private static final String UNCONFIGURED = "UNCONFIGURED";
@@ -74,10 +76,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         }
     };
 
-    private final CommonParameterRepository commonParameterRepository;
+    private final CommonParameterValues commonParameterValues;
     private final ConfigurationManagementRepository configurationRepository;
     private final WorkspaceRepository workspaceRepository;
     private final AgentConfigRepository agentConfigRepository;
+    private final UserRepository userRepository;
     private final GitRemoteService gitRemoteService;
     private final GitWorkspaceService gitWorkspaceService;
     private final SshKeyEncryptionService sshKeyEncryptionService;
@@ -92,20 +95,22 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
      */
     @Autowired
     public AgentConfigApplicationService(
-            CommonParameterRepository commonParameterRepository,
+            CommonParameterValues commonParameterValues,
             ConfigurationManagementRepository configurationRepository,
             WorkspaceRepository workspaceRepository,
             AgentConfigRepository agentConfigRepository,
+            UserRepository userRepository,
             WorkspaceFileService fileService,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
             ObjectProvider<AgentConfigProgressSink> progressSinkProvider,
             SshKeyEncryptionService sshKeyEncryptionService) {
         this(
-                commonParameterRepository,
+                commonParameterValues,
                 configurationRepository,
                 workspaceRepository,
                 agentConfigRepository,
+                userRepository,
                 new GitRemoteService(),
                 new GitWorkspaceService(),
                 sshKeyEncryptionService,
@@ -117,10 +122,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     AgentConfigApplicationService(
-            CommonParameterRepository commonParameterRepository,
+            CommonParameterValues commonParameterValues,
             ConfigurationManagementRepository configurationRepository,
             WorkspaceRepository workspaceRepository,
             AgentConfigRepository agentConfigRepository,
+            UserRepository userRepository,
             GitRemoteService gitRemoteService,
             GitWorkspaceService gitWorkspaceService,
             SshKeyEncryptionService sshKeyEncryptionService,
@@ -129,10 +135,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             ServerBroadcastPublisher broadcastPublisher,
             Clock clock,
             AgentConfigProgressSink progressSink) {
-        this.commonParameterRepository = Objects.requireNonNull(commonParameterRepository, "commonParameterRepository must not be null");
+        this.commonParameterValues = Objects.requireNonNull(commonParameterValues, "commonParameterValues must not be null");
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.agentConfigRepository = Objects.requireNonNull(agentConfigRepository, "agentConfigRepository must not be null");
+        this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.gitRemoteService = Objects.requireNonNull(gitRemoteService, "gitRemoteService must not be null");
         this.gitWorkspaceService = Objects.requireNonNull(gitWorkspaceService, "gitWorkspaceService must not be null");
         this.sshKeyEncryptionService = Objects.requireNonNull(sshKeyEncryptionService, "sshKeyEncryptionService must not be null");
@@ -181,6 +188,35 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return gitRemoteService.listBranches(config.gitUrl(), decryptSingleSshKey(userId));
     }
 
+    public AgentConfigResponses.PublicRepositoryStatusResponse localPublicRepositoryStatus() {
+        PublicConfig config = publicConfig();
+        return publicRepositoryStatus(config);
+    }
+
+    public AgentConfigResponses.PublicRepositoryStatusResponse initializeLocalPublicRepository(
+            String branch,
+            String operationId,
+            UserId userId,
+            String traceId) {
+        String normalizedBranch = requireText(branch, "分支不能为空", "branch");
+        AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.PUBLIC, null, "initialize-repository", normalizedBranch, traceId);
+        try {
+            PublicConfig config = requireEnabledPublicConfig();
+            String privateKey = decryptSingleSshKey(userId);
+            progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
+            ensurePublicRepositoryReady(config, normalizedBranch, privateKey);
+            requireInitializedConfigDirectory(config);
+            progress.succeeded(gitWorkspaceService.headCommit(config.gitRoot()));
+            return publicRepositoryStatus(config);
+        } catch (PlatformException exception) {
+            progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
+            throw exception;
+        } catch (Exception exception) {
+            progress.failed(ErrorCode.INTERNAL_ERROR.name(), "初始化公共 Agent 配置仓库失败");
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "初始化公共 Agent 配置仓库失败", Map.of(), exception);
+        }
+    }
+
     public AgentConfigResponses.AgentConfigOperationResponse updatePublicConfig(
             String branch,
             String operationId,
@@ -208,7 +244,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
 
     public List<FileTreeEntryResponse> listPublicAgentFiles(String relativePath, String worktreeId) {
         Path agentRoot = publicAgentRootForRead(worktreeId);
-        ensureDirectory(agentRoot);
+        // 公共配置目录须由管理员初始化（git clone）后才会存在；未初始化时返回空列表，不自动创建，
+        // 避免浏览即静默建出 OPENCODE_PUBLIC_CONFIG_DIR 空壳。
+        if (!Files.isDirectory(agentRoot)) {
+            return List.of();
+        }
         return fileService.listDirectory(agentRoot.toString(), relativePath);
     }
 
@@ -227,7 +267,10 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
 
     public List<FileTreeEntryResponse> listWorkspaceAgentFiles(String workspaceId, String relativePath, String worktreeId) {
         Path agentRoot = workspaceAgentRootForRead(workspaceId, worktreeId);
-        ensureDirectory(agentRoot);
+        // 工作区 agent 目录不存在时返回空列表，不自动创建。
+        if (!Files.isDirectory(agentRoot)) {
+            return List.of();
+        }
         return fileService.listDirectory(agentRoot.toString(), relativePath);
     }
 
@@ -255,6 +298,22 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             String operationId,
             UserId userId,
             String traceId) {
+        return createPublicWorktree(baseName, branch, operationId, null, userId, traceId);
+    }
+
+    public AgentConfigResponses.AgentConfigWorktreeResponse createPublicWorktree(
+            String baseName,
+            String branch,
+            String operationId,
+            String linuxServerId,
+            UserId userId,
+            String traceId) {
+        if (linuxServerId != null && !linuxServerId.isBlank() && !serverIdentity.linuxServerId().equals(linuxServerId.trim())) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "公共 Agent worktree 必须在目标服务器创建",
+                    Map.of("targetLinuxServerId", linuxServerId.trim(), "currentLinuxServerId", serverIdentity.linuxServerId()));
+        }
         PublicConfig config = requireEnabledPublicConfig();
         String normalizedBranch = requireText(branch, "分支不能为空", "branch");
         String worktreeName = worktreeName(baseName);
@@ -262,10 +321,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         try {
             String privateKey = decryptSingleSshKey(userId);
             progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
-            ensureExistingCleanRepository(config.gitRoot(), config.gitUrl());
-            gitWorkspaceService.fetch(config.gitRoot(), privateKey);
-            gitWorkspaceService.checkoutTrackingBranch(config.gitRoot(), normalizedBranch, privateKey);
-            gitWorkspaceService.pullFastForward(config.gitRoot(), normalizedBranch, privateKey);
+            ensureExistingPublicRepositoryReady(config, normalizedBranch, privateKey);
             progress.step(AgentConfigOperationStep.CREATING_WORKTREE);
             Path worktreeRoot = config.worktreeRoot().resolve(worktreeName).normalize();
             ensureChild(config.worktreeRoot(), worktreeRoot, "worktreeName");
@@ -274,6 +330,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                     RuntimeIdGenerator.agentConfigWorktreeId(),
                     AgentConfigScope.PUBLIC,
                     null,
+                    serverIdentity.linuxServerId(),
                     worktreeName,
                     worktreeName,
                     worktreeRoot.toString(),
@@ -291,6 +348,51 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             progress.failed(ErrorCode.INTERNAL_ERROR.name(), "创建公共 Agent worktree 失败");
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "创建公共 Agent worktree 失败", Map.of(), exception);
         }
+    }
+
+    public Optional<String> publicWorktreeLinuxServerId(String worktreeId) {
+        if (worktreeId == null || worktreeId.isBlank()) {
+            return Optional.empty();
+        }
+        AgentConfigWorktree worktree = agentConfigRepository.findWorktree(worktreeId.trim())
+                .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Agent worktree 不存在", Map.of("worktreeId", worktreeId)));
+        if (worktree.scope() != AgentConfigScope.PUBLIC || worktree.status() != AgentConfigWorktreeStatus.ACTIVE) {
+            throw new PlatformException(ErrorCode.NOT_FOUND, "Agent worktree 不存在", Map.of("worktreeId", worktreeId));
+        }
+        return Optional.ofNullable(worktree.linuxServerId()).or(() -> Optional.of(serverIdentity.linuxServerId()));
+    }
+
+    /**
+     * 查询某台服务器上的公共 ACTIVE worktree，并补齐创建人展示名供管理员切换时识别。
+     */
+    public List<AgentConfigResponses.AgentConfigWorktreeOptionResponse> listPublicWorktrees(String linuxServerId) {
+        String targetServerId = requireText(linuxServerId, "服务器不能为空", "linuxServerId");
+        return agentConfigRepository.findWorktrees(
+                        AgentConfigScope.PUBLIC,
+                        null,
+                        null,
+                        targetServerId,
+                        AgentConfigWorktreeStatus.ACTIVE).stream()
+                .map(worktree -> AgentConfigResponses.AgentConfigWorktreeOptionResponse.from(
+                        worktree,
+                        publicStandardAgentRoot(Path.of(worktree.rootPath())).toString(),
+                        usernameFor(worktree.createdBy())))
+                .toList();
+    }
+
+    /**
+     * 查询工作空间级 Agent 配置文件应路由到的服务器；仅做归属解析，不访问文件系统。
+     */
+    public String workspaceAgentFilesLinuxServerId(String workspaceId, String worktreeId) {
+        Workspace workspace = existingWorkspaceForRouting(workspaceId);
+        String workspaceLinuxServerId = workspace.linuxServerId() == null
+                ? serverIdentity.linuxServerId()
+                : workspace.linuxServerId();
+        if (worktreeId == null || worktreeId.isBlank()) {
+            return workspaceLinuxServerId;
+        }
+        AgentConfigWorktree worktree = existingWorktreeForRouting(worktreeId, AgentConfigScope.WORKSPACE, workspace.workspaceId());
+        return worktree.linuxServerId() == null ? workspaceLinuxServerId : worktree.linuxServerId();
     }
 
     public AgentConfigResponses.AgentConfigWorktreeResponse createWorkspaceWorktree(
@@ -329,6 +431,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                     RuntimeIdGenerator.agentConfigWorktreeId(),
                     AgentConfigScope.WORKSPACE,
                     workspace.workspaceId(),
+                    serverIdentity.linuxServerId(),
                     worktreeName,
                     worktreeName,
                     worktreeRoot.toString(),
@@ -548,20 +651,119 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
 
     private void ensurePublicRepositoryReady(PublicConfig config, String branch, String privateKey) {
         Path gitRoot = config.gitRoot();
-        if (Files.exists(gitRoot)) {
+        if (gitWorkspaceService.isGitRepository(gitRoot)) {
             ensureExistingCleanRepository(gitRoot, config.gitUrl());
             gitWorkspaceService.fetch(gitRoot, privateKey);
             gitWorkspaceService.checkoutTrackingBranch(gitRoot, branch, privateKey);
             gitWorkspaceService.pullFastForward(gitRoot, branch, privateKey);
+            requireInitializedConfigDirectory(config);
             return;
+        }
+        // 公共配置首次使用时允许根目录不存在或为空目录，由后端按通用参数自动 clone。
+        if (Files.exists(gitRoot) && !isEmptyDirectory(gitRoot)) {
+            // 目录已存在且非空，但又不是 Git 仓库，两种情况都阻碍自动 clone
+            throw new PlatformException(ErrorCode.CONFLICT, "目录已存在且非空，但不是 Git 仓库：" + gitRoot, Map.of("path", gitRoot.toString()));
         }
         ensureDirectory(gitRoot.getParent());
         gitWorkspaceService.cloneBranch(config.gitUrl(), branch, gitRoot, privateKey);
+        requireInitializedConfigDirectory(config);
+    }
+
+    private void ensureExistingPublicRepositoryReady(PublicConfig config, String branch, String privateKey) {
+        if (!gitWorkspaceService.isGitRepository(config.gitRoot())) {
+            throw publicRepositoryUninitialized(config.gitRoot());
+        }
+        ensureExistingCleanRepository(config.gitRoot(), config.gitUrl());
+        gitWorkspaceService.fetch(config.gitRoot(), privateKey);
+        gitWorkspaceService.checkoutTrackingBranch(config.gitRoot(), branch, privateKey);
+        gitWorkspaceService.pullFastForward(config.gitRoot(), branch, privateKey);
+        requireInitializedConfigDirectory(config);
+    }
+
+    private AgentConfigResponses.PublicRepositoryStatusResponse publicRepositoryStatus(PublicConfig config) {
+        String message = null;
+        String status = "UNINITIALIZED";
+        boolean initialized = false;
+        boolean initializationAllowed = config.enabled();
+        String currentBranch = null;
+        String commitHash = null;
+        if (!config.enabled()) {
+            status = "DISABLED";
+            initializationAllowed = false;
+            message = "公共 Agent Git 地址未配置";
+        } else if (gitWorkspaceService.isGitRepository(config.gitRoot())) {
+            currentBranch = gitWorkspaceService.currentBranch(config.gitRoot());
+            commitHash = gitWorkspaceService.headCommit(config.gitRoot());
+            boolean originMatched = Objects.equals(gitWorkspaceService.originUrl(config.gitRoot()), config.gitUrl());
+            boolean clean = gitWorkspaceService.isWorktreeClean(config.gitRoot());
+            boolean configReady = isInitializedConfigDirectory(config);
+            initialized = originMatched && clean && configReady;
+            status = initialized ? "READY" : "CONFLICT";
+            initializationAllowed = originMatched && clean;
+            if (!originMatched) {
+                message = "Git origin 与配置不一致";
+            } else if (!clean) {
+                message = "Git 工作树存在未提交变更";
+            } else if (!configReady) {
+                status = "UNINITIALIZED";
+                message = "公共配置目录未初始化";
+            }
+        } else if (Files.exists(config.gitRoot()) && !isEmptyDirectory(config.gitRoot())) {
+            status = "CONFLICT";
+            initializationAllowed = false;
+            message = "目录已存在且非空，但不是 Git 仓库";
+        } else {
+            message = "公共配置仓库未初始化";
+        }
+        return new AgentConfigResponses.PublicRepositoryStatusResponse(
+                serverIdentity.linuxServerId(),
+                serverIdentity.linuxServerId(),
+                config.gitRoot().toString(),
+                config.configDir().toString(),
+                config.worktreeRoot().toString(),
+                status,
+                initialized,
+                initializationAllowed,
+                currentBranch,
+                commitHash,
+                message);
+    }
+
+    private boolean isInitializedConfigDirectory(PublicConfig config) {
+        return Files.isDirectory(config.configDir()) && !isEmptyDirectory(config.configDir());
+    }
+
+    private void requireInitializedConfigDirectory(PublicConfig config) {
+        if (!isInitializedConfigDirectory(config)) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "服务器" + serverIdentity.linuxServerId() + "上公共配置目录在" + config.configDir() + "目录中未初始化。",
+                    Map.of("linuxServerId", serverIdentity.linuxServerId(), "configDirPath", config.configDir().toString()));
+        }
+    }
+
+    private PlatformException publicRepositoryUninitialized(Path gitRoot) {
+        return new PlatformException(
+                ErrorCode.CONFLICT,
+                "服务器" + serverIdentity.linuxServerId() + "上公共配置仓库在" + gitRoot + "目录中未初始化。",
+                Map.of("linuxServerId", serverIdentity.linuxServerId(), "gitRootPath", gitRoot.toString()));
+    }
+
+    private boolean isEmptyDirectory(Path directory) {
+        if (!Files.isDirectory(directory)) {
+            return false;
+        }
+        try (java.util.stream.Stream<Path> children = Files.list(directory)) {
+            return children.findAny().isEmpty();
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "读取目录失败", Map.of("path", directory.toString()), exception);
+        }
     }
 
     private void ensureExistingCleanRepository(Path repoRoot, String expectedOrigin) {
         if (!gitWorkspaceService.isGitRepository(repoRoot)) {
-            throw new PlatformException(ErrorCode.CONFLICT, "目录不是 Git 仓库", Map.of("path", repoRoot.toString()));
+            // 消息带上具体目录，便于前端直接定位问题路径
+            throw new PlatformException(ErrorCode.CONFLICT, "目录不是 Git 仓库：" + repoRoot, Map.of("path", repoRoot.toString()));
         }
         String origin = gitWorkspaceService.originUrl(repoRoot);
         if (expectedOrigin != null && !expectedOrigin.isBlank() && !Objects.equals(origin, expectedOrigin)) {
@@ -608,6 +810,12 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return publicStandardAgentRoot(repoRootForPublicOperation(worktreeId));
     }
 
+    private String usernameFor(UserId userId) {
+        return userRepository.findByUserId(userId)
+                .map(User::username)
+                .orElse(null);
+    }
+
     private Path workspaceAgentRootForRead(String workspaceId, String worktreeId) {
         Path repoRoot = repoRootForWorkspaceOperation(workspaceId, worktreeId);
         Path standard = workspaceStandardAgentRoot(repoRoot);
@@ -638,6 +846,20 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     private AgentConfigWorktree existingWorktree(String worktreeId, AgentConfigScope scope, WorkspaceId workspaceId) {
+        AgentConfigWorktree worktree = existingWorktreeForRouting(worktreeId, scope, workspaceId);
+        if (worktree.linuxServerId() != null && !worktree.linuxServerId().equals(serverIdentity.linuxServerId())) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "Agent worktree 不属于当前服务器",
+                    Map.of(
+                            "worktreeId", worktreeId,
+                            "targetLinuxServerId", worktree.linuxServerId(),
+                            "currentLinuxServerId", serverIdentity.linuxServerId()));
+        }
+        return worktree;
+    }
+
+    private AgentConfigWorktree existingWorktreeForRouting(String worktreeId, AgentConfigScope scope, WorkspaceId workspaceId) {
         AgentConfigWorktree worktree = agentConfigRepository.findWorktree(requireText(worktreeId, "worktreeId 不能为空", "worktreeId"))
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "Agent worktree 不存在", Map.of("worktreeId", worktreeId)));
         if (worktree.scope() != scope || (workspaceId != null && !workspaceId.equals(worktree.workspaceId()))) {
@@ -650,14 +872,19 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     private Workspace existingWorkspace(String workspaceId) {
+        Workspace workspace = existingWorkspaceForRouting(workspaceId);
+        if (workspace.linuxServerId() != null && !workspace.linuxServerId().equals(serverIdentity.linuxServerId())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "工作区不属于当前服务器", Map.of("workspaceId", workspaceId));
+        }
+        return workspace;
+    }
+
+    private Workspace existingWorkspaceForRouting(String workspaceId) {
         WorkspaceId id = new WorkspaceId(requireText(workspaceId, "工作区 ID 不能为空", "workspaceId"));
         Workspace workspace = workspaceRepository.findById(id)
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "工作区不存在", Map.of("workspaceId", workspaceId)));
         if (workspace.status() != WorkspaceStatus.ACTIVE) {
             throw new PlatformException(ErrorCode.CONFLICT, "工作区不可用", Map.of("workspaceId", workspaceId));
-        }
-        if (workspace.linuxServerId() != null && !workspace.linuxServerId().equals(serverIdentity.linuxServerId())) {
-            throw new PlatformException(ErrorCode.CONFLICT, "工作区不属于当前服务器", Map.of("workspaceId", workspaceId));
         }
         return workspace;
     }
@@ -674,30 +901,25 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         // gitUrl 缺失或为 UNCONFIGURED 均视为公共级功能未启用（合法语义，不抛异常）。
         String gitUrl = optionalParameter(PARAM_PUBLIC_AGENT_GIT_URL, UNCONFIGURED);
         Path gitRoot = Path.of(requiredParameter(PARAM_PUBLIC_CONFIG_GIT_ROOT)).normalize();
+        Path configDir = Path.of(optionalParameter(PARAM_PUBLIC_CONFIG_DIR, gitRoot.resolve("opencode").toString())).normalize();
         Path worktreeRoot = Path.of(requiredParameter(PARAM_PUBLIC_CONFIG_WORKTREE_ROOT)).normalize();
-        return new PublicConfig(gitUrl, gitRoot, worktreeRoot);
+        return new PublicConfig(gitUrl, gitRoot, configDir, worktreeRoot);
     }
 
     /**
-     * 读取可选参数：缺失或空白时回退到 defaultValue，用于语义性的"未配置"开关值。
+     * 读取可选参数（已展开变量引用）：缺失或空白时回退到 defaultValue，用于语义性的"未配置"开关值。
      */
     private String optionalParameter(String englishName, String defaultValue) {
-        ParameterPlatform current = ParameterPlatform.current();
-        return commonParameterRepository.findByEnglishNameAndPlatform(englishName, current)
-                .or(() -> commonParameterRepository.findByEnglishNameAndPlatform(englishName, ParameterPlatform.ALL))
-                .map(parameter -> parameter.parameterValue())
+        return commonParameterValues.resolvedValue(englishName)
                 .filter(value -> !value.isBlank())
                 .orElse(defaultValue);
     }
 
     /**
-     * 读取必填参数：common_parameters 为唯一事实源，缺失或空白时抛异常，不在 yaml/代码预留 fallback。
+     * 读取必填参数（已展开变量引用）：common_parameters 为唯一事实源，缺失或空白时抛异常，不在 yaml/代码预留 fallback。
      */
     private String requiredParameter(String englishName) {
-        ParameterPlatform current = ParameterPlatform.current();
-        return commonParameterRepository.findByEnglishNameAndPlatform(englishName, current)
-                .or(() -> commonParameterRepository.findByEnglishNameAndPlatform(englishName, ParameterPlatform.ALL))
-                .map(parameter -> parameter.parameterValue())
+        return commonParameterValues.resolvedValue(englishName)
                 .filter(value -> !value.isBlank())
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.INTERNAL_ERROR,
@@ -821,7 +1043,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return Instant.now(clock);
     }
 
-    private record PublicConfig(String gitUrl, Path gitRoot, Path worktreeRoot) {
+    private record PublicConfig(String gitUrl, Path gitRoot, Path configDir, Path worktreeRoot) {
         private boolean enabled() {
             return gitUrl != null && !gitUrl.isBlank() && !UNCONFIGURED.equalsIgnoreCase(gitUrl.trim());
         }

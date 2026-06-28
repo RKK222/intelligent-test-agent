@@ -27,6 +27,103 @@ describe("FigmaChatPanel", () => {
     expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("");
   });
 
+  it("keeps the composer enabled while a ready process is refreshing in the background", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "后台刷新时发送",
+        processRequired: true,
+        processLoading: true,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    expect(wrapper.text()).not.toContain("正在检查 opencode 进程");
+    expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeUndefined();
+
+    await wrapper.get('[aria-label="发送"]').trigger("click");
+
+    expect(wrapper.emitted("send")).toEqual([["后台刷新时发送"]]);
+  });
+
+  it("requests a process refresh when the user focuses the composer textarea", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    await wrapper.get("textarea").trigger("focus");
+
+    expect(wrapper.emitted("refresh-process")).toEqual([[]]);
+  });
+
+  it("requests a process refresh when the user clicks the composer card", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    await wrapper.get(".figma-chat-input-card").trigger("click");
+
+    expect(wrapper.emitted("refresh-process")).toEqual([[]]);
+  });
+
+  it("deduplicates focus and click refresh requests from the same interaction", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    await wrapper.get("textarea").trigger("focus");
+    await wrapper.get(".figma-chat-input-card").trigger("click");
+
+    expect(wrapper.emitted("refresh-process")).toEqual([[]]);
+  });
+
+  it("blocks submit actions and skips duplicate refresh while process status is refreshing", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "刷新中不发送",
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        processRefreshing: true
+      }
+    });
+
+    const textarea = wrapper.get("textarea");
+    expect(textarea.attributes("disabled")).toBeUndefined();
+    expect(wrapper.get(".figma-chat-new-btn").attributes("disabled")).toBeDefined();
+    expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeDefined();
+
+    await textarea.trigger("focus");
+    await wrapper.get(".figma-chat-input-card").trigger("click");
+    await wrapper.get('[aria-label="发送"]').trigger("click");
+
+    expect(wrapper.emitted("refresh-process")).toBeUndefined();
+    expect(wrapper.emitted("send")).toBeUndefined();
+  });
+
+  it("shows the checking state before the first process status response arrives", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processRequired: true,
+        processLoading: true,
+        processStatus: null
+      }
+    });
+
+    expect(wrapper.text()).toContain("正在检查 opencode 进程");
+    expect(wrapper.text()).toContain("正在检查当前用户可用进程");
+    expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeDefined();
+  });
+
   it("does not send Enter while IME composition is active", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

@@ -67,7 +67,14 @@ function renderRuntimePanel(api: Partial<BackendApiClient>) {
           template: `<option :value="value">{{ label }}</option>`
         },
         ElRadioGroup: ElRadioGroupStub,
-        ElRadioButton: ElRadioButtonStub
+        ElRadioButton: ElRadioButtonStub,
+        RuntimeMetricChart: {
+          props: ["title"],
+          template: `<div class="runtime-metric-chart-stub"><h6>{{ title }}</h6></div>`
+        },
+        RuntimeTopologyGraph: {
+          template: `<div class="runtime-topology-graph-stub">网络拓扑图</div>`
+        }
       },
       provide: {
         api: api as BackendApiClient
@@ -173,27 +180,83 @@ describe("runtime management settings", () => {
 
   it("loads runtime management overview and renders empty state", async () => {
     const api = {
-      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyOverview)
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyOverview),
+      getOpencodeRuntimeManagementUserProcesses: vi.fn()
     };
     const { findByText, queryClient } = renderRuntimePanel(api);
 
-    expect(await findByText("暂无 opencode 进程")).toBeTruthy();
+    expect(await findByText("请输入用户关键字查询 opencode 进程")).toBeTruthy();
     expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledWith(
       expect.objectContaining({ page: 1, size: 20 })
     );
+    expect(api.getOpencodeRuntimeManagementUserProcesses).not.toHaveBeenCalled();
 
     queryClient.clear();
   });
 
-  it("queries and renders opencode processes by username", async () => {
+  it("merges Linux servers and backend Java processes by linuxServerId", async () => {
     const overview: OpencodeRuntimeManagementOverview = {
       ...emptyOverview,
       summary: {
         ...emptyOverview.summary,
-        opencodeProcesses: 1,
-        runningOpencodeProcesses: 1
+        linuxServers: 1,
+        readyLinuxServers: 1,
+        backendProcesses: 1,
+        readyBackendProcesses: 1
       },
-      opencodeProcesses: {
+      linuxServers: [
+        {
+          linuxServerId: "10.8.0.12",
+          name: "server-a",
+          status: "READY",
+          capacitySummary: { containers: 1 },
+          lastHeartbeatAt: "2026-06-24T08:00:00Z",
+          createdAt: "2026-06-24T08:00:00Z",
+          updatedAt: "2026-06-24T08:00:00Z",
+          traceId: "trace_server"
+        }
+      ],
+      backendProcesses: [
+        {
+          backendProcessId: "bjp_1234567890abcdef",
+          linuxServerId: "10.8.0.12",
+          listenUrl: "http://10.8.0.12:8080",
+          status: "READY",
+          startedAt: "2026-06-24T08:00:00Z",
+          lastHeartbeatAt: "2026-06-24T08:00:00Z",
+          cpuUsagePercent: 12.5,
+          memoryUsagePercent: 50,
+          memoryUsedBytes: 512,
+          diskUsagePercent: 62.5,
+          diskUsedBytes: 1024,
+          jvmMemoryUsedBytes: 268435456,
+          jvmThreadsLive: 42,
+          createdAt: "2026-06-24T08:00:00Z",
+          updatedAt: "2026-06-24T08:00:00Z",
+          traceId: "trace_backend"
+        }
+      ]
+    };
+    const api = {
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(overview)
+    };
+    const { findByText, queryByText, queryClient } = renderRuntimePanel(api);
+
+    expect(await findByText("服务器 / Java 进程")).toBeTruthy();
+    expect(await findByText("bjp_1234567890abcdef")).toBeTruthy();
+    expect(await findByText("10.8.0.12")).toBeTruthy();
+    expect(await findByText("12.5%")).toBeTruthy();
+    expect(await findByText((_content, element) =>
+      element?.tagName === "TD" && Boolean(element.textContent?.includes("42 线程"))
+    )).toBeTruthy();
+    expect(queryByText("Linux 服务器")).toBeNull();
+    expect(queryByText("后端 Java 进程")).toBeNull();
+
+    queryClient.clear();
+  });
+
+  it("queries and renders opencode processes by user keyword", async () => {
+    const userProcessPage = {
         items: [
           {
             processId: "ocp_1234567890abcdef",
@@ -204,11 +267,14 @@ describe("runtime management settings", () => {
             port: 4096,
             pid: 12345,
             baseUrl: "http://10.8.0.12:4096",
-            status: "RUNNING",
+            status: "STOPPED",
+            managerStatus: "NOT_RUNNING",
+            healthStatus: "NOT_RUNNING",
+            restartable: true,
             sessionPath: "/data/opencode/session/4096",
             configPath: "/data/opencode/.config/opencode/",
             lastHealthCheckAt: "2026-06-24T08:00:00Z",
-            healthMessage: "ok",
+            healthMessage: "process pid is not alive",
             createdAt: "2026-06-24T08:00:00Z",
             updatedAt: "2026-06-24T08:00:00Z",
             traceId: "trace_1234567890abcdef",
@@ -220,31 +286,164 @@ describe("runtime management settings", () => {
         page: 1,
         size: 20,
         total: 1
-      }
     };
     const api = {
-      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(overview)
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyOverview),
+      getOpencodeRuntimeManagementUserProcesses: vi.fn().mockResolvedValue(userProcessPage),
+      restartOpencodeRuntimeManagedProcess: vi.fn().mockResolvedValue({ command: "restart", status: "STARTED", port: 4096 })
     };
     const { findByText, getByPlaceholderText, getByText, queryClient } = renderRuntimePanel(api);
 
-    expect(await findByText("wr")).toBeTruthy();
-    await fireEvent.update(getByPlaceholderText("用户名"), "wr");
-    await fireEvent.click(getByText("查询"));
+    expect(await findByText("请输入用户关键字查询 opencode 进程")).toBeTruthy();
+    await fireEvent.update(getByPlaceholderText("用户名 / userId / 统一认证号"), "wr");
+    await fireEvent.click(getByText("查询用户进程"));
 
-    await waitFor(() => expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenLastCalledWith(
-      expect.objectContaining({ username: "wr", page: 1, size: 20 })
+    await waitFor(() => expect(api.getOpencodeRuntimeManagementUserProcesses).toHaveBeenCalledWith(
+      expect.objectContaining({ keyword: "wr", page: 1, size: 20 })
     ));
+    expect(await findByText("wr")).toBeTruthy();
+    expect(await findByText("NOT_RUNNING / NOT_RUNNING")).toBeTruthy();
+    expect(await findByText("process pid is not alive")).toBeTruthy();
+
+    await fireEvent.click(getByText("重启"));
+    await waitFor(() => expect(api.restartOpencodeRuntimeManagedProcess).toHaveBeenCalledWith("ctr_01", 4096));
 
     queryClient.clear();
   });
 
-  it("shows container latest metrics and loads metric history after row click", async () => {
+  it("expands a merged container manager row and groups owned and ghost processes", async () => {
+    const startCommand =
+      "XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs";
     const overview: OpencodeRuntimeManagementOverview = {
       ...emptyOverview,
       summary: {
         ...emptyOverview.summary,
         containers: 1,
-        readyContainers: 1
+        readyContainers: 1,
+        managers: 1,
+        connectedManagers: 1
+      },
+      containers: [
+        {
+          containerId: "ctr_01",
+          linuxServerId: "10.8.0.12",
+          containerName: "opencode-a",
+          portStart: 4096,
+          portEnd: 4100,
+          maxProcesses: 4,
+          currentProcesses: 3,
+          availableCapacity: 1,
+          metricsSource: "cgroup",
+          status: "READY",
+          lastHeartbeatAt: "2026-06-24T08:00:00Z",
+          createdAt: "2026-06-24T08:00:00Z",
+          updatedAt: "2026-06-24T08:00:00Z",
+          traceId: "trace_1234567890abcdef"
+        }
+      ],
+      managers: [
+        {
+          managerId: "mgr_1234567890abcdef",
+          containerId: "ctr_01",
+          linuxServerId: "10.8.0.12",
+          protocolVersion: "opencode-manager.v1",
+          connectionStatus: "CONNECTED",
+          capabilities: { commands: ["start", "health"] },
+          lastHeartbeatAt: "2026-06-24T08:00:00Z",
+          createdAt: "2026-06-24T08:00:00Z",
+          updatedAt: "2026-06-24T08:00:00Z",
+          traceId: "trace_1234567890abcdef",
+          managedProcesses: [
+            {
+              port: 4096,
+              pid: 12345,
+              baseUrl: "http://10.8.0.12:4096",
+              sessionPath: "/data/opencode/session/4096",
+              configPath: "/data/opencode/.config/opencode/",
+              startedAt: "2026-06-24T08:00:00Z",
+              startCommand,
+              traceId: "trace_process",
+              ownership: "BOUND",
+              processId: "ocp_1234567890abcdef",
+              processStatus: "RUNNING",
+              healthMessage: "ok",
+              userId: "usr_1234567890abcdef",
+              username: "wr",
+              bindingAgentId: "opencode",
+              bindingStatus: "ACTIVE",
+              bindingUpdatedAt: "2026-06-24T08:00:00Z"
+            },
+            {
+              port: 4097,
+              pid: 22345,
+              baseUrl: "http://10.8.0.12:4097",
+              sessionPath: "/data/opencode/session/4097",
+              configPath: "/data/opencode/.config/opencode/",
+              startedAt: "2026-06-24T08:05:00Z",
+              traceId: "trace_ghost",
+              ownership: "UNBOUND",
+              processId: "ocp_2234567890abcdef",
+              processStatus: "UNHEALTHY",
+              healthMessage: "process is not alive"
+            }
+          ]
+        }
+      ]
+    };
+    const api = {
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(overview),
+      restartOpencodeRuntimeManagedProcess: vi.fn().mockResolvedValue({
+        command: "restart",
+        status: "STARTED",
+        port: 4096,
+        message: "opencode server started"
+      }),
+      stopOpencodeRuntimeManagedProcess: vi.fn().mockResolvedValue({
+        command: "stop",
+        status: "STOPPED",
+        port: 4097,
+        message: "opencode server stopped"
+      })
+    };
+    const { findAllByRole, findByText, queryByText, queryClient } = renderRuntimePanel(api);
+
+    expect(await findByText("mgr_1234567890abcdef")).toBeTruthy();
+    expect(queryByText(startCommand)).toBeNull();
+    await fireEvent.click(await findByText("ctr_01"));
+
+    expect(await findByText("有主进程")).toBeTruthy();
+    expect(await findByText("无主进程")).toBeTruthy();
+    expect(await findByText("wr")).toBeTruthy();
+    expect(await findByText("process is not alive")).toBeTruthy();
+    expect(await findByText(/容量计数来自 manager state/)).toBeTruthy();
+    expect(await findByText("启动命令")).toBeTruthy();
+    expect(await findByText(startCommand)).toBeTruthy();
+    expect(await findByText("http://10.8.0.12:4096")).toBeTruthy();
+    const restartButtons = await findAllByRole("button", { name: "重启" });
+    const stopButtons = await findAllByRole("button", { name: "停止" });
+
+    await fireEvent.click(restartButtons[0]);
+    await waitFor(() => expect(api.restartOpencodeRuntimeManagedProcess).toHaveBeenCalledWith("ctr_01", 4096));
+    await waitFor(() => expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledTimes(2));
+
+    await fireEvent.click(stopButtons[1]);
+    await waitFor(() => expect(api.stopOpencodeRuntimeManagedProcess).toHaveBeenCalledWith("ctr_01", 4097));
+    await waitFor(() => expect(queryByText("process is not alive")).toBeNull());
+    expect(await findByText("暂无无主进程")).toBeTruthy();
+    expect(api.getOpencodeRuntimeManagementOverview).toHaveBeenCalledTimes(2);
+
+    queryClient.clear();
+  });
+
+  it("shows container latest metrics and loads metric history from the trend action", async () => {
+    const overview: OpencodeRuntimeManagementOverview = {
+      ...emptyOverview,
+      summary: {
+        ...emptyOverview.summary,
+        containers: 1,
+        readyContainers: 1,
+        managers: 1,
+        connectedManagers: 1
       },
       containers: [
         {
@@ -265,6 +464,21 @@ describe("runtime management settings", () => {
           memoryUsagePercent: 50,
           memoryUsedBytes: 512
         }
+      ],
+      managers: [
+        {
+          managerId: "mgr_1234567890abcdef",
+          containerId: "ctr_01",
+          linuxServerId: "10.8.0.12",
+          protocolVersion: "opencode-manager.v1",
+          connectionStatus: "CONNECTED",
+          capabilities: { commands: ["start", "health"] },
+          lastHeartbeatAt: "2026-06-24T08:00:00Z",
+          createdAt: "2026-06-24T08:00:00Z",
+          updatedAt: "2026-06-24T08:00:00Z",
+          traceId: "trace_1234567890abcdef",
+          managedProcesses: []
+        }
       ]
     };
     const api = {
@@ -277,11 +491,11 @@ describe("runtime management settings", () => {
         samples: [{ sampledAt: "2026-06-26T17:28:00Z", cpuUsagePercent: 12.5, memoryUsagePercent: 50 }]
       })
     };
-    const { findByText, queryClient } = renderRuntimePanel(api);
+    const { findByRole, findByText, queryClient } = renderRuntimePanel(api);
 
     expect(await findByText("12.5%")).toBeTruthy();
     expect(await findByText("512 B")).toBeTruthy();
-    await fireEvent.click(await findByText("ctr_01"));
+    await fireEvent.click(await findByRole("button", { name: "查看 ctr_01 容器监控趋势" }));
 
     await waitFor(() => expect(api.getOpencodeRuntimeContainerMetrics).toHaveBeenLastCalledWith(
       "ctr_01",
@@ -315,6 +529,48 @@ describe("runtime management settings", () => {
       "ctr_01",
       expect.objectContaining({ windowMinutes: 2880, maxPoints: 720 })
     ));
+
+    queryClient.clear();
+  });
+
+  it("explains container metric source values on hover", async () => {
+    const overview: OpencodeRuntimeManagementOverview = {
+      ...emptyOverview,
+      summary: {
+        ...emptyOverview.summary,
+        containers: 1,
+        readyContainers: 1
+      },
+      containers: [
+        {
+          containerId: "ctr_01",
+          linuxServerId: "10.8.0.12",
+          containerName: "opencode-a",
+          portStart: 4096,
+          portEnd: 4100,
+          maxProcesses: 4,
+          currentProcesses: 2,
+          availableCapacity: 2,
+          metricsSource: "cgroup",
+          status: "READY",
+          lastHeartbeatAt: "2026-06-24T08:00:00Z",
+          createdAt: "2026-06-24T08:00:00Z",
+          updatedAt: "2026-06-24T08:00:00Z",
+          traceId: "trace_1234567890abcdef"
+        }
+      ]
+    };
+    const api = {
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(overview)
+    };
+    const { findByTitle, queryClient } = renderRuntimePanel(api);
+
+    const sourceCell = await findByTitle(/“cgroup”/);
+
+    expect(sourceCell.textContent).toBe("cgroup");
+    expect(sourceCell.getAttribute("title")).toContain("“process”: 降级为当前 Go manager 进程指标");
+    expect(sourceCell.getAttribute("title")).toContain("“不可采集”: 当前环境无法安全采集");
+    expect(sourceCell.getAttribute("title")).toContain("“-”: 旧数据或未上报");
 
     queryClient.clear();
   });

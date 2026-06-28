@@ -30,14 +30,11 @@ OPENCODE_MANAGER_CONTAINER_ID=ctr_01
 OPENCODE_MANAGER_SERVER_IP_FILE=/data/.testagent/.serverip
 OPENCODE_MANAGER_PORT_START=4096
 OPENCODE_MANAGER_PORT_END=4100
-OPENCODE_MANAGER_MAX_PROCESSES=5
 OPENCODE_MANAGER_ID=mgr_1234567890abcdef
 OPENCODE_MANAGER_BACKEND_PORT=8080
 OPENCODE_MANAGER_TOKEN=<manager-control-token>
 OPENCODE_BIN=opencode
 OPENCODE_MANAGER_STATE_DIR=/data/.testagent/agent-opencode/manager
-OPENCODE_SESSION_ROOT=/data/.testagent/agent-opencode/.session
-OPENCODE_CONFIG_DIR=/data/.testagent/agent-opencode/.config/opencode/
 ```
 
 长运行模式启动：
@@ -58,11 +55,13 @@ OPENCODE_CONFIG_DIR=/data/.testagent/agent-opencode/.config/opencode/ \
 opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 ```
 
+`XDG_DATA_HOME` 和 `OPENCODE_CONFIG_DIR` 的真实值不再由 manager 环境变量传入，而是 manager 通过 WebSocket `configRequest` 从 Java 后端获取通用参数：`OPENCODE_SESSION_DIR`、`OPENCODE_PUBLIC_CONFIG_DIR`。最大进程数同样来自 `OPENCODE_MANAGER_MAX_PROCESSES`（`platform=all`）。收到完整 `configUpdate` 前，manager 会拒绝 `start`/`restart` 命令，不会用容器内默认路径启动用户进程；成功应用 `configUpdate` 后，manager 会立即补发 heartbeat，把端口池裁剪后的生效容量写入运行管理 Redis 快照。通用参数值不会经过 shell；`$NAME` 直接按 Java 后端进程环境变量展开，`${NAME}` 先按通用参数引用解析、未命中时再按环境变量展开，路径开头的 `$HOME` 和 `~/` 会解析为当前用户主目录后再下发给 manager。`OPENCODE_PUBLIC_CONFIG_DIR` 的存在性和非空检查发生在目标 manager 执行 `start` 时，检查的是目标 opencode server 所在服务器的实际文件系统。
+
 opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http://{linuxServerIp}:{port}` 访问。生产部署必须通过容器网络、主机防火墙或网关限制端口池访问面，不得把用户进程端口暴露到不可信网络。
 
-后端创建用户进程、应用版本工作区和个人 worktree 时读取数据库 `common_parameters` 中当前平台的 opencode 路径参数：`OPENCODE_SESSION_DIR`、`OPENCODE_PUBLIC_CONFIG_DIR`、`OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT`。`common_parameters` 为唯一事实源，缺失或值为空时抛 `INTERNAL_ERROR` 业务异常，不在 yaml 或代码常量预留 fallback；Windows 默认值在迁移中按 `D:/data/.testagent/agent-opencode/...` 初始化。
+后端创建用户进程、应用版本工作区和个人 worktree 时读取数据库 `common_parameters` 中当前平台的 opencode 路径参数：`OPENCODE_SESSION_DIR`、`OPENCODE_PUBLIC_CONFIG_DIR`、`OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT`。`common_parameters` 为唯一事实源，缺失或值为空时抛 `INTERNAL_ERROR` 业务异常，不在 yaml 或代码常量预留 fallback；Windows 默认值在迁移中按 `D:/data/.testagent/agent-opencode/...` 初始化。macOS/Linux 本地开发可把路径写为 `$HOME/.testagent/...` 或 `$TEST_AGENT_ROOT/...`，加载后的 `resolvedValue` 会变为实际用户目录或环境变量值。真实创建用户进程时，后端先按健康容器和空闲端口选择目标容器，再向该容器对应 manager 下发 `start`；manager 使用已通过 `configUpdate` 同步的 `OPENCODE_PUBLIC_CONFIG_DIR`，并在所在服务器检查该目录必须存在且非空。缺失、为空、非目录或不可读时返回 `OPENCODE_UNAVAILABLE` 和“公共配置未初始化，请联系管理员。”，不会创建 session、不会启动 opencode server。
 
-公共 Agent 配置额外读取 `OPENCODE_PUBLIC_AGENT_GIT_URL`、`OPENCODE_PUBLIC_CONFIG_GIT_ROOT`、`OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT`。Git 地址默认为 `UNCONFIGURED`，未配置前公共 Agent 只读 status 可用，更新、worktree、commit、publish 均被禁用。公共配置实际 opencode agent 目录为 `{OPENCODE_PUBLIC_CONFIG_GIT_ROOT}/opencode/agents/`，读兼容 `{OPENCODE_PUBLIC_CONFIG_GIT_ROOT}/opencode/agent/`；worktree 模式目录在 `{OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT}/{worktreeName-yyyymmdd}` 下创建。
+公共 Agent 配置额外读取 `OPENCODE_PUBLIC_AGENT_GIT_URL`、`OPENCODE_PUBLIC_CONFIG_GIT_ROOT`、`OPENCODE_PUBLIC_CONFIG_DIR`、`OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT`。Git 地址默认为 `UNCONFIGURED`，未配置前公共 Agent 只读 status 可用，更新、worktree、commit、publish 均被禁用。公共配置 Git 仓库按服务器本地盘初始化到 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT`，初始化完成后必须校验 `OPENCODE_PUBLIC_CONFIG_DIR` 指向的 opencode 配置目录存在且非空；公共配置实际 agent 目录为 `{OPENCODE_PUBLIC_CONFIG_GIT_ROOT}/opencode/agents/`，读兼容 `{OPENCODE_PUBLIC_CONFIG_GIT_ROOT}/opencode/agent/`。公共 worktree 由管理员在前端显式选择一台已初始化服务器后创建，目录在该服务器 `{OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT}/{worktreeName-yyyymmdd}` 下创建，创建成功后记录 `worktreeId -> linuxServerId`，后续公共 Agent 文件、diff、stage、commit、publish 都由当前后端代理到该服务器执行，浏览器不直连目标后端。
 
 启用用户进程模型后，已登录用户的 Run 和 opencode runtime 代理都会优先使用当前用户绑定的 `READY` 进程；用户未初始化或健康检测失败时返回平台 `OPENCODE_UNAVAILABLE`，由前端提示初始化。无用户主体的 static-token 兼容调用仍可使用配置 seed 写入的固定 `execution_nodes`，用于旧集成或本地探测。Session 级 runtime 代理发现绑定节点不是当前用户进程节点时，会在当前进程上创建新的远端 session 并覆盖绑定，不会删除旧远端 session。
 
@@ -82,7 +81,7 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 端口池规划必须满足：
 
 - 同一 Linux 服务器上所有 opencode 容器的主机可访问端口范围不能重叠，数据库约束 `opencode_server_processes(linux_server_id, port)` 会拒绝同一服务器端口重复。
-- `OPENCODE_MANAGER_MAX_PROCESSES` 不得超过 `OPENCODE_MANAGER_PORT_END - OPENCODE_MANAGER_PORT_START + 1`。
+- `common_parameters.OPENCODE_MANAGER_MAX_PROCESSES` 不得超过容器端口池容量；超过时 manager 会按 `OPENCODE_MANAGER_PORT_END - OPENCODE_MANAGER_PORT_START + 1` 裁剪，并通过即时 heartbeat 回报裁剪后的生效容量。
 - 建议每个容器预留 1 到 2 个端口作为故障排查或滚动扩容缓冲，不要把端口池全部按理论最大值打满。
 - `.serverip` 固定语义是“当前服务器 IPv4”，不是容器 IP，不承载 token、URL 或 JSON；用户进程 `baseUrl` 和同服务器重建规则都使用该 IPv4。
 - 本地或测试环境执行 `./restart-dev-services.sh` 时，脚本默认把 Java 和 manager 的 server IP 文件都指向 `.tmp/dev-services/.serverip`，避免 mac/Linux 本地写 `/data` 权限问题；未显式配置 `TEST_AGENT_BACKEND_LISTEN_URL` 时，会使用默认路由网卡 IPv4 补全后端直连地址。
@@ -93,8 +92,8 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 |---|---|---|---|
 | `/data/.testagent/agent-opencode/.session/{port}` | Linux 服务器本地盘并挂载到容器 | 用户进程 `XDG_DATA_HOME` | 不能跨 Linux 服务器共享；备份/清理必须按端口和用户绑定关系执行。 |
 | `/data/.testagent/agent-opencode/.config/opencode/` | Linux 服务器本地盘并挂载到容器 | 公共 agent、插件、skill 配置 | 多容器共享只读或受控写入；变更前先备份。 |
-| `/data/.testagent/agent-opencode/.config/` | Linux 服务器本地盘 | 公共 Agent 配置 Git 根目录 | 由 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` 控制；Git origin 必须与参数一致，更新前要求工作树 clean。 |
-| `/data/.testagent/agent-opencode/.configdev/` | Linux 服务器本地盘 | 公共 Agent 配置 Git worktree 根目录 | 由 `OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT` 控制；发布时先 merge 回公共配置当前分支再 push。 |
+| `/data/.testagent/agent-opencode/.config/` | Linux 服务器本地盘 | 公共 Agent 配置 Git 根目录 | 由 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` 控制；每台在线后端所在服务器需要在系统管理中初始化，Git origin 必须与参数一致，更新前要求工作树 clean。 |
+| `/data/.testagent/agent-opencode/.configdev/` | Linux 服务器本地盘 | 公共 Agent 配置 Git worktree 根目录 | 由 `OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT` 控制；worktree 记录服务器归属，发布时由当前后端代理到目标服务器，先 merge 回公共配置当前分支再 push。 |
 | `/data/.testagent/agent-opencode/workspace/appworkspace/` | Linux 服务器本地盘 | 应用版本工作区根目录 | 默认由 `common_parameters.OPENCODE_APP_WORKSPACE_ROOT` 控制；目录片段为版本 + 代码库英文名。 |
 | `/data/.testagent/agent-opencode/workspace/personalworktree/` | Linux 服务器本地盘 | 个人 git worktree 根目录 | 默认由 `common_parameters.OPENCODE_PERSONAL_WORKTREE_ROOT` 控制；目录片段包含版本、统一认证号、代码库英文名和个人空间 ID。 |
 | `/data/.testagent/agent-opencode/manager/processes/{port}.json` | 容器挂载目录 | manager 本地进程状态 | 用于 stop/list/restart；容器重启后继续识别已有 state。 |
@@ -109,7 +108,7 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 | `TEST_AGENT_BACKEND_STALE_AFTER` | `10s` | Java/manager Redis 快照 TTL；不再作为数据库心跳回退窗口使用。 |
 | `TEST_AGENT_BACKEND_DISCOVERY_LIMIT` | `100` | `backendListResponse` 和兼容诊断端点返回后端实例上限。 |
 | `TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT` | `10s` | 后端等待 manager 命令结果的超时。 |
-| `TEST_AGENT_SERVER_BROADCAST_ENABLED` | `false` / 多机 `true` | 开启 Redis 服务器广播，应用版本创建、同步和 git pull 后广播目标 commit 给其他后端。 |
+| `TEST_AGENT_SERVER_BROADCAST_ENABLED` | `false` / 多机 `true` | 开启 Redis 服务器广播，应用版本创建、同步和 git pull 后广播目标 commit 给其他后端；公共 Agent 配置长操作也用它广播安全进度字段。 |
 | `TEST_AGENT_SERVER_BROADCAST_CHANNEL` | `test-agent:server-broadcast` | 服务器广播 Redis channel；同一集群必须一致。 |
 | `TEST_AGENT_MANAGED_WORKSPACE_REPLICA_RECONCILER_ENABLED` | `true` | 启用应用版本工作区本机副本补偿扫描，补齐漏消息或落后 commit。 |
 | `TEST_AGENT_MANAGED_WORKSPACE_REPLICA_RECONCILER_INTERVAL` | `60s` | 副本补偿扫描间隔，最小按 10 秒执行。 |
@@ -139,6 +138,8 @@ opencode 容器扩容流程：
 | 现象 | 排查顺序 | 处理 |
 |---|---|---|
 | 用户初始化返回 `OPENCODE_UNAVAILABLE` | 运行管理页查看是否有 Redis 在线的 `READY` 容器和 `CONNECTED` manager；检查 Redis、manager WebSocket 连接和 `managerHeartbeat` | 恢复 Redis/manager WebSocket 连接或启动有空余端口的容器。 |
+| 用户初始化返回 `OPENCODE_UNAVAILABLE` 且提示“公共配置未初始化，请联系管理员。” | 先在运行管理页或日志确认本次选择的目标容器/manager，再登录该 manager 所在服务器检查 `common_parameters.OPENCODE_PUBLIC_CONFIG_DIR` 解析后的目录是否存在且非空；确认公共配置 Git 根目录已经 clone/pull 并包含 `opencode/` 配置内容 | 由管理员在目标服务器初始化公共配置目录后重试；不要在空目录状态下启动用户进程。 |
+| 创建公共 Agent worktree 返回 `CONFLICT` 且提示“公共配置仓库未初始化” | 在系统管理 > 配置管理 > opencode公共配置管理中查看对应 `linuxServerId` 的 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT`、`OPENCODE_PUBLIC_CONFIG_DIR` 和状态；确认当前管理员 SSH key 有公共配置仓库读取权限 | 对该服务器执行初始化；不要在创建 worktree 时手工拷贝半初始化目录。 |
 | 用户初始化返回 `OPENCODE_TIMEOUT` | 查看 `{stateDir}/logs/{port}.log`、后端命令超时配置、opencode CLI 是否卡住 | 先保留日志，再 stop/restart 目标端口或扩容新容器。 |
 | 用户初始化返回 `OPENCODE_BAD_GATEWAY` 且包含 `already managed but unhealthy` | 目标端口已有 manager 本地 state，但 PID 或 HTTP 健康检查失败 | 先查看 `{stateDir}/processes/{port}.json` 和 `{stateDir}/logs/{port}.log`；确认无业务流量后用 manager `restart` 或 `stop` 清理该端口。健康的已托管端口会被幂等复用，不会再因 `already managed` 初始化失败。 |
 | 进程健康异常后没有同服务器重建 | 检查原 `linuxServerId` 下是否还有 `READY` 且有容量的容器 | 在同一 Linux 服务器上恢复或扩容容器；不要把该用户迁移到其他服务器，否则 session 目录不可用。 |
@@ -167,7 +168,7 @@ tools/verify-opencode-process-deployment.sh \
 
 手工验收清单：
 
-1. 首次登录：普通用户进入工作台后进程状态为 `NEEDS_INITIALIZATION`，点击初始化后创建 1 条 `user_opencode_process_bindings` 当前绑定和 1 条 `opencode_server_processes` 记录。
+1. 首次登录：确认系统管理 > 配置管理 > opencode公共配置管理中每台计划承载公共 Agent worktree 的服务器均已初始化；同时确认每个目标 manager 所在服务器上 `OPENCODE_PUBLIC_CONFIG_DIR` 解析后的公共配置目录存在且非空；普通用户进入工作台后进程状态为 `NEEDS_INITIALIZATION`，点击初始化后创建 1 条 `user_opencode_process_bindings` 当前绑定和 1 条 `opencode_server_processes` 记录。
 2. 复用绑定：同一用户退出再登录，状态为 `READY`，`processId/linuxServerId/port/baseUrl` 不变化。
 3. Run 防绕过：用户未初始化或进程不可用时，前端禁用发送；直接调用 Run API 返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run。
 4. 原服务器重建：停止当前用户进程或让 health 失败后重新初始化，新的进程仍位于原 `linuxServerId` 下的可用容器。

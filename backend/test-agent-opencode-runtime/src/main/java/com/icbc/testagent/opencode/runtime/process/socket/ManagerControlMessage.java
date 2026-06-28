@@ -43,7 +43,9 @@ public record ManagerControlMessage(
         String errorCode,
         List<String> connectedBackendProcessIds,
         List<ManagerBackendEndpoint> backendEndpoints,
-        String metricsSource) {
+        String metricsSource,
+        String sessionRoot,
+        String configDir) {
 
     /**
      * 规整可扩展能力字段，避免调用方持有可变 Map。
@@ -56,7 +58,8 @@ public record ManagerControlMessage(
     }
 
     /**
-     * 兼容旧构造调用；新增 metricsSource 只由新 manager 心跳或 JSON 反序列化提供。
+     * 兼容旧构造调用；新增 metricsSource/sessionRoot/configDir 只由新 manager 心跳、
+     * 公共参数配置下发或 JSON 反序列化提供。
      */
     public ManagerControlMessage(
             String type,
@@ -128,6 +131,87 @@ public record ManagerControlMessage(
                 errorCode,
                 connectedBackendProcessIds,
                 backendEndpoints,
+                null,
+                null,
+                null);
+    }
+
+    /**
+     * 兼容旧构造调用；旧代码可继续只传 metricsSource，不需要感知配置下发字段。
+     */
+    public ManagerControlMessage(
+            String type,
+            String protocolVersion,
+            String traceId,
+            String managerId,
+            String containerId,
+            String linuxServerId,
+            String containerName,
+            Integer portStart,
+            Integer portEnd,
+            Integer maxProcesses,
+            Integer currentProcesses,
+            Double cpuUsagePercent,
+            Long memoryMaxBytes,
+            Long memoryUsedBytes,
+            Double memoryUsagePercent,
+            Double diskReadBytesPerSecond,
+            Double diskWriteBytesPerSecond,
+            List<ManagerManagedProcess> managedProcesses,
+            Map<String, Object> capabilities,
+            String backendProcessId,
+            String commandId,
+            String command,
+            Integer port,
+            Long timeoutMillis,
+            String status,
+            Long pid,
+            String baseUrl,
+            String sessionPath,
+            String configPath,
+            Boolean healthy,
+            String message,
+            String errorCode,
+            List<String> connectedBackendProcessIds,
+            List<ManagerBackendEndpoint> backendEndpoints,
+            String metricsSource) {
+        this(
+                type,
+                protocolVersion,
+                traceId,
+                managerId,
+                containerId,
+                linuxServerId,
+                containerName,
+                portStart,
+                portEnd,
+                maxProcesses,
+                currentProcesses,
+                cpuUsagePercent,
+                memoryMaxBytes,
+                memoryUsedBytes,
+                memoryUsagePercent,
+                diskReadBytesPerSecond,
+                diskWriteBytesPerSecond,
+                managedProcesses,
+                capabilities,
+                backendProcessId,
+                commandId,
+                command,
+                port,
+                timeoutMillis,
+                status,
+                pid,
+                baseUrl,
+                sessionPath,
+                configPath,
+                healthy,
+                message,
+                errorCode,
+                connectedBackendProcessIds,
+                backendEndpoints,
+                metricsSource,
+                null,
                 null);
     }
 
@@ -317,6 +401,47 @@ public record ManagerControlMessage(
     }
 
     /**
+     * 构造 manager 主动请求运行配置的消息。
+     */
+    public static ManagerControlMessage configRequest(String traceId) {
+        return new ManagerControlMessage(
+                ManagerControlProtocol.TYPE_CONFIG_REQUEST,
+                ManagerControlProtocol.VERSION,
+                traceId,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of(),
+                Map.of(),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
+    }
+
+    /**
      * 构造后端返回给 manager 的存活 Java 实例列表。
      */
     public static ManagerControlMessage backendListResponse(List<ManagerBackendEndpoint> backendEndpoints, String traceId) {
@@ -418,6 +543,37 @@ public record ManagerControlMessage(
             Boolean healthy,
             String message,
             String traceId) {
+        return commandResult(
+                commandId,
+                command,
+                status,
+                port,
+                pid,
+                baseUrl,
+                sessionPath,
+                configPath,
+                healthy,
+                message,
+                null,
+                traceId);
+    }
+
+    /**
+     * 构造携带平台错误码的命令执行结果消息。
+     */
+    public static ManagerControlMessage commandResult(
+            String commandId,
+            String command,
+            String status,
+            Integer port,
+            Long pid,
+            String baseUrl,
+            String sessionPath,
+            String configPath,
+            Boolean healthy,
+            String message,
+            String errorCode,
+            String traceId) {
         return new ManagerControlMessage(
                 ManagerControlProtocol.TYPE_COMMAND_RESULT,
                 ManagerControlProtocol.VERSION,
@@ -450,15 +606,23 @@ public record ManagerControlMessage(
                 configPath,
                 healthy,
                 message,
-                null,
+                errorCode,
                 null,
                 null);
     }
 
     /**
-     * 构造后端→manager 的运行时配置下发消息（当前仅承载最大进程数）。
+     * 构造后端→manager 的运行时配置下发消息。
      */
     public static ManagerControlMessage configUpdate(int maxProcesses, String traceId) {
+        return configUpdate(maxProcesses, null, null, traceId);
+    }
+
+    /**
+     * 构造后端→manager 的完整运行时配置下发消息。
+     */
+    public static ManagerControlMessage configUpdate(
+            int maxProcesses, String sessionRoot, String configDir, String traceId) {
         return new ManagerControlMessage(
                 ManagerControlProtocol.TYPE_CONFIG_UPDATE,
                 ManagerControlProtocol.VERSION,
@@ -493,7 +657,10 @@ public record ManagerControlMessage(
                 null,
                 null,
                 null,
-                null);
+                null,
+                null,
+                sessionRoot,
+                configDir);
     }
 
     /**

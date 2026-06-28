@@ -576,7 +576,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   height: 36px;
   padding: 0 12px;
   background: #fff;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid #eaeaea;
   flex-shrink: 0;
   font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   font-size: 12px;
@@ -599,6 +599,11 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   gap: 16px;
   overflow: hidden;
   white-space: nowrap;
+  background: #f4f4f5;
+  border-radius: 12px;
+  padding: 4px 14px;
+  height: 28px;
+  border: 1px solid #e4e4e7;
 }
 
 .ta-workbench-footer-right {
@@ -672,7 +677,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   gap: 4px;
   min-width: 0;
   font-family: "JetBrains Mono", "PingFang SC", monospace;
-  font-size: 12px;
+  font-size: 11px;
   color: #555;
 }
 
@@ -697,26 +702,27 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 26px;
-  padding: 0 12px;
+  height: 28px;
+  padding: 0 16px;
   border: none;
-  border-radius: 6px;
-  background: #18181b;
-  color: #fff;
+  border-radius: 12px;
+  background: #eeeeee;
+  color: #333333;
   font: inherit;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 0.12s ease, opacity 0.12s ease;
+  transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .ta-workbench-footer-save:hover:not(:disabled) {
-  background: #000;
+  background: #e2e2e5;
+  color: #111111;
 }
 
 .ta-workbench-footer-save:disabled {
-  background: #c0c4cc;
+  background: #f4f4f5;
+  color: #a1a1aa;
   cursor: not-allowed;
-  opacity: 0.7;
 }
 
 .ta-workbench-footer-save-icon {

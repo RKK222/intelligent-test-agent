@@ -49,10 +49,17 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
             err.join(1000);
             int exit = process.exitValue();
             if (exit != 0) {
+                String stderrText = safeStderr(stderr);
+                GitCommandFailure failure = GitCommandFailureClassifier.classify(command, stderrText);
                 throw new PlatformException(
                         ErrorCode.GIT_UNAVAILABLE,
-                        "Git 远端读取失败",
-                        Map.of("command", safeCommand(command), "exitCode", exit, "stderr", safeStderr(stderr)));
+                        failure.message(),
+                        Map.of(
+                                "command", safeCommand(command),
+                                "exitCode", exit,
+                                "stderr", stderrText,
+                                "gitFailureType", failure.type(),
+                                "gitFailureHint", failure.hint()));
             }
             byte[] stdoutBytes = stdout.toByteArray();
             return new GitCommandResult(exit, new String(stdoutBytes, StandardCharsets.UTF_8), stdoutBytes);

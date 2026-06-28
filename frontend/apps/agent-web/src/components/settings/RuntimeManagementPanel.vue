@@ -1,53 +1,111 @@
 <script setup lang="ts">
 import { computed, inject, ref } from "vue";
-import { useQuery } from "@tanstack/vue-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { Refresh, Search } from "@element-plus/icons-vue";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type {
   CurrentUser,
   OpencodeRuntimeBackendMetricHistory,
+  OpencodeRuntimeBackendProcess,
+  OpencodeRuntimeContainer,
   OpencodeRuntimeContainerMetricHistory,
+  OpencodeRuntimeLinuxServer,
   OpencodeRuntimeManagementOverview,
-  OpencodeRuntimeManagementOverviewParams
+  OpencodeRuntimeManagementOverviewParams,
+  OpencodeRuntimeManagedProcess,
+  OpencodeRuntimeManager,
+  OpencodeRuntimeProcess,
+  PageResponse
 } from "@test-agent/shared-types";
 import RuntimeMetricChart from "./RuntimeMetricChart.vue";
+import RuntimeTopologyGraph from "./RuntimeTopologyGraph.vue";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
 }>();
 
 const api = inject<BackendApiClient>("api")!;
+const queryClient = useQueryClient();
 
 type FilterDraft = {
   status: string;
   linuxServerId: string;
   containerId: string;
-  username: string;
+};
+
+type RuntimeContainerManagerRow = {
+  key: string;
+  containerId?: string | null;
+  linuxServerId?: string | null;
+  container?: OpencodeRuntimeContainer;
+  manager?: OpencodeRuntimeManager;
+  managedProcesses: OpencodeRuntimeManagedProcess[];
+};
+
+type RuntimeServerBackendRow = {
+  key: string;
+  linuxServerId?: string | null;
+  server?: OpencodeRuntimeLinuxServer;
+  backend?: OpencodeRuntimeBackendProcess;
+};
+
+type ManagedProcessActionKind = "restart" | "stop";
+
+type ManagedProcessActionRequest = {
+  action: ManagedProcessActionKind;
+  containerId: string;
+  port: number;
 };
 
 const processStatusOptions = ["RUNNING"];
-const draftFilters = ref<FilterDraft>({ status: "", linuxServerId: "", containerId: "", username: "" });
-const activeFilters = ref<FilterDraft>({ status: "", linuxServerId: "", containerId: "", username: "" });
+const metricsSourceHelp =
+  "“cgroup”: Linux 容器/cgroup 整体指标，包含 manager 和下属 opencode server 等进程\n" +
+  "“process”: 降级为当前 Go manager 进程指标\n" +
+  "“不可采集”: 当前环境无法安全采集\n" +
+  "“-”: 旧数据或未上报";
+const draftFilters = ref<FilterDraft>({ status: "", linuxServerId: "", containerId: "" });
+const activeFilters = ref<FilterDraft>({ status: "", linuxServerId: "", containerId: "" });
+const userKeywordDraft = ref("");
+const activeUserKeyword = ref("");
 const page = ref(1);
 const size = ref(20);
+const userProcessPage = ref(1);
+const userProcessSize = ref(20);
+const expandedRuntimeRowKeys = ref<Set<string>>(new Set());
 const selectedMetricsTarget = ref<{ type: "container" | "backend"; id: string; title: string } | null>(null);
 const selectedWindowMinutes = ref(60);
+const actionErrorMessage = ref("");
+const activeManagedProcessAction = ref<ManagedProcessActionRequest | null>(null);
 
 const hasSuperAdmin = computed(() => props.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 const overviewParams = computed<OpencodeRuntimeManagementOverviewParams>(() => ({
   status: activeFilters.value.status || undefined,
   linuxServerId: activeFilters.value.linuxServerId.trim() || undefined,
   containerId: activeFilters.value.containerId.trim() || undefined,
-  username: activeFilters.value.username.trim() || undefined,
   page: page.value,
   size: size.value
 }));
+const overviewQueryKey = computed(() => ["opencode-runtime-management", overviewParams.value] as const);
+const userProcessParams = computed(() => ({
+  keyword: activeUserKeyword.value.trim(),
+  page: userProcessPage.value,
+  size: userProcessSize.value
+}));
+const userProcessQueryKey = computed(() => ["opencode-runtime-management-user-processes", userProcessParams.value] as const);
 
 const overviewQuery = useQuery<OpencodeRuntimeManagementOverview, Error>({
-  queryKey: computed(() => ["opencode-runtime-management", overviewParams.value]),
+  queryKey: overviewQueryKey,
   enabled: () => hasSuperAdmin.value,
   retry: false,
+  refetchInterval: 5000,
   queryFn: () => api.getOpencodeRuntimeManagementOverview(overviewParams.value)
+});
+
+const userProcessQuery = useQuery<PageResponse<OpencodeRuntimeProcess>, Error>({
+  queryKey: userProcessQueryKey,
+  enabled: () => hasSuperAdmin.value && activeUserKeyword.value.trim().length > 0,
+  retry: false,
+  queryFn: () => api.getOpencodeRuntimeManagementUserProcesses(userProcessParams.value)
 });
 
 const metricsQuery = useQuery<OpencodeRuntimeContainerMetricHistory | OpencodeRuntimeBackendMetricHistory, Error>({
@@ -68,12 +126,47 @@ const metricsQuery = useQuery<OpencodeRuntimeContainerMetricHistory | OpencodeRu
   }
 });
 
+const managedProcessActionMutation = useMutation({
+  mutationFn: (request: ManagedProcessActionRequest) => {
+    if (request.action === "restart") {
+      return api.restartOpencodeRuntimeManagedProcess(request.containerId, request.port);
+    }
+    return api.stopOpencodeRuntimeManagedProcess(request.containerId, request.port);
+  },
+  onMutate: request => {
+    actionErrorMessage.value = "";
+    activeManagedProcessAction.value = request;
+  },
+  onSuccess: (_result, request) => {
+    if (request.action === "stop") {
+      removeStoppedManagedProcess(request);
+      return;
+    }
+    void overviewQuery.refetch();
+    if (activeUserKeyword.value.trim()) {
+      void userProcessQuery.refetch();
+    }
+  },
+  onError: error => {
+    if (error instanceof BackendApiError) {
+      actionErrorMessage.value = `${error.message}（${error.code}）`;
+      return;
+    }
+    actionErrorMessage.value = error instanceof Error ? error.message : "进程操作失败";
+  },
+  onSettled: () => {
+    activeManagedProcessAction.value = null;
+  }
+});
+
 const overview = computed(() => overviewQuery.data.value);
 const summary = computed(() => overview.value?.summary);
-const processPage = computed(() => overview.value?.opencodeProcesses);
+const processPage = computed(() => userProcessQuery.data.value);
 const processRows = computed(() => processPage.value?.items ?? []);
 const isLoading = computed(() => overviewQuery.isLoading.value);
 const isFetching = computed(() => overviewQuery.isFetching.value);
+const isUserProcessFetching = computed(() => userProcessQuery.isFetching.value);
+const hasUserProcessQuery = computed(() => activeUserKeyword.value.trim().length > 0);
 const metricHistory = computed(() => metricsQuery.data.value);
 const metricSamples = computed(() => metricHistory.value?.samples ?? []);
 const metricErrorMessage = computed(() => {
@@ -96,17 +189,92 @@ const errorMessage = computed(() => {
   }
   return error.message || "运行管理数据加载失败";
 });
-const totalPages = computed(() => Math.max(1, Math.ceil((processPage.value?.total ?? 0) / size.value)));
+const userProcessErrorMessage = computed(() => {
+  const error = userProcessQuery.error.value;
+  if (!error) {
+    return "";
+  }
+  if (error instanceof BackendApiError) {
+    return `${error.message}（${error.code}）`;
+  }
+  return error.message || "用户 opencode 进程加载失败";
+});
+const totalPages = computed(() => Math.max(1, Math.ceil((processPage.value?.total ?? 0) / userProcessSize.value)));
 const summaryCards = computed(() => {
   const item = summary.value;
   return [
-    { label: "Linux 服务器", value: item?.linuxServers ?? 0, extra: `${item?.readyLinuxServers ?? 0} READY` },
+    { label: "服务器", value: item?.linuxServers ?? 0, extra: `${item?.readyLinuxServers ?? 0} READY` },
     { label: "后端进程", value: item?.backendProcesses ?? 0, extra: `${item?.readyBackendProcesses ?? 0} READY` },
     { label: "容器", value: item?.containers ?? 0, extra: `${item?.readyContainers ?? 0} READY` },
     { label: "管理进程", value: item?.managers ?? 0, extra: `${item?.connectedManagers ?? 0} CONNECTED` },
     { label: "opencode 进程", value: item?.opencodeProcesses ?? 0, extra: `${item?.runningOpencodeProcesses ?? 0} RUNNING` },
     { label: "用户绑定", value: item?.userBindings ?? 0, extra: `${item?.managerBackendConnections ?? 0} 连接` }
   ];
+});
+const serverBackendRows = computed<RuntimeServerBackendRow[]>(() => {
+  const rows = new Map<string, RuntimeServerBackendRow>();
+  for (const server of overview.value?.linuxServers ?? []) {
+    rows.set(server.linuxServerId, {
+      key: `server:${server.linuxServerId}`,
+      linuxServerId: server.linuxServerId,
+      server
+    });
+  }
+  for (const backend of overview.value?.backendProcesses ?? []) {
+    const existing = rows.get(backend.linuxServerId);
+    if (existing && !existing.backend) {
+      existing.backend = backend;
+      existing.linuxServerId = existing.linuxServerId || backend.linuxServerId;
+      continue;
+    }
+    rows.set(`backend:${backend.backendProcessId}`, {
+      key: `backend:${backend.backendProcessId}`,
+      linuxServerId: backend.linuxServerId,
+      backend
+    });
+  }
+  return Array.from(rows.values()).sort((left, right) =>
+    (left.linuxServerId ?? left.backend?.backendProcessId ?? "").localeCompare(
+      right.linuxServerId ?? right.backend?.backendProcessId ?? ""
+    )
+  );
+});
+const containerManagerRows = computed<RuntimeContainerManagerRow[]>(() => {
+  const rows = new Map<string, RuntimeContainerManagerRow>();
+  for (const container of overview.value?.containers ?? []) {
+    rows.set(container.containerId, {
+      key: `container:${container.containerId}`,
+      containerId: container.containerId,
+      linuxServerId: container.linuxServerId,
+      container,
+      managedProcesses: []
+    });
+  }
+  for (const manager of overview.value?.managers ?? []) {
+    const existing = rows.get(manager.containerId);
+    if (existing) {
+      existing.key = `container:${manager.containerId}`;
+      existing.manager = manager;
+      existing.managedProcesses = manager.managedProcesses ?? [];
+      existing.linuxServerId = existing.linuxServerId || manager.linuxServerId;
+      continue;
+    }
+    rows.set(manager.containerId, {
+      key: `manager:${manager.managerId}`,
+      containerId: manager.containerId,
+      linuxServerId: manager.linuxServerId,
+      manager,
+      managedProcesses: manager.managedProcesses ?? []
+    });
+  }
+  return Array.from(rows.values()).sort((left, right) => {
+    const leftServer = left.linuxServerId ?? "";
+    const rightServer = right.linuxServerId ?? "";
+    if (leftServer !== rightServer) {
+      return leftServer.localeCompare(rightServer);
+    }
+    return (left.containerId ?? left.manager?.managerId ?? "").localeCompare(right.containerId ?? right.manager?.managerId ?? "");
+  });
 });
 
 function applyFilters() {
@@ -115,24 +283,32 @@ function applyFilters() {
 }
 
 function clearFilters() {
-  draftFilters.value = { status: "", linuxServerId: "", containerId: "", username: "" };
-  activeFilters.value = { status: "", linuxServerId: "", containerId: "", username: "" };
+  draftFilters.value = { status: "", linuxServerId: "", containerId: "" };
+  activeFilters.value = { status: "", linuxServerId: "", containerId: "" };
   page.value = 1;
 }
 
 function refresh() {
   void overviewQuery.refetch();
+  if (activeUserKeyword.value.trim()) {
+    void userProcessQuery.refetch();
+  }
   if (selectedMetricsTarget.value) {
     void metricsQuery.refetch();
   }
 }
 
+function queryUserProcesses() {
+  activeUserKeyword.value = userKeywordDraft.value.trim();
+  userProcessPage.value = 1;
+}
+
 function prevPage() {
-  page.value = Math.max(1, page.value - 1);
+  userProcessPage.value = Math.max(1, userProcessPage.value - 1);
 }
 
 function nextPage() {
-  page.value = Math.min(totalPages.value, page.value + 1);
+  userProcessPage.value = Math.min(totalPages.value, userProcessPage.value + 1);
 }
 
 function statusClass(status?: string | null) {
@@ -164,6 +340,13 @@ function formatDate(value?: string | null) {
     second: "2-digit",
     hour12: false
   }).format(new Date(value));
+}
+
+function formatNullable(value?: string | number | null) {
+  if (value === null || value === undefined || value === "") {
+    return "-";
+  }
+  return value;
 }
 
 function compactRecord(value?: Record<string, unknown> | null) {
@@ -235,6 +418,153 @@ function formatMetricsSource(value?: string | null) {
 function activeRowClass(type: "container" | "backend", id: string) {
   return selectedMetricsTarget.value?.type === type && selectedMetricsTarget.value.id === id ? "is-selected" : "";
 }
+
+function portRange(row: RuntimeContainerManagerRow) {
+  if (!row.container) {
+    return "-";
+  }
+  return `${row.container.portStart}-${row.container.portEnd}`;
+}
+
+function capacityText(row: RuntimeContainerManagerRow) {
+  if (!row.container) {
+    return "-";
+  }
+  return `${row.container.currentProcesses}/${row.container.maxProcesses}`;
+}
+
+function heartbeatText(row: RuntimeContainerManagerRow) {
+  return formatDate(row.manager?.lastHeartbeatAt ?? row.container?.lastHeartbeatAt);
+}
+
+function ownedProcesses(row: RuntimeContainerManagerRow) {
+  return row.managedProcesses.filter(process => process.ownership === "BOUND");
+}
+
+function ghostProcesses(row: RuntimeContainerManagerRow) {
+  return row.managedProcesses.filter(process => process.ownership !== "BOUND");
+}
+
+function hasManagedProcessCountMismatch(row: RuntimeContainerManagerRow) {
+  return row.container !== undefined && row.container.currentProcesses !== row.managedProcesses.length;
+}
+
+function processOwner(process: OpencodeRuntimeManagedProcess) {
+  return process.username || process.userId || "-";
+}
+
+function processBinding(process: OpencodeRuntimeManagedProcess) {
+  if (process.bindingAgentId || process.bindingStatus) {
+    return `${process.bindingAgentId ?? "-"} / ${process.bindingStatus ?? "-"}`;
+  }
+  return "-";
+}
+
+function processHealth(process: OpencodeRuntimeManagedProcess) {
+  return process.healthMessage || process.processStatus || "-";
+}
+
+function userProcessActualStatus(process: OpencodeRuntimeProcess) {
+  if (process.managerStatus || process.healthStatus) {
+    return `${process.managerStatus ?? "-"} / ${process.healthStatus ?? "-"}`;
+  }
+  return process.status;
+}
+
+function canRestartUserProcess(process: OpencodeRuntimeProcess) {
+  return process.restartable === true && Boolean(process.containerId) && Number.isFinite(process.port);
+}
+
+function runUserProcessRestart(process: OpencodeRuntimeProcess) {
+  if (!canRestartUserProcess(process)) {
+    actionErrorMessage.value = "该用户进程缺少容器或端口，无法重启";
+    return;
+  }
+  managedProcessActionMutation.mutate({ action: "restart", containerId: process.containerId, port: process.port });
+}
+
+function isUserProcessRestartRunning(process: OpencodeRuntimeProcess) {
+  const active = activeManagedProcessAction.value;
+  return active?.action === "restart" && active.containerId === process.containerId && active.port === process.port;
+}
+
+function removeStoppedManagedProcess(request: ManagedProcessActionRequest) {
+  queryClient.setQueryData<OpencodeRuntimeManagementOverview>(overviewQueryKey.value, old => {
+    if (!old) {
+      return old;
+    }
+    let removed = false;
+    const managers = old.managers.map(manager => {
+      if (manager.containerId !== request.containerId || !manager.managedProcesses?.length) {
+        return manager;
+      }
+      const managedProcesses = manager.managedProcesses.filter(process => process.port !== request.port);
+      if (managedProcesses.length === manager.managedProcesses.length) {
+        return manager;
+      }
+      removed = true;
+      return { ...manager, managedProcesses };
+    });
+    if (!removed) {
+      return old;
+    }
+    const containers = old.containers.map(container => {
+      if (container.containerId !== request.containerId) {
+        return container;
+      }
+      const currentProcesses = Math.max(0, container.currentProcesses - 1);
+      const availableCapacity = Math.min(container.maxProcesses, container.availableCapacity + 1);
+      return { ...container, currentProcesses, availableCapacity };
+    });
+    return { ...old, containers, managers };
+  });
+}
+
+function runManagedProcessAction(
+  row: RuntimeContainerManagerRow,
+  process: OpencodeRuntimeManagedProcess,
+  action: ManagedProcessActionKind
+) {
+  const containerId = runtimeRowContainerId(row);
+  if (!containerId || !Number.isFinite(process.port)) {
+    actionErrorMessage.value = "缺少容器或端口，无法发送进程操作";
+    return;
+  }
+  managedProcessActionMutation.mutate({ action, containerId, port: process.port });
+}
+
+function isManagedProcessActionRunning(
+  row: RuntimeContainerManagerRow,
+  process: OpencodeRuntimeManagedProcess,
+  action: ManagedProcessActionKind
+) {
+  const containerId = runtimeRowContainerId(row);
+  const active = activeManagedProcessAction.value;
+  return active?.action === action && active.containerId === containerId && active.port === process.port;
+}
+
+function isManagedProcessActionDisabled(row: RuntimeContainerManagerRow, process: OpencodeRuntimeManagedProcess) {
+  const containerId = runtimeRowContainerId(row);
+  return managedProcessActionMutation.isPending.value || !containerId || !Number.isFinite(process.port);
+}
+
+function runtimeRowContainerId(row: RuntimeContainerManagerRow) {
+  return row.containerId ?? row.container?.containerId ?? row.manager?.containerId;
+}
+
+function isRuntimeRowExpanded(row: RuntimeContainerManagerRow) {
+  return expandedRuntimeRowKeys.value.has(row.key);
+}
+
+function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
+  const next = new Set(expandedRuntimeRowKeys.value);
+  if (next.has(row.key)) {
+    next.delete(row.key);
+  } else {
+    next.add(row.key);
+  }
+  expandedRuntimeRowKeys.value = next;
+}
 </script>
 
 <template>
@@ -247,13 +577,14 @@ function activeRowClass(type: "container" | "backend", id: string) {
         </el-select>
         <el-input v-model="draftFilters.linuxServerId" size="small" clearable placeholder="Linux IP" class="ta-runtime-filter" />
         <el-input v-model="draftFilters.containerId" size="small" clearable placeholder="容器 ID" class="ta-runtime-filter" />
-        <el-input v-model="draftFilters.username" size="small" clearable placeholder="用户名" class="ta-runtime-filter" />
         <el-button size="small" type="primary" :icon="Search" :loading="isFetching" @click="applyFilters">查询</el-button>
         <el-button size="small" :icon="Refresh" :loading="isFetching" @click="refresh">刷新</el-button>
         <el-button size="small" @click="clearFilters">清空</el-button>
       </div>
 
-      <div v-if="errorMessage" class="ta-runtime-alert" role="alert">{{ errorMessage }}</div>
+      <div v-if="errorMessage || userProcessErrorMessage || actionErrorMessage" class="ta-runtime-alert" role="alert">
+        {{ errorMessage || userProcessErrorMessage || actionErrorMessage }}
+      </div>
 
       <div v-if="isLoading" class="ta-runtime-placeholder">正在加载运行状态...</div>
       <template v-else>
@@ -271,52 +602,53 @@ function activeRowClass(type: "container" | "backend", id: string) {
             <span>生成时间 {{ formatDate(overview?.generatedAt) }}</span>
           </header>
           <div class="ta-runtime-grid">
-            <div class="ta-runtime-block">
-              <h5>Linux 服务器</h5>
+            <div class="ta-runtime-block is-wide">
+              <h5>服务器 / Java 进程</h5>
               <div class="ta-runtime-block-scroll">
                 <table class="ta-runtime-table">
                   <thead>
-                    <tr><th>服务器</th><th>状态</th><th>最近心跳</th><th>容量</th><th>traceId</th></tr>
+                    <tr><th>服务器</th><th>Java 进程</th><th>服务器状态</th><th>Java 状态</th><th>CPU</th><th>内存</th><th>磁盘</th><th>JVM</th><th>心跳</th><th>容量</th><th>操作</th></tr>
                   </thead>
                   <tbody>
-                    <tr v-if="!overview?.linuxServers.length"><td colspan="5" class="is-empty">暂无服务器</td></tr>
-                    <tr v-for="server in overview?.linuxServers ?? []" :key="server.linuxServerId">
-                      <td>{{ server.linuxServerId }}</td>
-                      <td><span :class="['ta-status', statusClass(server.status)]">{{ server.status }}</span></td>
-                      <td>{{ formatDate(server.lastHeartbeatAt) }}</td>
-                      <td class="is-compact">{{ compactRecord(server.capacitySummary) }}</td>
-                      <td class="is-compact">{{ server.traceId }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div class="ta-runtime-block">
-              <h5>后端 Java 进程</h5>
-              <div class="ta-runtime-block-scroll">
-                <table class="ta-runtime-table">
-                  <thead>
-                    <tr><th>进程</th><th>服务器</th><th>状态</th><th>CPU</th><th>内存</th><th>磁盘</th><th>JVM</th><th>心跳</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr v-if="!overview?.backendProcesses.length"><td colspan="8" class="is-empty">暂无后端进程</td></tr>
+                    <tr v-if="!serverBackendRows.length"><td colspan="11" class="is-empty">暂无服务器 / Java 进程</td></tr>
                     <tr
-                      v-for="process in overview?.backendProcesses ?? []"
-                      :key="process.backendProcessId"
-                      :class="activeRowClass('backend', process.backendProcessId)"
-                      tabindex="0"
-                      @click="selectBackendProcess(process.backendProcessId)"
-                      @keydown.enter="selectBackendProcess(process.backendProcessId)"
+                      v-for="row in serverBackendRows"
+                      :key="row.key"
+                      :class="row.backend ? activeRowClass('backend', row.backend.backendProcessId) : ''"
+                      :tabindex="row.backend ? 0 : undefined"
+                      @click="row.backend ? selectBackendProcess(row.backend.backendProcessId) : undefined"
+                      @keydown.enter="row.backend ? selectBackendProcess(row.backend.backendProcessId) : undefined"
                     >
-                      <td class="is-compact">{{ process.backendProcessId }}</td>
-                      <td>{{ process.linuxServerId }}</td>
-                      <td><span :class="['ta-status', statusClass(process.status)]">{{ process.status }}</span></td>
-                      <td>{{ formatPercent(process.cpuUsagePercent) }}</td>
-                      <td>{{ formatPercent(process.memoryUsagePercent) }} / {{ formatBytes(process.memoryUsedBytes) }}</td>
-                      <td>{{ formatPercent(process.diskUsagePercent) }} / {{ formatBytes(process.diskUsedBytes) }}</td>
-                      <td>{{ formatBytes(process.jvmMemoryUsedBytes) }} / {{ process.jvmThreadsLive ?? "-" }} 线程</td>
-                      <td>{{ formatDate(process.lastHeartbeatAt) }}</td>
+                      <td>{{ formatNullable(row.linuxServerId) }}</td>
+                      <td class="is-compact">{{ formatNullable(row.backend?.backendProcessId) }}</td>
+                      <td>
+                        <span v-if="row.server" :class="['ta-status', statusClass(row.server.status)]">{{ row.server.status }}</span>
+                        <span v-else>-</span>
+                      </td>
+                      <td>
+                        <span v-if="row.backend" :class="['ta-status', statusClass(row.backend.status)]">{{ row.backend.status }}</span>
+                        <span v-else>-</span>
+                      </td>
+                      <td>{{ formatPercent(row.backend?.cpuUsagePercent) }}</td>
+                      <td>{{ formatPercent(row.backend?.memoryUsagePercent) }} / {{ formatBytes(row.backend?.memoryUsedBytes) }}</td>
+                      <td>{{ formatPercent(row.backend?.diskUsagePercent) }} / {{ formatBytes(row.backend?.diskUsedBytes) }}</td>
+                      <td>{{ formatBytes(row.backend?.jvmMemoryUsedBytes) }} / {{ row.backend?.jvmThreadsLive ?? "-" }} 线程</td>
+                      <td>{{ formatDate(row.backend?.lastHeartbeatAt ?? row.server?.lastHeartbeatAt) }}</td>
+                      <td class="is-compact">{{ compactRecord(row.server?.capacitySummary) }}</td>
+                      <td>
+                        <button
+                          v-if="row.backend"
+                          type="button"
+                          class="ta-runtime-trend-button"
+                          :aria-label="`查看 ${row.backend.backendProcessId} 后端监控趋势`"
+                          :title="`查看 ${row.backend.backendProcessId} 后端监控趋势`"
+                          @click.stop="selectBackendProcess(row.backend.backendProcessId)"
+                          @keydown.enter.stop
+                        >
+                          趋势
+                        </button>
+                        <span v-else>-</span>
+                      </td>
                     </tr>
                   </tbody>
                 </table>
@@ -360,6 +692,7 @@ function activeRowClass(type: "container" | "backend", id: string) {
                     { name: 'committed', field: 'jvmMemoryCommittedBytes' },
                     { name: 'max', field: 'jvmMemoryMaxBytes' }
                   ]"
+                  yAxis-unit="G"
                 />
                 <RuntimeMetricChart
                   title="JVM GC / 线程（当前进程）"
@@ -372,34 +705,191 @@ function activeRowClass(type: "container" | "backend", id: string) {
               </div>
             </div>
 
-            <div class="ta-runtime-block">
-              <h5>容器</h5>
+            <div class="ta-runtime-block is-wide">
+              <h5>容器 / 管理进程</h5>
               <div class="ta-runtime-block-scroll">
                 <table class="ta-runtime-table">
                   <thead>
-                    <tr><th>容器</th><th>服务器</th><th>状态</th><th>端口池</th><th>容量</th><th>来源</th><th>CPU</th><th>内存率</th><th>已用内存</th><th>心跳</th></tr>
+                    <tr>
+                      <th class="is-expand"></th>
+                      <th>容器</th>
+                      <th>管理进程</th>
+                      <th>服务器</th>
+                      <th>容器状态</th>
+                      <th>管理状态</th>
+                      <th>端口池</th>
+                      <th>容量</th>
+                      <th>来源</th>
+                      <th>CPU</th>
+                      <th>内存率</th>
+                      <th>已用内存</th>
+                      <th>协议</th>
+                      <th>心跳</th>
+                      <th>操作</th>
+                    </tr>
                   </thead>
                   <tbody>
-                    <tr v-if="!overview?.containers.length"><td colspan="10" class="is-empty">暂无容器</td></tr>
-                    <tr
-                      v-for="container in overview?.containers ?? []"
-                      :key="container.containerId"
-                      :class="activeRowClass('container', container.containerId)"
-                      tabindex="0"
-                      @click="selectContainer(container.containerId)"
-                      @keydown.enter="selectContainer(container.containerId)"
-                    >
-                      <td class="is-compact">{{ container.containerId }}</td>
-                      <td>{{ container.linuxServerId }}</td>
-                      <td><span :class="['ta-status', statusClass(container.status)]">{{ container.status }}</span></td>
-                      <td>{{ container.portStart }}-{{ container.portEnd }}</td>
-                      <td>{{ container.currentProcesses }}/{{ container.maxProcesses }}</td>
-                      <td>{{ formatMetricsSource(container.metricsSource) }}</td>
-                      <td>{{ formatPercent(container.cpuUsagePercent) }}</td>
-                      <td>{{ formatPercent(container.memoryUsagePercent) }}</td>
-                      <td>{{ formatBytes(container.memoryUsedBytes) }}</td>
-                      <td>{{ formatDate(container.lastHeartbeatAt) }}</td>
-                    </tr>
+                    <tr v-if="!containerManagerRows.length"><td colspan="15" class="is-empty">暂无容器 / 管理进程</td></tr>
+                    <template v-for="row in containerManagerRows" :key="row.key">
+                      <tr
+                        :class="[row.container ? activeRowClass('container', row.container.containerId) : '', { 'is-expanded': isRuntimeRowExpanded(row) }]"
+                        tabindex="0"
+                        :aria-expanded="isRuntimeRowExpanded(row)"
+                        @click="toggleRuntimeRow(row)"
+                        @keydown.enter.prevent="toggleRuntimeRow(row)"
+                      >
+                        <td class="is-expand">
+                          <span :class="['ta-runtime-expand-icon', { 'is-expanded': isRuntimeRowExpanded(row) }]" aria-hidden="true"></span>
+                        </td>
+                        <td class="is-compact">{{ formatNullable(row.containerId) }}</td>
+                        <td class="is-compact">{{ formatNullable(row.manager?.managerId) }}</td>
+                        <td>{{ formatNullable(row.linuxServerId) }}</td>
+                        <td>
+                          <span v-if="row.container" :class="['ta-status', statusClass(row.container.status)]">{{ row.container.status }}</span>
+                          <span v-else>-</span>
+                        </td>
+                        <td>
+                          <span v-if="row.manager" :class="['ta-status', statusClass(row.manager.connectionStatus)]">{{ row.manager.connectionStatus }}</span>
+                          <span v-else>-</span>
+                        </td>
+                        <td>{{ portRange(row) }}</td>
+                        <td>{{ capacityText(row) }}</td>
+                        <td>
+                          <span class="ta-runtime-help" :title="metricsSourceHelp">
+                            {{ row.container ? formatMetricsSource(row.container.metricsSource) : "-" }}
+                          </span>
+                        </td>
+                        <td>{{ formatPercent(row.container?.cpuUsagePercent) }}</td>
+                        <td>{{ formatPercent(row.container?.memoryUsagePercent) }}</td>
+                        <td>{{ formatBytes(row.container?.memoryUsedBytes) }}</td>
+                        <td>{{ formatNullable(row.manager?.protocolVersion) }}</td>
+                        <td>{{ heartbeatText(row) }}</td>
+                        <td>
+                          <button
+                            v-if="row.container"
+                            type="button"
+                            class="ta-runtime-trend-button"
+                            :aria-label="`查看 ${row.container.containerId} 容器监控趋势`"
+                            :title="`查看 ${row.container.containerId} 容器监控趋势`"
+                            @click.stop="selectContainer(row.container.containerId)"
+                            @keydown.enter.stop
+                          >
+                            趋势
+                          </button>
+                          <span v-else>-</span>
+                        </td>
+                      </tr>
+                      <tr v-if="isRuntimeRowExpanded(row)" class="ta-runtime-managed-detail">
+                        <td colspan="15">
+                          <div class="ta-runtime-managed-processes">
+                            <div v-if="hasManagedProcessCountMismatch(row)" class="ta-runtime-managed-warning">
+                              容量计数来自 manager state，明细来自 manager 上报数组；旧快照或旧 manager 可能缺失明细。
+                            </div>
+
+                            <section class="ta-runtime-managed-group">
+                              <header class="ta-runtime-managed-group-header">
+                                <strong>有主进程</strong>
+                                <span>{{ ownedProcesses(row).length }} 条</span>
+                              </header>
+                              <div v-if="!ownedProcesses(row).length" class="ta-runtime-managed-empty">暂无有主进程</div>
+                              <table v-else class="ta-runtime-managed-table">
+                                <thead>
+                                  <tr><th>端口</th><th>PID</th><th>用户</th><th>进程</th><th>baseUrl</th><th>启动时间</th><th>绑定</th><th>健康</th><th>启动命令</th><th>traceId</th><th>操作</th></tr>
+                                </thead>
+                                <tbody>
+                                  <tr v-for="(process, index) in ownedProcesses(row)" :key="`owned:${row.key}:${process.processId ?? process.port}:${index}`">
+                                    <td>{{ process.port }}</td>
+                                    <td>{{ formatNullable(process.pid) }}</td>
+                                    <td class="is-compact">{{ processOwner(process) }}</td>
+                                    <td class="is-compact">{{ formatNullable(process.processId) }}</td>
+                                    <td class="is-compact">{{ formatNullable(process.baseUrl) }}</td>
+                                    <td>{{ formatDate(process.startedAt) }}</td>
+                                    <td>{{ processBinding(process) }}</td>
+                                    <td class="is-compact">{{ processHealth(process) }}</td>
+                                    <td class="is-command"><code>{{ formatNullable(process.startCommand) }}</code></td>
+                                    <td class="is-compact">{{ formatNullable(process.traceId) }}</td>
+                                    <td>
+                                      <div class="ta-runtime-process-actions">
+                                        <button
+                                          type="button"
+                                          class="ta-runtime-action-button"
+                                          :class="{ 'is-running': isManagedProcessActionRunning(row, process, 'restart') }"
+                                          :disabled="isManagedProcessActionDisabled(row, process)"
+                                          title="重启该 opencode server"
+                                          @click.stop="runManagedProcessAction(row, process, 'restart')"
+                                        >
+                                          重启
+                                        </button>
+                                        <button
+                                          type="button"
+                                          class="ta-runtime-action-button is-danger"
+                                          :class="{ 'is-running': isManagedProcessActionRunning(row, process, 'stop') }"
+                                          :disabled="isManagedProcessActionDisabled(row, process)"
+                                          title="停止该 opencode server"
+                                          @click.stop="runManagedProcessAction(row, process, 'stop')"
+                                        >
+                                          停止
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </section>
+
+                            <section class="ta-runtime-managed-group">
+                              <header class="ta-runtime-managed-group-header">
+                                <strong>无主进程</strong>
+                                <span>{{ ghostProcesses(row).length }} 条</span>
+                              </header>
+                              <div v-if="!ghostProcesses(row).length" class="ta-runtime-managed-empty">暂无无主进程</div>
+                              <table v-else class="ta-runtime-managed-table">
+                                <thead>
+                                  <tr><th>端口</th><th>PID</th><th>进程</th><th>状态</th><th>baseUrl</th><th>启动时间</th><th>健康</th><th>启动命令（无主）</th><th>traceId</th><th>操作</th></tr>
+                                </thead>
+                                <tbody>
+                                  <tr v-for="(process, index) in ghostProcesses(row)" :key="`ghost:${row.key}:${process.processId ?? process.port}:${index}`">
+                                    <td>{{ process.port }}</td>
+                                    <td>{{ formatNullable(process.pid) }}</td>
+                                    <td class="is-compact">{{ formatNullable(process.processId) }}</td>
+                                    <td><span :class="['ta-status', statusClass(process.processStatus)]">{{ formatNullable(process.processStatus) }}</span></td>
+                                    <td class="is-compact">{{ formatNullable(process.baseUrl) }}</td>
+                                    <td>{{ formatDate(process.startedAt) }}</td>
+                                    <td class="is-compact">{{ processHealth(process) }}</td>
+                                    <td class="is-command"><code>{{ formatNullable(process.startCommand) }}</code></td>
+                                    <td class="is-compact">{{ formatNullable(process.traceId) }}</td>
+                                    <td>
+                                      <div class="ta-runtime-process-actions">
+                                        <button
+                                          type="button"
+                                          class="ta-runtime-action-button"
+                                          :class="{ 'is-running': isManagedProcessActionRunning(row, process, 'restart') }"
+                                          :disabled="isManagedProcessActionDisabled(row, process)"
+                                          title="重启该无主 opencode server"
+                                          @click.stop="runManagedProcessAction(row, process, 'restart')"
+                                        >
+                                          重启
+                                        </button>
+                                        <button
+                                          type="button"
+                                          class="ta-runtime-action-button is-danger"
+                                          :class="{ 'is-running': isManagedProcessActionRunning(row, process, 'stop') }"
+                                          :disabled="isManagedProcessActionDisabled(row, process)"
+                                          title="停止该无主 opencode server"
+                                          @click.stop="runManagedProcessAction(row, process, 'stop')"
+                                        >
+                                          停止
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </section>
+                          </div>
+                        </td>
+                      </tr>
+                    </template>
                   </tbody>
                 </table>
               </div>
@@ -452,48 +942,9 @@ function activeRowClass(type: "container" | "backend", id: string) {
               </div>
             </div>
 
-            <div class="ta-runtime-block">
-              <h5>管理进程</h5>
-              <div class="ta-runtime-block-scroll">
-                <table class="ta-runtime-table">
-                  <thead>
-                    <tr><th>管理进程</th><th>容器</th><th>状态</th><th>协议</th><th>能力</th><th>心跳</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr v-if="!overview?.managers.length"><td colspan="6" class="is-empty">暂无管理进程</td></tr>
-                    <tr v-for="manager in overview?.managers ?? []" :key="manager.managerId">
-                      <td class="is-compact">{{ manager.managerId }}</td>
-                      <td class="is-compact">{{ manager.containerId }}</td>
-                      <td><span :class="['ta-status', statusClass(manager.connectionStatus)]">{{ manager.connectionStatus }}</span></td>
-                      <td>{{ manager.protocolVersion }}</td>
-                      <td class="is-compact">{{ compactRecord(manager.capabilities) }}</td>
-                      <td>{{ formatDate(manager.lastHeartbeatAt) }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
             <div class="ta-runtime-block is-wide">
-              <h5>Manager 与后端连接</h5>
-              <div class="ta-runtime-block-scroll">
-                <table class="ta-runtime-table">
-                  <thead>
-                    <tr><th>管理进程</th><th>后端进程</th><th>状态</th><th>连接时间</th><th>最近心跳</th><th>traceId</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr v-if="!overview?.managerBackendConnections.length"><td colspan="6" class="is-empty">暂无连接</td></tr>
-                    <tr v-for="connection in overview?.managerBackendConnections ?? []" :key="`${connection.managerId}:${connection.backendProcessId}`">
-                      <td class="is-compact">{{ connection.managerId }}</td>
-                      <td class="is-compact">{{ connection.backendProcessId }}</td>
-                      <td><span :class="['ta-status', statusClass(connection.status)]">{{ connection.status }}</span></td>
-                      <td>{{ formatDate(connection.connectedAt) }}</td>
-                      <td>{{ formatDate(connection.lastHeartbeatAt) }}</td>
-                      <td class="is-compact">{{ connection.traceId }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+              <h5>Manager 与后端连接拓扑</h5>
+              <RuntimeTopologyGraph :overview="overview" />
             </div>
           </div>
         </section>
@@ -503,6 +954,17 @@ function activeRowClass(type: "container" | "backend", id: string) {
             <h4>用户 opencode server 进程</h4>
             <span>{{ processPage?.total ?? 0 }} 条</span>
           </header>
+          <div class="ta-runtime-user-query">
+            <el-input
+              v-model="userKeywordDraft"
+              size="small"
+              clearable
+              placeholder="用户名 / userId / 统一认证号"
+              class="ta-runtime-user-filter"
+              @keyup.enter="queryUserProcesses"
+            />
+            <el-button size="small" type="primary" :icon="Search" :loading="isUserProcessFetching" @click="queryUserProcesses">查询用户进程</el-button>
+          </div>
           <div class="ta-runtime-table-scroll">
             <table class="ta-runtime-table">
               <thead>
@@ -514,14 +976,18 @@ function activeRowClass(type: "container" | "backend", id: string) {
                   <th>端口</th>
                   <th>PID</th>
                   <th>状态</th>
+                  <th>实际状态</th>
                   <th>baseUrl</th>
                   <th>绑定</th>
                   <th>健康</th>
                   <th>traceId</th>
+                  <th>操作</th>
                 </tr>
               </thead>
               <tbody>
-                <tr v-if="!processRows.length"><td colspan="11" class="is-empty">暂无 opencode 进程</td></tr>
+                <tr v-if="!hasUserProcessQuery"><td colspan="13" class="is-empty">请输入用户关键字查询 opencode 进程</td></tr>
+                <tr v-else-if="isUserProcessFetching && !processRows.length"><td colspan="13" class="is-empty">正在查询用户 opencode 进程...</td></tr>
+                <tr v-else-if="!processRows.length"><td colspan="13" class="is-empty">暂无该用户 opencode 进程</td></tr>
                 <tr v-for="process in processRows" :key="process.processId">
                   <td class="is-compact">{{ process.processId }}</td>
                   <td class="is-compact">{{ process.username || process.userId }}</td>
@@ -530,6 +996,7 @@ function activeRowClass(type: "container" | "backend", id: string) {
                   <td>{{ process.port }}</td>
                   <td>{{ process.pid ?? "-" }}</td>
                   <td><span :class="['ta-status', statusClass(process.status)]">{{ process.status }}</span></td>
+                  <td class="is-compact">{{ userProcessActualStatus(process) }}</td>
                   <td class="is-compact">{{ process.baseUrl }}</td>
                   <td>
                     <span v-if="process.bindingAgentId" :class="['ta-status', statusClass(process.bindingStatus)]">
@@ -539,14 +1006,28 @@ function activeRowClass(type: "container" | "backend", id: string) {
                   </td>
                   <td class="is-compact">{{ process.healthMessage || formatDate(process.lastHealthCheckAt) }}</td>
                   <td class="is-compact">{{ process.traceId }}</td>
+                  <td>
+                    <button
+                      v-if="canRestartUserProcess(process)"
+                      type="button"
+                      class="ta-runtime-action-button"
+                      :class="{ 'is-running': isUserProcessRestartRunning(process) }"
+                      :disabled="managedProcessActionMutation.isPending.value"
+                      title="重启该用户 opencode server"
+                      @click="runUserProcessRestart(process)"
+                    >
+                      重启
+                    </button>
+                    <span v-else>-</span>
+                  </td>
                 </tr>
               </tbody>
             </table>
           </div>
           <footer class="ta-runtime-pagination">
-            <el-button size="small" :disabled="page <= 1 || isFetching" @click="prevPage">上一页</el-button>
-            <span>第 {{ page }} / {{ totalPages }} 页</span>
-            <el-button size="small" :disabled="page >= totalPages || isFetching" @click="nextPage">下一页</el-button>
+            <el-button size="small" :disabled="userProcessPage <= 1 || isUserProcessFetching" @click="prevPage">上一页</el-button>
+            <span>第 {{ userProcessPage }} / {{ totalPages }} 页</span>
+            <el-button size="small" :disabled="userProcessPage >= totalPages || isUserProcessFetching" @click="nextPage">下一页</el-button>
           </footer>
         </section>
       </template>
@@ -576,6 +1057,16 @@ function activeRowClass(type: "container" | "backend", id: string) {
 }
 .ta-runtime-filter {
   width: 132px;
+}
+.ta-runtime-user-query {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.ta-runtime-user-filter {
+  width: 240px;
 }
 .ta-runtime-alert {
   flex-shrink: 0;
@@ -696,6 +1187,12 @@ function activeRowClass(type: "container" | "backend", id: string) {
   font-weight: 600;
   background: #f7f8fa;
 }
+.ta-runtime-table th.is-expand,
+.ta-runtime-table td.is-expand {
+  width: 32px;
+  padding-right: 4px;
+  text-align: center;
+}
 .ta-runtime-table tr:last-child td {
   border-bottom: 0;
 }
@@ -706,15 +1203,159 @@ function activeRowClass(type: "container" | "backend", id: string) {
 .ta-runtime-table tbody tr.is-selected {
   background: #f4f8ff;
 }
+.ta-runtime-table tbody tr.is-expanded {
+  background: #f4f8ff;
+}
 .ta-runtime-table .is-empty {
   height: 44px;
   color: #909399;
   text-align: center;
 }
+.ta-runtime-expand-icon {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 6px solid #606266;
+  transition: transform 0.15s ease;
+}
+.ta-runtime-expand-icon.is-expanded {
+  transform: rotate(90deg);
+}
+.ta-runtime-managed-detail td {
+  padding: 0;
+  background: #fbfcff;
+}
+.ta-runtime-managed-processes {
+  min-width: 720px;
+  padding: 10px 12px 12px;
+}
+.ta-runtime-managed-warning {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid #f3d19e;
+  border-radius: 6px;
+  background: #fdf6ec;
+  color: #946200;
+  font-size: 12px;
+}
+.ta-runtime-managed-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ta-runtime-managed-group + .ta-runtime-managed-group {
+  margin-top: 12px;
+}
+.ta-runtime-managed-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #303133;
+  font-size: 12px;
+}
+.ta-runtime-managed-group-header span {
+  color: #909399;
+}
+.ta-runtime-managed-empty {
+  padding: 12px;
+  border: 1px dashed #dcdfe6;
+  border-radius: 6px;
+  background: #fff;
+  color: #909399;
+}
+.ta-runtime-managed-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+.ta-runtime-managed-table th,
+.ta-runtime-managed-table td {
+  padding: 7px 8px;
+  border: 1px solid #ebeef5;
+  text-align: left;
+  vertical-align: middle;
+}
+.ta-runtime-managed-table th {
+  color: #606266;
+  font-weight: 600;
+  background: #f7f8fa;
+}
+.ta-runtime-managed-table .is-command {
+  max-width: 520px;
+}
+.ta-runtime-managed-table .is-command code {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  white-space: nowrap;
+}
+.ta-runtime-process-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.ta-runtime-action-button {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid #c7d2fe;
+  border-radius: 6px;
+  background: #fff;
+  color: #1d4ed8;
+  font: inherit;
+  cursor: pointer;
+}
+.ta-runtime-action-button:hover,
+.ta-runtime-action-button:focus-visible {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  outline: none;
+}
+.ta-runtime-action-button.is-danger {
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+.ta-runtime-action-button.is-danger:hover,
+.ta-runtime-action-button.is-danger:focus-visible {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+.ta-runtime-action-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.ta-runtime-action-button.is-running {
+  box-shadow: inset 0 0 0 1px currentColor;
+}
 .is-compact {
   max-width: 180px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.ta-runtime-help {
+  cursor: help;
+  text-decoration: underline dotted #a8abb2;
+  text-underline-offset: 3px;
+}
+.ta-runtime-trend-button {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  background: #fff;
+  color: #2563eb;
+  font: inherit;
+  cursor: pointer;
+}
+.ta-runtime-trend-button:hover,
+.ta-runtime-trend-button:focus-visible {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  outline: none;
 }
 .ta-status {
   display: inline-flex;

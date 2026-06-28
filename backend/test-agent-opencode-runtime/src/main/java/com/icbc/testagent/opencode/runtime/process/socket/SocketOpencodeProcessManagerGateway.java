@@ -5,6 +5,8 @@ import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
+import com.icbc.testagent.opencode.runtime.process.OpencodeProcessControlCommand;
+import com.icbc.testagent.opencode.runtime.process.OpencodeProcessControlResult;
 import com.icbc.testagent.opencode.runtime.process.OpencodeProcessHealthCommand;
 import com.icbc.testagent.opencode.runtime.process.OpencodeProcessHealthResult;
 import com.icbc.testagent.opencode.runtime.process.OpencodeProcessManagerGateway;
@@ -25,6 +27,8 @@ import org.springframework.stereotype.Service;
 @Service
 @ConditionalOnProperty(name = "test-agent.opencode.manager-control.gateway-mode", havingValue = "socket", matchIfMissing = true)
 public class SocketOpencodeProcessManagerGateway implements OpencodeProcessManagerGateway {
+
+    private static final String OPENCODE_UNAVAILABLE_ERROR_CODE = "OPENCODE_UNAVAILABLE";
 
     private final OpencodeProcessManagementRepository repository;
     private final ManagerConnectionRegistry connections;
@@ -73,9 +77,51 @@ public class SocketOpencodeProcessManagerGateway implements OpencodeProcessManag
                 settings.commandTimeout().toMillis(),
                 command.traceId()));
         if (!"STARTED".equals(result.status())) {
+            if (OPENCODE_UNAVAILABLE_ERROR_CODE.equals(result.errorCode())) {
+                throw new PlatformException(
+                        ErrorCode.OPENCODE_UNAVAILABLE,
+                        safeMessage(result.message(), "opencode 服务不可用"));
+            }
             throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, safeMessage(result.message(), "opencode 管理进程启动失败"));
         }
         return new OpencodeProcessStartResult(result.pid(), safeMessage(result.message(), "started"));
+    }
+
+    @Override
+    public OpencodeProcessControlResult restartProcess(OpencodeProcessControlCommand command) {
+        return controlManagedProcess(command, "restart", "STARTED", "opencode 管理进程重启失败");
+    }
+
+    @Override
+    public OpencodeProcessControlResult stopProcess(OpencodeProcessControlCommand command) {
+        return controlManagedProcess(command, "stop", "STOPPED", "opencode 管理进程停止失败");
+    }
+
+    private OpencodeProcessControlResult controlManagedProcess(
+            OpencodeProcessControlCommand command,
+            String managerCommand,
+            String expectedStatus,
+            String failureMessage) {
+        ManagerControlMessage result = send(command.containerId(), ManagerControlMessage.command(
+                RuntimeIdGenerator.managerCommandId(),
+                managerCommand,
+                command.port(),
+                settings.commandTimeout().toMillis(),
+                command.traceId()));
+        if (!expectedStatus.equals(result.status())) {
+            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, safeMessage(result.message(), failureMessage));
+        }
+        return new OpencodeProcessControlResult(
+                managerCommand,
+                result.status(),
+                result.port() == null ? command.port() : result.port(),
+                result.pid(),
+                result.baseUrl(),
+                result.sessionPath(),
+                result.configPath(),
+                result.healthy(),
+                safeMessage(result.message(), expectedStatus.toLowerCase()),
+                result.traceId());
     }
 
     private ManagerControlMessage send(

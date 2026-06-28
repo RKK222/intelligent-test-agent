@@ -235,7 +235,13 @@ const props =
     processStatus?: OpencodeProcessState | null
     processRequired?: boolean
     processLoading?: boolean
+    /** 已有状态下的后台健康探测中；不阻塞输入，但要阻止提交旧状态。 */
+    processRefreshing?: boolean
     processInitializing?: boolean
+    /** 可选模型列表（供快速标签使用） */
+    models?: any[]
+    /** 当前选中的模型标识 */
+    selectedModel?: string
   }>()
 
 const emit =
@@ -251,10 +257,34 @@ const emit =
     (e: 'open-diff', path: string): void
     (e: 'open-model-picker'): void
     (e: 'initialize-process'): void
+    (e: 'refresh-process'): void
+    (e: 'select-model', model: any): void
   }>()
 
 const localInput = ref(props.inputValue ?? '')
 const inputComposing = ref(false)
+
+function modelValue(model: { id: string; providerId?: string }) {
+  return model.providerId ? `${model.providerId}/${model.id}` : model.id
+}
+
+const quickModels = computed(() => {
+  if (!props.models) return []
+  return props.models.filter(m => m.enabled !== false).slice(0, 4)
+})
+
+function selectQuickModel(model: any) {
+  emit('select-model', model)
+}
+
+function getModelColor(model: any) {
+  const name = (model.name || '').toLowerCase()
+  if (name.includes('glm')) return '#18a978'
+  if (name.includes('kimi')) return '#3366ff'
+  if (name.includes('gpt')) return '#a855f7'
+  if (name.includes('seedance') || name.includes('deepseek')) return '#f97316'
+  return '#64748b'
+}
 const wasStopped = ref(false)
 const wasCompleted = ref(false)
 const wasFailed = ref(false)
@@ -898,21 +928,21 @@ function parseDiffLines(patch: string | undefined): DiffLine[] {
 const hasFileChanges = computed(() => (props.fileChanges?.length ?? 0) > 0)
 const processReady = computed(() => {
   if (props.processRequired) {
-    return !props.processLoading && props.processStatus?.status === 'READY'
+    return props.processStatus?.status === 'READY'
   }
-  return (
-    !props.processLoading &&
-    (!props.processStatus || props.processStatus.status === 'READY')
-  )
+  return !props.processStatus || props.processStatus.status === 'READY'
 })
+const processSubmitBlocked = computed(
+  () => props.running || !processReady.value || props.processRefreshing
+)
 const processStatusVisible = computed(
   () =>
     props.processRequired || props.processLoading || props.processStatus != null
 )
 const processStatusTitle = computed(() => {
-  if (props.processLoading) return '正在检查 opencode 进程'
+  if (props.processLoading && !props.processStatus) return '正在检查 opencode 进程'
   if (props.processRequired && !props.processStatus)
-    return '正在检查 opencode 进程'
+    return 'opencode 进程状态未知'
   if (!props.processStatus) return ''
   if (props.processStatus.status === 'READY') return 'opencode 进程可用'
   if (props.processStatus.status === 'NEEDS_INITIALIZATION')
@@ -920,9 +950,10 @@ const processStatusTitle = computed(() => {
   return 'opencode 进程不可用'
 })
 const processStatusText = computed(() => {
-  if (props.processLoading) return '正在检查当前用户可用进程'
-  if (props.processRequired && !props.processStatus)
+  if (props.processLoading && !props.processStatus)
     return '正在检查当前用户可用进程'
+  if (props.processRequired && !props.processStatus)
+    return '请刷新进程状态后重试'
   if (!props.processStatus) return ''
   return props.processStatus.baseUrl ?? props.processStatus.message
 })
@@ -1109,6 +1140,31 @@ function onProcessStatusDotResize() {
     processStatusDotPos.value.x,
     processStatusDotPos.value.y
   )
+}
+
+const PROCESS_REFRESH_DEDUPE_MS = 2000
+let lastProcessRefreshRequestedAt = 0
+
+function requestProcessRefresh() {
+  if (
+    props.running ||
+    props.processLoading ||
+    props.processRefreshing ||
+    (!props.processRequired && !props.processStatus)
+  ) {
+    return
+  }
+  const now = Date.now()
+  // focus 和 click 经常在同一次用户交互里连续触发，做轻量去重避免重复健康检查。
+  if (now - lastProcessRefreshRequestedAt < PROCESS_REFRESH_DEDUPE_MS) return
+  lastProcessRefreshRequestedAt = now
+  emit('refresh-process')
+}
+
+function onComposerCardClick(event: MouseEvent) {
+  const target = event.target as HTMLElement | null
+  if (target?.closest('button')) return
+  requestProcessRefresh()
 }
 
 // 抽屉可见文件列表（按 props 顺序）；选中态基于 drawerSelectedPath。
@@ -1448,7 +1504,7 @@ function formatTime(iso: string) {
 
 function submit() {
   const text = localInput.value.trim()
-  if (!text || props.running) return
+  if (!text || processSubmitBlocked.value) return
   wasStopped.value = false
   wasCompleted.value = false
   wasFailed.value = false
@@ -2129,13 +2185,14 @@ function onCompositionEnd() {
     </div>
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div v-else class="figma-chat-composer">
-      <div class="figma-chat-input-card">
+      <div class="figma-chat-input-card" @click="onComposerCardClick">
         <textarea
           v-model="localInput"
           class="figma-chat-textarea"
           :placeholder="placeholder || 'Ask the AI agent...'"
           rows="1"
           :disabled="running || !processReady"
+          @focus="requestProcessRefresh"
           @keydown="onKeydown"
           @compositionstart="onCompositionStart"
           @compositionend="onCompositionEnd"
@@ -2170,7 +2227,7 @@ function onCompositionEnd() {
           <button
             type="button"
             class="figma-chat-card-btn figma-chat-new-btn"
-            :disabled="running || !processReady"
+            :disabled="processSubmitBlocked"
             @click="emit('new-conversation')"
           >
             <Plus class="figma-chat-btn-icon" />
@@ -2180,7 +2237,7 @@ function onCompositionEnd() {
             v-if="!running"
             type="button"
             class="figma-chat-send-card"
-            :disabled="!localInput.trim() || !processReady"
+            :disabled="!localInput.trim() || processSubmitBlocked"
             aria-label="发送"
             @click="submit"
           >
@@ -2196,6 +2253,22 @@ function onCompositionEnd() {
             @click="stop"
           >
             <Square class="figma-chat-stop-icon" fill="currentColor" />
+          </button>
+        </div>
+      </div>
+      <!-- 快速切换模型功能标签 -->
+      <div v-if="quickModels && quickModels.length" class="figma-chat-quick-models">
+        <span class="figma-chat-quick-models-title">上新</span>
+        <div class="figma-chat-quick-models-list">
+          <button
+            v-for="model in quickModels"
+            :key="modelValue(model)"
+            type="button"
+            :class="['figma-chat-quick-model-tag', modelValue(model) === selectedModel && 'is-active']"
+            @click="selectQuickModel(model)"
+          >
+            <span class="figma-chat-quick-model-dot" :style="{ backgroundColor: getModelColor(model) }" />
+            <span class="figma-chat-quick-model-name">{{ model.name }}</span>
           </button>
         </div>
       </div>
@@ -3576,11 +3649,11 @@ function onCompositionEnd() {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin: 0 12px 4px;
-  padding: 8px 10px;
+  gap: 12px;
+  margin: 0 12px 8px;
+  padding: 12px 16px;
   border: 1px solid #d7d7d7;
-  border-radius: 6px;
+  border-radius: 12px;
   background: #fafafa;
   color: #333;
   cursor: pointer;
@@ -3681,8 +3754,8 @@ function onCompositionEnd() {
 }
 
 .figma-chat-process-title {
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 13px;
+  line-height: 18px;
   font-weight: 600;
 }
 
@@ -3691,17 +3764,17 @@ function onCompositionEnd() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 16px;
   color: #666;
 }
 
 .figma-chat-process-init {
   flex-shrink: 0;
-  height: 26px;
-  padding: 0 10px;
+  height: 28px;
+  padding: 0 12px;
   border: 1px solid #b5b5b5;
-  border-radius: 6px;
+  border-radius: 8px;
   background: #fff;
   color: #333;
   font-size: 12px;
@@ -3730,7 +3803,7 @@ function onCompositionEnd() {
   display: flex;
   flex-direction: column;
   border: 1px solid #d4d4d4;
-  border-radius: 12px;
+  border-radius: 16px;
   background: #fff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
   overflow: hidden;
@@ -3785,11 +3858,11 @@ function onCompositionEnd() {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 26px;
-  padding: 0 8px;
+  height: 28px;
+  padding: 0 10px;
   border: 1px solid transparent;
-  border-radius: 6px;
-  background: transparent;
+  border-radius: 12px;
+  background: #f4f4f5;
   color: #555;
   font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 11px;
@@ -3800,9 +3873,8 @@ function onCompositionEnd() {
 }
 
 .figma-chat-card-btn:hover:not(:disabled) {
-  background: #f0f0f0;
-  border-color: #d4d4d4;
-  color: #333;
+  background: #e2e2e5;
+  color: #111111;
 }
 
 .figma-chat-card-btn:disabled {
@@ -3846,19 +3918,19 @@ function onCompositionEnd() {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 28px;
+  height: 28px;
   border: none;
-  border-radius: 6px;
+  border-radius: 50%;
   cursor: pointer;
   transition: background-color 0.12s ease, opacity 0.12s ease;
   flex-shrink: 0;
 }
 
 .figma-chat-send-card {
-  background: #9bb3da;
+  background: #18181b;
   color: #fff;
-  opacity: 0.45;
+  opacity: 0.35;
 }
 
 .figma-chat-send-card:not(:disabled) {
@@ -3866,12 +3938,13 @@ function onCompositionEnd() {
 }
 
 .figma-chat-send-card:not(:disabled):hover {
-  background: #4a5d78;
+  background: #000;
 }
 
 .figma-chat-stop-card {
   background: #ffe8e8;
   color: #d1423a;
+  border-radius: 50%;
 }
 
 .figma-chat-stop-card:hover {
@@ -4443,5 +4516,70 @@ function onCompositionEnd() {
 
 .figma-chat-bubble-content :deep(.markdown-body blockquote) {
   background: transparent;
+}
+
+/* 快速切换模型功能标签 */
+.figma-chat-quick-models {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.figma-chat-quick-models-title {
+  font-size: 11px;
+  color: #888;
+  background: #eaeaea;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'PingFang SC', sans-serif;
+  font-weight: 500;
+}
+
+.figma-chat-quick-models-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.figma-chat-quick-model-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid #dfdfdf;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #555;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: 'PingFang SC', sans-serif;
+  transition: all 0.12s ease;
+}
+
+.figma-chat-quick-model-tag:hover {
+  background: #f4f4f5;
+  border-color: #cfcfcf;
+  color: #111;
+}
+
+.figma-chat-quick-model-tag.is-active {
+  background: #eaf0ff;
+  border-color: #b9c8ff;
+  color: #1d3fb0;
+}
+
+.figma-chat-quick-model-tag.is-active:hover {
+  background: #dde7ff;
+}
+
+.figma-chat-quick-model-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
 }
 </style>

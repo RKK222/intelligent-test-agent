@@ -17,12 +17,15 @@ import com.icbc.testagent.domain.configuration.AgentConfigScope;
 import com.icbc.testagent.domain.configuration.AgentConfigWorktree;
 import com.icbc.testagent.domain.configuration.AgentConfigWorktreeStatus;
 import com.icbc.testagent.domain.configuration.CommonParameter;
-import com.icbc.testagent.domain.configuration.CommonParameterRepository;
+import com.icbc.testagent.domain.configuration.CommonParameterValues;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.icbc.testagent.domain.configuration.ParameterPlatform;
 import com.icbc.testagent.domain.configuration.SshKeyId;
 import com.icbc.testagent.domain.configuration.UserSshKey;
+import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.user.UserRepository;
+import com.icbc.testagent.domain.user.UserStatus;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
@@ -66,6 +69,21 @@ class AgentConfigApplicationServiceTest {
         assertThat(status.gitUrl()).isEqualTo("UNCONFIGURED");
         assertThat(status.agentDirectory().replace('\\', '/'))
                 .endsWith("/.config/opencode/agents");
+    }
+
+    @Test
+    void listPublicAgentFilesReturnsEmptyAndDoesNotCreateDirectoryWhenUninitialized() {
+        // 公共配置已启用（git url 已配置）但尚未 clone 初始化时，浏览应返回空列表，不得自动创建目录。
+        AgentConfigApplicationService service = service(Map.of(
+                "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()));
+
+        List<FileTreeEntryResponse> entries = service.listPublicAgentFiles("", null);
+
+        assertThat(entries).isEmpty();
+        assertThat(Files.exists(root.resolve(".config"))).isFalse();
+        assertThat(Files.exists(root.resolve(".config/opencode/agents"))).isFalse();
     }
 
     @Test
@@ -119,6 +137,8 @@ class AgentConfigApplicationServiceTest {
     @Test
     void publicWorktreeNameAppendsCurrentDateAndCreatesGitWorktree() throws Exception {
         Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
         InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
         AgentConfigApplicationService service = service(
@@ -145,6 +165,85 @@ class AgentConfigApplicationServiceTest {
         assertThat(agentConfigs.findWorktree(response.worktreeId()))
                 .map(AgentConfigWorktree::status)
                 .contains(AgentConfigWorktreeStatus.ACTIVE);
+        assertThat(agentConfigs.findWorktree(response.worktreeId()))
+                .map(AgentConfigWorktree::linuxServerId)
+                .contains("linux-1");
+    }
+
+    @Test
+    void publicWorktreeFailsWhenGitRootMissingAndDoesNotClone() {
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher());
+
+        assertThatThrownBy(() -> service.createPublicWorktree(
+                "change-agent-md",
+                "main",
+                ADMIN,
+                "trace_worktree"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("服务器linux-1上公共配置仓库在")
+                .hasMessageContaining("目录中未初始化");
+        assertThat(git.clonedUrl).isNull();
+        assertThat(git.worktreeBranch).isNull();
+    }
+
+    @Test
+    void publicWorktreeFailsWhenGitRootIsEmptyDirectoryAndDoesNotClone() throws Exception {
+        Files.createDirectories(root.resolve(".config"));
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher());
+
+        assertThatThrownBy(() -> service.createPublicWorktree(
+                "change-agent-md",
+                "main",
+                ADMIN,
+                "trace_worktree"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("服务器linux-1上公共配置仓库在")
+                .hasMessageContaining("目录中未初始化");
+
+        assertThat(git.clonedUrl).isNull();
+        assertThat(git.worktreeRoot).isNull();
+    }
+
+    @Test
+    void initializePublicRepositoryClonesMissingGitRootAndValidatesConfigDirectory() {
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_DIR", root.resolve(".config/opencode").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher());
+
+        AgentConfigResponses.PublicRepositoryStatusResponse response = service.initializeLocalPublicRepository(
+                "main",
+                "aco_init_1234567890",
+                ADMIN,
+                "trace_init");
+
+        assertThat(git.clonedUrl).isEqualTo("git@gitee.com:test/agent-config.git");
+        assertThat(git.clonedBranch).isEqualTo("main");
+        assertThat(response.initialized()).isTrue();
+        assertThat(response.linuxServerId()).isEqualTo("linux-1");
     }
 
     @Test
@@ -178,6 +277,149 @@ class AgentConfigApplicationServiceTest {
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agent/new.md"))).isFalse();
     }
 
+    @Test
+    void workspaceAgentFileLinuxServerUsesWorkspaceServerWhenNoWorktree() {
+        Path workspaceRoot = root.resolve("project");
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_project"),
+                        "project",
+                        workspaceRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-2",
+                        "trace_workspace")));
+
+        assertThat(service.workspaceAgentFilesLinuxServerId("wrk_project", null)).isEqualTo("linux-2");
+    }
+
+    @Test
+    void workspaceAgentFileLinuxServerUsesWorktreeServerWhenPresent() {
+        Path workspaceRoot = root.resolve("project");
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_workspace",
+                AgentConfigScope.WORKSPACE,
+                new WorkspaceId("wrk_project"),
+                "linux-3",
+                "change-agent-md",
+                "change-agent-md",
+                root.resolve("worktrees/change-agent-md").toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW));
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_project"),
+                        "project",
+                        workspaceRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-2",
+                        "trace_workspace")));
+
+        assertThat(service.workspaceAgentFilesLinuxServerId("wrk_project", "agw_workspace")).isEqualTo("linux-3");
+    }
+
+    @Test
+    void listPublicWorktreesFiltersActiveWorktreesByServerAndIncludesCreatorName() {
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_new",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-2",
+                "new-change",
+                "new-change",
+                root.resolve("worktrees/new-change").toString(),
+                new UserId("usr_alice"),
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW.plusSeconds(30)));
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_old",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-2",
+                "old-change",
+                "old-change",
+                root.resolve("worktrees/old-change").toString(),
+                new UserId("usr_missing"),
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW.plusSeconds(10)));
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_published",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-2",
+                "published-change",
+                "published-change",
+                root.resolve("worktrees/published-change").toString(),
+                new UserId("usr_alice"),
+                AgentConfigWorktreeStatus.PUBLISHED,
+                NOW,
+                NOW.plusSeconds(40)));
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_public_other_server",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-3",
+                "other-server",
+                "other-server",
+                root.resolve("worktrees/other-server").toString(),
+                new UserId("usr_alice"),
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW.plusSeconds(50)));
+        agentConfigs.saveWorktree(new AgentConfigWorktree(
+                "agw_workspace",
+                AgentConfigScope.WORKSPACE,
+                new WorkspaceId("wrk_project"),
+                "linux-2",
+                "workspace-change",
+                "workspace-change",
+                root.resolve("worktrees/workspace-change").toString(),
+                new UserId("usr_alice"),
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW.plusSeconds(60)));
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher());
+
+        List<AgentConfigResponses.AgentConfigWorktreeOptionResponse> options = service.listPublicWorktrees("linux-2");
+
+        assertThat(options).extracting(AgentConfigResponses.AgentConfigWorktreeOptionResponse::worktreeId)
+                .containsExactly("agw_public_new", "agw_public_old");
+        assertThat(options.get(0).createdByUserId()).isEqualTo("usr_alice");
+        assertThat(options.get(0).createdByUsername()).isEqualTo("alice");
+        assertThat(options.get(1).createdByUserId()).isEqualTo("usr_missing");
+        assertThat(options.get(1).createdByUsername()).isNull();
+    }
+
     private AgentConfigApplicationService service(Map<String, String> parameters) {
         return service(parameters, new InMemoryAgentConfigRepository(), new RecordingGitWorkspaceService(), new RecordingBroadcastPublisher());
     }
@@ -196,7 +438,7 @@ class AgentConfigApplicationServiceTest {
             RecordingGitWorkspaceService git,
             ServerBroadcastPublisher publisher,
             Optional<Workspace> workspace) {
-        CommonParameterRepository commonParameters = commonParameters(parameters);
+        CommonParameterValues commonParameters = commonParameters(parameters);
         ConfigurationManagementRepository configuration = mock(ConfigurationManagementRepository.class);
         when(configuration.findSshKeys(eq(ADMIN))).thenReturn(List.of(encryptedSshKey()));
         WorkspaceRepository workspaces = mock(WorkspaceRepository.class);
@@ -206,6 +448,7 @@ class AgentConfigApplicationServiceTest {
                 configuration,
                 workspaces,
                 agentConfigs,
+                new InMemoryUserRepository(),
                 new GitRemoteService(),
                 git,
                 sshKeyFixtures.encryptionService(),
@@ -216,16 +459,33 @@ class AgentConfigApplicationServiceTest {
                 new RecordingAgentConfigProgressSink());
     }
 
-    private CommonParameterRepository commonParameters(Map<String, String> parameters) {
-        return (englishName, platform) -> Optional.ofNullable(parameters.get(englishName))
-                .map(value -> new CommonParameter(
-                        "param_" + englishName.toLowerCase(),
-                        englishName,
-                        englishName,
-                        value,
-                        platform,
-                        NOW,
-                        NOW));
+    private CommonParameterValues commonParameters(Map<String, String> parameters) {
+        return new CommonParameterValues() {
+            @Override
+            public Optional<String> resolvedValue(String englishName) {
+                return Optional.ofNullable(parameters.get(englishName));
+            }
+
+            @Override
+            public Optional<String> resolvedValue(String englishName, com.icbc.testagent.domain.configuration.ParameterPlatform platform) {
+                return Optional.ofNullable(parameters.get(englishName));
+            }
+
+            @Override
+            public Optional<CommonParameter> raw(String englishName, com.icbc.testagent.domain.configuration.ParameterPlatform platform) {
+                return Optional.empty();
+            }
+
+            @Override
+            public List<CommonParameter> findAll() {
+                return List.of();
+            }
+
+            @Override
+            public List<com.icbc.testagent.domain.configuration.ResolvedParameter> resolvedAll() {
+                return List.of();
+            }
+        };
     }
 
     private UserSshKey encryptedSshKey() {
@@ -244,6 +504,13 @@ class AgentConfigApplicationServiceTest {
             this.clonedUrl = gitUrl;
             this.clonedBranch = branch;
             this.privateKeyUsed = privateKey;
+            try {
+                Files.createDirectories(repoRoot.resolve(".git"));
+                Files.createDirectories(repoRoot.resolve("opencode"));
+                Files.writeString(repoRoot.resolve("opencode/config.json"), "{}");
+            } catch (Exception exception) {
+                throw new IllegalStateException(exception);
+            }
         }
 
         @Override
@@ -346,6 +613,58 @@ class AgentConfigApplicationServiceTest {
                     .filter(worktree -> workspaceId == null || workspaceId.equals(worktree.workspaceId()))
                     .filter(worktree -> createdBy == null || createdBy.equals(worktree.createdBy()))
                     .toList();
+        }
+    }
+
+    private static final class InMemoryUserRepository implements UserRepository {
+
+        @Override
+        public void save(User user) {
+        }
+
+        @Override
+        public Optional<User> findByUserId(UserId userId) {
+            if (new UserId("usr_alice").equals(userId)) {
+                return Optional.of(new User(
+                        userId,
+                        "AUTH_ALICE",
+                        "alice",
+                        "hash",
+                        "org",
+                        "rd",
+                        "dept",
+                        UserStatus.ACTIVE,
+                        NOW,
+                        NOW));
+            }
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<User> findByUnifiedAuthId(String unifiedAuthId) {
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<User> findByUsername(String username) {
+            return Optional.empty();
+        }
+
+        @Override
+        public com.icbc.testagent.common.pagination.PageResponse<User> findPage(
+                String keyword,
+                com.icbc.testagent.common.pagination.PageRequest pageRequest) {
+            return new com.icbc.testagent.common.pagination.PageResponse<>(List.of(), pageRequest.page(), pageRequest.size(), 0);
+        }
+
+        @Override
+        public boolean existsByUsername(String username) {
+            return false;
+        }
+
+        @Override
+        public boolean existsByUnifiedAuthId(String unifiedAuthId) {
+            return false;
         }
     }
 }

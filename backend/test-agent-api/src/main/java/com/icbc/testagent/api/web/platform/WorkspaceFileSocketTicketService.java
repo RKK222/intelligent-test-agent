@@ -8,7 +8,7 @@ import com.icbc.testagent.domain.dictionary.Dictionary;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
-import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessFileRoutingAffinity;
 import com.icbc.testagent.opencode.runtime.process.WorkspaceFileRoutingService;
 import com.icbc.testagent.workspace.WorkspaceApplicationService;
 import java.util.Map;
@@ -23,6 +23,9 @@ class WorkspaceFileSocketTicketService {
 
     private static final String MODE_WORKSPACE = "workspace";
     private static final String MODE_DIRECTORY_PICKER = "directory-picker";
+    private static final String MODE_AGENT_CONFIG = "agent-config";
+    private static final String SCOPE_PUBLIC = "PUBLIC";
+    private static final String SCOPE_WORKSPACE = "WORKSPACE";
 
     private final WorkspaceApplicationService workspaceService;
     private final UserOpencodeProcessAssignmentService assignmentService;
@@ -51,30 +54,44 @@ class WorkspaceFileSocketTicketService {
                     "文件 WebSocket ticket 必须在目标后端签发",
                     Map.of("targetLinuxServerId", request.linuxServerId(), "currentLinuxServerId", currentLinuxServerId));
         }
-        UserOpencodeProcessStatusResponse process = userProcess(principal, traceId);
+        if (MODE_AGENT_CONFIG.equals(mode)) {
+            return response(ticketStore.issue(
+                    agentConfigWorkspaceId(request),
+                    currentLinuxServerId,
+                    null,
+                    superAdmin,
+                    mode,
+                    agentConfigScope(request),
+                    normalizeOptional(request.worktreeId()),
+                    traceId));
+        }
+        UserOpencodeProcessFileRoutingAffinity process = userProcessAffinity(principal, traceId);
         String agentLinuxServerId = process.status() == UserOpencodeProcessAvailability.READY ? process.linuxServerId() : null;
         if (MODE_WORKSPACE.equals(mode)) {
             String workspaceId = requiredWorkspaceId(request);
             requireReadyAgentOnCurrentServer(process, currentLinuxServerId, workspaceId);
             workspaceService.requireWorkspaceOnCurrentServer(new WorkspaceId(workspaceId), traceId);
-            return response(ticketStore.issue(workspaceId, currentLinuxServerId, agentLinuxServerId, superAdmin, mode, traceId));
+            return response(ticketStore.issue(workspaceId, currentLinuxServerId, agentLinuxServerId, superAdmin, mode, null, null, traceId));
+        }
+        if (!MODE_DIRECTORY_PICKER.equals(mode)) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "文件 WebSocket ticket 模式无效", Map.of("mode", mode));
         }
         if (!superAdmin) {
             requireReadyAgentOnCurrentServer(process, currentLinuxServerId, "directory-picker");
         }
-        return response(ticketStore.issue(null, currentLinuxServerId, agentLinuxServerId, superAdmin, mode, traceId));
+        return response(ticketStore.issue(null, currentLinuxServerId, agentLinuxServerId, superAdmin, mode, null, null, traceId));
     }
 
     WorkspaceFileSocketTicket consume(String ticket, String origin) {
         return ticketStore.consume(ticket, origin);
     }
 
-    private UserOpencodeProcessStatusResponse userProcess(AuthPrincipal principal, String traceId) {
-        return assignmentService.status(principal.userId(), "opencode", traceId);
+    private UserOpencodeProcessFileRoutingAffinity userProcessAffinity(AuthPrincipal principal, String traceId) {
+        return assignmentService.fileRoutingAffinity(principal.userId(), "opencode", traceId);
     }
 
     private void requireReadyAgentOnCurrentServer(
-            UserOpencodeProcessStatusResponse process,
+            UserOpencodeProcessFileRoutingAffinity process,
             String currentLinuxServerId,
             String workspaceId) {
         if (process.status() != UserOpencodeProcessAvailability.READY || process.linuxServerId() == null) {
@@ -113,5 +130,21 @@ class WorkspaceFileSocketTicketService {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "workspaceId 不能为空");
         }
         return request.workspaceId().trim();
+    }
+
+    private String agentConfigWorkspaceId(WorkspaceFileSocketDtos.TicketRequest request) {
+        return SCOPE_WORKSPACE.equals(agentConfigScope(request)) ? requiredWorkspaceId(request) : null;
+    }
+
+    private String agentConfigScope(WorkspaceFileSocketDtos.TicketRequest request) {
+        String scope = request.scope() == null ? "" : request.scope().trim().toUpperCase(java.util.Locale.ROOT);
+        if (SCOPE_PUBLIC.equals(scope) || SCOPE_WORKSPACE.equals(scope)) {
+            return scope;
+        }
+        throw new PlatformException(ErrorCode.VALIDATION_ERROR, "Agent 配置文件 scope 无效", Map.of("scope", request.scope()));
+    }
+
+    private String normalizeOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 }

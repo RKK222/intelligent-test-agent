@@ -19,6 +19,7 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementReposi
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
+import com.icbc.testagent.opencode.runtime.process.OpencodeProcessControlCommand;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.process.OpencodeProcessHealthCommand;
 import com.icbc.testagent.opencode.runtime.process.OpencodeProcessStartCommand;
@@ -69,6 +70,47 @@ class SocketOpencodeProcessManagerGatewayTest {
     }
 
     @Test
+    void startMapsManagerOpencodeUnavailableErrorCode() {
+        FakeRepository repository = new FakeRepository();
+        ManagerConnectionRegistry registry = new ManagerConnectionRegistry();
+        ManagerPendingCommandRegistry pending = new ManagerPendingCommandRegistry();
+        registry.register(
+                new ContainerManagerId("mgr_1234567890abcdef"),
+                new OpencodeContainerId("ctr_01"),
+                new BackendProcessId("bjp_1234567890abcdef"),
+                message -> pending.complete(message.commandId(), ManagerControlMessage.commandResult(
+                        message.commandId(),
+                        message.command(),
+                        "FAILED",
+                        message.port(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        false,
+                        "公共配置未初始化，请联系管理员。",
+                        "OPENCODE_UNAVAILABLE",
+                        message.traceId())));
+        SocketOpencodeProcessManagerGateway gateway = gateway(repository, registry, pending);
+
+        assertThatThrownBy(() -> gateway.startProcess(new OpencodeProcessStartCommand(
+                new UserId("usr_1234567890abcdef"),
+                new LinuxServerId("10.8.0.12"),
+                new OpencodeContainerId("ctr_01"),
+                4096,
+                "http://10.8.0.12:4096",
+                "/data/opencode/session/4096",
+                "/data/opencode/.config/opencode/",
+                "trace_1234567890abcdef")))
+                .isInstanceOf(PlatformException.class)
+                .satisfies(error -> {
+                    PlatformException exception = (PlatformException) error;
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
+                    assertThat(exception.getMessage()).isEqualTo("公共配置未初始化，请联系管理员。");
+                });
+    }
+
+    @Test
     void healthRoutesByPersistedProcessContainer() {
         FakeRepository repository = new FakeRepository();
         repository.process = process();
@@ -96,6 +138,86 @@ class SocketOpencodeProcessManagerGatewayTest {
                 new OpencodeProcessId("ocp_1234567890abcdef"),
                 "http://10.8.0.12:4096",
                 "trace_1234567890abcdef")).healthy()).isTrue();
+    }
+
+    @Test
+    void restartSendsManagerCommandAndMapsStartedResult() {
+        FakeRepository repository = new FakeRepository();
+        ManagerConnectionRegistry registry = new ManagerConnectionRegistry();
+        ManagerPendingCommandRegistry pending = new ManagerPendingCommandRegistry();
+        List<ManagerControlMessage> sent = new java.util.ArrayList<>();
+        registry.register(
+                new ContainerManagerId("mgr_1234567890abcdef"),
+                new OpencodeContainerId("ctr_01"),
+                new BackendProcessId("bjp_1234567890abcdef"),
+                message -> {
+                    sent.add(message);
+                    pending.complete(message.commandId(), ManagerControlMessage.commandResult(
+                            message.commandId(),
+                            message.command(),
+                            "STARTED",
+                            message.port(),
+                            12346L,
+                            "http://10.8.0.12:4096",
+                            "/data/opencode/session/4096",
+                            "/data/opencode/.config/opencode/",
+                            true,
+                            "opencode server started",
+                            message.traceId()));
+                });
+        SocketOpencodeProcessManagerGateway gateway = gateway(repository, registry, pending);
+
+        var result = gateway.restartProcess(new OpencodeProcessControlCommand(
+                new OpencodeContainerId("ctr_01"),
+                4096,
+                "trace_1234567890abcdef"));
+
+        assertThat(sent).singleElement().satisfies(message -> {
+            assertThat(message.command()).isEqualTo("restart");
+            assertThat(message.port()).isEqualTo(4096);
+        });
+        assertThat(result.status()).isEqualTo("STARTED");
+        assertThat(result.pid()).isEqualTo(12346L);
+    }
+
+    @Test
+    void stopSendsManagerCommandAndMapsStoppedResult() {
+        FakeRepository repository = new FakeRepository();
+        ManagerConnectionRegistry registry = new ManagerConnectionRegistry();
+        ManagerPendingCommandRegistry pending = new ManagerPendingCommandRegistry();
+        List<ManagerControlMessage> sent = new java.util.ArrayList<>();
+        registry.register(
+                new ContainerManagerId("mgr_1234567890abcdef"),
+                new OpencodeContainerId("ctr_01"),
+                new BackendProcessId("bjp_1234567890abcdef"),
+                message -> {
+                    sent.add(message);
+                    pending.complete(message.commandId(), ManagerControlMessage.commandResult(
+                            message.commandId(),
+                            message.command(),
+                            "STOPPED",
+                            message.port(),
+                            12345L,
+                            "http://10.8.0.12:4096",
+                            "/data/opencode/session/4096",
+                            "/data/opencode/.config/opencode/",
+                            true,
+                            "opencode server stopped",
+                            message.traceId()));
+                });
+        SocketOpencodeProcessManagerGateway gateway = gateway(repository, registry, pending);
+
+        var result = gateway.stopProcess(new OpencodeProcessControlCommand(
+                new OpencodeContainerId("ctr_01"),
+                4096,
+                "trace_1234567890abcdef"));
+
+        assertThat(sent).singleElement().satisfies(message -> {
+            assertThat(message.command()).isEqualTo("stop");
+            assertThat(message.port()).isEqualTo(4096);
+        });
+        assertThat(result.status()).isEqualTo("STOPPED");
+        assertThat(result.message()).isEqualTo("opencode server stopped");
     }
 
     @Test

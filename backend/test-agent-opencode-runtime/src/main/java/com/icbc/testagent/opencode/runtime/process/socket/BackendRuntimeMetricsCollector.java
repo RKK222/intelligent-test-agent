@@ -9,10 +9,32 @@ import java.nio.file.Path;
 
 /**
  * 采集当前 Java 后端进程和所在服务器的资源指标，供 Redis 运行管理快照和历史趋势使用。
+ * 内存采集根据操作系统类型选择不同策略，确保 macOS、Linux、Windows 都能获取准确的内存信息。
  */
 public class BackendRuntimeMetricsCollector {
 
     private Long lastGcCollectionMillis;
+    private final SystemMemoryProvider memoryProvider;
+
+    public BackendRuntimeMetricsCollector() {
+        this(OsType.detect());
+    }
+
+    /**
+     * 用于测试的构造函数，允许指定操作系统类型。
+     */
+    BackendRuntimeMetricsCollector(OsType osType) {
+        this.memoryProvider = createMemoryProvider(osType);
+    }
+
+    private SystemMemoryProvider createMemoryProvider(OsType osType) {
+        return switch (osType) {
+            case MACOS -> new MacOsMemoryProvider();
+            case LINUX -> new LinuxMemoryProvider();
+            case WINDOWS -> new WindowsMemoryProvider();
+            case UNKNOWN -> new LinuxMemoryProvider(); // 默认使用 Linux 策略
+        };
+    }
 
     /**
      * 返回当前 Java 进程运行指标；单个指标不可用时只置空该字段，不阻断心跳。
@@ -20,9 +42,12 @@ public class BackendRuntimeMetricsCollector {
     public synchronized BackendRuntimeMetrics sample() {
         com.sun.management.OperatingSystemMXBean osBean = operatingSystemBean();
         Double cpuUsagePercent = cpuUsagePercent(osBean);
-        Long memoryMaxBytes = osBean == null ? null : positive(osBean.getTotalMemorySize());
-        Long memoryFreeBytes = osBean == null ? null : positive(osBean.getFreeMemorySize());
-        Long memoryUsedBytes = memoryMaxBytes == null || memoryFreeBytes == null ? null : Math.max(0, memoryMaxBytes - memoryFreeBytes);
+        MemoryInfo memoryInfo = memoryProvider.getMemoryInfo();
+        Long memoryMaxBytes = memoryInfo != null ? memoryInfo.totalBytes() : null;
+        Long memoryAvailableBytes = memoryInfo != null ? memoryInfo.availableBytes() : null;
+        Long memoryUsedBytes = memoryMaxBytes == null || memoryAvailableBytes == null
+                ? null
+                : Math.max(0, memoryMaxBytes - memoryAvailableBytes);
         Double memoryUsagePercent = percent(memoryUsedBytes, memoryMaxBytes);
         DiskUsage diskUsage = diskUsage();
         JvmMemoryUsage jvmMemoryUsage = jvmMemoryUsage();

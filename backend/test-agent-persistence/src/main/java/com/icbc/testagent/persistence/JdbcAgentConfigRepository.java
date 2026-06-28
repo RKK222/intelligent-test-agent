@@ -13,12 +13,10 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.stereotype.Repository;
 
 /**
  * Agent 配置操作 JDBC Repository，保存 operation 快照和 worktree 生命周期。
  */
-@Repository
 public class JdbcAgentConfigRepository extends JdbcRepositorySupport implements AgentConfigRepository {
 
     private final JdbcClient jdbcClient;
@@ -42,6 +40,7 @@ public class JdbcAgentConfigRepository extends JdbcRepositorySupport implements 
             rs.getString("worktree_id"),
             AgentConfigScope.valueOf(rs.getString("scope")),
             optionalWorkspaceId(rs.getString("workspace_id")),
+            null,
             rs.getString("worktree_name"),
             rs.getString("branch"),
             rs.getString("root_path"),

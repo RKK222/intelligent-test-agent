@@ -116,6 +116,8 @@ cp .env.local.example .env.local
 
 `guo` profile 的 IDEA 启动路径已把上述本地 Java 运行参数写入 yml；继续使用 `tools/dev-backend-run.sh` 或 `restart-dev-services.sh --profile guo --env-file .env.local` 时，`.env.local` 仍可覆盖 yml，便于 macOS/Linux 联调脚本启动前后端和 opencode。根目录一键脚本不带参数时默认读取 `.env.test` 并启动 `test` profile；停止 manager 时会清理其托管的用户 opencode 子进程和 state JSON，防止端口池残留进程导致下次初始化失败。
 
+用户专属 opencode 进程的 session/config 路径来自数据库 `common_parameters`，不是 `.env.local`。点击初始化时，Java 后端先按当前后端已连接的健康容器视图选择进程数最少且有空闲端口的目标容器，再向该容器对应的 manager 下发 `start`；manager 使用已通过 `configUpdate` 同步的 `OPENCODE_PUBLIC_CONFIG_DIR`。目录存在且非空的检查只在目标 manager 所在服务器执行。目录缺失、为空、非目录或不可读时，manager 返回 `OPENCODE_UNAVAILABLE` 和“公共配置未初始化，请联系管理员。”，Java 仅映射为统一平台错误，不在本机提前检查。
+
 验证后端启动成功：
 ```bash
 curl http://127.0.0.1:8080/actuator/health

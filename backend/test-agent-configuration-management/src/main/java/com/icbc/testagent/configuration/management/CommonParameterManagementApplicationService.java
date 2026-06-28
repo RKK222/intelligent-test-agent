@@ -4,8 +4,11 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
+import com.icbc.testagent.configuration.management.CommonParameterManagementResponses.ChangeLogResponse;
 import com.icbc.testagent.configuration.management.CommonParameterManagementResponses.CommonParameterResponse;
 import com.icbc.testagent.domain.configuration.CommonParameter;
+import com.icbc.testagent.domain.configuration.CommonParameterChangeLog;
+import com.icbc.testagent.domain.configuration.CommonParameterChangeLogRepository;
 import com.icbc.testagent.domain.configuration.CommonParameterRepository;
 import com.icbc.testagent.domain.configuration.CommonParameterUpdatedEvent;
 import com.icbc.testagent.domain.configuration.ParameterPlatform;
@@ -14,6 +17,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,26 +32,34 @@ import org.springframework.stereotype.Service;
 public class CommonParameterManagementApplicationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CommonParameterManagementApplicationService.class);
+    private static final int CHANGE_LOG_LIMIT = 50;
 
     private final CommonParameterRepository repository;
+    private final CommonParameterChangeLogRepository changeLogRepository;
     private final ApplicationEventPublisher eventPublisher;
     private final Clock clock;
 
     /**
-     * 注入通用参数领域端口；使用系统默认时钟记录更新时间。
+     * 注入通用参数领域端口和修改日志端口；使用系统默认时钟记录更新时间。
      */
     @Autowired
     public CommonParameterManagementApplicationService(
-            CommonParameterRepository repository, ApplicationEventPublisher eventPublisher) {
-        this(repository, eventPublisher, Clock.systemUTC());
+            CommonParameterRepository repository,
+            CommonParameterChangeLogRepository changeLogRepository,
+            ApplicationEventPublisher eventPublisher) {
+        this(repository, changeLogRepository, eventPublisher, Clock.systemUTC());
     }
 
     /**
      * 测试可注入可控时钟，便于断言更新时间。
      */
     CommonParameterManagementApplicationService(
-            CommonParameterRepository repository, ApplicationEventPublisher eventPublisher, Clock clock) {
+            CommonParameterRepository repository,
+            CommonParameterChangeLogRepository changeLogRepository,
+            ApplicationEventPublisher eventPublisher,
+            Clock clock) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.changeLogRepository = Objects.requireNonNull(changeLogRepository, "changeLogRepository must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
@@ -72,13 +84,26 @@ public class CommonParameterManagementApplicationService {
 
     /**
      * 仅更新指定通用参数的 value；参数不存在抛 {@link ErrorCode#NOT_FOUND}，
-     * 新值为空抛 {@link ErrorCode#VALIDATION_ERROR}。
+     * 新值为空抛 {@link ErrorCode#VALIDATION_ERROR}。更新成功后记录修改日志。
+     *
+     * @param parameterId 参数业务 ID
+     * @param newValue 新值
+     * @param traceId 链路追踪 ID
+     * @param changedByUserId 修改用户 ID（可为空，兼容 static token）
+     * @param changedByUsername 修改用户名（可为空，兼容 static token）
+     * @return 更新后的参数响应
      */
-    public CommonParameterResponse updateValue(String parameterId, String newValue, String traceId) {
+    public CommonParameterResponse updateValue(
+            String parameterId,
+            String newValue,
+            String traceId,
+            String changedByUserId,
+            String changedByUsername) {
         String normalizedParameterId = normalize(parameterId, "parameterId");
         CommonParameter existing = repository.findByParameterId(normalizedParameterId)
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.NOT_FOUND, "通用参数不存在", Map.of("parameterId", normalizedParameterId)));
+        String oldValue = existing.parameterValue();
         Instant updatedAt = clock.instant();
         CommonParameter updated;
         try {
@@ -92,14 +117,40 @@ public class CommonParameterManagementApplicationService {
             throw new PlatformException(
                     ErrorCode.NOT_FOUND, "通用参数不存在", Map.of("parameterId", normalizedParameterId));
         }
+        // 记录修改日志
+        CommonParameterChangeLog changeLog = CommonParameterChangeLog.create(
+                "log_" + UUID.randomUUID().toString().replace("-", ""),
+                normalizedParameterId,
+                oldValue,
+                updated.parameterValue(),
+                changedByUserId,
+                changedByUsername,
+                traceId,
+                updatedAt);
+        changeLogRepository.save(changeLog);
+
         CommonParameterResponse response = repository.findByParameterId(normalizedParameterId)
                 .map(CommonParameterResponse::from)
                 .orElse(CommonParameterResponse.from(updated));
-        LOGGER.info("通用参数 value 已更新 traceId={} parameterId={}", traceId, normalizedParameterId);
+        LOGGER.info("通用参数 value 已更新 traceId={} parameterId={} changedBy={}",
+                traceId, normalizedParameterId, changedByUsername);
         // 事务提交后发布事件，供下游模块（如向 opencode manager 下发运行时配置）监听联动。
         eventPublisher.publishEvent(new CommonParameterUpdatedEvent(
                 existing.englishName(), existing.platform(), updated.parameterValue(), normalizedParameterId, traceId));
         return response;
+    }
+
+    /**
+     * 查询指定参数的修改历史记录，按修改时间倒序排列。
+     *
+     * @param parameterId 参数业务 ID
+     * @return 修改日志响应列表
+     */
+    public List<ChangeLogResponse> findChangeLogs(String parameterId) {
+        String normalizedParameterId = normalize(parameterId, "parameterId");
+        return changeLogRepository.findByParameterId(normalizedParameterId, CHANGE_LOG_LIMIT).stream()
+                .map(ChangeLogResponse::from)
+                .toList();
     }
 
     private static String normalize(String value, String field) {

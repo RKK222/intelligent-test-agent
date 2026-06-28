@@ -296,10 +296,30 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="!path" class="flex h-full min-h-0 items-center justify-center bg-[var(--ta-panel-2)] text-slate-500">
-    <div class="text-center">
-      <div class="text-[14px] font-semibold text-slate-300">未打开文件</div>
-      <div class="mt-1 text-[12px]">从左侧文件树选择一个测试脚本或配置文件</div>
+  <div v-if="!path" class="flex h-full min-h-0 flex-col items-center justify-center bg-[var(--ta-panel-2)] text-slate-500 px-6">
+    <div class="text-center max-w-[280px] flex flex-col items-center">
+      <div class="mb-4 flex items-center justify-center w-16 h-16 rounded-full bg-slate-50 shadow-sm border border-slate-100/50">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="32" height="32" class="text-indigo-500">
+          <defs>
+            <linearGradient id="folderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#818cf8" />
+              <stop offset="100%" stop-color="#4f46e5" />
+            </linearGradient>
+            <linearGradient id="folderBackGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#c7d2fe" />
+              <stop offset="100%" stop-color="#a5b4fc" />
+            </linearGradient>
+          </defs>
+          <path d="M4 4h5l2 3h9a2 2 0 0 1 2 2v1H2V6a2 2 0 0 1 2-2z" fill="url(#folderBackGrad)" />
+          <path d="M6 8h12v6H6z" fill="#ffffff" opacity="0.9" rx="1" />
+          <path d="M8 10h8v1H8zm0 2h5v1H8z" fill="#e2e8f0" />
+          <path d="M2 10h20l-2 10H4z" fill="url(#folderGrad)" />
+        </svg>
+      </div>
+      <div class="text-[16px] font-bold text-slate-700 tracking-tight">开始您的探索</div>
+      <div class="mt-2 text-[13px] text-slate-400 leading-relaxed">
+        请从左侧文件树选择一个测试脚本或配置文件，或者直接在右侧向智能体发起提问。
+      </div>
     </div>
   </div>
   <div v-else class="flex h-full min-h-0 flex-col bg-[var(--ta-surface)]">

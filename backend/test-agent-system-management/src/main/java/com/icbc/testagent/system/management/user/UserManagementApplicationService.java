@@ -16,6 +16,7 @@ import com.icbc.testagent.system.management.user.UserManagementResponses.UserRes
 import java.util.List;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 用户管理（测试）应用服务，封装查询用户列表、创建测试用户、查询可选角色的业务编排。
@@ -65,6 +66,7 @@ public class UserManagementApplicationService {
      *
      * @throws PlatformException 当角色无效、用户名或统一认证号重复时
      */
+    @Transactional
     public UserResponse createUser(CreateUserCommand command) {
         String roleCode = command.role();
         if (roleCode == null || roleCode.isBlank()) {

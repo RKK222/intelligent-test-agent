@@ -14,8 +14,8 @@
 - `TodoItem` 保留旧 `text/status/priority` 字段，并可选承载 `title/description/summary/result/error/steps/updatedAt` 等对话框任务分解展示字段。
 - `CurrentUser`、`LoginResponse` 增加可选 `roles`，旧响应缺字段时按空角色兼容。
 - 定义用户管理（测试）DTO：`UserManagementUser`、`CreateUserPayload`、`RoleOption`，供 `backend-api` 和设置页超级管理员造号面板复用。
-- 定义 opencode 用户进程状态与超级管理员运行管理 DTO：当前用户进程状态（含头像菜单用 `serviceStatus` / `serviceAddress` 展示字段）、运行管理 overview、拓扑列表、manager-backend 连接、用户 opencode server 进程分页，以及容器/后端 Java 进程的 Redis 指标历史响应类型；指标历史查询主参数为 `windowMinutes`，`hours` 仅保留兼容；新增监控字段均保持可选，旧后端缺字段时前端必须兼容。
-- 定义 Workspace 文件 WebSocket 路由、目标后端服务器、ticket 请求/响应 DTO，供 `backend-api` 和 agent-web 复用。
+- 定义 opencode 用户进程状态与超级管理员运行管理 DTO：当前用户进程状态（含头像菜单用 `serviceStatus` / `serviceAddress` 展示字段）、运行管理 overview、拓扑列表、manager 可选下属 `OpencodeRuntimeManagedProcess` 明细、manager-backend 连接、用户 opencode server 进程分页、`OpencodeRuntimeManagedProcessCommandResult` 重启/停止命令结果，以及容器/后端 Java 进程的 Redis 指标历史响应类型；`OpencodeRuntimeManagedProcess` 可选承载 `ownership`、候选进程、健康和用户绑定字段，供前端把 manager 本地托管进程分成有主/无主；指标历史查询主参数为 `windowMinutes`，`hours` 仅保留兼容；新增监控、manager 下属进程和命令结果字段均保持可选，旧后端缺字段时前端必须兼容。
+- 定义 Workspace/Agent 配置文件 WebSocket 路由、目标后端服务器、ticket 请求/响应 DTO，供 `backend-api` 和 agent-web 复用；`AgentConfigWorktreeOption` 在公共 worktree 切换列表中补充 `createdByUserId/createdByUsername`。
 - 定义应用配置管理 DTO：`ApplicationDefinition`、`ApplicationMember`、`CodeRepositoryConfig`、`ApplicationWorkspaceConfig`、`WorkspaceCreateOperation`、`SshKeyMetadata` 和对应请求 payload；`CodeRepositoryConfig.englishName` 对历史数据保持可空，新增/编辑 payload 必填。
 - 定义应用版本工作区 DTO：`ManagedApplication`、`ApplicationWorkspaceTemplate`、`ApplicationWorkspaceVersion`、`PersonalWorkspace`、`WorkspaceDiff`、`WorkspaceSyncResult` 和对应请求 payload；`ApplicationWorkspaceVersion` 的 `targetCommitHash`、`replicaCommitHash`、`replicaLinuxServerId`、`replicaStatus` 均为可选字段，兼容旧后端和历史版本。
 - 不引入运行时依赖。

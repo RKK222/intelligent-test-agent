@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onUnmounted, ref, watch, type CSSProperties } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch, type CSSProperties } from "vue";
 import { ChevronDown, LogOut, ShieldCheck, UserRound } from "lucide-vue-next";
 import type { UserOpencodeProcess } from "@test-agent/shared-types";
 import logoUrl from "../assets/figma/logo.svg";
@@ -220,6 +220,581 @@ onUnmounted(() => {
   document.body.style.cursor = "";
   document.body.style.userSelect = "";
 });
+
+// --- MIMO Robot Easter Egg Logic ---
+type RobotState =
+  | "sleeping"
+  | "spawning"
+  | "idle"
+  | "charging"
+  | "jumping-up"
+  | "jumping-down"
+  | "landing"
+  | "waving"
+  | "exiting-charge"
+  | "exiting-fly"
+  | "walking"
+  | "sitting"
+  | "flipping"
+  | "hanging";
+
+const robotState = ref<RobotState>("sleeping");
+const robotX = ref(0);
+const robotY = ref(0);
+const robotDirection = ref<"left" | "right" | "front">("front");
+const robotTransition = ref("none");
+
+let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+let naturalExitTimer: ReturnType<typeof setTimeout> | null = null;
+let behaviorTimer: ReturnType<typeof setTimeout> | null = null;
+let movementTimeout: ReturnType<typeof setTimeout> | null = null;
+
+const robotCurrentLevel = ref<"top" | "bottom">("top");
+
+// Throttled activity timer
+let lastActivityTime = 0;
+
+// Safe X ranges logic
+function getSafeXRange(level: "top" | "bottom") {
+  if (level === "bottom") {
+    return [50, window.innerWidth - 50];
+  }
+  // Level is 'top': avoid logo on left, avatar on right
+  const leftEl = document.querySelector(".figma-header-left");
+  const leftWidth = leftEl ? leftEl.getBoundingClientRect().right : 220;
+
+  const rightEl = document.querySelector(".figma-header-right");
+  const rightWidth = rightEl ? window.innerWidth - rightEl.getBoundingClientRect().left : 220;
+
+  const minX = leftWidth + 20;
+  const maxX = window.innerWidth - rightWidth - 20;
+  if (minX >= maxX) {
+    return [100, window.innerWidth - 100];
+  }
+  return [minX, maxX];
+}
+
+// Bounding box of the title for spawning
+function getBirthPosition() {
+  const el = document.querySelector(".figma-title");
+  if (el) {
+    const rect = el.getBoundingClientRect();
+    return {
+      x: rect.left + rect.width / 2,
+      y: rect.bottom
+    };
+  }
+  return { x: 100, y: 36 };
+}
+
+// Exit logic (interrupted or naturally)
+function triggerExit() {
+  if (robotState.value === "sleeping" || robotState.value === "exiting-charge" || robotState.value === "exiting-fly") {
+    return;
+  }
+
+  // Clear running timers
+  clearAllRobotTimers();
+
+  robotState.value = "waving";
+  robotDirection.value = "front";
+  robotTransition.value = "none";
+
+  // Wave for 1.2s
+  movementTimeout = setTimeout(() => {
+    robotState.value = "exiting-charge";
+
+    // Charge for 300ms
+    movementTimeout = setTimeout(() => {
+      robotState.value = "exiting-fly";
+
+      const flyLeft = Math.random() < 0.5;
+      const targetX = flyLeft ? -100 : window.innerWidth + 100;
+      const startX = robotX.value;
+      const startY = robotY.value;
+      const peakY = Math.max(-100, startY - 180);
+
+      // Phase 1: Fly Up
+      robotTransition.value = "left 0.4s linear, top 0.4s ease-out";
+      robotDirection.value = flyLeft ? "left" : "right";
+      robotX.value = (startX + targetX) / 2;
+      robotY.value = peakY;
+
+      movementTimeout = setTimeout(() => {
+        // Phase 2: Fly Down/Out
+        robotTransition.value = "left 0.4s linear, top 0.4s ease-in";
+        robotX.value = targetX;
+        robotY.value = -200; // Fly out upwards/sideways
+
+        movementTimeout = setTimeout(() => {
+          robotState.value = "sleeping";
+          resetInactivityTimer();
+        }, 400);
+      }, 400);
+    }, 300);
+  }, 1200);
+}
+
+// Clean timers helper
+function clearAllRobotTimers() {
+  if (naturalExitTimer) clearTimeout(naturalExitTimer);
+  if (behaviorTimer) clearTimeout(behaviorTimer);
+  if (movementTimeout) clearTimeout(movementTimeout);
+}
+
+// Reset activity and 20-sec inactivity timer
+function resetInactivityTimer() {
+  if (robotState.value !== "sleeping") {
+    // Already active, check if we need to exit
+    if (robotState.value !== "waving" && robotState.value !== "exiting-charge" && robotState.value !== "exiting-fly") {
+      triggerExit();
+    }
+    return;
+  }
+
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+  inactivityTimer = setTimeout(spawnRobot, 60000); // 20 seconds
+}
+
+// Spawn logic
+function spawnRobot() {
+  if (robotState.value !== "sleeping") return;
+
+  clearAllRobotTimers();
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+
+  const birth = getBirthPosition();
+  robotX.value = birth.x;
+  robotY.value = birth.y;
+  robotCurrentLevel.value = "top";
+  robotState.value = "spawning";
+  robotTransition.value = "none";
+
+  const [minX, maxX] = getSafeXRange("top");
+  const targetX = minX + Math.random() * (maxX - minX);
+  const targetY = 36; // navbar bottom floor
+
+  robotDirection.value = targetX > birth.x ? "right" : "left";
+
+  // Use nextTick and a slight timeout to let Vue render the birth position first
+  nextTick(() => {
+    setTimeout(() => {
+      if (robotState.value !== "spawning") return;
+
+      // Jump from text onto navbar (High parabola)
+      const peakY = -40; // High in the sky
+
+      // Phase 1: Up
+      robotTransition.value = "left 0.4s linear, top 0.4s ease-out";
+      robotX.value = (birth.x + targetX) / 2;
+      robotY.value = peakY;
+
+      movementTimeout = setTimeout(() => {
+        if (robotState.value !== "spawning") return;
+
+        // Phase 2: Down
+        robotTransition.value = "left 0.4s linear, top 0.4s ease-in";
+        robotX.value = targetX;
+        robotY.value = targetY;
+
+        movementTimeout = setTimeout(() => {
+          if (robotState.value !== "spawning") return;
+
+          // Land
+          robotTransition.value = "none";
+          robotState.value = "landing";
+
+          movementTimeout = setTimeout(() => {
+            // Start idle behavior
+            robotState.value = "idle";
+
+            // Schedule natural exit
+            const stayDuration = (15 + Math.random() * 45) * 1000;
+            naturalExitTimer = setTimeout(triggerExit, stayDuration);
+
+            // Start random behaviors loop
+            scheduleNextAction();
+          }, 250);
+        }, 400);
+      }, 400);
+    }, 50);
+  });
+}
+
+// Action selection
+function scheduleNextAction() {
+  if (robotState.value !== "idle" && robotState.value !== "sitting" && robotState.value !== "hanging") return;
+
+  if (behaviorTimer) clearTimeout(behaviorTimer);
+  behaviorTimer = setTimeout(() => {
+    if (robotState.value !== "idle" && robotState.value !== "sitting" && robotState.value !== "hanging") return;
+
+    if (robotCurrentLevel.value === "top") {
+      // At top: restrict upward jumps to prevent going off-screen
+      const rand = Math.random();
+      if (rand < 0.40) {
+        executeWalking();
+      } else if (rand < 0.65) {
+        executeHanging();
+      } else if (rand < 0.85) {
+        executeBigJump(); // Drop down to bottom
+      } else {
+        if (Math.random() < 0.6) {
+          executeSitting();
+        } else {
+          executeStayIdle();
+        }
+      }
+    } else {
+      // At bottom: normal full actions including upward jumps
+      const rand = Math.random();
+      if (rand < 0.25) {
+        executeShortJump();
+      } else if (rand < 0.50) {
+        executeWalking();
+      } else if (rand < 0.65) {
+        executeBackflip();
+      } else if (rand < 0.80) {
+        executeBigJump(); // Jump up to top navbar
+      } else if (rand < 0.92) {
+        executeBounce();
+      } else {
+        if (Math.random() < 0.6) {
+          executeSitting();
+        } else {
+          executeStayIdle();
+        }
+      }
+    }
+  }, 1000 + Math.random() * 1000); // 1-2s cycle for high activity
+}
+
+function executeStayIdle() {
+  robotState.value = "idle";
+  scheduleNextAction();
+}
+
+function executeSitting() {
+  robotState.value = "sitting";
+  robotDirection.value = "front";
+
+  // Sit down for 1.5s to 3s
+  const sitDuration = 1500 + Math.random() * 1500;
+  movementTimeout = setTimeout(() => {
+    if (robotState.value !== "sitting") return;
+    robotState.value = "idle";
+    robotDirection.value = Math.random() < 0.5 ? "left" : "right";
+    scheduleNextAction();
+  }, sitDuration);
+}
+
+function executeHanging() {
+  robotState.value = "hanging";
+  robotDirection.value = "front";
+
+  // Hang upside down for 2s to 4s
+  const hangDuration = 2000 + Math.random() * 2000;
+  movementTimeout = setTimeout(() => {
+    if (robotState.value !== "hanging") return;
+    robotState.value = "idle";
+    robotDirection.value = Math.random() < 0.5 ? "left" : "right";
+    scheduleNextAction();
+  }, hangDuration);
+}
+
+function executeWalking() {
+  const startX = robotX.value;
+  const [minX, maxX] = getSafeXRange(robotCurrentLevel.value);
+
+  const direction = Math.random() < 0.5 ? -1 : 1;
+  const dx = 50 + Math.random() * 50; // 50-100px
+  let targetX = startX + direction * dx;
+
+  if (targetX < minX) {
+    targetX = Math.min(maxX, startX + dx);
+  } else if (targetX > maxX) {
+    targetX = Math.max(minX, startX - dx);
+  }
+
+  if (Math.abs(targetX - startX) < 15) {
+    if (Math.random() < 0.5) {
+      executeSitting();
+    } else {
+      executeBounce();
+    }
+    return;
+  }
+
+  const duration = Math.abs(targetX - startX) / 50; // speed 50px/s
+  robotDirection.value = targetX > startX ? "right" : "left";
+  robotState.value = "walking";
+  robotTransition.value = `left ${duration}s linear`;
+  robotX.value = targetX;
+
+  movementTimeout = setTimeout(() => {
+    if (robotState.value !== "walking") return;
+    robotTransition.value = "none";
+    robotState.value = "idle";
+    scheduleNextAction();
+  }, duration * 1000);
+}
+
+function executeBackflip() {
+  const startY = robotY.value;
+  robotState.value = "charging";
+
+  movementTimeout = setTimeout(() => {
+    if (robotState.value !== "charging") return;
+
+    // Flip Jump Up
+    robotState.value = "flipping";
+    robotTransition.value = "top 0.4s ease-out";
+    robotY.value = startY - 60;
+
+    movementTimeout = setTimeout(() => {
+      if (robotState.value !== "flipping") return;
+
+      // Fall Down
+      robotTransition.value = "top 0.4s ease-in";
+      robotY.value = startY;
+
+      movementTimeout = setTimeout(() => {
+        if (robotState.value !== "flipping") return;
+
+        // Land
+        robotTransition.value = "none";
+        robotState.value = "landing";
+
+        movementTimeout = setTimeout(() => {
+          robotState.value = "idle";
+          scheduleNextAction();
+        }, 250);
+      }, 400);
+    }, 400);
+  }, 300);
+}
+
+function executeBounce() {
+  const startY = robotY.value;
+  robotState.value = "charging";
+
+  movementTimeout = setTimeout(() => {
+    if (robotState.value !== "charging") return;
+
+    // Jump Up
+    robotState.value = "jumping-up";
+    robotTransition.value = "top 0.35s ease-out";
+    robotY.value = startY - 50;
+
+    movementTimeout = setTimeout(() => {
+      if (robotState.value !== "jumping-up") return;
+
+      // Fall Down
+      robotState.value = "jumping-down";
+      robotTransition.value = "top 0.35s ease-in";
+      robotY.value = startY;
+
+      movementTimeout = setTimeout(() => {
+        if (robotState.value !== "jumping-down") return;
+
+        // Land
+        robotTransition.value = "none";
+        robotState.value = "landing";
+
+        movementTimeout = setTimeout(() => {
+          robotState.value = "idle";
+          scheduleNextAction();
+        }, 250);
+      }, 350);
+    }, 350);
+  }, 300);
+}
+
+function executeShortJump() {
+  const startX = robotX.value;
+  const startY = robotY.value;
+  const [minX, maxX] = getSafeXRange(robotCurrentLevel.value);
+
+  const direction = Math.random() < 0.5 ? -1 : 1;
+  const dx = 60 + Math.random() * 90; // 60-150px
+  let targetX = startX + direction * dx;
+
+  // Clamp and correct direction if hitting boundary
+  if (targetX < minX) {
+    targetX = Math.min(maxX, startX + dx);
+  } else if (targetX > maxX) {
+    targetX = Math.max(minX, startX - dx);
+  }
+
+  // If space is too narrow to jump
+  if (Math.abs(targetX - startX) < 15) {
+    executeBounce();
+    return;
+  }
+
+  robotDirection.value = targetX > startX ? "right" : "left";
+  robotState.value = "charging";
+
+  movementTimeout = setTimeout(() => {
+    if (robotState.value !== "charging") return;
+
+    // Phase 1: Jump Up
+    robotState.value = "jumping-up";
+    robotTransition.value = "left 0.4s linear, top 0.4s ease-out";
+    robotX.value = (startX + targetX) / 2;
+    robotY.value = startY - 40;
+
+    movementTimeout = setTimeout(() => {
+      if (robotState.value !== "jumping-up") return;
+
+      // Phase 2: Fall Down
+      robotState.value = "jumping-down";
+      robotTransition.value = "left 0.4s linear, top 0.4s ease-in";
+      robotX.value = targetX;
+      robotY.value = startY;
+
+      movementTimeout = setTimeout(() => {
+        if (robotState.value !== "jumping-down") return;
+
+        // Land
+        robotTransition.value = "none";
+        robotState.value = "landing";
+
+        movementTimeout = setTimeout(() => {
+          robotState.value = "idle";
+          scheduleNextAction();
+        }, 250);
+      }, 400);
+    }, 400);
+  }, 300);
+}
+
+function executeBigJump() {
+  const startX = robotX.value;
+  const startY = robotY.value;
+  const targetLevel = robotCurrentLevel.value === "top" ? "bottom" : "top";
+  const targetY = targetLevel === "top" ? 36 : window.innerHeight - 4;
+  const [minX, maxX] = getSafeXRange(targetLevel);
+  const targetX = minX + Math.random() * (maxX - minX);
+
+  robotDirection.value = targetX > startX ? "right" : "left";
+
+  if (robotCurrentLevel.value === "top") {
+    // Drop down directly from top to bottom (no upward jump, so no off-screen)
+    robotState.value = "jumping-down";
+    robotTransition.value = "left 0.6s linear, top 0.6s ease-in";
+    robotX.value = targetX;
+    robotY.value = targetY;
+
+    movementTimeout = setTimeout(() => {
+      if (robotState.value !== "jumping-down") return;
+
+      robotCurrentLevel.value = "bottom";
+
+      // Land
+      robotTransition.value = "none";
+      robotState.value = "landing";
+
+      movementTimeout = setTimeout(() => {
+        robotState.value = "idle";
+        scheduleNextAction();
+      }, 250);
+    }, 600);
+  } else {
+    // Jump up from bottom to top (requires peakY)
+    robotState.value = "charging";
+
+    movementTimeout = setTimeout(() => {
+      if (robotState.value !== "charging") return;
+
+      const peakY = Math.max(10, Math.min(startY, targetY) - 100);
+
+      // Phase 1: Jump Up
+      robotState.value = "jumping-up";
+      robotTransition.value = "left 0.6s linear, top 0.6s ease-out";
+      robotX.value = (startX + targetX) / 2;
+      robotY.value = peakY;
+
+      movementTimeout = setTimeout(() => {
+        if (robotState.value !== "jumping-up") return;
+
+        // Phase 2: Fall Down
+        robotState.value = "jumping-down";
+        robotTransition.value = "left 0.6s linear, top 0.6s ease-in";
+        robotX.value = targetX;
+        robotY.value = targetY;
+
+        movementTimeout = setTimeout(() => {
+          if (robotState.value !== "jumping-down") return;
+
+          robotCurrentLevel.value = "top";
+
+          // Land
+          robotTransition.value = "none";
+          robotState.value = "landing";
+
+          movementTimeout = setTimeout(() => {
+            robotState.value = "idle";
+            scheduleNextAction();
+          }, 250);
+        }, 600);
+      }, 600);
+    }, 300);
+  }
+}
+
+// User activity listener
+function handleUserActivity() {
+  const now = Date.now();
+  if (now - lastActivityTime < 100) return;
+  lastActivityTime = now;
+  resetInactivityTimer();
+}
+
+function handleWindowResize() {
+  if (robotState.value === "sleeping") return;
+  const [minX, maxX] = getSafeXRange(robotCurrentLevel.value);
+  if (robotX.value > maxX) robotX.value = maxX;
+  if (robotX.value < minX) robotX.value = minX;
+  if (robotCurrentLevel.value === "bottom") {
+    robotY.value = window.innerHeight - 4;
+  }
+}
+
+const robotStyle = computed(() => ({
+  position: "fixed" as const,
+  left: `${robotX.value}px`,
+  top: `${robotY.value - 32}px`, // Offset by character height (32px)
+  width: "24px",
+  height: "32px",
+  zIndex: 9999,
+  pointerEvents: "none" as const,
+  transition: robotTransition.value,
+  opacity: 0.85
+}));
+
+onMounted(() => {
+  window.addEventListener("resize", handleWindowResize);
+
+  // Register inactivity detectors
+  window.addEventListener("mousemove", handleUserActivity, { passive: true });
+  window.addEventListener("mousedown", handleUserActivity, { passive: true });
+  window.addEventListener("keydown", handleUserActivity, { passive: true });
+  window.addEventListener("scroll", handleUserActivity, { passive: true });
+
+  resetInactivityTimer();
+});
+
+onUnmounted(() => {
+  window.removeEventListener("resize", handleWindowResize);
+  window.removeEventListener("mousemove", handleUserActivity);
+  window.removeEventListener("mousedown", handleUserActivity);
+  window.removeEventListener("keydown", handleUserActivity);
+  window.removeEventListener("scroll", handleUserActivity);
+
+  clearAllRobotTimers();
+  if (inactivityTimer) clearTimeout(inactivityTimer);
+});
 </script>
 
 <template>
@@ -229,9 +804,15 @@ onUnmounted(() => {
         <div class="figma-logo-group">
           <img :src="logoUrl" alt="logo" class="figma-logo" />
           <div class="figma-logo-margin" />
-          <span class="figma-title">MIMO测试智能体</span>
+          <div class="figma-title-group">
+            <span class="figma-title">MIMO测试智能体</span>
+            <span class="figma-subtitle">MIMO Intelligent Test Agent</span>
+          </div>
         </div>
       </div>
+
+
+
       <div class="figma-header-right">
         <div class="figma-app-menu-wrapper" @click.stop>
           <button
@@ -304,7 +885,7 @@ onUnmounted(() => {
 
     <div class="figma-body">
       <!-- Floating left sidebar toggle button -->
-      <div 
+      <div
         class="figma-sidebar-toggle-floating"
         :class="{ 'is-resizing': resizing === 'left' }"
         :style="{ left: leftPanelOpen ? `${leftPanelWidth + 48 - 32}px` : '54px' }"
@@ -318,11 +899,11 @@ onUnmounted(() => {
           aria-label="切换侧边栏"
           @click.stop="toggleLeftPanel"
         >
-          <img 
-            :src="panelCloseUrl" 
-            alt="toggle panel" 
-            class="figma-icon-16" 
-            :style="{ transform: leftPanelOpen ? 'scaleX(-1)' : 'none' }" 
+          <img
+            :src="panelCloseUrl"
+            alt="toggle panel"
+            class="figma-icon-16"
+            :style="{ transform: leftPanelOpen ? 'scaleX(-1)' : 'none' }"
           />
         </button>
       </div>
@@ -338,11 +919,11 @@ onUnmounted(() => {
           aria-label="切换右侧栏"
           @click.stop="toggleRightPanel"
         >
-          <img 
-            :src="panelCloseUrl" 
-            alt="toggle panel" 
-            class="figma-icon-16" 
-            :style="{ transform: showRightPanel ? 'none' : 'scaleX(-1)' }" 
+          <img
+            :src="panelCloseUrl"
+            alt="toggle panel"
+            class="figma-icon-16"
+            :style="{ transform: showRightPanel ? 'none' : 'scaleX(-1)' }"
           />
         </button>
       </div>
@@ -363,21 +944,25 @@ onUnmounted(() => {
           role="separator"
           aria-orientation="vertical"
         />
-        <div class="figma-panel-center">
-          <slot name="editor" />
-        </div>
-        <div class="figma-chat-panel-wrapper" :class="{ 'is-resizing': resizing === 'right' }" :style="rightPanelStyle">
-          <div
-            v-if="showRightPanel"
-            class="figma-chat-resize-handle"
-            @mousedown="onResizeStart('right', $event)"
-            aria-label="拖拽调整对话窗口宽度"
-            role="separator"
-            aria-orientation="vertical"
-          />
-          <div class="figma-panel-right" :style="{ width: `${rightPanelWidth}px` }">
-            <div class="figma-chat-body">
-              <slot name="chat" />
+        <div class="figma-main-card-container">
+          <div class="figma-main-card">
+            <div class="figma-panel-center">
+              <slot name="editor" />
+            </div>
+            <div class="figma-chat-panel-wrapper" :class="{ 'is-resizing': resizing === 'right' }" :style="rightPanelStyle">
+              <div
+                v-if="showRightPanel"
+                class="figma-chat-resize-handle"
+                @mousedown="onResizeStart('right', $event)"
+                aria-label="拖拽调整对话窗口宽度"
+                role="separator"
+                aria-orientation="vertical"
+              />
+              <div class="figma-panel-right" :style="{ width: `${rightPanelWidth}px` }">
+                <div class="figma-chat-body">
+                  <slot name="chat" />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -387,13 +972,53 @@ onUnmounted(() => {
         <slot name="bottom" />
       </div>
     </div>
+
+    <!-- MIMO Test Agent Easter Egg Character -->
+    <div
+      v-if="robotState !== 'sleeping'"
+      class="figma-robot-agent"
+      :style="robotStyle"
+    >
+      <div class="robot-dir-wrap" :class="[`facing-${robotDirection}`]">
+        <div class="robot-squash-wrap" :class="[`state-${robotState}`]">
+          <svg viewBox="0 0 24 32" class="robot-svg" width="24" height="32">
+            <!-- Antennas -->
+            <path class="robot-antenna-l" d="M8,4 L6,2" stroke="#1F2937" stroke-width="1.2" stroke-linecap="round" />
+            <circle class="robot-antenna-l-tip" cx="6" cy="1.5" r="0.8" fill="#1F2937" />
+
+            <path class="robot-antenna-r" d="M16,4 L18,2" stroke="#1F2937" stroke-width="1.2" stroke-linecap="round" />
+            <circle class="robot-antenna-r-tip" cx="18" cy="1.5" r="0.8" fill="#1F2937" />
+
+            <!-- Head -->
+            <rect class="robot-head" x="6" y="4" width="12" height="10" rx="2.5" fill="#1F2937" />
+            <!-- Facial sensor (glowing/breath) -->
+            <circle class="robot-eye" cx="12" cy="9" r="1.2" fill="#FFFFFF" />
+
+            <!-- Body -->
+            <rect class="robot-body" x="5" y="15.5" width="14" height="10" rx="4" fill="#1F2937" />
+
+            <!-- Left Arm -->
+            <rect class="robot-arm-l" x="2.5" y="16" width="2" height="6.5" rx="1" fill="#1F2937" />
+
+            <!-- Right Arm -->
+            <rect class="robot-arm-r" x="19.5" y="16" width="2" height="6.5" rx="1" fill="#1F2937" />
+
+            <!-- Left Leg -->
+            <rect class="robot-leg-l" x="9" y="26.5" width="2.5" height="5" rx="1.25" fill="#1F2937" />
+
+            <!-- Right Leg -->
+            <rect class="robot-leg-r" x="12.5" y="26.5" width="2.5" height="5" rx="1.25" fill="#1F2937" />
+          </svg>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .figma-app {
   display: grid;
-  grid-template-rows: 52px 1fr;
+  grid-template-rows: 36px 1fr;
   grid-template-columns: minmax(0, 1fr);
   width: 100%;
   height: 100vh;
@@ -406,10 +1031,10 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 52px;
+  height: 36px;
   background: #fff;
-  border-bottom: 1px solid #ddd;
-  padding: 0 5px;
+  border-bottom: 1px solid #eaeaea;
+  padding: 0 10px;
   flex-shrink: 0;
   z-index: 30;
   position: relative;
@@ -435,8 +1060,8 @@ onUnmounted(() => {
 }
 
 .figma-logo {
-  width: 32px;
-  height: 24.8px;
+  height: 20px;
+  width: auto;
   flex-shrink: 0;
 }
 
@@ -445,21 +1070,41 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.figma-title-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 0px;
+}
+
 .figma-title {
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
   font-weight: 600;
-  font-size: 14px;
-  line-height: 20px;
-  letter-spacing: 0.0143em;
+  font-size: 12px;
+  line-height: 14px;
+  letter-spacing: 0.02em;
   color: #333;
   white-space: nowrap;
+}
+
+.figma-subtitle {
+  font-family: "Geist", "Noto Sans SC", sans-serif;
+  font-weight: 500;
+  font-size: 7px;
+  line-height: 8px;
+  letter-spacing: -0.01em;
+  color: #777;
+  white-space: nowrap;
+  transform: scale(0.9);
+  transform-origin: center center;
 }
 
 /* ---- Header Right ---- */
 .figma-header-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 /* ---- App Dropdown ---- */
@@ -471,8 +1116,8 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  height: 28px;
-  padding: 0 8px;
+  height: 24px;
+  padding: 0 6px;
   border: 0.8px solid transparent;
   border-radius: 6px;
   background: transparent;
@@ -489,8 +1134,8 @@ onUnmounted(() => {
 
 .figma-app-menu-name {
   font-weight: 600;
-  font-size: 13px;
-  line-height: 20px;
+  font-size: 12px;
+  line-height: 16px;
   letter-spacing: 0.0154em;
   color: #18181b;
 }
@@ -578,8 +1223,8 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   border: 1px solid transparent;
   border-radius: 999px;
   background: transparent;
@@ -597,13 +1242,13 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   border-radius: 999px;
   background: #18181b;
   color: #fff;
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 600;
   line-height: 1;
 }
@@ -746,35 +1391,39 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 8px;
-  border: none;
+  border-radius: 6px;
+  border: none !important;
+  background: transparent !important;
   cursor: pointer;
-  transition: background-color 0.14s ease;
+  width: 24px;
+  height: 24px;
+  color: #666;
+  box-shadow: none !important;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.figma-icon-btn:hover {
+  background: rgba(0, 0, 0, 0.06) !important;
+  color: #111;
 }
 
 .figma-icon-btn-ghost {
-  width: 28px;
-  height: 28px;
-  background: #f9f9f9;
-  border: 0.8px solid #dfdfdf;
-}
-
-.figma-icon-btn-ghost:hover {
-  background: #eee;
+  width: 24px;
+  height: 24px;
 }
 
 .figma-icon-btn-ghost--collapsed {
-  background: #e8e8e8;
+  background: rgba(0, 0, 0, 0.04) !important;
 }
 
 .figma-icon-btn-secondary {
-  width: 28px;
-  height: 28px;
-  background: #f4f4f5;
+  width: 24px;
+  height: 24px;
+  background: #f4f4f5 !important;
 }
 
 .figma-icon-btn-secondary:hover {
-  background: #e8e8e8;
+  background: #e8e8e8 !important;
 }
 
 .figma-icon-16 {
@@ -795,7 +1444,7 @@ onUnmounted(() => {
   width: 48px;
   flex-shrink: 0;
   background: #fff;
-  border-right: 1px solid #ddd;
+  border-right: 1px solid #eaeaea;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -829,7 +1478,7 @@ onUnmounted(() => {
   cursor: col-resize;
   position: relative;
   z-index: 5;
-  background: transparent;
+  background: #f5f5f5;
   transition: background-color 0.14s ease;
 }
 
@@ -841,12 +1490,12 @@ onUnmounted(() => {
   left: 50%;
   width: 1px;
   margin-left: -0.5px;
-  background: #e4e4e7;
+  background: #eaeaea;
   transition: background-color 0.14s ease;
 }
 
 .figma-files-resize-handle:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: #e8e8e8;
 }
 
 .figma-files-resize-handle:hover::after {
@@ -854,7 +1503,27 @@ onUnmounted(() => {
 }
 
 .figma-files-resize-handle:active {
-  background: rgba(0, 0, 0, 0.06);
+  background: #e0e0e0;
+}
+
+.figma-main-card-container {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #f6f6f6;
+  padding: 0;
+}
+
+.figma-main-card {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+  border: 1px solid #eaeaea;
 }
 
 .figma-panel-center {
@@ -894,7 +1563,7 @@ onUnmounted(() => {
   cursor: col-resize;
   position: relative;
   z-index: 5;
-  background: transparent;
+  background: #f5f5f5;
   transition: background-color 0.14s ease;
 }
 
@@ -906,12 +1575,12 @@ onUnmounted(() => {
   left: 50%;
   width: 1px;
   margin-left: -0.5px;
-  background: #e4e4e7;
+  background: #eaeaea;
   transition: background-color 0.14s ease;
 }
 
 .figma-chat-resize-handle:hover {
-  background: rgba(0, 0, 0, 0.04);
+  background: #e8e8e8;
 }
 
 .figma-chat-resize-handle:hover::after {
@@ -919,7 +1588,7 @@ onUnmounted(() => {
 }
 
 .figma-chat-resize-handle:active {
-  background: rgba(0, 0, 0, 0.06);
+  background: #e0e0e0;
 }
 
 .figma-chat-body {
@@ -941,7 +1610,7 @@ onUnmounted(() => {
   height: 0;
   overflow: hidden;
   transition: height 0.2s ease;
-  border-top: 1px solid #ddd;
+  border-top: 1px solid #eaeaea;
   background: #f5f5f5;
   box-shadow: 0 -12px 28px rgba(17, 24, 39, 0.08);
 }
@@ -1022,12 +1691,227 @@ onUnmounted(() => {
   top: 4px;
 }
 .figma-icon-btn-floating-open {
-  width: 28px;
-  height: 28px;
-  background: transparent;
-  border: none;
+  width: 24px;
+  height: 24px;
 }
-.figma-icon-btn-floating-open:hover {
-  background: rgba(0, 0, 0, 0.05);
+
+/* ---- MIMO Test Agent Idle Egg Character ---- */
+.figma-robot-agent {
+  pointer-events: none;
+  user-select: none;
+  transform: translate3d(0, 0, 0);
+  opacity: 0.85;
+}
+
+.robot-dir-wrap {
+  width: 100%;
+  height: 100%;
+  transition: transform 0.2s ease;
+}
+
+.robot-dir-wrap.facing-left {
+  transform: scaleX(-1);
+}
+
+.robot-dir-wrap.facing-right {
+  transform: scaleX(1);
+}
+
+.robot-dir-wrap.facing-front {
+  transform: scaleX(1);
+}
+
+.robot-squash-wrap {
+  width: 100%;
+  height: 100%;
+  transform-origin: 50% 100%;
+  transition: transform 0.15s ease-out;
+}
+
+/* Squash/Stretch shapes depending on state */
+.robot-squash-wrap.state-charging,
+.robot-squash-wrap.state-exiting-charge,
+.robot-squash-wrap.state-landing {
+  transform: scale(1.15, 0.7);
+}
+
+.robot-squash-wrap.state-jumping-up {
+  transform: scale(0.9, 1.15);
+}
+
+.robot-squash-wrap.state-jumping-down {
+  transform: scale(0.9, 1.15);
+}
+
+.robot-squash-wrap.state-exiting-fly {
+  transform: scale(0.85, 1.25);
+}
+
+/* Idle/spawning/waving breathing animation */
+.robot-squash-wrap.state-idle,
+.robot-squash-wrap.state-spawning,
+.robot-squash-wrap.state-waving {
+  animation: robot-breath 3s infinite ease-in-out;
+}
+
+@keyframes robot-breath {
+  0%, 100% {
+    transform: scale(1, 1);
+  }
+  50% {
+    transform: scale(1.02, 1.05); /* 5% vertical stretch */
+  }
+}
+
+.robot-svg {
+  display: block;
+}
+
+/* Eye glowing/breathing animation */
+.robot-eye {
+  animation: robot-eye-glow 2s infinite ease-in-out;
+}
+
+@keyframes robot-eye-glow {
+  0%, 100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* Limbs styling & transitions */
+.robot-arm-r {
+  transform-origin: 20.5px 17px;
+  transition: transform 0.2s ease;
+}
+
+.robot-arm-l {
+  transform-origin: 3.5px 17px;
+  transition: transform 0.2s ease;
+}
+
+.robot-leg-l {
+  transform-origin: 10.25px 26.5px;
+  transition: transform 0.2s ease;
+}
+
+.robot-leg-r {
+  transform-origin: 13.75px 26.5px;
+  transition: transform 0.2s ease;
+}
+
+.robot-head,
+.robot-body {
+  transition: transform 0.2s ease;
+}
+
+/* Waving state */
+.state-waving .robot-arm-r {
+  animation: robot-wave 0.15s infinite ease-in-out;
+}
+
+@keyframes robot-wave {
+  0%, 100% {
+    transform: rotate(-140deg);
+  }
+  50% {
+    transform: rotate(-180deg);
+  }
+}
+
+/* Walking state walk-cycle */
+.state-walking .robot-leg-l {
+  animation: robot-walk-leg 0.4s infinite ease-in-out;
+}
+
+.state-walking .robot-leg-r {
+  animation: robot-walk-leg 0.4s infinite ease-in-out reverse;
+}
+
+.state-walking .robot-arm-l {
+  animation: robot-walk-arm 0.4s infinite ease-in-out;
+}
+
+.state-walking .robot-arm-r {
+  animation: robot-walk-arm 0.4s infinite ease-in-out reverse;
+}
+
+@keyframes robot-walk-leg {
+  0%, 100% {
+    transform: rotate(-25deg);
+  }
+  50% {
+    transform: rotate(25deg);
+  }
+}
+
+@keyframes robot-walk-arm {
+  0%, 100% {
+    transform: rotate(20deg);
+  }
+  50% {
+    transform: rotate(-20deg);
+  }
+}
+
+/* Sitting state */
+.state-sitting .robot-head,
+.state-sitting .robot-body {
+  transform: translateY(3px);
+}
+
+.state-sitting .robot-leg-l {
+  transform: translate(-1.5px, -2px) rotate(80deg);
+}
+
+.state-sitting .robot-leg-r {
+  transform: translate(1.5px, -2px) rotate(-80deg);
+}
+
+.state-sitting .robot-arm-l {
+  transform: rotate(20deg);
+}
+
+.state-sitting .robot-arm-r {
+  transform: rotate(-20deg);
+}
+
+/* Flipping (Backflip) state */
+.robot-squash-wrap.state-flipping {
+  animation: robot-backflip 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes robot-backflip {
+  0% {
+    transform: scale(0.9, 1.15) rotate(0deg);
+  }
+  50% {
+    transform: scale(1.1, 0.85) rotate(-180deg);
+  }
+  100% {
+    transform: scale(1, 1) rotate(-360deg);
+  }
+}
+
+/* Hanging (upside down) state */
+.robot-squash-wrap.state-hanging {
+  animation: robot-hang-swing 4s infinite ease-in-out;
+}
+
+@keyframes robot-hang-swing {
+  0%, 100% {
+    transform: rotate(180deg);
+  }
+  50% {
+    transform: rotate(175deg) translateX(-1px);
+  }
+}
+
+.state-hanging .robot-arm-l,
+.state-hanging .robot-arm-r {
+  /* Let arms hang loosely straight down relative to the viewport floor */
+  transform: rotate(160deg);
 }
 </style>

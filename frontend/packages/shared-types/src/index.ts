@@ -51,6 +51,14 @@ export type FileTreeEntry = {
   modifiedAt?: string;
 };
 
+export type FileSearchResult = {
+  path: string;
+  name: string;
+  directory: string;
+  size: number;
+  modifiedAt?: string;
+};
+
 export type FileContent = {
   path: string;
   content: string;
@@ -89,7 +97,9 @@ export type WorkspaceBackendServer = {
 export type WorkspaceFileSocketTicketRequest = {
   workspaceId?: string;
   linuxServerId?: string;
-  mode?: "workspace" | "directory-picker" | string;
+  mode?: "workspace" | "directory-picker" | "agent-config" | string;
+  scope?: AgentConfigScope;
+  worktreeId?: string | null;
 };
 
 export type WorkspaceFileSocketTicketResponse = {
@@ -99,6 +109,17 @@ export type WorkspaceFileSocketTicketResponse = {
 };
 
 export type AgentConfigScope = "PUBLIC" | "WORKSPACE" | string;
+
+export type AgentConfigFileRoute = {
+  scope: AgentConfigScope;
+  workspaceId?: string | null;
+  worktreeId?: string | null;
+  linuxServerId: string;
+  baseUrl: string;
+  webSocketPath: string;
+  sameServer: boolean;
+  message?: string | null;
+};
 
 export type AgentConfigStatus = {
   scope: AgentConfigScope;
@@ -111,10 +132,25 @@ export type AgentConfigStatus = {
   commitHash?: string | null;
 };
 
+export type PublicAgentRepositoryStatus = {
+  linuxServerId: string;
+  serverName: string;
+  gitRootPath?: string | null;
+  configDirPath?: string | null;
+  worktreeRootPath?: string | null;
+  status: string;
+  initialized: boolean;
+  initializationAllowed: boolean;
+  currentBranch?: string | null;
+  commitHash?: string | null;
+  message?: string | null;
+};
+
 export type AgentConfigWorktree = {
   worktreeId: string;
   scope: AgentConfigScope;
   workspaceId?: string | null;
+  linuxServerId?: string | null;
   worktreeName: string;
   branch: string;
   rootPath: string;
@@ -122,6 +158,11 @@ export type AgentConfigWorktree = {
   status: "ACTIVE" | "PUBLISHED" | "REMOVED" | string;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AgentConfigWorktreeOption = AgentConfigWorktree & {
+  createdByUserId: string;
+  createdByUsername?: string | null;
 };
 
 export type AgentConfigDiffFile = {
@@ -174,6 +215,7 @@ export type AgentConfigWorktreePayload = {
   baseName: string;
   branch: string;
   operationId?: string;
+  linuxServerId?: string;
 };
 
 export type AgentConfigCommitPayload = {
@@ -257,6 +299,12 @@ export type OpencodeRuntimeManagementOverviewParams = {
   size?: number;
 };
 
+export type OpencodeRuntimeManagementUserProcessParams = {
+  keyword: string;
+  page?: number;
+  size?: number;
+};
+
 export type OpencodeRuntimeManagementSummary = {
   linuxServers: number;
   readyLinuxServers: number;
@@ -330,6 +378,39 @@ export type OpencodeRuntimeContainer = {
   traceId: string;
 };
 
+export type OpencodeRuntimeManagedProcess = {
+  port: number;
+  pid?: number | null;
+  baseUrl?: string | null;
+  sessionPath?: string | null;
+  configPath?: string | null;
+  startedAt?: string | null;
+  startCommand?: string | null;
+  traceId?: string | null;
+  ownership?: "BOUND" | "UNBOUND" | string | null;
+  processId?: string | null;
+  processStatus?: string | null;
+  healthMessage?: string | null;
+  userId?: string | null;
+  username?: string | null;
+  bindingAgentId?: string | null;
+  bindingStatus?: string | null;
+  bindingUpdatedAt?: string | null;
+};
+
+export type OpencodeRuntimeManagedProcessCommandResult = {
+  command: string;
+  status: string;
+  port: number;
+  pid?: number | null;
+  baseUrl?: string | null;
+  sessionPath?: string | null;
+  configPath?: string | null;
+  healthy?: boolean | null;
+  message?: string | null;
+  traceId?: string | null;
+};
+
 export type OpencodeRuntimeManager = {
   managerId: string;
   containerId: string;
@@ -341,6 +422,7 @@ export type OpencodeRuntimeManager = {
   createdAt: string;
   updatedAt: string;
   traceId: string;
+  managedProcesses?: OpencodeRuntimeManagedProcess[];
 };
 
 export type OpencodeRuntimeManagerBackendConnection = {
@@ -363,6 +445,9 @@ export type OpencodeRuntimeProcess = {
   pid?: number | null;
   baseUrl: string;
   status: string;
+  managerStatus?: string | null;
+  healthStatus?: string | null;
+  restartable?: boolean;
   sessionPath: string;
   configPath: string;
   startedAt?: string | null;
@@ -546,6 +631,35 @@ export type GeneralParameterListParams = {
 
 export type GeneralParameterUpdatePayload = {
   value: string;
+};
+
+export type CommonParameterChangeLog = {
+  logId: string;
+  parameterId: string;
+  oldValue: string | null;
+  newValue: string;
+  changedByUserId: string | null;
+  changedByUsername: string | null;
+  traceId: string | null;
+  createdAt: string;
+};
+
+export type LoadedParameter = {
+  englishName: string;
+  platform: string;
+  rawValue: string;
+  resolvedValue: string;
+  hasReference: boolean;
+  resolutionError?: string | null;
+};
+
+export type CommonParameterLoadSnapshot = {
+  backendProcessId: string;
+  linuxServerId: string;
+  listenUrl: string;
+  instanceId: string;
+  loadedAt: string;
+  parameters: LoadedParameter[];
 };
 
 export type RunEventType =

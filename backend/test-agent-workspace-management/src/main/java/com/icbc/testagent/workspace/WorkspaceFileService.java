@@ -6,9 +6,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -21,12 +26,27 @@ public class WorkspaceFileService {
 
     private final long maxFileBytes;
     private final int maxDirectoryEntries;
+    // 搜索相关配置
+    private final int maxSearchResults;
+    private final int maxSearchDepth;
+    private final long searchTimeoutMillis;
+    // 黑名单目录：搜索时跳过这些目录
+    private static final Set<String> BLACKLISTED_DIRECTORIES = Set.of(
+            ".git", "node_modules", ".idea", "target", "build", ".gradle", "__pycache__", ".venv", "venv"
+    );
 
     /**
      * 使用默认文件大小和目录项上限构造服务，适用于本地测试和未显式配置的运行环境。
      */
     public WorkspaceFileService() {
-        this(1024 * 1024, 1000);
+        this(1024 * 1024, 1000, 200, 20, 5000L);
+    }
+
+    /**
+     * 兼容测试路径：仅指定文件大小和目录项上限，搜索相关参数取默认值。
+     */
+    public WorkspaceFileService(long maxFileBytes, int maxDirectoryEntries) {
+        this(maxFileBytes, maxDirectoryEntries, 200, 20, 5000L);
     }
 
     /**
@@ -35,7 +55,10 @@ public class WorkspaceFileService {
     @Autowired
     public WorkspaceFileService(
             @Value("${test-agent.files.max-file-bytes:1048576}") long maxFileBytes,
-            @Value("${test-agent.files.max-directory-entries:1000}") int maxDirectoryEntries) {
+            @Value("${test-agent.files.max-directory-entries:1000}") int maxDirectoryEntries,
+            @Value("${test-agent.files.max-search-results:200}") int maxSearchResults,
+            @Value("${test-agent.files.max-search-depth:20}") int maxSearchDepth,
+            @Value("${test-agent.files.search-timeout-millis:5000}") long searchTimeoutMillis) {
         if (maxFileBytes < 1) {
             throw new IllegalArgumentException("maxFileBytes must be positive");
         }
@@ -44,6 +67,9 @@ public class WorkspaceFileService {
         }
         this.maxFileBytes = maxFileBytes;
         this.maxDirectoryEntries = maxDirectoryEntries;
+        this.maxSearchResults = maxSearchResults;
+        this.maxSearchDepth = maxSearchDepth;
+        this.searchTimeoutMillis = searchTimeoutMillis;
     }
 
     /**
@@ -210,5 +236,98 @@ public class WorkspaceFileService {
      */
     private String safePath(String relativePath) {
         return relativePath == null ? "" : relativePath;
+    }
+
+    /**
+     * 在 rootPath 下递归搜索文件名包含 query（不区分大小写）的文件。
+     * 忽略黑名单目录，结果按文件名排序，最多返回 maxSearchResults 条。
+     * 搜索有超时保护，超时后返回已收集的结果。
+     */
+    public List<FileSearchResultResponse> searchFiles(String rootPath, String query) {
+        if (query == null || query.isBlank()) {
+            return List.of();
+        }
+        Path root = rootRealPath(rootPath);
+        String normalizedQuery = query.trim().toLowerCase();
+        List<FileSearchResultResponse> results = new ArrayList<>();
+
+        // 使用 CompletableFuture 实现超时保护
+        CompletableFuture<Void> searchFuture = CompletableFuture.runAsync(() -> {
+            searchDirectory(root, root, normalizedQuery, results, 0);
+        });
+
+        try {
+            searchFuture.get(searchTimeoutMillis, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException exception) {
+            // 超时后取消搜索，返回已收集的结果
+            searchFuture.cancel(true);
+        } catch (Exception exception) {
+            // 其他异常（中断、执行异常）也返回已收集的结果
+        }
+
+        // 按文件名排序
+        results.sort(Comparator.comparing(FileSearchResultResponse::name));
+        // 限制返回数量
+        if (results.size() > maxSearchResults) {
+            return results.subList(0, maxSearchResults);
+        }
+        return results;
+    }
+
+    /**
+     * 递归搜索目录，收集匹配的文件。
+     */
+    private void searchDirectory(
+            Path root, Path directory, String query, List<FileSearchResultResponse> results, int depth) {
+        // 超过深度限制或结果已满，停止搜索
+        if (depth > maxSearchDepth || results.size() >= maxSearchResults) {
+            return;
+        }
+        try (var stream = Files.list(directory)) {
+            stream.forEach(path -> {
+                // 结果已满，停止处理
+                if (results.size() >= maxSearchResults) {
+                    return;
+                }
+                String name = path.getFileName().toString();
+                // 跳过黑名单目录
+                if (Files.isDirectory(path) && BLACKLISTED_DIRECTORIES.contains(name)) {
+                    return;
+                }
+                if (Files.isDirectory(path)) {
+                    // 递归搜索子目录
+                    searchDirectory(root, path, query, results, depth + 1);
+                } else if (Files.isRegularFile(path)) {
+                    // 文件名匹配（不区分大小写）
+                    if (name.toLowerCase().contains(query)) {
+                        results.add(searchResultEntry(root, path));
+                    }
+                }
+            });
+        } catch (Exception exception) {
+            // 目录读取失败，跳过该目录继续搜索其他目录
+        }
+    }
+
+    /**
+     * 将单个匹配文件转换为搜索结果条目。
+     */
+    private FileSearchResultResponse searchResultEntry(Path root, Path path) {
+        try {
+            String relativePath = root.relativize(path).toString().replace('\\', '/');
+            String name = path.getFileName().toString();
+            // 父目录相对路径
+            String directory = "";
+            int lastSlash = relativePath.lastIndexOf('/');
+            if (lastSlash > 0) {
+                directory = relativePath.substring(0, lastSlash);
+            }
+            return new FileSearchResultResponse(
+                    relativePath, name, directory,
+                    Files.size(path),
+                    Files.getLastModifiedTime(path).toInstant());
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "读取搜索结果文件信息失败", Map.of("path", path.getFileName().toString()), exception);
+        }
     }
 }

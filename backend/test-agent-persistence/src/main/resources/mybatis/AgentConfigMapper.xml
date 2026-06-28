@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.icbc.testagent.persistence.mybatis.AgentConfigMapper">
+    <resultMap id="AgentConfigOperationRowMap" type="com.icbc.testagent.persistence.mybatis.AgentConfigOperationRow">
+        <constructor>
+            <arg column="operation_id" javaType="java.lang.String"/>
+            <arg column="scope" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="action" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="current_step" javaType="java.lang.String"/>
+            <arg column="error_code" javaType="java.lang.String"/>
+            <arg column="error_message" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="branch" javaType="java.lang.String"/>
+            <arg column="commit_hash" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="AgentConfigWorktreeRowMap" type="com.icbc.testagent.persistence.mybatis.AgentConfigWorktreeRow">
+        <constructor>
+            <arg column="worktree_id" javaType="java.lang.String"/>
+            <arg column="scope" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="linux_server_id" javaType="java.lang.String"/>
+            <arg column="worktree_name" javaType="java.lang.String"/>
+            <arg column="branch" javaType="java.lang.String"/>
+            <arg column="root_path" javaType="java.lang.String"/>
+            <arg column="created_by_user_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="AgentConfigOperationColumns">
+        operation_id, scope, workspace_id, action, status, current_step,
+        error_code, error_message, trace_id, branch, commit_hash, created_at, updated_at
+    </sql>
+
+    <sql id="AgentConfigWorktreeColumns">
+        worktree_id, scope, workspace_id, linux_server_id, worktree_name, branch, root_path,
+        created_by_user_id, status, created_at, updated_at
+    </sql>
+
+    <insert id="insertOperation">
+        insert into agent_config_operations(
+            operation_id, scope, workspace_id, action, status, current_step,
+            error_code, error_message, trace_id, branch, commit_hash, created_at, updated_at
+        ) values (
+            #{operationId}, #{scope}, #{workspaceId}, #{action}, #{status}, #{currentStep},
+            #{errorCode}, #{errorMessage}, #{traceId}, #{branch}, #{commitHash}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="updateOperation">
+        update agent_config_operations
+        set scope = #{scope},
+            workspace_id = #{workspaceId},
+            action = #{action},
+            status = #{status},
+            current_step = #{currentStep},
+            error_code = #{errorCode},
+            error_message = #{errorMessage},
+            trace_id = #{traceId},
+            branch = #{branch},
+            commit_hash = #{commitHash},
+            updated_at = #{updatedAt}
+        where operation_id = #{operationId}
+    </update>
+
+    <select id="findOperation" resultMap="AgentConfigOperationRowMap">
+        select
+        <include refid="AgentConfigOperationColumns"/>
+        from agent_config_operations
+        where operation_id = #{operationId}
+    </select>
+
+    <insert id="insertWorktree">
+        insert into agent_config_worktrees(
+            worktree_id, scope, workspace_id, linux_server_id, worktree_name, branch, root_path,
+            created_by_user_id, status, created_at, updated_at
+        ) values (
+            #{worktreeId}, #{scope}, #{workspaceId}, #{linuxServerId}, #{worktreeName}, #{branch}, #{rootPath},
+            #{createdByUserId}, #{status}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="updateWorktree">
+        update agent_config_worktrees
+        set scope = #{scope},
+            workspace_id = #{workspaceId},
+            linux_server_id = #{linuxServerId},
+            worktree_name = #{worktreeName},
+            branch = #{branch},
+            root_path = #{rootPath},
+            created_by_user_id = #{createdByUserId},
+            status = #{status},
+            updated_at = #{updatedAt}
+        where worktree_id = #{worktreeId}
+    </update>
+
+    <select id="findWorktree" resultMap="AgentConfigWorktreeRowMap">
+        select
+        <include refid="AgentConfigWorktreeColumns"/>
+        from agent_config_worktrees
+        where worktree_id = #{worktreeId}
+    </select>
+
+    <select id="findWorktrees" resultMap="AgentConfigWorktreeRowMap">
+        select
+        <include refid="AgentConfigWorktreeColumns"/>
+        from agent_config_worktrees
+        where scope = #{scope}
+        <if test="workspaceId != null">
+            and workspace_id = #{workspaceId}
+        </if>
+        <if test="createdByUserId != null">
+            and created_by_user_id = #{createdByUserId}
+        </if>
+        <if test="linuxServerId != null">
+            and linux_server_id = #{linuxServerId}
+        </if>
+        <if test="status != null">
+            and status = #{status}
+        </if>
+        order by updated_at desc, worktree_id
+    </select>
+</mapper>

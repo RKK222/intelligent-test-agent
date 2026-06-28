@@ -41,6 +41,11 @@ import com.icbc.testagent.opencode.runtime.process.RuntimeManagementBackendProce
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementContainerMetricHistory;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementContainerMetricSample;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementContainer;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementManager;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementManagedProcess;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementManagedProcessOwnership;
+import com.icbc.testagent.opencode.runtime.process.OpencodeProcessControlResult;
+import com.icbc.testagent.opencode.runtime.process.RuntimeManagementCommandService;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementQueryService;
 import com.icbc.testagent.opencode.runtime.process.RuntimeManagementSummary;
 import java.time.Duration;
@@ -80,11 +85,52 @@ class RuntimeManagementControllerTest {
                 .jsonPath("$.data.backendProcesses[0].backendProcessId").isEqualTo("bjp_1234567890abcdef")
                 .jsonPath("$.data.containers[0].currentProcesses").isEqualTo(1)
                 .jsonPath("$.data.managers[0].connectionStatus").isEqualTo("CONNECTED")
+                .jsonPath("$.data.managers[0].managedProcesses[0].port").isEqualTo(4096)
+                .jsonPath("$.data.managers[0].managedProcesses[0].ownership").isEqualTo("BOUND")
+                .jsonPath("$.data.managers[0].managedProcesses[0].processId").isEqualTo("ocp_1234567890abcdef")
+                .jsonPath("$.data.managers[0].managedProcesses[0].username").isEqualTo("process-user")
+                .jsonPath("$.data.managers[0].managedProcesses[0].bindingStatus").isEqualTo("ACTIVE")
+                .jsonPath("$.data.managers[0].managedProcesses[0].startCommand").isEqualTo("XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs")
                 .jsonPath("$.data.managerBackendConnections[0].status").isEqualTo("CONNECTED")
                 .jsonPath("$.data.opencodeProcesses.items[0].processId").isEqualTo("ocp_1234567890abcdef")
                 .jsonPath("$.data.opencodeProcesses.items[0].username").isEqualTo("process-user")
                 .jsonPath("$.data.opencodeProcesses.items[0].bindingAgentId").isEqualTo("opencode")
                 .jsonPath("$.data.opencodeProcesses.items[0].bindingStatus").isEqualTo("ACTIVE");
+    }
+
+    @Test
+    void superAdminCanQueryRuntimeManagementUserProcessesByKeyword() {
+        RuntimeManagementQueryService service = org.mockito.Mockito.mock(RuntimeManagementQueryService.class);
+        OpencodeServerProcess process = process(OpencodeServerProcessStatus.STOPPED);
+        when(service.userProcesses(
+                        eq("process-user"),
+                        eq(new PageRequest(1, 20)),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new PageResponse<>(
+                        List.of(new RuntimeManagementOpencodeProcess(
+                                process,
+                                Optional.of(binding(process)),
+                                Optional.of("process-user"),
+                                "NOT_RUNNING",
+                                "NOT_RUNNING",
+                                true)),
+                        1,
+                        20,
+                        1));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/opencode-runtime/management/user-processes?keyword=process-user&page=1&size=20")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.items[0].processId").isEqualTo("ocp_1234567890abcdef")
+                .jsonPath("$.data.items[0].username").isEqualTo("process-user")
+                .jsonPath("$.data.items[0].status").isEqualTo("STOPPED")
+                .jsonPath("$.data.items[0].managerStatus").isEqualTo("NOT_RUNNING")
+                .jsonPath("$.data.items[0].healthStatus").isEqualTo("NOT_RUNNING")
+                .jsonPath("$.data.items[0].restartable").isEqualTo(true);
     }
 
     @Test
@@ -99,7 +145,9 @@ class RuntimeManagementControllerTest {
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("FORBIDDEN");
 
-        WebTestClient.bindToController(new RuntimeManagementController(service))
+        WebTestClient.bindToController(new RuntimeManagementController(
+                        service,
+                        org.mockito.Mockito.mock(RuntimeManagementCommandService.class)))
                 .webFilter(new TraceIdWebFilter())
                 .controllerAdvice(new GlobalExceptionHandler())
                 .build()
@@ -110,6 +158,63 @@ class RuntimeManagementControllerTest {
                 .expectStatus().isUnauthorized()
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("UNAUTHENTICATED");
+    }
+
+    @Test
+    void superAdminCanRestartAndStopManagedProcess() {
+        RuntimeManagementQueryService queryService = org.mockito.Mockito.mock(RuntimeManagementQueryService.class);
+        RuntimeManagementCommandService commandService = org.mockito.Mockito.mock(RuntimeManagementCommandService.class);
+        when(commandService.restartManagedProcess(
+                        eq(new OpencodeContainerId("ctr_01")),
+                        eq(4096),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new OpencodeProcessControlResult(
+                        "restart",
+                        "STARTED",
+                        4096,
+                        12346L,
+                        "http://10.8.0.12:4096",
+                        "/data/opencode/session/4096",
+                        "/data/opencode/.config/opencode/",
+                        true,
+                        "opencode server started",
+                        "trace_1234567890abcdef"));
+        when(commandService.stopManagedProcess(
+                        eq(new OpencodeContainerId("ctr_01")),
+                        eq(4097),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(new OpencodeProcessControlResult(
+                        "stop",
+                        "STOPPED",
+                        4097,
+                        22345L,
+                        "http://10.8.0.12:4097",
+                        "/data/opencode/session/4097",
+                        "/data/opencode/.config/opencode/",
+                        true,
+                        "opencode server stopped",
+                        "trace_1234567890abcdef"));
+        WebTestClient client = client(queryService, commandService, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/opencode-runtime/management/containers/ctr_01/processes/4096/restart")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.command").isEqualTo("restart")
+                .jsonPath("$.data.status").isEqualTo("STARTED")
+                .jsonPath("$.data.pid").isEqualTo(12346);
+
+        client.post()
+                .uri("/api/internal/platform/opencode-runtime/management/containers/ctr_01/processes/4097/stop")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.command").isEqualTo("stop")
+                .jsonPath("$.data.status").isEqualTo("STOPPED")
+                .jsonPath("$.data.message").isEqualTo("opencode server stopped");
     }
 
     @Test
@@ -320,6 +425,13 @@ class RuntimeManagementControllerTest {
     }
 
     private static WebTestClient client(RuntimeManagementQueryService service, List<String> roles) {
+        return client(service, org.mockito.Mockito.mock(RuntimeManagementCommandService.class), roles);
+    }
+
+    private static WebTestClient client(
+            RuntimeManagementQueryService service,
+            RuntimeManagementCommandService commandService,
+            List<String> roles) {
         AuthPrincipal principal = new AuthPrincipal(
                 "token",
                 new UserId("usr_admin_1234567890"),
@@ -328,7 +440,7 @@ class RuntimeManagementControllerTest {
                 roles,
                 NOW,
                 NOW.plusSeconds(3600));
-        return WebTestClient.bindToController(new RuntimeManagementController(service))
+        return WebTestClient.bindToController(new RuntimeManagementController(service, commandService))
                 .webFilter(new TraceIdWebFilter())
                 .webFilter((exchange, chain) -> {
                     exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, principal);
@@ -423,8 +535,60 @@ class RuntimeManagementControllerTest {
                 List.of(linuxServer),
                 List.of(new RuntimeManagementBackendProcess(backendProcess, null)),
                 List.of(new RuntimeManagementContainer(container, null)),
-                List.of(manager),
+                List.of(new RuntimeManagementManager(
+                        manager,
+                        List.of(new RuntimeManagementManagedProcess(
+                                4096,
+                                12345L,
+                                "http://10.8.0.12:4096",
+                                "/data/opencode/session/4096",
+                                "/data/opencode/.config/opencode/",
+                                NOW,
+                                "XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs",
+                                "trace_process",
+                                RuntimeManagementManagedProcessOwnership.BOUND,
+                                process.processId(),
+                                process.status(),
+                                process.healthMessage(),
+                                process.userId(),
+                                Optional.of("process-user"),
+                                binding.agentId(),
+                                binding.status(),
+                                binding.updatedAt())))),
                 List.of(connection),
                 new PageResponse<>(List.of(new RuntimeManagementOpencodeProcess(process, Optional.of(binding), Optional.of("process-user"))), 1, 20, 1));
+    }
+
+    private static OpencodeServerProcess process(OpencodeServerProcessStatus status) {
+        return new OpencodeServerProcess(
+                new OpencodeProcessId("ocp_1234567890abcdef"),
+                new UserId("usr_1234567890abcdef"),
+                new LinuxServerId("10.8.0.12"),
+                new OpencodeContainerId("ctr_01"),
+                4096,
+                12345L,
+                "http://10.8.0.12:4096",
+                status,
+                "/data/opencode/session/4096",
+                "/data/opencode/.config/opencode/",
+                NOW,
+                NOW,
+                "process pid is not alive",
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
+    }
+
+    private static UserOpencodeProcessBinding binding(OpencodeServerProcess process) {
+        return new UserOpencodeProcessBinding(
+                process.userId(),
+                "opencode",
+                process.processId(),
+                process.linuxServerId(),
+                process.port(),
+                UserOpencodeProcessBindingStatus.ACTIVE,
+                NOW,
+                NOW,
+                "trace_1234567890abcdef");
     }
 }

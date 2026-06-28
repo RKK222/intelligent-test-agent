@@ -6,7 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.configuration.CommonParameter;
-import com.icbc.testagent.domain.configuration.CommonParameterRepository;
+import com.icbc.testagent.domain.configuration.CommonParameterValues;
 import com.icbc.testagent.domain.configuration.ParameterPlatform;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
@@ -33,6 +33,7 @@ import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatu
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -41,12 +42,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.junit.jupiter.api.io.TempDir;
 
 class UserOpencodeProcessAssignmentServiceTest {
 
     private static final Instant NOW = Instant.parse("2026-06-24T00:00:00Z");
     private static final UserId USER_ID = new UserId("usr_1234567890abcdef");
     private static final String TRACE_ID = "trace_1234567890abcdef";
+
+    @TempDir
+    Path tempDir;
 
     @org.junit.jupiter.api.Test
     void statusRequestsInitializationWhenUserHasNoBindingAndContainerIsAvailable() {
@@ -274,6 +279,29 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
+    void initializeDelegatesPublicConfigCheckToSelectedManagerWhenLocalDirIsMissing() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_busy", container("ctr_busy", "10.8.0.12", 4096, 4100, 4, 3));
+        repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.13", 4200, 4205, 4, 0));
+        RecordingGateway gateway = new RecordingGateway();
+        Path missingConfigDir = tempDir.resolve("missing-opencode-config");
+        UserOpencodeProcessAssignmentService service = serviceWithPublicConfigDir(
+                repository,
+                gateway,
+                missingConfigDir);
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
+        assertThat(response.baseUrl()).isEqualTo("http://10.8.0.13:4200");
+        assertThat(gateway.startCommands).singleElement().satisfies(command -> {
+            assertThat(command.containerId()).isEqualTo(new OpencodeContainerId("ctr_idle"));
+            assertThat(command.linuxServerId()).isEqualTo(new LinuxServerId("10.8.0.13"));
+            assertThat(command.configPath()).isEqualTo(missingConfigDir.toString().replace('\\', '/') + "/");
+        });
+    }
+
+    @org.junit.jupiter.api.Test
     void nonOpencodeAgentIsRejected() {
         UserOpencodeProcessAssignmentService service = service(new FakeRepository(), new RecordingGateway());
 
@@ -350,6 +378,59 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
+    void fileRoutingAffinityReturnsBoundServerWithoutCallingGatewayHealth() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess process = process("ocp_existing", USER_ID, "10.8.0.12", "ctr_idle", 4096, OpencodeServerProcessStatus.RUNNING);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, process.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthFailure = new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "opencode 管理进程命令超时");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessFileRoutingAffinity affinity = service.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(affinity.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
+        assertThat(affinity.processId()).isEqualTo("ocp_existing");
+        assertThat(affinity.linuxServerId()).isEqualTo("10.8.0.12");
+        assertThat(affinity.containerId()).isEqualTo("ctr_idle");
+        assertThat(affinity.port()).isEqualTo(4096);
+        assertThat(affinity.serviceAddress()).isEqualTo("10.8.0.12:4096");
+        assertThat(gateway.healthCommands).isEmpty();
+    }
+
+    @org.junit.jupiter.api.Test
+    void fileRoutingAffinityReportsUnavailableWhenUserHasNoBinding() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4100, 4, 0));
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessFileRoutingAffinity affinity = service.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(affinity.status()).isEqualTo(UserOpencodeProcessAvailability.NEEDS_INITIALIZATION);
+        assertThat(affinity.initializable()).isTrue();
+        assertThat(affinity.linuxServerId()).isNull();
+        assertThat(gateway.healthCommands).isEmpty();
+        assertThat(repository.findContainerCalls).isEqualTo(1);
+    }
+
+    @org.junit.jupiter.api.Test
+    void localDirectFileRoutingAffinityReturnsSyntheticServerWithoutGatewayHealth() {
+        FakeRepository repository = new NoopRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = serviceLocalDirect(repository, gateway, "http://127.0.0.1:4096");
+
+        UserOpencodeProcessFileRoutingAffinity affinity = service.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(affinity.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
+        assertThat(affinity.linuxServerId()).isEqualTo("127.0.0.1");
+        assertThat(affinity.port()).isEqualTo(4096);
+        assertThat(affinity.serviceAddress()).isEqualTo("127.0.0.1:4096");
+        assertThat(gateway.healthCommands).isEmpty();
+        assertThat(repository.findUserBindingCalls).isEqualTo(0);
+    }
+
+    @org.junit.jupiter.api.Test
     void localDirectBaseUrlWithoutPortFallsBackToDefaults() {
         FakeRepository repository = new NoopRepository();
         RecordingGateway gateway = new RecordingGateway();
@@ -364,9 +445,16 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     private static UserOpencodeProcessAssignmentService service(FakeRepository repository, RecordingGateway gateway) {
+        return serviceWithPublicConfigDir(repository, gateway, Path.of(CONFIG_DIR));
+    }
+
+    private static UserOpencodeProcessAssignmentService serviceWithPublicConfigDir(
+            FakeRepository repository,
+            RecordingGateway gateway,
+            Path publicConfigDir) {
         return new UserOpencodeProcessAssignmentService(
                 repository,
-                commonParameters(),
+                commonParameters(publicConfigDir),
                 repository,
                 gateway,
                 new BackendJavaProcessLifecycleService(
@@ -384,19 +472,40 @@ class UserOpencodeProcessAssignmentServiceTest {
     private static final String SESSION_DIR = "/tmp/testagent/.session/";
     private static final String CONFIG_DIR = "/tmp/testagent/.config/opencode/";
 
-    private static CommonParameterRepository commonParameters() {
+    private static CommonParameterValues commonParameters() {
+        return commonParameters(Path.of(CONFIG_DIR));
+    }
+
+    private static CommonParameterValues commonParameters(Path publicConfigDir) {
         Map<String, String> parameters = Map.of(
                 "OPENCODE_SESSION_DIR", SESSION_DIR,
-                "OPENCODE_PUBLIC_CONFIG_DIR", CONFIG_DIR);
-        return (englishName, platform) -> Optional.ofNullable(parameters.get(englishName))
-                .map(value -> new CommonParameter(
-                        "param_" + englishName.toLowerCase(),
-                        englishName,
-                        englishName,
-                        value,
-                        platform,
-                        NOW,
-                        NOW));
+                "OPENCODE_PUBLIC_CONFIG_DIR", publicConfigDir.toString());
+        return new CommonParameterValues() {
+            @Override
+            public Optional<String> resolvedValue(String englishName) {
+                return Optional.ofNullable(parameters.get(englishName));
+            }
+
+            @Override
+            public Optional<String> resolvedValue(String englishName, com.icbc.testagent.domain.configuration.ParameterPlatform platform) {
+                return Optional.ofNullable(parameters.get(englishName));
+            }
+
+            @Override
+            public Optional<CommonParameter> raw(String englishName, com.icbc.testagent.domain.configuration.ParameterPlatform platform) {
+                return Optional.empty();
+            }
+
+            @Override
+            public List<CommonParameter> findAll() {
+                return List.of();
+            }
+
+            @Override
+            public List<com.icbc.testagent.domain.configuration.ResolvedParameter> resolvedAll() {
+                return List.of();
+            }
+        };
     }
 
     private static UserOpencodeProcessAssignmentService serviceLocalDirect(
@@ -497,11 +606,17 @@ class UserOpencodeProcessAssignmentServiceTest {
 
     private static final class RecordingGateway implements OpencodeProcessManagerGateway {
         private final List<OpencodeProcessStartCommand> startCommands = new ArrayList<>();
+        private final List<OpencodeProcessHealthCommand> healthCommands = new ArrayList<>();
         private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy("ok");
+        private PlatformException healthFailure;
         private PlatformException startFailure;
 
         @Override
         public OpencodeProcessHealthResult checkHealth(OpencodeProcessHealthCommand command) {
+            healthCommands.add(command);
+            if (healthFailure != null) {
+                throw healthFailure;
+            }
             return health;
         }
 
@@ -512,6 +627,16 @@ class UserOpencodeProcessAssignmentServiceTest {
             }
             startCommands.add(command);
             return new OpencodeProcessStartResult(12345L, "started");
+        }
+
+        @Override
+        public OpencodeProcessControlResult restartProcess(OpencodeProcessControlCommand command) {
+            throw new UnsupportedOperationException("restartProcess is not used");
+        }
+
+        @Override
+        public OpencodeProcessControlResult stopProcess(OpencodeProcessControlCommand command) {
+            throw new UnsupportedOperationException("stopProcess is not used");
         }
     }
 

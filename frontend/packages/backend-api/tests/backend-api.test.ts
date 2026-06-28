@@ -126,7 +126,34 @@ describe("backend-api", () => {
             linuxServers: [{ linuxServerId: "10.8.0.12", name: "10.8.0.12", status: "READY", capacitySummary: {}, lastHeartbeatAt: "2026-06-24T00:00:00Z", traceId: "trace_fixed" }],
             backendProcesses: [],
             containers: [],
-            managers: [],
+            managers: [{
+              managerId: "mgr_1234567890abcdef",
+              containerId: "ctr_01",
+              linuxServerId: "10.8.0.12",
+              protocolVersion: "opencode-manager.v1",
+              connectionStatus: "CONNECTED",
+              capabilities: {},
+              traceId: "trace_fixed",
+              managedProcesses: [{
+                port: 4096,
+                pid: 12345,
+                baseUrl: "http://10.8.0.12:4096",
+                sessionPath: "/data/opencode/session/4096",
+                configPath: "/data/opencode/.config/opencode/",
+                startedAt: "2026-06-24T00:00:00Z",
+                startCommand: "XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs",
+                traceId: "trace_process",
+                ownership: "BOUND",
+                processId: "ocp_1234567890abcdef",
+                processStatus: "RUNNING",
+                healthMessage: "ok",
+                userId: "usr_1234567890abcdef",
+                username: "process-user",
+                bindingAgentId: "opencode",
+                bindingStatus: "ACTIVE",
+                bindingUpdatedAt: "2026-06-24T00:00:00Z"
+              }]
+            }],
             managerBackendConnections: [],
             opencodeProcesses: {
               items: [
@@ -177,6 +204,14 @@ describe("backend-api", () => {
       })
     ).resolves.toMatchObject({
       summary: { runningOpencodeProcesses: 1 },
+      managers: [{
+        managedProcesses: [{
+          ownership: "BOUND",
+          username: "process-user",
+          bindingStatus: "ACTIVE",
+          startCommand: expect.stringContaining("opencode serve --hostname 0.0.0.0 --port 4096")
+        }]
+      }],
       opencodeProcesses: { total: 1 }
     });
 
@@ -185,6 +220,59 @@ describe("backend-api", () => {
     );
     const headers = fetcher.mock.calls[0]?.[1]?.headers as Headers;
     expect(headers.get("Authorization")).toBe("Bearer token_123");
+  });
+
+  it("maps opencode runtime management user process lookup through platform URL", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            items: [{
+              processId: "ocp_1234567890abcdef",
+              userId: "usr_1234567890abcdef",
+              username: "process-user",
+              linuxServerId: "10.8.0.12",
+              containerId: "ctr_01",
+              port: 4096,
+              pid: 12345,
+              baseUrl: "http://10.8.0.12:4096",
+              status: "STOPPED",
+              managerStatus: "NOT_RUNNING",
+              healthStatus: "NOT_RUNNING",
+              restartable: true,
+              sessionPath: "/data/opencode/session/4096",
+              configPath: "/data/opencode/.config/opencode/",
+              lastHealthCheckAt: "2026-06-24T00:00:00Z",
+              healthMessage: "process pid is not alive",
+              traceId: "trace_fixed",
+              bindingAgentId: "opencode",
+              bindingStatus: "ACTIVE"
+            }],
+            page: 1,
+            size: 20,
+            total: 1
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.getOpencodeRuntimeManagementUserProcesses({ keyword: "process-user", page: 1, size: 20 }))
+      .resolves.toMatchObject({
+        total: 1,
+        items: [{ status: "STOPPED", managerStatus: "NOT_RUNNING", healthStatus: "NOT_RUNNING", restartable: true }]
+      });
+
+    expect(fetcher.mock.calls[0]?.[0]).toBe(
+      "http://api/api/internal/platform/opencode-runtime/management/user-processes?keyword=process-user&page=1&size=20"
+    );
   });
 
   it("maps opencode runtime metric history APIs through platform URL", async () => {
@@ -248,6 +336,36 @@ describe("backend-api", () => {
     expect(fetcher.mock.calls[1]?.[0]).toBe(
       "http://api/api/internal/platform/opencode-runtime/management/backend-processes/bjp_1234567890abcdef/metrics"
     );
+  });
+
+  it("maps opencode runtime managed process actions through platform URL", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { command: "restart", status: "STARTED", port: 4096, pid: 12346, message: "opencode server started" }
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        traceId: "trace_fixed",
+        data: { command: "stop", status: "STOPPED", port: 4097, pid: 22345, message: "opencode server stopped" }
+      }), { status: 200 }));
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token_123",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await expect(client.restartOpencodeRuntimeManagedProcess("ctr_01", 4096))
+      .resolves.toMatchObject({ command: "restart", status: "STARTED", port: 4096 });
+    await expect(client.stopOpencodeRuntimeManagedProcess("ctr_01", 4097))
+      .resolves.toMatchObject({ command: "stop", status: "STOPPED", port: 4097 });
+
+    expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method])).toEqual([
+      ["http://api/api/internal/platform/opencode-runtime/management/containers/ctr_01/processes/4096/restart", "POST"],
+      ["http://api/api/internal/platform/opencode-runtime/management/containers/ctr_01/processes/4097/stop", "POST"]
+    ]);
   });
 
   it("maps scheduler management APIs through platform URL", async () => {
@@ -907,6 +1025,141 @@ describe("backend-api", () => {
     });
   });
 
+  it("routes public agent config files through target backend websocket", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              scope: "PUBLIC",
+              worktreeId: "agw_1234567890abcdef",
+              linuxServerId: "linux-2",
+              baseUrl: "http://10.8.0.13:8080",
+              webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+              sameServer: false
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              ticket: "wft_agentconfig",
+              expiresAt: "2026-06-26T10:00:00Z",
+              webSocketUrl: "/api/internal/platform/workspace-management/file/ws?ticket=wft_agentconfig"
+            }
+          }),
+          { status: 200 }
+        )
+      );
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token_123",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: fakeWorkspaceWebSocketFactory(sockets)
+    });
+
+    await expect(client.listPublicAgentFiles("opencode/agents", "agw_1234567890abcdef", "linux-2")).resolves.toEqual([
+      {
+        path: "opencode/agents/review.md",
+        name: "review.md",
+        type: "file",
+        size: 18,
+        modifiedAt: "2026-06-26T09:00:00Z"
+      }
+    ]);
+
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "http://api/api/internal/platform/workspace-management/agent-config/file-ws-route",
+      "http://10.8.0.13:8080/api/internal/platform/workspace-management/file-ws/tickets"
+    ]);
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toEqual({
+      scope: "PUBLIC",
+      worktreeId: "agw_1234567890abcdef",
+      linuxServerId: "linux-2"
+    });
+    expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body))).toEqual({
+      linuxServerId: "linux-2",
+      mode: "agent-config",
+      scope: "PUBLIC",
+      worktreeId: "agw_1234567890abcdef"
+    });
+    expect(sockets[0]?.url).toBe("ws://10.8.0.13:8080/api/internal/platform/workspace-management/file/ws?ticket=wft_agentconfig");
+    expect(sockets[0]?.sentMessages[0]).toMatchObject({
+      op: "agent-config.list",
+      params: { scope: "PUBLIC", path: "opencode/agents", worktreeId: "agw_1234567890abcdef" }
+    });
+  });
+
+  it("routes workspace agent config read and write through one file websocket", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              scope: "WORKSPACE",
+              workspaceId: "wrk_1234567890abcdef",
+              linuxServerId: "linux-1",
+              baseUrl: "http://10.8.0.12:8080",
+              webSocketPath: "/api/internal/platform/workspace-management/file/ws",
+              sameServer: true
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              ticket: "wft_workspace_agentconfig",
+              expiresAt: "2026-06-26T10:00:00Z",
+              webSocketUrl: "/api/internal/platform/workspace-management/file/ws?ticket=wft_workspace_agentconfig"
+            }
+          }),
+          { status: 200 }
+        )
+      );
+    const sockets: FakeWorkspaceWebSocket[] = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: fakeWorkspaceWebSocketFactory(sockets)
+    });
+
+    await expect(client.readWorkspaceAgentFile("wrk_1234567890abcdef", "review.md")).resolves.toMatchObject({
+      path: "review.md",
+      content: "agent content",
+      encoding: "utf-8"
+    });
+    await expect(client.writeWorkspaceAgentFile("wrk_1234567890abcdef", "review.md", "changed")).resolves.toBeNull();
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body))).toEqual({
+      workspaceId: "wrk_1234567890abcdef",
+      linuxServerId: "linux-1",
+      mode: "agent-config",
+      scope: "WORKSPACE"
+    });
+    expect(sockets).toHaveLength(1);
+    expect(sockets[0]?.sentMessages.map((message) => message.op)).toEqual(["agent-config.read", "agent-config.write"]);
+  });
+
   it("persists and reads the (app, workspace) VCS branch preference through the platform API", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
@@ -971,6 +1224,141 @@ describe("backend-api", () => {
       "http://api/api/internal/platform/workspace-management/applications/app_gcms/workspaces/wks_456/branch-preference"
     );
   });
+
+  it("manages public agent repository status and routes public worktree creation to a selected server", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: [
+              {
+                linuxServerId: "linux-1",
+                serverName: "linux-1",
+                gitRootPath: "/data/opencode-public-config",
+                configDirPath: "/data/opencode-public-config/opencode",
+                worktreeRootPath: "/data/opencode-public-worktrees",
+                status: "UNINITIALIZED",
+                initialized: false,
+                initializationAllowed: true,
+                currentBranch: null,
+                commitHash: null,
+                message: "未初始化"
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: [
+              {
+                worktreeId: "agw_1234567890abcdef",
+                scope: "PUBLIC",
+                workspaceId: null,
+                linuxServerId: "linux-1",
+                worktreeName: "change-agent-md-20260628",
+                branch: "main",
+                rootPath: "/data/opencode-public-worktrees/change-agent-md-20260628",
+                agentDirectory: "/data/opencode-public-worktrees/change-agent-md-20260628/opencode/agent",
+                status: "ACTIVE",
+                createdAt: "2026-06-28T00:00:00Z",
+                updatedAt: "2026-06-28T00:00:00Z",
+                createdByUserId: "usr_admin",
+                createdByUsername: "admin"
+              }
+            ]
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              linuxServerId: "linux-1",
+              serverName: "linux-1",
+              gitRootPath: "/data/opencode-public-config",
+              configDirPath: "/data/opencode-public-config/opencode",
+              worktreeRootPath: "/data/opencode-public-worktrees",
+              status: "READY",
+              initialized: true,
+              initializationAllowed: true,
+              currentBranch: "main",
+              commitHash: "abc1234",
+              message: "已初始化"
+            }
+          }),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              worktreeId: "acw_1234567890abcdef",
+              scope: "PUBLIC",
+              workspaceId: null,
+              linuxServerId: "linux-1",
+              worktreeName: "change-agent-md-20260628",
+              branch: "main",
+              rootPath: "/data/opencode-public-worktrees/change-agent-md-20260628",
+              agentDirectory: "/data/opencode-public-worktrees/change-agent-md-20260628/opencode/agent",
+              status: "ACTIVE",
+              createdAt: "2026-06-28T00:00:00Z",
+              updatedAt: "2026-06-28T00:00:00Z"
+            }
+          }),
+          { status: 200 }
+        )
+      );
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.listPublicAgentRepositories()).resolves.toHaveLength(1);
+    await expect(client.listPublicAgentWorktrees("linux-1")).resolves.toMatchObject([
+      {
+        worktreeId: "agw_1234567890abcdef",
+        createdByUserId: "usr_admin",
+        createdByUsername: "admin"
+      }
+    ]);
+    await expect(client.initializePublicAgentRepository("linux-1", "main", "aco_init")).resolves.toMatchObject({
+      linuxServerId: "linux-1",
+      initialized: true
+    });
+    await expect(
+      client.createPublicAgentWorktree({
+        baseName: "change-agent-md",
+        branch: "main",
+        linuxServerId: "linux-1",
+        operationId: "aco_worktree"
+      })
+    ).resolves.toMatchObject({ worktreeId: "acw_1234567890abcdef", linuxServerId: "linux-1" });
+
+    expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
+      "http://api/api/internal/platform/workspace-management/agent-config/public/repositories",
+      "http://api/api/internal/platform/workspace-management/agent-config/public/worktrees?linuxServerId=linux-1",
+      "http://api/api/internal/platform/workspace-management/agent-config/public/repositories/linux-1/initialize",
+      "http://api/api/internal/platform/workspace-management/agent-config/public/worktrees"
+    ]);
+    expect(JSON.parse(String(fetcher.mock.calls[2]?.[1]?.body))).toEqual({ branch: "main", operationId: "aco_init" });
+    expect(JSON.parse(String(fetcher.mock.calls[3]?.[1]?.body))).toEqual({
+      baseName: "change-agent-md",
+      branch: "main",
+      linuxServerId: "linux-1",
+      operationId: "aco_worktree"
+    });
+  });
 });
 
 type WebSocketEventHandler = ((event: any) => void) | null;
@@ -1005,6 +1393,22 @@ class FakeWorkspaceWebSocket {
                     lastModifiedAt: "2026-06-26T09:00:00Z"
                   }
                 ]
+              : message.op === "agent-config.list"
+                ? [
+                    {
+                      path: "opencode/agents/review.md",
+                      name: "review.md",
+                      directory: false,
+                      size: 18,
+                      lastModifiedAt: "2026-06-26T09:00:00Z"
+                    }
+                  ]
+                : message.op === "agent-config.read"
+                  ? {
+                      path: "review.md",
+                      content: "agent content",
+                      size: 13
+                    }
               : null
         })
       });

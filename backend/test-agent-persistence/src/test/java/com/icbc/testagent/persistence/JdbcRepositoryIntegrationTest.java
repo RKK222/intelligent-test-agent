@@ -776,6 +776,7 @@ class JdbcRepositoryIntegrationTest {
                 "agw_test_1234567890",
                 AgentConfigScope.WORKSPACE,
                 new WorkspaceId("wrk_agentcfg"),
+                "linux-1",
                 "change-agent-20260626",
                 "change-agent-20260626",
                 "/tmp/worktree",

@@ -6,8 +6,9 @@
 
 ## 主要程序清单
 
-- `FileExplorer.tsx`：三 tab 文件面板、Changed Files 入口、紧凑状态徽标和选择回调。
-- `filterLoadedFiles.ts`：已加载文件名过滤。
+- `FileExplorer.vue`：三 tab 文件面板、Changed Files 入口、紧凑状态徽标和选择回调；搜索 tab 接收 app 层传入的服务端搜索结果并高亮关键字。
+- `filterLoadedFiles.ts`：已加载文件名过滤，作为服务端搜索结果未提供时的本地回退。
+- `highlightKeyword.ts`：把文件名按关键字分段，供搜索结果高亮渲染。
 
 ## 允许依赖
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-import type { FileStatus, FileTreeEntry, RunDiffFile } from "@test-agent/shared-types";
+import type { FileStatus, FileTreeEntry, RunDiffFile, FileSearchResult } from "@test-agent/shared-types";
 
 export type FileExplorerProps = {
   workspaceName?: string;
@@ -13,6 +13,10 @@ export type FileExplorerProps = {
   hideHeader?: boolean;
   hideTabbar?: boolean;
   activeTab?: ExplorerTab;
+  // 搜索相关 props（由应用层传入）
+  searchResults?: FileSearchResult[];
+  searchLoading?: boolean;
+  searchKeyword?: string;
 };
 
 export type ExplorerTab = "explorer" | "search" | "changes";
@@ -23,6 +27,7 @@ import { computed, ref } from "vue";
 import { FileText, FolderTree, GitBranch, RefreshCw, Search } from "lucide-vue-next";
 import { Badge, Input, cn } from "@test-agent/ui-kit";
 import { filterLoadedFiles } from "./filterLoadedFiles";
+import { highlightKeyword } from "./highlightKeyword";
 import DirectoryRows from "./DirectoryRows.vue";
 
 const props = withDefaults(defineProps<FileExplorerProps>(), { workspaceName: "Workspace" });
@@ -32,11 +37,32 @@ const emit = defineEmits<{
   openFile: [path: string];
   openDiff: [path: string];
   refresh: [];
+  search: [keyword: string];
 }>();
 
 const tab = ref<ExplorerTab>("explorer");
 const keyword = ref("");
-const searchResults = computed(() => filterLoadedFiles(props.entriesByDirectory, keyword.value));
+// 本地过滤结果（备用，当 searchResults prop 未提供时使用），统一映射为 FileSearchResult 形态
+const localSearchResults = computed<FileSearchResult[]>(() =>
+  filterLoadedFiles(props.entriesByDirectory, keyword.value).map((entry) => ({
+    path: entry.path,
+    name: entry.name,
+    directory: entry.path.includes("/") ? entry.path.slice(0, entry.path.lastIndexOf("/")) : "",
+    size: entry.size ?? 0
+  }))
+);
+
+// 显示用的搜索关键字：优先使用 prop，否则使用本地 keyword
+const displayKeyword = computed(() => props.searchKeyword ?? keyword.value);
+
+// 显示用的搜索结果：优先使用 prop，否则使用本地过滤结果
+const displaySearchResults = computed(() => props.searchResults ?? localSearchResults.value);
+
+// 处理搜索输入：同时更新本地 keyword 并 emit 事件
+function handleSearchInput(value: string) {
+  keyword.value = value;
+  emit("search", value);
+}
 
 // 把 changedFiles 的路径归一化为 workspace 相对路径，用于文件树行匹配 +N -N。
 // opencode 的 diff path 可能是绝对路径或带 a//b/ 前缀，需与文件树 entry.path（相对路径）对齐。
@@ -119,18 +145,33 @@ const changeStats = computed(() => {
     <div v-else-if="computedTab === 'search'" class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
       <div class="relative">
         <Search class="pointer-events-none absolute left-2 top-2 h-4 w-4 text-[var(--ta-muted)]" :stroke-width="1.5" />
-        <Input v-model="keyword" class="pl-7" placeholder="过滤已加载文件名" />
+        <Input
+          :model-value="searchKeyword ?? keyword"
+          class="pl-7"
+          placeholder="搜索工作区文件"
+          @update:model-value="handleSearchInput"
+        />
       </div>
-      <div class="mt-2 space-y-1">
+      <div v-if="searchLoading" class="mt-3 text-center text-[12px] text-[var(--ta-muted)]">搜索中...</div>
+      <div v-else-if="displayKeyword && (!displaySearchResults || displaySearchResults.length === 0)" class="mt-3 text-center text-[12px] text-[var(--ta-muted)]">无匹配文件</div>
+      <div v-else class="mt-2 space-y-1">
         <button
-          v-for="entry in searchResults"
+          v-for="entry in displaySearchResults"
           :key="entry.path"
           type="button"
-          :class="cn('flex h-7 w-full items-center gap-2 rounded px-2 text-left text-[14px] text-[var(--ta-subtle)] hover:bg-[var(--ta-hover)]')"
+          :class="cn('flex flex-col h-auto min-h-7 w-full items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-[var(--ta-hover)]')"
           @click="emit('openFile', entry.path)"
         >
-          <FileText class="h-4 w-4 text-[var(--ta-muted)]" :stroke-width="1.5" />
-          <span class="min-w-0 truncate">{{ entry.path }}</span>
+          <div class="flex items-center gap-2 min-w-0">
+            <FileText class="h-4 w-4 shrink-0 text-[var(--ta-muted)]" :stroke-width="1.5" />
+            <span class="min-w-0 truncate text-[14px] text-[var(--ta-text)]">
+              <template v-for="segment in highlightKeyword(entry.name, displayKeyword)" :key="segment.text">
+                <mark v-if="segment.match" class="bg-yellow-200 text-inherit rounded px-0.5">{{ segment.text }}</mark>
+                <span v-else>{{ segment.text }}</span>
+              </template>
+            </span>
+          </div>
+          <span v-if="entry.directory" class="ml-6 text-[11px] text-[var(--ta-muted)] truncate">{{ entry.directory }}</span>
         </button>
       </div>
     </div>

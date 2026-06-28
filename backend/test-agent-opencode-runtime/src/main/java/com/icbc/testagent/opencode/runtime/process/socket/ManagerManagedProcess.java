@@ -12,5 +12,6 @@ public record ManagerManagedProcess(
         String sessionPath,
         String configPath,
         Instant startedAt,
+        String startCommand,
         String traceId) {
 }

@@ -114,7 +114,6 @@ function toggleMarkdownPreview() {
   height: 100%;
   min-height: 0;
   background: #fff;
-  border: 1px solid #ddd;
 }
 
 /* ---- Tabs ---- */

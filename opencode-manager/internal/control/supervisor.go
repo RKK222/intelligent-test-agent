@@ -127,6 +127,13 @@ func (s *Supervisor) readLoop(ctx context.Context, state *connectionState, conne
 		switch message.Type {
 		case messageTypeRegistered:
 			state.setBackendProcessID(message.BackendProcessID)
+			if err := state.writeJSON(ctx, Message{
+				Type:            messageTypeConfigRequest,
+				ProtocolVersion: protocolVersion,
+				TraceID:         traceID(),
+			}); err != nil {
+				return err
+			}
 		case messageTypeBackendListResponse:
 			s.handleBackendList(ctx, message.BackendEndpoints)
 		case messageTypeCommand:
@@ -134,16 +141,25 @@ func (s *Supervisor) readLoop(ctx context.Context, state *connectionState, conne
 			if err := state.writeJSON(ctx, result); err != nil {
 				return err
 			}
+			if shouldSendImmediateHeartbeat(result) {
+				if err := state.writeJSON(ctx, s.topologyMessage(messageTypeManagerHeartbeat)); err != nil {
+					return err
+				}
+			}
 		case messageTypeError:
 			log.Printf("manager websocket received backend error: %s", message.ErrorCode)
 		case messageTypeConfigUpdate:
 			previous := s.manager.MaxProcesses()
-			applied, err := s.manager.SetMaxProcesses(message.MaxProcesses)
+			applied, err := s.manager.ApplyRuntimeConfig(message.MaxProcesses, message.SessionRoot, message.ConfigDir)
 			if err != nil {
 				log.Printf("manager config update rejected: traceId=%s value=%d err=%v", message.TraceID, message.MaxProcesses, err)
 				continue
 			}
 			log.Printf("manager config update applied: traceId=%s maxProcesses %d -> %d (requested %d)", message.TraceID, previous, applied, message.MaxProcesses)
+			// 配置热更新会影响运行管理容量展示，立即补发心跳避免前端等待下一个周期。
+			if err := state.writeJSON(ctx, s.topologyMessage(messageTypeManagerHeartbeat)); err != nil {
+				return err
+			}
 		default:
 			log.Printf("manager websocket ignored message type: %s", message.Type)
 		}
@@ -212,7 +228,16 @@ func (s *Supervisor) executeCommand(ctx context.Context, message Message) Messag
 		ConfigPath:      result.ConfigPath,
 		Healthy:         &healthy,
 		Message:         responseMessage,
+		ErrorCode:       result.ErrorCode,
 	}
+}
+
+func shouldSendImmediateHeartbeat(message Message) bool {
+	if message.Type != messageTypeCommandResult {
+		return false
+	}
+	// 只有会改变本地进程拓扑的成功命令需要立即补发心跳，health 仍等待周期心跳。
+	return message.Status == string(process.StatusStarted) || message.Status == string(process.StatusStopped)
 }
 
 func (s *Supervisor) dispatchProcessCommand(ctx context.Context, message Message, timeout time.Duration) (process.Result, error) {
@@ -241,13 +266,14 @@ func (s *Supervisor) topologyMessage(messageType string) Message {
 		managedProcesses = make([]ManagedProcess, 0, len(records.Records))
 		for _, record := range records.Records {
 			managedProcesses = append(managedProcesses, ManagedProcess{
-				Port:        record.Port,
-				PID:         record.PID,
-				BaseURL:     record.BaseURL,
-				SessionPath: record.SessionPath,
-				ConfigPath:  record.ConfigPath,
-				StartedAt:   record.StartedAt,
-				TraceID:     record.TraceID,
+				Port:         record.Port,
+				PID:          record.PID,
+				BaseURL:      record.BaseURL,
+				SessionPath:  record.SessionPath,
+				ConfigPath:   record.ConfigPath,
+				StartedAt:    record.StartedAt,
+				StartCommand: record.StartCommand,
+				TraceID:      record.TraceID,
 			})
 		}
 	}

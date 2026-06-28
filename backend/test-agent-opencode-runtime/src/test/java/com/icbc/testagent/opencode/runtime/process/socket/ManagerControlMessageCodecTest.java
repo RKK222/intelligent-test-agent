@@ -75,6 +75,39 @@ class ManagerControlMessageCodecTest {
     }
 
     @Test
+    void decodesManagerHeartbeatManagedProcessStartCommand() {
+        ManagerControlMessageCodec codec = new ManagerControlMessageCodec(new ObjectMapper());
+
+        ManagerControlMessage decoded = codec.decode("""
+                {
+                  "type":"managerHeartbeat",
+                  "protocolVersion":"opencode-manager.v1",
+                  "traceId":"trace_1234567890abcdef",
+                  "managerId":"mgr_1234567890abcdef",
+                  "containerId":"ctr_01",
+                  "linuxServerId":"10.8.0.12",
+                  "portStart":4096,
+                  "portEnd":4100,
+                  "maxProcesses":5,
+                  "currentProcesses":1,
+                  "managedProcesses":[{
+                    "port":4096,
+                    "pid":12345,
+                    "baseUrl":"http://10.8.0.12:4096",
+                    "sessionPath":"/data/opencode/session/4096",
+                    "configPath":"/data/opencode/.config/opencode/",
+                    "startedAt":"2026-06-24T00:00:00Z",
+                    "startCommand":"XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs",
+                    "traceId":"trace_process"
+                  }]
+                }
+                """);
+
+        assertThat(decoded.managedProcesses()).singleElement().satisfies(process ->
+                assertThat(process.startCommand()).contains("opencode serve --hostname 0.0.0.0 --port 4096"));
+    }
+
+    @Test
     void encodesBackendListResponseEndpoints() {
         ManagerControlMessageCodec codec = new ManagerControlMessageCodec(new ObjectMapper());
         ManagerControlMessage response = ManagerControlMessage.backendListResponse(
@@ -111,5 +144,24 @@ class ManagerControlMessageCodecTest {
         } catch (Exception exception) {
             throw new AssertionError("后端列表响应 JSON 解析失败", exception);
         }
+    }
+
+    @Test
+    void encodesBackendEndpointHeartbeatTimeAsRfc3339String() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        ManagerControlMessageCodec codec = new ManagerControlMessageCodec(objectMapper);
+        ManagerControlMessage response = ManagerControlMessage.backendListResponse(
+                List.of(new ManagerBackendEndpoint(
+                        "bjp_1234567890abcdef",
+                        "10.8.0.12",
+                        "http://10.8.0.12:8080",
+                        "ws://10.8.0.12:8080/api/internal/platform/opencode-runtime/manager/ws",
+                        Instant.parse("2026-06-24T00:00:00Z"))),
+                "trace_1234567890abcdef");
+
+        String payload = codec.encode(response);
+
+        assertThat(objectMapper.readTree(payload).at("/backendEndpoints/0/lastHeartbeatAt").isTextual()).isTrue();
+        assertThat(payload).contains("\"lastHeartbeatAt\":\"2026-06-24T00:00:00Z\"");
     }
 }

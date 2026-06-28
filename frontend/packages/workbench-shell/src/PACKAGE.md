@@ -8,7 +8,7 @@
 
 - `WorkbenchShell.vue`：dockview-vue panel 壳、顶部状态栏、底部运行区容器和固定尺寸布局约束。
 - `DockPanel.ts`：dockview 面板渲染器，按 `params.slot` 渲染对应插槽内容。
-- `workbenchStore.ts`：Pinia 工作台状态。
+- `workbenchStore.ts`：Pinia 工作台状态，包括打开文件 tab、Agent public/workspace worktree 和公共直接配置目录服务器记忆。
 
 ## 允许依赖
 

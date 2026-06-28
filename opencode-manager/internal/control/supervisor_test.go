@@ -219,14 +219,15 @@ func TestSupervisorHeartbeatIncludesResourceMetricsAndManagedProcesses(t *testin
 	cfg := supervisorTestConfig(seedURL)
 	cfg.HeartbeatInterval = 20 * time.Millisecond
 	manager := process.NewManager(cfg.Config, staticStore{records: []state.ProcessRecord{{
-		Port:        4096,
-		PID:         12345,
-		BaseURL:     "http://10.8.0.12:4096",
-		SessionPath: "/data/opencode/session/4096",
-		ConfigPath:  "/data/opencode/.config/opencode/",
-		StartedAt:   time.Date(2026, 6, 24, 8, 0, 0, 0, time.UTC),
-		TraceID:     "trace_process",
-	}}}, nil, nil, health.Checker{})
+		Port:         4096,
+		PID:          12345,
+		BaseURL:      "http://10.8.0.12:4096",
+		SessionPath:  "/data/opencode/session/4096",
+		ConfigPath:   "/data/opencode/.config/opencode/",
+		StartedAt:    time.Date(2026, 6, 24, 8, 0, 0, 0, time.UTC),
+		StartCommand: "XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs",
+		TraceID:      "trace_process",
+	}}}, nil, nil, health.Checker{ProcessAlive: func(pid int) bool { return true }})
 	supervisor := NewSupervisor(cfg, manager)
 	supervisor.metrics = staticMetricsCollector{sample: RuntimeMetricsSample{
 		CPUUsagePercent:         float64Ptr(12.5),
@@ -253,10 +254,14 @@ func TestSupervisorHeartbeatIncludesResourceMetricsAndManagedProcesses(t *testin
 	if len(heartbeat.ManagedProcesses) != 1 || heartbeat.ManagedProcesses[0].Port != 4096 || heartbeat.ManagedProcesses[0].PID != 12345 {
 		t.Fatalf("expected managed process details, got %#v", heartbeat.ManagedProcesses)
 	}
+	if heartbeat.ManagedProcesses[0].StartCommand == "" {
+		t.Fatalf("expected managed process start command")
+	}
 }
 
 func TestSupervisorAppliesConfigUpdateAndReportsLiveMaxInHeartbeat(t *testing.T) {
 	heartbeats := make(chan Message, 8)
+	configRequests := make(chan Message, 2)
 	seedURL, cleanup := websocketServer(t, func(ctx context.Context, connection *websocket.Conn) {
 		_, payload, err := connection.Read(ctx)
 		if err != nil {
@@ -270,12 +275,14 @@ func TestSupervisorAppliesConfigUpdateAndReportsLiveMaxInHeartbeat(t *testing.T)
 				BackendProcessID: "bjp_seed_1234567890",
 				TraceID:          register.TraceID,
 			})
-			// 注册后立即下发 configUpdate，把最大进程数从 cfg 的 4 调到 2。
+			// 注册后立即下发 configUpdate，超过端口池时应裁剪并立即通过心跳回报生效值。
 			_ = writeTestMessage(ctx, connection, Message{
 				Type:            messageTypeConfigUpdate,
 				ProtocolVersion: protocolVersion,
 				TraceID:         register.TraceID,
-				MaxProcesses:    2,
+				MaxProcesses:    9,
+				SessionRoot:     "/data/.testagent/agent-opencode/.session/",
+				ConfigDir:       "/data/.testagent/agent-opencode/.config/opencode/",
 			})
 		}
 		for {
@@ -287,6 +294,9 @@ func TestSupervisorAppliesConfigUpdateAndReportsLiveMaxInHeartbeat(t *testing.T)
 			if err := json.Unmarshal(payload, &message); err != nil {
 				continue
 			}
+			if message.Type == messageTypeConfigRequest {
+				configRequests <- message
+			}
 			if message.Type == messageTypeManagerHeartbeat {
 				heartbeats <- message
 			}
@@ -294,7 +304,7 @@ func TestSupervisorAppliesConfigUpdateAndReportsLiveMaxInHeartbeat(t *testing.T)
 	})
 	defer cleanup()
 	cfg := supervisorTestConfig(seedURL)
-	cfg.HeartbeatInterval = 20 * time.Millisecond
+	cfg.HeartbeatInterval = time.Hour
 	manager := testProcessManager() // 初始 MaxProcesses = 4
 	supervisor := NewSupervisor(cfg, manager)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -303,12 +313,119 @@ func TestSupervisorAppliesConfigUpdateAndReportsLiveMaxInHeartbeat(t *testing.T)
 		_ = supervisor.Run(ctx)
 	}()
 
-	heartbeat := receiveMessage(t, heartbeats, time.Second)
-	if heartbeat.MaxProcesses != 2 {
-		t.Fatalf("expected heartbeat to report live maxProcesses 2, got %d", heartbeat.MaxProcesses)
+	configRequest := receiveMessage(t, configRequests, time.Second)
+	if configRequest.Type != messageTypeConfigRequest {
+		t.Fatalf("expected config request after registration, got %#v", configRequest)
 	}
-	if manager.MaxProcesses() != 2 {
-		t.Fatalf("expected manager runtime max 2, got %d", manager.MaxProcesses())
+	heartbeat := receiveMessage(t, heartbeats, time.Second)
+	if heartbeat.MaxProcesses != 5 {
+		t.Fatalf("expected immediate heartbeat to report clamped live maxProcesses 5, got %d", heartbeat.MaxProcesses)
+	}
+	if manager.MaxProcesses() != 5 {
+		t.Fatalf("expected manager runtime max 5, got %d", manager.MaxProcesses())
+	}
+}
+
+func TestSupervisorCommandResultIncludesPublicConfigErrorCode(t *testing.T) {
+	cfg := supervisorTestConfig("")
+	cfg.Config.StateDir = t.TempDir()
+	cfg.Config.SessionRoot = t.TempDir() + "/sessions"
+	cfg.Config.ConfigDir = t.TempDir() + "/missing-opencode-config"
+	manager := process.NewManager(cfg.Config, state.NewFileStore(t.TempDir()), nil, fakeSupervisorSignaler{}, health.Checker{})
+	supervisor := NewSupervisor(cfg, manager)
+
+	result := supervisor.executeCommand(context.Background(), Message{
+		Type:          messageTypeCommand,
+		CommandID:     "mcmd_start_1234567890",
+		Command:       "start",
+		Port:          4096,
+		TimeoutMillis: int64(time.Second / time.Millisecond),
+		TraceID:       "trace_start_1234567890",
+	})
+
+	if result.Status != string(process.StatusFailed) {
+		t.Fatalf("expected failed command result, got %#v", result)
+	}
+	if result.ErrorCode != "OPENCODE_UNAVAILABLE" {
+		t.Fatalf("expected OPENCODE_UNAVAILABLE errorCode, got %q", result.ErrorCode)
+	}
+	if result.Message != "公共配置未初始化，请联系管理员。" {
+		t.Fatalf("unexpected command result message %q", result.Message)
+	}
+}
+
+func TestSupervisorSendsHeartbeatImmediatelyAfterStopCommand(t *testing.T) {
+	commandResults := make(chan Message, 2)
+	heartbeats := make(chan Message, 4)
+	seedURL, cleanup := websocketServer(t, func(ctx context.Context, connection *websocket.Conn) {
+		_, payload, err := connection.Read(ctx)
+		if err != nil {
+			return
+		}
+		var register Message
+		if err := json.Unmarshal(payload, &register); err == nil && register.Type == messageTypeRegister {
+			_ = writeTestMessage(ctx, connection, Message{
+				Type:             messageTypeRegistered,
+				ProtocolVersion:  protocolVersion,
+				BackendProcessID: "bjp_seed_1234567890",
+				TraceID:          register.TraceID,
+			})
+			_ = writeTestMessage(ctx, connection, Message{
+				Type:            messageTypeCommand,
+				ProtocolVersion: protocolVersion,
+				CommandID:       "mcmd_stop_1234567890",
+				Command:         "stop",
+				Port:            4096,
+				TimeoutMillis:   1,
+				TraceID:         "trace_stop_1234567890",
+			})
+		}
+		for {
+			_, payload, err := connection.Read(ctx)
+			if err != nil {
+				return
+			}
+			var message Message
+			if err := json.Unmarshal(payload, &message); err != nil {
+				continue
+			}
+			if message.Type == messageTypeCommandResult {
+				commandResults <- message
+			}
+			if message.Type == messageTypeManagerHeartbeat {
+				heartbeats <- message
+			}
+		}
+	})
+	defer cleanup()
+
+	cfg := supervisorTestConfig(seedURL)
+	cfg.HeartbeatInterval = time.Hour
+	store := state.NewFileStore(t.TempDir())
+	_ = store.Save(state.ProcessRecord{
+		Port:      4096,
+		PID:       12345,
+		BaseURL:   "http://10.8.0.12:4096",
+		StartedAt: time.Now().UTC(),
+		TraceID:   "trace_process",
+	})
+	manager := process.NewManager(cfg.Config, store, nil, fakeSupervisorSignaler{}, health.Checker{
+		ProcessAlive: func(pid int) bool { return true },
+	})
+	supervisor := NewSupervisor(cfg, manager)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = supervisor.Run(ctx)
+	}()
+
+	result := receiveMessage(t, commandResults, time.Second)
+	if result.Status != string(process.StatusStopped) {
+		t.Fatalf("expected stop command result, got %#v", result)
+	}
+	heartbeat := receiveMessage(t, heartbeats, time.Second)
+	if heartbeat.Type != messageTypeManagerHeartbeat || heartbeat.CurrentProcesses != 0 || len(heartbeat.ManagedProcesses) != 0 {
+		t.Fatalf("expected immediate empty heartbeat after stop, got %#v", heartbeat)
 	}
 }
 
@@ -423,3 +540,8 @@ func float64Ptr(value float64) *float64 {
 func int64Ptr(value int64) *int64 {
 	return &value
 }
+
+type fakeSupervisorSignaler struct{}
+
+func (fakeSupervisorSignaler) Terminate(int) error { return nil }
+func (fakeSupervisorSignaler) Kill(int) error      { return nil }

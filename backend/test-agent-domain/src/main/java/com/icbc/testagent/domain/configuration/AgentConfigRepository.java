@@ -19,4 +19,20 @@ public interface AgentConfigRepository {
     Optional<AgentConfigWorktree> findWorktree(String worktreeId);
 
     List<AgentConfigWorktree> findWorktrees(AgentConfigScope scope, WorkspaceId workspaceId, UserId createdBy);
+
+    /**
+     * 按可选服务器和状态过滤 worktree；存量 JDBC 实现复用旧查询后在内存中过滤，MyBatis 实现用 XML 下推条件。
+     */
+    default List<AgentConfigWorktree> findWorktrees(
+            AgentConfigScope scope,
+            WorkspaceId workspaceId,
+            UserId createdBy,
+            String linuxServerId,
+            AgentConfigWorktreeStatus status) {
+        String normalizedServer = linuxServerId == null || linuxServerId.isBlank() ? null : linuxServerId.trim();
+        return findWorktrees(scope, workspaceId, createdBy).stream()
+                .filter(worktree -> normalizedServer == null || normalizedServer.equals(worktree.linuxServerId()))
+                .filter(worktree -> status == null || status == worktree.status())
+                .toList();
+    }
 }

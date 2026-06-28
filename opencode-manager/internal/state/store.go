@@ -14,13 +14,14 @@ import (
 
 // ProcessRecord 是管理进程跨 CLI 调用保存的本地进程快照。
 type ProcessRecord struct {
-	Port        int       `json:"port"`
-	PID         int       `json:"pid"`
-	BaseURL     string    `json:"baseUrl"`
-	SessionPath string    `json:"sessionPath"`
-	ConfigPath  string    `json:"configPath"`
-	StartedAt   time.Time `json:"startedAt"`
-	TraceID     string    `json:"traceId"`
+	Port         int       `json:"port"`
+	PID          int       `json:"pid"`
+	BaseURL      string    `json:"baseUrl"`
+	SessionPath  string    `json:"sessionPath"`
+	ConfigPath   string    `json:"configPath"`
+	StartedAt    time.Time `json:"startedAt"`
+	StartCommand string    `json:"startCommand,omitempty"`
+	TraceID      string    `json:"traceId"`
 }
 
 // FileStore 使用 stateDir/processes/{port}.json 保存端口到 PID 的索引。

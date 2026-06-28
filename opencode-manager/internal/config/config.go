@@ -92,6 +92,8 @@ type Config struct {
 	SessionRoot   string
 	ConfigDir     string
 	AllowedCORS   []string
+	// RuntimeConfigRequired 表示 run 模式必须先从 Java 公共参数拿到 session/config/max 后才能启动用户进程。
+	RuntimeConfigRequired bool
 }
 
 // ControlConfig 扩展容器本地配置，描述 manager 与后端控制面通信所需参数。
@@ -157,9 +159,34 @@ func LoadControlFromEnv() (ControlConfig, error) {
 }
 
 func loadControlFromEnvWithRuntime(rt configRuntime) (ControlConfig, error) {
-	base, err := loadFromEnvWithRuntime(rt)
+	rt = rt.withDefaults()
+	portStart, err := requiredInt("OPENCODE_MANAGER_PORT_START")
 	if err != nil {
 		return ControlConfig{}, err
+	}
+	portEnd, err := requiredInt("OPENCODE_MANAGER_PORT_END")
+	if err != nil {
+		return ControlConfig{}, err
+	}
+	containerID, err := resolveContainerID(rt)
+	if err != nil {
+		return ControlConfig{}, err
+	}
+	serverIP, err := resolveServerIP(rt)
+	if err != nil {
+		return ControlConfig{}, err
+	}
+	availablePorts := portEnd - portStart + 1
+	base := Config{
+		ContainerID:           containerID,
+		LinuxServerID:         serverIP,
+		PortStart:             portStart,
+		PortEnd:               portEnd,
+		MaxProcesses:          availablePorts,
+		OpencodeBin:           envDefault("OPENCODE_BIN", defaultOpencodeBin),
+		StateDir:              envDefault("OPENCODE_MANAGER_STATE_DIR", defaultStateDir),
+		AllowedCORS:           splitCSV(os.Getenv("OPENCODE_ALLOWED_CORS")),
+		RuntimeConfigRequired: true,
 	}
 	webSocketURL, err := derivedBackendWebSocketURL(base.LinuxServerID)
 	if err != nil {
@@ -201,10 +228,10 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.StateDir) == "" {
 		return fmt.Errorf("OPENCODE_MANAGER_STATE_DIR must not be blank")
 	}
-	if strings.TrimSpace(c.SessionRoot) == "" {
+	if !c.RuntimeConfigRequired && strings.TrimSpace(c.SessionRoot) == "" {
 		return fmt.Errorf("OPENCODE_SESSION_ROOT must not be blank")
 	}
-	if strings.TrimSpace(c.ConfigDir) == "" {
+	if !c.RuntimeConfigRequired && strings.TrimSpace(c.ConfigDir) == "" {
 		return fmt.Errorf("OPENCODE_CONFIG_DIR must not be blank")
 	}
 	return nil

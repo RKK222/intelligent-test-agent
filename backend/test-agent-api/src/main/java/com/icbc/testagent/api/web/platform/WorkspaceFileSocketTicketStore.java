@@ -39,6 +39,8 @@ class WorkspaceFileSocketTicketStore {
             String agentLinuxServerId,
             boolean superAdmin,
             String mode,
+            String scope,
+            String worktreeId,
             String traceId) {
         WorkspaceFileSocketTicket ticket = new WorkspaceFileSocketTicket(
                 ticketFactory.get(),
@@ -47,6 +49,8 @@ class WorkspaceFileSocketTicketStore {
                 agentLinuxServerId,
                 superAdmin,
                 mode,
+                scope,
+                worktreeId,
                 traceId,
                 clock.instant().plus(DEFAULT_TTL));
         tickets.put(ticket.ticket(), ticket);

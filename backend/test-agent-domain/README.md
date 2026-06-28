@@ -26,7 +26,7 @@
 - ExecutionNode：`ExecutionNode`、`ExecutionNodeId`、`ExecutionNodeStatus`。
 - RoutingDecision：`RoutingDecision`、`RoutingReason`、`ExecutionNodeRouter`。
 - OpencodeProcess：`LinuxServer`、`BackendJavaProcess`、`BackendRuntimeSnapshot`、`ServerRuntimeMetricSample`、`OpencodeContainer`、`OpencodeContainerManager`、`ManagerRuntimeSnapshot`、`OpencodeManagerBackendConnection`、`OpencodeServerProcess`、`OpencodeServerProcessFilter`、`UserOpencodeProcessBinding`、`OpencodeProcessManagementRepository` 和 `OpencodeProcessHeartbeatStore`；只表达 Linux 服务器、容器、管理进程、用户专属 opencode 进程拓扑、Redis 运行快照、查询筛选、服务器级/JVM/容器指标样本和运行心跳端口，不直接发起进程操作或 socket 通信。
-- Configuration：`ApplicationDefinition`、`ApplicationMember`、`CodeRepository`（含可空 `englishName`）、`ApplicationRepositoryLink`、`ApplicationWorkspace`、`UserSshKey`、`CommonParameter`、`WorkspaceCreateOperation`，与运行态 Workspace/Session/Run 解耦。
+- Configuration：`ApplicationDefinition`、`ApplicationMember`、`CodeRepository`（含可空 `englishName`）、`ApplicationRepositoryLink`、`ApplicationWorkspace`、`UserSshKey`、`CommonParameter`、`CommonParameterReferenceResolver`、`WorkspaceCreateOperation`，与运行态 Workspace/Session/Run 解耦；通用参数支持 `${englishName}` 互相引用，`${NAME}` 未命中通用参数时回退进程环境变量，`$NAME` 直接读取环境变量，并在路径开头支持 `$HOME` / `~/` 展开为用户主目录。
 - ManagedWorkspace：`ApplicationWorkspaceVersion`、`ApplicationWorkspaceVersionReplica`、`PersonalWorkspace`、`UserWorkspacePreference`、`WorkspaceSyncRecord`，把应用工作空间模板落为运行态 Workspace，记录每服务器副本 commit/status、个人 worktree 与同步审计。
 - Broadcast：`ServerBroadcastEvent`、`ServerBroadcastPublisher`、`ServerBroadcastHandler`，定义后端实例之间广播事件的领域端口，不绑定 Redis 或其他传输。
 - Scheduler：`ScheduledTask`、`ScheduledTaskPlan`、`ScheduledTaskRun`、状态枚举和值对象；用户级计划仅作为后续定时会话能力预留。
@@ -49,7 +49,7 @@
 - `ExecutionNodeRouterTest`、`ExecutionNodeTest` 覆盖执行节点容量、可路由状态和路由冲突错误。
 - `OpencodeProcessDomainTest` 覆盖 Linux 服务器 IP、容器端口范围、用户进程 baseUrl 和用户绑定边界。
 - `RunEventTest`、`RunEventTypeTest`、`DomainValidationTest` 覆盖事件模型、事件 wireName 映射和值对象公共校验。
-- `ConfigurationDomainTest` 覆盖应用成员逻辑删除、代码库 URL 不可编辑、英文名称兼容、应用工作空间目录约束等配置领域规则。
+- `ConfigurationDomainTest`、`CommonParameterReferenceResolverTest` 覆盖应用成员逻辑删除、代码库 URL 不可编辑、英文名称兼容、应用工作空间目录约束、通用参数互相引用、环境变量回退和 `$HOME` 路径展开等配置领域规则。
 - `SchedulerDomainTest` 覆盖任务定义、用户计划、运行记录状态和会话来源默认值。
 
 ## 允许依赖

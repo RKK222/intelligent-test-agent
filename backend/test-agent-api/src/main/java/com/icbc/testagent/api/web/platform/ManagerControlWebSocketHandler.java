@@ -111,8 +111,8 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
             containerRef.set(containerId);
             connections.register(managerId, containerId, backendLifecycle.backendProcessId(), outboundMessage -> outbound.tryEmitNext(outboundMessage));
             outbound.tryEmitNext(registered);
-            // 连接入注册表后，立即把通用参数表中的最大进程数下发给该 manager，使其采用权威值而非 env 兜底。
-            configSyncService.pushCurrentMaxTo(containerId);
+            // 连接入注册表后，立即把通用参数表中的完整运行配置下发给该 manager，使其采用权威值而非 env 兜底。
+            configSyncService.pushCurrentConfigTo(containerId);
             return Mono.empty();
         }
         if (ManagerControlProtocol.TYPE_HEARTBEAT.equals(message.type())) {
@@ -125,6 +125,12 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
         }
         if (ManagerControlProtocol.TYPE_BACKEND_LIST_REQUEST.equals(message.type())) {
             outbound.tryEmitNext(controlService.backendListResponse(message.traceId()));
+            return Mono.empty();
+        }
+        if (ManagerControlProtocol.TYPE_CONFIG_REQUEST.equals(message.type())) {
+            outbound.tryEmitNext(configSyncService.configUpdateMessage(message.traceId())
+                    .orElseGet(() -> ManagerControlMessage.error(
+                            "OPENCODE_UNAVAILABLE", "manager 运行公共参数未配置", message.traceId())));
             return Mono.empty();
         }
         if (ManagerControlProtocol.TYPE_COMMAND_RESULT.equals(message.type()) || ManagerControlProtocol.TYPE_ERROR.equals(message.type())) {

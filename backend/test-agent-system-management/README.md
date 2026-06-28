@@ -11,6 +11,7 @@
 - **用户管理**：用户注册、查询、密码校验（BCrypt）。
 - **认证服务**：用户登录（用户名+密码验证 -> 加载全局角色 -> Token 生成）、登出、Token 校验和刷新。
 - **领域模型**：`User`、`UserLoginLog`、`Dictionary`、`UserRole`、`AuthPrincipal`、`TokenStore`。
+- **测试造号**：创建测试用户时使用事务同时写入用户和角色，避免角色授权失败后留下无角色用户。
 
 ## 依赖
 
@@ -18,6 +19,7 @@
 
 - `test-agent-common`。
 - `test-agent-domain`。
+- Spring Context、Spring TX（服务 Bean 与事务边界）。
 
 ### 禁止依赖
 

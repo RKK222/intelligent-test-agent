@@ -8,4 +8,8 @@ public interface OpencodeProcessManagerGateway {
     OpencodeProcessHealthResult checkHealth(OpencodeProcessHealthCommand command);
 
     OpencodeProcessStartResult startProcess(OpencodeProcessStartCommand command);
+
+    OpencodeProcessControlResult restartProcess(OpencodeProcessControlCommand command);
+
+    OpencodeProcessControlResult stopProcess(OpencodeProcessControlCommand command);
 }

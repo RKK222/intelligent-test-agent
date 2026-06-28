@@ -18,6 +18,7 @@ import com.icbc.testagent.domain.opencodeprocess.ContainerRuntimeMetricSample;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerStatus;
+import com.icbc.testagent.domain.opencodeprocess.ManagedOpencodeProcessSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.ManagerConnectionStatus;
 import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
@@ -72,6 +73,10 @@ class RedisOpencodeProcessHeartbeatStoreTest {
         verify(fixture.values).set(
                 eq("test-agent:runtime-snapshot:manager:mgr_1234567890abcdef"),
                 contains("\"currentProcesses\":2"),
+                eq(Duration.ofSeconds(10)));
+        verify(fixture.values).set(
+                eq("test-agent:runtime-snapshot:manager:mgr_1234567890abcdef"),
+                contains("\"startCommand\":\"XDG_DATA_HOME=/data/opencode/session/4096"),
                 eq(Duration.ofSeconds(10)));
         verify(fixture.sets).add("test-agent:runtime-snapshot:index:manager", "mgr_1234567890abcdef");
     }
@@ -240,7 +245,17 @@ class RedisOpencodeProcessHeartbeatStoreTest {
                         NOW,
                         NOW,
                         NOW,
-                        "trace_1234567890abcdef")));
+                        "trace_1234567890abcdef")),
+                null,
+                List.of(new ManagedOpencodeProcessSnapshot(
+                        4096,
+                        12345L,
+                        "http://10.8.0.12:4096",
+                        "/data/opencode/session/4096",
+                        "/data/opencode/.config/opencode/",
+                        NOW,
+                        "XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs",
+                        "trace_process")));
     }
 
     private static ManagerRuntimeSnapshot managerSnapshotWithMetrics() {

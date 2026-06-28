@@ -12,6 +12,8 @@ record WorkspaceFileSocketTicket(
         String agentLinuxServerId,
         boolean superAdmin,
         String mode,
+        String scope,
+        String worktreeId,
         String traceId,
         Instant expiresAt) {
 }

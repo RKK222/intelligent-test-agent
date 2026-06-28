@@ -18,6 +18,16 @@ public class UnavailableOpencodeProcessManagerGateway implements OpencodeProcess
         throw unavailable();
     }
 
+    @Override
+    public OpencodeProcessControlResult restartProcess(OpencodeProcessControlCommand command) {
+        throw unavailable();
+    }
+
+    @Override
+    public OpencodeProcessControlResult stopProcess(OpencodeProcessControlCommand command) {
+        throw unavailable();
+    }
+
     private PlatformException unavailable() {
         return new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "opencode 管理进程尚未接入");
     }

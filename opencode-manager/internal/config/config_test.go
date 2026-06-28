@@ -187,6 +187,32 @@ func TestLoadFromEnvAppliesDefaultsAndCors(t *testing.T) {
 	}
 }
 
+func TestLoadControlFromEnvDoesNotRequireRuntimeCommonParameterEnv(t *testing.T) {
+	t.Setenv("HOSTNAME", "")
+	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
+	t.Setenv("OPENCODE_MANAGER_PORT_START", "4096")
+	t.Setenv("OPENCODE_MANAGER_PORT_END", "4100")
+	t.Setenv("OPENCODE_MANAGER_ID", "mgr_1234567890abcdef")
+	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
+
+	cfg, err := loadControlFromEnvWithRuntime(testRuntime("linux", map[string]string{
+		defaultServerIPFile: "10.8.0.12\n",
+	}))
+	if err != nil {
+		t.Fatalf("loadControlFromEnvWithRuntime returned error: %v", err)
+	}
+
+	if cfg.MaxProcesses != 5 {
+		t.Fatalf("expected run mode to use port capacity as registration placeholder, got %d", cfg.MaxProcesses)
+	}
+	if cfg.SessionRoot != "" || cfg.ConfigDir != "" {
+		t.Fatalf("run mode must wait for common parameters, got session=%q config=%q", cfg.SessionRoot, cfg.ConfigDir)
+	}
+	if !cfg.RuntimeConfigRequired {
+		t.Fatalf("expected run mode to require runtime config update")
+	}
+}
+
 func setBaseManagerEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv("HOSTNAME", "")

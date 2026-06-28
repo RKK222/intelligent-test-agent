@@ -13,6 +13,7 @@ public record AgentConfigWorktree(
         String worktreeId,
         AgentConfigScope scope,
         WorkspaceId workspaceId,
+        String linuxServerId,
         String worktreeName,
         String branch,
         String rootPath,
@@ -24,6 +25,7 @@ public record AgentConfigWorktree(
     public AgentConfigWorktree {
         worktreeId = DomainValidation.requireText(worktreeId, "worktreeId").trim();
         Objects.requireNonNull(scope, "scope must not be null");
+        linuxServerId = linuxServerId == null || linuxServerId.isBlank() ? null : linuxServerId.trim();
         worktreeName = DomainValidation.requireText(worktreeName, "worktreeName").trim();
         branch = DomainValidation.requireText(branch, "branch").trim();
         rootPath = DomainValidation.requireText(rootPath, "rootPath").trim();
@@ -41,6 +43,7 @@ public record AgentConfigWorktree(
                 worktreeId,
                 scope,
                 workspaceId,
+                linuxServerId,
                 worktreeName,
                 branch,
                 rootPath,

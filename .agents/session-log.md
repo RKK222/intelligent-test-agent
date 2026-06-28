@@ -48,6 +48,278 @@
 - Result: 首页聊天面板默认展现更宽大舒服；用户气泡呈亮色圆润浅灰底色（对比头像更柔和，完美对齐图 1）；智能体最终回答、Markdown 文本以及大表格、列表间距布局彻底紧凑精致。前端已初始化 toast 去除，右上角进程状态提示绿卡完美保留。前端 lint 校验与 Vitest 全部通过。
 
 
+### 2026-06-28 - 左侧栏刷新与配置操作按钮防重点击与点击反馈优化
+
+- Why: 左侧工作空间文件树和 Agents 配置栏的刷新及创建/更新按钮在点击后没有任何视觉反馈（如 hover/active 态或 loading 状态），且缺乏防重点击（点击后禁用）的设计，容易导致用户重复触发网络请求，交互体验不够灵敏。
+- What: 为刷新和配置按钮增加悬浮、按压、防重点击（disabled 状态）以及 loading 动画反馈。
+- How:
+  - 在 `AgentWorkbench.vue` 中重构 `loadDirectory(path, workspaceId, force)` 签名，将 `force` 作为第三个参数以维持对已有调用（传 workspaceId 作为第二个参数）的向后兼容，并在 `force = true` 时绕过本地缓存强制拉取。
+  - 在 `FigmaFileExplorer.vue` 中，文件树刷新和配置栏刷新分别根据父组件 `loadingPath.has("")` 和子组件 `agentConfigPanelRef?.busy` 状态进行自锁控制（禁用按钮且 `RefreshCw` 图标旋转 animate-spin）。对 `.figma-fe-section-action-btn` 样式补充 `:active` 和 `:disabled` 状态。
+  - 在 `AgentConfigPanel.vue` 中暴露 `busy` 状态，新增 `updatingPublicConfig` 和 `creatingWorktreeScope` 状态标识。在按钮中根据此状态渲染 `Loader2` 旋转加载动画代替原先的 `Plus` 或 `ArrowUpFromLine` 图标。对 `.agent-icon-btn` 补充 `:hover` 和 `:active` 样式背景色和阴影。
+- Result: 按钮交互反馈清晰，刷新期间能平滑旋转并阻止二次点击，完美修复了防重点击与视觉卡顿的问题。经 `@test-agent/agent-web` 内部 typecheck 和 lint 均一次性顺利通过。
+
+### 2026-06-28 - 分布式公共 Agent 配置初始化与 worktree 路由
+
+- Why: 公共 Agent worktree 必须依赖目标服务器本地 Git 仓库；在创建 worktree 时自动 clone 会在分布式部署下把仓库落到当前后端而不是管理员期望的目标服务器，后续文件和 Git 操作也缺少稳定的服务器归属。
+- What: 公共配置仓库初始化从创建 worktree 流程拆出，系统管理新增“配置管理 > opencode公共配置管理”查看在线后端服务器初始化状态并执行初始化；创建公共 worktree 时选择已初始化服务器并写入 `agent_config_worktrees.linux_server_id`，后续公共 Agent 文件、diff、stage、commit、publish 按该字段由当前后端代理到目标服务器执行。AgentConfig 持久化同步迁到 MyBatis XML，进度通过 `agent-config.operation-progress` 广播安全字段。
+- How: 先补 workspace-management、persistence、API、progress hub 和前端 RED/回归测试，再最小修改 `AgentConfigApplicationService`、`AgentConfigController`、MyBatis mapper、backend-api/shared-types 和 agent-web 管理页/弹窗；同步 HTTP API、数据库、后端部署、workspace-management README 和 agent-web README。
+- Result: 后端聚合测试 `mvn -pl test-agent-workspace-management,test-agent-api,test-agent-persistence -am test` 通过；前端 `corepack pnpm --filter @test-agent/agent-web typecheck`、新增用例 `agent-config-panel.test.ts` 和 backend-api/系统管理定向用例通过；`corepack pnpm exec vitest run apps/agent-web/tests` 仍有进入前已有的 runtime topology label 和运行管理空态文案断言失败，未在本次范围内处理；`git diff --check` 通过。
+
+### 2026-06-28 - 更新公共配置按钮图标改为表达 Git Push 含义的 ArrowUpFromLine 图标
+
+- Why: 公共配置面板中，“更新公共配置”操作原本使用的是代表分支的 GitBranch 图标，无法直观传达出将配置推送或上传同步至远端服务器/代码库的含义，容易引起误解。
+- What: 将该操作按钮的图标组件替换为能够表达上传/推送含义的 ArrowUpFromLine 图标。
+- How:
+  - 考虑到当前版本的 `lucide-vue-next` 不包含 `GitPush` 图标，采用了 `ArrowUpFromLine` 这一代表向上推送/上传的 Lucide 图标。
+  - 在 `AgentConfigPanel.vue` 中导入 `ArrowUpFromLine`，并将 `updatePublicConfig` 按钮中的 `<GitBranch>` 替换为 `<ArrowUpFromLine>`。
+- Result: 按钮图标成功转换为更符合“推送、上传并同步”语义的箭头图标，提升了图标语义的准确性。TypeScript 编译及样式代码检查顺利通过。
+
+### 2026-06-28 - OPENCODE_PUBLIC_CONFIG_DIR 校验下沉到目标 manager
+
+- Why: Java 后端和最终分配用户 opencode 进程的 manager 可能不在同一台服务器；在 Java 本机检查 `OPENCODE_PUBLIC_CONFIG_DIR` 会误判目标服务器目录状态，并破坏既有按负载选择目标容器的流程。
+- What: 移除 `UserOpencodeProcessAssignmentService` 的本机 `Files.*` 目录校验，初始化仍先按当前候选中进程数最少且有空闲端口的容器选择目标 manager，再下发 `start`。Go manager 在 `Start` 中检查 `ConfigPath` 必须存在、是目录且非空；缺失、空目录、非目录或不可读时不创建 session、不启动 opencode，返回 `FAILED + errorCode=OPENCODE_UNAVAILABLE + 公共配置未初始化，请联系管理员。`。Java socket gateway 对该 errorCode 映射为同码平台异常。
+- How: 先补 RED 测试覆盖 Java 本机目录不存在仍路由到目标 manager、manager errorCode 映射、Go manager 缺失/空目录/非目录失败，以及 supervisor `commandResult.errorCode` 透传；再改 Java runtime、控制消息工厂、Go process/supervisor 和 README/API/部署文档。
+- Result: 窄测试先按预期失败后转绿；后续执行 `mvn -pl test-agent-opencode-runtime -am test`、`go test ./...`（opencode-manager）、`mvn clean package -DskipTests` 和 `git diff --check`。本变更不涉及数据库 migration、RunEvent/SSE 或前端直连逻辑。
+
+### 2026-06-28 - Agent worktree Git 错误提示增加安全归因
+
+- Why: 创建公共 Agent worktree 时，Git clone/fetch/pull/worktree 失败只显示“Git 远端读取失败”，管理员无法区分 SSH key 权限、仓库地址、网络、分支或同名 worktree 冲突。
+- What: `ProcessGitCommandExecutor` 在 Git 命令非零退出时按 stderr 和命令上下文归因，保持 `GIT_UNAVAILABLE` 统一错误码，同时在 message 和 `details.gitFailureType/gitFailureHint` 返回可安全展示的诊断建议；`AgentConfigPanel` 优先展示 `gitFailureHint + traceId`，不展示原始 stderr、完整命令或内部路径。同步 HTTP API、workspace-management README 和 agent-web README。
+- How: 先补 RED 测试覆盖认证失败、仓库不可访问、网络失败、分支不存在和 worktree 冲突，再新增 `GitCommandFailureClassifier` 并把前端错误格式化抽成 `agentConfigErrors.ts` 单测覆盖。
+- Result: `mvn -pl test-agent-common,test-agent-workspace-management -am test`、`corepack pnpm exec vitest run apps/agent-web/tests/agent-config-errors.test.ts`、`corepack pnpm --filter @test-agent/agent-web typecheck` 和 `git diff --check` 通过；一次全量 Vitest 误用参数触发了既有 runtime topology/scheduler 测试失败，未在本次修复范围内处理。
+
+### 2026-06-28 - 用户 opencode 初始化校验公共配置目录
+
+- Note: 该实现已被上方“OPENCODE_PUBLIC_CONFIG_DIR 校验下沉到目标 manager”修正为目标 manager/目标服务器校验；本条仅保留历史上下文。
+- Why: 用户进程初始化会把 `OPENCODE_PUBLIC_CONFIG_DIR` 下发为 `OPENCODE_CONFIG_DIR`，若公共配置目录未初始化，manager 仍可能启动一个没有公共 agent/provider 配置的用户进程，后续运行状态难以排查。
+- What: `UserOpencodeProcessAssignmentService.initialize` 在真正下发 manager `start` 前检查 `OPENCODE_PUBLIC_CONFIG_DIR` 解析后的本机目录必须存在且非空；缺失、为空、非法或不可读时返回 `OPENCODE_UNAVAILABLE`，提示“公共配置未初始化，请联系管理员。”，并且不调用 manager 启动。同步更新后端工程 README、opencode-runtime README、HTTP API 和部署故障排查文档。
+- How: 先补 RED 测试覆盖目录不存在和空目录两种场景，确认旧实现会继续启动；再最小加入 `java.nio.file.Files` 目录存在性/非空检查，错误详情只暴露参数名不暴露本机路径。
+- Result: `mvn -pl test-agent-opencode-runtime test`、`mvn -pl test-agent-opencode-runtime -am test`、`mvn clean package -DskipTests` 均通过；不涉及数据库 migration、SSE 事件或前端直连逻辑。
+
+### 2026-06-28 - 通用参数修改增加修改日志与历史查询
+
+- Why: 通用参数为系统级配置，此前修改只在 `common_parameters` 覆盖更新值，无法追溯谁在何时把参数改成了什么；运维需要一个 SUPER_ADMIN 可访问的界面查看每次修改的时间、修改用户和修改前后的值。
+- What: 新增 `common_parameter_change_logs` 表（Flyway migration `V20260628100000`），记录 `logId/parameterId/oldValue/newValue/changedByUserId/changedByUsername/traceId/createdAt`；`CommonParameterManagementApplicationService.updateValue` 更新参数值后自动写入修改日志，`findChangeLogs(parameterId)` 按修改时间倒序返回最多 50 条；Controller 在 `PATCH /{parameterId}` 从 `AuthPrincipal` 取用户 ID 和用户名传给应用服务，并新增 `GET /{parameterId}/change-logs` 查询历史。前端 `shared-types` 新增 `CommonParameterChangeLog` 类型，`backend-api` 新增 `listCommonParameterChangeLogs` 方法，`GeneralParamManagementPanel.vue` 操作列新增"修改历史"按钮，点击后弹出抽屉展示修改时间、修改用户、修改前值和修改后值。
+- How: 先按 module-map 和 dependency-rules 归属文件到 `test-agent-domain/configuration`、`test-agent-persistence/mybatis`、`test-agent-configuration-management`、`test-agent-api`，复用既有 MyBatis XML mapper 模式和 SUPER_ADMIN 鉴权；应用服务新增 `CommonParameterChangeLogRepository` 依赖和测试可注入构造器，同步更新既有 `CommonParameterManagementApplicationServiceTest` 和 `CommonParameterManagementControllerTest` 的方法签名；同步 `docs/deployment/database.md` 和 `docs/api/http-api.md`。
+- Result: `mvn clean package` 全量测试通过，`corepack pnpm -r typecheck` 通过；新增 migration 不影响现有 `common_parameters` 数据，新增 API 端点和前端功能向后兼容。
+
+### 2026-06-28 - 左侧侧边栏工作空间与 Agents 分栏标题文案修改
+
+- Why: 增强界面易读性与语义规范。原本左侧的“应用工作空间”标题不包含其他目录且略显冗长，而“agents”使用的是小写，视觉体验不一致。
+- What: 将左侧侧边栏两个分栏的标题文案分别修改为“工作空间”和“Agents”。
+- How:
+  - 修改 `FigmaFileExplorer.vue`，将第一个分栏标题的文本由“应用工作空间”替换为“工作空间”。
+  - 将第二个分栏标题的文本由“agents”替换为“Agents”。
+- Result: 侧边栏标题展示为更简洁一致的“工作空间”和首字母大写的“Agents”，符合 IDE 界面设计标准。通过了前端的类型检查与样式审查，无任何逻辑与 API 破坏风险。
+
+### 2026-06-28 - 运行管理底部用户进程按用户主动探测并支持重启
+
+- Why: 运行管理底部列表原来依赖 overview 中按 Redis opencode 心跳筛选的 RUNNING 进程，用户进程停止后记录不再显示，导致无法从用户列表重新启动。
+- What: 新增运行管理 `user-processes` HTTP 查询，按用户名、userId 或统一认证号定位用户，不依赖 Redis 心跳过滤；查询时由后端通过 manager health 主动区分 `HEALTHY`、`NOT_RUNNING`、`UNHEALTHY`、`CHECK_FAILED`，并给可重启进程返回 `restartable=true`。前端底部列表改为显式输入用户关键字后查询，未运行或健康失败行可直接重启。
+- How: 先补 runtime 查询服务、API Controller、backend-api 和 agent-web RED 测试，再最小实现后端探测/回写、前端独立 Vue Query 和重启入口；同步 HTTP API、Event Stream、runtime 模块、agent-web 与 backend-api 文档。
+- Result: `RuntimeManagementQueryServiceTest`、`RuntimeManagementControllerTest`、`runtime-management-settings.test.ts` 和 `backend-api.test.ts` 已通过；不新增数据库结构或 SSE 事件，重启仍复用现有 `containerId + port` manager restart 命令。
+
+### 2026-06-28 - 公共 Agent worktree 首次创建自动准备主仓库
+
+- Why: 公共级创建 Agent worktree 时，如果 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` 尚未 clone 或只是空目录，后端直接校验 Git 仓库并返回“目录不是 Git 仓库”，与公共配置应按通用参数自动下载后创建 worktree 的预期不符。
+- What: `AgentConfigApplicationService#createPublicWorktree` 改为复用公共仓库准备流程；公共 Git 根目录缺失或为空目录时先按请求分支 clone，再在 `OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT` 下创建 worktree。已有非空非 Git 目录、origin 不一致或工作树 dirty 仍拒绝接管。
+- How: 先补 RED 测试覆盖缺失目录和空目录两种首次创建场景，再最小修改公共仓库准备逻辑，并同步 workspace-management README、HTTP API 和数据库部署文档。
+- Result: `mvn -pl test-agent-workspace-management -Dtest=AgentConfigApplicationServiceTest test` 与 `mvn -pl test-agent-workspace-management test` 已通过；不新增 API、事件、数据库字段或 migration。
+
+### 2026-06-28 - 创建 Agent worktree 从 window.prompt 改为自定义模态弹窗
+
+- Why: 之前创建 worktree 流程（公共级和工作空间级）依赖浏览器原生的 `window.prompt`，不仅视觉风格与 MIMO Web IDE 的现代 UI 严重割裂，而且需要用户连续点击两次弹窗，体验不够连贯。
+- What: 将 `AgentConfigPanel.vue` 中创建 worktree 的流程重构为自定义模态弹窗。
+- How:
+  - 引入 `@test-agent/ui-kit` 中的 `Button` 和 `Input` 基础组件。
+  - 新增 `showCreateWorktreeModal` (控制弹窗显示)、`createWorktreeScope` (保存当前操作的作用域)、`newWorktreeName` (绑定输入的 worktree 名称) 等响应式变量。
+  - 用 `<Teleport to="body">` 渲染自定义模态弹窗，在弹窗上半部分展示当前 git 库分支（只读，取自 `status.value[scope]?.currentBranch`），在下半部分提供 `Input` 组件供用户输入 worktree 分支名称。
+  - 支持回车键（Enter）确认提交、Esc 键或点击取消按钮关闭弹窗。
+- Result: 替换了原生 `window.prompt` 弹出逻辑，优化后的模态弹窗使用 ui-kit 和 tailwind 样式，设计符合 IDE 主体风格。经 `corepack pnpm typecheck` 和 `corepack pnpm lint` 校验全部通过，不影响任何后端 API 及现有的 Diff、Commit 和 Publish 流程。
+
+### 2026-06-28 - 聊天输入区交互重新探测 opencode 进程状态
+
+- Why: 右侧对话面板可能保留旧的 `READY` 进程状态缓存，实际 opencode 进程退出后仍显示“进程可用”，用户点击输入区后可能继续发送任务。
+- What: `FigmaChatPanel` 在输入框聚焦或输入卡片点击时请求工作台刷新当前用户 opencode 进程状态；`AgentWorkbench` 复用现有 `/processes/me` Vue Query refetch，并把已有状态下的刷新态回传给面板。
+- How: 刷新中保持 textarea 可编辑，但禁用发送和新建对话；focus/click 同次交互做 2 秒轻量去重，且不把已有 `READY` 的后台刷新展示成首次“正在检查”。
+- Result: 不新增 HTTP API、SSE 事件或数据库字段；面板单测覆盖刷新事件、去重、刷新中阻止提交和旧的首次加载态。
+
+### 2026-06-28 - 通用参数最大进程数热更新后运行管理容量即时刷新
+
+- Why: `OPENCODE_MANAGER_MAX_PROCESSES` 修改后，manager 虽然会应用 `configUpdate`，但运行管理容量来自 Redis manager heartbeat 快照；若只等周期心跳且前端 overview 不轮询，页面会继续显示旧容量。
+- What: Go manager 成功应用 `configUpdate` 后立即补发 `managerHeartbeat`，把按端口池 clamp 后的生效 `maxProcesses` 写回 Redis；运行管理 overview 查询增加 5 秒自动刷新；通用参数保存成功后同时失效运行管理 overview 缓存。
+- How: 先把 Go 回归测试改成 1 小时心跳间隔并下发超端口池容量的值，确认旧实现等不到即时 heartbeat；再最小修改 manager 控制面、前端 Vue Query 配置和稳定文档。
+- Result: 参数保存后容量展示以 manager 实际生效值为准，超端口池时展示 clamp 后容量；不新增 HTTP API、SSE 事件或数据库字段。
+
+### 2026-06-28 - 文件树加载绕开 opencode-manager 健康检查
+
+- Why: 前端加载工作区文件树时会先走 `/api/workspaces/{workspaceId}/file-ws-route` 和目标后端 file-ws ticket 签发；这两个读路径复用了 `UserOpencodeProcessAssignmentService.status()`，导致已有用户进程会触发 manager `health` 命令，manager 慢响应时文件树被 `OPENCODE_TIMEOUT: opencode 管理进程命令超时` 阻塞。
+- What: 新增文件 WebSocket 路由专用 `UserOpencodeProcessFileRoutingAffinity` 与 `fileRoutingAffinity()`，只读取 ACTIVE binding 和可恢复进程记录来判断服务器归属；`WorkspaceFileRoutingService` 和 `WorkspaceFileSocketTicketService` 改用该非阻塞归属查询，Run 启动、初始化和用户进程状态接口仍保留强健康检查语义。
+- How: 先补 RED 测试覆盖分配服务、文件路由和 ticket 签发不调用阻塞式 `status()`/gateway health，再最小修改 runtime/API；同步 opencode-runtime、API、agent-web README 和 HTTP API 文档。
+- Result: 文件树 route/ticket 签发不再向 opencode-manager 下发 health/start 命令；workspace 与用户进程服务器不一致仍返回 `CONFLICT`，用户未初始化进程仍按 `OPENCODE_UNAVAILABLE` 提示先初始化。
+
+### 2026-06-28 - 登录后 opencode 进程状态检查态修复
+
+- Why: 用户登录进入工作台后，后端已返回当前用户 opencode 进程 `status=READY`，右侧聊天面板仍可能停留在“正在检查 opencode 进程”；根因是前端把 Vue Query 后台 fetching 与首包无数据加载混用，READY 数据刷新期间仍会把对话区判为阻塞态。
+- What: `AgentWorkbench` 将当前用户进程 query 的 enabled/key 绑定到响应式登录 token，并新增只在首个状态响应前为 true 的 `opencodeProcessInitialLoading`；`FigmaChatPanel` 的 READY 判定不再依赖 loading，只有 `processLoading && !processStatus` 才展示“正在检查”。补充聊天面板单测和从 `/login` 提交后进入工作台的 Playwright 回归。
+- How: 先写 RED 单测复现 READY+后台刷新仍显示检查态，再最小修改前端状态链路；不修改后端状态 API，不处理本次排查发现的 `bindingClearable/localFallback` 文档与 API DTO 实现漂移。
+- Result: `corepack pnpm test -- FigmaChatPanel.test.ts`、`corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts --grep "login redirects to workbench"`、`corepack pnpm --filter @test-agent/agent-web typecheck` 均通过；整份 `workbench.spec.ts` 仍存在与本次无关的既有失败（SSH key mock 断言、工作空间按钮 strict selector/超时等），不要把这些失败误归因到 opencode 状态修复。
+
+### 2026-06-28 - 通用参数路径支持 $HOME 和环境变量展开
+
+- Why: macOS 本地把 `OPENCODE_PUBLIC_CONFIG_DIR` 配成 `$HOME/.testagent/agent-opencode/.config/opencode/` 后，manager/后端不会经过 shell 展开，字面 `$HOME` 被当作相对路径，导致目录落到项目工作目录下的 `$HOME/`；后续还需要通用参数能引用其他环境变量。
+- What: `CommonParameterReferenceResolver` 在通用参数 resolvedValue 阶段支持路径开头 `$HOME` 和 `~/` 展开为当前用户主目录，支持 `$NAME` 读取 Java 后端进程环境变量，支持 `${NAME}` 在通用参数未命中时回退同名环境变量，并保持通用参数引用优先级不变；同步部署、数据库、HTTP API 和模块 README 说明。
+- How: 先补 `CommonParameterReferenceResolverTest#expandsDollarHomeLiteralToUserHome`、`expandsDollarEnvironmentVariableFromProcessEnvironment` 和 `expandsBracedEnvironmentVariableWhenNoCommonParameterExists` 复现失败，再最小修改领域解析器；验证领域、配置缓存和 opencode runtime 消费链路测试。
+- Result: manager 下发 `OPENCODE_PUBLIC_CONFIG_DIR` / `OPENCODE_SESSION_DIR` 时使用展开后的 `resolvedValue`，不会再把字面 `$HOME` 或已存在的 `$NAME` 传给 manager；本地残留的未跟踪 `$HOME/` 目录若确认无用可人工删除。
+
+### 2026-06-27 - 运行管理拓扑图优化为机房网络拓扑与上下层级结构
+
+- Why: 拓扑图原先为水平结构且采用圆圈节点，长进程 ID 或服务器信息容易在圆圈外产生严重的字符重叠/溢出；用户需要将拓扑优化为上下层级的网络机房类型风格，且各节点需要使用具体的品牌/应用图标表示（Linux 服务器使用 Linux 图标、Docker 使用 Docker 图标、opencode 使用 opencode 图标）。
+- What:
+  - 重构 `runtimeTopologyGraphData.ts`：将拓扑结构改为上下三层布局（Y=50 为 Java 进程，Y=140 为 Manager，Y=230 为 opencode 进程），各层节点均实现动态水平居中，且 opencode 进程垂直分布在所属 Manager 下方。这大大缩减了垂直高度的占用，彻底消除了底部节点被切断的现象。
+  - 重构 `RuntimeTopologyGraph.vue`：
+    * 引入 `frontend/apps/agent-web/src/assets/figma/` 路径下的 `Linux.svg`、`Docker.svg`、`opencode-logo.svg` 和 `unknown.svg`。
+    * 将 ECharts 节点 `symbol` 根据节点种类映射为上述 SVG 的 Vite 导入 URL，以 `image://` 进行注入渲染。这替代了原本 of 内联 Base64 和复杂 SVG Path，不仅极大地简化了代码结构，还确保了渲染定位 of 完全稳定。为了满足图标小巧精致的要求，将图标尺寸修改为紧凑 of 正方形（Linux 36px，Docker 38px，opencode 32px）。对于无主 opencode 节点，使用 `unknown.svg` 图标进行标识。
+    * 将节点 labels 排版位置改为 `"bottom"`（距离图标 8px），确保大长串的 ID 和状态信息完美呈现在图标正下方，从而彻底打消之前的卡片容器挤压或字符重合缺陷。
+    * 自定义 label 格式化程序，通过 ECharts rich text 实现状态指示灯 (●) 与标题/副标题在图标下方分行精美渲染，并对長进程 ID 自动截断（保留前后缀）以防溢出。
+    * 将连接线曲率设为 `0` (直线连接)，使连线看起来像机房中的网线走线。
+    * 优化了图例 meta，不再显示单色的色块背景，而是改为使用对应的 SVG 本地矢量图标 (`img.legend-icon`)，实现图例与图表节点视觉元素的高保真统一。
+    * 在画布右下角新增了浮动缩放控制面板（放大 `+`、缩小 `-`、重置 `⟲`），通过调用 ECharts `setOption` 接口动态改变 `zoom` 及 `center`，提供极其流畅的画布平移和缩放功能，并将画布高度提升至 `400px`。
+- How: 纯前端数据层坐标派生与 ECharts 渲染配置优化，不更改任何 API 契约或后端业务状态。
+- Result: 拓扑图完美升级为具有机房网络卡片风格、走线工整的上下垂直结构，引入 Figma 本地 SVG 静态导入机制并实现图例图标化，通过缩减层级 Y 轴距离、缩小图标尺寸及增加浮动缩放面板，完全解决了底部节点超出屏幕以及缩放平移交互的需求。相关 typecheck、linter 以及所有 Vitest 单元测试均一次性顺利通过。
+
+### 2026-06-27 - 页面复测用户新增登录与 SSH key 加密兼容修复
+
+- Why: 继续页面测试“用户添加 → 新用户登录 → SSH key 添加”时，新增用户和新用户登录通过，但新用户在个人设置添加 SSH key 返回 `RSA decryption failed`；根因是浏览器 Web Crypto 的 RSA-OAEP/SHA-256 使用 MGF1-SHA256，而后端 JCE transformation 未显式指定 OAEP 参数，可能按 Java provider 默认 MGF1 参数解密，导致浏览器密文无法解开。
+- What: `RsaKeyService` 解密优先显式使用 RSA-OAEP/SHA-256 + MGF1-SHA256，并保留旧 Java 默认 OAEP 参数兜底以兼容历史 Java 夹具或旧密文；新增 `RsaKeyServiceTest` 覆盖浏览器 Web Crypto 参数密文；同步 `test-agent-common` README。
+- How: 页面先复现失败，再补 RED 测试 `decryptsWebCryptoRsaOaepSha256Payload` 观察到 `RSA decryption failed`，随后最小修改后端 RSA 解密参数并重启本地后端/前端服务复测。
+- Result: 页面新增测试用户 `codex_user_72481135` 成功，默认密码 `123456` 页面登录成功；该用户个人设置添加 SSH key `codex-ui-key-691863` 成功，数据库中只保存密文、RSA 加密 AES key 和指纹，未出现私钥明文标记。当前主工作区仍因本地 opencode 进程未初始化显示不可用，但不影响本次用户和 SSH key 设置链路。
+
+### 2026-06-27 - 本地开发 PostgreSQL 和 Redis 容器启动
+
+- Why: 用户需要搭建本地 PostgreSQL 和 Redis 容器用于个人本地开发，避免继续依赖当前不可用或超时的外部数据库/Redis。
+- What: 使用仓库既有个人离线开发入口 `tools/dev-local-up.sh --redis` 启动 `deploy/local/docker-compose.yml` 中的 `test-agent-postgres` 和 `test-agent-redis`，保持项目默认端口映射：PostgreSQL `15432 -> 5432`，Redis `16379 -> 6379`；未修改 `.env.local`、`.env.test` 或其他密钥配置文件。
+- How: 先确认 Docker CLI 存在并启动 Docker Desktop，再通过项目脚本拉起依赖；按 compose healthcheck 等待容器进入 healthy 状态，并用容器内客户端验证连接。
+- Result: `test-agent-postgres` 当前健康且可用，数据库/用户为 `test_agent`/`test_agent`；`test-agent-redis` 当前健康且 `redis-cli ping` 返回 `PONG`。本地 `local` profile 可使用 `TEST_AGENT_LOCAL_DB_HOST=127.0.0.1`、`TEST_AGENT_LOCAL_DB_PORT=15432`、`TEST_AGENT_LOCAL_DB_NAME=test_agent`、`TEST_AGENT_LOCAL_DB_USERNAME=test_agent`、`TEST_AGENT_LOCAL_DB_PASSWORD=test_agent`、`TEST_AGENT_REDIS_HOST=127.0.0.1`、`TEST_AGENT_REDIS_PORT=16379`、空 Redis 密码连接这组容器。
+
+### 2026-06-27 - 页面新增用户失败的 user_roles 序列修复
+
+- Why: 通过页面测试“用户管理（测试）”新增用户时，前端返回“服务器内部错误”；后端日志显示 `user_roles_pkey` 主键冲突，根因是历史库 `user_roles.id` identity 序列落后于已有数据，且创建用户流程缺少事务边界，角色授权失败时可能留下无角色用户。
+- What: 为 `UserManagementApplicationService.createUser` 增加事务边界，并给 `test-agent-system-management` 补充 `spring-tx` 依赖；新增 Flyway migration `V20260627214000__reset_user_roles_identity_sequence.sql` 将 `user_roles.id` 后续发号起点抬高到 `1000000`；同步系统管理、持久化和数据库部署文档。
+- How: 先用页面复现，再按日志定位到 `JdbcUserRoleRepository.save` 的 `user_roles` 主键冲突；补 RED 测试锁定创建用户必须有事务注解，随后最小实现事务和序列兼容迁移。
+- Result: `UserManagementApplicationServiceTest`、`FlywayMigrationNamingTest`、`JdbcRepositoryIntegrationTest#migrationGrantsDefaultUserSuperAdminRole` 均已通过；`./restart-dev-services.sh` 构建后端和前端成功，但运行时连接 `.env.test`/`.env.local` 指向的 PostgreSQL 在握手阶段 EOF/read timeout，导致 8080 后端未能启动，页面端新增用户、新用户登录和 SSH key 添加的最终复测被外部数据库可用性阻断。
+
+### 2026-06-27 - 运行管理停止已结束进程幂等清理
+
+- Why: 用户在运行管理停止无主 opencode server 时遇到 `os: process already finished (OPENCODE_BAD_GATEWAY)`，列表仍保留该进程；根因是 Go manager 本地 state 残留已退出 PID，`Stop` 遇到操作系统“进程已结束/不存在”错误时未删除 state。
+- What: Go manager 将已结束或不存在进程的 `stop` 视为幂等 `STOPPED` 并删除本地 state；`list`/heartbeat 会过滤并清理 PID 不存在的 stale state；成功的 `start`/`stop`/`restart` 命令后立即补发一次 manager heartbeat。前端 `stop` 成功后直接更新当前 overview 缓存，删除匹配 `containerId + port` 的 managed process，并同步下调容量计数，`restart` 仍保持刷新 overview。
+- How: 不新增 HTTP API、SSE、数据库表或 DTO 字段；后端仍沿用现有 manager 命令响应语义，`STOPPED` 为成功，`FAILED` 仍按既有 `OPENCODE_BAD_GATEWAY` 返回。
+- Result: 目标 Go 测试、运行管理 Vitest、`@test-agent/agent-web`/`@test-agent/shared-types` typecheck 和 `git diff --check` 已通过；本次仅改 manager 幂等清理、前端局部缓存更新、测试与文档。
+
+### 2026-06-27 - MIMO测试智能体挂机趣味彩蛋动效
+
+- Why: 满足挂机趣味彩蛋动效的需求，当用户静止 20 秒（挂机不活跃状态）时唤醒极简纯色机器人智能体小人执行原地弹跳、随机前跳、走动、坐立、翻跟斗、跨层大跳和发呆等一系列趣味动作，增强界面活力，且在用户再次操作时秒级中断并飞出屏幕离场，不打扰用户正常工作。
+- What:
+  - 移除了 `FigmaShell.vue` 中原有的极简 stick-figure 火柴人 walker 占位。
+  - 新增不活跃检测：通过对 `mousemove`（限流处理）、`mousedown`、`scroll`、`keydown` 事件监听，重置 20s 唤醒定时器，且在小人活跃时有上述操作可高优先级触发离场。
+  - 引入了全新机器人彩蛋 SVG 形象：符合圆角正方形头部、双触角、呼吸闪烁的面部光点、胶囊型身体与四肢外观规范。
+  - 编写并丰富了物理弹性状态机与移动逻辑：
+    * 缩短决策动作切换周期至 1s~2s 左右以极大提高小人活跃度，并调整行为动作池概率。
+    * 修复首次诞生的跳跃轨迹：在 `spawnRobot` 中使用 `nextTick` 与 `setTimeout` 延迟触发跳跃，避免 Vue 数据合并渲染导致首跳坐标丢失。
+    * 顶部防出界机制：当小人在顶部时，禁止原地弹跳、前跳及空翻等向上跳跃的行为；原本的跨层大跳如果从顶部出发，则优化为无向上弧度、直接向下加速坠落（falling）的平滑滑落。
+    * 实现“走动 (walking)”动画：在水平面上做直线位移，双腿与手臂交替旋转摆动（行走步态周期）。
+    * 实现“坐立 (sitting)”动画：头与身体下沉，双腿向外侧水平平伸展，处于安静落座状态。
+    * 实现“倒挂 (hanging)”动画：小人倒挂在顶部导航栏下沿，CSS 触发 180° 旋转，双臂自然垂下（逆向旋转）并在微风中轻微钟摆摇晃。
+    * 实现“翻跟斗 (flipping)”动画：腾空跳跃并在半空中完成 360° 后空翻，伴随 Squash/Stretch 形变（仅在底部时启用）。
+    * 保留“原地弹跳 (Bounce)”、“随机前跳 (Short Jump)”、“跨层大跳 (Big Jump)”以及“呼吸发呆 (Stay Idle)”。
+  - 编写趣味离场动效：原地面向屏幕 -> 挥手告别 1.2s（右臂高频摆动） -> 蓄力 0.3s -> 抛物线直接飞出屏幕之外 -> 销毁与重置。
+- How: 纯前端交互逻辑优化，在 `FigmaShell.vue` 内实现自包含的不活跃状态机，通过三层 DOM 容器（定位、翻转、变形）搭配原生 CSS Transition & Keyframes，完美还原 Squash & Stretch 物理弹性，性能无影响。
+- Result: 机器人挂机彩蛋动画顺畅优美，类型检查和 138 个 Vitest 单元测试全部全绿通过，打扰防御和自然消亡逻辑验证正常。
+
+
+
+### 2026-06-27 - 运行管理服务器/Java 合并与节点连线拓扑图
+
+- Why: 当前部署假设一台 Linux 服务器只启动一个后端 Java 进程，运行管理里分成“Linux 服务器”和“后端 Java 进程”两张表会割裂服务器资源与 JVM 进程视角；用户同时需要用节点和连线直观看到 Java、manager 与 opencode server 的连接/管理关系。
+- What: 前端运行管理将服务器与 Java 进程按 `linuxServerId` 合并为“服务器 / Java 进程”列表，保留服务器/Java 状态、资源指标、JVM、容量和趋势入口；新增 `RuntimeTopologyGraph` 和 `runtimeTopologyGraphData`，使用 overview 现有 `backendProcesses`、`managerBackendConnections`、`managers[].managedProcesses[]` 派生 `Java -> Manager -> opencode server` 拓扑节点和边，支持缩放、拖拽、hover tooltip 与点击节点高亮相邻关系，并兼容旧响应缺少 `managedProcesses`。
+- How: 不新增后端接口、SSE、数据库表或 manager 协议字段；原“容器 / 管理进程”表及展开后的有主/无主重启、停止操作保持不变。同步更新 agent-web README 和 HTTP API 文档，说明展示形态变化不改变 overview wire shape。
+- Result: 目标运行管理 Vitest、`@test-agent/agent-web` typecheck、`@test-agent/shared-types` typecheck 和 `git diff --check` 已通过；本次仅涉及前端展示、前端测试和文档。
+
+### 2026-06-27 - 运行管理有主/无主进程增加重启停止操作
+
+- Why: 用户需要在运行管理展开的“有主进程”和“无主进程”明细行后直接执行重启、停止，便于处理绑定用户进程和无主进程，不再只做只读观察。
+- What: 新增 `RuntimeManagementCommandService` 与 `OpencodeProcessControlCommand/Result`，扩展 `OpencodeProcessManagerGateway` 及 socket 实现，通过 manager WebSocket `restart`/`stop` 命令按 `containerId + port` 控制 opencode server；API 新增两个 `SUPER_ADMIN` POST 端点并返回命令结果 DTO；前端 `backend-api` 增加对应方法，运行管理展开表的有主/无主两组行末新增“重启”“停止”按钮，成功后刷新 overview。
+- How: 不新增数据库表、SSE 事件或前端展示用额外请求；重启/停止仍经平台后端鉴权与 traceId，再由后端转发 manager 控制面。local 网关对重启/停止明确返回不可用，避免误以为本地直连可操作。
+- Result: 后端聚合 Maven 测试、运行管理 Vitest、`shared-types`/`backend-api`/`agent-web` typecheck 和 `git diff --check` 均通过；HTTP API、Event Stream、相关 README 已同步更新。
+
+### 2026-06-27 - MIMO Test Agent 界面风格与视觉通透感优化
+
+- Why: 系统的旧风格采用直角、硬线条分割，整体偏扁平且缺乏现代 UI 的呼吸感和层次感；需对其进行现代 UI 风格重构（如大圆角、外层灰色背景配合内层白色大圆角卡片），并优化占位符、错误提示框、底部路径栏、模型选择输入框及顶栏标题英文副标题，以提升界面的通透感、清晰度和亲和力。同时跟进微调侧栏折叠按钮样式、压缩卡片容器留白至 `0`，全面弱化/柔化了主界面所有生硬的边框分界线，统一了左右侧边栏分割拖拽条的背景，在顶部主标题下方增设了等宽、居中的英文副标题，并添加了一个在顶部边框线上随机漫步的简约纯色小人动画。
+- What:
+  - **卡片化与外层背景**：修改 `FigmaShell.vue` 引入外层极淡灰色背景 `#F6F6F6` 及 `0` 紧凑外边距（从 `24px` 缩减以完全消除留白、提升编辑器空间），并将中间编辑器区和右侧对话区包裹在 `16px` 大圆角的白色卡片容器 `.figma-main-card` 内（搭配 subtle border 与 shadow），设置 `overflow: hidden` 防止溢出。移除 `FigmaEditorArea.vue` 的 outer border 避免双边框。
+  - **顶栏标题英文副标题及走动小人**：
+    - 修改 `FigmaShell.vue` 模板与样式，将头部标题包装至 `.figma-title-group` 居中列式布局中，在中文标题下方新增英文副标题 `<span class="figma-subtitle">MIMO Intelligent Test Agent</span>`，使用 `font-size: 7px` 并结合 `transform: scale(0.9)`、`transform-origin: center center` 与 `letter-spacing` 调优，以居中对齐排版，使其视觉长度与中文主标题对齐，提升高级感。
+    - 引入基于 inline SVG 的简约纯色 stick-figure 火柴人 walker，在顶栏底部边框线上通过 Vue 的 random-walk 随机状态机进行 `'idle'` (立正呼吸) 与 `'walking'` (往返行走且自动翻转) 状态的循环切换，利用原生 CSS transition 实现 60fps 的顺滑运动，并在宽屏下限制行走区间，在窄屏（<500px）下自动隐藏避免遮挡文字。
+
+  - **界面分割线条弱化与柔和处理**：修改 `globals.css` 将系统主边框色 `--ta-border`、`--border` 等由较深的 `#dddddd` 变更为极柔和的 `#eaeaea`；同步修改 `FigmaShell.vue`、`FigmaChatPanel.vue` 和 `WorkbenchFooter.vue`，将头尾边框、活动栏侧边框及拖拽条内部细线由 `#ddd` / `#e4e4e7` 改为 `#eaeaea`，同时将左右两个 resize handle 拖拽条的背景统一为固定的 `#f5f5f5`（不再使用右侧 transparent 造成的白色背景穿透），使其在左右两边呈现完全对称一致的 6px 灰底与中置发丝线，全面移除不一致的观感。
+  - **折叠展开按钮去硬边框**：修改 `FigmaShell.vue`，将左侧、右侧悬浮折叠展开按钮 `.figma-icon-btn` 重构为全扁平、透明且无框的轻量圆角 icon 按钮，宽度 and 高度精简为 `24px`，并只在 hover 时显示浅灰微背景，极大降噪。
+  - **空状态占位符**：修改 `CodeEditor.vue`，用一整幅精心设计的彩色 open folder SVG 渐变图标，以及更清晰、更有引导性的文字和排版“开始您的探索”替换原干瘪灰色 placeholder。
+  - **扁平化 Footer 与 Save 按钮**：修改 `WorkbenchFooter.vue`，将底部的路径栏 `.ta-workbench-footer-middle` 优化为极具现代感的圆角 `12px` 灰色胶囊 pill；将 `.ta-workbench-footer-save` 按钮改版为全扁平、圆角 `12px` 矩形，背景为淡灰 `#eeeeee` 并配以线性 Save 图标。
+  - **模型快速切换标签与圆角**：
+    - 修改 `FigmaChatPanel.vue`，为聊天输入框 `.figma-chat-input-card` 设置 `16px` 大圆角；输入框底部的操作按钮改为全扁平圆角 `12px` 标签（灰色 `#f4f4f5` 背景），发送与停止按钮设计为 premium 黑色圆形。
+    - 将右下角 OpenCode 进程错误提示框 `.figma-chat-process-status` 改为 `12px` 柔和大圆角，并将内边距从 `8px 10px` 增加到 `12px 16px`， gap 从 `10px` 增至 `12px`，降低突兀感。
+    - 在输入卡片下方新增一排快速切换模型的推荐功能标签（GLM-5.2、Kimi K2.7 Code 等），支持一键点击切换，并为当前选中项标记蓝色高亮。
+    - 在 `AgentWorkbench.vue` 绑定 `:models` and `:selected-model` 并接收 `@select-model` 事件；将工作区空状态 `.managed-workspace-empty` 重构为 `16px` 大圆角虚线背景卡片，其边框宽度微调为更精致的 `0.5px`，外边距设为 `0` 以完全消除多余的边距，按钮 `.managed-workspace-button` 统一设为 `12px` 圆角及 `34px` 现代高度。模型选择弹窗 `.managed-model-dialog` 圆角增至 `16px`。
+- How: 纯 CSS/Tailwind 样式参数微调与 Vue template 细节调整，不影响底层业务逻辑与 API 通讯。
+- Result: MIMO 界面呈现高度通透、亲和现代的卡片式视觉风格，侧栏折叠按钮更为内敛高级，操作区整体有效空间与分割线条得到完美释放；TypeScript 类型检查和 `pnpm build` 全部顺利通过。
+
+### 2026-06-27 - Web IDE 顶部工具栏高度扁平化与精简调整
+
+- Why: 用户需要更扁平的界面设计，将 Web IDE 顶部的顶栏高度从 52px 缩减，使整体工作区布局更紧凑。
+- What: 修改 `frontend/apps/agent-web/src/components/FigmaShell.vue`：
+  - 将 `.figma-app` 的 `grid-template-rows` 从 `52px 1fr` 调整为 `36px 1fr`。
+  - 将 `.figma-header` 的 `height` 从 `52px` 缩减为 `36px`，左右外边距/内边距从 `0 5px` 改为 `0 10px`。
+  - 缩放顶栏内各子元素尺寸：Logo 高度调整为 `20px`（宽度按比例自适应）；标题字号 `font-size` 从 `14px` 降至 `13px`，`line-height` 降至 `18px`；右侧各项的 gap 从 `12px` 改为 `8px`。
+  - 调整应用切换菜单 `.figma-app-menu-trigger` 高度从 `28px` 至 `24px`，padding 降至 `0 6px`，字号降至 `12px`。
+  - 调整用户头像按钮 `.figma-user-avatar-btn` 大小从 `30px` 至 `24px`；头像内文字 `.figma-user-avatar` 容器大小从 `24px` 至 `20px`，字号从 `12px` 降至 `10px`。
+- How: 纯 CSS/Tailwind 布局样式参数的比例缩放调整，不更改模板结构或底层 DOM 结构。
+- Result: 顶部状态栏高度缩小到 36px，整体布局明显更加扁平、紧凑，符合 IDE 专业视觉标准；Vitest 单元测试和 TypeScript 校验全部顺利通过。
+
+### 2026-06-27 - 运行管理容器与管理进程合并表及有主/无主分组
+
+- Why: 当前架构是一容器一 manager，运行管理里分成“容器”和“管理进程”两张表会让容量计数与下属明细关系不直观；用户需要展开容器/manager 行后区分有 ACTIVE 用户绑定的进程和无主进程。
+- What: 后端 `RuntimeManagementQueryService` 在 `managers[].managedProcesses[]` 上补充 `ownership`、候选进程、健康和绑定字段，按同服务器、同容器、同端口匹配用户进程并只把 `ACTIVE` 绑定标为 `BOUND`；无活跃绑定或无候选进程标为 `UNBOUND`。控制面 `backendListResponse.backendEndpoints[].lastHeartbeatAt` 固定按 RFC3339 字符串编码。前端运行管理把容器/manager 两张表合并为“容器 / 管理进程”表，行展开按“有主进程 / 无主进程”分组，容器趋势改为行内按钮打开。
+- How: 不新增接口、SSE 或数据库表；继续复用 `GET /api/internal/platform/opencode-runtime/management/overview`，并保持新增字段可选以兼容旧后端、旧 manager 和旧 Redis 快照。同步 HTTP API、Event Stream、模块 README 和 shared types/backend-api/agent-web 文档。
+- Result: 后端目标 Maven 全测、前端运行管理 Vitest、`shared-types`/`backend-api`/`agent-web` typecheck 和 `git diff --check` 均通过；当前仍有其他会话遗留的 memory provider/metrics collector 未提交改动，提交时需只暂存本次相关文件。
+
+### 2026-06-27 - 容器指标来源提示文本格式化与换行优化
+
+- Why: 优化容器列表指标“来源”列的悬停提示（Tooltip）排版，使用户更容易阅读各项指标来源的说明。
+- What: 修改 `frontend/apps/agent-web/src/components/settings/RuntimeManagementPanel.vue` 和 `runtime-management-settings.test.ts`：
+  - 将 `metricsSourceHelp` 变量重构为多行文本，并使用 `\n` 换行符。
+  - 将各个来源类型的格式调整为 `“xxxx”: xxxx`（双引号括起名称），每个类型独占一行。
+  - 更新对应的 Vitest 单元测试，将提示文本匹配器修改为新格式。
+- How: 修改 Vue 组件内部的静态配置字符串，配合 HTML 容器 native `title` 的多行解析特性实现换行，并同步更新测试中的断言。
+- Result: 容器指标来源列悬停时，提示以清晰的多行引号格式展示，提升了可读性；Vitest 单元测试与 TypeScript 检查均顺利通过。
+
+### 2026-06-27 - 运行管理管理进程展开显示 opencode server 明细
+
+- Why: 系统管理-运行管理的管理进程列表需要直接查看该 manager 当前管理的 opencode server 进程启动信息，避免只看到 manager 拓扑而无法定位端口、PID 和启动命令。
+- What: Go manager 本地 state、启动结果和 `managerHeartbeat.managedProcesses[]` 增加安全展示用 `startCommand`，旧 state 缺字段时按当前配置和端口派生；Java runtime/API 将 manager overview 从纯 manager 扩展为 `RuntimeManagementManager(manager, managedProcesses)` 并返回 `managers[].managedProcesses[]`；前端 shared-types/backend-api/agent-web 增加可选下属进程类型和管理进程行展开 UI；同步 HTTP API、Event Stream 和相关 README。
+- How: 先补 RED 测试覆盖 Go state/heartbeat、Java heartbeat 映射/overview/API/Redis 兼容和前端展开展示，再最小实现；运行管理仍只走 `GET /api/internal/platform/opencode-runtime/management/overview`，不新增接口、SSE、数据库 migration 或前端额外请求。
+- Result: 目标 Go/Maven/Vitest/typecheck 和后端 `mvn clean package -DskipTests` 均通过；启动命令只包含 `XDG_DATA_HOME`、`OPENCODE_CONFIG_DIR` 和固定 `opencode serve` 参数，不包含 token、Cookie、用户 prompt 或 API key。
+
+### 2026-06-27 - 运行管理指标趋势图 JVM 内存 y 轴单位变成 G
+
+- Why: 优化 JVM 内存监控趋势图的 y 轴标签展示，使其更具可读性并节省横向布局空间。
+- What: 修改 `frontend/apps/agent-web/src/components/settings/RuntimeMetricChart.vue` 与 `RuntimeManagementPanel.vue`：
+  - `RuntimeMetricChart` 新增 `yAxisUnit?: string` 属性。
+  - 在 `yAxis` 中判断当配置 `yAxisUnit` 时，追加 `axisLabel: { formatter: '{value} G' }` 格式化标签。
+  - 在数据映射阶段，判断当 `yAxisUnit` 为 `"G"` 时，将原始字节数据转换为二进制 G（即除以 `1024 * 1024 * 1024`）。
+  - 对 series 的 `valueFormatter` 也进行判断，当 `yAxisUnit` 为 `"G"` 时，将悬浮提示（Tooltip）里的数据值格式化为保留 2 位小数并带 `" G"` 单位后缀的格式。
+  - 在 `RuntimeManagementPanel.vue` 中的 JVM 内存趋势图组件上配置 `yAxis-unit="G"`。
+- How: 通过在图表组件层将原始数据转化为 GB 单位使得 ECharts 能够按 GB 刻度自动进行平滑轴刻度划分，并配以 axisLabel 与 valueFormatter 达成视觉完美统一。
+- Result: JVM 内存趋势图的 y 轴标签从 raw 字节（如 `5,000,000,000`）成功显示为更加直观的 GB 数值（如 `1 G` 到 `5 G`），Tooltip 提示也同步以 GB 显示，性能无影响，类型检查与单元测试全部通过。
 
 ### 2026-06-27 - 运行管理服务器指标历史连续性复核与类型修复
 
@@ -479,7 +751,7 @@
 
 ### 2026-06-25 - 修复运行管理拖动/滚动条问题及文件树和工作台图标大小/线条
 
-- Why: 
+- Why:
   - 用户反馈超级管理员设置-运行管理页内容（拓扑状态及 opencode 进程列表）存在可以被拖动的行为；同时，原多卡片各自独立的滚动条容易产生高度上的错落不齐，希望能将其对齐统一放最下面（保持每个小卡片自己独立带滚动条的形式，但整体布局保持对齐，不要错落）。
   - 工作台顶栏需保留左侧的文件树展开/收起切换按钮，右侧面板由顶栏右侧的折叠按钮（均使用 `panel-close.svg` 图标）控制。右侧折叠按钮位置调整到面板 header / tabbar 对应高度，浮动在最外层（即使折叠依然可见并能点开），左侧折叠按钮也同样调整至浮动在左面板 tabbar 相同高度上，使两个侧边栏开关功能一致。
 - What:
@@ -490,10 +762,10 @@
   - **AgentWorkbench.vue**: 移除左侧 Activity Bar 上的对话框按钮（`MessageSquare` 图标按钮），将编辑图标 `Code2` 的 `stroke-width` 设置为 `1.5`。
   - **FileExplorer.vue**: 将 Tab 栏图标 `FolderTree`、`Search`、`GitBranch` 的 `stroke-width` 设置为 `1.5`，尺寸从 `h-[18px] w-[18px]` 调整为 `h-4 w-4`。其他 Lucide 图标（`Search`、`FileText`、`RefreshCw`）的 `stroke-width` 也同步设置为 `1.5`。
   - **FigmaChatPanel.vue**: 去除对话框头部的冗余关闭按钮（由外部 FigmaShell 的浮动展开/收起按钮替代）。
-- How: 
+- How:
   - 通过 Vue 模板和 CSS 属性实现禁用拖拽和卡片 flex 高度对齐。
   - 调整 figma-header 和 figma-sidebar 相关的 Vue 模板与 CSS 镜像 transform 设置，增加绝对定位浮动开关。
-- Result: 
+- Result:
   - 运行管理页面的元素完全不可拖拽，且拓扑图形只有一个位于最下方的滚动条进行整体横向滚动，页面变得非常干净。
   - 侧边栏折叠按钮恢复并在两侧完美以相反的方向指向，Activity Rail 的对话框切换按钮已去除，一切点击、折叠逻辑符合现代 IDE 的标准行为。
 - Pitfalls: 无。
@@ -550,7 +822,7 @@
   - 添加数据库 CHECK 约束，确保 ID 前缀格式正确，防止未来再写入不符合格式的数据
 - How: 通过 Flyway migration 执行 DELETE 清理脏数据 + ALTER TABLE 添加 CHECK 约束。
 - Result: 运行管理页面查询不再因脏数据导致领域对象构造失败；数据库层面新增约束防止非法 ID 写入。
-- Pitfalls: 
+- Pitfalls:
   - 一开始误认为 `LinuxServerId` 也需要 `lsrv_` 前缀，实际上它要求 IPv4 地址格式
   - `OpencodeContainerId` 只要求非空文本，无固定前缀要求
 - Verification: 需要在有脏数据的环境中重启后端验证 migration 执行成功，页面可正常加载。
@@ -928,7 +1200,7 @@
 ### 2026-06-26 - 优化设置页创建工作空间区域的视觉样式
 
 - Why: 设置页"工作空间管理"下的"创建工作空间"区域原来是三个散乱的、带边框的卡片，并且当输入标签存在时，输入框和右侧的动作按钮没有底齐，导致视觉上严重错位，整体不够美观。用户后续提出希望去掉“第一步/第二步/第三步”文字前缀并使高度更加紧凑。
-- What: 
+- What:
   - `SettingsAppWorkspacePanel.vue` 中将三个步骤项改造成统一的卡片布局，左侧以一条纵向时间线 (Timeline) 贯穿 3 个步骤圆形数字徽标。
   - 为步骤卡片引入了 `:class` 状态绑定，能够基于当前填写的状态自动呈现已完成 (is-completed)、进行中 (is-active)、已禁用 (is-disabled) 三种视觉状态。
   - 重写了 steps 的 CSS，将 controls 设为 `align-items: flex-end`，从而保证无论标签如何折行，输入/选择框都会和右侧的执行动作按钮底端对齐；同时给运行中的进度圆点加入了呼吸灯动画 (`ta-progress-pulse`)。
@@ -1029,7 +1301,7 @@
 ### 2026-06-27 - 运行管理指标历史改为分钟级窗口并支持48小时自定义
 
 - Why: 原 `hours` 参数只能表达整数小时且最小 1 小时，无法支持运行管理趋势图的 1 分钟、30 分钟短窗口，同时用户也需要能自主调整/查看最大 48 小时（2880 分钟）的历史图表。
-- What: 
+- What:
   - 指标 history API 新增 `windowMinutes` 主参数，允许 `1/30/60/360/720/1440/2880`，默认 60 分钟；旧 `hours` 保留兼容但前端不再使用。
   - 前端 `RuntimeManagementPanel.vue` 在 radio-group 按钮组中新增 `48小时` (value = 2880) 选项。
   - 后端 `RuntimeManagementController.java` 中的 `ALLOWED_METRIC_WINDOW_MINUTES` 集合追加 `2880`。
@@ -1113,3 +1385,100 @@
 - What: `UserOpencodeProcessAssignmentService` 在原服务器无健康容器时 fallback 到当前后端全局健康容器并迁移 binding；端口选择改为按 `(linux_server_id, port)` 全局避让所有历史进程行；`WorkspaceFileRoutingService` 在旧服务器无在线后端且本机根目录可访问时安全回绑 workspace；`restart-dev-services.sh` 停止 manager 时清理 state JSON、state pid 和端口池残留 `opencode serve`；新增 `tools/verify-opencode-user-process-scenarios.sh` 插入/清理测试脏数据验证新老用户四类场景。
 - How: 用单测覆盖旧 binding fallback、旧 process 缺失、端口脏行避让、workspace 安全回绑与旧服务器在线不回绑；用 `.env.test` 重启后运行场景脚本，验证新用户正常/脏数据、老用户正常/旧 binding + 旧 workspace 均能 READY、runtime health 和 file-ws-route 正常。
 - Result: 本地 `test` profile 重启成功，脚本清掉旧 manager 托管进程；四类 opencode 场景通过且脚本测试数据清零。后续排查 workspace 文件树刷新时，要先看 `file-ws-route` 的 workspace/agent `linuxServerId` 是否不一致，再看真实 WebSocket ticket/连接错误。
+### 2026-06-27 - 后端 Java 进程内存采集跨平台适配
+
+- Why: 后端 Java 进程获取其所在运行主机的内存使用不准确，macOS 的 `OperatingSystemMXBean.getFreeMemorySize()` 返回值与实际可用内存差异较大（macOS 内存管理机制不同，包含活跃/非活跃/已压缩等概念）。
+- What:
+  - 新增 `OsType` 枚举检测当前操作系统（MACOS/LINUX/WINDOWS/UNKNOWN）。
+  - 新增 `SystemMemoryProvider` 策略接口和 `MemoryInfo` 数据结构。
+  - 实现 `MacOsMemoryProvider`：执行 `vm_stat` 命令获取 free + inactive + speculative 内存计算可用内存，失败时降级到 `OperatingSystemMXBean`。
+  - 实现 `LinuxMemoryProvider` 和 `WindowsMemoryProvider`：使用 `OperatingSystemMXBean`。
+  - 修改 `BackendRuntimeMetricsCollector` 集成策略模式，根据操作系统类型选择对应实现。
+  - 新增单元测试覆盖各平台策略和采集器行为。
+- How: 使用策略模式封装不同操作系统的内存获取逻辑，macOS 通过解析 `vm_stat` 命令输出获取准确的可用内存（= free + inactive + speculative），其他平台继续使用 JDK 标准接口。
+- Result: macOS 环境下内存采集准确性显著提升；Linux 和 Windows 行为保持不变；后端 154 个测试全部通过。
+- Verification: `mvn test -pl test-agent-opencode-runtime` 154/154 通过。
+
+### 2026-06-27 - 将浏览器标签页图标设置为首页logo
+
+- Why: 用户要求将浏览器标签页的图标（favicon）设置为首页面"MIMO测试智能体"左边的logo，使浏览器标签页显示品牌标识。
+- What:
+  - 创建 `frontend/apps/agent-web/public/` 目录
+  - 将 `frontend/apps/agent-web/src/assets/figma/logo.svg` 复制为 `frontend/apps/agent-web/public/favicon.svg`
+  - 在 `frontend/apps/agent-web/index.html` 的 `<head>` 中添加 favicon 链接：`<link rel="icon" type="image/svg+xml" href="/favicon.svg" />`
+- How: 直接将首页面左上角logo（SVG格式）作为浏览器favicon，保持视觉一致性。
+- Result: 浏览器标签页现在显示MIMO logo图标，与首页面logo保持一致。
+- Pitfalls: 无。
+- Verification: 文件已创建并提交到git。
+- Next: 用户在浏览器中刷新页面即可看到新favicon。
+
+### 2026-06-27 - 启动脚本清理日志 + 后端数据库/Redis 连接失败打印 IP:port
+
+- Why: 排查用户 123456789 登录失败时，发现 `.tmp/dev-services/` 下日志文件持续累积，且后端日志里数据库/Redis 连接超时只显示晦涩的 Lettuce/JDBC Reactor 堆栈，没有直观的 IP:port，定位网络问题效率低。
+- What:
+  - `restart-dev-services.sh`：在构建前新增 `clear_service_logs` 步骤，每次启动清理 `backend.log`/`frontend.log`/`opencode-manager.log`/`opencode.log` 及对应 `.pid` 文件，保留 `opencode-manager-state`/`opencode-manager-session` 运行态目录。
+  - `DatabaseMigrationRunner`：迁移前先做 `isValid(2)` 连通性探测，失败时打印 ERROR `数据库连接失败，请检查数据库是否可达: <jdbc url>（host=, port=）`；迁移异常也补充打印数据库地址，host/port 从 JDBC URL 解析。
+  - 新增 `RedisStartupHealthCheck`（`HIGHEST_PRECEDENCE+1`）：启动早期主动 TCP 探测 Redis，成功打印 INFO，失败打印 ERROR `Redis 连接失败，请检查 Redis 是否可达: host=, port=（超时 Nms）`，解决 Lettuce 懒连接导致运行时才暴露 Redis 不可达的问题。
+- How: 启动脚本用 `rm -f` 清理日志；后端用 SLF4J 在启动早期 `ApplicationRunner` 做 TCP/isValid 探测，不阻断启动，仅打印清晰地址日志。
+- Result: 每次重启日志干净无累积；数据库或 Redis 不可达时启动日志直接显示 host:port，无需翻 Reactor 堆栈。
+- Pitfalls: `DatabaseMigrationRunner` 仍是 `HIGHEST_PRECEDENCE`，新增的 Redis 检查用 `+1` 紧随其后；Redis host 为空时跳过探测，兼容可选 Redis 场景。
+- Verification: `mvn -pl test-agent-app -am compile -DskipTests` 编译通过；`bash -n restart-dev-services.sh` 语法校验通过。
+
+### 2026-06-27 - manager 启动参数改为 WebSocket 公共参数下发
+
+- Why: manager 容器内不应继续通过 `OPENCODE_SESSION_ROOT`、`OPENCODE_CONFIG_DIR`、`OPENCODE_MANAGER_MAX_PROCESSES` 环境变量决定用户 opencode 进程启动参数；这些值需要与 Java 后端使用的 `common_parameters` 保持一致。
+- What: `opencode-manager run` 只从环境读取连接必需项和端口池，注册后发送 `configRequest`，收到后端完整 `configUpdate(maxProcesses/sessionRoot/configDir)` 前拒绝 `start/restart`；Java 控制面从 `common_parameters.OPENCODE_MANAGER_MAX_PROCESSES`、`OPENCODE_SESSION_DIR`、`OPENCODE_PUBLIC_CONFIG_DIR` 组装配置，参数更新时广播完整配置。
+- How: Go manager 增加运行时配置 ready 状态和热更新方法；Java `OpencodeManagerConfigSyncService` 改为完整配置快照同步；本地重启脚本停止注入 max/session/config 环境变量，稳定文档同步说明 WebSocket-only 配置来源。
+- Result: `go test ./...`、`tools/verify-dev-scripts.sh`、`mvn -pl test-agent-domain,test-agent-opencode-runtime,test-agent-api -am test` 均通过。后续本地开发若需要自定义 session/config 路径，应修改通用参数表，而不是给 manager 加环境变量。
+
+### 2026-06-28 - 通用参数增加变量引用、内存缓存、跨实例广播刷新与每进程加载值展示
+
+- Why: 通用参数需支持 `${B}` 引用 B 的值、启动加载到内存、DB 修改后跨实例刷新、管理页展示每台服务器 Java 进程实际加载值。
+- What:
+  - domain 新增 `CommonParameterReferenceResolver`（`${englishName}` 展开，循环/缺失/超深保留字面，ALL 只能引用 ALL）、`CommonParameterValues` 只读缓存端口、`CommonParameterReloadedEvent`、`CommonParameterLoadSnapshot`/`LoadedParameter`/`CommonParameterLoadSnapshotStore`、`BackendInstanceIdentity` 端口。
+  - configuration-management 新增 `InMemoryCommonParameterValues`（启动 `SmartInitializingSingleton` 全量加载，整体原子替换快照）、`CommonParameterCacheRefresher`（监听 `CommonParameterUpdatedEvent` + `ServerBroadcastHandler`：reload+写快照+发 `common-parameter.refresh-requested` 广播+发本地 `CommonParameterReloadedEvent`；远端只 reload 不转发避免循环）、`CommonParameterLoadSnapshotQueryService`；controller 新增 `GET /common-parameters/load-snapshots`。
+  - persistence 新增 `RedisCommonParameterLoadSnapshotStore`（key `test-agent:common-param-snapshot:backend:{id}` TTL 30s + 索引 set）。
+  - opencode-runtime 新增 `ManagerBackendInstanceIdentity` 实现；`OpencodeManagerConfigSyncService` 改用 `CommonParameterValues` 并监听 `CommonParameterReloadedEvent`；`UserOpencodeProcessAssignmentService` 改用 `CommonParameterValues`。
+  - workspace-management `AgentConfigApplicationService`/`ManagedWorkspaceApplicationService` 改用 `CommonParameterValues`。
+  - 前端 `shared-types`/`backend-api` 新增类型与 `listCommonParameterLoadSnapshots`；`GeneralParamManagementPanel` 新增"查看各进程加载值"按钮+抽屉。
+  - 文档同步 `docs/api/http-api.md`、`docs/api/event-stream.md`、`docs/deployment/database.md`、`docs/architecture/module-map.md`。
+- How: 解析器纯领域服务，缓存只存原始值读取时展开；跨实例复用既有 `ServerBroadcastPublisher` Redis pub-sub，payload 只传参数标识不传值；身份经 domain 端口 `BackendInstanceIdentity` 解决 configuration-management 不能依赖 opencode-runtime 的限制；`CommonParameterRepository` 保留为管理端写+启动加载源，消费方迁移到 `CommonParameterValues`。
+- Result: 后端 `mvn test` 全绿（含新增解析器/缓存/刷新器/Redis store/controller 端点测试与迁移后的 4 个消费方测试），前端 `pnpm -r typecheck` + `pnpm test` 全绿。无 Flyway/schema 变更，API 仅新增端点，向后兼容。
+- Pitfalls: `OpencodeManagerConfigSyncServiceTest` 原本深度 mock `CommonParameterRepository.findByEnglishNameAndPlatform`，迁移后改用 `CommonParameterValues` 桩（opencode-runtime 不依赖 configuration-management，无法用 `InMemoryCommonParameterValues`）；缓存启动加载用 `SmartInitializingSingleton` 而非 `ApplicationRunner`，因 configuration-management 仅依赖 spring-context。
+- Verification: `mvn test`、`corepack pnpm -r typecheck`、`corepack pnpm test`。
+
+### 2026-06-28 - “目录不是 Git 仓库”错误提示带上具体目录
+
+- Why: 创建 Agent worktree 失败时前端只显示“创建 Agent worktree失败：目录不是 Git 仓库”，看不到具体是哪个目录，排查困难。后端异常其实已把 `path` 放进结构化 `details`，但前端 `errorMessageFor` 只渲染 `error.message`，目录信息未呈现。
+- What: `ensurePublicRepositoryReady` 抛异常条件改为同时提示"目录已存在且非空，但不是 Git 仓库"（`Files.exists(gitRoot) && !isEmptyDirectory(gitRoot)`），完整说明两个阻碍因素，避免遗漏"目录非空"场景。
+- How: 直接在异常消息文本里带上路径，复用前端既有 `${fallback}：${error.message}` 渲染，无需改前端。`path` 本就在可安全序列化的 `details` 中，纳入消息不引入新暴露面。
+- Result: 前端错误提示变为”创建 Agent worktree失败：目录已存在且非空，但不是 Git 仓库：/data/.../xxx”，同时展示目录路径和两个阻碍条件。
+- Pitfalls: 无测试断言该消息文本；未改动前端通用 `errorMessageFor`。
+- Verification: `mvn -pl test-agent-workspace-management -am compile` 通过。
+
+### 2026-06-28 - Agent 配置文件操作改为平台文件 WebSocket 路由
+
+- Why: 分布式部署下公共/工作空间 Agent 配置文件必须在 worktree 所属服务器执行，前端不能直连目标服务器，也不能继续依赖后端到后端 HTTP 文件代理；后续 server-bound 能力扩展需要复用同一套 route/ticket/RPC 模式。
+- What: `test-agent-api` 新增 Agent 配置文件路由 API 与 `mode=agent-config` 文件 WebSocket ticket 绑定，文件 RPC 新增 `agent-config.list/read/write`；`backend-api` 和 `AgentConfigPanel`/`AgentWorkbench` 将目录列表、读取、写入迁移到目标后端文件 WebSocket；旧 HTTP 文件接口仅保留本地兼容，远端目标返回明确错误要求使用文件 WebSocket。
+- How: 路由按 `scope/workspaceId/worktreeId/linuxServerId` 解析目标服务器，ticket 绑定 scope/worktree/server 并由 WebSocket handler 校验 op 参数一致性和写权限；前端先请求 `agent-config/file-ws-route`，再向目标后端申请 ticket 并复用 `WorkspaceFileSocketClient` 发送 Agent 配置文件 RPC。
+- Result: Git 初始化、创建 worktree、远端分支、diff、stage、commit、publish 仍走既有 HTTP/进度 WebSocket；配置文件 list/read/write 统一走平台文件 WebSocket。后端目标模块测试、agent-web typecheck、本次相关前端 Vitest 和 `git diff --check` 通过；完整 `vitest run apps/agent-web/tests packages/backend-api` 仍受工作区既有运行拓扑/系统管理前端脏改动影响失败，未纳入本次提交。
+
+### 2026-06-28 - 工作空间文件搜索（后端递归 + 文件名关键字高亮）
+
+- Why: 工作空间原有搜索只过滤已加载文件树（前端本地子串匹配），搜不到未展开目录的文件，且结果无关键字高亮。需支持整个工作空间递归模糊搜索文件名并高亮关键字。
+- What:
+  - 后端 `WorkspaceFileService` 新增 `searchFiles(rootPath, query)`：递归遍历，文件名不区分大小写子串匹配，跳过硬编码黑名单目录（`.git`/`node_modules` 等），深度上限 20、超时 5s、结果上限 200；新增 `FileSearchResultResponse`（path/name/directory/size/lastModifiedAt）。
+  - `WorkspaceApplicationService` 暴露 `searchFiles`；`WorkspaceFileWebSocketHandler` 新增 `workspace.search` RPC op（与现有文件操作同走 WebSocket RPC）。
+  - 前端 `backend-api` 新增 `searchFiles`；`shared-types` 新增 `FileSearchResult`；`file-explorer` 新增 `highlightKeyword`（分段渲染 `<mark>`），搜索 tab 改用 app 层传入的服务端结果 + 高亮，本地过滤作回退。
+  - `AgentWorkbench` 新增搜索状态（keyword/results/loading）+ 250ms 防抖 + 过期请求丢弃（searchSeq），切工作区时清空。
+- How: 包层不直连后端的约束保持——FileExplorer 通过 `search` emit 把关键字交给 AgentWorkbench 发起 RPC，结果经 props 回流。新增 2 参数兼容构造器避免破坏既有 `WorkspaceFileServiceTest`。
+- Result: 后端 `mvn -pl test-agent-api -am test` 全绿（含新增 3 个 searchFiles 测试）；前端 `pnpm -r typecheck` 全绿，file-explorer vitest 7 个测试通过（含新增 highlightKeyword 6 个）。文档同步 `docs/api/event-stream.md`、`file-explorer/README.md`、`PACKAGE.md`。
+- Pitfalls: 工作区有预先存在的脏改动（FigmaShell.vue / RuntimeTopologyGraph.vue / AgentConfigBackendRoutingService.java 等，非本次任务），提交时已精确暂存排除。`mvn -pl <module> compile` 不带 `-am` 时因本地 `.m2` 的 test-agent-domain jar 缓存不一致会报 `AgentConfigWorktree.linuxServerId()` 找不到，带 `-am` 重新编译 domain 源码后一致；验证后端务必带 `-am`。
+- Verification: `mvn -pl test-agent-api -am test -DskipITs`、`corepack pnpm -r typecheck`、`corepack pnpm exec vitest run packages/file-explorer`。
+
+### 2026-06-28 - 公共 Agent worktree 切换绑定服务器上下文
+
+- Why: 公共 Agent 配置在分布式部署下可能存在多个已初始化服务器，管理员需要在左侧 Agent 面板切换“直接公共配置目录”或某台服务器上的公共 worktree，后续文件操作必须落到所选服务器。
+- What: 后端新增 `GET /agent-config/public/worktrees?linuxServerId=` 返回指定服务器 `ACTIVE/PUBLIC` worktree 和创建人字段；MyBatis XML 支持 `scope/linuxServerId/status` 过滤，legacy repository 继续走内存过滤兼容。前端 Agent 面板公共级新增切换按钮和弹窗，先选已初始化服务器，再选直接目录或 worktree；workbench store 新增 `publicConfigLinuxServerId` 记住直接目录服务器。
+- How: 切换只更新 `worktreeId/linuxServerId` 上下文并清空公共文件树缓存；公共文件列表、读取、保存仍通过 agent-config 文件 WebSocket route/ticket/RPC，直接目录模式用 `linuxServerId` 绑定服务器，worktree 模式用落库 `worktreeId -> linuxServerId` 定位服务器。已打开 tab 不关闭，保存继续沿用 tab 内上下文。
+- Result: 后端目标测试、前端 agent-web typecheck、AgentConfigPanel/backend-api 定向 Vitest 通过；文档同步 API、事件、前后端规范、相关 README/PACKAGE。提交时继续排除既有 FigmaShell、运行拓扑和 AgentConfigBackendRoutingService 等无关脏改动。

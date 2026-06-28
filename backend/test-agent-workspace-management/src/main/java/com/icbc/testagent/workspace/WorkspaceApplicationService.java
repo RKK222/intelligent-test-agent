@@ -198,6 +198,15 @@ public class WorkspaceApplicationService {
     }
 
     /**
+     * 在工作区内递归搜索文件名包含 query（不区分大小写）的文件。
+     * 忽略黑名单目录，结果按文件名排序，有数量和超时限制。
+     */
+    public List<FileSearchResultResponse> searchFiles(WorkspaceId workspaceId, String query) {
+        Workspace workspace = getWorkspace(workspaceId);
+        return fileService.searchFiles(workspace.rootPath(), query);
+    }
+
+    /**
      * 校验并归一化工作区根目录，返回真实路径，避免后续文件服务基于符号链接产生越权判断误差。
      */
     private Path validateRootPath(String rootPath) {

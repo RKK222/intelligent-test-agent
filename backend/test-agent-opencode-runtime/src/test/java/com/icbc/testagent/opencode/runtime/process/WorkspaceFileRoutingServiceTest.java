@@ -52,7 +52,7 @@ class WorkspaceFileRoutingServiceTest {
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
         when(workspaceRepository.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace("10.8.0.12")));
-        when(assignmentService.status(USER_ID, "opencode", TRACE_ID)).thenReturn(process("10.8.0.12"));
+        when(assignmentService.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID)).thenReturn(affinity("10.8.0.12"));
         when(heartbeatStore.liveBackendSnapshots()).thenReturn(List.of(backendSnapshot("10.8.0.12")));
 
         WorkspaceFileRouteResponse response = service(workspaceRepository, assignmentService, heartbeatStore)
@@ -64,12 +64,30 @@ class WorkspaceFileRoutingServiceTest {
     }
 
     @Test
+    void routesWorkspaceFilesWithoutCallingBlockingProcessStatus() {
+        WorkspaceRepository workspaceRepository = Mockito.mock(WorkspaceRepository.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
+        when(workspaceRepository.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace("10.8.0.12")));
+        when(assignmentService.status(USER_ID, "opencode", TRACE_ID))
+                .thenThrow(new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "opencode 管理进程命令超时"));
+        when(assignmentService.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID)).thenReturn(affinity("10.8.0.12"));
+        when(heartbeatStore.liveBackendSnapshots()).thenReturn(List.of(backendSnapshot("10.8.0.12")));
+
+        WorkspaceFileRouteResponse response = service(workspaceRepository, assignmentService, heartbeatStore)
+                .routeWorkspace(USER_ID, "opencode", WORKSPACE_ID, TRACE_ID);
+
+        assertThat(response.baseUrl()).isEqualTo("http://10.8.0.12:8080");
+        Mockito.verify(assignmentService, Mockito.never()).status(USER_ID, "opencode", TRACE_ID);
+    }
+
+    @Test
     void rejectsWorkspaceFilesWhenWorkspaceAndAgentAreOnDifferentLinuxServers() {
         WorkspaceRepository workspaceRepository = Mockito.mock(WorkspaceRepository.class);
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
         when(workspaceRepository.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace("10.8.0.12")));
-        when(assignmentService.status(eq(USER_ID), eq("opencode"), eq(TRACE_ID))).thenReturn(process("10.8.0.13"));
+        when(assignmentService.fileRoutingAffinity(eq(USER_ID), eq("opencode"), eq(TRACE_ID))).thenReturn(affinity("10.8.0.13"));
 
         assertThatThrownBy(() -> service(workspaceRepository, assignmentService, heartbeatStore)
                         .routeWorkspace(USER_ID, "opencode", WORKSPACE_ID, TRACE_ID))
@@ -156,6 +174,19 @@ class WorkspaceFileRoutingServiceTest {
                 "ctr_01",
                 4096,
                 "http://" + linuxServerId + ":4096",
+                NOW);
+    }
+
+    private static UserOpencodeProcessFileRoutingAffinity affinity(String linuxServerId) {
+        return new UserOpencodeProcessFileRoutingAffinity(
+                UserOpencodeProcessAvailability.READY,
+                false,
+                "ready",
+                "ocp_1234567890abcdef",
+                linuxServerId,
+                "ctr_01",
+                4096,
+                linuxServerId + ":4096",
                 NOW);
     }
 

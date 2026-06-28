@@ -8,13 +8,14 @@ import (
 func TestFileStoreSavesListsAndDeletesRecords(t *testing.T) {
 	store := NewFileStore(t.TempDir())
 	record := ProcessRecord{
-		Port:        4096,
-		PID:         12345,
-		BaseURL:     "http://10.8.0.12:4096",
-		SessionPath: "/data/opencode/session/4096",
-		ConfigPath:  "/data/opencode/.config/opencode/",
-		StartedAt:   time.Date(2026, 6, 24, 0, 0, 0, 0, time.UTC),
-		TraceID:     "trace_1234567890abcdef",
+		Port:         4096,
+		PID:          12345,
+		BaseURL:      "http://10.8.0.12:4096",
+		SessionPath:  "/data/opencode/session/4096",
+		ConfigPath:   "/data/opencode/.config/opencode/",
+		StartedAt:    time.Date(2026, 6, 24, 0, 0, 0, 0, time.UTC),
+		StartCommand: "XDG_DATA_HOME=/data/opencode/session/4096 OPENCODE_CONFIG_DIR=/data/opencode/.config/opencode/ opencode serve --hostname 0.0.0.0 --port 4096 --print-logs",
+		TraceID:      "trace_1234567890abcdef",
 	}
 
 	if err := store.Save(record); err != nil {
@@ -24,7 +25,7 @@ func TestFileStoreSavesListsAndDeletesRecords(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("Get returned ok=%v err=%v", ok, err)
 	}
-	if loaded.PID != record.PID || loaded.BaseURL != record.BaseURL {
+	if loaded.PID != record.PID || loaded.BaseURL != record.BaseURL || loaded.StartCommand != record.StartCommand {
 		t.Fatalf("loaded record mismatch: %#v", loaded)
 	}
 	records, err := store.List()

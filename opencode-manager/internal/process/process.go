@@ -2,11 +2,14 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -26,6 +29,13 @@ const (
 	StatusUnhealthy Status = "UNHEALTHY"
 	StatusFailed    Status = "FAILED"
 )
+
+const (
+	ErrorCodeOpencodeUnavailable      = "OPENCODE_UNAVAILABLE"
+	publicConfigNotInitializedMessage = "公共配置未初始化，请联系管理员。"
+)
+
+var errPublicConfigNotInitialized = errors.New("public config directory not initialized")
 
 // StartRequest 描述一次启动 opencode server 的本地命令。
 type StartRequest struct {
@@ -48,28 +58,31 @@ type HealthRequest struct {
 
 // Result 是所有进程操作的稳定 JSON 输出模型。
 type Result struct {
-	Status      Status                `json:"status"`
-	Port        int                   `json:"port"`
-	PID         int                   `json:"pid"`
-	BaseURL     string                `json:"baseUrl"`
-	SessionPath string                `json:"sessionPath"`
-	ConfigPath  string                `json:"configPath"`
-	Message     string                `json:"message"`
-	TraceID     string                `json:"traceId"`
-	Records     []state.ProcessRecord `json:"records,omitempty"`
+	Status       Status                `json:"status"`
+	Port         int                   `json:"port"`
+	PID          int                   `json:"pid"`
+	BaseURL      string                `json:"baseUrl"`
+	SessionPath  string                `json:"sessionPath"`
+	ConfigPath   string                `json:"configPath"`
+	StartCommand string                `json:"startCommand,omitempty"`
+	Message      string                `json:"message"`
+	ErrorCode    string                `json:"errorCode,omitempty"`
+	TraceID      string                `json:"traceId"`
+	Records      []state.ProcessRecord `json:"records,omitempty"`
 }
 
 // StartSpec 是 OSStarter 执行 opencode serve 所需的完整命令描述。
 type StartSpec struct {
-	Command     string
-	Args        []string
-	Env         map[string]string
-	LogPath     string
-	Port        int
-	BaseURL     string
-	SessionPath string
-	ConfigPath  string
-	TraceID     string
+	Command      string
+	Args         []string
+	Env          map[string]string
+	LogPath      string
+	Port         int
+	BaseURL      string
+	SessionPath  string
+	ConfigPath   string
+	StartCommand string
+	TraceID      string
 }
 
 // Starter 隔离真实 os/exec，便于单测验证启动命令而不拉起真实 opencode。
@@ -100,6 +113,9 @@ type Manager struct {
 	signaler Signaler
 	checker  health.Checker
 
+	cfgMu              sync.RWMutex
+	runtimeConfigReady bool
+
 	// maxProcesses 是运行时最大并发进程数，可由后端通过 configUpdate 热更新；
 	// 初始值取自 cfg.MaxProcesses（env 兜底），后端下发值覆盖。
 	maxProcesses atomic.Int64
@@ -115,6 +131,7 @@ func NewManager(cfg config.Config, store Store, starter Starter, signaler Signal
 		checker:  checker,
 	}
 	m.maxProcesses.Store(int64(cfg.MaxProcesses))
+	m.runtimeConfigReady = !cfg.RuntimeConfigRequired
 	return m
 }
 
@@ -140,6 +157,41 @@ func (m *Manager) SetMaxProcesses(v int) (int, error) {
 	return applied, nil
 }
 
+// ApplyRuntimeConfig 应用 Java 公共参数下发的 manager 运行配置。
+// sessionRoot/configDir 是启动 opencode server 的权威路径；maxProcesses 会按端口池容量裁剪。
+func (m *Manager) ApplyRuntimeConfig(maxProcesses int, sessionRoot, configDir string) (int, error) {
+	sessionRoot = strings.TrimSpace(sessionRoot)
+	configDir = strings.TrimSpace(configDir)
+	if sessionRoot == "" {
+		return m.MaxProcesses(), fmt.Errorf("sessionRoot must not be blank")
+	}
+	if configDir == "" {
+		return m.MaxProcesses(), fmt.Errorf("configDir must not be blank")
+	}
+	applied, err := m.SetMaxProcesses(maxProcesses)
+	if err != nil {
+		return applied, err
+	}
+	m.cfgMu.Lock()
+	defer m.cfgMu.Unlock()
+	m.cfg.SessionRoot = sessionRoot
+	m.cfg.ConfigDir = configDir
+	m.runtimeConfigReady = true
+	return applied, nil
+}
+
+func (m *Manager) startConfig() (config.Config, error) {
+	m.cfgMu.RLock()
+	defer m.cfgMu.RUnlock()
+	if m.cfg.RuntimeConfigRequired && !m.runtimeConfigReady {
+		return config.Config{}, fmt.Errorf("manager runtime config not ready")
+	}
+	cfg := m.cfg
+	cfg.MaxProcesses = m.MaxProcesses()
+	cfg.RuntimeConfigRequired = false
+	return cfg, nil
+}
+
 // BuildStartSpec 构造固定的 opencode serve 命令和启动环境。
 func BuildStartSpec(cfg config.Config, request StartRequest) (StartSpec, error) {
 	if err := cfg.Validate(); err != nil {
@@ -157,22 +209,28 @@ func BuildStartSpec(cfg config.Config, request StartRequest) (StartSpec, error) 
 	for _, origin := range cfg.AllowedCORS {
 		args = append(args, "--cors", origin)
 	}
+	env := map[string]string{"XDG_DATA_HOME": sessionPath, "OPENCODE_CONFIG_DIR": cfg.ConfigDir}
 	return StartSpec{
-		Command:     cfg.OpencodeBin,
-		Args:        args,
-		Env:         map[string]string{"XDG_DATA_HOME": sessionPath, "OPENCODE_CONFIG_DIR": cfg.ConfigDir},
-		LogPath:     cfg.LogPath(request.Port),
-		Port:        request.Port,
-		BaseURL:     fmt.Sprintf("http://%s:%d", cfg.LinuxServerID, request.Port),
-		SessionPath: sessionPath,
-		ConfigPath:  cfg.ConfigDir,
-		TraceID:     request.TraceID,
+		Command:      cfg.OpencodeBin,
+		Args:         args,
+		Env:          env,
+		LogPath:      cfg.LogPath(request.Port),
+		Port:         request.Port,
+		BaseURL:      fmt.Sprintf("http://%s:%d", cfg.LinuxServerID, request.Port),
+		SessionPath:  sessionPath,
+		ConfigPath:   cfg.ConfigDir,
+		StartCommand: formatStartCommand(cfg.OpencodeBin, args, env),
+		TraceID:      request.TraceID,
 	}, nil
 }
 
 // Start 启动一个端口对应的 opencode server，并写入本地 state。
 func (m *Manager) Start(ctx context.Context, request StartRequest) (Result, error) {
-	spec, err := BuildStartSpec(m.cfg, request)
+	cfg, err := m.startConfig()
+	if err != nil {
+		return failed(request.Port, request.TraceID, err), err
+	}
+	spec, err := BuildStartSpec(cfg, request)
 	if err != nil {
 		return failed(request.Port, request.TraceID, err), err
 	}
@@ -196,10 +254,17 @@ func (m *Manager) Start(ctx context.Context, request StartRequest) (Result, erro
 		err := fmt.Errorf("container max processes reached")
 		return failed(request.Port, request.TraceID, err), err
 	}
-	if err := os.MkdirAll(spec.SessionPath, 0o755); err != nil {
-		return failed(request.Port, request.TraceID, err), err
+	if err := ensurePublicConfigInitialized(spec.ConfigPath); err != nil {
+		// 公共配置目录（OPENCODE_PUBLIC_CONFIG_DIR）必须由管理员预先初始化，
+		// manager 不自动创建，避免拉起一个没有公共 agent/provider 配置的空壳进程。
+		return failedWithCode(
+				request.Port,
+				request.TraceID,
+				ErrorCodeOpencodeUnavailable,
+				publicConfigNotInitializedMessage),
+			err
 	}
-	if err := os.MkdirAll(spec.ConfigPath, 0o755); err != nil {
+	if err := os.MkdirAll(spec.SessionPath, 0o755); err != nil {
 		return failed(request.Port, request.TraceID, err), err
 	}
 	if err := os.MkdirAll(filepath.Dir(spec.LogPath), 0o755); err != nil {
@@ -210,13 +275,14 @@ func (m *Manager) Start(ctx context.Context, request StartRequest) (Result, erro
 		return failed(request.Port, request.TraceID, err), err
 	}
 	record := state.ProcessRecord{
-		Port:        request.Port,
-		PID:         pid,
-		BaseURL:     spec.BaseURL,
-		SessionPath: spec.SessionPath,
-		ConfigPath:  spec.ConfigPath,
-		StartedAt:   time.Now().UTC(),
-		TraceID:     request.TraceID,
+		Port:         request.Port,
+		PID:          pid,
+		BaseURL:      spec.BaseURL,
+		SessionPath:  spec.SessionPath,
+		ConfigPath:   spec.ConfigPath,
+		StartedAt:    time.Now().UTC(),
+		StartCommand: spec.StartCommand,
+		TraceID:      request.TraceID,
 	}
 	if err := m.store.Create(record); err != nil {
 		_ = m.signaler.Terminate(pid)
@@ -235,15 +301,19 @@ func (m *Manager) Stop(ctx context.Context, request StopRequest) (Result, error)
 		err := fmt.Errorf("port %d is not managed", request.Port)
 		return failed(request.Port, request.TraceID, err), err
 	}
+	finished := false
 	if err := m.signaler.Terminate(record.PID); err != nil {
-		return failed(request.Port, request.TraceID, err), err
+		if !isProcessFinishedError(err) {
+			return failed(request.Port, request.TraceID, err), err
+		}
+		finished = true
 	}
 	timeout := request.Timeout
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	if !m.waitStopped(ctx, record.PID, timeout) {
-		if err := m.signaler.Kill(record.PID); err != nil {
+	if !finished && !m.waitStopped(ctx, record.PID, timeout) {
+		if err := m.signaler.Kill(record.PID); err != nil && !isProcessFinishedError(err) {
 			return failed(request.Port, request.TraceID, err), err
 		}
 	}
@@ -283,11 +353,70 @@ func (m *Manager) Health(ctx context.Context, request HealthRequest) (Result, er
 
 // List 返回当前本地 state 中记录的全部 opencode server 进程。
 func (m *Manager) List(traceID string) (Result, error) {
-	records, err := m.store.List()
+	records, err := m.activeRecords()
 	if err != nil {
 		return failed(0, traceID, err), err
 	}
+	records = m.withDerivedStartCommands(records, traceID)
 	return Result{Status: StatusHealthy, Message: "listed managed processes", TraceID: traceID, Records: records}, nil
+}
+
+// activeRecords 在对外展示/心跳前清理已退出 PID 的陈旧 state，避免死进程继续占用容量。
+func (m *Manager) activeRecords() ([]state.ProcessRecord, error) {
+	records, err := m.store.List()
+	if err != nil {
+		return nil, err
+	}
+	alive := m.checker.ProcessAlive
+	if alive == nil {
+		alive = health.DefaultProcessAlive
+	}
+	active := records[:0]
+	for _, record := range records {
+		if !alive(record.PID) {
+			if err := m.store.Delete(record.Port); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		active = append(active, record)
+	}
+	return active, nil
+}
+
+func (m *Manager) withDerivedStartCommands(records []state.ProcessRecord, traceID string) []state.ProcessRecord {
+	cfg, err := m.startConfig()
+	if err != nil {
+		return records
+	}
+	for i := range records {
+		if records[i].StartCommand != "" {
+			continue
+		}
+		spec, err := BuildStartSpec(cfg, StartRequest{Port: records[i].Port, TraceID: nonEmptyTraceID(traceID)})
+		if err == nil {
+			records[i].StartCommand = spec.StartCommand
+		}
+	}
+	return records
+}
+
+func isProcessFinishedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "process already finished") || strings.Contains(message, "no such process")
+}
+
+func nonEmptyTraceID(traceID string) string {
+	if traceID != "" {
+		return traceID
+	}
+	return "trace_list"
 }
 
 func (m *Manager) waitStopped(ctx context.Context, pid int, timeout time.Duration) bool {
@@ -313,16 +442,35 @@ func (m *Manager) waitStopped(ctx context.Context, pid int, timeout time.Duratio
 	}
 }
 
+func ensurePublicConfigInitialized(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		return errPublicConfigNotInitialized
+	}
+	if !info.IsDir() {
+		return errPublicConfigNotInitialized
+	}
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return errPublicConfigNotInitialized
+	}
+	if len(entries) == 0 {
+		return errPublicConfigNotInitialized
+	}
+	return nil
+}
+
 func result(status Status, record state.ProcessRecord, message string, traceID string) Result {
 	return Result{
-		Status:      status,
-		Port:        record.Port,
-		PID:         record.PID,
-		BaseURL:     record.BaseURL,
-		SessionPath: record.SessionPath,
-		ConfigPath:  record.ConfigPath,
-		Message:     message,
-		TraceID:     traceID,
+		Status:       status,
+		Port:         record.Port,
+		PID:          record.PID,
+		BaseURL:      record.BaseURL,
+		SessionPath:  record.SessionPath,
+		ConfigPath:   record.ConfigPath,
+		StartCommand: record.StartCommand,
+		Message:      message,
+		TraceID:      traceID,
 	}
 }
 
@@ -332,6 +480,10 @@ func failed(port int, traceID string, err error) Result {
 		message = err.Error()
 	}
 	return Result{Status: StatusFailed, Port: port, Message: message, TraceID: traceID}
+}
+
+func failedWithCode(port int, traceID string, errorCode string, message string) Result {
+	return Result{Status: StatusFailed, Port: port, Message: message, ErrorCode: errorCode, TraceID: traceID}
 }
 
 // OSStarter 使用 os/exec 启动真实 opencode serve 进程。
@@ -387,4 +539,37 @@ func flattenEnv(values map[string]string) []string {
 		env = append(env, key+"="+value)
 	}
 	return env
+}
+
+func formatStartCommand(command string, args []string, env map[string]string) string {
+	parts := make([]string, 0, len(args)+3)
+	for _, key := range []string{"XDG_DATA_HOME", "OPENCODE_CONFIG_DIR"} {
+		if value, ok := env[key]; ok {
+			parts = append(parts, key+"="+shellQuote(value))
+		}
+	}
+	parts = append(parts, shellQuote(command))
+	for _, arg := range args {
+		parts = append(parts, shellQuote(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	for _, char := range value {
+		if !isShellSafe(char) {
+			return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+		}
+	}
+	return value
+}
+
+func isShellSafe(char rune) bool {
+	return char >= 'A' && char <= 'Z' ||
+		char >= 'a' && char <= 'z' ||
+		char >= '0' && char <= '9' ||
+		strings.ContainsRune("_./:=@%+-", char)
 }

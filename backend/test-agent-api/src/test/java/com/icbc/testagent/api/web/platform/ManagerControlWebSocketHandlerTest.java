@@ -26,6 +26,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -190,9 +191,43 @@ class ManagerControlWebSocketHandlerTest {
         verify(controlService).backendListResponse("trace_1234567890abcdef");
     }
 
+    @Test
+    void handlesConfigRequestWithCurrentRuntimeConfig() {
+        ManagerControlApplicationService controlService = Mockito.mock(ManagerControlApplicationService.class);
+        OpencodeManagerConfigSyncService configSyncService = Mockito.mock(OpencodeManagerConfigSyncService.class);
+        when(configSyncService.configUpdateMessage("trace_config")).thenReturn(Optional.of(
+                ManagerControlMessage.configUpdate(
+                        8,
+                        "/data/.testagent/agent-opencode/.session/",
+                        "/data/.testagent/agent-opencode/.config/opencode/",
+                        "trace_config")));
+        ManagerControlMessage request = ManagerControlMessage.configRequest("trace_config");
+        FakeWebSocketSession session = FakeWebSocketSession.withToken(
+                "secret-token",
+                List.of(codec.encode(request)));
+
+        handler(controlService, new ManagerPendingCommandRegistry(), configSyncService)
+                .handle(session)
+                .block(Duration.ofSeconds(1));
+
+        ManagerControlMessage response = codec.decode(session.sentText().getFirst());
+        assertThat(response.type()).isEqualTo(com.icbc.testagent.opencode.runtime.process.socket.ManagerControlProtocol.TYPE_CONFIG_UPDATE);
+        assertThat(response.maxProcesses()).isEqualTo(8);
+        assertThat(response.sessionRoot()).isEqualTo("/data/.testagent/agent-opencode/.session/");
+        assertThat(response.configDir()).isEqualTo("/data/.testagent/agent-opencode/.config/opencode/");
+        verify(configSyncService).configUpdateMessage("trace_config");
+    }
+
     private ManagerControlWebSocketHandler handler(
             ManagerControlApplicationService controlService,
             ManagerPendingCommandRegistry pendingCommands) {
+        return handler(controlService, pendingCommands, Mockito.mock(OpencodeManagerConfigSyncService.class));
+    }
+
+    private ManagerControlWebSocketHandler handler(
+            ManagerControlApplicationService controlService,
+            ManagerPendingCommandRegistry pendingCommands,
+            OpencodeManagerConfigSyncService configSyncService) {
         BackendJavaProcessLifecycleService backendLifecycle = Mockito.mock(BackendJavaProcessLifecycleService.class);
         when(backendLifecycle.backendProcessId()).thenReturn(new BackendProcessId("bjp_1234567890abcdef"));
         return new ManagerControlWebSocketHandler(
@@ -202,7 +237,7 @@ class ManagerControlWebSocketHandlerTest {
                 backendLifecycle,
                 new ManagerConnectionRegistry(),
                 pendingCommands,
-                Mockito.mock(OpencodeManagerConfigSyncService.class));
+                configSyncService);
     }
 
     private static ManagerControlSettings settings() {

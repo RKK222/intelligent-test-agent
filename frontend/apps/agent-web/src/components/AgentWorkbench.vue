@@ -14,6 +14,7 @@ import type {
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
   FileContent,
+  FileSearchResult,
   FileTreeEntry,
   ManagedApplication,
   MessagePart,
@@ -97,6 +98,12 @@ const expandedDirectories = ref<Set<string>>(new Set());
 // 展开多层）。使用 Set<string> 而非单值 ref，避免后到的加载把前者的 loading 状态覆盖，
 // 导致"点击没反应"——toggleDirectory 的二次点击守卫会因 loading 状态丢失而误判。
 const loadingPath = ref<Set<string>>(new Set());
+// 文件搜索状态：searchKeyword 由输入框双向驱动；searchResults/searchLoading 由防抖后的 RPC 回填。
+let searchTimer: ReturnType<typeof setTimeout> | null = null;
+let searchSeq = 0;
+const searchKeyword = ref("");
+const searchResults = ref<FileSearchResult[]>([]);
+const searchLoading = ref(false);
 const session = shallowRef<Session | null>(null);
 const run = shallowRef<Run | null>(null);
 const lastPrompt = ref("");
@@ -425,9 +432,11 @@ const vcsStatusQuery = useQuery({
   queryFn: () => api.getVcsStatus(selectedWorkspaceIdRef.value!),
   refetchInterval: 30000
 });
+const opencodeProcessEnabled = computed(() => authStore.isAuthenticated());
+const opencodeProcessQueryKey = computed(() => ["runtime", "opencode-process", "me", authStore.token ?? ""] as const);
 const opencodeProcessQuery = useQuery({
-  queryKey: ["runtime", "opencode-process", "me"],
-  enabled: () => authStore.isAuthenticated(),
+  queryKey: opencodeProcessQueryKey,
+  enabled: opencodeProcessEnabled,
   queryFn: () => api.getMyOpencodeProcess(),
   retry: false
 });
@@ -443,12 +452,24 @@ const lspStatusData = computed(() => lspStatusQuery.data.value);
 const mcpStatusData = computed(() => mcpStatusQuery.data.value);
 const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => opencodeProcessQuery.data.value ?? null);
 const opencodeProcessReady = computed(() => opencodeProcessStatus.value?.status === "READY");
+// 只在首个状态响应回来前展示“正在检查”，避免 READY 数据后台刷新时把对话区重新置为阻塞态。
+const opencodeProcessInitialLoading = computed(
+  () => opencodeProcessEnabled.value && !opencodeProcessStatus.value && (opencodeProcessQuery.isPending.value || opencodeProcessQuery.isFetching.value)
+);
+const opencodeProcessRefreshing = computed(
+  () => opencodeProcessEnabled.value && Boolean(opencodeProcessStatus.value) && opencodeProcessQuery.isFetching.value
+);
 const sessionsItems = computed(() => sessionsQuery.data.value?.items ?? []);
 const selectedModelInfo = computed(() => {
   const selected = modelIdOnly(selectedModel.value);
   return models.value.find((model) => modelValue(model) === selectedModel.value || model.id === selected);
 });
 const selectedModelLabel = computed(() => selectedModelInfo.value?.name ?? selectedModel.value ?? "未选择模型");
+
+function refreshOpencodeProcessStatus() {
+  if (!opencodeProcessEnabled.value || opencodeProcessQuery.isFetching.value) return;
+  void opencodeProcessQuery.refetch();
+}
 const modelsLoading = computed(() => modelsQuery.isPending.value || modelsQuery.isFetching.value);
 const modelGroups = computed(() => {
   const keyword = modelSearch.value.trim().toLowerCase();
@@ -612,7 +633,7 @@ const saveMutation = useMutation({
     if (isAgentFilePath(tab.path)) {
       const agent = agentFileInfo(tab.path);
       if (agent.scope === "PUBLIC") {
-        await api.writePublicAgentFile(agent.path, tab.content, agent.worktreeId);
+        await api.writePublicAgentFile(agent.path, tab.content, agent.worktreeId, agent.linuxServerId);
       } else {
         if (!selectedWorkspace.value) {
           throw new Error("未选择 Workspace");
@@ -654,21 +675,28 @@ function publicFilePath(tabPath: string): string {
 function isAgentFilePath(path: string): boolean {
   return path.startsWith(AGENT_PUBLIC_FILE_PREFIX) || path.startsWith(AGENT_WORKSPACE_FILE_PREFIX);
 }
-function agentTabPath(scope: "PUBLIC" | "WORKSPACE", path: string, worktreeId?: string | null): string {
+function agentTabPath(scope: "PUBLIC" | "WORKSPACE", path: string, worktreeId?: string | null, linuxServerId?: string | null): string {
   const prefix = scope === "PUBLIC" ? AGENT_PUBLIC_FILE_PREFIX : AGENT_WORKSPACE_FILE_PREFIX;
-  return `${prefix}${encodeURIComponent(worktreeId ?? "")}:${encodeURIComponent(path)}`;
+  return `${prefix}${encodeURIComponent(worktreeId ?? "")}:${encodeURIComponent(linuxServerId ?? "")}:${encodeURIComponent(path)}`;
 }
-function agentFileInfo(tabPath: string): { scope: "PUBLIC" | "WORKSPACE"; path: string; worktreeId?: string } {
+function agentFileInfo(tabPath: string): { scope: "PUBLIC" | "WORKSPACE"; path: string; worktreeId?: string; linuxServerId?: string } {
   const scope: "PUBLIC" | "WORKSPACE" = tabPath.startsWith(AGENT_PUBLIC_FILE_PREFIX) ? "PUBLIC" : "WORKSPACE";
   const prefix = scope === "PUBLIC" ? AGENT_PUBLIC_FILE_PREFIX : AGENT_WORKSPACE_FILE_PREFIX;
   const rest = tabPath.slice(prefix.length);
-  const separator = rest.indexOf(":");
-  const rawWorktree = separator >= 0 ? rest.slice(0, separator) : "";
-  const rawPath = separator >= 0 ? rest.slice(separator + 1) : rest;
+  const firstSeparator = rest.indexOf(":");
+  const secondSeparator = firstSeparator >= 0 ? rest.indexOf(":", firstSeparator + 1) : -1;
+  const rawWorktree = firstSeparator >= 0 ? rest.slice(0, firstSeparator) : "";
+  const rawLinuxServer = secondSeparator >= 0 ? rest.slice(firstSeparator + 1, secondSeparator) : "";
+  const rawPath = secondSeparator >= 0
+    ? rest.slice(secondSeparator + 1)
+    : firstSeparator >= 0
+      ? rest.slice(firstSeparator + 1)
+      : rest;
   return {
     scope,
     path: decodeURIComponent(rawPath),
-    worktreeId: rawWorktree ? decodeURIComponent(rawWorktree) : undefined
+    worktreeId: rawWorktree ? decodeURIComponent(rawWorktree) : undefined,
+    linuxServerId: rawLinuxServer ? decodeURIComponent(rawLinuxServer) : undefined
   };
 }
 
@@ -709,7 +737,7 @@ const startRunMutation = useMutation({
 const initializeOpencodeProcessMutation = useMutation({
   mutationFn: () => api.initializeMyOpencodeProcess(),
   onSuccess: (status) => {
-    queryClient.setQueryData(["runtime", "opencode-process", "me"], status);
+    queryClient.setQueryData(opencodeProcessQueryKey.value, status);
   },
   onError: (error) => {
     feedback.value = errorFeedback("初始化 opencode 进程失败", error);
@@ -1002,6 +1030,15 @@ function resetWorkspaceState() {
   entriesByDirectory.value = {};
   expandedDirectories.value = new Set();
   loadingPath.value = new Set();
+  // 切换工作区时清空搜索状态，避免旧工作区的搜索结果残留。
+  searchKeyword.value = "";
+  searchResults.value = [];
+  searchLoading.value = false;
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+    searchTimer = null;
+  }
+  searchSeq++;
   session.value = null;
   run.value = null;
   logs.value = [];
@@ -1363,6 +1400,46 @@ async function loadDirectory(
   }
 }
 
+// 处理文件搜索输入：防抖 250ms 后发起 workspace.search RPC。
+// 用 searchSeq 丢弃过期请求结果（用户快速输入时只采纳最后一次的结果）。
+function handleFileSearch(keyword: string) {
+  searchKeyword.value = keyword;
+  const trimmed = keyword.trim();
+  if (!trimmed) {
+    searchResults.value = [];
+    searchLoading.value = false;
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+      searchTimer = null;
+    }
+    return;
+  }
+  if (searchTimer) {
+    clearTimeout(searchTimer);
+  }
+  searchLoading.value = true;
+  const seq = ++searchSeq;
+  searchTimer = setTimeout(async () => {
+    searchTimer = null;
+    try {
+      const results = await api.searchFiles(selectedWorkspace.value!.workspaceId, trimmed);
+      // 丢弃过期请求的结果
+      if (seq === searchSeq) {
+        searchResults.value = results;
+      }
+    } catch (error) {
+      if (seq === searchSeq) {
+        searchResults.value = [];
+        feedback.value = errorFeedback("搜索文件失败", error);
+      }
+    } finally {
+      if (seq === searchSeq) {
+        searchLoading.value = false;
+      }
+    }
+  }, 250);
+}
+
 async function openFile(path: string) {
   if (!selectedWorkspace.value) {
     return;
@@ -1398,11 +1475,11 @@ async function openPublicFile(payload: { path: string; content: FileContent; rea
   });
 }
 
-async function openAgentFile(payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null }) {
+async function openAgentFile(payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null; linuxServerId?: string | null }) {
   centerMode.value = "editor";
-  const tabPath = agentTabPath(payload.scope, payload.path, payload.worktreeId);
+  const tabPath = agentTabPath(payload.scope, payload.path, payload.worktreeId, payload.linuxServerId);
   workbench.openTab({
-    id: `${payload.scope.toLowerCase()}:agent:file:${payload.worktreeId ?? "direct"}:${payload.path}`,
+    id: `${payload.scope.toLowerCase()}:agent:file:${payload.worktreeId ?? "direct"}:${payload.linuxServerId ?? "local"}:${payload.path}`,
     path: tabPath,
     title: payload.path.split(/[\\/]+/).filter(Boolean).at(-1) ?? payload.path,
     content: payload.content.content,
@@ -1931,7 +2008,7 @@ const saveDiffFileMutation = useMutation({
     if (isAgentFilePath(path)) {
       const agent = agentFileInfo(path);
       if (agent.scope === "PUBLIC") {
-        await api.writePublicAgentFile(agent.path, content, agent.worktreeId);
+        await api.writePublicAgentFile(agent.path, content, agent.worktreeId, agent.linuxServerId);
       } else {
         if (!selectedWorkspace.value) {
           throw new Error("未选择 Workspace");
@@ -2062,11 +2139,11 @@ async function handleLogout() {
     :current-user-name="authStore.currentUser?.username"
     :current-user-role-labels="authStore.currentUser?.roleLabels"
     :opencode-process-status="opencodeProcessStatus"
-    :opencode-process-loading="opencodeProcessQuery.isFetching.value"
+    :opencode-process-loading="opencodeProcessInitialLoading"
     @toggle-left-panel="leftPanelOpen = !leftPanelOpen"
     @toggle-right-panel="rightPanelOpen = !rightPanelOpen"
     @select-app="handleSelectApp"
-    @refresh-opencode-process="() => { void opencodeProcessQuery.refetch(); }"
+    @refresh-opencode-process="refreshOpencodeProcessStatus"
     @logout="handleLogout"
   >
     <template #activity>
@@ -2131,6 +2208,9 @@ async function handleLogout() {
           :api-base-url="apiBaseUrl"
           :workspace-id="selectedWorkspace.workspaceId"
           :show-server-workspace-switch="isSuperAdmin"
+          :search-results="searchResults"
+          :search-loading="searchLoading"
+          :search-keyword="searchKeyword"
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
           @open-diff="handleOpenDiff"
@@ -2141,6 +2221,7 @@ async function handleLogout() {
           @open-public-file="openPublicFile"
           @open-agent-file="openAgentFile"
           @open-server-workspace-picker="openServerWorkspacePicker"
+          @search="handleFileSearch"
         />
         <div v-else class="managed-workspace-empty">
           <p>当前应用尚未切换到可用工作区。</p>
@@ -2238,7 +2319,8 @@ async function handleLogout() {
           :readonly-reason="readonlySessionReason"
           :process-status="opencodeProcessStatus"
           process-required
-          :process-loading="opencodeProcessQuery.isFetching.value && !opencodeProcessStatus"
+          :process-loading="opencodeProcessInitialLoading"
+          :process-refreshing="opencodeProcessRefreshing"
           :process-initializing="initializeOpencodeProcessMutation.isPending.value"
           :permissions="chatState.permissions"
           :questions="chatState.questions"
@@ -2246,17 +2328,21 @@ async function handleLogout() {
           :model-picker-disabled="false"
           :stop-disabled="!canStopRun"
           :stop-disabled-reason="stopDisabledReason"
+          :models="models"
+          :selected-model="selectedModel"
           placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
           @send="(text: string) => handleSend(text)"
           @stop="handleStopRun"
           @new-conversation="handleNewConversation"
           @open-model-picker="modelPickerOpen = true"
           @initialize-process="() => initializeOpencodeProcessMutation.mutate()"
+          @refresh-process="refreshOpencodeProcessStatus"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
           @reply-permission="(requestId: string, decision: 'once' | 'always' | 'reject') => replyPermissionMutation.mutate({ requestId, decision })"
           @reply-question="(requestId: string, answers: unknown[]) => replyQuestionMutation.mutate({ requestId, answers })"
           @reject-question="(requestId: string) => rejectQuestionMutation.mutate(requestId)"
           @select-session="(id: string) => switchSession(id)"
+          @select-model="(model) => selectRuntimeModel(model)"
           @close="rightPanelOpen = false"
         />
       </div>
@@ -2453,7 +2539,7 @@ async function handleLogout() {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--ta-border);
-  border-radius: 8px;
+  border-radius: 16px;
   background: var(--ta-panel);
   box-shadow: 0 20px 60px rgb(15 23 42 / 20%);
 }
@@ -2484,7 +2570,7 @@ async function handleLogout() {
   margin: 12px 16px 8px;
   height: 36px;
   border: 1px solid var(--ta-border);
-  border-radius: 6px;
+  border-radius: 12px;
   background: var(--ta-panel-2);
   color: var(--ta-text);
   padding: 0 10px;
@@ -2549,14 +2635,21 @@ async function handleLogout() {
 }
 
 .managed-workspace-button {
-  height: 28px;
+  height: 34px;
   border: 1px solid var(--ta-border);
-  border-radius: 6px;
+  border-radius: 12px;
   background: #fff;
   color: var(--ta-text);
-  font-size: 12px;
-  padding: 0 8px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 0 16px;
   white-space: nowrap;
+  transition: background-color 0.12s, border-color 0.12s;
+  cursor: pointer;
+}
+.managed-workspace-button:hover {
+  background: #f5f5f5;
+  border-color: #bbb;
 }
 
 .managed-workspace-files {
@@ -2570,10 +2663,14 @@ async function handleLogout() {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 24px;
+  gap: 14px;
+  padding: 24px 16px;
   color: var(--ta-muted);
-  font-size: 13px;
+  font-size: 14px;
   text-align: center;
+  border-radius: 16px;
+  background: #ffffff;
+  border: 0.5px dashed var(--ta-border-strong);
+  margin: 0;
 }
 </style>

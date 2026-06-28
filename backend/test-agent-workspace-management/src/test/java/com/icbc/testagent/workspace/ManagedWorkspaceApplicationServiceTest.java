@@ -19,7 +19,7 @@ import com.icbc.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.icbc.testagent.domain.configuration.CodeRepository;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
 import com.icbc.testagent.domain.configuration.CommonParameter;
-import com.icbc.testagent.domain.configuration.CommonParameterRepository;
+import com.icbc.testagent.domain.configuration.CommonParameterValues;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.icbc.testagent.domain.configuration.ParameterPlatform;
 import com.icbc.testagent.domain.configuration.SshKeyId;
@@ -363,7 +363,7 @@ class ManagedWorkspaceApplicationServiceTest {
             FakeWorkspaceRepository workspaces,
             FakeGitWorkspaceService git,
             ServerBroadcastPublisher publisher) {
-        CommonParameterRepository commonParameters = commonParameters();
+        CommonParameterValues commonParameters = commonParameters();
         return new ManagedWorkspaceApplicationService(
                 configuration,
                 commonParameters,
@@ -383,7 +383,7 @@ class ManagedWorkspaceApplicationServiceTest {
             FakeWorkspaceRepository workspaces,
             FakeGitWorkspaceService git,
             List<String> branches) {
-        CommonParameterRepository commonParameters = commonParameters();
+        CommonParameterValues commonParameters = commonParameters();
         return new ManagedWorkspaceApplicationService(
                 configuration,
                 commonParameters,
@@ -400,19 +400,39 @@ class ManagedWorkspaceApplicationServiceTest {
     /**
      * 内存通用参数仓库：把工作区根目录参数指向 @TempDir 下的子目录，common_parameters 为唯一来源。
      */
-    private CommonParameterRepository commonParameters() {
+    /**
+     * 内存通用参数值视图：把工作区根目录参数指向 @TempDir 下的子目录，common_parameters 为唯一来源。
+     */
+    private CommonParameterValues commonParameters() {
         Map<String, String> parameters = Map.of(
                 "OPENCODE_APP_WORKSPACE_ROOT", root.resolve("appworkspace").toString(),
                 "OPENCODE_PERSONAL_WORKTREE_ROOT", root.resolve("personalworktree").toString());
-        return (englishName, platform) -> Optional.ofNullable(parameters.get(englishName))
-                .map(value -> new CommonParameter(
-                        "param_" + englishName.toLowerCase(),
-                        englishName,
-                        englishName,
-                        value,
-                        platform,
-                        Instant.EPOCH,
-                        Instant.EPOCH));
+        return new CommonParameterValues() {
+            @Override
+            public Optional<String> resolvedValue(String englishName) {
+                return Optional.ofNullable(parameters.get(englishName));
+            }
+
+            @Override
+            public Optional<String> resolvedValue(String englishName, com.icbc.testagent.domain.configuration.ParameterPlatform platform) {
+                return Optional.ofNullable(parameters.get(englishName));
+            }
+
+            @Override
+            public Optional<CommonParameter> raw(String englishName, com.icbc.testagent.domain.configuration.ParameterPlatform platform) {
+                return Optional.empty();
+            }
+
+            @Override
+            public List<CommonParameter> findAll() {
+                return List.of();
+            }
+
+            @Override
+            public List<com.icbc.testagent.domain.configuration.ResolvedParameter> resolvedAll() {
+                return List.of();
+            }
+        };
     }
 
     private static final class RecordingBroadcastPublisher implements ServerBroadcastPublisher {

@@ -8,6 +8,7 @@ import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.observability.TraceConstants;
 import com.icbc.testagent.observability.TraceIdSupport;
+import com.icbc.testagent.workspace.AgentConfigApplicationService;
 import com.icbc.testagent.workspace.WorkspaceApplicationService;
 import com.icbc.testagent.workspace.WorkspaceDirectoryService;
 import java.net.URI;
@@ -33,10 +34,15 @@ import reactor.core.scheduler.Schedulers;
 public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
 
     private static final String MODE_DIRECTORY_PICKER = "directory-picker";
+    private static final String MODE_WORKSPACE = "workspace";
+    private static final String MODE_AGENT_CONFIG = "agent-config";
+    private static final String SCOPE_PUBLIC = "PUBLIC";
+    private static final String SCOPE_WORKSPACE = "WORKSPACE";
 
     private final WorkspaceFileSocketTicketService ticketService;
     private final WorkspaceApplicationService workspaceService;
     private final WorkspaceDirectoryService directoryService;
+    private final AgentConfigApplicationService agentConfigService;
     private final ObjectMapper objectMapper;
     private final Set<String> allowedOrigins;
 
@@ -47,12 +53,14 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             WorkspaceFileSocketTicketService ticketService,
             WorkspaceApplicationService workspaceService,
             WorkspaceDirectoryService directoryService,
+            AgentConfigApplicationService agentConfigService,
             ObjectMapper objectMapper,
             @Value("${test-agent.security.cors-allowed-origins:http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}")
             String allowedOrigins) {
         this.ticketService = Objects.requireNonNull(ticketService, "ticketService must not be null");
         this.workspaceService = Objects.requireNonNull(workspaceService, "workspaceService must not be null");
         this.directoryService = Objects.requireNonNull(directoryService, "directoryService must not be null");
+        this.agentConfigService = Objects.requireNonNull(agentConfigService, "agentConfigService must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.allowedOrigins = Set.copyOf(Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
@@ -101,6 +109,7 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             JsonNode params = root.path("params");
             Object data = switch (op) {
                 case "workspace.list" -> workspaceService.listFiles(workspaceId(ticket, params), text(params, "path"));
+                case "workspace.search" -> workspaceService.searchFiles(workspaceId(ticket, params), text(params, "query"));
                 case "workspace.read" -> workspaceService.readFile(workspaceId(ticket, params), requiredText(params, "path"));
                 case "workspace.write" -> {
                     workspaceService.writeFile(workspaceId(ticket, params), requiredText(params, "path"), text(params, "content"));
@@ -109,6 +118,12 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
                 case "workspace.status" -> workspaceService.fileStatus(workspaceId(ticket, params), requiredText(params, "path"));
                 case "workspace.delete" -> {
                     workspaceService.deleteFile(workspaceId(ticket, params), requiredText(params, "path"));
+                    yield null;
+                }
+                case "agent-config.list" -> agentConfigList(ticket, params);
+                case "agent-config.read" -> agentConfigRead(ticket, params);
+                case "agent-config.write" -> {
+                    agentConfigWrite(ticket, params);
                     yield null;
                 }
                 case "directory.list" -> directoryList(ticket, params);
@@ -151,7 +166,79 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
         return RuntimeDtos.WorkspaceResponse.from(workspace);
     }
 
+    private Object agentConfigList(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        String scope = agentConfigScope(ticket, params);
+        String worktreeId = agentConfigWorktreeId(ticket, params);
+        if (SCOPE_PUBLIC.equals(scope)) {
+            return agentConfigService.listPublicAgentFiles(text(params, "path"), worktreeId);
+        }
+        return agentConfigService.listWorkspaceAgentFiles(agentConfigWorkspaceId(ticket, params), text(params, "path"), worktreeId);
+    }
+
+    private Object agentConfigRead(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        String scope = agentConfigScope(ticket, params);
+        String worktreeId = agentConfigWorktreeId(ticket, params);
+        if (SCOPE_PUBLIC.equals(scope)) {
+            return agentConfigService.readPublicAgentFile(requiredText(params, "path"), worktreeId);
+        }
+        return agentConfigService.readWorkspaceAgentFile(agentConfigWorkspaceId(ticket, params), requiredText(params, "path"), worktreeId);
+    }
+
+    private void agentConfigWrite(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        if (!ticket.superAdmin()) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "无权限");
+        }
+        String scope = agentConfigScope(ticket, params);
+        String worktreeId = agentConfigWorktreeId(ticket, params);
+        if (SCOPE_PUBLIC.equals(scope)) {
+            agentConfigService.writePublicAgentFile(requiredText(params, "path"), text(params, "content"), worktreeId);
+            return;
+        }
+        agentConfigService.writeWorkspaceAgentFile(agentConfigWorkspaceId(ticket, params), requiredText(params, "path"), text(params, "content"), worktreeId);
+    }
+
+    private String agentConfigScope(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        if (!MODE_AGENT_CONFIG.equals(ticket.mode())) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "当前 ticket 不允许操作 Agent 配置文件");
+        }
+        String ticketScope = ticket.scope();
+        if (!SCOPE_PUBLIC.equals(ticketScope) && !SCOPE_WORKSPACE.equals(ticketScope)) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "Agent 配置文件 ticket 无效");
+        }
+        String requestedScope = text(params, "scope");
+        if (requestedScope != null && !requestedScope.isBlank() && !ticketScope.equals(requestedScope.trim().toUpperCase(java.util.Locale.ROOT))) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "Agent 配置 scope 与文件 WebSocket ticket 不匹配");
+        }
+        return ticketScope;
+    }
+
+    private String agentConfigWorkspaceId(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        String workspaceId = text(params, "workspaceId");
+        if (workspaceId == null || workspaceId.isBlank()) {
+            workspaceId = ticket.workspaceId();
+        }
+        if (workspaceId == null || workspaceId.isBlank() || !workspaceId.equals(ticket.workspaceId())) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "Agent 配置 workspace 与文件 WebSocket ticket 不匹配");
+        }
+        return workspaceId;
+    }
+
+    private String agentConfigWorktreeId(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        String requested = normalizeOptional(text(params, "worktreeId"));
+        String bound = normalizeOptional(ticket.worktreeId());
+        if (bound == null && requested == null) {
+            return null;
+        }
+        if (bound != null && bound.equals(requested)) {
+            return bound;
+        }
+        throw new PlatformException(ErrorCode.FORBIDDEN, "Agent 配置 worktree 与文件 WebSocket ticket 不匹配");
+    }
+
     private WorkspaceId workspaceId(WorkspaceFileSocketTicket ticket, JsonNode params) {
+        if (!MODE_WORKSPACE.equals(ticket.mode())) {
+            throw new PlatformException(ErrorCode.FORBIDDEN, "当前 ticket 不允许操作工作区文件");
+        }
         String workspaceId = text(params, "workspaceId");
         if (workspaceId == null || workspaceId.isBlank()) {
             workspaceId = ticket.workspaceId();
@@ -160,6 +247,10 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
             throw new PlatformException(ErrorCode.FORBIDDEN, "Workspace 与文件 WebSocket ticket 不匹配");
         }
         return new WorkspaceId(workspaceId);
+    }
+
+    private String normalizeOptional(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private String success(String id, Object data, String traceId) {

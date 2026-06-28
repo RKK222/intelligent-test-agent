@@ -14,6 +14,7 @@ const (
 	messageTypeCommand             = "command"
 	messageTypeCommandResult       = "commandResult"
 	messageTypeError               = "error"
+	messageTypeConfigRequest       = "configRequest"
 	messageTypeConfigUpdate        = "configUpdate"
 )
 
@@ -28,13 +29,14 @@ type BackendEndpoint struct {
 
 // ManagedProcess 是 manager 心跳中随 latest snapshot 保存的本地 opencode server 进程明细。
 type ManagedProcess struct {
-	Port        int       `json:"port"`
-	PID         int       `json:"pid"`
-	BaseURL     string    `json:"baseUrl,omitempty"`
-	SessionPath string    `json:"sessionPath,omitempty"`
-	ConfigPath  string    `json:"configPath,omitempty"`
-	StartedAt   time.Time `json:"startedAt,omitempty"`
-	TraceID     string    `json:"traceId,omitempty"`
+	Port         int       `json:"port"`
+	PID          int       `json:"pid"`
+	BaseURL      string    `json:"baseUrl,omitempty"`
+	SessionPath  string    `json:"sessionPath,omitempty"`
+	ConfigPath   string    `json:"configPath,omitempty"`
+	StartedAt    time.Time `json:"startedAt,omitempty"`
+	StartCommand string    `json:"startCommand,omitempty"`
+	TraceID      string    `json:"traceId,omitempty"`
 }
 
 // Message 是 manager 与后端 WebSocket 控制面的稳定 JSON 帧。
@@ -49,6 +51,8 @@ type Message struct {
 	PortStart                  int               `json:"portStart,omitempty"`
 	PortEnd                    int               `json:"portEnd,omitempty"`
 	MaxProcesses               int               `json:"maxProcesses,omitempty"`
+	SessionRoot                string            `json:"sessionRoot,omitempty"`
+	ConfigDir                  string            `json:"configDir,omitempty"`
 	CurrentProcesses           int               `json:"currentProcesses"`
 	MetricsSource              string            `json:"metricsSource,omitempty"`
 	CPUUsagePercent            *float64          `json:"cpuUsagePercent,omitempty"`

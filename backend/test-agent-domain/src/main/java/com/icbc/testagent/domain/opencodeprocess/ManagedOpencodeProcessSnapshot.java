@@ -12,5 +12,6 @@ public record ManagedOpencodeProcessSnapshot(
         String sessionPath,
         String configPath,
         Instant startedAt,
+        String startCommand,
         String traceId) {
 }

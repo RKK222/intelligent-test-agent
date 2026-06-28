@@ -15,10 +15,8 @@ import com.icbc.testagent.domain.configuration.ApplicationWorkspace;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.icbc.testagent.domain.configuration.CodeRepository;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
-import com.icbc.testagent.domain.configuration.CommonParameter;
-import com.icbc.testagent.domain.configuration.CommonParameterRepository;
+import com.icbc.testagent.domain.configuration.CommonParameterValues;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
-import com.icbc.testagent.domain.configuration.ParameterPlatform;
 import com.icbc.testagent.domain.configuration.UserSshKey;
 import com.icbc.testagent.domain.configuration.WorkspaceCreateOperation;
 import com.icbc.testagent.domain.configuration.WorkspaceCreateOperationRepository;
@@ -83,11 +81,37 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private static final String PARAM_OPENCODE_APP_WORKSPACE_ROOT = "OPENCODE_APP_WORKSPACE_ROOT";
     private static final String PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT = "OPENCODE_PERSONAL_WORKTREE_ROOT";
     private static final ServerBroadcastPublisher NOOP_BROADCAST_PUBLISHER = event -> { };
-    private static final CommonParameterRepository EMPTY_PARAMETER_REPOSITORY = (englishName, platform) -> Optional.empty();
+    private static final CommonParameterValues EMPTY_PARAMETER_VALUES = new CommonParameterValues() {
+        @Override
+        public Optional<String> resolvedValue(String englishName) {
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<String> resolvedValue(String englishName, com.icbc.testagent.domain.configuration.ParameterPlatform platform) {
+            return Optional.empty();
+        }
+
+        @Override
+        public Optional<com.icbc.testagent.domain.configuration.CommonParameter> raw(
+                String englishName, com.icbc.testagent.domain.configuration.ParameterPlatform platform) {
+            return Optional.empty();
+        }
+
+        @Override
+        public java.util.List<com.icbc.testagent.domain.configuration.CommonParameter> findAll() {
+            return java.util.List.of();
+        }
+
+        @Override
+        public java.util.List<com.icbc.testagent.domain.configuration.ResolvedParameter> resolvedAll() {
+            return java.util.List.of();
+        }
+    };
     private static final WorkspaceCreateOperationRepository NOOP_OPERATION_REPOSITORY = new NoopWorkspaceCreateOperationRepository();
 
     private final ConfigurationManagementRepository configurationRepository;
-    private final CommonParameterRepository commonParameterRepository;
+    private final CommonParameterValues commonParameterValues;
     private final WorkspaceCreateOperationRepository workspaceCreateOperationRepository;
     private final ManagedWorkspaceRepository managedWorkspaceRepository;
     private final WorkspaceRepository workspaceRepository;
@@ -106,7 +130,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     @Autowired
     public ManagedWorkspaceApplicationService(
             ConfigurationManagementRepository configurationRepository,
-            CommonParameterRepository commonParameterRepository,
+            CommonParameterValues commonParameterValues,
             WorkspaceCreateOperationRepository workspaceCreateOperationRepository,
             ManagedWorkspaceRepository managedWorkspaceRepository,
             WorkspaceRepository workspaceRepository,
@@ -116,7 +140,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             SshKeyEncryptionService sshKeyEncryptionService) {
         this(
                 configurationRepository,
-                commonParameterRepository,
+                commonParameterValues,
                 workspaceCreateOperationRepository,
                 managedWorkspaceRepository,
                 workspaceRepository,
@@ -141,7 +165,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             SshKeyEncryptionService sshKeyEncryptionService) {
         this(
                 configurationRepository,
-                EMPTY_PARAMETER_REPOSITORY,
+                EMPTY_PARAMETER_VALUES,
                 NOOP_OPERATION_REPOSITORY,
                 managedWorkspaceRepository,
                 workspaceRepository,
@@ -168,7 +192,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             ServerBroadcastPublisher broadcastPublisher) {
         this(
                 configurationRepository,
-                EMPTY_PARAMETER_REPOSITORY,
+                EMPTY_PARAMETER_VALUES,
                 NOOP_OPERATION_REPOSITORY,
                 managedWorkspaceRepository,
                 workspaceRepository,
@@ -186,7 +210,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
      */
     ManagedWorkspaceApplicationService(
             ConfigurationManagementRepository configurationRepository,
-            CommonParameterRepository commonParameterRepository,
+            CommonParameterValues commonParameterValues,
             ManagedWorkspaceRepository managedWorkspaceRepository,
             WorkspaceRepository workspaceRepository,
             UserRepository userRepository,
@@ -197,7 +221,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             ServerBroadcastPublisher broadcastPublisher) {
         this(
                 configurationRepository,
-                commonParameterRepository,
+                commonParameterValues,
                 NOOP_OPERATION_REPOSITORY,
                 managedWorkspaceRepository,
                 workspaceRepository,
@@ -211,7 +235,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     ManagedWorkspaceApplicationService(
             ConfigurationManagementRepository configurationRepository,
-            CommonParameterRepository commonParameterRepository,
+            CommonParameterValues commonParameterValues,
             WorkspaceCreateOperationRepository workspaceCreateOperationRepository,
             ManagedWorkspaceRepository managedWorkspaceRepository,
             WorkspaceRepository workspaceRepository,
@@ -222,7 +246,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
-        this.commonParameterRepository = Objects.requireNonNull(commonParameterRepository, "commonParameterRepository must not be null");
+        this.commonParameterValues = Objects.requireNonNull(commonParameterValues, "commonParameterValues must not be null");
         this.workspaceCreateOperationRepository = Objects.requireNonNull(workspaceCreateOperationRepository, "workspaceCreateOperationRepository must not be null");
         this.managedWorkspaceRepository = Objects.requireNonNull(managedWorkspaceRepository, "managedWorkspaceRepository must not be null");
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
@@ -1206,15 +1230,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     /**
-     * 从 common_parameters 读取必填路径参数，缺失或空白时抛异常。
+     * 从通用参数内存缓存读取必填路径参数（已展开变量引用），缺失或空白时抛异常。
      * common_parameters 为唯一事实源，不在 yaml 或代码常量预留 fallback。
      */
     private Path configuredPath(String parameterEnglishName) {
-        ParameterPlatform platform = ParameterPlatform.current();
-        return commonParameterRepository.findByEnglishNameAndPlatform(parameterEnglishName, platform)
-                .or(() -> commonParameterRepository.findByEnglishNameAndPlatform(parameterEnglishName, ParameterPlatform.ALL))
-                .map(CommonParameter::parameterValue)
-                .filter(value -> value != null && !value.isBlank())
+        return commonParameterValues.resolvedValue(parameterEnglishName)
+                .filter(value -> !value.isBlank())
                 .map(Path::of)
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.INTERNAL_ERROR,

@@ -24,10 +24,25 @@ public final class AgentConfigResponses {
             String commitHash) {
     }
 
+    public record PublicRepositoryStatusResponse(
+            String linuxServerId,
+            String serverName,
+            String gitRootPath,
+            String configDirPath,
+            String worktreeRootPath,
+            String status,
+            boolean initialized,
+            boolean initializationAllowed,
+            String currentBranch,
+            String commitHash,
+            String message) {
+    }
+
     public record AgentConfigWorktreeResponse(
             String worktreeId,
             String scope,
             String workspaceId,
+            String linuxServerId,
             String worktreeName,
             String branch,
             String rootPath,
@@ -41,6 +56,7 @@ public final class AgentConfigResponses {
                     worktree.worktreeId(),
                     worktree.scope().name(),
                     worktree.workspaceId() == null ? null : worktree.workspaceId().value(),
+                    worktree.linuxServerId(),
                     worktree.worktreeName(),
                     worktree.branch(),
                     worktree.rootPath(),
@@ -48,6 +64,42 @@ public final class AgentConfigResponses {
                     worktree.status().name(),
                     worktree.createdAt(),
                     worktree.updatedAt());
+        }
+    }
+
+    public record AgentConfigWorktreeOptionResponse(
+            String worktreeId,
+            String scope,
+            String workspaceId,
+            String linuxServerId,
+            String worktreeName,
+            String branch,
+            String rootPath,
+            String agentDirectory,
+            String status,
+            Instant createdAt,
+            Instant updatedAt,
+            String createdByUserId,
+            String createdByUsername) {
+
+        public static AgentConfigWorktreeOptionResponse from(
+                AgentConfigWorktree worktree,
+                String agentDirectory,
+                String createdByUsername) {
+            return new AgentConfigWorktreeOptionResponse(
+                    worktree.worktreeId(),
+                    worktree.scope().name(),
+                    worktree.workspaceId() == null ? null : worktree.workspaceId().value(),
+                    worktree.linuxServerId(),
+                    worktree.worktreeName(),
+                    worktree.branch(),
+                    worktree.rootPath(),
+                    agentDirectory,
+                    worktree.status().name(),
+                    worktree.createdAt(),
+                    worktree.updatedAt(),
+                    worktree.createdBy().value(),
+                    createdByUsername);
         }
     }
 
