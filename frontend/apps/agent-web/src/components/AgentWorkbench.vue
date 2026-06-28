@@ -1655,25 +1655,22 @@ async function openLivePreview(relPath: string) {
 }
 
 // 把文件所在父目录重新拉取一次，让新建/删除的文件即时出现在文件树中。
-// 仅在父目录已经缓存（用户已展开过）时刷新；未加载的目录交给 expandPathToFile 懒加载，
-// 避免一次工具完成触发两次 listFiles 同一目录的重复请求。
-// 父目录已加载时必须走 force=true 强制重新拉取，否则会被 loadDirectory 的去重短路，
-// 导致 agent 写文件后文件树不会即时反映新增/删除。
+// 不论父目录是否已加载过，都走 force=true 强制重新拉取：未加载时由 `loadDirectory` 直接发起
+// 一次拉取，已加载时则覆盖旧条目；正在加载中的请求由 `loadDirectory` 内部的 `loadingPath`
+// 守卫去重，避免对同一目录堆积并发请求。
+// 注意：父目录的"加入 expandedDirectories"动作由 `expandPathToFile` 负责，
+// `refreshParentDirectory` 单纯负责把磁盘最新状态拉回前端。
 function refreshParentDirectory(relPath: string) {
   if (!relPath || relPath.startsWith("/")) {
     return;
   }
   const segments = relPath.split("/").filter(Boolean);
   if (segments.length <= 1) {
-    if (entriesByDirectory.value[""] !== undefined || expandedDirectories.value.size > 0) {
-      void loadDirectory("", undefined, true);
-    }
+    void loadDirectory("", undefined, true);
     return;
   }
   const parentPath = segments.slice(0, -1).join("/");
-  if (entriesByDirectory.value[parentPath] !== undefined) {
-    void loadDirectory(parentPath, undefined, true);
-  }
+  void loadDirectory(parentPath, undefined, true);
 }
 
 // 展开文件树到目标文件：把所有祖先目录加入 expandedDirectories 并按需懒加载。
@@ -1782,6 +1779,10 @@ function scanLiveToolParts() {
       if (liveTrack.value) {
         void openLivePreview(path);
       } else {
+        // 即使不开实时预览，也要展开文件树并刷新父目录，让用户看到新文件。
+        // 与 assistant 分支保持一致：card 事件可能不经过 assistant message，
+        // 必须在这里也展开祖先目录才能让新增文件立刻可见。
+        expandPathToFile(path);
         refreshParentDirectory(path);
       }
     }

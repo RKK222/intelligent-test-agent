@@ -1061,3 +1061,14 @@
 - How: 复用上一条已经引入的 `force` 形参；保留"父目录未展开过就不预加载"的判断（`entriesByDirectory[parentPath] === undefined` 时直接 return），不主动拉取用户从未展开的目录；`loadDirectory` 内部的 `loadingPath.has(path)` 守卫依旧防止对同一目录的并发请求堆积。
 - Result: agent 完成写文件工具后，写入位置所属的父目录会立即重新 `api.listFiles` 一次，文件树即时反映新建/删除；`vue-tsc` typecheck 与 Vitest 132 个测试全部通过。
 
+### 2026-06-28 - card 路径与未展开父目录下的文件树实时刷新二次修复
+
+- Why: 用户反馈上一轮修复后，agent 通过对话新生成的文件仍要按刷新按钮才能看到——差异卡片能更新，但文件树不展开新增文件的祖先目录。
+- What: 修改 `frontend/apps/agent-web/src/components/AgentWorkbench.vue`：
+  - `scanLiveToolParts` 的 tool card 分支（`message.role === "card" && message.cardType === "tool"`，由 `tool.started` / `tool.finished` 事件生成）原来只在 `liveTrack.value === false` 时调 `refreshParentDirectory(path)`，缺少 `expandPathToFile(path)`；与 assistant message 的 part 分支不一致，导致 card 路径下新文件所在的祖先目录不会被自动展开。补上 `expandPathToFile(path)`，让 card 路径与 assistant 路径行为完全一致。
+  - `refreshParentDirectory` 去掉"父目录必须已经缓存（`entriesByDirectory[parentPath] !== undefined`）才重拉"的限制，**始终**走 `loadDirectory(parent, undefined, true)`：父目录未加载时由 `loadDirectory` 直接发起拉取（`force=true` 不会绕过 `loadingPath` 守卫，所以不会与 `expandPathToFile` 已经在飞的请求堆积并发），已加载时则覆盖旧条目。根目录分支同步去掉"`entriesByDirectory[""] !== undefined || expandedDirectories.size > 0`"前置条件，root 总是会被强制重拉一次。
+  - 同步更新 `refreshParentDirectory` 上方中文注释，把"展开"和"重拉"的职责拆开（前者归 `expandPathToFile`、后者归 `refreshParentDirectory`），并明确 `loadDirectory` 内部的 `loadingPath` 守卫仍负责并发去重。
+  - 同步更新 `frontend/apps/agent-web/README.md` 第 34 行描述，明确两条路径（assistant part / tool card）都会调 `expandPathToFile` + `refreshParentDirectory`。
+- How: 没有改 `loadDirectory` 行为，只放宽 `refreshParentDirectory` 的调用条件并在 card 路径补齐 `expandPathToFile`，覆盖"父目录从未被用户展开过"和"工具事件只生成独立 card 消息"两种原本会被跳过的场景。
+- Result: 不论 agent 走 assistant message part 还是独立 tool card 事件，新文件的所有祖先目录都会被自动展开并触发 `api.listFiles`，文件树即时反映新增；用户不再需要手动点刷新按钮。`vue-tsc` typecheck 与 Vitest 132 个测试全部通过。
+
