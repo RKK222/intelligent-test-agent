@@ -175,6 +175,9 @@ function renderPanel(api = createApi()) {
         ElRadioGroup: ElRadioGroupStub,
         ElSelect: ElSelectStub,
         ElOption: ElOptionStub,
+        ElProgress: {
+          template: `<div class="el-progress">Progress</div>`
+        },
         ElTooltip: {
           props: ["content"],
           template: `<span :title="content"><slot /></span>`

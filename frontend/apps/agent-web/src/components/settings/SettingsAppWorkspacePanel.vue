@@ -91,6 +91,8 @@ const workspaceName = ref("");
 const workspaceVersion = ref("");
 const workspaceCreateOperation = ref<WorkspaceCreateOperation | null>(null);
 let workspaceCreatePollTimer: number | undefined;
+const loadingBranches = ref(false);
+const loadingDirectories = ref(false);
 
 const selectedWorkspaceRepository = computed(() => appRepositories.value.find((item) => item.repositoryId === workspaceRepositoryId.value) ?? null);
 const requiresWorkspaceVersion = computed(() => selectedWorkspaceRepository.value != null && !selectedWorkspaceRepository.value.standard);
@@ -349,21 +351,27 @@ async function loadWorkspaces() {
 }
 
 async function loadBranches() {
+  loadingBranches.value = true;
   await run(async () => {
     branches.value = workspaceRepositoryId.value ? await api.listRepositoryBranches(workspaceRepositoryId.value) : [];
     workspaceBranch.value = branches.value[0] ?? "";
     directories.value = [];
     workspaceDirectory.value = "";
+  }).finally(() => {
+    loadingBranches.value = false;
   });
 }
 
 async function loadDirectories() {
+  loadingDirectories.value = true;
   await run(async () => {
     directories.value =
       workspaceRepositoryId.value && workspaceBranch.value
         ? await api.listRepositoryDirectories(workspaceRepositoryId.value, workspaceBranch.value)
         : [];
     workspaceDirectory.value = directories.value[0] ?? "";
+  }).finally(() => {
+    loadingDirectories.value = false;
   });
 }
 
@@ -717,7 +725,10 @@ onBeforeUnmount(() => {
                     </el-select>
                   </label>
                 </div>
-                <el-button :disabled="loading || !workspaceRepositoryId" @click="loadBranches">刷新分支</el-button>
+                <el-button :disabled="loading || !workspaceRepositoryId" :loading="loadingBranches" @click="loadBranches">刷新分支</el-button>
+              </div>
+              <div v-if="loadingBranches" class="ta-workspace-step-progress">
+                <el-progress :percentage="100" :indeterminate="true" :duration="1" :show-text="false" :stroke-width="2" style="width: 100%" />
               </div>
             </div>
 
@@ -742,7 +753,10 @@ onBeforeUnmount(() => {
                     </el-select>
                   </label>
                 </div>
-                <el-button :disabled="loading || !workspaceBranch" @click="loadDirectories">加载目录</el-button>
+                <el-button :disabled="loading || !workspaceBranch" :loading="loadingDirectories" @click="loadDirectories">加载目录</el-button>
+              </div>
+              <div v-if="loadingDirectories" class="ta-workspace-step-progress">
+                <el-progress :percentage="100" :indeterminate="true" :duration="1" :show-text="false" :stroke-width="2" style="width: 100%" />
               </div>
             </div>
 
@@ -932,6 +946,27 @@ onBeforeUnmount(() => {
 }
 .ta-workspace-step:hover {
   background: #fbfcfe;
+}
+.ta-workspace-step-progress {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  line-height: 1;
+}
+.ta-workspace-step-progress :deep(.el-progress) {
+  margin: 0;
+}
+.ta-workspace-step-progress :deep(.el-progress-bar) {
+  margin: 0;
+  padding: 0;
+}
+.ta-workspace-step-progress :deep(.el-progress-bar__outer) {
+  border-radius: 0;
+  background-color: transparent !important;
+}
+.ta-workspace-step-progress :deep(.el-progress-bar__inner) {
+  border-radius: 0;
 }
 .ta-workspace-step-heading {
   display: flex;
