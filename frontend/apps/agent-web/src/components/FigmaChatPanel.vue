@@ -10,6 +10,7 @@ import {
   Circle,
   Eye,
   EyeOff,
+  FileText,
   History,
   ListTodo,
   Loader2,
@@ -61,9 +62,29 @@ function partText(part: unknown): string {
   return ''
 }
 
-function hasToolParts(msg: AgentMessage): boolean {
+function hasVisibleParts(msg: AgentMessage): boolean {
   if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return false
-  return msg.parts.some((p) => p.type === 'tool')
+  return msg.parts.some((p) => p.type === 'tool' || p.type === 'file')
+}
+
+function messageFiles(msg: FileOperationMessage) {
+  if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return []
+  return msg.parts
+    .filter((part): part is Extract<MessagePart, { type: 'file' }> => part.type === 'file')
+    .map((part) => ({
+      id: part.partId,
+      name: part.name ?? part.path ?? part.partId,
+      path: part.path,
+      mimeType: part.mimeType,
+      url: part.url,
+    }))
+}
+
+// 连续助手快照合并时只保留一个边界换行，避免前一段自带换行后再次 join 产生空白段。
+function joinAssistantContent(left: string, right: string): string {
+  if (!left) return right
+  if (!right) return left
+  return `${left.replace(/\n+$/, '')}\n${right.replace(/^\n+/, '')}`
 }
 
 type TaskPartItem = {
@@ -1133,7 +1154,7 @@ function openChangesDrawer() {
   drawerSelectedPath.value = drawerFiles.value[0]?.path ?? ''
   drawerOpen.value = true
   // 让 diff 区域滚回顶部，避免上次浏览的中间位置被保留
-  void nextTick(() => drawerScroll.value?.scrollTo({ top: 0 }))
+  void nextTick(() => drawerScroll.value?.scrollTo?.({ top: 0 }))
 }
 
 function closeChangesDrawer() {
@@ -1271,9 +1292,9 @@ const displayMessages = computed<ChatMessage[]>(() => {
         skillName = skillMatch[1]
         text = skillMatch[2]
       }
-      const hasTools = hasToolParts(m as AgentMessage)
-      // 有 tool part 的消息即使没有文本也保留，不因 running 状态变化而消失
-      if (!text.trim() && !hasTools) return null
+      const hasParts = hasVisibleParts(m as AgentMessage)
+      // 有 tool/file part 的消息即使没有文本也保留，不因 running 状态变化而消失
+      if (!text.trim() && !hasParts) return null
       return {
         id: m.messageId ?? m.id ?? `${m.role}-${index}`,
         role: m.role,
@@ -1290,7 +1311,7 @@ const displayMessages = computed<ChatMessage[]>(() => {
   for (const msg of raw) {
     const last = merged.length > 0 ? merged[merged.length - 1] : null
     if (msg.role === 'assistant' && last && last.role === 'assistant') {
-      last.content = [last.content, msg.content].filter(Boolean).join('\n')
+      last.content = joinAssistantContent(last.content, msg.content)
       last.parts = [...last.parts, ...msg.parts]
       if (msg.meta) last.meta = msg.meta
     } else {
@@ -1686,7 +1707,27 @@ function onCompositionEnd() {
                     message.content
                   }}</span>
                 </div>
-                <MarkdownView v-else :source="message.content" />
+                <MarkdownView v-else-if="message.content.trim()" :source="message.content" />
+                <div
+                  v-if="messageFiles(message).length > 0"
+                  class="figma-chat-document-list"
+                  aria-label="智能体返回文档"
+                >
+                  <component
+                    :is="file.url ? 'a' : 'div'"
+                    v-for="file in messageFiles(message)"
+                    :key="file.id"
+                    :href="file.url"
+                    :target="file.url ? '_blank' : undefined"
+                    :rel="file.url ? 'noreferrer' : undefined"
+                    class="figma-chat-document-item"
+                    :title="file.path || file.name"
+                  >
+                    <FileText :size="14" />
+                    <span>{{ file.name }}</span>
+                    <small v-if="file.mimeType">{{ file.mimeType }}</small>
+                  </component>
+                </div>
               </div>
             </div>
           </div>
@@ -1778,6 +1819,36 @@ function onCompositionEnd() {
         <pre class="figma-chat-thinking-text" v-html="reasoningHtml" />
       </div>
     </div>
+
+    <!-- 文件变更提示：实时与历史恢复共用同一个入口，点击后展示本地 Diff 抽屉。 -->
+    <button
+      v-if="hasFileChanges"
+      type="button"
+      class="figma-chat-changes-card"
+      :title="`${fileChanges?.length} 个文件已更改，点击查看 diff`"
+      :aria-expanded="drawerOpen"
+      aria-haspopup="dialog"
+      @click="openChangesDrawer"
+    >
+      <span class="figma-chat-changes-icon" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+          <path
+            d="M7 18C4.79 18 3 16.21 3 14C3 11.95 4.5 10.27 6.5 10.03C6.97 7.64 9.05 5.85 11.57 5.85C13.95 5.85 15.94 7.42 16.55 9.6C16.97 9.45 17.42 9.36 17.9 9.36C20.18 9.36 22 11.18 22 13.46C22 15.74 20.18 17.56 17.9 17.56"
+            stroke="white"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
+      </span>
+      <span class="figma-chat-changes-title">{{ fileChanges?.length }} 个文件已更改</span>
+      <span class="figma-chat-changes-spacer" />
+      <span class="figma-chat-changes-stats">
+        <span v-if="totalAdditions" class="figma-chat-add">+{{ totalAdditions }}</span>
+        <span v-if="totalDeletions" class="figma-chat-del">-{{ totalDeletions }}</span>
+      </span>
+      <ArrowUpRight class="figma-chat-changes-arrow" :size="16" />
+    </button>
 
     <!-- 任务消耗提示（位于输入框上方） -->
     <div v-if="hasTaskUsageDisplay" class="figma-chat-usage">
@@ -2748,6 +2819,40 @@ function onCompositionEnd() {
   padding: 0;
   color: #333;
   border-top-left-radius: 2px;
+}
+
+.figma-chat-document-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.figma-chat-document-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid var(--ta-chat-border);
+  border-radius: 6px;
+  background: var(--ta-chat-process-bg);
+  color: var(--ta-chat-text);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.figma-chat-document-item span {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figma-chat-document-item small {
+  color: var(--ta-chat-muted);
+  font-size: 10px;
 }
 
 .figma-chat-bubble--error {

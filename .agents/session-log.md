@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-06-28 - 历史文档恢复、首条消息标题与对话空行修复（纠正前次完成结论）
+
+- Why: 前次记录宣称历史文档和空行已解决，但真实页面仍无法看到历史生成文档，Session 标题仍是 `Agent HH:mm:ss`，连续助手快照仍会在边界多插换行；同时前次把 delta 事件全局豁免去重，违反 `docs/api/event-stream.md` 中 transient 也按稳定 `eventId` 去重的契约。
+- What:
+  - `agent-chat.normalizeMessagePart` 复用实时 reducer 的 part 归一化规则，把历史 `partsJson` 的 `id/tool/state.*` 原始结构恢复成统一 text/tool/file part；`workbench-utils.diffFilesFromSessionMessages` 在 Run Diff 快照为空时从历史 write/edit/apply_patch part 推断生成文件。
+  - `FigmaChatPanel` 恢复此前被删但 README 仍声明存在的“N 个文件已更改”入口和 Diff 抽屉，补 file part 文档行；连续 assistant 消息合并时边界最多保留一个换行。
+  - 新 Session 创建标题改为第一次发送消息的去首尾空白内容，聊天标题同步使用当前 Session 标题。
+  - event-stream-client 恢复所有真实 `eventId`（含 transient delta）统一去重；仅缺失 `eventId` 且 `seq=0` 的旧增量保持放行。
+- How: 先增加失败用例复现历史 raw part、文件卡片、连续换行、首条标题和重复 transient eventId，再做最小实现；历史 Diff 合并时以 Run API 返回为最新值、tool part 推断为缺失兜底。未修改 `.env.local`，未改 API、事件类型、数据库或 generated SDK。
+- Result: 前端 Vitest 22 文件 137/137、全 workspace typecheck、生产 build 通过；新增历史文档/首条标题 Playwright 在 Chromium 与 mobile 4/4 通过；今天涉及的后端 17 模块 Maven 回归 `BUILD SUCCESS`；`.env.test` 三服务重启成功，backend health/readiness 均 `UP`、frontend 3000 返回 200、CORS preflight 200。完整 mock E2E 仍有历史用例未随当前 UI 契约更新：24 passed、13 failed、3 skipped，失败集中在已改版的附件/实时追踪/工作区入口、SSH key 加密 mock 和不唯一“工作空间”定位器，不能据此宣称全量 E2E 已通过。
+
 ### 2026-06-28 - 事件流 transient 文本防重修复与历史对话管理抽屉实现及深度适配
 
 - Why: 响应用户需求及进一步精准反馈：(1) 修正智能体输出流式增量中丢失分段/排版破碎产生多余空行的问题；(2) 解决历史对话看不到的问题，提供质感极佳的交互与样式以便用户查看历史并一键切换；(3) 修复历史对话按钮与工作台外部缩进按钮重叠的问题；(4) 修复切换历史对话后仅显示用户消息、智能体返回内容丢失的问题；(5) 修复新建对话按钮失效的问题；(6) 解决切换历史对话后，智能体生成的修改过的文件（文档）没有被恢复展示的缺陷。

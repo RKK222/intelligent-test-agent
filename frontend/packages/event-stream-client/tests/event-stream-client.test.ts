@@ -44,7 +44,7 @@ describe("event-stream-client", () => {
     ).toMatchObject({ eventId: "evt_1", type: "run.started" });
   });
 
-  it("deduplicates by event id first and allows transient seq zero events", () => {
+  it("deduplicates all events by event id first and allows distinct transient seq zero events", () => {
     const source = new FakeEventSource();
     const received: string[] = [];
     const statuses: string[] = [];
@@ -89,7 +89,7 @@ describe("event-stream-client", () => {
       payload: { delta: "b" }
     });
 
-    expect(received).toEqual(["evt_1", "evt_live_1", "evt_live_2", "same_evt_id", "same_evt_id"]);
+    expect(received).toEqual(["evt_1", "evt_live_1", "evt_live_2", "same_evt_id"]);
     expect(statuses).toEqual(["connecting", "open"]);
 
     subscription.close();

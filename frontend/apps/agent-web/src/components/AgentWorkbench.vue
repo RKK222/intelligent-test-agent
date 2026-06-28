@@ -56,6 +56,7 @@ import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp
 import {
   buildPromptParts,
   diffFilesFromPayload,
+  diffFilesFromSessionMessages,
   dispatchRuntimeResult,
   errorFeedback,
   historyItems,
@@ -70,6 +71,7 @@ import {
   promptFromParts,
   runtimeResources,
   runtimeStatus,
+  sessionTitleFromFirstMessage,
   syntheticEvent,
   text
 } from "./workbench-utils";
@@ -139,7 +141,7 @@ const selectedAppId = ref<string | undefined>(undefined);
 const readonlySessionReason = ref("");
 const modelPickerOpen = ref(false);
 const modelSearch = ref("");
-const chatTitle = ref("生成测试案例");
+const chatTitle = computed(() => session.value?.title ?? "生成测试案例");
 // 任务消耗展示：duration 取 chatStartedAt 实时计算；tokens 从助手消息的 step-finish part
 // 累计（opencode 每轮 step 结束会上报 tokens.total）；thought for 累计 reasoning part 的
 // durationMs。Run 结束后保留最后值继续展示。Run 切换时清零。
@@ -671,7 +673,7 @@ function agentFileInfo(tabPath: string): { scope: "PUBLIC" | "WORKSPACE"; path: 
 }
 
 const startRunMutation = useMutation({
-  mutationFn: async (input: { prompt: string; parts: PromptPart[] }) => {
+  mutationFn: async (input: { prompt: string; parts: PromptPart[]; title?: string }) => {
     if (!opencodeProcessReady.value) {
       throw new Error("请先初始化 opencode 进程");
     }
@@ -680,8 +682,12 @@ const startRunMutation = useMutation({
     }
     const activeSession =
       session.value ??
-      (await api.createSession(selectedWorkspace.value.workspaceId, `Agent ${new Date().toLocaleTimeString("zh-CN", { hour12: false })}`));
+      (await api.createSession(
+        selectedWorkspace.value.workspaceId,
+        sessionTitleFromFirstMessage(input.title ?? input.prompt)
+      ));
     session.value = activeSession;
+    void queryClient.invalidateQueries({ queryKey: ["sessions"] });
     return api.startRun({
       sessionId: activeSession.sessionId,
       prompt: input.prompt,
@@ -1470,7 +1476,7 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     commandMutation.mutate({ ...command, prompt: aiPrompt });
     return;
   }
-  startRunMutation.mutate({ prompt: aiPrompt, parts });
+  startRunMutation.mutate({ prompt: aiPrompt, parts, title: displayPrompt });
 }
 
 function handleStopRun() {
@@ -1985,6 +1991,11 @@ async function switchSession(sessionId: string) {
   try {
     const page = await api.listSessionMessages(sessionId, 1, 100);
     dispatchChat({ type: "reset", messages: messagesFromSessionMessages(page.items) });
+    const restoredFiles = diffFilesFromSessionMessages(page.items).map((file) => ({
+      ...file,
+      path: normalizeWorkspacePath(file.path) || file.path
+    }));
+    diffFiles.value = restoredFiles;
 
     // 寻找最新的 runId 从而恢复 Run 状态与文件 Diff
     const lastMsgWithRunId = [...page.items].reverse().find((m) => m.runId);
@@ -1995,13 +2006,16 @@ async function switchSession(sessionId: string) {
           api.getRunDiff(lastMsgWithRunId.runId).catch(() => ({ files: [] }))
         ]);
         run.value = runDetail;
-        diffFiles.value = diffDetail.files ?? [];
+        const runFiles = (diffDetail.files ?? []).map((file) => ({
+          ...file,
+          path: normalizeWorkspacePath(file.path) || file.path
+        }));
+        diffFiles.value = mergeDiffFiles(restoredFiles, runFiles);
       } catch (runErr) {
         console.error("加载关联 Run 失败", runErr);
       }
     } else {
       run.value = null;
-      diffFiles.value = [];
     }
 
     feedback.value = { kind: "info", title: "已切换 Session", description: selected.title };

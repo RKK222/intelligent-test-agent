@@ -68,7 +68,7 @@ Browser
 | `packages/file-explorer` | 文件树、选择 Workspace 目录事件、已加载文件名过滤、变更列表和打开文件入口。 |
 | `packages/editor` | Monaco 编辑器（原生 `monaco-editor`）、语言识别、内容编辑和只读展示。 |
 | `packages/diff-viewer` | Monaco Diff、变更文件列表、Run/Session/VCS 来源切换、split/unified 视图、Run 级接受/拒绝按钮和当前文件反馈。 |
-| `packages/agent-chat` | 自建最小 chat 运行时、用户消息、message part timeline（text/reasoning/tool/file/subtask/step-start/step-finish/snapshot/patch/agent/retry/compaction）、运行卡片（plan/tool/test/diff/event）、runtime selector/status、slash command、`@` context、permission/question/Todo dock、Markdown 懒加载渲染（markdown-it + DOMPurify + highlight.js）和纯 RunEvent reducer。 |
+| `packages/agent-chat` | 自建最小 chat 运行时、用户消息、message part timeline（text/reasoning/tool/file/subtask/step-start/step-finish/snapshot/patch/agent/retry/compaction）、运行卡片（plan/tool/test/diff/event）、runtime selector/status、slash command、`@` context、permission/question/Todo dock、Markdown 懒加载渲染（markdown-it + DOMPurify + highlight.js）、纯 RunEvent reducer，以及供实时事件和历史 `partsJson` 共用的 message part 归一化入口。 |
 | `packages/terminal` | 受控 PTY 前端包，负责 ticket WebSocket 连接、输入、resize、关闭和输出渲染，不创建 ticket、不直连 opencode server。 |
 | `packages/test-runner` | 底部 Run 状态、取消、重试和事件日志面板。 |
 | `packages/ui-kit` | 平台通用 UI 组件、基础样式组合和反馈组件。 |

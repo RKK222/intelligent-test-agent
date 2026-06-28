@@ -69,6 +69,65 @@ describe("FigmaChatPanel", () => {
     expect(text.indexOf("第二轮用户问题")).toBeLessThan(text.indexOf("第二轮助手回答"));
   });
 
+  it("renders historical generated files and opens the file changes drawer", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1",
+            messageId: "a1",
+            role: "assistant",
+            text: "",
+            parts: [
+              {
+                partId: "file-1",
+                type: "file",
+                name: "登录测试报告.md",
+                path: "docs/登录测试报告.md",
+                mimeType: "text/markdown"
+              }
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        fileChanges: [
+          {
+            path: "docs/登录测试报告.md",
+            patch: "--- /dev/null\n+++ b/登录测试报告.md\n@@ -0,0 +1,1 @@\n+# 登录测试报告",
+            additions: 1,
+            deletions: 0,
+            status: "added"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.text()).toContain("登录测试报告.md");
+    const changesCard = wrapper.get(".figma-chat-changes-card");
+    expect(changesCard.text()).toContain("1 个文件已更改");
+
+    await changesCard.trigger("click");
+
+    expect(wrapper.get('[role="dialog"][aria-label="文件变更 Diff"]').text()).toContain("docs/登录测试报告.md");
+  });
+
+  it("does not insert an extra blank line when consecutive assistant fragments already contain a line break", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          { id: "a1", messageId: "a1", role: "assistant", text: "第一段\n", createdAt: "2026-06-25T09:01:00.000Z" },
+          { id: "a2", messageId: "a2", role: "assistant", text: "第二段", createdAt: "2026-06-25T09:01:01.000Z" }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.getComponent(markdownViewStub).props("source")).toBe("第一段\n第二段");
+  });
+
   it("does not render assistant rows that have no visible content", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

@@ -238,6 +238,94 @@ test("model picker groups models by provider and updates run model", async ({ pa
   });
 });
 
+test("the first sent message becomes the new session title", async ({ page }) => {
+  const sessionRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, { sessionRequests });
+
+  await gotoWorkbench(page);
+
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("请生成登录测试案例");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => sessionRequests.length).toBe(1);
+  expect(sessionRequests[0]).toEqual({
+    workspaceId: "wrk_1234567890abcdef",
+    title: "请生成登录测试案例"
+  });
+});
+
+test("switching history restores assistant documents and the file changes drawer", async ({ page }) => {
+  await mockBackendApi(page, {
+    sessions: [
+      {
+        sessionId: "ses_history",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "请生成登录测试报告",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-06-28T08:00:00Z",
+        updatedAt: "2026-06-28T08:01:00Z"
+      }
+    ],
+    sessionMessages: [
+      {
+        messageId: "msg_user",
+        sessionId: "ses_history",
+        role: "USER",
+        content: "请生成登录测试报告",
+        createdAt: "2026-06-28T08:00:00Z",
+        runId: "run_history"
+      },
+      {
+        messageId: "msg_assistant",
+        sessionId: "ses_history",
+        role: "ASSISTANT",
+        content: "测试报告已生成",
+        createdAt: "2026-06-28T08:01:00Z",
+        runId: "run_history",
+        parts: [
+          {
+            id: "part_file",
+            messageID: "msg_assistant",
+            type: "file",
+            name: "登录测试报告.md",
+            path: "docs/登录测试报告.md",
+            mimeType: "text/markdown"
+          }
+        ]
+      }
+    ],
+    historyRun: {
+      runId: "run_history",
+      sessionId: "ses_history",
+      workspaceId: "wrk_1234567890abcdef",
+      status: "SUCCEEDED",
+      createdAt: "2026-06-28T08:00:00Z",
+      updatedAt: "2026-06-28T08:01:00Z"
+    },
+    historyDiffFiles: [
+      {
+        path: "docs/登录测试报告.md",
+        patch: "--- /dev/null\n+++ b/登录测试报告.md\n@@ -0,0 +1,1 @@\n+# 登录测试报告",
+        additions: 1,
+        deletions: 0,
+        status: "added"
+      }
+    ]
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "历史对话" }).click();
+  await page.getByRole("button", { name: /请生成登录测试报告/ }).click();
+
+  await expect(page.getByText("测试报告已生成")).toBeVisible();
+  await expect(page.getByText("登录测试报告.md")).toBeVisible();
+  const changesCard = page.locator(".figma-chat-changes-card");
+  await expect(changesCard).toContainText("1 个文件已更改");
+  await changesCard.click();
+  await expect(page.getByRole("dialog", { name: "文件变更 Diff" })).toContainText("docs/登录测试报告.md");
+});
+
 test("workbench disables chat until opencode process is initialized", async ({ page }) => {
   const processInitializations: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, { processStatus: "NEEDS_INITIALIZATION", processInitializations });
@@ -566,6 +654,7 @@ async function mockBackendApi(
   page: Page,
   capture: {
     runRequests?: Array<Record<string, unknown>>;
+    sessionRequests?: Array<Record<string, unknown>>;
     permissionReplies?: Array<Record<string, unknown>>;
     questionReplies?: Array<Record<string, unknown>>;
     terminalTickets?: Array<Record<string, unknown>>;
@@ -591,6 +680,10 @@ async function mockBackendApi(
     processStatus?: "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE";
     processStatusRequests?: string[];
     processInitializations?: Array<Record<string, unknown>>;
+    sessions?: Array<Record<string, unknown>>;
+    sessionMessages?: Array<Record<string, unknown>>;
+    historyRun?: Record<string, unknown>;
+    historyDiffFiles?: Array<Record<string, unknown>>;
   } = {}
 ) {
   await page.exposeFunction("__taRecordWorkspaceFileRequest", (workspaceId: string, path: string) => {
@@ -921,15 +1014,28 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && /\/api\/workspaces\/[^/]+\/sessions$/.test(url.pathname)) {
-      await route.fulfill(json(pageOf([])));
+      await route.fulfill(json(pageOf(capture.sessions ?? [])));
       return;
     }
     if (method === "POST" && url.pathname === "/api/sessions") {
+      capture.sessionRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await route.fulfill(json(session()));
       return;
     }
     if (method === "GET" && url.pathname === "/api/sessions") {
-      await route.fulfill(json(pageOf([])));
+      await route.fulfill(json(pageOf(capture.sessions ?? [])));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/sessions/ses_history/messages") {
+      await route.fulfill(json(pageOf(capture.sessionMessages ?? [])));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/runs/run_history") {
+      await route.fulfill(json(capture.historyRun ?? {}));
+      return;
+    }
+    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/runs/run_history/diff") {
+      await route.fulfill(json({ runId: "run_history", files: capture.historyDiffFiles ?? [] }));
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/agent") {

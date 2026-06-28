@@ -254,7 +254,7 @@ function upsertPart(messages: AgentMessage[], event: RunEvent) {
       parts: []
     } satisfies Extract<AgentMessage, { role: "assistant" }>);
   const replaceIndex = exact.message ? exact.index : lastIdx;
-  const part = toMessagePart(raw, partId);
+  const part = normalizeMessagePart(raw, partId);
   const parts = [...(assistant.parts ?? [])];
   const partIdx = parts.findIndex((item) => item.partId === partId);
   if (partIdx >= 0) {
@@ -377,7 +377,12 @@ function toolCardKey(payload: Record<string, unknown>) {
   );
 }
 
-function toMessagePart(raw: Record<string, unknown>, partId: string): MessagePart {
+/**
+ * 把 opencode 原始 message part 和平台已规范化 part 收敛为前端统一模型。
+ * 历史消息接口返回的是数据库中保存的原始 partsJson，必须复用实时事件相同的归一化规则。
+ */
+export function normalizeMessagePart(raw: Record<string, unknown>, fallbackPartId?: string): MessagePart {
+  const partId = text(raw.partId) ?? text(raw.partID) ?? text(raw.id) ?? fallbackPartId ?? "part_unknown";
   const partType = text(raw.type) ?? text(raw.partType) ?? "text";
   if (partType === "tool") {
     const state = record(raw.state);

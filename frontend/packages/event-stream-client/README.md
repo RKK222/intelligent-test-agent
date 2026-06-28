@@ -8,7 +8,7 @@
 
 - 连接 `/api/internal/agent/{agentId}/runs/{runId}/events`，`agentId` 默认 `opencode`；旧 `/api/runs/{runId}/events` 仅作为后端兼容入口。
 - 监听平台 RunEvent wire name。
-- 优先按 `eventId` 去重，兼容旧事件时回退 `runId + seq`。
+- 所有事件（包括 transient 文本增量）优先按 `eventId` 去重，兼容缺失 `eventId` 的旧事件时才回退 `runId + seq`；`seq=0` 且缺失 `eventId` 的旧增量不能按固定序号互相去重。
 - 使用 `lastEventId` query 参数支持浏览器原生 EventSource 的首次续传，agent URL 下格式不变。
 - 提供关闭订阅和连接状态回调。
 

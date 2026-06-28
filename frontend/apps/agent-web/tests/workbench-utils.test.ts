@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import type { MessagePart, RunDiffFile } from "@test-agent/shared-types";
 import {
   diffFilesFromPayload,
+  diffFilesFromSessionMessages,
   inferDiffFromToolPart,
   mergeDiffFiles,
-  normalizePathKey
+  messagesFromSessionMessages,
+  normalizePathKey,
+  sessionTitleFromFirstMessage
 } from "../src/components/workbench-utils";
 
 function file(path: string, additions: number, deletions: number, status = "modified"): RunDiffFile {
@@ -138,6 +141,63 @@ describe("normalizePathKey", () => {
   it("returns empty string for falsy input", () => {
     expect(normalizePathKey("")).toBe("");
     expect(normalizePathKey(undefined)).toBe("");
+  });
+});
+
+describe("historical session restoration", () => {
+  it("normalizes raw opencode parts and restores generated documents", () => {
+    const messages = [
+      {
+        messageId: "msg_1",
+        sessionId: "ses_1",
+        role: "ASSISTANT",
+        content: "测试文档已生成",
+        createdAt: "2026-06-28T08:00:00Z",
+        parts: [
+          {
+            id: "part_write",
+            messageID: "msg_1",
+            type: "tool",
+            tool: "write",
+            state: {
+              status: "completed",
+              input: {
+                filePath: "/workspace/docs/登录测试报告.md",
+                content: "# 登录测试报告"
+              }
+            }
+          }
+        ] as never
+      }
+    ];
+
+    const mapped = messagesFromSessionMessages(messages);
+    expect(mapped[0]).toMatchObject({
+      role: "assistant",
+      parts: [
+        {
+          partId: "part_write",
+          type: "tool",
+          toolName: "write",
+          status: "completed",
+          input: {
+            filePath: "/workspace/docs/登录测试报告.md",
+            content: "# 登录测试报告"
+          }
+        }
+      ]
+    });
+    expect(diffFilesFromSessionMessages(messages)).toMatchObject([
+      {
+        path: "/workspace/docs/登录测试报告.md",
+        additions: 1,
+        status: "added"
+      }
+    ]);
+  });
+
+  it("uses the trimmed first message as the session title", () => {
+    expect(sessionTitleFromFirstMessage("  请生成登录测试案例  ")).toBe("请生成登录测试案例");
   });
 });
 

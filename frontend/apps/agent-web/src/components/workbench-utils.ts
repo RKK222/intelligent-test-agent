@@ -17,7 +17,7 @@ import type {
 import type { AgentChatRuntimeAction } from "@test-agent/agent-chat";
 import type { EditorSelectionContext } from "@test-agent/editor";
 import type { Feedback } from "@test-agent/ui-kit";
-import { buildComposerPromptParts, type ComposerAttachment } from "@test-agent/agent-chat";
+import { buildComposerPromptParts, normalizeMessagePart, type ComposerAttachment } from "@test-agent/agent-chat";
 import { buildEditorFilePromptPart } from "./prompt-context";
 
 export function diffFilesFromPayload(payload: Record<string, unknown>): RunDiffFile[] {
@@ -275,10 +275,57 @@ export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMe
       messageId: message.messageId,
       role: "assistant",
       text: message.content,
-      parts: message.parts ?? [],
+      parts: normalizeSessionMessageParts(message),
       createdAt: message.createdAt
     };
   });
+}
+
+/**
+ * 历史接口返回的 partsJson 保留 opencode 原始字段（id/tool/state），
+ * 这里复用实时 reducer 的归一化逻辑，避免历史工具和文档因字段形态不同而丢失。
+ */
+function normalizeSessionMessageParts(message: SessionMessage): MessagePart[] {
+  return (message.parts ?? [])
+    .map((part, index) => {
+      if (!part || typeof part !== "object") {
+        return null;
+      }
+      return normalizeMessagePart(
+        part as unknown as Record<string, unknown>,
+        `${message.messageId}-part-${index}`
+      );
+    })
+    .filter((part): part is MessagePart => part !== null);
+}
+
+/**
+ * 从历史 assistant 工具 part 恢复生成文件列表，作为 Run Diff 快照缺失时的展示兜底。
+ */
+export function diffFilesFromSessionMessages(messages: SessionMessage[]): RunDiffFile[] {
+  let restored: RunDiffFile[] = [];
+  for (const message of messagesFromSessionMessages(messages)) {
+    if (message.role !== "assistant") {
+      continue;
+    }
+    for (const part of message.parts ?? []) {
+      if (part.type !== "tool") {
+        continue;
+      }
+      const inferred = inferDiffFromToolPart(part);
+      if (inferred) {
+        restored = mergeDiffFiles(restored, [inferred]);
+      }
+    }
+  }
+  return restored;
+}
+
+/**
+ * 新会话标题直接取第一次发送的可见消息，去掉输入框首尾空白。
+ */
+export function sessionTitleFromFirstMessage(message: string): string {
+  return message.trim() || "新对话";
 }
 
 export function modelValue(model: ModelInfo) {
