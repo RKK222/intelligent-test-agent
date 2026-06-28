@@ -9,7 +9,7 @@
 - Session 创建、查询、消息追加和归档。
 - Run 启动、取消、远端 agent session 懒创建/复用、事件订阅和终态处理。
 - 当前用户 opencode 进程状态查询、头像菜单服务状态投影、初始化契约、防绕过 Run 校验、runtime 代理用户进程路由、manager WebSocket 命令网关，以及用户进程到兼容 `ExecutionNode` 的投影。
-- `WorkspaceFileRoutingService` 根据当前用户 opencode 进程和 Redis Java 后端快照定位同服务器后端 Java 进程，供前端工作区文件 WebSocket 先路由到目标后端；超级管理员服务器工作空间选择器也复用该在线快照返回活跃后端服务器列表和默认目录。
+- `WorkspaceFileRoutingService` 根据当前用户 opencode 进程和 Redis Java 后端快照定位同服务器后端 Java 进程，供前端工作区文件 WebSocket 先路由到目标后端；超级管理员服务器工作空间选择器也复用该在线快照返回活跃后端服务器列表和默认目录。本地换 IP 或切换数据库后，历史 workspace 的 `linux_server_id` 若指向已无在线 Java 后端的旧服务器，且当前用户 opencode 已迁移到本后端、workspace 根目录在本机可访问，路由时会把 workspace 回绑到当前 `linuxServerId`；旧服务器仍在线或本机目录不可访问时继续返回 `CONFLICT`。
 - `AgentRuntimeTargetResolver` 统一封装用户进程节点、固定节点 fallback、远端 session 创建/复用以及 binding 节点不一致时的自动覆盖。
 - `RuntimeManagementQueryService` 聚合 Linux 服务器、后端 Java 进程、opencode 容器、manager、manager-backend 连接、用户进程和绑定状态，供超级管理员只读管理页展示；Java 后端、manager 和连接在线态只读取 Redis 快照，不回退数据库 heartbeat 字段。容器指标历史按容器 ID 读取；后端 Java 指标历史会把按 `linuxServerId` 保存的服务器 CPU/内存/磁盘样本与按 `backendProcessId` 保存的当前 JVM 样本合并返回，保留近 48 小时原始 5 秒样本，查询时按 Controller 解析出的时间窗口读取，超出查询上限时按时间桶降采样。
 - `OpencodeProcessHeartbeatMaintenanceService` 每 3 分钟通过 manager health 命令确认 RUNNING opencode server 进程并刷新 Redis 心跳，每 5 分钟清理 Redis 心跳索引中过期的 Java/opencode 进程 ID；opencode 进程心跳仍保留 5 分钟窗口。
@@ -17,6 +17,7 @@
 - `OpencodeProcessManagerGateway` 提供两套实现，通过 `test-agent.opencode.manager-control.gateway-mode` 切换：`socket`（默认，生产用 `SocketOpencodeProcessManagerGateway` 走 manager WebSocket）与 `local`（`LocalOpencodeProcessManagerGateway` 直连 `baseUrl` 跑 HTTP GET 检查、`startProcess` 走占位返回）。两个实现都打 `@ConditionalOnProperty` 互斥激活；`application-local.yml` 默认 `local`，其它 profile 留空走 `socket`。
 - manager WebSocket 控制面通过 `ManagerControlMessageCodec` 编码 JSON；发给 Go manager 的时间字段必须保持 RFC3339 字符串，不能使用 Jackson 默认时间戳，否则 Go `time.Time` 解码会断开连接并导致用户进程初始化不可用。
 - `UserOpencodeProcessAssignmentService` 支持 `test-agent.opencode.local-direct` 短路开关：开启后 `status` / `initialize` / `requireReadyProcess` 三个入口完全跳过 database topology / user binding / manager health 校验链路，直接合成一个指向 `test-agent.opencode.local-direct-base-url`（默认 `http://127.0.0.1:4096`）的 READY 进程对象。Run 启动拿到合成节点后仍会先 upsert 兼容 `ExecutionNode`，再保存路由审计和 agent session binding，避免本地直连节点触发外键失败。`application-local.yml` / `application-guo.yml` 默认 `true`，生产必须保持 `false`。配置类由 `OpencodeManagerControlConfig.localDirectSettings` 注入到 runtime 的 `LocalDirectSettings`。
+- `UserOpencodeProcessAssignmentService` 对已有 binding 的用户仍优先在原 `linux_server_id` 上重建；当原服务器没有当前后端已连接的健康容器时，会 fallback 到当前后端任意健康容器，并在初始化成功后把 binding 迁移到新 `linuxServerId`，避免本地换 IP、换测试库或 manager 迁移后旧用户被旧 binding 锁死。端口选择按数据库唯一约束 `(linux_server_id, port)` 在同服务器全局避让所有历史进程行，包含其它容器和非运行态脏数据。
 - `UserOpencodeProcessAssignmentService` 创建或合成用户 opencode 进程时，session/config 路径优先读取 `common_parameters.OPENCODE_SESSION_DIR` 和 `common_parameters.OPENCODE_PUBLIC_CONFIG_DIR`；缺失时回退 `/data/.testagent/agent-opencode/.session/` 和 `/data/.testagent/agent-opencode/.config/opencode/`。
 - RunEvent 持久化策略、实时发布和 agent projected messages 恢复。
 - Run 终态/取消后的 session_messages 快照持久化，包含 assistant 输出、message parts 和 token/cost。
@@ -41,8 +42,8 @@
 ## 测试覆盖
 
 - `RunApplicationServiceTest` 覆盖 Run 创建、通用 binding 保存/复用、远端 session 懒创建/复用、用户进程节点 upsert、用户进程 binding 不一致自动重建、sticky node、prompt parts、终态事件、终态消息快照/token 持久化、瞬态消息事件、tool part 实时 Diff 派生和取消编排。
-- `UserOpencodeProcessAssignmentServiceTest` 覆盖未绑定状态、READY 复用、头像菜单未分配/运行中/未运行服务状态、同服务器重建、端口选择、manager 不可用、通用参数 session/config 路径读取、绑定/节点投影，以及本地短路模式（`local-direct=true`）下 `status` / `initialize` / `requireReadyProcess` 完全跳过 database 与 gateway 直返合成 READY 的行为。
-- `WorkspaceFileRoutingServiceTest` 覆盖同服务器 workspace 通过 Redis 后端快照路由到目标后端、workspace 与 agent 不同服务器时拒绝。
+- `UserOpencodeProcessAssignmentServiceTest` 覆盖未绑定状态、READY 复用、头像菜单未分配/运行中/未运行服务状态、同服务器重建、换 IP 后 fallback 到全局健康容器、端口选择、同服务器历史脏行端口避让、manager 不可用、通用参数 session/config 路径读取、绑定/节点投影，以及本地短路模式（`local-direct=true`）下 `status` / `initialize` / `requireReadyProcess` 完全跳过 database 与 gateway 直返合成 READY 的行为。
+- `WorkspaceFileRoutingServiceTest` 覆盖同服务器 workspace 通过 Redis 后端快照路由到目标后端、workspace 与 agent 不同服务器时拒绝、本地旧 `linux_server_id` 安全回绑，以及旧服务器仍在线时不回绑。
 - `RuntimeManagementQueryServiceTest` 覆盖运行管理 Redis 快照聚合、活跃进程过滤、用户名筛选、绑定状态合并、空数据、分钟级时间窗口、容器/后端指标历史降采样，以及同一 `linuxServerId` 下 Java 重启后的服务器指标连续查询。
 - `ManagerControlMessageCodecTest`、`ManagerControlApplicationServiceTest`、`ManagerConnectionRegistryTest`、`SocketOpencodeProcessManagerGatewayTest`、`BackendJavaProcessLifecycleServiceTest`、`LocalOpencodeProcessManagerGatewayTest`、`OpencodeManagerConfigSyncServiceTest` 覆盖 manager 控制面消息、Redis manager 心跳、后端列表响应、连接路由、命令等待、后端实例心跳、本地 manager-backend 连接自举、local 网关的 HTTP 健康检查与 start 占位，以及最大进程数 `configUpdate` 下发/广播/参数过滤。
 - `RunDiffApplicationServiceTest` 覆盖 Diff 事件优先读取、agent runtime Diff fallback、接受/拒绝动作和缺失 messageID 冲突。

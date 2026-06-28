@@ -2,7 +2,10 @@ package com.icbc.testagent.opencode.runtime.process;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.icbc.testagent.common.error.ErrorCode;
@@ -21,6 +24,7 @@ import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,6 +32,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
@@ -37,6 +42,9 @@ class WorkspaceFileRoutingServiceTest {
     private static final UserId USER_ID = new UserId("usr_1234567890abcdef");
     private static final WorkspaceId WORKSPACE_ID = new WorkspaceId("wrk_1234567890abcdef");
     private static final String TRACE_ID = "trace_1234567890abcdef";
+
+    @TempDir
+    Path root;
 
     @Test
     void routesWorkspaceFilesToBackendOnSameLinuxServer() {
@@ -69,6 +77,40 @@ class WorkspaceFileRoutingServiceTest {
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
     }
 
+    @Test
+    void rebindsWorkspaceWhenStoredLinuxServerIsStaleAndCurrentPathExists() {
+        WorkspaceRepository workspaceRepository = Mockito.mock(WorkspaceRepository.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
+        when(workspaceRepository.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace("10.8.0.99", root.toString())));
+        when(workspaceRepository.save(any(Workspace.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(assignmentService.status(USER_ID, "opencode", TRACE_ID)).thenReturn(process("10.8.0.12"));
+        when(heartbeatStore.liveBackendSnapshots()).thenReturn(List.of(backendSnapshot("10.8.0.12")));
+
+        WorkspaceFileRouteResponse response = service(workspaceRepository, assignmentService, heartbeatStore)
+                .routeWorkspace(USER_ID, "opencode", WORKSPACE_ID, TRACE_ID);
+
+        assertThat(response.linuxServerId()).isEqualTo("10.8.0.12");
+        verify(workspaceRepository).save(Mockito.argThat(workspace ->
+                "10.8.0.12".equals(workspace.linuxServerId()) && WORKSPACE_ID.equals(workspace.workspaceId())));
+    }
+
+    @Test
+    void keepsConflictWhenStoredLinuxServerStillHasReadyBackend() {
+        WorkspaceRepository workspaceRepository = Mockito.mock(WorkspaceRepository.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
+        when(workspaceRepository.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace("10.8.0.99", root.toString())));
+        when(assignmentService.status(USER_ID, "opencode", TRACE_ID)).thenReturn(process("10.8.0.12"));
+        when(heartbeatStore.liveBackendSnapshots()).thenReturn(List.of(backendSnapshot("10.8.0.12"), backendSnapshot("10.8.0.99")));
+
+        assertThatThrownBy(() -> service(workspaceRepository, assignmentService, heartbeatStore)
+                        .routeWorkspace(USER_ID, "opencode", WORKSPACE_ID, TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+        verify(workspaceRepository, never()).save(any(Workspace.class));
+    }
+
     private static WorkspaceFileRoutingService service(
             WorkspaceRepository workspaceRepository,
             UserOpencodeProcessAssignmentService assignmentService,
@@ -89,10 +131,14 @@ class WorkspaceFileRoutingServiceTest {
     }
 
     private static Workspace workspace(String linuxServerId) {
+        return workspace(linuxServerId, "/tmp/demo");
+    }
+
+    private static Workspace workspace(String linuxServerId, String rootPath) {
         return new Workspace(
                 WORKSPACE_ID,
                 "Demo",
-                "/tmp/demo",
+                rootPath,
                 WorkspaceStatus.ACTIVE,
                 NOW,
                 NOW,

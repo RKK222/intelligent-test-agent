@@ -33,6 +33,7 @@ if [[ "${restart_help}" != *"backend env:     .env.test"* ]]; then
 fi
 run_check "opencode process deployment smoke script bash syntax" bash -n "${ROOT_DIR}/tools/verify-opencode-process-deployment.sh"
 run_check "opencode process deployment smoke script help" bash "${ROOT_DIR}/tools/verify-opencode-process-deployment.sh" --help
+run_check "opencode user process scenario script bash syntax" bash -n "${ROOT_DIR}/tools/verify-opencode-user-process-scenarios.sh"
 
 # 用 xtrace 验证误用 sh 执行时确实重进 Bash，而不是继续留在 sh/POSIX 模式。
 restart_trace="$(sh -x "${ROOT_DIR}/restart-dev-services.sh" --help 2>&1 >/dev/null || true)"

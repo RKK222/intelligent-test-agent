@@ -149,7 +149,7 @@ opencode-manager 兼容诊断 API 和 `/api/internal/platform/opencode-runtime/m
 
 ## Workspace File WebSocket
 
-Workspace 文件 WebSocket 不产生 RunEvent/SSE，属于前端工作区文件操作的受控双向 RPC 通道。浏览器先调用 `POST /api/workspaces/{workspaceId}/file-ws-route` 定位目标后端，再在目标后端调用 `POST /api/internal/platform/workspace-management/file-ws/tickets` 创建一次性 ticket，最后连接：
+Workspace 文件 WebSocket 不产生 RunEvent/SSE，属于前端工作区文件操作的受控双向 RPC 通道。浏览器先调用 `POST /api/workspaces/{workspaceId}/file-ws-route` 定位目标后端，再在目标后端调用 `POST /api/internal/platform/workspace-management/file-ws/tickets` 创建一次性 ticket，最后连接。路由阶段会校验当前用户 READY opencode 进程、workspace 和目标 Java 后端同服务器；本地换 IP 后仅在旧服务器无在线后端且本机目录可访问时回绑历史 workspace，避免文件树 WebSocket 被旧 `linuxServerId` 卡住。
 
 ```text
 /api/internal/platform/workspace-management/file/ws?ticket=wft_...

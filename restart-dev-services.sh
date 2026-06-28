@@ -407,6 +407,61 @@ opencode_manager_pids() {
   '
 }
 
+opencode_manager_port_start() {
+  echo "${OPENCODE_MANAGER_PORT_START:-$(url_port "${TEST_AGENT_OPENCODE_BASE_URL:-http://127.0.0.1:4096}")}"
+}
+
+opencode_manager_port_end() {
+  local start
+  start="$(opencode_manager_port_start)"
+  echo "${OPENCODE_MANAGER_PORT_END:-$((start + 9))}"
+}
+
+opencode_manager_state_dir() {
+  echo "${OPENCODE_MANAGER_STATE_DIR:-${LOG_DIR}/opencode-manager-state}"
+}
+
+opencode_manager_state_pids() {
+  local state_dir file
+  state_dir="$(opencode_manager_state_dir)"
+  [[ -d "${state_dir}/processes" ]] || return 0
+  for file in "${state_dir}/processes"/*.json; do
+    [[ -f "${file}" ]] || continue
+    awk -F: '/"pid"/ { gsub(/[^0-9]/, "", $2); if ($2 != "") print $2; exit }' "${file}"
+  done
+}
+
+opencode_manager_port_range_pids() {
+  local start end
+  start="$(opencode_manager_port_start)"
+  end="$(opencode_manager_port_end)"
+  ps -eo pid=,command= | awk -v start="${start}" -v end="${end}" '
+    index($0, "opencode serve") {
+      for (port = start; port <= end; port++) {
+        if (index($0, "--port " port)) {
+          print $1
+          break
+        }
+      }
+    }
+  '
+}
+
+opencode_manager_managed_opencode_pids() {
+  {
+    opencode_manager_state_pids
+    opencode_manager_port_range_pids
+  } | awk 'NF && !seen[$1]++ { print $1 }'
+}
+
+cleanup_opencode_manager_state() {
+  local state_dir
+  state_dir="$(opencode_manager_state_dir)"
+  if [[ -d "${state_dir}/processes" ]]; then
+    rm -f "${state_dir}/processes"/*.json >/dev/null 2>&1 || true
+  fi
+}
+
 should_seed_demo_workspaces() {
   case "${TEST_AGENT_SEED_DEMO_WORKSPACES:-auto}" in
     true|TRUE|1|yes|YES)
@@ -553,6 +608,14 @@ stop_opencode_manager_service() {
   fi
   stop_screen_session "${OPENCODE_MANAGER_SCREEN_SESSION}"
 
+  local managed_pids=()
+  for pid in $(opencode_manager_managed_opencode_pids); do
+    managed_pids+=("${pid}")
+  done
+  if [[ "${#managed_pids[@]}" -gt 0 ]]; then
+    stop_pids "opencode-manager managed opencode serve" "${managed_pids[@]}"
+  fi
+
   local opencode_pids=()
   for pid in $(opencode_pids); do
     opencode_pids+=("${pid}")
@@ -560,6 +623,7 @@ stop_opencode_manager_service() {
   if [[ "${#opencode_pids[@]}" -gt 0 ]]; then
     stop_pids "opencode serve" "${opencode_pids[@]}"
   fi
+  cleanup_opencode_manager_state
   stop_screen_session "${OPENCODE_SCREEN_SESSION}"
 }
 

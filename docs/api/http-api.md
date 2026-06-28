@@ -663,7 +663,7 @@ Phase 04 开始由 `test-agent-api` 定义可联调 HTTP API，并由 `test-agen
 }
 ```
 
-`POST /api/workspaces/{workspaceId}/file-ws-route` 使用当前登录用户的 `opencode` 进程定位同服务器后端，返回浏览器应直连的目标后端地址。工作区服务器归属、用户 opencode 进程服务器和目标后端服务器不一致时返回统一 `CONFLICT`。
+`POST /api/workspaces/{workspaceId}/file-ws-route` 使用当前登录用户的 `opencode` 进程定位同服务器后端，返回浏览器应直连的目标后端地址。工作区服务器归属、用户 opencode 进程服务器和目标后端服务器不一致时返回统一 `CONFLICT`。本地换 IP 或切换测试库后，若历史 workspace 仍绑定旧 `linuxServerId`，且旧服务器没有在线后端快照、当前 opencode 进程在本后端、workspace 根目录在本机可访问，后端会在路由时把 workspace 回绑到当前服务器；多机环境中旧服务器仍在线或目录不可访问时不会自动迁移。
 
 响应 `WorkspaceFileRouteResponse`：
 
@@ -1048,8 +1048,8 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 初始化规则：
 
 - 未绑定用户时选择当前后端实例已连接的全局进程数最少 `READY` 容器。
-- 已有绑定但进程不可用时固定原 `linuxServerId`，只在该 Linux 服务器内选择当前后端已连接的进程数最少容器。
-- 端口从容器端口范围内选择第一个未被当前运行进程占用的端口。
+- 已有绑定但进程不可用时优先在原 `linuxServerId` 内选择当前后端已连接的进程数最少容器；原服务器无可用容器时 fallback 到当前后端任意健康容器，成功后更新用户 binding 的 `linuxServerId` 和端口。
+- 端口从容器端口范围内选择第一个未被同一 `linuxServerId` 下历史进程行占用的端口；避让范围按数据库唯一约束 `(linux_server_id, port)` 生效，包含其它容器和非运行态脏数据。
 - 启动参数优先读取通用参数：`XDG_DATA_HOME={OPENCODE_SESSION_DIR}/{port}`、`OPENCODE_CONFIG_DIR={OPENCODE_PUBLIC_CONFIG_DIR}`；缺失时分别回退 `/data/.testagent/agent-opencode/.session/{port}` 和 `/data/.testagent/agent-opencode/.config/opencode/`。
 - 若 manager 本地 state 已托管目标端口且健康，`start` 命令按幂等成功处理，后端继续补齐用户进程绑定、进程快照和兼容 `execution_nodes` 投影；若该 state 不健康，仍按 manager 失败结果返回统一 opencode 错误。
 - 初始化成功后会同步写入用户进程绑定、进程快照，以及兼容旧运行链路的 `execution_nodes` 投影。

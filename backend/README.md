@@ -83,13 +83,13 @@ SPRING_PROFILES_ACTIVE=local mvn spring-boot:run -pl test-agent-app
 
 `tools/dev-backend-run.sh` 和仓库根目录的 `restart-dev-services.sh` 启动后端 Java 进程时会清空 JVM 的 HTTP/HTTPS/FTP/SOCKS 代理系统属性，避免本机系统代理影响 PostgreSQL JDBC 与 Redis 直连。直接使用 Maven 或 IDEA 启动时，如果本机开启了全局 SOCKS/HTTP 代理，需要在 VM options 中显式清空同类 `-D*proxy*` 参数。
 
-Windows 开发人员可直接使用已提交的 IDEA 运行配置 `TestAgentApplication guo`：
+Windows 开发人员若只需要 legacy guo profile，可直接使用已提交的 IDEA 运行配置 `TestAgentApplication guo`：
 
 1. 用 IDEA 导入 `backend/pom.xml`。
 2. 选择 Run Configuration `TestAgentApplication guo`。
 3. 使用 JDK 21+ 启动。
 
-该配置通过 `-Dspring.profiles.active=guo` 读取 `test-agent-app/src/main/resources/application-guo.yml`，不依赖 shell 启动脚本或 `.env.local`。`guo` profile 已内置 Java 进程需要的数据库、Redis、opencode、manager token、模型来源和模型 key 配置；`TEST_AGENT_OPENCODE_BIN`、`TEST_AGENT_START_OPENCODE` 等只服务于根目录 shell 编排脚本，不属于 Java 进程配置。
+该配置通过 `-Dspring.profiles.active=guo` 读取 `test-agent-app/src/main/resources/application-guo.yml`，不依赖 shell 启动脚本或 `.env.local`。`guo` profile 已内置 Java 进程需要的数据库、Redis、opencode、manager token、模型来源和模型 key 配置；`TEST_AGENT_OPENCODE_BIN`、`TEST_AGENT_START_OPENCODE` 等只服务于根目录 shell 编排脚本，不属于 Java 进程配置。当前本地联调默认改用 `test` profile 和 `.env.test`；Windows 用户要连同一测试环境时，推荐在 WSL/Git Bash 执行根目录脚本，或在 IDEA/PowerShell 中显式导入 `.env.test` 的数据库、Redis、模型、`TEST_AGENT_OPENCODE_MANAGER_TOKEN` 和 `.serverip` 路径等变量，并用 `-Dspring.profiles.active=test` 启动 Java 后端，另起 `opencode-manager run` 和前端 dev server。
 
 ### 环境变量配置
 
@@ -114,7 +114,7 @@ cp .env.local.example .env.local
 | `TEST_AGENT_BAILIAN_BASE_URL` | 外网百炼 OpenAI-compatible base URL，默认 `https://coding.dashscope.aliyuncs.com/v1`。 |
 | `TEST_AGENT_ICBC_OPENAI_BASE_URL` | 企业内 OpenAI-compatible base URL，默认与 openclaw 企业 patch 中的 `icbc-openai` 地址一致。 |
 
-`guo` profile 的 IDEA 启动路径已把上述本地 Java 运行参数写入 yml；继续使用 `tools/dev-backend-run.sh` 或 `restart-dev-services.sh --profile guo --env-file .env.local` 时，`.env.local` 仍可覆盖 yml，便于 macOS/Linux 联调脚本启动前后端和 opencode。根目录一键脚本不带参数时默认读取 `.env.test` 并启动 `test` profile。
+`guo` profile 的 IDEA 启动路径已把上述本地 Java 运行参数写入 yml；继续使用 `tools/dev-backend-run.sh` 或 `restart-dev-services.sh --profile guo --env-file .env.local` 时，`.env.local` 仍可覆盖 yml，便于 macOS/Linux 联调脚本启动前后端和 opencode。根目录一键脚本不带参数时默认读取 `.env.test` 并启动 `test` profile；停止 manager 时会清理其托管的用户 opencode 子进程和 state JSON，防止端口池残留进程导致下次初始化失败。
 
 验证后端启动成功：
 ```bash

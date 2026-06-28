@@ -657,14 +657,9 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
                         select port
                         from opencode_server_processes
                         where linux_server_id = :linuxServerId
-                          and container_id = :containerId
-                          and status in (:startingStatus, :runningStatus)
                         order by port asc
                         """)
                 .param("linuxServerId", linuxServerId.value())
-                .param("containerId", containerId.value())
-                .param("startingStatus", OpencodeServerProcessStatus.STARTING.name())
-                .param("runningStatus", OpencodeServerProcessStatus.RUNNING.name())
                 .query(Integer.class)
                 .list();
     }

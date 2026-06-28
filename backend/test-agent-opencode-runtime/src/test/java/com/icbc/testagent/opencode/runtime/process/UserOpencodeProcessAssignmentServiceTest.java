@@ -146,6 +146,32 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
+    void initializeSkipsDirtyPortsOnSameLinuxServer() {
+        // 端口唯一约束按 linux_server_id 生效；同服务器其它容器和非运行态历史脏行也要避让。
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4098, 3, 0));
+        repository.processes.put("ocp_dirty_4096", process(
+                "ocp_dirty_4096",
+                new UserId("usr_dirty_4096"),
+                "10.8.0.12",
+                "ctr_idle",
+                4096,
+                OpencodeServerProcessStatus.UNHEALTHY));
+        repository.processes.put("ocp_other_container_4097", process(
+                "ocp_other_container_4097",
+                new UserId("usr_dirty_4097"),
+                "10.8.0.12",
+                "ctr_other",
+                4097,
+                OpencodeServerProcessStatus.STOPPED));
+        UserOpencodeProcessAssignmentService service = service(repository, new RecordingGateway());
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.port()).isEqualTo(4098);
+    }
+
+    @org.junit.jupiter.api.Test
     void initializeRebuildsUnhealthyBindingOnSameLinuxServer() {
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_old", container("ctr_old", "10.8.0.12", 4096, 4098, 3, 1));
@@ -177,6 +203,74 @@ class UserOpencodeProcessAssignmentServiceTest {
                 .isInstanceOf(PlatformException.class)
                 .extracting(error -> ((PlatformException) error).errorCode())
                 .isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
+    }
+
+    @org.junit.jupiter.api.Test
+    void statusReturnsNeedsInitializationWhenBoundLinuxServerHasNoContainerButGlobalHas() {
+        // 场景：换 IP 重启后，旧用户 binding 仍指向旧 IP 10.8.0.12，但该 IP 上已无可用容器；
+        // 当前可用的容器在 10.8.0.13 上。status() 应 fallback 到全局查找，返回 NEEDS_INITIALIZATION
+        // 让用户能重新初始化，而不是直接判死为 UNAVAILABLE 把用户卡死。
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_other_linux", container("ctr_other_linux", "10.8.0.13", 4300, 4302, 3, 0));
+        OpencodeServerProcess oldProcess = process("ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.UNHEALTHY);
+        repository.processes.put(oldProcess.processId().value(), oldProcess);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, oldProcess.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.unhealthy("down");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.NEEDS_INITIALIZATION);
+        assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.NOT_RUNNING);
+    }
+
+    @org.junit.jupiter.api.Test
+    void statusReturnsNeedsInitializationWhenBoundProcessIsMissingAndGlobalContainerExists() {
+        // 场景：旧 binding 还在，但 process 行已被历史清理或脏数据删除；
+        // 原 IP 上没有可用容器时也应 fallback 到当前后端可用容器，避免状态接口把旧用户判死。
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_other_linux", container("ctr_other_linux", "10.8.0.13", 4300, 4302, 3, 0));
+        repository.bindings.put(
+                USER_ID.value() + ":opencode",
+                binding(USER_ID, new OpencodeProcessId("ocp_missing_process"), "10.8.0.12", 4096));
+        UserOpencodeProcessAssignmentService service = service(repository, new RecordingGateway());
+
+        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.NEEDS_INITIALIZATION);
+        assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.NOT_RUNNING);
+        assertThat(response.serviceAddress()).isEqualTo("10.8.0.12:4096");
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeRebuildsOnDifferentLinuxServerWhenOldServerHasNoContainer() {
+        // 场景：旧用户 binding 在 10.8.0.12 上，但该 IP 上已无可用容器；
+        // initialize() 应 fallback 到全局查找，在 10.8.0.13 上重建进程，
+        // 并通过 saveUserBinding 把 binding 迁移到新 IP，复用旧 process_id。
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_other_linux", container("ctr_other_linux", "10.8.0.13", 4300, 4302, 3, 0));
+        OpencodeServerProcess oldProcess = process("ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.UNHEALTHY);
+        repository.processes.put(oldProcess.processId().value(), oldProcess);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, oldProcess.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.unhealthy("down");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
+        assertThat(response.linuxServerId()).isEqualTo("10.8.0.13");
+        assertThat(response.containerId()).isEqualTo("ctr_other_linux");
+        assertThat(response.port()).isEqualTo(4300);
+        assertThat(response.processId()).isEqualTo("ocp_existing");
+        assertThat(gateway.startCommands.getFirst().linuxServerId()).isEqualTo(new LinuxServerId("10.8.0.13"));
+        assertThat(gateway.startCommands.getFirst().baseUrl()).isEqualTo("http://10.8.0.13:4300");
+        // binding 应已迁移到新 IP，避免下次再次卡死在旧 IP 上
+        assertThat(repository.findUserBinding(USER_ID, "opencode"))
+                .get()
+                .extracting(UserOpencodeProcessBinding::linuxServerId)
+                .isEqualTo(new LinuxServerId("10.8.0.13"));
     }
 
     @org.junit.jupiter.api.Test
@@ -465,9 +559,6 @@ class UserOpencodeProcessAssignmentServiceTest {
         public List<Integer> findOccupiedPorts(LinuxServerId linuxServerId, OpencodeContainerId containerId) {
             return processes.values().stream()
                     .filter(process -> process.linuxServerId().equals(linuxServerId))
-                    .filter(process -> process.containerId().equals(containerId))
-                    .filter(process -> process.status() == OpencodeServerProcessStatus.STARTING
-                            || process.status() == OpencodeServerProcessStatus.RUNNING)
                     .map(OpencodeServerProcess::port)
                     .toList();
         }

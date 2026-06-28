@@ -1072,3 +1072,9 @@
 - How: 没有改 `loadDirectory` 行为，只放宽 `refreshParentDirectory` 的调用条件并在 card 路径补齐 `expandPathToFile`，覆盖"父目录从未被用户展开过"和"工具事件只生成独立 card 消息"两种原本会被跳过的场景。
 - Result: 不论 agent 走 assistant message part 还是独立 tool card 事件，新文件的所有祖先目录都会被自动展开并触发 `api.listFiles`，文件树即时反映新增；用户不再需要手动点刷新按钮。`vue-tsc` typecheck 与 Vitest 132 个测试全部通过。
 
+### 2026-06-28 - opencode 旧绑定迁移、端口脏数据避让与本地重启清理
+
+- Why: `test` 环境切换 IP/数据库后，旧用户 binding 会锁在旧 `linux_server_id`，初始化/状态接口可能 503；workspace 文件 WebSocket 也会因历史 workspace 仍绑定旧服务器而间歇失败；本地重启脚本只清理 standalone 4096，没有清理 manager 派生的用户 opencode 子进程和 state。
+- What: `UserOpencodeProcessAssignmentService` 在原服务器无健康容器时 fallback 到当前后端全局健康容器并迁移 binding；端口选择改为按 `(linux_server_id, port)` 全局避让所有历史进程行；`WorkspaceFileRoutingService` 在旧服务器无在线后端且本机根目录可访问时安全回绑 workspace；`restart-dev-services.sh` 停止 manager 时清理 state JSON、state pid 和端口池残留 `opencode serve`；新增 `tools/verify-opencode-user-process-scenarios.sh` 插入/清理测试脏数据验证新老用户四类场景。
+- How: 用单测覆盖旧 binding fallback、旧 process 缺失、端口脏行避让、workspace 安全回绑与旧服务器在线不回绑；用 `.env.test` 重启后运行场景脚本，验证新用户正常/脏数据、老用户正常/旧 binding + 旧 workspace 均能 READY、runtime health 和 file-ws-route 正常。
+- Result: 本地 `test` profile 重启成功，脚本清掉旧 manager 托管进程；四类 opencode 场景通过且脚本测试数据清零。后续排查 workspace 文件树刷新时，要先看 `file-ws-route` 的 workspace/agent `linuxServerId` 是否不一致，再看真实 WebSocket ticket/连接错误。

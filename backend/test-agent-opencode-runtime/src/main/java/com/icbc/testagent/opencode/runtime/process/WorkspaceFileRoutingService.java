@@ -12,6 +12,7 @@ import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
@@ -76,13 +77,17 @@ public class WorkspaceFileRoutingService {
         String agentLinuxServerId = readyLinuxServerId(process, workspaceId.value());
         String workspaceLinuxServerId = workspace.linuxServerId() == null ? agentLinuxServerId : workspace.linuxServerId();
         if (!workspaceLinuxServerId.equals(agentLinuxServerId)) {
-            throw new PlatformException(
-                    ErrorCode.CONFLICT,
-                    "工作空间与 agent 不在同一服务器",
-                    Map.of(
-                            "workspaceId", workspaceId.value(),
-                            "workspaceLinuxServerId", workspaceLinuxServerId,
-                            "agentLinuxServerId", agentLinuxServerId));
+            workspace = rebindStaleWorkspaceIfSafe(workspace, workspaceLinuxServerId, agentLinuxServerId, traceId);
+            workspaceLinuxServerId = workspace.linuxServerId();
+            if (!workspaceLinuxServerId.equals(agentLinuxServerId)) {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "工作空间与 agent 不在同一服务器",
+                        Map.of(
+                                "workspaceId", workspaceId.value(),
+                                "workspaceLinuxServerId", workspaceLinuxServerId,
+                                "agentLinuxServerId", agentLinuxServerId));
+            }
         }
         BackendJavaProcess backend = backendFor(new LinuxServerId(workspaceLinuxServerId));
         return new WorkspaceFileRouteResponse(
@@ -92,6 +97,46 @@ public class WorkspaceFileRoutingService {
                 WEB_SOCKET_PATH,
                 true,
                 null);
+    }
+
+    /**
+     * 本地 IP 变化或数据库切换后，历史 workspace 可能仍绑定旧服务器 IP。
+     *
+     * <p>只有在当前 agent 已经落在本后端、旧服务器没有存活后端快照、且 workspace 根目录在本机可访问时，
+     * 才把 workspace 回绑到当前 agent 服务器。多机部署中旧服务器仍在线或本机没有该目录时继续返回冲突，
+     * 避免把真实远端工作区错误迁移到当前机器。
+     */
+    private Workspace rebindStaleWorkspaceIfSafe(
+            Workspace workspace,
+            String staleLinuxServerId,
+            String agentLinuxServerId,
+            String traceId) {
+        if (!settings.linuxServerId().value().equals(agentLinuxServerId)) {
+            return workspace;
+        }
+        if (hasReadyBackend(new LinuxServerId(staleLinuxServerId))) {
+            return workspace;
+        }
+        if (!rootPathAvailable(workspace.rootPath())) {
+            return workspace;
+        }
+        Workspace rebound = workspace.withLinuxServerId(agentLinuxServerId, traceId, Instant.now(clock));
+        return workspaceRepository.save(rebound);
+    }
+
+    private boolean hasReadyBackend(LinuxServerId linuxServerId) {
+        if (settings.linuxServerId().equals(linuxServerId)) {
+            return true;
+        }
+        return readyBackends().stream().anyMatch(backend -> backend.linuxServerId().equals(linuxServerId));
+    }
+
+    private boolean rootPathAvailable(String rootPath) {
+        try {
+            return Files.isDirectory(Path.of(rootPath).toRealPath());
+        } catch (Exception ignored) {
+            return false;
+        }
     }
 
     /**

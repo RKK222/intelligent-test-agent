@@ -52,6 +52,12 @@ public interface OpencodeProcessManagementRepository {
 
     Optional<OpencodeServerProcess> findOpencodeServerProcessById(OpencodeProcessId processId);
 
+    /**
+     * 查询同一 Linux 服务器上已被进程记录占用的端口。
+     *
+     * <p>数据库唯一约束是 `(linux_server_id, port)`，不是 `(container_id, port)`。
+     * 因此实现必须按 Linux 服务器全局避让历史脏行和非运行态行，避免初始化新进程时撞唯一键。
+     */
     List<Integer> findOccupiedPorts(LinuxServerId linuxServerId, OpencodeContainerId containerId);
 
     UserOpencodeProcessBinding saveUserBinding(UserOpencodeProcessBinding binding);
