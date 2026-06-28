@@ -142,7 +142,7 @@ onBeforeUnmount(() => {
   color: var(--ta-chat-text);
   font-family: inherit;
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.35;
   letter-spacing: -0.01em;
 }
 
@@ -173,17 +173,17 @@ onBeforeUnmount(() => {
 }
 
 .markdown-body :deep(p) {
-  margin: 0.4em 0;
+  margin: 4px 0 !important;
 }
 
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
-  margin: 0.4em 0;
+  margin: 4px 0 !important;
   padding-left: 0;
 }
 
 .markdown-body :deep(li) {
-  margin: 0.1em 0;
+  margin: 2px 0 !important;
 }
 
 .markdown-body :deep(a) {
@@ -203,13 +203,15 @@ onBeforeUnmount(() => {
 
 .markdown-body :deep(table) {
   border-collapse: collapse;
-  margin: 0.4em 0;
+  margin: 6px 0 !important;
+  line-height: 1.3 !important;
+  font-size: 12px;
 }
 
 .markdown-body :deep(table th),
 .markdown-body :deep(table td) {
   border: 1px solid var(--ta-chat-border);
-  padding: 4px 8px;
+  padding: 3px 6px !important;
 }
 
 .markdown-body :deep(table tr:nth-child(2n)) {

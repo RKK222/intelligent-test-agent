@@ -2495,9 +2495,9 @@ function onCompositionEnd() {
 
 .figma-chat-bubble--user {
   display: block;
-  background: transparent;
+  background: var(--ta-chat-user-bg);
   color: #111;
-  border-top-right-radius: 2px;
+  border-radius: 12px;
 }
 
 .figma-chat-bubble--assistant {
