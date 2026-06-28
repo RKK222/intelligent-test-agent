@@ -1657,6 +1657,8 @@ async function openLivePreview(relPath: string) {
 // 把文件所在父目录重新拉取一次，让新建/删除的文件即时出现在文件树中。
 // 仅在父目录已经缓存（用户已展开过）时刷新；未加载的目录交给 expandPathToFile 懒加载，
 // 避免一次工具完成触发两次 listFiles 同一目录的重复请求。
+// 父目录已加载时必须走 force=true 强制重新拉取，否则会被 loadDirectory 的去重短路，
+// 导致 agent 写文件后文件树不会即时反映新增/删除。
 function refreshParentDirectory(relPath: string) {
   if (!relPath || relPath.startsWith("/")) {
     return;
@@ -1664,13 +1666,13 @@ function refreshParentDirectory(relPath: string) {
   const segments = relPath.split("/").filter(Boolean);
   if (segments.length <= 1) {
     if (entriesByDirectory.value[""] !== undefined || expandedDirectories.value.size > 0) {
-      void loadDirectory("");
+      void loadDirectory("", undefined, true);
     }
     return;
   }
   const parentPath = segments.slice(0, -1).join("/");
   if (entriesByDirectory.value[parentPath] !== undefined) {
-    void loadDirectory(parentPath);
+    void loadDirectory(parentPath, undefined, true);
   }
 }
 

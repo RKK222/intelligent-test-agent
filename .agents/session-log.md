@@ -1039,3 +1039,13 @@
 - How: 维持原函数签名向后兼容（仅追加默认参数），未改其他 6 处 `loadDirectory` 调用方，避免影响首次加载、工作区切换和目录懒加载的现有去重行为。
 - Result: 手动刷新按钮能真正触发 `api.listFiles(workspaceId, '')` 并刷新根目录行；`vue-tsc` typecheck 与 Vitest 132 个测试全部通过。
 
+### 2026-06-28 - 工作树不随 agent 写文件实时刷新的修复
+
+- Why: 用户反馈左侧「应用工作空间」文件树在 agent 调用 `write` / `edit` / `apply_patch` / `str_replace` / `multi_edit` / `create_file` 等写盘工具完成后不立即出现新文件，必须手动点刷新才会更新。
+- What: 修改 `frontend/apps/agent-web/src/components/AgentWorkbench.vue`：
+  - `refreshParentDirectory` 内的两处 `loadDirectory` 调用补上第三个参数 `force=true`：根目录走 `loadDirectory("", undefined, true)`，子目录父级走 `loadDirectory(parentPath, undefined, true)`。
+  - 同步更新该函数上方中文注释，说明"父目录已加载时必须走 force=true，否则会被 loadDirectory 去重短路"以及该设计选择与新增/未加载目录的处理。
+  - 同步更新 `frontend/apps/agent-web/README.md` 第 34 行描述，明确 `refreshParentDirectory` 和手动刷新按钮都依赖 `force` 参数。
+- How: 复用上一条已经引入的 `force` 形参；保留"父目录未展开过就不预加载"的判断（`entriesByDirectory[parentPath] === undefined` 时直接 return），不主动拉取用户从未展开的目录；`loadDirectory` 内部的 `loadingPath.has(path)` 守卫依旧防止对同一目录的并发请求堆积。
+- Result: agent 完成写文件工具后，写入位置所属的父目录会立即重新 `api.listFiles` 一次，文件树即时反映新建/删除；`vue-tsc` typecheck 与 Vitest 132 个测试全部通过。
+
