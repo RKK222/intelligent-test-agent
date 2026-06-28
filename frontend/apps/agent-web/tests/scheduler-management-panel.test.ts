@@ -198,7 +198,7 @@ describe("scheduler management panel", () => {
     await fireEvent.click(view.getByText("运行管理"));
 
     await waitFor(() => expect(backendApi.getOpencodeRuntimeManagementOverview).toHaveBeenCalled());
-    expect(await view.findByText("暂无 opencode 进程")).toBeTruthy();
+    expect(await view.findByText("暂无服务器 / Java 进程")).toBeTruthy();
     view.queryClient.clear();
   });
 

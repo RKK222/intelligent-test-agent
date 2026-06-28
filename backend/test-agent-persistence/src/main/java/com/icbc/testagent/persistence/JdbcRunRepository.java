@@ -37,7 +37,9 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
             rs.getBigDecimal("cost_usd"),
             ConversationSourceType.valueOf(rs.getString("source_type")),
             rs.getString("source_ref_id"),
-            userId(rs.getString("triggered_by_user_id")));
+            userId(rs.getString("triggered_by_user_id")),
+            rs.getString("agent_id"),
+            rs.getString("model_id"));
 
     /**
      * 注入 JdbcClient，持久化层只负责 Run 表字段映射。
@@ -63,7 +65,9 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                                 cost_usd = :costUsd,
                                 source_type = :sourceType,
                                 source_ref_id = :sourceRefId,
-                                triggered_by_user_id = :triggeredByUserId
+                                triggered_by_user_id = :triggeredByUserId,
+                                agent_id = :agentId,
+                                model_id = :modelId
                             where run_id = :runId
                             """)
                     .param("runId", run.runId().value())
@@ -82,6 +86,8 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                     .param("sourceType", run.sourceType().name())
                     .param("sourceRefId", run.sourceRefId())
                     .param("triggeredByUserId", userIdValue(run.triggeredByUserId()))
+                    .param("agentId", run.agentId())
+                    .param("modelId", run.modelId())
                     .update();
         } else {
             jdbcClient.sql("""
@@ -89,13 +95,13 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                                 run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
                                 tokens_input, tokens_output, tokens_reasoning,
                                 tokens_cache_read, tokens_cache_write, cost_usd,
-                                source_type, source_ref_id, triggered_by_user_id
+                                source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
                             )
                             values (
                                 :runId, :sessionId, :workspaceId, :status, :traceId, :createdAt, :updatedAt,
                                 :tokensInput, :tokensOutput, :tokensReasoning,
                                 :tokensCacheRead, :tokensCacheWrite, :costUsd,
-                                :sourceType, :sourceRefId, :triggeredByUserId
+                                :sourceType, :sourceRefId, :triggeredByUserId, :agentId, :modelId
                             )
                             """)
                     .param("runId", run.runId().value())
@@ -114,6 +120,8 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                     .param("sourceType", run.sourceType().name())
                     .param("sourceRefId", run.sourceRefId())
                     .param("triggeredByUserId", userIdValue(run.triggeredByUserId()))
+                    .param("agentId", run.agentId())
+                    .param("modelId", run.modelId())
                     .update();
         }
         return run;
@@ -128,7 +136,7 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                         select run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
                                tokens_input, tokens_output, tokens_reasoning,
                                tokens_cache_read, tokens_cache_write, cost_usd,
-                               source_type, source_ref_id, triggered_by_user_id
+                               source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
                         from runs
                         where run_id = :runId
                         """)
@@ -146,7 +154,7 @@ public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepos
                         select run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
                                tokens_input, tokens_output, tokens_reasoning,
                                tokens_cache_read, tokens_cache_write, cost_usd,
-                               source_type, source_ref_id, triggered_by_user_id
+                               source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
                         from runs
                         where session_id = :sessionId
                           and status in ('PENDING', 'RUNNING', 'CANCELLING')

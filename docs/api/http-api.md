@@ -63,6 +63,16 @@
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/overview` | 无旧 URL |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/containers/{containerId}/processes/{port}/restart` | 无旧 URL |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/containers/{containerId}/processes/{port}/stop` | 无旧 URL |
+| `opencode-runtime` | `/api/internal/platform/opencode-runtime/messages/{messageId}/feedback` | 无旧 URL |
+| `opencode-runtime` | `/api/internal/platform/opencode-runtime/messages/{messageId}/feedback/me` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/overview` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/timeseries` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/peaks` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/users` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/organizations` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/satisfaction` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/exceptions` | 无旧 URL |
+| `analytics` | `/api/internal/platform/analytics/export` | 无旧 URL |
 | `scheduler-management` | `/api/internal/platform/scheduler-management/tasks` | 无旧 URL |
 | `scheduler-management` | `/api/internal/platform/scheduler-management/runs` | 无旧 URL |
 | `system-management` | `/api/internal/platform/system-management/users` | 无旧 URL |
@@ -90,6 +100,56 @@
 | `/api/internal/agent/opencode/session/{sessionId}/abort` | Session abort。 |
 | `/api/internal/agent/opencode/permission?sessionId={sessionId}` | Pending permission；opencode 原路径不包含平台 sessionId，因此使用 query 定位平台 session。 |
 | `/api/internal/agent/opencode/question?sessionId={sessionId}` | Pending question；opencode 原路径不包含平台 sessionId，因此使用 query 定位平台 session。 |
+
+## AI 回复反馈 API
+
+Base URL：`/api/internal/platform/opencode-runtime/messages`。该能力只写满意度反馈事实，不同步刷新运营汇总。
+
+鉴权：任意已登录用户。后端会校验目标消息存在、角色为 `ASSISTANT`，且当前用户是会话创建人或关联 Run 的触发人；不满足时返回 `FORBIDDEN` 或 `VALIDATION_ERROR`。
+
+| 方法 | 路径 | 用途 | 请求体 | 响应 |
+|---|---|---|---|---|
+| `PUT` | `/{messageId}/feedback` | 提交或更新当前用户对 assistant 消息的反馈 | `{ "rating": "POSITIVE|NEGATIVE", "reasonCode": "WRONG_ANSWER|NOT_HELPFUL|DID_NOT_FOLLOW_INSTRUCTION|CODE_QUALITY_LOW|TEST_RESULT_BAD|TOO_SLOW|TOO_VERBOSE|TOO_SHORT|OTHER"?, "comment": string? }`，`comment` 最多 300 字 | `FeedbackResponse` |
+| `GET` | `/{messageId}/feedback/me` | 查询当前用户对该消息的反馈 | 无 | `FeedbackResponse` 或 `null` |
+
+`FeedbackResponse`：
+
+```json
+{
+  "feedbackId": "fb_...",
+  "messageId": "msg_...",
+  "sessionId": "ses_...",
+  "runId": "run_...",
+  "rating": "NEGATIVE",
+  "reasonCode": "WRONG_ANSWER",
+  "comment": "不准确",
+  "createdAt": "2026-06-28T00:00:00Z",
+  "updatedAt": "2026-06-28T00:00:00Z"
+}
+```
+
+对应测试：`AiMessageFeedbackControllerTest`、`AiMessageFeedbackApplicationServiceTest`。
+
+## 运营分析 API
+
+Base URL：`/api/internal/platform/analytics`。所有接口要求 `SUPER_ADMIN`，普通管理员和匿名用户分别返回 `FORBIDDEN`、`UNAUTHENTICATED`。查询接口只读 rollup 表；失败或延迟时通过响应中的 `freshness.status=STALE|FAILED` 标记最近成功数据，不在 API 请求时扫描原始事实宽表。
+
+通用 query 参数：`startTime`、`endTime`、`granularity=hour|day|week|month`、`organization`、`rdDepartment`、`department`、`userId`、`agentId`、`model`、`workspaceId`、`topN`、`page`、`pageSize`、`sort`。约束：`topN<=100`，`pageSize<=100`，趋势点数 `<=500`；`hour` 粒度最多 48 小时，`day` 粒度最多 180 天。
+
+| 方法 | 路径 | 用途 | 响应 |
+|---|---|---|---|
+| `GET` | `/overview` | 用户规模、漏斗、使用强度、Run 结果、满意度、Diff 采纳、token 强度与 freshness | `AnalyticsOverview` |
+| `GET` | `/timeseries` | 按 hour/day/week/month 聚合趋势 | `AnalyticsTimeSeriesPoint[]` |
+| `GET` | `/peaks` | 峰值时段和小时热力 | `AnalyticsPeaks` |
+| `GET` | `/users` | 用户使用明细和排行，支持 `sort=active|runs|successRate|satisfactionRate|diffAcceptanceRate|cancelRate|negativeFeedback|tokenUsage` | `PageResponse<AnalyticsUserUsageRow>` |
+| `GET` | `/organizations?groupBy=organization|rdDepartment|department` | 组织维度排行 | `AnalyticsOrganizationUsageRow[]` |
+| `GET` | `/satisfaction` | 满意率、反馈覆盖率、负反馈原因分布和反馈明细 | `AnalyticsSatisfaction` |
+| `GET` | `/exceptions` | 失败/取消 Run 明细，不返回 prompt 或 assistant 原文 | `PageResponse<AnalyticsExceptionDetail>` |
+| `GET` | `/export?type=overview|timeseries|users|organizations|feedback|exceptions` | CSV 导出；不导出 prompt 原文、assistant 原文或 cost/costUsd 字段 | `text/csv` |
+
+核心口径：满意率为 `positive/(positive+negative)`，无反馈时为 `null`；反馈覆盖率为 `(positive+negative)/assistantMessageCount`；Diff 采纳率为 `diffAccepted/diffProposed`，无 proposed 时为 `null`；p95 耗时基于 `analytics_run_duration_histogram_hourly` 近似计算；token 仅包含 input/output/reasoning/total，不统计、不展示、不导出费用字段。
+
+对应测试：`AnalyticsControllerTest`、`AnalyticsQueryServiceTest`、`analytics-management-panel.test.ts`。
 
 ## 统一响应
 

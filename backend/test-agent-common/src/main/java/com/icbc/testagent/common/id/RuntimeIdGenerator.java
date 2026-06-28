@@ -42,6 +42,20 @@ public final class RuntimeIdGenerator {
     }
 
     /**
+     * 生成 AI 回复反馈 ID，供满意/不满意反馈 API 和运营明细稳定引用。
+     */
+    public static String feedbackId() {
+        return prefixed("fb_");
+    }
+
+    /**
+     * 生成运营汇总任务运行 ID，便于记录 rollup job 排障轨迹。
+     */
+    public static String analyticsJobRunId() {
+        return prefixed("ajr_");
+    }
+
+    /**
      * 生成 PTY ticket ID，返回值仅用于短生命周期终端连接授权。
      */
     public static String terminalTicketId() {

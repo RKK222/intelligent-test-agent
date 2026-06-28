@@ -16,6 +16,7 @@ import com.icbc.testagent.domain.session.SessionMessageRepository;
 import com.icbc.testagent.domain.session.SessionMessageRole;
 import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.domain.session.SessionStatus;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
@@ -44,6 +45,22 @@ class SessionApplicationServiceTest {
         assertThat(created.status()).isEqualTo(SessionStatus.ACTIVE);
         assertThat(sessions.saved).singleElement().satisfies(saved ->
                 assertThat(saved.traceId()).isEqualTo("trace_1234567890abcdef"));
+    }
+
+    @Test
+    void createSessionWithUserRecordsCreator() {
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        SessionApplicationService service = service(new FakeWorkspaceRepository(true), sessions, new FakeMessageRepository());
+
+        Session created = service.createSession(
+                new UserId("usr_1234567890abcdef"),
+                WORKSPACE_ID,
+                "Demo session",
+                "trace_1234567890abcdef");
+
+        assertThat(created.createdByUserId()).isEqualTo(new UserId("usr_1234567890abcdef"));
+        assertThat(sessions.saved).singleElement().satisfies(saved ->
+                assertThat(saved.createdByUserId()).isEqualTo(new UserId("usr_1234567890abcdef")));
     }
 
     @Test
@@ -87,6 +104,23 @@ class SessionApplicationServiceTest {
         assertThat(message.role()).isEqualTo(SessionMessageRole.USER);
         assertThat(message.content()).isEqualTo("run tests");
         assertThat(messages.saved).singleElement().isEqualTo(message);
+    }
+
+    @Test
+    void appendMessageWithUserRecordsSender() {
+        FakeMessageRepository messages = new FakeMessageRepository();
+        SessionApplicationService service = service(new FakeWorkspaceRepository(true), new FakeSessionRepository(session()), messages);
+
+        SessionMessage message = service.appendMessage(
+                new UserId("usr_1234567890abcdef"),
+                SESSION_ID,
+                null,
+                "run tests",
+                "trace_1234567890abcdef");
+
+        assertThat(message.senderUserId()).isEqualTo(new UserId("usr_1234567890abcdef"));
+        assertThat(messages.saved).singleElement().satisfies(saved ->
+                assertThat(saved.senderUserId()).isEqualTo(new UserId("usr_1234567890abcdef")));
     }
 
     private static SessionApplicationService service(

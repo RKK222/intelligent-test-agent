@@ -25,6 +25,7 @@ import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
 import com.icbc.testagent.domain.run.RunStatus;
+import com.icbc.testagent.domain.session.ConversationSourceType;
 import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionMessage;
@@ -284,6 +285,8 @@ public class RunApplicationService {
         String prompt = input.effectivePrompt();
         Session session = findSession(sessionId);
         Workspace workspace = findWorkspace(session.workspaceId());
+        ModelSelection modelSelection = parseModel(input.model());
+        String opencodeAgent = resolveOpencodeAgent(input);
         Run pending = new Run(
                 new RunId(RuntimeIdGenerator.runId()),
                 session.sessionId(),
@@ -292,8 +295,12 @@ public class RunApplicationService {
                 now,
                 now,
                 traceId);
+        if (userId != null) {
+            pending = pending.withSource(ConversationSourceType.MANUAL, null, userId);
+        }
+        pending = pending.withRuntimeSelection(opencodeAgent, firstText(modelSelection.modelId(), input.model()));
         runRepository.save(pending);
-        saveUserMessage(session.sessionId(), pending.runId(), prompt, traceId, now);
+        saveUserMessage(session.sessionId(), pending.runId(), prompt, userId, traceId, now);
         append(pending.runId(), RunEventType.RUN_CREATED, traceId, now, Map.of("status", RunStatus.PENDING.name()));
 
         try {
@@ -313,8 +320,6 @@ public class RunApplicationService {
                     workspace,
                     target.node(),
                     traceId);
-            ModelSelection model = parseModel(input.model());
-            String opencodeAgent = resolveOpencodeAgent(input);
             syncProviderConfig(runtime, target.node(), traceId);
             Run running = runRepository.save(pending.start(Instant.now()));
             append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
@@ -334,8 +339,8 @@ public class RunApplicationService {
                             toAgentPromptParts(input, workspace),
                             input.messageId(),
                             opencodeAgent,
-                            model.providerId(),
-                            model.modelId(),
+                            modelSelection.providerId(),
+                            modelSelection.modelId(),
                             input.variant(),
                             traceId))
                     .block();
@@ -664,8 +669,8 @@ public class RunApplicationService {
     /**
      * 保存用户消息投影，记录 runId 以支持按每次对话查询用户输入与消耗。
      */
-    private void saveUserMessage(SessionId sessionId, RunId runId, String prompt, String traceId, Instant createdAt) {
-        sessionMessageRepository.save(new SessionMessage(
+    private void saveUserMessage(SessionId sessionId, RunId runId, String prompt, UserId userId, String traceId, Instant createdAt) {
+        SessionMessage message = new SessionMessage(
                 new SessionMessageId(RuntimeIdGenerator.messageId()),
                 sessionId,
                 SessionMessageRole.USER,
@@ -678,7 +683,10 @@ public class RunApplicationService {
                 null,
                 null,
                 null,
-                createdAt));
+                createdAt);
+        sessionMessageRepository.save(userId == null
+                ? message
+                : message.withSource(ConversationSourceType.MANUAL, null, userId));
     }
 
     /**

@@ -1,11 +1,13 @@
 package com.icbc.testagent.api.web.platform;
 
+import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.opencode.runtime.run.RunApplicationService;
 import com.icbc.testagent.opencode.runtime.session.SessionApplicationService;
 import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.session.SessionId;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,8 +56,9 @@ public class SessionController {
             @Valid @RequestBody RuntimeDtos.CreateSessionRequest request,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         return ApiResponse.ok(RuntimeDtos.SessionResponse.from(sessionService.createSession(
-                new WorkspaceId(request.workspaceId()), request.title(), traceId)), traceId);
+                userId, new WorkspaceId(request.workspaceId()), request.title(), traceId)), traceId);
     }
 
     /**
@@ -146,8 +149,9 @@ public class SessionController {
             @Valid @RequestBody RuntimeDtos.AppendMessageRequest request,
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
         return ApiResponse.ok(RuntimeDtos.SessionMessageResponse.from(sessionService.appendMessage(
-                new SessionId(sessionId), request.role(), request.content(), traceId)), traceId);
+                userId, new SessionId(sessionId), request.role(), request.content(), traceId)), traceId);
     }
 
     /**

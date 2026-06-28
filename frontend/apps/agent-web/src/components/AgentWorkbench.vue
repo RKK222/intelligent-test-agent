@@ -11,6 +11,8 @@ import { Code2, MessageSquare, Monitor } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
   AgentMessage,
+  AiMessageFeedback,
+  AiMessageFeedbackPayload,
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
   FileContent,
@@ -230,6 +232,8 @@ onBeforeUnmount(() => {
 
 // Chat runtime：单一 reducer 维护，dispatch 闭包更新
 const chatState = ref(createInitialAgentChatRuntimeState(initialMessages));
+const messageFeedbacks = ref<Record<string, AiMessageFeedback | null>>({});
+const feedbackSubmitting = ref<Record<string, boolean>>({});
 function dispatchChat(action: Parameters<typeof reduceAgentChatRuntime>[1]) {
   chatState.value = reduceAgentChatRuntime(chatState.value, action);
 }
@@ -1011,6 +1015,29 @@ const rejectQuestionMutation = useMutation({
   onSuccess: (_result, requestId) => dispatchChat({ type: "question.replied", requestId }),
   onError: (error) => {
     feedback.value = errorFeedback("拒绝提问失败", error);
+  }
+});
+
+const submitMessageFeedbackMutation = useMutation({
+  mutationFn: async (payload: AiMessageFeedbackPayload & { messageId: string }) =>
+    api.putMessageFeedback(payload.messageId, {
+      rating: payload.rating,
+      reasonCode: payload.reasonCode,
+      comment: payload.comment
+    }),
+  onMutate: payload => {
+    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.messageId]: true };
+  },
+  onSuccess: (saved, payload) => {
+    messageFeedbacks.value = { ...messageFeedbacks.value, [payload.messageId]: saved };
+    feedback.value = { kind: "success", title: "反馈已提交", description: payload.rating === "POSITIVE" ? "满意" : "不满意" };
+  },
+  onError: (error, payload) => {
+    feedback.value = errorFeedback("提交反馈失败", error);
+    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.messageId]: false };
+  },
+  onSettled: (_data, _error, payload) => {
+    feedbackSubmitting.value = { ...feedbackSubmitting.value, [payload.messageId]: false };
   }
 });
 
@@ -2068,6 +2095,7 @@ async function switchSession(sessionId: string) {
   try {
     const page = await api.listSessionMessages(sessionId, 1, 100);
     dispatchChat({ type: "reset", messages: messagesFromSessionMessages(page.items) });
+    await loadFeedbacksForMessages(page.items);
     const restoredFiles = diffFilesFromSessionMessages(page.items).map((file) => ({
       ...file,
       path: normalizeWorkspacePath(file.path) || file.path
@@ -2105,8 +2133,30 @@ function handleNewConversation() {
   session.value = null;
   run.value = null;
   dispatchChat({ type: "reset" });
+  messageFeedbacks.value = {};
+  feedbackSubmitting.value = {};
   readonlySessionReason.value = "";
   diffFiles.value = [];
+}
+
+async function loadFeedbacksForMessages(messages: Array<{ messageId?: string; role?: string }>) {
+  const assistantMessageIds = messages
+    .filter(message => message.role === "ASSISTANT" && message.messageId?.startsWith("msg_"))
+    .map(message => message.messageId!)
+  const uniqueIds = [...new Set(assistantMessageIds)];
+  const loaded: Record<string, AiMessageFeedback | null> = {};
+  await Promise.all(uniqueIds.map(async messageId => {
+    try {
+      loaded[messageId] = await api.getMyMessageFeedback(messageId);
+    } catch {
+      loaded[messageId] = null;
+    }
+  }));
+  messageFeedbacks.value = loaded;
+}
+
+function handleSubmitFeedback(payload: AiMessageFeedbackPayload & { messageId: string }) {
+  submitMessageFeedbackMutation.mutate(payload);
 }
 
 function onCurrentFileFeedback(action: "accept-current" | "reject-current", path: string) {
@@ -2330,6 +2380,8 @@ async function handleLogout() {
           :stop-disabled-reason="stopDisabledReason"
           :models="models"
           :selected-model="selectedModel"
+          :message-feedbacks="messageFeedbacks"
+          :feedback-submitting="feedbackSubmitting"
           placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
           @send="(text: string) => handleSend(text)"
           @stop="handleStopRun"
@@ -2343,6 +2395,7 @@ async function handleLogout() {
           @reject-question="(requestId: string) => rejectQuestionMutation.mutate(requestId)"
           @select-session="(id: string) => switchSession(id)"
           @select-model="(model) => selectRuntimeModel(model)"
+          @submit-feedback="handleSubmitFeedback"
           @close="rightPanelOpen = false"
         />
       </div>

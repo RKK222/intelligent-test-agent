@@ -743,6 +743,75 @@ V18 及以前保留既有数字版本，已在本地或共享库执行过的 mig
 - 修改参数值时自动写入日志，无需人工干预。
 - 日志表只追加，不提供删除接口，满足审计要求。
 
+## V20260628231000 运营分析反馈与汇总表
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260628231000__create_analytics_feedback_and_rollups.sql` 为 AI 回复反馈和运营分析 rollup 增加以下结构。
+
+### runs 归因扩展
+
+| 字段 | 说明 |
+|---|---|
+| `agent_id` | Run 使用的业务 Agent 标识快照，用于按 agent 过滤和排行。 |
+| `model_id` | Run 使用的模型标识快照，用于按 model 过滤和排行。 |
+
+新增索引覆盖 Run 创建/更新时间窗、状态、用户、agent/model 维度；运营分析不统计、不展示、不导出 `cost_usd`。
+
+### ai_message_feedbacks
+
+保存当前登录用户对自己归属的 `ASSISTANT` 消息的满意度反馈。
+
+| 字段 | 说明 |
+|---|---|
+| `feedback_id` | 反馈业务 ID，`fb_` 前缀。 |
+| `user_id` / `session_id` / `run_id` / `message_id` | 反馈用户、会话、Run 和消息归属；`run_id` 可空兼容历史消息。 |
+| `rating` | `POSITIVE` 或 `NEGATIVE`。 |
+| `reason_code` | 负反馈原因：`WRONG_ANSWER`、`NOT_HELPFUL`、`DID_NOT_FOLLOW_INSTRUCTION`、`CODE_QUALITY_LOW`、`TEST_RESULT_BAD`、`TOO_SLOW`、`TOO_VERBOSE`、`TOO_SHORT`、`OTHER`。 |
+| `comment` | 用户补充说明，最多 300 字。 |
+| `organization` / `rd_department` / `department` | 提交反馈时的组织快照，用于历史归因。 |
+| `trace_id` / `created_at` / `updated_at` | 审计字段。 |
+
+约束和索引：
+
+- `(user_id, message_id)` 唯一，表示同一用户对同一消息只能有一条反馈，后续提交为更新。
+- 外键引用 `users`、`sessions`、`runs`、`session_messages`。
+- 时间、组织时间和 Run 维度索引用于反馈明细和负反馈分布查询。
+
+### analytics_user_activity_hourly / analytics_user_activity_daily
+
+运营分析 API 只读 hourly/daily rollup 表，不在请求链路扫描原始事实宽表。
+
+| 主要字段 | 说明 |
+|---|---|
+| `bucket_start` / `activity_date` | 小时或日期桶。 |
+| `user_id`、`username`、`organization`、`rd_department`、`department` | 用户和组织快照。 |
+| `workspace_id`、`agent_id`、`model_id` | 过滤和排行维度。 |
+| `login_count`、`session_count`、`active_session_count`、`empty_session_count`、`continuous_session_count` | 用户规模、会话和连续对话口径。 |
+| `user_message_count`、`assistant_message_count`、`run_count`、`valid_interaction_count` | 使用强度口径。 |
+| `succeeded_run_count`、`failed_run_count`、`cancelled_run_count`、`active_termination_count` | Run 结果口径。 |
+| `positive_feedback_count`、`negative_feedback_count` | 满意度口径。 |
+| `diff_proposed_count`、`diff_accepted_count`、`diff_rejected_count` | Diff 采纳口径。 |
+| `tokens_input`、`tokens_output`、`tokens_reasoning`、`tokens_total` | token 使用强度，不含 cache 和费用字段。 |
+| `duration_total_ms`、`duration_run_count` | 平均耗时计算来源。 |
+| `first_activity_at`、`last_activity_at`、`updated_at` | 活动和刷新时间。 |
+
+主键分别为 `(bucket_start, user_id, workspace_id, agent_id, model_id)` 和 `(activity_date, user_id, workspace_id, agent_id, model_id)`；组织+时间索引用于看板筛选。
+
+### analytics_run_duration_histogram_hourly
+
+Run 耗时小时直方图，字段包括 `bucket_start`、组织维度、`workspace_id`、`agent_id`、`model_id`、`le_ms`、`run_count`。p95 通过直方图近似计算，不在查询时对原始 Run 明细排序。
+
+### analytics_rollup_watermarks / analytics_rollup_job_runs / analytics_job_locks
+
+- `analytics_rollup_watermarks` 保存 rollup 水位、最近生成时间、`FRESH|STALE|FAILED` 状态和消息；API 通过 `freshness` 返回最近成功数据状态。
+- `analytics_rollup_job_runs` 预留 rollup 任务运行审计。
+- `analytics_job_locks` 提供数据库互斥锁，保证多实例下同一 rollup runner 不并发刷新同一窗口。
+
+兼容策略：
+
+- 新增表和可空字段，不破坏历史数据；历史 Run 的 `agent_id/model_id` 为空时 rollup 使用 `__none__` 维度。
+- 会话创建人、Run 触发人、用户消息发送人由业务层逐步补齐；历史空值按 session 创建人或 `__unknown__` 兜底。
+- 主链路只写事实表，统计刷新由后台定时任务执行；失败时保留最近成功 rollup 并标记 freshness。
+
 ## V20260626210000 数据库表和字段中文注释
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260626210000__add_chinese_comments_for_all_tables.sql` 为项目中所有数据库表和字段添加中文注释：

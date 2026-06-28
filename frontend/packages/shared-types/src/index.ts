@@ -253,6 +253,250 @@ export type SessionMessage = {
   tokens?: TokenUsage;
 };
 
+export type AiFeedbackRating = "POSITIVE" | "NEGATIVE";
+
+export type AiFeedbackReasonCode =
+  | "WRONG_ANSWER"
+  | "NOT_HELPFUL"
+  | "DID_NOT_FOLLOW_INSTRUCTION"
+  | "CODE_QUALITY_LOW"
+  | "TEST_RESULT_BAD"
+  | "TOO_SLOW"
+  | "TOO_VERBOSE"
+  | "TOO_SHORT"
+  | "OTHER";
+
+export type AiMessageFeedback = {
+  feedbackId: string;
+  messageId: string;
+  sessionId: string;
+  runId?: string | null;
+  rating: AiFeedbackRating;
+  reasonCode?: AiFeedbackReasonCode | null;
+  comment?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AiMessageFeedbackPayload = {
+  rating: AiFeedbackRating;
+  reasonCode?: AiFeedbackReasonCode | null;
+  comment?: string | null;
+};
+
+export type AnalyticsGranularity = "hour" | "day" | "week" | "month";
+
+export type AnalyticsQueryParams = {
+  startTime?: string;
+  endTime?: string;
+  granularity?: AnalyticsGranularity;
+  organization?: string;
+  rdDepartment?: string;
+  department?: string;
+  userId?: string;
+  agentId?: string;
+  model?: string;
+  workspaceId?: string;
+  topN?: number;
+  page?: number;
+  pageSize?: number;
+  sort?: string;
+};
+
+export type AnalyticsFreshness = {
+  generatedAt?: string | null;
+  status: "FRESH" | "STALE" | "FAILED" | string;
+  message?: string | null;
+};
+
+export type AnalyticsOverview = {
+  registeredUsers: number;
+  enabledUsers: number;
+  loginUsers: number;
+  activeUsers: number;
+  validUsers: number;
+  deepUsers: number;
+  activeRate?: number | null;
+  loginToActiveRate?: number | null;
+  activeToValidRate?: number | null;
+  validToDeepRate?: number | null;
+  sessionCount: number;
+  activeSessionCount: number;
+  emptySessionCount: number;
+  continuousSessionCount: number;
+  userMessageCount: number;
+  assistantMessageCount: number;
+  runCount: number;
+  runsPerUser?: number | null;
+  messagesPerUser?: number | null;
+  messagesPerSession?: number | null;
+  continuousConversationRate?: number | null;
+  validInteractionCount: number;
+  sustainedUsers: number;
+  succeededRuns: number;
+  failedRuns: number;
+  cancelledRuns: number;
+  activeTerminations: number;
+  successRate?: number | null;
+  failureRate?: number | null;
+  cancellationRate?: number | null;
+  averageDurationMs?: number | null;
+  p95DurationMs?: number | null;
+  positiveFeedbackCount: number;
+  negativeFeedbackCount: number;
+  satisfactionRate?: number | null;
+  feedbackCoverageRate?: number | null;
+  diffProposedCount: number;
+  diffAcceptedCount: number;
+  diffRejectedCount: number;
+  diffAcceptanceRate?: number | null;
+  diffRejectionRate?: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  tokensPerUser?: number | null;
+  tokensPerRun?: number | null;
+  freshness: AnalyticsFreshness;
+};
+
+export type AnalyticsTimeSeriesPoint = {
+  bucketStart: string;
+  loginUsers: number;
+  activeUsers: number;
+  sessionCount: number;
+  activeSessionCount: number;
+  userMessageCount: number;
+  assistantMessageCount: number;
+  runCount: number;
+  succeededRuns: number;
+  failedRuns: number;
+  cancelledRuns: number;
+  positiveFeedbackCount: number;
+  negativeFeedbackCount: number;
+  diffAcceptedCount: number;
+  diffRejectedCount: number;
+  totalTokens: number;
+  satisfactionRate?: number | null;
+  diffAcceptanceRate?: number | null;
+  cancellationRate?: number | null;
+};
+
+export type AnalyticsPeakPoint = {
+  bucketStart: string;
+  activeUsers: number;
+  runCount: number;
+  userMessageCount: number;
+  satisfactionRate?: number | null;
+  cancellationRate?: number | null;
+  totalTokens: number;
+};
+
+export type AnalyticsHeatmapPoint = {
+  dayOfWeek: number;
+  hourOfDay: number;
+  activeUsers: number;
+  runCount: number;
+  userMessageCount: number;
+};
+
+export type AnalyticsPeaks = {
+  peakPeriods: AnalyticsPeakPoint[];
+  heatmap: AnalyticsHeatmapPoint[];
+  freshness: AnalyticsFreshness;
+};
+
+export type AnalyticsUserUsageRow = {
+  userId: string;
+  username?: string | null;
+  organization?: string | null;
+  rdDepartment?: string | null;
+  department?: string | null;
+  loginCount: number;
+  sessionCount: number;
+  activeSessionCount: number;
+  userMessageCount: number;
+  runCount: number;
+  succeededRuns: number;
+  failedRuns: number;
+  cancelledRuns: number;
+  positiveFeedbackCount: number;
+  negativeFeedbackCount: number;
+  diffAcceptedCount: number;
+  diffRejectedCount: number;
+  totalTokens: number;
+  successRate?: number | null;
+  satisfactionRate?: number | null;
+  diffAcceptanceRate?: number | null;
+  lastActivityAt?: string | null;
+};
+
+export type AnalyticsOrganizationUsageRow = {
+  dimension: string;
+  name: string;
+  registeredUsers: number;
+  enabledUsers: number;
+  loginUsers: number;
+  activeUsers: number;
+  deepUsers: number;
+  activeRate?: number | null;
+  deepRate?: number | null;
+  runCount: number;
+  succeededRuns: number;
+  failedRuns: number;
+  cancelledRuns: number;
+  positiveFeedbackCount: number;
+  negativeFeedbackCount: number;
+  diffAcceptedCount: number;
+  diffRejectedCount: number;
+  totalTokens: number;
+  successRate?: number | null;
+  satisfactionRate?: number | null;
+  diffAcceptanceRate?: number | null;
+};
+
+export type AnalyticsFeedbackDetail = {
+  feedbackId: string;
+  userId: string;
+  username?: string | null;
+  organization?: string | null;
+  rdDepartment?: string | null;
+  department?: string | null;
+  sessionId: string;
+  runId?: string | null;
+  messageId: string;
+  rating: AiFeedbackRating;
+  reasonCode?: AiFeedbackReasonCode | null;
+  comment?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AnalyticsExceptionDetail = {
+  runId: string;
+  userId: string;
+  username?: string | null;
+  organization?: string | null;
+  rdDepartment?: string | null;
+  department?: string | null;
+  workspaceId: string;
+  agentId?: string | null;
+  modelId?: string | null;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AnalyticsSatisfaction = {
+  positiveFeedbackCount: number;
+  negativeFeedbackCount: number;
+  satisfactionRate?: number | null;
+  feedbackCoverageRate?: number | null;
+  negativeReasonCounts: Record<string, number>;
+  feedbackDetails: PageResponse<AnalyticsFeedbackDetail>;
+  freshness: AnalyticsFreshness;
+};
+
 export type Run = {
   runId: string;
   sessionId: string;

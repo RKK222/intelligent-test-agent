@@ -19,11 +19,19 @@ import {
   Plus,
   Send,
   Square,
+  ThumbsDown,
+  ThumbsUp,
   Upload,
   User,
   X,
 } from 'lucide-vue-next'
-import type { AgentMessage, MessagePart } from '@test-agent/shared-types'
+import type {
+  AgentMessage,
+  AiFeedbackReasonCode,
+  AiFeedbackRating,
+  AiMessageFeedback,
+  MessagePart,
+} from '@test-agent/shared-types'
 import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
@@ -242,6 +250,10 @@ const props =
     models?: any[]
     /** 当前选中的模型标识 */
     selectedModel?: string
+    /** 当前用户对 assistant 消息的反馈状态 */
+    messageFeedbacks?: Record<string, AiMessageFeedback | null>
+    /** 正在提交反馈的消息 */
+    feedbackSubmitting?: Record<string, boolean>
   }>()
 
 const emit =
@@ -259,10 +271,35 @@ const emit =
     (e: 'initialize-process'): void
     (e: 'refresh-process'): void
     (e: 'select-model', model: any): void
+    (
+      e: 'submit-feedback',
+      payload: {
+        messageId: string
+        rating: AiFeedbackRating
+        reasonCode?: AiFeedbackReasonCode | null
+        comment?: string | null
+      }
+    ): void
   }>()
 
 const localInput = ref(props.inputValue ?? '')
 const inputComposing = ref(false)
+const negativeFeedbackOpen = ref(false)
+const negativeFeedbackMessageId = ref('')
+const negativeFeedbackReason = ref<AiFeedbackReasonCode | ''>('')
+const negativeFeedbackComment = ref('')
+
+const feedbackReasonOptions: Array<{ value: AiFeedbackReasonCode; label: string }> = [
+  { value: 'WRONG_ANSWER', label: '回答不正确' },
+  { value: 'NOT_HELPFUL', label: '没有帮助' },
+  { value: 'DID_NOT_FOLLOW_INSTRUCTION', label: '没按要求执行' },
+  { value: 'CODE_QUALITY_LOW', label: '代码质量不满意' },
+  { value: 'TEST_RESULT_BAD', label: '测试结果不满意' },
+  { value: 'TOO_SLOW', label: '响应太慢' },
+  { value: 'TOO_VERBOSE', label: '内容太长' },
+  { value: 'TOO_SHORT', label: '内容太少' },
+  { value: 'OTHER', label: '其他' },
+]
 
 function modelValue(model: { id: string; providerId?: string }) {
   return model.providerId ? `${model.providerId}/${model.id}` : model.id
@@ -275,6 +312,43 @@ const quickModels = computed(() => {
 
 function selectQuickModel(model: any) {
   emit('select-model', model)
+}
+
+function canFeedback(message: ChatMessage) {
+  return message.role === 'assistant' && !message._error && message.id.startsWith('msg_')
+}
+
+function feedbackFor(message: ChatMessage) {
+  return props.messageFeedbacks?.[message.id] ?? null
+}
+
+function feedbackSubmitting(message: ChatMessage) {
+  return props.feedbackSubmitting?.[message.id] === true
+}
+
+function submitPositiveFeedback(message: ChatMessage) {
+  if (!canFeedback(message)) return
+  emit('submit-feedback', { messageId: message.id, rating: 'POSITIVE' })
+}
+
+function openNegativeFeedback(message: ChatMessage) {
+  if (!canFeedback(message)) return
+  const current = feedbackFor(message)
+  negativeFeedbackMessageId.value = message.id
+  negativeFeedbackReason.value = current?.rating === 'NEGATIVE' ? current.reasonCode ?? '' : ''
+  negativeFeedbackComment.value = current?.rating === 'NEGATIVE' ? current.comment ?? '' : ''
+  negativeFeedbackOpen.value = true
+}
+
+function submitNegativeFeedback() {
+  if (!negativeFeedbackMessageId.value) return
+  emit('submit-feedback', {
+    messageId: negativeFeedbackMessageId.value,
+    rating: 'NEGATIVE',
+    reasonCode: negativeFeedbackReason.value || null,
+    comment: negativeFeedbackComment.value.trim() || null,
+  })
+  negativeFeedbackOpen.value = false
 }
 
 function getModelColor(model: any) {
@@ -1786,6 +1860,35 @@ function onCompositionEnd() {
                 </div>
               </div>
             </div>
+            <div v-if="canFeedback(message)" class="figma-chat-feedback">
+              <button
+                type="button"
+                :class="[
+                  'figma-chat-feedback-btn',
+                  feedbackFor(message)?.rating === 'POSITIVE' && 'is-selected',
+                ]"
+                :disabled="feedbackSubmitting(message)"
+                title="满意"
+                @click="submitPositiveFeedback(message)"
+              >
+                <ThumbsUp :size="14" />
+                <span>满意</span>
+              </button>
+              <button
+                type="button"
+                :class="[
+                  'figma-chat-feedback-btn',
+                  'figma-chat-feedback-btn--negative',
+                  feedbackFor(message)?.rating === 'NEGATIVE' && 'is-selected',
+                ]"
+                :disabled="feedbackSubmitting(message)"
+                title="不满意"
+                @click="openNegativeFeedback(message)"
+              >
+                <ThumbsDown :size="14" />
+                <span>不满意</span>
+              </button>
+            </div>
           </div>
         </div>
       </template>
@@ -2565,6 +2668,41 @@ function onCompositionEnd() {
         </div>
       </div>
     </div>
+
+    <el-dialog
+      v-model="negativeFeedbackOpen"
+      title="不满意反馈"
+      width="360px"
+      append-to-body
+      class="figma-chat-feedback-dialog"
+    >
+      <div class="figma-chat-feedback-reasons">
+        <button
+          v-for="reason in feedbackReasonOptions"
+          :key="reason.value"
+          type="button"
+          :class="[
+            'figma-chat-feedback-reason',
+            negativeFeedbackReason === reason.value && 'is-selected',
+          ]"
+          @click="negativeFeedbackReason = reason.value"
+        >
+          {{ reason.label }}
+        </button>
+      </div>
+      <el-input
+        v-model="negativeFeedbackComment"
+        type="textarea"
+        :rows="3"
+        maxlength="300"
+        show-word-limit
+        placeholder="补充说明"
+      />
+      <template #footer>
+        <button type="button" class="figma-chat-feedback-cancel" @click="negativeFeedbackOpen = false">取消</button>
+        <button type="button" class="figma-chat-feedback-submit" @click="submitNegativeFeedback">提交</button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -2954,6 +3092,95 @@ function onCompositionEnd() {
   color: #8a2f29;
   word-break: break-word;
   white-space: pre-wrap;
+}
+
+.figma-chat-feedback {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  margin-top: 6px;
+}
+
+.figma-chat-feedback-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid #dfe3ea;
+  border-radius: 6px;
+  background: #fff;
+  color: #5b6472;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.figma-chat-feedback-btn:hover:not(:disabled),
+.figma-chat-feedback-btn.is-selected {
+  border-color: #8ab4ff;
+  background: #eef5ff;
+  color: #1f5fbf;
+}
+
+.figma-chat-feedback-btn--negative:hover:not(:disabled),
+.figma-chat-feedback-btn--negative.is-selected {
+  border-color: #f1b8ae;
+  background: #fff3f1;
+  color: #b94030;
+}
+
+.figma-chat-feedback-btn:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.figma-chat-feedback-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.figma-chat-feedback-reason {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #dfe3ea;
+  border-radius: 6px;
+  background: #fff;
+  color: #394150;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.figma-chat-feedback-reason.is-selected,
+.figma-chat-feedback-reason:hover {
+  border-color: #f1b8ae;
+  background: #fff3f1;
+  color: #b94030;
+}
+
+.figma-chat-feedback-cancel,
+.figma-chat-feedback-submit {
+  min-width: 64px;
+  height: 30px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.figma-chat-feedback-cancel {
+  border: 1px solid #dfe3ea;
+  background: #fff;
+  color: #4b5563;
+}
+
+.figma-chat-feedback-submit {
+  border: 1px solid #1f5fbf;
+  background: #2563eb;
+  color: #fff;
 }
 
 .figma-chat-bubble-content {

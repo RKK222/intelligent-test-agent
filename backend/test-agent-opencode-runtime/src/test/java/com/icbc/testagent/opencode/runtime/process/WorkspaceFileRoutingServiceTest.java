@@ -102,7 +102,7 @@ class WorkspaceFileRoutingServiceTest {
         OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
         when(workspaceRepository.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace("10.8.0.99", root.toString())));
         when(workspaceRepository.save(any(Workspace.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(assignmentService.status(USER_ID, "opencode", TRACE_ID)).thenReturn(process("10.8.0.12"));
+        when(assignmentService.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID)).thenReturn(affinity("10.8.0.12"));
         when(heartbeatStore.liveBackendSnapshots()).thenReturn(List.of(backendSnapshot("10.8.0.12")));
 
         WorkspaceFileRouteResponse response = service(workspaceRepository, assignmentService, heartbeatStore)
@@ -119,7 +119,7 @@ class WorkspaceFileRoutingServiceTest {
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         OpencodeProcessHeartbeatStore heartbeatStore = Mockito.mock(OpencodeProcessHeartbeatStore.class);
         when(workspaceRepository.findById(WORKSPACE_ID)).thenReturn(Optional.of(workspace("10.8.0.99", root.toString())));
-        when(assignmentService.status(USER_ID, "opencode", TRACE_ID)).thenReturn(process("10.8.0.12"));
+        when(assignmentService.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID)).thenReturn(affinity("10.8.0.12"));
         when(heartbeatStore.liveBackendSnapshots()).thenReturn(List.of(backendSnapshot("10.8.0.12"), backendSnapshot("10.8.0.99")));
 
         assertThatThrownBy(() -> service(workspaceRepository, assignmentService, heartbeatStore)

@@ -135,6 +135,7 @@ class RunApplicationServiceTest {
         FakeRunEventRepository events = new FakeRunEventRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         FakeExecutionNodeRepository nodes = new FakeExecutionNodeRepository();
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
         UserOpencodeProcessAssignmentService assignmentService = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
         ExecutionNode assignedNode = userProcessNode("node_1234567890abcdef", "http://10.8.0.12:4096");
         org.mockito.Mockito.when(assignmentService.requireReadyProcess(
@@ -146,7 +147,7 @@ class RunApplicationServiceTest {
                 new FakeWorkspaceRepository(),
                 new FakeSessionRepository(session()),
                 runs,
-                new FakeSessionMessageRepository(),
+                messages,
                 nodes,
                 new FakeRoutingDecisionRepository(),
                 new RunEventAppender(events),
@@ -160,6 +161,11 @@ class RunApplicationServiceTest {
                 "trace_1234567890abcdef");
 
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(run.triggeredByUserId()).isEqualTo(new UserId("usr_1234567890abcdef"));
+        assertThat(runs.saved).allSatisfy(saved ->
+                assertThat(saved.triggeredByUserId()).isEqualTo(new UserId("usr_1234567890abcdef")));
+        assertThat(messages.saved).singleElement().satisfies(message ->
+                assertThat(message.senderUserId()).isEqualTo(new UserId("usr_1234567890abcdef")));
         assertThat(nodes.findRoutableNodesCalls).isZero();
         assertThat(nodes.saved).contains(assignedNode);
         assertThat(facade.createSessionCommands).hasSize(1);
@@ -1148,7 +1154,17 @@ class RunApplicationServiceTest {
 
         @Override
         public Optional<SessionMessage> findById(SessionMessageId messageId) {
-            return Optional.empty();
+            return saved.stream()
+                    .filter(message -> message.messageId().equals(messageId))
+                    .reduce((first, second) -> second);
+        }
+
+        @Override
+        public Optional<SessionMessage> findBySessionIdAndRemoteMessageId(SessionId sessionId, String remoteMessageId) {
+            return saved.stream()
+                    .filter(message -> message.sessionId().equals(sessionId))
+                    .filter(message -> remoteMessageId != null && remoteMessageId.equals(message.remoteMessageId()))
+                    .reduce((first, second) -> second);
         }
 
         @Override

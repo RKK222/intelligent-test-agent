@@ -26,7 +26,9 @@ public record Run(
         BigDecimal costUsd,
         ConversationSourceType sourceType,
         String sourceRefId,
-        UserId triggeredByUserId) {
+        UserId triggeredByUserId,
+        String agentId,
+        String modelId) {
 
     /**
      * 构造未指定 traceId 的 Run，兼容历史测试和持久化重建路径，内部使用占位 traceId。
@@ -80,6 +82,8 @@ public record Run(
                 costUsd,
                 ConversationSourceType.MANUAL,
                 null,
+                null,
+                null,
                 null);
     }
 
@@ -104,6 +108,12 @@ public record Run(
         sourceType = sourceType == null ? ConversationSourceType.MANUAL : sourceType;
         if (sourceRefId != null) {
             sourceRefId = com.icbc.testagent.domain.support.DomainValidation.requireText(sourceRefId, "sourceRefId");
+        }
+        if (agentId != null) {
+            agentId = com.icbc.testagent.domain.support.DomainValidation.requireText(agentId, "agentId").trim().toLowerCase(java.util.Locale.ROOT);
+        }
+        if (modelId != null) {
+            modelId = com.icbc.testagent.domain.support.DomainValidation.requireText(modelId, "modelId");
         }
     }
 
@@ -131,7 +141,9 @@ public record Run(
                 costUsd,
                 sourceType,
                 sourceRefId,
-                triggeredByUserId);
+                triggeredByUserId,
+                agentId,
+                modelId);
     }
 
     /**
@@ -188,7 +200,9 @@ public record Run(
                 costUsd,
                 sourceType,
                 sourceRefId,
-                triggeredByUserId);
+                triggeredByUserId,
+                agentId,
+                modelId);
     }
 
     /**
@@ -207,6 +221,29 @@ public record Run(
                 costUsd,
                 sourceType,
                 sourceRefId,
-                triggeredByUserId);
+                triggeredByUserId,
+                agentId,
+                modelId);
+    }
+
+    /**
+     * 设置运行态选择快照，供运营分析按 agent/model 维度过滤新数据。
+     */
+    public Run withRuntimeSelection(String agentId, String modelId) {
+        return new Run(
+                runId,
+                sessionId,
+                workspaceId,
+                status,
+                createdAt,
+                updatedAt,
+                traceId,
+                tokenUsage,
+                costUsd,
+                sourceType,
+                sourceRefId,
+                triggeredByUserId,
+                agentId,
+                modelId);
     }
 }

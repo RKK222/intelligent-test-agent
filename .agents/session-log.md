@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-28 - 运营分析 rollup 与 AI 回复满意度反馈一次性实现
+
+- Why: 运营侧需要覆盖用户规模漏斗、使用强度、Run 结果、满意度、Diff 采纳、Token、趋势高峰、维度排行和明细导出的 P0 指标；同时 AI 回复需要可追溯的满意/不满意反馈，但不能展示 prompt、assistant 原文或成本字段。
+- What: 后端补齐 Session/Run/用户消息归因字段，新增 `ai_message_feedbacks`、`runs.agent_id/model_id`、hourly/daily rollup、duration histogram、watermark/job/DB lock 表；新增反馈领域对象、MyBatis mapper、服务和 `/messages/{messageId}/feedback` API；新增 analytics rollup runner、查询服务、SUPER_ADMIN analytics API 与 CSV 导出。前端在助手消息下方新增满意/不满意反馈入口，系统管理新增“运营分析”页，覆盖筛选、概览、趋势、热力、排行、满意度、异常明细和导出；同步 API、事件、数据库、backend/frontend README。
+- How: 主链路只写事实数据，统计由定时 rollup 持 DB 锁重算最近 hourly/daily，API 只读 rollup 并返回 freshness/stale 状态；MyBatis XML 承载新增 SQL；满意度按 `positive/(positive+negative)`，无反馈返回 `null`，p95 用 histogram 近似；CSV/看板不输出 cost/costUsd。提交时需要继续排除既有无关脏文件：`frontend/apps/agent-web/vite.config.ts`、`frontend/packages/diff-viewer/*`、`frontend/packages/editor/*`。
+- Result: 后端完整 `mvn -q test` 通过；在临时 stash 无关脏文件、只保留本次 staged 内容的提交态下，前端相关包 typecheck 通过，workspace 级 `corepack pnpm test` 27 个文件 169/169 通过。带回既有未暂存 editor Monaco 改动时曾因 mock 缺少 `loadMonaco` 出现 unhandled rejection，已确认不纳入本次提交。
+
 ### 2026-06-28 - 完成态历史助手快照与实时 user part 误拼修复
 
 - Why: 真实页面复现完成态 Session `#89d405` 只剩用户消息；数据库对应会话只有 USER 行。后端日志同时显示历史查询在 Reactor `parallel-*` 线程调用 `.block()` 必然失败。进一步直连 opencode 发现 `/api/session/{id}/message` 只返回 `agent-switched/model-switched`，完整 user/assistant 消息实际来自 `/session/{id}/message`；真实新任务还确认 user 的实时 `message.updated + message.part.updated` 会被 reducer 误建成 assistant，从而把提示词拼入回答并表现为多余空行/重复内容。

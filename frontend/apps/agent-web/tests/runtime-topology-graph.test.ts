@@ -97,8 +97,8 @@ describe("runtime topology graph data", () => {
     const graph = buildRuntimeTopologyGraph(overview);
 
     expect(graph.nodes.map((node) => [node.id, node.kind, node.label])).toEqual([
-      ["backend:bjp_1234567890abcdef", "backend", "bjp_1234567890abcdef"],
-      ["manager:mgr_1234567890abcdef", "manager", "mgr_1234567890abcdef"],
+      ["backend:bjp_1234567890abcdef", "backend", "10.8.0.12"],
+      ["manager:mgr_1234567890abcdef", "manager", "ctr_01"],
       ["opencode:mgr_1234567890abcdef:4096:0", "opencode-bound", "4096"],
       ["opencode:mgr_1234567890abcdef:4097:1", "opencode-unbound", "4097"]
     ]);

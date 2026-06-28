@@ -13,6 +13,8 @@ import com.icbc.testagent.domain.session.SessionMessageRepository;
 import com.icbc.testagent.domain.session.SessionMessageRole;
 import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.domain.session.SessionStatus;
+import com.icbc.testagent.domain.session.ConversationSourceType;
+import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.opencode.runtime.run.RunSessionMessageSnapshotService;
@@ -66,19 +68,29 @@ public class SessionApplicationService {
      * 在指定 Workspace 下创建平台 Session，创建前先确认 Workspace 存在。
      */
     public Session createSession(WorkspaceId workspaceId, String title, String traceId) {
+        return createSession(null, workspaceId, title, traceId);
+    }
+
+    /**
+     * 在指定 Workspace 下创建当前用户的 Session，并记录创建人归因供运营统计使用。
+     */
+    public Session createSession(UserId userId, WorkspaceId workspaceId, String title, String traceId) {
         if (workspaceRepository.findById(workspaceId).isEmpty()) {
             LOGGER.warn("Cannot create session: workspace not found, workspaceId={}, traceId={}", workspaceId.value(), traceId);
             throw new PlatformException(ErrorCode.NOT_FOUND, "Workspace 不存在", Map.of("workspaceId", workspaceId.value()));
         }
         Instant now = Instant.now();
-        Session session = sessionRepository.save(new Session(
+        Session draft = new Session(
                 new SessionId(RuntimeIdGenerator.sessionId()),
                 workspaceId,
                 title,
                 SessionStatus.ACTIVE,
                 now,
                 now,
-                traceId));
+                traceId);
+        Session session = sessionRepository.save(userId == null
+                ? draft
+                : draft.withSource(ConversationSourceType.MANUAL, null, userId));
         LOGGER.info("Session created, sessionId={}, workspaceId={}, title={}, traceId={}",
                 session.sessionId().value(), workspaceId.value(), title, traceId);
         return session;
@@ -137,15 +149,25 @@ public class SessionApplicationService {
      * 追加平台侧 Session 消息，role 缺省为 USER；assistant 正文恢复不依赖本地消息表。
      */
     public SessionMessage appendMessage(SessionId sessionId, SessionMessageRole role, String content, String traceId) {
+        return appendMessage(null, sessionId, role, content, traceId);
+    }
+
+    /**
+     * 追加当前用户发送的 Session 消息，并记录 senderUserId 供用户活跃统计使用。
+     */
+    public SessionMessage appendMessage(UserId userId, SessionId sessionId, SessionMessageRole role, String content, String traceId) {
         getSession(sessionId);
         SessionMessageRole resolvedRole = role == null ? SessionMessageRole.USER : role;
-        return sessionMessageRepository.save(new SessionMessage(
+        SessionMessage draft = new SessionMessage(
                 new SessionMessageId(RuntimeIdGenerator.messageId()),
                 sessionId,
                 resolvedRole,
                 content,
                 Instant.now(),
-                traceId));
+                traceId);
+        return sessionMessageRepository.save(userId == null
+                ? draft
+                : draft.withSource(ConversationSourceType.MANUAL, null, userId));
     }
 
     /**

@@ -8,6 +8,8 @@
 
 - Session 创建、查询、消息追加和归档。
 - Run 启动、取消、远端 agent session 懒创建/复用、事件订阅和终态处理。
+- AI 回复满意度反馈归属校验和 upsert：只允许登录用户对自己会话或自己触发 Run 的 `ASSISTANT` 消息提交 `POSITIVE/NEGATIVE` 反馈，评论最多 300 字。
+- 运营分析 rollup 与查询：主链路只写事实，后台 runner 通过数据库锁默认刷新最近窗口的 hourly/daily rollup 和 Run 耗时直方图；查询服务只读 rollup 并返回 freshness，不统计、不展示、不导出 cost/costUsd。
 - 当前用户 opencode 进程状态查询、头像菜单服务状态投影、初始化契约、防绕过 Run 校验、runtime 代理用户进程路由、manager WebSocket 命令网关，以及用户进程到兼容 `ExecutionNode` 的投影。
 - `WorkspaceFileRoutingService` 根据当前用户 opencode 进程的服务器归属和 Redis Java 后端快照定位同服务器后端 Java 进程，供前端工作区文件 WebSocket 先路由到目标后端；该文件路由归属查询只读取 ACTIVE binding 和可恢复进程记录，不触发 manager health/start 命令，避免文件树加载被 opencode-manager 慢响应阻塞。超级管理员服务器工作空间选择器也复用该在线快照返回活跃后端服务器列表和默认目录。本地换 IP 或切换数据库后，历史 workspace 的 `linux_server_id` 若指向已无在线 Java 后端的旧服务器，且当前用户 opencode 已迁移到本后端、workspace 根目录在本机可访问，路由时会把 workspace 回绑到当前 `linuxServerId`；旧服务器仍在线或本机目录不可访问时继续返回 `CONFLICT`。
 - `AgentRuntimeTargetResolver` 统一封装用户进程节点、固定节点 fallback、远端 session 创建/复用以及 binding 节点不一致时的自动覆盖。
@@ -53,6 +55,8 @@
 - `RunEventPersistencePolicyTest` 覆盖消息投影只走实时通道、关键状态事件持久化、tool payload 清洗和 rawPayload 移除。
 - `RunMessageRecoveryServiceTest` 覆盖 agent session messages 中 assistant 恢复为 transient SSE snapshot、user part 不重复回放，以及未绑定/远端失败时降级为空。
 - `SessionApplicationServiceTest` 覆盖 Session 创建前 Workspace 校验、归档隐藏、标题/置顶更新、消息追加默认 role 和消息列表 DB fallback。
+- `AiMessageFeedbackApplicationServiceTest` 覆盖反馈创建/更新、assistant role 校验、消息归属校验和评论长度边界。
+- `AnalyticsQueryServiceTest` 覆盖 overview 指标口径、空分母、参数边界和 CSV 不含 cost 字段。
 - `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
 - `ModelCatalogApplicationServiceTest` 覆盖企业内模型 seed、`DeepSeek-V4-Flash-W8A8` 默认模型和 opencode provider 配置同步请求。
 - `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、用户进程节点路由、固定节点 fallback、session binding 自动重建、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
@@ -77,6 +81,7 @@
 
 新增与会话、运行、事件、Diff、permission/question、runtime catalog、terminal 相关业务编排时改这里；新增 agent 适配器应放在 `test-agent-agent-runtime`。Controller 和 URL 映射必须放在 `test-agent-api`。
 高频文本 delta、message projection 和大段 tool/bash 输出不应写入 `run_events`；消息内容刷新恢复优先从 agent 标准 session messages 拉取并 upsert 到 `session_messages`，历史查询的远端刷新必须在 bounded-elastic 线程执行，agent 不可用时回退数据库快照。Run 状态、Diff、permission/question 等平台关键事件继续依赖 durable RunEvent。
+运营分析新增指标时优先扩展 `AnalyticsModels`、`AnalyticsRepository`、rollup runner 和查询服务；API 查询不得绕过 rollup 直接扫原始事实表，导出字段不得包含 prompt/assistant 原文、密钥或费用字段。
 生产 `OpencodeProcessManagerGateway` 通过 manager WebSocket 控制面下发 `start`/`health`/`restart`/`stop` 命令；无连接、超时或异常必须转换为平台 opencode 错误码。测试仍可使用 fake gateway 固定初始化、健康检查或运行管理命令结果。
 `OpencodeManagerConfigSyncService` 把通用参数表中的 `OPENCODE_MANAGER_MAX_PROCESSES`（`platform=all`）、`OPENCODE_SESSION_DIR`、`OPENCODE_PUBLIC_CONFIG_DIR` 经控制面 WebSocket 下发给已连接 manager：manager 注册成功后立即补推一帧完整 `configUpdate`，manager 收到 `registered` 后也会发送 `configRequest` 拉取同一配置；前端修改上述任一参数触发 `CommonParameterUpdatedEvent`，由 `ManagerConnectionRegistry.broadcast` 推给当前实例持有的所有连接（全互联拓扑下可触达全部 manager）。参数缺失、空白或最大进程数非正整数时不下发可启动配置，manager 保持未 ready 并拒绝启动用户进程；`opencode_containers.max_processes` 仍由 manager heartbeat 回报的生效值同步。
 runtime 代理入口有认证用户时必须通过 `AgentRuntimeTargetResolver` 使用用户专属 opencode 进程；无用户主体的 static-token 或本地兼容调用才允许使用固定 `execution_nodes` fallback。

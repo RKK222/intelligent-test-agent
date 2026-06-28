@@ -10,7 +10,17 @@ import type {
   AgentConfigWorktree,
   AgentConfigWorktreeOption,
   AgentConfigWorktreePayload,
+  AiMessageFeedback,
+  AiMessageFeedbackPayload,
   AddSshKeyPayload,
+  AnalyticsExceptionDetail,
+  AnalyticsOrganizationUsageRow,
+  AnalyticsOverview,
+  AnalyticsPeaks,
+  AnalyticsQueryParams,
+  AnalyticsSatisfaction,
+  AnalyticsTimeSeriesPoint,
+  AnalyticsUserUsageRow,
   ApplicationWorkspaceTemplate,
   ApplicationWorkspaceVersion,
   ApplicationDefinition,
@@ -170,6 +180,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const opencodeRuntimeManagementBase = "/api/internal/platform/opencode-runtime/management";
   const schedulerManagementBase = "/api/internal/platform/scheduler-management";
   const systemManagementBase = "/api/internal/platform/system-management";
+  const analyticsBase = "/api/internal/platform/analytics";
   const commonParameterBase = `${configurationBase}/common-parameters`;
   const fetcher = options.fetcher ?? fetch;
   const webSocketFactory: WorkspaceWebSocketFactory =
@@ -248,6 +259,23 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     return requestFrom<T>(baseUrl, path, init);
+  }
+
+  async function requestCsv(path: string, init: RequestInit = {}): Promise<Blob> {
+    const traceId = traceIdFactory();
+    const headers = new Headers(init.headers);
+    headers.set("Accept", "text/csv");
+    headers.set("X-Trace-Id", traceId);
+    const userToken = options.apiToken ?? (typeof localStorage !== "undefined" ? localStorage.getItem("test-agent.auth.token") : null);
+    if (userToken && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${userToken}`);
+    }
+    const response = await fetcher(`${baseUrl}${path}`, { ...init, headers });
+    if (!response.ok) {
+      const body = await readJson(response);
+      throw new BackendApiError(response.status, normalizeFailure(body, traceId, response.status));
+    }
+    return response.blob();
   }
 
   const agentPath = (path: string) => `${agentBase}${path}`;
@@ -660,6 +688,13 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     deleteSession: (sessionId: string) => request<Session>(`/api/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }),
     listSessionMessages: (sessionId: string, page = 1, size = 100) =>
       request<PageResponse<SessionMessage>>(`/api/sessions/${encodeURIComponent(sessionId)}/messages?page=${page}&size=${size}`),
+    putMessageFeedback: (messageId: string, payload: AiMessageFeedbackPayload) =>
+      request<AiMessageFeedback>(`/api/internal/platform/opencode-runtime/messages/${encodeURIComponent(messageId)}/feedback`, {
+        method: "PUT",
+        body: JSON.stringify(payload)
+      }),
+    getMyMessageFeedback: (messageId: string) =>
+      request<AiMessageFeedback | null>(`/api/internal/platform/opencode-runtime/messages/${encodeURIComponent(messageId)}/feedback/me`),
     getActiveRun: (sessionId: string) => request<Run | null>(`/api/sessions/${encodeURIComponent(sessionId)}/active-run`),
     createSession: (workspaceId: string, title: string) =>
       request<Session>("/api/sessions", { method: "POST", body: JSON.stringify({ workspaceId, title }) }),
@@ -693,6 +728,22 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${opencodeRuntimeManagementBase}/containers/${encodeURIComponent(containerId)}/processes/${encodeURIComponent(String(port))}/stop`,
         { method: "POST" }
       ),
+    getAnalyticsOverview: (params: AnalyticsQueryParams = {}) =>
+      request<AnalyticsOverview>(`${analyticsBase}/overview${query({ ...params })}`),
+    getAnalyticsTimeseries: (params: AnalyticsQueryParams = {}) =>
+      request<AnalyticsTimeSeriesPoint[]>(`${analyticsBase}/timeseries${query({ ...params })}`),
+    getAnalyticsPeaks: (params: AnalyticsQueryParams = {}) =>
+      request<AnalyticsPeaks>(`${analyticsBase}/peaks${query({ ...params })}`),
+    getAnalyticsUsers: (params: AnalyticsQueryParams = {}) =>
+      request<PageResponse<AnalyticsUserUsageRow>>(`${analyticsBase}/users${query({ ...params })}`),
+    getAnalyticsOrganizations: (params: AnalyticsQueryParams & { groupBy?: string } = {}) =>
+      request<AnalyticsOrganizationUsageRow[]>(`${analyticsBase}/organizations${query({ ...params })}`),
+    getAnalyticsSatisfaction: (params: AnalyticsQueryParams = {}) =>
+      request<AnalyticsSatisfaction>(`${analyticsBase}/satisfaction${query({ ...params })}`),
+    getAnalyticsExceptions: (params: AnalyticsQueryParams = {}) =>
+      request<PageResponse<AnalyticsExceptionDetail>>(`${analyticsBase}/exceptions${query({ ...params })}`),
+    exportAnalyticsCsv: (type: "overview" | "timeseries" | "users" | "organizations" | "feedback" | "exceptions", params: AnalyticsQueryParams = {}) =>
+      requestCsv(`${analyticsBase}/export${query({ ...params, type })}`),
     listScheduledTasks: (params: ScheduledTaskListParams = {}) =>
       request<PageResponse<ScheduledTaskManagementTask>>(
         `${schedulerManagementBase}/tasks${query({ page: params.page, size: params.size })}`

@@ -1,0 +1,962 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.icbc.testagent.persistence.mybatis.AnalyticsMapper">
+    <resultMap id="ActivityRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsActivityRow">
+        <constructor>
+            <arg column="bucket_start" javaType="java.time.Instant"/>
+            <arg column="activity_date" javaType="java.time.LocalDate"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="username" javaType="java.lang.String"/>
+            <arg column="organization" javaType="java.lang.String"/>
+            <arg column="rd_department" javaType="java.lang.String"/>
+            <arg column="department" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="agent_id" javaType="java.lang.String"/>
+            <arg column="model_id" javaType="java.lang.String"/>
+            <arg column="login_count" javaType="long"/>
+            <arg column="session_count" javaType="long"/>
+            <arg column="active_session_count" javaType="long"/>
+            <arg column="empty_session_count" javaType="long"/>
+            <arg column="continuous_session_count" javaType="long"/>
+            <arg column="user_message_count" javaType="long"/>
+            <arg column="assistant_message_count" javaType="long"/>
+            <arg column="run_count" javaType="long"/>
+            <arg column="succeeded_run_count" javaType="long"/>
+            <arg column="failed_run_count" javaType="long"/>
+            <arg column="cancelled_run_count" javaType="long"/>
+            <arg column="active_termination_count" javaType="long"/>
+            <arg column="valid_interaction_count" javaType="long"/>
+            <arg column="positive_feedback_count" javaType="long"/>
+            <arg column="negative_feedback_count" javaType="long"/>
+            <arg column="diff_proposed_count" javaType="long"/>
+            <arg column="diff_accepted_count" javaType="long"/>
+            <arg column="diff_rejected_count" javaType="long"/>
+            <arg column="tokens_input" javaType="long"/>
+            <arg column="tokens_output" javaType="long"/>
+            <arg column="tokens_reasoning" javaType="long"/>
+            <arg column="tokens_total" javaType="long"/>
+            <arg column="duration_total_ms" javaType="long"/>
+            <arg column="duration_run_count" javaType="long"/>
+            <arg column="first_activity_at" javaType="java.time.Instant"/>
+            <arg column="last_activity_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="DurationFactRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsDurationFactRow">
+        <constructor>
+            <arg column="bucket_start" javaType="java.time.Instant"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="username" javaType="java.lang.String"/>
+            <arg column="organization" javaType="java.lang.String"/>
+            <arg column="rd_department" javaType="java.lang.String"/>
+            <arg column="department" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="agent_id" javaType="java.lang.String"/>
+            <arg column="model_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="DurationHistogramRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsDurationHistogramRow">
+        <constructor>
+            <arg column="bucket_start" javaType="java.time.Instant"/>
+            <arg column="organization" javaType="java.lang.String"/>
+            <arg column="rd_department" javaType="java.lang.String"/>
+            <arg column="department" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="agent_id" javaType="java.lang.String"/>
+            <arg column="model_id" javaType="java.lang.String"/>
+            <arg column="le_ms" javaType="long"/>
+            <arg column="run_count" javaType="long"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="FreshnessRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsFreshnessRow">
+        <constructor>
+            <arg column="job_name" javaType="java.lang.String"/>
+            <arg column="watermark_at" javaType="java.time.Instant"/>
+            <arg column="generated_at" javaType="java.time.Instant"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="message" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="FeedbackDetailRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsFeedbackDetailRow">
+        <constructor>
+            <arg column="feedback_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="username" javaType="java.lang.String"/>
+            <arg column="organization" javaType="java.lang.String"/>
+            <arg column="rd_department" javaType="java.lang.String"/>
+            <arg column="department" javaType="java.lang.String"/>
+            <arg column="session_id" javaType="java.lang.String"/>
+            <arg column="run_id" javaType="java.lang.String"/>
+            <arg column="message_id" javaType="java.lang.String"/>
+            <arg column="rating" javaType="java.lang.String"/>
+            <arg column="reason_code" javaType="java.lang.String"/>
+            <arg column="comment" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="ExceptionDetailRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsExceptionDetailRow">
+        <constructor>
+            <arg column="run_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="username" javaType="java.lang.String"/>
+            <arg column="organization" javaType="java.lang.String"/>
+            <arg column="rd_department" javaType="java.lang.String"/>
+            <arg column="department" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="agent_id" javaType="java.lang.String"/>
+            <arg column="model_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="OrganizationUserCountRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsOrganizationUserCountRow">
+        <constructor>
+            <arg column="name" javaType="java.lang.String"/>
+            <arg column="registered_users" javaType="long"/>
+            <arg column="enabled_users" javaType="long"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="ZeroMetrics">
+        0 as login_count,
+        0 as session_count,
+        0 as active_session_count,
+        0 as empty_session_count,
+        0 as continuous_session_count,
+        0 as user_message_count,
+        0 as assistant_message_count,
+        0 as run_count,
+        0 as succeeded_run_count,
+        0 as failed_run_count,
+        0 as cancelled_run_count,
+        0 as active_termination_count,
+        0 as valid_interaction_count,
+        0 as positive_feedback_count,
+        0 as negative_feedback_count,
+        0 as diff_proposed_count,
+        0 as diff_accepted_count,
+        0 as diff_rejected_count,
+        0 as tokens_input,
+        0 as tokens_output,
+        0 as tokens_reasoning,
+        0 as tokens_total,
+        0 as duration_total_ms,
+        0 as duration_run_count
+    </sql>
+
+    <select id="loadRawActivityFacts" resultMap="ActivityRowMap">
+        select
+            occurred_at as bucket_start,
+            cast(null as date) as activity_date,
+            user_id,
+            username,
+            coalesce(organization, '未归属') as organization,
+            coalesce(rd_department, '未归属') as rd_department,
+            coalesce(department, '未归属') as department,
+            coalesce(workspace_id, '__none__') as workspace_id,
+            coalesce(agent_id, '__none__') as agent_id,
+            coalesce(model_id, '__none__') as model_id,
+            login_count,
+            session_count,
+            active_session_count,
+            empty_session_count,
+            continuous_session_count,
+            user_message_count,
+            assistant_message_count,
+            run_count,
+            succeeded_run_count,
+            failed_run_count,
+            cancelled_run_count,
+            active_termination_count,
+            valid_interaction_count,
+            positive_feedback_count,
+            negative_feedback_count,
+            diff_proposed_count,
+            diff_accepted_count,
+            diff_rejected_count,
+            tokens_input,
+            tokens_output,
+            tokens_reasoning,
+            tokens_total,
+            duration_total_ms,
+            duration_run_count,
+            occurred_at as first_activity_at,
+            occurred_at as last_activity_at
+        from (
+            select
+                l.login_at as occurred_at,
+                l.user_id as user_id,
+                u.username,
+                u.organization,
+                u.rd_department,
+                u.department,
+                '__none__' as workspace_id,
+                '__none__' as agent_id,
+                '__none__' as model_id,
+                1 as login_count,
+                0 as session_count,
+                0 as active_session_count,
+                0 as empty_session_count,
+                0 as continuous_session_count,
+                0 as user_message_count,
+                0 as assistant_message_count,
+                0 as run_count,
+                0 as succeeded_run_count,
+                0 as failed_run_count,
+                0 as cancelled_run_count,
+                0 as active_termination_count,
+                0 as valid_interaction_count,
+                0 as positive_feedback_count,
+                0 as negative_feedback_count,
+                0 as diff_proposed_count,
+                0 as diff_accepted_count,
+                0 as diff_rejected_count,
+                0 as tokens_input,
+                0 as tokens_output,
+                0 as tokens_reasoning,
+                0 as tokens_total,
+                0 as duration_total_ms,
+                0 as duration_run_count
+            from user_login_logs l
+            join users u on u.user_id = l.user_id
+            where l.login_result = 'SUCCESS'
+              and l.login_at &gt;= #{startInclusive}
+              and l.login_at &lt; #{endExclusive}
+
+            union all
+
+            select
+                s.created_at as occurred_at,
+                coalesce(s.created_by_user_id, '__unknown__') as user_id,
+                u.username,
+                u.organization,
+                u.rd_department,
+                u.department,
+                s.workspace_id,
+                '__none__' as agent_id,
+                '__none__' as model_id,
+                0 as login_count,
+                1 as session_count,
+                0 as active_session_count,
+                case when not exists (select 1 from session_messages m where m.session_id = s.session_id)
+                       and not exists (select 1 from runs r where r.session_id = s.session_id)
+                     then 1 else 0 end as empty_session_count,
+                0 as continuous_session_count,
+                0 as user_message_count,
+                0 as assistant_message_count,
+                0 as run_count,
+                0 as succeeded_run_count,
+                0 as failed_run_count,
+                0 as cancelled_run_count,
+                0 as active_termination_count,
+                0 as valid_interaction_count,
+                0 as positive_feedback_count,
+                0 as negative_feedback_count,
+                0 as diff_proposed_count,
+                0 as diff_accepted_count,
+                0 as diff_rejected_count,
+                0 as tokens_input,
+                0 as tokens_output,
+                0 as tokens_reasoning,
+                0 as tokens_total,
+                0 as duration_total_ms,
+                0 as duration_run_count
+            from sessions s
+            left join users u on u.user_id = s.created_by_user_id
+            where s.created_at &gt;= #{startInclusive}
+              and s.created_at &lt; #{endExclusive}
+
+            union all
+
+            select
+                max(x.occurred_at) as occurred_at,
+                x.user_id,
+                u.username,
+                u.organization,
+                u.rd_department,
+                u.department,
+                x.workspace_id,
+                '__none__' as agent_id,
+                '__none__' as model_id,
+                0 as login_count,
+                0 as session_count,
+                1 as active_session_count,
+                0 as empty_session_count,
+                case when sum(x.user_message_hit) &gt;= 2 then 1 else 0 end as continuous_session_count,
+                0 as user_message_count,
+                0 as assistant_message_count,
+                0 as run_count,
+                0 as succeeded_run_count,
+                0 as failed_run_count,
+                0 as cancelled_run_count,
+                0 as active_termination_count,
+                0 as valid_interaction_count,
+                0 as positive_feedback_count,
+                0 as negative_feedback_count,
+                0 as diff_proposed_count,
+                0 as diff_accepted_count,
+                0 as diff_rejected_count,
+                0 as tokens_input,
+                0 as tokens_output,
+                0 as tokens_reasoning,
+                0 as tokens_total,
+                0 as duration_total_ms,
+                0 as duration_run_count
+            from (
+                select
+                    m.session_id,
+                    coalesce(m.sender_user_id, s.created_by_user_id, '__unknown__') as user_id,
+                    s.workspace_id,
+                    m.created_at as occurred_at,
+                    case when m.role = 'USER' then 1 else 0 end as user_message_hit
+                from session_messages m
+                join sessions s on s.session_id = m.session_id
+                where m.created_at &gt;= #{startInclusive}
+                  and m.created_at &lt; #{endExclusive}
+                  and m.role = 'USER'
+                union all
+                select
+                    r.session_id,
+                    coalesce(r.triggered_by_user_id, s.created_by_user_id, '__unknown__') as user_id,
+                    r.workspace_id,
+                    r.created_at as occurred_at,
+                    0 as user_message_hit
+                from runs r
+                join sessions s on s.session_id = r.session_id
+                where r.created_at &gt;= #{startInclusive}
+                  and r.created_at &lt; #{endExclusive}
+            ) x
+            left join users u on u.user_id = x.user_id
+            group by x.session_id, x.user_id, u.username, u.organization, u.rd_department, u.department, x.workspace_id
+
+            union all
+
+            select
+                m.created_at as occurred_at,
+                coalesce(m.sender_user_id, r.triggered_by_user_id, s.created_by_user_id, '__unknown__') as user_id,
+                u.username,
+                u.organization,
+                u.rd_department,
+                u.department,
+                s.workspace_id,
+                coalesce(m.agent_id, r.agent_id, '__none__') as agent_id,
+                coalesce(r.model_id, '__none__') as model_id,
+                0 as login_count,
+                0 as session_count,
+                0 as active_session_count,
+                0 as empty_session_count,
+                0 as continuous_session_count,
+                case when m.role = 'USER' then 1 else 0 end as user_message_count,
+                case when m.role = 'ASSISTANT' then 1 else 0 end as assistant_message_count,
+                0 as run_count,
+                0 as succeeded_run_count,
+                0 as failed_run_count,
+                0 as cancelled_run_count,
+                0 as active_termination_count,
+                0 as valid_interaction_count,
+                0 as positive_feedback_count,
+                0 as negative_feedback_count,
+                0 as diff_proposed_count,
+                0 as diff_accepted_count,
+                0 as diff_rejected_count,
+                0 as tokens_input,
+                0 as tokens_output,
+                0 as tokens_reasoning,
+                0 as tokens_total,
+                0 as duration_total_ms,
+                0 as duration_run_count
+            from session_messages m
+            join sessions s on s.session_id = m.session_id
+            left join runs r on r.run_id = m.run_id
+            left join users u on u.user_id = coalesce(m.sender_user_id, r.triggered_by_user_id, s.created_by_user_id)
+            where m.created_at &gt;= #{startInclusive}
+              and m.created_at &lt; #{endExclusive}
+              and m.role in ('USER', 'ASSISTANT')
+
+            union all
+
+            select
+                r.created_at as occurred_at,
+                coalesce(r.triggered_by_user_id, s.created_by_user_id, '__unknown__') as user_id,
+                u.username,
+                u.organization,
+                u.rd_department,
+                u.department,
+                r.workspace_id,
+                coalesce(r.agent_id, '__none__') as agent_id,
+                coalesce(r.model_id, '__none__') as model_id,
+                0 as login_count,
+                0 as session_count,
+                0 as active_session_count,
+                0 as empty_session_count,
+                0 as continuous_session_count,
+                0 as user_message_count,
+                0 as assistant_message_count,
+                1 as run_count,
+                case when r.status = 'SUCCEEDED' then 1 else 0 end as succeeded_run_count,
+                case when r.status = 'FAILED' then 1 else 0 end as failed_run_count,
+                case when r.status = 'CANCELLED' then 1 else 0 end as cancelled_run_count,
+                case when r.status = 'CANCELLED' then 1 else 0 end as active_termination_count,
+                case when r.status in ('SUCCEEDED', 'FAILED', 'CANCELLED') then 1 else 0 end as valid_interaction_count,
+                0 as positive_feedback_count,
+                0 as negative_feedback_count,
+                0 as diff_proposed_count,
+                0 as diff_accepted_count,
+                0 as diff_rejected_count,
+                coalesce(r.tokens_input, 0) as tokens_input,
+                coalesce(r.tokens_output, 0) as tokens_output,
+                coalesce(r.tokens_reasoning, 0) as tokens_reasoning,
+                coalesce(r.tokens_input, 0) + coalesce(r.tokens_output, 0) + coalesce(r.tokens_reasoning, 0) as tokens_total,
+                0 as duration_total_ms,
+                0 as duration_run_count
+            from runs r
+            join sessions s on s.session_id = r.session_id
+            left join users u on u.user_id = coalesce(r.triggered_by_user_id, s.created_by_user_id)
+            where r.created_at &gt;= #{startInclusive}
+              and r.created_at &lt; #{endExclusive}
+
+            union all
+
+            select
+                e.occurred_at as occurred_at,
+                coalesce(r.triggered_by_user_id, s.created_by_user_id, '__unknown__') as user_id,
+                u.username,
+                u.organization,
+                u.rd_department,
+                u.department,
+                r.workspace_id,
+                coalesce(r.agent_id, '__none__') as agent_id,
+                coalesce(r.model_id, '__none__') as model_id,
+                0 as login_count,
+                0 as session_count,
+                0 as active_session_count,
+                0 as empty_session_count,
+                0 as continuous_session_count,
+                0 as user_message_count,
+                0 as assistant_message_count,
+                0 as run_count,
+                0 as succeeded_run_count,
+                0 as failed_run_count,
+                0 as cancelled_run_count,
+                0 as active_termination_count,
+                0 as valid_interaction_count,
+                0 as positive_feedback_count,
+                0 as negative_feedback_count,
+                case when e.type = 'diff.proposed' then 1 else 0 end as diff_proposed_count,
+                case when e.type = 'diff.accepted' then 1 else 0 end as diff_accepted_count,
+                case when e.type = 'diff.rejected' then 1 else 0 end as diff_rejected_count,
+                0 as tokens_input,
+                0 as tokens_output,
+                0 as tokens_reasoning,
+                0 as tokens_total,
+                0 as duration_total_ms,
+                0 as duration_run_count
+            from run_events e
+            join runs r on r.run_id = e.run_id
+            join sessions s on s.session_id = r.session_id
+            left join users u on u.user_id = coalesce(r.triggered_by_user_id, s.created_by_user_id)
+            where e.occurred_at &gt;= #{startInclusive}
+              and e.occurred_at &lt; #{endExclusive}
+              and e.type in ('diff.proposed', 'diff.accepted', 'diff.rejected')
+
+            union all
+
+            select
+                f.created_at as occurred_at,
+                f.user_id,
+                u.username,
+                coalesce(f.organization, u.organization) as organization,
+                coalesce(f.rd_department, u.rd_department) as rd_department,
+                coalesce(f.department, u.department) as department,
+                s.workspace_id,
+                coalesce(r.agent_id, '__none__') as agent_id,
+                coalesce(r.model_id, '__none__') as model_id,
+                0 as login_count,
+                0 as session_count,
+                0 as active_session_count,
+                0 as empty_session_count,
+                0 as continuous_session_count,
+                0 as user_message_count,
+                0 as assistant_message_count,
+                0 as run_count,
+                0 as succeeded_run_count,
+                0 as failed_run_count,
+                0 as cancelled_run_count,
+                0 as active_termination_count,
+                0 as valid_interaction_count,
+                case when f.rating = 'POSITIVE' then 1 else 0 end as positive_feedback_count,
+                case when f.rating = 'NEGATIVE' then 1 else 0 end as negative_feedback_count,
+                0 as diff_proposed_count,
+                0 as diff_accepted_count,
+                0 as diff_rejected_count,
+                0 as tokens_input,
+                0 as tokens_output,
+                0 as tokens_reasoning,
+                0 as tokens_total,
+                0 as duration_total_ms,
+                0 as duration_run_count
+            from ai_message_feedbacks f
+            join sessions s on s.session_id = f.session_id
+            left join runs r on r.run_id = f.run_id
+            left join users u on u.user_id = f.user_id
+            where f.created_at &gt;= #{startInclusive}
+              and f.created_at &lt; #{endExclusive}
+        ) facts
+    </select>
+
+    <select id="loadRunDurationSamples" resultMap="DurationFactRowMap">
+        select
+            r.created_at as bucket_start,
+            coalesce(r.triggered_by_user_id, s.created_by_user_id, '__unknown__') as user_id,
+            coalesce(u.username, coalesce(r.triggered_by_user_id, s.created_by_user_id, '__unknown__')) as username,
+            coalesce(u.organization, '未归属') as organization,
+            coalesce(u.rd_department, '未归属') as rd_department,
+            coalesce(u.department, '未归属') as department,
+            coalesce(r.workspace_id, '__none__') as workspace_id,
+            coalesce(r.agent_id, '__none__') as agent_id,
+            coalesce(r.model_id, '__none__') as model_id,
+            r.created_at,
+            r.updated_at
+        from runs r
+        join sessions s on s.session_id = r.session_id
+        left join users u on u.user_id = coalesce(r.triggered_by_user_id, s.created_by_user_id)
+        where r.created_at &gt;= #{startInclusive}
+          and r.created_at &lt; #{endExclusive}
+          and r.status in ('SUCCEEDED', 'FAILED', 'CANCELLED')
+          and r.updated_at &gt;= r.created_at
+    </select>
+
+    <delete id="deleteHourly">
+        delete from analytics_user_activity_hourly
+        where bucket_start &gt;= #{startInclusive}
+          and bucket_start &lt; #{endExclusive}
+    </delete>
+
+    <insert id="insertHourly">
+        insert into analytics_user_activity_hourly(
+            bucket_start, user_id, username, organization, rd_department, department,
+            workspace_id, agent_id, model_id,
+            login_count, session_count, active_session_count, empty_session_count, continuous_session_count,
+            user_message_count, assistant_message_count,
+            run_count, succeeded_run_count, failed_run_count, cancelled_run_count, active_termination_count, valid_interaction_count,
+            positive_feedback_count, negative_feedback_count,
+            diff_proposed_count, diff_accepted_count, diff_rejected_count,
+            tokens_input, tokens_output, tokens_reasoning, tokens_total,
+            duration_total_ms, duration_run_count, first_activity_at, last_activity_at, updated_at
+        )
+        values
+        <foreach collection="rows" item="row" separator=",">
+            (
+                #{row.bucketStart}, #{row.userId}, #{row.username}, #{row.organization}, #{row.rdDepartment}, #{row.department},
+                #{row.workspaceId}, #{row.agentId}, #{row.modelId},
+                #{row.loginCount}, #{row.sessionCount}, #{row.activeSessionCount}, #{row.emptySessionCount}, #{row.continuousSessionCount},
+                #{row.userMessageCount}, #{row.assistantMessageCount},
+                #{row.runCount}, #{row.succeededRunCount}, #{row.failedRunCount}, #{row.cancelledRunCount}, #{row.activeTerminationCount}, #{row.validInteractionCount},
+                #{row.positiveFeedbackCount}, #{row.negativeFeedbackCount},
+                #{row.diffProposedCount}, #{row.diffAcceptedCount}, #{row.diffRejectedCount},
+                #{row.tokensInput}, #{row.tokensOutput}, #{row.tokensReasoning}, #{row.tokensTotal},
+                #{row.durationTotalMs}, #{row.durationRunCount}, #{row.firstActivityAt}, #{row.lastActivityAt}, #{updatedAt}
+            )
+        </foreach>
+    </insert>
+
+    <select id="loadHourly" resultMap="ActivityRowMap">
+        select
+            bucket_start, cast(null as date) as activity_date, user_id, username, organization, rd_department, department,
+            workspace_id, agent_id, model_id,
+            login_count, session_count, active_session_count, empty_session_count, continuous_session_count,
+            user_message_count, assistant_message_count,
+            run_count, succeeded_run_count, failed_run_count, cancelled_run_count, active_termination_count, valid_interaction_count,
+            positive_feedback_count, negative_feedback_count,
+            diff_proposed_count, diff_accepted_count, diff_rejected_count,
+            tokens_input, tokens_output, tokens_reasoning, tokens_total,
+            duration_total_ms, duration_run_count, first_activity_at, last_activity_at
+        from analytics_user_activity_hourly
+        where bucket_start &gt;= #{startInclusive}
+          and bucket_start &lt; #{endExclusive}
+    </select>
+
+    <delete id="deleteDaily">
+        delete from analytics_user_activity_daily
+        where activity_date &gt;= #{startInclusive}
+          and activity_date &lt;= #{endInclusive}
+    </delete>
+
+    <insert id="insertDaily">
+        insert into analytics_user_activity_daily(
+            activity_date, user_id, username, organization, rd_department, department,
+            workspace_id, agent_id, model_id,
+            login_count, session_count, active_session_count, empty_session_count, continuous_session_count,
+            user_message_count, assistant_message_count,
+            run_count, succeeded_run_count, failed_run_count, cancelled_run_count, active_termination_count, valid_interaction_count,
+            positive_feedback_count, negative_feedback_count,
+            diff_proposed_count, diff_accepted_count, diff_rejected_count,
+            tokens_input, tokens_output, tokens_reasoning, tokens_total,
+            duration_total_ms, duration_run_count, first_activity_at, last_activity_at, updated_at
+        )
+        values
+        <foreach collection="rows" item="row" separator=",">
+            (
+                #{row.activityDate}, #{row.userId}, #{row.username}, #{row.organization}, #{row.rdDepartment}, #{row.department},
+                #{row.workspaceId}, #{row.agentId}, #{row.modelId},
+                #{row.loginCount}, #{row.sessionCount}, #{row.activeSessionCount}, #{row.emptySessionCount}, #{row.continuousSessionCount},
+                #{row.userMessageCount}, #{row.assistantMessageCount},
+                #{row.runCount}, #{row.succeededRunCount}, #{row.failedRunCount}, #{row.cancelledRunCount}, #{row.activeTerminationCount}, #{row.validInteractionCount},
+                #{row.positiveFeedbackCount}, #{row.negativeFeedbackCount},
+                #{row.diffProposedCount}, #{row.diffAcceptedCount}, #{row.diffRejectedCount},
+                #{row.tokensInput}, #{row.tokensOutput}, #{row.tokensReasoning}, #{row.tokensTotal},
+                #{row.durationTotalMs}, #{row.durationRunCount}, #{row.firstActivityAt}, #{row.lastActivityAt}, #{updatedAt}
+            )
+        </foreach>
+    </insert>
+
+    <delete id="deleteDurationHistogram">
+        delete from analytics_run_duration_histogram_hourly
+        where bucket_start &gt;= #{startInclusive}
+          and bucket_start &lt; #{endExclusive}
+    </delete>
+
+    <insert id="insertDurationHistogram">
+        insert into analytics_run_duration_histogram_hourly(
+            bucket_start, organization, rd_department, department,
+            workspace_id, agent_id, model_id, le_ms, run_count, updated_at
+        )
+        values
+        <foreach collection="rows" item="row" separator=",">
+            (
+                #{row.bucketStart}, #{row.organization}, #{row.rdDepartment}, #{row.department},
+                #{row.workspaceId}, #{row.agentId}, #{row.modelId}, #{row.leMs}, #{row.runCount}, #{updatedAt}
+            )
+        </foreach>
+    </insert>
+
+    <select id="freshness" resultMap="FreshnessRowMap">
+        select job_name, watermark_at, generated_at, status, message
+        from analytics_rollup_watermarks
+        where job_name = #{jobName}
+    </select>
+
+    <update id="updateWatermark">
+        update analytics_rollup_watermarks
+        set watermark_at = #{watermarkAt},
+            generated_at = #{generatedAt},
+            status = #{status},
+            message = #{message},
+            trace_id = #{traceId},
+            updated_at = #{updatedAt}
+        where job_name = #{jobName}
+    </update>
+
+    <insert id="insertWatermark">
+        insert into analytics_rollup_watermarks(
+            job_name, watermark_at, generated_at, status, message, trace_id, updated_at
+        )
+        values (
+            #{jobName}, #{watermarkAt}, #{generatedAt}, #{status}, #{message}, #{traceId}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="updateLock">
+        update analytics_job_locks
+        set owner_id = #{ownerId},
+            locked_until = #{lockedUntil},
+            updated_at = #{now}
+        where lock_name = #{lockName}
+          and (locked_until &lt;= #{now} or owner_id = #{ownerId})
+    </update>
+
+    <insert id="insertLock">
+        insert into analytics_job_locks(lock_name, owner_id, locked_until, updated_at)
+        values (#{lockName}, #{ownerId}, #{lockedUntil}, #{now})
+    </insert>
+
+    <delete id="releaseLock">
+        delete from analytics_job_locks
+        where lock_name = #{lockName}
+          and owner_id = #{ownerId}
+    </delete>
+
+    <select id="countRegisteredUsers" resultType="long">
+        select count(*)
+        from users
+        where 1 = 1
+        <include refid="UserDimensionFilters"/>
+    </select>
+
+    <select id="countEnabledUsers" resultType="long">
+        select count(*)
+        from users
+        where status = 'ACTIVE'
+        <include refid="UserDimensionFilters"/>
+    </select>
+
+    <select id="organizationUserCounts" resultMap="OrganizationUserCountRowMap">
+        select
+            <choose>
+                <when test="dimension != null and dimension.equals('rdDepartment')">
+                    coalesce(rd_department, '未归属')
+                </when>
+                <when test="dimension != null and dimension.equals('department')">
+                    coalesce(department, '未归属')
+                </when>
+                <otherwise>
+                    coalesce(organization, '未归属')
+                </otherwise>
+            </choose>
+            as name,
+            count(*) as registered_users,
+            sum(case when status = 'ACTIVE' then 1 else 0 end) as enabled_users
+        from users
+        where 1 = 1
+        <include refid="UserDimensionFilters"/>
+        group by
+            <choose>
+                <when test="dimension != null and dimension.equals('rdDepartment')">
+                    coalesce(rd_department, '未归属')
+                </when>
+                <when test="dimension != null and dimension.equals('department')">
+                    coalesce(department, '未归属')
+                </when>
+                <otherwise>
+                    coalesce(organization, '未归属')
+                </otherwise>
+            </choose>
+    </select>
+
+    <sql id="UserDimensionFilters">
+        <if test="organization != null and organization != ''">
+            and organization = #{organization}
+        </if>
+        <if test="rdDepartment != null and rdDepartment != ''">
+            and rd_department = #{rdDepartment}
+        </if>
+        <if test="department != null and department != ''">
+            and department = #{department}
+        </if>
+        <if test="userId != null and userId != ''">
+            and user_id = #{userId}
+        </if>
+    </sql>
+
+    <sql id="RollupFilters">
+        <if test="organization != null and organization != ''">
+            and organization = #{organization}
+        </if>
+        <if test="rdDepartment != null and rdDepartment != ''">
+            and rd_department = #{rdDepartment}
+        </if>
+        <if test="department != null and department != ''">
+            and department = #{department}
+        </if>
+        <if test="userId != null and userId != ''">
+            and user_id = #{userId}
+        </if>
+        <if test="agentId != null and agentId != ''">
+            and agent_id = #{agentId}
+        </if>
+        <if test="model != null and model != ''">
+            and model_id = #{model}
+        </if>
+        <if test="workspaceId != null and workspaceId != ''">
+            and workspace_id = #{workspaceId}
+        </if>
+    </sql>
+
+    <select id="queryHourlyRollups" resultMap="ActivityRowMap">
+        select
+            bucket_start, cast(null as date) as activity_date, user_id, username, organization, rd_department, department,
+            workspace_id, agent_id, model_id,
+            login_count, session_count, active_session_count, empty_session_count, continuous_session_count,
+            user_message_count, assistant_message_count,
+            run_count, succeeded_run_count, failed_run_count, cancelled_run_count, active_termination_count, valid_interaction_count,
+            positive_feedback_count, negative_feedback_count,
+            diff_proposed_count, diff_accepted_count, diff_rejected_count,
+            tokens_input, tokens_output, tokens_reasoning, tokens_total,
+            duration_total_ms, duration_run_count, first_activity_at, last_activity_at
+        from analytics_user_activity_hourly
+        where bucket_start &gt;= #{startInclusive}
+          and bucket_start &lt; #{endExclusive}
+        <include refid="RollupFilters"/>
+    </select>
+
+    <select id="queryDailyRollups" resultMap="ActivityRowMap">
+        select
+            cast(null as timestamp) as bucket_start, activity_date, user_id, username, organization, rd_department, department,
+            workspace_id, agent_id, model_id,
+            login_count, session_count, active_session_count, empty_session_count, continuous_session_count,
+            user_message_count, assistant_message_count,
+            run_count, succeeded_run_count, failed_run_count, cancelled_run_count, active_termination_count, valid_interaction_count,
+            positive_feedback_count, negative_feedback_count,
+            diff_proposed_count, diff_accepted_count, diff_rejected_count,
+            tokens_input, tokens_output, tokens_reasoning, tokens_total,
+            duration_total_ms, duration_run_count, first_activity_at, last_activity_at
+        from analytics_user_activity_daily
+        where activity_date &gt;= #{startDate}
+          and activity_date &lt;= #{endDate}
+        <include refid="RollupFilters"/>
+    </select>
+
+    <select id="queryDurationHistogram" resultMap="DurationHistogramRowMap">
+        select bucket_start, organization, rd_department, department, workspace_id, agent_id, model_id, le_ms, run_count
+        from analytics_run_duration_histogram_hourly
+        where bucket_start &gt;= #{startInclusive}
+          and bucket_start &lt; #{endExclusive}
+        <if test="organization != null and organization != ''">
+          and organization = #{organization}
+        </if>
+        <if test="rdDepartment != null and rdDepartment != ''">
+          and rd_department = #{rdDepartment}
+        </if>
+        <if test="department != null and department != ''">
+          and department = #{department}
+        </if>
+        <if test="agentId != null and agentId != ''">
+          and agent_id = #{agentId}
+        </if>
+        <if test="model != null and model != ''">
+          and model_id = #{model}
+        </if>
+        <if test="workspaceId != null and workspaceId != ''">
+          and workspace_id = #{workspaceId}
+        </if>
+    </select>
+
+    <select id="feedbackDetails" resultMap="FeedbackDetailRowMap">
+        select
+            f.feedback_id, f.user_id, coalesce(u.username, f.user_id) as username,
+            coalesce(f.organization, u.organization, '未归属') as organization,
+            coalesce(f.rd_department, u.rd_department, '未归属') as rd_department,
+            coalesce(f.department, u.department, '未归属') as department,
+            f.session_id, f.run_id, f.message_id, f.rating, f.reason_code, f.comment,
+            f.created_at, f.updated_at
+        from ai_message_feedbacks f
+        left join sessions s on s.session_id = f.session_id
+        left join runs r on r.run_id = f.run_id
+        left join users u on u.user_id = f.user_id
+        where f.created_at &gt;= #{startInclusive}
+          and f.created_at &lt; #{endExclusive}
+        <include refid="FeedbackFilters"/>
+        order by f.created_at desc, f.id desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countFeedbackDetails" resultType="long">
+        select count(*)
+        from ai_message_feedbacks f
+        left join sessions s on s.session_id = f.session_id
+        left join runs r on r.run_id = f.run_id
+        left join users u on u.user_id = f.user_id
+        where f.created_at &gt;= #{startInclusive}
+          and f.created_at &lt; #{endExclusive}
+        <include refid="FeedbackFilters"/>
+    </select>
+
+    <select id="negativeReasonCounts" resultType="map">
+        select coalesce(f.reason_code, 'OTHER') as reason_code, count(*) as reason_count
+        from ai_message_feedbacks f
+        left join sessions s on s.session_id = f.session_id
+        left join runs r on r.run_id = f.run_id
+        left join users u on u.user_id = f.user_id
+        where f.created_at &gt;= #{startInclusive}
+          and f.created_at &lt; #{endExclusive}
+          and f.rating = 'NEGATIVE'
+        <include refid="FeedbackFilters"/>
+        group by coalesce(f.reason_code, 'OTHER')
+        order by count(*) desc
+        limit #{limit}
+    </select>
+
+    <sql id="FeedbackFilters">
+        <if test="organization != null and organization != ''">
+            and coalesce(f.organization, u.organization) = #{organization}
+        </if>
+        <if test="rdDepartment != null and rdDepartment != ''">
+            and coalesce(f.rd_department, u.rd_department) = #{rdDepartment}
+        </if>
+        <if test="department != null and department != ''">
+            and coalesce(f.department, u.department) = #{department}
+        </if>
+        <if test="userId != null and userId != ''">
+            and f.user_id = #{userId}
+        </if>
+        <if test="agentId != null and agentId != ''">
+            and r.agent_id = #{agentId}
+        </if>
+        <if test="model != null and model != ''">
+            and r.model_id = #{model}
+        </if>
+        <if test="workspaceId != null and workspaceId != ''">
+            and coalesce(r.workspace_id, s.workspace_id) = #{workspaceId}
+        </if>
+    </sql>
+
+    <select id="exceptionDetails" resultMap="ExceptionDetailRowMap">
+        select
+            r.run_id, coalesce(r.triggered_by_user_id, s.created_by_user_id, '__unknown__') as user_id,
+            coalesce(u.username, coalesce(r.triggered_by_user_id, s.created_by_user_id, '__unknown__')) as username,
+            coalesce(u.organization, '未归属') as organization,
+            coalesce(u.rd_department, '未归属') as rd_department,
+            coalesce(u.department, '未归属') as department,
+            r.workspace_id,
+            coalesce(r.agent_id, '__none__') as agent_id,
+            coalesce(r.model_id, '__none__') as model_id,
+            r.status,
+            r.created_at,
+            r.updated_at
+        from runs r
+        join sessions s on s.session_id = r.session_id
+        left join users u on u.user_id = coalesce(r.triggered_by_user_id, s.created_by_user_id)
+        where r.created_at &gt;= #{startInclusive}
+          and r.created_at &lt; #{endExclusive}
+          and r.status in ('FAILED', 'CANCELLED')
+        <include refid="ExceptionFilters"/>
+        order by r.updated_at desc, r.id desc
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countExceptionDetails" resultType="long">
+        select count(*)
+        from runs r
+        join sessions s on s.session_id = r.session_id
+        left join users u on u.user_id = coalesce(r.triggered_by_user_id, s.created_by_user_id)
+        where r.created_at &gt;= #{startInclusive}
+          and r.created_at &lt; #{endExclusive}
+          and r.status in ('FAILED', 'CANCELLED')
+        <include refid="ExceptionFilters"/>
+    </select>
+
+    <sql id="ExceptionFilters">
+        <if test="organization != null and organization != ''">
+            and u.organization = #{organization}
+        </if>
+        <if test="rdDepartment != null and rdDepartment != ''">
+            and u.rd_department = #{rdDepartment}
+        </if>
+        <if test="department != null and department != ''">
+            and u.department = #{department}
+        </if>
+        <if test="userId != null and userId != ''">
+            and coalesce(r.triggered_by_user_id, s.created_by_user_id) = #{userId}
+        </if>
+        <if test="agentId != null and agentId != ''">
+            and r.agent_id = #{agentId}
+        </if>
+        <if test="model != null and model != ''">
+            and r.model_id = #{model}
+        </if>
+        <if test="workspaceId != null and workspaceId != ''">
+            and r.workspace_id = #{workspaceId}
+        </if>
+    </sql>
+</mapper>
