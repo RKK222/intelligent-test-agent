@@ -224,6 +224,7 @@ const emit =
     (e: 'new-conversation'): void
     (e: 'close'): void
     (e: 'open-history'): void
+    (e: 'select-session', id: string): void
     (e: 'open-tasks'): void
     (e: 'update:inputValue', value: string): void
     (e: 'open-diff', path: string): void
@@ -1154,11 +1155,37 @@ function selectDrawerFile(path: string) {
   void nextTick(() => drawerScroll.value?.scrollTo({ top: 0 }))
 }
 
+const historyDrawerOpen = ref(false)
+const historySearchQuery = ref('')
+const filteredHistory = computed(() => {
+  const list = props.history || []
+  const q = historySearchQuery.value.trim().toLowerCase()
+  if (!q) return list
+  return list.filter(
+    (item) =>
+      item.title.toLowerCase().includes(q) ||
+      (item.createdAt && item.createdAt.includes(q))
+  )
+})
+function closeHistoryDrawer() {
+  historyDrawerOpen.value = false
+  historySearchQuery.value = ''
+}
+function selectHistoryItem(id: string) {
+  emit('select-session', id)
+  closeHistoryDrawer()
+}
+
 // Esc 关闭面板内浮层：监听全局 keydown，只在当前浮层打开时响应。
 function onOverlayKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && attachmentDialogOpen.value) {
     event.preventDefault()
     closeAttachmentDialog()
+    return
+  }
+  if (event.key === 'Escape' && historyDrawerOpen.value) {
+    event.preventDefault()
+    closeHistoryDrawer()
     return
   }
   if (event.key === 'Escape' && drawerOpen.value) {
@@ -1438,6 +1465,17 @@ function onCompositionEnd() {
   <div class="figma-chat-root">
     <header class="figma-chat-header">
       <h2 class="figma-chat-title">{{ title || '生成测试案例' }}</h2>
+      <div class="figma-chat-header-actions">
+        <button
+          type="button"
+          class="figma-chat-header-btn"
+          title="查看历史对话"
+          @click="historyDrawerOpen = true; emit('open-history')"
+        >
+          <History :size="15" />
+          <span>历史对话</span>
+        </button>
+      </div>
     </header>
 
     <div ref="scrollEl" class="figma-chat-scroll">
@@ -2314,10 +2352,224 @@ function onCompositionEnd() {
         </div>
       </div>
     </div>
+
+    <!-- 历史对话抽屉 -->
+    <div
+      v-if="historyDrawerOpen"
+      class="figma-chat-drawer-mask"
+      role="presentation"
+      @click.self="closeHistoryDrawer"
+    >
+      <div
+        class="figma-chat-history-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="历史对话记录"
+      >
+        <header class="figma-chat-drawer-header">
+          <div class="figma-chat-drawer-title">
+            <span class="figma-chat-drawer-title-text">历史对话</span>
+            <span class="figma-chat-drawer-count">{{ (props.history || []).length }}</span>
+          </div>
+          <button
+            type="button"
+            class="figma-chat-drawer-close"
+            aria-label="关闭历史对话抽屉"
+            @click="closeHistoryDrawer"
+          >
+            <X :size="14" />
+          </button>
+        </header>
+
+        <div class="figma-chat-history-search">
+          <input
+            v-model="historySearchQuery"
+            type="text"
+            placeholder="搜索历史对话..."
+            class="figma-chat-history-search-input"
+          />
+        </div>
+
+        <div class="figma-chat-history-body">
+          <div v-if="filteredHistory.length === 0" class="figma-chat-history-empty">
+            <History :size="32" class="figma-chat-history-empty-icon" />
+            <p class="figma-chat-history-empty-text">
+              {{ historySearchQuery.trim() ? '无匹配的历史对话' : '暂无历史对话记录，快在下方开启新会话吧~' }}
+            </p>
+          </div>
+          <ul v-else class="figma-chat-history-list">
+            <li v-for="item in filteredHistory" :key="item.id">
+              <button
+                type="button"
+                class="figma-chat-history-card"
+                :title="item.title"
+                @click="selectHistoryItem(item.id)"
+              >
+                <div class="figma-chat-history-card-icon">
+                  <BookOpen :size="15" />
+                </div>
+                <div class="figma-chat-history-card-content">
+                  <div class="figma-chat-history-card-title">{{ item.title || '新对话' }}</div>
+                  <div class="figma-chat-history-card-meta">
+                    <span>{{ item.createdAt ? item.createdAt.replace('T', ' ').slice(0, 16) : '最近创建' }}</span>
+                    <span class="figma-chat-history-card-id">#{{ item.id.slice(-6) }}</span>
+                  </div>
+                </div>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.figma-chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  height: 48px;
+  border-bottom: 1px solid var(--ta-border);
+  background: var(--ta-surface);
+  user-select: none;
+}
+.figma-chat-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.figma-chat-header-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ta-muted);
+  background: transparent;
+  border: 1px solid var(--ta-border);
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+.figma-chat-header-btn:hover {
+  color: var(--ta-text);
+  background: var(--ta-hover);
+  border-color: var(--ta-muted);
+}
+.figma-chat-history-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--ta-surface);
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+  animation: figma-chat-drawer-slide 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.figma-chat-history-search {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ta-border);
+  background: var(--ta-panel);
+}
+.figma-chat-history-search-input {
+  width: 100%;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--ta-text);
+  background: var(--ta-surface);
+  border: 1px solid var(--ta-border);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.figma-chat-history-search-input:focus {
+  border-color: var(--ta-focus, #3b82f6);
+}
+.figma-chat-history-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+.figma-chat-history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  color: var(--ta-muted);
+  text-align: center;
+}
+.figma-chat-history-empty-icon {
+  opacity: 0.4;
+  margin-bottom: 12px;
+}
+.figma-chat-history-empty-text {
+  font-size: 13px;
+  line-height: 1.5;
+}
+.figma-chat-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.figma-chat-history-card {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--ta-surface);
+  border: 1px solid var(--ta-border);
+  text-align: left;
+  transition: all 0.15s ease;
+  cursor: pointer;
+}
+.figma-chat-history-card:hover {
+  background: var(--ta-hover);
+  border-color: var(--ta-muted);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  transform: translateY(-1px);
+}
+.figma-chat-history-card-icon {
+  flex: 0 0 auto;
+  color: var(--ta-muted);
+  padding-top: 2px;
+}
+.figma-chat-history-card-content {
+  flex: 1;
+  min-width: 0;
+}
+.figma-chat-history-card-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ta-text);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.figma-chat-history-card-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--ta-muted);
+}
+.figma-chat-history-card-id {
+  font-family: var(--font-mono);
+  opacity: 0.8;
+}
+
 .figma-chat-root {
   display: flex;
   flex-direction: column;

@@ -128,4 +128,31 @@ describe("event-stream-client", () => {
 
     expect(openedUrl).toBe("http://api/api/internal/agent/otheragent/runs/run_1/events");
   });
+
+  it("does not incorrectly discard seq zero transient events when eventId is missing", () => {
+    const source = new FakeEventSource();
+    const received: string[] = [];
+
+    subscribeRunEvents({
+      baseUrl: "http://api",
+      runId: "run_1",
+      eventSourceFactory: () => source,
+      onEvent: (event) => received.push((event.payload as { delta: string }).delta)
+    });
+
+    source.emit("message.part.delta", {
+      runId: "run_1",
+      seq: 0,
+      type: "message.part.delta",
+      payload: { delta: "hel" }
+    });
+    source.emit("message.part.delta", {
+      runId: "run_1",
+      seq: 0,
+      type: "message.part.delta",
+      payload: { delta: "lo" }
+    });
+
+    expect(received).toEqual(["hel", "lo"]);
+  });
 });

@@ -77,11 +77,22 @@ export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventS
     if (!parsed) {
       return;
     }
-    const key = parsed.eventId.trim().length > 0 ? `event:${parsed.eventId}` : `seq:${parsed.runId}:${parsed.seq}`;
-    if (seen.has(key)) {
-      return;
+    // 如果 eventId 是 fallback 的 runId:seq，说明后端未提供显式 eventId
+    const isFallback = parsed.eventId === `${parsed.runId}:${parsed.seq}`;
+    // 优先按真实 eventId 去重，兼容旧事件回退 runId + seq；seq=0 transient 文本事件不能因为相同 seq 被错误丢弃
+    if (!isFallback) {
+      const key = `event:${parsed.eventId}`;
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
+    } else if (parsed.seq > 0) {
+      const key = `seq:${parsed.runId}:${parsed.seq}`;
+      if (seen.has(key)) {
+        return;
+      }
+      seen.add(key);
     }
-    seen.add(key);
     options.onEvent(parsed);
   };
 

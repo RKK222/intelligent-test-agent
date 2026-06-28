@@ -2215,6 +2215,7 @@ async function handleLogout() {
           @reply-permission="(requestId: string, decision: 'once' | 'always' | 'reject') => replyPermissionMutation.mutate({ requestId, decision })"
           @reply-question="(requestId: string, answers: unknown[]) => replyQuestionMutation.mutate({ requestId, answers })"
           @reject-question="(requestId: string) => rejectQuestionMutation.mutate(requestId)"
+          @select-session="(id: string) => switchSession(id)"
           @close="rightPanelOpen = false"
         />
       </div>
