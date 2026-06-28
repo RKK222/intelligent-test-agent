@@ -1028,3 +1028,13 @@
 - How: 纯前端代码更新，使用 Element Plus 的 filterable / allow-create / el-progress 配合 Vue computed 过滤来实现。
 - Result: 单元测试 `settings-app-workspace-panel.test.ts` 全部通过，`pnpm typecheck` 与 `pnpm lint` 校验通过，界面交互逻辑流畅，无任何未解析组件警告。
 
+### 2026-06-28 - 「应用工作空间」标题栏手动刷新按钮失效修复
+
+- Why: 用户反馈左侧「应用工作空间」标题栏上的循环刷新按钮点击后完全没有反应，文件树不会重新拉取。
+- What: 修改 `frontend/apps/agent-web/src/components/AgentWorkbench.vue`：
+  - `loadDirectory(path, workspaceId)` 增加 `force = false` 第三参数；早返回守卫改为 `loadingPath.has(path) || (!force && entriesByDirectory[path] !== undefined)`，仅在「非强制刷新」且「已加载过」时短路，正在加载中的请求仍去重避免并发风暴。
+  - 模板中 `<FigmaFileExplorer @refresh>` 从 `loadDirectory('')` 改为 `loadDirectory('', undefined, true)`，让用户点击刷新按钮时强制重新拉取根目录。
+  - 同步在 `frontend/apps/agent-web/README.md` 第 34 行补充说明手动刷新按钮走 `force=true` 路径，绕过 `loadDirectory` 的去重短路。
+- How: 维持原函数签名向后兼容（仅追加默认参数），未改其他 6 处 `loadDirectory` 调用方，避免影响首次加载、工作区切换和目录懒加载的现有去重行为。
+- Result: 手动刷新按钮能真正触发 `api.listFiles(workspaceId, '')` 并刷新根目录行；`vue-tsc` typecheck 与 Vitest 132 个测试全部通过。
+

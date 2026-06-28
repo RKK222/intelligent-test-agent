@@ -1322,12 +1322,18 @@ async function selectServerWorkspaceDirectory(payload: { server: WorkspaceBacken
   }
 }
 
-async function loadDirectory(path: string, workspaceId = selectedWorkspace.value?.workspaceId) {
+async function loadDirectory(
+  path: string,
+  workspaceId = selectedWorkspace.value?.workspaceId,
+  force = false
+) {
   if (!workspaceId) {
     return;
   }
   // 已被其他并发请求加载完成（或正在加载）就直接返回，避免重复请求与状态竞争。
-  if (entriesByDirectory.value[path] !== undefined || loadingPath.value.has(path)) {
+  // 显式传 force=true（典型场景：用户点击文件树刷新按钮）时，即便已经加载也要重新拉取；
+  // 但仍跳过正在加载中的请求，避免短时间内多次点击产生并发重复请求。
+  if (loadingPath.value.has(path) || (!force && entriesByDirectory.value[path] !== undefined)) {
     return;
   }
   const nextLoading = new Set(loadingPath.value);
@@ -2085,7 +2091,7 @@ async function handleLogout() {
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
           @open-diff="handleOpenDiff"
-          @refresh="loadDirectory('')"
+          @refresh="loadDirectory('', undefined, true)"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"
