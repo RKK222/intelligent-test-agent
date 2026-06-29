@@ -3,11 +3,13 @@ package com.icbc.testagent.persistence.mybatis;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
+import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 /**
  * 运营分析 MyBatis mapper，SQL 统一维护在 XML 中，避免新增 JDBC SQL。
  */
+@Mapper
 public interface AnalyticsMapper {
 
     List<AnalyticsActivityRow> loadRawActivityFacts(

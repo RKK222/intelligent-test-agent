@@ -9,9 +9,10 @@ import com.icbc.testagent.domain.configuration.AgentConfigWorktree;
 import com.icbc.testagent.domain.configuration.AgentConfigWorktreeStatus;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
+import org.springframework.stereotype.Repository;
+
 import java.util.List;
 import java.util.Optional;
-import org.springframework.stereotype.Repository;
 
 /**
  * AgentConfig 的 MyBatis Repository 实现，负责领域端口和 XML mapper 之间的转换。

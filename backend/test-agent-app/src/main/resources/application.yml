@@ -1,6 +1,6 @@
 spring:
   profiles:
-    active: ${SPRING_PROFILES_ACTIVE:guo}
+    active: guo
   application:
     name: test-agent
   datasource:

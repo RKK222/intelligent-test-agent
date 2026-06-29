@@ -1,11 +1,13 @@
 package com.icbc.testagent.persistence.mybatis;
 
 import java.util.List;
+import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 
 /**
  * Agent 配置 MyBatis mapper；SQL 必须维护在 XML 中，接口只声明参数和返回值。
  */
+@Mapper
 public interface AgentConfigMapper {
 
     void insertOperation(AgentConfigOperationRow row);
