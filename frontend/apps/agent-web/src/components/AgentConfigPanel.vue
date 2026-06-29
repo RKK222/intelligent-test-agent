@@ -1174,12 +1174,12 @@ defineExpose({
 .agent-more-menu-dropdown {
   position: absolute;
   top: -4px;
-  left: 100%;
-  margin-left: 4px;
+  right: 100%;
+  margin-right: 4px;
   background: var(--ta-panel, #fff);
   border: 1px solid var(--ta-border, #e4e4e7);
   border-radius: 6px;
-  box-shadow: 4px 4px 12px rgba(0, 0, 0, 0.08);
+  box-shadow: -4px 4px 12px rgba(0, 0, 0, 0.08);
   padding: 4px;
   display: none;
   flex-direction: column;
