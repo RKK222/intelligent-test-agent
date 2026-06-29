@@ -339,28 +339,30 @@ func waitForServerIPFile(rt configRuntime, path string) (string, error) {
 }
 
 func resolveContainerID(rt configRuntime) (string, error) {
-	if configured := normalizeIdentifier(os.Getenv("OPENCODE_MANAGER_CONTAINER_ID")); configured != "" {
-		return configured, nil
-	}
 	if strings.EqualFold(rt.goos, "windows") {
 		hostname, err := rt.hostname()
 		if err != nil {
-			return "", fmt.Errorf("OPENCODE_MANAGER_CONTAINER_ID is required and Windows hostname lookup failed: %w", err)
+			return "", fmt.Errorf("Windows hostname lookup failed: %w", err)
 		}
 		if id := normalizeIdentifier(hostname); id != "" {
 			return id, nil
 		}
-		return "", fmt.Errorf("OPENCODE_MANAGER_CONTAINER_ID is required and Windows hostname is blank")
+		return "", fmt.Errorf("Windows hostname is blank")
+	}
+	if hostname, err := rt.hostname(); err == nil {
+		if id := normalizeIdentifier(hostname); id != "" {
+			return id, nil
+		}
 	}
 	if raw, err := rt.readFile("/etc/hostname"); err == nil {
 		if id := normalizeIdentifier(string(raw)); id != "" {
 			return id, nil
 		}
 	}
-	if id := normalizeIdentifier(os.Getenv("HOSTNAME")); id != "" {
-		return id, nil
+	if configured := normalizeIdentifier(os.Getenv("OPENCODE_MANAGER_CONTAINER_ID")); configured != "" {
+		return configured, nil
 	}
-	return "", fmt.Errorf("OPENCODE_MANAGER_CONTAINER_ID is required or /etc/hostname must contain a container id")
+	return "", fmt.Errorf("hostname, /etc/hostname or OPENCODE_MANAGER_CONTAINER_ID must contain a container id")
 }
 
 func derivedBackendWebSocketURL(serverIP string) (string, error) {

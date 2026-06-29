@@ -35,7 +35,7 @@ opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 
 | 变量 | 默认值/说明 |
 |---|---|
-| `OPENCODE_MANAGER_CONTAINER_ID` | 未配置时 Linux/Unix 优先读 `/etc/hostname`，再读 `HOSTNAME`；Windows 读机器名。最终为空则启动失败。 |
+| `OPENCODE_MANAGER_CONTAINER_ID` | 仅作为非 Windows 容器 ID 的最后兜底。非 Windows 先读系统 hostname，再读 `/etc/hostname`，两者为空时才读该环境变量；不再读取 `HOSTNAME` 环境变量。Windows 直接读机器名，不读取该变量。最终为空则启动失败。 |
 | `OPENCODE_MANAGER_SERVER_IP_FILE` | 非 Windows 默认 `/data/.testagent/.serverip`。启动时读取单行服务器 IPv4，文件不存在每 1 秒重试，最多 30 秒。 |
 | `OPENCODE_MANAGER_BACKEND_PORT` | `8080`，manager 按服务器 IPv4 派生初始 WebSocket 入口时使用。 |
 | `OPENCODE_BIN` | `opencode` |
@@ -45,7 +45,7 @@ opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 | `OPENCODE_MANAGER_HEARTBEAT_INTERVAL` | `5s` |
 | `OPENCODE_MANAGER_RECONNECT_INTERVAL` | `10s` |
 
-`OPENCODE_MANAGER_LINUX_SERVER_ID` 不再作为生产路径使用。非 Windows 环境的服务器身份必须来自 `.serverip` 文件；Windows 本机开发态跳过文件等待，直接探测本机非回环 IPv4，并用机器名作为 `containerId`。
+`OPENCODE_MANAGER_LINUX_SERVER_ID` 不再作为生产路径使用。非 Windows 环境的服务器身份必须来自 `.serverip` 文件；`containerId` 优先来自系统 hostname，其次来自 `/etc/hostname`，最后才使用 `OPENCODE_MANAGER_CONTAINER_ID`。Windows 本机开发态跳过文件等待，直接探测本机非回环 IPv4，并用机器名作为 `containerId`。
 
 ## CLI
 

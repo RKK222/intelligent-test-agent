@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-29 - opencode-manager 容器 ID 改为 hostname 优先
+
+- Why: 运行管理中的 manager 容器标识需要优先反映实际主机/容器 hostname，不能被 `OPENCODE_MANAGER_CONTAINER_ID` 环境变量抢先覆盖。
+- What: 调整 Go manager `resolveContainerID`：Windows 直接使用机器名；非 Windows 依次读取系统 hostname、`/etc/hostname`，最后才用 `OPENCODE_MANAGER_CONTAINER_ID` 兜底，并移除旧的 `HOSTNAME` 环境变量兜底。同步 opencode-manager README 和部署文档，说明环境变量只作最后兜底。
+- How: 先补 RED 测试覆盖 hostname 优先、`/etc/hostname` 优先于 env、env 最后兜底、`HOSTNAME` env 不再生效、Windows 忽略 env 使用机器名，再最小调整解析函数。
+- Result: `go test ./internal/config`、`go test ./...`（opencode-manager）、`mvn clean package -DskipTests` 和 `git diff --check` 已通过。本变更不涉及数据库、HTTP API、SSE 或前端直连逻辑。
+
 ### 2026-06-29 - 模型选择器交互重构：实现气泡下拉框并整合上新推荐
 
 - Why: 聊天输入卡片下方的“上新”标签与输入框内的模型选择下拉按钮功能重叠。为了提升交互体验，需要将模型选择机制彻底由覆盖全局的模态弹窗重构成紧凑优雅的触发式气泡下拉框（Popover Dropdown），并将上新推荐无缝融合在下拉框内。同时，需解决气泡下拉框在不同宽度下的裁剪和遮挡问题。

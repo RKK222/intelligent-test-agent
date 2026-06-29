@@ -29,6 +29,87 @@ func TestLoadFromEnvReadsServerIPFileOnNonWindows(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnvPrefersHostnameOverEtcHostnameAndEnvOnNonWindows(t *testing.T) {
+	setBaseManagerEnv(t)
+	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_env")
+	rt := testRuntime("linux", map[string]string{
+		defaultServerIPFile: "10.8.0.12\n",
+		"/etc/hostname":     "ctr_file\n",
+	})
+	rt.hostname = func() (string, error) {
+		return "ctr_hostname", nil
+	}
+
+	cfg, err := loadFromEnvWithRuntime(rt)
+	if err != nil {
+		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
+	}
+
+	if cfg.ContainerID != "ctr_hostname" {
+		t.Fatalf("expected container id from hostname first, got %q", cfg.ContainerID)
+	}
+}
+
+func TestLoadFromEnvFallsBackToEtcHostnameBeforeEnvOnNonWindows(t *testing.T) {
+	setBaseManagerEnv(t)
+	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_env")
+	rt := testRuntime("linux", map[string]string{
+		defaultServerIPFile: "10.8.0.12\n",
+		"/etc/hostname":     "ctr_file\n",
+	})
+	rt.hostname = func() (string, error) {
+		return " ", nil
+	}
+
+	cfg, err := loadFromEnvWithRuntime(rt)
+	if err != nil {
+		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
+	}
+
+	if cfg.ContainerID != "ctr_file" {
+		t.Fatalf("expected container id from /etc/hostname before env, got %q", cfg.ContainerID)
+	}
+}
+
+func TestLoadFromEnvFallsBackToEnvWhenHostnameSourcesBlankOnNonWindows(t *testing.T) {
+	setBaseManagerEnv(t)
+	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_env")
+	rt := testRuntime("linux", map[string]string{
+		defaultServerIPFile: "10.8.0.12\n",
+		"/etc/hostname":     " \n",
+	})
+	rt.hostname = func() (string, error) {
+		return " ", nil
+	}
+
+	cfg, err := loadFromEnvWithRuntime(rt)
+	if err != nil {
+		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
+	}
+
+	if cfg.ContainerID != "ctr_env" {
+		t.Fatalf("expected container id from env fallback, got %q", cfg.ContainerID)
+	}
+}
+
+func TestLoadFromEnvDoesNotUseHostNameEnvFallbackOnNonWindows(t *testing.T) {
+	setBaseManagerEnv(t)
+	t.Setenv("HOSTNAME", "ctr_host_env")
+	rt := testRuntime("linux", map[string]string{
+		defaultServerIPFile: "10.8.0.12\n",
+		"/etc/hostname":     " \n",
+	})
+	rt.hostname = func() (string, error) {
+		return " ", nil
+	}
+
+	_, err := loadFromEnvWithRuntime(rt)
+
+	if err == nil || !strings.Contains(err.Error(), "OPENCODE_MANAGER_CONTAINER_ID") {
+		t.Fatalf("expected missing container id error without OPENCODE_MANAGER_CONTAINER_ID fallback, got %v", err)
+	}
+}
+
 func TestLoadFromEnvWaitsForDelayedServerIPFile(t *testing.T) {
 	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
@@ -91,6 +172,7 @@ func TestLoadFromEnvFailsWhenServerIPFileContainsInvalidIPv4(t *testing.T) {
 
 func TestLoadFromEnvWindowsUsesLocalIPv4AndMachineName(t *testing.T) {
 	setBaseManagerEnv(t)
+	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_env")
 	rt := testRuntime("windows", nil)
 	rt.hostname = func() (string, error) {
 		return "WIN-DEV-01", nil
