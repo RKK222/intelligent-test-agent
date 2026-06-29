@@ -55,6 +55,15 @@ class MyBatisCommonParameterRepositoryIntegrationTest {
         assertThat(repository.findByEnglishNameAndPlatform("OPENCODE_SESSION_DIR", ParameterPlatform.WINDOWS))
                 .map(CommonParameter::parameterValue)
                 .contains("D:/data/.testagent/agent-opencode/.session/");
+        assertThat(repository.findByEnglishNameAndPlatform("SYS_DATA_ROOT_DIR", ParameterPlatform.MACOS))
+                .map(CommonParameter::parameterValue)
+                .contains("$HOME/.testagent");
+        assertThat(repository.findByEnglishNameAndPlatform("SYS_DATA_ROOT_DIR", ParameterPlatform.LINUX))
+                .map(CommonParameter::parameterValue)
+                .contains("/data/.testagent");
+        assertThat(repository.findByEnglishNameAndPlatform("SYS_DATA_ROOT_DIR", ParameterPlatform.WINDOWS))
+                .map(CommonParameter::parameterValue)
+                .contains("D:/data/.testagent");
         assertThat(repository.findAll())
                 .extracting(CommonParameter::englishName)
                 .contains("OPENCODE_PUBLIC_AGENT_GIT_URL", "OPENCODE_PUBLIC_CONFIG_GIT_ROOT");

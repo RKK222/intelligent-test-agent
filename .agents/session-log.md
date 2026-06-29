@@ -8,6 +8,12 @@
 - What: `AgentWorkbench.vue` 让当前用户 opencode 进程状态在页面可见时自动 refetch，未 `READY` 时每 5 秒快速探测，`READY` 后降频为每 30 秒，降低常态 manager health 和数据库写入压力；Agent/Provider/Model/Command/MCP/LSP/VCS 等运行态目录改为仅在进程 `READY` 后启用，并在状态刚转为 `READY` 时主动 invalidate，清掉早期健康失败造成的空缓存。同步更新 `frontend/README.md` 和 `frontend/apps/agent-web/README.md`。
 - How: 复用既有 `/api/internal/agent/opencode/processes/me` 与 runtime catalog API，不新增后端接口、不直连 opencode server、不修改数据库或环境文件；保持输入区手动触发刷新逻辑作为即时探测入口。
 - Result: `corepack pnpm --filter @test-agent/agent-web typecheck`、`corepack pnpm test FigmaChatPanel.test.ts workbench-utils.test.ts follow-up-queue.test.ts`、`corepack pnpm --filter @test-agent/agent-web build`、`git diff --check` 均通过；`.env.test` 三服务已重启，backend health/readiness、frontend 3000 和 CORS 预检通过。登录态 smoke 显示默认账号初始化 opencode 仍被环境配置阻塞：manager 返回 `OPENCODE_UNAVAILABLE`，原因是当前测试库公共 opencode配置目录为 Windows 路径 `D:/data/.testagent/agent-opencode/.config/opencode/`，在 macOS 本地未初始化，因此模型接口在该账号未 READY 时按预期返回 503。
+### 2026-06-29 - 新增系统数据根目录通用参数
+
+- Why: 需要在通用参数表中提供跨平台系统数据根目录，避免后续模块继续硬编码 macOS、Linux、Windows 的数据根路径。
+- What: 新增生产必需通用参数 `SYS_DATA_ROOT_DIR` 三条种子记录：macOS `$HOME/.testagent`、Linux `/data/.testagent`、Windows `D:/data/.testagent`；同步后端 README、configuration-management README、persistence README、HTTP API 文档和数据库 migration 文档。
+- How: 按独立时间戳 Flyway migration `V20260629203006__seed_sys_data_root_dir_param.sql` 插入 `common_parameters`，不改表结构、不改 API DTO/事件类型、不改 `.env.local`；保留 MyBatis 集成测试中的三平台断言，并新增轻量 migration 内容测试覆盖本次 SQL 文件。
+- Result: `CommonParameterSeedMigrationTest` 和 `git diff --check` 通过，`mvn clean package -Dmaven.test.skip=true` 通过；`MyBatisCommonParameterRepositoryIntegrationTest` 仍被既有 `V20260628223000__add_macos_platform_support.sql` 中 H2 不支持的 PostgreSQL 数组 CHECK 语法阻断在 Flyway migrate 阶段，未执行到本次新增断言。默认 `mvn clean package -DskipTests` 还会在 app 测试编译阶段被既有 `ServerIpFilePathResolverTest` 引用缺失类阻断。该旧 migration 已在前次记录中要求不改写，后续若要恢复 H2 全量 Flyway 测试，应通过兼容性方案处理 checksum 风险。
 
 ### 2026-06-29 - 按容器和管理进程名派生 opencode managerId
 

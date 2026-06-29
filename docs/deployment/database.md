@@ -284,6 +284,22 @@
 - 使用独立时间戳版本 `20260627020000`，不得复用已存在的 `20260627010000` SSH key migration 版本。
 - 该参数属于生产运行所需系统参数，不是测试或演示数据；如果运维需要调整默认值，应通过通用参数管理或显式 SQL 更新现有记录，不改写已发布 migration。
 
+## V20260629203006 通用参数种子 SYS_DATA_ROOT_DIR
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260629203006__seed_sys_data_root_dir_param.sql` 初始化生产必需通用参数：
+
+| 参数 | 平台 | 默认值 | 说明 |
+|---|---|---|---|
+| `SYS_DATA_ROOT_DIR` | `macos` | `$HOME/.testagent` | macOS 系统数据根目录，读取时由通用参数解析器展开 `$HOME`。 |
+| `SYS_DATA_ROOT_DIR` | `linux` | `/data/.testagent` | Linux 系统数据根目录。 |
+| `SYS_DATA_ROOT_DIR` | `windows` | `D:/data/.testagent` | Windows 系统数据根目录。 |
+
+兼容策略：
+
+- 该 migration 只新增 `common_parameters` 行，不修改表结构、API DTO 或事件类型。
+- `macos` 沿用现有通用参数平台枚举值；用户口头称 “mac” 时落库仍使用稳定值 `macos`。
+- 该参数属于生产运行所需系统参数，不是测试或演示数据；既有环境如需调整实际目录，应通过通用参数管理页面/API 修改 value，不改写已发布 migration。
+
 ## V20260627214000 user_roles identity 序列兼容修复
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260627214000__reset_user_roles_identity_sequence.sql` 将 `user_roles.id` identity 起点重置到 `1000000`，兼容历史库或人工数据导入后序列值落后于已有主键，导致新增用户授予角色时报 `user_roles_pkey` 冲突的问题。
