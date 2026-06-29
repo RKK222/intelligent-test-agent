@@ -167,21 +167,6 @@ function taskParts(msg: ChatMessage): TaskPartItem[] {
 
 const runStartMsgCount = ref(0)
 
-const liveTaskParts = computed(() => {
-  if (!props.running) return []
-  const seen = new Set<string>()
-  const items: TaskPartItem[] = []
-  for (const msg of displayMessages.value.slice(runStartMsgCount.value)) {
-    if (msg.role !== 'assistant') continue
-    for (const tp of taskParts(msg)) {
-      if (seen.has(tp.partId)) continue
-      seen.add(tp.partId)
-      items.push(tp)
-    }
-  }
-  return items
-})
-
 type FileOperationMessage = Pick<ChatMessage, 'role' | 'parts'>
 
 export type FileChangeStat = {
@@ -280,6 +265,23 @@ const emit =
       }
     ): void
   }>()
+
+const taskPanelRef = ref<HTMLElement | null>(null)
+
+const liveTaskParts = computed(() => {
+  if (!props.running) return []
+  const seen = new Set<string>()
+  const items: TaskPartItem[] = []
+  for (const msg of displayMessages.value.slice(runStartMsgCount.value)) {
+    if (msg.role !== 'assistant') continue
+    for (const tp of taskParts(msg)) {
+      if (seen.has(tp.partId)) continue
+      seen.add(tp.partId)
+      items.push(tp)
+    }
+  }
+  return items
+})
 
 const localInput = ref(props.inputValue ?? '')
 const dropdownOpen = ref(false)
@@ -496,11 +498,21 @@ const choiceQuestion = computed(() => {
   return sentences.slice(-2).join(' ').trim().slice(0, 100)
 })
 
+const isProblemList = computed(() => {
+  const last = displayMessages.value.filter((m) => m.role === 'assistant').pop()
+  if (!last) return false
+  const text = last.content.slice(0, 200)
+  return /(?:存在以下问题|以下问题|发现以下[问题错误]|错误如下|异常如下|报错|warning|error|bug\s*[:：]|缺陷如下|注意以下)/i.test(
+    text
+  )
+})
+
 const showChoicePanel = computed(
   () =>
     !wasStopped.value &&
     !choiceDismissed.value &&
-    choiceOptions.value.length >= 2
+    choiceOptions.value.length >= 2 &&
+    !isProblemList.value
 )
 
 function selectChoice(index: number) {
@@ -1008,6 +1020,20 @@ function messageEditCount(msg: FileOperationMessage): number {
       count += 1
   }
   return count
+}
+
+// 操作按文件路径去重，保留每个文件的最后一次操作
+function uniqueOps(
+  msg: FileOperationMessage,
+  opType: 'edit' | 'write'
+): FileOperation[] {
+  if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return []
+  const seen = new Map<string, FileOperation>()
+  const ops = messageFileOps(msg).filter((o) => o.opType === opType)
+  for (const op of ops) {
+    seen.set(op.filePath, op)
+  }
+  return Array.from(seen.values())
 }
 
 const reasoningText = computed(() => thinkingLines.value.join('\n'))
@@ -1575,6 +1601,12 @@ const displayTokens = computed<number | undefined>(
   () => props.taskUsage?.tokens ?? parsedTokens.value
 )
 
+function formatTokens(n: number): string {
+  if (n >= 10000) return `${(n / 10000).toFixed(1)}w`
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+  return String(n)
+}
+
 const hasTaskUsageDisplay = computed(
   () =>
     !!(
@@ -1625,6 +1657,16 @@ watch(
 
 watch([wasCompleted, wasStopped, wasFailed], () => {
   nextTick(scrollToBottom)
+})
+
+// 任务面板变化时同时滚动任务面板和主聊天区到底部
+watch(liveTaskParts, () => {
+  nextTick(() => {
+    if (taskPanelRef.value) {
+      taskPanelRef.value.scrollTop = taskPanelRef.value.scrollHeight
+    }
+    scrollToBottom()
+  })
 })
 
 function formatTime(iso: string) {
@@ -1784,112 +1826,106 @@ function onCompositionEnd() {
                       </li>
                     </ul>
                   </div>
-                  <!-- 写入 -->
-                  <div
-                    v-if="messageWriteCount(message) > 0"
-                    class="figma-chat-file-summary"
+                  <!-- 写入：每个文件独立展开（已去重） -->
+                  <template
+                    v-for="op in uniqueOps(message, 'write')"
+                    :key="'write-' + op.filePath"
                   >
-                    <div
-                      class="figma-chat-file-summary-row"
-                      @click="toggleFileExpanded(message.id, 'write')"
-                    >
-                      <span
-                        >写入<span style="color: #a1a5b1; margin-left: 4px">
-                          {{
-                            messageFileOps(message)
-                              .filter((o) => o.opType === 'write')
-                              .map((o) => o.filePath.split('/').pop())
-                              .join('  ')
-                          }}</span
-                        ></span
+                    <div class="figma-chat-file-summary">
+                      <div
+                        class="figma-chat-file-summary-row"
+                        @click="
+                          toggleFileExpanded(message.id, 'write-' + op.filePath)
+                        "
                       >
-                      <ChevronRight
-                        v-if="!isFileExpanded(message.id, 'write')"
-                        class="figma-chat-read-chevron"
-                        :size="14"
-                      />
-                      <ChevronDown
-                        v-else
-                        class="figma-chat-read-chevron"
-                        :size="14"
-                      />
-                    </div>
-                    <ul
-                      v-if="isFileExpanded(message.id, 'write')"
-                      class="figma-chat-file-list"
-                    >
-                      <li
-                        v-for="(op, i) in messageFileOps(message).filter(
-                          (o) => o.opType === 'write'
-                        )"
-                        :key="i"
-                      >
-                        <pre
-                          v-if="op.content"
-                          class="figma-chat-write-preview"
-                          v-html="
-                            highlightCode(op.content, op.filePath).slice(
-                              0,
-                              4000
-                            ) + (op.content.length > 2000 ? '...' : '')
+                        <span
+                          >写入<span style="color: #a1a5b1; margin-left: 4px">{{
+                            op.filePath.split('/').pop()
+                          }}</span></span
+                        >
+                        <ChevronRight
+                          v-if="
+                            !isFileExpanded(message.id, 'write-' + op.filePath)
                           "
-                        ></pre>
-                      </li>
-                    </ul>
-                  </div>
-                  <!-- 编写 -->
-                  <div
-                    v-if="messageEditCount(message) > 0"
-                    class="figma-chat-file-summary"
+                          class="figma-chat-read-chevron"
+                          :size="14"
+                        />
+                        <ChevronDown
+                          v-else
+                          class="figma-chat-read-chevron"
+                          :size="14"
+                        />
+                      </div>
+                      <div
+                        v-if="
+                          isFileExpanded(message.id, 'write-' + op.filePath)
+                        "
+                        class="figma-chat-file-list"
+                      >
+                        <div class="figma-chat-file-item">
+                          <pre
+                            v-if="op.content"
+                            class="figma-chat-write-preview"
+                            v-html="
+                              highlightCode(op.content, op.filePath).slice(
+                                0,
+                                4000
+                              ) + (op.content.length > 2000 ? '...' : '')
+                            "
+                          ></pre>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                  <!-- 编写：每个文件独立展开（已去重） -->
+                  <template
+                    v-for="op in uniqueOps(message, 'edit')"
+                    :key="'edit-' + op.filePath"
                   >
-                    <div
-                      class="figma-chat-file-summary-row"
-                      @click="toggleFileExpanded(message.id, 'edit')"
-                    >
-                      <span
-                        >编写<span style="color: #a1a5b1; margin-left: 4px">
-                          {{
-                            messageFileOps(message)
-                              .filter((o) => o.opType === 'edit')
-                              .map((o) => o.filePath.split('/').pop())
-                              .join('  ')
-                          }}</span
-                        ></span
+                    <div class="figma-chat-file-summary">
+                      <div
+                        class="figma-chat-file-summary-row"
+                        @click="
+                          toggleFileExpanded(message.id, 'edit-' + op.filePath)
+                        "
                       >
-                      <ChevronRight
-                        v-if="!isFileExpanded(message.id, 'edit')"
-                        class="figma-chat-read-chevron"
-                        :size="14"
-                      />
-                      <ChevronDown
-                        v-else
-                        class="figma-chat-read-chevron"
-                        :size="14"
-                      />
-                    </div>
-                    <ul
-                      v-if="isFileExpanded(message.id, 'edit')"
-                      class="figma-chat-file-list"
-                    >
-                      <li
-                        v-for="(op, i) in messageFileOps(message).filter(
-                          (o) => o.opType === 'edit'
-                        )"
-                        :key="i"
-                      >
-                        <pre
-                          v-if="op.content"
-                          class="figma-chat-write-preview"
-                          v-html="
-                            highlightCode(op.content, op.filePath).slice(
-                              0,
-                              4000
-                            ) + (op.content.length > 2000 ? '...' : '')
+                        <span
+                          >编写<span style="color: #a1a5b1; margin-left: 4px">{{
+                            op.filePath.split('/').pop()
+                          }}</span></span
+                        >
+                        <ChevronRight
+                          v-if="
+                            !isFileExpanded(message.id, 'edit-' + op.filePath)
                           "
-                        ></pre>
-                      </li>
-                    </ul>
-                  </div>
+                          class="figma-chat-read-chevron"
+                          :size="14"
+                        />
+                        <ChevronDown
+                          v-else
+                          class="figma-chat-read-chevron"
+                          :size="14"
+                        />
+                      </div>
+                      <div
+                        v-if="isFileExpanded(message.id, 'edit-' + op.filePath)"
+                        class="figma-chat-file-list"
+                      >
+                        <div class="figma-chat-file-item">
+                          <pre
+                            v-if="op.content"
+                            class="figma-chat-write-preview"
+                            v-html="
+                              highlightCode(op.content, op.filePath).slice(
+                                0,
+                                4000
+                              ) + (op.content.length > 2000 ? '...' : '')
+                            "
+                          ></pre>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
                 </template>
                 <div v-if="message._error" class="figma-chat-error-row">
                   <AlertTriangle :size="14" class="figma-chat-error-icon" />
@@ -2094,7 +2130,7 @@ function onCompositionEnd() {
         >
 
         <template v-if="displayTokens !== undefined">
-          · ↓ {{ displayTokens }} tokens</template
+          · ↓ {{ formatTokens(displayTokens) }} tokens</template
         >
         <template v-if="taskUsage?.thoughtFor">
           · thought for {{ taskUsage.thoughtFor }}</template
@@ -2199,6 +2235,7 @@ function onCompositionEnd() {
     <!-- 任务面板：运行中显示工具操作进度 -->
     <div
       v-if="running && liveTaskParts.length > 0"
+      ref="taskPanelRef"
       class="figma-chat-task-panel"
     >
       <div class="figma-chat-task-summary">
@@ -2263,7 +2300,7 @@ function onCompositionEnd() {
             ]"
             @click="selectChoice(opt.index)"
           >
-            <span class="figma-chat-choice-index">{{ opt.index }}</span>
+            <!-- <span class="figma-chat-choice-index">{{ opt.index }}</span> -->
             <span class="figma-chat-choice-label">{{ opt.label }}</span>
           </div>
           <div
@@ -2274,7 +2311,7 @@ function onCompositionEnd() {
                 'figma-chat-choice-row--selected',
             ]"
           >
-            <span class="figma-chat-choice-index">#</span>
+            <!-- <span class="figma-chat-choice-index">#</span> -->
             <input
               v-model="choiceCustomInput"
               class="figma-chat-choice-input"
@@ -3077,7 +3114,7 @@ function onCompositionEnd() {
 .figma-chat-bubble {
   display: inline-block;
   max-width: 100%;
-  padding: 8px 10px;
+  padding: 4px 6px;
   border-radius: 8px;
   font-size: 14px;
   line-height: 20px;
@@ -3363,7 +3400,7 @@ function onCompositionEnd() {
   color: #374151;
   white-space: pre-wrap;
   word-break: break-all;
-  max-height: 120px;
+  max-height: 200px;
   overflow-y: auto;
   user-select: none;
 }
@@ -3585,18 +3622,22 @@ function onCompositionEnd() {
   flex-direction: column;
   gap: 2px;
   padding: 6px 10px;
-  margin: 0 10px 4px;
+  margin: 0 10px -8px 10px;
   background: var(--ta-chat-process-bg, rgba(0, 0, 0, 0.03));
   border-radius: 8px;
   border: 1px solid var(--ta-chat-border, rgba(0, 0, 0, 0.06));
-  max-height: 140px;
+  max-height: 100px;
   overflow-y: auto;
 }
 
 .figma-chat-task-summary {
+  position: sticky;
+  top: -6px;
+  background: var(--ta-chat-process-bg, rgba(0, 0, 0, 0.03));
   font-size: 12px;
   color: var(--ta-chat-muted, #8b8ea0);
   padding-bottom: 4px;
+  z-index: 1;
 }
 
 .figma-chat-task-row {
@@ -3914,11 +3955,34 @@ function onCompositionEnd() {
 }
 
 /* ---- Task Usage (above input box) ---- */
+.figma-chat-file-changes-bar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 18px;
+  font-size: 12px;
+  cursor: pointer;
+  border-top: 1px solid var(--ta-chat-border, rgba(0, 0, 0, 0.06));
+}
+.figma-chat-file-changes-bar:hover {
+  background: var(--ta-chat-process-bg, rgba(0, 0, 0, 0.02));
+}
+.figma-chat-file-changes-label {
+  color: var(--ta-chat-text);
+  font-weight: 500;
+}
+.figma-chat-file-changes-hint {
+  color: var(--ta-chat-muted, #8b8ea0);
+  margin-left: auto;
+  font-size: 11px;
+}
+
 .figma-chat-usage {
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 6px;
   padding: 6px 18px 8px;
   background: #fff;

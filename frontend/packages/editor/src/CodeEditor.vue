@@ -82,7 +82,7 @@ function buildModel(path: string, content: string): monaco.editor.ITextModel {
 }
 
 async function ensureMonacoEditor(path: string, content: string) {
-  if (!containerEl.value) {
+  if (!containerEl.value || !containerEl.value.parentNode) {
     return;
   }
   if (!monacoLib) {
@@ -163,6 +163,7 @@ function emitSelection(inst: monaco.editor.IStandaloneCodeEditor) {
 }
 
 onMounted(async () => {
+  await nextTick();
   if (!props.path || !containerEl.value) {
     return;
   }
