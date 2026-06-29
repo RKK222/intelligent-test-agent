@@ -2,6 +2,20 @@
 
 ## Entries
 
+### 2026-06-29 - 对话区“上新”快速模型标签收纳至模型选择弹窗
+
+- Why: 聊天输入卡片下方的“上新”快速切换标签与输入框内的模型选择下拉按钮功能重合，存在交互冗余，需要从交互上将它们合并为一个。
+- What:
+  - 移除了 `FigmaChatPanel.vue` 输入卡片下方的“上新”模型标签及相关逻辑、CSS 样式。
+  - 在 `AgentWorkbench.vue` 的模型选择弹窗中，当搜索关键字为空时，于顶部位置新增“上新推荐”的快捷模型标签组件，供用户一键快速选择最推荐的模型，其余所有模型依旧在下方按供应者分组排列。
+- How: 
+  - 删除 `FigmaChatPanel.vue` 中 `quickModels` 计算属性、`selectQuickModel` 及 `getModelColor` 方法与模板样式。
+  - 在 `AgentWorkbench.vue` 脚本中增加 `recommendedModels`（取前 4 个）与 `getModelColor` 动态渲染指示灯颜色；在弹窗列表模板顶部加上 `div.managed-model-recommended` 节点，并在 CSS 中补充对应的卡片标签及激活态、悬停态等样式。
+- Result:
+  - 聊天面板主界面清爽紧凑，取消了下方的冗余操作。
+  - 模型切换入口归一为统一的模型选择按钮，点击后在弹窗最显眼位置通过网格标签形式展示“上新推荐”，功能体验完美融合。
+  - 全量 170 项 Vitest 单测及编译检查全部绿过。
+
 ### 2026-06-29 - 统一目录配置与 macOS 平台修复
 
 - Why: 合并后 macOS 参数仍指向 `/tmp/test-agent`、`$HOME/test-agent`，公共 Git 地址为 `UNCONFIGURED`；前端未提供 `macos` 筛选，相关后端测试还把 `macos` 当非法值，用户初始化失败提示也没有给出可执行入口。

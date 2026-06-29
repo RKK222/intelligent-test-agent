@@ -475,6 +475,17 @@ function refreshOpencodeProcessStatus() {
   void opencodeProcessQuery.refetch();
 }
 const modelsLoading = computed(() => modelsQuery.isPending.value || modelsQuery.isFetching.value);
+const recommendedModels = computed(() => {
+  return models.value.slice(0, 4);
+});
+function getModelColor(model: any) {
+  const name = (model.name || '').toLowerCase()
+  if (name.includes('glm')) return '#18a978'
+  if (name.includes('kimi')) return '#3366ff'
+  if (name.includes('gpt')) return '#a855f7'
+  if (name.includes('seedance') || name.includes('deepseek')) return '#f97316'
+  return '#64748b'
+}
 const modelGroups = computed(() => {
   const keyword = modelSearch.value.trim().toLowerCase();
   const providerNames = new Map(providers.value.map((provider) => [provider.providerId, provider.name]));
@@ -2473,6 +2484,23 @@ async function handleLogout() {
       <div class="managed-model-list">
         <div v-if="modelsLoading" class="managed-model-empty">模型加载中...</div>
         <template v-else>
+          <!-- 推荐/上新模型 -->
+          <div v-if="!modelSearch.trim() && recommendedModels.length" class="managed-model-recommended">
+            <div class="managed-model-recommended-title">上新推荐</div>
+            <div class="managed-model-recommended-tags">
+              <button
+                v-for="model in recommendedModels"
+                :key="modelValue(model)"
+                type="button"
+                :class="['managed-model-recommended-tag', modelValue(model) === selectedModel && 'is-active']"
+                @click="selectRuntimeModel(model)"
+              >
+                <span class="managed-model-recommended-dot" :style="{ backgroundColor: getModelColor(model) }" />
+                <span class="managed-model-recommended-name">{{ model.name }}</span>
+              </button>
+            </div>
+          </div>
+
           <section v-for="group in modelGroups" :key="group.providerId" class="managed-model-group">
             <h3>{{ group.providerName }}</h3>
             <button
@@ -2634,6 +2662,60 @@ async function handleLogout() {
   min-height: 0;
   overflow: auto;
   padding: 0 16px 16px;
+}
+
+.managed-model-recommended {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--ta-border);
+}
+
+.managed-model-recommended-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ta-muted);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.managed-model-recommended-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.managed-model-recommended-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--ta-border);
+  border-radius: 14px;
+  background: var(--ta-panel-2);
+  color: var(--ta-text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.managed-model-recommended-tag:hover {
+  background: var(--ta-hover, #f4f4f5);
+  border-color: var(--ta-border);
+  color: var(--ta-text);
+}
+
+.managed-model-recommended-tag.is-active {
+  background: #eaf0ff;
+  border-color: #b9c8ff;
+  color: #1d3fb0;
+}
+
+.managed-model-recommended-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
 }
 
 .managed-model-group {

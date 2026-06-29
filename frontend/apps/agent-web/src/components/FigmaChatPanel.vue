@@ -305,15 +305,6 @@ function modelValue(model: { id: string; providerId?: string }) {
   return model.providerId ? `${model.providerId}/${model.id}` : model.id
 }
 
-const quickModels = computed(() => {
-  if (!props.models) return []
-  return props.models.filter(m => m.enabled !== false).slice(0, 4)
-})
-
-function selectQuickModel(model: any) {
-  emit('select-model', model)
-}
-
 function canFeedback(message: ChatMessage) {
   return message.role === 'assistant' && !message._error && message.id.startsWith('msg_')
 }
@@ -349,15 +340,6 @@ function submitNegativeFeedback() {
     comment: negativeFeedbackComment.value.trim() || null,
   })
   negativeFeedbackOpen.value = false
-}
-
-function getModelColor(model: any) {
-  const name = (model.name || '').toLowerCase()
-  if (name.includes('glm')) return '#18a978'
-  if (name.includes('kimi')) return '#3366ff'
-  if (name.includes('gpt')) return '#a855f7'
-  if (name.includes('seedance') || name.includes('deepseek')) return '#f97316'
-  return '#64748b'
 }
 const wasStopped = ref(false)
 const wasCompleted = ref(false)
@@ -2356,22 +2338,6 @@ function onCompositionEnd() {
             @click="stop"
           >
             <Square class="figma-chat-stop-icon" fill="currentColor" />
-          </button>
-        </div>
-      </div>
-      <!-- 快速切换模型功能标签 -->
-      <div v-if="quickModels && quickModels.length" class="figma-chat-quick-models">
-        <span class="figma-chat-quick-models-title">上新</span>
-        <div class="figma-chat-quick-models-list">
-          <button
-            v-for="model in quickModels"
-            :key="modelValue(model)"
-            type="button"
-            :class="['figma-chat-quick-model-tag', modelValue(model) === selectedModel && 'is-active']"
-            @click="selectQuickModel(model)"
-          >
-            <span class="figma-chat-quick-model-dot" :style="{ backgroundColor: getModelColor(model) }" />
-            <span class="figma-chat-quick-model-name">{{ model.name }}</span>
           </button>
         </div>
       </div>
@@ -4743,70 +4709,5 @@ function onCompositionEnd() {
 
 .figma-chat-bubble-content :deep(.markdown-body blockquote) {
   background: transparent;
-}
-
-/* 快速切换模型功能标签 */
-.figma-chat-quick-models {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 10px;
-  flex-wrap: wrap;
-}
-
-.figma-chat-quick-models-title {
-  font-size: 11px;
-  color: #888;
-  background: #eaeaea;
-  padding: 2px 6px;
-  border-radius: 4px;
-  font-family: 'PingFang SC', sans-serif;
-  font-weight: 500;
-}
-
-.figma-chat-quick-models-list {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.figma-chat-quick-model-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 0 10px;
-  border: 1px solid #dfdfdf;
-  border-radius: 12px;
-  background: #ffffff;
-  color: #555;
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-  font-family: 'PingFang SC', sans-serif;
-  transition: all 0.12s ease;
-}
-
-.figma-chat-quick-model-tag:hover {
-  background: #f4f4f5;
-  border-color: #cfcfcf;
-  color: #111;
-}
-
-.figma-chat-quick-model-tag.is-active {
-  background: #eaf0ff;
-  border-color: #b9c8ff;
-  color: #1d3fb0;
-}
-
-.figma-chat-quick-model-tag.is-active:hover {
-  background: #dde7ff;
-}
-
-.figma-chat-quick-model-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
 }
 </style>
