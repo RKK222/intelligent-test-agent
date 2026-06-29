@@ -338,11 +338,13 @@ onBeforeUnmount(() => {
       />
       <template v-if="isMarkdown && showPreview">
         <div
-          class="relative h-[4px] w-full shrink-0 cursor-row-resize bg-[var(--ta-border)] hover:bg-[var(--ta-hover)]"
+          class="relative h-[8px] w-full shrink-0 cursor-row-resize border-t border-b border-[var(--ta-border)] bg-[var(--ta-bg-2)] hover:bg-[var(--ta-hover)] transition-colors duration-150 flex items-center justify-center"
           @pointerdown="onSashDown"
         >
           <!-- 扩大 sash 命中区域，便于拖拽 -->
-          <div class="absolute inset-x-0 -top-[3px] -bottom-[3px]" />
+          <div class="absolute inset-x-0 -top-[4px] -bottom-[4px] z-10" />
+          <!-- 拖拽手柄 -->
+          <div class="h-[2px] w-8 rounded-full bg-[var(--ta-border-strong)] z-20" />
         </div>
         <MarkdownPreview
           ref="previewRef"

@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-29 - 优化编辑器 Markdown 预览分屏分隔线视觉设计
+
+- Why: Markdown 预览开启后的分屏分隔线（sash）原本为扁平的极浅灰色，在白色背景上几乎不可见且不明显，缺乏可拖拽的视觉暗示。
+- What: 将其重新设计为一个 8px 高度、带上下精致边框和圆角拖拽手柄的高级分隔线，并辅以悬浮过渡状态。
+- How: 修改 `CodeEditor.vue` 中分屏 sash 部分的代码，将 `4px` 纯色 `div` 更改为带 `border-t border-b border-[var(--ta-border)]`、`bg-[var(--ta-bg-2)]` 的 `8px` 容器，居中放置一个 `h-[2px] w-8 rounded-full bg-[var(--ta-border-strong)]` 的精细拖拽手柄。
+- Result: 视觉效果更立体美观，具备明确的拖拽引导，各项前端类型校验和单测全绿通过。
+
 ### 2026-06-29 - 修复公共 Agent 面板因本地系统文件判脏无法刷新
 
 - Why: 左侧 Agent 面板点击刷新仍提示“没有已初始化服务器”，但公共 opencode 配置目录实际已存在且包含迁移后的 agent/skill。
