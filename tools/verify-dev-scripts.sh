@@ -108,6 +108,29 @@ if [[ "${restart_output}" != *"Defaulting TEST_AGENT_BACKEND_LISTEN_URL to detec
   echo "${restart_output}" >&2
   fail "restart script did not default TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4"
 fi
+
+# auto 模式必须把默认路由网卡的 IPv4 识别为本机地址；.env.test 使用局域网 IP 时也要启动 manager。
+printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$*" >>%q\nexit 0\n' "${tmp_dir}/go.calls" >"${tmp_dir}/bin/go"
+chmod +x "${tmp_dir}/bin/go"
+printf 'TEST_AGENT_BASE_URL=http://10.8.0.115:8080\nTEST_AGENT_FRONTEND_URL=http://10.8.0.115:3000\nTEST_AGENT_OPENCODE_BASE_URL=http://10.8.0.115:4096\n' >"${tmp_dir}/env-local-ip.local"
+set +e
+restart_local_ip_output="$(
+  PATH="${tmp_dir}/bin:${PATH}" sh "${ROOT_DIR}/restart-dev-services.sh" \
+    --skip-backend-build \
+    --skip-frontend-build \
+    --env-file "${tmp_dir}/env-local-ip.local" \
+    --log-dir "${tmp_dir}/logs" 2>&1
+)"
+restart_local_ip_status=$?
+set -e
+if [[ "${restart_local_ip_status}" -eq 0 ]]; then
+  fail "restart script isolated local-IP execution unexpectedly succeeded"
+fi
+if [[ "${restart_local_ip_output}" != *"Starting opencode-manager"* ]]; then
+  echo "${restart_local_ip_output}" >&2
+  fail "restart script should auto-start opencode-manager for the detected local IPv4"
+fi
+
 if grep -q "OPENCODE_MANAGER_LINUX_SERVER_ID" "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script should not inject OPENCODE_MANAGER_LINUX_SERVER_ID"
 fi
@@ -137,7 +160,7 @@ if [[ "${restart_frontend_output}" != *"Starting frontend on 0.0.0.0:3000"* ]]; 
   fail "restart script should bind frontend to 0.0.0.0 for non-loopback access URLs"
 fi
 
-printf 'TEST_AGENT_OPENCODE_BASE_URL=http://10.8.0.115:4096\n' >"${tmp_dir}/env-remote-opencode.local"
+printf 'TEST_AGENT_OPENCODE_BASE_URL=http://10.8.0.116:4096\n' >"${tmp_dir}/env-remote-opencode.local"
 set +e
 restart_remote_opencode_output="$(
   PATH="${tmp_dir}/bin:${PATH}" sh "${ROOT_DIR}/restart-dev-services.sh" \

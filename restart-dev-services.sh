@@ -335,7 +335,13 @@ apply_server_ip_file_defaults() {
 
 is_local_opencode_url() {
   local url="$1"
-  [[ "${url}" == http://127.0.0.1:* || "${url}" == http://localhost:* || "${url}" == http://[::1]:* ]]
+  local host local_ipv4
+  if [[ "${url}" == http://127.0.0.1:* || "${url}" == http://localhost:* || "${url}" == http://[::1]:* ]]; then
+    return 0
+  fi
+  host="$(url_host "${url}")"
+  local_ipv4="$(detect_local_ipv4 || true)"
+  [[ -n "${local_ipv4}" && "${host}" == "${local_ipv4}" ]]
 }
 
 should_start_opencode_manager() {

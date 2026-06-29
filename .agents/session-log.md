@@ -8,6 +8,7 @@
 - What:
   - 通用参数页面增加 `macos` 并改为选择即查询；后端/API 测试同步接受 `macos`、继续拒绝未知平台。
   - 启动脚本默认导出可覆盖的 `TEST_AGENT_ROOT=$ROOT_DIR`，F-COSS 本地种子目录改到项目 `temp/fcoss`，不再重建 `/tmp/test-agent`。
+  - manager 自动启动判断同时识别 loopback 和默认路由网卡的本机 IPv4，避免 `.env.test` 使用局域网地址时误判为远端并跳过 manager。
   - 新增默认只读的 `tools/cleanup-old-path-data.sql`；显式传入绝对项目根目录时只迁移路径字段，保留 Session、Run 和审计记录。
   - 公共 Git 未配置、公共 opencode 配置未初始化时，错误信息分别指向“通用参数管理”和“opencode公共配置管理”。
 - How:
