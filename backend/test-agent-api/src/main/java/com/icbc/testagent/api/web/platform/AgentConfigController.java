@@ -72,20 +72,20 @@ public class AgentConfigController {
 
     @GetMapping("/public/branches")
     public ApiResponse<List<String>> publicBranches(ServerWebExchange exchange) {
-        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
         return ApiResponse.ok(service.publicBranches(principal.userId()), RuntimeApiSupport.traceId(exchange));
     }
 
     @GetMapping("/public/repositories")
     public ApiResponse<List<AgentConfigResponses.PublicRepositoryStatusResponse>> publicRepositories(ServerWebExchange exchange) {
-        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        AuthWebSupport.getAuthPrincipal(exchange);
         String traceId = RuntimeApiSupport.traceId(exchange);
         return ApiResponse.ok(routingService.listPublicRepositories(exchange, traceId), traceId);
     }
 
     @GetMapping("/public/repositories/local")
     public ApiResponse<AgentConfigResponses.PublicRepositoryStatusResponse> localPublicRepository(ServerWebExchange exchange) {
-        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        AuthWebSupport.getAuthPrincipal(exchange);
         return ApiResponse.ok(service.localPublicRepositoryStatus(), RuntimeApiSupport.traceId(exchange));
     }
 

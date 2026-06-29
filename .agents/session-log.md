@@ -4,19 +4,21 @@
 
 ### 2026-06-29 - 重命名为应用级、增加 hover 备注，并放开应用级配置修改权限
 
-- Why: 满足用户的定制需求：将工作空间级重命名为应用级，添加详细备注；且为了保证多租户/多应用独立发布管理，只对超级管理员保留公共级配置的写权限，而将应用级配置的修改与发布权限下放给普通用户，并在本地技能中记录了正确的 macOS 开发重启命令。
+- Why: 满足用户的定制需求：将工作空间级重命名为应用级，添加详细备注；为了保证多租户/多应用独立发布管理，只对超级管理员保留公共级配置的写权限，而将应用级配置的修改与发布权限下放给普通用户，在本地技能中记录了正确的 macOS 开发重启命令；同时解决原生 title 属性 hover 响应慢的问题，以及非超管用户无法读取公共配置的缺陷。
 - What:
   - 前端将“工作空间级”全部重命名为“应用级”，公共级添加 hover 提示“公共级 agents 及skills”，应用级添加 hover 提示“应用自定义 agents 及 skills，应用可以自己心中修改和发布”。
   - 放开了应用级（WORKSPACE 作用域）的修改限制，允许非超级管理员执行文件写入、创建 worktree、stage、commit 和 publish。
+  - 将主按钮的悬浮提示改为 Element Plus 的 `<el-tooltip>`，设定悬浮响应时间为 50ms 级别以达成即时呈现效果。
+  - 后端放宽了获取公共配置元数据 GET 接口的角色要求，允许非超管用户读取公共分支与仓库，保证非超管用户能够正常以只读方式浏览公共级文件。
   - 新增项目级技能 `.agents/skills/restart/SKILL.md`，记录了本地 JDK 25 的重启服务命令。
 - How:
-  - 修改 `AgentConfigPanel.vue` 中 header 和 dialog 相关的文字，为 button 补充 `title` hover 备注；修改 `openFile` 的 `readonly` 计算、`createWorktree` / `openCreateWorkspacePackageModal` / `stage` / `commit` / `publish` 内部的 `props.canWrite` 逻辑，同时在 WORKSPACE 级隐藏 `v-if="canWrite"`。
-  - 修改 `AgentConfigController.java` 中所有的 `/workspaces/{workspaceId}/...` 写入和发布接口，将 `AuthWebSupport.requireRole(..., Dictionary.ROLE_SUPER_ADMIN)` 放宽为仅需要 `AuthWebSupport.getAuthPrincipal(exchange)`。
+  - 修改 `AgentConfigPanel.vue` 中 header 和 dialog 相关的文字，将公共级/应用级按钮用 `<el-tooltip placement="top-start" :show-after="50">` 包裹以即时呈现；修改 `openFile` 的 `readonly` 计算、`createWorktree` / `openCreateWorkspacePackageModal` / `stage` / `commit` / `publish` 内部的 `props.canWrite` 逻辑，同时在 WORKSPACE 级隐藏 `v-if="canWrite"`。
+  - 修改 `AgentConfigController.java` 中所有的 `/workspaces/{workspaceId}/...` 写入和发布接口，以及 `/public/repositories`、`/public/repositories/local` 和 `/public/branches` 三个只读 GET 接口，将 `AuthWebSupport.requireRole(..., Dictionary.ROLE_SUPER_ADMIN)` 放宽为 `AuthWebSupport.getAuthPrincipal(exchange)`。
   - 修改 `WorkspaceFileWebSocketHandler.java`，对于 `agentConfigWrite` 请求，仅在 `SCOPE_PUBLIC` 时校验 `ticket.superAdmin()`。
 - Result:
   - 运行 `JAVA_HOME=... mvn clean package -DskipTests` 后，18 个后端模块全部编译构建成功。
   - 前端修改 `agent-config-panel.test.ts` 中的按钮名称并运行 `corepack pnpm test agent-config-panel.test.ts`，Vitest 单测 5 个全绿通过。
-  - 本地运行重启脚本后服务已加载最新的 jar 包并健康检测通过。
+  - 本地运行重启脚本后服务已加载最新的 jar 包并健康检测通过，切换普通用户后能正常加载并以只读方式查看公共级文件，Hover 响应即时。
 
 ### 2026-06-29 - 修复公共配置恢复、技能包层级与 OpenCode 初始化
 

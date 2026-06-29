@@ -814,11 +814,13 @@ defineExpose({
 
     <div class="agent-tree">
       <div class="agent-root-row" :class="{ active: activeScope === 'PUBLIC' }">
-        <button type="button" class="agent-root-main" title="公共级 agents 及skills" @click="toggleRoot('PUBLIC')">
-          <Globe2 class="h-3.5 w-3.5" :stroke-width="1.5" />
-          <span>公共级</span>
-          <span v-if="publicRootBadge" class="agent-root-badge">{{ publicRootBadge }}</span>
-        </button>
+        <el-tooltip content="公共级 agents 及skills" placement="top-start" :show-after="50">
+          <button type="button" class="agent-root-main" @click="toggleRoot('PUBLIC')">
+            <Globe2 class="h-3.5 w-3.5" :stroke-width="1.5" />
+            <span>公共级</span>
+            <span v-if="publicRootBadge" class="agent-root-badge">{{ publicRootBadge }}</span>
+          </button>
+        </el-tooltip>
         <div v-if="canWrite" class="agent-more-menu-container">
           <button
             type="button"
@@ -879,17 +881,18 @@ defineExpose({
       </div>
 
       <div class="agent-root-row" :class="{ active: activeScope === 'WORKSPACE' }">
-        <button
-          type="button"
-          class="agent-root-main"
-          title="应用自定义 agents 及 skills，应用可以自己心中修改和发布"
-          :disabled="!workspaceId"
-          @click="toggleRoot('WORKSPACE')"
-        >
-          <Users class="h-3.5 w-3.5" :stroke-width="1.5" />
-          <span>应用级</span>
-          <span v-if="workspaceWorktree" class="agent-root-badge">{{ workspaceWorktree.worktreeName }}</span>
-        </button>
+        <el-tooltip content="应用自定义 agents 及 skills，应用可以自己心中修改和发布" placement="top-start" :show-after="50">
+          <button
+            type="button"
+            class="agent-root-main"
+            :disabled="!workspaceId"
+            @click="toggleRoot('WORKSPACE')"
+          >
+            <Users class="h-3.5 w-3.5" :stroke-width="1.5" />
+            <span>应用级</span>
+            <span v-if="workspaceWorktree" class="agent-root-badge">{{ workspaceWorktree.worktreeName }}</span>
+          </button>
+        </el-tooltip>
         <button
           type="button"
           class="agent-icon-btn"
