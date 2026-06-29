@@ -429,9 +429,24 @@ async function loadBranches() {
   loadingBranches.value = true;
   await run(async () => {
     branches.value = workspaceRepositoryId.value ? await api.listRepositoryBranches(workspaceRepositoryId.value) : [];
-    workspaceBranch.value = branches.value[0] ?? "";
+
+    // 智能选择默认分支
+    if (branches.value.length > 0) {
+      if (selectedWorkspaceRepository.value?.standard) {
+        // 标准库：选择第一条符合格式的分支（置灰的不能被选中）
+        const validBranch = branches.value.find(b => isValidStandardBranch(b));
+        workspaceBranch.value = validBranch ?? "";
+      } else {
+        // 非标准库：选择第一条
+        workspaceBranch.value = branches.value[0];
+      }
+    } else {
+      workspaceBranch.value = "";
+    }
+
     directories.value = [];
     workspaceDirectory.value = "";
+    customBranchError.value = "";
   }).finally(() => {
     loadingBranches.value = false;
   });
