@@ -123,7 +123,7 @@ describe("AgentConfigPanel", () => {
     const { view } = renderPanel();
 
     await waitFor(() => expect(apiClientMock.getWorkspaceAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByRole("button", { name: "初始化工作空间配置包" }));
+    await fireEvent.click(view.getByRole("button", { name: "初始化应用配置包" }));
     await fireEvent.update(await view.findByLabelText("配置包名称"), "支付测试技能");
     await fireEvent.click(view.getByRole("button", { name: "创建" }));
 

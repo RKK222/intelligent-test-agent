@@ -2,6 +2,22 @@
 
 ## Entries
 
+### 2026-06-29 - 重命名为应用级、增加 hover 备注，并放开应用级配置修改权限
+
+- Why: 满足用户的定制需求：将工作空间级重命名为应用级，添加详细备注；且为了保证多租户/多应用独立发布管理，只对超级管理员保留公共级配置的写权限，而将应用级配置的修改与发布权限下放给普通用户，并在本地技能中记录了正确的 macOS 开发重启命令。
+- What:
+  - 前端将“工作空间级”全部重命名为“应用级”，公共级添加 hover 提示“公共级 agents 及skills”，应用级添加 hover 提示“应用自定义 agents 及 skills，应用可以自己心中修改和发布”。
+  - 放开了应用级（WORKSPACE 作用域）的修改限制，允许非超级管理员执行文件写入、创建 worktree、stage、commit 和 publish。
+  - 新增项目级技能 `.agents/skills/restart/SKILL.md`，记录了本地 JDK 25 的重启服务命令。
+- How:
+  - 修改 `AgentConfigPanel.vue` 中 header 和 dialog 相关的文字，为 button 补充 `title` hover 备注；修改 `openFile` 的 `readonly` 计算、`createWorktree` / `openCreateWorkspacePackageModal` / `stage` / `commit` / `publish` 内部的 `props.canWrite` 逻辑，同时在 WORKSPACE 级隐藏 `v-if="canWrite"`。
+  - 修改 `AgentConfigController.java` 中所有的 `/workspaces/{workspaceId}/...` 写入和发布接口，将 `AuthWebSupport.requireRole(..., Dictionary.ROLE_SUPER_ADMIN)` 放宽为仅需要 `AuthWebSupport.getAuthPrincipal(exchange)`。
+  - 修改 `WorkspaceFileWebSocketHandler.java`，对于 `agentConfigWrite` 请求，仅在 `SCOPE_PUBLIC` 时校验 `ticket.superAdmin()`。
+- Result:
+  - 运行 `JAVA_HOME=... mvn clean package -DskipTests` 后，18 个后端模块全部编译构建成功。
+  - 前端修改 `agent-config-panel.test.ts` 中的按钮名称并运行 `corepack pnpm test agent-config-panel.test.ts`，Vitest 单测 5 个全绿通过。
+  - 本地运行重启脚本后服务已加载最新的 jar 包并健康检测通过。
+
 ### 2026-06-29 - 修复公共配置恢复、技能包层级与 OpenCode 初始化
 
 - Why: 公共配置 `agents/` 被误删后，仓库因工作树不干净被判为未初始化，导致文件树、刷新和重新拉取入口互相锁死；此前公共 skill 还有 `mimoagent-agents` 包装层和符号链接；本机 manager 又因历史 `mgr_kaka_opencode` 与标准 `mgr_local_opencode` 抢占同一 `container_id` 而持续断线。

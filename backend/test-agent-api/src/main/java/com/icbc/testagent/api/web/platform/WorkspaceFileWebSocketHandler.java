@@ -185,15 +185,16 @@ public class WorkspaceFileWebSocketHandler implements WebSocketHandler {
     }
 
     private void agentConfigWrite(WorkspaceFileSocketTicket ticket, JsonNode params) {
-        if (!ticket.superAdmin()) {
-            throw new PlatformException(ErrorCode.FORBIDDEN, "无权限");
-        }
         String scope = agentConfigScope(ticket, params);
-        String worktreeId = agentConfigWorktreeId(ticket, params);
         if (SCOPE_PUBLIC.equals(scope)) {
+            if (!ticket.superAdmin()) {
+                throw new PlatformException(ErrorCode.FORBIDDEN, "无权限");
+            }
+            String worktreeId = agentConfigWorktreeId(ticket, params);
             agentConfigService.writePublicAgentFile(requiredText(params, "path"), text(params, "content"), worktreeId);
             return;
         }
+        String worktreeId = agentConfigWorktreeId(ticket, params);
         agentConfigService.writeWorkspaceAgentFile(agentConfigWorkspaceId(ticket, params), requiredText(params, "path"), text(params, "content"), worktreeId);
     }
 

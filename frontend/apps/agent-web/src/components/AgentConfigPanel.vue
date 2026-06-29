@@ -180,7 +180,7 @@ async function openFile(scope: Scope, path: string) {
     const file = scope === "PUBLIC"
       ? await api.readPublicAgentFile(path, worktreeId(scope), linuxServerId)
       : await api.readWorkspaceAgentFile(props.workspaceId!, path, worktreeId(scope));
-    emit("openFile", { scope, path, content: file, readonly: !props.canWrite, worktreeId: worktreeId(scope), linuxServerId });
+    emit("openFile", { scope, path, content: file, readonly: scope === "PUBLIC" ? !props.canWrite : false, worktreeId: worktreeId(scope), linuxServerId });
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, "读取 Agent 文件失败");
   }
@@ -348,7 +348,7 @@ const canSubmitSwitchWorktree = computed(() =>
 
 // 弹窗的标题
 const createModalTitle = computed(() => {
-  return createWorktreeScope.value === "PUBLIC" ? "创建公共 worktree" : "创建工作空间 worktree";
+  return createWorktreeScope.value === "PUBLIC" ? "创建公共 worktree" : "创建应用 worktree";
 });
 
 /**
@@ -356,7 +356,7 @@ const createModalTitle = computed(() => {
  * @param scope 作用域 (PUBLIC 或 WORKSPACE)
  */
 async function createWorktree(scope: Scope) {
-  if (!props.canWrite) return;
+  if (scope === "PUBLIC" && !props.canWrite) return;
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   createWorktreeScope.value = scope;
   newWorktreeName.value = "change-agent-md";
@@ -526,7 +526,7 @@ function worktreeOptionLabel(worktree: AgentConfigWorktreeOption) {
 }
 
 function openCreateWorkspacePackageModal() {
-  if (!props.canWrite || !props.workspaceId || busy.value) return;
+  if (!props.workspaceId || busy.value) return;
   workspacePackageName.value = "";
   workspacePackageError.value = "";
   showCreateWorkspacePackageModal.value = true;
@@ -559,7 +559,7 @@ async function submitCreateWorkspacePackage() {
     await loadDirectory("WORKSPACE", "skills");
     await loadDirectory("WORKSPACE", `skills/${packageName}`);
   } catch (error) {
-    errorMessage.value = formatAgentConfigError(error, "初始化工作空间配置包失败");
+    errorMessage.value = formatAgentConfigError(error, "初始化应用配置包失败");
   } finally {
     busy.value = false;
   }
@@ -568,7 +568,7 @@ async function submitCreateWorkspacePackage() {
 function workspaceSkillTemplate(displayName: string, packageName: string) {
   return `---
 name: ${packageName}
-description: ${displayName}工作空间级技能包
+description: ${displayName}应用级技能包
 version: 1.0.0
 ---
 
@@ -714,7 +714,7 @@ async function loadDiff(scope = activeScope.value) {
 }
 
 async function stage(file: AgentConfigDiffFile) {
-  if (!props.canWrite) return;
+  if (activeScope.value === "PUBLIC" && !props.canWrite) return;
   busy.value = true;
   try {
     if (activeScope.value === "PUBLIC") {
@@ -731,7 +731,8 @@ async function stage(file: AgentConfigDiffFile) {
 }
 
 async function commit() {
-  if (!props.canWrite || !commitMessage.value.trim()) return;
+  if (activeScope.value === "PUBLIC" && !props.canWrite) return;
+  if (!commitMessage.value.trim()) return;
   const message = commitMessage.value.trim();
   const operationId = newOperationId();
   await runOperation(
@@ -747,7 +748,7 @@ async function commit() {
 }
 
 async function publish() {
-  if (!props.canWrite) return;
+  if (activeScope.value === "PUBLIC" && !props.canWrite) return;
   const operationId = newOperationId();
   await runOperation(
     () =>
@@ -813,7 +814,7 @@ defineExpose({
 
     <div class="agent-tree">
       <div class="agent-root-row" :class="{ active: activeScope === 'PUBLIC' }">
-        <button type="button" class="agent-root-main" @click="toggleRoot('PUBLIC')">
+        <button type="button" class="agent-root-main" title="公共级 agents 及skills" @click="toggleRoot('PUBLIC')">
           <Globe2 class="h-3.5 w-3.5" :stroke-width="1.5" />
           <span>公共级</span>
           <span v-if="publicRootBadge" class="agent-root-badge">{{ publicRootBadge }}</span>
@@ -878,28 +879,32 @@ defineExpose({
       </div>
 
       <div class="agent-root-row" :class="{ active: activeScope === 'WORKSPACE' }">
-        <button type="button" class="agent-root-main" :disabled="!workspaceId" @click="toggleRoot('WORKSPACE')">
+        <button
+          type="button"
+          class="agent-root-main"
+          title="应用自定义 agents 及 skills，应用可以自己心中修改和发布"
+          :disabled="!workspaceId"
+          @click="toggleRoot('WORKSPACE')"
+        >
           <Users class="h-3.5 w-3.5" :stroke-width="1.5" />
-          <span>工作空间级</span>
+          <span>应用级</span>
           <span v-if="workspaceWorktree" class="agent-root-badge">{{ workspaceWorktree.worktreeName }}</span>
         </button>
         <button
-          v-if="canWrite"
           type="button"
           class="agent-icon-btn"
-          title="初始化工作空间配置包"
-          aria-label="初始化工作空间配置包"
+          title="初始化应用配置包"
+          aria-label="初始化应用配置包"
           :disabled="busy || !workspaceId"
           @click="openCreateWorkspacePackageModal"
         >
           <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
         <button
-          v-if="canWrite"
           type="button"
           class="agent-icon-btn"
-          title="创建工作空间 worktree"
-          aria-label="创建工作空间 worktree"
+          title="创建应用 worktree"
+          aria-label="创建应用 worktree"
           :disabled="busy || !workspaceId"
           @click="createWorktree('WORKSPACE')"
         >
@@ -923,7 +928,7 @@ defineExpose({
       </div>
     </div>
 
-    <div v-if="canWrite && !hideGitOps" class="agent-diff">
+    <div v-if="(canWrite || activeScope === 'WORKSPACE') && !hideGitOps" class="agent-diff">
       <div class="agent-diff-toolbar">
         <button type="button" class="agent-action-btn" :disabled="busy" @click="loadDiff()">
           <GitCompare class="h-3.5 w-3.5" :stroke-width="1.5" />
@@ -1129,11 +1134,11 @@ defineExpose({
         <section
           role="dialog"
           aria-modal="true"
-          aria-label="初始化工作空间配置包"
+          aria-label="初始化应用配置包"
           class="flex w-[min(420px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
         >
           <header class="flex items-center justify-between border-b border-[var(--ta-border)] pb-2">
-            <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">初始化工作空间配置包</h2>
+            <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">初始化应用配置包</h2>
           </header>
 
           <div class="flex flex-col gap-3">
