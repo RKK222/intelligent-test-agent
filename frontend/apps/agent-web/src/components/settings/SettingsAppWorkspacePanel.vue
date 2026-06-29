@@ -97,6 +97,79 @@ const loadingDirectories = ref(false);
 const selectedWorkspaceRepository = computed(() => appRepositories.value.find((item) => item.repositoryId === workspaceRepositoryId.value) ?? null);
 const requiresWorkspaceVersion = computed(() => selectedWorkspaceRepository.value != null && !selectedWorkspaceRepository.value.standard);
 const workspaceCreateSteps = computed(() => workspaceCreateOperation.value?.steps ?? []);
+const customBranchError = ref("");
+
+/**
+ * 校验分支名是否符合标准库格式：feature_testagent_yyyyMMdd
+ */
+function isValidStandardBranch(branch: string): boolean {
+  // 正则匹配：feature_testagent_ + 8位数字
+  const pattern = /^feature_testagent_\d{8}$/;
+  if (!pattern.test(branch)) return false;
+
+  // 提取并校验日期有效性
+  const dateStr = branch.slice(-8);
+  const year = parseInt(dateStr.slice(0, 4), 10);
+  const month = parseInt(dateStr.slice(4, 6), 10);
+  const day = parseInt(dateStr.slice(6, 8), 10);
+
+  // 范围校验
+  if (month < 1 || month > 12 || day < 1 || day > 31) return false;
+
+  // 日期对象校验（自动处理2月30日等）
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year &&
+         date.getMonth() === month - 1 &&
+         date.getDate() === day;
+}
+
+/**
+ * 判断分支是否应该被禁用
+ */
+function isBranchDisabled(branch: string): boolean {
+  if (!selectedWorkspaceRepository.value?.standard) return false;
+  return !isValidStandardBranch(branch);
+}
+
+/**
+ * 处理分支变更事件（包括手动输入）
+ */
+function handleBranchChange(branch: string) {
+  customBranchError.value = "";
+
+  if (selectedWorkspaceRepository.value?.standard && branch) {
+    if (!isValidStandardBranch(branch)) {
+      customBranchError.value = "标准库只能使用 feature_testagent_yyyyMMdd 格式的分支";
+    }
+  }
+}
+
+/**
+ * 排序后的分支列表：符合格式的排在前面，不符合格式的排在后面
+ */
+const sortedBranches = computed(() => {
+  if (!selectedWorkspaceRepository.value?.standard) {
+    // 非标准库：按原始顺序返回
+    return branches.value;
+  }
+  // 标准库：符合格式的排前面，不符合的排后面
+  const validBranches: string[] = [];
+  const invalidBranches: string[] = [];
+
+  branches.value.forEach(branch => {
+    if (isValidStandardBranch(branch)) {
+      validBranches.push(branch);
+    } else {
+      invalidBranches.push(branch);
+    }
+  });
+
+  // 每组内部按字母顺序排序
+  validBranches.sort();
+  invalidBranches.sort();
+
+  return [...validBranches, ...invalidBranches];
+});
 
 async function run(action: () => Promise<void>) {
   loading.value = true;
@@ -494,6 +567,7 @@ watch(workspaceRepositoryId, () => {
   workspaceBranch.value = "";
   directories.value = [];
   workspaceDirectory.value = "";
+  customBranchError.value = "";
 });
 
 watch(workspaceBranch, () => {
@@ -750,12 +824,23 @@ onBeforeUnmount(() => {
                       default-first-option
                       placeholder="选择或输入分支"
                       style="width: 100%"
+                      @change="handleBranchChange"
                     >
-                      <el-option v-for="branch in branches" :key="branch" :label="branch" :value="branch" />
+                      <el-option
+                        v-for="branch in sortedBranches"
+                        :key="branch"
+                        :label="branch"
+                        :value="branch"
+                        :disabled="isBranchDisabled(branch)"
+                      />
                     </el-select>
+                    <!-- 标准库分支格式错误提示 -->
+                    <div v-if="customBranchError" class="ta-branch-error">
+                      {{ customBranchError }}
+                    </div>
                   </label>
                 </div>
-                <el-button :disabled="loading || !workspaceBranch" :loading="loadingDirectories" @click="loadDirectories">加载目录</el-button>
+                <el-button :disabled="loading || !workspaceBranch || !!customBranchError" :loading="loadingDirectories" @click="loadDirectories">加载目录</el-button>
               </div>
               <div v-if="loadingDirectories" class="ta-workspace-step-progress">
                 <el-progress :percentage="100" :indeterminate="true" :duration="1" :show-text="false" :stroke-width="2" style="width: 100%" />
@@ -1235,5 +1320,11 @@ onBeforeUnmount(() => {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 18px;
+}
+.ta-branch-error {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #f56c6c;
+  line-height: 1.4;
 }
 </style>
