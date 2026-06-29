@@ -57,18 +57,18 @@ public class RedisOpencodeProcessHeartbeatStore implements OpencodeProcessHeartb
     }
 
     @Override
-    public void recordBackendHeartbeat(BackendProcessId backendProcessId, Instant heartbeatAt) {
-        String id = backendProcessId.value();
+    public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) {
+        String id = linuxServerId.value();
         redisTemplate.opsForValue().set(BACKEND_KEY_PREFIX + id, String.valueOf(heartbeatAt.toEpochMilli()), RUNTIME_SNAPSHOT_TTL);
         redisTemplate.opsForSet().add(BACKEND_INDEX_KEY, id);
     }
 
     @Override
     public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) {
-        String id = snapshot.backendProcess().backendProcessId().value();
+        String id = snapshot.backendProcess().linuxServerId().value();
         redisTemplate.opsForValue().set(BACKEND_SNAPSHOT_KEY_PREFIX + id, encode(snapshot), RUNTIME_SNAPSHOT_TTL);
         redisTemplate.opsForSet().add(BACKEND_SNAPSHOT_INDEX_KEY, id);
-        recordBackendHeartbeat(snapshot.backendProcess().backendProcessId(), snapshot.backendProcess().lastHeartbeatAt());
+        recordBackendHeartbeat(snapshot.backendProcess().linuxServerId(), snapshot.backendProcess().lastHeartbeatAt());
         appendBackendMetricSample(snapshot);
     }
 
@@ -114,11 +114,11 @@ public class RedisOpencodeProcessHeartbeatStore implements OpencodeProcessHeartb
 
     @Override
     public List<BackendRuntimeMetricSample> backendMetricSamples(
-            BackendProcessId backendProcessId,
+            LinuxServerId linuxServerId,
             Instant from,
             Instant to) {
         List<BackendRuntimeMetricSample> samples = metricSamples(
-                BACKEND_METRICS_KEY_PREFIX + backendProcessId.value(),
+                BACKEND_METRICS_KEY_PREFIX + linuxServerId.value(),
                 from,
                 to,
                 BackendRuntimeMetricSample.class);
@@ -143,12 +143,27 @@ public class RedisOpencodeProcessHeartbeatStore implements OpencodeProcessHeartb
     }
 
     @Override
-    public Set<BackendProcessId> liveBackendProcessIds() {
+    public List<BackendRuntimeMetricSample> legacyBackendMetricSamples(
+            BackendProcessId backendProcessId,
+            Instant from,
+            Instant to) {
+        List<BackendRuntimeMetricSample> samples = metricSamples(
+                BACKEND_METRICS_KEY_PREFIX + backendProcessId.value(),
+                from,
+                to,
+                BackendRuntimeMetricSample.class);
+        return samples.stream()
+                .sorted(Comparator.comparing(BackendRuntimeMetricSample::sampledAt))
+                .toList();
+    }
+
+    @Override
+    public Set<LinuxServerId> liveBackendServerIds() {
         Set<String> ids = liveIds(BACKEND_INDEX_KEY, BACKEND_KEY_PREFIX);
         ids.addAll(liveIds(BACKEND_SNAPSHOT_INDEX_KEY, BACKEND_SNAPSHOT_KEY_PREFIX));
-        Set<BackendProcessId> result = new LinkedHashSet<>();
+        Set<LinuxServerId> result = new LinkedHashSet<>();
         for (String id : ids) {
-            result.add(new BackendProcessId(id));
+            result.add(new LinuxServerId(id));
         }
         return result;
     }
@@ -257,7 +272,7 @@ public class RedisOpencodeProcessHeartbeatStore implements OpencodeProcessHeartb
                 metrics.jvmMemoryMaxBytes(),
                 metrics.jvmGcPauseMillis(),
                 metrics.jvmThreadsLive());
-        appendMetricSample(BACKEND_METRICS_KEY_PREFIX + snapshot.backendProcess().backendProcessId().value(), sample.sampledAt(), sample);
+        appendMetricSample(BACKEND_METRICS_KEY_PREFIX + snapshot.backendProcess().linuxServerId().value(), sample.sampledAt(), sample);
     }
 
     private void appendMetricSample(String key, Instant sampledAt, Object sample) {

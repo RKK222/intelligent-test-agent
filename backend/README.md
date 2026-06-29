@@ -119,6 +119,8 @@ cp .env.local.example .env.local
 
 用户专属 opencode 进程的 session/config 路径来自数据库 `common_parameters`，不是 `.env.local`。点击初始化时，Java 后端先按当前后端已连接的健康容器视图选择进程数最少且有空闲端口的目标容器，再向该容器对应的 manager 下发 `start`；manager 使用已通过 `configUpdate` 同步的 `OPENCODE_PUBLIC_CONFIG_DIR`。目录存在且非空的检查只在目标 manager 所在服务器执行。目录缺失、为空、非目录或不可读时，manager 返回 `OPENCODE_UNAVAILABLE`，并明确提示超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化；Java 仅映射为统一平台错误，不在本机提前检查。
 
+运行管理中的 Java latest snapshot、在线心跳和 JVM 指标历史都以 `linuxServerId`（服务器 IPv4）为唯一键写入 Redis；`backendProcessId` 只表示当前 Java 实例、manager-backend 连接和拓扑连线，不作为同一服务器 Java 行或 JVM 趋势的身份。公共配置管理页同样按 `linuxServerId` 合并在线 Java 快照，避免 Java 重启后的 TTL 窗口内出现同 IP 重复服务器行。
+
 验证后端启动成功：
 ```bash
 curl http://127.0.0.1:8080/actuator/health

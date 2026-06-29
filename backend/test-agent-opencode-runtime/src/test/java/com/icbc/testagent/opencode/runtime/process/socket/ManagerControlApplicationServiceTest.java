@@ -201,13 +201,13 @@ class ManagerControlApplicationServiceTest {
         private final List<BackendRuntimeSnapshot> backendSnapshots = new ArrayList<>();
         private final List<ManagerRuntimeSnapshot> managerSnapshots = new ArrayList<>();
 
-        @Override public void recordBackendHeartbeat(BackendProcessId backendProcessId, Instant heartbeatAt) { }
+        @Override public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) { }
         @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) { backendSnapshots.add(snapshot); }
         @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { managerSnapshots.add(snapshot); }
         @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
         @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.copyOf(backendSnapshots); }
         @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.copyOf(managerSnapshots); }
-        @Override public Set<BackendProcessId> liveBackendProcessIds() { return Set.of(); }
+        @Override public Set<LinuxServerId> liveBackendServerIds() { return Set.of(); }
         @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
         @Override public void cleanupExpiredHeartbeats() { }
     }

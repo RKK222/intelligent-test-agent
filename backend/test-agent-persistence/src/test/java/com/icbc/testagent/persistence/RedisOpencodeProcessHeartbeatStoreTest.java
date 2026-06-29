@@ -3,6 +3,7 @@ package com.icbc.testagent.persistence;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -52,15 +53,30 @@ class RedisOpencodeProcessHeartbeatStoreTest {
         store.recordBackendSnapshot(backendSnapshot());
 
         verify(fixture.values).set(
-                eq("test-agent:runtime-snapshot:backend:bjp_1234567890abcdef"),
+                eq("test-agent:runtime-snapshot:backend:10.8.0.12"),
                 contains("\"listenUrl\":\"http://10.8.0.12:8080\""),
                 eq(Duration.ofSeconds(10)));
-        verify(fixture.sets).add("test-agent:runtime-snapshot:index:backend", "bjp_1234567890abcdef");
+        verify(fixture.sets).add("test-agent:runtime-snapshot:index:backend", "10.8.0.12");
         verify(fixture.values).set(
-                eq("test-agent:runtime-heartbeat:backend:bjp_1234567890abcdef"),
+                eq("test-agent:runtime-heartbeat:backend:10.8.0.12"),
                 eq(String.valueOf(NOW.toEpochMilli())),
                 eq(Duration.ofSeconds(10)));
-        verify(fixture.sets).add("test-agent:runtime-heartbeat:index:backend", "bjp_1234567890abcdef");
+        verify(fixture.sets).add("test-agent:runtime-heartbeat:index:backend", "10.8.0.12");
+    }
+
+    @Test
+    void recordBackendSnapshotOverwritesLatestSnapshotForSameIpAfterJavaRestart() {
+        RedisFixture fixture = RedisFixture.create();
+        RedisOpencodeProcessHeartbeatStore store = new RedisOpencodeProcessHeartbeatStore(fixture.redisTemplate);
+
+        store.recordBackendSnapshot(backendSnapshot(new BackendProcessId("bjp_1234567890abcdef")));
+        store.recordBackendSnapshot(backendSnapshot(new BackendProcessId("bjp_2234567890abcdef")));
+
+        verify(fixture.values, times(2)).set(
+                eq("test-agent:runtime-snapshot:backend:10.8.0.12"),
+                contains("\"value\":\"10.8.0.12\""),
+                eq(Duration.ofSeconds(10)));
+        verify(fixture.sets, times(2)).add("test-agent:runtime-snapshot:index:backend", "10.8.0.12");
     }
 
     @Test
@@ -105,7 +121,7 @@ class RedisOpencodeProcessHeartbeatStoreTest {
                 contains("\"diskUsagePercent\":25.0"),
                 eq((double) NOW.toEpochMilli()));
         verify(fixture.zsets).add(
-                eq("test-agent:runtime-metrics:backend:bjp_1234567890abcdef"),
+                eq("test-agent:runtime-metrics:backend:10.8.0.12"),
                 contains("\"jvmThreadsLive\":42"),
                 eq((double) NOW.toEpochMilli()));
         verify(fixture.zsets).removeRangeByScore(
@@ -133,7 +149,7 @@ class RedisOpencodeProcessHeartbeatStoreTest {
                         {"sampledAt":"2026-06-24T00:00:00Z","cpuUsagePercent":22.5,"memoryMaxBytes":2048,"memoryUsedBytes":1024,"memoryUsagePercent":50.0,"diskMaxBytes":4096,"diskUsedBytes":1024,"diskUsagePercent":25.0}
                         """));
         when(fixture.zsets.rangeByScore(
-                "test-agent:runtime-metrics:backend:bjp_1234567890abcdef",
+                "test-agent:runtime-metrics:backend:10.8.0.12",
                 NOW.minusSeconds(60).toEpochMilli(),
                 NOW.toEpochMilli()))
                 .thenReturn(java.util.Set.of("""
@@ -145,7 +161,7 @@ class RedisOpencodeProcessHeartbeatStoreTest {
                 NOW.minusSeconds(60),
                 NOW);
         List<BackendRuntimeMetricSample> backendSamples = store.backendMetricSamples(
-                new BackendProcessId("bjp_1234567890abcdef"),
+                new LinuxServerId("10.8.0.12"),
                 NOW.minusSeconds(60),
                 NOW);
         List<ServerRuntimeMetricSample> serverSamples = store.serverMetricSamples(
@@ -165,6 +181,10 @@ class RedisOpencodeProcessHeartbeatStoreTest {
     }
 
     private static BackendRuntimeSnapshot backendSnapshot() {
+        return backendSnapshot(new BackendProcessId("bjp_1234567890abcdef"));
+    }
+
+    private static BackendRuntimeSnapshot backendSnapshot(BackendProcessId backendProcessId) {
         LinuxServerId linuxServerId = new LinuxServerId("10.8.0.12");
         return new BackendRuntimeSnapshot(
                 new LinuxServer(
@@ -177,7 +197,7 @@ class RedisOpencodeProcessHeartbeatStoreTest {
                         NOW,
                         "trace_1234567890abcdef"),
                 new BackendJavaProcess(
-                        new BackendProcessId("bjp_1234567890abcdef"),
+                        backendProcessId,
                         linuxServerId,
                         "http://10.8.0.12:8080",
                         BackendJavaProcessStatus.READY,

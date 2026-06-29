@@ -143,13 +143,13 @@ class OpencodeProcessHeartbeatMaintenanceServiceTest {
         private final List<OpencodeProcessId> opencodeHeartbeats = new ArrayList<>();
         private boolean cleanupCalled;
 
-        @Override public void recordBackendHeartbeat(BackendProcessId backendProcessId, Instant heartbeatAt) {}
+        @Override public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) {}
         @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) {}
         @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) {}
         @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { opencodeHeartbeats.add(processId); }
         @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.of(); }
         @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
-        @Override public Set<BackendProcessId> liveBackendProcessIds() { return Set.of(); }
+        @Override public Set<LinuxServerId> liveBackendServerIds() { return Set.of(); }
         @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.copyOf(opencodeHeartbeats); }
         @Override public void cleanupExpiredHeartbeats() { cleanupCalled = true; }
     }

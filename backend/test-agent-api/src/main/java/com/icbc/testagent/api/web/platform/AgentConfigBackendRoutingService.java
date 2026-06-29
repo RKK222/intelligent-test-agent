@@ -76,13 +76,13 @@ class AgentConfigBackendRoutingService {
         this.service = Objects.requireNonNull(service, "service must not be null");
         this.serverIdentity = new WorkspaceServerIdentity("linux-1");
         this.heartbeatStore = new OpencodeProcessHeartbeatStore() {
-            @Override public void recordBackendHeartbeat(com.icbc.testagent.domain.opencodeprocess.BackendProcessId backendProcessId, java.time.Instant heartbeatAt) {}
+            @Override public void recordBackendHeartbeat(com.icbc.testagent.domain.opencodeprocess.LinuxServerId linuxServerId, java.time.Instant heartbeatAt) {}
             @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) {}
             @Override public void recordManagerSnapshot(com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot snapshot) {}
             @Override public void recordOpencodeHeartbeat(com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId processId, java.time.Instant heartbeatAt) {}
             @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.of(); }
             @Override public List<com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
-            @Override public java.util.Set<com.icbc.testagent.domain.opencodeprocess.BackendProcessId> liveBackendProcessIds() { return java.util.Set.of(); }
+            @Override public java.util.Set<com.icbc.testagent.domain.opencodeprocess.LinuxServerId> liveBackendServerIds() { return java.util.Set.of(); }
             @Override public java.util.Set<com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId> liveOpencodeProcessIds() { return java.util.Set.of(); }
             @Override public void cleanupExpiredHeartbeats() {}
         };
@@ -92,11 +92,15 @@ class AgentConfigBackendRoutingService {
 
     List<AgentConfigResponses.PublicRepositoryStatusResponse> listPublicRepositories(ServerWebExchange exchange, String traceId) {
         Map<String, BackendJavaProcess> remoteBackends = remoteBackendsByServer();
-        List<AgentConfigResponses.PublicRepositoryStatusResponse> responses = new ArrayList<>();
-        responses.add(service.localPublicRepositoryStatus());
+        Map<String, AgentConfigResponses.PublicRepositoryStatusResponse> responsesByServer = new LinkedHashMap<>();
+        AgentConfigResponses.PublicRepositoryStatusResponse local = service.localPublicRepositoryStatus();
+        responsesByServer.put(local.linuxServerId(), local);
         for (BackendJavaProcess backend : remoteBackends.values().stream()
                 .sorted(Comparator.comparing(process -> process.linuxServerId().value()))
                 .toList()) {
+            if (responsesByServer.containsKey(backend.linuxServerId().value())) {
+                continue;
+            }
             try {
                 ApiResponse<AgentConfigResponses.PublicRepositoryStatusResponse> response = forward(
                         exchange,
@@ -105,9 +109,9 @@ class AgentConfigBackendRoutingService {
                         "GET",
                         null,
                         new TypeReference<>() {});
-                responses.add(response.data());
+                responsesByServer.put(response.data().linuxServerId(), response.data());
             } catch (PlatformException exception) {
-                responses.add(new AgentConfigResponses.PublicRepositoryStatusResponse(
+                responsesByServer.put(backend.linuxServerId().value(), new AgentConfigResponses.PublicRepositoryStatusResponse(
                         backend.linuxServerId().value(),
                         backend.linuxServerId().value(),
                         null,
@@ -121,7 +125,7 @@ class AgentConfigBackendRoutingService {
                         exception.getMessage()));
             }
         }
-        return responses;
+        return new ArrayList<>(responsesByServer.values());
     }
 
     Optional<String> forwardTargetForPublicWorktree(String worktreeId) {

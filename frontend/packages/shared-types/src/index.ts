@@ -761,7 +761,8 @@ export type OpencodeRuntimeBackendMetricSample = {
 
 export type OpencodeRuntimeBackendMetricHistory = {
   generatedAt: string;
-  backendProcessId: string;
+  linuxServerId?: string | null;
+  backendProcessId?: string | null;
   from: string;
   to: string;
   samples: OpencodeRuntimeBackendMetricSample[];

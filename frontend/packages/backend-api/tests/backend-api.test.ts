@@ -319,6 +319,33 @@ describe("backend-api", () => {
           success: true,
           data: {
             generatedAt: "2026-06-24T00:00:00Z",
+            linuxServerId: "10.8.0.12",
+            backendProcessId: "bjp_1234567890abcdef",
+            from: "2026-06-22T00:00:00Z",
+            to: "2026-06-24T00:00:00Z",
+            samples: [{ sampledAt: "2026-06-24T00:00:00Z", jvmThreadsLive: 42 }]
+          }
+        }),
+        { status: 200 }
+      )
+    );
+
+    await expect(client.getOpencodeRuntimeBackendServerMetrics("10.8.0.12")).resolves.toMatchObject({
+      linuxServerId: "10.8.0.12",
+      backendProcessId: "bjp_1234567890abcdef",
+      samples: [{ jvmThreadsLive: 42 }]
+    });
+    expect(fetcher.mock.calls[1]?.[0]).toBe(
+      "http://api/api/internal/platform/opencode-runtime/management/linux-servers/10.8.0.12/backend-metrics"
+    );
+
+    fetcher.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          success: true,
+          data: {
+            generatedAt: "2026-06-24T00:00:00Z",
+            linuxServerId: "10.8.0.12",
             backendProcessId: "bjp_1234567890abcdef",
             from: "2026-06-22T00:00:00Z",
             to: "2026-06-24T00:00:00Z",
@@ -330,10 +357,11 @@ describe("backend-api", () => {
     );
 
     await expect(client.getOpencodeRuntimeBackendProcessMetrics("bjp_1234567890abcdef")).resolves.toMatchObject({
+      linuxServerId: "10.8.0.12",
       backendProcessId: "bjp_1234567890abcdef",
       samples: [{ jvmThreadsLive: 42 }]
     });
-    expect(fetcher.mock.calls[1]?.[0]).toBe(
+    expect(fetcher.mock.calls[2]?.[0]).toBe(
       "http://api/api/internal/platform/opencode-runtime/management/backend-processes/bjp_1234567890abcdef/metrics"
     );
   });

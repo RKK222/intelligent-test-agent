@@ -444,6 +444,7 @@ final class RuntimeManagementDtos {
 
     record BackendMetricHistoryResponse(
             Instant generatedAt,
+            String linuxServerId,
             String backendProcessId,
             Instant from,
             Instant to,
@@ -452,7 +453,8 @@ final class RuntimeManagementDtos {
         static BackendMetricHistoryResponse from(RuntimeManagementBackendMetricHistory history) {
             return new BackendMetricHistoryResponse(
                     history.generatedAt(),
-                    history.backendProcessId().value(),
+                    history.linuxServerId() == null ? null : history.linuxServerId().value(),
+                    history.backendProcessId().map(item -> item.value()).orElse(null),
                     history.from(),
                     history.to(),
                     history.samples().stream().map(BackendMetricSampleResponse::from).toList());

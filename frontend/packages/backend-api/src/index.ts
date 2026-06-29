@@ -714,6 +714,10 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<OpencodeRuntimeContainerMetricHistory>(
         `${opencodeRuntimeManagementBase}/containers/${encodeURIComponent(containerId)}/metrics${query({ ...params })}`
       ),
+    getOpencodeRuntimeBackendServerMetrics: (linuxServerId: string, params: OpencodeRuntimeMetricHistoryParams = {}) =>
+      request<OpencodeRuntimeBackendMetricHistory>(
+        `${opencodeRuntimeManagementBase}/linux-servers/${encodeURIComponent(linuxServerId)}/backend-metrics${query({ ...params })}`
+      ),
     getOpencodeRuntimeBackendProcessMetrics: (backendProcessId: string, params: OpencodeRuntimeMetricHistoryParams = {}) =>
       request<OpencodeRuntimeBackendMetricHistory>(
         `${opencodeRuntimeManagementBase}/backend-processes/${encodeURIComponent(backendProcessId)}/metrics${query({ ...params })}`

@@ -248,11 +248,20 @@ class RuntimeManagementQueryServiceTest {
     }
 
     @Test
-    void backendMetricHistoryKeepsServerMetricsAcrossBackendProcessRestart() {
+    void backendMetricHistoryUsesLinuxServerIdForServerAndJvmSamplesAcrossBackendProcessRestart() {
         FakeRepository repository = new FakeRepository();
-        BackendProcessId currentBackendId = new BackendProcessId("bjp_2234567890abcdef");
+        BackendJavaProcess staleBackend = new BackendJavaProcess(
+                new BackendProcessId("bjp_1234567890abcdef"),
+                new LinuxServerId("10.8.0.12"),
+                "http://10.8.0.12:8080",
+                BackendJavaProcessStatus.READY,
+                NOW.minusSeconds(30),
+                NOW.minusSeconds(30),
+                NOW.minusSeconds(30),
+                NOW.minusSeconds(30),
+                TRACE_ID);
         BackendJavaProcess currentBackend = new BackendJavaProcess(
-                currentBackendId,
+                new BackendProcessId("bjp_2234567890abcdef"),
                 new LinuxServerId("10.8.0.12"),
                 "http://10.8.0.12:8080",
                 BackendJavaProcessStatus.READY,
@@ -261,8 +270,10 @@ class RuntimeManagementQueryServiceTest {
                 NOW,
                 NOW,
                 TRACE_ID);
-        repository.backendProcesses.put(currentBackendId, currentBackend);
+        repository.backendProcesses.put(staleBackend.backendProcessId(), staleBackend);
+        repository.backendProcesses.put(currentBackend.backendProcessId(), currentBackend);
         RedisSnapshotHeartbeatStore heartbeatStore = new RedisSnapshotHeartbeatStore();
+        heartbeatStore.backendSnapshots.add(new BackendRuntimeSnapshot(linuxServer(), staleBackend));
         heartbeatStore.backendSnapshots.add(new BackendRuntimeSnapshot(linuxServer(), currentBackend));
         heartbeatStore.serverSamples.add(new ServerRuntimeMetricSample(
                 NOW.minusSeconds(40),
@@ -289,13 +300,16 @@ class RuntimeManagementQueryServiceTest {
                 42));
         RuntimeManagementQueryService service = service(repository, heartbeatStore);
 
-        RuntimeManagementBackendMetricHistory history = service.backendProcessMetrics(
-                currentBackendId,
+        RuntimeManagementBackendMetricHistory history = service.backendServerMetrics(
+                new LinuxServerId("10.8.0.12"),
                 Duration.ofMinutes(1),
                 720,
                 TRACE_ID);
 
+        assertThat(history.linuxServerId()).isEqualTo(new LinuxServerId("10.8.0.12"));
+        assertThat(history.backendProcessId()).contains(currentBackend.backendProcessId());
         assertThat(heartbeatStore.lastServerLinuxServerId).isEqualTo(new LinuxServerId("10.8.0.12"));
+        assertThat(heartbeatStore.lastBackendLinuxServerId).isEqualTo(new LinuxServerId("10.8.0.12"));
         assertThat(history.samples()).hasSize(2);
         RuntimeManagementBackendMetricSample serverSample = history.samples().get(0);
         assertThat(serverSample.cpuUsagePercent()).isEqualTo(55.0);
@@ -333,6 +347,8 @@ class RuntimeManagementQueryServiceTest {
                 720,
                 TRACE_ID);
 
+        assertThat(history.linuxServerId()).isEqualTo(backendProcess().linuxServerId());
+        assertThat(history.backendProcessId()).contains(backendProcess().backendProcessId());
         assertThat(history.samples()).hasSize(1);
         assertThat(history.samples().getFirst().cpuUsagePercent()).isEqualTo(33.0);
         assertThat(history.samples().getFirst().jvmThreadsLive()).isEqualTo(42);
@@ -894,13 +910,13 @@ class RuntimeManagementQueryServiceTest {
 
     private static OpencodeProcessHeartbeatStore disabledHeartbeatStore() {
         return new OpencodeProcessHeartbeatStore() {
-            @Override public void recordBackendHeartbeat(BackendProcessId backendProcessId, Instant heartbeatAt) { }
+            @Override public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) { }
             @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) { }
             @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { }
             @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
             @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.of(); }
             @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
-            @Override public Set<BackendProcessId> liveBackendProcessIds() { return Set.of(); }
+            @Override public Set<LinuxServerId> liveBackendServerIds() { return Set.of(); }
             @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
             @Override public void cleanupExpiredHeartbeats() { }
         };
@@ -912,18 +928,19 @@ class RuntimeManagementQueryServiceTest {
         private final List<ContainerRuntimeMetricSample> containerSamples = new java.util.ArrayList<>();
         private final List<BackendRuntimeMetricSample> backendSamples = new java.util.ArrayList<>();
         private final List<ServerRuntimeMetricSample> serverSamples = new java.util.ArrayList<>();
-        private final Set<BackendProcessId> liveBackendProcessIds = new LinkedHashSet<>();
+        private final Set<LinuxServerId> liveBackendServerIds = new LinkedHashSet<>();
         private final Set<OpencodeProcessId> liveOpencodeProcessIds = new LinkedHashSet<>();
         private Instant lastContainerFrom;
         private Instant lastContainerTo;
+        private LinuxServerId lastBackendLinuxServerId;
         private LinuxServerId lastServerLinuxServerId;
 
-        @Override public void recordBackendHeartbeat(BackendProcessId backendProcessId, Instant heartbeatAt) {
-            liveBackendProcessIds.add(backendProcessId);
+        @Override public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) {
+            liveBackendServerIds.add(linuxServerId);
         }
         @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) {
             backendSnapshots.add(snapshot);
-            liveBackendProcessIds.add(snapshot.backendProcess().backendProcessId());
+            liveBackendServerIds.add(snapshot.backendProcess().linuxServerId());
         }
         @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) {
             managerSnapshots.add(snapshot);
@@ -940,7 +957,13 @@ class RuntimeManagementQueryServiceTest {
                     .filter(sample -> !sample.sampledAt().isBefore(from) && !sample.sampledAt().isAfter(to))
                     .toList();
         }
-        @Override public List<BackendRuntimeMetricSample> backendMetricSamples(BackendProcessId backendProcessId, Instant from, Instant to) {
+        @Override public List<BackendRuntimeMetricSample> backendMetricSamples(LinuxServerId linuxServerId, Instant from, Instant to) {
+            lastBackendLinuxServerId = linuxServerId;
+            return backendSamples.stream()
+                    .filter(sample -> !sample.sampledAt().isBefore(from) && !sample.sampledAt().isAfter(to))
+                    .toList();
+        }
+        @Override public List<BackendRuntimeMetricSample> legacyBackendMetricSamples(BackendProcessId backendProcessId, Instant from, Instant to) {
             return backendSamples.stream()
                     .filter(sample -> !sample.sampledAt().isBefore(from) && !sample.sampledAt().isAfter(to))
                     .toList();
@@ -951,7 +974,7 @@ class RuntimeManagementQueryServiceTest {
                     .filter(sample -> !sample.sampledAt().isBefore(from) && !sample.sampledAt().isAfter(to))
                     .toList();
         }
-        @Override public Set<BackendProcessId> liveBackendProcessIds() { return Set.copyOf(liveBackendProcessIds); }
+        @Override public Set<LinuxServerId> liveBackendServerIds() { return Set.copyOf(liveBackendServerIds); }
         @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.copyOf(liveOpencodeProcessIds); }
         @Override public void cleanupExpiredHeartbeats() { }
     }

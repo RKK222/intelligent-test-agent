@@ -1771,3 +1771,11 @@
 - `backend/test-agent-configuration-management/OPTIMIZATION.md`（新增）
 
 **验证方法：** 见 `OPTIMIZATION.md` 文档
+### 2026-06-29 - Java 运行心跳与 JVM 趋势按服务器 IP 归并
+
+- Why: 运行管理页和 opencode 公共配置管理页会在同一服务器 Java 进程重启后看到多个 `backendProcessId` 快照，导致同 IP 重复行；JVM 指标历史按 `backendProcessId` 保存也会让趋势在重启后断裂。
+- What: Java latest snapshot、在线心跳和 JVM 指标历史改为按 `linuxServerId` 写 Redis；新增 `linux-servers/{linuxServerId}/backend-metrics` 主 API，旧 `backend-processes/{backendProcessId}/metrics` 仅兼容委托或旧样本兜底；运行管理前端按 IP 查询 Java 服务趋势，公共配置仓库列表后端/前端都按 `linuxServerId` 去重。
+- How: domain 心跳端口改为 `LinuxServerId`；Redis key 从 `backend:{backendProcessId}` 迁移到 `backend:{linuxServerId}`，并保留旧 key 读取方法；查询服务合并服务器资源和 JVM 样本时使用 IP，兼容响应里的 `backendProcessId` 选择同 IP 最新心跳 Java 实例；文档同步 API、事件流、部署和前后端 README。
+- Result: 同一 IP 的 Java 重启会覆盖 latest snapshot 并连续追加 JVM 历史，公共配置管理页不会再因 TTL 窗口内多个 Java 快照展示重复服务器行。
+- Pitfalls: `mvn -pl test-agent-domain,test-agent-persistence,test-agent-opencode-runtime,test-agent-api -am test` 仍会在 `test-agent-persistence` 的 H2 集成测试中被既有 `V20260628223000__add_macos_platform_support.sql` PostgreSQL `ANY(ARRAY...)` CHECK 语法阻断；本次相关定向测试已覆盖 Redis/API/前端路径。
+- Verification: `mvn -pl test-agent-persistence,test-agent-opencode-runtime,test-agent-api -am -Dtest=RedisOpencodeProcessHeartbeatStoreTest,RuntimeManagementQueryServiceTest,RuntimeManagementControllerTest,AgentConfigBackendRoutingServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`、`corepack pnpm --filter @test-agent/backend-api typecheck`、`corepack pnpm --filter @test-agent/agent-web typecheck`、`corepack pnpm test -- backend-api runtime-management-settings`、`mvn clean package -DskipTests`、`git diff --check`。

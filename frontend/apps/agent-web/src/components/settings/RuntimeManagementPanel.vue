@@ -122,7 +122,7 @@ const metricsQuery = useQuery<OpencodeRuntimeContainerMetricHistory | OpencodeRu
     if (target.type === "container") {
       return api.getOpencodeRuntimeContainerMetrics(target.id, params);
     }
-    return api.getOpencodeRuntimeBackendProcessMetrics(target.id, params);
+    return api.getOpencodeRuntimeBackendServerMetrics(target.id, params);
   }
 });
 
@@ -227,8 +227,8 @@ const serverBackendRows = computed<RuntimeServerBackendRow[]>(() => {
       existing.linuxServerId = existing.linuxServerId || backend.linuxServerId;
       continue;
     }
-    rows.set(`backend:${backend.backendProcessId}`, {
-      key: `backend:${backend.backendProcessId}`,
+    rows.set(backend.linuxServerId, {
+      key: `backend:${backend.linuxServerId}`,
       linuxServerId: backend.linuxServerId,
       backend
     });
@@ -367,11 +367,11 @@ function selectContainer(containerId: string) {
   }
 }
 
-function selectBackendProcess(backendProcessId: string) {
-  if (selectedMetricsTarget.value?.type === "backend" && selectedMetricsTarget.value.id === backendProcessId) {
+function selectBackendServer(linuxServerId: string) {
+  if (selectedMetricsTarget.value?.type === "backend" && selectedMetricsTarget.value.id === linuxServerId) {
     selectedMetricsTarget.value = null;
   } else {
-    selectedMetricsTarget.value = { type: "backend", id: backendProcessId, title: "后端监控趋势" };
+    selectedMetricsTarget.value = { type: "backend", id: linuxServerId, title: "后端监控趋势" };
   }
 }
 
@@ -614,10 +614,10 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
                     <tr
                       v-for="row in serverBackendRows"
                       :key="row.key"
-                      :class="row.backend ? activeRowClass('backend', row.backend.backendProcessId) : ''"
+                      :class="row.backend ? activeRowClass('backend', row.backend.linuxServerId) : ''"
                       :tabindex="row.backend ? 0 : undefined"
-                      @click="row.backend ? selectBackendProcess(row.backend.backendProcessId) : undefined"
-                      @keydown.enter="row.backend ? selectBackendProcess(row.backend.backendProcessId) : undefined"
+                      @click="row.backend ? selectBackendServer(row.backend.linuxServerId) : undefined"
+                      @keydown.enter="row.backend ? selectBackendServer(row.backend.linuxServerId) : undefined"
                     >
                       <td>{{ formatNullable(row.linuxServerId) }}</td>
                       <td class="is-compact">{{ formatNullable(row.backend?.backendProcessId) }}</td>
@@ -640,9 +640,9 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
                           v-if="row.backend"
                           type="button"
                           class="ta-runtime-trend-button"
-                          :aria-label="`查看 ${row.backend.backendProcessId} 后端监控趋势`"
-                          :title="`查看 ${row.backend.backendProcessId} 后端监控趋势`"
-                          @click.stop="selectBackendProcess(row.backend.backendProcessId)"
+                          :aria-label="`查看 ${row.backend.linuxServerId} 后端监控趋势`"
+                          :title="`查看 ${row.backend.linuxServerId} 后端监控趋势`"
+                          @click.stop="selectBackendServer(row.backend.linuxServerId)"
                           @keydown.enter.stop
                         >
                           趋势
@@ -655,7 +655,7 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
               </div>
             </div>
 
-            <!-- 后端趋势图按指标归属区分服务器级资源与当前 JVM 进程。 -->
+            <!-- 后端趋势图按服务器 IP 归并，JVM 样本跨 Java 进程重启连续。 -->
             <div v-if="selectedMetricsTarget && selectedMetricsTarget.type === 'backend'" class="ta-runtime-metrics-panel">
               <header class="ta-runtime-section-header">
                 <h4>{{ selectedMetricsTarget.title }}</h4>
@@ -685,7 +685,7 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
                   ]"
                 />
                 <RuntimeMetricChart
-                  title="JVM 内存（当前进程）"
+                  title="JVM 内存（Java 服务）"
                   :samples="metricSamples"
                   :series="[
                     { name: 'used', field: 'jvmMemoryUsedBytes' },
@@ -695,7 +695,7 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
                   yAxis-unit="G"
                 />
                 <RuntimeMetricChart
-                  title="JVM GC / 线程（当前进程）"
+                  title="JVM GC / 线程（Java 服务）"
                   :samples="metricSamples"
                   :series="[
                     { name: 'GC pause ms', field: 'jvmGcPauseMillis' },
