@@ -338,7 +338,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("download-files")).toBeUndefined();
   });
 
-  it("shows the initialization action when the opencode process needs initialization", async () => {
+  it("shows the assign action when the opencode process is unassigned (fallback inference)", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
@@ -351,13 +351,90 @@ describe("FigmaChatPanel", () => {
       }
     });
 
-    expect(wrapper.text()).toContain("需要初始化 opencode 进程");
+    // 未传 serviceStatus 且无地址，回退推断为 UNASSIGNED
+    expect(wrapper.text()).toContain("尚未分配 opencode 专属进程");
 
     const initButton = wrapper.get(".figma-chat-process-init");
-    expect(initButton.text()).toBe("初始化进程");
+    expect(initButton.text()).toBe("分配专属进程");
 
     await initButton.trigger("click");
 
     expect(wrapper.emitted("initialize-process")).toEqual([[]]);
+  });
+
+  it("shows the start action when the assigned opencode process is not running", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processRequired: true,
+        processStatus: {
+          status: "NEEDS_INITIALIZATION",
+          initializable: true,
+          serviceStatus: "NOT_RUNNING",
+          serviceAddress: "10.0.0.1:3000",
+          message: "opencode 进程不可用，需要重新初始化"
+        }
+      }
+    });
+
+    expect(wrapper.text()).toContain("opencode 专属进程未运行");
+
+    const initButton = wrapper.get(".figma-chat-process-init");
+    expect(initButton.text()).toBe("启动进程");
+
+    await initButton.trigger("click");
+
+    expect(wrapper.emitted("initialize-process")).toEqual([[]]);
+  });
+
+  it("shows the assign action when serviceStatus is explicitly UNASSIGNED", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processRequired: true,
+        processStatus: {
+          status: "NEEDS_INITIALIZATION",
+          initializable: true,
+          serviceStatus: "UNASSIGNED",
+          message: "需要初始化 opencode 进程"
+        }
+      }
+    });
+
+    expect(wrapper.text()).toContain("尚未分配 opencode 专属进程");
+    expect(wrapper.get(".figma-chat-process-init").text()).toBe("分配专属进程");
+  });
+
+  it("shows the loading label while initializing, differentiated by service status", async () => {
+    const unassigned = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processRequired: true,
+        processInitializing: true,
+        processStatus: {
+          status: "NEEDS_INITIALIZATION",
+          initializable: true,
+          serviceStatus: "UNASSIGNED",
+          message: "需要初始化 opencode 进程"
+        }
+      }
+    });
+    expect(unassigned.get(".figma-chat-process-init").text()).toBe("分配中");
+
+    const notRunning = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processRequired: true,
+        processInitializing: true,
+        processStatus: {
+          status: "NEEDS_INITIALIZATION",
+          initializable: true,
+          serviceStatus: "NOT_RUNNING",
+          serviceAddress: "10.0.0.1:3000",
+          message: "opencode 进程不可用，需要重新初始化"
+        }
+      }
+    });
+    expect(notRunning.get(".figma-chat-process-init").text()).toBe("启动中");
   });
 });

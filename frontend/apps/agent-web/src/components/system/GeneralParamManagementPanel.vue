@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Edit, Refresh, Connection, Clock } from "@element-plus/icons-vue";
+import { Refresh, Connection, Clock } from "@element-plus/icons-vue";
 import { ElMessage, ElDialog, ElButton, ElInput, ElForm, ElFormItem, ElDrawer, ElEmpty, ElTag } from "element-plus";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type { CurrentUser, GeneralParameter, CommonParameterLoadSnapshot, CommonParameterChangeLog } from "@test-agent/shared-types";
@@ -260,17 +260,10 @@ function formatError(error: unknown) {
               <td>
                 <div class="ta-common-param-val-cell" @click="openEditDialog(param)" title="点击修改参数值">
                   <code class="ta-common-param-val-code">{{ param.parameterValue }}</code>
-                  <span class="ta-common-param-edit-hint">点击修改</span>
                 </div>
               </td>
               <td>{{ formatDate(param.updatedAt) }}</td>
               <td class="ta-common-param-actions">
-                <el-button
-                  size="small"
-                  type="primary"
-                  plain
-                  @click="openEditDialog(param)"
-                >编辑</el-button>
                 <el-button
                   size="small"
                   plain
@@ -538,15 +531,16 @@ function formatError(error: unknown) {
   color: #6b7280;
 }
 .ta-common-param-val-cell {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 8px;
   padding: 4px 10px;
   background: #f3f4f6;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   cursor: pointer;
-  max-width: 320px;
+  width: 320px;
+  max-width: 100%;
+  box-sizing: border-box;
   transition: all 0.2s ease;
 }
 .ta-common-param-val-cell:hover {
@@ -561,17 +555,11 @@ function formatError(error: unknown) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 .ta-common-param-val-cell:hover .ta-common-param-val-code {
   color: #1d4ed8;
-}
-.ta-common-param-edit-hint {
-  font-size: 11px;
-  color: #9ca3af;
-  flex-shrink: 0;
-}
-.ta-common-param-val-cell:hover .ta-common-param-edit-hint {
-  color: #3b82f6;
 }
 
 /* Dialog Form Styling */

@@ -1550,9 +1550,24 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     return;
   }
   if (!opencodeProcessReady.value) {
+    // 与聊天面板状态卡一致：按 serviceStatus 区分“未分配 / 未运行”提示
+    const svc =
+      opencodeProcessStatus.value?.serviceStatus ??
+      (opencodeProcessStatus.value?.status === "READY"
+        ? "RUNNING"
+        : opencodeProcessStatus.value?.serviceAddress?.trim() ||
+          (opencodeProcessStatus.value?.linuxServerId && opencodeProcessStatus.value?.port)
+          ? "NOT_RUNNING"
+          : "UNASSIGNED");
+    const procTitle =
+      svc === "NOT_RUNNING"
+        ? "opencode 专属进程未运行"
+        : svc === "UNASSIGNED"
+        ? "尚未分配 opencode 专属进程"
+        : "请先初始化 opencode 进程";
     feedback.value = {
       kind: "info",
-      title: "请先初始化 opencode 进程",
+      title: procTitle,
       description: opencodeProcessStatus.value?.message ?? "正在检查当前用户可用进程"
     };
     return;

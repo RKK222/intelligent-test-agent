@@ -190,6 +190,11 @@ type OpencodeProcessState = {
   initializable: boolean
   message: string
   baseUrl?: string
+  // 与头像菜单一致的二级状态：未分配 / 运行中 / 未运行；旧后端缺失时前端按 status/地址推断
+  serviceStatus?: string
+  serviceAddress?: string | null
+  linuxServerId?: string
+  port?: number | string
 }
 
 // 抽屉里 diff 行的解析结果：保留原始前缀符号供渲染和后续扩展使用
@@ -1091,6 +1096,25 @@ function parseDiffLines(patch: string | undefined): DiffLine[] {
 }
 
 const hasFileChanges = computed(() => (props.fileChanges?.length ?? 0) > 0)
+
+// 推断 opencode 专属进程服务地址（与头像菜单 opencodeServiceDisplay 保持一致），
+// 用于 serviceStatus 缺失时的回退推断
+function resolveServiceAddress(process?: OpencodeProcessState | null): string {
+  if (!process) return ''
+  if (process.serviceAddress?.trim()) return process.serviceAddress.trim()
+  if (process.linuxServerId && process.port) return `${process.linuxServerId}:${process.port}`
+  // baseUrl 形如 http://host:port，退化取 host:port
+  try {
+    if (process.baseUrl) {
+      const url = new URL(process.baseUrl)
+      return url.hostname && url.port ? `${url.hostname}:${url.port}` : ''
+    }
+  } catch {
+    /* ignore */
+  }
+  return ''
+}
+
 const processReady = computed(() => {
   if (props.processRequired) {
     return props.processStatus?.status === 'READY'
@@ -1107,15 +1131,33 @@ const processStatusVisible = computed(
   () =>
     props.processRequired || props.processLoading || props.processStatus != null
 )
+// 有效 serviceStatus：优先用后端返回值，缺失时按头像菜单同样规则回退推断
+// （READY→RUNNING；否则有地址→NOT_RUNNING；无地址→UNASSIGNED），保证两处展示一致
+const effectiveServiceStatus = computed<string>(() => {
+  const p = props.processStatus
+  if (p?.serviceStatus) return p.serviceStatus
+  if (p?.status === 'READY') return 'RUNNING'
+  return resolveServiceAddress(p) ? 'NOT_RUNNING' : 'UNASSIGNED'
+})
 const processStatusTitle = computed(() => {
   if (props.processLoading && !props.processStatus) return '正在检查 opencode 进程'
   if (props.processRequired && !props.processStatus)
     return 'opencode 进程状态未知'
   if (!props.processStatus) return ''
   if (props.processStatus.status === 'READY') return 'opencode 进程可用'
-  if (props.processStatus.status === 'NEEDS_INITIALIZATION')
-    return '需要初始化 opencode 进程'
+  if (props.processStatus.status === 'NEEDS_INITIALIZATION') {
+    // 二级状态区分“尚未分配”与“已分配未运行”，与头像菜单一致
+    if (effectiveServiceStatus.value === 'NOT_RUNNING') return 'opencode 专属进程未运行'
+    if (effectiveServiceStatus.value === 'UNASSIGNED') return '尚未分配 opencode 专属进程'
+    return '需要初始化 opencode 进程' // serviceStatus 异常兜底
+  }
   return 'opencode 进程不可用'
+})
+// 初始化按钮文案：未分配→分配专属进程，已分配未运行→启动进程；进行中分别显示分配中/启动中
+const processInitButtonLabel = computed(() => {
+  const starting = effectiveServiceStatus.value === 'NOT_RUNNING'
+  if (props.processInitializing) return starting ? '启动中' : '分配中'
+  return starting ? '启动进程' : '分配专属进程'
 })
 const processStatusText = computed(() => {
   if (props.processLoading && !props.processStatus)
@@ -2204,7 +2246,7 @@ function onCompositionEnd() {
         "
         @click.stop="emit('initialize-process')"
       >
-        {{ processInitializing ? '初始化中' : '初始化进程' }}
+        {{ processInitButtonLabel }}
       </button>
     </div>
 

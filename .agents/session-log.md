@@ -8,7 +8,7 @@
 - What: `FigmaChatPanel.vue` 新增 `resolveServiceAddress` + `effectiveServiceStatus`（回退推断与 `FigmaShell.vue` 头像菜单一致）和 `processInitButtonLabel`；`processStatusTitle` 对 `NEEDS_INITIALIZATION` 拆分：`UNASSIGNED`→"尚未分配 opencode 专属进程"、`NOT_RUNNING`→"opencode 专属进程未运行"；按钮文案分别改为"分配专属进程"/"启动进程"（进行中显示"分配中"/"启动中"）。`AgentWorkbench.vue` 发送拦截反馈标题按同样规则区分。本地 prop 类型 `OpencodeProcessState` 补齐 `serviceStatus/serviceAddress/linuxServerId/port` 可选字段。
 - How: 纯前端改动，两个按钮仍调用同一 `initialize-process` → `POST /processes/me/initialize`，由后端 `initialize()` 统一处理分配并启动或重建并启动；无后端/API/事件/DB 变更。同步更新 `FigmaChatPanel.test.ts` 断言并补 `NOT_RUNNING`/显式 `UNASSIGNED`/进行中用例。
 - Result: 聊天面板状态卡与发送拦截提示与头像菜单状态文案一致；`UNASSIGNED` 显示分配入口、`NOT_RUNNING` 显示启动入口。
-- Verification: 待执行 `corepack pnpm --filter @test-agent/agent-web typecheck` 与 `corepack pnpm test -- FigmaChatPanel`。
+- Verification: `corepack pnpm --filter @test-agent/agent-web typecheck`、`corepack pnpm test -- FigmaChatPanel`（178 用例全通过）通过。
 
 ### 2026-06-29 - 改用 SYS_DATA_ROOT_DIR 派生服务器 IP 文件路径
 
