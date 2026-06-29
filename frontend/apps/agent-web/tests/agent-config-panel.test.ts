@@ -3,6 +3,15 @@ import { cleanup, fireEvent, render, waitFor } from "@testing-library/vue";
 import { createPinia } from "pinia";
 import AgentConfigPanel from "../src/components/AgentConfigPanel.vue";
 
+const notifyMock = vi.hoisted(() => ({
+  notifySuccess: vi.fn(),
+  notifyError: vi.fn(),
+  notifyWarning: vi.fn(),
+  notifyInfo: vi.fn()
+}));
+
+vi.mock("../src/components/notify", () => notifyMock);
+
 const apiClientMock = vi.hoisted(() => ({
   getPublicAgentConfigStatus: vi.fn(),
   getWorkspaceAgentConfigStatus: vi.fn(),
@@ -63,7 +72,7 @@ describe("AgentConfigPanel", () => {
     apiClientMock.readWorkspaceAgentFile.mockResolvedValue({ path: "agent.md", content: "", encoding: "utf-8" });
     apiClientMock.writeWorkspaceAgentFile.mockResolvedValue(undefined);
     apiClientMock.updatePublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED" });
-    apiClientMock.updatePublicAgentConfigAndPush.mockResolvedValue({ status: "SUCCEEDED" });
+    apiClientMock.updatePublicAgentConfigAndPush.mockResolvedValue({ status: "SUCCEEDED", commitHash: "newcommit123" });
     apiClientMock.connectAgentConfigProgress.mockResolvedValue({ close: vi.fn() });
   });
 
@@ -138,7 +147,7 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_1234567890abcdef", "", undefined));
   });
 
-  it("requires explicit confirmation and commit message before discarding dirty public config changes", async () => {
+  it("rejects submit when public repo is dirty and discard is not confirmed, shows error toast", async () => {
     apiClientMock.listPublicAgentRepositories.mockResolvedValue([{
       ...initializedRepository(),
       status: "CONFLICT",
@@ -154,13 +163,31 @@ describe("AgentConfigPanel", () => {
     // 提交信息未填写时按钮应禁用
     expect(confirmButton.disabled).toBe(true);
 
-    // 输入提交信息后，仍需勾选"放弃本地修改"才能继续
+    // 输入提交信息后按钮可点
     await fireEvent.update(view.getByLabelText("提交信息 *"), "chore: sync public config");
-    expect(confirmButton.disabled).toBe(true);
-
-    await fireEvent.click(view.getByLabelText("放弃本地修改并从远端恢复"));
     expect(confirmButton.disabled).toBe(false);
     await fireEvent.click(confirmButton);
+
+    // 等待弹窗内已渲染的错误提示（点击事件不会关闭弹窗）
+    expect(await view.findByText("存在本地未提交修改，请先勾选放弃本地修改或先提交/丢弃")).toBeTruthy();
+    // 仍然没有真正调用后端
+    expect(apiClientMock.updatePublicAgentConfigAndPush).not.toHaveBeenCalled();
+  });
+
+  it("allows submit after user explicitly confirms discard for dirty public repo", async () => {
+    apiClientMock.listPublicAgentRepositories.mockResolvedValue([{
+      ...initializedRepository(),
+      status: "CONFLICT",
+      message: "Git 工作树存在未提交变更"
+    }]);
+    const { view } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalled());
+    await fireEvent.click(view.getByText("更新公共配置"));
+    await view.findByText("Git 工作树存在未提交变更");
+    await fireEvent.update(view.getByLabelText("提交信息 *"), "chore: sync public config");
+    await fireEvent.click(view.getByLabelText("放弃本地修改并从远端恢复"));
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
 
     await waitFor(() => expect(apiClientMock.updatePublicAgentConfigAndPush).toHaveBeenCalledWith({
       branch: "main",
@@ -189,6 +216,28 @@ describe("AgentConfigPanel", () => {
       operationId: expect.stringMatching(/^aco_/),
       discardLocalChanges: false
     }));
+    await waitFor(() => expect(notifyMock.notifySuccess).toHaveBeenCalledWith(
+      "公共 Agent 已提交并推送",
+      expect.stringContaining("newcommit123")
+    ));
+  });
+
+  it("shows error toast when update-and-push fails", async () => {
+    apiClientMock.updatePublicAgentConfigAndPush.mockRejectedValueOnce(new Error("远端 push 失败：non-fast-forward"));
+    const { view } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalled());
+    await fireEvent.click(view.getByText("更新公共配置"));
+    await view.findByLabelText("提交信息 *");
+    await fireEvent.update(view.getByLabelText("提交信息 *"), "feat: try push");
+    const confirmButton = view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement;
+    await fireEvent.click(confirmButton);
+
+    await waitFor(() => expect(notifyMock.notifyError).toHaveBeenCalledWith(
+      "公共 Agent 提交并推送失败",
+      expect.stringContaining("non-fast-forward")
+    ));
+    expect(notifyMock.notifySuccess).not.toHaveBeenCalled();
   });
 });
 

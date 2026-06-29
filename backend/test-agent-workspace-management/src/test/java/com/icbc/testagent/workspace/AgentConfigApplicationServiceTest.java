@@ -217,19 +217,20 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
-    void publicUpdateAndPushStagesCommitsAndPushesWhenLocalChangesExist() {
+    void publicUpdateAndPushStagesCommitsAndPushesWhenLocalChangesExist() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.worktreeClean = false;
         git.stagedAfterAdd = "M opencode/agents/review.md";
-        git.headCommits.add("commit_base");
-        git.headCommits.add("commit_after_update_and_push");
         RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
-        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
         AgentConfigApplicationService service = service(
                 Map.of(
                         "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
                         "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
                         "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
-                agentConfigs,
+                new InMemoryAgentConfigRepository(),
                 git,
                 publisher);
 
@@ -246,6 +247,10 @@ class AgentConfigApplicationServiceTest {
         assertThat(git.pushedBranch).isEqualTo("main");
         assertThat(git.pushedForce).isFalse();
         assertThat(git.privateKeyUsed).isEqualTo(PRIVATE_KEY);
+        assertThat(git.resetCommit).isNull();
+        // 新流程不再调用 fetch/pull
+        assertThat(git.fetchCallCount).isZero();
+        assertThat(git.pulledBranch).isNull();
         assertThat(response.status()).isEqualTo("SUCCEEDED");
         assertThat(response.commitHash()).isEqualTo("commit_after_update_and_push");
         assertThat(publisher.events).hasSize(1);
@@ -256,11 +261,13 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
-    void publicUpdateAndPushSkipsCommitAndPushWhenWorktreeIsClean() {
+    void publicUpdateAndPushSkipsCommitAndPushWhenWorktreeIsClean() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
         // stagedAfterAdd 为空表示 stageAll 后没有可提交内容
         git.stagedAfterAdd = "";
-        git.headCommits.add("commit_base");
         RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
         AgentConfigApplicationService service = service(
                 Map.of(
@@ -282,9 +289,42 @@ class AgentConfigApplicationServiceTest {
         assertThat(git.stagedAllCallCount).isEqualTo(1);
         assertThat(git.lastCommitMessage).isNull();
         assertThat(git.pushedBranch).isNull();
+        assertThat(git.fetchCallCount).isZero();
         assertThat(response.status()).isEqualTo("SUCCEEDED");
         assertThat(response.commitHash()).isEqualTo("commit_base");
         assertThat(publisher.events).hasSize(1);
+    }
+
+    @Test
+    void publicUpdateAndPushResetsTrackedChangesWhenDiscardFlagTrue() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.worktreeClean = false;
+        git.stagedAfterAdd = "M opencode/agents/review.md";
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher());
+
+        AgentConfigResponses.AgentConfigOperationResponse response = service.updatePublicConfigAndPush(
+                "main",
+                "chore: sync",
+                "aco_update_push_discard",
+                true,
+                ADMIN,
+                "trace_update_push");
+
+        assertThat(git.resetCommit).isEqualTo("HEAD");
+        assertThat(git.stagedAllCallCount).isEqualTo(1);
+        assertThat(git.lastCommitMessage).isEqualTo("chore: sync");
+        assertThat(git.pushedBranch).isEqualTo("main");
+        assertThat(response.status()).isEqualTo("SUCCEEDED");
     }
 
     @Test
@@ -707,10 +747,12 @@ class AgentConfigApplicationServiceTest {
         private boolean worktreeClean = true;
         private String resetCommit;
         private String pulledBranch;
+        private int fetchCallCount;
         // 用于验证 update-and-push：模拟 stageAll 之后 porcelain 状态
         private String stagedAfterAdd = "M opencode/agents/review.md";
-        // headCommit 按序弹出，模拟 commit/push 后 commit 前进
-        private final List<String> headCommits = new ArrayList<>();
+        // 模拟当前 HEAD；commit 后会推进到下一个 commit id
+        private String currentHead = "commit_base";
+        private final List<String> headHistory = new ArrayList<>();
         private int stagedAllCallCount;
         private String lastCommitMessage;
         private String pushedBranch;
@@ -742,10 +784,7 @@ class AgentConfigApplicationServiceTest {
 
         @Override
         public String headCommit(Path repoRoot) {
-            if (headCommits.isEmpty()) {
-                return "commit_base";
-            }
-            return headCommits.get(Math.max(0, headCommits.size() - 1));
+            return currentHead;
         }
 
         @Override
@@ -755,6 +794,7 @@ class AgentConfigApplicationServiceTest {
 
         @Override
         public void fetch(Path repoRoot, String privateKey) {
+            this.fetchCallCount += 1;
         }
 
         @Override
@@ -798,7 +838,8 @@ class AgentConfigApplicationServiceTest {
             this.lastCommitMessage = message;
             this.privateKeyUsed = privateKey;
             // 模拟 commit 后 commit 前进一格
-            headCommits.add("commit_after_update_and_push");
+            headHistory.add(currentHead);
+            currentHead = "commit_after_update_and_push";
         }
 
         @Override

@@ -29,6 +29,7 @@ import type {
   PublicAgentRepositoryStatus
 } from "@test-agent/shared-types";
 import { formatAgentConfigError } from "./agentConfigErrors";
+import { notifyError, notifySuccess } from "./notify";
 import PublicDirectoryNode from "./PublicDirectoryNode.vue";
 
 const props = defineProps<{
@@ -238,33 +239,38 @@ function closeUpdatePublicConfigModal() {
   updatePublicConfigCommitMessage.value = "";
 }
 
-// 是否可以提交"更新+提交+推送"：分支已选、提交信息非空、未在加载、未在忙、冲突时已勾选放弃
+// 是否可以提交"更新+提交+推送"：分支已选、提交信息非空、未在加载、未在忙
 const canSubmitUpdatePublicConfig = computed(() =>
   !loadingUpdatePublicConfigBranches.value
   && !busy.value
   && !updatingPublicConfig.value
   && !!updatePublicConfigBranch.value
   && updatePublicConfigCommitMessage.value.trim().length > 0
-  && (!publicUpdateRequiresDiscard.value || updatePublicDiscardLocalChanges.value)
 );
 
 /**
- * 提交更新公共配置请求：调用后端复合接口 pull → commit → push。
+ * 提交更新公共配置请求：调用后端复合接口 stage → commit → push。
+ * 工作区有冲突修改且未勾选"放弃本地修改"时直接拒绝，避免静默清空用户未保存内容。
  */
 async function submitUpdatePublicConfig() {
   const branch = updatePublicConfigBranch.value;
   const message = updatePublicConfigCommitMessage.value.trim();
   if (!branch || !message) return;
-  if (publicUpdateRequiresDiscard.value && !updatePublicDiscardLocalChanges.value) return;
+  if (publicUpdateRequiresDiscard.value && !updatePublicDiscardLocalChanges.value) {
+    updatePublicConfigError.value = "存在本地未提交修改，请先勾选放弃本地修改或先提交/丢弃";
+    notifyError("公共 Agent 提交失败", updatePublicConfigError.value);
+    return;
+  }
   const discardLocalChanges = updatePublicDiscardLocalChanges.value;
   const messageSnapshot = message;
 
   closeUpdatePublicConfigModal();
 
   updatingPublicConfig.value = true;
+  const previousError = errorMessage.value;
   try {
     const operationId = newOperationId();
-    await runOperation(
+    const result = await runOperation(
       () => api.updatePublicAgentConfigAndPush({
         branch,
         commitMessage: messageSnapshot,
@@ -274,6 +280,13 @@ async function submitUpdatePublicConfig() {
       "公共 Agent 更新并推送",
       operationId
     );
+    if (result) {
+      const newHash = (result as { commitHash?: string }).commitHash;
+      notifySuccess("公共 Agent 已提交并推送", `分支 ${branch} 最新提交 ${newHash ?? "未知"}`);
+    } else if (errorMessage.value && errorMessage.value !== previousError) {
+      // runOperation 已经把错误写入 errorMessage，这里再以气泡形式通知一次。
+      notifyError("公共 Agent 提交并推送失败", errorMessage.value);
+    }
     publicRepositories.value = await api.listPublicAgentRepositories();
     await refreshScope("PUBLIC");
   } finally {

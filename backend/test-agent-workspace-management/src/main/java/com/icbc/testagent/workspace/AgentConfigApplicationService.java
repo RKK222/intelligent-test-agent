@@ -255,15 +255,17 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     /**
-     * "更新公共配置 + 提交并推送"复合操作：先按分支 fetch/checkout/pull，再 stage 工作区全部变更并用 commitMessage 生成一次提交，
-     * 最后 push 到远端并广播同步。
+     * "更新公共配置 + 提交并推送"复合操作：先 stage 工作区全部变更并用 commitMessage 生成一次提交，最后 push 到远端并广播同步。
      * <p>
-     * 与 updatePublicConfig 的差异：
+     * 设计上 <strong>不</strong> 调用 ensurePublicRepositoryReady：先 reset/pull 会破坏本地未提交内容并让后续 stage 无内容可提交。
+     * 工作区有未提交修改时按以下语义处理：
      * <ul>
-     *   <li>discardLocalChanges 仍按原语义决定是否覆盖受控仓库中的已跟踪修改；</li>
-     *   <li>commitMessage 不能为空，否则拒绝请求；</li>
-     *   <li>工作区在 pull 之后没有可提交内容时，跳过 commit/push，仅返回最新 commit hash。</li>
+     *   <li>discardLocalChanges=true：先 {@code git reset --hard HEAD} 放弃受控仓库中的已跟踪修改，再 stage+commit+push；</li>
+     *   <li>discardLocalChanges=false：保留所有本地修改并 stage+commit+push；</li>
+     *   <li>工作区无变更时不产生新 commit，仅返回当前 commit hash（视为幂等成功）。</li>
      * </ul>
+     * <p>
+     * 失败时统一抛 {@link PlatformException}，前端按统一错误格式处理。
      */
     public AgentConfigResponses.AgentConfigOperationResponse updatePublicConfigAndPush(
             String branch,
@@ -278,9 +280,14 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         try {
             PublicConfig config = requireEnabledPublicConfig();
             String privateKey = decryptSingleSshKey(userId);
-            progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
-            ensurePublicRepositoryReady(config, normalizedBranch, privateKey, discardLocalChanges);
             Path repoRoot = config.gitRoot();
+            if (!gitWorkspaceService.isGitRepository(repoRoot)) {
+                throw publicRepositoryUninitialized(repoRoot);
+            }
+            // 可选：放弃受控仓库中的已跟踪修改（不删除未跟踪文件）。
+            if (discardLocalChanges && !gitWorkspaceService.isWorktreeClean(repoRoot)) {
+                gitWorkspaceService.resetHardToCommit(repoRoot, "HEAD");
+            }
             String headBefore = gitWorkspaceService.headCommit(repoRoot);
             progress.step(AgentConfigOperationStep.COMMITTING);
             gitWorkspaceService.stageAll(repoRoot, privateKey);
@@ -288,7 +295,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 gitWorkspaceService.commitStaged(repoRoot, normalizedMessage, privateKey);
             }
             String headAfter = gitWorkspaceService.headCommit(repoRoot);
-            if (!headBefore.equals(headAfter) || hasStagedChanges(repoRoot)) {
+            boolean hasNewCommit = !headBefore.equals(headAfter);
+            if (hasNewCommit) {
                 progress.step(AgentConfigOperationStep.PUSHING);
                 gitWorkspaceService.push(repoRoot, normalizedBranch, false, privateKey);
             }

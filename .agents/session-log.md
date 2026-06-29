@@ -1789,6 +1789,26 @@
   - Controller 用 mock service 时不应断言空 commitMessage 的 400 响应，校验逻辑在 Service 内，Controller 测试只覆盖路由与权限；Service 单测中专门覆盖。
   - 公共配置 git 仓库路径在 `OPENCODE_PUBLIC_CONFIG_DIR` 通用参数中维护，路径变更需要走通用参数管理入口而非本接口。
 
+### 2026-06-29 - 公共配置"更新公共配置"流程修正为 commit→push 并接入气泡提示
+
+- Why: 上一版按"先 pull 再 commit+push"的顺序实现，结果 `ensureExistingRepositoryReadyForSync` 在工作区有未提交修改时要么抛 CONFLICT 拒绝，要么 `git reset --hard HEAD` 清空本地修改后再 `git add -A` 没有可提交内容，**用户看到的现象是"点了确定但没产生任何 commit"**。同时 `runOperation` 内部 try/catch 只写 `errorMessage` ref，没有调用 toast，前端也没有任何成功/失败的气泡通知。
+- What:
+  - 后端 `AgentConfigApplicationService.updatePublicConfigAndPush` 重新设计：删除 `ensurePublicRepositoryReady` 预拉取，改为「可选 `reset --hard HEAD` → `stageAll` → `commitStaged` → `push` → 广播」；`hasNewCommit = !headBefore.equals(headAfter)` 时才 push；commitMessage 为空直接抛 `VALIDATION_ERROR`。
+  - 后端 Service 单测同步更新（`currentHead` 字段模拟 commit 推进），新增 reset 路径测试；移除对 fetchCallCount 必然为 0 的硬性要求之外，断言 ensurePublicRepositoryReady 没有被调用。
+  - 前端 `AgentConfigPanel.vue` 接入 `./notify` 的 `notifySuccess` / `notifyError`：成功时 toast「公共 Agent 已提交并推送」附带新 commit hash；失败时 toast「公共 Agent 提交并推送失败」并附错误信息；冲突未确认时同步在弹窗内显示 `updatePublicConfigError` 让用户立即看到拒绝原因。
+  - 前端弹窗 disabled 规则简化为「提交信息非空且不在忙」；冲突判断放到 submit 入口的二次校验，并在测试中覆盖。
+  - 前端测试：新增 2 个 toast 通知用例（成功/失败），拆分冲突场景为「未勾选放弃→拒绝并弹错误」+「勾选放弃→调用后端」两个用例。
+- How:
+  - Service 入口在 `isGitRepository` 为 false 时直接抛 `publicRepositoryUninitialized`；`discardLocalChanges=true && !isWorktreeClean` 时先 `resetHardToCommit` 再继续。
+  - 前端 `runOperation` 仍负责进度 SSE 与 `errorMessage` 写入；提交函数额外对比 `previousError` 与 `errorMessage.value` 决定是否补发一次 toast，避免重复弹错。
+- Result:
+  - 后端：test-agent-workspace-management 20/20、test-agent-api 13/13 通过。
+  - 前端：vitest `agent-config-panel` 8/8、`backend-api` 32/32 通过；`pnpm typecheck` 无报错。
+- Pitfalls:
+  - JSDOM 下 fireEvent.click 在含 hover 触发的 dropdown 容器内可能受父级 pointer-events 影响，确认测试中 confirm 按钮真实可达；优先用 `view.findByText` 验证弹窗内错误文案（避免依赖全局 toast 在 jsdom 内的实现差异）。
+  - 之前 `canSubmitUpdatePublicConfig` 用 `publicUpdateRequiresDiscard` 做 disabled 条件会把冲突场景"静默禁用"，用户以为按钮坏了；改为弹窗内可见的拒绝错误更直观。
+- Verification: `pnpm test -- agent-config-panel` 8/8；`mvn -pl test-agent-workspace-management,test-agent-api test -Dtest=AgentConfigApplicationServiceTest,AgentConfigControllerTest` 33/33。
+
 ### 2026-06-29 - 修复 /api/workspaces 返回 updatedAt must not be before createdAt
 
 - Why: 用户反馈 GET /api/workspaces?page=1&size=50 一直返回 updatedAt must not be before createdAt 校验错误。该校验来自 Workspace 领域 record 的 compact constructor，抛 IllegalArgumentException 后被 GlobalExceptionHandler 原样回吐，把内部不变量错误信息暴露给前端。
