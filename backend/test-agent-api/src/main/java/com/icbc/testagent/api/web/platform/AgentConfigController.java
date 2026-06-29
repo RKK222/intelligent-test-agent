@@ -121,6 +121,23 @@ public class AgentConfigController {
                 RuntimeApiSupport.traceId(exchange)));
     }
 
+    /**
+     * 公共配置"更新 + 提交并推送"复合接口：按分支拉取最新后 stage 工作区全部变更并用 commitMessage 生成一次提交，最后 push 到远端并广播同步。
+     */
+    @PostMapping("/public/update-and-push")
+    public ApiResponse<Object> updatePublicAndPush(
+            @RequestBody AgentConfigDtos.UpdatePublicConfigAndPushRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return ok(exchange, service.updatePublicConfigAndPush(
+                request.branch(),
+                request.commitMessage(),
+                request.operationId(),
+                Boolean.TRUE.equals(request.discardLocalChanges()),
+                principal.userId(),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
     @PostMapping("/file-ws-route")
     public ApiResponse<AgentConfigDtos.FileRouteResponse> fileWebSocketRoute(
             @RequestBody(required = false) AgentConfigDtos.FileRouteRequest request,

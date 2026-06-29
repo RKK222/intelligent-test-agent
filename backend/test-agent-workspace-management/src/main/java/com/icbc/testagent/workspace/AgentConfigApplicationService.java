@@ -254,6 +254,65 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         }
     }
 
+    /**
+     * "更新公共配置 + 提交并推送"复合操作：先按分支 fetch/checkout/pull，再 stage 工作区全部变更并用 commitMessage 生成一次提交，
+     * 最后 push 到远端并广播同步。
+     * <p>
+     * 与 updatePublicConfig 的差异：
+     * <ul>
+     *   <li>discardLocalChanges 仍按原语义决定是否覆盖受控仓库中的已跟踪修改；</li>
+     *   <li>commitMessage 不能为空，否则拒绝请求；</li>
+     *   <li>工作区在 pull 之后没有可提交内容时，跳过 commit/push，仅返回最新 commit hash。</li>
+     * </ul>
+     */
+    public AgentConfigResponses.AgentConfigOperationResponse updatePublicConfigAndPush(
+            String branch,
+            String commitMessage,
+            String operationId,
+            boolean discardLocalChanges,
+            UserId userId,
+            String traceId) {
+        String normalizedBranch = requireText(branch, "分支不能为空", "branch");
+        String normalizedMessage = requireText(commitMessage, "提交说明不能为空", "commitMessage");
+        AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.PUBLIC, null, "update-and-push", normalizedBranch, traceId);
+        try {
+            PublicConfig config = requireEnabledPublicConfig();
+            String privateKey = decryptSingleSshKey(userId);
+            progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
+            ensurePublicRepositoryReady(config, normalizedBranch, privateKey, discardLocalChanges);
+            Path repoRoot = config.gitRoot();
+            String headBefore = gitWorkspaceService.headCommit(repoRoot);
+            progress.step(AgentConfigOperationStep.COMMITTING);
+            gitWorkspaceService.stageAll(repoRoot, privateKey);
+            if (!gitWorkspaceService.isWorktreeClean(repoRoot) || hasStagedChanges(repoRoot)) {
+                gitWorkspaceService.commitStaged(repoRoot, normalizedMessage, privateKey);
+            }
+            String headAfter = gitWorkspaceService.headCommit(repoRoot);
+            if (!headBefore.equals(headAfter) || hasStagedChanges(repoRoot)) {
+                progress.step(AgentConfigOperationStep.PUSHING);
+                gitWorkspaceService.push(repoRoot, normalizedBranch, false, privateKey);
+            }
+            String commitHash = gitWorkspaceService.headCommit(repoRoot);
+            progress.step(AgentConfigOperationStep.BROADCASTING);
+            broadcastPublicSync(normalizedBranch, commitHash, "update-and-push", traceId);
+            return progress.succeeded(commitHash);
+        } catch (PlatformException exception) {
+            progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
+            throw exception;
+        } catch (Exception exception) {
+            progress.failed(ErrorCode.INTERNAL_ERROR.name(), "公共 Agent 配置更新并推送失败");
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "公共 Agent 配置更新并推送失败", Map.of(), exception);
+        }
+    }
+
+    /**
+     * 检查仓库是否还有未推送的本地提交：比较 porcelain 状态是否非空；空表示没有 staged/unstaged/untracked 变更。
+     */
+    private boolean hasStagedChanges(Path repoRoot) {
+        String porcelain = gitWorkspaceService.statusPorcelain(repoRoot);
+        return !porcelain.trim().isEmpty();
+    }
+
     public List<FileTreeEntryResponse> listPublicAgentFiles(String relativePath, String worktreeId) {
         Path agentRoot = publicAgentRootForRead(worktreeId);
         // 公共配置目录须由管理员初始化（git clone）后才会存在；未初始化时返回空列表，不自动创建，

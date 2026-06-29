@@ -15,6 +15,7 @@ const apiClientMock = vi.hoisted(() => ({
   readWorkspaceAgentFile: vi.fn(),
   writeWorkspaceAgentFile: vi.fn(),
   updatePublicAgentConfig: vi.fn(),
+  updatePublicAgentConfigAndPush: vi.fn(),
   connectAgentConfigProgress: vi.fn()
 }));
 
@@ -62,6 +63,7 @@ describe("AgentConfigPanel", () => {
     apiClientMock.readWorkspaceAgentFile.mockResolvedValue({ path: "agent.md", content: "", encoding: "utf-8" });
     apiClientMock.writeWorkspaceAgentFile.mockResolvedValue(undefined);
     apiClientMock.updatePublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED" });
+    apiClientMock.updatePublicAgentConfigAndPush.mockResolvedValue({ status: "SUCCEEDED" });
     apiClientMock.connectAgentConfigProgress.mockResolvedValue({ close: vi.fn() });
   });
 
@@ -136,7 +138,7 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_1234567890abcdef", "", undefined));
   });
 
-  it("requires explicit confirmation before discarding dirty public config changes", async () => {
+  it("requires explicit confirmation and commit message before discarding dirty public config changes", async () => {
     apiClientMock.listPublicAgentRepositories.mockResolvedValue([{
       ...initializedRepository(),
       status: "CONFLICT",
@@ -148,18 +150,45 @@ describe("AgentConfigPanel", () => {
     await fireEvent.click(view.getByText("更新公共配置"));
 
     expect(await view.findByText("Git 工作树存在未提交变更")).toBeTruthy();
-    const confirmButton = view.getByRole("button", { name: "确定" }) as HTMLButtonElement;
+    const confirmButton = view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement;
+    // 提交信息未填写时按钮应禁用
+    expect(confirmButton.disabled).toBe(true);
+
+    // 输入提交信息后，仍需勾选"放弃本地修改"才能继续
+    await fireEvent.update(view.getByLabelText("提交信息 *"), "chore: sync public config");
     expect(confirmButton.disabled).toBe(true);
 
     await fireEvent.click(view.getByLabelText("放弃本地修改并从远端恢复"));
     expect(confirmButton.disabled).toBe(false);
     await fireEvent.click(confirmButton);
 
-    await waitFor(() => expect(apiClientMock.updatePublicAgentConfig).toHaveBeenCalledWith(
-      "main",
-      expect.stringMatching(/^aco_/),
-      true
-    ));
+    await waitFor(() => expect(apiClientMock.updatePublicAgentConfigAndPush).toHaveBeenCalledWith({
+      branch: "main",
+      commitMessage: "chore: sync public config",
+      operationId: expect.stringMatching(/^aco_/),
+      discardLocalChanges: true
+    }));
+    expect(apiClientMock.updatePublicAgentConfig).not.toHaveBeenCalled();
+  });
+
+  it("submits update-and-push with default discard flag when public repo is clean", async () => {
+    const { view } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalled());
+    await fireEvent.click(view.getByText("更新公共配置"));
+
+    await view.findByLabelText("提交信息 *");
+    await fireEvent.update(view.getByLabelText("提交信息 *"), "feat: update agent docs");
+    const confirmButton = view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement;
+    expect(confirmButton.disabled).toBe(false);
+    await fireEvent.click(confirmButton);
+
+    await waitFor(() => expect(apiClientMock.updatePublicAgentConfigAndPush).toHaveBeenCalledWith({
+      branch: "main",
+      commitMessage: "feat: update agent docs",
+      operationId: expect.stringMatching(/^aco_/),
+      discardLocalChanges: false
+    }));
   });
 });
 

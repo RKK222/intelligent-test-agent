@@ -563,6 +563,23 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "POST",
         body: JSON.stringify({ branch, operationId, discardLocalChanges })
       }),
+    /**
+     * 公共配置"更新 + 提交并推送"复合接口：按分支拉取最新后用 commitMessage 提交并推送到远端。
+     * @param payload.branch 远端分支
+     * @param payload.commitMessage 提交说明（必填）
+     * @param payload.operationId 进度 operationId
+     * @param payload.discardLocalChanges 是否覆盖受控仓库的已跟踪修改
+     */
+    updatePublicAgentConfigAndPush: (payload: {
+      branch: string;
+      commitMessage: string;
+      operationId?: string;
+      discardLocalChanges?: boolean;
+    }) =>
+      request<AgentConfigOperation>(`${agentConfigBase}/public/update-and-push`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
     listPublicAgentFiles: async (path = "", worktreeId?: string | null, linuxServerId?: string | null) => {
       const entries = await agentConfigFileRpc<BackendFileTreeEntry[]>(
         "PUBLIC",

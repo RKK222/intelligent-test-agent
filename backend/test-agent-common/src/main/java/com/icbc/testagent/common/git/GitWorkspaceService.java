@@ -192,6 +192,16 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 暂存工作区全部变更（含未跟踪文件），用于"更新+提交并推送"场景；不包含被 .gitignore 忽略的文件。
+     */
+    public void stageAll(Path repoRoot, String privateKey) {
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "add", "--all"),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
      * 从暂存区移除指定文件；空列表时不执行 Git 命令。
      */
     public void unstageFiles(Path repoRoot, List<String> files, String privateKey) {

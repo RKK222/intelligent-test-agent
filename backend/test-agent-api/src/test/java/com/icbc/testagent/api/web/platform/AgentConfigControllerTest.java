@@ -76,6 +76,50 @@ class AgentConfigControllerTest {
     }
 
     @Test
+    void nonSuperAdminCannotUpdateAndPushPublicConfig() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/update-and-push")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"branch":"main","commitMessage":"chore: sync","operationId":"aco_12345678"}
+                        """)
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("FORBIDDEN");
+
+        verifyNoInteractions(service);
+    }
+
+    @Test
+    void superAdminCanUpdateAndPushPublicConfigWithExplicitDiscard() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/update-and-push")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"branch":"main","commitMessage":"chore: sync public agent docs","operationId":"aco_12345678","discardLocalChanges":true}
+                        """)
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).updatePublicConfigAndPush(
+                "main",
+                "chore: sync public agent docs",
+                "aco_12345678",
+                true,
+                USER_ID,
+                TRACE_ID);
+    }
+
+    @Test
     void superAdminCanExplicitlyDiscardLocalChangesWhenUpdatingPublicConfig() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
         WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));

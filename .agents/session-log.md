@@ -1739,3 +1739,27 @@
 - Result: 前端 `MarkdownView.test.ts` + `MarkdownPreview.test.ts` + `runtime-reducer.test.ts` 共 25/25 通过。后端 persistence 模块因 H2 不兼容 PostgreSQL CHECK 约束的 Flyway migration 无法本地跑全量测试，XML 修改为纯文本替换无语法风险。
 - Pitfalls: github-markdown-css 的 `display:block` 是为宽表横向滚动设计，恢复 `display:table` 后极宽表格可能在窄气泡内溢出（聊天气泡 `max-w-[calc(100%-44px)]` 本身较宽，影响小）；后端 Flyway H2 兼容性问题需单独处理。
 - Verification: `npx vitest run packages/agent-chat/tests/ packages/editor/tests/` 相关测试全通；`mvn -pl test-agent-persistence -am compile` 编译通过。
+
+### 2026-06-29 - 公共配置"更新公共配置"弹窗新增提交信息输入并支持推送到远端
+
+- Why: 在 AgentConfigPanel 的公共级"更新公共配置"操作中，原行为仅 fetch+reset+pull（不修改远端），用户在管理面板中无法通过此入口把本地的 `OPENCODE_PUBLIC_CONFIG_DIR` 仓库下的修改提交并推送到远端。需要一个超级管理员可一键拉取最新、提交并推送的复合入口，减少多工具切换的步骤。
+- What:
+  - 后端新增 DTO `AgentConfigDtos.UpdatePublicConfigAndPushRequest`（branch、commitMessage 必填、operationId、discardLocalChanges）。
+  - 后端 `GitWorkspaceService` 新增 `stageAll(Path, String)` 公开方法，执行 `git add --all`。
+  - 后端 `AgentConfigApplicationService` 新增 `updatePublicConfigAndPush`：复用 `ensurePublicRepositoryReady` 完成 fetch/reset/pull 后 `stageAll`，若产生新 commit 则用 `commitMessage` 生成提交并 push 到 `branch`，最后广播 `agent-config.public-sync-requested` 事件。空 commitMessage 直接抛 `VALIDATION_ERROR`，保留失败时原始异常。
+  - 后端 `AgentConfigController` 暴露 `POST /api/internal/platform/workspace-management/agent-config/public/update-and-push`，要求 `ROLE_SUPER_ADMIN`，X-Trace-Id 透传。
+  - 前端 `packages/backend-api/src/index.ts` 新增 `updatePublicAgentConfigAndPush({ branch, commitMessage, operationId, discardLocalChanges })`。
+  - 前端 `apps/agent-web/src/components/AgentConfigPanel.vue` 的"更新公共配置"弹窗新增提交信息输入框（必填，带流程提示）、确定按钮文案改为"提交并推送"，提交后通过新接口调用并复用既有 `runOperation` 进度通道。
+  - 同步更新 `agent-config-panel.test.ts`（新增提交信息输入必填、CONFLICT 时仍需勾选放弃）和 `AgentConfigControllerTest` / `AgentConfigApplicationServiceTest` 的测试。
+  - 文档 `docs/api/http-api.md` 新增 `POST /public/update-and-push` 行与请求体/语义说明。
+- How:
+  - Service 复用现有 `commitStaged` / `push` / `headCommit` / `statusPorcelain`，在 `hasStagedChanges` 辅助方法里复用 porcelain 检查；流程步骤串行显式：PREPARING_REPOSITORY → COMMITTING → PUSHING → BROADCASTING。
+  - Controller 与 Service 测试都使用 mock service / RecordingGitWorkspaceService 覆盖三种场景：有本地变更、无本地变更、空 commitMessage 拒绝。
+  - 提交信息为必填项，前后端一致做 `trim().length > 0` 校验，禁用"提交并推送"按钮。
+- Result:
+  - 后端：test-agent-workspace-management 19/19、test-agent-api 13/13 通过；test-agent-common / test-agent-api 编译通过。
+  - 前端：vitest `agent-config-panel` 6/6、`backend-api` 32/32 通过；`pnpm typecheck` 无报错。
+- Pitfalls:
+  - `stageAll` 必须先 install `test-agent-common` 才能让下游模块拿到新方法签名，否则会触发 `NoSuchMethodError`。
+  - Controller 用 mock service 时不应断言空 commitMessage 的 400 响应，校验逻辑在 Service 内，Controller 测试只覆盖路由与权限；Service 单测中专门覆盖。
+  - 公共配置 git 仓库路径在 `OPENCODE_PUBLIC_CONFIG_DIR` 通用参数中维护，路径变更需要走通用参数管理入口而非本接口。

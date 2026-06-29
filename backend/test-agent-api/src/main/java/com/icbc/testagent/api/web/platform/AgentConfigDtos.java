@@ -14,6 +14,17 @@ final class AgentConfigDtos {
     record BranchRequest(String branch, String operationId, Boolean discardLocalChanges) {
     }
 
+    /**
+     * 公共配置"更新+提交并推送"复合请求：先按分支 fetch/reset/pull，再 stage 已跟踪/未跟踪修改，
+     * 然后用 commitMessage 生成一次提交并 push 到远端。discardLocalChanges 为 true 时才允许覆盖受控仓库中的已跟踪修改。
+     */
+    record UpdatePublicConfigAndPushRequest(
+            String branch,
+            String commitMessage,
+            String operationId,
+            Boolean discardLocalChanges) {
+    }
+
     record WorktreeRequest(String baseName, String branch, String operationId, String linuxServerId) {
     }
 

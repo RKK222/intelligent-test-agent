@@ -217,6 +217,95 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void publicUpdateAndPushStagesCommitsAndPushesWhenLocalChangesExist() {
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.stagedAfterAdd = "M opencode/agents/review.md";
+        git.headCommits.add("commit_base");
+        git.headCommits.add("commit_after_update_and_push");
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                publisher);
+
+        AgentConfigResponses.AgentConfigOperationResponse response = service.updatePublicConfigAndPush(
+                "main",
+                "chore: sync public agent docs",
+                "aco_update_push_1234567890",
+                false,
+                ADMIN,
+                "trace_update_push");
+
+        assertThat(git.stagedAllCallCount).isEqualTo(1);
+        assertThat(git.lastCommitMessage).isEqualTo("chore: sync public agent docs");
+        assertThat(git.pushedBranch).isEqualTo("main");
+        assertThat(git.pushedForce).isFalse();
+        assertThat(git.privateKeyUsed).isEqualTo(PRIVATE_KEY);
+        assertThat(response.status()).isEqualTo("SUCCEEDED");
+        assertThat(response.commitHash()).isEqualTo("commit_after_update_and_push");
+        assertThat(publisher.events).hasSize(1);
+        assertThat(publisher.events.get(0).type()).isEqualTo("agent-config.public-sync-requested");
+        assertThat(publisher.events.get(0).payload())
+                .containsEntry("branch", "main")
+                .containsEntry("commitHash", "commit_after_update_and_push");
+    }
+
+    @Test
+    void publicUpdateAndPushSkipsCommitAndPushWhenWorktreeIsClean() {
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        // stagedAfterAdd 为空表示 stageAll 后没有可提交内容
+        git.stagedAfterAdd = "";
+        git.headCommits.add("commit_base");
+        RecordingBroadcastPublisher publisher = new RecordingBroadcastPublisher();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                publisher);
+
+        AgentConfigResponses.AgentConfigOperationResponse response = service.updatePublicConfigAndPush(
+                "main",
+                "chore: empty",
+                "aco_update_push_empty",
+                false,
+                ADMIN,
+                "trace_update_push");
+
+        assertThat(git.stagedAllCallCount).isEqualTo(1);
+        assertThat(git.lastCommitMessage).isNull();
+        assertThat(git.pushedBranch).isNull();
+        assertThat(response.status()).isEqualTo("SUCCEEDED");
+        assertThat(response.commitHash()).isEqualTo("commit_base");
+        assertThat(publisher.events).hasSize(1);
+    }
+
+    @Test
+    void publicUpdateAndPushRejectsEmptyCommitMessage() {
+        AgentConfigApplicationService service = service(Map.of(
+                "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()));
+
+        assertThatThrownBy(() -> service.updatePublicConfigAndPush(
+                "main",
+                "   ",
+                "aco_update_push_invalid",
+                false,
+                ADMIN,
+                "trace_update_push"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("提交说明不能为空");
+    }
+
+    @Test
     void publicWorktreeNameAppendsCurrentDateAndCreatesGitWorktree() throws Exception {
         Files.createDirectories(root.resolve(".config/.git"));
         Files.createDirectories(root.resolve(".config/opencode"));
@@ -618,6 +707,14 @@ class AgentConfigApplicationServiceTest {
         private boolean worktreeClean = true;
         private String resetCommit;
         private String pulledBranch;
+        // 用于验证 update-and-push：模拟 stageAll 之后 porcelain 状态
+        private String stagedAfterAdd = "M opencode/agents/review.md";
+        // headCommit 按序弹出，模拟 commit/push 后 commit 前进
+        private final List<String> headCommits = new ArrayList<>();
+        private int stagedAllCallCount;
+        private String lastCommitMessage;
+        private String pushedBranch;
+        private Boolean pushedForce;
 
         @Override
         public void cloneBranch(String gitUrl, String branch, Path repoRoot, String privateKey) {
@@ -645,7 +742,10 @@ class AgentConfigApplicationServiceTest {
 
         @Override
         public String headCommit(Path repoRoot) {
-            return "commit_base";
+            if (headCommits.isEmpty()) {
+                return "commit_base";
+            }
+            return headCommits.get(Math.max(0, headCommits.size() - 1));
         }
 
         @Override
@@ -680,6 +780,32 @@ class AgentConfigApplicationServiceTest {
         public void createWorktree(Path repoRoot, Path worktreeRoot, String branch, String privateKey) {
             this.worktreeRoot = worktreeRoot;
             this.worktreeBranch = branch;
+        }
+
+        @Override
+        public void stageAll(Path repoRoot, String privateKey) {
+            this.stagedAllCallCount += 1;
+            this.privateKeyUsed = privateKey;
+        }
+
+        @Override
+        public String statusPorcelain(Path repoRoot) {
+            return stagedAfterAdd;
+        }
+
+        @Override
+        public void commitStaged(Path repoRoot, String message, String privateKey) {
+            this.lastCommitMessage = message;
+            this.privateKeyUsed = privateKey;
+            // 模拟 commit 后 commit 前进一格
+            headCommits.add("commit_after_update_and_push");
+        }
+
+        @Override
+        public void push(Path repoRoot, String branch, boolean force, String privateKey) {
+            this.pushedBranch = branch;
+            this.pushedForce = force;
+            this.privateKeyUsed = privateKey;
         }
     }
 

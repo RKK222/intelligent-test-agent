@@ -206,6 +206,7 @@ const updatePublicConfigBranches = ref<string[]>([]);
 const loadingUpdatePublicConfigBranches = ref(false);
 const updatePublicConfigError = ref("");
 const updatePublicDiscardLocalChanges = ref(false);
+const updatePublicConfigCommitMessage = ref("");
 
 /**
  * 触发更新公共配置流程，初始化弹窗状态，加载远端分支列表并打开弹窗
@@ -216,6 +217,7 @@ async function updatePublicConfig() {
   loadingUpdatePublicConfigBranches.value = true;
   updatePublicConfigError.value = "";
   updatePublicDiscardLocalChanges.value = false;
+  updatePublicConfigCommitMessage.value = "";
   try {
     const branches = await api.listPublicAgentBranches();
     updatePublicConfigBranches.value = branches;
@@ -233,16 +235,29 @@ function closeUpdatePublicConfigModal() {
   showUpdatePublicConfigModal.value = false;
   updatePublicConfigError.value = "";
   updatePublicDiscardLocalChanges.value = false;
+  updatePublicConfigCommitMessage.value = "";
 }
 
+// 是否可以提交"更新+提交+推送"：分支已选、提交信息非空、未在加载、未在忙、冲突时已勾选放弃
+const canSubmitUpdatePublicConfig = computed(() =>
+  !loadingUpdatePublicConfigBranches.value
+  && !busy.value
+  && !updatingPublicConfig.value
+  && !!updatePublicConfigBranch.value
+  && updatePublicConfigCommitMessage.value.trim().length > 0
+  && (!publicUpdateRequiresDiscard.value || updatePublicDiscardLocalChanges.value)
+);
+
 /**
- * 提交更新公共配置请求
+ * 提交更新公共配置请求：调用后端复合接口 pull → commit → push。
  */
 async function submitUpdatePublicConfig() {
   const branch = updatePublicConfigBranch.value;
-  if (!branch) return;
+  const message = updatePublicConfigCommitMessage.value.trim();
+  if (!branch || !message) return;
   if (publicUpdateRequiresDiscard.value && !updatePublicDiscardLocalChanges.value) return;
   const discardLocalChanges = updatePublicDiscardLocalChanges.value;
+  const messageSnapshot = message;
 
   closeUpdatePublicConfigModal();
 
@@ -250,8 +265,13 @@ async function submitUpdatePublicConfig() {
   try {
     const operationId = newOperationId();
     await runOperation(
-      () => api.updatePublicAgentConfig(branch, operationId, discardLocalChanges),
-      "公共 Agent 更新",
+      () => api.updatePublicAgentConfigAndPush({
+        branch,
+        commitMessage: messageSnapshot,
+        operationId,
+        discardLocalChanges
+      }),
+      "公共 Agent 更新并推送",
       operationId
     );
     publicRepositories.value = await api.listPublicAgentRepositories();
@@ -1072,7 +1092,7 @@ defineExpose({
           role="dialog"
           aria-modal="true"
           aria-label="更新公共配置"
-          class="flex w-[min(380px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
+          class="flex w-[min(420px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
         >
           <header class="flex items-center justify-between border-b border-[var(--ta-border)] pb-2">
             <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">更新公共配置</h2>
@@ -1104,6 +1124,23 @@ defineExpose({
               </div>
             </div>
 
+            <div class="flex flex-col gap-1.5">
+              <label for="update-public-commit-message" class="text-[11px] text-[var(--ta-muted)] font-medium">
+                提交信息 <span class="text-[var(--ta-danger,#b91c1c)]">*</span>
+              </label>
+              <Input
+                id="update-public-commit-message"
+                v-model="updatePublicConfigCommitMessage"
+                placeholder="请输入本次提交说明，确认后会将本地变更提交并推送到远端"
+                class="h-8 text-[13px]"
+                :disabled="loadingUpdatePublicConfigBranches"
+                @keydown.enter="canSubmitUpdatePublicConfig && submitUpdatePublicConfig()"
+              />
+              <span class="agent-modal-help">
+                流程：按分支拉取最新 → stage 工作区变更 → 提交 → push 到远端
+              </span>
+            </div>
+
             <label v-if="publicUpdateRequiresDiscard" class="flex items-start gap-2 text-[12px] text-[var(--ta-text)]">
               <input
                 v-model="updatePublicDiscardLocalChanges"
@@ -1119,10 +1156,10 @@ defineExpose({
             <Button
               variant="primary"
               size="sm"
-              :disabled="loadingUpdatePublicConfigBranches || !updatePublicConfigBranch || busy || (publicUpdateRequiresDiscard && !updatePublicDiscardLocalChanges)"
+              :disabled="!canSubmitUpdatePublicConfig"
               @click="submitUpdatePublicConfig"
             >
-              确定
+              提交并推送
             </Button>
           </footer>
         </section>
