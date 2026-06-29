@@ -5,7 +5,7 @@
 ### 2026-06-29 - 自动刷新当前用户 opencode 健康状态与模型目录
 
 - Why: 工作台进入后 `/processes/me` 只在首屏、点击头像、刷新页面或输入区交互时重新查询，导致后端/manager 健康检查已恢复后，右侧 opencode 状态和模型列表仍停留在旧的“检测中/失败/空列表”缓存；用户需要多次刷新页面才可能同时拿到绿色状态和模型。
-- What: `AgentWorkbench.vue` 让当前用户 opencode 进程状态在页面可见时每 5 秒自动 refetch；Agent/Provider/Model/Command/MCP/LSP/VCS 等运行态目录改为仅在进程 `READY` 后启用，并在状态刚转为 `READY` 时主动 invalidate，清掉早期健康失败造成的空缓存。后续修正把自动轮询和用户主动刷新拆开：后台轮询不再把右侧发送/新建按钮置为禁用，只有输入区 focus/click 主动刷新时才短暂阻止提交。同步更新 `frontend/README.md` 和 `frontend/apps/agent-web/README.md`。
+- What: `AgentWorkbench.vue` 让当前用户 opencode 进程状态在页面可见时自动 refetch，未 `READY` 时每 5 秒快速探测，`READY` 后降频为每 30 秒，降低常态 manager health 和数据库写入压力；Agent/Provider/Model/Command/MCP/LSP/VCS 等运行态目录改为仅在进程 `READY` 后启用，并在状态刚转为 `READY` 时主动 invalidate，清掉早期健康失败造成的空缓存。同步更新 `frontend/README.md` 和 `frontend/apps/agent-web/README.md`。
 - How: 复用既有 `/api/internal/agent/opencode/processes/me` 与 runtime catalog API，不新增后端接口、不直连 opencode server、不修改数据库或环境文件；保持输入区手动触发刷新逻辑作为即时探测入口。
 - Result: `corepack pnpm --filter @test-agent/agent-web typecheck`、`corepack pnpm test FigmaChatPanel.test.ts workbench-utils.test.ts follow-up-queue.test.ts`、`corepack pnpm --filter @test-agent/agent-web build`、`git diff --check` 均通过；`.env.test` 三服务已重启，backend health/readiness、frontend 3000 和 CORS 预检通过。登录态 smoke 显示默认账号初始化 opencode 仍被环境配置阻塞：manager 返回 `OPENCODE_UNAVAILABLE`，原因是当前测试库公共 opencode配置目录为 Windows 路径 `D:/data/.testagent/agent-opencode/.config/opencode/`，在 macOS 本地未初始化，因此模型接口在该账号未 READY 时按预期返回 503。
 

@@ -87,7 +87,8 @@ const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
 const authStore = useAuthStore();
 const router = useRouter();
-const OPENCODE_PROCESS_STATUS_REFETCH_INTERVAL_MS = 5000;
+const OPENCODE_PROCESS_STATUS_FAST_REFETCH_INTERVAL_MS = 5000;
+const OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS = 30000;
 
 const isSuperAdmin = computed(() => authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 
@@ -396,8 +397,13 @@ const opencodeProcessQuery = useQuery({
   enabled: opencodeProcessEnabled,
   queryFn: () => api.getMyOpencodeProcess(),
   retry: false,
-  // 自动刷新当前用户进程健康状态，避免必须点击头像或刷新页面才能看到 READY/UNAVAILABLE 变化。
-  refetchInterval: OPENCODE_PROCESS_STATUS_REFETCH_INTERVAL_MS,
+  // 未 READY 时保持快速探测；READY 后降频，避免每个工作台标签页持续压测 manager health。
+  refetchInterval: (query) => {
+    const status = (query.state.data as UserOpencodeProcess | undefined)?.status;
+    return status === "READY"
+      ? OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS
+      : OPENCODE_PROCESS_STATUS_FAST_REFETCH_INTERVAL_MS;
+  },
   refetchIntervalInBackground: false
 });
 const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => opencodeProcessQuery.data.value ?? null);
