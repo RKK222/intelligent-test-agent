@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-29 - 修复公共 Agent 面板因本地系统文件判脏无法刷新
+
+- Why: 左侧 Agent 面板点击刷新仍提示“没有已初始化服务器”，但公共 opencode 配置目录实际已存在且包含迁移后的 agent/skill。
+- What: 定位到 `listPublicAgentRepositories()` 返回 `status=CONFLICT, initialized=false`，原因是公共配置 Git 工作树存在未跟踪 `.DS_Store`；删除该文件后后端立即返回 `READY/initialized=true`。在公共配置仓库新增 `.gitignore` 忽略 `.DS_Store`，避免 macOS 再次生成系统文件导致页面无法加载公共级 Agent。
+- How: 使用默认测试账号登录后调用 `/api/internal/platform/workspace-management/agent-config/public/repositories` 和 `/public/files` 验证状态；当前 Agent 面板的公共级根目录映射到 `opencode/agents`，会直接列出 agent Markdown 文件，`opencode/skills` 由 opencode 运行时加载但不在该面板根目录展示。
+- Result: 公共配置仓库状态恢复为 `READY`，`/public/files?path=&linuxServerId=192.168.100.115` 可列出 7 个迁移 agent 文件。
+
 ### 2026-06-29 - 同步 openclaw 测试设计与执行公共 opencode 配置
 
 - Why: 当前项目的公共 opencode 配置已初始化到 `temp/opencode-config`，需要把桌面 `openclaw` 中沉淀的测试设计、测试执行 agent/skill 迁移到公共配置区域，供本项目托管 opencode 运行时复用。
