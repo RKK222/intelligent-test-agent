@@ -250,6 +250,19 @@ function upsertPart(messages: AgentMessage[], event: RunEvent) {
       ? messages
       : replaceOrAppendMessage(messages, exactMessageIndex, { ...exactMessage, text: userText });
   }
+  const delayedUserText = text(raw.text) ?? text(raw.content);
+  const delayedUserPartIndex = findUnlinkedUserByText(messages, delayedUserText);
+  if (delayedUserPartIndex >= 0) {
+    const user = messages[delayedUserPartIndex];
+    if (user.role === "user") {
+      return replaceOrAppendMessage(messages, delayedUserPartIndex, {
+        ...user,
+        id: messageId,
+        messageId,
+        text: delayedUserText ?? user.text
+      });
+    }
+  }
   const exact = findAssistantMessage(messages, messageId);
   const lastIdx = exact.message ? -1 : findLastAssistantInCurrentTurn(messages);
   const assistant: Extract<AgentMessage, { role: "assistant" }> =
@@ -304,6 +317,12 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
     const pendingUser = pendingUserIndex >= 0 ? messages[pendingUserIndex] : undefined;
     if (pendingUser?.role === "user" && (incomingText === undefined || pendingUser.text === incomingText)) {
       index = pendingUserIndex;
+    } else if (incomingText === undefined) {
+      // 远端可能在 assistant 后才补发 user 的 message.updated，再补发 text part。
+      // 这类空快照先不追加占位气泡，等后续 part 带文本时再和本地乐观 user 归并。
+      return messages;
+    } else {
+      index = findUnlinkedUserByText(messages, incomingText);
     }
   }
   const existing = index >= 0 ? messages[index] : undefined;
@@ -348,6 +367,16 @@ function findLastUserInCurrentTurn(messages: AgentMessage[]): number {
     if (messages[i].role === "user") return i;
   }
   return -1;
+}
+
+// 远端 user 事件晚于 assistant 到达时，"当前轮"边界已过；此时用尚未绑定 messageId 的同文本乐观消息兜底归并。
+function findUnlinkedUserByText(messages: AgentMessage[], incomingText: string | undefined): number {
+  if (incomingText === undefined) {
+    return -1;
+  }
+  return messages.findIndex(
+    (message) => message.role === "user" && !message.messageId && message.text === incomingText
+  );
 }
 
 function replaceOrAppendMessage(messages: AgentMessage[], index: number, message: AgentMessage) {

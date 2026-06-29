@@ -105,6 +105,56 @@ describe("agent-chat runtime reducer", () => {
     expect(completed.messages).toHaveLength(2);
   });
 
+  it("merges a delayed remote user snapshot back into the optimistic user message", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "你是谁",
+      createdAt: "2026-06-29T04:57:00Z"
+    });
+    const withAssistant = reduceAgentChatRuntime(submitted, {
+      type: "event",
+      event: event("message.updated", {
+        message: { id: "msg_assistant_1", role: "assistant" }
+      })
+    });
+    const withAssistantPart = reduceAgentChatRuntime(withAssistant, {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_assistant_1",
+        part: {
+          id: "part_assistant_1",
+          messageID: "msg_assistant_1",
+          type: "text",
+          text: "我是 opencode"
+        }
+      })
+    });
+    const withDelayedRemoteUser = reduceAgentChatRuntime(withAssistantPart, {
+      type: "event",
+      event: event("message.updated", {
+        message: { id: "msg_user_1", role: "user" }
+      })
+    });
+    const completed = reduceAgentChatRuntime(withDelayedRemoteUser, {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_user_1",
+        part: {
+          id: "part_user_1",
+          messageID: "msg_user_1",
+          type: "text",
+          text: "你是谁"
+        }
+      })
+    });
+
+    expect(completed.messages).toMatchObject([
+      { role: "user", messageId: "msg_user_1", text: "你是谁" },
+      { role: "assistant", messageId: "msg_assistant_1", text: "我是 opencode" }
+    ]);
+    expect(completed.messages).toHaveLength(2);
+  });
+
   it("normalizes opencode tool state from nested message part updates", () => {
     const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",

@@ -8,6 +8,12 @@
 - What: 调整 Go manager `resolveContainerID`：Windows 直接使用机器名；非 Windows 依次读取系统 hostname、`/etc/hostname`，最后才用 `OPENCODE_MANAGER_CONTAINER_ID` 兜底，并移除旧的 `HOSTNAME` 环境变量兜底。同步 opencode-manager README 和部署文档，说明环境变量只作最后兜底。
 - How: 先补 RED 测试覆盖 hostname 优先、`/etc/hostname` 优先于 env、env 最后兜底、`HOSTNAME` env 不再生效、Windows 忽略 env 使用机器名，再最小调整解析函数。
 - Result: `go test ./internal/config`、`go test ./...`（opencode-manager）、`mvn clean package -DskipTests` 和 `git diff --check` 已通过。本变更不涉及数据库、HTTP API、SSE 或前端直连逻辑。
+### 2026-06-29 - 修复首轮对话远端 user 快照延迟导致的重复气泡
+
+- Why: 新会话首轮发送后，opencode 可能在 assistant 已渲染后才补发同一条 user 的 `message.updated` / `message.part.updated`，前端 reducer 原先只在“当前轮还未出现 assistant”时归并远端 user，导致实时视图多出一条重复用户气泡；历史记录正常，因为持久化消息本身没有重复。
+- What: `frontend/packages/agent-chat/src/runtime-reducer.ts` 对空的延迟 user snapshot 不再追加占位消息，并在后续 text part 到达时按未绑定 `messageId` 且文本一致的乐观 user 消息回填远端 `messageId`。
+- How: 新增 `runtime-reducer.test.ts` 回归用例，先 RED 复现“乐观 user -> assistant -> 延迟远端 user snapshot/part”的事件顺序，再最小修改 reducer 归并逻辑；未改 API、SSE 事件契约、数据库或样式。
+- Result: `corepack pnpm exec vitest run packages/agent-chat/tests/runtime-reducer.test.ts`、`corepack pnpm --filter @test-agent/agent-chat typecheck`、`corepack pnpm test`、`corepack pnpm --filter @test-agent/agent-web build` 和 `git diff --check` 通过。`./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 完成后端打包但后端启动失败：`.env.test` 指向的 PostgreSQL `192.168.100.200:5432/testagent` 当前 `No route to host`，因此 backend health/CORS 未通过；frontend Vite `127.0.0.1:3000` 返回 200。构建仍有既有 CSS `@import` 顺序与大 chunk 警告，本次未扩大处理。
 
 ### 2026-06-29 - 模型选择器交互重构：实现气泡下拉框并整合上新推荐
 
