@@ -7,16 +7,30 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /**
  * 将当前后端实例解析出的服务器 IPv4 写入 Go manager 可读取的约定文件。
  */
 final class ServerIpFileWriter {
 
-    private final Path serverIpFile;
+    private final Supplier<Path> serverIpFileResolver;
 
     ServerIpFileWriter(Path serverIpFile) {
-        this.serverIpFile = Objects.requireNonNull(serverIpFile, "serverIpFile must not be null");
+        this(fixedPath(serverIpFile));
+    }
+
+    ServerIpFileWriter(ServerIpFilePathResolver serverIpFilePathResolver) {
+        this(serverIpFilePathResolver::resolve);
+    }
+
+    private ServerIpFileWriter(Supplier<Path> serverIpFileResolver) {
+        this.serverIpFileResolver = Objects.requireNonNull(serverIpFileResolver, "serverIpFileResolver must not be null");
+    }
+
+    private static Supplier<Path> fixedPath(Path serverIpFile) {
+        Path fixed = Objects.requireNonNull(serverIpFile, "serverIpFile must not be null");
+        return () -> fixed;
     }
 
     /**
@@ -24,6 +38,7 @@ final class ServerIpFileWriter {
      */
     void write(String serverIp) {
         String normalized = new LinuxServerId(serverIp).value();
+        Path serverIpFile = Objects.requireNonNull(serverIpFileResolver.get(), "serverIpFile must not be null");
         try {
             Path parent = serverIpFile.getParent();
             if (parent != null) {

@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-29 - 改用 SYS_DATA_ROOT_DIR 派生服务器 IP 文件路径
+
+- Why: `.serverip` 路径不应再通过 Java/Go 各自的环境变量配置，否则会绕开系统通用参数并造成同机 manager 与 Java 写读路径不一致。
+- What: Java 后端移除 `test-agent.opencode.manager-control.server-ip-file` / `TEST_AGENT_SERVER_IP_FILE` 绑定，启动时通过 `CommonParameterValues.resolvedValue("SYS_DATA_ROOT_DIR")` 写入 `SYS_DATA_ROOT_DIR/.serverip`；Go manager 移除 `OPENCODE_MANAGER_SERVER_IP_FILE` 读取，非 Windows 按通用参数种子的内置平台默认根目录读取 `.serverip`（Linux `/data/.testagent/.serverip`，macOS `$HOME/.testagent/.serverip`），Windows 仍直接探测本机 IPv4。
+- How: 新增 `ServerIpFilePathResolver` 和单测，保留 `ServerIpFileWriter` 的固定 Path 测试构造器；Go config 增加 `sysDataRootDir` / `serverIPFilePath` 并覆盖 Linux、macOS 和忽略旧环境变量分支；同步 backend、opencode-manager、API、部署和数据库文档，并调整一键重启脚本不再注入旧 server-ip-file 环境变量。
+- Result: `mvn -pl test-agent-app -Dtest=ServerIpFilePathResolverTest,ServerIpFileWriterTest,OpencodeManagerControlConfigTest,TestAgentRuntimePropertiesBindingTest test`、`go test -count=1 ./...`、`tools/verify-dev-scripts.sh` 和 `mvn clean package -DskipTests` 通过。当前本机未安装 `pwsh`/`powershell`，脚本校验按既有逻辑跳过 PowerShell parser 检查。
+
 ### 2026-06-29 - 自动刷新当前用户 opencode 健康状态与模型目录
 
 - Why: 工作台进入后 `/processes/me` 只在首屏、点击头像、刷新页面或输入区交互时重新查询，导致后端/manager 健康检查已恢复后，右侧 opencode 状态和模型列表仍停留在旧的“检测中/失败/空列表”缓存；用户需要多次刷新页面才可能同时拿到绿色状态和模型。

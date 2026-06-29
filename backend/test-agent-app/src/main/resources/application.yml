@@ -83,7 +83,6 @@ test-agent:
       backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:10s}
       command-timeout: ${TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT:10s}
       backend-discovery-limit: ${TEST_AGENT_BACKEND_DISCOVERY_LIMIT:100}
-      server-ip-file: ${TEST_AGENT_SERVER_IP_FILE:/data/.testagent/.serverip}
     nodes: []
   # Git 浅克隆缓存配置，用于加载远端仓库目录结构
   git-clone-cache:

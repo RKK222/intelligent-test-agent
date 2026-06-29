@@ -20,8 +20,10 @@ const (
 	defaultSessionRoot = "/data/opencode/session"
 	defaultConfigDir   = "/data/opencode/.config/opencode/"
 
-	defaultServerIPFile = "/data/.testagent/.serverip"
-	managerProcessName  = "opencode-manager"
+	defaultLinuxSysDataRootDir   = "/data/.testagent"
+	defaultWindowsSysDataRootDir = "D:/data/.testagent"
+	serverIPFileName             = ".serverip"
+	managerProcessName           = "opencode-manager"
 
 	defaultBackendPort          = 8080
 	defaultBackendWebSocketPath = "/api/internal/platform/opencode-runtime/manager/ws"
@@ -37,6 +39,7 @@ type configRuntime struct {
 	goos         string
 	readFile     func(string) ([]byte, error)
 	hostname     func() (string, error)
+	userHomeDir  func() (string, error)
 	localIPv4    func() (string, error)
 	sleep        func(time.Duration)
 	serverIPWait time.Duration
@@ -48,6 +51,7 @@ func defaultConfigRuntime() configRuntime {
 		goos:         runtime.GOOS,
 		readFile:     os.ReadFile,
 		hostname:     os.Hostname,
+		userHomeDir:  os.UserHomeDir,
 		localIPv4:    detectLocalIPv4,
 		sleep:        time.Sleep,
 		serverIPWait: defaultServerIPWait,
@@ -65,6 +69,9 @@ func (r configRuntime) withDefaults() configRuntime {
 	}
 	if r.hostname == nil {
 		r.hostname = defaults.hostname
+	}
+	if r.userHomeDir == nil {
+		r.userHomeDir = defaults.userHomeDir
 	}
 	if r.localIPv4 == nil {
 		r.localIPv4 = defaults.localIPv4
@@ -307,8 +314,38 @@ func resolveServerIP(rt configRuntime) (string, error) {
 		return ip, nil
 	}
 
-	path := envDefault("OPENCODE_MANAGER_SERVER_IP_FILE", defaultServerIPFile)
+	path, err := serverIPFilePath(rt)
+	if err != nil {
+		return "", err
+	}
 	return waitForServerIPFile(rt, path)
+}
+
+func serverIPFilePath(rt configRuntime) (string, error) {
+	root, err := sysDataRootDir(rt)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, serverIPFileName), nil
+}
+
+func sysDataRootDir(rt configRuntime) (string, error) {
+	switch strings.ToLower(rt.goos) {
+	case "darwin":
+		home, err := rt.userHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("resolve SYS_DATA_ROOT_DIR default failed: %w", err)
+		}
+		home = strings.TrimSpace(home)
+		if home == "" {
+			return "", fmt.Errorf("resolve SYS_DATA_ROOT_DIR default failed: home directory is blank")
+		}
+		return filepath.Join(home, ".testagent"), nil
+	case "windows":
+		return defaultWindowsSysDataRootDir, nil
+	default:
+		return defaultLinuxSysDataRootDir, nil
+	}
 }
 
 func waitForServerIPFile(rt configRuntime, path string) (string, error) {

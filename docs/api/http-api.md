@@ -1292,7 +1292,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 控制面只供容器内 `opencode-manager` 使用，不复用用户 JWT 或普通 API token。后端通过 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 配置独立 manager token；manager 建立 WebSocket upgrade 时必须携带 `Authorization: Bearer <token>`。token 缺失或错误返回统一 `UNAUTHENTICATED`。Go manager 运行路径不得通过 HTTP 与 Java 交互，`manager-backends` 仅保留为只读诊断/兼容接口。
 
-后端 Java 启动时会把当前服务器 IPv4 写入 `test-agent.opencode.manager-control.server-ip-file` / `TEST_AGENT_SERVER_IP_FILE`（默认 `/data/.testagent/.serverip`）。Go manager 在非 Windows 环境启动时读取同一路径（`OPENCODE_MANAGER_SERVER_IP_FILE`，默认相同），最多等待 30 秒；因此 WebSocket `register` / `heartbeat` 中的 `linuxServerId` 表示服务器 IPv4，不表示容器网卡 IP。`containerId` 继续表示容器身份，非 Windows 先读系统 hostname，再读 `/etc/hostname`，最后才读 `OPENCODE_MANAGER_CONTAINER_ID` 兜底；Windows 本机开发态直接使用机器名。
+后端 Java 启动时会把当前服务器 IPv4 写入通用参数 `SYS_DATA_ROOT_DIR` 派生的 `SYS_DATA_ROOT_DIR/.serverip`。Go manager 在非 Windows 环境启动时按同一系统参数的平台默认根目录读取 `.serverip`（Linux `/data/.testagent/.serverip`，macOS `$HOME/.testagent/.serverip`），最多等待 30 秒；因此 WebSocket `register` / `heartbeat` 中的 `linuxServerId` 表示服务器 IPv4，不表示容器网卡 IP。`containerId` 继续表示容器身份，非 Windows 先读系统 hostname，再读 `/etc/hostname`，最后才读 `OPENCODE_MANAGER_CONTAINER_ID` 兜底；Windows 本机开发态直接使用机器名。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|

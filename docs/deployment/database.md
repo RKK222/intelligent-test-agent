@@ -294,6 +294,8 @@
 | `SYS_DATA_ROOT_DIR` | `linux` | `/data/.testagent` | Linux 系统数据根目录。 |
 | `SYS_DATA_ROOT_DIR` | `windows` | `D:/data/.testagent` | Windows 系统数据根目录。 |
 
+Java 后端启动时会把当前服务器 IPv4 写入 `SYS_DATA_ROOT_DIR/.serverip`；非 Windows Go manager 在连接 Java 前按同一系统参数的平台默认路径读取该文件，用于派生初始 WebSocket seed 地址。
+
 兼容策略：
 
 - 该 migration 只新增 `common_parameters` 行，不修改表结构、API DTO 或事件类型。

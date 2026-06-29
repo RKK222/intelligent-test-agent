@@ -29,7 +29,6 @@ opencode-manager 环境变量只用于启动前必须由宿主环境提供的身
 
 ```dotenv
 OPENCODE_MANAGER_CONTAINER_ID=ctr_01
-OPENCODE_MANAGER_SERVER_IP_FILE=/data/.testagent/.serverip
 OPENCODE_MANAGER_PORT_START=4096
 OPENCODE_MANAGER_PORT_END=4100
 OPENCODE_MANAGER_BACKEND_PORT=8080
@@ -48,9 +47,9 @@ OPENCODE_MANAGER_STATE_DIR=/data/.testagent/agent-opencode/manager
 opencode-manager run
 ```
 
-`run` 不再通过 HTTP discovery 与 Java 后端交互。manager 会先用 `OPENCODE_MANAGER_SERVER_IP_FILE` 解析出的服务器 IPv4 和 `OPENCODE_MANAGER_BACKEND_PORT`（默认 `8080`）派生 seed WebSocket：`ws://{serverIp}:{port}/api/internal/platform/opencode-runtime/manager/ws`，并用 `Authorization: Bearer <OPENCODE_MANAGER_TOKEN>` 建立控制连接。后端扩容后，manager 每 10 秒通过任一已连接 socket 发送 `backendListRequest`，Java 从 Redis 当前存活后端快照返回 `backendListResponse`，manager 自动补连尚未连接的后端实例；所有 socket 断开时，manager 每 10 秒按 seed 地址无限重连。
+`run` 不再通过 HTTP discovery 与 Java 后端交互。manager 会先从 `SYS_DATA_ROOT_DIR/.serverip` 读取服务器 IPv4，再结合 `OPENCODE_MANAGER_BACKEND_PORT`（默认 `8080`）派生 seed WebSocket：`ws://{serverIp}:{port}/api/internal/platform/opencode-runtime/manager/ws`，并用 `Authorization: Bearer <OPENCODE_MANAGER_TOKEN>` 建立控制连接。后端扩容后，manager 每 10 秒通过任一已连接 socket 发送 `backendListRequest`，Java 从 Redis 当前存活后端快照返回 `backendListResponse`，manager 自动补连尚未连接的后端实例；所有 socket 断开时，manager 每 10 秒按 seed 地址无限重连。
 
-非 Windows 环境下，manager 启动时不再探测容器网卡 IP，也不再依赖 `OPENCODE_MANAGER_LINUX_SERVER_ID`。Java 后端先把当前服务器 IPv4 写入 `/data/.testagent/.serverip`（可用 `TEST_AGENT_SERVER_IP_FILE` / `test-agent.opencode.manager-control.server-ip-file` 覆盖），manager 读取同一路径；文件不存在时每 1 秒重试，最多 30 秒。文件内容必须是单行 IPv4，非法内容或超时会让 manager 安全失败。Windows 本机开发态跳过 `.serverip` 等待，直接使用本机非回环 IPv4，并用机器名作为容器标识。
+非 Windows 环境下，manager 启动时不再探测容器网卡 IP，也不再依赖 `OPENCODE_MANAGER_LINUX_SERVER_ID` 或 `OPENCODE_MANAGER_SERVER_IP_FILE`。Java 后端先把当前服务器 IPv4 写入通用参数 `SYS_DATA_ROOT_DIR` 派生的 `SYS_DATA_ROOT_DIR/.serverip`；Go manager 启动前无法连接 Java 查询数据库，因此按同一系统参数的内置平台默认值读取：Linux `/data/.testagent/.serverip`，macOS `$HOME/.testagent/.serverip`。文件不存在时每 1 秒重试，最多 30 秒。文件内容必须是单行 IPv4，非法内容或超时会让 manager 安全失败。Windows 本机开发态跳过 `.serverip` 等待，直接使用本机非回环 IPv4，并用机器名作为容器标识。
 
 启动单个用户进程时，manager 会执行：
 
@@ -76,8 +75,8 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 
 | 角色 | 部署数量 | 关键配置 | 说明 |
 |---|---:|---|---|
-| 后端 Java 实例 | 每台 Linux 服务器 1 个或按容量水平扩展 | `TEST_AGENT_BACKEND_LISTEN_URL`、`TEST_AGENT_SERVER_IP_FILE`、`TEST_AGENT_OPENCODE_MANAGER_TOKEN` | `listen-url` 必须是 manager 可直连的实例地址；非回环 IPv4 会作为服务器身份并写入 `.serverip`。 |
-| opencode 容器 | 每台 Linux 服务器多个 | 容器 hostname、`OPENCODE_MANAGER_SERVER_IP_FILE`、`OPENCODE_MANAGER_CONTAINER_ID` 兜底值、端口池、挂载目录 | 每个容器运行 1 个 `opencode-manager run`；`containerId` 标识容器，非 Windows 先取系统 hostname，再取 `/etc/hostname`，最后才取 `OPENCODE_MANAGER_CONTAINER_ID`，`managerId` 由 `containerId + opencode-manager` 派生，`linuxServerId` 来自 `.serverip`。 |
+| 后端 Java 实例 | 每台 Linux 服务器 1 个或按容量水平扩展 | `TEST_AGENT_BACKEND_LISTEN_URL`、`TEST_AGENT_OPENCODE_MANAGER_TOKEN`、`common_parameters.SYS_DATA_ROOT_DIR` | `listen-url` 必须是 manager 可直连的实例地址；非回环 IPv4 会作为服务器身份并写入 `SYS_DATA_ROOT_DIR/.serverip`。 |
+| opencode 容器 | 每台 Linux 服务器多个 | 容器 hostname、`OPENCODE_MANAGER_CONTAINER_ID` 兜底值、端口池、挂载目录 | 每个容器运行 1 个 `opencode-manager run`；`containerId` 标识容器，非 Windows 先取系统 hostname，再取 `/etc/hostname`，最后才取 `OPENCODE_MANAGER_CONTAINER_ID`，`managerId` 由 `containerId + opencode-manager` 派生，`linuxServerId` 来自 `.serverip`。 |
 | 用户 opencode server 进程 | 每个用户 1 个当前绑定 | 由 manager 按端口启动 | `baseUrl` 固定为 `http://{linuxServerIp}:{port}`，session 持久化在对应 Linux 服务器。 |
 | 前端访问入口 | 1 个负载均衡域名 | `VITE_TEST_AGENT_API_BASE_URL` | 浏览器只访问平台后端，不直连 opencode server 或 manager。 |
 
@@ -89,7 +88,7 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 - `common_parameters.OPENCODE_MANAGER_MAX_PROCESSES` 不得超过容器端口池容量；超过时 manager 会按 `OPENCODE_MANAGER_PORT_END - OPENCODE_MANAGER_PORT_START + 1` 裁剪，并通过即时 heartbeat 回报裁剪后的生效容量。
 - 建议每个容器预留 1 到 2 个端口作为故障排查或滚动扩容缓冲，不要把端口池全部按理论最大值打满。
 - `.serverip` 固定语义是“当前服务器 IPv4”，不是容器 IP，不承载 token、URL 或 JSON；用户进程 `baseUrl` 和同服务器重建规则都使用该 IPv4。
-- 本地或测试环境执行 `./restart-dev-services.sh` 时，脚本默认把 Java 和 manager 的 server IP 文件都指向 `.tmp/dev-services/.serverip`，避免 mac/Linux 本地写 `/data` 权限问题；未显式配置 `TEST_AGENT_BACKEND_LISTEN_URL` 时，会使用默认路由网卡 IPv4 补全后端直连地址。
+- 本地或测试环境执行 `./restart-dev-services.sh` 时，不再注入 server-ip-file 环境变量；Java 写入、Go 读取的路径都遵循 `SYS_DATA_ROOT_DIR/.serverip` 约定。未显式配置 `TEST_AGENT_BACKEND_LISTEN_URL` 时，脚本会使用默认路由网卡 IPv4 补全后端直连地址。
 
 目录和日志规划：
 
@@ -126,7 +125,7 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 后端 Java 扩容流程：
 
 1. 为新实例配置唯一的 `TEST_AGENT_BACKEND_LISTEN_URL=http://<backend-ip>:<port>`；如果该地址是非回环 IPv4，后端会优先使用它作为服务器身份并写入 `.serverip`。
-2. 使用同一个 `TEST_AGENT_OPENCODE_MANAGER_TOKEN`，并确认该地址和 `TEST_AGENT_SERVER_IP_FILE` 所在挂载路径可从同服务器 opencode 容器访问。
+2. 使用同一个 `TEST_AGENT_OPENCODE_MANAGER_TOKEN`，并确认该地址和 `SYS_DATA_ROOT_DIR/.serverip` 所在挂载路径可从同服务器 opencode 容器访问。
 3. 启动新后端，检查 `/actuator/health` 返回 `UP`。
 4. 等待 5 到 10 秒，确认超级管理员运行管理页能看到新的 Java 后端 Redis 快照。
 5. 已连接 manager 会在下一次 `backendListRequest` 后自动补连新实例；运行管理页中对应 manager-backend 连接应出现并为 `CONNECTED`，点击后端 Java 进程可看到 Redis 中保留的近 48 小时服务器/JVM 监控趋势。
@@ -135,7 +134,7 @@ opencode 容器扩容流程：
 
 1. 在同一 Linux 服务器上分配不与既有容器重叠的端口池。
 2. 按上文挂载 `/data/.testagent/agent-opencode/.session/`、`/data/.testagent/agent-opencode/.config/opencode/`、`/data/.testagent/agent-opencode/workspace/` 和 `/data/.testagent/agent-opencode/manager`。
-3. 配置新的容器 hostname、`OPENCODE_MANAGER_SERVER_IP_FILE` 和端口池环境变量；不要再配置 `OPENCODE_MANAGER_ID`，manager 会由容器名称和固定进程名派生内部 ID；`OPENCODE_MANAGER_CONTAINER_ID` 仅作为非 Windows 最后兜底。非 Windows 解析顺序固定为系统 hostname、`/etc/hostname`、`OPENCODE_MANAGER_CONTAINER_ID`；Windows 直接使用机器名。
+3. 配置新的容器 hostname 和端口池环境变量；不要再配置 `OPENCODE_MANAGER_ID` 或 `OPENCODE_MANAGER_SERVER_IP_FILE`，manager 会由容器名称和固定进程名派生内部 ID，并按 `SYS_DATA_ROOT_DIR/.serverip` 读取服务器 IPv4；`OPENCODE_MANAGER_CONTAINER_ID` 仅作为非 Windows 最后兜底。非 Windows 解析顺序固定为系统 hostname、`/etc/hostname`、`OPENCODE_MANAGER_CONTAINER_ID`；Windows 直接使用机器名。
 4. 启动 `opencode-manager run`，检查运行管理页中 `containers`、`managers` 和 `managerBackendConnections` 均出现对应记录，容器行展示最新 CPU、内存和已用内存。
 
 常见故障处理：
@@ -215,7 +214,7 @@ tools/verify-opencode-process-deployment.sh --backend-url http://127.0.0.1:8080
 
 `deploy/local/docker-compose.yml` 默认启动备用 Postgres，映射到 `127.0.0.1:15432`；Redis 是可选 profile，默认映射到 `127.0.0.1:16379`。脚本只读取环境变量，不生成或写入密钥。
 
-仓库根目录的 `restart-dev-services.sh` 是 macOS/Linux/WSL/Git Bash 三服务一键重启入口，Windows PowerShell 使用同级 `restart-dev-services.ps1`：二者默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」的依赖顺序，**逐个先 kill 原进程再启动**。脚本启动后端 Java 进程时同样清空 JVM 代理系统属性，确保测试库和 Redis 使用直连网络。当 `TEST_AGENT_OPENCODE_BASE_URL` 指向 loopback 或默认路由网卡探测到的本机 IPv4 时，脚本默认启动 Go `opencode-manager`（`run` 长运行模式），不再单独启动 standalone `opencode serve`——用户进程由 manager 自行派生，避免 4096 端口冲突。停止 manager 时，脚本会读取 `.tmp/dev-services/opencode-manager-state/processes/*.json` 中的 pid，并扫描端口池 `4096..4105` 内的 `opencode serve --port ...` 监听，统一停止残留用户进程后删除 state JSON，避免重启后旧进程或旧 state 导致端口被判定为已托管。脚本会把 `TEST_AGENT_SERVER_IP_FILE` 和 `OPENCODE_MANAGER_SERVER_IP_FILE` 默认指向 `.tmp/dev-services/.serverip`，后端先写入服务器 IPv4，manager 再读取同一路径；不再注入 `OPENCODE_MANAGER_LINUX_SERVER_ID`。manager 与后端共享的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 未设置时默认 `local-manager-token`（与 `application-guo.yml` 一致），本地无需手配 manager token；设 `TEST_AGENT_START_OPENCODE_MANAGER=false` 可跳过 manager。需要使用本地离线或个人调试配置时，Bash 显式传入 `--profile local --env-file .env.local` 或 `--profile guo --env-file .env.guo`，PowerShell 对应传入 `-Profile local -EnvFile .env.local` 或 `-Profile guo -EnvFile .env.guo`。
+仓库根目录的 `restart-dev-services.sh` 是 macOS/Linux/WSL/Git Bash 三服务一键重启入口，Windows PowerShell 使用同级 `restart-dev-services.ps1`：二者默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」的依赖顺序，**逐个先 kill 原进程再启动**。脚本启动后端 Java 进程时同样清空 JVM 代理系统属性，确保测试库和 Redis 使用直连网络。当 `TEST_AGENT_OPENCODE_BASE_URL` 指向 loopback 或默认路由网卡探测到的本机 IPv4 时，脚本默认启动 Go `opencode-manager`（`run` 长运行模式），不再单独启动 standalone `opencode serve`——用户进程由 manager 自行派生，避免 4096 端口冲突。停止 manager 时，脚本会读取 `.tmp/dev-services/opencode-manager-state/processes/*.json` 中的 pid，并扫描端口池 `4096..4105` 内的 `opencode serve --port ...` 监听，统一停止残留用户进程后删除 state JSON，避免重启后旧进程或旧 state 导致端口被判定为已托管。脚本不再注入 server-ip-file 路径；Java 和 Go manager 都按 `SYS_DATA_ROOT_DIR/.serverip` 约定写读服务器 IPv4，也不再注入 `OPENCODE_MANAGER_LINUX_SERVER_ID`。manager 与后端共享的 `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 未设置时默认 `local-manager-token`（与 `application-guo.yml` 一致），本地无需手配 manager token；设 `TEST_AGENT_START_OPENCODE_MANAGER=false` 可跳过 manager。需要使用本地离线或个人调试配置时，Bash 显式传入 `--profile local --env-file .env.local` 或 `--profile guo --env-file .env.guo`，PowerShell 对应传入 `-Profile local -EnvFile .env.local` 或 `-Profile guo -EnvFile .env.guo`。
 
 ## dotenv 示例
 
@@ -273,7 +272,6 @@ export TEST_AGENT_MODEL_CATALOG_SOURCE=internal
 export ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
 export TEST_AGENT_OPENCODE_MANAGER_TOKEN=<manager-control-token>
 export TEST_AGENT_BACKEND_LISTEN_URL=http://<this-backend-ip>:8080
-export TEST_AGENT_SERVER_IP_FILE=/data/.testagent/.serverip
 ```
 
 启用该 profile 后，Spring Boot 通过 Druid 管理 JDBC 连接池，并使用 `test-agent-persistence` 中的 Flyway migration 初始化或校验数据库结构；Actuator `health` 包含数据库健康检查；Druid Web 控制台默认关闭，不提供 `/druid/*` 管理入口。
@@ -339,7 +337,6 @@ TEST_AGENT_MODEL_CATALOG_SOURCE=internal
 ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
 TEST_AGENT_OPENCODE_MANAGER_TOKEN=<manager-control-token>
 TEST_AGENT_BACKEND_LISTEN_URL=http://<this-backend-ip>:8080
-TEST_AGENT_SERVER_IP_FILE=/data/.testagent/.serverip
 ```
 
 可选运行参数：
@@ -394,7 +391,6 @@ docker run --rm -p 8080:8080 \
   -e ICBC_OPENAI_AUTH_TOKEN=change-me \
   -e TEST_AGENT_OPENCODE_MANAGER_TOKEN=change-me-manager-token \
   -e TEST_AGENT_BACKEND_LISTEN_URL=http://10.8.0.21:8080 \
-  -e TEST_AGENT_SERVER_IP_FILE=/data/.testagent/.serverip \
   test-agent-backend:local
 ```
 
