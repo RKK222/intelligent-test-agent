@@ -198,11 +198,48 @@ const updatingPublicConfig = ref(false);
 // 正在创建 worktree 的作用域（PUBLIC 或 WORKSPACE），用以控制各创建按钮的加载动效
 const creatingWorktreeScope = ref<Scope | null>(null);
 
+// 更新公共配置弹窗的控制状态
+const showUpdatePublicConfigModal = ref(false);
+const updatePublicConfigBranch = ref("main");
+const updatePublicConfigBranches = ref<string[]>([]);
+const loadingUpdatePublicConfigBranches = ref(false);
+const updatePublicConfigError = ref("");
+
+/**
+ * 触发更新公共配置流程，初始化弹窗状态，加载远端分支列表并打开弹窗
+ */
 async function updatePublicConfig() {
   if (!props.canWrite) return;
-  const branches = await api.listPublicAgentBranches();
-  const branch = window.prompt("选择公共配置分支", status.value.PUBLIC?.currentBranch ?? branches[0] ?? "main");
+  showUpdatePublicConfigModal.value = true;
+  loadingUpdatePublicConfigBranches.value = true;
+  updatePublicConfigError.value = "";
+  try {
+    const branches = await api.listPublicAgentBranches();
+    updatePublicConfigBranches.value = branches;
+    updatePublicConfigBranch.value = status.value.PUBLIC?.currentBranch ?? branches[0] ?? "main";
+  } catch (error) {
+    updatePublicConfigError.value = formatAgentConfigError(error, "获取远端分支列表失败");
+    updatePublicConfigBranches.value = [];
+  } finally {
+    loadingUpdatePublicConfigBranches.value = false;
+  }
+}
+
+// 关闭更新公共配置弹窗并重置状态
+function closeUpdatePublicConfigModal() {
+  showUpdatePublicConfigModal.value = false;
+  updatePublicConfigError.value = "";
+}
+
+/**
+ * 提交更新公共配置请求
+ */
+async function submitUpdatePublicConfig() {
+  const branch = updatePublicConfigBranch.value;
   if (!branch) return;
+
+  closeUpdatePublicConfigModal();
+
   updatingPublicConfig.value = true;
   try {
     const operationId = newOperationId();
@@ -834,6 +871,51 @@ defineExpose({
           <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
             <Button variant="ghost" size="sm" @click="closeSwitchWorktreeModal">取消</Button>
             <Button variant="primary" size="sm" :disabled="!canSubmitSwitchWorktree" @click="submitSwitchWorktree">确定</Button>
+          </footer>
+        </section>
+      </div>
+    </Teleport>
+    <Teleport to="body">
+      <div
+        v-if="showUpdatePublicConfigModal"
+        class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/35 px-4 py-6"
+        @keydown.esc="closeUpdatePublicConfigModal"
+      >
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-label="更新公共配置"
+          class="flex w-[min(380px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
+        >
+          <header class="flex items-center justify-between border-b border-[var(--ta-border)] pb-2">
+            <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">更新公共配置</h2>
+          </header>
+
+          <div class="flex flex-col gap-3">
+            <div v-if="updatePublicConfigError" class="agent-modal-alert">
+              <AlertTriangle class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
+              <span>{{ updatePublicConfigError }}</span>
+            </div>
+
+            <div v-if="loadingUpdatePublicConfigBranches" class="agent-modal-loading">
+              <Loader2 class="h-3.5 w-3.5 animate-spin" />
+              <span>加载远端分支中...</span>
+            </div>
+
+            <div v-else class="flex flex-col gap-1.5">
+              <label for="update-public-branch" class="text-[11px] text-[var(--ta-muted)] font-medium">选择公共配置分支</label>
+              <div class="agent-modal-select">
+                <GitBranch class="h-3.5 w-3.5 text-[var(--ta-muted)]" :stroke-width="1.5" />
+                <select id="update-public-branch" v-model="updatePublicConfigBranch">
+                  <option v-for="branch in updatePublicConfigBranches" :key="branch" :value="branch">{{ branch }}</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
+            <Button variant="ghost" size="sm" @click="closeUpdatePublicConfigModal">取消</Button>
+            <Button variant="primary" size="sm" :disabled="loadingUpdatePublicConfigBranches || !updatePublicConfigBranch || busy" @click="submitUpdatePublicConfig">确定</Button>
           </footer>
         </section>
       </div>

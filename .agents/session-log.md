@@ -2,6 +2,15 @@
 
 ## Entries
 
+### 2026-06-29 - 将“更新公共配置”点击后的 prompt 弹出框替换为自定义 DIV 弹窗
+
+- Why: 点击“更新公共配置”按钮时使用原生的 `window.prompt` 会破坏 UI 的整体美观与一致性，需要用自定义设计的 DIV 弹窗代替。
+- What: 将更新公共配置中的 `window.prompt` 输入/选择框替换为一个使用 `<Teleport>` 渲染的自定义 DIV 弹窗，显示远端分支下拉列表供用户选择。
+- How: 
+  - 在 `AgentConfigPanel.vue` 中新增 `showUpdatePublicConfigModal`、`updatePublicConfigBranch`、`updatePublicConfigBranches` 等状态。
+  - 在 `updatePublicConfig()` 中异步加载远端分支列表并打开弹窗，由 `submitUpdatePublicConfig()` 执行提交；模版中添加 `showUpdatePublicConfigModal` 自定义弹窗，应用已有的样式结构和类，支持 ESC 键关闭。
+- Result: 成功使用统一样式的页面级模态弹窗取代了浏览器原生 prompt。前端项目类型检查及代码风格校验（`corepack pnpm typecheck && corepack pnpm lint`）均顺利通过。
+
 ### 2026-06-28 - 运营分析 rollup 与 AI 回复满意度反馈一次性实现
 
 - Why: 运营侧需要覆盖用户规模漏斗、使用强度、Run 结果、满意度、Diff 采纳、Token、趋势高峰、维度排行和明细导出的 P0 指标；同时 AI 回复需要可追溯的满意/不满意反馈，但不能展示 prompt、assistant 原文或成本字段。
