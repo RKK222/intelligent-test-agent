@@ -2,19 +2,20 @@
 
 ## Entries
 
-### 2026-06-29 - 对话区“上新”快速模型标签收纳至模型选择弹窗
+### 2026-06-29 - 模型选择器交互重构：实现气泡下拉框并整合上新推荐
 
-- Why: 聊天输入卡片下方的“上新”快速切换标签与输入框内的模型选择下拉按钮功能重合，存在交互冗余，需要从交互上将它们合并为一个。
+- Why: 聊天输入卡片下方的“上新”标签与输入框内的模型选择下拉按钮功能重叠。为了提升交互体验，需要将模型选择机制彻底由覆盖全局的模态弹窗重构成紧凑优雅的触发式气泡下拉框（Popover Dropdown），并将上新推荐无缝融合在下拉框内。同时，需解决气泡下拉框在不同宽度下的裁剪和遮挡问题。
 - What:
-  - 移除了 `FigmaChatPanel.vue` 输入卡片下方的“上新”模型标签及相关逻辑、CSS 样式。
-  - 在 `AgentWorkbench.vue` 的模型选择弹窗中，当搜索关键字为空时，于顶部位置新增“上新推荐”的快捷模型标签组件，供用户一键快速选择最推荐的模型，其余所有模型依旧在下方按供应者分组排列。
-- How: 
-  - 删除 `FigmaChatPanel.vue` 中 `quickModels` 计算属性、`selectQuickModel` 及 `getModelColor` 方法与模板样式。
-  - 在 `AgentWorkbench.vue` 脚本中增加 `recommendedModels`（取前 4 个）与 `getModelColor` 动态渲染指示灯颜色；在弹窗列表模板顶部加上 `div.managed-model-recommended` 节点，并在 CSS 中补充对应的卡片标签及激活态、悬停态等样式。
+  - 彻底移除了原 `AgentWorkbench.vue` 里的全局模态弹窗 `managed-model-dialog-backdrop` 结构及配套的弹窗控制逻辑与大片样式。
+  - 在 `FigmaChatPanel.vue` 中封装并实现了全新的 `.figma-chat-model-dropdown` 组件，绑定至模型选择按钮下方，使其点击直接在上方弹出下拉框（带指向箭头的卡片设计）。
+  - 下拉框内部高度融合：顶部包含模型搜索栏，搜索为空时在“上新推荐”分区呈两列圆角卡片展示最新推荐模型，下方则按供应者分类展示所有启用模型的垂直列表，高亮当前选中的模型并标示勾选符号。
+- How:
+  - 在 `FigmaChatPanel.vue` 的 script 模块中利用 `onMounted`/`onBeforeUnmount` 注册全局 click 监听以处理点击空白自动收起下拉框的交互。
+  - 移除了 `@open-model-picker` 组件事件触发；在 `AgentWorkbench.vue` 中将 `@select-model` 直接绑定至原有的 `selectRuntimeModel`，并且清理掉其原本管理的 `modelPickerOpen` 和 `modelGroups` 等冗余状态。
+  - **裁剪及定位优化**：将输入卡片 `.figma-chat-input-card` 的 `overflow` 属性由 `hidden` 改为 `visible`，解决下拉框被父级边框遮挡裁剪的问题。将下拉框 `.figma-chat-model-dropdown` 的水平定位由 `left: 50%; transform: translateX(-50%)` 修改为 `left: 0` 左对齐，指示小箭头 `::after` 修改为固定偏置 `left: 36px`，确保下拉框整体完全容纳在右侧聊天面板内，彻底解决了在窄屏或侧边栏左边界的裁剪切边缺陷。
 - Result:
-  - 聊天面板主界面清爽紧凑，取消了下方的冗余操作。
-  - 模型切换入口归一为统一的模型选择按钮，点击后在弹窗最显眼位置通过网格标签形式展示“上新推荐”，功能体验完美融合。
-  - 全量 170 项 Vitest 单测及编译检查全部绿过。
+  - 消除界面中的浮层弹层，模型切换交互完全局限在气泡下拉菜单内，极具 MIMO Web IDE 的精致卡片质感，用户体验高度一致，完美渲染不裁剪。
+  - 全量 170 项 Vitest 单测及编译类型检查全部无损通过。
 
 ### 2026-06-29 - 统一目录配置与 macOS 平台修复
 
@@ -30,7 +31,7 @@
   - 旧工作区文件先无损复制到项目 `temp/`，再迁移数据库 workspace/version/replica 路径；确认数据库旧路径引用为 0 后删除 `/tmp/test-agent`、`$HOME/tmp/test-agent` 和 `$HOME/test-agent/opencode-configdev`。
 - Result:
   - 浏览器实测 `macos` 选项可选且自动刷新；系统管理入口和公共配置管理可打开。
-  - 公共仓库已从 Gitee `master` 初始化到 `temp/opencode-config`（commit `a5a4ca00a9`），默认用户 opencode 进程在 `192.168.100.115:4096` 返回 `READY`。
+  - 公共仓库已从 Gitee `master` 初始化到 `temp/opencode-config`（commit `a5a4ca00a9`），最终重启后默认用户 opencode 进程在 `192.168.100.115:4098` 返回 `READY`。
   - Go 全量测试、前端 170 个 Vitest、相关 Maven reactor、前端 typecheck/build、系统管理入口 Playwright 和开发脚本校验通过。
 - 注意事项:
   - 已执行的 Flyway migration `V20260628223000` 不修改，避免 checksum mismatch。

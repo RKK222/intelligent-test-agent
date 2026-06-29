@@ -267,7 +267,6 @@ const emit =
     (e: 'open-tasks'): void
     (e: 'update:inputValue', value: string): void
     (e: 'open-diff', path: string): void
-    (e: 'open-model-picker'): void
     (e: 'initialize-process'): void
     (e: 'refresh-process'): void
     (e: 'select-model', model: any): void
@@ -283,6 +282,85 @@ const emit =
   }>()
 
 const localInput = ref(props.inputValue ?? '')
+const dropdownOpen = ref(false)
+const modelSearch = ref('')
+
+function toggleDropdown(event: Event) {
+  event.stopPropagation()
+  dropdownOpen.value = !dropdownOpen.value
+}
+
+function closeDropdown() {
+  dropdownOpen.value = false
+}
+
+onMounted(() => {
+  window.addEventListener('click', closeDropdown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('click', closeDropdown)
+})
+
+const recommendedModels = computed(() => {
+  if (!props.models) return []
+  return props.models.slice(0, 4)
+})
+
+function getModelColor(model: any) {
+  const name = (model.name || '').toLowerCase()
+  if (name.includes('glm')) return '#18a978'
+  if (name.includes('kimi')) return '#3366ff'
+  if (name.includes('gpt')) return '#a855f7'
+  if (name.includes('seedance') || name.includes('deepseek')) return '#f97316'
+  return '#64748b'
+}
+
+function getProviderName(providerId?: string) {
+  if (!providerId) return '其他'
+  const names: Record<string, string> = {
+    'openai': 'OpenAI',
+    'anthropic': 'Anthropic',
+    'google': 'Google',
+    'moonshot': 'Moonshot Kimi',
+    'deepseek': 'DeepSeek',
+    'zhipu': '智谱 AI',
+    'alibaba': '通义千问',
+    'qwen': '通义千问',
+  }
+  return names[providerId.toLowerCase()] || providerId
+}
+
+const modelGroups = computed(() => {
+  if (!props.models) return []
+  const keyword = modelSearch.value.trim().toLowerCase()
+  const groups = new Map<string, { providerId: string; providerName: string; models: any[] }>()
+  
+  props.models.forEach((model) => {
+    const haystack = `${model.name} ${model.id} ${model.providerId ?? ''}`.toLowerCase()
+    if (keyword && !haystack.includes(keyword)) {
+      return
+    }
+    const providerId = model.providerId || 'unknown'
+    const existing = groups.get(providerId)
+    if (existing) {
+      existing.models.push(model)
+    } else {
+      groups.set(providerId, {
+        providerId,
+        providerName: getProviderName(providerId),
+        models: [model]
+      })
+    }
+  })
+  
+  return Array.from(groups.values()).filter((group) => group.models.length > 0)
+})
+
+function selectModel(model: any) {
+  emit('select-model', model)
+  dropdownOpen.value = false
+}
 const inputComposing = ref(false)
 const negativeFeedbackOpen = ref(false)
 const negativeFeedbackMessageId = ref('')
@@ -2294,19 +2372,76 @@ function onCompositionEnd() {
             <Upload class="figma-chat-btn-icon" />
           </button>
           <!-- 中间：模型选择 -->
-          <button
-            type="button"
-            class="figma-chat-card-btn figma-chat-model-btn"
-            :disabled="modelPickerDisabled"
-            title="切换模型"
-            aria-label="切换模型"
-            @click="emit('open-model-picker')"
-          >
-            <span class="figma-chat-model-label">{{
-              selectedModelLabel || '选择模型'
-            }}</span>
-            <ChevronDown class="figma-chat-btn-icon" />
-          </button>
+          <div class="figma-chat-model-select-wrapper">
+            <button
+              type="button"
+              class="figma-chat-card-btn figma-chat-model-btn"
+              :disabled="modelPickerDisabled"
+              title="切换模型"
+              aria-label="切换模型"
+              @click.stop="toggleDropdown"
+            >
+              <span class="figma-chat-model-label">{{
+                selectedModelLabel || '选择模型'
+              }}</span>
+              <ChevronDown class="figma-chat-btn-icon" />
+            </button>
+            <div v-if="dropdownOpen" class="figma-chat-model-dropdown" @click.stop>
+              <div class="figma-chat-model-dropdown-search">
+                <input
+                  v-model="modelSearch"
+                  type="text"
+                  placeholder="搜索模型..."
+                  class="figma-chat-model-search-input"
+                  @keydown.enter.prevent
+                />
+              </div>
+              <div class="figma-chat-model-dropdown-list">
+                <!-- 上新推荐 -->
+                <div v-if="!modelSearch.trim() && recommendedModels.length" class="figma-chat-model-section">
+                  <div class="figma-chat-model-section-title">上新推荐</div>
+                  <div class="figma-chat-model-recommended-grid">
+                    <button
+                      v-for="model in recommendedModels"
+                      :key="modelValue(model)"
+                      type="button"
+                      :class="['figma-chat-model-rec-item', modelValue(model) === selectedModel && 'is-active']"
+                      @click="selectModel(model)"
+                    >
+                      <span class="figma-chat-model-rec-dot" :style="{ backgroundColor: getModelColor(model) }" />
+                      <span class="figma-chat-model-rec-name">{{ model.name }}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 所有模型 -->
+                <div
+                  v-for="group in modelGroups"
+                  :key="group.providerId"
+                  class="figma-chat-model-group"
+                >
+                  <div class="figma-chat-model-group-title">{{ group.providerName }}</div>
+                  <button
+                    v-for="model in group.models"
+                    :key="modelValue(model)"
+                    type="button"
+                    :class="['figma-chat-model-option-item', modelValue(model) === selectedModel && 'is-active']"
+                    @click="selectModel(model)"
+                  >
+                    <div class="figma-chat-model-option-info">
+                      <span class="figma-chat-model-option-dot" :style="{ backgroundColor: getModelColor(model) }" />
+                      <span class="figma-chat-model-option-name">{{ model.name }}</span>
+                    </div>
+                    <span v-if="modelValue(model) === selectedModel" class="figma-chat-model-option-checked">✓</span>
+                  </button>
+                </div>
+                
+                <div v-if="modelGroups.length === 0" class="figma-chat-model-empty">
+                  暂无匹配模型
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="figma-chat-card-spacer" />
           <!-- 右侧：新建对话 + 发送/停止 -->
           <button
@@ -3999,7 +4134,7 @@ function onCompositionEnd() {
   border-radius: 16px;
   background: #fff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
-  overflow: hidden;
+  overflow: visible;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -4709,5 +4844,202 @@ function onCompositionEnd() {
 
 .figma-chat-bubble-content :deep(.markdown-body blockquote) {
   background: transparent;
+}
+
+/* 模型下拉选择框 */
+.figma-chat-model-select-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.figma-chat-model-dropdown {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 0;
+  width: 290px;
+  max-height: 400px;
+  background: var(--ta-panel, #ffffff);
+  border: 1px solid var(--ta-border, #e4e4e7);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.15), 0 1px 4px rgba(15, 23, 42, 0.05);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+/* 下拉框指示小箭头 */
+.figma-chat-model-dropdown::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 36px;
+  transform: rotate(45deg);
+  width: 12px;
+  height: 12px;
+  background: var(--ta-panel, #ffffff);
+  border-right: 1px solid var(--ta-border, #e4e4e7);
+  border-bottom: 1px solid var(--ta-border, #e4e4e7);
+  z-index: -1;
+}
+
+.figma-chat-model-dropdown-search {
+  padding: 10px 12px 6px;
+  border-bottom: 1px solid var(--ta-border, #e4e4e7);
+}
+
+.figma-chat-model-search-input {
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--ta-border, #e4e4e7);
+  border-radius: 8px;
+  background: var(--ta-panel-2, #f4f4f5);
+  color: var(--ta-text, #18181b);
+  padding: 0 10px;
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.figma-chat-model-search-input:focus {
+  border-color: var(--ta-ink, #3b82f6);
+}
+
+.figma-chat-model-dropdown-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 12px 12px;
+}
+
+.figma-chat-model-dropdown-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.figma-chat-model-dropdown-list::-webkit-scrollbar-thumb {
+  background: var(--ta-border, #e4e4e7);
+  border-radius: 2px;
+}
+
+.figma-chat-model-section {
+  padding: 6px 0 10px;
+  border-bottom: 1px solid var(--ta-border, #e4e4e7);
+  margin-bottom: 8px;
+}
+
+.figma-chat-model-section-title,
+.figma-chat-model-group-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ta-muted, #71717a);
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.figma-chat-model-group-title {
+  margin-top: 8px;
+}
+
+.figma-chat-model-recommended-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.figma-chat-model-rec-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--ta-border, #e4e4e7);
+  border-radius: 8px;
+  background: var(--ta-panel-2, #f4f4f5);
+  color: var(--ta-text, #18181b);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  text-align: left;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.figma-chat-model-rec-item:hover {
+  background: var(--ta-border, #e4e4e7);
+}
+
+.figma-chat-model-rec-item.is-active {
+  background: #eaf0ff;
+  border-color: #b9c8ff;
+  color: #1d3fb0;
+}
+
+.figma-chat-model-rec-dot,
+.figma-chat-model-option-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.figma-chat-model-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.figma-chat-model-option-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ta-text, #18181b);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.12s;
+}
+
+.figma-chat-model-option-item:hover {
+  background: var(--ta-panel-2, #f4f4f5);
+}
+
+.figma-chat-model-option-item.is-active {
+  background: #eaf0ff;
+  color: #1d3fb0;
+  font-weight: 600;
+}
+
+.figma-chat-model-option-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.figma-chat-model-option-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.figma-chat-model-option-checked {
+  color: #1d3fb0;
+  font-weight: bold;
+}
+
+.figma-chat-model-empty {
+  padding: 24px 0;
+  color: var(--ta-muted, #71717a);
+  font-size: 12px;
+  text-align: center;
 }
 </style>

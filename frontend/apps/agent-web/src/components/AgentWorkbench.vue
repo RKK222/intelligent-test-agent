@@ -148,8 +148,6 @@ watch(centerMode, (newMode, oldMode) => {
 
 const selectedAppId = ref<string | undefined>(undefined);
 const readonlySessionReason = ref("");
-const modelPickerOpen = ref(false);
-const modelSearch = ref("");
 const chatTitle = computed(() => session.value?.title ?? "生成测试案例");
 // 任务消耗展示：duration 取 chatStartedAt 实时计算；tokens 从助手消息的 step-finish part
 // 累计（opencode 每轮 step 结束会上报 tokens.total）；thought for 累计 reasoning part 的
@@ -474,42 +472,6 @@ function refreshOpencodeProcessStatus() {
   if (!opencodeProcessEnabled.value || opencodeProcessQuery.isFetching.value) return;
   void opencodeProcessQuery.refetch();
 }
-const modelsLoading = computed(() => modelsQuery.isPending.value || modelsQuery.isFetching.value);
-const recommendedModels = computed(() => {
-  return models.value.slice(0, 4);
-});
-function getModelColor(model: any) {
-  const name = (model.name || '').toLowerCase()
-  if (name.includes('glm')) return '#18a978'
-  if (name.includes('kimi')) return '#3366ff'
-  if (name.includes('gpt')) return '#a855f7'
-  if (name.includes('seedance') || name.includes('deepseek')) return '#f97316'
-  return '#64748b'
-}
-const modelGroups = computed(() => {
-  const keyword = modelSearch.value.trim().toLowerCase();
-  const providerNames = new Map(providers.value.map((provider) => [provider.providerId, provider.name]));
-  const groups = new Map<string, { providerId: string; providerName: string; models: typeof models.value }>();
-  models.value.forEach((model) => {
-    const haystack = `${model.name} ${model.id} ${model.providerId ?? ""}`.toLowerCase();
-    if (keyword && !haystack.includes(keyword)) {
-      return;
-    }
-    const providerId = model.providerId ?? "unknown";
-    const existing = groups.get(providerId);
-    if (existing) {
-      existing.models.push(model);
-      return;
-    }
-    groups.set(providerId, {
-      providerId,
-      providerName: providerNames.get(providerId) ?? providerId,
-      models: [model]
-    });
-  });
-  return Array.from(groups.values()).filter((group) => group.models.length > 0);
-});
-
 const historyList = computed(() => historyItems(run.value, sessionsItems.value));
 const resourcesList = computed(() => runtimeResources(mcpResourcesData.value, activeTab.value));
 const runtimeStatusValue = computed(() =>
@@ -525,7 +487,6 @@ function selectRuntimeModel(model: typeof models.value[number]) {
     selectedProvider.value = model.providerId;
   }
   selectedModel.value = modelValue(model);
-  modelPickerOpen.value = false;
 }
 
 // ===== 默认值与联动 effect =====
@@ -2397,7 +2358,6 @@ async function handleLogout() {
           @send="(text: string) => handleSend(text)"
           @stop="handleStopRun"
           @new-conversation="handleNewConversation"
-          @open-model-picker="modelPickerOpen = true"
           @initialize-process="() => initializeOpencodeProcessMutation.mutate()"
           @refresh-process="refreshOpencodeProcessStatus"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
@@ -2473,54 +2433,6 @@ async function handleLogout() {
     @navigate="(path: string) => loadServerWorkspaceDirectories(path)"
     @select="selectServerWorkspaceDirectory"
   />
-
-  <div v-if="modelPickerOpen" class="managed-model-dialog-backdrop">
-    <div class="managed-model-dialog" role="dialog" aria-modal="true" aria-label="模型选择">
-      <header class="managed-model-dialog-header">
-        <h2>模型选择</h2>
-        <button type="button" class="managed-model-close" aria-label="关闭模型选择" @click="modelPickerOpen = false">关闭</button>
-      </header>
-      <input v-model="modelSearch" class="managed-model-search" type="search" placeholder="搜索模型" aria-label="搜索模型" />
-      <div class="managed-model-list">
-        <div v-if="modelsLoading" class="managed-model-empty">模型加载中...</div>
-        <template v-else>
-          <!-- 推荐/上新模型 -->
-          <div v-if="!modelSearch.trim() && recommendedModels.length" class="managed-model-recommended">
-            <div class="managed-model-recommended-title">上新推荐</div>
-            <div class="managed-model-recommended-tags">
-              <button
-                v-for="model in recommendedModels"
-                :key="modelValue(model)"
-                type="button"
-                :class="['managed-model-recommended-tag', modelValue(model) === selectedModel && 'is-active']"
-                @click="selectRuntimeModel(model)"
-              >
-                <span class="managed-model-recommended-dot" :style="{ backgroundColor: getModelColor(model) }" />
-                <span class="managed-model-recommended-name">{{ model.name }}</span>
-              </button>
-            </div>
-          </div>
-
-          <section v-for="group in modelGroups" :key="group.providerId" class="managed-model-group">
-            <h3>{{ group.providerName }}</h3>
-            <button
-              v-for="model in group.models"
-              :key="modelValue(model)"
-              type="button"
-              role="option"
-              :aria-selected="modelValue(model) === selectedModel"
-              class="managed-model-option"
-              @click="selectRuntimeModel(model)"
-            >
-              <span>{{ model.name }}</span>
-              <small>{{ model.providerId }}/{{ model.id }}</small>
-            </button>
-          </section>
-          <div v-if="modelGroups.length === 0" class="managed-model-empty">暂无匹配模型</div>
-        </template>
-      </div>
-    </div>
-  </div>
 
   <SettingsDialog :open="settingsOpen" :current-user="authStore.currentUser" @close="settingsOpen = false" />
 </template>
@@ -2604,163 +2516,7 @@ async function handleLogout() {
   color: var(--ta-ink);
 }
 
-.managed-model-dialog-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 80;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgb(0 0 0 / 18%);
-}
 
-.managed-model-dialog {
-  width: min(520px, calc(100vw - 48px));
-  max-height: min(680px, calc(100vh - 80px));
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--ta-border);
-  border-radius: 16px;
-  background: var(--ta-panel);
-  box-shadow: 0 20px 60px rgb(15 23 42 / 20%);
-}
-
-.managed-model-dialog-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-  border-bottom: 1px solid var(--ta-border);
-}
-
-.managed-model-dialog-header h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 700;
-}
-
-.managed-model-close {
-  border: 0;
-  background: transparent;
-  color: var(--ta-muted);
-  font-size: 13px;
-}
-
-.managed-model-search {
-  margin: 12px 16px 8px;
-  height: 36px;
-  border: 1px solid var(--ta-border);
-  border-radius: 12px;
-  background: var(--ta-panel-2);
-  color: var(--ta-text);
-  padding: 0 10px;
-  font-size: 13px;
-}
-
-.managed-model-list {
-  min-height: 0;
-  overflow: auto;
-  padding: 0 16px 16px;
-}
-
-.managed-model-recommended {
-  padding: 12px 0;
-  border-bottom: 1px solid var(--ta-border);
-}
-
-.managed-model-recommended-title {
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--ta-muted);
-  margin-bottom: 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.managed-model-recommended-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.managed-model-recommended-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 28px;
-  padding: 0 10px;
-  border: 1px solid var(--ta-border);
-  border-radius: 14px;
-  background: var(--ta-panel-2);
-  color: var(--ta-text);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.12s ease;
-}
-
-.managed-model-recommended-tag:hover {
-  background: var(--ta-hover, #f4f4f5);
-  border-color: var(--ta-border);
-  color: var(--ta-text);
-}
-
-.managed-model-recommended-tag.is-active {
-  background: #eaf0ff;
-  border-color: #b9c8ff;
-  color: #1d3fb0;
-}
-
-.managed-model-recommended-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-}
-
-.managed-model-group {
-  display: grid;
-  gap: 8px;
-  padding-top: 12px;
-}
-
-.managed-model-group h3 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--ta-text);
-}
-
-.managed-model-option {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  min-height: 38px;
-  border: 1px solid var(--ta-border);
-  border-radius: 6px;
-  background: var(--ta-panel-2);
-  color: var(--ta-text);
-  padding: 8px 10px;
-  text-align: left;
-}
-
-.managed-model-option[aria-selected="true"] {
-  border-color: var(--ta-ink);
-}
-
-.managed-model-option small {
-  color: var(--ta-muted);
-  font-size: 11px;
-}
-
-.managed-model-empty {
-  padding: 24px 0;
-  color: var(--ta-muted);
-  font-size: 13px;
-  text-align: center;
-}
 
 .managed-workspace-layout {
   display: flex;
