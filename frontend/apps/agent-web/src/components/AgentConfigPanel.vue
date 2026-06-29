@@ -12,7 +12,8 @@ import {
   Plus,
   RefreshCw,
   Upload,
-  Users
+  Users,
+  MoreHorizontal
 } from "lucide-vue-next";
 import { createBackendApiClient } from "@test-agent/backend-api";
 import { useWorkbenchStore } from "@test-agent/workbench-shell";
@@ -658,41 +659,49 @@ defineExpose({
           <span>公共级</span>
           <span v-if="publicRootBadge" class="agent-root-badge">{{ publicRootBadge }}</span>
         </button>
-        <button
-          v-if="canWrite"
-          type="button"
-          class="agent-icon-btn"
-          title="更新公共配置"
-          aria-label="更新公共配置"
-          :disabled="busy || status.PUBLIC?.enabled === false"
-          @click="updatePublicConfig"
-        >
-          <Loader2 v-if="updatingPublicConfig" class="h-3.5 w-3.5 animate-spin" />
-          <ArrowUpFromLine v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-        </button>
-        <button
-          v-if="canWrite"
-          type="button"
-          class="agent-icon-btn"
-          title="切换公共 worktree"
-          aria-label="切换公共 worktree"
-          :disabled="busy || status.PUBLIC?.enabled === false"
-          @click="openSwitchWorktreeModal"
-        >
-          <GitBranch class="h-3.5 w-3.5" :stroke-width="1.5" />
-        </button>
-        <button
-          v-if="canWrite"
-          type="button"
-          class="agent-icon-btn"
-          title="创建公共 worktree"
-          aria-label="创建公共 worktree"
-          :disabled="busy || status.PUBLIC?.enabled === false"
-          @click="createWorktree('PUBLIC')"
-        >
-          <Loader2 v-if="creatingWorktreeScope === 'PUBLIC'" class="h-3.5 w-3.5 animate-spin" />
-          <Plus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
-        </button>
+        <div v-if="canWrite" class="agent-more-menu-container">
+          <button
+            type="button"
+            class="agent-icon-btn"
+            title="更多操作"
+            aria-label="更多操作"
+            :disabled="busy || status.PUBLIC?.enabled === false"
+          >
+            <Loader2 v-if="updatingPublicConfig || creatingWorktreeScope === 'PUBLIC'" class="h-3.5 w-3.5 animate-spin" />
+            <MoreHorizontal v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+          </button>
+          <div class="agent-more-menu-dropdown">
+            <button
+              type="button"
+              class="agent-dropdown-item"
+              :disabled="busy || status.PUBLIC?.enabled === false"
+              @click="updatePublicConfig"
+            >
+              <Loader2 v-if="updatingPublicConfig" class="h-3.5 w-3.5 animate-spin" />
+              <ArrowUpFromLine v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+              <span>更新公共配置</span>
+            </button>
+            <button
+              type="button"
+              class="agent-dropdown-item"
+              :disabled="busy || status.PUBLIC?.enabled === false"
+              @click="openSwitchWorktreeModal"
+            >
+              <GitBranch class="h-3.5 w-3.5" :stroke-width="1.5" />
+              <span>切换公共 worktree</span>
+            </button>
+            <button
+              type="button"
+              class="agent-dropdown-item"
+              :disabled="busy || status.PUBLIC?.enabled === false"
+              @click="createWorktree('PUBLIC')"
+            >
+              <Loader2 v-if="creatingWorktreeScope === 'PUBLIC'" class="h-3.5 w-3.5 animate-spin" />
+              <Plus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+              <span>创建公共 worktree</span>
+            </button>
+          </div>
+        </div>
       </div>
       <div v-if="rootExpanded.has('PUBLIC')" class="agent-node-list">
         <div v-if="loadingByScope.PUBLIC.has('')" class="agent-loading"><Loader2 class="h-3.5 w-3.5 animate-spin" />加载中</div>
@@ -1157,6 +1166,55 @@ defineExpose({
 .agent-root-main:disabled {
   pointer-events: none;
   opacity: 0.45;
+}
+.agent-more-menu-container {
+  position: relative;
+  display: inline-flex;
+}
+.agent-more-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background: var(--ta-panel, #fff);
+  border: 1px solid var(--ta-border, #e4e4e7);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  padding: 4px;
+  display: none;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 50;
+  min-width: 140px;
+}
+.agent-more-menu-container:hover .agent-more-menu-dropdown {
+  display: flex;
+}
+.agent-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ta-text, #18181b);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.1s;
+}
+.agent-dropdown-item:hover:not(:disabled) {
+  background: var(--ta-hover, #f4f4f5);
+}
+.agent-dropdown-item:active:not(:disabled) {
+  background: var(--ta-active, #e4e4e7);
+}
+.agent-dropdown-item:disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 .agent-node-list {
   padding-left: 8px;
