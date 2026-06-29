@@ -1555,3 +1555,19 @@
 - What: 后端新增 `GET /agent-config/public/worktrees?linuxServerId=` 返回指定服务器 `ACTIVE/PUBLIC` worktree 和创建人字段；MyBatis XML 支持 `scope/linuxServerId/status` 过滤，legacy repository 继续走内存过滤兼容。前端 Agent 面板公共级新增切换按钮和弹窗，先选已初始化服务器，再选直接目录或 worktree；workbench store 新增 `publicConfigLinuxServerId` 记住直接目录服务器。
 - How: 切换只更新 `worktreeId/linuxServerId` 上下文并清空公共文件树缓存；公共文件列表、读取、保存仍通过 agent-config 文件 WebSocket route/ticket/RPC，直接目录模式用 `linuxServerId` 绑定服务器，worktree 模式用落库 `worktreeId -> linuxServerId` 定位服务器。已打开 tab 不关闭，保存继续沿用 tab 内上下文。
 - Result: 后端目标测试、前端 agent-web typecheck、AgentConfigPanel/backend-api 定向 Vitest 通过；文档同步 API、事件、前后端规范、相关 README/PACKAGE。提交时继续排除既有 FigmaShell、运行拓扑和 AgentConfigBackendRoutingService 等无关脏改动。
+
+### 2026-06-29 - 优化分支列表排序：符合格式的排前面
+
+- Why: 提升用户体验，让用户优先看到可选择的分支，而不是在大量置灰分支中寻找。
+- What: 实现分支列表排序优化：
+  - 标准库：符合格式的分支排在前面，不符合的排在后面
+  - 每组内部按字母顺序排序
+  - 非标准库保持原始顺序
+- How: 添加 sortedBranches 计算属性：
+  1. 判断是否为标准库
+  2. 将分支分为两组：validBranches 和 invalidBranches
+  3. 每组内部按字母顺序排序
+  4. 合并返回：[...validBranches, ...invalidBranches]
+- Result: 用户优先看到可选择的分支，置灰分支展示在后面供参考，提升了操作效率。
+- Pitfalls: 需要注意 computed 属性依赖的函数必须在其之前定义。
+- Verification: 手动测试标准库和非标准库的分支排序效果。
