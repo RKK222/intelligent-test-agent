@@ -454,7 +454,7 @@ export function normalizeMessagePart(raw: Record<string, unknown>, fallbackPartI
       callId: text(raw.callId) ?? text(raw.callID),
       status: text(raw.status) ?? text(state?.status) ?? "completed",
       input: record(raw.input) ?? record(state?.input),
-      output: raw.output ?? state?.output,
+      output: raw.output ?? state?.output ?? raw.error ?? state?.error,
       metadata: record(raw.metadata) ?? record(state?.metadata),
       startedAt: text(raw.startedAt) ?? text(stateTime?.start),
       endedAt: text(raw.endedAt) ?? text(stateTime?.end)

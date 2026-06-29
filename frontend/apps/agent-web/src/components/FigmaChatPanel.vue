@@ -56,8 +56,9 @@ function partText(part: unknown): string {
     if (pType === 'reasoning') return ''
     // tool part：提取执行结果（如 bash 命令输出、文件读取内容等）进入气泡
     if (pType === 'tool') {
-      const state = (part as { state?: { output?: string; error?: string } })
-        .state
+      const toolPart = part as { output?: unknown; state?: { output?: string; error?: string } }
+      if (typeof toolPart.output === 'string' && toolPart.output) return toolPart.output + '\n'
+      const state = toolPart.state
       if (state?.output) return state.output + '\n'
       if (state?.error) return state.error + '\n'
       return ''

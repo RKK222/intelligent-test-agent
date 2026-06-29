@@ -2,6 +2,16 @@
 
 ## Entries
 
+### 2026-06-29 - 修复历史对话工具消息归一化缺失导致助手气泡空白
+
+- Why: 之前引入的 `normalizeMessagePart` 规则将 opencode parts 归一化为平台标准结构，把 `part.state.output` 移到了 `part.output`。这导致 `FigmaChatPanel.vue` 中的 `partText` 函数在解析归一化后的 `tool` 分段时，由于继续尝试读取已不存在 of `part.state.output` / `part.state.error`，从而提取不到内容返回了空字符串。对于只有工具步骤且无文本消息的历史回复，会导致计算出的气泡文本为 `""`，从而被模板判定无内容而渲染为完全空白的助手气泡。
+- What:
+  - 修复 `frontend/apps/agent-web/src/components/FigmaChatPanel.vue` 中的 `partText` 函数，增加对归一化后 `toolPart.output` 为字符串的直接读取支持，并作为 `state.output/error` 之前的优先级，同时完美向后兼容。
+  - 修复 `frontend/packages/agent-chat/src/runtime-reducer.ts` 中的 `normalizeMessagePart`，在归一化 `tool` 分段时增加对 `raw.error` / `state.error` 备选项的复制支持，避免报错信息丢失并在 `ToolDetail` 中能够正常展现。
+  - 修复 `FigmaChatPanel.test.ts` 中受 formatTokens 格式化影响而报错的 tokens 静态断言（由 `"19915 tokens"` 更改为 `"2.0w tokens"`）。
+- How: 纯前端代码与测试用例微调，不涉及后端、接口或数据库模式变更。
+- Result: 修复后切换历史对话时，智能体执行的各工具过程和最终步骤文本均可正确、完整地展示。175 项 Vitest 单元测试全绿通过。
+
 ### 2026-06-29 - 重命名为应用级、增加 hover 备注，并放开应用级配置修改权限
 
 - Why: 满足用户的定制需求：将工作空间级重命名为应用级，添加详细备注；为了保证多租户/多应用独立发布管理，只对超级管理员保留公共级配置的写权限，而将应用级配置的修改与发布权限下放给普通用户，在本地技能中记录了正确的 macOS 开发重启命令；同时解决原生 title 属性 hover 响应慢的问题，以及非超管用户无法读取公共配置的缺陷。

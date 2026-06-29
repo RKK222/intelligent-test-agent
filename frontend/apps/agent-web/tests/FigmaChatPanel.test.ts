@@ -300,7 +300,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-usage img").exists()).toBe(false);
     expect(wrapper.find(".figma-chat-usage-dot").exists()).toBe(true);
     expect(wrapper.text()).toContain("任务消耗");
-    expect(wrapper.text()).toContain("19915 tokens");
+    expect(wrapper.text()).toContain("2.0w tokens");
   });
 
   it("opens a frontend-only attachment dialog from the composer action", async () => {
