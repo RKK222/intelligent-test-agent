@@ -179,6 +179,8 @@ const liveFollowedParts = ref<Set<string>>(new Set());
 // Markdown 预览开关：状态由 FigmaEditorArea tab 表头按钮双向绑定到 CodeEditor 的 showPreview。
 // 切换非 Markdown 文件时由 watch 主动复位，避免下次切回 md 时残留之前的开启状态。
 const markdownPreview = ref(false);
+// 只有用户主动触发的健康刷新需要短暂阻止提交；后台轮询刷新不应周期性打断输入体验。
+const manualOpencodeProcessRefreshing = ref(false);
 
 // Ctrl/Cmd+S 全局快捷键：在编辑器打开文件时拦截浏览器默认的「保存网页」行为，
 // 转而触发右下角保存按钮同款逻辑（saveMutation.mutate）。
@@ -467,7 +469,7 @@ const opencodeProcessInitialLoading = computed(
   () => opencodeProcessEnabled.value && !opencodeProcessStatus.value && (opencodeProcessQuery.isPending.value || opencodeProcessQuery.isFetching.value)
 );
 const opencodeProcessRefreshing = computed(
-  () => opencodeProcessEnabled.value && Boolean(opencodeProcessStatus.value) && opencodeProcessQuery.isFetching.value
+  () => opencodeProcessEnabled.value && Boolean(opencodeProcessStatus.value) && manualOpencodeProcessRefreshing.value
 );
 const sessionsItems = computed(() => sessionsQuery.data.value?.items ?? []);
 const selectedModelInfo = computed(() => {
@@ -478,7 +480,10 @@ const selectedModelLabel = computed(() => selectedModelInfo.value?.name ?? selec
 
 function refreshOpencodeProcessStatus() {
   if (!opencodeProcessEnabled.value || opencodeProcessQuery.isFetching.value) return;
-  void opencodeProcessQuery.refetch();
+  manualOpencodeProcessRefreshing.value = true;
+  void opencodeProcessQuery.refetch().finally(() => {
+    manualOpencodeProcessRefreshing.value = false;
+  });
 }
 const historyList = computed(() => historyItems(run.value, sessionsItems.value));
 const resourcesList = computed(() => runtimeResources(mcpResourcesData.value, activeTab.value));

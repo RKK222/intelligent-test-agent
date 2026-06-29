@@ -109,6 +109,24 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("send")).toBeUndefined();
   });
 
+  it("keeps submit enabled during non-blocking background process refresh", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        inputValue: "后台轮询时发送",
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        processRefreshing: true,
+        processRefreshBlocksSubmit: false
+      }
+    });
+
+    expect(wrapper.get('[aria-label="发送"]').attributes("disabled")).toBeUndefined();
+
+    await wrapper.get('[aria-label="发送"]').trigger("click");
+
+    expect(wrapper.emitted("send")).toEqual([["后台轮询时发送"]]);
+  });
+
   it("shows the checking state before the first process status response arrives", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

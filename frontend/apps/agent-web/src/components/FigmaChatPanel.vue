@@ -205,7 +205,7 @@ type DiffLine = {
 }
 
 const props =
-  defineProps<{
+  withDefaults(defineProps<{
     messages: ChatMessageInput[]
     running?: boolean
     placeholder?: string
@@ -231,6 +231,8 @@ const props =
     processLoading?: boolean
     /** 已有状态下的后台健康探测中；不阻塞输入，但要阻止提交旧状态。 */
     processRefreshing?: boolean
+    /** 主动刷新才需要阻止提交；后台轮询刷新不应周期性打断用户发送。 */
+    processRefreshBlocksSubmit?: boolean
     processInitializing?: boolean
     /** 可选模型列表（供快速标签使用） */
     models?: any[]
@@ -240,7 +242,9 @@ const props =
     messageFeedbacks?: Record<string, AiMessageFeedback | null>
     /** 正在提交反馈的消息 */
     feedbackSubmitting?: Record<string, boolean>
-  }>()
+  }>(), {
+    processRefreshBlocksSubmit: true
+  })
 
 const emit =
   defineEmits<{
@@ -1094,7 +1098,10 @@ const processReady = computed(() => {
   return !props.processStatus || props.processStatus.status === 'READY'
 })
 const processSubmitBlocked = computed(
-  () => props.running || !processReady.value || props.processRefreshing
+  () =>
+    props.running ||
+    !processReady.value ||
+    (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
 )
 const processStatusVisible = computed(
   () =>
