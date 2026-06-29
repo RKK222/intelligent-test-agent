@@ -436,12 +436,18 @@ async function loadBranches() {
   await run(async () => {
     branches.value = workspaceRepositoryId.value ? await api.listRepositoryBranches(workspaceRepositoryId.value) : [];
 
-    // 智能选择默认分支
+    // 智能选择默认分支（基于排序后的列表）
     if (branches.value.length > 0) {
       if (selectedWorkspaceRepository.value?.standard) {
-        // 标准库：选择第一条符合格式的分支（置灰的不能被选中）
-        const validBranch = branches.value.find(b => isValidStandardBranch(b));
-        workspaceBranch.value = validBranch ?? "";
+        // 标准库：先排序，再选择第一个（已按日期倒序，最新的在前）
+        const sortedValid = branches.value
+          .filter(b => isValidStandardBranch(b))
+          .sort((a, b) => {
+            const dateA = a.slice(-8);
+            const dateB = b.slice(-8);
+            return dateB.localeCompare(dateA);
+          });
+        workspaceBranch.value = sortedValid[0] ?? "";
       } else {
         // 非标准库：选择第一条
         workspaceBranch.value = branches.value[0];

@@ -1650,3 +1650,15 @@
 - Result: 用户优先看到最新的分支，便于选择最新版本进行开发。
 - Pitfalls: 日期字符串可以直接用 localeCompare 比较，格式 yyyyMMdd 保证字符串比较等同于日期比较。
 - Verification: 手动测试标准库分支排序效果，验证最新分支在最前面。
+
+### 2026-06-29 - 修复分支默认选中逻辑：先排序再选第一个
+
+- Why: loadBranches 使用 find 查找第一个符合格式的分支，但 UI 显示使用 sortedBranches（按日期倒序），导致默认选中的分支和显示的第一个可能不一致。
+- What: 修改 loadBranches 函数的默认选中逻辑，确保与 sortedBranches 的排序逻辑完全一致：
+  1. 过滤出符合格式的分支
+  2. 按日期倒序排序（最新在前）
+  3. 选择排序后的第一个
+- How: 在 loadBranches 中复制 sortedBranches 的排序逻辑，确保选中的就是显示的第一个。
+- Result: 用户看到的第一条分支就是被默认选中的分支，逻辑完全一致。
+- Pitfalls: 需要保持 loadBranches 和 sortedBranches 的排序逻辑一致，避免出现选中与显示不匹配的情况。
+- Verification: 刷新分支后，验证默认选中的分支就是列表中显示的第一个。

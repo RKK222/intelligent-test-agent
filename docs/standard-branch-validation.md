@@ -184,9 +184,18 @@ function handleBranchChange(branch: string) {
 - 如果没有任何符合格式的分支，选中空
 
 **测试用例**：
-- 分支列表：`["master", "develop", "feature_testagent_20260629", "feature_testagent_20260630"]`
-- 预期选中：`"feature_testagent_20260629"`（第一条符合格式的）
+- 分支列表：`["master", "develop", "feature_testagent_20260628", "feature_testagent_20260629", "feature_testagent_20260630"]`
+- 排序后显示：
+  ```
+  feature_testagent_20260630 ✅ (最新，默认选中)
+  feature_testagent_20260629 ✅
+  feature_testagent_20260628 ✅
+  develop                  ❌ (置灰)
+  master                   ❌ (置灰)
+  ```
+- 预期选中：`"feature_testagent_20260630"`（排序后的第一个）
 - 不应该选中：`"master"` 或 `"develop"`（置灰分支）
+- **注意**：默认选中逻辑与 UI 显示完全一致
 
 **测试用例2**：
 - 分支列表：`["master", "develop", "test"]`（全部不符合格式）
@@ -275,14 +284,16 @@ function handleBranchChange(branch: string) {
    - 不修改后端API，降低风险
 
 4. **默认选中逻辑**：
-   - 标准库：使用 `find` 方法查找第一条符合格式的分支
+   - 标准库：先过滤符合格式的分支，再按日期倒序排序，最后选中第一个（最新的）
    - 非标准库：保持原逻辑，选中第一条
    - 切换代码库时清空错误提示
+   - **默认选中的分支与 UI 显示的第一个分支完全一致**
 
 ## 提交信息
 
 - Commit 1: `8aa5d650` - 优化分支列表排序：符合格式的排前面，不符合的排后面
 - Commit 2: `c18e1989` - 优化分支默认选中逻辑：置灰分支不能被默认选中
 - Commit 3: `8571b149` - 优化分支排序：符合格式的分支按日期倒序排序
-- Commit 4: `336ca8a9` - 更新验证文档：添加分支排序优化说明
+- Commit 4: `0a6ae531` - 修复分支默认选中逻辑：先排序再选第一个
+- Commit 5: `77dfd59b` - 更新验证文档：说明分支按日期倒序排序
 - 文件: `frontend/apps/agent-web/src/components/settings/SettingsAppWorkspacePanel.vue`
