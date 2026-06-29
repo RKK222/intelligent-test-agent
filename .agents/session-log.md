@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-29 - 按容器和管理进程名派生 opencode managerId
+
+- Why: 多台本地或测试机器共享 Redis 时，旧启动脚本默认注入相同 `OPENCODE_MANAGER_ID=mgr_local_opencode`，导致 manager latest snapshot 互相覆盖，运行管理只显示其中一台容器。
+- What: Go manager 不再读取 `OPENCODE_MANAGER_ID`，而是按已解析的 `containerId` 和固定逻辑进程名 `opencode-manager` 派生内部 `managerId`；本地重启脚本删除 `OPENCODE_MANAGER_ID` 注入，脚本校验增加防回归断言。
+- How: 保持现有 `mgr_` 前缀、Redis key、数据库字段和 WebSocket 协议字段不变，只改变 manager 内部 ID 来源；同步 opencode-manager README、后端 README 和后端部署文档，说明生产和本地都不再配置该环境变量。
+- Result: 旧 `mgr_local_opencode` Redis 快照不做手工清理，等待 TTL 自然过期；后续同一共享 Redis 内要求容器名称唯一且一个容器只运行一个 opencode-manager。
+
 ### 2026-06-29 - 补充环境变量新增准入规范
 
 - Why: 后端和 opencode-manager 后续不能为了临时绕过配置、适配个人环境或规避通用参数随意新增环境变量，需要把准入规则写入稳定文档。

@@ -30,7 +30,6 @@ opencode-manager 不允许随意新增环境变量。新增前必须先确认该
 |---|---|
 | `OPENCODE_MANAGER_PORT_START` | 当前容器可管理端口池起始端口。 |
 | `OPENCODE_MANAGER_PORT_END` | 当前容器可管理端口池结束端口。 |
-| `OPENCODE_MANAGER_ID` | 当前 manager ID，必须以 `mgr_` 开头。 |
 | `OPENCODE_MANAGER_TOKEN` | 独立 manager token，用于 WebSocket 控制面鉴权。 |
 
 可选环境变量：
@@ -48,6 +47,8 @@ opencode-manager 不允许随意新增环境变量。新增前必须先确认该
 | `OPENCODE_MANAGER_RECONNECT_INTERVAL` | `10s` |
 
 `OPENCODE_MANAGER_LINUX_SERVER_ID` 不再作为生产路径使用。非 Windows 环境的服务器身份必须来自 `.serverip` 文件；`containerId` 优先来自系统 hostname，其次来自 `/etc/hostname`，最后才使用 `OPENCODE_MANAGER_CONTAINER_ID`。Windows 本机开发态跳过文件等待，直接探测本机非回环 IPv4，并用机器名作为 `containerId`。
+
+`OPENCODE_MANAGER_ID` 不再作为环境变量配置。manager 启动时会按 `mgr_<normalized_container_id>_<normalized_manager_process_name>` 派生内部 `managerId`，其中管理进程逻辑名固定为 `opencode-manager`，例如容器名 `kakadeMacBook-Pro.local` 会派生为 `mgr_kakadeMacBook_Pro_local_opencode_manager`。运行管理、Redis 快照和数据库拓扑中的 `managerId` 仍是内部协议 ID，唯一性来自同一共享 Redis 集群内的容器名称加管理进程名称；一个容器只运行一个 `opencode-manager`。
 
 ## CLI
 

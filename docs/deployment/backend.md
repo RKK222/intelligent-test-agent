@@ -32,7 +32,6 @@ OPENCODE_MANAGER_CONTAINER_ID=ctr_01
 OPENCODE_MANAGER_SERVER_IP_FILE=/data/.testagent/.serverip
 OPENCODE_MANAGER_PORT_START=4096
 OPENCODE_MANAGER_PORT_END=4100
-OPENCODE_MANAGER_ID=mgr_1234567890abcdef
 OPENCODE_MANAGER_BACKEND_PORT=8080
 OPENCODE_MANAGER_TOKEN=<manager-control-token>
 OPENCODE_BIN=opencode
@@ -40,6 +39,8 @@ OPENCODE_MANAGER_STATE_DIR=/data/.testagent/agent-opencode/manager
 ```
 
 `OPENCODE_MANAGER_CONTAINER_ID` 仅作为非 Windows 下的最后兜底值；生产容器应优先设置容器 hostname，manager 会先读系统 hostname，再读 `/etc/hostname`，最后才读该环境变量。
+
+生产和本地都不再配置 `OPENCODE_MANAGER_ID`。manager 启动时按容器名称和固定管理进程逻辑名 `opencode-manager` 派生内部 `managerId`，形如 `mgr_<normalized_container_id>_opencode_manager`；运行管理、Redis 快照和数据库拓扑中的 `managerId` 仍只作为内部协议 ID，唯一性来自同一共享 Redis 集群内的容器名称加管理进程名称。
 
 长运行模式启动：
 
@@ -76,7 +77,7 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 | 角色 | 部署数量 | 关键配置 | 说明 |
 |---|---:|---|---|
 | 后端 Java 实例 | 每台 Linux 服务器 1 个或按容量水平扩展 | `TEST_AGENT_BACKEND_LISTEN_URL`、`TEST_AGENT_SERVER_IP_FILE`、`TEST_AGENT_OPENCODE_MANAGER_TOKEN` | `listen-url` 必须是 manager 可直连的实例地址；非回环 IPv4 会作为服务器身份并写入 `.serverip`。 |
-| opencode 容器 | 每台 Linux 服务器多个 | 容器 hostname、`OPENCODE_MANAGER_SERVER_IP_FILE`、`OPENCODE_MANAGER_CONTAINER_ID` 兜底值、端口池、挂载目录 | 每个容器运行 1 个 `opencode-manager run`；`containerId` 标识容器，非 Windows 先取系统 hostname，再取 `/etc/hostname`，最后才取 `OPENCODE_MANAGER_CONTAINER_ID`，`linuxServerId` 来自 `.serverip`。 |
+| opencode 容器 | 每台 Linux 服务器多个 | 容器 hostname、`OPENCODE_MANAGER_SERVER_IP_FILE`、`OPENCODE_MANAGER_CONTAINER_ID` 兜底值、端口池、挂载目录 | 每个容器运行 1 个 `opencode-manager run`；`containerId` 标识容器，非 Windows 先取系统 hostname，再取 `/etc/hostname`，最后才取 `OPENCODE_MANAGER_CONTAINER_ID`，`managerId` 由 `containerId + opencode-manager` 派生，`linuxServerId` 来自 `.serverip`。 |
 | 用户 opencode server 进程 | 每个用户 1 个当前绑定 | 由 manager 按端口启动 | `baseUrl` 固定为 `http://{linuxServerIp}:{port}`，session 持久化在对应 Linux 服务器。 |
 | 前端访问入口 | 1 个负载均衡域名 | `VITE_TEST_AGENT_API_BASE_URL` | 浏览器只访问平台后端，不直连 opencode server 或 manager。 |
 
@@ -134,7 +135,7 @@ opencode 容器扩容流程：
 
 1. 在同一 Linux 服务器上分配不与既有容器重叠的端口池。
 2. 按上文挂载 `/data/.testagent/agent-opencode/.session/`、`/data/.testagent/agent-opencode/.config/opencode/`、`/data/.testagent/agent-opencode/workspace/` 和 `/data/.testagent/agent-opencode/manager`。
-3. 配置新的容器 hostname、`OPENCODE_MANAGER_ID`、`OPENCODE_MANAGER_SERVER_IP_FILE` 和端口池环境变量；`OPENCODE_MANAGER_CONTAINER_ID` 仅作为非 Windows 最后兜底。非 Windows 解析顺序固定为系统 hostname、`/etc/hostname`、`OPENCODE_MANAGER_CONTAINER_ID`；Windows 直接使用机器名。
+3. 配置新的容器 hostname、`OPENCODE_MANAGER_SERVER_IP_FILE` 和端口池环境变量；不要再配置 `OPENCODE_MANAGER_ID`，manager 会由容器名称和固定进程名派生内部 ID；`OPENCODE_MANAGER_CONTAINER_ID` 仅作为非 Windows 最后兜底。非 Windows 解析顺序固定为系统 hostname、`/etc/hostname`、`OPENCODE_MANAGER_CONTAINER_ID`；Windows 直接使用机器名。
 4. 启动 `opencode-manager run`，检查运行管理页中 `containers`、`managers` 和 `managerBackendConnections` 均出现对应记录，容器行展示最新 CPU、内存和已用内存。
 
 常见故障处理：

@@ -49,7 +49,7 @@ func TestSupervisorConnectsSeedWebSocketWithoutHTTPDiscovery(t *testing.T) {
 
 	message := receiveMessage(t, registered, time.Second)
 
-	if message.ManagerID != "mgr_1234567890abcdef" {
+	if message.ManagerID != "mgr_ctr_01_opencode_manager" {
 		t.Fatalf("expected seed WebSocket register message, got %#v", message)
 	}
 }
@@ -443,7 +443,7 @@ func supervisorTestConfig(webSocketURL string) config.ControlConfig {
 			SessionRoot:   "/tmp/opencode-session",
 			ConfigDir:     "/tmp/opencode-config",
 		},
-		ManagerID:           "mgr_1234567890abcdef",
+		ManagerID:           "mgr_ctr_01_opencode_manager",
 		BackendWebSocketURL: webSocketURL,
 		Token:               "manager-secret",
 		DiscoveryInterval:   time.Hour,
