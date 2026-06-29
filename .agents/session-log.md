@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-29 - 自动刷新当前用户 opencode 健康状态与模型目录
+
+- Why: 工作台进入后 `/processes/me` 只在首屏、点击头像、刷新页面或输入区交互时重新查询，导致后端/manager 健康检查已恢复后，右侧 opencode 状态和模型列表仍停留在旧的“检测中/失败/空列表”缓存；用户需要多次刷新页面才可能同时拿到绿色状态和模型。
+- What: `AgentWorkbench.vue` 让当前用户 opencode 进程状态在页面可见时每 5 秒自动 refetch；Agent/Provider/Model/Command/MCP/LSP/VCS 等运行态目录改为仅在进程 `READY` 后启用，并在状态刚转为 `READY` 时主动 invalidate，清掉早期健康失败造成的空缓存。同步更新 `frontend/README.md` 和 `frontend/apps/agent-web/README.md`。
+- How: 复用既有 `/api/internal/agent/opencode/processes/me` 与 runtime catalog API，不新增后端接口、不直连 opencode server、不修改数据库或环境文件；保持输入区手动触发刷新逻辑作为即时探测入口。
+- Result: `corepack pnpm --filter @test-agent/agent-web typecheck`、`corepack pnpm test FigmaChatPanel.test.ts workbench-utils.test.ts follow-up-queue.test.ts`、`corepack pnpm --filter @test-agent/agent-web build`、`git diff --check` 均通过；`.env.test` 三服务已重启，backend health/readiness、frontend 3000 和 CORS 预检通过。登录态 smoke 显示默认账号初始化 opencode 仍被环境配置阻塞：manager 返回 `OPENCODE_UNAVAILABLE`，原因是当前测试库公共 opencode配置目录为 Windows 路径 `D:/data/.testagent/agent-opencode/.config/opencode/`，在 macOS 本地未初始化，因此模型接口在该账号未 READY 时按预期返回 503。
+
 ### 2026-06-29 - 按容器和管理进程名派生 opencode managerId
 
 - Why: 多台本地或测试机器共享 Redis 时，旧启动脚本默认注入相同 `OPENCODE_MANAGER_ID=mgr_local_opencode`，导致 manager latest snapshot 互相覆盖，运行管理只显示其中一台容器。
@@ -14,7 +21,8 @@
 - Why: 后端和 opencode-manager 后续不能为了临时绕过配置、适配个人环境或规避通用参数随意新增环境变量，需要把准入规则写入稳定文档。
 - What: 在后端规范、后端 README、部署文档和 opencode-manager README 中补充环境变量新增规则，明确优先复用 `common_parameters`、Spring 配置、数据库配置、控制面 `configUpdate` 或既有 dotenv 变量；只有部署期密钥、外部端点、进程身份、启动引导路径、资源容量等必须由运行环境注入的值才允许新增。
 - How: 纯文档修改，不触碰 `.env.local` 等环境配置文件，不改代码、API、数据库或启动脚本。
-- Result: `git diff --check` 通过；当前工作区存在与本任务无关的未暂存 `opencode-manager/internal/config/control_test.go` 和 `tools/verify-dev-scripts.sh`，本次提交不纳入。
+- Result: `git diff --check` 通过；当前工作区存在与本任务无关 of 未暂存 `opencode-manager/internal/config/control_test.go` 和 `tools/verify-dev-scripts.sh`，本次提交不纳入。
+
 ### 2026-06-29 - 按照项目字体要求调整输入框字号与样式合并支持
 
 - Why: 侧边栏文件搜索框的 Search 图标与占位文字 "搜索工作区文件" 重叠，原因是 Input 组件默认 `px-2` 样式与父组件传入的 `pl-7` 产生冲突，且 Vue 的默认 class 合并未经过 `twMerge` 处理，导致 padding-left 仍被判定为 `px-2` 的 8px。此外，通用 Input 和 Textarea 组件原本写死了 `text-[12px]`，不符合项目前端排版规范中 "输入框文字 | 16px | 400" 的标准要求。
