@@ -12,7 +12,8 @@ const apiClientMock = vi.hoisted(() => ({
   listPublicAgentRepositories: vi.fn(),
   listPublicAgentWorktrees: vi.fn(),
   readPublicAgentFile: vi.fn(),
-  readWorkspaceAgentFile: vi.fn()
+  readWorkspaceAgentFile: vi.fn(),
+  writeWorkspaceAgentFile: vi.fn()
 }));
 
 const workbenchMock = vi.hoisted(() => ({
@@ -57,6 +58,7 @@ describe("AgentConfigPanel", () => {
     apiClientMock.listPublicAgentWorktrees.mockResolvedValue([]);
     apiClientMock.readPublicAgentFile.mockResolvedValue({ path: "agent.md", content: "", encoding: "utf-8" });
     apiClientMock.readWorkspaceAgentFile.mockResolvedValue({ path: "agent.md", content: "", encoding: "utf-8" });
+    apiClientMock.writeWorkspaceAgentFile.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -112,6 +114,24 @@ describe("AgentConfigPanel", () => {
     expect(workbench.publicConfigLinuxServerId).toBe("linux-1");
     await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenLastCalledWith("", undefined, "linux-1"));
   });
+
+  it("initializes workspace agent and skill package from the workspace plus action", async () => {
+    const { view } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.getWorkspaceAgentConfigStatus).toHaveBeenCalled());
+    await fireEvent.click(view.getByRole("button", { name: "初始化工作空间配置包" }));
+    await fireEvent.update(await view.findByLabelText("配置包名称"), "支付测试技能");
+    await fireEvent.click(view.getByRole("button", { name: "创建" }));
+
+    await waitFor(() => expect(apiClientMock.writeWorkspaceAgentFile).toHaveBeenCalledTimes(4));
+    expect(apiClientMock.writeWorkspaceAgentFile.mock.calls.map((call) => call.slice(0, 2))).toEqual([
+      ["wrk_1234567890abcdef", "agents/zhi-fu-ce-shi-ji-neng.md"],
+      ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/SKILL.md"],
+      ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/rules/.gitkeep"],
+      ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/templates/.gitkeep"]
+    ]);
+    await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_1234567890abcdef", "", undefined));
+  });
 });
 
 type PublicWorktree = {
@@ -143,6 +163,7 @@ function renderPanel(setup?: (workbench: WorkbenchStoreMock) => void) {
   const view = render(AgentConfigPanel, {
     props: {
       baseUrl: "http://api",
+      workspaceId: "wrk_1234567890abcdef",
       canWrite: true,
       hideHeader: true
     },

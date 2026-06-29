@@ -59,6 +59,8 @@ tools/dev-frontend-check.sh
 
 推荐从仓库根目录使用一键脚本重启三服务，脚本默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」顺序逐个先 kill 原进程再启动；当 `TEST_AGENT_OPENCODE_BASE_URL` 是本地地址时默认启动 Go `opencode-manager`（由它派生 opencode 子进程，不再单独启动 `opencode serve`）：
 
+工作台左侧 Agent 配置树展示公共级 `opencode/` 和工作空间级 `.opencode/` 配置根，包含 `agents/` 与 `skills/`。工作空间级 `+` 会初始化应用自己的配置包：`agents/<name>.md`、`skills/<name>/SKILL.md`、`rules/` 和 `templates/`。
+
 ```bash
 ./restart-dev-services.sh
 ```

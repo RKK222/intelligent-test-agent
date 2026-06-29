@@ -58,10 +58,10 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private static final String PARAM_PUBLIC_CONFIG_WORKTREE_ROOT = "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT";
     private static final String PARAM_PERSONAL_WORKTREE_ROOT = "OPENCODE_PERSONAL_WORKTREE_ROOT";
     private static final String UNCONFIGURED = "UNCONFIGURED";
-    private static final String PUBLIC_AGENT_RELATIVE_ROOT = "opencode/agents";
-    private static final String PUBLIC_AGENT_LEGACY_RELATIVE_ROOT = "opencode/agent";
-    private static final String WORKSPACE_AGENT_RELATIVE_ROOT = ".opencode/agents";
-    private static final String WORKSPACE_AGENT_LEGACY_RELATIVE_ROOT = ".opencode/agent";
+    private static final String PUBLIC_AGENT_RELATIVE_ROOT = "opencode";
+    private static final String PUBLIC_AGENT_LEGACY_RELATIVE_ROOT = "opencode/agents";
+    private static final String WORKSPACE_AGENT_RELATIVE_ROOT = ".opencode";
+    private static final String WORKSPACE_AGENT_LEGACY_RELATIVE_ROOT = ".opencode/agents";
     private static final Pattern OPERATION_ID_PATTERN = Pattern.compile("^aco_[A-Za-z0-9_-]{8,128}$");
     private static final Pattern WORKTREE_NAME_PATTERN = Pattern.compile("^[A-Za-z0-9._-]{1,64}$");
     private static final DateTimeFormatter WORKTREE_SUFFIX_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd").withZone(ZoneOffset.UTC);

@@ -68,7 +68,7 @@ class AgentConfigApplicationServiceTest {
         assertThat(status.writable()).isFalse();
         assertThat(status.gitUrl()).isEqualTo("UNCONFIGURED");
         assertThat(status.agentDirectory().replace('\\', '/'))
-                .endsWith("/.config/opencode/agents");
+                .endsWith("/.config/opencode");
     }
 
     @Test
@@ -269,12 +269,47 @@ class AgentConfigApplicationServiceTest {
                         "linux-1",
                         "trace_workspace")));
 
-        List<FileTreeEntryResponse> entries = service.listWorkspaceAgentFiles("wrk_project", "", null);
-        service.writeWorkspaceAgentFile("wrk_project", "new.md", "new agent", null);
+        List<FileTreeEntryResponse> entries = service.listWorkspaceAgentFiles("wrk_project", "agents", null);
+        service.writeWorkspaceAgentFile("wrk_project", "agents/new.md", "new agent", null);
 
         assertThat(entries).extracting(FileTreeEntryResponse::name).contains("review.md");
         assertThat(Files.readString(workspaceRoot.resolve(".opencode/agents/new.md"))).isEqualTo("new agent");
         assertThat(Files.exists(workspaceRoot.resolve(".opencode/agent/new.md"))).isFalse();
+    }
+
+    @Test
+    void workspaceAgentFilesExposeOpencodeRootForAgentAndSkillPackages() throws Exception {
+        Path workspaceRoot = root.resolve("project");
+        Files.createDirectories(workspaceRoot.resolve(".opencode/agents"));
+        Files.createDirectories(workspaceRoot.resolve(".opencode/skills/app-skill"));
+        Files.writeString(workspaceRoot.resolve(".opencode/agents/review.md"), "review");
+        Files.writeString(workspaceRoot.resolve(".opencode/skills/app-skill/SKILL.md"), "skill");
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                new RecordingGitWorkspaceService(),
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_project"),
+                        "project",
+                        workspaceRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-1",
+                        "trace_workspace")));
+
+        List<FileTreeEntryResponse> rootEntries = service.listWorkspaceAgentFiles("wrk_project", "", null);
+        List<FileTreeEntryResponse> skillEntries = service.listWorkspaceAgentFiles("wrk_project", "skills/app-skill", null);
+        service.writeWorkspaceAgentFile("wrk_project", "skills/new-skill/SKILL.md", "new skill", null);
+
+        assertThat(rootEntries).extracting(FileTreeEntryResponse::name).contains("agents", "skills");
+        assertThat(skillEntries).extracting(FileTreeEntryResponse::name).containsExactly("SKILL.md");
+        assertThat(Files.readString(workspaceRoot.resolve(".opencode/skills/new-skill/SKILL.md"))).isEqualTo("new skill");
+        assertThat(Files.exists(workspaceRoot.resolve(".opencode/agents/skills/new-skill/SKILL.md"))).isFalse();
     }
 
     @Test

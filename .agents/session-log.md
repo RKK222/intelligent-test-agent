@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-29 - Agent 配置树上移并支持工作空间技能包初始化
+
+- Why: 公共/工作空间 Agent 配置原先只展示 `agents/`，用户无法维护 `skills/<skill>/SKILL.md` 技能包；同时 openclaw 迁移内容需要保留 agent -> stage -> skills 的原始包结构。
+- What: 后端 Agent 配置文件树根上移为公共 `opencode/`、工作空间 `.opencode/`，前端工作空间级 `+` 初始化 `agents/<name>.md` 与 `skills/<name>/SKILL.md`/`rules`/`templates`，公共配置仓库把 openclaw 原始包放到 `opencode/mimoagent-agents/`，`opencode/skills/` 用符号链接作为运行时入口。
+- How: 保持 opencode 运行时仍读取 `agents/*.md` 和 `skills/*/SKILL.md`；避免在 `opencode/agents/` 根下混入目录，因为 opencode 1.17 会尝试把目录当 agent 配置解析并报 `p.info.permissions`。
+- Result: 后端 `AgentConfigApplicationServiceTest`、前端 `agent-config-panel.test.ts`、`@test-agent/agent-web typecheck`、opencode `agent list`/`serve` smoke 通过；`.env.test` 三服务已启动，backend/readiness/frontend/CORS 均通过，但 `opencode-manager.log` 仍每约 10 秒出现一次 WebSocket 断开记录，本次未扩展排查。
+
 ### 2026-06-29 - 优化编辑器 Markdown 预览分屏分隔线视觉设计
 
 - Why: Markdown 预览开启后的分屏分隔线（sash）原本为扁平的极浅灰色，在白色背景上几乎不可见且不明显，缺乏可拖拽的视觉暗示。

@@ -268,6 +268,9 @@ const switchWorktreeOptionsError = ref("");
 const switchPublicLinuxServerId = ref("");
 const switchPublicWorktreeId = ref(DIRECT_PUBLIC_CONFIG_OPTION);
 const switchPublicWorktrees = ref<AgentConfigWorktreeOption[]>([]);
+const showCreateWorkspacePackageModal = ref(false);
+const workspacePackageName = ref("");
+const workspacePackageError = ref("");
 
 const initializedPublicRepositories = computed(() =>
   publicRepositories.value.filter((repository) => repository.initialized)
@@ -494,6 +497,154 @@ function worktreeOptionLabel(worktree: AgentConfigWorktreeOption) {
     : `${worktree.createdByUserId} / 未知用户`;
   return `${worktree.worktreeName} / ${worktree.branch} / ${creator}`;
 }
+
+function openCreateWorkspacePackageModal() {
+  if (!props.canWrite || !props.workspaceId || busy.value) return;
+  workspacePackageName.value = "";
+  workspacePackageError.value = "";
+  showCreateWorkspacePackageModal.value = true;
+}
+
+function closeCreateWorkspacePackageModal() {
+  showCreateWorkspacePackageModal.value = false;
+  workspacePackageError.value = "";
+}
+
+async function submitCreateWorkspacePackage() {
+  if (!props.workspaceId || busy.value) return;
+  const displayName = workspacePackageName.value.trim();
+  const packageName = slugifyPackageName(displayName);
+  if (!displayName || !packageName) {
+    workspacePackageError.value = "请输入配置包名称";
+    return;
+  }
+  closeCreateWorkspacePackageModal();
+  busy.value = true;
+  errorMessage.value = "";
+  try {
+    await api.writeWorkspaceAgentFile(props.workspaceId, `agents/${packageName}.md`, workspaceAgentTemplate(displayName, packageName), worktreeId("WORKSPACE"));
+    await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/SKILL.md`, workspaceSkillTemplate(displayName, packageName), worktreeId("WORKSPACE"));
+    await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/rules/.gitkeep`, "", worktreeId("WORKSPACE"));
+    await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/templates/.gitkeep`, "", worktreeId("WORKSPACE"));
+    rootExpanded.value = new Set([...rootExpanded.value, "WORKSPACE"]);
+    entriesByScope.value = { ...entriesByScope.value, WORKSPACE: {} };
+    expandedByScope.value = { ...expandedByScope.value, WORKSPACE: new Set(["agents", "skills", `skills/${packageName}`]) };
+    await loadDirectory("WORKSPACE", "");
+    await loadDirectory("WORKSPACE", "agents");
+    await loadDirectory("WORKSPACE", "skills");
+    await loadDirectory("WORKSPACE", `skills/${packageName}`);
+  } catch (error) {
+    errorMessage.value = formatAgentConfigError(error, "初始化工作空间配置包失败");
+  } finally {
+    busy.value = false;
+  }
+}
+
+function workspaceAgentTemplate(displayName: string, packageName: string) {
+  return `---
+name: ${displayName}
+description: ${displayName}工作空间级 Agent
+mode: all
+permission:
+  read: allow
+  edit: allow
+  glob: allow
+  grep: allow
+  list: allow
+  bash: ask
+  skill:
+    "${packageName}": allow
+    "*": ask
+---
+
+# ${displayName}
+
+## 职责
+
+- 面向当前应用和工作空间处理专属测试、研发或运维任务。
+- 需要复用应用知识时，优先调用 \`${packageName}\` skill。
+
+## 输出要求
+
+- 说明使用了哪些应用材料。
+- 无法确认的信息标记为待确认，不自行编造。
+`;
+}
+
+function workspaceSkillTemplate(displayName: string, packageName: string) {
+  return `---
+name: ${packageName}
+description: ${displayName}工作空间级技能包
+version: 1.0.0
+---
+
+# ${displayName}
+
+## 适用场景
+
+- 当前应用或当前工作空间的专属任务。
+
+## 使用流程
+
+1. 读取用户指定的应用材料、规则或模板。
+2. 按当前应用约定处理任务。
+3. 输出可复核的结果和未确认项。
+
+## 资源目录
+
+- \`rules/\`：放置应用专属规则。
+- \`templates/\`：放置应用专属模板。
+`;
+}
+
+function slugifyPackageName(value: string) {
+  const converted = Array.from(value.trim())
+    .map((char) => PINYIN_SEGMENTS[char] ?? char)
+    .join("-");
+  return converted
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/-{2,}/g, "-")
+    .replace(/^[._-]+|[._-]+$/g, "")
+    .slice(0, 64);
+}
+
+const PINYIN_SEGMENTS: Record<string, string> = {
+  "支": "zhi",
+  "付": "fu",
+  "测": "ce",
+  "试": "shi",
+  "技": "ji",
+  "能": "neng",
+  "应": "ying",
+  "用": "yong",
+  "接": "jie",
+  "口": "kou",
+  "设": "she",
+  "计": "ji",
+  "执": "zhi",
+  "行": "xing",
+  "案": "an",
+  "例": "li",
+  "对": "dui",
+  "象": "xiang",
+  "策": "ce",
+  "略": "lue",
+  "规": "gui",
+  "划": "hua",
+  "生": "sheng",
+  "成": "cheng",
+  "审": "shen",
+  "查": "cha",
+  "工": "gong",
+  "作": "zuo",
+  "空": "kong",
+  "间": "jian",
+  "配": "pei",
+  "置": "zhi"
+};
 
 /**
  * 提交创建 worktree 请求到后端，并更新本地文件树
@@ -728,13 +879,24 @@ defineExpose({
           v-if="canWrite"
           type="button"
           class="agent-icon-btn"
+          title="初始化工作空间配置包"
+          aria-label="初始化工作空间配置包"
+          :disabled="busy || !workspaceId"
+          @click="openCreateWorkspacePackageModal"
+        >
+          <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
+        </button>
+        <button
+          v-if="canWrite"
+          type="button"
+          class="agent-icon-btn"
           title="创建工作空间 worktree"
           aria-label="创建工作空间 worktree"
           :disabled="busy || !workspaceId"
           @click="createWorktree('WORKSPACE')"
         >
           <Loader2 v-if="creatingWorktreeScope === 'WORKSPACE'" class="h-3.5 w-3.5 animate-spin" />
-          <Plus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+          <GitBranch v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
         </button>
       </div>
       <div v-if="rootExpanded.has('WORKSPACE')" class="agent-node-list">
@@ -925,6 +1087,47 @@ defineExpose({
           <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
             <Button variant="ghost" size="sm" @click="closeUpdatePublicConfigModal">取消</Button>
             <Button variant="primary" size="sm" :disabled="loadingUpdatePublicConfigBranches || !updatePublicConfigBranch || busy" @click="submitUpdatePublicConfig">确定</Button>
+          </footer>
+        </section>
+      </div>
+    </Teleport>
+    <Teleport to="body">
+      <div
+        v-if="showCreateWorkspacePackageModal"
+        class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/35 px-4 py-6"
+        @keydown.esc="closeCreateWorkspacePackageModal"
+      >
+        <section
+          role="dialog"
+          aria-modal="true"
+          aria-label="初始化工作空间配置包"
+          class="flex w-[min(420px,calc(100vw-24px))] flex-col rounded-lg border border-[var(--ta-border)] bg-[var(--ta-panel)] shadow-xl p-4 gap-4"
+        >
+          <header class="flex items-center justify-between border-b border-[var(--ta-border)] pb-2">
+            <h2 class="text-[14px] font-semibold text-[var(--ta-text)]">初始化工作空间配置包</h2>
+          </header>
+
+          <div class="flex flex-col gap-3">
+            <div v-if="workspacePackageError" class="agent-modal-alert">
+              <AlertTriangle class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
+              <span>{{ workspacePackageError }}</span>
+            </div>
+            <div class="flex flex-col gap-1.5">
+              <label for="workspace-package-name-input" class="text-[11px] text-[var(--ta-muted)] font-medium">配置包名称</label>
+              <Input
+                id="workspace-package-name-input"
+                v-model="workspacePackageName"
+                placeholder="例如：支付测试技能"
+                class="h-8 text-[13px]"
+                autofocus
+                @keydown.enter="submitCreateWorkspacePackage"
+              />
+            </div>
+          </div>
+
+          <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
+            <Button variant="ghost" size="sm" @click="closeCreateWorkspacePackageModal">取消</Button>
+            <Button variant="primary" size="sm" :disabled="busy || !workspacePackageName.trim()" @click="submitCreateWorkspacePackage">创建</Button>
           </footer>
         </section>
       </div>
