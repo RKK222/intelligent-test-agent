@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-29 - 补充环境变量新增准入规范
+
+- Why: 后端和 opencode-manager 后续不能为了临时绕过配置、适配个人环境或规避通用参数随意新增环境变量，需要把准入规则写入稳定文档。
+- What: 在后端规范、后端 README、部署文档和 opencode-manager README 中补充环境变量新增规则，明确优先复用 `common_parameters`、Spring 配置、数据库配置、控制面 `configUpdate` 或既有 dotenv 变量；只有部署期密钥、外部端点、进程身份、启动引导路径、资源容量等必须由运行环境注入的值才允许新增。
+- How: 纯文档修改，不触碰 `.env.local` 等环境配置文件，不改代码、API、数据库或启动脚本。
+- Result: `git diff --check` 通过；当前工作区存在与本任务无关的未暂存 `opencode-manager/internal/config/control_test.go` 和 `tools/verify-dev-scripts.sh`，本次提交不纳入。
+
 ### 2026-06-29 - 优化 opencode 公共配置未初始化错误提示
 
 - Why: 用户初始化 opencode 进程失败时，前端只提示公共配置未初始化，但系统管理页可能显示同 IP 已初始化；需要在错误消息中暴露目标 manager 实际检查的服务器和配置目录，减少 Java 视角与 manager 文件系统视角不一致时的排查成本。

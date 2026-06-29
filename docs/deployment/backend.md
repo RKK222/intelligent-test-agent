@@ -25,6 +25,8 @@
 
 容器环境变量示例：
 
+opencode-manager 环境变量只用于启动前必须由宿主环境提供的身份、端口池、token、二进制路径、状态目录或连接引导参数。不要为运行期业务配置随意新增 `OPENCODE_*` 环境变量；用户进程 session/config/maxProcesses 等运行配置必须优先通过 Java 后端 `common_parameters` 和控制面 `configUpdate` 下发。确需新增 manager 环境变量时，必须同步更新 opencode-manager README、本文档、配置解析测试和本地启动脚本/示例。
+
 ```dotenv
 OPENCODE_MANAGER_CONTAINER_ID=ctr_01
 OPENCODE_MANAGER_SERVER_IP_FILE=/data/.testagent/.serverip
@@ -321,6 +323,8 @@ export TEST_AGENT_DB_POOL_TEST_ON_BORROW=true
 ```
 
 ## 生产必填环境变量
+
+后端环境变量只用于部署期密钥、外部端点、进程身份、启动引导路径或资源容量。不要为了临时绕过配置或适配个人环境而随意新增 `TEST_AGENT_*` 环境变量；新增前必须优先评估 `common_parameters`、Spring 配置项、数据库配置和既有 dotenv 变量，并同步更新后端规范、README、部署文档、启动脚本或 dotenv 示例以及配置绑定测试。
 
 ```bash
 SPRING_PROFILES_ACTIVE=prod

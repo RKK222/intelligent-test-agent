@@ -101,6 +101,8 @@ cp .env.local.example .env.local
 
 编辑 `.env.local` 修改本地数据库、OpenCode 等配置：
 
+环境变量只用于部署期必须由运行环境注入的密钥、外部端点、进程身份、启动引导路径或资源容量。不要为了临时绕过配置、适配个人环境或规避 `common_parameters` / Spring 配置 / 数据库配置而随意新增环境变量；确需新增时必须先评估既有配置入口，并同步更新 `docs/standards/backend.md`、`docs/deployment/backend.md`、相关 README、启动脚本或 dotenv 示例以及配置绑定测试。
+
 | 变量 | 说明 |
 |------|------|
 | `TEST_AGENT_ROOT` | 项目根目录，由启动脚本自动导出；通用参数路径可使用 `$TEST_AGENT_ROOT` 引用。 |

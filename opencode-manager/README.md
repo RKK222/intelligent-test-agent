@@ -22,6 +22,8 @@ opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 
 ## 配置
 
+opencode-manager 不允许随意新增环境变量。新增前必须先确认该值无法通过 Java 后端 `common_parameters`、控制面 `configUpdate`、既有 manager 环境变量或进程启动参数表达；只有 manager 启动前必须由宿主环境提供的身份、端口池、token、二进制路径、状态目录或连接引导参数才允许作为环境变量。确需新增时，必须同步更新本 README、`docs/deployment/backend.md`、配置解析测试和本地启动脚本/示例，说明默认值、缺失时行为以及是否敏感。
+
 必填环境变量：
 
 | 变量 | 说明 |
