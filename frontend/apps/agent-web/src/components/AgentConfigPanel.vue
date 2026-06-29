@@ -1187,6 +1187,15 @@ defineExpose({
   z-index: 50;
   min-width: 140px;
 }
+.agent-more-menu-dropdown::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -8px;
+  width: 8px;
+  height: 100%;
+  background: transparent;
+}
 .agent-more-menu-container:hover .agent-more-menu-dropdown {
   display: flex;
 }

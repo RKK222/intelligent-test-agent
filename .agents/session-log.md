@@ -19,8 +19,8 @@
 - How: 
   - 在 `AgentConfigPanel.vue` 模板中引入 `MoreHorizontal` 图标，并在“公共级”头部使用 `.agent-more-menu-container` 包裹。
   - 将“更新公共配置”、“切换公共 worktree”和“创建公共 worktree”三个按钮移入内部的 `.agent-more-menu-dropdown` 容器，改写为横向对齐的条目。当触发异步操作时，外部的三点图标将智能替换为 `Loader2` 旋转动画以维持顶层加载指示。
-  - 在 `<style scoped>` 中通过纯 CSS `:hover` 选择器实现展开显示，设定 `right: 100%` 与 `top: -4px` 以在左侧对齐弹出，并配合向左投影 `box-shadow: -4px 4px 12px rgba(0, 0, 0, 0.08)` 优化视觉。
-- Result: 界面排版更加清爽，悬浮菜单能向左侧顺畅弹出，完美解决了容器裁剪导致看不见菜单的问题。前端项目检查和 Linter 完全通过。
+  - 在 `<style scoped>` 中通过纯 CSS `:hover` 选择器实现展开显示，设定 `right: 100%` 与 `top: -4px` 以在左侧对齐弹出，并配合向左投影 `box-shadow: -4px 4px 12px rgba(0, 0, 0, 0.08)` 优化视觉；此外使用 `::after` 伪元素桥接了按钮和菜单之间 4px 的物理空隙，确保鼠标滑向菜单时悬浮态连续且菜单不会意外消失。
+- Result: 界面排版更加清爽，悬浮菜单能向左侧顺畅弹出，且鼠标移入时极为稳定，完美解决了容器裁剪及悬空抖动消失的问题。前端项目检查和 Linter 完全通过。
 
 ### 2026-06-29 - 将“更新公共配置”点击后的 prompt 弹出框替换为自定义 DIV 弹窗
 
