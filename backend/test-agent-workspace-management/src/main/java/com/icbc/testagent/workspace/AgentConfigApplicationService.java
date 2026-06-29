@@ -222,13 +222,25 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             String operationId,
             UserId userId,
             String traceId) {
+        return updatePublicConfig(branch, operationId, false, userId, traceId);
+    }
+
+    /**
+     * 更新公共配置；只有调用方明确确认时才放弃受控仓库中的已跟踪文件修改。
+     */
+    public AgentConfigResponses.AgentConfigOperationResponse updatePublicConfig(
+            String branch,
+            String operationId,
+            boolean discardLocalChanges,
+            UserId userId,
+            String traceId) {
         String normalizedBranch = requireText(branch, "分支不能为空", "branch");
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.PUBLIC, null, "update", normalizedBranch, traceId);
         try {
             PublicConfig config = requireEnabledPublicConfig();
             String privateKey = decryptSingleSshKey(userId);
             progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
-            ensurePublicRepositoryReady(config, normalizedBranch, privateKey);
+            ensurePublicRepositoryReady(config, normalizedBranch, privateKey, discardLocalChanges);
             String commitHash = gitWorkspaceService.headCommit(config.gitRoot());
             progress.step(AgentConfigOperationStep.BROADCASTING);
             broadcastPublicSync(normalizedBranch, commitHash, "update", traceId);
@@ -650,9 +662,17 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     private void ensurePublicRepositoryReady(PublicConfig config, String branch, String privateKey) {
+        ensurePublicRepositoryReady(config, branch, privateKey, false);
+    }
+
+    private void ensurePublicRepositoryReady(
+            PublicConfig config,
+            String branch,
+            String privateKey,
+            boolean discardLocalChanges) {
         Path gitRoot = config.gitRoot();
         if (gitWorkspaceService.isGitRepository(gitRoot)) {
-            ensureExistingCleanRepository(gitRoot, config.gitUrl());
+            ensureExistingRepositoryReadyForSync(gitRoot, config.gitUrl(), discardLocalChanges);
             gitWorkspaceService.fetch(gitRoot, privateKey);
             gitWorkspaceService.checkoutTrackingBranch(gitRoot, branch, privateKey);
             gitWorkspaceService.pullFastForward(gitRoot, branch, privateKey);
@@ -697,9 +717,9 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             boolean originMatched = Objects.equals(gitWorkspaceService.originUrl(config.gitRoot()), config.gitUrl());
             boolean clean = gitWorkspaceService.isWorktreeClean(config.gitRoot());
             boolean configReady = isInitializedConfigDirectory(config);
-            initialized = originMatched && clean && configReady;
-            status = initialized ? "READY" : "CONFLICT";
-            initializationAllowed = originMatched && clean;
+            initialized = originMatched && configReady;
+            status = initialized && clean ? "READY" : "CONFLICT";
+            initializationAllowed = originMatched;
             if (!originMatched) {
                 message = "Git origin 与配置不一致";
             } else if (!clean) {
@@ -761,6 +781,13 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     private void ensureExistingCleanRepository(Path repoRoot, String expectedOrigin) {
+        ensureExistingRepositoryReadyForSync(repoRoot, expectedOrigin, false);
+    }
+
+    private void ensureExistingRepositoryReadyForSync(
+            Path repoRoot,
+            String expectedOrigin,
+            boolean discardLocalChanges) {
         if (!gitWorkspaceService.isGitRepository(repoRoot)) {
             // 消息带上具体目录，便于前端直接定位问题路径
             throw new PlatformException(ErrorCode.CONFLICT, "目录不是 Git 仓库：" + repoRoot, Map.of("path", repoRoot.toString()));
@@ -770,7 +797,11 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             throw new PlatformException(ErrorCode.CONFLICT, "Git origin 与配置不一致", Map.of("path", repoRoot.toString()));
         }
         if (!gitWorkspaceService.isWorktreeClean(repoRoot)) {
-            throw new PlatformException(ErrorCode.CONFLICT, "Git 工作树存在未提交变更", Map.of("path", repoRoot.toString()));
+            if (!discardLocalChanges) {
+                throw new PlatformException(ErrorCode.CONFLICT, "Git 工作树存在未提交变更", Map.of("path", repoRoot.toString()));
+            }
+            // 只恢复 Git 已跟踪内容；未跟踪文件不删除，避免“更新”扩大为不可逆清理。
+            gitWorkspaceService.resetHardToCommit(repoRoot, "HEAD");
         }
     }
 

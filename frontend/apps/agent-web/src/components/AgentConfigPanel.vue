@@ -205,6 +205,7 @@ const updatePublicConfigBranch = ref("main");
 const updatePublicConfigBranches = ref<string[]>([]);
 const loadingUpdatePublicConfigBranches = ref(false);
 const updatePublicConfigError = ref("");
+const updatePublicDiscardLocalChanges = ref(false);
 
 /**
  * 触发更新公共配置流程，初始化弹窗状态，加载远端分支列表并打开弹窗
@@ -214,6 +215,7 @@ async function updatePublicConfig() {
   showUpdatePublicConfigModal.value = true;
   loadingUpdatePublicConfigBranches.value = true;
   updatePublicConfigError.value = "";
+  updatePublicDiscardLocalChanges.value = false;
   try {
     const branches = await api.listPublicAgentBranches();
     updatePublicConfigBranches.value = branches;
@@ -230,6 +232,7 @@ async function updatePublicConfig() {
 function closeUpdatePublicConfigModal() {
   showUpdatePublicConfigModal.value = false;
   updatePublicConfigError.value = "";
+  updatePublicDiscardLocalChanges.value = false;
 }
 
 /**
@@ -238,13 +241,20 @@ function closeUpdatePublicConfigModal() {
 async function submitUpdatePublicConfig() {
   const branch = updatePublicConfigBranch.value;
   if (!branch) return;
+  if (publicUpdateRequiresDiscard.value && !updatePublicDiscardLocalChanges.value) return;
+  const discardLocalChanges = updatePublicDiscardLocalChanges.value;
 
   closeUpdatePublicConfigModal();
 
   updatingPublicConfig.value = true;
   try {
     const operationId = newOperationId();
-    await runOperation(() => api.updatePublicAgentConfig(branch, operationId), "公共 Agent 更新", operationId);
+    await runOperation(
+      () => api.updatePublicAgentConfig(branch, operationId, discardLocalChanges),
+      "公共 Agent 更新",
+      operationId
+    );
+    publicRepositories.value = await api.listPublicAgentRepositories();
     await refreshScope("PUBLIC");
   } finally {
     updatingPublicConfig.value = false;
@@ -296,6 +306,23 @@ const currentRepoBranch = computed(() => {
 
 const selectedPublicRepository = computed(() =>
   initializedPublicRepositories.value.find((repository) => repository.linuxServerId === selectedPublicLinuxServerId.value) ?? null
+);
+
+const activePublicRepository = computed(() => {
+  const serverId = publicWorktree.value?.linuxServerId ?? publicConfigLinuxServerId.value ?? selectedPublicLinuxServerId.value;
+  return publicRepositories.value.find((repository) => repository.linuxServerId === serverId)
+    ?? initializedPublicRepositories.value[0]
+    ?? null;
+});
+
+const publicUpdateConflictMessage = computed(() =>
+  activePublicRepository.value?.status === "CONFLICT"
+    ? activePublicRepository.value.message ?? "公共配置仓库存在未提交变更"
+    : ""
+);
+
+const publicUpdateRequiresDiscard = computed(() =>
+  publicUpdateConflictMessage.value.includes("未提交变更")
 );
 
 const selectedSwitchRepository = computed(() =>
@@ -522,15 +549,13 @@ async function submitCreateWorkspacePackage() {
   busy.value = true;
   errorMessage.value = "";
   try {
-    await api.writeWorkspaceAgentFile(props.workspaceId, `agents/${packageName}.md`, workspaceAgentTemplate(displayName, packageName), worktreeId("WORKSPACE"));
     await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/SKILL.md`, workspaceSkillTemplate(displayName, packageName), worktreeId("WORKSPACE"));
-    await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/rules/.gitkeep`, "", worktreeId("WORKSPACE"));
-    await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/templates/.gitkeep`, "", worktreeId("WORKSPACE"));
+    await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/rules/README.md`, workspaceRulesTemplate(displayName), worktreeId("WORKSPACE"));
+    await api.writeWorkspaceAgentFile(props.workspaceId, `skills/${packageName}/templates/README.md`, workspaceTemplatesTemplate(displayName), worktreeId("WORKSPACE"));
     rootExpanded.value = new Set([...rootExpanded.value, "WORKSPACE"]);
     entriesByScope.value = { ...entriesByScope.value, WORKSPACE: {} };
-    expandedByScope.value = { ...expandedByScope.value, WORKSPACE: new Set(["agents", "skills", `skills/${packageName}`]) };
+    expandedByScope.value = { ...expandedByScope.value, WORKSPACE: new Set(["skills", `skills/${packageName}`]) };
     await loadDirectory("WORKSPACE", "");
-    await loadDirectory("WORKSPACE", "agents");
     await loadDirectory("WORKSPACE", "skills");
     await loadDirectory("WORKSPACE", `skills/${packageName}`);
   } catch (error) {
@@ -538,37 +563,6 @@ async function submitCreateWorkspacePackage() {
   } finally {
     busy.value = false;
   }
-}
-
-function workspaceAgentTemplate(displayName: string, packageName: string) {
-  return `---
-name: ${displayName}
-description: ${displayName}工作空间级 Agent
-mode: all
-permission:
-  read: allow
-  edit: allow
-  glob: allow
-  grep: allow
-  list: allow
-  bash: ask
-  skill:
-    "${packageName}": allow
-    "*": ask
----
-
-# ${displayName}
-
-## 职责
-
-- 面向当前应用和工作空间处理专属测试、研发或运维任务。
-- 需要复用应用知识时，优先调用 \`${packageName}\` skill。
-
-## 输出要求
-
-- 说明使用了哪些应用材料。
-- 无法确认的信息标记为待确认，不自行编造。
-`;
 }
 
 function workspaceSkillTemplate(displayName: string, packageName: string) {
@@ -594,6 +588,20 @@ version: 1.0.0
 
 - \`rules/\`：放置应用专属规则。
 - \`templates/\`：放置应用专属模板。
+`;
+}
+
+function workspaceRulesTemplate(displayName: string) {
+  return `# ${displayName}规则
+
+在此目录新增应用专属规则 Markdown 文件，并在 \`../SKILL.md\` 的使用流程中说明读取时机。
+`;
+}
+
+function workspaceTemplatesTemplate(displayName: string) {
+  return `# ${displayName}模板
+
+在此目录新增应用专属输出模板，并在 \`../SKILL.md\` 中说明模板用途和选择条件。
 `;
 }
 
@@ -1068,6 +1076,11 @@ defineExpose({
               <span>{{ updatePublicConfigError }}</span>
             </div>
 
+            <div v-if="publicUpdateConflictMessage" class="agent-modal-alert">
+              <AlertTriangle class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
+              <span>{{ publicUpdateConflictMessage }}</span>
+            </div>
+
             <div v-if="loadingUpdatePublicConfigBranches" class="agent-modal-loading">
               <Loader2 class="h-3.5 w-3.5 animate-spin" />
               <span>加载远端分支中...</span>
@@ -1082,11 +1095,27 @@ defineExpose({
                 </select>
               </div>
             </div>
+
+            <label v-if="publicUpdateRequiresDiscard" class="flex items-start gap-2 text-[12px] text-[var(--ta-text)]">
+              <input
+                v-model="updatePublicDiscardLocalChanges"
+                type="checkbox"
+                class="mt-0.5 h-3.5 w-3.5 accent-[var(--ta-primary)]"
+              />
+              <span>放弃本地修改并从远端恢复</span>
+            </label>
           </div>
 
           <footer class="flex justify-end gap-2 pt-2 border-t border-[var(--ta-border)]">
             <Button variant="ghost" size="sm" @click="closeUpdatePublicConfigModal">取消</Button>
-            <Button variant="primary" size="sm" :disabled="loadingUpdatePublicConfigBranches || !updatePublicConfigBranch || busy" @click="submitUpdatePublicConfig">确定</Button>
+            <Button
+              variant="primary"
+              size="sm"
+              :disabled="loadingUpdatePublicConfigBranches || !updatePublicConfigBranch || busy || (publicUpdateRequiresDiscard && !updatePublicDiscardLocalChanges)"
+              @click="submitUpdatePublicConfig"
+            >
+              确定
+            </Button>
           </footer>
         </section>
       </div>

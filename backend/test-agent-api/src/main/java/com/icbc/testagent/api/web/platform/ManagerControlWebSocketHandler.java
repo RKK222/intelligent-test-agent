@@ -17,6 +17,8 @@ import com.icbc.testagent.opencode.runtime.process.socket.ManagerPendingCommandR
 import com.icbc.testagent.opencode.runtime.process.socket.OpencodeManagerConfigSyncService;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.socket.WebSocketHandler;
@@ -30,6 +32,8 @@ import reactor.core.publisher.Sinks;
  */
 @Component
 public class ManagerControlWebSocketHandler implements WebSocketHandler {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(ManagerControlWebSocketHandler.class);
 
     private final ManagerControlSettings settings;
     private final ManagerControlMessageCodec codec;
@@ -76,6 +80,12 @@ public class ManagerControlWebSocketHandler implements WebSocketHandler {
                 .map(WebSocketMessage::getPayloadAsText)
                 .map(codec::decode)
                 .concatMap(message -> handleMessage(outbound, managerRef, containerRef, message))
+                .doOnError(exception -> LOGGER.warn(
+                        "manager WebSocket 入站处理失败 managerId={} containerId={} traceId={}",
+                        managerRef.get(),
+                        containerRef.get(),
+                        traceId,
+                        exception))
                 .doFinally(ignored -> {
                     OpencodeContainerId containerId = containerRef.get();
                     ContainerManagerId managerId = managerRef.get();

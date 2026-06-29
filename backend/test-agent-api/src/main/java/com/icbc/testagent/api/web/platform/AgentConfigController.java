@@ -116,6 +116,7 @@ public class AgentConfigController {
         return ok(exchange, service.updatePublicConfig(
                 request.branch(),
                 request.operationId(),
+                Boolean.TRUE.equals(request.discardLocalChanges()),
                 principal.userId(),
                 RuntimeApiSupport.traceId(exchange)));
     }

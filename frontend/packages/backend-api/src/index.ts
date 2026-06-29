@@ -558,10 +558,10 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
           body: JSON.stringify({ branch, operationId })
         }
       ),
-    updatePublicAgentConfig: (branch: string, operationId?: string) =>
+    updatePublicAgentConfig: (branch: string, operationId?: string, discardLocalChanges = false) =>
       request<AgentConfigOperation>(`${agentConfigBase}/public/update`, {
         method: "POST",
-        body: JSON.stringify({ branch, operationId })
+        body: JSON.stringify({ branch, operationId, discardLocalChanges })
       }),
     listPublicAgentFiles: async (path = "", worktreeId?: string | null, linuxServerId?: string | null) => {
       const entries = await agentConfigFileRpc<BackendFileTreeEntry[]>(

@@ -76,6 +76,29 @@ class AgentConfigControllerTest {
     }
 
     @Test
+    void superAdminCanExplicitlyDiscardLocalChangesWhenUpdatingPublicConfig() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/update")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"branch":"main","operationId":"aco_12345678","discardLocalChanges":true}
+                        """)
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).updatePublicConfig(
+                "main",
+                "aco_12345678",
+                true,
+                USER_ID,
+                TRACE_ID);
+    }
+
+    @Test
     void superAdminCanReadLocalPublicRepositoryStatus() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
         when(service.localPublicRepositoryStatus()).thenReturn(new PublicRepositoryStatusResponse(

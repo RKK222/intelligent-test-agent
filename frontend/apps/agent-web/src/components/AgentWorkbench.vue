@@ -62,6 +62,7 @@ import {
   diffFilesFromSessionMessages,
   dispatchRuntimeResult,
   errorFeedback,
+  filterWorkspaceRootEntries,
   historyItems,
   inferDiffFromToolPart,
   initialMessages,
@@ -1381,7 +1382,7 @@ async function loadDirectory(
   nextLoading.add(path);
   loadingPath.value = nextLoading;
   try {
-    const entries = await api.listFiles(workspaceId, path);
+    const entries = filterWorkspaceRootEntries(path, await api.listFiles(workspaceId, path));
     entriesByDirectory.value = { ...entriesByDirectory.value, [path]: entries };
   } catch (error) {
     feedback.value = errorFeedback("加载文件树失败", error);

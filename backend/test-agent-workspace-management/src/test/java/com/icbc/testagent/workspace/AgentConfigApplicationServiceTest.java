@@ -135,6 +135,88 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void dirtyPublicRepositoryRemainsInitializedAndBrowsable() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode/agents"));
+        Files.writeString(root.resolve(".config/opencode/agents/review.md"), "review");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.worktreeClean = false;
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher());
+
+        AgentConfigResponses.PublicRepositoryStatusResponse status = service.localPublicRepositoryStatus();
+
+        assertThat(status.status()).isEqualTo("CONFLICT");
+        assertThat(status.initialized()).isTrue();
+        assertThat(status.initializationAllowed()).isTrue();
+        assertThat(status.message()).isEqualTo("Git 工作树存在未提交变更");
+        assertThat(service.listPublicAgentFiles("agents", null))
+                .extracting(FileTreeEntryResponse::name)
+                .containsExactly("review.md");
+    }
+
+    @Test
+    void publicUpdateRejectsDirtyRepositoryByDefault() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.worktreeClean = false;
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher());
+
+        assertThatThrownBy(() -> service.updatePublicConfig(
+                "main",
+                "aco_update_dirty",
+                false,
+                ADMIN,
+                "trace_update"))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("Git 工作树存在未提交变更");
+        assertThat(git.resetCommit).isNull();
+    }
+
+    @Test
+    void publicUpdateCanExplicitlyDiscardTrackedChangesBeforePull() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.worktreeClean = false;
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher());
+
+        AgentConfigResponses.AgentConfigOperationResponse response = service.updatePublicConfig(
+                "main",
+                "aco_update_discard",
+                true,
+                ADMIN,
+                "trace_update");
+
+        assertThat(git.resetCommit).isEqualTo("HEAD");
+        assertThat(git.pulledBranch).isEqualTo("main");
+        assertThat(response.status()).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
     void publicWorktreeNameAppendsCurrentDateAndCreatesGitWorktree() throws Exception {
         Files.createDirectories(root.resolve(".config/.git"));
         Files.createDirectories(root.resolve(".config/opencode"));
@@ -533,6 +615,9 @@ class AgentConfigApplicationServiceTest {
         private String privateKeyUsed;
         private String worktreeBranch;
         private Path worktreeRoot;
+        private boolean worktreeClean = true;
+        private String resetCommit;
+        private String pulledBranch;
 
         @Override
         public void cloneBranch(String gitUrl, String branch, Path repoRoot, String privateKey) {
@@ -565,7 +650,7 @@ class AgentConfigApplicationServiceTest {
 
         @Override
         public boolean isWorktreeClean(Path repoRoot) {
-            return true;
+            return worktreeClean;
         }
 
         @Override
@@ -578,6 +663,12 @@ class AgentConfigApplicationServiceTest {
 
         @Override
         public void pullFastForward(Path repoRoot, String branch, String privateKey) {
+            this.pulledBranch = branch;
+        }
+
+        @Override
+        public void resetHardToCommit(Path repoRoot, String commitHash) {
+            this.resetCommit = commitHash;
         }
 
         @Override

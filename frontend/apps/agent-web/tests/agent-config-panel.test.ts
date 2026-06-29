@@ -13,7 +13,9 @@ const apiClientMock = vi.hoisted(() => ({
   listPublicAgentWorktrees: vi.fn(),
   readPublicAgentFile: vi.fn(),
   readWorkspaceAgentFile: vi.fn(),
-  writeWorkspaceAgentFile: vi.fn()
+  writeWorkspaceAgentFile: vi.fn(),
+  updatePublicAgentConfig: vi.fn(),
+  connectAgentConfigProgress: vi.fn()
 }));
 
 const workbenchMock = vi.hoisted(() => ({
@@ -59,6 +61,8 @@ describe("AgentConfigPanel", () => {
     apiClientMock.readPublicAgentFile.mockResolvedValue({ path: "agent.md", content: "", encoding: "utf-8" });
     apiClientMock.readWorkspaceAgentFile.mockResolvedValue({ path: "agent.md", content: "", encoding: "utf-8" });
     apiClientMock.writeWorkspaceAgentFile.mockResolvedValue(undefined);
+    apiClientMock.updatePublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED" });
+    apiClientMock.connectAgentConfigProgress.mockResolvedValue({ close: vi.fn() });
   });
 
   afterEach(() => {
@@ -115,7 +119,7 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenLastCalledWith("", undefined, "linux-1"));
   });
 
-  it("initializes workspace agent and skill package from the workspace plus action", async () => {
+  it("initializes only a workspace skill package from the workspace plus action", async () => {
     const { view } = renderPanel();
 
     await waitFor(() => expect(apiClientMock.getWorkspaceAgentConfigStatus).toHaveBeenCalled());
@@ -123,14 +127,39 @@ describe("AgentConfigPanel", () => {
     await fireEvent.update(await view.findByLabelText("配置包名称"), "支付测试技能");
     await fireEvent.click(view.getByRole("button", { name: "创建" }));
 
-    await waitFor(() => expect(apiClientMock.writeWorkspaceAgentFile).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(apiClientMock.writeWorkspaceAgentFile).toHaveBeenCalledTimes(3));
     expect(apiClientMock.writeWorkspaceAgentFile.mock.calls.map((call) => call.slice(0, 2))).toEqual([
-      ["wrk_1234567890abcdef", "agents/zhi-fu-ce-shi-ji-neng.md"],
       ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/SKILL.md"],
-      ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/rules/.gitkeep"],
-      ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/templates/.gitkeep"]
+      ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/rules/README.md"],
+      ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/templates/README.md"]
     ]);
     await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_1234567890abcdef", "", undefined));
+  });
+
+  it("requires explicit confirmation before discarding dirty public config changes", async () => {
+    apiClientMock.listPublicAgentRepositories.mockResolvedValue([{
+      ...initializedRepository(),
+      status: "CONFLICT",
+      message: "Git 工作树存在未提交变更"
+    }]);
+    const { view } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalled());
+    await fireEvent.click(view.getByText("更新公共配置"));
+
+    expect(await view.findByText("Git 工作树存在未提交变更")).toBeTruthy();
+    const confirmButton = view.getByRole("button", { name: "确定" }) as HTMLButtonElement;
+    expect(confirmButton.disabled).toBe(true);
+
+    await fireEvent.click(view.getByLabelText("放弃本地修改并从远端恢复"));
+    expect(confirmButton.disabled).toBe(false);
+    await fireEvent.click(confirmButton);
+
+    await waitFor(() => expect(apiClientMock.updatePublicAgentConfig).toHaveBeenCalledWith(
+      "main",
+      expect.stringMatching(/^aco_/),
+      true
+    ));
   });
 });
 

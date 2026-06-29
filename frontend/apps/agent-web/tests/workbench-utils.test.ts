@@ -3,12 +3,14 @@ import type { MessagePart, RunDiffFile } from "@test-agent/shared-types";
 import {
   diffFilesFromPayload,
   diffFilesFromSessionMessages,
+  filterWorkspaceRootEntries,
   inferDiffFromToolPart,
   mergeDiffFiles,
   messagesFromSessionMessages,
   normalizePathKey,
   sessionTitleFromFirstMessage
 } from "../src/components/workbench-utils";
+import type { FileTreeEntry } from "@test-agent/shared-types";
 
 function file(path: string, additions: number, deletions: number, status = "modified"): RunDiffFile {
   return { path, patch: "", additions, deletions, status };
@@ -24,6 +26,20 @@ function toolPart(input: Record<string, unknown>, overrides: Partial<Extract<Mes
     ...overrides
   };
 }
+
+describe("filterWorkspaceRootEntries", () => {
+  it("hides .opencode only from the workspace root", () => {
+    const entries: FileTreeEntry[] = [
+      { path: ".opencode", name: ".opencode", type: "directory" },
+      { path: "src", name: "src", type: "directory" }
+    ];
+
+    expect(filterWorkspaceRootEntries("", entries)).toEqual([
+      { path: "src", name: "src", type: "directory" }
+    ]);
+    expect(filterWorkspaceRootEntries("config", entries)).toEqual(entries);
+  });
+});
 
 describe("diffFilesFromPayload", () => {
   it("reads file objects from payload.files", () => {

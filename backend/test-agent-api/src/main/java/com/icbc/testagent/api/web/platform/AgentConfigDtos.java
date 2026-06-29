@@ -11,7 +11,7 @@ final class AgentConfigDtos {
     private AgentConfigDtos() {
     }
 
-    record BranchRequest(String branch, String operationId) {
+    record BranchRequest(String branch, String operationId, Boolean discardLocalChanges) {
     }
 
     record WorktreeRequest(String baseName, String branch, String operationId, String linuxServerId) {

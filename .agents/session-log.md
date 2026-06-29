@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-29 - 修复公共配置恢复、技能包层级与 OpenCode 初始化
+
+- Why: 公共配置 `agents/` 被误删后，仓库因工作树不干净被判为未初始化，导致文件树、刷新和重新拉取入口互相锁死；此前公共 skill 还有 `mimoagent-agents` 包装层和符号链接；本机 manager 又因历史 `mgr_kaka_opencode` 与标准 `mgr_local_opencode` 抢占同一 `container_id` 而持续断线。
+- What: 公共仓库只要 origin 和 `opencode/` 有效就保持 `initialized=true` 和可浏览，未提交修改单独标记 `CONFLICT`；公共更新增加默认关闭的 `discardLocalChanges`，页面要求超级管理员明确勾选后才恢复已跟踪修改。工作空间 `+` 只生成 `skills/<name>/SKILL.md`、`rules/README.md`、`templates/README.md`，普通工作空间树隐藏根级 `.opencode`。公共配置仓库已把 18 个 skill 扁平为 `opencode/skills/<skill-name>/` 实体包并删除 `mimoagent-agents` 和符号链接。
+- How: 后端复用 `GitWorkspaceService.resetHardToCommit(..., "HEAD")`，不删除未跟踪文件；前端/API 增加显式布尔字段与确认框，并补充后端、backend-api 和组件回归测试。为定位 manager 断线，在 WebSocket 入站错误边界增加结构化 WARN；数据库事务只删除 `mgr_kaka_opencode` 的 6 条连接和 1 条 manager 冲突记录，保留 `mgr_local_opencode` 及业务工作区、会话、运行数据。
+- Result: 公共配置仓库 commit `081d56d` 已推送 Gitee `master`；Manager 自动以 `mgr_local_opencode` 绑定当前机器并恢复心跳；真实页面 OpenCode 初始化后状态为“opencode 进程可用”，最终三服务重启后用户进程 `192.168.100.115:4098` 健康检查通过。公共配置树可见 `agents/` 与 `skills/`，普通工作空间树不再展示 `.opencode`。后端相关 31 个测试、前端相关 31 个测试、前端 typecheck/build 和 `git diff --check` 通过。
+
 ### 2026-06-29 - Agent 配置树上移并支持工作空间技能包初始化
 
 - Why: 公共/工作空间 Agent 配置原先只展示 `agents/`，用户无法维护 `skills/<skill>/SKILL.md` 技能包；同时 openclaw 迁移内容需要保留 agent -> stage -> skills 的原始包结构。

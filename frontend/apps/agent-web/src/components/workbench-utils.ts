@@ -1,6 +1,7 @@
 import { BackendApiError } from "@test-agent/backend-api";
 import type {
   AgentMessage,
+  FileTreeEntry,
   MessagePart,
   ModelInfo,
   PromptPart,
@@ -19,6 +20,16 @@ import type { EditorSelectionContext } from "@test-agent/editor";
 import type { Feedback } from "@test-agent/ui-kit";
 import { buildComposerPromptParts, normalizeMessagePart, type ComposerAttachment } from "@test-agent/agent-chat";
 import { buildEditorFilePromptPart } from "./prompt-context";
+
+/**
+ * `.opencode` 已由下方 Agent 配置树专门管理，普通工作空间根目录不重复展示。
+ */
+export function filterWorkspaceRootEntries(path: string, entries: FileTreeEntry[]): FileTreeEntry[] {
+  if (path !== "") {
+    return entries;
+  }
+  return entries.filter((entry) => entry.name !== ".opencode");
+}
 
 export function diffFilesFromPayload(payload: Record<string, unknown>): RunDiffFile[] {
   const raw = Array.isArray(payload.diff) ? payload.diff : Array.isArray(payload.files) ? payload.files : [];
