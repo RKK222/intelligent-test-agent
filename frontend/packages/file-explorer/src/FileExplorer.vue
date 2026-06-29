@@ -222,5 +222,7 @@ const changeStats = computed(() => {
 
 .ta-file-search-input {
   padding-left: 28px !important;
+  font-size: 12px !important;
+  font-family: "Geist", "Noto Sans SC", sans-serif !important;
 }
 </style>
