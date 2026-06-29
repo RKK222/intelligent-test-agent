@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-29 - 同步 openclaw 测试设计与执行公共 opencode 配置
+
+- Why: 当前项目的公共 opencode 配置已初始化到 `temp/opencode-config`，需要把桌面 `openclaw` 中沉淀的测试设计、测试执行 agent/skill 迁移到公共配置区域，供本项目托管 opencode 运行时复用。
+- What: 在公共配置仓库新增 `opencode/agents/` 下的测试设计主 agent、测试对象识别/策略规划/案例生成/案例审查子 agent、测试执行主 agent 与 API 测试执行子 agent；将 `openclaw` 展开运行态中的 18 个测试设计/执行 skills 同步到 `opencode/skills/`，并更新公共配置 `README.md` 说明目录、迁移来源和当前能力边界。
+- How: 采用 `OPENCODE_PUBLIC_CONFIG_DIR` 实际指向的 `temp/opencode-config/opencode` 作为运行配置根目录，按 opencode 1.17 的复数目录约定放置 `agents/` 与 `skills/`；skill 来源选用 `/Users/kaka/Desktop/openclaw/.mimoagent-state/agents/*/workspace/skills`，以保留 `rules/`、`templates/` 等相对引用资源。
+- Result: `opencode agent list` 能识别 7 个迁移 agent；临时 `opencode serve` 通过 `/agent` 与 `/skill` 分别加载到迁移后的 agent/skill。当前项目未发现 `testing_api_action_run`、`testing_db_action_run` 等 openclaw 测试执行平台工具，因此执行 agent 已保留能力限制说明，后续接入真实 API/DB 执行能力时需补齐对应工具或适配层。
+
 ### 2026-06-29 - 新增 Windows PowerShell 三服务重启脚本
 
 - Why: Windows 开发环境需要不依赖 Bash 的三服务一键启动入口，避免按旧文档手工分别配置和启动 Java 后端、opencode-manager 与前端。
