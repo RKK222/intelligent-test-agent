@@ -45,6 +45,7 @@ build/
 out/
 dist/
 tmp/
+temp/
 *.tmp
 
 # ===== Gradle (SDK 生成器) =====

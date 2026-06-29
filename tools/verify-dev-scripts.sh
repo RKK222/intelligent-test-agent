@@ -31,6 +31,21 @@ if [[ "${restart_help}" != *"backend env:     .env.test"* ]]; then
   echo "${restart_help}" >&2
   fail "restart script help should document .env.test as the default dotenv file"
 fi
+if ! grep -Fq 'export TEST_AGENT_ROOT="${TEST_AGENT_ROOT:-${ROOT_DIR}}"' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script should default TEST_AGENT_ROOT without overriding an explicit value"
+fi
+if grep -Fq '"/tmp/test-agent/fcoss/' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script should not recreate legacy /tmp/test-agent demo workspaces"
+fi
+if ! grep -Fq '"${TEST_AGENT_ROOT}/temp/fcoss/' "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script should create demo workspaces under the project temp directory"
+fi
+if grep -Eq '\benglish_name\b' "${ROOT_DIR}/tools/cleanup-old-path-data.sql"; then
+  fail "cleanup SQL must use the real common_parameters.parameter_english column"
+fi
+if ! grep -Fq "parameter_english" "${ROOT_DIR}/tools/cleanup-old-path-data.sql"; then
+  fail "cleanup SQL should inspect common_parameters.parameter_english"
+fi
 run_check "opencode process deployment smoke script bash syntax" bash -n "${ROOT_DIR}/tools/verify-opencode-process-deployment.sh"
 run_check "opencode process deployment smoke script help" bash "${ROOT_DIR}/tools/verify-opencode-process-deployment.sh" --help
 run_check "opencode user process scenario script bash syntax" bash -n "${ROOT_DIR}/tools/verify-opencode-user-process-scenarios.sh"

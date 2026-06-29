@@ -32,7 +32,7 @@ const (
 
 const (
 	ErrorCodeOpencodeUnavailable      = "OPENCODE_UNAVAILABLE"
-	publicConfigNotInitializedMessage = "公共配置未初始化，请联系管理员。"
+	publicConfigNotInitializedMessage = "公共 opencode 配置尚未初始化。请使用超级管理员账号进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化后重试。"
 )
 
 var errPublicConfigNotInitialized = errors.New("public config directory not initialized")

@@ -88,7 +88,7 @@ class SocketOpencodeProcessManagerGatewayTest {
                         null,
                         null,
                         false,
-                        "公共配置未初始化，请联系管理员。",
+                        "公共 opencode 配置尚未初始化。请使用超级管理员账号进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化后重试。",
                         "OPENCODE_UNAVAILABLE",
                         message.traceId())));
         SocketOpencodeProcessManagerGateway gateway = gateway(repository, registry, pending);
@@ -106,7 +106,8 @@ class SocketOpencodeProcessManagerGatewayTest {
                 .satisfies(error -> {
                     PlatformException exception = (PlatformException) error;
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
-                    assertThat(exception.getMessage()).isEqualTo("公共配置未初始化，请联系管理员。");
+                    assertThat(exception.getMessage()).isEqualTo(
+                            "公共 opencode 配置尚未初始化。请使用超级管理员账号进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化后重试。");
                 });
     }
 

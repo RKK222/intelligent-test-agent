@@ -14,7 +14,7 @@
 
 ### 路径与配置
 
-新增 Flyway 兼容性数据迁移，不修改已经发布的 macOS 迁移。macOS 参数使用 `$TEST_AGENT_ROOT` 环境变量保存可移植的绝对路径来源：
+不修改已经发布的 Flyway migration，也不把本机路径写入新的生产 migration。macOS 参数通过现有通用参数管理页面更新，既保留修改历史，也触发后端缓存和 manager 配置刷新。参数使用 `$TEST_AGENT_ROOT` 环境变量保存可移植的绝对路径来源：
 
 | 参数 | 新值 |
 |---|---|
@@ -25,7 +25,7 @@
 | `OPENCODE_PUBLIC_CONFIG_DIR` | `$TEST_AGENT_ROOT/temp/opencode-config/opencode` |
 | `OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT` | `$TEST_AGENT_ROOT/temp/opencode-configdev` |
 
-公共配置 Git 地址仅在当前值仍为 `UNCONFIGURED` 时更新为 `git@gitee.com:huangzhenren/opencodeconfig.git`，避免覆盖已有环境的显式配置。
+公共配置 Git 地址由超级管理员明确更新为 `git@gitee.com:huangzhenren/opencodeconfig.git`。
 
 根目录启动脚本为 `TEST_AGENT_ROOT` 提供默认值 `${ROOT_DIR}`，同时允许调用方预先设置同名环境变量覆盖。Java 通用参数解析器继续负责把 `$TEST_AGENT_ROOT` 展开为绝对路径，manager 只接收展开结果。
 
@@ -39,7 +39,7 @@
 
 ### 目录迁移与初始化
 
-停止现有本地服务后，只删除本项目旧目录 `/tmp/test-agent` 和存在时的 `$HOME/tmp/test-agent`，不清理其他 `/tmp` 或用户目录。新目录由公共配置初始化和 manager 启动流程按需创建。
+停止现有本地服务后，先运行 `tools/cleanup-old-path-data.sql` 审计数据库引用；需要保留的工作区文件复制到项目 `temp/` 后，用脚本的显式迁移模式更新路径字段。数据库不再引用旧路径后，才删除本项目旧目录 `/tmp/test-agent` 和存在时的 `$HOME/tmp/test-agent`，不清理其他 `/tmp` 或用户目录。启动脚本中的本地 F-COSS 种子目录也改到 `$TEST_AGENT_ROOT/temp/fcoss`，避免重启后再次创建旧目录。
 
 重启后通过现有运维页面初始化公共配置仓库。仓库必须在 `opencode/` 下包含非空配置，否则沿用现有 `CONFLICT` 错误，不新增空目录占位或绕过检查。随后重新初始化当前用户 opencode 进程。
 
@@ -47,7 +47,7 @@
 
 1. 后端测试先证明合并后的旧用例错误地拒绝 `macos`，再改为接受 `macos` 且继续拒绝未知平台。
 2. 前端组件测试先证明平台选项缺少 `macos`、选择后不自动查询，再做最小实现。
-3. Flyway/持久化测试验证 macOS 参数和公共 Git 地址的新值。
+3. 开发脚本校验验证 `TEST_AGENT_ROOT` 默认值、项目内种子目录和旧路径审计脚本字段。
 4. 执行后端相关模块测试、前端定向测试、typecheck、构建和开发脚本校验。
 5. 使用 `.env.test` 启动三服务，验证 health/readiness、前端、CORS、manager 日志。
 6. 在真实页面验证 `macos` 选择后自动刷新、公共配置仓库初始化成功、用户 opencode 进程变为可用。
@@ -55,7 +55,7 @@
 ## 兼容性与安全
 
 - 不新增或变更 HTTP API、SSE 事件、DTO 和数据库结构。
-- 新迁移只修正系统参数数据，不写入测试样例或个人业务数据。
+- 不新增数据库结构或生产数据 migration；本地路径迁移由显式运维脚本完成。
 - 不修改 `.env.test`，不输出 SSH key、token 或数据库密码。
 - 不放宽 manager 对公共配置目录存在、可读且非空的校验。
-- 已有非 `UNCONFIGURED` 公共 Git 地址不被覆盖。
+- 通用参数修改继续使用既有 API 的审计、缓存刷新和跨实例广播链路。

@@ -480,7 +480,7 @@ should_seed_demo_workspaces() {
   esac
 }
 
-# 本地种子数据中的 F-COSS 工作区指向 /tmp/test-agent/fcoss/*；启动时补齐缺失目录，避免默认入口无法运行。
+# 本地种子工作区统一落到项目 temp/fcoss，避免重启后重新生成已废弃的 /tmp/test-agent。
 seed_demo_workspaces() {
   if ! should_seed_demo_workspaces; then
     return
@@ -491,7 +491,7 @@ seed_demo_workspaces() {
 
   # V10 种子数据：F-COSS 主服务两个版本（src/main 子目录）
   for version in 20260620 20260701; do
-    dest="/tmp/test-agent/fcoss/${version}"
+    dest="${TEST_AGENT_ROOT}/temp/fcoss/${version}"
     mkdir -p "${dest}/src/main"
     if [[ -d "${source_dir}" ]] && [[ ! -e "${dest}/README.md" ]]; then
       cp -R "${source_dir}/." "${dest}/"
@@ -502,9 +502,9 @@ seed_demo_workspaces() {
 
   # V13 种子数据：F-COSS 移动端（src/mobile）、数据同步（sync）、报表（reports）
   local workspace_dirs=(
-    "/tmp/test-agent/fcoss/mobile/20260705:src/mobile"
-    "/tmp/test-agent/fcoss/sync/20260710:sync"
-    "/tmp/test-agent/fcoss/report/20260715:reports"
+    "${TEST_AGENT_ROOT}/temp/fcoss/mobile/20260705:src/mobile"
+    "${TEST_AGENT_ROOT}/temp/fcoss/sync/20260710:sync"
+    "${TEST_AGENT_ROOT}/temp/fcoss/report/20260715:reports"
   )
   for entry in "${workspace_dirs[@]}"; do
     dest="${entry%%:*}"
@@ -832,6 +832,11 @@ start_frontend() {
 load_env_file "${env_file}"
 backend_url="${TEST_AGENT_BASE_URL:-${backend_url}}"
 frontend_url="${TEST_AGENT_FRONTEND_URL:-${frontend_url}}"
+
+# 通用参数中的 $TEST_AGENT_ROOT 由 Java 进程展开；允许调用方显式覆盖以适配其他工作目录。
+export TEST_AGENT_ROOT="${TEST_AGENT_ROOT:-${ROOT_DIR}}"
+echo "TEST_AGENT_ROOT set to: ${TEST_AGENT_ROOT}"
+
 derive_frontend_runtime_settings
 apply_frontend_origin_defaults
 apply_detected_runtime_ip_defaults

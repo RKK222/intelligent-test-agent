@@ -690,7 +690,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         if (!config.enabled()) {
             status = "DISABLED";
             initializationAllowed = false;
-            message = "公共 Agent Git 地址未配置";
+            message = publicGitUrlUnconfiguredMessage();
         } else if (gitWorkspaceService.isGitRepository(config.gitRoot())) {
             currentBranch = gitWorkspaceService.currentBranch(config.gitRoot());
             commitHash = gitWorkspaceService.headCommit(config.gitRoot());
@@ -892,9 +892,20 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private PublicConfig requireEnabledPublicConfig() {
         PublicConfig config = publicConfig();
         if (!config.enabled()) {
-            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "公共 Agent Git 地址未配置", Map.of("parameter", PARAM_PUBLIC_AGENT_GIT_URL));
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    publicGitUrlUnconfiguredMessage(),
+                    Map.of("parameter", PARAM_PUBLIC_AGENT_GIT_URL));
         }
         return config;
+    }
+
+    /**
+     * 返回公共配置 Git 地址缺失时的可执行提示，避免用户只看到“未配置”却不知道处理入口。
+     */
+    private String publicGitUrlUnconfiguredMessage() {
+        return "公共 Agent Git 地址未配置，请先在“系统管理 → 通用参数管理”中配置 "
+                + PARAM_PUBLIC_AGENT_GIT_URL;
     }
 
     private PublicConfig publicConfig() {

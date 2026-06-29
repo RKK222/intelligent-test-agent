@@ -91,20 +91,35 @@ class CommonParameterManagementControllerTest {
     }
 
     @Test
-    void invalidPlatformUsesUnifiedValidationError() {
+    void macosPlatformCanBeQueried() {
         CommonParameterManagementApplicationService service = org.mockito.Mockito.mock(CommonParameterManagementApplicationService.class);
-        when(service.find(eq(new CommonParameterFilter(null)), eq(new PageRequest(1, 50))))
-                .thenReturn(new PageResponse<>(List.of(), 1, 50, 0));
+        when(service.find(eq(new CommonParameterFilter(com.icbc.testagent.domain.configuration.ParameterPlatform.MACOS)),
+                eq(new PageRequest(1, 50))))
+                .thenReturn(new PageResponse<>(List.of(response("/tmp/ws", "macos")), 1, 50, 1));
         WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.get()
                 .uri("/api/internal/platform/configuration-management/common-parameters?platform=macos")
                 .header("X-Trace-Id", TRACE_ID)
                 .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.items[0].platform").isEqualTo("macos");
+    }
+
+    @Test
+    void invalidPlatformUsesUnifiedValidationError() {
+        CommonParameterManagementApplicationService service = org.mockito.Mockito.mock(CommonParameterManagementApplicationService.class);
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/configuration-management/common-parameters?platform=solaris")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
                 .expectStatus().isBadRequest()
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("VALIDATION_ERROR")
-                .jsonPath("$.details.platform").isEqualTo("macos");
+                .jsonPath("$.details.platform").isEqualTo("solaris");
     }
 
     @Test
@@ -172,12 +187,16 @@ class CommonParameterManagementControllerTest {
     }
 
     private static CommonParameterResponse response(String value) {
+        return response(value, "linux");
+    }
+
+    private static CommonParameterResponse response(String value, String platform) {
         return new CommonParameterResponse(
                 PARAMETER_ID,
                 "OPENCODE_WORKSPACE_ROOT",
                 "工作空间根目录",
                 value,
-                "linux",
+                platform,
                 NOW,
                 NOW);
     }

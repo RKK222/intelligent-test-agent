@@ -2,6 +2,26 @@
 
 ## Entries
 
+### 2026-06-29 - 统一目录配置与 macOS 平台修复
+
+- Why: 合并后 macOS 参数仍指向 `/tmp/test-agent`、`$HOME/test-agent`，公共 Git 地址为 `UNCONFIGURED`；前端未提供 `macos` 筛选，相关后端测试还把 `macos` 当非法值，用户初始化失败提示也没有给出可执行入口。
+- What:
+  - 通用参数页面增加 `macos` 并改为选择即查询；后端/API 测试同步接受 `macos`、继续拒绝未知平台。
+  - 启动脚本默认导出可覆盖的 `TEST_AGENT_ROOT=$ROOT_DIR`，F-COSS 本地种子目录改到项目 `temp/fcoss`，不再重建 `/tmp/test-agent`。
+  - 新增默认只读的 `tools/cleanup-old-path-data.sql`；显式传入绝对项目根目录时只迁移路径字段，保留 Session、Run 和审计记录。
+  - 公共 Git 未配置、公共 opencode 配置未初始化时，错误信息分别指向“通用参数管理”和“opencode公共配置管理”。
+- How:
+  - 六个 macOS 参数通过通用参数 API 更新为 `$TEST_AGENT_ROOT/temp/...`，公共 Git 地址更新为 `git@gitee.com:huangzhenren/opencodeconfig.git`，产生 7 条修改审计并触发 manager 配置刷新。
+  - 旧工作区文件先无损复制到项目 `temp/`，再迁移数据库 workspace/version/replica 路径；确认数据库旧路径引用为 0 后删除 `/tmp/test-agent`、`$HOME/tmp/test-agent` 和 `$HOME/test-agent/opencode-configdev`。
+- Result:
+  - 浏览器实测 `macos` 选项可选且自动刷新；系统管理入口和公共配置管理可打开。
+  - 公共仓库已从 Gitee `master` 初始化到 `temp/opencode-config`（commit `a5a4ca00a9`），默认用户 opencode 进程在 `192.168.100.115:4096` 返回 `READY`。
+  - Go 全量测试、前端 170 个 Vitest、相关 Maven reactor、前端 typecheck/build、系统管理入口 Playwright 和开发脚本校验通过。
+- 注意事项:
+  - 已执行的 Flyway migration `V20260628223000` 不修改，避免 checksum mismatch。
+  - 环境专属路径不应写入 Flyway，应通过通用参数管理 API 或本地初始化脚本更新。
+  - `temp/` 目录不提交到版本控制，本地开发时按需创建。
+
 ### 2026-06-29 - 前端 Chunk 大小优化与依赖按需加载
 
 - Why: Vite 生产构建时发出包体积过大警告，其中 `element-plus` (~940 kB)、`markdown` (~1.05 MB) 和 `echarts` (~1.08 MB) 均超出了 600 kB 警告阈值，影响加载性能。

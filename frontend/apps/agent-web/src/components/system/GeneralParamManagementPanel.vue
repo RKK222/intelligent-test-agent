@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Edit, Refresh, Search, Connection, Clock } from "@element-plus/icons-vue";
+import { Edit, Refresh, Connection, Clock } from "@element-plus/icons-vue";
 import { ElMessage, ElDialog, ElButton, ElInput, ElForm, ElFormItem, ElDrawer, ElEmpty, ElTag } from "element-plus";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type { CurrentUser, GeneralParameter, CommonParameterLoadSnapshot, CommonParameterChangeLog } from "@test-agent/shared-types";
@@ -223,13 +223,13 @@ function formatError(error: unknown) {
         <el-button size="small" :icon="Refresh" :loading="isFetching" @click="refresh">刷新</el-button>
         <el-button size="small" :icon="Connection" @click="loadSnapshotsOpen = true">查看各进程加载值</el-button>
         <div class="ta-common-param-filter">
-          <el-select v-model="draftPlatform" placeholder="平台" size="small" clearable style="width: 140px">
+          <el-select v-model="draftPlatform" placeholder="平台" size="small" clearable style="width: 140px" @change="applyFilter">
             <el-option label="全部" value="" />
             <el-option label="linux" value="linux" />
             <el-option label="windows" value="windows" />
+            <el-option label="macos" value="macos" />
             <el-option label="all" value="all" />
           </el-select>
-          <el-button size="small" :icon="Search" @click="applyFilter">筛选</el-button>
           <el-button size="small" text @click="clearFilter">重置</el-button>
         </div>
         <span class="ta-common-param-toolbar-note">通用参数为系统级配置，仅可修改参数值，不可新增或删除。</span>

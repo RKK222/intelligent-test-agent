@@ -95,7 +95,7 @@ class AgentConfigApplicationServiceTest {
 
         assertThatThrownBy(() -> service.writePublicAgentFile("review.md", "review", null))
                 .isInstanceOf(PlatformException.class)
-                .hasMessageContaining("公共 Agent Git 地址未配置");
+                .hasMessageContaining("请先在“系统管理 → 通用参数管理”中配置 OPENCODE_PUBLIC_AGENT_GIT_URL");
     }
 
     @Test

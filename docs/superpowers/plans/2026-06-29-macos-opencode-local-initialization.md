@@ -4,7 +4,7 @@
 
 **Goal:** 修复 macOS 本地 `.env.test` 环境的公共配置、用户 opencode 初始化和通用参数平台筛选。
 
-**Architecture:** 使用新的 Flyway 兼容迁移把 macOS 系统参数改为基于 `$TEST_AGENT_ROOT` 的项目内 `temp/` 路径，并由根启动脚本注入项目根目录。前端复用现有 Vue Query 查询，通过筛选值直接进入 query key 实现选择即刷新，不新增 API 或状态层。
+**Architecture:** macOS 系统参数通过现有通用参数管理 API 改为基于 `$TEST_AGENT_ROOT` 的项目内 `temp/` 路径，并由根启动脚本注入项目根目录；旧工作区数据使用显式本地审计/迁移脚本处理，不新增携带本机或演示数据的 Flyway migration。前端复用现有 Vue Query 查询，通过筛选值进入 query key 实现选择即刷新，不新增 API 或状态层。
 
 **Tech Stack:** Java 21、Spring Boot、Flyway、Vue 3、Element Plus、TanStack Vue Query、Vitest、Bash、Go opencode-manager
 
@@ -18,8 +18,8 @@
 - Modify: `backend/test-agent-configuration-management/src/test/java/com/icbc/testagent/configuration/management/CommonParameterManagementApplicationServiceTest.java`
 - Modify: `backend/test-agent-api/src/test/java/com/icbc/testagent/api/web/platform/CommonParameterManagementControllerTest.java`
 
-- [ ] 把现有 `macos` 非法值用例改为未知值，新增 `macos` 可解析和可查询断言。
-- [ ] 运行定向测试，确认旧断言先失败且新契约随后通过。
+- [x] 把现有 `macos` 非法值用例改为未知值，新增 `macos` 可解析和可查询断言。
+- [x] 运行定向测试，确认旧断言先失败且新契约随后通过。
 
 ### Task 2: 通用参数平台选择即刷新
 
@@ -27,24 +27,23 @@
 - Create: `frontend/apps/agent-web/tests/general-param-management-panel.test.ts`
 - Modify: `frontend/apps/agent-web/src/components/system/GeneralParamManagementPanel.vue`
 
-- [ ] 编写组件测试，断言下拉包含 `macos`，选择后立即使用 `platform=macos` 查询且页码重置。
-- [ ] 运行测试并确认在生产代码修改前按预期失败。
-- [ ] 删除 `draftPlatform/applyFilter`，将下拉绑定到 `activePlatform`，监听平台变化重置页码，移除筛选按钮。
-- [ ] 运行定向测试并确认通过。
+- [x] 编写组件测试，断言下拉包含 `macos`，选择后立即使用 `platform=macos` 查询且页码重置。
+- [x] 运行测试并确认在生产代码修改前按预期失败。
+- [x] 增加 `macos` 选项，选择变化时应用筛选并重置页码，移除二次确认按钮。
+- [x] 运行定向测试并确认通过。
 
 ### Task 3: 可移植的 macOS 项目内路径
 
 **Files:**
-- Create: `backend/test-agent-persistence/src/main/resources/db/migration/V20260629095000__fix_macos_opencode_local_paths.sql`
-- Modify: `backend/test-agent-persistence/src/test/java/com/icbc/testagent/persistence/MyBatisCommonParameterRepositoryIntegrationTest.java`
+- Create: `tools/cleanup-old-path-data.sql`
 - Modify: `restart-dev-services.sh`
 - Modify: `tools/verify-dev-scripts.sh`
 
-- [ ] 先扩展持久化/脚本验证，断言 macOS 原始参数使用 `$TEST_AGENT_ROOT/temp` 且启动脚本提供默认根目录。
-- [ ] 运行测试并确认新增断言失败。
-- [ ] 新增数据迁移，修正六个 macOS 参数，并在公共 Git 地址仍为 `UNCONFIGURED` 时写入确认的 Gitee 地址。
-- [ ] 在加载 `.env.test` 后设置可覆盖的 `TEST_AGENT_ROOT` 默认值。
-- [ ] 运行持久化测试和 `tools/verify-dev-scripts.sh`。
+- [x] 扩展脚本验证，断言启动脚本提供可覆盖的默认根目录，且不再创建 `/tmp/test-agent/fcoss`。
+- [x] 增加默认只读的旧路径审计脚本；显式传参时只迁移路径字段，不删除业务历史。
+- [x] 在加载 `.env.test` 后设置可覆盖的 `TEST_AGENT_ROOT` 默认值。
+- [x] 把本地 F-COSS 种子目录切换到 `$TEST_AGENT_ROOT/temp/fcoss`。
+- [x] 运行 `tools/verify-dev-scripts.sh`。
 
 ## Chunk 2: 文档、真实启动与交付
 

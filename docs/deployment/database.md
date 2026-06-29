@@ -302,7 +302,7 @@
 
 | 表/字段 | 说明 |
 |---|---|
-| `common_parameters` | 通用参数表，包含参数英文名、参数中文名、参数值、适用平台 `windows/linux/all`、创建和更新时间。 |
+| `common_parameters` | 通用参数表，包含参数英文名、参数中文名、参数值、适用平台 `windows/linux/macos/all`、创建和更新时间。 |
 | `code_repositories.english_name` | 代码库英文名称，可空兼容历史数据，非空唯一，最大 29 字符。 |
 | `workspace_create_operations` | 设置页创建应用工作空间的进度表，按 `operation_id` 记录状态、当前步骤、错误信息、关联应用/用户/模板/版本和 traceId。 |
 
@@ -338,6 +338,8 @@
 | `test-agent:common-param-snapshot:index:backend` | Set | - | 存活快照的后端进程 ID 索引 |
 
 进程崩溃后快照 30 秒内自动消失，与运行心跳 10 秒 TTL 不同步可接受（参数展示非实时关键）。广播总线未启用（`test-agent.server-broadcast.enabled=false`）或 Redis 故障时，仅本地实例刷新内存，全互联拓扑下各实例各自读库仍能最终一致，但跨实例 manager 下发需等待本实例下次刷新。
+
+macOS 本地环境迁移到项目内 `temp/` 时，先停止服务并运行 `tools/cleanup-old-path-data.sql` 的默认审计模式；确认引用后，再传入 `apply_cleanup=true` 和绝对 `test_agent_root` 迁移 `workspaces`、版本、replica、个人工作区、Agent worktree 和非运行 opencode 进程的路径字段。六个 macOS 通用参数和 `OPENCODE_PUBLIC_AGENT_GIT_URL` 必须通过通用参数管理 API/页面修改，以保留修改历史并触发缓存及 manager 配置刷新。该脚本不删除 Session、Run、审计记录或磁盘目录，也不是 Flyway migration。
 
 
 ## V20260626170000 公共 Agent 配置管理

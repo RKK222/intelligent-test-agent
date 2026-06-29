@@ -440,7 +440,7 @@ func assertPublicConfigRejected(t *testing.T, cfg config.Config) Result {
 	if result.ErrorCode != "OPENCODE_UNAVAILABLE" {
 		t.Fatalf("expected OPENCODE_UNAVAILABLE, got %q", result.ErrorCode)
 	}
-	if result.Message != "公共配置未初始化，请联系管理员。" {
+	if result.Message != "公共 opencode 配置尚未初始化。请使用超级管理员账号进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化后重试。" {
 		t.Fatalf("unexpected failure message %q", result.Message)
 	}
 	if len(starter.specs) != 0 {

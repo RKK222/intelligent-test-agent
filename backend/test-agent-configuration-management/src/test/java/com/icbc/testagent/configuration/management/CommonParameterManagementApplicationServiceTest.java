@@ -40,6 +40,7 @@ class CommonParameterManagementApplicationServiceTest {
         when(repository.findAll()).thenReturn(List.of(
                 parameter("param_opencode_workspace_root_linux", "OPENCODE_WORKSPACE_ROOT", "/opt/ws", ParameterPlatform.LINUX),
                 parameter("param_opencode_workspace_root_windows", "OPENCODE_WORKSPACE_ROOT", "C:\\ws", ParameterPlatform.WINDOWS),
+                parameter("param_opencode_workspace_root_macos", "OPENCODE_WORKSPACE_ROOT", "/tmp/ws", ParameterPlatform.MACOS),
                 parameter("param_opencode_public_agent_git_url_all", "OPENCODE_PUBLIC_AGENT_GIT_URL", "https://x.git", ParameterPlatform.ALL),
                 parameter("param_opencode_session_dir_linux", "OPENCODE_SESSION_DIR", "/opt/sess", ParameterPlatform.LINUX),
                 parameter("param_opencode_session_dir_windows", "OPENCODE_SESSION_DIR", "C:\\sess", ParameterPlatform.WINDOWS)));
@@ -52,7 +53,12 @@ class CommonParameterManagementApplicationServiceTest {
         assertThat(linuxPage.items()).extracting(CommonParameterResponse::platform).containsOnly("linux");
 
         PageResponse<CommonParameterResponse> allFirstPage = service.find(new CommonParameterFilter(null), new PageRequest(1, 2));
-        assertThat(allFirstPage.total()).isEqualTo(5);
+        PageResponse<CommonParameterResponse> macosPage = service.find(
+                new CommonParameterFilter(ParameterPlatform.MACOS), new PageRequest(1, 10));
+        assertThat(macosPage.total()).isEqualTo(1);
+        assertThat(macosPage.items()).extracting(CommonParameterResponse::platform).containsOnly("macos");
+
+        assertThat(allFirstPage.total()).isEqualTo(6);
         assertThat(allFirstPage.items()).hasSize(2);
         assertThat(allFirstPage.totalPages()).isEqualTo(3L);
 
@@ -61,8 +67,9 @@ class CommonParameterManagementApplicationServiceTest {
     }
 
     @Test
-    void parsePlatformFilterRejectsUnknownValue() {
-        assertThatThrownBy(() -> CommonParameterFilter.parse("macos"))
+    void parsePlatformFilterAcceptsMacosAndRejectsUnknownValue() {
+        assertThat(CommonParameterFilter.parse("macos").platform()).isEqualTo(ParameterPlatform.MACOS);
+        assertThatThrownBy(() -> CommonParameterFilter.parse("solaris"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
     }

@@ -126,6 +126,16 @@ test("admin application fallback runs after auth roles arrive", async ({ page })
   expect(configurationApplicationRequests).toContain("GET /api/internal/platform/configuration-management/applications");
 });
 
+test("super admin can open system management from the activity bar", async ({ page }) => {
+  await mockBackendApi(page, { authRoles: ["SUPER_ADMIN"] });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "系统管理" }).click();
+
+  await expect(page.getByRole("navigation", { name: "系统管理导航" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "通用参数管理" })).toBeVisible();
+});
+
 test("settings dialog manages application context and SSH key metadata", async ({ page }) => {
   await mockBackendApi(page);
 
