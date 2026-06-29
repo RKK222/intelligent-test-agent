@@ -2,6 +2,25 @@
 
 ## Entries
 
+### 2026-06-29 - 前端 Chunk 大小优化与依赖按需加载
+
+- Why: Vite 生产构建时发出包体积过大警告，其中 `element-plus` (~940 kB)、`markdown` (~1.05 MB) 和 `echarts` (~1.08 MB) 均超出了 600 kB 警告阈值，影响加载性能。
+- What:
+  - 引入 `unplugin-vue-components` 和 `unplugin-auto-import` 插件，实现 Element Plus 组件的按需自动导入。
+  - 将 `highlight.js` 全量包替换为 `highlight.js/lib/common` 常用语言子包（支持 37 种常用开发语言），精简 Markdown 渲染体积。
+  - 移除 `manualChunks` 中对 `echarts` 依赖的强合并配置，使其保持按需动态分片。
+  - 解决 Vitest 及 E2E 测试在此项调整下的兼容性，规避了 JSDOM 的 CSS 解析报错以及 Playwright 侧边栏按钮的选择器冲突。
+- How:
+  - 在 `apps/agent-web` 的 `devDependencies` 中安装按需引入依赖，并在 `vite.config.ts` 和 `vitest.config.ts` 中注册 `AutoImport` 及 `Components` 插件（为兼容单元测试在 Node 下运行，显式配置 `importStyle: false`）。
+  - 创建 `src/utils/locale.ts` 文件以剥离 Element Plus 国际化配置及 dayjs side-effects，在 `App.vue` 中使用 `<el-config-provider>` 包装，彻底规避 `main.ts` -> `App.vue` 的循环依赖导致应用崩溃问题。
+  - 修改 `MarkdownView.vue` 及 `MarkdownPreview.vue` 的动态 `import` 路径为 `highlight.js/lib/common`。
+  - 适配测试用例：在 `agent-config-panel.test.ts` 中将 `getByTitle` 调整为 `getByText`；在 `scheduler-management-panel.test.ts` 的 menu 切换断言中指定 `{ selector: ".ta-system-menu-text" }` 以免与 tooltips 冲突；在 `workbench.spec.ts` 中将模糊的 `/工作空间/` button 查询改用特定的 `.ta-workbench-footer-branch` 类定位器，解决 strict mode violation。
+- Result:
+  - `element-plus` 依赖包由 939.78 kB 缩减至 **514.97 kB**。
+  - `markdown` (highlight.js) 依赖包由 1,052.13 kB 缩减至 **289.87 kB**。
+  - `echarts` 全量包被完全拆散为异步子 chunk (单文件约 250 kB)，不再占用首屏同步加载。
+  - 全量 169 项 Vitest 单测均顺利绿过，成功消除 Vite 大包警告。
+
 ### 2026-06-29 - 优化挂机趣味彩蛋出现机制与计时
 
 - Why: 优化彩蛋出现机制，要求只有当页面置顶且鼠标不动超过 1 分钟时才出现小人，而在页面未在最前端显示时（例如后台标签页、浏览器最小化或失去焦点），小人不应触发以避免浪费背景资源或影响用户体验。

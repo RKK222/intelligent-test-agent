@@ -41,7 +41,7 @@ async function ensureLibs() {
   const [MarkdownIt, DOMPurifyMod, hljsMod] = await Promise.all([
     import('markdown-it'),
     import('dompurify'),
-    props.highlight ? import('highlight.js') : Promise.resolve(null),
+    props.highlight ? import('highlight.js/lib/common') : Promise.resolve(null),
   ])
   const md = new MarkdownIt.default({
     html: false, // 不直接内联原始 HTML，统一交给 DOMPurify

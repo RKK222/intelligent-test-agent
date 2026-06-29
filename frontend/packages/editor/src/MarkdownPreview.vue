@@ -40,7 +40,7 @@ async function ensureLibs() {
   }
   const [MarkdownIt, hljsMod, DOMPurifyMod] = await Promise.all([
     import("markdown-it"),
-    import("highlight.js"),
+    import("highlight.js/lib/common"),
     import("dompurify")
   ]);
   const md = new MarkdownIt.default({

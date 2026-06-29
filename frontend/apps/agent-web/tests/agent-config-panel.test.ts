@@ -70,7 +70,7 @@ describe("AgentConfigPanel", () => {
     const { view } = renderPanel();
 
     await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
-    await fireEvent.click(view.getByTitle("创建公共 worktree"));
+    await fireEvent.click(view.getByText("创建公共 worktree"));
 
     expect(await view.findByText("远端分支")).toBeTruthy();
     expect(await view.findByText("没有已初始化服务器，请到系统管理 > 配置管理 > opencode公共配置管理初始化。")).toBeTruthy();
@@ -83,7 +83,7 @@ describe("AgentConfigPanel", () => {
     const { view, workbench } = renderPanel();
 
     await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalledWith("", undefined, "linux-1"));
-    await fireEvent.click(view.getByTitle("切换公共 worktree"));
+    await fireEvent.click(view.getByText("切换公共 worktree"));
 
     expect(await view.findByText("change-agent-md / main / usr_admin / admin")).toBeTruthy();
     await fireEvent.update(view.getByLabelText("公共 worktree"), "agw_1234567890abcdef");
@@ -103,7 +103,7 @@ describe("AgentConfigPanel", () => {
     });
 
     await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalledWith("", "agw_1234567890abcdef", "linux-1"));
-    await fireEvent.click(view.getByTitle("切换公共 worktree"));
+    await fireEvent.click(view.getByText("切换公共 worktree"));
     await view.findByText("change-agent-md / main / usr_admin / admin");
     await fireEvent.update(view.getByLabelText("公共 worktree"), "__direct_public_config__");
     await fireEvent.click(view.getByRole("button", { name: "确定" }));

@@ -87,7 +87,11 @@ async function ensureMonacoEditor(path: string, content: string) {
   }
   if (!monacoLib) {
     const mod = await import("./monaco-env");
-    monacoLib = mod.monaco;
+    monacoLib = await mod.loadMonaco();
+  }
+  if (!monacoLib) {
+    console.error("Failed to load Monaco Editor");
+    return;
   }
   model = buildModel(path, content);
   if (editor.value) {

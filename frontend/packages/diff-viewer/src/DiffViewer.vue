@@ -105,7 +105,11 @@ watch(isDirty, (newVal) => {
 async function initMonaco(el: HTMLElement) {
   if (diffEditor.value) return;
   const mod = await import("./monaco-env");
-  monacoLib = mod.monaco;
+  monacoLib = await mod.loadMonaco();
+  if (!monacoLib) {
+    console.error("Failed to load Monaco Editor");
+    return;
+  }
   // Define premium light theme matching the light layout
   monacoLib.editor.defineTheme("ta-diff-light", {
     base: "vs",

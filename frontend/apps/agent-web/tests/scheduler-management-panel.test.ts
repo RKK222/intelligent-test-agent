@@ -193,9 +193,9 @@ describe("scheduler management panel", () => {
     const backendApi = api();
     const view = renderWithApi(SystemManagementPanel, backendApi);
 
-    expect(await view.findByText("定时任务管理")).toBeTruthy();
+    expect(await view.findByText("定时任务管理", { selector: ".ta-system-menu-text" })).toBeTruthy();
     expect(await view.findByText("每日清理")).toBeTruthy();
-    await fireEvent.click(view.getByText("运行管理"));
+    await fireEvent.click(view.getByText("运行管理", { selector: ".ta-system-menu-text" }));
 
     await waitFor(() => expect(backendApi.getOpencodeRuntimeManagementOverview).toHaveBeenCalled());
     expect(await view.findByText("暂无服务器 / Java 进程")).toBeTruthy();
@@ -206,7 +206,7 @@ describe("scheduler management panel", () => {
     const backendApi = api();
     const view = renderWithApi(SystemManagementPanel, backendApi);
 
-    await fireEvent.click(view.getByText("配置管理"));
+    await fireEvent.click(view.getByText("配置管理", { selector: ".ta-system-menu-text" }));
 
     expect(await view.findByText("opencode公共配置管理")).toBeTruthy();
     expect(await view.findByText("/data/opencode-public-config")).toBeTruthy();

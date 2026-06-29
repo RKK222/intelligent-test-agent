@@ -167,19 +167,21 @@ async function loadMembers() {
  * - keyword 为空时直接返回空下拉，不打后端，避免用户表数据多时聚焦/初始进入就全量拉取导致慢。
  * - 后端 LIKE 匹配 userId / unifiedAuthId / username 任一字段（不区分大小写）。
  */
-async function fetchUserSuggestions(keyword: string, callback: (items: PlatformUserSummary[]) => void) {
+function fetchUserSuggestions(keyword: string, callback: (items: any[]) => void) {
   const trimmed = keyword.trim();
   if (!trimmed) {
     callback([]);
     return;
   }
-  try {
-    const page = await api.searchUsers(trimmed, 1, 20);
-    callback(page.items);
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : "搜索用户失败";
-    callback([]);
-  }
+  void (async () => {
+    try {
+      const page = await api.searchUsers(trimmed, 1, 20);
+      callback(page.items);
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : "搜索用户失败";
+      callback([]);
+    }
+  })();
 }
 
 // 显式"搜索"按钮：懒加载策略下空输入不查库；el-autocomplete 已自带 300ms 防抖自动拉取候选。
@@ -579,7 +581,7 @@ onBeforeUnmount(() => {
               value-key="username"
               style="width: 280px"
               clearable
-              @select="onUserSelected"
+              @select="(item: any) => onUserSelected(item)"
             >
               <template #default="{ item }">
                 <div class="ta-user-suggestion">

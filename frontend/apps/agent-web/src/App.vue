@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ElConfigProvider } from "element-plus";
+import { zhCnWithArabicMonths } from "./utils/locale";
 import { useAuthStore } from "./stores/authStore";
 import { watch } from "vue";
 import { RouterView, useRouter } from "vue-router";
@@ -30,5 +32,7 @@ function handleUnauthorized() {
 </script>
 
 <template>
-  <RouterView />
+  <el-config-provider :locale="zhCnWithArabicMonths">
+    <RouterView />
+  </el-config-provider>
 </template>

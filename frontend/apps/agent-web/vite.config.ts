@@ -2,6 +2,9 @@ import { fileURLToPath, URL } from "node:url";
 import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
+import AutoImport from "unplugin-auto-import/vite";
+import Components from "unplugin-vue-components/vite";
+import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
 
 // 统一通过 import.meta.url 解析 workspace 包源码，避免硬编码绝对路径
 const pkgSrc = (name: string): string =>
@@ -10,7 +13,16 @@ const pkgSrc = (name: string): string =>
 const devServerHost = process.env.HOST ?? "127.0.0.1";
 
 export default defineConfig({
-  plugins: [vue(), tailwindcss()],
+  plugins: [
+    vue(),
+    tailwindcss(),
+    AutoImport({
+      resolvers: [ElementPlusResolver({ importStyle: false })]
+    }),
+    Components({
+      resolvers: [ElementPlusResolver({ importStyle: false })]
+    })
+  ],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
@@ -30,5 +42,38 @@ export default defineConfig({
   server: {
     host: devServerHost,
     port: 3000
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        // 代码分割策略：将大型第三方库独立分 chunk，优化缓存和首屏加载
+        // 注意：Monaco Editor 不放入 manualChunks，让 Vite 的 ?worker 语法自然拆分 Workers
+        manualChunks(id) {
+          // Vue 生态核心
+          if (id.includes("vue/dist") || id.includes("vue-router") || id.includes("pinia")) {
+            return "vue-vendor";
+          }
+          // Element Plus UI 库
+          if (id.includes("element-plus") || id.includes("@element-plus/icons-vue")) {
+            return "element-plus";
+          }
+          // Markdown 相关
+          if (id.includes("markdown-it") || id.includes("highlight.js") || id.includes("marked")) {
+            return "markdown";
+          }
+          // 布局/面板管理
+          if (id.includes("dockview-vue")) {
+            return "dockview";
+          }
+          // 数据请求管理
+          if (id.includes("@tanstack/vue-query")) {
+            return "query";
+          }
+          // Monaco Editor 不配置，让 ?worker 语法自然拆分 Workers
+        }
+      }
+    },
+    // Monaco Editor 作为懒加载包体积较大，提高包警告阈值至 1.5MB 避免误报
+    chunkSizeWarningLimit: 1500
   }
 });

@@ -532,7 +532,7 @@ test("workspace cascade menu teleports panel and submenu above all other UI", as
   await gotoWorkbench(page);
 
   // 触发按钮：label 是 "F-GCMS 工作空间"（无 selected version）
-  const trigger = page.getByRole("button", { name: /工作空间/ });
+  const trigger = page.locator(".ta-workbench-footer-branch");
   await expect(trigger).toBeVisible();
   await trigger.click();
 
@@ -592,7 +592,7 @@ test("workspace cascade menu +新增版本 dialog opens with yyyy年M月 label",
   await gotoWorkbench(page);
 
   // 打开一级菜单 → hover 模板 → 出现二级菜单
-  const trigger = page.getByRole("button", { name: /工作空间/ });
+  const trigger = page.locator(".ta-workbench-footer-branch");
   await trigger.click();
   const firstItem = page.getByRole("menuitem", { name: /F-GCMS 主服务/ });
   await firstItem.hover();
@@ -652,7 +652,7 @@ test("workspace cascade submenu shifts up when it would overflow the viewport bo
   });
 
   await gotoWorkbench(page);
-  const trigger = page.getByRole("button", { name: /工作空间/ });
+  const trigger = page.locator(".ta-workbench-footer-branch");
   await trigger.click();
 
   // hover 最后一个 li（最接近视口底部），让子菜单自然位置会溢出

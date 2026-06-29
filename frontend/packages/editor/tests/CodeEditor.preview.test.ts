@@ -23,17 +23,20 @@ vi.mock("../src/monaco-env", () => {
     addCommand: () => null,
     dispose: () => {}
   };
-  return {
-    monaco: {
-      Uri: { parse: () => ({}) },
-      KeyMod: { CtrlCmd: 1 << 11 },
-      KeyCode: { KeyS: 49 },
-      editor: {
-        getModel: () => null,
-        createModel: () => fakeModel,
-        create: () => fakeEditor
-      }
+  const mockMonaco = {
+    Uri: { parse: () => ({}) },
+    KeyMod: { CtrlCmd: 1 << 11 },
+    KeyCode: { KeyS: 49 },
+    editor: {
+      getModel: () => null,
+      createModel: () => fakeModel,
+      create: () => fakeEditor
     }
+  };
+  return {
+    loadMonaco: () => Promise.resolve(mockMonaco),
+    getMonaco: () => mockMonaco,
+    monaco: mockMonaco
   };
 });
 
