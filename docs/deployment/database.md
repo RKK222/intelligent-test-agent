@@ -302,6 +302,27 @@ Java 后端启动时会把当前服务器 IPv4 写入 `SYS_DATA_ROOT_DIR/.server
 - `macos` 沿用现有通用参数平台枚举值；用户口头称 “mac” 时落库仍使用稳定值 `macos`。
 - 该参数属于生产运行所需系统参数，不是测试或演示数据；既有环境如需调整实际目录，应通过通用参数管理页面/API 修改 value，不改写已发布 migration。
 
+## V20260629230000 OPENCODE 路径参数收敛为 all 行
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260629230000__consolidate_opencode_path_params_to_all.sql` 将 6 个 OPENCODE 路径类通用参数由 `linux`/`windows`/`macos` 三平台分别种子，收敛为单条 `all` 行，值统一引用 `${SYS_DATA_ROOT_DIR}`：
+
+| 参数 | 平台 | 默认值 |
+|---|---|---|
+| `OPENCODE_APP_WORKSPACE_ROOT` | `all` | `${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appworkspace/` |
+| `OPENCODE_PERSONAL_WORKTREE_ROOT` | `all` | `${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/personalworktree/` |
+| `OPENCODE_PUBLIC_CONFIG_DIR` | `all` | `${SYS_DATA_ROOT_DIR}/agent-opencode/.config/opencode/` |
+| `OPENCODE_PUBLIC_CONFIG_GIT_ROOT` | `all` | `${SYS_DATA_ROOT_DIR}/agent-opencode/.config/` |
+| `OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT` | `all` | `${SYS_DATA_ROOT_DIR}/agent-opencode/.configdev/` |
+| `OPENCODE_SESSION_DIR` | `all` | `${SYS_DATA_ROOT_DIR}/agent-opencode/.session/` |
+
+迁移先 `delete` 上述 6 个参数的既有 `linux`/`windows`/`macos` 行，再以 `on conflict (parameter_english, platform) do update` 写入 `all` 行。`SYS_DATA_ROOT_DIR` 仍保持三平台行不变；`all` 行在运行态由 `CommonParameterReferenceResolver` 按当前/目标平台作为解析上下文展开 `${SYS_DATA_ROOT_DIR}`（见 `CommonParameterReferenceResolver` 的 `all` 引用平台参数支持）。
+
+兼容策略：
+
+- 该 migration 只改 `common_parameters` 数据，不改表结构、API DTO 或事件类型。
+- `macOS` 实际路径由历史 `/tmp/test-agent/...` 变为 `$HOME/.testagent/agent-opencode/...`（来自 `SYS_DATA_ROOT_DIR` 的 macOS 值 `$HOME/.testagent`），本地开发既有 `/tmp` 数据需迁移到新位置。
+- 该参数属于生产运行所需系统参数，不是测试或演示数据；既有环境如需调整实际目录，应通过通用参数管理页面/API 修改 value，不改写已发布 migration。
+
 ## V20260627214000 user_roles identity 序列兼容修复
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260627214000__reset_user_roles_identity_sequence.sql` 将 `user_roles.id` identity 起点重置到 `1000000`，兼容历史库或人工数据导入后序列值落后于已有主键，导致新增用户授予角色时报 `user_roles_pkey` 冲突的问题。

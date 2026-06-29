@@ -15,8 +15,9 @@ import java.util.regex.Pattern;
  *   <li>占位符 {@code ${englishName}} 按 {@code parameter_english} 精确匹配，允许多层嵌套展开。</li>
  *   <li>若 {@code ${name}} 未命中通用参数，则按同名进程环境变量展开；{@code $NAME} 也按环境变量展开。</li>
  *   <li>路径值开头的 {@code $HOME/}、{@code $HOME\}、{@code $HOME} 和 {@code ~/} 会展开为用户主目录。</li>
- *   <li>被引用参数按"目标参数自身平台"作为上下文解析：目标为 ALL 时只能引用 ALL 参数
- *       （引用平台参数视为未解析）；目标为 LINUX/WINDOWS 时按"先当前平台、再回退 ALL"查找。</li>
+ *   <li>被引用参数按"解析上下文平台"查找：先该上下文平台、再回退 ALL。上下文由调用方传入：
+ *       目标为 ALL 行时，调用方以当前 JVM 平台或目标平台作为上下文，使 ALL 参数也能引用平台参数
+ *       （如 {@code SYS_DATA_ROOT_DIR} 仅有平台行）；目标为 LINUX/WINDOWS/MACOS 时上下文即该平台。</li>
  *   <li>循环引用与超过 {@link #MAX_DEPTH} 的深层嵌套保留字面占位符不展开，避免抛异常阻断业务。</li>
  *   <li>被引用参数或环境变量缺失时同样保留字面占位符，由调用方根据结果中残留的变量判断解析失败。</li>
  * </ul>
@@ -34,20 +35,40 @@ public final class CommonParameterReferenceResolver {
     /**
      * 解析目标参数的值；返回原始值、展开值、是否含引用及解析错误描述。
      *
+     * <p>上下文取目标参数自身平台：ALL 行只能引用 ALL 参数。需要让 ALL 行引用平台参数时，
+     * 改用 {@link #resolve(CommonParameter, ParameterPlatform, BiFunction)} 显式传入上下文平台。
+     *
      * @param target       待解析的通用参数
      * @param exactLookup  按 (englishName, platform) 精确匹配的查找回调（不做平台回退，回退由本解析器控制）
      */
     public ResolvedValue resolve(
             CommonParameter target,
             BiFunction<String, ParameterPlatform, Optional<CommonParameter>> exactLookup) {
+        return resolve(target, target.platform(), exactLookup);
+    }
+
+    /**
+     * 解析目标参数的值，按指定上下文平台展开被引用参数。
+     *
+     * <p>ALL 行可传入当前/目标平台作为上下文，从而引用平台参数（如 {@code SYS_DATA_ROOT_DIR}）。
+     * 上下文为 ALL 时退化为只引用 ALL 参数。
+     *
+     * @param target       待解析的通用参数
+     * @param context      解析被引用参数时使用的上下文平台
+     * @param exactLookup  按 (englishName, platform) 精确匹配的查找回调（不做平台回退，回退由本解析器控制）
+     */
+    public ResolvedValue resolve(
+            CommonParameter target,
+            ParameterPlatform context,
+            BiFunction<String, ParameterPlatform, Optional<CommonParameter>> exactLookup) {
         String raw = target.parameterValue();
         Set<String> resolving = new HashSet<>();
         resolving.add(target.englishName());
-        String resolved = expand(raw, target.platform(), resolving, exactLookup, 0);
+        String resolved = expand(raw, context, resolving, exactLookup, 0);
         boolean hasReference = hasAnyReference(raw);
         String error = null;
         if (hasReference && hasAnyReference(resolved)) {
-            error = "存在未解析的变量引用（循环、缺失、环境变量不存在或 ALL 引用了平台参数）";
+            error = "存在未解析的变量引用（循环、缺失或环境变量不存在）";
         }
         return new ResolvedValue(raw, resolved, hasReference, error);
     }
@@ -90,10 +111,7 @@ public final class CommonParameterReferenceResolver {
             String name,
             ParameterPlatform context,
             BiFunction<String, ParameterPlatform, Optional<CommonParameter>> exactLookup) {
-        if (context == ParameterPlatform.ALL) {
-            // ALL 参数只能引用 ALL 参数；引用平台参数时返回 empty，由调用方保留字面并标记未解析。
-            return exactLookup.apply(name, ParameterPlatform.ALL);
-        }
+        // 引用按"解析上下文平台"查找：先该平台、再回退 ALL；上下文为 ALL 时退化为只查 ALL。
         return exactLookup.apply(name, context)
                 .or(() -> exactLookup.apply(name, ParameterPlatform.ALL));
     }

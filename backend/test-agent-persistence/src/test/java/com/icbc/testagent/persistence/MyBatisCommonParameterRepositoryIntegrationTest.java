@@ -49,12 +49,13 @@ class MyBatisCommonParameterRepositoryIntegrationTest {
 
     @Test
     void commonParametersAreReadThroughMyBatisXmlMapper() {
-        assertThat(repository.findByEnglishNameAndPlatform("OPENCODE_APP_WORKSPACE_ROOT", ParameterPlatform.LINUX))
+        // OPENCODE 路径参数已收敛为 all 单行，值引用 ${SYS_DATA_ROOT_DIR}，由解析器在运行态展开。
+        assertThat(repository.findByEnglishNameAndPlatform("OPENCODE_APP_WORKSPACE_ROOT", ParameterPlatform.ALL))
                 .map(CommonParameter::parameterValue)
-                .contains("/data/.testagent/agent-opencode/workspace/appworkspace/");
-        assertThat(repository.findByEnglishNameAndPlatform("OPENCODE_SESSION_DIR", ParameterPlatform.WINDOWS))
+                .contains("${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appworkspace/");
+        assertThat(repository.findByEnglishNameAndPlatform("OPENCODE_SESSION_DIR", ParameterPlatform.ALL))
                 .map(CommonParameter::parameterValue)
-                .contains("D:/data/.testagent/agent-opencode/.session/");
+                .contains("${SYS_DATA_ROOT_DIR}/agent-opencode/.session/");
         assertThat(repository.findByEnglishNameAndPlatform("SYS_DATA_ROOT_DIR", ParameterPlatform.MACOS))
                 .map(CommonParameter::parameterValue)
                 .contains("$HOME/.testagent");

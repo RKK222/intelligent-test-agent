@@ -70,6 +70,28 @@ class InMemoryCommonParameterValuesTest {
         assertThat(values.resolvedValue("A", ParameterPlatform.ALL)).hasValue("2");
     }
 
+    @Test
+    void allRowResolvesPlatformReferenceByCurrentPlatform() {
+        FakeRepository repository = new FakeRepository();
+        // SYS_DATA_ROOT_DIR 仅有平台行；OPENCODE_SESSION_DIR 为 all 行引用它。
+        repository.add(param("SYS_DATA_ROOT_DIR", "/data/.testagent", ParameterPlatform.LINUX));
+        repository.add(param("SYS_DATA_ROOT_DIR", "$HOME/.testagent", ParameterPlatform.MACOS));
+        repository.add(param("SYS_DATA_ROOT_DIR", "D:/data/.testagent", ParameterPlatform.WINDOWS));
+        repository.add(param("OPENCODE_SESSION_DIR", "${SYS_DATA_ROOT_DIR}/agent-opencode/.session/", ParameterPlatform.ALL));
+        InMemoryCommonParameterValues values = new InMemoryCommonParameterValues(repository, resolver);
+        values.reload();
+
+        // 按当前平台读取 all 行，${SYS_DATA_ROOT_DIR} 应展开为当前平台的值。
+        String expectedRoot = switch (ParameterPlatform.current()) {
+            case LINUX -> "/data/.testagent";
+            case MACOS -> System.getProperty("user.home") + "/.testagent";
+            case WINDOWS -> "D:/data/.testagent";
+            case ALL -> "/data/.testagent";
+        };
+        assertThat(values.resolvedValue("OPENCODE_SESSION_DIR"))
+                .hasValue(expectedRoot + "/agent-opencode/.session/");
+    }
+
     private static CommonParameter param(String englishName, String value, ParameterPlatform platform) {
         return new CommonParameter(
                 "param_" + englishName.toLowerCase(),
