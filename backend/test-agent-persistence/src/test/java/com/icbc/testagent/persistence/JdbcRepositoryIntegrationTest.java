@@ -193,6 +193,44 @@ class JdbcRepositoryIntegrationTest {
     }
 
     @Test
+    void workspaceRepositoryClampsLegacyUpdatedAtBeforeCreatedAtOnRead() {
+        // 直接绕过 Repository 写入历史脏数据，模拟分布式批量写入或时钟回拨造成的 updated_at 早于 created_at。
+        // 读取侧应把 updated_at 抬到 created_at，避免把领域异常直接抛给上游。
+        Instant createdAt = NOW;
+        Instant legacyUpdatedAt = NOW.minusSeconds(60);
+        jdbcClient.sql("""
+                        insert into workspaces(
+                            workspace_id, name, root_path, status, linux_server_id, trace_id,
+                            created_at, updated_at
+                        ) values (
+                            :workspaceId, :name, :rootPath, :status, :linuxServerId, :traceId,
+                            :createdAt, :updatedAt
+                        )
+                        """)
+                .param("workspaceId", "wrk_legacy_clamp")
+                .param("name", "Legacy Workspace")
+                .param("rootPath", "/tmp/legacy")
+                .param("status", WorkspaceStatus.ACTIVE.name())
+                .param("linuxServerId", "linux-legacy")
+                .param("traceId", "trace_legacy_clamp")
+                .param("createdAt", Timestamp.from(createdAt))
+                .param("updatedAt", Timestamp.from(legacyUpdatedAt))
+                .update();
+
+        assertThat(workspaces.findById(new WorkspaceId("wrk_legacy_clamp")))
+                .get()
+                .satisfies(loaded -> {
+                    assertThat(loaded.createdAt()).isEqualTo(createdAt);
+                    assertThat(loaded.updatedAt())
+                            .as("updatedAt should be clamped to createdAt for legacy rows")
+                            .isEqualTo(createdAt);
+                });
+        assertThat(workspaces.findPage(new PageRequest(1, 50)).items())
+                .extracting(Workspace::workspaceId)
+                .contains(new WorkspaceId("wrk_legacy_clamp"));
+    }
+
+    @Test
     void sessionsPersistNullableOpencodeMappingAndAttachRemoteSession() {
         workspaces.save(workspace());
         sessions.save(session());

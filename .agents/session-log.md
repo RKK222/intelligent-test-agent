@@ -1763,3 +1763,20 @@
   - `stageAll` 必须先 install `test-agent-common` 才能让下游模块拿到新方法签名，否则会触发 `NoSuchMethodError`。
   - Controller 用 mock service 时不应断言空 commitMessage 的 400 响应，校验逻辑在 Service 内，Controller 测试只覆盖路由与权限；Service 单测中专门覆盖。
   - 公共配置 git 仓库路径在 `OPENCODE_PUBLIC_CONFIG_DIR` 通用参数中维护，路径变更需要走通用参数管理入口而非本接口。
+
+### 2026-06-29 - 修复 /api/workspaces 返回 updatedAt must not be before createdAt
+
+- Why: 用户反馈 GET /api/workspaces?page=1&size=50 一直返回 updatedAt must not be before createdAt 校验错误。该校验来自 Workspace 领域 record 的 compact constructor，抛 IllegalArgumentException 后被 GlobalExceptionHandler 原样回吐，把内部不变量错误信息暴露给前端。
+- What:
+  - 数据侧：192.168.100.200:5432/testagent 的 workspaces 表中 wrk_754915e1ecfe4a139c24b845f5be3d2e（F-WRAPP 本地工程模板-local）的 updated_at 早于 created_at（同一天 02:38:00 < 09:12:19，疑似时钟回拨或批量写入），是当前唯一一条脏数据。一次性 update workspaces set updated_at = created_at where workspace_id = ? 回填完毕，接口立即恢复 200。
+  - 防御侧：JdbcWorkspaceRepository.rowMapper 增加 
+ormalizeUpdatedAt 兜底：发现 updated_at < created_at 时把 updated_at 抬到 created_at，并打一条 SLF4J WARN 保留原始值供排障，避免类似历史脏数据再次把领域异常原样甩到前端。Workspace 领域不变量保持不变，写入侧仍由领域层保证 updated_at >= created_at。
+  - 文档与测试：ackend/test-agent-persistence/README.md 在 JdbcWorkspaceRepository 一行补充历史脏数据归一化说明；JdbcRepositoryIntegrationTest 新增 workspaceRepositoryClampsLegacyUpdatedAtBeforeCreatedAtOnRead 用例，直接 insert 脏行后验证 indById / indPage 都把 updatedAt 抬到 createdAt。
+- How: 仅修改持久化映射层，未触动领域对象和 API 契约；按 docs/standards/backend.md 第 4 条要求在 Repository 测试和模块 README 记录边界。
+- Result:
+  - 接口 GET /api/workspaces?page=1&size=50 实时请求返回 200，数据正常。
+  - 后端 mvn -pl test-agent-persistence -am compile 通过；新增的归一化用例因 JdbcRepositoryIntegrationTest 共用的 V20260628223000__add_macos_platform_support.sql 在 H2 PostgreSQL 模式中 ::text[] 数组语法不兼容而无法本地全量执行（与本次修复无关的预存在问题），已记录在 Pitfalls。
+- Pitfalls:
+  - ApplicationDatabaseIntegrityTest 等走 H2 的集成测试因 macOS 平台 migration 使用了 PostgreSQL 专属的 ARRAY[...]::text[] 语法而失败，是先于本次修复存在的测试基础设施问题；新增归一化逻辑仅在生产 PostgreSQL 路径生效。
+  - 该 IllegalArgumentException 链路会把领域内部不变量消息原样暴露给前端，存在信息泄漏风险；后续可考虑在 GlobalExceptionHandler 中对 IllegalArgumentException 改为统一 BAD_REQUEST 描述并把原始 message 仅写入 server log。
+- Verification: Invoke-WebRequest http://127.0.0.1:8080/api/workspaces?page=1&size=50 返回 200；mvn -pl test-agent-persistence -am compile 编译通过。

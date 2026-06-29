@@ -6,7 +6,10 @@ import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
+import java.time.Instant;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -17,22 +20,49 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class JdbcWorkspaceRepository extends JdbcRepositorySupport implements WorkspaceRepository {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(JdbcWorkspaceRepository.class);
+
     private final JdbcClient jdbcClient;
-    private final RowMapper<Workspace> rowMapper = (rs, rowNum) -> new Workspace(
-            new WorkspaceId(rs.getString("workspace_id")),
-            rs.getString("name"),
-            rs.getString("root_path"),
-            WorkspaceStatus.valueOf(rs.getString("status")),
-            instant(rs, "created_at"),
-            instant(rs, "updated_at"),
-            rs.getString("linux_server_id"),
-            rs.getString("trace_id"));
+    private final RowMapper<Workspace> rowMapper = (rs, rowNum) -> {
+        // 历史脏数据兜底：部分工作区 updated_at 早于 created_at（多出现在分布式批量写入或时钟回拨场景），
+        // 直接传给领域对象会触发 "updatedAt must not be before createdAt" 异常，污染 listWorkspaces 响应。
+        // 持久化映射层把 updatedAt 抬到 createdAt，并打印 WARN 提醒上游排障；写入侧由 SQL 修复脚本一次性回填。
+        String workspaceId = rs.getString("workspace_id");
+        Instant createdAt = instant(rs, "created_at");
+        Instant updatedAt = instant(rs, "updated_at");
+        Instant normalizedUpdatedAt = normalizeUpdatedAt(workspaceId, createdAt, updatedAt);
+        return new Workspace(
+                new WorkspaceId(workspaceId),
+                rs.getString("name"),
+                rs.getString("root_path"),
+                WorkspaceStatus.valueOf(rs.getString("status")),
+                createdAt,
+                normalizedUpdatedAt,
+                rs.getString("linux_server_id"),
+                rs.getString("trace_id"));
+    };
 
     /**
      * 注入 JdbcClient，Repository 不直接管理连接生命周期。
      */
     public JdbcWorkspaceRepository(JdbcClient jdbcClient) {
         this.jdbcClient = jdbcClient;
+    }
+
+    /**
+     * 把 updatedAt 归一化到不早于 createdAt；当发现历史脏数据时打印 WARN，保留原始值供排障。
+     */
+    private Instant normalizeUpdatedAt(String workspaceId, Instant createdAt, Instant updatedAt) {
+        if (updatedAt == null || createdAt == null) {
+            return updatedAt;
+        }
+        if (updatedAt.isBefore(createdAt)) {
+            LOGGER.warn(
+                    "Detected legacy workspace row with updatedAt before createdAt, clamping; workspaceId={}, createdAt={}, updatedAt={}",
+                    workspaceId, createdAt, updatedAt);
+            return createdAt;
+        }
+        return updatedAt;
     }
 
     /**
