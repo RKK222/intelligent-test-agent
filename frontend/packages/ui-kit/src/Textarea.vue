@@ -16,7 +16,7 @@ const model = defineModel<string>({ default: "" });
     v-model="model"
     v-bind="attrs"
     :class="cn(
-      'w-full resize-none rounded border border-[var(--ta-border)] bg-[var(--ta-surface)] pl-3 pr-3 py-2 text-[13px] font-sans text-[var(--ta-text)] outline-none transition placeholder:font-sans placeholder:text-[var(--ta-muted)] focus:border-[var(--ta-border-strong)]',
+      'w-full resize-none rounded border border-[var(--ta-border)] bg-[var(--ta-surface)] pl-3 pr-3 py-2 text-[12px] font-sans text-[var(--ta-text)] outline-none transition placeholder:font-sans placeholder:text-[var(--ta-muted)] focus:border-[var(--ta-border-strong)]',
       attrs.class
     )"
   />

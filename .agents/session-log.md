@@ -25,12 +25,14 @@
 
 ### 2026-06-29 - 按照项目字体要求调整输入框字号与样式合并支持
 
-- Why: 侧边栏文件搜索框的 Search 图标与占位文字 "搜索工作区文件" 重叠，原因是 Input 组件默认 `px-2` 样式与父组件传入的 `pl-7` 产生冲突，且 Vue 的默认 class 合并未经过 `twMerge` 处理，导致 padding-left 仍被判定为 `px-2` 的 8px。此外，通用 Input 和 Textarea 组件原本写死了 `text-[12px]`，不符合项目前端排版规范中 "输入框文字 | 16px | 400" 的标准要求。
+- Why: 侧边栏文件搜索框的 Search 图标与占位文字 "搜索工作区文件" 重叠，原因是 Input 组件默认 `px-2` 样式与父组件传入的 `pl-7` 产生冲突，且 Vue 的默认 class 合并未经过 `twMerge` 处理，且 `tailwind-merge` 不会判定简写 `px-2` 与具体 `pl-7` 冲突，导致 padding-left 仍被判定为 `px-2` 的 8px。此外，placeholder 没有继承项目的全局字体，原先测试的 `text-[16px]` 也过大不符合紧凑的 IDE 侧边栏约定。
 - What:
-  - 更新 `frontend/packages/ui-kit/src/Input.vue` 和 `frontend/packages/ui-kit/src/Textarea.vue`：将文字大小由 `text-[12px]` 调整为 `text-[16px]`。
-  - 为 `Input.vue`、`Textarea.vue` 和 `Button.vue` 组件设置 `inheritAttrs: false`，获取 `$attrs` 并在 `:class` 属性中通过 `cn(...)` 函数将 `attrs.class` 与组件默认类进行合并，确保外部传入的定位/内边距样式（如 `pl-7`）能正确应用并合并。
+  - 更新 `frontend/packages/ui-kit/src/Input.vue` 和 `frontend/packages/ui-kit/src/Textarea.vue`：将文字大小保持为项目约定的 `text-[12px]`，并增加 `font-sans` 和 `placeholder:font-sans` 以应用项目字体；将默认的 `px-2` / `px-3` 替换为显式的 `pl-2 pr-2` / `pl-3 pr-3`，以便 `tailwind-merge` 能识别并正确用 `pl-7` 覆盖 padding-left。
+  - 为 `Input.vue`、`Textarea.vue` 和 `Button.vue` 组件设置 `inheritAttrs: false`，获取 `$attrs` 并在 `:class` 属性中通过 `cn(...)` 函数将 `attrs.class` 与组件默认类进行合并，确保外部传入的定位/内边距样式能正确应用并合并。
+  - 在 `frontend/apps/agent-web/src/styles/globals.css` 中添加 `@source` 配置，确保 Tailwind 扫描外部包源码。
+  - 在 `FileExplorer.vue` 中对搜索框添加 `ta-file-search-input` 类并在 scoped style 中显式使用 `padding-left: 28px !important` 强制对齐。
 - How: 修改 `ui-kit` 中的通用表单元素模板与 setup 结构，并在 `frontend` 目录下运行 lint、typecheck 和单元测试进行回归验证。
-- Result: 侧边栏搜索框样式表现正常，搜索图标不再遮挡文本，字号完全契合项目 16px 设计规范，175 项单元测试及静态编译/Linter 全部全绿通过。
+- Result: 侧边栏搜索框样式表现正常，搜索图标不再遮挡文本，字号和字体完全契合项目原本的 12px 约定，177 项单元测试及静态编译/Linter 全部全绿通过。
 
 ### 2026-06-29 - 优化 opencode 公共配置未初始化错误提示
 
