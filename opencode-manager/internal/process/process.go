@@ -31,8 +31,7 @@ const (
 )
 
 const (
-	ErrorCodeOpencodeUnavailable      = "OPENCODE_UNAVAILABLE"
-	publicConfigNotInitializedMessage = "公共 opencode 配置尚未初始化。请使用超级管理员账号进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化后重试。"
+	ErrorCodeOpencodeUnavailable = "OPENCODE_UNAVAILABLE"
 )
 
 var errPublicConfigNotInitialized = errors.New("public config directory not initialized")
@@ -261,7 +260,7 @@ func (m *Manager) Start(ctx context.Context, request StartRequest) (Result, erro
 				request.Port,
 				request.TraceID,
 				ErrorCodeOpencodeUnavailable,
-				publicConfigNotInitializedMessage),
+				publicConfigNotInitializedMessage(cfg.LinuxServerID, spec.ConfigPath)),
 			err
 	}
 	if err := os.MkdirAll(spec.SessionPath, 0o755); err != nil {
@@ -458,6 +457,13 @@ func ensurePublicConfigInitialized(path string) error {
 		return errPublicConfigNotInitialized
 	}
 	return nil
+}
+
+// publicConfigNotInitializedMessage 明确暴露 manager 实际检查的服务器和目录，便于定位 Java 页面状态与目标进程文件系统不一致的问题。
+func publicConfigNotInitializedMessage(linuxServerID string, configPath string) string {
+	return fmt.Sprintf("服务器%s，公共 opencode 配置目录%s尚未初始化。请联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化后重试。",
+		linuxServerID,
+		configPath)
 }
 
 func result(status Status, record state.ProcessRecord, message string, traceID string) Result {

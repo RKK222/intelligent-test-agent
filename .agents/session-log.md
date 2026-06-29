@@ -2,6 +2,16 @@
 
 ## Entries
 
+### 2026-06-29 - 优化 opencode 公共配置未初始化错误提示
+
+- Why: 用户初始化 opencode 进程失败时，前端只提示公共配置未初始化，但系统管理页可能显示同 IP 已初始化；需要在错误消息中暴露目标 manager 实际检查的服务器和配置目录，减少 Java 视角与 manager 文件系统视角不一致时的排查成本。
+- What:
+  - Go manager 在 `OPENCODE_PUBLIC_CONFIG_DIR` 缺失、为空、非目录或不可读时，返回 `OPENCODE_UNAVAILABLE` 且 message 包含 `linuxServerId` 与实际检查的 `ConfigDir`。
+  - Java socket gateway 继续原样透传 manager 的 `OPENCODE_UNAVAILABLE` message，并更新测试 fixture 验证新文案。
+  - 同步 backend、opencode-runtime、opencode-manager README 以及 API/部署文档中的错误说明。
+- How: 先改 Go 失败断言并确认红灯，再最小调整 `process.Manager.Start()` 的公共配置失败消息生成；未改 API 结构、数据库、前端展示组件或 manager 控制协议字段。
+- Result: `go test ./...`、`mvn -pl test-agent-opencode-runtime -am test`、`mvn clean package -DskipTests` 和 `git diff --check` 均通过。
+
 ### 2026-06-29 - 修复历史对话工具消息归一化缺失导致助手气泡空白
 
 - Why: 之前引入的 `normalizeMessagePart` 规则将 opencode parts 归一化为平台标准结构，把 `part.state.output` 移到了 `part.output`。这导致 `FigmaChatPanel.vue` 中的 `partText` 函数在解析归一化后的 `tool` 分段时，由于继续尝试读取已不存在 of `part.state.output` / `part.state.error`，从而提取不到内容返回了空字符串。对于只有工具步骤且无文本消息的历史回复，会导致计算出的气泡文本为 `""`，从而被模板判定无内容而渲染为完全空白的助手气泡。
