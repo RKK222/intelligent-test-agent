@@ -575,7 +575,7 @@ describe("runtime management settings", () => {
     queryClient.clear();
   });
 
-  it("labels backend metric charts by server and current JVM scope", async () => {
+  it("loads backend metric charts by server IP and labels Java service JVM scope", async () => {
     const overview: OpencodeRuntimeManagementOverview = {
       ...emptyOverview,
       summary: {
@@ -606,8 +606,9 @@ describe("runtime management settings", () => {
     };
     const api = {
       getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(overview),
-      getOpencodeRuntimeBackendProcessMetrics: vi.fn().mockResolvedValue({
+      getOpencodeRuntimeBackendServerMetrics: vi.fn().mockResolvedValue({
         generatedAt: "2026-06-24T08:00:00Z",
+        linuxServerId: "10.8.0.12",
         backendProcessId: "bjp_1234567890abcdef",
         from: "2026-06-24T07:00:00Z",
         to: "2026-06-24T08:00:00Z",
@@ -619,15 +620,15 @@ describe("runtime management settings", () => {
     };
     const { findByText, queryClient } = renderRuntimePanel(api);
 
-    await fireEvent.click(await findByText("bjp_1234567890abcdef"));
+    await fireEvent.click(await findByText("10.8.0.12"));
 
-    await waitFor(() => expect(api.getOpencodeRuntimeBackendProcessMetrics).toHaveBeenLastCalledWith(
-      "bjp_1234567890abcdef",
+    await waitFor(() => expect(api.getOpencodeRuntimeBackendServerMetrics).toHaveBeenLastCalledWith(
+      "10.8.0.12",
       expect.objectContaining({ windowMinutes: 60, maxPoints: 720 })
     ));
     expect(await findByText("服务器 CPU / 内存 / 磁盘")).toBeTruthy();
-    expect(await findByText("JVM 内存（当前进程）")).toBeTruthy();
-    expect(await findByText("JVM GC / 线程（当前进程）")).toBeTruthy();
+    expect(await findByText("JVM 内存（Java 服务）")).toBeTruthy();
+    expect(await findByText("JVM GC / 线程（Java 服务）")).toBeTruthy();
 
     queryClient.clear();
   });

@@ -25,6 +25,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -236,26 +237,63 @@ public class RuntimeManagementQueryService {
     }
 
     /**
-     * 查询单个后端 Java 进程指定时间窗口内的运行指标历史，并按 maxPoints 做时间桶降采样。
+     * 按服务器 IP 查询 Java 服务指定时间窗口内的运行指标历史，并按 maxPoints 做时间桶降采样。
+     */
+    public RuntimeManagementBackendMetricHistory backendServerMetrics(
+            LinuxServerId linuxServerId,
+            Duration window,
+            int maxPoints,
+            String traceId) {
+        Instant to = Instant.now(clock);
+        Instant from = to.minus(window);
+        List<BackendRuntimeMetricSample> backendSamples = heartbeatStore.backendMetricSamples(linuxServerId, from, to);
+        List<ServerRuntimeMetricSample> serverSamples = heartbeatStore.serverMetricSamples(linuxServerId, from, to);
+        List<BackendRuntimeMetricSample> rawSamples = mergeBackendMetricSamples(serverSamples, backendSamples);
+        return new RuntimeManagementBackendMetricHistory(
+                to,
+                linuxServerId,
+                resolveLiveBackendProcessId(linuxServerId),
+                from,
+                to,
+                downsampleBackendSamples(rawSamples, from, to, maxPoints));
+    }
+
+    /**
+     * 兼容旧 backendProcessId history API：优先解析到服务器 IP 后复用新主路径，解析失败时读取旧 key。
      */
     public RuntimeManagementBackendMetricHistory backendProcessMetrics(
             BackendProcessId backendProcessId,
             Duration window,
             int maxPoints,
             String traceId) {
+        Optional<LinuxServerId> linuxServerId = resolveBackendLinuxServerId(backendProcessId);
+        if (linuxServerId.isPresent()) {
+            RuntimeManagementBackendMetricHistory history = backendServerMetrics(linuxServerId.get(), window, maxPoints, traceId);
+            return new RuntimeManagementBackendMetricHistory(
+                    history.generatedAt(),
+                    history.linuxServerId(),
+                    Optional.of(backendProcessId),
+                    history.from(),
+                    history.to(),
+                    history.samples());
+        }
         Instant to = Instant.now(clock);
         Instant from = to.minus(window);
-        List<BackendRuntimeMetricSample> backendSamples = heartbeatStore.backendMetricSamples(backendProcessId, from, to);
-        List<ServerRuntimeMetricSample> serverSamples = resolveBackendLinuxServerId(backendProcessId)
-                .map(linuxServerId -> heartbeatStore.serverMetricSamples(linuxServerId, from, to))
-                .orElse(List.of());
-        List<BackendRuntimeMetricSample> rawSamples = mergeBackendMetricSamples(serverSamples, backendSamples);
+        List<BackendRuntimeMetricSample> rawSamples = heartbeatStore.legacyBackendMetricSamples(backendProcessId, from, to);
         return new RuntimeManagementBackendMetricHistory(
                 to,
-                backendProcessId,
+                null,
+                Optional.of(backendProcessId),
                 from,
                 to,
                 downsampleBackendSamples(rawSamples, from, to, maxPoints));
+    }
+
+    private Optional<BackendProcessId> resolveLiveBackendProcessId(LinuxServerId linuxServerId) {
+        return heartbeatStore.liveBackendSnapshots().stream()
+                .filter(snapshot -> snapshot.backendProcess().linuxServerId().equals(linuxServerId))
+                .max(Comparator.comparing(snapshot -> snapshot.backendProcess().lastHeartbeatAt()))
+                .map(snapshot -> snapshot.backendProcess().backendProcessId());
     }
 
     private Optional<LinuxServerId> resolveBackendLinuxServerId(BackendProcessId backendProcessId) {
@@ -700,13 +738,13 @@ public class RuntimeManagementQueryService {
 
     private static OpencodeProcessHeartbeatStore disabledHeartbeatStore() {
         return new OpencodeProcessHeartbeatStore() {
-            @Override public void recordBackendHeartbeat(BackendProcessId backendProcessId, Instant heartbeatAt) { }
+            @Override public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) { }
             @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) { }
             @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { }
             @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
             @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.of(); }
             @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
-            @Override public Set<BackendProcessId> liveBackendProcessIds() { return Set.of(); }
+            @Override public Set<LinuxServerId> liveBackendServerIds() { return Set.of(); }
             @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
             @Override public void cleanupExpiredHeartbeats() { }
         };

@@ -25,12 +25,13 @@
 
 容器环境变量示例：
 
+opencode-manager 环境变量只用于启动前必须由宿主环境提供的身份、端口池、token、二进制路径、状态目录或连接引导参数。不要为运行期业务配置随意新增 `OPENCODE_*` 环境变量；用户进程 session/config/maxProcesses 等运行配置必须优先通过 Java 后端 `common_parameters` 和控制面 `configUpdate` 下发。确需新增 manager 环境变量时，必须同步更新 opencode-manager README、本文档、配置解析测试和本地启动脚本/示例。
+
 ```dotenv
 OPENCODE_MANAGER_CONTAINER_ID=ctr_01
 OPENCODE_MANAGER_SERVER_IP_FILE=/data/.testagent/.serverip
 OPENCODE_MANAGER_PORT_START=4096
 OPENCODE_MANAGER_PORT_END=4100
-OPENCODE_MANAGER_ID=mgr_1234567890abcdef
 OPENCODE_MANAGER_BACKEND_PORT=8080
 OPENCODE_MANAGER_TOKEN=<manager-control-token>
 OPENCODE_BIN=opencode
@@ -38,6 +39,8 @@ OPENCODE_MANAGER_STATE_DIR=/data/.testagent/agent-opencode/manager
 ```
 
 `OPENCODE_MANAGER_CONTAINER_ID` 仅作为非 Windows 下的最后兜底值；生产容器应优先设置容器 hostname，manager 会先读系统 hostname，再读 `/etc/hostname`，最后才读该环境变量。
+
+生产和本地都不再配置 `OPENCODE_MANAGER_ID`。manager 启动时按容器名称和固定管理进程逻辑名 `opencode-manager` 派生内部 `managerId`，形如 `mgr_<normalized_container_id>_opencode_manager`；运行管理、Redis 快照和数据库拓扑中的 `managerId` 仍只作为内部协议 ID，唯一性来自同一共享 Redis 集群内的容器名称加管理进程名称。
 
 长运行模式启动：
 
@@ -61,7 +64,7 @@ opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 
 opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http://{linuxServerIp}:{port}` 访问。生产部署必须通过容器网络、主机防火墙或网关限制端口池访问面，不得把用户进程端口暴露到不可信网络。
 
-后端创建用户进程、应用版本工作区和个人 worktree 时读取数据库 `common_parameters` 中当前平台的 opencode 路径参数：`OPENCODE_SESSION_DIR`、`OPENCODE_PUBLIC_CONFIG_DIR`、`OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT`。`common_parameters` 为唯一事实源，缺失或值为空时抛 `INTERNAL_ERROR` 业务异常，不在 yaml 或代码常量预留 fallback；Windows 默认值在迁移中按 `D:/data/.testagent/agent-opencode/...` 初始化。macOS/Linux 本地开发可把路径写为 `$HOME/.testagent/...` 或 `$TEST_AGENT_ROOT/...`，加载后的 `resolvedValue` 会变为实际用户目录或环境变量值。真实创建用户进程时，后端先按健康容器和空闲端口选择目标容器，再向该容器对应 manager 下发 `start`；manager 使用已通过 `configUpdate` 同步的 `OPENCODE_PUBLIC_CONFIG_DIR`，并在所在服务器检查该目录必须存在且非空。缺失、为空、非目录或不可读时返回 `OPENCODE_UNAVAILABLE`，并提示超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化；不会创建 session、不会启动 opencode server。
+后端创建用户进程、应用版本工作区和个人 worktree 时读取数据库 `common_parameters` 中当前平台的 opencode 路径参数：`OPENCODE_SESSION_DIR`、`OPENCODE_PUBLIC_CONFIG_DIR`、`OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT`。`common_parameters` 为唯一事实源，缺失或值为空时抛 `INTERNAL_ERROR` 业务异常，不在 yaml 或代码常量预留 fallback；Windows 默认值在迁移中按 `D:/data/.testagent/agent-opencode/...` 初始化。macOS/Linux 本地开发可把路径写为 `$HOME/.testagent/...` 或 `$TEST_AGENT_ROOT/...`，加载后的 `resolvedValue` 会变为实际用户目录或环境变量值。真实创建用户进程时，后端先按健康容器和空闲端口选择目标容器，再向该容器对应 manager 下发 `start`；manager 使用已通过 `configUpdate` 同步的 `OPENCODE_PUBLIC_CONFIG_DIR`，并在所在服务器检查该目录必须存在且非空。缺失、为空、非目录或不可读时返回 `OPENCODE_UNAVAILABLE`，错误消息包含目标服务器和 manager 实际检查目录，并提示联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化；不会创建 session、不会启动 opencode server。
 
 公共 Agent/Skill 配置额外读取 `OPENCODE_PUBLIC_AGENT_GIT_URL`、`OPENCODE_PUBLIC_CONFIG_GIT_ROOT`、`OPENCODE_PUBLIC_CONFIG_DIR`、`OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT`。Git 地址默认为 `UNCONFIGURED`，未配置前公共 Agent 只读 status 可用，更新、worktree、commit、publish 均被禁用。公共配置 Git 仓库按服务器本地盘初始化到 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT`，初始化完成后必须校验 `OPENCODE_PUBLIC_CONFIG_DIR` 指向的 opencode 配置目录存在且非空；公共配置文件树根为 `{OPENCODE_PUBLIC_CONFIG_GIT_ROOT}/opencode/`，其中 `agents/` 放 opencode agent Markdown，`skills/<skill-name>/` 直接放各自包含 `SKILL.md` 的实际技能包，不增加中间包装目录或符号链接。公共仓库有未提交修改时仍视为已初始化并允许浏览，但状态为 `CONFLICT`；更新默认拒绝覆盖，只有超级管理员明确确认后才恢复已跟踪文件再拉取，未跟踪文件不删除。公共 worktree 由管理员在前端显式选择一台已初始化服务器后创建，目录在该服务器 `{OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT}/{worktreeName-yyyymmdd}` 下创建，创建成功后记录 `worktreeId -> linuxServerId`，后续公共 Agent/Skill 文件、diff、stage、commit、publish 都由当前后端代理到该服务器执行，浏览器不直连目标后端。
 
@@ -74,7 +77,7 @@ opencode server 默认不设置 `OPENCODE_SERVER_PASSWORD`，后端仍按 `http:
 | 角色 | 部署数量 | 关键配置 | 说明 |
 |---|---:|---|---|
 | 后端 Java 实例 | 每台 Linux 服务器 1 个或按容量水平扩展 | `TEST_AGENT_BACKEND_LISTEN_URL`、`TEST_AGENT_SERVER_IP_FILE`、`TEST_AGENT_OPENCODE_MANAGER_TOKEN` | `listen-url` 必须是 manager 可直连的实例地址；非回环 IPv4 会作为服务器身份并写入 `.serverip`。 |
-| opencode 容器 | 每台 Linux 服务器多个 | 容器 hostname、`OPENCODE_MANAGER_SERVER_IP_FILE`、`OPENCODE_MANAGER_CONTAINER_ID` 兜底值、端口池、挂载目录 | 每个容器运行 1 个 `opencode-manager run`；`containerId` 标识容器，非 Windows 先取系统 hostname，再取 `/etc/hostname`，最后才取 `OPENCODE_MANAGER_CONTAINER_ID`，`linuxServerId` 来自 `.serverip`。 |
+| opencode 容器 | 每台 Linux 服务器多个 | 容器 hostname、`OPENCODE_MANAGER_SERVER_IP_FILE`、`OPENCODE_MANAGER_CONTAINER_ID` 兜底值、端口池、挂载目录 | 每个容器运行 1 个 `opencode-manager run`；`containerId` 标识容器，非 Windows 先取系统 hostname，再取 `/etc/hostname`，最后才取 `OPENCODE_MANAGER_CONTAINER_ID`，`managerId` 由 `containerId + opencode-manager` 派生，`linuxServerId` 来自 `.serverip`。 |
 | 用户 opencode server 进程 | 每个用户 1 个当前绑定 | 由 manager 按端口启动 | `baseUrl` 固定为 `http://{linuxServerIp}:{port}`，session 持久化在对应 Linux 服务器。 |
 | 前端访问入口 | 1 个负载均衡域名 | `VITE_TEST_AGENT_API_BASE_URL` | 浏览器只访问平台后端，不直连 opencode server 或 manager。 |
 
@@ -132,7 +135,7 @@ opencode 容器扩容流程：
 
 1. 在同一 Linux 服务器上分配不与既有容器重叠的端口池。
 2. 按上文挂载 `/data/.testagent/agent-opencode/.session/`、`/data/.testagent/agent-opencode/.config/opencode/`、`/data/.testagent/agent-opencode/workspace/` 和 `/data/.testagent/agent-opencode/manager`。
-3. 配置新的容器 hostname、`OPENCODE_MANAGER_ID`、`OPENCODE_MANAGER_SERVER_IP_FILE` 和端口池环境变量；`OPENCODE_MANAGER_CONTAINER_ID` 仅作为非 Windows 最后兜底。非 Windows 解析顺序固定为系统 hostname、`/etc/hostname`、`OPENCODE_MANAGER_CONTAINER_ID`；Windows 直接使用机器名。
+3. 配置新的容器 hostname、`OPENCODE_MANAGER_SERVER_IP_FILE` 和端口池环境变量；不要再配置 `OPENCODE_MANAGER_ID`，manager 会由容器名称和固定进程名派生内部 ID；`OPENCODE_MANAGER_CONTAINER_ID` 仅作为非 Windows 最后兜底。非 Windows 解析顺序固定为系统 hostname、`/etc/hostname`、`OPENCODE_MANAGER_CONTAINER_ID`；Windows 直接使用机器名。
 4. 启动 `opencode-manager run`，检查运行管理页中 `containers`、`managers` 和 `managerBackendConnections` 均出现对应记录，容器行展示最新 CPU、内存和已用内存。
 
 常见故障处理：
@@ -140,7 +143,7 @@ opencode 容器扩容流程：
 | 现象 | 排查顺序 | 处理 |
 |---|---|---|
 | 用户初始化返回 `OPENCODE_UNAVAILABLE` | 运行管理页查看是否有 Redis 在线的 `READY` 容器和 `CONNECTED` manager；检查 Redis、manager WebSocket 连接和 `managerHeartbeat` | 恢复 Redis/manager WebSocket 连接或启动有空余端口的容器。 |
-| 用户初始化返回 `OPENCODE_UNAVAILABLE` 且提示公共配置尚未初始化 | 先按提示进入“系统管理 → 配置管理 → opencode公共配置管理”，再结合运行管理页或日志确认目标容器/manager，检查 `common_parameters.OPENCODE_PUBLIC_CONFIG_DIR` 解析后的目录是否存在且非空；确认公共配置 Git 根目录已经 clone/pull 并包含 `opencode/` 配置内容 | 由超级管理员在目标服务器初始化公共配置目录后重试；不要在空目录状态下启动用户进程。 |
+| 用户初始化返回 `OPENCODE_UNAVAILABLE` 且提示公共配置尚未初始化 | 先读取错误消息中的目标服务器和公共配置目录，再进入“系统管理 → 配置管理 → opencode公共配置管理”确认该服务器状态；必要时结合运行管理页或日志确认目标容器/manager，检查错误消息中 manager 实际检查的目录是否存在且非空；确认公共配置 Git 根目录已经 clone/pull 并包含 `opencode/` 配置内容 | 由超级管理员在目标服务器初始化公共配置目录后重试；不要在空目录状态下启动用户进程。 |
 | 创建公共 Agent worktree 返回 `CONFLICT` 且提示“公共配置仓库未初始化” | 在系统管理 > 配置管理 > opencode公共配置管理中查看对应 `linuxServerId` 的 `OPENCODE_PUBLIC_CONFIG_GIT_ROOT`、`OPENCODE_PUBLIC_CONFIG_DIR` 和状态；确认当前管理员 SSH key 有公共配置仓库读取权限 | 对该服务器执行初始化；不要在创建 worktree 时手工拷贝半初始化目录。 |
 | 用户初始化返回 `OPENCODE_TIMEOUT` | 查看 `{stateDir}/logs/{port}.log`、后端命令超时配置、opencode CLI 是否卡住 | 先保留日志，再 stop/restart 目标端口或扩容新容器。 |
 | 用户初始化返回 `OPENCODE_BAD_GATEWAY` 且包含 `already managed but unhealthy` | 目标端口已有 manager 本地 state，但 PID 或 HTTP 健康检查失败 | 先查看 `{stateDir}/processes/{port}.json` 和 `{stateDir}/logs/{port}.log`；确认无业务流量后用 manager `restart` 或 `stop` 清理该端口。健康的已托管端口会被幂等复用，不会再因 `already managed` 初始化失败。 |
@@ -322,6 +325,8 @@ export TEST_AGENT_DB_POOL_TEST_ON_BORROW=true
 
 ## 生产必填环境变量
 
+后端环境变量只用于部署期密钥、外部端点、进程身份、启动引导路径或资源容量。不要为了临时绕过配置或适配个人环境而随意新增 `TEST_AGENT_*` 环境变量；新增前必须优先评估 `common_parameters`、Spring 配置项、数据库配置和既有 dotenv 变量，并同步更新后端规范、README、部署文档、启动脚本或 dotenv 示例以及配置绑定测试。
+
 ```bash
 SPRING_PROFILES_ACTIVE=prod
 TEST_AGENT_DB_URL=jdbc:postgresql://<pg-host>:5432/<database>
@@ -368,7 +373,7 @@ TEST_AGENT_SCHEDULER_DUE_TASK_LIMIT=50
 TEST_AGENT_SCHEDULER_MANUAL_RUN_LIMIT=50
 ```
 
-运行管理在线态和监控历史都只使用 Redis，不写入关系型数据库。Java/manager latest snapshot TTL 固定为 10 秒；指标历史使用 ZSET key `test-agent:runtime-metrics:server:{linuxServerId}`、`test-agent:runtime-metrics:backend:{backendProcessId}` 与 `test-agent:runtime-metrics:container:{containerId}`，每 5 秒追加原始样本，保留近 48 小时，key 过期兜底约 49 小时；运行管理 API 默认查询近 1 小时，前端提供 1 分钟、30 分钟、1 小时、6 小时、12 小时、24 小时、48 小时预设窗口。Java 服务器 CPU、内存和磁盘容量按 `linuxServerId` 连续保存，Java 后端重启后仍可查询同服务器历史；JVM 内存、GC 和线程按 `backendProcessId` 保存，只代表当前 Java 进程。Redis 历史只保证 Java 后端重启后连续；若 Redis 自身重启且未启用 AOF/RDB，历史样本会丢失。Java 指标来自 JDK MXBean 和当前工作目录所在文件系统；Go manager 使用 `gopsutil/v4` 与 `opencontainers/cgroups`，Linux 生产态优先按当前进程 cgroup v2/v1 子路径采集容器 CPU、内存和磁盘 IO，`metricsSource=cgroup`；cgroup 不可读时降级当前 manager 进程 CPU/内存，`metricsSource=process`；macOS/Windows 开发态同样使用进程指标；完全不可采集时 `metricsSource=unavailable`。采集失败只影响指标字段，不阻断心跳。
+运行管理在线态和监控历史都只使用 Redis，不写入关系型数据库。Java/manager latest snapshot TTL 固定为 10 秒；指标历史使用 ZSET key `test-agent:runtime-metrics:server:{linuxServerId}`、`test-agent:runtime-metrics:backend:{linuxServerId}` 与 `test-agent:runtime-metrics:container:{containerId}`，每 5 秒追加原始样本，保留近 48 小时，key 过期兜底约 49 小时；旧 `test-agent:runtime-metrics:backend:{backendProcessId}` 仅供兼容 API 在无法解析 IP 时回退读取。运行管理 API 默认查询近 1 小时，前端提供 1 分钟、30 分钟、1 小时、6 小时、12 小时、24 小时、48 小时预设窗口。Java latest snapshot、在线心跳、服务器 CPU/内存/磁盘容量和 JVM 内存/GC/线程都按 `linuxServerId` 连续保存，同一 IP 上 Java 后端重启后会覆盖 latest snapshot 并连续追加历史。Redis 历史只保证同一 IP 的 Java 后端重启后连续；若 Redis 自身重启且未启用 AOF/RDB，历史样本会丢失。Java 指标来自 JDK MXBean 和当前工作目录所在文件系统；Go manager 使用 `gopsutil/v4` 与 `opencontainers/cgroups`，Linux 生产态优先按当前进程 cgroup v2/v1 子路径采集容器 CPU、内存和磁盘 IO，`metricsSource=cgroup`；cgroup 不可读时降级当前 manager 进程 CPU/内存，`metricsSource=process`；macOS/Windows 开发态同样使用进程指标；完全不可采集时 `metricsSource=unavailable`。采集失败只影响指标字段，不阻断心跳。
 
 `TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED` 只控制 RunEvent 跨实例实时 fan-out；数据库 `run_events` replay、`Last-Event-ID` 和 `session_messages` 快照仍是恢复基线。该开关关闭时 RunEvent 自动退回本机 live bus + DB replay，但用户进程运行管理、manager 心跳、Token 存储、scheduler 和运行指标历史仍直接依赖 Redis。
 
@@ -416,4 +421,4 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 | `test-agent.model-catalog.internal.api-key` | 空 | 企业内 token 的 yml 直配值；未配置时回退到 `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` 指向的环境变量。 |
 | `TEST_AGENT_ICBC_OPENAI_AUTH_MODE` | `auth-token` | 企业内调用鉴权头模式，默认写入 `Auth-Token`。 |
 | `TEST_AGENT_INTERNAL_DEFAULT_MODEL` | `DeepSeek-V4-Flash-W8A8` | 企业内默认模型，前端模型切换会优先选中该模型。 |
-`DatabaseMigrationRunner` 会在启动时执行 Flyway migration；`ExecutionNodeSeeder` 会把配置中的 opencode node 写入 `execution_nodes` 作为兼容 Run 路由来源。启用用户进程模型后，`BackendJavaProcessLifecycleRunner` 会在启动和拓扑变化时写入 `linux_servers`、`backend_java_processes`，并每 5 秒写入 Redis Java 快照、按 `linuxServerId` 保存的服务器资源指标历史和按 `backendProcessId` 保存的 JVM 指标历史；`opencode-manager` WebSocket 注册会保留容器、manager 和连接持久拓扑，`managerHeartbeat` 每 5 秒经 WebSocket 写入 Redis manager 快照和容器资源指标历史，latest snapshot TTL 为 10 秒，历史指标保留近 48 小时。
+`DatabaseMigrationRunner` 会在启动时执行 Flyway migration；`ExecutionNodeSeeder` 会把配置中的 opencode node 写入 `execution_nodes` 作为兼容 Run 路由来源。启用用户进程模型后，`BackendJavaProcessLifecycleRunner` 会在启动和拓扑变化时写入 `linux_servers`、`backend_java_processes`，并每 5 秒按 `linuxServerId` 写入 Redis Java 快照、服务器资源指标历史和 JVM 指标历史；`backendProcessId` 仅表示当前 Java 实例和拓扑连接字段，不再作为 Java 心跳或 JVM 历史的唯一键；`opencode-manager` WebSocket 注册会保留容器、manager 和连接持久拓扑，`managerHeartbeat` 每 5 秒经 WebSocket 写入 Redis manager 快照和容器资源指标历史，latest snapshot TTL 为 10 秒，历史指标保留近 48 小时。

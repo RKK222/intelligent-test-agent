@@ -49,7 +49,7 @@ func TestSupervisorConnectsSeedWebSocketWithoutHTTPDiscovery(t *testing.T) {
 
 	message := receiveMessage(t, registered, time.Second)
 
-	if message.ManagerID != "mgr_1234567890abcdef" {
+	if message.ManagerID != "mgr_ctr_01_opencode_manager" {
 		t.Fatalf("expected seed WebSocket register message, got %#v", message)
 	}
 }
@@ -349,7 +349,8 @@ func TestSupervisorCommandResultIncludesPublicConfigErrorCode(t *testing.T) {
 	if result.ErrorCode != "OPENCODE_UNAVAILABLE" {
 		t.Fatalf("expected OPENCODE_UNAVAILABLE errorCode, got %q", result.ErrorCode)
 	}
-	if result.Message != "公共 opencode 配置尚未初始化。请使用超级管理员账号进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化后重试。" {
+	wantMessage := "服务器" + cfg.Config.LinuxServerID + "，公共 opencode 配置目录" + cfg.Config.ConfigDir + "尚未初始化。请联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化后重试。"
+	if result.Message != wantMessage {
 		t.Fatalf("unexpected command result message %q", result.Message)
 	}
 }
@@ -442,7 +443,7 @@ func supervisorTestConfig(webSocketURL string) config.ControlConfig {
 			SessionRoot:   "/tmp/opencode-session",
 			ConfigDir:     "/tmp/opencode-config",
 		},
-		ManagerID:           "mgr_1234567890abcdef",
+		ManagerID:           "mgr_ctr_01_opencode_manager",
 		BackendWebSocketURL: webSocketURL,
 		Token:               "manager-secret",
 		DiscoveryInterval:   time.Hour,

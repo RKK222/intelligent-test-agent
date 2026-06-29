@@ -526,13 +526,13 @@ class UserOpencodeProcessAssignmentServiceTest {
                                 Duration.ofSeconds(5),
                                 100)),
                 new OpencodeProcessHeartbeatStore() {
-                    @Override public void recordBackendHeartbeat(com.icbc.testagent.domain.opencodeprocess.BackendProcessId backendProcessId, Instant heartbeatAt) { }
+                    @Override public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) { }
                     @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) { }
                     @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { }
                     @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
                     @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.of(); }
                     @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
-                    @Override public Set<com.icbc.testagent.domain.opencodeprocess.BackendProcessId> liveBackendProcessIds() { return Set.of(); }
+                    @Override public Set<LinuxServerId> liveBackendServerIds() { return Set.of(); }
                     @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
                     @Override public void cleanupExpiredHeartbeats() { }
                 },

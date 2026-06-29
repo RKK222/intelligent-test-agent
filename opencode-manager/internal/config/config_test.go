@@ -274,7 +274,6 @@ func TestLoadControlFromEnvDoesNotRequireRuntimeCommonParameterEnv(t *testing.T)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
 	t.Setenv("OPENCODE_MANAGER_PORT_START", "4096")
 	t.Setenv("OPENCODE_MANAGER_PORT_END", "4100")
-	t.Setenv("OPENCODE_MANAGER_ID", "mgr_1234567890abcdef")
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
 
 	cfg, err := loadControlFromEnvWithRuntime(testRuntime("linux", map[string]string{

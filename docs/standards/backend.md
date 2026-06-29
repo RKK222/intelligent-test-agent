@@ -9,6 +9,12 @@
 3. 新增后端文件前必须先按 `docs/architecture/dependency-rules.md` 列出现有合适工程；没有合适工程时按业务边界新建 Maven module。
 4. 业务代码优先遵守模块 README 和 `docs/architecture/dependency-rules.md` 的边界。
 
+## 配置与环境变量
+
+1. 不允许为临时绕过配置、适配个人环境或规避通用参数/数据库配置而随意新增环境变量。
+2. 新增环境变量前必须先评估能否复用 `common_parameters`、Spring 配置项、数据库配置或既有 dotenv 变量；只有部署期密钥、外部端点、进程身份、启动引导路径或资源容量这类必须由运行环境注入的值，才允许新增环境变量。
+3. 确需新增环境变量时，必须同步说明用途、默认值、适用 profile、是否敏感、配置缺失时的失败语义，并更新 `backend/README.md`、`docs/deployment/backend.md`、相关模块 README、启动脚本或 dotenv 示例以及配置绑定/启动测试。
+
 ## 分层规则
 
 详细依赖方向与禁止关系见 `docs/architecture/dependency-rules.md`。核心红线：

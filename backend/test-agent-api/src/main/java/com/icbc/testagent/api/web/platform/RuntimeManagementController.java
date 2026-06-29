@@ -150,7 +150,32 @@ public class RuntimeManagementController {
     }
 
     /**
-     * 查询单个后端 Java 进程近 48 小时内的 Redis 指标历史。
+     * 按服务器 IP 查询后端 Java 服务近 48 小时内的 Redis 指标历史。
+     */
+    @GetMapping("/api/internal/platform/opencode-runtime/management/linux-servers/{linuxServerId}/backend-metrics")
+    public Mono<ApiResponse<RuntimeManagementDtos.BackendMetricHistoryResponse>> backendServerMetrics(
+            @PathVariable String linuxServerId,
+            @RequestParam(required = false) Integer windowMinutes,
+            @RequestParam(required = false) Integer hours,
+            @RequestParam(required = false) Integer maxPoints,
+            ServerWebExchange exchange) {
+        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        LinuxServerId parsedLinuxServerId = parseLinuxServerId(linuxServerId);
+        Duration resolvedWindow = parseMetricWindow(windowMinutes, hours);
+        int resolvedMaxPoints = parseMetricMaxPoints(maxPoints);
+        return Mono.fromCallable(() -> ApiResponse.ok(
+                        RuntimeManagementDtos.BackendMetricHistoryResponse.from(queryService.backendServerMetrics(
+                                parsedLinuxServerId,
+                                resolvedWindow,
+                                resolvedMaxPoints,
+                                traceId)),
+                        traceId))
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * 查询单个后端 Java 进程近 48 小时内的 Redis 指标历史，保留给旧客户端兼容。
      */
     @GetMapping("/api/internal/platform/opencode-runtime/management/backend-processes/{backendProcessId}/metrics")
     public Mono<ApiResponse<RuntimeManagementDtos.BackendMetricHistoryResponse>> backendProcessMetrics(

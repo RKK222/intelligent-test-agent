@@ -21,6 +21,7 @@ const (
 	defaultConfigDir   = "/data/opencode/.config/opencode/"
 
 	defaultServerIPFile = "/data/.testagent/.serverip"
+	managerProcessName  = "opencode-manager"
 
 	defaultBackendPort          = 8080
 	defaultBackendWebSocketPath = "/api/internal/platform/opencode-runtime/manager/ws"
@@ -194,7 +195,7 @@ func loadControlFromEnvWithRuntime(rt configRuntime) (ControlConfig, error) {
 	}
 	cfg := ControlConfig{
 		Config:              base,
-		ManagerID:           strings.TrimSpace(os.Getenv("OPENCODE_MANAGER_ID")),
+		ManagerID:           deriveManagerID(containerID),
 		BackendWebSocketURL: webSocketURL,
 		Token:               strings.TrimSpace(os.Getenv("OPENCODE_MANAGER_TOKEN")),
 		DiscoveryInterval:   durationDefault("OPENCODE_MANAGER_DISCOVERY_INTERVAL", defaultDiscoveryInterval),
@@ -251,7 +252,7 @@ func (c ControlConfig) ValidateControl() error {
 		return err
 	}
 	if !strings.HasPrefix(strings.TrimSpace(c.ManagerID), "mgr_") {
-		return fmt.Errorf("OPENCODE_MANAGER_ID must start with mgr_")
+		return fmt.Errorf("derived manager id must start with mgr_")
 	}
 	if strings.TrimSpace(c.BackendWebSocketURL) == "" {
 		return fmt.Errorf("backend WebSocket URL must not be blank")
@@ -439,6 +440,33 @@ func normalizeIdentifier(value string) string {
 		return ""
 	}
 	return strings.Join(fields, "-")
+}
+
+// deriveManagerID 使用容器名和固定管理进程逻辑名生成内部 managerId，避免多容器共享默认环境变量时互相覆盖 Redis 快照。
+func deriveManagerID(containerID string) string {
+	return "mgr_" + normalizeIDSegment(containerID) + "_" + normalizeIDSegment(managerProcessName)
+}
+
+// normalizeIDSegment 保留 ASCII 字母数字并用下划线折叠其他字符，使派生 ID 稳定满足现有 mgr_ 前缀和标识符约束。
+func normalizeIDSegment(value string) string {
+	var builder strings.Builder
+	lastUnderscore := false
+	for _, r := range strings.TrimSpace(value) {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			builder.WriteRune(r)
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore && builder.Len() > 0 {
+			builder.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	result := strings.Trim(builder.String(), "_")
+	if result == "" {
+		return "unknown"
+	}
+	return result
 }
 
 func requiredInt(name string) (int, error) {

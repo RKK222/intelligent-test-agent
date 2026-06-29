@@ -148,6 +148,9 @@ fi
 if grep -q "OPENCODE_MANAGER_LINUX_SERVER_ID" "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script should not inject OPENCODE_MANAGER_LINUX_SERVER_ID"
 fi
+if grep -q "OPENCODE_MANAGER_ID" "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script should not inject OPENCODE_MANAGER_ID; manager derives it from container and process name"
+fi
 if grep -q "OPENCODE_MANAGER_BACKEND_DISCOVERY_URL" "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script should not inject legacy HTTP discovery URL"
 fi
