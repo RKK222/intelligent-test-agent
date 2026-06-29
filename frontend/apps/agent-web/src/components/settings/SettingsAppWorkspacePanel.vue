@@ -164,8 +164,14 @@ const sortedBranches = computed(() => {
     }
   });
 
-  // 每组内部按字母顺序排序
-  validBranches.sort();
+  // 符合格式的分支按日期倒序排序（最新的在前）
+  validBranches.sort((a, b) => {
+    const dateA = a.slice(-8); // 提取日期 yyyyMMdd
+    const dateB = b.slice(-8);
+    return dateB.localeCompare(dateA); // 倒序：B 在前，A 在后
+  });
+
+  // 不符合格式的分支按字母顺序排序
   invalidBranches.sort();
 
   return [...validBranches, ...invalidBranches];
