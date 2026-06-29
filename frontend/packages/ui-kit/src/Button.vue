@@ -1,6 +1,13 @@
 <script setup lang="ts">
+import { useAttrs } from "vue";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "./lib";
+
+defineOptions({
+  inheritAttrs: false
+});
+
+const attrs = useAttrs();
 
 // 按钮视觉变体，与原 React 版保持一致的设计 token
 const buttonVariants = cva(
@@ -39,5 +46,5 @@ withDefaults(defineProps<{ variant?: ButtonVariants["variant"]; size?: ButtonVar
 
 <template>
   <!-- 原生 button 属性（disabled/type 等）通过 $attrs 自动透传 -->
-  <button :class="cn(buttonVariants({ variant, size }))"><slot /></button>
+  <button v-bind="attrs" :class="cn(buttonVariants({ variant, size }), attrs.class)"><slot /></button>
 </template>

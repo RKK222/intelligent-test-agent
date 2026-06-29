@@ -147,7 +147,7 @@ const changeStats = computed(() => {
         <Search class="pointer-events-none absolute left-2 top-2 h-4 w-4 text-[var(--ta-muted)]" :stroke-width="1.5" />
         <Input
           :model-value="searchKeyword ?? keyword"
-          class="pl-7"
+          class="ta-file-search-input"
           placeholder="搜索工作区文件"
           @update:model-value="handleSearchInput"
         />
@@ -218,5 +218,9 @@ const changeStats = computed(() => {
 .ta-fe-icon-btn:focus-visible {
   outline: 2px solid var(--ta-accent, #3366ff);
   outline-offset: 1px;
+}
+
+.ta-file-search-input {
+  padding-left: 28px !important;
 }
 </style>
