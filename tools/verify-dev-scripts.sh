@@ -20,6 +20,20 @@ run_check() {
 run_check "restart script bash syntax" bash -n "${ROOT_DIR}/restart-dev-services.sh"
 run_check "restart script sh parse guard" sh -n "${ROOT_DIR}/restart-dev-services.sh"
 run_check "restart script sh help entry" sh "${ROOT_DIR}/restart-dev-services.sh" --help
+WINDOWS_RESTART_SCRIPT="${ROOT_DIR}/restart-dev-services.ps1"
+[[ -f "${WINDOWS_RESTART_SCRIPT}" ]] || fail "windows restart script missing: ${WINDOWS_RESTART_SCRIPT}"
+powershell_bin=""
+for candidate in pwsh powershell.exe powershell; do
+  if command -v "${candidate}" >/dev/null 2>&1; then
+    powershell_bin="${candidate}"
+    break
+  fi
+done
+if [[ -n "${powershell_bin}" ]]; then
+  run_check "windows restart script PowerShell parse" env WINDOWS_RESTART_SCRIPT="${WINDOWS_RESTART_SCRIPT}" "${powershell_bin}" -NoProfile -Command '$parseErrors = @(); [void][System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw -LiteralPath $env:WINDOWS_RESTART_SCRIPT), [ref]$parseErrors); if ($parseErrors.Count -gt 0) { $parseErrors | Format-List | Out-String | Write-Error; exit 1 }'
+else
+  echo "Skipping windows restart script PowerShell parse: pwsh/powershell not found."
+fi
 run_check "dev backend script bash syntax" bash -n "${ROOT_DIR}/tools/dev-backend-run.sh"
 
 restart_help="$(sh "${ROOT_DIR}/restart-dev-services.sh" --help)"

@@ -59,7 +59,7 @@
 
 脚本默认使用 `test` profile、读取 `.env.test`、先编译后端和自研前端，再按「后端 → opencode-manager → 前端」逐个 kill 旧进程并启动新进程。后端 Java 进程会清空 JVM 代理系统属性，避免本机系统代理影响 PostgreSQL JDBC 与 Redis 直连。停止 opencode-manager 时会同步清理其 state 目录中记录的用户 `opencode serve` 子进程、端口池内残留监听进程和 `.tmp/dev-services/opencode-manager-state/processes/*.json`，避免重启后旧端口状态继续占用。需要连接 `local` 或 `guo` 环境时显式传入 `--profile local|guo` 和对应 dotenv 文件。服务日志写入 `.tmp/dev-services/`，不得打印 dotenv 中的敏感值。
 
-Windows 需要联调当前 test 环境时，优先在 WSL/Git Bash 中使用同一条 `./restart-dev-services.sh --profile test --env-file .env.test` 链路；直接用 PowerShell 时不要执行 Bash 脚本，需先按 `.env.test` 配置 Java 后端、opencode-manager 和前端三个进程的环境变量，再分别启动。仅启动 Java 后端时，可用 IDEA Run Configuration，但必须把 `.env.test` 中的数据库、Redis、模型和 manager token 环境变量配置进去并使用 `-Dspring.profiles.active=test`；已提交的 `TestAgentApplication guo` 只服务 legacy guo profile。
+Windows 需要联调当前 test 环境时，可在 PowerShell 中执行 `powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile test -EnvFile .env.test`；脚本同样只解析 dotenv 的 `KEY=VALUE` 行，不执行文件内容，并按后端、opencode-manager、前端顺序重启。WSL/Git Bash 中继续使用 `./restart-dev-services.sh --profile test --env-file .env.test`。仅启动 Java 后端时，可用 IDEA Run Configuration，但必须把 `.env.test` 中的数据库、Redis、模型和 manager token 环境变量配置进去并使用 `-Dspring.profiles.active=test`；已提交的 `TestAgentApplication guo` 只服务 legacy guo profile。
 
 开发脚本变更后，必须运行轻量校验，确认根目录重启脚本在 Bash 入口和误用 `sh` 入口下都不会解析失败：
 

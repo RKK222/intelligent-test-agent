@@ -64,4 +64,4 @@ npx serve apps/agent-web/dist -l 3000
 
 ## 本地联调
 
-本地三服务联调见 `frontend/README.md`：默认用 `./restart-dev-services.sh` 读取 `.env.test` 并以 `test` profile 一键重启；个人离线开发也可分别启动 `test-agent-app`（local profile）、`opencode serve` 和 `corepack pnpm dev`。`deploy/local/docker-compose.yml` 仅作为个人离线开发备用入口。
+本地三服务联调见 `frontend/README.md`：默认用 `./restart-dev-services.sh` 或 Windows PowerShell 下的 `.\restart-dev-services.ps1` 读取 `.env.test` 并以 `test` profile 一键重启；个人离线开发也可分别启动 `test-agent-app`（local profile）、`opencode serve` 和 `corepack pnpm dev`。`deploy/local/docker-compose.yml` 仅作为个人离线开发备用入口。

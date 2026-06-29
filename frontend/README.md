@@ -63,12 +63,26 @@ tools/dev-frontend-check.sh
 ./restart-dev-services.sh
 ```
 
+Windows PowerShell 直接使用同名入口：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile test -EnvFile .env.test
+```
+
 连接 `guo` 或其他个人调试环境时显式覆盖 profile 和 dotenv：
 
 ```bash
 TEST_AGENT_BASE_URL=http://192.168.100.115:8080 \
 TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000 \
 ./restart-dev-services.sh --profile guo --env-file .env.local --skip-frontend-build
+```
+
+Windows PowerShell 下使用 `$env:` 写入额外变量；若 `-EnvFile` 指定的 dotenv 已有同名键，以 dotenv 加载结果为准，与 Bash 脚本一致：
+
+```powershell
+$env:TEST_AGENT_BASE_URL = "http://192.168.100.115:8080"
+$env:TEST_AGENT_FRONTEND_URL = "http://192.168.100.115:3000"
+powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile guo -EnvFile .env.local -SkipFrontendBuild
 ```
 
 脚本会从 `TEST_AGENT_FRONTEND_URL` 推导前端监听 host/port，并把 `TEST_AGENT_BASE_URL` 注入为 Vite 的 `VITE_TEST_AGENT_API_BASE_URL`；需要通过局域网地址访问时，可在启动前设置 `TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000` 和 `TEST_AGENT_BASE_URL=http://192.168.100.115:8080`，后端 CORS 未显式配置时会自动包含该前端 origin。

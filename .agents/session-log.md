@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-29 - 新增 Windows PowerShell 三服务重启脚本
+
+- Why: Windows 开发环境需要不依赖 Bash 的三服务一键启动入口，避免按旧文档手工分别配置和启动 Java 后端、opencode-manager 与前端。
+- What: 新增根目录 `restart-dev-services.ps1`，对齐 `restart-dev-services.sh` 的默认 `test` profile、dotenv 安全解析、先构建再停服、后端 → opencode-manager → 前端重启顺序、JVM 代理清空、manager state/托管 opencode 进程清理和 `.tmp/dev-services` 日志约定；`tools/verify-dev-scripts.sh` 增加 ps1 存在性检查，并在可用 PowerShell 时做 parser 校验。
+- How: Windows 脚本使用 PowerShell 5.1 语法和 Win32_Process command line 精确匹配脚本管理的进程，不手改 `.env.local` 等敏感环境文件；同步 `docs/guides/ai-workflow.md`、`backend/README.md`、`frontend/README.md`、`docs/deployment/backend.md` 和 `docs/deployment/frontend.md` 的本地联调入口。
+- Result: `tools/verify-dev-scripts.sh` 在当前 macOS 环境通过；由于本机未安装 `pwsh`/`powershell`，校验脚本已跳过 PowerShell parser 校验，后续 Windows 环境应执行同一校验脚本或直接运行 `powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Help` 复核解析。
+
 ### 2026-06-29 - opencode-manager 容器 ID 改为 hostname 优先
 
 - Why: 运行管理中的 manager 容器标识需要优先反映实际主机/容器 hostname，不能被 `OPENCODE_MANAGER_CONTAINER_ID` 环境变量抢先覆盖。
