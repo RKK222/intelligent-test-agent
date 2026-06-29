@@ -342,7 +342,7 @@ function clearAllRobotTimers() {
   if (movementTimeout) clearTimeout(movementTimeout);
 }
 
-// Reset activity and 20-sec inactivity timer
+// Reset activity and 1-minute inactivity timer
 function resetInactivityTimer() {
   if (robotState.value !== "sleeping") {
     // Already active, check if we need to exit
@@ -353,12 +353,22 @@ function resetInactivityTimer() {
   }
 
   if (inactivityTimer) clearTimeout(inactivityTimer);
-  inactivityTimer = setTimeout(spawnRobot, 60000); // 20 seconds
+
+  // Only trigger when page is active and in focus
+  if (document.hidden || !document.hasFocus()) {
+    return;
+  }
+
+  inactivityTimer = setTimeout(spawnRobot, 60000); // 1 minute (60 seconds)
 }
 
 // Spawn logic
 function spawnRobot() {
   if (robotState.value !== "sleeping") return;
+  if (document.hidden || !document.hasFocus()) {
+    resetInactivityTimer();
+    return;
+  }
 
   clearAllRobotTimers();
   if (inactivityTimer) clearTimeout(inactivityTimer);
@@ -773,6 +783,10 @@ const robotStyle = computed(() => ({
   opacity: 0.85
 }));
 
+function handleFocusChange() {
+  resetInactivityTimer();
+}
+
 onMounted(() => {
   window.addEventListener("resize", handleWindowResize);
 
@@ -781,6 +795,11 @@ onMounted(() => {
   window.addEventListener("mousedown", handleUserActivity, { passive: true });
   window.addEventListener("keydown", handleUserActivity, { passive: true });
   window.addEventListener("scroll", handleUserActivity, { passive: true });
+
+  // Page active / focus change detectors
+  window.addEventListener("focus", handleFocusChange);
+  window.addEventListener("blur", handleFocusChange);
+  document.addEventListener("visibilitychange", handleFocusChange);
 
   resetInactivityTimer();
 });
@@ -791,6 +810,10 @@ onUnmounted(() => {
   window.removeEventListener("mousedown", handleUserActivity);
   window.removeEventListener("keydown", handleUserActivity);
   window.removeEventListener("scroll", handleUserActivity);
+
+  window.removeEventListener("focus", handleFocusChange);
+  window.removeEventListener("blur", handleFocusChange);
+  document.removeEventListener("visibilitychange", handleFocusChange);
 
   clearAllRobotTimers();
   if (inactivityTimer) clearTimeout(inactivityTimer);
