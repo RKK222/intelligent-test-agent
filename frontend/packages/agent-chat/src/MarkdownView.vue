@@ -179,7 +179,9 @@ onBeforeUnmount(() => {
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
   margin: 2px 0 !important;
-  padding-left: 0;
+  /* github-markdown-css 设了 padding-left: 2em，聊天气泡空间有限，
+     去除缩进让列表更紧凑 */
+  padding-left: 0 !important;
 }
 
 .markdown-body :deep(li) {
@@ -202,6 +204,12 @@ onBeforeUnmount(() => {
 }
 
 .markdown-body :deep(table) {
+  /* github-markdown-css 将 table 设为 display:block 以实现横向滚动，
+     但这会导致 border-collapse 失效，th/td 与 tr 的边框各自独立渲染，
+     在表头与表体之间、行与行之间产生多余空隙。
+     这里恢复为 display:table 使 border-collapse 正常工作。
+     加 !important 确保覆盖 github-markdown-css 的 display:block。 */
+  display: table !important;
   border-collapse: collapse;
   margin: 4px 0 !important;
   line-height: 1.25 !important;
@@ -212,6 +220,12 @@ onBeforeUnmount(() => {
 .markdown-body :deep(table td) {
   border: 1px solid var(--ta-chat-border);
   padding: 2px 5px !important;
+}
+
+/* 去除 github-markdown-css 在每行顶部加的独立边框，
+   避免与 th/td 边框叠加后在行间产生双重分割线 */
+.markdown-body :deep(table tr) {
+  border-top: none;
 }
 
 .markdown-body :deep(table tr:nth-child(2n)) {

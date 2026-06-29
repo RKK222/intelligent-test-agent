@@ -1697,3 +1697,17 @@
 - Result: 用户看到的第一条分支就是被默认选中的分支，逻辑完全一致。
 - Pitfalls: 需要保持 loadBranches 和 sortedBranches 的排序逻辑一致，避免出现选中与显示不匹配的情况。
 - Verification: 刷新分支后，验证默认选中的分支就是列表中显示的第一个。
+
+### 2026-06-29 - 修复 Markdown 表格渲染多余空行 + MyBatis Analytics Long 类型映射
+
+- Why:
+  - 前端：github-markdown-css v5.9.0 将 `<table>` 设为 `display:block`（为横向滚动），导致 `border-collapse:collapse` 失效，`th/td` 的 `border` 与 `tr` 的 `border-top` 各自独立渲染，表头与表体之间产生双重边框空隙，视觉上像空行。同时 `ul/ol` 的 `padding-left:2em` 在聊天气泡内显得间距过大。
+  - 后端：`AnalyticsMapper.xml` 中 `javaType="long"` 在 MyBatis 类型别名系统中解析为 `java.lang.Long`（装箱类型），而 `AnalyticsActivityRow` 等 Java record 的 canonical constructor 接受原始类型 `long`。MyBatis 反射查找构造函数时 `Long` ≠ `long`，导致 `NoSuchMethodException`，每次 rollup 调度任务都报错。
+- What:
+  - 前端 `MarkdownView.vue`：table 加 `display:table!important` 恢复标准表格布局；`tr` 加 `border-top:none` 去除行级双重边框；`ul/ol` 的 `padding-left` 加 `!important` 确保紧凑。
+  - 前端 `MarkdownPreview.vue`：同样加 `table{display:table;border-collapse:collapse}` 和 `tr{border-top:none}`。
+  - 后端 `AnalyticsMapper.xml`：全部 28 处 `javaType="long"` 改为 `javaType="_long"`（MyBatis 原始类型别名）。
+- How: CSS 覆盖利用 Vue scoped `:deep()` 选择器 + `!important` 提高优先级；XML 用 `sed` 批量替换后人工确认。
+- Result: 前端 `MarkdownView.test.ts` + `MarkdownPreview.test.ts` + `runtime-reducer.test.ts` 共 25/25 通过。后端 persistence 模块因 H2 不兼容 PostgreSQL CHECK 约束的 Flyway migration 无法本地跑全量测试，XML 修改为纯文本替换无语法风险。
+- Pitfalls: github-markdown-css 的 `display:block` 是为宽表横向滚动设计，恢复 `display:table` 后极宽表格可能在窄气泡内溢出（聊天气泡 `max-w-[calc(100%-44px)]` 本身较宽，影响小）；后端 Flyway H2 兼容性问题需单独处理。
+- Verification: `npx vitest run packages/agent-chat/tests/ packages/editor/tests/` 相关测试全通；`mvn -pl test-agent-persistence -am compile` 编译通过。

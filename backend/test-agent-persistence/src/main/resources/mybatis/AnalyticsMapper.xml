@@ -15,30 +15,30 @@
             <arg column="workspace_id" javaType="java.lang.String"/>
             <arg column="agent_id" javaType="java.lang.String"/>
             <arg column="model_id" javaType="java.lang.String"/>
-            <arg column="login_count" javaType="long"/>
-            <arg column="session_count" javaType="long"/>
-            <arg column="active_session_count" javaType="long"/>
-            <arg column="empty_session_count" javaType="long"/>
-            <arg column="continuous_session_count" javaType="long"/>
-            <arg column="user_message_count" javaType="long"/>
-            <arg column="assistant_message_count" javaType="long"/>
-            <arg column="run_count" javaType="long"/>
-            <arg column="succeeded_run_count" javaType="long"/>
-            <arg column="failed_run_count" javaType="long"/>
-            <arg column="cancelled_run_count" javaType="long"/>
-            <arg column="active_termination_count" javaType="long"/>
-            <arg column="valid_interaction_count" javaType="long"/>
-            <arg column="positive_feedback_count" javaType="long"/>
-            <arg column="negative_feedback_count" javaType="long"/>
-            <arg column="diff_proposed_count" javaType="long"/>
-            <arg column="diff_accepted_count" javaType="long"/>
-            <arg column="diff_rejected_count" javaType="long"/>
-            <arg column="tokens_input" javaType="long"/>
-            <arg column="tokens_output" javaType="long"/>
-            <arg column="tokens_reasoning" javaType="long"/>
-            <arg column="tokens_total" javaType="long"/>
-            <arg column="duration_total_ms" javaType="long"/>
-            <arg column="duration_run_count" javaType="long"/>
+            <arg column="login_count" javaType="_long"/>
+            <arg column="session_count" javaType="_long"/>
+            <arg column="active_session_count" javaType="_long"/>
+            <arg column="empty_session_count" javaType="_long"/>
+            <arg column="continuous_session_count" javaType="_long"/>
+            <arg column="user_message_count" javaType="_long"/>
+            <arg column="assistant_message_count" javaType="_long"/>
+            <arg column="run_count" javaType="_long"/>
+            <arg column="succeeded_run_count" javaType="_long"/>
+            <arg column="failed_run_count" javaType="_long"/>
+            <arg column="cancelled_run_count" javaType="_long"/>
+            <arg column="active_termination_count" javaType="_long"/>
+            <arg column="valid_interaction_count" javaType="_long"/>
+            <arg column="positive_feedback_count" javaType="_long"/>
+            <arg column="negative_feedback_count" javaType="_long"/>
+            <arg column="diff_proposed_count" javaType="_long"/>
+            <arg column="diff_accepted_count" javaType="_long"/>
+            <arg column="diff_rejected_count" javaType="_long"/>
+            <arg column="tokens_input" javaType="_long"/>
+            <arg column="tokens_output" javaType="_long"/>
+            <arg column="tokens_reasoning" javaType="_long"/>
+            <arg column="tokens_total" javaType="_long"/>
+            <arg column="duration_total_ms" javaType="_long"/>
+            <arg column="duration_run_count" javaType="_long"/>
             <arg column="first_activity_at" javaType="java.time.Instant"/>
             <arg column="last_activity_at" javaType="java.time.Instant"/>
         </constructor>
@@ -69,8 +69,8 @@
             <arg column="workspace_id" javaType="java.lang.String"/>
             <arg column="agent_id" javaType="java.lang.String"/>
             <arg column="model_id" javaType="java.lang.String"/>
-            <arg column="le_ms" javaType="long"/>
-            <arg column="run_count" javaType="long"/>
+            <arg column="le_ms" javaType="_long"/>
+            <arg column="run_count" javaType="_long"/>
         </constructor>
     </resultMap>
 
@@ -123,8 +123,8 @@
     <resultMap id="OrganizationUserCountRowMap" type="com.icbc.testagent.persistence.mybatis.AnalyticsOrganizationUserCountRow">
         <constructor>
             <arg column="name" javaType="java.lang.String"/>
-            <arg column="registered_users" javaType="long"/>
-            <arg column="enabled_users" javaType="long"/>
+            <arg column="registered_users" javaType="_long"/>
+            <arg column="enabled_users" javaType="_long"/>
         </constructor>
     </resultMap>
 
