@@ -129,6 +129,20 @@ const ElAutocompleteStub = defineComponent({
   }
 });
 
+const ElDatePickerStub = defineComponent({
+  props: ["modelValue", "placeholder"],
+  emits: ["update:modelValue"],
+  inheritAttrs: false,
+  setup(props, { emit }) {
+    return () =>
+      h("input", {
+        placeholder: props.placeholder,
+        value: props.modelValue,
+        onInput: (event: Event) => emit("update:modelValue", (event.target as HTMLInputElement).value)
+      });
+  }
+});
+
 const ElCheckboxStub = defineComponent({
   props: ["modelValue"],
   emits: ["update:modelValue"],
@@ -167,6 +181,7 @@ function renderPanel(api = createApi()) {
           template: `<button type="button" @click="$emit('click')"><slot /></button>`
         },
         ElCheckbox: ElCheckboxStub,
+        ElDatePicker: ElDatePickerStub,
         ElIcon: {
           template: `<span><slot /></span>`
         },
@@ -367,7 +382,7 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     await fireEvent.click(getAllByText("加载目录").find(el => el.tagName === "BUTTON")!);
     expect(await findByText("非标准库版本")).toBeTruthy();
 
-    await fireEvent.update(getByPlaceholderText("yyyyMMdd"), "20260707");
+    await fireEvent.update(getByPlaceholderText("选择日期"), "20260707");
     await fireEvent.click(getByText("创建"));
 
     await waitFor(() => expect(api.createApplicationWorkspace).toHaveBeenCalledWith("F-COSS", expect.objectContaining({

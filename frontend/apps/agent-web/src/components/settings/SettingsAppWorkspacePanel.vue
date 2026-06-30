@@ -478,8 +478,8 @@ async function loadDirectories() {
 }
 
 async function createWorkspace() {
-  if (requiresWorkspaceVersion.value && !/^\d{8}$/.test(workspaceVersion.value.trim())) {
-    errorMessage.value = "非标准库版本必须为 yyyyMMdd";
+  if (requiresWorkspaceVersion.value && !/^\d{8}$/.test(workspaceVersion.value ?? '')) {
+    errorMessage.value = "非标准库版本必须选择日期";
     return;
   }
   const operationId = createWorkspaceOperationId();
@@ -493,7 +493,7 @@ async function createWorkspace() {
         branch: workspaceBranch.value,
         directoryPath: workspaceDirectory.value,
         workspaceName: workspaceName.value.trim() || undefined,
-        version: requiresWorkspaceVersion.value ? workspaceVersion.value.trim() : undefined,
+        version: requiresWorkspaceVersion.value ? (workspaceVersion.value ?? '').trim() || undefined : undefined,
         operationId
       });
     } catch (error) {
@@ -909,9 +909,16 @@ onBeforeUnmount(() => {
                     <span class="ta-form-label">工作空间名称</span>
                     <el-input v-model="workspaceName" placeholder="工作空间名称" style="width: 100%" />
                   </label>
-                  <label v-if="requiresWorkspaceVersion" class="ta-form-field" style="width: 140px">
+                  <label v-if="requiresWorkspaceVersion" class="ta-form-field" style="width: 160px">
                     <span class="ta-form-label">非标准库版本</span>
-                    <el-input v-model="workspaceVersion" placeholder="yyyyMMdd" style="width: 100%" />
+                    <el-date-picker
+                      v-model="workspaceVersion"
+                      type="date"
+                      value-format="yyyyMMdd"
+                      format="yyyyMMdd"
+                      placeholder="选择日期"
+                      style="width: 100%"
+                    />
                   </label>
                 </div>
                 <el-button type="primary" :disabled="loading || !workspaceDirectory" @click="createWorkspace">创建</el-button>
