@@ -713,8 +713,19 @@ function Start-BackgroundCommand {
 
     $errorLogPath = Get-ErrorLogPath $LogPath
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LogPath) | Out-Null
-    Set-Content -LiteralPath $LogPath -Value "" -NoNewline
-    Set-Content -LiteralPath $errorLogPath -Value "" -NoNewline
+    # 日志文件可能被正在运行的服务占用，使用 .NET API 以 FileShare.ReadWrite 模式清空，
+    # 避免 IOException。
+    try {
+        [System.IO.File]::OpenWrite($LogPath).SetLength(0).Close()
+    } catch {
+        # 文件不存在时创建空文件
+        Set-Content -LiteralPath $LogPath -Value "" -NoNewline -ErrorAction SilentlyContinue
+    }
+    try {
+        [System.IO.File]::OpenWrite($errorLogPath).SetLength(0).Close()
+    } catch {
+        Set-Content -LiteralPath $errorLogPath -Value "" -NoNewline -ErrorAction SilentlyContinue
+    }
 
     # 直接使用 .NET ProcessStartInfo 启动目标命令。
     # 父进程的环境变量会自动继承，额外环境变量通过 ProcessStartInfo 注入。
