@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-30 - Maven build 前强制终止所有开发服务
+
+- Why: 如果上一次 Ctrl+C 或窗口崩溃导致后端 Java 进程未被正常回收，`mvn clean package` 会因 JAR 文件被锁而失败：`Failed to delete ... test-agent-app-0.1.0-SNAPSHOT.jar: 另一个程序正在使用此文件`。
+- What: 新增 `Stop-AllDevServices` 函数，在 `Clear-ServiceLogs` 之后、`Build-Backend` 之前调用。它先走现有的 `Stop-BackendService / Stop-FrontendService / Stop-OpencodeManagerService`（通过命令行匹配精确杀进程），再用 `taskkill /F /IM java.exe /T` 等做兜底（`/T` 同时终止子进程），彻底释放 target 目录的文件句柄。
+- How: 仅改 [win-restart-dev-services-fixed-v4.ps1](file:///d:/workspace/intelligent-test-agent/win-restart-dev-services-fixed-v4.ps1)；不涉及 API/事件/数据库/安全/兼容性。
+- Result: PowerShell parser 校验通过，`Stop-AllDevServices` 函数已识别。
+
 ### 2026-06-30 - 实时日志默认开启，用 -NoFollow 禁用
 
 - Why: 上一版 `-FollowLogs` 默认为 `$false`，脚本跑完就直接退出，用户需要手动加 `-FollowLogs` 才能进入 tail 模式，每次都要记着打参数很麻烦。

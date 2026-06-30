@@ -556,6 +556,38 @@ function Stop-OpencodeManagerService {
     Cleanup-OpencodeManagerState
 }
 
+# 在 Maven/npm 构建前强制终止所有可能锁住 target/dist 目录的残留进程。
+# 如果上一次 Ctrl+C 或窗口崩溃时后端/前端进程未被正常回收，Maven/npm clean 会因文件占用而失败。
+function Stop-AllDevServices {
+    Write-Host "Stopping all development services before build..."
+    Stop-BackendService
+    Stop-FrontendService
+    Stop-OpencodeManagerService
+
+    # 额外的兜底：强制清理任何遗留的 java.exe / node.exe / opencode.exe / opencode-manager.exe，
+    # 避免因 pid 文件过期导致清理遗漏。
+    # /T 同时终止子进程，避免孤儿进程。
+    $extraKills = @(
+        @{ Exe = "java.exe";       Desc = "Java (backend)" },
+        @{ Exe = "node.exe";       Desc = "Node (frontend)" },
+        @{ Exe = "opencode.exe";   Desc = "opencode" },
+        @{ Exe = "opencode";       Desc = "opencode (no ext)" },
+        @{ Exe = "opencode-manager.exe"; Desc = "opencode-manager" },
+        @{ Exe = "opencode-manager";     Desc = "opencode-manager (no ext)" }
+    )
+    foreach ($item in $extraKills) {
+        $previousErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = 'SilentlyContinue'
+        try {
+            # taskkill /F /IM 会返回 non-zero exit code 如果进程不存在，不算错误。
+            $null = & taskkill /F /IM $item.Exe 2>&1
+        } finally {
+            $ErrorActionPreference = $previousErrorAction
+        }
+    }
+    Write-Host "All development services stopped."
+}
+
 function Test-HttpOk {
     param([Parameter(Mandatory = $true)][string]$Url)
 
@@ -1066,6 +1098,7 @@ Require-Command "mvn"
 
 Seed-DemoWorkspaces
 Clear-ServiceLogs
+Stop-AllDevServices
 
 Write-Host "Sensitive environment values are loaded but not printed."
 Write-Host "Builds run before stopping existing services; failed builds leave current services untouched."
