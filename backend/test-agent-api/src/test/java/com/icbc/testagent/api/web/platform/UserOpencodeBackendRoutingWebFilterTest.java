@@ -17,7 +17,10 @@ import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeServiceStatus;
 import com.icbc.testagent.workspace.WorkspaceServerIdentity;
 import java.io.IOException;
 import java.net.Authenticator;
@@ -132,6 +135,66 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void missingTargetBackendReturnsAllocationStatusForReadOnlyProcessStatus() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
+                .thenReturn(Optional.of("10.8.0.22"));
+        Mockito.when(assignmentService.allocationStatus(
+                        Mockito.eq(USER_ID),
+                        Mockito.eq("opencode"),
+                        Mockito.anyString(),
+                        Mockito.eq("trace_1234567890abcdef")))
+                .thenReturn(allocatedStatus("目标服务器后端不可用，暂无法确认 opencode 进程健康状态"));
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore("10.8.0.33"), httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .get("/api/internal/agent/opencode/processes/me")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .build());
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(exchange1 -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isFalse();
+        assertThat(httpClient.requests).isEmpty();
+        assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(200);
+        assertThat(exchange.getResponse().getBodyAsString().block()).contains(
+                "\"status\":\"UNAVAILABLE\"",
+                "\"serviceStatus\":\"NOT_RUNNING\"",
+                "\"serviceAddress\":\"10.8.0.22:4097\"");
+    }
+
+    @Test
+    void failedForwardReturnsAllocationStatusForReadOnlyProcessStatus() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
+                .thenReturn(Optional.of("10.8.0.22"));
+        Mockito.when(assignmentService.allocationStatus(
+                        Mockito.eq(USER_ID),
+                        Mockito.eq("opencode"),
+                        Mockito.anyString(),
+                        Mockito.eq("trace_1234567890abcdef")))
+                .thenReturn(allocatedStatus("目标服务器后端不可用，暂无法确认 opencode 进程健康状态"));
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}", true);
+        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore("10.8.0.22"), httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .get("/api/internal/agent/opencode/processes/me")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .build());
+
+        filter.filter(exchange, chain(exchange1 -> Mono.empty())).block(Duration.ofSeconds(2));
+
+        assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(200);
+        assertThat(exchange.getResponse().getBodyAsString().block()).contains(
+                "\"status\":\"UNAVAILABLE\"",
+                "\"serviceStatus\":\"NOT_RUNNING\"",
+                "\"serviceAddress\":\"10.8.0.22:4097\"");
+    }
+
+    @Test
     void duplicateBackendSnapshotsUseLatestHeartbeatForSameServer() {
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
@@ -148,6 +211,21 @@ class UserOpencodeBackendRoutingWebFilterTest {
 
         assertThat(httpClient.requests).singleElement().satisfies(request -> assertThat(request.uri().toString())
                 .isEqualTo("http://10.8.0.22:18080/api/internal/agent/opencode/processes/me"));
+    }
+
+    private static UserOpencodeProcessStatusResponse allocatedStatus(String message) {
+        return new UserOpencodeProcessStatusResponse(
+                UserOpencodeProcessAvailability.UNAVAILABLE,
+                false,
+                message,
+                null,
+                null,
+                null,
+                null,
+                null,
+                NOW,
+                UserOpencodeServiceStatus.NOT_RUNNING,
+                "10.8.0.22:4097");
     }
 
     private static UserOpencodeBackendRoutingWebFilter filter(
@@ -231,11 +309,17 @@ class UserOpencodeBackendRoutingWebFilterTest {
     private static final class RecordingHttpClient extends HttpClient {
         private final int status;
         private final String responseBody;
+        private final boolean failSend;
         private final List<HttpRequest> requests = new ArrayList<>();
 
         private RecordingHttpClient(int status, String responseBody) {
+            this(status, responseBody, false);
+        }
+
+        private RecordingHttpClient(int status, String responseBody, boolean failSend) {
             this.status = status;
             this.responseBody = responseBody;
+            this.failSend = failSend;
         }
 
         @Override public Optional<CookieHandler> cookieHandler() { return Optional.empty(); }
@@ -253,6 +337,9 @@ class UserOpencodeBackendRoutingWebFilterTest {
         public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> responseBodyHandler)
                 throws IOException, InterruptedException {
             requests.add(request);
+            if (failSend) {
+                throw new IOException("connection refused");
+            }
             return new BytesResponse<>((T) responseBody.getBytes(java.nio.charset.StandardCharsets.UTF_8), request, status);
         }
 

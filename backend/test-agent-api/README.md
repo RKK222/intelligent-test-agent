@@ -55,7 +55,7 @@
 - `AnalyticsControllerTest` 覆盖运营分析 API 的 `SUPER_ADMIN` 成功、非超级管理员/匿名拒绝和非法时间参数统一校验错误。
 - `ManagerBackendDiscoveryControllerTest` 覆盖 manager token 鉴权、统一响应、traceId 和 Redis 在线后端实例 DTO；该接口仅作兼容诊断。
 - `ManagerControlWebSocketHandlerTest` 覆盖 `register`、`managerHeartbeat`、兼容 `backendListRequest` 忽略、命令结果和错误 envelope 的 WebSocket 入口适配。
-- `UserOpencodeBackendRoutingWebFilterTest` 覆盖用户 opencode 进程请求按已有 binding 所属服务器转发、内部路由头防循环和目标后端不可用错误。
+- `UserOpencodeBackendRoutingWebFilterTest` 覆盖用户 opencode 进程请求按已有 binding 所属服务器转发、内部路由头防循环、只读状态 GET 在目标后端不可用时返回 binding-only 分配状态，以及初始化/Run 等操作类请求的目标后端不可用错误。
 - `PlatformOpencodeRuntimeControllerTest` 覆盖旧 `/api/...` 与 `/api/internal/platform/...` 的 opencode runtime 代理入口、MCP tools、permission reply、session share、traceId 和可选用户主体透传。
 - `AgentOpencodeRuntimeControllerTest` 覆盖 `/api/internal/agent/{agentId}/...` 原始 opencode 路径兼容、agentId、traceId 和可选用户主体透传。
 - `AuthWebSupportTest` 覆盖可选认证主体读取，确保 static-token 兼容入口不会因缺少用户主体抛错。

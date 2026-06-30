@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-30 - 修复跨后端登录时用户 opencode 状态误判未分配
+
+- Why: 用户已有 `user_opencode_process_bindings` ACTIVE 记录在 A 服务器，但请求落到 B 服务器且转发到 A 失败时，前端拿不到 `processStatus`，会把“已分配但健康不可确认”误显示为“待分配专属进程”。
+- What: 后端新增 binding-only 的只读分配状态入口，`/api/internal/agent/opencode/processes/me` 跨后端转发在目标后端缺失、异常或 5xx 时降级返回 `UNAVAILABLE + NOT_RUNNING + serviceAddress`；真实初始化、Run 和 runtime 代理仍不降级，继续要求目标服务器执行。前端头像无状态时显示“状态未知”，聊天状态卡优先展示 `serviceAddress`。
+- How: 最小修改 `UserOpencodeProcessAssignmentService`、用户进程后端路由服务/过滤器和 `FigmaShell`/`FigmaChatPanel` 展示逻辑，并补充 runtime、API 路由和前端组件回归测试；同步 backend、opencode-runtime、api、agent-web README 与 HTTP API 文档。
+- Result: `mvn -pl test-agent-api,test-agent-opencode-runtime -am test`、`mvn clean package -DskipTests`、`corepack pnpm@10.25.0 --dir frontend test -- runtime-management-settings backend-api`、`corepack pnpm@10.25.0 --dir frontend --filter @test-agent/agent-web typecheck` 和 `git diff --check` 通过。本次不改数据库结构、不新增公开 API 字段、不迁移 binding。
+
 ### 2026-06-30 - 运行管理启停命令跨 Java 路由
 
 - Why: opencode-manager 只连接本服务器 Java，运行管理页可能从任意 Java 发起重启/停止，不能再假设入口后端一定和目标 manager 相连。

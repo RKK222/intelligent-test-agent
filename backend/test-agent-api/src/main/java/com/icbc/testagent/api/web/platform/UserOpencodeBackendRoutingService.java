@@ -2,6 +2,7 @@ package com.icbc.testagent.api.web.platform;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.icbc.testagent.common.api.ApiErrorResponse;
+import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
@@ -48,6 +49,7 @@ class UserOpencodeBackendRoutingService {
     private static final Duration FORWARD_TIMEOUT = Duration.ofSeconds(30);
     private static final String OPENCODE_AGENT_ID = "opencode";
     private static final String AGENT_PREFIX = "/api/internal/agent/";
+    private static final String PROCESS_STATUS_PATH = "/api/internal/agent/opencode/processes/me";
     private static final String PLATFORM_RUNTIME_PREFIX = "/api/internal/platform/opencode-runtime";
     private static final List<String> LEGACY_RUNTIME_PREFIXES = List.of(
             "/api/agents",
@@ -122,9 +124,12 @@ class UserOpencodeBackendRoutingService {
     /**
      * 转发原始 HTTP 请求，并把目标 Java 的响应原样写回当前响应。
      */
-    Mono<Void> forward(ServerWebExchange exchange, String linuxServerId) {
+    Mono<Void> forward(ServerWebExchange exchange, AuthPrincipal principal, String linuxServerId) {
         BackendJavaProcess backend = backendFor(linuxServerId);
         if (backend == null) {
+            if (isReadOnlyProcessStatusRequest(exchange)) {
+                return writeAllocationStatus(exchange, principal);
+            }
             return writeError(
                     exchange,
                     ErrorCode.OPENCODE_UNAVAILABLE,
@@ -134,10 +139,18 @@ class UserOpencodeBackendRoutingService {
         return requestBody(exchange)
                 .flatMap(body -> Mono.fromCallable(() -> send(exchange, backend, body))
                         .subscribeOn(Schedulers.boundedElastic()))
-                .flatMap(response -> writeForwardResponse(exchange, response))
+                .flatMap(response -> {
+                    if (shouldFallbackToAllocationStatus(exchange, response)) {
+                        return writeAllocationStatus(exchange, principal);
+                    }
+                    return writeForwardResponse(exchange, response);
+                })
                 .onErrorResume(exception -> {
                     LOGGER.warn("用户 opencode 请求转发失败 linuxServerId={} traceId={}",
                             linuxServerId, traceId(exchange), exception);
+                    if (isReadOnlyProcessStatusRequest(exchange)) {
+                        return writeAllocationStatus(exchange, principal);
+                    }
                     return writeError(
                             exchange,
                             ErrorCode.OPENCODE_UNAVAILABLE,
@@ -227,6 +240,17 @@ class UserOpencodeBackendRoutingService {
                 || path.equals("/api/auth/refresh");
     }
 
+    private boolean isReadOnlyProcessStatusRequest(ServerWebExchange exchange) {
+        return HttpMethod.GET.equals(exchange.getRequest().getMethod())
+                && PROCESS_STATUS_PATH.equals(exchange.getRequest().getURI().getRawPath());
+    }
+
+    private boolean shouldFallbackToAllocationStatus(
+            ServerWebExchange exchange,
+            HttpResponse<byte[]> response) {
+        return isReadOnlyProcessStatusRequest(exchange) && response.statusCode() >= 500;
+    }
+
     private BackendJavaProcess backendFor(String linuxServerId) {
         return liveBackendsByServer().get(linuxServerId);
     }
@@ -300,6 +324,26 @@ class UserOpencodeBackendRoutingService {
                 .ifPresent(value -> exchange.getResponse().getHeaders().set(TraceConstants.TRACE_ID_HEADER, value));
         DataBufferFactory bufferFactory = exchange.getResponse().bufferFactory();
         return exchange.getResponse().writeWith(Mono.just(bufferFactory.wrap(response.body())));
+    }
+
+    private Mono<Void> writeAllocationStatus(ServerWebExchange exchange, AuthPrincipal principal) {
+        String traceId = traceId(exchange);
+        try {
+            var response = assignmentService.allocationStatus(
+                    principal.userId(),
+                    OPENCODE_AGENT_ID,
+                    "已分配 opencode 专属进程，但目标服务器后端不可用，暂无法确认进程健康状态",
+                    traceId);
+            byte[] body = objectMapper.writeValueAsBytes(ApiResponse.ok(
+                    RuntimeDtos.UserOpencodeProcessResponse.from(response),
+                    traceId));
+            exchange.getResponse().setStatusCode(HttpStatusCode.valueOf(200));
+            exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
+            exchange.getResponse().getHeaders().set(TraceConstants.TRACE_ID_HEADER, traceId);
+            return exchange.getResponse().writeWith(Mono.just(exchange.getResponse().bufferFactory().wrap(body)));
+        } catch (Exception exception) {
+            return Mono.error(exception);
+        }
     }
 
     private Mono<Void> writeError(

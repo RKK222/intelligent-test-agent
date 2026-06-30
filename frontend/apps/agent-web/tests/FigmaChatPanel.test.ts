@@ -405,6 +405,26 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.get(".figma-chat-process-init").text()).toBe("分配专属进程");
   });
 
+  it("shows the assigned service address before the backend status message", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processRequired: true,
+        processStatus: {
+          status: "UNAVAILABLE",
+          initializable: false,
+          serviceStatus: "NOT_RUNNING",
+          serviceAddress: "192.168.100.115:4097",
+          message: "目标服务器后端不可用，暂无法确认 opencode 进程健康状态"
+        }
+      }
+    });
+
+    expect(wrapper.text()).toContain("opencode 进程不可用");
+    expect(wrapper.get(".figma-chat-process-message").text()).toBe("192.168.100.115:4097");
+    expect(wrapper.text()).not.toContain("尚未分配 opencode 专属进程");
+  });
+
   it("shows the loading label while initializing, differentiated by service status", async () => {
     const unassigned = mount(FigmaChatPanel, {
       props: {

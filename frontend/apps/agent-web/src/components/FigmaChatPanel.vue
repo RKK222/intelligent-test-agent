@@ -1165,7 +1165,7 @@ const processStatusText = computed(() => {
   if (props.processRequired && !props.processStatus)
     return '请刷新进程状态后重试'
   if (!props.processStatus) return ''
-  return props.processStatus.baseUrl ?? props.processStatus.message
+  return resolveServiceAddress(props.processStatus) || props.processStatus.message
 })
 
 // 进程状态卡片可折叠：默认收起为右下角一个小圆点（带渐变虚化），

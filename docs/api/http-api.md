@@ -1251,7 +1251,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 ### 用户 opencode 进程 API
 
-用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会通过 Redis `liveBackendSnapshots()` 找到 binding 所属服务器 Java 的 `listenUrl`，透传原始 `Authorization`、`X-Trace-Id`、请求 body 和统一错误响应转发到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。目标后端不在线时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程；无 manager 连接、命令超时或 manager 返回失败时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT` 或 `OPENCODE_BAD_GATEWAY`。
+用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会通过 Redis `liveBackendSnapshots()` 找到 binding 所属服务器 Java 的 `listenUrl`，透传原始 `Authorization`、`X-Trace-Id`、请求 body 和统一错误响应转发到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。是否已分配只以 `user_opencode_process_bindings(user_id, agent_id)` 的 ACTIVE 记录为准；`GET /processes/me` 目标后端不在线、转发失败或目标返回 5xx 时返回 200 成功响应，`data.status=UNAVAILABLE`、`serviceStatus=NOT_RUNNING`、`serviceAddress={绑定服务器}:{端口}`，表示已分配但暂无法确认健康状态。初始化、Run 启动和 runtime 代理仍在目标后端不可用时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding，也不会在当前 Java 启动旧 binding。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程；无 manager 连接、命令超时或 manager 返回失败时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT` 或 `OPENCODE_BAD_GATEWAY`。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -1285,9 +1285,9 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 - `initializable`：当前状态是否允许前端展示初始化动作；无当前后端可连接的健康容器时为 `false`。
 - `bindingClearable`：当 `status=UNAVAILABLE` 时，如果后端检测到 `execution_nodes` 中仍有可路由的固定节点（例如本地启动的 opencode）作为兜底，会把 `bindingClearable` 置为 `true`，前端可以展示"重置绑定"按钮。
 - `localFallback`：当 `status=READY` 时，如果响应已经回退到 `execution_nodes` 中的固定节点而非用户专属进程，`localFallback` 为 `true`；此时 `baseUrl` 来自固定节点，前端可以直接发起对话。
-- `serviceStatus`：头像菜单使用的服务展示状态，取值为 `UNASSIGNED`（未分配）、`RUNNING`（运行中）、`NOT_RUNNING`（未运行）；该字段不改变 `status` 的对话门禁语义。
-- `serviceAddress`：头像菜单展示地址，格式为 `{服务器ip}:{内部opencode端口}`；仅当前用户已有 ACTIVE 分配或 local-direct 合成进程时返回。
-- `message`：面向用户的状态说明或失败原因；命中 `localFallback` 时通常包含"回退到本地 opencode 节点"。
+- `serviceStatus`：头像菜单使用的服务展示状态，取值为 `UNASSIGNED`（未分配）、`RUNNING`（运行中）、`NOT_RUNNING`（已分配但未运行或健康不可确认）；该字段不改变 `status` 的对话门禁语义。
+- `serviceAddress`：头像菜单展示地址，格式为 `{服务器ip}:{内部opencode端口}`；仅当前用户已有 ACTIVE 分配或 local-direct 合成进程时返回，来源优先是 binding 表中的服务器和端口。
+- `message`：面向用户的状态说明或失败原因；目标后端不可用的状态查询会说明已分配但暂无法确认健康状态，命中 `localFallback` 时通常包含"回退到本地 opencode 节点"。
 - `processId`、`linuxServerId`、`containerId`、`port`、`baseUrl`：仅在已有或成功初始化进程时返回；`baseUrl` 固定为 `http://{linuxServerId}:{port}`。
 - `checkedAt`：本次状态计算时间。
 

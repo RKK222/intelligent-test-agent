@@ -249,6 +249,31 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
+    void allocationStatusReadsActiveBindingWithoutGatewayHealth() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4100, 4, 1));
+        repository.bindings.put(
+                USER_ID.value() + ":opencode",
+                binding(USER_ID, new OpencodeProcessId("ocp_existing"), "10.8.0.12", 4097));
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.allocationStatus(
+                USER_ID,
+                "opencode",
+                "已分配 opencode 专属进程，但暂无法确认进程健康状态",
+                TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.UNAVAILABLE);
+        assertThat(response.initializable()).isFalse();
+        assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.NOT_RUNNING);
+        assertThat(response.serviceAddress()).isEqualTo("10.8.0.12:4097");
+        assertThat(response.message()).contains("已分配");
+        assertThat(gateway.healthCommands).isEmpty();
+        assertThat(repository.findContainerCalls).isZero();
+    }
+
+    @org.junit.jupiter.api.Test
     void initializeDoesNotMigrateBindingToDifferentLinuxServerWhenOldServerHasNoContainer() {
         // 旧用户 binding 在 10.8.0.12 上，但该 IP 上已无可用容器；
         // 当前 Java 即使看到 10.8.0.13 有空闲容器，也不能静默迁移用户 binding。

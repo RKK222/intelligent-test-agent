@@ -165,7 +165,12 @@ public class UserOpencodeProcessAssignmentService {
                     : unavailable("原 Linux 服务器没有可用的 opencode 容器", binding.get(), now);
         }
         OpencodeServerProcess current = process.get();
-        OpencodeProcessHealthResult health = checkHealth(current, traceId);
+        OpencodeProcessHealthResult health;
+        try {
+            health = checkHealth(current, traceId);
+        } catch (PlatformException exception) {
+            return unavailable("opencode 进程健康状态暂无法确认：" + exception.getMessage(), current, now);
+        }
         if (health.healthy()) {
             OpencodeServerProcess refreshed = refreshProcess(current, OpencodeServerProcessStatus.RUNNING, health.message(), now, traceId);
             repository.saveOpencodeServerProcess(refreshed);
@@ -223,6 +228,29 @@ public class UserOpencodeProcessAssignmentService {
                 .filter(item -> item.status() == UserOpencodeProcessBindingStatus.ACTIVE)
                 .map(UserOpencodeProcessBinding::linuxServerId)
                 .map(LinuxServerId::value);
+    }
+
+    /**
+     * 只读取数据库 ACTIVE binding 来表达“是否已分配”，不触发 manager 健康检查、
+     * 容器可用性查询或进程启动，用于跨后端状态查询失败时保留用户分配事实。
+     */
+    public UserOpencodeProcessStatusResponse allocationStatus(
+            UserId userId,
+            String agentId,
+            String allocatedMessage,
+            String traceId) {
+        validateAgent(agentId);
+        Instant now = Instant.now();
+        Optional<UserOpencodeProcessBinding> binding = repository.findUserBinding(userId, OPENCODE_AGENT_ID)
+                .filter(item -> item.status() == UserOpencodeProcessBindingStatus.ACTIVE);
+        return binding
+                .map(item -> unavailable(
+                        allocatedMessage == null || allocatedMessage.isBlank()
+                                ? "已分配 opencode 专属进程，但暂无法确认进程健康状态"
+                                : allocatedMessage,
+                        item,
+                        now))
+                .orElseGet(() -> unavailable("当前用户尚未分配 opencode 专属进程", now));
     }
 
     /**
