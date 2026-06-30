@@ -139,6 +139,15 @@ function messageFiles(msg: FileOperationMessage) {
       url: part.url,
     }))
 }
+// 将 AI 回复中的 <thinking> 标签转为折叠块，美观展示思考过程。
+function formatThinking(text: string): string {
+  return text.replace(/<thinking>([\s\S]*?)<\/thinking>/g, (_, c) => {
+    const t = c.trim();
+    if (!t) return '';
+    return '\n> \u{1F4AD} **思考**\n> ' + t.replace(/\n/g, '\n> ') + '\n';
+  });
+}
+
 
 // 连续助手快照合并时只保留一个边界换行，避免前一段自带换行后再次 join 产生空白段。
 function joinAssistantContent(left: string, right: string): string {
@@ -2100,7 +2109,7 @@ function onCompositionEnd() {
                     message.content
                   }}</span>
                 </div>
-                <MarkdownView v-else-if="message.content.trim()" :source="message.content" />
+                <MarkdownView v-else-if="message.content.trim()" :source="formatThinking(message.content)" />
                 <div
                   v-if="messageFiles(message).length > 0"
                   class="figma-chat-document-list"
