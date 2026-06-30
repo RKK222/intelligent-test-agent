@@ -89,6 +89,7 @@ test-agent-event
 11. 业务模块不得直接访问 MyBatis mapper、MyBatis 行模型或 `test-agent-persistence` 内部实现；只能通过 domain 端口调用持久化能力。
 12. 涉及 opencode-manager 路由、Java 到 manager 控制、用户 opencode 进程服务器归属、运行管理 `containerId` 路由、Agent 配置或文件 WebSocket 目标后端选择时，不得新增自写路由、Redis 快照扫描、Java->Java HTTP 转发器、防循环 header、本机降级或本地绕过；必须复用 `BackendJavaRouteResolver`、`BackendHttpForwarder` 和目标 Java 的 `OpencodeProcessManagerGateway` 公共链路。
 13. 涉及 opencode server 启动、重启后拉起、端口复用或启动成功状态回写时，不得在业务入口直接调用 `OpencodeProcessManagerGateway.startProcess()` 并自行保存进程/binding/heartbeat/`ExecutionNode`；必须复用 `OpencodeProcessStartupService`，由它统一完成 start、候选快照、manager health、opencode HTTP health、最终状态和兼容投影。
+14. 涉及 opencode server 停止、停止后状态回写或运行管理停止命令时，不得在业务入口直接调用 `OpencodeProcessManagerGateway.stopProcess()` 并自行保存 `STOPPED`；必须复用 `OpencodeProcessStopService`，由它统一完成 stop、停止后 manager health 失败确认和最终状态回写。
 
 ## 业务工程归属
 

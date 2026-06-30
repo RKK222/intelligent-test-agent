@@ -28,6 +28,7 @@ public class RuntimeManagementCommandService {
     private final OpencodeProcessManagerGateway gateway;
     private final OpencodeProcessManagementRepository repository;
     private final OpencodeProcessStartupService startupService;
+    private final OpencodeProcessStopService stopService;
 
     /**
      * 注入管理进程控制面网关；服务层不直接持有 WebSocket 连接细节。
@@ -36,19 +37,22 @@ public class RuntimeManagementCommandService {
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.repository = null;
         this.startupService = null;
+        this.stopService = new OpencodeProcessStopService(gateway);
     }
 
     /**
-     * 注入控制面网关、进程仓储和公共启动服务。
+     * 注入控制面网关、进程仓储、公共启动服务和公共停止服务。
      */
     @Autowired
     public RuntimeManagementCommandService(
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessManagementRepository repository,
-            OpencodeProcessStartupService startupService) {
+            OpencodeProcessStartupService startupService,
+            OpencodeProcessStopService stopService) {
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.startupService = Objects.requireNonNull(startupService, "startupService must not be null");
+        this.stopService = Objects.requireNonNull(stopService, "stopService must not be null");
     }
 
     /**
@@ -77,7 +81,9 @@ public class RuntimeManagementCommandService {
      * 停止指定容器端口上的 opencode server。
      */
     public OpencodeProcessControlResult stopManagedProcess(OpencodeContainerId containerId, int port, String traceId) {
-        return gateway.stopProcess(new OpencodeProcessControlCommand(containerId, port, traceId));
+        return latestProcess(containerId, port)
+                .map(process -> stopService.stopAndVerify(OpencodeProcessStopRequest.tracked(process, traceId)))
+                .orElseGet(() -> stopService.stopAndVerify(OpencodeProcessStopRequest.untracked(containerId, port, traceId)));
     }
 
     private Optional<OpencodeServerProcess> latestProcess(OpencodeContainerId containerId, int port) {

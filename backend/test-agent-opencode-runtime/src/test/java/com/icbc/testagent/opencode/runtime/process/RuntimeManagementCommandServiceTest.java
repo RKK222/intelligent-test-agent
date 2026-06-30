@@ -149,6 +149,47 @@ class RuntimeManagementCommandServiceTest {
         assertThat(result.status()).isEqualTo("STOPPED");
     }
 
+    @Test
+    void stopTrackedUserProcessVerifiesHealthFailureAndMarksStopped() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess running = process("ocp_running", 4097, OpencodeServerProcessStatus.RUNNING);
+        repository.processes.put(running.processId(), running);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.unhealthy("process not found");
+        RuntimeManagementCommandService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        OpencodeProcessControlResult result = service.stopManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID);
+
+        assertThat(gateway.stopCommands).hasSize(1);
+        assertThat(gateway.healthCommands).singleElement()
+                .extracting(OpencodeProcessHealthCommand::processId)
+                .isEqualTo(running.processId());
+        assertThat(result.status()).isEqualTo("STOPPED");
+        assertThat(result.healthy()).isFalse();
+        assertThat(repository.findOpencodeServerProcessById(running.processId())).get().satisfies(process -> {
+            assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.STOPPED);
+            assertThat(process.pid()).isNull();
+        });
+    }
+
+    @Test
+    void stopTrackedUserProcessDoesNotReturnSuccessWhenHealthStillHealthy() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess running = process("ocp_running", 4097, OpencodeServerProcessStatus.RUNNING);
+        repository.processes.put(running.processId(), running);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.healthy("ok");
+        RuntimeManagementCommandService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        assertThatThrownBy(() -> service.stopManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_BAD_GATEWAY));
+
+        assertThat(repository.findOpencodeServerProcessById(running.processId())).get()
+                .extracting(OpencodeServerProcess::status)
+                .isEqualTo(OpencodeServerProcessStatus.RUNNING);
+    }
+
     private static RuntimeManagementCommandService service(
             FakeRepository repository,
             RecordingGateway gateway,
@@ -159,7 +200,11 @@ class RuntimeManagementCommandServiceTest {
                 gateway,
                 heartbeatStore,
                 Clock.fixed(NOW, ZoneOffset.UTC));
-        return new RuntimeManagementCommandService(gateway, repository, startupService);
+        OpencodeProcessStopService stopService = new OpencodeProcessStopService(
+                gateway,
+                repository,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        return new RuntimeManagementCommandService(gateway, repository, startupService, stopService);
     }
 
     private static OpencodeServerProcess process(String processId, int port, OpencodeServerProcessStatus status) {

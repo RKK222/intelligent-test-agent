@@ -2262,3 +2262,10 @@ bash /tmp/test-api-after-restart.sh
 - What: 新增 `OpencodeProcessStartupService` / `OpencodeProcessStartupRequest`，统一封装 start、候选进程快照、manager health、opencode HTTP health、最终状态回写、Redis heartbeat、ACTIVE binding 和兼容 `ExecutionNode` 投影；用户初始化和运行管理 restart 复用该服务。同步规范要求后续所有 opencode server 启动、重启后拉起、端口复用或启动状态回写都必须调用公共启动服务。
 - How: 公共启动服务先保存 `STARTING` 候选进程供 socket health 按 `processId` 查本地 state，再调用 manager health；healthy 才写 `RUNNING`，not-running 映射 `STOPPED`，HTTP 不健康映射 `UNHEALTHY`，异常映射 `FAILED` 并按统一平台错误抛出。运行管理对已有平台进程记录的 `STOPPED` 或 `not managed` 端口复用原 `containerId + port` 调用 start，manager 已管理端口的 restart 成功回包也会再走同一 health 确认。
 - Result: 对话框初始化和运行管理重启成功都必须同时满足 manager state/PID 与 opencode HTTP health healthy；无平台用户进程记录的无主 manager state 仍保持原 manager restart 语义。目标测试和 opencode-runtime 全模块测试通过；API 全模块测试仍被既有 `ConfigurationManagementControllerTest.createWorkspaceUsesCurrentUserReadyOpencodeServer` 的异步工作区创建断言阻断。
+
+### 2026-06-30 - 公共 opencode server 停止健康确认
+
+- Why: 运行管理停止旧链路只信任 manager `STOPPED` 回包，没有确认 opencode server health 已失败，也没有统一封装停止后 `STOPPED` 回写，后续入口容易再次各自实现 stop。
+- What: 新增 `OpencodeProcessStopService` / `OpencodeProcessStopRequest`，统一封装 manager stop、停止后 health 不健康确认和用户进程 `STOPPED` 回写；运行管理 stop 复用该服务。同步规范要求后续所有 opencode server 停止、停止后状态回写或运行管理停止命令都必须调用公共停止服务。
+- How: 对平台已有进程记录的端口，公共停止服务先通过 `OpencodeProcessManagerGateway.stopProcess()` 下发 manager stop，再对同一 `processId/baseUrl` 调用 manager health；health 仍 healthy 时抛 `OPENCODE_BAD_GATEWAY` 且不回写 STOPPED，health 不健康时把进程 pid 清空并写 `STOPPED`。无平台用户进程记录的无主 manager state 仍只以 manager `STOPPED` 回包为准，不新增数据库进程记录。
+- Result: 运行管理停止成功必须满足 manager stop 成功和停止后 health 不健康；业务主代码中直接 `gateway.stopProcess()` 只剩公共停止服务和 gateway 实现/接口。
