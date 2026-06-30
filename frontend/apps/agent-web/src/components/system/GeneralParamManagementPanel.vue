@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, inject, ref, watch } from "vue";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/vue-query";
-import { Refresh, Connection, Clock } from "@element-plus/icons-vue";
+import { Refresh, Clock } from "@element-plus/icons-vue";
 import { ElMessage, ElDialog, ElButton, ElInput, ElForm, ElFormItem, ElDrawer, ElEmpty, ElTag } from "element-plus";
 import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
-import type { CurrentUser, GeneralParameter, CommonParameterLoadSnapshot, CommonParameterChangeLog } from "@test-agent/shared-types";
+import type { CurrentUser, GeneralParameter, CommonParameterChangeLog } from "@test-agent/shared-types";
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
@@ -62,25 +62,6 @@ const updateMutation = useMutation({
   }
 });
 
-// 各进程加载值抽屉
-const loadSnapshotsOpen = ref(false);
-const loadSnapshotsQuery = useQuery({
-  queryKey: ["common-parameter-load-snapshots"],
-  enabled: () => hasSuperAdmin.value && loadSnapshotsOpen.value,
-  retry: false,
-  queryFn: () => api.listCommonParameterLoadSnapshots()
-});
-
-watch(loadSnapshotsOpen, (open) => {
-  if (open) {
-    void loadSnapshotsQuery.refetch();
-  }
-});
-
-const loadSnapshots = computed<CommonParameterLoadSnapshot[]>(() => loadSnapshotsQuery.data.value ?? []);
-const loadSnapshotsFetching = computed(() => loadSnapshotsQuery.isFetching.value);
-const loadSnapshotsError = computed(() => formatError(loadSnapshotsQuery.error.value));
-
 // 修改历史查询
 const changeLogsQuery = useQuery({
   queryKey: computed(() => ["common-parameter-change-logs", changeLogsParam.value?.parameterId]),
@@ -98,10 +79,6 @@ watch(changeLogsDrawerOpen, (open) => {
 const changeLogs = computed<CommonParameterChangeLog[]>(() => changeLogsQuery.data.value ?? []);
 const changeLogsFetching = computed(() => changeLogsQuery.isFetching.value);
 const changeLogsError = computed(() => formatError(changeLogsQuery.error.value));
-
-function refreshLoadSnapshots() {
-  void loadSnapshotsQuery.refetch();
-}
 
 function refreshChangeLogs() {
   void changeLogsQuery.refetch();
@@ -224,7 +201,6 @@ function formatError(error: unknown) {
     <template v-else>
       <div class="ta-common-param-toolbar">
         <el-button size="small" :icon="Refresh" :loading="isFetching" @click="refresh">刷新</el-button>
-        <el-button size="small" :icon="Connection" @click="loadSnapshotsOpen = true">查看各进程加载值</el-button>
         <div class="ta-common-param-filter">
           <el-select v-model="draftPlatform" placeholder="平台" size="small" clearable style="width: 140px" @change="applyFilter">
             <el-option label="全部" value="" />
@@ -336,56 +312,6 @@ function formatError(error: unknown) {
           </div>
         </template>
       </el-dialog>
-
-      <!-- 各后端进程加载值抽屉 -->
-      <el-drawer
-        v-model="loadSnapshotsOpen"
-        title="各服务器 Java 进程加载的通用参数值"
-        direction="rtl"
-        size="60%"
-        destroy-on-close
-      >
-        <div class="ta-load-snapshots">
-          <div class="ta-load-snapshots-toolbar">
-            <el-button size="small" :icon="Refresh" :loading="loadSnapshotsFetching" @click="refreshLoadSnapshots">刷新</el-button>
-            <span class="ta-load-snapshots-note">展示每个后端 Java 进程内存中加载的参数原始值与展开值，用于核对各进程刷新是否一致。</span>
-          </div>
-          <div v-if="loadSnapshotsError" class="ta-common-param-alert" role="alert">{{ loadSnapshotsError }}</div>
-          <el-empty v-if="!loadSnapshotsFetching && loadSnapshots.length === 0" description="暂无存活后端进程加载快照" />
-          <div v-for="snapshot in loadSnapshots" :key="snapshot.backendProcessId" class="ta-load-snapshot-card">
-            <div class="ta-load-snapshot-header">
-              <span class="ta-load-snapshot-id">{{ snapshot.backendProcessId }}</span>
-              <el-tag size="small" type="info">{{ snapshot.linuxServerId }}</el-tag>
-              <span class="ta-load-snapshot-url">{{ snapshot.listenUrl }}</span>
-              <span class="ta-load-snapshot-time">加载时间：{{ formatDate(snapshot.loadedAt) }}</span>
-            </div>
-            <table class="ta-load-snapshot-table">
-              <thead>
-                <tr>
-                  <th>参数英文名</th>
-                  <th>平台</th>
-                  <th>原始值</th>
-                  <th>展开值</th>
-                  <th>状态</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="param in snapshot.parameters" :key="`${snapshot.backendProcessId}-${param.englishName}-${param.platform}`">
-                  <td class="ta-common-param-mono">{{ param.englishName }}</td>
-                  <td><span class="ta-common-param-tag">{{ param.platform }}</span></td>
-                  <td class="ta-common-param-mono ta-load-snap-raw">{{ param.rawValue }}</td>
-                  <td class="ta-common-param-mono ta-load-snap-resolved" :class="{ 'is-error': param.resolutionError }">{{ param.resolvedValue }}</td>
-                  <td>
-                    <el-tag v-if="param.resolutionError" size="small" type="danger">解析失败</el-tag>
-                    <el-tag v-else-if="param.hasReference" size="small" type="warning">含引用</el-tag>
-                    <el-tag v-else size="small" type="success">正常</el-tag>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </el-drawer>
 
       <!-- 修改历史抽屉 -->
       <el-drawer
@@ -641,75 +567,6 @@ function formatError(error: unknown) {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-}
-
-/* 各进程加载值抽屉 */
-.ta-load-snapshots {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.ta-load-snapshots-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.ta-load-snapshots-note {
-  color: #6b7280;
-  font-size: 12px;
-}
-.ta-load-snapshot-card {
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  overflow: hidden;
-}
-.ta-load-snapshot-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  padding: 8px 12px;
-  background: #f9fafb;
-  border-bottom: 1px solid #e5e7eb;
-  font-size: 12px;
-}
-.ta-load-snapshot-id {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-weight: 600;
-  color: #111827;
-}
-.ta-load-snapshot-url {
-  color: #6b7280;
-}
-.ta-load-snapshot-time {
-  color: #9ca3af;
-  margin-left: auto;
-}
-.ta-load-snapshot-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-.ta-load-snapshot-table thead th {
-  text-align: left;
-  padding: 6px 12px;
-  font-weight: 600;
-  color: #374151;
-  border-bottom: 1px solid #f3f4f6;
-  white-space: nowrap;
-}
-.ta-load-snapshot-table tbody td {
-  padding: 6px 12px;
-  border-bottom: 1px solid #f9fafb;
-  vertical-align: top;
-  word-break: break-all;
-}
-.ta-load-snap-raw {
-  color: #6b7280;
-}
-.ta-load-snap-resolved.is-error {
-  color: #b91c1c;
 }
 
 /* 修改历史抽屉 */

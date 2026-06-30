@@ -11,7 +11,6 @@ import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.configuration.management.CommonParameterManagementApplicationService;
 import com.icbc.testagent.configuration.management.CommonParameterManagementApplicationService.CommonParameterFilter;
 import com.icbc.testagent.configuration.management.CommonParameterManagementResponses.CommonParameterResponse;
-import com.icbc.testagent.configuration.management.CommonParameterLoadSnapshotQueryService;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.dictionary.Dictionary;
 import com.icbc.testagent.domain.user.UserId;
@@ -77,7 +76,7 @@ class CommonParameterManagementControllerTest {
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("FORBIDDEN");
 
-        WebTestClient.bindToController(new CommonParameterManagementController(service, org.mockito.Mockito.mock(CommonParameterLoadSnapshotQueryService.class)))
+        WebTestClient.bindToController(new CommonParameterManagementController(service))
                 .webFilter(new TraceIdWebFilter())
                 .controllerAdvice(new GlobalExceptionHandler())
                 .build()
@@ -122,40 +121,6 @@ class CommonParameterManagementControllerTest {
                 .jsonPath("$.details.platform").isEqualTo("solaris");
     }
 
-    @Test
-    void superAdminCanQueryLoadSnapshots() {
-        CommonParameterManagementApplicationService service = org.mockito.Mockito.mock(CommonParameterManagementApplicationService.class);
-        CommonParameterLoadSnapshotQueryService queryService = org.mockito.Mockito.mock(CommonParameterLoadSnapshotQueryService.class);
-        when(queryService.list()).thenReturn(List.of(
-                new com.icbc.testagent.domain.configuration.CommonParameterLoadSnapshot(
-                        "bjp_a",
-                        "srv-a",
-                        "http://a:8080",
-                        "instance-a",
-                        NOW,
-                        List.of(new com.icbc.testagent.domain.configuration.LoadedParameter(
-                                "OPENCODE_MANAGER_MAX_PROCESSES", "all", "8", "8", false, null)))));
-        WebTestClient client = WebTestClient.bindToController(new CommonParameterManagementController(service, queryService))
-                .webFilter(new TraceIdWebFilter())
-                .webFilter((exchange, chain) -> {
-                    exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, superAdmin());
-                    return chain.filter(exchange);
-                })
-                .controllerAdvice(new GlobalExceptionHandler())
-                .build();
-
-        client.get()
-                .uri("/api/internal/platform/configuration-management/common-parameters/load-snapshots")
-                .header("X-Trace-Id", TRACE_ID)
-                .exchange()
-                .expectStatus().isOk()
-                .expectBody()
-                .jsonPath("$.data[0].backendProcessId").isEqualTo("bjp_a")
-                .jsonPath("$.data[0].linuxServerId").isEqualTo("srv-a")
-                .jsonPath("$.data[0].parameters[0].englishName").isEqualTo("OPENCODE_MANAGER_MAX_PROCESSES")
-                .jsonPath("$.data[0].parameters[0].resolvedValue").isEqualTo("8");
-    }
-
     private static AuthPrincipal superAdmin() {
         return new AuthPrincipal(
                 "token",
@@ -176,7 +141,7 @@ class CommonParameterManagementControllerTest {
                 roles,
                 NOW,
                 NOW.plusSeconds(3600));
-        return WebTestClient.bindToController(new CommonParameterManagementController(service, org.mockito.Mockito.mock(CommonParameterLoadSnapshotQueryService.class)))
+        return WebTestClient.bindToController(new CommonParameterManagementController(service))
                 .webFilter(new TraceIdWebFilter())
                 .webFilter((exchange, chain) -> {
                     exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, principal);

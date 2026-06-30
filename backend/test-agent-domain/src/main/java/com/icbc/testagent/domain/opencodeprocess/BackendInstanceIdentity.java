@@ -1,7 +1,7 @@
 package com.icbc.testagent.domain.opencodeprocess;
 
 /**
- * 当前后端 Java 实例身份端口；供需要实例身份（广播来源、加载快照归属）的模块依赖，不直接耦合运行时实现。
+ * 当前后端 Java 实例身份端口；供需要实例身份（广播来源等）的模块依赖，不直接耦合运行时实现。
  *
  * <p>由 {@code test-agent-opencode-runtime} 提供实现，复用 manager 控制面设置与后端进程生命周期服务。
  */

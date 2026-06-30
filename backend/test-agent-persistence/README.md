@@ -2,7 +2,7 @@
 
 ## 工程定位
 
-持久化模块，负责数据库、迁移、Repository 和缓存访问适配。
+持久化模块，负责数据库、迁移、Repository 和 Redis 运行态访问适配。
 
 ## 技术栈
 
@@ -20,7 +20,7 @@
 - Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、opencode 用户进程管理拓扑、AI 回复反馈、运营分析 rollup、应用配置管理、应用版本工作区、个人工作区和定时任务框架等持久化；运行态 Workspace 记录可空 `linux_server_id` 以支持文件 WebSocket 同服务器校验和 legacy 回填。
 - Flyway migration，包含 PostgreSQL 16 所需的 Flyway database support。
 - Repository 实现和数据库映射；新增或修改关系型 SQL 必须通过 MyBatis XML mapper。
-- Redis 限流、幂等、缓存和运行心跳能力适配；用户进程运行管理与 manager 控制面在线状态依赖 Redis。
+- Redis 限流、幂等和运行心跳能力适配；用户进程运行管理与 manager 控制面在线状态依赖 Redis。通用参数值不写入 Redis，运行态读取直接查询数据库。
 
 ## 建表规范
 

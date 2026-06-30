@@ -909,24 +909,6 @@ export type CommonParameterChangeLog = {
   createdAt: string;
 };
 
-export type LoadedParameter = {
-  englishName: string;
-  platform: string;
-  rawValue: string;
-  resolvedValue: string;
-  hasReference: boolean;
-  resolutionError?: string | null;
-};
-
-export type CommonParameterLoadSnapshot = {
-  backendProcessId: string;
-  linuxServerId: string;
-  listenUrl: string;
-  instanceId: string;
-  loadedAt: string;
-  parameters: LoadedParameter[];
-};
-
 export type RunEventType =
   | "run.created"
   | "run.started"

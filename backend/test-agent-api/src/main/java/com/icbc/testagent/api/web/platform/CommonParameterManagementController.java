@@ -6,9 +6,6 @@ import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.configuration.management.CommonParameterManagementApplicationService;
 import com.icbc.testagent.configuration.management.CommonParameterManagementApplicationService.CommonParameterFilter;
-import com.icbc.testagent.configuration.management.CommonParameterManagementResponses.ChangeLogResponse;
-import com.icbc.testagent.configuration.management.CommonParameterManagementResponses.LoadSnapshotResponse;
-import com.icbc.testagent.configuration.management.CommonParameterLoadSnapshotQueryService;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.dictionary.Dictionary;
 import java.util.Objects;
@@ -32,16 +29,12 @@ import reactor.core.scheduler.Schedulers;
 public class CommonParameterManagementController {
 
     private final CommonParameterManagementApplicationService service;
-    private final CommonParameterLoadSnapshotQueryService loadSnapshotQueryService;
 
     /**
-     * 注入通用参数管理应用服务与每进程加载快照查询服务。
+     * 注入通用参数管理应用服务。
      */
-    public CommonParameterManagementController(
-            CommonParameterManagementApplicationService service,
-            CommonParameterLoadSnapshotQueryService loadSnapshotQueryService) {
+    public CommonParameterManagementController(CommonParameterManagementApplicationService service) {
         this.service = Objects.requireNonNull(service, "service must not be null");
-        this.loadSnapshotQueryService = Objects.requireNonNull(loadSnapshotQueryService, "loadSnapshotQueryService must not be null");
     }
 
     /**
@@ -86,18 +79,6 @@ public class CommonParameterManagementController {
         requireSuperAdmin(exchange);
         String traceId = RuntimeApiSupport.traceId(exchange);
         return blocking(traceId, () -> service.findChangeLogs(parameterId));
-    }
-
-    /**
-     * 查询每个后端 Java 进程加载的通用参数值（原始值与展开值），仅限 SUPER_ADMIN。
-     */
-    @GetMapping("/load-snapshots")
-    public Mono<ApiResponse<Object>> loadSnapshots(ServerWebExchange exchange) {
-        requireSuperAdmin(exchange);
-        String traceId = RuntimeApiSupport.traceId(exchange);
-        return blocking(traceId, () -> loadSnapshotQueryService.list().stream()
-                .map(LoadSnapshotResponse::from)
-                .toList());
     }
 
     private AuthPrincipal requireSuperAdmin(ServerWebExchange exchange) {

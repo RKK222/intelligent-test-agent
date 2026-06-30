@@ -137,7 +137,7 @@ AI 回复满意度反馈接口 `/api/internal/platform/opencode-runtime/messages
 
 `workspace.version.sync-requested` 的 `reason` 当前包括 `CREATED`、`EXISTING_VERSION`、`SYNC_TO_APPLICATION`、`GIT_PULL_REQUESTED`、`GIT_PULLED`。payload 不允许携带 SSH 私钥、token、Authorization、Cookie 或文件内容；远端节点使用 `userId` 在本机业务服务内读取该用户已加密保存的 SSH key，并在当前服务器上 clone/fetch/reset 到目标 commit。消费者必须跳过 `originLinuxServerId` 与本机相同的事件，避免本机重复执行。
 
-`common-parameter.refresh-requested` 用于通用参数 `value` 修改后的跨实例内存缓存刷新。某实例 `PATCH` 修改参数后，本地刷新器 reload 内存缓存并写出本进程加载快照，同时发布该广播；其他实例收到后 reload 本机内存缓存、写出加载快照并发布本地 `CommonParameterReloadedEvent`，触发本实例向其持有的 opencode manager 下发最新运行配置。远端处理只 reload 不再转发广播，避免循环；消费者跳过 `originInstanceId` 与本机相同的事件。payload 只携带参数标识，不携带参数值（刷新方各自从库读取，避免值在总线明文）：
+`common-parameter.refresh-requested` 用于通用参数 `value` 修改后的跨实例联动。某实例 `PATCH` 修改参数后，本地广播器发布该广播并发布本地 `CommonParameterReloadedEvent`；其他实例收到后发布本地 `CommonParameterReloadedEvent`，监听方直接从数据库读取最新参数并向本实例持有的 opencode manager 下发最新运行配置。远端处理不再转发广播，避免循环；消费者跳过 `originInstanceId` 与本机相同的事件。payload 只携带参数标识，不携带参数值（各实例自行从库读取，避免值在总线明文）：
 
 ```json
 {

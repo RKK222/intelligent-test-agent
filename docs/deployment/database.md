@@ -365,20 +365,13 @@ Java 后端启动时会把当前服务器 IPv4 写入 `SYS_DATA_ROOT_DIR/.server
 
 `backend/test-agent-persistence/src/main/resources/db/migration/V20260626180000__drop_deprecated_opencode_workspace_root_parameter.sql` 删除 `common_parameters` 中无消费方的 `OPENCODE_WORKSPACE_ROOT`（linux/windows 各一行）。该参数仅为 `OPENCODE_APP_WORKSPACE_ROOT` / `OPENCODE_PERSONAL_WORKTREE_ROOT` 的父目录，子目录参数已独立维护全路径，父参数不再需要。
 
-## 通用参数内存缓存与加载快照（无 schema 变更）
+## 通用参数数据库直读与变量解析（无 schema 变更）
 
-通用参数值支持变量引用 `${englishName}`，在应用层读取时展开；`${NAME}` 先按通用参数引用解析，未命中时再读取 Java 后端进程环境变量，`$NAME` 直接读取环境变量；路径值开头的 `$HOME` 和 `~/` 会展开为当前用户主目录，**不涉及表结构变更**（`parameter_value` 已为 `text`）。所有通用参数在后端启动时全量加载到内存（`InMemoryCommonParameterValues`），消费方走内存读取；`PATCH` 修改后由 `CommonParameterCacheRefresher` reload 内存并发布 `common-parameter.refresh-requested` 跨实例广播，通知其他后端实例刷新内存。
+通用参数值支持变量引用 `${englishName}`，在应用层读取时展开；`${NAME}` 先按通用参数引用解析，未命中时再读取 Java 后端进程环境变量，`$NAME` 直接读取环境变量；路径值开头的 `$HOME` 和 `~/` 会展开为当前用户主目录，**不涉及表结构变更**（`parameter_value` 已为 `text`）。通用参数运行态通过 `RepositoryCommonParameterValues` 直接读取数据库，不写入 JVM 内存缓存或 Redis 参数快照。
 
-每台后端 Java 实例刷新内存缓存后，把自己的加载快照（原始值 + 展开值 + 解析状态）写入 Redis，供管理端 `GET /api/internal/platform/configuration-management/common-parameters/load-snapshots` 聚合展示：
+`PATCH` 修改 `OPENCODE_MANAGER_MAX_PROCESSES` 后，后端仍发布 `common-parameter.refresh-requested` 跨实例广播，但 payload 只携带参数标识，不携带参数值；各 Java 实例收到后直接从数据库读取最新值并向本服务器 manager 下发 max-only `configUpdate`。路径类参数属于部署/初始化参数，不通过前端热刷新。
 
-| Redis key | 类型 | TTL | 用途 |
-|---|---|---|---|
-| `test-agent:common-param-snapshot:backend:{backendProcessId}` | String(JSON) | 30 秒 | 单个后端进程加载的通用参数快照 |
-| `test-agent:common-param-snapshot:index:backend` | Set | - | 存活快照的后端进程 ID 索引 |
-
-进程崩溃后快照 30 秒内自动消失，与运行心跳 10 秒 TTL 不同步可接受（参数展示非实时关键）。广播总线未启用（`test-agent.server-broadcast.enabled=false`）或 Redis 故障时，仅本地实例刷新内存；manager 只连接本服务器 Java，跨实例参数刷新只影响最大进程数，未收到广播的实例需等待本实例下次刷新。
-
-macOS 本地环境迁移到项目内 `temp/` 时，先停止服务并运行 `tools/cleanup-old-path-data.sql` 的默认审计模式；确认引用后，再传入 `apply_cleanup=true` 和绝对 `test_agent_root` 迁移 `workspaces`、版本、replica、个人工作区、Agent worktree 和非运行 opencode 进程的路径字段。六个 macOS 通用参数和 `OPENCODE_PUBLIC_AGENT_GIT_URL` 必须通过通用参数管理 API/页面修改，以保留修改历史并触发缓存及 manager 配置刷新。该脚本不删除 Session、Run、审计记录或磁盘目录，也不是 Flyway migration。
+macOS 本地环境迁移到项目内 `temp/` 时，先停止服务并运行 `tools/cleanup-old-path-data.sql` 的默认审计模式；确认引用后，再传入 `apply_cleanup=true` 和绝对 `test_agent_root` 迁移 `workspaces`、版本、replica、个人工作区、Agent worktree 和非运行 opencode 进程的路径字段。六个 macOS 通用参数和 `OPENCODE_PUBLIC_AGENT_GIT_URL` 必须通过通用参数管理 API/页面修改，以保留修改历史并触发 manager 配置联动。该脚本不删除 Session、Run、审计记录或磁盘目录，也不是 Flyway migration。
 
 
 ## V20260626170000 公共 Agent 配置管理

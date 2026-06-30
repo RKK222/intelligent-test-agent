@@ -16,6 +16,13 @@
 - How: 目标 Java 收到带 `X-Test-Agent-Backend-Routed` 的请求后跳过再次路由，继续使用本机 `RuntimeManagementCommandService` 调 manager WebSocket。
 - Result: `mvn -pl test-agent-api -am -Dmaven.test.skip=true compile` 通过；目标 API 测试因既有 `CommonParameterManagementControllerTest.updateValue` 签名不匹配在 testCompile 阶段阻塞。
 
+### 2026-06-30 - 通用参数改为数据库直读并移除 Redis 加载快照
+
+- Why: 用户要求各 Java 进程不再把通用参数缓存到 Redis，业务需要参数时直接从数据库读取，避免多进程缓存陈旧值。
+- What: 将 `CommonParameterValues` 实现替换为 `RepositoryCommonParameterValues`，每次解析参数都通过 Repository 查库；移除启动内存加载、每进程加载快照、`/common-parameters/load-snapshots` API、前端“查看各进程加载值”和 Redis 快照存储。保留 `common-parameter.refresh-requested` 广播作为跨实例更新通知，监听方收到后直接查库并向本机 manager 下发最大进程数。
+- How: 新增 DB 直读与广播测试，删除快照 Store/DTO/前端类型，更新 configuration-management、persistence、API、event-stream、database 和 module-map 文档；不改数据库结构、不改 generated SDK、不新增环境变量。
+- Result: `RepositoryCommonParameterValuesTest` 与 `CommonParameterUpdateBroadcasterTest` 先红后绿；`CommonParameterManagementControllerTest`、`mvn clean package -DskipTests`、`corepack pnpm --filter @test-agent/agent-web typecheck`、`corepack pnpm exec vitest run apps/agent-web/tests/general-param-management-panel.test.ts` 和 `git diff --check` 通过。全量 `corepack pnpm test -- general-param-management-panel` 被 Vitest 过滤参数触发既有 `MarkdownPreview` 失败，定向文件测试通过。
+
 ### 2026-06-30 - 修复 manager 注册早于 Java 后端拓扑落库的启动竞态
 
 - Why: 三服务重启后后端日志在 `2026-06-30T10:46:11.043+08:00` 出现 `opencode_manager_backend_connections.backend_process_id` 外键失败；根因是 Netty 端口已监听后，opencode-manager 可能抢在 `BackendJavaProcessLifecycleRunner` 首次 `registerHeartbeat` 落库 `backend_java_processes` 前完成 WebSocket register。

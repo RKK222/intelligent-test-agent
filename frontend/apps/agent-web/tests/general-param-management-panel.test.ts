@@ -68,7 +68,6 @@ describe("general parameter management panel", () => {
     } satisfies PageResponse<GeneralParameter>));
     const backendApi = {
       listGeneralParameters,
-      listCommonParameterLoadSnapshots: vi.fn().mockResolvedValue([]),
       listCommonParameterChangeLogs: vi.fn().mockResolvedValue([])
     } as Partial<BackendApiClient> as BackendApiClient;
     const view = renderPanel(backendApi);

@@ -1374,7 +1374,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     /**
-     * 从通用参数内存缓存读取必填路径参数（已展开变量引用），缺失或空白时抛异常。
+     * 从通用参数数据库读取必填路径参数（已展开变量引用），缺失或空白时抛异常。
      * common_parameters 为唯一事实源，不在 yaml 或代码常量预留 fallback。
      */
     private Path configuredPath(String parameterEnglishName) {

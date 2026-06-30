@@ -95,16 +95,15 @@ public class OpencodeManagerConfigSyncService {
     }
 
     /**
-     * 通用参数缓存刷新事件触发；仅最大进程数变化时广播给本实例持有的 manager。
-     * 该事件由缓存刷新器在内存缓存 reload 完成后发布（本地更新与远端广播均会触发），
-     * 确保每台实例刷新缓存后都向本服务器 manager 下发最新并发限制。
+     * 通用参数更新事件触发；仅最大进程数变化时广播给本实例持有的 manager。
+     * 监听方收到事件后直接从数据库读取最新值，确保每台实例都向本服务器 manager 下发最新并发限制。
      */
     @EventListener
     public void onCommonParameterReloaded(CommonParameterReloadedEvent event) {
         if (!MAX_PROCESSES_PARAM_ENGLISH.equals(event.englishName())) {
             return;
         }
-        LOGGER.info("收到 manager 最大进程数缓存刷新事件，开始广播 englishName={} traceId={}", event.englishName(), event.traceId());
+        LOGGER.info("收到 manager 最大进程数更新事件，开始广播 englishName={} traceId={}", event.englishName(), event.traceId());
         broadcastCurrentMax();
     }
 
