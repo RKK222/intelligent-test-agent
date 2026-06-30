@@ -1268,15 +1268,16 @@ Build-Backend
 Build-OpencodeManager
 Build-Frontend
 
-# 逐个服务「先 kill 原进程再启动」，按依赖顺序：后端 -> opencode-manager -> 前端。
-Stop-BackendService
-Start-Backend
-
+# 启动顺序：先启动 opencode-manager 和前端，最后启动后端并实时输出日志。
+# 这样后端启动日志不会被其他服务输出淹没，方便排查后端问题。
 Stop-OpencodeManagerService
 Start-OpencodeManager
 
 Stop-FrontendService
 Start-Frontend
+
+Stop-BackendService
+Start-Backend
 
 Write-Host "Restart complete."
 Write-Host "Backend:  $BackendUrl"
