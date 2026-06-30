@@ -914,8 +914,8 @@ onBeforeUnmount(() => {
                     <el-date-picker
                       v-model="workspaceVersion"
                       type="date"
-                      value-format="yyyyMMdd"
-                      format="yyyy-MM-dd"
+                      value-format="YYYYMMDD"
+                      format="YYYYMMDD"
                       placeholder="选择日期"
                       style="width: 100%"
                     />
