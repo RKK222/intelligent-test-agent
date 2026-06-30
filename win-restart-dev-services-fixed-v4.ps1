@@ -716,46 +716,29 @@ function Start-BackgroundCommand {
     Set-Content -LiteralPath $LogPath -Value "" -NoNewline
     Set-Content -LiteralPath $errorLogPath -Value "" -NoNewline
 
-    # 构建环境变量设置脚本
-    $envScript = ""
+    # 直接使用 .NET ProcessStartInfo 启动目标命令。
+    # 父进程的环境变量会自动继承，额外环境变量通过 ProcessStartInfo 注入。
+    # 日志通过 cmd.exe 重定向写入文件，实时输出不受缓冲区影响。
+    $argStr = ($Arguments | ForEach-Object {
+        if ($_ -match '[ &|<>]') { "`"$_`"" } else { $_ }
+    }) -join " "
+    $cmdLine = "$Command $argStr"
+    $redirectPart = ">> `"$LogPath`" 2>> `"$errorLogPath`""
+    $fullArgs = "/c `"$cmdLine $redirectPart`""
+
+    $pinfo = New-Object System.Diagnostics.ProcessStartInfo
+    $pinfo.FileName = "cmd.exe"
+    $pinfo.Arguments = $fullArgs
+    $pinfo.UseShellExecute = $false
+    $pinfo.CreateNoWindow = $true
+    $pinfo.WorkingDirectory = $WorkingDirectory
+
+    # 注入额外环境变量
     foreach ($key in $Environment.Keys) {
-        $value = $Environment[$key]
-        $escapedKey = ConvertTo-PowerShellLiteral $key
-        $escapedValue = ConvertTo-PowerShellLiteral $value
-        $envScript += "`$env:$key = $escapedValue`n"
+        $pinfo.EnvironmentVariables[$key] = $Environment[$key]
     }
 
-    # 子 PowerShell 只负责驻留并转发输出，真实服务仍按 command line 被精确发现和清理。
-    # 使用单引号 here-string (@'...'@) 避免 $envScript 中的 $env:xxx 被父进程展开。
-    # 使用 Start-Process 直接启动进程，-ArgumentList 使用数组避免参数解析问题。
-    # 将参数数组转换为 PowerShell 数组字面量格式。
-    $argLiterals = ($Arguments | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ", "
-    $script = @'
-$ErrorActionPreference = 'Continue'
-ENV_SCRIPT_PLACEHOLDER
-Set-Location -LiteralPath 'WORKING_DIR_PLACEHOLDER'
-$argList = @(ARGUMENTS_ARRAY_PLACEHOLDER)
-$p = Start-Process -FilePath 'COMMAND_PLACEHOLDER' -ArgumentList $argList -RedirectStandardOutput 'LOG_PATH_PLACEHOLDER' -RedirectStandardError 'ERROR_LOG_PATH_PLACEHOLDER' -WindowStyle Hidden -PassThru
-Start-Sleep -Seconds 1
-if ($p -and -not $p.HasExited) {
-    Write-Host $p.Id
-}
-'@
-    $script = $script.Replace("ENV_SCRIPT_PLACEHOLDER", $envScript)
-    $script = $script.Replace("WORKING_DIR_PLACEHOLDER", (ConvertTo-PowerShellLiteral $WorkingDirectory))
-    $script = $script.Replace("COMMAND_PLACEHOLDER", (ConvertTo-PowerShellLiteral $Command))
-    $script = $script.Replace("ARGUMENTS_ARRAY_PLACEHOLDER", $argLiterals)
-    $script = $script.Replace("LOG_PATH_PLACEHOLDER", (ConvertTo-PowerShellLiteral $LogPath))
-    $script = $script.Replace("ERROR_LOG_PATH_PLACEHOLDER", (ConvertTo-PowerShellLiteral $errorLogPath))
-    $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($script))
-    $hostPath = Get-CurrentPowerShellPath
-    $hostArguments = @("-NoProfile")
-    if ((Split-Path -Leaf $hostPath) -ieq "powershell.exe") {
-        $hostArguments += @("-ExecutionPolicy", "Bypass")
-    }
-    $hostArguments += @("-EncodedCommand", $encoded)
-
-    $process = Start-Process -FilePath $hostPath -ArgumentList $hostArguments -WindowStyle Hidden -PassThru
+    $process = [System.Diagnostics.Process]::Start($pinfo)
     return $process.Id
 }
 
