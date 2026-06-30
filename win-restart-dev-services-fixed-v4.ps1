@@ -700,6 +700,67 @@ function Wait-UntilHttpOk {
     exit 1
 }
 
+# 实时输出后端启动日志，直到看到 "Started" 关键字或超时
+function Wait-BackendLogReady {
+    param(
+        [Parameter(Mandatory = $true)][string]$LogPath,
+        [Parameter(Mandatory = $true)][string]$ErrorLogPath,
+        [int]$TimeoutSeconds = 120
+    )
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastPos = 0
+
+    # 等待日志文件出现
+    while (-not (Test-Path -LiteralPath $LogPath -PathType Leaf) -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 500
+    }
+    if (-not (Test-Path -LiteralPath $LogPath -PathType Leaf)) {
+        Write-Stderr "Backend log file not created: $LogPath"
+        return
+    }
+
+    # 实时跟踪日志输出，直到看到 "Started" 关键字
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $fs = [System.IO.FileStream]::new($LogPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+            $fs.Position = $lastPos
+            $reader = New-Object System.IO.StreamReader($fs)
+            $line = $reader.ReadLine()
+            while ($null -ne $line) {
+                Write-Host $line
+                # Spring Boot 启动完成标志
+                if ($line -match 'Started\s+\S+Application') {
+                    $reader.Close()
+                    $fs.Close()
+                    return
+                }
+                # 启动失败标志
+                if ($line -match 'Application run failed') {
+                    $reader.Close()
+                    $fs.Close()
+                    Write-Stderr "Backend startup failed. Error log:"
+                    if (Test-Path -LiteralPath $ErrorLogPath -PathType Leaf) {
+                        Get-Content -LiteralPath $ErrorLogPath -ErrorAction SilentlyContinue | ForEach-Object { Write-Stderr $_ }
+                    }
+                    exit 1
+                }
+                $line = $reader.ReadLine()
+            }
+            $lastPos = $fs.Position
+            $reader.Close()
+            $fs.Close()
+        } catch {
+            # 文件可能暂时不可访问，忽略
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    Write-Stderr "Timed out waiting for backend to start ($TimeoutSeconds seconds)."
+    Write-LogTail $LogPath
+    exit 1
+}
+
 function ConvertTo-PowerShellLiteral {
     param([AllowEmptyString()][string]$Value)
 
@@ -988,12 +1049,14 @@ function Start-Backend {
 
     New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
     $logPath = Join-Path $LogDir "backend.log"
+    $errorLogPath = Get-ErrorLogPath $logPath
     Write-Host "Starting backend with profile '$BackendProfile'. Logs: $logPath"
     Write-Host "Backend JVM proxy settings are disabled for direct DB/Redis connections."
     $args = @($BackendJavaDirectNetworkArgs + @("-jar", $BackendJar, "--spring.profiles.active=$BackendProfile"))
     $wrapperProcessId = Start-BackgroundCommand -WorkingDirectory $BackendDir -Command "java" -Arguments $args -LogPath $logPath
     Write-PidFile (Join-Path $LogDir "backend.pid") @($wrapperProcessId)
-    Wait-UntilHttpOk "backend" "$($script:BackendUrl)/actuator/health/readiness" $logPath 90
+    # 实时输出后端启动日志，直到看到启动完成标志或超时
+    Wait-BackendLogReady $logPath $errorLogPath 120
     Write-PidFile (Join-Path $LogDir "backend.pid") @(Get-BackendProcessIds)
 }
 
