@@ -2,6 +2,16 @@
 
 ## Entries
 
+### 2026-06-30 - 解决拦截/路由请求绕过 Spring Security 导致的 CORS 跨域错误
+
+- Why: 跨后端路由过滤器 `UserOpencodeBackendRoutingWebFilter` 以及部分认证过滤器（如 `JwtAuthWebFilter`、`ApiTokenWebFilter` 在验证失败时）会直接向响应写入内容并返回 `Mono<Void>`，从而绕过了位于 Spring Security 过滤链中的 CORS 处理器，导致前端在特定场景下（例如请求 `GET /api/internal/agent/opencode/processes/me`）因缺少 `Access-Control-Allow-Origin` 头而报错。同时由于控制器接口异步化，`ConfigurationManagementControllerTest` 中既存的同步测试用例存在参数与签名不匹配的编译及运行期错误。
+- What: 
+  - 将 HTTP CORS 处理配置提取为全局高优先级的 `CorsWebFilter` Bean，使其在所有鉴权和跨后端路由过滤器之前（`Ordered.HIGHEST_PRECEDENCE + 5`）优先执行，从而确保任何直接写入响应或拦截返回的场景都能带有正确的 CORS 响应头，并将 Spring Security 的内置 `.cors()` 禁用，防止出现重复 CORS 头。
+  - 更新 `ConfigurationManagementControllerTest.createWorkspaceUsesCurrentUserReadyOpencodeServer` 测试用例以正确适配控制器端异步化 `createWorkspaceAccepted` 的方法签名与 `CreateWorkspaceAcceptedResponse` 返回结果。
+  - 在 `RuntimeSecurityConfigTest` 中新增 `corsWebFilterAppliesCorsHeaders` 测试，直接调用 `CorsWebFilter` 验证 preflight 场景下 CORS 响应头的正确生成。
+- How: 仅修改 `RuntimeSecurityConfig.java`、`RuntimeSecurityConfigTest.java` 和 `ConfigurationManagementControllerTest.java`，不新增数据库 Migration，不修改 `.env.local` 环境变量文件。
+- Result: 运行 `mvn -pl test-agent-api -am test`，包括新编写的 CORS 单测在内的 147 项后端 API 测试用例全量通过。
+
 ### 2026-06-30 - 修复测试库 Flyway schema history checksum
 
 - Why: 后端启动报 `FlywayValidateException`，目标测试库 `flyway_schema_history` 中 V5、V8、V10、V13、V17、V20260627000000、V20260628223000、V20260629230000 的已应用 checksum 与当前工作区 migration 文件不一致；其中 V10/V13/V17 当前为 0 字节，本地解析 checksum 为 0。

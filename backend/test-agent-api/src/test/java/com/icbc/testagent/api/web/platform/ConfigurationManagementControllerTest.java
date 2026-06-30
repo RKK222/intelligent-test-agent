@@ -125,7 +125,7 @@ class ConfigurationManagementControllerTest {
         ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
         ManagedWorkspaceApplicationService workspaceService = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
         UserOpencodeProcessAssignmentService assignmentService = readyAssignmentService("10.8.0.12");
-        when(workspaceService.createApplicationWorkspaceWithInitialVersion(
+        when(workspaceService.createWorkspaceAccepted(
                 eq("app_gcms"),
                 eq("repo_123"),
                 eq("feature_testagent_20260707"),
@@ -136,7 +136,10 @@ class ConfigurationManagementControllerTest {
                 eq(USER_ID),
                 eq("10.8.0.12"),
                 eq(TRACE_ID)))
-                .thenReturn(workspaceCreateResponse());
+                .thenReturn(new com.icbc.testagent.workspace.ManagedWorkspaceResponses.CreateWorkspaceAcceptedResponse(
+                        "wco_12345678",
+                        "ACCEPTED",
+                        Instant.parse("2026-06-26T00:00:00Z")));
         WebTestClient client = client(service, workspaceService, assignmentService, List.of(Dictionary.ROLE_APP_ADMIN));
 
         client.post()
@@ -149,8 +152,8 @@ class ConfigurationManagementControllerTest {
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
-                .jsonPath("$.data.workspaceId").isEqualTo("awp_123")
-                .jsonPath("$.data.initialVersion.versionId").isEqualTo("awv_123");
+                .jsonPath("$.data.operationId").isEqualTo("wco_12345678")
+                .jsonPath("$.data.status").isEqualTo("ACCEPTED");
 
         verify(assignmentService).requireReadyProcess(USER_ID, "opencode", TRACE_ID);
     }
