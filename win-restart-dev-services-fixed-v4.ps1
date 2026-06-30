@@ -567,11 +567,11 @@ function Stop-FrontendService {
 
 function Stop-OpencodeManagerService {
     Stop-ProcessIds "opencode-manager" @(Get-OpencodeManagerProcessIds)
-    Stop-ProcessIds "opencode-manager managed opencode serve" @(
-        Get-OpencodeManagerStateProcessIds
-        Get-OpencodeManagerPortRangeProcessIds
-    )
     if (-not $KeepOpencode) {
+        Stop-ProcessIds "opencode-manager managed opencode serve" @(
+            Get-OpencodeManagerStateProcessIds
+            Get-OpencodeManagerPortRangeProcessIds
+        )
         Stop-ProcessIds "opencode serve" @(Get-OpencodeProcessIds)
     } else {
         Write-Host "Skipping opencode serve cleanup (KeepOpencode mode)."
