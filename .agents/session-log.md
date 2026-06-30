@@ -53,6 +53,18 @@
 - What: 修改历史抽屉增加当前参数摘要（英文名、中文名、平台、当前值、更新时间），打开历史时主动失效历史缓存，保存参数成功后同步失效历史缓存；后端单测把日志记录从“调用 save”加强到字段级断言 old/new/user/trace/createdAt。
 - How: 仅改 `GeneralParamManagementPanel.vue`、`general-param-management-panel.test.ts` 和 `CommonParameterManagementApplicationServiceTest.java`；不改 HTTP API、事件、数据库结构或环境文件。
 - Result: `corepack pnpm test -- general-param-management-panel.test.ts`、`corepack pnpm --filter @test-agent/agent-web typecheck`、`mvn -pl test-agent-configuration-management -am -Dtest=CommonParameterManagementApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false test` 通过；`.env.test` 数据库临时不可达时无法直接核对现网日志表内容。
+## 2026-06-30 - 工作空间删除添加二次确认
+
+- Why: 设置页"已有工作空间"删除按钮直接执行删除操作，没有二次确认，用户可能误操作导致数据丢失。
+- What: 为删除工作空间添加与"移除成员"、"解除关联版本库"一致的二次确认机制：
+  - 扩展 `PendingDangerAction` 类型，新增 `delete-workspace` 类型。
+  - 新增 `confirmDeleteWorkspace` 方法，设置 `pendingDangerAction` 触发确认弹窗。
+  - 确认弹窗标题为"确认删除工作空间"，提示文案为"确认删除工作空间[xxx]吗？删除后数据将无法恢复。"
+  - 确认按钮文案为"确认删除"。
+  - `confirmDangerAction` 方法增加 `delete-workspace` 分支处理。
+  - 补充单测 `confirms before deleting a workspace` 验证完整流程。
+- How: 仅修改前端 `SettingsAppWorkspacePanel.vue` 组件和对应测试文件，不涉及 API、事件、数据库、安全或兼容性。
+- Result: 前端 `typecheck` 通过，`vitest` 183 个测试全通过。
 
 ### 2026-06-30 - Maven build 前强制终止所有开发服务
 
