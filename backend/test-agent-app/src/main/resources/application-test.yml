@@ -18,6 +18,9 @@ management:
       enabled: true
 
 test-agent:
+  managed-workspace:
+    replica-reconciler:
+      enabled: false
   redis:
     host: ${TEST_AGENT_REDIS_HOST:}
     port: ${TEST_AGENT_REDIS_PORT:6379}

@@ -2283,3 +2283,10 @@ bash /tmp/test-api-after-restart.sh
 - What: `OpencodeProcessStartupService` 在 manager `STARTED` 后复用公共状态查询服务做有界等待，默认使用 manager command-timeout 10 秒；运行管理前端在重启/停止成功或失败后都会刷新当前 overview 和用户进程查询。
 - How: 只对 `HEALTH_CHECK_FAILED` 且没有 manager 控制面错误码的普通健康失败继续轮询；`RUNNING` 立即成功，`NOT_STARTED`、manager timeout/unavailable 等控制面异常立即失败。超时仍抛统一 opencode 错误，并保留最后一次公共状态查询写入的 DB 状态和 healthMessage。
 - Result: 管理员重启不会因 opencode HTTP 端点短暂未 ready 而误报失败；真实失败时用户进程列表会立即展示最新 `UNHEALTHY/FAILED/STOPPED` 状态和健康消息。
+
+### 2026-06-30 - test profile 关闭应用版本副本补偿器
+
+- Why: `.env.test` 指向的共享测试库存在 ACTIVE 的演示/占位应用版本，其中 F-COSS 仓库为 `git.example.com` 占位地址，另一个本地仓库地址指向 `/Users/kaka/...`，当前机器没有 READY replica 时补偿器每分钟尝试 clone 并刷 `Git 远端读取失败`。
+- What: 在 `application-test.yml` 中关闭 `test-agent.managed-workspace.replica-reconciler.enabled`，仅影响 test profile；其他 profile 仍保持副本补偿器默认开启。
+- How: 同步更新 `test-agent-app` README，说明 test profile 默认关闭该后台扫描以及通用关闭开关。
+- Result: 重启 `test` profile 三服务后等待超过 60 秒，`/actuator/health/readiness` 为 `UP`，新 `backend.log` 未再出现 `managed-workspace-replica-reconciler` 或 Git 远端失败日志。
