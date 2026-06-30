@@ -2,7 +2,6 @@
 
 ## Entries
 
-<<<<<<< HEAD
 ### 2026-06-30 - 修复 Windows 下 opencode 专属进程启动失败（.ps1 包装脚本）
 
 - Why: 用户在 Windows 上把 `OPENCODE_BIN`（对应 `TEST_AGENT_OPENCODE_BIN`）配成 `D:\Tool\nodes\nodejs\opencode.ps1` 这种 PowerShell 包装脚本后，前台点击「分配专属进程」报 `OPENCODE_BAD_GATEWAY: fork/exec D:\Tool\nodes\nodejs\opencode.ps1: %1 is not a valid Win32 application`。根因是 Go `os/exec` 在 Windows 上无法把 `.ps1` 文本文件当作可执行体 fork/exec，必须由 PowerShell 进程承载脚本解释；当前 `process_windows.go` 仍按 `exec.Command(spec.Command, spec.Args...)` 直传配置命令，没做平台兜底。
@@ -87,14 +86,12 @@
 
 **Result**: 前端 typecheck 通过，187 个测试全部通过，git diff --check 无问题，commit 946315e2
 
-=======
 ### 2026-06-30 - 修复 Git 变更面板测试数据与应用级 Agent/Skill 展示
 
 - Why: 左侧 Git 变更面板在 opencode 进程不可用或真实刷新进行中点击“加载测试数据”时可能仍为空；mock 数据也把平台自身源码和公共级 Agent 配置混入了截图 1 的 `agents` 分组，不符合“应用工作区变更 + 应用级 agents/skills 变更”的展示目标。
 - What: 将 Git mock 数据改为应用项目 `src/`、`tests/` 文件，以及应用级 opencode `agents/*.md` 和 `skills/<skill>/SKILL.md`；`GitChangesPanel` 只在 `agents` 分组展示应用级 Agent/Skill diff，并用刷新 token 防止旧真实请求覆盖测试数据；应用级技能包模板改为只含 opencode `SKILL.md` 支持的 `name` / `description` frontmatter 和 `Instructions` / `Resources` 段落。
 - How: 新增 `git-changes-panel.test.ts` 覆盖“加载测试数据”后的列表内容和公共级排除，扩展 `agent-config-panel.test.ts` 覆盖技能包模板；同步 frontend、agent-web、workbench-shell README/PACKAGE 与 module-map。
 - Result: `corepack pnpm@10.25.0 --dir frontend --filter @test-agent/agent-web typecheck`、`corepack pnpm@10.25.0 --dir frontend test -- git-changes-panel.test.ts agent-config-panel.test.ts` 和 `git diff --check` 通过；按用户最新指示未重启三服务，UI 运行态由用户自行验收。
->>>>>>> 8f8ce900 (修复变更面板测试数据展示)
 
 ### 2026-06-30 - 修复测试库 Flyway schema history checksum
 
