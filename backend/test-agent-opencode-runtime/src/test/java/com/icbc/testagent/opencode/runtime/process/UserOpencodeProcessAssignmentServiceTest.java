@@ -115,6 +115,43 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
+    void statusRechecksStoppedBindingAndRestoresRunningWhenManagerIsHealthy() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4100, 4, 1));
+        OpencodeServerProcess process = process("ocp_existing", USER_ID, "10.8.0.12", "ctr_idle", 4096, OpencodeServerProcessStatus.STOPPED);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, process.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
+        assertThat(gateway.healthCommands).hasSize(1);
+        assertThat(repository.findOpencodeServerProcessById(process.processId())).get()
+                .extracting(OpencodeServerProcess::status)
+                .isEqualTo(OpencodeServerProcessStatus.RUNNING);
+    }
+
+    @org.junit.jupiter.api.Test
+    void requireReadyProcessRechecksFailedBindingAndRestoresRunningWhenManagerIsHealthy() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess process = process("ocp_existing", USER_ID, "10.8.0.12", "ctr_idle", 4096, OpencodeServerProcessStatus.FAILED);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, process.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessAssignment assignment = service.requireReadyProcess(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(assignment.node().baseUrl()).isEqualTo("http://10.8.0.12:4096");
+        assertThat(repository.savedNodes).hasSize(1);
+        assertThat(repository.findOpencodeServerProcessById(process.processId())).get()
+                .extracting(OpencodeServerProcess::status)
+                .isEqualTo(OpencodeServerProcessStatus.RUNNING);
+    }
+
+    @org.junit.jupiter.api.Test
     void statusReportsNotRunningWhenBoundProcessHealthFails() {
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4100, 4, 1));

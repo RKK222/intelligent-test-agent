@@ -23,6 +23,7 @@ public class OpencodeProcessStopService {
 
     private final OpencodeProcessManagerGateway gateway;
     private final OpencodeProcessManagementRepository repository;
+    private final OpencodeProcessStatusQueryService statusQueryService;
     private final Clock clock;
 
     /**
@@ -31,15 +32,25 @@ public class OpencodeProcessStopService {
     @Autowired
     public OpencodeProcessStopService(
             OpencodeProcessManagerGateway gateway,
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessStatusQueryService statusQueryService) {
+        this(gateway, repository, statusQueryService, Clock.systemUTC());
+    }
+
+    /**
+     * 兼容旧测试或手工装配入口；生产路径由 Spring 注入公共状态查询服务。
+     */
+    public OpencodeProcessStopService(
+            OpencodeProcessManagerGateway gateway,
             OpencodeProcessManagementRepository repository) {
-        this(gateway, repository, Clock.systemUTC());
+        this(gateway, repository, null, Clock.systemUTC());
     }
 
     /**
      * 无平台进程记录时仍可复用本服务向 manager 下发 stop。
      */
     public OpencodeProcessStopService(OpencodeProcessManagerGateway gateway) {
-        this(gateway, null, Clock.systemUTC());
+        this(gateway, null, null, Clock.systemUTC());
     }
 
     /**
@@ -49,8 +60,22 @@ public class OpencodeProcessStopService {
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessManagementRepository repository,
             Clock clock) {
+        this(gateway, repository, null, clock);
+    }
+
+    /**
+     * 完整测试构造器允许替换公共状态查询服务。
+     */
+    OpencodeProcessStopService(
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessStatusQueryService statusQueryService,
+            Clock clock) {
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.repository = repository;
+        this.statusQueryService = statusQueryService == null && repository != null
+                ? new OpencodeProcessStatusQueryService(repository, gateway, disabledHeartbeatStore(), clock)
+                : statusQueryService;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -72,25 +97,18 @@ public class OpencodeProcessStopService {
             return stopped;
         }
         OpencodeServerProcess process = trackedProcess(request);
-        OpencodeProcessHealthResult health = gateway.checkHealth(new OpencodeProcessHealthCommand(
-                request.processId(),
-                request.baseUrl(),
-                request.traceId()));
-        if (health == null) {
-            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 停止后健康检测未返回结果");
-        }
-        if (health.healthy()) {
+        OpencodeProcessStatusProbe probe = statusQueryService.query(request.processId(), request.traceId());
+        if (probe.status() != OpencodeProcessProbeStatus.NOT_STARTED) {
             throw new PlatformException(
                     ErrorCode.OPENCODE_BAD_GATEWAY,
-                    "opencode 进程停止后仍然健康",
+                    "opencode 进程停止后仍未确认退出",
                     Map.of("processId", process.processId().value(), "port", process.port()));
         }
-        OpencodeServerProcess stoppedProcess = refreshStoppedProcess(
+        OpencodeServerProcess stoppedProcess = probe.process().orElseGet(() -> refreshStoppedProcess(
                 process,
-                health.message(),
+                probe.message(),
                 Instant.now(clock),
-                request.traceId());
-        repository.saveOpencodeServerProcess(stoppedProcess);
+                request.traceId()));
         return new OpencodeProcessControlResult(
                 "stop",
                 "STOPPED",
@@ -100,7 +118,7 @@ public class OpencodeProcessStopService {
                 stoppedProcess.sessionPath(),
                 stoppedProcess.configPath(),
                 false,
-                health.message(),
+                probe.message(),
                 request.traceId());
     }
 
@@ -137,5 +155,19 @@ public class OpencodeProcessStopService {
                 process.createdAt(),
                 now,
                 traceId);
+    }
+
+    private static com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore disabledHeartbeatStore() {
+        return new com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore() {
+            @Override public void recordBackendHeartbeat(com.icbc.testagent.domain.opencodeprocess.LinuxServerId linuxServerId, Instant heartbeatAt) { }
+            @Override public void recordBackendSnapshot(com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot snapshot) { }
+            @Override public void recordManagerSnapshot(com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot snapshot) { }
+            @Override public void recordOpencodeHeartbeat(com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId processId, Instant heartbeatAt) { }
+            @Override public java.util.List<com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot> liveBackendSnapshots() { return java.util.List.of(); }
+            @Override public java.util.List<com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot> liveManagerSnapshots() { return java.util.List.of(); }
+            @Override public java.util.Set<com.icbc.testagent.domain.opencodeprocess.LinuxServerId> liveBackendServerIds() { return java.util.Set.of(); }
+            @Override public java.util.Set<com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId> liveOpencodeProcessIds() { return java.util.Set.of(); }
+            @Override public void cleanupExpiredHeartbeats() { }
+        };
     }
 }

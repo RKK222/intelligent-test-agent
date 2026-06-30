@@ -2269,3 +2269,10 @@ bash /tmp/test-api-after-restart.sh
 - What: 新增 `OpencodeProcessStopService` / `OpencodeProcessStopRequest`，统一封装 manager stop、停止后 health 不健康确认和用户进程 `STOPPED` 回写；运行管理 stop 复用该服务。同步规范要求后续所有 opencode server 停止、停止后状态回写或运行管理停止命令都必须调用公共停止服务。
 - How: 对平台已有进程记录的端口，公共停止服务先通过 `OpencodeProcessManagerGateway.stopProcess()` 下发 manager stop，再对同一 `processId/baseUrl` 调用 manager health；health 仍 healthy 时抛 `OPENCODE_BAD_GATEWAY` 且不回写 STOPPED，health 不健康时把进程 pid 清空并写 `STOPPED`。无平台用户进程记录的无主 manager state 仍只以 manager `STOPPED` 回包为准，不新增数据库进程记录。
 - Result: 运行管理停止成功必须满足 manager stop 成功和停止后 health 不健康；业务主代码中直接 `gateway.stopProcess()` 只剩公共停止服务和 gateway 实现/接口。
+
+### 2026-06-30 - 公共 opencode server 状态查询收敛
+
+- Why: 用户状态、Run 前检查、运行管理用户进程列表、后台 heartbeat、启动后确认和停止后确认分别调用 manager health 并各自映射 `RUNNING/STOPPED/UNHEALTHY/FAILED`，not-running、HTTP 不健康和 health 命令异常的含义不统一。
+- What: 新增 `OpencodeProcessStatusQueryService` / `OpencodeProcessStatusProbe` / `OpencodeProcessProbeStatus`，统一封装进程存在性检查、manager health、查询语义归一、进程状态回写和 Redis heartbeat 刷新；用户状态、运行管理、本机 heartbeat、公共启动和公共停止都改为复用该服务。同步规范要求后续所有 opencode server 状态查询、健康探测、状态回写或 heartbeat 刷新必须调用公共状态查询服务。
+- How: 公共查询服务先按 `processId` 查询平台进程记录，缺失时返回 `NOT_STARTED` 且不调用 manager；health healthy 写 `RUNNING` 并刷新 heartbeat；not-running 类消息写 `STOPPED` 并清空 pid；普通不健康写 `UNHEALTHY`；health 命令异常写 `FAILED` 并保留错误码。文件路由、后端路由归属和 allocationStatus 仍只读 binding，不触发 health。
+- Result: 业务主代码中直接 `gateway.checkHealth()` 只剩公共状态查询服务和 gateway 实现/接口；STOPPED/FAILED 历史 binding 在状态查询或 Run 前检查时也会先重新探测，manager healthy 时可恢复为 `RUNNING`。

@@ -87,6 +87,24 @@ class OpencodeProcessStopServiceTest {
     }
 
     @Test
+    void stopTrackedProcessDoesNotReturnSuccessWhenHealthCheckStillFails() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess running = process("ocp_running", 4097, OpencodeServerProcessStatus.RUNNING);
+        repository.processes.put(running.processId(), running);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.unhealthy("opencode http health failed");
+        OpencodeProcessStopService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.stopAndVerify(OpencodeProcessStopRequest.tracked(running, TRACE_ID)))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_BAD_GATEWAY));
+
+        assertThat(repository.findOpencodeServerProcessById(running.processId())).get()
+                .extracting(OpencodeServerProcess::status)
+                .isEqualTo(OpencodeServerProcessStatus.UNHEALTHY);
+    }
+
+    @Test
     void stopUntrackedPortOnlyUsesManagerStopResult() {
         RecordingGateway gateway = new RecordingGateway();
         OpencodeProcessStopService service = new OpencodeProcessStopService(gateway);
