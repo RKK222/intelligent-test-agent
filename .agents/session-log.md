@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-06-30 - 模型下拉菜单即时悬浮提示与原位恢复
+
+- Why: 聊天面板输入框下方的模型选择器，之前被移到了顶部标题栏。用户希望模型选择器改回在输入框下方，且指出之前反馈的"显示不全"其实是指下拉菜单中"上新推荐"一排的模型卡片在固定双列等宽网格下长名字被截断的问题，希望能用鼠标悬浮（Hover）即时显示完整名称的方式来解决（原生 title 属性有较长延迟，需使用 el-tooltip 实现快速响应）。
+- What:
+  - 将模型选择器 wrapper HTML 重新移回至 `.figma-chat-card-actions` 底部 actions 区域。
+  - 使用 Element Plus 的 `<el-tooltip>` 组件（配置 `:show-after="100"` 极短悬停延迟）包裹了模型选择按钮、所有“上新推荐”的推荐卡片 `.figma-chat-model-rec-item`，以及所有模型列表项 `.figma-chat-model-option-item`，实现光标挪上去立刻在上方浮现完整名称。
+  - 恢复了 CSS 中有关最大宽度限制（`.figma-chat-model-btn` 为 150px、`.figma-chat-model-label` 为 108px）、弹出位置（朝上弹出 `bottom: calc(100% + 12px)`）和指示箭头方向的配置。
+  - 给 `.figma-chat-model-rec-item` 增加了 `max-width: 100%`，并对内部文本名 `.figma-chat-model-rec-name` 补充了 text-ellipsis 以防止在极限宽度下布局撑爆。
+- How: 仅修改 `FigmaChatPanel.vue`，不修改 API、SSE 事件或数据库。
+- Result: 编译构建通过（`corepack pnpm --filter @test-agent/agent-web build`），单元测试通过（`pnpm test`），UI 布局与 Hover 悬浮显示功能逻辑自洽。
+
 ### 2026-06-30 - 通用参数修改历史抽屉补当前值与缓存刷新
 
 - Why: 通用参数“修改历史”点击后只依赖 `common_parameter_change_logs`，当日志为空或前端保留旧空缓存时用户看不到具体内容；页面保存成功后也没有主动失效历史查询缓存。
