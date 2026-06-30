@@ -714,17 +714,18 @@ function Start-BackgroundCommand {
     $errorLogPath = Get-ErrorLogPath $LogPath
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $LogPath) | Out-Null
     # 日志文件可能被正在运行的服务占用，使用 .NET API 以 FileShare.ReadWrite 模式清空，
-    # 避免 IOException。
+    # 避免 IOException。OpenWrite 以独占方式打开，仍可能失败，故改用 Open + ReadWrite 共享。
     try {
-        [System.IO.File]::OpenWrite($LogPath).SetLength(0).Close()
+        $fs = [System.IO.FileStream]::new($LogPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+        $fs.Close()
     } catch {
-        # 文件不存在时创建空文件
-        Set-Content -LiteralPath $LogPath -Value "" -NoNewline -ErrorAction SilentlyContinue
+        Write-Host "Warning: cannot clear log file $LogPath : $_" -ForegroundColor Yellow
     }
     try {
-        [System.IO.File]::OpenWrite($errorLogPath).SetLength(0).Close()
+        $fs = [System.IO.FileStream]::new($errorLogPath, [System.IO.FileMode]::Create, [System.IO.FileAccess]::Write, [System.IO.FileShare]::ReadWrite)
+        $fs.Close()
     } catch {
-        Set-Content -LiteralPath $errorLogPath -Value "" -NoNewline -ErrorAction SilentlyContinue
+        Write-Host "Warning: cannot clear error log file $errorLogPath : $_" -ForegroundColor Yellow
     }
 
     # 直接使用 .NET ProcessStartInfo 启动目标命令。
