@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-30 - 修复前端 readFile 接口返回值类型约束缺失 path 属性的编译错误
+
+- Why: 前端在构建 `@test-agent/agent-web` 时编译失败，报 TS1360 错误，提示 `{ content: string; encoding: string; readonly: false; }` 类型不满足 `FileContent` 的预期，缺失必填属性 `path`。
+- What: 在 `frontend/packages/backend-api/src/index.ts` 中的 `readFile` 方法返回对象里，加上缺失的 `path` 属性。
+- How: 仅修改 `frontend/packages/backend-api/src/index.ts` 中 `readFile` 返回的满足 `FileContent` 的结构，不改写后端或接口定义，保证 API 数据类型契合前端类型约束。
+- Result: 运行 `cd frontend && corepack pnpm typecheck` 和 `corepack pnpm build` 顺利通过，未再出现类型不匹配的编译期错误。
+
 ### 2026-06-30 - 解决拦截/路由请求绕过 Spring Security 导致的 CORS 跨域错误
 
 - Why: 跨后端路由过滤器 `UserOpencodeBackendRoutingWebFilter` 以及部分认证过滤器（如 `JwtAuthWebFilter`、`ApiTokenWebFilter` 在验证失败时）会直接向响应写入内容并返回 `Mono<Void>`，从而绕过了位于 Spring Security 过滤链中的 CORS 处理器，导致前端在特定场景下（例如请求 `GET /api/internal/agent/opencode/processes/me`）因缺少 `Access-Control-Allow-Origin` 头而报错。同时由于控制器接口异步化，`ConfigurationManagementControllerTest` 中既存的同步测试用例存在参数与签名不匹配的编译及运行期错误。

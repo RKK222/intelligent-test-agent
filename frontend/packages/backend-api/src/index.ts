@@ -475,7 +475,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     },
     readFile: async (workspaceId: string, path: string) => {
       const data = await request<{ type: string; content: string }>(`${agentBase}/file/content${query({ workspaceId, path })}`);
-      return { content: data.content, encoding: "utf-8", readonly: false } satisfies FileContent;
+      return { path, content: data.content, encoding: "utf-8", readonly: false } satisfies FileContent;
     },
     writeFile: (workspaceId: string, path: string, content: string) =>
       workspaceFileRpc<void>(workspaceId, "workspace.write", { path, content }),
