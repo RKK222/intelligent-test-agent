@@ -4,11 +4,15 @@
 
 ### 2026-06-30 - 修复 Stop-AllDevServices 子进程清理不彻底导致 Maven clean 失败
 
-- Why: 用户反馈之前加的 `Stop-AllDevServices` 没有解决 `mvn clean` 时 `test-agent-app-0.1.0-SNAPSHOT.jar: 另一个程序正在使用此文件` 的问题。原因是 `taskkill /F /IM` 和 `Stop-Process -Force` 都不杀子进程，Java 进程的子进程（如 Spring Boot 内部线程）继续持有 jar 句柄。
+- Why: 用户反馈之前加的 `Stop-AllDevServices` 没有解决 `mvn clean` 时 `test-agent-app-0.1.0-SNAPSHOT.jar: 另一个程序正在使用此文件` 的问题。原因有两个层次：
+  1. `taskkill /F /IM` 和 `Stop-Process -Force` 都不杀子进程，Java 子进程继续持有 jar 句柄。
+  2. 即使进程被杀掉，Windows 文件句柄释放有延迟，`mvn clean` 紧接着执行就撞上了。
 - What:
-  - [win-restart-dev-services-fixed-v4.ps1](file:///d:/workspace/intelligent-test-agent/win-restart-dev-services-fixed-v4.ps1) 两处修复：
+  - [win-restart-dev-services-fixed-v4.ps1](file:///d:/workspace/intelligent-test-agent/win-restart-dev-services-fixed-v4.ps1) 四处修复：
     1. `Stop-AllDevServices` 的兜底 `taskkill` 从 `/F /IM` 改为 `/F /T /IM`（`/T` 同时终止子进程）。
     2. `Stop-ProcessIds` 的 force stop 从 `Stop-Process -Force` 改为 `taskkill /F /T /PID`，对每一个残留 PID 递归杀子进程。
+    3. `Stop-AllDevServices` 末尾加 `Start-Sleep -Seconds 2`，给 Windows 时间释放句柄。
+    4. `Build-Backend` 中 `mvn clean` 失败时不再直接 `exit`，而是再次调用 `Stop-AllDevServices` 并等待 3 秒后重试一次。
 - How: 仅改 PowerShell 脚本；不涉及 API/事件/数据库/安全/兼容性。
 - Result: PowerShell parser 校验通过。
 

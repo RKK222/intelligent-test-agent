@@ -599,6 +599,8 @@ function Stop-AllDevServices {
         }
     }
     Write-Host "All development services stopped."
+    # Windows 上 taskkill 后文件句柄释放可能有延迟，给操作系统一点时间。
+    Start-Sleep -Seconds 2
 }
 
 function Test-HttpOk {
@@ -745,7 +747,15 @@ function Build-Backend {
         Write-Host ("Maven args: {0}" -f ($mvnArgs -join ' '))
         & $mvnExecutable @mvnArgs
         if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
+            # 常见原因是之前残留的 Java 进程仍持有 target 下的 jar 句柄。
+            # 先尝试强制清理一次，等待句柄释放后重试。
+            Write-Host "Maven build failed (exit $LASTEXITCODE). Attempting to kill lingering Java processes and retry..."
+            Stop-AllDevServices
+            Start-Sleep -Seconds 3
+            & $mvnExecutable @mvnArgs
+            if ($LASTEXITCODE -ne 0) {
+                exit $LASTEXITCODE
+            }
         }
     } finally {
         Pop-Location
