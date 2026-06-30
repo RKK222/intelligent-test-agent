@@ -1221,9 +1221,18 @@ async function switchWorkspace(workspace: Workspace) {
   await loadDirectory("", workspace.workspaceId);
 }
 
-// 根据当前选中的 workspace.rootPath 匹配出对应的应用版本（用于两级菜单高亮）。
-// 优先精确匹配根路径；若版本列表中包含当前 workspace.workspaceId 也直接返回。
+// 根据当前选中的 workspace 匹配出对应的应用版本（用于两级菜单高亮）。
+// 优先使用「最近工作区」接口直接回写的 versionId（重新登录或换电脑登录时不需要等模板 versions 异步加载），
+// 同时按需触发对应模板 versions 的预加载，确保 WorkbenchFooter.selectedTemplate 能找到匹配、按钮显示当前工作区。
+// 回退到精确匹配运行时 Workspace ID 与根路径，用于 versionId 缺失的旧数据。
 function syncCurrentVersionFromWorkspace(workspace: Workspace) {
+  if (workspace.versionId) {
+    currentVersionFromWorkspace.value = workspace.versionId;
+    if (workspace.applicationWorkspaceId) {
+      ensureAppVersionsLoaded(workspace.applicationWorkspaceId);
+    }
+    return;
+  }
   const entries = Object.values(versionsByTemplateId.value);
   for (const list of entries) {
     const hit = list.find((version) =>
@@ -1262,12 +1271,18 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
 
 // 统一"记录最近使用 + 切到运行态 Workspace"流程：先调 markRecentManagedWorkspace 让 user→app→workspace
 // 持久化到 user_application_workspace_preferences / user_global_workspace_preferences，再切工作台。
-// 后端在校验通过后会返回最新的 WorkspaceRuntime，前端无需再单独 getWorkspace。
+// 后端在校验通过后会返回最新的 WorkspaceRuntimeResponse（已回填 appId/versionId/applicationWorkspaceId），
+// 前端用这个响应回写 versionId/applicationWorkspaceId 到本次切到的工作区，确保重新登录或换电脑登录时
+// 左下角"切换工作空间"按钮能立刻显示当前所在的应用版本与模板，而不必等模板 versions 异步加载完成。
 // 非托管工作区（不属于任何应用）的 markRecent 会抛 NOT_FOUND，忽略该错误即可，不阻塞切换。
 async function applyManagedWorkspace(workspace: Workspace, feedbackDetail?: { successTitle: string; successDescription: string }) {
   const appId = selectedAppId.value;
+  let resolvedWorkspace = workspace;
   try {
-    await api.markRecentManagedWorkspace(workspace.workspaceId);
+    const response = await api.markRecentManagedWorkspace(workspace.workspaceId);
+    if (response) {
+      resolvedWorkspace = mergeRecentRuntimeResponse(workspace, response);
+    }
   } catch (error) {
     if (error instanceof BackendApiError && error.code === "FORBIDDEN") {
       throw error;
@@ -1275,13 +1290,26 @@ async function applyManagedWorkspace(workspace: Workspace, feedbackDetail?: { su
     // NOT_FOUND：工作区不属于任何应用（通常是手动目录注册出来的个人空间），不写入偏好。
     // 其他错误：网络/服务异常，吞掉但仍尝试切工作区，避免偏好写失败导致整个流程中断。
   }
-  await switchWorkspace(workspace);
+  await switchWorkspace(resolvedWorkspace);
   if (feedbackDetail) {
     feedback.value = { kind: "info", title: feedbackDetail.successTitle, description: feedbackDetail.successDescription };
   }
   // 注意：原「切到运行态工作区后回查 (userId, appId, workspaceId) 维度的最近 VCS 分支偏好」
   // 逻辑（loadBranchPreferenceOnEnter）已随 footer 的「选择分支」/「记住当前分支」入口下线一起移除；
   // 分支信息仍由 runtimeStatus 从 vcs.status 拉取并展示在右侧 Agent 面板。
+}
+
+// 把 markRecentManagedWorkspace 响应里能反映"工作区隶属于哪个应用 / 版本 / 模板"的字段
+// 回填到工作区对象；只覆盖非空字段，避免后端把旧值/异常值覆盖回前端已有的有效值。
+function mergeRecentRuntimeResponse(workspace: Workspace, response: Workspace): Workspace {
+  if (!response) return workspace;
+  let merged: Workspace = workspace;
+  if (response.appId && !merged.appId) merged = { ...merged, appId: response.appId };
+  if (response.versionId && !merged.versionId) merged = { ...merged, versionId: response.versionId };
+  if (response.applicationWorkspaceId && !merged.applicationWorkspaceId) {
+    merged = { ...merged, applicationWorkspaceId: response.applicationWorkspaceId };
+  }
+  return merged;
 }
 
 // 查询指定应用下的"默认进入工作空间"：优先 recent 偏好，否则回退到首模板的首版本。
@@ -2122,9 +2150,14 @@ async function switchSession(sessionId: string) {
   let readonlyReason = "";
   if (selected.workspaceId !== selectedWorkspaceIdRef.value) {
     try {
-      const workspace = await api.getWorkspace(selected.workspaceId);
+      let workspace = await api.getWorkspace(selected.workspaceId);
       try {
-        await api.markRecentManagedWorkspace(selected.workspaceId);
+        // markRecentManagedWorkspace 会同时回写 versionId/applicationWorkspaceId，
+        // 这里把响应合并到工作区上，确保会话切换后左下角按钮也能定位到当前版本。
+        const response = await api.markRecentManagedWorkspace(selected.workspaceId);
+        if (response) {
+          workspace = mergeRecentRuntimeResponse(workspace, response);
+        }
       } catch (error) {
         if (error instanceof BackendApiError && error.code === "FORBIDDEN") {
           throw error;

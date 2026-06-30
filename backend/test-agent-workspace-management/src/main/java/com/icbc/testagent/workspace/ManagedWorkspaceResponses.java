@@ -31,8 +31,9 @@ public final class ManagedWorkspaceResponses {
     /**
      * 托管工作区对应的运行态 Workspace 响应。
      *
-     * <p>{@code appId} 仅在需要回答「这个工作区归属于哪个托管应用」时填充；当前由「全局最近工作区」接口
-     * （{@code recent-workspace}）显式写入，便于前端在重新登录或换电脑时直接还原上次的应用上下文。
+     * <p>{@code appId} / {@code versionId} / {@code applicationWorkspaceId} 仅在需要回答「这个工作区归属于哪个托管应用 / 版本 / 模板」时填充；
+     * 当前由「最近工作区」相关接口（{@code recent-workspace} 与 {@code applications/{appId}/recent-workspace}）显式写入，
+     * 便于前端在重新登录或换电脑登录时直接还原上次的「应用 + 模板 + 版本」上下文，让左下角"切换工作空间"按钮立刻显示当前所在的工作区。
      * 其他场景下传 {@code null}，避免引入反向依赖（运行态 Workspace 本身不强制绑定托管应用）。
      */
     public record WorkspaceRuntimeResponse(
@@ -43,12 +44,19 @@ public final class ManagedWorkspaceResponses {
             String linuxServerId,
             Instant createdAt,
             Instant updatedAt,
-            String appId) {
+            String appId,
+            String versionId,
+            String applicationWorkspaceId) {
         public static WorkspaceRuntimeResponse from(Workspace workspace) {
-            return from(workspace, null);
+            return from(workspace, null, null, null);
         }
 
         public static WorkspaceRuntimeResponse from(Workspace workspace, String appId) {
+            return from(workspace, appId, null, null);
+        }
+
+        public static WorkspaceRuntimeResponse from(
+                Workspace workspace, String appId, String versionId, String applicationWorkspaceId) {
             return new WorkspaceRuntimeResponse(
                     workspace.workspaceId().value(),
                     workspace.name(),
@@ -57,7 +65,9 @@ public final class ManagedWorkspaceResponses {
                     workspace.linuxServerId(),
                     workspace.createdAt(),
                     workspace.updatedAt(),
-                    appId);
+                    appId,
+                    versionId,
+                    applicationWorkspaceId);
         }
     }
 

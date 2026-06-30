@@ -554,28 +554,44 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "托管工作区不存在", Map.of("workspaceId", workspaceId)));
         ensureMember(appId, userId);
         markRecent(userId, appId, workspace.workspaceId());
-        return ManagedWorkspaceResponses.WorkspaceRuntimeResponse.from(workspace);
+        // 复用 recent-workspace 的回填逻辑，把 appId/versionId/applicationWorkspaceId 一起回写，
+        // 让前端在切到运行态 Workspace 时立即拿到当前版本与模板信息，无需等模板 versions 异步加载。
+        return resolveRecentWorkspaceResponse(workspace);
     }
 
     public Optional<ManagedWorkspaceResponses.WorkspaceRuntimeResponse> recentWorkspace(UserId userId) {
         // 全局最近工作区会随用户切换应用而变化；为了让前端在重新登录或换电脑时能直接还原
-        // 上一次所在的应用 + 工作空间组合，这里在返回时把当前工作区对应的托管应用 appId 一并写出。
-        // 工作区不属于任何应用时（例如纯本机目录注册出来的个人空间），appId 留空，前端会按
+        // 上一次所在的应用 + 模板 + 版本组合（让左下角"切换工作空间"按钮立刻显示当前工作区），
+        // 这里在返回时把工作区所属的托管应用 appId、应用版本 versionId、模板 applicationWorkspaceId 一并写出。
+        // 工作区不属于任何应用版本时（例如纯本机目录注册出来的个人空间），三者留空，前端会按
         // 降级策略（首应用 / 首模板首版本）兜底。
         return managedWorkspaceRepository.findGlobalPreference(userId)
                 .flatMap(preference -> workspaceRepository.findById(preference.workspaceId()))
-                .map(workspace -> ManagedWorkspaceResponses.WorkspaceRuntimeResponse.from(
-                        workspace,
-                        appIdForRuntimeWorkspace(workspace.workspaceId())
-                                .map(ApplicationId::value)
-                                .orElse(null)));
+                .map(workspace -> resolveRecentWorkspaceResponse(workspace));
     }
 
     public Optional<ManagedWorkspaceResponses.WorkspaceRuntimeResponse> recentWorkspace(String appId, UserId userId) {
+        // 应用级最近工作区按应用维度持久化；同样在响应里回写应用 / 版本 / 模板 ID，
+        // 让前端在「切换应用 → 自动进入 per-app recent」链路里也能立即定位到当前版本并高亮工作区菜单。
+        // 工作区对应的运行态 Workspace 已被应用版本回收、或工作区仅作为个人工作区存在时，versionId / applicationWorkspaceId 留空。
         ApplicationId applicationId = existingMemberApp(appId, userId).appId();
         return managedWorkspaceRepository.findApplicationPreference(userId, applicationId)
                 .flatMap(preference -> workspaceRepository.findById(preference.workspaceId()))
-                .map(ManagedWorkspaceResponses.WorkspaceRuntimeResponse::from);
+                .map(workspace -> resolveRecentWorkspaceResponse(workspace));
+    }
+
+    private ManagedWorkspaceResponses.WorkspaceRuntimeResponse resolveRecentWorkspaceResponse(Workspace workspace) {
+        Optional<ApplicationWorkspaceVersion> version =
+                managedWorkspaceRepository.findVersionByRuntimeWorkspace(workspace.workspaceId());
+        String versionId = version.map(v -> v.versionId().value()).orElse(null);
+        String applicationWorkspaceId = version.map(v -> v.applicationWorkspaceId().value()).orElse(null);
+        String appId = version
+                .map(v -> v.appId().value())
+                .orElseGet(() -> managedWorkspaceRepository
+                        .findPersonalWorkspaceByRuntimeWorkspace(workspace.workspaceId())
+                        .map(p -> p.appId().value())
+                        .orElse(null));
+        return ManagedWorkspaceResponses.WorkspaceRuntimeResponse.from(workspace, appId, versionId, applicationWorkspaceId);
     }
 
     public ManagedWorkspaceResponses.WorkspaceDiffResponse diffPersonalWorkspace(String personalWorkspaceId, UserId userId) {

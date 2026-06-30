@@ -2,24 +2,23 @@
 
 ## Entries
 
-<<<<<<< HEAD
-### 2026-06-30 - 重新登录/换电脑登录自动恢复上次工作空间
+### 2026-06-30 - 重新登录/换电脑登录自动恢复上次工作空间 + 左下角按钮显示模板/版本名
 
-- Why: 用户希望工作台左下角"切换工作空间"按钮（`WorkbenchFooter.vue` 顶部的"应用 + 版本"两级菜单）能记忆上次选择，重新登录或换电脑登录时直接落到上次所在的应用 + 工作空间版本。后端已按应用维度持久化最近偏好，但前端 `applicationCatalog` 加载完成后总是回退 `apps[0]`，没有"上次进入的是哪个应用"的全局维度，导致重登后只回到首应用的首版本。
+- Why: 用户希望工作台左下角"切换工作空间"按钮（`WorkbenchFooter.vue` 顶部的"应用 + 版本"两级菜单）能记忆上次选择，重新登录或换电脑登录时直接落到上次所在的应用 + 工作空间版本，并在按钮上显示当前所在模板/版本名（而非降级为"切换工作空间"）。后端已按应用维度持久化最近偏好，但前端 `applicationCatalog` 加载完成后总是回退 `apps[0]`，没有"上次进入的是哪个应用"的全局维度；且 `currentVersionFromWorkspace` 依赖 `versionsByTemplateId` 精确匹配，异步加载完成前按钮会降级为默认文本。上一轮 commit 后用户实测"应用选择对了，但左下角按钮仍只显示切换工作空间图例"，根因是 `applyManagedWorkspace` 调用 `markRecentManagedWorkspace` 后直接忽略响应，导致 `switchSession`、首模板首版本兜底等不在 recent 直接命中路径上的 `workspace.versionId` 始终为 `null`，按钮降级。
 - What:
-  - 后端 `ManagedWorkspaceResponses.WorkspaceRuntimeResponse` 新增可空 `appId` 字段并保留旧的 `from(workspace)` 工厂；`recentWorkspace(UserId)` 通过 `appIdForRuntimeWorkspace` 反查工作区所属托管应用并在响应里填充（不属于任何应用时为 `null`），其他接口（`POST /workspaces/{id}/recent`、`GET /applications/{appId}/recent-workspace` 等）依旧 `null`，不强制在响应里重复写出托管应用信息。
-  - 前端 `Workspace` 类型新增可选 `appId`；`AgentWorkbench.vue` 新增 `globalRecentQuery` + `trySelectDefaultApp`：应用目录加载完成且 `selectedAppId` 为空时，先等 `GET /recent-workspace` 返回上次的 `appId`，命中且在应用目录里则直接 `handleSelectApp(appId)`，否则降级 `apps[0]`，目录为空或接口失败时保持空态交给用户手动选择；`handleSelectApp → pickDefaultWorkspaceForApp` 既有链路不动。
-  - 同步更新 `docs/api/http-api.md`、`backend/test-agent-workspace-management/README.md`、`frontend/apps/agent-web/README.md`，并修复 4 处 `ManagedWorkspaceControllerTest` / `ConfigurationManagementControllerTest` 中 `new WorkspaceRuntimeResponse(...)` 构造调用。
-- How: 纯前后端协作改动，不新增数据库 migration（`user_global_workspace_preferences` 已存全局偏好）、不改 `.env.local`、不重写 SDK、不引入新接口；`Workspace.appId` 设为可选以保证旧调用方兼容。
-- Result: 待执行 `mvn -pl test-agent-workspace-management,test-agent-api -am test`、`corepack pnpm --filter @test-agent/agent-web typecheck` 与相关 Vitest 套件后回填。
-=======
+  - 后端 `ManagedWorkspaceResponses.WorkspaceRuntimeResponse` 二次扩展：先加 `appId`（上次 commit 已落），再补 `versionId` + `applicationWorkspaceId`，同时为所有"recent 相关"接口（`/recent-workspace`、`/applications/{appId}/recent-workspace`、`POST /workspaces/{workspaceId}/recent`）抽出私有 `resolveRecentWorkspaceResponse(Workspace)`，通过 `findVersionByRuntimeWorkspace` 反查 `ApplicationWorkspaceVersion` 一次性回写三者；未命中版本记录时回退 `findPersonalWorkspaceByRuntimeWorkspace` 取 appId；完全无主时三者均为 `null`；其他接口依旧 `null`。
+  - 前端 `Workspace` 类型补可选 `versionId` + `applicationWorkspaceId`；`AgentWorkbench.vue` 新增 `mergeRecentRuntimeResponse` 把 `POST /workspaces/{workspaceId}/recent` 响应里的 `appId`/`versionId`/`applicationWorkspaceId` 合到本次切换的 `workspace` 上（仅覆盖非空字段、不破坏已有有效值），`applyManagedWorkspace` 与 `switchSession` 都走这条回填链，确保切会话、首模板首版本兜底等路径也能拿到 versionId。
+  - `syncCurrentVersionFromWorkspace` 优先用 `workspace.versionId` 直接设回 `currentVersionFromWorkspace`，并按 `workspace.applicationWorkspaceId` 调用 `ensureAppVersionsLoaded` 触发对应模板 `versions` 的预加载，使 `WorkbenchFooter.selectedTemplate` 立即找到匹配、左下角按钮立刻显示 `模板 / 版本` 名；`versionId` 缺失时回退到原 `versionsByTemplateId` 精确匹配逻辑以兼容旧数据。
+  - 同步更新 `docs/api/http-api.md`、`backend/test-agent-workspace-management/README.md`、`frontend/apps/agent-web/README.md`，并修复 4 处 `ManagedWorkspaceControllerTest` / `ConfigurationManagementControllerTest` 中 `new WorkspaceRuntimeResponse(...)` 构造调用（其中 `markRecentWorkspaceReturnsRuntimeWorkspace` 改为断言 `appId`/`versionId`/`applicationWorkspaceId` 都会被回填）；同时清掉 `d4720b4f` merge 提交残留的 `<<<<<<< HEAD` / `=======` / `>>>>>>> 64ab22c4` 未解决合并标记（rule 21）。
+- How: 纯前后端协作改动，不新增数据库 migration（`user_global_workspace_preferences` 已存全局偏好）、不改 `.env.local`、不重写 SDK；`Workspace.versionId` / `applicationWorkspaceId` 设为可选以保持旧调用方兼容。
+- Result: `mvn -pl test-agent-api test` 132 全通过；`test-agent-workspace-management` 仍有 2 个 Windows 路径分隔符既存失败（git stash 验证 main 上同样存在，与本次改动无关）。前端 `typecheck`、`build` 通过，`pnpm test` 181/182 通过（1 个 MarkdownPreview 既存）。
+
 ### 2026-06-30 - 模型目录外部供应商配置统一为 external
 
 - Why: 外部 OpenAI-compatible 模型供应商不应继续沿用百炼专用变量名，切换 DeepSeek 时会造成 `TEST_AGENT_BAILIAN_API_KEY_ENV` 与真实 key 变量双重命名的理解成本。
 - What: 将外部模型目录来源规范化为 `source=external`，新增 `TEST_AGENT_EXTERNAL_MODEL_*` 变量族；代码默认值保持 provider-neutral，不在 Java 或 profile yml 中写死 DeepSeek。历史 `source=bailian` 和 `TEST_AGENT_BAILIAN_*` 变量仍作为兼容兜底。移除 `application-guo.yml` 中原有直配模型 key，改为环境变量读取。
 - How: 修改 `ModelCatalogProperties` 的 source 归一化、外部 provider 默认值和 app profile 绑定；同步 backend README、opencode-runtime README、HTTP API、部署文档和 `.env.local.example`，并补充 `legacyBailianSourceIsTreatedAsExternalSource` 回归用例。
 - Result: `ModelCatalogApplicationServiceTest`、`TestAgentRuntimePropertiesBindingTest`、`mvn clean package -DskipTests` 和 `git diff --check` 通过。按 `.env.test` 重启时后端未启动：PostgreSQL `192.168.100.200:5432/testagent` 当前 `No route to host`；前端 3000 启动成功。`.env.test` 需要用户手填 `EXTERNAL_API_KEY` 后才能真实访问 DeepSeek。
->>>>>>> 64ab22c41ddcdb260b88aba1fc54fd0d599fd9ea
 
 ### 2026-06-29 - 聊天面板 opencode 进程状态卡按 serviceStatus 区分未分配/未运行
 

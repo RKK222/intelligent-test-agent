@@ -32,11 +32,24 @@ export type Workspace = {
   updatedAt: string;
   /**
    * 该工作区所属的托管应用 id。
-   * 仅在「全局最近工作区」等需要把「应用 + 工作区」一起回传给前端、用于重新登录后还原
-   * 上次进入的应用上下文时才会被填充；其他接口（按应用 / 模板 / 版本）依旧返回 null，
-   * 前端如果未取到可继续走 per-app recent 或首模板首版本兜底。
+   * 仅在「最近工作区」相关接口（`/recent-workspace`、`/applications/{appId}/recent-workspace`）中填充，
+   * 用于重新登录或换电脑登录时还原上次所在的应用上下文；其他接口依旧返回 `null`。
    */
   appId?: string | null;
+  /**
+   * 该工作区所属的应用版本 id（`ApplicationWorkspaceVersion.versionId`）。
+   * 仅在「最近工作区」相关接口中填充，便于前端在重新登录时直接把左下角"切换工作空间"按钮的 `selectedVersionId`
+   * 设回上次的版本，从而立即显示当前所在的工作区名称而无需等待 `versionsByTemplateId` 异步加载完成。
+   * 工作区不属于任何应用版本（例如纯本机目录注册出来的个人空间）时为 `null`。
+   */
+  versionId?: string | null;
+  /**
+   * 该工作区所属的应用工作空间模板 id（`ApplicationWorkspaceVersion.applicationWorkspaceId`）。
+   * 仅在「最近工作区」相关接口中填充，用于在重新登录时按需触发该模板 `versions` 的预加载，
+   * 避免 `WorkbenchFooter.selectedTemplate` 因为模板未展开而找不到匹配、按钮降级为「切换工作空间」。
+   * 工作区不属于任何应用版本时为 `null`。
+   */
+  applicationWorkspaceId?: string | null;
 };
 
 export type WorkspaceDirectoryEntry = {

@@ -16,7 +16,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - 基于配置管理中的应用工作空间模板创建应用版本工作区，clone 指定分支并创建运行态 `Workspace`；设置页创建应用工作空间时会复用该能力同步创建初始版本工作区，并按 `workspace_create_operations` 记录“校验、保存配置、解析版本、下载代码、创建运行态工作区、完成/失败”进度。
 - 应用版本工作区根目录优先读取 `common_parameters.OPENCODE_APP_WORKSPACE_ROOT`，路径片段包含安全化版本号和代码库 `englishName`；历史代码库缺少英文名称时拒绝创建新的版本工作区。
 - 基于应用版本工作区副本创建个人 git worktree，根目录优先读取 `common_parameters.OPENCODE_PERSONAL_WORKTREE_ROOT`，记录最近使用工作区，并支持个人/应用目录差异、双向文件同步、版本工作区 `git pull --ff-only` 和跨服务器副本广播同步。
-- 最近使用工作区偏好分两套维度持久化：`user_global_workspace_preferences`（`app_id = NULL`，跨应用追踪「上次进入的应用 + 工作区」组合）和 `user_application_workspace_preferences`（`app_id = 非空`，按应用追踪）。`POST /workspaces/{workspaceId}/recent` 同时写两条；`GET /recent-workspace` 返回运行态 Workspace 并显式填充 `appId`（通过 `appIdForRuntimeWorkspace` 反查工作区所属托管应用，工作区不属于任何应用时为 `null`），用于前端在重新登录或换电脑登录时直接还原上次所在的应用；`GET /applications/{appId}/recent-workspace` 仍只返回运行态 Workspace，`appId` 留 `null`，由调用方按入参 `appId` 自行索引，避免响应里冗余写出托管应用信息。
+- 最近使用工作区偏好分两套维度持久化：`user_global_workspace_preferences`（`app_id = NULL`，跨应用追踪「上次进入的应用 + 工作区」组合）和 `user_application_workspace_preferences`（`app_id = 非空`，按应用追踪）。`POST /workspaces/{workspaceId}/recent` 同时写两条，并在响应中通过 `resolveRecentWorkspaceResponse` 回填 `appId` / `versionId` / `applicationWorkspaceId`（与最近工作区接口共用同一反查链路：通过 `findVersionByRuntimeWorkspace` 找 `ApplicationWorkspaceVersion`，未命中再回退到 `findPersonalWorkspaceByRuntimeWorkspace` 取 appId；完全无主时三者均为 `null`），让前端在「切会话」「兜底选择首模板首版本」等非 recent 直接命中的路径里也能立即拿到当前版本与模板。`GET /recent-workspace` 与 `GET /applications/{appId}/recent-workspace` 同样使用该回填逻辑，便于重新登录或换电脑登录时直接还原「应用 + 模板 + 版本」上下文，让左下角"切换工作空间"按钮立刻显示当前工作区名 + 版本号；其他接口依旧只返回运行态 Workspace，避免在响应里重复写出托管应用信息。
 - 通过 domain 广播端口发布/消费 `workspace.version.sync-requested`，并通过本机补偿器扫描缺失或落后的副本。
 - 与文件相关的 git 操作、差异比对、agent/skill 文件管理优先进入本模块。
 

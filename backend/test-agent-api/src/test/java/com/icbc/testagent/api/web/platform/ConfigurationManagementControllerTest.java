@@ -247,6 +247,8 @@ class ConfigurationManagementControllerTest {
                 "10.8.0.12",
                 Instant.parse("2026-06-26T00:00:00Z"),
                 Instant.parse("2026-06-26T00:00:00Z"),
+                null,
+                null,
                 null);
         ApplicationWorkspaceVersionResponse version = new ApplicationWorkspaceVersionResponse(
                 "awv_123",
