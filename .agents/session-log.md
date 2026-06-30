@@ -2,7 +2,16 @@
 
 ## Entries
 
-<<<<<<< HEAD
+### 2026-06-30 - 修复 Windows 下 opencode 专属进程启动失败（.ps1 包装脚本）
+
+- Why: 用户在 Windows 上把 `OPENCODE_BIN`（对应 `TEST_AGENT_OPENCODE_BIN`）配成 `D:\Tool\nodes\nodejs\opencode.ps1` 这种 PowerShell 包装脚本后，前台点击「分配专属进程」报 `OPENCODE_BAD_GATEWAY: fork/exec D:\Tool\nodes\nodejs\opencode.ps1: %1 is not a valid Win32 application`。根因是 Go `os/exec` 在 Windows 上无法把 `.ps1` 文本文件当作可执行体 fork/exec，必须由 PowerShell 进程承载脚本解释；当前 `process_windows.go` 仍按 `exec.Command(spec.Command, spec.Args...)` 直传配置命令，没做平台兜底。
+- What:
+  - [opencode-manager/internal/process/process_windows.go](file:///d:/workspace/intelligent-test-agent/opencode-manager/internal/process/process_windows.go) 在 `OSStarter.Start` 内新增 `resolveWindowsCommand(command, args)`：检测 `filepath.Ext` 为 `.ps1`（大小写不敏感）时改写为 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <ps1> <args>`，其它可执行后缀（`.exe`、`.bat`、`.cmd`、裸名）原样返回。
+  - 新增 [opencode-manager/internal/process/process_windows_test.go](file:///d:/workspace/intelligent-test-agent/opencode-manager/internal/process/process_windows_test.go)，覆盖原生 exe、无扩展名命令、`.ps1` 包装、大写 `.PS1` 四种场景；新增文件用 `//go:build windows`，非 Windows 平台不会编译。
+  - 同步 [opencode-manager/README.md](file:///d:/workspace/intelligent-test-agent/opencode-manager/README.md) 的「构建与运行」段落，补充 Windows 上 `OPENCODE_BIN` 指向 `*.ps1` 时 manager 的实际调用形式和扩展名匹配规则，保持与代码行为一致。
+- How: 纯 Go 改动 + 模块 README 同步，不涉及 API/事件/数据库/安全/兼容性；不修改 `process.go` 的 `BuildStartSpec` / `formatStartCommand`，展示用的 `startCommand` 仍按 `cfg.OpencodeBin` 渲染（README 明确定义的展示形态不变）。
+- Result: `go vet ./...` 通过；`go build -o bin/opencode-manager.exe ./cmd/opencode-manager` 成功；`go test -run TestResolveWindowsCommand -v ./internal/process/...` 4 个新用例全部通过；其它 `internal/process` 与 `internal/config` 测试的失败在 base commit `c437e1b1` 已存在（Windows 下 `filepath.Join` 把 `/tmp/sessions/4096` 转成 `\tmp\sessions\4096`，config mock 在 Windows 上未注入 readFile），与本次改动无关。
+
 ### 2026-06-30 - 修复 Invoke-WebRequest 安全警告提示
 
 - Why: 脚本中 `Test-HttpOk` 用的 `Invoke-WebRequest` 没有 `-UseBasicParsing`，PowerShell 5 会弹出"脚本执行风险"安全警告，需要用户手动输入 Y 才能继续。
@@ -43,7 +52,7 @@
   - [process.go](file:///d:/workspace/intelligent-test-agent/opencode-manager/internal/process/process.go) 中保留 `OSStarter` / `OSSignaler` 类型定义和 `flattenEnv` 等通用函数，移除 `syscall` 导入和 `syscall.ESRCH` 引用。
 - How: 纯 Go 改动，不涉及 API/事件/数据库/安全/兼容性；保持 `internal/control/cgroup_parse_linux.go` 的既有平台拆分模式。
 - Result: Windows 上 `go build -o bin/opencode-manager.exe ./cmd/opencode-manager` 编译成功，生成 10MB 的可执行文件。
-=======
+
 ### 2026-06-30 - 修复测试库 Flyway schema history checksum
 
 - Why: 后端启动报 `FlywayValidateException`，目标测试库 `flyway_schema_history` 中 V5、V8、V10、V13、V17、V20260627000000、V20260628223000、V20260629230000 的已应用 checksum 与当前工作区 migration 文件不一致；其中 V10/V13/V17 当前为 0 字节，本地解析 checksum 为 0。
@@ -107,7 +116,6 @@
   - 补充单测 `confirms before deleting a workspace` 验证完整流程。
 - How: 仅修改前端 `SettingsAppWorkspacePanel.vue` 组件和对应测试文件，不涉及 API、事件、数据库、安全或兼容性。
 - Result: 前端 `typecheck` 通过，`vitest` 183 个测试全通过。
->>>>>>> 58bb81242398746e82d6e7c8243972b7f2eee9b5
 
 ### 2026-06-30 - Maven build 前强制终止所有开发服务
 

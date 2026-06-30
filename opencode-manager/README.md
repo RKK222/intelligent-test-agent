@@ -12,13 +12,17 @@ go test ./...
 go build -o bin/opencode-manager ./cmd/opencode-manager
 ```
 
-目标容器内必须能通过 `OPENCODE_BIN` 找到 opencode CLI，默认命令为 `opencode`。启动用户进程时会执行：
+目标容器内必须能通过 `OPENCODE_BIN` 找到 opencode CLI，默认命令为 `opencode`。Windows 启动用户进程时执行：
 
 ```bash
 XDG_DATA_HOME={common_parameters.OPENCODE_SESSION_DIR}/{port} \
 OPENCODE_CONFIG_DIR={common_parameters.OPENCODE_PUBLIC_CONFIG_DIR} \
 opencode serve --hostname 0.0.0.0 --port {port} --print-logs
 ```
+
+> Windows 平台上若 `OPENCODE_BIN` 指向 PowerShell 包装脚本（`*.ps1`），manager 会自动改写为
+> `powershell.exe -NoProfile -ExecutionPolicy Bypass -File <ps1> serve --hostname 0.0.0.0 --port {port} --print-logs`，
+> 避免 `os/exec` 直接 fork `.ps1` 触发 `%1 is not a valid Win32 application`。该解析对扩展名大小写不敏感。
 
 ## 配置
 
