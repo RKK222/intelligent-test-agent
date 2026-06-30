@@ -32,6 +32,7 @@ import type {
   CommandInfo,
   CommonParameterChangeLog,
   CreateApplicationWorkspacePayload,
+  CreateWorkspaceAcceptedResponse,
   CreatePersonalWorkspacePayload,
   CreateRepositoryPayload,
   CreateWorkspaceVersionPayload,
@@ -1012,7 +1013,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     listApplicationWorkspaces: (appId: string) =>
       request<ApplicationWorkspaceConfig[]>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`),
     createApplicationWorkspace: (appId: string, payload: CreateApplicationWorkspacePayload) =>
-      request<ApplicationWorkspaceConfig>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`, {
+      request<CreateWorkspaceAcceptedResponse>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`, {
         method: "POST",
         body: JSON.stringify(payload)
       }),

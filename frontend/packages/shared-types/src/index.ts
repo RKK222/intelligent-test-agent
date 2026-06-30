@@ -1406,6 +1406,13 @@ export type WorkspaceCreateOperation = {
   updatedAt?: string;
 };
 
+/** 工作空间创建已接受的响应（异步模式） */
+export type CreateWorkspaceAcceptedResponse = {
+  operationId: string;
+  status: "ACCEPTED";
+  createdAt: string;
+};
+
 export type ManagedApplication = ApplicationDefinition;
 
 export type ManagedWorkspaceRuntime = Workspace;

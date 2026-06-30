@@ -61,6 +61,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
  * 托管工作区应用服务，负责把应用工作空间配置落到物理 Git 目录和运行态 Workspace。
@@ -399,6 +401,123 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
     }
 
+    /**
+     * 异步创建工作空间的入口：验证参数、初始化 operation、启动异步任务、立即返回。
+     * 前端通过返回的 operationId 轮询进度。
+     */
+    public ManagedWorkspaceResponses.CreateWorkspaceAcceptedResponse createWorkspaceAccepted(
+            String appId,
+            String repositoryId,
+            String branch,
+            String directoryPath,
+            String workspaceName,
+            String version,
+            String operationId,
+            UserId userId,
+            String targetLinuxServerId,
+            String traceId) {
+        String normalizedOperationId = normalizeOperationId(operationId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.VALIDATION_ERROR, "operationId 不能为空", Map.of("field", "operationId")));
+
+        // 快速校验必要参数（确保 application 和 repository 存在）
+        ApplicationDefinition application = existingEnabledApp(appId);
+        CodeRepository repository = existingRepository(new CodeRepositoryId(repositoryId));
+        requireRepositoryEnglishName(repository);
+        ensureRepositoryLinked(application.appId(), repository.repositoryId());
+
+        // 初始化 operation 记录（状态 RUNNING，步骤 VALIDATING_INPUT）
+        WorkspaceCreateProgress progress = createProgress(normalizedOperationId, application.appId(), userId, traceId);
+        LOGGER.info("Workspace create accepted, operationId={}, appId={}", normalizedOperationId, appId);
+
+        // 启动异步任务执行实际创建逻辑
+        Mono.fromRunnable(() -> executeWorkspaceCreateAsync(
+                application,
+                repository,
+                branch,
+                directoryPath,
+                workspaceName,
+                version,
+                normalizedOperationId,
+                userId,
+                targetLinuxServerId,
+                traceId,
+                progress))
+                .subscribeOn(Schedulers.boundedElastic())
+                .doOnError(error -> {
+                    LOGGER.error("Failed to schedule workspace create async, operationId={}, error={}",
+                            normalizedOperationId, error.getMessage(), error);
+                    progress.failed("SCHEDULE_FAILED", "无法启动异步任务: " + error.getMessage());
+                })
+                .subscribe();
+
+        LOGGER.info("Workspace create async scheduled, operationId={}", normalizedOperationId);
+
+        // 立即返回 accepted 响应
+        return new ManagedWorkspaceResponses.CreateWorkspaceAcceptedResponse(
+                normalizedOperationId,
+                "ACCEPTED",
+                Instant.now());
+    }
+
+    /**
+     * 异步执行工作空间创建的详细逻辑，由 boundedElastic 线程池执行。
+     * 异常会被捕获并记录到 operation 中。
+     */
+    private void executeWorkspaceCreateAsync(
+            ApplicationDefinition application,
+            CodeRepository repository,
+            String branch,
+            String directoryPath,
+            String workspaceName,
+            String version,
+            String normalizedOperationId,
+            UserId userId,
+            String targetLinuxServerId,
+            String traceId,
+            WorkspaceCreateProgress progress) {
+        LOGGER.info("Starting async workspace create, operationId={}", normalizedOperationId);
+        try {
+            // 校验并规范化参数
+            String normalizedBranch = requireText(branch, "分支不能为空", "branch");
+            String normalizedPath = normalizeDirectoryPath(directoryPath);
+            String normalizedVersion = repository.standard()
+                    ? versionFromStandardBranch(normalizedBranch)
+                    : normalizeNonStandardWorkspaceCreateVersion(version);
+
+            progress.step(WorkspaceCreateOperationStep.SAVING_TEMPLATE);
+            ApplicationWorkspace template = saveOrReuseWorkspaceTemplate(
+                    application.appId(),
+                    repository.repositoryId(),
+                    normalizedBranch,
+                    normalizedPath,
+                    workspaceName);
+
+            progress.step(WorkspaceCreateOperationStep.RESOLVING_VERSION);
+            ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse initialVersion = createVersionFromTemplate(
+                    application,
+                    template,
+                    repository,
+                    normalizedVersion,
+                    normalizedBranch,
+                    userId,
+                    targetLinuxServerId,
+                    traceId,
+                    configurationRepository.isActiveMember(application.appId(), userId),
+                    progress);
+
+            LOGGER.info("Workspace create completed, operationId={}, workspaceId={}, versionId={}",
+                    normalizedOperationId, template.workspaceId().value(), initialVersion.versionId());
+            progress.succeeded(template.workspaceId(), new ApplicationWorkspaceVersionId(initialVersion.versionId()));
+            LOGGER.info("Workspace create succeeded marked, operationId={}", normalizedOperationId);
+        } catch (PlatformException exception) {
+            progress.failed(exception.errorCode().name(), exception.getMessage());
+            LOGGER.warn("Workspace create async failed, operationId={}, error={}", normalizedOperationId, exception.getMessage());
+        } catch (Exception exception) {
+            progress.failed(ErrorCode.INTERNAL_ERROR.name(), "创建应用工作空间失败");
+            LOGGER.error("Workspace create async failed unexpectedly, operationId={}", normalizedOperationId, exception);
+        }
+    }
+
     public ManagedWorkspaceResponses.WorkspaceCreateOperationResponse getWorkspaceCreateOperation(String operationId, UserId userId) {
         String normalizedOperationId = normalizeOperationId(operationId)
                 .orElseThrow(() -> new PlatformException(ErrorCode.VALIDATION_ERROR, "operationId 不能为空", Map.of("field", "operationId")));
@@ -423,6 +542,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             WorkspaceCreateProgress progress) {
         Optional<ApplicationWorkspaceVersion> existing = managedWorkspaceRepository.findVersionByTemplateAndVersion(template.workspaceId(), normalizedVersion);
         if (existing.isPresent()) {
+            LOGGER.info("Version already exists, templateId={}, version={}", template.workspaceId().value(), normalizedVersion);
             ApplicationWorkspaceVersion current = existing.get();
             ApplicationWorkspaceVersionReplica replica = ensureReplicaForTarget(current, template, userId, targetLinuxServerId, "EXISTING_VERSION", traceId);
             if (markRecent) {
@@ -1503,13 +1623,17 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
         private void step(WorkspaceCreateOperationStep step) {
             if (repository != null) {
+                LOGGER.debug("Marking step, operationId={}, step={}", operationId, step.name());
                 repository.markStep(operationId, step, Instant.now());
+                LOGGER.debug("Step marked, operationId={}, step={}", operationId, step.name());
             }
         }
 
         private void succeeded(ApplicationWorkspaceId workspaceId, ApplicationWorkspaceVersionId versionId) {
             if (repository != null) {
+                LOGGER.info("Marking succeeded, operationId={}, workspaceId={}", operationId, workspaceId.value());
                 repository.markSucceeded(operationId, workspaceId, versionId, Instant.now());
+                LOGGER.info("Succeeded marked, operationId={}", operationId);
             }
         }
 

@@ -485,20 +485,25 @@ async function createWorkspace() {
   const operationId = createWorkspaceOperationId();
   startWorkspaceCreatePolling(operationId);
   await run(async () => {
-    await api.createApplicationWorkspace(selectedAppId.value, {
-      repositoryId: workspaceRepositoryId.value,
-      branch: workspaceBranch.value,
-      directoryPath: workspaceDirectory.value,
-      workspaceName: workspaceName.value.trim() || undefined,
-      version: requiresWorkspaceVersion.value ? workspaceVersion.value.trim() : undefined,
-      operationId
-    });
+    // POST 失败时停止轮询（此时 operation 未创建或后端校验未通过），
+    // POST 成功后由 refreshWorkspaceCreateOperation 在终态时停止，或组件卸载后清理。
+    try {
+      await api.createApplicationWorkspace(selectedAppId.value, {
+        repositoryId: workspaceRepositoryId.value,
+        branch: workspaceBranch.value,
+        directoryPath: workspaceDirectory.value,
+        workspaceName: workspaceName.value.trim() || undefined,
+        version: requiresWorkspaceVersion.value ? workspaceVersion.value.trim() : undefined,
+        operationId
+      });
+    } catch (error) {
+      stopWorkspaceCreatePolling();
+      throw error;
+    }
     await refreshWorkspaceCreateOperation(operationId);
     workspaceName.value = "";
     workspaceVersion.value = "";
     await loadWorkspaces();
-  }).finally(() => {
-    stopWorkspaceCreatePolling();
   });
 }
 
@@ -552,6 +557,10 @@ async function refreshWorkspaceCreateOperation(operationId: string) {
     workspaceCreateOperation.value = operation;
     if (operation.status === "SUCCEEDED" || operation.status === "FAILED") {
       stopWorkspaceCreatePolling();
+      if (operation.status === "SUCCEEDED") {
+        // 操作完成后刷新已有工作空间列表，确保刚创建的工作空间可见
+        await loadWorkspaces();
+      }
     }
   } catch {
     // 创建请求刚发出时后端可能尚未写入 operation，下一轮轮询继续读取。
