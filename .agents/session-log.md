@@ -2,6 +2,16 @@
 
 ## Entries
 
+### 2026-06-30 - 实时日志默认开启，用 -NoFollow 禁用
+
+- Why: 上一版 `-FollowLogs` 默认为 `$false`，脚本跑完就直接退出，用户需要手动加 `-FollowLogs` 才能进入 tail 模式，每次都要记着打参数很麻烦。
+- What: 新增 `-NoFollow` 参数（无别名），默认日志跟随开启。判断逻辑改为 `$FollowLogs -or (-not $NoFollow)`，即：
+  - 不传任何参数 → 默认进入 tail 模式（`tail -f` 等效）。
+  - 传 `-NoFollow` → 脚本在服务启动后直接退出，不进入 tail。
+  - 传 `-FollowLogs`（显式开启，兼容旧用法）。
+- How: 仅改 [win-restart-dev-services-fixed-v4.ps1](file:///d:/workspace/intelligent-test-agent/win-restart-dev-services-fixed-v4.ps1) 的 param 块、Show-Usage 和末尾调用行。
+- Result: PowerShell parser 校验通过，-Help 输出正确显示 `-NoFollow` 选项。
+
 ### 2026-06-30 - 修复 Build-OpencodeManager 被 RemoteException 击穿的问题
 
 - Why: 上一版改动把 `& go build ... 2>&1` 直接赋给变量，但脚本顶部仍是 `$ErrorActionPreference = "Stop"`。`go build` 失败时把 `# github.com/.../internal/process` 这类诊断行写到 stderr，PowerShell 在 `Stop` 模式下把它升级为终止错误 `RemoteException`，整个脚本被击穿、Skip 逻辑走不到。

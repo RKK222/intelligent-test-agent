@@ -16,6 +16,8 @@ param(
     [Alias("Follow")]
     [switch]$FollowLogs,
 
+    [switch]$NoFollow,
+
     [Alias("h")]
     [switch]$Help
 )
@@ -48,7 +50,7 @@ $BackendJavaDirectNetworkArgs = @(
 
 function Show-Usage {
     @"
-Usage: powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 [-Profile local|test|guo] [-EnvFile <path>] [-LogDir <path>] [-SkipBackendBuild] [-SkipFrontendBuild] [-FollowLogs] [-Help]
+Usage: powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 [-Profile local|test|guo] [-EnvFile <path>] [-LogDir <path>] [-SkipBackendBuild] [-SkipFrontendBuild] [-FollowLogs] [-NoFollow] [-Help]
 
 Compile and restart the local platform services one by one on Windows. Each
 service is stopped before its new instance starts, in dependency order:
@@ -78,6 +80,8 @@ Options:
   -SkipFrontendBuild    Restart frontend without running pnpm build first.
   -FollowLogs           After all services start, tail backend/opencode-manager/frontend
                         logs in the current window until Ctrl+C is pressed.
+                        Default: enabled; use -NoFollow to disable.
+  -NoFollow             Disable log tailing; script exits after all services start.
   -Help                 Show this help.
 
 Environment overrides:
@@ -1091,6 +1095,6 @@ if (-not $script:OpencodeManagerBuildSucceeded) {
     Write-Host "  Fix the opencode-manager source (e.g. process.go uses Unix-only syscall.Setpgid / syscall.Kill) and re-run this script." -ForegroundColor Yellow
 }
 
-if ($FollowLogs) {
+if ($FollowLogs -or (-not $NoFollow)) {
     Follow-ServiceLogs
 }
