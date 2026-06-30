@@ -3,40 +3,32 @@ package com.icbc.testagent.configuration.management;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import java.io.BufferedReader;
-import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.stream.Stream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Git 无blob浅克隆缓存服务。
- * 使用 git clone --depth=1 --single-branch --filter=blob:none 进行无blob浅克隆，
- * 只下载目录结构（tree对象），不下载文件内容（blob对象），显著减少数据传输量。
- * 然后在本地遍历目录结构，避免 git archive --remote 在服务器端打包整个分支。
+ * Git 远程目录查询服务。
+ * 使用 git fetch + ls-tree 查询远程仓库的目录结构，只下载 tree 对象，不下载文件内容。
  *
  * <p>性能优势：</p>
  * <ul>
- *   <li>只下载 commit 和 tree 对象，数据传输量从GB级降至KB级</li>
- *   <li>对于大仓库，目录加载速度提升显著，避免因下载文件内容导致超时</li>
- *   <li>结合稀疏检出，只检出目录结构，不占用额外磁盘空间</li>
+ *   <li>只下载 commit 和 tree 对象，数据传输量极小（KB级）</li>
+ *   <li>查询速度快，通常在秒级完成</li>
+ *   <li>支持缓存机制，避免重复查询</li>
+ *   <li>零工作目录占用，只保留 .git 元数据</li>
  * </ul>
  *
- * <p>要求：Git 2.22+ 版本（支持 --filter 参数）</p>
+ * <p>要求：Git 1.7.8+ 版本</p>
  */
 public class GitCloneCacheService {
 
@@ -46,11 +38,6 @@ public class GitCloneCacheService {
      * 缓存目录名称格式：{urlHash}_{branch}
      */
     private static final String CACHE_DIR_FORMAT = "%s_%s";
-
-    /**
-     * 缓存元数据文件名
-     */
-    private static final String CACHE_META_FILE = ".cache-meta";
 
     /**
      * 缓存根目录
@@ -63,38 +50,38 @@ public class GitCloneCacheService {
     private final Duration cacheExpiry;
 
     /**
-     * 克隆超时时间
+     * 命令超时时间
      */
-    private final Duration cloneTimeout;
+    private final Duration commandTimeout;
 
     /**
-     * 克隆锁，防止同一仓库同时多次克隆
+     * 查询锁，防止同一仓库同时多次查询
      */
-    private final ConcurrentHashMap<String, Object> cloneLocks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Object> queryLocks = new ConcurrentHashMap<>();
 
     /**
-     * 构造缓存服务。
+     * 构造服务。
      *
-     * @param cacheRoot    缓存根目录路径
-     * @param cacheExpiry  缓存过期时间
-     * @param cloneTimeout 克隆超时时间
+     * @param cacheRoot      缓存根目录路径
+     * @param cacheExpiry    缓存过期时间
+     * @param commandTimeout 命令超时时间
      */
-    public GitCloneCacheService(Path cacheRoot, Duration cacheExpiry, Duration cloneTimeout) {
+    public GitCloneCacheService(Path cacheRoot, Duration cacheExpiry, Duration commandTimeout) {
         this.cacheRoot = cacheRoot;
         this.cacheExpiry = cacheExpiry;
-        this.cloneTimeout = cloneTimeout;
+        this.commandTimeout = commandTimeout;
         ensureCacheRootExists();
+        log.info("Git 目录查询服务已初始化，缓存目录: {}, 过期时间: {}", cacheRoot, cacheExpiry);
     }
 
     /**
      * 列出指定分支的目录结构。
-     * 先检查缓存是否有效，有效则直接遍历本地目录（只遍历tree对象，无blob）；
-     * 无效则重新进行无blob浅克隆后遍历。
+     * 使用 git fetch 获取 tree 对象，然后用 ls-tree 列出目录。
      *
      * @param gitUrl     Git 仓库 URL
      * @param branch     分支名称
      * @param privateKey SSH 私钥（可选）
-     * @return 目录路径列表（已去重排序），只包含目录路径，不包含文件
+     * @return 目录路径列表（已排序），只包含目录路径，不包含文件
      */
     public List<String> listDirectories(String gitUrl, String branch, String privateKey) {
         String cacheKey = buildCacheKey(gitUrl, branch);
@@ -103,26 +90,25 @@ public class GitCloneCacheService {
         // 检查缓存是否有效
         if (isCacheValid(cacheDir)) {
             log.debug("使用缓存目录: {}", cacheDir);
-            return listLocalDirectories(cacheDir);
+            return listCachedDirectories(cacheDir);
         }
 
-        // 获取克隆锁，防止并发克隆同一仓库
-        Object lock = cloneLocks.computeIfAbsent(cacheKey, k -> new Object());
+        // 获取锁，防止并发查询同一仓库
+        Object lock = queryLocks.computeIfAbsent(cacheKey, k -> new Object());
         synchronized (lock) {
-            // 双重检查，可能在等待锁期间其他线程已完成克隆
+            // 双重检查
             if (isCacheValid(cacheDir)) {
-                return listLocalDirectories(cacheDir);
+                return listCachedDirectories(cacheDir);
             }
 
-            // 执行浅克隆
-            shallowClone(gitUrl, branch, cacheDir, privateKey);
-            writeCacheMeta(cacheDir, gitUrl, branch);
+            // 执行查询
+            fetchAndListDirectories(gitUrl, branch, cacheDir, privateKey);
 
-            // 克隆完成后移除锁
-            cloneLocks.remove(cacheKey);
+            // 查询完成后移除锁
+            queryLocks.remove(cacheKey);
         }
 
-        return listLocalDirectories(cacheDir);
+        return listCachedDirectories(cacheDir);
     }
 
     /**
@@ -132,7 +118,7 @@ public class GitCloneCacheService {
         if (!Files.exists(cacheRoot)) {
             return;
         }
-        try (Stream<Path> paths = Files.list(cacheRoot)) {
+        try (var paths = Files.list(cacheRoot)) {
             paths.filter(Files::isDirectory)
                     .filter(this::isCacheExpired)
                     .forEach(this::deleteCacheDir);
@@ -145,28 +131,36 @@ public class GitCloneCacheService {
      * 构建缓存键：URL hash + branch
      */
     private String buildCacheKey(String gitUrl, String branch) {
-        // 使用 URL 的 hash 避免路径中包含特殊字符
         int urlHash = Math.abs(gitUrl.hashCode());
-        // 分支名中的特殊字符替换为下划线
         String safeBranch = branch.replaceAll("[^A-Za-z0-9._-]", "_");
         return String.format(CACHE_DIR_FORMAT, urlHash, safeBranch);
     }
 
     /**
-     * 检查缓存是否有效（目录存在且未过期）。
+     * 检查缓存是否有效。
+     * 必须同时满足：
+     * 1. 缓存目录存在
+     * 2. .git 目录存在
+     * 3. FETCH_HEAD 文件存在（说明已经 fetch 过）
+     * 4. 未过期
      */
     private boolean isCacheValid(Path cacheDir) {
         if (!Files.exists(cacheDir) || !Files.isDirectory(cacheDir)) {
             return false;
         }
-        Path metaFile = cacheDir.resolve(CACHE_META_FILE);
-        if (!Files.exists(metaFile)) {
+        Path gitDir = cacheDir.resolve(".git");
+        if (!Files.exists(gitDir)) {
+            return false;
+        }
+        // 检查 FETCH_HEAD 是否存在，确保已经 fetch 过
+        Path fetchHead = gitDir.resolve("FETCH_HEAD");
+        if (!Files.exists(fetchHead)) {
             return false;
         }
         try {
-            BasicFileAttributes attrs = Files.readAttributes(metaFile, BasicFileAttributes.class);
-            Instant lastModified = attrs.lastModifiedTime().toInstant();
-            return Instant.now().isBefore(lastModified.plus(cacheExpiry));
+            var attrs = Files.readAttributes(fetchHead, java.nio.file.attribute.BasicFileAttributes.class);
+            var lastModified = attrs.lastModifiedTime().toInstant();
+            return java.time.Instant.now().isBefore(lastModified.plus(cacheExpiry));
         } catch (IOException e) {
             return false;
         }
@@ -180,91 +174,67 @@ public class GitCloneCacheService {
     }
 
     /**
-     * 执行无blob浅克隆，只下载目录结构，不下载文件内容。
-     * 使用 --filter=blob:none 参数显著减少数据传输量，提升大仓库的目录加载速度。
+     * 获取远程分支的目录结构。
+     * 步骤：
+     * 1. 创建临时 Git 仓库
+     * 2. 添加远程引用
+     * 3. fetch 远程分支（只获取 tree，不获取 blob）
+     * 4. 使用 ls-tree 列出目录
      */
-    private void shallowClone(String gitUrl, String branch, Path cacheDir, String privateKey) {
-        // 删除旧的缓存目录（如果存在）
+    private void fetchAndListDirectories(String gitUrl, String branch, Path cacheDir, String privateKey) {
+        // 删除旧的缓存目录
         deleteCacheDir(cacheDir);
 
-        // 构建无blob克隆命令：--filter=blob:none 只下载 tree 对象，不下载 blob（文件内容）
-        List<String> cloneCommand = new ArrayList<>();
-        cloneCommand.add("git");
-        cloneCommand.add("clone");
-        cloneCommand.add("--depth=1");
-        cloneCommand.add("--single-branch");
-        cloneCommand.add("--branch=" + branch);
-        cloneCommand.add("--filter=blob:none");  // 关键：不下载文件内容
-        cloneCommand.add("--sparse");             // 启用稀疏检出模式
-        cloneCommand.add(gitUrl);
-        cloneCommand.add(cacheDir.toString());
-
-        // 执行无blob克隆
-        executeCommand(cloneCommand, privateKey, "无blob克隆仓库失败");
-        log.info("无blob浅克隆完成: {} 分支 {} 到 {}", gitUrl, branch, cacheDir);
-
-        // 配置稀疏检出，只检出目录结构（检出时会跳过blob下载）
         try {
-            List<String> sparseCommand = new ArrayList<>();
-            sparseCommand.add("git");
-            sparseCommand.add("-C");
-            sparseCommand.add(cacheDir.toString());
-            sparseCommand.add("sparse-checkout");
-            sparseCommand.add("set");
-            sparseCommand.add("/");  // 检出所有目录
+            // 1. 创建临时 Git 仓库
+            executeCommand(List.of("git", "init", cacheDir.toString()), privateKey, "初始化仓库失败");
 
-            executeCommand(sparseCommand, privateKey, "配置稀疏检出失败");
-            log.debug("稀疏检出配置完成: {}", cacheDir);
+            // 2. 添加远程引用
+            executeCommand(List.of("git", "-C", cacheDir.toString(), "remote", "add", "origin", gitUrl),
+                    privateKey, "添加远程引用失败");
+
+            // 3. fetch 远程分支（--depth=1 只获取最新提交，不下载 blob）
+            executeCommand(List.of("git", "-C", cacheDir.toString(), "fetch", "origin", branch, "--depth=1"),
+                    privateKey, "获取远程分支失败");
+
+            log.info("已获取远程分支: {} {}", gitUrl, branch);
+
         } catch (PlatformException e) {
-            // 稀疏检出失败不影响目录遍历，blobless clone 已经确保 tree 对象存在
-            log.warn("稀疏检出配置失败，但目录遍历仍可正常进行: {}", e.getMessage());
+            // 失败时清理缓存目录
+            deleteCacheDir(cacheDir);
+            throw e;
         }
     }
 
     /**
-     * 遍历本地目录，提取所有目录路径。
+     * 使用 ls-tree 列出缓存的目录结构。
      */
-    private List<String> listLocalDirectories(Path repoRoot) {
-        Set<String> directories = new HashSet<>();
-        try (Stream<Path> paths = Files.walk(repoRoot)) {
-            paths.filter(Files::isDirectory)
-                    .filter(p -> !p.equals(repoRoot)) // 排除根目录
-                    .filter(p -> !p.getFileName().toString().startsWith(".")) // 排除隐藏目录
-                    .forEach(p -> {
-                        String relativePath = repoRoot.relativize(p).toString();
-                        directories.add(relativePath);
-                    });
-        } catch (IOException e) {
-            throw new PlatformException(
-                    ErrorCode.GIT_UNAVAILABLE,
-                    "遍历本地目录失败",
-                    Map.of("path", repoRoot.toString()),
-                    e);
+    private List<String> listCachedDirectories(Path cacheDir) {
+        // 执行 git ls-tree -r -d --name-only FETCH_HEAD
+        List<String> command = List.of(
+                "git", "-C", cacheDir.toString(),
+                "ls-tree", "-r", "-d", "--name-only", "FETCH_HEAD"
+        );
+
+        String output = executeCommand(command, null, "列出目录失败");
+
+        // 解析输出
+        List<String> directories = new ArrayList<>();
+        String[] lines = output.split("\n");
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (!trimmed.isEmpty()) {
+                directories.add(trimmed);
+            }
         }
 
-        List<String> result = new ArrayList<>(directories);
-        result.sort(String::compareTo);
-        return result;
-    }
-
-    /**
-     * 写入缓存元数据文件。
-     */
-    private void writeCacheMeta(Path cacheDir, String gitUrl, String branch) {
-        Path metaFile = cacheDir.resolve(CACHE_META_FILE);
-        try {
-            String metaContent = String.format("url=%s\nbranch=%s\ncreatedAt=%s\n",
-                    gitUrl, branch, Instant.now().toString());
-            Files.writeString(metaFile, metaContent, StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            log.warn("写入缓存元数据失败: {}", e.getMessage());
-        }
+        return directories;
     }
 
     /**
      * 执行 Git 命令。
      */
-    private void executeCommand(List<String> command, String privateKey, String errorMessage) {
+    private String executeCommand(List<String> command, String privateKey, String errorMessage) {
         Path keyFile = null;
         try {
             ProcessBuilder builder = new ProcessBuilder(command);
@@ -284,10 +254,10 @@ public class GitCloneCacheService {
             String stdout = readStream(process.getInputStream());
             String stderr = readStream(process.getErrorStream());
 
-            boolean finished = process.waitFor(cloneTimeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
+            boolean finished = process.waitFor(commandTimeout.toMillis(), java.util.concurrent.TimeUnit.MILLISECONDS);
             if (!finished) {
                 process.destroyForcibly();
-                throw new PlatformException(ErrorCode.GIT_TIMEOUT, "Git 克隆超时", Map.of("command", safeCommand(command)));
+                throw new PlatformException(ErrorCode.GIT_TIMEOUT, "Git 命令超时", Map.of("command", safeCommand(command)));
             }
 
             int exitCode = process.exitValue();
@@ -297,6 +267,8 @@ public class GitCloneCacheService {
                         errorMessage,
                         Map.of("command", safeCommand(command), "exitCode", exitCode, "stderr", stderr.trim()));
             }
+
+            return stdout;
 
         } catch (PlatformException e) {
             throw e;
@@ -315,7 +287,7 @@ public class GitCloneCacheService {
      * 写入临时 SSH 私钥文件。
      */
     private Path writeTempKey(String privateKey) throws IOException {
-        Path file = Files.createTempFile("git-clone-", ".key");
+        Path file = Files.createTempFile("git-ls-", ".key");
         Files.writeString(file, privateKey.endsWith("\n") ? privateKey : privateKey + "\n", StandardCharsets.UTF_8);
         try {
             Files.setPosixFilePermissions(file, java.util.EnumSet.of(
@@ -391,7 +363,7 @@ public class GitCloneCacheService {
         if (!Files.exists(cacheRoot)) {
             try {
                 Files.createDirectories(cacheRoot);
-                log.info("创建 Git 克隆缓存目录: {}", cacheRoot);
+                log.info("创建 Git 缓存目录: {}", cacheRoot);
             } catch (IOException e) {
                 throw new PlatformException(
                         ErrorCode.INTERNAL_ERROR,
