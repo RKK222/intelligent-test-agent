@@ -37,7 +37,6 @@ opencode-manager 不允许随意新增环境变量。新增前必须先确认该
 | 变量 | 默认值/说明 |
 |---|---|
 | `OPENCODE_MANAGER_CONTAINER_ID` | 仅作为非 Windows 容器 ID 的最后兜底。非 Windows 先读系统 hostname，再读 `/etc/hostname`，两者为空时才读该环境变量；不再读取 `HOSTNAME` 环境变量。Windows 直接读机器名，不读取该变量。最终为空则启动失败。 |
-| `OPENCODE_MANAGER_SERVER_IP_FILE` | 非 Windows 默认 `/data/.testagent/.serverip`。启动时读取单行服务器 IPv4，文件不存在每 1 秒重试，最多 30 秒。 |
 | `OPENCODE_MANAGER_BACKEND_PORT` | `8080`，manager 按服务器 IPv4 派生初始 WebSocket 入口时使用。 |
 | `OPENCODE_BIN` | `opencode` |
 | `OPENCODE_MANAGER_STATE_DIR` | `/data/opencode/manager` |
@@ -46,7 +45,7 @@ opencode-manager 不允许随意新增环境变量。新增前必须先确认该
 | `OPENCODE_MANAGER_HEARTBEAT_INTERVAL` | `5s` |
 | `OPENCODE_MANAGER_RECONNECT_INTERVAL` | `10s` |
 
-`OPENCODE_MANAGER_LINUX_SERVER_ID` 不再作为生产路径使用。非 Windows 环境的服务器身份必须来自 `.serverip` 文件；`containerId` 优先来自系统 hostname，其次来自 `/etc/hostname`，最后才使用 `OPENCODE_MANAGER_CONTAINER_ID`。Windows 本机开发态跳过文件等待，直接探测本机非回环 IPv4，并用机器名作为 `containerId`。
+`OPENCODE_MANAGER_LINUX_SERVER_ID` 和 `OPENCODE_MANAGER_SERVER_IP_FILE` 不再作为生产路径使用。非 Windows 环境的服务器身份必须来自 `SYS_DATA_ROOT_DIR/.serverip` 文件；Go manager 启动前无法连接 Java 查询数据库，因此按系统通用参数的内置平台默认值派生：Linux `/data/.testagent/.serverip`，macOS `$HOME/.testagent/.serverip`。`containerId` 优先来自系统 hostname，其次来自 `/etc/hostname`，最后才使用 `OPENCODE_MANAGER_CONTAINER_ID`。Windows 本机开发态跳过文件等待，直接探测本机非回环 IPv4，并用机器名作为 `containerId`。
 
 `OPENCODE_MANAGER_ID` 不再作为环境变量配置。manager 启动时会按 `mgr_<normalized_container_id>_<normalized_manager_process_name>` 派生内部 `managerId`，其中管理进程逻辑名固定为 `opencode-manager`，例如容器名 `kakadeMacBook-Pro.local` 会派生为 `mgr_kakadeMacBook_Pro_local_opencode_manager`。运行管理、Redis 快照和数据库拓扑中的 `managerId` 仍是内部协议 ID，唯一性来自同一共享 Redis 集群内的容器名称加管理进程名称；一个容器只运行一个 `opencode-manager`。
 
@@ -74,7 +73,7 @@ opencode-manager list --trace-id trace_1234567890abcdef
 opencode-manager run
 ```
 
-`run` 会先解析服务器 IPv4：非 Windows 读取 `OPENCODE_MANAGER_SERVER_IP_FILE`，Windows 直接探测本机非回环 IPv4。manager 使用该服务器 IPv4 和 `OPENCODE_MANAGER_BACKEND_PORT`（默认 `8080`）派生初始 WebSocket：`ws://{serverIp}:{port}/api/internal/platform/opencode-runtime/manager/ws`。Go manager 不再通过 HTTP 与 Java 后端交互，所有注册、心跳、后端列表发现和命令控制都走 WebSocket，并使用 `Authorization: Bearer <OPENCODE_MANAGER_TOKEN>`；不得使用用户 JWT、普通 API token 或 opencode server 密钥。
+`run` 会先解析服务器 IPv4：非 Windows 读取 `SYS_DATA_ROOT_DIR/.serverip`，Windows 直接探测本机非回环 IPv4。manager 使用该服务器 IPv4 和 `OPENCODE_MANAGER_BACKEND_PORT`（默认 `8080`）派生初始 WebSocket：`ws://{serverIp}:{port}/api/internal/platform/opencode-runtime/manager/ws`。Go manager 不再通过 HTTP 与 Java 后端交互，所有注册、心跳、后端列表发现和命令控制都走 WebSocket，并使用 `Authorization: Bearer <OPENCODE_MANAGER_TOKEN>`；不得使用用户 JWT、普通 API token 或 opencode server 密钥。
 
 多后端 Java 实例部署时，manager 先连接 seed WebSocket；有连接后每 10 秒随机选择一个已连接 socket 发送 `backendListRequest`，Java 从 Redis 返回当前存活后端实例的 `webSocketUrl`，manager 自动连接尚未连接的实例。当所有 Java 连接都断开时，manager 每 10 秒按启动时的 `.serverip + backend port` 方式重连 seed WebSocket，不设总超时。
 

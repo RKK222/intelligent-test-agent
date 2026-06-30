@@ -1,6 +1,7 @@
 package com.icbc.testagent.app.config;
 
 import com.icbc.testagent.common.net.LinuxServerIpResolver;
+import com.icbc.testagent.domain.configuration.CommonParameterValues;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.observability.TraceIdSupport;
 import com.icbc.testagent.opencode.runtime.process.LocalDirectSettings;
@@ -54,11 +55,19 @@ public class OpencodeManagerControlConfig {
     }
 
     /**
+     * 创建服务器 IP 文件路径解析器，路径统一来自系统通用参数 SYS_DATA_ROOT_DIR。
+     */
+    @Bean
+    ServerIpFilePathResolver serverIpFilePathResolver(CommonParameterValues commonParameterValues) {
+        return new ServerIpFilePathResolver(commonParameterValues);
+    }
+
+    /**
      * 创建服务器 IP 文件写入器，供生产 socket 控制面启动时发布 .serverip。
      */
     @Bean
-    ServerIpFileWriter serverIpFileWriter(TestAgentRuntimeProperties properties) {
-        return new ServerIpFileWriter(properties.getOpencode().getManagerControl().getServerIpFile());
+    ServerIpFileWriter serverIpFileWriter(ServerIpFilePathResolver serverIpFilePathResolver) {
+        return new ServerIpFileWriter(serverIpFilePathResolver);
     }
 
     /**

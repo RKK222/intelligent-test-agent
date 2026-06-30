@@ -380,7 +380,6 @@ public class TestAgentRuntimeProperties {
         private Duration backendStaleAfter = Duration.ofSeconds(10);
         private Duration commandTimeout = Duration.ofSeconds(10);
         private int backendDiscoveryLimit = 100;
-        private Path serverIpFile = Path.of("/data/.testagent/.serverip");
         /**
          * 控制面网关模式：socket=生产 WebSocket；local=本地直连 baseUrl 的开发态占位，
          * 不依赖 opencode-manager 长连接。默认 socket。
@@ -469,20 +468,6 @@ public class TestAgentRuntimeProperties {
          */
         public void setBackendDiscoveryLimit(int backendDiscoveryLimit) {
             this.backendDiscoveryLimit = backendDiscoveryLimit;
-        }
-
-        /**
-         * 返回 Java 后端写给 Go manager 读取的服务器 IPv4 文件路径。
-         */
-        public Path getServerIpFile() {
-            return serverIpFile;
-        }
-
-        /**
-         * 绑定服务器 IPv4 文件路径，空值回退到生产默认 /data/.testagent/.serverip。
-         */
-        public void setServerIpFile(Path serverIpFile) {
-            this.serverIpFile = serverIpFile == null ? Path.of("/data/.testagent/.serverip") : serverIpFile;
         }
 
         /**

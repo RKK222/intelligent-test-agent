@@ -110,14 +110,6 @@ if [[ "${restart_output}" != *"TEST_AGENT_OPENCODE_BASE_URL is required"* ]]; th
   echo "${restart_output}" >&2
   fail "restart script did not reach backend startup precondition"
 fi
-if [[ "${restart_output}" != *"Defaulting TEST_AGENT_SERVER_IP_FILE to local dev path: ${tmp_dir}/logs/.serverip"* ]]; then
-  echo "${restart_output}" >&2
-  fail "restart script did not default TEST_AGENT_SERVER_IP_FILE to the local dev .serverip path"
-fi
-if [[ "${restart_output}" != *"Defaulting OPENCODE_MANAGER_SERVER_IP_FILE to TEST_AGENT_SERVER_IP_FILE: ${tmp_dir}/logs/.serverip"* ]]; then
-  echo "${restart_output}" >&2
-  fail "restart script did not point opencode-manager at the same .serverip path"
-fi
 if [[ "${restart_output}" != *"Defaulting TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4: http://10.8.0.115:8080"* ]]; then
   echo "${restart_output}" >&2
   fail "restart script did not default TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4"
@@ -147,6 +139,12 @@ fi
 
 if grep -q "OPENCODE_MANAGER_LINUX_SERVER_ID" "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script should not inject OPENCODE_MANAGER_LINUX_SERVER_ID"
+fi
+if grep -q "TEST_AGENT_SERVER_IP_FILE" "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script should not inject server IP file path; Java uses SYS_DATA_ROOT_DIR/.serverip"
+fi
+if grep -q "OPENCODE_MANAGER_SERVER_IP_FILE" "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script should not inject manager server IP file path; manager derives SYS_DATA_ROOT_DIR/.serverip"
 fi
 if grep -q "OPENCODE_MANAGER_ID" "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script should not inject OPENCODE_MANAGER_ID; manager derives it from container and process name"

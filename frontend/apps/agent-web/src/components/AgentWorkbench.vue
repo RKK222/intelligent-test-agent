@@ -87,6 +87,8 @@ const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
 const authStore = useAuthStore();
 const router = useRouter();
+const OPENCODE_PROCESS_STATUS_FAST_REFETCH_INTERVAL_MS = 5000;
+const OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS = 30000;
 
 const isSuperAdmin = computed(() => authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 
@@ -178,6 +180,8 @@ const liveFollowedParts = ref<Set<string>>(new Set());
 // Markdown 预览开关：状态由 FigmaEditorArea tab 表头按钮双向绑定到 CodeEditor 的 showPreview。
 // 切换非 Markdown 文件时由 watch 主动复位，避免下次切回 md 时残留之前的开启状态。
 const markdownPreview = ref(false);
+// 只有用户主动触发的健康刷新需要短暂阻止提交；后台轮询刷新不应周期性打断输入体验。
+const manualOpencodeProcessRefreshing = ref(false);
 
 // Ctrl/Cmd+S 全局快捷键：在编辑器打开文件时拦截浏览器默认的「保存网页」行为，
 // 转而触发右下角保存按钮同款逻辑（saveMutation.mutate）。
@@ -386,44 +390,65 @@ const sessionsQuery = useQuery({
   }
 });
 
+const opencodeProcessEnabled = computed(() => authStore.isAuthenticated());
+const opencodeProcessQueryKey = computed(() => ["runtime", "opencode-process", "me", authStore.token ?? ""] as const);
+const opencodeProcessQuery = useQuery({
+  queryKey: opencodeProcessQueryKey,
+  enabled: opencodeProcessEnabled,
+  queryFn: () => api.getMyOpencodeProcess(),
+  retry: false,
+  // 未 READY 时保持快速探测；READY 后降频，避免每个工作台标签页持续压测 manager health。
+  refetchInterval: (query) => {
+    const status = (query.state.data as UserOpencodeProcess | undefined)?.status;
+    return status === "READY"
+      ? OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS
+      : OPENCODE_PROCESS_STATUS_FAST_REFETCH_INTERVAL_MS;
+  },
+  refetchIntervalInBackground: false
+});
+const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => opencodeProcessQuery.data.value ?? null);
+const opencodeProcessReady = computed(() => opencodeProcessStatus.value?.status === "READY");
+
 const agentsQuery = useQuery({
   queryKey: ["runtime", "agents", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value),
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
   queryFn: () => api.listAgents(selectedWorkspaceIdRef.value!)
 });
 const modelsQuery = useQuery({
   queryKey: ["runtime", "models"],
+  enabled: opencodeProcessReady,
   queryFn: () => api.listModels()
 });
 const providersQuery = useQuery({
   queryKey: ["runtime", "providers"],
+  enabled: opencodeProcessReady,
   queryFn: () => api.listProviders()
 });
 const commandsQuery = useQuery({
   queryKey: ["runtime", "commands", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value),
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
   queryFn: () => api.listCommands(selectedWorkspaceIdRef.value!)
 });
 const lspStatusQuery = useQuery({
   queryKey: ["runtime", "lsp", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value),
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
   queryFn: () => api.getLspStatus(selectedWorkspaceIdRef.value!),
   refetchInterval: 30000
 });
 const mcpStatusQuery = useQuery({
   queryKey: ["runtime", "mcp", "status", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value),
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
   queryFn: () => api.getMcpStatus(selectedWorkspaceIdRef.value!),
   refetchInterval: 30000
 });
 const mcpResourcesQuery = useQuery({
   queryKey: ["runtime", "mcp", "resources", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value),
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
   queryFn: () => api.getMcpResources(selectedWorkspaceIdRef.value!)
 });
 const mcpToolsQuery = useQuery({
   queryKey: ["runtime", "mcp", "tools", selectedWorkspaceIdRef, selectedProvider, selectedModel],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value),
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
   queryFn: () => {
     const model = modelIdOnly(selectedModel.value);
     return api.getMcpTools(selectedWorkspaceIdRef.value!, selectedProvider.value || undefined, model || undefined);
@@ -431,17 +456,9 @@ const mcpToolsQuery = useQuery({
 });
 const vcsStatusQuery = useQuery({
   queryKey: ["runtime", "vcs", "status", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value),
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
   queryFn: () => api.getVcsStatus(selectedWorkspaceIdRef.value!),
   refetchInterval: 30000
-});
-const opencodeProcessEnabled = computed(() => authStore.isAuthenticated());
-const opencodeProcessQueryKey = computed(() => ["runtime", "opencode-process", "me", authStore.token ?? ""] as const);
-const opencodeProcessQuery = useQuery({
-  queryKey: opencodeProcessQueryKey,
-  enabled: opencodeProcessEnabled,
-  queryFn: () => api.getMyOpencodeProcess(),
-  retry: false
 });
 
 const agents = computed(() => agentsQuery.data.value ?? []);
@@ -453,14 +470,12 @@ const mcpToolsData = computed<RuntimeToolInfo[]>(() => mcpToolsQuery.data.value 
 const vcsStatusData = computed(() => vcsStatusQuery.data.value);
 const lspStatusData = computed(() => lspStatusQuery.data.value);
 const mcpStatusData = computed(() => mcpStatusQuery.data.value);
-const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => opencodeProcessQuery.data.value ?? null);
-const opencodeProcessReady = computed(() => opencodeProcessStatus.value?.status === "READY");
 // 只在首个状态响应回来前展示“正在检查”，避免 READY 数据后台刷新时把对话区重新置为阻塞态。
 const opencodeProcessInitialLoading = computed(
   () => opencodeProcessEnabled.value && !opencodeProcessStatus.value && (opencodeProcessQuery.isPending.value || opencodeProcessQuery.isFetching.value)
 );
 const opencodeProcessRefreshing = computed(
-  () => opencodeProcessEnabled.value && Boolean(opencodeProcessStatus.value) && opencodeProcessQuery.isFetching.value
+  () => opencodeProcessEnabled.value && Boolean(opencodeProcessStatus.value) && manualOpencodeProcessRefreshing.value
 );
 const sessionsItems = computed(() => sessionsQuery.data.value?.items ?? []);
 const selectedModelInfo = computed(() => {
@@ -471,7 +486,10 @@ const selectedModelLabel = computed(() => selectedModelInfo.value?.name ?? selec
 
 function refreshOpencodeProcessStatus() {
   if (!opencodeProcessEnabled.value || opencodeProcessQuery.isFetching.value) return;
-  void opencodeProcessQuery.refetch();
+  manualOpencodeProcessRefreshing.value = true;
+  void opencodeProcessQuery.refetch().finally(() => {
+    manualOpencodeProcessRefreshing.value = false;
+  });
 }
 const historyList = computed(() => historyItems(run.value, sessionsItems.value));
 const resourcesList = computed(() => runtimeResources(mcpResourcesData.value, activeTab.value));
@@ -529,6 +547,19 @@ watch(modelsQuery.data, (data) => {
   if (!selectedModel.value && data?.[0]) {
     selectedModel.value = modelValue(data.find((model) => model.defaultModel) ?? data[0]);
   }
+});
+watch(opencodeProcessReady, (ready, previous) => {
+  if (!ready || previous) {
+    return;
+  }
+  // 进程刚从不可用变为 READY 时，主动刷新运行态目录，避免模型/Provider 保留早期失败或空缓存。
+  void queryClient.invalidateQueries({ queryKey: ["runtime", "agents"] });
+  void queryClient.invalidateQueries({ queryKey: ["runtime", "models"] });
+  void queryClient.invalidateQueries({ queryKey: ["runtime", "providers"] });
+  void queryClient.invalidateQueries({ queryKey: ["runtime", "commands"] });
+  void queryClient.invalidateQueries({ queryKey: ["runtime", "lsp"] });
+  void queryClient.invalidateQueries({ queryKey: ["runtime", "mcp"] });
+  void queryClient.invalidateQueries({ queryKey: ["runtime", "vcs"] });
 });
 watch([() => selectedProvider.value, () => selectedModel.value, modelsQuery.data], ([provider, model, data]) => {
   if (!provider || !model || String(model).startsWith(`${provider}/`)) {
@@ -1519,9 +1550,24 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     return;
   }
   if (!opencodeProcessReady.value) {
+    // 与聊天面板状态卡一致：按 serviceStatus 区分“未分配 / 未运行”提示
+    const svc =
+      opencodeProcessStatus.value?.serviceStatus ??
+      (opencodeProcessStatus.value?.status === "READY"
+        ? "RUNNING"
+        : opencodeProcessStatus.value?.serviceAddress?.trim() ||
+          (opencodeProcessStatus.value?.linuxServerId && opencodeProcessStatus.value?.port)
+          ? "NOT_RUNNING"
+          : "UNASSIGNED");
+    const procTitle =
+      svc === "NOT_RUNNING"
+        ? "opencode 专属进程未运行"
+        : svc === "UNASSIGNED"
+        ? "尚未分配 opencode 专属进程"
+        : "请先初始化 opencode 进程";
     feedback.value = {
       kind: "info",
-      title: "请先初始化 opencode 进程",
+      title: procTitle,
       description: opencodeProcessStatus.value?.message ?? "正在检查当前用户可用进程"
     };
     return;

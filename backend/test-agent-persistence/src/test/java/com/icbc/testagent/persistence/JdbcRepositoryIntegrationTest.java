@@ -736,12 +736,13 @@ class JdbcRepositoryIntegrationTest {
 
     @Test
     void commonParametersAreSeededAndWorkspaceCreateOperationsPersistProgress() {
-        assertThat(commonParameters.findByEnglishNameAndPlatform("OPENCODE_APP_WORKSPACE_ROOT", ParameterPlatform.LINUX))
+        // OPENCODE 路径参数已收敛为 all 单行，值引用 ${SYS_DATA_ROOT_DIR}，由解析器在运行态展开。
+        assertThat(commonParameters.findByEnglishNameAndPlatform("OPENCODE_APP_WORKSPACE_ROOT", ParameterPlatform.ALL))
                 .map(CommonParameter::parameterValue)
-                .contains("/data/.testagent/agent-opencode/workspace/appworkspace/");
-        assertThat(commonParameters.findByEnglishNameAndPlatform("OPENCODE_SESSION_DIR", ParameterPlatform.WINDOWS))
+                .contains("${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/appworkspace/");
+        assertThat(commonParameters.findByEnglishNameAndPlatform("OPENCODE_SESSION_DIR", ParameterPlatform.ALL))
                 .map(CommonParameter::parameterValue)
-                .contains("D:/data/.testagent/agent-opencode/.session/");
+                .contains("${SYS_DATA_ROOT_DIR}/agent-opencode/.session/");
 
         users.save(User.createNew("usr_1234567890abcdef", "AUTH_PROGRESS", "progress-user", "hash", "org", "rd", "dept"));
         jdbcClient.sql("""
@@ -781,9 +782,9 @@ class JdbcRepositoryIntegrationTest {
         assertThat(commonParameters.findByEnglishNameAndPlatform("OPENCODE_PUBLIC_AGENT_GIT_URL", ParameterPlatform.ALL))
                 .map(CommonParameter::parameterValue)
                 .contains("UNCONFIGURED");
-        assertThat(commonParameters.findByEnglishNameAndPlatform("OPENCODE_PUBLIC_CONFIG_GIT_ROOT", ParameterPlatform.LINUX))
+        assertThat(commonParameters.findByEnglishNameAndPlatform("OPENCODE_PUBLIC_CONFIG_GIT_ROOT", ParameterPlatform.ALL))
                 .map(CommonParameter::parameterValue)
-                .contains("/data/.testagent/agent-opencode/.config/");
+                .contains("${SYS_DATA_ROOT_DIR}/agent-opencode/.config/");
 
         workspaces.save(new Workspace(
                 new WorkspaceId("wrk_agentcfg"),

@@ -784,16 +784,7 @@ function Apply-DetectedRuntimeIpDefaults {
     Write-Host "Defaulting TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4: $listenUrl"
 }
 
-function Apply-ServerIpFileDefaults {
-    if ([string]::IsNullOrWhiteSpace((Get-EnvValue "TEST_AGENT_SERVER_IP_FILE" ""))) {
-        $serverIpFile = Join-Path $LogDir ".serverip"
-        Set-EnvValue "TEST_AGENT_SERVER_IP_FILE" $serverIpFile
-        Write-Host "Defaulting TEST_AGENT_SERVER_IP_FILE to local dev path: $serverIpFile"
-    }
-    if ([string]::IsNullOrWhiteSpace((Get-EnvValue "OPENCODE_MANAGER_SERVER_IP_FILE" ""))) {
-        Set-EnvValue "OPENCODE_MANAGER_SERVER_IP_FILE" (Get-EnvValue "TEST_AGENT_SERVER_IP_FILE" "")
-        Write-Host "Defaulting OPENCODE_MANAGER_SERVER_IP_FILE to TEST_AGENT_SERVER_IP_FILE: $(Get-EnvValue "OPENCODE_MANAGER_SERVER_IP_FILE" "")"
-    }
+function Apply-ManagerBackendPortDefaults {
     if ([string]::IsNullOrWhiteSpace((Get-EnvValue "OPENCODE_MANAGER_BACKEND_PORT" ""))) {
         Set-EnvValue "OPENCODE_MANAGER_BACKEND_PORT" (Get-UrlPort $script:BackendUrl)
     }
@@ -819,10 +810,6 @@ function Start-Backend {
     }
 
     New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
-    $serverIpFile = Get-EnvValue "TEST_AGENT_SERVER_IP_FILE" ""
-    if (-not [string]::IsNullOrWhiteSpace($serverIpFile)) {
-        Remove-Item -LiteralPath $serverIpFile -Force -ErrorAction SilentlyContinue
-    }
     $logPath = Join-Path $LogDir "backend.log"
     Write-Host "Starting backend with profile '$BackendProfile'. Logs: $logPath"
     Write-Host "Backend JVM proxy settings are disabled for direct DB/Redis connections."
@@ -862,7 +849,6 @@ function Start-OpencodeManager {
     $managerId = Get-EnvValue "OPENCODE_MANAGER_ID" "mgr_local_opencode"
     $containerId = Get-EnvValue "OPENCODE_MANAGER_CONTAINER_ID" ([System.Environment]::MachineName)
     $managerStateDir = Get-OpencodeManagerStateDir
-    $serverIpFile = Get-EnvValue "OPENCODE_MANAGER_SERVER_IP_FILE" (Get-EnvValue "TEST_AGENT_SERVER_IP_FILE" "")
     $backendPort = Get-EnvValue "OPENCODE_MANAGER_BACKEND_PORT" (Get-UrlPort $script:BackendUrl)
     $version = ""
     try {
@@ -873,7 +859,6 @@ function Start-OpencodeManager {
 
     New-Item -ItemType Directory -Force -Path $LogDir, $managerStateDir | Out-Null
     Set-EnvValue "OPENCODE_MANAGER_CONTAINER_ID" $containerId
-    Set-EnvValue "OPENCODE_MANAGER_SERVER_IP_FILE" $serverIpFile
     Set-EnvValue "OPENCODE_MANAGER_BACKEND_PORT" $backendPort
     Set-EnvValue "OPENCODE_MANAGER_PORT_START" $portStart
     Set-EnvValue "OPENCODE_MANAGER_PORT_END" $portEnd
@@ -925,7 +910,7 @@ Write-Host "TEST_AGENT_ROOT set to: $(Get-EnvValue "TEST_AGENT_ROOT" "")"
 Derive-FrontendRuntimeSettings
 Apply-FrontendOriginDefaults
 Apply-DetectedRuntimeIpDefaults
-Apply-ServerIpFileDefaults
+Apply-ManagerBackendPortDefaults
 Set-EnvValue "SPRING_PROFILES_ACTIVE" $BackendProfile
 
 # 开发和测试默认给 opencode-manager 一个与后端共享的 token，避免每次手配本机 dotenv。

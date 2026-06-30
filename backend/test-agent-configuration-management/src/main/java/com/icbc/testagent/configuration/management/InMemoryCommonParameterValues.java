@@ -78,7 +78,7 @@ public class InMemoryCommonParameterValues implements CommonParameterValues {
     @Override
     public Optional<String> resolvedValue(String englishName, ParameterPlatform platform) {
         return raw(englishName, platform)
-                .map(parameter -> resolver.resolve(parameter, exactLookup(snapshot)).resolvedValue());
+                .map(parameter -> resolver.resolve(parameter, platform, exactLookup(snapshot)).resolvedValue());
     }
 
     @Override
@@ -101,7 +101,11 @@ public class InMemoryCommonParameterValues implements CommonParameterValues {
     }
 
     private ResolvedParameter toResolved(CommonParameter parameter, Map<Key, CommonParameter> map) {
-        CommonParameterReferenceResolver.ResolvedValue resolved = resolver.resolve(parameter, exactLookup(map));
+        // 管理端展示用：ALL 行按当前 JVM 平台作为上下文展开，使引用平台参数的 ALL 行也能展示已展开值。
+        ParameterPlatform context = parameter.platform() == ParameterPlatform.ALL
+                ? ParameterPlatform.current()
+                : parameter.platform();
+        CommonParameterReferenceResolver.ResolvedValue resolved = resolver.resolve(parameter, context, exactLookup(map));
         return new ResolvedParameter(
                 parameter, resolved.resolvedValue(), resolved.hasReference(), resolved.resolutionError());
     }

@@ -2,6 +2,8 @@
 @import "dockview-vue/dist/styles/dockview.css";
 @import url('https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&family=Noto+Sans+SC:wght@100..900&display=swap');
 
+@source "../../../../packages/*/src/**/*.{vue,ts,js}";
+
 /* ===== 设计 token：Figma Web IDE neutral chrome =====
    对齐目标 Frame 的浅灰 chrome、白色编辑面、发丝边框和紧凑 14px 信息密度。 */
 :root {

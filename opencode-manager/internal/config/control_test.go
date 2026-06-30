@@ -11,7 +11,7 @@ func TestLoadControlFromEnvRequiresManagerSocketSettings(t *testing.T) {
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
 
 	_, err := loadControlFromEnvWithRuntime(testRuntime("linux", map[string]string{
-		defaultServerIPFile: "10.8.0.12\n",
+		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
 	}))
 
 	if err == nil {
@@ -26,7 +26,7 @@ func TestLoadControlFromEnvDerivesWebSocketURLFromServerIPAndBackendPort(t *test
 	t.Setenv("OPENCODE_MANAGER_BACKEND_PORT", "18080")
 
 	cfg, err := loadControlFromEnvWithRuntime(testRuntime("linux", map[string]string{
-		defaultServerIPFile: "10.8.0.12\n",
+		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
 	}))
 	if err != nil {
 		t.Fatalf("loadControlFromEnvWithRuntime returned error: %v", err)
@@ -46,7 +46,7 @@ func TestLoadControlFromEnvIgnoresLegacyDiscoveryURL(t *testing.T) {
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
 
 	cfg, err := loadControlFromEnvWithRuntime(testRuntime("linux", map[string]string{
-		defaultServerIPFile: "10.8.0.12\n",
+		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
 	}))
 	if err != nil {
 		t.Fatalf("loadControlFromEnvWithRuntime returned error: %v", err)
@@ -66,7 +66,7 @@ func TestLoadControlFromEnvAppliesIntervalsAndHidesToken(t *testing.T) {
 	t.Setenv("OPENCODE_MANAGER_RECONNECT_INTERVAL", "5s")
 
 	cfg, err := loadControlFromEnvWithRuntime(testRuntime("linux", map[string]string{
-		defaultServerIPFile: "10.8.0.12\n",
+		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
 	}))
 	if err != nil {
 		t.Fatalf("loadControlFromEnvWithRuntime returned error: %v", err)
@@ -89,7 +89,7 @@ func TestLoadControlFromEnvUsesFiveSecondHeartbeatAndTenSecondReconnectDefaults(
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
 
 	cfg, err := loadControlFromEnvWithRuntime(testRuntime("linux", map[string]string{
-		defaultServerIPFile: "10.8.0.12\n",
+		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
 	}))
 	if err != nil {
 		t.Fatalf("loadControlFromEnvWithRuntime returned error: %v", err)
@@ -108,8 +108,8 @@ func TestLoadControlFromEnvDerivesManagerIDFromHostnameAndProcessName(t *testing
 	t.Setenv("OPENCODE_MANAGER_ID", "mgr_should_be_ignored")
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
 	rt := testRuntime("linux", map[string]string{
-		defaultServerIPFile: "10.8.0.12\n",
-		"/etc/hostname":     "ctr_file\n",
+		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
+		"/etc/hostname":                   "ctr_file\n",
 	})
 	rt.hostname = func() (string, error) {
 		return "kakadeMacBook-Pro.local", nil
@@ -130,8 +130,8 @@ func TestLoadControlFromEnvDerivesManagerIDFromEtcHostnameWhenHostnameBlank(t *t
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_env")
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
 	rt := testRuntime("linux", map[string]string{
-		defaultServerIPFile: "10.8.0.12\n",
-		"/etc/hostname":     "ctr-file-01\n",
+		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
+		"/etc/hostname":                   "ctr-file-01\n",
 	})
 	rt.hostname = func() (string, error) {
 		return " ", nil
@@ -152,8 +152,8 @@ func TestLoadControlFromEnvDerivesManagerIDFromContainerIDEnvFallback(t *testing
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr-env-01")
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
 	rt := testRuntime("linux", map[string]string{
-		defaultServerIPFile: "10.8.0.12\n",
-		"/etc/hostname":     " \n",
+		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
+		"/etc/hostname":                   " \n",
 	})
 	rt.hostname = func() (string, error) {
 		return " ", nil

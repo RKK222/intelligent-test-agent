@@ -55,16 +55,32 @@ class CommonParameterReferenceResolverTest {
     }
 
     @Test
-    void allContextReferencingPlatformParamLeavesLiteral() {
+    void allRowResolvesPlatformReferenceUnderPlatformContext() {
         Map<Key, CommonParameter> snapshot = new HashMap<>();
-        // ALL 参数引用了一个仅 LINUX 的参数 → 视为未解析，保留字面。
+        // ALL 行引用了一个仅 LINUX 的参数；以 LINUX 作为解析上下文时按 LINUX 解析。
         snapshot.put(key("PLATFORM_ONLY", ParameterPlatform.LINUX),
                 param("PLATFORM_ONLY", "/linux-only", ParameterPlatform.LINUX));
         snapshot.put(key("GLOBAL", ParameterPlatform.ALL),
                 param("GLOBAL", "${PLATFORM_ONLY}/x", ParameterPlatform.ALL));
 
         CommonParameterReferenceResolver.ResolvedValue result =
-                resolver.resolve(snapshot.get(key("GLOBAL", ParameterPlatform.ALL)), exactLookup(snapshot));
+                resolver.resolve(snapshot.get(key("GLOBAL", ParameterPlatform.ALL)), ParameterPlatform.LINUX, exactLookup(snapshot));
+
+        assertThat(result.resolvedValue()).isEqualTo("/linux-only/x");
+        assertThat(result.resolutionError()).isNull();
+    }
+
+    @Test
+    void allRowLeavesLiteralUnderExplicitAllContext() {
+        Map<Key, CommonParameter> snapshot = new HashMap<>();
+        // 显式以 ALL 作为上下文时，ALL 行只能引用 ALL 参数；引用仅 LINUX 的参数视为未解析，保留字面。
+        snapshot.put(key("PLATFORM_ONLY", ParameterPlatform.LINUX),
+                param("PLATFORM_ONLY", "/linux-only", ParameterPlatform.LINUX));
+        snapshot.put(key("GLOBAL", ParameterPlatform.ALL),
+                param("GLOBAL", "${PLATFORM_ONLY}/x", ParameterPlatform.ALL));
+
+        CommonParameterReferenceResolver.ResolvedValue result =
+                resolver.resolve(snapshot.get(key("GLOBAL", ParameterPlatform.ALL)), ParameterPlatform.ALL, exactLookup(snapshot));
 
         assertThat(result.resolvedValue()).isEqualTo("${PLATFORM_ONLY}/x");
         assertThat(result.resolutionError()).isNotNull();
