@@ -68,6 +68,11 @@ opencode-manager/bin/
 
 # 测试工作区（开发测试用，不提交）
 test-workspaces/
+
+# ===== 运行时数据目录（不提交） =====
+.testagent/
+backend/$TESTAGENT/
+backend/${SYS_DATA_ROOT_DIR}/agent-opencode/workspace/
 /backend/.idea/.gitignore
 /backend/.idea/compiler.xml
 /backend/.idea/encodings.xml
