@@ -728,12 +728,13 @@ function Start-BackgroundCommand {
     # 子 PowerShell 只负责驻留并转发输出，真实服务仍按 command line 被精确发现和清理。
     # 使用单引号 here-string (@'...'@) 避免 $envScript 中的 $env:xxx 被父进程展开。
     # 使用 Start-Process 直接启动进程，-ArgumentList 使用数组避免参数解析问题。
-    $argArray = $Arguments -replace "'", "''"
+    # 将参数数组转换为 PowerShell 数组字面量格式。
+    $argLiterals = ($Arguments | ForEach-Object { "'" + $_.Replace("'", "''") + "'" }) -join ", "
     $script = @'
 $ErrorActionPreference = 'Continue'
 ENV_SCRIPT_PLACEHOLDER
 Set-Location -LiteralPath 'WORKING_DIR_PLACEHOLDER'
-$argList = @('ARGUMENTS_ARRAY_PLACEHOLDER')
+$argList = @(ARGUMENTS_ARRAY_PLACEHOLDER)
 $p = Start-Process -FilePath 'COMMAND_PLACEHOLDER' -ArgumentList $argList -RedirectStandardOutput 'LOG_PATH_PLACEHOLDER' -RedirectStandardError 'ERROR_LOG_PATH_PLACEHOLDER' -WindowStyle Hidden -PassThru
 Start-Sleep -Seconds 1
 if ($p -and -not $p.HasExited) {
@@ -743,7 +744,7 @@ if ($p -and -not $p.HasExited) {
     $script = $script.Replace("ENV_SCRIPT_PLACEHOLDER", $envScript)
     $script = $script.Replace("WORKING_DIR_PLACEHOLDER", (ConvertTo-PowerShellLiteral $WorkingDirectory))
     $script = $script.Replace("COMMAND_PLACEHOLDER", (ConvertTo-PowerShellLiteral $Command))
-    $script = $script.Replace("ARGUMENTS_ARRAY_PLACEHOLDER", $argArray)
+    $script = $script.Replace("ARGUMENTS_ARRAY_PLACEHOLDER", $argLiterals)
     $script = $script.Replace("LOG_PATH_PLACEHOLDER", (ConvertTo-PowerShellLiteral $LogPath))
     $script = $script.Replace("ERROR_LOG_PATH_PLACEHOLDER", (ConvertTo-PowerShellLiteral $errorLogPath))
     $encoded = [Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($script))
