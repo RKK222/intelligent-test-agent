@@ -45,6 +45,8 @@ declare module 'vue' {
     PublicDirectoryNode: typeof import('./src/components/PublicDirectoryNode.vue')['default']
     PublicDirectoryPanel: typeof import('./src/components/PublicDirectoryPanel.vue')['default']
     ReadonlyTranscript: typeof import('./src/components/ReadonlyTranscript.vue')['default']
+    RouterLink: typeof import('vue-router')['RouterLink']
+    RouterView: typeof import('vue-router')['RouterView']
     RuntimeManagementPanel: typeof import('./src/components/settings/RuntimeManagementPanel.vue')['default']
     RuntimeManagementWrapper: typeof import('./src/components/RuntimeManagementWrapper.vue')['default']
     RuntimeMetricChart: typeof import('./src/components/settings/RuntimeMetricChart.vue')['default']
