@@ -18,6 +18,10 @@ param(
 
     [switch]$NoFollow,
 
+    # 保留手动启动的 opencode serve 进程不被脚本杀掉。
+    # 适用于你同时运行 manager 和独立的 opencode serve 场景。
+    [switch]$KeepOpencode,
+
     [Alias("h")]
     [switch]$Help
 )
@@ -85,6 +89,8 @@ Options:
                         logs in the current window until Ctrl+C is pressed.
                         Default: enabled; use -NoFollow to disable.
   -NoFollow             Disable log tailing; script exits after all services start.
+  -KeepOpencode         Do NOT kill manually started opencode serve processes.
+                        Use this when you run both manager and standalone opencode.
   -Help                 Show this help.
 
 Environment overrides:
@@ -565,7 +571,11 @@ function Stop-OpencodeManagerService {
         Get-OpencodeManagerStateProcessIds
         Get-OpencodeManagerPortRangeProcessIds
     )
-    Stop-ProcessIds "opencode serve" @(Get-OpencodeProcessIds)
+    if (-not $KeepOpencode) {
+        Stop-ProcessIds "opencode serve" @(Get-OpencodeProcessIds)
+    } else {
+        Write-Host "Skipping opencode serve cleanup (KeepOpencode mode)."
+    }
     Cleanup-OpencodeManagerState
 }
 
@@ -582,9 +592,15 @@ function Stop-AllDevServices {
     # /T 同时终止子进程，避免孤儿进程。
     $extraKills = @(
         @{ Exe = "java.exe";       Desc = "Java (backend)" },
-        @{ Exe = "node.exe";       Desc = "Node (frontend)" },
-        @{ Exe = "opencode.exe";   Desc = "opencode" },
-        @{ Exe = "opencode";       Desc = "opencode (no ext)" },
+        @{ Exe = "node.exe";       Desc = "Node (frontend)" }
+    )
+    if (-not $KeepOpencode) {
+        $extraKills += @(
+            @{ Exe = "opencode.exe";   Desc = "opencode" },
+            @{ Exe = "opencode";       Desc = "opencode (no ext)" }
+        )
+    }
+    $extraKills += @(
         @{ Exe = "opencode-manager.exe"; Desc = "opencode-manager" },
         @{ Exe = "opencode-manager";     Desc = "opencode-manager (no ext)" }
     )
