@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-30 - 修复测试库 Flyway schema history checksum
+
+- Why: 后端启动报 `FlywayValidateException`，目标测试库 `flyway_schema_history` 中 V5、V8、V10、V13、V17、V20260627000000、V20260628223000、V20260629230000 的已应用 checksum 与当前工作区 migration 文件不一致；其中 V10/V13/V17 当前为 0 字节，本地解析 checksum 为 0。
+- What: 按用户要求只修复数据库数据，不回退或改写当前工作区 migration 文件；将 `.env.test` 指向的 `testagent` 库中上述 8 条成功 migration 的 checksum 更新为当前本地解析值。
+- How: 先查询目标库确认旧 checksum，再在单事务中更新 `flyway_schema_history`，随后用项目运行时依赖直接调用 Flyway `validate()` 和 `migrate()`，避免 Flyway Maven 插件缺少 PostgreSQL database plugin 的误报。
+- Result: Flyway `validate()` 通过，`migrate()` 返回 `migrationsExecuted=0`；本次不改业务表、不改 API/事件/数据库结构、不修改 `.env.local` 或 `.env.test`。
+
 ### 2026-06-30 - 修复跨后端登录时用户 opencode 状态误判未分配
 
 - Why: 用户已有 `user_opencode_process_bindings` ACTIVE 记录在 A 服务器，但请求落到 B 服务器且转发到 A 失败时，前端拿不到 `processStatus`，会把“已分配但健康不可确认”误显示为“待分配专属进程”。
