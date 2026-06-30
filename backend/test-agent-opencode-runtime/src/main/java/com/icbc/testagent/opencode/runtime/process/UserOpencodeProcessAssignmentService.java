@@ -2,7 +2,6 @@ package com.icbc.testagent.opencode.runtime.process;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
-import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
@@ -77,6 +76,7 @@ public class UserOpencodeProcessAssignmentService {
     private final OpencodeProcessManagerGateway gateway;
     private final BackendJavaProcessLifecycleService backendLifecycle;
     private final OpencodeProcessHeartbeatStore heartbeatStore;
+    private final OpencodeProcessStartupService startupService;
 
     /**
      * 注入进程管理 Repository、兼容节点 Repository 和管理进程 gateway。
@@ -98,7 +98,7 @@ public class UserOpencodeProcessAssignmentService {
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessHeartbeatStore heartbeatStore) {
-        this(repository, EMPTY_PARAMETER_VALUES, executionNodeRepository, gateway, backendLifecycle, heartbeatStore);
+        this(repository, EMPTY_PARAMETER_VALUES, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, null);
     }
 
     /**
@@ -123,13 +123,30 @@ public class UserOpencodeProcessAssignmentService {
             ExecutionNodeRepository executionNodeRepository,
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle,
-            OpencodeProcessHeartbeatStore heartbeatStore) {
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            OpencodeProcessStartupService startupService) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.commonParameterValues = Objects.requireNonNull(commonParameterValues, "commonParameterValues must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.backendLifecycle = Objects.requireNonNull(backendLifecycle, "backendLifecycle must not be null");
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
+        this.startupService = startupService == null
+                ? new OpencodeProcessStartupService(repository, executionNodeRepository, gateway, heartbeatStore)
+                : startupService;
+    }
+
+    /**
+     * 兼容旧测试构造器，生产路径使用注入的公共启动服务。
+     */
+    public UserOpencodeProcessAssignmentService(
+            OpencodeProcessManagementRepository repository,
+            CommonParameterValues commonParameterValues,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            BackendJavaProcessLifecycleService backendLifecycle,
+            OpencodeProcessHeartbeatStore heartbeatStore) {
+        this(repository, commonParameterValues, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, null);
     }
 
     /**
@@ -265,44 +282,18 @@ public class UserOpencodeProcessAssignmentService {
                         backendLifecycle.backendProcessId(),
                         CONTAINER_CANDIDATE_LIMIT));
         OpencodeProcessStartCommand command = startCommand(userId, chooseContainer(candidates), traceId);
-        OpencodeProcessStartResult started = gateway.startProcess(command);
-        if (started == null) {
-            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 管理进程启动未返回结果");
-        }
-        OpencodeProcessId processId = existingBinding
-                .map(UserOpencodeProcessBinding::processId)
-                .orElseGet(() -> new OpencodeProcessId(RuntimeIdGenerator.opencodeProcessId()));
-        Instant createdAt = existingProcess.map(OpencodeServerProcess::createdAt).orElse(now);
-        OpencodeServerProcess process = new OpencodeServerProcess(
-                processId,
+        OpencodeServerProcess process = startupService.startAndVerify(new OpencodeProcessStartupRequest(
                 userId,
+                existingBinding.map(UserOpencodeProcessBinding::processId).orElse(null),
+                existingProcess.map(OpencodeServerProcess::createdAt).orElse(null),
+                existingBinding.map(UserOpencodeProcessBinding::createdAt).orElse(null),
                 command.linuxServerId(),
                 command.containerId(),
                 command.port(),
-                started.pid(),
                 command.baseUrl(),
-                OpencodeServerProcessStatus.RUNNING,
                 command.sessionPath(),
                 command.configPath(),
-                now,
-                now,
-                started.message() == null ? "started" : started.message(),
-                createdAt,
-                now,
-                traceId);
-        repository.saveOpencodeServerProcess(process);
-        heartbeatStore.recordOpencodeHeartbeat(process.processId(), now);
-        repository.saveUserBinding(new UserOpencodeProcessBinding(
-                userId,
-                OPENCODE_AGENT_ID,
-                process.processId(),
-                process.linuxServerId(),
-                process.port(),
-                UserOpencodeProcessBindingStatus.ACTIVE,
-                existingBinding.map(UserOpencodeProcessBinding::createdAt).orElse(now),
-                now,
                 traceId));
-        executionNodeRepository.save(projectExecutionNode(process, now, traceId));
         return ready(process, "opencode 进程可用", now);
     }
 

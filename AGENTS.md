@@ -25,19 +25,20 @@
 8. 前端不得直连 opencode server，必须通过 `backend-api` 调用 `test-agent-app`，实时事件必须通过 RunEvent SSE。
 9. 工作区文件和 Agent 配置文件的目录列表、读取、写入必须走平台文件 WebSocket route/ticket/RPC 模式；跨服务器文件操作不得新增后端到后端 HTTP 文件代理。
 10. 涉及 opencode-manager 路由、Java 到 manager 控制、用户 opencode 进程服务器归属、运行管理 containerId 路由、Agent 配置或文件 WebSocket 目标后端选择的新增/修改，必须复用公共路由程序：`BackendJavaRouteResolver` 负责目标 Java 选择，`BackendHttpForwarder` 负责 Java->Java HTTP 转发，目标 Java 再通过 `OpencodeProcessManagerGateway` 控制本服务器 manager；禁止自行扫描 Redis 快照、手写转发器、防循环 header 变体、本机降级或本地绕过。
-11. generated SDK 不能手改，只能通过 `tools/generate-opencode-java-sdk.sh` 重新生成后同步。
-12. 数据库结构变更必须有 Flyway migration，不能只改实体或 Repository，并同步 `docs/deployment/database.md`。
-13. Flyway migration 只能承载表结构变更、兼容性数据迁移和生产必需的基础字典/系统参数，禁止写入测试、演示或个人开发数据；此类数据必须放在测试 fixture、`test-agent-test-support` 或显式本地开发脚本中，不能随生产 migration 发布。
-14. API、DTO、事件类型、数据库字段变更必须考虑向后兼容。
-15. 鉴权、限流、日志脱敏和密钥管理必须按 `docs/standards/security.md` 执行。
-16. 错误必须统一格式返回，不能把任意异常直接抛给前端。
-17. 关键流程必须携带或生成 traceId，禁止用 `System.out.println` 作为正式日志。
-18. 完成前必须按 `docs/guides/self-checklist.md` 自检。
-19. 后端新增文件前必须先按 `docs/architecture/module-map.md` 和 `docs/architecture/dependency-rules.md` 分析是否已有合适工程；没有合适工程时，按业务边界新建 Maven module 后再落文件。模块 README 即包级说明。
-20. **未经用户明确要求，不得修改 `.env.local` 等环境配置文件**。此类文件包含敏感的数据库连接、API 密钥等，仅在用户明确指示时方可修改。
-21. 每次会话收尾时，如果本次出现了值得保留给后续开发者/智能体的新增信息（例如新的坑、验证结论、外部状态变化或明确决策），再更新 `.agents/session-log.md`，用 `Why / What / How / Result` 说明本次变更；同一会话内的零散小改动合并为一条，不要按文件或命令频繁记账。该文件属于仓库内容，应随本次 git 提交一起保留，必要时可与其他改动一并推送远程。
-22. 每次提交代码前，必须先回顾 `.agents/session-log.md` 中所有人记录的近期变更、坑点和未完成事项，确认本次暂存内容不会覆盖、丢弃或误合并其他开发者/智能体已经提交的成果；如发现冲突或残留合并标记，必须先处理或明确说明风险。
-23. 后续新增或修改关系型数据库 SQL 必须通过 MyBatis XML mapper 实现；存量 `Jdbc*Repository` 仅作为迁移窗口保留，不得继续新增 JDBC SQL。Redis、Flyway migration 和 Druid 连接池不受此条限制。
+11. 涉及 opencode server 启动、重启后拉起、端口复用或启动成功状态回写的新增/修改，必须调用 `OpencodeProcessStartupService` 这一公共启动程序；禁止在业务入口直接调用 `OpencodeProcessManagerGateway.startProcess()` 后自行写入进程、binding、heartbeat 或 `ExecutionNode`，启动成功必须以公共程序完成 manager state/PID 与 opencode HTTP health 检查为准。
+12. generated SDK 不能手改，只能通过 `tools/generate-opencode-java-sdk.sh` 重新生成后同步。
+13. 数据库结构变更必须有 Flyway migration，不能只改实体或 Repository，并同步 `docs/deployment/database.md`。
+14. Flyway migration 只能承载表结构变更、兼容性数据迁移和生产必需的基础字典/系统参数，禁止写入测试、演示或个人开发数据；此类数据必须放在测试 fixture、`test-agent-test-support` 或显式本地开发脚本中，不能随生产 migration 发布。
+15. API、DTO、事件类型、数据库字段变更必须考虑向后兼容。
+16. 鉴权、限流、日志脱敏和密钥管理必须按 `docs/standards/security.md` 执行。
+17. 错误必须统一格式返回，不能把任意异常直接抛给前端。
+18. 关键流程必须携带或生成 traceId，禁止用 `System.out.println` 作为正式日志。
+19. 完成前必须按 `docs/guides/self-checklist.md` 自检。
+20. 后端新增文件前必须先按 `docs/architecture/module-map.md` 和 `docs/architecture/dependency-rules.md` 分析是否已有合适工程；没有合适工程时，按业务边界新建 Maven module 后再落文件。模块 README 即包级说明。
+21. **未经用户明确要求，不得修改 `.env.local` 等环境配置文件**。此类文件包含敏感的数据库连接、API 密钥等，仅在用户明确指示时方可修改。
+22. 每次会话收尾时，如果本次出现了值得保留给后续开发者/智能体的新增信息（例如新的坑、验证结论、外部状态变化或明确决策），再更新 `.agents/session-log.md`，用 `Why / What / How / Result` 说明本次变更；同一会话内的零散小改动合并为一条，不要按文件或命令频繁记账。该文件属于仓库内容，应随本次 git 提交一起保留，必要时可与其他改动一并推送远程。
+23. 每次提交代码前，必须先回顾 `.agents/session-log.md` 中所有人记录的近期变更、坑点和未完成事项，确认本次暂存内容不会覆盖、丢弃或误合并其他开发者/智能体已经提交的成果；如发现冲突或残留合并标记，必须先处理或明确说明风险。
+24. 后续新增或修改关系型数据库 SQL 必须通过 MyBatis XML mapper 实现；存量 `Jdbc*Repository` 仅作为迁移窗口保留，不得继续新增 JDBC SQL。Redis、Flyway migration 和 Druid 连接池不受此条限制。
 
 ## 完成标准
 

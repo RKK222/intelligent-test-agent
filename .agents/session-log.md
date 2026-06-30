@@ -2255,3 +2255,10 @@ bash /tmp/test-api-after-restart.sh
 - What: 在 `AGENTS.md`、后端总 README、后端规范、依赖边界、API 模块 README 和 opencode-runtime 模块 README 中明确：涉及 opencode-manager 路由、Java 到 manager 控制、用户进程服务器归属、运行管理 `containerId` 路由、Agent 配置或文件 WebSocket 目标后端选择时，必须复用 `BackendJavaRouteResolver`、`BackendHttpForwarder` 和目标 Java 的 `OpencodeProcessManagerGateway`。
 - How: 用禁止项列明不得自行扫描 Redis 快照、手写 Java->Java HTTP 转发器、定义防循环 header 变体、本机降级、跨服务器直接控制 manager 或恢复本地绕过。
 - Result: 后续新增相关入口时，规范入口、后端编码规范、架构依赖边界和模块 README 都指向同一套公共路由机制。
+
+### 2026-06-30 - 公共 opencode server 启动健康确认
+
+- Why: 用户初始化旧链路在 manager 返回 `STARTED` 后直接写 `RUNNING`，没有确认 opencode HTTP health；运行管理重启已停止用户进程或 manager state 已清理端口时会遇到 `port ... is not managed`，超级管理员无法按原端口拉起。
+- What: 新增 `OpencodeProcessStartupService` / `OpencodeProcessStartupRequest`，统一封装 start、候选进程快照、manager health、opencode HTTP health、最终状态回写、Redis heartbeat、ACTIVE binding 和兼容 `ExecutionNode` 投影；用户初始化和运行管理 restart 复用该服务。同步规范要求后续所有 opencode server 启动、重启后拉起、端口复用或启动状态回写都必须调用公共启动服务。
+- How: 公共启动服务先保存 `STARTING` 候选进程供 socket health 按 `processId` 查本地 state，再调用 manager health；healthy 才写 `RUNNING`，not-running 映射 `STOPPED`，HTTP 不健康映射 `UNHEALTHY`，异常映射 `FAILED` 并按统一平台错误抛出。运行管理对已有平台进程记录的 `STOPPED` 或 `not managed` 端口复用原 `containerId + port` 调用 start，manager 已管理端口的 restart 成功回包也会再走同一 health 确认。
+- Result: 对话框初始化和运行管理重启成功都必须同时满足 manager state/PID 与 opencode HTTP health healthy；无平台用户进程记录的无主 manager state 仍保持原 manager restart 语义。目标测试和 opencode-runtime 全模块测试通过；API 全模块测试仍被既有 `ConfigurationManagementControllerTest.createWorkspaceUsesCurrentUserReadyOpencodeServer` 的异步工作区创建断言阻断。
