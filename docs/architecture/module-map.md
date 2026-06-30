@@ -64,7 +64,7 @@ Browser
 | `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、服务器工作空间选择、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、设置模态（含版本库英文名、工作空间创建进度和用户管理（测试）页签）、超级管理员系统管理容器（定时任务管理 + 运行管理最新指标与 ECharts 趋势）和全局错误提示。 |
 | `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、受控目录选择、平台文件 WebSocket route/ticket/RPC（workspace 与 Agent 配置文件）、用户 opencode 进程状态/初始化、运行管理 overview 与指标历史、定时任务管理、配置管理、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询和默认 `opencode` 的 agent URL 前缀。 |
 | `packages/event-stream-client` | RunEvent SSE client，负责按默认 `opencode` agent URL 连接、自动重连、事件解析、去重和取消订阅。 |
-| `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板和工作台级 Pinia 状态。 |
+| `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板、工作台级 Pinia 状态，以及 Git 变更面板应用工作区/应用级 Agent mock 数据。 |
 | `packages/file-explorer` | 文件树、选择 Workspace 目录事件、已加载文件名过滤、变更列表和打开文件入口。 |
 | `packages/editor` | Monaco 编辑器（原生 `monaco-editor`）、语言识别、内容编辑和只读展示。 |
 | `packages/diff-viewer` | Monaco Diff、变更文件列表、Run/Session/VCS 来源切换、split/unified 视图、Run 级接受/拒绝按钮和当前文件反馈。 |

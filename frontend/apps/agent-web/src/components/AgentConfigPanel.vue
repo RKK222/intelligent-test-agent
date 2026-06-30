@@ -602,25 +602,20 @@ function workspaceSkillTemplate(displayName: string, packageName: string) {
   return `---
 name: ${packageName}
 description: ${displayName}应用级技能包
-version: 1.0.0
 ---
 
 # ${displayName}
 
-## 适用场景
+## Instructions
 
-- 当前应用或当前工作空间的专属任务。
+1. Read the current application workspace files and any resources under this skill package.
+2. Apply only rules that are relevant to this application or workspace.
+3. Return verifiable output and list unresolved assumptions.
 
-## 使用流程
+## Resources
 
-1. 读取用户指定的应用材料、规则或模板。
-2. 按当前应用约定处理任务。
-3. 输出可复核的结果和未确认项。
-
-## 资源目录
-
-- \`rules/\`：放置应用专属规则。
-- \`templates/\`：放置应用专属模板。
+- \`rules/\`: application-specific rules.
+- \`templates/\`: reusable output templates.
 `;
 }
 

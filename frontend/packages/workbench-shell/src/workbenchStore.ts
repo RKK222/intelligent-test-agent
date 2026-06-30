@@ -13,222 +13,49 @@ export type EditorTab = {
   livePreview?: boolean;
 };
 
-// 预定义测试数据供 UI 演示和 diff 效果展示
+// 预定义测试数据供 UI 演示和 diff 效果展示，路径模拟真实应用工作区，而不是平台自身源码。
 export const mockVcsDiffFiles: RunDiffFile[] = [
   {
-    path: "frontend/apps/agent-web/src/components/FigmaFileExplorer.vue",
+    path: "src/App.vue",
     status: "modified",
     additions: 15,
     deletions: 8,
-    patch: `--- a/frontend/apps/agent-web/src/components/FigmaFileExplorer.vue
-+++ b/frontend/apps/agent-web/src/components/FigmaFileExplorer.vue
+    patch: `--- a/src/App.vue
++++ b/src/App.vue
  <script setup lang="ts">
- import { ref, computed, onMounted } from "vue";
- import { Folder, File, ChevronDown, ChevronRight, GitBranch } from "lucide-vue-next";
- import { useWorkbenchStore } from "@test-agent/workbench-shell";
- 
- const props = defineProps<{
-   workspaceId: string;
-   apiBaseUrl: string;
- }>();
- 
- const workbench = useWorkbenchStore();
- const workspaceExpanded = ref(true);
- const agentsExpanded = ref(true);
- 
--const sidebarWidth = ref(260);
--const minWidth = ref(150);
--const activeTab = ref("files");
-+const sidebarMinWidth = 200;
-+const sidebarMaxWidth = 600;
-+const activeTab = ref("changes");
-+const isDragging = ref(false);
- 
- function handleTabChange(tab: string) {
--  activeTab.value = tab;
-+  if (tab === "changes") {
-+    workbench.setSelectedDiffPath("frontend/apps/agent-web/src/components/FigmaFileExplorer.vue");
-+  }
-+  activeTab.value = tab;
- }
- 
- onMounted(() => {
-   console.log("FigmaFileExplorer mounted");
- });
+-import { ref } from "vue";
++import { computed, ref } from "vue";
+ import { RouterView } from "vue-router";
+
+ const appName = ref("Payment Test Workspace");
++const title = computed(() => appName.value.toUpperCase());
  </script>
- 
+
  <template>
-   <div class="figma-fe-root">
-     <div class="ta-icon-tabbar flex items-center border-b border-slate-800 bg-slate-950 px-2 py-1">
-       <button
-         type="button"
--        :class="['ta-icon-tab', activeTab === 'files' && 'is-active']"
--        @click="handleTabChange('files')"
-+        :class="['ta-icon-tab', activeTab === 'explorer' && 'is-active']"
-+        @click="handleTabChange('explorer')"
-       >
-         <Folder class="h-4 w-4" />
-       </button>
-       <button
-         type="button"
-         :class="['ta-icon-tab', activeTab === 'changes' && 'is-active']"
-         @click="handleTabChange('changes')"
-       >
-         <GitBranch class="h-4 w-4" />
-       </button>
-     </div>
-     
-     <div class="figma-fe-body flex-1 overflow-auto">
-       <div v-if="activeTab === 'changes'" class="h-full">
-         <div class="changes-title px-3 py-2 text-[11px] uppercase font-semibold text-slate-500">Source Control</div>
-         <div class="px-3 py-1 text-[12px] text-slate-300">Click a file below to edit and save:</div>
-       </div>
-       <div v-else class="workspace-files">
-         <div class="flex items-center px-3 py-1.5 hover:bg-slate-800 cursor-pointer">
-           <ChevronDown class="h-4 w-4 text-slate-400 mr-1" />
-           <span class="text-[12px] font-semibold text-slate-200">应用工作空间</span>
-         </div>
-       </div>
-     </div>
-   </div>
- </template>
- 
- <style scoped>
- .figma-fe-root {
-   display: flex;
-   flex-direction: column;
-   height: 100%;
-   background: #020617;
-   border-right: 1px solid #1e293b;
- }
- .ta-icon-tab {
-   height: 32px;
-   padding: 0 12px;
-   color: #64748b;
-   border-bottom: 2px solid transparent;
- }
- .ta-icon-tab.is-active {
-   color: #3b82f6;
-   border-bottom-color: #3b82f6;
- }
- </style>`
+   <main class="app-shell">
+-    <h1>{{ appName }}</h1>
++    <h1>{{ title }}</h1>
+     <RouterView />
+   </main>
+ </template>`
   },
   {
-    path: "frontend/packages/workbench-shell/src/workbenchStore.ts",
+    path: "tests/payment-flow.spec.ts",
     status: "modified",
     additions: 12,
     deletions: 4,
-    patch: `--- a/frontend/packages/workbench-shell/src/workbenchStore.ts
-+++ b/frontend/packages/workbench-shell/src/workbenchStore.ts
- import { defineStore } from "pinia";
- import { ref, computed } from "vue";
+    patch: `--- a/tests/payment-flow.spec.ts
++++ b/tests/payment-flow.spec.ts
+ import { test, expect } from "@playwright/test";
  
- export interface EditorTab {
-   path: string;
-   content: string;
-   savedContent: string;
-   readonly?: boolean;
- }
- 
- export const useWorkbenchStore = defineStore("workbench", () => {
-   const tabs = ref<EditorTab[]>([]);
-   const activePath = ref<string | undefined>(undefined);
-   const selectedDiffPath = ref<string | undefined>(undefined);
--  const useMockTestData = ref(false);
--  
--  function toggleMock() {
--    useMockTestData.value = !useMockTestData.value;
--  }
-+  const useMockTestData = ref(true);
-+  const gitStatusMessage = ref("");
-+  const changesCount = computed(() => mockVcsDiffFiles.length);
-+
-+  function toggleMockTestData() {
-+    useMockTestData.value = !useMockTestData.value;
-+  }
- 
-   function openTab(tab: EditorTab) {
-     const exists = tabs.value.some((t) => t.path === tab.path);
-     if (!exists) {
-       tabs.value.push(tab);
-     }
-     activePath.value = tab.path;
-   }
- 
-   function closeTab(path: string) {
-     tabs.value = tabs.value.filter((t) => t.path !== path);
-     if (activePath.value === path) {
-       activePath.value = tabs.value[tabs.value.length - 1]?.path;
-     }
-   }
- 
-   return {
-     tabs,
-     activePath,
-     selectedDiffPath,
-     useMockTestData,
-+    gitStatusMessage,
-+    changesCount,
-+    toggleMockTestData,
-     openTab,
-     closeTab
-   };
+ test("creates a payment order", async ({ page }) => {
+-  await page.goto("/checkout");
+-  await expect(page.getByText("Success")).toBeVisible();
++  await page.goto("/payments/new");
++  await page.getByLabel("Amount").fill("100");
++  await page.getByRole("button", { name: "Submit" }).click();
++  await expect(page.getByText("Payment submitted")).toBeVisible();
  });`
-  },
-  {
-    path: "frontend/apps/agent-web/src/components/GitChangesPanel.vue",
-    status: "untracked",
-    additions: 45,
-    deletions: 0,
-    patch: `--- /dev/null
-+++ b/frontend/apps/agent-web/src/components/GitChangesPanel.vue
-+<script setup lang="ts">
-+import { ref, computed } from "vue";
-+import { ChevronDown, Play, Plus, Check } from "lucide-vue-next";
-+import { useWorkbenchStore } from "@test-agent/workbench-shell";
-+
-+const workbench = useWorkbenchStore();
-+const commitMessage = ref("");
-+const unstagedExpanded = ref(true);
-+const stagedExpanded = ref(true);
-+
-+function handleCommit() {
-+  if (!commitMessage.value.trim()) return;
-+  console.log("Committing changes:", commitMessage.value);
-+  commitMessage.value = "";
-+}
-+</script>
-+
-+<template>
-+  <div class="git-changes-panel flex flex-col h-full bg-[#020617] text-slate-300">
-+    <div class="panel-section border-b border-slate-800 p-3">
-+      <div class="section-title flex items-center justify-between mb-2">
-+        <span class="text-[11px] font-bold uppercase tracking-wider text-slate-500">Unstaged Changes</span>
-+      </div>
-+      <div class="file-list space-y-1">
-+        <div class="file-item flex items-center justify-between p-1.5 rounded hover:bg-slate-900 cursor-pointer">
-+          <span class="font-mono text-[12px]">FigmaFileExplorer.vue</span>
-+          <span class="text-[11px] text-amber-500">M</span>
-+        </div>
-+      </div>
-+    </div>
-+    
-+    <div class="commit-form p-3 border-t border-slate-800 mt-auto bg-slate-950">
-+      <textarea 
-+        v-model="commitMessage"
-+        class="w-full bg-slate-900 border border-slate-800 rounded p-2 text-[12px] text-white focus:outline-none focus:border-blue-500"
-+        placeholder="Commit message (Chinese)..."
-+        rows="3"
-+      ></textarea>
-+      <button 
-+        class="btn-commit w-full bg-blue-600 hover:bg-blue-700 text-white rounded py-2 mt-2 text-[12px] font-semibold"
-+        @click="handleCommit"
-+      >
-+        Commit to main
-+      </button>
-+    </div>
-+  </div>
-+</template>`
   }
 ];
 
@@ -239,57 +66,52 @@ export interface MockAgentConfigDiffFile {
   patch: string;
 }
 
-export const mockPublicAgentDiffs: MockAgentConfigDiffFile[] = [
-  {
-    path: "opencode/agents/public_agent_test.json",
-    status: "modified",
-    staged: false,
-    patch: `--- a/opencode/agents/public_agent_test.json
-+++ b/opencode/agents/public_agent_test.json
- {
-   "id": "public_agent",
--  "name": "Old Public Agent Name",
--  "description": "This is the original description of the public agent config.",
--  "version": "1.0.0",
-+  "name": "Premium Public Agent (MIMO)",
-+  "description": "This is the updated premium description of the public agent config.",
-+  "version": "2.0.0",
-   "parameters": {
-     "temperature": 0.7,
-     "maxTokens": 2048,
--    "stream": false
-+    "stream": true
-   },
-   "system_prompt": "You are a professional coding assistant.",
-   "enabled": true
- }`
-  }
-];
+export const mockPublicAgentDiffs: MockAgentConfigDiffFile[] = [];
 
 export const mockWorkspaceAgentDiffs: MockAgentConfigDiffFile[] = [
   {
-    path: ".opencode/agents/workspace_agent_test.json",
+    path: "agents/payment-test.md",
     status: "modified",
     staged: false,
-    patch: `--- a/.opencode/agents/workspace_agent_test.json
-+++ b/.opencode/agents/workspace_agent_test.json
- {
-   "id": "workspace_agent",
--  "name": "Old Workspace Agent Name",
--  "description": "This is the original description of the workspace agent config.",
--  "version": "1.0.0",
-+  "name": "Premium Workspace Agent (MIMO)",
-+  "description": "This is the updated premium description of the workspace agent config.",
-+  "version": "2.0.0",
-   "parameters": {
-     "temperature": 0.5,
-     "maxTokens": 4096,
--    "stream": false
-+    "stream": true
-   },
-   "system_prompt": "You are a professional test agent working on workspaces.",
-   "enabled": true
- }`
+    patch: `--- a/agents/payment-test.md
++++ b/agents/payment-test.md
+ ---
+ description: Handles payment-domain test design and execution tasks.
+-mode: primary
++mode: all
+ temperature: 0.2
+ tools:
+   write: true
+   edit: true
+   bash: true
+ ---
+
+-You are responsible for payment test assistance.
++You are responsible for payment test assistance. Read relevant skills before drafting or editing test assets.`
+  },
+  {
+    path: "skills/payment-case-design/SKILL.md",
+    status: "untracked",
+    staged: false,
+    patch: `--- /dev/null
++++ b/skills/payment-case-design/SKILL.md
++---
++name: payment-case-design
++description: Generate and review payment-domain test cases for this application.
++---
++
++# Payment Case Design
++
++## Instructions
++
++1. Read the application-specific requirements and payment rules.
++2. Identify payment scenarios, boundary conditions, and failure paths.
++3. Generate test cases with clear preconditions, steps, data, and expected results.
++
++## Resources
++
++- rules/: application-specific testing rules.
++- templates/: reusable output templates.`
   }
 ];
 

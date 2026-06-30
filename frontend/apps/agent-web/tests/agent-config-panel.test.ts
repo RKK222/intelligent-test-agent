@@ -144,6 +144,12 @@ describe("AgentConfigPanel", () => {
       ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/rules/README.md"],
       ["wrk_1234567890abcdef", "skills/zhi-fu-ce-shi-ji-neng/templates/README.md"]
     ]);
+    const skillContent = String(apiClientMock.writeWorkspaceAgentFile.mock.calls[0]?.[2]);
+    expect(skillContent).toContain("name: zhi-fu-ce-shi-ji-neng");
+    expect(skillContent).toContain("description: 支付测试技能应用级技能包");
+    expect(skillContent).not.toContain("version:");
+    expect(skillContent).toContain("## Instructions");
+    expect(skillContent).toContain("## Resources");
     await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_1234567890abcdef", "", undefined));
   });
 

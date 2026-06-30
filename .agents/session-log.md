@@ -53,7 +53,6 @@
   - [process.go](file:///d:/workspace/intelligent-test-agent/opencode-manager/internal/process/process.go) 中保留 `OSStarter` / `OSSignaler` 类型定义和 `flattenEnv` 等通用函数，移除 `syscall` 导入和 `syscall.ESRCH` 引用。
 - How: 纯 Go 改动，不涉及 API/事件/数据库/安全/兼容性；保持 `internal/control/cgroup_parse_linux.go` 的既有平台拆分模式。
 - Result: Windows 上 `go build -o bin/opencode-manager.exe ./cmd/opencode-manager` 编译成功，生成 10MB 的可执行文件。
-=======
 ### 2026-06-30 - 修复前端 readFile 接口返回值类型约束缺失 path 属性的编译错误
 
 - Why: 前端在构建 `@test-agent/agent-web` 时编译失败，报 TS1360 错误，提示 `{ content: string; encoding: string; readonly: false; }` 类型不满足 `FileContent` 的预期，缺失必填属性 `path`。
@@ -70,7 +69,14 @@
   - 在 `RuntimeSecurityConfigTest` 中新增 `corsWebFilterAppliesCorsHeaders` 测试，直接调用 `CorsWebFilter` 验证 preflight 场景下 CORS 响应头的正确生成。
 - How: 仅修改 `RuntimeSecurityConfig.java`、`RuntimeSecurityConfigTest.java` 和 `ConfigurationManagementControllerTest.java`，不新增数据库 Migration，不修改 `.env.local` 环境变量文件。
 - Result: 运行 `mvn -pl test-agent-api -am test`，包括新编写的 CORS 单测在内的 147 项后端 API 测试用例全量通过。
->>>>>>> d41dff984c0aefa9b8f92ed58e82723e8c8a2db6
+=======
+### 2026-06-30 - 修复 Git 变更面板测试数据与应用级 Agent/Skill 展示
+
+- Why: 左侧 Git 变更面板在 opencode 进程不可用或真实刷新进行中点击“加载测试数据”时可能仍为空；mock 数据也把平台自身源码和公共级 Agent 配置混入了截图 1 的 `agents` 分组，不符合“应用工作区变更 + 应用级 agents/skills 变更”的展示目标。
+- What: 将 Git mock 数据改为应用项目 `src/`、`tests/` 文件，以及应用级 opencode `agents/*.md` 和 `skills/<skill>/SKILL.md`；`GitChangesPanel` 只在 `agents` 分组展示应用级 Agent/Skill diff，并用刷新 token 防止旧真实请求覆盖测试数据；应用级技能包模板改为只含 opencode `SKILL.md` 支持的 `name` / `description` frontmatter 和 `Instructions` / `Resources` 段落。
+- How: 新增 `git-changes-panel.test.ts` 覆盖“加载测试数据”后的列表内容和公共级排除，扩展 `agent-config-panel.test.ts` 覆盖技能包模板；同步 frontend、agent-web、workbench-shell README/PACKAGE 与 module-map。
+- Result: `corepack pnpm@10.25.0 --dir frontend --filter @test-agent/agent-web typecheck`、`corepack pnpm@10.25.0 --dir frontend test -- git-changes-panel.test.ts agent-config-panel.test.ts` 和 `git diff --check` 通过；按用户最新指示未重启三服务，UI 运行态由用户自行验收。
+>>>>>>> 8f8ce900 (修复变更面板测试数据展示)
 
 ### 2026-06-30 - 修复测试库 Flyway schema history checksum
 

@@ -93,6 +93,8 @@ const loading = ref(false);
 const committing = ref(false);
 const errorMessage = ref("");
 const progressMessage = ref("");
+// 切换测试数据可能发生在真实刷新未完成时，用 token 丢弃旧请求回写，避免列表被清空。
+let refreshChangesToken = 0;
 
 // Commit form
 const commitMessage = ref("");
@@ -118,9 +120,6 @@ const workspaceAgentDiffs = ref<AgentConfigDiffFile[]>([]);
 
 const agentsUnstaged = computed(() => {
   const list: (AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" })[] = [];
-  publicAgentDiffs.value.forEach((f) => {
-    if (!f.staged) list.push({ ...f, scope: "PUBLIC" });
-  });
   workspaceAgentDiffs.value.forEach((f) => {
     if (!f.staged) list.push({ ...f, scope: "WORKSPACE" });
   });
@@ -129,9 +128,6 @@ const agentsUnstaged = computed(() => {
 
 const agentsStaged = computed(() => {
   const list: (AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" })[] = [];
-  publicAgentDiffs.value.forEach((f) => {
-    if (f.staged) list.push({ ...f, scope: "PUBLIC" });
-  });
   workspaceAgentDiffs.value.forEach((f) => {
     if (f.staged) list.push({ ...f, scope: "WORKSPACE" });
   });
@@ -155,25 +151,32 @@ watch(
 function toggleMockTestData() {
   workbench.useMockTestData = !workbench.useMockTestData;
   stagedWorkspacePaths.value.clear();
+  refreshChangesToken++;
+  if (workbench.useMockTestData) {
+    loading.value = false;
+    errorMessage.value = "";
+    applyMockChanges();
+    return;
+  }
+  clearChanges();
   void refreshChanges();
 }
 
 async function refreshChanges() {
   if (loading.value) return;
+  const token = ++refreshChangesToken;
   loading.value = true;
   errorMessage.value = "";
   try {
     if (workbench.useMockTestData) {
-      workspaceDiffFiles.value = JSON.parse(JSON.stringify(mockVcsDiffFiles));
-      publicAgentDiffs.value = JSON.parse(JSON.stringify(mockPublicAgentDiffs));
-      workspaceAgentDiffs.value = JSON.parse(JSON.stringify(mockWorkspaceAgentDiffs));
-      loading.value = false;
+      applyMockChanges();
       return;
     }
 
     // 1. Fetch workspace changes (VCS)
     if (props.workspaceId) {
       const vcs = await api.getVcsDiffFiles(props.workspaceId);
+      if (token !== refreshChangesToken) return;
       workspaceDiffFiles.value = vcs.files;
     } else {
       workspaceDiffFiles.value = [];
@@ -182,8 +185,10 @@ async function refreshChanges() {
     // 2. Fetch public agent changes
     try {
       const pubDiff = await api.getPublicAgentDiff(workbench.publicWorktree?.worktreeId);
+      if (token !== refreshChangesToken) return;
       publicAgentDiffs.value = pubDiff.files;
     } catch {
+      if (token !== refreshChangesToken) return;
       publicAgentDiffs.value = [];
     }
 
@@ -191,18 +196,35 @@ async function refreshChanges() {
     if (props.workspaceId) {
       try {
         const wksDiff = await api.getWorkspaceAgentDiff(props.workspaceId, workbench.workspaceWorktree?.worktreeId);
+        if (token !== refreshChangesToken) return;
         workspaceAgentDiffs.value = wksDiff.files;
       } catch {
+        if (token !== refreshChangesToken) return;
         workspaceAgentDiffs.value = [];
       }
     } else {
       workspaceAgentDiffs.value = [];
     }
   } catch (error) {
+    if (token !== refreshChangesToken) return;
     errorMessage.value = errorMessageFor(error, "刷新变更列表失败");
   } finally {
-    loading.value = false;
+    if (token === refreshChangesToken) {
+      loading.value = false;
+    }
   }
+}
+
+function applyMockChanges() {
+  workspaceDiffFiles.value = JSON.parse(JSON.stringify(mockVcsDiffFiles));
+  publicAgentDiffs.value = JSON.parse(JSON.stringify(mockPublicAgentDiffs));
+  workspaceAgentDiffs.value = JSON.parse(JSON.stringify(mockWorkspaceAgentDiffs));
+}
+
+function clearChanges() {
+  workspaceDiffFiles.value = [];
+  publicAgentDiffs.value = [];
+  workspaceAgentDiffs.value = [];
 }
 
 // Stage workspace file (simulate)
@@ -516,7 +538,7 @@ defineExpose({
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
                 <span class="git-file-name" :title="file.path">
-                  <span class="git-scope-label">[{{ file.scope === 'PUBLIC' ? '公共' : '工作区' }}]</span>
+                  <span class="git-scope-label">[{{ file.scope === 'PUBLIC' ? '公共' : '应用级' }}]</span>
                   {{ file.path }}
                 </span>
                 
@@ -603,7 +625,7 @@ defineExpose({
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
                 <span class="git-file-name" :title="file.path">
-                  <span class="git-scope-label">[{{ file.scope === 'PUBLIC' ? '公共' : '工作区' }}]</span>
+                  <span class="git-scope-label">[{{ file.scope === 'PUBLIC' ? '公共' : '应用级' }}]</span>
                   {{ file.path }}
                 </span>
                 
