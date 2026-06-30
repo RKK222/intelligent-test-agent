@@ -567,7 +567,7 @@ function Stop-FrontendService {
 
 function Stop-OpencodeManagerService {
     Stop-ProcessIds "opencode-manager" @(Get-OpencodeManagerProcessIds)
-    if (-not $KeepOpencode) {
+    if (-not $script:KeepOpencode) {
         Stop-ProcessIds "opencode-manager managed opencode serve" @(
             Get-OpencodeManagerStateProcessIds
             Get-OpencodeManagerPortRangeProcessIds
@@ -594,7 +594,7 @@ function Stop-AllDevServices {
         @{ Exe = "java.exe";       Desc = "Java (backend)" },
         @{ Exe = "node.exe";       Desc = "Node (frontend)" }
     )
-    if (-not $KeepOpencode) {
+    if (-not $script:KeepOpencode) {
         $extraKills += @(
             @{ Exe = "opencode.exe";   Desc = "opencode" },
             @{ Exe = "opencode";       Desc = "opencode (no ext)" }
