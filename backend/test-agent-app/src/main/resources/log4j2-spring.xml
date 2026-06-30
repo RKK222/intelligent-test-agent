@@ -4,12 +4,24 @@
         <Console name="Console" target="SYSTEM_OUT">
             <PatternLayout pattern="timestamp=&quot;%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}&quot; level=%p traceId=&quot;%enc{%X{traceId}}{CRLF}&quot; module=backend logger=&quot;%c{1.}&quot; thread=&quot;%enc{%t}{CRLF}&quot; message=&quot;%enc{%m}{CRLF}&quot;%n%xEx"/>
         </Console>
+        <!-- 按周滚动文件，历史日志压缩为 .gz；当前周写入 backend.log，每周一切换并归档 -->
+        <RollingFile name="WeeklyFile"
+                     fileName="logs/backend.log"
+                     filePattern="logs/backend-%d{yyyy-MM-dd}.log.gz">
+            <PatternLayout pattern="timestamp=&quot;%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX}&quot; level=%p traceId=&quot;%enc{%X{traceId}}{CRLF}&quot; module=backend logger=&quot;%c{1.}&quot; thread=&quot;%enc{%t}{CRLF}&quot; message=&quot;%enc{%m}{CRLF}&quot;%n%xEx"/>
+            <Policies>
+                <!-- 按周滚动：interval=7 表示每 7 天滚动一次 -->
+                <TimeBasedTriggeringPolicy interval="7" modulate="true"/>
+            </Policies>
+            <DefaultRolloverStrategy max="12"/>
+        </RollingFile>
     </Appenders>
 
     <Loggers>
         <Logger name="com.icbc.testagent" level="INFO"/>
         <Root level="INFO">
             <AppenderRef ref="Console"/>
+            <AppenderRef ref="WeeklyFile"/>
         </Root>
     </Loggers>
 </Configuration>
