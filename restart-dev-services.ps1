@@ -846,7 +846,6 @@ function Start-OpencodeManager {
 
     $portStart = [string](Get-OpencodeManagerPortStart)
     $portEnd = [string](Get-OpencodeManagerPortEnd)
-    $managerId = Get-EnvValue "OPENCODE_MANAGER_ID" "mgr_local_opencode"
     $containerId = Get-EnvValue "OPENCODE_MANAGER_CONTAINER_ID" ([System.Environment]::MachineName)
     $managerStateDir = Get-OpencodeManagerStateDir
     $backendPort = Get-EnvValue "OPENCODE_MANAGER_BACKEND_PORT" (Get-UrlPort $script:BackendUrl)
@@ -862,12 +861,10 @@ function Start-OpencodeManager {
     Set-EnvValue "OPENCODE_MANAGER_BACKEND_PORT" $backendPort
     Set-EnvValue "OPENCODE_MANAGER_PORT_START" $portStart
     Set-EnvValue "OPENCODE_MANAGER_PORT_END" $portEnd
-    Set-EnvValue "OPENCODE_MANAGER_ID" $managerId
     Set-EnvValue "OPENCODE_MANAGER_TOKEN" (Get-EnvValue "TEST_AGENT_OPENCODE_MANAGER_TOKEN" "")
     Set-EnvValue "OPENCODE_MANAGER_STATE_DIR" $managerStateDir
     Set-EnvValue "OPENCODE_BIN" $opencodeBinary
     Set-EnvValue "OPENCODE_ALLOWED_CORS" "http://localhost:$($script:FrontendPort),http://127.0.0.1:$($script:FrontendPort)"
-    Set-EnvValue "OPENCODE_MANAGER_DISCOVERY_INTERVAL" (Get-EnvValue "OPENCODE_MANAGER_DISCOVERY_INTERVAL" "10s")
     Set-EnvValue "OPENCODE_MANAGER_HEARTBEAT_INTERVAL" (Get-EnvValue "OPENCODE_MANAGER_HEARTBEAT_INTERVAL" "5s")
     Set-EnvValue "OPENCODE_MANAGER_RECONNECT_INTERVAL" (Get-EnvValue "OPENCODE_MANAGER_RECONNECT_INTERVAL" "10s")
 

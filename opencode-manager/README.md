@@ -2,7 +2,7 @@
 
 ## 工程定位
 
-`opencode-manager` 是运行在每个 opencode 容器内的本地进程管理器，负责启动、停止、重启、健康检测容器内的用户专属 opencode server 进程。它提供本地 CLI 和 `run` 长运行模式；`run` 会发现所有 READY 后端实例，并与每个实例建立 WebSocket JSON 控制面连接。
+`opencode-manager` 是运行在每个 opencode 容器内的本地进程管理器，负责启动、停止、重启、健康检测容器内的用户专属 opencode server 进程。它提供本地 CLI 和 `run` 长运行模式；`run` 只连接当前服务器上的 Java 后端 WebSocket，由该后端控制本服务器 manager。
 
 ## 构建与运行
 
@@ -41,7 +41,6 @@ opencode-manager 不允许随意新增环境变量。新增前必须先确认该
 | `OPENCODE_BIN` | `opencode` |
 | `OPENCODE_MANAGER_STATE_DIR` | `/data/opencode/manager` |
 | `OPENCODE_ALLOWED_CORS` | 空，多个 origin 用逗号分隔 |
-| `OPENCODE_MANAGER_DISCOVERY_INTERVAL` | `10s`，通过已连接 socket 询问存活 Java 后端列表的间隔。 |
 | `OPENCODE_MANAGER_HEARTBEAT_INTERVAL` | `5s` |
 | `OPENCODE_MANAGER_RECONNECT_INTERVAL` | `10s` |
 
@@ -73,16 +72,15 @@ opencode-manager list --trace-id trace_1234567890abcdef
 opencode-manager run
 ```
 
-`run` 会先解析服务器 IPv4：非 Windows 读取 `SYS_DATA_ROOT_DIR/.serverip`，Windows 直接探测本机非回环 IPv4。manager 使用该服务器 IPv4 和 `OPENCODE_MANAGER_BACKEND_PORT`（默认 `8080`）派生初始 WebSocket：`ws://{serverIp}:{port}/api/internal/platform/opencode-runtime/manager/ws`。Go manager 不再通过 HTTP 与 Java 后端交互，所有注册、心跳、后端列表发现和命令控制都走 WebSocket，并使用 `Authorization: Bearer <OPENCODE_MANAGER_TOKEN>`；不得使用用户 JWT、普通 API token 或 opencode server 密钥。
+`run` 会先解析服务器 IPv4：非 Windows 读取 `SYS_DATA_ROOT_DIR/.serverip`，Windows 直接探测本机非回环 IPv4。manager 使用该服务器 IPv4 和 `OPENCODE_MANAGER_BACKEND_PORT`（默认 `8080`）派生本服务器 Java WebSocket：`ws://{serverIp}:{port}/api/internal/platform/opencode-runtime/manager/ws`。Go manager 不再通过 HTTP 与 Java 后端交互，所有注册、配置拉取、心跳和命令控制都走这个 WebSocket，并使用 `Authorization: Bearer <OPENCODE_MANAGER_TOKEN>`；不得使用用户 JWT、普通 API token 或 opencode server 密钥。
 
-多后端 Java 实例部署时，manager 先连接 seed WebSocket；有连接后每 10 秒随机选择一个已连接 socket 发送 `backendListRequest`，Java 从 Redis 返回当前存活后端实例的 `webSocketUrl`，manager 自动连接尚未连接的实例。当所有 Java 连接都断开时，manager 每 10 秒按启动时的 `.serverip + backend port` 方式重连 seed WebSocket，不设总超时。
+多后端 Java 实例部署时，一个 manager 仍只连接 `.serverip + OPENCODE_MANAGER_BACKEND_PORT` 推导出的本服务器 Java；同一服务器上多个 manager 会分别连接该服务器 Java。连接异常断开后，manager 按 `OPENCODE_MANAGER_RECONNECT_INTERVAL` 间隔无限重连，不设置总超时；重连成功并收到 `registered` 后会重新发送 `configRequest` 拉取运行配置。
 
 WebSocket 文本帧为 JSON，协议版本固定 `opencode-manager.v1`。manager 会发送：
 
 - `register`：连接建立后注册容器、端口池、容量和能力。
 - `configRequest`：收到 `registered` 后主动请求 Java 从 `common_parameters` 返回当前运行配置。后端 `configUpdate` 必须包含 `maxProcesses`、`sessionRoot`（来自 `OPENCODE_SESSION_DIR`）和 `configDir`（来自 `OPENCODE_PUBLIC_CONFIG_DIR`）；收到完整配置前，manager 拒绝 `start`/`restart`，不会用本地默认路径启动用户进程。
-- `managerHeartbeat`：每 5 秒通过任一已连接 socket 上报当前进程数、已连接后端 ID、端口池、容器 CPU/内存/磁盘 IO 指标、`metricsSource` 和本地 opencode server 进程明细，Java 写入 Redis latest snapshot，TTL 为 10 秒；资源指标同时追加到 Redis 48 小时历史 ZSET。进程明细包含安全展示用 `startCommand`，只拼出 `XDG_DATA_HOME`、`OPENCODE_CONFIG_DIR` 和 `opencode serve` 固定参数；旧 state 缺字段时按当前配置和端口派生。心跳生成前会清理 PID 已不存在的 stale state；`configUpdate` 成功应用以及 `start`、`stop`、`restart` 成功后还会立即补发一次心跳，加速 Redis latest snapshot 收敛。
-- `backendListRequest`：每 10 秒通过任一已连接 socket 请求当前存活 Java 后端列表；后端返回的 `backendListResponse.backendEndpoints[].lastHeartbeatAt` 为 RFC3339 字符串，manager 按字符串解析。
+- `managerHeartbeat`：每 5 秒通过本服务器 Java socket 上报当前进程数、已连接后端 ID、端口池、容器 CPU/内存/磁盘 IO 指标、`metricsSource` 和本地 opencode server 进程明细，Java 写入 Redis latest snapshot，TTL 为 10 秒；资源指标同时追加到 Redis 48 小时历史 ZSET。进程明细包含安全展示用 `startCommand`，只拼出 `XDG_DATA_HOME`、`OPENCODE_CONFIG_DIR` 和 `opencode serve` 固定参数；旧 state 缺字段时按当前配置和端口派生。心跳生成前会清理 PID 已不存在的 stale state；`configUpdate` 成功应用以及 `start`、`stop`、`restart` 成功后还会立即补发一次心跳，加速 Redis latest snapshot 收敛。
 - `commandResult`：执行后端 `command` 后返回状态、端口、PID、路径、traceId 和可选 `errorCode`。`start` 发现目标服务器 `OPENCODE_PUBLIC_CONFIG_DIR` 未初始化时返回 `FAILED`、`errorCode=OPENCODE_UNAVAILABLE`，`message` 包含目标服务器和 manager 实际检查的配置目录，并提示联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化。
 
 manager 当前接受的命令为 `start`、`health`、`stop`、`restart`。命令最终复用 `internal/process`，不会重新实现 opencode 生命周期逻辑。超级管理员运行管理页的“重启/停止”按钮先调用 Java 后端 HTTP API，再由后端通过已认证的 manager WebSocket 转发 `restart`/`stop`，浏览器不直连 manager 或 opencode server。

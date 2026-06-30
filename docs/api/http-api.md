@@ -775,9 +775,9 @@ Base URL：`/api/internal/platform/configuration-management/common-parameters`
 
 ### manager 运行公共参数
 
-通用参数表中的 `OPENCODE_MANAGER_MAX_PROCESSES`（`platform=all`，全局单值）是 opencode manager 的最大并发进程数权威来源；`OPENCODE_SESSION_DIR` 和 `OPENCODE_PUBLIC_CONFIG_DIR` 是 manager 启动用户 opencode server 时的 session/config 路径权威来源。manager 通过 WebSocket 控制面连入后端时，后端在注册成功后立即向该 manager 下发完整 `configUpdate` 控制帧；manager 收到 `registered` 后也会主动发送 `configRequest` 拉取同一份配置。前端修改上述三个参数任一项后，`PATCH` 触发通用参数内存缓存刷新，刷新完成后发布进程内 `CommonParameterReloadedEvent`，后端经控制面 WebSocket 把完整配置广播给当前实例持有的所有 manager 连接；多实例部署下，刷新器同时发布 `common-parameter.refresh-requested` 跨实例广播，每台实例刷新缓存后都向自己持有的 manager 下发（全互联拓扑下可触达全部 manager）。
+通用参数表中的 `OPENCODE_MANAGER_MAX_PROCESSES`（`platform=all`，全局单值）是 opencode manager 的最大并发进程数权威来源；`OPENCODE_SESSION_DIR` 和 `OPENCODE_PUBLIC_CONFIG_DIR` 是 manager 启动用户 opencode server 时的 session/config 路径权威来源。manager 通过 WebSocket 控制面连入本服务器后端时，后端在注册成功后只返回 `registered`；manager 收到后主动发送 `configRequest` 拉取完整配置。连接异常断开后，manager 按重连间隔无限重连，重连成功后重新发送 `configRequest`。前端只允许修改 `OPENCODE_MANAGER_MAX_PROCESSES`；其它通用参数属于部署或初始化参数，不允许通过通用参数前端更新。最大进程数 `PATCH` 成功后触发通用参数内存缓存刷新，刷新完成后发布进程内 `CommonParameterReloadedEvent`，后端经控制面 WebSocket 把只包含 `maxProcesses` 的 `configUpdate` 广播给当前 Java 实例持有的本服务器 manager 连接；多实例部署下，刷新器同时发布 `common-parameter.refresh-requested` 跨实例广播，每台实例刷新缓存后只向本服务器 manager 下发最大进程数。
 
-manager 收到后按自身端口池容量 `PortEnd-PortStart+1` 做 clamp（超上限 clamp 到容量、`<1` 拒绝）并热更新，成功应用 `configUpdate` 后立即补发一次 `managerHeartbeat` 上报生效值，后续周期 heartbeat 继续同步，`opencode_containers.max_processes` 随之更新。`OPENCODE_SESSION_DIR` 会拼接端口作为 `XDG_DATA_HOME={sessionRoot}/{port}`，`OPENCODE_PUBLIC_CONFIG_DIR` 会作为 `OPENCODE_CONFIG_DIR`；两者均使用通用参数 `resolvedValue`，不会把字面 `$HOME` 下发给 manager。任一必需参数缺失、空白或最大进程数非正整数时，后端不会下发可启动配置，manager 保持未 ready 并拒绝 `start`/`restart`，不会回退 `OPENCODE_SESSION_ROOT`、`OPENCODE_CONFIG_DIR` 或 `OPENCODE_MANAGER_MAX_PROCESSES` 环境变量。该下发通道不产生 RunEvent/SSE，不向前端推送。
+manager 收到后按自身端口池容量 `PortEnd-PortStart+1` 做 clamp（超上限 clamp 到容量、`<1` 拒绝）并热更新，成功应用 `configUpdate` 后立即补发一次 `managerHeartbeat` 上报生效值，后续周期 heartbeat 继续同步，`opencode_containers.max_processes` 随之更新。首次或重连后完整 `configUpdate` 中，`OPENCODE_SESSION_DIR` 会拼接端口作为 `XDG_DATA_HOME={sessionRoot}/{port}`，`OPENCODE_PUBLIC_CONFIG_DIR` 会作为 `OPENCODE_CONFIG_DIR`；两者均使用通用参数 `resolvedValue`，不会把字面 `$HOME` 下发给 manager。任一必需参数缺失、空白或最大进程数非正整数时，后端不会下发可启动配置，manager 保持未 ready 并拒绝 `start`/`restart`，不会回退 `OPENCODE_SESSION_ROOT`、`OPENCODE_CONFIG_DIR` 或 `OPENCODE_MANAGER_MAX_PROCESSES` 环境变量。该下发通道不产生 RunEvent/SSE，不向前端推送。
 
 ## 限流
 
@@ -1251,7 +1251,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 ### 用户 opencode 进程 API
 
-用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。初始化会通过当前后端实例已连接的 `opencode-manager` WebSocket 控制面启动进程；无 manager 连接、命令超时或 manager 返回失败时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT` 或 `OPENCODE_BAD_GATEWAY`。
+用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会通过 Redis `liveBackendSnapshots()` 找到 binding 所属服务器 Java 的 `listenUrl`，透传原始 `Authorization`、`X-Trace-Id`、请求 body 和统一错误响应转发到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。目标后端不在线时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程；无 manager 连接、命令超时或 manager 返回失败时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT` 或 `OPENCODE_BAD_GATEWAY`。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -1293,8 +1293,8 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 初始化规则：
 
-- 未绑定用户时选择当前后端实例已连接的全局进程数最少 `READY` 容器。
-- 已有绑定但进程不可用时优先在原 `linuxServerId` 内选择当前后端已连接的进程数最少容器；原服务器无可用容器时 fallback 到当前后端任意健康容器，成功后更新用户 binding 的 `linuxServerId` 和端口。
+- 未绑定用户时选择当前后端实例已连接的本服务器进程数最少 `READY` 容器。
+- 已有绑定但进程不可用时，只能在 binding 原 `linuxServerId` 内选择目标后端已连接的进程数最少容器；原服务器无可用容器或目标后端不在线时返回 `OPENCODE_UNAVAILABLE`，不 fallback 到当前后端任意健康容器，也不迁移用户 binding。
 - 端口从容器端口范围内选择第一个未被同一 `linuxServerId` 下历史进程行占用的端口；避让范围按数据库唯一约束 `(linux_server_id, port)` 生效，包含其它容器和非运行态脏数据。
 - 启动参数读取通用参数：`XDG_DATA_HOME={OPENCODE_SESSION_DIR}/{port}`、`OPENCODE_CONFIG_DIR={OPENCODE_PUBLIC_CONFIG_DIR}`；缺失或空白时返回平台错误，不回退环境变量或代码默认路径。
 - Java 后端不检查本机 `OPENCODE_PUBLIC_CONFIG_DIR` 目录；初始化先按当前候选中进程数最少且有空闲端口的容器选择目标 manager，再下发 `start`。目标 manager 在所在服务器检查 `OPENCODE_PUBLIC_CONFIG_DIR` 必须是已存在且非空的目录；缺失、为空、非目录或不可读时返回 `FAILED + errorCode=OPENCODE_UNAVAILABLE`，`message` 包含目标服务器和 manager 实际检查的配置目录，并提示联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化，不会创建 session、不会启动 opencode server，Java 将该结果映射为同码平台错误。
@@ -1309,7 +1309,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 ### opencode-manager 控制面 API
 
-控制面只供容器内 `opencode-manager` 使用，不复用用户 JWT 或普通 API token。后端通过 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 配置独立 manager token；manager 建立 WebSocket upgrade 时必须携带 `Authorization: Bearer <token>`。token 缺失或错误返回统一 `UNAUTHENTICATED`。Go manager 运行路径不得通过 HTTP 与 Java 交互，`manager-backends` 仅保留为只读诊断/兼容接口。
+控制面只供容器内 `opencode-manager` 使用，不复用用户 JWT 或普通 API token。后端通过 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN` 配置独立 manager token；manager 建立 WebSocket upgrade 时必须携带 `Authorization: Bearer <token>`。token 缺失或错误返回统一 `UNAUTHENTICATED`。Go manager 运行路径不得通过 HTTP 与 Java 交互，`manager-backends` 仅保留为只读诊断/兼容接口。每个 manager 只连接 `.serverip + OPENCODE_MANAGER_BACKEND_PORT` 推导出的本服务器 Java；多 Java 后端之间的用户请求转发由 Java API 层完成，manager 不再连接其他服务器 Java。
 
 后端 Java 启动时会把当前服务器 IPv4 写入通用参数 `SYS_DATA_ROOT_DIR` 派生的 `SYS_DATA_ROOT_DIR/.serverip`。Go manager 在非 Windows 环境启动时按同一系统参数的平台默认根目录读取 `.serverip`（Linux `/data/.testagent/.serverip`，macOS `$HOME/.testagent/.serverip`），最多等待 30 秒；因此 WebSocket `register` / `heartbeat` 中的 `linuxServerId` 表示服务器 IPv4，不表示容器网卡 IP。`containerId` 继续表示容器身份，非 Windows 先读系统 hostname，再读 `/etc/hostname`，最后才读 `OPENCODE_MANAGER_CONTAINER_ID` 兜底；Windows 本机开发态直接使用机器名。
 
@@ -1332,7 +1332,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 ]
 ```
 
-WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelope，稳定 `type` 包括 `register`、`registered`、`configRequest`、`configUpdate`、`managerHeartbeat`、`backendListRequest`、`backendListResponse`、`command`、`commandResult`、`error`；旧 `heartbeat` 只作为兼容消息，不作为新运行路径主入口。`configUpdate` 由后端返回 `maxProcesses`、`sessionRoot`、`configDir`，其中 `sessionRoot/configDir` 分别来自 `common_parameters.OPENCODE_SESSION_DIR` 与 `OPENCODE_PUBLIC_CONFIG_DIR`。`managerHeartbeat` 每 5 秒由 manager 通过任一已连接 socket 发送一次，后端写入 Redis manager 快照，TTL 为 10 秒，同时把容器资源指标追加到 Redis 48 小时历史 ZSET；资源指标可带 `metricsSource=cgroup|process|unavailable`，其中 `cgroup` 表示 Linux 容器 cgroup 指标，`process` 表示开发态或降级的 manager 进程指标，`unavailable` 表示当前平台不可采集。`managerHeartbeat.managedProcesses[]` 可选携带本 manager 管理的 opencode server 明细：`port`、`pid`、`baseUrl`、`sessionPath`、`configPath`、`startedAt`、`startCommand`、`traceId`；`startCommand` 是 manager 生成的安全展示命令，只包含 `XDG_DATA_HOME`、`OPENCODE_CONFIG_DIR` 和 `opencode serve` 固定参数，不包含 manager token、用户 JWT、Cookie、prompt 或 API key。manager 生成心跳前会清理 PID 已不存在的本地 stale state，旧 manager 或旧 Redis 快照缺少该字段时按 `null`/缺失兼容。`backendListRequest` 每 10 秒由 manager 通过任一已连接 socket 发送，后端从 Redis Java 快照返回当前在线后端的 `webSocketUrl`；`backendListResponse.backendEndpoints[].lastHeartbeatAt` 必须编码为 RFC3339 字符串，例如 `"2026-06-24T08:00:00Z"`，不能编码为数字时间戳。后端命令使用 `commandId=mcmd_...`，manager 回包必须带同一 `commandId` 和 `traceId`；`commandResult.errorCode` 为可选平台错误码，目前 `start` 因目标服务器公共配置目录未初始化失败时返回 `OPENCODE_UNAVAILABLE`，`message` 包含目标服务器和 manager 实际检查的配置目录。当前命令集合为 `start`、`health`、`stop`、`restart`，其中用户初始化和健康检测链路使用 `start`、`health`；收到完整 `configUpdate` 前，`start`/`restart` 返回 `FAILED`，不会拉起 opencode server；运行管理页面按容器和端口调用 HTTP stop/restart API，再由后端转发为 WebSocket `command`。`stop` 对 state 存在但 OS 进程已结束的端口按幂等成功返回 `STOPPED` 并清理 state；`configUpdate` 成功应用以及 `start`、`stop`、`restart` 成功后，manager 都会立即补发一次 `managerHeartbeat`，不必等待 5 秒周期。
+WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelope，稳定 `type` 包括 `register`、`registered`、`configRequest`、`configUpdate`、`managerHeartbeat`、`command`、`commandResult`、`error`；`backendListRequest`、`backendListResponse` 和旧 `heartbeat` 只作为兼容枚举保留，不作为新运行路径主入口，Java 收到 `backendListRequest` 会忽略。`configUpdate` 首次由 manager 的 `configRequest` 拉取，完整帧返回 `maxProcesses`、`sessionRoot`、`configDir`，其中 `sessionRoot/configDir` 分别来自 `common_parameters.OPENCODE_SESSION_DIR` 与 `OPENCODE_PUBLIC_CONFIG_DIR`；后续最大进程数刷新帧只携带 `maxProcesses`，`sessionRoot/configDir` 为空表示路径不变。`managerHeartbeat` 每 5 秒由 manager 通过本服务器 Java socket 发送一次，后端写入 Redis manager 快照，TTL 为 10 秒，同时把容器资源指标追加到 Redis 48 小时历史 ZSET；资源指标可带 `metricsSource=cgroup|process|unavailable`，其中 `cgroup` 表示 Linux 容器 cgroup 指标，`process` 表示开发态或降级的 manager 进程指标，`unavailable` 表示当前平台不可采集。`managerHeartbeat.managedProcesses[]` 可选携带本 manager 管理的 opencode server 明细：`port`、`pid`、`baseUrl`、`sessionPath`、`configPath`、`startedAt`、`startCommand`、`traceId`；`startCommand` 是 manager 生成的安全展示命令，只包含 `XDG_DATA_HOME`、`OPENCODE_CONFIG_DIR` 和 `opencode serve` 固定参数，不包含 manager token、用户 JWT、Cookie、prompt 或 API key。manager 生成心跳前会清理 PID 已不存在的本地 stale state，旧 manager 或旧 Redis 快照缺少该字段时按 `null`/缺失兼容。后端命令使用 `commandId=mcmd_...`，manager 回包必须带同一 `commandId` 和 `traceId`；`commandResult.errorCode` 为可选平台错误码，目前 `start` 因目标服务器公共配置目录未初始化失败时返回 `OPENCODE_UNAVAILABLE`，`message` 包含目标服务器和 manager 实际检查的配置目录。当前命令集合为 `start`、`health`、`stop`、`restart`，其中用户初始化和健康检测链路使用 `start`、`health`；收到完整 `configUpdate` 前，`start`/`restart` 返回 `FAILED`，不会拉起 opencode server；运行管理页面按容器和端口调用 HTTP stop/restart API，再由后端转发为 WebSocket `command`。`stop` 对 state 存在但 OS 进程已结束的端口按幂等成功返回 `STOPPED` 并清理 state；`configUpdate` 成功应用以及 `start`、`stop`、`restart` 成功后，manager 都会立即补发一次 `managerHeartbeat`，不必等待 5 秒周期。
 
 ### opencode runtime 运行管理 API
 

@@ -33,6 +33,7 @@ public class CommonParameterManagementApplicationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CommonParameterManagementApplicationService.class);
     private static final int CHANGE_LOG_LIMIT = 50;
+    private static final String EDITABLE_MAX_PROCESSES_PARAMETER = "OPENCODE_MANAGER_MAX_PROCESSES";
 
     private final CommonParameterRepository repository;
     private final CommonParameterChangeLogRepository changeLogRepository;
@@ -103,6 +104,12 @@ public class CommonParameterManagementApplicationService {
         CommonParameter existing = repository.findByParameterId(normalizedParameterId)
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.NOT_FOUND, "通用参数不存在", Map.of("parameterId", normalizedParameterId)));
+        if (!EDITABLE_MAX_PROCESSES_PARAMETER.equals(existing.englishName())) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "除 opencode manager 最大进程数外，通用参数不允许在前端修改",
+                    Map.of("parameterId", normalizedParameterId, "englishName", existing.englishName()));
+        }
         String oldValue = existing.parameterValue();
         Instant updatedAt = clock.instant();
         CommonParameter updated;

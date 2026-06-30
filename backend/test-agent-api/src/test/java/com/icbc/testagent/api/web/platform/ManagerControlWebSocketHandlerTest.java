@@ -21,7 +21,6 @@ import com.icbc.testagent.opencode.runtime.process.socket.OpencodeManagerConfigS
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.security.Principal;
-import java.time.Instant;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -154,7 +153,7 @@ class ManagerControlWebSocketHandlerTest {
     }
 
     @Test
-    void handlesManagerHeartbeatAndBackendListRequest() {
+    void handlesManagerHeartbeatAndIgnoresBackendListRequest() {
         ManagerControlApplicationService controlService = Mockito.mock(ManagerControlApplicationService.class);
         ManagerControlMessage heartbeat = ManagerControlMessage.managerHeartbeat(
                 "mgr_1234567890abcdef",
@@ -169,26 +168,15 @@ class ManagerControlWebSocketHandlerTest {
                 List.of("bjp_1234567890abcdef"),
                 "trace_1234567890abcdef");
         ManagerControlMessage request = ManagerControlMessage.backendListRequest("trace_1234567890abcdef");
-        when(controlService.backendListResponse("trace_1234567890abcdef")).thenReturn(
-                ManagerControlMessage.backendListResponse(
-                        List.of(new com.icbc.testagent.opencode.runtime.process.socket.ManagerBackendEndpoint(
-                                "bjp_1234567890abcdef",
-                                "10.8.0.12",
-                                "http://10.8.0.12:8080",
-                                "ws://10.8.0.12:8080/api/internal/platform/opencode-runtime/manager/ws",
-                                Instant.parse("2026-06-24T00:00:00Z"))),
-                        "trace_1234567890abcdef"));
         FakeWebSocketSession session = FakeWebSocketSession.withToken(
                 "secret-token",
                 List.of(codec.encode(heartbeat), codec.encode(request)));
 
         handler(controlService, new ManagerPendingCommandRegistry()).handle(session).block(Duration.ofSeconds(1));
 
-        assertThat(session.sentText()).hasSize(1);
-        assertThat(codec.decode(session.sentText().getFirst()).type())
-                .isEqualTo(com.icbc.testagent.opencode.runtime.process.socket.ManagerControlProtocol.TYPE_BACKEND_LIST_RESPONSE);
+        assertThat(session.sentText()).isEmpty();
         verify(controlService).managerHeartbeat(heartbeat);
-        verify(controlService).backendListResponse("trace_1234567890abcdef");
+        verify(controlService, never()).backendListResponse("trace_1234567890abcdef");
     }
 
     @Test

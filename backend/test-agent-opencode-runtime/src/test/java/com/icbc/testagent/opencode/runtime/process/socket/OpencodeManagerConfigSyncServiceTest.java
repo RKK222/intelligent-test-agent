@@ -53,7 +53,7 @@ class OpencodeManagerConfigSyncServiceTest {
     }
 
     @Test
-    void pushCurrentMaxToSendsConfigUpdateWithConfiguredValue() {
+    void pushCurrentMaxToSendsOnlyMaxProcessesForRuntimeRefresh() {
         CommonParameterValues values = values(Map.of(
                 "OPENCODE_MANAGER_MAX_PROCESSES", "6",
                 "OPENCODE_SESSION_DIR", "/data/.testagent/agent-opencode/.session/",
@@ -66,8 +66,8 @@ class OpencodeManagerConfigSyncServiceTest {
         ArgumentCaptor<ManagerControlMessage> captor = ArgumentCaptor.forClass(ManagerControlMessage.class);
         verify(connections).send(eq(CONTAINER_ID), captor.capture());
         assertThat(captor.getValue().maxProcesses()).isEqualTo(6);
-        assertThat(captor.getValue().sessionRoot()).isEqualTo("/data/.testagent/agent-opencode/.session/");
-        assertThat(captor.getValue().configDir()).isEqualTo("/data/.testagent/agent-opencode/.config/opencode/");
+        assertThat(captor.getValue().sessionRoot()).isNull();
+        assertThat(captor.getValue().configDir()).isNull();
     }
 
     @Test
@@ -138,7 +138,7 @@ class OpencodeManagerConfigSyncServiceTest {
     }
 
     @Test
-    void onReloadedBroadcastsForSessionAndConfigParams() {
+    void onReloadedDoesNotBroadcastForSessionAndConfigParams() {
         CommonParameterValues values = values(Map.of(
                 "OPENCODE_MANAGER_MAX_PROCESSES", "8",
                 "OPENCODE_SESSION_DIR", "/data/session/",
@@ -150,7 +150,7 @@ class OpencodeManagerConfigSyncServiceTest {
         service.onCommonParameterReloaded(reloaded("OPENCODE_SESSION_DIR", ParameterPlatform.current()));
         service.onCommonParameterReloaded(reloaded("OPENCODE_PUBLIC_CONFIG_DIR", ParameterPlatform.current()));
 
-        verify(connections, times(2)).broadcast(any());
+        verify(connections, never()).broadcast(any());
     }
 
     @Test

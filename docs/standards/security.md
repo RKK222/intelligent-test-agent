@@ -17,7 +17,7 @@
 Token 校验流程：
 - `JwtAuthWebFilter`（Order +10）优先检查用户 Token，有效时设置 `AuthPrincipal` 到请求属性。
 - `ApiTokenWebFilter`（Order +20）作为静态 API Token 兜底，未配置时放行。
-- opencode runtime 代理可以读取可选 `AuthPrincipal`：存在用户主体时业务层使用用户专属 opencode 进程；只有 static token 或本地放行而没有用户主体时，才允许走固定 `execution_nodes` 兼容 fallback。静态 API token 不得被伪装成用户身份。
+- opencode runtime 代理可以读取可选 `AuthPrincipal`：存在用户主体时业务层使用用户专属 opencode 进程；用户已有 ACTIVE binding 且属于其他服务器时，API 层只允许把用户进程状态、初始化、Run 启动和 opencode runtime 代理请求转发到 binding 所属服务器 Java，并必须透传原始用户 Authorization 和 traceId，由目标 Java 继续鉴权。只有 static token 或本地放行而没有用户主体时，才允许走固定 `execution_nodes` 兼容 fallback。静态 API token 不得被伪装成用户身份。
 
 本地占位策略：
 
@@ -66,7 +66,7 @@ Token 校验流程：
 3. Druid Web 控制台默认关闭；如后续启用，必须通过环境变量配置账号、密码和访问 allowlist，并同步 API、运维和安全文档。
 4. 旧 `/api/...`、新 `/api/internal/platform/...` 和 `/api/internal/agent/opencode/...` 共享同一鉴权、限流、CORS、traceId 与错误格式。Workspace 文件 API 和文件 WebSocket RPC 必须把所有请求路径归一化到注册的 workspace root 内，路径穿越或越权访问返回 `FORBIDDEN`。
 5. Workspace 目录选择器只能浏览 `test-agent.workspace-picker.allowed-roots` / `TEST_AGENT_WORKSPACE_PICKER_ROOTS` 声明的本机根目录，默认 `${user.home}/workspace`；越出允许根目录返回 `FORBIDDEN`，缺失或非目录返回 `VALIDATION_ERROR`，前端不得直接调用浏览器、本地插件或 opencode server 枚举任意磁盘路径。超级管理员服务器工作空间选择器只能通过目标后端签发的文件 WebSocket ticket 浏览目录。
-6. opencode-manager WebSocket 控制面只允许容器内 manager 使用独立 token 访问，不接受浏览器用户 token；manager 不得通过 HTTP 与 Java 后端交互，后端列表发现只通过 WebSocket `backendListRequest/backendListResponse` 完成。返回给 manager 的 `listenUrl`/`webSocketUrl` 必须是 manager 可访问的后端实例直连地址，不应暴露到公网或不可信网络。
+6. opencode-manager WebSocket 控制面只允许容器内 manager 使用独立 token 访问，不接受浏览器用户 token；manager 不得通过 HTTP 与 Java 后端交互，也不再连接其他服务器 Java。manager 只连接 `.serverip + OPENCODE_MANAGER_BACKEND_PORT` 推导出的本服务器 Java，断开后按重连间隔无限重连并重新拉取配置。返回给 Java 间用户进程路由使用的 `listenUrl` 必须是可信内网内其它后端可访问的直连地址，不应暴露到公网或不可信网络。
 7. 用户专属 opencode server 默认监听 `0.0.0.0:{port}` 且不设置 Basic Auth，生产必须用容器网络、主机防火墙或内网网关限制端口池访问面；浏览器和外部系统不得直接访问这些端口。
 8. `tools/verify-opencode-process-deployment.sh` 只用于只读 smoke check；传入的 manager token 和 `SUPER_ADMIN` 用户 token 不会由脚本打印。生产执行时应使用临时 shell、禁用命令历史或通过安全变量注入，避免 token 留在 history 中。
 

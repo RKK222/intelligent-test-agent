@@ -56,7 +56,7 @@ public class ManagerConnectionRegistry {
     /**
      * 向当前后端实例持有的所有 manager 连接广播消息（如运行时配置下发）。
      * 单条连接发送异常不中断其余连接的广播；返回已发送的连接数。
-     * 全互联拓扑下每台 Java 实例各自向本地连接广播即可触达所有 manager。
+     * manager 只连接本服务器 Java，因此这里只触达本服务器 managers。
      */
     public int broadcast(ManagerControlMessage message) {
         Objects.requireNonNull(message, "message must not be null");

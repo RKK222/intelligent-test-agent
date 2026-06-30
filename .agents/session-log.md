@@ -2112,3 +2112,16 @@ git ls-tree -r -d --name-only FETCH_HEAD  # 列出目录
 ```bash
 bash /tmp/test-api-after-restart.sh
 ```
+- Why: `V20260629230000` 的 INSERT 值含字面量 `${SYS_DATA_ROOT_DIR}/...`（需存进 DB 由 Java 解析器运行态展开），但 Flyway 默认把 `${...}` 当占位符替换，找不到值时在 prod PostgreSQL 报 `Unable to parse ... No value provided for placeholder: ${SYS_DATA_ROOT_DIR}`，迁移无法应用。
+- What: 改写该迁移的值列为 `'$' || '{SYS_DATA_ROOT_DIR}/...'` 字符串拼接，使 SQL 文本中不出现 `${` 序列绕开 Flyway 占位符扫描，DB 实际仍存储 `${SYS_DATA_ROOT_DIR}/...` 字面量；同步重写注释避免出现 `${`。该迁移此前解析失败从未落库，改写无 checksum 风险。
+- How: 不改各 profile 的全局 Flyway 配置（最小改动）；通过 `$` 与 `{` 分属两个字符串字面量、中间以 `||` 连接，破坏 `${` 占位符前缀。
+- Result: 用与生产一致的 Flyway 12.4.0 引擎对临时 PostgreSQL 16 容器执行全量迁移成功，`flyway_schema_history` 记录 `20260629230000 success=t`，6 个参数存储值为字面量 `${SYS_DATA_ROOT_DIR}/...`。
+- Verification: `java -cp flyway-core-12.4.0.jar:... FlywayRun`（`FLYWAY_MIGRATE_OK`）、`mvn -pl test-agent-domain -am test -Dtest=CommonParameterReferenceResolverTest`（`BUILD SUCCESS`）、`grep '\${'` 确认迁移文件无 `${` 序列。
+
+### 2026-06-30 - opencode manager 单连接与用户进程后端路由
+
+- Why: manager 收敛为只连接本服务器 Java 后，用户请求可能落到非 binding 所属服务器；旧逻辑会在当前 Java 看到其它健康容器时静默迁移 binding，容易把用户进程从原服务器迁走。
+- What: 新增 API 层用户 opencode 后端路由过滤器，ACTIVE binding 属于远端服务器时按 Redis Java live snapshot 的 `linuxServerId -> listenUrl` 转发状态、初始化、Run 创建和 runtime 代理请求，并用 `X-Test-Agent-Backend-Routed` 防循环；`UserOpencodeProcessAssignmentService` 删除跨服务器 fallback，只允许在 binding 原服务器本机 manager 内重建。Go manager 删除 backend list 补连和 discovery interval，只连接 `.serverip + OPENCODE_MANAGER_BACKEND_PORT` 推导的本服务器 Java；Java register 只返回 `registered`，完整配置只响应 manager 的 `configRequest`，后续只允许 `OPENCODE_MANAGER_MAX_PROCESSES` max-only 热刷新。
+- How: Java 路由服务保留原始 `Authorization`、`X-Trace-Id`、body 和目标响应，目标后端不可用统一返回 `OPENCODE_UNAVAILABLE`；同 IP 历史重复 Java 快照按最新 heartbeat 选目标。通用参数前端更新入口只放行最大进程数，路径类参数改为部署/初始化参数；启动脚本删除废弃 `OPENCODE_MANAGER_DISCOVERY_INTERVAL` 和 `OPENCODE_MANAGER_ID` 注入。
+- Result: 任意 Java 收到 remote binding 请求时会路由到 binding 所属服务器 Java，不再自动迁移；每个 manager 只维持单条本机 Java WebSocket，断线后按重连间隔无限重连并重新拉取配置。
+- Verification: `mvn -pl test-agent-api,test-agent-opencode-runtime,test-agent-configuration-management -am test`、`go test ./...`（opencode-manager）、`bash tools/verify-dev-scripts.sh`、`mvn clean package -DskipTests`、`git diff --check` 全部通过。

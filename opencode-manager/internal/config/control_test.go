@@ -61,7 +61,6 @@ func TestLoadControlFromEnvAppliesIntervalsAndHidesToken(t *testing.T) {
 	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
-	t.Setenv("OPENCODE_MANAGER_DISCOVERY_INTERVAL", "3s")
 	t.Setenv("OPENCODE_MANAGER_HEARTBEAT_INTERVAL", "4s")
 	t.Setenv("OPENCODE_MANAGER_RECONNECT_INTERVAL", "5s")
 
@@ -75,7 +74,7 @@ func TestLoadControlFromEnvAppliesIntervalsAndHidesToken(t *testing.T) {
 	if cfg.ManagerID != "mgr_ctr_01_opencode_manager" {
 		t.Fatalf("unexpected manager id %q", cfg.ManagerID)
 	}
-	if cfg.DiscoveryInterval != 3*time.Second || cfg.HeartbeatInterval != 4*time.Second || cfg.ReconnectInterval != 5*time.Second {
+	if cfg.HeartbeatInterval != 4*time.Second || cfg.ReconnectInterval != 5*time.Second {
 		t.Fatalf("unexpected intervals: %#v", cfg)
 	}
 	if strings.Contains(cfg.String(), "manager-secret") {

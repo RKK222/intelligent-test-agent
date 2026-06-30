@@ -77,21 +77,21 @@ class CommonParameterManagementApplicationServiceTest {
     @Test
     void updateValuePersistsAndReturnsReloadedValue() {
         CommonParameterRepository repository = mock(CommonParameterRepository.class);
-        CommonParameter existing = parameter("param_opencode_workspace_root_linux", "OPENCODE_WORKSPACE_ROOT", "/old", ParameterPlatform.LINUX);
-        CommonParameter updated = existing.withValue("/new", UPDATED_AT);
-        when(repository.findByParameterId("param_opencode_workspace_root_linux"))
+        CommonParameter existing = parameter("param_opencode_manager_max_processes_all", "OPENCODE_MANAGER_MAX_PROCESSES", "4", ParameterPlatform.ALL);
+        CommonParameter updated = existing.withValue("6", UPDATED_AT);
+        when(repository.findByParameterId("param_opencode_manager_max_processes_all"))
                 .thenReturn(Optional.of(existing))
                 .thenReturn(Optional.of(updated));
-        when(repository.updateValue(eq("param_opencode_workspace_root_linux"), eq("/new"), eq(UPDATED_AT))).thenReturn(1);
+        when(repository.updateValue(eq("param_opencode_manager_max_processes_all"), eq("6"), eq(UPDATED_AT))).thenReturn(1);
         ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
         CommonParameterChangeLogRepository changeLogRepository = mock(CommonParameterChangeLogRepository.class);
         CommonParameterManagementApplicationService service = newService(repository, changeLogRepository, publisher);
 
-        CommonParameterResponse response = service.updateValue("param_opencode_workspace_root_linux", "/new", "trace_test", "usr_test", "testuser");
+        CommonParameterResponse response = service.updateValue("param_opencode_manager_max_processes_all", "6", "trace_test", "usr_test", "testuser");
 
-        assertThat(response.parameterValue()).isEqualTo("/new");
+        assertThat(response.parameterValue()).isEqualTo("6");
         assertThat(response.updatedAt()).isEqualTo(UPDATED_AT);
-        verify(repository).updateValue("param_opencode_workspace_root_linux", "/new", UPDATED_AT);
+        verify(repository).updateValue("param_opencode_manager_max_processes_all", "6", UPDATED_AT);
         verify(changeLogRepository).save(any(CommonParameterChangeLog.class));
         verify(publisher).publishEvent(any(CommonParameterUpdatedEvent.class));
     }
@@ -110,24 +110,52 @@ class CommonParameterManagementApplicationServiceTest {
     @Test
     void updateValueRejectsBlankValueAsValidationError() {
         CommonParameterRepository repository = mock(CommonParameterRepository.class);
-        when(repository.findByParameterId("param_opencode_workspace_root_linux"))
-                .thenReturn(Optional.of(parameter("param_opencode_workspace_root_linux", "OPENCODE_WORKSPACE_ROOT", "/old", ParameterPlatform.LINUX)));
+        when(repository.findByParameterId("param_opencode_manager_max_processes_all"))
+                .thenReturn(Optional.of(parameter("param_opencode_manager_max_processes_all", "OPENCODE_MANAGER_MAX_PROCESSES", "4", ParameterPlatform.ALL)));
         CommonParameterManagementApplicationService service = newService(repository);
 
-        assertThatThrownBy(() -> service.updateValue("param_opencode_workspace_root_linux", "  ", "trace_test", "usr_test", "testuser"))
+        assertThatThrownBy(() -> service.updateValue("param_opencode_manager_max_processes_all", "  ", "trace_test", "usr_test", "testuser"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
     }
 
     @Test
+    void updateValueRejectsDeploymentPathParametersAsReadonly() {
+        CommonParameterRepository repository = mock(CommonParameterRepository.class);
+        when(repository.findByParameterId("param_opencode_public_config_dir_linux"))
+                .thenReturn(Optional.of(parameter(
+                        "param_opencode_public_config_dir_linux",
+                        "OPENCODE_PUBLIC_CONFIG_DIR",
+                        "/old",
+                        ParameterPlatform.LINUX)));
+        CommonParameterChangeLogRepository changeLogRepository = mock(CommonParameterChangeLogRepository.class);
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        CommonParameterManagementApplicationService service = newService(repository, changeLogRepository, publisher);
+
+        assertThatThrownBy(() -> service.updateValue(
+                        "param_opencode_public_config_dir_linux",
+                        "/new",
+                        "trace_test",
+                        "usr_test",
+                        "testuser"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR);
+                    assertThat(exception.getMessage()).contains("最大进程数");
+                });
+        verify(repository, org.mockito.Mockito.never()).updateValue(any(), any(), any());
+        verify(changeLogRepository, org.mockito.Mockito.never()).save(any());
+        verify(publisher, org.mockito.Mockito.never()).publishEvent(any());
+    }
+
+    @Test
     void updateValueThrowsNotFoundWhenRowDisappearsConcurrently() {
         CommonParameterRepository repository = mock(CommonParameterRepository.class);
-        when(repository.findByParameterId("param_opencode_workspace_root_linux"))
-                .thenReturn(Optional.of(parameter("param_opencode_workspace_root_linux", "OPENCODE_WORKSPACE_ROOT", "/old", ParameterPlatform.LINUX)));
-        when(repository.updateValue(eq("param_opencode_workspace_root_linux"), eq("/new"), eq(UPDATED_AT))).thenReturn(0);
+        when(repository.findByParameterId("param_opencode_manager_max_processes_all"))
+                .thenReturn(Optional.of(parameter("param_opencode_manager_max_processes_all", "OPENCODE_MANAGER_MAX_PROCESSES", "4", ParameterPlatform.ALL)));
+        when(repository.updateValue(eq("param_opencode_manager_max_processes_all"), eq("6"), eq(UPDATED_AT))).thenReturn(0);
         CommonParameterManagementApplicationService service = newService(repository);
 
-        assertThatThrownBy(() -> service.updateValue("param_opencode_workspace_root_linux", "/new", "trace_test", "usr_test", "testuser"))
+        assertThatThrownBy(() -> service.updateValue("param_opencode_manager_max_processes_all", "6", "trace_test", "usr_test", "testuser"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.NOT_FOUND));
     }

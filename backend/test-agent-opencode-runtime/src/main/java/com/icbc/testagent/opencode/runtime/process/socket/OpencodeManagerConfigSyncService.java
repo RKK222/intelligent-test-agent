@@ -8,7 +8,6 @@ import com.icbc.testagent.observability.TraceIdSupport;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.event.EventListener;
@@ -17,10 +16,9 @@ import org.springframework.stereotype.Service;
 /**
  * 把通用参数表中的 opencode manager 运行配置下发给已连接的 manager。
  *
- * <p>manager 注册或发送 configRequest 时立即下发权威值；
- * 前端修改参数后，通用参数内存缓存刷新器发布 {@link CommonParameterReloadedEvent} 触发 {@link #broadcastCurrentConfig()},
- * 经 {@link ManagerConnectionRegistry#broadcast} 推给当前实例持有的所有 manager 连接。
- * 全互联拓扑下每台 Java 实例各自广播即可触达全部 manager。
+ * <p>manager 发送 configRequest 时下发完整权威值；
+ * 后续只允许最大进程数运行时刷新，经 {@link ManagerConnectionRegistry#broadcast}
+ * 推给当前实例持有的本服务器 manager 连接。路径类参数属于部署参数，不做热刷新。
  *
  * <p>任一必需参数缺失或非法时不会下发 configUpdate，manager 必须保持未 ready 并拒绝启动用户进程。
  */
@@ -35,11 +33,6 @@ public class OpencodeManagerConfigSyncService {
     public static final String SESSION_DIR_PARAM_ENGLISH = "OPENCODE_SESSION_DIR";
     /** 通用参数英文名：opencode 公共配置目录，按当前平台读取。 */
     public static final String PUBLIC_CONFIG_DIR_PARAM_ENGLISH = "OPENCODE_PUBLIC_CONFIG_DIR";
-
-    private static final Set<String> MANAGER_RUNTIME_PARAMS = Set.of(
-            MAX_PROCESSES_PARAM_ENGLISH,
-            SESSION_DIR_PARAM_ENGLISH,
-            PUBLIC_CONFIG_DIR_PARAM_ENGLISH);
 
     private final CommonParameterValues commonParameterValues;
     private final ManagerConnectionRegistry connections;
@@ -67,66 +60,52 @@ public class OpencodeManagerConfigSyncService {
     }
 
     /**
-     * 向单个容器下发当前运行配置；无配置值时发送安全错误，避免 manager 误用本地默认路径。
+     * 向单个容器下发当前最大进程数；无配置值时发送安全错误，避免 manager 沿用过期并发限制。
      */
     public void pushCurrentMaxTo(OpencodeContainerId containerId) {
-        pushCurrentConfigTo(containerId);
-    }
-
-    /**
-     * 向单个容器下发当前运行配置；无配置值时发送安全错误，避免 manager 误用本地默认路径。
-     */
-    public void pushCurrentConfigTo(OpencodeContainerId containerId) {
         Objects.requireNonNull(containerId, "containerId must not be null");
         String traceId = TraceIdSupport.generate();
         try {
-            ManagerControlMessage message = configUpdateMessage(traceId)
+            ManagerControlMessage message = maxProcessesUpdateMessage(traceId)
                     .orElseGet(() -> ManagerControlMessage.error(
-                            "OPENCODE_UNAVAILABLE", "manager 运行公共参数未配置", traceId));
+                            "OPENCODE_UNAVAILABLE", "manager 最大进程数参数未配置", traceId));
             connections.send(containerId, message);
-            LOGGER.info("已向 manager 下发运行配置 containerId={} type={} traceId={}",
+            LOGGER.info("已向 manager 下发最大进程数配置 containerId={} type={} traceId={}",
                     containerId, message.type(), traceId);
         } catch (RuntimeException exception) {
             // 连接刚断开等情况下发送失败不应影响注册主流程。
-            LOGGER.warn("下发 manager 运行配置失败 containerId={} traceId={}", containerId, traceId, exception);
+            LOGGER.warn("下发 manager 最大进程数配置失败 containerId={} traceId={}", containerId, traceId, exception);
         }
     }
 
     /**
-     * 向当前实例持有的所有 manager 连接广播运行配置；无配置值时跳过。
+     * 向当前实例持有的所有 manager 连接广播最大进程数；无配置值时跳过。
      */
     public int broadcastCurrentMax() {
-        return broadcastCurrentConfig();
-    }
-
-    /**
-     * 向当前实例持有的所有 manager 连接广播运行配置；无配置值时跳过。
-     */
-    public int broadcastCurrentConfig() {
         String traceId = TraceIdSupport.generate();
-        Optional<ManagerControlMessage> message = configUpdateMessage(traceId);
+        Optional<ManagerControlMessage> message = maxProcessesUpdateMessage(traceId);
         if (message.isEmpty()) {
-            LOGGER.warn("跳过广播 manager 运行配置：通用参数缺失或非法 traceId={}", traceId);
+            LOGGER.warn("跳过广播 manager 最大进程数配置：通用参数缺失或非法 traceId={}", traceId);
             return 0;
         }
         int sent = connections.broadcast(message.get());
-        LOGGER.info("已广播 manager 运行配置 maxProcesses={} sent={} traceId={}",
+        LOGGER.info("已广播 manager 最大进程数配置 maxProcesses={} sent={} traceId={}",
                 message.get().maxProcesses(), sent, traceId);
         return sent;
     }
 
     /**
-     * 通用参数缓存刷新事件触发；仅 manager 运行参数变化时广播给所有 manager。
+     * 通用参数缓存刷新事件触发；仅最大进程数变化时广播给本实例持有的 manager。
      * 该事件由缓存刷新器在内存缓存 reload 完成后发布（本地更新与远端广播均会触发），
-     * 确保每台实例刷新缓存后都向自己持有的 manager 下发最新配置。
+     * 确保每台实例刷新缓存后都向本服务器 manager 下发最新并发限制。
      */
     @EventListener
     public void onCommonParameterReloaded(CommonParameterReloadedEvent event) {
-        if (event.englishName() != null && !MANAGER_RUNTIME_PARAMS.contains(event.englishName())) {
+        if (!MAX_PROCESSES_PARAM_ENGLISH.equals(event.englishName())) {
             return;
         }
-        LOGGER.info("收到 manager 运行参数缓存刷新事件，开始广播 englishName={} traceId={}", event.englishName(), event.traceId());
-        broadcastCurrentConfig();
+        LOGGER.info("收到 manager 最大进程数缓存刷新事件，开始广播 englishName={} traceId={}", event.englishName(), event.traceId());
+        broadcastCurrentMax();
     }
 
     private Optional<ManagerRuntimeConfig> currentRuntimeConfig() {
@@ -142,6 +121,11 @@ public class OpencodeManagerConfigSyncService {
     private Optional<Integer> readMaxProcesses() {
         return commonParameterValues.resolvedValue(MAX_PROCESSES_PARAM_ENGLISH, ParameterPlatform.ALL)
                 .flatMap(OpencodeManagerConfigSyncService::tryParsePositiveInt);
+    }
+
+    private Optional<ManagerControlMessage> maxProcessesUpdateMessage(String traceId) {
+        return readMaxProcesses()
+                .map(maxProcesses -> ManagerControlMessage.configUpdate(maxProcesses, null, null, traceId));
     }
 
     private Optional<String> readPathParameter(String englishName) {

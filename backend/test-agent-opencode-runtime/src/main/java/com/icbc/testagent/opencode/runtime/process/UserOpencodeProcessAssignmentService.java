@@ -160,7 +160,7 @@ public class UserOpencodeProcessAssignmentService {
         }
         Optional<OpencodeServerProcess> process = activeProcess(binding.get());
         if (process.isEmpty()) {
-            return canRebuild(binding.get().linuxServerId())
+            return canRebuildOn(binding.get().linuxServerId())
                     ? needsInitialization("opencode 进程不可用，需要重新初始化", binding.get(), now)
                     : unavailable("原 Linux 服务器没有可用的 opencode 容器", binding.get(), now);
         }
@@ -173,7 +173,7 @@ public class UserOpencodeProcessAssignmentService {
             return ready(refreshed, "opencode 进程可用", now);
         }
         repository.saveOpencodeServerProcess(refreshProcess(current, OpencodeServerProcessStatus.UNHEALTHY, health.message(), now, traceId));
-        return canRebuild(binding.get().linuxServerId())
+        return canRebuildOn(binding.get().linuxServerId())
                 ? needsInitialization("opencode 进程健康检测失败，需要重新初始化", current, now)
                 : unavailable("opencode 进程健康检测失败，且当前没有可用容器", current, now);
     }
@@ -209,6 +209,23 @@ public class UserOpencodeProcessAssignmentService {
     }
 
     /**
+     * API 层后端路由只需要 ACTIVE binding 的服务器归属，不触发健康检查或初始化。
+     *
+     * <p>返回值为远端路由候选，调用方需自行与当前 Java 所在服务器比较。不存在 binding
+     * 时必须走本机正常初始化/状态流程，由当前 Java 选择本机可用 manager。
+     */
+    public Optional<String> routingLinuxServerId(UserId userId, String agentId) {
+        validateAgent(agentId);
+        if (localDirectSettings.enabled()) {
+            return Optional.empty();
+        }
+        return repository.findUserBinding(userId, OPENCODE_AGENT_ID)
+                .filter(item -> item.status() == UserOpencodeProcessBindingStatus.ACTIVE)
+                .map(UserOpencodeProcessBinding::linuxServerId)
+                .map(LinuxServerId::value);
+    }
+
+    /**
      * 初始化或重建当前用户 opencode 进程；真实启动由 gateway 完成。
      */
     public UserOpencodeProcessStatusResponse initialize(UserId userId, String agentId, String traceId) {
@@ -234,21 +251,13 @@ public class UserOpencodeProcessAssignmentService {
             }
         }
 
-        // 旧 binding 存在时优先按原 linux_server_id 查容器；旧 IP 上已无可用容器时
-        // fallback 到全局查找，让旧用户能在当前可用的 manager 上重建进程，
-        // 并通过后续 saveUserBinding 把 binding 迁移到新 IP。
+        // 旧 binding 存在时只能按原 linux_server_id 查容器。跨服务器请求由 API 层
+        // 路由到 binding 所属后端，避免当前 Java 静默迁移用户进程归属。
         List<OpencodeContainer> candidates = existingBinding
-                .map(binding -> {
-                    List<OpencodeContainer> byServer = repository.findHealthyContainersConnectedToBackendByLinuxServer(
-                            backendLifecycle.backendProcessId(),
-                            binding.linuxServerId(),
-                            CONTAINER_CANDIDATE_LIMIT);
-                    return byServer.isEmpty()
-                            ? repository.findHealthyContainersConnectedToBackend(
-                                    backendLifecycle.backendProcessId(),
-                                    CONTAINER_CANDIDATE_LIMIT)
-                            : byServer;
-                })
+                .map(binding -> repository.findHealthyContainersConnectedToBackendByLinuxServer(
+                        backendLifecycle.backendProcessId(),
+                        binding.linuxServerId(),
+                        CONTAINER_CANDIDATE_LIMIT))
                 .orElseGet(() -> repository.findHealthyContainersConnectedToBackend(
                         backendLifecycle.backendProcessId(),
                         CONTAINER_CANDIDATE_LIMIT));
@@ -357,18 +366,6 @@ public class UserOpencodeProcessAssignmentService {
                 backendLifecycle.backendProcessId(),
                 linuxServerId,
                 1).isEmpty();
-    }
-
-    /**
-     * 判断是否能在当前后端可用的容器上重建进程。
-     *
-     * <p>先按旧 binding 的 linux_server_id 偏好查找（同 IP 重启时优先命中原容器）；
-     * 旧 IP 上没有可用容器时 fallback 到全局查找。任一命中即视为可重建，
-     * 让换 IP / 容器迁移后旧用户也能在当前可用的 manager 上重新初始化，
-     * 避免被旧 binding 锁死在失联 IP 上。
-     */
-    private boolean canRebuild(LinuxServerId preferredLinuxServerId) {
-        return canRebuildOn(preferredLinuxServerId) || hasInitializableContainer();
     }
 
     private OpencodeContainer chooseContainer(List<OpencodeContainer> candidates) {

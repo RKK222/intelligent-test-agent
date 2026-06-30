@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"math/rand"
 	"net/http"
 	"sync"
 	"time"
@@ -15,7 +14,7 @@ import (
 	"nhooyr.io/websocket"
 )
 
-// Supervisor 通过 WebSocket 与 Java 后端保持控制面连接，不再通过 HTTP discovery 与 Java 交互。
+// Supervisor 通过 WebSocket 与本服务器 Java 后端保持控制面连接。
 type Supervisor struct {
 	cfg     config.ControlConfig
 	manager *process.Manager
@@ -43,7 +42,7 @@ func NewSupervisor(cfg config.ControlConfig, manager *process.Manager) *Supervis
 	}
 }
 
-// Run 阻塞运行 WebSocket seed、心跳和后端列表补连循环，直到 ctx 取消。
+// Run 阻塞运行本服务器 Java WebSocket 和心跳循环，直到 ctx 取消。
 func (s *Supervisor) Run(ctx context.Context) error {
 	s.ensureConnection(ctx, BackendEndpoint{
 		BackendProcessID: "seed",
@@ -51,8 +50,6 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		WebSocketURL:     s.cfg.BackendWebSocketURL,
 	})
 
-	backendListTicker := time.NewTicker(s.cfg.DiscoveryInterval)
-	defer backendListTicker.Stop()
 	heartbeatTicker := time.NewTicker(s.cfg.HeartbeatInterval)
 	defer heartbeatTicker.Stop()
 
@@ -61,8 +58,6 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			s.stopAll()
 			return ctx.Err()
-		case <-backendListTicker.C:
-			s.requestBackendList(ctx)
 		case <-heartbeatTicker.C:
 			s.sendManagerHeartbeat(ctx)
 		}
@@ -135,7 +130,7 @@ func (s *Supervisor) readLoop(ctx context.Context, state *connectionState, conne
 				return err
 			}
 		case messageTypeBackendListResponse:
-			s.handleBackendList(ctx, message.BackendEndpoints)
+			log.Printf("manager websocket ignored backend list response: manager connects only local backend")
 		case messageTypeCommand:
 			result := s.executeCommand(ctx, message)
 			if err := state.writeJSON(ctx, result); err != nil {
@@ -163,29 +158,6 @@ func (s *Supervisor) readLoop(ctx context.Context, state *connectionState, conne
 		default:
 			log.Printf("manager websocket ignored message type: %s", message.Type)
 		}
-	}
-}
-
-func (s *Supervisor) handleBackendList(ctx context.Context, backends []BackendEndpoint) {
-	for _, backend := range backends {
-		if backend.WebSocketURL == "" {
-			continue
-		}
-		s.ensureConnection(ctx, backend)
-	}
-}
-
-func (s *Supervisor) requestBackendList(ctx context.Context) {
-	state := s.randomConnectedState()
-	if state == nil {
-		return
-	}
-	if err := state.writeJSON(ctx, Message{
-		Type:            messageTypeBackendListRequest,
-		ProtocolVersion: protocolVersion,
-		TraceID:         traceID(),
-	}); err != nil {
-		log.Printf("manager backend list request failed: %v", err)
 	}
 }
 
@@ -320,7 +292,7 @@ func (s *Supervisor) randomConnectedState() *connectionState {
 	if len(states) == 0 {
 		return nil
 	}
-	return states[rand.Intn(len(states))]
+	return states[0]
 }
 
 func (s *Supervisor) connectedBackendProcessIDs() []string {

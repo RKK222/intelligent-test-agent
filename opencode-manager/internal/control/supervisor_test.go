@@ -54,8 +54,8 @@ func TestSupervisorConnectsSeedWebSocketWithoutHTTPDiscovery(t *testing.T) {
 	}
 }
 
-func TestSupervisorAsksConnectedSocketForBackendListAndConnectsMissingBackend(t *testing.T) {
-	secondRegistered := make(chan Message, 1)
+func TestSupervisorIgnoresBackendListAndDoesNotConnectOtherBackends(t *testing.T) {
+	secondConnected := make(chan Message, 1)
 	secondURL, secondCleanup := websocketServer(t, func(ctx context.Context, connection *websocket.Conn) {
 		_, payload, err := connection.Read(ctx)
 		if err != nil {
@@ -63,13 +63,7 @@ func TestSupervisorAsksConnectedSocketForBackendListAndConnectsMissingBackend(t 
 		}
 		var message Message
 		if err := json.Unmarshal(payload, &message); err == nil && message.Type == messageTypeRegister {
-			secondRegistered <- message
-			_ = writeTestMessage(ctx, connection, Message{
-				Type:             messageTypeRegistered,
-				ProtocolVersion:  protocolVersion,
-				BackendProcessID: "bjp_second_12345678",
-				TraceID:          message.TraceID,
-			})
+			secondConnected <- message
 		}
 		<-ctx.Done()
 	})
@@ -89,6 +83,18 @@ func TestSupervisorAsksConnectedSocketForBackendListAndConnectsMissingBackend(t 
 				BackendProcessID: "bjp_seed_1234567890",
 				TraceID:          register.TraceID,
 			})
+			_ = writeTestMessage(ctx, connection, Message{
+				Type:            messageTypeBackendListResponse,
+				ProtocolVersion: protocolVersion,
+				TraceID:         register.TraceID,
+				BackendEndpoints: []BackendEndpoint{{
+					BackendProcessID: "bjp_second_12345678",
+					LinuxServerID:    "10.8.0.12",
+					ListenURL:        "http://10.8.0.12:8081",
+					WebSocketURL:     secondURL,
+					LastHeartbeatAt:  time.Now().UTC(),
+				}},
+			})
 		}
 		for {
 			_, payload, err := connection.Read(ctx)
@@ -101,25 +107,13 @@ func TestSupervisorAsksConnectedSocketForBackendListAndConnectsMissingBackend(t 
 			}
 			if message.Type == messageTypeBackendListRequest {
 				listRequested <- message
-				_ = writeTestMessage(ctx, connection, Message{
-					Type:            messageTypeBackendListResponse,
-					ProtocolVersion: protocolVersion,
-					TraceID:         message.TraceID,
-					BackendEndpoints: []BackendEndpoint{{
-						BackendProcessID: "bjp_second_12345678",
-						LinuxServerID:    "10.8.0.12",
-						ListenURL:        "http://10.8.0.12:8081",
-						WebSocketURL:     secondURL,
-						LastHeartbeatAt:  time.Now().UTC(),
-					}},
-				})
 			}
 		}
 	})
 	defer seedCleanup()
 
 	cfg := supervisorTestConfig(seedURL)
-	cfg.DiscoveryInterval = 20 * time.Millisecond
+	cfg.HeartbeatInterval = 20 * time.Millisecond
 	supervisor := NewSupervisor(cfg, testProcessManager())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -127,12 +121,8 @@ func TestSupervisorAsksConnectedSocketForBackendListAndConnectsMissingBackend(t 
 		_ = supervisor.Run(ctx)
 	}()
 
-	_ = receiveMessage(t, listRequested, time.Second)
-	second := receiveMessage(t, secondRegistered, time.Second)
-
-	if second.Type != messageTypeRegister {
-		t.Fatalf("expected supervisor to register with missing backend, got %#v", second)
-	}
+	assertNoMessage(t, listRequested, 120*time.Millisecond, "manager must not request backend list")
+	assertNoMessage(t, secondConnected, 120*time.Millisecond, "manager must not connect backend list endpoints")
 }
 
 func TestSupervisorSendsManagerHeartbeatThroughOneConnectedSocket(t *testing.T) {
@@ -275,15 +265,6 @@ func TestSupervisorAppliesConfigUpdateAndReportsLiveMaxInHeartbeat(t *testing.T)
 				BackendProcessID: "bjp_seed_1234567890",
 				TraceID:          register.TraceID,
 			})
-			// 注册后立即下发 configUpdate，超过端口池时应裁剪并立即通过心跳回报生效值。
-			_ = writeTestMessage(ctx, connection, Message{
-				Type:            messageTypeConfigUpdate,
-				ProtocolVersion: protocolVersion,
-				TraceID:         register.TraceID,
-				MaxProcesses:    9,
-				SessionRoot:     "/data/.testagent/agent-opencode/.session/",
-				ConfigDir:       "/data/.testagent/agent-opencode/.config/opencode/",
-			})
 		}
 		for {
 			_, payload, err := connection.Read(ctx)
@@ -296,6 +277,15 @@ func TestSupervisorAppliesConfigUpdateAndReportsLiveMaxInHeartbeat(t *testing.T)
 			}
 			if message.Type == messageTypeConfigRequest {
 				configRequests <- message
+				// manager 主动拉取配置后再下发 configUpdate，超过端口池时应裁剪并立即通过心跳回报生效值。
+				_ = writeTestMessage(ctx, connection, Message{
+					Type:            messageTypeConfigUpdate,
+					ProtocolVersion: protocolVersion,
+					TraceID:         message.TraceID,
+					MaxProcesses:    9,
+					SessionRoot:     "/data/.testagent/agent-opencode/.session/",
+					ConfigDir:       "/data/.testagent/agent-opencode/.config/opencode/",
+				})
 			}
 			if message.Type == messageTypeManagerHeartbeat {
 				heartbeats <- message
@@ -446,7 +436,6 @@ func supervisorTestConfig(webSocketURL string) config.ControlConfig {
 		ManagerID:           "mgr_ctr_01_opencode_manager",
 		BackendWebSocketURL: webSocketURL,
 		Token:               "manager-secret",
-		DiscoveryInterval:   time.Hour,
 		HeartbeatInterval:   time.Hour,
 		ReconnectInterval:   10 * time.Millisecond,
 	}
@@ -482,6 +471,15 @@ func receiveMessage(t *testing.T, messages <-chan Message, timeout time.Duration
 		t.Fatal("timed out waiting for message")
 	}
 	return Message{}
+}
+
+func assertNoMessage(t *testing.T, messages <-chan Message, timeout time.Duration, failure string) {
+	t.Helper()
+	select {
+	case message := <-messages:
+		t.Fatalf("%s, got %#v", failure, message)
+	case <-time.After(timeout):
+	}
 }
 
 func testProcessManager() *process.Manager {

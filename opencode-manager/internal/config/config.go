@@ -27,7 +27,6 @@ const (
 
 	defaultBackendPort          = 8080
 	defaultBackendWebSocketPath = "/api/internal/platform/opencode-runtime/manager/ws"
-	defaultDiscoveryInterval    = 10 * time.Second
 	defaultHeartbeatInterval    = 5 * time.Second
 	defaultReconnectInterval    = 10 * time.Second
 	defaultServerIPWait         = 30 * time.Second
@@ -110,7 +109,6 @@ type ControlConfig struct {
 	ManagerID           string
 	BackendWebSocketURL string
 	Token               string
-	DiscoveryInterval   time.Duration
 	HeartbeatInterval   time.Duration
 	ReconnectInterval   time.Duration
 }
@@ -205,7 +203,6 @@ func loadControlFromEnvWithRuntime(rt configRuntime) (ControlConfig, error) {
 		ManagerID:           deriveManagerID(containerID),
 		BackendWebSocketURL: webSocketURL,
 		Token:               strings.TrimSpace(os.Getenv("OPENCODE_MANAGER_TOKEN")),
-		DiscoveryInterval:   durationDefault("OPENCODE_MANAGER_DISCOVERY_INTERVAL", defaultDiscoveryInterval),
 		HeartbeatInterval:   durationDefault("OPENCODE_MANAGER_HEARTBEAT_INTERVAL", defaultHeartbeatInterval),
 		ReconnectInterval:   durationDefault("OPENCODE_MANAGER_RECONNECT_INTERVAL", defaultReconnectInterval),
 	}
@@ -271,7 +268,7 @@ func (c ControlConfig) ValidateControl() error {
 	if strings.TrimSpace(c.Token) == "" {
 		return fmt.Errorf("OPENCODE_MANAGER_TOKEN is required")
 	}
-	if c.DiscoveryInterval <= 0 || c.HeartbeatInterval <= 0 || c.ReconnectInterval <= 0 {
+	if c.HeartbeatInterval <= 0 || c.ReconnectInterval <= 0 {
 		return fmt.Errorf("manager control intervals must be positive")
 	}
 	return nil
@@ -280,12 +277,11 @@ func (c ControlConfig) ValidateControl() error {
 // String 返回脱敏后的控制配置摘要，禁止暴露 manager token。
 func (c ControlConfig) String() string {
 	return fmt.Sprintf(
-		"managerId=%s containerId=%s linuxServerId=%s webSocketUrl=%s token=<redacted> discoveryInterval=%s heartbeatInterval=%s reconnectInterval=%s",
+		"managerId=%s containerId=%s linuxServerId=%s webSocketUrl=%s token=<redacted> heartbeatInterval=%s reconnectInterval=%s",
 		c.ManagerID,
 		c.ContainerID,
 		c.LinuxServerID,
 		c.BackendWebSocketURL,
-		c.DiscoveryInterval,
 		c.HeartbeatInterval,
 		c.ReconnectInterval,
 	)

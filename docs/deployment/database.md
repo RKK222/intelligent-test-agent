@@ -376,7 +376,7 @@ Java 后端启动时会把当前服务器 IPv4 写入 `SYS_DATA_ROOT_DIR/.server
 | `test-agent:common-param-snapshot:backend:{backendProcessId}` | String(JSON) | 30 秒 | 单个后端进程加载的通用参数快照 |
 | `test-agent:common-param-snapshot:index:backend` | Set | - | 存活快照的后端进程 ID 索引 |
 
-进程崩溃后快照 30 秒内自动消失，与运行心跳 10 秒 TTL 不同步可接受（参数展示非实时关键）。广播总线未启用（`test-agent.server-broadcast.enabled=false`）或 Redis 故障时，仅本地实例刷新内存，全互联拓扑下各实例各自读库仍能最终一致，但跨实例 manager 下发需等待本实例下次刷新。
+进程崩溃后快照 30 秒内自动消失，与运行心跳 10 秒 TTL 不同步可接受（参数展示非实时关键）。广播总线未启用（`test-agent.server-broadcast.enabled=false`）或 Redis 故障时，仅本地实例刷新内存；manager 只连接本服务器 Java，跨实例参数刷新只影响最大进程数，未收到广播的实例需等待本实例下次刷新。
 
 macOS 本地环境迁移到项目内 `temp/` 时，先停止服务并运行 `tools/cleanup-old-path-data.sql` 的默认审计模式；确认引用后，再传入 `apply_cleanup=true` 和绝对 `test_agent_root` 迁移 `workspaces`、版本、replica、个人工作区、Agent worktree 和非运行 opencode 进程的路径字段。六个 macOS 通用参数和 `OPENCODE_PUBLIC_AGENT_GIT_URL` 必须通过通用参数管理 API/页面修改，以保留修改历史并触发缓存及 manager 配置刷新。该脚本不删除 Session、Run、审计记录或磁盘目录，也不是 Flyway migration。
 

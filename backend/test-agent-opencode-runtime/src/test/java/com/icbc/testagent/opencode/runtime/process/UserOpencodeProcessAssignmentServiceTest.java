@@ -211,10 +211,9 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
-    void statusReturnsNeedsInitializationWhenBoundLinuxServerHasNoContainerButGlobalHas() {
-        // 场景：换 IP 重启后，旧用户 binding 仍指向旧 IP 10.8.0.12，但该 IP 上已无可用容器；
-        // 当前可用的容器在 10.8.0.13 上。status() 应 fallback 到全局查找，返回 NEEDS_INITIALIZATION
-        // 让用户能重新初始化，而不是直接判死为 UNAVAILABLE 把用户卡死。
+    void statusDoesNotUseGlobalContainerWhenBoundLinuxServerHasNoContainer() {
+        // 多后端路由启用后，remote binding 必须由 binding 所属服务器的 Java 处理；
+        // 业务服务自身不再把用户静默迁移到当前 Java 可见的其他服务器容器。
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_other_linux", container("ctr_other_linux", "10.8.0.13", 4300, 4302, 3, 0));
         OpencodeServerProcess oldProcess = process("ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.UNHEALTHY);
@@ -226,14 +225,15 @@ class UserOpencodeProcessAssignmentServiceTest {
 
         UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
 
-        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.NEEDS_INITIALIZATION);
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.UNAVAILABLE);
         assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.NOT_RUNNING);
+        assertThat(response.serviceAddress()).isEqualTo("10.8.0.12:4096");
     }
 
     @org.junit.jupiter.api.Test
-    void statusReturnsNeedsInitializationWhenBoundProcessIsMissingAndGlobalContainerExists() {
-        // 场景：旧 binding 还在，但 process 行已被历史清理或脏数据删除；
-        // 原 IP 上没有可用容器时也应 fallback 到当前后端可用容器，避免状态接口把旧用户判死。
+    void statusDoesNotUseGlobalContainerWhenBoundProcessIsMissing() {
+        // 旧 binding 的 process 行缺失时也不能 fallback 到其他服务器；
+        // API 层会先把请求路由到 binding 所属服务器，路由失败则由入口层返回不可用。
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_other_linux", container("ctr_other_linux", "10.8.0.13", 4300, 4302, 3, 0));
         repository.bindings.put(
@@ -243,16 +243,15 @@ class UserOpencodeProcessAssignmentServiceTest {
 
         UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
 
-        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.NEEDS_INITIALIZATION);
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.UNAVAILABLE);
         assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.NOT_RUNNING);
         assertThat(response.serviceAddress()).isEqualTo("10.8.0.12:4096");
     }
 
     @org.junit.jupiter.api.Test
-    void initializeRebuildsOnDifferentLinuxServerWhenOldServerHasNoContainer() {
-        // 场景：旧用户 binding 在 10.8.0.12 上，但该 IP 上已无可用容器；
-        // initialize() 应 fallback 到全局查找，在 10.8.0.13 上重建进程，
-        // 并通过 saveUserBinding 把 binding 迁移到新 IP，复用旧 process_id。
+    void initializeDoesNotMigrateBindingToDifferentLinuxServerWhenOldServerHasNoContainer() {
+        // 旧用户 binding 在 10.8.0.12 上，但该 IP 上已无可用容器；
+        // 当前 Java 即使看到 10.8.0.13 有空闲容器，也不能静默迁移用户 binding。
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_other_linux", container("ctr_other_linux", "10.8.0.13", 4300, 4302, 3, 0));
         OpencodeServerProcess oldProcess = process("ocp_existing", USER_ID, "10.8.0.12", "ctr_old", 4096, OpencodeServerProcessStatus.UNHEALTHY);
@@ -262,20 +261,14 @@ class UserOpencodeProcessAssignmentServiceTest {
         gateway.health = OpencodeProcessHealthResult.unhealthy("down");
         UserOpencodeProcessAssignmentService service = service(repository, gateway);
 
-        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
-
-        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
-        assertThat(response.linuxServerId()).isEqualTo("10.8.0.13");
-        assertThat(response.containerId()).isEqualTo("ctr_other_linux");
-        assertThat(response.port()).isEqualTo(4300);
-        assertThat(response.processId()).isEqualTo("ocp_existing");
-        assertThat(gateway.startCommands.getFirst().linuxServerId()).isEqualTo(new LinuxServerId("10.8.0.13"));
-        assertThat(gateway.startCommands.getFirst().baseUrl()).isEqualTo("http://10.8.0.13:4300");
-        // binding 应已迁移到新 IP，避免下次再次卡死在旧 IP 上
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+        assertThat(gateway.startCommands).isEmpty();
         assertThat(repository.findUserBinding(USER_ID, "opencode"))
                 .get()
                 .extracting(UserOpencodeProcessBinding::linuxServerId)
-                .isEqualTo(new LinuxServerId("10.8.0.13"));
+                .isEqualTo(new LinuxServerId("10.8.0.12"));
     }
 
     @org.junit.jupiter.api.Test
@@ -395,6 +388,22 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(affinity.containerId()).isEqualTo("ctr_idle");
         assertThat(affinity.port()).isEqualTo(4096);
         assertThat(affinity.serviceAddress()).isEqualTo("10.8.0.12:4096");
+        assertThat(gateway.healthCommands).isEmpty();
+    }
+
+    @org.junit.jupiter.api.Test
+    void routingLinuxServerIdReadsActiveBindingWithoutGatewayHealth() {
+        FakeRepository repository = new FakeRepository();
+        repository.bindings.put(
+                USER_ID.value() + ":opencode",
+                binding(USER_ID, new OpencodeProcessId("ocp_existing"), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthFailure = new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "不应触发健康检查");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        Optional<String> target = service.routingLinuxServerId(USER_ID, "opencode");
+
+        assertThat(target).contains("10.8.0.12");
         assertThat(gateway.healthCommands).isEmpty();
     }
 

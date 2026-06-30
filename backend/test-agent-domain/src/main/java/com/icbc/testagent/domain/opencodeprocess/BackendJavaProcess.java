@@ -5,7 +5,7 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * 后端 Java 进程实例快照，用于管理进程建立全连接和管理页展示。
+ * 后端 Java 进程实例快照，用于本机 manager 连接、后端路由和管理页展示。
  */
 public record BackendJavaProcess(
         BackendProcessId backendProcessId,

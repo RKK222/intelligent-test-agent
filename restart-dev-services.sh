@@ -771,7 +771,7 @@ start_opencode_manager() {
   : >"${LOG_DIR}/opencode-manager.log"
   if command -v screen >/dev/null 2>&1; then
     local manager_cmd
-    printf -v manager_cmd 'cd %q && export OPENCODE_MANAGER_CONTAINER_ID=%q OPENCODE_MANAGER_BACKEND_PORT=%q OPENCODE_MANAGER_PORT_START=%q OPENCODE_MANAGER_PORT_END=%q OPENCODE_MANAGER_TOKEN="$TEST_AGENT_OPENCODE_MANAGER_TOKEN" OPENCODE_MANAGER_STATE_DIR=%q OPENCODE_BIN=%q OPENCODE_ALLOWED_CORS=%q OPENCODE_MANAGER_DISCOVERY_INTERVAL="${OPENCODE_MANAGER_DISCOVERY_INTERVAL:-10s}" OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}" OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}" && exec ./opencode-manager/bin/opencode-manager run >>%q 2>&1' \
+    printf -v manager_cmd 'cd %q && export OPENCODE_MANAGER_CONTAINER_ID=%q OPENCODE_MANAGER_BACKEND_PORT=%q OPENCODE_MANAGER_PORT_START=%q OPENCODE_MANAGER_PORT_END=%q OPENCODE_MANAGER_TOKEN="$TEST_AGENT_OPENCODE_MANAGER_TOKEN" OPENCODE_MANAGER_STATE_DIR=%q OPENCODE_BIN=%q OPENCODE_ALLOWED_CORS=%q OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}" OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}" && exec ./opencode-manager/bin/opencode-manager run >>%q 2>&1' \
       "${ROOT_DIR}" "${container_id}" "${backend_port}" "${port_start}" "${port_end}" "${manager_state_dir}" "${bin}" "http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}" "${LOG_DIR}/opencode-manager.log"
     screen -dmS "${OPENCODE_MANAGER_SCREEN_SESSION}" bash -lc "${manager_cmd}"
   else
@@ -785,7 +785,6 @@ start_opencode_manager() {
       export OPENCODE_MANAGER_STATE_DIR="${manager_state_dir}"
       export OPENCODE_BIN="${bin}"
       export OPENCODE_ALLOWED_CORS="http://localhost:${frontend_port},http://127.0.0.1:${frontend_port}"
-      export OPENCODE_MANAGER_DISCOVERY_INTERVAL="${OPENCODE_MANAGER_DISCOVERY_INTERVAL:-10s}"
       export OPENCODE_MANAGER_HEARTBEAT_INTERVAL="${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}"
       export OPENCODE_MANAGER_RECONNECT_INTERVAL="${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}"
       nohup ./opencode-manager/bin/opencode-manager run >>"${LOG_DIR}/opencode-manager.log" 2>&1 &
