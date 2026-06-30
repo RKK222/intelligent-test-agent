@@ -1827,7 +1827,7 @@ opencode Web App 运行态能力统一由 `test-agent-api` 的 runtime Controlle
 Model/Provider 目录兼容说明：
 
 - `test-agent.model-catalog.source=opencode` 时，`/api/models` 和 `/api/providers` 保持旧行为，直接代理 opencode。
-- `source=bailian` 时，`/api/models` 由后端请求百炼 OpenAI-compatible `/models` 获取；请求失败时返回配置内置外网模型，Provider 为 `modelstudio`。
+- `source=external` 时，`/api/models` 由后端请求外部 OpenAI-compatible `/models` 获取；请求失败时返回配置内置外网模型，Provider 默认为 `external-openai`。历史 `source=bailian` 会按 `external` 兼容处理。
 - `source=internal` 时，`/api/models` 从 `ai_model_configs` 表读取启用模型，Provider 为 `icbc-openai`；启动时会按 openclaw 企业 patch 的模型清单初始化表，默认模型为 `DeepSeek-V4-Flash-W8A8`。
 - Model 响应对象包含兼容字段 `id`、`modelId`、`modelID`、`providerId`、`providerID`、`name`，托管来源还会返回 `contextLimit`、`outputLimit` 和 `defaultModel`。前端优先选中 `defaultModel=true` 的模型。
 

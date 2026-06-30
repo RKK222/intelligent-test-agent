@@ -25,7 +25,7 @@ import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
 
 /**
- * 模型目录应用服务：外网读取百炼 /models，内网读取 ai_model_configs 表，并尽力同步 opencode provider 配置。
+ * 模型目录应用服务：外网读取 OpenAI-compatible /models，内网读取 ai_model_configs 表，并尽力同步 opencode provider 配置。
  */
 @Service
 public class ModelCatalogApplicationService {
@@ -156,7 +156,7 @@ public class ModelCatalogApplicationService {
             }
             HttpResponse<String> response = httpClient.send(builder.GET().build(), HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new IllegalStateException("Bailian models returned HTTP " + response.statusCode());
+                throw new IllegalStateException("External models returned HTTP " + response.statusCode());
             }
             JsonNode root = objectMapper.readTree(response.body());
             JsonNode data = root.path("data");
@@ -167,7 +167,7 @@ public class ModelCatalogApplicationService {
             data.forEach(item -> result.add(toExternalPayload(provider, item)));
             return result;
         } catch (Exception exception) {
-            LOGGER.warn("event=bailian_models_fetch_failed providerId={} error={}", provider.getProviderId(), exception.getClass().getSimpleName());
+            LOGGER.warn("event=external_models_fetch_failed providerId={} error={}", provider.getProviderId(), exception.getClass().getSimpleName());
             return configuredExternalModels();
         }
     }

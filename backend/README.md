@@ -110,10 +110,10 @@ cp .env.local.example .env.local
 | `TEST_AGENT_REDIS_HOST` / `TEST_AGENT_REDIS_PORT` / `TEST_AGENT_REDIS_PASSWORD` | Redis 连接信息；Redis 是系统必需依赖。 |
 | `TEST_AGENT_SCHEDULER_ENABLED` | 是否启用定时任务后台扫描，默认 false；启用时使用同一 Redis。 |
 | `TEST_AGENT_OPENCODE_BASE_URL` | OpenCode 服务地址 |
-| `TEST_AGENT_MODEL_CATALOG_SOURCE` | 模型目录来源：`opencode` 保持旧代理，`bailian` 直连百炼 `/models`，`internal` 从数据库读取企业内模型。local 默认 `bailian`，test/prod 默认 `internal`。 |
-| `MODELSTUDIO_API_KEY` | 外网百炼 Model Studio Coding Plan API Key；变量名可通过 `TEST_AGENT_BAILIAN_API_KEY_ENV` 改为其他环境变量名。 |
+| `TEST_AGENT_MODEL_CATALOG_SOURCE` | 模型目录来源：`opencode` 保持旧代理，`external` 直连 OpenAI-compatible `/models`，`internal` 从数据库读取企业内模型。local 默认 `external`，test/prod 默认 `internal`；历史 `bailian` 值兼容为 `external`。 |
+| `EXTERNAL_API_KEY` | 外部 OpenAI-compatible API Key；变量名可通过 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 改为其他环境变量名。 |
 | `ICBC_OPENAI_AUTH_TOKEN` | 企业内 `icbc-openai` 访问 token；变量名可通过 `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` 改为其他环境变量名。 |
-| `TEST_AGENT_BAILIAN_BASE_URL` | 外网百炼 OpenAI-compatible base URL，默认 `https://coding.dashscope.aliyuncs.com/v1`。 |
+| `TEST_AGENT_EXTERNAL_MODEL_BASE_URL` | 外部 OpenAI-compatible base URL，例如 `https://api.deepseek.com`。旧 `TEST_AGENT_BAILIAN_BASE_URL` 仍作为兼容兜底。 |
 | `TEST_AGENT_ICBC_OPENAI_BASE_URL` | 企业内 OpenAI-compatible base URL，默认与 openclaw 企业 patch 中的 `icbc-openai` 地址一致。 |
 
 `guo` profile 的 IDEA 启动路径已把上述本地 Java 运行参数写入 yml；继续使用 `tools/dev-backend-run.sh`、`restart-dev-services.sh --profile guo --env-file .env.local` 或 `restart-dev-services.ps1 -Profile guo -EnvFile .env.local` 时，`.env.local` 仍可覆盖 yml，便于本地联调脚本启动前后端和 opencode。根目录一键脚本不带参数时默认读取 `.env.test` 并启动 `test` profile；停止 manager 时会清理其托管的用户 opencode 子进程和 state JSON，防止端口池残留进程导致下次初始化失败。生产和本地都不再配置 `OPENCODE_MANAGER_ID`，Go manager 会由容器名称和固定管理进程名 `opencode-manager` 派生内部 `managerId`。

@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-30 - 模型目录外部供应商配置统一为 external
+
+- Why: 外部 OpenAI-compatible 模型供应商不应继续沿用百炼专用变量名，切换 DeepSeek 时会造成 `TEST_AGENT_BAILIAN_API_KEY_ENV` 与真实 key 变量双重命名的理解成本。
+- What: 将外部模型目录来源规范化为 `source=external`，新增 `TEST_AGENT_EXTERNAL_MODEL_*` 变量族；代码默认值保持 provider-neutral，不在 Java 或 profile yml 中写死 DeepSeek。历史 `source=bailian` 和 `TEST_AGENT_BAILIAN_*` 变量仍作为兼容兜底。移除 `application-guo.yml` 中原有直配模型 key，改为环境变量读取。
+- How: 修改 `ModelCatalogProperties` 的 source 归一化、外部 provider 默认值和 app profile 绑定；同步 backend README、opencode-runtime README、HTTP API、部署文档和 `.env.local.example`，并补充 `legacyBailianSourceIsTreatedAsExternalSource` 回归用例。
+- Result: `ModelCatalogApplicationServiceTest`、`TestAgentRuntimePropertiesBindingTest`、`mvn clean package -DskipTests` 和 `git diff --check` 通过。按 `.env.test` 重启时后端未启动：PostgreSQL `192.168.100.200:5432/testagent` 当前 `No route to host`；前端 3000 启动成功。`.env.test` 需要用户手填 `EXTERNAL_API_KEY` 后才能真实访问 DeepSeek。
+
 ### 2026-06-29 - 聊天面板 opencode 进程状态卡按 serviceStatus 区分未分配/未运行
 
 - Why: 之前聊天面板状态卡对所有非就绪情况都显示"需要初始化 opencode 进程"和"初始化进程"按钮，无法区分"尚未分配专属进程"和"已分配但未运行"，与头像菜单已区分的展示不一致。
