@@ -157,19 +157,23 @@ func (m *Manager) SetMaxProcesses(v int) (int, error) {
 }
 
 // ApplyRuntimeConfig 应用 Java 公共参数下发的 manager 运行配置。
-// sessionRoot/configDir 是启动 opencode server 的权威路径；maxProcesses 会按端口池容量裁剪。
+// 首次完整帧必须同时携带 sessionRoot/configDir；后续 max-only 帧用空路径表示保持原路径不变。
+// maxProcesses 会按端口池容量裁剪。
 func (m *Manager) ApplyRuntimeConfig(maxProcesses int, sessionRoot, configDir string) (int, error) {
 	sessionRoot = strings.TrimSpace(sessionRoot)
 	configDir = strings.TrimSpace(configDir)
-	if sessionRoot == "" {
+	if sessionRoot == "" && configDir != "" {
 		return m.MaxProcesses(), fmt.Errorf("sessionRoot must not be blank")
 	}
-	if configDir == "" {
+	if sessionRoot != "" && configDir == "" {
 		return m.MaxProcesses(), fmt.Errorf("configDir must not be blank")
 	}
 	applied, err := m.SetMaxProcesses(maxProcesses)
 	if err != nil {
 		return applied, err
+	}
+	if sessionRoot == "" && configDir == "" {
+		return applied, nil
 	}
 	m.cfgMu.Lock()
 	defer m.cfgMu.Unlock()

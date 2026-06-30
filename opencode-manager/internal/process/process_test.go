@@ -248,6 +248,40 @@ func TestManagerApplyRuntimeConfigUsesCommonParameterPaths(t *testing.T) {
 	}
 }
 
+func TestManagerApplyRuntimeConfigSupportsMaxOnlyUpdateAfterFullConfig(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.RuntimeConfigRequired = true
+	cfg.SessionRoot = ""
+	cfg.ConfigDir = ""
+	store := state.NewFileStore(t.TempDir())
+	starter := &fakeStarter{pid: 12345}
+	manager := NewManager(cfg, store, starter, fakeSignaler{}, health.Checker{})
+	sessionRoot := t.TempDir() + "/.session/"
+	configDir := t.TempDir() + "/.config/opencode/"
+	initializePublicConfigDir(t, configDir)
+
+	if _, err := manager.ApplyRuntimeConfig(4, sessionRoot, configDir); err != nil {
+		t.Fatalf("initial full runtime config failed: %v", err)
+	}
+	applied, err := manager.ApplyRuntimeConfig(2, "", "")
+	if err != nil {
+		t.Fatalf("max-only runtime config should be accepted after full config: %v", err)
+	}
+	if applied != 2 || manager.MaxProcesses() != 2 {
+		t.Fatalf("expected max-only update to apply 2, applied=%d current=%d", applied, manager.MaxProcesses())
+	}
+	result, err := manager.Start(context.Background(), StartRequest{Port: 4096, TraceID: "trace_1234567890abcdef"})
+	if err != nil {
+		t.Fatalf("Start returned error after max-only config: %v", err)
+	}
+	if result.SessionPath != sessionRoot+"4096" {
+		t.Fatalf("max-only config must keep previous session path, got %q", result.SessionPath)
+	}
+	if result.ConfigPath != configDir {
+		t.Fatalf("max-only config must keep previous config path, got %q", result.ConfigPath)
+	}
+}
+
 func TestManagerStopTerminatesProcessAndRemovesState(t *testing.T) {
 	cfg := testConfig(t)
 	store := state.NewFileStore(t.TempDir())

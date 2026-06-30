@@ -316,6 +316,80 @@ func TestSupervisorAppliesConfigUpdateAndReportsLiveMaxInHeartbeat(t *testing.T)
 	}
 }
 
+func TestSupervisorAppliesMaxOnlyConfigUpdateAndReportsHeartbeat(t *testing.T) {
+	heartbeats := make(chan Message, 8)
+	seedURL, cleanup := websocketServer(t, func(ctx context.Context, connection *websocket.Conn) {
+		_, payload, err := connection.Read(ctx)
+		if err != nil {
+			return
+		}
+		var register Message
+		if err := json.Unmarshal(payload, &register); err == nil && register.Type == messageTypeRegister {
+			_ = writeTestMessage(ctx, connection, Message{
+				Type:             messageTypeRegistered,
+				ProtocolVersion:  protocolVersion,
+				BackendProcessID: "bjp_seed_1234567890",
+				TraceID:          register.TraceID,
+			})
+		}
+		maxOnlySent := false
+		for {
+			_, payload, err := connection.Read(ctx)
+			if err != nil {
+				return
+			}
+			var message Message
+			if err := json.Unmarshal(payload, &message); err != nil {
+				continue
+			}
+			if message.Type == messageTypeConfigRequest {
+				_ = writeTestMessage(ctx, connection, Message{
+					Type:            messageTypeConfigUpdate,
+					ProtocolVersion: protocolVersion,
+					TraceID:         message.TraceID,
+					MaxProcesses:    5,
+					SessionRoot:     "/data/.testagent/agent-opencode/.session/",
+					ConfigDir:       "/data/.testagent/agent-opencode/.config/opencode/",
+				})
+			}
+			if message.Type == messageTypeManagerHeartbeat {
+				heartbeats <- message
+				if !maxOnlySent {
+					maxOnlySent = true
+					_ = writeTestMessage(ctx, connection, Message{
+						Type:            messageTypeConfigUpdate,
+						ProtocolVersion: protocolVersion,
+						TraceID:         "trace_max_only",
+						MaxProcesses:    2,
+					})
+				}
+			}
+		}
+	})
+	defer cleanup()
+	cfg := supervisorTestConfig(seedURL)
+	cfg.HeartbeatInterval = time.Hour
+	manager := testProcessManager()
+	supervisor := NewSupervisor(cfg, manager)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		_ = supervisor.Run(ctx)
+	}()
+
+	initialHeartbeat := receiveMessage(t, heartbeats, time.Second)
+	if initialHeartbeat.MaxProcesses != 5 {
+		t.Fatalf("expected full config heartbeat maxProcesses 5, got %d", initialHeartbeat.MaxProcesses)
+	}
+	maxOnlyHeartbeat := receiveMessage(t, heartbeats, time.Second)
+	if maxOnlyHeartbeat.MaxProcesses != 2 {
+		t.Fatalf("expected max-only config heartbeat maxProcesses 2, got %d", maxOnlyHeartbeat.MaxProcesses)
+	}
+	if manager.MaxProcesses() != 2 {
+		t.Fatalf("expected manager runtime max 2 after max-only update, got %d", manager.MaxProcesses())
+	}
+}
+
 func TestSupervisorCommandResultIncludesPublicConfigErrorCode(t *testing.T) {
 	cfg := supervisorTestConfig("")
 	cfg.Config.StateDir = t.TempDir()

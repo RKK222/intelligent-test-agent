@@ -2185,3 +2185,11 @@ bash /tmp/test-api-after-restart.sh
 - How: Java 路由服务保留原始 `Authorization`、`X-Trace-Id`、body 和目标响应，目标后端不可用统一返回 `OPENCODE_UNAVAILABLE`；同 IP 历史重复 Java 快照按最新 heartbeat 选目标。通用参数前端更新入口只放行最大进程数，路径类参数改为部署/初始化参数；启动脚本删除废弃 `OPENCODE_MANAGER_DISCOVERY_INTERVAL` 和 `OPENCODE_MANAGER_ID` 注入。
 - Result: 任意 Java 收到 remote binding 请求时会路由到 binding 所属服务器 Java，不再自动迁移；每个 manager 只维持单条本机 Java WebSocket，断线后按重连间隔无限重连并重新拉取配置。
 - Verification: `mvn -pl test-agent-api,test-agent-opencode-runtime,test-agent-configuration-management -am test`、`go test ./...`（opencode-manager）、`bash tools/verify-dev-scripts.sh`、`mvn clean package -DskipTests`、`git diff --check` 全部通过。
+
+### 2026-06-30 - 修复 manager 最大进程数热更新不生效
+
+- Why: Java 已按新契约广播 max-only `configUpdate(maxProcesses, sessionRoot=null, configDir=null)`，但 Go `Manager.ApplyRuntimeConfig` 仍把空路径当完整配置缺失拒绝，导致 manager 不更新 `MaxProcesses`、不立即 heartbeat，运行管理容量保持旧值。
+- What: Go manager 支持两种合法配置帧：首次完整帧必须同时带 `sessionRoot/configDir` 并置 ready；后续 max-only 帧允许路径为空，只更新并发上限并保留已生效路径。单路径缺失的非法帧仍拒绝且不产生部分路径更新。
+- How: 先补红灯测试 `TestManagerApplyRuntimeConfigSupportsMaxOnlyUpdateAfterFullConfig` 和 `TestSupervisorAppliesMaxOnlyConfigUpdateAndReportsHeartbeat`，确认旧实现失败；再调整 `ApplyRuntimeConfig` 的路径帧形态校验与 max-only 分支，并更新 opencode-manager README。
+- Result: 修改 `OPENCODE_MANAGER_MAX_PROCESSES` 后，manager 会应用新容量并立即补发 heartbeat，Java 按 heartbeat 更新 Redis/数据库快照，运行管理“容器 / 管理进程”容量随刷新变化。
+- Verification: `go test ./...`（opencode-manager）、`git diff --check` 通过。
