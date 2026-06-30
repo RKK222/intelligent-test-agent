@@ -501,6 +501,43 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
                 .update();
     }
 
+    @Override
+    public void deleteAllByApplicationWorkspaceId(ApplicationWorkspaceId applicationWorkspaceId) {
+        String appWsId = applicationWorkspaceId.value();
+        // 1. 删除同步记录（引用 personal_workspaces.personal_workspace_id）
+        jdbcClient.sql("""
+                        delete from workspace_sync_records
+                        where target_workspace_id in (
+                            select personal_workspace_id from personal_workspaces
+                            where application_workspace_id = :applicationWorkspaceId
+                        )
+                        or source_workspace_id in (
+                            select personal_workspace_id from personal_workspaces
+                            where application_workspace_id = :applicationWorkspaceId
+                        )
+                        """)
+                .param("applicationWorkspaceId", appWsId)
+                .update();
+        // 2. 删除版本副本（引用 application_workspace_versions.version_id）
+        jdbcClient.sql("""
+                        delete from application_workspace_version_replicas
+                        where version_id in (
+                            select version_id from application_workspace_versions
+                            where application_workspace_id = :applicationWorkspaceId
+                        )
+                        """)
+                .param("applicationWorkspaceId", appWsId)
+                .update();
+        // 3. 删除个人工作空间（引用 application_workspace_versions.version_id 和 application_workspaces.workspace_id）
+        jdbcClient.sql("delete from personal_workspaces where application_workspace_id = :applicationWorkspaceId")
+                .param("applicationWorkspaceId", appWsId)
+                .update();
+        // 4. 删除应用版本工作空间（引用 application_workspaces.workspace_id）
+        jdbcClient.sql("delete from application_workspace_versions where application_workspace_id = :applicationWorkspaceId")
+                .param("applicationWorkspaceId", appWsId)
+                .update();
+    }
+
     private void saveGlobalPreference(UserWorkspacePreference preference) {
         if (findGlobalPreference(preference.userId()).isPresent()) {
             jdbcClient.sql("""

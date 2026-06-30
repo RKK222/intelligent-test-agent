@@ -632,6 +632,12 @@ class ManagedWorkspaceApplicationServiceTest {
             return Optional.of(current);
         }
         @Override public void saveSyncRecord(WorkspaceSyncRecord record) { syncRecords.add(record); }
+        @Override public void deleteAllByApplicationWorkspaceId(ApplicationWorkspaceId applicationWorkspaceId) {
+            syncRecords.clear();
+            replicas.clear();
+            personals.clear();
+            versions.clear();
+        }
     }
 
     private static final class FakeWorkspaceRepository implements WorkspaceRepository {

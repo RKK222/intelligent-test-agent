@@ -1,5 +1,6 @@
 package com.icbc.testagent.api.web.platform;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.common.api.ApiResponse;
@@ -21,6 +22,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -44,15 +46,19 @@ public class RuntimeManagementController {
 
     private final RuntimeManagementQueryService queryService;
     private final RuntimeManagementCommandService commandService;
+    private final RuntimeManagementBackendRoutingService backendRoutingService;
 
     /**
      * 注入运行管理查询和命令服务；Controller 不直接访问 Repository。
      */
+    @Autowired
     public RuntimeManagementController(
             RuntimeManagementQueryService queryService,
-            RuntimeManagementCommandService commandService) {
+            RuntimeManagementCommandService commandService,
+            RuntimeManagementBackendRoutingService backendRoutingService) {
         this.queryService = Objects.requireNonNull(queryService, "queryService must not be null");
         this.commandService = Objects.requireNonNull(commandService, "commandService must not be null");
+        this.backendRoutingService = Objects.requireNonNull(backendRoutingService, "backendRoutingService must not be null");
     }
 
     /**
@@ -209,6 +215,13 @@ public class RuntimeManagementController {
         OpencodeContainerId parsedContainerId = parseRequiredContainerId(containerId);
         int parsedPort = parsePort(port);
         return Mono.fromCallable(() -> {
+                    var forwardTarget = backendRoutingService.forwardTargetForContainer(exchange, parsedContainerId);
+                    if (forwardTarget.isPresent()) {
+                        return backendRoutingService.forward(
+                                exchange,
+                                forwardTarget.get(),
+                                new TypeReference<ApiResponse<RuntimeManagementDtos.ManagedProcessCommandResponse>>() {});
+                    }
                     OpencodeProcessControlResult result = restart
                             ? commandService.restartManagedProcess(parsedContainerId, parsedPort, traceId)
                             : commandService.stopManagedProcess(parsedContainerId, parsedPort, traceId);

@@ -160,6 +160,9 @@ const opencodeServiceDisplay = computed(() => {
     return { tone: "checking", text: "正在查询" };
   }
   const process = props.opencodeProcessStatus;
+  if (!process) {
+    return { tone: "checking", text: "状态未知" };
+  }
   const address = opencodeServiceAddress(process);
   const serviceStatus = process?.serviceStatus ?? (process?.status === "READY" ? "RUNNING" : address ? "NOT_RUNNING" : "UNASSIGNED");
   if (serviceStatus === "RUNNING") {

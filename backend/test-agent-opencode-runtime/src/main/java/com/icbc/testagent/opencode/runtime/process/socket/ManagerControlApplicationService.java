@@ -94,8 +94,12 @@ public class ManagerControlApplicationService {
         while (current != null) {
             String simpleName = current.getClass().getSimpleName();
             String className = current.getClass().getName();
+            // 唯一键冲突和 FK 违规都属于数据完整性问题，
+            // 在线状态以 WebSocket 和 Redis 快照为准，持久拓扑冲突不能阻断 manager 启动。
             if ("DuplicateKeyException".equals(simpleName)
-                    || "org.springframework.dao.DuplicateKeyException".equals(className)) {
+                    || "org.springframework.dao.DuplicateKeyException".equals(className)
+                    || "DataIntegrityViolationException".equals(simpleName)
+                    || "org.springframework.dao.DataIntegrityViolationException".equals(className)) {
                 return true;
             }
             current = current.getCause();
@@ -215,6 +219,8 @@ public class ManagerControlApplicationService {
         LinuxServerId linuxServerId = new LinuxServerId(message.linuxServerId());
         OpencodeContainerId containerId = new OpencodeContainerId(message.containerId());
         ContainerManagerId managerId = new ContainerManagerId(message.managerId());
+        // manager 可能在 ApplicationRunner 首次心跳落库前连入，先补齐当前 Java 进程父表行，避免连接外键失败。
+        backendLifecycle.registerHeartbeat(message.traceId());
         repository.saveLinuxServer(new LinuxServer(
                 linuxServerId,
                 linuxServerId.value(),

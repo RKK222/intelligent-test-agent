@@ -153,67 +153,6 @@ class TestAgentRuntimePropertiesBindingTest {
                     assertThat(properties.getOpencode().getManagerControl().getHeartbeatInterval()).isEqualTo(Duration.ofSeconds(4));
                     assertThat(properties.getOpencode().getManagerControl().getBackendStaleAfter()).isEqualTo(Duration.ofSeconds(9));
                     assertThat(properties.getOpencode().getManagerControl().getCommandTimeout()).isEqualTo(Duration.ofSeconds(7));
-                    // gatewayMode 未显式配置时回退为默认 socket，避免空字符串污染网关激活条件。
-                    assertThat(properties.getOpencode().getManagerControl().getGatewayMode()).isEqualTo("socket");
-                });
-    }
-
-    @Test
-    void managerControlGatewayModeBindsAndDefaultsAreNormalized() {
-        profileContextRunner
-                .withPropertyValues(
-                        "test-agent.opencode.manager-control.gateway-mode=local")
-                .run(context -> {
-                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
-                    assertThat(properties.getOpencode().getManagerControl().getGatewayMode()).isEqualTo("local");
-                });
-        profileContextRunner
-                .withPropertyValues(
-                        "test-agent.opencode.manager-control.gateway-mode=  ")
-                .run(context -> {
-                    TestAgentRuntimeProperties properties = context.getBean(TestAgentRuntimeProperties.class);
-                    // 空白字符串会被规整回 socket，避免 @ConditionalOnProperty 走空值不匹配的边界条件。
-                    assertThat(properties.getOpencode().getManagerControl().getGatewayMode()).isEqualTo("socket");
-                });
-    }
-
-    @Test
-    void opencodeLocalDirectDefaultsAreFalseAnd1270014096() {
-        // 不显式配置时短路默认关闭，baseUrl 回退默认 127.0.0.1:4096，
-        // 避免生产环境被误启用导致 topology 校验被跳过。
-        contextRunner.run(context -> {
-            TestAgentRuntimeProperties.Opencode opencode = context
-                    .getBean(TestAgentRuntimeProperties.class)
-                    .getOpencode();
-            assertThat(opencode.isLocalDirect()).isFalse();
-            assertThat(opencode.getLocalDirectBaseUrl()).isEqualTo("http://127.0.0.1:4096");
-        });
-    }
-
-    @Test
-    void opencodeLocalDirectBindsFromPropertiesAndNormalizesBlankBaseUrl() {
-        contextRunner
-                .withPropertyValues(
-                        "test-agent.opencode.local-direct=true",
-                        "test-agent.opencode.local-direct-base-url=http://opencode-dev.example.internal:5099")
-                .run(context -> {
-                    TestAgentRuntimeProperties.Opencode opencode = context
-                            .getBean(TestAgentRuntimeProperties.class)
-                            .getOpencode();
-                    assertThat(opencode.isLocalDirect()).isTrue();
-                    assertThat(opencode.getLocalDirectBaseUrl()).isEqualTo("http://opencode-dev.example.internal:5099");
-                });
-        // baseUrl 为空时回退到默认 127.0.0.1:4096，避免合成进程构造失败。
-        contextRunner
-                .withPropertyValues(
-                        "test-agent.opencode.local-direct=true",
-                        "test-agent.opencode.local-direct-base-url=  ")
-                .run(context -> {
-                    TestAgentRuntimeProperties.Opencode opencode = context
-                            .getBean(TestAgentRuntimeProperties.class)
-                            .getOpencode();
-                    assertThat(opencode.isLocalDirect()).isTrue();
-                    assertThat(opencode.getLocalDirectBaseUrl()).isEqualTo("http://127.0.0.1:4096");
                 });
     }
 

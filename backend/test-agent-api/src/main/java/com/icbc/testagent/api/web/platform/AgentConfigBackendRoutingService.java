@@ -2,20 +2,19 @@ package com.icbc.testagent.api.web.platform;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.icbc.testagent.common.api.ApiErrorResponse;
 import com.icbc.testagent.common.api.ApiResponse;
-import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
+import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
+import com.icbc.testagent.opencode.runtime.process.BackendJavaRouteResolver;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import com.icbc.testagent.workspace.AgentConfigApplicationService;
 import com.icbc.testagent.workspace.AgentConfigResponses;
 import com.icbc.testagent.workspace.WorkspaceServerIdentity;
 import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -25,7 +24,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpHeaders;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ServerWebExchange;
 
@@ -35,17 +33,23 @@ import org.springframework.web.server.ServerWebExchange;
 @Service
 class AgentConfigBackendRoutingService {
 
-    private static final Duration FORWARD_TIMEOUT = Duration.ofSeconds(30);
     private static final String LOCAL_REPOSITORY_PATH =
             "/api/internal/platform/workspace-management/agent-config/public/repositories/local";
 
     private final AgentConfigApplicationService service;
-    private final WorkspaceServerIdentity serverIdentity;
-    private final OpencodeProcessHeartbeatStore heartbeatStore;
-    private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
+    private final BackendJavaRouteResolver routeResolver;
+    private final BackendHttpForwarder forwarder;
 
     @Autowired
+    AgentConfigBackendRoutingService(
+            AgentConfigApplicationService service,
+            BackendJavaRouteResolver routeResolver,
+            BackendHttpForwarder forwarder) {
+        this.service = Objects.requireNonNull(service, "service must not be null");
+        this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
+        this.forwarder = Objects.requireNonNull(forwarder, "forwarder must not be null");
+    }
+
     AgentConfigBackendRoutingService(
             AgentConfigApplicationService service,
             WorkspaceServerIdentity serverIdentity,
@@ -62,20 +66,19 @@ class AgentConfigBackendRoutingService {
             OpencodeProcessHeartbeatStore heartbeatStore,
             ObjectMapper objectMapper,
             HttpClient httpClient) {
-        this.service = Objects.requireNonNull(service, "service must not be null");
-        this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
-        this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
-        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
-        this.httpClient = Objects.requireNonNull(httpClient, "httpClient must not be null");
+        this(
+                service,
+                testRouteResolver(serverIdentity, heartbeatStore),
+                new BackendHttpForwarder(objectMapper, httpClient));
     }
 
     /**
      * 单元测试便捷构造器：只支持本机执行，不访问 Redis 或远端 HTTP。
      */
     AgentConfigBackendRoutingService(AgentConfigApplicationService service) {
-        this.service = Objects.requireNonNull(service, "service must not be null");
-        this.serverIdentity = new WorkspaceServerIdentity("linux-1");
-        this.heartbeatStore = new OpencodeProcessHeartbeatStore() {
+        this(
+                service,
+                testRouteResolver(new WorkspaceServerIdentity("127.0.0.1"), new OpencodeProcessHeartbeatStore() {
             @Override public void recordBackendHeartbeat(com.icbc.testagent.domain.opencodeprocess.LinuxServerId linuxServerId, java.time.Instant heartbeatAt) {}
             @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) {}
             @Override public void recordManagerSnapshot(com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot snapshot) {}
@@ -85,13 +88,27 @@ class AgentConfigBackendRoutingService {
             @Override public java.util.Set<com.icbc.testagent.domain.opencodeprocess.LinuxServerId> liveBackendServerIds() { return java.util.Set.of(); }
             @Override public java.util.Set<com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId> liveOpencodeProcessIds() { return java.util.Set.of(); }
             @Override public void cleanupExpiredHeartbeats() {}
-        };
-        this.objectMapper = new ObjectMapper().findAndRegisterModules();
-        this.httpClient = HttpClient.newHttpClient();
+        }),
+                new BackendHttpForwarder(new ObjectMapper().findAndRegisterModules(), HttpClient.newHttpClient()));
+    }
+
+    private static BackendJavaRouteResolver testRouteResolver(
+            WorkspaceServerIdentity serverIdentity,
+            OpencodeProcessHeartbeatStore heartbeatStore) {
+        return new BackendJavaRouteResolver(
+                heartbeatStore,
+                new ManagerControlSettings(
+                        "",
+                        "http://" + serverIdentity.linuxServerId() + ":8080",
+                        new LinuxServerId(serverIdentity.linuxServerId()),
+                        Duration.ofSeconds(5),
+                        Duration.ofSeconds(10),
+                        Duration.ofSeconds(10),
+                        100));
     }
 
     List<AgentConfigResponses.PublicRepositoryStatusResponse> listPublicRepositories(ServerWebExchange exchange, String traceId) {
-        Map<String, BackendJavaProcess> remoteBackends = remoteBackendsByServer();
+        Map<String, BackendJavaProcess> remoteBackends = routeResolver.remoteBackendsByServer();
         Map<String, AgentConfigResponses.PublicRepositoryStatusResponse> responsesByServer = new LinkedHashMap<>();
         AgentConfigResponses.PublicRepositoryStatusResponse local = service.localPublicRepositoryStatus();
         responsesByServer.put(local.linuxServerId(), local);
@@ -130,14 +147,11 @@ class AgentConfigBackendRoutingService {
 
     Optional<String> forwardTargetForPublicWorktree(String worktreeId) {
         return service.publicWorktreeLinuxServerId(worktreeId)
-                .filter(linuxServerId -> !serverIdentity.linuxServerId().equals(linuxServerId));
+                .flatMap(routeResolver::remoteTarget);
     }
 
     Optional<String> forwardTargetForRequestedServer(String linuxServerId) {
-        if (linuxServerId == null || linuxServerId.isBlank() || serverIdentity.linuxServerId().equals(linuxServerId.trim())) {
-            return Optional.empty();
-        }
-        return Optional.of(linuxServerId.trim());
+        return routeResolver.remoteTarget(linuxServerId);
     }
 
     <T> ApiResponse<T> forward(
@@ -157,73 +171,7 @@ class AgentConfigBackendRoutingService {
             String method,
             Object requestBody,
             TypeReference<ApiResponse<T>> responseType) {
-        BackendJavaProcess backend = backendFor(linuxServerId);
-        try {
-            HttpRequest.Builder builder = HttpRequest.newBuilder()
-                    .uri(URI.create(trimTrailingSlash(backend.listenUrl()) + pathAndQuery))
-                    .timeout(FORWARD_TIMEOUT)
-                    .header("X-Trace-Id", traceId(exchange))
-                    .header(HttpHeaders.CONTENT_TYPE, "application/json");
-            String authorization = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
-            if (authorization != null && !authorization.isBlank()) {
-                builder.header(HttpHeaders.AUTHORIZATION, authorization);
-            }
-            HttpRequest.BodyPublisher body = requestBody == null
-                    ? HttpRequest.BodyPublishers.noBody()
-                    : HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(requestBody));
-            HttpResponse<String> response = httpClient.send(builder.method(method, body).build(), HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() >= 200 && response.statusCode() < 300) {
-                return objectMapper.readValue(response.body(), responseType);
-            }
-            ApiErrorResponse error = objectMapper.readValue(response.body(), ApiErrorResponse.class);
-            throw new PlatformException(errorCode(error.code()), error.message(), error.details());
-        } catch (PlatformException exception) {
-            throw exception;
-        } catch (Exception exception) {
-            throw new PlatformException(
-                    ErrorCode.OPENCODE_UNAVAILABLE,
-                    "目标服务器后端不可用",
-                    Map.of("linuxServerId", linuxServerId),
-                    exception);
-        }
-    }
-
-    private BackendJavaProcess backendFor(String linuxServerId) {
-        BackendJavaProcess backend = remoteBackendsByServer().get(linuxServerId);
-        if (backend == null) {
-            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "目标服务器后端不可用", Map.of("linuxServerId", linuxServerId));
-        }
-        return backend;
-    }
-
-    private Map<String, BackendJavaProcess> remoteBackendsByServer() {
-        Map<String, BackendJavaProcess> result = new LinkedHashMap<>();
-        for (BackendRuntimeSnapshot snapshot : heartbeatStore.liveBackendSnapshots()) {
-            BackendJavaProcess backend = snapshot.backendProcess();
-            if (!serverIdentity.linuxServerId().equals(backend.linuxServerId().value())) {
-                result.putIfAbsent(backend.linuxServerId().value(), backend);
-            }
-        }
-        return result;
-    }
-
-    private ErrorCode errorCode(String code) {
-        try {
-            return ErrorCode.valueOf(code);
-        } catch (Exception exception) {
-            return ErrorCode.INTERNAL_ERROR;
-        }
-    }
-
-    private String traceId(ServerWebExchange exchange) {
-        String traceId = exchange.getResponse().getHeaders().getFirst("X-Trace-Id");
-        if (traceId == null || traceId.isBlank()) {
-            traceId = exchange.getRequest().getHeaders().getFirst("X-Trace-Id");
-        }
-        return traceId == null || traceId.isBlank() ? "trace_agent_config_forward" : traceId;
-    }
-
-    private String trimTrailingSlash(String value) {
-        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+        BackendJavaProcess backend = routeResolver.requireBackend(linuxServerId);
+        return forwarder.forwardTyped(exchange, backend, pathAndQuery, method, requestBody, responseType);
     }
 }

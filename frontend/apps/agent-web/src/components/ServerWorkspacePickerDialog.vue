@@ -85,10 +85,18 @@ function goForward() {
 
 const canGoBack = computed(() => historyIndex.value > 0);
 const canGoForward = computed(() => historyIndex.value < historyStack.value.length - 1);
+const selectedDirectoryPath = computed(() => props.directory?.path ?? selectedServer.value?.defaultDirectory ?? "");
+const selectedDirectoryName = computed(() => {
+  const path = selectedDirectoryPath.value;
+  if (!path) return "—";
+  const normalizedPath = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const lastSegment = normalizedPath.split("/").filter(Boolean).at(-1);
+  return lastSegment || path;
+});
 
 // Parse path into breadcrumbs with safety for Linux/Windows structures
 const breadcrumbs = computed(() => {
-  const pathStr = props.directory?.path || selectedServer.value?.defaultDirectory || "";
+  const pathStr = selectedDirectoryPath.value;
   if (!pathStr) return [];
 
   const normalizedPath = pathStr.replace(/\\/g, "/");
@@ -179,7 +187,7 @@ const breadcrumbs = computed(() => {
             </div>
 
             <!-- macOS Finder-style Navigation & Location Bar -->
-            <div class="flex items-center gap-3 mb-3 bg-white border border-[var(--ta-border)] rounded-md p-1.5 shrink-0 select-none shadow-sm">
+            <div class="flex items-center gap-3 bg-white border border-[var(--ta-border)] rounded-md p-1.5 shrink-0 select-none shadow-sm">
               <!-- Back / Forward Buttons -->
               <div class="flex items-center gap-0.5 shrink-0">
                 <button
@@ -230,25 +238,47 @@ const breadcrumbs = computed(() => {
                   </div>
                 </template>
               </div>
+            </div>
 
-              <!-- Select Directory Button -->
+            <!-- 当前目录才是将被选择的工作空间，下面列表仅用于进入子目录。 -->
+            <div class="my-3 flex items-start gap-3 rounded-md border border-[#bfdbfe] bg-[#eff6ff] px-3 py-2 shadow-sm">
+              <div class="min-w-0 flex-1">
+                <div class="text-[11px] font-semibold text-[#1d4ed8]">将作为工作空间选择</div>
+                <div
+                  class="mt-1 flex min-w-0 items-start gap-1.5 text-[13px] font-semibold leading-5 text-[#111827]"
+                  :title="selectedDirectoryName"
+                >
+                  <Folder class="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#2563eb]" />
+                  <span class="min-w-0 break-all">{{ selectedDirectoryName }}</span>
+                </div>
+                <div
+                  class="mt-0.5 break-all font-mono text-[11px] leading-4 text-[#1e3a8a]"
+                  :title="selectedDirectoryPath"
+                >
+                  {{ selectedDirectoryPath || "—" }}
+                </div>
+              </div>
               <Button
                 size="sm"
-                class="h-7 shrink-0 text-[12px] font-medium"
+                class="h-8 shrink-0 text-[12px] font-medium"
                 :disabled="loading || serverMismatch || !directory || !selectedServer"
                 @click="directory && selectedServer && emit('select', { server: selectedServer, path: directory.path })"
               >
-                选择此目录
+                使用当前目录
               </Button>
             </div>
 
             <!-- macOS Finder list-view container -->
             <div class="flex-1 flex flex-col min-h-0 bg-white border border-[var(--ta-border)] rounded-md overflow-hidden shadow-sm">
+              <div class="flex h-8 shrink-0 items-center justify-between border-b border-[var(--ta-border)] bg-[#fafafa] px-3 text-[11px] font-semibold text-gray-500">
+                <span>子目录（点击进入）</span>
+                <span v-if="directory && !loading" class="font-normal text-gray-400">{{ directory.entries.length }} 个</span>
+              </div>
               <!-- Content -->
               <div class="flex-1 overflow-y-auto min-h-0 py-1">
                 <div v-if="loading" class="px-3 py-8 text-[13px] text-[var(--ta-muted)] text-center">正在加载目录</div>
                 <div v-else-if="serverMismatch" class="px-3 py-8 text-[13px] text-[var(--ta-muted)] text-center">请选择与当前 agent 相同的服务器后继续。</div>
-                <div v-else-if="!directory?.entries.length" class="px-3 py-8 text-[13px] text-[var(--ta-muted)] text-center">没有可进入的子目录</div>
+                <div v-else-if="!directory?.entries.length" class="px-3 py-8 text-[13px] text-[var(--ta-muted)] text-center">当前目录没有可进入的子目录，可直接使用当前目录。</div>
                 <template v-else>
                   <ServerWorkspaceDirectoryNode
                     v-for="entry in directory.entries"

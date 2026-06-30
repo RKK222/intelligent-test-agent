@@ -201,7 +201,8 @@ public class ConfigurationManagementController {
             @RequestBody ConfigurationManagementDtos.CreateApplicationWorkspaceRequest request,
             ServerWebExchange exchange) {
         UserId userId = requireAdmin(exchange);
-        return ok(exchange, workspaceService.createApplicationWorkspaceWithInitialVersion(
+        // 异步创建：立即返回 operationId，前端通过轮询获取进度
+        return ok(exchange, workspaceService.createWorkspaceAccepted(
                 appId,
                 request.repositoryId(),
                 request.branch(),

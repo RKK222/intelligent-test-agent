@@ -1165,7 +1165,7 @@ const processStatusText = computed(() => {
   if (props.processRequired && !props.processStatus)
     return '请刷新进程状态后重试'
   if (!props.processStatus) return ''
-  return props.processStatus.baseUrl ?? props.processStatus.message
+  return resolveServiceAddress(props.processStatus) || props.processStatus.message
 })
 
 // 进程状态卡片可折叠：默认收起为右下角一个小圆点（带渐变虚化），
@@ -2460,20 +2460,26 @@ function onCompositionEnd() {
           </button>
           <!-- 中间：模型选择 -->
           <div class="figma-chat-model-select-wrapper">
-            <button
-              type="button"
-              class="figma-chat-card-btn figma-chat-model-btn"
+            <el-tooltip
+              :content="selectedModelLabel || '选择模型'"
+              placement="top"
+              :show-after="100"
               :disabled="modelPickerDisabled"
-              title="切换模型"
-              aria-label="切换模型"
-              @click.stop="toggleDropdown"
             >
-              <span class="figma-chat-model-label">{{
-                selectedModelLabel || '选择模型'
-              }}</span>
-              <ChevronDown class="figma-chat-btn-icon" />
-            </button>
-            <div v-if="dropdownOpen" class="figma-chat-model-dropdown" @click.stop>
+              <button
+                type="button"
+                class="figma-chat-card-btn figma-chat-model-btn"
+                :disabled="modelPickerDisabled"
+                aria-label="切换模型"
+                @click.stop="toggleDropdown"
+              >
+                <span class="figma-chat-model-label">{{
+                  selectedModelLabel || '选择模型'
+                }}</span>
+                <ChevronDown class="figma-chat-btn-icon" />
+              </button>
+            </el-tooltip>
+            <div v-if="dropdownOpen" class="figma-chat-model-dropdown" role="dialog" aria-label="模型选择" @click.stop>
               <div class="figma-chat-model-dropdown-search">
                 <input
                   v-model="modelSearch"
@@ -2488,16 +2494,22 @@ function onCompositionEnd() {
                 <div v-if="!modelSearch.trim() && recommendedModels.length" class="figma-chat-model-section">
                   <div class="figma-chat-model-section-title">上新推荐</div>
                   <div class="figma-chat-model-recommended-grid">
-                    <button
+                    <el-tooltip
                       v-for="model in recommendedModels"
                       :key="modelValue(model)"
-                      type="button"
-                      :class="['figma-chat-model-rec-item', modelValue(model) === selectedModel && 'is-active']"
-                      @click="selectModel(model)"
+                      :content="model.name"
+                      placement="top"
+                      :show-after="100"
                     >
-                      <span class="figma-chat-model-rec-dot" :style="{ backgroundColor: getModelColor(model) }" />
-                      <span class="figma-chat-model-rec-name">{{ model.name }}</span>
-                    </button>
+                      <button
+                        type="button"
+                        :class="['figma-chat-model-rec-item', modelValue(model) === selectedModel && 'is-active']"
+                        @click="selectModel(model)"
+                      >
+                        <span class="figma-chat-model-rec-dot" :style="{ backgroundColor: getModelColor(model) }" />
+                        <span class="figma-chat-model-rec-name">{{ model.name }}</span>
+                      </button>
+                    </el-tooltip>
                   </div>
                 </div>
 
@@ -2508,19 +2520,25 @@ function onCompositionEnd() {
                   class="figma-chat-model-group"
                 >
                   <div class="figma-chat-model-group-title">{{ group.providerName }}</div>
-                  <button
+                  <el-tooltip
                     v-for="model in group.models"
                     :key="modelValue(model)"
-                    type="button"
-                    :class="['figma-chat-model-option-item', modelValue(model) === selectedModel && 'is-active']"
-                    @click="selectModel(model)"
+                    :content="model.name"
+                    placement="top"
+                    :show-after="100"
                   >
-                    <div class="figma-chat-model-option-info">
-                      <span class="figma-chat-model-option-dot" :style="{ backgroundColor: getModelColor(model) }" />
-                      <span class="figma-chat-model-option-name">{{ model.name }}</span>
-                    </div>
-                    <span v-if="modelValue(model) === selectedModel" class="figma-chat-model-option-checked">✓</span>
-                  </button>
+                    <button
+                      type="button"
+                      :class="['figma-chat-model-option-item', modelValue(model) === selectedModel && 'is-active']"
+                      @click="selectModel(model)"
+                    >
+                      <div class="figma-chat-model-option-info">
+                        <span class="figma-chat-model-option-dot" :style="{ backgroundColor: getModelColor(model) }" />
+                        <span class="figma-chat-model-option-name">{{ model.name }}</span>
+                      </div>
+                      <span v-if="modelValue(model) === selectedModel" class="figma-chat-model-option-checked">✓</span>
+                    </button>
+                  </el-tooltip>
                 </div>
                 
                 <div v-if="modelGroups.length === 0" class="figma-chat-model-empty">
@@ -5078,6 +5096,13 @@ function onCompositionEnd() {
   text-align: left;
   overflow: hidden;
   white-space: nowrap;
+  max-width: 100%;
+}
+
+.figma-chat-model-rec-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .figma-chat-model-rec-item:hover {

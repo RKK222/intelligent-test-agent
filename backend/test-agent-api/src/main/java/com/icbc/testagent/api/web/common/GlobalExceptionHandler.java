@@ -9,6 +9,7 @@ import jakarta.validation.ConstraintViolationException;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -82,6 +83,24 @@ public class GlobalExceptionHandler {
             return first;
         }
         return fallback;
+    }
+
+    /**
+     * 处理数据库数据完整性违规（如外键约束冲突、唯一键冲突），返回 CONFLICT 错误。
+     * 不暴露内部表名和约束名，仅提示用户数据冲突。
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiErrorResponse> handleDataIntegrityViolation(
+            DataIntegrityViolationException exception,
+            ServerWebExchange exchange) {
+        String traceId = traceIdFrom(exchange);
+        LOGGER.warn("Data integrity violation, traceId={}", traceId, exception);
+        ApiErrorResponse response = ApiErrorResponse.of(
+                ErrorCode.CONFLICT,
+                "数据冲突：当前操作因存在关联数据无法执行，请先清理关联记录后重试",
+                traceId,
+                Map.of());
+        return ResponseEntity.status(ErrorCode.CONFLICT.httpStatus()).body(response);
     }
 
     /**

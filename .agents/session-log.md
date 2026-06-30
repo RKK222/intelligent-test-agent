@@ -2,6 +2,7 @@
 
 ## Entries
 
+<<<<<<< HEAD
 ### 2026-06-30 - 修复 Invoke-WebRequest 安全警告提示
 
 - Why: 脚本中 `Test-HttpOk` 用的 `Invoke-WebRequest` 没有 `-UseBasicParsing`，PowerShell 5 会弹出"脚本执行风险"安全警告，需要用户手动输入 Y 才能继续。
@@ -42,6 +43,71 @@
   - [process.go](file:///d:/workspace/intelligent-test-agent/opencode-manager/internal/process/process.go) 中保留 `OSStarter` / `OSSignaler` 类型定义和 `flattenEnv` 等通用函数，移除 `syscall` 导入和 `syscall.ESRCH` 引用。
 - How: 纯 Go 改动，不涉及 API/事件/数据库/安全/兼容性；保持 `internal/control/cgroup_parse_linux.go` 的既有平台拆分模式。
 - Result: Windows 上 `go build -o bin/opencode-manager.exe ./cmd/opencode-manager` 编译成功，生成 10MB 的可执行文件。
+=======
+### 2026-06-30 - 修复测试库 Flyway schema history checksum
+
+- Why: 后端启动报 `FlywayValidateException`，目标测试库 `flyway_schema_history` 中 V5、V8、V10、V13、V17、V20260627000000、V20260628223000、V20260629230000 的已应用 checksum 与当前工作区 migration 文件不一致；其中 V10/V13/V17 当前为 0 字节，本地解析 checksum 为 0。
+- What: 按用户要求只修复数据库数据，不回退或改写当前工作区 migration 文件；将 `.env.test` 指向的 `testagent` 库中上述 8 条成功 migration 的 checksum 更新为当前本地解析值。
+- How: 先查询目标库确认旧 checksum，再在单事务中更新 `flyway_schema_history`，随后用项目运行时依赖直接调用 Flyway `validate()` 和 `migrate()`，避免 Flyway Maven 插件缺少 PostgreSQL database plugin 的误报。
+- Result: Flyway `validate()` 通过，`migrate()` 返回 `migrationsExecuted=0`；本次不改业务表、不改 API/事件/数据库结构、不修改 `.env.local` 或 `.env.test`。
+
+### 2026-06-30 - 修复跨后端登录时用户 opencode 状态误判未分配
+
+- Why: 用户已有 `user_opencode_process_bindings` ACTIVE 记录在 A 服务器，但请求落到 B 服务器且转发到 A 失败时，前端拿不到 `processStatus`，会把“已分配但健康不可确认”误显示为“待分配专属进程”。
+- What: 后端新增 binding-only 的只读分配状态入口，`/api/internal/agent/opencode/processes/me` 跨后端转发在目标后端缺失、异常或 5xx 时降级返回 `UNAVAILABLE + NOT_RUNNING + serviceAddress`；真实初始化、Run 和 runtime 代理仍不降级，继续要求目标服务器执行。前端头像无状态时显示“状态未知”，聊天状态卡优先展示 `serviceAddress`。
+- How: 最小修改 `UserOpencodeProcessAssignmentService`、用户进程后端路由服务/过滤器和 `FigmaShell`/`FigmaChatPanel` 展示逻辑，并补充 runtime、API 路由和前端组件回归测试；同步 backend、opencode-runtime、api、agent-web README 与 HTTP API 文档。
+- Result: `mvn -pl test-agent-api,test-agent-opencode-runtime -am test`、`mvn clean package -DskipTests`、`corepack pnpm@10.25.0 --dir frontend test -- runtime-management-settings backend-api`、`corepack pnpm@10.25.0 --dir frontend --filter @test-agent/agent-web typecheck` 和 `git diff --check` 通过。本次不改数据库结构、不新增公开 API 字段、不迁移 binding。
+
+### 2026-06-30 - 运行管理启停命令跨 Java 路由
+
+- Why: opencode-manager 只连接本服务器 Java，运行管理页可能从任意 Java 发起重启/停止，不能再假设入口后端一定和目标 manager 相连。
+- What: 新增 API 层 `RuntimeManagementBackendRoutingService`，按 Redis manager 快照定位 `containerId` 所属 `linuxServerId`，目标不是本机时透传用户 JWT 和 traceId 转发到目标 Java。
+- How: 目标 Java 收到带 `X-Test-Agent-Backend-Routed` 的请求后跳过再次路由，继续使用本机 `RuntimeManagementCommandService` 调 manager WebSocket。
+- Result: `mvn -pl test-agent-api -am -Dmaven.test.skip=true compile` 通过；目标 API 测试因既有 `CommonParameterManagementControllerTest.updateValue` 签名不匹配在 testCompile 阶段阻塞。
+
+### 2026-06-30 - 通用参数改为数据库直读并移除 Redis 加载快照
+
+- Why: 用户要求各 Java 进程不再把通用参数缓存到 Redis，业务需要参数时直接从数据库读取，避免多进程缓存陈旧值。
+- What: 将 `CommonParameterValues` 实现替换为 `RepositoryCommonParameterValues`，每次解析参数都通过 Repository 查库；移除启动内存加载、每进程加载快照、`/common-parameters/load-snapshots` API、前端“查看各进程加载值”和 Redis 快照存储。保留 `common-parameter.refresh-requested` 广播作为跨实例更新通知，监听方收到后直接查库并向本机 manager 下发最大进程数。
+- How: 新增 DB 直读与广播测试，删除快照 Store/DTO/前端类型，更新 configuration-management、persistence、API、event-stream、database 和 module-map 文档；不改数据库结构、不改 generated SDK、不新增环境变量。
+- Result: `RepositoryCommonParameterValuesTest` 与 `CommonParameterUpdateBroadcasterTest` 先红后绿；`CommonParameterManagementControllerTest`、`mvn clean package -DskipTests`、`corepack pnpm --filter @test-agent/agent-web typecheck`、`corepack pnpm exec vitest run apps/agent-web/tests/general-param-management-panel.test.ts` 和 `git diff --check` 通过。全量 `corepack pnpm test -- general-param-management-panel` 被 Vitest 过滤参数触发既有 `MarkdownPreview` 失败，定向文件测试通过。
+
+### 2026-06-30 - 修复 manager 注册早于 Java 后端拓扑落库的启动竞态
+
+- Why: 三服务重启后后端日志在 `2026-06-30T10:46:11.043+08:00` 出现 `opencode_manager_backend_connections.backend_process_id` 外键失败；根因是 Netty 端口已监听后，opencode-manager 可能抢在 `BackendJavaProcessLifecycleRunner` 首次 `registerHeartbeat` 落库 `backend_java_processes` 前完成 WebSocket register。
+- What: `ManagerControlApplicationService.register` 在写 manager/container/connection 持久拓扑前先调用 `BackendJavaProcessLifecycleService.registerHeartbeat`，确保当前 `backendProcessId` 的父表行存在，再插入 manager-backend 连接；重复键容错边界不变，非重复键持久化异常仍继续暴露。
+- How: 新增 `ManagerControlApplicationServiceTest.registerPersistsCurrentBackendBeforeSavingManagerConnection`，fake repository 模拟连接表外键约束并断言 `saveBackendJavaProcess` 早于 `saveManagerBackendConnection`；同步更新 `test-agent-opencode-runtime` README。
+- Result: 定向测试先红后绿，`mvn -pl test-agent-opencode-runtime -am -Dtest=ManagerControlApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false test` 通过；本修复不改数据库结构、API、事件或环境配置。
+### 2026-06-30 - 模型下拉菜单即时悬浮提示与原位恢复
+
+- Why: 聊天面板输入框下方的模型选择器，之前被移到了顶部标题栏。用户希望模型选择器改回在输入框下方，且指出之前反馈的"显示不全"其实是指下拉菜单中"上新推荐"一排的模型卡片在固定双列等宽网格下长名字被截断的问题，希望能用鼠标悬浮（Hover）即时显示完整名称的方式来解决（原生 title 属性有较长延迟，需使用 el-tooltip 实现快速响应）。
+- What:
+  - 将模型选择器 wrapper HTML 重新移回至 `.figma-chat-card-actions` 底部 actions 区域。
+  - 使用 Element Plus 的 `<el-tooltip>` 组件（配置 `:show-after="100"` 极短悬停延迟）包裹了模型选择按钮、所有“上新推荐”的推荐卡片 `.figma-chat-model-rec-item`，以及所有模型列表项 `.figma-chat-model-option-item`，实现光标挪上去立刻在上方浮现完整名称。
+  - 恢复了 CSS 中有关最大宽度限制（`.figma-chat-model-btn` 为 150px、`.figma-chat-model-label` 为 108px）、弹出位置（朝上弹出 `bottom: calc(100% + 12px)`）和指示箭头方向的配置。
+  - 给 `.figma-chat-model-rec-item` 增加了 `max-width: 100%`，并对内部文本名 `.figma-chat-model-rec-name` 补充了 text-ellipsis 以防止在极限宽度下布局撑爆。
+- How: 仅修改 `FigmaChatPanel.vue`，不修改 API、SSE 事件或数据库。
+- Result: 编译构建通过（`corepack pnpm --filter @test-agent/agent-web build`），单元测试通过（`pnpm test`），UI 布局与 Hover 悬浮显示功能逻辑自洽。
+
+### 2026-06-30 - 通用参数修改历史抽屉补当前值与缓存刷新
+
+- Why: 通用参数“修改历史”点击后只依赖 `common_parameter_change_logs`，当日志为空或前端保留旧空缓存时用户看不到具体内容；页面保存成功后也没有主动失效历史查询缓存。
+- What: 修改历史抽屉增加当前参数摘要（英文名、中文名、平台、当前值、更新时间），打开历史时主动失效历史缓存，保存参数成功后同步失效历史缓存；后端单测把日志记录从“调用 save”加强到字段级断言 old/new/user/trace/createdAt。
+- How: 仅改 `GeneralParamManagementPanel.vue`、`general-param-management-panel.test.ts` 和 `CommonParameterManagementApplicationServiceTest.java`；不改 HTTP API、事件、数据库结构或环境文件。
+- Result: `corepack pnpm test -- general-param-management-panel.test.ts`、`corepack pnpm --filter @test-agent/agent-web typecheck`、`mvn -pl test-agent-configuration-management -am -Dtest=CommonParameterManagementApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false test` 通过；`.env.test` 数据库临时不可达时无法直接核对现网日志表内容。
+## 2026-06-30 - 工作空间删除添加二次确认
+
+- Why: 设置页"已有工作空间"删除按钮直接执行删除操作，没有二次确认，用户可能误操作导致数据丢失。
+- What: 为删除工作空间添加与"移除成员"、"解除关联版本库"一致的二次确认机制：
+  - 扩展 `PendingDangerAction` 类型，新增 `delete-workspace` 类型。
+  - 新增 `confirmDeleteWorkspace` 方法，设置 `pendingDangerAction` 触发确认弹窗。
+  - 确认弹窗标题为"确认删除工作空间"，提示文案为"确认删除工作空间[xxx]吗？删除后数据将无法恢复。"
+  - 确认按钮文案为"确认删除"。
+  - `confirmDangerAction` 方法增加 `delete-workspace` 分支处理。
+  - 补充单测 `confirms before deleting a workspace` 验证完整流程。
+- How: 仅修改前端 `SettingsAppWorkspacePanel.vue` 组件和对应测试文件，不涉及 API、事件、数据库、安全或兼容性。
+- Result: 前端 `typecheck` 通过，`vitest` 183 个测试全通过。
+>>>>>>> 58bb81242398746e82d6e7c8243972b7f2eee9b5
 
 ### 2026-06-30 - Maven build 前强制终止所有开发服务
 
@@ -2202,3 +2268,33 @@ bash /tmp/test-api-after-restart.sh
 - How: Java 路由服务保留原始 `Authorization`、`X-Trace-Id`、body 和目标响应，目标后端不可用统一返回 `OPENCODE_UNAVAILABLE`；同 IP 历史重复 Java 快照按最新 heartbeat 选目标。通用参数前端更新入口只放行最大进程数，路径类参数改为部署/初始化参数；启动脚本删除废弃 `OPENCODE_MANAGER_DISCOVERY_INTERVAL` 和 `OPENCODE_MANAGER_ID` 注入。
 - Result: 任意 Java 收到 remote binding 请求时会路由到 binding 所属服务器 Java，不再自动迁移；每个 manager 只维持单条本机 Java WebSocket，断线后按重连间隔无限重连并重新拉取配置。
 - Verification: `mvn -pl test-agent-api,test-agent-opencode-runtime,test-agent-configuration-management -am test`、`go test ./...`（opencode-manager）、`bash tools/verify-dev-scripts.sh`、`mvn clean package -DskipTests`、`git diff --check` 全部通过。
+
+### 2026-06-30 - 修复 manager 最大进程数热更新不生效
+
+- Why: Java 已按新契约广播 max-only `configUpdate(maxProcesses, sessionRoot=null, configDir=null)`，但 Go `Manager.ApplyRuntimeConfig` 仍把空路径当完整配置缺失拒绝，导致 manager 不更新 `MaxProcesses`、不立即 heartbeat，运行管理容量保持旧值。
+- What: Go manager 支持两种合法配置帧：首次完整帧必须同时带 `sessionRoot/configDir` 并置 ready；后续 max-only 帧允许路径为空，只更新并发上限并保留已生效路径。单路径缺失的非法帧仍拒绝且不产生部分路径更新。
+- How: 先补红灯测试 `TestManagerApplyRuntimeConfigSupportsMaxOnlyUpdateAfterFullConfig` 和 `TestSupervisorAppliesMaxOnlyConfigUpdateAndReportsHeartbeat`，确认旧实现失败；再调整 `ApplyRuntimeConfig` 的路径帧形态校验与 max-only 分支，并更新 opencode-manager README。
+- Result: 修改 `OPENCODE_MANAGER_MAX_PROCESSES` 后，manager 会应用新容量并立即补发 heartbeat，Java 按 heartbeat 更新 Redis/数据库快照，运行管理“容器 / 管理进程”容量随刷新变化。
+- Verification: `go test ./...`（opencode-manager）、`git diff --check` 通过。
+
+### 2026-06-30 - 收敛 Java 到 manager 路由并移除本地绕过
+
+- Why: 用户 opencode、运行管理、Agent 配置和文件 WebSocket 路由分别扫描 Redis/转发 HTTP，且此前叠加了 `local-direct` 与 `gateway-mode=local` 两套本地绕过，导致“任意 Java 收请求后应由目标服务器 Java 控制本机 manager”的规则不够单一。
+- What: 新增 `BackendJavaRouteResolver` 统一解析当前 `linuxServerId`、每台服务器最新 Java 后端和 `containerId` 所属 manager 服务器；新增 `BackendHttpForwarder` 统一 Java->Java HTTP 转发、Authorization/trace/body/query 透传与 `X-Test-Agent-Backend-Routed` 防循环。用户 binding、运行管理 restart/stop、Agent 配置 HTTP、Workspace/Agent 配置文件路由都改用统一组件；配置工作区创建、应用版本工作区创建和版本 `git-pull` 纳入用户 binding 路由。为跑通 app 全量回归，顺带把两个已知阻塞 H2 Flyway 的近期 migration 改为 PostgreSQL/H2 兼容等价 SQL：`V20260628223000` 使用标准 `platform IN (...)` CHECK 和普通 INSERT，`V20260629230000` 在删除旧平台行后普通 INSERT 新 `all` 行。
+- How: `RuntimeManagementQueryService.userProcesses` 只在进程属于当前 Java 服务器时调用本机 manager health，远端返回 `REMOTE_SERVER/CHECK_SKIPPED`；`OpencodeProcessHeartbeatMaintenanceService` 只扫描当前服务器 RUNNING 进程。删除 `LocalDirectSettings`、`LocalOpencodeProcessManagerGateway`、`gateway-mode`、`local-direct` 配置和对应测试，本地/生产都必须启动 Go manager。
+- Result: 前端可访问任意 Java；后端先通过统一路由定位目标 Java；只有目标 Java 通过本服务器 manager WebSocket 控制 manager。旧 session-log 中关于开启 local-direct/local gateway 的记录已被本条决策覆盖。
+- Verification: 目标红灯测试 `BackendJavaRouteResolverTest`、`BackendHttpForwarderTest`、`UserOpencodeBackendRoutingWebFilterTest` 随 `mvn -pl test-agent-api,test-agent-opencode-runtime,test-agent-app -am test -Dtest=BackendJavaRouteResolverTest,BackendHttpForwarderTest,UserOpencodeBackendRoutingWebFilterTest -Dsurefire.failIfNoSpecifiedTests=false` 通过；回归命令 `mvn -q -pl test-agent-api -am test`、`mvn -q -pl test-agent-opencode-runtime -am test`、`mvn -q -pl test-agent-app -am test` 均通过。
+
+### 2026-06-30 - 修复 BackendHttpForwarder Spring 构造器装配失败
+
+- Why: 打包启动时报 `BackendHttpForwarder: No default constructor found`，原因是该组件同时存在生产构造器和测试构造器，Spring 7 未自动推断应使用 `ObjectMapper` 构造器。
+- What: 将 `BackendHttpForwarder` 类和生产 `ObjectMapper` 构造器公开，并用 `@Autowired` 明确 Spring 注入点；新增 Spring context 级单测复现并防止回归。
+- How: 保留双参 `HttpClient` 构造器为包级测试入口；通过 `AnnotationConfigApplicationContext` 注册 `ObjectMapper` 和 `BackendHttpForwarder` 验证组件可实例化。
+- Result: `BackendHttpForwarderTest` 和 `test-agent-api` 全量测试通过，`test-agent-app` 跳过测试打包通过；`test-agent-app -am test` 当前被工作区未提交的 persistence migration seed 改动阻断，失败点是默认用户/本地拓扑 fixture 断言，与本次构造器修复无关。
+
+### 2026-06-30 - 固化 opencode-manager 公共路由规范
+
+- Why: Java 到 manager 路由已收敛为公共 resolver/forwarder/gateway 链路，需要把“不得再自写路由”固化到后续开发必读规范。
+- What: 在 `AGENTS.md`、后端总 README、后端规范、依赖边界、API 模块 README 和 opencode-runtime 模块 README 中明确：涉及 opencode-manager 路由、Java 到 manager 控制、用户进程服务器归属、运行管理 `containerId` 路由、Agent 配置或文件 WebSocket 目标后端选择时，必须复用 `BackendJavaRouteResolver`、`BackendHttpForwarder` 和目标 Java 的 `OpencodeProcessManagerGateway`。
+- How: 用禁止项列明不得自行扫描 Redis 快照、手写 Java->Java HTTP 转发器、定义防循环 header 变体、本机降级、跨服务器直接控制 manager 或恢复本地绕过。
+- Result: 后续新增相关入口时，规范入口、后端编码规范、架构依赖边界和模块 README 都指向同一套公共路由机制。

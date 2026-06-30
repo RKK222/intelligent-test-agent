@@ -65,7 +65,3 @@ insert into dictionaries (dict_id, dict_name, dict_key, dict_value, dict_label, 
     ('dict_role_system_admin', '应用角色', 'ROLE', 'SYSTEM_ADMIN', '系统管理员', 2, now(), now()),
     ('dict_role_app_admin', '应用角色', 'ROLE', 'APP_ADMIN', '应用管理员', 3, now(), now()),
     ('dict_role_user', '应用角色', 'ROLE', 'USER', '普通用户', 4, now(), now());
-
--- 初始化默认测试用户（用户名 888888888，密码 123456），仅用于本地开发
-insert into users (user_id, unified_auth_id, username, password_hash, organization, rd_department, department, status, created_at, updated_at) values
-    ('usr_test_dev', 'DEV_888888888', '888888888', '$2a$10$rhtTcWH3HZM/cw2d0QqYeeH8gKqDhieqlLoLCD7X1viDtefE9Sj16', '测试机构', '测试研发部', '测试部门', 'ACTIVE', now(), now());

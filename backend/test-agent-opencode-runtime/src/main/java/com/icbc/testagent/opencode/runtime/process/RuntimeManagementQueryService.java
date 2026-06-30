@@ -50,6 +50,7 @@ public class RuntimeManagementQueryService {
     private final UserRepository userRepository;
     private final OpencodeProcessManagerGateway gateway;
     private final OpencodeProcessHeartbeatStore heartbeatStore;
+    private final BackendJavaRouteResolver routeResolver;
     private final Clock clock;
 
     /**
@@ -60,15 +61,16 @@ public class RuntimeManagementQueryService {
             OpencodeProcessManagementRepository repository,
             UserRepository userRepository,
             OpencodeProcessManagerGateway gateway,
-            OpencodeProcessHeartbeatStore heartbeatStore) {
-        this(repository, userRepository, gateway, heartbeatStore, Clock.systemUTC());
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            BackendJavaRouteResolver routeResolver) {
+        this(repository, userRepository, gateway, heartbeatStore, routeResolver, Clock.systemUTC());
     }
 
     /**
      * 测试构造器允许固定时钟，避免快照时间不稳定。
      */
     public RuntimeManagementQueryService(OpencodeProcessManagementRepository repository, Clock clock) {
-        this(repository, disabledUserRepository(), new UnavailableOpencodeProcessManagerGateway(), disabledHeartbeatStore(), clock);
+        this(repository, disabledUserRepository(), new UnavailableOpencodeProcessManagerGateway(), disabledHeartbeatStore(), null, clock);
     }
 
     /**
@@ -78,7 +80,7 @@ public class RuntimeManagementQueryService {
             OpencodeProcessManagementRepository repository,
             UserRepository userRepository,
             Clock clock) {
-        this(repository, userRepository, new UnavailableOpencodeProcessManagerGateway(), disabledHeartbeatStore(), clock);
+        this(repository, userRepository, new UnavailableOpencodeProcessManagerGateway(), disabledHeartbeatStore(), null, clock);
     }
 
     /**
@@ -89,7 +91,7 @@ public class RuntimeManagementQueryService {
             UserRepository userRepository,
             OpencodeProcessHeartbeatStore heartbeatStore,
             Clock clock) {
-        this(repository, userRepository, new UnavailableOpencodeProcessManagerGateway(), heartbeatStore, clock);
+        this(repository, userRepository, new UnavailableOpencodeProcessManagerGateway(), heartbeatStore, null, clock);
     }
 
     /**
@@ -101,10 +103,24 @@ public class RuntimeManagementQueryService {
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessHeartbeatStore heartbeatStore,
             Clock clock) {
+        this(repository, userRepository, gateway, heartbeatStore, null, clock);
+    }
+
+    /**
+     * 完整测试构造器允许替换时钟、心跳端口、manager 网关和统一路由解析器。
+     */
+    public RuntimeManagementQueryService(
+            OpencodeProcessManagementRepository repository,
+            UserRepository userRepository,
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            BackendJavaRouteResolver routeResolver,
+            Clock clock) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
+        this.routeResolver = routeResolver;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -492,6 +508,15 @@ public class RuntimeManagementQueryService {
             Optional<String> username,
             String traceId) {
         Instant checkedAt = Instant.now(clock);
+        if (routeResolver != null && !routeResolver.isCurrent(process.linuxServerId())) {
+            return new RuntimeManagementOpencodeProcess(
+                    process,
+                    binding,
+                    username,
+                    "REMOTE_SERVER",
+                    "CHECK_SKIPPED",
+                    true);
+        }
         try {
             OpencodeProcessHealthResult health = gateway.checkHealth(new OpencodeProcessHealthCommand(
                     process.processId(),

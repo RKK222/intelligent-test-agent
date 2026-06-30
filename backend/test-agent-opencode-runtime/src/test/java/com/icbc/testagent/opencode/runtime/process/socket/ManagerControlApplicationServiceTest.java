@@ -79,6 +79,39 @@ class ManagerControlApplicationServiceTest {
     }
 
     @Test
+    void registerPersistsCurrentBackendBeforeSavingManagerConnection() {
+        FakeRepository repository = new FakeRepository();
+        repository.enforceBackendForeignKeyForConnections = true;
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        BackendJavaProcessLifecycleService backendLifecycle = backendLifecycle(repository, heartbeatStore);
+        ManagerControlApplicationService service = new ManagerControlApplicationService(
+                repository,
+                heartbeatStore,
+                backendLifecycle,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        ManagerControlMessage register = ManagerControlMessage.register(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                5,
+                0,
+                Map.of("commands", List.of("start", "health")),
+                "trace_1234567890abcdef");
+
+        ManagerControlMessage response = service.register(register);
+
+        assertThat(response.type()).isEqualTo(ManagerControlProtocol.TYPE_REGISTERED);
+        assertThat(repository.savedBackends).singleElement().satisfies(backend ->
+                assertThat(backend.backendProcessId()).isEqualTo(backendLifecycle.backendProcessId()));
+        assertThat(repository.savedConnections).singleElement().satisfies(connection ->
+                assertThat(connection.backendProcessId()).isEqualTo(backendLifecycle.backendProcessId()));
+        assertThat(repository.operations).containsSubsequence("saveBackendJavaProcess", "saveManagerBackendConnection");
+    }
+
+    @Test
     void registerContinuesWhenPersistentTopologyConflictsWithExpiredDatabaseState() {
         FakeRepository repository = new FakeRepository();
         repository.failSavingManagerWithDuplicateKey = true;
@@ -276,13 +309,27 @@ class ManagerControlApplicationServiceTest {
         private final List<OpencodeContainer> savedContainers = new ArrayList<>();
         private final List<OpencodeContainerManager> savedManagers = new ArrayList<>();
         private final List<OpencodeManagerBackendConnection> savedConnections = new ArrayList<>();
+        private final List<BackendJavaProcess> savedBackends = new ArrayList<>();
+        private final List<String> operations = new ArrayList<>();
+        private BackendJavaProcess backend;
+        private boolean enforceBackendForeignKeyForConnections;
         private boolean failSavingManagerWithDuplicateKey;
         private boolean failSavingManagerWithUnexpectedError;
 
         @Override public LinuxServer saveLinuxServer(LinuxServer linuxServer) { return linuxServer; }
         @Override public Optional<LinuxServer> findLinuxServerById(LinuxServerId linuxServerId) { return Optional.empty(); }
-        @Override public BackendJavaProcess saveBackendJavaProcess(BackendJavaProcess backendJavaProcess) { return backendJavaProcess; }
-        @Override public Optional<BackendJavaProcess> findBackendJavaProcessById(BackendProcessId backendProcessId) { return Optional.empty(); }
+        @Override public BackendJavaProcess saveBackendJavaProcess(BackendJavaProcess backendJavaProcess) {
+            operations.add("saveBackendJavaProcess");
+            backend = backendJavaProcess;
+            savedBackends.add(backendJavaProcess);
+            return backendJavaProcess;
+        }
+        @Override public Optional<BackendJavaProcess> findBackendJavaProcessById(BackendProcessId backendProcessId) {
+            if (backend == null || !backend.backendProcessId().equals(backendProcessId)) {
+                return Optional.empty();
+            }
+            return Optional.of(backend);
+        }
         @Override public List<BackendJavaProcess> findReadyBackendJavaProcesses(Instant minHeartbeatAt, int limit) { return List.of(); }
         @Override public OpencodeContainer saveContainer(OpencodeContainer container) { savedContainers.add(container); return container; }
         @Override public Optional<OpencodeContainer> findContainerById(OpencodeContainerId containerId) { return Optional.empty(); }
@@ -301,7 +348,15 @@ class ManagerControlApplicationServiceTest {
             return manager;
         }
         @Override public Optional<OpencodeContainerManager> findContainerManagerById(ContainerManagerId managerId) { return Optional.empty(); }
-        @Override public OpencodeManagerBackendConnection saveManagerBackendConnection(OpencodeManagerBackendConnection connection) { savedConnections.add(connection); return connection; }
+        @Override public OpencodeManagerBackendConnection saveManagerBackendConnection(OpencodeManagerBackendConnection connection) {
+            operations.add("saveManagerBackendConnection");
+            if (enforceBackendForeignKeyForConnections
+                    && findBackendJavaProcessById(connection.backendProcessId()).isEmpty()) {
+                throw new IllegalStateException("backend foreign key missing");
+            }
+            savedConnections.add(connection);
+            return connection;
+        }
         @Override public Optional<OpencodeManagerBackendConnection> findManagerBackendConnection(ContainerManagerId managerId, BackendProcessId backendProcessId) { return Optional.empty(); }
         @Override public OpencodeServerProcess saveOpencodeServerProcess(OpencodeServerProcess process) { return process; }
         @Override public Optional<OpencodeServerProcess> findOpencodeServerProcessById(OpencodeProcessId processId) { return Optional.empty(); }
@@ -312,6 +367,7 @@ class ManagerControlApplicationServiceTest {
         @Override public PageResponse<OpencodeServerProcess> findOpencodeServerProcesses(OpencodeServerProcessFilter filter, PageRequest pageRequest) {
             return new PageResponse<>(List.of(), pageRequest.page(), pageRequest.size(), 0);
         }
+        @Override public List<OpencodeContainerManager> findContainerManagers(int limit) { return List.of(); }
     }
 
     private static final class DuplicateKeyException extends RuntimeException {

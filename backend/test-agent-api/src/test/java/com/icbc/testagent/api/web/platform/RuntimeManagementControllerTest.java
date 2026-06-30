@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.GlobalExceptionHandler;
 import com.icbc.testagent.api.web.common.TraceIdWebFilter;
+import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
@@ -147,7 +148,8 @@ class RuntimeManagementControllerTest {
 
         WebTestClient.bindToController(new RuntimeManagementController(
                         service,
-                        org.mockito.Mockito.mock(RuntimeManagementCommandService.class)))
+                        org.mockito.Mockito.mock(RuntimeManagementCommandService.class),
+                        org.mockito.Mockito.mock(RuntimeManagementBackendRoutingService.class)))
                 .webFilter(new TraceIdWebFilter())
                 .controllerAdvice(new GlobalExceptionHandler())
                 .build()
@@ -215,6 +217,44 @@ class RuntimeManagementControllerTest {
                 .jsonPath("$.data.command").isEqualTo("stop")
                 .jsonPath("$.data.status").isEqualTo("STOPPED")
                 .jsonPath("$.data.message").isEqualTo("opencode server stopped");
+    }
+
+    @Test
+    void superAdminCommandUsesBackendRoutingBeforeLocalManagerGateway() {
+        RuntimeManagementQueryService queryService = org.mockito.Mockito.mock(RuntimeManagementQueryService.class);
+        RuntimeManagementCommandService commandService = org.mockito.Mockito.mock(RuntimeManagementCommandService.class);
+        RuntimeManagementBackendRoutingService routingService = org.mockito.Mockito.mock(RuntimeManagementBackendRoutingService.class);
+        when(routingService.forwardTargetForContainer(
+                        org.mockito.Mockito.any(),
+                        eq(new OpencodeContainerId("ctr_01"))))
+                .thenReturn(Optional.of("10.8.0.22"));
+        when(routingService.forward(
+                        org.mockito.Mockito.any(),
+                        eq("10.8.0.22"),
+                        org.mockito.Mockito.any()))
+                .thenReturn(ApiResponse.ok(new RuntimeManagementDtos.ManagedProcessCommandResponse(
+                        "restart",
+                        "STARTED",
+                        4096,
+                        12346L,
+                        "http://10.8.0.22:4096",
+                        "/data/opencode/session/4096",
+                        "/data/opencode/.config/opencode/",
+                        true,
+                        "opencode server started",
+                        "trace_1234567890abcdef"), "trace_1234567890abcdef"));
+        WebTestClient client = client(queryService, commandService, routingService, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/opencode-runtime/management/containers/ctr_01/processes/4096/restart")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.command").isEqualTo("restart")
+                .jsonPath("$.data.status").isEqualTo("STARTED")
+                .jsonPath("$.data.baseUrl").isEqualTo("http://10.8.0.22:4096");
+        org.mockito.Mockito.verifyNoInteractions(commandService);
     }
 
     @Test
@@ -475,6 +515,18 @@ class RuntimeManagementControllerTest {
             RuntimeManagementQueryService service,
             RuntimeManagementCommandService commandService,
             List<String> roles) {
+        return client(
+                service,
+                commandService,
+                org.mockito.Mockito.mock(RuntimeManagementBackendRoutingService.class),
+                roles);
+    }
+
+    private static WebTestClient client(
+            RuntimeManagementQueryService service,
+            RuntimeManagementCommandService commandService,
+            RuntimeManagementBackendRoutingService routingService,
+            List<String> roles) {
         AuthPrincipal principal = new AuthPrincipal(
                 "token",
                 new UserId("usr_admin_1234567890"),
@@ -483,7 +535,10 @@ class RuntimeManagementControllerTest {
                 roles,
                 NOW,
                 NOW.plusSeconds(3600));
-        return WebTestClient.bindToController(new RuntimeManagementController(service, commandService))
+        return WebTestClient.bindToController(new RuntimeManagementController(
+                        service,
+                        commandService,
+                        routingService))
                 .webFilter(new TraceIdWebFilter())
                 .webFilter((exchange, chain) -> {
                     exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, principal);

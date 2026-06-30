@@ -12,62 +12,44 @@ import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
-class InMemoryCommonParameterValuesTest {
+class RepositoryCommonParameterValuesTest {
 
     private static final Instant NOW = Instant.parse("2026-06-27T00:00:00Z");
 
     private final CommonParameterReferenceResolver resolver = new CommonParameterReferenceResolver();
 
     @Test
-    void reloadLoadsAllAndResolvesReferences() {
+    void resolvedValueReadsRepositoryEachTimeWithoutReload() {
         FakeRepository repository = new FakeRepository();
-        repository.add(param("BASE", "/data", ParameterPlatform.ALL));
-        repository.add(param("CHILD", "${BASE}/child", ParameterPlatform.ALL));
-        InMemoryCommonParameterValues values = new InMemoryCommonParameterValues(repository, resolver);
+        repository.add(param("A", "1", ParameterPlatform.ALL));
+        RepositoryCommonParameterValues values = new RepositoryCommonParameterValues(repository, resolver);
 
-        values.reload();
+        assertThat(values.resolvedValue("A", ParameterPlatform.ALL)).hasValue("1");
 
-        assertThat(values.resolvedValue("CHILD", ParameterPlatform.ALL)).hasValue("/data/child");
-        assertThat(values.raw("CHILD", ParameterPlatform.ALL)).map(CommonParameter::parameterValue).hasValue("${BASE}/child");
-        assertThat(values.findAll()).hasSize(2);
-        assertThat(values.resolvedAll()).hasSize(2);
+        repository.clear();
+        repository.add(param("A", "2", ParameterPlatform.ALL));
+
+        assertThat(values.resolvedValue("A", ParameterPlatform.ALL)).hasValue("2");
     }
 
     @Test
     void resolvedValueFallsBackToAllFromCurrentPlatform() {
         FakeRepository repository = new FakeRepository();
         repository.add(param("GLOBAL", "/g", ParameterPlatform.ALL));
-        InMemoryCommonParameterValues values = new InMemoryCommonParameterValues(repository, resolver);
-        values.reload();
+        RepositoryCommonParameterValues values = new RepositoryCommonParameterValues(repository, resolver);
 
-        // 当前平台（测试机通常为 linux）无 LINUX 条目，回退 ALL。
+        // 当前平台无精确条目时直接从数据库 ALL 行回退。
         assertThat(values.resolvedValue("GLOBAL")).hasValue("/g");
         assertThat(values.raw("GLOBAL", ParameterPlatform.current())).map(CommonParameter::parameterValue).hasValue("/g");
     }
 
     @Test
     void missingParameterReturnsEmpty() {
-        InMemoryCommonParameterValues values = new InMemoryCommonParameterValues(new FakeRepository(), resolver);
-        values.reload();
+        RepositoryCommonParameterValues values = new RepositoryCommonParameterValues(new FakeRepository(), resolver);
 
         assertThat(values.resolvedValue("MISSING")).isEmpty();
         assertThat(values.raw("MISSING", ParameterPlatform.ALL)).isEmpty();
         assertThat(values.findAll()).isEmpty();
-    }
-
-    @Test
-    void reloadAtomicallyReplacesSnapshot() {
-        FakeRepository repository = new FakeRepository();
-        repository.add(param("A", "1", ParameterPlatform.ALL));
-        InMemoryCommonParameterValues values = new InMemoryCommonParameterValues(repository, resolver);
-        values.reload();
-        assertThat(values.resolvedValue("A", ParameterPlatform.ALL)).hasValue("1");
-
-        repository.clear();
-        repository.add(param("A", "2", ParameterPlatform.ALL));
-        values.reload();
-
-        assertThat(values.resolvedValue("A", ParameterPlatform.ALL)).hasValue("2");
     }
 
     @Test
@@ -78,8 +60,7 @@ class InMemoryCommonParameterValuesTest {
         repository.add(param("SYS_DATA_ROOT_DIR", "$HOME/.testagent", ParameterPlatform.MACOS));
         repository.add(param("SYS_DATA_ROOT_DIR", "D:/data/.testagent", ParameterPlatform.WINDOWS));
         repository.add(param("OPENCODE_SESSION_DIR", "${SYS_DATA_ROOT_DIR}/agent-opencode/.session/", ParameterPlatform.ALL));
-        InMemoryCommonParameterValues values = new InMemoryCommonParameterValues(repository, resolver);
-        values.reload();
+        RepositoryCommonParameterValues values = new RepositoryCommonParameterValues(repository, resolver);
 
         // 按当前平台读取 all 行，${SYS_DATA_ROOT_DIR} 应展开为当前平台的值。
         String expectedRoot = switch (ParameterPlatform.current()) {
@@ -90,6 +71,20 @@ class InMemoryCommonParameterValuesTest {
         };
         assertThat(values.resolvedValue("OPENCODE_SESSION_DIR"))
                 .hasValue(expectedRoot + "/agent-opencode/.session/");
+    }
+
+    @Test
+    void resolvedAllReadsCurrentDatabaseRowsAndResolvesReferences() {
+        FakeRepository repository = new FakeRepository();
+        repository.add(param("BASE", "/data", ParameterPlatform.ALL));
+        repository.add(param("CHILD", "${BASE}/child", ParameterPlatform.ALL));
+        RepositoryCommonParameterValues values = new RepositoryCommonParameterValues(repository, resolver);
+
+        assertThat(values.findAll()).hasSize(2);
+        assertThat(values.resolvedAll()).extracting(resolved -> resolved.parameter().englishName())
+                .containsExactly("BASE", "CHILD");
+        assertThat(values.resolvedValue("CHILD", ParameterPlatform.ALL)).hasValue("/data/child");
+        assertThat(values.raw("CHILD", ParameterPlatform.ALL)).map(CommonParameter::parameterValue).hasValue("${BASE}/child");
     }
 
     private static CommonParameter param(String englishName, String value, ParameterPlatform platform) {

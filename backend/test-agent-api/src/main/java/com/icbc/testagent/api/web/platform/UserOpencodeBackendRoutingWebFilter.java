@@ -21,7 +21,7 @@ import reactor.core.publisher.Mono;
 @Order(Ordered.HIGHEST_PRECEDENCE + 25)
 class UserOpencodeBackendRoutingWebFilter implements WebFilter {
 
-    static final String ROUTED_HEADER = "X-Test-Agent-Backend-Routed";
+    static final String ROUTED_HEADER = BackendHttpForwarder.ROUTED_HEADER;
 
     private final UserOpencodeBackendRoutingService routingService;
 
@@ -33,11 +33,15 @@ class UserOpencodeBackendRoutingWebFilter implements WebFilter {
     public Mono<Void> filter(ServerWebExchange exchange, WebFilterChain chain) {
         return AuthWebSupport.getOptionalAuthPrincipal(exchange)
                 .flatMap(principal -> routeTarget(exchange, principal))
-                .map(linuxServerId -> routingService.forward(exchange, linuxServerId))
+                .map(target -> routingService.forward(exchange, target.principal(), target.linuxServerId()))
                 .orElseGet(() -> chain.filter(exchange));
     }
 
-    private java.util.Optional<String> routeTarget(ServerWebExchange exchange, AuthPrincipal principal) {
-        return routingService.targetLinuxServerId(exchange, principal);
+    private java.util.Optional<RouteTarget> routeTarget(ServerWebExchange exchange, AuthPrincipal principal) {
+        return routingService.targetLinuxServerId(exchange, principal)
+                .map(linuxServerId -> new RouteTarget(principal, linuxServerId));
+    }
+
+    private record RouteTarget(AuthPrincipal principal, String linuxServerId) {
     }
 }

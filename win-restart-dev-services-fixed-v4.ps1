@@ -700,7 +700,7 @@ function Wait-UntilHttpOk {
     exit 1
 }
 
-# 实时输出后端启动日志（stdout + stderr 合并），直到看到 "Started" 关键字或超时
+# 实时输出后端启动日志（stdout + stderr 合并），直到看到 "Started" 关键字或进程退出
 function Wait-BackendLogReady {
     param(
         [Parameter(Mandatory = $true)][string]$LogPath,
@@ -712,15 +712,23 @@ function Wait-BackendLogReady {
     $lastPosOut = 0
     $lastPosErr = 0
 
+    # 读取后端进程 PID 用于检测进程是否已退出
+    $pidFile = Join-Path $LogDir "backend.pid"
+    $backendPid = 0
+    if (Test-Path -LiteralPath $pidFile -PathType Leaf) {
+        $backendPid = [int](Get-Content -LiteralPath $pidFile -First 1 -ErrorAction SilentlyContinue)
+    }
+
     # 等待日志文件出现
     while ((-not (Test-Path -LiteralPath $LogPath -PathType Leaf)) -and (Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 500
     }
 
-    # 辅助：从指定文件读取新增内容并输出，返回是否匹配终止关键字
+    # 辅助：从指定文件读取新增内容并输出，返回关键字匹配结果
+    # 返回值: "started" | "failed" | "none"
     $readNewLines = {
-        param([string]$Path, [ref]$Pos, [bool]$IsErr)
-        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+        param([string]$Path, [ref]$Pos)
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return "none" }
         try {
             $fs = [System.IO.FileStream]::new($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
             $fs.Position = $Pos.Value
@@ -730,42 +738,41 @@ function Wait-BackendLogReady {
                 Write-Host $line
                 if ($line -match 'Started\s+\S+Application') {
                     $reader.Close(); $fs.Close()
-                    return $true
+                    return "started"
                 }
-                if ($line -match 'Application run failed') {
+                if ($line -match 'Application run failed|closing \.\.\.') {
                     $reader.Close(); $fs.Close()
-                    return $true
+                    return "failed"
                 }
                 $line = $reader.ReadLine()
             }
             $Pos.Value = $fs.Position
             $reader.Close(); $fs.Close()
         } catch { }
-        return $false
+        return "none"
     }
 
     # 同时跟踪 stdout 和 stderr 日志，实时输出
+    $consecutiveEmpty = 0
     while ((Get-Date) -lt $deadline) {
-        $done = (& $readNewLines $LogPath ([ref]$lastPosOut) $false)
-        if ($done) { return }
+        $result = (& $readNewLines $LogPath ([ref]$lastPosOut))
+        if ($result -eq "started") { return }
 
-        $done = (& $readNewLines $ErrorLogPath ([ref]$lastPosErr) $true)
-        if ($done) { return }
+        $result = (& $readNewLines $ErrorLogPath ([ref]$lastPosErr))
+        if ($result -eq "started") { return }
 
-        # 如果 stderr 有内容说明出错了，输出完整错误日志后退出
-        if (($lastPosErr -gt 0) -and (Test-Path -LiteralPath $ErrorLogPath -PathType Leaf)) {
-            try {
-                $efs = [System.IO.FileStream]::new($ErrorLogPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-                $efs.Position = 0
-                $ereader = New-Object System.IO.StreamReader($efs)
-                $errContent = $ereader.ReadToEnd()
-                $ereader.Close(); $efs.Close()
-                if ($errContent -match 'Exception|Error|failed|Failed') {
-                    Write-Host ""
-                    Write-Host "Backend startup failed." -ForegroundColor Red
-                    exit 1
-                }
-            } catch { }
+        # 检测后端进程是否已退出（崩溃）
+        if ($backendPid -gt 0) {
+            $proc = Get-Process -Id $backendPid -ErrorAction SilentlyContinue
+            if ($null -eq $proc) {
+                # 进程已退出，读取剩余日志后报错
+                Start-Sleep -Seconds 2
+                & $readNewLines $LogPath ([ref]$lastPosOut) | Out-Null
+                & $readNewLines $ErrorLogPath ([ref]$lastPosErr) | Out-Null
+                Write-Host ""
+                Write-Host "Backend process exited unexpectedly (PID $backendPid)." -ForegroundColor Red
+                exit 1
+            }
         }
 
         Start-Sleep -Milliseconds 500

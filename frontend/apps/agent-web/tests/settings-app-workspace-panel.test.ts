@@ -48,7 +48,8 @@ function createApi(): Partial<BackendApiClient> {
     createRepository: vi.fn().mockResolvedValue(repositories[1]),
     updateRepository: vi.fn().mockResolvedValue(repositories[0]),
     removeApplicationMember: vi.fn().mockResolvedValue(undefined),
-    unlinkApplicationRepository: vi.fn().mockResolvedValue(undefined)
+    unlinkApplicationRepository: vi.fn().mockResolvedValue(undefined),
+    deleteApplicationWorkspace: vi.fn().mockResolvedValue(undefined)
   };
 }
 
@@ -129,6 +130,20 @@ const ElAutocompleteStub = defineComponent({
   }
 });
 
+const ElDatePickerStub = defineComponent({
+  props: ["modelValue", "placeholder"],
+  emits: ["update:modelValue"],
+  inheritAttrs: false,
+  setup(props, { emit }) {
+    return () =>
+      h("input", {
+        placeholder: props.placeholder,
+        value: props.modelValue,
+        onInput: (event: Event) => emit("update:modelValue", (event.target as HTMLInputElement).value)
+      });
+  }
+});
+
 const ElCheckboxStub = defineComponent({
   props: ["modelValue"],
   emits: ["update:modelValue"],
@@ -167,6 +182,7 @@ function renderPanel(api = createApi()) {
           template: `<button type="button" @click="$emit('click')"><slot /></button>`
         },
         ElCheckbox: ElCheckboxStub,
+        ElDatePicker: ElDatePickerStub,
         ElIcon: {
           template: `<span><slot /></span>`
         },
@@ -367,7 +383,7 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     await fireEvent.click(getAllByText("加载目录").find(el => el.tagName === "BUTTON")!);
     expect(await findByText("非标准库版本")).toBeTruthy();
 
-    await fireEvent.update(getByPlaceholderText("yyyyMMdd"), "20260707");
+    await fireEvent.update(getByPlaceholderText("选择日期"), "20260707");
     await fireEvent.click(getByText("创建"));
 
     await waitFor(() => expect(api.createApplicationWorkspace).toHaveBeenCalledWith("F-COSS", expect.objectContaining({
@@ -424,5 +440,35 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     await fireEvent.click(getByText("解除"));
     await fireEvent.click(getByText("确认解除"));
     await waitFor(() => expect(api.unlinkApplicationRepository).toHaveBeenCalledWith("F-COSS", "repo_wr"));
+  });
+
+  it("confirms before deleting a workspace", async () => {
+    const api = createApi();
+    api.listApplicationWorkspaces = vi.fn().mockResolvedValue([
+      {
+        workspaceId: "ws_test",
+        workspaceName: "测试工作空间",
+        branch: "feature_testagent_20260707",
+        directoryPath: "tests",
+        repositoryId: "repo_wr"
+      }
+    ]);
+    const { findByText, getByText, queryByText, getAllByText } = renderPanel(api);
+
+    await findByText("应用人员管理");
+    await fireEvent.click(getByText("工作空间管理"));
+    expect(await findByText("测试工作空间")).toBeTruthy();
+
+    await fireEvent.click(getByText("删除"));
+    expect(await findByText("确认删除工作空间")).toBeTruthy();
+    expect(getByText("确认删除工作空间[测试工作空间]吗？删除后数据将无法恢复。")).toBeTruthy();
+    expect(api.deleteApplicationWorkspace).not.toHaveBeenCalled();
+
+    await fireEvent.click(getByText("取消"));
+    expect(queryByText("确认删除工作空间[测试工作空间]吗？删除后数据将无法恢复。")).toBeNull();
+
+    await fireEvent.click(getAllByText("删除").find(el => el.tagName === "BUTTON")!);
+    await fireEvent.click(getByText("确认删除"));
+    await waitFor(() => expect(api.deleteApplicationWorkspace).toHaveBeenCalledWith("F-COSS", "ws_test"));
   });
 });

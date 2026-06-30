@@ -316,4 +316,13 @@ public final class ManagedWorkspaceResponses {
                     preference.updatedAt());
         }
     }
+
+    /**
+     * 工作空间创建已接受的响应（异步模式），前端通过 operationId 轮询进度。
+     */
+    public record CreateWorkspaceAcceptedResponse(
+            String operationId,
+            String status,  // "ACCEPTED"
+            Instant createdAt) {
+    }
 }

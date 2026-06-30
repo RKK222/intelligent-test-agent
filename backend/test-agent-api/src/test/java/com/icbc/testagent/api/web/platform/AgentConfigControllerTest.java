@@ -146,8 +146,8 @@ class AgentConfigControllerTest {
     void superAdminCanReadLocalPublicRepositoryStatus() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
         when(service.localPublicRepositoryStatus()).thenReturn(new PublicRepositoryStatusResponse(
-                "linux-1",
-                "linux-1",
+                "127.0.0.1",
+                "127.0.0.1",
                 "/data/.testagent/agent-opencode/.config",
                 "/data/.testagent/agent-opencode/.config/opencode",
                 "/data/.testagent/agent-opencode/.configdev",
@@ -165,7 +165,7 @@ class AgentConfigControllerTest {
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
-                .jsonPath("$.data.linuxServerId").isEqualTo("linux-1")
+                .jsonPath("$.data.linuxServerId").isEqualTo("127.0.0.1")
                 .jsonPath("$.data.initialized").isEqualTo(true)
                 .jsonPath("$.data.currentBranch").isEqualTo("main");
     }
@@ -177,13 +177,13 @@ class AgentConfigControllerTest {
                 "change-agent-md",
                 "main",
                 "aco_12345678",
-                "linux-1",
+                "127.0.0.1",
                 USER_ID,
                 TRACE_ID)).thenReturn(new AgentConfigWorktreeResponse(
                         "agw_123",
                         "PUBLIC",
                         null,
-                        "linux-1",
+                        "127.0.0.1",
                         "change-agent-md-20260628",
                         "change-agent-md-20260628",
                         "/data/.testagent/agent-opencode/.configdev/change-agent-md-20260628",
@@ -198,25 +198,25 @@ class AgentConfigControllerTest {
                 .header("X-Trace-Id", TRACE_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
-                        {"baseName":"change-agent-md","branch":"main","operationId":"aco_12345678","linuxServerId":"linux-1"}
+                        {"baseName":"change-agent-md","branch":"main","operationId":"aco_12345678","linuxServerId":"127.0.0.1"}
                         """)
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
-                .jsonPath("$.data.linuxServerId").isEqualTo("linux-1");
+                .jsonPath("$.data.linuxServerId").isEqualTo("127.0.0.1");
 
-        verify(service).createPublicWorktree("change-agent-md", "main", "aco_12345678", "linux-1", USER_ID, TRACE_ID);
+        verify(service).createPublicWorktree("change-agent-md", "main", "aco_12345678", "127.0.0.1", USER_ID, TRACE_ID);
     }
 
     @Test
     void superAdminCanListPublicWorktreesByLinuxServer() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
-        when(service.listPublicWorktrees("linux-1")).thenReturn(List.of(
+        when(service.listPublicWorktrees("127.0.0.1")).thenReturn(List.of(
                 new AgentConfigWorktreeOptionResponse(
                         "agw_123",
                         "PUBLIC",
                         null,
-                        "linux-1",
+                        "127.0.0.1",
                         "change-agent-md",
                         "change-agent-md",
                         "/data/.testagent/agent-opencode/.configdev/change-agent-md",
@@ -229,7 +229,7 @@ class AgentConfigControllerTest {
         WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.get()
-                .uri("/api/internal/platform/workspace-management/agent-config/public/worktrees?linuxServerId=linux-1")
+                .uri("/api/internal/platform/workspace-management/agent-config/public/worktrees?linuxServerId=127.0.0.1")
                 .header("X-Trace-Id", TRACE_ID)
                 .exchange()
                 .expectStatus().isOk()
@@ -238,7 +238,7 @@ class AgentConfigControllerTest {
                 .jsonPath("$.data[0].createdByUserId").isEqualTo("usr_admin")
                 .jsonPath("$.data[0].createdByUsername").isEqualTo("admin");
 
-        verify(service).listPublicWorktrees("linux-1");
+        verify(service).listPublicWorktrees("127.0.0.1");
     }
 
     @Test
@@ -247,7 +247,7 @@ class AgentConfigControllerTest {
         WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
 
         client.get()
-                .uri("/api/internal/platform/workspace-management/agent-config/public/worktrees?linuxServerId=linux-1")
+                .uri("/api/internal/platform/workspace-management/agent-config/public/worktrees?linuxServerId=127.0.0.1")
                 .header("X-Trace-Id", TRACE_ID)
                 .exchange()
                 .expectStatus().isForbidden()

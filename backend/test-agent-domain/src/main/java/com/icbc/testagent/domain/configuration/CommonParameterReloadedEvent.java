@@ -1,11 +1,10 @@
 package com.icbc.testagent.domain.configuration;
 
 /**
- * 通用参数缓存已刷新事件，由 {@code CommonParameterCacheRefresher} 在内存缓存 reload 完成后发布。
+ * 通用参数已更新事件，由 {@code CommonParameterUpdateBroadcaster} 在本地更新或远端广播后发布。
  *
- * <p>供需要"缓存已刷新后联动"的模块监听（如向本实例 opencode manager 下发运行配置），
- * 替代直接监听 {@link CommonParameterUpdatedEvent}：远端实例收到广播刷新缓存后也发布本事件，
- * 使每台实例都能在缓存刷新后向自己持有的 manager 下发，无需跨模块调用。
+ * <p>供需要跨实例联动的模块监听（如向本实例 opencode manager 下发运行配置）。监听方收到事件后
+ * 通过 {@link CommonParameterValues} 从数据库读取最新值，不依赖 JVM 或 Redis 参数缓存。
  *
  * @param englishName       触发刷新的参数英文名；远端批量刷新时可能为 null
  * @param platform          触发刷新的参数平台

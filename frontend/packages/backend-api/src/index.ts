@@ -32,6 +32,7 @@ import type {
   CommandInfo,
   CommonParameterChangeLog,
   CreateApplicationWorkspacePayload,
+  CreateWorkspaceAcceptedResponse,
   CreatePersonalWorkspacePayload,
   CreateRepositoryPayload,
   CreateWorkspaceVersionPayload,
@@ -44,7 +45,6 @@ import type {
   GeneralParameter,
   GeneralParameterListParams,
   GeneralParameterUpdatePayload,
-  CommonParameterLoadSnapshot,
   LoginRequest,
   LoginResponse,
   ManagedApplication,
@@ -802,8 +802,6 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "PATCH",
         body: JSON.stringify(payload)
       }),
-    listCommonParameterLoadSnapshots: () =>
-      request<CommonParameterLoadSnapshot[]>(`${commonParameterBase}/load-snapshots`),
     listCommonParameterChangeLogs: (parameterId: string) =>
       request<CommonParameterChangeLog[]>(`${commonParameterBase}/${encodeURIComponent(parameterId)}/change-logs`),
     getRun: (runId: string) => request<Run>(agentPath(`/runs/${encodeURIComponent(runId)}`)),
@@ -1012,7 +1010,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     listApplicationWorkspaces: (appId: string) =>
       request<ApplicationWorkspaceConfig[]>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`),
     createApplicationWorkspace: (appId: string, payload: CreateApplicationWorkspacePayload) =>
-      request<ApplicationWorkspaceConfig>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`, {
+      request<CreateWorkspaceAcceptedResponse>(`${configurationBase}/applications/${encodeURIComponent(appId)}/workspaces`, {
         method: "POST",
         body: JSON.stringify(payload)
       }),

@@ -65,4 +65,10 @@ public interface ManagedWorkspaceRepository {
     Optional<UserWorkspaceBranchPreference> findBranchPreference(UserId userId, ApplicationId appId, WorkspaceId workspaceId);
 
     void saveSyncRecord(WorkspaceSyncRecord record);
+
+    /**
+     * 级联删除指定应用工作空间关联的所有子表数据（同步记录 → 版本副本 → 个人工作空间 → 应用版本工作空间）。
+     * 调用方需在之后自行删除 application_workspaces 主表记录。
+     */
+    void deleteAllByApplicationWorkspaceId(ApplicationWorkspaceId applicationWorkspaceId);
 }
