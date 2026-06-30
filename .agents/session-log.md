@@ -2,7 +2,14 @@
 
 ## Entries
 
-### 2026-06-30 - 修复 Stop-AllDevServices 子进程清理不彻底导致 Maven clean 失败
+### 2026-06-30 - 修复 Invoke-WebRequest 安全警告提示
+
+- Why: 脚本中 `Test-HttpOk` 用的 `Invoke-WebRequest` 没有 `-UseBasicParsing`，PowerShell 5 会弹出"脚本执行风险"安全警告，需要用户手动输入 Y 才能继续。
+- What: [win-restart-dev-services-fixed-v4.ps1](file:///d:/workspace/intelligent-test-agent/win-restart-dev-services-fixed-v4.ps1) 中 `Test-HttpOk` 的 `Invoke-WebRequest` 加上 `-UseBasicParsing` 开关。
+- How: 仅改 PowerShell 脚本；不涉及 API/事件/数据库/安全/兼容性。
+- Result: 不会再弹出安全警告。
+
+### 2026-06-30 - 修复 Maven clean 失败：子进程清理 + 句柄延迟释放 + 自动重试
 
 - Why: 用户反馈之前加的 `Stop-AllDevServices` 没有解决 `mvn clean` 时 `test-agent-app-0.1.0-SNAPSHOT.jar: 另一个程序正在使用此文件` 的问题。原因有两个层次：
   1. `taskkill /F /IM` 和 `Stop-Process -Force` 都不杀子进程，Java 子进程继续持有 jar 句柄。

@@ -607,7 +607,7 @@ function Test-HttpOk {
     param([Parameter(Mandatory = $true)][string]$Url)
 
     try {
-        $response = Invoke-WebRequest -Uri $Url -Method Get -TimeoutSec 5 -ErrorAction Stop
+        $response = Invoke-WebRequest -Uri $Url -Method Get -TimeoutSec 5 -UseBasicParsing -ErrorAction Stop
         return $response.StatusCode -ge 200 -and $response.StatusCode -lt 400
     } catch {
         return $false
