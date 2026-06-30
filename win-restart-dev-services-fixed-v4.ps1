@@ -700,7 +700,7 @@ function Wait-UntilHttpOk {
     exit 1
 }
 
-# 实时输出后端启动日志，直到看到 "Started" 关键字或超时
+# 实时输出后端启动日志（stdout + stderr 合并），直到看到 "Started" 关键字或超时
 function Wait-BackendLogReady {
     param(
         [Parameter(Mandatory = $true)][string]$LogPath,
@@ -709,55 +709,69 @@ function Wait-BackendLogReady {
     )
 
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
-    $lastPos = 0
+    $lastPosOut = 0
+    $lastPosErr = 0
 
     # 等待日志文件出现
-    while (-not (Test-Path -LiteralPath $LogPath -PathType Leaf) -and (Get-Date) -lt $deadline) {
+    while ((-not (Test-Path -LiteralPath $LogPath -PathType Leaf)) -and (Get-Date) -lt $deadline) {
         Start-Sleep -Milliseconds 500
     }
-    if (-not (Test-Path -LiteralPath $LogPath -PathType Leaf)) {
-        Write-Stderr "Backend log file not created: $LogPath"
-        return
-    }
 
-    # 实时跟踪日志输出，直到看到 "Started" 关键字
-    while ((Get-Date) -lt $deadline) {
+    # 辅助：从指定文件读取新增内容并输出，返回是否匹配终止关键字
+    $readNewLines = {
+        param([string]$Path, [ref]$Pos, [bool]$IsErr)
+        if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
         try {
-            $fs = [System.IO.FileStream]::new($LogPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
-            $fs.Position = $lastPos
+            $fs = [System.IO.FileStream]::new($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+            $fs.Position = $Pos.Value
             $reader = New-Object System.IO.StreamReader($fs)
             $line = $reader.ReadLine()
             while ($null -ne $line) {
                 Write-Host $line
-                # Spring Boot 启动完成标志
                 if ($line -match 'Started\s+\S+Application') {
-                    $reader.Close()
-                    $fs.Close()
-                    return
+                    $reader.Close(); $fs.Close()
+                    return $true
                 }
-                # 启动失败标志
                 if ($line -match 'Application run failed') {
-                    $reader.Close()
-                    $fs.Close()
-                    Write-Stderr "Backend startup failed. Error log:"
-                    if (Test-Path -LiteralPath $ErrorLogPath -PathType Leaf) {
-                        Get-Content -LiteralPath $ErrorLogPath -ErrorAction SilentlyContinue | ForEach-Object { Write-Stderr $_ }
-                    }
-                    exit 1
+                    $reader.Close(); $fs.Close()
+                    return $true
                 }
                 $line = $reader.ReadLine()
             }
-            $lastPos = $fs.Position
-            $reader.Close()
-            $fs.Close()
-        } catch {
-            # 文件可能暂时不可访问，忽略
+            $Pos.Value = $fs.Position
+            $reader.Close(); $fs.Close()
+        } catch { }
+        return $false
+    }
+
+    # 同时跟踪 stdout 和 stderr 日志，实时输出
+    while ((Get-Date) -lt $deadline) {
+        $done = (& $readNewLines $LogPath ([ref]$lastPosOut) $false)
+        if ($done) { return }
+
+        $done = (& $readNewLines $ErrorLogPath ([ref]$lastPosErr) $true)
+        if ($done) { return }
+
+        # 如果 stderr 有内容说明出错了，输出完整错误日志后退出
+        if (($lastPosErr -gt 0) -and (Test-Path -LiteralPath $ErrorLogPath -PathType Leaf)) {
+            try {
+                $efs = [System.IO.FileStream]::new($ErrorLogPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+                $efs.Position = 0
+                $ereader = New-Object System.IO.StreamReader($efs)
+                $errContent = $ereader.ReadToEnd()
+                $ereader.Close(); $efs.Close()
+                if ($errContent -match 'Exception|Error|failed|Failed') {
+                    Write-Host ""
+                    Write-Host "Backend startup failed." -ForegroundColor Red
+                    exit 1
+                }
+            } catch { }
         }
+
         Start-Sleep -Milliseconds 500
     }
 
-    Write-Stderr "Timed out waiting for backend to start ($TimeoutSeconds seconds)."
-    Write-LogTail $LogPath
+    Write-Host "Timed out waiting for backend to start ($TimeoutSeconds seconds)." -ForegroundColor Red
     exit 1
 }
 
