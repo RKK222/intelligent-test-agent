@@ -755,6 +755,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     created.workspaceName(),
                     created.branch(),
                     created.runtimeWorkspace());
+        } catch (PlatformException exception) {
+            throw exception;
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "创建默认私人工作区失败: " + exception.getMessage(), Map.of(), exception);
         }
@@ -1011,7 +1013,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
      */
     private List<String> conflictPaths(Path repoRoot) {
         try {
-            GitCommandResult result = new com.icbc.testagent.common.git.ProcessGitCommandExecutor().execute(
+            GitCommandResult result = new ProcessGitCommandExecutor().execute(
                     List.of("git", "-C", repoRoot.toString(), "diff", "--name-only", "--diff-filter", "U"),
                     null,
                     Duration.ofSeconds(15));

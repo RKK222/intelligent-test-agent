@@ -70,6 +70,24 @@
 - How: 仅修改 `RuntimeSecurityConfig.java`、`RuntimeSecurityConfigTest.java` 和 `ConfigurationManagementControllerTest.java`，不新增数据库 Migration，不修改 `.env.local` 环境变量文件。
 - Result: 运行 `mvn -pl test-agent-api -am test`，包括新编写的 CORS 单测在内的 147 项后端 API 测试用例全量通过。
 =======
+### 2026-06-30 - 应用工作区私有 Worktree 与 Diff/推送方案
+
+**Why**: 普通应用工作区 diff 不应调用 opencode /vcs/diff，避免 opencode 服务异常导致"刷新变更列表失败"。应用版本进入后默认切到用户私有 worktree，提交并推送合并回应用版本分支。
+
+**What**:
+- 后端新增 ensureDefaultPersonalWorkspace / getWorkspaceGitDiff / publishPersonalWorkspace 3 个 Service 方法和对应 Controller 端点
+- 前端 AgentWorkbench、GitChangesPanel、FigmaFileExplorer 适配新的私有 worktree 链路
+- 前端 backend-api 和 shared-types 新增类型与 API 方法
+- 文档 http-api.md 同步更新
+
+**How**:
+- 私有 worktree 新命名规则: {应用版本分支}_{userId}_default
+- Git diff 基于本地 git status --porcelain + git diff，不依赖 opencode
+- 推送流程: stageAll → commitStaged → push → merge app branch
+- 冲突仅在个人 worktree，应用版本副本不受影响
+
+**Result**: 前端 typecheck 通过，187 个测试全部通过，git diff --check 无问题，commit 946315e2
+
 ### 2026-06-30 - 修复 Git 变更面板测试数据与应用级 Agent/Skill 展示
 
 - Why: 左侧 Git 变更面板在 opencode 进程不可用或真实刷新进行中点击“加载测试数据”时可能仍为空；mock 数据也把平台自身源码和公共级 Agent 配置混入了截图 1 的 `agents` 分组，不符合“应用工作区变更 + 应用级 agents/skills 变更”的展示目标。

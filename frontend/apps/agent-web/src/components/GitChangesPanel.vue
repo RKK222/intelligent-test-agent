@@ -371,10 +371,9 @@ async function handleCommit(push = false) {
       progressMessage.value = "已提交并推送到应用版本！";
       await new Promise((resolve) => setTimeout(resolve, 500));
     } else if (!push && workspaceStaged.value.length > 0) {
-      // 仅提交（不推送）：暂不需要
-      progressMessage.value = "已提交变更到个人工作区。";
-      stagedWorkspacePaths.value.clear();
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // 仅提交（不推送）：用户应使用「提交并推送」完成整个发布流程
+      progressMessage.value = "请点击右侧「提交并推送」按钮完成合并与发布。";
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
 
     // 2. Commit Agent PUBLIC changes

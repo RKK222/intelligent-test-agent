@@ -1261,12 +1261,12 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
       feedback.value = { kind: "error", title: "该版本未关联运行态工作区", description: "请先在平台侧初始化版本。" };
       return;
     }
+    // 无论是否已是当前工作区，都记录个人工作区 ID（若从 recent 恢复进入，可能尚未设置）
+    currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
     if (runtimeWorkspaceId === selectedWorkspaceId.value) {
       feedback.value = { kind: "info", title: "已在该版本工作区", description: `${payload.version.version} (个人空间: default)` };
       return;
     }
-    // 记录当前个人工作区 ID，供 GitChangesPanel 提交/推送使用
-    currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
     const workspace = await api.getWorkspace(runtimeWorkspaceId);
     await applyManagedWorkspace(workspace, {
       successTitle: "已切换应用版本",
