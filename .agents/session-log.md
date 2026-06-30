@@ -2,6 +2,12 @@
 
 ## Entries
 
+### 2026-06-30 - 修复 manager 注册早于 Java 后端拓扑落库的启动竞态
+
+- Why: 三服务重启后后端日志在 `2026-06-30T10:46:11.043+08:00` 出现 `opencode_manager_backend_connections.backend_process_id` 外键失败；根因是 Netty 端口已监听后，opencode-manager 可能抢在 `BackendJavaProcessLifecycleRunner` 首次 `registerHeartbeat` 落库 `backend_java_processes` 前完成 WebSocket register。
+- What: `ManagerControlApplicationService.register` 在写 manager/container/connection 持久拓扑前先调用 `BackendJavaProcessLifecycleService.registerHeartbeat`，确保当前 `backendProcessId` 的父表行存在，再插入 manager-backend 连接；重复键容错边界不变，非重复键持久化异常仍继续暴露。
+- How: 新增 `ManagerControlApplicationServiceTest.registerPersistsCurrentBackendBeforeSavingManagerConnection`，fake repository 模拟连接表外键约束并断言 `saveBackendJavaProcess` 早于 `saveManagerBackendConnection`；同步更新 `test-agent-opencode-runtime` README。
+- Result: 定向测试先红后绿，`mvn -pl test-agent-opencode-runtime -am -Dtest=ManagerControlApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false test` 通过；本修复不改数据库结构、API、事件或环境配置。
 ### 2026-06-30 - 模型下拉菜单即时悬浮提示与原位恢复
 
 - Why: 聊天面板输入框下方的模型选择器，之前被移到了顶部标题栏。用户希望模型选择器改回在输入框下方，且指出之前反馈的"显示不全"其实是指下拉菜单中"上新推荐"一排的模型卡片在固定双列等宽网格下长名字被截断的问题，希望能用鼠标悬浮（Hover）即时显示完整名称的方式来解决（原生 title 属性有较长延迟，需使用 el-tooltip 实现快速响应）。

@@ -215,6 +215,8 @@ public class ManagerControlApplicationService {
         LinuxServerId linuxServerId = new LinuxServerId(message.linuxServerId());
         OpencodeContainerId containerId = new OpencodeContainerId(message.containerId());
         ContainerManagerId managerId = new ContainerManagerId(message.managerId());
+        // manager 可能在 ApplicationRunner 首次心跳落库前连入，先补齐当前 Java 进程父表行，避免连接外键失败。
+        backendLifecycle.registerHeartbeat(message.traceId());
         repository.saveLinuxServer(new LinuxServer(
                 linuxServerId,
                 linuxServerId.value(),
