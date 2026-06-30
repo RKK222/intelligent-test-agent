@@ -29,6 +29,11 @@ param(
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = "Stop"
 
+# 设置控制台输出编码为 UTF-8，避免中文日志乱码
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 # opencode-manager 编译状态：失败时仅跳过 manager 启动，后端和前端继续。
 $script:OpencodeManagerBuildSucceeded = $true
 
@@ -656,11 +661,11 @@ function Write-LogTail {
     $errorLogPath = Get-ErrorLogPath $LogPath
     if (Test-Path -LiteralPath $LogPath -PathType Leaf) {
         Write-Stderr "stdout log tail:"
-        Get-Content -LiteralPath $LogPath -Tail 120 -ErrorAction SilentlyContinue | ForEach-Object { Write-Stderr $_ }
+        Get-Content -LiteralPath $LogPath -Tail 120 -Encoding utf8 -ErrorAction SilentlyContinue | ForEach-Object { Write-Stderr $_ }
     }
     if (Test-Path -LiteralPath $errorLogPath -PathType Leaf) {
         Write-Stderr "stderr log tail:"
-        Get-Content -LiteralPath $errorLogPath -Tail 120 -ErrorAction SilentlyContinue | ForEach-Object { Write-Stderr $_ }
+        Get-Content -LiteralPath $errorLogPath -Tail 120 -Encoding utf8 -ErrorAction SilentlyContinue | ForEach-Object { Write-Stderr $_ }
     }
 }
 
@@ -685,7 +690,7 @@ function Wait-UntilHttpOk {
         Write-Host -NoNewline "`rWaiting for $Label... ($attempt/$Attempts)"
         # 每隔 5 次尝试输出日志尾部，帮助诊断启动问题
         if ($attempt % 5 -eq 0 -and (Test-Path -LiteralPath $LogPath -PathType Leaf)) {
-            $lastLine = (Get-Content -LiteralPath $LogPath -Tail 1 -ErrorAction SilentlyContinue)
+            $lastLine = (Get-Content -LiteralPath $LogPath -Tail 1 -Encoding utf8 -ErrorAction SilentlyContinue)
             if ($lastLine) {
                 Write-Host ""
                 Write-Host "  latest log: $lastLine" -ForegroundColor DarkGray
@@ -732,7 +737,7 @@ function Wait-BackendLogReady {
         try {
             $fs = [System.IO.FileStream]::new($Path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
             $fs.Position = $Pos.Value
-            $reader = New-Object System.IO.StreamReader($fs)
+            $reader = New-Object System.IO.StreamReader($fs, [System.Text.Encoding]::UTF8)
             $line = $reader.ReadLine()
             while ($null -ne $line) {
                 Write-Host $line
@@ -1189,7 +1194,7 @@ function Follow-ServiceLogs {
     foreach ($name in $logMap.Keys) {
         $logPath = $logMap[$name]
         Write-Host "--- $name (last 20 lines) ---"
-        Get-Content -LiteralPath $logPath -Tail 20 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "[$name] $_" }
+        Get-Content -LiteralPath $logPath -Tail 20 -Encoding utf8 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "[$name] $_" }
         Write-Host "--- end $name ---"
     }
 
@@ -1204,7 +1209,7 @@ function Follow-ServiceLogs {
         $jobs += Start-Job -Name "tail-$name" -ScriptBlock {
             param($path, $displayName)
             try {
-                Get-Content -LiteralPath $path -Wait -Tail 0 -ErrorAction SilentlyContinue
+                Get-Content -LiteralPath $path -Wait -Tail 0 -Encoding utf8 -ErrorAction SilentlyContinue
             } finally {
                 # Get-Content -Wait 在外部 Stop-Job 后不会自然返回，这里只在异常时输出标记。
             }
