@@ -24,6 +24,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +34,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class ManagerControlApplicationService {
+
+    private static final Logger log = LoggerFactory.getLogger(ManagerControlApplicationService.class);
 
     private final OpencodeProcessManagementRepository repository;
     private final OpencodeProcessHeartbeatStore heartbeatStore;
@@ -67,8 +71,36 @@ public class ManagerControlApplicationService {
      * 注册 manager 连接并返回当前后端实例确认消息。
      */
     public ManagerControlMessage register(ManagerControlMessage message) {
-        saveTopology(message, ManagerConnectionStatus.CONNECTED);
+        try {
+            saveTopology(message, ManagerConnectionStatus.CONNECTED);
+        } catch (RuntimeException exception) {
+            if (!isPersistenceIntegrityViolation(exception)) {
+                throw exception;
+            }
+            // 在线状态以 WebSocket 和 Redis 快照为准，历史拓扑唯一键冲突不能阻断 manager 启动。
+            log.warn(
+                    "manager 注册持久拓扑失败，继续建立控制面连接 managerId={} containerId={} linuxServerId={} traceId={}",
+                    message == null ? null : message.managerId(),
+                    message == null ? null : message.containerId(),
+                    message == null ? null : message.linuxServerId(),
+                    message == null ? null : message.traceId(),
+                    exception);
+        }
         return ManagerControlMessage.registered(backendLifecycle.backendProcessId().value(), message.traceId());
+    }
+
+    private boolean isPersistenceIntegrityViolation(RuntimeException exception) {
+        Throwable current = exception;
+        while (current != null) {
+            String simpleName = current.getClass().getSimpleName();
+            String className = current.getClass().getName();
+            if ("DuplicateKeyException".equals(simpleName)
+                    || "org.springframework.dao.DuplicateKeyException".equals(className)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     /**

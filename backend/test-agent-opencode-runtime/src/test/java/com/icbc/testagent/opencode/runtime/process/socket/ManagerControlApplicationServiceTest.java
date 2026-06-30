@@ -1,6 +1,7 @@
 package com.icbc.testagent.opencode.runtime.process.socket;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
@@ -75,6 +76,65 @@ class ManagerControlApplicationServiceTest {
             assertThat(snapshot.connections()).extracting(connection -> connection.backendProcessId().value())
                     .containsExactly("bjp_1234567890abcdef", "bjp_2234567890abcdef");
         });
+    }
+
+    @Test
+    void registerContinuesWhenPersistentTopologyConflictsWithExpiredDatabaseState() {
+        FakeRepository repository = new FakeRepository();
+        repository.failSavingManagerWithDuplicateKey = true;
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        BackendJavaProcessLifecycleService backendLifecycle = backendLifecycle(repository, heartbeatStore);
+        ManagerControlApplicationService service = new ManagerControlApplicationService(
+                repository,
+                heartbeatStore,
+                backendLifecycle,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        ManagerControlMessage register = ManagerControlMessage.register(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                5,
+                0,
+                Map.of("commands", List.of("start", "health")),
+                "trace_1234567890abcdef");
+
+        ManagerControlMessage response = service.register(register);
+
+        assertThat(response.type()).isEqualTo(ManagerControlProtocol.TYPE_REGISTERED);
+        assertThat(response.backendProcessId()).isEqualTo(backendLifecycle.backendProcessId().value());
+        assertThat(repository.savedContainers).hasSize(1);
+        assertThat(repository.savedConnections).isEmpty();
+    }
+
+    @Test
+    void registerDoesNotHideUnexpectedPersistenceFailures() {
+        FakeRepository repository = new FakeRepository();
+        repository.failSavingManagerWithUnexpectedError = true;
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        BackendJavaProcessLifecycleService backendLifecycle = backendLifecycle(repository, heartbeatStore);
+        ManagerControlApplicationService service = new ManagerControlApplicationService(
+                repository,
+                heartbeatStore,
+                backendLifecycle,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+        ManagerControlMessage register = ManagerControlMessage.register(
+                "mgr_1234567890abcdef",
+                "ctr_01",
+                "10.8.0.12",
+                "opencode-a",
+                4096,
+                4100,
+                5,
+                0,
+                Map.of("commands", List.of("start", "health")),
+                "trace_1234567890abcdef");
+
+        assertThatThrownBy(() -> service.register(register))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unexpected persistence failure");
     }
 
     @Test
@@ -216,6 +276,8 @@ class ManagerControlApplicationServiceTest {
         private final List<OpencodeContainer> savedContainers = new ArrayList<>();
         private final List<OpencodeContainerManager> savedManagers = new ArrayList<>();
         private final List<OpencodeManagerBackendConnection> savedConnections = new ArrayList<>();
+        private boolean failSavingManagerWithDuplicateKey;
+        private boolean failSavingManagerWithUnexpectedError;
 
         @Override public LinuxServer saveLinuxServer(LinuxServer linuxServer) { return linuxServer; }
         @Override public Optional<LinuxServer> findLinuxServerById(LinuxServerId linuxServerId) { return Optional.empty(); }
@@ -228,7 +290,16 @@ class ManagerControlApplicationServiceTest {
         @Override public List<OpencodeContainer> findHealthyContainersByLinuxServer(LinuxServerId linuxServerId, int limit) { return List.of(); }
         @Override public List<OpencodeContainer> findHealthyContainersConnectedToBackend(BackendProcessId backendProcessId, int limit) { return List.of(); }
         @Override public List<OpencodeContainer> findHealthyContainersConnectedToBackendByLinuxServer(BackendProcessId backendProcessId, LinuxServerId linuxServerId, int limit) { return List.of(); }
-        @Override public OpencodeContainerManager saveContainerManager(OpencodeContainerManager manager) { savedManagers.add(manager); return manager; }
+        @Override public OpencodeContainerManager saveContainerManager(OpencodeContainerManager manager) {
+            if (failSavingManagerWithDuplicateKey) {
+                throw new DuplicateKeyException("duplicate container_id");
+            }
+            if (failSavingManagerWithUnexpectedError) {
+                throw new IllegalStateException("unexpected persistence failure");
+            }
+            savedManagers.add(manager);
+            return manager;
+        }
         @Override public Optional<OpencodeContainerManager> findContainerManagerById(ContainerManagerId managerId) { return Optional.empty(); }
         @Override public OpencodeManagerBackendConnection saveManagerBackendConnection(OpencodeManagerBackendConnection connection) { savedConnections.add(connection); return connection; }
         @Override public Optional<OpencodeManagerBackendConnection> findManagerBackendConnection(ContainerManagerId managerId, BackendProcessId backendProcessId) { return Optional.empty(); }
@@ -240,6 +311,12 @@ class ManagerControlApplicationServiceTest {
         @Override public List<OpencodeServerProcess> findOpencodeServerProcesses(int limit) { return List.of(); }
         @Override public PageResponse<OpencodeServerProcess> findOpencodeServerProcesses(OpencodeServerProcessFilter filter, PageRequest pageRequest) {
             return new PageResponse<>(List.of(), pageRequest.page(), pageRequest.size(), 0);
+        }
+    }
+
+    private static final class DuplicateKeyException extends RuntimeException {
+        private DuplicateKeyException(String message) {
+            super(message);
         }
     }
 }

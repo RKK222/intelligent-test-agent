@@ -1854,6 +1854,14 @@
   - 之前 `canSubmitUpdatePublicConfig` 用 `publicUpdateRequiresDiscard` 做 disabled 条件会把冲突场景"静默禁用"，用户以为按钮坏了；改为弹窗内可见的拒绝错误更直观。
 - Verification: `pnpm test -- agent-config-panel` 8/8；`mvn -pl test-agent-workspace-management,test-agent-api test -Dtest=AgentConfigApplicationServiceTest,AgentConfigControllerTest` 33/33。
 
+### 2026-06-30 - manager 注册重复拓扑不再阻断 WebSocket
+
+- Why: 本地重启后 opencode-manager 反复断开，后端日志显示注册阶段写 `opencode_container_managers` 时因历史 `container_id` 行触发 `DuplicateKeyException`。该表是持久拓扑/历史审计，不是在线态 TTL 来源；在线态应由 WebSocket 连接和 Redis snapshot 决定。
+- What: `ManagerControlApplicationService.register` 对持久拓扑写入的重复键异常做 best-effort 容错，记录 WARN 后继续返回 `registered`；异常识别范围收窄到 `DuplicateKeyException`，外键、check constraint 或其他持久化异常继续抛出，避免隐藏真实数据错误。补充单测覆盖重复键继续注册、普通异常不吞；README 记录注册写库不应阻断在线控制面。
+- How: 不改数据库唯一约束、不覆盖旧 `container_id` 行、不新增 JDBC SQL；runtime 模块不引入 Spring DAO 依赖，按异常类名识别实际 persistence 抛出的重复键异常。
+- Result: 新 jar 已打包；用户可自行重启验证 manager WebSocket 不再因历史拓扑重复键直接断开。
+- Verification: `mvn -pl test-agent-opencode-runtime -am -Dtest=ManagerControlApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false test` 5/5 通过；`mvn clean package -DskipTests` 通过。
+
 ### 2026-06-29 - 修复 /api/workspaces 返回 updatedAt must not be before createdAt
 
 - Why: 用户反馈 GET /api/workspaces?page=1&size=50 一直返回 updatedAt must not be before createdAt 校验错误。该校验来自 Workspace 领域 record 的 compact constructor，抛 IllegalArgumentException 后被 GlobalExceptionHandler 原样回吐，把内部不变量错误信息暴露给前端。
