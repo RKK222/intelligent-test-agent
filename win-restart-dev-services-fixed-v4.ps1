@@ -833,7 +833,8 @@ function Start-BackgroundCommand {
     }) -join " "
     $cmdLine = "$Command $argStr"
     $redirectPart = ">> `"$LogPath`" 2>> `"$errorLogPath`""
-    $fullArgs = "/c `"$cmdLine $redirectPart`""
+    # chcp 65001 将 cmd.exe 代码页切换为 UTF-8，避免中文日志通过重定向写入文件时乱码
+    $fullArgs = "/c `"chcp 65001 >nul & $cmdLine $redirectPart`""
 
     $pinfo = New-Object System.Diagnostics.ProcessStartInfo
     $pinfo.FileName = "cmd.exe"
