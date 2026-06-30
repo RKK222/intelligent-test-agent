@@ -732,13 +732,31 @@ function Build-OpencodeManager {
     Write-Host "Building opencode-manager: go build"
     Push-Location $managerDir
     try {
-        $buildOutput = & go build -o "bin/opencode-manager.exe" ./cmd/opencode-manager 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        # go build 失败时会把 `# package` 之类的诊断行写到 stderr，PowerShell 默认会把它当 ErrorRecord。
+        # 脚本顶部设置了 $ErrorActionPreference = Stop，必须临时切回 Continue 并 try/catch 吞掉终止错误，
+        # 否则脚本会被 RemoteException 直接击穿、后面的 Skip 逻辑根本走不到。
+        $buildOutput = ""
+        $buildExitCode = 0
+        $previousErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $buildOutput = & go build -o "bin/opencode-manager.exe" ./cmd/opencode-manager 2>&1
+            $buildExitCode = $LASTEXITCODE
+        } catch {
+            $buildOutput = @($buildOutput) + @($_.ToString())
+            $buildExitCode = 1
+        } finally {
+            $ErrorActionPreference = $previousErrorAction
+        }
+
+        if ($buildExitCode -ne 0) {
             # opencode-manager 编译失败不应该阻断后端和前端的本地启动；后续 Start-OpencodeManager 会跳过启动。
-            Write-Stderr "opencode-manager build failed (exit $LASTEXITCODE). Backend and frontend will still start; manager will be skipped this run."
+            Write-Stderr "opencode-manager build failed (exit $buildExitCode). Backend and frontend will still start; manager will be skipped this run."
             Write-Stderr "--- go build output ---"
             foreach ($line in @($buildOutput)) {
-                Write-Stderr $line
+                if ($null -ne $line) {
+                    Write-Stderr ([string]$line)
+                }
             }
             Write-Stderr "--- end go build output ---"
             $script:OpencodeManagerBuildSucceeded = $false

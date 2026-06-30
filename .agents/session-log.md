@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-30 - 修复 Build-OpencodeManager 被 RemoteException 击穿的问题
+
+- Why: 上一版改动把 `& go build ... 2>&1` 直接赋给变量，但脚本顶部仍是 `$ErrorActionPreference = "Stop"`。`go build` 失败时把 `# github.com/.../internal/process` 这类诊断行写到 stderr，PowerShell 在 `Stop` 模式下把它升级为终止错误 `RemoteException`，整个脚本被击穿、Skip 逻辑走不到。
+- What: `Build-OpencodeManager` 内临时把 `$ErrorActionPreference` 切到 `Continue`，用嵌套 try/catch/finally 包住 `& go build` 调用并保留原值；`$LASTEXITCODE` 改为先存到 `$buildExitCode` 再判断；输出循环增加 null 检查。
+- How: 仅修改 [win-restart-dev-services-fixed-v4.ps1](file:///d:/workspace/intelligent-test-agent/win-restart-dev-services-fixed-v4.ps1) 的 `Build-OpencodeManager` 函数；不涉及 API/事件/数据库/安全/兼容性；Maven 与 pnpm 调用仍保留原 exit-on-fail 行为，因为后端 jar 与前端产物缺失时本就应该中止。
+- Result: 用 `cmd /c` 模拟 `go build` 写 stderr + exit 2 的小测试验证：捕获到 `buildExitCode = 2`、3 行输出被正确记录，且脚本正常结束（`exit code 0`），不再被 `RemoteException` 击穿。
+
 ### 2026-06-30 - 增强 win-restart-dev-services-fixed-v4.ps1：opencode-manager 编译失败不再阻断、增加 -FollowLogs 实时日志
 
 - Why: 在 Windows 上 `go build` opencode-manager 时 `process.go` 仍在使用仅 Unix 的 `syscall.Setpgid` / `syscall.Kill`，脚本原有逻辑是 `exit $LASTEXITCODE`，导致后端、前端、opencode-manager 全部都不会启动；同时用户希望所有服务起来后能在当前窗口直接看到实时日志。
