@@ -17,6 +17,7 @@
 - `RuntimeManagementCommandService` 为超级管理员运行管理页提供按 `containerId + port` 重启/停止 opencode server 的命令入口，复用 `OpencodeProcessManagerGateway` 转发到 manager WebSocket `restart`/`stop`，不直接访问 opencode server、不写数据库；local 网关明确返回不可用。
 - `OpencodeProcessHeartbeatMaintenanceService` 每 3 分钟通过 manager health 命令确认 RUNNING opencode server 进程并刷新 Redis 心跳，每 5 分钟清理 Redis 心跳索引中过期的 Java/opencode 进程 ID；opencode 进程心跳仍保留 5 分钟窗口。
 - `BackendJavaProcessLifecycleService.registerHeartbeat` 每 5 秒为当前 Java 实例写 Redis 后端快照，TTL 为 10 秒，并采集服务器 CPU、内存、当前工作目录所在磁盘容量和 JVM 指标；Java latest snapshot、在线心跳、服务器级样本和 JVM 样本都按 `linuxServerId` 保存，使同一服务器 Java 进程重启后页面只保留一行且 JVM 趋势连续。`backendProcessId` 继续作为当前 Java 实例元数据、manager-backend 连接和拓扑连线字段。数据库只在拓扑首次落库或状态变化时写入 `linux_servers` / `backend_java_processes`。它仍会为同 `linux_server_id` 下所有 `connection_status = CONNECTED` 的本地开发 manager 补齐到本实例的连接行（仅在 (manager, backend) 组合不存在连接时插入），让本地开发环境在 V17 迁移预置 manager 但还没有 manager WebSocket 注册时，仍能通过 `findHealthyContainersConnectedToBackend*` 查询到本机容器。
+- `ManagerControlApplicationService.register` 会尽力写入持久拓扑，但 `opencode_container_managers` 等历史拓扑表的唯一键冲突不会阻断 WebSocket 注册；manager 启动和在线态以控制面连接及 Redis 快照为准，避免已过期的数据库拓扑行导致 manager 重连失败。
 - `OpencodeProcessManagerGateway` 提供两套实现，通过 `test-agent.opencode.manager-control.gateway-mode` 切换：`socket`（默认，生产用 `SocketOpencodeProcessManagerGateway` 走 manager WebSocket）与 `local`（`LocalOpencodeProcessManagerGateway` 直连 `baseUrl` 跑 HTTP GET 检查、`startProcess` 走占位返回）。两个实现都打 `@ConditionalOnProperty` 互斥激活；`application-local.yml` 默认 `local`，其它 profile 留空走 `socket`。
 - manager WebSocket 控制面通过 `ManagerControlMessageCodec` 编码 JSON；发给 Go manager 的时间字段必须保持 RFC3339 字符串，不能使用 Jackson 默认时间戳，否则 Go `time.Time` 解码会断开连接并导致用户进程初始化不可用。
 - `UserOpencodeProcessAssignmentService` 支持 `test-agent.opencode.local-direct` 短路开关：开启后 `status` / `initialize` / `requireReadyProcess` 三个入口完全跳过 database topology / user binding / manager health 校验链路，直接合成一个指向 `test-agent.opencode.local-direct-base-url`（默认 `http://127.0.0.1:4096`）的 READY 进程对象。Run 启动拿到合成节点后仍会先 upsert 兼容 `ExecutionNode`，再保存路由审计和 agent session binding，避免本地直连节点触发外键失败。`application-local.yml` / `application-guo.yml` 默认 `true`，生产必须保持 `false`。配置类由 `OpencodeManagerControlConfig.localDirectSettings` 注入到 runtime 的 `LocalDirectSettings`。
@@ -28,7 +29,7 @@
 - 从完成态 `write`/`edit`/`apply_patch` tool part 派生运行中 `diff.proposed`，供前端实时追踪文件变化和行数统计。
 - Run Diff 查询、接受和拒绝。
 - agent runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth；opencode 原路径作为当前标准适配形态。
-- Model 目录编排：`opencode` 来源保持旧代理；`bailian` 来源直连百炼 `/models` 并把外网 provider 配置同步给 opencode；`internal` 来源读取 `ai_model_configs` 表并按 openclaw 企业 patch 的 `icbc-openai` 兼容配置同步给 opencode。
+- Model 目录编排：`opencode` 来源保持旧代理；`external` 来源直连 OpenAI-compatible `/models` 并把外部 provider 配置同步给 opencode；`internal` 来源读取 `ai_model_configs` 表并按 openclaw 企业 patch 的 `icbc-openai` 兼容配置同步给 opencode。历史 `bailian` source 会按 `external` 兼容处理。
 - PTY terminal ticket、限流、active session registry、进程适配和审计。
 
 ## Model 目录配置
@@ -38,10 +39,10 @@
 | source | 行为 |
 |---|---|
 | `opencode` | 保持旧行为，`/api/model`、`/api/provider` 直接代理 opencode。 |
-| `bailian` | 外网测试模式，后端请求 `external.base-url + /models` 获取模型列表；获取失败时回退到配置内置外网模型。 |
+| `external` | 外网测试模式，后端请求 `external.base-url + /models` 获取模型列表；获取失败时回退到配置内置外网模型。 |
 | `internal` | 企业内模式，启动时把 openclaw 企业 patch 中的模型清单 seed 到 `ai_model_configs`，接口从数据库读取启用模型。默认模型为 `DeepSeek-V4-Flash-W8A8`。 |
 
-在 `bailian` 和 `internal` 模式下，Run 启动和模型/Provider 目录读取前会尽力 `PATCH /global/config` 到当前 opencode 执行节点，写入 OpenAI-compatible provider、默认模型和请求头配置。provider API Key 优先读取 `test-agent.model-catalog.<external|internal>.api-key`，未配置时回退到 `api-key-env` 指定的环境变量，便于 IDEA 直接启动和脚本启动同时兼容。同步失败只记录告警，Run 仍走原有错误处理路径。
+在 `external` 和 `internal` 模式下，Run 启动和模型/Provider 目录读取前会尽力 `PATCH /global/config` 到当前 opencode 执行节点，写入 OpenAI-compatible provider、默认模型和请求头配置。provider API Key 优先读取 `test-agent.model-catalog.<external|internal>.api-key`，未配置时回退到 `api-key-env` 指定的环境变量，便于 IDEA 直接启动和脚本启动同时兼容。同步失败只记录告警，Run 仍走原有错误处理路径。
 
 ## 测试覆盖
 

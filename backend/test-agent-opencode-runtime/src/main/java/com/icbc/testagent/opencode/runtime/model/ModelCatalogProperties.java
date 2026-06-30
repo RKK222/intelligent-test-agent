@@ -12,20 +12,15 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "test-agent.model-catalog")
 public class ModelCatalogProperties {
 
-    private String source = "bailian";
+    private String source = "external";
     private final Provider external = new Provider(
-            "modelstudio",
-            "Model Studio Coding Plan",
-            "https://coding.dashscope.aliyuncs.com/v1",
-            "MODELSTUDIO_API_KEY",
+            "external-openai",
+            "External OpenAI Compatible",
+            "",
+            "EXTERNAL_API_KEY",
             "bearer",
-            "qwen3.5-plus",
-            new ArrayList<>(List.of(
-                    new Model("qwen3.5-plus", "qwen3.5-plus", List.of("text"), 131072, 16384, true, 10),
-                    new Model("qwen3-max-2026-01-23", "qwen3-max-2026-01-23", List.of("text"), 131072, 16384, false, 20),
-                    new Model("kimi-k2.5", "kimi-k2.5", List.of("text"), 131072, 16384, false, 30),
-                    new Model("qwen3-coder-next", "qwen3-coder-next", List.of("text"), 131072, 16384, false, 40),
-                    new Model("qwen3-coder-plus", "qwen3-coder-plus", List.of("text"), 131072, 16384, false, 50))));
+            "",
+            new ArrayList<>());
     private final Provider internal = new Provider(
             "icbc-openai",
             "ICBC OpenAI",
@@ -43,17 +38,22 @@ public class ModelCatalogProperties {
                     new Model("glm-51", "glm-51", List.of("text"), 131072, 16384, false, 70))));
 
     /**
-     * 返回模型来源：opencode 保持旧代理，bailian 直连百炼 /models，internal 从数据库读取。
+     * 返回模型来源：opencode 保持旧代理，external 直连 OpenAI-compatible /models，internal 从数据库读取。
      */
     public String getSource() {
         return source;
     }
 
     /**
-     * 绑定模型来源，空值回退到 bailian。
+     * 绑定模型来源，空值回退到 external；历史 bailian 配置按 external 兼容处理。
      */
     public void setSource(String source) {
-        this.source = source == null || source.isBlank() ? "bailian" : source.trim().toLowerCase();
+        if (source == null || source.isBlank()) {
+            this.source = "external";
+            return;
+        }
+        String normalized = source.trim().toLowerCase();
+        this.source = "bailian".equals(normalized) ? "external" : normalized;
     }
 
     public Provider getExternal() {

@@ -41,15 +41,14 @@ test-agent:
     port: 16379
     password: ""
   model-catalog:
-    source: bailian
+    source: external
     external:
-      provider-id: modelstudio
-      name: Model Studio Coding Plan
-      base-url: https://coding.dashscope.aliyuncs.com/v1
-      api-key-env: MODELSTUDIO_API_KEY
-      api-key: sk-sp-ffacbe80d6a24711b216456f41be0d07
+      provider-id: ${TEST_AGENT_EXTERNAL_MODEL_PROVIDER_ID:external-openai}
+      name: ${TEST_AGENT_EXTERNAL_MODEL_PROVIDER_NAME:External OpenAI Compatible}
+      base-url: ${TEST_AGENT_EXTERNAL_MODEL_BASE_URL:${TEST_AGENT_BAILIAN_BASE_URL:}}
+      api-key-env: ${TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV:${TEST_AGENT_BAILIAN_API_KEY_ENV:EXTERNAL_API_KEY}}
       auth-mode: bearer
-      default-model: qwen3.5-plus
+      default-model: ${TEST_AGENT_EXTERNAL_MODEL_DEFAULT_MODEL:${TEST_AGENT_BAILIAN_DEFAULT_MODEL:}}
     internal:
       provider-id: icbc-openai
       name: ICBC OpenAI

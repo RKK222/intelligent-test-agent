@@ -231,8 +231,13 @@ TEST_AGENT_REDIS_HOST=<redis-host>
 TEST_AGENT_REDIS_PORT=6379
 TEST_AGENT_REDIS_PASSWORD=<redis-password>
 TEST_AGENT_OPENCODE_BASE_URL=http://127.0.0.1:4096
-TEST_AGENT_MODEL_CATALOG_SOURCE=bailian
-MODELSTUDIO_API_KEY=<bailian-api-key>
+TEST_AGENT_MODEL_CATALOG_SOURCE=external
+TEST_AGENT_EXTERNAL_MODEL_PROVIDER_ID=deepseek
+TEST_AGENT_EXTERNAL_MODEL_PROVIDER_NAME=DeepSeek
+TEST_AGENT_EXTERNAL_MODEL_BASE_URL=https://api.deepseek.com
+TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV=EXTERNAL_API_KEY
+EXTERNAL_API_KEY=<external-api-key>
+TEST_AGENT_EXTERNAL_MODEL_DEFAULT_MODEL=deepseek-v4-pro
 ```
 
 `.env.test`（test profile）：
@@ -407,11 +412,13 @@ curl -fsS http://127.0.0.1:8080/actuator/health
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `TEST_AGENT_MODEL_CATALOG_SOURCE` | local: `bailian`；test/prod: `internal` | 模型目录来源。`opencode` 保持旧代理，`bailian` 直连百炼 `/models`，`internal` 从数据库读取企业内模型。 |
-| `TEST_AGENT_BAILIAN_BASE_URL` | `https://coding.dashscope.aliyuncs.com/v1` | 外网百炼 OpenAI-compatible base URL。 |
-| `TEST_AGENT_BAILIAN_API_KEY_ENV` | `MODELSTUDIO_API_KEY` | 外网百炼密钥所在环境变量名。 |
-| `test-agent.model-catalog.external.api-key` | 空 | 外网百炼密钥的 yml 直配值；本地 IDEA 启动优先使用该值，未配置时回退到 `TEST_AGENT_BAILIAN_API_KEY_ENV` 指向的环境变量。 |
-| `TEST_AGENT_BAILIAN_DEFAULT_MODEL` | `qwen3.5-plus` | 外网模式同步给 opencode 的默认模型。 |
+| `TEST_AGENT_MODEL_CATALOG_SOURCE` | local: `external`；test/prod: `internal` | 模型目录来源。`opencode` 保持旧代理，`external` 直连 OpenAI-compatible `/models`，`internal` 从数据库读取企业内模型；历史 `bailian` 值兼容为 `external`。 |
+| `TEST_AGENT_EXTERNAL_MODEL_PROVIDER_ID` | `external-openai` | 外部 OpenAI-compatible provider ID，例如 DeepSeek 可设为 `deepseek`。 |
+| `TEST_AGENT_EXTERNAL_MODEL_PROVIDER_NAME` | `External OpenAI Compatible` | 外部 OpenAI-compatible provider 展示名。 |
+| `TEST_AGENT_EXTERNAL_MODEL_BASE_URL` | 空 | 外部 OpenAI-compatible base URL，例如 `https://api.deepseek.com`。旧 `TEST_AGENT_BAILIAN_BASE_URL` 仍作为兼容兜底。 |
+| `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` | `EXTERNAL_API_KEY` | 外部模型密钥所在环境变量名。旧 `TEST_AGENT_BAILIAN_API_KEY_ENV` 仍作为兼容兜底。 |
+| `test-agent.model-catalog.external.api-key` | 空 | 外部模型密钥的 yml 直配值；本地 IDEA 启动优先使用该值，未配置时回退到 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 指向的环境变量。 |
+| `TEST_AGENT_EXTERNAL_MODEL_DEFAULT_MODEL` | 空 | 外部模式同步给 opencode 的默认模型，例如 `deepseek-v4-pro`。旧 `TEST_AGENT_BAILIAN_DEFAULT_MODEL` 仍作为兼容兜底。 |
 | `TEST_AGENT_ICBC_OPENAI_BASE_URL` | `http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1` | 企业内 OpenAI-compatible base URL，与 openclaw 企业 patch 保持一致。 |
 | `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` | `ICBC_OPENAI_AUTH_TOKEN` | 企业内 token 所在环境变量名。 |
 | `test-agent.model-catalog.internal.api-key` | 空 | 企业内 token 的 yml 直配值；未配置时回退到 `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` 指向的环境变量。 |

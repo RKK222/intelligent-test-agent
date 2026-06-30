@@ -99,7 +99,7 @@ class ModelCatalogApplicationServiceTest {
     @Test
     void syncProviderConfigUsesConfiguredApiKeyBeforeEnvironmentReference() {
         ModelCatalogProperties properties = new ModelCatalogProperties();
-        properties.setSource("bailian");
+        properties.setSource("external");
         properties.getExternal().setApiKey("configured-model-key");
         FakeModelRepository repository = new FakeModelRepository();
         ModelCatalogApplicationService service = new ModelCatalogApplicationService(properties, repository, objectMapper);
@@ -110,7 +110,17 @@ class ModelCatalogApplicationServiceTest {
         assertThat(runtime.command).isNotNull();
         assertThat(runtime.command.body()).asString()
                 .contains("apiKey=configured-model-key")
-                .doesNotContain("{env:MODELSTUDIO_API_KEY}");
+                .doesNotContain("{env:EXTERNAL_API_KEY}");
+    }
+
+    @Test
+    void legacyBailianSourceIsTreatedAsExternalSource() {
+        ModelCatalogProperties properties = new ModelCatalogProperties();
+
+        properties.setSource("bailian");
+
+        assertThat(properties.getSource()).isEqualTo("external");
+        assertThat(properties.activeProvider()).isSameAs(properties.getExternal());
     }
 
     private ExecutionNode node() {
