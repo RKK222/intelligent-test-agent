@@ -2,6 +2,16 @@
 
 ## Entries
 
+### 2026-06-30 - 重新登录/换电脑登录自动恢复上次工作空间
+
+- Why: 用户希望工作台左下角"切换工作空间"按钮（`WorkbenchFooter.vue` 顶部的"应用 + 版本"两级菜单）能记忆上次选择，重新登录或换电脑登录时直接落到上次所在的应用 + 工作空间版本。后端已按应用维度持久化最近偏好，但前端 `applicationCatalog` 加载完成后总是回退 `apps[0]`，没有"上次进入的是哪个应用"的全局维度，导致重登后只回到首应用的首版本。
+- What:
+  - 后端 `ManagedWorkspaceResponses.WorkspaceRuntimeResponse` 新增可空 `appId` 字段并保留旧的 `from(workspace)` 工厂；`recentWorkspace(UserId)` 通过 `appIdForRuntimeWorkspace` 反查工作区所属托管应用并在响应里填充（不属于任何应用时为 `null`），其他接口（`POST /workspaces/{id}/recent`、`GET /applications/{appId}/recent-workspace` 等）依旧 `null`，不强制在响应里重复写出托管应用信息。
+  - 前端 `Workspace` 类型新增可选 `appId`；`AgentWorkbench.vue` 新增 `globalRecentQuery` + `trySelectDefaultApp`：应用目录加载完成且 `selectedAppId` 为空时，先等 `GET /recent-workspace` 返回上次的 `appId`，命中且在应用目录里则直接 `handleSelectApp(appId)`，否则降级 `apps[0]`，目录为空或接口失败时保持空态交给用户手动选择；`handleSelectApp → pickDefaultWorkspaceForApp` 既有链路不动。
+  - 同步更新 `docs/api/http-api.md`、`backend/test-agent-workspace-management/README.md`、`frontend/apps/agent-web/README.md`，并修复 4 处 `ManagedWorkspaceControllerTest` / `ConfigurationManagementControllerTest` 中 `new WorkspaceRuntimeResponse(...)` 构造调用。
+- How: 纯前后端协作改动，不新增数据库 migration（`user_global_workspace_preferences` 已存全局偏好）、不改 `.env.local`、不重写 SDK、不引入新接口；`Workspace.appId` 设为可选以保证旧调用方兼容。
+- Result: 待执行 `mvn -pl test-agent-workspace-management,test-agent-api -am test`、`corepack pnpm --filter @test-agent/agent-web typecheck` 与相关 Vitest 套件后回填。
+
 ### 2026-06-29 - 聊天面板 opencode 进程状态卡按 serviceStatus 区分未分配/未运行
 
 - Why: 之前聊天面板状态卡对所有非就绪情况都显示"需要初始化 opencode 进程"和"初始化进程"按钮，无法区分"尚未分配专属进程"和"已分配但未运行"，与头像菜单已区分的展示不一致。

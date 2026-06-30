@@ -558,9 +558,17 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     public Optional<ManagedWorkspaceResponses.WorkspaceRuntimeResponse> recentWorkspace(UserId userId) {
+        // 全局最近工作区会随用户切换应用而变化；为了让前端在重新登录或换电脑时能直接还原
+        // 上一次所在的应用 + 工作空间组合，这里在返回时把当前工作区对应的托管应用 appId 一并写出。
+        // 工作区不属于任何应用时（例如纯本机目录注册出来的个人空间），appId 留空，前端会按
+        // 降级策略（首应用 / 首模板首版本）兜底。
         return managedWorkspaceRepository.findGlobalPreference(userId)
                 .flatMap(preference -> workspaceRepository.findById(preference.workspaceId()))
-                .map(ManagedWorkspaceResponses.WorkspaceRuntimeResponse::from);
+                .map(workspace -> ManagedWorkspaceResponses.WorkspaceRuntimeResponse.from(
+                        workspace,
+                        appIdForRuntimeWorkspace(workspace.workspaceId())
+                                .map(ApplicationId::value)
+                                .orElse(null)));
     }
 
     public Optional<ManagedWorkspaceResponses.WorkspaceRuntimeResponse> recentWorkspace(String appId, UserId userId) {

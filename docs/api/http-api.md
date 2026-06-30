@@ -1120,10 +1120,21 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 4. 兜底命中：调用 `POST /workspaces/{workspaceId}/recent` 把该 Workspace 写入 `(user_id, app_id)` 与 `(user_id, NULL)` 两条偏好，下次进入直接命中第 2 步。
 5. 应用下没有任何工作空间模板/版本时保持空态，由用户手动选择本机目录。
 
+跨应用"默认进入应用"还原规则（前端 `trySelectDefaultApp`，重新登录 / 换电脑登录时使用）：
+
+1. 应用目录加载完成且 `selectedAppId` 为空时，先等待 `GET /recent-workspace` 返回「全局最近 Workspace」及其 `appId`（`WorkspaceRuntimeResponse.appId`，仅全局接口填充，其他接口为 `null`）。
+2. 命中且 `appId` 在当前账号的应用目录里：调用 `handleSelectApp(appId)` 走上面「应用级默认工作空间」解析链，自然落到 per-app recent（多数情况下就是上次的版本工作区）。
+3. 命中但 `appId` 不在当前账号的应用目录里（应用被禁用 / 被移除 / 切换租户）：降级到 `apps[0]`，由「应用级默认工作空间」解析链兜底。
+4. 全局 recent 接口报错或返回 `null`：同样降级到 `apps[0]`。
+5. 应用目录为空：保持空态，由用户主动选择。
+
 `POST /workspaces/{workspaceId}/recent` 兼容说明：
 
 - 后端 `markRecentWorkspace` 同时写入 `user_global_workspace_preferences`（`app_id = NULL`）和 `user_application_workspace_preferences`（`app_id = 解析到的 appId`），对应"全局最近"和"应用内最近"两套维度。
 - 工作区不属于任何应用（即 `appIdForRuntimeWorkspace` 既不匹配应用版本也不匹配个人工作区）时返回 `NOT_FOUND`；前端 `applyManagedWorkspace` 静默吞掉该错误，切换流程不受影响。
+- `WorkspaceRuntimeResponse.appId` 字段：
+  - `GET /recent-workspace`：必定填充（工作区不属于任何应用时为 `null`），用于前端在重新登录时还原上次所在的应用。
+  - 其他接口（`POST /workspaces/{workspaceId}/recent`、`GET /applications/{appId}/recent-workspace` 等）：仍返回 `null`，由调用方按 `appId` 自行索引；不在响应里重复写出托管应用信息，避免引入「运行态 Workspace → 托管应用」反向依赖。
 - `POST /applications/{appId}/workspaces/{workspaceId}/branch-preference` 用于在 (appId, workspaceId) 维度持久化用户最近选择的 VCS 分支（写入 `user_workspace_branch_preferences`，按 (user_id, app_id, workspace_id) 唯一索引 upsert）。请求体为 `{"branch":"<branch-name>"}`；调用方需先校验工作区属于该应用。
 - `GET /applications/{appId}/workspaces/{workspaceId}/branch-preference` 返回 `BranchPreferenceResponse { appId, workspaceId, branch, updatedAt }`，未设置时返回 `null`，前端可据此在进入工作区时自动回填分支显示或提示用户当前本地分支与偏好分支不一致。
 

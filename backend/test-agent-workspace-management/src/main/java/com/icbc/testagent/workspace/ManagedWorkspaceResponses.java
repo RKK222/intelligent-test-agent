@@ -28,6 +28,13 @@ public final class ManagedWorkspaceResponses {
         }
     }
 
+    /**
+     * 托管工作区对应的运行态 Workspace 响应。
+     *
+     * <p>{@code appId} 仅在需要回答「这个工作区归属于哪个托管应用」时填充；当前由「全局最近工作区」接口
+     * （{@code recent-workspace}）显式写入，便于前端在重新登录或换电脑时直接还原上次的应用上下文。
+     * 其他场景下传 {@code null}，避免引入反向依赖（运行态 Workspace 本身不强制绑定托管应用）。
+     */
     public record WorkspaceRuntimeResponse(
             String workspaceId,
             String name,
@@ -35,8 +42,13 @@ public final class ManagedWorkspaceResponses {
             String status,
             String linuxServerId,
             Instant createdAt,
-            Instant updatedAt) {
+            Instant updatedAt,
+            String appId) {
         public static WorkspaceRuntimeResponse from(Workspace workspace) {
+            return from(workspace, null);
+        }
+
+        public static WorkspaceRuntimeResponse from(Workspace workspace, String appId) {
             return new WorkspaceRuntimeResponse(
                     workspace.workspaceId().value(),
                     workspace.name(),
@@ -44,7 +56,8 @@ public final class ManagedWorkspaceResponses {
                     workspace.status().name(),
                     workspace.linuxServerId(),
                     workspace.createdAt(),
-                    workspace.updatedAt());
+                    workspace.updatedAt(),
+                    appId);
         }
     }
 

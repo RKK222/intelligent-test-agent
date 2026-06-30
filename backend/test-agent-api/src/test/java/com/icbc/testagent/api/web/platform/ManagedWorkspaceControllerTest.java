@@ -58,7 +58,8 @@ class ManagedWorkspaceControllerTest {
                 "ACTIVE",
                 "10.8.0.12",
                 Instant.parse("2026-06-23T00:00:00Z"),
-                Instant.parse("2026-06-23T00:00:00Z"));
+                Instant.parse("2026-06-23T00:00:00Z"),
+                "app_gcms");
         UserOpencodeProcessAssignmentService assignmentService = readyAssignmentService("10.8.0.12");
         when(service.createVersion(eq("app_gcms"), eq("aws_123"), eq("20260707"), eq("feature_testagent_20260707"), eq(USER_ID), eq("10.8.0.12"), eq(TRACE_ID)))
                 .thenReturn(new ApplicationWorkspaceVersionResponse(
@@ -131,7 +132,8 @@ class ManagedWorkspaceControllerTest {
                         "ACTIVE",
                         "127.0.0.1",
                         Instant.parse("2026-06-23T00:00:00Z"),
-                        Instant.parse("2026-06-23T00:00:00Z")));
+                        Instant.parse("2026-06-23T00:00:00Z"),
+                        null));
 
         client(service).post()
                 .uri("/api/internal/platform/workspace-management/workspaces/wks_123/recent")
@@ -252,6 +254,7 @@ class ManagedWorkspaceControllerTest {
                 "ACTIVE",
                 "10.8.0.12",
                 Instant.parse("2026-06-23T00:00:00Z"),
-                Instant.parse("2026-06-23T00:00:00Z"));
+                Instant.parse("2026-06-23T00:00:00Z"),
+                "app_gcms");
     }
 }

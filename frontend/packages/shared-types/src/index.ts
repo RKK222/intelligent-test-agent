@@ -30,6 +30,13 @@ export type Workspace = {
   linuxServerId?: string | null;
   createdAt: string;
   updatedAt: string;
+  /**
+   * 该工作区所属的托管应用 id。
+   * 仅在「全局最近工作区」等需要把「应用 + 工作区」一起回传给前端、用于重新登录后还原
+   * 上次进入的应用上下文时才会被填充；其他接口（按应用 / 模板 / 版本）依旧返回 null，
+   * 前端如果未取到可继续走 per-app recent 或首模板首版本兜底。
+   */
+  appId?: string | null;
 };
 
 export type WorkspaceDirectoryEntry = {

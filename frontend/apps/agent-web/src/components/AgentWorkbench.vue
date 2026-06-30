@@ -289,6 +289,16 @@ const allApplicationsQuery = useQuery({
 const applicationCatalog = computed<ManagedApplication[]>(() =>
   managedApplications.value.length ? managedApplications.value : (allApplicationsQuery.data.value ?? [])
 );
+// 全局最近工作区：跨应用维度维护「上一次进入的应用 + 工作区」组合。
+// 重新登录或换电脑登录时，前端用它直接还原上次的应用上下文（替代之前总是回退 apps[0] 的逻辑），
+// 工作区是否在当前用户权限内则继续走 per-app recent / 模板首版本兜底。
+const globalRecentQuery = useQuery({
+  queryKey: ["managed-workspace", "recent-workspace"],
+  queryFn: () => api.getRecentManagedWorkspace(),
+  retry: false
+});
+const globalRecentAppId = computed(() => globalRecentQuery.data.value?.appId ?? null);
+const globalRecentLoaded = computed(() => globalRecentQuery.isSuccess.value || globalRecentQuery.isError.value);
 const shellApps = computed(() =>
   applicationCatalog.value.map((app) => ({ id: app.appId, name: app.appName, description: app.enabled ? "已启用" : "已停用" }))
 );
@@ -509,10 +519,27 @@ function selectRuntimeModel(model: typeof models.value[number]) {
 }
 
 // ===== 默认值与联动 effect =====
-watch(applicationCatalog, (apps) => {
-  if (!selectedAppId.value && apps[0]?.appId) {
-    void handleSelectApp(apps[0].appId);
+// 选择默认应用：优先使用「全局最近工作区」所属应用，让用户重新登录或换电脑登录时
+// 自动回到上次所在的应用 + 工作区组合；该应用在当前账号的应用目录里找不到时降级到 apps[0]，
+// 都没结果则不主动进入，由用户在右上角手动选择。
+function trySelectDefaultApp() {
+  if (selectedAppId.value) return;
+  const apps = applicationCatalog.value;
+  if (apps.length === 0 || !globalRecentLoaded.value) return;
+  const preferredAppId =
+    globalRecentAppId.value && apps.some((app) => app.appId === globalRecentAppId.value)
+      ? globalRecentAppId.value
+      : apps[0]?.appId;
+  if (preferredAppId) {
+    void handleSelectApp(preferredAppId);
   }
+}
+watch(applicationCatalog, () => {
+  trySelectDefaultApp();
+});
+// applicationCatalog 先于 globalRecent 加载完成时，等 recent 回来再补一次选择。
+watch(globalRecentLoaded, () => {
+  trySelectDefaultApp();
 });
 watch(selectedWorkspace, (sw) => {
   if (!selectedWorkspaceId.value && sw?.workspaceId) {
