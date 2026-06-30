@@ -156,44 +156,33 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
 
     @Override
     public LinuxServer saveLinuxServer(LinuxServer linuxServer) {
-        if (findLinuxServerById(linuxServer.linuxServerId()).isPresent()) {
-            jdbcClient.sql("""
-                            update linux_servers
-                            set name = :name, status = :status, capacity_summary_json = :capacitySummaryJson,
-                                last_heartbeat_at = :lastHeartbeatAt, trace_id = :traceId,
-                                created_at = :createdAt, updated_at = :updatedAt
-                            where linux_server_id = :linuxServerId
-                            """)
-                    .param("linuxServerId", linuxServer.linuxServerId().value())
-                    .param("name", linuxServer.name())
-                    .param("status", linuxServer.status().name())
-                    .param("capacitySummaryJson", writeMap(linuxServer.capacitySummary()))
-                    .param("lastHeartbeatAt", timestamp(linuxServer.lastHeartbeatAt()))
-                    .param("traceId", linuxServer.traceId())
-                    .param("createdAt", timestamp(linuxServer.createdAt()))
-                    .param("updatedAt", timestamp(linuxServer.updatedAt()))
-                    .update();
-        } else {
-            jdbcClient.sql("""
-                            insert into linux_servers(
-                                linux_server_id, name, status, capacity_summary_json,
-                                last_heartbeat_at, trace_id, created_at, updated_at
-                            )
-                            values (
-                                :linuxServerId, :name, :status, :capacitySummaryJson,
-                                :lastHeartbeatAt, :traceId, :createdAt, :updatedAt
-                            )
-                            """)
-                    .param("linuxServerId", linuxServer.linuxServerId().value())
-                    .param("name", linuxServer.name())
-                    .param("status", linuxServer.status().name())
-                    .param("capacitySummaryJson", writeMap(linuxServer.capacitySummary()))
-                    .param("lastHeartbeatAt", timestamp(linuxServer.lastHeartbeatAt()))
-                    .param("traceId", linuxServer.traceId())
-                    .param("createdAt", timestamp(linuxServer.createdAt()))
-                    .param("updatedAt", timestamp(linuxServer.updatedAt()))
-                    .update();
-        }
+        // 使用 INSERT ... ON CONFLICT DO UPDATE 替代 check-then-act，避免并发竞态。
+        jdbcClient.sql("""
+                        insert into linux_servers(
+                            linux_server_id, name, status, capacity_summary_json,
+                            last_heartbeat_at, trace_id, created_at, updated_at
+                        )
+                        values (
+                            :linuxServerId, :name, :status, :capacitySummaryJson,
+                            :lastHeartbeatAt, :traceId, :createdAt, :updatedAt
+                        )
+                        on conflict (linux_server_id) do update set
+                            name = excluded.name,
+                            status = excluded.status,
+                            capacity_summary_json = excluded.capacity_summary_json,
+                            last_heartbeat_at = excluded.last_heartbeat_at,
+                            trace_id = excluded.trace_id,
+                            updated_at = excluded.updated_at
+                        """)
+                .param("linuxServerId", linuxServer.linuxServerId().value())
+                .param("name", linuxServer.name())
+                .param("status", linuxServer.status().name())
+                .param("capacitySummaryJson", writeMap(linuxServer.capacitySummary()))
+                .param("lastHeartbeatAt", timestamp(linuxServer.lastHeartbeatAt()))
+                .param("traceId", linuxServer.traceId())
+                .param("createdAt", timestamp(linuxServer.createdAt()))
+                .param("updatedAt", timestamp(linuxServer.updatedAt()))
+                .update();
         return linuxServer;
     }
 
@@ -212,46 +201,36 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
 
     @Override
     public BackendJavaProcess saveBackendJavaProcess(BackendJavaProcess backendJavaProcess) {
-        if (findBackendJavaProcessById(backendJavaProcess.backendProcessId()).isPresent()) {
-            jdbcClient.sql("""
-                            update backend_java_processes
-                            set linux_server_id = :linuxServerId, listen_url = :listenUrl, status = :status,
-                                started_at = :startedAt, last_heartbeat_at = :lastHeartbeatAt,
-                                trace_id = :traceId, created_at = :createdAt, updated_at = :updatedAt
-                            where backend_process_id = :backendProcessId
-                            """)
-                    .param("backendProcessId", backendJavaProcess.backendProcessId().value())
-                    .param("linuxServerId", backendJavaProcess.linuxServerId().value())
-                    .param("listenUrl", backendJavaProcess.listenUrl())
-                    .param("status", backendJavaProcess.status().name())
-                    .param("startedAt", timestamp(backendJavaProcess.startedAt()))
-                    .param("lastHeartbeatAt", timestamp(backendJavaProcess.lastHeartbeatAt()))
-                    .param("traceId", backendJavaProcess.traceId())
-                    .param("createdAt", timestamp(backendJavaProcess.createdAt()))
-                    .param("updatedAt", timestamp(backendJavaProcess.updatedAt()))
-                    .update();
-        } else {
-            jdbcClient.sql("""
-                            insert into backend_java_processes(
-                                backend_process_id, linux_server_id, listen_url, status,
-                                started_at, last_heartbeat_at, trace_id, created_at, updated_at
-                            )
-                            values (
-                                :backendProcessId, :linuxServerId, :listenUrl, :status,
-                                :startedAt, :lastHeartbeatAt, :traceId, :createdAt, :updatedAt
-                            )
-                            """)
-                    .param("backendProcessId", backendJavaProcess.backendProcessId().value())
-                    .param("linuxServerId", backendJavaProcess.linuxServerId().value())
-                    .param("listenUrl", backendJavaProcess.listenUrl())
-                    .param("status", backendJavaProcess.status().name())
-                    .param("startedAt", timestamp(backendJavaProcess.startedAt()))
-                    .param("lastHeartbeatAt", timestamp(backendJavaProcess.lastHeartbeatAt()))
-                    .param("traceId", backendJavaProcess.traceId())
-                    .param("createdAt", timestamp(backendJavaProcess.createdAt()))
-                    .param("updatedAt", timestamp(backendJavaProcess.updatedAt()))
-                    .update();
-        }
+        // 使用 INSERT ... ON CONFLICT DO UPDATE 替代 check-then-act，
+        // 避免并发心跳注册时的 DuplicateKeyException。
+        jdbcClient.sql("""
+                        insert into backend_java_processes(
+                            backend_process_id, linux_server_id, listen_url, status,
+                            started_at, last_heartbeat_at, trace_id, created_at, updated_at
+                        )
+                        values (
+                            :backendProcessId, :linuxServerId, :listenUrl, :status,
+                            :startedAt, :lastHeartbeatAt, :traceId, :createdAt, :updatedAt
+                        )
+                        on conflict (backend_process_id) do update set
+                            linux_server_id = excluded.linux_server_id,
+                            listen_url = excluded.listen_url,
+                            status = excluded.status,
+                            started_at = excluded.started_at,
+                            last_heartbeat_at = excluded.last_heartbeat_at,
+                            trace_id = excluded.trace_id,
+                            updated_at = excluded.updated_at
+                        """)
+                .param("backendProcessId", backendJavaProcess.backendProcessId().value())
+                .param("linuxServerId", backendJavaProcess.linuxServerId().value())
+                .param("listenUrl", backendJavaProcess.listenUrl())
+                .param("status", backendJavaProcess.status().name())
+                .param("startedAt", timestamp(backendJavaProcess.startedAt()))
+                .param("lastHeartbeatAt", timestamp(backendJavaProcess.lastHeartbeatAt()))
+                .param("traceId", backendJavaProcess.traceId())
+                .param("createdAt", timestamp(backendJavaProcess.createdAt()))
+                .param("updatedAt", timestamp(backendJavaProcess.updatedAt()))
+                .update();
         return backendJavaProcess;
     }
 
@@ -288,56 +267,43 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
 
     @Override
     public OpencodeContainer saveContainer(OpencodeContainer container) {
-        if (findContainerById(container.containerId()).isPresent()) {
-            jdbcClient.sql("""
-                            update opencode_containers
-                            set linux_server_id = :linuxServerId, container_name = :containerName,
-                                port_start = :portStart, port_end = :portEnd,
-                                max_processes = :maxProcesses, current_processes = :currentProcesses,
-                                status = :status, last_heartbeat_at = :lastHeartbeatAt,
-                                trace_id = :traceId, created_at = :createdAt, updated_at = :updatedAt
-                            where container_id = :containerId
-                            """)
-                    .param("containerId", container.containerId().value())
-                    .param("linuxServerId", container.linuxServerId().value())
-                    .param("containerName", container.containerName())
-                    .param("portStart", container.portStart())
-                    .param("portEnd", container.portEnd())
-                    .param("maxProcesses", container.maxProcesses())
-                    .param("currentProcesses", container.currentProcesses())
-                    .param("status", container.status().name())
-                    .param("lastHeartbeatAt", timestamp(container.lastHeartbeatAt()))
-                    .param("traceId", container.traceId())
-                    .param("createdAt", timestamp(container.createdAt()))
-                    .param("updatedAt", timestamp(container.updatedAt()))
-                    .update();
-        } else {
-            jdbcClient.sql("""
-                            insert into opencode_containers(
-                                container_id, linux_server_id, container_name, port_start, port_end,
-                                max_processes, current_processes, status, last_heartbeat_at,
-                                trace_id, created_at, updated_at
-                            )
-                            values (
-                                :containerId, :linuxServerId, :containerName, :portStart, :portEnd,
-                                :maxProcesses, :currentProcesses, :status, :lastHeartbeatAt,
-                                :traceId, :createdAt, :updatedAt
-                            )
-                            """)
-                    .param("containerId", container.containerId().value())
-                    .param("linuxServerId", container.linuxServerId().value())
-                    .param("containerName", container.containerName())
-                    .param("portStart", container.portStart())
-                    .param("portEnd", container.portEnd())
-                    .param("maxProcesses", container.maxProcesses())
-                    .param("currentProcesses", container.currentProcesses())
-                    .param("status", container.status().name())
-                    .param("lastHeartbeatAt", timestamp(container.lastHeartbeatAt()))
-                    .param("traceId", container.traceId())
-                    .param("createdAt", timestamp(container.createdAt()))
-                    .param("updatedAt", timestamp(container.updatedAt()))
-                    .update();
-        }
+        // 使用 INSERT ... ON CONFLICT DO UPDATE 替代 check-then-act，避免并发竞态。
+        jdbcClient.sql("""
+                        insert into opencode_containers(
+                            container_id, linux_server_id, container_name, port_start, port_end,
+                            max_processes, current_processes, status, last_heartbeat_at,
+                            trace_id, created_at, updated_at
+                        )
+                        values (
+                            :containerId, :linuxServerId, :containerName, :portStart, :portEnd,
+                            :maxProcesses, :currentProcesses, :status, :lastHeartbeatAt,
+                            :traceId, :createdAt, :updatedAt
+                        )
+                        on conflict (container_id) do update set
+                            linux_server_id = excluded.linux_server_id,
+                            container_name = excluded.container_name,
+                            port_start = excluded.port_start,
+                            port_end = excluded.port_end,
+                            max_processes = excluded.max_processes,
+                            current_processes = excluded.current_processes,
+                            status = excluded.status,
+                            last_heartbeat_at = excluded.last_heartbeat_at,
+                            trace_id = excluded.trace_id,
+                            updated_at = excluded.updated_at
+                        """)
+                .param("containerId", container.containerId().value())
+                .param("linuxServerId", container.linuxServerId().value())
+                .param("containerName", container.containerName())
+                .param("portStart", container.portStart())
+                .param("portEnd", container.portEnd())
+                .param("maxProcesses", container.maxProcesses())
+                .param("currentProcesses", container.currentProcesses())
+                .param("status", container.status().name())
+                .param("lastHeartbeatAt", timestamp(container.lastHeartbeatAt()))
+                .param("traceId", container.traceId())
+                .param("createdAt", timestamp(container.createdAt()))
+                .param("updatedAt", timestamp(container.updatedAt()))
+                .update();
         return container;
     }
 
@@ -453,51 +419,39 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
 
     @Override
     public OpencodeContainerManager saveContainerManager(OpencodeContainerManager manager) {
-        if (findContainerManagerById(manager.managerId()).isPresent()) {
-            jdbcClient.sql("""
-                            update opencode_container_managers
-                            set container_id = :containerId, linux_server_id = :linuxServerId,
-                                protocol_version = :protocolVersion, connection_status = :connectionStatus,
-                                capabilities_json = :capabilitiesJson, last_heartbeat_at = :lastHeartbeatAt,
-                                trace_id = :traceId, created_at = :createdAt, updated_at = :updatedAt
-                            where manager_id = :managerId
-                            """)
-                    .param("managerId", manager.managerId().value())
-                    .param("containerId", manager.containerId().value())
-                    .param("linuxServerId", manager.linuxServerId().value())
-                    .param("protocolVersion", manager.protocolVersion())
-                    .param("connectionStatus", manager.connectionStatus().name())
-                    .param("capabilitiesJson", writeMap(manager.capabilities()))
-                    .param("lastHeartbeatAt", timestamp(manager.lastHeartbeatAt()))
-                    .param("traceId", manager.traceId())
-                    .param("createdAt", timestamp(manager.createdAt()))
-                    .param("updatedAt", timestamp(manager.updatedAt()))
-                    .update();
-        } else {
-            jdbcClient.sql("""
-                            insert into opencode_container_managers(
-                                manager_id, container_id, linux_server_id, protocol_version,
-                                connection_status, capabilities_json, last_heartbeat_at,
-                                trace_id, created_at, updated_at
-                            )
-                            values (
-                                :managerId, :containerId, :linuxServerId, :protocolVersion,
-                                :connectionStatus, :capabilitiesJson, :lastHeartbeatAt,
-                                :traceId, :createdAt, :updatedAt
-                            )
-                            """)
-                    .param("managerId", manager.managerId().value())
-                    .param("containerId", manager.containerId().value())
-                    .param("linuxServerId", manager.linuxServerId().value())
-                    .param("protocolVersion", manager.protocolVersion())
-                    .param("connectionStatus", manager.connectionStatus().name())
-                    .param("capabilitiesJson", writeMap(manager.capabilities()))
-                    .param("lastHeartbeatAt", timestamp(manager.lastHeartbeatAt()))
-                    .param("traceId", manager.traceId())
-                    .param("createdAt", timestamp(manager.createdAt()))
-                    .param("updatedAt", timestamp(manager.updatedAt()))
-                    .update();
-        }
+        // 使用 INSERT ... ON CONFLICT DO UPDATE 替代 check-then-act，避免并发竞态。
+        jdbcClient.sql("""
+                        insert into opencode_container_managers(
+                            manager_id, container_id, linux_server_id, protocol_version,
+                            connection_status, capabilities_json, last_heartbeat_at,
+                            trace_id, created_at, updated_at
+                        )
+                        values (
+                            :managerId, :containerId, :linuxServerId, :protocolVersion,
+                            :connectionStatus, :capabilitiesJson, :lastHeartbeatAt,
+                            :traceId, :createdAt, :updatedAt
+                        )
+                        on conflict (manager_id) do update set
+                            container_id = excluded.container_id,
+                            linux_server_id = excluded.linux_server_id,
+                            protocol_version = excluded.protocol_version,
+                            connection_status = excluded.connection_status,
+                            capabilities_json = excluded.capabilities_json,
+                            last_heartbeat_at = excluded.last_heartbeat_at,
+                            trace_id = excluded.trace_id,
+                            updated_at = excluded.updated_at
+                        """)
+                .param("managerId", manager.managerId().value())
+                .param("containerId", manager.containerId().value())
+                .param("linuxServerId", manager.linuxServerId().value())
+                .param("protocolVersion", manager.protocolVersion())
+                .param("connectionStatus", manager.connectionStatus().name())
+                .param("capabilitiesJson", writeMap(manager.capabilities()))
+                .param("lastHeartbeatAt", timestamp(manager.lastHeartbeatAt()))
+                .param("traceId", manager.traceId())
+                .param("createdAt", timestamp(manager.createdAt()))
+                .param("updatedAt", timestamp(manager.updatedAt()))
+                .update();
         return manager;
     }
 
@@ -518,42 +472,31 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
     @Override
     public OpencodeManagerBackendConnection saveManagerBackendConnection(
             OpencodeManagerBackendConnection connection) {
-        if (findManagerBackendConnection(connection.managerId(), connection.backendProcessId()).isPresent()) {
-            jdbcClient.sql("""
-                            update opencode_manager_backend_connections
-                            set status = :status, connected_at = :connectedAt,
-                                last_heartbeat_at = :lastHeartbeatAt, trace_id = :traceId,
-                                updated_at = :updatedAt
-                            where manager_id = :managerId and backend_process_id = :backendProcessId
-                            """)
-                    .param("managerId", connection.managerId().value())
-                    .param("backendProcessId", connection.backendProcessId().value())
-                    .param("status", connection.status().name())
-                    .param("connectedAt", timestamp(connection.connectedAt()))
-                    .param("lastHeartbeatAt", timestamp(connection.lastHeartbeatAt()))
-                    .param("traceId", connection.traceId())
-                    .param("updatedAt", timestamp(connection.updatedAt()))
-                    .update();
-        } else {
-            jdbcClient.sql("""
-                            insert into opencode_manager_backend_connections(
-                                manager_id, backend_process_id, status, connected_at,
-                                last_heartbeat_at, trace_id, updated_at
-                            )
-                            values (
-                                :managerId, :backendProcessId, :status, :connectedAt,
-                                :lastHeartbeatAt, :traceId, :updatedAt
-                            )
-                            """)
-                    .param("managerId", connection.managerId().value())
-                    .param("backendProcessId", connection.backendProcessId().value())
-                    .param("status", connection.status().name())
-                    .param("connectedAt", timestamp(connection.connectedAt()))
-                    .param("lastHeartbeatAt", timestamp(connection.lastHeartbeatAt()))
-                    .param("traceId", connection.traceId())
-                    .param("updatedAt", timestamp(connection.updatedAt()))
-                    .update();
-        }
+        // 使用 INSERT ... ON CONFLICT DO UPDATE 替代 check-then-act，避免并发竞态。
+        jdbcClient.sql("""
+                        insert into opencode_manager_backend_connections(
+                            manager_id, backend_process_id, status, connected_at,
+                            last_heartbeat_at, trace_id, updated_at
+                        )
+                        values (
+                            :managerId, :backendProcessId, :status, :connectedAt,
+                            :lastHeartbeatAt, :traceId, :updatedAt
+                        )
+                        on conflict (manager_id, backend_process_id) do update set
+                            status = excluded.status,
+                            connected_at = excluded.connected_at,
+                            last_heartbeat_at = excluded.last_heartbeat_at,
+                            trace_id = excluded.trace_id,
+                            updated_at = excluded.updated_at
+                        """)
+                .param("managerId", connection.managerId().value())
+                .param("backendProcessId", connection.backendProcessId().value())
+                .param("status", connection.status().name())
+                .param("connectedAt", timestamp(connection.connectedAt()))
+                .param("lastHeartbeatAt", timestamp(connection.lastHeartbeatAt()))
+                .param("traceId", connection.traceId())
+                .param("updatedAt", timestamp(connection.updatedAt()))
+                .update();
         return connection;
     }
 
