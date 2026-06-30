@@ -915,7 +915,7 @@ onBeforeUnmount(() => {
                       v-model="workspaceVersion"
                       type="date"
                       value-format="yyyyMMdd"
-                      format="yyyyMMdd"
+                      format="yyyy-MM-dd"
                       placeholder="选择日期"
                       style="width: 100%"
                     />
