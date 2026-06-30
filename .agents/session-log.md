@@ -2276,3 +2276,10 @@ bash /tmp/test-api-after-restart.sh
 - What: 新增 `OpencodeProcessStatusQueryService` / `OpencodeProcessStatusProbe` / `OpencodeProcessProbeStatus`，统一封装进程存在性检查、manager health、查询语义归一、进程状态回写和 Redis heartbeat 刷新；用户状态、运行管理、本机 heartbeat、公共启动和公共停止都改为复用该服务。同步规范要求后续所有 opencode server 状态查询、健康探测、状态回写或 heartbeat 刷新必须调用公共状态查询服务。
 - How: 公共查询服务先按 `processId` 查询平台进程记录，缺失时返回 `NOT_STARTED` 且不调用 manager；health healthy 写 `RUNNING` 并刷新 heartbeat；not-running 类消息写 `STOPPED` 并清空 pid；普通不健康写 `UNHEALTHY`；health 命令异常写 `FAILED` 并保留错误码。文件路由、后端路由归属和 allocationStatus 仍只读 binding，不触发 health。
 - Result: 业务主代码中直接 `gateway.checkHealth()` 只剩公共状态查询服务和 gateway 实现/接口；STOPPED/FAILED 历史 binding 在状态查询或 Run 前检查时也会先重新探测，manager healthy 时可恢复为 `RUNNING`。
+
+### 2026-06-30 - 管理员重启等待 opencode HTTP health ready
+
+- Why: Go manager 的 `start/restart` 在拉起进程并写入 state 后立即返回 `STARTED`，不会等待 opencode HTTP health endpoint ready；Java 公共启动服务只做一次即时 health，导致管理员重启慢启动进程时前端看到 `opencode health endpoints are not reachable（OPENCODE_UNAVAILABLE）`，且用户进程列表失败后不刷新。
+- What: `OpencodeProcessStartupService` 在 manager `STARTED` 后复用公共状态查询服务做有界等待，默认使用 manager command-timeout 10 秒；运行管理前端在重启/停止成功或失败后都会刷新当前 overview 和用户进程查询。
+- How: 只对 `HEALTH_CHECK_FAILED` 且没有 manager 控制面错误码的普通健康失败继续轮询；`RUNNING` 立即成功，`NOT_STARTED`、manager timeout/unavailable 等控制面异常立即失败。超时仍抛统一 opencode 错误，并保留最后一次公共状态查询写入的 DB 状态和 healthMessage。
+- Result: 管理员重启不会因 opencode HTTP 端点短暂未 ready 而误报失败；真实失败时用户进程列表会立即展示最新 `UNHEALTHY/FAILED/STOPPED` 状态和健康消息。

@@ -140,19 +140,18 @@ const managedProcessActionMutation = useMutation({
   onSuccess: (_result, request) => {
     if (request.action === "stop") {
       removeStoppedManagedProcess(request);
+      refetchUserProcessesIfActive();
       return;
     }
-    void overviewQuery.refetch();
-    if (activeUserKeyword.value.trim()) {
-      void userProcessQuery.refetch();
-    }
+    refetchRuntimeManagementAfterAction();
   },
   onError: error => {
     if (error instanceof BackendApiError) {
       actionErrorMessage.value = `${error.message}（${error.code}）`;
-      return;
+    } else {
+      actionErrorMessage.value = error instanceof Error ? error.message : "进程操作失败";
     }
-    actionErrorMessage.value = error instanceof Error ? error.message : "进程操作失败";
+    refetchRuntimeManagementAfterAction();
   },
   onSettled: () => {
     activeManagedProcessAction.value = null;
@@ -486,6 +485,17 @@ function runUserProcessRestart(process: OpencodeRuntimeProcess) {
 function isUserProcessRestartRunning(process: OpencodeRuntimeProcess) {
   const active = activeManagedProcessAction.value;
   return active?.action === "restart" && active.containerId === process.containerId && active.port === process.port;
+}
+
+function refetchUserProcessesIfActive() {
+  if (activeUserKeyword.value.trim()) {
+    void userProcessQuery.refetch();
+  }
+}
+
+function refetchRuntimeManagementAfterAction() {
+  void overviewQuery.refetch();
+  refetchUserProcessesIfActive();
 }
 
 function removeStoppedManagedProcess(request: ManagedProcessActionRequest) {

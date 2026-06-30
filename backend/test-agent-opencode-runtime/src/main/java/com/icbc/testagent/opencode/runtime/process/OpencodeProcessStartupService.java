@@ -14,11 +14,14 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -32,12 +35,17 @@ import org.springframework.stereotype.Service;
 public class OpencodeProcessStartupService {
 
     private static final String OPENCODE_AGENT_ID = "opencode";
+    private static final Duration DEFAULT_STARTUP_HEALTH_TIMEOUT = Duration.ofSeconds(10);
+    private static final Duration DEFAULT_STARTUP_HEALTH_POLL_INTERVAL = Duration.ofMillis(500);
 
     private final OpencodeProcessManagementRepository repository;
     private final ExecutionNodeRepository executionNodeRepository;
     private final OpencodeProcessManagerGateway gateway;
     private final OpencodeProcessStatusQueryService statusQueryService;
     private final Clock clock;
+    private final Duration startupHealthTimeout;
+    private final Duration startupHealthPollInterval;
+    private final Consumer<Duration> startupHealthSleeper;
 
     /**
      * Spring 生产构造器使用系统 UTC 时钟。
@@ -48,8 +56,18 @@ public class OpencodeProcessStartupService {
             ExecutionNodeRepository executionNodeRepository,
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessHeartbeatStore heartbeatStore,
-            OpencodeProcessStatusQueryService statusQueryService) {
-        this(repository, executionNodeRepository, gateway, heartbeatStore, statusQueryService, Clock.systemUTC());
+            OpencodeProcessStatusQueryService statusQueryService,
+            ManagerControlSettings managerControlSettings) {
+        this(
+                repository,
+                executionNodeRepository,
+                gateway,
+                heartbeatStore,
+                statusQueryService,
+                Clock.systemUTC(),
+                managerControlSettings.commandTimeout(),
+                DEFAULT_STARTUP_HEALTH_POLL_INTERVAL,
+                OpencodeProcessStartupService::sleepCurrentThread);
     }
 
     /**
@@ -85,6 +103,31 @@ public class OpencodeProcessStartupService {
             OpencodeProcessHeartbeatStore heartbeatStore,
             OpencodeProcessStatusQueryService statusQueryService,
             Clock clock) {
+        this(
+                repository,
+                executionNodeRepository,
+                gateway,
+                heartbeatStore,
+                statusQueryService,
+                clock,
+                DEFAULT_STARTUP_HEALTH_TIMEOUT,
+                DEFAULT_STARTUP_HEALTH_POLL_INTERVAL,
+                duration -> { });
+    }
+
+    /**
+     * 完整测试构造器允许控制启动后健康确认窗口，避免单测真实等待。
+     */
+    OpencodeProcessStartupService(
+            OpencodeProcessManagementRepository repository,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            OpencodeProcessStatusQueryService statusQueryService,
+            Clock clock,
+            Duration startupHealthTimeout,
+            Duration startupHealthPollInterval,
+            Consumer<Duration> startupHealthSleeper) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
@@ -93,6 +136,9 @@ public class OpencodeProcessStartupService {
                 ? new OpencodeProcessStatusQueryService(repository, gateway, heartbeatStore, clock)
                 : statusQueryService;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        this.startupHealthTimeout = positive(startupHealthTimeout, DEFAULT_STARTUP_HEALTH_TIMEOUT);
+        this.startupHealthPollInterval = positive(startupHealthPollInterval, DEFAULT_STARTUP_HEALTH_POLL_INTERVAL);
+        this.startupHealthSleeper = Objects.requireNonNull(startupHealthSleeper, "startupHealthSleeper must not be null");
     }
 
     /**
@@ -136,12 +182,12 @@ public class OpencodeProcessStartupService {
                 now,
                 request.traceId());
         repository.saveOpencodeServerProcess(candidate);
-        OpencodeProcessStatusProbe probe = statusQueryService.query(candidate.processId(), request.traceId());
+        OpencodeProcessStatusProbe probe = waitForStartupHealth(candidate.processId(), request.traceId());
         if (probe.status() != OpencodeProcessProbeStatus.RUNNING) {
             ErrorCode errorCode = probe.errorCode() == null ? ErrorCode.OPENCODE_UNAVAILABLE : probe.errorCode();
             throw new PlatformException(
                     errorCode,
-                    probe.message(),
+                    startupFailureMessage(probe),
                     Map.of("processId", candidate.processId().value(), "port", candidate.port()));
         }
         OpencodeServerProcess running = probe.process().orElse(candidate);
@@ -157,6 +203,55 @@ public class OpencodeProcessStartupService {
                 request.traceId()));
         executionNodeRepository.save(projectExecutionNode(running, running.updatedAt(), request.traceId()));
         return running;
+    }
+
+    private OpencodeProcessStatusProbe waitForStartupHealth(OpencodeProcessId processId, String traceId) {
+        int maxAttempts = startupHealthMaxAttempts();
+        Instant deadline = Instant.now(clock).plus(startupHealthTimeout);
+        OpencodeProcessStatusProbe probe = null;
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            probe = statusQueryService.query(processId, traceId);
+            if (!shouldRetryStartupHealth(probe)
+                    || attempt == maxAttempts
+                    || !Instant.now(clock).isBefore(deadline)) {
+                return probe;
+            }
+            startupHealthSleeper.accept(startupHealthPollInterval);
+        }
+        return probe;
+    }
+
+    /**
+     * 只有 opencode HTTP 尚未 ready 这类普通健康失败才等待；manager 控制面错误或进程不存在立即失败。
+     */
+    private boolean shouldRetryStartupHealth(OpencodeProcessStatusProbe probe) {
+        return probe.status() == OpencodeProcessProbeStatus.HEALTH_CHECK_FAILED && probe.errorCode() == null;
+    }
+
+    private int startupHealthMaxAttempts() {
+        long timeoutMillis = startupHealthTimeout.toMillis();
+        if (timeoutMillis <= 0) {
+            return 1;
+        }
+        long pollMillis = Math.max(1L, startupHealthPollInterval.toMillis());
+        long attempts = (timeoutMillis + pollMillis - 1) / pollMillis + 1;
+        return (int) Math.min(Integer.MAX_VALUE, Math.max(1L, attempts));
+    }
+
+    private String startupFailureMessage(OpencodeProcessStatusProbe probe) {
+        String message = probe.message() == null || probe.message().isBlank() ? "opencode 健康检测异常" : probe.message();
+        if (shouldRetryStartupHealth(probe) && startupHealthTimeout.toMillis() > 0) {
+            return "启动后 " + formatDuration(startupHealthTimeout) + "内未通过健康检查：" + message;
+        }
+        return message;
+    }
+
+    private String formatDuration(Duration duration) {
+        long millis = duration.toMillis();
+        if (millis % 1000 == 0) {
+            return (millis / 1000) + " 秒";
+        }
+        return millis + " 毫秒";
     }
 
     private OpencodeProcessStartCommand startCommand(OpencodeProcessStartupRequest request) {
@@ -185,5 +280,21 @@ public class OpencodeProcessStartupService {
                 now,
                 now,
                 traceId);
+    }
+
+    private static Duration positive(Duration value, Duration fallback) {
+        return value == null || value.isZero() || value.isNegative() ? fallback : value;
+    }
+
+    private static void sleepCurrentThread(Duration duration) {
+        if (duration == null || duration.isZero() || duration.isNegative()) {
+            return;
+        }
+        try {
+            Thread.sleep(duration.toMillis());
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "opencode 启动健康确认被中断", Map.of(), exception);
+        }
     }
 }

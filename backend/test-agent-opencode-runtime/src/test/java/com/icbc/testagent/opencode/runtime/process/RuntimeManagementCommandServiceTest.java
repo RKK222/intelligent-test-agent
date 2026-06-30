@@ -33,7 +33,9 @@ import com.icbc.testagent.domain.user.UserId;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -128,6 +130,25 @@ class RuntimeManagementCommandServiceTest {
         assertThat(repository.findOpencodeServerProcessById(stopped.processId())).get()
                 .extracting(OpencodeServerProcess::status)
                 .isEqualTo(OpencodeServerProcessStatus.UNHEALTHY);
+    }
+
+    @Test
+    void restartWaitsForTransientHealthFailureAfterStart() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess stopped = process("ocp_stopped", 4097, OpencodeServerProcessStatus.STOPPED);
+        repository.processes.put(stopped.processId(), stopped);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("opencode health endpoints are not reachable"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy("ok"));
+        RuntimeManagementCommandService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        OpencodeProcessControlResult result = service.restartManagedProcess(new OpencodeContainerId("ctr_01"), 4097, TRACE_ID);
+
+        assertThat(result.status()).isEqualTo("STARTED");
+        assertThat(gateway.healthCommands).hasSize(2);
+        assertThat(repository.findOpencodeServerProcessById(stopped.processId())).get()
+                .extracting(OpencodeServerProcess::status)
+                .isEqualTo(OpencodeServerProcessStatus.RUNNING);
     }
 
     @Test
@@ -245,12 +266,16 @@ class RuntimeManagementCommandServiceTest {
         private final List<OpencodeProcessControlCommand> stopCommands = new ArrayList<>();
         private final List<OpencodeProcessStartCommand> startCommands = new ArrayList<>();
         private final List<OpencodeProcessHealthCommand> healthCommands = new ArrayList<>();
+        private final Deque<OpencodeProcessHealthResult> healthResults = new ArrayDeque<>();
         private PlatformException restartFailure;
         private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy("ok");
 
         @Override
         public OpencodeProcessHealthResult checkHealth(OpencodeProcessHealthCommand command) {
             healthCommands.add(command);
+            if (!healthResults.isEmpty()) {
+                return healthResults.removeFirst();
+            }
             return health;
         }
 

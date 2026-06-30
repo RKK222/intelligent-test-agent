@@ -2,7 +2,7 @@ import { defineComponent, h, inject, provide } from "vue";
 import { QueryClient, VueQueryPlugin } from "@tanstack/vue-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/vue";
-import type { BackendApiClient } from "@test-agent/backend-api";
+import { BackendApiError, type BackendApiClient } from "@test-agent/backend-api";
 import type { OpencodeRuntimeManagementOverview } from "@test-agent/shared-types";
 import RuntimeManagementPanel from "../src/components/settings/RuntimeManagementPanel.vue";
 import { formatMetricSampleTime } from "../src/components/settings/runtimeMetricFormatting";
@@ -307,6 +307,82 @@ describe("runtime management settings", () => {
 
     await fireEvent.click(getByText("重启"));
     await waitFor(() => expect(api.restartOpencodeRuntimeManagedProcess).toHaveBeenCalledWith("ctr_01", 4096));
+    await waitFor(() => expect(api.getOpencodeRuntimeManagementUserProcesses).toHaveBeenCalledTimes(2));
+
+    queryClient.clear();
+  });
+
+  it("refreshes user process list after restart failure", async () => {
+    const stoppedPage = {
+      items: [
+        {
+          processId: "ocp_1234567890abcdef",
+          userId: "usr_1234567890abcdef",
+          username: "wr",
+          linuxServerId: "10.8.0.12",
+          containerId: "ctr_01",
+          port: 4096,
+          pid: 12345,
+          baseUrl: "http://10.8.0.12:4096",
+          status: "STOPPED",
+          managerStatus: "NOT_RUNNING",
+          healthStatus: "NOT_RUNNING",
+          restartable: true,
+          sessionPath: "/data/opencode/session/4096",
+          configPath: "/data/opencode/.config/opencode/",
+          lastHealthCheckAt: "2026-06-24T08:00:00Z",
+          healthMessage: "process pid is not alive",
+          createdAt: "2026-06-24T08:00:00Z",
+          updatedAt: "2026-06-24T08:00:00Z",
+          traceId: "trace_1234567890abcdef",
+          bindingAgentId: "opencode",
+          bindingStatus: "ACTIVE",
+          bindingUpdatedAt: "2026-06-24T08:00:00Z"
+        }
+      ],
+      page: 1,
+      size: 20,
+      total: 1
+    };
+    const unhealthyPage = {
+      ...stoppedPage,
+      items: [
+        {
+          ...stoppedPage.items[0],
+          status: "UNHEALTHY",
+          managerStatus: "UNHEALTHY",
+          healthStatus: "UNHEALTHY",
+          healthMessage: "opencode health endpoints are not reachable",
+          updatedAt: "2026-06-24T08:00:10Z"
+        }
+      ]
+    };
+    const api = {
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyOverview),
+      getOpencodeRuntimeManagementUserProcesses: vi.fn()
+        .mockResolvedValueOnce(stoppedPage)
+        .mockResolvedValueOnce(unhealthyPage),
+      restartOpencodeRuntimeManagedProcess: vi.fn().mockRejectedValue(new BackendApiError(503, {
+        success: false,
+        code: "OPENCODE_UNAVAILABLE",
+        message: "启动后 10 秒内未通过健康检查：opencode health endpoints are not reachable",
+        traceId: "trace_1234567890abcdef"
+      }))
+    };
+    const { findByText, getByPlaceholderText, getByText, queryClient } = renderRuntimePanel(api);
+
+    expect(await findByText("请输入用户关键字查询 opencode 进程")).toBeTruthy();
+    await fireEvent.update(getByPlaceholderText("用户名 / userId / 统一认证号"), "wr");
+    await fireEvent.click(getByText("查询用户进程"));
+    expect(await findByText("process pid is not alive")).toBeTruthy();
+
+    await fireEvent.click(getByText("重启"));
+
+    await waitFor(() => expect(api.restartOpencodeRuntimeManagedProcess).toHaveBeenCalledWith("ctr_01", 4096));
+    await waitFor(() => expect(api.getOpencodeRuntimeManagementUserProcesses).toHaveBeenCalledTimes(2));
+    expect(await findByText("UNHEALTHY / UNHEALTHY")).toBeTruthy();
+    expect(await findByText("opencode health endpoints are not reachable")).toBeTruthy();
+    expect(await findByText(/OPENCODE_UNAVAILABLE/)).toBeTruthy();
 
     queryClient.clear();
   });

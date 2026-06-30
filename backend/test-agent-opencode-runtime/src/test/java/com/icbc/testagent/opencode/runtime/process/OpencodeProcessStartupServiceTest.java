@@ -33,7 +33,9 @@ import com.icbc.testagent.domain.user.UserId;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -116,6 +118,47 @@ class OpencodeProcessStartupServiceTest {
     }
 
     @Test
+    void startAndVerifyWaitsForTransientUnhealthyHealthBeforeMarkingRunning() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("opencode health endpoints are not reachable"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy("ok"));
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        OpencodeProcessStartupService service = service(repository, gateway, heartbeatStore);
+
+        OpencodeServerProcess process = service.startAndVerify(request(new OpencodeProcessId("ocp_transient"), NOW, NOW));
+
+        assertThat(gateway.healthCommands).hasSize(2);
+        assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
+        assertThat(process.healthMessage()).isEqualTo("ok");
+        assertThat(heartbeatStore.liveOpencodeProcessIds()).contains(process.processId());
+        assertThat(repository.findUserBinding(USER_ID, "opencode")).isPresent();
+    }
+
+    @Test
+    void startAndVerifyTimesOutWhenHealthNeverBecomesHealthy() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.unhealthy("opencode health endpoints are not reachable");
+        RecordingHeartbeatStore heartbeatStore = new RecordingHeartbeatStore();
+        OpencodeProcessStartupService service = service(repository, gateway, heartbeatStore);
+
+        assertThatThrownBy(() -> service.startAndVerify(request(new OpencodeProcessId("ocp_timeout"), NOW, NOW)))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
+                    assertThat(exception.getMessage()).contains("启动后 10 秒内未通过健康检查");
+                });
+
+        assertThat(gateway.healthCommands).hasSizeGreaterThan(1);
+        OpencodeServerProcess process = repository.findOpencodeServerProcessById(new OpencodeProcessId("ocp_timeout"))
+                .orElseThrow();
+        assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.UNHEALTHY);
+        assertThat(process.healthMessage()).isEqualTo("opencode health endpoints are not reachable");
+        assertThat(heartbeatStore.liveOpencodeProcessIds()).isEmpty();
+        assertThat(repository.findUserBinding(USER_ID, "opencode")).isEmpty();
+    }
+
+    @Test
     void startAndVerifyMapsNotRunningHealthToStopped() {
         FakeRepository repository = new FakeRepository();
         RecordingGateway gateway = new RecordingGateway();
@@ -164,11 +207,15 @@ class OpencodeProcessStartupServiceTest {
     private static final class RecordingGateway implements OpencodeProcessManagerGateway {
         private final List<OpencodeProcessStartCommand> startCommands = new ArrayList<>();
         private final List<OpencodeProcessHealthCommand> healthCommands = new ArrayList<>();
+        private final Deque<OpencodeProcessHealthResult> healthResults = new ArrayDeque<>();
         private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy("ok");
 
         @Override
         public OpencodeProcessHealthResult checkHealth(OpencodeProcessHealthCommand command) {
             healthCommands.add(command);
+            if (!healthResults.isEmpty()) {
+                return healthResults.removeFirst();
+            }
             return health;
         }
 
