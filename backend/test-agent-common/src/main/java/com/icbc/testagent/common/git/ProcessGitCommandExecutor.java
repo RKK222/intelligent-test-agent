@@ -28,6 +28,8 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
             ProcessBuilder builder = new ProcessBuilder(command)
                     .redirectInput(ProcessBuilder.Redirect.PIPE);
             builder.environment().put("GIT_TERMINAL_PROMPT", "0");
+            builder.environment().put("LANG", "en_US.UTF-8");
+            builder.environment().put("LC_ALL", "en_US.UTF-8");
             if (privateKey != null && !privateKey.isBlank()) {
                 keyFile = writeTempKey(privateKey);
                 builder.environment().put(

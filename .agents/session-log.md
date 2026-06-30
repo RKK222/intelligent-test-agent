@@ -2,6 +2,15 @@
 
 ## Entries
 
+### 2026-06-30 - 修复 Windows 下后端日志与 Git 输出乱码
+
+- Why: Windows 控制台默认 GBK 编码，后端 Java 进程 `System.out/err` 按 GBK 输出到日志文件，PowerShell 读 `backend.log` 时中文显示为乱码（`Git 杩滅璇诲彇澶辫触` 等）。同时 `ProcessGitCommandExecutor` 执行 `git` 子进程时，Windows 上 `git` 的 stderr 也是 GBK，被 Java 按 UTF-8 读出来也是乱码。
+- What:
+  - [win-restart-dev-services-fixed-v4.ps1](file:///d:/workspace/intelligent-test-agent/win-restart-dev-services-fixed-v4.ps1) 的 `BackendJavaDirectNetworkArgs` 增加 `-Dfile.encoding=UTF-8`、`-Dsun.stdout.encoding=UTF-8`、`-Dsun.stderr.encoding=UTF-8`，强制 Java 进程的输出编码为 UTF-8。
+  - [ProcessGitCommandExecutor.java](file:///d:/workspace/intelligent-test-agent/backend/test-agent-common/src/main/java/com/icbc/testagent/common/git/ProcessGitCommandExecutor.java) 中 `ProcessBuilder` 环境变量补充 `LANG=en_US.UTF-8` 和 `LC_ALL=en_US.UTF-8`，让 git 子进程按 UTF-8 输出（代码本身已用 UTF-8 读取）。
+- How: 纯运维配置 + 子进程环境变量调整，不改变业务逻辑、不影响 API/事件/数据库/安全/兼容性。
+- Result: `mvn -pl test-agent-common -am compile` 通过；`LANG`/`LC_ALL` 在 Linux/macOS 上是 git 的常规配置，无副作用。
+
 ### 2026-06-30 - 拆分 process.go 为 Unix/Windows 平台特化实现
 
 - Why: `process.go` 中的 `OSStarter.Start()` 和 `OSSignaler` 使用了仅 Unix 的 `syscall.SysProcAttr{Setpgid: true}` 和 `syscall.Kill(-pid, sig)`，导致 Windows 上 `go build` 失败。开发组同时使用 macOS 和 Windows，需要跨平台兼容。
