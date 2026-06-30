@@ -16,6 +16,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.buffer.DataBuffer;
 import org.springframework.core.io.buffer.DataBufferFactory;
 import org.springframework.core.io.buffer.DataBufferUtils;
@@ -30,7 +31,7 @@ import reactor.core.scheduler.Schedulers;
  * 后端 Java 之间的统一 HTTP 转发器，负责 header/body/trace 透传和统一错误转换。
  */
 @Service
-class BackendHttpForwarder {
+public class BackendHttpForwarder {
 
     static final String ROUTED_HEADER = "X-Test-Agent-Backend-Routed";
 
@@ -45,7 +46,8 @@ class BackendHttpForwarder {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
 
-    BackendHttpForwarder(ObjectMapper objectMapper) {
+    @Autowired
+    public BackendHttpForwarder(ObjectMapper objectMapper) {
         this(objectMapper, HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .build());

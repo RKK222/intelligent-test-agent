@@ -2222,3 +2222,10 @@ bash /tmp/test-api-after-restart.sh
 - How: `RuntimeManagementQueryService.userProcesses` 只在进程属于当前 Java 服务器时调用本机 manager health，远端返回 `REMOTE_SERVER/CHECK_SKIPPED`；`OpencodeProcessHeartbeatMaintenanceService` 只扫描当前服务器 RUNNING 进程。删除 `LocalDirectSettings`、`LocalOpencodeProcessManagerGateway`、`gateway-mode`、`local-direct` 配置和对应测试，本地/生产都必须启动 Go manager。
 - Result: 前端可访问任意 Java；后端先通过统一路由定位目标 Java；只有目标 Java 通过本服务器 manager WebSocket 控制 manager。旧 session-log 中关于开启 local-direct/local gateway 的记录已被本条决策覆盖。
 - Verification: 目标红灯测试 `BackendJavaRouteResolverTest`、`BackendHttpForwarderTest`、`UserOpencodeBackendRoutingWebFilterTest` 随 `mvn -pl test-agent-api,test-agent-opencode-runtime,test-agent-app -am test -Dtest=BackendJavaRouteResolverTest,BackendHttpForwarderTest,UserOpencodeBackendRoutingWebFilterTest -Dsurefire.failIfNoSpecifiedTests=false` 通过；回归命令 `mvn -q -pl test-agent-api -am test`、`mvn -q -pl test-agent-opencode-runtime -am test`、`mvn -q -pl test-agent-app -am test` 均通过。
+
+### 2026-06-30 - 修复 BackendHttpForwarder Spring 构造器装配失败
+
+- Why: 打包启动时报 `BackendHttpForwarder: No default constructor found`，原因是该组件同时存在生产构造器和测试构造器，Spring 7 未自动推断应使用 `ObjectMapper` 构造器。
+- What: 将 `BackendHttpForwarder` 类和生产 `ObjectMapper` 构造器公开，并用 `@Autowired` 明确 Spring 注入点；新增 Spring context 级单测复现并防止回归。
+- How: 保留双参 `HttpClient` 构造器为包级测试入口；通过 `AnnotationConfigApplicationContext` 注册 `ObjectMapper` 和 `BackendHttpForwarder` 验证组件可实例化。
+- Result: `BackendHttpForwarderTest` 和 `test-agent-api` 全量测试通过，`test-agent-app` 跳过测试打包通过；`test-agent-app -am test` 当前被工作区未提交的 persistence migration seed 改动阻断，失败点是默认用户/本地拓扑 fixture 断言，与本次构造器修复无关。

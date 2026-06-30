@@ -30,6 +30,9 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSession;
 import org.junit.jupiter.api.Test;
+import org.springframework.context.annotation.AnnotationConfigApplicationContext;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.buffer.DataBufferUtils;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
@@ -38,6 +41,17 @@ import org.springframework.mock.web.server.MockServerWebExchange;
 class BackendHttpForwarderTest {
 
     private static final Instant NOW = Instant.parse("2026-06-30T00:00:00Z");
+
+    @Test
+    void springContextCreatesForwarderWithObjectMapperConstructor() {
+        try (AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext()) {
+            context.register(TestConfig.class, BackendHttpForwarder.class);
+
+            context.refresh();
+
+            assertThat(context.getBean(BackendHttpForwarder.class)).isNotNull();
+        }
+    }
 
     @Test
     void forwardsRawRequestWithAuthTraceQueryBodyAndRoutedHeader() {
@@ -102,6 +116,14 @@ class BackendHttpForwarderTest {
                 NOW,
                 NOW,
                 "trace_backend");
+    }
+
+    @Configuration
+    static class TestConfig {
+        @Bean
+        ObjectMapper objectMapper() {
+            return new ObjectMapper().findAndRegisterModules();
+        }
     }
 
     private static final class RecordingHttpClient extends HttpClient {
