@@ -5,19 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/icbc/test-agent/opencode-manager/internal/config"
 	"github.com/icbc/test-agent/opencode-manager/internal/health"
 	"github.com/icbc/test-agent/opencode-manager/internal/state"
 )
+
+type OSStarter struct{}
+
+type OSSignaler struct{}
 
 // Status 是 opencode-manager CLI 输出的稳定状态枚举。
 type Status string
@@ -404,7 +406,7 @@ func isProcessFinishedError(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH) {
+	if errors.Is(err, os.ErrProcessDone) {
 		return true
 	}
 	message := strings.ToLower(err.Error())
@@ -490,53 +492,6 @@ func failed(port int, traceID string, err error) Result {
 
 func failedWithCode(port int, traceID string, errorCode string, message string) Result {
 	return Result{Status: StatusFailed, Port: port, Message: message, ErrorCode: errorCode, TraceID: traceID}
-}
-
-// OSStarter 使用 os/exec 启动真实 opencode serve 进程。
-type OSStarter struct{}
-
-func (OSStarter) Start(_ context.Context, spec StartSpec) (int, error) {
-	logFile, err := os.OpenFile(spec.LogPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
-	if err != nil {
-		return 0, err
-	}
-	defer logFile.Close()
-
-	command := exec.Command(spec.Command, spec.Args...)
-	command.Env = append(os.Environ(), flattenEnv(spec.Env)...)
-	command.Stdout = logFile
-	command.Stderr = logFile
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if err := command.Start(); err != nil {
-		return 0, err
-	}
-	go func() {
-		_ = command.Wait()
-	}()
-	return command.Process.Pid, nil
-}
-
-// OSSignaler 向真实 Unix 进程发送终止或强杀信号。
-type OSSignaler struct{}
-
-func (OSSignaler) Terminate(pid int) error {
-	return signal(pid, syscall.SIGTERM)
-}
-
-func (OSSignaler) Kill(pid int) error {
-	return signal(pid, syscall.SIGKILL)
-}
-
-func signal(pid int, sig syscall.Signal) error {
-	// 启动时已设置独立进程组，优先按组发送信号以清理可能的子进程。
-	if err := syscall.Kill(-pid, sig); err == nil {
-		return nil
-	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return err
-	}
-	return process.Signal(sig)
 }
 
 func flattenEnv(values map[string]string) []string {

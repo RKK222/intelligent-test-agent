@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-06-30 - 拆分 process.go 为 Unix/Windows 平台特化实现
+
+- Why: `process.go` 中的 `OSStarter.Start()` 和 `OSSignaler` 使用了仅 Unix 的 `syscall.SysProcAttr{Setpgid: true}` 和 `syscall.Kill(-pid, sig)`，导致 Windows 上 `go build` 失败。开发组同时使用 macOS 和 Windows，需要跨平台兼容。
+- What:
+  - 将平台相关代码拆到 [process_unix.go](file:///d:/workspace/intelligent-test-agent/opencode-manager/internal/process/process_unix.go)（`//go:build !windows`）和 [process_windows.go](file:///d:/workspace/intelligent-test-agent/opencode-manager/internal/process/process_windows.go)（`//go:build windows`）。
+  - Unix 版本保留原有 `Setpgid: true` 和 `syscall.Kill(-pid, sig)` 逻辑。
+  - Windows 版本用 `CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP` 创建独立进程组，用 `process.Kill()` 替代信号发送。
+  - [process.go](file:///d:/workspace/intelligent-test-agent/opencode-manager/internal/process/process.go) 中保留 `OSStarter` / `OSSignaler` 类型定义和 `flattenEnv` 等通用函数，移除 `syscall` 导入和 `syscall.ESRCH` 引用。
+- How: 纯 Go 改动，不涉及 API/事件/数据库/安全/兼容性；保持 `internal/control/cgroup_parse_linux.go` 的既有平台拆分模式。
+- Result: Windows 上 `go build -o bin/opencode-manager.exe ./cmd/opencode-manager` 编译成功，生成 10MB 的可执行文件。
+
 ### 2026-06-30 - Maven build 前强制终止所有开发服务
 
 - Why: 如果上一次 Ctrl+C 或窗口崩溃导致后端 Java 进程未被正常回收，`mvn clean package` 会因 JAR 文件被锁而失败：`Failed to delete ... test-agent-app-0.1.0-SNAPSHOT.jar: 另一个程序正在使用此文件`。
