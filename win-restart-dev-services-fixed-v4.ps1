@@ -691,7 +691,8 @@ function Start-BackgroundCommand {
         [Parameter(Mandatory = $true)][string]$WorkingDirectory,
         [Parameter(Mandatory = $true)][string]$Command,
         [string[]]$Arguments = @(),
-        [Parameter(Mandatory = $true)][string]$LogPath
+        [Parameter(Mandatory = $true)][string]$LogPath,
+        [hashtable]$Environment = @{}
     )
 
     $errorLogPath = Get-ErrorLogPath $LogPath
@@ -699,10 +700,20 @@ function Start-BackgroundCommand {
     Set-Content -LiteralPath $LogPath -Value "" -NoNewline
     Set-Content -LiteralPath $errorLogPath -Value "" -NoNewline
 
+    # 构建环境变量设置脚本
+    $envScript = ""
+    foreach ($key in $Environment.Keys) {
+        $value = $Environment[$key]
+        $escapedKey = ConvertTo-PowerShellLiteral $key
+        $escapedValue = ConvertTo-PowerShellLiteral $value
+        $envScript += "`$env:$key = $escapedValue`n"
+    }
+
     # 子 PowerShell 只负责驻留并转发输出，真实服务仍按 command line 被精确发现和清理。
     $argumentText = (@($Arguments) | ForEach-Object { ConvertTo-PowerShellLiteral ([string]$_) }) -join " "
     $script = @"
 `$ErrorActionPreference = 'Stop'
+$envScript
 Set-Location -LiteralPath $(ConvertTo-PowerShellLiteral $WorkingDirectory)
 & $(ConvertTo-PowerShellLiteral $Command) $argumentText >> $(ConvertTo-PowerShellLiteral $LogPath) 2>> $(ConvertTo-PowerShellLiteral $errorLogPath)
 "@
@@ -988,20 +999,24 @@ function Start-OpencodeManager {
     }
 
     New-Item -ItemType Directory -Force -Path $LogDir, $managerStateDir | Out-Null
-    Set-EnvValue "OPENCODE_MANAGER_CONTAINER_ID" $containerId
-    Set-EnvValue "OPENCODE_MANAGER_BACKEND_PORT" $backendPort
-    Set-EnvValue "OPENCODE_MANAGER_PORT_START" $portStart
-    Set-EnvValue "OPENCODE_MANAGER_PORT_END" $portEnd
-    Set-EnvValue "OPENCODE_MANAGER_TOKEN" (Get-EnvValue "TEST_AGENT_OPENCODE_MANAGER_TOKEN" "")
-    Set-EnvValue "OPENCODE_MANAGER_STATE_DIR" $managerStateDir
-    Set-EnvValue "OPENCODE_BIN" $opencodeBinary
-    Set-EnvValue "OPENCODE_ALLOWED_CORS" "http://localhost:$($script:FrontendPort),http://127.0.0.1:$($script:FrontendPort)"
-    Set-EnvValue "OPENCODE_MANAGER_HEARTBEAT_INTERVAL" (Get-EnvValue "OPENCODE_MANAGER_HEARTBEAT_INTERVAL" "5s")
-    Set-EnvValue "OPENCODE_MANAGER_RECONNECT_INTERVAL" (Get-EnvValue "OPENCODE_MANAGER_RECONNECT_INTERVAL" "10s")
+
+    # 收集所有需要传递给子进程的环境变量
+    $envVars = @{
+        "OPENCODE_MANAGER_CONTAINER_ID" = $containerId
+        "OPENCODE_MANAGER_BACKEND_PORT" = $backendPort
+        "OPENCODE_MANAGER_PORT_START" = $portStart
+        "OPENCODE_MANAGER_PORT_END" = $portEnd
+        "OPENCODE_MANAGER_TOKEN" = (Get-EnvValue "TEST_AGENT_OPENCODE_MANAGER_TOKEN" "")
+        "OPENCODE_MANAGER_STATE_DIR" = $managerStateDir
+        "OPENCODE_BIN" = $opencodeBinary
+        "OPENCODE_ALLOWED_CORS" = "http://localhost:$($script:FrontendPort),http://127.0.0.1:$($script:FrontendPort)"
+        "OPENCODE_MANAGER_HEARTBEAT_INTERVAL" = (Get-EnvValue "OPENCODE_MANAGER_HEARTBEAT_INTERVAL" "5s")
+        "OPENCODE_MANAGER_RECONNECT_INTERVAL" = (Get-EnvValue "OPENCODE_MANAGER_RECONNECT_INTERVAL" "10s")
+    }
 
     $logPath = Join-Path $LogDir "opencode-manager.log"
     Write-Host "Starting opencode-manager for $containerId ($version). Logs: $logPath"
-    $wrapperProcessId = Start-BackgroundCommand -WorkingDirectory $RootDir -Command $managerBinary -Arguments @("run") -LogPath $logPath
+    $wrapperProcessId = Start-BackgroundCommand -WorkingDirectory $RootDir -Command $managerBinary -Arguments @("run") -LogPath $logPath -Environment $envVars
     Write-PidFile (Join-Path $LogDir "opencode-manager.pid") @($wrapperProcessId)
     Start-Sleep -Seconds 3
     $managerProcessIds = @(Get-OpencodeManagerProcessIds)
