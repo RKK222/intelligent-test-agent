@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-30 - 通用参数修改历史抽屉补当前值与缓存刷新
+
+- Why: 通用参数“修改历史”点击后只依赖 `common_parameter_change_logs`，当日志为空或前端保留旧空缓存时用户看不到具体内容；页面保存成功后也没有主动失效历史查询缓存。
+- What: 修改历史抽屉增加当前参数摘要（英文名、中文名、平台、当前值、更新时间），打开历史时主动失效历史缓存，保存参数成功后同步失效历史缓存；后端单测把日志记录从“调用 save”加强到字段级断言 old/new/user/trace/createdAt。
+- How: 仅改 `GeneralParamManagementPanel.vue`、`general-param-management-panel.test.ts` 和 `CommonParameterManagementApplicationServiceTest.java`；不改 HTTP API、事件、数据库结构或环境文件。
+- Result: `corepack pnpm test -- general-param-management-panel.test.ts`、`corepack pnpm --filter @test-agent/agent-web typecheck`、`mvn -pl test-agent-configuration-management -am -Dtest=CommonParameterManagementApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false test` 通过；`.env.test` 数据库临时不可达时无法直接核对现网日志表内容。
+
 ### 2026-06-30 - Maven build 前强制终止所有开发服务
 
 - Why: 如果上一次 Ctrl+C 或窗口崩溃导致后端 Java 进程未被正常回收，`mvn clean package` 会因 JAR 文件被锁而失败：`Failed to delete ... test-agent-app-0.1.0-SNAPSHOT.jar: 另一个程序正在使用此文件`。

@@ -54,6 +54,7 @@ const updateMutation = useMutation({
     api.updateGeneralParameter(parameterId, { value }),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ["common-parameters"] });
+    queryClient.invalidateQueries({ queryKey: ["common-parameter-change-logs"] });
     queryClient.invalidateQueries({ queryKey: ["opencode-runtime-management"] });
   },
   onError: (error) => {
@@ -168,6 +169,8 @@ async function submitEdit() {
 function openChangeLogsDrawer(param: GeneralParameter) {
   changeLogsParam.value = param;
   changeLogsDrawerOpen.value = true;
+  // 抽屉打开时立即按当前参数重新拉取，避免复用上一条参数的历史缓存。
+  void queryClient.invalidateQueries({ queryKey: ["common-parameter-change-logs"] });
 }
 
 function closeChangeLogsDrawer() {
@@ -394,6 +397,20 @@ function formatError(error: unknown) {
         @close="closeChangeLogsDrawer"
       >
         <div class="ta-change-logs">
+          <div v-if="changeLogsParam" class="ta-change-log-param-card">
+            <div class="ta-change-log-param-card-header">
+              <span class="ta-common-param-mono">{{ changeLogsParam.englishName }}</span>
+              <span class="ta-common-param-tag">{{ changeLogsParam.platform }}</span>
+            </div>
+            <div class="ta-change-log-param-grid">
+              <span>参数中文名</span>
+              <strong>{{ changeLogsParam.chineseName }}</strong>
+              <span>当前参数值</span>
+              <code class="ta-common-param-mono">{{ changeLogsParam.parameterValue }}</code>
+              <span>更新时间</span>
+              <strong>{{ formatFullDate(changeLogsParam.updatedAt) }}</strong>
+            </div>
+          </div>
           <div class="ta-change-logs-toolbar">
             <el-button size="small" :icon="Refresh" :loading="changeLogsFetching" @click="refreshChangeLogs">刷新</el-button>
             <span class="ta-change-logs-note">展示该参数最近 50 条修改记录</span>
@@ -468,6 +485,35 @@ function formatError(error: unknown) {
   background: #fef2f2;
   color: #b91c1c;
   font-size: 12px;
+}
+.ta-change-log-param-card {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #f9fafb;
+}
+.ta-change-log-param-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ta-change-log-param-grid {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 8px 12px;
+  font-size: 12px;
+  color: #6b7280;
+}
+.ta-change-log-param-grid strong,
+.ta-change-log-param-grid code {
+  min-width: 0;
+  color: #111827;
+  font-weight: 500;
+  word-break: break-all;
 }
 .ta-common-param-table-wrapper {
   flex: 1;

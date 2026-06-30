@@ -26,6 +26,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.context.ApplicationEventPublisher;
 
 class CommonParameterManagementApplicationServiceTest {
@@ -92,7 +93,16 @@ class CommonParameterManagementApplicationServiceTest {
         assertThat(response.parameterValue()).isEqualTo("6");
         assertThat(response.updatedAt()).isEqualTo(UPDATED_AT);
         verify(repository).updateValue("param_opencode_manager_max_processes_all", "6", UPDATED_AT);
-        verify(changeLogRepository).save(any(CommonParameterChangeLog.class));
+        ArgumentCaptor<CommonParameterChangeLog> logCaptor = ArgumentCaptor.forClass(CommonParameterChangeLog.class);
+        verify(changeLogRepository).save(logCaptor.capture());
+        CommonParameterChangeLog savedLog = logCaptor.getValue();
+        assertThat(savedLog.parameterId()).isEqualTo("param_opencode_manager_max_processes_all");
+        assertThat(savedLog.oldValue()).isEqualTo("4");
+        assertThat(savedLog.newValue()).isEqualTo("6");
+        assertThat(savedLog.changedByUserId()).isEqualTo("usr_test");
+        assertThat(savedLog.changedByUsername()).isEqualTo("testuser");
+        assertThat(savedLog.traceId()).isEqualTo("trace_test");
+        assertThat(savedLog.createdAt()).isEqualTo(UPDATED_AT);
         verify(publisher).publishEvent(any(CommonParameterUpdatedEvent.class));
     }
 
