@@ -3,6 +3,7 @@ package com.icbc.testagent.common.git;
 import com.icbc.testagent.common.error.PlatformException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -75,18 +76,66 @@ public class GitWorkspaceService {
             if (!"WORKTREE_CONFLICT".equals(exception.details().get("gitFailureType"))) {
                 throw exception;
             }
-            executor.execute(
-                    List.of(
-                            "git",
-                            "-C",
-                            repoRoot.toString(),
-                            "worktree",
-                            "add",
-                            worktreeRoot.toString(),
-                            branch),
-                    privateKey,
-                    DEFAULT_TIMEOUT);
+            pruneWorktrees(repoRoot, privateKey);
+            try {
+                executor.execute(
+                        List.of(
+                                "git",
+                                "-C",
+                                repoRoot.toString(),
+                                "worktree",
+                                "add",
+                                worktreeRoot.toString(),
+                                branch),
+                        privateKey,
+                        DEFAULT_TIMEOUT);
+            } catch (PlatformException reuseException) {
+                if ("WORKTREE_CONFLICT".equals(reuseException.details().get("gitFailureType"))
+                        && registeredWorktreeMatches(repoRoot, worktreeRoot, branch)) {
+                    return;
+                }
+                throw reuseException;
+            }
         }
+    }
+
+    /**
+     * 清理已失效的 worktree 元数据。Git 只会删除磁盘目录已不存在的登记，不会移除仍存活的其它 worktree。
+     */
+    private void pruneWorktrees(Path repoRoot, String privateKey) {
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "worktree", "prune"),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    private boolean registeredWorktreeMatches(Path repoRoot, Path worktreeRoot, String branch) {
+        GitCommandResult result = executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "worktree", "list", "--porcelain"),
+                null,
+                DEFAULT_TIMEOUT);
+        String expectedPath = worktreeRoot.toAbsolutePath().normalize().toString();
+        String currentPath = null;
+        boolean currentBranchMatches = false;
+        for (String line : result.stdoutText().split("\\R")) {
+            if (line.startsWith("worktree ")) {
+                if (expectedPath.equals(normalizeWorktreeListPath(currentPath)) && currentBranchMatches) {
+                    return true;
+                }
+                currentPath = line.substring("worktree ".length()).trim();
+                currentBranchMatches = false;
+            } else if (line.startsWith("branch refs/heads/")) {
+                currentBranchMatches = branch.equals(line.substring("branch refs/heads/".length()).trim());
+            }
+        }
+        return expectedPath.equals(normalizeWorktreeListPath(currentPath)) && currentBranchMatches;
+    }
+
+    private String normalizeWorktreeListPath(String path) {
+        if (path == null || path.isBlank()) {
+            return "";
+        }
+        return Path.of(path).toAbsolutePath().normalize().toString();
     }
 
     /**
@@ -248,7 +297,7 @@ public class GitWorkspaceService {
      */
     public String statusPorcelain(Path repoRoot) {
         GitCommandResult result = executor.execute(
-                List.of("git", "-C", repoRoot.toString(), "status", "--porcelain"),
+                gitNoQuotedPath(repoRoot, "status", "--porcelain"),
                 null,
                 DEFAULT_TIMEOUT);
         return result.stdoutText();
@@ -259,8 +308,8 @@ public class GitWorkspaceService {
      */
     public String diff(Path repoRoot, String file, boolean staged) {
         List<String> command = staged
-                ? List.of("git", "-C", repoRoot.toString(), "diff", "--cached", "--", file)
-                : List.of("git", "-C", repoRoot.toString(), "diff", "--", file);
+                ? gitNoQuotedPath(repoRoot, "diff", "--cached", "--", file)
+                : gitNoQuotedPath(repoRoot, "diff", "--", file);
         return executor.execute(command, null, DEFAULT_TIMEOUT).stdoutText();
     }
 
@@ -300,10 +349,21 @@ public class GitWorkspaceService {
      */
     public boolean isWorktreeClean(Path repoRoot) {
         GitCommandResult result = executor.execute(
-                List.of("git", "-C", repoRoot.toString(), "status", "--porcelain"),
+                gitNoQuotedPath(repoRoot, "status", "--porcelain"),
                 null,
                 DEFAULT_TIMEOUT);
         return result.stdoutText().trim().isEmpty();
+    }
+
+    private List<String> gitNoQuotedPath(Path repoRoot, String... args) {
+        ArrayList<String> command = new ArrayList<>();
+        command.add("git");
+        command.add("-c");
+        command.add("core.quotepath=false");
+        command.add("-C");
+        command.add(repoRoot.toString());
+        command.addAll(List.of(args));
+        return List.copyOf(command);
     }
 
     private List<String> addCommand(Path repoRoot, List<String> files) {

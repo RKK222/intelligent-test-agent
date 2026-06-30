@@ -30,6 +30,8 @@ defineProps<FileExplorerProps & {
   workspaceId?: string;
   /** 当前默认个人工作区 ID，透传给 GitChangesPanel 用于提交并推送 */
   personalWorkspaceId?: string;
+  /** 当前默认个人 worktree 分支，透传给底部工作空间切换入口展示 */
+  personalWorkspaceBranch?: string;
   /** 是否显示超级管理员服务器工作空间切换入口 */
   showServerWorkspaceSwitch?: boolean;
   /** 搜索结果列表 */
@@ -276,6 +278,7 @@ defineExpose({
       :app-name="appName"
       :templates="appTemplates"
       :selected-version-id="selectedVersionId"
+      :personal-workspace-branch="personalWorkspaceBranch"
       :loading-templates="loadingAppTemplates"
       :loading-versions="loadingAppVersions"
       :creating-version="creatingVersion"

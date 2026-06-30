@@ -246,6 +246,67 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void ensureDefaultPersonalWorkspaceRecreatesEmptyLeftoverDirectory() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        Files.createDirectories(root.resolve("personalworktree/20260707/000857009/gcms/default"));
+
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+
+        assertThat(personal.personalWorkspaceBranch()).isEqualTo("feature_testagent_20260707_usr_1_default");
+        assertThat(git.reusedWorktreeBranch).isEqualTo("feature_testagent_20260707_usr_1_default");
+        assertThat(Files.isDirectory(root.resolve("personalworktree/20260707/000857009/gcms/default/F-GCMS/workspace"))).isTrue();
+    }
+
+    @Test
+    void workspaceGitDiffReturnsWorkspaceRelativeChinesePathAndPatch() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+        git.nextStatusPorcelain = " M F-GCMS/workspace/需求/登录测试.md\n";
+        git.diffByFile.put(
+                "F-GCMS/workspace/需求/登录测试.md",
+                "diff --git a/F-GCMS/workspace/需求/登录测试.md b/F-GCMS/workspace/需求/登录测试.md\n@@ -1 +1 @@\n-旧\n+新\n");
+
+        ManagedWorkspaceResponses.WorkspaceGitDiffResponse diff = service.getWorkspaceGitDiff(
+                personal.runtimeWorkspace().workspaceId(),
+                new UserId("usr_1"));
+
+        assertThat(diff.files()).hasSize(1);
+        assertThat(diff.files().get(0).path()).isEqualTo("需求/登录测试.md");
+        assertThat(diff.files().get(0).patch()).contains("+新");
+        assertThat(git.lastDiffFile).isEqualTo("F-GCMS/workspace/需求/登录测试.md");
+    }
+
+    @Test
     void syncsPersonalWorkspaceFilesToApplicationAndRecordsPush() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -501,6 +562,9 @@ class ManagedWorkspaceApplicationServiceTest {
         private String nextHeadCommit = "commit_base";
         private boolean failCreateWorktreeWithConflict;
         private String reusedWorktreeBranch;
+        private String nextStatusPorcelain = "";
+        private final Map<String, String> diffByFile = new java.util.HashMap<>();
+        private String lastDiffFile;
 
         private FakeGitWorkspaceService(String directoryPath) {
             this.directoryPath = directoryPath;
@@ -567,6 +631,17 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override
         public void pullFastForward(Path repoRoot, String branch, String privateKey) {
             this.pulledBranch = branch;
+        }
+
+        @Override
+        public String statusPorcelain(Path repoRoot) {
+            return nextStatusPorcelain;
+        }
+
+        @Override
+        public String diff(Path repoRoot, String file, boolean staged) {
+            this.lastDiffFile = file;
+            return diffByFile.getOrDefault(file, "");
         }
     }
 

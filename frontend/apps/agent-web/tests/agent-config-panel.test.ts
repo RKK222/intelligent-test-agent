@@ -94,6 +94,25 @@ describe("AgentConfigPanel", () => {
     expect((view.getByRole("button", { name: "确定" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it("loads public and workspace agent status plus root directories without serial blocking", async () => {
+    let resolvePublicStatus!: (value: ReturnType<typeof publicStatus>) => void;
+    let resolvePublicFiles!: (value: unknown[]) => void;
+    apiClientMock.getPublicAgentConfigStatus.mockReturnValue(new Promise((resolve) => {
+      resolvePublicStatus = resolve;
+    }));
+    apiClientMock.listPublicAgentFiles.mockReturnValue(new Promise((resolve) => {
+      resolvePublicFiles = resolve;
+    }));
+
+    renderPanel();
+
+    await waitFor(() => expect(apiClientMock.getWorkspaceAgentConfigStatus).toHaveBeenCalled());
+    resolvePublicStatus(publicStatus());
+    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalled());
+    await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_1234567890abcdef", "", undefined));
+    resolvePublicFiles([]);
+  });
+
   it("switches public level to a selected worktree and reloads files with worktree context", async () => {
     apiClientMock.listPublicAgentWorktrees.mockResolvedValue([publicWorktreeOption()]);
 

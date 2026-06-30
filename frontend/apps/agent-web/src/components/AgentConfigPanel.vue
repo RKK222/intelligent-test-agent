@@ -96,26 +96,30 @@ watch(
 
 async function refreshAll() {
   await refreshStatus();
-  if (status.value.PUBLIC?.enabled !== false) {
-    await loadDirectory("PUBLIC", "");
-  }
-  if (props.workspaceId) {
-    await loadDirectory("WORKSPACE", "");
-  }
+  const tasks: Promise<void>[] = [];
+  if (status.value.PUBLIC?.enabled !== false) tasks.push(loadDirectory("PUBLIC", ""));
+  if (props.workspaceId) tasks.push(loadDirectory("WORKSPACE", ""));
+  await Promise.all(tasks);
 }
 
 async function refreshStatus() {
-  try {
-    const next: { PUBLIC?: AgentConfigStatus; WORKSPACE?: AgentConfigStatus } = {
-      PUBLIC: await api.getPublicAgentConfigStatus()
-    };
-    if (props.workspaceId) {
-      next.WORKSPACE = await api.getWorkspaceAgentConfigStatus(props.workspaceId);
-    }
-    status.value = next;
-  } catch (error) {
-    errorMessage.value = formatAgentConfigError(error, "加载 Agent 状态失败");
+  const next: { PUBLIC?: AgentConfigStatus; WORKSPACE?: AgentConfigStatus } = {};
+  const publicStatusPromise = api.getPublicAgentConfigStatus();
+  const workspaceStatusPromise = props.workspaceId
+    ? api.getWorkspaceAgentConfigStatus(props.workspaceId)
+    : Promise.resolve<AgentConfigStatus | undefined>(undefined);
+  const [publicResult, workspaceResult] = await Promise.allSettled([publicStatusPromise, workspaceStatusPromise]);
+  if (publicResult.status === "fulfilled") {
+    next.PUBLIC = publicResult.value;
+  } else {
+    errorMessage.value = formatAgentConfigError(publicResult.reason, "加载公共 Agent 状态失败");
   }
+  if (workspaceResult.status === "fulfilled") {
+    next.WORKSPACE = workspaceResult.value;
+  } else {
+    errorMessage.value = formatAgentConfigError(workspaceResult.reason, "加载应用 Agent 状态失败");
+  }
+  status.value = next;
 }
 
 function worktreeId(scope: Scope) {

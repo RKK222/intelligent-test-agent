@@ -152,6 +152,8 @@ watch(centerMode, (newMode, oldMode) => {
 const selectedAppId = ref<string | undefined>(undefined);
 // 当前选中版本对应的默认个人工作区 ID，供 GitChangesPanel 调用 publishPersonalWorkspace。
 const currentPersonalWorkspaceId = ref<string | undefined>(undefined);
+const currentPersonalWorkspaceBranch = ref<string | undefined>(undefined);
+let retryingWorkspaceAfterOpencodeReady = false;
 const readonlySessionReason = ref("");
 const chatTitle = computed(() => session.value?.title ?? "生成测试案例");
 // 任务消耗展示：duration 取 chatStartedAt 实时计算；tokens 从助手消息的 step-finish part
@@ -589,6 +591,12 @@ watch(opencodeProcessReady, (ready, previous) => {
   void queryClient.invalidateQueries({ queryKey: ["runtime", "lsp"] });
   void queryClient.invalidateQueries({ queryKey: ["runtime", "mcp"] });
   void queryClient.invalidateQueries({ queryKey: ["runtime", "vcs"] });
+  if (selectedAppId.value && !selectedWorkspaceId.value && !retryingWorkspaceAfterOpencodeReady) {
+    retryingWorkspaceAfterOpencodeReady = true;
+    void handleSelectApp(selectedAppId.value).finally(() => {
+      retryingWorkspaceAfterOpencodeReady = false;
+    });
+  }
 });
 watch([() => selectedProvider.value, () => selectedModel.value, modelsQuery.data], ([provider, model, data]) => {
   if (!provider || !model || String(model).startsWith(`${provider}/`)) {
@@ -1142,6 +1150,7 @@ function resetWorkspaceState() {
   dispatchChat({ type: "reset" });
   // 切工作区时清掉个人工作区 ID，避免旧版本的空 ID 残留导致提交/推送指向错误目标。
   currentPersonalWorkspaceId.value = undefined;
+  currentPersonalWorkspaceBranch.value = undefined;
   workbench.resetWorkspaceView();
 }
 
@@ -1278,6 +1287,7 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
     }
     // 无论是否已是当前工作区，都记录个人工作区 ID（若从 recent 恢复进入，可能尚未设置）
     currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
+    currentPersonalWorkspaceBranch.value = defaultPw.personalWorkspaceBranch;
     if (runtimeWorkspaceId === selectedWorkspaceId.value) {
       feedback.value = { kind: "info", title: "已在该版本工作区", description: `${payload.version.version} (个人空间: default)` };
       return;
@@ -1346,9 +1356,13 @@ async function pickDefaultWorkspaceForApp(appId: string): Promise<{ workspace: W
     // 后续文件树、保存和 Git diff 都落在私人空间，避免直接修改应用版本副本。
     const defaultPw = await api.ensureDefaultPersonalWorkspace(recent.versionId);
     currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
+    currentPersonalWorkspaceBranch.value = defaultPw.personalWorkspaceBranch;
     return { workspace: defaultPw.runtimeWorkspace, isFallback: false };
   }
-  if (recent) return { workspace: recent, isFallback: false };
+  if (recent) {
+    currentPersonalWorkspaceBranch.value = undefined;
+    return { workspace: recent, isFallback: false };
+  }
   const templates = await api.listWorkspaceTemplates(appId);
   const firstTemplate = templates[0];
   if (!firstTemplate) return null;
@@ -1358,6 +1372,7 @@ async function pickDefaultWorkspaceForApp(appId: string): Promise<{ workspace: W
   // 确保默认个人工作区存在（复用或创建），避免直接使用应用版本副本
   const defaultPw = await api.ensureDefaultPersonalWorkspace(firstVersion.versionId);
   currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
+  currentPersonalWorkspaceBranch.value = defaultPw.personalWorkspaceBranch;
   if (!defaultPw.runtimeWorkspace?.workspaceId) return null;
   return { workspace: defaultPw.runtimeWorkspace, isFallback: true };
 }
@@ -1400,6 +1415,7 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
     // 确保默认个人工作区存在，并切换到该个人工作区的运行态 workspace。
     const defaultPw = await api.ensureDefaultPersonalWorkspace(response.versionId);
     currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
+    currentPersonalWorkspaceBranch.value = defaultPw.personalWorkspaceBranch;
     if (defaultPw.runtimeWorkspace?.workspaceId) {
       await applyManagedWorkspace(defaultPw.runtimeWorkspace, {
         successTitle: "已切换应用版本",
@@ -2399,6 +2415,7 @@ async function handleLogout() {
           :api-base-url="apiBaseUrl"
           :workspace-id="selectedWorkspace.workspaceId"
           :personal-workspace-id="currentPersonalWorkspaceId"
+          :personal-workspace-branch="currentPersonalWorkspaceBranch"
           :show-server-workspace-switch="isSuperAdmin"
           :search-results="searchResults"
           :search-loading="searchLoading"

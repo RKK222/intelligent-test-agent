@@ -91,14 +91,55 @@ class GitWorkspaceServiceTest {
                         "PRIVATE KEY"),
                 new Call(
                         List.of(
+                        "git",
+                        "-C",
+                        repoRoot.toString(),
+                        "worktree",
+                        "prune"),
+                "PRIVATE KEY"),
+                new Call(
+                        List.of(
                                 "git",
                                 "-C",
                                 repoRoot.toString(),
-                                "worktree",
-                                "add",
-                                worktreeRoot.toString(),
-                                "feature_testagent_20260707_000857009_default"),
+                        "worktree",
+                        "add",
+                        worktreeRoot.toString(),
+                        "feature_testagent_20260707_000857009_default"),
                         "PRIVATE KEY"));
+    }
+
+    @Test
+    void createWorktreeReusesValidTargetWorktreeWhenGitReportsBranchConflict() throws Exception {
+        RecordingExecutor executor = new RecordingExecutor("");
+        executor.failCalls.add(1);
+        executor.failCalls.add(3);
+        executor.stdoutByCall.put(4, "worktree " + tempDir.resolve("personalworktree/default") + "\nbranch refs/heads/feature_default\n");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+        Path repoRoot = tempDir.resolve("appworkspace/repo_1");
+        Path worktreeRoot = tempDir.resolve("personalworktree/default");
+        java.nio.file.Files.createDirectories(worktreeRoot);
+
+        service.createWorktreeReusingBranch(repoRoot, worktreeRoot, "feature_default", "PRIVATE KEY");
+
+        assertThat(executor.calls).containsExactly(
+                new Call(List.of("git", "-C", repoRoot.toString(), "worktree", "add", "-b", "feature_default", worktreeRoot.toString()), "PRIVATE KEY"),
+                new Call(List.of("git", "-C", repoRoot.toString(), "worktree", "prune"), "PRIVATE KEY"),
+                new Call(List.of("git", "-C", repoRoot.toString(), "worktree", "add", worktreeRoot.toString(), "feature_default"), "PRIVATE KEY"),
+                new Call(List.of("git", "-C", repoRoot.toString(), "worktree", "list", "--porcelain"), null));
+    }
+
+    @Test
+    void statusAndDiffDisableGitPathQuotingForChinesePaths() {
+        RecordingExecutor executor = new RecordingExecutor(" M F-GCMS/workspace/设计.md\n");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        assertThat(service.statusPorcelain(tempDir)).contains("设计.md");
+        service.diff(tempDir, "F-GCMS/workspace/设计.md", false);
+
+        assertThat(executor.calls).containsExactly(
+                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "status", "--porcelain"), null),
+                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff", "--", "F-GCMS/workspace/设计.md"), null));
     }
 
     @Test
@@ -147,13 +188,15 @@ class GitWorkspaceServiceTest {
         assertThat(service.isWorktreeClean(tempDir)).isTrue();
 
         assertThat(executor.calls).containsExactly(new Call(
-                List.of("git", "-C", tempDir.toString(), "status", "--porcelain"),
+                List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "status", "--porcelain"),
                 null));
     }
 
     private static final class RecordingExecutor implements GitCommandExecutor {
         private final String stdout;
         private final List<Call> calls = new ArrayList<>();
+        private final List<Integer> failCalls = new ArrayList<>();
+        private final Map<Integer, String> stdoutByCall = new java.util.HashMap<>();
         private boolean failFirst;
 
         private RecordingExecutor(String stdout) {
@@ -163,13 +206,14 @@ class GitWorkspaceServiceTest {
         @Override
         public GitCommandResult execute(List<String> command, String privateKey, Duration timeout) {
             calls.add(new Call(command, privateKey));
-            if (failFirst && calls.size() == 1) {
+            if ((failFirst && calls.size() == 1) || failCalls.contains(calls.size())) {
                 throw new PlatformException(
                         ErrorCode.GIT_UNAVAILABLE,
                         "Git worktree 创建冲突",
                         Map.of("gitFailureType", "WORKTREE_CONFLICT"));
             }
-            return new GitCommandResult(0, stdout, stdout.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            String currentStdout = stdoutByCall.getOrDefault(calls.size(), stdout);
+            return new GitCommandResult(0, currentStdout, currentStdout.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
     }
 

@@ -150,20 +150,6 @@ watch(
   { immediate: true }
 );
 
-function toggleMockTestData() {
-  workbench.useMockTestData = !workbench.useMockTestData;
-  stagedWorkspacePaths.value.clear();
-  refreshChangesToken++;
-  if (workbench.useMockTestData) {
-    loading.value = false;
-    errorMessage.value = "";
-    applyMockChanges();
-    return;
-  }
-  clearChanges();
-  void refreshChanges();
-}
-
 async function refreshChanges() {
   if (loading.value) return;
   const token = ++refreshChangesToken;
@@ -496,15 +482,7 @@ defineExpose({
           <span class="git-section-title">UNSTAGED (未暂存) ({{ totalUnstagedCount }})</span>
           <button
             type="button"
-            class="git-demo-btn ml-auto mr-1.5 px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 text-[10px] font-medium transition-colors"
-            title="构造演示/测试数据以展示 diff 和 VCS 面板交互效果"
-            @click.stop="toggleMockTestData"
-          >
-            {{ workbench.useMockTestData ? '清除测试数据' : '加载测试数据' }}
-          </button>
-          <button
-            type="button"
-            class="git-refresh-btn"
+            class="git-refresh-btn ml-auto"
             title="刷新变更列表"
             @click.stop="refreshChanges"
             :disabled="loading"

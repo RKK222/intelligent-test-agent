@@ -983,6 +983,116 @@ class JdbcRepositoryIntegrationTest {
     }
 
     @Test
+    void managedWorkspaceMappersClampLegacyUpdatedAtBeforeCreatedAt() {
+        ApplicationId appId = new ApplicationId("app_legacy_time");
+        UserId userId = new UserId("usr_legacy_time");
+        users.save(User.createNew(userId.value(), "AUTH_LEGACY_TIME", "legacy-time", "hash", "org", "rd", "dept"));
+        jdbcClient.sql("""
+                        insert into applications(app_id, app_name, enabled, created_at, updated_at)
+                        values (:appId, :appName, true, :createdAt, :updatedAt)
+                        """)
+                .param("appId", appId.value())
+                .param("appName", "F-LEGACY")
+                .param("createdAt", Timestamp.from(NOW))
+                .param("updatedAt", Timestamp.from(NOW))
+                .update();
+        CodeRepository repository = configurationManagement.saveRepository(new CodeRepository(
+                new CodeRepositoryId("repo_legacy_time"),
+                "git@gitee.com:demo/legacy-time.git",
+                "时间脏数据库",
+                "legacytime",
+                true,
+                NOW,
+                NOW));
+        ApplicationWorkspace template = configurationManagement.saveWorkspace(new ApplicationWorkspace(
+                new ApplicationWorkspaceId("awp_legacy_time"),
+                appId,
+                repository.repositoryId(),
+                "main",
+                "F-LEGACY/workspace",
+                "F-LEGACY 工作区",
+                NOW,
+                NOW));
+        Workspace runtimeWorkspace = new Workspace(
+                new WorkspaceId("wrk_legacy_time"),
+                "legacy-time",
+                "/tmp/legacy-time/F-LEGACY/workspace",
+                WorkspaceStatus.ACTIVE,
+                NOW,
+                NOW,
+                "linux-1",
+                "trace_legacy_time");
+        workspaces.save(runtimeWorkspace);
+        ApplicationWorkspaceVersion version = managedWorkspaces.saveVersion(new ApplicationWorkspaceVersion(
+                new ApplicationWorkspaceVersionId("awv_legacy_time"),
+                template.workspaceId(),
+                appId,
+                repository.repositoryId(),
+                "20260707",
+                "feature_legacy_time",
+                "/tmp/legacy-time",
+                runtimeWorkspace.rootPath(),
+                runtimeWorkspace.workspaceId(),
+                userId,
+                ManagedWorkspaceStatus.ACTIVE,
+                NOW,
+                NOW));
+        managedWorkspaces.saveVersionReplica(new ApplicationWorkspaceVersionReplica(
+                new ApplicationWorkspaceVersionReplicaId("awr_legacy_time"),
+                version.versionId(),
+                "linux-1",
+                version.repoRootPath(),
+                version.workspaceRootPath(),
+                runtimeWorkspace.workspaceId(),
+                "abc123",
+                WorkspaceReplicaSyncStatus.READY,
+                null,
+                NOW,
+                "trace_legacy_time",
+                NOW,
+                NOW));
+        managedWorkspaces.savePersonalWorkspace(new PersonalWorkspace(
+                new PersonalWorkspaceId("psw_legacy_time"),
+                version.versionId(),
+                appId,
+                template.workspaceId(),
+                userId,
+                "default",
+                "feature_legacy_time_AUTH_LEGACY_TIME_default",
+                "/tmp/legacy-time-personal",
+                runtimeWorkspace.rootPath(),
+                runtimeWorkspace.workspaceId(),
+                "abc123",
+                ManagedWorkspaceStatus.ACTIVE,
+                NOW,
+                NOW));
+
+        Timestamp legacyUpdatedAt = Timestamp.from(NOW.minusSeconds(60));
+        jdbcClient.sql("update application_workspace_versions set updated_at = :updatedAt where version_id = :versionId")
+                .param("updatedAt", legacyUpdatedAt)
+                .param("versionId", version.versionId().value())
+                .update();
+        jdbcClient.sql("update application_workspace_version_replicas set updated_at = :updatedAt where replica_id = :replicaId")
+                .param("updatedAt", legacyUpdatedAt)
+                .param("replicaId", "awr_legacy_time")
+                .update();
+        jdbcClient.sql("update personal_workspaces set updated_at = :updatedAt where personal_workspace_id = :personalWorkspaceId")
+                .param("updatedAt", legacyUpdatedAt)
+                .param("personalWorkspaceId", "psw_legacy_time")
+                .update();
+
+        assertThat(managedWorkspaces.findVersion(version.versionId())).get()
+                .extracting(ApplicationWorkspaceVersion::updatedAt)
+                .isEqualTo(NOW);
+        assertThat(managedWorkspaces.findVersionReplica(version.versionId(), "linux-1")).get()
+                .extracting(ApplicationWorkspaceVersionReplica::updatedAt)
+                .isEqualTo(NOW);
+        assertThat(managedWorkspaces.findPersonalWorkspace(new PersonalWorkspaceId("psw_legacy_time"))).get()
+                .extracting(PersonalWorkspace::updatedAt)
+                .isEqualTo(NOW);
+    }
+
+    @Test
     void migrationGrantsDefaultUserSuperAdminRole() {
         Integer roleCount = jdbcClient.sql("""
                         select count(*)

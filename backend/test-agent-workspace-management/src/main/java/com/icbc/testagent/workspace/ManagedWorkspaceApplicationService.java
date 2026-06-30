@@ -805,7 +805,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         CodeRepository repository = existingRepository(version.repositoryId());
         ApplicationWorkspaceVersionReplica applicationReplica = readyReplicaOrLegacy(version, serverIdentity.linuxServerId());
         if (Files.exists(repoRoot)) {
-            if (!gitWorkspaceService.isGitRepository(repoRoot) || !branch.equals(gitWorkspaceService.currentBranch(repoRoot))) {
+            if (gitWorkspaceService.isGitRepository(repoRoot) && branch.equals(gitWorkspaceService.currentBranch(repoRoot))) {
+                // 已有同路径同分支的有效 worktree，直接复用。
+            } else if (isEmptyDirectory(repoRoot)) {
+                deleteEmptyDirectory(repoRoot);
+                gitWorkspaceService.createWorktreeReusingBranch(Path.of(applicationReplica.repoRootPath()), repoRoot, branch, privateKeyFor(repository, userId));
+            } else {
                 throw new PlatformException(
                         ErrorCode.CONFLICT,
                         "默认私人工作区目录已存在且不属于当前用户分支",
@@ -838,6 +843,29 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return ManagedWorkspaceResponses.PersonalWorkspaceResponse.from(saved, runtimeWorkspace);
     }
 
+    private boolean isEmptyDirectory(Path directory) {
+        if (!Files.isDirectory(directory)) {
+            return false;
+        }
+        try (var stream = Files.list(directory)) {
+            return stream.findAny().isEmpty();
+        } catch (Exception exception) {
+            return false;
+        }
+    }
+
+    private void deleteEmptyDirectory(Path directory) {
+        try {
+            Files.delete(directory);
+        } catch (Exception exception) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "默认私人工作区空目录残留清理失败",
+                    Map.of("path", directory.toString()),
+                    exception);
+        }
+    }
+
     /**
      * 个人工作区物理根路径（使用名字而非 personalId 作为末段，使路径可读）。
      */
@@ -861,9 +889,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         // 尝试通过运行时 workspace 反查个人工作区
         Optional<PersonalWorkspace> personal = managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspace.workspaceId());
         Path gitRoot;
+        String displayPathPrefix = "";
         if (personal.isPresent()) {
             ensurePersonalOwner(personal.get(), userId);
             gitRoot = Path.of(personal.get().repoRootPath());
+            displayPathPrefix = repoRelativePrefix(gitRoot, Path.of(personal.get().workspaceRootPath()));
         } else {
             // 回退：直接基于 workspace rootPath（可能是应用版本工作区副本）
             gitRoot = Path.of(workspace.rootPath());
@@ -873,9 +903,23 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
         try {
             String porcelain = gitWorkspaceService.statusPorcelain(gitRoot);
-            return new ManagedWorkspaceResponses.WorkspaceGitDiffResponse(parsePorcelainFiles(gitRoot, porcelain));
+            return new ManagedWorkspaceResponses.WorkspaceGitDiffResponse(parsePorcelainFiles(gitRoot, porcelain, displayPathPrefix));
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "获取 Git 变更列表失败: " + exception.getMessage(), Map.of(), exception);
+        }
+    }
+
+    private String repoRelativePrefix(Path repoRoot, Path workspaceRoot) {
+        try {
+            Path normalizedRepoRoot = repoRoot.toAbsolutePath().normalize();
+            Path normalizedWorkspaceRoot = workspaceRoot.toAbsolutePath().normalize();
+            if (!normalizedWorkspaceRoot.startsWith(normalizedRepoRoot)) {
+                return "";
+            }
+            String prefix = normalizedRepoRoot.relativize(normalizedWorkspaceRoot).toString().replace('\\', '/');
+            return prefix.isBlank() ? "" : prefix + "/";
+        } catch (Exception exception) {
+            return "";
         }
     }
 
@@ -883,7 +927,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
      * 解析 git status --porcelain 输出，对每个变更文件调用 git diff 获取 patch/details。
      * porcelain 格式: XY path，其中 X=暂存区状态, Y=工作区状态。
      */
-    private List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> parsePorcelainFiles(Path repoRoot, String porcelain) {
+    private List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> parsePorcelainFiles(
+            Path repoRoot,
+            String porcelain,
+            String displayPathPrefix) {
         List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> files = new ArrayList<>();
         if (porcelain == null || porcelain.isBlank()) {
             return files;
@@ -899,6 +946,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             if (arrowIndex > 0) {
                 path = path.substring(arrowIndex + 4);
             }
+            String gitPath = path;
+            String displayPath = stripDisplayPathPrefix(gitPath, displayPathPrefix);
             String status = porcelainStatus(indexStatus, worktreeStatus);
             boolean staged = indexStatus != ' ' && indexStatus != '?';
             // 对每个文件调用 git diff 获取 patch
@@ -908,9 +957,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             try {
                 if ("added".equals(status) || "untracked".equals(status)) {
                     // 新增/未跟踪文件：diff 没有内容，通过 wc 统计
-                    additions = countFileLines(repoRoot.resolve(path));
+                    additions = countFileLines(repoRoot.resolve(gitPath));
                 } else if (!"deleted".equals(status)) {
-                    String diffOutput = gitWorkspaceService.diff(repoRoot, path, staged);
+                    String diffOutput = gitWorkspaceService.diff(repoRoot, gitPath, staged);
                     if (diffOutput != null && !diffOutput.isBlank()) {
                         patch = diffOutput;
                         additions = countDiffAdditions(diffOutput);
@@ -918,7 +967,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     }
                     // 如果 staged，也获取 unstaged 变更
                     if (staged && worktreeStatus != ' ') {
-                        String unstagedDiff = gitWorkspaceService.diff(repoRoot, path, false);
+                        String unstagedDiff = gitWorkspaceService.diff(repoRoot, gitPath, false);
                         if (unstagedDiff != null && !unstagedDiff.isBlank()) {
                             if (!patch.isEmpty()) {
                                 patch += "\n";
@@ -933,9 +982,16 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 // diff 单个文件失败不影响整体列表
             }
             files.add(new ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse(
-                    path, status, staged, patch, additions, deletions));
+                    displayPath, status, staged, patch, additions, deletions));
         }
         return files;
+    }
+
+    private String stripDisplayPathPrefix(String path, String displayPathPrefix) {
+        if (displayPathPrefix == null || displayPathPrefix.isBlank()) {
+            return path;
+        }
+        return path.startsWith(displayPathPrefix) ? path.substring(displayPathPrefix.length()) : path;
     }
 
     private String porcelainStatus(char indexStatus, char worktreeStatus) {

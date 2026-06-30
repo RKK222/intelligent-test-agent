@@ -417,6 +417,39 @@ test("workbench refetches opencode status when initialize returns a stale failur
   await expect(page.getByText("初始化 opencode 进程失败")).toHaveCount(0);
 });
 
+test("workbench retries application workspace selection after opencode becomes ready", async ({ page }) => {
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const defaultPersonalRequests: string[] = [];
+  const processInitializations: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    processStatus: "NEEDS_INITIALIZATION",
+    ensureDefaultRequiresReady: true,
+    fileRequests,
+    defaultPersonalRequests,
+    processInitializations,
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        workspaceId: "wrk_app_replica",
+        name: "F-GCMS 报表 / 20260715",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms"
+      }
+    }
+  });
+
+  await gotoWorkbench(page);
+  await expect.poll(() => defaultPersonalRequests.length).toBeGreaterThanOrEqual(1);
+  expect(fileRequests).toEqual([]);
+
+  await page.getByRole("button", { name: "分配专属进程" }).click();
+
+  await expect.poll(() => processInitializations.length).toBe(1);
+  await expect.poll(() => defaultPersonalRequests.length).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => fileRequests).toContainEqual({ workspaceId: "wrk_personal_default", path: "" });
+});
+
 test("phase 11 runtime flow sends attachment parts and handles docks", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   const permissionReplies: Array<Record<string, unknown>> = [];
@@ -757,6 +790,7 @@ async function mockBackendApi(
     processStatusRequests?: string[];
     processInitializations?: Array<Record<string, unknown>>;
     initializeFailureThenReady?: boolean;
+    ensureDefaultRequiresReady?: boolean;
     sessions?: Array<Record<string, unknown>>;
     sessionMessages?: Array<Record<string, unknown>>;
     historyRun?: Record<string, unknown>;
@@ -1042,6 +1076,13 @@ async function mockBackendApi(
       if (method === "POST" && /\/api\/internal\/platform\/workspace-management\/workspace-versions\/[^/]+\/ensure-default-personal-workspace$/.test(url.pathname)) {
         const versionId = url.pathname.match(/\/workspace-versions\/([^/]+)\/ensure-default-personal-workspace$/)?.[1] ?? "";
         capture.defaultPersonalRequests?.push(versionId);
+        if (capture.ensureDefaultRequiresReady && currentProcessStatus !== "READY") {
+          await route.fulfill({
+            status: 409,
+            ...jsonFailure("OPENCODE_PROCESS_STARTING", "opencode 进程正在启动")
+          });
+          return;
+        }
         await route.fulfill(json({
           personalWorkspaceId: "psw_default",
           personalWorkspaceName: "default",

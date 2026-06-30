@@ -32,6 +32,8 @@ const props = defineProps<{
   templates?: AppWorkspaceTemplate[];
   /** 当前选中的版本 ID；用于标记菜单项高亮 */
   selectedVersionId?: string;
+  /** 当前默认个人 worktree 分支；用于底部入口直接展示用户实际改动分支 */
+  personalWorkspaceBranch?: string;
   /** 工作空间模板是否仍在加载 */
   loadingTemplates?: boolean;
   /** 工作空间版本是否仍在加载（按模板分组懒加载时使用） */
@@ -247,6 +249,13 @@ const triggerLabel = computed(() => {
   return "切换工作空间";
 });
 
+const triggerTitle = computed(() => {
+  if (!props.personalWorkspaceBranch) {
+    return triggerLabel.value;
+  }
+  return `${triggerLabel.value} / ${props.personalWorkspaceBranch}`;
+});
+
 function toggleMenu() {
   if (menuOpen.value) {
     closeMenu();
@@ -369,13 +378,14 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
           ref="cascadeButtonRef"
           type="button"
           class="ta-workbench-footer-branch"
-          :title="triggerLabel"
+          :title="triggerTitle"
           :aria-expanded="menuOpen"
           aria-haspopup="menu"
           @click.stop="toggleMenu"
         >
           <ArrowLeftRight class="ta-workbench-footer-icon" />
           <span class="ta-workbench-footer-branch-label">{{ triggerLabel }}</span>
+          <span v-if="personalWorkspaceBranch" class="ta-workbench-footer-branch-ref">{{ personalWorkspaceBranch }}</span>
         </button>
         <!--
           两级菜单用 <Teleport to="body"> + position:fixed 挂到 body 末尾，
@@ -614,6 +624,8 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  max-width: min(520px, 62vw);
   height: 26px;
   padding: 0 10px;
   border: 0.8px solid #dfdfdf;
@@ -638,6 +650,27 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
 
 .ta-workbench-footer-branch-label {
   font-weight: 500;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ta-workbench-footer-branch-ref {
+  flex: 1 1 auto;
+  min-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #71717a;
+  font-size: 12px;
+}
+
+.ta-workbench-footer-branch-ref::before {
+  content: "/";
+  margin-right: 6px;
+  color: #a1a1aa;
 }
 
 .ta-workbench-footer-icon {

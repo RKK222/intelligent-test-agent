@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/vue";
+import { cleanup, render, waitFor } from "@testing-library/vue";
 import { createPinia } from "pinia";
 import GitChangesPanel from "../src/components/GitChangesPanel.vue";
 
@@ -51,7 +51,36 @@ describe("GitChangesPanel", () => {
     vi.clearAllMocks();
   });
 
-  it("loads mock workspace changes and application-level agent and skill changes", async () => {
+  it("does not expose mock data button and loads workspace plus application agent changes", async () => {
+    apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
+      files: [
+        {
+          path: "需求/登录测试.md",
+          status: "modified",
+          staged: false,
+          patch: "@@ -1 +1 @@\n-旧\n+新",
+          additions: 1,
+          deletions: 1
+        }
+      ]
+    });
+    apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({
+      files: [
+        {
+          path: "agents/payment-test.md",
+          status: "M",
+          staged: false,
+          patch: "@@ -1 +1 @@\n-old\n+new"
+        },
+        {
+          path: "skills/payment-case-design/SKILL.md",
+          status: "M",
+          staged: false,
+          patch: "@@ -1 +1 @@\n-old\n+new"
+        }
+      ]
+    });
+
     const view = render(GitChangesPanel, {
       props: {
         workspaceId: "wrk_1234567890abcdef",
@@ -64,10 +93,9 @@ describe("GitChangesPanel", () => {
     });
 
     await waitFor(() => expect(apiClientMock.getWorkspaceAgentDiff).toHaveBeenCalled());
-    await waitFor(() => expect(view.getByRole("button", { name: "加载测试数据" })).toBeTruthy());
-    await fireEvent.click(view.getByRole("button", { name: "加载测试数据" }));
 
-    expect(await view.findByText("src/App.vue")).toBeTruthy();
+    expect(view.queryByRole("button", { name: "加载测试数据" })).toBeNull();
+    expect(await view.findByText("需求/登录测试.md")).toBeTruthy();
     expect(await view.findByText("agents/payment-test.md", { exact: false })).toBeTruthy();
     expect(await view.findByText("skills/payment-case-design/SKILL.md", { exact: false })).toBeTruthy();
     expect(view.queryByText("[公共]", { exact: false })).toBeNull();

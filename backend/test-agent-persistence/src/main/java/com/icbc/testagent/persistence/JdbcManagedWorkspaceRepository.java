@@ -22,8 +22,11 @@ import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncRecordId;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncStatus;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -34,59 +37,75 @@ import org.springframework.stereotype.Repository;
 @Repository
 public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implements ManagedWorkspaceRepository {
 
+    private static final Logger LOGGER = LoggerFactory.getLogger(JdbcManagedWorkspaceRepository.class);
     private static final TypeReference<List<String>> STRING_LIST = new TypeReference<>() {
     };
 
     private final JdbcClient jdbcClient;
     private final ObjectMapper objectMapper;
 
-    private final RowMapper<ApplicationWorkspaceVersion> versionMapper = (rs, rowNum) -> new ApplicationWorkspaceVersion(
-            new ApplicationWorkspaceVersionId(rs.getString("version_id")),
-            new ApplicationWorkspaceId(rs.getString("application_workspace_id")),
-            new ApplicationId(rs.getString("app_id")),
-            new CodeRepositoryId(rs.getString("repository_id")),
-            rs.getString("version"),
-            rs.getString("branch"),
-            rs.getString("repo_root_path"),
-            rs.getString("workspace_root_path"),
-            new WorkspaceId(rs.getString("runtime_workspace_id")),
-            new UserId(rs.getString("created_by_user_id")),
-            ManagedWorkspaceStatus.valueOf(rs.getString("status")),
-            rs.getString("target_commit_hash"),
-            instant(rs, "target_commit_updated_at"),
-            instant(rs, "created_at"),
-            instant(rs, "updated_at"));
+    private final RowMapper<ApplicationWorkspaceVersion> versionMapper = (rs, rowNum) -> {
+        String versionId = rs.getString("version_id");
+        Instant createdAt = instant(rs, "created_at");
+        Instant updatedAt = normalizeUpdatedAt("application_workspace_versions", versionId, createdAt, instant(rs, "updated_at"));
+        return new ApplicationWorkspaceVersion(
+                new ApplicationWorkspaceVersionId(versionId),
+                new ApplicationWorkspaceId(rs.getString("application_workspace_id")),
+                new ApplicationId(rs.getString("app_id")),
+                new CodeRepositoryId(rs.getString("repository_id")),
+                rs.getString("version"),
+                rs.getString("branch"),
+                rs.getString("repo_root_path"),
+                rs.getString("workspace_root_path"),
+                new WorkspaceId(rs.getString("runtime_workspace_id")),
+                new UserId(rs.getString("created_by_user_id")),
+                ManagedWorkspaceStatus.valueOf(rs.getString("status")),
+                rs.getString("target_commit_hash"),
+                instant(rs, "target_commit_updated_at"),
+                createdAt,
+                updatedAt);
+    };
 
-    private final RowMapper<ApplicationWorkspaceVersionReplica> replicaMapper = (rs, rowNum) -> new ApplicationWorkspaceVersionReplica(
-            new ApplicationWorkspaceVersionReplicaId(rs.getString("replica_id")),
-            new ApplicationWorkspaceVersionId(rs.getString("version_id")),
-            rs.getString("linux_server_id"),
-            rs.getString("repo_root_path"),
-            rs.getString("workspace_root_path"),
-            new WorkspaceId(rs.getString("runtime_workspace_id")),
-            rs.getString("current_commit_hash"),
-            WorkspaceReplicaSyncStatus.valueOf(rs.getString("sync_status")),
-            rs.getString("last_error"),
-            instant(rs, "last_synced_at"),
-            rs.getString("trace_id"),
-            instant(rs, "created_at"),
-            instant(rs, "updated_at"));
+    private final RowMapper<ApplicationWorkspaceVersionReplica> replicaMapper = (rs, rowNum) -> {
+        String replicaId = rs.getString("replica_id");
+        Instant createdAt = instant(rs, "created_at");
+        Instant updatedAt = normalizeUpdatedAt("application_workspace_version_replicas", replicaId, createdAt, instant(rs, "updated_at"));
+        return new ApplicationWorkspaceVersionReplica(
+                new ApplicationWorkspaceVersionReplicaId(replicaId),
+                new ApplicationWorkspaceVersionId(rs.getString("version_id")),
+                rs.getString("linux_server_id"),
+                rs.getString("repo_root_path"),
+                rs.getString("workspace_root_path"),
+                new WorkspaceId(rs.getString("runtime_workspace_id")),
+                rs.getString("current_commit_hash"),
+                WorkspaceReplicaSyncStatus.valueOf(rs.getString("sync_status")),
+                rs.getString("last_error"),
+                instant(rs, "last_synced_at"),
+                rs.getString("trace_id"),
+                createdAt,
+                updatedAt);
+    };
 
-    private final RowMapper<PersonalWorkspace> personalMapper = (rs, rowNum) -> new PersonalWorkspace(
-            new PersonalWorkspaceId(rs.getString("personal_workspace_id")),
-            new ApplicationWorkspaceVersionId(rs.getString("app_workspace_version_id")),
-            new ApplicationId(rs.getString("app_id")),
-            new ApplicationWorkspaceId(rs.getString("application_workspace_id")),
-            new UserId(rs.getString("user_id")),
-            rs.getString("workspace_name"),
-            rs.getString("branch"),
-            rs.getString("repo_root_path"),
-            rs.getString("workspace_root_path"),
-            new WorkspaceId(rs.getString("runtime_workspace_id")),
-            rs.getString("base_commit"),
-            ManagedWorkspaceStatus.valueOf(rs.getString("status")),
-            instant(rs, "created_at"),
-            instant(rs, "updated_at"));
+    private final RowMapper<PersonalWorkspace> personalMapper = (rs, rowNum) -> {
+        String personalWorkspaceId = rs.getString("personal_workspace_id");
+        Instant createdAt = instant(rs, "created_at");
+        Instant updatedAt = normalizeUpdatedAt("personal_workspaces", personalWorkspaceId, createdAt, instant(rs, "updated_at"));
+        return new PersonalWorkspace(
+                new PersonalWorkspaceId(personalWorkspaceId),
+                new ApplicationWorkspaceVersionId(rs.getString("app_workspace_version_id")),
+                new ApplicationId(rs.getString("app_id")),
+                new ApplicationWorkspaceId(rs.getString("application_workspace_id")),
+                new UserId(rs.getString("user_id")),
+                rs.getString("workspace_name"),
+                rs.getString("branch"),
+                rs.getString("repo_root_path"),
+                rs.getString("workspace_root_path"),
+                new WorkspaceId(rs.getString("runtime_workspace_id")),
+                rs.getString("base_commit"),
+                ManagedWorkspaceStatus.valueOf(rs.getString("status")),
+                createdAt,
+                updatedAt);
+    };
 
     private final RowMapper<UserWorkspacePreference> globalPreferenceMapper = (rs, rowNum) -> new UserWorkspacePreference(
             new UserId(rs.getString("user_id")),
@@ -110,6 +129,16 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
     public JdbcManagedWorkspaceRepository(JdbcClient jdbcClient, ObjectMapper objectMapper) {
         this.jdbcClient = jdbcClient;
         this.objectMapper = objectMapper;
+    }
+
+    private Instant normalizeUpdatedAt(String tableName, String id, Instant createdAt, Instant updatedAt) {
+        if (updatedAt == null || createdAt == null || !updatedAt.isBefore(createdAt)) {
+            return updatedAt;
+        }
+        LOGGER.warn(
+                "Detected legacy managed workspace row with updatedAt before createdAt, clamping; table={}, id={}, createdAt={}, updatedAt={}",
+                tableName, id, createdAt, updatedAt);
+        return createdAt;
     }
 
     @Override

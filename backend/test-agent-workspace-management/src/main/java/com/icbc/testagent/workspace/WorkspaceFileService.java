@@ -181,11 +181,12 @@ public class WorkspaceFileService {
      */
     private FileTreeEntryResponse entry(Path root, Path path) {
         try {
+            boolean directory = Files.isDirectory(path);
             return new FileTreeEntryResponse(
                     root.relativize(path).toString(),
                     path.getFileName().toString(),
-                    Files.isDirectory(path),
-                    Files.isDirectory(path) ? 0L : Files.size(path),
+                    directory,
+                    directory ? 0L : Files.size(path),
                     Files.getLastModifiedTime(path).toInstant());
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "读取目录项失败", Map.of("path", path.getFileName().toString()), exception);

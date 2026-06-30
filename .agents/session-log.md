@@ -69,6 +69,20 @@
 - How: 仅修改 `RuntimeSecurityConfig.java`、`RuntimeSecurityConfigTest.java` 和 `ConfigurationManagementControllerTest.java`，不新增数据库 Migration，不修改 `.env.local` 环境变量文件。
 - Result: 运行 `mvn -pl test-agent-api -am test`，包括新编写的 CORS 单测在内的 147 项后端 API 测试用例全量通过。
 
+### 2026-06-30 - 修复 worktree 残留冲突、中文 Diff 展示和工作区恢复
+
+**Why**: 手工测试继续暴露 default 私人 worktree 切换时偶发创建冲突；中文路径在 Git 变更面板中显示为 octal 转义且 patch 为空；opencode 刚初始化成功后应用工作区不会自动恢复；wr 用户加载工作区疑似被历史 `updated_at < created_at` 脏数据击穿；Agent/工作区树初始加载偏慢。
+
+**What**:
+- Git status/diff 统一加 `core.quotepath=false`，后端返回 UI 的应用工作区 diff path 改为 workspace-relative，Git 命令仍使用 repo-relative 原路径。
+- default 私人 worktree 创建冲突时先 `git worktree prune` 清理 stale 元数据；只在 `worktree list --porcelain` 确认同路径同分支时直接复用；目标路径为空目录残留时删除后重建，非空/其它分支继续报冲突。
+- 前端去掉 Git 变更面板 mock 测试数据按钮，footer 直接展示当前私人 worktree 分支；opencode 从未 READY 变 READY 且尚无 workspace 时重试当前应用的 default 私人工作区选择。
+- 托管工作区 version/replica/personal mapper 对历史 `updated_at` 早于 `created_at` 做只读归一化；Agent 配置状态与 public/workspace 根目录加载改为并发，文件列表 entry 避免重复 `Files.isDirectory`。
+
+**How**: 补充 `GitWorkspaceServiceTest`、`ManagedWorkspaceApplicationServiceTest`、`JdbcRepositoryIntegrationTest`、`GitChangesPanel`/`WorkbenchFooter`/`AgentConfigPanel` 组件测试和 workbench mock E2E；同步 frontend 与 agent-web README。
+
+**Result**: `test-agent-workspace-management` 模块测试、关键 persistence targeted 测试、agent-web typecheck、相关 Vitest 和 workbench E2E 均通过。persistence 全模块仍有既有测试失败：MyBatis agent worktree 测试缺少 `usr_test_dev` 外键 fixture，另有默认用户/loopback topology migration seed 断言为 0；本次未修改这些路径。
+
 ### 2026-06-30 - 修复应用 default 私人 worktree 进入、Diff 刷新与 opencode 初始化竞态
 
 **Why**: 手工测试发现切换应用版本时 default 私人 worktree 偶发创建冲突；应用 recent 恢复后首页可能直接加载应用版本副本而不是用户私人 worktree；普通文件保存后中间 VCS Diff 仍可能走旧 opencode `/vcs/diff`；初始化 opencode 短暂失败后，后端实际已变 READY 但前端仍展示创建失败。
