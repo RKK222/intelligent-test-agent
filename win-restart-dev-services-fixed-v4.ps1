@@ -529,7 +529,17 @@ function Stop-ProcessIds {
     $aliveIds = @($ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
     if ($aliveIds.Count -gt 0) {
         Write-Host "Force stopping $Label`: $($aliveIds -join ' ')"
-        Stop-Process -Id $aliveIds -Force -ErrorAction SilentlyContinue
+        # taskkill /F /T /PID 比 Stop-Process -Force 更可靠：/T 同时终止子进程，
+        # 避免子进程继续持有文件句柄导致 Maven clean 失败。
+        foreach ($pid in $aliveIds) {
+            $previousErrorAction = $ErrorActionPreference
+            $ErrorActionPreference = 'SilentlyContinue'
+            try {
+                $null = & taskkill /F /T /PID $pid 2>&1
+            } finally {
+                $ErrorActionPreference = $previousErrorAction
+            }
+        }
     }
 }
 
@@ -582,8 +592,8 @@ function Stop-AllDevServices {
         $previousErrorAction = $ErrorActionPreference
         $ErrorActionPreference = 'SilentlyContinue'
         try {
-            # taskkill /F /IM 会返回 non-zero exit code 如果进程不存在，不算错误。
-            $null = & taskkill /F /IM $item.Exe 2>&1
+            # /T 同时终止子进程，避免孤儿进程继续持有文件句柄。
+            $null = & taskkill /F /T /IM $item.Exe 2>&1
         } finally {
             $ErrorActionPreference = $previousErrorAction
         }

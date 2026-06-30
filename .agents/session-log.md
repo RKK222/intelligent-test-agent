@@ -2,6 +2,16 @@
 
 ## Entries
 
+### 2026-06-30 - 修复 Stop-AllDevServices 子进程清理不彻底导致 Maven clean 失败
+
+- Why: 用户反馈之前加的 `Stop-AllDevServices` 没有解决 `mvn clean` 时 `test-agent-app-0.1.0-SNAPSHOT.jar: 另一个程序正在使用此文件` 的问题。原因是 `taskkill /F /IM` 和 `Stop-Process -Force` 都不杀子进程，Java 进程的子进程（如 Spring Boot 内部线程）继续持有 jar 句柄。
+- What:
+  - [win-restart-dev-services-fixed-v4.ps1](file:///d:/workspace/intelligent-test-agent/win-restart-dev-services-fixed-v4.ps1) 两处修复：
+    1. `Stop-AllDevServices` 的兜底 `taskkill` 从 `/F /IM` 改为 `/F /T /IM`（`/T` 同时终止子进程）。
+    2. `Stop-ProcessIds` 的 force stop 从 `Stop-Process -Force` 改为 `taskkill /F /T /PID`，对每一个残留 PID 递归杀子进程。
+- How: 仅改 PowerShell 脚本；不涉及 API/事件/数据库/安全/兼容性。
+- Result: PowerShell parser 校验通过。
+
 ### 2026-06-30 - 修复 Windows 下后端日志与 Git 输出乱码
 
 - Why: Windows 控制台默认 GBK 编码，后端 Java 进程 `System.out/err` 按 GBK 输出到日志文件，PowerShell 读 `backend.log` 时中文显示为乱码（`Git 杩滅璇诲彇澶辫触` 等）。同时 `ProcessGitCommandExecutor` 执行 `git` 子进程时，Windows 上 `git` 的 stderr 也是 GBK，被 Java 按 UTF-8 读出来也是乱码。
