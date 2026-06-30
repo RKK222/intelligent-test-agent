@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-06-30 - 增强 win-restart-dev-services-fixed-v4.ps1：opencode-manager 编译失败不再阻断、增加 -FollowLogs 实时日志
+
+- Why: 在 Windows 上 `go build` opencode-manager 时 `process.go` 仍在使用仅 Unix 的 `syscall.Setpgid` / `syscall.Kill`，脚本原有逻辑是 `exit $LASTEXITCODE`，导致后端、前端、opencode-manager 全部都不会启动；同时用户希望所有服务起来后能在当前窗口直接看到实时日志。
+- What:
+  - 新增脚本级变量 `$script:OpencodeManagerBuildSucceeded`（默认 true）；`Build-OpencodeManager` 编译失败时打印 stderr 警告 + go build 完整输出，置位为 `$false` 并 `return`，不再 `exit`。
+  - `Start-OpencodeManager` 在编译失败时直接跳过启动并打印一行说明，保留后端/前端原有启动顺序。
+  - 末尾 `if (-not $script:OpencodeManagerBuildSucceeded)` 时给出黄色 WARNING，提示需要修复源码。
+  - 新增 `-FollowLogs`（别名 `-Follow`）开关参数；启用后调用新增的 `Follow-ServiceLogs`：先打印 backend/opencode-manager/frontend 三个日志的最近 20 行，再用后台 PowerShell 作业对每个日志 `Get-Content -Wait -Tail 0` 做 tail，主循环 500ms 收取并以前缀 `[service]` 输出到当前窗口；按 Ctrl+C 时 finally 块 `Stop-Job` + `Remove-Job` 清理。
+  - 同步更新 `Show-Usage` 的 Usage 行、Options 段和新增的 Notes 段，说明编译失败可继续启动 manager 这一行为。
+- How: 纯 PowerShell 改动，不涉及 API/事件/数据库/安全/兼容性；不修改 `.env.local` 或 Go 源码。后续若要让 opencode-manager 在 Windows 真正跑起来，仍需为 `process.go` 拆分 Unix/Windows 实现（`//go:build !windows` 与 `//go:build windows`）。
+- Result: PowerShell parser 校验通过；参数表识别到 `FollowLogs: SwitchParameter`；`Functions found` 包含新增的 `Follow-ServiceLogs`。
+
 ### 2026-06-30 - 重新登录/换电脑登录自动恢复上次工作空间 + 左下角按钮显示模板/版本名
 
 - Why: 用户希望工作台左下角"切换工作空间"按钮（`WorkbenchFooter.vue` 顶部的"应用 + 版本"两级菜单）能记忆上次选择，重新登录或换电脑登录时直接落到上次所在的应用 + 工作空间版本，并在按钮上显示当前所在模板/版本名（而非降级为"切换工作空间"）。后端已按应用维度持久化最近偏好，但前端 `applicationCatalog` 加载完成后总是回退 `apps[0]`，没有"上次进入的是哪个应用"的全局维度；且 `currentVersionFromWorkspace` 依赖 `versionsByTemplateId` 精确匹配，异步加载完成前按钮会降级为默认文本。上一轮 commit 后用户实测"应用选择对了，但左下角按钮仍只显示切换工作空间图例"，根因是 `applyManagedWorkspace` 调用 `markRecentManagedWorkspace` 后直接忽略响应，导致 `switchSession`、首模板首版本兜底等不在 recent 直接命中路径上的 `workspace.versionId` 始终为 `null`，按钮降级。
