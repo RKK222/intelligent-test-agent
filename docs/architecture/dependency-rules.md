@@ -87,6 +87,7 @@ test-agent-event
 9. `test-agent-test-support` 不得被生产代码依赖。
 10. 除 `test-agent-opencode-client` 外，人工维护业务模块不得 import `com.example.opencode.sdk.*`。
 11. 业务模块不得直接访问 MyBatis mapper、MyBatis 行模型或 `test-agent-persistence` 内部实现；只能通过 domain 端口调用持久化能力。
+12. 涉及 opencode-manager 路由、Java 到 manager 控制、用户 opencode 进程服务器归属、运行管理 `containerId` 路由、Agent 配置或文件 WebSocket 目标后端选择时，不得新增自写路由、Redis 快照扫描、Java->Java HTTP 转发器、防循环 header、本机降级或本地绕过；必须复用 `BackendJavaRouteResolver`、`BackendHttpForwarder` 和目标 Java 的 `OpencodeProcessManagerGateway` 公共链路。
 
 ## 业务工程归属
 

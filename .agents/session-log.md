@@ -2229,3 +2229,10 @@ bash /tmp/test-api-after-restart.sh
 - What: 将 `BackendHttpForwarder` 类和生产 `ObjectMapper` 构造器公开，并用 `@Autowired` 明确 Spring 注入点；新增 Spring context 级单测复现并防止回归。
 - How: 保留双参 `HttpClient` 构造器为包级测试入口；通过 `AnnotationConfigApplicationContext` 注册 `ObjectMapper` 和 `BackendHttpForwarder` 验证组件可实例化。
 - Result: `BackendHttpForwarderTest` 和 `test-agent-api` 全量测试通过，`test-agent-app` 跳过测试打包通过；`test-agent-app -am test` 当前被工作区未提交的 persistence migration seed 改动阻断，失败点是默认用户/本地拓扑 fixture 断言，与本次构造器修复无关。
+
+### 2026-06-30 - 固化 opencode-manager 公共路由规范
+
+- Why: Java 到 manager 路由已收敛为公共 resolver/forwarder/gateway 链路，需要把“不得再自写路由”固化到后续开发必读规范。
+- What: 在 `AGENTS.md`、后端总 README、后端规范、依赖边界、API 模块 README 和 opencode-runtime 模块 README 中明确：涉及 opencode-manager 路由、Java 到 manager 控制、用户进程服务器归属、运行管理 `containerId` 路由、Agent 配置或文件 WebSocket 目标后端选择时，必须复用 `BackendJavaRouteResolver`、`BackendHttpForwarder` 和目标 Java 的 `OpencodeProcessManagerGateway`。
+- How: 用禁止项列明不得自行扫描 Redis 快照、手写 Java->Java HTTP 转发器、定义防循环 header 变体、本机降级、跨服务器直接控制 manager 或恢复本地绕过。
+- Result: 后续新增相关入口时，规范入口、后端编码规范、架构依赖边界和模块 README 都指向同一套公共路由机制。
