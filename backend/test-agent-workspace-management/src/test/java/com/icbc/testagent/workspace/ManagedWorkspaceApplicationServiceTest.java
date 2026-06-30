@@ -218,6 +218,34 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void ensureDefaultPersonalWorkspaceUsesUserIdBranchAndReusesWorktreeConflict() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        git.failCreateWorktreeWithConflict = true;
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+
+        assertThat(personal.personalWorkspaceName()).isEqualTo("default");
+        assertThat(personal.personalWorkspaceBranch()).isEqualTo("feature_testagent_20260707_usr_1_default");
+        assertThat(git.reusedWorktreeBranch).isEqualTo("feature_testagent_20260707_usr_1_default");
+        assertThat(managed.personals).hasSize(1);
+    }
+
+    @Test
     void syncsPersonalWorkspaceFilesToApplicationAndRecordsPush() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -471,6 +499,8 @@ class ManagedWorkspaceApplicationServiceTest {
         private boolean pushedForce;
         private String pulledBranch;
         private String nextHeadCommit = "commit_base";
+        private boolean failCreateWorktreeWithConflict;
+        private String reusedWorktreeBranch;
 
         private FakeGitWorkspaceService(String directoryPath) {
             this.directoryPath = directoryPath;
@@ -489,6 +519,22 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override
         public void createWorktree(Path repoRoot, Path worktreeRoot, String branch, String privateKey) {
             this.worktreeBranch = branch;
+            if (failCreateWorktreeWithConflict) {
+                throw new PlatformException(
+                        ErrorCode.GIT_UNAVAILABLE,
+                        "Git worktree 创建冲突",
+                        Map.of("gitFailureType", "WORKTREE_CONFLICT"));
+            }
+            createWorktreeDirectory(worktreeRoot);
+        }
+
+        @Override
+        public void createWorktreeReusingBranch(Path repoRoot, Path worktreeRoot, String branch, String privateKey) {
+            this.reusedWorktreeBranch = branch;
+            createWorktreeDirectory(worktreeRoot);
+        }
+
+        private void createWorktreeDirectory(Path worktreeRoot) {
             try {
                 Files.createDirectories(worktreeRoot.resolve(directoryPath));
             } catch (Exception exception) {

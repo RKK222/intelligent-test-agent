@@ -5,6 +5,7 @@ import GitChangesPanel from "../src/components/GitChangesPanel.vue";
 
 const apiClientMock = vi.hoisted(() => ({
   getVcsDiffFiles: vi.fn(),
+  getWorkspaceGitDiff: vi.fn(),
   getPublicAgentDiff: vi.fn(),
   getWorkspaceAgentDiff: vi.fn(),
   stagePublicAgentFiles: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock("@test-agent/workbench-shell", async () => {
 describe("GitChangesPanel", () => {
   beforeEach(() => {
     apiClientMock.getVcsDiffFiles.mockResolvedValue({ files: [] });
+    apiClientMock.getWorkspaceGitDiff.mockResolvedValue({ files: [] });
     apiClientMock.getPublicAgentDiff.mockResolvedValue({ files: [] });
     apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({ files: [] });
     apiClientMock.connectAgentConfigProgress.mockResolvedValue({ close: vi.fn() });
@@ -70,5 +72,35 @@ describe("GitChangesPanel", () => {
     expect(await view.findByText("skills/payment-case-design/SKILL.md", { exact: false })).toBeTruthy();
     expect(view.queryByText("[公共]", { exact: false })).toBeNull();
     expect(view.queryByText("opencode/agents/public_agent_test.json", { exact: false })).toBeNull();
+  });
+
+  it("loads application workspace changes from platform git diff instead of opencode vcs diff", async () => {
+    apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
+      files: [
+        {
+          path: "package.json",
+          status: "modified",
+          staged: false,
+          patch: "@@ -1 +1 @@\n-old\n+new",
+          additions: 1,
+          deletions: 1
+        }
+      ]
+    });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        apiBaseUrl: "http://api",
+        canWrite: true
+      },
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    expect(await view.findByText("package.json")).toBeTruthy();
+    expect(apiClientMock.getWorkspaceGitDiff).toHaveBeenCalledWith("wrk_1234567890abcdef");
+    expect(apiClientMock.getVcsDiffFiles).not.toHaveBeenCalled();
   });
 });

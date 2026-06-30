@@ -56,6 +56,30 @@ test("workbench does not read a workspace file tree before an application is sel
   expect(fileRequests).toEqual([]);
 });
 
+test("application recent workspace resolves to default personal worktree before loading files", async ({ page }) => {
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const defaultPersonalRequests: string[] = [];
+  await mockBackendApi(page, {
+    fileRequests,
+    defaultPersonalRequests,
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        workspaceId: "wrk_app_replica",
+        name: "F-GCMS 报表 / 20260715",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms"
+      }
+    }
+  });
+
+  await gotoWorkbench(page);
+
+  await expect.poll(() => defaultPersonalRequests).toEqual(["awv_20260715"]);
+  await expect.poll(() => fileRequests).toContainEqual({ workspaceId: "wrk_personal_default", path: "" });
+});
+
 test("user avatar menu logs out and returns to login", async ({ page }) => {
   const logoutRequests: string[] = [];
   const processStatusRequests: string[] = [];
@@ -365,12 +389,32 @@ test("workbench disables chat until opencode process is initialized", async ({ p
 
   await expect(page.getByText("需要初始化 opencode 进程").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "发送" })).toBeDisabled();
-  await page.getByRole("button", { name: "初始化进程" }).click();
+  await page.getByRole("button", { name: "分配专属进程" }).click();
 
   await expect.poll(() => processInitializations.length).toBe(1);
-  await expect(page.getByText("opencode 进程可用")).toBeVisible();
+  await expect(page.getByText("opencode 进程可用").first()).toBeVisible();
   await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("run after init");
   await expect(page.getByRole("button", { name: "发送" })).toBeEnabled();
+});
+
+test("workbench refetches opencode status when initialize returns a stale failure", async ({ page }) => {
+  const processInitializations: Array<Record<string, unknown>> = [];
+  const processStatusRequests: string[] = [];
+  await mockBackendApi(page, {
+    processStatus: "NEEDS_INITIALIZATION",
+    processInitializations,
+    processStatusRequests,
+    initializeFailureThenReady: true
+  });
+
+  await gotoWorkbench(page);
+
+  await page.getByRole("button", { name: "分配专属进程" }).click();
+
+  await expect.poll(() => processInitializations.length).toBe(1);
+  await expect.poll(() => processStatusRequests.length).toBeGreaterThanOrEqual(2);
+  await expect(page.getByText("opencode 进程可用").first()).toBeVisible();
+  await expect(page.getByText("初始化 opencode 进程失败")).toHaveCount(0);
 });
 
 test("phase 11 runtime flow sends attachment parts and handles docks", async ({ page }) => {
@@ -699,7 +743,7 @@ async function mockBackendApi(
     configurationApplicationRequests?: string[];
     applications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     managedApplications?: Array<{ appId: string; appName: string; enabled: boolean }>;
-    recentWorkspaces?: Record<string, ReturnType<typeof workspace> | null>;
+    recentWorkspaces?: Record<string, (ReturnType<typeof workspace> & Record<string, unknown>) | null>;
     /** 自定义 /vcs/status 返回，覆盖默认的 { status: "ready", branch: "main", defaultBranch: "main" }。 */
     vcsStatus?: { status?: string; branch?: string; defaultBranch?: string };
     /** 收集「+新增版本」发出的 POST workspace-templates/{id}/versions 请求的 version 字段（用户原值）。 */
@@ -708,9 +752,11 @@ async function mockBackendApi(
     workspaceTemplates?: Record<string, Array<Record<string, unknown>>>;
     /** 自定义 /applications/{appId}/workspace-templates/{tid}/versions 返回；key 用 `{appId}:{templateId}`。 */
     workspaceVersions?: Record<string, Array<Record<string, unknown>>>;
+    defaultPersonalRequests?: string[];
     processStatus?: "READY" | "NEEDS_INITIALIZATION" | "UNAVAILABLE";
     processStatusRequests?: string[];
     processInitializations?: Array<Record<string, unknown>>;
+    initializeFailureThenReady?: boolean;
     sessions?: Array<Record<string, unknown>>;
     sessionMessages?: Array<Record<string, unknown>>;
     historyRun?: Record<string, unknown>;
@@ -993,6 +1039,29 @@ async function mockBackendApi(
         await route.fulfill(json([]));
         return;
       }
+      if (method === "POST" && /\/api\/internal\/platform\/workspace-management\/workspace-versions\/[^/]+\/ensure-default-personal-workspace$/.test(url.pathname)) {
+        const versionId = url.pathname.match(/\/workspace-versions\/([^/]+)\/ensure-default-personal-workspace$/)?.[1] ?? "";
+        capture.defaultPersonalRequests?.push(versionId);
+        await route.fulfill(json({
+          personalWorkspaceId: "psw_default",
+          personalWorkspaceName: "default",
+          personalWorkspaceBranch: "feature_testagent_20260715_usr_admin_default",
+          runtimeWorkspace: {
+            ...workspace(),
+            workspaceId: "wrk_personal_default",
+            name: "default",
+            rootPath: "/Users/huang/workspace/personal-default",
+            appId: "app_gcms",
+            versionId,
+            applicationWorkspaceId: "awp_1"
+          }
+        }));
+        return;
+      }
+      if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/workspaces\/[^/]+\/git-diff$/.test(url.pathname)) {
+        await route.fulfill(json({ files: capture.historyDiffFiles ?? [] }));
+        return;
+      }
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/processes/me") {
       capture.processStatusRequests?.push(`${method} ${url.pathname}`);
@@ -1001,6 +1070,14 @@ async function mockBackendApi(
     }
     if (method === "POST" && url.pathname === "/api/internal/agent/opencode/processes/me/initialize") {
       capture.processInitializations?.push({});
+      if (capture.initializeFailureThenReady) {
+        currentProcessStatus = "READY";
+        await route.fulfill({
+          status: 409,
+          ...jsonFailure("OPENCODE_PROCESS_STARTING", "opencode 进程正在启动")
+        });
+        return;
+      }
       currentProcessStatus = "READY";
       await route.fulfill(json(opencodeProcessStatus(currentProcessStatus)));
       return;
@@ -1185,6 +1262,14 @@ function json(data: unknown) {
     contentType: "application/json",
     headers: corsHeaders(),
     body: JSON.stringify({ success: true, traceId: "trace_e2e", data })
+  };
+}
+
+function jsonFailure(code: string, message: string) {
+  return {
+    contentType: "application/json",
+    headers: corsHeaders(),
+    body: JSON.stringify({ success: false, traceId: "trace_e2e", code, message, retryable: true, details: {} })
   };
 }
 

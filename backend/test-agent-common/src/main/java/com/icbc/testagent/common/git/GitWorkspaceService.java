@@ -66,6 +66,30 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 创建个人 worktree；当同名分支已存在时，复用该分支重新挂载 worktree，避免默认私人空间重复进入时报创建冲突。
+     */
+    public void createWorktreeReusingBranch(Path repoRoot, Path worktreeRoot, String branch, String privateKey) {
+        try {
+            createWorktree(repoRoot, worktreeRoot, branch, privateKey);
+        } catch (PlatformException exception) {
+            if (!"WORKTREE_CONFLICT".equals(exception.details().get("gitFailureType"))) {
+                throw exception;
+            }
+            executor.execute(
+                    List.of(
+                            "git",
+                            "-C",
+                            repoRoot.toString(),
+                            "worktree",
+                            "add",
+                            worktreeRoot.toString(),
+                            branch),
+                    privateKey,
+                    DEFAULT_TIMEOUT);
+        }
+    }
+
+    /**
      * 判断目录是否是 Git 仓库；该方法用于接管公共配置目录前做冲突校验。
      */
     public boolean isGitRepository(Path repoRoot) {

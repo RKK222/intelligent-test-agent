@@ -693,6 +693,9 @@ const saveMutation = useMutation({
   onSuccess: (tab) => {
     workbench.markTabSaved(tab.path, tab.content);
     feedback.value = { kind: "success", title: "文件已保存", description: tab.path };
+    if (!isAgentFilePath(tab.path) && !isPublicFilePath(tab.path)) {
+      void refreshWorkspaceGitDiff();
+    }
   },
   onError: (error) => {
     feedback.value = errorFeedback("保存文件失败", error);
@@ -777,7 +780,19 @@ const initializeOpencodeProcessMutation = useMutation({
     queryClient.setQueryData(opencodeProcessQueryKey.value, status);
   },
   onError: (error) => {
-    feedback.value = errorFeedback("初始化 opencode 进程失败", error);
+    void (async () => {
+      try {
+        const refreshed = await opencodeProcessQuery.refetch();
+        if (refreshed.data?.status === "READY") {
+          queryClient.setQueryData(opencodeProcessQueryKey.value, refreshed.data);
+          feedback.value = { kind: "info", title: "opencode 进程可用", description: refreshed.data.serviceAddress ?? refreshed.data.message };
+          return;
+        }
+      } catch {
+        // 保留原始初始化错误，避免复查失败吞掉真正原因。
+      }
+      feedback.value = errorFeedback("初始化 opencode 进程失败", error);
+    })();
   }
 });
 
@@ -1326,6 +1341,13 @@ function mergeRecentRuntimeResponse(workspace: Workspace, response: Workspace): 
 // 两种情况最终都会通过 applyManagedWorkspace 写入 recent，下次进入直接命中该条偏好。
 async function pickDefaultWorkspaceForApp(appId: string): Promise<{ workspace: Workspace; isFallback: boolean } | null> {
   const recent = await api.getRecentManagedWorkspaceForApplication(appId);
+  if (recent?.versionId) {
+    // recent 可能指向应用版本副本或历史运行态 workspace；进入应用时统一确保并切到用户 default 私人 worktree，
+    // 后续文件树、保存和 Git diff 都落在私人空间，避免直接修改应用版本副本。
+    const defaultPw = await api.ensureDefaultPersonalWorkspace(recent.versionId);
+    currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
+    return { workspace: defaultPw.runtimeWorkspace, isFallback: false };
+  }
   if (recent) return { workspace: recent, isFallback: false };
   const templates = await api.listWorkspaceTemplates(appId);
   const firstTemplate = templates[0];
@@ -2039,7 +2061,7 @@ async function loadDiffSource(source: "run" | "session" | "vcs" | "agent") {
     } else if (source === "session") {
       nextFiles = session.value ? (await api.getSessionDiff(session.value.sessionId)).files : [];
     } else if (source === "vcs") {
-      nextFiles = selectedWorkspace.value ? (await api.getVcsDiffFiles(selectedWorkspace.value.workspaceId)).files : [];
+      nextFiles = await loadWorkspaceGitDiffFiles();
     } else if (source === "agent") {
       const pubDiff = await api.getPublicAgentDiff(workbench.publicWorktree?.worktreeId).catch(() => ({ files: [] }));
       const mappedPub = pubDiff.files.map((f) => ({
@@ -2069,6 +2091,31 @@ async function loadDiffSource(source: "run" | "session" | "vcs" | "agent") {
     }
   } catch (error) {
     feedback.value = errorFeedback("加载 Diff 失败", error);
+  }
+}
+
+async function loadWorkspaceGitDiffFiles(): Promise<RunDiffFile[]> {
+  if (!selectedWorkspace.value) return [];
+  const gitDiff = await api.getWorkspaceGitDiff(selectedWorkspace.value.workspaceId);
+  return gitDiff.files.map((file) => ({
+    path: file.path,
+    status: file.status,
+    patch: file.patch,
+    additions: file.additions,
+    deletions: file.deletions
+  }));
+}
+
+async function refreshWorkspaceGitDiff() {
+  try {
+    const nextFiles = await loadWorkspaceGitDiffFiles();
+    diffFiles.value = nextFiles;
+    if (!workbench.selectedDiffPath || !nextFiles.some((file) => file.path === workbench.selectedDiffPath)) {
+      workbench.setSelectedDiffPath(nextFiles[0]?.path);
+    }
+  } catch {
+    // 保存后刷新 Git diff 只是辅助 UI 同步；失败时保留“文件已保存”的主结果，
+    // 用户仍可点击 Diff 刷新按钮看到后端返回的具体错误。
   }
 }
 

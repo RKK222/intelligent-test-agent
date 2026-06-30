@@ -2,10 +2,13 @@ package com.icbc.testagent.common.git;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.icbc.testagent.common.error.ErrorCode;
+import com.icbc.testagent.common.error.PlatformException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -61,6 +64,44 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
+    void createWorktreeReusesExistingBranchWhenNewBranchAlreadyExists() {
+        RecordingExecutor executor = new RecordingExecutor("");
+        executor.failFirst = true;
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+        Path repoRoot = tempDir.resolve("appworkspace/20260707/repo_1");
+        Path worktreeRoot = tempDir.resolve("personalworktree/20260707/000857009/repo_1/default");
+
+        service.createWorktreeReusingBranch(
+                repoRoot,
+                worktreeRoot,
+                "feature_testagent_20260707_000857009_default",
+                "PRIVATE KEY");
+
+        assertThat(executor.calls).containsExactly(
+                new Call(
+                        List.of(
+                                "git",
+                                "-C",
+                                repoRoot.toString(),
+                                "worktree",
+                                "add",
+                                "-b",
+                                "feature_testagent_20260707_000857009_default",
+                                worktreeRoot.toString()),
+                        "PRIVATE KEY"),
+                new Call(
+                        List.of(
+                                "git",
+                                "-C",
+                                repoRoot.toString(),
+                                "worktree",
+                                "add",
+                                worktreeRoot.toString(),
+                                "feature_testagent_20260707_000857009_default"),
+                        "PRIVATE KEY"));
+    }
+
+    @Test
     void readsCurrentBranchFromLocalRepository() {
         RecordingExecutor executor = new RecordingExecutor("feature_testagent_20260707\n");
         GitWorkspaceService service = new GitWorkspaceService(executor);
@@ -113,6 +154,7 @@ class GitWorkspaceServiceTest {
     private static final class RecordingExecutor implements GitCommandExecutor {
         private final String stdout;
         private final List<Call> calls = new ArrayList<>();
+        private boolean failFirst;
 
         private RecordingExecutor(String stdout) {
             this.stdout = stdout;
@@ -121,6 +163,12 @@ class GitWorkspaceServiceTest {
         @Override
         public GitCommandResult execute(List<String> command, String privateKey, Duration timeout) {
             calls.add(new Call(command, privateKey));
+            if (failFirst && calls.size() == 1) {
+                throw new PlatformException(
+                        ErrorCode.GIT_UNAVAILABLE,
+                        "Git worktree 创建冲突",
+                        Map.of("gitFailureType", "WORKTREE_CONFLICT"));
+            }
             return new GitCommandResult(0, stdout, stdout.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
     }

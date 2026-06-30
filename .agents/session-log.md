@@ -68,6 +68,21 @@
   - 在 `RuntimeSecurityConfigTest` 中新增 `corsWebFilterAppliesCorsHeaders` 测试，直接调用 `CorsWebFilter` 验证 preflight 场景下 CORS 响应头的正确生成。
 - How: 仅修改 `RuntimeSecurityConfig.java`、`RuntimeSecurityConfigTest.java` 和 `ConfigurationManagementControllerTest.java`，不新增数据库 Migration，不修改 `.env.local` 环境变量文件。
 - Result: 运行 `mvn -pl test-agent-api -am test`，包括新编写的 CORS 单测在内的 147 项后端 API 测试用例全量通过。
+
+### 2026-06-30 - 修复应用 default 私人 worktree 进入、Diff 刷新与 opencode 初始化竞态
+
+**Why**: 手工测试发现切换应用版本时 default 私人 worktree 偶发创建冲突；应用 recent 恢复后首页可能直接加载应用版本副本而不是用户私人 worktree；普通文件保存后中间 VCS Diff 仍可能走旧 opencode `/vcs/diff`；初始化 opencode 短暂失败后，后端实际已变 READY 但前端仍展示创建失败。
+
+**What**:
+- default 私人空间分支统一为 `{应用版本分支}_{userId}_default`，同 JVM 内串行创建；同名分支已存在时复用分支挂载 worktree，目录已存在且当前分支匹配时接管。
+- 应用级 recent 命中带 `versionId` 的工作区时，前端先 `ensureDefaultPersonalWorkspace(versionId)`，再切到返回的 runtime workspace 加载文件树。
+- VCS Diff 与保存后变更刷新统一改用平台 `getWorkspaceGitDiff()`，不再从工作台调用 opencode `/vcs/diff`。
+- opencode 初始化接口短暂失败后立即 refetch `/processes/me`，复查 READY 时以可用状态为准。
+
+**How**: 复用 `GitWorkspaceService` 增加 `createWorktreeReusingBranch`；扩展 `ManagedWorkspaceApplicationServiceTest`、`GitWorkspaceServiceTest`、`workbench.spec.ts` 和 `git-changes-panel.test.ts`；同步 HTTP API、前后端 README。
+
+**Result**: 后端定向测试、前端 Vitest、工作台 mock E2E、agent-web typecheck 和 `git diff --check` 通过；服务启动验证见本次交付说明。
+
 ### 2026-06-30 - 应用工作区私有 Worktree 与 Diff/推送方案
 
 **Why**: 普通应用工作区 diff 不应调用 opencode /vcs/diff，避免 opencode 服务异常导致"刷新变更列表失败"。应用版本进入后默认切到用户私有 worktree，提交并推送合并回应用版本分支。

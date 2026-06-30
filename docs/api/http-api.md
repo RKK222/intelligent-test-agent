@@ -1086,7 +1086,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 1. 先查询 `(versionId, userId, workspaceName=default)` 是否已有个人工作区记录。
 2. 存在：直接复用，返回 `DefaultPersonalWorkspaceResponse`（含 `personalWorkspaceId`、`personalWorkspaceName`、`personalWorkspaceBranch`、`runtimeWorkspace`）。
-3. 不存在：后台创建个人工作区（`git worktree add -b {branch}_{userId}_default`），返回新建记录。
+3. 不存在：后台创建个人工作区（`git worktree add -b {branch}_{userId}_default`）。如果同名个人分支已存在，后端会尝试复用该分支挂载 worktree；如果目标目录已存在且是同一分支的 Git worktree，则接管并补运行态记录，只有目录被其他内容占用时返回 `CONFLICT`。
 
 新创建的分支命名规则：`{应用版本分支}_{userId}_default`（与旧规则的 `_{personalWorkspaceId}` 不同）。已有旧个人工作区记录不做迁移，新规则仅影响 `workspaceName=default` 或新建的 `custom` 私有空间。
 
@@ -1174,7 +1174,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 - 工作台左下角的"应用工作空间"按钮按当前应用（`selectedAppId`）查询 `GET /applications/{appId}/workspace-templates`，渲染第一级菜单（只显示 `workspaceName`，不显示 `directoryPath` / `branch`）。
 - 鼠标 hover 第一级菜单项时按需触发 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 加载该模板下的版本（懒加载，未展开的模板不发请求）。
-- 点击版本后调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好，并触发工作台切换。
+- 点击版本或应用 recent 命中带 `versionId` 的工作区后，前端都会调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用、接管或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好，并触发工作台切换。普通工作区文件树、保存和左侧 Git 变更面板都基于该默认个人 worktree。
 - 当前版本匹配规则：优先按 `runtimeWorkspace.workspaceId` 精确匹配，其次按 `workspaceRootPath` 匹配 `selectedWorkspace.rootPath`。
 - 第二级菜单（版本列表）底部固定一行「+新增版本」：点击后弹 el-dialog，内嵌 `ElDatePicker`（`type=date`, `format=yyyyMMdd`），标准库直接选日期；非标准库先通过 `GET /repositories/{repoId}/branches` 加载分支列表，用户选择分支后再选日期。提交时调用 `POST /applications/{appId}/workspace-templates/{templateId}/versions`，请求体 `version` 字段为 `yyyyMMdd` 格式，非标准库同时传递 `branch`。成功后失效 `versionsByTemplateId` 缓存并把新建版本切到工作区。
 

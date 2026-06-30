@@ -127,6 +127,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private final WorkspaceServerIdentity serverIdentity;
     private final ServerBroadcastPublisher broadcastPublisher;
     private final String broadcastInstanceId;
+    private final Object defaultPersonalWorkspaceLock = new Object();
 
     /**
      * Spring 构造器：注入通用参数仓库和 SSH key 加密密钥。
@@ -737,6 +738,15 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String versionId,
             UserId userId,
             String traceId) {
+        synchronized (defaultPersonalWorkspaceLock) {
+            return doEnsureDefaultPersonalWorkspace(versionId, userId, traceId);
+        }
+    }
+
+    private ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse doEnsureDefaultPersonalWorkspace(
+            String versionId,
+            UserId userId,
+            String traceId) {
         ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(versionId));
         ensureMember(version.appId(), userId);
         User user = existingUser(userId);
@@ -789,12 +799,21 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         PersonalWorkspaceId personalId = new PersonalWorkspaceId(RuntimeIdGenerator.personalWorkspaceId());
         // 新分支命名: {应用版本分支}_{userId}_{workspaceName}
         String sanitizedName = sanitizeBranchPart(normalizedName);
-        String branch = version.branch() + "_" + sanitizeBranchPart(user.unifiedAuthId()) + "_" + sanitizedName;
+        String branch = version.branch() + "_" + sanitizeBranchPart(userId.value()) + "_" + sanitizedName;
         Path repoRoot = personalRepoRootWithName(version, user, sanitizedName);
         Path workspaceRoot = repoRoot.resolve(template.directoryPath()).normalize();
         CodeRepository repository = existingRepository(version.repositoryId());
         ApplicationWorkspaceVersionReplica applicationReplica = readyReplicaOrLegacy(version, serverIdentity.linuxServerId());
-        gitWorkspaceService.createWorktree(Path.of(applicationReplica.repoRootPath()), repoRoot, branch, privateKeyFor(repository, userId));
+        if (Files.exists(repoRoot)) {
+            if (!gitWorkspaceService.isGitRepository(repoRoot) || !branch.equals(gitWorkspaceService.currentBranch(repoRoot))) {
+                throw new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "默认私人工作区目录已存在且不属于当前用户分支",
+                        Map.of("path", repoRoot.toString(), "branch", branch));
+            }
+        } else {
+            gitWorkspaceService.createWorktreeReusingBranch(Path.of(applicationReplica.repoRootPath()), repoRoot, branch, privateKeyFor(repository, userId));
+        }
         if (!Files.isDirectory(workspaceRoot)) {
             throw new PlatformException(ErrorCode.CONFLICT, "个人工作区目录不存在", Map.of("path", workspaceRoot.toString()));
         }
