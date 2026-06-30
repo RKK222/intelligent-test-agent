@@ -150,6 +150,8 @@ watch(centerMode, (newMode, oldMode) => {
 });
 
 const selectedAppId = ref<string | undefined>(undefined);
+// 当前选中版本对应的默认个人工作区 ID，供 GitChangesPanel 调用 publishPersonalWorkspace。
+const currentPersonalWorkspaceId = ref<string | undefined>(undefined);
 const readonlySessionReason = ref("");
 const chatTitle = computed(() => session.value?.title ?? "生成测试案例");
 // 任务消耗展示：duration 取 chatStartedAt 实时计算；tokens 从助手消息的 step-finish part
@@ -1123,6 +1125,8 @@ function resetWorkspaceState() {
   lastThoughtForMs = 0;
   nowTick.value = Date.now();
   dispatchChat({ type: "reset" });
+  // 切工作区时清掉个人工作区 ID，避免旧版本的空 ID 残留导致提交/推送指向错误目标。
+  currentPersonalWorkspaceId.value = undefined;
   workbench.resetWorkspaceView();
 }
 
@@ -1247,22 +1251,26 @@ function syncCurrentVersionFromWorkspace(workspace: Workspace) {
   // 没有匹配到时不主动清空：可能是用户刚切换应用、版本尚未加载完，避免菜单高亮闪烁。
 }
 
-// 切换到某个应用版本：拉取对应的运行态 Workspace，触发工作台状态切换。
+// 切换到某个应用版本：通过 ensureDefaultPersonalWorkspace 确保用户拥有默认个人工作区，
+// 将返回的 runtimeWorkspace 作为当前工作区。同一用户同一版本复用 default 空间，避免重复创建。
 async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemplate; version: ApplicationWorkspaceVersion }) {
-  const runtimeWorkspaceId = payload.version.runtimeWorkspace?.workspaceId;
-  if (!runtimeWorkspaceId) {
-    feedback.value = { kind: "error", title: "该版本未关联运行态工作区", description: "请先在平台侧初始化版本。" };
-    return;
-  }
-  if (runtimeWorkspaceId === selectedWorkspaceId.value) {
-    feedback.value = { kind: "info", title: "已在该版本工作区", description: payload.version.version };
-    return;
-  }
   try {
+    const defaultPw = await api.ensureDefaultPersonalWorkspace(payload.version.versionId);
+    const runtimeWorkspaceId = defaultPw.runtimeWorkspace?.workspaceId;
+    if (!runtimeWorkspaceId) {
+      feedback.value = { kind: "error", title: "该版本未关联运行态工作区", description: "请先在平台侧初始化版本。" };
+      return;
+    }
+    if (runtimeWorkspaceId === selectedWorkspaceId.value) {
+      feedback.value = { kind: "info", title: "已在该版本工作区", description: `${payload.version.version} (个人空间: default)` };
+      return;
+    }
+    // 记录当前个人工作区 ID，供 GitChangesPanel 提交/推送使用
+    currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
     const workspace = await api.getWorkspace(runtimeWorkspaceId);
     await applyManagedWorkspace(workspace, {
       successTitle: "已切换应用版本",
-      successDescription: `${payload.template.workspaceName} · ${payload.version.version}`
+      successDescription: `${payload.template.workspaceName} · ${payload.version.version} (个人空间: default)`
     });
   } catch (error) {
     feedback.value = errorFeedback("切换应用版本失败", error);
@@ -1313,6 +1321,7 @@ function mergeRecentRuntimeResponse(workspace: Workspace, response: Workspace): 
 }
 
 // 查询指定应用下的"默认进入工作空间"：优先 recent 偏好，否则回退到首模板的首版本。
+// 回退时通过 ensureDefaultPersonalWorkspace 创建/复用默认个人工作区，避免直接使用应用版本副本。
 // 返回 { workspace, isFallback }：isFallback=true 表示走了"首模板首版本"的兜底，false 表示命中 recent。
 // 两种情况最终都会通过 applyManagedWorkspace 写入 recent，下次进入直接命中该条偏好。
 async function pickDefaultWorkspaceForApp(appId: string): Promise<{ workspace: Workspace; isFallback: boolean } | null> {
@@ -1323,8 +1332,12 @@ async function pickDefaultWorkspaceForApp(appId: string): Promise<{ workspace: W
   if (!firstTemplate) return null;
   const versions = await api.listWorkspaceVersions(appId, firstTemplate.workspaceId);
   const firstVersion = versions[0];
-  if (!firstVersion?.runtimeWorkspace) return null;
-  return { workspace: firstVersion.runtimeWorkspace, isFallback: true };
+  if (!firstVersion) return null;
+  // 确保默认个人工作区存在（复用或创建），避免直接使用应用版本副本
+  const defaultPw = await api.ensureDefaultPersonalWorkspace(firstVersion.versionId);
+  currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
+  if (!defaultPw.runtimeWorkspace?.workspaceId) return null;
+  return { workspace: defaultPw.runtimeWorkspace, isFallback: true };
 }
 
 // WorkbenchFooter / FigmaFileExplorer 上两级菜单展开模板时调用，触发版本懒加载。
@@ -1362,18 +1375,11 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
         queryKey: ["managed-workspace", "app-versions", selectedAppIdRef, payload.template.workspaceId]
       });
     }
-    // 切到新版本对应的运行态工作区，保持「新增完即进入新版本」的体验。
-    if (response.runtimeWorkspace?.workspaceId) {
-      const workspace: Workspace = {
-        workspaceId: response.runtimeWorkspace.workspaceId,
-        name: response.runtimeWorkspace.name,
-        rootPath: response.runtimeWorkspace.rootPath,
-        status: response.runtimeWorkspace.status as Workspace["status"],
-        linuxServerId: response.runtimeWorkspace.linuxServerId,
-        createdAt: response.runtimeWorkspace.createdAt,
-        updatedAt: response.runtimeWorkspace.updatedAt
-      };
-      await applyManagedWorkspace(workspace, {
+    // 确保默认个人工作区存在，并切换到该个人工作区的运行态 workspace。
+    const defaultPw = await api.ensureDefaultPersonalWorkspace(response.versionId);
+    currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
+    if (defaultPw.runtimeWorkspace?.workspaceId) {
+      await applyManagedWorkspace(defaultPw.runtimeWorkspace, {
         successTitle: "已切换应用版本",
         successDescription: `${payload.template.workspaceName} · ${response.version}`
       });
@@ -2345,6 +2351,7 @@ async function handleLogout() {
           :public-directory-writable="isSuperAdmin"
           :api-base-url="apiBaseUrl"
           :workspace-id="selectedWorkspace.workspaceId"
+          :personal-workspace-id="currentPersonalWorkspaceId"
           :show-server-workspace-switch="isSuperAdmin"
           :search-results="searchResults"
           :search-loading="searchLoading"

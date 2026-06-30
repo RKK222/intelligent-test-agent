@@ -1523,3 +1523,38 @@ export type SyncWorkspacePayload = {
   files: string[];
   force?: boolean;
 };
+
+export type PublishPersonalWorkspacePayload = {
+  commitMessage: string;
+};
+
+/** 个人工作区发布结果 */
+export type PublishPersonalWorkspaceResult = {
+  status: "MERGED" | "CONFLICT";
+  personalWorkspaceId: string;
+  versionId: string;
+  conflictFiles: string[];
+  message: string;
+};
+
+/** 确保默认个人工作区响应 */
+export type DefaultPersonalWorkspaceResponse = {
+  personalWorkspaceId: string;
+  personalWorkspaceName: string;
+  personalWorkspaceBranch: string;
+  runtimeWorkspace: ManagedWorkspaceRuntime;
+};
+
+/** 本地 Git diff 文件（不依赖 opencode） */
+export type WorkspaceGitDiffFile = {
+  path: string;
+  status: string;
+  staged: boolean;
+  patch: string;
+  additions: number;
+  deletions: number;
+};
+
+export type WorkspaceGitDiff = {
+  files: WorkspaceGitDiffFile[];
+};

@@ -38,6 +38,7 @@ import type {
   CreateWorkspaceVersionPayload,
   CreateUserPayload,
   CurrentUser,
+  DefaultPersonalWorkspaceResponse,
   FileContent,
   FileSearchResult,
   FileStatus,
@@ -65,6 +66,8 @@ import type {
   PromptPart,
   PublicAgentRepositoryStatus,
   ProviderInfo,
+  PublishPersonalWorkspacePayload,
+  PublishPersonalWorkspaceResult,
   QuestionRequest,
   RoleOption,
   Run,
@@ -93,6 +96,7 @@ import type {
   WorkspaceBackendServer,
   WorkspaceCreateOperation,
   WorkspaceDiff,
+  WorkspaceGitDiff,
   WorkspaceSyncResult,
   WorkspaceBranchPreference,
   WorkspaceDirectoryList,
@@ -461,6 +465,33 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "POST",
         body: JSON.stringify(payload)
       }),
+    /**
+     * 确保默认个人工作区存在：先查 (versionId, userId, workspaceName=default)，
+     * 存在则复用，不存在则后台创建。
+     */
+    ensureDefaultPersonalWorkspace: (versionId: string) =>
+      request<DefaultPersonalWorkspaceResponse>(
+        `${workspaceManagementBase}/workspace-versions/${encodeURIComponent(versionId)}/ensure-default-personal-workspace`,
+        { method: "POST" }
+      ),
+    /**
+     * 基于本地 Git 获取工作区变更文件列表（不依赖 opencode runtime /vcs/diff）。
+     * @param workspaceId 运行时 workspace ID（personal workspace 的 runtimeWorkspace.workspaceId）
+     */
+    getWorkspaceGitDiff: (workspaceId: string) =>
+      request<WorkspaceGitDiff>(
+        `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-diff`
+      ),
+    /**
+     * 个人工作区"提交并推送"：将个人 worktree 合并回应用版本分支。
+     * @param personalWorkspaceId 个人工作区 ID
+     * @param payload.commitMessage 提交说明
+     */
+    publishPersonalWorkspace: (personalWorkspaceId: string, payload: PublishPersonalWorkspacePayload) =>
+      request<PublishPersonalWorkspaceResult>(
+        `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/publish`,
+        { method: "POST", body: JSON.stringify(payload) }
+      ),
     listWorkspaceDirectories: (path?: string) =>
       request<WorkspaceDirectoryList>(`/api/workspace-directories${query({ path })}`),
     listFiles: async (workspaceId: string, path = "") => {

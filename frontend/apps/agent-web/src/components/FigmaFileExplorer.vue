@@ -28,6 +28,8 @@ defineProps<FileExplorerProps & {
   apiBaseUrl?: string;
   /** 当前运行态 Workspace ID，透传给 AgentConfigPanel */
   workspaceId?: string;
+  /** 当前默认个人工作区 ID，透传给 GitChangesPanel 用于提交并推送 */
+  personalWorkspaceId?: string;
   /** 是否显示超级管理员服务器工作空间切换入口 */
   showServerWorkspaceSwitch?: boolean;
   /** 搜索结果列表 */
@@ -162,6 +164,7 @@ defineExpose({
         v-if="tab === 'changes'"
         ref="gitChangesPanelRef"
         :workspace-id="workspaceId"
+        :personal-workspace-id="personalWorkspaceId"
         :api-base-url="apiBaseUrl"
         :can-write="!!publicDirectoryWritable"
         @open-diff="(payload) => emit('openDiff', payload)"

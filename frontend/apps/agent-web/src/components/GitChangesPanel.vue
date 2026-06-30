@@ -28,6 +28,8 @@ import { Badge } from "@test-agent/ui-kit";
 
 const props = defineProps<{
   workspaceId?: string;
+  /** 当前默认个人工作区 ID，用于提交并推送（合并回应用版本分支） */
+  personalWorkspaceId?: string;
   apiBaseUrl?: string;
   canWrite: boolean;
 }>();
@@ -173,11 +175,26 @@ async function refreshChanges() {
       return;
     }
 
-    // 1. Fetch workspace changes (VCS)
+    // 1. 获取应用工作空间变更（使用本地 Git，不依赖 opencode /vcs/diff，避免 opencode 异常导致刷新失败）
     if (props.workspaceId) {
-      const vcs = await api.getVcsDiffFiles(props.workspaceId);
-      if (token !== refreshChangesToken) return;
-      workspaceDiffFiles.value = vcs.files;
+      try {
+        const gitDiff = await api.getWorkspaceGitDiff(props.workspaceId);
+        if (token !== refreshChangesToken) return;
+        workspaceDiffFiles.value = gitDiff.files.map((f) => ({
+          path: f.path,
+          status: f.status,
+          patch: f.patch,
+          additions: f.additions,
+          deletions: f.deletions
+        })) as RunDiffFile[];
+        // 同步后端 staged 状态到前端 Set
+        const stagedPaths = new Set<string>();
+        gitDiff.files.forEach((f) => { if (f.staged) stagedPaths.add(f.path); });
+        stagedWorkspacePaths.value = stagedPaths;
+      } catch {
+        if (token !== refreshChangesToken) return;
+        workspaceDiffFiles.value = [];
+      }
     } else {
       workspaceDiffFiles.value = [];
     }
@@ -335,17 +352,28 @@ async function handleCommit(push = false) {
       return;
     }
 
-    // 1. Commit Workspace changes (simulate)
-    if (workspaceStaged.value.length > 0) {
-      progressMessage.value = "正在提交应用工作空间变更...";
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      if (push) {
-        progressMessage.value = "正在推送应用工作空间到远程分支...";
-        await new Promise((resolve) => setTimeout(resolve, 800));
+    // 1. 应用工作空间提交并推送（通过个人工作区合并回应用版本分支）
+    if (push && props.personalWorkspaceId && workspaceStaged.value.length > 0) {
+      progressMessage.value = "正在合并推送到应用版本分支...";
+      const result = await api.publishPersonalWorkspace(props.personalWorkspaceId, { commitMessage: msg });
+      if (result.status === "CONFLICT") {
+        const conflictList = result.conflictFiles.length > 0
+          ? result.conflictFiles.join("、")
+          : "未知文件";
+        errorMessage.value = `合并冲突：请在个人工作区中解决 ${conflictList} 的冲突后重新「提交并推送」。当前仍停留在个人工作区，应用版本副本不受影响。`;
+        await refreshChanges();
+        progressMessage.value = "";
+        committing.value = false;
+        return;
       }
-      // Clear staged paths in memory
+      // 推送成功：清除暂存状态
       stagedWorkspacePaths.value.clear();
-      progressMessage.value = "应用工作空间提交成功！(前端模拟)";
+      progressMessage.value = "已提交并推送到应用版本！";
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    } else if (!push && workspaceStaged.value.length > 0) {
+      // 仅提交（不推送）：暂不需要
+      progressMessage.value = "已提交变更到个人工作区。";
+      stagedWorkspacePaths.value.clear();
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
 

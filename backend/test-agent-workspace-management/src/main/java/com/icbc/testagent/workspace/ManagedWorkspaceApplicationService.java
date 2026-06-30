@@ -2,8 +2,10 @@ package com.icbc.testagent.workspace;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.common.git.GitCommandResult;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
+import com.icbc.testagent.common.git.ProcessGitCommandExecutor;
 import com.icbc.testagent.common.git.SshKeyEncryptionService;
 import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastEvent;
@@ -46,6 +48,7 @@ import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -712,6 +715,310 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                         .map(p -> p.appId().value())
                         .orElse(null));
         return ManagedWorkspaceResponses.WorkspaceRuntimeResponse.from(workspace, appId, versionId, applicationWorkspaceId);
+    }
+
+    /**
+     * 确保指定用户在某应用版本下存在默认私人空间（workspaceName=default）。
+     * 查询条件: (versionId, userId, workspaceName=default)，存在则直接返回，不存在则后台创建。
+     * 新创建的分支命名规则: {应用版本分支}_{userId}_default。
+     * 保留已有旧 personal workspace 记录，不做迁移；新规则只影响新建的 default/custom 私有空间。
+     */
+    public ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse ensureDefaultPersonalWorkspace(
+            String versionId,
+            UserId userId,
+            String traceId) {
+        ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(versionId));
+        ensureMember(version.appId(), userId);
+        User user = existingUser(userId);
+        String defaultName = "default";
+        // 先查是否已有 (versionId, userId, workspaceName=default) 的私人空间
+        Optional<PersonalWorkspace> existing = managedWorkspaceRepository.findPersonalWorkspaces(version.versionId(), userId).stream()
+                .filter(pw -> defaultName.equals(pw.workspaceName()))
+                .findFirst();
+        if (existing.isPresent()) {
+            PersonalWorkspace pw = existing.get();
+            Workspace runtimeWorkspace = existingWorkspace(pw.runtimeWorkspaceId());
+            markRecent(userId, version.appId(), runtimeWorkspace.workspaceId());
+            return new ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse(
+                    pw.personalWorkspaceId().value(),
+                    pw.workspaceName(),
+                    pw.branch(),
+                    ManagedWorkspaceResponses.WorkspaceRuntimeResponse.from(runtimeWorkspace,
+                            version.appId().value(), version.versionId().value(), version.applicationWorkspaceId().value()));
+        }
+        // 不存在则新建：按新规则命名分支 {branch}_{userId}_default
+        try {
+            ManagedWorkspaceResponses.PersonalWorkspaceResponse created = doCreatePersonalWorkspaceWithName(
+                    versionId, defaultName, userId, traceId);
+            return new ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse(
+                    created.personalWorkspaceId(),
+                    created.workspaceName(),
+                    created.branch(),
+                    created.runtimeWorkspace());
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.INTERNAL_ERROR, "创建默认私人工作区失败: " + exception.getMessage(), Map.of(), exception);
+        }
+    }
+
+    /**
+     * 创建个人工作区（使用新的命名规则：{branch}_{userId}_{workspaceName}）。
+     * 与 doCreatePersonalWorkspace 核心逻辑相同，区别在于分支命名使用 workspaceName 而不是 personalId。
+     */
+    private ManagedWorkspaceResponses.PersonalWorkspaceResponse doCreatePersonalWorkspaceWithName(
+            String versionId,
+            String workspaceName,
+            UserId userId,
+            String traceId) {
+        ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(versionId));
+        ensureMember(version.appId(), userId);
+        ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
+        User user = existingUser(userId);
+        String normalizedName = requireText(workspaceName, "个人工作区名称不能为空", "workspaceName");
+        PersonalWorkspaceId personalId = new PersonalWorkspaceId(RuntimeIdGenerator.personalWorkspaceId());
+        // 新分支命名: {应用版本分支}_{userId}_{workspaceName}
+        String sanitizedName = sanitizeBranchPart(normalizedName);
+        String branch = version.branch() + "_" + sanitizeBranchPart(user.unifiedAuthId()) + "_" + sanitizedName;
+        Path repoRoot = personalRepoRootWithName(version, user, sanitizedName);
+        Path workspaceRoot = repoRoot.resolve(template.directoryPath()).normalize();
+        CodeRepository repository = existingRepository(version.repositoryId());
+        ApplicationWorkspaceVersionReplica applicationReplica = readyReplicaOrLegacy(version, serverIdentity.linuxServerId());
+        gitWorkspaceService.createWorktree(Path.of(applicationReplica.repoRootPath()), repoRoot, branch, privateKeyFor(repository, userId));
+        if (!Files.isDirectory(workspaceRoot)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "个人工作区目录不存在", Map.of("path", workspaceRoot.toString()));
+        }
+        Workspace runtimeWorkspace = createRuntimeWorkspace(normalizedName, workspaceRoot, traceId);
+        Instant now = Instant.now();
+        PersonalWorkspace saved = managedWorkspaceRepository.savePersonalWorkspace(new PersonalWorkspace(
+                personalId,
+                version.versionId(),
+                version.appId(),
+                version.applicationWorkspaceId(),
+                userId,
+                normalizedName,
+                branch,
+                realPath(repoRoot).toString(),
+                realPath(workspaceRoot).toString(),
+                runtimeWorkspace.workspaceId(),
+                gitWorkspaceService.headCommit(repoRoot),
+                ManagedWorkspaceStatus.ACTIVE,
+                now,
+                now));
+        markRecent(userId, version.appId(), runtimeWorkspace.workspaceId());
+        return ManagedWorkspaceResponses.PersonalWorkspaceResponse.from(saved, runtimeWorkspace);
+    }
+
+    /**
+     * 个人工作区物理根路径（使用名字而非 personalId 作为末段，使路径可读）。
+     */
+    private Path personalRepoRootWithName(ApplicationWorkspaceVersion version, User user, String sanitizedName) {
+        CodeRepository repository = existingRepository(version.repositoryId());
+        return configuredPath(PARAM_OPENCODE_PERSONAL_WORKTREE_ROOT)
+                .resolve(sanitizeVersionForBranchAndPath(version.version()))
+                .resolve(sanitizePathPart(user.unifiedAuthId()))
+                .resolve(requireRepositoryEnglishName(repository))
+                .resolve(sanitizedName)
+                .normalize();
+    }
+
+    /**
+     * 基于本地 Git 获取工作区变更文件列表（不依赖 opencode runtime /vcs/diff）。
+     * 通过 workspace 反查 personal workspace，若找到则基于其 repoRoot 进行 git status/diff；
+     * 若找不到则尝试基于 workspace rootPath 自身。
+     */
+    public ManagedWorkspaceResponses.WorkspaceGitDiffResponse getWorkspaceGitDiff(String workspaceId, UserId userId) {
+        Workspace workspace = existingWorkspace(new WorkspaceId(workspaceId));
+        // 尝试通过运行时 workspace 反查个人工作区
+        Optional<PersonalWorkspace> personal = managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspace.workspaceId());
+        Path gitRoot;
+        if (personal.isPresent()) {
+            ensurePersonalOwner(personal.get(), userId);
+            gitRoot = Path.of(personal.get().repoRootPath());
+        } else {
+            // 回退：直接基于 workspace rootPath（可能是应用版本工作区副本）
+            gitRoot = Path.of(workspace.rootPath());
+        }
+        if (!Files.exists(gitRoot)) {
+            return new ManagedWorkspaceResponses.WorkspaceGitDiffResponse(List.of());
+        }
+        try {
+            String porcelain = gitWorkspaceService.statusPorcelain(gitRoot);
+            return new ManagedWorkspaceResponses.WorkspaceGitDiffResponse(parsePorcelainFiles(gitRoot, porcelain));
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "获取 Git 变更列表失败: " + exception.getMessage(), Map.of(), exception);
+        }
+    }
+
+    /**
+     * 解析 git status --porcelain 输出，对每个变更文件调用 git diff 获取 patch/details。
+     * porcelain 格式: XY path，其中 X=暂存区状态, Y=工作区状态。
+     */
+    private List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> parsePorcelainFiles(Path repoRoot, String porcelain) {
+        List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> files = new ArrayList<>();
+        if (porcelain == null || porcelain.isBlank()) {
+            return files;
+        }
+        for (String line : porcelain.split("\\n")) {
+            String trimmed = line.stripTrailing();
+            if (trimmed.length() < 3) continue;
+            char indexStatus = trimmed.charAt(0);
+            char worktreeStatus = trimmed.charAt(1);
+            String path = trimmed.substring(3).trim();
+            // 重命名格式 "R old -> new"，取新路径
+            int arrowIndex = path.indexOf(" -> ");
+            if (arrowIndex > 0) {
+                path = path.substring(arrowIndex + 4);
+            }
+            String status = porcelainStatus(indexStatus, worktreeStatus);
+            boolean staged = indexStatus != ' ' && indexStatus != '?';
+            // 对每个文件调用 git diff 获取 patch
+            String patch = "";
+            int additions = 0;
+            int deletions = 0;
+            try {
+                if ("added".equals(status) || "untracked".equals(status)) {
+                    // 新增/未跟踪文件：diff 没有内容，通过 wc 统计
+                    additions = countFileLines(repoRoot.resolve(path));
+                } else if (!"deleted".equals(status)) {
+                    String diffOutput = gitWorkspaceService.diff(repoRoot, path, staged);
+                    if (diffOutput != null && !diffOutput.isBlank()) {
+                        patch = diffOutput;
+                        additions = countDiffAdditions(diffOutput);
+                        deletions = countDiffDeletions(diffOutput);
+                    }
+                    // 如果 staged，也获取 unstaged 变更
+                    if (staged && worktreeStatus != ' ') {
+                        String unstagedDiff = gitWorkspaceService.diff(repoRoot, path, false);
+                        if (unstagedDiff != null && !unstagedDiff.isBlank()) {
+                            if (!patch.isEmpty()) {
+                                patch += "\n";
+                            }
+                            patch += unstagedDiff;
+                            additions += countDiffAdditions(unstagedDiff);
+                            deletions += countDiffDeletions(unstagedDiff);
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+                // diff 单个文件失败不影响整体列表
+            }
+            files.add(new ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse(
+                    path, status, staged, patch, additions, deletions));
+        }
+        return files;
+    }
+
+    private String porcelainStatus(char indexStatus, char worktreeStatus) {
+        if (indexStatus == 'A' || (indexStatus == '?' && worktreeStatus == '?')) {
+            return worktreeStatus == '?' ? "untracked" : "added";
+        }
+        if (indexStatus == 'D' || worktreeStatus == 'D') return "deleted";
+        if (indexStatus == 'R') return "renamed";
+        if (indexStatus == 'M' || worktreeStatus == 'M') return "modified";
+        if (indexStatus == '?' && worktreeStatus == '?') return "untracked";
+        return "modified";
+    }
+
+    private int countFileLines(Path filePath) {
+        try {
+            return (int) Files.lines(filePath).count();
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private int countDiffAdditions(String diff) {
+        int count = 0;
+        for (String line : diff.split("\\n")) {
+            if (line.startsWith("+") && !line.startsWith("+++")) count++;
+        }
+        return count;
+    }
+
+    private int countDiffDeletions(String diff) {
+        int count = 0;
+        for (String line : diff.split("\\n")) {
+            if (line.startsWith("-") && !line.startsWith("---")) count++;
+        }
+        return count;
+    }
+
+    /**
+     * 个人工作区"提交并推送"：将个人 worktree 合并回应用版本分支。
+     * 流程: fetch/pull 应用版本分支 → 在个人 worktree 中 merge 应用分支 → 推送个人分支到远端。
+     * 合并成功: 更新应用版本 targetCommitHash 和当前服务器 replica commit，广播。
+     * 合并冲突: 返回 CONFLICT 及冲突文件列表，不污染应用版本副本。
+     */
+    public ManagedWorkspaceResponses.PersonalWorkspacePublishResponse publishPersonalWorkspace(
+            String personalWorkspaceId,
+            String commitMessage,
+            UserId userId,
+            String traceId) {
+        PersonalWorkspace personal = existingPersonal(new PersonalWorkspaceId(personalWorkspaceId));
+        ensurePersonalOwner(personal, userId);
+        ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
+        CodeRepository repository = existingRepository(version.repositoryId());
+        String privateKey = privateKeyFor(repository, userId);
+        Path repoRoot = Path.of(personal.repoRootPath());
+
+        // 1. stage 所有变更并 commit
+        try {
+            gitWorkspaceService.stageAll(repoRoot, privateKey);
+            gitWorkspaceService.commitStaged(repoRoot, requireText(commitMessage, "提交说明不能为空", "commitMessage"), privateKey);
+        } catch (PlatformException e) {
+            // 如果没有东西可提交，Git 返回错误是预期的
+            if (!e.getMessage().contains("nothing to commit") && !e.getMessage().contains("nothing added")) {
+                throw e;
+            }
+        }
+
+        // 2. push 个人分支到远端
+        gitWorkspaceService.push(repoRoot, personal.branch(), false, privateKey);
+
+        // 3. 在个人 worktree 中 fetch 并尝试 merge 应用版本分支
+        gitWorkspaceService.fetch(repoRoot, privateKey);
+        try {
+            gitWorkspaceService.mergeBranch(repoRoot, version.branch(), privateKey);
+        } catch (PlatformException mergeException) {
+            // 合并冲突：返回冲突文件列表
+            List<String> conflictFiles = List.of();
+            try {
+                conflictFiles = conflictPaths(repoRoot);
+            } catch (Exception ignored) {
+            }
+            return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
+                    "CONFLICT", personalWorkspaceId, version.versionId().value(), conflictFiles,
+                    "合并冲突，请在个人工作区中解决冲突后重新提交并推送");
+        }
+
+        // 4. 合并成功：更新应用版本 commit 和副本
+        Instant now = Instant.now();
+        String headCommit = gitWorkspaceService.headCommit(repoRoot);
+        ApplicationWorkspaceVersion updatedVersion = managedWorkspaceRepository.updateVersionTargetCommit(version.versionId(), headCommit, now);
+        // 更新当前服务器副本
+        Optional<ApplicationWorkspaceVersionReplica> currentReplica = managedWorkspaceRepository.findVersionReplica(
+                version.versionId(), serverIdentity.linuxServerId());
+        if (currentReplica.isPresent()) {
+            managedWorkspaceRepository.saveVersionReplica(currentReplica.get().ready(headCommit, now, traceId));
+        }
+        publishVersionSync(updatedVersion, userId, "PERSONAL_PUBLISHED", traceId, Map.of());
+        return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
+                "MERGED", personalWorkspaceId, version.versionId().value(), List.of(),
+                "合并成功: " + headCommit);
+    }
+
+    /**
+     * 获取 Git 冲突文件列表（通过 git diff --name-only --diff-filter=U）。
+     */
+    private List<String> conflictPaths(Path repoRoot) {
+        try {
+            GitCommandResult result = new com.icbc.testagent.common.git.ProcessGitCommandExecutor().execute(
+                    List.of("git", "-C", repoRoot.toString(), "diff", "--name-only", "--diff-filter", "U"),
+                    null,
+                    Duration.ofSeconds(15));
+            return result.stdoutText().lines().filter(line -> !line.isBlank()).toList();
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     public ManagedWorkspaceResponses.WorkspaceDiffResponse diffPersonalWorkspace(String personalWorkspaceId, UserId userId) {

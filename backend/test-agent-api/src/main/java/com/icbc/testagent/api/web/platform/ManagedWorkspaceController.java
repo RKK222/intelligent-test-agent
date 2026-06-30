@@ -163,6 +163,47 @@ public class ManagedWorkspaceController {
                 RuntimeApiSupport.traceId(exchange)));
     }
 
+    /**
+     * 确保默认个人工作区存在：先查 (versionId, userId, workspaceName=default)，
+     * 存在则复用，不存在则后台创建。分支命名: {应用版本分支}_{userId}_default。
+     */
+    @PostMapping("/workspace-versions/{versionId}/ensure-default-personal-workspace")
+    public ApiResponse<Object> ensureDefaultPersonalWorkspace(
+            @PathVariable String versionId,
+            ServerWebExchange exchange) {
+        return ok(exchange, service.ensureDefaultPersonalWorkspace(
+                versionId,
+                userId(exchange),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
+    /**
+     * 基于本地 Git（不依赖 opencode runtime）获取工作区变更文件列表。
+     * 通过 runtime workspace 反查 personal workspace，使用其 repoRoot 进行 git status --porcelain + git diff。
+     */
+    @GetMapping("/workspaces/{workspaceId}/git-diff")
+    public ApiResponse<Object> getWorkspaceGitDiff(
+            @PathVariable String workspaceId,
+            ServerWebExchange exchange) {
+        return ok(exchange, service.getWorkspaceGitDiff(workspaceId, userId(exchange)));
+    }
+
+    /**
+     * 个人工作区"提交并推送"：将个人 worktree 合并回应用版本分支。
+     * 合并成功: 更新版本 commit；冲突: 返回 CONFLICT + 冲突文件列表。
+     */
+    @PostMapping("/personal-workspaces/{personalWorkspaceId}/publish")
+    public ApiResponse<Object> publishPersonalWorkspace(
+            @PathVariable String personalWorkspaceId,
+            @RequestBody ManagedWorkspaceDtos.PublishPersonalWorkspaceRequest request,
+            ServerWebExchange exchange) {
+        return ok(exchange, service.publishPersonalWorkspace(
+                personalWorkspaceId,
+                request.commitMessage(),
+                userId(exchange),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
     private UserId userId(ServerWebExchange exchange) {
         return AuthWebSupport.getAuthPrincipal(exchange).userId();
     }

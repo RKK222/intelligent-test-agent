@@ -325,4 +325,42 @@ public final class ManagedWorkspaceResponses {
             String status,  // "ACCEPTED"
             Instant createdAt) {
     }
+
+    /**
+     * 基于本地 Git status/diff 的工作区变更文件响应，不依赖 opencode runtime。
+     * staged 标识是否已 git add；patch/additions/deletions 来自 git diff。
+     */
+    public record WorkspaceGitDiffFileResponse(
+            String path,
+            String status,
+            boolean staged,
+            String patch,
+            int additions,
+            int deletions) {
+    }
+
+    public record WorkspaceGitDiffResponse(List<WorkspaceGitDiffFileResponse> files) {
+    }
+
+    /**
+     * 个人工作区发布（合并到应用版本分支）的响应。
+     * status 为 MERGED 表示合并成功并已更新版本 commit；CONFLICT 时 conflictFiles 列出冲突文件路径。
+     */
+    public record PersonalWorkspacePublishResponse(
+            String status,              // "MERGED" / "CONFLICT"
+            String personalWorkspaceId,
+            String versionId,
+            List<String> conflictFiles,
+            String message) {
+    }
+
+    /**
+     * 确保默认私有工作区存在后的统一响应，同时返回个人工作区和运行态 workspace。
+     */
+    public record DefaultPersonalWorkspaceResponse(
+            String personalWorkspaceId,
+            String personalWorkspaceName,
+            String personalWorkspaceBranch,
+            WorkspaceRuntimeResponse runtimeWorkspace) {
+    }
 }

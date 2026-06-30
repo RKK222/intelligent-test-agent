@@ -1001,6 +1001,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/personal-workspaces/{personalWorkspaceId}/diff` | 查询个人工作区与应用版本工作区目录差异。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-to-application` | 将所选个人工作区文件同步到应用版本工作区，提交并 push。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-from-application` | 将所选应用版本工作区文件同步到个人工作区。 |
+| `POST` | `/workspace-versions/{versionId}/ensure-default-personal-workspace` | 确保默认个人工作区存在：查询 (versionId, userId, workspaceName=default)，存在则复用返回，不存在则后台创建。 |
+| `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取工作区变更文件列表，返回 `{ files: [{ path, status, staged, patch, additions, deletions }] }`。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 个人工作区"提交并推送"：在个人 worktree 中 stage all + commit + push，再 merge 回应用版本分支；冲突返回 `CONFLICT` 与冲突文件列表。 |
 
 `POST /applications/{appId}/workspace-templates/{templateId}/versions` 请求体：
 
@@ -1077,11 +1080,101 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `sync-to-application.force=true` 时使用 `--force-with-lease` 覆盖远端；失败、冲突或认证问题使用统一 Git/冲突错误码返回，并记录同步审计。同步成功后更新应用版本 `targetCommitHash` 与当前服务器副本 `replicaCommitHash`，并通过内部服务器广播要求其他服务器同步。应用版本工作区与个人工作区同步不新增 RunEvent/SSE 事件。
 
+### 默认个人工作区自动创建
+
+`POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 无请求体。后端逻辑：
+
+1. 先查询 `(versionId, userId, workspaceName=default)` 是否已有个人工作区记录。
+2. 存在：直接复用，返回 `DefaultPersonalWorkspaceResponse`（含 `personalWorkspaceId`、`personalWorkspaceName`、`personalWorkspaceBranch`、`runtimeWorkspace`）。
+3. 不存在：后台创建个人工作区（`git worktree add -b {branch}_{userId}_default`），返回新建记录。
+
+新创建的分支命名规则：`{应用版本分支}_{userId}_default`（与旧规则的 `_{personalWorkspaceId}` 不同）。已有旧个人工作区记录不做迁移，新规则仅影响 `workspaceName=default` 或新建的 `custom` 私有空间。
+
+响应 `DefaultPersonalWorkspaceResponse`：
+
+```json
+{
+  "personalWorkspaceId": "psw_...",
+  "personalWorkspaceName": "default",
+  "personalWorkspaceBranch": "feature_testagent_20260707_usr_xxx_default",
+  "runtimeWorkspace": {
+    "workspaceId": "wrk_...",
+    "name": "default",
+    "rootPath": "/data/.testagent/personal-worktrees/...",
+    ...
+  }
+}
+```
+
+### 工作区本地 Git Diff
+
+`GET /workspaces/{workspaceId}/git-diff` 无请求参数。后端通过 runtime workspace 反查 personal workspace，使用其 `repoRootPath` 执行 `git status --porcelain` + `git diff`，返回每个变更文件的 path、status、staged、patch、additions、deletions。不依赖 opencode `/vcs/diff`，opencode 服务异常不影响变更列表刷新。
+
+响应 `WorkspaceGitDiffResponse`：
+
+```json
+{
+  "files": [
+    {
+      "path": "src/App.java",
+      "status": "modified",
+      "staged": false,
+      "patch": "@@ -1,3 +1,4 @@\n...",
+      "additions": 3,
+      "deletions": 1
+    }
+  ]
+}
+```
+
+### 个人工作区提交并推送
+
+`POST /personal-workspaces/{personalWorkspaceId}/publish` 请求体：
+
+```json
+{
+  "commitMessage": "feat: 新增测试案例"
+}
+```
+
+后端执行流程：
+
+1. 在个人 worktree 中 `git add --all` + `git commit -m "..."`。
+2. `git push origin {personalBranch}` 推送个人分支。
+3. `git fetch origin` + `git merge {appVersionBranch}` 在个人 worktree 中尝试合并应用版本分支。
+
+合并结果：
+
+- **成功（MERGED）**：更新应用版本 `targetCommitHash` 和当前服务器 replica commit，广播其他服务器同步。
+- **冲突（CONFLICT）**：返回冲突文件列表，应用版本副本不进入冲突状态。用户在当前个人 worktree 中编辑冲突文件、保存后重新提交推送。
+
+响应 `PersonalWorkspacePublishResponse`：
+
+```json
+// 成功
+{
+  "status": "MERGED",
+  "personalWorkspaceId": "psw_...",
+  "versionId": "awv_...",
+  "conflictFiles": [],
+  "message": "合并成功: abc123..."
+}
+
+// 冲突
+{
+  "status": "CONFLICT",
+  "personalWorkspaceId": "psw_...",
+  "versionId": "awv_...",
+  "conflictFiles": ["src/App.java", "src/Config.java"],
+  "message": "合并冲突，请在个人工作区中解决冲突后重新提交并推送"
+}
+```
+
 前端两级菜单（应用工作空间→版本）使用说明：
 
 - 工作台左下角的"应用工作空间"按钮按当前应用（`selectedAppId`）查询 `GET /applications/{appId}/workspace-templates`，渲染第一级菜单（只显示 `workspaceName`，不显示 `directoryPath` / `branch`）。
 - 鼠标 hover 第一级菜单项时按需触发 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 加载该模板下的版本（懒加载，未展开的模板不发请求）。
-- 点击版本后调用 `GET /workspaces/{workspaceId}` 拉取对应的运行态 `Workspace`，再调用 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好，并触发工作台切换。
+- 点击版本后调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好，并触发工作台切换。
 - 当前版本匹配规则：优先按 `runtimeWorkspace.workspaceId` 精确匹配，其次按 `workspaceRootPath` 匹配 `selectedWorkspace.rootPath`。
 - 第二级菜单（版本列表）底部固定一行「+新增版本」：点击后弹 el-dialog，内嵌 `ElDatePicker`（`type=date`, `format=yyyyMMdd`），标准库直接选日期；非标准库先通过 `GET /repositories/{repoId}/branches` 加载分支列表，用户选择分支后再选日期。提交时调用 `POST /applications/{appId}/workspace-templates/{templateId}/versions`，请求体 `version` 字段为 `yyyyMMdd` 格式，非标准库同时传递 `branch`。成功后失效 `versionsByTemplateId` 缓存并把新建版本切到工作区。
 
@@ -1089,7 +1182,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 1. 调用 `GET /applications/{appId}/recent-workspace` 读取 `user_application_workspace_preferences` 中 `(user_id, app_id)` 对应的最近使用运行态 Workspace。
 2. 命中 recent：调用 `POST /workspaces/{workspaceId}/recent` 刷新时间戳（幂等），再切工作台。
-3. 未命中 recent：调用 `GET /applications/{appId}/workspace-templates` 拉取应用下的工作空间模板，取第一个模板；再调用 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 拉取该模板下的版本，取第一个版本的 `runtimeWorkspace`。
+3. 未命中 recent：调用 `GET /applications/{appId}/workspace-templates` 拉取应用下的工作空间模板，取第一个模板；再调用 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 拉取该模板下的版本，取第一个版本；然后调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在，使用其 `runtimeWorkspace`。
 4. 兜底命中：调用 `POST /workspaces/{workspaceId}/recent` 把该 Workspace 写入 `(user_id, app_id)` 与 `(user_id, NULL)` 两条偏好，下次进入直接命中第 2 步。
 5. 应用下没有任何工作空间模板/版本时保持空态，由用户手动选择本机目录。
 
