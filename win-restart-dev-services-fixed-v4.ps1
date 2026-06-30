@@ -672,14 +672,29 @@ function Wait-UntilHttpOk {
         [int]$Attempts = 90
     )
 
+    # 首次等待前先等待 3 秒，让进程有时间初始化并写入日志
+    Start-Sleep -Seconds 3
+
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
         if (Test-HttpOk $Url) {
-            Write-Host "OK $Label`: $Url"
+            Write-Host ""
+            Write-Host "OK $Label`: $Url" -ForegroundColor Green
             return
+        }
+        # 输出等待进度，避免用户以为脚本卡住
+        Write-Host -NoNewline "`rWaiting for $Label... ($attempt/$Attempts)"
+        # 每隔 5 次尝试输出日志尾部，帮助诊断启动问题
+        if ($attempt % 5 -eq 0 -and (Test-Path -LiteralPath $LogPath -PathType Leaf)) {
+            $lastLine = (Get-Content -LiteralPath $LogPath -Tail 1 -ErrorAction SilentlyContinue)
+            if ($lastLine) {
+                Write-Host ""
+                Write-Host "  latest log: $lastLine" -ForegroundColor DarkGray
+            }
         }
         Start-Sleep -Seconds 2
     }
 
+    Write-Host ""
     Write-Stderr "Timed out waiting for $Label`: $Url"
     Write-LogTail $LogPath
     exit 1
