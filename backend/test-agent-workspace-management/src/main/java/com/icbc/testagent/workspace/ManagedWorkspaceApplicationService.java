@@ -703,17 +703,27 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .map(workspace -> resolveRecentWorkspaceResponse(workspace));
     }
 
+    /**
+     * 回填 appId / versionId / applicationWorkspaceId 到 WorkspaceRuntimeResponse。
+     * 优先通过应用版本工作区反查，查不到时回退到个人工作区——后者同样需要填充 versionId 和
+     * applicationWorkspaceId，确保前端 syncCurrentVersionFromWorkspace 能正确匹配菜单高亮。
+     */
     private ManagedWorkspaceResponses.WorkspaceRuntimeResponse resolveRecentWorkspaceResponse(Workspace workspace) {
         Optional<ApplicationWorkspaceVersion> version =
                 managedWorkspaceRepository.findVersionByRuntimeWorkspace(workspace.workspaceId());
         String versionId = version.map(v -> v.versionId().value()).orElse(null);
         String applicationWorkspaceId = version.map(v -> v.applicationWorkspaceId().value()).orElse(null);
-        String appId = version
-                .map(v -> v.appId().value())
-                .orElseGet(() -> managedWorkspaceRepository
-                        .findPersonalWorkspaceByRuntimeWorkspace(workspace.workspaceId())
-                        .map(p -> p.appId().value())
-                        .orElse(null));
+        String appId = version.map(v -> v.appId().value()).orElse(null);
+        // 应用版本未关联该运行时 workspace 时，回退查个人工作区
+        if (appId == null) {
+            Optional<PersonalWorkspace> personal = managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspace.workspaceId());
+            if (personal.isPresent()) {
+                PersonalWorkspace pw = personal.get();
+                appId = pw.appId().value();
+                if (versionId == null) versionId = pw.versionId().value();
+                if (applicationWorkspaceId == null) applicationWorkspaceId = pw.applicationWorkspaceId().value();
+            }
+        }
         return ManagedWorkspaceResponses.WorkspaceRuntimeResponse.from(workspace, appId, versionId, applicationWorkspaceId);
     }
 
