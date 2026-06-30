@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-06-30 - 运行管理启停命令跨 Java 路由
+
+- Why: opencode-manager 只连接本服务器 Java，运行管理页可能从任意 Java 发起重启/停止，不能再假设入口后端一定和目标 manager 相连。
+- What: 新增 API 层 `RuntimeManagementBackendRoutingService`，按 Redis manager 快照定位 `containerId` 所属 `linuxServerId`，目标不是本机时透传用户 JWT 和 traceId 转发到目标 Java。
+- How: 目标 Java 收到带 `X-Test-Agent-Backend-Routed` 的请求后跳过再次路由，继续使用本机 `RuntimeManagementCommandService` 调 manager WebSocket。
+- Result: `mvn -pl test-agent-api -am -Dmaven.test.skip=true compile` 通过；目标 API 测试因既有 `CommonParameterManagementControllerTest.updateValue` 签名不匹配在 testCompile 阶段阻塞。
+
 ### 2026-06-30 - 修复 manager 注册早于 Java 后端拓扑落库的启动竞态
 
 - Why: 三服务重启后后端日志在 `2026-06-30T10:46:11.043+08:00` 出现 `opencode_manager_backend_connections.backend_process_id` 外键失败；根因是 Netty 端口已监听后，opencode-manager 可能抢在 `BackendJavaProcessLifecycleRunner` 首次 `registerHeartbeat` 落库 `backend_java_processes` 前完成 WebSocket register。

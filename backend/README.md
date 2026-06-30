@@ -120,7 +120,7 @@ cp .env.local.example .env.local
 
 用户专属 opencode 进程的 session/config 路径来自数据库 `common_parameters`，不是 `.env.local`。系统级数据根目录通过 `SYS_DATA_ROOT_DIR` 维护，默认值为 macOS `$HOME/.testagent`、Linux `/data/.testagent`、Windows `D:/data/.testagent`；Java 后端启动时把当前服务器 IPv4 写入 `SYS_DATA_ROOT_DIR/.serverip`，Go manager 在连接 Java 前按同一系统参数的平台默认路径读取该文件。每个 manager 只连接本服务器 Java；如果用户已有 ACTIVE binding 属于其他服务器，请求落到任意 Java 时会先通过 Redis Java 快照找到 binding 所属服务器的 `listenUrl` 并转发到目标 Java，由目标 Java 控制本服务器 managers，不允许当前 Java 静默迁移旧 binding。点击初始化且没有远端路由时，Java 后端按本实例已连接的健康容器视图选择进程数最少且有空闲端口的目标容器，再向该容器对应的 manager 下发 `start`；manager 使用通过 `configRequest/configUpdate` 同步的 `OPENCODE_PUBLIC_CONFIG_DIR`。目录存在且非空的检查只在目标 manager 所在服务器执行。目录缺失、为空、非目录或不可读时，manager 返回 `OPENCODE_UNAVAILABLE`，错误消息包含目标服务器和 manager 实际检查的配置目录，并提示联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化；Java 仅映射为统一平台错误，不在本机提前检查。
 
-运行管理中的 Java latest snapshot、在线心跳和 JVM 指标历史都以 `linuxServerId`（服务器 IPv4）为唯一键写入 Redis；`backendProcessId` 只表示当前 Java 实例、manager-backend 连接和拓扑连线，不作为同一服务器 Java 行或 JVM 趋势的身份。公共配置管理页同样按 `linuxServerId` 合并在线 Java 快照，避免 Java 重启后的 TTL 窗口内出现同 IP 重复服务器行。
+运行管理中的 Java latest snapshot、在线心跳和 JVM 指标历史都以 `linuxServerId`（服务器 IPv4）为唯一键写入 Redis；`backendProcessId` 只表示当前 Java 实例、manager-backend 连接和拓扑连线，不作为同一服务器 Java 行或 JVM 趋势的身份。超级管理员在运行管理页重启/停止 opencode server 时，入口 Java 会先按 Redis manager 快照定位 `containerId` 所属服务器，目标不是本机时转发到目标 Java，再由目标 Java 控制本服务器 manager。公共配置管理页同样按 `linuxServerId` 合并在线 Java 快照，避免 Java 重启后的 TTL 窗口内出现同 IP 重复服务器行。
 
 验证后端启动成功：
 ```bash
