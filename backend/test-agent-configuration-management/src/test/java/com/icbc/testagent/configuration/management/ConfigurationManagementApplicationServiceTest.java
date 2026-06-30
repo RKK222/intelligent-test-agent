@@ -16,6 +16,7 @@ import com.icbc.testagent.domain.configuration.CodeRepositoryId;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.icbc.testagent.domain.configuration.SshKeyId;
 import com.icbc.testagent.domain.configuration.UserSshKey;
+import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
 import java.nio.file.Path;
@@ -39,7 +40,8 @@ class ConfigurationManagementApplicationServiceTest {
                 repository,
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
-                sshKeyFixtures.encryptionService());
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
         when(repository.findRepositoryByGitUrl("https://gitee.com/demo/repo.git")).thenReturn(Optional.empty());
         when(repository.findRepositoryByEnglishName("demo")).thenReturn(Optional.empty());
         when(repository.saveRepository(argThat(saved -> "demo".equals(saved.englishName()))))
@@ -61,7 +63,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(ConfigurationManagementRepository.class),
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
-                sshKeyFixtures.encryptionService());
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
 
         assertThatThrownBy(() -> service.createRepository(
                 "https://gitee.com/demo/repo.git",
@@ -97,7 +100,8 @@ class ConfigurationManagementApplicationServiceTest {
                 repository,
                 org.mockito.Mockito.mock(UserRepository.class),
                 createTestCacheService(),
-                sshKeyFixtures.encryptionService());
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
 
         assertThatThrownBy(() -> service.updateRepository("repo_123", "演示库", "Demo", false))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
@@ -121,7 +125,7 @@ class ConfigurationManagementApplicationServiceTest {
         when(gitRemoteService.listBranches(eq(codeRepository.gitUrl()), eq(PRIVATE_KEY))).thenReturn(List.of("main"));
 
         ConfigurationManagementApplicationService service =
-                new ConfigurationManagementApplicationService(repository, userRepository, gitRemoteService, gitCloneCacheService, encryptionService);
+                new ConfigurationManagementApplicationService(repository, userRepository, gitRemoteService, gitCloneCacheService, encryptionService, org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
 
         assertThat(service.listBranches("repo_123", userId)).containsExactly("main");
         verify(gitRemoteService).listBranches(codeRepository.gitUrl(), PRIVATE_KEY);
@@ -138,7 +142,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 org.mockito.Mockito.mock(GitRemoteService.class),
                 createTestCacheService(),
-                sshKeyFixtures.encryptionService());
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
 
         SshKeyTestFixtures.EncryptedPayload payload = sshKeyFixtures.encryptPayload(PRIVATE_KEY);
         assertThatThrownBy(() -> service.addSshKey(
@@ -160,7 +165,8 @@ class ConfigurationManagementApplicationServiceTest {
                 org.mockito.Mockito.mock(UserRepository.class),
                 org.mockito.Mockito.mock(GitRemoteService.class),
                 createTestCacheService(),
-                sshKeyFixtures.encryptionService());
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
 
         SshKeyTestFixtures.EncryptedPayload payload = sshKeyFixtures.encryptPayload(PRIVATE_KEY);
         ConfigurationManagementResponses.SshKeyResponse response = service.addSshKey(

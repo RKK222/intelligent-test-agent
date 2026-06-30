@@ -23,6 +23,7 @@ import com.icbc.testagent.domain.configuration.CodeRepositoryId;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.icbc.testagent.domain.configuration.SshKeyId;
 import com.icbc.testagent.domain.configuration.UserSshKey;
+import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
@@ -35,6 +36,7 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 应用配置管理应用服务，集中编排配置持久化、Git 远端读取和个人 SSH key 加密。
@@ -50,6 +52,7 @@ public class ConfigurationManagementApplicationService {
     private final GitRemoteService gitRemoteService;
     private final GitCloneCacheService gitCloneCacheService;
     private final SshKeyEncryptionService sshKeyEncryptionService;
+    private final ManagedWorkspaceRepository managedWorkspaceRepository;
 
     /**
      * 注入领域端口和公共 Git/加密服务。
@@ -59,8 +62,9 @@ public class ConfigurationManagementApplicationService {
             ConfigurationManagementRepository configurationRepository,
             UserRepository userRepository,
             GitCloneCacheService gitCloneCacheService,
-            SshKeyEncryptionService sshKeyEncryptionService) {
-        this(configurationRepository, userRepository, new GitRemoteService(), gitCloneCacheService, sshKeyEncryptionService);
+            SshKeyEncryptionService sshKeyEncryptionService,
+            ManagedWorkspaceRepository managedWorkspaceRepository) {
+        this(configurationRepository, userRepository, new GitRemoteService(), gitCloneCacheService, sshKeyEncryptionService, managedWorkspaceRepository);
     }
 
     /**
@@ -71,12 +75,14 @@ public class ConfigurationManagementApplicationService {
             UserRepository userRepository,
             GitRemoteService gitRemoteService,
             GitCloneCacheService gitCloneCacheService,
-            SshKeyEncryptionService sshKeyEncryptionService) {
+            SshKeyEncryptionService sshKeyEncryptionService,
+            ManagedWorkspaceRepository managedWorkspaceRepository) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.gitRemoteService = Objects.requireNonNull(gitRemoteService, "gitRemoteService must not be null");
         this.gitCloneCacheService = Objects.requireNonNull(gitCloneCacheService, "gitCloneCacheService must not be null");
         this.sshKeyEncryptionService = Objects.requireNonNull(sshKeyEncryptionService, "sshKeyEncryptionService must not be null");
+        this.managedWorkspaceRepository = Objects.requireNonNull(managedWorkspaceRepository, "managedWorkspaceRepository must not be null");
     }
 
     public List<ApplicationResponse> listApplications(Boolean enabledOnly) {
@@ -258,11 +264,16 @@ public class ConfigurationManagementApplicationService {
         return workspaceResponse(configurationRepository.updateWorkspace(updated));
     }
 
+    @Transactional
     public void deleteWorkspace(String appId, String workspaceId) {
         ApplicationId applicationId = new ApplicationId(appId);
-        ApplicationWorkspace workspace = configurationRepository.findWorkspace(new ApplicationWorkspaceId(workspaceId))
+        ApplicationWorkspaceId applicationWorkspaceId = new ApplicationWorkspaceId(workspaceId);
+        ApplicationWorkspace workspace = configurationRepository.findWorkspace(applicationWorkspaceId)
                 .filter(found -> found.appId().equals(applicationId))
                 .orElseThrow(() -> notFound("应用工作空间不存在", "workspaceId", workspaceId));
+        // 先级联删除关联子表数据（同步记录 → 版本副本 → 个人工作空间 → 应用版本工作空间），
+        // 严格按子→父依赖顺序，避免外键约束冲突
+        managedWorkspaceRepository.deleteAllByApplicationWorkspaceId(applicationWorkspaceId);
         configurationRepository.deleteWorkspace(workspace.workspaceId());
     }
 
