@@ -6,7 +6,6 @@ import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
-import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
@@ -35,8 +34,7 @@ public class WorkspaceFileRoutingService {
 
     private final WorkspaceRepository workspaceRepository;
     private final UserOpencodeProcessAssignmentService assignmentService;
-    private final OpencodeProcessHeartbeatStore heartbeatStore;
-    private final ManagerControlSettings settings;
+    private final BackendJavaRouteResolver routeResolver;
     private final Clock clock;
 
     /**
@@ -46,9 +44,8 @@ public class WorkspaceFileRoutingService {
     public WorkspaceFileRoutingService(
             WorkspaceRepository workspaceRepository,
             UserOpencodeProcessAssignmentService assignmentService,
-            OpencodeProcessHeartbeatStore heartbeatStore,
-            ManagerControlSettings settings) {
-        this(workspaceRepository, assignmentService, heartbeatStore, settings, Clock.systemUTC());
+            BackendJavaRouteResolver routeResolver) {
+        this(workspaceRepository, assignmentService, routeResolver, Clock.systemUTC());
     }
 
     /**
@@ -57,14 +54,35 @@ public class WorkspaceFileRoutingService {
     public WorkspaceFileRoutingService(
             WorkspaceRepository workspaceRepository,
             UserOpencodeProcessAssignmentService assignmentService,
-            OpencodeProcessHeartbeatStore heartbeatStore,
-            ManagerControlSettings settings,
+            BackendJavaRouteResolver routeResolver,
             Clock clock) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
-        this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
-        this.settings = Objects.requireNonNull(settings, "settings must not be null");
+        this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+    }
+
+    /**
+     * 兼容旧单元测试构造器。
+     */
+    public WorkspaceFileRoutingService(
+            WorkspaceRepository workspaceRepository,
+            UserOpencodeProcessAssignmentService assignmentService,
+            com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore heartbeatStore,
+            ManagerControlSettings settings,
+            Clock clock) {
+        this(workspaceRepository, assignmentService, new BackendJavaRouteResolver(heartbeatStore, settings, clock), clock);
+    }
+
+    /**
+     * 兼容旧单元测试构造器。
+     */
+    public WorkspaceFileRoutingService(
+            WorkspaceRepository workspaceRepository,
+            UserOpencodeProcessAssignmentService assignmentService,
+            com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore heartbeatStore,
+            ManagerControlSettings settings) {
+        this(workspaceRepository, assignmentService, heartbeatStore, settings, Clock.systemUTC());
     }
 
     /**
@@ -111,7 +129,7 @@ public class WorkspaceFileRoutingService {
             String staleLinuxServerId,
             String agentLinuxServerId,
             String traceId) {
-        if (!settings.linuxServerId().value().equals(agentLinuxServerId)) {
+        if (!routeResolver.isCurrent(agentLinuxServerId)) {
             return workspace;
         }
         if (hasReadyBackend(new LinuxServerId(staleLinuxServerId))) {
@@ -125,10 +143,15 @@ public class WorkspaceFileRoutingService {
     }
 
     private boolean hasReadyBackend(LinuxServerId linuxServerId) {
-        if (settings.linuxServerId().equals(linuxServerId)) {
+        if (routeResolver.isCurrent(linuxServerId)) {
             return true;
         }
-        return readyBackends().stream().anyMatch(backend -> backend.linuxServerId().equals(linuxServerId));
+        try {
+            routeResolver.requireBackend(linuxServerId);
+            return true;
+        } catch (PlatformException exception) {
+            return false;
+        }
     }
 
     private boolean rootPathAvailable(String rootPath) {
@@ -152,7 +175,7 @@ public class WorkspaceFileRoutingService {
         } catch (PlatformException ignored) {
             agentLinuxServerId = null;
         }
-        List<BackendRuntimeSnapshot> snapshots = liveBackendSnapshots();
+        List<BackendRuntimeSnapshot> snapshots = routeResolver.liveBackendSnapshots(BACKEND_LIMIT);
         Map<String, LinuxServer> servers = new LinkedHashMap<>();
         Map<String, BackendJavaProcess> backendByServer = new LinkedHashMap<>();
         for (BackendRuntimeSnapshot snapshot : snapshots) {
@@ -160,7 +183,6 @@ public class WorkspaceFileRoutingService {
             BackendJavaProcess backend = snapshot.backendProcess();
             backendByServer.putIfAbsent(backend.linuxServerId().value(), backend);
         }
-        backendByServer.putIfAbsent(settings.linuxServerId().value(), currentBackend());
         String currentAgentServer = agentLinuxServerId;
         return backendByServer.values().stream()
                 .sorted(Comparator.comparing(backend -> backend.linuxServerId().value()))
@@ -188,44 +210,7 @@ public class WorkspaceFileRoutingService {
     }
 
     private BackendJavaProcess backendFor(LinuxServerId linuxServerId) {
-        return readyBackends().stream()
-                .filter(backend -> backend.linuxServerId().equals(linuxServerId))
-                .findFirst()
-                .orElseGet(() -> {
-                    if (settings.linuxServerId().equals(linuxServerId)) {
-                        return currentBackend();
-                    }
-                    throw new PlatformException(
-                            ErrorCode.OPENCODE_UNAVAILABLE,
-                            "目标服务器后端不可用",
-                            Map.of("linuxServerId", linuxServerId.value()));
-                });
-    }
-
-    private List<BackendJavaProcess> readyBackends() {
-        return liveBackendSnapshots().stream()
-                .map(BackendRuntimeSnapshot::backendProcess)
-                .toList();
-    }
-
-    private List<BackendRuntimeSnapshot> liveBackendSnapshots() {
-        return heartbeatStore.liveBackendSnapshots().stream()
-                .limit(BACKEND_LIMIT)
-                .toList();
-    }
-
-    private BackendJavaProcess currentBackend() {
-        Instant now = Instant.now(clock);
-        return new BackendJavaProcess(
-                new com.icbc.testagent.domain.opencodeprocess.BackendProcessId("bjp_current_backend"),
-                settings.linuxServerId(),
-                settings.listenUrl(),
-                com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus.READY,
-                now,
-                now,
-                now,
-                now,
-                "trace_current_backend");
+        return routeResolver.requireBackend(linuxServerId);
     }
 
     private String defaultDirectory(LinuxServer server, BackendJavaProcess backend) {
@@ -235,7 +220,7 @@ public class WorkspaceFileRoutingService {
                 return value;
             }
         }
-        if (backend.linuxServerId().equals(settings.linuxServerId())) {
+        if (routeResolver.isCurrent(backend.linuxServerId())) {
             return Path.of("").toAbsolutePath().normalize().toString();
         }
         return "";

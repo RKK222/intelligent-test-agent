@@ -4,7 +4,6 @@ import com.icbc.testagent.common.net.LinuxServerIpResolver;
 import com.icbc.testagent.domain.configuration.CommonParameterValues;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.observability.TraceIdSupport;
-import com.icbc.testagent.opencode.runtime.process.LocalDirectSettings;
 import com.icbc.testagent.opencode.runtime.process.OpencodeProcessHeartbeatMaintenanceService;
 import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
@@ -71,19 +70,6 @@ public class OpencodeManagerControlConfig {
     }
 
     /**
-     * 将 app 配置中的本地开发短路开关 + baseUrl 绑定为 runtime 可注入的 settings。
-     *
-     * <p>本地开发者开启后，{@link com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService}
-     * 会跳过 database topology / binding / manager 健康检测，直接合成指向 baseUrl 的 READY 进程对象。
-     * 生产必须保持 false。
-     */
-    @Bean
-    LocalDirectSettings localDirectSettings(TestAgentRuntimeProperties properties) {
-        TestAgentRuntimeProperties.Opencode opencode = properties.getOpencode();
-        return new LocalDirectSettings(opencode.isLocalDirect(), opencode.getLocalDirectBaseUrl());
-    }
-
-    /**
      * 注册当前后端 Java 进程生命周期 runner。
      */
     @Bean
@@ -91,10 +77,9 @@ public class OpencodeManagerControlConfig {
             BackendJavaProcessLifecycleService lifecycleService,
             OpencodeProcessHeartbeatMaintenanceService heartbeatMaintenanceService,
             ManagerControlSettings settings,
-            LocalDirectSettings localDirectSettings,
             ServerIpFileWriter serverIpFileWriter) {
         return new BackendJavaProcessLifecycleRunner(
-                lifecycleService, heartbeatMaintenanceService, settings, localDirectSettings, serverIpFileWriter);
+                lifecycleService, heartbeatMaintenanceService, settings, serverIpFileWriter);
     }
 
     /**
@@ -105,7 +90,6 @@ public class OpencodeManagerControlConfig {
         private final BackendJavaProcessLifecycleService lifecycleService;
         private final OpencodeProcessHeartbeatMaintenanceService heartbeatMaintenanceService;
         private final ManagerControlSettings settings;
-        private final LocalDirectSettings localDirectSettings;
         private final ServerIpFileWriter serverIpFileWriter;
         private ScheduledExecutorService executor;
 
@@ -113,20 +97,16 @@ public class OpencodeManagerControlConfig {
                 BackendJavaProcessLifecycleService lifecycleService,
                 OpencodeProcessHeartbeatMaintenanceService heartbeatMaintenanceService,
                 ManagerControlSettings settings,
-                LocalDirectSettings localDirectSettings,
                 ServerIpFileWriter serverIpFileWriter) {
             this.lifecycleService = lifecycleService;
             this.heartbeatMaintenanceService = heartbeatMaintenanceService;
             this.settings = settings;
-            this.localDirectSettings = localDirectSettings;
             this.serverIpFileWriter = serverIpFileWriter;
         }
 
         @Override
         public void run(ApplicationArguments args) {
-            if (!localDirectSettings.enabled()) {
-                serverIpFileWriter.write(settings.linuxServerId().value());
-            }
+            serverIpFileWriter.write(settings.linuxServerId().value());
             lifecycleService.registerHeartbeat(TraceIdSupport.generate());
             executor = Executors.newScheduledThreadPool(2, runnable -> {
                 Thread thread = new Thread(runnable, "opencode-manager-backend-heartbeat");

@@ -308,15 +308,6 @@ public class TestAgentRuntimeProperties {
     public static class Opencode {
         private List<Node> nodes = new ArrayList<>();
         private final ManagerControl managerControl = new ManagerControl();
-        /**
-         * 本地开发短路开关：true 时直接走预设的 baseUrl，不再校验 database 拓扑 /
-         * binding / manager 健康检测。生产必须保持 false。
-         */
-        private boolean localDirect = false;
-        /**
-         * 本地开发短路使用的 opencode server baseUrl（默认 127.0.0.1:4096）。
-         */
-        private String localDirectBaseUrl = "http://127.0.0.1:4096";
 
         /**
          * 返回配置化 opencode 节点列表。
@@ -339,35 +330,6 @@ public class TestAgentRuntimeProperties {
             return managerControl;
         }
 
-        /**
-         * 返回是否启用本地开发短路模式（跳过 database 校验、直连 baseUrl）。
-         */
-        public boolean isLocalDirect() {
-            return localDirect;
-        }
-
-        /**
-         * 绑定是否启用本地开发短路模式。生产必须保持 false。
-         */
-        public void setLocalDirect(boolean localDirect) {
-            this.localDirect = localDirect;
-        }
-
-        /**
-         * 返回本地开发短路使用的 opencode server baseUrl。
-         */
-        public String getLocalDirectBaseUrl() {
-            return localDirectBaseUrl;
-        }
-
-        /**
-         * 绑定本地开发短路使用的 baseUrl；空值会回退到默认 127.0.0.1:4096。
-         */
-        public void setLocalDirectBaseUrl(String localDirectBaseUrl) {
-            this.localDirectBaseUrl = (localDirectBaseUrl == null || localDirectBaseUrl.isBlank())
-                    ? "http://127.0.0.1:4096"
-                    : localDirectBaseUrl.trim();
-        }
     }
 
     /**
@@ -380,11 +342,6 @@ public class TestAgentRuntimeProperties {
         private Duration backendStaleAfter = Duration.ofSeconds(10);
         private Duration commandTimeout = Duration.ofSeconds(10);
         private int backendDiscoveryLimit = 100;
-        /**
-         * 控制面网关模式：socket=生产 WebSocket；local=本地直连 baseUrl 的开发态占位，
-         * 不依赖 opencode-manager 长连接。默认 socket。
-         */
-        private String gatewayMode = "socket";
 
         /**
          * 返回 manager 控制面专用 token。
@@ -470,19 +427,6 @@ public class TestAgentRuntimeProperties {
             this.backendDiscoveryLimit = backendDiscoveryLimit;
         }
 
-        /**
-         * 返回控制面网关模式：socket（生产 WebSocket）/ local（本地直连）。
-         */
-        public String getGatewayMode() {
-            return gatewayMode;
-        }
-
-        /**
-         * 绑定控制面网关模式，未知值会被规整为 socket。
-         */
-        public void setGatewayMode(String gatewayMode) {
-            this.gatewayMode = (gatewayMode == null || gatewayMode.isBlank()) ? "socket" : gatewayMode.trim();
-        }
     }
 
     /**

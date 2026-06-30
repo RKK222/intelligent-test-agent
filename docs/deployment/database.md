@@ -315,7 +315,7 @@ Java 后端启动时会把当前服务器 IPv4 写入 `SYS_DATA_ROOT_DIR/.server
 | `OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT` | `all` | `${SYS_DATA_ROOT_DIR}/agent-opencode/.configdev/` |
 | `OPENCODE_SESSION_DIR` | `all` | `${SYS_DATA_ROOT_DIR}/agent-opencode/.session/` |
 
-迁移先 `delete` 上述 6 个参数的既有 `linux`/`windows`/`macos` 行，再以 `on conflict (parameter_english, platform) do update` 写入 `all` 行。`SYS_DATA_ROOT_DIR` 仍保持三平台行不变；`all` 行在运行态由 `CommonParameterReferenceResolver` 按当前/目标平台作为解析上下文展开 `${SYS_DATA_ROOT_DIR}`（见 `CommonParameterReferenceResolver` 的 `all` 引用平台参数支持）。
+迁移先 `delete` 上述 6 个参数的既有 `linux`/`windows`/`macos` 行，再用普通 `insert` 写入 `all` 行；该写法保持 PostgreSQL 与 H2 PostgreSQL 模式的 Flyway 测试兼容。`SYS_DATA_ROOT_DIR` 仍保持三平台行不变；`all` 行在运行态由 `CommonParameterReferenceResolver` 按当前/目标平台作为解析上下文展开 `${SYS_DATA_ROOT_DIR}`（见 `CommonParameterReferenceResolver` 的 `all` 引用平台参数支持）。
 
 兼容策略：
 
@@ -710,7 +710,7 @@ V10 种子数据对 F-COSS 的影响：
 - `process_id` 以 `ocp_` 开头（V15 校验），`manager_id` 以 `mgr_` 开头（V15 校验）。
 - `OpencodeManagerBackendConnection` 的 `backend_process_id` 形如 `bjp_xxx`，由后端 `BackendJavaProcessLifecycleService.registerHeartbeat` 在启动时为本实例补齐，因此 migration 不预置该行。
 - 补齐逻辑详见 `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/process/socket/BackendJavaProcessLifecycleService.java#bootstrapLocalManagerConnections`，仅在 (manager, backend) 组合不存在连接行时插入；已有行只更新兼容字段 `last_heartbeat_at` / `status`。真实 manager 连上后由 `ManagerControlApplicationService.register` 维护持久连接行，在线连接状态由 Redis manager 快照表达。
-- 后续完整迁移会执行 `V20260627000000__cleanup_loopback_linux_server_seed.sql` 清理这些 `127.0.0.1` 行；本地开发不再依赖 V17 数据，必须通过 `local-direct` 或真实 manager/backend 心跳注册获得运行态拓扑。
+- 后续完整迁移会执行 `V20260627000000__cleanup_loopback_linux_server_seed.sql` 清理这些 `127.0.0.1` 行；本地开发不再依赖 V17 数据，必须通过真实 manager/backend 心跳注册获得运行态拓扑。
 
 兼容策略：
 
@@ -742,9 +742,8 @@ V10 种子数据对 F-COSS 的影响：
 
 本地开发健康检测/启动网关选择：
 
-- 默认 `test-agent.opencode.manager-control.gateway-mode=socket`（生产）：`SocketOpencodeProcessManagerGateway` 走 manager WebSocket，本地没起 manager 时 health/start 都会返回 `OPENCODE_UNAVAILABLE`，前端状态会落到 "opencode 进程健康检测失败，需要重新初始化"。
-- `application-local.yml` 默认 `gateway-mode=local`（受 `TEST_AGENT_OPENCODE_GATEWAY_MODE` 覆盖）：`LocalOpencodeProcessManagerGateway` 直连 `baseUrl` 跑 HTTP GET，`startProcess` 走占位返回；本机 127.0.0.1:4096 真的在跑 opencode server 时，前台状态会从 UNAVAILABLE 升级为 READY。
-- `local-direct` 完全短路：`application-local.yml` / `application-guo.yml` 默认 `test-agent.opencode.local-direct=true`（受 `TEST_AGENT_OPENCODE_LOCAL_DIRECT` 覆盖），`UserOpencodeProcessAssignmentService` 在 `status` / `initialize` / `requireReadyProcess` 三个入口跳过 database topology / user binding / manager health 校验链路，合成指向 `test-agent.opencode.local-direct-base-url`（默认 `http://127.0.0.1:4096`）的 READY 进程对象；无论是否存在 V17 历史种子、真实 opencode server 或 manager 状态如何，本地登录后状态接口都直接落到 READY。生产请把 `local-direct` 设回 `false`（也是 Java 字段默认值），保留 topology / health 校验。
+- `SocketOpencodeProcessManagerGateway` 是唯一生产装配，本地和生产都走 manager WebSocket；本地没起 manager 时 health/start 都会返回 `OPENCODE_UNAVAILABLE`，前端状态会落到 "opencode 进程健康检测失败，需要重新初始化"。
+- `application-local.yml` / `application-guo.yml` 不再配置 `gateway-mode=local` 或 `local-direct`；本地调试用户进程必须启动 Go manager，并依赖真实 manager/backend 心跳注册获得运行态拓扑。
 
 ## 后续 migration 版本规则
 

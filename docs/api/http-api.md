@@ -1224,7 +1224,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 ### 用户 opencode 进程 API
 
-用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会通过 Redis `liveBackendSnapshots()` 找到 binding 所属服务器 Java 的 `listenUrl`，透传原始 `Authorization`、`X-Trace-Id`、请求 body 和统一错误响应转发到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。是否已分配只以 `user_opencode_process_bindings(user_id, agent_id)` 的 ACTIVE 记录为准；`GET /processes/me` 目标后端不在线、转发失败或目标返回 5xx 时返回 200 成功响应，`data.status=UNAVAILABLE`、`serviceStatus=NOT_RUNNING`、`serviceAddress={绑定服务器}:{端口}`，表示已分配但暂无法确认健康状态。初始化、Run 启动和 runtime 代理仍在目标后端不可用时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding，也不会在当前 Java 启动旧 binding。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程；无 manager 连接、命令超时或 manager 返回失败时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT` 或 `OPENCODE_BAD_GATEWAY`。
+用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会先用统一 `BackendJavaRouteResolver` 找到 binding 所属服务器 Java 的 `listenUrl`，再通过统一 `BackendHttpForwarder` 透传原始 `Authorization`、`X-Trace-Id`、query、请求 body 和统一错误响应到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。配置管理创建应用工作区、应用版本工作区创建、版本 `git-pull`、Run 创建、初始化和 runtime 代理都纳入同一用户 binding 路由判断。是否已分配只以 `user_opencode_process_bindings(user_id, agent_id)` 的 ACTIVE 记录为准；`GET /processes/me` 目标后端不在线、转发失败或目标返回 5xx 时返回 200 成功响应，`data.status=UNAVAILABLE`、`serviceStatus=NOT_RUNNING`、`serviceAddress={绑定服务器}:{端口}`，表示已分配但暂无法确认健康状态。初始化、Run 启动和 runtime 代理仍在目标后端不可用时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding，也不会在当前 Java 启动旧 binding。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程；无 manager 连接、命令超时或 manager 返回失败时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT` 或 `OPENCODE_BAD_GATEWAY`。本地和生产都必须启动 Go manager，不再支持 `local-direct` 或 `gateway-mode=local` 绕过。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -1259,7 +1259,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 - `bindingClearable`：当 `status=UNAVAILABLE` 时，如果后端检测到 `execution_nodes` 中仍有可路由的固定节点（例如本地启动的 opencode）作为兜底，会把 `bindingClearable` 置为 `true`，前端可以展示"重置绑定"按钮。
 - `localFallback`：当 `status=READY` 时，如果响应已经回退到 `execution_nodes` 中的固定节点而非用户专属进程，`localFallback` 为 `true`；此时 `baseUrl` 来自固定节点，前端可以直接发起对话。
 - `serviceStatus`：头像菜单使用的服务展示状态，取值为 `UNASSIGNED`（未分配）、`RUNNING`（运行中）、`NOT_RUNNING`（已分配但未运行或健康不可确认）；该字段不改变 `status` 的对话门禁语义。
-- `serviceAddress`：头像菜单展示地址，格式为 `{服务器ip}:{内部opencode端口}`；仅当前用户已有 ACTIVE 分配或 local-direct 合成进程时返回，来源优先是 binding 表中的服务器和端口。
+- `serviceAddress`：头像菜单展示地址，格式为 `{服务器ip}:{内部opencode端口}`；仅当前用户已有 ACTIVE 分配时返回，来源优先是 binding 表中的服务器和端口。
 - `message`：面向用户的状态说明或失败原因；目标后端不可用的状态查询会说明已分配但暂无法确认健康状态，命中 `localFallback` 时通常包含"回退到本地 opencode 节点"。
 - `processId`、`linuxServerId`、`containerId`、`port`、`baseUrl`：仅在已有或成功初始化进程时返回；`baseUrl` 固定为 `http://{linuxServerId}:{port}`。
 - `checkedAt`：本次状态计算时间。
@@ -1309,7 +1309,7 @@ WebSocket 协议版本固定为 `opencode-manager.v1`。文本帧是 JSON envelo
 
 ### opencode runtime 运行管理 API
 
-运行管理 API 是高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`，非法分页、状态、容器 ID 或端口参数返回 `VALIDATION_ERROR`。overview 和 metrics 只读展示当前 Redis 中仍在线的 Java 后端、容器、manager、manager 管理的本地 opencode server 明细和 manager-backend 连接；页面底部用户进程列表不再从 overview 展示全部进程，而是通过 `user-processes` 按用户关键字查询数据库记录并主动调用 manager health 获取实际状态。运行管理前端展示形态由 overview 现有 wire shape 派生：按 `linuxServerId` 合并 `linuxServers[]` 与 `backendProcesses[]` 为“服务器 / Java 进程”列表，按 `containerId` 合并 `containers[]` 与 `managers[]` 为“容器 / 管理进程”列表，并用 `backendProcesses[]`、`managerBackendConnections[]`、`managers[].managedProcesses[]` 渲染 `Java -> Manager -> opencode server` 节点连线拓扑图。restart/stop 只按 `containerId + port` 发起 HTTP 命令；入口 Java 先用 Redis manager 快照定位容器所属 `linuxServerId`，必要时把同一 HTTP 请求转发到目标 Java，由目标 Java 向本服务器 manager WebSocket 长连接发送控制命令，不直接访问 opencode server，不新增数据库记录。停止成功后前端会先从当前 overview 缓存局部移除对应 `containerId + port` 的明细并更新容量，随后由 manager 立即心跳和周期心跳同步 Redis latest snapshot。Redis 不可用时 overview 不会回退数据库 heartbeat 字段，命令路由也无法定位远端 Java。
+运行管理 API 是高权限平台接口，只允许已认证用户且角色包含 `SUPER_ADMIN` 访问。未认证返回 `UNAUTHENTICATED`，非超级管理员返回 `FORBIDDEN`，非法分页、状态、容器 ID 或端口参数返回 `VALIDATION_ERROR`。overview 和 metrics 只读展示当前 Redis 中仍在线的 Java 后端、容器、manager、manager 管理的本地 opencode server 明细和 manager-backend 连接；页面底部用户进程列表不再从 overview 展示全部进程，而是通过 `user-processes` 按用户关键字查询数据库记录，只在进程所属 `linuxServerId` 为当前 Java 时主动调用本机 manager health，远端进程返回 `REMOTE_SERVER/CHECK_SKIPPED` 避免随机 Java 控制其他服务器 manager。运行管理前端展示形态由 overview 现有 wire shape 派生：按 `linuxServerId` 合并 `linuxServers[]` 与 `backendProcesses[]` 为“服务器 / Java 进程”列表，按 `containerId` 合并 `containers[]` 与 `managers[]` 为“容器 / 管理进程”列表，并用 `backendProcesses[]`、`managerBackendConnections[]`、`managers[].managedProcesses[]` 渲染 `Java -> Manager -> opencode server` 节点连线拓扑图。restart/stop 只按 `containerId + port` 发起 HTTP 命令；入口 Java 先用统一 `BackendJavaRouteResolver` 定位容器所属 `linuxServerId`，必要时把同一 HTTP 请求通过 `BackendHttpForwarder` 转发到目标 Java，由目标 Java 向本服务器 manager WebSocket 长连接发送控制命令，不直接访问 opencode server，不新增数据库记录。停止成功后前端会先从当前 overview 缓存局部移除对应 `containerId + port` 的明细并更新容量，随后由 manager 立即心跳和周期心跳同步 Redis latest snapshot。Redis 不可用时 overview 不会回退数据库 heartbeat 字段，命令路由也无法定位远端 Java。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|

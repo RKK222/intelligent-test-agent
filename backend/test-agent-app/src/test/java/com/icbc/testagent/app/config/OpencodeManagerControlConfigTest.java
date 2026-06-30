@@ -6,7 +6,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
-import com.icbc.testagent.opencode.runtime.process.LocalDirectSettings;
 import com.icbc.testagent.opencode.runtime.process.OpencodeProcessHeartbeatMaintenanceService;
 import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
@@ -33,7 +32,6 @@ class OpencodeManagerControlConfigTest {
                         lifecycleService,
                         heartbeatMaintenanceService,
                         managerControlSettings(),
-                        LocalDirectSettings.disabled(),
                         serverIpFileWriter);
 
         assertThatCode(() -> runner.run(new DefaultApplicationArguments()))

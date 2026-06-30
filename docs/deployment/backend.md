@@ -292,26 +292,9 @@ V17 migration（`backend/test-agent-persistence/src/main/resources/db/migration/
 
 `opencode_manager_backend_connections` 的 `backend_process_id` 形如 `bjp_xxx`，是后端 Java 实例 ID；后端启动时由 `BackendJavaProcessLifecycleService.registerHeartbeat` 在拓扑落库阶段补齐 `(mgr_local_4096, bjp_xxx)` 这一行，状态 `CONNECTED`。该自举仅在 (manager, backend) 组合尚无连接行时插入；真实 manager WebSocket 连上后由 `ManagerControlApplicationService.register` 维护持久连接行，在线连接视图由 Redis manager 快照表达。
 
-`local` profile 默认 `test-agent.opencode.manager-control.gateway-mode=local`（受 `TEST_AGENT_OPENCODE_GATEWAY_MODE` 覆盖），加载 `LocalOpencodeProcessManagerGateway`：
+`local` / `guo` profile 不再支持 `test-agent.opencode.manager-control.gateway-mode=local`、`test-agent.opencode.local-direct` 或本地直连 `baseUrl` 绕过。用户进程状态、初始化、Run 启动、运行管理 restart/stop 都统一通过 `SocketOpencodeProcessManagerGateway` 发送本服务器 manager WebSocket 命令。
 
-- `checkHealth` 直接对 `opencode_server_processes.baseUrl` 跑 HTTP GET，返回 2xx/3xx 视为健康，因此只要本机 127.0.0.1:4096 真的在跑 opencode server，前台用户进程状态即可落到 `READY`。
-- `startProcess` 走占位返回 `pid=0, status=local-skip`，不实际拉起进程，假设本地手动启动的 127.0.0.1:4096 已就绪。
-
-切换生产请把 `gateway-mode` 显式设回 `socket`（默认），加载 `SocketOpencodeProcessManagerGateway` 走 manager WebSocket；切回 `local` 仅作为没有 opencode-manager 容器时的开发态占位，不替代生产部署。
-
-## 本地开发 opencode 短路模式
-
-`local` / `guo`（开发常用 profile）默认启用 `test-agent.opencode.local-direct=true`（受 `TEST_AGENT_OPENCODE_LOCAL_DIRECT` 覆盖，默认 `true`）。该开关在 `UserOpencodeProcessAssignmentService` 的 `status` / `initialize` / `requireReadyProcess` 三个入口短路整个 topology / binding / health 校验链路，直接合成一个指向 `test-agent.opencode.local-direct-base-url`（默认 `http://127.0.0.1:4096`）的 READY 进程对象给前端。
-
-行为说明：
-
-- `status`：不查 `user_opencode_process_bindings`、不调用 `LocalOpencodeProcessManagerGateway.checkHealth`，返回 `本地开发模式：直连 http://127.0.0.1:4096`。
-- `initialize`：不查容器、不调用 `gateway.startProcess`，直接返回上述合成响应。
-- `requireReadyProcess`：不校验 binding / process 健康状态，直接返回 `node_ocp_local_direct` 的兼容 `ExecutionNode` 给 Run 启动链路。
-- 合成进程对象走 `OpencodeServerProcess` 完整校验：host/port 从 baseUrl 解析，构造的 `linuxServerId=127.0.0.1, port=4096, baseUrl=http://127.0.0.1:4096`，因此能通过 V15 CHECK 约束（`base_url = 'http://' || linux_server_id || ':' || port`）。
-- baseUrl 无法解析（空 / 非法）时回退到默认 `http://127.0.0.1:4096`，避免状态接口 500。
-
-生产部署务必保持 `local-direct=false`（也是 Java 字段的默认值），避免跳过 topology 校验引入误判。如果生产环境临时无法访问 manager，可单独把 `gateway-mode` 切到 `local`（仍走实际 HTTP 探测），但 `local-direct` 只能保留 `false`。
+本地开发也必须启动 Go manager，并确保 Java 启动时写入的 `SYS_DATA_ROOT_DIR/.serverip` 能被 manager 读取。前端请求可以落到任意 Java；入口 Java 先用统一 Java 路由解析器定位目标 `linuxServerId/containerId` 对应的 Java，必要时通过后端 HTTP 转发到目标 Java，只有目标 Java 控制本服务器 manager。
 
 ## 连接池配置
 

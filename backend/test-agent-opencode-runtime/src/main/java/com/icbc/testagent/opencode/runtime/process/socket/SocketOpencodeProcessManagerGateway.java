@@ -14,18 +14,12 @@ import com.icbc.testagent.opencode.runtime.process.OpencodeProcessStartCommand;
 import com.icbc.testagent.opencode.runtime.process.OpencodeProcessStartResult;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 /**
  * 基于 manager WebSocket 长连接的生产网关，实现用户进程启动和健康检测命令分发。
- *
- * <p>仅在 {@code test-agent.opencode.manager-control.gateway-mode=socket}（默认）时启用；
- * 本地开发可改用 {@link LocalOpencodeProcessManagerGateway} 让控制面命令直接打 opencode
- * server 的 baseUrl，绕开 manager WebSocket 依赖。
  */
 @Service
-@ConditionalOnProperty(name = "test-agent.opencode.manager-control.gateway-mode", havingValue = "socket", matchIfMissing = true)
 public class SocketOpencodeProcessManagerGateway implements OpencodeProcessManagerGateway {
 
     private static final String OPENCODE_UNAVAILABLE_ERROR_CODE = "OPENCODE_UNAVAILABLE";

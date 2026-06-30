@@ -21,7 +21,7 @@ import reactor.core.publisher.Mono;
 @Order(Ordered.HIGHEST_PRECEDENCE + 25)
 class UserOpencodeBackendRoutingWebFilter implements WebFilter {
 
-    static final String ROUTED_HEADER = "X-Test-Agent-Backend-Routed";
+    static final String ROUTED_HEADER = BackendHttpForwarder.ROUTED_HEADER;
 
     private final UserOpencodeBackendRoutingService routingService;
 

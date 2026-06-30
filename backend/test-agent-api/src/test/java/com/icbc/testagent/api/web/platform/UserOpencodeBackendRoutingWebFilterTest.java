@@ -112,6 +112,21 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void routesConfigurationWorkspaceCreationBecauseItRequiresUserOpencodeServer() {
+        assertRequestIsForwarded("/api/internal/platform/configuration-management/applications/app_1/workspaces");
+    }
+
+    @Test
+    void routesManagedWorkspaceVersionCreationBecauseItRequiresUserOpencodeServer() {
+        assertRequestIsForwarded("/api/internal/platform/workspace-management/applications/app_1/workspace-templates/tpl_1/versions");
+    }
+
+    @Test
+    void routesManagedWorkspaceGitPullBecauseItRequiresUserOpencodeServer() {
+        assertRequestIsForwarded("/api/internal/platform/workspace-management/workspace-versions/ver_1/git-pull");
+    }
+
+    @Test
     void missingTargetBackendReturnsUnavailableWithoutCallingLocalController() {
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
@@ -226,6 +241,34 @@ class UserOpencodeBackendRoutingWebFilterTest {
                 NOW,
                 UserOpencodeServiceStatus.NOT_RUNNING,
                 "10.8.0.22:4097");
+    }
+
+    private static void assertRequestIsForwarded(String path) {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
+                .thenReturn(Optional.of("10.8.0.22"));
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, """
+                {"success":true,"traceId":"trace_1234567890abcdef","data":{}}
+                """);
+        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore("10.8.0.22"), httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .post(path)
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .header(org.springframework.http.HttpHeaders.AUTHORIZATION, "Bearer user-token")
+                .header(org.springframework.http.HttpHeaders.CONTENT_TYPE, "application/json")
+                .body("{\"operationId\":\"op_1\"}"));
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(exchange1 -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isFalse();
+        assertThat(httpClient.requests).singleElement().satisfies(request -> {
+            assertThat(request.uri().toString()).isEqualTo("http://10.8.0.22:8080" + path);
+            assertThat(request.headers().firstValue(UserOpencodeBackendRoutingWebFilter.ROUTED_HEADER)).contains("true");
+        });
     }
 
     private static UserOpencodeBackendRoutingWebFilter filter(

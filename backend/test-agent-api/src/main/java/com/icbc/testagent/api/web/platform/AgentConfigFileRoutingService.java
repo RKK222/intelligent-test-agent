@@ -3,16 +3,9 @@ package com.icbc.testagent.api.web.platform;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
-import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus;
-import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
-import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
-import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
-import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
+import com.icbc.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.icbc.testagent.opencode.runtime.process.WorkspaceFileRoutingService;
-import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import com.icbc.testagent.workspace.AgentConfigApplicationService;
-import com.icbc.testagent.workspace.WorkspaceServerIdentity;
-import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
@@ -27,19 +20,13 @@ class AgentConfigFileRoutingService {
     private static final String SCOPE_WORKSPACE = "WORKSPACE";
 
     private final AgentConfigApplicationService service;
-    private final WorkspaceServerIdentity serverIdentity;
-    private final OpencodeProcessHeartbeatStore heartbeatStore;
-    private final ManagerControlSettings settings;
+    private final BackendJavaRouteResolver routeResolver;
 
     AgentConfigFileRoutingService(
             AgentConfigApplicationService service,
-            WorkspaceServerIdentity serverIdentity,
-            OpencodeProcessHeartbeatStore heartbeatStore,
-            ManagerControlSettings settings) {
+            BackendJavaRouteResolver routeResolver) {
         this.service = Objects.requireNonNull(service, "service must not be null");
-        this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
-        this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
-        this.settings = Objects.requireNonNull(settings, "settings must not be null");
+        this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
     }
 
     /**
@@ -61,7 +48,7 @@ class AgentConfigFileRoutingService {
                 linuxServerId,
                 trimTrailingSlash(backend.listenUrl()),
                 WorkspaceFileRoutingService.WEB_SOCKET_PATH,
-                serverIdentity.linuxServerId().equals(linuxServerId),
+                routeResolver.isCurrent(linuxServerId),
                 null);
     }
 
@@ -74,7 +61,7 @@ class AgentConfigFileRoutingService {
             }
             return requestedLinuxServerId;
         }
-        String resolved = service.publicWorktreeLinuxServerId(worktreeId).orElse(serverIdentity.linuxServerId());
+        String resolved = service.publicWorktreeLinuxServerId(worktreeId).orElse(routeResolver.currentLinuxServerIdValue());
         if (requestedLinuxServerId != null && !requestedLinuxServerId.equals(resolved)) {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
@@ -98,31 +85,7 @@ class AgentConfigFileRoutingService {
     }
 
     private BackendJavaProcess backendFor(String linuxServerId) {
-        if (serverIdentity.linuxServerId().equals(linuxServerId)) {
-            return currentBackend();
-        }
-        return heartbeatStore.liveBackendSnapshots().stream()
-                .map(BackendRuntimeSnapshot::backendProcess)
-                .filter(backend -> backend.linuxServerId().value().equals(linuxServerId))
-                .findFirst()
-                .orElseThrow(() -> new PlatformException(
-                        ErrorCode.OPENCODE_UNAVAILABLE,
-                        "目标服务器后端不可用",
-                        Map.of("linuxServerId", linuxServerId)));
-    }
-
-    private BackendJavaProcess currentBackend() {
-        Instant now = Instant.now();
-        return new BackendJavaProcess(
-                new BackendProcessId("bjp_current_backend"),
-                new LinuxServerId(serverIdentity.linuxServerId()),
-                settings.listenUrl(),
-                BackendJavaProcessStatus.READY,
-                now,
-                now,
-                now,
-                now,
-                "trace_current_backend");
+        return routeResolver.requireBackend(linuxServerId);
     }
 
     private String normalizeScope(String scope) {

@@ -24,6 +24,7 @@ public class OpencodeProcessHeartbeatMaintenanceService {
     private final OpencodeProcessManagementRepository repository;
     private final OpencodeProcessManagerGateway gateway;
     private final OpencodeProcessHeartbeatStore heartbeatStore;
+    private final BackendJavaRouteResolver routeResolver;
     private final Clock clock;
 
     /**
@@ -33,8 +34,9 @@ public class OpencodeProcessHeartbeatMaintenanceService {
     public OpencodeProcessHeartbeatMaintenanceService(
             OpencodeProcessManagementRepository repository,
             OpencodeProcessManagerGateway gateway,
-            OpencodeProcessHeartbeatStore heartbeatStore) {
-        this(repository, gateway, heartbeatStore, Clock.systemUTC());
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            BackendJavaRouteResolver routeResolver) {
+        this(repository, gateway, heartbeatStore, routeResolver, Clock.systemUTC());
     }
 
     /**
@@ -45,9 +47,22 @@ public class OpencodeProcessHeartbeatMaintenanceService {
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessHeartbeatStore heartbeatStore,
             Clock clock) {
+        this(repository, gateway, heartbeatStore, null, clock);
+    }
+
+    /**
+     * 测试构造器允许固定时钟和显式路由解析器。
+     */
+    public OpencodeProcessHeartbeatMaintenanceService(
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            BackendJavaRouteResolver routeResolver,
+            Clock clock) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
+        this.routeResolver = routeResolver;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -57,7 +72,7 @@ public class OpencodeProcessHeartbeatMaintenanceService {
     public void refreshRunningProcessHeartbeats(String traceId) {
         Instant now = Instant.now(clock);
         var page = repository.findOpencodeServerProcesses(
-                new OpencodeServerProcessFilter(OpencodeServerProcessStatus.RUNNING, null, null, null),
+                new OpencodeServerProcessFilter(OpencodeServerProcessStatus.RUNNING, currentLinuxServerId(), null, null),
                 new PageRequest(1, PROCESS_SCAN_LIMIT));
         for (OpencodeServerProcess process : page.items()) {
             OpencodeProcessHealthResult health = checkHealth(process, traceId);
@@ -79,6 +94,10 @@ public class OpencodeProcessHeartbeatMaintenanceService {
      */
     public void cleanupExpiredHeartbeats() {
         heartbeatStore.cleanupExpiredHeartbeats();
+    }
+
+    private com.icbc.testagent.domain.opencodeprocess.LinuxServerId currentLinuxServerId() {
+        return routeResolver == null ? null : routeResolver.currentLinuxServerId();
     }
 
     private OpencodeProcessHealthResult checkHealth(OpencodeServerProcess process, String traceId) {

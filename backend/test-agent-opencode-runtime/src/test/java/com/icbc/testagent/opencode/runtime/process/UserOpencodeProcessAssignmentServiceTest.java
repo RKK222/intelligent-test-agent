@@ -344,58 +344,6 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
-    void localDirectStatusReturnsSyntheticReadyWithoutTouchingRepository() {
-        FakeRepository repository = new NoopRepository();
-        RecordingGateway gateway = new RecordingGateway();
-        UserOpencodeProcessAssignmentService service = serviceLocalDirect(repository, gateway, "http://127.0.0.1:4096");
-
-        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
-
-        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
-        assertThat(response.baseUrl()).isEqualTo("http://127.0.0.1:4096");
-        assertThat(response.port()).isEqualTo(4096);
-        assertThat(response.linuxServerId()).isEqualTo("127.0.0.1");
-        assertThat(response.processId()).isEqualTo("ocp_local_direct");
-        assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.RUNNING);
-        assertThat(response.serviceAddress()).isEqualTo("127.0.0.1:4096");
-        assertThat(response.message()).contains("本地开发模式");
-        // 短路模式下不允许触发 gateway 健康检测，也不应写库。
-        assertThat(gateway.startCommands).isEmpty();
-        assertThat(repository.findUserBindingCalls).isEqualTo(0);
-        assertThat(repository.findContainerCalls).isEqualTo(0);
-    }
-
-    @org.junit.jupiter.api.Test
-    void localDirectInitializeReturnsSyntheticReadyAndSkipsGatewayStart() {
-        FakeRepository repository = new NoopRepository();
-        RecordingGateway gateway = new RecordingGateway();
-        UserOpencodeProcessAssignmentService service = serviceLocalDirect(repository, gateway, "http://127.0.0.1:4096");
-
-        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
-
-        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
-        assertThat(response.baseUrl()).isEqualTo("http://127.0.0.1:4096");
-        assertThat(response.message()).contains("本地开发模式");
-        // 关键：initialize 也不调用 gateway.startProcess，避免被 manager 状态卡住。
-        assertThat(gateway.startCommands).isEmpty();
-        assertThat(repository.findUserBindingCalls).isEqualTo(0);
-    }
-
-    @org.junit.jupiter.api.Test
-    void localDirectRequireReadyProcessReturnsSyntheticAssignment() {
-        FakeRepository repository = new NoopRepository();
-        RecordingGateway gateway = new RecordingGateway();
-        UserOpencodeProcessAssignmentService service = serviceLocalDirect(repository, gateway, "http://127.0.0.1:4096");
-
-        UserOpencodeProcessAssignment assignment = service.requireReadyProcess(USER_ID, "opencode", TRACE_ID);
-
-        assertThat(assignment.node().baseUrl()).isEqualTo("http://127.0.0.1:4096");
-        assertThat(assignment.node().executionNodeId().value()).isEqualTo("node_ocp_local_direct");
-        // 不应触发 topology / binding 查询，Run 启动可以走到 4096 直连。
-        assertThat(repository.findUserBindingCalls).isEqualTo(0);
-    }
-
-    @org.junit.jupiter.api.Test
     void fileRoutingAffinityReturnsBoundServerWithoutCallingGatewayHealth() {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess process = process("ocp_existing", USER_ID, "10.8.0.12", "ctr_idle", 4096, OpencodeServerProcessStatus.RUNNING);
@@ -446,36 +394,6 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(affinity.linuxServerId()).isNull();
         assertThat(gateway.healthCommands).isEmpty();
         assertThat(repository.findContainerCalls).isEqualTo(1);
-    }
-
-    @org.junit.jupiter.api.Test
-    void localDirectFileRoutingAffinityReturnsSyntheticServerWithoutGatewayHealth() {
-        FakeRepository repository = new NoopRepository();
-        RecordingGateway gateway = new RecordingGateway();
-        UserOpencodeProcessAssignmentService service = serviceLocalDirect(repository, gateway, "http://127.0.0.1:4096");
-
-        UserOpencodeProcessFileRoutingAffinity affinity = service.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID);
-
-        assertThat(affinity.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
-        assertThat(affinity.linuxServerId()).isEqualTo("127.0.0.1");
-        assertThat(affinity.port()).isEqualTo(4096);
-        assertThat(affinity.serviceAddress()).isEqualTo("127.0.0.1:4096");
-        assertThat(gateway.healthCommands).isEmpty();
-        assertThat(repository.findUserBindingCalls).isEqualTo(0);
-    }
-
-    @org.junit.jupiter.api.Test
-    void localDirectBaseUrlWithoutPortFallsBackToDefaults() {
-        FakeRepository repository = new NoopRepository();
-        RecordingGateway gateway = new RecordingGateway();
-        // 故意传一个不能解析出 host/port 的字符串，验证服务会回退到默认 127.0.0.1:4096 而不是抛错。
-        UserOpencodeProcessAssignmentService service = serviceLocalDirect(repository, gateway, "not a url");
-
-        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
-
-        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
-        assertThat(response.baseUrl()).isEqualTo("http://127.0.0.1:4096");
-        assertThat(response.linuxServerId()).isEqualTo("127.0.0.1");
     }
 
     private static UserOpencodeProcessAssignmentService service(FakeRepository repository, RecordingGateway gateway) {
@@ -540,37 +458,6 @@ class UserOpencodeProcessAssignmentServiceTest {
                 return List.of();
             }
         };
-    }
-
-    private static UserOpencodeProcessAssignmentService serviceLocalDirect(
-            FakeRepository repository, RecordingGateway gateway, String baseUrl) {
-        return new UserOpencodeProcessAssignmentService(
-                repository,
-                commonParameters(),
-                repository,
-                gateway,
-                new BackendJavaProcessLifecycleService(
-                        repository,
-                        new ManagerControlSettings(
-                                "secret-token",
-                                "http://10.8.0.21:8080",
-                                new LinuxServerId("10.8.0.21"),
-                                Duration.ofSeconds(10),
-                                Duration.ofSeconds(30),
-                                Duration.ofSeconds(5),
-                                100)),
-                new OpencodeProcessHeartbeatStore() {
-                    @Override public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) { }
-                    @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) { }
-                    @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { }
-                    @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
-                    @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return List.of(); }
-                    @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
-                    @Override public Set<LinuxServerId> liveBackendServerIds() { return Set.of(); }
-                    @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
-                    @Override public void cleanupExpiredHeartbeats() { }
-                },
-                new LocalDirectSettings(true, baseUrl));
     }
 
     private static OpencodeContainer container(
@@ -778,22 +665,4 @@ class UserOpencodeProcessAssignmentServiceTest {
         public List<OpencodeServerProcess> findOpencodeServerProcesses(int limit) { return processes.values().stream().limit(limit).toList(); }
     }
 
-    /**
-     * 用于本地开发短路测试的占位 repository：抛错意味着如果服务真的去查库，
-     * 测试会立即失败，便于保证短路路径不接触数据库。
-     */
-    private static final class NoopRepository extends FakeRepository {
-        @Override
-        public OpencodeServerProcess saveOpencodeServerProcess(OpencodeServerProcess process) {
-            throw new AssertionError("local-direct 不应写库: " + process);
-        }
-        @Override
-        public UserOpencodeProcessBinding saveUserBinding(UserOpencodeProcessBinding binding) {
-            throw new AssertionError("local-direct 不应写库: " + binding);
-        }
-        @Override
-        public ExecutionNode save(ExecutionNode executionNode) {
-            throw new AssertionError("local-direct 不应写库: " + executionNode);
-        }
-    }
 }

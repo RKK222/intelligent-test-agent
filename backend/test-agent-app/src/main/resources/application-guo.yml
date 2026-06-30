@@ -58,15 +58,12 @@ test-agent:
       default-model: DeepSeek-V4-Flash-W8A8
   opencode:
     manager-control:
-      gateway-mode: local
       token: local-manager-token
       listen-url: http://192.168.100.194:8080
       heartbeat-interval: 10s
       backend-stale-after: 30s
       command-timeout: 10s
       backend-discovery-limit: 100
-    local-direct: true
-    local-direct-base-url: http://192.168.100.194:4096
     nodes:
       - id: node_local_opencode
         base-url: http://192.168.100.194:4096

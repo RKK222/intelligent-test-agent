@@ -2214,3 +2214,11 @@ bash /tmp/test-api-after-restart.sh
 - How: 先补红灯测试 `TestManagerApplyRuntimeConfigSupportsMaxOnlyUpdateAfterFullConfig` 和 `TestSupervisorAppliesMaxOnlyConfigUpdateAndReportsHeartbeat`，确认旧实现失败；再调整 `ApplyRuntimeConfig` 的路径帧形态校验与 max-only 分支，并更新 opencode-manager README。
 - Result: 修改 `OPENCODE_MANAGER_MAX_PROCESSES` 后，manager 会应用新容量并立即补发 heartbeat，Java 按 heartbeat 更新 Redis/数据库快照，运行管理“容器 / 管理进程”容量随刷新变化。
 - Verification: `go test ./...`（opencode-manager）、`git diff --check` 通过。
+
+### 2026-06-30 - 收敛 Java 到 manager 路由并移除本地绕过
+
+- Why: 用户 opencode、运行管理、Agent 配置和文件 WebSocket 路由分别扫描 Redis/转发 HTTP，且此前叠加了 `local-direct` 与 `gateway-mode=local` 两套本地绕过，导致“任意 Java 收请求后应由目标服务器 Java 控制本机 manager”的规则不够单一。
+- What: 新增 `BackendJavaRouteResolver` 统一解析当前 `linuxServerId`、每台服务器最新 Java 后端和 `containerId` 所属 manager 服务器；新增 `BackendHttpForwarder` 统一 Java->Java HTTP 转发、Authorization/trace/body/query 透传与 `X-Test-Agent-Backend-Routed` 防循环。用户 binding、运行管理 restart/stop、Agent 配置 HTTP、Workspace/Agent 配置文件路由都改用统一组件；配置工作区创建、应用版本工作区创建和版本 `git-pull` 纳入用户 binding 路由。为跑通 app 全量回归，顺带把两个已知阻塞 H2 Flyway 的近期 migration 改为 PostgreSQL/H2 兼容等价 SQL：`V20260628223000` 使用标准 `platform IN (...)` CHECK 和普通 INSERT，`V20260629230000` 在删除旧平台行后普通 INSERT 新 `all` 行。
+- How: `RuntimeManagementQueryService.userProcesses` 只在进程属于当前 Java 服务器时调用本机 manager health，远端返回 `REMOTE_SERVER/CHECK_SKIPPED`；`OpencodeProcessHeartbeatMaintenanceService` 只扫描当前服务器 RUNNING 进程。删除 `LocalDirectSettings`、`LocalOpencodeProcessManagerGateway`、`gateway-mode`、`local-direct` 配置和对应测试，本地/生产都必须启动 Go manager。
+- Result: 前端可访问任意 Java；后端先通过统一路由定位目标 Java；只有目标 Java 通过本服务器 manager WebSocket 控制 manager。旧 session-log 中关于开启 local-direct/local gateway 的记录已被本条决策覆盖。
+- Verification: 目标红灯测试 `BackendJavaRouteResolverTest`、`BackendHttpForwarderTest`、`UserOpencodeBackendRoutingWebFilterTest` 随 `mvn -pl test-agent-api,test-agent-opencode-runtime,test-agent-app -am test -Dtest=BackendJavaRouteResolverTest,BackendHttpForwarderTest,UserOpencodeBackendRoutingWebFilterTest -Dsurefire.failIfNoSpecifiedTests=false` 通过；回归命令 `mvn -q -pl test-agent-api -am test`、`mvn -q -pl test-agent-opencode-runtime -am test`、`mvn -q -pl test-agent-app -am test` 均通过。

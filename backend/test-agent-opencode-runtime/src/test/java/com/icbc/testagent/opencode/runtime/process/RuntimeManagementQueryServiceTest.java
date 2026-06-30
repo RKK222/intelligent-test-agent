@@ -35,6 +35,7 @@ import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.domain.user.UserStatus;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -169,6 +170,36 @@ class RuntimeManagementQueryServiceTest {
         assertThat(repository.findOpencodeServerProcessById(unhealthy.processId()).orElseThrow().status())
                 .isEqualTo(OpencodeServerProcessStatus.RUNNING);
         assertThat(heartbeatStore.liveOpencodeProcessIds()).contains(unhealthy.processId());
+    }
+
+    @Test
+    void userProcessesSkipsManagerHealthWhenProcessBelongsToRemoteServer() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess remote = process(
+                "ocp_1234567890abcdef",
+                "usr_1234567890abcdef",
+                OpencodeServerProcessStatus.RUNNING);
+        repository.processes.add(remote);
+        repository.bindings.put(remote.processId(), binding(remote));
+        repository.users.put(remote.userId(), user(remote.userId(), "process-user"));
+        FakeGateway gateway = new FakeGateway();
+        RuntimeManagementQueryService service = new RuntimeManagementQueryService(
+                repository,
+                repository,
+                gateway,
+                new RedisSnapshotHeartbeatStore(),
+                routeResolver("10.8.0.21"),
+                Clock.fixed(NOW, ZoneOffset.UTC));
+
+        PageResponse<RuntimeManagementOpencodeProcess> page =
+                service.userProcesses("process-user", new PageRequest(1, 20), TRACE_ID);
+
+        RuntimeManagementOpencodeProcess row = page.items().getFirst();
+        assertThat(row.process()).isEqualTo(remote);
+        assertThat(row.managerStatus()).isEqualTo("REMOTE_SERVER");
+        assertThat(row.healthStatus()).isEqualTo("CHECK_SKIPPED");
+        assertThat(row.restartable()).isTrue();
+        assertThat(gateway.healthCommands).isEmpty();
     }
 
     @Test
@@ -753,6 +784,20 @@ class RuntimeManagementQueryServiceTest {
                 repository,
                 gateway,
                 heartbeatStore,
+                Clock.fixed(NOW, ZoneOffset.UTC));
+    }
+
+    private static BackendJavaRouteResolver routeResolver(String currentLinuxServerId) {
+        return new BackendJavaRouteResolver(
+                disabledHeartbeatStore(),
+                new ManagerControlSettings(
+                        "manager-token",
+                        "http://" + currentLinuxServerId + ":8080",
+                        new LinuxServerId(currentLinuxServerId),
+                        Duration.ofSeconds(5),
+                        Duration.ofSeconds(10),
+                        Duration.ofSeconds(10),
+                        100),
                 Clock.fixed(NOW, ZoneOffset.UTC));
     }
 

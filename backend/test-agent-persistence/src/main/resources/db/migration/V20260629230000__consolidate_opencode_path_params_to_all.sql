@@ -23,8 +23,4 @@ VALUES
     ('param_opencode_public_config_dir_all',          'OPENCODE_PUBLIC_CONFIG_DIR',         'opencode公共配置目录',           '$' || '{SYS_DATA_ROOT_DIR}/agent-opencode/.config/opencode/',           'all', current_timestamp, current_timestamp),
     ('param_opencode_public_config_git_root_all',     'OPENCODE_PUBLIC_CONFIG_GIT_ROOT',    'opencode公共配置Git下载目录',    '$' || '{SYS_DATA_ROOT_DIR}/agent-opencode/.config/',                    'all', current_timestamp, current_timestamp),
     ('param_opencode_public_config_worktree_root_all','OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT','opencode公共配置Git worktree目录','$' || '{SYS_DATA_ROOT_DIR}/agent-opencode/.configdev/',               'all', current_timestamp, current_timestamp),
-    ('param_opencode_session_dir_all',                'OPENCODE_SESSION_DIR',               'opencodesession目录',            '$' || '{SYS_DATA_ROOT_DIR}/agent-opencode/.session/',                   'all', current_timestamp, current_timestamp)
-ON CONFLICT (parameter_english, platform) DO UPDATE SET
-    parameter_value = EXCLUDED.parameter_value,
-    parameter_chinese = EXCLUDED.parameter_chinese,
-    updated_at = current_timestamp;
+    ('param_opencode_session_dir_all',                'OPENCODE_SESSION_DIR',               'opencodesession目录',            '$' || '{SYS_DATA_ROOT_DIR}/agent-opencode/.session/',                   'all', current_timestamp, current_timestamp);

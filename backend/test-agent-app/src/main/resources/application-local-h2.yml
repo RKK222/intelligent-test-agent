@@ -56,15 +56,12 @@ test-agent:
     timeout: ${TEST_AGENT_REDIS_TIMEOUT:1s}
   opencode:
     manager-control:
-      gateway-mode: ${TEST_AGENT_OPENCODE_GATEWAY_MODE:local}
       token: ${TEST_AGENT_OPENCODE_MANAGER_TOKEN:}
       listen-url: ${TEST_AGENT_BACKEND_LISTEN_URL:http://127.0.0.1:8080}
       heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:5s}
       backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:10s}
       command-timeout: ${TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT:10s}
       backend-discovery-limit: ${TEST_AGENT_BACKEND_DISCOVERY_LIMIT:100}
-    local-direct: ${TEST_AGENT_OPENCODE_LOCAL_DIRECT:true}
-    local-direct-base-url: ${TEST_AGENT_OPENCODE_BASE_URL:http://127.0.0.1:4096}
     nodes:
       - id: ${TEST_AGENT_OPENCODE_NODE_ID:node_local_opencode}
         base-url: ${TEST_AGENT_OPENCODE_BASE_URL:http://127.0.0.1:4096}

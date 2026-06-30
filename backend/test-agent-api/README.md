@@ -19,6 +19,7 @@
 - 暴露 Workspace/Agent 配置文件 WebSocket 路由、ticket 和 WebSocket RPC 入口：Controller/Handler 只做鉴权、`SUPER_ADMIN` 校验、ticket、Origin、traceId、协议 envelope 和统一错误包装，文件系统操作继续委托 `test-agent-workspace-management`。Workspace 路由和 ticket 签发只校验用户进程服务器归属，不触发 opencode-manager health/start 命令；Agent 配置文件路由按 scope/workspace/worktree 的服务器归属定位目标后端，不新增跨服务器 HTTP 文件代理；Run、初始化和用户进程状态接口仍由 runtime 执行强健康检查。
 - 暴露 Agent 配置管理 HTTP 和进度 WebSocket 入口：Controller 只做认证、`SUPER_ADMIN` 写权限、DTO 和 traceId 转换；公共 worktree 列表接口只返回指定服务器上的 `ACTIVE/PUBLIC` 元数据和创建人字段，文件内容仍必须走文件 WebSocket；进度 WebSocket 使用一次性 ticket、Origin 白名单和 `snapshot/step/completed/failed` envelope，业务逻辑委托 `test-agent-workspace-management`。
 - 暴露 opencode-manager 兼容诊断 API 和 WebSocket 控制面入口，入口只做 manager token 鉴权、DTO/消息适配和 traceId 处理；Go manager 运行路径不通过 HTTP 与 Java 交互，只连接本服务器 Java，`backendListRequest/backendListResponse` 仅保留为兼容诊断协议。
+- 后端 Java 路由统一使用 runtime 的 `BackendJavaRouteResolver` 解析当前服务器、`linuxServerId -> BackendJavaProcess` 和 `containerId -> linuxServerId`；API 层所有 Java->Java HTTP 转发统一走 `BackendHttpForwarder`，由它设置 `X-Test-Agent-Backend-Routed` 防循环并透传 Authorization、traceId、query 和 body。
 - 暴露超级管理员运行管理 overview、容器/按 IP 的后端指标历史、旧后端进程指标兼容入口和有主/无主 opencode server 重启/停止 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选/历史/容器/端口参数校验、用户名筛选参数透传、manager 下属 opencode server 明细和 `BOUND/UNBOUND` 归属 DTO 映射、命令结果 DTO 映射、traceId 处理；重启/停止命令先按 `containerId` 的 Redis manager 快照定位容器所属 `linuxServerId`，目标不是本机时透传用户 JWT 和 traceId 转发到目标 Java，由目标 Java 控制本服务器 manager；指标历史主参数为 `windowMinutes`，`hours` 仅兼容旧客户端。
 - 暴露超级管理员定时任务管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选参数校验、DTO 映射和 traceId 处理。
 - 暴露 AI 回复反馈 API，Controller 只读取当前登录用户、messageId、traceId 和请求体，具体 assistant role 与归属校验由 runtime 服务完成。
@@ -55,7 +56,8 @@
 - `AnalyticsControllerTest` 覆盖运营分析 API 的 `SUPER_ADMIN` 成功、非超级管理员/匿名拒绝和非法时间参数统一校验错误。
 - `ManagerBackendDiscoveryControllerTest` 覆盖 manager token 鉴权、统一响应、traceId 和 Redis 在线后端实例 DTO；该接口仅作兼容诊断。
 - `ManagerControlWebSocketHandlerTest` 覆盖 `register`、`managerHeartbeat`、兼容 `backendListRequest` 忽略、命令结果和错误 envelope 的 WebSocket 入口适配。
-- `UserOpencodeBackendRoutingWebFilterTest` 覆盖用户 opencode 进程请求按已有 binding 所属服务器转发、内部路由头防循环、只读状态 GET 在目标后端不可用时返回 binding-only 分配状态，以及初始化/Run 等操作类请求的目标后端不可用错误。
+- `UserOpencodeBackendRoutingWebFilterTest` 覆盖用户 opencode 进程请求按已有 binding 所属服务器转发、内部路由头防循环、只读状态 GET 在目标后端不可用时返回 binding-only 分配状态，以及初始化、Run、配置工作区创建、应用版本工作区创建和版本 `git pull` 等需要用户 opencode 服务器的入口。
+- `BackendHttpForwarderTest` 覆盖 Java->Java HTTP 转发对 Authorization、`X-Trace-Id`、query、body、content-type 和 `X-Test-Agent-Backend-Routed` 的统一透传。
 - `PlatformOpencodeRuntimeControllerTest` 覆盖旧 `/api/...` 与 `/api/internal/platform/...` 的 opencode runtime 代理入口、MCP tools、permission reply、session share、traceId 和可选用户主体透传。
 - `AgentOpencodeRuntimeControllerTest` 覆盖 `/api/internal/agent/{agentId}/...` 原始 opencode 路径兼容、agentId、traceId 和可选用户主体透传。
 - `AuthWebSupportTest` 覆盖可选认证主体读取，确保 static-token 兼容入口不会因缺少用户主体抛错。

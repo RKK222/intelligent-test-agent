@@ -4,19 +4,19 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.icbc.testagent.common.api.ApiErrorResponse;
 import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.common.error.ErrorCode;
+import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
-import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
+import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.observability.TraceConstants;
+import com.icbc.testagent.opencode.runtime.process.BackendJavaRouteResolver;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import com.icbc.testagent.workspace.WorkspaceServerIdentity;
-import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -24,17 +24,12 @@ import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.core.io.buffer.DataBuffer;
-import org.springframework.core.io.buffer.DataBufferFactory;
-import org.springframework.core.io.buffer.DataBufferUtils;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 /**
  * 用户 opencode 进程跨后端路由服务。
@@ -46,11 +41,14 @@ import reactor.core.scheduler.Schedulers;
 class UserOpencodeBackendRoutingService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(UserOpencodeBackendRoutingService.class);
-    private static final Duration FORWARD_TIMEOUT = Duration.ofSeconds(30);
     private static final String OPENCODE_AGENT_ID = "opencode";
     private static final String AGENT_PREFIX = "/api/internal/agent/";
     private static final String PROCESS_STATUS_PATH = "/api/internal/agent/opencode/processes/me";
     private static final String PLATFORM_RUNTIME_PREFIX = "/api/internal/platform/opencode-runtime";
+    private static final String CONFIGURATION_WORKSPACE_PREFIX =
+            "/api/internal/platform/configuration-management/applications/";
+    private static final String WORKSPACE_MANAGEMENT_PREFIX =
+            "/api/internal/platform/workspace-management/";
     private static final List<String> LEGACY_RUNTIME_PREFIXES = List.of(
             "/api/agents",
             "/api/models",
@@ -67,20 +65,49 @@ class UserOpencodeBackendRoutingService {
             "/api/provider/",
             "/api/worktrees",
             "/api/sessions");
-    private static final List<String> FORWARDED_HEADERS = List.of(
-            HttpHeaders.AUTHORIZATION,
-            HttpHeaders.ACCEPT,
-            HttpHeaders.CONTENT_TYPE,
-            HttpHeaders.ACCEPT_LANGUAGE,
-            TraceConstants.TRACE_ID_HEADER);
 
     private final UserOpencodeProcessAssignmentService assignmentService;
-    private final WorkspaceServerIdentity serverIdentity;
-    private final OpencodeProcessHeartbeatStore heartbeatStore;
+    private final BackendJavaRouteResolver routeResolver;
+    private final BackendHttpForwarder forwarder;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient;
 
     @Autowired
+    UserOpencodeBackendRoutingService(
+            UserOpencodeProcessAssignmentService assignmentService,
+            BackendJavaRouteResolver routeResolver,
+            BackendHttpForwarder forwarder,
+            ObjectMapper objectMapper) {
+        this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
+        this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
+        this.forwarder = Objects.requireNonNull(forwarder, "forwarder must not be null");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+    }
+
+    UserOpencodeBackendRoutingService(
+            UserOpencodeProcessAssignmentService assignmentService,
+            WorkspaceServerIdentity serverIdentity,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            ObjectMapper objectMapper,
+            HttpClient httpClient) {
+        this(assignmentService, testRouteResolver(serverIdentity, heartbeatStore), new BackendHttpForwarder(objectMapper, httpClient), objectMapper);
+    }
+
+    private static BackendJavaRouteResolver testRouteResolver(
+            WorkspaceServerIdentity serverIdentity,
+            OpencodeProcessHeartbeatStore heartbeatStore) {
+        return new BackendJavaRouteResolver(
+                heartbeatStore,
+                new ManagerControlSettings(
+                        "",
+                        "http://" + serverIdentity.linuxServerId() + ":8080",
+                        new LinuxServerId(serverIdentity.linuxServerId()),
+                        Duration.ofSeconds(5),
+                        Duration.ofSeconds(10),
+                        Duration.ofSeconds(10),
+                        100));
+    }
+
+    @SuppressWarnings("unused")
     UserOpencodeBackendRoutingService(
             UserOpencodeProcessAssignmentService assignmentService,
             WorkspaceServerIdentity serverIdentity,
@@ -91,26 +118,13 @@ class UserOpencodeBackendRoutingService {
                 .build());
     }
 
-    UserOpencodeBackendRoutingService(
-            UserOpencodeProcessAssignmentService assignmentService,
-            WorkspaceServerIdentity serverIdentity,
-            OpencodeProcessHeartbeatStore heartbeatStore,
-            ObjectMapper objectMapper,
-            HttpClient httpClient) {
-        this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
-        this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
-        this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
-        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
-        this.httpClient = Objects.requireNonNull(httpClient, "httpClient must not be null");
-    }
-
     /**
      * 解析当前请求是否需要路由到远端 binding 所属后端。
      */
     Optional<String> targetLinuxServerId(ServerWebExchange exchange, AuthPrincipal principal) {
         Objects.requireNonNull(exchange, "exchange must not be null");
         Objects.requireNonNull(principal, "principal must not be null");
-        if (exchange.getRequest().getHeaders().getFirst(UserOpencodeBackendRoutingWebFilter.ROUTED_HEADER) != null) {
+        if (exchange.getRequest().getHeaders().getFirst(BackendHttpForwarder.ROUTED_HEADER) != null) {
             return Optional.empty();
         }
         Optional<String> agentId = routeAgentId(exchange);
@@ -118,15 +132,17 @@ class UserOpencodeBackendRoutingService {
             return Optional.empty();
         }
         return assignmentService.routingLinuxServerId(principal.userId(), agentId.get())
-                .filter(linuxServerId -> !serverIdentity.linuxServerId().equals(linuxServerId));
+                .flatMap(routeResolver::remoteTarget);
     }
 
     /**
      * 转发原始 HTTP 请求，并把目标 Java 的响应原样写回当前响应。
      */
     Mono<Void> forward(ServerWebExchange exchange, AuthPrincipal principal, String linuxServerId) {
-        BackendJavaProcess backend = backendFor(linuxServerId);
-        if (backend == null) {
+        BackendJavaProcess backend;
+        try {
+            backend = routeResolver.requireBackend(linuxServerId);
+        } catch (PlatformException exception) {
             if (isReadOnlyProcessStatusRequest(exchange)) {
                 return writeAllocationStatus(exchange, principal);
             }
@@ -136,14 +152,12 @@ class UserOpencodeBackendRoutingService {
                     "目标服务器后端不可用",
                     Map.of("linuxServerId", linuxServerId));
         }
-        return requestBody(exchange)
-                .flatMap(body -> Mono.fromCallable(() -> send(exchange, backend, body))
-                        .subscribeOn(Schedulers.boundedElastic()))
+        return forwarder.forwardRawResponse(exchange, backend)
                 .flatMap(response -> {
                     if (shouldFallbackToAllocationStatus(exchange, response)) {
                         return writeAllocationStatus(exchange, principal);
                     }
-                    return writeForwardResponse(exchange, response);
+                    return forwarder.writeRawResponse(exchange, response);
                 })
                 .onErrorResume(exception -> {
                     LOGGER.warn("用户 opencode 请求转发失败 linuxServerId={} traceId={}",
@@ -170,6 +184,9 @@ class UserOpencodeBackendRoutingService {
             return agentPathAgentId;
         }
         if (isPlatformRuntimePath(path, method) || isLegacyRuntimePath(path, method)) {
+            return Optional.of(OPENCODE_AGENT_ID);
+        }
+        if (isManagedWorkspacePath(path, method)) {
             return Optional.of(OPENCODE_AGENT_ID);
         }
         return Optional.empty();
@@ -240,6 +257,21 @@ class UserOpencodeBackendRoutingService {
                 || path.equals("/api/auth/refresh");
     }
 
+    private boolean isManagedWorkspacePath(String path, HttpMethod method) {
+        if (!HttpMethod.POST.equals(method)) {
+            return false;
+        }
+        if (path.startsWith(CONFIGURATION_WORKSPACE_PREFIX) && path.endsWith("/workspaces")) {
+            return true;
+        }
+        if (!path.startsWith(WORKSPACE_MANAGEMENT_PREFIX)) {
+            return false;
+        }
+        String suffix = path.substring(WORKSPACE_MANAGEMENT_PREFIX.length());
+        return (suffix.startsWith("applications/") && suffix.contains("/workspace-templates/") && suffix.endsWith("/versions"))
+                || (suffix.startsWith("workspace-versions/") && suffix.endsWith("/git-pull"));
+    }
+
     private boolean isReadOnlyProcessStatusRequest(ServerWebExchange exchange) {
         return HttpMethod.GET.equals(exchange.getRequest().getMethod())
                 && PROCESS_STATUS_PATH.equals(exchange.getRequest().getURI().getRawPath());
@@ -249,81 +281,6 @@ class UserOpencodeBackendRoutingService {
             ServerWebExchange exchange,
             HttpResponse<byte[]> response) {
         return isReadOnlyProcessStatusRequest(exchange) && response.statusCode() >= 500;
-    }
-
-    private BackendJavaProcess backendFor(String linuxServerId) {
-        return liveBackendsByServer().get(linuxServerId);
-    }
-
-    private Map<String, BackendJavaProcess> liveBackendsByServer() {
-        Map<String, BackendJavaProcess> result = new LinkedHashMap<>();
-        for (BackendRuntimeSnapshot snapshot : heartbeatStore.liveBackendSnapshots()) {
-            BackendJavaProcess backend = snapshot.backendProcess();
-            if (backend != null) {
-                result.merge(backend.linuxServerId().value(), backend, this::latestBackend);
-            }
-        }
-        return result;
-    }
-
-    private BackendJavaProcess latestBackend(BackendJavaProcess left, BackendJavaProcess right) {
-        return right.lastHeartbeatAt().isAfter(left.lastHeartbeatAt()) ? right : left;
-    }
-
-    private Mono<byte[]> requestBody(ServerWebExchange exchange) {
-        return DataBufferUtils.join(exchange.getRequest().getBody())
-                .map(buffer -> {
-                    byte[] result = bytes(buffer);
-                    DataBufferUtils.release(buffer);
-                    return result;
-                })
-                .defaultIfEmpty(new byte[0]);
-    }
-
-    private HttpResponse<byte[]> send(
-            ServerWebExchange exchange,
-            BackendJavaProcess backend,
-            byte[] body) throws Exception {
-        URI uri = exchange.getRequest().getURI();
-        String pathAndQuery = uri.getRawPath() + (uri.getRawQuery() == null ? "" : "?" + uri.getRawQuery());
-        HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(URI.create(trimTrailingSlash(backend.listenUrl()) + pathAndQuery))
-                .timeout(FORWARD_TIMEOUT);
-        for (String headerName : FORWARDED_HEADERS) {
-            copyHeader(exchange, builder, headerName);
-        }
-        builder.header(UserOpencodeBackendRoutingWebFilter.ROUTED_HEADER, "true");
-        if (exchange.getRequest().getHeaders().getFirst(TraceConstants.TRACE_ID_HEADER) == null) {
-            builder.header(TraceConstants.TRACE_ID_HEADER, traceId(exchange));
-        }
-        HttpRequest.BodyPublisher publisher = body.length == 0
-                ? HttpRequest.BodyPublishers.noBody()
-                : HttpRequest.BodyPublishers.ofByteArray(body);
-        return httpClient.send(
-                builder.method(exchange.getRequest().getMethod().name(), publisher).build(),
-                HttpResponse.BodyHandlers.ofByteArray());
-    }
-
-    private void copyHeader(ServerWebExchange exchange, HttpRequest.Builder builder, String headerName) {
-        List<String> values = exchange.getRequest().getHeaders().get(headerName);
-        if (values == null || values.isEmpty()) {
-            return;
-        }
-        for (String value : values) {
-            if (value != null && !value.isBlank()) {
-                builder.header(headerName, value);
-            }
-        }
-    }
-
-    private Mono<Void> writeForwardResponse(ServerWebExchange exchange, HttpResponse<byte[]> response) {
-        exchange.getResponse().setStatusCode(HttpStatusCode.valueOf(response.statusCode()));
-        response.headers().firstValue(HttpHeaders.CONTENT_TYPE)
-                .ifPresent(value -> exchange.getResponse().getHeaders().set(HttpHeaders.CONTENT_TYPE, value));
-        response.headers().firstValue(TraceConstants.TRACE_ID_HEADER)
-                .ifPresent(value -> exchange.getResponse().getHeaders().set(TraceConstants.TRACE_ID_HEADER, value));
-        DataBufferFactory bufferFactory = exchange.getResponse().bufferFactory();
-        return exchange.getResponse().writeWith(Mono.just(bufferFactory.wrap(response.body())));
     }
 
     private Mono<Void> writeAllocationStatus(ServerWebExchange exchange, AuthPrincipal principal) {
@@ -363,22 +320,12 @@ class UserOpencodeBackendRoutingService {
         }
     }
 
-    private byte[] bytes(DataBuffer buffer) {
-        byte[] bytes = new byte[buffer.readableByteCount()];
-        buffer.read(bytes);
-        return bytes;
-    }
-
     private String traceId(ServerWebExchange exchange) {
         String traceId = exchange.getResponse().getHeaders().getFirst(TraceConstants.TRACE_ID_HEADER);
         if (traceId == null || traceId.isBlank()) {
             traceId = exchange.getRequest().getHeaders().getFirst(TraceConstants.TRACE_ID_HEADER);
         }
         return traceId == null || traceId.isBlank() ? "trace_user_opencode_route" : traceId;
-    }
-
-    private String trimTrailingSlash(String value) {
-        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }
 
 }
