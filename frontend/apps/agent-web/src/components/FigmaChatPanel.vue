@@ -59,6 +59,12 @@ type ChatMessage = {
   readOutputs?: ReadOutputInfo[]
 }
 
+function getFileName(path: string): string {
+  if (!path) return ''
+  const normalized = path.replace(/\\/g, '/')
+  return normalized.split('/').filter(Boolean).pop() || path
+}
+
 /**
  * 解析 read 工具输出的 XML 格式文件/目录内容。
  */
@@ -170,7 +176,7 @@ function taskPartLabel(
   input?: Record<string, unknown>
 ): { label: string; detail: string } {
   const file = input ? toolFilePath(toolName, input) : ''
-  const fileName = file.split('/').pop() || file
+  const fileName = getFileName(file)
   switch (toolName) {
     case 'bash': {
       const cmd = typeof input?.command === 'string' ? input.command : ''
@@ -1922,7 +1928,7 @@ function onCompositionEnd() {
                           >读取</span
                         >
                         <span class="figma-chat-file-path">{{
-                          op.filePath.split('/').pop()
+                          getFileName(op.filePath)
                         }}</span>
                       </li>
                     </ul>
@@ -1941,7 +1947,7 @@ function onCompositionEnd() {
                       >
                         <span
                           >写入<span style="color: #a1a5b1; margin-left: 4px">{{
-                            op.filePath.split('/').pop()
+                            getFileName(op.filePath)
                           }}</span></span
                         >
                         <ChevronRight
@@ -1992,7 +1998,7 @@ function onCompositionEnd() {
                       >
                         <span
                           >编写<span style="color: #a1a5b1; margin-left: 4px">{{
-                            op.filePath.split('/').pop()
+                            getFileName(op.filePath)
                           }}</span></span
                         >
                         <ChevronRight
@@ -2042,12 +2048,12 @@ function onCompositionEnd() {
                     >
                       <template v-if="ro.kind === 'file'">
                         <span>读取的文件</span>
-                        <span style="color: #a1a5b1; margin-left: 4px">{{ ro.path.split('/').pop() }}</span>
+                        <span class="figma-chat-file-name">{{ getFileName(ro.path) }}</span>
                         <span style="color: #a1a5b1; margin-left: auto; font-size: 10px;">{{ ro.language }}</span>
                       </template>
                       <template v-else>
                         <FileText :size="14" class="shrink-0" style="color: #a1a5b1" />
-                        <span style="margin-left: 6px">{{ ro.path.split('/').filter(Boolean).pop() || ro.path }}</span>
+                        <span class="figma-chat-file-name">{{ getFileName(ro.path) }}</span>
                         <span style="color: #a1a5b1; margin-left: 6px">目录 · {{ ro.entries?.length ?? 0 }} 项</span>
                       </template>
                       <ChevronRight
@@ -3522,6 +3528,16 @@ function onCompositionEnd() {
   line-height: 20px;
   color: #000;
   font-weight: 600;
+  white-space: nowrap;
+}
+.figma-chat-file-name {
+  color: #a1a5b1;
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
 }
 .figma-chat-read-chevron {
   flex-shrink: 0;
