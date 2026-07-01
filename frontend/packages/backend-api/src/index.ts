@@ -923,9 +923,9 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     unrevertSession: (sessionId: string, payload?: Record<string, unknown>) =>
       postRuntime(agentPath(`/session/${encodeURIComponent(sessionId)}/unrevert`), payload, request),
     runSessionCommand: (sessionId: string, payload?: Record<string, unknown>) =>
-      postRuntime(agentPath(`/session/${encodeURIComponent(sessionId)}/command`), payload, request),
+      postRuntime(agentPath(`/session/${encodeURIComponent(sessionId)}/command`), payload, request, { timeoutMs: 120000 }),
     runSessionShell: (sessionId: string, payload?: Record<string, unknown>) =>
-      postRuntime(agentPath(`/session/${encodeURIComponent(sessionId)}/shell`), payload, request),
+      postRuntime(agentPath(`/session/${encodeURIComponent(sessionId)}/shell`), payload, request, { timeoutMs: 120000 }),
     shareSession: (sessionId: string) =>
       postRuntime(agentPath(`/session/${encodeURIComponent(sessionId)}/share`), undefined, request),
     unshareSession: (sessionId: string) =>
@@ -1232,10 +1232,11 @@ async function runtimeList(path: string, request: RequestFn) {
   return listFromRuntimeEnvelope(await request<unknown>(path));
 }
 
-function postRuntime(path: string, payload: Record<string, unknown> | undefined, request: RequestFn) {
+function postRuntime(path: string, payload: Record<string, unknown> | undefined, request: RequestFn, init?: ExtraRequestInit) {
   return request<unknown>(path, {
     method: "POST",
-    body: payload == null ? undefined : JSON.stringify(payload)
+    body: payload == null ? undefined : JSON.stringify(payload),
+    ...init
   });
 }
 

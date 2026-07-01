@@ -795,6 +795,41 @@ describe("backend-api", () => {
     }
   });
 
+  it("aborts hanging postRuntime requests and maps them to a timeout error using custom timeoutMs override", async () => {
+    vi.useFakeTimers();
+    let signal: AbortSignal | undefined;
+    const fetcher = vi.fn<typeof fetch>(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          signal = init?.signal ?? undefined;
+          signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
+        })
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      requestTimeoutMs: 30000
+    });
+
+    try {
+      const request = client.runSessionCommand("ses_1", { command: "test" });
+      const expectation = expect(request).rejects.toMatchObject({
+        code: "REQUEST_TIMEOUT",
+        traceId: "trace_fixed",
+        retryable: true
+      });
+      await vi.advanceTimersByTimeAsync(30000);
+      expect(signal?.aborted).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(90000);
+      expect(signal?.aborted).toBe(true);
+      await expectation;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("lists Phase 11 runtime agents through the platform API and maps stable fields", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
