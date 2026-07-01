@@ -2185,12 +2185,49 @@ async function loadWorkspaceGitDiffFiles(): Promise<RunDiffFile[]> {
   }));
 }
 
-async function refreshWorkspaceGitDiff() {
+async function refreshOpenWorkspaceTabsFromDisk(paths?: string[]) {
+  if (!selectedWorkspace.value) {
+    return;
+  }
+  const workspaceId = selectedWorkspace.value.workspaceId;
+  const pathFilter = paths && paths.length > 0 ? new Set(paths) : null;
+  const workspaceTabs = workbench.tabs.filter(
+    (tab: EditorTab) =>
+      !tab.livePreview &&
+      !isAgentFilePath(tab.path) &&
+      !isPublicFilePath(tab.path) &&
+      (!pathFilter || pathFilter.has(tab.path))
+  );
+  const previousActivePath = activePath.value;
+  for (const tab of workspaceTabs) {
+    try {
+      const file = await api.readFile(workspaceId, tab.path);
+      workbench.openTab({
+        ...tab,
+        content: file.content,
+        savedContent: file.content,
+        readonly: file.readonly
+      });
+    } catch (error) {
+      if (error instanceof BackendApiError && error.code === "NOT_FOUND") {
+        workbench.closeTab(tab.path);
+      }
+    }
+  }
+  if (previousActivePath && workbench.tabs.some((tab: EditorTab) => tab.path === previousActivePath)) {
+    workbench.setActivePath(previousActivePath);
+  }
+}
+
+async function refreshWorkspaceGitDiff(options: { reloadOpenFiles?: boolean; paths?: string[] } = {}) {
   try {
     const nextFiles = await loadWorkspaceGitDiffFiles();
     diffFiles.value = nextFiles;
     if (!workbench.selectedDiffPath || !nextFiles.some((file) => file.path === workbench.selectedDiffPath)) {
       workbench.setSelectedDiffPath(nextFiles[0]?.path);
+    }
+    if (options.reloadOpenFiles) {
+      await refreshOpenWorkspaceTabsFromDisk(options.paths);
     }
   } catch {
     // 保存后刷新 Git diff 只是辅助 UI 同步；失败时保留“文件已保存”的主结果，
@@ -2487,7 +2524,7 @@ async function handleLogout() {
           @open-file="openFile"
           @open-diff="handleOpenDiff"
           @refresh="loadDirectory('', undefined, true)"
-          @changes-refreshed="refreshWorkspaceGitDiff"
+          @changes-refreshed="(payload) => refreshWorkspaceGitDiff({ reloadOpenFiles: true, paths: payload?.paths })"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"

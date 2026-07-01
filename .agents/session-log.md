@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-01 - 修复 opencode 状态不一致与回退后编辑器缓存未刷新
+
+- Why: 用户反馈右侧状态卡显示 `opencode 进程可用`，但左侧文件树仍提示 `OPENCODE_UNAVAILABLE`；同时点击 Git 变更回退后，变更计数消失但已打开编辑器里的文件内容仍是回退前缓存。
+- What: Workspace 文件 WebSocket ticket 签发在轻量 `fileRoutingAffinity` 未 READY 时复查当前用户 opencode 强状态，使文件树可用性与状态卡一致；Git 回退事件携带被回退路径，父组件刷新 diff 后只重读对应已打开工作区 tab，并清理旧的文件树失败提示。
+- How: 复用既有 `UserOpencodeProcessAssignmentService.status`、`api.readFile` 和 workbench store，不新增启动逻辑、不修改环境配置；同步 API、API 模块 README 与 agent-web README 的文件 ticket 语义。
+- Result: `WorkspaceFileSocketTicketServiceTest`、`agent-web typecheck`、`git-changes-panel.test.ts` 和 `git diff --check` 通过；按用户要求未启动本地服务。
+
 ### 2026-06-30 - 修复 Windows 下 opencode 专属进程启动失败（.ps1 包装脚本）
 
 - Why: 用户在 Windows 上把 `OPENCODE_BIN`（对应 `TEST_AGENT_OPENCODE_BIN`）配成 `D:\Tool\nodes\nodejs\opencode.ps1` 这种 PowerShell 包装脚本后，前台点击「分配专属进程」报 `OPENCODE_BAD_GATEWAY: fork/exec D:\Tool\nodes\nodejs\opencode.ps1: %1 is not a valid Win32 application`。根因是 Go `os/exec` 在 Windows 上无法把 `.ps1` 文本文件当作可执行体 fork/exec，必须由 PowerShell 进程承载脚本解释；当前 `process_windows.go` 仍按 `exec.Command(spec.Command, spec.Args...)` 直传配置命令，没做平台兜底。

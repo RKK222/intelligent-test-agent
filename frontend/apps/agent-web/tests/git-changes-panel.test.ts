@@ -178,6 +178,8 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect(apiClientMock.discardWorkspaceGitFiles)
       .toHaveBeenCalledWith("wrk_1234567890abcdef", ["workspace/02-设计/Test Material.md"]));
     await waitFor(() => expect(view.queryByText("workspace/02-设计/Test Material.md")).toBeNull());
-    await waitFor(() => expect(changesRefreshed).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(changesRefreshed).toHaveBeenCalledWith({
+      paths: ["workspace/02-设计/Test Material.md"]
+    }));
   });
 });

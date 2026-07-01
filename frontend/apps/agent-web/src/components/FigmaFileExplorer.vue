@@ -46,7 +46,7 @@ const emit = defineEmits<{
   toggleDirectory: [path: string];
   openFile: [path: string];
   openDiff: [payload: string | { path: string; source: "vcs" | "agent"; scope?: "PUBLIC" | "WORKSPACE" }];
-  "changes-refreshed": [];
+  "changes-refreshed": [payload?: { paths?: string[] }];
   refresh: [];
   // 选择某个应用版本后由父组件切换运行态 Workspace
   selectVersion: [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
@@ -171,7 +171,7 @@ defineExpose({
         :api-base-url="apiBaseUrl"
         :can-write="!!publicDirectoryWritable"
         @open-diff="(payload) => emit('openDiff', payload)"
-        @changes-refreshed="emit('changes-refreshed')"
+        @changes-refreshed="(payload) => emit('changes-refreshed', payload)"
       />
       <template v-else>
         <!-- Section 1: 应用工作空间 -->

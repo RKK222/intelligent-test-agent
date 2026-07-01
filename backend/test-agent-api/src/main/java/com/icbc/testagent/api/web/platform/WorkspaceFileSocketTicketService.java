@@ -9,6 +9,7 @@ import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessFileRoutingAffinity;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.icbc.testagent.opencode.runtime.process.WorkspaceFileRoutingService;
 import com.icbc.testagent.workspace.WorkspaceApplicationService;
 import java.util.Map;
@@ -87,7 +88,24 @@ class WorkspaceFileSocketTicketService {
     }
 
     private UserOpencodeProcessFileRoutingAffinity userProcessAffinity(AuthPrincipal principal, String traceId) {
-        return assignmentService.fileRoutingAffinity(principal.userId(), "opencode", traceId);
+        UserOpencodeProcessFileRoutingAffinity affinity =
+                assignmentService.fileRoutingAffinity(principal.userId(), "opencode", traceId);
+        if (affinity.status() == UserOpencodeProcessAvailability.READY) {
+            return affinity;
+        }
+        // 文件树入口的可用性提示必须与右侧进程状态卡一致：轻量归属快照未 READY 时，
+        // 复用同一个强状态查询兜底，避免 UI 同时展示“进程可用”和“文件树不可用”。
+        UserOpencodeProcessStatusResponse status = assignmentService.status(principal.userId(), "opencode", traceId);
+        return new UserOpencodeProcessFileRoutingAffinity(
+                status.status(),
+                status.initializable(),
+                status.message(),
+                status.processId(),
+                status.linuxServerId(),
+                status.containerId(),
+                status.port(),
+                status.serviceAddress(),
+                status.checkedAt());
     }
 
     private void requireReadyAgentOnCurrentServer(

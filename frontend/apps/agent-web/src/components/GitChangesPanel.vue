@@ -37,7 +37,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   openDiff: [payload: { path: string; source: "vcs" | "agent"; scope?: "PUBLIC" | "WORKSPACE" }];
-  "changes-refreshed": [];
+  "changes-refreshed": [payload?: { paths?: string[] }];
 }>();
 
 const workbench = useWorkbenchStore();
@@ -260,8 +260,8 @@ function unstageWorkspaceFile(path: string) {
   stagedWorkspacePaths.value = next;
 }
 
-function notifyChangesRefreshed() {
-  emit("changes-refreshed");
+function notifyChangesRefreshed(paths?: string[]) {
+  emit("changes-refreshed", paths ? { paths } : undefined);
 }
 
 async function discardWorkspaceFile(path: string) {
@@ -274,7 +274,7 @@ async function discardWorkspaceFile(path: string) {
       const next = new Set(stagedWorkspacePaths.value);
       next.delete(path);
       stagedWorkspacePaths.value = next;
-      notifyChangesRefreshed();
+      notifyChangesRefreshed([path]);
       return;
     }
     await api.discardWorkspaceGitFiles(props.workspaceId, [path]);
@@ -282,7 +282,7 @@ async function discardWorkspaceFile(path: string) {
     next.delete(path);
     stagedWorkspacePaths.value = next;
     await refreshChanges();
-    notifyChangesRefreshed();
+    notifyChangesRefreshed([path]);
   } catch (error) {
     errorMessage.value = errorMessageFor(error, "回退工作区文件失败");
   } finally {

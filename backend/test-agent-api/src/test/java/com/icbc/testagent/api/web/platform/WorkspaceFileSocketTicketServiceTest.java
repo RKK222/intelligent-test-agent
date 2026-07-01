@@ -15,6 +15,7 @@ import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessFileRoutingAffinity;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.icbc.testagent.workspace.WorkspaceApplicationService;
 import java.time.Clock;
 import java.time.Instant;
@@ -30,7 +31,7 @@ class WorkspaceFileSocketTicketServiceTest {
     private static final UserId USER_ID = new UserId("usr_1234567890abcdef");
 
     @Test
-    void createsWorkspaceTicketWithoutCallingBlockingProcessStatus() {
+    void createsWorkspaceTicketFromReadyAffinityWithoutCallingBlockingProcessStatus() {
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         WorkspaceFileSocketTicketService service = service(workspaceService, assignmentService);
@@ -68,21 +69,32 @@ class WorkspaceFileSocketTicketServiceTest {
     }
 
     @Test
-    void rejectsWorkspaceTicketWhenAffinityIsNotReady() {
+    void createsWorkspaceTicketWhenAffinityIsStaleButStrongStatusIsReady() {
         WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         WorkspaceFileSocketTicketService service = service(workspaceService, assignmentService);
         when(workspaceService.currentLinuxServerId()).thenReturn("10.8.0.12");
-        when(assignmentService.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID)).thenReturn(new UserOpencodeProcessFileRoutingAffinity(
-                UserOpencodeProcessAvailability.NEEDS_INITIALIZATION,
-                true,
-                "需要初始化 opencode 进程",
-                null,
-                null,
-                null,
-                null,
-                null,
-                NOW));
+        when(assignmentService.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID)).thenReturn(needsInitializationAffinity());
+        when(assignmentService.status(USER_ID, "opencode", TRACE_ID)).thenReturn(readyStatus("10.8.0.12"));
+
+        WorkspaceFileSocketDtos.TicketResponse response = service.createTicket(
+                principal(List.of(Dictionary.ROLE_USER)),
+                new WorkspaceFileSocketDtos.TicketRequest("wrk_1234567890abcdef", "10.8.0.12", "workspace"),
+                TRACE_ID);
+
+        assertThat(response.ticket()).isEqualTo("wft_fixed");
+        verify(assignmentService).status(USER_ID, "opencode", TRACE_ID);
+        verify(workspaceService).requireWorkspaceOnCurrentServer(new WorkspaceId("wrk_1234567890abcdef"), TRACE_ID);
+    }
+
+    @Test
+    void rejectsWorkspaceTicketWhenAffinityAndStrongStatusAreNotReady() {
+        WorkspaceApplicationService workspaceService = Mockito.mock(WorkspaceApplicationService.class);
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        WorkspaceFileSocketTicketService service = service(workspaceService, assignmentService);
+        when(workspaceService.currentLinuxServerId()).thenReturn("10.8.0.12");
+        when(assignmentService.fileRoutingAffinity(USER_ID, "opencode", TRACE_ID)).thenReturn(needsInitializationAffinity());
+        when(assignmentService.status(USER_ID, "opencode", TRACE_ID)).thenReturn(needsInitializationStatus());
 
         assertThatThrownBy(() -> service.createTicket(
                         principal(List.of(Dictionary.ROLE_USER)),
@@ -159,6 +171,45 @@ class WorkspaceFileSocketTicketServiceTest {
                 "ctr_01",
                 4096,
                 linuxServerId + ":4096",
+                NOW);
+    }
+
+    private static UserOpencodeProcessFileRoutingAffinity needsInitializationAffinity() {
+        return new UserOpencodeProcessFileRoutingAffinity(
+                UserOpencodeProcessAvailability.NEEDS_INITIALIZATION,
+                true,
+                "需要初始化 opencode 进程",
+                null,
+                null,
+                null,
+                null,
+                null,
+                NOW);
+    }
+
+    private static UserOpencodeProcessStatusResponse readyStatus(String linuxServerId) {
+        return new UserOpencodeProcessStatusResponse(
+                UserOpencodeProcessAvailability.READY,
+                false,
+                "opencode 进程可用",
+                "ocp_1234567890abcdef",
+                linuxServerId,
+                "ctr_01",
+                4096,
+                "http://" + linuxServerId + ":4096",
+                NOW);
+    }
+
+    private static UserOpencodeProcessStatusResponse needsInitializationStatus() {
+        return new UserOpencodeProcessStatusResponse(
+                UserOpencodeProcessAvailability.NEEDS_INITIALIZATION,
+                true,
+                "需要初始化 opencode 进程",
+                null,
+                null,
+                null,
+                null,
+                null,
                 NOW);
     }
 
