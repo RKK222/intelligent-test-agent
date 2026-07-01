@@ -2897,8 +2897,8 @@ function onCompositionEnd() {
           @click="taskPanelCollapsed = !taskPanelCollapsed"
           :title="taskPanelCollapsed ? '展开任务列表' : '收起任务列表'"
         >
-          <ChevronDown v-if="taskPanelCollapsed" :size="12" />
-          <ChevronUp v-else :size="12" />
+          <ChevronUp v-if="taskPanelCollapsed" :size="12" />
+          <ChevronDown v-else :size="12" />
         </button>
       </div>
       <div v-show="!taskPanelCollapsed" class="figma-chat-task-list">
