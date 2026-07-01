@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-01 - 收口 OpenCode 状态抖动、技能召唤与重启假超时
+
+- Why: `/global/health` 返回 200 时页面显示绿灯，但公共配置 `opencode.jsonc` 仍使用旧的 `skills: ["./skills"]`，OpenCode 1.17.7 的 `/command` 实际返回 `ConfigInvalidError`；同时瞬时 manager/HTTP 探测会覆盖数据库稳定状态，文件 ticket 强探测和旧 workspace 重试会放大抖动，运行管理 restart 还存在“实际成功但 Java 先超时”的竞态。
+- What: 公共配置改为 OpenCode 原生 `"skills": {"paths": ["./skills"]}` 并提交推送到配置仓库；manager readiness 增加 `/global/config` 可加载校验，restart 的 stop 阶段只占总预算一半；Java 瞬时失败返回 `STALE` 且不覆盖稳定状态，最近成功健康检查仅保留 60 秒 READY 宽限，启动控制错误立即失败并收敛候选状态；文件 ticket 只读 affinity，工作区文件树用 workspaceId + 代次隔离旧请求；技能面板继续直接消费 OpenCode `/command` 的 `source=skill`，调用权限仍由原生 `permission.skill` 决定。
+- How: 未修改 OpenCode 源码、generated SDK、数据库结构或环境文件；Java 继续通过公共 startup/status/stop 服务和 manager WebSocket 控制进程，普通 runtime/skill/agent 请求继续经 `AgentRuntime` 代理 OpenCode 原生 API。同步 opencode-manager、runtime、agent-web README 与 HTTP API 文档，并补充 Go、Java、Vue 回归测试。
+- Result: `go test ./...`、相关 Java 定向测试、runtime/API 模块全量测试、前端 195 个 Vitest、typecheck、build 和真实 `/api/command`（44 条命令、42 条 skill）通过。后端全 reactor 到 persistence 前均通过；persistence 仍有近期日志已记录的 H2 `ON CONFLICT` 不兼容、`usr_test_dev` fixture 外键缺失和 migration seed 断言失败，本次未扩大范围处理。
+
 ### 2026-07-01 - 修复 opencode 状态不一致与回退后编辑器缓存未刷新
 
 - Why: 用户反馈右侧状态卡显示 `opencode 进程可用`，但左侧文件树仍提示 `OPENCODE_UNAVAILABLE`；同时点击 Git 变更回退后，变更计数消失但已打开编辑器里的文件内容仍是回退前缓存。
@@ -2481,3 +2488,17 @@ bash /tmp/test-api-after-restart.sh
   - 服务启动成功
 - Result: 第一阶段"止血"修改完成，红灯闪烁、绿灯不可用矛盾已解决。P1-5（Agent 与 Skill 权限）需要第二阶段配合后端改动。
 
+
+### 2026-07-01 - 修复个人 worktree 推送未合并回应用版本特性分支
+
+- Why: 应用工作区采用 worktree 管理后，「推送」按钮本应把个人 worktree 上的变更 merge 回应用版本特性分支再推送特性分支，但 `ManagedWorkspaceApplicationService.publishPersonalWorkspace` 的旧实现存在三个核心错误：直接推送个人分支、merge 方向反了（特性分支→个人分支）、把个人 worktree HEAD 当成应用版本 commit 写回。导致远端特性分支始终收不到个人改动，前端展示的版本 commit 也是个人分支的 commit。
+- What:
+  1. `GitWorkspaceService`：新增 `conflictPaths(Path repoRoot)` 方法，统一执行 `git -C {repoRoot} diff --name-only --diff-filter=U`，返回未解决合并冲突文件列表，过滤空行。
+  2. `ManagedWorkspaceApplicationService.publishPersonalWorkspace`：重写为三段式正确流程——① 在个人 worktree 上 `stageAll` + `commitStaged`；② 取应用版本副本（checkout 在特性分支上），校验工作树干净后 `fetch` + `pullFastForward` 特性分支，再 `mergeBranch(applicationRepoRoot, personal.branch(), privateKey)` 把个人分支合并进特性分支（正确方向：特性分支 ← 个人分支），合并失败时通过 `GitWorkspaceService.conflictPaths` 拉取冲突文件列表并以 `CONFLICT` 状态返回前端；③ 合并成功后 `push` 特性分支，从应用版本副本取 `headCommit` 更新 `targetCommitHash` 与副本 commit。
+  3. 删除此前在业务层直接 `new ProcessGitCommandExecutor()` 自行执行 git 命令的 `conflictPaths` 私有方法和不再使用的 import（`GitCommandResult`、`ProcessGitCommandExecutor`、`Duration`），统一收口到 `GitWorkspaceService`。
+  4. 测试：`ManagedWorkspaceApplicationServiceTest` 在 `FakeGitWorkspaceService` 中补齐 `stageAll/commitStaged/fetch/mergeBranch/conflictPaths` 重写并记录 repoRoot，新增 `publishPersonalWorkspaceMergesPersonalBranchIntoApplicationBranch` 和 `publishPersonalWorkspaceReturnsConflictWhenMergeFails` 两个用例，分别验证正确合并方向、推送特性分支、版本 commit 来自副本，以及合并冲突时不推送且返回 `CONFLICT` 与冲突文件列表。`GitWorkspaceServiceTest` 新增 `conflictPathsListsUnmergedFilesAndFiltersBlankLines` 验证 git 命令拼接与多行输出解析。
+  5. 文档：更新 `docs/api/http-api.md` 接口表格描述与「后端执行流程」为四步正确流程；更新 `test-agent-common/README.md` 与 `test-agent-workspace-management/README.md` 的 `GitWorkspaceService` 与测试覆盖说明。
+- How:
+  - 参考 `AgentConfigApplicationService.publicPublish`/`workspacePublish` 的正确模式作为修复模板。
+  - 运行 `JAVA_HOME=.../openjdk-25.0.1/Contents/Home mvn -pl test-agent-common test -Dtest=GitWorkspaceServiceTest` 与 `mvn -pl test-agent-workspace-management test`，两个模块测试全部通过（test-agent-common 12 个，test-agent-workspace-management 19 个，0 失败 0 错误）。
+- Result: 个人 worktree 推送链路已修复，特性分支能正确接收个人改动；合并冲突时前端拿到 `CONFLICT` + 冲突文件列表可引导用户在个人 worktree 解决后重推。本次不涉及 API 契约、事件、数据库结构、鉴权变更，向后兼容。

@@ -223,6 +223,18 @@ class GitWorkspaceServiceTest {
                 null));
     }
 
+    @Test
+    void conflictPathsListsUnmergedFilesAndFiltersBlankLines() {
+        RecordingExecutor executor = new RecordingExecutor("src/Main.java\nREADME.md\n\n");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        assertThat(service.conflictPaths(tempDir)).containsExactly("src/Main.java", "README.md");
+
+        assertThat(executor.calls).containsExactly(new Call(
+                List.of("git", "-C", tempDir.toString(), "diff", "--name-only", "--diff-filter", "U"),
+                null));
+    }
+
     private static final class RecordingExecutor implements GitCommandExecutor {
         private final String stdout;
         private final List<Call> calls = new ArrayList<>();

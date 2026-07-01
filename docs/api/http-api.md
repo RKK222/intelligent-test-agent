@@ -1004,7 +1004,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/workspace-versions/{versionId}/ensure-default-personal-workspace` | 确保默认个人工作区存在：查询 (versionId, userId, workspaceName=default)，存在则复用返回，不存在则后台创建。 |
 | `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取工作区变更文件列表，返回 `{ files: [{ path, status, staged, patch, additions, deletions }] }`。 |
 | `POST` | `/workspaces/{workspaceId}/git-discard` | 丢弃当前个人 worktree 中指定工作区相对路径的本地 Git 改动；已跟踪文件执行 restore，新增/未跟踪文件定点 clean。 |
-| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 个人工作区"提交并推送"：在个人 worktree 中 stage all + commit + push，再 merge 回应用版本分支；冲突返回 `CONFLICT` 与冲突文件列表。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 个人工作区"提交并推送"：在个人 worktree 中 stage all + commit，再在应用版本副本（特性分支）上 fetch/pull + merge 个人分支 + push 特性分支；冲突返回 `CONFLICT` 与冲突文件列表。 |
 
 `POST /applications/{appId}/workspace-templates/{templateId}/versions` 请求体：
 
@@ -1151,13 +1151,14 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 后端执行流程：
 
 1. 在个人 worktree 中 `git add --all` + `git commit -m "..."`。
-2. `git push origin {personalBranch}` 推送个人分支。
-3. `git fetch origin` + `git merge {appVersionBranch}` 在个人 worktree 中尝试合并应用版本分支。
+2. 切到应用版本副本（checkout 在应用版本特性分支）：`git fetch origin` + `git pull --ff-only {appVersionBranch}`。
+3. `git merge --no-ff {personalBranch}` 在应用版本副本上把个人分支合并进特性分支（合并方向为「特性分支 ← 个人分支」）。
+4. `git push origin {appVersionBranch}` 推送应用版本特性分支。
 
 合并结果：
 
 - **成功（MERGED）**：更新应用版本 `targetCommitHash` 和当前服务器 replica commit，广播其他服务器同步。
-- **冲突（CONFLICT）**：返回冲突文件列表，应用版本副本不进入冲突状态。用户在当前个人 worktree 中编辑冲突文件、保存后重新提交推送。
+- **冲突（CONFLICT）**：返回冲突文件列表，不推送特性分支，应用版本副本不进入冲突状态。用户在当前个人 worktree 中解决冲突后重新提交推送。
 
 响应 `PersonalWorkspacePublishResponse`：
 
@@ -1328,7 +1329,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 
 ### 用户 opencode 进程 API
 
-用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会先用统一 `BackendJavaRouteResolver` 找到 binding 所属服务器 Java 的 `listenUrl`，再通过统一 `BackendHttpForwarder` 透传原始 `Authorization`、`X-Trace-Id`、query、请求 body 和统一错误响应到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。配置管理创建应用工作区、应用版本工作区创建、版本 `git-pull`、Run 创建、初始化和 runtime 代理都纳入同一用户 binding 路由判断。是否已分配只以 `user_opencode_process_bindings(user_id, agent_id)` 的 ACTIVE 记录为准；`GET /processes/me` 目标后端不在线、转发失败或目标返回 5xx 时返回 200 成功响应，`data.status=UNAVAILABLE`、`serviceStatus=NOT_RUNNING`、`serviceAddress={绑定服务器}:{端口}`，表示已分配但暂无法确认健康状态。初始化、Run 启动和 runtime 代理仍在目标后端不可用时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding，也不会在当前 Java 启动旧 binding。目标 Java 上所有强状态查询统一调用 `OpencodeProcessStatusQueryService`：先查询平台进程记录是否存在，再通过本机 manager health 归一为未启动、运行中或健康检查异常，并统一回写进程状态和 Redis heartbeat。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程，并统一调用公共启动服务在 manager `STARTED` 后复用公共状态查询，默认最多等待 manager command-timeout（10 秒）确认 manager state/PID 和 opencode HTTP health 都 healthy 后才返回 READY、写入 RUNNING/binding/heartbeat/兼容节点；无 manager 连接、命令超时、manager 返回失败或启动后 health 在等待窗口内仍不健康时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT`、`OPENCODE_BAD_GATEWAY` 或统一 opencode 不可用错误。本地和生产都必须启动 Go manager，不再支持 `local-direct` 或 `gateway-mode=local` 绕过。
+用户进程 API 只支持 `agentId=opencode`，必须从认证主体读取当前用户；未认证返回 `UNAUTHENTICATED`，非 `opencode` agent 返回 `VALIDATION_ERROR`。如果当前用户已有 ACTIVE binding 且 `linuxServerId` 不等于当前 Java 所在服务器，API 层会先用统一 `BackendJavaRouteResolver` 找到 binding 所属服务器 Java 的 `listenUrl`，再通过统一 `BackendHttpForwarder` 透传原始 `Authorization`、`X-Trace-Id`、query、请求 body 和统一错误响应到目标 Java；内部路由头 `X-Test-Agent-Backend-Routed: true` 会阻止循环转发。配置管理创建应用工作区、应用版本工作区创建、版本 `git-pull`、Run 创建、初始化和 runtime 代理都纳入同一用户 binding 路由判断。是否已分配只以 `user_opencode_process_bindings(user_id, agent_id)` 的 ACTIVE 记录为准；`GET /processes/me` 目标后端不在线、转发失败或目标返回 5xx 时返回 200 成功响应，`data.status=UNAVAILABLE`、`serviceStatus=NOT_RUNNING`、`serviceAddress={绑定服务器}:{端口}`，表示已分配但暂无法确认健康状态。初始化、Run 启动和 runtime 代理仍在目标后端不可用时返回 `OPENCODE_UNAVAILABLE`，不会自动迁移 binding，也不会在当前 Java 启动旧 binding。目标 Java 上所有强状态查询统一调用 `OpencodeProcessStatusQueryService`：先查询平台进程记录是否存在，再通过本机 manager health 归一为未启动、运行中或 `STALE`；健康成功和明确未启动才更新稳定状态，瞬时 HTTP/manager 异常保留数据库最近状态。已有 RUNNING 进程仅在最近成功健康检查后的 60 秒内允许沿用 READY，超过宽限期后状态查询和 Run 前置校验都会拒绝旧绿灯。初始化最终由 binding 所属服务器或当前服务器 Java 通过本机已连接的 `opencode-manager` WebSocket 控制面启动进程，并统一调用公共启动服务在 manager `STARTED` 后复用公共状态查询，默认最多等待 manager command-timeout（10 秒）确认 manager state/PID、`/global/health` 和 `/global/config` 都 healthy 后才返回 READY、写入 RUNNING/binding/heartbeat/兼容节点；无 manager 连接、命令超时、manager 返回失败或启动后 health 在等待窗口内仍不健康时分别映射为 `OPENCODE_UNAVAILABLE`、`OPENCODE_TIMEOUT`、`OPENCODE_BAD_GATEWAY` 或统一 opencode 不可用错误。本地和生产都必须启动 Go manager，不再支持 `local-direct` 或 `gateway-mode=local` 绕过。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
@@ -1376,7 +1377,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 - 启动参数读取通用参数：`XDG_DATA_HOME={OPENCODE_SESSION_DIR}/{port}`、`OPENCODE_CONFIG_DIR={OPENCODE_PUBLIC_CONFIG_DIR}`；缺失或空白时返回平台错误，不回退环境变量或代码默认路径。
 - Java 后端不检查本机 `OPENCODE_PUBLIC_CONFIG_DIR` 目录；初始化先按当前候选中进程数最少且有空闲端口的容器选择目标 manager，再下发 `start`。目标 manager 在所在服务器检查 `OPENCODE_PUBLIC_CONFIG_DIR` 必须是已存在且非空的目录；缺失、为空、非目录或不可读时返回 `FAILED + errorCode=OPENCODE_UNAVAILABLE`，`message` 包含目标服务器和 manager 实际检查的配置目录，并提示联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化，不会创建 session、不会启动 opencode server，Java 将该结果映射为同码平台错误。
 - 若 manager 本地 state 已托管目标端口且健康，`start` 命令按幂等成功处理，后端继续补齐用户进程绑定、进程快照和兼容 `execution_nodes` 投影；若该 state 不健康，仍按 manager 失败结果返回统一 opencode 错误。
-- 初始化成功必须同时满足 manager 已管理该端口、PID 存活、opencode server HTTP health healthy；仅 manager 返回 `STARTED` 不算成功。启动后公共状态查询为未启动时进程快照回写 `STOPPED`，HTTP 不健康时回写 `UNHEALTHY`，health 命令异常时回写 `FAILED`，接口按统一错误格式返回，不返回 READY。
+- 初始化成功必须同时满足 manager 已管理该端口、PID 存活、opencode server `/global/health` 和 `/global/config` healthy；仅 manager 返回 `STARTED` 不算成功。启动确认期间只有 OpenCode HTTP 暂未就绪会在窗口内重试，manager 超时或网关错误立即失败；最终失败候选会收敛为 `STOPPED/UNHEALTHY/FAILED`，不会长期残留 `STARTING`。普通状态轮询遇到瞬时 HTTP 或 manager 异常时返回 `STALE` 且不覆盖数据库稳定状态。
 - 初始化成功后会同步写入用户进程绑定、进程快照、Redis heartbeat，以及兼容旧运行链路的 `execution_nodes` 投影。
 
 `DELETE` 行为：

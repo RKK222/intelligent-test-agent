@@ -612,6 +612,103 @@ class ManagedWorkspaceApplicationServiceTest {
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
     }
 
+    @Test
+    void publishPersonalWorkspaceMergesPersonalBranchIntoApplicationBranch() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        // createVersion 后版本 commit 为 commit_base
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_base");
+
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+
+        // 合并成功后应用版本副本 HEAD 变为 commit_merged
+        git.nextHeadCommit = "commit_merged";
+
+        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "fix: 修复缺陷",
+                new UserId("usr_1"),
+                "trace_publish");
+
+        Path applicationRepoRoot = Path.of(managed.replicas.get(0).repoRootPath());
+        Path personalRepoRoot = Path.of(managed.personals.get(0).repoRootPath());
+
+        assertThat(result.status()).isEqualTo("MERGED");
+        assertThat(result.versionId()).isEqualTo(version.versionId());
+        // 合并方向：在应用版本副本（特性分支）上把个人分支 merge 进来，而非反过来
+        assertThat(git.mergedBranch).isEqualTo(personal.personalWorkspaceBranch());
+        assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
+        // 推送的是应用版本特性分支，不是个人分支；且推送发生在应用版本副本仓库
+        assertThat(git.pushedBranch).isEqualTo(version.branch());
+        assertThat(git.pushedRepoRoot).isEqualTo(applicationRepoRoot);
+        assertThat(git.pushedBranch).isNotEqualTo(personal.personalWorkspaceBranch());
+        // head commit 取自应用版本副本而非个人 worktree
+        assertThat(git.headCommitRepoRoot).isEqualTo(applicationRepoRoot);
+        // 个人 worktree 只负责 stage + commit
+        assertThat(git.stagedRepoRoot).isEqualTo(personalRepoRoot);
+        assertThat(git.committedStagedRepoRoot).isEqualTo(personalRepoRoot);
+        assertThat(git.committedStagedMessage).isEqualTo("fix: 修复缺陷");
+        // 版本 targetCommitHash 和副本 commit 已更新到合并后的 commit
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_merged");
+        assertThat(managed.replicas.get(0).currentCommitHash()).isEqualTo("commit_merged");
+    }
+
+    @Test
+    void publishPersonalWorkspaceReturnsConflictWhenMergeFails() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        git.failMergeWithConflict = true;
+        git.nextConflictPaths = List.of("src/Main.java", "README.md");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+
+        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "fix: 修复缺陷",
+                new UserId("usr_1"),
+                "trace_publish");
+
+        Path applicationRepoRoot = Path.of(managed.replicas.get(0).repoRootPath());
+
+        assertThat(result.status()).isEqualTo("CONFLICT");
+        assertThat(result.conflictFiles()).containsExactly("src/Main.java", "README.md");
+        // 合并方向仍应是个人分支 merge 进应用版本特性分支
+        assertThat(git.mergedBranch).isEqualTo(personal.personalWorkspaceBranch());
+        assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
+        // 冲突时不应推送
+        assertThat(git.pushedBranch).isNull();
+        // 版本 commit 不应更新
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_base");
+    }
+
     private ManagedWorkspaceApplicationService service(
             FakeConfigurationRepository configuration,
             FakeManagedWorkspaceRepository managed,
@@ -743,6 +840,17 @@ class ManagedWorkspaceApplicationServiceTest {
         private List<String> restoredFiles = List.of();
         private List<String> unstagedFiles = List.of();
         private List<String> cleanedFiles = List.of();
+        // 个人 worktree 推送（合并回应用版本特性分支）链路记录
+        private Path stagedRepoRoot;
+        private Path committedStagedRepoRoot;
+        private String committedStagedMessage;
+        private Path fetchedRepoRoot;
+        private String mergedBranch;
+        private Path mergedBranchRepoRoot;
+        private boolean failMergeWithConflict;
+        private List<String> nextConflictPaths = List.of();
+        private Path pushedRepoRoot;
+        private Path headCommitRepoRoot;
 
         private FakeGitWorkspaceService(String directoryPath) {
             this.directoryPath = directoryPath;
@@ -802,6 +910,7 @@ class ManagedWorkspaceApplicationServiceTest {
 
         @Override
         public String headCommit(Path repoRoot) {
+            this.headCommitRepoRoot = repoRoot;
             return nextHeadCommit;
         }
 
@@ -812,9 +921,43 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
+        public void stageAll(Path repoRoot, String privateKey) {
+            this.stagedRepoRoot = repoRoot;
+        }
+
+        @Override
+        public void commitStaged(Path repoRoot, String message, String privateKey) {
+            this.committedStagedRepoRoot = repoRoot;
+            this.committedStagedMessage = message;
+        }
+
+        @Override
+        public void fetch(Path repoRoot, String privateKey) {
+            this.fetchedRepoRoot = repoRoot;
+        }
+
+        @Override
+        public void mergeBranch(Path repoRoot, String branch, String privateKey) {
+            this.mergedBranch = branch;
+            this.mergedBranchRepoRoot = repoRoot;
+            if (failMergeWithConflict) {
+                throw new PlatformException(
+                        ErrorCode.GIT_UNAVAILABLE,
+                        "合并冲突",
+                        Map.of());
+            }
+        }
+
+        @Override
+        public List<String> conflictPaths(Path repoRoot) {
+            return nextConflictPaths;
+        }
+
+        @Override
         public void push(Path repoRoot, String branch, boolean force, String privateKey) {
             this.pushedBranch = branch;
             this.pushedForce = force;
+            this.pushedRepoRoot = repoRoot;
         }
 
         @Override
