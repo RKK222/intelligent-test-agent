@@ -535,7 +535,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     public AgentConfigResponses.AgentConfigDiffResponse workspaceDiff(String workspaceId, String worktreeId) {
-        return diff(repoRootForWorkspaceOperation(workspaceId, worktreeId));
+        return workspaceDiff(repoRootForWorkspaceOperation(workspaceId, worktreeId));
     }
 
     public void publicStage(List<String> files, String worktreeId, UserId userId) {
@@ -547,11 +547,17 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     public void workspaceStage(String workspaceId, List<String> files, String worktreeId, UserId userId) {
-        gitWorkspaceService.stageFiles(repoRootForWorkspaceOperation(workspaceId, worktreeId), normalizeFiles(files), decryptSingleSshKey(userId));
+        gitWorkspaceService.stageFiles(
+                repoRootForWorkspaceOperation(workspaceId, worktreeId),
+                normalizeWorkspaceAgentFiles(files),
+                decryptSingleSshKey(userId));
     }
 
     public void workspaceUnstage(String workspaceId, List<String> files, String worktreeId, UserId userId) {
-        gitWorkspaceService.unstageFiles(repoRootForWorkspaceOperation(workspaceId, worktreeId), normalizeFiles(files), decryptSingleSshKey(userId));
+        gitWorkspaceService.unstageFiles(
+                repoRootForWorkspaceOperation(workspaceId, worktreeId),
+                normalizeWorkspaceAgentFiles(files),
+                decryptSingleSshKey(userId));
     }
 
     public AgentConfigResponses.AgentConfigOperationResponse publicCommit(
@@ -716,14 +722,43 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 continue;
             }
             String status = line.substring(0, 2);
-            String path = line.substring(3).trim();
+            String path = gitWorkspaceService.unquotePorcelainPath(line.substring(3));
             int rename = path.indexOf(" -> ");
             if (rename >= 0) {
-                path = path.substring(rename + 4).trim();
+                path = gitWorkspaceService.unquotePorcelainPath(path.substring(rename + 4));
             }
             boolean staged = status.charAt(0) != ' ' && status.charAt(0) != '?';
             String patch = gitWorkspaceService.diff(repoRoot, path, staged);
             files.put(path, new AgentConfigResponses.AgentConfigDiffFileResponse(path, status.trim(), staged, patch));
+        }
+        return new AgentConfigResponses.AgentConfigDiffResponse(List.copyOf(files.values()));
+    }
+
+    /**
+     * 工作空间级 Agent 配置只允许展示 .opencode 下的 agents 与 skills。
+     * Git porcelain 在子目录执行时仍可能返回仓库根相对路径，因此这里保留 Git 命令路径并单独生成 UI 展示路径。
+     */
+    private AgentConfigResponses.AgentConfigDiffResponse workspaceDiff(Path repoRoot) {
+        String statusOutput = gitWorkspaceService.statusPorcelain(repoRoot, WORKSPACE_AGENT_RELATIVE_ROOT);
+        Map<String, AgentConfigResponses.AgentConfigDiffFileResponse> files = new LinkedHashMap<>();
+        for (String line : statusOutput.lines().toList()) {
+            if (line.length() < 4) {
+                continue;
+            }
+            String status = line.substring(0, 2);
+            String rawPath = gitWorkspaceService.unquotePorcelainPath(line.substring(3));
+            int rename = rawPath.indexOf(" -> ");
+            if (rename >= 0) {
+                rawPath = gitWorkspaceService.unquotePorcelainPath(rawPath.substring(rename + 4));
+            }
+            String gitPath = workspaceAgentGitPath(rawPath);
+            String displayPath = workspaceAgentDisplayPath(gitPath);
+            if (displayPath == null) {
+                continue;
+            }
+            boolean staged = status.charAt(0) != ' ' && status.charAt(0) != '?';
+            String patch = gitWorkspaceService.diff(repoRoot, gitPath, staged);
+            files.put(displayPath, new AgentConfigResponses.AgentConfigDiffFileResponse(displayPath, status.trim(), staged, patch));
         }
         return new AgentConfigResponses.AgentConfigDiffResponse(List.copyOf(files.values()));
     }
@@ -1091,6 +1126,34 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             normalized.add(value);
         }
         return List.copyOf(normalized);
+    }
+
+    private List<String> normalizeWorkspaceAgentFiles(List<String> files) {
+        return normalizeFiles(files).stream()
+                .map(this::workspaceAgentGitPath)
+                .filter(path -> workspaceAgentDisplayPath(path) != null)
+                .toList();
+    }
+
+    private String workspaceAgentGitPath(String path) {
+        String value = requireText(path, "文件路径不能为空", "path").replace('\\', '/');
+        int marker = value.indexOf(WORKSPACE_AGENT_RELATIVE_ROOT + "/");
+        if (marker >= 0) {
+            return value.substring(marker);
+        }
+        return value.startsWith(WORKSPACE_AGENT_RELATIVE_ROOT + "/")
+                ? value
+                : WORKSPACE_AGENT_RELATIVE_ROOT + "/" + value;
+    }
+
+    private String workspaceAgentDisplayPath(String gitPath) {
+        String normalized = gitPath.replace('\\', '/');
+        String prefix = WORKSPACE_AGENT_RELATIVE_ROOT + "/";
+        if (!normalized.startsWith(prefix)) {
+            return null;
+        }
+        String display = normalized.substring(prefix.length());
+        return display.startsWith("agents/") || display.startsWith("skills/") ? display : null;
     }
 
     private void broadcastPublicSync(String branch, String commitHash, String reason, String traceId) {

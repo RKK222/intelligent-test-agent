@@ -97,6 +97,7 @@ void authStore.fetchCurrentUser(api);
 
 // 工作台状态
 const selectedWorkspaceId = ref<string | undefined>(undefined);
+const selectedWorkspaceSnapshot = shallowRef<Workspace | undefined>(undefined);
 const entriesByDirectory = ref<Record<string, FileTreeEntry[]>>({});
 const expandedDirectories = ref<Set<string>>(new Set());
 // 多个目录可能同时在加载（用户连续点开多个折叠项，或 expandPathToFile 一次性
@@ -154,6 +155,8 @@ const selectedAppId = ref<string | undefined>(undefined);
 const currentPersonalWorkspaceId = ref<string | undefined>(undefined);
 const currentPersonalWorkspaceBranch = ref<string | undefined>(undefined);
 let retryingWorkspaceAfterOpencodeReady = false;
+let selectingAppId: string | undefined;
+let appSelectionSeq = 0;
 const readonlySessionReason = ref("");
 const chatTitle = computed(() => session.value?.title ?? "生成测试案例");
 // 任务消耗展示：duration 取 chatStartedAt 实时计算；tokens 从助手消息的 step-finish part
@@ -264,7 +267,12 @@ const workspaces = computed(() => workspacesQuery.data.value?.items ?? []);
 // 禁止 fallback 到 workspaces[0]，否则会出现右上角应用与左侧文件树不同步。
 const selectedWorkspace = computed(() => {
   if (!selectedAppId.value) return undefined;
-  return workspaces.value.find((item) => item.workspaceId === selectedWorkspaceId.value);
+  const fromList = workspaces.value.find((item) => item.workspaceId === selectedWorkspaceId.value);
+  if (fromList) return fromList;
+  if (selectedWorkspaceSnapshot.value?.workspaceId === selectedWorkspaceId.value) {
+    return selectedWorkspaceSnapshot.value;
+  }
+  return undefined;
 });
 const selectedWorkspaceIdRef = computed(() => selectedWorkspace.value?.workspaceId);
 const sessionSearchTrim = computed(() => sessionSearch.value.trim());
@@ -422,56 +430,71 @@ const opencodeProcessQuery = useQuery({
 });
 const opencodeProcessStatus = computed<UserOpencodeProcess | null>(() => opencodeProcessQuery.data.value ?? null);
 const opencodeProcessReady = computed(() => opencodeProcessStatus.value?.status === "READY");
+const workspaceFileRouteReadyById = ref<Record<string, boolean>>({});
+const selectedWorkspaceFileRouteReady = computed(() => {
+  const workspaceId = selectedWorkspaceIdRef.value;
+  return Boolean(workspaceId && workspaceFileRouteReadyById.value[workspaceId]);
+});
+const runtimeWorkspaceReady = computed(() => opencodeProcessReady.value && selectedWorkspaceFileRouteReady.value);
 
 const agentsQuery = useQuery({
   queryKey: ["runtime", "agents", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
-  queryFn: () => api.listAgents(selectedWorkspaceIdRef.value!)
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
+  queryFn: () => api.listAgents(selectedWorkspaceIdRef.value!),
+  retry: false
 });
 const modelsQuery = useQuery({
-  queryKey: ["runtime", "models"],
-  enabled: opencodeProcessReady,
-  queryFn: () => api.listModels()
+  queryKey: ["runtime", "models", selectedWorkspaceIdRef],
+  enabled: runtimeWorkspaceReady,
+  queryFn: () => api.listModels(),
+  retry: false
 });
 const providersQuery = useQuery({
-  queryKey: ["runtime", "providers"],
-  enabled: opencodeProcessReady,
-  queryFn: () => api.listProviders()
+  queryKey: ["runtime", "providers", selectedWorkspaceIdRef],
+  enabled: runtimeWorkspaceReady,
+  queryFn: () => api.listProviders(),
+  retry: false
 });
 const commandsQuery = useQuery({
   queryKey: ["runtime", "commands", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
-  queryFn: () => api.listCommands(selectedWorkspaceIdRef.value!)
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
+  queryFn: () => api.listCommands(selectedWorkspaceIdRef.value!),
+  retry: false
 });
 const lspStatusQuery = useQuery({
   queryKey: ["runtime", "lsp", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
   queryFn: () => api.getLspStatus(selectedWorkspaceIdRef.value!),
+  retry: false,
   refetchInterval: 30000
 });
 const mcpStatusQuery = useQuery({
   queryKey: ["runtime", "mcp", "status", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
   queryFn: () => api.getMcpStatus(selectedWorkspaceIdRef.value!),
+  retry: false,
   refetchInterval: 30000
 });
 const mcpResourcesQuery = useQuery({
   queryKey: ["runtime", "mcp", "resources", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
-  queryFn: () => api.getMcpResources(selectedWorkspaceIdRef.value!)
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
+  queryFn: () => api.getMcpResources(selectedWorkspaceIdRef.value!),
+  retry: false
 });
 const mcpToolsQuery = useQuery({
   queryKey: ["runtime", "mcp", "tools", selectedWorkspaceIdRef, selectedProvider, selectedModel],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
   queryFn: () => {
     const model = modelIdOnly(selectedModel.value);
     return api.getMcpTools(selectedWorkspaceIdRef.value!, selectedProvider.value || undefined, model || undefined);
-  }
+  },
+  retry: false
 });
 const vcsStatusQuery = useQuery({
   queryKey: ["runtime", "vcs", "status", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
   queryFn: () => api.getVcsStatus(selectedWorkspaceIdRef.value!),
+  retry: false,
   refetchInterval: 30000
 });
 
@@ -561,6 +584,7 @@ watch(activePath, () => {
 });
 watch(selectedWorkspaceIdRef, (id) => {
   if (id) {
+    workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [id]: false };
     void loadDirectory("", id);
   }
 });
@@ -591,6 +615,9 @@ watch(opencodeProcessReady, (ready, previous) => {
   void queryClient.invalidateQueries({ queryKey: ["runtime", "lsp"] });
   void queryClient.invalidateQueries({ queryKey: ["runtime", "mcp"] });
   void queryClient.invalidateQueries({ queryKey: ["runtime", "vcs"] });
+  if (selectedWorkspaceId.value) {
+    void loadDirectory("", selectedWorkspaceId.value, true);
+  }
   if (selectedAppId.value && !selectedWorkspaceId.value && !retryingWorkspaceAfterOpencodeReady) {
     retryingWorkspaceAfterOpencodeReady = true;
     void handleSelectApp(selectedAppId.value).finally(() => {
@@ -1149,9 +1176,15 @@ function resetWorkspaceState() {
   nowTick.value = Date.now();
   dispatchChat({ type: "reset" });
   // 切工作区时清掉个人工作区 ID，避免旧版本的空 ID 残留导致提交/推送指向错误目标。
+  selectedWorkspaceSnapshot.value = undefined;
   currentPersonalWorkspaceId.value = undefined;
   currentPersonalWorkspaceBranch.value = undefined;
   workbench.resetWorkspaceView();
+}
+
+function rememberPersonalWorkspace(personalWorkspaceId?: string, personalWorkspaceBranch?: string) {
+  currentPersonalWorkspaceId.value = personalWorkspaceId;
+  currentPersonalWorkspaceBranch.value = personalWorkspaceBranch;
 }
 
 function cacheWorkspace(workspace: Workspace) {
@@ -1241,6 +1274,7 @@ async function switchWorkspace(workspace: Workspace) {
   resetWorkspaceState();
   cacheWorkspace(workspace);
   selectedWorkspaceId.value = workspace.workspaceId;
+  selectedWorkspaceSnapshot.value = workspace;
   // 切到运行态 Workspace 后，反查当前 workspace 来自哪个应用版本，驱动两级菜单的高亮项。
   syncCurrentVersionFromWorkspace(workspace);
   void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
@@ -1285,10 +1319,8 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
       feedback.value = { kind: "error", title: "该版本未关联运行态工作区", description: "请先在平台侧初始化版本。" };
       return;
     }
-    // 无论是否已是当前工作区，都记录个人工作区 ID（若从 recent 恢复进入，可能尚未设置）
-    currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
-    currentPersonalWorkspaceBranch.value = defaultPw.personalWorkspaceBranch;
     if (runtimeWorkspaceId === selectedWorkspaceId.value) {
+      rememberPersonalWorkspace(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch);
       feedback.value = { kind: "info", title: "已在该版本工作区", description: `${payload.version.version} (个人空间: default)` };
       return;
     }
@@ -1297,6 +1329,7 @@ async function handleSelectVersion(payload: { template: ApplicationWorkspaceTemp
       successTitle: "已切换应用版本",
       successDescription: `${payload.template.workspaceName} · ${payload.version.version} (个人空间: default)`
     });
+    rememberPersonalWorkspace(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch);
   } catch (error) {
     feedback.value = errorFeedback("切换应用版本失败", error);
   }
@@ -1349,18 +1382,20 @@ function mergeRecentRuntimeResponse(workspace: Workspace, response: Workspace): 
 // 回退时通过 ensureDefaultPersonalWorkspace 创建/复用默认个人工作区，避免直接使用应用版本副本。
 // 返回 { workspace, isFallback }：isFallback=true 表示走了"首模板首版本"的兜底，false 表示命中 recent。
 // 两种情况最终都会通过 applyManagedWorkspace 写入 recent，下次进入直接命中该条偏好。
-async function pickDefaultWorkspaceForApp(appId: string): Promise<{ workspace: Workspace; isFallback: boolean } | null> {
+async function pickDefaultWorkspaceForApp(appId: string): Promise<{ workspace: Workspace; isFallback: boolean; personalWorkspaceId?: string; personalWorkspaceBranch?: string } | null> {
   const recent = await api.getRecentManagedWorkspaceForApplication(appId);
   if (recent?.versionId) {
     // recent 可能指向应用版本副本或历史运行态 workspace；进入应用时统一确保并切到用户 default 私人 worktree，
     // 后续文件树、保存和 Git diff 都落在私人空间，避免直接修改应用版本副本。
     const defaultPw = await api.ensureDefaultPersonalWorkspace(recent.versionId);
-    currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
-    currentPersonalWorkspaceBranch.value = defaultPw.personalWorkspaceBranch;
-    return { workspace: defaultPw.runtimeWorkspace, isFallback: false };
+    return {
+      workspace: defaultPw.runtimeWorkspace,
+      isFallback: false,
+      personalWorkspaceId: defaultPw.personalWorkspaceId,
+      personalWorkspaceBranch: defaultPw.personalWorkspaceBranch
+    };
   }
   if (recent) {
-    currentPersonalWorkspaceBranch.value = undefined;
     return { workspace: recent, isFallback: false };
   }
   const templates = await api.listWorkspaceTemplates(appId);
@@ -1371,10 +1406,13 @@ async function pickDefaultWorkspaceForApp(appId: string): Promise<{ workspace: W
   if (!firstVersion) return null;
   // 确保默认个人工作区存在（复用或创建），避免直接使用应用版本副本
   const defaultPw = await api.ensureDefaultPersonalWorkspace(firstVersion.versionId);
-  currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
-  currentPersonalWorkspaceBranch.value = defaultPw.personalWorkspaceBranch;
   if (!defaultPw.runtimeWorkspace?.workspaceId) return null;
-  return { workspace: defaultPw.runtimeWorkspace, isFallback: true };
+  return {
+    workspace: defaultPw.runtimeWorkspace,
+    isFallback: true,
+    personalWorkspaceId: defaultPw.personalWorkspaceId,
+    personalWorkspaceBranch: defaultPw.personalWorkspaceBranch
+  };
 }
 
 // WorkbenchFooter / FigmaFileExplorer 上两级菜单展开模板时调用，触发版本懒加载。
@@ -1414,14 +1452,14 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
     }
     // 确保默认个人工作区存在，并切换到该个人工作区的运行态 workspace。
     const defaultPw = await api.ensureDefaultPersonalWorkspace(response.versionId);
-    currentPersonalWorkspaceId.value = defaultPw.personalWorkspaceId;
-    currentPersonalWorkspaceBranch.value = defaultPw.personalWorkspaceBranch;
     if (defaultPw.runtimeWorkspace?.workspaceId) {
       await applyManagedWorkspace(defaultPw.runtimeWorkspace, {
         successTitle: "已切换应用版本",
         successDescription: `${payload.template.workspaceName} · ${response.version}`
       });
+      rememberPersonalWorkspace(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch);
     } else {
+      rememberPersonalWorkspace(defaultPw.personalWorkspaceId, defaultPw.personalWorkspaceBranch);
       feedback.value = {
         kind: "info",
         title: "新增版本成功",
@@ -1436,6 +1474,11 @@ async function handleCreateVersion(payload: { template: ApplicationWorkspaceTemp
 }
 
 async function handleSelectApp(appId: string) {
+  if (selectingAppId === appId) {
+    return;
+  }
+  const selectionSeq = ++appSelectionSeq;
+  selectingAppId = appId;
   // 切换应用时先清空旧 workspace 状态，避免文件树继续展示上一个应用的 workspace 内容
   resetWorkspaceState();
   selectedWorkspaceId.value = undefined;
@@ -1446,13 +1489,24 @@ async function handleSelectApp(appId: string) {
     //   2) 没有 recent 时回退到首模板的首版本，并把这条记录写入 recent，下次进入即可命中。
     // 两种情况都通过 applyManagedWorkspace 完成"写偏好 + 切工作区"两步，保证状态与持久化一致。
     const pick = await pickDefaultWorkspaceForApp(appId);
+    if (selectionSeq !== appSelectionSeq) {
+      return;
+    }
     if (pick) {
       await applyManagedWorkspace(pick.workspace);
+      if (selectionSeq !== appSelectionSeq) {
+        return;
+      }
+      rememberPersonalWorkspace(pick.personalWorkspaceId, pick.personalWorkspaceBranch);
       return;
     }
     // 应用下没有任何工作空间模板/版本，保持空态由用户手动选择。
   } catch (error) {
     feedback.value = errorFeedback("切换应用失败", error);
+  } finally {
+    if (selectionSeq === appSelectionSeq) {
+      selectingAppId = undefined;
+    }
   }
 }
 
@@ -1514,7 +1568,13 @@ async function loadDirectory(
   try {
     const entries = filterWorkspaceRootEntries(path, await api.listFiles(workspaceId, path));
     entriesByDirectory.value = { ...entriesByDirectory.value, [path]: entries };
+    if (path === "") {
+      workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [workspaceId]: true };
+    }
   } catch (error) {
+    if (path === "" && error instanceof BackendApiError && ["OPENCODE_UNAVAILABLE", "OPENCODE_BAD_GATEWAY"].includes(error.code)) {
+      workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [workspaceId]: false };
+    }
     feedback.value = errorFeedback("加载文件树失败", error);
     // 加载失败：从展开集合里把这条目录回滚掉，让目录行恢复成可点击触发重试。
     // 注意：不删除 entriesByDirectory[path]——该 key 在失败前并未写入。
@@ -2424,6 +2484,7 @@ async function handleLogout() {
           @open-file="openFile"
           @open-diff="handleOpenDiff"
           @refresh="loadDirectory('', undefined, true)"
+          @changes-refreshed="refreshWorkspaceGitDiff"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"
@@ -2473,8 +2534,20 @@ async function handleLogout() {
             :write-path="selectedDiffPath"
             :dirty="isDiffDirty"
             :saving="saveDiffFileMutation.isPending.value"
+            :app-name="selectedManagedApplication?.appName"
+            :templates="appTemplatesWithVersions"
+            :selected-version-id="selectedVersionId"
+            :personal-workspace-branch="currentPersonalWorkspaceBranch"
+            :loading-templates="loadingAppTemplates"
+            :loading-versions="loadingAppVersions"
+            :creating-version="creatingVersion"
+            :show-server-workspace-switch="isSuperAdmin"
             show-save
             @save="() => diffViewerRef?.handleSave()"
+            @select-version="handleSelectVersion"
+            @load-versions="handleLoadVersions"
+            @create-version="handleCreateVersion"
+            @open-server-workspace-picker="openServerWorkspacePicker"
           />
         </template>
         <template v-else-if="centerMode === 'system'">
@@ -2493,11 +2566,23 @@ async function handleLogout() {
           :dirty="!!activeTab && !activeTab.livePreview && activeTab.content !== activeTab.savedContent"
           :readonly="!!activeTab?.readonly"
           :saving="saveMutation.isPending.value"
+          :app-name="selectedManagedApplication?.appName"
+          :templates="appTemplatesWithVersions"
+          :selected-version-id="selectedVersionId"
+          :personal-workspace-branch="currentPersonalWorkspaceBranch"
+          :loading-templates="loadingAppTemplates"
+          :loading-versions="loadingAppVersions"
+          :creating-version="creatingVersion"
+          :show-server-workspace-switch="isSuperAdmin"
           :markdown-preview="markdownPreview"
           @activate="(path: string) => workbench.setActivePath(path)"
           @close="(path: string) => workbench.closeTab(path)"
           @editor-action="() => {}"
           @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
+          @select-version="handleSelectVersion"
+          @load-versions="handleLoadVersions"
+          @create-version="handleCreateVersion"
+          @open-server-workspace-picker="openServerWorkspacePicker"
           @update:markdown-preview="(value: boolean) => (markdownPreview = value)"
         >
           <CodeEditor

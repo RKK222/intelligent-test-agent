@@ -524,6 +524,72 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void workspaceDiffOnlyIncludesApplicationAgentAndSkillFiles() {
+        Path workspaceRoot = root.resolve("project/F-COSS/workspace");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.statusByPathspec.put(
+                ".opencode",
+                """
+                 M F-COSS/workspace/02-设计/Test Material.md
+                 M "F-COSS/workspace/.opencode/agents/review rule.md"
+                 M F-COSS/workspace/.opencode/skills/payment/SKILL.md
+                """);
+        git.diffByFile.put(".opencode/agents/review rule.md", "diff --git a/.opencode/agents/review rule.md b/.opencode/agents/review rule.md\n");
+        git.diffByFile.put(".opencode/skills/payment/SKILL.md", "diff --git a/.opencode/skills/payment/SKILL.md b/.opencode/skills/payment/SKILL.md\n");
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_project"),
+                        "project",
+                        workspaceRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-1",
+                        "trace_workspace")));
+
+        AgentConfigResponses.AgentConfigDiffResponse diff = service.workspaceDiff("wrk_project", null);
+
+        assertThat(diff.files()).extracting(AgentConfigResponses.AgentConfigDiffFileResponse::path)
+                .containsExactly("agents/review rule.md", "skills/payment/SKILL.md");
+        assertThat(git.lastStatusPathspec).isEqualTo(".opencode");
+        assertThat(git.diffFiles).containsExactly(".opencode/agents/review rule.md", ".opencode/skills/payment/SKILL.md");
+    }
+
+    @Test
+    void workspaceStageMapsDisplayedAgentPathsBackToOpencodeRoot() {
+        Path workspaceRoot = root.resolve("project");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_project"),
+                        "project",
+                        workspaceRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-1",
+                        "trace_workspace")));
+
+        service.workspaceStage("wrk_project", List.of("agents/review.md", "skills/payment/SKILL.md"), null, ADMIN);
+
+        assertThat(git.stagedFiles).containsExactly(".opencode/agents/review.md", ".opencode/skills/payment/SKILL.md");
+    }
+
+    @Test
     void workspaceAgentFileLinuxServerUsesWorkspaceServerWhenNoWorktree() {
         Path workspaceRoot = root.resolve("project");
         AgentConfigApplicationService service = service(
@@ -757,6 +823,11 @@ class AgentConfigApplicationServiceTest {
         private String lastCommitMessage;
         private String pushedBranch;
         private Boolean pushedForce;
+        private final Map<String, String> statusByPathspec = new LinkedHashMap<>();
+        private String lastStatusPathspec;
+        private final Map<String, String> diffByFile = new LinkedHashMap<>();
+        private final List<String> diffFiles = new ArrayList<>();
+        private List<String> stagedFiles = List.of();
 
         @Override
         public void cloneBranch(String gitUrl, String branch, Path repoRoot, String privateKey) {
@@ -831,6 +902,24 @@ class AgentConfigApplicationServiceTest {
         @Override
         public String statusPorcelain(Path repoRoot) {
             return stagedAfterAdd;
+        }
+
+        @Override
+        public String statusPorcelain(Path repoRoot, String pathspec) {
+            this.lastStatusPathspec = pathspec;
+            return statusByPathspec.getOrDefault(pathspec, stagedAfterAdd);
+        }
+
+        @Override
+        public String diff(Path repoRoot, String file, boolean staged) {
+            this.diffFiles.add(file);
+            return diffByFile.getOrDefault(file, "");
+        }
+
+        @Override
+        public void stageFiles(Path repoRoot, List<String> files, String privateKey) {
+            this.stagedFiles = List.copyOf(files);
+            this.privateKeyUsed = privateKey;
         }
 
         @Override

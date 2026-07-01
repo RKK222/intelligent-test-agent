@@ -79,8 +79,14 @@ const updatedLabel = computed(() => {
 const templates = computed(() => props.templates ?? []);
 
 // ===== 应用工作空间两级菜单的弹出状态 =====
-// 当父组件未传 templates 或 templates 为空时，不渲染 VCS 分支按钮（分支选择入口已下线）。
-const useCascadeMenu = computed(() => templates.value.length > 0);
+// 模板列表尚未加载或为空时仍展示入口，用于直接暴露当前个人 worktree 分支；
+// 点击后菜单会展示加载/空态，不影响用户识别当前实际改动分支。
+const useCascadeMenu = computed(() =>
+  templates.value.length > 0 ||
+  Boolean(props.appName) ||
+  Boolean(props.personalWorkspaceBranch) ||
+  Boolean(props.loadingTemplates)
+);
 
 // ===== 两级菜单弹出状态 =====
 // menuOpen: 一级菜单（工作空间列表）开关；hoveredTemplateId: 当前悬停的模板，控制二级菜单（版本）显隐。
@@ -385,7 +391,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         >
           <ArrowLeftRight class="ta-workbench-footer-icon" />
           <span class="ta-workbench-footer-branch-label">{{ triggerLabel }}</span>
-          <span v-if="personalWorkspaceBranch" class="ta-workbench-footer-branch-ref">{{ personalWorkspaceBranch }}</span>
+          <span v-if="personalWorkspaceBranch" class="ta-workbench-footer-branch-ref">worktree: {{ personalWorkspaceBranch }}</span>
         </button>
         <!--
           两级菜单用 <Teleport to="body"> + position:fixed 挂到 body 末尾，
@@ -460,10 +466,17 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
                 :key="version.versionId"
                 :class="['ta-workbench-cascade-submenu-item', version.versionId === selectedVersionId && 'is-selected']"
                 role="menuitem"
+                :title="version.versionId === selectedVersionId && personalWorkspaceBranch ? `当前 worktree：${personalWorkspaceBranch}` : version.branch"
                 @click="onVersionClick(hoveredTemplate, version)"
               >
                 <span class="ta-workbench-cascade-submenu-item-name">{{ version.version }}</span>
                 <span class="ta-workbench-cascade-submenu-item-desc">{{ version.branch }}</span>
+                <span
+                  v-if="version.versionId === selectedVersionId && personalWorkspaceBranch"
+                  class="ta-workbench-cascade-submenu-worktree"
+                >
+                  worktree: {{ personalWorkspaceBranch }}
+                </span>
               </li>
             </ul>
             <!--
@@ -671,6 +684,18 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   content: "/";
   margin-right: 6px;
   color: #a1a1aa;
+}
+
+.ta-workbench-cascade-submenu-worktree {
+  display: block;
+  max-width: 100%;
+  margin-top: 3px;
+  overflow: hidden;
+  color: #2563eb;
+  font-family: "JetBrains Mono", "PingFang SC", monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ta-workbench-footer-icon {

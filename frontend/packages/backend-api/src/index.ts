@@ -482,6 +482,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<WorkspaceGitDiff>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-diff`
       ),
+    discardWorkspaceGitFiles: (workspaceId: string, files: string[]) =>
+      request<void>(
+        `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-discard`,
+        { method: "POST", body: JSON.stringify({ files }) }
+      ),
     /**
      * 个人工作区"提交并推送"：将个人 worktree 合并回应用版本分支。
      * @param personalWorkspaceId 个人工作区 ID

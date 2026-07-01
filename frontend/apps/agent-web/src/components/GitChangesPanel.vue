@@ -10,7 +10,8 @@ import {
   Plus,
   Minus,
   RefreshCw,
-  Loader2
+  Loader2,
+  Undo2
 } from "lucide-vue-next";
 import { createBackendApiClient, BackendApiError } from "@test-agent/backend-api";
 import {
@@ -36,6 +37,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   openDiff: [payload: { path: string; source: "vcs" | "agent"; scope?: "PUBLIC" | "WORKSPACE" }];
+  "changes-refreshed": [];
 }>();
 
 const workbench = useWorkbenchStore();
@@ -107,6 +109,7 @@ const amend = ref(false);
 // Local arrays for workspace diff
 const workspaceDiffFiles = ref<RunDiffFile[]>([]);
 const stagedWorkspacePaths = ref<Set<string>>(new Set());
+const discardingWorkspacePaths = ref<Set<string>>(new Set());
 
 // Workspace diff computed lists
 const workspaceUnstaged = computed(() =>
@@ -123,7 +126,8 @@ const workspaceAgentDiffs = ref<AgentConfigDiffFile[]>([]);
 const agentsUnstaged = computed(() => {
   const list: (AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" })[] = [];
   workspaceAgentDiffs.value.forEach((f) => {
-    if (!f.staged) list.push({ ...f, scope: "WORKSPACE" });
+    const path = normalizeWorkspaceAgentDiffPath(f.path);
+    if (!f.staged && path) list.push({ ...f, path, scope: "WORKSPACE" });
   });
   return list;
 });
@@ -131,7 +135,8 @@ const agentsUnstaged = computed(() => {
 const agentsStaged = computed(() => {
   const list: (AgentConfigDiffFile & { scope: "PUBLIC" | "WORKSPACE" })[] = [];
   workspaceAgentDiffs.value.forEach((f) => {
-    if (f.staged) list.push({ ...f, scope: "WORKSPACE" });
+    const path = normalizeWorkspaceAgentDiffPath(f.path);
+    if (f.staged && path) list.push({ ...f, path, scope: "WORKSPACE" });
   });
   return list;
 });
@@ -230,14 +235,61 @@ function clearChanges() {
   workspaceAgentDiffs.value = [];
 }
 
+function normalizeWorkspaceAgentDiffPath(path: string): string | null {
+  let value = path.replaceAll("\\", "/").trim();
+  if (value.startsWith('"') && value.endsWith('"')) {
+    value = value.slice(1, -1);
+  }
+  const marker = ".opencode/";
+  const markerIndex = value.indexOf(marker);
+  if (markerIndex >= 0) {
+    value = value.slice(markerIndex + marker.length);
+  }
+  return value.startsWith("agents/") || value.startsWith("skills/") ? value : null;
+}
+
 // Stage workspace file (simulate)
 function stageWorkspaceFile(path: string) {
-  stagedWorkspacePaths.value.add(path);
+  stagedWorkspacePaths.value = new Set([...stagedWorkspacePaths.value, path]);
 }
 
 // Unstage workspace file (simulate)
 function unstageWorkspaceFile(path: string) {
-  stagedWorkspacePaths.value.delete(path);
+  const next = new Set(stagedWorkspacePaths.value);
+  next.delete(path);
+  stagedWorkspacePaths.value = next;
+}
+
+function notifyChangesRefreshed() {
+  emit("changes-refreshed");
+}
+
+async function discardWorkspaceFile(path: string) {
+  if (!props.canWrite || !props.workspaceId || discardingWorkspacePaths.value.has(path)) return;
+  errorMessage.value = "";
+  discardingWorkspacePaths.value = new Set([...discardingWorkspacePaths.value, path]);
+  try {
+    if (workbench.useMockTestData) {
+      workspaceDiffFiles.value = workspaceDiffFiles.value.filter((file) => file.path !== path);
+      const next = new Set(stagedWorkspacePaths.value);
+      next.delete(path);
+      stagedWorkspacePaths.value = next;
+      notifyChangesRefreshed();
+      return;
+    }
+    await api.discardWorkspaceGitFiles(props.workspaceId, [path]);
+    const next = new Set(stagedWorkspacePaths.value);
+    next.delete(path);
+    stagedWorkspacePaths.value = next;
+    await refreshChanges();
+    notifyChangesRefreshed();
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "回退工作区文件失败");
+  } finally {
+    const next = new Set(discardingWorkspacePaths.value);
+    next.delete(path);
+    discardingWorkspacePaths.value = next;
+  }
 }
 
 // Stage agent file (real / mock)
@@ -516,6 +568,16 @@ defineExpose({
                 <button
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
+                  title="回退文件改动"
+                  :disabled="discardingWorkspacePaths.has(file.path)"
+                  @click.stop="discardWorkspaceFile(file.path)"
+                >
+                  <Loader2 v-if="discardingWorkspacePaths.has(file.path)" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                  <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+                </button>
+                <button
+                  type="button"
+                  class="git-row-action hidden group-hover:inline-flex"
                   title="暂存文件"
                   @click.stop="stageWorkspaceFile(file.path)"
                 >
@@ -600,6 +662,16 @@ defineExpose({
                 <span v-if="file.additions" class="git-additions ml-1">+{{ file.additions }}</span>
                 <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
                 
+                <button
+                  type="button"
+                  class="git-row-action hidden group-hover:inline-flex"
+                  title="回退文件改动"
+                  :disabled="discardingWorkspacePaths.has(file.path)"
+                  @click.stop="discardWorkspaceFile(file.path)"
+                >
+                  <Loader2 v-if="discardingWorkspacePaths.has(file.path)" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                  <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
+                </button>
                 <button
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"

@@ -1003,6 +1003,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-from-application` | 将所选应用版本工作区文件同步到个人工作区。 |
 | `POST` | `/workspace-versions/{versionId}/ensure-default-personal-workspace` | 确保默认个人工作区存在：查询 (versionId, userId, workspaceName=default)，存在则复用返回，不存在则后台创建。 |
 | `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取工作区变更文件列表，返回 `{ files: [{ path, status, staged, patch, additions, deletions }] }`。 |
+| `POST` | `/workspaces/{workspaceId}/git-discard` | 丢弃当前个人 worktree 中指定工作区相对路径的本地 Git 改动；已跟踪文件执行 restore，新增/未跟踪文件定点 clean。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 个人工作区"提交并推送"：在个人 worktree 中 stage all + commit + push，再 merge 回应用版本分支；冲突返回 `CONFLICT` 与冲突文件列表。 |
 
 `POST /applications/{appId}/workspace-templates/{templateId}/versions` 请求体：
@@ -1067,7 +1068,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-个人工作区基于应用版本仓库创建 git worktree，分支名为 `{应用版本分支}_{统一认证号}_{personalWorkspaceId}`。物理根目录读取通用参数 `OPENCODE_PERSONAL_WORKTREE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终目录包含 `{branchFragment}/{统一认证号}/{repository.englishName}/{personalWorkspaceId}`，前端只展示 `workspaceName`。同一用户在同一应用版本下 `workspaceName` 唯一。
+个人工作区基于应用版本仓库创建 git worktree，分支名为 `{应用版本分支}_{userId}_{workspaceName}`，其中 `workspaceName` 会安全化为 Git/path 可用片段。物理根目录读取通用参数 `OPENCODE_PERSONAL_WORKTREE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终目录包含 `{version}/{userId}/{repository.englishName}/{应用版本分支}_{userId}_{workspaceName}`，前端展示 `workspaceName` 和当前 worktree 分支。同一用户在同一应用版本下 `workspaceName` 唯一。
 
 同步请求体：
 
@@ -1086,9 +1087,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 1. 先查询 `(versionId, userId, workspaceName=default)` 是否已有个人工作区记录。
 2. 存在：直接复用，返回 `DefaultPersonalWorkspaceResponse`（含 `personalWorkspaceId`、`personalWorkspaceName`、`personalWorkspaceBranch`、`runtimeWorkspace`）。
-3. 不存在：后台创建个人工作区（`git worktree add -b {branch}_{userId}_default`）。如果同名个人分支已存在，后端会尝试复用该分支挂载 worktree；如果目标目录已存在且是同一分支的 Git worktree，则接管并补运行态记录，只有目录被其他内容占用时返回 `CONFLICT`。
+3. 不存在：后台创建个人工作区（`git worktree add -b {branch}_{userId}_default`）。如果同名个人分支已存在，后端会尝试复用该分支挂载 worktree；如果目标目录已存在且是同一分支的 Git worktree，则接管并补运行态记录；如果同名分支仍登记在旧路径且目标规范路径不存在，后端会先 `git worktree move` 重挂载到规范路径。只有目标目录被其他内容占用时返回 `CONFLICT`。
 
-新创建的分支命名规则：`{应用版本分支}_{userId}_default`（与旧规则的 `_{personalWorkspaceId}` 不同）。已有旧个人工作区记录不做迁移，新规则仅影响 `workspaceName=default` 或新建的 `custom` 私有空间。
+默认个人工作区分支命名规则：`{应用版本分支}_{userId}_default`（与旧规则的 `_{personalWorkspaceId}` 不同）。已有 `workspaceName=default` 的旧个人工作区记录如果 branch/path 不符合新规范，`ensure-default-personal-workspace` 会非破坏式创建或重挂载规范 worktree，并把 `personal_workspaces` 与关联运行态 `workspaces.root_path` 更新到新路径；旧物理目录不会被自动删除。新建自定义私人空间同样使用 `{应用版本分支}_{userId}_{workspaceName}`。
 
 响应 `DefaultPersonalWorkspaceResponse`：
 
@@ -1126,6 +1127,16 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   ]
 }
 ```
+
+`POST /workspaces/{workspaceId}/git-discard` 请求体：
+
+```json
+{
+  "files": ["src/App.java"]
+}
+```
+
+`files` 使用 `git-diff` 响应中的工作区相对路径。后端只允许当前用户个人 worktree 的运行态 workspace 调用；会先把路径映射到仓库相对路径，已跟踪修改/删除执行 `git restore --staged --worktree -- <file>`，新增或未跟踪文件先取消暂存再执行定点 `git clean -f -- <file>`。成功后无业务响应体，前端刷新 `git-diff` 后该文件不再出现在变更列表中。
 
 ### 个人工作区提交并推送
 

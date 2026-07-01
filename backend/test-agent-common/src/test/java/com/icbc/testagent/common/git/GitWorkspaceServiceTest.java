@@ -130,6 +130,27 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
+    void createWorktreeMovesSameBranchFromLegacyPathToTargetWhenBranchAlreadyCheckedOutElsewhere() {
+        RecordingExecutor executor = new RecordingExecutor("");
+        executor.failCalls.add(1);
+        executor.failCalls.add(3);
+        Path repoRoot = tempDir.resolve("appworkspace/repo_1");
+        Path legacyRoot = tempDir.resolve("personalworktree/20260707/usr_1/gcms/default");
+        Path targetRoot = tempDir.resolve("personalworktree/20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default");
+        executor.stdoutByCall.put(4, "worktree " + legacyRoot + "\nbranch refs/heads/feature_testagent_20260707_usr_1_default\n");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        service.createWorktreeReusingBranch(repoRoot, targetRoot, "feature_testagent_20260707_usr_1_default", "PRIVATE KEY");
+
+        assertThat(executor.calls).containsExactly(
+                new Call(List.of("git", "-C", repoRoot.toString(), "worktree", "add", "-b", "feature_testagent_20260707_usr_1_default", targetRoot.toString()), "PRIVATE KEY"),
+                new Call(List.of("git", "-C", repoRoot.toString(), "worktree", "prune"), "PRIVATE KEY"),
+                new Call(List.of("git", "-C", repoRoot.toString(), "worktree", "add", targetRoot.toString(), "feature_testagent_20260707_usr_1_default"), "PRIVATE KEY"),
+                new Call(List.of("git", "-C", repoRoot.toString(), "worktree", "list", "--porcelain"), null),
+                new Call(List.of("git", "-C", repoRoot.toString(), "worktree", "move", legacyRoot.toAbsolutePath().normalize().toString(), targetRoot.toString()), "PRIVATE KEY"));
+    }
+
+    @Test
     void statusAndDiffDisableGitPathQuotingForChinesePaths() {
         RecordingExecutor executor = new RecordingExecutor(" M F-GCMS/workspace/设计.md\n");
         GitWorkspaceService service = new GitWorkspaceService(executor);
@@ -140,6 +161,16 @@ class GitWorkspaceServiceTest {
         assertThat(executor.calls).containsExactly(
                 new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "status", "--porcelain"), null),
                 new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff", "--", "F-GCMS/workspace/设计.md"), null));
+    }
+
+    @Test
+    void unquotesPorcelainPathsWithSpacesAndUtf8OctalEscapes() {
+        GitWorkspaceService service = new GitWorkspaceService(new RecordingExecutor(""));
+
+        assertThat(service.unquotePorcelainPath("\"F-COSS/workspace/02-设计/Test Material.md\""))
+                .isEqualTo("F-COSS/workspace/02-设计/Test Material.md");
+        assertThat(service.unquotePorcelainPath("\"F-COSS/workspace/02-\\350\\256\\276\\350\\256\\241/Test.md\""))
+                .isEqualTo("F-COSS/workspace/02-设计/Test.md");
     }
 
     @Test

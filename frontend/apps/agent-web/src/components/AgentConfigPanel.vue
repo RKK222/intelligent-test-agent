@@ -60,6 +60,7 @@ const diffFiles = ref<AgentConfigDiffFile[]>([]);
 const selectedDiffPath = ref("");
 const commitMessage = ref("");
 const progressEvents = ref<AgentConfigProgressEvent[]>([]);
+const REQUEST_TIMEOUT_MS = 15000;
 
 const publicWorktree = computed<AgentConfigWorktree | null>({
   get: () => workbench.publicWorktree,
@@ -78,6 +79,8 @@ const busy = ref(false);
 const activeWorktree = computed(() => activeScope.value === "PUBLIC" ? publicWorktree.value : workspaceWorktree.value);
 const selectedDiff = computed(() => diffFiles.value.find((file) => file.path === selectedDiffPath.value) ?? diffFiles.value[0]);
 
+let refreshAllToken = 0;
+const refreshing = ref(false);
 void refreshAll();
 
 watch(
@@ -95,18 +98,30 @@ watch(
 );
 
 async function refreshAll() {
-  await refreshStatus();
-  const tasks: Promise<void>[] = [];
-  if (status.value.PUBLIC?.enabled !== false) tasks.push(loadDirectory("PUBLIC", ""));
-  if (props.workspaceId) tasks.push(loadDirectory("WORKSPACE", ""));
-  await Promise.all(tasks);
+  const token = ++refreshAllToken;
+  refreshing.value = true;
+  errorMessage.value = "";
+  // 手动刷新必须能打断旧的根目录 loading 状态，避免某次公共配置请求卡住后 UI 永远转圈。
+  loadingByScope.value = { PUBLIC: new Set(), WORKSPACE: new Set() };
+  try {
+    await refreshStatus();
+    if (token !== refreshAllToken) return;
+    const tasks: Promise<void>[] = [];
+    if (status.value.PUBLIC?.enabled !== false) tasks.push(loadDirectory("PUBLIC", "", true));
+    if (props.workspaceId) tasks.push(loadDirectory("WORKSPACE", "", true));
+    await Promise.allSettled(tasks);
+  } finally {
+    if (token === refreshAllToken) {
+      refreshing.value = false;
+    }
+  }
 }
 
 async function refreshStatus() {
   const next: { PUBLIC?: AgentConfigStatus; WORKSPACE?: AgentConfigStatus } = {};
-  const publicStatusPromise = api.getPublicAgentConfigStatus();
+  const publicStatusPromise = withTimeout(api.getPublicAgentConfigStatus(), "加载公共 Agent 状态超时");
   const workspaceStatusPromise = props.workspaceId
-    ? api.getWorkspaceAgentConfigStatus(props.workspaceId)
+    ? withTimeout(api.getWorkspaceAgentConfigStatus(props.workspaceId), "加载应用 Agent 状态超时")
     : Promise.resolve<AgentConfigStatus | undefined>(undefined);
   const [publicResult, workspaceResult] = await Promise.allSettled([publicStatusPromise, workspaceStatusPromise]);
   if (publicResult.status === "fulfilled") {
@@ -126,17 +141,19 @@ function worktreeId(scope: Scope) {
   return scope === "PUBLIC" ? publicWorktree.value?.worktreeId : workspaceWorktree.value?.worktreeId;
 }
 
-async function loadDirectory(scope: Scope, path: string) {
+async function loadDirectory(scope: Scope, path: string, force = false) {
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   if (scope === "PUBLIC" && status.value.PUBLIC?.enabled === false) return;
-  if (entriesByScope.value[scope][path] !== undefined || loadingByScope.value[scope].has(path)) return;
+  if (!force && (entriesByScope.value[scope][path] !== undefined || loadingByScope.value[scope].has(path))) return;
   loadingByScope.value = { ...loadingByScope.value, [scope]: new Set([...loadingByScope.value[scope], path]) };
   errorMessage.value = "";
   try {
-    const linuxServerId = scope === "PUBLIC" ? await publicFileLinuxServerId() : undefined;
-    const entries = scope === "PUBLIC"
-      ? await api.listPublicAgentFiles(path, worktreeId(scope), linuxServerId)
-      : await api.listWorkspaceAgentFiles(props.workspaceId!, path, worktreeId(scope));
+    const entries = await withTimeout((async () => {
+      const linuxServerId = scope === "PUBLIC" ? await publicFileLinuxServerId() : undefined;
+      return scope === "PUBLIC"
+        ? api.listPublicAgentFiles(path, worktreeId(scope), linuxServerId)
+        : api.listWorkspaceAgentFiles(props.workspaceId!, path, worktreeId(scope));
+    })(), "加载 Agent 文件超时");
     entriesByScope.value = {
       ...entriesByScope.value,
       [scope]: { ...entriesByScope.value[scope], [path]: entries }
@@ -151,6 +168,16 @@ async function loadDirectory(scope: Scope, path: string) {
     next.delete(path);
     loadingByScope.value = { ...loadingByScope.value, [scope]: next };
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, message: string, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 function toggleRoot(scope: Scope) {
@@ -835,8 +862,8 @@ defineExpose({
   <div class="agent-config-panel">
     <div v-if="!hideHeader" class="agent-config-header">
       <span>Agent</span>
-      <button type="button" class="agent-icon-btn" title="刷新" aria-label="刷新" :disabled="busy" @click="refreshAll">
-        <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': busy }" :stroke-width="1.5" />
+      <button type="button" class="agent-icon-btn" title="刷新" aria-label="刷新" :disabled="refreshing" @click="refreshAll">
+        <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': refreshing }" :stroke-width="1.5" />
       </button>
     </div>
     <div v-if="errorMessage" class="agent-error">

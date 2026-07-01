@@ -46,6 +46,8 @@ public interface ManagedWorkspaceRepository {
 
     PersonalWorkspace savePersonalWorkspace(PersonalWorkspace workspace);
 
+    PersonalWorkspace updatePersonalWorkspaceLocation(PersonalWorkspace workspace);
+
     Optional<ApplicationWorkspaceVersion> findVersionByRuntimeWorkspace(WorkspaceId workspaceId);
 
     void savePreference(UserWorkspacePreference preference);

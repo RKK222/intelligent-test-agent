@@ -59,7 +59,7 @@ tools/dev-frontend-check.sh
 
 推荐从仓库根目录使用一键脚本重启三服务，脚本默认读取 `.env.test` 并以 `test` profile 启动，按「后端 → opencode-manager → 前端」顺序逐个先 kill 原进程再启动；当 `TEST_AGENT_OPENCODE_BASE_URL` 是本地地址时默认启动 Go `opencode-manager`（由它派生 opencode 子进程，不再单独启动 `opencode serve`）：
 
-工作台左侧 Agent 配置树展示公共级 `opencode/` 和工作空间级 `.opencode/` 配置根，包含 `agents/` 与 `skills/`；普通工作空间文件树隐藏根级 `.opencode`，避免重复展示。工作空间级 `+` 只初始化应用自己的技能包：`skills/<name>/SKILL.md`、`rules/README.md` 和 `templates/README.md`，其中 `SKILL.md` 使用 opencode 支持的 `name` / `description` frontmatter。公共仓库有本地修改时仍可浏览，更新前必须明确勾选放弃已跟踪修改。进入应用 recent 或手动切换应用版本时，前端都会先确保并切到用户 default 私人 worktree；普通工作区保存后刷新平台 Git diff，不依赖 opencode `/vcs/diff`。左侧 Git 变更面板展示真实应用工作区 Git diff 和应用级 opencode `agents/*.md` / `skills/<skill>/SKILL.md` diff，不再提供 mock 测试数据入口。
+工作台左侧 Agent 配置树展示公共级 `opencode/` 和工作空间级 `.opencode/` 配置根，包含 `agents/` 与 `skills/`；普通工作空间文件树隐藏根级 `.opencode`，避免重复展示。工作空间级 `+` 只初始化应用自己的技能包：`skills/<name>/SKILL.md`、`rules/README.md` 和 `templates/README.md`，其中 `SKILL.md` 使用 opencode 支持的 `name` / `description` frontmatter。公共仓库有本地修改时仍可浏览，更新前必须明确勾选放弃已跟踪修改。进入应用 recent 或手动切换应用版本时，前端都会先确保并切到用户 default 私人 worktree，footer 按钮和版本子菜单会显示当前私人 worktree 分支；普通工作区保存后刷新平台 Git diff，不依赖 opencode `/vcs/diff`。左侧 Git 变更面板展示真实应用工作区 Git diff 和应用级 opencode `agents/*.md` / `skills/<skill>/SKILL.md` diff，不再提供 mock 测试数据入口；agents 分组只接收 `.opencode/agents` 与 `.opencode/skills` 变更，公共级文件和普通应用文件不会混入；应用工作区文件行提供回退按钮，调用平台 Git discard 后刷新 diff。
 
 ```bash
 ./restart-dev-services.sh
@@ -87,7 +87,7 @@ $env:TEST_AGENT_FRONTEND_URL = "http://192.168.100.115:3000"
 powershell -ExecutionPolicy Bypass -File .\restart-dev-services.ps1 -Profile guo -EnvFile .env.local -SkipFrontendBuild
 ```
 
-脚本会从 `TEST_AGENT_FRONTEND_URL` 推导前端监听 host/port，并把 `TEST_AGENT_BASE_URL` 注入为 Vite 的 `VITE_TEST_AGENT_API_BASE_URL`；需要通过局域网地址访问时，可在启动前设置 `TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000` 和 `TEST_AGENT_BASE_URL=http://192.168.100.115:8080`，后端 CORS 未显式配置时会自动包含该前端 origin。
+脚本会从 `TEST_AGENT_FRONTEND_URL` 推导前端监听 host/port，并把 `TEST_AGENT_BASE_URL` 注入为 Vite 的 `VITE_TEST_AGENT_API_BASE_URL`；未显式设置 `TEST_AGENT_BASE_URL` 时，会复用自动探测到的 `TEST_AGENT_BACKEND_LISTEN_URL`（例如 `http://192.168.100.115:8080`），避免局域网访问前端时浏览器仍请求 `127.0.0.1`。需要指定固定入口时，可在启动前设置 `TEST_AGENT_FRONTEND_URL=http://192.168.100.115:3000` 和 `TEST_AGENT_BASE_URL=http://192.168.100.115:8080`，后端 CORS 未显式配置时会自动包含该前端 origin。
 
 本机存在多个 opencode 版本时，在当前使用的 dotenv（默认 `.env.test`，或显式 `--env-file` 指定的文件）里指定 `TEST_AGENT_OPENCODE_BIN`，避免 PATH 命中旧版本。例如：
 

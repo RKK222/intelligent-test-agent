@@ -5,7 +5,7 @@ import { computed } from "vue";
 import { Eye, EyeOff } from "lucide-vue-next";
 import type { EditorTab as WorkbenchTab } from "@test-agent/workbench-shell";
 import { languageFromPath } from "@test-agent/editor";
-import WorkbenchFooter from "./WorkbenchFooter.vue";
+import WorkbenchFooter, { type AppWorkspaceTemplate, type AppWorkspaceVersion } from "./WorkbenchFooter.vue";
 
 const props = withDefaults(
   defineProps<{
@@ -19,6 +19,15 @@ const props = withDefaults(
     dirty?: boolean;
     readonly?: boolean;
     saving?: boolean;
+    appName?: string;
+    templates?: AppWorkspaceTemplate[];
+    selectedVersionId?: string;
+    personalWorkspaceBranch?: string;
+    loadingTemplates?: boolean;
+    loadingVersions?: boolean;
+    creatingVersion?: boolean;
+    showServerWorkspaceSwitch?: boolean;
+    serverWorkspaceSwitchDisabled?: boolean;
     /** Markdown 预览开关（受控），由父级双向绑定到 CodeEditor 的 showPreview。 */
     markdownPreview?: boolean;
   }>(),
@@ -30,6 +39,10 @@ const emit = defineEmits<{
   close: [path: string];
   editorAction: [];
   save: [];
+  "select-version": [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
+  "load-versions": [templateId: string];
+  "create-version": [payload: { template: AppWorkspaceTemplate; version: string; branch?: string }];
+  "open-server-workspace-picker": [];
   "update:markdownPreview": [enabled: boolean];
 }>();
 
@@ -101,8 +114,21 @@ function toggleMarkdownPreview() {
       :dirty="dirty"
       :readonly="readonly"
       :saving="saving"
+      :app-name="appName"
+      :templates="templates"
+      :selected-version-id="selectedVersionId"
+      :personal-workspace-branch="personalWorkspaceBranch"
+      :loading-templates="loadingTemplates"
+      :loading-versions="loadingVersions"
+      :creating-version="creatingVersion"
+      :show-server-workspace-switch="showServerWorkspaceSwitch"
+      :server-workspace-switch-disabled="serverWorkspaceSwitchDisabled"
       show-save
       @save="emit('save')"
+      @select-version="(payload) => emit('select-version', payload)"
+      @load-versions="(templateId) => emit('load-versions', templateId)"
+      @create-version="(payload) => emit('create-version', payload)"
+      @open-server-workspace-picker="emit('open-server-workspace-picker')"
     />
   </div>
 </template>

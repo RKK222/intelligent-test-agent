@@ -188,6 +188,15 @@ public class ManagedWorkspaceController {
         return ok(exchange, service.getWorkspaceGitDiff(workspaceId, userId(exchange)));
     }
 
+    @PostMapping("/workspaces/{workspaceId}/git-discard")
+    public ApiResponse<Object> discardWorkspaceGitFiles(
+            @PathVariable String workspaceId,
+            @RequestBody ManagedWorkspaceDtos.WorkspaceGitFilesRequest request,
+            ServerWebExchange exchange) {
+        service.discardWorkspaceGitFiles(workspaceId, request.files(), userId(exchange));
+        return ok(exchange, null);
+    }
+
     /**
      * 个人工作区"提交并推送"：将个人 worktree 合并回应用版本分支。
      * 合并成功: 更新版本 commit；冲突: 返回 CONFLICT + 冲突文件列表。

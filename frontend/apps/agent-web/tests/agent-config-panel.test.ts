@@ -180,7 +180,7 @@ describe("AgentConfigPanel", () => {
     }]);
     const { view } = renderPanel();
 
-    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalled());
+    await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
     await fireEvent.click(view.getByText("更新公共配置"));
 
     expect(await view.findByText("Git 工作树存在未提交变更")).toBeTruthy();
@@ -207,7 +207,7 @@ describe("AgentConfigPanel", () => {
     }]);
     const { view } = renderPanel();
 
-    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalled());
+    await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
     await fireEvent.click(view.getByText("更新公共配置"));
     await view.findByText("Git 工作树存在未提交变更");
     await fireEvent.update(view.getByLabelText("提交信息 *"), "chore: sync public config");
@@ -226,7 +226,7 @@ describe("AgentConfigPanel", () => {
   it("submits update-and-push with default discard flag when public repo is clean", async () => {
     const { view } = renderPanel();
 
-    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalled());
+    await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
     await fireEvent.click(view.getByText("更新公共配置"));
 
     await view.findByLabelText("提交信息 *");
@@ -251,7 +251,7 @@ describe("AgentConfigPanel", () => {
     apiClientMock.updatePublicAgentConfigAndPush.mockRejectedValueOnce(new Error("远端 push 失败：non-fast-forward"));
     const { view } = renderPanel();
 
-    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalled());
+    await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
     await fireEvent.click(view.getByText("更新公共配置"));
     await view.findByLabelText("提交信息 *");
     await fireEvent.update(view.getByLabelText("提交信息 *"), "feat: try push");

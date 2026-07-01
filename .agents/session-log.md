@@ -2410,3 +2410,10 @@ bash /tmp/test-api-after-restart.sh
 - What: 在 `application-test.yml` 中关闭 `test-agent.managed-workspace.replica-reconciler.enabled`，仅影响 test profile；其他 profile 仍保持副本补偿器默认开启。
 - How: 同步更新 `test-agent-app` README，说明 test profile 默认关闭该后台扫描以及通用关闭开关。
 - Result: 重启 `test` profile 三服务后等待超过 60 秒，`/actuator/health/readiness` 为 `UP`，新 `backend.log` 未再出现 `managed-workspace-replica-reconciler` 或 Git 远端失败日志。
+
+### 2026-07-01 - 应用私人 worktree 与 Diff 交互修复
+
+- Why: 应用工作区需要切到用户 default 私人 worktree 后再读写文件和展示 diff；历史脏 personal workspace 记录、Git quoted path、回退后父级 diff 状态未刷新、opencode 未就绪时 runtime API 并发请求，以及脚本默认注入 `127.0.0.1` 都会导致 UI 上文件树/变更/进程状态异常。
+- What: 默认私人 worktree 分支命名统一为 `{应用分支名}_{用户 id}_{私人空间名称}`，同名分支优先复用/移动已有 worktree；历史记录路径不匹配时更新 personal workspace 和 runtime workspace，模板子目录缺失但 repo root 存在时补偿到 repo root。工作区 diff 改用平台 Git diff 并解码 quoted path，agents diff 只展示应用级 `.opencode/agents` 与 `.opencode/skills`；回退按钮调用平台 discard API，并向父组件发 `changes-refreshed` 同步活动栏计数和 diff viewer。前端 runtime 查询新增当前 workspace file route ready gate，避免切工作区/opencode 未就绪时刷屏 502/503；重启脚本在未显式设置 `TEST_AGENT_BASE_URL` 时复用自动探测的 `TEST_AGENT_BACKEND_LISTEN_URL` 给浏览器访问。
+- How: 后端新增 `discardWorkspaceGitFiles`，Git 服务支持 porcelain path 解码、worktree 同分支复用/移动、tracked restore、staged new unstage+clean、untracked clean；personal workspace location 更新走 MyBatis XML mapper。前端移除加载测试数据按钮，底部工作区入口显示 worktree 名称，公共级 agents 保持进入即加载且防卡死，opencode READY 后强制刷新当前根目录。同步更新 API/前端/工作区管理文档和定向测试。
+- Result: 单元/组件/类型/Playwright mock 验证通过；真实 UI 曾验证到默认 worktree 名称、公共 agents 加载、opencode 启动后文件树重拉、切到 `F-COSS 移动端 / 20260705` 不再 409 且显示 `feature_testagent_20260705_usr_test_dev_default`。后续真实 UI 复测被外部测试环境网络阻塞：`192.168.100.200:5432` 和 `192.168.100.200:16379` 均 `No route to host`，后端无法启动，需网络恢复后重跑 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`。

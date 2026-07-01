@@ -22,11 +22,13 @@ import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncRecordId;
 import com.icbc.testagent.domain.managedworkspace.WorkspaceSyncStatus;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
+import com.icbc.testagent.persistence.mybatis.PersonalWorkspaceMapper;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
@@ -43,6 +45,7 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
 
     private final JdbcClient jdbcClient;
     private final ObjectMapper objectMapper;
+    private final PersonalWorkspaceMapper personalWorkspaceMapper;
 
     private final RowMapper<ApplicationWorkspaceVersion> versionMapper = (rs, rowNum) -> {
         String versionId = rs.getString("version_id");
@@ -126,9 +129,18 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
             rs.getString("branch"),
             instant(rs, "updated_at"));
 
-    public JdbcManagedWorkspaceRepository(JdbcClient jdbcClient, ObjectMapper objectMapper) {
+    @Autowired
+    public JdbcManagedWorkspaceRepository(
+            JdbcClient jdbcClient,
+            ObjectMapper objectMapper,
+            PersonalWorkspaceMapper personalWorkspaceMapper) {
         this.jdbcClient = jdbcClient;
         this.objectMapper = objectMapper;
+        this.personalWorkspaceMapper = personalWorkspaceMapper;
+    }
+
+    JdbcManagedWorkspaceRepository(JdbcClient jdbcClient, ObjectMapper objectMapper) {
+        this(jdbcClient, objectMapper, null);
     }
 
     private Instant normalizeUpdatedAt(String tableName, String id, Instant createdAt, Instant updatedAt) {
@@ -398,6 +410,24 @@ public class JdbcManagedWorkspaceRepository extends JdbcRepositorySupport implem
                 .param("createdAt", timestamp(workspace.createdAt()))
                 .param("updatedAt", timestamp(workspace.updatedAt()))
                 .update();
+        return workspace;
+    }
+
+    @Override
+    public PersonalWorkspace updatePersonalWorkspaceLocation(PersonalWorkspace workspace) {
+        if (personalWorkspaceMapper == null) {
+            throw new IllegalStateException("PersonalWorkspaceMapper is required to update personal workspace location");
+        }
+        int updated = personalWorkspaceMapper.updateLocation(
+                workspace.personalWorkspaceId().value(),
+                workspace.branch(),
+                workspace.repoRootPath(),
+                workspace.workspaceRootPath(),
+                workspace.baseCommit(),
+                workspace.updatedAt());
+        if (updated == 0) {
+            throw new IllegalStateException("Personal workspace not found: " + workspace.personalWorkspaceId().value());
+        }
         return workspace;
     }
 

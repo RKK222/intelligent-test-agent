@@ -317,6 +317,10 @@ apply_detected_runtime_ip_defaults() {
     export TEST_AGENT_BACKEND_LISTEN_URL="http://${local_ipv4}:${backend_port}"
     echo "Defaulting TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4: ${TEST_AGENT_BACKEND_LISTEN_URL}"
   fi
+  if [[ -z "${TEST_AGENT_BASE_URL:-}" && "${backend_url}" == http://127.0.0.1:* ]]; then
+    backend_url="${TEST_AGENT_BACKEND_LISTEN_URL}"
+    echo "Defaulting TEST_AGENT_BASE_URL to backend listen URL for browser access: ${backend_url}"
+  fi
 }
 
 apply_manager_backend_port_defaults() {

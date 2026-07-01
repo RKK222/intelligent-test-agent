@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, waitFor } from "@testing-library/vue";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/vue";
 import { createPinia } from "pinia";
 import GitChangesPanel from "../src/components/GitChangesPanel.vue";
 
 const apiClientMock = vi.hoisted(() => ({
   getVcsDiffFiles: vi.fn(),
   getWorkspaceGitDiff: vi.fn(),
+  discardWorkspaceGitFiles: vi.fn(),
   getPublicAgentDiff: vi.fn(),
   getWorkspaceAgentDiff: vi.fn(),
   stagePublicAgentFiles: vi.fn(),
@@ -41,6 +42,7 @@ describe("GitChangesPanel", () => {
   beforeEach(() => {
     apiClientMock.getVcsDiffFiles.mockResolvedValue({ files: [] });
     apiClientMock.getWorkspaceGitDiff.mockResolvedValue({ files: [] });
+    apiClientMock.discardWorkspaceGitFiles.mockResolvedValue(undefined);
     apiClientMock.getPublicAgentDiff.mockResolvedValue({ files: [] });
     apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({ files: [] });
     apiClientMock.connectAgentConfigProgress.mockResolvedValue({ close: vi.fn() });
@@ -77,6 +79,12 @@ describe("GitChangesPanel", () => {
           status: "M",
           staged: false,
           patch: "@@ -1 +1 @@\n-old\n+new"
+        },
+        {
+          path: "F-COSS/workspace/02-设计/Test Material.md",
+          status: "M",
+          staged: false,
+          patch: "@@ -1 +1 @@\n-old\n+new"
         }
       ]
     });
@@ -98,6 +106,7 @@ describe("GitChangesPanel", () => {
     expect(await view.findByText("需求/登录测试.md")).toBeTruthy();
     expect(await view.findByText("agents/payment-test.md", { exact: false })).toBeTruthy();
     expect(await view.findByText("skills/payment-case-design/SKILL.md", { exact: false })).toBeTruthy();
+    expect(view.queryByText("F-COSS/workspace/02-设计/Test Material.md", { exact: false })).toBeNull();
     expect(view.queryByText("[公共]", { exact: false })).toBeNull();
     expect(view.queryByText("opencode/agents/public_agent_test.json", { exact: false })).toBeNull();
   });
@@ -130,5 +139,45 @@ describe("GitChangesPanel", () => {
     expect(await view.findByText("package.json")).toBeTruthy();
     expect(apiClientMock.getWorkspaceGitDiff).toHaveBeenCalledWith("wrk_1234567890abcdef");
     expect(apiClientMock.getVcsDiffFiles).not.toHaveBeenCalled();
+  });
+
+  it("discards an application workspace file and refreshes the diff list", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [
+          {
+            path: "workspace/02-设计/Test Material.md",
+            status: "modified",
+            staged: false,
+            patch: "@@ -1 +1 @@\n-old\n+new",
+            additions: 1,
+            deletions: 0
+          }
+        ]
+      })
+      .mockResolvedValueOnce({ files: [] });
+    const changesRefreshed = vi.fn();
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        apiBaseUrl: "http://api",
+        canWrite: true,
+        "onChanges-refreshed": changesRefreshed
+      },
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    expect(await view.findByText("workspace/02-设计/Test Material.md")).toBeTruthy();
+
+    const discardButton = view.getByTitle("回退文件改动");
+    await fireEvent.click(discardButton);
+
+    await waitFor(() => expect(apiClientMock.discardWorkspaceGitFiles)
+      .toHaveBeenCalledWith("wrk_1234567890abcdef", ["workspace/02-设计/Test Material.md"]));
+    await waitFor(() => expect(view.queryByText("workspace/02-设计/Test Material.md")).toBeNull());
+    await waitFor(() => expect(changesRefreshed).toHaveBeenCalledTimes(1));
   });
 });

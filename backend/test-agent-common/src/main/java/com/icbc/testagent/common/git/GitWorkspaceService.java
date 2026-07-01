@@ -1,7 +1,10 @@
 package com.icbc.testagent.common.git;
 
 import com.icbc.testagent.common.error.PlatformException;
+import java.io.ByteArrayOutputStream;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -90,9 +93,15 @@ public class GitWorkspaceService {
                         privateKey,
                         DEFAULT_TIMEOUT);
             } catch (PlatformException reuseException) {
-                if ("WORKTREE_CONFLICT".equals(reuseException.details().get("gitFailureType"))
-                        && registeredWorktreeMatches(repoRoot, worktreeRoot, branch)) {
-                    return;
+                if ("WORKTREE_CONFLICT".equals(reuseException.details().get("gitFailureType"))) {
+                    Path registeredPath = registeredWorktreePathForBranch(repoRoot, branch);
+                    if (samePath(worktreeRoot, registeredPath)) {
+                        return;
+                    }
+                    if (registeredPath != null && !Files.exists(worktreeRoot)) {
+                        moveRegisteredWorktree(repoRoot, registeredPath, worktreeRoot, privateKey);
+                        return;
+                    }
                 }
                 throw reuseException;
             }
@@ -109,18 +118,17 @@ public class GitWorkspaceService {
                 DEFAULT_TIMEOUT);
     }
 
-    private boolean registeredWorktreeMatches(Path repoRoot, Path worktreeRoot, String branch) {
+    private Path registeredWorktreePathForBranch(Path repoRoot, String branch) {
         GitCommandResult result = executor.execute(
                 List.of("git", "-C", repoRoot.toString(), "worktree", "list", "--porcelain"),
                 null,
                 DEFAULT_TIMEOUT);
-        String expectedPath = worktreeRoot.toAbsolutePath().normalize().toString();
         String currentPath = null;
         boolean currentBranchMatches = false;
         for (String line : result.stdoutText().split("\\R")) {
             if (line.startsWith("worktree ")) {
-                if (expectedPath.equals(normalizeWorktreeListPath(currentPath)) && currentBranchMatches) {
-                    return true;
+                if (currentBranchMatches) {
+                    return normalizeWorktreeListPath(currentPath);
                 }
                 currentPath = line.substring("worktree ".length()).trim();
                 currentBranchMatches = false;
@@ -128,14 +136,41 @@ public class GitWorkspaceService {
                 currentBranchMatches = branch.equals(line.substring("branch refs/heads/".length()).trim());
             }
         }
-        return expectedPath.equals(normalizeWorktreeListPath(currentPath)) && currentBranchMatches;
+        return currentBranchMatches ? normalizeWorktreeListPath(currentPath) : null;
     }
 
-    private String normalizeWorktreeListPath(String path) {
+    private Path normalizeWorktreeListPath(String path) {
         if (path == null || path.isBlank()) {
-            return "";
+            return null;
         }
-        return Path.of(path).toAbsolutePath().normalize().toString();
+        return Path.of(path).toAbsolutePath().normalize();
+    }
+
+    private boolean samePath(Path expected, Path actual) {
+        return actual != null && expected.toAbsolutePath().normalize().equals(actual.toAbsolutePath().normalize());
+    }
+
+    private void moveRegisteredWorktree(Path repoRoot, Path existingWorktreeRoot, Path targetWorktreeRoot, String privateKey) {
+        try {
+            Files.createDirectories(targetWorktreeRoot.toAbsolutePath().normalize().getParent());
+        } catch (Exception exception) {
+            throw new PlatformException(
+                    com.icbc.testagent.common.error.ErrorCode.INTERNAL_ERROR,
+                    "创建 worktree 目标父目录失败",
+                    java.util.Map.of("path", targetWorktreeRoot.toString()),
+                    exception);
+        }
+        executor.execute(
+                List.of(
+                        "git",
+                        "-C",
+                        repoRoot.toString(),
+                        "worktree",
+                        "move",
+                        existingWorktreeRoot.toString(),
+                        targetWorktreeRoot.toString()),
+                privateKey,
+                DEFAULT_TIMEOUT);
     }
 
     /**
@@ -293,11 +328,59 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 放弃指定文件的暂存区和工作区改动；未跟踪文件由调用方过滤后再清理。
+     */
+    public void restoreFiles(Path repoRoot, List<String> files, String privateKey) {
+        if (files == null || files.isEmpty()) {
+            return;
+        }
+        java.util.ArrayList<String> command = new java.util.ArrayList<>();
+        command.add("git");
+        command.add("-C");
+        command.add(repoRoot.toString());
+        command.add("restore");
+        command.add("--staged");
+        command.add("--worktree");
+        command.add("--");
+        command.addAll(files);
+        executor.execute(List.copyOf(command), privateKey, DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 清理指定未跟踪文件，调用方必须传入明确文件列表，避免扩大删除范围。
+     */
+    public void cleanUntrackedFiles(Path repoRoot, List<String> files, String privateKey) {
+        if (files == null || files.isEmpty()) {
+            return;
+        }
+        java.util.ArrayList<String> command = new java.util.ArrayList<>();
+        command.add("git");
+        command.add("-C");
+        command.add(repoRoot.toString());
+        command.add("clean");
+        command.add("-f");
+        command.add("--");
+        command.addAll(files);
+        executor.execute(List.copyOf(command), privateKey, DEFAULT_TIMEOUT);
+    }
+
+    /**
      * 返回工作树 porcelain 状态，由业务层转换成前端 diff 文件列表。
      */
     public String statusPorcelain(Path repoRoot) {
         GitCommandResult result = executor.execute(
                 gitNoQuotedPath(repoRoot, "status", "--porcelain"),
+                null,
+                DEFAULT_TIMEOUT);
+        return result.stdoutText();
+    }
+
+    /**
+     * 返回指定 pathspec 下的 porcelain 状态，用于只扫描应用级 .opencode 配置目录。
+     */
+    public String statusPorcelain(Path repoRoot, String pathspec) {
+        GitCommandResult result = executor.execute(
+                gitNoQuotedPath(repoRoot, "status", "--porcelain", "--", pathspec),
                 null,
                 DEFAULT_TIMEOUT);
         return result.stdoutText();
@@ -311,6 +394,66 @@ public class GitWorkspaceService {
                 ? gitNoQuotedPath(repoRoot, "diff", "--cached", "--", file)
                 : gitNoQuotedPath(repoRoot, "diff", "--", file);
         return executor.execute(command, null, DEFAULT_TIMEOUT).stdoutText();
+    }
+
+    /**
+     * 还原 Git porcelain 中带双引号的 C-style 路径，避免含空格或转义字符的路径展示乱码且 diff 查不到文件。
+     */
+    public String unquotePorcelainPath(String path) {
+        if (path == null) {
+            return "";
+        }
+        String value = path.trim();
+        if (value.length() < 2 || value.charAt(0) != '"' || value.charAt(value.length() - 1) != '"') {
+            return value;
+        }
+        String body = value.substring(1, value.length() - 1);
+        StringBuilder result = new StringBuilder();
+        ByteArrayOutputStream escapedBytes = new ByteArrayOutputStream();
+        for (int i = 0; i < body.length(); i++) {
+            char ch = body.charAt(i);
+            if (ch != '\\' || i + 1 >= body.length()) {
+                flushEscapedBytes(result, escapedBytes);
+                result.append(ch);
+                continue;
+            }
+            char next = body.charAt(++i);
+            if (next >= '0' && next <= '7') {
+                int octal = next - '0';
+                int count = 1;
+                while (count < 3 && i + 1 < body.length()) {
+                    char digit = body.charAt(i + 1);
+                    if (digit < '0' || digit > '7') {
+                        break;
+                    }
+                    i++;
+                    count++;
+                    octal = octal * 8 + (digit - '0');
+                }
+                escapedBytes.write(octal);
+                continue;
+            }
+            flushEscapedBytes(result, escapedBytes);
+            result.append(switch (next) {
+                case 'n' -> '\n';
+                case 't' -> '\t';
+                case 'r' -> '\r';
+                case 'b' -> '\b';
+                case '"' -> '"';
+                case '\\' -> '\\';
+                default -> next;
+            });
+        }
+        flushEscapedBytes(result, escapedBytes);
+        return result.toString();
+    }
+
+    private void flushEscapedBytes(StringBuilder result, ByteArrayOutputStream escapedBytes) {
+        if (escapedBytes.size() == 0) {
+            return;
+        }
+        result.append(escapedBytes.toString(StandardCharsets.UTF_8));
+        escapedBytes.reset();
     }
 
     /**

@@ -78,6 +78,7 @@ test("application recent workspace resolves to default personal worktree before 
 
   await expect.poll(() => defaultPersonalRequests).toEqual(["awv_20260715"]);
   await expect.poll(() => fileRequests).toContainEqual({ workspaceId: "wrk_personal_default", path: "" });
+  await expect(page.getByRole("button", { name: /worktree: feature_testagent_20260715_usr_admin_default/ }).first()).toBeVisible();
 });
 
 test("user avatar menu logs out and returns to login", async ({ page }) => {
