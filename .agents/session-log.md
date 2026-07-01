@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-01 - 修复换网后 INACTIVE 旧绑定阻断 OpenCode 初始化
+
+- Why: 本地切换网络后当前 Java/manager 的 `linux_server_id` 从 `192.168.100.115` 变为 `172.20.10.2`，用户旧 ACTIVE binding 指向旧 IP 导致初始化请求被路由到不可达后端；手工将旧 binding 置为 INACTIVE 后，`initialize()` 仍读取未过滤状态的历史 binding，并继续按旧 IP 查容器，报“没有可用的 opencode 容器或端口”。
+- What: `UserOpencodeProcessAssignmentService.initialize()` 只复用 ACTIVE binding；INACTIVE 历史绑定不再参与服务器归属选择。补充回归测试覆盖“INACTIVE 旧绑定存在时，应选择当前可用容器初始化”。
+- How: 不修改 `.env.test`、不改 OpenCode 源码、不改变 ACTIVE binding 不静默迁移的多服务器规则；本地排障时仅将 `usr_test_dev` 的旧 `192.168.100.115` binding 置为 INACTIVE，并用临时环境变量 `TEST_AGENT_START_OPENCODE_MANAGER=true` 强制启动 manager。
+- Result: `UserOpencodeProcessAssignmentServiceTest` 24 个用例通过；按 test profile 重启服务后，OpenCode 初始化到 `172.20.10.2:4096`，`/global/health` 和 `/global/config` 均返回 200。
+
 ### 2026-07-01 - 收口 OpenCode 状态抖动、技能召唤与重启假超时
 
 - Why: `/global/health` 返回 200 时页面显示绿灯，但公共配置 `opencode.jsonc` 仍使用旧的 `skills: ["./skills"]`，OpenCode 1.17.7 的 `/command` 实际返回 `ConfigInvalidError`；同时瞬时 manager/HTTP 探测会覆盖数据库稳定状态，文件 ticket 强探测和旧 workspace 重试会放大抖动，运行管理 restart 还存在“实际成功但 Java 先超时”的竞态。

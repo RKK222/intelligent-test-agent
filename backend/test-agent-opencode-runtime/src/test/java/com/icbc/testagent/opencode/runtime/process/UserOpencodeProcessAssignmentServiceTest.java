@@ -378,6 +378,28 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
+    void initializeIgnoresInactiveBindingWhenChoosingContainer() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_current", container("ctr_current", "10.8.0.21", 4096, 4098, 3, 0));
+        OpencodeProcessId oldProcessId = new OpencodeProcessId("ocp_inactive_old");
+        repository.bindings.put(
+                USER_ID.value() + ":opencode",
+                inactiveBinding(USER_ID, oldProcessId, "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
+        assertThat(response.linuxServerId()).isEqualTo("10.8.0.21");
+        assertThat(response.containerId()).isEqualTo("ctr_current");
+        assertThat(gateway.startCommands).singleElement().satisfies(command -> {
+            assertThat(command.linuxServerId()).isEqualTo(new LinuxServerId("10.8.0.21"));
+            assertThat(command.containerId()).isEqualTo(new OpencodeContainerId("ctr_current"));
+        });
+    }
+
+    @org.junit.jupiter.api.Test
     void initializeDelegatesPublicConfigCheckToSelectedManagerWhenLocalDirIsMissing() {
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_busy", container("ctr_busy", "10.8.0.12", 4096, 4100, 4, 3));
@@ -642,6 +664,23 @@ class UserOpencodeProcessAssignmentServiceTest {
                 new LinuxServerId(linuxServerId),
                 port,
                 UserOpencodeProcessBindingStatus.ACTIVE,
+                NOW,
+                NOW,
+                TRACE_ID);
+    }
+
+    private static UserOpencodeProcessBinding inactiveBinding(
+            UserId userId,
+            OpencodeProcessId processId,
+            String linuxServerId,
+            int port) {
+        return new UserOpencodeProcessBinding(
+                userId,
+                "opencode",
+                processId,
+                new LinuxServerId(linuxServerId),
+                port,
+                UserOpencodeProcessBindingStatus.INACTIVE,
                 NOW,
                 NOW,
                 TRACE_ID);
