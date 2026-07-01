@@ -24,9 +24,6 @@ func (OSStarter) Start(_ context.Context, spec StartSpec) (int, error) {
 	if err := command.Start(); err != nil {
 		return 0, err
 	}
-	go func() {
-		_ = command.Wait()
-	}()
 	return command.Process.Pid, nil
 }
 

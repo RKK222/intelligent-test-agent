@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/icbc/test-agent/opencode-manager/internal/state"
@@ -85,15 +83,6 @@ func (c Checker) probeBaseURL(record state.ProcessRecord) string {
 		return c.ProbeBaseURL
 	}
 	return fmt.Sprintf("http://127.0.0.1:%d", record.Port)
-}
-
-// DefaultProcessAlive 使用 signal 0 判断 Unix 进程是否仍存在。
-func DefaultProcessAlive(pid int) bool {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return process.Signal(syscall.Signal(0)) == nil
 }
 
 func healthy(record state.ProcessRecord, message string) Result {

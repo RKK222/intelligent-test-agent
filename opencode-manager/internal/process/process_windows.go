@@ -30,9 +30,11 @@ func (OSStarter) Start(_ context.Context, spec StartSpec) (int, error) {
 	if err := command.Start(); err != nil {
 		return 0, err
 	}
-	go func() {
-		_ = command.Wait()
-	}()
+	// 注意：不等待 PowerShell 退出。
+	// opencode.ps1 使用 Start-Process -PassThru -NoNewWindow 拉起 opencode 子进程后 PowerShell
+	// 立即退出。goroutine 等待 command.Wait() 会几乎瞬间完成——但此时 store.Create() 还未执行或刚执行
+	// 完，随后心跳 activeRecords() 的 ProcessAlive(PowerShell PID) 就返回 false，导致 state 被删。
+	// 去掉 goroutine 让 PowerShell 自然托给 OS：它退出后 OS 会把 opencode 子进程 reparent，不影响管理。
 	return command.Process.Pid, nil
 }
 
