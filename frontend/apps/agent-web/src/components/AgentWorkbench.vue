@@ -90,8 +90,31 @@ const authStore = useAuthStore();
 const router = useRouter();
 const OPENCODE_PROCESS_STATUS_FAST_REFETCH_INTERVAL_MS = 5000;
 const OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS = 30000;
+const SELECTED_PROVIDER_STORAGE_KEY = "ta_selected_provider";
+const SELECTED_MODEL_STORAGE_KEY = "ta_selected_model";
+const ACTIVE_RUN_PROBE_INTERVAL_MS = 1500;
 
 const isSuperAdmin = computed(() => authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
+
+function readStoredRuntimePreference() {
+  return {
+    provider: localStorage.getItem(SELECTED_PROVIDER_STORAGE_KEY) || "",
+    model: localStorage.getItem(SELECTED_MODEL_STORAGE_KEY) || ""
+  };
+}
+
+function persistRuntimePreference(provider: string, model: string) {
+  if (provider) {
+    localStorage.setItem(SELECTED_PROVIDER_STORAGE_KEY, provider);
+  } else {
+    localStorage.removeItem(SELECTED_PROVIDER_STORAGE_KEY);
+  }
+  if (model) {
+    localStorage.setItem(SELECTED_MODEL_STORAGE_KEY, model);
+  } else {
+    localStorage.removeItem(SELECTED_MODEL_STORAGE_KEY);
+  }
+}
 
 // 设置弹窗依赖当前用户角色；工作台直达时需要主动补齐 /api/auth/me。
 void authStore.fetchCurrentUser(api);
@@ -119,8 +142,9 @@ const session = shallowRef<Session | null>(null);
 const run = shallowRef<Run | null>(null);
 const lastPrompt = ref("");
 const selectedAgent = ref("");
-const selectedProvider = ref("");
-const selectedModel = ref("");
+const storedRuntimePreference = readStoredRuntimePreference();
+const selectedProvider = ref(storedRuntimePreference.provider);
+const selectedModel = ref(storedRuntimePreference.model);
 const promptMode = ref("build");
 const logs = ref<string[]>([]);
 const diffFiles = ref<RunDiffFile[]>([]);
@@ -245,6 +269,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onWindowKeydown);
   clearFileTreeRetryTimers();
+  stopActiveRunProbe();
 });
 
 // Chat runtime：单一 reducer 维护，dispatch 闭包更新
@@ -565,7 +590,40 @@ function selectRuntimeModel(model: typeof models.value[number]) {
   if (model.providerId) {
     selectedProvider.value = model.providerId;
   }
-  selectedModel.value = modelValue(model);
+  const val = modelValue(model);
+  selectedModel.value = val;
+  persistRuntimePreference(selectedProvider.value, val);
+}
+
+let activeRunProbeSeq = 0;
+let activeRunProbeTimer: ReturnType<typeof setInterval> | null = null;
+
+function stopActiveRunProbe() {
+  if (activeRunProbeTimer) {
+    clearInterval(activeRunProbeTimer);
+    activeRunProbeTimer = null;
+  }
+}
+
+async function recoverActiveRunForSession(sessionId: string, reason: string): Promise<Run | null> {
+  const seq = ++activeRunProbeSeq;
+  try {
+    const activeRun = await api.getActiveRun(sessionId);
+    if (seq !== activeRunProbeSeq || session.value?.sessionId !== sessionId) {
+      return null;
+    }
+    if (activeRun && isRunBusyStatus(activeRun.status)) {
+      if (run.value?.runId !== activeRun.runId || run.value.status !== activeRun.status) {
+        // 刷新、历史切换或启动请求仍未返回时，以后端 active-run 为准接管 SSE。
+        run.value = activeRun;
+        logs.value = [...logs.value.slice(-200), `[run] recovered ${activeRun.runId} ${activeRun.status} via ${reason}`];
+      }
+      return activeRun;
+    }
+  } catch (err) {
+    console.warn("自动探测活动 Run 失败", err);
+  }
+  return null;
 }
 
 // ===== 默认值与联动 effect =====
@@ -618,11 +676,21 @@ watch(agentsQuery.data, (data) => {
   }
 });
 watch(providersQuery.data, (data) => {
+  const savedProvider = readStoredRuntimePreference().provider;
+  if (savedProvider && data?.some((p) => p.providerId === savedProvider)) {
+    selectedProvider.value = savedProvider;
+    return;
+  }
   if (!selectedProvider.value && data?.[0]?.providerId) {
     selectedProvider.value = data[0].providerId;
   }
 });
 watch(modelsQuery.data, (data) => {
+  const savedModel = readStoredRuntimePreference().model;
+  if (savedModel && data?.some((m) => modelValue(m) === savedModel)) {
+    selectedModel.value = savedModel;
+    return;
+  }
   if (!selectedModel.value && data?.[0]) {
     selectedModel.value = modelValue(data.find((model) => model.defaultModel) ?? data[0]);
   }
@@ -655,13 +723,15 @@ watch([() => selectedProvider.value, () => selectedModel.value, modelsQuery.data
   }
   const nextModel = (data as typeof modelsQuery.data.value | undefined)?.find((m) => m.providerId === provider);
   if (nextModel) {
-    selectedModel.value = modelValue(nextModel);
+    const val = modelValue(nextModel);
+    selectedModel.value = val;
+    persistRuntimePreference(provider, val);
   }
 });
 
 // ===== RunEvent SSE 订阅：Run 处于运行/取消中时建立，卸载/状态变化时关闭 =====
 watch(run, (r, _old, onCleanup) => {
-  if (!r || !["RUNNING", "CANCELLING"].includes(r.status)) {
+  if (!r || !isRunBusyStatus(r.status)) {
     return;
   }
   const subscription = subscribeRunEvents({
@@ -677,6 +747,18 @@ watch(run, (r, _old, onCleanup) => {
   });
   onCleanup(() => subscription.close());
 });
+
+// 自动恢复 Session 的活动 Run，确保页面刷新、挂载或重新连入时仍能通过 SSE 接管后台执行。
+watch(
+  () => session.value?.sessionId,
+  async (sessionId) => {
+    if (!sessionId) return;
+    if (!isRunBusyStatus(run.value?.status)) {
+      await recoverActiveRunForSession(sessionId, "session-watch");
+    }
+  },
+  { immediate: true }
+);
 
 // 实时追踪：tool part 每次更新都扫描新完成的写文件工具，读盘刷新预览（逐次实时）。
 watch(
@@ -830,8 +912,32 @@ const startRunMutation = useMutation({
   },
   onError: (error) => {
     feedback.value = errorFeedback("启动 Run 失败", error);
+    if (session.value?.sessionId && !isRunBusyStatus(run.value?.status)) {
+      void recoverActiveRunForSession(session.value.sessionId, "start-run-error");
+    }
   }
 });
+
+// startRun 的 HTTP 请求可能因为首次拉起 runtime 或长任务初始化而迟迟不返回；此时后端
+// 可能已经创建了非终态 Run。pending 期间轮询 active-run，尽早拿到 runId 并订阅 SSE。
+watch(
+  [() => startRunMutation.isPending.value, () => session.value?.sessionId, () => run.value?.status],
+  ([pending, sessionId, status]) => {
+    stopActiveRunProbe();
+    if (!pending || !sessionId || isRunBusyStatus(status)) {
+      return;
+    }
+    void recoverActiveRunForSession(sessionId, "start-run-pending");
+    activeRunProbeTimer = setInterval(() => {
+      if (!startRunMutation.isPending.value || !session.value?.sessionId || isRunBusyStatus(run.value?.status)) {
+        stopActiveRunProbe();
+        return;
+      }
+      void recoverActiveRunForSession(session.value.sessionId, "start-run-pending");
+    }, ACTIVE_RUN_PROBE_INTERVAL_MS);
+  },
+  { immediate: true }
+);
 
 const initializeOpencodeProcessMutation = useMutation({
   mutationFn: () => api.initializeMyOpencodeProcess(),
@@ -1189,8 +1295,7 @@ function resetWorkspaceState() {
   readonlySessionReason.value = "";
   liveFollowedParts.value = new Set();
   selectedAgent.value = "";
-  selectedProvider.value = "";
-  selectedModel.value = "";
+  // 模型和 Provider 是用户级运行偏好，刷新后切回 recent workspace 时不能清空。
   markdownPreview.value = false;
   // 切工作区时同步清掉任务消耗计时与上一轮终态展示，避免旧 Run 的 token/duration 残留。
   chatStartedAt.value = null;
@@ -2470,6 +2575,9 @@ async function switchSession(sessionId: string) {
     } else {
       run.value = null;
     }
+
+    // 优先通过 getActiveRun 获取当前最新活跃的非终态活动 Run（如正在后台运行的任务）来重建连接。
+    await recoverActiveRunForSession(sessionId, "switch-session");
 
     feedback.value = { kind: "info", title: "已切换 Session", description: selected.title };
   } catch (error) {

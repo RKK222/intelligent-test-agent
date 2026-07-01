@@ -1887,6 +1887,20 @@ const lastAssistant = computed(() => {
   return null
 })
 
+const showRunningAssistant = computed(() => {
+  if (!props.running) return false
+  const last = lastAssistant.value
+  if (!last) return true
+  // 如果最新的助理消息里已经开始显示 reasoning 或 tool 的 part 卡片，则不需要展示最底部的全局 "思考中..." 卡片以避免冗余
+  if (Array.isArray(last.parts) && last.parts.length > 0) {
+    return false
+  }
+  if (last.content && last.content.trim().length > 0) {
+    return false
+  }
+  return true
+})
+
 const lastUser = computed(() => {
   for (let i = displayMessages.value.length - 1; i >= 0; i -= 1) {
     if (displayMessages.value[i].role === 'user')
@@ -2688,7 +2702,7 @@ function onCompositionEnd() {
 
       <!-- 运行中状态 -->
       <div
-        v-if="running"
+        v-if="showRunningAssistant"
         class="figma-chat-running-assistant"
       >
         <div class="figma-chat-avatar">

@@ -2,6 +2,20 @@
 
 ## Entries
 
+### 2026-07-01 - 自动恢复历史与刷新会话中的活动 Run 及组件状态持久化
+
+- Why:
+  1. 当用户输入由 `/` 触发的技能（例如 `/generate-cases-orthogonal` 等长耗时操作）时，如果刷新页面或在历史会话中切换，前端先前会丢失与后台正在执行（状态为 `RUNNING`/`CANCELLING`）的活动 Run 的绑定，从而无法通过 SSE 续连事件流，导致状态卡死在“思考中”。
+  2. 智能体思考过程中，气泡内的 `思考状态` 和全局底部的 `C 思考中...` 重合渲染，样式存在冲突和视觉冗余。
+  3. 用户刷新页面后，之前选择的模型与厂商配置会重置为系统默认值，需频繁重新选择。
+- What:
+  - 增强 `AgentWorkbench.vue` 中的 active-run 接管逻辑：恢复历史消息、刷新后 session 恢复、以及 `startRun` HTTP 请求 pending 或失败但后端已创建 Run 的场景，都会通过 `api.getActiveRun` 查询后端。若当前会话在后端有 `PENDING`/`RUNNING`/`CANCELLING` 活动 Run，则将其赋给 `run.value` 重连。
+  - 新增带序号保护的 active-run 探测函数和启动请求 pending 期间的短轮询，避免会话快速切换时旧请求覆盖新会话，也避免长耗时命令在前端拿不到 runId 时无法订阅 SSE。
+  - 优化 `FigmaChatPanel.vue` 中的全局 `showRunningAssistant` 计算逻辑：若当前最新的回复气泡内已经输出了 reasoning/tool part，则不再展示最底部的全局 `figma-chat-running-assistant`（思考状态栏），避免界面同时渲染两个思考指示器。
+  - 将 `AgentWorkbench.vue` 里的模型 `selectedModel` 与提供商 `selectedProvider` 配置持久化至 `localStorage`（通过 `ta_selected_model` / `ta_selected_provider`），并避免 recent workspace 自动切换时清空该用户级偏好，使页面刷新后能够自动恢复上次的模型选择偏好，避免重选。
+- How: 纯前端组件优化与状态持久化操作，不改变后端数据接口，保持 API 与单测兼容。
+- Result: `corepack pnpm --filter @test-agent/agent-web typecheck` 通过；`corepack pnpm exec playwright test apps/agent-web/tests/workbench.spec.ts -g "model picker keeps|switching history resumes" --project=chromium` 通过，覆盖模型刷新恢复与历史 active-run SSE 接管。
+
 ### 2026-07-01 - 提升前端启动 Run 和初始化进程请求超时限制
 
 - Why: 当前对话页面中，当智能体思考或启动过久（例如拉起新容器、建立 bindings、首次会话创建等耗时较长操作）时，前端 HTTP 会在 30 秒超时后显示超时报错（如“启动 Run 失败: 请求超时”）。但由于后端该操作已经开始并最终会异步运行成功，点开历史消息时发现智能体其实已经完成，给用户造成了不一致和误导性的体验。此外，会话标题过长时在 flex 布局中未设置收缩及最小宽度，导致标题文本挤占空间将“历史对话”按钮完全挤出可视区域或压缩文字。
@@ -2609,4 +2623,3 @@ bash /tmp/test-api-after-restart.sh
 - What: Run 保存 `RUNNING` 并先订阅事件后改为异步提交 prompt，提交失败复用统一 `run.failed` 链路；SSE 将消息快照与 durable/live 流并发合并。完成态 `write/edit/apply_patch` 只从 tool part 派生文件通知，不再请求 OpenCode 不支持的 `/vcs/diff?mode=working`。前端收到 `diff.proposed/session.diff` 后同步刷新父目录和工作区 Git Diff；失败重试统一复用最近 prompt。Git status 增加 `--untracked-files=all`，返回可展示、可回退的文件级未跟踪记录。
 - How: 复用 `RunEventSseStreamService`、`failRunFromStream`、`refreshWorkspaceGitDiff`、`refreshParentDirectory` 和现有 workspace discard 链路，没有修改 OpenCode/generated SDK，也没有新增旁路架构。补充 Run 非阻塞/异步失败、快照不阻塞 live delta、Git 文件级 status、重试和运行中 Diff 刷新的回归测试，并同步模块 README 与 HTTP/事件文档。
 - Result: 后端相关 88 个测试、前端 204 个 Vitest、typecheck、build 和 2 个关键 Playwright E2E 通过。通过 iTerm 使用 `.env.test` 重启后，后端 readiness、数据库、Redis、前端均正常；manager 和 OpenCode 各单实例，OpenCode 实际监听 `192.168.100.115:4098`。真实页面变更徽标为 9，与 personal worktree 的 9 个非空未跟踪文件一致，不再出现折叠目录空 Diff。未修改 API 字段、事件类型、数据库、安全或鉴权契约；`POST /runs` 的返回时机变为非阻塞，保持响应 DTO 向后兼容。
-

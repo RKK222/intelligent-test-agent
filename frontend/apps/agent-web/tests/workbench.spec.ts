@@ -294,6 +294,30 @@ test("model picker groups models by provider and updates run model", async ({ pa
   });
 });
 
+test("model picker keeps the selected model after page reload", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, { runRequests });
+
+  await gotoWorkbench(page);
+
+  await page.getByRole("button", { name: "切换模型" }).click();
+  await page.getByPlaceholder("搜索模型").fill("north");
+  await page.getByRole("dialog", { name: "模型选择" }).getByRole("button", { name: /North Mini Code Free/ }).click();
+  await expect(page.getByRole("button", { name: "切换模型" })).toContainText("North Mini Code Free");
+
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("button", { name: "切换模型" })).toContainText("North Mini Code Free");
+
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("use persisted model");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runRequests.length).toBe(1);
+  expect(runRequests[0]).toMatchObject({
+    prompt: "use persisted model",
+    model: "opencode-zen/north-mini-code"
+  });
+});
+
 test("the first sent message becomes the new session title", async ({ page }) => {
   const sessionRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, { sessionRequests });
@@ -435,6 +459,69 @@ test("switching history restores assistant documents and the file changes drawer
   await expect(changesCard).toContainText("1 个文件已更改");
   await changesCard.click();
   await expect(page.getByRole("dialog", { name: "文件变更 Diff" })).toContainText("docs/登录测试报告.md");
+});
+
+test("switching history resumes the active run event stream", async ({ page }) => {
+  const activeRunRequests: string[] = [];
+  const runEventRequests: string[] = [];
+  await mockBackendApi(page, {
+    activeRunRequests,
+    runEventRequests,
+    sessions: [
+      {
+        sessionId: "ses_history",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "/generate-cases-orthogonal 车贷",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-06-28T08:00:00Z",
+        updatedAt: "2026-06-28T08:01:00Z"
+      }
+    ],
+    sessionMessages: [
+      {
+        messageId: "msg_user",
+        sessionId: "ses_history",
+        role: "USER",
+        content: "/generate-cases-orthogonal 车贷",
+        createdAt: "2026-06-28T08:00:00Z",
+        runId: "run_history"
+      }
+    ],
+    historyRun: {
+      runId: "run_history",
+      sessionId: "ses_history",
+      workspaceId: "wrk_1234567890abcdef",
+      status: "SUCCEEDED",
+      createdAt: "2026-06-28T08:00:00Z",
+      updatedAt: "2026-06-28T08:01:00Z"
+    },
+    activeRun: {
+      runId: "run_1",
+      sessionId: "ses_history",
+      workspaceId: "wrk_1234567890abcdef",
+      status: "RUNNING",
+      createdAt: "2026-06-28T08:02:00Z",
+      updatedAt: "2026-06-28T08:02:01Z"
+    },
+    runEvents: [
+      event(1, "message.part.delta", {
+        messageId: "msg_live",
+        messageID: "msg_live",
+        partId: "part_text",
+        partID: "part_text",
+        delta: "正交表实时输出"
+      })
+    ]
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "历史" }).click();
+  await page.getByRole("button", { name: /generate-cases-orthogonal/ }).click();
+
+  await expect.poll(() => activeRunRequests).toContain("/api/sessions/ses_history/active-run");
+  await expect.poll(() => runEventRequests).toContain("/api/internal/agent/opencode/runs/run_1/events");
+  await expect(page.getByText("正交表实时输出")).toBeVisible();
 });
 
 test("workbench disables chat until opencode process is initialized", async ({ page }) => {
@@ -852,6 +939,9 @@ async function mockBackendApi(
     sessionMessages?: Array<Record<string, unknown>>;
     historyRun?: Record<string, unknown>;
     historyDiffFiles?: Array<Record<string, unknown>>;
+    activeRun?: Record<string, unknown> | null;
+    activeRunRequests?: string[];
+    runEventRequests?: string[];
     skipInitialAuthToken?: boolean;
     loginRequests?: Array<{ username?: string; password?: string }>;
   } = {}
@@ -1251,6 +1341,11 @@ async function mockBackendApi(
       await route.fulfill(json(pageOf(capture.sessionMessages ?? [])));
       return;
     }
+    if (method === "GET" && /^\/api\/sessions\/[^/]+\/active-run$/.test(url.pathname)) {
+      capture.activeRunRequests?.push(url.pathname);
+      await route.fulfill(json(capture.activeRun ?? null));
+      return;
+    }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/runs/run_history") {
       await route.fulfill(json(capture.historyRun ?? {}));
       return;
@@ -1309,6 +1404,7 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/runs/run_1/events") {
+      capture.runEventRequests?.push(url.pathname);
       await route.fulfill({
         status: 200,
         headers: { ...corsHeaders(), "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
