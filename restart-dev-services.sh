@@ -47,7 +47,8 @@ in dependency order: backend -> opencode-manager -> frontend.
 Services managed by this script:
   backend           Spring Boot test-agent-app (java -jar, profile from --profile).
   opencode-manager  Go opencode-manager supervisor (./opencode-manager/bin/opencode-manager run).
-                    Started by default when TEST_AGENT_OPENCODE_BASE_URL is a local URL.
+                    Started by default for the test profile, or when
+                    TEST_AGENT_OPENCODE_BASE_URL is a local URL.
                     Standalone `opencode serve` is NOT started separately when the
                     manager runs, because the manager spawns opencode child processes.
   frontend          agent-web Vite dev server (corepack pnpm dev).
@@ -72,6 +73,8 @@ Options:
 Environment overrides:
   TEST_AGENT_START_OPENCODE_MANAGER  auto|true|false. Set false to skip the Go manager.
   TEST_AGENT_OPENCODE_MANAGER_TOKEN  Shared secret between manager and backend. Defaults to local-manager-token.
+  TEST_AGENT_ROOT                    Project root used by common parameter path expansion.
+  TESTAGENT                          Compatibility alias for existing local common parameters.
 USAGE
 }
 
@@ -349,6 +352,9 @@ should_start_opencode_manager() {
       return 1
       ;;
     auto|"")
+      if [[ "${profile:-}" == "test" ]]; then
+        return 0
+      fi
       # token 已有默认值，这里改用 TEST_AGENT_OPENCODE_BASE_URL 是否配置且指向本机作为启动判据；
       # 校验环境的占位 env 不配置该地址，远端 opencode 环境也不应拉起本地 manager。
       [[ -n "${TEST_AGENT_OPENCODE_BASE_URL:-}" ]] && is_local_opencode_url "${TEST_AGENT_OPENCODE_BASE_URL}"
@@ -830,7 +836,9 @@ backend_url="${TEST_AGENT_BASE_URL:-${backend_url}}"
 frontend_url="${TEST_AGENT_FRONTEND_URL:-${frontend_url}}"
 
 # 通用参数中的 $TEST_AGENT_ROOT 由 Java 进程展开；允许调用方显式覆盖以适配其他工作目录。
+# TESTAGENT 是早期本地测试库已使用的兼容别名，保留以避免公共配置路径下发给 manager 时变成字面量。
 export TEST_AGENT_ROOT="${TEST_AGENT_ROOT:-${ROOT_DIR}}"
+export TESTAGENT="${TESTAGENT:-${TEST_AGENT_ROOT}}"
 echo "TEST_AGENT_ROOT set to: ${TEST_AGENT_ROOT}"
 
 derive_frontend_runtime_settings

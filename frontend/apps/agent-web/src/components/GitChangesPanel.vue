@@ -391,7 +391,13 @@ async function handleCommit(push = false) {
     }
 
     // 1. 应用工作空间提交并推送（通过个人工作区合并回应用版本分支）
-    if (push && props.personalWorkspaceId && workspaceStaged.value.length > 0) {
+    if (push && workspaceStaged.value.length > 0) {
+      if (!props.personalWorkspaceId) {
+        errorMessage.value = "当前未进入个人 worktree，无法合并推送到应用版本分支。请重新进入应用版本工作区后再试。";
+        progressMessage.value = "";
+        committing.value = false;
+        return;
+      }
       progressMessage.value = "正在合并推送到应用版本分支...";
       const result = await api.publishPersonalWorkspace(props.personalWorkspaceId, { commitMessage: msg });
       if (result.status === "CONFLICT") {
@@ -399,8 +405,8 @@ async function handleCommit(push = false) {
           ? result.conflictFiles.join("、")
           : "未知文件";
         errorMessage.value = `合并冲突：请在个人工作区中解决 ${conflictList} 的冲突后重新「提交并推送」。当前仍停留在个人工作区，应用版本副本不受影响。`;
-        await refreshChanges();
         progressMessage.value = "";
+        await refreshChanges();
         committing.value = false;
         return;
       }

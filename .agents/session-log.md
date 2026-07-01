@@ -2,12 +2,19 @@
 
 ## Entries
 
+### 2026-07-01 - 修复 worktree 发布、公共配置展示、opencode 启动与固定机器绑定
+
+- Why: F-COSS 本地 UI 验证发现个人 worktree 点击“提交并推送”后远端应用分支没有代码，且失败后可能重复提示冲突/错误；公共 opencode config 初始化后首页不显示；test profile 下 opencode 启动失败；同时确认 `7571d775e00453f85b1bd370385fe1e0bbdd10cc` 的 INACTIVE binding 自动迁移语义不符合“一人固定绑定一台 IP 机器”的规则。
+- What: 个人 worktree 发布改为先提交并推送个人分支，再确保当前机器应用版本副本有效，fetch `origin/<personalBranch>` 后 merge 到应用版本特性分支并推送；冲突仅在 Git 明确留下冲突文件时返回 `CONFLICT`，随后 `merge --abort` 清理应用副本；已提交但后续失败的 clean worktree 重试会继续 push/merge；应用副本记录中的旧 Windows/macOS 路径会按当前 `OPENCODE_APP_WORKSPACE_ROOT` 自愈并同步运行态 Workspace。公共配置状态刷新会回填服务器仓库列表，restart 脚本在 test profile 默认启动本机 manager 并导出 `$TESTAGENT` 兼容别名。`UserOpencodeProcessAssignmentService.initialize()` 恢复读取用户固定 binding，不因 INACTIVE 记录自动迁移到当前 IP。
+- How: 未修改 `.env.local`/`.env.test` 和数据库 schema；复用既有 `ensureLocalReplica`、Git service、公共 opencode startup/status/manager 链路；同步 workspace-management/common/app/backend/API/部署文档，并补单测覆盖远端个人分支 fetch、冲突 abort、clean retry、旧应用副本路径自愈和固定机器绑定。
+- Result: 定向后端测试、前端 typecheck、脚本语法校验和真实 test profile 重启通过；UI 验证公共级配置树可见、opencode 可从页面启动、F-COSS worktree diff/暂存/提交并推送成功，远端 `feature_testagent_20260618` 已包含 UI 验证标记。
+
 ### 2026-07-01 - 修复换网后 INACTIVE 旧绑定阻断 OpenCode 初始化
 
-- Why: 本地切换网络后当前 Java/manager 的 `linux_server_id` 从 `192.168.100.115` 变为 `172.20.10.2`，用户旧 ACTIVE binding 指向旧 IP 导致初始化请求被路由到不可达后端；手工将旧 binding 置为 INACTIVE 后，`initialize()` 仍读取未过滤状态的历史 binding，并继续按旧 IP 查容器，报“没有可用的 opencode 容器或端口”。
-- What: `UserOpencodeProcessAssignmentService.initialize()` 只复用 ACTIVE binding；INACTIVE 历史绑定不再参与服务器归属选择。补充回归测试覆盖“INACTIVE 旧绑定存在时，应选择当前可用容器初始化”。
-- How: 不修改 `.env.test`、不改 OpenCode 源码、不改变 ACTIVE binding 不静默迁移的多服务器规则；本地排障时仅将 `usr_test_dev` 的旧 `192.168.100.115` binding 置为 INACTIVE，并用临时环境变量 `TEST_AGENT_START_OPENCODE_MANAGER=true` 强制启动 manager。
-- Result: `UserOpencodeProcessAssignmentServiceTest` 24 个用例通过；按 test profile 重启服务后，OpenCode 初始化到 `172.20.10.2:4096`，`/global/health` 和 `/global/config` 均返回 200。
+- Why: 该条历史记录来自临时排障方向，后续确认不符合“一人固定绑定一台 IP 机器”的产品规则；INACTIVE 历史 binding 不能被 `initialize()` 静默忽略并迁移到当前 IP。
+- What: 本次已在上一条记录中纠正：`initialize()` 继续读取用户既有 binding，并由业务侧临时数据修正或运维处理异常 IP 变动，不做自动迁移。
+- How: 保留该条作为误判追溯，避免后续开发者按旧结论重新实现 INACTIVE 自动迁移。
+- Result: 当前有效结论以上一条“固定机器绑定”记录为准。
 
 ### 2026-07-01 - 收口 OpenCode 状态抖动、技能召唤与重启假超时
 

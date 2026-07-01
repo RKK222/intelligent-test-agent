@@ -44,6 +44,7 @@ import com.icbc.testagent.domain.user.UserStatus;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
+import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -295,6 +296,70 @@ class ManagedWorkspaceApplicationServiceTest {
 
         assertThat(personal.runtimeWorkspace().rootPath().replace('\\', '/'))
                 .contains("/personalworktree/20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default/F-GCMS/workspace");
+    }
+
+    @Test
+    void ensureDefaultPersonalWorkspaceReusesExistingValidWorktreeEvenWhenPathDiffersFromConfiguredRoot() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+
+        PersonalWorkspace saved = managed.personals.get(0);
+        Workspace runtime = workspaces.findById(saved.runtimeWorkspaceId()).orElseThrow();
+        Path existingRepoRoot = root.resolve("existing-valid-worktree");
+        Path existingWorkspaceRoot = existingRepoRoot.resolve("F-GCMS/workspace");
+        Files.createDirectories(existingWorkspaceRoot);
+        PersonalWorkspace relocated = new PersonalWorkspace(
+                saved.personalWorkspaceId(),
+                saved.versionId(),
+                saved.appId(),
+                saved.applicationWorkspaceId(),
+                saved.userId(),
+                saved.workspaceName(),
+                saved.branch(),
+                existingRepoRoot.toString(),
+                existingWorkspaceRoot.toString(),
+                saved.runtimeWorkspaceId(),
+                saved.baseCommit(),
+                saved.status(),
+                saved.createdAt(),
+                saved.updatedAt());
+        managed.updatePersonalWorkspaceLocation(relocated);
+        workspaces.save(new Workspace(
+                runtime.workspaceId(),
+                runtime.name(),
+                existingWorkspaceRoot.toString(),
+                runtime.status(),
+                runtime.createdAt(),
+                runtime.updatedAt(),
+                runtime.linuxServerId(),
+                runtime.traceId()));
+        git.currentBranchValue = personal.personalWorkspaceBranch();
+        git.reusedWorktreeBranch = null;
+
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse reused = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_reuse");
+
+        assertThat(reused.personalWorkspaceId()).isEqualTo(personal.personalWorkspaceId());
+        assertThat(reused.runtimeWorkspace().rootPath()).isEqualTo(existingWorkspaceRoot.toString());
+        assertThat(git.reusedWorktreeBranch).isNull();
+        assertThat(managed.personals.get(0).repoRootPath()).isEqualTo(existingRepoRoot.toString());
     }
 
     @Test
@@ -618,6 +683,7 @@ class ManagedWorkspaceApplicationServiceTest {
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
         FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        git.nextStatusPorcelain = "M F-GCMS/workspace/README.md\n";
         ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
 
         ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
@@ -649,13 +715,19 @@ class ManagedWorkspaceApplicationServiceTest {
 
         assertThat(result.status()).isEqualTo("MERGED");
         assertThat(result.versionId()).isEqualTo(version.versionId());
-        // 合并方向：在应用版本副本（特性分支）上把个人分支 merge 进来，而非反过来
-        assertThat(git.mergedBranch).isEqualTo(personal.personalWorkspaceBranch());
+        // 合并方向：在应用版本副本（特性分支）上把远端个人分支 merge 进来，而非反过来
+        assertThat(git.fetchedBranch).isEqualTo(personal.personalWorkspaceBranch());
+        assertThat(git.fetchedBranchRepoRoot).isEqualTo(applicationRepoRoot);
+        assertThat(git.mergedBranch).isEqualTo("origin/" + personal.personalWorkspaceBranch());
         assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
-        // 推送的是应用版本特性分支，不是个人分支；且推送发生在应用版本副本仓库
+        // 先推送个人分支，再推送应用版本特性分支；应用分支推送发生在应用版本副本仓库
+        assertThat(git.pushes)
+                .extracting(push -> push.branch)
+                .containsExactly(personal.personalWorkspaceBranch(), version.branch());
+        assertThat(git.pushes.get(0).repoRoot).isEqualTo(personalRepoRoot);
+        assertThat(git.pushes.get(1).repoRoot).isEqualTo(applicationRepoRoot);
         assertThat(git.pushedBranch).isEqualTo(version.branch());
         assertThat(git.pushedRepoRoot).isEqualTo(applicationRepoRoot);
-        assertThat(git.pushedBranch).isNotEqualTo(personal.personalWorkspaceBranch());
         // head commit 取自应用版本副本而非个人 worktree
         assertThat(git.headCommitRepoRoot).isEqualTo(applicationRepoRoot);
         // 个人 worktree 只负责 stage + commit
@@ -668,11 +740,118 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void publishPersonalWorkspaceRepairsStaleApplicationReplicaPath() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        git.nextStatusPorcelain = "M F-GCMS/workspace/README.md\n";
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+
+        ApplicationWorkspaceVersionReplica current = managed.replicas.get(0);
+        Instant now = Instant.now();
+        managed.replicas.clear();
+        managed.replicas.add(new ApplicationWorkspaceVersionReplica(
+                current.replicaId(),
+                current.versionId(),
+                current.linuxServerId(),
+                "D:\\data\\.testagent\\agent-opencode\\workspace\\appworkspace\\20260707\\gcms",
+                "D:\\data\\.testagent\\agent-opencode\\workspace\\appworkspace\\20260707\\gcms\\F-GCMS\\workspace",
+                current.runtimeWorkspaceId(),
+                current.currentCommitHash(),
+                current.syncStatus(),
+                current.lastError(),
+                current.lastSyncedAt(),
+                "trace_stale",
+                current.createdAt(),
+                now));
+        workspaces.save(new Workspace(
+                current.runtimeWorkspaceId(),
+                "GCMS Workspace-20260707",
+                "D:\\data\\.testagent\\agent-opencode\\workspace\\appworkspace\\20260707\\gcms\\F-GCMS\\workspace",
+                WorkspaceStatus.ACTIVE,
+                now,
+                now,
+                "127.0.0.1",
+                "trace_stale"));
+
+        git.nextHeadCommit = "commit_merged_repaired";
+
+        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "fix: 修复旧路径",
+                new UserId("usr_1"),
+                "trace_publish");
+
+        Path applicationRepoRoot = Path.of(managed.replicas.get(0).repoRootPath());
+        Workspace runtimeWorkspace = workspaces.findById(current.runtimeWorkspaceId()).orElseThrow();
+
+        assertThat(result.status()).isEqualTo("MERGED");
+        assertThat(applicationRepoRoot).isEqualTo(root.resolve("appworkspace/20260707/gcms").toRealPath());
+        assertThat(runtimeWorkspace.rootPath()).doesNotContain("D:\\data");
+        assertThat(git.fetchedBranchRepoRoot).isEqualTo(applicationRepoRoot);
+        assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_merged_repaired");
+    }
+
+    @Test
+    void publishPersonalWorkspaceRetriesAfterCommitWithoutNewChanges() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        git.nextStatusPorcelain = "";
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+
+        git.nextHeadCommit = "commit_merged_retry";
+
+        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "fix: retry publish",
+                new UserId("usr_1"),
+                "trace_publish");
+
+        assertThat(result.status()).isEqualTo("MERGED");
+        assertThat(git.committedStagedRepoRoot).isNull();
+        assertThat(git.pushes)
+                .extracting(push -> push.branch)
+                .containsExactly(personal.personalWorkspaceBranch(), version.branch());
+        assertThat(git.mergedBranch).isEqualTo("origin/" + personal.personalWorkspaceBranch());
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_merged_retry");
+    }
+
+    @Test
     void publishPersonalWorkspaceReturnsConflictWhenMergeFails() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
         FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
         FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        git.nextStatusPorcelain = "M F-GCMS/workspace/README.md\n";
         git.failMergeWithConflict = true;
         git.nextConflictPaths = List.of("src/Main.java", "README.md");
         ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
@@ -700,13 +879,53 @@ class ManagedWorkspaceApplicationServiceTest {
 
         assertThat(result.status()).isEqualTo("CONFLICT");
         assertThat(result.conflictFiles()).containsExactly("src/Main.java", "README.md");
-        // 合并方向仍应是个人分支 merge 进应用版本特性分支
-        assertThat(git.mergedBranch).isEqualTo(personal.personalWorkspaceBranch());
+        // 合并方向仍应是远端个人分支 merge 进应用版本特性分支
+        assertThat(git.mergedBranch).isEqualTo("origin/" + personal.personalWorkspaceBranch());
         assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
-        // 冲突时不应推送
-        assertThat(git.pushedBranch).isNull();
+        // 冲突时只允许已发生的个人分支推送，不应继续推送应用分支
+        assertThat(git.pushes).singleElement().satisfies(push ->
+                assertThat(push.branch).isEqualTo(personal.personalWorkspaceBranch()));
+        assertThat(git.pushedBranch).isEqualTo(personal.personalWorkspaceBranch());
+        // 合并冲突后立即 abort，避免应用版本副本保留 MERGING 状态导致后续重复冲突提示。
+        assertThat(git.abortedMergeRepoRoot).isEqualTo(applicationRepoRoot);
         // 版本 commit 不应更新
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_base");
+    }
+
+    @Test
+    void publishPersonalWorkspacePropagatesMergeFailureWhenNoConflictFiles() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        git.nextStatusPorcelain = "M F-GCMS/workspace/README.md\n";
+        git.failMergeWithConflict = true;
+        git.nextConflictPaths = List.of();
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+
+        assertThatThrownBy(() -> service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "fix: 修复缺陷",
+                new UserId("usr_1"),
+                "trace_publish"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.GIT_UNAVAILABLE));
+        assertThat(git.abortedMergeRepoRoot).isNull();
+        assertThat(git.pushes).singleElement().satisfies(push ->
+                assertThat(push.branch).isEqualTo(personal.personalWorkspaceBranch()));
     }
 
     private ManagedWorkspaceApplicationService service(
@@ -840,17 +1059,22 @@ class ManagedWorkspaceApplicationServiceTest {
         private List<String> restoredFiles = List.of();
         private List<String> unstagedFiles = List.of();
         private List<String> cleanedFiles = List.of();
+        private String currentBranchValue;
         // 个人 worktree 推送（合并回应用版本特性分支）链路记录
         private Path stagedRepoRoot;
         private Path committedStagedRepoRoot;
         private String committedStagedMessage;
         private Path fetchedRepoRoot;
+        private Path fetchedBranchRepoRoot;
+        private String fetchedBranch;
         private String mergedBranch;
         private Path mergedBranchRepoRoot;
         private boolean failMergeWithConflict;
         private List<String> nextConflictPaths = List.of();
+        private Path abortedMergeRepoRoot;
         private Path pushedRepoRoot;
         private Path headCommitRepoRoot;
+        private final List<PushCall> pushes = new ArrayList<>();
 
         private FakeGitWorkspaceService(String directoryPath) {
             this.directoryPath = directoryPath;
@@ -883,6 +1107,27 @@ class ManagedWorkspaceApplicationServiceTest {
         public void createWorktreeReusingBranch(Path repoRoot, Path worktreeRoot, String branch, String privateKey) {
             this.reusedWorktreeBranch = branch;
             createWorktreeDirectory(worktreeRoot);
+        }
+
+        @Override
+        public boolean isGitRepository(Path repoRoot) {
+            return Files.isDirectory(repoRoot);
+        }
+
+        @Override
+        public String currentBranch(Path repoRoot) {
+            if (currentBranchValue != null) {
+                return currentBranchValue;
+            }
+            if (repoRoot.toString().contains("appworkspace")) {
+                return clonedBranch;
+            }
+            return worktreeBranch;
+        }
+
+        @Override
+        public String originUrl(Path repoRoot) {
+            return "https://example.com/gcms.git";
         }
 
         @Override
@@ -937,6 +1182,12 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
+        public void fetchBranch(Path repoRoot, String branch, String privateKey) {
+            this.fetchedBranchRepoRoot = repoRoot;
+            this.fetchedBranch = branch;
+        }
+
+        @Override
         public void mergeBranch(Path repoRoot, String branch, String privateKey) {
             this.mergedBranch = branch;
             this.mergedBranchRepoRoot = repoRoot;
@@ -954,7 +1205,13 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
+        public void abortMerge(Path repoRoot, String privateKey) {
+            this.abortedMergeRepoRoot = repoRoot;
+        }
+
+        @Override
         public void push(Path repoRoot, String branch, boolean force, String privateKey) {
+            this.pushes.add(new PushCall(repoRoot, branch, force));
             this.pushedBranch = branch;
             this.pushedForce = force;
             this.pushedRepoRoot = repoRoot;
@@ -971,6 +1228,10 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
+        public void resetHardToCommit(Path repoRoot, String commitHash) {
+        }
+
+        @Override
         public String statusPorcelain(Path repoRoot) {
             return nextStatusPorcelain;
         }
@@ -980,6 +1241,9 @@ class ManagedWorkspaceApplicationServiceTest {
             this.lastDiffFile = file;
             return diffByFile.getOrDefault(file, "");
         }
+    }
+
+    private record PushCall(Path repoRoot, String branch, boolean force) {
     }
 
     private static final class FakeConfigurationRepository implements ConfigurationManagementRepository {

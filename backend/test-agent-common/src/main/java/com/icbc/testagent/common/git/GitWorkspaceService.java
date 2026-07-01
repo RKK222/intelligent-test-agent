@@ -284,6 +284,16 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 放弃进行中的 Git merge，确保应用版本副本不会停留在冲突状态影响后续推送。
+     */
+    public void abortMerge(Path repoRoot, String privateKey) {
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "merge", "--abort"),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
      * 以 fast-forward only 模式拉取指定远端分支，避免自动 merge 产生不可预期的工作区差异。
      */
     public void pullFastForward(Path repoRoot, String branch, String privateKey) {
@@ -299,6 +309,22 @@ public class GitWorkspaceService {
     public void fetch(Path repoRoot, String privateKey) {
         executor.execute(
                 List.of("git", "-C", repoRoot.toString(), "fetch", "origin"),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 拉取指定远端分支并更新 remote-tracking ref；单分支 clone 的副本默认 refspec 可能不包含个人分支。
+     */
+    public void fetchBranch(Path repoRoot, String branch, String privateKey) {
+        executor.execute(
+                List.of(
+                        "git",
+                        "-C",
+                        repoRoot.toString(),
+                        "fetch",
+                        "origin",
+                        branch + ":refs/remotes/origin/" + branch),
                 privateKey,
                 DEFAULT_TIMEOUT);
     }

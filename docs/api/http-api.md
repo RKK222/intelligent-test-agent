@@ -1004,7 +1004,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/workspace-versions/{versionId}/ensure-default-personal-workspace` | 确保默认个人工作区存在：查询 (versionId, userId, workspaceName=default)，存在则复用返回，不存在则后台创建。 |
 | `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取工作区变更文件列表，返回 `{ files: [{ path, status, staged, patch, additions, deletions }] }`。 |
 | `POST` | `/workspaces/{workspaceId}/git-discard` | 丢弃当前个人 worktree 中指定工作区相对路径的本地 Git 改动；已跟踪文件执行 restore，新增/未跟踪文件定点 clean。 |
-| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 个人工作区"提交并推送"：在个人 worktree 中 stage all + commit，再在应用版本副本（特性分支）上 fetch/pull + merge 个人分支 + push 特性分支；冲突返回 `CONFLICT` 与冲突文件列表。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 个人工作区"提交并推送"：在个人 worktree 中 stage all + commit + push 个人分支，再确保当前服务器应用版本副本可用（必要时按当前 `OPENCODE_APP_WORKSPACE_ROOT` 修复旧路径），随后在应用版本副本（特性分支）上 fetch/pull + fetch 远端个人分支 + merge `origin/<personalBranch>` + push 特性分支；真实合并冲突返回业务 `CONFLICT` 与冲突文件列表，并清理应用版本副本的 merge 状态；认证、网络、远端拒绝等非冲突 Git 错误按统一错误响应返回。 |
 
 `POST /applications/{appId}/workspace-templates/{templateId}/versions` 请求体：
 
@@ -1150,10 +1150,13 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 后端执行流程：
 
-1. 在个人 worktree 中 `git add --all` + `git commit -m "..."`。
-2. 切到应用版本副本（checkout 在应用版本特性分支）：`git fetch origin` + `git pull --ff-only {appVersionBranch}`。
-3. `git merge --no-ff {personalBranch}` 在应用版本副本上把个人分支合并进特性分支（合并方向为「特性分支 ← 个人分支」）。
-4. `git push origin {appVersionBranch}` 推送应用版本特性分支。
+1. 在个人 worktree 中 `git add --all`；如果 `git status --porcelain` 非空则 `git commit -m "..."`，如果上次发布已完成本地 commit 但后续失败，重试时允许 clean worktree 直接继续。
+2. `git push origin {personalBranch}` 推送个人分支。
+3. 确保当前服务器应用版本副本可用：副本路径不存在、不是当前机器路径或历史运行态 Workspace 根目录仍指向旧系统路径时，按当前 `OPENCODE_APP_WORKSPACE_ROOT` 重新准备本机副本并更新副本/Workspace 记录。
+4. 切到应用版本副本（checkout 在应用版本特性分支）：`git fetch origin` + `git pull --ff-only {appVersionBranch}`。
+5. 对单分支 clone 的应用副本显式执行 `git fetch origin {personalBranch}:refs/remotes/origin/{personalBranch}`，确保副本能读取最新个人分支。
+6. `git merge --no-ff origin/{personalBranch}` 在应用版本副本上把远端个人分支合并进特性分支（合并方向为「特性分支 ← 个人分支」）。
+7. `git push origin {appVersionBranch}` 推送应用版本特性分支。
 
 合并结果：
 

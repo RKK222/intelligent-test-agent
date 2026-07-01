@@ -279,8 +279,7 @@ public class UserOpencodeProcessAssignmentService {
     public UserOpencodeProcessStatusResponse initialize(UserId userId, String agentId, String traceId) {
         validateAgent(agentId);
         Instant now = Instant.now();
-        Optional<UserOpencodeProcessBinding> existingBinding = repository.findUserBinding(userId, OPENCODE_AGENT_ID)
-                .filter(binding -> binding.status() == UserOpencodeProcessBindingStatus.ACTIVE);
+        Optional<UserOpencodeProcessBinding> existingBinding = repository.findUserBinding(userId, OPENCODE_AGENT_ID);
         Optional<OpencodeServerProcess> existingProcess = existingBinding.flatMap(binding -> activeProcess(binding).or(() ->
                 repository.findOpencodeServerProcessById(binding.processId())));
         if (existingProcess.isPresent()) {

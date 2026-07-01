@@ -126,6 +126,18 @@ async function refreshStatus() {
   const [publicResult, workspaceResult] = await Promise.allSettled([publicStatusPromise, workspaceStatusPromise]);
   if (publicResult.status === "fulfilled") {
     next.PUBLIC = publicResult.value;
+    if (publicResult.value.enabled !== false) {
+      try {
+        publicRepositories.value = await api.listPublicAgentRepositories();
+        const nextServer = preferredPublicServer(publicRepositories.value);
+        if (nextServer) {
+          selectedPublicLinuxServerId.value = nextServer;
+          publicConfigLinuxServerId.value = nextServer;
+        }
+      } catch (error) {
+        errorMessage.value = formatAgentConfigError(error, "加载公共配置仓库列表失败");
+      }
+    }
   } else {
     errorMessage.value = formatAgentConfigError(publicResult.reason, "加载公共 Agent 状态失败");
   }

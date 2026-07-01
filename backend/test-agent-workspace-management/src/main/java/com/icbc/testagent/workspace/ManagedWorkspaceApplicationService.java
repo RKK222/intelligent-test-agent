@@ -643,7 +643,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         Path repoRoot = personalRepoRootWithName(version, userId, branch);
         Path workspaceRoot = repoRoot.resolve(template.directoryPath()).normalize();
         CodeRepository repository = existingRepository(version.repositoryId());
-        ApplicationWorkspaceVersionReplica applicationReplica = readyReplicaOrLegacy(version, serverIdentity.linuxServerId());
+        ApplicationWorkspaceVersionReplica applicationReplica = ensureLocalReplica(version, template, userId, traceId);
         ensurePersonalWorktreeRoot(
                 Path.of(applicationReplica.repoRootPath()),
                 repoRoot,
@@ -801,11 +801,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 && sameNormalizedPath(expectedRepoPath, personal.repoRootPath())
                 && sameNormalizedPath(expectedWorkspacePath, personal.workspaceRootPath())
                 && sameNormalizedPath(expectedWorkspacePath, runtimeWorkspace.rootPath());
-        if (matches) {
+        if (matches || canReuseExistingPersonalWorkspace(personal, runtimeWorkspace, expectedBranch)) {
             return personal;
         }
         CodeRepository repository = existingRepository(version.repositoryId());
-        ApplicationWorkspaceVersionReplica applicationReplica = readyReplicaOrLegacy(version, serverIdentity.linuxServerId());
+        ApplicationWorkspaceVersionReplica applicationReplica = ensureLocalReplica(version, template, userId, traceId);
         ensurePersonalWorktreeRoot(
                 Path.of(applicationReplica.repoRootPath()),
                 expectedRepoRoot,
@@ -840,6 +840,27 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 personal.createdAt(),
                 now);
         return managedWorkspaceRepository.updatePersonalWorkspaceLocation(repaired);
+    }
+
+    private boolean canReuseExistingPersonalWorkspace(
+            PersonalWorkspace personal,
+            Workspace runtimeWorkspace,
+            String expectedBranch) {
+        if (!expectedBranch.equals(personal.branch())) {
+            return false;
+        }
+        try {
+            Path personalRepoRoot = Path.of(personal.repoRootPath()).toAbsolutePath().normalize();
+            Path runtimeRoot = Path.of(runtimeWorkspace.rootPath()).toAbsolutePath().normalize();
+            Path personalWorkspaceRoot = Path.of(personal.workspaceRootPath()).toAbsolutePath().normalize();
+            return Files.isDirectory(personalRepoRoot)
+                    && Files.isDirectory(runtimeRoot)
+                    && Files.isDirectory(personalWorkspaceRoot)
+                    && gitWorkspaceService.isGitRepository(personalRepoRoot)
+                    && expectedBranch.equals(gitWorkspaceService.currentBranch(personalRepoRoot));
+        } catch (Exception exception) {
+            return false;
+        }
     }
 
     private boolean sameNormalizedPath(String left, String right) {
@@ -1189,8 +1210,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     /**
      * 个人工作区"提交并推送"：将个人 worktree 上的变更合并回应用版本特性分支并推送。
-     * 流程: 在个人 worktree 上 stage+commit → 切到应用版本副本（特性分支）→ fetch/pull 特性分支 →
-     * 将个人分支 merge 进特性分支 → 推送特性分支 → 更新版本 targetCommitHash 和副本 commit，广播。
+     * 流程: 在个人 worktree 上 stage+commit → 推送个人分支 → 切到应用版本副本（特性分支）→ fetch/pull 特性分支 →
+     * fetch 个人分支 → 将 origin/个人分支 merge 进特性分支 → 推送特性分支 → 更新版本 targetCommitHash 和副本 commit，广播。
      * 合并冲突: 返回 CONFLICT 及冲突文件列表，不污染应用版本副本。
      */
     public ManagedWorkspaceResponses.PersonalWorkspacePublishResponse publishPersonalWorkspace(
@@ -1205,19 +1226,24 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String privateKey = privateKeyFor(repository, userId);
         Path personalRepoRoot = Path.of(personal.repoRootPath());
 
-        // 1. 在个人 worktree 上 stage 所有变更并 commit；无变更时 Git 报错是预期行为，跳过提交。
-        try {
-            gitWorkspaceService.stageAll(personalRepoRoot, privateKey);
-            gitWorkspaceService.commitStaged(personalRepoRoot, requireText(commitMessage, "提交说明不能为空", "commitMessage"), privateKey);
-        } catch (PlatformException e) {
-            if (!e.getMessage().contains("nothing to commit") && !e.getMessage().contains("nothing added")) {
-                throw e;
+        // 1. 在个人 worktree 上 stage 所有变更并 commit；若上一次发布已完成 commit 但后续推送失败，
+        // 重试时工作区会是 clean，此时直接复用当前个人分支 HEAD 继续 push/merge。
+        gitWorkspaceService.stageAll(personalRepoRoot, privateKey);
+        if (!gitWorkspaceService.statusPorcelain(personalRepoRoot).isBlank()) {
+            try {
+                gitWorkspaceService.commitStaged(personalRepoRoot, requireText(commitMessage, "提交说明不能为空", "commitMessage"), privateKey);
+            } catch (PlatformException e) {
+                if (!e.getMessage().contains("nothing to commit") && !e.getMessage().contains("nothing added")) {
+                    throw e;
+                }
             }
         }
+        gitWorkspaceService.push(personalRepoRoot, personal.branch(), false, privateKey);
 
         // 2. 在应用版本副本（checkout 在应用版本特性分支上）上合并个人分支。
         //    合并方向必须是「特性分支 ← 个人分支」，才能让特性分支拿到个人 worktree 的变更并推送到远端。
-        ApplicationWorkspaceVersionReplica applicationReplica = replicaForPersonalWorkspace(version, personal);
+        ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
+        ApplicationWorkspaceVersionReplica applicationReplica = ensureLocalReplica(version, template, userId, traceId);
         Path applicationRepoRoot = Path.of(applicationReplica.repoRootPath());
         if (!gitWorkspaceService.isWorktreeClean(applicationRepoRoot)) {
             throw new PlatformException(
@@ -1228,15 +1254,20 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String applicationBranch = version.branch();
         gitWorkspaceService.fetch(applicationRepoRoot, privateKey);
         gitWorkspaceService.pullFastForward(applicationRepoRoot, applicationBranch, privateKey);
+        gitWorkspaceService.fetchBranch(applicationRepoRoot, personal.branch(), privateKey);
         try {
-            gitWorkspaceService.mergeBranch(applicationRepoRoot, personal.branch(), privateKey);
+            gitWorkspaceService.mergeBranch(applicationRepoRoot, "origin/" + personal.branch(), privateKey);
         } catch (PlatformException mergeException) {
-            // 合并冲突：返回冲突文件列表，不污染应用版本副本。
+            // 合并冲突只在 Git 明确留下未解决文件时作为业务 CONFLICT 返回；其他 Git 失败继续向上抛出。
             List<String> conflictFiles = List.of();
             try {
                 conflictFiles = gitWorkspaceService.conflictPaths(applicationRepoRoot);
             } catch (Exception ignored) {
             }
+            if (conflictFiles.isEmpty()) {
+                throw mergeException;
+            }
+            abortMergeQuietly(applicationRepoRoot, privateKey);
             return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
                     "CONFLICT", personalWorkspaceId, version.versionId().value(), conflictFiles,
                     "合并冲突，请在个人工作区中解决冲突后重新提交并推送");
@@ -1256,6 +1287,14 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
                 "MERGED", personalWorkspaceId, version.versionId().value(), List.of(),
                 "合并成功: " + headCommit);
+    }
+
+    private void abortMergeQuietly(Path applicationRepoRoot, String privateKey) {
+        try {
+            gitWorkspaceService.abortMerge(applicationRepoRoot, privateKey);
+        } catch (Exception exception) {
+            LOGGER.warn("abort personal workspace merge failed repoRoot={}", applicationRepoRoot, exception);
+        }
     }
 
     public ManagedWorkspaceResponses.WorkspaceDiffResponse diffPersonalWorkspace(String personalWorkspaceId, UserId userId) {
@@ -1495,11 +1534,21 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         Optional<ApplicationWorkspaceVersionReplica> existing = managedWorkspaceRepository.findVersionReplica(
                 version.versionId(),
                 serverIdentity.linuxServerId());
+        Instant now = Instant.now();
         Workspace runtimeWorkspace = existing
                 .flatMap(replica -> workspaceRepository.findById(replica.runtimeWorkspaceId()))
+                .map(current -> new Workspace(
+                        current.workspaceId(),
+                        current.name(),
+                        realPath(workspaceRoot).toString(),
+                        current.status(),
+                        current.createdAt(),
+                        now,
+                        serverIdentity.linuxServerId(),
+                        traceId))
+                .map(workspaceRepository::save)
                 .orElseGet(() -> createRuntimeWorkspace(template.workspaceName() + "-" + version.version(), workspaceRoot, traceId));
         String currentCommit = syncReplicaToTargetCommit(version, repoRoot, privateKey, existing.orElse(null), traceId);
-        Instant now = Instant.now();
         ApplicationWorkspaceVersion updatedVersion = version.targetCommitHash() == null
                 ? managedWorkspaceRepository.updateVersionTargetCommit(version.versionId(), currentCommit, now)
                 : version;
