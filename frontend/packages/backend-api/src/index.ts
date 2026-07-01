@@ -169,7 +169,9 @@ export type StartRunPayload = {
   mode?: string;
 };
 
-type RequestFn = <T>(path: string, init?: RequestInit) => Promise<T>;
+export type ExtraRequestInit = RequestInit & { timeoutMs?: number };
+
+type RequestFn = <T>(path: string, init?: ExtraRequestInit) => Promise<T>;
 
 export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const baseUrl = (options.baseUrl ?? readEnv("VITE_TEST_AGENT_API_BASE_URL") ?? "http://127.0.0.1:8080").replace(
@@ -198,7 +200,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
   const traceIdFactory = options.traceIdFactory ?? defaultTraceId;
   const requestTimeoutMs = options.requestTimeoutMs ?? 30000;
 
-  async function requestFrom<T>(requestBaseUrl: string, path: string, init: RequestInit = {}): Promise<T> {
+  async function requestFrom<T>(requestBaseUrl: string, path: string, init: ExtraRequestInit = {}): Promise<T> {
     const traceId = traceIdFactory();
     const headers = new Headers(init.headers);
     headers.set("Accept", "application/json");
@@ -214,12 +216,13 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     // 所有后端请求统一设置超时，避免目录选择等界面在连接悬挂时一直停留在加载态。
     const controller = new AbortController();
     let timedOut = false;
+    const timeoutMs = init.timeoutMs ?? requestTimeoutMs;
     const timeoutId =
-      requestTimeoutMs > 0
+      timeoutMs > 0
         ? setTimeout(() => {
             timedOut = true;
             controller.abort();
-          }, requestTimeoutMs)
+          }, timeoutMs)
         : undefined;
     const abortFromCaller = () => controller.abort();
     init.signal?.addEventListener("abort", abortFromCaller, { once: true });
@@ -227,7 +230,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       controller.abort();
     }
     try {
-      const response = await fetcher(`${requestBaseUrl}${path}`, { ...init, headers, signal: controller.signal });
+      const { timeoutMs: _, ...restInit } = init;
+      const response = await fetcher(`${requestBaseUrl}${path}`, { ...restInit, headers, signal: controller.signal });
       const body = await readJson(response);
       if (!response.ok || !isSuccessResponse<T>(body)) {
         const error = new BackendApiError(response.status, normalizeFailure(body, traceId, response.status));
@@ -261,7 +265,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     }
   }
 
-  async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  async function request<T>(path: string, init: ExtraRequestInit = {}): Promise<T> {
     return requestFrom<T>(baseUrl, path, init);
   }
 
@@ -754,11 +758,15 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     startRun: (sessionIdOrPayload: string | StartRunPayload, prompt?: string) =>
       request<Run>(agentPath("/runs"), {
         method: "POST",
-        body: JSON.stringify(normalizeStartRunPayload(sessionIdOrPayload, prompt))
+        body: JSON.stringify(normalizeStartRunPayload(sessionIdOrPayload, prompt)),
+        timeoutMs: 120000
       }),
     getMyOpencodeProcess: () => request<UserOpencodeProcess>(agentPath("/processes/me")),
     initializeMyOpencodeProcess: () =>
-      request<UserOpencodeProcess>(agentPath("/processes/me/initialize"), { method: "POST" }),
+      request<UserOpencodeProcess>(agentPath("/processes/me/initialize"), {
+        method: "POST",
+        timeoutMs: 120000
+      }),
     getOpencodeRuntimeManagementOverview: (params: OpencodeRuntimeManagementOverviewParams = {}) =>
       request<OpencodeRuntimeManagementOverview>(`${opencodeRuntimeManagementBase}/overview${query({ ...params })}`),
     getOpencodeRuntimeManagementUserProcesses: (params: OpencodeRuntimeManagementUserProcessParams) =>

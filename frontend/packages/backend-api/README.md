@@ -8,7 +8,7 @@
 
 - 统一 baseUrl、traceId、鉴权头和 JSON 解析。
 - 支持 `agentId?: string` 配置，默认 `opencode`；Run、Diff 和 runtime 相关请求统一走 `/api/internal/agent/{agentId}/...`。
-- 默认 30 秒请求超时，可通过 `requestTimeoutMs` 覆盖；超时统一映射为 `BackendApiError` 的 `REQUEST_TIMEOUT`。
+- 默认 30 秒请求超时，可通过 `requestTimeoutMs` 覆盖，或通过单个请求 init 参数中的 `timeoutMs` 进行局部覆盖；超时统一映射为 `BackendApiError` 的 `REQUEST_TIMEOUT`。
 - 映射统一错误响应为 `BackendApiError`。
 - 暴露 Workspace、受控目录选择、文件、Session、Session message、Run、Diff API 方法；Session 支持 workspace 列表、全局搜索、标题/置顶更新和软删除。Workspace/Session CRUD 仍走平台 URL，不放入 agent URL。
 - 工作区文件列表、读取、写入、状态和删除统一走“route 查询 + 目标后端 ticket + 文件 WebSocket RPC”，不再调用旧 HTTP 文件接口；client 负责 requestId 匹配、超时、断线错误和切换工作区关闭旧连接。

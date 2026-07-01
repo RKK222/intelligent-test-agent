@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-01 - 提升前端启动 Run 和初始化进程请求超时限制
+
+- Why: 当前对话页面中，当智能体思考或启动过久（例如拉起新容器、建立 bindings、首次会话创建等耗时较长操作）时，前端 HTTP 会在 30 秒超时后显示超时报错（如“启动 Run 失败: 请求超时”）。但由于后端该操作已经开始并最终会异步运行成功，点开历史消息时发现智能体其实已经完成，给用户造成了不一致和误导性的体验。
+- What:
+  - 在 `backend-api` 中定义 `ExtraRequestInit` 类型（继承自 `RequestInit` 并增加 `timeoutMs?: number`），使前端每个请求可独立覆盖 30 秒的默认全局超时配置。
+  - 在 `requestFrom` 核心请求方法中解析局部 `timeoutMs`，并在传给 `fetcher` 时对 extra 属性进行解构，保障标准的 fetch 参数规范。
+  - 将启动任务 `/runs` (startRun) 与初始化专属进程 `/processes/me/initialize` (initializeMyOpencodeProcess) 的客户端请求超时提高到 120,000 毫秒（2 分钟），防止冷启动或思考延迟下频繁报错。
+  - 在 `backend-api` 的 `README.md` 中同步了这一 API 行为。
+- How: 仅涉及前端 client 请求超时配置调整与局部覆盖，无后端逻辑修改，无接口或数据库 schema 变动。
+- Result: 新增的 `timeoutMs` 局部覆盖单元测试及前端 31 个测试包共 205 个测试全部通过。
+
 ### 2026-07-01 - 物理 Git 干净时清空侧边栏 Tab 变更角标和文件树高亮
 
 - Why: 物理 Git 工作区已处理干净时（未暂存/已暂存为 0），侧边栏的 Git 变更 Tab 角标依然显示为 1，且工作区文件树（例如 .subitem.json）依然显示 +2 -1 的高亮。这是因为角标和文件树高亮绑定了智能体运行产生的会话变更（diffFiles），未与物理 Git 状态同步。
