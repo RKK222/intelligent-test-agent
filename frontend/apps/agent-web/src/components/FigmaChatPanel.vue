@@ -230,6 +230,123 @@ function taskParts(msg: ChatMessage): TaskPartItem[] {
  * - retry part
  * 这些 part 不进入主正文，在本组件内以折叠块独立渲染。
  */
+const URL_FETCH_TOOLS = new Set(['webfetch', 'fetch_url', 'read_url_content', 'browser_subagent', 'execute_url', 'read_url'])
+
+function isUrlFetchTool(toolName?: string): boolean {
+  if (!toolName) return false
+  return URL_FETCH_TOOLS.has(toolName.toLowerCase())
+}
+
+function formatToolName(toolName?: string): string {
+  if (!toolName) return 'Webfetch'
+  const name = toolName.toLowerCase()
+  if (name === 'webfetch') return 'Webfetch'
+  if (name === 'read_url_content' || name === 'read_url') return 'Webfetch'
+  return toolName
+}
+
+function getUrlFromInput(input?: Record<string, unknown>): string {
+  if (!input) return ''
+  return typeof input.url === 'string' ? input.url : typeof input.uri === 'string' ? input.uri : ''
+}
+
+function isSkillCall(part: MessagePart): boolean {
+  if (part.type !== 'tool') return false
+  const toolName = (part as any).toolName || ''
+  if (!toolName) return false
+  const lower = toolName.toLowerCase()
+  const standardTools = new Set(['bash', 'grep', 'glob', 'read', 'write', 'edit', 'apply_patch', 'task'])
+  if (standardTools.has(lower)) return false
+  if (isUrlFetchTool(lower)) return false
+  return true
+}
+
+function messageSkillCalls(msg: ChatMessage): MessagePart[] {
+  if (!Array.isArray(msg.parts)) return []
+  return msg.parts.filter(p => isSkillCall(p))
+}
+
+function getSkillDescription(skillName: string): string {
+  if (!skillName) return ''
+  const cmd = props.commands.find(c => c.name === skillName || c.commandId === skillName)
+  return cmd?.description || ''
+}
+
+function formatSkillTime(part: MessagePart): string {
+  const durationMs = (part as any).durationMs || 120000
+  const start = new Date()
+  const end = new Date(start.getTime() + durationMs)
+  const format = (d: Date) => `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+  return `${format(start)}-${format(end)}`
+}
+
+type SubtaskItem = {
+  label: string
+  detail?: string
+  status: string
+}
+
+function messageSubtasks(msg: ChatMessage): SubtaskItem[] {
+  if (!Array.isArray(msg.parts)) return []
+  const list: SubtaskItem[] = []
+  for (const part of msg.parts) {
+    if (part.type === 'subtask') {
+      list.push({
+        label: (part as any).title || (part as any).label || '子任务',
+        detail: (part as any).detail || '',
+        status: (part as any).status || 'pending',
+      })
+    } else if (part.type === 'tool' && (part as any).toolName === 'task') {
+      const input = (part as any).input || {}
+      list.push({
+        label: typeof input.title === 'string' ? input.title : typeof input.description === 'string' ? input.description : '子任务',
+        detail: typeof input.detail === 'string' ? input.detail : '',
+        status: (part as any).status || 'pending',
+      })
+    }
+  }
+  return list
+}
+
+function getFileDir(filePath: string): string {
+  if (!filePath) return ''
+  const parts = filePath.split('/')
+  parts.pop()
+  return parts.join('/')
+}
+
+function getShortenedPath(path: string): string {
+  if (!path) return ''
+  if (path.length > 50) {
+    const parts = path.split('/')
+    if (parts.length > 4) {
+      return '.../' + parts.slice(-4).join('/')
+    }
+  }
+  return path
+}
+
+function renderCodeWithLineNumbers(content: string, filePath: string): string {
+  const highlighted = highlightCode(content, filePath)
+  const lines = highlighted.split('\n')
+  return lines
+    .map((line, idx) => {
+      const lineNum = idx + 1
+      return `<div class="figma-chat-code-line"><span class="figma-chat-code-lineno">${lineNum}</span><span class="figma-chat-code-linecontent">${line || ' '}</span></div>`
+    })
+    .join('')
+}
+
+function copyErrorMessage() {
+  const lastErr = displayMessages.value.filter((m) => m._error).pop()
+  const errorText = lastErr?.content || 'Unknown connection error.'
+  navigator.clipboard.writeText(errorText).then(() => {
+    console.log('Error copied to clipboard')
+  }).catch((err) => {
+    console.error('Failed to copy: ', err)
+  })
+}
+
 function messageOtherParts(msg: ChatMessage): MessagePart[] {
   if (!Array.isArray(msg.parts)) return []
   return msg.parts.filter((p) => {
@@ -237,14 +354,12 @@ function messageOtherParts(msg: ChatMessage): MessagePart[] {
     if (p.type === 'retry') return true
     if (p.type === 'tool') {
       const toolName = (p.toolName ?? '').toLowerCase()
-      // 文件操作类工具已由现有 file summaries / readOutputs 结构化渲染
+      if (isSkillCall(p)) return false
+      if (toolName === 'task') return false
       if (FILE_READ_TOOLS.has(toolName) || FILE_WRITE_TOOLS.has(toolName) || FILE_EDIT_TOOLS.has(toolName)) {
-        // read 工具的输出如果带 XML 标记，已在 readOutputs 渲染
         if (toolName === 'read' && typeof (p as any).output === 'string' && parseReadOutput((p as any).output)) {
           return false
         }
-        // 其他文件操作也在 file summaries 中有统计，但保留输出详情以供折叠查看
-        // 这里仍然返回 true，让用户可展开查看完整输出
         return true
       }
       return true
@@ -392,6 +507,7 @@ const emit =
   defineEmits<{
     (e: 'send', prompt: string): void
     (e: 'stop'): void
+    (e: 'retry'): void
     (e: 'new-conversation'): void
     (e: 'close'): void
     (e: 'open-history'): void
@@ -2055,11 +2171,11 @@ function onCompositionEnd() {
                           toggleFileExpanded(message.id, 'write-' + op.filePath)
                         "
                       >
-                        <span
-                          >写入<span style="color: #a1a5b1; margin-left: 4px">{{
-                            getFileName(op.filePath)
-                          }}</span></span
-                        >
+                        <span>
+                          写入
+                          <span style="color: #1a1a1a; font-weight: 500; margin-left: 4px">{{ getFileName(op.filePath) }}</span>
+                          <span style="color: #8c8c8c; font-size: 11px; margin-left: 6px">{{ getFileDir(op.filePath) }}</span>
+                        </span>
                         <ChevronRight
                           v-if="
                             !isFileExpanded(message.id, 'write-' + op.filePath)
@@ -2077,17 +2193,17 @@ function onCompositionEnd() {
                         v-if="
                           isFileExpanded(message.id, 'write-' + op.filePath)
                         "
-                        class="figma-chat-file-list"
+                        class="figma-chat-code-wrapper"
                       >
+                        <div class="figma-chat-code-header">
+                          <span class="figma-chat-code-path">{{ getShortenedPath(op.filePath) }}</span>
+                        </div>
                         <div class="figma-chat-file-item">
                           <pre
                             v-if="op.content"
                             class="figma-chat-write-preview"
                             v-html="
-                              highlightCode(op.content, op.filePath).slice(
-                                0,
-                                4000
-                              ) + (op.content.length > 2000 ? '...' : '')
+                              renderCodeWithLineNumbers(op.content, op.filePath)
                             "
                           ></pre>
                         </div>
@@ -2106,11 +2222,11 @@ function onCompositionEnd() {
                           toggleFileExpanded(message.id, 'edit-' + op.filePath)
                         "
                       >
-                        <span
-                          >编写<span style="color: #a1a5b1; margin-left: 4px">{{
-                            getFileName(op.filePath)
-                          }}</span></span
-                        >
+                        <span>
+                          编写
+                          <span style="color: #1a1a1a; font-weight: 500; margin-left: 4px">{{ getFileName(op.filePath) }}</span>
+                          <span style="color: #8c8c8c; font-size: 11px; margin-left: 6px">{{ getFileDir(op.filePath) }}</span>
+                        </span>
                         <ChevronRight
                           v-if="
                             !isFileExpanded(message.id, 'edit-' + op.filePath)
@@ -2126,23 +2242,72 @@ function onCompositionEnd() {
                       </div>
                       <div
                         v-if="isFileExpanded(message.id, 'edit-' + op.filePath)"
-                        class="figma-chat-file-list"
+                        class="figma-chat-code-wrapper"
                       >
+                        <div class="figma-chat-code-header">
+                          <span class="figma-chat-code-path">{{ getShortenedPath(op.filePath) }}</span>
+                        </div>
                         <div class="figma-chat-file-item">
                           <pre
                             v-if="op.content"
                             class="figma-chat-write-preview"
                             v-html="
-                              highlightCode(op.content, op.filePath).slice(
-                                0,
-                                4000
-                              ) + (op.content.length > 2000 ? '...' : '')
+                              renderCodeWithLineNumbers(op.content, op.filePath)
                             "
                           ></pre>
                         </div>
                       </div>
                     </div>
                   </template>
+
+                  <!-- 技能调用：每个技能独立展开 -->
+                  <div
+                    v-if="messageSkillCalls(message).length > 0"
+                    class="figma-chat-file-summary"
+                  >
+                    <div
+                      class="figma-chat-file-summary-row"
+                      @click="toggleFileExpanded(message.id, 'skills')"
+                    >
+                      <span>
+                        已调用
+                        <span style="color: #1a1a1a; font-weight: 500; margin-left: 4px">
+                          {{ messageSkillCalls(message).length }} 次技能
+                        </span>
+                      </span>
+                      <ChevronRight
+                        v-if="!isFileExpanded(message.id, 'skills')"
+                        class="figma-chat-read-chevron"
+                        :size="14"
+                      />
+                      <ChevronDown
+                        v-else
+                        class="figma-chat-read-chevron"
+                        :size="14"
+                      />
+                    </div>
+                    <div
+                      v-if="isFileExpanded(message.id, 'skills')"
+                      class="figma-chat-skill-call-list"
+                    >
+                      <div
+                        v-for="(part, idx) in messageSkillCalls(message)"
+                        :key="idx"
+                        class="figma-chat-skill-call-card"
+                      >
+                        <div class="figma-chat-skill-call-header">
+                          <BookOpen :size="12" class="figma-chat-skill-call-icon" />
+                          <span class="figma-chat-skill-call-title">Launched skill {{ (part as any).toolName }}</span>
+                        </div>
+                        <div class="figma-chat-skill-call-body">
+                          {{ getSkillDescription((part as any).toolName) || (part as any).output || 'Running skill...' }}
+                        </div>
+                        <div class="figma-chat-skill-call-footer">
+                          技能启动完成 {{ formatSkillTime(part) }}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </template>
 
                 <!-- 读取的文件/目录展示 -->
@@ -2182,13 +2347,18 @@ function onCompositionEnd() {
                       class="figma-chat-file-list"
                     >
                       <!-- 文件内容 -->
-                      <div v-if="ro.kind === 'file'" class="figma-chat-file-item">
-                        <pre
-                          class="figma-chat-write-preview"
-                          v-html="
-                            highlightCode(ro.content, ro.path).slice(0, 4000)
-                          "
-                        ></pre>
+                      <div v-if="ro.kind === 'file'" class="figma-chat-code-wrapper">
+                        <div class="figma-chat-code-header">
+                          <span class="figma-chat-code-path">{{ getShortenedPath(ro.path) }}</span>
+                        </div>
+                        <div class="figma-chat-file-item">
+                          <pre
+                            class="figma-chat-write-preview"
+                            v-html="
+                              renderCodeWithLineNumbers(ro.content, ro.path)
+                            "
+                          ></pre>
+                        </div>
                       </div>
                       <!-- 目录列表 -->
                       <div v-else class="figma-chat-dir-list">
@@ -2206,9 +2376,26 @@ function onCompositionEnd() {
 
                 <!-- 结构化 part 块：非文件操作的 tool/reasoning/retry 以折叠块独立渲染，不进入正文 -->
                 <template v-for="part in messageOtherParts(message)" :key="part.partId || `${message.id}-${part.type}`">
+                  <!-- Webfetch tool call links -->
+                  <div
+                    v-if="part.type === 'tool' && isUrlFetchTool((part as any).toolName)"
+                    class="figma-chat-url-fetch-row"
+                  >
+                    <span class="figma-chat-url-fetch-title">{{ formatToolName((part as any).toolName) }}</span>
+                    <a
+                      :href="getUrlFromInput((part as any).input)"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="figma-chat-url-fetch-link"
+                    >
+                      {{ getUrlFromInput((part as any).input) }}
+                      <ArrowUpRight :size="12" class="figma-chat-url-fetch-icon" />
+                    </a>
+                  </div>
+
                   <!-- reasoning 折叠块（非运行中，运行中由 thinkingLines 实时展示） -->
                   <details
-                    v-if="part.type === 'reasoning' && (part as any).text"
+                    v-else-if="part.type === 'reasoning' && (part as any).text"
                     :open="false"
                     class="figma-chat-process-detail"
                   >
@@ -2232,7 +2419,7 @@ function onCompositionEnd() {
 
                   <!-- tool 折叠块（bash/grep/glob 等，含输入/输出/错误） -->
                   <details
-                    v-else-if="part.type === 'tool'"
+                    v-else-if="part.type === 'tool' && !isUrlFetchTool((part as any).toolName)"
                     :open="partIsRunning(part)"
                     :class="['figma-chat-process-detail', toolIsFailed(part) && 'figma-chat-process-detail--error']"
                   >
@@ -2312,6 +2499,41 @@ function onCompositionEnd() {
                   }}</span>
                 </div>
                 <MarkdownView v-else-if="message.content.trim()" :source="formatThinking(message.content)" />
+
+                <!-- Inline Subtasks List -->
+                <div
+                  v-if="messageSubtasks(message).length > 0"
+                  class="figma-chat-task-panel inline-task-panel"
+                >
+                  <div class="figma-chat-task-summary">
+                    已完成
+                    {{ messageSubtasks(message).filter((t) => t.status === 'completed' || t.status === 'success').length }}
+                    个任务 （共 {{ messageSubtasks(message).length }} 个）
+                  </div>
+                  <div
+                    v-for="(tp, idx) in messageSubtasks(message)"
+                    :key="idx"
+                    :class="['figma-chat-task-row', `figma-chat-task-row--${tp.status}`]"
+                  >
+                    <CheckCircle
+                      v-if="tp.status === 'completed' || tp.status === 'success'"
+                      :size="12"
+                      class="figma-chat-task-icon figma-chat-task-icon--completed"
+                    />
+                    <Loader2
+                      v-else-if="tp.status === 'running' || tp.status === 'in_progress'"
+                      :size="12"
+                      class="figma-chat-task-icon figma-chat-task-icon--running figma-chat-spin"
+                    />
+                    <Circle
+                      v-else
+                      :size="12"
+                      class="figma-chat-task-icon figma-chat-task-icon--pending"
+                    />
+                    <span class="figma-chat-task-label">{{ tp.label }}</span>
+                    <span v-if="tp.detail" class="figma-chat-task-detail">{{ tp.detail }}</span>
+                  </div>
+                </div>
                 <div
                   v-if="messageFiles(message).length > 0"
                   class="figma-chat-document-list"
@@ -2376,13 +2598,26 @@ function onCompositionEnd() {
         <span>已手动终止</span>
       </div>
 
+      <!-- 重试卡片 -->
+      <div
+        v-if="wasFailed && !running && displayMessages.length > 0"
+        class="figma-chat-retry-card"
+      >
+        <div class="figma-chat-retry-card-header">
+          <AlertTriangle :size="14" class="figma-chat-retry-card-icon" />
+          <span class="figma-chat-retry-card-text">您的请求断开，请重试！ (974)</span>
+          <span class="figma-chat-retry-card-copy" @click="copyErrorMessage">复制错误信息</span>
+        </div>
+        <button class="figma-chat-retry-card-btn" @click="emit('retry')">重试</button>
+      </div>
+
       <!-- 对话失败提示 -->
       <div
         v-if="wasFailed && !running && displayMessages.length > 0"
         class="figma-chat-failed"
       >
-        <AlertTriangle :size="14" class="figma-chat-failed-icon" />
-        <span>任务执行失败</span>
+        <MinusCircle :size="14" class="figma-chat-failed-icon" />
+        <span>异常中断</span>
       </div>
 
       <!-- 对话完成提示 -->
@@ -4038,16 +4273,16 @@ function onCompositionEnd() {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 12px 4px;
+  padding-left: 30px;
   font-size: 12px;
-  color: #d1423a;
+  color: #8c8c8c;
   font-weight: 500;
   align-self: flex-start;
 }
 
 .figma-chat-failed-icon {
   flex-shrink: 0;
-  color: #d1423a;
+  color: #8c8c8c;
 }
 
 /* ---- Task Panel (above input, during running) ---- */
@@ -4396,17 +4631,20 @@ function onCompositionEnd() {
 
 /* ---- 技能面板 ---- */
 .figma-chat-skill-panel {
-  padding: 2px 10px 6px;
-  border: 1px solid var(--ta-chat-border, #d7d7d7);
+  padding: 12px 16px;
+  border: 1px solid var(--ta-chat-border, #e0e0e0);
   border-radius: 8px;
-  margin: 0 10px 4px;
+  background: #ffffff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  margin: 0 10px 10px;
+  flex-shrink: 0;
 }
 
 .figma-chat-skill-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  max-height: 220px;
+  gap: 4px;
+  max-height: 200px;
   overflow-y: auto;
 }
 
@@ -4414,22 +4652,26 @@ function onCompositionEnd() {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 4px;
+  padding: 8px 12px;
   cursor: pointer;
   border-radius: 6px;
-  transition: background 0.12s;
+  background: #ffffff;
+  transition: background 0.12s ease;
 }
 
 .figma-chat-skill-row:hover {
-  background: #f0f1f4;
+  background: #f5f5f5;
 }
 
 .figma-chat-skill-icon {
-  flex-shrink: 0;
   color: #3366ff;
+  flex-shrink: 0;
 }
 
 .figma-chat-skill-info {
+  display: flex;
+  align-items: center;
+  flex: 1;
   min-width: 0;
 }
 
@@ -4437,19 +4679,23 @@ function onCompositionEnd() {
   font-size: 13px;
   font-weight: 600;
   color: #1a1a1a;
-  line-height: 18px;
+  flex-shrink: 0;
 }
 
 .figma-chat-skill-desc {
-  font-size: 11px;
-  color: #999;
-  line-height: 15px;
+  font-size: 12px;
+  color: #8c8c8c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  margin-left: 8px;
 }
 
 .figma-chat-skill-empty {
-  padding: 8px 4px;
+  padding: 12px 4px;
   font-size: 12px;
-  color: #999;
+  color: #8c8c8c;
   text-align: center;
 }
 
@@ -5804,5 +6050,237 @@ details[open] .figma-chat-process-chevron {
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 200px;
+}
+
+/* ---- Code Preview Box with path header and line numbers ---- */
+.figma-chat-code-wrapper {
+  margin-top: 8px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fdfdfd;
+  overflow: hidden;
+}
+
+.figma-chat-code-header {
+  padding: 6px 12px;
+  background: #f5f5f5;
+  border-bottom: 1px solid #e0e0e0;
+  display: flex;
+  align-items: center;
+}
+
+.figma-chat-code-path {
+  font-size: 11px;
+  font-family: var(--ta-font-mono, monospace);
+  color: #8c8c8c;
+  word-break: break-all;
+}
+
+.figma-chat-code-body {
+  margin: 0;
+  padding: 8px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-x: auto;
+  background: #fafafa;
+}
+
+.figma-chat-code-line {
+  display: flex;
+  padding: 0 12px;
+}
+
+.figma-chat-code-line:hover {
+  background: #f0f0f0;
+}
+
+.figma-chat-code-lineno {
+  width: 28px;
+  color: #bfbfbf;
+  text-align: right;
+  margin-right: 12px;
+  user-select: none;
+  font-family: var(--ta-font-mono, monospace);
+  font-size: 11px;
+}
+
+.figma-chat-code-linecontent {
+  flex: 1;
+  white-space: pre;
+  font-family: var(--ta-font-mono, monospace);
+  color: #262626;
+}
+
+/* ---- Webfetch Link Rows ---- */
+.figma-chat-url-fetch-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 30px;
+  font-size: 13px;
+  color: #262626;
+}
+
+.figma-chat-url-fetch-title {
+  font-weight: 700;
+  color: #1a1a1a;
+  flex-shrink: 0;
+}
+
+.figma-chat-url-fetch-link {
+  color: #3366ff;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.figma-chat-url-fetch-link:hover {
+  text-decoration: underline;
+}
+
+.figma-chat-url-fetch-icon {
+  color: #3366ff;
+}
+
+/* ---- Skill Execution Card ---- */
+.figma-chat-skill-call-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.figma-chat-skill-call-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.figma-chat-skill-call-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: #1e293b;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.figma-chat-skill-call-icon {
+  color: #3b82f6;
+}
+
+.figma-chat-skill-call-body {
+  font-size: 12px;
+  color: #64748b;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.figma-chat-skill-call-footer {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 8px;
+  text-align: left;
+}
+
+/* ---- Inline Task Panel in message content ---- */
+.inline-task-panel {
+  margin: 8px 0 0 0;
+  max-height: none;
+  background: #f9f9f9;
+  border: 1px solid #e0e0e0;
+  padding: 10px 12px;
+}
+
+.inline-task-panel .figma-chat-task-summary {
+  background: #f9f9f9;
+  font-weight: 600;
+  color: #595959;
+  margin-bottom: 6px;
+  position: static;
+  padding: 0;
+}
+
+.inline-task-panel .figma-chat-task-row {
+  padding: 4px 0;
+}
+
+.inline-task-panel .figma-chat-task-row--running .figma-chat-task-label {
+  font-weight: 600;
+  color: #1a1a1a;
+}
+
+.inline-task-panel .figma-chat-task-row--completed .figma-chat-task-label {
+  color: #2c3e50;
+}
+
+.inline-task-panel .figma-chat-task-row--pending .figma-chat-task-label {
+  color: #8c8c8c;
+}
+
+/* ---- Retry Card ---- */
+.figma-chat-retry-card {
+  margin: 10px 10px 10px 30px;
+  background: #fff1f0;
+  border: 1px solid #ffa39e;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-self: flex-start;
+}
+
+.figma-chat-retry-card-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #d46b08;
+}
+
+.figma-chat-retry-card-icon {
+  color: #ff4d4f;
+  flex-shrink: 0;
+}
+
+.figma-chat-retry-card-text {
+  color: #ff4d4f;
+  font-weight: 500;
+}
+
+.figma-chat-retry-card-copy {
+  color: #1890ff;
+  cursor: pointer;
+  font-size: 12px;
+  margin-left: 8px;
+  user-select: none;
+}
+
+.figma-chat-retry-card-copy:hover {
+  text-decoration: underline;
+}
+
+.figma-chat-retry-card-btn {
+  align-self: flex-start;
+  height: 28px;
+  padding: 0 16px;
+  background: #ffffff;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  color: #595959;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.figma-chat-retry-card-btn:hover {
+  background: #f5f5f5;
+  border-color: #d9d9d9;
+  color: #262626;
 }
 </style>

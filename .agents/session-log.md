@@ -2557,21 +2557,22 @@ bash /tmp/test-api-after-restart.sh
 - How: 纯前端 Vue 组件修改，更新 `FigmaChatPanel.vue` 的 script/template/style，新增 `FigmaChatPanel.test.ts` 测试用例。
 - Result: 28 个测试全部通过（+7 个新增用例）；typecheck 无新增错误；前端 201 个全部回归测试通过。`AgentWorkbench.vue` 的预存类型错误不在此次修复范围。
 
-### 2026-07-01 - 按照设计稿扣样式：优化选择题与补充信息面板样式及增加运行思考计时器
+### 2026-07-01 - 按照设计稿扣样式：优化选择题与补充信息面板样式及增加运行思考计时器与补充区块样式
 
-- Why: 聊天面板底部的多轮选择题（Step 1）和补充信息输入面板（Step 2）样式与设计稿存在偏差，需要优化样式以匹配设计稿。同时，智能体运行时的思考中状态需要展示计时器（如 "10:36s"）和加载动画。此外，文件树 typecheck 存在 event 参数类型的遗留 TypeScript 编译期类型报错。
+- Why: 聊天面板底部多轮选择题、补充信息输入面板样式与设计稿存在偏差，智能体运行时的思考中状态需要展示计时器（如 "10:36s"）和加载动画。同时，补充四个设计稿的样式：写入/编写文件预览卡片（显示所在目录与带行号的代码编辑器）、Webfetch 链接渲染（以单行链接行渲染带 ↗ 图标）、技能调用（已调用 N 次技能折叠卡与卡片式明细）、子任务面板（已完成 N 个任务的内联时间轴卡片）、重试卡片（粉色卡片，带复制错误按钮及重试按钮，状态显示为 grey 状态的异常中断）。
 - What:
   1. `FigmaChatPanel.vue`：
-     - 新增运行思考计时器：在智能体开始运行时（watch running 为 true）启动计时器并在页面上显示 `思考中... 10:36s`，同时配以旋转加载图标；组件销毁或运行停止时停止计时器并清理定时任务。
-     - 优化多轮选择题（Step 1）和补充信息（Step 2）面板：
-       * 引入 pagination 结构在 header 显示 `1/2 个问题` 或 `2/2 个问题` 并且可以通过点击页码切换步骤。
-       * 列表选项改造为 distinct 卡片形式，添加 1px border 与 6px border-radius，在选中项右侧显示回车符号 `⏎`。
-       * Step 1 "other" 选项细化展示，静态标签 "其他" 配以 input 输入框以及右侧 `0/500` 字数限制计数器。
-       * Step 2 textarea 背景设为白色并添加 `0/1000` 绝对定位计数器。
-       * 按钮样式调整：取消与上一步按钮变为白底 outline 按钮，确认按钮改文案为 "确定" 且为实色黑底。
+     - 新增运行思考计时器：在智能体开始运行时启动计时器并在页面上显示 `思考中... 10:36s`，同时配以旋转加载图标；
+     - 优化多轮选择题（Step 1）和补充信息（Step 2）面板：包括 pagination、卡片选项、字数限制指示、按钮样式；
+     - 优化文件预览卡片 (FilePart)：写入和编辑文件预览上方增加文件所在目录、在头部展示 `.../a/Desktop/...` 的精简绝对路径、重构代码块为显示 line numbers 行号的高级编辑器容器；
+     - Webfetch 链接渲染 (FilePart)：工具名为 url 抓取类工具时，过滤 details 折叠块，在消息内单独以单行 Webfetch 链接展示，右侧配以 ArrowUpRight `↗` 链接图标；
+     - 技能调用 (ToolPart)：将技能调用工具从 standard 列表中过滤，在消息中归并为 `已调用 N 次技能` 折叠面板，展开后显示Launched skill卡片、技能描述和启动时间，且优化 autocomplete 技能面板的阴影与卡片悬浮样式；
+     - 子任务进度时间轴 (SubtaskPart)：从消息 parts 中提取 subtask 及 task 类型任务，在消息正文底部以内联卡片形式展示已完成/运行中/等待的任务时间轴进度，配合旋转和打勾图标；
+     - 重试卡片与异常中断 (RetryBlock)：当运行异常时，在消息底部渲染粉红色背景的 `您的请求断开，请重试！` 卡片，包含复制错误信息操作以及重试按钮（向父组件 emit `retry` 动作），同时将失败 status 标记图标改为 MinusCircle 并改文案为 grey 灰色的 “异常中断”；
+     - 在 `defineEmits` 中补齐 `retry` 声明。
   2. `FigmaFileExplorer.vue`：
-     - 修正 `"changes-refreshed"` 的 Event type 定义，添加可选属性 `reloadOpenFiles?: boolean`，从而消除 `AgentWorkbench.vue` 里的 `reloadOpenFiles does not exist` 的 TypeScript 编译期报错。
+     - 修正 `"changes-refreshed"` 的 Event type 定义，添加可选属性 `reloadOpenFiles?: boolean`，消除了 TypeScript 编译期报错。
 - How: 纯前端样式与组件微调，涉及 `FigmaChatPanel.vue` 和 `FigmaFileExplorer.vue`。
-- Result: `corepack pnpm typecheck` 通过；前端 201 个 Vitest 回归测试全部通过。
+- Result: `corepack pnpm typecheck` 成功；前端 201 个 Vitest 回归测试全部通过。
 
 
