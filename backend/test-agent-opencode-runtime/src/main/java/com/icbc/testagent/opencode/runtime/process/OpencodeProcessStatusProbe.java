@@ -25,8 +25,14 @@ public record OpencodeProcessStatusProbe(
     public OpencodeProcessStatusProbe {
         Objects.requireNonNull(status, "status must not be null");
         process = process == null ? Optional.empty() : process;
-        managerStatus = blankToDefault(managerStatus, status == OpencodeProcessProbeStatus.RUNNING ? "RUNNING" : "NOT_RUNNING");
-        healthStatus = blankToDefault(healthStatus, status == OpencodeProcessProbeStatus.RUNNING ? "HEALTHY" : managerStatus);
+        // STALE 状态使用特殊默认值，表示"状态暂无法确认"
+        if (status == OpencodeProcessProbeStatus.STALE) {
+            managerStatus = blankToDefault(managerStatus, "STALE");
+            healthStatus = blankToDefault(healthStatus, "STALE");
+        } else {
+            managerStatus = blankToDefault(managerStatus, status == OpencodeProcessProbeStatus.RUNNING ? "RUNNING" : "NOT_RUNNING");
+            healthStatus = blankToDefault(healthStatus, status == OpencodeProcessProbeStatus.RUNNING ? "HEALTHY" : managerStatus);
+        }
         message = blankToDefault(message, "");
         Objects.requireNonNull(checkedAt, "checkedAt must not be null");
     }

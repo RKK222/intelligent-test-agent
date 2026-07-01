@@ -2433,3 +2433,36 @@ bash /tmp/test-api-after-restart.sh
   - 修改 `WorkbenchFooter.test.ts`：更新单元测试中的 prop 与断言结构（在测试服务器切换时使用默认 `showSave: false`，并在 worktree 测试中断言 `title` 属性而不是 visible text）。
 - How: 纯前端代码与测试更新，重构 `WorkbenchFooter` 的条件渲染结构和样式定义，通过 prop 传参打通侧栏组件与 worktree 数据绑定。
 - Result: 所有 31 个测试文件（共 193 个用例）全部通过，`pnpm build` 在本地成功生成生产包，UI 结构完全符合用户诉求。
+
+### 2026-07-01 - Opencode 心跳检查与 Skill 召唤问题修复（第一阶段：止血）
+
+- Why: Opencode 心跳检查混乱，会出现"一会红一会绿、绿灯但页面上方报错不可用"的情况；公共级 Skill 无法在对话页召唤，FigmaChatPanel 硬编码了不存在的技能列表且使用 `__SKILL__` 标记而非真实 Command 调用。
+- What:
+  1. health.go：去掉 `/doc` readiness 回退，只使用 `/global/health` 作为 readiness 端点，避免"绿灯但 API 不可用"
+  2. OpencodeProcessStatusQueryService：瞬时异常不再写 `FAILED`，返回 `STALE` 状态让调用方使用缓存数据
+  3. OpencodeProcessProbeStatus：新增 `STALE` 枚举值表示状态暂时无法确认
+  4. WorkspaceFileSocketTicketService：文件路由彻底解除健康检查依赖，不再调用强状态查询兜底
+  5. AgentWorkbench.vue：拆分 `runtimeWorkspaceReady` 为 `authReady`、`fileRouteReady`、`opencodeCatalogReady`、`runtimeReady`、`runReady`，模型/Provider 登录后立即加载
+  6. FigmaChatPanel.vue：删除硬编码技能列表，新增 `commands` prop，使用真实的 `source=skill` Command，选择后插入 `/skill-name ` 格式
+- How:
+  - Go 测试 `TestCheckerFallsBackToDocEndpoint` 改为验证不再回退行为
+  - 前端类型检查通过
+- Result: Go health 测试通过，前端类型检查通过。后端 Java 测试因 Java 版本不匹配（需 Java 21，当前 Java 17）未能运行，需环境配置后验证。
+
+
+### 2026-07-01 - Opencode 心跳检查与 Skill 召唤问题修复（补充修复）
+
+- Why: 审查发现第一阶段修改存在多个问题：Java 编译错误（Unicode 弯引号）、红绿闪烁根因未完全解决、绿灯和顶部不可用提示仍可能同时出现、新会话无法召唤 Skill、Agent 与 Skill 权限未闭环。
+- What:
+  1. WorkspaceFileSocketTicketService.java：修复 Unicode 弯引号导致的编译错误
+  2. OpencodeProcessStatusQueryService.java：普通 HTTP 不健康不再写入 UNHEALTHY，返回 STALE 不持久化，只有进程明确死亡才写入 STOPPED
+  3. UserOpencodeProcessAssignmentService.java：STALE 状态保留上次成功状态，数据库中是 RUNNING 时返回 READY 带"状态暂时无法确认"消息
+  4. AgentWorkbench.vue：新增 fileTreeError 状态，文件树错误在面板内显示，不覆盖全局反馈；新会话执行命令时先创建 session 再执行
+  5. FigmaFileExplorer.vue：新增 fileTreeError prop 和错误显示样式
+  6. FigmaChatPanel.vue：添加 TODO 注释说明需要后端返回 Agent permission 信息才能按 permission.skill 过滤
+- How:
+  - 前端类型检查通过
+  - 前端测试 193 个用例全部通过
+  - Go health 测试通过
+- Result: 第一阶段"止血"修改完成。P1-5（Agent 与 Skill 权限）需要第二阶段配合后端改动。
+

@@ -187,7 +187,21 @@ public class UserOpencodeProcessAssignmentService {
             return ready(refreshed, "opencode 进程可用", now);
         }
         OpencodeServerProcess refreshed = probe.process().orElse(current);
+        // STALE 状态表示瞬时故障，保留上次成功状态，展示"状态暂时无法确认"
+        // 只有当数据库中进程状态不是 RUNNING 时才要求重新初始化
+        if (probe.status() == OpencodeProcessProbeStatus.STALE) {
+            if (current.status() == OpencodeServerProcessStatus.RUNNING) {
+                // 上次确认可用，保留绿灯，消息提示暂无法确认
+                return ready(refreshed, "状态暂时无法确认：" + probe.message(), now);
+            }
+            // 上次状态不是 RUNNING，返回不可用但不要求重新初始化
+            return unavailable("opencode 进程健康状态暂无法确认：" + probe.message(), refreshed, now);
+        }
         if (probe.errorCode() != null) {
+            // 有错误码但非 STALE，可能是明确的失败，根据上次状态决定
+            if (current.status() == OpencodeServerProcessStatus.RUNNING) {
+                return ready(refreshed, "状态暂时无法确认：" + probe.message(), now);
+            }
             return unavailable("opencode 进程健康状态暂无法确认：" + probe.message(), refreshed, now);
         }
         return canRebuildOn(binding.get().linuxServerId())

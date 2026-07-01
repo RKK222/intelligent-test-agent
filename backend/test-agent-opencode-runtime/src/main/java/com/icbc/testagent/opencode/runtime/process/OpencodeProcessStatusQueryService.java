@@ -86,7 +86,8 @@ public class OpencodeProcessStatusQueryService {
                     process.baseUrl(),
                     traceId));
             if (health == null) {
-                return failedProbe(process, checkedAt, "opencode 健康检测未返回结果", ErrorCode.OPENCODE_BAD_GATEWAY, traceId);
+                // Manager 返回 null 表示网关异常，不持久化，返回 STALE
+                return staleProbe(process, checkedAt, "opencode 健康检测未返回结果", ErrorCode.OPENCODE_BAD_GATEWAY);
             }
             if (health.healthy()) {
                 OpencodeServerProcess running = saveSnapshot(
@@ -107,6 +108,7 @@ public class OpencodeProcessStatusQueryService {
                         false,
                         null);
             }
+            // 只有进程明确死亡或 Manager 明确返回 not managed/not running 才立即写入 STOPPED
             if (isNotRunningHealthMessage(health.message())) {
                 OpencodeServerProcess stopped = saveSnapshot(
                         process,
@@ -125,54 +127,38 @@ public class OpencodeProcessStatusQueryService {
                         true,
                         null);
             }
-            OpencodeServerProcess unhealthy = saveSnapshot(
-                    process,
-                    OpencodeServerProcessStatus.UNHEALTHY,
-                    process.pid(),
-                    health.message(),
-                    checkedAt,
-                    traceId);
-            return new OpencodeProcessStatusProbe(
-                    OpencodeProcessProbeStatus.HEALTH_CHECK_FAILED,
-                    Optional.of(unhealthy),
-                    "UNHEALTHY",
-                    "UNHEALTHY",
-                    health.message(),
-                    checkedAt,
-                    true,
-                    null);
+            // 普通 HTTP 不健康：不持久化数据库状态，返回 STALE 让调用方使用上次成功数据
+            // 后台维护任务会负责集中刷新和连续失败阈值判定
+            return staleProbe(process, checkedAt, health.message(), ErrorCode.OPENCODE_UNAVAILABLE);
         } catch (RuntimeException exception) {
+            // 瞬时异常（网络超时、连接拒绝等）不持久化，返回 STALE 状态
             ErrorCode errorCode = exception instanceof PlatformException platformException
                     ? platformException.errorCode()
                     : ErrorCode.OPENCODE_BAD_GATEWAY;
             String message = exception.getMessage() == null || exception.getMessage().isBlank()
                     ? "opencode 健康检测异常"
                     : exception.getMessage();
-            return failedProbe(process, checkedAt, message, errorCode, traceId);
+            return staleProbe(process, checkedAt, message, errorCode);
         }
     }
 
-    private OpencodeProcessStatusProbe failedProbe(
+    /**
+     * 瞬时异常时返回 STALE 状态，不修改数据库中的进程状态。
+     * 调用方可以继续使用上次成功的数据，展示"状态暂时无法确认"而非立即切红。
+     */
+    private OpencodeProcessStatusProbe staleProbe(
             OpencodeServerProcess process,
             Instant checkedAt,
             String message,
-            ErrorCode errorCode,
-            String traceId) {
-        OpencodeServerProcess failed = saveSnapshot(
-                process,
-                OpencodeServerProcessStatus.FAILED,
-                process.pid(),
-                message,
-                checkedAt,
-                traceId);
+            ErrorCode errorCode) {
         return new OpencodeProcessStatusProbe(
-                OpencodeProcessProbeStatus.HEALTH_CHECK_FAILED,
-                Optional.of(failed),
-                "CHECK_FAILED",
-                "CHECK_FAILED",
+                OpencodeProcessProbeStatus.STALE,
+                Optional.of(process),
+                "STALE",
+                "STALE",
                 message,
                 checkedAt,
-                true,
+                false,
                 errorCode);
     }
 

@@ -100,6 +100,8 @@ const selectedWorkspaceId = ref<string | undefined>(undefined);
 const selectedWorkspaceSnapshot = shallowRef<Workspace | undefined>(undefined);
 const entriesByDirectory = ref<Record<string, FileTreeEntry[]>>({});
 const expandedDirectories = ref<Set<string>>(new Set());
+// 文件树面板内错误状态，不覆盖全局顶部反馈
+const fileTreeError = ref<string | null>(null);
 // 多个目录可能同时在加载（用户连续点开多个折叠项，或 expandPathToFile 一次性
 // 展开多层）。使用 Set<string> 而非单值 ref，避免后到的加载把前者的 loading 状态覆盖，
 // 导致"点击没反应"——toggleDirectory 的二次点击守卫会因 loading 状态丢失而误判。
@@ -435,55 +437,71 @@ const selectedWorkspaceFileRouteReady = computed(() => {
   const workspaceId = selectedWorkspaceIdRef.value;
   return Boolean(workspaceId && workspaceFileRouteReadyById.value[workspaceId]);
 });
-const runtimeWorkspaceReady = computed(() => opencodeProcessReady.value && selectedWorkspaceFileRouteReady.value);
 
-const agentsQuery = useQuery({
-  queryKey: ["runtime", "agents", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
-  queryFn: () => api.listAgents(selectedWorkspaceIdRef.value!),
-  retry: false
-});
+// 拆分就绪条件：不同能力依赖不同条件
+// 1. 模型和 Provider：登录后立即加载，不依赖 workspace 和 opencode
+const authReady = computed(() => authStore.isAuthenticated());
+// 2. 文件路由：只需要 workspace 存在，不依赖 opencode 状态
+const fileRouteReady = computed(() => Boolean(selectedWorkspaceIdRef.value));
+// 3. Runtime 目录（Agent、Command）：需要 opencode READY + workspace
+const opencodeCatalogReady = computed(() => opencodeProcessReady.value && Boolean(selectedWorkspaceIdRef.value));
+// 4. LSP、MCP、VCS：需要 opencode READY + workspace
+const runtimeReady = computed(() => opencodeProcessReady.value && selectedWorkspaceFileRouteReady.value);
+// 5. Run 启动：需要 opencode READY + workspace 文件路由成功
+const runReady = computed(() => opencodeProcessReady.value && selectedWorkspaceFileRouteReady.value);
+
+// 模型和 Provider 登录后立即加载
 const modelsQuery = useQuery({
-  queryKey: ["runtime", "models", selectedWorkspaceIdRef],
-  enabled: runtimeWorkspaceReady,
+  queryKey: ["runtime", "models"],
+  enabled: authReady,
   queryFn: () => api.listModels(),
   retry: false
 });
 const providersQuery = useQuery({
-  queryKey: ["runtime", "providers", selectedWorkspaceIdRef],
-  enabled: runtimeWorkspaceReady,
+  queryKey: ["runtime", "providers"],
+  enabled: authReady,
   queryFn: () => api.listProviders(),
+  retry: false
+});
+
+// Agent、Command 需要 opencode READY + workspace
+const agentsQuery = useQuery({
+  queryKey: ["runtime", "agents", selectedWorkspaceIdRef],
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
+  queryFn: () => api.listAgents(selectedWorkspaceIdRef.value!),
   retry: false
 });
 const commandsQuery = useQuery({
   queryKey: ["runtime", "commands", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
   queryFn: () => api.listCommands(selectedWorkspaceIdRef.value!),
   retry: false
 });
+
+// LSP、MCP、VCS 需要 opencode READY + workspace 文件路由成功
 const lspStatusQuery = useQuery({
   queryKey: ["runtime", "lsp", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeReady.value,
   queryFn: () => api.getLspStatus(selectedWorkspaceIdRef.value!),
   retry: false,
   refetchInterval: 30000
 });
 const mcpStatusQuery = useQuery({
   queryKey: ["runtime", "mcp", "status", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeReady.value,
   queryFn: () => api.getMcpStatus(selectedWorkspaceIdRef.value!),
   retry: false,
   refetchInterval: 30000
 });
 const mcpResourcesQuery = useQuery({
   queryKey: ["runtime", "mcp", "resources", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeReady.value,
   queryFn: () => api.getMcpResources(selectedWorkspaceIdRef.value!),
   retry: false
 });
 const mcpToolsQuery = useQuery({
   queryKey: ["runtime", "mcp", "tools", selectedWorkspaceIdRef, selectedProvider, selectedModel],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeReady.value,
   queryFn: () => {
     const model = modelIdOnly(selectedModel.value);
     return api.getMcpTools(selectedWorkspaceIdRef.value!, selectedProvider.value || undefined, model || undefined);
@@ -492,7 +510,7 @@ const mcpToolsQuery = useQuery({
 });
 const vcsStatusQuery = useQuery({
   queryKey: ["runtime", "vcs", "status", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeWorkspaceReady.value,
+  enabled: () => Boolean(selectedWorkspaceIdRef.value) && runtimeReady.value,
   queryFn: () => api.getVcsStatus(selectedWorkspaceIdRef.value!),
   retry: false,
   refetchInterval: 30000
@@ -507,7 +525,7 @@ const mcpToolsData = computed<RuntimeToolInfo[]>(() => mcpToolsQuery.data.value 
 const vcsStatusData = computed(() => vcsStatusQuery.data.value);
 const lspStatusData = computed(() => lspStatusQuery.data.value);
 const mcpStatusData = computed(() => mcpStatusQuery.data.value);
-// 只在首个状态响应回来前展示“正在检查”，避免 READY 数据后台刷新时把对话区重新置为阻塞态。
+// 只在首个状态响应回来前展示"正在检查"，避免 READY 数据后台刷新时把对话区重新置为阻塞态。
 const opencodeProcessInitialLoading = computed(
   () => opencodeProcessEnabled.value && !opencodeProcessStatus.value && (opencodeProcessQuery.isPending.value || opencodeProcessQuery.isFetching.value)
 );
@@ -1570,15 +1588,18 @@ async function loadDirectory(
     entriesByDirectory.value = { ...entriesByDirectory.value, [path]: entries };
     if (path === "") {
       workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [workspaceId]: true };
-      if (feedback.value?.kind === "error" && feedback.value.title === "加载文件树失败") {
-        feedback.value = null;
-      }
+      // 根目录加载成功后清除面板内错误
+      fileTreeError.value = null;
     }
   } catch (error) {
-    if (path === "" && error instanceof BackendApiError && ["OPENCODE_UNAVAILABLE", "OPENCODE_BAD_GATEWAY"].includes(error.code)) {
-      workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [workspaceId]: false };
+    // 根目录加载失败：设置面板内错误，保留上次成功数据，不覆盖全局反馈
+    if (path === "") {
+      if (error instanceof BackendApiError && ["OPENCODE_UNAVAILABLE", "OPENCODE_BAD_GATEWAY"].includes(error.code)) {
+        workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [workspaceId]: false };
+      }
+      // 不写入全局 feedback，改为面板内错误显示
+      fileTreeError.value = error instanceof BackendApiError ? error.message : "加载文件树失败";
     }
-    feedback.value = errorFeedback("加载文件树失败", error);
     // 加载失败：从展开集合里把这条目录回滚掉，让目录行恢复成可点击触发重试。
     // 注意：不删除 entriesByDirectory[path]——该 key 在失败前并未写入。
     if (expandedDirectories.value.has(path)) {
@@ -1700,19 +1721,12 @@ function toggleDirectory(path: string) {
 }
 
 function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
-  // 解析技能标记 __SKILL__<name>__PROMPT__<prompt>
-  let skillPrompt: string | undefined
-  const skillMatch = prompt.match(/^__SKILL__(.+?)__PROMPT__(.+)$/s)
-  if (skillMatch) {
-    skillPrompt = skillMatch[2].trim()
-    // 保持原始 prompt 用于消息展示，skillPrompt 用于发给 AI
-  }
   if (readonlySessionReason.value) {
     feedback.value = { kind: "info", title: "当前会话只读", description: readonlySessionReason.value };
     return;
   }
   if (!opencodeProcessReady.value) {
-    // 与聊天面板状态卡一致：按 serviceStatus 区分“未分配 / 未运行”提示
+    // 与聊天面板状态卡一致：按 serviceStatus 区分"未分配 / 未运行"提示
     const svc =
       opencodeProcessStatus.value?.serviceStatus ??
       (opencodeProcessStatus.value?.status === "READY"
@@ -1750,18 +1764,32 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   chatStartedAt.value = Date.now();
   accumulatedTokens.value = 0;
   accumulatedReasoningMs.value = 0;
+  // 解析命令（包括 Skill Command，格式为 /skill-name）
   const command = parseCommand(prompt, promptMode.value);
   if (runtimeBusy.value) {
     followUpQueue.value = enqueueFollowUp(followUpQueue.value, createFollowUpDraft(displayPrompt, parts, undefined, command ?? undefined));
     feedback.value = { kind: "info", title: "Prompt 已排队", description: `等待当前 Run 完成后继续执行，队列 ${followUpQueue.value.length} 条` };
     return;
   }
-  const aiPrompt = skillPrompt ?? displayPrompt
-  if (command && session.value) {
-    commandMutation.mutate({ ...command, prompt: aiPrompt });
+  // 有命令时：如果有 session 直接执行，否则先创建 session 再执行命令
+  if (command) {
+    if (session.value) {
+      commandMutation.mutate({ ...command, prompt: displayPrompt });
+    } else {
+      // 新会话执行命令：先创建 session，再执行命令
+      api.createSession(selectedWorkspace.value.workspaceId, sessionTitleFromFirstMessage(displayPrompt))
+        .then((newSession) => {
+          session.value = newSession;
+          void queryClient.invalidateQueries({ queryKey: ["sessions"] });
+          commandMutation.mutate({ ...command, prompt: displayPrompt });
+        })
+        .catch((error) => {
+          feedback.value = errorFeedback("创建会话失败", error);
+        });
+    }
     return;
   }
-  startRunMutation.mutate({ prompt: aiPrompt, parts, title: displayPrompt });
+  startRunMutation.mutate({ prompt: displayPrompt, parts, title: displayPrompt });
 }
 
 function handleStopRun() {
@@ -2230,7 +2258,7 @@ async function refreshWorkspaceGitDiff(options: { reloadOpenFiles?: boolean; pat
       await refreshOpenWorkspaceTabsFromDisk(options.paths);
     }
   } catch {
-    // 保存后刷新 Git diff 只是辅助 UI 同步；失败时保留“文件已保存”的主结果，
+    // 保存后刷新 Git diff 只是辅助 UI 同步；失败时保留"文件已保存"的主结果，
     // 用户仍可点击 Diff 刷新按钮看到后端返回的具体错误。
   }
 }
@@ -2520,6 +2548,7 @@ async function handleLogout() {
           :search-results="searchResults"
           :search-loading="searchLoading"
           :search-keyword="searchKeyword"
+          :file-tree-error="fileTreeError"
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
           @open-diff="handleOpenDiff"
@@ -2666,6 +2695,7 @@ async function handleLogout() {
           :selected-model="selectedModel"
           :message-feedbacks="messageFeedbacks"
           :feedback-submitting="feedbackSubmitting"
+          :commands="commands"
           placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
           @send="(text: string) => handleSend(text)"
           @stop="handleStopRun"

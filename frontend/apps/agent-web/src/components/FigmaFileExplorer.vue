@@ -40,6 +40,8 @@ defineProps<FileExplorerProps & {
   searchLoading?: boolean;
   /** 搜索关键字 */
   searchKeyword?: string;
+  /** 文件树面板内错误（根目录加载失败时不覆盖全局反馈） */
+  fileTreeError?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -208,6 +210,11 @@ defineExpose({
             </div>
           </div>
           <div v-show="workspaceExpanded" class="figma-fe-section-content">
+            <!-- 文件树面板内错误：根目录加载失败时显示，不覆盖全局反馈 -->
+            <div v-if="fileTreeError" class="figma-fe-error-banner">
+              <span class="figma-fe-error-text">{{ fileTreeError }}</span>
+              <button type="button" class="figma-fe-error-retry" @click="emit('refresh')">重试</button>
+            </div>
             <FileExplorer
               :workspace-name="workspaceName"
               :workspace-root-path="workspaceRootPath"
@@ -490,5 +497,43 @@ defineExpose({
 
 .figma-fe-body :deep(.bg-\[var\(--ta-panel\)\]) {
   background: #fafafa;
+}
+
+/* 文件树面板内错误提示 */
+.figma-fe-error-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #fef2f2;
+  border-bottom: 1px solid #fecaca;
+  flex-shrink: 0;
+}
+
+.figma-fe-error-text {
+  font-size: 12px;
+  color: #dc2626;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figma-fe-error-retry {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  font-size: 12px;
+  color: #dc2626;
+  background: transparent;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.14s ease;
+}
+
+.figma-fe-error-retry:hover {
+  background: #fee2e2;
 }
 </style>

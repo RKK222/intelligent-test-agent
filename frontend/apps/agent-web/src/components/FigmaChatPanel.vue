@@ -307,8 +307,11 @@ const props =
     messageFeedbacks?: Record<string, AiMessageFeedback | null>
     /** 正在提交反馈的消息 */
     feedbackSubmitting?: Record<string, boolean>
+    /** 可用命令列表（含 source=skill 的 Skill Command） */
+    commands?: Array<{ commandId: string; name: string; description?: string; source?: string; arguments?: string }>
   }>(), {
-    processRefreshBlocksSubmit: true
+    processRefreshBlocksSubmit: true,
+    commands: () => []
   })
 
 const emit =
@@ -629,48 +632,34 @@ function resetChoice() {
 }
 
 // ===== 技能面板 =====
-type SkillItem = { name: string; description: string; prompt: string }
+// 使用真实的 source=skill Command，删除硬编码技能列表
+type SkillItem = { name: string; description: string; commandId: string }
 
-const skills: SkillItem[] = [
-  {
-    name: '生成测试用例',
-    description: '根据代码逻辑自动生成单元测试',
-    prompt: '请为以下代码生成完整的单元测试用例',
-  },
-  {
-    name: '代码审查',
-    description: '检查代码质量、安全漏洞和最佳实践',
-    prompt: '请对以下代码进行代码审查，指出潜在的问题',
-  },
-  {
-    name: '修复 Bug',
-    description: '分析错误日志并给出修复方案',
-    prompt: '请分析以下错误并给出修复方案',
-  },
-  {
-    name: '解释代码',
-    description: '解读复杂代码逻辑和设计思路',
-    prompt: '请详细解释以下代码的逻辑和设计思路',
-  },
-  {
-    name: '重构建议',
-    description: '提出代码重构和优化建议',
-    prompt: '请对以下代码提出重构和优化建议',
-  },
-  {
-    name: 'API 文档生成',
-    description: '根据代码生成 API 接口文档',
-    prompt: '请根据以下代码生成 API 接口文档',
-  },
-]
+// 从 commands 中过滤出 source=skill 的命令作为技能列表
+// TODO: 第二阶段需要按当前 Agent 的 permission.skill 过滤：
+// - 后端 API 需要返回 Agent 的 permission 信息
+// - 或新增"当前 Agent 可用 Skill 目录"接口
+// - 当前暂时显示所有 source=skill 的命令
+const skills = computed<SkillItem[]>(() => {
+  if (!props.commands || props.commands.length === 0) return []
+  return props.commands
+    .filter((cmd) => cmd.source === 'skill')
+    // 预留：按 Agent permission 过滤
+    // .filter((cmd) => isSkillAllowedForAgent(cmd.name, props.selectedAgentId, agentPermissions))
+    .map((cmd) => ({
+      name: cmd.name,
+      description: cmd.description || '',
+      commandId: cmd.commandId
+    }))
+})
 
 const showSkillPanel = ref(false)
 const skillFilterText = ref('')
 
 const filteredSkills = computed(() => {
   const q = skillFilterText.value.toLowerCase()
-  if (!q) return skills
-  return skills.filter(
+  if (!q) return skills.value
+  return skills.value.filter(
     (s) =>
       s.name.toLowerCase().includes(q) ||
       s.description.toLowerCase().includes(q)
@@ -690,11 +679,13 @@ function onSkillInput(text: string) {
 }
 
 function selectSkill(skill: SkillItem) {
-  emit('send', `__SKILL__${skill.name}__PROMPT__${skill.prompt}`)
+  // 使用真实的 Skill Command，插入 `/skill-name ` 格式
+  // 用户可以补充参数后发送，由工作台的 parseCommand 解析并调用 commandMutation
+  const commandText = `/${skill.name} `
+  localInput.value = commandText
+  emit('update:inputValue', commandText)
   showSkillPanel.value = false
   skillFilterText.value = ''
-  localInput.value = ''
-  emit('update:inputValue', '')
 }
 
 function dismissSkillPanel() {
@@ -703,14 +694,14 @@ function dismissSkillPanel() {
 }
 
 // ===== 文件变更抽屉 =====
-// 抽屉默认选中第一个文件；打开后通过 fileChanges 变化自动跟随到最新一个文件（与原有的“跟随最近一次变化”心智一致）。
+// 抽屉默认选中第一个文件；打开后通过 fileChanges 变化自动跟随到最新一个文件（与原有的"跟随最近一次变化"心智一致）。
 const drawerOpen = ref(false)
 const drawerSelectedPath = ref<string>('')
 const drawerScroll = ref<HTMLElement | null>(null)
 const attachmentDialogOpen = ref(false)
 // 是否在 diff 视图中显示 unified diff 的上下文行（未改动的行）。
 // 默认关闭：用户在文件变更抽屉里通常只想看真正的 +/- 行，避免出现
-// “只改一行但全文飘红” 的体验。当后端 patch 是整文件重写时，关闭上下文
+// "只改一行但全文飘红" 的体验。当后端 patch 是整文件重写时，关闭上下文
 // 仍然会看到完整的 del+add 列表，但能配合新增的 toggle 切换为完整上下文做核对。
 const showContext = ref(false)
 const thinkingExpanded = ref(false)
@@ -1206,7 +1197,7 @@ const processStatusTitle = computed(() => {
   if (!props.processStatus) return ''
   if (props.processStatus.status === 'READY') return 'opencode 进程可用'
   if (props.processStatus.status === 'NEEDS_INITIALIZATION') {
-    // 二级状态区分“尚未分配”与“已分配未运行”，与头像菜单一致
+    // 二级状态区分"尚未分配"与"已分配未运行"，与头像菜单一致
     if (effectiveServiceStatus.value === 'NOT_RUNNING') return 'opencode 专属进程未运行'
     if (effectiveServiceStatus.value === 'UNASSIGNED') return '尚未分配 opencode 专属进程'
     return '需要初始化 opencode 进程' // serviceStatus 异常兜底
@@ -2918,7 +2909,7 @@ function onCompositionEnd() {
             >
               <p>当前文件没有可显示的变更行</p>
               <p class="figma-chat-drawer-diff-empty-hint">
-                点击右上角“上下文”可显示完整 diff 行。
+                点击右上角"上下文"可显示完整 diff 行。
               </p>
             </div>
             <div v-else class="figma-chat-drawer-diff-empty">
@@ -4815,7 +4806,7 @@ function onCompositionEnd() {
   color: #333;
 }
 
-/* 上下文行切换：默认 “仅变更” 状态（is-active）时高亮，让用户一眼分辨当前是哪种模式。
+/* 上下文行切换：默认 "仅变更" 状态（is-active）时高亮，让用户一眼分辨当前是哪种模式。
    按钮放在摘要数字和关闭按钮之间，避免和右上角关闭按钮位置冲突。*/
 .figma-chat-drawer-toggle {
   margin-left: auto;
