@@ -159,7 +159,15 @@ class GitWorkspaceServiceTest {
         service.diff(tempDir, "F-GCMS/workspace/设计.md", false);
 
         assertThat(executor.calls).containsExactly(
-                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "status", "--porcelain"), null),
+                new Call(List.of(
+                        "git",
+                        "-c",
+                        "core.quotepath=false",
+                        "-C",
+                        tempDir.toString(),
+                        "status",
+                        "--porcelain",
+                        "--untracked-files=all"), null),
                 new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff", "--", "F-GCMS/workspace/设计.md"), null));
     }
 

@@ -7,7 +7,7 @@
 ## 主要职责
 
 - Session 创建、查询、消息追加和归档。
-- Run 启动、取消、远端 agent session 懒创建/复用、事件订阅和终态处理。
+- Run 启动、取消、远端 agent session 懒创建/复用、事件订阅和终态处理；平台保存 `RUNNING` 并订阅事件后异步提交远端 prompt，不等待 prompt HTTP 完成才返回 Run，提交失败统一追加 `run.failed`。
 - AI 回复满意度反馈归属校验和 upsert：只允许登录用户对自己会话或自己触发 Run 的 `ASSISTANT` 消息提交 `POSITIVE/NEGATIVE` 反馈，评论最多 300 字。
 - 运营分析 rollup 与查询：主链路只写事实，后台 runner 通过数据库锁默认刷新最近窗口的 hourly/daily rollup 和 Run 耗时直方图；查询服务只读 rollup 并返回 freshness，不统计、不展示、不导出 cost/costUsd。
 - 当前用户 opencode 进程状态查询、头像菜单服务状态投影、初始化契约、防绕过 Run 校验、runtime 代理用户进程路由、manager WebSocket 命令网关，以及用户进程到兼容 `ExecutionNode` 的投影。
@@ -30,7 +30,7 @@
 - `UserOpencodeProcessAssignmentService` 创建用户 opencode 进程时，session/config 路径读取 `common_parameters.OPENCODE_SESSION_DIR` 和 `common_parameters.OPENCODE_PUBLIC_CONFIG_DIR`；缺失或空白时抛平台错误，不回退环境变量或代码默认路径。初始化时 Java 仍按当前后端已连接的健康容器视图选择进程数最少且有空闲端口的目标容器，然后经公共启动服务向该容器对应的 manager 下发 `start`；manager 使用已通过 `configUpdate` 同步的配置路径。`OPENCODE_PUBLIC_CONFIG_DIR` 是否存在且非空只由目标 manager 在所在服务器检查，Java 本机不做 `Files.*` 校验。manager 返回 `errorCode=OPENCODE_UNAVAILABLE` 时，message 会包含目标服务器和 manager 实际检查的配置目录，socket gateway 映射为同码平台错误并原样透出。manager `STARTED` 仅表示启动命令完成，公共启动服务还必须立即调用 health；health healthy 才能返回 READY。
 - RunEvent 持久化策略、实时发布和 agent projected messages 恢复。
 - Run 终态/取消后的 `session_messages` 快照持久化，包含 assistant 可见 text、完整 message parts 和 token/cost；reasoning/tool output 不拼入回答正文，无 text 的工具步骤以空正文加结构化 parts 保存。
-- 从完成态 `write`/`edit`/`apply_patch` tool part 派生运行中 `diff.proposed`，供前端实时追踪文件变化和行数统计。
+- 从完成态 `write`/`edit`/`apply_patch` tool part 派生运行中 `diff.proposed`，供前端实时追踪文件变化；不调用 opencode `/vcs/diff?mode=working`，实际 Git patch 和精确行数由工作区 Git Diff 接口读取。
 - Run Diff 查询、接受和拒绝。
 - agent runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth；opencode 原路径作为当前标准适配形态。
 - Model 目录编排：`opencode` 来源保持旧代理；`external` 来源直连 OpenAI-compatible `/models` 并把外部 provider 配置同步给 opencode；`internal` 来源读取 `ai_model_configs` 表并按 openclaw 企业 patch 的 `icbc-openai` 兼容配置同步给 opencode。历史 `bailian` source 会按 `external` 兼容处理。
@@ -50,7 +50,7 @@
 
 ## 测试覆盖
 
-- `RunApplicationServiceTest` 覆盖 Run 创建、通用 binding 保存/复用、远端 session 懒创建/复用、用户进程节点 upsert、用户进程 binding 不一致自动重建、sticky node、prompt parts、终态事件、终态消息快照/token 持久化、reasoning/tool output 与可见正文隔离、瞬态消息事件、tool part 实时 Diff 派生和取消编排。
+- `RunApplicationServiceTest` 覆盖 Run 创建、远端 prompt 非阻塞提交及异步失败、通用 binding 保存/复用、远端 session 懒创建/复用、用户进程节点 upsert、用户进程 binding 不一致自动重建、sticky node、prompt parts、终态事件、终态消息快照/token 持久化、reasoning/tool output 与可见正文隔离、瞬态消息事件、tool part 实时 Diff 派生和取消编排。
 - `BackendJavaRouteResolverTest` 覆盖同服务器多 Java 快照取最新、当前服务器本地兜底、远端目标判断、`containerId` 按最新 manager 快照解析所属服务器，以及目标 Java 不可用时统一 `OPENCODE_UNAVAILABLE`。
 - `OpencodeProcessStatusQueryServiceTest` 覆盖公共状态查询服务的进程记录缺失、health healthy、not-running 映射 STOPPED、普通不健康和 manager 异常返回 STALE 且不覆盖数据库稳定状态，以及 heartbeat 刷新。
 - `OpencodeProcessStartupServiceTest` 覆盖公共启动服务的 start、候选进程保存、启动后公共状态查询、短暂 HTTP health 不可达时等待恢复、manager 控制错误立即失败、持续健康失败超时、失败候选状态收敛、RUNNING/binding/heartbeat/ExecutionNode 回写和旧进程/绑定时间复用。

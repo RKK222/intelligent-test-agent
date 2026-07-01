@@ -19,6 +19,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.http.codec.ServerSentEvent;
+import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
 class RunEventServicesTest {
@@ -181,6 +182,36 @@ class RunEventServicesTest {
                     assertThat(event.data()).isNotNull();
                     assertThat(event.data().seq()).isZero();
                     assertThat(event.data().payload()).containsEntry("delta", "hello");
+                })
+                .verifyComplete();
+    }
+
+    @Test
+    void sseStreamSubscribesToLiveEventsWhileInitialSnapshotIsStillLoading() {
+        FakeRunEventRepository repository = new FakeRunEventRepository();
+        RunEventLiveBus liveBus = new RunEventLiveBus();
+        RunId runId = new RunId("run_1234567890abcdef");
+        RunEventSseStreamService streamService = new RunEventSseStreamService(
+                new RunEventReplayService(repository),
+                new RunEventSseMapper(),
+                liveBus);
+
+        StepVerifier.create(streamService.streamAfterWithSnapshot(
+                        runId,
+                        "0",
+                        Duration.ofSeconds(30),
+                        50,
+                        Flux.never()).take(1))
+                .then(() -> liveBus.publishTransient(new RunEventDraft(
+                        runId,
+                        RunEventType.MESSAGE_PART_DELTA,
+                        "trace_1234567890abcdef",
+                        NOW,
+                        Map.of("messageID", "msg_1", "partID", "part_1", "delta", "streaming"))))
+                .assertNext(event -> {
+                    assertThat(event.event()).isEqualTo("message.part.delta");
+                    assertThat(event.data()).isNotNull();
+                    assertThat(event.data().payload()).containsEntry("delta", "streaming");
                 })
                 .verifyComplete();
     }

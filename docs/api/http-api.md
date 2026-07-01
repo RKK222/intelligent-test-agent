@@ -1770,6 +1770,8 @@ Base URL：`/api/internal/platform/scheduler-management`
 }
 ```
 
+Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 `RUNNING`，不等待 agent 的 prompt HTTP 请求完成。prompt 提交或后续事件流失败时通过同一 RunEvent 链路追加 `run.failed`，前端不应把创建 Run 接口的等待时间当作智能体执行超时。
+
 请求体保持向后兼容，并支持以下可选字段：
 
 ```json

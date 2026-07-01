@@ -450,11 +450,12 @@ class RuntimeControllerTest {
     void runControllerAcceptsLastEventIdFromQueryForBrowserEventSource() {
         RunApplicationService runService = org.mockito.Mockito.mock(RunApplicationService.class);
         RunEventSseStreamService eventStreamService = org.mockito.Mockito.mock(RunEventSseStreamService.class);
-        when(eventStreamService.streamAfter(
+        when(eventStreamService.streamAfterWithSnapshot(
                         eq(new RunId("run_1234567890abcdef")),
                         eq("7"),
                         any(),
-                        eq(100)))
+                        eq(100),
+                        any()))
                 .thenReturn(Flux.empty());
         WebTestClient client = WebTestClient.bindToController(new RunController(runService, null, eventStreamService))
                 .webFilter(new TraceIdWebFilter())
@@ -465,22 +466,24 @@ class RuntimeControllerTest {
                 .exchange()
                 .expectStatus().isOk();
 
-        org.mockito.Mockito.verify(eventStreamService).streamAfter(
+        org.mockito.Mockito.verify(eventStreamService).streamAfterWithSnapshot(
                 eq(new RunId("run_1234567890abcdef")),
                 eq("7"),
                 any(),
-                eq(100));
+                eq(100),
+                any());
     }
 
     @Test
     void runControllerAlsoExposesInternalPlatformEventUrl() {
         RunApplicationService runService = org.mockito.Mockito.mock(RunApplicationService.class);
         RunEventSseStreamService eventStreamService = org.mockito.Mockito.mock(RunEventSseStreamService.class);
-        when(eventStreamService.streamAfter(
+        when(eventStreamService.streamAfterWithSnapshot(
                         eq(new RunId("run_1234567890abcdef")),
                         eq("7"),
                         any(),
-                        eq(100)))
+                        eq(100),
+                        any()))
                 .thenReturn(Flux.empty());
         WebTestClient client = WebTestClient.bindToController(new RunController(runService, null, eventStreamService))
                 .webFilter(new TraceIdWebFilter())
@@ -491,15 +494,16 @@ class RuntimeControllerTest {
                 .exchange()
                 .expectStatus().isOk();
 
-        org.mockito.Mockito.verify(eventStreamService).streamAfter(
+        org.mockito.Mockito.verify(eventStreamService).streamAfterWithSnapshot(
                 eq(new RunId("run_1234567890abcdef")),
                 eq("7"),
                 any(),
-                eq(100));
+                eq(100),
+                any());
     }
 
     @Test
-    void runControllerPrependsOpencodeMessageSnapshotBeforeDurableStream() {
+    void runControllerMergesOpencodeMessageSnapshotWithDurableStream() {
         RunApplicationService runService = org.mockito.Mockito.mock(RunApplicationService.class);
         RunEventSseStreamService eventStreamService = org.mockito.Mockito.mock(RunEventSseStreamService.class);
         RunMessageRecoveryService recoveryService = org.mockito.Mockito.mock(RunMessageRecoveryService.class);
@@ -521,12 +525,17 @@ class RuntimeControllerTest {
                 NOW,
                 Map.of("status", "RUNNING"));
         when(recoveryService.recover(eq(runId), eq("trace_1234567890abcdef"))).thenReturn(Flux.just(snapshot));
-        when(eventStreamService.streamAfter(eq(runId), eq(null), any(), eq(100)))
-                .thenReturn(Flux.just(ServerSentEvent.<RunEventSsePayload>builder()
-                        .id("1")
-                        .event("run.started")
-                        .data(durable)
-                        .build()));
+        when(eventStreamService.streamAfterWithSnapshot(eq(runId), eq(null), any(), eq(100), any()))
+                .thenAnswer(invocation -> {
+                    Flux<ServerSentEvent<RunEventSsePayload>> snapshotEvents = invocation.getArgument(4);
+                    return Flux.concat(
+                            snapshotEvents,
+                            Flux.just(ServerSentEvent.<RunEventSsePayload>builder()
+                                    .id("1")
+                                    .event("run.started")
+                                    .data(durable)
+                                    .build()));
+                });
         WebTestClient client = WebTestClient.bindToController(new RunController(
                         runService,
                         null,

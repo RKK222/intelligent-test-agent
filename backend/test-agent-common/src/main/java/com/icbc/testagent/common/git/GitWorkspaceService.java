@@ -393,7 +393,7 @@ public class GitWorkspaceService {
      */
     public String statusPorcelain(Path repoRoot) {
         GitCommandResult result = executor.execute(
-                gitNoQuotedPath(repoRoot, "status", "--porcelain"),
+                gitNoQuotedPath(repoRoot, "status", "--porcelain", "--untracked-files=all"),
                 null,
                 DEFAULT_TIMEOUT);
         return result.stdoutText();

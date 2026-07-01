@@ -2,6 +2,7 @@ package com.icbc.testagent.opencode.runtime.run;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
@@ -68,6 +69,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -127,6 +129,59 @@ class RunApplicationServiceTest {
                 .isEqualTo(REMOTE_SESSION_ID);
         assertThat(events.events).extracting(RunEvent::type)
                 .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED);
+    }
+
+    @Test
+    void serviceReturnsRunningBeforeRemotePromptRequestCompletes() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.startRun = ignored -> Mono.never();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        Run run = assertTimeoutPreemptively(
+                Duration.ofMillis(500),
+                () -> service.startRun(
+                        new SessionId("ses_1234567890abcdef"),
+                        "run the tests",
+                        "trace_1234567890abcdef"));
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(facade.startRunCommands).hasSize(1);
+    }
+
+    @Test
+    void serviceMarksRunFailedWhenRemotePromptRequestFailsAsynchronously() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.startRun = ignored -> Mono.error(new IllegalStateException("prompt failed"));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        Run run = service.startRun(
+                new SessionId("ses_1234567890abcdef"),
+                "run the tests",
+                "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        awaitRunStatus(service, run.runId(), RunStatus.FAILED);
+        awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_FAILED);
     }
 
     @Test
@@ -726,22 +781,10 @@ class RunApplicationServiceTest {
     }
 
     @Test
-    void serviceUsesWorkingTreeDiffAsFallbackForCompletedWriteToolPart() {
+    void servicePublishesWritePathWithoutCallingUnsupportedWorkingTreeDiff() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
-        facade.runtime = command -> {
-            facade.runtimeCommands.add(command);
-            ArrayNode files = JsonNodeFactory.instance.arrayNode();
-            ObjectNode file = JsonNodeFactory.instance.objectNode();
-            file.put("path", "src/Write.ts");
-            file.put("patch", "@@ write @@");
-            file.put("additions", 5);
-            file.put("deletions", 2);
-            file.put("status", "modified");
-            files.add(file);
-            return Mono.just(new OpencodeRuntimeResult(files));
-        };
         facade.streamEvents = command -> Flux.just(new RunEventDraft(
                 command.runId(),
                 RunEventType.MESSAGE_PART_UPDATED,
@@ -772,19 +815,13 @@ class RunApplicationServiceTest {
         service.startRun(new SessionId("ses_1234567890abcdef"), "write file", "trace_1234567890abcdef");
 
         awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.DIFF_PROPOSED);
-        assertThat(facade.runtimeCommands).singleElement().satisfies(command -> {
-            assertThat(command.method()).isEqualTo("GET");
-            assertThat(command.path()).isEqualTo("/vcs/diff");
-            assertThat(command.directory()).isEqualTo("/tmp/demo");
-            assertThat(command.workspace()).isNull();
-            assertThat(command.query()).containsEntry("mode", "working");
-        });
+        assertThat(facade.runtimeCommands).isEmpty();
         assertThat((List<?>) events.events.get(2).payload().get("files"))
                 .singleElement()
                 .satisfies(file -> assertThat(mapObject(file))
                         .containsEntry("path", "src/Write.ts")
-                        .containsEntry("additions", 5)
-                        .containsEntry("deletions", 2));
+                        .containsEntry("additions", 0)
+                        .containsEntry("deletions", 0));
     }
 
     @Test
@@ -1299,6 +1336,8 @@ class RunApplicationServiceTest {
         private RuntimeException createSessionError;
         private OpencodeSessionMessagesResult sessionMessagesResult = new OpencodeSessionMessagesResult(List.of(), null, null);
         private Function<OpencodeStreamEventsCommand, Flux<RunEventDraft>> streamEvents = ignored -> Flux.empty();
+        private Function<OpencodeStartRunCommand, Mono<OpencodeStartRunResult>> startRun =
+                ignored -> Mono.just(new OpencodeStartRunResult(true));
         private Function<OpencodeRuntimeCommand, Mono<OpencodeRuntimeResult>> runtime =
                 ignored -> Mono.just(new OpencodeRuntimeResult(JsonNodeFactory.instance.objectNode()));
 
@@ -1326,7 +1365,7 @@ class RunApplicationServiceTest {
             callOrder.add("startRun");
             startRunCommands.add(command);
             lastPrompt = command.prompt();
-            return Mono.just(new OpencodeStartRunResult(true));
+            return startRun.apply(command);
         }
 
         @Override

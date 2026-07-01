@@ -81,7 +81,7 @@
 - 浏览器原生 `EventSource` 不能设置自定义请求头；前端首次续传优先使用 `GET /api/internal/agent/{agentId}/runs/{runId}/events?lastEventId={seq}`，默认 `agentId=opencode`。旧兼容入口 `GET /api/runs/{runId}/events?lastEventId={seq}` 和 `GET /api/internal/platform/opencode-runtime/runs/{runId}/events?lastEventId={seq}` 继续有效。后端 header 优先，query 参数作为浏览器兼容入口。
 - 如果 `Last-Event-ID` 缺失，默认从当前订阅策略允许的起点开始返回。
 - 如果 `Last-Event-ID` 非数字或小于 0，后端返回统一错误格式，错误码为 `VALIDATION_ERROR`。
-- 消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时后端会先通过当前 `AgentRuntime.messages` 拉取 projected messages，并转换为 transient `message.updated` / `message.part.updated` snapshot 事件。当前 `opencode` 实现适配 opencode `GET /api/session/{sessionID}/message`。前端刷新恢复时先用 `GET /api/sessions/{sessionId}/messages` 加载数据库/远端快照，再用 `GET /api/sessions/{sessionId}/active-run` 判断是否重新订阅本 Run SSE。
+- 消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时后端通过当前 `AgentRuntime.messages` 拉取 projected messages，并转换为 transient `message.updated` / `message.part.updated` snapshot 事件。快照恢复与 durable replay、本机 live bus、远端广播并发订阅，不能让较慢的快照查询阻塞实时 delta 下发。当前 `opencode` 实现适配 opencode `GET /api/session/{sessionID}/message`。前端刷新恢复时先用 `GET /api/sessions/{sessionId}/messages` 加载数据库/远端快照，再用 `GET /api/sessions/{sessionId}/active-run` 判断是否重新订阅本 Run SSE。
 
 ## Phase 04 Runtime SSE
 
@@ -280,7 +280,7 @@ data: {"eventId":"evt_...","runId":"run_...","seq":13,"type":"diff.rejected","tr
 
 前端处理：
 
-- `diff.proposed` 更新 Changed Files 和 DiffActionCard；开启实时追踪时，前端也用运行中的 `diff.proposed.files[].path/additions/deletions/status` 刷新文件树行数并跟随打开最近变化文件。
+- `diff.proposed` 更新 Changed Files 和 DiffActionCard；前端始终按运行中的 `diff.proposed.files[].path` 强制刷新变更文件父目录和工作区 Git Diff，开启实时追踪时再使用 `additions/deletions/status` 刷新文件树行数并跟随打开最近变化文件。`write` 工具事件只承担实时变更通知，不调用 opencode 不支持的 `mode=working` Diff；精确 patch/行数由工作区 Git Diff 返回。
 - `diff.accepted` / `diff.rejected` 展示动作结果并保留 traceId。
 - 终态 `run.succeeded` / `run.failed` / `run.cancelled` 必须停止“运行中”状态。
 

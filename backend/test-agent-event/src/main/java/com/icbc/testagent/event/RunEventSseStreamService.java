@@ -107,6 +107,22 @@ public class RunEventSseStreamService {
     }
 
     /**
+     * 初始消息快照与实时事件并发输出，避免远端快照查询期间尚未订阅 live bus 而丢失增量。
+     */
+    public Flux<ServerSentEvent<RunEventSsePayload>> streamAfterWithSnapshot(
+            RunId runId,
+            String lastEventId,
+            Duration pollInterval,
+            int batchLimit,
+            Flux<ServerSentEvent<RunEventSsePayload>> initialSnapshot) {
+        Objects.requireNonNull(initialSnapshot, "initialSnapshot must not be null");
+        return Flux.merge(
+                initialSnapshot,
+                streamAfter(runId, lastEventId, pollInterval, batchLimit))
+                .distinct(this::eventId);
+    }
+
+    /**
      * 将 durable repository 事件映射成 SSE，保持 seq 作为客户端续传游标。
      */
     private ServerSentEvent<RunEventSsePayload> toSse(RunEvent event) {

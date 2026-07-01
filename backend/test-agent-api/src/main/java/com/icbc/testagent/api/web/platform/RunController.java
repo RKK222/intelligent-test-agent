@@ -203,9 +203,12 @@ public class RunController {
                         ? messageRecoveryService.recover(agentId, currentRunId, traceId)
                         : messageRecoveryService.recover(currentRunId, traceId))
                         .map(sseMapper::toTransientSse);
-        return Flux.concat(
-                snapshotEvents,
-                eventStreamService.streamAfter(currentRunId, resumeEventId, DEFAULT_POLL_INTERVAL, DEFAULT_BATCH_LIMIT));
+        return eventStreamService.streamAfterWithSnapshot(
+                currentRunId,
+                resumeEventId,
+                DEFAULT_POLL_INTERVAL,
+                DEFAULT_BATCH_LIMIT,
+                snapshotEvents);
     }
 
     /**

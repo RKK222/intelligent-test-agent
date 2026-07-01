@@ -19,6 +19,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - 最近使用工作区偏好分两套维度持久化：`user_global_workspace_preferences`（`app_id = NULL`，跨应用追踪「上次进入的应用 + 工作区」组合）和 `user_application_workspace_preferences`（`app_id = 非空`，按应用追踪）。`POST /workspaces/{workspaceId}/recent` 同时写两条，并在响应中通过 `resolveRecentWorkspaceResponse` 回填 `appId` / `versionId` / `applicationWorkspaceId`（与最近工作区接口共用同一反查链路：通过 `findVersionByRuntimeWorkspace` 找 `ApplicationWorkspaceVersion`，未命中再回退到 `findPersonalWorkspaceByRuntimeWorkspace` 取 appId；完全无主时三者均为 `null`），让前端在「切会话」「兜底选择首模板首版本」等非 recent 直接命中的路径里也能立即拿到当前版本与模板。`GET /recent-workspace` 与 `GET /applications/{appId}/recent-workspace` 同样使用该回填逻辑，便于重新登录或换电脑登录时直接还原「应用 + 模板 + 版本」上下文，让左下角"切换工作空间"按钮立刻显示当前工作区名 + 版本号；其他接口依旧只返回运行态 Workspace，避免在响应里重复写出托管应用信息。
 - 通过 domain 广播端口发布/消费 `workspace.version.sync-requested`，并通过本机补偿器扫描缺失或落后的副本。
 - 与文件相关的 git 操作、差异比对、agent/skill 文件管理优先进入本模块。
+- 工作区 Git Diff 使用 `git status --porcelain --untracked-files=all` 展开未跟踪目录中的每个文件，确保每条记录都有文件级 patch/行数并可通过单文件 discard 清理。
 
 ## 测试覆盖
 
@@ -26,7 +27,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - `WorkspaceFileServiceTest` 覆盖 UTF-8 读写、普通文件删除、目录删除拒绝、路径穿越拒绝、目录列表排序与上限、文件大小限制和 null 内容写入。
 - `WorkspaceDirectoryServiceTest` 覆盖默认根目录、只返回子目录、排序、父目录边界、越权和缺失目录错误码。
 - `PublicDirectoryServiceTest` 覆盖未配置/不存在根目录时 list/read/write 返回 `NOT_FOUND`，以及配置正常时委托给 `WorkspaceFileService` 的 list/read/write 行为。
-- `ManagedWorkspaceApplicationServiceTest` 覆盖应用成员校验、标准库分支校验、设置页初始版本工作区创建、应用版本工作区创建、通用参数根目录、代码库英文名路径片段、服务器副本记录、目标 commit、广播发布、`git pull`、运行态 Workspace 关联、最近使用记录、私人 worktree 新命名规则、Git diff 路径解码、单文件 discard、个人 worktree 发布（先拉远端特性分支，在个人 worktree 合入最新特性分支，成功后把本地个人分支 merge 回应用版本副本并只推送特性分支；含合并冲突返回 `CONFLICT`、冲突文件列表、冲突保留在个人 worktree 供用户解决、已提交但后续失败的 clean worktree 重试、旧应用副本路径自愈）、`yyyy年M月` 版本格式（`sanitizeVersionForBranchAndPath` 转 `yyyy-MM` 派生分支/路径）和非法版本格式拒绝。
+- `ManagedWorkspaceApplicationServiceTest` 覆盖应用成员校验、标准库分支校验、设置页初始版本工作区创建、应用版本工作区创建、通用参数根目录、代码库英文名路径片段、服务器副本记录、目标 commit、广播发布、`git pull`、运行态 Workspace 关联、最近使用记录、私人 worktree 新命名规则、Git diff 路径解码、未跟踪文件级 patch、单文件 discard、个人 worktree 发布（先拉远端特性分支，在个人 worktree 合入最新特性分支，成功后把本地个人分支 merge 回应用版本副本并只推送特性分支；含合并冲突返回 `CONFLICT`、冲突文件列表、冲突保留在个人 worktree 供用户解决、已提交但后续失败的 clean worktree 重试、旧应用副本路径自愈）、`yyyy年M月` 版本格式（`sanitizeVersionForBranchAndPath` 转 `yyyy-MM` 派生分支/路径）和非法版本格式拒绝。
 - `AgentConfigApplicationServiceTest` 覆盖公共 Git 地址未配置禁用、公共更新/初始化 clone 与广播、脏仓库保持可浏览、默认拒绝覆盖和显式恢复已跟踪修改、公共 worktree 未初始化时拒绝 clone、worktree 名称拼接日期、服务器归属保存、公共 worktree 切换列表按服务器/状态过滤并返回创建人、Agent 配置文件服务器归属查询，以及工作空间级 `.opencode/` 根下 `agents/` 与 `skills/` 技能包读写和 diff 过滤。
 
 ## 允许依赖

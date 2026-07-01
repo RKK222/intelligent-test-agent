@@ -335,6 +335,36 @@ test("retrying a failed chat run sends the previous prompt again", async ({ page
   expect(runRequests[1]).toMatchObject({ prompt: "重试这条测试任务" });
 });
 
+test("a live diff refreshes the changed file parent directory before the run finishes", async ({ page }) => {
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const gitDiffRequests: string[] = [];
+  await mockBackendApi(page, {
+    fileRequests,
+    gitDiffRequests,
+    runEvents: [
+      event(1, "diff.proposed", {
+        files: [{ path: "tests/generated.spec.ts", status: "added", additions: 8, deletions: 0 }]
+      })
+    ]
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: /tests/ }).click();
+  await expect(page.getByRole("button", { name: /checkout.spec.ts/ })).toBeVisible();
+  fileRequests.length = 0;
+  gitDiffRequests.length = 0;
+
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("生成新的测试文件");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect(page.getByText("1 个文件已更改")).toBeVisible();
+  await expect.poll(() => fileRequests).toContainEqual({
+    workspaceId: "wrk_1234567890abcdef",
+    path: "tests"
+  });
+  await expect.poll(() => gitDiffRequests.length).toBeGreaterThan(0);
+});
+
 test("switching history restores assistant documents and the file changes drawer", async ({ page }) => {
   await mockBackendApi(page, {
     sessions: [
@@ -794,6 +824,7 @@ async function mockBackendApi(
     terminalTickets?: Array<Record<string, unknown>>;
     workspaceCreates?: Array<Record<string, unknown>>;
     fileRequests?: Array<{ workspaceId: string; path: string }>;
+    gitDiffRequests?: string[];
     runEvents?: Array<ReturnType<typeof event>>;
     fileContents?: Record<string, string>;
     authRoles?: string[];
@@ -1126,6 +1157,7 @@ async function mockBackendApi(
         return;
       }
       if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/workspaces\/[^/]+\/git-diff$/.test(url.pathname)) {
+        capture.gitDiffRequests?.push(`${method} ${url.pathname}`);
         await route.fulfill(json({ files: capture.historyDiffFiles ?? [] }));
         return;
       }

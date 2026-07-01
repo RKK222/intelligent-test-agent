@@ -6,9 +6,7 @@ import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.agent.runtime.AgentCancelCommand;
 import com.icbc.testagent.agent.runtime.AgentPromptPart;
 import com.icbc.testagent.agent.runtime.AgentRuntime;
-import com.icbc.testagent.agent.runtime.AgentRuntimeCommand;
 import com.icbc.testagent.agent.runtime.AgentRuntimeRegistry;
-import com.icbc.testagent.agent.runtime.AgentRuntimeResult;
 import com.icbc.testagent.agent.runtime.AgentStartRunCommand;
 import com.icbc.testagent.agent.runtime.AgentStreamEventsCommand;
 import com.icbc.testagent.domain.agent.AgentSessionBinding;
@@ -41,7 +39,6 @@ import com.icbc.testagent.opencode.runtime.model.ModelCatalogApplicationService;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -330,20 +327,25 @@ public class RunApplicationService {
                     traceId);
             // 先订阅事件再触发 prompt，避免 opencode 快速失败或快速返回时平台漏掉终态事件。
             subscribeAgentEvents(resolvedAgentId, runtime, running, target.node(), workspace, traceId);
-            runtime.startRun(new AgentStartRunCommand(
-                            target.node(),
-                            binding.remoteSessionId(),
-                            workspace.rootPath(),
-                            null,
-                            prompt,
-                            toAgentPromptParts(input, workspace),
-                            input.messageId(),
-                            opencodeAgent,
-                            modelSelection.providerId(),
-                            modelSelection.modelId(),
-                            input.variant(),
-                            traceId))
-                    .block();
+            AgentStartRunCommand command = new AgentStartRunCommand(
+                    target.node(),
+                    binding.remoteSessionId(),
+                    workspace.rootPath(),
+                    null,
+                    prompt,
+                    toAgentPromptParts(input, workspace),
+                    input.messageId(),
+                    opencodeAgent,
+                    modelSelection.providerId(),
+                    modelSelection.modelId(),
+                    input.variant(),
+                    traceId);
+            // prompt_async 的 HTTP 响应不代表 Run 完成，不能阻塞创建 Run 的接口和后续 SSE 订阅。
+            Mono.defer(() -> runtime.startRun(command))
+                    .subscribe(
+                            ignored -> {
+                            },
+                            error -> failRunFromStream(resolvedAgentId, running, traceId, error));
             return running;
         } catch (PlatformException exception) {
             LOGGER.error("Run failed to start, runId={}, errorCode={}, traceId={}",
@@ -765,7 +767,7 @@ public class RunApplicationService {
                         null,
                         traceId))
                 // opencode stream 来自 Netty 线程，事件入库或实时发布必须串行 offload，且本地 DB 抖动不能误判为 Run 失败。
-                .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(agentId, runtime, run, node, workspace, draft))
+                .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(agentId, run, workspace, draft))
                         .subscribeOn(Schedulers.boundedElastic())
                         .onErrorResume(error -> {
                             LOGGER.warn(
@@ -786,7 +788,7 @@ public class RunApplicationService {
     /**
      * 处理单个 agent 事件：终态事件落库并更新 Run，瞬态消息事件只发布 live bus。
      */
-    private void appendStreamEvent(String agentId, AgentRuntime runtime, Run originalRun, ExecutionNode node, Workspace workspace, RunEventDraft draft) {
+    private void appendStreamEvent(String agentId, Run originalRun, Workspace workspace, RunEventDraft draft) {
         if (draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED) {
             Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
             if (!current.status().isTerminal()) {
@@ -802,7 +804,7 @@ public class RunApplicationService {
             return;
         }
         if (draft.type() == RunEventType.MESSAGE_PART_UPDATED) {
-            appendLiveDiffFromToolPart(runtime, originalRun, node, workspace, draft);
+            appendLiveDiffFromToolPart(originalRun, workspace, draft);
         }
         if (!runEventPersistencePolicy.shouldPersist(draft)) {
             runEventLiveBus.publishTransient(runEventPersistencePolicy.sanitizeForPersistence(draft));
@@ -814,9 +816,9 @@ public class RunApplicationService {
     /**
      * 从 agent tool part 完成态派生轻量 Diff 事件，供前端在 Run 未结束时实时刷新文件树。
      */
-    private void appendLiveDiffFromToolPart(AgentRuntime runtime, Run originalRun, ExecutionNode node, Workspace workspace, RunEventDraft draft) {
+    private void appendLiveDiffFromToolPart(Run originalRun, Workspace workspace, RunEventDraft draft) {
         try {
-            liveDiffFromToolPart(runtime, originalRun, node, workspace, draft)
+            liveDiffFromToolPart(originalRun, workspace, draft)
                     .ifPresent(diff -> runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(diff)));
         } catch (RuntimeException exception) {
             LOGGER.warn(
@@ -828,9 +830,7 @@ public class RunApplicationService {
     }
 
     private Optional<RunEventDraft> liveDiffFromToolPart(
-            AgentRuntime runtime,
             Run originalRun,
-            ExecutionNode node,
             Workspace workspace,
             RunEventDraft draft) {
         Map<String, Object> rawPart = mapValue(draft.payload().get("part")).orElse(draft.payload());
@@ -853,14 +853,8 @@ public class RunApplicationService {
                 .or(() -> mapValue(rawPart.get("metadata")))
                 .orElse(Map.of());
         List<LiveDiffFile> files = extractToolDiffFiles(tool, input, metadata, workspace);
-        boolean needsWorkingTreeDiff = "write".equals(tool) || files.isEmpty() || files.stream().anyMatch(file -> !file.countsKnown());
-        if (needsWorkingTreeDiff) {
-            List<LiveDiffFile> workingTreeFiles = workingTreeDiffFiles(runtime, node, workspace, draft.traceId());
-            if (!workingTreeFiles.isEmpty()) {
-                files = workingTreeFiles;
-            } else if ("write".equals(tool) || files.isEmpty()) {
-                return Optional.empty();
-            }
+        if (files.isEmpty()) {
+            return Optional.empty();
         }
         return Optional.of(new RunEventDraft(
                 originalRun.runId(),
@@ -941,66 +935,6 @@ public class RunApplicationService {
                 additions.isPresent() && deletions.isPresent()));
     }
 
-    private List<LiveDiffFile> workingTreeDiffFiles(AgentRuntime runtime, ExecutionNode node, Workspace workspace, String traceId) {
-        AgentRuntimeResult result = runtime.runtime(new AgentRuntimeCommand(
-                        node,
-                        "GET",
-                        "/vcs/diff",
-                        workspace.rootPath(),
-                        null,
-                        Map.of("mode", "working"),
-                        null,
-                        traceId))
-                .block();
-        if (result == null) {
-            return List.of();
-        }
-        JsonNode filesNode = diffFilesNode(result.body());
-        if (filesNode == null || !filesNode.isArray()) {
-            return List.of();
-        }
-        List<LiveDiffFile> files = new ArrayList<>();
-        filesNode.forEach(item -> diffFileFromJson(item, workspace).ifPresent(files::add));
-        return files;
-    }
-
-    private JsonNode diffFilesNode(JsonNode body) {
-        if (body == null || body.isNull()) {
-            return null;
-        }
-        if (body.isArray()) {
-            return body;
-        }
-        if (body.has("data") && body.get("data").isArray()) {
-            return body.get("data");
-        }
-        if (body.has("files") && body.get("files").isArray()) {
-            return body.get("files");
-        }
-        if (body.has("items") && body.get("items").isArray()) {
-            return body.get("items");
-        }
-        return null;
-    }
-
-    private Optional<LiveDiffFile> diffFileFromJson(JsonNode item, Workspace workspace) {
-        if (item == null || !item.isObject()) {
-            return Optional.empty();
-        }
-        Optional<String> path = firstJsonText(item, "path", "file", "filePath", "relativePath")
-                .flatMap(raw -> normalizeWorkspacePath(workspace, raw));
-        if (path.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(new LiveDiffFile(
-                path.get(),
-                firstJsonText(item, "patch", "diff").orElse(""),
-                jsonInt(item, "additions").orElse(0),
-                jsonInt(item, "deletions").orElse(0),
-                firstJsonText(item, "status").orElse("modified"),
-                item.has("additions") && item.has("deletions")));
-    }
-
     private String statusFromPatchType(String type) {
         if (type == null) {
             return "modified";
@@ -1059,34 +993,6 @@ public class RunApplicationService {
         if (value instanceof String text && !text.isBlank()) {
             try {
                 return Optional.of(Integer.parseInt(text));
-            } catch (NumberFormatException ignored) {
-                return Optional.empty();
-            }
-        }
-        return Optional.empty();
-    }
-
-    private Optional<String> firstJsonText(JsonNode item, String... keys) {
-        for (String key : keys) {
-            JsonNode value = item.get(key);
-            if (value != null && value.isTextual() && !value.asText().isBlank()) {
-                return Optional.of(value.asText());
-            }
-        }
-        return Optional.empty();
-    }
-
-    private Optional<Integer> jsonInt(JsonNode item, String key) {
-        JsonNode value = item.get(key);
-        if (value == null || value.isNull()) {
-            return Optional.empty();
-        }
-        if (value.isInt() || value.isLong()) {
-            return Optional.of(value.asInt());
-        }
-        if (value.isTextual() && !value.asText().isBlank()) {
-            try {
-                return Optional.of(Integer.parseInt(value.asText()));
             } catch (NumberFormatException ignored) {
                 return Optional.empty();
             }

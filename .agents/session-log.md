@@ -2588,4 +2588,10 @@ bash /tmp/test-api-after-restart.sh
 - How: 纯前端交互与样式修改，新增折叠控制状态，不改动业务逻辑和后端 API。
 - Result: 前端类型检查（`corepack pnpm typecheck`）成功，全部 204 个 Vitest 测试用例全数通过，无任何 regression。
 
+### 2026-07-01 - 修复 Run 非流式、失败超时与工作区 Diff 实时同步
+
+- Why: `POST /runs` 在 `runtime.startRun(...).block()` 等待远端 prompt，日志中出现 Run 已开始后约 21 秒前端才建立 SSE；消息快照又串行阻塞实时流。智能体写文件时前端只更新运行内 Diff，未刷新文件树和 Git Changes；Git 默认把未跟踪目录折叠成目录记录，导致无 patch/行数且单文件回退无法清理。
+- What: Run 保存 `RUNNING` 并先订阅事件后改为异步提交 prompt，提交失败复用统一 `run.failed` 链路；SSE 将消息快照与 durable/live 流并发合并。完成态 `write/edit/apply_patch` 只从 tool part 派生文件通知，不再请求 OpenCode 不支持的 `/vcs/diff?mode=working`。前端收到 `diff.proposed/session.diff` 后同步刷新父目录和工作区 Git Diff；失败重试统一复用最近 prompt。Git status 增加 `--untracked-files=all`，返回可展示、可回退的文件级未跟踪记录。
+- How: 复用 `RunEventSseStreamService`、`failRunFromStream`、`refreshWorkspaceGitDiff`、`refreshParentDirectory` 和现有 workspace discard 链路，没有修改 OpenCode/generated SDK，也没有新增旁路架构。补充 Run 非阻塞/异步失败、快照不阻塞 live delta、Git 文件级 status、重试和运行中 Diff 刷新的回归测试，并同步模块 README 与 HTTP/事件文档。
+- Result: 后端相关 88 个测试、前端 204 个 Vitest、typecheck、build 和 2 个关键 Playwright E2E 通过。通过 iTerm 使用 `.env.test` 重启后，后端 readiness、数据库、Redis、前端均正常；manager 和 OpenCode 各单实例，OpenCode 实际监听 `192.168.100.115:4098`。真实页面变更徽标为 9，与 personal worktree 的 9 个非空未跟踪文件一致，不再出现折叠目录空 Diff。未修改 API 字段、事件类型、数据库、安全或鉴权契约；`POST /runs` 的返回时机变为非阻塞，保持响应 DTO 向后兼容。
 

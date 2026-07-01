@@ -1849,6 +1849,20 @@ function handleStopRun() {
   }
 }
 
+/** 失败后的所有重试入口统一复用最近一次 prompt，避免子组件事件无人接收。 */
+function handleRetryRun() {
+  const prompt = lastPrompt.value.trim();
+  if (!prompt) {
+    feedback.value = {
+      kind: "info",
+      title: "无法重试",
+      description: "未找到上一条任务内容，请重新输入后发送"
+    };
+    return;
+  }
+  handleSend(prompt);
+}
+
 function handleRunEvent(event: RunEvent) {
   logs.value = [...logs.value.slice(-200), `[${event.seq}] ${event.type}`];
   dispatchChat({ type: "event", event });
@@ -1870,6 +1884,8 @@ function handleRunEvent(event: RunEvent) {
       diffSource.value = "run";
       diffFiles.value = mergeDiffFiles(diffFiles.value, files);
       workbench.setSelectedDiffPath(files[0]?.path);
+      files.forEach((file) => refreshParentDirectory(file.path));
+      void refreshWorkspaceGitDiff();
     }
     // 注意：不再回退到 api.getRunDiff——该接口返回的是最近一个 diff.proposed 事件的 files，
     // 触发后会把当前已累加的多文件集合覆盖成单文件，导致"X 个文件已更改"提示从 3 变回 1。
@@ -1884,6 +1900,8 @@ function handleRunEvent(event: RunEvent) {
       diffSource.value = "session";
       diffFiles.value = mergeDiffFiles(diffFiles.value, files);
       workbench.setSelectedDiffPath(files[0]?.path);
+      files.forEach((file) => refreshParentDirectory(file.path));
+      void refreshWorkspaceGitDiff();
     }
   } else if (event.type === "run.succeeded" || event.type === "run.failed" || event.type === "run.cancelled") {
     run.value = run.value
@@ -2742,6 +2760,7 @@ async function handleLogout() {
           placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
           @send="(text: string) => handleSend(text)"
           @stop="handleStopRun"
+          @retry="handleRetryRun"
           @new-conversation="handleNewConversation"
           @initialize-process="() => initializeOpencodeProcessMutation.mutate()"
           @refresh-process="refreshOpencodeProcessStatus"
@@ -2783,7 +2802,7 @@ async function handleLogout() {
             :run="run"
             :logs="logs"
             @cancel="cancelRunMutation.mutate()"
-            @retry="() => lastPrompt && handleSend(lastPrompt)"
+            @retry="handleRetryRun"
           />
           <TerminalPanel
             v-else
