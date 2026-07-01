@@ -15,7 +15,6 @@ export type CodeEditorProps = {
   dirty?: boolean;
   readonly?: boolean;
   saving?: boolean;
-  feedback?: import("@test-agent/ui-kit").Feedback | null;
   /**
    * Markdown 预览开关（受控）。开启后会在编辑器下方追加分屏预览区，
    * 关闭后回到全屏编辑。组件本身不维护该状态，由父级（通常是 tab 表头）
@@ -34,7 +33,6 @@ export type CodeEditorEmits = {
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
-import { FeedbackBanner } from "@test-agent/ui-kit";
 import { languageFromPath } from "./language";
 import MarkdownPreview from "./MarkdownPreview.vue";
 
@@ -356,7 +354,6 @@ onBeforeUnmount(() => {
         />
       </template>
     </div>
-    <FeedbackBanner :feedback="feedback" />
   </div>
 </template>
 

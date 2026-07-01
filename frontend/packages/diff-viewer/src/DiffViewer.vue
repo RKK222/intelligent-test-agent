@@ -1,7 +1,6 @@
 <script lang="ts">
 import type * as monaco from "monaco-editor";
 import type { PromptPart, RunDiffFile } from "@test-agent/shared-types";
-import type { Feedback } from "@test-agent/ui-kit";
 
 export type DiffViewerProps = {
   files: RunDiffFile[];
@@ -10,7 +9,6 @@ export type DiffViewerProps = {
   viewMode?: "split" | "unified";
   accepting?: boolean;
   rejecting?: boolean;
-  feedback?: Feedback | null;
 };
 
 type FilePromptPart = Extract<PromptPart, { type: "file" }>;
@@ -19,7 +17,7 @@ type FilePromptPart = Extract<PromptPart, { type: "file" }>;
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { Check, ChevronDown, ChevronUp, MessageSquareQuote, RotateCcw } from "lucide-vue-next";
-import { Badge, Button, FeedbackBanner, cn } from "@test-agent/ui-kit";
+import { Badge, Button, cn } from "@test-agent/ui-kit";
 import { hunkToPromptPart, parseDiffHunks, selectAdjacentHunk } from "./hunks";
 import { parseUnifiedPatch } from "./unifiedPatch";
 
@@ -368,7 +366,6 @@ onBeforeUnmount(() => {
         <div ref="containerEl" class="min-w-0 flex-1 min-h-0" />
       </div>
     </div>
-    <FeedbackBanner :feedback="feedback" />
   </div>
 </template>
 
