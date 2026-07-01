@@ -8,7 +8,8 @@ import {
   mergeDiffFiles,
   messagesFromSessionMessages,
   normalizePathKey,
-  sessionTitleFromFirstMessage
+  sessionTitleFromFirstMessage,
+  workspaceLoadIsCurrent
 } from "../src/components/workbench-utils";
 import type { FileTreeEntry } from "@test-agent/shared-types";
 
@@ -38,6 +39,14 @@ describe("filterWorkspaceRootEntries", () => {
       { path: "src", name: "src", type: "directory" }
     ]);
     expect(filterWorkspaceRootEntries("config", entries)).toEqual(entries);
+  });
+});
+
+describe("workspaceLoadIsCurrent", () => {
+  it("accepts a result only for the selected workspace and current generation", () => {
+    expect(workspaceLoadIsCurrent("wrk_a", 3, "wrk_a", 3)).toBe(true);
+    expect(workspaceLoadIsCurrent("wrk_a", 3, "wrk_b", 3)).toBe(false);
+    expect(workspaceLoadIsCurrent("wrk_a", 2, "wrk_a", 3)).toBe(false);
   });
 });
 

@@ -16,6 +16,12 @@ import (
 	"nhooyr.io/websocket"
 )
 
+func TestRestartStopTimeoutReservesHalfOfCommandBudgetForStartup(t *testing.T) {
+	if got := restartStopTimeout(10 * time.Second); got != 5*time.Second {
+		t.Fatalf("expected 5s stop timeout, got %s", got)
+	}
+}
+
 func TestSupervisorConnectsSeedWebSocketWithoutHTTPDiscovery(t *testing.T) {
 	registered := make(chan Message, 1)
 	seedURL, cleanup := websocketServer(t, func(ctx context.Context, connection *websocket.Conn) {

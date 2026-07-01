@@ -43,7 +43,7 @@ class OpencodeProcessHeartbeatMaintenanceServiceTest {
     private static final String TRACE_ID = "trace_1234567890abcdef";
 
     @Test
-    void refreshRunningProcessHeartbeatsRecordsOnlyHealthyProcessAndMarksFailures() {
+    void refreshRunningProcessHeartbeatsRecordsOnlyHealthyProcessAndKeepsTransientFailures() {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess healthy = process("ocp_1111111111111111", 4096, OpencodeServerProcessStatus.RUNNING);
         OpencodeServerProcess unhealthy = process("ocp_2222222222222222", 4097, OpencodeServerProcessStatus.RUNNING);
@@ -64,10 +64,10 @@ class OpencodeProcessHeartbeatMaintenanceServiceTest {
         service.refreshRunningProcessHeartbeats(TRACE_ID);
 
         assertThat(heartbeatStore.opencodeHeartbeats).containsExactly(healthy.processId());
-        assertThat(repository.savedProcesses).containsOnlyKeys(healthy.processId(), unhealthy.processId(), unavailable.processId());
+        assertThat(repository.savedProcesses).containsOnlyKeys(healthy.processId());
         assertThat(repository.savedProcesses.get(healthy.processId()).status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
-        assertThat(repository.savedProcesses.get(unhealthy.processId()).status()).isEqualTo(OpencodeServerProcessStatus.UNHEALTHY);
-        assertThat(repository.savedProcesses.get(unavailable.processId()).status()).isEqualTo(OpencodeServerProcessStatus.FAILED);
+        assertThat(unhealthy.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
+        assertThat(unavailable.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
         assertThat(repository.savedProcesses.get(stopped.processId())).isNull();
         assertThat(repository.savedProcesses.values()).allSatisfy(process -> {
             assertThat(process.lastHealthCheckAt()).isEqualTo(NOW);

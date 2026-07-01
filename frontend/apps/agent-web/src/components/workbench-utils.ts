@@ -31,6 +31,18 @@ export function filterWorkspaceRootEntries(path: string, entries: FileTreeEntry[
   return entries.filter((entry) => entry.name !== ".opencode");
 }
 
+/**
+ * 异步文件树请求只能写回发起时的 Workspace 代际，避免旧重试覆盖新 Workspace。
+ */
+export function workspaceLoadIsCurrent(
+  requestWorkspaceId: string,
+  requestGeneration: number,
+  selectedWorkspaceId: string | undefined,
+  currentGeneration: number
+): boolean {
+  return requestWorkspaceId === selectedWorkspaceId && requestGeneration === currentGeneration;
+}
+
 export function diffFilesFromPayload(payload: Record<string, unknown>): RunDiffFile[] {
   const raw = Array.isArray(payload.diff) ? payload.diff : Array.isArray(payload.files) ? payload.files : [];
   return raw

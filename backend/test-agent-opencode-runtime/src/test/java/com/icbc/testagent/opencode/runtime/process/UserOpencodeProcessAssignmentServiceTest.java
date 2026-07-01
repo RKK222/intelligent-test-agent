@@ -170,6 +170,46 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     @org.junit.jupiter.api.Test
+    void statusKeepsReadyDuringShortStaleGracePeriod() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess process = withLastHealthCheckAt(
+                process("ocp_recent", USER_ID, "10.8.0.12", "ctr_idle", 4096, OpencodeServerProcessStatus.RUNNING),
+                Instant.now().minusSeconds(5));
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, process.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.unhealthy("temporary health failure");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
+        assertThat(response.message()).contains("暂时无法确认");
+    }
+
+    @org.junit.jupiter.api.Test
+    void requireReadyProcessRejectsStaleProcessAfterGracePeriod() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess process = process(
+                "ocp_expired",
+                USER_ID,
+                "10.8.0.12",
+                "ctr_idle",
+                4096,
+                OpencodeServerProcessStatus.RUNNING);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, process.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.unhealthy("persistent health failure");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.requireReadyProcess(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+        assertThat(repository.savedNodes).isEmpty();
+    }
+
+    @org.junit.jupiter.api.Test
     void initializeChoosesFirstFreePortInsideContainerRange() {
         FakeRepository repository = new FakeRepository();
         repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4098, 3, 0));
@@ -566,6 +606,28 @@ class UserOpencodeProcessAssignmentServiceTest {
                 NOW,
                 NOW,
                 TRACE_ID);
+    }
+
+    private static OpencodeServerProcess withLastHealthCheckAt(
+            OpencodeServerProcess process,
+            Instant lastHealthCheckAt) {
+        return new OpencodeServerProcess(
+                process.processId(),
+                process.userId(),
+                process.linuxServerId(),
+                process.containerId(),
+                process.port(),
+                process.pid(),
+                process.baseUrl(),
+                process.status(),
+                process.sessionPath(),
+                process.configPath(),
+                process.startedAt(),
+                lastHealthCheckAt,
+                process.healthMessage(),
+                process.createdAt(),
+                process.updatedAt(),
+                process.traceId());
     }
 
     private static UserOpencodeProcessBinding binding(

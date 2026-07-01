@@ -109,7 +109,7 @@ class OpencodeProcessStatusQueryServiceTest {
     }
 
     @Test
-    void unhealthyHealthMessageMarksProcessUnhealthy() {
+    void unhealthyHealthMessageReturnsStaleWithoutDatabaseWrite() {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess old = process("ocp_unhealthy", 4097, OpencodeServerProcessStatus.RUNNING, 22222L);
         repository.processes.put(old.processId(), old);
@@ -119,19 +119,21 @@ class OpencodeProcessStatusQueryServiceTest {
 
         OpencodeProcessStatusProbe probe = service.query(old.processId(), TRACE_ID);
 
-        assertThat(probe.status()).isEqualTo(OpencodeProcessProbeStatus.HEALTH_CHECK_FAILED);
+        assertThat(probe.status()).isEqualTo(OpencodeProcessProbeStatus.STALE);
+        assertThat(probe.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
         assertThat(probe.process()).get().satisfies(process -> {
-            assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.UNHEALTHY);
+            assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
             assertThat(process.pid()).isEqualTo(22222L);
-            assertThat(process.healthMessage()).isEqualTo("opencode http health failed");
+            assertThat(process.healthMessage()).isEqualTo("old");
         });
-        assertThat(probe.managerStatus()).isEqualTo("UNHEALTHY");
-        assertThat(probe.healthStatus()).isEqualTo("UNHEALTHY");
-        assertThat(probe.restartable()).isTrue();
+        assertThat(probe.managerStatus()).isEqualTo("STALE");
+        assertThat(probe.healthStatus()).isEqualTo("STALE");
+        assertThat(probe.restartable()).isFalse();
+        assertThat(repository.savedProcesses).isEmpty();
     }
 
     @Test
-    void healthCommandExceptionMarksProcessFailedAndKeepsErrorCode() {
+    void healthCommandExceptionReturnsStaleAndKeepsErrorCodeWithoutDatabaseWrite() {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess old = process("ocp_failed", 4097, OpencodeServerProcessStatus.RUNNING, 22222L);
         repository.processes.put(old.processId(), old);
@@ -141,16 +143,17 @@ class OpencodeProcessStatusQueryServiceTest {
 
         OpencodeProcessStatusProbe probe = service.query(old.processId(), TRACE_ID);
 
-        assertThat(probe.status()).isEqualTo(OpencodeProcessProbeStatus.HEALTH_CHECK_FAILED);
+        assertThat(probe.status()).isEqualTo(OpencodeProcessProbeStatus.STALE);
         assertThat(probe.errorCode()).isEqualTo(ErrorCode.OPENCODE_TIMEOUT);
         assertThat(probe.process()).get().satisfies(process -> {
-            assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.FAILED);
+            assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.RUNNING);
             assertThat(process.pid()).isEqualTo(22222L);
-            assertThat(process.healthMessage()).isEqualTo("manager command timeout");
+            assertThat(process.healthMessage()).isEqualTo("old");
         });
-        assertThat(probe.managerStatus()).isEqualTo("CHECK_FAILED");
-        assertThat(probe.healthStatus()).isEqualTo("CHECK_FAILED");
-        assertThat(probe.restartable()).isTrue();
+        assertThat(probe.managerStatus()).isEqualTo("STALE");
+        assertThat(probe.healthStatus()).isEqualTo("STALE");
+        assertThat(probe.restartable()).isFalse();
+        assertThat(repository.savedProcesses).isEmpty();
     }
 
     private static OpencodeProcessStatusQueryService service(

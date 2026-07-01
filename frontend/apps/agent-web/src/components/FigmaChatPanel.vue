@@ -632,20 +632,14 @@ function resetChoice() {
 }
 
 // ===== 技能面板 =====
-// 使用真实的 source=skill Command，删除硬编码技能列表
+// 直接展示 OpenCode /command 返回的 source=skill 项；Agent 是否可调用由 OpenCode 原生 permission.skill 判定。
 type SkillItem = { name: string; description: string; commandId: string }
 
 // 从 commands 中过滤出 source=skill 的命令作为技能列表
-// TODO: 第二阶段需要按当前 Agent 的 permission.skill 过滤：
-// - 后端 API 需要返回 Agent 的 permission 信息
-// - 或新增"当前 Agent 可用 Skill 目录"接口
-// - 当前暂时显示所有 source=skill 的命令
 const skills = computed<SkillItem[]>(() => {
   if (!props.commands || props.commands.length === 0) return []
   return props.commands
     .filter((cmd) => cmd.source === 'skill')
-    // 预留：按 Agent permission 过滤
-    // .filter((cmd) => isSkillAllowedForAgent(cmd.name, props.selectedAgentId, agentPermissions))
     .map((cmd) => ({
       name: cmd.name,
       description: cmd.description || '',

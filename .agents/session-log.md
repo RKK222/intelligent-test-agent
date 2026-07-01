@@ -7,7 +7,7 @@
 - Why: `/global/health` 返回 200 时页面显示绿灯，但公共配置 `opencode.jsonc` 仍使用旧的 `skills: ["./skills"]`，OpenCode 1.17.7 的 `/command` 实际返回 `ConfigInvalidError`；同时瞬时 manager/HTTP 探测会覆盖数据库稳定状态，文件 ticket 强探测和旧 workspace 重试会放大抖动，运行管理 restart 还存在“实际成功但 Java 先超时”的竞态。
 - What: 公共配置改为 OpenCode 原生 `"skills": {"paths": ["./skills"]}` 并提交推送到配置仓库；manager readiness 增加 `/global/config` 可加载校验，restart 的 stop 阶段只占总预算一半；Java 瞬时失败返回 `STALE` 且不覆盖稳定状态，最近成功健康检查仅保留 60 秒 READY 宽限，启动控制错误立即失败并收敛候选状态；文件 ticket 只读 affinity，工作区文件树用 workspaceId + 代次隔离旧请求；技能面板继续直接消费 OpenCode `/command` 的 `source=skill`，调用权限仍由原生 `permission.skill` 决定。
 - How: 未修改 OpenCode 源码、generated SDK、数据库结构或环境文件；Java 继续通过公共 startup/status/stop 服务和 manager WebSocket 控制进程，普通 runtime/skill/agent 请求继续经 `AgentRuntime` 代理 OpenCode 原生 API。同步 opencode-manager、runtime、agent-web README 与 HTTP API 文档，并补充 Go、Java、Vue 回归测试。
-- Result: `go test ./...`、相关 Java 定向测试、runtime/API 模块全量测试、前端 195 个 Vitest、typecheck、build 和真实 `/api/command`（44 条命令、42 条 skill）通过。后端全 reactor 到 persistence 前均通过；persistence 仍有近期日志已记录的 H2 `ON CONFLICT` 不兼容、`usr_test_dev` fixture 外键缺失和 migration seed 断言失败，本次未扩大范围处理。
+- Result: `go test ./...`、相关 Java 定向测试、runtime/API 模块全量测试、前端 195 个 Vitest、typecheck、build 和真实 `/api/command`（44 条命令、42 条 skill）通过；额外确认项目公共配置目录自身有 19 个业务 skill，其余来自 OpenCode 原生合并到的用户级/系统级 skill。后端全 reactor 到 persistence 前均通过；persistence 仍有近期日志已记录的 H2 `ON CONFLICT` 不兼容、`usr_test_dev` fixture 外键缺失和 migration seed 断言失败，本次未扩大范围处理。
 
 ### 2026-07-01 - 修复 opencode 状态不一致与回退后编辑器缓存未刷新
 

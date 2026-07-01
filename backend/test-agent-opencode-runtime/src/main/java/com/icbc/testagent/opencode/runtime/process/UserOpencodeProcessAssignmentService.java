@@ -22,6 +22,7 @@ import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatu
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -41,6 +42,7 @@ public class UserOpencodeProcessAssignmentService {
 
     private static final String OPENCODE_AGENT_ID = "opencode";
     private static final int CONTAINER_CANDIDATE_LIMIT = 100;
+    private static final Duration STALE_READY_GRACE_PERIOD = Duration.ofSeconds(60);
     private static final String PARAM_OPENCODE_SESSION_DIR = "OPENCODE_SESSION_DIR";
     private static final String PARAM_OPENCODE_PUBLIC_CONFIG_DIR = "OPENCODE_PUBLIC_CONFIG_DIR";
     private static final CommonParameterValues EMPTY_PARAMETER_VALUES = new CommonParameterValues() {
@@ -187,15 +189,14 @@ public class UserOpencodeProcessAssignmentService {
             return ready(refreshed, "opencode 进程可用", now);
         }
         OpencodeServerProcess refreshed = probe.process().orElse(current);
-        // STALE 状态表示瞬时故障，保留上次成功状态，展示"状态暂时无法确认"
-        // 只有当数据库中进程状态不是 RUNNING 时才要求重新初始化
+        // STALE 只在最后一次成功健康检查后的短暂宽限期内保留可用状态。
         if (probe.status() == OpencodeProcessProbeStatus.STALE) {
-            if (current.status() == OpencodeServerProcessStatus.RUNNING) {
-                // 上次确认可用，保留绿灯，消息提示暂无法确认
+            if (isWithinStaleReadyGrace(current, probe.checkedAt())) {
                 return ready(refreshed, "状态暂时无法确认：" + probe.message(), now);
             }
-            // 上次状态不是 RUNNING，返回不可用但不要求重新初始化
-            return unavailable("opencode 进程健康状态暂无法确认：" + probe.message(), refreshed, now);
+            return canRebuildOn(binding.get().linuxServerId())
+                    ? needsInitialization(statusFailureMessage(probe), refreshed, now)
+                    : unavailable("opencode 进程健康状态暂无法确认：" + probe.message(), refreshed, now);
         }
         if (probe.errorCode() != null) {
             // 有错误码但非 STALE，可能是明确的失败，根据上次状态决定
@@ -337,10 +338,9 @@ public class UserOpencodeProcessAssignmentService {
             executionNodeRepository.save(node);
             return new UserOpencodeProcessAssignment(node, refreshed.linuxServerId().value());
         }
-        // STALE 状态：如果数据库是 RUNNING，允许运行（使用上次成功数据）
+        // STALE 只在最后一次成功健康检查后的短暂宽限期内放行。
         if (probe.status() == OpencodeProcessProbeStatus.STALE
-                && process.status() == OpencodeServerProcessStatus.RUNNING) {
-            // 使用数据库中的进程信息，允许运行
+                && isWithinStaleReadyGrace(process, probe.checkedAt())) {
             ExecutionNode node = projectExecutionNode(process, now, traceId);
             executionNodeRepository.save(node);
             return new UserOpencodeProcessAssignment(node, process.linuxServerId().value());
@@ -367,6 +367,15 @@ public class UserOpencodeProcessAssignmentService {
         return process.status() == OpencodeServerProcessStatus.RUNNING
                 || process.status() == OpencodeServerProcessStatus.STARTING
                 || process.status() == OpencodeServerProcessStatus.UNHEALTHY;
+    }
+
+    private boolean isWithinStaleReadyGrace(OpencodeServerProcess process, Instant checkedAt) {
+        if (process.status() != OpencodeServerProcessStatus.RUNNING
+                || process.lastHealthCheckAt() == null
+                || checkedAt == null) {
+            return false;
+        }
+        return !process.lastHealthCheckAt().plus(STALE_READY_GRACE_PERIOD).isBefore(checkedAt);
     }
 
     private boolean hasInitializableContainer() {

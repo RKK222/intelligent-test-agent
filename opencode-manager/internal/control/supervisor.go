@@ -221,11 +221,20 @@ func (s *Supervisor) dispatchProcessCommand(ctx context.Context, message Message
 	case "stop":
 		return s.manager.Stop(ctx, process.StopRequest{Port: message.Port, TraceID: message.TraceID, Timeout: timeout})
 	case "restart":
-		return s.manager.Restart(ctx, process.StopRequest{Port: message.Port, TraceID: message.TraceID, Timeout: timeout})
+		return s.manager.Restart(ctx, process.StopRequest{
+			Port:    message.Port,
+			TraceID: message.TraceID,
+			Timeout: restartStopTimeout(timeout),
+		})
 	default:
 		err := fmt.Errorf("unknown command %q", message.Command)
 		return process.Result{Status: process.StatusFailed, Port: message.Port, TraceID: message.TraceID, Message: err.Error()}, err
 	}
+}
+
+// restart 的总预算还要覆盖新进程启动和命令回包，stop 阶段最多使用一半。
+func restartStopTimeout(commandTimeout time.Duration) time.Duration {
+	return commandTimeout / 2
 }
 
 func (s *Supervisor) topologyMessage(messageType string) Message {

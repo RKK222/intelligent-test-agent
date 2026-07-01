@@ -64,7 +64,7 @@ opencode-manager restart --port 4096 --trace-id trace_1234567890abcdef
 opencode-manager list --trace-id trace_1234567890abcdef
 ```
 
-`health` 先检查 PID 是否存在，再请求 `http://127.0.0.1:{port}/global/health`，失败时回退 `/doc`。
+`health` 先检查 PID 是否存在，再依次请求 `http://127.0.0.1:{port}/global/health` 和 `/global/config`。前者确认进程 HTTP 存活，后者确认 `OPENCODE_CONFIG_DIR` 中的公共配置符合当前 OpenCode 原生 schema；任一失败都返回 `UNHEALTHY`，不回退只能证明 HTTP 可访问的 `/doc`。例如 OpenCode 1.17.7 的额外技能目录配置必须写成 `"skills": {"paths": ["./skills"]}`，不能使用旧数组形式。
 
 `start` 对已经写入本地 state 且健康的端口保持幂等：重复启动同一端口会返回 `STARTED` 和既有 PID，不会再拉起第二个 opencode server。若该端口已有 state 但健康检查失败，`start` 返回 `FAILED`，需要先用 `health`、`restart` 或 `stop` 排查/清理。`stop` 对 state 存在但 OS 进程已结束的端口按幂等成功处理，会删除本地 state 并返回 `STOPPED`；`list` 和心跳会过滤并清理 PID 已不存在的 stale state，避免死进程继续占用容量或展示在运行管理明细中。
 
@@ -87,7 +87,7 @@ WebSocket 文本帧为 JSON，协议版本固定 `opencode-manager.v1`。manager
 - `managerHeartbeat`：每 5 秒通过本服务器 Java socket 上报当前进程数、已连接后端 ID、端口池、容器 CPU/内存/磁盘 IO 指标、`metricsSource` 和本地 opencode server 进程明细，Java 写入 Redis latest snapshot，TTL 为 10 秒；资源指标同时追加到 Redis 48 小时历史 ZSET。进程明细包含安全展示用 `startCommand`，只拼出 `XDG_DATA_HOME`、`OPENCODE_CONFIG_DIR` 和 `opencode serve` 固定参数；旧 state 缺字段时按当前配置和端口派生。心跳生成前会清理 PID 已不存在的 stale state；`configUpdate` 成功应用以及 `start`、`stop`、`restart` 成功后还会立即补发一次心跳，加速 Redis latest snapshot 收敛。
 - `commandResult`：执行后端 `command` 后返回状态、端口、PID、路径、traceId 和可选 `errorCode`。`start` 发现目标服务器 `OPENCODE_PUBLIC_CONFIG_DIR` 未初始化时返回 `FAILED`、`errorCode=OPENCODE_UNAVAILABLE`，`message` 包含目标服务器和 manager 实际检查的配置目录，并提示联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化。
 
-manager 当前接受的命令为 `start`、`health`、`stop`、`restart`。命令最终复用 `internal/process`，不会重新实现 opencode 生命周期逻辑。超级管理员运行管理页的“重启/停止”按钮先调用 Java 后端 HTTP API，再由后端通过已认证的 manager WebSocket 转发 `restart`/`stop`，浏览器不直连 manager 或 opencode server。
+manager 当前接受的命令为 `start`、`health`、`stop`、`restart`。命令最终复用 `internal/process`，不会重新实现 opencode 生命周期逻辑。`restart` 的总命令超时同时覆盖停止、重新启动和回包，停止阶段最多使用一半预算，避免新进程实际已启动但 Java 等待端先返回超时。超级管理员运行管理页的“重启/停止”按钮先调用 Java 后端 HTTP API，再由后端通过已认证的 manager WebSocket 转发 `restart`/`stop`，浏览器不直连 manager 或 opencode server。
 
 ## 状态与日志
 

@@ -185,6 +185,7 @@ public class OpencodeProcessStartupService {
         OpencodeProcessStatusProbe probe = waitForStartupHealth(candidate.processId(), request.traceId());
         if (probe.status() != OpencodeProcessProbeStatus.RUNNING) {
             ErrorCode errorCode = probe.errorCode() == null ? ErrorCode.OPENCODE_UNAVAILABLE : probe.errorCode();
+            persistFailedStartup(candidate, probe, request.traceId());
             throw new PlatformException(
                     errorCode,
                     startupFailureMessage(probe),
@@ -226,12 +227,47 @@ public class OpencodeProcessStartupService {
      * manager 控制面错误或进程不存在立即失败。
      */
     private boolean shouldRetryStartupHealth(OpencodeProcessStatusProbe probe) {
-        // STALE 表示 HTTP 未就绪但进程可能还在启动中，需要继续等待
+        // 只有 OpenCode HTTP 暂未就绪才等待；Manager 超时/网关错误直接失败。
         if (probe.status() == OpencodeProcessProbeStatus.STALE) {
-            return true;
+            return probe.errorCode() == ErrorCode.OPENCODE_UNAVAILABLE;
         }
         // 普通健康失败（非控制面错误）也需要等待
         return probe.status() == OpencodeProcessProbeStatus.HEALTH_CHECK_FAILED && probe.errorCode() == null;
+    }
+
+    /**
+     * 启动确认失败时收敛候选快照，避免异常返回后数据库长期残留 STARTING。
+     */
+    private void persistFailedStartup(
+            OpencodeServerProcess candidate,
+            OpencodeProcessStatusProbe probe,
+            String traceId) {
+        if (probe.status() == OpencodeProcessProbeStatus.NOT_STARTED) {
+            return;
+        }
+        OpencodeServerProcess current = probe.process().orElse(candidate);
+        OpencodeServerProcessStatus status =
+                probe.errorCode() == null || probe.errorCode() == ErrorCode.OPENCODE_UNAVAILABLE
+                        ? OpencodeServerProcessStatus.UNHEALTHY
+                        : OpencodeServerProcessStatus.FAILED;
+        Instant checkedAt = probe.checkedAt();
+        repository.saveOpencodeServerProcess(new OpencodeServerProcess(
+                current.processId(),
+                current.userId(),
+                current.linuxServerId(),
+                current.containerId(),
+                current.port(),
+                current.pid(),
+                current.baseUrl(),
+                status,
+                current.sessionPath(),
+                current.configPath(),
+                current.startedAt(),
+                checkedAt,
+                probe.message(),
+                current.createdAt(),
+                checkedAt,
+                traceId));
     }
 
     private int startupHealthMaxAttempts() {

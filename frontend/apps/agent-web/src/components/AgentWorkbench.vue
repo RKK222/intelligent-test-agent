@@ -77,7 +77,8 @@ import {
   runtimeStatus,
   sessionTitleFromFirstMessage,
   syntheticEvent,
-  text
+  text,
+  workspaceLoadIsCurrent
 } from "./workbench-utils";
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
@@ -102,6 +103,8 @@ const entriesByDirectory = ref<Record<string, FileTreeEntry[]>>({});
 const expandedDirectories = ref<Set<string>>(new Set());
 // 文件树面板内错误状态，不覆盖全局顶部反馈
 const fileTreeError = ref<string | null>(null);
+let workspaceLoadGeneration = 0;
+const fileTreeRetryTimers = new Set<ReturnType<typeof setTimeout>>();
 // 多个目录可能同时在加载（用户连续点开多个折叠项，或 expandPathToFile 一次性
 // 展开多层）。使用 Set<string> 而非单值 ref，避免后到的加载把前者的 loading 状态覆盖，
 // 导致"点击没反应"——toggleDirectory 的二次点击守卫会因 loading 状态丢失而误判。
@@ -240,6 +243,7 @@ onMounted(() => {
 });
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onWindowKeydown);
+  clearFileTreeRetryTimers();
 });
 
 // Chat runtime：单一 reducer 维护，dispatch 闭包更新
@@ -1155,9 +1159,12 @@ function createTerminalTicket() {
 
 function resetWorkspaceState() {
   // Workspace 切换后必须清掉旧根目录绑定的文件树、编辑器、Diff 与运行态，避免误操作旧路径。
+  workspaceLoadGeneration++;
+  clearFileTreeRetryTimers();
   entriesByDirectory.value = {};
   expandedDirectories.value = new Set();
   loadingPath.value = new Set();
+  fileTreeError.value = null;
   // 切换工作区时清空搜索状态，避免旧工作区的搜索结果残留。
   searchKeyword.value = "";
   searchResults.value = [];
@@ -1570,9 +1577,15 @@ async function loadDirectory(
   path: string,
   workspaceId = selectedWorkspace.value?.workspaceId,
   force = false,
-  retryCount = 0
+  retryCount = 0,
+  generation = workspaceLoadGeneration
 ) {
-  if (!workspaceId) {
+  if (!workspaceId || !workspaceLoadIsCurrent(
+    workspaceId,
+    generation,
+    selectedWorkspaceIdRef.value,
+    workspaceLoadGeneration
+  )) {
     return;
   }
   // 已被其他并发请求加载完成（或正在加载）就直接返回，避免重复请求与状态竞争。
@@ -1586,6 +1599,9 @@ async function loadDirectory(
   loadingPath.value = nextLoading;
   try {
     const entries = filterWorkspaceRootEntries(path, await api.listFiles(workspaceId, path));
+    if (!workspaceLoadIsCurrent(workspaceId, generation, selectedWorkspaceIdRef.value, workspaceLoadGeneration)) {
+      return;
+    }
     entriesByDirectory.value = { ...entriesByDirectory.value, [path]: entries };
     if (path === "") {
       workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [workspaceId]: true };
@@ -1593,6 +1609,9 @@ async function loadDirectory(
       fileTreeError.value = null;
     }
   } catch (error) {
+    if (!workspaceLoadIsCurrent(workspaceId, generation, selectedWorkspaceIdRef.value, workspaceLoadGeneration)) {
+      return;
+    }
     // 根目录加载失败：设置面板内错误，保留上次成功数据
     if (path === "") {
       if (error instanceof BackendApiError && ["OPENCODE_UNAVAILABLE", "OPENCODE_BAD_GATEWAY"].includes(error.code)) {
@@ -1602,9 +1621,11 @@ async function loadDirectory(
       if (retryCount < 3) {
         const delay = Math.pow(2, retryCount) * 1000;
         fileTreeError.value = `加载文件树失败，${delay / 1000} 秒后重试...`;
-        setTimeout(() => {
-          void loadDirectory(path, workspaceId, force, retryCount + 1);
+        const timer = setTimeout(() => {
+          fileTreeRetryTimers.delete(timer);
+          void loadDirectory(path, workspaceId, force, retryCount + 1, generation);
         }, delay);
+        fileTreeRetryTimers.add(timer);
       } else {
         // 重试耗尽，显示错误和手动重试按钮
         fileTreeError.value = error instanceof BackendApiError ? error.message : "加载文件树失败";
@@ -1618,10 +1639,19 @@ async function loadDirectory(
       }
     }
   } finally {
-    const cleared = new Set(loadingPath.value);
-    cleared.delete(path);
-    loadingPath.value = cleared;
+    if (workspaceLoadIsCurrent(workspaceId, generation, selectedWorkspaceIdRef.value, workspaceLoadGeneration)) {
+      const cleared = new Set(loadingPath.value);
+      cleared.delete(path);
+      loadingPath.value = cleared;
+    }
   }
+}
+
+function clearFileTreeRetryTimers() {
+  for (const timer of fileTreeRetryTimers) {
+    clearTimeout(timer);
+  }
+  fileTreeRetryTimers.clear();
 }
 
 // 处理文件搜索输入：防抖 250ms 后发起 workspace.search RPC。

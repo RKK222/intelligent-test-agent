@@ -159,6 +159,24 @@ class OpencodeProcessStartupServiceTest {
     }
 
     @Test
+    void startAndVerifyDoesNotRetryManagerControlFailure() {
+        FakeRepository repository = new FakeRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.healthFailure = new PlatformException(ErrorCode.OPENCODE_TIMEOUT, "manager command timeout");
+        OpencodeProcessStartupService service = service(repository, gateway, new RecordingHeartbeatStore());
+
+        assertThatThrownBy(() -> service.startAndVerify(request(new OpencodeProcessId("ocp_manager_timeout"), NOW, NOW)))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_TIMEOUT));
+
+        assertThat(gateway.healthCommands).hasSize(1);
+        assertThat(repository.findOpencodeServerProcessById(new OpencodeProcessId("ocp_manager_timeout")))
+                .get()
+                .extracting(OpencodeServerProcess::status)
+                .isEqualTo(OpencodeServerProcessStatus.FAILED);
+    }
+
+    @Test
     void startAndVerifyMapsNotRunningHealthToStopped() {
         FakeRepository repository = new FakeRepository();
         RecordingGateway gateway = new RecordingGateway();
@@ -209,10 +227,14 @@ class OpencodeProcessStartupServiceTest {
         private final List<OpencodeProcessHealthCommand> healthCommands = new ArrayList<>();
         private final Deque<OpencodeProcessHealthResult> healthResults = new ArrayDeque<>();
         private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy("ok");
+        private RuntimeException healthFailure;
 
         @Override
         public OpencodeProcessHealthResult checkHealth(OpencodeProcessHealthCommand command) {
             healthCommands.add(command);
+            if (healthFailure != null) {
+                throw healthFailure;
+            }
             if (!healthResults.isEmpty()) {
                 return healthResults.removeFirst();
             }

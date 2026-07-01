@@ -35,9 +35,9 @@ type Checker struct {
 	ProbeBaseURL string
 }
 
-// Check 执行本地 PID + HTTP 健康检查，/global/health 为唯一 readiness 端点。
-// /doc 只能证明 HTTP 服务存活（liveness），不能证明 Opencode Runtime 可用，
-// 因此不再作为 readiness 回退，避免出现"绿灯但 API 不可用"的情况。
+// Check 执行本地 PID、HTTP 存活和配置可加载检查。
+// /global/health 只证明服务存活；/global/config 用于确认公共配置符合当前
+// OpenCode 原生 schema，避免进程绿灯但 command/skill 等运行时接口全部返回 400。
 func (c Checker) Check(ctx context.Context, record state.ProcessRecord) Result {
 	alive := c.ProcessAlive
 	if alive == nil {
@@ -65,16 +65,23 @@ func (c Checker) Check(ctx context.Context, record state.ProcessRecord) Result {
 	defer cancel()
 
 	baseURL := c.probeBaseURL(record)
-	// 只探测 /global/health 作为 readiness；不再回退 /doc
-	if ok, message := httpOK(checkCtx, client, baseURL, "/global/health"); ok {
+	if ok, _ := httpOK(checkCtx, client, baseURL, "/global/health"); !ok {
+		return Result{
+			Status:  StatusUnhealthy,
+			Port:    record.Port,
+			PID:     record.PID,
+			Message: "opencode /global/health endpoint is not reachable",
+			TraceID: record.TraceID,
+		}
+	}
+	if ok, message := httpOK(checkCtx, client, baseURL, "/global/config"); ok {
 		return healthy(record, message)
 	}
-	// /global/health 失败时返回明确的 UNHEALTHY，不回退 /doc
 	return Result{
 		Status:  StatusUnhealthy,
 		Port:    record.Port,
 		PID:     record.PID,
-		Message: "opencode /global/health endpoint is not reachable",
+		Message: "opencode configuration is not loadable",
 		TraceID: record.TraceID,
 	}
 }

@@ -101,7 +101,7 @@ class OpencodeProcessStopServiceTest {
 
         assertThat(repository.findOpencodeServerProcessById(running.processId())).get()
                 .extracting(OpencodeServerProcess::status)
-                .isEqualTo(OpencodeServerProcessStatus.UNHEALTHY);
+                .isEqualTo(OpencodeServerProcessStatus.RUNNING);
     }
 
     @Test

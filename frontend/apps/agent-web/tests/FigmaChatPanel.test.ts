@@ -11,6 +11,30 @@ const markdownViewStub = {
 };
 
 describe("FigmaChatPanel", () => {
+  it("lists native skill commands when the user types slash", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        commands: [
+          { commandId: "skill-1", name: "identify-test-objects", description: "识别测试对象", source: "skill" },
+          { commandId: "command-1", name: "help", description: "帮助", source: "command" }
+        ]
+      }
+    });
+
+    await wrapper.get("textarea").setValue("/");
+
+    expect(wrapper.find(".figma-chat-skill-panel").exists()).toBe(true);
+    expect(wrapper.text()).toContain("identify-test-objects");
+    expect(wrapper.text()).not.toContain("帮助");
+
+    await wrapper.get(".figma-chat-skill-row").trigger("click");
+
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("/identify-test-objects ");
+    expect(wrapper.emitted("update:inputValue")).toContainEqual(["/identify-test-objects "]);
+  });
+
   it("sends the trimmed prompt and clears the composer when the process is ready", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
