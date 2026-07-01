@@ -1437,7 +1437,6 @@
 - Pitfalls: 这个修复与"中文月份"任务无关，但属于阻断 dev server 的预存在 bug；不修就测不了用户反馈。
 - Verification: `pnpm typecheck` 仅剩其它预存在错误（与本 PR 无关），`pnpm playwright test workbench.spec.ts -g "新增版本 dialog opens"` 通过。
 - Next: 在 commit message 里把"中文月份"和"FigmaChatPanel 修复"拆成两条提交，避免单点耦合。
-
 ### 2026-06-24 - Require Session Log In Project Rules
 
 - Why: The session log needed to be treated as a first-class tracked artifact, not an ad hoc local note, so remote commits carry the handoff context too.
@@ -2417,3 +2416,13 @@ bash /tmp/test-api-after-restart.sh
 - What: 默认私人 worktree 分支命名统一为 `{应用分支名}_{用户 id}_{私人空间名称}`，同名分支优先复用/移动已有 worktree；历史记录路径不匹配时更新 personal workspace 和 runtime workspace，模板子目录缺失但 repo root 存在时补偿到 repo root。工作区 diff 改用平台 Git diff 并解码 quoted path，agents diff 只展示应用级 `.opencode/agents` 与 `.opencode/skills`；回退按钮调用平台 discard API，并向父组件发 `changes-refreshed` 同步活动栏计数和 diff viewer。前端 runtime 查询新增当前 workspace file route ready gate，避免切工作区/opencode 未就绪时刷屏 502/503；重启脚本在未显式设置 `TEST_AGENT_BASE_URL` 时复用自动探测的 `TEST_AGENT_BACKEND_LISTEN_URL` 给浏览器访问。
 - How: 后端新增 `discardWorkspaceGitFiles`，Git 服务支持 porcelain path 解码、worktree 同分支复用/移动、tracked restore、staged new unstage+clean、untracked clean；personal workspace location 更新走 MyBatis XML mapper。前端移除加载测试数据按钮，底部工作区入口显示 worktree 名称，公共级 agents 保持进入即加载且防卡死，opencode READY 后强制刷新当前根目录。同步更新 API/前端/工作区管理文档和定向测试。
 - Result: 单元/组件/类型/Playwright mock 验证通过；真实 UI 曾验证到默认 worktree 名称、公共 agents 加载、opencode 启动后文件树重拉、切到 `F-COSS 移动端 / 20260705` 不再 409 且显示 `feature_testagent_20260705_usr_test_dev_default`。后续真实 UI 复测被外部测试环境网络阻塞：`192.168.100.200:5432` 和 `192.168.100.200:16379` 均 `No route to host`，后端无法启动，需网络恢复后重跑 `./restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build`。
+
+### 2026-07-01 - 优化页脚与工作区切换布局
+
+- Why: 用户需要优化左下角和页脚的信息展示结构，去除重复的多处分支/版本信息展示；只在左下角侧边栏页脚保留分支切换和服务器切换的 icon-only 按钮，将当前文件路径移回编辑器页脚左侧，并把服务器切换按钮移入侧栏页脚；同时在文件树侧边栏的“工作空间”栏目右侧直观展示当前 worktree 名字。
+- What:
+  - 修改 `WorkbenchFooter.vue`：使分支两级菜单切换按钮 `ta-workbench-footer-branch` 在侧边栏页脚（`showSave` 为 false 时）仅显示为 `⇄` 图标且不含文字，并将其样式修正为 26x26px 的正方形按钮；将“写入路径”和“更新时间”移回编辑器页脚的左侧，通过 `|` 分割；移除原中间部分的卡片容器 `.ta-workbench-footer-middle`；将“切换服务器工作空间”按钮 `ta-workbench-server-switch` 移回侧边栏页脚，放置于分支切换按钮的右侧。
+  - 修改 `FigmaFileExplorer.vue`：新增 `personalWorkspaceBranch` 属性并透传给 `WorkbenchFooter`；修改 collapsible 部分，当 `personalWorkspaceBranch` 存在时在“工作空间”标题右侧以 `/ worktree: {branch}` 形式显示当前的 worktree 名字；添加对应的 `.figma-fe-section-worktree` 样式定义。
+  - 修改 `WorkbenchFooter.test.ts`：更新单元测试中的 prop 与断言结构（在测试服务器切换时使用默认 `showSave: false`，并在 worktree 测试中断言 `title` 属性而不是 visible text）。
+- How: 纯前端代码与测试更新，重构 `WorkbenchFooter` 的条件渲染结构和样式定义，通过 prop 传参打通侧栏组件与 worktree 数据绑定。
+- Result: 所有 31 个测试文件（共 193 个用例）全部通过，`pnpm build` 在本地成功生成生产包，UI 结构完全符合用户诉求。

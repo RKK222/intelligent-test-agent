@@ -189,6 +189,9 @@ defineExpose({
               <ChevronDown v-if="workspaceExpanded" class="h-3.5 w-3.5" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
               <span class="figma-fe-section-title" :title="workspaceName">工作空间</span>
+              <span v-if="personalWorkspaceBranch" class="figma-fe-section-worktree" :title="`当前 worktree: ${personalWorkspaceBranch}`">
+                / worktree: {{ personalWorkspaceBranch }}
+              </span>
             </button>
             <div class="figma-fe-section-actions" v-if="workspaceExpanded">
                <button
@@ -396,6 +399,17 @@ defineExpose({
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.figma-fe-section-worktree {
+  font-size: 11px;
+  color: #71717a;
+  font-weight: normal;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
 }
 
 .figma-fe-section-actions {

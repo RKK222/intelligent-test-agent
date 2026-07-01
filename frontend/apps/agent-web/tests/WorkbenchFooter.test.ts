@@ -26,7 +26,8 @@ describe("WorkbenchFooter", () => {
     const hidden = mount(WorkbenchFooter, {
       props: {
         appName: "F-COSS",
-        templates: [template]
+        templates: [template],
+        showSave: false
       }
     });
 
@@ -36,7 +37,8 @@ describe("WorkbenchFooter", () => {
       props: {
         appName: "F-COSS",
         templates: [template],
-        showServerWorkspaceSwitch: true
+        showServerWorkspaceSwitch: true,
+        showSave: false
       }
     });
 
@@ -78,7 +80,6 @@ describe("WorkbenchFooter", () => {
       }
     });
 
-    expect(wrapper.text()).toContain("feature_testagent_20260618_usr_888888888_default");
     expect(wrapper.find(".ta-workbench-footer-branch").attributes("title"))
       .toContain("feature_testagent_20260618_usr_888888888_default");
   });

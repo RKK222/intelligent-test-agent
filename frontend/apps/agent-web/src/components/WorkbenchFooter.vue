@@ -376,7 +376,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         鼠标 hover 模板时触发子菜单；点击版本后由父组件切换运行态 Workspace。
       -->
       <div
-        v-if="useCascadeMenu"
+        v-if="!showSave && useCascadeMenu"
         class="ta-workbench-cascade"
         :class="{ 'is-open': menuOpen }"
       >
@@ -390,12 +390,10 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
           @click.stop="toggleMenu"
         >
           <ArrowLeftRight class="ta-workbench-footer-icon" />
-          <span class="ta-workbench-footer-branch-label">{{ triggerLabel }}</span>
-          <span v-if="personalWorkspaceBranch" class="ta-workbench-footer-branch-ref">worktree: {{ personalWorkspaceBranch }}</span>
         </button>
         <!--
           两级菜单用 <Teleport to="body"> + position:fixed 挂到 body 末尾，
-          避开 dockview 面板的 overflow:hidden / 内部 stacking context 裁切。
+          避开 dockview 面板 of overflow:hidden / 内部 stacking context 裁切。
           一级菜单 fixed 定位到触发按钮正上方；二级菜单 fixed 定位到当前 hover 行右侧，
           不再嵌在一级菜单 li 内，所以可以越过一级菜单的边界显示。
         -->
@@ -496,7 +494,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         </Teleport>
       </div>
       <button
-        v-if="showServerWorkspaceSwitch"
+        v-if="!showSave && showServerWorkspaceSwitch"
         type="button"
         class="ta-workbench-server-switch"
         :disabled="serverWorkspaceSwitchDisabled"
@@ -506,13 +504,13 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
       >
         <ServerCog class="ta-workbench-footer-icon" />
       </button>
-    </div>
-
-    <div v-if="showSave" class="ta-workbench-footer-middle">
-      <span class="ta-workbench-footer-path">
-        写入路径：<span class="ta-workbench-footer-path-value">{{ writePath ?? "—" }}</span>
-      </span>
-      <span class="ta-workbench-footer-updated">更新时间：{{ updatedLabel }}</span>
+      <template v-else-if="showSave">
+        <span class="ta-workbench-footer-path">
+          写入路径：<span class="ta-workbench-footer-path-value">{{ writePath ?? "—" }}</span>
+        </span>
+        <span class="ta-workbench-footer-separator">|</span>
+        <span class="ta-workbench-footer-updated">更新时间：{{ updatedLabel }}</span>
+      </template>
     </div>
 
     <div v-if="showSave" class="ta-workbench-footer-right">
@@ -636,29 +634,20 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
 .ta-workbench-footer-branch {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
-  max-width: min(520px, 62vw);
+  justify-content: center;
+  width: 26px;
   height: 26px;
-  padding: 0 10px;
   border: 0.8px solid #dfdfdf;
   border-radius: 6px;
   background: #fff;
   color: #333;
   cursor: pointer;
   transition: background-color 0.12s ease, border-color 0.12s ease;
-  font: inherit;
 }
 
 .ta-workbench-footer-branch:hover {
   background: #f5f5f5;
   border-color: #b5b5b5;
-}
-
-.ta-workbench-footer-branch.is-disabled {
-  cursor: default;
-  color: #888;
-  background: #fafafa;
 }
 
 .ta-workbench-footer-branch-label {
@@ -737,6 +726,12 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   font-family: "JetBrains Mono", "PingFang SC", monospace;
   font-size: 11px;
   color: #555;
+}
+
+.ta-workbench-footer-separator {
+  color: #dfdfdf;
+  margin: 0 4px;
+  user-select: none;
 }
 
 .ta-workbench-footer-path {

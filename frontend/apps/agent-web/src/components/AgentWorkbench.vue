@@ -1570,6 +1570,9 @@ async function loadDirectory(
     entriesByDirectory.value = { ...entriesByDirectory.value, [path]: entries };
     if (path === "") {
       workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [workspaceId]: true };
+      if (feedback.value?.kind === "error" && feedback.value.title === "加载文件树失败") {
+        feedback.value = null;
+      }
     }
   } catch (error) {
     if (path === "" && error instanceof BackendApiError && ["OPENCODE_UNAVAILABLE", "OPENCODE_BAD_GATEWAY"].includes(error.code)) {
