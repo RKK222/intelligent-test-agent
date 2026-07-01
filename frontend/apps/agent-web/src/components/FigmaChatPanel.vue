@@ -6,6 +6,7 @@ import {
   BookOpen,
   CheckCircle,
   ChevronDown,
+  ChevronUp,
   ChevronRight,
   Circle,
   Eye,
@@ -571,6 +572,35 @@ const wasStopped = ref(false)
 const wasCompleted = ref(false)
 const wasFailed = ref(false)
 
+// ===== 运行计时器 =====
+const runStartTime = ref<number | null>(null)
+const runDurationSeconds = ref(0)
+let runTimerId: ReturnType<typeof setInterval> | null = null
+
+function startRunTimer() {
+  stopRunTimer()
+  runStartTime.value = Date.now()
+  runDurationSeconds.value = 0
+  runTimerId = setInterval(() => {
+    if (runStartTime.value) {
+      runDurationSeconds.value = Math.floor((Date.now() - runStartTime.value) / 1000)
+    }
+  }, 1000)
+}
+
+function stopRunTimer() {
+  if (runTimerId) {
+    clearInterval(runTimerId)
+    runTimerId = null
+  }
+}
+
+const formattedRunDuration = computed(() => {
+  const m = Math.floor(runDurationSeconds.value / 60)
+  const s = runDurationSeconds.value % 60
+  return `${m}:${s.toString().padStart(2, '0')}s`
+})
+
 // ===== 选择题检测 =====
 type ChoiceOption = { index: number; label: string }
 const selectedChoice = ref<number | null>(null)
@@ -578,6 +608,14 @@ const choiceCustomInput = ref('')
 const choiceDismissed = ref(false)
 const choiceStep = ref<'select' | 'supplement'>('select')
 const supplementText = ref('')
+
+function toggleChoiceStep() {
+  if (choiceStep.value === 'select') {
+    choiceStep.value = 'supplement'
+  } else {
+    choiceStep.value = 'select'
+  }
+}
 
 const choiceOptions = computed<ChoiceOption[]>(() => {
   if (props.running) return []
@@ -1604,6 +1642,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onOverlayKeydown)
+  stopRunTimer()
 })
 
 watch(
@@ -1624,11 +1663,15 @@ watch(
       wasFailed.value = false
       choiceDismissed.value = false
       runStartMsgCount.value = displayMessages.value.length
+      startRunTimer()
     }
-    if (!now && prev && !wasStopped.value) {
-      const hasError = displayMessages.value.some((m) => m._error)
-      if (hasError) wasFailed.value = true
-      else wasCompleted.value = true
+    if (!now && prev) {
+      stopRunTimer()
+      if (!wasStopped.value) {
+        const hasError = displayMessages.value.some((m) => m._error)
+        if (hasError) wasFailed.value = true
+        else wasCompleted.value = true
+      }
     }
   }
 )
@@ -2386,8 +2429,8 @@ function onCompositionEnd() {
         class="figma-chat-status"
         :style="{ marginTop: reasoningText ? '-10px' : '0' }"
       >
-        <!-- <div class="figma-chat-status-dot" /> -->
-        <span>思考中...</span>
+        <Loader2 :size="14" class="figma-chat-status-loader figma-chat-spin" />
+        <span class="figma-chat-status-text">思考中... <span class="figma-chat-running-timer">{{ formattedRunDuration }}</span></span>
         <button
           v-if="reasoningText"
           type="button"
@@ -2617,6 +2660,10 @@ function onCompositionEnd() {
           <div v-if="choiceQuestion" class="figma-chat-choice-question">
             {{ choiceQuestion }}
           </div>
+          <div class="figma-chat-choice-pagination" @click="toggleChoiceStep">
+            <ChevronUp :size="12" class="figma-chat-pagination-icon" />
+            <span class="figma-chat-pagination-text">1/2 个问题</span>
+          </div>
           <button
             type="button"
             class="figma-chat-choice-close"
@@ -2635,24 +2682,26 @@ function onCompositionEnd() {
             ]"
             @click="selectChoice(opt.index)"
           >
-            <!-- <span class="figma-chat-choice-index">{{ opt.index }}</span> -->
             <span class="figma-chat-choice-label">{{ opt.label }}</span>
+            <span v-if="selectedChoice === opt.index" class="figma-chat-choice-enter-icon">⏎</span>
           </div>
           <div
             :class="[
               'figma-chat-choice-row figma-chat-choice-row--other',
-              selectedChoice === null &&
-                choiceCustomInput !== '' &&
-                'figma-chat-choice-row--selected',
+              selectedChoice === null && 'figma-chat-choice-row--selected',
             ]"
+            @click="selectedChoice = null"
           >
-            <!-- <span class="figma-chat-choice-index">#</span> -->
+            <span class="figma-chat-choice-other-label">其他</span>
             <input
               v-model="choiceCustomInput"
               class="figma-chat-choice-input"
-              placeholder="其他..."
+              placeholder="请输入..."
+              maxlength="500"
               @focus="selectedChoice = null"
             />
+            <span v-if="selectedChoice === null" class="figma-chat-choice-enter-icon" style="margin-right: 4px;">⏎</span>
+            <span class="figma-chat-choice-char-count">{{ choiceCustomInput.length }}/500</span>
           </div>
         </div>
         <div class="figma-chat-choice-actions">
@@ -2669,7 +2718,7 @@ function onCompositionEnd() {
             :disabled="selectedChoice === null && !choiceCustomInput.trim()"
             @click="confirmChoice"
           >
-            确认
+            确定
           </button>
         </div>
       </template>
@@ -2677,7 +2726,11 @@ function onCompositionEnd() {
       <template v-else>
         <div class="figma-chat-choice-header">
           <div class="figma-chat-supplement-title">
-            是否有更多需要补充的信息
+            是否更多需要补充信息需要提供?
+          </div>
+          <div class="figma-chat-choice-pagination" @click="toggleChoiceStep">
+            <ChevronUp :size="12" class="figma-chat-pagination-icon" />
+            <span class="figma-chat-pagination-text">2/2 个问题</span>
           </div>
           <button
             type="button"
@@ -2687,12 +2740,16 @@ function onCompositionEnd() {
             <X :size="14" />
           </button>
         </div>
-        <textarea
-          v-model="supplementText"
-          class="figma-chat-supplement-textarea"
-          placeholder="补充说明（可选）..."
-          rows="3"
-        />
+        <div class="figma-chat-supplement-textarea-wrapper">
+          <textarea
+            v-model="supplementText"
+            class="figma-chat-supplement-textarea"
+            placeholder="添加补充信息"
+            rows="3"
+            maxlength="1000"
+          />
+          <span class="figma-chat-supplement-char-count">{{ supplementText.length }}/1000</span>
+        </div>
         <div class="figma-chat-choice-actions">
           <button
             type="button"
@@ -2713,7 +2770,7 @@ function onCompositionEnd() {
             class="figma-chat-choice-confirm"
             @click="submitSupplement"
           >
-            确认
+            确定
           </button>
         </div>
       </template>
@@ -3873,23 +3930,37 @@ function onCompositionEnd() {
 .figma-chat-status {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   padding-left: 30px;
   margin-top: -20px;
-  /* background: #fafafa; */
   border-radius: 8px;
   font-size: 12px;
-  color: #000;
-  font-weight: 600;
+  color: #8c8c8c;
+  font-weight: 500;
   align-self: flex-start;
 }
 
-.figma-chat-status-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #18a978;
-  animation: figma-chat-pulse 1.4s infinite ease-in-out;
+.figma-chat-status-loader {
+  color: #8c8c8c;
+  flex-shrink: 0;
+}
+
+@keyframes figma-chat-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.figma-chat-spin {
+  animation: figma-chat-spin 1s linear infinite;
+}
+
+.figma-chat-running-timer {
+  color: #8c8c8c;
+  margin-left: 4px;
 }
 
 .figma-chat-thinking-toggle {
@@ -4047,15 +4118,19 @@ function onCompositionEnd() {
 
 /* ---- 选择题面板 ---- */
 .figma-chat-choice-panel {
-  padding: 2px 10px 6px;
-  border: 1px solid var(--ta-chat-border, #d7d7d7);
+  flex-shrink: 0;
+  margin: 0 10px 10px;
+  padding: 12px 16px;
+  border: 1px solid var(--ta-chat-border, #e0e0e0);
   border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.04);
 }
 
 .figma-chat-choice-header {
   display: flex;
-  align-items: flex-start;
-  margin-bottom: 10px;
+  align-items: center;
+  margin-bottom: 12px;
   justify-content: space-between;
 }
 
@@ -4075,7 +4150,6 @@ function onCompositionEnd() {
   justify-content: center;
   width: 20px;
   height: 20px;
-  margin-top: 4px;
   border: none;
   background: transparent;
   color: #999;
@@ -4084,15 +4158,15 @@ function onCompositionEnd() {
 }
 
 .figma-chat-choice-close:hover {
-  background: #f0f1f4;
+  background: #f5f5f5;
   color: #555;
 }
 
 .figma-chat-choice-list {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  margin-bottom: 2px;
+  gap: 6px;
+  margin-bottom: 12px;
   max-height: 200px;
   overflow-y: auto;
 }
@@ -4100,43 +4174,87 @@ function onCompositionEnd() {
 .figma-chat-choice-row {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 2px;
+  justify-content: space-between;
+  padding: 8px 12px;
   cursor: pointer;
-  transition: background 0.12s;
+  background: #ffffff;
+  border: 1px solid #f0f0f0;
+  border-radius: 6px;
+  transition: all 0.12s ease;
 }
 
 .figma-chat-choice-row:hover {
-  background: #f0f1f4;
+  background: #f5f5f5;
+  border-color: #bfbfbf;
 }
 
 .figma-chat-choice-row--selected {
-  background: #e8f0ff;
-}
-
-.figma-chat-choice-index {
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--ta-chat-process-bg, #f0f1f4);
-  font-size: 12px;
-  font-weight: 600;
-  color: #666;
-}
-
-.figma-chat-choice-row--selected .figma-chat-choice-index {
-  background: #3366ff;
-  color: #fff;
+  background: #f5f5f5;
+  border-color: #bfbfbf;
 }
 
 .figma-chat-choice-label {
   font-size: 13px;
   line-height: 18px;
-  color: #333;
+  color: #595959;
+  flex: 1;
+  text-align: left;
+}
+
+.figma-chat-choice-row--selected .figma-chat-choice-label {
+  color: #1a1a1a;
+  font-weight: 500;
+}
+
+.figma-chat-choice-enter-icon {
+  font-size: 14px;
+  color: #8c8c8c;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+
+/* ---- Choose / Pagination ---- */
+.figma-chat-choice-pagination {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  margin-left: auto;
+  margin-right: 8px;
+  color: #8c8c8c;
+  font-size: 11px;
+  user-select: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.figma-chat-choice-pagination:hover {
+  background: #f5f5f5;
+  color: #595959;
+}
+
+.figma-chat-pagination-icon {
+  color: #8c8c8c;
+}
+
+/* ---- Choose / Other ---- */
+.figma-chat-choice-row--other {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.figma-chat-choice-other-label {
+  font-size: 13px;
+  color: #595959;
+  flex-shrink: 0;
+}
+
+.figma-chat-choice-row--selected .figma-chat-choice-other-label {
+  color: #1a1a1a;
+  font-weight: 500;
 }
 
 .figma-chat-choice-input {
@@ -4145,12 +4263,20 @@ function onCompositionEnd() {
   outline: none;
   background: transparent;
   font-size: 13px;
-  color: #333;
+  color: #1a1a1a;
   padding: 0;
 }
 
 .figma-chat-choice-input::placeholder {
-  color: #aaa;
+  color: #bfbfbf;
+}
+
+.figma-chat-choice-char-count {
+  font-size: 11px;
+  color: #bfbfbf;
+  flex-shrink: 0;
+  margin-left: 8px;
+  user-select: none;
 }
 
 .figma-chat-choice-actions {
@@ -4160,65 +4286,97 @@ function onCompositionEnd() {
 }
 
 .figma-chat-choice-cancel,
+.figma-chat-supplement-back,
 .figma-chat-choice-confirm {
-  padding: 3px 10px;
-  border-radius: 4px;
-  font-size: 11px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  border: none;
-  transition: background 0.12s;
+  transition: all 0.12s ease;
+  box-sizing: border-box;
 }
 
-.figma-chat-choice-cancel {
-  background: #f0f1f4;
-  color: #666;
+.figma-chat-choice-cancel,
+.figma-chat-supplement-back {
+  background: #ffffff;
+  border: 1px solid #d9d9d9;
+  color: #595959;
 }
 
-.figma-chat-choice-cancel:hover {
-  background: #e4e5e9;
+.figma-chat-choice-cancel:hover,
+.figma-chat-supplement-back:hover {
+  background: #f5f5f5;
+  border-color: #d9d9d9;
+  color: #262626;
 }
 
 .figma-chat-choice-confirm {
   background: #1a1a1a;
-  color: #fff;
+  border: 1px solid #1a1a1a;
+  color: #ffffff;
 }
 
 .figma-chat-choice-confirm:not(:disabled):hover {
-  background: #333;
+  background: #333333;
+  border-color: #333333;
 }
 
 .figma-chat-choice-confirm:disabled {
-  opacity: 0.4;
+  background: #f5f5f5;
+  border-color: #d9d9d9;
+  color: #bfbfbf;
   cursor: not-allowed;
 }
 
 /* ---- 选择面板第二步：补充信息 ---- */
 .figma-chat-supplement-title {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
   color: #1a1a1a;
-  padding: 4px 2px 8px;
+  padding: 6px 2px 4px;
+  line-height: 1.45;
+  flex: 1;
+}
+
+.figma-chat-supplement-textarea-wrapper {
+  position: relative;
+  width: 100%;
+  margin-bottom: 12px;
 }
 
 .figma-chat-supplement-textarea {
   width: 100%;
-  padding: 8px 10px;
+  padding: 8px 12px 24px;
   border: 1px solid #e0e0e0;
   border-radius: 6px;
-  background: #f5f5f5;
+  background: #ffffff;
   font-size: 13px;
   line-height: 1.5;
-  color: #333;
+  color: #1a1a1a;
   outline: none;
   resize: none;
   font-family: inherit;
   box-sizing: border-box;
-  margin-bottom: 8px;
+  transition: border-color 0.12s ease;
 }
 
 .figma-chat-supplement-textarea:focus {
-  border-color: #3366ff;
-  background: #fff;
+  border-color: #bfbfbf;
+}
+
+.figma-chat-supplement-textarea::placeholder {
+  color: #bfbfbf;
+}
+
+.figma-chat-supplement-char-count {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  font-size: 11px;
+  color: #bfbfbf;
+  user-select: none;
 }
 
 .figma-chat-supplement-back {

@@ -2541,3 +2541,37 @@ bash /tmp/test-api-after-restart.sh
 - What: 将 `FigmaFileExplorer.vue` 中的 `.figma-fe-section-worktree` 元素使用 Element Plus 的 `<el-tooltip>` 包裹起来，当鼠标悬浮时展示完整的当前 worktree 名字；同时移除原 span 上的原生 `title` 属性，避免出现双重 Tooltip。
 - How: 纯前端模版修改，使用 unplugin 自动导入的 `el-tooltip` 组件。
 - Result: 前端 `lint`、`typecheck`、单元测试（195 个用例全部通过）和生产包 `build` 全部通过。
+
+---
+
+## 2026-07-01: 修正消息分层：tool/reasoning 等过程内容不再混入最终回答正文
+
+- Why: Figma 设计方案发现右侧对话中 tool stderr/stdout、reasoning 思考过程被展示成 assistant 最终回答正文，违背消息分层设计。
+- What:
+  1. 修改 `FigmaChatPanel.vue` 的 `partText()` 函数，只允许 `text` 类型 part 进入消息正文，`tool/reasoning/file/subtask/retry/step-*/compaction` 全部返回空字符串。
+  2. 新增 `messageOtherParts()` 函数提取非文件操作 tool part、已完成的 reasoning、retry part，在 assistant 消息中以 `details` 折叠块独立渲染。
+  3. 新增 `summaryFromToolInput()`、`toolOutputText()`、`toolIsFailed()`、`reasoningDurationText()`、`partIsRunning()` 等辅助函数。
+  4. 更新 `hasVisibleParts()` 包含 `reasoning` 和 `retry` 类型，确保仅有这些 parts 的消息不被过滤。
+  5. 更新 template 渲染：tool 折叠块展示工具名、入参、输出/错误；reasoning 折叠块展示思考过程和耗时；retry 以错误块展示。
+  6. 新增 FigmaChatPanel 回归测试 7 个用例覆盖：tool stdout/stderr 不混入正文、reasoning 不进入正文、read/file 结构化展示、纯 tool 消息可渲染、retry 块分离展示、state.error 不混入正文。
+- How: 纯前端 Vue 组件修改，更新 `FigmaChatPanel.vue` 的 script/template/style，新增 `FigmaChatPanel.test.ts` 测试用例。
+- Result: 28 个测试全部通过（+7 个新增用例）；typecheck 无新增错误；前端 201 个全部回归测试通过。`AgentWorkbench.vue` 的预存类型错误不在此次修复范围。
+
+### 2026-07-01 - 按照设计稿扣样式：优化选择题与补充信息面板样式及增加运行思考计时器
+
+- Why: 聊天面板底部的多轮选择题（Step 1）和补充信息输入面板（Step 2）样式与设计稿存在偏差，需要优化样式以匹配设计稿。同时，智能体运行时的思考中状态需要展示计时器（如 "10:36s"）和加载动画。此外，文件树 typecheck 存在 event 参数类型的遗留 TypeScript 编译期类型报错。
+- What:
+  1. `FigmaChatPanel.vue`：
+     - 新增运行思考计时器：在智能体开始运行时（watch running 为 true）启动计时器并在页面上显示 `思考中... 10:36s`，同时配以旋转加载图标；组件销毁或运行停止时停止计时器并清理定时任务。
+     - 优化多轮选择题（Step 1）和补充信息（Step 2）面板：
+       * 引入 pagination 结构在 header 显示 `1/2 个问题` 或 `2/2 个问题` 并且可以通过点击页码切换步骤。
+       * 列表选项改造为 distinct 卡片形式，添加 1px border 与 6px border-radius，在选中项右侧显示回车符号 `⏎`。
+       * Step 1 "other" 选项细化展示，静态标签 "其他" 配以 input 输入框以及右侧 `0/500` 字数限制计数器。
+       * Step 2 textarea 背景设为白色并添加 `0/1000` 绝对定位计数器。
+       * 按钮样式调整：取消与上一步按钮变为白底 outline 按钮，确认按钮改文案为 "确定" 且为实色黑底。
+  2. `FigmaFileExplorer.vue`：
+     - 修正 `"changes-refreshed"` 的 Event type 定义，添加可选属性 `reloadOpenFiles?: boolean`，从而消除 `AgentWorkbench.vue` 里的 `reloadOpenFiles does not exist` 的 TypeScript 编译期报错。
+- How: 纯前端样式与组件微调，涉及 `FigmaChatPanel.vue` 和 `FigmaFileExplorer.vue`。
+- Result: `corepack pnpm typecheck` 通过；前端 201 个 Vitest 回归测试全部通过。
+
+
