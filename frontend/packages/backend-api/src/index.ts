@@ -474,8 +474,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       })) satisfies FileTreeEntry[];
     },
     readFile: async (workspaceId: string, path: string) => {
-      const file = await workspaceFileRpc<BackendFileContent>(workspaceId, "workspace.read", { path });
-      return { ...file, encoding: "utf-8", readonly: false } satisfies FileContent;
+      const data = await request<{ type: string; content: string }>(`${agentBase}/file/content${query({ workspaceId, path })}`);
+      return { path, content: data.content, encoding: "utf-8", readonly: false } satisfies FileContent;
     },
     writeFile: (workspaceId: string, path: string, content: string) =>
       workspaceFileRpc<void>(workspaceId, "workspace.write", { path, content }),

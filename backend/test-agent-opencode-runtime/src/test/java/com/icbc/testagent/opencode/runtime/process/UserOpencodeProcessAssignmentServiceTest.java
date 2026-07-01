@@ -37,10 +37,12 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Queue;
 import java.util.Set;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -83,6 +85,7 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
         assertThat(response.baseUrl()).isEqualTo("http://10.8.0.13:4200");
         assertThat(gateway.startCommands).hasSize(1);
+        assertThat(gateway.healthCommands).hasSize(1);
         assertThat(gateway.startCommands.getFirst().containerId()).isEqualTo(new OpencodeContainerId("ctr_idle"));
         assertThat(gateway.startCommands.getFirst().sessionPath()).isEqualTo(SESSION_DIR + "4200");
         assertThat(gateway.startCommands.getFirst().configPath()).isEqualTo(CONFIG_DIR);
@@ -109,6 +112,43 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(response.baseUrl()).isEqualTo("http://10.8.0.12:4096");
         assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.RUNNING);
         assertThat(response.serviceAddress()).isEqualTo("10.8.0.12:4096");
+    }
+
+    @org.junit.jupiter.api.Test
+    void statusRechecksStoppedBindingAndRestoresRunningWhenManagerIsHealthy() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4100, 4, 1));
+        OpencodeServerProcess process = process("ocp_existing", USER_ID, "10.8.0.12", "ctr_idle", 4096, OpencodeServerProcessStatus.STOPPED);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, process.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
+        assertThat(gateway.healthCommands).hasSize(1);
+        assertThat(repository.findOpencodeServerProcessById(process.processId())).get()
+                .extracting(OpencodeServerProcess::status)
+                .isEqualTo(OpencodeServerProcessStatus.RUNNING);
+    }
+
+    @org.junit.jupiter.api.Test
+    void requireReadyProcessRechecksFailedBindingAndRestoresRunningWhenManagerIsHealthy() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess process = process("ocp_existing", USER_ID, "10.8.0.12", "ctr_idle", 4096, OpencodeServerProcessStatus.FAILED);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, process.processId(), "10.8.0.12", 4096));
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        UserOpencodeProcessAssignment assignment = service.requireReadyProcess(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(assignment.node().baseUrl()).isEqualTo("http://10.8.0.12:4096");
+        assertThat(repository.savedNodes).hasSize(1);
+        assertThat(repository.findOpencodeServerProcessById(process.processId())).get()
+                .extracting(OpencodeServerProcess::status)
+                .isEqualTo(OpencodeServerProcessStatus.RUNNING);
     }
 
     @org.junit.jupiter.api.Test
@@ -186,7 +226,8 @@ class UserOpencodeProcessAssignmentServiceTest {
         repository.processes.put(oldProcess.processId().value(), oldProcess);
         repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, oldProcess.processId(), "10.8.0.12", 4096));
         RecordingGateway gateway = new RecordingGateway();
-        gateway.health = OpencodeProcessHealthResult.unhealthy("down");
+        gateway.healthResults.add(OpencodeProcessHealthResult.unhealthy("down"));
+        gateway.healthResults.add(OpencodeProcessHealthResult.healthy("ok"));
         UserOpencodeProcessAssignmentService service = service(repository, gateway);
 
         UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
@@ -341,6 +382,25 @@ class UserOpencodeProcessAssignmentServiceTest {
                 .isInstanceOf(PlatformException.class)
                 .extracting(error -> ((PlatformException) error).errorCode())
                 .isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeDoesNotReturnReadyWhenStartedProcessFailsHealth() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.12", 4096, 4100, 4, 0));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.unhealthy("opencode http health failed");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway);
+
+        assertThatThrownBy(() -> service.initialize(USER_ID, "opencode", TRACE_ID))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE));
+
+        OpencodeServerProcess process = repository.processes.values().stream().findFirst().orElseThrow();
+        assertThat(process.status()).isEqualTo(OpencodeServerProcessStatus.UNHEALTHY);
+        assertThat(process.healthMessage()).isEqualTo("opencode http health failed");
+        assertThat(repository.findUserBinding(USER_ID, "opencode")).isEmpty();
+        assertThat(repository.savedNodes).isEmpty();
     }
 
     @org.junit.jupiter.api.Test
@@ -528,6 +588,7 @@ class UserOpencodeProcessAssignmentServiceTest {
     private static final class RecordingGateway implements OpencodeProcessManagerGateway {
         private final List<OpencodeProcessStartCommand> startCommands = new ArrayList<>();
         private final List<OpencodeProcessHealthCommand> healthCommands = new ArrayList<>();
+        private final Queue<OpencodeProcessHealthResult> healthResults = new ArrayDeque<>();
         private OpencodeProcessHealthResult health = OpencodeProcessHealthResult.healthy("ok");
         private PlatformException healthFailure;
         private PlatformException startFailure;
@@ -538,7 +599,7 @@ class UserOpencodeProcessAssignmentServiceTest {
             if (healthFailure != null) {
                 throw healthFailure;
             }
-            return health;
+            return healthResults.isEmpty() ? health : healthResults.remove();
         }
 
         @Override

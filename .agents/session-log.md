@@ -2,6 +2,7 @@
 
 ## Entries
 
+<<<<<<< HEAD
 ### 2026-06-30 - 修复 Windows 下 opencode 专属进程启动失败（.ps1 包装脚本）
 
 - Why: 用户在 Windows 上把 `OPENCODE_BIN`（对应 `TEST_AGENT_OPENCODE_BIN`）配成 `D:\Tool\nodes\nodejs\opencode.ps1` 这种 PowerShell 包装脚本后，前台点击「分配专属进程」报 `OPENCODE_BAD_GATEWAY: fork/exec D:\Tool\nodes\nodejs\opencode.ps1: %1 is not a valid Win32 application`。根因是 Go `os/exec` 在 Windows 上无法把 `.ps1` 文本文件当作可执行体 fork/exec，必须由 PowerShell 进程承载脚本解释；当前 `process_windows.go` 仍按 `exec.Command(spec.Command, spec.Args...)` 直传配置命令，没做平台兜底。
@@ -52,6 +53,24 @@
   - [process.go](file:///d:/workspace/intelligent-test-agent/opencode-manager/internal/process/process.go) 中保留 `OSStarter` / `OSSignaler` 类型定义和 `flattenEnv` 等通用函数，移除 `syscall` 导入和 `syscall.ESRCH` 引用。
 - How: 纯 Go 改动，不涉及 API/事件/数据库/安全/兼容性；保持 `internal/control/cgroup_parse_linux.go` 的既有平台拆分模式。
 - Result: Windows 上 `go build -o bin/opencode-manager.exe ./cmd/opencode-manager` 编译成功，生成 10MB 的可执行文件。
+=======
+### 2026-06-30 - 修复前端 readFile 接口返回值类型约束缺失 path 属性的编译错误
+
+- Why: 前端在构建 `@test-agent/agent-web` 时编译失败，报 TS1360 错误，提示 `{ content: string; encoding: string; readonly: false; }` 类型不满足 `FileContent` 的预期，缺失必填属性 `path`。
+- What: 在 `frontend/packages/backend-api/src/index.ts` 中的 `readFile` 方法返回对象里，加上缺失的 `path` 属性。
+- How: 仅修改 `frontend/packages/backend-api/src/index.ts` 中 `readFile` 返回的满足 `FileContent` 的结构，不改写后端或接口定义，保证 API 数据类型契合前端类型约束。
+- Result: 运行 `cd frontend && corepack pnpm typecheck` 和 `corepack pnpm build` 顺利通过，未再出现类型不匹配的编译期错误。
+
+### 2026-06-30 - 解决拦截/路由请求绕过 Spring Security 导致的 CORS 跨域错误
+
+- Why: 跨后端路由过滤器 `UserOpencodeBackendRoutingWebFilter` 以及部分认证过滤器（如 `JwtAuthWebFilter`、`ApiTokenWebFilter` 在验证失败时）会直接向响应写入内容并返回 `Mono<Void>`，从而绕过了位于 Spring Security 过滤链中的 CORS 处理器，导致前端在特定场景下（例如请求 `GET /api/internal/agent/opencode/processes/me`）因缺少 `Access-Control-Allow-Origin` 头而报错。同时由于控制器接口异步化，`ConfigurationManagementControllerTest` 中既存的同步测试用例存在参数与签名不匹配的编译及运行期错误。
+- What: 
+  - 将 HTTP CORS 处理配置提取为全局高优先级的 `CorsWebFilter` Bean，使其在所有鉴权和跨后端路由过滤器之前（`Ordered.HIGHEST_PRECEDENCE + 5`）优先执行，从而确保任何直接写入响应或拦截返回的场景都能带有正确的 CORS 响应头，并将 Spring Security 的内置 `.cors()` 禁用，防止出现重复 CORS 头。
+  - 更新 `ConfigurationManagementControllerTest.createWorkspaceUsesCurrentUserReadyOpencodeServer` 测试用例以正确适配控制器端异步化 `createWorkspaceAccepted` 的方法签名与 `CreateWorkspaceAcceptedResponse` 返回结果。
+  - 在 `RuntimeSecurityConfigTest` 中新增 `corsWebFilterAppliesCorsHeaders` 测试，直接调用 `CorsWebFilter` 验证 preflight 场景下 CORS 响应头的正确生成。
+- How: 仅修改 `RuntimeSecurityConfig.java`、`RuntimeSecurityConfigTest.java` 和 `ConfigurationManagementControllerTest.java`，不新增数据库 Migration，不修改 `.env.local` 环境变量文件。
+- Result: 运行 `mvn -pl test-agent-api -am test`，包括新编写的 CORS 单测在内的 147 项后端 API 测试用例全量通过。
+>>>>>>> d41dff984c0aefa9b8f92ed58e82723e8c8a2db6
 
 ### 2026-06-30 - 修复测试库 Flyway schema history checksum
 
@@ -2306,3 +2325,38 @@ bash /tmp/test-api-after-restart.sh
 - What: 在 `AGENTS.md`、后端总 README、后端规范、依赖边界、API 模块 README 和 opencode-runtime 模块 README 中明确：涉及 opencode-manager 路由、Java 到 manager 控制、用户进程服务器归属、运行管理 `containerId` 路由、Agent 配置或文件 WebSocket 目标后端选择时，必须复用 `BackendJavaRouteResolver`、`BackendHttpForwarder` 和目标 Java 的 `OpencodeProcessManagerGateway`。
 - How: 用禁止项列明不得自行扫描 Redis 快照、手写 Java->Java HTTP 转发器、定义防循环 header 变体、本机降级、跨服务器直接控制 manager 或恢复本地绕过。
 - Result: 后续新增相关入口时，规范入口、后端编码规范、架构依赖边界和模块 README 都指向同一套公共路由机制。
+
+### 2026-06-30 - 公共 opencode server 启动健康确认
+
+- Why: 用户初始化旧链路在 manager 返回 `STARTED` 后直接写 `RUNNING`，没有确认 opencode HTTP health；运行管理重启已停止用户进程或 manager state 已清理端口时会遇到 `port ... is not managed`，超级管理员无法按原端口拉起。
+- What: 新增 `OpencodeProcessStartupService` / `OpencodeProcessStartupRequest`，统一封装 start、候选进程快照、manager health、opencode HTTP health、最终状态回写、Redis heartbeat、ACTIVE binding 和兼容 `ExecutionNode` 投影；用户初始化和运行管理 restart 复用该服务。同步规范要求后续所有 opencode server 启动、重启后拉起、端口复用或启动状态回写都必须调用公共启动服务。
+- How: 公共启动服务先保存 `STARTING` 候选进程供 socket health 按 `processId` 查本地 state，再调用 manager health；healthy 才写 `RUNNING`，not-running 映射 `STOPPED`，HTTP 不健康映射 `UNHEALTHY`，异常映射 `FAILED` 并按统一平台错误抛出。运行管理对已有平台进程记录的 `STOPPED` 或 `not managed` 端口复用原 `containerId + port` 调用 start，manager 已管理端口的 restart 成功回包也会再走同一 health 确认。
+- Result: 对话框初始化和运行管理重启成功都必须同时满足 manager state/PID 与 opencode HTTP health healthy；无平台用户进程记录的无主 manager state 仍保持原 manager restart 语义。目标测试和 opencode-runtime 全模块测试通过；API 全模块测试仍被既有 `ConfigurationManagementControllerTest.createWorkspaceUsesCurrentUserReadyOpencodeServer` 的异步工作区创建断言阻断。
+
+### 2026-06-30 - 公共 opencode server 停止健康确认
+
+- Why: 运行管理停止旧链路只信任 manager `STOPPED` 回包，没有确认 opencode server health 已失败，也没有统一封装停止后 `STOPPED` 回写，后续入口容易再次各自实现 stop。
+- What: 新增 `OpencodeProcessStopService` / `OpencodeProcessStopRequest`，统一封装 manager stop、停止后 health 不健康确认和用户进程 `STOPPED` 回写；运行管理 stop 复用该服务。同步规范要求后续所有 opencode server 停止、停止后状态回写或运行管理停止命令都必须调用公共停止服务。
+- How: 对平台已有进程记录的端口，公共停止服务先通过 `OpencodeProcessManagerGateway.stopProcess()` 下发 manager stop，再对同一 `processId/baseUrl` 调用 manager health；health 仍 healthy 时抛 `OPENCODE_BAD_GATEWAY` 且不回写 STOPPED，health 不健康时把进程 pid 清空并写 `STOPPED`。无平台用户进程记录的无主 manager state 仍只以 manager `STOPPED` 回包为准，不新增数据库进程记录。
+- Result: 运行管理停止成功必须满足 manager stop 成功和停止后 health 不健康；业务主代码中直接 `gateway.stopProcess()` 只剩公共停止服务和 gateway 实现/接口。
+
+### 2026-06-30 - 公共 opencode server 状态查询收敛
+
+- Why: 用户状态、Run 前检查、运行管理用户进程列表、后台 heartbeat、启动后确认和停止后确认分别调用 manager health 并各自映射 `RUNNING/STOPPED/UNHEALTHY/FAILED`，not-running、HTTP 不健康和 health 命令异常的含义不统一。
+- What: 新增 `OpencodeProcessStatusQueryService` / `OpencodeProcessStatusProbe` / `OpencodeProcessProbeStatus`，统一封装进程存在性检查、manager health、查询语义归一、进程状态回写和 Redis heartbeat 刷新；用户状态、运行管理、本机 heartbeat、公共启动和公共停止都改为复用该服务。同步规范要求后续所有 opencode server 状态查询、健康探测、状态回写或 heartbeat 刷新必须调用公共状态查询服务。
+- How: 公共查询服务先按 `processId` 查询平台进程记录，缺失时返回 `NOT_STARTED` 且不调用 manager；health healthy 写 `RUNNING` 并刷新 heartbeat；not-running 类消息写 `STOPPED` 并清空 pid；普通不健康写 `UNHEALTHY`；health 命令异常写 `FAILED` 并保留错误码。文件路由、后端路由归属和 allocationStatus 仍只读 binding，不触发 health。
+- Result: 业务主代码中直接 `gateway.checkHealth()` 只剩公共状态查询服务和 gateway 实现/接口；STOPPED/FAILED 历史 binding 在状态查询或 Run 前检查时也会先重新探测，manager healthy 时可恢复为 `RUNNING`。
+
+### 2026-06-30 - 管理员重启等待 opencode HTTP health ready
+
+- Why: Go manager 的 `start/restart` 在拉起进程并写入 state 后立即返回 `STARTED`，不会等待 opencode HTTP health endpoint ready；Java 公共启动服务只做一次即时 health，导致管理员重启慢启动进程时前端看到 `opencode health endpoints are not reachable（OPENCODE_UNAVAILABLE）`，且用户进程列表失败后不刷新。
+- What: `OpencodeProcessStartupService` 在 manager `STARTED` 后复用公共状态查询服务做有界等待，默认使用 manager command-timeout 10 秒；运行管理前端在重启/停止成功或失败后都会刷新当前 overview 和用户进程查询。
+- How: 只对 `HEALTH_CHECK_FAILED` 且没有 manager 控制面错误码的普通健康失败继续轮询；`RUNNING` 立即成功，`NOT_STARTED`、manager timeout/unavailable 等控制面异常立即失败。超时仍抛统一 opencode 错误，并保留最后一次公共状态查询写入的 DB 状态和 healthMessage。
+- Result: 管理员重启不会因 opencode HTTP 端点短暂未 ready 而误报失败；真实失败时用户进程列表会立即展示最新 `UNHEALTHY/FAILED/STOPPED` 状态和健康消息。
+
+### 2026-06-30 - test profile 关闭应用版本副本补偿器
+
+- Why: `.env.test` 指向的共享测试库存在 ACTIVE 的演示/占位应用版本，其中 F-COSS 仓库为 `git.example.com` 占位地址，另一个本地仓库地址指向 `/Users/kaka/...`，当前机器没有 READY replica 时补偿器每分钟尝试 clone 并刷 `Git 远端读取失败`。
+- What: 在 `application-test.yml` 中关闭 `test-agent.managed-workspace.replica-reconciler.enabled`，仅影响 test profile；其他 profile 仍保持副本补偿器默认开启。
+- How: 同步更新 `test-agent-app` README，说明 test profile 默认关闭该后台扫描以及通用关闭开关。
+- Result: 重启 `test` profile 三服务后等待超过 60 秒，`/actuator/health/readiness` 为 `UP`，新 `backend.log` 未再出现 `managed-workspace-replica-reconciler` 或 Git 远端失败日志。

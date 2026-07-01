@@ -1712,6 +1712,13 @@ function handleRunEvent(event: RunEvent) {
     run.value = run.value
       ? { ...run.value, status: event.type === "run.succeeded" ? "SUCCEEDED" : event.type === "run.failed" ? "FAILED" : "CANCELLED" }
       : run.value;
+    // Run 完成后刷新所有已展开的目录，确保新增/删除/修改的文件在左侧工作区立即可见。
+    setTimeout(() => {
+      loadDirectory("", undefined, true);
+      for (const dir of expandedDirectories.value) {
+        loadDirectory(dir, undefined, true);
+      }
+    }, 500);
     // 计算任务消耗统计：duration 由 chatStartedAt 锁定，tokens/thoughtFor 仍优先取累计值；
     // 如果后端 payload 直接带上 tokens 或 thoughtFor 字段，则覆盖一次（向后兼容未来后端实现）。
     if (chatStartedAt.value) {
@@ -1733,7 +1740,7 @@ function handleRunEvent(event: RunEvent) {
 }
 
 // agent 写文件用的 opencode 工具名；这些工具的 input 带文件路径，完成时磁盘已写入。
-const LIVE_WRITE_TOOLS = new Set(["write", "edit", "apply_patch", "str_replace", "multi_edit", "create_file"]);
+const LIVE_WRITE_TOOLS = new Set(["write", "edit", "apply_patch", "str_replace", "multi_edit", "create_file", "delete"]);
 
 // 把绝对路径或带 git 前缀的路径归一化为 workspace 相对路径（统一使用 / 分隔符）。
 // - 去掉 git diff 前缀 "a/" / "b/"
@@ -1935,7 +1942,9 @@ function scanLiveToolParts() {
           void openLivePreview(path);
         } else {
           // 即使不开实时预览，也要展开文件树并刷新父目录，让用户看到新文件。
-          expandPathToFile(path);
+          if (part.toolName !== "delete") {
+            expandPathToFile(path);
+          }
           refreshParentDirectory(path);
         }
       }

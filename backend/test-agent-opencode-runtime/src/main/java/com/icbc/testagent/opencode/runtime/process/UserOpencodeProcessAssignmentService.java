@@ -2,7 +2,6 @@ package com.icbc.testagent.opencode.runtime.process;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
-import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
@@ -22,6 +21,7 @@ import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -77,6 +77,8 @@ public class UserOpencodeProcessAssignmentService {
     private final OpencodeProcessManagerGateway gateway;
     private final BackendJavaProcessLifecycleService backendLifecycle;
     private final OpencodeProcessHeartbeatStore heartbeatStore;
+    private final OpencodeProcessStartupService startupService;
+    private final OpencodeProcessStatusQueryService statusQueryService;
 
     /**
      * 注入进程管理 Repository、兼容节点 Repository 和管理进程 gateway。
@@ -98,7 +100,7 @@ public class UserOpencodeProcessAssignmentService {
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessHeartbeatStore heartbeatStore) {
-        this(repository, EMPTY_PARAMETER_VALUES, executionNodeRepository, gateway, backendLifecycle, heartbeatStore);
+        this(repository, EMPTY_PARAMETER_VALUES, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, null, null);
     }
 
     /**
@@ -123,13 +125,40 @@ public class UserOpencodeProcessAssignmentService {
             ExecutionNodeRepository executionNodeRepository,
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle,
-            OpencodeProcessHeartbeatStore heartbeatStore) {
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            OpencodeProcessStartupService startupService,
+            OpencodeProcessStatusQueryService statusQueryService) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.commonParameterValues = Objects.requireNonNull(commonParameterValues, "commonParameterValues must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.backendLifecycle = Objects.requireNonNull(backendLifecycle, "backendLifecycle must not be null");
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
+        this.statusQueryService = statusQueryService == null
+                ? new OpencodeProcessStatusQueryService(repository, gateway, heartbeatStore)
+                : statusQueryService;
+        this.startupService = startupService == null
+                ? new OpencodeProcessStartupService(
+                        repository,
+                        executionNodeRepository,
+                        gateway,
+                        heartbeatStore,
+                        this.statusQueryService,
+                        Clock.systemUTC())
+                : startupService;
+    }
+
+    /**
+     * 兼容旧测试构造器，生产路径使用注入的公共启动服务。
+     */
+    public UserOpencodeProcessAssignmentService(
+            OpencodeProcessManagementRepository repository,
+            CommonParameterValues commonParameterValues,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            BackendJavaProcessLifecycleService backendLifecycle,
+            OpencodeProcessHeartbeatStore heartbeatStore) {
+        this(repository, commonParameterValues, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, null, null);
     }
 
     /**
@@ -145,29 +174,25 @@ public class UserOpencodeProcessAssignmentService {
                     ? needsInitialization("需要初始化 opencode 进程", now)
                     : unavailable("没有可用的 opencode 容器", now);
         }
-        Optional<OpencodeServerProcess> process = activeProcess(binding.get());
+        Optional<OpencodeServerProcess> process = boundProcess(binding.get());
         if (process.isEmpty()) {
             return canRebuildOn(binding.get().linuxServerId())
                     ? needsInitialization("opencode 进程不可用，需要重新初始化", binding.get(), now)
                     : unavailable("原 Linux 服务器没有可用的 opencode 容器", binding.get(), now);
         }
         OpencodeServerProcess current = process.get();
-        OpencodeProcessHealthResult health;
-        try {
-            health = checkHealth(current, traceId);
-        } catch (PlatformException exception) {
-            return unavailable("opencode 进程健康状态暂无法确认：" + exception.getMessage(), current, now);
-        }
-        if (health.healthy()) {
-            OpencodeServerProcess refreshed = refreshProcess(current, OpencodeServerProcessStatus.RUNNING, health.message(), now, traceId);
-            repository.saveOpencodeServerProcess(refreshed);
-            heartbeatStore.recordOpencodeHeartbeat(refreshed.processId(), now);
+        OpencodeProcessStatusProbe probe = statusQueryService.query(current.processId(), traceId);
+        if (probe.status() == OpencodeProcessProbeStatus.RUNNING) {
+            OpencodeServerProcess refreshed = probe.process().orElse(current);
             return ready(refreshed, "opencode 进程可用", now);
         }
-        repository.saveOpencodeServerProcess(refreshProcess(current, OpencodeServerProcessStatus.UNHEALTHY, health.message(), now, traceId));
+        OpencodeServerProcess refreshed = probe.process().orElse(current);
+        if (probe.errorCode() != null) {
+            return unavailable("opencode 进程健康状态暂无法确认：" + probe.message(), refreshed, now);
+        }
         return canRebuildOn(binding.get().linuxServerId())
-                ? needsInitialization("opencode 进程健康检测失败，需要重新初始化", current, now)
-                : unavailable("opencode 进程健康检测失败，且当前没有可用容器", current, now);
+                ? needsInitialization(statusFailureMessage(probe), refreshed, now)
+                : unavailable(statusFailureMessage(probe).replace("需要重新初始化", "且当前没有可用容器"), refreshed, now);
     }
 
     /**
@@ -242,12 +267,10 @@ public class UserOpencodeProcessAssignmentService {
         Optional<UserOpencodeProcessBinding> existingBinding = repository.findUserBinding(userId, OPENCODE_AGENT_ID);
         Optional<OpencodeServerProcess> existingProcess = existingBinding.flatMap(binding -> activeProcess(binding).or(() ->
                 repository.findOpencodeServerProcessById(binding.processId())));
-        if (existingProcess.isPresent() && isRecoverableProcess(existingProcess.get())) {
-            OpencodeProcessHealthResult health = checkHealth(existingProcess.get(), traceId);
-            if (health.healthy()) {
-                OpencodeServerProcess refreshed = refreshProcess(existingProcess.get(), OpencodeServerProcessStatus.RUNNING, health.message(), now, traceId);
-                repository.saveOpencodeServerProcess(refreshed);
-                heartbeatStore.recordOpencodeHeartbeat(refreshed.processId(), now);
+        if (existingProcess.isPresent()) {
+            OpencodeProcessStatusProbe probe = statusQueryService.query(existingProcess.get().processId(), traceId);
+            if (probe.status() == OpencodeProcessProbeStatus.RUNNING) {
+                OpencodeServerProcess refreshed = probe.process().orElse(existingProcess.get());
                 ExecutionNode node = projectExecutionNode(refreshed, now, traceId);
                 executionNodeRepository.save(node);
                 return ready(refreshed, "opencode 进程可用", now);
@@ -265,44 +288,18 @@ public class UserOpencodeProcessAssignmentService {
                         backendLifecycle.backendProcessId(),
                         CONTAINER_CANDIDATE_LIMIT));
         OpencodeProcessStartCommand command = startCommand(userId, chooseContainer(candidates), traceId);
-        OpencodeProcessStartResult started = gateway.startProcess(command);
-        if (started == null) {
-            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 管理进程启动未返回结果");
-        }
-        OpencodeProcessId processId = existingBinding
-                .map(UserOpencodeProcessBinding::processId)
-                .orElseGet(() -> new OpencodeProcessId(RuntimeIdGenerator.opencodeProcessId()));
-        Instant createdAt = existingProcess.map(OpencodeServerProcess::createdAt).orElse(now);
-        OpencodeServerProcess process = new OpencodeServerProcess(
-                processId,
+        OpencodeServerProcess process = startupService.startAndVerify(new OpencodeProcessStartupRequest(
                 userId,
+                existingBinding.map(UserOpencodeProcessBinding::processId).orElse(null),
+                existingProcess.map(OpencodeServerProcess::createdAt).orElse(null),
+                existingBinding.map(UserOpencodeProcessBinding::createdAt).orElse(null),
                 command.linuxServerId(),
                 command.containerId(),
                 command.port(),
-                started.pid(),
                 command.baseUrl(),
-                OpencodeServerProcessStatus.RUNNING,
                 command.sessionPath(),
                 command.configPath(),
-                now,
-                now,
-                started.message() == null ? "started" : started.message(),
-                createdAt,
-                now,
-                traceId);
-        repository.saveOpencodeServerProcess(process);
-        heartbeatStore.recordOpencodeHeartbeat(process.processId(), now);
-        repository.saveUserBinding(new UserOpencodeProcessBinding(
-                userId,
-                OPENCODE_AGENT_ID,
-                process.processId(),
-                process.linuxServerId(),
-                process.port(),
-                UserOpencodeProcessBindingStatus.ACTIVE,
-                existingBinding.map(UserOpencodeProcessBinding::createdAt).orElse(now),
-                now,
                 traceId));
-        executionNodeRepository.save(projectExecutionNode(process, now, traceId));
         return ready(process, "opencode 进程可用", now);
     }
 
@@ -316,16 +313,12 @@ public class UserOpencodeProcessAssignmentService {
                 .filter(item -> item.status() == UserOpencodeProcessBindingStatus.ACTIVE)
                 .orElseThrow(() -> unavailableException("请先初始化 opencode 进程"));
         OpencodeServerProcess process = repository.findOpencodeServerProcessById(binding.processId())
-                .filter(this::isRecoverableProcess)
                 .orElseThrow(() -> unavailableException("请先初始化 opencode 进程"));
-        OpencodeProcessHealthResult health = checkHealth(process, traceId);
-        if (!health.healthy()) {
-            repository.saveOpencodeServerProcess(refreshProcess(process, OpencodeServerProcessStatus.UNHEALTHY, health.message(), now, traceId));
+        OpencodeProcessStatusProbe probe = statusQueryService.query(process.processId(), traceId);
+        if (probe.status() != OpencodeProcessProbeStatus.RUNNING) {
             throw unavailableException("opencode 进程不可用，请先初始化");
         }
-        OpencodeServerProcess refreshed = refreshProcess(process, OpencodeServerProcessStatus.RUNNING, health.message(), now, traceId);
-        repository.saveOpencodeServerProcess(refreshed);
-        heartbeatStore.recordOpencodeHeartbeat(refreshed.processId(), now);
+        OpencodeServerProcess refreshed = probe.process().orElse(process);
         ExecutionNode node = projectExecutionNode(refreshed, now, traceId);
         executionNodeRepository.save(node);
         return new UserOpencodeProcessAssignment(node, refreshed.linuxServerId().value());
@@ -339,21 +332,17 @@ public class UserOpencodeProcessAssignmentService {
                 .filter(this::isRecoverableProcess);
     }
 
+    private Optional<OpencodeServerProcess> boundProcess(UserOpencodeProcessBinding binding) {
+        if (binding.status() != UserOpencodeProcessBindingStatus.ACTIVE) {
+            return Optional.empty();
+        }
+        return repository.findOpencodeServerProcessById(binding.processId());
+    }
+
     private boolean isRecoverableProcess(OpencodeServerProcess process) {
         return process.status() == OpencodeServerProcessStatus.RUNNING
                 || process.status() == OpencodeServerProcessStatus.STARTING
                 || process.status() == OpencodeServerProcessStatus.UNHEALTHY;
-    }
-
-    private OpencodeProcessHealthResult checkHealth(OpencodeServerProcess process, String traceId) {
-        try {
-            return gateway.checkHealth(new OpencodeProcessHealthCommand(process.processId(), process.baseUrl(), traceId));
-        } catch (PlatformException exception) {
-            if (exception.errorCode() == ErrorCode.OPENCODE_UNAVAILABLE) {
-                return OpencodeProcessHealthResult.unhealthy(exception.getMessage());
-            }
-            throw exception;
-        }
     }
 
     private boolean hasInitializableContainer() {
@@ -404,31 +393,6 @@ public class UserOpencodeProcessAssignmentService {
             }
         }
         return Optional.empty();
-    }
-
-    private OpencodeServerProcess refreshProcess(
-            OpencodeServerProcess process,
-            OpencodeServerProcessStatus status,
-            String healthMessage,
-            Instant now,
-            String traceId) {
-        return new OpencodeServerProcess(
-                process.processId(),
-                process.userId(),
-                process.linuxServerId(),
-                process.containerId(),
-                process.port(),
-                process.pid(),
-                process.baseUrl(),
-                status,
-                process.sessionPath(),
-                process.configPath(),
-                process.startedAt(),
-                now,
-                healthMessage,
-                process.createdAt(),
-                now,
-                traceId);
     }
 
     private ExecutionNode projectExecutionNode(OpencodeServerProcess process, Instant now, String traceId) {
@@ -676,6 +640,12 @@ public class UserOpencodeProcessAssignmentService {
             return null;
         }
         return process.linuxServerId().value() + ":" + process.port();
+    }
+
+    private String statusFailureMessage(OpencodeProcessStatusProbe probe) {
+        return probe.status() == OpencodeProcessProbeStatus.NOT_STARTED
+                ? "opencode 进程未启动，需要重新初始化"
+                : "opencode 进程健康检测失败，需要重新初始化";
     }
 
     private void validateAgent(String agentId) {

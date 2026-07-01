@@ -11,6 +11,7 @@ import {
   Eye,
   EyeOff,
   FileText,
+  Folder,
   History,
   ListTodo,
   Loader2,
@@ -39,6 +40,14 @@ import { MarkdownView } from '@test-agent/agent-chat'
 
 type ChatMessageInput = AgentMessage & { content?: string }
 
+type ReadOutputInfo = {
+  kind: 'file' | 'directory'
+  path: string
+  content: string
+  language?: string
+  entries?: string[]
+}
+
 type ChatMessage = {
   id: string
   role: 'user' | 'assistant'
@@ -47,6 +56,44 @@ type ChatMessage = {
   parts: MessagePart[]
   _error?: boolean
   _skillName?: string
+  readOutputs?: ReadOutputInfo[]
+}
+
+/**
+ * 解析 read 工具输出的 XML 格式文件/目录内容。
+ */
+function parseReadOutput(output: string): ReadOutputInfo | null {
+  if (!output.includes('<path>')) return null
+  const pathMatch = output.match(/<path>(.+?)<\/path>/)
+  const typeMatch = output.match(/<type>(.+?)<\/type>/)
+  if (!pathMatch || !typeMatch) return null
+  const filePath = pathMatch[1].trim()
+  const kind = typeMatch[1].trim() as 'file' | 'directory'
+
+  if (kind === 'file') {
+    const contentMatch = output.match(/<content>([\s\S]*?)<\/content>/)
+    if (!contentMatch) return null
+    const rawContent = contentMatch[1].replace(/^\d+:\s?/gm, '').trimEnd()
+    const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
+    const langMap: Record<string, string> = {
+      js: 'javascript', ts: 'typescript', jsx: 'javascript', tsx: 'typescript',
+      vue: 'vue', html: 'xml', css: 'css', scss: 'scss', java: 'java',
+      kt: 'kotlin', py: 'python', go: 'go', rs: 'rust', cpp: 'cpp',
+      c: 'c', cs: 'csharp', php: 'php', swift: 'swift', md: 'markdown',
+      json: 'json', yml: 'yaml', yaml: 'yaml', xml: 'xml', sql: 'sql',
+      sh: 'bash', bash: 'bash', gradle: 'groovy',
+    }
+    return { kind, path: filePath, content: rawContent, language: langMap[ext] ?? ext }
+  }
+
+  // directory
+  const entriesMatch = output.match(/<entries>([\s\S]*?)<\/entries>/)
+  if (!entriesMatch) return null
+  const entries = entriesMatch[1]
+    .split('\n')
+    .map((e) => e.trim())
+    .filter((e) => e && !e.startsWith('(') && !e.startsWith(')'))
+  return { kind, path: filePath, content: '', entries }
 }
 
 function partText(part: unknown): string {
@@ -56,7 +103,11 @@ function partText(part: unknown): string {
     if (pType === 'reasoning') return ''
     // tool part：提取执行结果（如 bash 命令输出、文件读取内容等）进入气泡
     if (pType === 'tool') {
-      const toolPart = part as { output?: unknown; state?: { output?: string; error?: string } }
+      const toolPart = part as { output?: unknown; state?: { output?: string; error?: string }; toolName?: string }
+      // read 工具的文件/目录内容由 readOutputs 单独渲染，不混入 markdown
+      if (toolPart.toolName === 'read' && typeof toolPart.output === 'string' && parseReadOutput(toolPart.output)) {
+        return ''
+      }
       if (typeof toolPart.output === 'string' && toolPart.output) return toolPart.output + '\n'
       const state = toolPart.state
       if (state?.output) return state.output + '\n'
@@ -88,6 +139,15 @@ function messageFiles(msg: FileOperationMessage) {
       url: part.url,
     }))
 }
+// 将 AI 回复中的 <thinking> 标签转为折叠块，美观展示思考过程。
+function formatThinking(text: string): string {
+  return text.replace(/<thinking>([\s\S]*?)<\/thinking>/g, (_, c) => {
+    const t = c.trim();
+    if (!t) return '';
+    return '\n> \u{1F4AD} **思考**\n> ' + t.replace(/\n/g, '\n> ') + '\n';
+  });
+}
+
 
 // 连续助手快照合并时只保留一个边界换行，避免前一段自带换行后再次 join 产生空白段。
 function joinAssistantContent(left: string, right: string): string {
@@ -1568,6 +1628,12 @@ const displayMessages = computed<ChatMessage[]>(() => {
         _skillName: skillName,
         meta: m.createdAt ? formatTime(m.createdAt) : undefined,
         parts: m.role === 'assistant' ? [...(m.parts ?? [])] : [],
+        readOutputs: m.role === 'assistant' && Array.isArray(m.parts)
+          ? m.parts
+            .filter((p): p is Extract<MessagePart, { type: 'tool' }> => p.type === 'tool' && p.toolName === 'read')
+            .map((p) => parseReadOutput(typeof p.output === 'string' ? p.output : ''))
+            .filter((f): f is ReadOutputInfo => f !== null)
+          : undefined,
       }
     })
     .filter((m): m is ChatMessage => m !== null)
@@ -1977,13 +2043,73 @@ function onCompositionEnd() {
                     </div>
                   </template>
                 </template>
+
+                <!-- 读取的文件/目录展示 -->
+                <template v-if="message.readOutputs?.length">
+                  <div
+                    v-for="(ro, ri) in message.readOutputs"
+                    :key="'read-output-' + ri"
+                    class="figma-chat-file-summary"
+                  >
+                    <div
+                      class="figma-chat-file-summary-row"
+                      @click="toggleFileExpanded(message.id, 'read-output-' + ri)"
+                    >
+                      <template v-if="ro.kind === 'file'">
+                        <span>读取的文件</span>
+                        <span style="color: #a1a5b1; margin-left: 4px">{{ ro.path.split('/').pop() }}</span>
+                        <span style="color: #a1a5b1; margin-left: auto; font-size: 10px;">{{ ro.language }}</span>
+                      </template>
+                      <template v-else>
+                        <FileText :size="14" class="shrink-0" style="color: #a1a5b1" />
+                        <span style="margin-left: 6px">{{ ro.path.split('/').filter(Boolean).pop() || ro.path }}</span>
+                        <span style="color: #a1a5b1; margin-left: 6px">目录 · {{ ro.entries?.length ?? 0 }} 项</span>
+                      </template>
+                      <ChevronRight
+                        v-if="!isFileExpanded(message.id, 'read-output-' + ri)"
+                        class="figma-chat-read-chevron"
+                        :size="14"
+                      />
+                      <ChevronDown
+                        v-else
+                        class="figma-chat-read-chevron"
+                        :size="14"
+                      />
+                    </div>
+                    <div
+                      v-if="isFileExpanded(message.id, 'read-output-' + ri)"
+                      class="figma-chat-file-list"
+                    >
+                      <!-- 文件内容 -->
+                      <div v-if="ro.kind === 'file'" class="figma-chat-file-item">
+                        <pre
+                          class="figma-chat-write-preview"
+                          v-html="
+                            highlightCode(ro.content, ro.path).slice(0, 4000)
+                          "
+                        ></pre>
+                      </div>
+                      <!-- 目录列表 -->
+                      <div v-else class="figma-chat-dir-list">
+                        <div
+                          v-for="entry in ro.entries"
+                          :key="entry"
+                          class="figma-chat-dir-item"
+                        >
+                          <span>{{ entry }}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+
                 <div v-if="message._error" class="figma-chat-error-row">
                   <AlertTriangle :size="14" class="figma-chat-error-icon" />
                   <span class="figma-chat-error-text">{{
                     message.content
                   }}</span>
                 </div>
-                <MarkdownView v-else-if="message.content.trim()" :source="message.content" />
+                <MarkdownView v-else-if="message.content.trim()" :source="formatThinking(message.content)" />
                 <div
                   v-if="messageFiles(message).length > 0"
                   class="figma-chat-document-list"

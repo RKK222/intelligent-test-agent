@@ -51,6 +51,7 @@ public class RuntimeManagementQueryService {
     private final OpencodeProcessManagerGateway gateway;
     private final OpencodeProcessHeartbeatStore heartbeatStore;
     private final BackendJavaRouteResolver routeResolver;
+    private final OpencodeProcessStatusQueryService statusQueryService;
     private final Clock clock;
 
     /**
@@ -62,8 +63,9 @@ public class RuntimeManagementQueryService {
             UserRepository userRepository,
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessHeartbeatStore heartbeatStore,
-            BackendJavaRouteResolver routeResolver) {
-        this(repository, userRepository, gateway, heartbeatStore, routeResolver, Clock.systemUTC());
+            BackendJavaRouteResolver routeResolver,
+            OpencodeProcessStatusQueryService statusQueryService) {
+        this(repository, userRepository, gateway, heartbeatStore, routeResolver, statusQueryService, Clock.systemUTC());
     }
 
     /**
@@ -116,11 +118,28 @@ public class RuntimeManagementQueryService {
             OpencodeProcessHeartbeatStore heartbeatStore,
             BackendJavaRouteResolver routeResolver,
             Clock clock) {
+        this(repository, userRepository, gateway, heartbeatStore, routeResolver, null, clock);
+    }
+
+    /**
+     * 完整测试构造器允许替换时钟、manager 网关、统一路由解析器和公共状态查询服务。
+     */
+    RuntimeManagementQueryService(
+            OpencodeProcessManagementRepository repository,
+            UserRepository userRepository,
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            BackendJavaRouteResolver routeResolver,
+            OpencodeProcessStatusQueryService statusQueryService,
+            Clock clock) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
         this.routeResolver = routeResolver;
+        this.statusQueryService = statusQueryService == null
+                ? new OpencodeProcessStatusQueryService(repository, gateway, heartbeatStore, clock)
+                : statusQueryService;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -507,7 +526,6 @@ public class RuntimeManagementQueryService {
             Optional<UserOpencodeProcessBinding> binding,
             Optional<String> username,
             String traceId) {
-        Instant checkedAt = Instant.now(clock);
         if (routeResolver != null && !routeResolver.isCurrent(process.linuxServerId())) {
             return new RuntimeManagementOpencodeProcess(
                     process,
@@ -517,82 +535,14 @@ public class RuntimeManagementQueryService {
                     "CHECK_SKIPPED",
                     true);
         }
-        try {
-            OpencodeProcessHealthResult health = gateway.checkHealth(new OpencodeProcessHealthCommand(
-                    process.processId(),
-                    process.baseUrl(),
-                    traceId));
-            if (health.healthy()) {
-                OpencodeServerProcess running = updateProcessProbeSnapshot(
-                        process,
-                        OpencodeServerProcessStatus.RUNNING,
-                        checkedAt,
-                        health.message(),
-                        traceId);
-                heartbeatStore.recordOpencodeHeartbeat(running.processId(), checkedAt);
-                return new RuntimeManagementOpencodeProcess(
-                        running,
-                        binding,
-                        username,
-                        "RUNNING",
-                        "HEALTHY",
-                        false);
-            }
-            OpencodeServerProcessStatus status = notRunningMessage(health.message())
-                    ? OpencodeServerProcessStatus.STOPPED
-                    : OpencodeServerProcessStatus.UNHEALTHY;
-            OpencodeServerProcess unhealthy = updateProcessProbeSnapshot(
-                    process,
-                    status,
-                    checkedAt,
-                    health.message(),
-                    traceId);
-            String probeStatus = status == OpencodeServerProcessStatus.STOPPED ? "NOT_RUNNING" : "UNHEALTHY";
-            return new RuntimeManagementOpencodeProcess(unhealthy, binding, username, probeStatus, probeStatus, true);
-        } catch (RuntimeException exception) {
-            OpencodeServerProcess failed = updateProcessProbeSnapshot(
-                    process,
-                    OpencodeServerProcessStatus.FAILED,
-                    checkedAt,
-                    exception.getMessage(),
-                    traceId);
-            return new RuntimeManagementOpencodeProcess(failed, binding, username, "CHECK_FAILED", "CHECK_FAILED", true);
-        }
-    }
-
-    private OpencodeServerProcess updateProcessProbeSnapshot(
-            OpencodeServerProcess process,
-            OpencodeServerProcessStatus status,
-            Instant checkedAt,
-            String healthMessage,
-            String traceId) {
-        OpencodeServerProcess updated = new OpencodeServerProcess(
-                process.processId(),
-                process.userId(),
-                process.linuxServerId(),
-                process.containerId(),
-                process.port(),
-                process.pid(),
-                process.baseUrl(),
-                status,
-                process.sessionPath(),
-                process.configPath(),
-                process.startedAt(),
-                checkedAt,
-                healthMessage,
-                process.createdAt(),
-                checkedAt,
-                traceId);
-        return repository.saveOpencodeServerProcess(updated);
-    }
-
-    private boolean notRunningMessage(String message) {
-        String normalized = message == null ? "" : message.toLowerCase(java.util.Locale.ROOT);
-        return normalized.contains("pid is not alive")
-                || normalized.contains("process is not running")
-                || normalized.contains("process not found")
-                || normalized.contains("state not found")
-                || normalized.contains("already stopped");
+        OpencodeProcessStatusProbe probe = statusQueryService.query(process.processId(), traceId);
+        return new RuntimeManagementOpencodeProcess(
+                probe.process().orElse(process),
+                binding,
+                username,
+                probe.managerStatus(),
+                probe.healthStatus(),
+                probe.restartable());
     }
 
     private Optional<String> username(UserId userId) {

@@ -27,6 +27,9 @@
 6. `test-agent-app` 不得新增 Controller、WebFilter、WebSocket handler 或业务源码包。
 7. 工作区文件和 Agent 配置文件的跨服务器目录列表、读取、写入必须走平台文件 WebSocket route/ticket/RPC；不得为文件操作新增后端到后端 HTTP 代理，Git、初始化、进度查询、公共 worktree 元数据列表等非文件操作除外。公共 Agent 直接目录模式必须通过 route/ticket 绑定 `linuxServerId`，公共 worktree 模式必须通过落库 `worktreeId -> linuxServerId` 绑定目标服务器。
 8. 涉及 opencode-manager 路由、Java 到 manager 控制、用户 opencode 进程服务器归属、运行管理 `containerId` 路由、Agent 配置或文件 WebSocket 目标后端选择时，必须复用统一公共程序：`BackendJavaRouteResolver` 做目标 Java 选择，`BackendHttpForwarder` 做 Java->Java HTTP 转发，目标 Java 再通过 `OpencodeProcessManagerGateway` 和本服务器 manager WebSocket 控制 manager。禁止在业务入口自行扫描 Redis 快照、手写 HTTP 转发器、防循环 header 变体、本机降级、跨服务器直接控制 manager 或恢复 `local-direct` / `gateway-mode=local` 等本地绕过。
+9. 涉及 opencode server 启动、重启后拉起、端口复用或启动成功状态回写时，必须复用 `test-agent-opencode-runtime` 的 `OpencodeProcessStartupService`。业务入口不得直接调用 `OpencodeProcessManagerGateway.startProcess()` 后自行保存进程、用户 binding、Redis heartbeat 或兼容 `ExecutionNode`；启动成功必须以公共启动服务完成 manager state/PID 与 opencode HTTP health 检查为准。
+10. 涉及 opencode server 停止、停止后状态回写或运行管理停止命令时，必须复用 `test-agent-opencode-runtime` 的 `OpencodeProcessStopService`。业务入口不得直接调用 `OpencodeProcessManagerGateway.stopProcess()` 后自行判定成功或保存 `STOPPED`；平台已有进程记录时，停止成功必须以公共停止服务完成 manager stop 和停止后 health 不健康确认为准。
+11. 涉及 opencode server 状态查询、健康探测、进程状态回写或 Redis heartbeat 刷新时，必须复用 `test-agent-opencode-runtime` 的 `OpencodeProcessStatusQueryService`。业务入口不得直接调用 `OpencodeProcessManagerGateway.checkHealth()` 后自行判断 `RUNNING/STOPPED/UNHEALTHY/FAILED`；进程不存在、运行中和健康检查异常的查询语义由公共查询服务统一映射。
 
 ## DTO 与模型
 
@@ -93,6 +96,9 @@
 1. 外部调用必须有连接、读取和整体超时；重试必须有上限，只对可重试错误执行。
 2. 取消 Run、SSE 断开、请求超时必须释放资源；opencode server 节点选择不得每次全量扫描大表。
 3. 新增 agent 必须实现 `AgentRuntime` 并复用 registry 的日志、指标和统一错误处理；未注册 agent 不得在 Controller 中特殊分支，应由 registry 返回统一错误。
+4. opencode server 启动成功不能只信任 manager `STARTED` 回包；所有启动入口必须走 `OpencodeProcessStartupService`，由它在目标 Java 上写入候选进程快照、调用 manager health 同时确认本地 state/PID 和 opencode HTTP health，健康后才回写 `RUNNING`、ACTIVE binding、Redis heartbeat 和兼容节点投影。
+5. opencode server 停止成功不能只信任 manager `STOPPED` 回包；所有停止入口必须走 `OpencodeProcessStopService`，由它通过 manager stop 发起停止，对平台已有进程记录的端口继续调用 manager health，确认 health 不健康后才回写 `STOPPED`。
+6. opencode server 状态查询不能在业务入口直接调用 manager health；所有强状态查询必须走 `OpencodeProcessStatusQueryService`，先确认平台进程记录是否存在，再通过目标 Java 的本机 manager health 归一为未启动、运行中或健康检查异常，并统一刷新 DB 状态与 Redis heartbeat。
 
 ### SSE 与事件
 
