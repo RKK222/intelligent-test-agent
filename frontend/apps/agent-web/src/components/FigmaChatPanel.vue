@@ -2060,7 +2060,7 @@ function onCompositionEnd() {
   <div class="figma-chat-root">
     <header class="figma-chat-header">
       <div class="figma-chat-header-left">
-        <h2 class="figma-chat-title">{{ title || '生成测试案例' }}</h2>
+        <h2 class="figma-chat-title" :title="title || '生成测试案例'">{{ title || '生成测试案例' }}</h2>
         <button
           type="button"
           class="figma-chat-header-btn"
@@ -2068,7 +2068,7 @@ function onCompositionEnd() {
           @click="historyDrawerOpen = true; emit('open-history')"
         >
           <History :size="15" />
-          <span>历史对话</span>
+          <span>历史</span>
         </button>
       </div>
     </header>
@@ -3551,6 +3551,8 @@ function onCompositionEnd() {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: 1;
+  min-width: 0;
 }
 .figma-chat-header-btn {
   display: flex;
@@ -3565,6 +3567,7 @@ function onCompositionEnd() {
   border: 1px solid var(--ta-border);
   transition: all 0.15s ease;
   cursor: pointer;
+  flex-shrink: 0;
 }
 .figma-chat-header-btn:hover {
   color: var(--ta-text);
@@ -3706,6 +3709,8 @@ function onCompositionEnd() {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
 }
 
 .figma-chat-close {

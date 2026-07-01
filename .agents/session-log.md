@@ -4,14 +4,18 @@
 
 ### 2026-07-01 - 提升前端启动 Run 和初始化进程请求超时限制
 
-- Why: 当前对话页面中，当智能体思考或启动过久（例如拉起新容器、建立 bindings、首次会话创建等耗时较长操作）时，前端 HTTP 会在 30 秒超时后显示超时报错（如“启动 Run 失败: 请求超时”）。但由于后端该操作已经开始并最终会异步运行成功，点开历史消息时发现智能体其实已经完成，给用户造成了不一致和误导性的体验。
+- Why: 当前对话页面中，当智能体思考或启动过久（例如拉起新容器、建立 bindings、首次会话创建等耗时较长操作）时，前端 HTTP 会在 30 秒超时后显示超时报错（如“启动 Run 失败: 请求超时”）。但由于后端该操作已经开始并最终会异步运行成功，点开历史消息时发现智能体其实已经完成，给用户造成了不一致和误导性的体验。此外，会话标题过长时在 flex 布局中未设置收缩及最小宽度，导致标题文本挤占空间将“历史对话”按钮完全挤出可视区域或压缩文字。
 - What:
   - 在 `backend-api` 中定义 `ExtraRequestInit` 类型（继承自 `RequestInit` 并增加 `timeoutMs?: number`），使前端每个请求可独立覆盖 30 秒 of 默认全局超时配置。
   - 在 `requestFrom` 核心请求方法中解析局部 `timeoutMs`，并在传给 `fetcher` 时对 extra 属性进行解构，保障标准的 fetch 参数规范。
-  - 将启动任务 `/runs` (startRun)、初始化专属进程 `/processes/me/initialize` (initializeMyOpencodeProcess) 以及向会话发送命令/Shell 操作 (`runSessionCommand`/`runSessionShell`) 的客户端请求超时提高到 120,000 毫秒（2 分钟），防止智能体长时间思考或冷启动下频繁弹窗超时报错。
+  - 将启动任务 `/runs` (startRun)、初始化专属进程 `/processes/me/initialize` (initializeMyOpencodeProcess) 以及向会话发送命令/Shell 操作 (`runSessionCommand`/`runSessionShell`) 的客户端请求超时提高到 120,000 毫秒（2 分钟），并在 Java 后端的 `DefaultOpencodeClientFacade.runtime()` 对 `/command` 和 `/shell` 命令接口同步将远端 opencode 交互超时提升为 120 秒，避免冷启动与执行偏慢下频繁抛出 `OPENCODE_TIMEOUT` 错误。
   - 在 `backend-api` 的 `README.md` 中同步了这一 API 行为。
-- How: 仅涉及前端 client 请求超时配置调整与局部覆盖，无后端逻辑修改，无接口或数据库 schema 变动。
-- Result: 新增的 `timeoutMs` 局部覆盖单元测试及前端 31 个测试包共 205 个测试全部通过。
+  - 调整 `FigmaChatPanel.vue`：
+    - 为对话标题 `.figma-chat-title` 和左侧布局容器 `.figma-chat-header-left` 增加 `flex: 1; min-width: 0;` 以实现响应式截断及省略号。
+    - 为标题增加了 `:title` 属性，鼠标悬停时会展示全量标题文本。
+    - 将“历史对话”按钮文本简写为“历史”（减少宽度占用），并为其 CSS 类 `.figma-chat-header-btn` 加上 `flex-shrink: 0` 防止被挤压或隐藏。
+- How: 涉及前端网络超时、Java 后端 opencode client 通信策略以及 Vue 聊天面板 CSS flex 属性调整，无数据库和 schema 变动。
+- Result: 单元测试及前端 31 个测试包共 206 个测试全部通过，Java 模块 `test-agent-opencode-client` 35 个单测通过。
 
 ### 2026-07-01 - 物理 Git 干净时清空侧边栏 Tab 变更角标和文件树高亮
 

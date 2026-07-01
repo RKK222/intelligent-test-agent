@@ -187,6 +187,11 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
     @Override
     public Mono<OpencodeRuntimeResult> runtime(OpencodeRuntimeCommand command) {
         Objects.requireNonNull(command, "command must not be null");
+        String path = command.path() != null ? command.path() : "";
+        Duration customTimeout = null;
+        if (path.endsWith("/command") || path.endsWith("/shell")) {
+            customTimeout = Duration.ofSeconds(120);
+        }
         return applyPolicy(
                 Mono.defer(() -> gateway.runtime(
                         command.node(),
@@ -198,7 +203,8 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                         command.body(),
                         command.traceId())),
                 "runtime",
-                command.node());
+                command.node(),
+                customTimeout);
     }
 
     /**
@@ -223,9 +229,13 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
      * 为 Mono 外部调用统一增加超时、有限重试和平台错误码映射。
      */
     private <T> Mono<T> applyPolicy(Mono<T> source, String operation, ExecutionNode node) {
+        return applyPolicy(source, operation, node, null);
+    }
+
+    private <T> Mono<T> applyPolicy(Mono<T> source, String operation, ExecutionNode node, Duration customTimeout) {
         String nodeId = node.executionNodeId().value();
         LOGGER.debug("Opencode call started, operation={}, nodeId={}, baseUrl={}", operation, nodeId, node.baseUrl());
-        Mono<T> protectedSource = source.timeout(timeout);
+        Mono<T> protectedSource = source.timeout(customTimeout != null ? customTimeout : timeout);
         if (maxRetries > 0) {
             protectedSource = protectedSource.retryWhen(retrySpec(operation, nodeId));
         }
