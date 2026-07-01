@@ -33,6 +33,27 @@ describe("FigmaChatPanel", () => {
 
     expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("/identify-test-objects ");
     expect(wrapper.emitted("update:inputValue")).toContainEqual(["/identify-test-objects "]);
+    expect(wrapper.find(".figma-chat-skill-panel").exists()).toBe(false);
+  });
+
+  it("keeps the composer visible below a detected choice panel", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1",
+            messageId: "a1",
+            role: "assistant",
+            text: "请选择下一步：\n1. 生成测试用例\n2. 分析测试对象",
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    expect(wrapper.find(".figma-chat-choice-panel").exists()).toBe(true);
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
   });
 
   it("sends the trimmed prompt and clears the composer when the process is ready", async () => {
@@ -553,6 +574,48 @@ describe("FigmaChatPanel", () => {
     // reasoning 以折叠块独立存在
     expect(wrapper.text()).toContain("思考状态");
     expect(wrapper.text()).toContain("需要分析");
+  });
+
+  it("shows the latest reasoning as running until the whole response finishes", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1", messageId: "a1", role: "assistant",
+            text: "正在生成回答",
+            parts: [
+              { partId: "reason-1", type: "reasoning", text: "仍在分析...", status: "completed", durationMs: 3200 },
+              { partId: "text-1", type: "text", text: "正在生成回答" }
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        running: true,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    const details = wrapper.get(".figma-chat-process-detail");
+    expect(details.text()).toContain("思考中");
+    expect(details.text()).not.toContain("已完成");
+
+    expect((details.element as HTMLDetailsElement).open).toBe(false);
+    await details.get("summary").trigger("click");
+    expect((details.element as HTMLDetailsElement).open).toBe(true);
+  });
+
+  it("shows the assistant avatar beside the running status", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        running: true,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    expect(wrapper.find(".figma-chat-running-assistant .figma-chat-avatar").exists()).toBe(true);
+    expect(wrapper.find(".figma-chat-running-assistant .figma-chat-status").exists()).toBe(true);
   });
 
   it("shows read tool output as structured FilePart, not in main text", () => {

@@ -2576,3 +2576,16 @@ bash /tmp/test-api-after-restart.sh
 - Result: `corepack pnpm typecheck` 成功；前端 201 个 Vitest 回归测试全部通过。
 
 
+### 2026-07-01 - 对话面板底部的运行中任务面板及历史消息内联任务列表增加折叠与展开功能
+
+- Why: 任务执行期间随着步骤增多，输入框上方的实时任务栏会占据大量高度遮挡视野；历史消息中的内联子任务列表在完成后也会占据过长篇幅，用户希望能够将其收缩。
+- What:
+  1. `FigmaChatPanel.vue`：
+     - 新增 `taskPanelCollapsed` 响应式变量，并在 watch 监听到新任务启动（`props.running` 从 false 变为 true）时重置为 `false`；
+     - 新增 `collapsedMessages` 响应式变量（Record<string, boolean>）用于记录各历史消息内联任务列表的折叠状态；
+     - 修改 template 中历史内联任务面板 (`inline-task-panel`) 和底部实时任务面板 (`figma-chat-task-panel`)，在 header 右侧增加折叠/展开 Chevron 按钮（`<ChevronUp>`/`<ChevronDown>`），列表包裹在 `.figma-chat-task-list` 容器中并根据折叠状态使用 `v-show` 控制显示隐藏；
+     - CSS 部分：更新 `.figma-chat-task-summary` 为 flex 布局（space-between），增加折叠状态对应的样式 `.figma-chat-task-summary--collapsed`、`.figma-chat-task-panel--collapsed`、折叠按钮样式 `.figma-chat-task-collapse-btn` 以及列表容器 `.figma-chat-task-list` 样式。
+- How: 纯前端交互与样式修改，新增折叠控制状态，不改动业务逻辑和后端 API。
+- Result: 前端类型检查（`corepack pnpm typecheck`）成功，全部 204 个 Vitest 测试用例全数通过，无任何 regression。
+
+

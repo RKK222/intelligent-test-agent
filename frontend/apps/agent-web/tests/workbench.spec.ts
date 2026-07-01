@@ -310,6 +310,31 @@ test("the first sent message becomes the new session title", async ({ page }) =>
   });
 });
 
+test("retrying a failed chat run sends the previous prompt again", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    runRequests,
+    runEvents: [
+      event(1, "run.failed", {
+        error: { name: "ConnectionError", message: "您的请求断开，请重试" }
+      })
+    ]
+  });
+
+  await gotoWorkbench(page);
+
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await composer.fill("重试这条测试任务");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect.poll(() => runRequests.length).toBe(1);
+  await expect(page.getByText("您的请求断开，请重试！ (974)")).toBeVisible();
+
+  await page.locator(".figma-chat-retry-card-btn").click();
+
+  await expect.poll(() => runRequests.length).toBe(2);
+  expect(runRequests[1]).toMatchObject({ prompt: "重试这条测试任务" });
+});
+
 test("switching history restores assistant documents and the file changes drawer", async ({ page }) => {
   await mockBackendApi(page, {
     sessions: [

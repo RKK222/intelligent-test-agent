@@ -408,6 +408,11 @@ function partIsRunning(part: MessagePart): boolean {
   return ['running', 'in_progress', 'streaming', 'started', 'active'].includes(status)
 }
 
+/** 最新回复尚未结束时，reasoning 仍属于整轮思考过程，不能提前展示为已完成。 */
+function reasoningIsRunning(message: ChatMessage, part: MessagePart): boolean {
+  return partIsRunning(part) || (props.running && message.id === lastAssistant.value?.id)
+}
+
 /** 从 tool input 生成一行摘要文字，显示在 tool 折叠块标题行 */
 function summaryFromToolInput(toolName: string, input: Record<string, unknown> | undefined): string {
   if (!input) return ''
@@ -530,6 +535,8 @@ const emit =
   }>()
 
 const taskPanelRef = ref<HTMLElement | null>(null)
+const taskPanelCollapsed = ref(false)
+const collapsedMessages = ref<Record<string, boolean>>({})
 
 const liveTaskParts = computed(() => {
   if (!props.running) return []
@@ -889,7 +896,8 @@ const filteredSkills = computed(() => {
 
 function onSkillInput(text: string) {
   const trimmed = text.trimStart()
-  if (trimmed.startsWith('/') && !props.running && !showChoicePanel.value) {
+  // 已选命令后的空格表示进入参数输入阶段，此时不再重复打开技能检索面板。
+  if (/^\/\S*$/.test(trimmed) && !props.running && !showChoicePanel.value) {
     const afterSlash = trimmed.slice(1)
     skillFilterText.value = afterSlash
     showSkillPanel.value = true
@@ -1774,6 +1782,7 @@ watch(
   () => props.running,
   (now, prev) => {
     if (now && !prev) {
+      taskPanelCollapsed.value = false
       thinkingExpanded.value = false
       wasCompleted.value = false
       wasFailed.value = false
@@ -2396,17 +2405,23 @@ function onCompositionEnd() {
                   <!-- reasoning 折叠块（非运行中，运行中由 thinkingLines 实时展示） -->
                   <details
                     v-else-if="part.type === 'reasoning' && (part as any).text"
-                    :open="false"
                     class="figma-chat-process-detail"
                   >
-                    <summary class="figma-chat-process-summary" @click.prevent>
-                      <span class="figma-chat-process-dot" />
+                    <summary class="figma-chat-process-summary">
+                      <span
+                        :class="[
+                          'figma-chat-process-dot',
+                          reasoningIsRunning(message, part) && 'figma-chat-process-dot--running',
+                        ]"
+                      />
                       <span class="figma-chat-process-title">思考状态</span>
                       <span
                         v-if="reasoningDurationText(part)"
                         class="figma-chat-process-meta"
                       >已思考 {{ reasoningDurationText(part) }}</span>
-                      <span class="figma-chat-process-status-label">已完成</span>
+                      <span class="figma-chat-process-status-label">
+                        {{ reasoningIsRunning(message, part) ? '思考中' : '已完成' }}
+                      </span>
                       <ChevronRight class="figma-chat-process-chevron" :size="14" />
                     </summary>
                     <div class="figma-chat-process-body">
@@ -2503,35 +2518,48 @@ function onCompositionEnd() {
                 <!-- Inline Subtasks List -->
                 <div
                   v-if="messageSubtasks(message).length > 0"
-                  class="figma-chat-task-panel inline-task-panel"
+                  :class="['figma-chat-task-panel', 'inline-task-panel', collapsedMessages[message.id] && 'figma-chat-task-panel--collapsed']"
                 >
-                  <div class="figma-chat-task-summary">
-                    已完成
-                    {{ messageSubtasks(message).filter((t) => t.status === 'completed' || t.status === 'success').length }}
-                    个任务 （共 {{ messageSubtasks(message).length }} 个）
+                  <div :class="['figma-chat-task-summary', collapsedMessages[message.id] && 'figma-chat-task-summary--collapsed']">
+                    <span>
+                      已完成
+                      {{ messageSubtasks(message).filter((t) => t.status === 'completed' || t.status === 'success').length }}
+                      个任务 （共 {{ messageSubtasks(message).length }} 个）
+                    </span>
+                    <button
+                      type="button"
+                      class="figma-chat-task-collapse-btn"
+                      @click="collapsedMessages[message.id] = !collapsedMessages[message.id]"
+                      :title="collapsedMessages[message.id] ? '展开任务列表' : '收起任务列表'"
+                    >
+                      <ChevronDown v-if="collapsedMessages[message.id]" :size="12" />
+                      <ChevronUp v-else :size="12" />
+                    </button>
                   </div>
-                  <div
-                    v-for="(tp, idx) in messageSubtasks(message)"
-                    :key="idx"
-                    :class="['figma-chat-task-row', `figma-chat-task-row--${tp.status}`]"
-                  >
-                    <CheckCircle
-                      v-if="tp.status === 'completed' || tp.status === 'success'"
-                      :size="12"
-                      class="figma-chat-task-icon figma-chat-task-icon--completed"
-                    />
-                    <Loader2
-                      v-else-if="tp.status === 'running' || tp.status === 'in_progress'"
-                      :size="12"
-                      class="figma-chat-task-icon figma-chat-task-icon--running figma-chat-spin"
-                    />
-                    <Circle
-                      v-else
-                      :size="12"
-                      class="figma-chat-task-icon figma-chat-task-icon--pending"
-                    />
-                    <span class="figma-chat-task-label">{{ tp.label }}</span>
-                    <span v-if="tp.detail" class="figma-chat-task-detail">{{ tp.detail }}</span>
+                  <div v-show="!collapsedMessages[message.id]" class="figma-chat-task-list">
+                    <div
+                      v-for="(tp, idx) in messageSubtasks(message)"
+                      :key="idx"
+                      :class="['figma-chat-task-row', `figma-chat-task-row--${tp.status}`]"
+                    >
+                      <CheckCircle
+                        v-if="tp.status === 'completed' || tp.status === 'success'"
+                        :size="12"
+                        class="figma-chat-task-icon figma-chat-task-icon--completed"
+                      />
+                      <Loader2
+                        v-else-if="tp.status === 'running' || tp.status === 'in_progress'"
+                        :size="12"
+                        class="figma-chat-task-icon figma-chat-task-icon--running figma-chat-spin"
+                      />
+                      <Circle
+                        v-else
+                        :size="12"
+                        class="figma-chat-task-icon figma-chat-task-icon--pending"
+                      />
+                      <span class="figma-chat-task-label">{{ tp.label }}</span>
+                      <span v-if="tp.detail" class="figma-chat-task-detail">{{ tp.detail }}</span>
+                    </div>
                   </div>
                 </div>
                 <div
@@ -2661,30 +2689,36 @@ function onCompositionEnd() {
       <!-- 运行中状态 -->
       <div
         v-if="running"
-        class="figma-chat-status"
-        :style="{ marginTop: reasoningText ? '-10px' : '0' }"
+        class="figma-chat-running-assistant"
       >
-        <Loader2 :size="14" class="figma-chat-status-loader figma-chat-spin" />
-        <span class="figma-chat-status-text">思考中... <span class="figma-chat-running-timer">{{ formattedRunDuration }}</span></span>
-        <button
-          v-if="reasoningText"
-          type="button"
-          class="figma-chat-thinking-toggle"
-          :aria-label="thinkingExpanded ? '收起思考过程' : '展开思考过程'"
-          @click="thinkingExpanded = !thinkingExpanded"
-        >
-          <ChevronDown
-            v-if="thinkingExpanded"
-            class="figma-chat-thinking-chevron"
-          />
-          <ChevronRight v-else class="figma-chat-thinking-chevron" />
-        </button>
-      </div>
-      <div
-        v-if="running && thinkingExpanded && reasoningText"
-        class="figma-chat-thinking-body"
-      >
-        <pre class="figma-chat-thinking-text" v-html="reasoningHtml" />
+        <div class="figma-chat-avatar">
+          <img :src="aiHeaderUrl" alt="AI" class="figma-chat-avatar-icon" />
+        </div>
+        <div class="figma-chat-running-content">
+          <div class="figma-chat-status">
+            <Loader2 :size="14" class="figma-chat-status-loader figma-chat-spin" />
+            <span class="figma-chat-status-text">思考中... <span class="figma-chat-running-timer">{{ formattedRunDuration }}</span></span>
+            <button
+              v-if="reasoningText"
+              type="button"
+              class="figma-chat-thinking-toggle"
+              :aria-label="thinkingExpanded ? '收起思考过程' : '展开思考过程'"
+              @click="thinkingExpanded = !thinkingExpanded"
+            >
+              <ChevronDown
+                v-if="thinkingExpanded"
+                class="figma-chat-thinking-chevron"
+              />
+              <ChevronRight v-else class="figma-chat-thinking-chevron" />
+            </button>
+          </div>
+          <div
+            v-if="thinkingExpanded && reasoningText"
+            class="figma-chat-thinking-body"
+          >
+            <pre class="figma-chat-thinking-text" v-html="reasoningHtml" />
+          </div>
+        </div>
       </div>
     </div>
 
@@ -2849,45 +2883,58 @@ function onCompositionEnd() {
     <div
       v-if="running && liveTaskParts.length > 0"
       ref="taskPanelRef"
-      class="figma-chat-task-panel"
+      :class="['figma-chat-task-panel', taskPanelCollapsed && 'figma-chat-task-panel--collapsed']"
     >
-      <div class="figma-chat-task-summary">
-        已完成
-        {{ liveTaskParts.filter((t) => t.status === 'completed').length }}
-        个任务 共（{{ liveTaskParts.length }} 个）
+      <div :class="['figma-chat-task-summary', taskPanelCollapsed && 'figma-chat-task-summary--collapsed']">
+        <span>
+          已完成
+          {{ liveTaskParts.filter((t) => t.status === 'completed').length }}
+          个任务 共（{{ liveTaskParts.length }} 个）
+        </span>
+        <button
+          type="button"
+          class="figma-chat-task-collapse-btn"
+          @click="taskPanelCollapsed = !taskPanelCollapsed"
+          :title="taskPanelCollapsed ? '展开任务列表' : '收起任务列表'"
+        >
+          <ChevronDown v-if="taskPanelCollapsed" :size="12" />
+          <ChevronUp v-else :size="12" />
+        </button>
       </div>
-      <div
-        v-for="tp in liveTaskParts"
-        :key="tp.partId"
-        :class="['figma-chat-task-row', `figma-chat-task-row--${tp.status}`]"
-      >
-        <Loader2
-          v-if="tp.status === 'running'"
-          :size="12"
-          class="figma-chat-task-icon figma-chat-task-icon--running"
-        />
-        <CheckCircle
-          v-else-if="tp.status === 'completed'"
-          :size="12"
-          class="figma-chat-task-icon figma-chat-task-icon--completed"
-        />
-        <X
-          v-else-if="tp.status === 'error'"
-          :size="12"
-          class="figma-chat-task-icon figma-chat-task-icon--error"
-        />
-        <Circle
-          v-else
-          :size="12"
-          class="figma-chat-task-icon figma-chat-task-icon--pending"
-        />
-        <span class="figma-chat-task-label">{{ tp.label }}</span>
-        <span v-if="tp.detail" class="figma-chat-task-detail">{{
-          tp.detail
-        }}</span>
+      <div v-show="!taskPanelCollapsed" class="figma-chat-task-list">
+        <div
+          v-for="tp in liveTaskParts"
+          :key="tp.partId"
+          :class="['figma-chat-task-row', `figma-chat-task-row--${tp.status}`]"
+        >
+          <Loader2
+            v-if="tp.status === 'running'"
+            :size="12"
+            class="figma-chat-task-icon figma-chat-task-icon--running"
+          />
+          <CheckCircle
+            v-else-if="tp.status === 'completed'"
+            :size="12"
+            class="figma-chat-task-icon figma-chat-task-icon--completed"
+          />
+          <X
+            v-else-if="tp.status === 'error'"
+            :size="12"
+            class="figma-chat-task-icon figma-chat-task-icon--error"
+          />
+          <Circle
+            v-else
+            :size="12"
+            class="figma-chat-task-icon figma-chat-task-icon--pending"
+          />
+          <span class="figma-chat-task-label">{{ tp.label }}</span>
+          <span v-if="tp.detail" class="figma-chat-task-detail">{{
+            tp.detail
+          }}</span>
+        </div>
       </div>
     </div>
-    <!-- 选择题面板：替换输入区域 -->
+    <!-- 选择题面板：固定展示在输入区域上方，保留 composer 供用户继续补充内容。 -->
     <div v-if="showChoicePanel" class="figma-chat-choice-panel">
       <!-- Step 1: 选择选项 -->
       <template v-if="choiceStep === 'select'">
@@ -3011,7 +3058,7 @@ function onCompositionEnd() {
       </template>
     </div>
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
-    <div v-else class="figma-chat-composer">
+    <div class="figma-chat-composer">
       <div class="figma-chat-input-card" @click="onComposerCardClick">
         <textarea
           v-model="localInput"
@@ -4162,12 +4209,24 @@ function onCompositionEnd() {
 }
 
 /* ---- Status ---- */
+.figma-chat-running-assistant {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  align-self: stretch;
+  max-width: 100%;
+}
+
+.figma-chat-running-content {
+  flex: 1;
+  min-width: 0;
+}
+
 .figma-chat-status {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-left: 30px;
-  margin-top: -20px;
+  min-height: 24px;
   border-radius: 8px;
   font-size: 12px;
   color: #8c8c8c;
@@ -4307,6 +4366,42 @@ function onCompositionEnd() {
   color: var(--ta-chat-muted, #8b8ea0);
   padding-bottom: 4px;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.figma-chat-task-summary--collapsed {
+  padding-bottom: 0;
+}
+
+.figma-chat-task-panel--collapsed {
+  max-height: none;
+  overflow-y: hidden;
+}
+
+.figma-chat-task-collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--ta-chat-muted, #8b8ea0);
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.figma-chat-task-collapse-btn:hover {
+  background: var(--ta-chat-hover-bg, rgba(0, 0, 0, 0.05));
+  color: var(--ta-chat-text, #333);
+}
+
+.figma-chat-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .figma-chat-task-row {
@@ -6202,6 +6297,10 @@ details[open] .figma-chat-process-chevron {
   margin-bottom: 6px;
   position: static;
   padding: 0;
+}
+
+.inline-task-panel .figma-chat-task-summary--collapsed {
+  margin-bottom: 0;
 }
 
 .inline-task-panel .figma-chat-task-row {
