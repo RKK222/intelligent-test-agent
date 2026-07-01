@@ -2502,3 +2502,10 @@ bash /tmp/test-api-after-restart.sh
   - 参考 `AgentConfigApplicationService.publicPublish`/`workspacePublish` 的正确模式作为修复模板。
   - 运行 `JAVA_HOME=.../openjdk-25.0.1/Contents/Home mvn -pl test-agent-common test -Dtest=GitWorkspaceServiceTest` 与 `mvn -pl test-agent-workspace-management test`，两个模块测试全部通过（test-agent-common 12 个，test-agent-workspace-management 19 个，0 失败 0 错误）。
 - Result: 个人 worktree 推送链路已修复，特性分支能正确接收个人改动；合并冲突时前端拿到 `CONFLICT` + 冲突文件列表可引导用户在个人 worktree 解决后重推。本次不涉及 API 契约、事件、数据库结构、鉴权变更，向后兼容。
+
+### 2026-07-01 - 优化侧边栏 worktree 显示支持鼠标悬浮展示完整名称
+
+- Why: 侧边栏工作空间右侧的 worktree 名字在文本过长时会被截断（使用 ellipsis），原生 title 提示响应过慢且不美观，用户要求挪上去之后可以展示完整名字。
+- What: 将 `FigmaFileExplorer.vue` 中的 `.figma-fe-section-worktree` 元素使用 Element Plus 的 `<el-tooltip>` 包裹起来，当鼠标悬浮时展示完整的当前 worktree 名字；同时移除原 span 上的原生 `title` 属性，避免出现双重 Tooltip。
+- How: 纯前端模版修改，使用 unplugin 自动导入的 `el-tooltip` 组件。
+- Result: 前端 `lint`、`typecheck`、单元测试（195 个用例全部通过）和生产包 `build` 全部通过。
