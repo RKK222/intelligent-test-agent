@@ -212,24 +212,6 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
-    void fetchesSpecificBranchIntoRemoteTrackingRef() {
-        RecordingExecutor executor = new RecordingExecutor("");
-        GitWorkspaceService service = new GitWorkspaceService(executor);
-
-        service.fetchBranch(tempDir, "feature_testagent_20260707_usr_1_default", "PRIVATE KEY");
-
-        assertThat(executor.calls).containsExactly(new Call(
-                List.of(
-                        "git",
-                        "-C",
-                        tempDir.toString(),
-                        "fetch",
-                        "origin",
-                        "feature_testagent_20260707_usr_1_default:refs/remotes/origin/feature_testagent_20260707_usr_1_default"),
-                "PRIVATE KEY"));
-    }
-
-    @Test
     void reportsCleanWorktreeFromPorcelainStatus() {
         RecordingExecutor executor = new RecordingExecutor("\n");
         GitWorkspaceService service = new GitWorkspaceService(executor);

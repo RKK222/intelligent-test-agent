@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-01 - 调整个人 worktree 发布为本地合并并保留用户冲突现场
+
+- Why: 本地个人 worktree 分支不应推送远端；发布应先拉远端应用版本特性分支，在本地完成 merge 后只推送特性分支。同时合并冲突需要留给用户在个人 worktree 中解决，不能只在后台应用副本 abort 后返回错误。
+- What: `publishPersonalWorkspace` 改为个人 worktree 本地提交后，确保应用版本副本可用并拉取远端特性分支；先把最新特性分支 merge 进个人 worktree，若冲突则返回 `CONFLICT` 且保留个人 worktree 的 unmerged 状态；无冲突时把本地个人分支 merge 回应用版本副本并只 push 应用特性分支。删除不再使用的指定个人分支 remote-tracking fetch 封装。
+- How: 未修改 `.env.local`/`.env.test` 和数据库 schema；同步 workspace-management/common README 与 HTTP API 文档；单测覆盖只推特性分支、本地双向 merge 顺序、冲突落在个人 worktree、clean retry 和旧应用副本路径自愈。
+- Result: `ManagedWorkspaceApplicationServiceTest` 先按新语义红测，再调整实现跑绿；`GitWorkspaceServiceTest` 与 `mvn -pl test-agent-workspace-management -am test` 通过。后续实际 UI 验证时，若返回 `CONFLICT`，用户需要在当前个人工作区内解决冲突并再次点击提交并推送。
+
 ### 2026-07-01 - 修复 worktree 发布、公共配置展示、opencode 启动与固定机器绑定
 
 - Why: F-COSS 本地 UI 验证发现个人 worktree 点击“提交并推送”后远端应用分支没有代码，且失败后可能重复提示冲突/错误；公共 opencode config 初始化后首页不显示；test profile 下 opencode 启动失败；同时确认 `7571d775e00453f85b1bd370385fe1e0bbdd10cc` 的 INACTIVE binding 自动迁移语义不符合“一人固定绑定一台 IP 机器”的规则。

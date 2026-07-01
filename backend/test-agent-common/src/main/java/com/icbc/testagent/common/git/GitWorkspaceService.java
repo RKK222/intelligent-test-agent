@@ -260,7 +260,7 @@ public class GitWorkspaceService {
     }
 
     /**
-     * 将 worktree 对应分支合并回主配置仓库当前分支，调用方负责提前 pull 和 clean 校验。
+     * 将指定本地分支合并进当前分支，调用方负责提前 pull、clean 校验和冲突处理。
      */
     public void mergeBranch(Path repoRoot, String branch, String privateKey) {
         executor.execute(
@@ -309,22 +309,6 @@ public class GitWorkspaceService {
     public void fetch(Path repoRoot, String privateKey) {
         executor.execute(
                 List.of("git", "-C", repoRoot.toString(), "fetch", "origin"),
-                privateKey,
-                DEFAULT_TIMEOUT);
-    }
-
-    /**
-     * 拉取指定远端分支并更新 remote-tracking ref；单分支 clone 的副本默认 refspec 可能不包含个人分支。
-     */
-    public void fetchBranch(Path repoRoot, String branch, String privateKey) {
-        executor.execute(
-                List.of(
-                        "git",
-                        "-C",
-                        repoRoot.toString(),
-                        "fetch",
-                        "origin",
-                        branch + ":refs/remotes/origin/" + branch),
                 privateKey,
                 DEFAULT_TIMEOUT);
     }

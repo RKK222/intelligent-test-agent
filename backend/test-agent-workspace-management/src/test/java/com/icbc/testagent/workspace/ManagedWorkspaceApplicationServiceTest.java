@@ -715,17 +715,20 @@ class ManagedWorkspaceApplicationServiceTest {
 
         assertThat(result.status()).isEqualTo("MERGED");
         assertThat(result.versionId()).isEqualTo(version.versionId());
-        // 合并方向：在应用版本副本（特性分支）上把远端个人分支 merge 进来，而非反过来
-        assertThat(git.fetchedBranch).isEqualTo(personal.personalWorkspaceBranch());
-        assertThat(git.fetchedBranchRepoRoot).isEqualTo(applicationRepoRoot);
-        assertThat(git.mergedBranch).isEqualTo("origin/" + personal.personalWorkspaceBranch());
+        // 合并方向：先在个人 worktree 上合入最新特性分支，冲突留给用户处理；成功后再把本地个人分支 merge 回特性分支。
+        assertThat(git.mergeCalls)
+                .extracting(MergeCall::branch)
+                .containsExactly(version.branch(), personal.personalWorkspaceBranch());
+        assertThat(git.mergeCalls)
+                .extracting(MergeCall::repoRoot)
+                .containsExactly(personalRepoRoot, applicationRepoRoot);
+        assertThat(git.mergedBranch).isEqualTo(personal.personalWorkspaceBranch());
         assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
-        // 先推送个人分支，再推送应用版本特性分支；应用分支推送发生在应用版本副本仓库
+        // 不再推送个人 worktree 分支，只推送应用版本特性分支；应用分支推送发生在应用版本副本仓库
         assertThat(git.pushes)
                 .extracting(push -> push.branch)
-                .containsExactly(personal.personalWorkspaceBranch(), version.branch());
-        assertThat(git.pushes.get(0).repoRoot).isEqualTo(personalRepoRoot);
-        assertThat(git.pushes.get(1).repoRoot).isEqualTo(applicationRepoRoot);
+                .containsExactly(version.branch());
+        assertThat(git.pushes.get(0).repoRoot).isEqualTo(applicationRepoRoot);
         assertThat(git.pushedBranch).isEqualTo(version.branch());
         assertThat(git.pushedRepoRoot).isEqualTo(applicationRepoRoot);
         // head commit 取自应用版本副本而非个人 worktree
@@ -801,7 +804,6 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(result.status()).isEqualTo("MERGED");
         assertThat(applicationRepoRoot).isEqualTo(root.resolve("appworkspace/20260707/gcms").toRealPath());
         assertThat(runtimeWorkspace.rootPath()).doesNotContain("D:\\data");
-        assertThat(git.fetchedBranchRepoRoot).isEqualTo(applicationRepoRoot);
         assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_merged_repaired");
     }
@@ -840,8 +842,10 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.committedStagedRepoRoot).isNull();
         assertThat(git.pushes)
                 .extracting(push -> push.branch)
-                .containsExactly(personal.personalWorkspaceBranch(), version.branch());
-        assertThat(git.mergedBranch).isEqualTo("origin/" + personal.personalWorkspaceBranch());
+                .containsExactly(version.branch());
+        assertThat(git.mergeCalls)
+                .extracting(MergeCall::branch)
+                .containsExactly(version.branch(), personal.personalWorkspaceBranch());
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_merged_retry");
     }
 
@@ -875,19 +879,16 @@ class ManagedWorkspaceApplicationServiceTest {
                 new UserId("usr_1"),
                 "trace_publish");
 
-        Path applicationRepoRoot = Path.of(managed.replicas.get(0).repoRootPath());
+        Path personalRepoRoot = Path.of(managed.personals.get(0).repoRootPath());
 
         assertThat(result.status()).isEqualTo("CONFLICT");
         assertThat(result.conflictFiles()).containsExactly("src/Main.java", "README.md");
-        // 合并方向仍应是远端个人分支 merge 进应用版本特性分支
-        assertThat(git.mergedBranch).isEqualTo("origin/" + personal.personalWorkspaceBranch());
-        assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
-        // 冲突时只允许已发生的个人分支推送，不应继续推送应用分支
-        assertThat(git.pushes).singleElement().satisfies(push ->
-                assertThat(push.branch).isEqualTo(personal.personalWorkspaceBranch()));
-        assertThat(git.pushedBranch).isEqualTo(personal.personalWorkspaceBranch());
-        // 合并冲突后立即 abort，避免应用版本副本保留 MERGING 状态导致后续重复冲突提示。
-        assertThat(git.abortedMergeRepoRoot).isEqualTo(applicationRepoRoot);
+        // 冲突必须留在当前个人 worktree，便于用户在可编辑工作区内解决。
+        assertThat(git.mergedBranch).isEqualTo(version.branch());
+        assertThat(git.mergedBranchRepoRoot).isEqualTo(personalRepoRoot);
+        assertThat(git.pushes).isEmpty();
+        assertThat(git.pushedBranch).isNull();
+        assertThat(git.abortedMergeRepoRoot).isNull();
         // 版本 commit 不应更新
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_base");
     }
@@ -924,8 +925,7 @@ class ManagedWorkspaceApplicationServiceTest {
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.GIT_UNAVAILABLE));
         assertThat(git.abortedMergeRepoRoot).isNull();
-        assertThat(git.pushes).singleElement().satisfies(push ->
-                assertThat(push.branch).isEqualTo(personal.personalWorkspaceBranch()));
+        assertThat(git.pushes).isEmpty();
     }
 
     private ManagedWorkspaceApplicationService service(
@@ -1065,10 +1065,9 @@ class ManagedWorkspaceApplicationServiceTest {
         private Path committedStagedRepoRoot;
         private String committedStagedMessage;
         private Path fetchedRepoRoot;
-        private Path fetchedBranchRepoRoot;
-        private String fetchedBranch;
         private String mergedBranch;
         private Path mergedBranchRepoRoot;
+        private final List<MergeCall> mergeCalls = new ArrayList<>();
         private boolean failMergeWithConflict;
         private List<String> nextConflictPaths = List.of();
         private Path abortedMergeRepoRoot;
@@ -1182,15 +1181,10 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
-        public void fetchBranch(Path repoRoot, String branch, String privateKey) {
-            this.fetchedBranchRepoRoot = repoRoot;
-            this.fetchedBranch = branch;
-        }
-
-        @Override
         public void mergeBranch(Path repoRoot, String branch, String privateKey) {
             this.mergedBranch = branch;
             this.mergedBranchRepoRoot = repoRoot;
+            this.mergeCalls.add(new MergeCall(repoRoot, branch));
             if (failMergeWithConflict) {
                 throw new PlatformException(
                         ErrorCode.GIT_UNAVAILABLE,
@@ -1244,6 +1238,9 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     private record PushCall(Path repoRoot, String branch, boolean force) {
+    }
+
+    private record MergeCall(Path repoRoot, String branch) {
     }
 
     private static final class FakeConfigurationRepository implements ConfigurationManagementRepository {
