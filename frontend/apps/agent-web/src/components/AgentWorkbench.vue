@@ -124,6 +124,7 @@ const selectedModel = ref("");
 const promptMode = ref("build");
 const logs = ref<string[]>([]);
 const diffFiles = ref<RunDiffFile[]>([]);
+const vcsDiffFiles = ref<RunDiffFile[]>([]);
 const diffSource = ref<"run" | "session" | "vcs" | "agent">("run");
 const diffViewMode = ref<"split" | "unified">("split");
 const centerMode = ref<"editor" | "diff" | "system">("editor");
@@ -608,6 +609,7 @@ watch(selectedWorkspaceIdRef, (id) => {
   if (id) {
     workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [id]: false };
     void loadDirectory("", id);
+    void refreshWorkspaceGitDiff();
   }
 });
 watch(agentsQuery.data, (data) => {
@@ -2290,9 +2292,12 @@ async function refreshOpenWorkspaceTabsFromDisk(paths?: string[]) {
 async function refreshWorkspaceGitDiff(options: { reloadOpenFiles?: boolean; paths?: string[] } = {}) {
   try {
     const nextFiles = await loadWorkspaceGitDiffFiles();
-    diffFiles.value = nextFiles;
-    if (!workbench.selectedDiffPath || !nextFiles.some((file) => file.path === workbench.selectedDiffPath)) {
-      workbench.setSelectedDiffPath(nextFiles[0]?.path);
+    vcsDiffFiles.value = nextFiles;
+    if (diffSource.value === "vcs") {
+      diffFiles.value = nextFiles;
+      if (!workbench.selectedDiffPath || !nextFiles.some((file) => file.path === workbench.selectedDiffPath)) {
+        workbench.setSelectedDiffPath(nextFiles[0]?.path);
+      }
     }
     if (options.reloadOpenFiles) {
       await refreshOpenWorkspaceTabsFromDisk(options.paths);
@@ -2571,7 +2576,7 @@ async function handleLogout() {
           :entries-by-directory="entriesByDirectory"
           :expanded-directories="expandedDirectories"
           :active-path="activePath"
-          :changed-files="diffFiles"
+          :changed-files="vcsDiffFiles"
           :loading-path="loadingPath"
           :app-name="selectedManagedApplication?.appName"
           :app-templates="appTemplatesWithVersions"
@@ -2592,8 +2597,8 @@ async function handleLogout() {
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
           @open-diff="handleOpenDiff"
-          @refresh="loadDirectory('', undefined, true)"
-          @changes-refreshed="(payload) => refreshWorkspaceGitDiff({ reloadOpenFiles: true, paths: payload?.paths })"
+          @refresh="() => { loadDirectory('', undefined, true); refreshWorkspaceGitDiff(); }"
+          @changes-refreshed="(payload) => refreshWorkspaceGitDiff({ reloadOpenFiles: payload?.reloadOpenFiles ?? true, paths: payload?.paths })"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"

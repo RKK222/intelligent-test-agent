@@ -105,32 +105,22 @@ function parseReadOutput(output: string): ReadOutputInfo | null {
 function partText(part: unknown): string {
   if (part && typeof part === 'object') {
     const pType = (part as { type?: string }).type
-    // reasoning 不进入气泡正文
-    if (pType === 'reasoning') return ''
-    // tool part：提取执行结果（如 bash 命令输出、文件读取内容等）进入气泡
-    if (pType === 'tool') {
-      const toolPart = part as { output?: unknown; state?: { output?: string; error?: string }; toolName?: string }
-      // read 工具的文件/目录内容由 readOutputs 单独渲染，不混入 markdown
-      if (toolPart.toolName === 'read' && typeof toolPart.output === 'string' && parseReadOutput(toolPart.output)) {
-        return ''
-      }
-      if (typeof toolPart.output === 'string' && toolPart.output) return toolPart.output + '\n'
-      const state = toolPart.state
-      if (state?.output) return state.output + '\n'
-      if (state?.error) return state.error + '\n'
+    // Only text parts should appear in the main message body.
+    // All structured parts (tool/reasoning/file/subtask/retry/step-*/compaction)
+    // are rendered separately as structured blocks below.
+    if (!pType || pType !== 'text') {
       return ''
     }
-    if ('text' in part) {
-      const text = (part as { text?: unknown }).text
-      return typeof text === 'string' ? text : ''
-    }
+    // For text parts, return the text content
+    const text = (part as { text?: unknown }).text
+    return typeof text === 'string' ? text : ''
   }
   return ''
 }
 
 function hasVisibleParts(msg: AgentMessage): boolean {
   if (msg.role !== 'assistant' || !Array.isArray(msg.parts)) return false
-  return msg.parts.some((p) => p.type === 'tool' || p.type === 'file')
+  return msg.parts.some((p) => p.type === 'tool' || p.type === 'file' || p.type === 'reasoning' || p.type === 'retry')
 }
 
 function messageFiles(msg: FileOperationMessage) {
@@ -230,6 +220,83 @@ function taskParts(msg: ChatMessage): TaskPartItem[] {
         status: p.status || 'pending',
       }
     })
+}
+
+/**
+ * 从消息 parts 中提取需要结构化渲染的块：
+ * - reasoning（已完成状态，运行中由 thinkingLines 实时展示）
+ * - 非文件操作 tool part（bash/grep/glob 等，文件操作已由 file summaries 覆盖）
+ * - retry part
+ * 这些 part 不进入主正文，在本组件内以折叠块独立渲染。
+ */
+function messageOtherParts(msg: ChatMessage): MessagePart[] {
+  if (!Array.isArray(msg.parts)) return []
+  return msg.parts.filter((p) => {
+    if (p.type === 'reasoning') return true
+    if (p.type === 'retry') return true
+    if (p.type === 'tool') {
+      const toolName = (p.toolName ?? '').toLowerCase()
+      // 文件操作类工具已由现有 file summaries / readOutputs 结构化渲染
+      if (FILE_READ_TOOLS.has(toolName) || FILE_WRITE_TOOLS.has(toolName) || FILE_EDIT_TOOLS.has(toolName)) {
+        // read 工具的输出如果带 XML 标记，已在 readOutputs 渲染
+        if (toolName === 'read' && typeof (p as any).output === 'string' && parseReadOutput((p as any).output)) {
+          return false
+        }
+        // 其他文件操作也在 file summaries 中有统计，但保留输出详情以供折叠查看
+        // 这里仍然返回 true，让用户可展开查看完整输出
+        return true
+      }
+      return true
+    }
+    return false
+  })
+}
+
+/** 从 tool part 获取展示用的输出文本 */
+function toolOutputText(part: MessagePart): string | undefined {
+  if (part.type !== 'tool') return undefined
+  const p = part as { output?: unknown; state?: { output?: string; error?: string } }
+  if (typeof p.output === 'string' && p.output) return p.output
+  if (p.state?.output) return p.state.output
+  if (p.state?.error) return p.state.error
+  return undefined
+}
+
+/** 判断 tool part 是否失败 */
+function toolIsFailed(part: MessagePart): boolean {
+  if (part.type !== 'tool') return false
+  const status = (part as { status?: string }).status ?? ''
+  const st = status.toLowerCase()
+  if (st === 'failed' || st === 'error') return true
+  const p = part as { state?: { error?: string } }
+  if (p.state?.error) return true
+  return false
+}
+
+/** 提取 reasoning part 的耗时文本 */
+function reasoningDurationText(part: MessagePart): string | undefined {
+  if (part.type !== 'reasoning') return undefined
+  const ms = (part as { durationMs?: number }).durationMs
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return undefined
+  if (ms < 1000) return `${ms}ms`
+  const seconds = ms / 1000
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`
+  const minutes = Math.floor(seconds / 60)
+  const rest = Math.round(seconds % 60)
+  return `${minutes}m ${rest}s`
+}
+
+/** 检查 part 是否处于运行中状态 */
+function partIsRunning(part: MessagePart): boolean {
+  const status = ((part as { status?: string }).status ?? '').toLowerCase()
+  return ['running', 'in_progress', 'streaming', 'started', 'active'].includes(status)
+}
+
+/** 从 tool input 生成一行摘要文字，显示在 tool 折叠块标题行 */
+function summaryFromToolInput(toolName: string, input: Record<string, unknown> | undefined): string {
+  if (!input) return ''
+  const { label, detail } = taskPartLabel(toolName || 'tool', input)
+  return detail || label || ''
 }
 
 const runStartMsgCount = ref(0)
@@ -2091,6 +2158,107 @@ function onCompositionEnd() {
                         </div>
                       </div>
                     </div>
+                  </div>
+                </template>
+
+                <!-- 结构化 part 块：非文件操作的 tool/reasoning/retry 以折叠块独立渲染，不进入正文 -->
+                <template v-for="part in messageOtherParts(message)" :key="part.partId || `${message.id}-${part.type}`">
+                  <!-- reasoning 折叠块（非运行中，运行中由 thinkingLines 实时展示） -->
+                  <details
+                    v-if="part.type === 'reasoning' && (part as any).text"
+                    :open="false"
+                    class="figma-chat-process-detail"
+                  >
+                    <summary class="figma-chat-process-summary" @click.prevent>
+                      <span class="figma-chat-process-dot" />
+                      <span class="figma-chat-process-title">思考状态</span>
+                      <span
+                        v-if="reasoningDurationText(part)"
+                        class="figma-chat-process-meta"
+                      >已思考 {{ reasoningDurationText(part) }}</span>
+                      <span class="figma-chat-process-status-label">已完成</span>
+                      <ChevronRight class="figma-chat-process-chevron" :size="14" />
+                    </summary>
+                    <div class="figma-chat-process-body">
+                      <MarkdownView
+                        :source="(part as any).text || ''"
+                        body-class="max-h-44 overflow-auto text-[12px] leading-5 text-[var(--ta-chat-muted)]"
+                      />
+                    </div>
+                  </details>
+
+                  <!-- tool 折叠块（bash/grep/glob 等，含输入/输出/错误） -->
+                  <details
+                    v-else-if="part.type === 'tool'"
+                    :open="partIsRunning(part)"
+                    :class="['figma-chat-process-detail', toolIsFailed(part) && 'figma-chat-process-detail--error']"
+                  >
+                    <summary class="figma-chat-process-summary" @click.prevent>
+                      <span
+                        :class="[
+                          'figma-chat-process-dot',
+                          partIsRunning(part) && 'figma-chat-process-dot--running',
+                          toolIsFailed(part) && 'figma-chat-process-dot--error',
+                        ]"
+                      />
+                      <span class="figma-chat-process-title">{{ (part as any).toolName || '工具' }}</span>
+                      <span
+                        v-if="(part as any).input"
+                        class="figma-chat-process-meta"
+                      >
+                        {{ summaryFromToolInput((part as any).toolName, (part as any).input) }}
+                      </span>
+                      <span
+                        :class="[
+                          'figma-chat-process-status-label',
+                          toolIsFailed(part) && 'figma-chat-process-status-label--error',
+                        ]"
+                      >{{
+                        partIsRunning(part) ? '执行中' :
+                        toolIsFailed(part) ? '失败' :
+                        (part as any).status === 'completed' || (part as any).status === 'success' ? '已完成' : '等待'
+                      }}</span>
+                      <ChevronRight class="figma-chat-process-chevron" :size="14" />
+                    </summary>
+                    <div class="figma-chat-process-body">
+                      <div
+                        v-if="(part as any).input && Object.keys((part as any).input).length > 0"
+                        class="figma-chat-tool-section"
+                      >
+                        <div class="figma-chat-tool-section-label">入参</div>
+                        <pre class="figma-chat-tool-code max-h-28">{{ JSON.stringify((part as any).input, null, 2) }}</pre>
+                      </div>
+                      <div
+                        v-if="toolOutputText(part)"
+                        class="figma-chat-tool-section"
+                      >
+                        <div class="figma-chat-tool-section-label">
+                          {{ toolIsFailed(part) ? '错误' : '输出' }}
+                        </div>
+                        <pre
+                          :class="[
+                            'figma-chat-tool-code',
+                            toolIsFailed(part) ? 'max-h-24' : 'max-h-48',
+                            toolIsFailed(part) && 'figma-chat-tool-code--error',
+                          ]"
+                        >{{ toolOutputText(part) }}</pre>
+                      </div>
+                    </div>
+                  </details>
+
+                  <!-- retry 错误块 -->
+                  <div
+                    v-else-if="part.type === 'retry'"
+                    class="figma-chat-retry-block"
+                  >
+                    <AlertTriangle :size="14" class="figma-chat-retry-icon" />
+                    <span class="figma-chat-retry-text">
+                      重试第 {{ (part as any).attempt || '?' }} 次
+                    </span>
+                    <span
+                      v-if="(part as any).error?.message"
+                      class="figma-chat-retry-detail"
+                    >{{ (part as any).error.message }}</span>
                   </div>
                 </template>
 
@@ -5307,5 +5475,176 @@ function onCompositionEnd() {
   color: var(--ta-muted, #71717a);
   font-size: 12px;
   text-align: center;
+}
+
+/* ===== 结构化 Part 折叠块样式 ===== */
+/* 与 agent-chat 包的 ProcessDisclosure 风格保持一致 */
+
+.figma-chat-process-detail {
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid var(--ta-chat-border, #e5e5e5);
+  background: var(--ta-chat-process-bg, #fafafa);
+}
+
+.figma-chat-process-detail--error {
+  border-color: rgba(235, 94, 83, 0.3);
+  background: rgba(235, 94, 83, 0.04);
+}
+
+.figma-chat-process-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ta-chat-text, #333);
+  list-style: none;
+}
+
+.figma-chat-process-summary::-webkit-details-marker {
+  display: none;
+}
+
+.figma-chat-process-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--ta-chat-border-strong, #c0c0c0);
+}
+
+.figma-chat-process-dot--running {
+  background: var(--ta-chat-status-running, #3366ff);
+  animation: figma-chat-pulse 1.4s ease-in-out infinite;
+}
+
+.figma-chat-process-dot--error {
+  background: var(--ta-chat-status-error, #eb5e53);
+}
+
+.figma-chat-process-title {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--ta-chat-text, #333);
+  flex-shrink: 0;
+}
+
+.figma-chat-process-meta {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ta-chat-muted, #888);
+  font-size: 11px;
+}
+
+.figma-chat-process-status-label {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--ta-chat-muted, #888);
+  background: var(--ta-chat-chip-bg, #f0f0f0);
+}
+
+.figma-chat-process-status-label--error {
+  background: rgba(235, 94, 83, 0.12);
+  color: #c0392b;
+}
+
+.figma-chat-process-chevron {
+  flex-shrink: 0;
+  color: var(--ta-chat-muted, #999);
+  transition: transform 0.15s ease;
+}
+
+details[open] .figma-chat-process-chevron {
+  transform: rotate(90deg);
+}
+
+.figma-chat-process-body {
+  border-top: 1px solid var(--ta-chat-border, #e5e5e5);
+  padding: 8px 10px;
+}
+
+/* 工具 part 内部区域 */
+.figma-chat-tool-section {
+  margin-bottom: 6px;
+}
+
+.figma-chat-tool-section:last-child {
+  margin-bottom: 0;
+}
+
+.figma-chat-tool-section--error {
+  border-left: 2px solid var(--ta-chat-status-error, #eb5e53);
+  padding-left: 8px;
+}
+
+.figma-chat-tool-section-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--ta-chat-muted, #888);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.figma-chat-tool-code {
+  margin: 0;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--ta-chat-detail-bg, #f5f5f5);
+  font-family: 'JetBrains Mono', 'Cascadia Mono', monospace;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--ta-chat-text, #374151);
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-y: auto;
+}
+
+.figma-chat-tool-code--error {
+  color: #c0392b;
+  background: rgba(235, 94, 83, 0.06);
+}
+
+/* retry 错误块 */
+.figma-chat-retry-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(235, 94, 83, 0.06);
+  border: 1px solid rgba(235, 94, 83, 0.2);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.figma-chat-retry-icon {
+  flex-shrink: 0;
+  color: #eb5e53;
+  margin-top: 2px;
+}
+
+.figma-chat-retry-text {
+  font-weight: 500;
+  color: #c0392b;
+}
+
+.figma-chat-retry-detail {
+  color: #888;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
 }
 </style>

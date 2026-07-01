@@ -513,6 +513,50 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void workspaceGitDiffReturnsPseudoPatchForUntrackedOrAddedFiles() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+
+        Path repoRoot = Path.of(personal.runtimeWorkspace().rootPath());
+        Path fileFolder = repoRoot.resolve("需求");
+        java.nio.file.Files.createDirectories(fileFolder);
+        Path untrackedFile = fileFolder.resolve("untracked.txt");
+        java.nio.file.Files.writeString(untrackedFile, "line1\nline2");
+
+        git.nextStatusPorcelain = "?? \"F-GCMS/workspace/需求/untracked.txt\"\n";
+
+        try {
+            ManagedWorkspaceResponses.WorkspaceGitDiffResponse diff = service.getWorkspaceGitDiff(
+                    personal.runtimeWorkspace().workspaceId(),
+                    new UserId("usr_1"));
+
+            assertThat(diff.files()).hasSize(1);
+            assertThat(diff.files().get(0).path()).isEqualTo("需求/untracked.txt");
+            assertThat(diff.files().get(0).status()).isEqualTo("untracked");
+            assertThat(diff.files().get(0).patch()).contains("+line1");
+            assertThat(diff.files().get(0).patch()).contains("+line2");
+            assertThat(diff.files().get(0).additions()).isEqualTo(2);
+        } finally {
+            java.nio.file.Files.deleteIfExists(untrackedFile);
+        }
+    }
+
+    @Test
     void discardWorkspaceGitFilesRestoresTrackedAndCleansNewFiles() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();

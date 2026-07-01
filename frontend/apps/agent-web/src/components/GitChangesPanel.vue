@@ -37,7 +37,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   openDiff: [payload: { path: string; source: "vcs" | "agent"; scope?: "PUBLIC" | "WORKSPACE" }];
-  "changes-refreshed": [payload?: { paths?: string[] }];
+  "changes-refreshed": [payload?: { paths?: string[]; reloadOpenFiles?: boolean }];
 }>();
 
 const workbench = useWorkbenchStore();
@@ -219,6 +219,7 @@ async function refreshChanges() {
   } finally {
     if (token === refreshChangesToken) {
       loading.value = false;
+      notifyChangesRefreshed(undefined, false);
     }
   }
 }
@@ -260,8 +261,11 @@ function unstageWorkspaceFile(path: string) {
   stagedWorkspacePaths.value = next;
 }
 
-function notifyChangesRefreshed(paths?: string[]) {
-  emit("changes-refreshed", paths ? { paths } : undefined);
+function notifyChangesRefreshed(paths?: string[], reloadOpenFiles?: boolean) {
+  const payload: { paths?: string[]; reloadOpenFiles?: boolean } = {};
+  if (paths) payload.paths = paths;
+  if (reloadOpenFiles !== undefined) payload.reloadOpenFiles = reloadOpenFiles;
+  emit("changes-refreshed", payload);
 }
 
 async function discardWorkspaceFile(path: string) {

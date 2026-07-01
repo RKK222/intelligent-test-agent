@@ -481,4 +481,199 @@ describe("FigmaChatPanel", () => {
     });
     expect(notRunning.get(".figma-chat-process-init").text()).toBe("启动中");
   });
+
+  // ===== 消息分层展示回归测试 =====
+
+  it("does NOT include tool stdout/stderr in the assistant main text bubble", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1", messageId: "a1", role: "assistant",
+            text: "这是最终回答",
+            parts: [
+              { partId: "tool-1", type: "tool", toolName: "bash", status: "completed", output: "ls: No such file or directory\n", input: { command: "ls /nonexistent" } },
+              { partId: "tool-2", type: "tool", toolName: "bash", status: "completed", state: { error: "permission denied" }, input: { command: "cat /etc/shadow" } } as any,
+              { partId: "text-1", type: "text", text: "这是最终回答" }
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    // MarkdownView stub 渲染 source 为纯文本；找到 source 为"这是最终回答"的那个
+    // （即主正文的 MarkdownView），它不应包含 tool output/stderr
+    const mdViews = wrapper.findAllComponents(markdownViewStub);
+    const mainMd = mdViews.find((w) => (w.props("source") as string).includes("这是最终回答"));
+    expect(mainMd).toBeTruthy();
+    if (mainMd) {
+      const src = mainMd.props("source") as string;
+      expect(src).toContain("这是最终回答");
+      expect(src).not.toContain("No such file or directory");
+      expect(src).not.toContain("permission denied");
+    }
+
+    // tool output/stderr 出现在折叠块详情中
+    expect(wrapper.text()).toContain("No such file or directory");
+    expect(wrapper.text()).toContain("permission denied");
+  });
+
+  it("does NOT include reasoning text in the main content", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1", messageId: "a1", role: "assistant",
+            text: "最终分析结论",
+            parts: [
+              { partId: "reason-1", type: "reasoning", text: "用户输入了一个测试需求，需要分析...", status: "completed", durationMs: 3200 },
+              { partId: "text-1", type: "text", text: "最终分析结论" }
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    // 检查主正文的 MarkdownView source 不包含 reasoning 文本
+    const mdViews = wrapper.findAllComponents(markdownViewStub);
+    const mainMd = mdViews.find((w) => (w.props("source") as string).includes("最终分析结论"));
+    expect(mainMd).toBeTruthy();
+    if (mainMd) {
+      const src = mainMd.props("source") as string;
+      expect(src).toContain("最终分析结论");
+      expect(src).not.toContain("需要分析");
+    }
+
+    // reasoning 以折叠块独立存在
+    expect(wrapper.text()).toContain("思考状态");
+    expect(wrapper.text()).toContain("需要分析");
+  });
+
+  it("shows read tool output as structured FilePart, not in main text", () => {
+    const xmlOutput = "<path>/tmp/test.txt</path><type>file</type><content>1: hello world</content>";
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1", messageId: "a1", role: "assistant",
+            text: "文件内容如下",
+            parts: [
+              { partId: "read-1", type: "tool", toolName: "read", status: "completed", output: xmlOutput },
+              { partId: "text-1", type: "text", text: "文件内容如下" }
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    // 主正文 MarkdownView 只含 text part
+    const mdViews = wrapper.findAllComponents(markdownViewStub);
+    const mainMd = mdViews.find((w) => (w.props("source") as string).includes("文件内容如下"));
+    expect(mainMd).toBeTruthy();
+    if (mainMd) {
+      const src = mainMd.props("source") as string;
+      expect(src).not.toContain("<path>");
+      expect(src).not.toContain("hello world");
+    }
+
+    // read output 在结构化 FilePart 中（文件名显示）
+    expect(wrapper.text()).toContain("test.txt");
+  });
+
+  it("renders a completed assistant message that only has tool parts (no text)", () => {
+    // 消息只有 tool parts 没有 text -> 应作为结构化块展示
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1", messageId: "a1", role: "assistant",
+            text: "",
+            parts: [
+              { partId: "tool-1", type: "tool", toolName: "bash", status: "completed", output: "编译成功\n", input: { command: "npm run build" } }
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    // assistant 消息存在
+    expect(wrapper.findAll(".figma-chat-assistant")).toHaveLength(1);
+    // 有折叠块展示工具信息
+    expect(wrapper.text()).toContain("bash");
+    expect(wrapper.text()).toContain("编译成功");
+  });
+
+  it("renders retry part as an error block, not in main body", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1", messageId: "a1", role: "assistant",
+            text: "重试后成功",
+            parts: [
+              { partId: "retry-1", type: "retry", attempt: 3, error: { name: "TimeoutError", message: "请求超时" } },
+              { partId: "text-1", type: "text", text: "重试后成功" }
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    const mdViews = wrapper.findAllComponents(markdownViewStub);
+    const mainMd = mdViews.find((w) => (w.props("source") as string).includes("重试后成功"));
+    expect(mainMd).toBeTruthy();
+    if (mainMd) {
+      const src = mainMd.props("source") as string;
+      expect(src).not.toContain("重试第 3 次");
+      expect(src).not.toContain("请求超时");
+    }
+
+    // retry 块展示错误信息
+    expect(wrapper.text()).toContain("重试第 3 次");
+    expect(wrapper.text()).toContain("请求超时");
+  });
+
+  it("does NOT include tool state.output or state.error in the main message body", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1", messageId: "a1", role: "assistant",
+            text: "",
+            parts: [
+              {
+                partId: "tool-1", type: "tool", toolName: "read", status: "error",
+                output: "",
+                state: { output: "", error: "ls: /nonexistent: No such file or directory" }
+              } as any
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    // 正文中不出现 state.error
+    const allText = wrapper.text();
+    expect(allText).toContain("No such file or directory");
+    // 错误在 tool 折叠块中显示
+    expect(allText).toContain("read");
+  });
 });

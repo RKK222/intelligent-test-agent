@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-01 - 物理 Git 干净时清空侧边栏 Tab 变更角标和文件树高亮
+
+- Why: 物理 Git 工作区已处理干净时（未暂存/已暂存为 0），侧边栏的 Git 变更 Tab 角标依然显示为 1，且工作区文件树（例如 .subitem.json）依然显示 +2 -1 的高亮。这是因为角标和文件树高亮绑定了智能体运行产生的会话变更（diffFiles），未与物理 Git 状态同步。
+- What:
+  - 在 `AgentWorkbench.vue` 中新增 `vcsDiffFiles` 响应式变量，作为物理 Git 仓库变更的专用数据源，将其传给 `FigmaFileExplorer` 的 `:changed-files` 属性。
+  - 修改 `refreshWorkspaceGitDiff`：总是将最新的物理 Git diff 写入 `vcsDiffFiles`；仅在当前 `diffSource === 'vcs'` 时才覆盖 `diffFiles`（以保持 diff 视图一致性）。
+  - 在 `GitChangesPanel.vue` 的 `refreshChanges` 完成时（`finally` 块中），调用 `notifyChangesRefreshed(undefined, false)` 以向父组件广播最新的 Git 状态，但不强制重新加载所有已打开的文件（避免覆盖未保存的编辑内容）。
+  - 在切换工作空间（`selectedWorkspaceIdRef` 监听器中）和手动刷新文件树（FigmaFileExplorer 的 `@refresh` 事件中）时，触发 `refreshWorkspaceGitDiff()` 以保证物理 Git 状态即时同步。
+- How: 纯前端组件和事件流调整，不修改任何后端接口、环境配置、数据库或 generated SDK。
+- Result: 前端 Vitest 195 个测试全量通过，`corepack pnpm typecheck` 通过；当物理 Git 干净时，侧边栏角标和工作区文件树高亮标志正确清零，右侧 FigmaChatPanel 内的智能体历史任务执行卡片仍保留修改历史（+2 -1）以作存档。
+
 ### 2026-07-01 - 调整个人 worktree 发布为本地合并并保留用户冲突现场
 
 - Why: 本地个人 worktree 分支不应推送远端；发布应先拉远端应用版本特性分支，在本地完成 merge 后只推送特性分支。同时合并冲突需要留给用户在个人 worktree 中解决，不能只在后台应用副本 abort 后返回错误。

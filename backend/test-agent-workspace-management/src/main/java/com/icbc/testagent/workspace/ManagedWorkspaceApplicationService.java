@@ -1135,8 +1135,24 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             int deletions = 0;
             try {
                 if ("added".equals(status) || "untracked".equals(status)) {
-                    // 新增/未跟踪文件：diff 没有内容，通过 wc 统计
-                    additions = countFileLines(repoRoot.resolve(gitPath));
+                    // 新增/未跟踪文件：通过读取文件内容生成全新增 patch，使 Diff 视图正常显示
+                    Path filePath = repoRoot.resolve(gitPath);
+                    additions = countFileLines(filePath);
+                    if (Files.exists(filePath) && !Files.isDirectory(filePath)) {
+                        try {
+                            String content = Files.readString(filePath);
+                            StringBuilder sb = new StringBuilder();
+                            sb.append("--- /dev/null\n");
+                            sb.append("+++ b/").append(gitPath).append("\n");
+                            sb.append("@@ -0,0 +1,").append(additions).append(" @@\n");
+                            for (String lineStr : content.split("\\r?\\n", -1)) {
+                                sb.append("+").append(lineStr).append("\n");
+                            }
+                            patch = sb.toString();
+                        } catch (Exception e) {
+                            // ignore
+                        }
+                    }
                 } else if (!"deleted".equals(status)) {
                     String diffOutput = gitWorkspaceService.diff(repoRoot, gitPath, staged);
                     if (diffOutput != null && !diffOutput.isBlank()) {
