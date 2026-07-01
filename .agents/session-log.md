@@ -2466,3 +2466,18 @@ bash /tmp/test-api-after-restart.sh
   - Go health 测试通过
 - Result: 第一阶段"止血"修改完成。P1-5（Agent 与 Skill 权限）需要第二阶段配合后端改动。
 
+
+### 2026-07-01 - Opencode 心跳检查与 Skill 召唤问题修复（补充修复第二轮）
+
+- Why: 复查发现第一轮修复存在问题：初始化流程被破坏、绿灯但功能不可用、进程死亡消息匹配错误、文件树无自动重试。
+- What:
+  1. OpencodeProcessStartupService：shouldRetryStartupHealth 增加 STALE 状态重试，启动后 HTTP 未就绪会继续等待
+  2. OpencodeProcessStatusQueryService：isNotRunningHealthMessage 增加 "process is not alive" 匹配，修正注释说明当前无连续失败阈值机制
+  3. UserOpencodeProcessAssignmentService：requireReadyProcess 在 STALE + 数据库 RUNNING 时允许运行，统一与 status() 的行为
+  4. AgentWorkbench.vue：loadDirectory 增加指数退避重试（最多 3 次，间隔 1s/2s/4s）
+- How:
+  - 后端编译通过
+  - 前端类型检查通过
+  - 服务启动成功
+- Result: 第一阶段"止血"修改完成，红灯闪烁、绿灯不可用矛盾已解决。P1-5（Agent 与 Skill 权限）需要第二阶段配合后端改动。
+

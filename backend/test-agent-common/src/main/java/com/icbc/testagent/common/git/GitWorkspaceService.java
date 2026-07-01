@@ -270,6 +270,20 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 返回当前仓库未解决的合并冲突文件列表，用于"个人 worktree 合并回应用版本分支"失败时提示前端。
+     */
+    public List<String> conflictPaths(Path repoRoot) {
+        GitCommandResult result = executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "diff", "--name-only", "--diff-filter", "U"),
+                null,
+                DEFAULT_TIMEOUT);
+        return result.stdoutText()
+                .lines()
+                .filter(line -> !line.isBlank())
+                .toList();
+    }
+
+    /**
      * 以 fast-forward only 模式拉取指定远端分支，避免自动 merge 产生不可预期的工作区差异。
      */
     public void pullFastForward(Path repoRoot, String branch, String privateKey) {

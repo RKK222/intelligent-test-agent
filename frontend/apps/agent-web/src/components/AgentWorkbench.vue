@@ -1569,7 +1569,8 @@ async function selectServerWorkspaceDirectory(payload: { server: WorkspaceBacken
 async function loadDirectory(
   path: string,
   workspaceId = selectedWorkspace.value?.workspaceId,
-  force = false
+  force = false,
+  retryCount = 0
 ) {
   if (!workspaceId) {
     return;
@@ -1592,20 +1593,29 @@ async function loadDirectory(
       fileTreeError.value = null;
     }
   } catch (error) {
-    // 根目录加载失败：设置面板内错误，保留上次成功数据，不覆盖全局反馈
+    // 根目录加载失败：设置面板内错误，保留上次成功数据
     if (path === "") {
       if (error instanceof BackendApiError && ["OPENCODE_UNAVAILABLE", "OPENCODE_BAD_GATEWAY"].includes(error.code)) {
         workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [workspaceId]: false };
       }
-      // 不写入全局 feedback，改为面板内错误显示
-      fileTreeError.value = error instanceof BackendApiError ? error.message : "加载文件树失败";
-    }
-    // 加载失败：从展开集合里把这条目录回滚掉，让目录行恢复成可点击触发重试。
-    // 注意：不删除 entriesByDirectory[path]——该 key 在失败前并未写入。
-    if (expandedDirectories.value.has(path)) {
-      const nextExpanded = new Set(expandedDirectories.value);
-      nextExpanded.delete(path);
-      expandedDirectories.value = nextExpanded;
+      // 指数退避重试：最多重试 3 次，间隔 1s, 2s, 4s
+      if (retryCount < 3) {
+        const delay = Math.pow(2, retryCount) * 1000;
+        fileTreeError.value = `加载文件树失败，${delay / 1000} 秒后重试...`;
+        setTimeout(() => {
+          void loadDirectory(path, workspaceId, force, retryCount + 1);
+        }, delay);
+      } else {
+        // 重试耗尽，显示错误和手动重试按钮
+        fileTreeError.value = error instanceof BackendApiError ? error.message : "加载文件树失败";
+      }
+    } else {
+      // 非根目录加载失败：从展开集合里把这条目录回滚掉
+      if (expandedDirectories.value.has(path)) {
+        const nextExpanded = new Set(expandedDirectories.value);
+        nextExpanded.delete(path);
+        expandedDirectories.value = nextExpanded;
+      }
     }
   } finally {
     const cleared = new Set(loadingPath.value);

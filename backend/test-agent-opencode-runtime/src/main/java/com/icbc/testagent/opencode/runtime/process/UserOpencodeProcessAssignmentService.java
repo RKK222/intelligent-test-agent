@@ -319,6 +319,8 @@ public class UserOpencodeProcessAssignmentService {
 
     /**
      * Run 启动前解析用户专属运行目标；缺失或不健康时要求前端先初始化。
+     * STALE 状态时：如果数据库状态是 RUNNING，允许运行（使用上次成功数据）；
+     * 否则要求重新初始化。
      */
     public UserOpencodeProcessAssignment requireReadyProcess(UserId userId, String agentId, String traceId) {
         validateAgent(agentId);
@@ -329,13 +331,21 @@ public class UserOpencodeProcessAssignmentService {
         OpencodeServerProcess process = repository.findOpencodeServerProcessById(binding.processId())
                 .orElseThrow(() -> unavailableException("请先初始化 opencode 进程"));
         OpencodeProcessStatusProbe probe = statusQueryService.query(process.processId(), traceId);
-        if (probe.status() != OpencodeProcessProbeStatus.RUNNING) {
-            throw unavailableException("opencode 进程不可用，请先初始化");
+        if (probe.status() == OpencodeProcessProbeStatus.RUNNING) {
+            OpencodeServerProcess refreshed = probe.process().orElse(process);
+            ExecutionNode node = projectExecutionNode(refreshed, now, traceId);
+            executionNodeRepository.save(node);
+            return new UserOpencodeProcessAssignment(node, refreshed.linuxServerId().value());
         }
-        OpencodeServerProcess refreshed = probe.process().orElse(process);
-        ExecutionNode node = projectExecutionNode(refreshed, now, traceId);
-        executionNodeRepository.save(node);
-        return new UserOpencodeProcessAssignment(node, refreshed.linuxServerId().value());
+        // STALE 状态：如果数据库是 RUNNING，允许运行（使用上次成功数据）
+        if (probe.status() == OpencodeProcessProbeStatus.STALE
+                && process.status() == OpencodeServerProcessStatus.RUNNING) {
+            // 使用数据库中的进程信息，允许运行
+            ExecutionNode node = projectExecutionNode(process, now, traceId);
+            executionNodeRepository.save(node);
+            return new UserOpencodeProcessAssignment(node, process.linuxServerId().value());
+        }
+        throw unavailableException("opencode 进程不可用，请先初始化");
     }
 
     private Optional<OpencodeServerProcess> activeProcess(UserOpencodeProcessBinding binding) {

@@ -128,7 +128,8 @@ public class OpencodeProcessStatusQueryService {
                         null);
             }
             // 普通 HTTP 不健康：不持久化数据库状态，返回 STALE 让调用方使用上次成功数据
-            // 后台维护任务会负责集中刷新和连续失败阈值判定
+            // 注意：当前没有实现连续失败阈值机制，HTTP 长期故障时数据库会保持 RUNNING
+            // TODO: 第二阶段引入连续失败计数和状态降级
             return staleProbe(process, checkedAt, health.message(), ErrorCode.OPENCODE_UNAVAILABLE);
         } catch (RuntimeException exception) {
             // 瞬时异常（网络超时、连接拒绝等）不持久化，返回 STALE 状态
@@ -194,6 +195,7 @@ public class OpencodeProcessStatusQueryService {
     static boolean isNotRunningHealthMessage(String message) {
         String normalized = message == null ? "" : message.toLowerCase(Locale.ROOT);
         return normalized.contains("pid is not alive")
+                || normalized.contains("process is not alive")
                 || normalized.contains("process is not running")
                 || normalized.contains("process not found")
                 || normalized.contains("state not found")

@@ -222,9 +222,15 @@ public class OpencodeProcessStartupService {
     }
 
     /**
-     * 只有 opencode HTTP 尚未 ready 这类普通健康失败才等待；manager 控制面错误或进程不存在立即失败。
+     * opencode HTTP 尚未 ready（STALE 或普通 HEALTH_CHECK_FAILED）才等待；
+     * manager 控制面错误或进程不存在立即失败。
      */
     private boolean shouldRetryStartupHealth(OpencodeProcessStatusProbe probe) {
+        // STALE 表示 HTTP 未就绪但进程可能还在启动中，需要继续等待
+        if (probe.status() == OpencodeProcessProbeStatus.STALE) {
+            return true;
+        }
+        // 普通健康失败（非控制面错误）也需要等待
         return probe.status() == OpencodeProcessProbeStatus.HEALTH_CHECK_FAILED && probe.errorCode() == null;
     }
 
