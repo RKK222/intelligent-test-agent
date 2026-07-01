@@ -167,10 +167,10 @@ public class OpencodeRuntimeApplicationService {
 
     /**
      * 列出当前 workspace 可用模型。
+     * 平台托管时直接返回，不触发健康检查；provider 配置在 Run 启动前由 RunApplicationService 同步。
      */
     public Object listModels(String workspaceId, String traceId) {
         if (modelCatalogService != null && modelCatalogService.managedSourceEnabled()) {
-            syncProviderConfig(workspaceId, traceId);
             return modelCatalogService.listModels();
         }
         return get(workspaceLocation(workspaceId, traceId), "/api/model", Map.of(), traceId);
@@ -178,10 +178,10 @@ public class OpencodeRuntimeApplicationService {
 
     /**
      * 列出当前 workspace 可用 provider。
+     * 平台托管时直接返回，不触发健康检查；provider 配置在 Run 启动前由 RunApplicationService 同步。
      */
     public Object listProviders(String workspaceId, String traceId) {
         if (modelCatalogService != null && modelCatalogService.managedSourceEnabled()) {
-            syncProviderConfig(workspaceId, traceId);
             return modelCatalogService.listProviders();
         }
         return get(workspaceLocation(workspaceId, traceId), "/api/provider", Map.of(), traceId);
