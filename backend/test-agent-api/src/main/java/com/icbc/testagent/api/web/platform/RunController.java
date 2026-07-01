@@ -194,6 +194,7 @@ public class RunController {
             @RequestHeader(name = "Last-Event-ID", required = false) String lastEventId,
             @RequestParam(name = "lastEventId", required = false) String lastEventIdQuery,
             ServerWebExchange exchange) {
+        exchange.getResponse().getHeaders().set("X-Accel-Buffering", "no");
         String resumeEventId = lastEventId != null ? lastEventId : lastEventIdQuery;
         RunId currentRunId = new RunId(runId);
         String traceId = RuntimeApiSupport.traceId(exchange);

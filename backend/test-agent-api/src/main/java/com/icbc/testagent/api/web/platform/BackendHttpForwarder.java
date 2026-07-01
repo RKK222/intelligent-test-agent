@@ -35,7 +35,7 @@ public class BackendHttpForwarder {
 
     static final String ROUTED_HEADER = "X-Test-Agent-Backend-Routed";
 
-    private static final Duration FORWARD_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration FORWARD_TIMEOUT = Duration.ofSeconds(120);
     private static final List<String> FORWARDED_HEADERS = List.of(
             HttpHeaders.AUTHORIZATION,
             HttpHeaders.ACCEPT,
