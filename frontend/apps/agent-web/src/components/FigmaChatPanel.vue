@@ -2605,6 +2605,8 @@ function onCompositionEnd() {
                           :key="entry"
                           class="figma-chat-dir-item"
                         >
+                          <Folder v-if="entry.endsWith('/')" :size="13" class="figma-chat-dir-icon" />
+                          <FileText v-else :size="13" class="figma-chat-dir-icon" />
                           <span>{{ entry }}</span>
                         </div>
                       </div>
@@ -4356,7 +4358,7 @@ function onCompositionEnd() {
   position: absolute;
   top: 6px;
   right: 6px;
-  opacity: 0;
+  opacity: 0.35;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4385,10 +4387,45 @@ function onCompositionEnd() {
 .figma-chat-bubble-copy-btn:hover {
   background: var(--ta-panel-2, #f4f4f5);
   color: var(--ta-chat-text, #333);
+  opacity: 1;
 }
 
 .figma-chat-bubble-copy-btn:active {
   background: var(--ta-panel-3, #e4e4e7);
+}
+
+/* ===== 目录/文件浏览结构样式 ===== */
+.figma-chat-dir-list {
+  background: var(--ta-panel-2, #fafafc);
+  border: 1px solid var(--ta-chat-border, #eef0f3);
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.figma-chat-dir-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ta-chat-text, #333);
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: background-color 0.12s;
+}
+
+.figma-chat-dir-item:hover {
+  background: var(--ta-panel-3, #f4f4f5);
+}
+
+.figma-chat-dir-icon {
+  color: var(--ta-chat-muted, #8c8c8c);
+  flex-shrink: 0;
 }
 
 .figma-chat-document-list {
@@ -4580,8 +4617,9 @@ function onCompositionEnd() {
   color: #6b7280;
 }
 .figma-chat-file-list {
-  margin: 6px 0 0;
-  padding: 0;
+  margin: 4px 0 8px 3px;
+  padding: 4px 0 4px 12px;
+  border-left: 1px solid var(--ta-chat-border, #e5e5e5);
   list-style: none;
   display: flex;
   flex-direction: column;
