@@ -270,6 +270,17 @@ function upsertPart(messages: AgentMessage[], event: RunEvent) {
       });
     }
   }
+  const slashUserPartIndex = findUnlinkedSlashUserByExpandedText(messages, delayedUserText);
+  if (slashUserPartIndex >= 0) {
+    const user = messages[slashUserPartIndex];
+    if (user.role === "user") {
+      return replaceOrAppendMessage(messages, slashUserPartIndex, {
+        ...user,
+        id: messageId,
+        messageId
+      });
+    }
+  }
   const exact = findAssistantMessage(messages, messageId);
   const lastIdx = exact.message ? -1 : findLastAssistantInCurrentTurn(messages);
   const assistant: Extract<AgentMessage, { role: "assistant" }> =
@@ -384,6 +395,29 @@ function findUnlinkedUserByText(messages: AgentMessage[], incomingText: string |
   return messages.findIndex(
     (message) => message.role === "user" && !message.messageId && message.text === incomingText
   );
+}
+
+// slash command 会被 opencode 展开成完整技能提示词；只用展开文本识别归属，用户气泡仍保留原始命令。
+function findUnlinkedSlashUserByExpandedText(messages: AgentMessage[], expandedText: string | undefined): number {
+  if (expandedText === undefined) {
+    return -1;
+  }
+  return messages.findIndex((message) => {
+    if (message.role !== "user" || message.messageId) {
+      return false;
+    }
+    const argument = slashCommandArgument(message.text);
+    return argument.length > 0 && expandedText.includes(argument);
+  });
+}
+
+function slashCommandArgument(prompt: string): string {
+  const trimmed = prompt.trim();
+  if (!trimmed.startsWith("/")) {
+    return "";
+  }
+  const firstSpace = trimmed.search(/\s/);
+  return firstSpace > 0 ? trimmed.slice(firstSpace).trim() : "";
 }
 
 function replaceOrAppendMessage(messages: AgentMessage[], index: number, message: AgentMessage) {

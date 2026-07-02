@@ -149,6 +149,38 @@ describe("agent-chat runtime reducer", () => {
     expect(completed.messages).toHaveLength(1);
   });
 
+  it("binds expanded slash command user parts when the user message snapshot is delayed", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "/generate-cases-path 对车贷的开发文档，生成路径图",
+      createdAt: "2026-07-02T05:44:30Z"
+    });
+    const completed = reduceAgentChatRuntime(submitted, {
+      type: "event",
+      event: event("message.part.updated", {
+        sessionID: "ses_0dea4821cffepwpXaTFMUHFwsH",
+        rawType: "message.part.updated",
+        part: {
+          type: "text",
+          text: "# 路径法案例生成\n\n## 适用\n\n页面流、状态流、审批流、跨接口链路。\n\n对车贷的开发文档，生成路径图",
+          messageID: "msg_f215b8020001M9BKwEZC6zAH3e",
+          sessionID: "ses_0dea4821cffepwpXaTFMUHFwsH",
+          id: "prt_f215b8027001sJNXB8Knzu5XJx"
+        }
+      })
+    });
+
+    expect(completed.messages).toMatchObject([
+      {
+        role: "user",
+        messageId: "msg_f215b8020001M9BKwEZC6zAH3e",
+        text: "/generate-cases-path 对车贷的开发文档，生成路径图"
+      }
+    ]);
+    expect(completed.messages).toHaveLength(1);
+    expect(completed.messages.some((message) => message.role === "assistant" && message.text.includes("# 路径法案例生成"))).toBe(false);
+  });
+
   it("merges a delayed remote user snapshot back into the optimistic user message", () => {
     const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "user.submitted",

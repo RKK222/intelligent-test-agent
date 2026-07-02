@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-02 - slash command 展开 user part 不能误建 assistant 输出
+
+- Why: opencode 可能先发送 `message.part.updated`，再发送或不及时发送 `message.updated(role=user)`；slash command 会被展开成完整技能提示词，展开文本与本地原始 `/command 参数` 不相等，旧 reducer 会把该 user text part 当作 assistant 输出显示。
+- What: `agent-chat` reducer 在 exact message 和同文本 user 归并之外，增加 slash command 展开文本兜底：远端 text part 包含本地 slash 参数时，只把远端 `messageID` 绑定回未绑定的本地 user 消息，保留用户原始输入文本。
+- How: 新增 `findUnlinkedSlashUserByExpandedText` / `slashCommandArgument` helper，并补充无 `message.updated(role=user)` 的回归测试，覆盖 `/generate-cases-path 对车贷的开发文档，生成路径图` 被展开为路径法技能正文的真实形态。
+- Result: `cd frontend && corepack pnpm test -- runtime-reducer`、`cd frontend && corepack pnpm --filter @test-agent/agent-chat typecheck`、`cd frontend && corepack pnpm test -- FigmaChatPanel` 和 `git diff --check` 通过。
+
 ### 2026-07-02 - 前端原始报文查看器只捕获浏览器可见数据
 
 - Why: 用户需要在右侧对话框查看前端用户发送给平台后端、以及前端从平台后端收到的原始报文，用于排查前端渲染前的真实输入输出；同时明确不是 opencode server 端原始事件，也不需要后端持久化。
