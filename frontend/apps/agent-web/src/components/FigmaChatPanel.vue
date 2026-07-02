@@ -404,6 +404,7 @@ function reasoningDurationText(part: MessagePart): string | undefined {
 
 /** 检查 part 是否处于运行中状态 */
 function partIsRunning(part: MessagePart): boolean {
+  if (!props.running) return false
   const status = ((part as { status?: string }).status ?? '').toLowerCase()
   return ['running', 'in_progress', 'streaming', 'started', 'active'].includes(status)
 }
@@ -2564,6 +2565,7 @@ function onCompositionEnd() {
                   <details
                     v-else-if="part.type === 'reasoning' && (part as any).text"
                     class="figma-chat-process-detail"
+                    :class="{ 'is-running': reasoningIsRunning(message, part) }"
                   >
                     <summary class="figma-chat-process-summary">
                       <span
@@ -2594,7 +2596,11 @@ function onCompositionEnd() {
                   <details
                     v-else-if="part.type === 'tool' && !isUrlFetchTool((part as any).toolName)"
                     :open="partIsRunning(part)"
-                    :class="['figma-chat-process-detail', toolIsFailed(part) && 'figma-chat-process-detail--error']"
+                    :class="[
+                      'figma-chat-process-detail',
+                      toolIsFailed(part) && 'figma-chat-process-detail--error',
+                      partIsRunning(part) && 'is-running'
+                    ]"
                   >
                     <summary class="figma-chat-process-summary" @click.prevent>
                       <span
@@ -2671,7 +2677,9 @@ function onCompositionEnd() {
                     message.content
                   }}</span>
                 </div>
-                <MarkdownView v-else-if="message.content.trim()" :source="formatThinking(message.content)" />
+                <div v-else-if="message.content.trim()" class="figma-chat-text-bubble">
+                  <MarkdownView :source="formatThinking(message.content)" />
+                </div>
 
                 <!-- Inline Subtasks List -->
                 <div
@@ -4232,6 +4240,19 @@ function onCompositionEnd() {
   padding: 0;
   color: #333;
   border-top-left-radius: 2px;
+}
+
+.figma-chat-text-bubble {
+  background: #fafafc;
+  border: 1px solid #eef0f3;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border-top-left-radius: 2px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  color: #1a1a1a;
+  margin-top: 10px;
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .figma-chat-document-list {
@@ -6352,11 +6373,34 @@ function onCompositionEnd() {
 /* 与 agent-chat 包的 ProcessDisclosure 风格保持一致 */
 
 .figma-chat-process-detail {
-  margin-top: 8px;
+  margin-top: 6px;
   overflow: hidden;
-  border-radius: 6px;
-  border: 1px solid var(--ta-chat-border, #e5e5e5);
-  background: var(--ta-chat-process-bg, #fafafa);
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  background: rgba(0, 0, 0, 0.015);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.figma-chat-process-detail:hover {
+  background: rgba(0, 0, 0, 0.03);
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
+@keyframes ta-shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.figma-chat-process-detail.is-running {
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.01) 25%, rgba(0, 0, 0, 0.04) 50%, rgba(0, 0, 0, 0.01) 75%);
+  background-size: 200% 100%;
+  animation: ta-shimmer 1.5s infinite linear;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
 
 .figma-chat-process-detail--error {
@@ -6390,7 +6434,7 @@ function onCompositionEnd() {
 }
 
 .figma-chat-process-dot--running {
-  background: var(--ta-chat-status-running, #3366ff);
+  background: linear-gradient(135deg, #3366ff, #9b51e0);
   animation: figma-chat-pulse 1.4s ease-in-out infinite;
 }
 

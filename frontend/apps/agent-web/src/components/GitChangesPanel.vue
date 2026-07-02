@@ -155,11 +155,13 @@ watch(
   { immediate: true }
 );
 
-async function refreshChanges() {
+async function refreshChanges(options: { preserveError?: boolean } = {}) {
   if (loading.value) return;
   const token = ++refreshChangesToken;
   loading.value = true;
-  errorMessage.value = "";
+  if (!options.preserveError) {
+    errorMessage.value = "";
+  }
   try {
     if (workbench.useMockTestData) {
       applyMockChanges();
@@ -413,7 +415,8 @@ async function handleCommit(push = false) {
           : "未知文件";
         errorMessage.value = `合并冲突：请在个人工作区中解决 ${conflictList} 的冲突后重新「提交并推送」。当前仍停留在个人工作区，应用版本副本不受影响。`;
         progressMessage.value = "";
-        await refreshChanges();
+        await refreshChanges({ preserveError: true });
+        errorMessage.value = `合并冲突：请在个人工作区中解决 ${conflictList} 的冲突后重新「提交并推送」。当前仍停留在个人工作区，应用版本副本不受影响。`;
         committing.value = false;
         return;
       }
@@ -549,7 +552,7 @@ defineExpose({
             type="button"
             class="git-refresh-btn ml-auto"
             title="刷新变更列表"
-            @click.stop="refreshChanges"
+            @click.stop="refreshChanges()"
             :disabled="loading"
           >
             <RefreshCw class="h-3 w-3" :class="{ 'animate-spin': loading }" :stroke-width="1.5" />
