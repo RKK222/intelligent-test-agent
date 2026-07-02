@@ -46,17 +46,17 @@ class RedisOpencodeProcessHeartbeatStoreTest {
     private static final Instant NOW = Instant.parse("2026-06-24T00:00:00Z");
 
     @Test
-    void recordBackendSnapshotWritesSnapshotAndLegacyHeartbeatWithTenSecondTtl() {
+    void recordBackendSnapshotWritesSnapshotByBackendProcessAndServerHeartbeatWithTenSecondTtl() {
         RedisFixture fixture = RedisFixture.create();
         RedisOpencodeProcessHeartbeatStore store = new RedisOpencodeProcessHeartbeatStore(fixture.redisTemplate);
 
         store.recordBackendSnapshot(backendSnapshot());
 
         verify(fixture.values).set(
-                eq("test-agent:runtime-snapshot:backend:10.8.0.12"),
+                eq("test-agent:runtime-snapshot:backend:bjp_1234567890abcdef"),
                 contains("\"listenUrl\":\"http://10.8.0.12:8080\""),
                 eq(Duration.ofSeconds(10)));
-        verify(fixture.sets).add("test-agent:runtime-snapshot:index:backend", "10.8.0.12");
+        verify(fixture.sets).add("test-agent:runtime-snapshot:index:backend", "bjp_1234567890abcdef");
         verify(fixture.values).set(
                 eq("test-agent:runtime-heartbeat:backend:10.8.0.12"),
                 eq(String.valueOf(NOW.toEpochMilli())),
@@ -65,18 +65,23 @@ class RedisOpencodeProcessHeartbeatStoreTest {
     }
 
     @Test
-    void recordBackendSnapshotOverwritesLatestSnapshotForSameIpAfterJavaRestart() {
+    void recordBackendSnapshotKeepsMultipleJavaSnapshotsForSameServer() {
         RedisFixture fixture = RedisFixture.create();
         RedisOpencodeProcessHeartbeatStore store = new RedisOpencodeProcessHeartbeatStore(fixture.redisTemplate);
 
         store.recordBackendSnapshot(backendSnapshot(new BackendProcessId("bjp_1234567890abcdef")));
         store.recordBackendSnapshot(backendSnapshot(new BackendProcessId("bjp_2234567890abcdef")));
 
-        verify(fixture.values, times(2)).set(
-                eq("test-agent:runtime-snapshot:backend:10.8.0.12"),
-                contains("\"value\":\"10.8.0.12\""),
+        verify(fixture.values).set(
+                eq("test-agent:runtime-snapshot:backend:bjp_1234567890abcdef"),
+                contains("\"backendProcessId\":{\"value\":\"bjp_1234567890abcdef\"}"),
                 eq(Duration.ofSeconds(10)));
-        verify(fixture.sets, times(2)).add("test-agent:runtime-snapshot:index:backend", "10.8.0.12");
+        verify(fixture.values).set(
+                eq("test-agent:runtime-snapshot:backend:bjp_2234567890abcdef"),
+                contains("\"backendProcessId\":{\"value\":\"bjp_2234567890abcdef\"}"),
+                eq(Duration.ofSeconds(10)));
+        verify(fixture.sets).add("test-agent:runtime-snapshot:index:backend", "bjp_1234567890abcdef");
+        verify(fixture.sets).add("test-agent:runtime-snapshot:index:backend", "bjp_2234567890abcdef");
     }
 
     @Test

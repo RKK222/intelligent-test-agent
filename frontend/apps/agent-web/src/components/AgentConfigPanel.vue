@@ -30,7 +30,7 @@ import type {
 } from "@test-agent/shared-types";
 import { formatAgentConfigError } from "./agentConfigErrors";
 import { notifyError, notifySuccess } from "./notify";
-import PublicDirectoryNode from "./PublicDirectoryNode.vue";
+import AgentConfigTreeNode from "./AgentConfigTreeNode.vue";
 
 const props = defineProps<{
   baseUrl: string;
@@ -938,7 +938,7 @@ defineExpose({
       </div>
       <div v-if="rootExpanded.has('PUBLIC')" class="agent-node-list">
         <div v-if="loadingByScope.PUBLIC.has('')" class="agent-loading"><Loader2 class="h-3.5 w-3.5 animate-spin" />加载中</div>
-        <PublicDirectoryNode
+        <AgentConfigTreeNode
           v-for="entry in entriesByScope.PUBLIC[''] ?? []"
           :key="`PUBLIC:${entry.path}`"
           :entry="entry"
@@ -988,7 +988,7 @@ defineExpose({
       </div>
       <div v-if="rootExpanded.has('WORKSPACE')" class="agent-node-list">
         <div v-if="loadingByScope.WORKSPACE.has('')" class="agent-loading"><Loader2 class="h-3.5 w-3.5 animate-spin" />加载中</div>
-        <PublicDirectoryNode
+        <AgentConfigTreeNode
           v-for="entry in entriesByScope.WORKSPACE[''] ?? []"
           :key="`WORKSPACE:${entry.path}`"
           :entry="entry"

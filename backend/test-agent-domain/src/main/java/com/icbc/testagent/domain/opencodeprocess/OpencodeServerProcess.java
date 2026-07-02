@@ -2,6 +2,7 @@ package com.icbc.testagent.domain.opencodeprocess;
 
 import com.icbc.testagent.domain.support.DomainValidation;
 import com.icbc.testagent.domain.user.UserId;
+import java.net.URI;
 import java.time.Instant;
 import java.util.Objects;
 
@@ -38,10 +39,7 @@ public record OpencodeServerProcess(
             throw new IllegalArgumentException("port must be between 1 and 65535");
         }
         baseUrl = DomainValidation.requireText(baseUrl, "baseUrl");
-        String expectedBaseUrl = "http://" + linuxServerId.value() + ":" + port;
-        if (!expectedBaseUrl.equals(baseUrl)) {
-            throw new IllegalArgumentException("baseUrl must equal " + expectedBaseUrl);
-        }
+        validateBaseUrl(baseUrl, port);
         Objects.requireNonNull(status, "status must not be null");
         sessionPath = DomainValidation.requireText(sessionPath, "sessionPath");
         configPath = DomainValidation.requireText(configPath, "configPath");
@@ -53,6 +51,27 @@ public record OpencodeServerProcess(
         traceId = DomainValidation.requireText(traceId, "traceId");
         if (updatedAt.isBefore(createdAt)) {
             throw new IllegalArgumentException("updatedAt must not be before createdAt");
+        }
+    }
+
+    /**
+     * baseUrl 表示网络地址，不能再与稳定服务器 ID 绑定；这里只保证协议、主机和端口可用。
+     */
+    private static void validateBaseUrl(String baseUrl, int port) {
+        try {
+            URI uri = URI.create(baseUrl);
+            String scheme = uri.getScheme();
+            if (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme)) {
+                throw new IllegalArgumentException("baseUrl scheme must be http or https");
+            }
+            if (uri.getHost() == null || uri.getHost().isBlank()) {
+                throw new IllegalArgumentException("baseUrl host must not be blank");
+            }
+            if (uri.getPort() != port) {
+                throw new IllegalArgumentException("baseUrl port must equal process port");
+            }
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException("baseUrl must be an absolute http(s) URL with matching port", exception);
         }
     }
 }

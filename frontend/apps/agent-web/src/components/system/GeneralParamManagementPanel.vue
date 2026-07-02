@@ -211,7 +211,7 @@ function formatError(error: unknown) {
           </el-select>
           <el-button size="small" text @click="clearFilter">重置</el-button>
         </div>
-        <span class="ta-common-param-toolbar-note">通用参数为系统级配置，仅可修改参数值，不可新增或删除。</span>
+        <span class="ta-common-param-toolbar-note">通用参数为系统级配置，仅可修改参数值，不可新增或删除；标记为只读的参数不可在前端修改。</span>
       </div>
 
       <div v-if="errorMessage" class="ta-common-param-alert" role="alert">{{ errorMessage }}</div>
@@ -237,8 +237,14 @@ function formatError(error: unknown) {
               <td>{{ param.chineseName }}</td>
               <td><span class="ta-common-param-tag">{{ param.platform }}</span></td>
               <td>
-                <div class="ta-common-param-val-cell" @click="openEditDialog(param)" title="点击修改参数值">
+                <div
+                  class="ta-common-param-val-cell"
+                  :class="{ 'is-readonly': !param.editable }"
+                  @click="openEditDialog(param)"
+                  :title="param.editable ? '点击修改参数值' : '只读参数，点击查看'"
+                >
                   <code class="ta-common-param-val-code">{{ param.parameterValue }}</code>
+                  <span v-if="!param.editable" class="ta-common-param-readonly-mark" aria-label="只读参数">🔒</span>
                 </div>
               </td>
               <td>{{ formatDate(param.updatedAt) }}</td>
@@ -288,14 +294,20 @@ function formatError(error: unknown) {
             </div>
           </div>
           <div class="ta-dialog-form-item">
-            <span class="ta-dialog-form-label">参数值</span>
+            <div class="ta-dialog-form-label-row">
+              <span class="ta-dialog-form-label">参数值</span>
+              <el-tag v-if="editingParam && !editingParam.editable" size="small" type="info">只读参数</el-tag>
+            </div>
             <el-input
               v-model="editingValue"
               type="textarea"
               :rows="4"
               placeholder="参数值不能为空"
-              :disabled="saving"
+              :disabled="saving || !editingParam?.editable"
             />
+            <div v-if="editingParam && !editingParam.editable" class="ta-common-param-readonly-alert" role="alert">
+              ⚠ 只读参数 · 修改后将影响系统正常运行
+            </div>
           </div>
         </div>
         <template #footer>
@@ -304,7 +316,7 @@ function formatError(error: unknown) {
             <el-button
               type="primary"
               :loading="saving"
-              :disabled="!isDialogValueDirty"
+              :disabled="!isDialogValueDirty || !editingParam?.editable"
               @click="submitEdit"
             >
               保存
@@ -410,6 +422,14 @@ function formatError(error: unknown) {
   border-radius: 6px;
   background: #fef2f2;
   color: #b91c1c;
+  font-size: 12px;
+}
+.ta-common-param-readonly-alert {
+  padding: 8px 12px;
+  border: 1px solid #fcd9b6;
+  border-radius: 6px;
+  background: #fffbeb;
+  color: #b45309;
   font-size: 12px;
 }
 .ta-change-log-param-card {
@@ -520,6 +540,24 @@ function formatError(error: unknown) {
   border-color: #bfdbfe;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
+.ta-common-param-val-cell.is-readonly {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+  cursor: not-allowed;
+}
+.ta-common-param-val-cell.is-readonly:hover {
+  background: #f3f4f6;
+  border-color: #e5e7eb;
+  box-shadow: none;
+}
+.ta-common-param-val-cell.is-readonly:hover .ta-common-param-val-code {
+  color: #6b7280;
+}
+.ta-common-param-readonly-mark {
+  margin-left: 6px;
+  font-size: 12px;
+  color: #9ca3af;
+}
 .ta-common-param-val-code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
@@ -550,6 +588,11 @@ function formatError(error: unknown) {
   font-size: 12px;
   font-weight: 600;
   color: #4b5563;
+}
+.ta-dialog-form-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .ta-dialog-form-value {
   font-size: 13px;

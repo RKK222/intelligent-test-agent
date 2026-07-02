@@ -18,7 +18,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 public class JdbcCommonParameterRepository extends JdbcRepositorySupport implements CommonParameterRepository {
 
     private static final String SELECT_COLUMNS = """
-            parameter_id, parameter_english, parameter_chinese, parameter_value, platform, created_at, updated_at
+            parameter_id, parameter_english, parameter_chinese, parameter_value, platform, editable, created_at, updated_at
             """;
 
     private final JdbcClient jdbcClient;
@@ -29,6 +29,7 @@ public class JdbcCommonParameterRepository extends JdbcRepositorySupport impleme
             rs.getString("parameter_chinese"),
             rs.getString("parameter_value"),
             ParameterPlatform.fromValue(rs.getString("platform")),
+            rs.getBoolean("editable"),
             instant(rs, "created_at"),
             instant(rs, "updated_at"));
 

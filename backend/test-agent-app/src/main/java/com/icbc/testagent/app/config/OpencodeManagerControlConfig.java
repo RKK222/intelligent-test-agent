@@ -11,6 +11,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.DisposableBean;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
@@ -23,10 +24,7 @@ import org.springframework.context.annotation.Configuration;
 public class OpencodeManagerControlConfig {
 
     /**
-     * 探测当前后端所在 Linux 服务器真实内网 IPv4 地址，作为 listen-url 为本地地址时的回退来源。
-     *
-     * <p>启动时强制自动探测，探测失败直接抛异常让启动中断；最终服务器身份会优先采用
-     * listen-url 中的非回环 IPv4。
+     * 探测当前后端所在服务器真实内网 IPv4 地址，作为 advertised host 默认值。
      */
     @Bean
     LinuxServerIpResolver linuxServerIpResolver() {
@@ -34,39 +32,65 @@ public class OpencodeManagerControlConfig {
     }
 
     /**
+     * 解析稳定服务器身份：环境变量优先，缺失时读取 Java 主机名。
+     */
+    @Bean
+    ServerIdentityResolver serverIdentityResolver() {
+        return new ServerIdentityResolver();
+    }
+
+    /**
+     * 解析服务器可访问地址：环境变量优先，缺失时复用内网 IP 探测。
+     */
+    @Bean
+    ServerAdvertisedHostResolver serverAdvertisedHostResolver(LinuxServerIpResolver linuxServerIpResolver) {
+        return new ServerAdvertisedHostResolver(linuxServerIpResolver);
+    }
+
+    /**
      * 将 app 配置转换为 runtime/API 可复用的控制面 settings。
      *
-     * <p>Linux 服务器 ID 优先来自 listen-url 的非回环 IPv4；listen-url 是 127.0.0.1 /
-     * localhost / 0.0.0.0 时回退到 {@link LinuxServerIpResolver} 的真实网卡探测结果。
+     * <p>linuxServerId 表示稳定服务器身份；listenUrl 使用 advertised host 生成，二者互不绑定。
      */
     @Bean
     ManagerControlSettings managerControlSettings(
-            TestAgentRuntimeProperties properties, LinuxServerIpResolver linuxServerIpResolver) {
+            TestAgentRuntimeProperties properties,
+            ServerIdentityResolver serverIdentityResolver,
+            ServerAdvertisedHostResolver advertisedHostResolver,
+            @Value("${server.port:8080}") int serverPort) {
         TestAgentRuntimeProperties.ManagerControl control = properties.getOpencode().getManagerControl();
+        LinuxServerId linuxServerId = serverIdentityResolver.resolve();
+        String advertisedHost = advertisedHostResolver.resolve();
+        String listenUrl = "http://" + advertisedHost + ":" + effectiveServerPort(serverPort);
         return new ManagerControlSettings(
                 control.getToken(),
-                control.getListenUrl(),
-                new LinuxServerId(linuxServerIpResolver.resolveForListenUrl(control.getListenUrl())),
+                listenUrl,
+                linuxServerId,
+                advertisedHost,
                 control.getHeartbeatInterval(),
                 control.getBackendStaleAfter(),
                 control.getCommandTimeout(),
                 control.getBackendDiscoveryLimit());
     }
 
-    /**
-     * 创建服务器 IP 文件路径解析器，路径统一来自系统通用参数 SYS_DATA_ROOT_DIR。
-     */
-    @Bean
-    ServerIpFilePathResolver serverIpFilePathResolver(CommonParameterValues commonParameterValues) {
-        return new ServerIpFilePathResolver(commonParameterValues);
+    private int effectiveServerPort(int serverPort) {
+        return serverPort > 0 ? serverPort : 8080;
     }
 
     /**
-     * 创建服务器 IP 文件写入器，供生产 socket 控制面启动时发布 .serverip。
+     * 创建服务器身份/地址文件路径解析器，路径统一来自系统通用参数 SYS_DATA_ROOT_DIR。
      */
     @Bean
-    ServerIpFileWriter serverIpFileWriter(ServerIpFilePathResolver serverIpFilePathResolver) {
-        return new ServerIpFileWriter(serverIpFilePathResolver);
+    ServerIdentityFilePathResolver serverIdentityFilePathResolver(CommonParameterValues commonParameterValues) {
+        return new ServerIdentityFilePathResolver(commonParameterValues);
+    }
+
+    /**
+     * 创建服务器身份/地址文件写入器，供生产 socket 控制面启动时发布 .serverid/.serverhost。
+     */
+    @Bean
+    ServerIdentityFileWriter serverIdentityFileWriter(ServerIdentityFilePathResolver serverIdentityFilePathResolver) {
+        return new ServerIdentityFileWriter(serverIdentityFilePathResolver);
     }
 
     /**
@@ -77,9 +101,9 @@ public class OpencodeManagerControlConfig {
             BackendJavaProcessLifecycleService lifecycleService,
             OpencodeProcessHeartbeatMaintenanceService heartbeatMaintenanceService,
             ManagerControlSettings settings,
-            ServerIpFileWriter serverIpFileWriter) {
+            ServerIdentityFileWriter serverIdentityFileWriter) {
         return new BackendJavaProcessLifecycleRunner(
-                lifecycleService, heartbeatMaintenanceService, settings, serverIpFileWriter);
+                lifecycleService, heartbeatMaintenanceService, settings, serverIdentityFileWriter);
     }
 
     /**
@@ -90,23 +114,23 @@ public class OpencodeManagerControlConfig {
         private final BackendJavaProcessLifecycleService lifecycleService;
         private final OpencodeProcessHeartbeatMaintenanceService heartbeatMaintenanceService;
         private final ManagerControlSettings settings;
-        private final ServerIpFileWriter serverIpFileWriter;
+        private final ServerIdentityFileWriter serverIdentityFileWriter;
         private ScheduledExecutorService executor;
 
         BackendJavaProcessLifecycleRunner(
                 BackendJavaProcessLifecycleService lifecycleService,
                 OpencodeProcessHeartbeatMaintenanceService heartbeatMaintenanceService,
                 ManagerControlSettings settings,
-                ServerIpFileWriter serverIpFileWriter) {
+                ServerIdentityFileWriter serverIdentityFileWriter) {
             this.lifecycleService = lifecycleService;
             this.heartbeatMaintenanceService = heartbeatMaintenanceService;
             this.settings = settings;
-            this.serverIpFileWriter = serverIpFileWriter;
+            this.serverIdentityFileWriter = serverIdentityFileWriter;
         }
 
         @Override
         public void run(ApplicationArguments args) {
-            serverIpFileWriter.write(settings.linuxServerId().value());
+            serverIdentityFileWriter.write(settings.linuxServerId().value(), settings.advertisedHost());
             lifecycleService.registerHeartbeat(TraceIdSupport.generate());
             executor = Executors.newScheduledThreadPool(2, runnable -> {
                 Thread thread = new Thread(runnable, "opencode-manager-backend-heartbeat");

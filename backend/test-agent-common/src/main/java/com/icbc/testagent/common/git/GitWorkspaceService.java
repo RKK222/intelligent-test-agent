@@ -284,13 +284,17 @@ public class GitWorkspaceService {
     }
 
     /**
-     * 放弃进行中的 Git merge，确保应用版本副本不会停留在冲突状态影响后续推送。
+     * 终止当前仓库中的未完成 merge，用于业务层在收集冲突文件后恢复受控副本到可继续操作状态。
      */
     public void abortMerge(Path repoRoot, String privateKey) {
         executor.execute(
                 List.of("git", "-C", repoRoot.toString(), "merge", "--abort"),
                 privateKey,
                 DEFAULT_TIMEOUT);
+    }
+
+    public void abortMerge(Path repoRoot) {
+        abortMerge(repoRoot, null);
     }
 
     /**
@@ -421,6 +425,75 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 解析 {@code git status --porcelain} 输出，统一完成路径反转义和 rename 新路径选择。
+     * 业务层只处理权限、路径展示和响应 DTO，不再重复理解 porcelain 字段。
+     */
+    public List<GitStatusEntry> parseStatusPorcelain(String porcelain) {
+        if (porcelain == null || porcelain.isBlank()) {
+            return List.of();
+        }
+        List<GitStatusEntry> entries = new ArrayList<>();
+        for (String line : porcelain.split("\\R")) {
+            String trimmed = line.stripTrailing();
+            if (trimmed.length() < 4) {
+                continue;
+            }
+            String rawStatus = trimmed.substring(0, 2);
+            String rawPath = trimmed.substring(3);
+            int rename = rawPath.indexOf(" -> ");
+            if (rename >= 0) {
+                rawPath = rawPath.substring(rename + 4);
+            }
+            String path = unquotePorcelainPath(rawPath);
+            if (path.isBlank()) {
+                continue;
+            }
+            entries.add(new GitStatusEntry(rawStatus.charAt(0), rawStatus.charAt(1), rawStatus, path));
+        }
+        return List.copyOf(entries);
+    }
+
+    /**
+     * 基于 porcelain 输出收集前端 diff 文件模型，合并同一文件的暂存区和工作区 patch。
+     * 单个文件 diff 失败时只降级该文件的 patch/行数，避免一次 Git 异常打断整批变更列表。
+     */
+    public List<GitDiffFile> collectDiffFiles(Path repoRoot, String porcelain) {
+        return collectDiffFiles(repoRoot, parseStatusPorcelain(porcelain));
+    }
+
+    /**
+     * 基于已解析状态收集 diff；调用方可先改写条目的 Git 路径或过滤业务目录后再调用。
+     */
+    public List<GitDiffFile> collectDiffFiles(Path repoRoot, List<GitStatusEntry> entries) {
+        if (entries == null || entries.isEmpty()) {
+            return List.of();
+        }
+        List<GitDiffFile> files = new ArrayList<>();
+        for (GitStatusEntry entry : entries) {
+            DiffAccumulator accumulator = new DiffAccumulator();
+            if (entry.untrackedFile()) {
+                appendNewFilePatch(entry.path(), repoRoot.resolve(entry.path()), accumulator);
+            } else {
+                if (entry.staged()) {
+                    appendDiff(repoRoot, entry.path(), true, accumulator);
+                }
+                if (entry.needsUnstagedDiff()) {
+                    appendDiff(repoRoot, entry.path(), false, accumulator);
+                }
+            }
+            files.add(new GitDiffFile(
+                    entry.path(),
+                    entry.rawStatus(),
+                    entry.status(),
+                    entry.staged(),
+                    accumulator.patch(),
+                    accumulator.additions,
+                    accumulator.deletions));
+        }
+        return List.copyOf(files);
+    }
+
+    /**
      * 还原 Git porcelain 中带双引号的 C-style 路径，避免含空格或转义字符的路径展示乱码且 diff 查不到文件。
      */
     public String unquotePorcelainPath(String path) {
@@ -480,6 +553,57 @@ public class GitWorkspaceService {
         escapedBytes.reset();
     }
 
+    private void appendDiff(Path repoRoot, String file, boolean staged, DiffAccumulator accumulator) {
+        try {
+            String output = diff(repoRoot, file, staged);
+            if (output == null || output.isBlank()) {
+                return;
+            }
+            accumulator.append(output);
+        } catch (Exception ignored) {
+            // 单文件 diff 失败不影响其它文件展示；调用方仍能看到状态和路径。
+        }
+    }
+
+    private void appendNewFilePatch(String gitPath, Path filePath, DiffAccumulator accumulator) {
+        if (!Files.exists(filePath) || Files.isDirectory(filePath)) {
+            return;
+        }
+        try {
+            List<String> lines = Files.readAllLines(filePath, StandardCharsets.UTF_8);
+            StringBuilder diff = new StringBuilder();
+            diff.append("--- /dev/null\n");
+            diff.append("+++ b/").append(gitPath).append('\n');
+            diff.append("@@ -0,0 +1,").append(lines.size()).append(" @@\n");
+            for (String line : lines) {
+                diff.append('+').append(line).append('\n');
+            }
+            accumulator.append(diff.toString());
+        } catch (Exception exception) {
+            // 单个未跟踪文件读取失败只降级该文件 patch，不影响整批 diff 展示。
+        }
+    }
+
+    private static int countDiffAdditions(String diff) {
+        int count = 0;
+        for (String line : diff.split("\\R")) {
+            if (line.startsWith("+") && !line.startsWith("+++")) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static int countDiffDeletions(String diff) {
+        int count = 0;
+        for (String line : diff.split("\\R")) {
+            if (line.startsWith("-") && !line.startsWith("---")) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     /**
      * 提交当前暂存区；调用方负责先 stage 和校验 message。
      */
@@ -520,6 +644,84 @@ public class GitWorkspaceService {
                 null,
                 DEFAULT_TIMEOUT);
         return result.stdoutText().trim().isEmpty();
+    }
+
+    public record GitStatusEntry(char indexStatus, char worktreeStatus, String rawStatus, String path) {
+
+        public GitStatusEntry {
+            rawStatus = rawStatus == null || rawStatus.length() != 2
+                    ? "" + indexStatus + worktreeStatus
+                    : rawStatus;
+            path = path == null ? "" : path;
+        }
+
+        public boolean staged() {
+            return indexStatus != ' ' && indexStatus != '?';
+        }
+
+        public boolean stagedNewFile() {
+            return indexStatus == 'A';
+        }
+
+        public boolean untrackedFile() {
+            return indexStatus == '?' && worktreeStatus == '?';
+        }
+
+        public String status() {
+            if (untrackedFile()) {
+                return "untracked";
+            }
+            if (indexStatus == 'A') {
+                return "added";
+            }
+            if (indexStatus == 'D' || worktreeStatus == 'D') {
+                return "deleted";
+            }
+            if (indexStatus == 'R') {
+                return "renamed";
+            }
+            if (indexStatus == 'M' || worktreeStatus == 'M') {
+                return "modified";
+            }
+            return "modified";
+        }
+
+        public GitStatusEntry withPath(String path) {
+            return new GitStatusEntry(indexStatus, worktreeStatus, rawStatus, path);
+        }
+
+        private boolean needsUnstagedDiff() {
+            return !untrackedFile() && worktreeStatus != ' ' && worktreeStatus != '?';
+        }
+    }
+
+    public record GitDiffFile(
+            String path,
+            String rawStatus,
+            String status,
+            boolean staged,
+            String patch,
+            int additions,
+            int deletions) {
+    }
+
+    private static final class DiffAccumulator {
+        private final StringBuilder patch = new StringBuilder();
+        private int additions;
+        private int deletions;
+
+        private void append(String diff) {
+            if (!patch.isEmpty()) {
+                patch.append('\n');
+            }
+            patch.append(diff);
+            additions += countDiffAdditions(diff);
+            deletions += countDiffDeletions(diff);
+        }
+
+        private String patch() {
+            return patch.toString();
+        }
     }
 
     private List<String> gitNoQuotedPath(Path repoRoot, String... args) {

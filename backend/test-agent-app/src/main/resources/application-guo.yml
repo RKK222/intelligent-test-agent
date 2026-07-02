@@ -29,17 +29,6 @@ test-agent:
   files:
     max-file-bytes: 1048576
     max-directory-entries: 1000
-  workspace-picker:
-    allowed-roots:
-      - /Users/kaka/Desktop
-      - D:/workspace
-  public-directory:
-    path: D:/agents
-  redis:
-    enabled: true
-    host: 192.168.100.200
-    port: 16379
-    password: ""
   model-catalog:
     source: external
     external:
@@ -59,20 +48,10 @@ test-agent:
   opencode:
     manager-control:
       token: local-manager-token
-      listen-url: http://192.168.100.194:8080
       heartbeat-interval: 10s
       backend-stale-after: 30s
       command-timeout: 10s
       backend-discovery-limit: 100
-    nodes:
-      - id: node_local_opencode
-        base-url: http://192.168.100.194:4096
-        max-runs: 4
-        weight: 100
-        capabilities:
-          - chat
-          - diff
-          - test
 
 management:
   health:

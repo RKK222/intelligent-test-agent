@@ -13,6 +13,7 @@ public record CommonParameter(
         String chineseName,
         String parameterValue,
         ParameterPlatform platform,
+        boolean editable,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -32,8 +33,9 @@ public record CommonParameter(
     /**
      * 返回替换了参数值与更新时间的新实例，复用 compact 构造器校验，
      * 保证新值非空且更新时间不早于创建时间；供管理端「仅修改 value」场景使用。
+     * editable 标志不随 value 改变，原样透传。
      */
     public CommonParameter withValue(String newValue, Instant updatedAt) {
-        return new CommonParameter(parameterId, englishName, chineseName, newValue, platform, createdAt, updatedAt);
+        return new CommonParameter(parameterId, englishName, chineseName, newValue, platform, editable, createdAt, updatedAt);
     }
 }

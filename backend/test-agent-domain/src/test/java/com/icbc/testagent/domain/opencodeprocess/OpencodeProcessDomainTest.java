@@ -13,13 +13,22 @@ class OpencodeProcessDomainTest {
     private static final Instant NOW = Instant.parse("2026-06-24T00:00:00Z");
 
     @Test
-    void linuxServerIdRequiresIpAddress() {
-        LinuxServerId linuxServerId = new LinuxServerId("10.8.0.12");
+    void linuxServerIdAllowsStableServerIdentifiers() {
+        LinuxServerId linuxServerId = new LinuxServerId("server-a_01");
 
-        assertThat(linuxServerId.value()).isEqualTo("10.8.0.12");
-        assertThatThrownBy(() -> new LinuxServerId("backend-host-a"))
+        assertThat(linuxServerId.value()).isEqualTo("server-a_01");
+        assertThat(new LinuxServerId("prod_01").value()).isEqualTo("prod_01");
+        assertThat(new LinuxServerId("_prod-01").value()).isEqualTo("_prod-01");
+        assertThat(new LinuxServerId("10.8.0.12").value()).isEqualTo("10.8.0.12");
+        assertThatThrownBy(() -> new LinuxServerId(""))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new LinuxServerId("999.1.1.1"))
+        assertThatThrownBy(() -> new LinuxServerId("server a"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LinuxServerId("server/a"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LinuxServerId("server:a"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new LinuxServerId("a".repeat(129)))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -59,18 +68,19 @@ class OpencodeProcessDomainTest {
     }
 
     @Test
-    void serverProcessBaseUrlMustMatchLinuxIpAndPort() {
+    void serverProcessBaseUrlOnlyRequiresHttpUrlAndMatchingPort() {
         OpencodeServerProcess process = opencodeProcess();
 
+        assertThat(process.linuxServerId()).isEqualTo(new LinuxServerId("server-a"));
         assertThat(process.baseUrl()).isEqualTo("http://10.8.0.12:4096");
         assertThatThrownBy(() -> new OpencodeServerProcess(
                         new OpencodeProcessId("ocp_01"),
                         new UserId("usr_test"),
-                        new LinuxServerId("10.8.0.12"),
+                        new LinuxServerId("server-a"),
                         new OpencodeContainerId("ctr_01"),
                         4096,
                         12345L,
-                        "http://10.8.0.13:4096",
+                        "http://10.8.0.12:4100",
                         OpencodeServerProcessStatus.RUNNING,
                         "/data/opencode/session/4096",
                         "/data/opencode/.config/opencode/",
@@ -149,7 +159,7 @@ class OpencodeProcessDomainTest {
         return new OpencodeServerProcess(
                 new OpencodeProcessId("ocp_01"),
                 new UserId("usr_test"),
-                new LinuxServerId("10.8.0.12"),
+                new LinuxServerId("server-a"),
                 new OpencodeContainerId("ctr_01"),
                 4096,
                 12345L,

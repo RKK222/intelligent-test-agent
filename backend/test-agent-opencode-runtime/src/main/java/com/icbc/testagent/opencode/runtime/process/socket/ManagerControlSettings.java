@@ -1,6 +1,7 @@
 package com.icbc.testagent.opencode.runtime.process.socket;
 
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
+import java.net.URI;
 import java.time.Duration;
 import java.util.Objects;
 
@@ -11,10 +12,33 @@ public record ManagerControlSettings(
         String token,
         String listenUrl,
         LinuxServerId linuxServerId,
+        String advertisedHost,
         Duration heartbeatInterval,
         Duration backendStaleAfter,
         Duration commandTimeout,
         int backendDiscoveryLimit) {
+
+    /**
+     * 兼容旧测试构造器；advertisedHost 从 listenUrl 中提取，提取失败时回退为 linuxServerId 文本。
+     */
+    public ManagerControlSettings(
+            String token,
+            String listenUrl,
+            LinuxServerId linuxServerId,
+            Duration heartbeatInterval,
+            Duration backendStaleAfter,
+            Duration commandTimeout,
+            int backendDiscoveryLimit) {
+        this(
+                token,
+                listenUrl,
+                linuxServerId,
+                advertisedHostFromListenUrl(listenUrl, linuxServerId),
+                heartbeatInterval,
+                backendStaleAfter,
+                commandTimeout,
+                backendDiscoveryLimit);
+    }
 
     /**
      * 规整时间和上限，避免配置错误造成零超时或无限列表。
@@ -23,6 +47,7 @@ public record ManagerControlSettings(
         token = token == null ? "" : token.trim();
         listenUrl = requireText(listenUrl, "listenUrl");
         Objects.requireNonNull(linuxServerId, "linuxServerId must not be null");
+        advertisedHost = requireText(advertisedHost, "advertisedHost");
         heartbeatInterval = positive(heartbeatInterval, Duration.ofSeconds(5));
         backendStaleAfter = positive(backendStaleAfter, Duration.ofSeconds(10));
         commandTimeout = positive(commandTimeout, Duration.ofSeconds(10));
@@ -64,5 +89,19 @@ public record ManagerControlSettings(
             throw new IllegalArgumentException(name + " must not be blank");
         }
         return value.trim();
+    }
+
+    private static String advertisedHostFromListenUrl(String listenUrl, LinuxServerId linuxServerId) {
+        if (listenUrl != null && !listenUrl.isBlank()) {
+            try {
+                String host = URI.create(listenUrl.trim()).getHost();
+                if (host != null && !host.isBlank()) {
+                    return host;
+                }
+            } catch (IllegalArgumentException ignored) {
+                // 旧构造器只用于兼容测试和少量内部调用；解析失败时用稳定 ID 兜底。
+            }
+        }
+        return linuxServerId == null ? "" : linuxServerId.value();
     }
 }

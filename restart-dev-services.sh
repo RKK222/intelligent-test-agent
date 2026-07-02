@@ -313,16 +313,12 @@ apply_detected_runtime_ip_defaults() {
     return
   fi
 
-  # 后端 Java 进程会把最终服务器 IP 写入 SYS_DATA_ROOT_DIR/.serverip；
-  # 这里仅补全 manager 可直连的后端 listen-url。
-  if [[ -z "${TEST_AGENT_BACKEND_LISTEN_URL:-}" ]]; then
-    backend_port="$(url_port "${backend_url}")"
-    export TEST_AGENT_BACKEND_LISTEN_URL="http://${local_ipv4}:${backend_port}"
-    echo "Defaulting TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4: ${TEST_AGENT_BACKEND_LISTEN_URL}"
-  fi
+  # 后端 Java 进程会按 server.port 和探测到的内网 IP 自动注册直连地址；
+  # 这里仅在浏览器通过局域网访问前端时补全前端可访问的后端 URL。
   if [[ -z "${TEST_AGENT_BASE_URL:-}" && "${backend_url}" == http://127.0.0.1:* ]]; then
-    backend_url="${TEST_AGENT_BACKEND_LISTEN_URL}"
-    echo "Defaulting TEST_AGENT_BASE_URL to backend listen URL for browser access: ${backend_url}"
+    backend_port="$(url_port "${backend_url}")"
+    backend_url="http://${local_ipv4}:${backend_port}"
+    echo "Defaulting TEST_AGENT_BASE_URL to detected local IPv4 for browser access: ${backend_url}"
   fi
 }
 

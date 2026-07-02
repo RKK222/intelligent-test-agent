@@ -48,7 +48,7 @@
 - `SessionMessageTest`、`SessionTest` 覆盖消息约束、parts/token/cost 可选快照、会话归档、置顶和内部 opencode session/node 映射边界。
 - `AgentSessionBindingTest` 覆盖 agentId 规范化、远端 session/node 绑定和 traceId 边界。
 - `ExecutionNodeRouterTest`、`ExecutionNodeTest` 覆盖执行节点容量、可路由状态和路由冲突错误。
-- `OpencodeProcessDomainTest` 覆盖 Linux 服务器 IP、容器端口范围、用户进程 baseUrl 和用户绑定边界。
+- `OpencodeProcessDomainTest` 覆盖稳定 Linux 服务器身份、容器端口范围、用户进程 baseUrl 和用户绑定边界。
 - `RunEventTest`、`RunEventTypeTest`、`DomainValidationTest` 覆盖事件模型、事件 wireName 映射和值对象公共校验。
 - `ConfigurationDomainTest`、`CommonParameterReferenceResolverTest` 覆盖应用成员逻辑删除、代码库 URL 不可编辑、英文名称兼容、应用工作空间目录约束、通用参数互相引用、环境变量回退和 `$HOME` 路径展开等配置领域规则。
 - `SchedulerDomainTest` 覆盖任务定义、用户计划、运行记录状态和会话来源默认值。

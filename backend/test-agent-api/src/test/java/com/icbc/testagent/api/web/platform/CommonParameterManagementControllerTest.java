@@ -43,6 +43,7 @@ class CommonParameterManagementControllerTest {
                 .jsonPath("$.data.items[0].parameterId").isEqualTo(PARAMETER_ID)
                 .jsonPath("$.data.items[0].parameterValue").isEqualTo("/opt/ws")
                 .jsonPath("$.data.items[0].platform").isEqualTo("linux")
+                .jsonPath("$.data.items[0].editable").isEqualTo(false)
                 .jsonPath("$.data.total").isEqualTo(1);
     }
 
@@ -162,6 +163,7 @@ class CommonParameterManagementControllerTest {
                 "工作空间根目录",
                 value,
                 platform,
+                false,
                 NOW,
                 NOW);
     }

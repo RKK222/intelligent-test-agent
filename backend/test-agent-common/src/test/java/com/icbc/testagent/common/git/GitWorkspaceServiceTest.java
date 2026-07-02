@@ -182,6 +182,86 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
+    void parseStatusPorcelainDecodesQuotedRenameAndUtf8EscapedPath() {
+        GitWorkspaceService service = new GitWorkspaceService(new RecordingExecutor(""));
+        String porcelain = "R  \"old agent.md\" -> \"F-COSS/workspace/.opencode/agents/review rule.md\"\n"
+                + " M \"F-COSS/workspace/02-\\350\\256\\276\\350\\256\\241/Test Material.md\"\n";
+
+        List<GitWorkspaceService.GitStatusEntry> entries = service.parseStatusPorcelain(porcelain);
+
+        assertThat(entries).extracting(GitWorkspaceService.GitStatusEntry::path)
+                .containsExactly(
+                        "F-COSS/workspace/.opencode/agents/review rule.md",
+                        "F-COSS/workspace/02-设计/Test Material.md");
+        assertThat(entries.get(0).rawStatus()).isEqualTo("R ");
+        assertThat(entries.get(0).status()).isEqualTo("renamed");
+        assertThat(entries.get(0).staged()).isTrue();
+    }
+
+    @Test
+    void collectDiffFilesMergesStagedAndUnstagedPatchStats() {
+        RecordingExecutor executor = new RecordingExecutor("");
+        executor.stdoutByCall.put(1, "diff --git a/src/App.java b/src/App.java\n@@ -1 +1 @@\n-old\n+staged\n");
+        executor.stdoutByCall.put(2, "diff --git a/src/App.java b/src/App.java\n@@ -2 +2,2 @@\n-old2\n+unstaged\n+more\n");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        List<GitWorkspaceService.GitDiffFile> files = service.collectDiffFiles(tempDir, "MM src/App.java\n");
+
+        assertThat(files).singleElement().satisfies(file -> {
+            assertThat(file.path()).isEqualTo("src/App.java");
+            assertThat(file.rawStatus()).isEqualTo("MM");
+            assertThat(file.status()).isEqualTo("modified");
+            assertThat(file.staged()).isTrue();
+            assertThat(file.patch()).contains("+staged").contains("+unstaged").contains("+more");
+            assertThat(file.additions()).isEqualTo(3);
+            assertThat(file.deletions()).isEqualTo(2);
+        });
+        assertThat(executor.calls).containsExactly(
+                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff", "--cached", "--", "src/App.java"), null),
+                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff", "--", "src/App.java"), null));
+    }
+
+    @Test
+    void collectDiffFilesBuildsPseudoPatchForUntrackedFileWithoutRunningDiff() throws Exception {
+        java.nio.file.Files.createDirectories(tempDir.resolve("notes"));
+        java.nio.file.Files.writeString(tempDir.resolve("notes/new.md"), "line1\nline2\n");
+        RecordingExecutor executor = new RecordingExecutor("");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        List<GitWorkspaceService.GitDiffFile> files = service.collectDiffFiles(tempDir, "?? notes/new.md\n");
+
+        assertThat(files).singleElement().satisfies(file -> {
+            assertThat(file.path()).isEqualTo("notes/new.md");
+            assertThat(file.status()).isEqualTo("untracked");
+            assertThat(file.staged()).isFalse();
+            assertThat(file.patch()).contains("--- /dev/null").contains("+++ b/notes/new.md").contains("+line1").contains("+line2");
+            assertThat(file.additions()).isEqualTo(2);
+            assertThat(file.deletions()).isZero();
+        });
+        assertThat(executor.calls).isEmpty();
+    }
+
+    @Test
+    void collectDiffFilesUsesExpectedDiffModeForStagedAddedAndUnstagedDeletedFiles() {
+        RecordingExecutor executor = new RecordingExecutor("");
+        executor.stdoutByCall.put(1, "diff --git a/src/New.java b/src/New.java\n@@ -0,0 +1,2 @@\n+one\n+two\n");
+        executor.stdoutByCall.put(2, "diff --git a/src/Old.java b/src/Old.java\n@@ -1 +0,0 @@\n-old\n");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        List<GitWorkspaceService.GitDiffFile> files = service.collectDiffFiles(tempDir, "A  src/New.java\n D src/Old.java\n");
+
+        assertThat(files).extracting(GitWorkspaceService.GitDiffFile::status)
+                .containsExactly("added", "deleted");
+        assertThat(files.get(0).additions()).isEqualTo(2);
+        assertThat(files.get(0).deletions()).isZero();
+        assertThat(files.get(1).additions()).isZero();
+        assertThat(files.get(1).deletions()).isEqualTo(1);
+        assertThat(executor.calls).containsExactly(
+                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff", "--cached", "--", "src/New.java"), null),
+                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff", "--", "src/Old.java"), null));
+    }
+
+    @Test
     void readsCurrentBranchFromLocalRepository() {
         RecordingExecutor executor = new RecordingExecutor("feature_testagent_20260707\n");
         GitWorkspaceService service = new GitWorkspaceService(executor);
@@ -244,7 +324,7 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
-    void abortsInProgressMerge() {
+    void abortsInProgressMergeWithPrivateKey() {
         RecordingExecutor executor = new RecordingExecutor("");
         GitWorkspaceService service = new GitWorkspaceService(executor);
 
@@ -253,6 +333,18 @@ class GitWorkspaceServiceTest {
         assertThat(executor.calls).containsExactly(new Call(
                 List.of("git", "-C", tempDir.toString(), "merge", "--abort"),
                 "PRIVATE KEY"));
+    }
+
+    @Test
+    void abortMergeRunsGitMergeAbortInRepository() {
+        RecordingExecutor executor = new RecordingExecutor("");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        service.abortMerge(tempDir);
+
+        assertThat(executor.calls).containsExactly(new Call(
+                List.of("git", "-C", tempDir.toString(), "merge", "--abort"),
+                null));
     }
 
     private static final class RecordingExecutor implements GitCommandExecutor {

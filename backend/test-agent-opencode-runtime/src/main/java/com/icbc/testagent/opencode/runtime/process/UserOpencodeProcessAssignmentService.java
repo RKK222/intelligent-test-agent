@@ -81,6 +81,7 @@ public class UserOpencodeProcessAssignmentService {
     private final OpencodeProcessHeartbeatStore heartbeatStore;
     private final OpencodeProcessStartupService startupService;
     private final OpencodeProcessStatusQueryService statusQueryService;
+    private final OpencodeServerAddressResolver addressResolver;
 
     /**
      * 注入进程管理 Repository、兼容节点 Repository 和管理进程 gateway。
@@ -139,6 +140,7 @@ public class UserOpencodeProcessAssignmentService {
         this.statusQueryService = statusQueryService == null
                 ? new OpencodeProcessStatusQueryService(repository, gateway, heartbeatStore)
                 : statusQueryService;
+        this.addressResolver = new OpencodeServerAddressResolver(backendLifecycle.advertisedHost());
         this.startupService = startupService == null
                 ? new OpencodeProcessStartupService(
                         repository,
@@ -406,7 +408,7 @@ public class UserOpencodeProcessAssignmentService {
             String traceId) {
         int port = firstAvailablePort(container)
                 .orElseThrow(() -> unavailableException("没有可用的 opencode 端口"));
-        String baseUrl = "http://" + container.linuxServerId().value() + ":" + port;
+        String baseUrl = addressResolver.baseUrl(port);
         return new OpencodeProcessStartCommand(
                 userId,
                 container.linuxServerId(),
@@ -669,10 +671,10 @@ public class UserOpencodeProcessAssignmentService {
     }
 
     private String serviceAddress(OpencodeServerProcess process) {
-        if (process == null || process.linuxServerId() == null) {
+        if (process == null) {
             return null;
         }
-        return process.linuxServerId().value() + ":" + process.port();
+        return addressResolver.serviceAddress(process.baseUrl(), process.port());
     }
 
     private String statusFailureMessage(OpencodeProcessStatusProbe probe) {

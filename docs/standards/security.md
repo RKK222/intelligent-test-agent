@@ -42,7 +42,7 @@ Token 校验流程：
 5. 个人 Git SSH 私钥必须使用 AES-GCM 加密后落库，加密密钥来自 `TEST_AGENT_SSH_KEY_ENCRYPTION_KEY` 或 `test-agent.security.ssh-key-encryption-key`，要求为 Base64 编码的 16/24/32 字节 AES key；不得提供硬编码默认值。
 6. SSH key API 只能返回 `sshKeyId/name/fingerprint/createdAt` 元信息，禁止回显私钥明文或密文。指纹基于规范化私钥内容的 SHA-256 生成。
 7. Git SSH 远端命令只允许使用当前登录用户保存的唯一 SSH key。临时私钥文件必须设置最小可行权限并在命令结束后清理；Git 命令环境必须禁用交互式凭据提示。
-8. 应用版本工作区和个人工作区的 Git clone/worktree/diff/push/pull/副本同步仍只允许使用当前登录用户保存的唯一 SSH key；不得回退到机器账号、部署用户默认 SSH key 或其他用户 key。托管根目录优先来自 `common_parameters.OPENCODE_APP_WORKSPACE_ROOT` / `OPENCODE_PERSONAL_WORKTREE_ROOT`，缺失时回退 `test-agent.managed-workspace.root` / `TEST_AGENT_MANAGED_WORKSPACE_ROOT`；磁盘目录已存在时只能在校验目标 origin URL 和分支匹配后接管，不得覆盖或删除未知目录。跨服务器副本同步在 `fetch/reset --hard` 前必须确认工作树无未提交变更，否则标记副本 `FAILED` 并拒绝静默覆盖。
+8. 应用版本工作区和个人工作区的 Git clone/worktree/diff/push/pull/副本同步仍只允许使用当前登录用户保存的唯一 SSH key；不得回退到机器账号、部署用户默认 SSH key 或其他用户 key。托管根目录只允许来自 `common_parameters.OPENCODE_APP_WORKSPACE_ROOT` / `OPENCODE_PERSONAL_WORKTREE_ROOT`；缺失或空白时必须失败，不能回退到 yml、环境变量或代码默认路径。磁盘目录已存在时只能在校验目标 origin URL 和分支匹配后接管，不得覆盖或删除未知目录。跨服务器副本同步在 `fetch/reset --hard` 前必须确认工作树无未提交变更，否则标记副本 `FAILED` 并拒绝静默覆盖。
 9. 设置页创建应用工作空间的 `workspace_create_operations.error_message` 只能保存平台安全错误说明或通用失败文案，不得写入 SSH 私钥、token、Authorization、Cookie、完整命令行、完整用户输入或敏感路径片段。
 10. opencode-manager 控制面必须使用独立 manager token，配置键为 `test-agent.opencode.manager-control.token` / `TEST_AGENT_OPENCODE_MANAGER_TOKEN`；不得复用用户 JWT、普通 `TEST_AGENT_API_TOKEN` 或 opencode server 密钥。生产环境该 token 必须由环境变量或配置中心注入，示例只能使用占位值。
 11. 超级管理员运行管理 API 必须使用用户 JWT，并由后端强制校验 `SUPER_ADMIN`；前端菜单可见性只作为体验优化，不能作为权限边界。
@@ -65,8 +65,8 @@ Token 校验流程：
 2. 安全响应头必须在 `test-agent-api` 的入口配置中统一定义，并由 `test-agent-app` 装配生效。
 3. Druid Web 控制台默认关闭；如后续启用，必须通过环境变量配置账号、密码和访问 allowlist，并同步 API、运维和安全文档。
 4. 旧 `/api/...`、新 `/api/internal/platform/...` 和 `/api/internal/agent/opencode/...` 共享同一鉴权、限流、CORS、traceId 与错误格式。Workspace 文件 API 和文件 WebSocket RPC 必须把所有请求路径归一化到注册的 workspace root 内，路径穿越或越权访问返回 `FORBIDDEN`。
-5. Workspace 目录选择器只能浏览 `test-agent.workspace-picker.allowed-roots` / `TEST_AGENT_WORKSPACE_PICKER_ROOTS` 声明的本机根目录，默认 `${user.home}/workspace`；越出允许根目录返回 `FORBIDDEN`，缺失或非目录返回 `VALIDATION_ERROR`，前端不得直接调用浏览器、本地插件或 opencode server 枚举任意磁盘路径。超级管理员服务器工作空间选择器只能通过目标后端签发的文件 WebSocket ticket 浏览目录。
-6. opencode-manager WebSocket 控制面只允许容器内 manager 使用独立 token 访问，不接受浏览器用户 token；manager 不得通过 HTTP 与 Java 后端交互，也不再连接其他服务器 Java。manager 只连接 `.serverip + OPENCODE_MANAGER_BACKEND_PORT` 推导出的本服务器 Java，断开后按重连间隔无限重连并重新拉取配置。返回给 Java 间用户进程路由使用的 `listenUrl` 必须是可信内网内其它后端可访问的直连地址，不应暴露到公网或不可信网络。
+5. 普通前端不提供本机目录选择或传物理目录创建 Workspace 的入口；应用和个人工作区目录由后端根据通用参数与业务 id 派生。超级管理员服务器工作空间选择器只能通过目标后端签发的文件 WebSocket ticket 浏览目录，创建服务器工作空间时仍由后端校验目标服务器与当前 agent 服务器一致。
+6. opencode-manager WebSocket 控制面只允许容器内 manager 使用独立 token 访问，不接受浏览器用户 token；manager 不得通过 HTTP 与 Java 后端交互，也不再连接其他服务器 Java。manager 只连接 `.serverhost + OPENCODE_MANAGER_BACKEND_PORT` 推导出的本服务器 Java，断开后按重连间隔无限重连并重新拉取配置。返回给 Java 间用户进程路由使用的 `listenUrl` 必须是可信内网内其它后端可访问的直连地址，不应暴露到公网或不可信网络。
 7. 用户专属 opencode server 默认监听 `0.0.0.0:{port}` 且不设置 Basic Auth，生产必须用容器网络、主机防火墙或内网网关限制端口池访问面；浏览器和外部系统不得直接访问这些端口。
 8. `tools/verify-opencode-process-deployment.sh` 只用于只读 smoke check；传入的 manager token 和 `SUPER_ADMIN` 用户 token 不会由脚本打印。生产执行时应使用临时 shell、禁用命令历史或通过安全变量注入，避免 token 留在 history 中。
 

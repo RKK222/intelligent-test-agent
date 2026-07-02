@@ -12,6 +12,7 @@
 - **认证服务**：用户登录（用户名+密码验证 -> 加载全局角色 -> Token 生成）、登出、Token 校验和刷新。
 - **领域模型**：`User`、`UserLoginLog`、`Dictionary`、`UserRole`、`AuthPrincipal`、`TokenStore`。
 - **测试造号**：创建测试用户时使用事务同时写入用户和角色，避免角色授权失败后留下无角色用户。
+- **数据库 IDENTITY 运维**：查询/对齐/手动重启白名单表（users/user_roles/dictionaries/user_login_logs）的 identity 序列，修复序列落后于已有主键导致的新增冲突。
 
 ## 依赖
 

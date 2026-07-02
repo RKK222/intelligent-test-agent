@@ -57,6 +57,7 @@ public class MyBatisCommonParameterRepository implements CommonParameterReposito
                 row.parameterChinese(),
                 row.parameterValue(),
                 ParameterPlatform.fromValue(row.platform()),
+                row.editable(),
                 row.createdAt(),
                 row.updatedAt());
     }

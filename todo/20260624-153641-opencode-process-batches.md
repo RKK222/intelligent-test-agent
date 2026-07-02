@@ -35,8 +35,8 @@
   - `frontend/packages/backend-api/src/index.ts`：前端新增运行管理 API client 的唯一位置。
 - 当前实现：
   - `RunApplicationService.resolveAgentTarget(...)` 已有“已有绑定则粘滞到绑定节点，否则从 `execution_nodes` 选最低负载节点”的基础逻辑。
-  - `ExecutionNodeSeeder` 从 `test-agent.opencode.nodes` seed 固定 opencode server 节点，适合本地和单节点配置，不适合动态用户专属进程。
-  - `OpencodeNodesHealthIndicator` 对配置化 opencode node 做健康检查，但不管理进程生命周期。
+  - 历史固定 opencode server 节点 seed 适合本地和单节点配置，不适合动态用户专属进程；当前已改为不再从 yml 自动 seed 固定节点。
+  - 历史配置化 opencode 节点健康检查只覆盖静态节点，不管理进程生命周期。
   - 前端已有 `roles`，且设置页根据 `APP_ADMIN` / `SUPER_ADMIN` 控制展示；新运行管理必须由后端强制校验 `SUPER_ADMIN`，前端只做可见性优化。
 - 问题原因：
   - 当前数据模型缺少 Linux 服务器、后端 Java 进程、容器、管理进程、opencode server 进程和用户绑定关系。

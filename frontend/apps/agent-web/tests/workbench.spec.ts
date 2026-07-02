@@ -235,38 +235,12 @@ test("settings dialog shows empty role placeholder for users without roles", asy
   await expect(page.getByText("您当前角色[无角色]无该项设置权限。")).toBeVisible();
 });
 
-test("workspace picker creates selected directory and loads its file tree", async ({ page, isMobile }) => {
-  test.skip(isMobile, "mobile workspace picker layout is not part of this mock E2E");
-  const workspaceCreates: Array<Record<string, unknown>> = [];
-  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
-  await mockBackendApi(page, { workspaceCreates, fileRequests, recentWorkspaces: { app_gcms: null } });
+test("empty application workspace state does not expose local directory picker", async ({ page }) => {
+  await mockBackendApi(page, { recentWorkspaces: { app_gcms: null } });
 
   await gotoWorkbench(page);
 
-  await page.getByRole("button", { name: "选择本机目录" }).click();
-  await expect(page.getByRole("dialog", { name: "选择工作区目录" })).toBeVisible();
-  await page.getByRole("button", { name: /project-a/ }).click();
-  await page.getByRole("button", { name: "选择此目录" }).click();
-
-  await expect.poll(() => workspaceCreates.length).toBe(1);
-  expect(workspaceCreates[0]).toEqual({ name: "project-a", rootPath: "/Users/huang/workspace/project-a" });
-  await expect(page.getByRole("button", { name: /src/ })).toBeVisible();
-  expect(fileRequests).toContainEqual({ workspaceId: "wrk_project_a", path: "" });
-});
-
-test("workspace picker switches to an existing workspace without recreating it", async ({ page, isMobile }) => {
-  test.skip(isMobile, "mobile workspace picker layout is not part of this mock E2E");
-  const workspaceCreates: Array<Record<string, unknown>> = [];
-  await mockBackendApi(page, { workspaceCreates, recentWorkspaces: { app_gcms: null } });
-
-  await gotoWorkbench(page);
-
-  await page.getByRole("button", { name: "选择本机目录" }).click();
-  await page.getByRole("button", { name: /demo-tests/ }).click();
-  await page.getByRole("button", { name: "选择此目录" }).click();
-
-  await expect(page.getByRole("button", { name: /tests/ })).toBeVisible();
-  expect(workspaceCreates).toEqual([]);
+  await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
 });
 
 test("model picker groups models by provider and updates run model", async ({ page }) => {
@@ -909,7 +883,6 @@ async function mockBackendApi(
     permissionReplies?: Array<Record<string, unknown>>;
     questionReplies?: Array<Record<string, unknown>>;
     terminalTickets?: Array<Record<string, unknown>>;
-    workspaceCreates?: Array<Record<string, unknown>>;
     fileRequests?: Array<{ workspaceId: string; path: string }>;
     gitDiffRequests?: string[];
     runEvents?: Array<ReturnType<typeof event>>;
@@ -1292,26 +1265,6 @@ async function mockBackendApi(
       await route.fulfill(json(workspaceItems.find((item) => item.workspaceId === workspaceId) ?? workspace()));
       return;
     }
-    if (method === "POST" && url.pathname === "/api/workspaces") {
-      const payload = JSON.parse(route.request().postData() ?? "{}") as { name: string; rootPath: string };
-      capture.workspaceCreates?.push(payload);
-      const workspace = {
-        workspaceId: "wrk_project_a",
-        name: payload.name,
-        rootPath: payload.rootPath,
-        linuxServerId: "10.8.0.12",
-        status: "ACTIVE",
-        createdAt: "2026-06-19T00:00:00Z",
-        updatedAt: "2026-06-19T00:00:00Z"
-      };
-      workspaceItems.unshift(workspace);
-      await route.fulfill(json(workspace));
-      return;
-    }
-    if (method === "GET" && url.pathname === "/api/workspace-directories") {
-      await route.fulfill(json(workspaceDirectories(url.searchParams.get("path"))));
-      return;
-    }
     if (method === "GET" && url.pathname.endsWith("/files")) {
       await route.fulfill({ status: 500, ...json({ error: "workspace files must use websocket" }) });
       return;
@@ -1508,31 +1461,6 @@ function workspace() {
     status: "ACTIVE",
     createdAt: "2026-06-19T00:00:00Z",
     updatedAt: "2026-06-19T00:00:00Z"
-  };
-}
-
-function workspaceDirectories(path: string | null) {
-  if (path === "/Users/huang/workspace/project-a") {
-    return {
-      path: "/Users/huang/workspace/project-a",
-      parentPath: "/Users/huang/workspace",
-      entries: [{ name: "src", path: "/Users/huang/workspace/project-a/src" }]
-    };
-  }
-  if (path === "/Users/huang/workspace/demo-tests") {
-    return {
-      path: "/Users/huang/workspace/demo-tests",
-      parentPath: "/Users/huang/workspace",
-      entries: [{ name: "tests", path: "/Users/huang/workspace/demo-tests/tests" }]
-    };
-  }
-  return {
-    path: "/Users/huang/workspace",
-    parentPath: null,
-    entries: [
-      { name: "demo-tests", path: "/Users/huang/workspace/demo-tests" },
-      { name: "project-a", path: "/Users/huang/workspace/project-a" }
-    ]
   };
 }
 

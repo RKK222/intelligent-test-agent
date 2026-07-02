@@ -97,6 +97,25 @@ class RuntimeManagementBackendRoutingServiceTest {
         assertThat(target).isEmpty();
     }
 
+    @Test
+    void forwardsContainerCommandWithinSameLinuxServerWhenSelectedBackendIsAnotherJavaProcess() {
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, """
+                {"success":true,"traceId":"trace_1234567890abcdef","data":{"command":"stop","status":"STOPPED","port":4096,"healthy":false,"message":"stopped","traceId":"trace_1234567890abcdef"}}
+                """);
+        RuntimeManagementBackendRoutingService service = service(httpClient, heartbeatStore(
+                List.of(backend("bjp_same_server_target", "10.8.0.21", "http://10.8.0.21:18080", NOW)),
+                List.of(managerSnapshot("ctr_01", "10.8.0.21"))));
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest
+                .post("/api/internal/platform/opencode-runtime/management/containers/ctr_01/processes/4096/stop")
+                .build());
+
+        Optional<String> target = service.forwardTargetForContainer(exchange, new OpencodeContainerId("ctr_01"));
+        service.forward(exchange, target.orElseThrow(), new TypeReference<ApiResponse<RuntimeManagementDtos.ManagedProcessCommandResponse>>() {});
+
+        assertThat(httpClient.requests).singleElement().satisfies(request -> assertThat(request.uri().toString())
+                .isEqualTo("http://10.8.0.21:18080/api/internal/platform/opencode-runtime/management/containers/ctr_01/processes/4096/stop"));
+    }
+
     private static RuntimeManagementBackendRoutingService service(
             RecordingHttpClient httpClient,
             OpencodeProcessHeartbeatStore heartbeatStore) {

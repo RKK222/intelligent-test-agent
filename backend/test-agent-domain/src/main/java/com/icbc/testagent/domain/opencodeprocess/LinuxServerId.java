@@ -4,21 +4,20 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * Linux 服务器业务 ID，当前按部署约定直接使用服务器 IPv4 地址。
+ * Linux 服务器稳定业务 ID，用于跨 Java、manager 和数据库关联同一台物理/虚拟服务器。
  */
 public record LinuxServerId(String value) {
 
-    private static final Pattern IPV4 = Pattern.compile(
-            "^(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)"
-                    + "(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}$");
+    private static final Pattern STABLE_ID = Pattern.compile("^[A-Za-z0-9._-]{1,128}$");
 
     /**
-     * 校验服务器 ID 必须是可用于 http://{linuxServerIp}:{port} 的 IPv4 地址。
+     * 校验服务器 ID 只能包含 URL path、Redis key 和数据库索引中稳定可用的安全字符。
      */
     public LinuxServerId {
         Objects.requireNonNull(value, "linuxServerId must not be null");
-        if (!IPV4.matcher(value).matches()) {
-            throw new IllegalArgumentException("linuxServerId must be an IPv4 address");
+        value = value.trim();
+        if (!STABLE_ID.matcher(value).matches()) {
+            throw new IllegalArgumentException("linuxServerId must be 1-128 chars of letters, digits, dot, underscore or hyphen");
         }
     }
 

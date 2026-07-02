@@ -16,55 +16,50 @@ class WorkspaceDirectoryServiceTest {
     Path root;
 
     @Test
-    void serviceListsOnlyDirectoriesUnderDefaultAllowedRoot() throws Exception {
+    void serviceListsOnlyDirectoriesUnderServerDefaultDirectory() throws Exception {
         Files.createDirectories(root.resolve("zeta"));
         Files.createDirectories(root.resolve("alpha"));
         Files.writeString(root.resolve("notes.txt"), "not a directory");
-        WorkspaceDirectoryService service = new WorkspaceDirectoryService(root.toString(), 1000);
+        WorkspaceDirectoryService service = new WorkspaceDirectoryService(1000);
 
-        WorkspaceDirectoryListResponse response = service.listDirectories(null);
+        WorkspaceDirectoryListResponse response = service.listServerDirectories(null, root.toString());
 
         assertThat(response.path()).isEqualTo(root.toRealPath().toString());
-        assertThat(response.parentPath()).isNull();
+        assertThat(response.parentPath()).isEqualTo(root.toRealPath().getParent().toString());
         assertThat(response.entries())
                 .extracting(WorkspaceDirectoryEntryResponse::name)
                 .containsExactly("alpha", "zeta");
     }
 
     @Test
-    void serviceExposesParentOnlyInsideAllowedRoot() throws Exception {
+    void serviceExposesParentForServerDirectoryNavigation() throws Exception {
         Path child = Files.createDirectories(root.resolve("child"));
-        WorkspaceDirectoryService service = new WorkspaceDirectoryService(root.toString(), 1000);
+        WorkspaceDirectoryService service = new WorkspaceDirectoryService(1000);
 
-        WorkspaceDirectoryListResponse response = service.listDirectories(child.toString());
+        WorkspaceDirectoryListResponse response = service.listServerDirectories(child.toString(), root.toString());
 
         assertThat(response.path()).isEqualTo(child.toRealPath().toString());
         assertThat(response.parentPath()).isEqualTo(root.toRealPath().toString());
     }
 
     @Test
-    void serviceRejectsDirectoryOutsideAllowedRoots() {
-        WorkspaceDirectoryService service = new WorkspaceDirectoryService(root.toString(), 1000);
+    void serviceHonorsMaxDirectoryEntriesForServerPicker() throws Exception {
+        Files.createDirectories(root.resolve("alpha"));
+        Files.createDirectories(root.resolve("beta"));
+        WorkspaceDirectoryService service = new WorkspaceDirectoryService(1);
 
-        assertThatThrownBy(() -> service.listDirectories(root.getParent().toString()))
-                .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
-    }
+        WorkspaceDirectoryListResponse response = service.listServerDirectories(root.toString(), root.toString());
 
-    @Test
-    void serviceRejectsPathTraversalOutsideAllowedRoots() {
-        WorkspaceDirectoryService service = new WorkspaceDirectoryService(root.toString(), 1000);
-
-        assertThatThrownBy(() -> service.listDirectories(root.resolve("..").toString()))
-                .isInstanceOfSatisfying(PlatformException.class, exception ->
-                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN));
+        assertThat(response.entries())
+                .extracting(WorkspaceDirectoryEntryResponse::name)
+                .containsExactly("alpha");
     }
 
     @Test
     void serviceRejectsMissingDirectoryAsValidationError() {
-        WorkspaceDirectoryService service = new WorkspaceDirectoryService(root.toString(), 1000);
+        WorkspaceDirectoryService service = new WorkspaceDirectoryService(1000);
 
-        assertThatThrownBy(() -> service.listDirectories(root.resolve("missing").toString()))
+        assertThatThrownBy(() -> service.listServerDirectories(root.resolve("missing").toString(), root.toString()))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
     }
@@ -72,9 +67,9 @@ class WorkspaceDirectoryServiceTest {
     @Test
     void serviceRejectsRegularFileAsValidationError() throws Exception {
         Path file = Files.writeString(root.resolve("notes.txt"), "not a directory");
-        WorkspaceDirectoryService service = new WorkspaceDirectoryService(root.toString(), 1000);
+        WorkspaceDirectoryService service = new WorkspaceDirectoryService(1000);
 
-        assertThatThrownBy(() -> service.listDirectories(file.toString()))
+        assertThatThrownBy(() -> service.listServerDirectories(file.toString(), root.toString()))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
                         assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR));
     }

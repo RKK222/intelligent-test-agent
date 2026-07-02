@@ -5,18 +5,18 @@ import { cn } from "@test-agent/ui-kit";
 import type { FileTreeEntry } from "@test-agent/shared-types";
 
 /**
- * 公共目录树节点（递归组件）：
+ * Agent 配置文件树节点（递归组件）：
  * <ul>
  *   <li>渲染单行：目录带 chevron + folder，文件不带 chevron</li>
  *   <li>展开时递归渲染子目录，支持任意层级（修复之前模板只支持两层的 bug）</li>
  * </ul>
  *
- * 数据来源由父组件 PublicDirectoryPanel 统一管理（entriesByDirectory / expandedDirectories / loadingPath），
+ * 数据来源由父组件 AgentConfigPanel 统一管理（entriesByDirectory / expandedDirectories / loadingPath），
  * 本组件只负责根据当前节点路径读取其子项并向外发出 toggle / openFile 事件。
  */
 
 // 显式声明组件名，允许在自身模板内通过 PascalCase 名称递归引用。
-defineOptions({ name: "PublicDirectoryNode" });
+defineOptions({ name: "AgentConfigTreeNode" });
 
 const props = defineProps<{
   /** 当前节点 */
@@ -89,7 +89,7 @@ function onRowClick() {
       <Loader2 v-if="isLoading" class="h-3.5 w-3.5 animate-spin text-[var(--ta-muted)]" />
     </button>
     <div v-if="isDirectory && isExpanded" class="space-y-px">
-      <PublicDirectoryNode
+      <AgentConfigTreeNode
         v-for="child in children ?? []"
         :key="child.path"
         :entry="child"

@@ -12,6 +12,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AgentConfigPanel: typeof import('./src/components/AgentConfigPanel.vue')['default']
+    AgentConfigTreeNode: typeof import('./src/components/AgentConfigTreeNode.vue')['default']
     AgentWorkbench: typeof import('./src/components/AgentWorkbench.vue')['default']
     AnalyticsManagementPanel: typeof import('./src/components/system/AnalyticsManagementPanel.vue')['default']
     ConfigurationManagementPanel: typeof import('./src/components/system/ConfigurationManagementPanel.vue')['default']
@@ -20,6 +21,8 @@ declare module 'vue' {
     ElAutocomplete: typeof import('element-plus/es')['ElAutocomplete']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElCheckbox: typeof import('element-plus/es')['ElCheckbox']
+    ElCollapse: typeof import('element-plus/es')['ElCollapse']
+    ElCollapseItem: typeof import('element-plus/es')['ElCollapseItem']
     ElDatePicker: typeof import('element-plus/es')['ElDatePicker']
     ElDialog: typeof import('element-plus/es')['ElDialog']
     ElForm: typeof import('element-plus/es')['ElForm']
@@ -34,6 +37,7 @@ declare module 'vue' {
     ElSelect: typeof import('element-plus/es')['ElSelect']
     ElTable: typeof import('element-plus/es')['ElTable']
     ElTableColumn: typeof import('element-plus/es')['ElTableColumn']
+    ElTag: typeof import('element-plus/es')['ElTag']
     ElTooltip: typeof import('element-plus/es')['ElTooltip']
     FigmaChatPanel: typeof import('./src/components/FigmaChatPanel.vue')['default']
     FigmaEditorArea: typeof import('./src/components/FigmaEditorArea.vue')['default']
@@ -42,8 +46,6 @@ declare module 'vue' {
     GeneralParamManagementPanel: typeof import('./src/components/system/GeneralParamManagementPanel.vue')['default']
     GitChangesPanel: typeof import('./src/components/GitChangesPanel.vue')['default']
     OpencodePublicConfigManagementPanel: typeof import('./src/components/system/OpencodePublicConfigManagementPanel.vue')['default']
-    PublicDirectoryNode: typeof import('./src/components/PublicDirectoryNode.vue')['default']
-    PublicDirectoryPanel: typeof import('./src/components/PublicDirectoryPanel.vue')['default']
     ReadonlyTranscript: typeof import('./src/components/ReadonlyTranscript.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
@@ -63,8 +65,6 @@ declare module 'vue' {
     SystemManagementPanel: typeof import('./src/components/system/SystemManagementPanel.vue')['default']
     SystemManagementWrapper: typeof import('./src/components/SystemManagementWrapper.vue')['default']
     WorkbenchFooter: typeof import('./src/components/WorkbenchFooter.vue')['default']
-    WorkspaceBootstrap: typeof import('./src/components/WorkspaceBootstrap.vue')['default']
-    WorkspaceDirectoryPickerDialog: typeof import('./src/components/WorkspaceDirectoryPickerDialog.vue')['default']
   }
   export interface GlobalDirectives {
     vLoading: typeof import('element-plus/es')['ElLoadingDirective']

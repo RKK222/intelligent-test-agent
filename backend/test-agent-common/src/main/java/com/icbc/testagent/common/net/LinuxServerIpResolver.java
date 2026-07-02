@@ -56,7 +56,7 @@ public final class LinuxServerIpResolver {
     }
 
     /**
-     * 优先使用后端 listen-url 中声明的非回环 IPv4，确保 Java 自身注册和写出的 .serverip 来自同一结果。
+     * 优先使用后端 listen-url 中声明的非回环 IPv4，作为未显式配置 advertised host 时的兜底地址。
      *
      * <p>本地开发常见的 127.0.0.1 / localhost / 0.0.0.0 只表示绑定入口，不能作为服务器身份；
      * 此类地址会回退到启动时缓存的真实网卡探测结果。

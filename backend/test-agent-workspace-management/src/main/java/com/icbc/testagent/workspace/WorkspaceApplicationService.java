@@ -53,13 +53,6 @@ public class WorkspaceApplicationService {
     }
 
     /**
-     * 注册工作区；rootPath 必须是已存在目录，traceId 会写入领域对象用于审计和排障。
-     */
-    public Workspace createWorkspace(String name, String rootPath, String traceId) {
-        return createWorkspace(name, rootPath, null, traceId);
-    }
-
-    /**
      * 注册工作区；可选 linuxServerId 必须与当前后端身份一致，用于跨服务器目录选择后的目标端创建。
      */
     public Workspace createWorkspace(String name, String rootPath, String linuxServerId, String traceId) {

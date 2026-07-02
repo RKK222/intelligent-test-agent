@@ -33,7 +33,6 @@ public class CommonParameterManagementApplicationService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(CommonParameterManagementApplicationService.class);
     private static final int CHANGE_LOG_LIMIT = 50;
-    private static final String EDITABLE_MAX_PROCESSES_PARAMETER = "OPENCODE_MANAGER_MAX_PROCESSES";
 
     private final CommonParameterRepository repository;
     private final CommonParameterChangeLogRepository changeLogRepository;
@@ -85,7 +84,8 @@ public class CommonParameterManagementApplicationService {
 
     /**
      * 仅更新指定通用参数的 value；参数不存在抛 {@link ErrorCode#NOT_FOUND}，
-     * 新值为空抛 {@link ErrorCode#VALIDATION_ERROR}。更新成功后记录修改日志。
+     * 新值为空抛 {@link ErrorCode#VALIDATION_ERROR}。只读参数（editable=false）抛
+     * {@link ErrorCode#VALIDATION_ERROR}，避免误改部署/初始化参数影响系统正常运行。更新成功后记录修改日志。
      *
      * @param parameterId 参数业务 ID
      * @param newValue 新值
@@ -104,10 +104,10 @@ public class CommonParameterManagementApplicationService {
         CommonParameter existing = repository.findByParameterId(normalizedParameterId)
                 .orElseThrow(() -> new PlatformException(
                         ErrorCode.NOT_FOUND, "通用参数不存在", Map.of("parameterId", normalizedParameterId)));
-        if (!EDITABLE_MAX_PROCESSES_PARAMETER.equals(existing.englishName())) {
+        if (!existing.editable()) {
             throw new PlatformException(
                     ErrorCode.VALIDATION_ERROR,
-                    "除 opencode manager 最大进程数外，通用参数不允许在前端修改",
+                    "该通用参数为只读参数，修改后将影响系统正常运行",
                     Map.of("parameterId", normalizedParameterId, "englishName", existing.englishName()));
         }
         String oldValue = existing.parameterValue();

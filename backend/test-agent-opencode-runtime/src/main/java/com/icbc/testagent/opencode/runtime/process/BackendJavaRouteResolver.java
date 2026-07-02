@@ -12,16 +12,21 @@ import com.icbc.testagent.domain.opencodeprocess.LinuxServerStatus;
 import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnection;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
+import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -35,6 +40,7 @@ public class BackendJavaRouteResolver {
 
     private final OpencodeProcessHeartbeatStore heartbeatStore;
     private final ManagerControlSettings settings;
+    private final BackendProcessId currentBackendProcessId;
     private final Clock clock;
 
     /**
@@ -43,8 +49,9 @@ public class BackendJavaRouteResolver {
     @Autowired
     public BackendJavaRouteResolver(
             OpencodeProcessHeartbeatStore heartbeatStore,
-            ManagerControlSettings settings) {
-        this(heartbeatStore, settings, Clock.systemUTC());
+            ManagerControlSettings settings,
+            BackendJavaProcessLifecycleService lifecycleService) {
+        this(heartbeatStore, settings, lifecycleService.backendProcessId(), Clock.systemUTC());
     }
 
     /**
@@ -54,8 +61,20 @@ public class BackendJavaRouteResolver {
             OpencodeProcessHeartbeatStore heartbeatStore,
             ManagerControlSettings settings,
             Clock clock) {
+        this(heartbeatStore, settings, new BackendProcessId("bjp_current_backend"), clock);
+    }
+
+    /**
+     * 测试构造器允许显式指定当前 Java backendProcessId。
+     */
+    public BackendJavaRouteResolver(
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            ManagerControlSettings settings,
+            BackendProcessId currentBackendProcessId,
+            Clock clock) {
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
+        this.currentBackendProcessId = Objects.requireNonNull(currentBackendProcessId, "currentBackendProcessId must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -92,7 +111,11 @@ public class BackendJavaRouteResolver {
      */
     public Optional<LinuxServerId> remoteTarget(LinuxServerId linuxServerId) {
         Objects.requireNonNull(linuxServerId, "linuxServerId must not be null");
-        return isCurrent(linuxServerId) ? Optional.empty() : Optional.of(linuxServerId);
+        if (!isCurrent(linuxServerId)) {
+            return Optional.of(linuxServerId);
+        }
+        BackendJavaProcess selected = requireBackend(linuxServerId);
+        return isCurrentBackend(selected) ? Optional.empty() : Optional.of(linuxServerId);
     }
 
     /**
@@ -159,19 +182,13 @@ public class BackendJavaRouteResolver {
      * 返回在线 Java 快照，包含当前 Java 的本地兜底。
      */
     public List<BackendRuntimeSnapshot> liveBackendSnapshots(int limit) {
-        Map<String, BackendRuntimeSnapshot> snapshotsByServer = new LinkedHashMap<>();
+        Map<String, BackendRuntimeSnapshot> snapshotsByBackend = new LinkedHashMap<>();
         for (BackendRuntimeSnapshot snapshot : heartbeatStore.liveBackendSnapshots()) {
-            BackendJavaProcess backend = snapshot.backendProcess();
-            snapshotsByServer.merge(
-                    backend.linuxServerId().value(),
-                    snapshot,
-                    (left, right) -> latestBackend(left.backendProcess(), right.backendProcess()) == right.backendProcess()
-                            ? right
-                            : left);
+            snapshotsByBackend.put(snapshot.backendProcess().backendProcessId().value(), snapshot);
         }
-        snapshotsByServer.putIfAbsent(currentLinuxServerIdValue(), currentBackendSnapshot());
+        snapshotsByBackend.putIfAbsent(currentBackendProcessId.value(), currentBackendSnapshot());
         int resolvedLimit = limit < 1 ? DEFAULT_BACKEND_LIMIT : limit;
-        return snapshotsByServer.values().stream()
+        return snapshotsByBackend.values().stream()
                 .limit(resolvedLimit)
                 .toList();
     }
@@ -190,15 +207,50 @@ public class BackendJavaRouteResolver {
 
     private Map<String, BackendJavaProcess> latestBackendsByServer() {
         Map<String, BackendJavaProcess> result = new LinkedHashMap<>();
+        Map<String, Set<BackendProcessId>> connectedBackendIdsByServer = connectedBackendIdsByServer();
         for (BackendRuntimeSnapshot snapshot : heartbeatStore.liveBackendSnapshots()) {
             BackendJavaProcess backend = snapshot.backendProcess();
-            result.merge(backend.linuxServerId().value(), backend, this::latestBackend);
+            result.merge(
+                    backend.linuxServerId().value(),
+                    backend,
+                    (left, right) -> preferredBackend(left, right, connectedBackendIdsByServer));
+        }
+        return result;
+    }
+
+    private BackendJavaProcess preferredBackend(
+            BackendJavaProcess left,
+            BackendJavaProcess right,
+            Map<String, Set<BackendProcessId>> connectedBackendIdsByServer) {
+        Set<BackendProcessId> connected = connectedBackendIdsByServer.getOrDefault(left.linuxServerId().value(), Set.of());
+        boolean leftConnected = connected.contains(left.backendProcessId());
+        boolean rightConnected = connected.contains(right.backendProcessId());
+        if (leftConnected != rightConnected) {
+            return rightConnected ? right : left;
+        }
+        return latestBackend(left, right);
+    }
+
+    private Map<String, Set<BackendProcessId>> connectedBackendIdsByServer() {
+        Map<String, Set<BackendProcessId>> result = new HashMap<>();
+        for (ManagerRuntimeSnapshot snapshot : heartbeatStore.liveManagerSnapshots()) {
+            String linuxServerId = snapshot.manager().linuxServerId().value();
+            for (OpencodeManagerBackendConnection connection : snapshot.connections()) {
+                if (connection.status() == com.icbc.testagent.domain.opencodeprocess.ManagerConnectionStatus.CONNECTED) {
+                    result.computeIfAbsent(linuxServerId, ignored -> new HashSet<>()).add(connection.backendProcessId());
+                }
+            }
         }
         return result;
     }
 
     private BackendJavaProcess latestBackend(BackendJavaProcess left, BackendJavaProcess right) {
         return right.lastHeartbeatAt().isAfter(left.lastHeartbeatAt()) ? right : left;
+    }
+
+    private boolean isCurrentBackend(BackendJavaProcess backend) {
+        return backend.backendProcessId().equals(currentBackendProcessId)
+                || Objects.equals(backend.listenUrl(), settings.listenUrl());
     }
 
     private BackendRuntimeSnapshot currentBackendSnapshot() {
@@ -221,7 +273,7 @@ public class BackendJavaRouteResolver {
 
     private BackendJavaProcess currentBackend(Instant now) {
         return new BackendJavaProcess(
-                new BackendProcessId("bjp_current_backend"),
+                currentBackendProcessId,
                 currentLinuxServerId(),
                 settings.listenUrl(),
                 BackendJavaProcessStatus.READY,

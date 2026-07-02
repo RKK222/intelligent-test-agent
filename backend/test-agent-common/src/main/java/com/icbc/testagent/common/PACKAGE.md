@@ -20,6 +20,7 @@
 - `pagination.PageRequest`：分页请求模型。
 - `pagination.PageResponse`：分页响应模型。
 - `id.RuntimeIdGenerator`：生成运行态业务 ID，包括 scheduler 运行记录和计划 ID。
+- `git.GitWorkspaceService`：封装本地 Git 原子命令，包括 clone/worktree/status/diff/commit/push/pull/fetch/reset、冲突文件列表和 merge abort；不承载业务发布流程。
 - 后续可新增 Idempotency-Key、时间和校验工具。
 
 ## 允许依赖

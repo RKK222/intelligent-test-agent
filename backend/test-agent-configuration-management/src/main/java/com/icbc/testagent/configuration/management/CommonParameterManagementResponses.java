@@ -18,6 +18,7 @@ public final class CommonParameterManagementResponses {
             String chineseName,
             String parameterValue,
             String platform,
+            boolean editable,
             Instant createdAt,
             Instant updatedAt) {
 
@@ -28,6 +29,7 @@ public final class CommonParameterManagementResponses {
                     parameter.chineseName(),
                     parameter.parameterValue(),
                     parameter.platform().value(),
+                    parameter.editable(),
                     parameter.createdAt(),
                     parameter.updatedAt());
         }

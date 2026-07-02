@@ -7,6 +7,7 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Locale;
@@ -29,6 +30,7 @@ public class OpencodeProcessStatusQueryService {
     private final OpencodeProcessManagerGateway gateway;
     private final OpencodeProcessHeartbeatStore heartbeatStore;
     private final Clock clock;
+    private final OpencodeServerAddressResolver addressResolver;
 
     /**
      * Spring 生产构造器使用系统 UTC 时钟。
@@ -37,8 +39,19 @@ public class OpencodeProcessStatusQueryService {
     public OpencodeProcessStatusQueryService(
             OpencodeProcessManagementRepository repository,
             OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            ManagerControlSettings settings) {
+        this(repository, gateway, heartbeatStore, Clock.systemUTC(), new OpencodeServerAddressResolver(settings.advertisedHost()));
+    }
+
+    /**
+     * 兼容旧测试和手工构造路径；没有 settings 时使用进程当前 baseUrl，不主动改写地址。
+     */
+    public OpencodeProcessStatusQueryService(
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessManagerGateway gateway,
             OpencodeProcessHeartbeatStore heartbeatStore) {
-        this(repository, gateway, heartbeatStore, Clock.systemUTC());
+        this(repository, gateway, heartbeatStore, Clock.systemUTC(), null);
     }
 
     /**
@@ -49,10 +62,20 @@ public class OpencodeProcessStatusQueryService {
             OpencodeProcessManagerGateway gateway,
             OpencodeProcessHeartbeatStore heartbeatStore,
             Clock clock) {
+        this(repository, gateway, heartbeatStore, clock, null);
+    }
+
+    OpencodeProcessStatusQueryService(
+            OpencodeProcessManagementRepository repository,
+            OpencodeProcessManagerGateway gateway,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            Clock clock,
+            OpencodeServerAddressResolver addressResolver) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.gateway = Objects.requireNonNull(gateway, "gateway must not be null");
         this.heartbeatStore = Objects.requireNonNull(heartbeatStore, "heartbeatStore must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
+        this.addressResolver = addressResolver;
     }
 
     /**
@@ -177,7 +200,7 @@ public class OpencodeProcessStatusQueryService {
                 process.containerId(),
                 process.port(),
                 pid,
-                process.baseUrl(),
+                refreshedBaseUrl(process),
                 status,
                 process.sessionPath(),
                 process.configPath(),
@@ -187,6 +210,10 @@ public class OpencodeProcessStatusQueryService {
                 process.createdAt(),
                 checkedAt,
                 traceId));
+    }
+
+    private String refreshedBaseUrl(OpencodeServerProcess process) {
+        return addressResolver == null ? process.baseUrl() : addressResolver.baseUrl(process.port());
     }
 
     /**

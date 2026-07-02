@@ -238,6 +238,16 @@ const serverBackendRows = computed<RuntimeServerBackendRow[]>(() => {
     )
   );
 });
+const backendAddressByLinuxServerId = computed(() => {
+  const addresses = new Map<string, string>();
+  for (const backend of overview.value?.backendProcesses ?? []) {
+    const address = extractHostFromUrl(backend.listenUrl);
+    if (address && !addresses.has(backend.linuxServerId)) {
+      addresses.set(backend.linuxServerId, address);
+    }
+  }
+  return addresses;
+});
 const containerManagerRows = computed<RuntimeContainerManagerRow[]>(() => {
   const rows = new Map<string, RuntimeContainerManagerRow>();
   for (const container of overview.value?.containers ?? []) {
@@ -346,6 +356,33 @@ function formatNullable(value?: string | number | null) {
     return "-";
   }
   return value;
+}
+
+function extractHostFromUrl(value?: string | null) {
+  if (!value) {
+    return "";
+  }
+  try {
+    return new URL(value).hostname || value;
+  } catch {
+    const withoutScheme = value.replace(/^[a-z][a-z\d+.-]*:\/\//i, "");
+    const authority = withoutScheme.split(/[/?#]/, 1)[0] ?? "";
+    if (authority.startsWith("[") && authority.includes("]")) {
+      return authority.slice(1, authority.indexOf("]"));
+    }
+    return authority.split(":")[0] || value;
+  }
+}
+
+function backendNetworkAddress(row: RuntimeServerBackendRow) {
+  return String(formatNullable(extractHostFromUrl(row.backend?.listenUrl)));
+}
+
+function containerManagerNetworkAddress(row: RuntimeContainerManagerRow) {
+  if (!row.linuxServerId) {
+    return "-";
+  }
+  return String(formatNullable(backendAddressByLinuxServerId.value.get(row.linuxServerId)));
 }
 
 function compactRecord(value?: Record<string, unknown> | null) {
@@ -575,6 +612,33 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
   }
   expandedRuntimeRowKeys.value = next;
 }
+
+function startResize(e: MouseEvent) {
+  const handle = e.target as HTMLElement;
+  const th = handle.parentElement;
+  if (!th) return;
+
+  const startX = e.clientX;
+  const startWidth = th.offsetWidth;
+
+  handle.classList.add("is-resizing");
+
+  const doDrag = (moveEvent: MouseEvent) => {
+    const newWidth = Math.max(startWidth + (moveEvent.clientX - startX), 40);
+    th.style.width = `${newWidth}px`;
+    th.style.minWidth = `${newWidth}px`;
+    th.style.maxWidth = `${newWidth}px`;
+  };
+
+  const stopDrag = () => {
+    handle.classList.remove("is-resizing");
+    document.removeEventListener("mousemove", doDrag);
+    document.removeEventListener("mouseup", stopDrag);
+  };
+
+  document.addEventListener("mousemove", doDrag);
+  document.addEventListener("mouseup", stopDrag);
+}
 </script>
 
 <template>
@@ -585,7 +649,7 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
         <el-select v-model="draftFilters.status" size="small" clearable placeholder="进程状态" class="ta-runtime-filter">
           <el-option v-for="status in processStatusOptions" :key="status" :label="status" :value="status" />
         </el-select>
-        <el-input v-model="draftFilters.linuxServerId" size="small" clearable placeholder="Linux IP" class="ta-runtime-filter" />
+        <el-input v-model="draftFilters.linuxServerId" size="small" clearable placeholder="服务器ID" class="ta-runtime-filter" />
         <el-input v-model="draftFilters.containerId" size="small" clearable placeholder="容器 ID" class="ta-runtime-filter" />
         <el-button size="small" type="primary" :icon="Search" :loading="isFetching" @click="applyFilters">查询</el-button>
         <el-button size="small" :icon="Refresh" :loading="isFetching" @click="refresh">刷新</el-button>
@@ -617,10 +681,23 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
               <div class="ta-runtime-block-scroll">
                 <table class="ta-runtime-table">
                   <thead>
-                    <tr><th>服务器</th><th>Java 进程</th><th>服务器状态</th><th>Java 状态</th><th>CPU</th><th>内存</th><th>磁盘</th><th>JVM</th><th>心跳</th><th>容量</th><th>操作</th></tr>
+                    <tr>
+                      <th style="width: 120px; position: relative;">服务器<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 120px; position: relative;">IP地址<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 120px; position: relative;">Java 进程<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 90px; position: relative;">服务器状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 90px; position: relative;">Java 状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 80px; position: relative;">CPU<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 150px; position: relative;">内存<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 150px; position: relative;">磁盘<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 150px; position: relative;">JVM<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 140px; position: relative;">心跳<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 120px; position: relative;">容量<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 100px; position: relative;">操作<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                    </tr>
                   </thead>
                   <tbody>
-                    <tr v-if="!serverBackendRows.length"><td colspan="11" class="is-empty">暂无服务器 / Java 进程</td></tr>
+                    <tr v-if="!serverBackendRows.length"><td colspan="12" class="is-empty">暂无服务器 / Java 进程</td></tr>
                     <tr
                       v-for="row in serverBackendRows"
                       :key="row.key"
@@ -629,8 +706,9 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
                       @click="row.backend ? selectBackendServer(row.backend.linuxServerId) : undefined"
                       @keydown.enter="row.backend ? selectBackendServer(row.backend.linuxServerId) : undefined"
                     >
-                      <td>{{ formatNullable(row.linuxServerId) }}</td>
-                      <td class="is-compact">{{ formatNullable(row.backend?.backendProcessId) }}</td>
+                      <td :title="row.linuxServerId ?? undefined">{{ formatNullable(row.linuxServerId) }}</td>
+                      <td :title="backendNetworkAddress(row)">{{ backendNetworkAddress(row) }}</td>
+                      <td class="is-compact" :title="row.backend?.backendProcessId ?? undefined">{{ formatNullable(row.backend?.backendProcessId) }}</td>
                       <td>
                         <span v-if="row.server" :class="['ta-status', statusClass(row.server.status)]">{{ row.server.status }}</span>
                         <span v-else>-</span>
@@ -665,7 +743,7 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
               </div>
             </div>
 
-            <!-- 后端趋势图按服务器 IP 归并，JVM 样本跨 Java 进程重启连续。 -->
+            <!-- 后端趋势图按稳定服务器身份归并，JVM 样本跨 Java 进程重启连续。 -->
             <div v-if="selectedMetricsTarget && selectedMetricsTarget.type === 'backend'" class="ta-runtime-metrics-panel">
               <header class="ta-runtime-section-header">
                 <h4>{{ selectedMetricsTarget.title }}</h4>
@@ -721,25 +799,26 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
                 <table class="ta-runtime-table">
                   <thead>
                     <tr>
-                      <th class="is-expand"></th>
-                      <th>容器</th>
-                      <th>管理进程</th>
-                      <th>服务器</th>
-                      <th>容器状态</th>
-                      <th>管理状态</th>
-                      <th>端口池</th>
-                      <th>容量</th>
-                      <th>来源</th>
-                      <th>CPU</th>
-                      <th>内存率</th>
-                      <th>已用内存</th>
-                      <th>协议</th>
-                      <th>心跳</th>
-                      <th>操作</th>
+                      <th class="is-expand" style="width: 32px;"></th>
+                      <th style="width: 120px; position: relative;">容器<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 120px; position: relative;">管理进程<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 120px; position: relative;">服务器<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 120px; position: relative;">IP地址<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 90px; position: relative;">容器状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 90px; position: relative;">管理状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 100px; position: relative;">端口池<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 100px; position: relative;">容量<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 80px; position: relative;">来源<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 80px; position: relative;">CPU<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 80px; position: relative;">内存率<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 100px; position: relative;">已用内存<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 80px; position: relative;">协议<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 140px; position: relative;">心跳<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                      <th style="width: 120px; position: relative;">操作<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-if="!containerManagerRows.length"><td colspan="15" class="is-empty">暂无容器 / 管理进程</td></tr>
+                    <tr v-if="!containerManagerRows.length"><td colspan="16" class="is-empty">暂无容器 / 管理进程</td></tr>
                     <template v-for="row in containerManagerRows" :key="row.key">
                       <tr
                         :class="[row.container ? activeRowClass('container', row.container.containerId) : '', { 'is-expanded': isRuntimeRowExpanded(row) }]"
@@ -751,9 +830,10 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
                         <td class="is-expand">
                           <span :class="['ta-runtime-expand-icon', { 'is-expanded': isRuntimeRowExpanded(row) }]" aria-hidden="true"></span>
                         </td>
-                        <td class="is-compact">{{ formatNullable(row.containerId) }}</td>
-                        <td class="is-compact">{{ formatNullable(row.manager?.managerId) }}</td>
-                        <td>{{ formatNullable(row.linuxServerId) }}</td>
+                         <td class="is-compact" :title="row.container?.containerId ?? undefined" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ formatNullable(row.container?.containerId) }}</td>
+                         <td class="is-compact" :title="row.manager?.managerId ?? undefined" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ formatNullable(row.manager?.managerId) }}</td>
+                         <td :title="row.linuxServerId ?? undefined" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ formatNullable(row.linuxServerId) }}</td>
+                         <td :title="containerManagerNetworkAddress(row)" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ containerManagerNetworkAddress(row) }}</td>
                         <td>
                           <span v-if="row.container" :class="['ta-status', statusClass(row.container.status)]">{{ row.container.status }}</span>
                           <span v-else>-</span>
@@ -790,7 +870,7 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
                         </td>
                       </tr>
                       <tr v-if="isRuntimeRowExpanded(row)" class="ta-runtime-managed-detail">
-                        <td colspan="15">
+                        <td colspan="16">
                           <div class="ta-runtime-managed-processes">
                             <div v-if="hasManagedProcessCountMismatch(row)" class="ta-runtime-managed-warning">
                               容量计数来自 manager state，明细来自 manager 上报数组；旧快照或旧 manager 可能缺失明细。
@@ -804,20 +884,32 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
                               <div v-if="!ownedProcesses(row).length" class="ta-runtime-managed-empty">暂无有主进程</div>
                               <table v-else class="ta-runtime-managed-table">
                                 <thead>
-                                  <tr><th>端口</th><th>PID</th><th>用户</th><th>进程</th><th>baseUrl</th><th>启动时间</th><th>绑定</th><th>健康</th><th>启动命令</th><th>traceId</th><th>操作</th></tr>
+                                  <tr>
+                                    <th style="width: 80px; position: relative;">端口<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 80px; position: relative;">PID<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 100px; position: relative;">用户<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 120px; position: relative;">进程<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 160px; position: relative;">baseUrl<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 140px; position: relative;">启动时间<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 120px; position: relative;">绑定<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 100px; position: relative;">健康<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 250px; position: relative;">启动命令<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 150px; position: relative;">traceId<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 120px; position: relative;">操作<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                  </tr>
                                 </thead>
                                 <tbody>
                                   <tr v-for="(process, index) in ownedProcesses(row)" :key="`owned:${row.key}:${process.processId ?? process.port}:${index}`">
                                     <td>{{ process.port }}</td>
                                     <td>{{ formatNullable(process.pid) }}</td>
-                                    <td class="is-compact">{{ processOwner(process) }}</td>
-                                    <td class="is-compact">{{ formatNullable(process.processId) }}</td>
-                                    <td class="is-compact">{{ formatNullable(process.baseUrl) }}</td>
+                                    <td class="is-compact" :title="processOwner(process) ?? undefined">{{ processOwner(process) }}</td>
+                                    <td class="is-compact" :title="process.processId ?? undefined">{{ formatNullable(process.processId) }}</td>
+                                    <td class="is-compact" :title="process.baseUrl ?? undefined">{{ formatNullable(process.baseUrl) }}</td>
                                     <td>{{ formatDate(process.startedAt) }}</td>
                                     <td>{{ processBinding(process) }}</td>
                                     <td class="is-compact">{{ processHealth(process) }}</td>
-                                    <td class="is-command"><code>{{ formatNullable(process.startCommand) }}</code></td>
-                                    <td class="is-compact">{{ formatNullable(process.traceId) }}</td>
+                                    <td class="is-command" :title="process.startCommand ?? undefined"><code>{{ formatNullable(process.startCommand) }}</code></td>
+                                    <td class="is-compact" :title="process.traceId ?? undefined">{{ formatNullable(process.traceId) }}</td>
                                     <td>
                                       <div class="ta-runtime-process-actions">
                                         <button
@@ -855,19 +947,29 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
                               <div v-if="!ghostProcesses(row).length" class="ta-runtime-managed-empty">暂无无主进程</div>
                               <table v-else class="ta-runtime-managed-table">
                                 <thead>
-                                  <tr><th>端口</th><th>PID</th><th>进程</th><th>状态</th><th>baseUrl</th><th>启动时间</th><th>健康</th><th>启动命令（无主）</th><th>traceId</th><th>操作</th></tr>
+                                  <tr>
+                                    <th style="width: 80px; position: relative;">端口<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 80px; position: relative;">PID<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 120px; position: relative;">进程<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 90px; position: relative;">状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 160px; position: relative;">baseUrl<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 140px; position: relative;">启动时间<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 100px; position: relative;">健康<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 250px; position: relative;">启动命令（无主）<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 150px; position: relative;">traceId<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                    <th style="width: 120px; position: relative;">操作<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                                  </tr>
                                 </thead>
                                 <tbody>
                                   <tr v-for="(process, index) in ghostProcesses(row)" :key="`ghost:${row.key}:${process.processId ?? process.port}:${index}`">
                                     <td>{{ process.port }}</td>
                                     <td>{{ formatNullable(process.pid) }}</td>
-                                    <td class="is-compact">{{ formatNullable(process.processId) }}</td>
+                                    <td class="is-compact" :title="process.processId ?? undefined">{{ formatNullable(process.processId) }}</td>
                                     <td><span :class="['ta-status', statusClass(process.processStatus)]">{{ formatNullable(process.processStatus) }}</span></td>
-                                    <td class="is-compact">{{ formatNullable(process.baseUrl) }}</td>
                                     <td>{{ formatDate(process.startedAt) }}</td>
                                     <td class="is-compact">{{ processHealth(process) }}</td>
-                                    <td class="is-command"><code>{{ formatNullable(process.startCommand) }}</code></td>
-                                    <td class="is-compact">{{ formatNullable(process.traceId) }}</td>
+                                    <td class="is-command" :title="process.startCommand ?? undefined"><code>{{ formatNullable(process.startCommand) }}</code></td>
+                                    <td class="is-compact" :title="process.traceId ?? undefined">{{ formatNullable(process.traceId) }}</td>
                                     <td>
                                       <div class="ta-runtime-process-actions">
                                         <button
@@ -979,19 +1081,19 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
             <table class="ta-runtime-table">
               <thead>
                 <tr>
-                  <th>进程</th>
-                  <th>用户</th>
-                  <th>服务器</th>
-                  <th>容器</th>
-                  <th>端口</th>
-                  <th>PID</th>
-                  <th>状态</th>
-                  <th>实际状态</th>
-                  <th>baseUrl</th>
-                  <th>绑定</th>
-                  <th>健康</th>
-                  <th>traceId</th>
-                  <th>操作</th>
+                  <th style="width: 120px; position: relative;">进程<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                  <th style="width: 100px; position: relative;">用户<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                  <th style="width: 120px; position: relative;">服务器<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                  <th style="width: 120px; position: relative;">容器<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                  <th style="width: 80px; position: relative;">端口<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                  <th style="width: 80px; position: relative;">PID<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                  <th style="width: 90px; position: relative;">状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                  <th style="width: 90px; position: relative;">实际状态<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                  <th style="width: 160px; position: relative;">baseUrl<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                  <th style="width: 120px; position: relative;">绑定<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                  <th style="width: 100px; position: relative;">健康<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                  <th style="width: 150px; position: relative;">traceId<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
+                  <th style="width: 120px; position: relative;">操作<div class="ta-resize-handle" @mousedown.stop.prevent="startResize"></div></th>
                 </tr>
               </thead>
               <tbody>
@@ -999,23 +1101,23 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
                 <tr v-else-if="isUserProcessFetching && !processRows.length"><td colspan="13" class="is-empty">正在查询用户 opencode 进程...</td></tr>
                 <tr v-else-if="!processRows.length"><td colspan="13" class="is-empty">暂无该用户 opencode 进程</td></tr>
                 <tr v-for="process in processRows" :key="process.processId">
-                  <td class="is-compact">{{ process.processId }}</td>
-                  <td class="is-compact">{{ process.username || process.userId }}</td>
-                  <td>{{ process.linuxServerId }}</td>
-                  <td class="is-compact">{{ process.containerId }}</td>
+                  <td class="is-compact" :title="process.processId ?? undefined">{{ process.processId }}</td>
+                  <td class="is-compact" :title="(process.username || process.userId) ?? undefined">{{ process.username || process.userId }}</td>
+                  <td :title="process.linuxServerId ?? undefined">{{ process.linuxServerId }}</td>
+                  <td class="is-compact" :title="process.containerId ?? undefined">{{ process.containerId }}</td>
                   <td>{{ process.port }}</td>
                   <td>{{ process.pid ?? "-" }}</td>
                   <td><span :class="['ta-status', statusClass(process.status)]">{{ process.status }}</span></td>
                   <td class="is-compact">{{ userProcessActualStatus(process) }}</td>
-                  <td class="is-compact">{{ process.baseUrl }}</td>
+                  <td class="is-compact" :title="process.baseUrl ?? undefined">{{ process.baseUrl }}</td>
                   <td>
                     <span v-if="process.bindingAgentId" :class="['ta-status', statusClass(process.bindingStatus)]">
                       {{ process.bindingAgentId }} / {{ process.bindingStatus }}
                     </span>
                     <span v-else>-</span>
                   </td>
-                  <td class="is-compact">{{ process.healthMessage || formatDate(process.lastHealthCheckAt) }}</td>
-                  <td class="is-compact">{{ process.traceId }}</td>
+                  <td class="is-compact" :title="process.healthMessage || formatDate(process.lastHealthCheckAt) || undefined">{{ process.healthMessage || formatDate(process.lastHealthCheckAt) }}</td>
+                  <td class="is-compact" :title="process.traceId ?? undefined">{{ process.traceId }}</td>
                   <td>
                     <button
                       v-if="canRestartUserProcess(process)"
@@ -1181,8 +1283,10 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
 }
 .ta-runtime-table {
   width: 100%;
+  min-width: max-content;
   border-collapse: collapse;
   font-size: 12px;
+  table-layout: fixed;
 }
 .ta-runtime-table th,
 .ta-runtime-table td {
@@ -1191,6 +1295,8 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
   text-align: left;
   vertical-align: middle;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ta-runtime-table th {
   color: #606266;
@@ -1278,8 +1384,10 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
 }
 .ta-runtime-managed-table {
   width: 100%;
+  min-width: max-content;
   border-collapse: collapse;
   background: #fff;
+  table-layout: fixed;
 }
 .ta-runtime-managed-table th,
 .ta-runtime-managed-table td {
@@ -1287,6 +1395,9 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
   border: 1px solid #ebeef5;
   text-align: left;
   vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .ta-runtime-managed-table th {
   color: #606266;
@@ -1427,5 +1538,19 @@ function toggleRuntimeRow(row: RuntimeContainerManagerRow) {
   .ta-runtime-filter {
     width: 100%;
   }
+}
+
+.ta-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 10;
+}
+.ta-resize-handle:hover,
+.ta-resize-handle.is-resizing {
+  background: rgba(0, 0, 0, 0.08);
 }
 </style>

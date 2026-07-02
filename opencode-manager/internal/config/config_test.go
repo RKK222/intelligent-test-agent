@@ -9,31 +9,32 @@ import (
 	"time"
 )
 
-func TestLoadFromEnvReadsServerIPFileFromSysDataRootOnLinux(t *testing.T) {
+func TestLoadFromEnvReadsServerIdentityAndHostFilesFromSysDataRootOnLinux(t *testing.T) {
 	setBaseManagerEnv(t)
-	t.Setenv("OPENCODE_MANAGER_LINUX_SERVER_ID", "10.9.0.99")
 
 	cfg, err := loadFromEnvWithRuntime(testRuntime("linux", map[string]string{
-		"/data/.testagent/.serverip": "10.8.0.12\n",
-		"/etc/hostname":              "container-abc123\n",
+		"/data/.testagent/.serverid":   "linux-prod-a\n",
+		"/data/.testagent/.serverhost": "10.8.0.12\n",
+		"/etc/hostname":                "container-abc123\n",
 	}))
 	if err != nil {
 		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
 	}
 
-	if cfg.LinuxServerID != "10.8.0.12" {
-		t.Fatalf("expected server IP from .serverip file, got %q", cfg.LinuxServerID)
+	if cfg.LinuxServerID != "linux-prod-a" {
+		t.Fatalf("expected server identity from .serverid file, got %q", cfg.LinuxServerID)
 	}
 	if cfg.ContainerID != "container-abc123" {
 		t.Fatalf("expected container id from /etc/hostname, got %q", cfg.ContainerID)
 	}
 }
 
-func TestLoadFromEnvReadsServerIPFileFromSysDataRootOnDarwin(t *testing.T) {
+func TestLoadFromEnvReadsServerIdentityFileFromSysDataRootOnDarwin(t *testing.T) {
 	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
 	rt := testRuntime("darwin", map[string]string{
-		"/Users/kaka/.testagent/.serverip": "10.8.0.13\n",
+		"/Users/kaka/.testagent/.serverid":   "mac-build-a\n",
+		"/Users/kaka/.testagent/.serverhost": "10.8.0.13\n",
 	})
 	rt.userHomeDir = func() (string, error) {
 		return "/Users/kaka", nil
@@ -44,25 +45,8 @@ func TestLoadFromEnvReadsServerIPFileFromSysDataRootOnDarwin(t *testing.T) {
 		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
 	}
 
-	if cfg.LinuxServerID != "10.8.0.13" {
-		t.Fatalf("expected server IP from SYS_DATA_ROOT_DIR-derived .serverip, got %q", cfg.LinuxServerID)
-	}
-}
-
-func TestLoadFromEnvIgnoresLegacyServerIPFileEnv(t *testing.T) {
-	setBaseManagerEnv(t)
-	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
-	t.Setenv("OPENCODE_MANAGER_SERVER_IP_FILE", "/tmp/legacy/.serverip")
-
-	cfg, err := loadFromEnvWithRuntime(testRuntime("linux", map[string]string{
-		"/data/.testagent/.serverip": "10.8.0.14\n",
-	}))
-	if err != nil {
-		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
-	}
-
-	if cfg.LinuxServerID != "10.8.0.14" {
-		t.Fatalf("expected legacy env to be ignored, got %q", cfg.LinuxServerID)
+	if cfg.LinuxServerID != "mac-build-a" {
+		t.Fatalf("expected server identity from SYS_DATA_ROOT_DIR-derived .serverid, got %q", cfg.LinuxServerID)
 	}
 }
 
@@ -70,8 +54,9 @@ func TestLoadFromEnvPrefersHostnameOverEtcHostnameAndEnvOnNonWindows(t *testing.
 	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_env")
 	rt := testRuntime("linux", map[string]string{
-		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
-		"/etc/hostname":                   "ctr_file\n",
+		defaultLinuxServerIDFileForTest():   "linux-prod-a\n",
+		defaultLinuxServerHostFileForTest(): "10.8.0.12\n",
+		"/etc/hostname":                     "ctr_file\n",
 	})
 	rt.hostname = func() (string, error) {
 		return "ctr_hostname", nil
@@ -91,8 +76,9 @@ func TestLoadFromEnvFallsBackToEtcHostnameBeforeEnvOnNonWindows(t *testing.T) {
 	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_env")
 	rt := testRuntime("linux", map[string]string{
-		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
-		"/etc/hostname":                   "ctr_file\n",
+		defaultLinuxServerIDFileForTest():   "linux-prod-a\n",
+		defaultLinuxServerHostFileForTest(): "10.8.0.12\n",
+		"/etc/hostname":                     "ctr_file\n",
 	})
 	rt.hostname = func() (string, error) {
 		return " ", nil
@@ -112,8 +98,9 @@ func TestLoadFromEnvFallsBackToEnvWhenHostnameSourcesBlankOnNonWindows(t *testin
 	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_env")
 	rt := testRuntime("linux", map[string]string{
-		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
-		"/etc/hostname":                   " \n",
+		defaultLinuxServerIDFileForTest():   "linux-prod-a\n",
+		defaultLinuxServerHostFileForTest(): "10.8.0.12\n",
+		"/etc/hostname":                     " \n",
 	})
 	rt.hostname = func() (string, error) {
 		return " ", nil
@@ -133,8 +120,9 @@ func TestLoadFromEnvDoesNotUseHostNameEnvFallbackOnNonWindows(t *testing.T) {
 	setBaseManagerEnv(t)
 	t.Setenv("HOSTNAME", "ctr_host_env")
 	rt := testRuntime("linux", map[string]string{
-		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
-		"/etc/hostname":                   " \n",
+		defaultLinuxServerIDFileForTest():   "linux-prod-a\n",
+		defaultLinuxServerHostFileForTest(): "10.8.0.12\n",
+		"/etc/hostname":                     " \n",
 	})
 	rt.hostname = func() (string, error) {
 		return " ", nil
@@ -147,7 +135,7 @@ func TestLoadFromEnvDoesNotUseHostNameEnvFallbackOnNonWindows(t *testing.T) {
 	}
 }
 
-func TestLoadFromEnvWaitsForDelayedServerIPFile(t *testing.T) {
+func TestLoadFromEnvWaitsForDelayedServerIdentityAndHostFiles(t *testing.T) {
 	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
 
@@ -156,14 +144,18 @@ func TestLoadFromEnvWaitsForDelayedServerIPFile(t *testing.T) {
 	rt.serverIPWait = 30 * time.Second
 	rt.serverIPPoll = time.Second
 	rt.readFile = func(path string) ([]byte, error) {
-		if path != defaultLinuxServerIPFileForTest() {
+		switch path {
+		case defaultLinuxServerIDFileForTest():
+			readAttempts++
+			if readAttempts < 4 {
+				return nil, os.ErrNotExist
+			}
+			return []byte("linux-prod-a\n"), nil
+		case defaultLinuxServerHostFileForTest():
+			return []byte("10.8.0.21\n"), nil
+		default:
 			return nil, os.ErrNotExist
 		}
-		readAttempts++
-		if readAttempts < 4 {
-			return nil, os.ErrNotExist
-		}
-		return []byte("10.8.0.21\n"), nil
 	}
 
 	cfg, err := loadFromEnvWithRuntime(rt)
@@ -171,15 +163,15 @@ func TestLoadFromEnvWaitsForDelayedServerIPFile(t *testing.T) {
 		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
 	}
 
-	if cfg.LinuxServerID != "10.8.0.21" {
-		t.Fatalf("expected delayed server IP file to be used, got %q", cfg.LinuxServerID)
+	if cfg.LinuxServerID != "linux-prod-a" {
+		t.Fatalf("expected delayed server identity file to be used, got %q", cfg.LinuxServerID)
 	}
 	if readAttempts != 4 {
-		t.Fatalf("expected four server IP file read attempts, got %d", readAttempts)
+		t.Fatalf("expected four server identity file read attempts, got %d", readAttempts)
 	}
 }
 
-func TestLoadFromEnvFailsWhenServerIPFileTimesOut(t *testing.T) {
+func TestLoadFromEnvFailsWhenServerIdentityFileTimesOut(t *testing.T) {
 	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
 
@@ -189,25 +181,39 @@ func TestLoadFromEnvFailsWhenServerIPFileTimesOut(t *testing.T) {
 
 	_, err := loadFromEnvWithRuntime(rt)
 
-	if err == nil || !strings.Contains(err.Error(), ".serverip") {
-		t.Fatalf("expected safe timeout error for missing .serverip file, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), ".serverid") {
+		t.Fatalf("expected safe timeout error for missing .serverid file, got %v", err)
 	}
 }
 
-func TestLoadFromEnvFailsWhenServerIPFileContainsInvalidIPv4(t *testing.T) {
+func TestLoadFromEnvFailsWhenServerHostFileTimesOut(t *testing.T) {
 	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
 
 	_, err := loadFromEnvWithRuntime(testRuntime("linux", map[string]string{
-		defaultLinuxServerIPFileForTest(): "not-an-ip\n",
+		defaultLinuxServerIDFileForTest(): "linux-prod-a\n",
 	}))
 
-	if err == nil || !strings.Contains(err.Error(), "invalid IPv4") {
-		t.Fatalf("expected invalid IPv4 error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), ".serverhost") {
+		t.Fatalf("expected safe timeout error for missing .serverhost file, got %v", err)
 	}
 }
 
-func TestLoadFromEnvWindowsUsesLocalIPv4AndMachineName(t *testing.T) {
+func TestLoadFromEnvFailsWhenServerIDFileContainsInvalidStableID(t *testing.T) {
+	setBaseManagerEnv(t)
+	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
+
+	_, err := loadFromEnvWithRuntime(testRuntime("linux", map[string]string{
+		defaultLinuxServerIDFileForTest():   "server/a\n",
+		defaultLinuxServerHostFileForTest(): "10.8.0.12\n",
+	}))
+
+	if err == nil || !strings.Contains(err.Error(), "server identity file .serverid contains invalid stable id") {
+		t.Fatalf("expected invalid stable id error, got %v", err)
+	}
+}
+
+func TestLoadFromEnvWindowsUsesMachineNameAsLinuxServerId(t *testing.T) {
 	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_env")
 	rt := testRuntime("windows", nil)
@@ -218,7 +224,7 @@ func TestLoadFromEnvWindowsUsesLocalIPv4AndMachineName(t *testing.T) {
 		return "192.168.10.25", nil
 	}
 	rt.readFile = func(path string) ([]byte, error) {
-		t.Fatalf("windows branch must not read server IP file %q", path)
+		t.Fatalf("windows branch must not read server identity files %q", path)
 		return nil, errors.New("unexpected read")
 	}
 
@@ -227,8 +233,8 @@ func TestLoadFromEnvWindowsUsesLocalIPv4AndMachineName(t *testing.T) {
 		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
 	}
 
-	if cfg.LinuxServerID != "192.168.10.25" {
-		t.Fatalf("expected Windows local IPv4, got %q", cfg.LinuxServerID)
+	if cfg.LinuxServerID != "WIN-DEV-01" {
+		t.Fatalf("expected Windows linuxServerId to be hostname, got %q", cfg.LinuxServerID)
 	}
 	if cfg.ContainerID != "WIN-DEV-01" {
 		t.Fatalf("expected Windows container id to be hostname, got %q", cfg.ContainerID)
@@ -240,8 +246,9 @@ func TestLoadFromEnvFailsWhenContainerIDCannotBeResolved(t *testing.T) {
 	t.Setenv("HOSTNAME", " ")
 
 	rt := testRuntime("linux", map[string]string{
-		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
-		"/etc/hostname":                   " \n",
+		defaultLinuxServerIDFileForTest():   "linux-prod-a\n",
+		defaultLinuxServerHostFileForTest(): "10.8.0.12\n",
+		"/etc/hostname":                     " \n",
 	})
 
 	_, err := loadFromEnvWithRuntime(rt)
@@ -259,7 +266,8 @@ func TestLoadFromEnvValidatesPortRangeAndCapacity(t *testing.T) {
 	t.Setenv("OPENCODE_MANAGER_MAX_PROCESSES", "4")
 
 	_, err := loadFromEnvWithRuntime(testRuntime("linux", map[string]string{
-		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
+		defaultLinuxServerIDFileForTest():   "linux-prod-a\n",
+		defaultLinuxServerHostFileForTest(): "10.8.0.12\n",
 	}))
 	if err == nil {
 		t.Fatalf("expected invalid port range error")
@@ -270,7 +278,8 @@ func TestLoadFromEnvValidatesPortRangeAndCapacity(t *testing.T) {
 	t.Setenv("OPENCODE_MANAGER_MAX_PROCESSES", "3")
 
 	_, err = loadFromEnvWithRuntime(testRuntime("linux", map[string]string{
-		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
+		defaultLinuxServerIDFileForTest():   "linux-prod-a\n",
+		defaultLinuxServerHostFileForTest(): "10.8.0.12\n",
 	}))
 	if err == nil {
 		t.Fatalf("expected max processes to be limited by available ports")
@@ -283,7 +292,8 @@ func TestLoadFromEnvAppliesDefaultsAndCors(t *testing.T) {
 	t.Setenv("OPENCODE_ALLOWED_CORS", "http://localhost:3000,http://127.0.0.1:3000")
 
 	cfg, err := loadFromEnvWithRuntime(testRuntime("linux", map[string]string{
-		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
+		defaultLinuxServerIDFileForTest():   "linux-prod-a\n",
+		defaultLinuxServerHostFileForTest(): "10.8.0.12\n",
 	}))
 	if err != nil {
 		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
@@ -314,7 +324,8 @@ func TestLoadControlFromEnvDoesNotRequireRuntimeCommonParameterEnv(t *testing.T)
 	t.Setenv("OPENCODE_MANAGER_TOKEN", "manager-secret")
 
 	cfg, err := loadControlFromEnvWithRuntime(testRuntime("linux", map[string]string{
-		defaultLinuxServerIPFileForTest(): "10.8.0.12\n",
+		defaultLinuxServerIDFileForTest():   "linux-prod-a\n",
+		defaultLinuxServerHostFileForTest(): "10.8.0.12\n",
 	}))
 	if err != nil {
 		t.Fatalf("loadControlFromEnvWithRuntime returned error: %v", err)
@@ -339,8 +350,12 @@ func setBaseManagerEnv(t *testing.T) {
 	t.Setenv("OPENCODE_MANAGER_MAX_PROCESSES", "4")
 }
 
-func defaultLinuxServerIPFileForTest() string {
-	return filepath.Join(defaultLinuxSysDataRootDir, serverIPFileName)
+func defaultLinuxServerIDFileForTest() string {
+	return filepath.Join(defaultLinuxSysDataRootDir, serverIDFileName)
+}
+
+func defaultLinuxServerHostFileForTest() string {
+	return filepath.Join(defaultLinuxSysDataRootDir, serverHostFileName)
 }
 
 func testRuntime(goos string, files map[string]string) configRuntime {

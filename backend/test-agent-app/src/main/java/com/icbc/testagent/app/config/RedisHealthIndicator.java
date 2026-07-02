@@ -2,6 +2,8 @@ package com.icbc.testagent.app.config;
 
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.time.Duration;
+import org.springframework.boot.data.redis.autoconfigure.DataRedisProperties;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
 import org.springframework.stereotype.Component;
@@ -12,12 +14,12 @@ import org.springframework.stereotype.Component;
 @Component("redisRequired")
 public class RedisHealthIndicator implements HealthIndicator {
 
-    private final TestAgentRuntimeProperties properties;
+    private final DataRedisProperties properties;
 
     /**
-     * 注入 Redis 连接配置。
+     * 注入 Spring 标准 Redis 连接配置。
      */
-    public RedisHealthIndicator(TestAgentRuntimeProperties properties) {
+    public RedisHealthIndicator(DataRedisProperties properties) {
         this.properties = properties;
     }
 
@@ -26,20 +28,29 @@ public class RedisHealthIndicator implements HealthIndicator {
      */
     @Override
     public Health health() {
-        TestAgentRuntimeProperties.Redis redis = properties.getRedis();
+        String host = properties.getHost();
+        int port = properties.getPort();
         try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(redis.getHost(), redis.getPort()), Math.toIntExact(redis.getTimeout().toMillis()));
+            socket.connect(new InetSocketAddress(host, port), redisConnectTimeoutMillis());
             return Health.up()
                     .withDetail("redis", "required")
-                    .withDetail("host", redis.getHost())
-                    .withDetail("port", redis.getPort())
+                    .withDetail("host", host)
+                    .withDetail("port", port)
                     .build();
         } catch (Exception exception) {
             return Health.down(exception)
                     .withDetail("redis", "required")
-                    .withDetail("host", redis.getHost())
-                    .withDetail("port", redis.getPort())
+                    .withDetail("host", host)
+                    .withDetail("port", port)
                     .build();
         }
+    }
+
+    private int redisConnectTimeoutMillis() {
+        Duration timeout = properties.getConnectTimeout() != null
+                ? properties.getConnectTimeout()
+                : properties.getTimeout();
+        long timeoutMillis = timeout == null ? 1000 : timeout.toMillis();
+        return Math.toIntExact(Math.max(1, timeoutMillis));
     }
 }

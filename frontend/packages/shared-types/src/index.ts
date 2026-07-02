@@ -40,7 +40,7 @@ export type Workspace = {
    * 该工作区所属的应用版本 id（`ApplicationWorkspaceVersion.versionId`）。
    * 仅在「最近工作区」相关接口中填充，便于前端在重新登录时直接把左下角"切换工作空间"按钮的 `selectedVersionId`
    * 设回上次的版本，从而立即显示当前所在的工作区名称而无需等待 `versionsByTemplateId` 异步加载完成。
-   * 工作区不属于任何应用版本（例如纯本机目录注册出来的个人空间）时为 `null`。
+   * 工作区不属于任何应用版本（例如历史手动注册或超级管理员服务器工作空间）时为 `null`。
    */
   versionId?: string | null;
   /**
@@ -535,7 +535,7 @@ export type UserOpencodeProcess = {
   status: UserOpencodeProcessStatus;
   /** 头像菜单展示状态：未分配、运行中、未运行。旧后端缺失时前端从 status/baseUrl 推断。 */
   serviceStatus?: UserOpencodeServiceStatus;
-  /** 头像菜单展示地址，格式为 服务器IP:内部opencode端口。 */
+  /** 头像菜单展示地址，格式为 advertisedHost:内部opencode端口。 */
   serviceAddress?: string | null;
   initializable: boolean;
   /** 用户绑定指向的 Linux 服务器已无可用容器，但本地仍有可路由节点时为 true。 */
@@ -884,6 +884,7 @@ export type GeneralParameter = {
   chineseName: string;
   parameterValue: string;
   platform: string;
+  editable: boolean;
   createdAt: string;
   updatedAt: string;
 };
@@ -1345,6 +1346,16 @@ export type CreateUserPayload = {
 export type RoleOption = {
   roleCode: string;
   roleLabel: string;
+};
+
+/** 数据库 identity 运维：单张表的状态快照。 */
+export type IdentityStatus = {
+  table: string;
+  tableName: string;
+  currentValue: number | null;
+  maxId: number | null;
+  conflict: boolean;
+  lastUpdatedAt: string;
 };
 
 export type CodeRepositoryConfig = {

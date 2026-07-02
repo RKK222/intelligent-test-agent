@@ -156,7 +156,7 @@ public class RuntimeManagementController {
     }
 
     /**
-     * 按服务器 IP 查询后端 Java 服务近 48 小时内的 Redis 指标历史。
+     * 按稳定服务器身份查询后端 Java 服务近 48 小时内的 Redis 指标历史。
      */
     @GetMapping("/api/internal/platform/opencode-runtime/management/linux-servers/{linuxServerId}/backend-metrics")
     public Mono<ApiResponse<RuntimeManagementDtos.BackendMetricHistoryResponse>> backendServerMetrics(

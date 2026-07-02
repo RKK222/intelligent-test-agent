@@ -111,7 +111,7 @@ test-agent-event
 
 ## API URL 边界
 
-- 旧 `/api/...` URL 全部保留，作为兼容入口，不在本次删除或重定向。
+- 旧 `/api/...` URL 默认保留，作为兼容入口；已明确作废的入口除外，不得无计划删除或重定向。
 - 前端调用平台自身能力优先使用 `/api/internal/platform/{business-project}/{business}/...`。
 - 与 agent 交互的新入口使用 `/api/internal/agent/{agentId}/...`；当前默认可用 agent 为 `opencode`，opencode 原 path 兼容形态为 `/api/internal/agent/opencode/{原 opencode path}`。
 - 给其他系统调用的公开 API 使用 `/api/public/...`，新增前必须先完成鉴权、限流和兼容性设计。

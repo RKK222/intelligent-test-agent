@@ -70,6 +70,7 @@ import type {
   PublishPersonalWorkspaceResult,
   QuestionRequest,
   RoleOption,
+  IdentityStatus,
   Run,
   RunDiff,
   RunDiffAction,
@@ -213,7 +214,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     if (userToken && !headers.has("Authorization")) {
       headers.set("Authorization", `Bearer ${userToken}`);
     }
-    // 所有后端请求统一设置超时，避免目录选择等界面在连接悬挂时一直停留在加载态。
+    // 所有后端请求统一设置超时，避免文件、运行和配置管理界面在连接悬挂时一直停留在加载态。
     const controller = new AbortController();
     let timedOut = false;
     const timeoutMs = init.timeoutMs ?? requestTimeoutMs;
@@ -417,8 +418,6 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     listWorkspaces: (page = 1, size = 20) =>
       request<PageResponse<Workspace>>(`/api/workspaces?page=${page}&size=${size}`),
     getWorkspace: (workspaceId: string) => request<Workspace>(`/api/workspaces/${encodeURIComponent(workspaceId)}`),
-    createWorkspace: (payload: { name: string; rootPath: string; linuxServerId?: string }) =>
-      request<Workspace>("/api/workspaces", { method: "POST", body: JSON.stringify(payload) }),
     listManagedApplications: () => request<ManagedApplication[]>(`${workspaceManagementBase}/applications`),
     listWorkspaceTemplates: (appId: string) =>
       request<ApplicationWorkspaceTemplate[]>(`${workspaceManagementBase}/applications/${encodeURIComponent(appId)}/workspace-templates`),
@@ -501,8 +500,6 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/publish`,
         { method: "POST", body: JSON.stringify(payload) }
       ),
-    listWorkspaceDirectories: (path?: string) =>
-      request<WorkspaceDirectoryList>(`/api/workspace-directories${query({ path })}`),
     listFiles: async (workspaceId: string, path = "") => {
       const entries = await workspaceFileRpc<BackendFileTreeEntry[]>(workspaceId, "workspace.list", { path });
       return entries.map((entry) => ({
@@ -562,27 +559,6 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         client.close();
       }
     },
-    // 公共目录（后端 application.yml 中 test-agent.public-directory.path 配置的固定根目录）：
-    // 列表/读取对所有登录用户开放，写入仅 SUPER_ADMIN 可调用。
-    listPublicFiles: async (path = "") => {
-      const entries = await request<BackendFileTreeEntry[]>(`/api/public/files${query({ path })}`);
-      return entries.map((entry) => ({
-        path: entry.path,
-        name: entry.name,
-        type: entry.directory ? "directory" : "file",
-        size: entry.size,
-        modifiedAt: entry.lastModifiedAt
-      })) satisfies FileTreeEntry[];
-    },
-    readPublicFile: async (path: string) => {
-      const file = await request<BackendFileContent>(`/api/public/files/content${query({ path })}`);
-      return { ...file, encoding: "utf-8", readonly: false } satisfies FileContent;
-    },
-    writePublicFile: (path: string, content: string) =>
-      request<void>("/api/public/files/content", {
-        method: "PUT",
-        body: JSON.stringify({ path, content })
-      }),
     getPublicAgentConfigStatus: () => request<AgentConfigStatus>(`${agentConfigBase}/public/status`),
     getWorkspaceAgentConfigStatus: (workspaceId: string) =>
       request<AgentConfigStatus>(`${agentConfigBase}/workspaces/${encodeURIComponent(workspaceId)}/status`),
@@ -1015,6 +991,17 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<UserManagementUser>(`${systemManagementBase}/users`, { method: "POST", body: JSON.stringify(payload) }),
     /** 查询可选角色列表，供新增用户下拉选择。 */
     listRoles: () => request<RoleOption[]>(`${systemManagementBase}/roles`),
+
+    // ---- 数据库 IDENTITY 运维 API ----
+
+    /** 查询白名单表 identity 状态（仅 SUPER_ADMIN）。 */
+    listIdentityStatuses: () => request<IdentityStatus[]>(`${systemManagementBase}/identity`),
+    /** 把指定表 identity 对齐到 max(id)+1。 */
+    alignIdentity: (table: string) =>
+      request<IdentityStatus>(`${systemManagementBase}/identity/align`, { method: "POST", body: JSON.stringify({ table }) }),
+    /** 手动把指定表 identity 重启到目标值。 */
+    restartIdentity: (table: string, targetValue: number) =>
+      request<IdentityStatus>(`${systemManagementBase}/identity/restart`, { method: "POST", body: JSON.stringify({ table, targetValue }) }),
 
     listRepositories: (page = 1, size = 50) =>
       request<PageResponse<CodeRepositoryConfig>>(`${configurationBase}/repositories${query({ page, size })}`),

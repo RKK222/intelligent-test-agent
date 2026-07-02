@@ -150,7 +150,7 @@ public class AgentConfigController {
     }
 
     @GetMapping("/public/files")
-    public ApiResponse<List<FileTreeEntryResponse>> listPublicFiles(
+    public ApiResponse<List<FileTreeEntryResponse>> listPublicAgentConfigFiles(
             @RequestParam(required = false) String path,
             @RequestParam(required = false) String worktreeId,
             ServerWebExchange exchange) {
@@ -163,7 +163,7 @@ public class AgentConfigController {
     }
 
     @GetMapping("/public/files/content")
-    public ApiResponse<FileContentResponse> readPublicFile(
+    public ApiResponse<FileContentResponse> readPublicAgentConfigFile(
             @RequestParam String path,
             @RequestParam(required = false) String worktreeId,
             ServerWebExchange exchange) {
@@ -176,7 +176,7 @@ public class AgentConfigController {
     }
 
     @PutMapping("/public/files/content")
-    public ApiResponse<Void> writePublicFile(
+    public ApiResponse<Void> writePublicAgentConfigFile(
             @Valid @RequestBody AgentConfigDtos.FileContentRequest request,
             ServerWebExchange exchange) {
         AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);

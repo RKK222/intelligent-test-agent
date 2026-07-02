@@ -13,31 +13,32 @@ import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
-class ServerIpFilePathResolverTest {
+class ServerIdentityFilePathResolverTest {
 
     @Test
-    void resolvesServerIpFileFromSysDataRootDirCommonParameter() {
-        ServerIpFilePathResolver resolver = new ServerIpFilePathResolver(values(Map.of(
+    void resolvesServerIdentityAndHostFilesFromSysDataRootDirCommonParameter() {
+        ServerIdentityFilePathResolver resolver = new ServerIdentityFilePathResolver(values(Map.of(
                 "SYS_DATA_ROOT_DIR", "/tmp/test-agent-data")));
 
-        assertThat(resolver.resolve()).isEqualTo(Path.of("/tmp/test-agent-data/.serverip"));
+        assertThat(resolver.serverIdFile()).isEqualTo(Path.of("/tmp/test-agent-data/.serverid"));
+        assertThat(resolver.serverHostFile()).isEqualTo(Path.of("/tmp/test-agent-data/.serverhost"));
     }
 
     @Test
     void rejectsMissingSysDataRootDir() {
-        ServerIpFilePathResolver resolver = new ServerIpFilePathResolver(values(Map.of()));
+        ServerIdentityFilePathResolver resolver = new ServerIdentityFilePathResolver(values(Map.of()));
 
-        assertThatThrownBy(resolver::resolve)
+        assertThatThrownBy(resolver::serverIdFile)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("通用参数未配置：SYS_DATA_ROOT_DIR");
     }
 
     @Test
     void rejectsBlankSysDataRootDir() {
-        ServerIpFilePathResolver resolver = new ServerIpFilePathResolver(values(Map.of(
+        ServerIdentityFilePathResolver resolver = new ServerIdentityFilePathResolver(values(Map.of(
                 "SYS_DATA_ROOT_DIR", "  ")));
 
-        assertThatThrownBy(resolver::resolve)
+        assertThatThrownBy(resolver::serverHostFile)
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("通用参数未配置：SYS_DATA_ROOT_DIR");
     }

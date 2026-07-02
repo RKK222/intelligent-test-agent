@@ -43,7 +43,7 @@ Browser
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK，禁止手改。 |
 | `test-agent-opencode-client` | 封装 generated SDK，提供 `OpencodeClientFacade`，是业务访问 opencode 的唯一门面。 |
 | `test-agent-agent-runtime` | 定义 `AgentRuntime`、`AgentRuntimeRegistry`、统一日志/指标包装、`OpencodeAgentRuntime` 适配器和未注册的 `OtherAgentRuntime` 抽象占位。 |
-| `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/删除、受控目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、agent 和 skill 管理业务。 |
+| `test-agent-workspace-management` | Workspace、服务器归属、文件查看/新增/修改/删除、超级管理员服务器目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、每服务器版本副本、个人工作区、agent 和 skill 管理业务。 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、当前用户 opencode 进程状态/初始化契约、Run 和 runtime 代理防绕过校验、用户进程/固定节点目标解析、workspace 文件 WebSocket 后端路由、manager WebSocket 网关与后端实例生命周期、超级管理员运行管理 Redis 快照聚合和 48 小时指标历史查询、通过 `AgentRuntimeRegistry` 调用 agent、Diff/revert、terminal ticket/PTY 业务。 |
 | `test-agent-system-management` | 用户、角色、权限等平台内部管理业务，包括注册、登录认证和 Token 管理，以及用户管理（测试）查询/新增用户。 |
 | `test-agent-configuration-management` | 应用定义只读消费、应用成员、代码库英文名与应用关联、应用工作空间、个人 SSH key 和 Git 远端只读目录查询配置业务；通用参数数据库直读视图（`RepositoryCommonParameterValues`）、变量引用解析器和参数更新跨实例广播。 |
@@ -62,10 +62,10 @@ Browser
 | 包 | 职责 |
 |---|---|
 | `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、服务器工作空间选择、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、设置模态（含版本库英文名、工作空间创建进度和用户管理（测试）页签）、超级管理员系统管理容器（定时任务管理 + 运行管理最新指标与 ECharts 趋势）和全局错误提示。 |
-| `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、受控目录选择、平台文件 WebSocket route/ticket/RPC（workspace 与 Agent 配置文件）、用户 opencode 进程状态/初始化、运行管理 overview 与指标历史、定时任务管理、配置管理、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询和默认 `opencode` 的 agent URL 前缀。 |
+| `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、超级管理员服务器目录选择、平台文件 WebSocket route/ticket/RPC（workspace 与 Agent 配置文件）、用户 opencode 进程状态/初始化、运行管理 overview 与指标历史、定时任务管理、配置管理、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询和默认 `opencode` 的 agent URL 前缀。 |
 | `packages/event-stream-client` | RunEvent SSE client，负责按默认 `opencode` agent URL 连接、自动重连、事件解析、去重和取消订阅。 |
 | `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板、工作台级 Pinia 状态，以及 Git 变更面板应用工作区/应用级 Agent mock 数据。 |
-| `packages/file-explorer` | 文件树、选择 Workspace 目录事件、已加载文件名过滤、变更列表和打开文件入口。 |
+| `packages/file-explorer` | 文件树、超级管理员服务器工作空间选择事件、已加载文件名过滤、变更列表和打开文件入口。 |
 | `packages/editor` | Monaco 编辑器（原生 `monaco-editor`）、语言识别、内容编辑和只读展示。 |
 | `packages/diff-viewer` | Monaco Diff、变更文件列表、Run/Session/VCS 来源切换、split/unified 视图、Run 级接受/拒绝按钮和当前文件反馈。 |
 | `packages/agent-chat` | 自建最小 chat 运行时、用户消息、message part timeline（text/reasoning/tool/file/subtask/step-start/step-finish/snapshot/patch/agent/retry/compaction）、运行卡片（plan/tool/test/diff/event）、runtime selector/status、slash command、`@` context、permission/question/Todo dock、Markdown 懒加载渲染（markdown-it + DOMPurify + highlight.js）、纯 RunEvent reducer，以及供实时事件和历史 `partsJson` 共用的 message part 归一化入口。 |

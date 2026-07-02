@@ -22,9 +22,9 @@ defineProps<FileExplorerProps & {
   loadingAppVersions?: boolean;
   /** 「+新增版本」提交中标记（父组件控制 WorkbenchFooter 弹窗按钮的禁用与文案） */
   creatingVersion?: boolean;
-  /** 是否允许编辑公共目录（仅 SUPER_ADMIN 传 true） */
-  publicDirectoryWritable?: boolean;
-  /** 后端 base url，透传给 PublicDirectoryPanel */
+  /** 是否允许执行侧栏内的写操作（仅 SUPER_ADMIN 传 true） */
+  canWrite?: boolean;
+  /** 后端 base url，透传给 AgentConfigPanel/GitChangesPanel */
   apiBaseUrl?: string;
   /** 当前运行态 Workspace ID，透传给 AgentConfigPanel */
   workspaceId?: string;
@@ -56,8 +56,6 @@ const emit = defineEmits<{
   loadVersions: [templateId: string];
   // 「+新增版本」弹窗确认后由父组件调用 createWorkspaceVersion。
   createVersion: [payload: { template: AppWorkspaceTemplate; version: string; branch?: string }];
-  // 公共目录下打开文件：path + 只读/可写 由父组件决定如何渲染 tab
-  openPublicFile: [payload: { path: string; content: FileContent; readonly: boolean }];
   openAgentFile: [payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null }];
   openServerWorkspacePicker: [];
   // 搜索事件
@@ -171,7 +169,7 @@ defineExpose({
         :workspace-id="workspaceId"
         :personal-workspace-id="personalWorkspaceId"
         :api-base-url="apiBaseUrl"
-        :can-write="!!publicDirectoryWritable"
+        :can-write="!!canWrite"
         @open-diff="(payload) => emit('openDiff', payload)"
         @changes-refreshed="(payload) => emit('changes-refreshed', payload)"
       />
@@ -284,7 +282,7 @@ defineExpose({
               ref="agentConfigPanelRef"
               :base-url="apiBaseUrl ?? ''"
               :workspace-id="workspaceId"
-              :can-write="!!publicDirectoryWritable"
+              :can-write="!!canWrite"
               :hide-header="true"
               :hide-git-ops="true"
               @open-file="emit('openAgentFile', $event)"

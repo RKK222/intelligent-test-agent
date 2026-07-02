@@ -22,8 +22,6 @@ spring:
       timeout: ${TEST_AGENT_REDIS_TIMEOUT:1s}
 
 test-agent:
-  workspace-picker:
-    allowed-roots: ${TEST_AGENT_WORKSPACE_PICKER_ROOTS:${user.home}/workspace}
   security:
     api-token: ${TEST_AGENT_API_TOKEN:}
     cors-allowed-origins: ${TEST_AGENT_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://127.0.0.1:3000,http://localhost:4173,http://127.0.0.1:4173,http://localhost:4177,http://127.0.0.1:4177,http://localhost:4187,http://127.0.0.1:4187,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}
@@ -31,8 +29,6 @@ test-agent:
     enabled: ${TEST_AGENT_RATE_LIMIT_ENABLED:false}
     capacity: ${TEST_AGENT_RATE_LIMIT_CAPACITY:120}
     window: ${TEST_AGENT_RATE_LIMIT_WINDOW:1m}
-  managed-workspace:
-    root: ${TEST_AGENT_MANAGED_WORKSPACE_ROOT:}
   model-catalog:
     source: ${TEST_AGENT_MODEL_CATALOG_SOURCE:external}
     external:
@@ -49,28 +45,13 @@ test-agent:
       api-key-env: ${TEST_AGENT_ICBC_OPENAI_TOKEN_ENV:ICBC_OPENAI_AUTH_TOKEN}
       auth-mode: ${TEST_AGENT_ICBC_OPENAI_AUTH_MODE:auth-token}
       default-model: ${TEST_AGENT_INTERNAL_DEFAULT_MODEL:DeepSeek-V4-Flash-W8A8}
-  redis:
-    host: ${TEST_AGENT_REDIS_HOST:127.0.0.1}
-    port: ${TEST_AGENT_REDIS_PORT:6379}
-    password: ${TEST_AGENT_REDIS_PASSWORD:}
-    timeout: ${TEST_AGENT_REDIS_TIMEOUT:1s}
   opencode:
     manager-control:
       token: ${TEST_AGENT_OPENCODE_MANAGER_TOKEN:}
-      listen-url: ${TEST_AGENT_BACKEND_LISTEN_URL:http://127.0.0.1:8080}
       heartbeat-interval: ${TEST_AGENT_BACKEND_HEARTBEAT_INTERVAL:5s}
       backend-stale-after: ${TEST_AGENT_BACKEND_STALE_AFTER:10s}
       command-timeout: ${TEST_AGENT_OPENCODE_MANAGER_COMMAND_TIMEOUT:10s}
       backend-discovery-limit: ${TEST_AGENT_BACKEND_DISCOVERY_LIMIT:100}
-    nodes:
-      - id: ${TEST_AGENT_OPENCODE_NODE_ID:node_local_opencode}
-        base-url: ${TEST_AGENT_OPENCODE_BASE_URL:http://127.0.0.1:4096}
-        max-runs: ${TEST_AGENT_OPENCODE_MAX_RUNS:4}
-        weight: ${TEST_AGENT_OPENCODE_WEIGHT:100}
-        capabilities:
-          - chat
-          - diff
-          - test
 
 management:
   health:

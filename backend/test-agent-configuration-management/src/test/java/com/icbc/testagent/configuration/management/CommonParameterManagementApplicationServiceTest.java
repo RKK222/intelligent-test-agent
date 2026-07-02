@@ -78,7 +78,7 @@ class CommonParameterManagementApplicationServiceTest {
     @Test
     void updateValuePersistsAndReturnsReloadedValue() {
         CommonParameterRepository repository = mock(CommonParameterRepository.class);
-        CommonParameter existing = parameter("param_opencode_manager_max_processes_all", "OPENCODE_MANAGER_MAX_PROCESSES", "4", ParameterPlatform.ALL);
+        CommonParameter existing = parameter("param_opencode_manager_max_processes_all", "OPENCODE_MANAGER_MAX_PROCESSES", "4", ParameterPlatform.ALL, true);
         CommonParameter updated = existing.withValue("6", UPDATED_AT);
         when(repository.findByParameterId("param_opencode_manager_max_processes_all"))
                 .thenReturn(Optional.of(existing))
@@ -121,7 +121,7 @@ class CommonParameterManagementApplicationServiceTest {
     void updateValueRejectsBlankValueAsValidationError() {
         CommonParameterRepository repository = mock(CommonParameterRepository.class);
         when(repository.findByParameterId("param_opencode_manager_max_processes_all"))
-                .thenReturn(Optional.of(parameter("param_opencode_manager_max_processes_all", "OPENCODE_MANAGER_MAX_PROCESSES", "4", ParameterPlatform.ALL)));
+                .thenReturn(Optional.of(parameter("param_opencode_manager_max_processes_all", "OPENCODE_MANAGER_MAX_PROCESSES", "4", ParameterPlatform.ALL, true)));
         CommonParameterManagementApplicationService service = newService(repository);
 
         assertThatThrownBy(() -> service.updateValue("param_opencode_manager_max_processes_all", "  ", "trace_test", "usr_test", "testuser"))
@@ -150,7 +150,7 @@ class CommonParameterManagementApplicationServiceTest {
                         "testuser"))
                 .isInstanceOfSatisfying(PlatformException.class, exception -> {
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.VALIDATION_ERROR);
-                    assertThat(exception.getMessage()).contains("最大进程数");
+                    assertThat(exception.getMessage()).contains("只读参数");
                 });
         verify(repository, org.mockito.Mockito.never()).updateValue(any(), any(), any());
         verify(changeLogRepository, org.mockito.Mockito.never()).save(any());
@@ -158,10 +158,37 @@ class CommonParameterManagementApplicationServiceTest {
     }
 
     @Test
+    void updateValueAllowsAgentGitUrlAsEditableParameter() {
+        CommonParameterRepository repository = mock(CommonParameterRepository.class);
+        CommonParameter existing = parameter(
+                "param_opencode_public_agent_git_url_all",
+                "OPENCODE_PUBLIC_AGENT_GIT_URL",
+                "https://old.git",
+                ParameterPlatform.ALL,
+                true);
+        CommonParameter updated = existing.withValue("https://new.git", UPDATED_AT);
+        when(repository.findByParameterId("param_opencode_public_agent_git_url_all"))
+                .thenReturn(Optional.of(existing))
+                .thenReturn(Optional.of(updated));
+        when(repository.updateValue(eq("param_opencode_public_agent_git_url_all"), eq("https://new.git"), eq(UPDATED_AT))).thenReturn(1);
+        CommonParameterChangeLogRepository changeLogRepository = mock(CommonParameterChangeLogRepository.class);
+        ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+        CommonParameterManagementApplicationService service = newService(repository, changeLogRepository, publisher);
+
+        CommonParameterResponse response = service.updateValue(
+                "param_opencode_public_agent_git_url_all", "https://new.git", "trace_git", "usr_test", "testuser");
+
+        assertThat(response.parameterValue()).isEqualTo("https://new.git");
+        assertThat(response.editable()).isTrue();
+        verify(repository).updateValue("param_opencode_public_agent_git_url_all", "https://new.git", UPDATED_AT);
+        verify(publisher).publishEvent(any(CommonParameterUpdatedEvent.class));
+    }
+
+    @Test
     void updateValueThrowsNotFoundWhenRowDisappearsConcurrently() {
         CommonParameterRepository repository = mock(CommonParameterRepository.class);
         when(repository.findByParameterId("param_opencode_manager_max_processes_all"))
-                .thenReturn(Optional.of(parameter("param_opencode_manager_max_processes_all", "OPENCODE_MANAGER_MAX_PROCESSES", "4", ParameterPlatform.ALL)));
+                .thenReturn(Optional.of(parameter("param_opencode_manager_max_processes_all", "OPENCODE_MANAGER_MAX_PROCESSES", "4", ParameterPlatform.ALL, true)));
         when(repository.updateValue(eq("param_opencode_manager_max_processes_all"), eq("6"), eq(UPDATED_AT))).thenReturn(0);
         CommonParameterManagementApplicationService service = newService(repository);
 
@@ -182,6 +209,10 @@ class CommonParameterManagementApplicationServiceTest {
     }
 
     private static CommonParameter parameter(String parameterId, String english, String value, ParameterPlatform platform) {
-        return new CommonParameter(parameterId, english, english + "_CN", value, platform, CREATED_AT, CREATED_AT);
+        return parameter(parameterId, english, value, platform, false);
+    }
+
+    private static CommonParameter parameter(String parameterId, String english, String value, ParameterPlatform platform, boolean editable) {
+        return new CommonParameter(parameterId, english, english + "_CN", value, platform, editable, CREATED_AT, CREATED_AT);
     }
 }

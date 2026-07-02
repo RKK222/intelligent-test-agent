@@ -3,14 +3,15 @@ package com.icbc.testagent.app.config;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.data.redis.autoconfigure.DataRedisProperties;
 import org.springframework.boot.health.contributor.Status;
 
 class RedisHealthIndicatorTest {
 
     @Test
     void redisHealthReportsRequiredConnectionStatus() {
-        TestAgentRuntimeProperties properties = new TestAgentRuntimeProperties();
-        properties.getRedis().setPort(1);
+        DataRedisProperties properties = new DataRedisProperties();
+        properties.setPort(1);
 
         var health = new RedisHealthIndicator(properties).health();
 

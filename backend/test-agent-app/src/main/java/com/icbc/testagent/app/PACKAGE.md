@@ -17,9 +17,8 @@
 - `TestAgentApplication`：Spring Boot 启动类，扫描 `com.icbc.testagent` 下的后端组件。
 - `config.TestAgentRuntimeProperties`：运行时配置绑定。
 - `config.DatabaseMigrationRunner`：运行态 Flyway migration 入口。
-- `config.ExecutionNodeSeeder`：opencode execution node seed。
 - `config.RuntimeJsonConfig`：应用运行态共享 Jackson ObjectMapper 配置。
-- `config.OpencodeNodesHealthIndicator`、`config.RedisHealthIndicator`：本地集成健康检查。
+- `config.RedisHealthIndicator`：Redis 必需依赖健康检查。
 
 ## 允许依赖
 

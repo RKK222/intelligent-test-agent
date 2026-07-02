@@ -139,11 +139,6 @@ if [[ -n "${JAVA_VERSION:-}" ]] || [[ -z "${JAVA_HOME:-}" ]]; then
   fi
 fi
 
-if [[ -z "${TEST_AGENT_OPENCODE_BASE_URL:-}" ]]; then
-  echo "TEST_AGENT_OPENCODE_BASE_URL is required in ${env_file}." >&2
-  exit 1
-fi
-
 echo "Starting backend with profile '${profile}' using $(basename "${env_file}")."
 echo "Sensitive environment values are loaded but not printed."
 echo "Backend JVM proxy settings are disabled for direct DB/Redis connections."

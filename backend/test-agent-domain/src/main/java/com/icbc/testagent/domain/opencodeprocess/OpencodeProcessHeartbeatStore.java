@@ -10,7 +10,7 @@ import java.util.Set;
 public interface OpencodeProcessHeartbeatStore {
 
     /**
-     * 写入后端 Java 服务心跳；Java 服务在线身份以 linuxServerId/IP 为准。
+     * 写入后端 Java 服务心跳；服务器在线身份以稳定 linuxServerId 为准。
      */
     void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt);
 

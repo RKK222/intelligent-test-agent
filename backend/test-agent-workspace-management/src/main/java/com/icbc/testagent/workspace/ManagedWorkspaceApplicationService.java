@@ -4,6 +4,7 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
+import com.icbc.testagent.common.git.GitWorkspaceService.GitStatusEntry;
 import com.icbc.testagent.common.git.SshKeyEncryptionService;
 import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastEvent;
@@ -120,6 +121,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private final UserRepository userRepository;
     private final GitRemoteService gitRemoteService;
     private final GitWorkspaceService gitWorkspaceService;
+    private final GitPublishWorkflow gitPublishWorkflow;
     private final SshKeyEncryptionService sshKeyEncryptionService;
     private final WorkspaceServerIdentity serverIdentity;
     private final ServerBroadcastPublisher broadcastPublisher;
@@ -256,6 +258,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.gitRemoteService = Objects.requireNonNull(gitRemoteService, "gitRemoteService must not be null");
         this.gitWorkspaceService = Objects.requireNonNull(gitWorkspaceService, "gitWorkspaceService must not be null");
+        this.gitPublishWorkflow = new GitPublishWorkflow(this.gitWorkspaceService);
         this.sshKeyEncryptionService = Objects.requireNonNull(sshKeyEncryptionService, "sshKeyEncryptionService must not be null");
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
         this.broadcastPublisher = Objects.requireNonNull(broadcastPublisher, "broadcastPublisher must not be null");
@@ -686,7 +689,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         // 全局最近工作区会随用户切换应用而变化；为了让前端在重新登录或换电脑时能直接还原
         // 上一次所在的应用 + 模板 + 版本组合（让左下角"切换工作空间"按钮立刻显示当前工作区），
         // 这里在返回时把工作区所属的托管应用 appId、应用版本 versionId、模板 applicationWorkspaceId 一并写出。
-        // 工作区不属于任何应用版本时（例如纯本机目录注册出来的个人空间），三者留空，前端会按
+        // 工作区不属于任何应用版本时（例如历史手动注册或超级管理员服务器工作空间），三者留空，前端会按
         // 降级策略（首应用 / 首模板首版本）兜底。
         return managedWorkspaceRepository.findGlobalPreference(userId)
                 .flatMap(preference -> workspaceRepository.findById(preference.workspaceId()))
@@ -1009,7 +1012,17 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
         try {
             String porcelain = gitWorkspaceService.statusPorcelain(gitRoot);
-            return new ManagedWorkspaceResponses.WorkspaceGitDiffResponse(parsePorcelainFiles(gitRoot, porcelain, displayPathPrefix));
+            String finalDisplayPathPrefix = displayPathPrefix;
+            List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> files = gitWorkspaceService.collectDiffFiles(gitRoot, porcelain).stream()
+                    .map(file -> new ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse(
+                            stripDisplayPathPrefix(file.path(), finalDisplayPathPrefix),
+                            file.status(),
+                            file.staged(),
+                            file.patch(),
+                            file.additions(),
+                            file.deletions()))
+                    .toList();
+            return new ManagedWorkspaceResponses.WorkspaceGitDiffResponse(files);
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "获取 Git 变更列表失败: " + exception.getMessage(), Map.of(), exception);
         }
@@ -1029,12 +1042,15 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         Path workspaceRoot = Path.of(current.workspaceRootPath());
         List<String> gitFiles = repoRelativeFiles(repoRoot, workspaceRoot, normalizeFiles(files));
         try {
-            Map<String, StatusEntry> statuses = statusEntries(gitWorkspaceService.statusPorcelain(repoRoot));
+            Map<String, GitStatusEntry> statuses = new LinkedHashMap<>();
+            for (GitStatusEntry status : gitWorkspaceService.parseStatusPorcelain(gitWorkspaceService.statusPorcelain(repoRoot))) {
+                statuses.put(status.path(), status);
+            }
             List<String> trackedFiles = new ArrayList<>();
             List<String> stagedNewFiles = new ArrayList<>();
             List<String> untrackedFiles = new ArrayList<>();
             for (String gitFile : gitFiles) {
-                StatusEntry status = statuses.get(gitFile);
+                GitStatusEntry status = statuses.get(gitFile);
                 if (status != null && status.stagedNewFile()) {
                     stagedNewFiles.add(gitFile);
                 } else if (status != null && status.untrackedFile()) {
@@ -1070,158 +1086,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
     }
 
-    private Map<String, StatusEntry> statusEntries(String porcelain) {
-        if (porcelain == null || porcelain.isBlank()) {
-            return Map.of();
-        }
-        Map<String, StatusEntry> entries = new LinkedHashMap<>();
-        for (String line : porcelain.split("\\n")) {
-            String trimmed = line.stripTrailing();
-            if (trimmed.length() < 4) {
-                continue;
-            }
-            char indexStatus = trimmed.charAt(0);
-            char worktreeStatus = trimmed.charAt(1);
-            String path = gitWorkspaceService.unquotePorcelainPath(trimmed.substring(3));
-            int arrowIndex = path.indexOf(" -> ");
-            if (arrowIndex > 0) {
-                path = gitWorkspaceService.unquotePorcelainPath(path.substring(arrowIndex + 4));
-            }
-            entries.put(path, new StatusEntry(indexStatus, worktreeStatus));
-        }
-        return entries;
-    }
-
-    private record StatusEntry(char indexStatus, char worktreeStatus) {
-        private boolean stagedNewFile() {
-            return indexStatus == 'A';
-        }
-
-        private boolean untrackedFile() {
-            return indexStatus == '?' && worktreeStatus == '?';
-        }
-    }
-
-    /**
-     * 解析 git status --porcelain 输出，对每个变更文件调用 git diff 获取 patch/details。
-     * porcelain 格式: XY path，其中 X=暂存区状态, Y=工作区状态。
-     */
-    private List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> parsePorcelainFiles(
-            Path repoRoot,
-            String porcelain,
-            String displayPathPrefix) {
-        List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> files = new ArrayList<>();
-        if (porcelain == null || porcelain.isBlank()) {
-            return files;
-        }
-        for (String line : porcelain.split("\\n")) {
-            String trimmed = line.stripTrailing();
-            if (trimmed.length() < 3) continue;
-            char indexStatus = trimmed.charAt(0);
-            char worktreeStatus = trimmed.charAt(1);
-            String path = gitWorkspaceService.unquotePorcelainPath(trimmed.substring(3));
-            // 重命名格式 "R old -> new"，取新路径
-            int arrowIndex = path.indexOf(" -> ");
-            if (arrowIndex > 0) {
-                path = gitWorkspaceService.unquotePorcelainPath(path.substring(arrowIndex + 4));
-            }
-            String gitPath = path;
-            String displayPath = stripDisplayPathPrefix(gitPath, displayPathPrefix);
-            String status = porcelainStatus(indexStatus, worktreeStatus);
-            boolean staged = indexStatus != ' ' && indexStatus != '?';
-            // 对每个文件调用 git diff 获取 patch
-            String patch = "";
-            int additions = 0;
-            int deletions = 0;
-            try {
-                if ("added".equals(status) || "untracked".equals(status)) {
-                    // 新增/未跟踪文件：通过读取文件内容生成全新增 patch，使 Diff 视图正常显示
-                    Path filePath = repoRoot.resolve(gitPath);
-                    additions = countFileLines(filePath);
-                    if (Files.exists(filePath) && !Files.isDirectory(filePath)) {
-                        try {
-                            String content = Files.readString(filePath);
-                            StringBuilder sb = new StringBuilder();
-                            sb.append("--- /dev/null\n");
-                            sb.append("+++ b/").append(gitPath).append("\n");
-                            sb.append("@@ -0,0 +1,").append(additions).append(" @@\n");
-                            for (String lineStr : content.split("\\r?\\n", -1)) {
-                                sb.append("+").append(lineStr).append("\n");
-                            }
-                            patch = sb.toString();
-                        } catch (Exception e) {
-                            // ignore
-                        }
-                    }
-                } else if (!"deleted".equals(status)) {
-                    String diffOutput = gitWorkspaceService.diff(repoRoot, gitPath, staged);
-                    if (diffOutput != null && !diffOutput.isBlank()) {
-                        patch = diffOutput;
-                        additions = countDiffAdditions(diffOutput);
-                        deletions = countDiffDeletions(diffOutput);
-                    }
-                    // 如果 staged，也获取 unstaged 变更
-                    if (staged && worktreeStatus != ' ') {
-                        String unstagedDiff = gitWorkspaceService.diff(repoRoot, gitPath, false);
-                        if (unstagedDiff != null && !unstagedDiff.isBlank()) {
-                            if (!patch.isEmpty()) {
-                                patch += "\n";
-                            }
-                            patch += unstagedDiff;
-                            additions += countDiffAdditions(unstagedDiff);
-                            deletions += countDiffDeletions(unstagedDiff);
-                        }
-                    }
-                }
-            } catch (Exception ignored) {
-                // diff 单个文件失败不影响整体列表
-            }
-            files.add(new ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse(
-                    displayPath, status, staged, patch, additions, deletions));
-        }
-        return files;
-    }
-
     private String stripDisplayPathPrefix(String path, String displayPathPrefix) {
         if (displayPathPrefix == null || displayPathPrefix.isBlank()) {
             return path;
         }
         return path.startsWith(displayPathPrefix) ? path.substring(displayPathPrefix.length()) : path;
-    }
-
-    private String porcelainStatus(char indexStatus, char worktreeStatus) {
-        if (indexStatus == 'A' || (indexStatus == '?' && worktreeStatus == '?')) {
-            return worktreeStatus == '?' ? "untracked" : "added";
-        }
-        if (indexStatus == 'D' || worktreeStatus == 'D') return "deleted";
-        if (indexStatus == 'R') return "renamed";
-        if (indexStatus == 'M' || worktreeStatus == 'M') return "modified";
-        if (indexStatus == '?' && worktreeStatus == '?') return "untracked";
-        return "modified";
-    }
-
-    private int countFileLines(Path filePath) {
-        try {
-            return (int) Files.lines(filePath).count();
-        } catch (Exception e) {
-            return 0;
-        }
-    }
-
-    private int countDiffAdditions(String diff) {
-        int count = 0;
-        for (String line : diff.split("\\n")) {
-            if (line.startsWith("+") && !line.startsWith("+++")) count++;
-        }
-        return count;
-    }
-
-    private int countDiffDeletions(String diff) {
-        int count = 0;
-        for (String line : diff.split("\\n")) {
-            if (line.startsWith("-") && !line.startsWith("---")) count++;
-        }
-        return count;
     }
 
     /**
@@ -1260,52 +1129,22 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
         ApplicationWorkspaceVersionReplica applicationReplica = ensureLocalReplica(version, template, userId, traceId);
         Path applicationRepoRoot = Path.of(applicationReplica.repoRootPath());
-        if (!gitWorkspaceService.isWorktreeClean(applicationRepoRoot)) {
-            throw new PlatformException(
-                    ErrorCode.CONFLICT,
-                    "应用版本工作区存在未提交变更，无法合并个人工作区",
-                    Map.of("versionId", version.versionId().value()));
-        }
         String applicationBranch = version.branch();
-        gitWorkspaceService.fetch(applicationRepoRoot, privateKey);
-        gitWorkspaceService.pullFastForward(applicationRepoRoot, applicationBranch, privateKey);
-        try {
-            gitWorkspaceService.mergeBranch(personalRepoRoot, applicationBranch, privateKey);
-        } catch (PlatformException mergeException) {
-            List<String> conflictFiles = List.of();
-            try {
-                conflictFiles = gitWorkspaceService.conflictPaths(personalRepoRoot);
-            } catch (Exception ignored) {
-            }
-            if (conflictFiles.isEmpty()) {
-                throw mergeException;
-            }
+        GitPublishWorkflow.PublishResult publishResult = gitPublishWorkflow.publishMergedBranch(
+                applicationRepoRoot,
+                applicationBranch,
+                personal.branch(),
+                false,
+                privateKey);
+        if (publishResult.hasConflicts()) {
             return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
-                    "CONFLICT", personalWorkspaceId, version.versionId().value(), conflictFiles,
-                    "合并冲突，请在当前个人工作区中解决冲突后重新提交并推送");
+                    "CONFLICT", personalWorkspaceId, version.versionId().value(), publishResult.conflictFiles(),
+                    "合并冲突，请在个人工作区中解决冲突后重新提交并推送");
         }
 
-        // 3. 个人分支已包含最新特性分支后，再在应用版本副本上本地合并个人分支。
-        try {
-            gitWorkspaceService.mergeBranch(applicationRepoRoot, personal.branch(), privateKey);
-        } catch (PlatformException mergeException) {
-            // 正常情况下冲突应已在个人 worktree 阶段暴露；这里兜底清理应用副本，避免后台仓库停留在 MERGING 状态。
-            List<String> conflictFiles = List.of();
-            try {
-                conflictFiles = gitWorkspaceService.conflictPaths(applicationRepoRoot);
-            } catch (Exception ignored) {
-            }
-            if (conflictFiles.isEmpty()) {
-                throw mergeException;
-            }
-            abortMergeQuietly(applicationRepoRoot, privateKey);
-            throw mergeException;
-        }
-
-        // 4. 合并成功：只推送应用版本特性分支，更新版本 targetCommitHash 和副本 commit。
-        gitWorkspaceService.push(applicationRepoRoot, applicationBranch, false, privateKey);
+        // 3. 合并成功：推送应用版本特性分支，更新版本 targetCommitHash 和副本 commit。
         Instant now = Instant.now();
-        String headCommit = gitWorkspaceService.headCommit(applicationRepoRoot);
+        String headCommit = publishResult.headCommit();
         ApplicationWorkspaceVersion updatedVersion = managedWorkspaceRepository.updateVersionTargetCommit(version.versionId(), headCommit, now);
         Optional<ApplicationWorkspaceVersionReplica> currentReplica = managedWorkspaceRepository.findVersionReplica(
                 version.versionId(), serverIdentity.linuxServerId());
@@ -1349,16 +1188,20 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         List<String> normalizedFiles = normalizeFiles(files);
         WorkspaceSyncRecordId syncId = new WorkspaceSyncRecordId(RuntimeIdGenerator.workspaceSyncRecordId());
         try {
-            copyFiles(Path.of(personal.workspaceRootPath()), Path.of(applicationReplica.workspaceRootPath()), normalizedFiles);
+            Path applicationRepoRoot = Path.of(applicationReplica.repoRootPath());
+            Path applicationWorkspaceRoot = Path.of(applicationReplica.workspaceRootPath());
             CodeRepository repository = existingRepository(version.repositoryId());
-            gitWorkspaceService.commitFiles(
-                    Path.of(applicationReplica.repoRootPath()),
-                    repoRelativeFiles(Path.of(applicationReplica.repoRootPath()), Path.of(applicationReplica.workspaceRootPath()), normalizedFiles),
+            String privateKey = privateKeyFor(repository, userId);
+            GitPublishWorkflow.PublishResult publishResult = gitPublishWorkflow.syncFilesThenPush(
+                    applicationRepoRoot,
+                    version.branch(),
+                    repoRelativeFiles(applicationRepoRoot, applicationWorkspaceRoot, normalizedFiles),
                     "test-agent sync " + syncId.value(),
-                    privateKeyFor(repository, userId));
-            gitWorkspaceService.push(Path.of(applicationReplica.repoRootPath()), version.branch(), force, privateKeyFor(repository, userId));
+                    force,
+                    privateKey,
+                    () -> copyFiles(Path.of(personal.workspaceRootPath()), applicationWorkspaceRoot, normalizedFiles));
             Instant now = Instant.now();
-            String headCommit = gitWorkspaceService.headCommit(Path.of(applicationReplica.repoRootPath()));
+            String headCommit = publishResult.headCommit();
             ApplicationWorkspaceVersion updatedVersion = managedWorkspaceRepository.updateVersionTargetCommit(version.versionId(), headCommit, now);
             ApplicationWorkspaceVersionReplica updatedReplica = managedWorkspaceRepository.saveVersionReplica(applicationReplica.ready(headCommit, now, traceId));
             publishVersionSync(updatedVersion, userId, "SYNC_TO_APPLICATION", traceId, Map.of());

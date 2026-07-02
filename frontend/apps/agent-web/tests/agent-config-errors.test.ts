@@ -30,4 +30,20 @@ describe("formatAgentConfigError", () => {
 
     expect(formatAgentConfigError(error, "加载 Agent 文件失败")).toBe("加载 Agent 文件失败：目录不存在");
   });
+
+  it("shows merge conflict files from backend error details", () => {
+    const error = new BackendApiError(409, {
+      success: false,
+      code: "CONFLICT",
+      message: "Agent 配置 worktree 合并冲突",
+      traceId: "trace_conflict",
+      retryable: false,
+      details: {
+        conflictFiles: ["opencode/agents/review.md", "opencode/skills/pay/SKILL.md"]
+      }
+    });
+
+    expect(formatAgentConfigError(error, "发布 Agent 配置失败"))
+      .toBe("发布 Agent 配置失败：合并冲突，请先处理 opencode/agents/review.md、opencode/skills/pay/SKILL.md 后重试。");
+  });
 });

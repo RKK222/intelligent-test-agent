@@ -37,12 +37,6 @@ final class RuntimeDtos {
     }
 
     /**
-     * 创建工作区请求体。
-     */
-    record CreateWorkspaceRequest(@NotBlank String name, @NotBlank String rootPath, String linuxServerId) {
-    }
-
-    /**
      * 写入文件内容请求体，content 允许为空字符串。
      */
     record WriteFileRequest(@NotBlank String path, String content) {

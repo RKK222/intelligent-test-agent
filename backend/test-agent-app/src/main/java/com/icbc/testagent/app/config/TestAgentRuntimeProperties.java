@@ -8,7 +8,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 /**
- * test-agent 运行时配置，集中绑定安全、限流、文件、目录选择、Redis 和 opencode 节点配置。
+ * test-agent 运行时配置，集中绑定安全、限流、文件和 opencode 控制面配置。
  */
 @Component
 @ConfigurationProperties(prefix = "test-agent")
@@ -17,8 +17,6 @@ public class TestAgentRuntimeProperties {
     private final Security security = new Security();
     private final RateLimit rateLimit = new RateLimit();
     private final Files files = new Files();
-    private final WorkspacePicker workspacePicker = new WorkspacePicker();
-    private final Redis redis = new Redis();
     private final Opencode opencode = new Opencode();
     private final Terminal terminal = new Terminal();
     private final GitCloneCache gitCloneCache = new GitCloneCache();
@@ -45,21 +43,7 @@ public class TestAgentRuntimeProperties {
     }
 
     /**
-     * 返回工作区目录选择器配置。
-     */
-    public WorkspacePicker getWorkspacePicker() {
-        return workspacePicker;
-    }
-
-    /**
-     * 返回可选 Redis 连接配置。
-     */
-    public Redis getRedis() {
-        return redis;
-    }
-
-    /**
-     * 返回 opencode 运行节点配置。
+     * 返回 opencode 控制面配置。
      */
     public Opencode getOpencode() {
         return opencode;
@@ -215,113 +199,10 @@ public class TestAgentRuntimeProperties {
     }
 
     /**
-     * 工作区目录选择器安全边界配置项。
-     */
-    public static class WorkspacePicker {
-        private List<String> allowedRoots = new ArrayList<>(List.of(
-                Path.of(System.getProperty("user.home"), "workspace").toString()));
-
-        /**
-         * 返回允许前端浏览和选择的本机目录根。
-         */
-        public List<String> getAllowedRoots() {
-            return allowedRoots;
-        }
-
-        /**
-         * 绑定允许目录根，null 会被规整为空列表以便部署显式关闭默认值。
-         */
-        public void setAllowedRoots(List<String> allowedRoots) {
-            this.allowedRoots = allowedRoots == null ? new ArrayList<>() : new ArrayList<>(allowedRoots);
-        }
-    }
-
-    /**
-     * Redis 连接配置项；Redis 是系统必需依赖。
-     */
-    public static class Redis {
-        private String host = "127.0.0.1";
-        private int port = 6379;
-        private String password;
-        private Duration timeout = Duration.ofSeconds(1);
-
-        /**
-         * 返回 Redis 主机名。
-         */
-        public String getHost() {
-            return host;
-        }
-
-        /**
-         * 绑定 Redis 主机名。
-         */
-        public void setHost(String host) {
-            this.host = host;
-        }
-
-        /**
-         * 返回 Redis 端口。
-         */
-        public int getPort() {
-            return port;
-        }
-
-        /**
-         * 绑定 Redis 端口。
-         */
-        public void setPort(int port) {
-            this.port = port;
-        }
-
-        /**
-         * 返回 Redis 密码。
-         */
-        public String getPassword() {
-            return password;
-        }
-
-        /**
-         * 绑定 Redis 密码。
-         */
-        public void setPassword(String password) {
-            this.password = password;
-        }
-
-        /**
-         * 返回 Redis TCP 探测超时时间。
-         */
-        public Duration getTimeout() {
-            return timeout;
-        }
-
-        /**
-         * 绑定 Redis TCP 探测超时时间。
-         */
-        public void setTimeout(Duration timeout) {
-            this.timeout = timeout;
-        }
-    }
-
-    /**
-     * opencode 运行节点配置集合。
+     * opencode 控制面配置集合。
      */
     public static class Opencode {
-        private List<Node> nodes = new ArrayList<>();
         private final ManagerControl managerControl = new ManagerControl();
-
-        /**
-         * 返回配置化 opencode 节点列表。
-         */
-        public List<Node> getNodes() {
-            return nodes;
-        }
-
-        /**
-         * 绑定 opencode 节点列表，null 会被规整为空列表。
-         */
-        public void setNodes(List<Node> nodes) {
-            this.nodes = nodes == null ? new ArrayList<>() : new ArrayList<>(nodes);
-        }
 
         /**
          * 返回 opencode-manager 控制面配置。
@@ -337,7 +218,6 @@ public class TestAgentRuntimeProperties {
      */
     public static class ManagerControl {
         private String token = "";
-        private String listenUrl = "http://127.0.0.1:8080";
         private Duration heartbeatInterval = Duration.ofSeconds(5);
         private Duration backendStaleAfter = Duration.ofSeconds(10);
         private Duration commandTimeout = Duration.ofSeconds(10);
@@ -355,20 +235,6 @@ public class TestAgentRuntimeProperties {
          */
         public void setToken(String token) {
             this.token = token;
-        }
-
-        /**
-         * 返回当前后端实例可被 manager 直连的 HTTP 地址。
-         */
-        public String getListenUrl() {
-            return listenUrl;
-        }
-
-        /**
-         * 绑定当前后端实例直连 HTTP 地址。
-         */
-        public void setListenUrl(String listenUrl) {
-            this.listenUrl = listenUrl;
         }
 
         /**
@@ -582,87 +448,6 @@ public class TestAgentRuntimeProperties {
          */
         public void setTicketWindow(Duration ticketWindow) {
             this.ticketWindow = ticketWindow;
-        }
-    }
-
-    /**
-     * 单个 opencode 执行节点配置。
-     */
-    public static class Node {
-        private String id = "node_local_opencode";
-        private String baseUrl = "http://127.0.0.1:4096";
-        private int maxRuns = 4;
-        private int weight = 100;
-        private List<String> capabilities = new ArrayList<>(List.of("chat", "diff", "test"));
-
-        /**
-         * 返回执行节点 ID。
-         */
-        public String getId() {
-            return id;
-        }
-
-        /**
-         * 绑定执行节点 ID。
-         */
-        public void setId(String id) {
-            this.id = id;
-        }
-
-        /**
-         * 返回 opencode server baseUrl。
-         */
-        public String getBaseUrl() {
-            return baseUrl;
-        }
-
-        /**
-         * 绑定 opencode server baseUrl。
-         */
-        public void setBaseUrl(String baseUrl) {
-            this.baseUrl = baseUrl;
-        }
-
-        /**
-         * 返回该节点最大并发运行数。
-         */
-        public int getMaxRuns() {
-            return maxRuns;
-        }
-
-        /**
-         * 绑定该节点最大并发运行数。
-         */
-        public void setMaxRuns(int maxRuns) {
-            this.maxRuns = maxRuns;
-        }
-
-        /**
-         * 返回路由权重，负载相同时权重越高越优先。
-         */
-        public int getWeight() {
-            return weight;
-        }
-
-        /**
-         * 绑定路由权重。
-         */
-        public void setWeight(int weight) {
-            this.weight = weight;
-        }
-
-        /**
-         * 返回节点能力标签。
-         */
-        public List<String> getCapabilities() {
-            return capabilities;
-        }
-
-        /**
-         * 绑定节点能力标签，null 会被规整为空列表。
-         */
-        public void setCapabilities(List<String> capabilities) {
-            this.capabilities = capabilities == null ? new ArrayList<>() : new ArrayList<>(capabilities);
         }
     }
 

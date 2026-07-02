@@ -118,7 +118,7 @@ public class WorkspaceFileRoutingService {
     }
 
     /**
-     * 本地 IP 变化或数据库切换后，历史 workspace 可能仍绑定旧服务器 IP。
+     * 本地服务器身份变化或数据库切换后，历史 workspace 可能仍绑定旧服务器身份。
      *
      * <p>只有在当前 agent 已经落在本后端、旧服务器没有存活后端快照、且 workspace 根目录在本机可访问时，
      * 才把 workspace 回绑到当前 agent 服务器。多机部署中旧服务器仍在线或本机没有该目录时继续返回冲突，

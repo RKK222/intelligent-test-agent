@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.icbc.testagent.persistence.mybatis.DatabaseIdentityMapper">
+
+    <!--
+        查询一张表的 identity 序列当前值与 max(id)。
+        tableName 已由服务层限定为白名单枚举常量，安全拼接。
+        pg_get_serial_sequence 返回形如 'public.users_id_seq'，pg_sequences.sequencename 为短名 'users_id_seq'，
+        故用 regexp_replace 去掉 schema 前缀后匹配 sequencename。
+        返回列名使用双引号别名，配合 mapUnderscoreToCamelCase 由 Map 直接读取 currentValue/maxId。
+    -->
+    <select id="queryIdentityStatus" resultType="java.util.LinkedHashMap">
+        select
+            (select s.last_value
+               from pg_sequences s
+              where s.sequencename = regexp_replace(
+                        pg_get_serial_sequence(#{tableName}, 'id')::text, '^.*\.', '')) as "currentValue",
+            (select max(id) from ${tableName}) as "maxId"
+    </select>
+
+    <!--
+        重置 identity 到目标值。targetValue 已由服务层校验为正整数且大于 max(id)。
+        H2(PostgreSQL 模式) 与 PostgreSQL 均支持该语法。
+    -->
+    <update id="restartIdentity">
+        alter table ${tableName} alter column id restart with ${targetValue}
+    </update>
+
+</mapper>

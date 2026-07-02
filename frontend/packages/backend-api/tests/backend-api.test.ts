@@ -535,32 +535,6 @@ describe("backend-api", () => {
     });
   });
 
-  it("lists selectable workspace directories through the platform API", async () => {
-    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          success: true,
-          traceId: "trace_fixed",
-          data: {
-            path: "/Users/huang/workspace",
-            parentPath: null,
-            entries: [{ name: "demo", path: "/Users/huang/workspace/demo" }]
-          }
-        }),
-        { status: 200 }
-      )
-    );
-    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
-
-    await expect(client.listWorkspaceDirectories("/Users/huang/workspace")).resolves.toEqual({
-      path: "/Users/huang/workspace",
-      parentPath: null,
-      entries: [{ name: "demo", path: "/Users/huang/workspace/demo" }]
-    });
-
-    expect(fetcher).toHaveBeenCalledWith("http://api/api/workspace-directories?path=%2FUsers%2Fhuang%2Fworkspace", expect.any(Object));
-  });
-
   it("maps configuration management APIs through platform URLs", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(
@@ -745,7 +719,7 @@ describe("backend-api", () => {
     });
 
     try {
-      const request = client.listWorkspaceDirectories();
+      const request = client.listWorkspaces();
       const expectation = expect(request).rejects.toMatchObject({
         code: "REQUEST_TIMEOUT",
         traceId: "trace_fixed",

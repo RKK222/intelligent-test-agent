@@ -24,9 +24,6 @@ import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAvailabili
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.opencode.runtime.session.SessionApplicationService;
-import com.icbc.testagent.workspace.WorkspaceDirectoryEntryResponse;
-import com.icbc.testagent.workspace.WorkspaceDirectoryListResponse;
-import com.icbc.testagent.workspace.WorkspaceDirectoryService;
 import com.icbc.testagent.workspace.WorkspaceApplicationService;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.run.Run;
@@ -61,88 +58,6 @@ import reactor.core.scheduler.Schedulers;
 class RuntimeControllerTest {
 
     private static final Instant NOW = Instant.parse("2026-06-19T00:00:00Z");
-
-    @Test
-    void workspaceControllerWrapsCreatedWorkspaceInApiResponse() {
-        WorkspaceApplicationService service = org.mockito.Mockito.mock(WorkspaceApplicationService.class);
-        when(service.createWorkspace(eq("Demo"), any(), eq("trace_1234567890abcdef")))
-                .thenReturn(workspace());
-        WebTestClient client = WebTestClient.bindToController(new WorkspaceController(service, org.mockito.Mockito.mock(WorkspaceDirectoryService.class)))
-                .webFilter(new TraceIdWebFilter())
-                .build();
-
-        client.post()
-                .uri("/api/workspaces")
-                .header("X-Trace-Id", "trace_1234567890abcdef")
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue("""
-                        {"name":"Demo","rootPath":"/tmp/demo"}
-                        """)
-                .exchange()
-                .expectStatus().isOk()
-                .expectHeader().valueEquals("X-Trace-Id", "trace_1234567890abcdef")
-                .expectBody()
-                .jsonPath("$.success").isEqualTo(true)
-                .jsonPath("$.traceId").isEqualTo("trace_1234567890abcdef")
-                .jsonPath("$.data.workspaceId").isEqualTo("wrk_1234567890abcdef");
-    }
-
-    @Test
-    void workspaceControllerAlsoExposesInternalPlatformWorkspaceUrl() {
-        WorkspaceApplicationService service = org.mockito.Mockito.mock(WorkspaceApplicationService.class);
-        when(service.createWorkspace(eq("Demo"), any(), eq("trace_1234567890abcdef")))
-                .thenReturn(workspace());
-        WebTestClient client = WebTestClient.bindToController(new WorkspaceController(service, org.mockito.Mockito.mock(WorkspaceDirectoryService.class)))
-                .webFilter(new TraceIdWebFilter())
-                .build();
-
-        client.post()
-                .uri("/api/internal/platform/workspace-management/workspaces")
-                .header("X-Trace-Id", "trace_1234567890abcdef")
-                .contentType(MediaType.APPLICATION_JSON)
-                .bodyValue("""
-                        {"name":"Demo","rootPath":"/tmp/demo"}
-                        """)
-                .exchange()
-                .expectStatus().isOk()
-                .expectBody()
-                .jsonPath("$.success").isEqualTo(true)
-                .jsonPath("$.traceId").isEqualTo("trace_1234567890abcdef")
-                .jsonPath("$.data.workspaceId").isEqualTo("wrk_1234567890abcdef");
-    }
-
-    @Test
-    void workspaceControllerListsSelectableDirectoriesOnCompatibilityAndInternalUrls() {
-        WorkspaceApplicationService workspaceService = org.mockito.Mockito.mock(WorkspaceApplicationService.class);
-        WorkspaceDirectoryService directoryService = org.mockito.Mockito.mock(WorkspaceDirectoryService.class);
-        when(directoryService.listDirectories("/Users/huang/workspace"))
-                .thenReturn(new WorkspaceDirectoryListResponse(
-                        "/Users/huang/workspace",
-                        null,
-                        List.of(new WorkspaceDirectoryEntryResponse("demo", "/Users/huang/workspace/demo"))));
-        WebTestClient client = WebTestClient.bindToController(new WorkspaceController(workspaceService, directoryService))
-                .webFilter(new TraceIdWebFilter())
-                .build();
-
-        client.get()
-                .uri("/api/workspace-directories?path=/Users/huang/workspace")
-                .header("X-Trace-Id", "trace_1234567890abcdef")
-                .exchange()
-                .expectStatus().isOk()
-                .expectBody()
-                .jsonPath("$.success").isEqualTo(true)
-                .jsonPath("$.data.path").isEqualTo("/Users/huang/workspace")
-                .jsonPath("$.data.entries[0].name").isEqualTo("demo")
-                .jsonPath("$.data.entries[0].path").isEqualTo("/Users/huang/workspace/demo");
-
-        client.get()
-                .uri("/api/internal/platform/workspace-management/workspace-directories?path=/Users/huang/workspace")
-                .header("X-Trace-Id", "trace_1234567890abcdef")
-                .exchange()
-                .expectStatus().isOk()
-                .expectBody()
-                .jsonPath("$.data.entries[0].name").isEqualTo("demo");
-    }
 
     @Test
     void runControllerStartsRunAndReturnsRunningStatus() {

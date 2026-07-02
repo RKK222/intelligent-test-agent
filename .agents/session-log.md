@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-02 - 合并未推送提交并保留未跟踪文件 Diff patch
+
+- Why: 本地 `main` 与最新 `origin/main` 已分叉，需要把本地未推送提交压成一个提交并保留远端新增修复；冲突合并时工作区 Git Diff 解析从业务层迁到 `GitWorkspaceService` 后，未跟踪文件的 pseudo patch 行为不能丢失，否则前端 Diff 视图会显示空 patch。
+- What: 将本地未推送内容 squash merge 到最新 `origin/main`，合并 session log、README、HTTP/部署文档、Git 发布流程与前端包说明冲突；`GitWorkspaceService.collectDiffFiles` 对未跟踪文件生成 `/dev/null -> b/path` pseudo patch，并让工作区 Git Diff 继续复用 common 层解析。
+- How: 保留 `GitPublishWorkflow` 统一发布/冲突 abort 语义，删除 `ManagedWorkspaceApplicationService` 中已迁移的私有 porcelain/diff 解析块；补充 `GitWorkspaceServiceTest` 与 `ManagedWorkspaceApplicationServiceTest` 覆盖未跟踪文件 patch、staged/unstaged 聚合和发布冲突 abort。
+- Result: `mvn -pl test-agent-workspace-management -am -Dtest=GitWorkspaceServiceTest,GitPublishWorkflowTest,ManagedWorkspaceApplicationServiceTest -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false test`、`corepack pnpm --filter @test-agent/agent-web typecheck`、`go test ./...`、冲突标记扫描和 `git diff --check --cached` 通过。
+
 ### 2026-07-01 - 自动恢复历史与刷新会话中的活动 Run 及组件状态持久化
 
 - Why:
@@ -62,6 +69,79 @@
 - What: 本次已在上一条记录中纠正：`initialize()` 继续读取用户既有 binding，并由业务侧临时数据修正或运维处理异常 IP 变动，不做自动迁移。
 - How: 保留该条作为误判追溯，避免后续开发者按旧结论重新实现 INACTIVE 自动迁移。
 - Result: 当前有效结论以上一条“固定机器绑定”记录为准。
+### 2026-07-02 - 运行管理拓扑展示服务器地址列
+
+- Why: 稳定 `linuxServerId` 不再保证是 IP，运行管理两张拓扑表需要同时展示服务器身份和可访问地址，便于排查多服务器、多 Java 场景。
+- What: “服务器 / Java 进程”和“容器 / 管理进程”表保留稳定服务器身份列，新增“IP地址”列；地址从同服务器 Java `listenUrl` 的 host 派生，不把 `linuxServerId` 当网络地址使用。
+- How: 前端只基于 overview 现有字段派生展示值，不变更后端 API wire shape；补充 Vitest 覆盖稳定 ID 为 `linux-prod-a`、地址为 `10.8.0.21` 的展示场景，并收窄地址函数返回类型以通过 Vue `title` 绑定检查。
+- Result: `corepack pnpm@10.25.0 --dir frontend test -- apps/agent-web/tests/runtime-management-settings.test.ts` 和 `corepack pnpm@10.25.0 --dir frontend --filter @test-agent/agent-web typecheck` 通过。
+
+### 2026-07-02 - 测试库构造 20 个超级管理员用户
+
+- Why: 用户需要在 `192.168.100.200:5432/testagent` 测试库中直接构造 20 个超级管理员账号，统一密码为 `123456`，并明确不要使用 Flyway。
+- What: 直接写入 `users` 与 `user_roles`，账号为 `superadmin01` 至 `superadmin20`，统一认证号同账号，用户业务 ID 为 `usr_test_superadmin01` 至 `usr_test_superadmin20`，角色为 `SUPER_ADMIN`。
+- How: 使用项目同版本 Spring Security BCrypt 生成密码哈希，通过 psql 执行事务 SQL；写入前后对齐 `users` 与 `user_roles` identity 序列，未新增或修改 migration、代码、API、事件或环境配置文件。
+- Result: 校验目标账号数 20、ACTIVE 用户 20、`SUPER_ADMIN` 授权 20；抽样 `superadmin01` 的 BCrypt 密码匹配 `123456` 为 true。
+
+### 2026-07-02 - 恢复已落库 migration 校验和
+
+- Why: 后端启动日志显示 Flyway 校验失败，`V15` 和 `V20260626210000` 的本地 checksum 与测试库 `flyway_schema_history` 已应用值不一致。
+- What: 根因是工作树里对两个已落库 migration 的注释做了未提交改写；稳定服务器身份的数据库注释已经由新增的 `V20260702000000__allow_stable_linux_server_ids.sql` 承载，旧 migration 不能再改。
+- How: 将两个旧 migration 文件恢复到 HEAD 内容，不运行 `flyway repair`，避免把本地误改写入共享测试库历史；确认这两个文件已无 diff。
+- Result: `mvn -q -pl test-agent-persistence -Dtest=FlywayMigrationNamingTest test` 通过；启动日志里的 backend_java_processes 外键 WARN 是迁移失败后关闭清理阶段的级联副作用，迁移恢复后需重新构建/重启后端验证。
+
+### 2026-07-02 - Linux Server 改为稳定服务器身份
+
+- Why: 服务器迁移后 IPv4 会变化，继续把 `linuxServerId` 绑定为 IP 会导致 manager、用户 opencode 进程和跨 Java 路由失效；同一服务器上多个 Java 进程也需要等价承载完整服务能力。
+- What: `linuxServerId` 放宽为稳定服务器身份，Java 启动时写入 `.serverid` 与 `.serverhost`，opencode-manager 读取新文件注册；opencode `baseUrl/serviceAddress` 改用 advertised host；Redis 后端快照按 `backendProcessId` 保留并按稳定身份分组选路，优先 manager 连接 Java、其次最新心跳、最后当前 Java；删除 `.serverip` 依赖。
+- How: 新增 `TEST_AGENT_LINUX_SERVER_ID` / `TEST_AGENT_SERVER_ADVERTISED_HOST` 解析和启动文件写入，调整领域校验、runtime 路由、状态刷新、manager 配置、Flyway 字段长度注释、前端展示与文档文案；不兼容旧 `.serverip` 模式，当前未投产按新语义重建或清理本地数据。
+- Result: 稳定身份相关 Java 定向回归、Go manager 测试、前端 typecheck/Vitest、`mvn clean package -DskipTests`、`tools/verify-dev-scripts.sh` 与 `git diff --check` 通过；计划中的后端聚合 `mvn -pl test-agent-domain,test-agent-opencode-runtime,test-agent-api,test-agent-app,test-agent-persistence -am test` 仍被既有 persistence 全量测试问题阻塞（H2 `ON CONFLICT`、`usr_test_dev` fixture 外键、默认 seed/loopback 断言），与本次稳定身份改造无关。
+
+### 2026-07-01 - 统一 Git Diff 与 porcelain 解析
+
+- Why: 工作区 Git Diff 与 Agent 配置 Diff 分别解析 `git status --porcelain`、rename 路径、staged/unstaged patch 和增删行统计，容易出现行为不一致。
+- What: `GitWorkspaceService` 新增通用 porcelain 解析和 diff 文件聚合能力；工作区 Git Diff 与 Agent 配置 Diff 改为复用 common 层，业务服务只保留权限、路径裁剪/映射和响应 DTO 转换。
+- How: 工作区 Git Diff 返回归一化状态与 additions/deletions；Agent 配置 Diff 保留原始 Git 状态简写；工作空间级 Agent diff 继续只展示 `.opencode/agents` 与 `.opencode/skills` 下的 `agents/`、`skills/` 路径。
+- Result: `mvn -pl test-agent-workspace-management -am -Dtest=GitWorkspaceServiceTest,ManagedWorkspaceApplicationServiceTest,AgentConfigApplicationServiceTest -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false test` 与 `mvn -pl test-agent-workspace-management -am test` 均通过；不涉及 API URL、事件、数据库、前端 UI 或环境配置。
+
+### 2026-07-01 - 作废普通 Workspace 目录选择与 allowed-roots 配置
+
+- Why: 用户要求作废 `test-agent.workspace-picker.allowed-roots`，并明确应用/个人 workspace 目录必须由后端根据通用参数和业务 id 查询/派生，普通前端不能直接传物理目录。
+- What: 删除所有 `application*.yml` 中的普通目录选择配置，移除 `TestAgentRuntimeProperties.WorkspacePicker`、普通 HTTP `rootPath` 创建入口和普通目录浏览入口；前端删除普通本机目录选择弹窗、bootstrap 注册组件和 backend-api 对应方法，保留 `SUPER_ADMIN` 服务器工作空间选择器的 WebSocket `directory.list` / `workspace.create` 链路。
+- How: 应用版本/个人工作区继续走 managed workspace id 与 `common_parameters` 路径规则；历史/超管服务器工作空间仍可由后端根据数据库 `workspaceId` 读取根目录，文件访问继续走 route/ticket/RPC。
+- Result: 待本次验证命令完成后随代码一起提交；当前工作区存在他人未提交的 common parameter editable 相关改动和 migration，本次不纳入暂存。
+
+### 2026-07-01 - 运行管理列宽拖动与折叠面板类型修复
+
+- Why: 运行管理中的各个列表标题不支持拖动，当文字过多时无法显示完整，且无法手动调整列宽度；此外，前端构建时 `SettingsUserManagementPanel.vue` 的 `identityVisible` 声明为 boolean 类型与 Element Plus 的 `el-collapse` v-model 要求的类型冲突。
+- What:
+  - 在 `RuntimeManagementPanel.vue` 中将所有 5 个运行管理表格设置为 `table-layout: fixed` 并分配初始列宽，在表头中加入绝对定位的拖拽手柄 `.ta-resize-handle` 元素。
+  - 实现了 `startResize` 拖拽监听函数，通过直接操作 DOM 中 `<th>` 元素的 `width` / `minWidth` / `maxWidth` 实现列宽拖拽调节；给容易溢出的长文本单元格添加 `:title` 属性结合 `?? undefined` 构成类型安全的悬浮气泡。
+  - 在 `SettingsUserManagementPanel.vue` 中将 `identityVisible` 类型修改为 `string[]` 并适配对应的 watcher，消除 TypeScript 类型检查错误。
+- How: 纯前端交互调整，不改变后端接口与环境配置，保持 DOM 操作高性能渲染。
+- Result: 整个前端项目打包构建 (`vue-tsc --noEmit` & `vite build`) 成功，无任何编译及类型错误；相关 Vitest 单元测试全部通过。
+
+### 2026-07-01 - 作废公共目录、托管根路径与 test-agent Redis 配置
+
+- Why: 用户要求继续参数治理，作废 `test-agent.managed-workspace.root`、`test-agent.public-directory.path`，下线公共目录功能，并把 Redis 配置统一收口到 Spring 标准 `spring.data.redis.*`。
+- What: 删除 6 个 application yml 中的 `test-agent.public-directory` / `test-agent.redis`，删除 local-h2 中的托管根路径；移除公共目录后端 Controller/Service/测试、frontend 公共目录入口和 backend-api 公共目录方法；`RedisHealthIndicator` / `RedisStartupHealthCheck` 改为读取 `DataRedisProperties`；文档同步为只使用 `spring.data.redis.*`。
+- How: `TEST_AGENT_REDIS_HOST/PORT/PASSWORD/TIMEOUT` 仍作为部署环境变量保留，但只绑定到 `spring.data.redis.*`；`managed-workspace.replica-reconciler.enabled` 保留；不新增数据库 migration，不新增 common_parameters，不改 `.env.local`。
+- Result: 配置绑定与 Redis 健康检查定向测试、workspace-management 模块测试、后端 app package、backend-api/agent-web typecheck、废弃参数精准搜索和 `git diff --check` 通过；计划中的 `test-agent-api -am test` 仍被既有 `ApiLoggingAspectTest.java` 测试编译错误阻塞（访问 private 方法且缺少断言/AuthWebSupport 引用），与本次改动无关。
+
+### 2026-07-01 - 数据库 IDENTITY 运维功能
+
+- Why: 添加用户时报"数据冲突：当前操作因存在关联数据无法执行，请先清理关联记录后重试"，根因是 `users` 表 identity 序列落后于已有主键（与历史 `user_roles` 同类问题），被全局异常处理器翻译成误导文案。用户要求把"查询当前序号 + 手工滚动"做成运维入口而非一次性 Flyway 修复。
+- What: 新增超管运维入口，查询白名单表（users/user_roles/dictionaries/user_login_logs）identity 当前值/max(id) 并支持一键对齐 max+1 与手动 RESTART WITH n（禁止往回滚）。
+- How:
+  - 后端按端口适配器模式：domain 端口 `DatabaseIdentityMaintenancePort` + 白名单枚举 `IdentityManagedTable`；persistence 用 MyBatis XML（`pg_get_serial_sequence` + `pg_sequences` + `ALTER TABLE ... RESTART WITH`）实现 `MyBatisDatabaseIdentityMaintenanceRepository`；system-management 应用服务编排校验+审计日志。
+  - Controller (`DatabaseIdentityController`) 3 接口挂 `/api/internal/platform/system-management/identity`，仅 SUPER_ADMIN。
+  - 前端在 `SettingsUserManagementPanel.vue` 新增折叠区块，表格展示状态 + 对齐/重置按钮 + 错位高亮。
+  - 同步 http-api.md / database.md / 两模块 README。
+- Result:
+  - 后端服务层 8 个单元测试、Controller 切片 5 个测试、Mapper H2 集成测试全绿。
+  - api 模块预存 `ApiLoggingAspectTest` 死测试阻塞编译（调用 private 方法），与本次无关；已补充 `reactor-test` 测试依赖。
+  - 前端代码结构正确，沿用现有面板范式。
+  - 未改表结构（无 Flyway migration）；未新增 ErrorCode 枚举；SQL 注入由白名单枚举+Long 校验防护。
 
 ### 2026-07-01 - 收口 OpenCode 状态抖动、技能召唤与重启假超时
 
@@ -2623,3 +2703,32 @@ bash /tmp/test-api-after-restart.sh
 - What: Run 保存 `RUNNING` 并先订阅事件后改为异步提交 prompt，提交失败复用统一 `run.failed` 链路；SSE 将消息快照与 durable/live 流并发合并。完成态 `write/edit/apply_patch` 只从 tool part 派生文件通知，不再请求 OpenCode 不支持的 `/vcs/diff?mode=working`。前端收到 `diff.proposed/session.diff` 后同步刷新父目录和工作区 Git Diff；失败重试统一复用最近 prompt。Git status 增加 `--untracked-files=all`，返回可展示、可回退的文件级未跟踪记录。
 - How: 复用 `RunEventSseStreamService`、`failRunFromStream`、`refreshWorkspaceGitDiff`、`refreshParentDirectory` 和现有 workspace discard 链路，没有修改 OpenCode/generated SDK，也没有新增旁路架构。补充 Run 非阻塞/异步失败、快照不阻塞 live delta、Git 文件级 status、重试和运行中 Diff 刷新的回归测试，并同步模块 README 与 HTTP/事件文档。
 - Result: 后端相关 88 个测试、前端 204 个 Vitest、typecheck、build 和 2 个关键 Playwright E2E 通过。通过 iTerm 使用 `.env.test` 重启后，后端 readiness、数据库、Redis、前端均正常；manager 和 OpenCode 各单实例，OpenCode 实际监听 `192.168.100.115:4098`。真实页面变更徽标为 9，与 personal worktree 的 9 个非空未跟踪文件一致，不再出现折叠目录空 Diff。未修改 API 字段、事件类型、数据库、安全或鉴权契约；`POST /runs` 的返回时机变为非阻塞，保持响应 DTO 向后兼容。
+### 2026-07-01 - 作废 opencode 固定节点 yml 参数
+
+- Why: `test-agent.opencode.manager-control.listen-url` 和 `test-agent.opencode.nodes` 已成为重复配置；前者可由服务器内网 IP 和 `server.port` 自动派生，后者不再适合用户专属 opencode 进程模型。
+- What: 从 6 个 `application*.yml` 删除 `listen-url` 与 `nodes`；`ManagerControlSettings.listenUrl` 改为启动时由 `LinuxServerIpResolver.resolve()` + `server.port` 派生；删除固定节点配置绑定、`ExecutionNodeSeeder` 和静态节点 Actuator health indicator。启动脚本不再导出 `TEST_AGENT_BACKEND_LISTEN_URL`，只在局域网访问场景补全前端使用的 `TEST_AGENT_BASE_URL`。
+- How: 不新增 migration，不删除历史 `execution_nodes` 数据；旧 static-token 集成若仍依赖固定节点，需要继续使用数据库已有记录或后续专门初始化方案。
+- Result: 配置绑定测试、manager 控制面装配测试、`test-agent-app -am` 编译、开发脚本验证和作废变量搜索均通过；PowerShell 脚本解析在当前机器因缺少 `pwsh/powershell` 按验证脚本逻辑跳过。
+
+### 2026-07-01 - 通用参数新增 editable 字段控制可改性
+
+- Why: 通用参数可改性此前是 Service 层硬编码（仅 `OPENCODE_MANAGER_MAX_PROCESSES`），前端无法得知哪些参数可改，且 `OPENCODE_PUBLIC_AGENT_GIT_URL` 缺失前端可改入口。需在通用参数表定义字段表示是否可改，并让前端对只读参数限制输入、标注「只读参数」、提示「修改后将影响系统正常运行」。
+- What:
+  1. Flyway `V20260701100000` 为 `common_parameters` 加 `editable boolean not null default false` 列 + comment + 两条 UPDATE（`OPENCODE_MANAGER_MAX_PROCESSES`、`OPENCODE_PUBLIC_AGENT_GIT_URL` 置 true）。
+  2. `CommonParameter` record 加 `boolean editable`，`withValue` 透传；`CommonParameterRow`、`CommonParameterMapper.xml`（columns 片段 + `<arg javaType="_boolean">`）、`MyBatisCommonParameterRepository.toDomain`、存量 `JdbcCommonParameterRepository`（最小同步，未迁移到 MyBatis）同步加列；`CommonParameterResponse` 加 `editable`。
+  3. `CommonParameterManagementApplicationService` 删除硬编码常量 `EDITABLE_MAX_PROCESSES_PARAMETER`，改为 `if (!existing.editable())` 校验，文案「该通用参数为只读参数，修改后将影响系统正常运行」；补齐 `OPENCODE_PUBLIC_AGENT_GIT_URL` 可改入口（此前白名单未放行）。
+  4. 前端 `shared-types` 的 `GeneralParameter` 加 `editable`；`GeneralParamManagementPanel.vue` 只读弹窗渲染（禁用输入/保存、`只读参数`标签、`⚠ 只读参数 · 修改后将影响系统正常运行`警告条、单元格 🔒 只读视觉）；补只读/可改交互用例 2 个。
+  5. 测试：5 个后端测试类构造工厂/断言同步，新增 `OPENCODE_PUBLIC_AGENT_GIT_URL` 可改用例与只读文案断言。
+  6. 文档：`configuration-management`、`opencode-runtime` README 同步可改参数说明；`http-api.md` 补 `editable` 响应字段与只读校验说明；`database.md` 补表说明与新 migration 章节。
+- How:
+  - `mvn -pl test-agent-configuration-management -am test` 全 26 通过；`CommonParameterSeedMigrationTest`、`MyBatisCommonParameterRepositoryIntegrationTest`（跑全量 Flyway 含新 migration）通过；前端 `vitest run general-param-management-panel.test.ts` 4/4 通过。
+  - `git stash -u` 干净 HEAD 复跑确认 `test-agent-persistence` 的 linux_servers/agent_config 失败与 `test-agent-api` 的 `ApiLoggingAspectTest` 编译失败均为**预存在**（非本次引入），记入项目记忆。
+  - 文档提交时用 `git stash` 隔离 `http-api.md`/`database.md`/`session-log.md` 的并发改动，在干净 HEAD 上只追加本次文档，再 `git stash pop` 恢复并发改动，确保不混入他人未落定工作。
+- Result: 通用参数可改性由 DB `editable` 列驱动（单一事实源），仅 `OPENCODE_MANAGER_MAX_PROCESSES` 与 `OPENCODE_PUBLIC_AGENT_GIT_URL` 可改；前端只读参数禁用输入并标注警告。`OPENCODE_PUBLIC_AGENT_GIT_URL` 更新走 `common-parameter.refresh-requested` 广播但不热刷新 manager（URL 属部署参数，AgentConfig 下次操作直读 DB 生效），符合既有「路径/URL 不热刷新」设计。本次为 additive 字段，向后兼容。`CommonParameterManagementControllerTest` 因 `ApiLoggingAspectTest` 预存在编译失败未能运行（已用暂存 diff 审查确认改动正确）。
+
+### 2026-07-02 - 复用 Git publish workflow 并统一冲突回滚
+
+- Why: 个人 worktree publish、Agent 公共/工作空间 publish 和 sync-to-application 都是高风险 Git 写操作，之前 clean/pull/merge/conflict/push/headCommit 分散在业务服务内，冲突后 abort 能力也没有复用到 Agent 配置发布。
+- What: `test-agent-common` 只新增 `GitWorkspaceService.abortMerge` 原子命令；`test-agent-workspace-management` 新增 `GitPublishWorkflow` 统一 direct publish、worktree merge publish 和 sync files then push。个人发布、Agent direct/worktree publish、sync-to-application 改用 workflow；worktree merge 冲突会返回 `conflictFiles` 并先执行 `merge --abort`，Agent 冲突不 mark published、不 push。前端 Agent 配置错误格式化补充展示 `details.conflictFiles`。
+- How: 不新增 API URL、数据库字段或 generated SDK；`update-and-push` 保持“不预拉取远端内容”契约。同步更新 common/workspace-management/frontend README、包说明和 `docs/api/http-api.md`。
+- Result: 定向后端测试、AgentConfigController 测试、前端冲突错误测试、agent-web typecheck 和 `git diff --check` 全部通过；本次不涉及事件、数据库结构、鉴权或环境配置变更。

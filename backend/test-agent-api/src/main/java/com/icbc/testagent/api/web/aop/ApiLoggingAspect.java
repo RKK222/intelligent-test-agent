@@ -142,7 +142,7 @@ public class ApiLoggingAspect {
     /**
      * 从方法参数中提取 ServerWebExchange。
      */
-    private ServerWebExchange extractExchange(Object[] args) {
+    ServerWebExchange extractExchange(Object[] args) {
         if (args == null) return null;
         return Arrays.stream(args)
                 .filter(ServerWebExchange.class::isInstance)
@@ -154,7 +154,7 @@ public class ApiLoggingAspect {
     /**
      * 从参数中提取请求体（仅提取 @RequestBody 标注的参数）。
      */
-    private String extractRequestBody(Object[] args) {
+    String extractRequestBody(Object[] args) {
         if (args == null) return "";
 
         // 尝试序列化第一个非 ServerWebExchange、非 FilePart 的参数
@@ -199,7 +199,7 @@ public class ApiLoggingAspect {
     /**
      * 提取用户 ID，未认证时返回 "anonymous"。
      */
-    private String extractUserId(ServerWebExchange exchange) {
+    String extractUserId(ServerWebExchange exchange) {
         if (exchange == null) return "anonymous";
         return AuthWebSupport.getOptionalAuthPrincipal(exchange)
                 .map(p -> p.userId().value())
@@ -218,7 +218,7 @@ public class ApiLoggingAspect {
     /**
      * 获取 HTTP 方法名。
      */
-    private String httpMethod(ServerWebExchange exchange) {
+    String httpMethod(ServerWebExchange exchange) {
         if (exchange == null) return "UNKNOWN";
         return exchange.getRequest().getMethod().name();
     }
@@ -226,7 +226,7 @@ public class ApiLoggingAspect {
     /**
      * 获取请求路径。
      */
-    private String requestPath(ServerWebExchange exchange) {
+    String requestPath(ServerWebExchange exchange) {
         if (exchange == null) return "unknown";
         return exchange.getRequest().getPath().value();
     }
@@ -234,7 +234,7 @@ public class ApiLoggingAspect {
     /**
      * 获取客户端 IP。
      */
-    private String clientIp(ServerWebExchange exchange) {
+    String clientIp(ServerWebExchange exchange) {
         if (exchange == null) return "unknown";
         String xForwardedFor = exchange.getRequest().getHeaders().getFirst("X-Forwarded-For");
         if (xForwardedFor != null && !xForwardedFor.isBlank()) {

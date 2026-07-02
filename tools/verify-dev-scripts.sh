@@ -20,7 +20,7 @@ run_check() {
 run_check "restart script bash syntax" bash -n "${ROOT_DIR}/restart-dev-services.sh"
 run_check "restart script sh parse guard" sh -n "${ROOT_DIR}/restart-dev-services.sh"
 run_check "restart script sh help entry" sh "${ROOT_DIR}/restart-dev-services.sh" --help
-WINDOWS_RESTART_SCRIPT="${ROOT_DIR}/restart-dev-services.ps1"
+WINDOWS_RESTART_SCRIPT="${ROOT_DIR}/win-restart-dev-services-fixed-v4.ps1"
 [[ -f "${WINDOWS_RESTART_SCRIPT}" ]] || fail "windows restart script missing: ${WINDOWS_RESTART_SCRIPT}"
 powershell_bin=""
 for candidate in pwsh powershell.exe powershell; do
@@ -110,9 +110,9 @@ if [[ "${restart_output}" != *"TEST_AGENT_OPENCODE_BASE_URL is required"* ]]; th
   echo "${restart_output}" >&2
   fail "restart script did not reach backend startup precondition"
 fi
-if [[ "${restart_output}" != *"Defaulting TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4: http://10.8.0.115:8080"* ]]; then
+if [[ "${restart_output}" != *"Defaulting TEST_AGENT_BASE_URL to detected local IPv4 for browser access: http://10.8.0.115:8080"* ]]; then
   echo "${restart_output}" >&2
-  fail "restart script did not default TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4"
+  fail "restart script did not default TEST_AGENT_BASE_URL to detected local IPv4"
 fi
 
 # auto 模式必须把默认路由网卡的 IPv4 识别为本机地址；.env.test 使用局域网 IP 时也要启动 manager。

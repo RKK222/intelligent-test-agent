@@ -19,6 +19,7 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerManager;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerStatus;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnection;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
@@ -38,12 +39,12 @@ class BackendJavaRouteResolverTest {
     void resolvesLatestBackendByLinuxServerIdAndKeepsCurrentFallback() {
         BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(
                 List.of(
-                        backendSnapshot("bjp_old_backend", "10.8.0.22", "http://10.8.0.22:8080", NOW.minusSeconds(30)),
-                        backendSnapshot("bjp_new_backend", "10.8.0.22", "http://10.8.0.22:18080", NOW)),
+                        backendSnapshot("bjp_old_backend", "server-b", "http://10.8.0.22:8080", NOW.minusSeconds(30)),
+                        backendSnapshot("bjp_new_backend", "server-b", "http://10.8.0.22:18080", NOW)),
                 List.of()));
 
-        BackendJavaProcess remote = resolver.requireBackend(new LinuxServerId("10.8.0.22"));
-        BackendJavaProcess current = resolver.requireBackend(new LinuxServerId("10.8.0.21"));
+        BackendJavaProcess remote = resolver.requireBackend(new LinuxServerId("server-b"));
+        BackendJavaProcess current = resolver.requireBackend(new LinuxServerId("server-a"));
 
         assertThat(remote.listenUrl()).isEqualTo("http://10.8.0.22:18080");
         assertThat(current.listenUrl()).isEqualTo("http://10.8.0.21:8080");
@@ -53,9 +54,36 @@ class BackendJavaRouteResolverTest {
     void resolvesRemoteTargetOnlyWhenDifferentFromCurrentServer() {
         BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(List.of(), List.of()));
 
-        assertThat(resolver.remoteTarget(new LinuxServerId("10.8.0.21"))).isEmpty();
-        assertThat(resolver.remoteTarget(new LinuxServerId("10.8.0.22")))
-                .contains(new LinuxServerId("10.8.0.22"));
+        assertThat(resolver.remoteTarget(new LinuxServerId("server-a"))).isEmpty();
+        assertThat(resolver.remoteTarget(new LinuxServerId("server-b")))
+                .contains(new LinuxServerId("server-b"));
+    }
+
+    @Test
+    void prefersBackendConnectedToManagerEvenWhenAnotherJavaHasLaterHeartbeat() {
+        BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(
+                List.of(
+                        backendSnapshot("bjp_connected", "server-a", "http://10.8.0.21:18080", NOW.minusSeconds(30)),
+                        backendSnapshot("bjp_latest", "server-a", "http://10.8.0.21:8080", NOW)),
+                List.of(managerSnapshot("ctr_01", "server-a", NOW, "bjp_connected"))),
+                new BackendProcessId("bjp_latest"));
+
+        BackendJavaProcess selected = resolver.requireBackend(new LinuxServerId("server-a"));
+
+        assertThat(selected.backendProcessId()).isEqualTo(new BackendProcessId("bjp_connected"));
+        assertThat(resolver.remoteTarget(new LinuxServerId("server-a"))).contains(new LinuxServerId("server-a"));
+    }
+
+    @Test
+    void sameServerDoesNotForwardWhenSelectedBackendIsCurrentJava() {
+        BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(
+                List.of(backendSnapshot("bjp_connected", "server-a", "http://10.8.0.21:8080", NOW)),
+                List.of(managerSnapshot("ctr_01", "server-a", NOW, "bjp_connected"))),
+                new BackendProcessId("bjp_connected"));
+
+        assertThat(resolver.requireBackend(new LinuxServerId("server-a")).backendProcessId())
+                .isEqualTo(new BackendProcessId("bjp_connected"));
+        assertThat(resolver.remoteTarget(new LinuxServerId("server-a"))).isEmpty();
     }
 
     @Test
@@ -63,36 +91,44 @@ class BackendJavaRouteResolverTest {
         BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(
                 List.of(),
                 List.of(
-                        managerSnapshot("ctr_01", "10.8.0.22", NOW.minusSeconds(30)),
-                        managerSnapshot("ctr_01", "10.8.0.23", NOW))));
+                        managerSnapshot("ctr_01", "server-b", NOW.minusSeconds(30)),
+                        managerSnapshot("ctr_01", "server-c", NOW))));
 
         Optional<LinuxServerId> linuxServerId = resolver.containerLinuxServerId(new OpencodeContainerId("ctr_01"));
 
-        assertThat(linuxServerId).contains(new LinuxServerId("10.8.0.23"));
+        assertThat(linuxServerId).contains(new LinuxServerId("server-c"));
     }
 
     @Test
     void missingRemoteBackendThrowsUnifiedUnavailableError() {
         BackendJavaRouteResolver resolver = resolver(new FakeHeartbeatStore(List.of(), List.of()));
 
-        assertThatThrownBy(() -> resolver.requireBackend(new LinuxServerId("10.8.0.99")))
+        assertThatThrownBy(() -> resolver.requireBackend(new LinuxServerId("missing-server")))
                 .isInstanceOfSatisfying(PlatformException.class, exception -> {
                     assertThat(exception.errorCode()).isEqualTo(ErrorCode.OPENCODE_UNAVAILABLE);
-                    assertThat(exception.details()).containsEntry("linuxServerId", "10.8.0.99");
+                    assertThat(exception.details()).containsEntry("linuxServerId", "missing-server");
                 });
     }
 
     private static BackendJavaRouteResolver resolver(OpencodeProcessHeartbeatStore heartbeatStore) {
+        return resolver(heartbeatStore, new BackendProcessId("bjp_current_backend"));
+    }
+
+    private static BackendJavaRouteResolver resolver(
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            BackendProcessId currentBackendProcessId) {
         return new BackendJavaRouteResolver(
                 heartbeatStore,
                 new ManagerControlSettings(
                         "manager-token",
                         "http://10.8.0.21:8080",
-                        new LinuxServerId("10.8.0.21"),
+                        new LinuxServerId("server-a"),
+                        "10.8.0.21",
                         Duration.ofSeconds(5),
                         Duration.ofSeconds(10),
                         Duration.ofSeconds(10),
                         100),
+                currentBackendProcessId,
                 java.time.Clock.fixed(NOW, java.time.ZoneOffset.UTC));
     }
 
@@ -125,8 +161,17 @@ class BackendJavaRouteResolverTest {
     }
 
     private static ManagerRuntimeSnapshot managerSnapshot(String containerId, String linuxServerId, Instant heartbeatAt) {
+        return managerSnapshot(containerId, linuxServerId, heartbeatAt, null);
+    }
+
+    private static ManagerRuntimeSnapshot managerSnapshot(
+            String containerId,
+            String linuxServerId,
+            Instant heartbeatAt,
+            String connectedBackendProcessId) {
         LinuxServerId serverId = new LinuxServerId(linuxServerId);
         OpencodeContainerId parsedContainerId = new OpencodeContainerId(containerId);
+        ContainerManagerId managerId = new ContainerManagerId("mgr_" + linuxServerId.replace(".", "_").replace("-", "_"));
         return new ManagerRuntimeSnapshot(
                 new OpencodeContainer(
                         parsedContainerId,
@@ -142,7 +187,7 @@ class BackendJavaRouteResolverTest {
                         heartbeatAt,
                         "trace_manager"),
                 new OpencodeContainerManager(
-                        new ContainerManagerId("mgr_" + linuxServerId.replace(".", "")),
+                        managerId,
                         parsedContainerId,
                         serverId,
                         "opencode-manager.v1",
@@ -152,7 +197,14 @@ class BackendJavaRouteResolverTest {
                         NOW.minusSeconds(60),
                         heartbeatAt,
                         "trace_manager"),
-                List.of());
+                connectedBackendProcessId == null ? List.of() : List.of(new OpencodeManagerBackendConnection(
+                        managerId,
+                        new BackendProcessId(connectedBackendProcessId),
+                        ManagerConnectionStatus.CONNECTED,
+                        heartbeatAt,
+                        heartbeatAt,
+                        heartbeatAt,
+                        "trace_manager")));
     }
 
     private record FakeHeartbeatStore(

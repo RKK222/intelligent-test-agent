@@ -18,6 +18,18 @@ const macosParameter: GeneralParameter = {
   chineseName: "OpenCode会话目录",
   parameterValue: "$TEST_AGENT_ROOT/temp/opencode-session",
   platform: "macos",
+  editable: false,
+  createdAt: "2026-06-29T00:00:00Z",
+  updatedAt: "2026-06-29T00:00:00Z"
+};
+
+const editableParameter: GeneralParameter = {
+  parameterId: "opencode_public_agent_git_url_all",
+  englishName: "OPENCODE_PUBLIC_AGENT_GIT_URL",
+  chineseName: "公共 Agent 仓库地址",
+  parameterValue: "https://example.com/agent.git",
+  platform: "all",
+  editable: true,
   createdAt: "2026-06-29T00:00:00Z",
   updatedAt: "2026-06-29T00:00:00Z"
 };
@@ -123,6 +135,48 @@ describe("general parameter management panel", () => {
     expect(view.getAllByText("$TEST_AGENT_ROOT/temp/opencode-session").length).toBeGreaterThan(0);
     await waitFor(() => expect(listCommonParameterChangeLogs).toHaveBeenCalledWith(macosParameter.parameterId));
     expect(await view.findByText("$OLD_ROOT/temp/opencode-session")).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("shows readonly markers when opening a non-editable parameter", async () => {
+    const listGeneralParameters = vi.fn(async () => ({
+      items: [macosParameter],
+      page: 1,
+      size: 50,
+      total: 1
+    } satisfies PageResponse<GeneralParameter>));
+    const backendApi = {
+      listGeneralParameters,
+      listCommonParameterChangeLogs: vi.fn().mockResolvedValue([])
+    } as Partial<BackendApiClient> as BackendApiClient;
+    const view = renderPanel(backendApi);
+
+    await view.findByText("OPENCODE_SESSION_DIR");
+    await fireEvent.click(view.getByText("$TEST_AGENT_ROOT/temp/opencode-session"));
+
+    expect(await view.findByText("只读参数")).toBeTruthy();
+    expect(await view.findByText(/修改后将影响系统正常运行/)).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("opens an editable parameter without readonly markers", async () => {
+    const listGeneralParameters = vi.fn(async () => ({
+      items: [editableParameter],
+      page: 1,
+      size: 50,
+      total: 1
+    } satisfies PageResponse<GeneralParameter>));
+    const backendApi = {
+      listGeneralParameters,
+      listCommonParameterChangeLogs: vi.fn().mockResolvedValue([])
+    } as Partial<BackendApiClient> as BackendApiClient;
+    const view = renderPanel(backendApi);
+
+    await view.findByText("OPENCODE_PUBLIC_AGENT_GIT_URL");
+    await fireEvent.click(view.getByText("https://example.com/agent.git"));
+
+    expect(view.queryByText("只读参数")).toBeNull();
+    expect(view.queryByText(/修改后将影响系统正常运行/)).toBeNull();
     view.queryClient.clear();
   });
 });

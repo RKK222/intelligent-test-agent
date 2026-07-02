@@ -4,6 +4,8 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
+import com.icbc.testagent.common.git.GitWorkspaceService.GitDiffFile;
+import com.icbc.testagent.common.git.GitWorkspaceService.GitStatusEntry;
 import com.icbc.testagent.common.git.SshKeyEncryptionService;
 import com.icbc.testagent.common.id.RuntimeIdGenerator;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastEvent;
@@ -83,6 +85,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private final UserRepository userRepository;
     private final GitRemoteService gitRemoteService;
     private final GitWorkspaceService gitWorkspaceService;
+    private final GitPublishWorkflow gitPublishWorkflow;
     private final SshKeyEncryptionService sshKeyEncryptionService;
     private final WorkspaceFileService fileService;
     private final WorkspaceServerIdentity serverIdentity;
@@ -142,6 +145,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.gitRemoteService = Objects.requireNonNull(gitRemoteService, "gitRemoteService must not be null");
         this.gitWorkspaceService = Objects.requireNonNull(gitWorkspaceService, "gitWorkspaceService must not be null");
+        this.gitPublishWorkflow = new GitPublishWorkflow(this.gitWorkspaceService);
         this.sshKeyEncryptionService = Objects.requireNonNull(sshKeyEncryptionService, "sshKeyEncryptionService must not be null");
         this.fileService = Objects.requireNonNull(fileService, "fileService must not be null");
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
@@ -596,20 +600,23 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 ensureExistingCleanRepository(repoRoot, config.gitUrl());
                 branch = gitWorkspaceService.currentBranch(repoRoot);
                 progress.step(AgentConfigOperationStep.PUSHING);
-                gitWorkspaceService.push(repoRoot, branch, false, privateKey);
-                commitHash = gitWorkspaceService.headCommit(repoRoot);
+                commitHash = gitPublishWorkflow.publishDirectBranch(repoRoot, branch, false, privateKey).headCommit();
             } else {
                 AgentConfigWorktree worktree = existingWorktree(worktreeId, AgentConfigScope.PUBLIC, null);
                 Path repoRoot = config.gitRoot();
                 ensureExistingCleanRepository(repoRoot, config.gitUrl());
                 branch = gitWorkspaceService.currentBranch(repoRoot);
                 progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
-                gitWorkspaceService.pullFastForward(repoRoot, branch, privateKey);
                 progress.step(AgentConfigOperationStep.MERGING);
-                gitWorkspaceService.mergeBranch(repoRoot, worktree.branch(), privateKey);
+                GitPublishWorkflow.PublishResult result = gitPublishWorkflow.publishMergedBranch(
+                        repoRoot,
+                        branch,
+                        worktree.branch(),
+                        false,
+                        privateKey);
+                throwIfConflicted(result, "公共 Agent 配置合并冲突");
                 progress.step(AgentConfigOperationStep.PUSHING);
-                gitWorkspaceService.push(repoRoot, branch, false, privateKey);
-                commitHash = gitWorkspaceService.headCommit(repoRoot);
+                commitHash = result.headCommit();
                 agentConfigRepository.saveWorktree(worktree.markPublished(now()));
             }
             progress.step(AgentConfigOperationStep.BROADCASTING);
@@ -637,17 +644,25 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             Path repoRoot = Path.of(workspace.rootPath());
             ensureExistingCleanRepository(repoRoot, null);
             String branch = gitWorkspaceService.currentBranch(repoRoot);
+            String commitHash;
             if (worktreeId != null && !worktreeId.isBlank()) {
                 AgentConfigWorktree worktree = existingWorktree(worktreeId, AgentConfigScope.WORKSPACE, workspace.workspaceId());
                 progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
-                gitWorkspaceService.pullFastForward(repoRoot, branch, privateKey);
                 progress.step(AgentConfigOperationStep.MERGING);
-                gitWorkspaceService.mergeBranch(repoRoot, worktree.branch(), privateKey);
+                GitPublishWorkflow.PublishResult result = gitPublishWorkflow.publishMergedBranch(
+                        repoRoot,
+                        branch,
+                        worktree.branch(),
+                        false,
+                        privateKey);
+                throwIfConflicted(result, "工作空间 Agent 配置合并冲突");
+                commitHash = result.headCommit();
                 agentConfigRepository.saveWorktree(worktree.markPublished(now()));
+            } else {
+                progress.step(AgentConfigOperationStep.PUSHING);
+                commitHash = gitPublishWorkflow.publishDirectBranch(repoRoot, branch, false, privateKey).headCommit();
             }
-            progress.step(AgentConfigOperationStep.PUSHING);
-            gitWorkspaceService.push(repoRoot, branch, false, privateKey);
-            return progress.succeeded(gitWorkspaceService.headCommit(repoRoot));
+            return progress.succeeded(commitHash);
         } catch (PlatformException exception) {
             progress.failed(exception.errorCode().name(), safeErrorMessage(exception.getMessage()));
             throw exception;
@@ -717,21 +732,24 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private AgentConfigResponses.AgentConfigDiffResponse diff(Path repoRoot) {
         String statusOutput = gitWorkspaceService.statusPorcelain(repoRoot);
         Map<String, AgentConfigResponses.AgentConfigDiffFileResponse> files = new LinkedHashMap<>();
-        for (String line : statusOutput.lines().toList()) {
-            if (line.length() < 4) {
-                continue;
-            }
-            String status = line.substring(0, 2);
-            String path = gitWorkspaceService.unquotePorcelainPath(line.substring(3));
-            int rename = path.indexOf(" -> ");
-            if (rename >= 0) {
-                path = gitWorkspaceService.unquotePorcelainPath(path.substring(rename + 4));
-            }
-            boolean staged = status.charAt(0) != ' ' && status.charAt(0) != '?';
-            String patch = gitWorkspaceService.diff(repoRoot, path, staged);
-            files.put(path, new AgentConfigResponses.AgentConfigDiffFileResponse(path, status.trim(), staged, patch));
+        for (GitDiffFile file : gitWorkspaceService.collectDiffFiles(repoRoot, statusOutput)) {
+            files.put(file.path(), new AgentConfigResponses.AgentConfigDiffFileResponse(
+                    file.path(),
+                    file.rawStatus().trim(),
+                    file.staged(),
+                    file.patch()));
         }
         return new AgentConfigResponses.AgentConfigDiffResponse(List.copyOf(files.values()));
+    }
+
+    private void throwIfConflicted(GitPublishWorkflow.PublishResult result, String message) {
+        if (!result.hasConflicts()) {
+            return;
+        }
+        throw new PlatformException(
+                ErrorCode.CONFLICT,
+                message,
+                Map.of("conflictFiles", result.conflictFiles()));
     }
 
     /**
@@ -741,24 +759,20 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private AgentConfigResponses.AgentConfigDiffResponse workspaceDiff(Path repoRoot) {
         String statusOutput = gitWorkspaceService.statusPorcelain(repoRoot, WORKSPACE_AGENT_RELATIVE_ROOT);
         Map<String, AgentConfigResponses.AgentConfigDiffFileResponse> files = new LinkedHashMap<>();
-        for (String line : statusOutput.lines().toList()) {
-            if (line.length() < 4) {
-                continue;
-            }
-            String status = line.substring(0, 2);
-            String rawPath = gitWorkspaceService.unquotePorcelainPath(line.substring(3));
-            int rename = rawPath.indexOf(" -> ");
-            if (rename >= 0) {
-                rawPath = gitWorkspaceService.unquotePorcelainPath(rawPath.substring(rename + 4));
-            }
-            String gitPath = workspaceAgentGitPath(rawPath);
-            String displayPath = workspaceAgentDisplayPath(gitPath);
+        List<GitStatusEntry> entries = gitWorkspaceService.parseStatusPorcelain(statusOutput).stream()
+                .map(entry -> entry.withPath(workspaceAgentGitPath(entry.path())))
+                .filter(entry -> workspaceAgentDisplayPath(entry.path()) != null)
+                .toList();
+        for (GitDiffFile file : gitWorkspaceService.collectDiffFiles(repoRoot, entries)) {
+            String displayPath = workspaceAgentDisplayPath(file.path());
             if (displayPath == null) {
                 continue;
             }
-            boolean staged = status.charAt(0) != ' ' && status.charAt(0) != '?';
-            String patch = gitWorkspaceService.diff(repoRoot, gitPath, staged);
-            files.put(displayPath, new AgentConfigResponses.AgentConfigDiffFileResponse(displayPath, status.trim(), staged, patch));
+            files.put(displayPath, new AgentConfigResponses.AgentConfigDiffFileResponse(
+                    displayPath,
+                    file.rawStatus().trim(),
+                    file.staged(),
+                    file.patch()));
         }
         return new AgentConfigResponses.AgentConfigDiffResponse(List.copyOf(files.values()));
     }

@@ -1034,19 +1034,16 @@ function Apply-FrontendOriginDefaults {
 }
 
 function Apply-DetectedRuntimeIpDefaults {
-    if (-not [string]::IsNullOrWhiteSpace((Get-EnvValue "TEST_AGENT_BACKEND_LISTEN_URL" ""))) {
-        return
-    }
-
     $localIPv4 = Get-LocalIPv4
     if ([string]::IsNullOrWhiteSpace($localIPv4)) {
         return
     }
 
-    $backendPort = Get-UrlPort $script:BackendUrl
-    $listenUrl = "http://$localIPv4`:$backendPort"
-    Set-EnvValue "TEST_AGENT_BACKEND_LISTEN_URL" $listenUrl
-    Write-Host "Defaulting TEST_AGENT_BACKEND_LISTEN_URL to detected local IPv4: $listenUrl"
+    if ([string]::IsNullOrWhiteSpace((Get-EnvValue "TEST_AGENT_BASE_URL" "")) -and $script:BackendUrl.StartsWith("http://127.0.0.1:")) {
+        $backendPort = Get-UrlPort $script:BackendUrl
+        $script:BackendUrl = "http://$localIPv4`:$backendPort"
+        Write-Host "Defaulting TEST_AGENT_BASE_URL to detected local IPv4 for browser access: $script:BackendUrl"
+    }
 }
 
 function Apply-ManagerBackendPortDefaults {

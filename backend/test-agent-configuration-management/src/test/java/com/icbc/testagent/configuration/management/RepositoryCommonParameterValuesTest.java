@@ -94,6 +94,7 @@ class RepositoryCommonParameterValuesTest {
                 englishName + " 中文名",
                 value,
                 platform,
+                false,
                 NOW,
                 NOW);
     }

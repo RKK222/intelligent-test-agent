@@ -6,12 +6,14 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastEvent;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastPublisher;
 import com.icbc.testagent.domain.configuration.AgentConfigOperation;
+import com.icbc.testagent.domain.configuration.AgentConfigOperationStatus;
 import com.icbc.testagent.domain.configuration.AgentConfigRepository;
 import com.icbc.testagent.domain.configuration.AgentConfigScope;
 import com.icbc.testagent.domain.configuration.AgentConfigWorktree;
@@ -563,6 +565,184 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
+    void publicDiffKeepsRawPorcelainStatusAndMergesStagedAndUnstagedPatch() {
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.stagedAfterAdd = "MM opencode/agents/public-review.md\n";
+        git.diffByFileAndStage.put(
+                "opencode/agents/public-review.md|true",
+                "diff --git a/opencode/agents/public-review.md b/opencode/agents/public-review.md\n@@ -1 +1 @@\n-old\n+staged\n");
+        git.diffByFileAndStage.put(
+                "opencode/agents/public-review.md|false",
+                "diff --git a/opencode/agents/public-review.md b/opencode/agents/public-review.md\n@@ -2 +2 @@\n-old2\n+unstaged\n");
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher(),
+                Optional.empty());
+
+        AgentConfigResponses.AgentConfigDiffResponse diff = service.publicDiff(null);
+
+        assertThat(diff.files()).singleElement().satisfies(file -> {
+            assertThat(file.path()).isEqualTo("opencode/agents/public-review.md");
+            assertThat(file.status()).isEqualTo("MM");
+            assertThat(file.staged()).isTrue();
+            assertThat(file.patch()).contains("+staged").contains("+unstaged");
+        });
+        assertThat(git.diffFiles).containsExactly("opencode/agents/public-review.md", "opencode/agents/public-review.md");
+    }
+
+    @Test
+    void publicWorktreePublishReturnsConflictFilesAndDoesNotMarkPublishedWhenMergeConflicts() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode"));
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        AgentConfigWorktree worktree = new AgentConfigWorktree(
+                "agw_public",
+                AgentConfigScope.PUBLIC,
+                null,
+                "linux-1",
+                "review-agent",
+                "review-agent",
+                root.resolve(".configdev/review-agent").toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW);
+        agentConfigs.saveWorktree(worktree);
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.failMergeWithConflict = true;
+        git.conflictFiles = List.of("opencode/agents/review.md", "opencode/skills/pay/SKILL.md");
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher());
+
+        assertThatThrownBy(() -> service.publicPublish("agw_public", "aco_publish_conflict", ADMIN, "trace_publish"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.details()).containsEntry("conflictFiles", List.of("opencode/agents/review.md", "opencode/skills/pay/SKILL.md"));
+                });
+
+        assertThat(git.abortedMergeRepoRoot).isEqualTo(root.resolve(".config"));
+        assertThat(git.pushedBranch).isNull();
+        assertThat(agentConfigs.findWorktree("agw_public")).get().extracting(AgentConfigWorktree::status)
+                .isEqualTo(AgentConfigWorktreeStatus.ACTIVE);
+        assertThat(agentConfigs.findOperation("aco_publish_conflict")).get().satisfies(operation -> {
+            assertThat(operation.status()).isEqualTo(AgentConfigOperationStatus.FAILED);
+            assertThat(operation.errorCode()).isEqualTo(ErrorCode.CONFLICT.name());
+            assertThat(operation.errorMessage()).contains("合并冲突");
+        });
+    }
+
+    @Test
+    void workspaceWorktreePublishReturnsConflictFilesAndDoesNotPushWhenMergeConflicts() throws Exception {
+        Path workspaceRoot = root.resolve("project");
+        Files.createDirectories(workspaceRoot.resolve(".git"));
+        InMemoryAgentConfigRepository agentConfigs = new InMemoryAgentConfigRepository();
+        AgentConfigWorktree worktree = new AgentConfigWorktree(
+                "agw_workspace",
+                AgentConfigScope.WORKSPACE,
+                new WorkspaceId("wrk_project"),
+                "linux-1",
+                "workspace-agent",
+                "workspace-agent",
+                root.resolve("worktrees/workspace-agent").toString(),
+                ADMIN,
+                AgentConfigWorktreeStatus.ACTIVE,
+                NOW,
+                NOW);
+        agentConfigs.saveWorktree(worktree);
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.failMergeWithConflict = true;
+        git.conflictFiles = List.of(".opencode/agents/review.md");
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                agentConfigs,
+                git,
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_project"),
+                        "project",
+                        workspaceRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-1",
+                        "trace_workspace")));
+
+        assertThatThrownBy(() -> service.workspacePublish("wrk_project", "agw_workspace", "aco_workspace_publish", ADMIN, "trace_publish"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.details()).containsEntry("conflictFiles", List.of(".opencode/agents/review.md"));
+                });
+
+        assertThat(git.abortedMergeRepoRoot).isEqualTo(workspaceRoot);
+        assertThat(git.pushedBranch).isNull();
+        assertThat(agentConfigs.findWorktree("agw_workspace")).get().extracting(AgentConfigWorktree::status)
+                .isEqualTo(AgentConfigWorktreeStatus.ACTIVE);
+        assertThat(agentConfigs.findOperation("aco_workspace_publish")).get().satisfies(operation -> {
+            assertThat(operation.status()).isEqualTo(AgentConfigOperationStatus.FAILED);
+            assertThat(operation.errorCode()).isEqualTo(ErrorCode.CONFLICT.name());
+        });
+    }
+
+    @Test
+    void workspaceDiffMergesStagedAndUnstagedPatchAfterFilteringAgentFiles() {
+        Path workspaceRoot = root.resolve("project/F-COSS/workspace");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.statusByPathspec.put(
+                ".opencode",
+                """
+                MM F-COSS/workspace/.opencode/agents/review rule.md
+                 M F-COSS/workspace/02-设计/Test Material.md
+                """);
+        git.diffByFileAndStage.put(
+                ".opencode/agents/review rule.md|true",
+                "diff --git a/.opencode/agents/review rule.md b/.opencode/agents/review rule.md\n@@ -1 +1 @@\n-old\n+staged\n");
+        git.diffByFileAndStage.put(
+                ".opencode/agents/review rule.md|false",
+                "diff --git a/.opencode/agents/review rule.md b/.opencode/agents/review rule.md\n@@ -2 +2 @@\n-old2\n+unstaged\n");
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "UNCONFIGURED",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher(),
+                Optional.of(new Workspace(
+                        new WorkspaceId("wrk_project"),
+                        "project",
+                        workspaceRoot.toString(),
+                        WorkspaceStatus.ACTIVE,
+                        NOW,
+                        NOW,
+                        "linux-1",
+                        "trace_workspace")));
+
+        AgentConfigResponses.AgentConfigDiffResponse diff = service.workspaceDiff("wrk_project", null);
+
+        assertThat(diff.files()).singleElement().satisfies(file -> {
+            assertThat(file.path()).isEqualTo("agents/review rule.md");
+            assertThat(file.status()).isEqualTo("MM");
+            assertThat(file.staged()).isTrue();
+            assertThat(file.patch()).contains("+staged").contains("+unstaged");
+        });
+        assertThat(git.diffFiles).containsExactly(".opencode/agents/review rule.md", ".opencode/agents/review rule.md");
+    }
+
+    @Test
     void workspaceStageMapsDisplayedAgentPathsBackToOpencodeRoot() {
         Path workspaceRoot = root.resolve("project");
         RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
@@ -823,9 +1003,13 @@ class AgentConfigApplicationServiceTest {
         private String lastCommitMessage;
         private String pushedBranch;
         private Boolean pushedForce;
+        private boolean failMergeWithConflict;
+        private List<String> conflictFiles = List.of();
+        private Path abortedMergeRepoRoot;
         private final Map<String, String> statusByPathspec = new LinkedHashMap<>();
         private String lastStatusPathspec;
         private final Map<String, String> diffByFile = new LinkedHashMap<>();
+        private final Map<String, String> diffByFileAndStage = new LinkedHashMap<>();
         private final List<String> diffFiles = new ArrayList<>();
         private List<String> stagedFiles = List.of();
 
@@ -878,6 +1062,23 @@ class AgentConfigApplicationServiceTest {
         }
 
         @Override
+        public void mergeBranch(Path repoRoot, String branch, String privateKey) {
+            if (failMergeWithConflict) {
+                throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "合并冲突", Map.of());
+            }
+        }
+
+        @Override
+        public List<String> conflictPaths(Path repoRoot) {
+            return conflictFiles;
+        }
+
+        @Override
+        public void abortMerge(Path repoRoot) {
+            this.abortedMergeRepoRoot = repoRoot;
+        }
+
+        @Override
         public void resetHardToCommit(Path repoRoot, String commitHash) {
             this.resetCommit = commitHash;
         }
@@ -913,7 +1114,7 @@ class AgentConfigApplicationServiceTest {
         @Override
         public String diff(Path repoRoot, String file, boolean staged) {
             this.diffFiles.add(file);
-            return diffByFile.getOrDefault(file, "");
+            return diffByFileAndStage.getOrDefault(file + "|" + staged, diffByFile.getOrDefault(file, ""));
         }
 
         @Override

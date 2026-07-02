@@ -30,7 +30,7 @@ class WorkspaceApplicationServiceTest {
                 new WorkspaceFileService(),
                 new WorkspaceServerIdentity("10.8.0.12"));
 
-        Workspace workspace = service.createWorkspace("Demo", root.toString(), "trace_1234567890abcdef");
+        Workspace workspace = service.createWorkspace("Demo", root.toString(), "10.8.0.12", "trace_1234567890abcdef");
 
         assertThat(workspace.workspaceId().value()).startsWith("wrk_");
         assertThat(workspace.rootPath()).isEqualTo(root.toRealPath().toString());

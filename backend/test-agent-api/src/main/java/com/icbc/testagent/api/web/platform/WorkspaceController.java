@@ -5,8 +5,6 @@ import com.icbc.testagent.workspace.FileContentResponse;
 import com.icbc.testagent.workspace.FileStatusResponse;
 import com.icbc.testagent.workspace.FileTreeEntryResponse;
 import com.icbc.testagent.workspace.WorkspaceApplicationService;
-import com.icbc.testagent.workspace.WorkspaceDirectoryListResponse;
-import com.icbc.testagent.workspace.WorkspaceDirectoryService;
 import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
@@ -14,7 +12,6 @@ import jakarta.validation.Valid;
 import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,30 +25,12 @@ import org.springframework.web.server.ServerWebExchange;
 public class WorkspaceController {
 
     private final WorkspaceApplicationService workspaceService;
-    private final WorkspaceDirectoryService directoryService;
 
     /**
-     * 注入工作区应用服务和目录选择服务，Controller 只负责 HTTP 协议适配。
+     * 注入工作区应用服务，Controller 只负责 HTTP 协议适配。
      */
-    public WorkspaceController(WorkspaceApplicationService workspaceService, WorkspaceDirectoryService directoryService) {
+    public WorkspaceController(WorkspaceApplicationService workspaceService) {
         this.workspaceService = workspaceService;
-        this.directoryService = directoryService;
-    }
-
-    /**
-     * 创建工作区，并保持公开路径与内部平台路径响应契约一致。
-     */
-    @PostMapping({"/api/workspaces", "/api/internal/platform/workspace-management/workspaces"})
-    public ApiResponse<RuntimeDtos.WorkspaceResponse> createWorkspace(
-            @Valid @RequestBody RuntimeDtos.CreateWorkspaceRequest request,
-            ServerWebExchange exchange) {
-        String traceId = RuntimeApiSupport.traceId(exchange);
-        var workspace = request.linuxServerId() == null || request.linuxServerId().isBlank()
-                ? workspaceService.createWorkspace(request.name(), request.rootPath(), traceId)
-                : workspaceService.createWorkspace(request.name(), request.rootPath(), request.linuxServerId(), traceId);
-        return ApiResponse.ok(
-                RuntimeDtos.WorkspaceResponse.from(workspace),
-                traceId);
     }
 
     /**
@@ -64,17 +43,6 @@ public class WorkspaceController {
             ServerWebExchange exchange) {
         String traceId = RuntimeApiSupport.traceId(exchange);
         return ApiResponse.ok(RuntimeDtos.workspacePage(workspaceService.listWorkspaces(RuntimeApiSupport.pageRequest(page, size))), traceId);
-    }
-
-    /**
-     * 浏览允许范围内的本机目录，用于前端选择新的 Workspace 根目录。
-     */
-    @GetMapping({"/api/workspace-directories", "/api/internal/platform/workspace-management/workspace-directories"})
-    public ApiResponse<WorkspaceDirectoryListResponse> listWorkspaceDirectories(
-            @RequestParam(required = false) String path,
-            ServerWebExchange exchange) {
-        String traceId = RuntimeApiSupport.traceId(exchange);
-        return ApiResponse.ok(directoryService.listDirectories(path), traceId);
     }
 
     /**

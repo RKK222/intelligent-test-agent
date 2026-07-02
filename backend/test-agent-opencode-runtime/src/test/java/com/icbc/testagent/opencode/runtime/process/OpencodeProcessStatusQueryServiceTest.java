@@ -87,6 +87,33 @@ class OpencodeProcessStatusQueryServiceTest {
     }
 
     @Test
+    void healthyProcessRefreshesBaseUrlFromAdvertisedHostForStableServerId() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess old = process(
+                "ocp_running",
+                "linux-prod-a",
+                "http://old-host:4097",
+                4097,
+                OpencodeServerProcessStatus.UNHEALTHY,
+                11111L);
+        repository.processes.put(old.processId(), old);
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.healthy("ok");
+        OpencodeProcessStatusQueryService service = new OpencodeProcessStatusQueryService(
+                repository,
+                gateway,
+                new RecordingHeartbeatStore(),
+                Clock.fixed(NOW, ZoneOffset.UTC),
+                new OpencodeServerAddressResolver("10.8.0.21"));
+
+        OpencodeProcessStatusProbe probe = service.query(old.processId(), TRACE_ID);
+
+        assertThat(probe.process()).get()
+                .extracting(OpencodeServerProcess::baseUrl)
+                .isEqualTo("http://10.8.0.21:4097");
+    }
+
+    @Test
     void notRunningHealthMessageMarksProcessStoppedAndClearsPid() {
         FakeRepository repository = new FakeRepository();
         OpencodeServerProcess old = process("ocp_stale", 4097, OpencodeServerProcessStatus.RUNNING, 22222L);
@@ -172,14 +199,24 @@ class OpencodeProcessStatusQueryServiceTest {
             int port,
             OpencodeServerProcessStatus status,
             Long pid) {
+        return process(processId, "10.8.0.12", "http://10.8.0.12:" + port, port, status, pid);
+    }
+
+    private static OpencodeServerProcess process(
+            String processId,
+            String linuxServerId,
+            String baseUrl,
+            int port,
+            OpencodeServerProcessStatus status,
+            Long pid) {
         return new OpencodeServerProcess(
                 new OpencodeProcessId(processId),
                 new UserId("usr_1234567890abcdef"),
-                new LinuxServerId("10.8.0.12"),
+                new LinuxServerId(linuxServerId),
                 new OpencodeContainerId("ctr_01"),
                 port,
                 pid,
-                "http://10.8.0.12:" + port,
+                baseUrl,
                 status,
                 "/data/opencode/session/" + port,
                 "/data/opencode/.config/opencode/",

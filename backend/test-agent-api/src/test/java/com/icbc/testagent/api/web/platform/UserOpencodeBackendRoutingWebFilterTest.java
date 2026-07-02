@@ -228,6 +228,26 @@ class UserOpencodeBackendRoutingWebFilterTest {
                 .isEqualTo("http://10.8.0.22:18080/api/internal/agent/opencode/processes/me"));
     }
 
+    @Test
+    void forwardsWithinSameLinuxServerWhenSelectedBackendIsAnotherJavaProcess() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
+                .thenReturn(Optional.of("10.8.0.21"));
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, """
+                {"success":true,"traceId":"trace_1234567890abcdef","data":{"status":"READY"}}
+                """);
+        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore(List.of(
+                backend("bjp_same_server_target", "10.8.0.21", "http://10.8.0.21:18080", NOW))), httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .get("/api/internal/agent/opencode/processes/me")
+                .build());
+
+        filter.filter(exchange, chain(exchange1 -> Mono.empty())).block(Duration.ofSeconds(2));
+
+        assertThat(httpClient.requests).singleElement().satisfies(request -> assertThat(request.uri().toString())
+                .isEqualTo("http://10.8.0.21:18080/api/internal/agent/opencode/processes/me"));
+    }
+
     private static UserOpencodeProcessStatusResponse allocatedStatus(String message) {
         return new UserOpencodeProcessStatusResponse(
                 UserOpencodeProcessAvailability.UNAVAILABLE,

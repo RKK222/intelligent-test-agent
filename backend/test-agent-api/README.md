@@ -9,7 +9,7 @@
 - 暴露旧 `/api/...` 兼容 URL。
 - 暴露新增 `/api/internal/platform/...`、`/api/internal/agent/{agentId}/...` 和预留 `/api/public/...` URL。
 - `web.platform` 承载平台自身接口和旧兼容入口，`web.agent` 承载 agent runtime 兼容代理入口，`web.common` 承载 traceId、鉴权、限流和统一异常等入口支撑。
-- 暴露 Workspace 受控目录选择接口，Controller 只委托 workspace-management 目录服务。
+- 普通 Workspace HTTP 入口只保留查询和文件路由；服务器目录选择与创建仅通过超级管理员文件 WebSocket ticket 执行。
 - 暴露应用版本工作区、版本 `git pull` 和个人工作区运行接口，Controller 只解析登录主体、traceId、当前用户 opencode agent 服务器并委托 workspace-management；应用成员权限由业务服务校验。
 - 暴露配置管理接口，Controller 只委托 configuration-management 业务服务；应用与工作区接口统一校验 `APP_ADMIN`，`SUPER_ADMIN` 继承该能力。设置页创建应用工作空间接口会读取当前用户 READY opencode 进程的 Linux 服务器并委托 workspace-management 创建初始版本工作区，进度通过 `workspace-create-operations/{operationId}` HTTP 轮询查询。
 - Controller 只调用业务模块 service，不直接访问 Repository、generated SDK 或 JDBC 实现。
@@ -20,7 +20,7 @@
 - 暴露 Agent 配置管理 HTTP 和进度 WebSocket 入口：Controller 只做认证、`SUPER_ADMIN` 写权限、DTO 和 traceId 转换；公共 worktree 列表接口只返回指定服务器上的 `ACTIVE/PUBLIC` 元数据和创建人字段，文件内容仍必须走文件 WebSocket；进度 WebSocket 使用一次性 ticket、Origin 白名单和 `snapshot/step/completed/failed` envelope，业务逻辑委托 `test-agent-workspace-management`。
 - 暴露 opencode-manager 兼容诊断 API 和 WebSocket 控制面入口，入口只做 manager token 鉴权、DTO/消息适配和 traceId 处理；Go manager 运行路径不通过 HTTP 与 Java 交互，只连接本服务器 Java，`backendListRequest/backendListResponse` 仅保留为兼容诊断协议。
 - 后端 Java 路由统一使用 runtime 的 `BackendJavaRouteResolver` 解析当前服务器、`linuxServerId -> BackendJavaProcess` 和 `containerId -> linuxServerId`；API 层所有 Java->Java HTTP 转发统一走 `BackendHttpForwarder`，由它设置 `X-Test-Agent-Backend-Routed` 防循环并透传 Authorization、traceId、query 和 body。后续新增任何 opencode-manager 路由或 Java->manager 控制入口，都必须复用这套公共程序，不得在 Controller、WebFilter、WebSocket handler 或业务 service 中自行扫描 Redis 快照、拼接目标 Java URL、复制转发逻辑或定义新的防循环 header。
-- 暴露超级管理员运行管理 overview、容器/按 IP 的后端指标历史、旧后端进程指标兼容入口和有主/无主 opencode server 重启/停止 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选/历史/容器/端口参数校验、用户名筛选参数透传、manager 下属 opencode server 明细和 `BOUND/UNBOUND` 归属 DTO 映射、命令结果 DTO 映射、traceId 处理；重启/停止命令先按 `containerId` 的 Redis manager 快照定位容器所属 `linuxServerId`，目标不是本机时透传用户 JWT 和 traceId 转发到目标 Java，由目标 Java 控制本服务器 manager。API 层不实现 opencode server 启动、停止、状态查询或健康确认；用户进程初始化、STOPPED 进程重启和 `port ... is not managed` 后重新拉起由 `test-agent-opencode-runtime` 的 `OpencodeProcessStartupService` 完成，平台已有进程记录的停止确认和 `STOPPED` 回写由 `OpencodeProcessStopService` 完成，状态查询、健康探测和 heartbeat 刷新由 `OpencodeProcessStatusQueryService` 完成。指标历史主参数为 `windowMinutes`，`hours` 仅兼容旧客户端。
+- 暴露超级管理员运行管理 overview、容器/按稳定服务器身份的后端指标历史、旧后端进程指标兼容入口和有主/无主 opencode server 重启/停止 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选/历史/容器/端口参数校验、用户名筛选参数透传、manager 下属 opencode server 明细和 `BOUND/UNBOUND` 归属 DTO 映射、命令结果 DTO 映射、traceId 处理；重启/停止命令先按 `containerId` 的 Redis manager 快照定位容器所属 `linuxServerId`，目标不是当前 Java 或同服务器选中 Java 时透传用户 JWT 和 traceId 转发到目标 Java，由目标 Java 控制本服务器 manager。API 层不实现 opencode server 启动、停止、状态查询或健康确认；用户进程初始化、STOPPED 进程重启和 `port ... is not managed` 后重新拉起由 `test-agent-opencode-runtime` 的 `OpencodeProcessStartupService` 完成，平台已有进程记录的停止确认和 `STOPPED` 回写由 `OpencodeProcessStopService` 完成，状态查询、健康探测和 heartbeat 刷新由 `OpencodeProcessStatusQueryService` 完成。指标历史主参数为 `windowMinutes`，`hours` 仅兼容旧客户端。
 - 暴露超级管理员定时任务管理 API，Controller 只做 `SUPER_ADMIN` 鉴权、分页/筛选参数校验、DTO 映射和 traceId 处理。
 - 暴露 AI 回复反馈 API，Controller 只读取当前登录用户、messageId、traceId 和请求体，具体 assistant role 与归属校验由 runtime 服务完成。
 - 暴露超级管理员运营分析 API，Controller 只做 `SUPER_ADMIN` 鉴权、ISO 时间参数解析、通用筛选参数传递、CSV 响应头和统一错误转换；查询服务只读 rollup。
@@ -49,7 +49,7 @@
 
 ## 测试覆盖
 
-- `RuntimeControllerTest` 覆盖 Workspace、目录选择、Session、Run、Diff、agent-scoped Run URL、RunEvent SSE 恢复快照和内部平台兼容 URL。
+- `RuntimeControllerTest` 覆盖 Workspace 查询、Session、Run、Diff、agent-scoped Run URL、RunEvent SSE 恢复快照和内部平台兼容 URL。
 - `RuntimeManagementControllerTest` 覆盖运行管理 overview、按 `linuxServerId` 的后端指标历史主 API、旧 `backendProcessId` 指标兼容入口和进程重启/停止 API 的 `SUPER_ADMIN` 成功、跨 Java 后端路由优先于本地 manager gateway、manager 下属 opencode server 明细与归属字段响应映射、命令结果响应映射、用户名筛选/响应映射、`windowMinutes` 预设窗口、`hours` 兼容、历史参数默认值与上限、非超级管理员拒绝、未认证、非法分页/状态参数和 traceId；`RuntimeManagementBackendRoutingServiceTest` 覆盖按容器归属服务器转发命令和路由头防循环。
 - `SchedulerManagementControllerTest` 覆盖定时任务管理 API 的 `SUPER_ADMIN` 成功、`APP_ADMIN`/匿名拒绝、非法状态参数、任务 patch、手动触发和运行记录查询。
 - `AiMessageFeedbackControllerTest` 覆盖登录用户提交/查询自己的消息反馈，以及匿名请求拒绝。
@@ -72,4 +72,4 @@
 
 ## 后续 AI 编码指引
 
-新增 API 时先确认业务实现应落在哪个业务模块；本模块只新增 Controller/DTO/协议转换。平台自身接口放 `web.platform`，agent 兼容代理入口放 `web.agent`，横切入口支撑放 `web.common`。旧 URL 不删除，新 URL 必须同步记录到 `docs/api/http-api.md`。
+新增 API 时先确认业务实现应落在哪个业务模块；本模块只新增 Controller/DTO/协议转换。平台自身接口放 `web.platform`，agent 兼容代理入口放 `web.agent`，横切入口支撑放 `web.common`。旧 URL 默认不删除，明确作废的入口除外；新 URL 必须同步记录到 `docs/api/http-api.md`。

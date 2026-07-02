@@ -132,7 +132,7 @@
 - Observability：验证 traceId 传播、日志字段、关键指标注册。
 - Application service：使用 fake repository/facade 验证 workspace、session、run、cancel 编排和错误映射。
 - File service：验证路径穿越拒绝、单层目录列表、UTF-8 读写和超大文件拒绝。
-- Health/config：验证 local/prod properties binding、opencode node seed、Redis disabled/enabled health。
+- Health/config：验证 local/prod properties binding、废弃 opencode 固定节点配置缺失、Redis disabled/enabled health。
 
 ### 模块测试命令
 

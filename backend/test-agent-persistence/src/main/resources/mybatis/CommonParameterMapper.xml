@@ -10,13 +10,14 @@
             <arg column="parameter_chinese" javaType="java.lang.String"/>
             <arg column="parameter_value" javaType="java.lang.String"/>
             <arg column="platform" javaType="java.lang.String"/>
+            <arg column="editable" javaType="_boolean"/>
             <arg column="created_at" javaType="java.time.Instant"/>
             <arg column="updated_at" javaType="java.time.Instant"/>
         </constructor>
     </resultMap>
 
     <sql id="CommonParameterColumns">
-        parameter_id, parameter_english, parameter_chinese, parameter_value, platform, created_at, updated_at
+        parameter_id, parameter_english, parameter_chinese, parameter_value, platform, editable, created_at, updated_at
     </sql>
 
     <select id="findByEnglishNameAndPlatform" resultMap="CommonParameterRowMap">

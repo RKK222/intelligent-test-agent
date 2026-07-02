@@ -2,10 +2,12 @@ package com.icbc.testagent.app.config;
 
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.time.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.data.redis.autoconfigure.DataRedisProperties;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -24,12 +26,12 @@ public class RedisStartupHealthCheck implements ApplicationRunner {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RedisStartupHealthCheck.class);
 
-    private final TestAgentRuntimeProperties properties;
+    private final DataRedisProperties properties;
 
     /**
-     * 注入 Redis 连接配置。
+     * 注入 Spring 标准 Redis 连接配置。
      */
-    public RedisStartupHealthCheck(TestAgentRuntimeProperties properties) {
+    public RedisStartupHealthCheck(DataRedisProperties properties) {
         this.properties = properties;
     }
 
@@ -39,10 +41,9 @@ public class RedisStartupHealthCheck implements ApplicationRunner {
      */
     @Override
     public void run(ApplicationArguments args) {
-        TestAgentRuntimeProperties.Redis redis = properties.getRedis();
-        String host = redis.getHost();
-        int port = redis.getPort();
-        long timeoutMillis = Math.max(500, redis.getTimeout().toMillis());
+        String host = properties.getHost();
+        int port = properties.getPort();
+        long timeoutMillis = Math.max(500, redisConnectTimeoutMillis());
 
         // host 为空时表示未配置 Redis，跳过探测，交由各消费方按可选依赖处理。
         if (host == null || host.isBlank()) {
@@ -57,5 +58,12 @@ public class RedisStartupHealthCheck implements ApplicationRunner {
             LOGGER.error("Redis 连接失败，请检查 Redis 是否可达: host={}, port={}（超时 {}ms）",
                     host, port, timeoutMillis, exception);
         }
+    }
+
+    private long redisConnectTimeoutMillis() {
+        Duration timeout = properties.getConnectTimeout() != null
+                ? properties.getConnectTimeout()
+                : properties.getTimeout();
+        return timeout == null ? 1000 : Math.max(1, timeout.toMillis());
     }
 }

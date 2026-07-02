@@ -83,7 +83,7 @@ class UserOpencodeProcessAssignmentServiceTest {
         UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
 
         assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
-        assertThat(response.baseUrl()).isEqualTo("http://10.8.0.13:4200");
+        assertThat(response.baseUrl()).isEqualTo("http://10.8.0.21:4200");
         assertThat(gateway.startCommands).hasSize(1);
         assertThat(gateway.healthCommands).hasSize(1);
         assertThat(gateway.startCommands.getFirst().containerId()).isEqualTo(new OpencodeContainerId("ctr_idle"));
@@ -93,7 +93,24 @@ class UserOpencodeProcessAssignmentServiceTest {
                 .extracting(UserOpencodeProcessBinding::linuxServerId)
                 .isEqualTo(new LinuxServerId("10.8.0.13"));
         assertThat(repository.savedNodes).hasSize(1);
-        assertThat(repository.savedNodes.getFirst().baseUrl()).isEqualTo("http://10.8.0.13:4200");
+        assertThat(repository.savedNodes.getFirst().baseUrl()).isEqualTo("http://10.8.0.21:4200");
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeUsesAdvertisedHostForBaseUrlWhenLinuxServerIdIsStableIdentity() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_idle", container("ctr_idle", "linux-prod-a", 4200, 4205, 4, 0));
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = service(repository, gateway, "linux-prod-a", "10.8.0.21");
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(gateway.startCommands).singleElement().satisfies(command -> {
+            assertThat(command.linuxServerId()).isEqualTo(new LinuxServerId("linux-prod-a"));
+            assertThat(command.baseUrl()).isEqualTo("http://10.8.0.21:4200");
+        });
+        assertThat(response.serviceAddress()).isEqualTo("10.8.0.21:4200");
+        assertThat(repository.savedNodes.getFirst().baseUrl()).isEqualTo("http://10.8.0.21:4200");
     }
 
     @org.junit.jupiter.api.Test
@@ -227,7 +244,7 @@ class UserOpencodeProcessAssignmentServiceTest {
         UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
 
         assertThat(response.port()).isEqualTo(4097);
-        assertThat(gateway.startCommands.getFirst().baseUrl()).isEqualTo("http://10.8.0.12:4097");
+        assertThat(gateway.startCommands.getFirst().baseUrl()).isEqualTo("http://10.8.0.21:4097");
     }
 
     @org.junit.jupiter.api.Test
@@ -413,7 +430,7 @@ class UserOpencodeProcessAssignmentServiceTest {
         UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID);
 
         assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
-        assertThat(response.baseUrl()).isEqualTo("http://10.8.0.13:4200");
+        assertThat(response.baseUrl()).isEqualTo("http://10.8.0.21:4200");
         assertThat(gateway.startCommands).singleElement().satisfies(command -> {
             assertThat(command.containerId()).isEqualTo(new OpencodeContainerId("ctr_idle"));
             assertThat(command.linuxServerId()).isEqualTo(new LinuxServerId("10.8.0.13"));
@@ -518,13 +535,30 @@ class UserOpencodeProcessAssignmentServiceTest {
     }
 
     private static UserOpencodeProcessAssignmentService service(FakeRepository repository, RecordingGateway gateway) {
-        return serviceWithPublicConfigDir(repository, gateway, Path.of(CONFIG_DIR));
+        return service(repository, gateway, "10.8.0.21", "10.8.0.21");
+    }
+
+    private static UserOpencodeProcessAssignmentService service(
+            FakeRepository repository,
+            RecordingGateway gateway,
+            String linuxServerId,
+            String advertisedHost) {
+        return serviceWithPublicConfigDir(repository, gateway, Path.of(CONFIG_DIR), linuxServerId, advertisedHost);
     }
 
     private static UserOpencodeProcessAssignmentService serviceWithPublicConfigDir(
             FakeRepository repository,
             RecordingGateway gateway,
             Path publicConfigDir) {
+        return serviceWithPublicConfigDir(repository, gateway, publicConfigDir, "10.8.0.21", "10.8.0.21");
+    }
+
+    private static UserOpencodeProcessAssignmentService serviceWithPublicConfigDir(
+            FakeRepository repository,
+            RecordingGateway gateway,
+            Path publicConfigDir,
+            String linuxServerId,
+            String advertisedHost) {
         return new UserOpencodeProcessAssignmentService(
                 repository,
                 commonParameters(publicConfigDir),
@@ -534,8 +568,9 @@ class UserOpencodeProcessAssignmentServiceTest {
                         repository,
                         new ManagerControlSettings(
                                 "secret-token",
-                                "http://10.8.0.21:8080",
-                                new LinuxServerId("10.8.0.21"),
+                                "http://" + advertisedHost + ":8080",
+                                new LinuxServerId(linuxServerId),
+                                advertisedHost,
                                 Duration.ofSeconds(10),
                                 Duration.ofSeconds(30),
                                 Duration.ofSeconds(5),

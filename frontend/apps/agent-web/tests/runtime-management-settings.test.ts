@@ -240,17 +240,104 @@ describe("runtime management settings", () => {
     const api = {
       getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(overview)
     };
-    const { findByText, queryByText, queryClient } = renderRuntimePanel(api);
+    const { findAllByText, findByText, queryByText, queryClient } = renderRuntimePanel(api);
 
     expect(await findByText("服务器 / Java 进程")).toBeTruthy();
     expect(await findByText("bjp_1234567890abcdef")).toBeTruthy();
-    expect(await findByText("10.8.0.12")).toBeTruthy();
+    expect((await findAllByText("10.8.0.12")).length).toBeGreaterThanOrEqual(2);
     expect(await findByText("12.5%")).toBeTruthy();
     expect(await findByText((_content, element) =>
       element?.tagName === "TD" && Boolean(element.textContent?.includes("42 线程"))
     )).toBeTruthy();
     expect(queryByText("Linux 服务器")).toBeNull();
     expect(queryByText("后端 Java 进程")).toBeNull();
+
+    queryClient.clear();
+  });
+
+  it("renders advertised host as a separate address column when stable server id is not an IP", async () => {
+    const overview: OpencodeRuntimeManagementOverview = {
+      ...emptyOverview,
+      summary: {
+        ...emptyOverview.summary,
+        linuxServers: 1,
+        readyLinuxServers: 1,
+        backendProcesses: 1,
+        readyBackendProcesses: 1,
+        containers: 1,
+        readyContainers: 1,
+        managers: 1,
+        connectedManagers: 1
+      },
+      linuxServers: [
+        {
+          linuxServerId: "linux-prod-a",
+          name: "linux-prod-a",
+          status: "READY",
+          capacitySummary: {},
+          lastHeartbeatAt: "2026-06-24T08:00:00Z",
+          createdAt: "2026-06-24T08:00:00Z",
+          updatedAt: "2026-06-24T08:00:00Z",
+          traceId: "trace_server"
+        }
+      ],
+      backendProcesses: [
+        {
+          backendProcessId: "bjp_1234567890abcdef",
+          linuxServerId: "linux-prod-a",
+          listenUrl: "http://10.8.0.21:8080",
+          status: "READY",
+          startedAt: "2026-06-24T08:00:00Z",
+          lastHeartbeatAt: "2026-06-24T08:00:00Z",
+          createdAt: "2026-06-24T08:00:00Z",
+          updatedAt: "2026-06-24T08:00:00Z",
+          traceId: "trace_backend"
+        }
+      ],
+      containers: [
+        {
+          containerId: "ctr_01",
+          linuxServerId: "linux-prod-a",
+          containerName: "opencode-a",
+          portStart: 4096,
+          portEnd: 4100,
+          maxProcesses: 4,
+          currentProcesses: 0,
+          availableCapacity: 4,
+          status: "READY",
+          lastHeartbeatAt: "2026-06-24T08:00:00Z",
+          createdAt: "2026-06-24T08:00:00Z",
+          updatedAt: "2026-06-24T08:00:00Z",
+          traceId: "trace_container"
+        }
+      ],
+      managers: [
+        {
+          managerId: "mgr_1234567890abcdef",
+          containerId: "ctr_01",
+          linuxServerId: "linux-prod-a",
+          protocolVersion: "opencode-manager.v1",
+          connectionStatus: "CONNECTED",
+          capabilities: {},
+          lastHeartbeatAt: "2026-06-24T08:00:00Z",
+          createdAt: "2026-06-24T08:00:00Z",
+          updatedAt: "2026-06-24T08:00:00Z",
+          traceId: "trace_manager",
+          managedProcesses: []
+        }
+      ]
+    };
+    const api = {
+      getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(overview)
+    };
+    const { findByText, getAllByText, queryClient } = renderRuntimePanel(api);
+
+    expect(await findByText("服务器 / Java 进程")).toBeTruthy();
+    expect(await findByText("容器 / 管理进程")).toBeTruthy();
+    await findByText("服务器 / Java 进程");
+    expect(getAllByText("linux-prod-a").length).toBeGreaterThanOrEqual(2);
+    expect(getAllByText("IP地址").length).toBeGreaterThanOrEqual(2);
+    expect(getAllByText("10.8.0.21").length).toBeGreaterThanOrEqual(2);
 
     queryClient.clear();
   });
@@ -651,7 +738,7 @@ describe("runtime management settings", () => {
     queryClient.clear();
   });
 
-  it("loads backend metric charts by server IP and labels Java service JVM scope", async () => {
+  it("loads backend metric charts by stable server id and labels Java service JVM scope", async () => {
     const overview: OpencodeRuntimeManagementOverview = {
       ...emptyOverview,
       summary: {
@@ -694,9 +781,9 @@ describe("runtime management settings", () => {
         ]
       })
     };
-    const { findByText, queryClient } = renderRuntimePanel(api);
+    const { findAllByText, findByText, queryClient } = renderRuntimePanel(api);
 
-    await fireEvent.click(await findByText("10.8.0.12"));
+    await fireEvent.click((await findAllByText("10.8.0.12"))[0]);
 
     await waitFor(() => expect(api.getOpencodeRuntimeBackendServerMetrics).toHaveBeenLastCalledWith(
       "10.8.0.12",

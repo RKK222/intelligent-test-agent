@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, inject, onMounted, ref } from "vue";
-import { ElMessage } from "element-plus";
+import { computed, inject, onMounted, ref, watch } from "vue";
+import { ElMessage, ElMessageBox } from "element-plus";
 import type { BackendApiClient } from "@test-agent/backend-api";
 import type {
   CreateUserPayload,
   CurrentUser,
+  IdentityStatus,
   RoleOption,
   UserManagementUser
 } from "@test-agent/shared-types";
@@ -41,6 +42,71 @@ const form = ref<CreateUserPayload>({
   department: ""
 });
 const creating = ref(false);
+
+// 数据库 IDENTITY 运维
+const identityVisible = ref<string[]>([]);
+const identityStatuses = ref<IdentityStatus[]>([]);
+const identityLoading = ref(false);
+
+async function loadIdentityStatuses() {
+  identityLoading.value = true;
+  try {
+    identityStatuses.value = await api.listIdentityStatuses();
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "加载 IDENTITY 状态失败");
+  } finally {
+    identityLoading.value = false;
+  }
+}
+
+async function alignIdentity(row: IdentityStatus) {
+  try {
+    await ElMessageBox.confirm(
+      `确认将 ${row.tableName} 的 IDENTITY 对齐到 max(id)+1？`,
+      "对齐 IDENTITY",
+      { type: "warning" }
+    );
+    const updated = await api.alignIdentity(row.table);
+    identityStatuses.value = identityStatuses.value.map(
+      (item) => (item.table === updated.table ? updated : item)
+    );
+    ElMessage.success("已对齐");
+  } catch (error) {
+    if (error !== "cancel") {
+      ElMessage.error(error instanceof Error ? error.message : "对齐失败");
+    }
+  }
+}
+
+async function restartIdentity(row: IdentityStatus) {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      `输入目标值（需大于当前最大 ID ${row.maxId ?? 0}）`,
+      "重置 IDENTITY",
+      { inputPattern: /^\d+$/, inputErrorMessage: "请输入正整数", type: "warning" }
+    );
+    const target = Number(value);
+    if (row.maxId != null && target <= row.maxId) {
+      ElMessage.error("目标值必须大于当前最大 ID");
+      return;
+    }
+    const updated = await api.restartIdentity(row.table, target);
+    identityStatuses.value = identityStatuses.value.map(
+      (item) => (item.table === updated.table ? updated : item)
+    );
+    ElMessage.success("已重置");
+  } catch (error) {
+    if (error !== "cancel") {
+      ElMessage.error(error instanceof Error ? error.message : "重置失败");
+    }
+  }
+}
+
+watch(identityVisible, (visible) => {
+  if (visible.includes("identity") && identityStatuses.value.length === 0) {
+    loadIdentityStatuses();
+  }
+});
 
 async function run(action: () => Promise<void>) {
   loading.value = true;
@@ -222,6 +288,36 @@ onMounted(() => {
           />
         </div>
       </div>
+
+      <!-- 数据库 IDENTITY 运维 -->
+      <el-collapse v-model="identityVisible" class="ta-identity-collapse">
+        <el-collapse-item title="数据库 IDENTITY 运维（仅超级管理员）" name="identity">
+          <div class="ta-identity-toolbar">
+            <el-button size="small" :disabled="identityLoading" @click="loadIdentityStatuses">刷新</el-button>
+            <span v-if="identityStatuses.some((s) => s.conflict)" class="ta-identity-warn">
+              存在序列落后于已有主键的表，新增数据可能冲突，建议对齐。
+            </span>
+          </div>
+          <el-table :data="identityStatuses" size="small" border>
+            <el-table-column prop="tableName" label="表名" />
+            <el-table-column prop="currentValue" label="序列当前值" />
+            <el-table-column prop="maxId" label="最大ID" />
+            <el-table-column label="是否错位">
+              <template #default="{ row }">
+                <el-tag :type="row.conflict ? 'danger' : 'success'" size="small">
+                  {{ row.conflict ? '错位' : '正常' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="180">
+              <template #default="{ row }">
+                <el-button size="small" @click="alignIdentity(row)">对齐</el-button>
+                <el-button size="small" @click="restartIdentity(row)">重置</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-collapse-item>
+      </el-collapse>
     </template>
   </div>
 </template>
@@ -266,5 +362,18 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   margin-top: 8px;
+}
+.ta-identity-collapse {
+  margin-top: 8px;
+}
+.ta-identity-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.ta-identity-warn {
+  color: #d46b08;
+  font-size: 12px;
 }
 </style>

@@ -1382,7 +1382,6 @@ const hasFileChanges = computed(() => (props.fileChanges?.length ?? 0) > 0)
 function resolveServiceAddress(process?: OpencodeProcessState | null): string {
   if (!process) return ''
   if (process.serviceAddress?.trim()) return process.serviceAddress.trim()
-  if (process.linuxServerId && process.port) return `${process.linuxServerId}:${process.port}`
   // baseUrl 形如 http://host:port，退化取 host:port
   try {
     if (process.baseUrl) {
@@ -1392,6 +1391,7 @@ function resolveServiceAddress(process?: OpencodeProcessState | null): string {
   } catch {
     /* ignore */
   }
+  if (process.linuxServerId && process.port) return `${process.linuxServerId}:${process.port}`
   return ''
 }
 

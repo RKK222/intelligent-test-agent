@@ -38,7 +38,7 @@
 - `db/migration/V13__seed_fcoss_more_workspaces.sql`：历史本地 F-COSS 扩展种子数据。
 - `db/migration/V16__add_message_and_run_usage_fields.sql`：扩展 session_messages/runs 的 run、remote message、parts、token、cost 和 active-run 索引。
 - `db/migration/V14__create_opencode_process_management_tables.sql`：创建 Linux 服务器、后端 Java 进程、opencode 容器、容器管理进程、管理进程连接、用户专属 opencode server 进程和用户绑定表。
-- `db/migration/V15__add_opencode_process_id_check_constraints.sql`：为 opencode 进程管理表加 `process_id` 前缀、IPv4、状态、port、baseUrl 形状等 CHECK 约束。
+- `db/migration/V15__add_opencode_process_id_check_constraints.sql`：为 opencode 进程管理表加 `process_id` 前缀、稳定服务器身份、状态、port、baseUrl 形状等 CHECK 约束。
 - `db/migration/V20260625184300__create_scheduler_framework_tables.sql`：创建 scheduler 表并为 sessions/runs/session_messages 增加来源预留字段。
 - `db/migration/V20260626150000__add_common_parameters_and_workspace_create_operations.sql`：创建通用参数表、代码库英文名字段和工作空间创建进度表。
 - `db/migration/V17__seed_local_opencode_machine_for_default_user.sql`：历史本地开发种子脚本，曾预置一台 `127.0.0.1` 的 opencode 机器并绑定默认开发用户；该版本只做 Flyway 历史保留，禁止删除、重命名或直接改写。

@@ -26,7 +26,7 @@
 | `test-agent-opencode-sdk-generated` | 从 opencode OpenAPI spec 生成的 Java SDK |
 | `test-agent-opencode-client` | 业务侧 opencode client facade |
 | `test-agent-agent-runtime` | 多 agent 运行时接口、registry、统一日志/指标包装和 opencode 适配器 |
-| `test-agent-workspace-management` | Workspace、文件、受控目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、agent 和 skill 管理业务 |
+| `test-agent-workspace-management` | Workspace、文件、超级管理员服务器目录选择、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、agent 和 skill 管理业务 |
 | `test-agent-opencode-runtime` | Session、Run、RunEvent 编排、agent runtime 调用、Diff/revert、AI 回复反馈、运营分析 rollup/query 和 PTY terminal 业务 |
 | `test-agent-system-management` | 用户、角色、权限等系统内部管理业务，包括用户注册、登录认证、Token 管理等 |
 | `test-agent-configuration-management` | 应用、应用成员、代码库英文名与关联、应用工作空间和个人 SSH key 配置管理 |
@@ -108,9 +108,11 @@ cp .env.local.example .env.local
 | `TEST_AGENT_ROOT` | 项目根目录，由启动脚本自动导出；通用参数路径可使用 `$TEST_AGENT_ROOT` 引用。 |
 | `TESTAGENT` | 本地测试库历史兼容别名，启动脚本默认与 `TEST_AGENT_ROOT` 相同；仅用于展开既有 `$TESTAGENT/...` 通用参数路径。 |
 | `TEST_AGENT_LOCAL_DB_*` | 本地 PostgreSQL 连接信息 |
-| `TEST_AGENT_REDIS_HOST` / `TEST_AGENT_REDIS_PORT` / `TEST_AGENT_REDIS_PASSWORD` | Redis 连接信息；Redis 是系统必需依赖。 |
+| `TEST_AGENT_REDIS_HOST` / `TEST_AGENT_REDIS_PORT` / `TEST_AGENT_REDIS_PASSWORD` | Redis 连接信息，绑定到 Spring 标准 `spring.data.redis.*`；Redis 是系统必需依赖。 |
 | `TEST_AGENT_SCHEDULER_ENABLED` | 是否启用定时任务后台扫描，默认 false；启用时使用同一 Redis。 |
-| `TEST_AGENT_OPENCODE_BASE_URL` | OpenCode 服务地址 |
+| `TEST_AGENT_OPENCODE_BASE_URL` | 本地脚本判断是否启动 opencode-manager 和端口池的地址，不再作为 Java 固定 opencode node 配置。 |
+| `TEST_AGENT_LINUX_SERVER_ID` | 稳定 Linux 服务器身份，可使用 `server-a`、`prod_01`、`10.1.2.3` 等 1-128 位标识；缺失时使用 Java 主机名。 |
+| `TEST_AGENT_SERVER_ADVERTISED_HOST` | 当前 Java/用户 opencode server 对其它后端和浏览器可访问的主机地址；缺失时复用现有内网 IPv4 探测。 |
 | `TEST_AGENT_MODEL_CATALOG_SOURCE` | 模型目录来源：`opencode` 保持旧代理，`external` 直连 OpenAI-compatible `/models`，`internal` 从数据库读取企业内模型。local 默认 `external`，test/prod 默认 `internal`；历史 `bailian` 值兼容为 `external`。 |
 | `EXTERNAL_API_KEY` | 外部 OpenAI-compatible API Key；变量名可通过 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 改为其他环境变量名。 |
 | `ICBC_OPENAI_AUTH_TOKEN` | 企业内 `icbc-openai` 访问 token；变量名可通过 `TEST_AGENT_ICBC_OPENAI_TOKEN_ENV` 改为其他环境变量名。 |
@@ -119,9 +121,9 @@ cp .env.local.example .env.local
 
 `guo` profile 的 IDEA 启动路径已把上述本地 Java 运行参数写入 yml；继续使用 `tools/dev-backend-run.sh`、`restart-dev-services.sh --profile guo --env-file .env.local` 或 `restart-dev-services.ps1 -Profile guo -EnvFile .env.local` 时，`.env.local` 仍可覆盖 yml，便于本地联调脚本启动前后端和 opencode。根目录一键脚本不带参数时默认读取 `.env.test` 并启动 `test` profile，test profile 下默认启动本机 Go manager，即使 `.env.test` 中 `TEST_AGENT_OPENCODE_BASE_URL` 指向共享测试地址；停止 manager 时会清理其托管的用户 opencode 子进程和 state JSON，防止端口池残留进程导致下次初始化失败。生产和本地都不再配置 `OPENCODE_MANAGER_ID`，Go manager 会由容器名称和固定管理进程名 `opencode-manager` 派生内部 `managerId`。
 
-用户专属 opencode 进程的 session/config 路径来自数据库 `common_parameters`，不是 `.env.local`。系统级数据根目录通过 `SYS_DATA_ROOT_DIR` 维护，默认值为 macOS `$HOME/.testagent`、Linux `/data/.testagent`、Windows `D:/data/.testagent`；Java 后端启动时把当前服务器 IPv4 写入 `SYS_DATA_ROOT_DIR/.serverip`，Go manager 在连接 Java 前按同一系统参数的平台默认路径读取该文件。每个 manager 只连接本服务器 Java；前端请求可落到任意 Java，后端统一通过 `BackendJavaRouteResolver` 解析目标 `linuxServerId/containerId` 对应 Java，并通过 `BackendHttpForwarder` 透传到目标 Java，由目标 Java 控制本服务器 managers，不允许当前 Java 静默迁移旧 binding。是否已分配只以 `user_opencode_process_bindings` 的 ACTIVE 记录为准；`/processes/me` 状态查询在目标后端不可用时会返回已分配但健康不可确认的 `NOT_RUNNING + serviceAddress`，初始化、Run 和 runtime 代理仍必须由目标服务器执行，不做本机降级。所有强状态查询、健康探测、状态回写和 Redis opencode heartbeat 刷新都必须走 `OpencodeProcessStatusQueryService`：先确认平台进程记录是否存在，再通过目标 Java 的本机 manager health 归一为未启动、运行中或健康检查异常。点击初始化且没有远端路由时，Java 后端按本实例已连接的健康容器视图选择进程数最少且有空闲端口的目标容器，再调用 `OpencodeProcessStartupService` 向该容器对应的 manager 下发 `start`；该公共启动服务会先保存候选进程，再复用公共状态查询服务确认本地 state/PID 和 opencode HTTP health，默认最多等待 manager command-timeout（10 秒）让 opencode HTTP 端点 ready，只有健康后才写入 `RUNNING`、ACTIVE binding、Redis heartbeat 和兼容 `ExecutionNode`。后续所有涉及 opencode server 启动、重启后拉起或端口复用的业务入口都必须调用这套公共启动程序，不得自行实现 start、状态回写或健康确认；所有涉及 opencode server 停止或停止后状态回写的业务入口都必须调用 `OpencodeProcessStopService`，不得自行实现 stop、停止成功判定或 `STOPPED` 回写。manager 使用通过 `configRequest/configUpdate` 同步的 `OPENCODE_PUBLIC_CONFIG_DIR`。目录存在且非空的检查只在目标 manager 所在服务器执行。目录缺失、为空、非目录或不可读时，manager 返回 `OPENCODE_UNAVAILABLE`，错误消息包含目标服务器和 manager 实际检查的配置目录，并提示联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化；Java 仅映射为统一平台错误，不在本机提前检查。本地和生产都必须启动 Go manager，不再支持 `local-direct` 或 `gateway-mode=local` 绕过。
+用户专属 opencode 进程的 session/config 路径来自数据库 `common_parameters`，不是 `.env.local`。系统级数据根目录通过 `SYS_DATA_ROOT_DIR` 维护，默认值为 macOS `$HOME/.testagent`、Linux `/data/.testagent`、Windows `D:/data/.testagent`；Java 后端启动时写入 `SYS_DATA_ROOT_DIR/.serverid` 和 `.serverhost`，分别表示稳定服务器身份和可访问主机地址，Go manager 在连接 Java 前按同一系统参数的平台默认路径读取这两个文件。每个 manager 只连接本服务器 Java；同一服务器允许运行多个 Java，多个 Java 共享同一个 `linuxServerId`，入口 Java 会通过 `BackendJavaRouteResolver` 优先选择与目标服务器 manager 已连接的 Java，其次选择同服务器最新心跳 Java，再通过 `BackendHttpForwarder` 透传到目标 Java，由目标 Java 控制本服务器 managers。是否已分配只以 `user_opencode_process_bindings` 的 ACTIVE 记录为准；`/processes/me` 状态查询在目标后端不可用时会返回已分配但健康不可确认的 `NOT_RUNNING + serviceAddress`，初始化、Run 和 runtime 代理仍必须由目标服务器执行，不做本机降级。所有强状态查询、健康探测、状态回写和 Redis opencode heartbeat 刷新都必须走 `OpencodeProcessStatusQueryService`：先确认平台进程记录是否存在，再通过目标 Java 的本机 manager health 归一为未启动、运行中或健康检查异常。点击初始化且没有远端路由时，Java 后端按本实例已连接的健康容器视图选择进程数最少且有空闲端口的目标容器，再调用 `OpencodeProcessStartupService` 向该容器对应的 manager 下发 `start`；新进程 `baseUrl` 使用 `.serverhost` / `TEST_AGENT_SERVER_ADVERTISED_HOST`，不再由 `linuxServerId` 拼接。该公共启动服务会先保存候选进程，再复用公共状态查询服务确认本地 state/PID 和 opencode HTTP health，默认最多等待 manager command-timeout（10 秒）让 opencode HTTP 端点 ready，只有健康后才写入 `RUNNING`、ACTIVE binding、Redis heartbeat 和兼容 `ExecutionNode`。后续所有涉及 opencode server 启动、重启后拉起或端口复用的业务入口都必须调用这套公共启动程序，不得自行实现 start、状态回写或健康确认；所有涉及 opencode server 停止或停止后状态回写的业务入口都必须调用 `OpencodeProcessStopService`，不得自行实现 stop、停止成功判定或 `STOPPED` 回写。manager 使用通过 `configRequest/configUpdate` 同步的 `OPENCODE_PUBLIC_CONFIG_DIR`。目录存在且非空的检查只在目标 manager 所在服务器执行。目录缺失、为空、非目录或不可读时，manager 返回 `OPENCODE_UNAVAILABLE`，错误消息包含目标服务器和 manager 实际检查的配置目录，并提示联系超级管理员进入“系统管理 → 配置管理 → opencode公共配置管理”完成初始化；Java 仅映射为统一平台错误，不在本机提前检查。本地和生产都必须启动 Go manager，不再支持 `local-direct` 或 `gateway-mode=local` 绕过。
 
-运行管理中的 Java latest snapshot、在线心跳和 JVM 指标历史都以 `linuxServerId`（服务器 IPv4）为唯一键写入 Redis；`backendProcessId` 只表示当前 Java 实例、manager-backend 连接和拓扑连线，不作为同一服务器 Java 行或 JVM 趋势的身份。超级管理员在运行管理页重启/停止 opencode server 时，入口 Java 会先按统一 resolver 定位 `containerId` 所属服务器，目标不是本机时转发到目标 Java，再由目标 Java 控制本服务器 manager。公共配置管理页同样按 `linuxServerId` 合并在线 Java 快照，避免 Java 重启后的 TTL 窗口内出现同 IP 重复服务器行。
+运行管理中的 Java 后端快照按 `backendProcessId` 写入 Redis，并按 `linuxServerId` 分组选择目标 Java；`linuxServerId` 表示稳定服务器身份，不再要求是 IP。超级管理员在运行管理页重启/停止 opencode server 时，入口 Java 会先按统一 resolver 定位 `containerId` 所属服务器，目标不是当前 Java 或同服务器选中 Java 时转发到目标 Java，再由目标 Java 控制本服务器 manager。公共配置管理页同样按稳定 `linuxServerId` 合并服务器视图。
 
 验证后端启动成功：
 ```bash
@@ -179,7 +181,7 @@ mvn test
 - 新增可部署入口只允许放在 `test-agent-app`。
 - 新增业务文件前先列出现有合适工程；无合适工程时按业务边界新建 Maven module。
 - `test-agent-app` 只放启动、装配、profile、migration 和 health 等运行入口，不放 Controller 或业务服务。
-- HTTP/SSE/WebSocket 入口放在 `test-agent-api`，旧 `/api/...` URL 必须保留，新 URL 同步写入 `docs/api/http-api.md`。
+- HTTP/SSE/WebSocket 入口放在 `test-agent-api`，旧 `/api/...` URL 默认保留，明确作废的入口除外；新 URL 同步写入 `docs/api/http-api.md`。
 - Workspace、文件、git/diff、设置页初始版本工作区创建、应用版本工作区、个人工作区、agent、skill 管理业务放在 `test-agent-workspace-management`。
 - 多 agent 运行时接口、`agentId` 选择、日志/指标包装和具体 agent 适配器放在 `test-agent-agent-runtime`。
 - Session、Run、RunEvent、agent runtime 调用、Diff/revert、terminal 业务放在 `test-agent-opencode-runtime`。

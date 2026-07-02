@@ -291,13 +291,13 @@ class RuntimeManagementControllerTest {
         WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
 
         client.get()
-                .uri("/api/internal/platform/opencode-runtime/management/overview?linuxServerId=not-an-ip")
+                .uri("/api/internal/platform/opencode-runtime/management/overview?linuxServerId=bad:id")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isBadRequest()
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("VALIDATION_ERROR")
-                .jsonPath("$.details.linuxServerId").isEqualTo("not-an-ip");
+                .jsonPath("$.details.linuxServerId").isEqualTo("bad:id");
     }
 
     @Test

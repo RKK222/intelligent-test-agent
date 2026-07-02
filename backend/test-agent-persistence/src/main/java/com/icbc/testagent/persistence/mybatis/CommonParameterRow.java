@@ -11,6 +11,7 @@ public record CommonParameterRow(
         String parameterChinese,
         String parameterValue,
         String platform,
+        boolean editable,
         Instant createdAt,
         Instant updatedAt) {
 }

@@ -107,6 +107,13 @@ public class BackendJavaProcessLifecycleService {
     }
 
     /**
+     * 返回当前服务器对其它 Java、manager 和 opencode server 可访问的主机名/IP。
+     */
+    public String advertisedHost() {
+        return settings.advertisedHost();
+    }
+
+    /**
      * 注册或刷新当前后端实例 Redis 心跳。
      *
      * <p>除写入本实例的 Redis 运行快照外，还会在拓扑首次落库或状态变化时为同服务器下所有
@@ -129,6 +136,7 @@ public class BackendJavaProcessLifecycleService {
                 LinuxServerStatus.READY,
                 Map.of(
                         "backendListenUrl", settings.listenUrl(),
+                        "serverAdvertisedHost", settings.advertisedHost(),
                         "backendWorkingDirectory", Path.of("").toAbsolutePath().normalize().toString()),
                 now,
                 existingServer == null ? now : existingServer.createdAt(),

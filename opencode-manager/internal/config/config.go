@@ -22,7 +22,8 @@ const (
 
 	defaultLinuxSysDataRootDir   = "/data/.testagent"
 	defaultWindowsSysDataRootDir = "D:/data/.testagent"
-	serverIPFileName             = ".serverip"
+	serverIDFileName             = ".serverid"
+	serverHostFileName           = ".serverhost"
 	managerProcessName           = "opencode-manager"
 
 	defaultBackendPort          = 8080
@@ -136,14 +137,14 @@ func loadFromEnvWithRuntime(rt configRuntime) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	serverIP, err := resolveServerIP(rt)
+	linuxServerID, _, err := resolveServerIdentityAndHost(rt)
 	if err != nil {
 		return Config{}, err
 	}
 
 	cfg := Config{
 		ContainerID:   containerID,
-		LinuxServerID: serverIP,
+		LinuxServerID: linuxServerID,
 		PortStart:     portStart,
 		PortEnd:       portEnd,
 		MaxProcesses:  maxProcesses,
@@ -178,14 +179,14 @@ func loadControlFromEnvWithRuntime(rt configRuntime) (ControlConfig, error) {
 	if err != nil {
 		return ControlConfig{}, err
 	}
-	serverIP, err := resolveServerIP(rt)
+	linuxServerID, serverHost, err := resolveServerIdentityAndHost(rt)
 	if err != nil {
 		return ControlConfig{}, err
 	}
 	availablePorts := portEnd - portStart + 1
 	base := Config{
 		ContainerID:           containerID,
-		LinuxServerID:         serverIP,
+		LinuxServerID:         linuxServerID,
 		PortStart:             portStart,
 		PortEnd:               portEnd,
 		MaxProcesses:          availablePorts,
@@ -194,7 +195,7 @@ func loadControlFromEnvWithRuntime(rt configRuntime) (ControlConfig, error) {
 		AllowedCORS:           splitCSV(os.Getenv("OPENCODE_ALLOWED_CORS")),
 		RuntimeConfigRequired: true,
 	}
-	webSocketURL, err := derivedBackendWebSocketURL(base.LinuxServerID)
+	webSocketURL, err := derivedBackendWebSocketURL(serverHost)
 	if err != nil {
 		return ControlConfig{}, err
 	}
@@ -217,8 +218,8 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.ContainerID) == "" {
 		return fmt.Errorf("OPENCODE_MANAGER_CONTAINER_ID is required")
 	}
-	if !isUsableIPv4(c.LinuxServerID) {
-		return fmt.Errorf("linux server id must be a non-loopback IPv4")
+	if !isStableServerID(c.LinuxServerID) {
+		return fmt.Errorf("linux server id must be 1-128 chars of letters, digits, dot, underscore or hyphen")
 	}
 	if c.PortStart < 1 || c.PortEnd > 65535 || c.PortStart > c.PortEnd {
 		return fmt.Errorf("port range must be between 1 and 65535")
@@ -297,32 +298,60 @@ func (c Config) LogPath(port int) string {
 	return filepath.Join(c.StateDir, "logs", fmt.Sprintf("%d.log", port))
 }
 
-func resolveServerIP(rt configRuntime) (string, error) {
+func resolveServerIdentityAndHost(rt configRuntime) (string, string, error) {
 	if strings.EqualFold(rt.goos, "windows") {
+		hostname, err := rt.hostname()
+		if err != nil {
+			return "", "", fmt.Errorf("Windows hostname lookup failed: %w", err)
+		}
+		linuxServerID := normalizeIdentifier(hostname)
+		if !isStableServerID(linuxServerID) {
+			return "", "", fmt.Errorf("Windows hostname must contain a stable linux server id")
+		}
 		ip, err := rt.localIPv4()
 		if err != nil {
-			return "", fmt.Errorf("detect Windows local IPv4 failed: %w", err)
+			return "", "", fmt.Errorf("detect Windows local IPv4 failed: %w", err)
 		}
 		ip = strings.TrimSpace(ip)
 		if !isUsableIPv4(ip) {
-			return "", fmt.Errorf("detected Windows local IPv4 is invalid")
+			return "", "", fmt.Errorf("detected Windows local IPv4 is invalid")
 		}
-		return ip, nil
+		return linuxServerID, ip, nil
 	}
 
-	path, err := serverIPFilePath(rt)
+	idPath, err := serverIDFilePath(rt)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return waitForServerIPFile(rt, path)
+	hostPath, err := serverHostFilePath(rt)
+	if err != nil {
+		return "", "", err
+	}
+	linuxServerID, err := waitForServerIDFile(rt, idPath)
+	if err != nil {
+		return "", "", err
+	}
+	serverHost, err := waitForServerHostFile(rt, hostPath)
+	if err != nil {
+		return "", "", err
+	}
+	return linuxServerID, serverHost, nil
 }
 
-func serverIPFilePath(rt configRuntime) (string, error) {
+func serverIDFilePath(rt configRuntime) (string, error) {
 	root, err := sysDataRootDir(rt)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(root, serverIPFileName), nil
+	return filepath.Join(root, serverIDFileName), nil
+}
+
+func serverHostFilePath(rt configRuntime) (string, error) {
+	root, err := sysDataRootDir(rt)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, serverHostFileName), nil
 }
 
 func sysDataRootDir(rt configRuntime) (string, error) {
@@ -344,7 +373,29 @@ func sysDataRootDir(rt configRuntime) (string, error) {
 	}
 }
 
-func waitForServerIPFile(rt configRuntime, path string) (string, error) {
+func waitForServerIDFile(rt configRuntime, path string) (string, error) {
+	value, err := waitForRequiredFile(rt, path, "server identity file .serverid")
+	if err != nil {
+		return "", err
+	}
+	if !isStableServerID(value) {
+		return "", fmt.Errorf("server identity file .serverid contains invalid stable id")
+	}
+	return value, nil
+}
+
+func waitForServerHostFile(rt configRuntime, path string) (string, error) {
+	value, err := waitForRequiredFile(rt, path, "server host file .serverhost")
+	if err != nil {
+		return "", err
+	}
+	if !isValidServerHost(value) {
+		return "", fmt.Errorf("server host file .serverhost contains invalid host")
+	}
+	return value, nil
+}
+
+func waitForRequiredFile(rt configRuntime, path string, label string) (string, error) {
 	attempts := int(rt.serverIPWait / rt.serverIPPoll)
 	if rt.serverIPWait%rt.serverIPPoll != 0 {
 		attempts++
@@ -356,20 +407,16 @@ func waitForServerIPFile(rt configRuntime, path string) (string, error) {
 	for attempt := 0; attempt <= attempts; attempt++ {
 		raw, err := rt.readFile(path)
 		if err == nil {
-			ip := strings.TrimSpace(string(raw))
-			if !isUsableIPv4(ip) {
-				return "", fmt.Errorf("server IP file .serverip contains invalid IPv4")
-			}
-			return ip, nil
+			return strings.TrimSpace(string(raw)), nil
 		}
 		if !errors.Is(err, os.ErrNotExist) {
-			return "", fmt.Errorf("read server IP file .serverip failed: %w", err)
+			return "", fmt.Errorf("read %s failed: %w", label, err)
 		}
 		if attempt < attempts {
 			rt.sleep(rt.serverIPPoll)
 		}
 	}
-	return "", fmt.Errorf("server IP file .serverip was not available within %s", rt.serverIPWait)
+	return "", fmt.Errorf("%s was not available within %s", label, rt.serverIPWait)
 }
 
 func resolveContainerID(rt configRuntime) (string, error) {
@@ -399,13 +446,16 @@ func resolveContainerID(rt configRuntime) (string, error) {
 	return "", fmt.Errorf("hostname, /etc/hostname or OPENCODE_MANAGER_CONTAINER_ID must contain a container id")
 }
 
-func derivedBackendWebSocketURL(serverIP string) (string, error) {
+func derivedBackendWebSocketURL(serverHost string) (string, error) {
 	rawPort := envDefault("OPENCODE_MANAGER_BACKEND_PORT", strconv.Itoa(defaultBackendPort))
 	port, err := strconv.Atoi(rawPort)
 	if err != nil || port < 1 || port > 65535 {
 		return "", fmt.Errorf("OPENCODE_MANAGER_BACKEND_PORT must be an integer between 1 and 65535")
 	}
-	return fmt.Sprintf("ws://%s:%d%s", serverIP, port, defaultBackendWebSocketPath), nil
+	if !isValidServerHost(serverHost) {
+		return "", fmt.Errorf("server host must be a host name or IPv4 literal without scheme or port")
+	}
+	return fmt.Sprintf("ws://%s:%d%s", serverHost, port, defaultBackendWebSocketPath), nil
 }
 
 func detectLocalIPv4() (string, error) {
@@ -463,6 +513,38 @@ func isUsableIPv4(value string) bool {
 	}
 	if ip[0] >= 224 {
 		return false
+	}
+	return true
+}
+
+func isStableServerID(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 1 || len(value) > 128 {
+		return false
+	}
+	for _, r := range value {
+		valid := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+		valid = valid || r == '.' || r == '_' || r == '-'
+		if !valid {
+			return false
+		}
+	}
+	return true
+}
+
+func isValidServerHost(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 1 || len(value) > 255 {
+		return false
+	}
+	for i, r := range value {
+		valid := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+		if i > 0 {
+			valid = valid || r == '.' || r == '_' || r == '-'
+		}
+		if !valid {
+			return false
+		}
 	}
 	return true
 }

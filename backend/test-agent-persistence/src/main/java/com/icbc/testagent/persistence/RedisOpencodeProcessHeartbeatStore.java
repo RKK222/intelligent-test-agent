@@ -65,7 +65,7 @@ public class RedisOpencodeProcessHeartbeatStore implements OpencodeProcessHeartb
 
     @Override
     public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) {
-        String id = snapshot.backendProcess().linuxServerId().value();
+        String id = snapshot.backendProcess().backendProcessId().value();
         redisTemplate.opsForValue().set(BACKEND_SNAPSHOT_KEY_PREFIX + id, encode(snapshot), RUNTIME_SNAPSHOT_TTL);
         redisTemplate.opsForSet().add(BACKEND_SNAPSHOT_INDEX_KEY, id);
         recordBackendHeartbeat(snapshot.backendProcess().linuxServerId(), snapshot.backendProcess().lastHeartbeatAt());
@@ -160,10 +160,12 @@ public class RedisOpencodeProcessHeartbeatStore implements OpencodeProcessHeartb
     @Override
     public Set<LinuxServerId> liveBackendServerIds() {
         Set<String> ids = liveIds(BACKEND_INDEX_KEY, BACKEND_KEY_PREFIX);
-        ids.addAll(liveIds(BACKEND_SNAPSHOT_INDEX_KEY, BACKEND_SNAPSHOT_KEY_PREFIX));
         Set<LinuxServerId> result = new LinkedHashSet<>();
         for (String id : ids) {
             result.add(new LinuxServerId(id));
+        }
+        for (BackendRuntimeSnapshot snapshot : liveBackendSnapshots()) {
+            result.add(snapshot.backendProcess().linuxServerId());
         }
         return result;
     }

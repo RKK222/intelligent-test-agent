@@ -272,7 +272,7 @@ public class RuntimeManagementQueryService {
     }
 
     /**
-     * 按服务器 IP 查询 Java 服务指定时间窗口内的运行指标历史，并按 maxPoints 做时间桶降采样。
+     * 按稳定服务器身份查询 Java 服务指定时间窗口内的运行指标历史，并按 maxPoints 做时间桶降采样。
      */
     public RuntimeManagementBackendMetricHistory backendServerMetrics(
             LinuxServerId linuxServerId,
@@ -294,7 +294,7 @@ public class RuntimeManagementQueryService {
     }
 
     /**
-     * 兼容旧 backendProcessId history API：优先解析到服务器 IP 后复用新主路径，解析失败时读取旧 key。
+     * 兼容旧 backendProcessId history API：优先解析到稳定服务器身份后复用新主路径，解析失败时读取旧 key。
      */
     public RuntimeManagementBackendMetricHistory backendProcessMetrics(
             BackendProcessId backendProcessId,

@@ -151,8 +151,10 @@ function serviceAddressFromBaseUrl(baseUrl?: string) {
 function opencodeServiceAddress(process?: UserOpencodeProcess | null) {
   if (!process) return "";
   if (process.serviceAddress?.trim()) return process.serviceAddress.trim();
+  const addressFromBaseUrl = serviceAddressFromBaseUrl(process.baseUrl);
+  if (addressFromBaseUrl) return addressFromBaseUrl;
   if (process.linuxServerId && process.port) return `${process.linuxServerId}:${process.port}`;
-  return serviceAddressFromBaseUrl(process.baseUrl);
+  return "";
 }
 
 const opencodeServiceDisplay = computed(() => {

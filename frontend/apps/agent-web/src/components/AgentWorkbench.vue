@@ -49,8 +49,6 @@ import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
 import SettingsDialog from "./settings/SettingsDialog.vue";
-import WorkspaceBootstrap from "./WorkspaceBootstrap.vue";
-import WorkspaceDirectoryPickerDialog from "./WorkspaceDirectoryPickerDialog.vue";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
@@ -201,9 +199,6 @@ let lastTokens = 0;
 let lastThoughtForMs = 0;
 const nowTick = ref(Date.now());
 const settingsOpen = ref(false);
-const directoryPickerOpen = ref(false);
-const directoryPickerLoading = ref(false);
-const directoryPickerData = shallowRef<WorkspaceDirectoryList | null>(null);
 const serverWorkspacePickerOpen = ref(false);
 const serverWorkspacePickerLoading = ref(false);
 const serverWorkspaceServers = shallowRef<WorkspaceBackendServer[]>([]);
@@ -629,7 +624,7 @@ async function recoverActiveRunForSession(sessionId: string, reason: string): Pr
 // ===== 默认值与联动 effect =====
 // 选择默认应用：优先使用「全局最近工作区」所属应用，让用户重新登录或换电脑登录时
 // 自动回到上次所在的应用 + 工作区组合；该应用在当前账号的应用目录里找不到时降级到 apps[0]，
-// 都没结果则不主动进入，由用户在右上角手动选择。
+// 都没结果则保持空态，由应用目录和工作空间模板配置驱动后续进入。
 function trySelectDefaultApp() {
   if (selectedAppId.value) return;
   const apps = applicationCatalog.value;
@@ -795,17 +790,6 @@ watch(diffFiles, (files) => {
 });
 
 // ===== Mutations =====
-const createWorkspaceMutation = useMutation({
-  mutationFn: (payload: { name: string; rootPath: string }) => api.createWorkspace(payload),
-  onSuccess: (workspace) => {
-    selectedWorkspaceId.value = workspace.workspaceId;
-    void queryClient.invalidateQueries({ queryKey: ["workspaces"] });
-  },
-  onError: (error) => {
-    feedback.value = errorFeedback("创建 Workspace 失败", error);
-  }
-});
-
 const saveMutation = useMutation({
   mutationFn: async (tab: NonNullable<typeof activeTab.value>) => {
     if (isAgentFilePath(tab.path)) {
@@ -820,11 +804,6 @@ const saveMutation = useMutation({
       }
       return tab;
     }
-    if (isPublicFilePath(tab.path)) {
-      // 公共目录写：仅 SUPER_ADMIN 角色可调（服务端二次校验），前端不暴露给普通用户。
-      await api.writePublicFile(publicFilePath(tab.path), tab.content);
-      return tab;
-    }
     if (!selectedWorkspace.value) {
       throw new Error("未选择 Workspace");
     }
@@ -834,7 +813,7 @@ const saveMutation = useMutation({
   onSuccess: (tab) => {
     workbench.markTabSaved(tab.path, tab.content);
     feedback.value = { kind: "success", title: "文件已保存", description: tab.path };
-    if (!isAgentFilePath(tab.path) && !isPublicFilePath(tab.path)) {
+    if (!isAgentFilePath(tab.path)) {
       void refreshWorkspaceGitDiff();
     }
   },
@@ -843,16 +822,8 @@ const saveMutation = useMutation({
   }
 });
 
-// 公共文件 tab.path 用 "public:<相对路径>" 表示；与工作区路径空间隔离，避免编辑器 activePath 撞名。
-const PUBLIC_FILE_PREFIX = "public:";
 const AGENT_PUBLIC_FILE_PREFIX = "agent-public:";
 const AGENT_WORKSPACE_FILE_PREFIX = "agent-workspace:";
-function isPublicFilePath(path: string): boolean {
-  return path.startsWith(PUBLIC_FILE_PREFIX);
-}
-function publicFilePath(tabPath: string): string {
-  return tabPath.startsWith(PUBLIC_FILE_PREFIX) ? tabPath.slice(PUBLIC_FILE_PREFIX.length) : tabPath;
-}
 function isAgentFilePath(path: string): boolean {
   return path.startsWith(AGENT_PUBLIC_FILE_PREFIX) || path.startsWith(AGENT_WORKSPACE_FILE_PREFIX);
 }
@@ -1344,22 +1315,6 @@ function workspaceNameFromPath(path: string) {
   return path.split(/[\\/]+/).filter(Boolean).at(-1) ?? "Workspace";
 }
 
-async function loadWorkspaceDirectories(path?: string) {
-  directoryPickerLoading.value = true;
-  try {
-    directoryPickerData.value = await api.listWorkspaceDirectories(path);
-  } catch (error) {
-    feedback.value = errorFeedback("加载工作区目录失败", error);
-  } finally {
-    directoryPickerLoading.value = false;
-  }
-}
-
-function openWorkspaceDirectoryPicker() {
-  directoryPickerOpen.value = true;
-  void loadWorkspaceDirectories();
-}
-
 async function openServerWorkspacePicker() {
   if (!isSuperAdmin.value) return;
   serverWorkspacePickerOpen.value = true;
@@ -1632,29 +1587,13 @@ async function handleSelectApp(appId: string) {
       rememberPersonalWorkspace(pick.personalWorkspaceId, pick.personalWorkspaceBranch);
       return;
     }
-    // 应用下没有任何工作空间模板/版本，保持空态由用户手动选择。
+    // 应用下没有任何工作空间模板/版本，保持空态，不回退到普通本机目录选择。
   } catch (error) {
     feedback.value = errorFeedback("切换应用失败", error);
   } finally {
     if (selectionSeq === appSelectionSeq) {
       selectingAppId = undefined;
     }
-  }
-}
-
-async function selectWorkspaceDirectory(path: string) {
-  directoryPickerLoading.value = true;
-  try {
-    const workspace =
-      workspaces.value.find((item) => item.rootPath === path) ??
-      (await api.createWorkspace({ name: workspaceNameFromPath(path), rootPath: path }));
-    await switchWorkspace(workspace);
-    directoryPickerOpen.value = false;
-    directoryPickerData.value = null;
-  } catch (error) {
-    feedback.value = errorFeedback("切换 Workspace 失败", error);
-  } finally {
-    directoryPickerLoading.value = false;
   }
 }
 
@@ -1821,21 +1760,6 @@ async function openFile(path: string) {
   }
 }
 
-// 公共目录打开文件：把"public:<相对路径>"作为 tab.path，确保与工作区路径空间隔离。
-// readonly 由 canWrite 反向决定，普通用户永远是只读，超级管理员可写。
-async function openPublicFile(payload: { path: string; content: FileContent; readonly: boolean }) {
-  centerMode.value = "editor";
-  const tabPath = `${PUBLIC_FILE_PREFIX}${payload.path}`;
-  workbench.openTab({
-    id: `public:file:${payload.path}`,
-    path: tabPath,
-    title: payload.path.split(/[\\/]+/).filter(Boolean).at(-1) ?? payload.path,
-    content: payload.content.content,
-    savedContent: payload.content.content,
-    readonly: payload.readonly
-  });
-}
-
 async function openAgentFile(payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null; linuxServerId?: string | null }) {
   centerMode.value = "editor";
   const tabPath = agentTabPath(payload.scope, payload.path, payload.worktreeId, payload.linuxServerId);
@@ -1896,7 +1820,7 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     return;
   }
   if (!selectedWorkspace.value) {
-    feedback.value = { kind: "info", title: "未选择工作区", description: "请先点击\"选择本机目录\"或切换到可用工作区，再发送任务。" };
+    feedback.value = { kind: "info", title: "未选择工作区", description: "请先切换到应用版本或个人工作区，再发送任务。" };
     return;
   }
   const parts = buildPromptParts(prompt, activeTab.value, attachments, diffContextParts.value, editorSelection.value);
@@ -2388,7 +2312,6 @@ async function refreshOpenWorkspaceTabsFromDisk(paths?: string[]) {
     (tab: EditorTab) =>
       !tab.livePreview &&
       !isAgentFilePath(tab.path) &&
-      !isPublicFilePath(tab.path) &&
       (!pathFilter || pathFilter.has(tab.path))
   );
   const previousActivePath = activePath.value;
@@ -2490,10 +2413,6 @@ const saveDiffFileMutation = useMutation({
         }
         await api.writeWorkspaceAgentFile(selectedWorkspace.value.workspaceId, agent.path, content, agent.worktreeId);
       }
-      return { path, content };
-    }
-    if (isPublicFilePath(path)) {
-      await api.writePublicFile(publicFilePath(path), content);
       return { path, content };
     }
     if (!selectedWorkspace.value) {
@@ -2710,7 +2629,7 @@ async function handleLogout() {
           :loading-app-templates="loadingAppTemplates"
           :loading-app-versions="loadingAppVersions"
           :creating-version="creatingVersion"
-          :public-directory-writable="isSuperAdmin"
+          :can-write="isSuperAdmin"
           :api-base-url="apiBaseUrl"
           :workspace-id="selectedWorkspace.workspaceId"
           :personal-workspace-id="currentPersonalWorkspaceId"
@@ -2728,21 +2647,17 @@ async function handleLogout() {
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"
-          @open-public-file="openPublicFile"
           @open-agent-file="openAgentFile"
           @open-server-workspace-picker="openServerWorkspacePicker"
           @search="handleFileSearch"
         />
         <div v-else class="managed-workspace-empty">
           <p>当前应用尚未切换到可用工作区。</p>
-          <button type="button" class="managed-workspace-button" @click="openWorkspaceDirectoryPicker">选择本机目录</button>
         </div>
       </div>
-      <WorkspaceBootstrap
-        v-else
-        :loading="createWorkspaceMutation.isPending.value"
-        @create="(payload) => createWorkspaceMutation.mutate(payload)"
-      />
+      <div v-else class="managed-workspace-empty">
+        <p>请选择应用后进入应用版本或个人工作区。</p>
+      </div>
     </template>
 
     <template #editor>
@@ -2924,15 +2839,6 @@ async function handleLogout() {
     </template>
   </FigmaShell>
 
-  <WorkspaceDirectoryPickerDialog
-    :open="directoryPickerOpen"
-    :directory="directoryPickerData"
-    :loading="directoryPickerLoading"
-    @close="directoryPickerOpen = false"
-    @navigate="loadWorkspaceDirectories"
-    @select="selectWorkspaceDirectory"
-  />
-
   <ServerWorkspacePickerDialog
     :open="serverWorkspacePickerOpen"
     :servers="serverWorkspaceServers"
@@ -3035,24 +2941,6 @@ async function handleLogout() {
   flex-direction: column;
   height: 100%;
   min-height: 0;
-}
-
-.managed-workspace-button {
-  height: 34px;
-  border: 1px solid var(--ta-border);
-  border-radius: 12px;
-  background: #fff;
-  color: var(--ta-text);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 0 16px;
-  white-space: nowrap;
-  transition: background-color 0.12s, border-color 0.12s;
-  cursor: pointer;
-}
-.managed-workspace-button:hover {
-  background: #f5f5f5;
-  border-color: #bbb;
 }
 
 .managed-workspace-files {

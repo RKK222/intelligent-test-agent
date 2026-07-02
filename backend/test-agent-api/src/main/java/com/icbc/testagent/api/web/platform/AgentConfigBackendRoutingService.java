@@ -104,7 +104,8 @@ class AgentConfigBackendRoutingService {
                         Duration.ofSeconds(5),
                         Duration.ofSeconds(10),
                         Duration.ofSeconds(10),
-                        100));
+                        100),
+                java.time.Clock.systemUTC());
     }
 
     List<AgentConfigResponses.PublicRepositoryStatusResponse> listPublicRepositories(ServerWebExchange exchange, String traceId) {
