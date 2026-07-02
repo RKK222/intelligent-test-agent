@@ -53,6 +53,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -1072,6 +1073,8 @@ class ManagedWorkspaceApplicationServiceTest {
         Path personalRepoRoot = personalRepoRoot(personal.personalWorkspaceBranch());
 
         assertThat(result.status()).isEqualTo("MERGED");
+        assertThat(result.remotePushed()).isTrue();
+        assertThat(result.headCommit()).isEqualTo("commit_merged");
         assertThat(result.versionId()).isEqualTo(version.versionId());
         // 合并方向：先在个人 worktree 上合入最新特性分支，再在应用版本副本上把个人分支 merge 进特性分支。
         assertThat(git.mergeCalls)
@@ -1095,6 +1098,7 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.stagedRepoRoot).isNull();
         assertThat(git.stagedFilesRepoRoot).isEqualTo(personalRepoRoot);
         assertThat(git.stagedFiles).containsExactly("F-GCMS/workspace/README.md");
+        assertThat(git.resetIndexRepoRoot).isEqualTo(personalRepoRoot);
         assertThat(git.committedStagedRepoRoot).isEqualTo(personalRepoRoot);
         assertThat(git.committedStagedMessage).isEqualTo("fix: 修复缺陷");
         // 版本 targetCommitHash 和副本 commit 已更新到合并后的 commit
@@ -1246,6 +1250,8 @@ class ManagedWorkspaceApplicationServiceTest {
         Path personalRepoRoot = personalRepoRoot(personal.personalWorkspaceBranch());
 
         assertThat(result.status()).isEqualTo("CONFLICT");
+        assertThat(result.remotePushed()).isFalse();
+        assertThat(result.headCommit()).isNull();
         assertThat(result.conflictFiles()).containsExactly("src/Main.java", "README.md");
         // 冲突留在当前个人 worktree，用户才能在编辑器中解决。
         assertThat(git.mergedBranch).isEqualTo(version.branch());
@@ -1255,6 +1261,45 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.pushedBranch).isNull();
         // 版本 commit 不应更新
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_base");
+    }
+
+    @Test
+    void readsAndResolvesPersonalWorkspaceConflict() throws Exception {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.nextStatusPorcelain = "UU F-GCMS/workspace/src/Login.java\n";
+        git.conflictStageContents.put(1, "base");
+        git.conflictStageContents.put(2, "current");
+        git.conflictStageContents.put(3, "incoming");
+        git.nextConflictPaths = List.of("F-GCMS/workspace/src/Login.java");
+
+        ManagedWorkspaceResponses.WorkspaceGitConflictResponse conflict = service.getWorkspaceGitConflict(
+                personal.runtimeWorkspace().workspaceId(),
+                "src/Login.java",
+                new UserId("usr_1"));
+
+        assertThat(conflict.path()).isEqualTo("src/Login.java");
+        assertThat(conflict.baseContent()).isEqualTo("base");
+        assertThat(conflict.currentContent()).isEqualTo("current");
+        assertThat(conflict.incomingContent()).isEqualTo("incoming");
+
+        service.resolveWorkspaceGitConflict(
+                personal.runtimeWorkspace().workspaceId(),
+                "src/Login.java",
+                "MANUAL",
+                "resolved",
+                new UserId("usr_1"));
+
+        assertThat(Files.readString(personalRepoRoot(personal.personalWorkspaceBranch())
+                .resolve("F-GCMS/workspace/src/Login.java"))).isEqualTo("resolved");
+        assertThat(git.stagedFiles).containsExactly("F-GCMS/workspace/src/Login.java");
     }
 
     @Test
@@ -1455,6 +1500,9 @@ class ManagedWorkspaceApplicationServiceTest {
         private Path abortedMergeRepoRoot;
         private Path pushedRepoRoot;
         private Path headCommitRepoRoot;
+        private Path resetIndexRepoRoot;
+        private boolean mergeInProgress;
+        private final Map<Integer, String> conflictStageContents = new java.util.HashMap<>();
         private final List<PushCall> pushes = new ArrayList<>();
         private String clonedGitUrl;
         private String originUrlValue = "https://example.com/gcms.git";
@@ -1569,6 +1617,26 @@ class ManagedWorkspaceApplicationServiceTest {
         public void stageFiles(Path repoRoot, List<String> files, String privateKey) {
             this.stagedFilesRepoRoot = repoRoot;
             this.stagedFiles = List.copyOf(files);
+        }
+
+        @Override
+        public void resetIndexToHead(Path repoRoot, String privateKey) {
+            this.resetIndexRepoRoot = repoRoot;
+        }
+
+        @Override
+        public boolean isMergeInProgress(Path repoRoot) {
+            return mergeInProgress;
+        }
+
+        @Override
+        public Set<Integer> conflictStages(Path repoRoot, String file) {
+            return conflictStageContents.keySet();
+        }
+
+        @Override
+        public String conflictStageContent(Path repoRoot, int stage, String file) {
+            return conflictStageContents.get(stage);
         }
 
         @Override

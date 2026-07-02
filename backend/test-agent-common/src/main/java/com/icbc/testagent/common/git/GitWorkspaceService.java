@@ -7,8 +7,10 @@ import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Git 工作区命令服务，集中封装 clone、worktree、diff 和 push 等本地仓库操作。
@@ -294,6 +296,44 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 返回冲突文件在 Git index 中实际存在的 stage（1=base、2=current、3=incoming）。
+     */
+    public Set<Integer> conflictStages(Path repoRoot, String file) {
+        GitCommandResult result = executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "ls-files", "--unmerged", "--stage", "--", file),
+                null,
+                DEFAULT_TIMEOUT);
+        Set<Integer> stages = new LinkedHashSet<>();
+        for (String line : result.stdoutText().lines().toList()) {
+            int tab = line.indexOf('\t');
+            String metadata = tab >= 0 ? line.substring(0, tab) : line;
+            String[] fields = metadata.trim().split("\\s+");
+            if (fields.length < 3) {
+                continue;
+            }
+            try {
+                stages.add(Integer.parseInt(fields[2]));
+            } catch (NumberFormatException ignored) {
+                // 非标准输出不进入 stage 集合，由业务层按“不是冲突文件”处理。
+            }
+        }
+        return Set.copyOf(stages);
+    }
+
+    /**
+     * 读取冲突 index 的指定 stage 文本。调用方必须先确认该 stage 存在。
+     */
+    public String conflictStageContent(Path repoRoot, int stage, String file) {
+        if (stage < 1 || stage > 3) {
+            throw new IllegalArgumentException("conflict stage must be 1, 2 or 3");
+        }
+        return executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "show", ":" + stage + ":" + file),
+                null,
+                DEFAULT_TIMEOUT).stdoutText();
+    }
+
+    /**
      * 终止当前仓库中的未完成 merge，用于业务层在收集冲突文件后恢复受控副本到可继续操作状态。
      */
     public void abortMerge(Path repoRoot, String privateKey) {
@@ -335,6 +375,33 @@ public class GitWorkspaceService {
             return;
         }
         executor.execute(addCommand(repoRoot, files), privateKey, DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 仅把索引恢复到 HEAD，不改动工作树。个人工作区按文件白名单发布前调用，
+     * 防止历史暂存项被无 pathspec 的 commit 一并提交。
+     */
+    public void resetIndexToHead(Path repoRoot, String privateKey) {
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "reset", "--mixed", "HEAD"),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
+     * 判断仓库是否存在未完成 merge。worktree 的 MERGE_HEAD 可能位于独立 gitdir，
+     * 因此先由 Git 返回实际路径再检查文件。
+     */
+    public boolean isMergeInProgress(Path repoRoot) {
+        String value = executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "rev-parse", "--git-path", "MERGE_HEAD"),
+                null,
+                DEFAULT_TIMEOUT).stdoutText().trim();
+        if (value.isBlank()) {
+            return false;
+        }
+        Path mergeHead = Path.of(value);
+        return Files.isRegularFile(mergeHead.isAbsolute() ? mergeHead : repoRoot.resolve(mergeHead).normalize());
     }
 
     /**

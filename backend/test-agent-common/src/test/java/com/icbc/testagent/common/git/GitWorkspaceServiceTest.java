@@ -362,6 +362,33 @@ class GitWorkspaceServiceTest {
                 null));
     }
 
+    @Test
+    void resetsOnlyIndexBeforeStagingPublishWhitelist() {
+        RecordingExecutor executor = new RecordingExecutor("");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        service.resetIndexToHead(tempDir, "PRIVATE KEY");
+
+        assertThat(executor.calls).containsExactly(new Call(
+                List.of("git", "-C", tempDir.toString(), "reset", "--mixed", "HEAD"),
+                "PRIVATE KEY"));
+    }
+
+    @Test
+    void readsAvailableConflictStagesAndSelectedBlob() {
+        RecordingExecutor executor = new RecordingExecutor(
+                "100644 aaa 1\tsrc/Login.java\n100644 bbb 2\tsrc/Login.java\n100644 ccc 3\tsrc/Login.java\n");
+        executor.stdoutByCall.put(2, "current-content");
+        GitWorkspaceService service = new GitWorkspaceService(executor);
+
+        assertThat(service.conflictStages(tempDir, "src/Login.java")).containsExactlyInAnyOrder(1, 2, 3);
+        assertThat(service.conflictStageContent(tempDir, 2, "src/Login.java")).isEqualTo("current-content");
+
+        assertThat(executor.calls).containsExactly(
+                new Call(List.of("git", "-C", tempDir.toString(), "ls-files", "--unmerged", "--stage", "--", "src/Login.java"), null),
+                new Call(List.of("git", "-C", tempDir.toString(), "show", ":2:src/Login.java"), null));
+    }
+
     private static final class RecordingExecutor implements GitCommandExecutor {
         private final String stdout;
         private final List<Call> calls = new ArrayList<>();

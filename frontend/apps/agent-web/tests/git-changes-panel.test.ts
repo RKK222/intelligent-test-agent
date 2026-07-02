@@ -7,6 +7,9 @@ const apiClientMock = vi.hoisted(() => ({
   getVcsDiffFiles: vi.fn(),
   getWorkspaceGitDiff: vi.fn(),
   discardWorkspaceGitFiles: vi.fn(),
+  getWorkspaceGitConflict: vi.fn(),
+  resolveWorkspaceGitConflict: vi.fn(),
+  abortWorkspaceGitConflict: vi.fn(),
   getPublicAgentDiff: vi.fn(),
   getWorkspaceAgentDiff: vi.fn(),
   stagePublicAgentFiles: vi.fn(),
@@ -51,8 +54,20 @@ describe("GitChangesPanel", () => {
       personalWorkspaceId: "psw_default",
       versionId: "awv_1",
       conflictFiles: [],
-      message: "合并成功"
+      message: "合并成功",
+      remotePushed: true,
+      headCommit: "commit_merged"
     });
+    apiClientMock.getWorkspaceGitConflict.mockResolvedValue({
+      path: "src/conflict.ts",
+      rawStatus: "UU",
+      baseContent: "base",
+      currentContent: "current",
+      incomingContent: "incoming",
+      resultContent: "<<<<<<< HEAD\ncurrent\n=======\nincoming\n>>>>>>> app"
+    });
+    apiClientMock.resolveWorkspaceGitConflict.mockResolvedValue(undefined);
+    apiClientMock.abortWorkspaceGitConflict.mockResolvedValue(undefined);
     apiClientMock.connectAgentConfigProgress.mockResolvedValue({ close: vi.fn() });
   });
 
@@ -295,7 +310,9 @@ describe("GitChangesPanel", () => {
       personalWorkspaceId: "psw_default",
       versionId: "awv_1",
       conflictFiles: ["workspace/docs/conflict.md"],
-      message: "合并冲突，请在个人工作区中解决冲突后重新提交并推送"
+      message: "合并冲突，请在个人工作区中解决冲突后重新提交并推送",
+      remotePushed: false,
+      headCommit: null
     });
 
     const view = render(GitChangesPanel, {
@@ -328,5 +345,51 @@ describe("GitChangesPanel", () => {
     expect(view.getByText("STAGED (已暂存) (1)")).toBeTruthy();
     expect((view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement).disabled).toBe(true);
     expect(view.queryByText("提交并推送成功！")).toBeNull();
+  });
+
+  it("does not show success when backend cannot confirm remote push", async () => {
+    apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
+      files: [{ path: "src/selected.ts", status: "modified", staged: false, patch: "", additions: 1, deletions: 0 }]
+    });
+    apiClientMock.publishPersonalWorkspace.mockResolvedValueOnce({
+      status: "MERGED",
+      personalWorkspaceId: "psw_default",
+      versionId: "awv_1",
+      conflictFiles: [],
+      message: "本地合并完成",
+      remotePushed: false,
+      headCommit: null
+    });
+    const view = render(GitChangesPanel, {
+      props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("src/selected.ts")).toBeTruthy();
+    await fireEvent.click(view.getByTitle("暂存文件"));
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: push");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    expect(await view.findByText(/远端推送结果未确认/)).toBeTruthy();
+    expect(view.queryByText("提交并推送成功！")).toBeNull();
+  });
+
+  it("opens the three-way editor for a conflict row", async () => {
+    apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
+      files: [{ path: "src/conflict.ts", status: "conflict", rawStatus: "UU", staged: true, patch: "", additions: 0, deletions: 0 }]
+    });
+    const view = render(GitChangesPanel, {
+      props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
+      global: { plugins: [createPinia()] }
+    });
+
+    await fireEvent.click(await view.findByText("src/conflict.ts"));
+
+    await waitFor(() => expect(apiClientMock.getWorkspaceGitConflict)
+      .toHaveBeenCalledWith("wrk_1234567890abcdef", "src/conflict.ts"));
+    expect(await view.findByText("合并编辑器")).toBeTruthy();
+    expect(await view.findByText("当前个人版本")).toBeTruthy();
+    expect(await view.findByText("应用版本")).toBeTruthy();
+    expect(await view.findByText("合并结果（可编辑）")).toBeTruthy();
   });
 });

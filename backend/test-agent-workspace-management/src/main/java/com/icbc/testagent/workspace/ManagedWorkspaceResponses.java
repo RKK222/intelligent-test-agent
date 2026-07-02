@@ -344,6 +344,18 @@ public final class ManagedWorkspaceResponses {
     }
 
     /**
+     * Git 三方冲突内容。content 为 null 表示对应版本中不存在该文件。
+     */
+    public record WorkspaceGitConflictResponse(
+            String path,
+            String rawStatus,
+            String baseContent,
+            String currentContent,
+            String incomingContent,
+            String resultContent) {
+    }
+
+    /**
      * 个人工作区发布（合并到应用版本分支）的响应。
      * status 为 MERGED 表示合并成功并已更新版本 commit；CONFLICT 时 conflictFiles 列出冲突文件路径。
      */
@@ -352,7 +364,9 @@ public final class ManagedWorkspaceResponses {
             String personalWorkspaceId,
             String versionId,
             List<String> conflictFiles,
-            String message) {
+            String message,
+            boolean remotePushed,
+            String headCommit) {
     }
 
     /**

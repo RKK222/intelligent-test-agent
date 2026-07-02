@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
 
@@ -194,6 +195,36 @@ public class ManagedWorkspaceController {
             @RequestBody ManagedWorkspaceDtos.WorkspaceGitFilesRequest request,
             ServerWebExchange exchange) {
         service.discardWorkspaceGitFiles(workspaceId, request.files(), userId(exchange));
+        return ok(exchange, null);
+    }
+
+    @GetMapping("/workspaces/{workspaceId}/git-conflict")
+    public ApiResponse<Object> getWorkspaceGitConflict(
+            @PathVariable String workspaceId,
+            @RequestParam String path,
+            ServerWebExchange exchange) {
+        return ok(exchange, service.getWorkspaceGitConflict(workspaceId, path, userId(exchange)));
+    }
+
+    @PostMapping("/workspaces/{workspaceId}/git-conflict/resolve")
+    public ApiResponse<Object> resolveWorkspaceGitConflict(
+            @PathVariable String workspaceId,
+            @RequestBody ManagedWorkspaceDtos.ResolveWorkspaceGitConflictRequest request,
+            ServerWebExchange exchange) {
+        service.resolveWorkspaceGitConflict(
+                workspaceId,
+                request.path(),
+                request.resolution(),
+                request.content(),
+                userId(exchange));
+        return ok(exchange, null);
+    }
+
+    @PostMapping("/workspaces/{workspaceId}/git-conflict/abort")
+    public ApiResponse<Object> abortWorkspaceGitConflict(
+            @PathVariable String workspaceId,
+            ServerWebExchange exchange) {
+        service.abortWorkspaceGitConflict(workspaceId, userId(exchange));
         return ok(exchange, null);
     }
 

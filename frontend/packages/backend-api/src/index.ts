@@ -70,6 +70,7 @@ import type {
   RepositoryDeploymentOptions,
   PublishPersonalWorkspacePayload,
   PublishPersonalWorkspaceResult,
+  ResolveWorkspaceGitConflictPayload,
   QuestionRequest,
   RepositoryTypeOption,
   RoleOption,
@@ -101,6 +102,7 @@ import type {
   WorkspaceCreateOperation,
   WorkspaceDiff,
   WorkspaceGitDiff,
+  WorkspaceGitConflict,
   WorkspaceSyncResult,
   WorkspaceBranchPreference,
   WorkspaceDirectoryList,
@@ -548,6 +550,20 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<void>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-discard`,
         { method: "POST", body: JSON.stringify({ files }) }
+      ),
+    getWorkspaceGitConflict: (workspaceId: string, path: string) =>
+      request<WorkspaceGitConflict>(
+        `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict${query({ path })}`
+      ),
+    resolveWorkspaceGitConflict: (workspaceId: string, payload: ResolveWorkspaceGitConflictPayload) =>
+      request<void>(
+        `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict/resolve`,
+        { method: "POST", body: JSON.stringify(payload) }
+      ),
+    abortWorkspaceGitConflict: (workspaceId: string) =>
+      request<void>(
+        `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict/abort`,
+        { method: "POST" }
       ),
     /**
      * 个人工作区"提交并推送"：将个人 worktree 合并回应用版本分支。

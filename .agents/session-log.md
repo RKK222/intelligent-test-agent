@@ -34,6 +34,12 @@
     - 修改 mock stub `ElInputStub` 绑定 `disabled` 属性到原生 `input`。
     - 调整原有测试用例以在点击“新增”前选择版本库类型，并新增校验及字段禁用的回归测试用例。
 - Result: 前端 `corepack pnpm test settings-repository-panel` (11 个测试) 与 `corepack pnpm typecheck` 全部通过。未修改 generated SDK、后端 API 协议或环境配置文件。
+### 2026-07-02 - 修复工作区发布白名单、三方冲突处理与推送误报
+
+- Why: 个人工作区普通发布在 Git index 残留其他 staged 文件时会被无 pathspec 的 commit 一并提交；冲突文件虽能识别但没有三方查看/解决入口；发布异常后前端可能保留中间成功进度，并且缺少远端 push 的独立确认。
+- What: 普通发布先把 index 恢复到 HEAD，再只 stage 前端白名单；merge 重试保留完整 merge index。新增工作区冲突读取、解决、取消 API，读取 Git stage 1/2/3，并支持当前、传入、两者、手工、删除和 `merge --abort`。前端复用 Monaco 增加三方合并编辑器；发布响应增加向后兼容的 `remotePushed/headCommit`，只有明确确认 push 才展示成功，异常分支清除进度。
+- How: Git 原子能力继续放在 `GitWorkspaceService`，业务校验和编排放在 workspace-management，HTTP 入口放在 API，前端通过 backend-api 调用；新增真实临时 Git 仓库测试验证残留 staged 文件隔离和 base/current/incoming stage 内容，并补充后端、Controller、前端组件回归测试与 API/模块文档。
+- Result: common 真实 Git 2 个测试、workspace-management 33 个测试、API Controller 8 个测试、前端 239 个测试及生产构建通过。按 `.env.test` / `test` profile 启动时后端因 PostgreSQL `No route to host` 在 DataSource/Flyway 初始化前退出，未替换环境文件；前端 Vite 可在本地直连并显示登录页，后端运行态与真实页面冲突交互因此未完成环境联调。
 
 ### 2026-07-02 - 用户 opencode 进程按服务器名称展示和解析
 

@@ -22,6 +22,9 @@ final class ManagedWorkspaceDtos {
     record WorkspaceGitFilesRequest(List<String> files) {
     }
 
+    record ResolveWorkspaceGitConflictRequest(String path, String resolution, String content) {
+    }
+
     /**
      * VCS 分支偏好写入请求体：当前分支名由前端从 IDE 或 vcs.status 拿到。
      */

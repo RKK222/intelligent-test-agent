@@ -71,6 +71,7 @@ import reactor.core.scheduler.Schedulers;
  */
 @Service
 public class ManagedWorkspaceApplicationService implements ServerBroadcastHandler {
+    private static final long MAX_CONFLICT_FILE_BYTES = 1024L * 1024L;
 
     private static final Logger LOGGER = LoggerFactory.getLogger(ManagedWorkspaceApplicationService.class);
 
@@ -1132,6 +1133,164 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
     }
 
+    /**
+     * 读取个人 worktree 中单个冲突文件的 base/current/incoming 三方内容。
+     */
+    public ManagedWorkspaceResponses.WorkspaceGitConflictResponse getWorkspaceGitConflict(
+            String workspaceId,
+            String path,
+            UserId userId) {
+        PersonalGitContext context = personalGitContext(workspaceId, userId);
+        String displayPath = normalizeFiles(List.of(path)).get(0);
+        String gitFile = repoRelativeFiles(
+                context.repoRoot(),
+                context.workspaceRoot(),
+                List.of(displayPath)).get(0);
+        Set<Integer> stages = gitWorkspaceService.conflictStages(context.repoRoot(), gitFile);
+        if (stages.isEmpty()) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "文件当前不是未解决的 Git 冲突",
+                    Map.of("path", displayPath));
+        }
+        Path resultPath = context.repoRoot().resolve(gitFile).normalize();
+        return new ManagedWorkspaceResponses.WorkspaceGitConflictResponse(
+                displayPath,
+                conflictRawStatus(context.repoRoot(), gitFile),
+                conflictStageContent(context.repoRoot(), stages, 1, gitFile),
+                conflictStageContent(context.repoRoot(), stages, 2, gitFile),
+                conflictStageContent(context.repoRoot(), stages, 3, gitFile),
+                readConflictWorkingContent(resultPath));
+    }
+
+    /**
+     * 写入冲突解决结果并定点 stage。CURRENT/INCOMING 对应 Git stage 2/3，
+     * BOTH 拼接两侧文本，MANUAL 使用前端编辑结果，DELETE 删除文件。
+     */
+    public void resolveWorkspaceGitConflict(
+            String workspaceId,
+            String path,
+            String resolution,
+            String content,
+            UserId userId) {
+        PersonalGitContext context = personalGitContext(workspaceId, userId);
+        String displayPath = normalizeFiles(List.of(path)).get(0);
+        String gitFile = repoRelativeFiles(
+                context.repoRoot(),
+                context.workspaceRoot(),
+                List.of(displayPath)).get(0);
+        Set<Integer> stages = gitWorkspaceService.conflictStages(context.repoRoot(), gitFile);
+        if (stages.isEmpty()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "文件当前不是未解决的 Git 冲突", Map.of("path", displayPath));
+        }
+        String mode = requireText(resolution, "冲突解决方式不能为空", "resolution").toUpperCase(java.util.Locale.ROOT);
+        String resolved = switch (mode) {
+            case "CURRENT" -> conflictStageContent(context.repoRoot(), stages, 2, gitFile);
+            case "INCOMING" -> conflictStageContent(context.repoRoot(), stages, 3, gitFile);
+            case "BOTH" -> joinConflictSides(
+                    conflictStageContent(context.repoRoot(), stages, 2, gitFile),
+                    conflictStageContent(context.repoRoot(), stages, 3, gitFile));
+            case "MANUAL" -> content;
+            case "DELETE" -> null;
+            default -> throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "不支持的冲突解决方式",
+                    Map.of("resolution", mode));
+        };
+        if ("MANUAL".equals(mode) && content == null) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "手工解决内容不能为空", Map.of("field", "content"));
+        }
+        Path target = context.repoRoot().resolve(gitFile).normalize();
+        try {
+            if (resolved == null) {
+                Files.deleteIfExists(target);
+            } else {
+                byte[] bytes = resolved.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                if (bytes.length > MAX_CONFLICT_FILE_BYTES) {
+                    throw new PlatformException(ErrorCode.VALIDATION_ERROR, "冲突文件超过 1MB 限制", Map.of("path", displayPath));
+                }
+                Files.createDirectories(target.getParent());
+                Files.writeString(target, resolved, java.nio.charset.StandardCharsets.UTF_8);
+            }
+            gitWorkspaceService.stageFiles(context.repoRoot(), List.of(gitFile), context.privateKey());
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "解决 Git 冲突失败", Map.of("path", displayPath), exception);
+        }
+    }
+
+    /**
+     * 取消个人 worktree 当前未完成的 merge。
+     */
+    public void abortWorkspaceGitConflict(String workspaceId, UserId userId) {
+        PersonalGitContext context = personalGitContext(workspaceId, userId);
+        if (!gitWorkspaceService.isMergeInProgress(context.repoRoot())) {
+            throw new PlatformException(ErrorCode.CONFLICT, "当前没有可取消的 Git 合并", Map.of("workspaceId", workspaceId));
+        }
+        gitWorkspaceService.abortMerge(context.repoRoot(), context.privateKey());
+    }
+
+    private PersonalGitContext personalGitContext(String workspaceId, UserId userId) {
+        Workspace workspace = existingWorkspace(new WorkspaceId(workspaceId));
+        PersonalWorkspace personal = managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspace.workspaceId())
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.NOT_FOUND,
+                        "个人工作区不存在",
+                        Map.of("workspaceId", workspaceId)));
+        ensurePersonalOwner(personal, userId);
+        ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
+        CodeRepository repository = existingRepository(version.repositoryId());
+        return new PersonalGitContext(
+                pathResolver.resolve(personal.repoRootPath()),
+                pathResolver.resolve(personal.workspaceRootPath()),
+                privateKeyFor(repository, userId));
+    }
+
+    private String conflictRawStatus(Path repoRoot, String gitFile) {
+        return gitWorkspaceService.parseStatusPorcelain(gitWorkspaceService.statusPorcelain(repoRoot)).stream()
+                .filter(entry -> entry.path().equals(gitFile))
+                .map(GitStatusEntry::rawStatus)
+                .findFirst()
+                .orElse("UU");
+    }
+
+    private String conflictStageContent(Path repoRoot, Set<Integer> stages, int stage, String gitFile) {
+        return stages.contains(stage) ? gitWorkspaceService.conflictStageContent(repoRoot, stage, gitFile) : null;
+    }
+
+    private String readConflictWorkingContent(Path target) {
+        try {
+            if (!Files.exists(target)) {
+                return null;
+            }
+            if (Files.size(target) > MAX_CONFLICT_FILE_BYTES) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "冲突文件超过 1MB 限制", Map.of());
+            }
+            return Files.readString(target, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "读取 Git 冲突文件失败", Map.of(), exception);
+        }
+    }
+
+    private String joinConflictSides(String current, String incoming) {
+        if (current == null || incoming == null) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "文件删除冲突不能使用保留两者",
+                    Map.of());
+        }
+        if (current.isEmpty() || incoming.isEmpty()) {
+            return current + incoming;
+        }
+        return current.endsWith("\n") ? current + incoming : current + "\n" + incoming;
+    }
+
+    private record PersonalGitContext(Path repoRoot, Path workspaceRoot, String privateKey) {
+    }
+
     private String repoRelativePrefix(Path repoRoot, Path workspaceRoot) {
         try {
             Path normalizedRepoRoot = repoRoot.toAbsolutePath().normalize();
@@ -1174,8 +1333,19 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         Path personalWorkspaceRoot = pathResolver.resolve(personal.workspaceRootPath());
         List<String> gitFiles = repoRelativeFiles(personalRepoRoot, personalWorkspaceRoot, normalizeFiles(files));
 
-        // 1. 只暂存前端显式选择的文件，避免一次发布把未选择的 diff 全部提交并从列表消失。
-        gitWorkspaceService.stageFiles(personalRepoRoot, gitFiles, privateKey);
+        // 1. 普通发布先清空索引再只暂存白名单；merge 重试必须保留自动合并结果和已解决冲突的完整 index。
+        boolean mergeInProgress = gitWorkspaceService.isMergeInProgress(personalRepoRoot);
+        if (mergeInProgress) {
+            List<String> unresolved = gitWorkspaceService.conflictPaths(personalRepoRoot);
+            if (!unresolved.isEmpty()) {
+                return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
+                        "CONFLICT", personalWorkspaceId, version.versionId().value(), unresolved,
+                        "仍有未解决的合并冲突", false, null);
+            }
+        } else {
+            gitWorkspaceService.resetIndexToHead(personalRepoRoot, privateKey);
+            gitWorkspaceService.stageFiles(personalRepoRoot, gitFiles, privateKey);
+        }
         try {
             gitWorkspaceService.commitStaged(personalRepoRoot, requireText(commitMessage, "提交说明不能为空", "commitMessage"), privateKey);
         } catch (PlatformException e) {
@@ -1211,7 +1381,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             }
             return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
                     "CONFLICT", personalWorkspaceId, version.versionId().value(), conflictFiles,
-                    "合并冲突，请在个人工作区中解决冲突后重新提交并推送");
+                    "合并冲突，请在个人工作区中解决冲突后重新提交并推送", false, null);
         }
 
         // 3. 个人分支已包含最新特性分支后，再在应用版本副本上本地合并个人分支。
@@ -1243,7 +1413,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         publishVersionSync(updatedVersion, userId, "PERSONAL_PUBLISHED", traceId, Map.of());
         return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
                 "MERGED", personalWorkspaceId, version.versionId().value(), List.of(),
-                "合并成功: " + headCommit);
+                "合并成功: " + headCommit, true, headCommit);
     }
 
     private void abortMergeQuietly(Path applicationRepoRoot, String privateKey) {

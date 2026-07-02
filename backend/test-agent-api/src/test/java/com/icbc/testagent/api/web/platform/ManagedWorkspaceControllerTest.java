@@ -19,6 +19,7 @@ import com.icbc.testagent.workspace.ManagedWorkspaceResponses.ApplicationWorkspa
 import com.icbc.testagent.workspace.ManagedWorkspaceResponses.BranchPreferenceResponse;
 import com.icbc.testagent.workspace.ManagedWorkspaceResponses.ManagedApplicationResponse;
 import com.icbc.testagent.workspace.ManagedWorkspaceResponses.WorkspaceRuntimeResponse;
+import com.icbc.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitConflictResponse;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -206,6 +207,39 @@ class ManagedWorkspaceControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data").isEmpty();
+    }
+
+    @Test
+    void gitConflictEndpointsForwardPathResolutionAndUser() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        when(service.getWorkspaceGitConflict("wks_123", "src/Login.java", USER_ID))
+                .thenReturn(new WorkspaceGitConflictResponse(
+                        "src/Login.java", "UU", "base", "current", "incoming", "result"));
+
+        client(service).get()
+                .uri(uriBuilder -> uriBuilder
+                        .path("/api/internal/platform/workspace-management/workspaces/wks_123/git-conflict")
+                        .queryParam("path", "src/Login.java")
+                        .build())
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.currentContent").isEqualTo("current")
+                .jsonPath("$.data.incomingContent").isEqualTo("incoming");
+
+        client(service).post()
+                .uri("/api/internal/platform/workspace-management/workspaces/wks_123/git-conflict/resolve")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"path":"src/Login.java","resolution":"MANUAL","content":"resolved"}
+                        """)
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).resolveWorkspaceGitConflict(
+                "wks_123", "src/Login.java", "MANUAL", "resolved", USER_ID);
     }
 
     private WebTestClient client(ManagedWorkspaceApplicationService service) {

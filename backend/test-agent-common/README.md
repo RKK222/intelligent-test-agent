@@ -27,7 +27,7 @@
 - `PageRequest`、`PageResponse<T>`：分页请求和响应模型。
 - `RuntimeIdGenerator`：生成 Workspace、Session、Run、Message、PTY ticket、代码库、应用工作空间、应用版本工作区、应用版本服务器副本、服务器广播事件、个人工作区、同步记录、SSH key 和 scheduler 运行/计划的稳定前缀 ID。
 - `GitRemoteService`、`ProcessGitCommandExecutor`：封装 `git ls-remote --heads`、`git archive --remote`、超时、输出上限、非交互环境和临时 SSH key 文件清理。
-- `GitWorkspaceService`：封装 clone、worktree add、同名分支已存在时复用分支挂载 worktree、当前分支/origin/head/status 查询、origin set-url、porcelain 状态解析、diff 文件聚合、提交指定文件、push/force-with-lease、pull --ff-only、fetch、reset --hard 到指定 commit、合并冲突文件列表（`git diff --name-only --diff-filter=U`）和 `merge --abort` 原子命令，供业务层在发布冲突后恢复受控仓库状态。
+- `GitWorkspaceService`：封装 clone、worktree add、分支/origin/head/status、porcelain/diff、索引恢复到 HEAD、冲突 stage 1/2/3 读取、提交、push/pull/fetch、冲突文件列表和 `merge --abort` 等 Git 原子命令。
 - `SshKeyCryptoService`：封装个人 SSH 私钥 AES-GCM 加解密和 SHA-256 指纹生成。
 - `RsaKeyService`：封装 SSH key 前端混合加密所需的 RSA 公钥导出和私钥解密；解密优先使用浏览器 Web Crypto 对齐的 RSA-OAEP/SHA-256 + MGF1-SHA-256 参数，并兼容历史 Java 默认 OAEP 参数密文。
 

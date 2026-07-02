@@ -1038,6 +1038,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/workspace-versions/{versionId}/ensure-default-personal-workspace` | 显式确保默认个人工作区存在：查询 (versionId, userId, workspaceName=default)，存在则复用返回，不存在则后台创建。 |
 | `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取工作区变更文件列表，返回 `{ files: [{ path, rawStatus, status, staged, patch, additions, deletions }] }`；Git unmerged 状态会返回 `status=conflict`。 |
 | `POST` | `/workspaces/{workspaceId}/git-discard` | 丢弃当前个人 worktree 中指定工作区相对路径的本地 Git 改动；已跟踪文件执行 restore，新增/未跟踪文件定点 clean。 |
+| `GET` | `/workspaces/{workspaceId}/git-conflict?path={path}` | 读取个人 worktree 冲突文件的 Git base/current/incoming stage 与工作树结果。 |
+| `POST` | `/workspaces/{workspaceId}/git-conflict/resolve` | 解决单个冲突并定点 stage，支持当前、应用、两者、手工内容和删除语义。 |
+| `POST` | `/workspaces/{workspaceId}/git-conflict/abort` | 在个人 worktree 中执行 `merge --abort`，取消整次未完成合并。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 个人工作区"提交并推送"：请求体必须带 `files`，后端只暂存并提交这些前端已暂存文件；随后确保当前服务器应用版本副本可用（必要时按当前 `OPENCODE_APP_WORKSPACE_ROOT` 修复旧路径），先把远端特性分支合入个人 worktree，再在应用版本副本（特性分支）上 merge 个人分支并只 push 特性分支；个人分支不推送远端；真实合并冲突返回业务 `CONFLICT` 与冲突文件列表，冲突保留在个人 worktree 供用户解决；认证、网络、远端拒绝等非冲突 Git 错误按统一错误响应返回。 |
 
 `POST /applications/{appId}/workspace-templates/{templateId}/versions` 请求体：
@@ -1176,6 +1179,14 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `files` 使用 `git-diff` 响应中的工作区相对路径。后端只允许当前用户个人 worktree 的运行态 workspace 调用；会先把路径映射到仓库相对路径，已跟踪修改/删除执行 `git restore --staged --worktree -- <file>`，新增或未跟踪文件先取消暂存再执行定点 `git clean -f -- <file>`。成功后无业务响应体，前端刷新 `git-diff` 后该文件不再出现在变更列表中。
 
+`GET /workspaces/{workspaceId}/git-conflict?path=src/App.java` 返回 `path/rawStatus/baseContent/currentContent/incomingContent/resultContent`。四个 content 可为 `null`，表示对应 Git stage 或工作树中不存在文件；文本上限 1MB。`POST /workspaces/{workspaceId}/git-conflict/resolve` 请求体为：
+
+```json
+{"path":"src/App.java","resolution":"MANUAL","content":"编辑后的最终内容"}
+```
+
+`resolution` 支持 `CURRENT`、`INCOMING`、`BOTH`、`MANUAL`、`DELETE`。非冲突路径返回 `CONFLICT`。`POST /workspaces/{workspaceId}/git-conflict/abort` 无请求体，仅在存在未完成 merge 时成功。
+
 ### 个人工作区提交并推送
 
 `POST /personal-workspaces/{personalWorkspaceId}/publish` 请求体：
@@ -1189,7 +1200,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 后端执行流程：
 
-1. 将 `files` 按当前个人 workspace 根目录映射为仓库相对路径，在个人 worktree 中只对这些文件执行 `git add -- <files>` 并 `git commit -m "..."`；未选择文件不会被提交，仍保留在个人 worktree diff 中。如果上次发布已完成本地 commit 但后续失败，重试时允许没有新提交并继续后续合并。
+1. 将 `files` 映射为仓库相对路径。普通发布先把 index 恢复到 `HEAD`，再只 stage 并提交这些文件；未选择文件保留在工作树。merge 重试则保留完整 merge index，在所有冲突解决后提交 Git 自动合并项和解决结果。
 2. 确保当前服务器应用版本副本可用：副本路径不存在、不是当前机器路径或历史运行态 Workspace 根目录仍指向旧系统路径时，按当前 `OPENCODE_APP_WORKSPACE_ROOT` 重新准备本机副本并更新副本/Workspace 记录。
 3. 切到应用版本副本（checkout 在应用版本特性分支）：`git fetch origin` + `git pull --ff-only {appVersionBranch}`，先把远端特性分支拉到本地。
 4. 在个人 worktree 中 `git merge --no-ff {appVersionBranch}`，把最新特性分支合入个人分支；如发生冲突，冲突文件保留在当前个人 worktree。
@@ -1210,7 +1221,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "personalWorkspaceId": "psw_...",
   "versionId": "awv_...",
   "conflictFiles": [],
-  "message": "合并成功: abc123..."
+  "message": "合并成功: abc123...",
+  "remotePushed": true,
+  "headCommit": "abc123..."
 }
 
 // 冲突
@@ -1222,6 +1235,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "message": "合并冲突，请在个人工作区中解决冲突后重新提交并推送"
 }
 ```
+
+`remotePushed` 只有在应用版本分支 `git push` 成功并读取发布后的 HEAD 后才为 `true`；前端未收到 `remotePushed=true` 时不得展示推送成功。
 
 前端两级菜单（应用工作空间→版本）使用说明：
 

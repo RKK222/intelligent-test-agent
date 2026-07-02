@@ -1594,6 +1594,25 @@ export type PublishPersonalWorkspaceResult = {
   versionId: string;
   conflictFiles: string[];
   message: string;
+  remotePushed?: boolean;
+  headCommit?: string | null;
+};
+
+export type WorkspaceGitConflict = {
+  path: string;
+  rawStatus: string;
+  baseContent?: string | null;
+  currentContent?: string | null;
+  incomingContent?: string | null;
+  resultContent?: string | null;
+};
+
+export type WorkspaceGitConflictResolution = "CURRENT" | "INCOMING" | "BOTH" | "MANUAL" | "DELETE";
+
+export type ResolveWorkspaceGitConflictPayload = {
+  path: string;
+  resolution: WorkspaceGitConflictResolution;
+  content?: string | null;
 };
 
 /** 确保默认个人工作区响应 */

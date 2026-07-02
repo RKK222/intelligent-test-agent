@@ -14,6 +14,7 @@ import {
   Undo2
 } from "lucide-vue-next";
 import { createBackendApiClient, BackendApiError } from "@test-agent/backend-api";
+import { MergeConflictEditor } from "@test-agent/diff-viewer";
 import {
   useWorkbenchStore,
   mockVcsDiffFiles,
@@ -22,8 +23,9 @@ import {
 } from "@test-agent/workbench-shell";
 import type {
   AgentConfigDiffFile,
-  AgentConfigProgressEvent,
-  RunDiffFile
+  RunDiffFile,
+  WorkspaceGitConflict,
+  WorkspaceGitConflictResolution
 } from "@test-agent/shared-types";
 import { Badge } from "@test-agent/ui-kit";
 
@@ -97,6 +99,9 @@ const loading = ref(false);
 const committing = ref(false);
 const errorMessage = ref("");
 const progressMessage = ref("");
+const activeConflict = ref<WorkspaceGitConflict | null>(null);
+const conflictLoading = ref(false);
+const conflictResolving = ref(false);
 // 切换测试数据可能发生在真实刷新未完成时，用 token 丢弃旧请求回写，避免列表被清空。
 let refreshChangesToken = 0;
 
@@ -282,6 +287,55 @@ function isConflictFile(file: { status?: string; rawStatus?: string }): boolean 
   return file.status === "conflict" || ["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(rawStatus);
 }
 
+async function openWorkspaceConflict(path: string) {
+  if (!props.workspaceId || conflictLoading.value) return;
+  conflictLoading.value = true;
+  errorMessage.value = "";
+  try {
+    activeConflict.value = await api.getWorkspaceGitConflict(props.workspaceId, path);
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "读取 Git 冲突失败");
+  } finally {
+    conflictLoading.value = false;
+  }
+}
+
+async function resolveWorkspaceConflict(payload: {
+  resolution: WorkspaceGitConflictResolution;
+  content?: string | null;
+}) {
+  if (!props.workspaceId || !activeConflict.value || conflictResolving.value) return;
+  conflictResolving.value = true;
+  errorMessage.value = "";
+  try {
+    const path = activeConflict.value.path;
+    await api.resolveWorkspaceGitConflict(props.workspaceId, { path, ...payload });
+    activeConflict.value = null;
+    await refreshChanges();
+    notifyChangesRefreshed([path], true);
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "解决 Git 冲突失败");
+  } finally {
+    conflictResolving.value = false;
+  }
+}
+
+async function abortWorkspaceConflict() {
+  if (!props.workspaceId || conflictResolving.value) return;
+  conflictResolving.value = true;
+  errorMessage.value = "";
+  try {
+    await api.abortWorkspaceGitConflict(props.workspaceId);
+    activeConflict.value = null;
+    await refreshChanges();
+    notifyChangesRefreshed(undefined, true);
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "取消 Git 合并失败");
+  } finally {
+    conflictResolving.value = false;
+  }
+}
+
 async function discardWorkspaceFile(path: string) {
   if (!props.canWrite || !props.workspaceId || discardingWorkspacePaths.value.has(path)) return;
   errorMessage.value = "";
@@ -437,6 +491,9 @@ async function handleCommit(push = false) {
         committing.value = false;
         return;
       }
+      if (result.status !== "MERGED" || result.remotePushed !== true) {
+        throw new Error("远端推送结果未确认，请刷新变更列表并检查远程分支后重试。");
+      }
       // 推送成功：清除暂存状态
       stagedWorkspacePaths.value.clear();
       progressMessage.value = "已提交并推送到应用版本！";
@@ -496,6 +553,7 @@ async function handleCommit(push = false) {
       progressMessage.value = "";
     }, 2000);
   } catch (error) {
+    progressMessage.value = "";
     errorMessage.value = errorMessageFor(error, "提交失败");
   } finally {
     committing.value = false;
@@ -514,7 +572,17 @@ async function runAgentOperation<T>(action: () => Promise<T>, label: string, ope
     socket = null;
   }
   try {
-    await action();
+    const result = await action();
+    if (
+      result
+      && typeof result === "object"
+      && "status" in result
+      && (result as { status?: string }).status !== "SUCCEEDED"
+    ) {
+      const operation = result as { status?: string; errorMessage?: string | null };
+      throw new Error(operation.errorMessage || `${label}未成功完成`);
+    }
+    return result;
   } finally {
     setTimeout(() => socket?.close(), 1000);
   }
@@ -547,6 +615,15 @@ defineExpose({
 
 <template>
   <div class="git-changes-panel">
+    <div v-if="activeConflict" class="git-merge-overlay">
+      <MergeConflictEditor
+        :conflict="activeConflict"
+        :resolving="conflictResolving"
+        @resolve="resolveWorkspaceConflict"
+        @abort="abortWorkspaceConflict"
+        @close="activeConflict = null"
+      />
+    </div>
     <!-- Header status / errors -->
     <div v-if="errorMessage" class="git-error">
       <AlertTriangle class="h-3.5 w-3.5 shrink-0 mt-[2px]" :stroke-width="1.5" />
@@ -593,7 +670,7 @@ defineExpose({
                 v-for="file in workspaceConflicts"
                 :key="file.path"
                 class="git-file-row git-conflict-row group"
-                @click="handleOpenFileDiff(file.path, 'vcs')"
+                @click="openWorkspaceConflict(file.path)"
               >
                 <Badge tone="danger" class="mr-1 py-0 px-1 text-[9px] uppercase">CONFLICT</Badge>
                 <span class="git-file-name" :title="file.path">{{ file.path }}</span>
@@ -817,6 +894,21 @@ defineExpose({
   height: 100%;
   min-height: 0;
   background: #fafafa;
+}
+
+.git-merge-overlay {
+  position: fixed;
+  inset: 40px 450px 28px 310px;
+  z-index: 60;
+  min-width: 640px;
+  background: #fff;
+  box-shadow: 0 18px 50px rgb(24 24 27 / 18%);
+}
+
+@media (max-width: 1180px) {
+  .git-merge-overlay {
+    inset: 40px 0 28px 310px;
+  }
 }
 
 .git-error {
