@@ -17,12 +17,10 @@ import java.util.List;
 import java.util.Optional;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.stereotype.Repository;
 
 /**
- * 配置管理 JDBC Repository，集中映射应用、代码库、工作空间和个人 SSH key 配置表。
+ * 配置管理 JDBC Repository，作为迁移窗口保留；生产 Bean 使用 MyBatis 实现。
  */
-@Repository
 public class JdbcConfigurationManagementRepository extends JdbcRepositorySupport implements ConfigurationManagementRepository {
 
     private final JdbcClient jdbcClient;

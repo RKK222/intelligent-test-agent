@@ -10,6 +10,7 @@ import com.icbc.testagent.configuration.management.ConfigurationManagementRespon
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.ApplicationResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.ApplicationWorkspaceResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.CodeRepositoryResponse;
+import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryTypeOptionResponse;
 import com.icbc.testagent.common.git.SshKeyEncryptionService;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.SshKeyResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.UserResponse;
@@ -20,9 +21,12 @@ import com.icbc.testagent.domain.configuration.ApplicationWorkspace;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.icbc.testagent.domain.configuration.CodeRepository;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
+import com.icbc.testagent.domain.configuration.CodeRepositoryType;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.icbc.testagent.domain.configuration.SshKeyId;
 import com.icbc.testagent.domain.configuration.UserSshKey;
+import com.icbc.testagent.domain.dictionary.Dictionary;
+import com.icbc.testagent.domain.dictionary.DictionaryRepository;
 import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
 import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
@@ -48,6 +52,7 @@ public class ConfigurationManagementApplicationService {
     private static final Pattern REPOSITORY_ENGLISH_NAME_PATTERN = Pattern.compile("^[A-Za-z]{1,29}$");
 
     private final ConfigurationManagementRepository configurationRepository;
+    private final DictionaryRepository dictionaryRepository;
     private final UserRepository userRepository;
     private final GitRemoteService gitRemoteService;
     private final GitCloneCacheService gitCloneCacheService;
@@ -60,11 +65,12 @@ public class ConfigurationManagementApplicationService {
     @Autowired
     public ConfigurationManagementApplicationService(
             ConfigurationManagementRepository configurationRepository,
+            DictionaryRepository dictionaryRepository,
             UserRepository userRepository,
             GitCloneCacheService gitCloneCacheService,
             SshKeyEncryptionService sshKeyEncryptionService,
             ManagedWorkspaceRepository managedWorkspaceRepository) {
-        this(configurationRepository, userRepository, new GitRemoteService(), gitCloneCacheService, sshKeyEncryptionService, managedWorkspaceRepository);
+        this(configurationRepository, dictionaryRepository, userRepository, new GitRemoteService(), gitCloneCacheService, sshKeyEncryptionService, managedWorkspaceRepository);
     }
 
     /**
@@ -72,12 +78,14 @@ public class ConfigurationManagementApplicationService {
      */
     ConfigurationManagementApplicationService(
             ConfigurationManagementRepository configurationRepository,
+            DictionaryRepository dictionaryRepository,
             UserRepository userRepository,
             GitRemoteService gitRemoteService,
             GitCloneCacheService gitCloneCacheService,
             SshKeyEncryptionService sshKeyEncryptionService,
             ManagedWorkspaceRepository managedWorkspaceRepository) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
+        this.dictionaryRepository = Objects.requireNonNull(dictionaryRepository, "dictionaryRepository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
         this.gitRemoteService = Objects.requireNonNull(gitRemoteService, "gitRemoteService must not be null");
         this.gitCloneCacheService = Objects.requireNonNull(gitCloneCacheService, "gitCloneCacheService must not be null");
@@ -128,10 +136,23 @@ public class ConfigurationManagementApplicationService {
                 page.total());
     }
 
-    public CodeRepositoryResponse createRepository(String gitUrl, String name, String englishName, Boolean standard) {
+    public List<RepositoryTypeOptionResponse> listRepositoryTypes() {
+        return dictionaryRepository.findByDictKey(Dictionary.DICT_KEY_REPOSITORY_TYPE).stream()
+                .sorted(java.util.Comparator.comparingInt(Dictionary::sortOrder))
+                .map(dictionary -> new RepositoryTypeOptionResponse(dictionary.dictValue(), dictionary.dictLabel()))
+                .toList();
+    }
+
+    public CodeRepositoryResponse createRepository(
+            String gitUrl,
+            String name,
+            String englishName,
+            Boolean standard,
+            String repositoryType) {
         String normalizedUrl = validateGitUrl(gitUrl);
         String normalizedName = requireText(name, "代码库名称不能为空", "name");
         String normalizedEnglishName = normalizeRepositoryEnglishName(englishName);
+        String normalizedRepositoryType = normalizeRepositoryTypeForCreate(repositoryType, standard);
         configurationRepository.findRepositoryByGitUrl(normalizedUrl).ifPresent(repository -> {
             throw new PlatformException(
                     ErrorCode.CONFLICT,
@@ -145,7 +166,8 @@ public class ConfigurationManagementApplicationService {
                 normalizedUrl,
                 normalizedName,
                 normalizedEnglishName,
-                Boolean.TRUE.equals(standard),
+                normalizedRepositoryType,
+                CodeRepositoryType.fromValue(normalizedRepositoryType).standard(),
                 now,
                 now);
         return repositoryResponse(configurationRepository.saveRepository(repository));
@@ -155,10 +177,13 @@ public class ConfigurationManagementApplicationService {
         CodeRepository repository = existingRepository(new CodeRepositoryId(repositoryId));
         String normalizedEnglishName = normalizeRepositoryEnglishName(englishName);
         ensureRepositoryEnglishNameUnique(normalizedEnglishName, repository.repositoryId());
+        String nextRepositoryType = standard == null
+                ? repository.repositoryType()
+                : CodeRepositoryType.fromStandard(Boolean.TRUE.equals(standard)).value();
         CodeRepository updated = repository.editMetadata(
                 requireText(name, "代码库名称不能为空", "name"),
                 normalizedEnglishName,
-                Boolean.TRUE.equals(standard),
+                nextRepositoryType,
                 Instant.now());
         return repositoryResponse(configurationRepository.updateRepositoryMetadata(updated));
     }
@@ -391,6 +416,28 @@ public class ConfigurationManagementApplicationService {
         return value.toLowerCase(java.util.Locale.ROOT);
     }
 
+    private String normalizeRepositoryTypeForCreate(String repositoryType, Boolean legacyStandard) {
+        String value = repositoryType == null || repositoryType.isBlank()
+                ? CodeRepositoryType.fromStandard(Boolean.TRUE.equals(legacyStandard)).value()
+                : repositoryType.trim();
+        CodeRepositoryType parsedType;
+        try {
+            parsedType = CodeRepositoryType.fromValue(value);
+        } catch (IllegalArgumentException exception) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "版本库类型无效",
+                    Map.of("field", "repositoryType", "repositoryType", value));
+        }
+        // 类型必须存在于通用字典表，保证前后端选项来自同一个数据源。
+        dictionaryRepository.findByDictKeyAndValue(Dictionary.DICT_KEY_REPOSITORY_TYPE, parsedType.value())
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.VALIDATION_ERROR,
+                        "版本库类型无效",
+                        Map.of("field", "repositoryType", "repositoryType", parsedType.value())));
+        return parsedType.value();
+    }
+
     private void ensureRepositoryEnglishNameUnique(String englishName, CodeRepositoryId currentRepositoryId) {
         configurationRepository.findRepositoryByEnglishName(englishName).ifPresent(existing -> {
             if (currentRepositoryId == null || !existing.repositoryId().equals(currentRepositoryId)) {
@@ -476,9 +523,17 @@ public class ConfigurationManagementApplicationService {
                 repository.gitUrl(),
                 repository.name(),
                 repository.englishName(),
+                repository.repositoryType(),
+                repositoryTypeLabel(repository.repositoryType()),
                 repository.standard(),
                 repository.createdAt(),
                 repository.updatedAt());
+    }
+
+    private String repositoryTypeLabel(String repositoryType) {
+        return dictionaryRepository.findByDictKeyAndValue(Dictionary.DICT_KEY_REPOSITORY_TYPE, repositoryType)
+                .map(Dictionary::dictLabel)
+                .orElse(repositoryType);
     }
 
     private ApplicationWorkspaceResponse workspaceResponse(ApplicationWorkspace workspace) {

@@ -107,12 +107,23 @@ public class ConfigurationManagementController {
         return ok(exchange, service.listRepositories(RuntimeApiSupport.pageRequest(page, size)));
     }
 
+    @GetMapping("/repository-types")
+    public ApiResponse<Object> listRepositoryTypes(ServerWebExchange exchange) {
+        requireAdmin(exchange);
+        return ok(exchange, service.listRepositoryTypes());
+    }
+
     @PostMapping("/repositories")
     public ApiResponse<Object> createRepository(
             @RequestBody ConfigurationManagementDtos.CreateRepositoryRequest request,
             ServerWebExchange exchange) {
         requireAdmin(exchange);
-        return ok(exchange, service.createRepository(request.gitUrl(), request.name(), request.englishName(), request.standard()));
+        return ok(exchange, service.createRepository(
+                request.gitUrl(),
+                request.name(),
+                request.englishName(),
+                request.standard(),
+                request.repositoryType()));
     }
 
     @PatchMapping("/repositories/{repositoryId}")

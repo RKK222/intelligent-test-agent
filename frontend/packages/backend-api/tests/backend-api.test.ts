@@ -646,6 +646,8 @@ describe("backend-api", () => {
           gitUrl: "https://gitee.com/demo/repo.git",
           name: "演示库",
           englishName: "demorepo",
+          repositoryType: "TEST_WORK_REPOSITORY",
+          repositoryTypeLabel: "测试工作库",
           standard: true,
           createdAt: "2026-06-26T00:00:00Z",
           updatedAt: "2026-06-26T00:00:00Z"
@@ -682,6 +684,7 @@ describe("backend-api", () => {
       gitUrl: "https://gitee.com/demo/repo.git",
       name: "演示库",
       englishName: "demorepo",
+      repositoryType: "TEST_WORK_REPOSITORY",
       standard: true
     });
     await client.createApplicationWorkspace("app_1", {
@@ -692,9 +695,37 @@ describe("backend-api", () => {
     });
     await client.getWorkspaceCreateOperation("wco_123");
 
-    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({ englishName: "demorepo" });
+    expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
+      englishName: "demorepo",
+      repositoryType: "TEST_WORK_REPOSITORY",
+      standard: true
+    });
     expect(JSON.parse(String(fetcher.mock.calls[1]?.[1]?.body))).toMatchObject({ operationId: "wco_123" });
     expect(fetcher.mock.calls[2]?.[0]).toBe("http://api/api/internal/platform/configuration-management/workspace-create-operations/wco_123");
+  });
+
+  it("loads repository type options from configuration APIs", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: [
+        { typeCode: "TEST_WORK_REPOSITORY", typeLabel: "测试工作库" },
+        { typeCode: "APPLICATION_CODE_REPOSITORY", typeLabel: "应用代码库" },
+        { typeCode: "APPLICATION_ASSET_REPOSITORY", typeLabel: "应用资产库" }
+      ]
+    }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.listRepositoryTypes()).resolves.toEqual([
+      { typeCode: "TEST_WORK_REPOSITORY", typeLabel: "测试工作库" },
+      { typeCode: "APPLICATION_CODE_REPOSITORY", typeLabel: "应用代码库" },
+      { typeCode: "APPLICATION_ASSET_REPOSITORY", typeLabel: "应用资产库" }
+    ]);
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/configuration-management/repository-types",
+      expect.any(Object)
+    );
   });
 
   it("maps managed workspace APIs through platform URLs", async () => {

@@ -70,6 +70,7 @@ import type {
   PublishPersonalWorkspacePayload,
   PublishPersonalWorkspaceResult,
   QuestionRequest,
+  RepositoryTypeOption,
   RoleOption,
   IdentityStatus,
   Run,
@@ -1068,6 +1069,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
 
     listRepositories: (page = 1, size = 50) =>
       request<PageResponse<CodeRepositoryConfig>>(`${configurationBase}/repositories${query({ page, size })}`),
+    listRepositoryTypes: () =>
+      request<RepositoryTypeOption[]>(`${configurationBase}/repository-types`),
     createRepository: (payload: CreateRepositoryPayload) =>
       request<CodeRepositoryConfig>(`${configurationBase}/repositories`, { method: "POST", body: JSON.stringify(payload) }),
     updateRepository: (repositoryId: string, payload: UpdateRepositoryPayload) =>

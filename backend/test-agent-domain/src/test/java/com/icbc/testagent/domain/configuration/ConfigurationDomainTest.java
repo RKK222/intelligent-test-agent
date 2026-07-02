@@ -18,17 +18,48 @@ class ConfigurationDomainTest {
                 "git@example.com:demo/repo.git",
                 "旧名称",
                 "demo",
+                CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(),
                 false,
                 NOW,
                 NOW);
 
-        CodeRepository edited = repository.editMetadata("新名称", "demonew", true, NOW.plusSeconds(1));
+        CodeRepository edited = repository.editMetadata(
+                "新名称",
+                "demonew",
+                CodeRepositoryType.TEST_WORK_REPOSITORY.value(),
+                NOW.plusSeconds(1));
 
         assertThat(edited.gitUrl()).isEqualTo("git@example.com:demo/repo.git");
         assertThat(edited.name()).isEqualTo("新名称");
         assertThat(edited.englishName()).isEqualTo("demonew");
+        assertThat(edited.repositoryType()).isEqualTo(CodeRepositoryType.TEST_WORK_REPOSITORY.value());
         assertThat(edited.standard()).isTrue();
         assertThat(edited.updatedAt()).isEqualTo(NOW.plusSeconds(1));
+    }
+
+    @Test
+    void codeRepositoryDerivesLegacyStandardFlagFromRepositoryType() {
+        CodeRepository testWorkRepository = new CodeRepository(
+                new CodeRepositoryId("repo_test_work"),
+                "git@example.com:demo/test-work.git",
+                "测试工作库",
+                "testwork",
+                CodeRepositoryType.TEST_WORK_REPOSITORY.value(),
+                false,
+                NOW,
+                NOW);
+        CodeRepository applicationAssetRepository = new CodeRepository(
+                new CodeRepositoryId("repo_asset"),
+                "git@example.com:demo/asset.git",
+                "应用资产库",
+                "asset",
+                CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value(),
+                true,
+                NOW,
+                NOW);
+
+        assertThat(testWorkRepository.standard()).isTrue();
+        assertThat(applicationAssetRepository.standard()).isFalse();
     }
 
     @Test

@@ -11,7 +11,7 @@ final class ConfigurationManagementDtos {
     record AddMemberRequest(String userId) {
     }
 
-    record CreateRepositoryRequest(String gitUrl, String name, String englishName, Boolean standard) {
+    record CreateRepositoryRequest(String gitUrl, String name, String englishName, Boolean standard, String repositoryType) {
     }
 
     record UpdateRepositoryRequest(String name, String englishName, Boolean standard) {

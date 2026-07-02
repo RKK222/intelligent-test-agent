@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.icbc.testagent.persistence.mybatis.ConfigurationManagementMapper">
+
+    <resultMap id="ApplicationDefinitionMap" type="com.icbc.testagent.persistence.mybatis.ApplicationDefinitionRow">
+        <constructor>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="app_name" javaType="java.lang.String"/>
+            <arg column="enabled" javaType="_boolean"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="ApplicationMemberMap" type="com.icbc.testagent.persistence.mybatis.ApplicationMemberRow">
+        <constructor>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="deleted_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="CodeRepositoryMap" type="com.icbc.testagent.persistence.mybatis.CodeRepositoryRow">
+        <constructor>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="git_url" javaType="java.lang.String"/>
+            <arg column="name" javaType="java.lang.String"/>
+            <arg column="english_name" javaType="java.lang.String"/>
+            <arg column="repository_type" javaType="java.lang.String"/>
+            <arg column="standard" javaType="_boolean"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="ApplicationWorkspaceMap" type="com.icbc.testagent.persistence.mybatis.ApplicationWorkspaceRow">
+        <constructor>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="app_id" javaType="java.lang.String"/>
+            <arg column="repository_id" javaType="java.lang.String"/>
+            <arg column="branch" javaType="java.lang.String"/>
+            <arg column="directory_path" javaType="java.lang.String"/>
+            <arg column="workspace_name" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <resultMap id="UserSshKeyMap" type="com.icbc.testagent.persistence.mybatis.UserSshKeyRow">
+        <constructor>
+            <arg column="ssh_key_id" javaType="java.lang.String"/>
+            <arg column="user_id" javaType="java.lang.String"/>
+            <arg column="name" javaType="java.lang.String"/>
+            <arg column="fingerprint" javaType="java.lang.String"/>
+            <arg column="encrypted_private_key" javaType="java.lang.String"/>
+            <arg column="encrypted_aes_key" javaType="java.lang.String"/>
+            <arg column="encryption_nonce" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <select id="findApplications" resultMap="ApplicationDefinitionMap">
+        select app_id, app_name, enabled, created_at, updated_at
+        from applications
+        <where>
+            <if test="enabledOnly == true">
+                enabled = true
+            </if>
+        </where>
+        order by app_name, app_id
+    </select>
+
+    <select id="findApplication" resultMap="ApplicationDefinitionMap">
+        select app_id, app_name, enabled, created_at, updated_at
+        from applications
+        where app_id = #{appId}
+    </select>
+
+    <select id="findApplicationsByMember" resultMap="ApplicationDefinitionMap">
+        select a.app_id, a.app_name, a.enabled, a.created_at, a.updated_at
+        from applications a
+        join application_members m on m.app_id = a.app_id
+        where m.user_id = #{userId}
+          and m.deleted_at is null
+          and a.enabled = true
+        order by a.app_name, a.app_id
+    </select>
+
+    <select id="countActiveMember" resultType="long">
+        select count(*)
+        from application_members
+        where app_id = #{appId}
+          and user_id = #{userId}
+          and deleted_at is null
+    </select>
+
+    <select id="findActiveMembers" resultMap="ApplicationMemberMap">
+        select app_id, user_id, created_at, updated_at, deleted_at
+        from application_members
+        where app_id = #{appId}
+          and deleted_at is null
+        order by created_at, user_id
+    </select>
+
+    <select id="countMember" resultType="long">
+        select count(*)
+        from application_members
+        where app_id = #{appId}
+          and user_id = #{userId}
+    </select>
+
+    <update id="reactivateMember">
+        update application_members
+        set updated_at = #{updatedAt}, deleted_at = null
+        where app_id = #{appId}
+          and user_id = #{userId}
+    </update>
+
+    <insert id="insertMember">
+        insert into application_members(app_id, user_id, created_at, updated_at, deleted_at)
+        values (#{appId}, #{userId}, #{createdAt}, #{updatedAt}, #{deletedAt})
+    </insert>
+
+    <update id="deleteMember">
+        update application_members
+        set deleted_at = current_timestamp, updated_at = current_timestamp
+        where app_id = #{appId}
+          and user_id = #{userId}
+          and deleted_at is null
+    </update>
+
+    <select id="findRepositories" resultMap="CodeRepositoryMap">
+        select repository_id, git_url, name, english_name, repository_type, standard, created_at, updated_at
+        from code_repositories
+        order by updated_at desc, repository_id
+        limit #{limit} offset #{offset}
+    </select>
+
+    <select id="countRepositories" resultType="long">
+        select count(*) from code_repositories
+    </select>
+
+    <select id="findRepository" resultMap="CodeRepositoryMap">
+        select repository_id, git_url, name, english_name, repository_type, standard, created_at, updated_at
+        from code_repositories
+        where repository_id = #{repositoryId}
+    </select>
+
+    <select id="findRepositoryByGitUrl" resultMap="CodeRepositoryMap">
+        select repository_id, git_url, name, english_name, repository_type, standard, created_at, updated_at
+        from code_repositories
+        where git_url = #{gitUrl}
+    </select>
+
+    <select id="findRepositoryByEnglishName" resultMap="CodeRepositoryMap">
+        select repository_id, git_url, name, english_name, repository_type, standard, created_at, updated_at
+        from code_repositories
+        where english_name = #{englishName}
+    </select>
+
+    <insert id="insertRepository" parameterType="com.icbc.testagent.persistence.mybatis.CodeRepositoryRow">
+        insert into code_repositories(
+            repository_id, git_url, name, english_name, repository_type, standard, created_at, updated_at
+        )
+        values (
+            #{repositoryId}, #{gitUrl}, #{name}, #{englishName}, #{repositoryType}, #{standard}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="updateRepositoryMetadata" parameterType="com.icbc.testagent.persistence.mybatis.CodeRepositoryRow">
+        update code_repositories
+        set name = #{name},
+            english_name = #{englishName},
+            repository_type = #{repositoryType},
+            standard = #{standard},
+            updated_at = #{updatedAt}
+        where repository_id = #{repositoryId}
+    </update>
+
+    <select id="findRepositoriesByApplication" resultMap="CodeRepositoryMap">
+        select r.repository_id, r.git_url, r.name, r.english_name, r.repository_type, r.standard, r.created_at, r.updated_at
+        from code_repositories r
+        join application_repository_links l on l.repository_id = r.repository_id
+        where l.app_id = #{appId}
+        order by r.name, r.repository_id
+    </select>
+
+    <select id="findApplicationsByRepository" resultMap="ApplicationDefinitionMap">
+        select a.app_id, a.app_name, a.enabled, a.created_at, a.updated_at
+        from applications a
+        join application_repository_links l on l.app_id = a.app_id
+        where l.repository_id = #{repositoryId}
+        order by a.app_name, a.app_id
+    </select>
+
+    <select id="countRepositoryLink" resultType="long">
+        select count(*)
+        from application_repository_links
+        where app_id = #{appId}
+          and repository_id = #{repositoryId}
+    </select>
+
+    <insert id="insertRepositoryLink">
+        insert into application_repository_links(app_id, repository_id, created_at)
+        values (#{appId}, #{repositoryId}, current_timestamp)
+    </insert>
+
+    <delete id="deleteRepositoryLink">
+        delete from application_repository_links
+        where app_id = #{appId}
+          and repository_id = #{repositoryId}
+    </delete>
+
+    <select id="findWorkspaces" resultMap="ApplicationWorkspaceMap">
+        select workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at
+        from application_workspaces
+        where app_id = #{appId}
+        order by updated_at desc, workspace_id
+    </select>
+
+    <select id="findWorkspace" resultMap="ApplicationWorkspaceMap">
+        select workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at
+        from application_workspaces
+        where workspace_id = #{workspaceId}
+    </select>
+
+    <select id="findWorkspaceByLocation" resultMap="ApplicationWorkspaceMap">
+        select workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at
+        from application_workspaces
+        where app_id = #{appId}
+          and repository_id = #{repositoryId}
+          and branch = #{branch}
+          and directory_path = #{directoryPath}
+    </select>
+
+    <insert id="insertWorkspace" parameterType="com.icbc.testagent.persistence.mybatis.ApplicationWorkspaceRow">
+        insert into application_workspaces(
+            workspace_id, app_id, repository_id, branch, directory_path, workspace_name, created_at, updated_at
+        )
+        values (
+            #{workspaceId}, #{appId}, #{repositoryId}, #{branch}, #{directoryPath}, #{workspaceName}, #{createdAt}, #{updatedAt}
+        )
+    </insert>
+
+    <update id="updateWorkspace" parameterType="com.icbc.testagent.persistence.mybatis.ApplicationWorkspaceRow">
+        update application_workspaces
+        set workspace_name = #{workspaceName}, updated_at = #{updatedAt}
+        where workspace_id = #{workspaceId}
+    </update>
+
+    <delete id="deleteWorkspace">
+        delete from application_workspaces
+        where workspace_id = #{workspaceId}
+    </delete>
+
+    <select id="findSshKeys" resultMap="UserSshKeyMap">
+        select ssh_key_id, user_id, name, fingerprint, encrypted_private_key, encrypted_aes_key, encryption_nonce, created_at
+        from user_ssh_keys
+        where user_id = #{userId}
+        order by created_at desc
+    </select>
+
+    <select id="findSshKey" resultMap="UserSshKeyMap">
+        select ssh_key_id, user_id, name, fingerprint, encrypted_private_key, encrypted_aes_key, encryption_nonce, created_at
+        from user_ssh_keys
+        where user_id = #{userId}
+          and ssh_key_id = #{sshKeyId}
+    </select>
+
+    <insert id="insertSshKey" parameterType="com.icbc.testagent.persistence.mybatis.UserSshKeyRow">
+        insert into user_ssh_keys(
+            ssh_key_id, user_id, name, fingerprint, encrypted_private_key, encrypted_aes_key, encryption_nonce, created_at
+        )
+        values (
+            #{sshKeyId}, #{userId}, #{name}, #{fingerprint}, #{encryptedPrivateKey}, #{encryptedAesKey}, #{encryptionNonce}, #{createdAt}
+        )
+    </insert>
+
+    <delete id="deleteSshKey">
+        delete from user_ssh_keys
+        where user_id = #{userId}
+          and ssh_key_id = #{sshKeyId}
+    </delete>
+</mapper>

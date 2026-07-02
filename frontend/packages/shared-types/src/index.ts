@@ -1388,9 +1388,16 @@ export type CodeRepositoryConfig = {
   gitUrl: string;
   name: string;
   englishName?: string | null;
+  repositoryType?: string | null;
+  repositoryTypeLabel?: string | null;
   standard: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type RepositoryTypeOption = {
+  typeCode: string;
+  typeLabel: string;
 };
 
 export type ApplicationWorkspaceConfig = {
@@ -1516,6 +1523,7 @@ export type CreateRepositoryPayload = {
   gitUrl: string;
   name: string;
   englishName: string;
+  repositoryType?: string;
   standard?: boolean;
 };
 

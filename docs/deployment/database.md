@@ -162,6 +162,11 @@
 - `APP_ADMIN`（应用管理员）
 - `USER`（普通用户）
 
+`V20260702153000` 初始化版本库类型字典 `REPOSITORY_TYPE`：
+- `TEST_WORK_REPOSITORY`（测试工作库）
+- `APPLICATION_CODE_REPOSITORY`（应用代码库）
+- `APPLICATION_ASSET_REPOSITORY`（应用资产库）
+
 ### user_roles 用户角色对照表
 
 | 字段 | 说明 |
@@ -215,6 +220,7 @@
 - `application_members(app_id, user_id)` 唯一；`deleted_at` 为空表示有效关系。
 - `code_repositories.git_url` 唯一；不提供删除仓库配置的业务接口。
 - `code_repositories.english_name` 后续迁移新增，可空兼容历史数据；非空值唯一，新增/编辑代码库时由后端校验 1 到 29 位英文字母并统一小写保存。
+- `code_repositories.repository_type` 后续迁移新增，取值来自通用字典 `REPOSITORY_TYPE`；旧 `standard` 字段保留，新增/读取时统一由版本库类型派生兼容值。
 - `application_repository_links(app_id, repository_id)` 唯一。
 - `application_workspaces(app_id, repository_id, branch, directory_path)` 唯一，一个目录对应一个应用工作空间配置。
 - `user_ssh_keys.user_id` 唯一，保证每个用户最多保存一把 SSH key。
@@ -367,6 +373,22 @@ Java 后端启动时会把稳定服务器身份写入 `SYS_DATA_ROOT_DIR/.server
 - 缺少英文名的历史代码库不能创建新的应用版本工作区，后端返回 `VALIDATION_ERROR`，避免新路径规则下目录冲突。
 - 通用参数读取按 `当前平台 -> all` 顺序选择，命中即用；未命中或值为空时抛 `INTERNAL_ERROR` 业务异常（`通用参数未配置：<参数英文名>`），强制运维在 `common_parameters` 表中补配。`OPENCODE_PUBLIC_AGENT_GIT_URL` 例外，其缺失或为 `UNCONFIGURED` 时视为公共级功能未启用，不抛异常。
 - `workspace_create_operations` 只服务 HTTP 轮询进度，不写入 `run_events`，也不参与 RunEvent SSE 续传。
+
+## V20260702153000 版本库类型字典与字段
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260702153000__add_repository_type_to_code_repositories.sql` 为版本库类型优化增加生产必需字典和字段：
+
+| 表/字段 | 说明 |
+|---|---|
+| `dictionaries(REPOSITORY_TYPE)` | 初始化 `TEST_WORK_REPOSITORY`、`APPLICATION_CODE_REPOSITORY`、`APPLICATION_ASSET_REPOSITORY` 三个版本库类型下拉选项。 |
+| `code_repositories.repository_type` | 版本库类型，非空，默认 `APPLICATION_CODE_REPOSITORY`，业务含义由 `dictionaries.dict_key='REPOSITORY_TYPE'` 的值定义。 |
+
+兼容策略：
+
+- 历史 `standard=true` 的代码库回填为 `TEST_WORK_REPOSITORY`。
+- 历史 `standard=false` 的代码库无法自动区分代码或资产，统一回填为 `APPLICATION_CODE_REPOSITORY`。
+- 旧 `standard` 布尔列继续保留给工作空间分支规则等存量逻辑；新增版本库选择测试工作库时写 `standard=true`，选择应用代码库或应用资产库时写 `standard=false`。
+- 字典种子属于生产必需基础字典，不包含测试、演示或个人开发数据。
 
 ## V20260626180000 删除废弃参数 OPENCODE_WORKSPACE_ROOT
 

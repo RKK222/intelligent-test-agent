@@ -10,7 +10,10 @@ import com.icbc.testagent.api.web.common.GlobalExceptionHandler;
 import com.icbc.testagent.api.web.common.TraceIdWebFilter;
 import com.icbc.testagent.configuration.management.ConfigurationManagementApplicationService;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.ApplicationResponse;
+import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.CodeRepositoryResponse;
+import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryTypeOptionResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.SshKeyResponse;
+import com.icbc.testagent.domain.configuration.CodeRepositoryType;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.dictionary.Dictionary;
 import com.icbc.testagent.domain.node.ExecutionNode;
@@ -79,6 +82,61 @@ class ConfigurationManagementControllerTest {
                 .expectStatus().isForbidden()
                 .expectBody()
                 .jsonPath("$.code").isEqualTo("FORBIDDEN");
+    }
+
+    @Test
+    void appAdminCanListRepositoryTypesFromDictionary() {
+        ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
+        when(service.listRepositoryTypes()).thenReturn(List.of(
+                new RepositoryTypeOptionResponse(CodeRepositoryType.TEST_WORK_REPOSITORY.value(), "测试工作库"),
+                new RepositoryTypeOptionResponse(CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(), "应用代码库"),
+                new RepositoryTypeOptionResponse(CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value(), "应用资产库")));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/configuration-management/repository-types")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data[0].typeCode").isEqualTo(CodeRepositoryType.TEST_WORK_REPOSITORY.value())
+                .jsonPath("$.data[0].typeLabel").isEqualTo("测试工作库");
+    }
+
+    @Test
+    void createRepositoryAcceptsRepositoryTypeAndKeepsLegacyStandardInResponse() {
+        ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
+        when(service.createRepository(
+                eq("https://gitee.com/demo/repo.git"),
+                eq("演示库"),
+                eq("demo"),
+                eq(false),
+                eq(CodeRepositoryType.TEST_WORK_REPOSITORY.value())))
+                .thenReturn(new CodeRepositoryResponse(
+                        "repo_123",
+                        "https://gitee.com/demo/repo.git",
+                        "演示库",
+                        "demo",
+                        CodeRepositoryType.TEST_WORK_REPOSITORY.value(),
+                        "测试工作库",
+                        true,
+                        Instant.parse("2026-07-02T08:00:00Z"),
+                        Instant.parse("2026-07-02T08:00:00Z")));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/configuration-management/repositories")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"gitUrl":"https://gitee.com/demo/repo.git","name":"演示库","englishName":"demo","standard":false,"repositoryType":"TEST_WORK_REPOSITORY"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.repositoryType").isEqualTo(CodeRepositoryType.TEST_WORK_REPOSITORY.value())
+                .jsonPath("$.data.repositoryTypeLabel").isEqualTo("测试工作库")
+                .jsonPath("$.data.standard").isEqualTo(true);
     }
 
     @Test

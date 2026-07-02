@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-02 - 版本库类型改为字典下拉并兼容 standard
+
+- Why: 版本库管理需要把原“是否标准库”勾选升级为“版本库类型”下拉，同时存量工作空间分支规则仍依赖旧 `standard` 字段。
+- What: `code_repositories` 新增 `repository_type`，`REPOSITORY_TYPE` 字典初始化测试工作库、应用代码库和应用资产库；后端新增 `/configuration-management/repository-types`，新增版本库优先使用 `repositoryType` 并派生旧 `standard`；配置管理生产仓储迁到 MyBatis XML；前端新增表单使用类型下拉，编辑区只读展示类型。
+- How: Flyway 回填历史 `standard=true` 为 `TEST_WORK_REPOSITORY`、`standard=false` 为 `APPLICATION_CODE_REPOSITORY`；Domain 用 `CodeRepositoryType` 统一派生兼容布尔值；API/DTO/shared-types/backend-api/设置页和文档同步，存量 JDBC 配置管理仓储仅保留迁移窗口。
+- Result: 后端 domain/configuration-management/API/persistence 定向测试、`mvn clean package -DskipTests`、前端 settings/backend-api Vitest、shared-types/backend-api/agent-web typecheck 和后续 `git diff --check` 已通过；未修改 RunEvent/SSE、generated SDK 或环境配置文件。
+
 ### 2026-07-02 - 托管工作区路径逻辑化与默认空态加载
 
 - Why: 切换应用在当前服务器没有 READY 副本时会把旧数据库绝对路径当成本机 Git 根目录，导致 `GIT_UNAVAILABLE`；同时登录/切应用无 per-app recent 时会兜底首模板首版本并自动创建 default 私人 worktree，不符合“无历史不加载工作区”的新规则。

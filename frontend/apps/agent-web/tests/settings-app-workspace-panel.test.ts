@@ -13,6 +13,8 @@ const repositories: CodeRepositoryConfig[] = [
     gitUrl: "file:///Users/kaka/Desktop/intelligent-test-agent/test-workspaces/F-WRTESTAPP",
     name: "F-WRTESTAPP 本地测试库",
     englishName: "wrtestapp",
+    repositoryType: "TEST_WORK_REPOSITORY",
+    repositoryTypeLabel: "测试工作库",
     standard: true,
     createdAt: "2026-06-26T08:00:00Z",
     updatedAt: "2026-06-26T08:00:00Z"
@@ -22,6 +24,8 @@ const repositories: CodeRepositoryConfig[] = [
     gitUrl: "https://gitee.com/mimo/demo.git",
     name: "MIMO 示例库",
     englishName: "mimo",
+    repositoryType: "APPLICATION_CODE_REPOSITORY",
+    repositoryTypeLabel: "应用代码库",
     standard: false,
     createdAt: "2026-06-26T08:00:00Z",
     updatedAt: "2026-06-26T08:00:00Z"
@@ -33,6 +37,11 @@ function createApi(): Partial<BackendApiClient> {
     listApplications: vi.fn().mockResolvedValue([{ appId: "F-COSS", appName: "F-COSS", enabled: true }]),
     listApplicationMembers: vi.fn().mockResolvedValue([]),
     listRepositories: vi.fn().mockResolvedValue({ items: repositories, page: 1, size: 100, total: repositories.length }),
+    listRepositoryTypes: vi.fn().mockResolvedValue([
+      { typeCode: "TEST_WORK_REPOSITORY", typeLabel: "测试工作库" },
+      { typeCode: "APPLICATION_CODE_REPOSITORY", typeLabel: "应用代码库" },
+      { typeCode: "APPLICATION_ASSET_REPOSITORY", typeLabel: "应用资产库" }
+    ]),
     listApplicationRepositories: vi.fn().mockResolvedValue([repositories[0]]),
     listRepositoryApplications: vi.fn().mockResolvedValue([]),
     listApplicationWorkspaces: vi.fn().mockResolvedValue([]),
@@ -256,12 +265,12 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect(await findByText("已有版本库")).toBeTruthy();
     expect(getByText("共 2 个版本库")).toBeTruthy();
     await waitFor(() => expect(document.activeElement).toBe(getByPlaceholderText("Git URL")));
-    expect(getAllByTitle("标准代码库是指测试自己去git申请，专门用于测试智能体的版本库。").length).toBeGreaterThan(0);
+    expect(getAllByTitle("测试工作库等价于原标准库，会按标准库分支规则创建工作空间。").length).toBeGreaterThan(0);
   });
 
   it("shows repository count and creates repositories in management tab", async () => {
     const api = createApi();
-    const { findByText, getByPlaceholderText, getByText } = renderPanel(api);
+    const { findByText, getByLabelText, getByPlaceholderText, getByText } = renderPanel(api);
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("版本库管理"));
@@ -273,13 +282,15 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     await fireEvent.update(getByPlaceholderText("Git URL"), "https://gitee.com/mimo/new-repo.git");
     await fireEvent.update(getByPlaceholderText("中文名称"), "新增测试库");
     await fireEvent.update(getByPlaceholderText("英文名称"), "NewRepo");
+    await fireEvent.update(getByLabelText("版本库类型"), "TEST_WORK_REPOSITORY");
     await fireEvent.click(getByText("新增"));
 
     await waitFor(() => expect(api.createRepository).toHaveBeenCalledWith({
       gitUrl: "https://gitee.com/mimo/new-repo.git",
       name: "新增测试库",
       englishName: "newrepo",
-      standard: false
+      repositoryType: "TEST_WORK_REPOSITORY",
+      standard: true
     }));
   });
 
@@ -311,12 +322,14 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     const createNameRow = container.querySelector(".ta-repository-create-name-row");
     expect(createNameRow?.textContent).toContain("版本库名称");
     expect(createNameRow?.textContent).toContain("版本库英文名称");
+    expect(createNameRow?.textContent).toContain("版本库类型");
     expect(createNameRow?.querySelector("input")?.getAttribute("placeholder")).toBe("中文名称");
 
     await fireEvent.click(getAllByText("编辑")[0]);
     expect(getByText("取消")).toBeTruthy();
     expect(getAllByText("版本库名称").length).toBeGreaterThanOrEqual(2);
     expect(getAllByText("版本库英文名称").length).toBeGreaterThanOrEqual(2);
+    expect(getByText("类型：测试工作库")).toBeTruthy();
 
     await fireEvent.update(getByPlaceholderText("名称"), "临时名称");
     await fireEvent.click(getByText("取消"));

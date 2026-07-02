@@ -54,6 +54,21 @@ class PersistenceSqlConventionTest {
     }
 
     @Test
+    void configurationManagementRepositoryUsesMyBatisAsTheSpringBean() throws IOException {
+        Path javaRoot = locate("src/main/java");
+        Path resourceRoot = locate("src/main/resources");
+
+        assertThat(Files.readString(javaRoot.resolve("com/icbc/testagent/persistence/JdbcConfigurationManagementRepository.java")))
+                .doesNotContain("@Repository");
+        assertThat(javaRoot.resolve("com/icbc/testagent/persistence/mybatis/MyBatisConfigurationManagementRepository.java"))
+                .exists();
+        assertThat(javaRoot.resolve("com/icbc/testagent/persistence/mybatis/ConfigurationManagementMapper.java"))
+                .exists();
+        assertThat(resourceRoot.resolve("mybatis/ConfigurationManagementMapper.xml"))
+                .exists();
+    }
+
+    @Test
     void newJdbcSqlIsRestrictedToLegacyAllowlist() throws IOException {
         Path persistenceRoot = locate("src/main/java/com/icbc/testagent/persistence");
         Set<String> jdbcFiles;

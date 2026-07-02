@@ -36,9 +36,14 @@ public final class ConfigurationManagementResponses {
             String gitUrl,
             String name,
             String englishName,
+            String repositoryType,
+            String repositoryTypeLabel,
             boolean standard,
             Instant createdAt,
             Instant updatedAt) {
+    }
+
+    public record RepositoryTypeOptionResponse(String typeCode, String typeLabel) {
     }
 
     public record ApplicationWorkspaceResponse(
