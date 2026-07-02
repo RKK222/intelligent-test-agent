@@ -11,6 +11,7 @@ import java.util.Objects;
 public record AgentStreamEventsCommand(
         ExecutionNode node,
         RunId runId,
+        String remoteSessionId,
         String directory,
         String workspace,
         String traceId) {
@@ -21,6 +22,7 @@ public record AgentStreamEventsCommand(
     public AgentStreamEventsCommand {
         Objects.requireNonNull(node, "node must not be null");
         Objects.requireNonNull(runId, "runId must not be null");
+        remoteSessionId = DomainValidation.requireText(remoteSessionId, "remoteSessionId");
         directory = directory == null ? null : DomainValidation.requireText(directory, "directory");
         workspace = workspace == null || workspace.isBlank() ? null : workspace.trim();
         traceId = DomainValidation.requireText(traceId, "traceId");

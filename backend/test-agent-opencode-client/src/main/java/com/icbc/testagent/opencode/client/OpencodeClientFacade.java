@@ -30,6 +30,11 @@ public interface OpencodeClientFacade {
     Mono<OpencodeStartRunResult> startRun(OpencodeStartRunCommand command);
 
     /**
+     * 通过原生 session command 启动技能任务；调用在后端后台持续等待，浏览器断开不影响执行。
+     */
+    Mono<OpencodeStartRunResult> startCommand(OpencodeStartCommand command);
+
+    /**
      * 订阅远端事件流，并输出已经映射好的平台 RunEventDraft。
      */
     Flux<RunEventDraft> streamRunEvents(OpencodeStreamEventsCommand command);

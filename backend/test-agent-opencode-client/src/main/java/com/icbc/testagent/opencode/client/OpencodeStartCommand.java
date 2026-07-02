@@ -1,4 +1,4 @@
-package com.icbc.testagent.agent.runtime;
+package com.icbc.testagent.opencode.client;
 
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.support.DomainValidation;
@@ -6,41 +6,42 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * 启动远端 agent 运行的通用命令。
+ * 通过 opencode 原生 session command 启动技能任务的稳定命令模型。
  */
-public record AgentStartRunCommand(
+public record OpencodeStartCommand(
         ExecutionNode node,
-        String remoteSessionId,
+        String opencodeSessionId,
         String directory,
         String workspace,
-        String prompt,
-        List<AgentPromptPart> parts,
+        String command,
+        String arguments,
+        List<OpencodePromptPart> parts,
         String messageId,
         String agent,
         String modelProviderId,
         String modelId,
         String variant,
-        String command,
-        String arguments,
         String traceId) {
 
     /**
-     * 校验远端会话、prompt 和 traceId，并固化 part 列表。
+     * 规范化命令参数；command 必填，arguments 和运行态选择字段可空。
      */
-    public AgentStartRunCommand {
+    public OpencodeStartCommand {
         Objects.requireNonNull(node, "node must not be null");
-        remoteSessionId = DomainValidation.requireText(remoteSessionId, "remoteSessionId");
-        directory = directory == null ? null : DomainValidation.requireText(directory, "directory");
-        workspace = workspace == null || workspace.isBlank() ? null : workspace.trim();
-        prompt = DomainValidation.requireText(prompt, "prompt");
+        opencodeSessionId = DomainValidation.requireText(opencodeSessionId, "opencodeSessionId");
+        directory = DomainValidation.requireText(directory, "directory");
+        workspace = optionalText(workspace);
+        command = DomainValidation.requireText(command, "command");
+        arguments = arguments == null ? "" : arguments;
         parts = parts == null ? List.of() : List.copyOf(parts);
         messageId = optionalText(messageId);
         agent = optionalText(agent);
         modelProviderId = optionalText(modelProviderId);
         modelId = optionalText(modelId);
+        if ((modelProviderId == null) != (modelId == null)) {
+            throw new IllegalArgumentException("modelProviderId and modelId must be provided together");
+        }
         variant = optionalText(variant);
-        command = optionalText(command);
-        arguments = optionalText(arguments);
         traceId = DomainValidation.requireText(traceId, "traceId");
     }
 

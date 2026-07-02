@@ -1745,9 +1745,13 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
   "agent": "build",
   "model": "anthropic/claude-sonnet-4-5",
   "variant": "default",
-  "mode": "build"
+  "mode": "build",
+  "command": "generate-cases-path",
+  "arguments": "对车贷的开发文档，生成路径图"
 }
 ```
+
+`command` / `arguments` 为可选字段。提供 `command` 时，平台仍先创建并持久化 Run、订阅 RunEvent，再由后端后台调用 opencode 原生 `/session/{sessionID}/command`；创建 Run 接口不会等待技能执行完成。这样 slash 技能与普通 prompt 共用 active-run 恢复、SSE 实时输出和取消语义。未提供 `command` 时继续使用 `prompt_async`。
 
 兼容要求：
 

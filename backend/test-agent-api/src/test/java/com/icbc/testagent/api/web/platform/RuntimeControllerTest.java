@@ -187,6 +187,39 @@ class RuntimeControllerTest {
     }
 
     @Test
+    void runControllerMapsNativeCommandIntoRunInput() {
+        RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
+        when(service.startRun(
+                        eq(new UserId("usr_1234567890abcdef")),
+                        argThat(input -> "generate-cases-path".equals(input.command())
+                                && "对车贷的开发文档，生成路径图".equals(input.arguments())
+                                && "/generate-cases-path 对车贷的开发文档，生成路径图".equals(input.effectivePrompt())),
+                        eq("trace_1234567890abcdef")))
+                .thenReturn(run());
+        WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))
+                .webFilter(new TraceIdWebFilter())
+                .webFilter(authenticatedUserFilter())
+                .build();
+
+        client.post()
+                .uri("/api/runs")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {
+                          "sessionId":"ses_1234567890abcdef",
+                          "prompt":"/generate-cases-path 对车贷的开发文档，生成路径图",
+                          "command":"generate-cases-path",
+                          "arguments":"对车贷的开发文档，生成路径图"
+                        }
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.status").isEqualTo("RUNNING");
+    }
+
+    @Test
     void runControllerRejectsRunStartWithoutPromptOrTextPart() {
         RunApplicationService service = org.mockito.Mockito.mock(RunApplicationService.class);
         WebTestClient client = WebTestClient.bindToController(new RunController(service, null, null))

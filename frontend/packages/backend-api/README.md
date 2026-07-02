@@ -24,7 +24,7 @@
 - 暴露 AI 回复反馈方法：`putMessageFeedback(messageId, payload)`、`getMyMessageFeedback(messageId)`，统一走 `/api/internal/platform/opencode-runtime/messages/{messageId}/feedback...`，只提交评分、原因和备注，不提交 prompt/assistant 原文。
 - 暴露超级管理员运营分析方法：overview、timeseries、peaks、users、organizations、satisfaction、exceptions 和 `exportAnalyticsCsv(type, params)`，统一走 `/api/internal/platform/analytics`；CSV 以 `Blob` 返回，不提供 cost/costUsd 字段。
 - 暴露超级管理员用户管理（测试）方法：用户分页查询、创建用户（默认密码 123456）、角色列表，统一走 `/api/internal/platform/system-management`，自动携带用户 Bearer Token；仅用于研发测试便捷造号。
-- `startRun` 同时支持旧 `(sessionId, prompt)` 参数和对象 payload（`parts`、`messageId`、`agent`、`model`、`variant`、`mode`）。
+- `startRun` 同时支持旧 `(sessionId, prompt)` 参数和对象 payload（`parts`、`messageId`、`agent`、`model`、`variant`、`mode`、`command`、`arguments`）；slash 技能通过可选命令字段进入同一可恢复 Run 链路。
 - 暴露 opencode Web App 标准运行态方法：Agent/Model/Provider/Command/Reference 目录、config、provider auth/OAuth、worktree、Session active-run/children/todo/diff/abort/fork/compact/revert/command/shell/share、permission/question、fs/vcs/lsp/mcp status/resources/tools/auth 和 terminal ticket；除 terminal ticket 外均按 agent URL 调用。
 - Command catalog 映射会保留 opencode runtime 的 `source/hints` 可选字段，供 frontend-opencode 生成 slash command 参数表单。
 - 把后端文件 DTO 转换为前端稳定展示模型。

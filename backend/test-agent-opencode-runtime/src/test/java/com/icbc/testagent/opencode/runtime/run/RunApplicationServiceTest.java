@@ -62,6 +62,7 @@ import com.icbc.testagent.opencode.client.OpencodeRuntimeResult;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessage;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessagesCommand;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessagesResult;
+import com.icbc.testagent.opencode.client.OpencodeStartCommand;
 import com.icbc.testagent.opencode.client.OpencodeStartRunCommand;
 import com.icbc.testagent.opencode.client.OpencodeStartRunResult;
 import com.icbc.testagent.opencode.client.OpencodeStreamEventsCommand;
@@ -155,6 +156,40 @@ class RunApplicationServiceTest {
 
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
         assertThat(facade.startRunCommands).hasSize(1);
+    }
+
+    @Test
+    void serviceForwardsSlashCommandThroughRecoverableRun() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        Run run = service.startRun(new StartRunInput(
+                        new SessionId("ses_1234567890abcdef"),
+                        "/generate-cases-path 对车贷的开发文档，生成路径图",
+                        List.of(StartRunInput.PromptPart.text("/generate-cases-path 对车贷的开发文档，生成路径图")),
+                        null,
+                        "build",
+                        "opencode/north-mini-code-free",
+                        null,
+                        "build",
+                        "generate-cases-path",
+                        "对车贷的开发文档，生成路径图"),
+                "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        assertThat(facade.startCommandCommands).singleElement().satisfies(command -> {
+            assertThat(command.command()).isEqualTo("generate-cases-path");
+            assertThat(command.arguments()).isEqualTo("对车贷的开发文档，生成路径图");
+        });
     }
 
     @Test
@@ -1330,6 +1365,7 @@ class RunApplicationServiceTest {
     private static final class FakeOpencodeFacade implements OpencodeClientFacade {
         private final List<OpencodeCreateSessionCommand> createSessionCommands = new ArrayList<>();
         private final List<OpencodeStartRunCommand> startRunCommands = new ArrayList<>();
+        private final List<OpencodeStartCommand> startCommandCommands = new ArrayList<>();
         private final List<OpencodeRuntimeCommand> runtimeCommands = new ArrayList<>();
         private final List<String> callOrder = new ArrayList<>();
         private String lastPrompt;
@@ -1366,6 +1402,13 @@ class RunApplicationServiceTest {
             startRunCommands.add(command);
             lastPrompt = command.prompt();
             return startRun.apply(command);
+        }
+
+        @Override
+        public Mono<OpencodeStartRunResult> startCommand(OpencodeStartCommand command) {
+            callOrder.add("startCommand");
+            startCommandCommands.add(command);
+            return Mono.just(new OpencodeStartRunResult(true));
         }
 
         @Override

@@ -37,5 +37,5 @@ export function canStartFollowUp(run: Pick<Run, "status"> | null | undefined, mu
 }
 
 export function isRunBusyStatus(status: Run["status"] | string | undefined): boolean {
-  return status === "QUEUED" || status === "RUNNING" || status === "CANCELLING";
+  return status === "PENDING" || status === "QUEUED" || status === "RUNNING" || status === "CANCELLING";
 }

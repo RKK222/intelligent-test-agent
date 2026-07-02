@@ -8,7 +8,7 @@
 
 - 定义 `AgentRuntime` 通用 Java 接口。
 - 提供 `AgentRuntimeRegistry`，按 URL 中的 agentId 查找运行时，未知或未注册 agent 统一返回平台 `NOT_FOUND` 错误。
-- 提供 `OpencodeAgentRuntime`，把通用运行命令适配到 `OpencodeClientFacade`。
+- 提供 `OpencodeAgentRuntime`，把普通 prompt 与 slash 原生命令统一适配到 `OpencodeClientFacade` 的可恢复 Run 调用。
 - 提供 `OtherAgentRuntime` 抽象占位类，供后续其他 agent 实现继承；本次不注册为可调用 Spring Bean。
 
 ## 测试覆盖

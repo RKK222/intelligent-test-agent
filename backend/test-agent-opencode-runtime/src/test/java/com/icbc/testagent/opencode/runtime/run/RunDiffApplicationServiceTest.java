@@ -47,6 +47,7 @@ import com.icbc.testagent.opencode.client.OpencodeRuntimeCommand;
 import com.icbc.testagent.opencode.client.OpencodeRuntimeResult;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessagesCommand;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessagesResult;
+import com.icbc.testagent.opencode.client.OpencodeStartCommand;
 import com.icbc.testagent.opencode.client.OpencodeStartRunCommand;
 import com.icbc.testagent.opencode.client.OpencodeStartRunResult;
 import com.icbc.testagent.opencode.client.OpencodeStreamEventsCommand;
@@ -399,6 +400,11 @@ class RunDiffApplicationServiceTest {
 
         @Override
         public Mono<OpencodeStartRunResult> startRun(OpencodeStartRunCommand command) {
+            return Mono.just(new OpencodeStartRunResult(true));
+        }
+
+        @Override
+        public Mono<OpencodeStartRunResult> startCommand(OpencodeStartCommand command) {
             return Mono.just(new OpencodeStartRunResult(true));
         }
 

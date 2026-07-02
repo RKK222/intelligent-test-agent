@@ -622,6 +622,27 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
   expect(terminalTickets[0]).toEqual({ workspaceId: "wrk_1234567890abcdef", cols: 120, rows: 32 });
 });
 
+test("slash skill starts a recoverable run instead of a direct session command", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  const commandRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, { runRequests, commandRequests });
+
+  await gotoWorkbench(page);
+
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因")
+    .fill("/generate-cases-path 对车贷的开发文档，生成路径图");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runRequests.length).toBe(1);
+  expect(runRequests[0]).toMatchObject({
+    sessionId: "ses_1",
+    prompt: "/generate-cases-path 对车贷的开发文档，生成路径图",
+    command: "generate-cases-path",
+    arguments: "对车贷的开发文档，生成路径图"
+  });
+  expect(commandRequests).toEqual([]);
+});
+
 test("live tracking opens changed file and shows line counts before run finishes", async ({ page }) => {
   await mockBackendApi(page, {
     runEvents: [
@@ -879,6 +900,7 @@ async function mockBackendApi(
   page: Page,
   capture: {
     runRequests?: Array<Record<string, unknown>>;
+    commandRequests?: Array<Record<string, unknown>>;
     sessionRequests?: Array<Record<string, unknown>>;
     permissionReplies?: Array<Record<string, unknown>>;
     questionReplies?: Array<Record<string, unknown>>;
@@ -1354,6 +1376,11 @@ async function mockBackendApi(
         createdAt: "2026-06-19T00:00:00Z",
         updatedAt: "2026-06-19T00:00:00Z"
       }));
+      return;
+    }
+    if (method === "POST" && /^\/api\/internal\/agent\/opencode\/session\/[^/]+\/command$/.test(url.pathname)) {
+      capture.commandRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+      await route.fulfill(json({ accepted: true }));
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/runs/run_1/events") {

@@ -26,6 +26,7 @@ import reactor.util.retry.Retry;
 public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(DefaultOpencodeClientFacade.class);
+    private static final Duration LONG_RUNNING_COMMAND_TIMEOUT = Duration.ofHours(24);
 
     private final OpencodeSdkGateway gateway;
     private final OpencodeRunEventMapper eventMapper;
@@ -128,6 +129,36 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
     }
 
     /**
+     * 技能命令可能持续数分钟，不能套用普通 30 秒超时，也不能重试造成同一命令重复执行。
+     * 后端 Run 取消会调用 session abort，让该请求自然结束；24 小时硬上限避免异常连接永久占用资源。
+     */
+    @Override
+    public Mono<OpencodeStartRunResult> startCommand(OpencodeStartCommand command) {
+        Objects.requireNonNull(command, "command must not be null");
+        String nodeId = command.node().executionNodeId().value();
+        LOGGER.debug("Opencode call started, operation=startCommand, nodeId={}, baseUrl={}",
+                nodeId, command.node().baseUrl());
+        return Mono.defer(() -> gateway.startCommand(
+                        command.node(),
+                        command.opencodeSessionId(),
+                        command.directory(),
+                        command.workspace(),
+                        command.command(),
+                        command.arguments(),
+                        command.parts(),
+                        command.messageId(),
+                        command.agent(),
+                        command.modelProviderId(),
+                        command.modelId(),
+                        command.variant(),
+                        command.traceId()))
+                .timeout(LONG_RUNNING_COMMAND_TIMEOUT)
+                .doOnSuccess(result -> LOGGER.debug(
+                        "Opencode call completed, operation=startCommand, nodeId={}", nodeId))
+                .onErrorMap(error -> toPlatformException(error, "startCommand", command.node()));
+    }
+
+    /**
      * 订阅 opencode raw event 流，并在 facade 层转换为平台 RunEventDraft。
      */
     @Override
@@ -141,6 +172,7 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                                 command.traceId())),
                         "streamRunEvents",
                         command.node())
+                .filter(rawEvent -> eventMapper.belongsToSession(rawEvent, command.opencodeSessionId()))
                 .map(rawEvent -> eventMapper.toDraft(rawEvent, command.runId(), command.traceId()));
     }
 

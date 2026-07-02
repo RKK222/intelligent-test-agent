@@ -168,6 +168,8 @@ export type StartRunPayload = {
   model?: string;
   variant?: string;
   mode?: string;
+  command?: string;
+  arguments?: string;
 };
 
 export type ExtraRequestInit = RequestInit & { timeoutMs?: number };

@@ -326,7 +326,14 @@ public class RunApplicationService {
                     binding.remoteSessionId(),
                     traceId);
             // 先订阅事件再触发 prompt，避免 opencode 快速失败或快速返回时平台漏掉终态事件。
-            subscribeAgentEvents(resolvedAgentId, runtime, running, target.node(), workspace, traceId);
+            subscribeAgentEvents(
+                    resolvedAgentId,
+                    runtime,
+                    running,
+                    binding.remoteSessionId(),
+                    target.node(),
+                    workspace,
+                    traceId);
             AgentStartRunCommand command = new AgentStartRunCommand(
                     target.node(),
                     binding.remoteSessionId(),
@@ -339,6 +346,8 @@ public class RunApplicationService {
                     modelSelection.providerId(),
                     modelSelection.modelId(),
                     input.variant(),
+                    input.command(),
+                    input.arguments(),
                     traceId);
             // prompt_async 的 HTTP 响应不代表 Run 完成，不能阻塞创建 Run 的接口和后续 SSE 订阅。
             Mono.defer(() -> runtime.startRun(command))
@@ -759,13 +768,23 @@ public class RunApplicationService {
     /**
      * 订阅 agent 事件流，事件处理串行 offload，避免阻塞 Netty 线程。
      */
-    private void subscribeAgentEvents(String agentId, AgentRuntime runtime, Run run, ExecutionNode node, Workspace workspace, String traceId) {
+    private void subscribeAgentEvents(
+            String agentId,
+            AgentRuntime runtime,
+            Run run,
+            String remoteSessionId,
+            ExecutionNode node,
+            Workspace workspace,
+            String traceId) {
         runtime.streamRunEvents(new AgentStreamEventsCommand(
                         node,
                         run.runId(),
+                        remoteSessionId,
                         workspace.rootPath(),
                         null,
                         traceId))
+                // opencode event SSE 是长连接；本 Run 收到首个终态后结束订阅，避免同一远端会话的下一轮消息串入旧 Run。
+                .takeUntil(draft -> draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED)
                 // opencode stream 来自 Netty 线程，事件入库或实时发布必须串行 offload，且本地 DB 抖动不能误判为 Run 失败。
                 .concatMap(draft -> Mono.fromRunnable(() -> appendStreamEvent(agentId, run, workspace, draft))
                         .subscribeOn(Schedulers.boundedElastic())

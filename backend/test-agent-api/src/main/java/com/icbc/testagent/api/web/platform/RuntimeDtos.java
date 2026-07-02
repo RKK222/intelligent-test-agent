@@ -71,7 +71,9 @@ final class RuntimeDtos {
             String agent,
             String model,
             String variant,
-            String mode) {
+            String mode,
+            String command,
+            String arguments) {
 
         /**
          * 校验 prompt 或文本 part 至少提供一个，避免空运行进入应用层。
@@ -101,7 +103,17 @@ final class RuntimeDtos {
                     .filter(part -> part != null && part.type() != null && !part.type().isBlank())
                     .map(PromptPartRequest::toInputPart)
                     .toList();
-            return new StartRunInput(new SessionId(sessionId), prompt, mappedParts, messageId, agent, model, variant, mode);
+            return new StartRunInput(
+                    new SessionId(sessionId),
+                    prompt,
+                    mappedParts,
+                    messageId,
+                    agent,
+                    model,
+                    variant,
+                    mode,
+                    command,
+                    arguments);
         }
 
         /**

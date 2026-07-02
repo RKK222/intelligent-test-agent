@@ -147,6 +147,81 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
     }
 
     /**
+     * 调用同步 session command；平台会在创建 Run 和订阅事件后于后台订阅本请求。
+     */
+    @Override
+    public Mono<OpencodeStartRunResult> startCommand(
+            ExecutionNode node,
+            String opencodeSessionId,
+            String directory,
+            String workspace,
+            String command,
+            String arguments,
+            List<OpencodePromptPart> parts,
+            String messageId,
+            String agent,
+            String modelProviderId,
+            String modelId,
+            String variant,
+            String traceId) {
+        ApiClient apiClient = apiClient(node, traceId);
+        LinkedHashMap<String, Object> request = new LinkedHashMap<>();
+        request.put("command", command);
+        request.put("arguments", arguments == null ? "" : arguments);
+        String optionalMessageId = optionalText(messageId);
+        if (optionalMessageId != null) {
+            request.put("messageID", optionalMessageId);
+        }
+        String optionalAgent = optionalText(agent);
+        if (optionalAgent != null) {
+            request.put("agent", optionalAgent);
+        }
+        String optionalModelProvider = optionalText(modelProviderId);
+        String optionalModelId = optionalText(modelId);
+        if (optionalModelProvider != null && optionalModelId != null) {
+            request.put("model", optionalModelProvider + "/" + optionalModelId);
+        }
+        String optionalVariant = optionalText(variant);
+        if (optionalVariant != null) {
+            request.put("variant", optionalVariant);
+        }
+        List<Map<String, Object>> fileParts = parts == null
+                ? List.of()
+                : parts.stream()
+                        .filter(part -> "file".equals(part.type()))
+                        .map(OpencodePromptPart::toRequestBody)
+                        .toList();
+        if (!fileParts.isEmpty()) {
+            request.put("parts", fileParts);
+        }
+        ParameterizedTypeReference<JsonNode> returnType = new ParameterizedTypeReference<>() {
+        };
+        Map<String, Object> pathParams = new HashMap<>();
+        pathParams.put("sessionID", opencodeSessionId);
+        MultiValueMap<String, String> queryParams = queryParams(apiClient, directory, workspace);
+        HttpHeaders headerParams = new HttpHeaders();
+        MultiValueMap<String, String> cookieParams = new LinkedMultiValueMap<>();
+        MultiValueMap<String, Object> formParams = new LinkedMultiValueMap<>();
+        List<MediaType> accepts = apiClient.selectHeaderAccept(new String[]{"application/json"});
+        MediaType contentType = apiClient.selectHeaderContentType(new String[]{"application/json"});
+        return apiClient.invokeAPI(
+                        "/session/{sessionID}/command",
+                        HttpMethod.POST,
+                        pathParams,
+                        queryParams,
+                        Map.copyOf(request),
+                        headerParams,
+                        cookieParams,
+                        formParams,
+                        accepts,
+                        contentType,
+                        new String[]{},
+                        returnType)
+                .bodyToMono(returnType)
+                .thenReturn(new OpencodeStartRunResult(true));
+    }
+
+    /**
      * 构造 prompt_async 请求体，只写入调用方显式传入的可选运行态选择字段。
      */
     private Map<String, Object> promptAsyncRequest(

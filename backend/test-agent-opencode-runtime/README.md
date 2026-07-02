@@ -7,7 +7,7 @@
 ## 主要职责
 
 - Session 创建、查询、消息追加和归档。
-- Run 启动、取消、远端 agent session 懒创建/复用、事件订阅和终态处理；平台保存 `RUNNING` 并订阅事件后异步提交远端 prompt，不等待 prompt HTTP 完成才返回 Run，提交失败统一追加 `run.failed`。
+- Run 启动、取消、远端 agent session 懒创建/复用、事件订阅和终态处理；平台保存 `RUNNING` 并订阅事件后异步提交远端 prompt 或原生 session command，不等待远端长任务完成才返回 Run，提交失败统一追加 `run.failed`。事件订阅绑定本 Run 的 remote session，并在首个终态后结束，避免其它会话或同一会话下一轮消息串入旧 Run。
 - AI 回复满意度反馈归属校验和 upsert：只允许登录用户对自己会话或自己触发 Run 的 `ASSISTANT` 消息提交 `POSITIVE/NEGATIVE` 反馈，评论最多 300 字。
 - 运营分析 rollup 与查询：主链路只写事实，后台 runner 通过数据库锁默认刷新最近窗口的 hourly/daily rollup 和 Run 耗时直方图；查询服务只读 rollup 并返回 freshness，不统计、不展示、不导出 cost/costUsd。
 - 当前用户 opencode 进程状态查询、头像菜单服务状态投影、初始化契约、防绕过 Run 校验、runtime 代理用户进程路由、manager WebSocket 命令网关，以及用户进程到兼容 `ExecutionNode` 的投影。

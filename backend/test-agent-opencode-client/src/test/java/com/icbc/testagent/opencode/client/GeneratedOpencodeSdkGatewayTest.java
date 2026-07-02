@@ -93,6 +93,43 @@ class GeneratedOpencodeSdkGatewayTest {
     }
 
     @Test
+    void gatewayStartsNativeSessionCommandWithRuntimeSelection() throws Exception {
+        AtomicReference<RequestSnapshot> request = new AtomicReference<>();
+        HttpServer server = startServer(exchange -> {
+            request.set(snapshot(exchange));
+            respond(exchange, 200, "application/json", "{\"info\":{\"id\":\"msg_1\"},\"parts\":[]}");
+        });
+
+        try {
+            OpencodeStartRunResult result = new GeneratedOpencodeSdkGateway()
+                    .startCommand(
+                            node(server),
+                            REMOTE_SESSION_ID,
+                            "/tmp/demo",
+                            null,
+                            "generate-cases-path",
+                            "对车贷的开发文档，生成路径图",
+                            List.of(),
+                            null,
+                            "build",
+                            "opencode",
+                            "north-mini-code-free",
+                            null,
+                            TRACE_ID)
+                    .block(Duration.ofSeconds(5));
+
+            assertThat(result.accepted()).isTrue();
+            assertThat(request.get().path()).isEqualTo("/session/" + REMOTE_SESSION_ID + "/command");
+            assertThat(request.get().body()).contains(
+                    "\"command\":\"generate-cases-path\"",
+                    "\"arguments\":\"对车贷的开发文档，生成路径图\"",
+                    "\"model\":\"opencode/north-mini-code-free\"");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void gatewayStartsRunWithPromptPartsAndRuntimeSelection() throws Exception {
         AtomicReference<RequestSnapshot> request = new AtomicReference<>();
         HttpServer server = startServer(exchange -> {

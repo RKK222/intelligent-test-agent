@@ -53,6 +53,24 @@ public interface OpencodeSdkGateway {
             String traceId);
 
     /**
+     * 调用原生 session command；该接口响应代表命令执行完成，调用方必须放到后台订阅。
+     */
+    Mono<OpencodeStartRunResult> startCommand(
+            ExecutionNode node,
+            String opencodeSessionId,
+            String directory,
+            String workspace,
+            String command,
+            String arguments,
+            java.util.List<OpencodePromptPart> parts,
+            String messageId,
+            String agent,
+            String modelProviderId,
+            String modelId,
+            String variant,
+            String traceId);
+
+    /**
      * 订阅远端事件 SSE，保持 JsonNode 原文供 facade 做平台事件映射。
      */
     Flux<JsonNode> streamEvents(ExecutionNode node, String directory, String workspace, String traceId);

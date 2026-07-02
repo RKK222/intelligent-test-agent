@@ -5,7 +5,8 @@ import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp
 describe("follow-up queue", () => {
   const parts: PromptPart[] = [{ type: "text", text: "next prompt" }];
 
-  it("treats queued, running and cancelling runs as busy", () => {
+  it("treats pending, queued, running and cancelling runs as busy", () => {
+    expect(isRunBusyStatus("PENDING")).toBe(true);
     expect(isRunBusyStatus("QUEUED")).toBe(true);
     expect(isRunBusyStatus("RUNNING")).toBe(true);
     expect(isRunBusyStatus("CANCELLING")).toBe(true);

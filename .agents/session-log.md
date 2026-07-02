@@ -2732,3 +2732,10 @@ bash /tmp/test-api-after-restart.sh
 - What: `test-agent-common` 只新增 `GitWorkspaceService.abortMerge` 原子命令；`test-agent-workspace-management` 新增 `GitPublishWorkflow` 统一 direct publish、worktree merge publish 和 sync files then push。个人发布、Agent direct/worktree publish、sync-to-application 改用 workflow；worktree merge 冲突会返回 `conflictFiles` 并先执行 `merge --abort`，Agent 冲突不 mark published、不 push。前端 Agent 配置错误格式化补充展示 `details.conflictFiles`。
 - How: 不新增 API URL、数据库字段或 generated SDK；`update-and-push` 保持“不预拉取远端内容”契约。同步更新 common/workspace-management/frontend README、包说明和 `docs/api/http-api.md`。
 - Result: 定向后端测试、AgentConfigController 测试、前端冲突错误测试、agent-web typecheck 和 `git diff --check` 全部通过；本次不涉及事件、数据库结构、鉴权或环境配置变更。
+
+### 2026-07-02 - slash 技能统一进入可恢复 Run
+
+- Why: 前端此前直接调用 opencode session command，长技能请求期间没有平台 Run 和 RunEvent SSE，导致页面只显示“思考中”、刷新或历史重进无法接管、终止无目标，并可能把同一 workspace 全局事件流的其它会话或后续轮次内容混入当前 Run。
+- What: slash 技能改为通过 `POST /runs` 携带可选 `command/arguments` 创建平台 Run；后端先持久化 Run、绑定 remote session 并订阅事件，再后台调用原生 `/session/{sessionID}/command`。事件流按显式 `sessionID/sessionId` 过滤，并在首个成功/失败终态后结束订阅；前端把 `PENDING` 纳入忙碌/恢复状态，模型偏好继续沿用既有 localStorage 机制。
+- How: 复用现有 `RunApplicationService`、`AgentRuntime`、`OpencodeClientFacade`、active-run 恢复、Run 取消和 RunEvent SSE 链路；原生命令不自动重试，使用 24 小时硬超时，取消仍走 session abort。同步更新 HTTP/事件文档、模块 README、前端包说明，并补充 API、gateway、facade、runtime、前端队列和 Playwright 回归测试。
+- Result: 定向后端测试、前端单测/typecheck/build、桌面和移动 mock E2E 通过；按 `.env.test` 重启三服务后，真实 UI 验证正常对话、文件读取工具、路径图技能实时输出、刷新后从历史恢复运行中任务、任务完成、正交表技能终止、终止状态展示和模型刷新保持均可用。未修改 manager 配置、环境文件、数据库结构、事件类型、鉴权或 generated SDK。

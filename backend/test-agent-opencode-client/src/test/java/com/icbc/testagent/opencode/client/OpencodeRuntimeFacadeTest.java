@@ -131,6 +131,24 @@ class OpencodeRuntimeFacadeTest {
         }
 
         @Override
+        public Mono<OpencodeStartRunResult> startCommand(
+                ExecutionNode node,
+                String opencodeSessionId,
+                String directory,
+                String workspace,
+                String command,
+                String arguments,
+                List<OpencodePromptPart> parts,
+                String messageId,
+                String agent,
+                String modelProviderId,
+                String modelId,
+                String variant,
+                String traceId) {
+            return Mono.just(new OpencodeStartRunResult(true));
+        }
+
+        @Override
         public Flux<JsonNode> streamEvents(ExecutionNode node, String directory, String workspace, String traceId) {
             return Flux.empty();
         }

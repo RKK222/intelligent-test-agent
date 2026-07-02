@@ -58,7 +58,6 @@ import {
   buildPromptParts,
   diffFilesFromPayload,
   diffFilesFromSessionMessages,
-  dispatchRuntimeResult,
   errorFeedback,
   filterWorkspaceRootEntries,
   historyItems,
@@ -853,7 +852,12 @@ function agentFileInfo(tabPath: string): { scope: "PUBLIC" | "WORKSPACE"; path: 
 }
 
 const startRunMutation = useMutation({
-  mutationFn: async (input: { prompt: string; parts: PromptPart[]; title?: string }) => {
+  mutationFn: async (input: {
+    prompt: string;
+    parts: PromptPart[];
+    title?: string;
+    command?: { command: string; arguments: string };
+  }) => {
     if (!opencodeProcessReady.value) {
       throw new Error("请先初始化 opencode 进程");
     }
@@ -874,7 +878,9 @@ const startRunMutation = useMutation({
       parts: input.parts,
       agent: selectedAgent.value || undefined,
       model: selectedModel.value || undefined,
-      mode: promptMode.value
+      mode: promptMode.value,
+      command: input.command?.command,
+      arguments: input.command?.arguments
     });
   },
   onSuccess: (started) => {
@@ -932,28 +938,7 @@ const initializeOpencodeProcessMutation = useMutation({
   }
 });
 
-const commandMutation = useMutation({
-  mutationFn: async (input: { command: string; arguments: string; prompt: string }) => {
-    if (!session.value) {
-      throw new Error("当前 Session 尚未绑定远端上下文，请先发送一次普通 prompt");
-    }
-    return api.runSessionCommand(session.value.sessionId, {
-      command: input.command,
-      arguments: input.arguments,
-      agent: selectedAgent.value || undefined,
-      model: selectedModel.value || undefined
-    });
-  },
-  onSuccess: (result) => {
-    logs.value = [...logs.value.slice(-200), "[command] completed"];
-    dispatchRuntimeResult(result, dispatchChat);
-  },
-  onError: (error) => {
-    feedback.value = errorFeedback("命令执行失败", error);
-  }
-});
-
-const runtimeBusy = computed(() => isRunBusyStatus(run.value?.status) || startRunMutation.isPending.value || commandMutation.isPending.value);
+const runtimeBusy = computed(() => isRunBusyStatus(run.value?.status) || startRunMutation.isPending.value);
 const canStopRun = computed(() => Boolean(run.value && isRunBusyStatus(run.value.status) && !cancelRunMutation.isPending.value));
 const stopDisabledReason = computed(() => {
   if (cancelRunMutation.isPending.value) return "正在终止";
@@ -1067,12 +1052,12 @@ watch(runtimeBusy, (busy) => {
 
 // follow-up 队列：Run 空闲且有排队 prompt 时自动出队执行
 watch(
-  [followUpQueue, run, session, () => startRunMutation.isPending.value, () => commandMutation.isPending.value, opencodeProcessReady],
+  [followUpQueue, run, session, () => startRunMutation.isPending.value, opencodeProcessReady],
   () => {
     if (
       followUpQueue.value.length === 0 ||
       !opencodeProcessReady.value ||
-      !canStartFollowUp(run.value, startRunMutation.isPending.value || commandMutation.isPending.value)
+      !canStartFollowUp(run.value, startRunMutation.isPending.value)
     ) {
       return;
     }
@@ -1081,11 +1066,7 @@ watch(
       return;
     }
     followUpQueue.value = queue;
-    if (next.command && session.value) {
-      commandMutation.mutate({ ...next.command, prompt: next.prompt });
-    } else {
-      startRunMutation.mutate({ prompt: next.prompt, parts: next.parts });
-    }
+    startRunMutation.mutate({ prompt: next.prompt, parts: next.parts, command: next.command });
   }
 );
 
@@ -1842,25 +1823,8 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     feedback.value = { kind: "info", title: "Prompt 已排队", description: `等待当前 Run 完成后继续执行，队列 ${followUpQueue.value.length} 条` };
     return;
   }
-  // 有命令时：如果有 session 直接执行，否则先创建 session 再执行命令
-  if (command) {
-    if (session.value) {
-      commandMutation.mutate({ ...command, prompt: displayPrompt });
-    } else {
-      // 新会话执行命令：先创建 session，再执行命令
-      api.createSession(selectedWorkspace.value.workspaceId, sessionTitleFromFirstMessage(displayPrompt))
-        .then((newSession) => {
-          session.value = newSession;
-          void queryClient.invalidateQueries({ queryKey: ["sessions"] });
-          commandMutation.mutate({ ...command, prompt: displayPrompt });
-        })
-        .catch((error) => {
-          feedback.value = errorFeedback("创建会话失败", error);
-        });
-    }
-    return;
-  }
-  startRunMutation.mutate({ prompt: displayPrompt, parts, title: displayPrompt });
+  // slash 技能和普通消息统一创建平台 Run，才能复用 SSE、刷新恢复和终止能力。
+  startRunMutation.mutate({ prompt: displayPrompt, parts, title: displayPrompt, command: command ?? undefined });
 }
 
 function handleStopRun() {

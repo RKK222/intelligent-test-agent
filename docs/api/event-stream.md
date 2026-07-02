@@ -81,7 +81,7 @@
 - 浏览器原生 `EventSource` 不能设置自定义请求头；前端首次续传优先使用 `GET /api/internal/agent/{agentId}/runs/{runId}/events?lastEventId={seq}`，默认 `agentId=opencode`。旧兼容入口 `GET /api/runs/{runId}/events?lastEventId={seq}` 和 `GET /api/internal/platform/opencode-runtime/runs/{runId}/events?lastEventId={seq}` 继续有效。后端 header 优先，query 参数作为浏览器兼容入口。
 - 如果 `Last-Event-ID` 缺失，默认从当前订阅策略允许的起点开始返回。
 - 如果 `Last-Event-ID` 非数字或小于 0，后端返回统一错误格式，错误码为 `VALIDATION_ERROR`。
-- 消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时后端通过当前 `AgentRuntime.messages` 拉取 projected messages，并转换为 transient `message.updated` / `message.part.updated` snapshot 事件。快照恢复与 durable replay、本机 live bus、远端广播并发订阅，不能让较慢的快照查询阻塞实时 delta 下发。当前 `opencode` 实现适配 opencode `GET /api/session/{sessionID}/message`。前端刷新恢复时先用 `GET /api/sessions/{sessionId}/messages` 加载数据库/远端快照，再用 `GET /api/sessions/{sessionId}/active-run` 判断是否重新订阅本 Run SSE。
+- 消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时后端通过当前 `AgentRuntime.messages` 拉取 projected messages，并转换为 transient `message.updated` / `message.part.updated` snapshot 事件。快照恢复与 durable replay、本机 live bus、远端广播并发订阅，不能让较慢的快照查询阻塞实时 delta 下发。当前 `opencode` 实现适配 opencode `GET /api/session/{sessionID}/message`。opencode workspace 级事件流中显式携带 `sessionID/sessionId` 的事件只映射到 remote session 匹配的 Run，并在该 Run 首个成功/失败终态后结束远端订阅，避免跨会话或同一会话后续轮次串流。前端刷新恢复时先用 `GET /api/sessions/{sessionId}/messages` 加载数据库/远端快照，再用 `GET /api/sessions/{sessionId}/active-run` 判断是否重新订阅本 Run SSE。
 
 ## Phase 04 Runtime SSE
 

@@ -140,17 +140,43 @@ class DefaultOpencodeClientFacadeTest {
     }
 
     @Test
+    void facadeStartsNativeCommandWithoutConvertingItToPromptText() {
+        FakeGateway gateway = new FakeGateway();
+        OpencodeClientFacade facade = facade(gateway, Duration.ofMillis(10), 0);
+
+        OpencodeStartRunResult result = facade.startCommand(new OpencodeStartCommand(
+                node(),
+                "ses_remote1234567890abcdef",
+                "/tmp/demo",
+                null,
+                "generate-cases-path",
+                "对车贷的开发文档，生成路径图",
+                List.of(),
+                null,
+                "build",
+                "opencode",
+                "north-mini-code-free",
+                null,
+                "trace_1234567890abcdef")).block();
+
+        assertThat(result.accepted()).isTrue();
+        assertThat(gateway.lastCommand).isEqualTo("generate-cases-path");
+        assertThat(gateway.lastArguments).isEqualTo("对车贷的开发文档，生成路径图");
+    }
+
+    @Test
     void facadeMapsRawOpencodeEventsToRunEventDrafts() throws Exception {
         FakeGateway gateway = new FakeGateway();
         ObjectMapper objectMapper = new ObjectMapper();
         gateway.events = Flux.just(objectMapper.readTree("""
-                {"id":"evt_raw_1","type":"session.next.text.delta","properties":{"text":"hello"}}
+                {"id":"evt_raw_1","type":"session.next.text.delta","properties":{"sessionID":"ses_remote1234567890abcdef","text":"hello"}}
                 """));
         OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);
 
         RunEventDraft draft = facade.streamRunEvents(new OpencodeStreamEventsCommand(
                 node(),
                 new RunId("run_1234567890abcdef"),
+                "ses_remote1234567890abcdef",
                 "/tmp/demo",
                 null,
                 "trace_1234567890abcdef")).blockFirst();
@@ -158,6 +184,31 @@ class DefaultOpencodeClientFacadeTest {
         assertThat(draft.type()).isEqualTo(RunEventType.ASSISTANT_MESSAGE_DELTA);
         assertThat(draft.payload()).containsEntry("text", "hello");
         assertThat(draft.payload()).containsEntry("rawType", "session.next.text.delta");
+    }
+
+    @Test
+    void facadeDropsEventsBelongingToAnotherRemoteSession() throws Exception {
+        FakeGateway gateway = new FakeGateway();
+        ObjectMapper objectMapper = new ObjectMapper();
+        gateway.events = Flux.just(
+                objectMapper.readTree("""
+                        {"id":"evt_other","type":"message.updated","properties":{"info":{"sessionID":"ses_other"}}}
+                        """),
+                objectMapper.readTree("""
+                        {"id":"evt_current","type":"message.updated","properties":{"info":{"sessionID":"ses_remote1234567890abcdef"}}}
+                        """));
+        OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);
+
+        List<RunEventDraft> drafts = facade.streamRunEvents(new OpencodeStreamEventsCommand(
+                node(),
+                new RunId("run_1234567890abcdef"),
+                "ses_remote1234567890abcdef",
+                "/tmp/demo",
+                null,
+                "trace_1234567890abcdef")).collectList().block();
+
+        assertThat(drafts).hasSize(1);
+        assertThat(drafts.getFirst().payload()).containsEntry("rawEventId", "evt_current");
     }
 
     @Test
@@ -280,6 +331,8 @@ class DefaultOpencodeClientFacadeTest {
         private String lastWorkspace;
         private String lastTitle;
         private String lastMessageId;
+        private String lastCommand;
+        private String lastArguments;
         private int lastLimit;
         private String lastOrder;
         private String lastCursor;
@@ -342,6 +395,32 @@ class DefaultOpencodeClientFacadeTest {
             lastDirectory = directory;
             lastWorkspace = workspace;
             lastPrompt = prompt;
+            lastParts = parts;
+            lastMessageId = messageId;
+            return Mono.just(new OpencodeStartRunResult(true));
+        }
+
+        @Override
+        public Mono<OpencodeStartRunResult> startCommand(
+                ExecutionNode node,
+                String opencodeSessionId,
+                String directory,
+                String workspace,
+                String command,
+                String arguments,
+                List<OpencodePromptPart> parts,
+                String messageId,
+                String agent,
+                String modelProviderId,
+                String modelId,
+                String variant,
+                String traceId) {
+            lastTraceId = traceId;
+            lastOpencodeSessionId = opencodeSessionId;
+            lastDirectory = directory;
+            lastWorkspace = workspace;
+            lastCommand = command;
+            lastArguments = arguments;
             lastParts = parts;
             lastMessageId = messageId;
             return Mono.just(new OpencodeStartRunResult(true));

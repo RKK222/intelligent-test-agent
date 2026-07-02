@@ -8,9 +8,11 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -66,6 +68,38 @@ public class OpencodeRunEventMapper {
         }
 
         return new RunEventDraft(runId, type, traceId, now.get(), payload);
+    }
+
+    /**
+     * opencode 的事件订阅是 workspace 级全局流；只要事件显式携带 sessionID，就必须匹配当前 Run。
+     * 未携带 sessionID 的全局状态事件继续保留，以兼容 LSP/MCP/VCS 等事件。
+     */
+    public boolean belongsToSession(JsonNode rawEvent, String sessionId) {
+        Objects.requireNonNull(rawEvent, "rawEvent must not be null");
+        String expected = DomainValidation.requireText(sessionId, "sessionId");
+        Set<String> sessionIds = new HashSet<>();
+        collectSessionIds(properties(rawEvent), sessionIds);
+        return sessionIds.isEmpty() || sessionIds.contains(expected);
+    }
+
+    private void collectSessionIds(JsonNode node, Set<String> sessionIds) {
+        if (node == null || node.isNull()) {
+            return;
+        }
+        if (node.isObject()) {
+            node.fields().forEachRemaining(entry -> {
+                if (("sessionID".equals(entry.getKey()) || "sessionId".equals(entry.getKey()))
+                        && entry.getValue().isTextual()) {
+                    sessionIds.add(entry.getValue().asText());
+                } else {
+                    collectSessionIds(entry.getValue(), sessionIds);
+                }
+            });
+            return;
+        }
+        if (node.isArray()) {
+            node.forEach(item -> collectSessionIds(item, sessionIds));
+        }
     }
 
     /**

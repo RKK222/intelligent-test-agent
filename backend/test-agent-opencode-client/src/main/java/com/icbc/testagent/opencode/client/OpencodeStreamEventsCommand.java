@@ -11,6 +11,7 @@ import java.util.Objects;
 public record OpencodeStreamEventsCommand(
         ExecutionNode node,
         RunId runId,
+        String opencodeSessionId,
         String directory,
         String workspace,
         String traceId) {
@@ -21,6 +22,7 @@ public record OpencodeStreamEventsCommand(
     public OpencodeStreamEventsCommand {
         Objects.requireNonNull(node, "node must not be null");
         Objects.requireNonNull(runId, "runId must not be null");
+        opencodeSessionId = DomainValidation.requireText(opencodeSessionId, "opencodeSessionId");
         directory = DomainValidation.requireText(directory, "directory");
         workspace = optionalText(workspace);
         traceId = DomainValidation.requireText(traceId, "traceId");

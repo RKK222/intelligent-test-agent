@@ -909,7 +909,7 @@ function onSkillInput(text: string) {
 
 function selectSkill(skill: SkillItem) {
   // 使用真实的 Skill Command，插入 `/skill-name ` 格式
-  // 用户可以补充参数后发送，由工作台的 parseCommand 解析并调用 commandMutation
+  // 用户可以补充参数后发送，由工作台的 parseCommand 解析并通过平台 Run 启动技能。
   const commandText = `/${skill.name} `
   localInput.value = commandText
   emit('update:inputValue', commandText)

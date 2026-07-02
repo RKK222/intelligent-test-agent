@@ -19,6 +19,7 @@ import com.icbc.testagent.opencode.client.OpencodeSessionMessagesCommand;
 import com.icbc.testagent.opencode.client.OpencodeSessionMessagesResult;
 import com.icbc.testagent.opencode.client.OpencodeStartRunCommand;
 import com.icbc.testagent.opencode.client.OpencodeStartRunResult;
+import com.icbc.testagent.opencode.client.OpencodeStartCommand;
 import com.icbc.testagent.opencode.client.OpencodeStreamEventsCommand;
 import java.util.Objects;
 import org.springframework.stereotype.Service;
@@ -58,6 +59,23 @@ public class OpencodeAgentRuntime implements AgentRuntime {
 
     @Override
     public Mono<AgentStartRunResult> startRun(AgentStartRunCommand command) {
+        if (command.command() != null) {
+            return opencodeClientFacade.startCommand(new OpencodeStartCommand(
+                            command.node(),
+                            command.remoteSessionId(),
+                            command.directory(),
+                            command.workspace(),
+                            command.command(),
+                            command.arguments(),
+                            command.parts().stream().map(this::toOpencodePromptPart).toList(),
+                            command.messageId(),
+                            command.agent(),
+                            command.modelProviderId(),
+                            command.modelId(),
+                            command.variant(),
+                            command.traceId()))
+                    .map(this::toStartRunResult);
+        }
         return opencodeClientFacade.startRun(new OpencodeStartRunCommand(
                         command.node(),
                         command.remoteSessionId(),
@@ -90,6 +108,7 @@ public class OpencodeAgentRuntime implements AgentRuntime {
         return opencodeClientFacade.streamRunEvents(new OpencodeStreamEventsCommand(
                 command.node(),
                 command.runId(),
+                command.remoteSessionId(),
                 command.directory(),
                 command.workspace(),
                 command.traceId()));
