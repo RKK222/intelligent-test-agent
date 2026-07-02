@@ -8,6 +8,20 @@
 - What: `POST /api/internal/agent/{agentId}/processes/me/initialize` 增加可选 `operationId`，新增只读 `GET /initialize-operations/{operationId}`；后端把校验、确认分配、选择容器、准备参数、进程启动、记录候选进程、检查进程、健康检查、写入绑定和完成/失败写入 `opencode_process_start_operations`，前端 `AgentWorkbench` 生成 `opi_...` 并用 `OpencodeProcessStartupDialog` 每 500ms 轮询展示。
 - How: Domain 增加 operation 模型/步骤枚举/repository 端口，persistence 用 Flyway + MyBatis XML mapper 落表，runtime 在 `UserOpencodeProcessAssignmentService` 和 `OpencodeProcessStartupService` 中穿透可选进度记录器；API GET 只读 DB、不触发 manager health/start、不写 RunEvent。前端只改工作台层状态，`FigmaChatPanel` 继续只 emit 初始化事件。
 - Result: runtime/API/persistence 定向测试、backend-api/agent-web typecheck 和 Vitest 通过；计划中的后端聚合 `mvn -pl test-agent-opencode-runtime,test-agent-api,test-agent-persistence -am test` 在 `test-agent-persistence` 既有全量测试处失败（H2 `ON CONFLICT`、`usr_test_dev` fixture 外键、默认/loopback seed 断言），runtime 和 API 模块在该 reactor 中已通过。
+### 2026-07-02 - 对话框思考与能力卡片渲染重构，优化状态字与文字流光效果
+
+- Why: 
+  1. 任务结束后，部分运行中状态（“思考状态 思考中”）依然停留在“思考中”并伴随动画，无法自动恢复为已完成态，体验不一致。
+  2. 思考过程（reasoning）和工具调用（tool）的卡片式渲染（ProcessDisclosure）增加了大量不必要的边框、背景及胶囊徽标，导致侧边栏窄对话面板中的信息密度偏低且杂乱。
+  3. 卡片外壳移除后，正在运行中的状态节点需要更突出的指示，用户希望以文字流光（文字渐变流动）效果呈现。
+- What:
+  1. 合并思考过程：在 `MessageParts.vue` 渲染前，将同一个助手消息中的所有 `reasoning` 思考零件合并为一个，且统一呈现在最上方，避免多次思考产生多个冗余的“思考中”。
+  2. 移除卡片容器：重构 `ReasoningPartBlock.vue` 和 `ToolPartBlock.vue`，彻底弃用 `ProcessDisclosure` 卡片包装，改用无背景、无卡片框的**轻量级文本/日志行时间线**呈现。
+  3. 精确的任务运行态同步：修改 `AssistantThread.vue`，仅向最后一个助手消息传递 `running` 状态，确保历史消息的思考与工具状态被强制归一化为已完成或非运行态；并且在零件块中当 `props.running` 为 `false` 时，任何活跃状态强制转为完成态，彻底修复“思考中”残留问题。
+  4. 文字流光效果：在 `globals.css` 中新增 `.ta-text-shimmer` 流光 CSS 动画，并在 `ReasoningPartBlock.vue` 与 `ToolPartBlock.vue` 运行态文本中应用该效果。
+- How: 纯前端组件与样式重构，无后端和数据库改动；更新了 `agent-chat` 包的 README。
+- Result: 运行 `corepack pnpm typecheck` 成功；`corepack pnpm test` 全量通过（31 个测试包 217 个用例全绿），无类型或逻辑错误。
+
 ### 2026-07-02 - 修复个人 worktree 发布误提交未暂存文件
 
 - Why: 个人 worktree 左侧 Git 面板的“暂存”只是前端选择状态，后端发布仍执行 `git add --all`；用户只选择/保留一个文件发布时，其余本地 diff 也被提交并从个人 worktree 消失，且发布链路失败时远端特性分支可能没有收到内容。
@@ -2783,3 +2797,10 @@ bash /tmp/test-api-after-restart.sh
 - What: slash 技能改为通过 `POST /runs` 携带可选 `command/arguments` 创建平台 Run；后端先持久化 Run、绑定 remote session 并订阅事件，再后台调用原生 `/session/{sessionID}/command`。事件流按显式 `sessionID/sessionId` 过滤，并在首个成功/失败终态后结束订阅；前端把 `PENDING` 纳入忙碌/恢复状态，模型偏好继续沿用既有 localStorage 机制。
 - How: 复用现有 `RunApplicationService`、`AgentRuntime`、`OpencodeClientFacade`、active-run 恢复、Run 取消和 RunEvent SSE 链路；原生命令不自动重试，使用 24 小时硬超时，取消仍走 session abort。同步更新 HTTP/事件文档、模块 README、前端包说明，并补充 API、gateway、facade、runtime、前端队列和 Playwright 回归测试。
 - Result: 定向后端测试、前端单测/typecheck/build、桌面和移动 mock E2E 通过；按 `.env.test` 重启三服务后，真实 UI 验证正常对话、文件读取工具、路径图技能实时输出、刷新后从历史恢复运行中任务、任务完成、正交表技能终止、终止状态展示和模型刷新保持均可用。未修改 manager 配置、环境文件、数据库结构、事件类型、鉴权或 generated SDK。
+
+### 2026-07-02 - 修复个人 worktree 发布冲突提示与 unmerged diff 展示
+
+- Why: 个人 worktree 发布接口实际返回业务 `CONFLICT` 且未推送远端，但前端在刷新变更列表时清掉冲突提示，用户看到类似成功状态；同时 `git status --porcelain` 的 `AU/UU` 等 unmerged 状态被当作普通 staged 删除展示，导致误以为提交后“stash”文件被删除。
+- What: `GitWorkspaceService` 保留 Git 两字符 `rawStatus`，并将 `DD/AU/UD/UA/DU/AA/UU` 统一映射为 `status=conflict`；工作区 `git-diff` 响应新增 `rawStatus`。Git Changes 面板在 publish 返回 `CONFLICT` 后保留错误提示，刷新后把冲突文件单独展示为 `CONFLICT`，不再计入普通 staged/unstaged 文件列表。
+- How: 只改 workspace git diff DTO、公共 Git porcelain 解析和前端 Git 变更面板展示；不自动 abort/reset 用户个人 worktree 中的冲突现场。同步更新 HTTP API、workspace-management README、agent-web README，并补充后端解析和前端 publish 冲突回归测试。
+- Result: 定向后端与前端测试、workspace-management 编译、agent-web/shared-types typecheck 和 `git diff --check` 通过；本次不涉及数据库、事件、鉴权、安全或环境配置变更。

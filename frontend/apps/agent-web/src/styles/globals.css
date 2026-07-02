@@ -700,3 +700,33 @@ h3 {
 .monaco-diff-editor {
   --vscode-editor-background: #ffffff;
 }
+
+/* ===== Flowing Text Shimmer / 流光文字效果 ===== */
+@keyframes ta-text-shimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+.ta-text-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--ta-chat-text, #333333) 0%,
+    var(--ta-cyan, #4f6f7a) 25%,
+    var(--ta-chat-text, #333333) 50%,
+    var(--ta-cyan, #4f6f7a) 75%,
+    var(--ta-chat-text, #333333) 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: ta-text-shimmer 3s linear infinite;
+  display: inline-block;
+}
+

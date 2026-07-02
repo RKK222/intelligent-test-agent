@@ -74,6 +74,15 @@ const defaultOpenCardIds = computed(() => {
   };
 });
 
+const lastAssistantIndex = computed(() => {
+  for (let i = props.messages.length - 1; i >= 0; i--) {
+    if (props.messages[i].role === "assistant") {
+      return i;
+    }
+  }
+  return -1;
+});
+
 // 流式内容指纹：变化时触发自动滚动
 const streamSignature = computed(() =>
   props.messages
@@ -145,7 +154,7 @@ onBeforeUnmount(() => {
         <div class="text-[12px] text-[var(--ta-chat-muted)]">描述测试任务，例如：跑 checkout 模块并分析失败原因</div>
       </div>
       <TaskBreakdown :todos="todos" />
-      <template v-for="message in messages" :key="message.id">
+      <template v-for="(message, index) in messages" :key="message.id">
         <AgentCard
           v-if="message.role === 'card'"
           :message="message"
@@ -159,11 +168,12 @@ onBeforeUnmount(() => {
           >
             <Bot class="h-4 w-4" />
           </span>
-          <div class="max-w-[calc(100%_-_44px)] rounded-md border border-[var(--ta-chat-border)] bg-[var(--ta-chat-message-bg)] px-3 py-3">
+          <div class="max-w-[calc(100%_-_44px)] rounded-md border border border-[var(--ta-chat-border)] bg-[var(--ta-chat-message-bg)] px-3 py-3">
             <MessageParts
               v-if="message.parts?.length"
               :parts="message.parts"
               :fallback-text="message.text"
+              :running="running && index === lastAssistantIndex"
             />
             <PlainAnswer v-else :text="message.text" />
           </div>

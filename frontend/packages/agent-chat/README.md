@@ -9,11 +9,12 @@ Agent 对话和结构化卡片展示包。
 - 展示用户/助手消息。
 - 右侧 Agent 面板使用 Figma Web IDE 风格的 47px Chat/History 顶部 tab、紧凑消息流和底部 composer/runtime 控制区，适配约 245px 窄面板。
 - 展示 message part timeline（text、reasoning、tool、file、subtask、step-start、step-finish、snapshot、patch、agent、retry、compaction），用户消息使用右侧浅灰气泡。
-- `reasoning` 与最终 `text` 回答必须分块展示；最终回答使用最清晰的白底正文块，思考过程使用弱化折叠块，避免把思考过程和答复混在同一个气泡里。
-- 结构化 Agent 时间线使用浅色低对比折叠卡片壳展示 plan、tool、test、diff、event：标题行包含图标、标题和展开/收起按钮；内容区按类型展示步骤、工具摘要、测试命令、变更文件表格或紧凑 JSON fallback。
-- 时间线默认只展开运行中卡片、最新工具卡片和最新 Diff 卡片；历史完成项默认折叠，避免长输出撑乱工作台。
+- `reasoning` 与最终 `text` 回答必须分块展示；最终回答使用最清晰的白底正文块，同一个助手回复中的所有思考过程合并为一个顶部的弱化折叠日志行展示，避免多次思考产生重复节点或将答复混在同一个气泡里。
+- 思考过程 (`reasoning`) 与工具调用 (`tool`) 不使用卡片外壳，而是渲染为轻量级的文本/日志行，默认仅展开运行中步骤以保持紧凑。正在运行的步骤（如“思考中...”、“正在调用能力...”）文字带有流光渐变动画。
+- 结构化 Agent 时间线使用浅色低对比折叠卡片壳展示 plan、test、diff、event：标题行包含图标、标题和展开/收起按钮；内容区按类型展示步骤、工具摘要、测试命令、变更文件表格或紧凑 JSON fallback。
+- 时间线默认只展开运行中卡片和最新 Diff 卡片；历史完成项默认折叠，避免长输出撑乱工作台。
 - 提供 Agent/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和线程内任务分解展示；模型选择器按 Provider 分组展示模型，选择模型时同步更新 Provider 与 Model。
-- Skill 调用不新增独立卡片类型或 `skill.*` 事件；当 tool/message part 的 `tool` 或 `toolName` 为 `skill` 时，在前端分类展示为 Skill 调用块，并展示 Skill 名称、用途、状态和折叠详情。
+- Skill 调用不新增独立卡片类型或 `skill.*` 事件；当 tool/message part 的 `tool` 或 `toolName` 为 `skill` 时，在前端展示为 Skill 调用块，展示 Skill 名称、用途、状态和折叠详情。
 - Prompt composer 支持文本、文件附件、图片附件和附件 chips；文件读取后只向 app 层返回平台 `PromptPart`，不直接提交后端。
 - History tab 支持受控搜索、选择会话、置顶/取消置顶和删除回调；实际 API 调用由 app 层完成。
 - 提供纯 RunEvent reducer，把 `message.part.delta`、permission/question、todo、diff 等事件归并为对话展示状态；opencode 重发的远端 user message/part 会合并回当前乐观 user 消息，slash command 展开后的技能正文不会覆盖用户原始命令、误建 assistant 消息或拼入回答；导出的 `normalizeMessagePart` 统一兼容 opencode `id/tool/state.input/metadata/status/time` 原始结构和平台规范化结构，供实时事件与历史 `partsJson` 恢复共同复用。

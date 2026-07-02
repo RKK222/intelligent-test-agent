@@ -5,6 +5,7 @@ import type { MessagePart } from "@test-agent/shared-types";
 export type MessagePartsProps = {
   parts: NonNullable<Extract<import("@test-agent/shared-types").AgentMessage, { role: "assistant" }>["parts"]>;
   fallbackText: string;
+  running?: boolean;
 };
 </script>
 
@@ -23,10 +24,52 @@ import StepFinishMarker from "./StepFinishMarker.vue";
 import AgentChip from "./AgentChip.vue";
 import RetryBlock from "./RetryBlock.vue";
 import CompactionMarker from "./CompactionMarker.vue";
+import { normalizeProcessStatus } from "./process-status";
 
 const props = defineProps<MessagePartsProps>();
 const hasAnswer = computed(() => props.parts.some((part) => part.type === "text" && part.text.trim().length > 0));
 const showFallback = computed(() => props.parts.length === 0);
+
+// 合并所有 reasoning 类型的零件，放到渲染列表的最上方展示
+const processedParts = computed(() => {
+  const reasoningParts = props.parts.filter((p) => p.type === "reasoning") as Array<Extract<MessagePart, { type: "reasoning" }>>;
+  const otherParts = props.parts.filter((p) => p.type !== "reasoning");
+
+  if (reasoningParts.length === 0) {
+    return otherParts;
+  }
+
+  const mergedText = reasoningParts
+    .map((p) => p.text)
+    .filter((t) => typeof t === "string" && t.trim().length > 0)
+    .join("\n\n")
+    .trim();
+
+  let mergedStatus = "completed";
+  if (props.running) {
+    const hasRunning = reasoningParts.some((p) => normalizeProcessStatus(p.status) === "running");
+    if (hasRunning) {
+      mergedStatus = "running";
+    }
+  }
+
+  let totalDurationMs = 0;
+  for (const p of reasoningParts) {
+    if (typeof p.durationMs === "number" && Number.isFinite(p.durationMs)) {
+      totalDurationMs += p.durationMs;
+    }
+  }
+
+  const mergedReasoning: Extract<MessagePart, { type: "reasoning" }> = {
+    partId: "merged-reasoning",
+    type: "reasoning",
+    text: mergedText,
+    status: mergedStatus,
+    durationMs: totalDurationMs > 0 ? totalDurationMs : undefined
+  };
+
+  return [mergedReasoning, ...otherParts];
+});
 
 // 按 part.type 查表分发到对应展示组件，新增类型只需在此注册，不再堆叠 v-else-if
 const PART_COMPONENTS: Partial<Record<MessagePart["type"], Component>> = {
@@ -44,10 +87,20 @@ const PART_COMPONENTS: Partial<Record<MessagePart["type"], Component>> = {
   compaction: CompactionMarker
 };
 
-// reasoning 需要依据是否已有最终回答决定默认展开，其余组件只接收 part
+// reasoning 需要依据是否已有最终回答决定默认展开，其余组件只接收 part 极其运行状态
 function partProps(part: MessagePart): Record<string, unknown> {
   if (part.type === "reasoning") {
-    return { part, openByDefault: part.status === "running" || !hasAnswer.value };
+    return {
+      part,
+      openByDefault: part.status === "running" || !hasAnswer.value,
+      running: props.running
+    };
+  }
+  if (part.type === "tool") {
+    return {
+      part,
+      running: props.running
+    };
   }
   return { part };
 }
@@ -56,7 +109,7 @@ function partProps(part: MessagePart): Record<string, unknown> {
 <template>
   <PlainAnswer v-if="showFallback" :text="fallbackText" />
   <div v-else class="space-y-2">
-    <template v-for="part in parts" :key="part.partId">
+    <template v-for="part in processedParts" :key="part.partId">
       <component :is="PART_COMPONENTS[part.type]" v-if="PART_COMPONENTS[part.type]" v-bind="partProps(part)" />
       <pre
         v-else
@@ -65,3 +118,4 @@ function partProps(part: MessagePart): Record<string, unknown> {
     </template>
   </div>
 </template>
+
