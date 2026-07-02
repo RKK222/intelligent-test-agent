@@ -808,9 +808,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-running-assistant .figma-chat-status").exists()).toBe(true);
   });
 
-  it("shows the read tool file paths directly in the explore section", () => {
-    // 之前 read 工具只显示"读取 X 次"计数，文件路径被藏在 chevron 后面。
-    // 现在应当默认展开文件路径列表，方便用户看到 agent 读了哪些文件。
+  it("allows the explore section to expand and collapse", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -830,14 +828,17 @@ describe("FigmaChatPanel", () => {
       }
     });
 
-    // 探索区里应当直接显示两个文件名，无需点击
-    const exploreSection = wrapper.find(".figma-chat-file-summary--open");
+    const exploreSection = wrapper.find(".figma-chat-file-summary");
     expect(exploreSection.exists()).toBe(true);
-    const exploreText = exploreSection.text();
-    expect(exploreText).toContain("login.test.ts");
-    expect(exploreText).toContain("login.ts");
-    // 不应再保留 chevron / 折叠交互
-    expect(exploreSection.find(".figma-chat-read-chevron").exists()).toBe(false);
+    expect(exploreSection.text()).not.toContain("login.test.ts");
+    expect(exploreSection.find(".figma-chat-read-chevron").exists()).toBe(true);
+
+    await exploreSection.get(".figma-chat-file-summary-row").trigger("click");
+    expect(exploreSection.text()).toContain("login.test.ts");
+    expect(exploreSection.text()).toContain("login.ts");
+
+    await exploreSection.get(".figma-chat-file-summary-row").trigger("click");
+    expect(exploreSection.text()).not.toContain("login.test.ts");
   });
 
   it("uses v-memo on write/edit previews so the syntax highlight is cached across rerenders", async () => {
@@ -864,6 +865,8 @@ describe("FigmaChatPanel", () => {
 
     // 折叠时不应渲染 pre
     expect(wrapper.find(".figma-chat-write-preview").exists()).toBe(false);
+    // 文件工具只能走文件摘要，不应再额外出现一份通用 tool 详情。
+    expect(wrapper.find(".figma-chat-process-detail").exists()).toBe(false);
     // 展开后应当渲染（一次性计算 v-memo 缓存）
     const summaryRow = wrapper.find(".figma-chat-file-summary-row");
     await summaryRow.trigger("click");
@@ -872,6 +875,34 @@ describe("FigmaChatPanel", () => {
     await summaryRow.trigger("click");
     await summaryRow.trigger("click");
     expect(wrapper.find(".figma-chat-write-preview").exists()).toBe(true);
+  });
+
+  it("does not render a standalone directory card for read tool output", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1", messageId: "a1", role: "assistant",
+            text: "目录读取完成",
+            parts: [
+              {
+                partId: "read-1",
+                type: "tool",
+                toolName: "read",
+                status: "completed",
+                input: { filePath: "/tmp/F-COSS" },
+                output: "<path>/tmp/F-COSS</path><type>directory</type><entries>workspace/</entries>"
+              }
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    expect(wrapper.text()).not.toContain("目录 · 1 项");
+    expect(wrapper.text()).not.toContain("workspace/");
   });
 
   it("shows read tool output as structured FilePart, not in main text", () => {

@@ -55,7 +55,7 @@ import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
 import WorkbenchFooter from "./WorkbenchFooter.vue";
 import { notifyFeedback } from "./notify";
-import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, type FollowUpDraft } from "./follow-up-queue";
+import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, isRuntimeBusy, type FollowUpDraft } from "./follow-up-queue";
 import {
   buildPromptParts,
   diffFilesFromPayload,
@@ -713,6 +713,8 @@ function refreshOpencodeProcessStatus() {
   });
 }
 const historyList = computed(() => historyItems(run.value, sessionsItems.value));
+const historyLoadingSessionId = ref<string | null>(null);
+let historySwitchSeq = 0;
 const resourcesList = computed(() => runtimeResources(mcpResourcesData.value, activeTab.value));
 const runtimeStatusValue = computed(() =>
   runtimeStatus(session.value, run.value, selectedAgent.value, selectedModel.value, vcsStatusData.value, lspStatusData.value, mcpStatusData.value, mcpToolsData.value, mcpResourcesData.value)
@@ -1301,7 +1303,10 @@ const initializeOpencodeProcessMutation = useMutation({
   }
 });
 
-const runtimeBusy = computed(() => isRunBusyStatus(run.value?.status) || startRunMutation.isPending.value);
+// Run 与 reducer 可能因网络时序短暂不一致；明确终态优先，避免完成后的残留 shimmer。
+const runtimeBusy = computed(() =>
+  isRuntimeBusy(run.value?.status, chatState.value.status, startRunMutation.isPending.value)
+);
 const canStopRun = computed(() => Boolean(run.value && isRunBusyStatus(run.value.status) && !cancelRunMutation.isPending.value));
 const stopDisabledReason = computed(() => {
   if (cancelRunMutation.isPending.value) return "正在终止";
@@ -1429,6 +1434,7 @@ watch(
       return;
     }
     followUpQueue.value = queue;
+    dispatchChat({ type: "run.requested" });
     startRunMutation.mutate({ prompt: next.prompt, parts: next.parts, command: next.command });
   }
 );
@@ -2188,6 +2194,7 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     return;
   }
   // slash 技能和普通消息统一创建平台 Run，才能复用 SSE、刷新恢复和终止能力。
+  dispatchChat({ type: "run.requested" });
   startRunMutation.mutate({ prompt: displayPrompt, parts, title: displayPrompt, command: command ?? undefined });
 }
 
@@ -2767,6 +2774,8 @@ function handleSaveDiffFile(path: string, content: string) {
 }
 
 async function switchSession(sessionId: string) {
+  const switchSeq = ++historySwitchSeq;
+  historyLoadingSessionId.value = sessionId;
   const selected = sessionsQuery.data.value?.items.find((item) => item.sessionId === sessionId) ?? (await api.getSession(sessionId));
   let readonlyReason = "";
   if (selected.workspaceId !== selectedWorkspaceIdRef.value) {
@@ -2794,8 +2803,13 @@ async function switchSession(sessionId: string) {
   readonlySessionReason.value = readonlyReason;
   try {
     const page = await api.listSessionMessages(sessionId, 1, 100);
+    if (switchSeq !== historySwitchSeq) {
+      return;
+    }
     dispatchChat({ type: "reset", messages: messagesFromSessionMessages(page.items) });
-    await loadFeedbacksForMessages(page.items);
+    historyLoadingSessionId.value = null;
+    // 正文是历史切换的首要结果；反馈状态随后补齐，不阻塞用户阅读。
+    void loadFeedbacksForMessages(page.items, sessionId);
     const restoredFiles = diffFilesFromSessionMessages(page.items).map((file) => ({
       ...file,
       path: normalizeWorkspacePath(file.path) || file.path
@@ -2830,6 +2844,10 @@ async function switchSession(sessionId: string) {
     feedback.value = { kind: "info", title: "已切换 Session", description: selected.title };
   } catch (error) {
     feedback.value = errorFeedback("加载 Session 消息失败", error);
+  } finally {
+    if (switchSeq === historySwitchSeq) {
+      historyLoadingSessionId.value = null;
+    }
   }
 }
 
@@ -2843,7 +2861,7 @@ function handleNewConversation() {
   diffFiles.value = [];
 }
 
-async function loadFeedbacksForMessages(messages: Array<{ messageId?: string; role?: string }>) {
+async function loadFeedbacksForMessages(messages: Array<{ messageId?: string; role?: string }>, expectedSessionId?: string) {
   const assistantMessageIds = messages
     .filter(message => message.role === "ASSISTANT" && message.messageId?.startsWith("msg_"))
     .map(message => message.messageId!)
@@ -2856,7 +2874,9 @@ async function loadFeedbacksForMessages(messages: Array<{ messageId?: string; ro
       loaded[messageId] = null;
     }
   }));
-  messageFeedbacks.value = loaded;
+  if (!expectedSessionId || session.value?.sessionId === expectedSessionId) {
+    messageFeedbacks.value = loaded;
+  }
 }
 
 function handleSubmitFeedback(payload: AiMessageFeedbackPayload & { messageId: string }) {
@@ -3092,6 +3112,7 @@ async function handleLogout() {
           :file-changes="diffFiles"
           :task-usage="taskUsage"
           :history="historyList"
+          :history-loading="Boolean(historyLoadingSessionId)"
           :readonly-reason="readonlySessionReason"
           :process-status="opencodeProcessStatus"
           process-required

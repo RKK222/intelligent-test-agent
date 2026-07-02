@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PromptPart } from "@test-agent/shared-types";
-import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus } from "../src/components/follow-up-queue";
+import { canStartFollowUp, createFollowUpDraft, dequeueFollowUp, enqueueFollowUp, isRunBusyStatus, isRuntimeBusy } from "../src/components/follow-up-queue";
 
 describe("follow-up queue", () => {
   const parts: PromptPart[] = [{ type: "text", text: "next prompt" }];
@@ -32,5 +32,20 @@ describe("follow-up queue", () => {
     expect(canStartFollowUp({ status: "SUCCEEDED" }, true)).toBe(false);
     expect(canStartFollowUp({ status: "SUCCEEDED" }, false)).toBe(true);
     expect(canStartFollowUp(null, false)).toBe(true);
+  });
+
+  it("stops runtime animation when either current status is terminal", () => {
+    expect(isRuntimeBusy("RUNNING", "SUCCEEDED", false)).toBe(false);
+    expect(isRuntimeBusy("SUCCEEDED", "RUNNING", false)).toBe(false);
+    expect(isRuntimeBusy("RUNNING", "FAILED", false)).toBe(false);
+    expect(isRuntimeBusy("RUNNING", "CANCELLED", false)).toBe(false);
+  });
+
+  it("keeps runtime animation for active or starting runs without a terminal status", () => {
+    expect(isRuntimeBusy("RUNNING", undefined, false)).toBe(true);
+    expect(isRuntimeBusy(undefined, "RUNNING", false)).toBe(true);
+    expect(isRuntimeBusy(undefined, undefined, true)).toBe(true);
+    expect(isRuntimeBusy("SUCCEEDED", undefined, true)).toBe(true);
+    expect(isRuntimeBusy("SUCCEEDED", undefined, false)).toBe(false);
   });
 });

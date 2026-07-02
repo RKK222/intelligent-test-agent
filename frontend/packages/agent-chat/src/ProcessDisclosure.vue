@@ -36,6 +36,13 @@ watch(
   }
 );
 
+watch(
+  () => props.defaultOpen,
+  (val) => {
+    open.value = val;
+  }
+);
+
 const hasBody = computed(() => Boolean(slots.default));
 </script>
 

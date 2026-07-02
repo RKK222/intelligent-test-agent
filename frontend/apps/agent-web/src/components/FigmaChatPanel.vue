@@ -373,11 +373,9 @@ function messageOtherParts(msg: ChatMessage): MessagePart[] {
       const toolName = (p.toolName ?? '').toLowerCase()
       if (isSkillCall(p)) return false
       if (toolName === 'task') return false
-      if (FILE_READ_TOOLS.has(toolName) || FILE_WRITE_TOOLS.has(toolName) || FILE_EDIT_TOOLS.has(toolName)) {
-        if (toolName === 'read' && typeof (p as any).output === 'string' && parseReadOutput((p as any).output)) {
-          return false
-        }
-        return true
+      if (toolName === 'read' || FILE_WRITE_TOOLS.has(toolName) || FILE_EDIT_TOOLS.has(toolName)) {
+        // 成功的文件工具统一由上方文件摘要渲染；失败时仍保留通用详情以展示错误原因。
+        return toolIsFailed(p)
       }
       return true
     }
@@ -570,6 +568,8 @@ const props =
     fileChanges?: FileChangeStat[]
     /** 历史对话列表 */
     history?: Array<{ id: string; title: string; createdAt?: string }>
+    /** 正在切换历史会话；旧正文在此期间隐藏，避免误以为点击无响应。 */
+    historyLoading?: boolean
     /** 当前选中的模型展示名 */
     selectedModelLabel?: string
     /** 模型选择按钮是否禁用 */
@@ -2078,7 +2078,8 @@ const displayMessages = computed<ChatMessage[]>(() => {
           ? m.parts
             .filter((p): p is Extract<MessagePart, { type: 'tool' }> => p.type === 'tool' && p.toolName === 'read')
             .map((p) => parseReadOutput(typeof p.output === 'string' ? p.output : ''))
-            .filter((f): f is ReadOutputInfo => f !== null)
+            // 目录扫描已在“探索”读取列表中表达，不再额外展示容易误解的目录结果卡片。
+            .filter((f): f is ReadOutputInfo => f?.kind === 'file')
           : undefined,
       }
     })
@@ -2317,7 +2318,11 @@ function onCompositionEnd() {
     </header>
 
     <div ref="scrollEl" class="figma-chat-scroll">
-      <template v-for="message in displayMessages" :key="message.id">
+      <div v-if="historyLoading" class="figma-chat-history-loading" role="status">
+        <Loader2 :size="18" class="figma-chat-history-loading-icon" />
+        <span>正在加载历史对话…</span>
+      </div>
+      <template v-else v-for="message in displayMessages" :key="message.id">
         <!-- 用户消息气泡 (右对齐) -->
         <div
           v-if="message.role === 'user'"
@@ -2390,13 +2395,15 @@ function onCompositionEnd() {
                     messageEditCount(message) > 0
                   "
                 >
-                  <!-- 探索：read 工具调用列表。直接展开文件路径，让用户能
-                       看到 agent 这一轮读了哪些文件，无需再点 chevron。 -->
+                  <!-- 探索：read 工具调用列表，默认收起并允许用户手工展开。 -->
                   <div
                     v-if="messageReadCount(message) > 0"
-                    class="figma-chat-file-summary figma-chat-file-summary--open"
+                    class="figma-chat-file-summary"
                   >
-                    <div class="figma-chat-file-summary-row">
+                    <div
+                      class="figma-chat-file-summary-row"
+                      @click="toggleFileExpanded(message.id, 'read')"
+                    >
                       <span>{{
                         running && message.id === lastAssistant?.id
                           ? '正在探索'
@@ -2405,8 +2412,21 @@ function onCompositionEnd() {
                       <span style="color: #a1a5b1"
                         >读取 {{ messageReadCount(message) }} 次</span
                       >
+                      <ChevronRight
+                        v-if="!isFileExpanded(message.id, 'read')"
+                        class="figma-chat-read-chevron"
+                        :size="14"
+                      />
+                      <ChevronDown
+                        v-else
+                        class="figma-chat-read-chevron"
+                        :size="14"
+                      />
                     </div>
-                    <ul class="figma-chat-file-list">
+                    <ul
+                      v-if="isFileExpanded(message.id, 'read')"
+                      class="figma-chat-file-list"
+                    >
                       <li
                         v-for="(op, i) in messageFileOps(message).filter(
                           (o) => o.opType === 'read'
@@ -4627,13 +4647,6 @@ function onCompositionEnd() {
   cursor: pointer;
   user-select: none;
 }
-/* 探索区（read 工具列表）默认展开文件路径，summary 不再承载点击折叠 */
-.figma-chat-file-summary--open {
-  cursor: default;
-}
-.figma-chat-file-summary--open .figma-chat-file-summary-row {
-  cursor: default;
-}
 .figma-chat-file-summary-row {
   display: flex;
   align-items: center;
@@ -4643,6 +4656,20 @@ function onCompositionEnd() {
   color: var(--ta-chat-text, #333);
   font-weight: 600;
   white-space: nowrap;
+}
+
+.figma-chat-history-loading {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--ta-chat-muted, #8c8c8c);
+  font-size: 13px;
+}
+
+.figma-chat-history-loading-icon {
+  animation: figma-chat-spin 0.9s linear infinite;
 }
 
 .figma-chat-user-feedback {

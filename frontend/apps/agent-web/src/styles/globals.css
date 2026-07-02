@@ -717,16 +717,17 @@ h3 {
   background: linear-gradient(
     90deg,
     var(--ta-chat-text, #333333) 0%,
-    var(--ta-cyan, #4f6f7a) 25%,
-    var(--ta-chat-text, #333333) 50%,
-    var(--ta-cyan, #4f6f7a) 75%,
+    #2563eb 20%,
+    #8b5cf6 40%,
+    #06b6d4 60%,
+    #2563eb 80%,
     var(--ta-chat-text, #333333) 100%
   );
   background-size: 200% auto;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  animation: ta-text-shimmer 3s linear infinite;
+  animation: ta-text-shimmer 2s linear infinite;
   display: inline-block;
 }
 

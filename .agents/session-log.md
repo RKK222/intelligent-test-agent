@@ -9,6 +9,13 @@
 - How: Domain 增加 operation 模型/步骤枚举/repository 端口，persistence 用 Flyway + MyBatis XML mapper 落表，runtime 在 `UserOpencodeProcessAssignmentService` 和 `OpencodeProcessStartupService` 中穿透可选进度记录器；API GET 只读 DB、不触发 manager health/start、不写 RunEvent。前端只改工作台层状态，`FigmaChatPanel` 继续只 emit 初始化事件。
 - Result: runtime/API/persistence 定向测试、backend-api/agent-web typecheck 和 Vitest 通过；计划中的后端聚合 `mvn -pl test-agent-opencode-runtime,test-agent-api,test-agent-persistence -am test` 在 `test-agent-persistence` 既有全量测试处失败（H2 `ON CONFLICT`、`usr_test_dev` fixture 外键、默认/loopback seed 断言），runtime 和 API 模块在该 reactor 中已通过。
 ### 2026-07-02 - 对话框思考与能力卡片渲染重构，优化状态字与文字流光效果
+### 2026-07-02 - 对话活动折叠、历史加载反馈与终态动画收敛
+
+- Why: 右侧对话中“探索”无法折叠，成功的 write/edit 同时进入文件摘要和通用工具详情导致重复且部分区域点不动；历史会话切换期间旧正文停留且没有加载反馈；Run 与聊天 reducer 状态短暂不一致时，任务完成后仍可能显示思考动画；read 目录输出还会额外渲染“F-COSS 目录 · 1 项”造成误解。
+- What: “探索”恢复为默认收起并支持手工展开/收起；成功的 read/write/edit 只走文件摘要，失败时仍保留通用工具详情展示错误；目录型 read 输出不再渲染独立目录卡片，文件内容预览保持不变。历史切换新增明确加载态，正文返回后立即显示，消息反馈异步补齐。新增 `isRuntimeBusy` 复用既有 Run busy 判定，让任一明确终态立即停止动画；新增 `run.requested` reducer 动作清除上一轮终态但保留 transcript，确保下一轮启动动画不被旧终态压住。
+- How: 复用 `FigmaChatPanel.expandedFileKeys`、`follow-up-queue.isRunBusyStatus` 和现有 Session/反馈 API；用 Vitest 与 Playwright 先验证失败再最小修复。按用户要求保留并提交 unstash 中对话相关的 shimmer/`ProcessDisclosure` 改动，冲突解决/取消合并相关后端、GitChangesPanel、backend-api/shared-types 和 API 文档改动全部恢复到 `HEAD`。
+- Result: `corepack pnpm test` 31 个测试文件、225 通过、1 跳过；`corepack pnpm typecheck` 全 workspace 通过；`corepack pnpm build` 通过（仅保留既有 CSS `@import` 顺序和大 chunk 警告）；历史加载 Playwright 在 Chromium/mobile 2/2 通过。用户明确选择自行重启服务，本会话未执行服务启动。
+
 ### 2026-07-02 - 对话面板 read 工具直接展示 + write/edit 折叠展开卡顿优化
 
 - Why:

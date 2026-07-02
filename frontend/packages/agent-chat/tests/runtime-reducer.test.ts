@@ -3,6 +3,25 @@ import { createInitialAgentChatRuntimeState, reduceAgentChatRuntime } from "../s
 import type { RunEvent } from "@test-agent/shared-types";
 
 describe("agent-chat runtime reducer", () => {
+  it("starts a new run without clearing the existing conversation", () => {
+    const previous = {
+      ...createInitialAgentChatRuntimeState([
+        {
+          id: "assistant-old",
+          role: "assistant" as const,
+          text: "上一轮完成",
+          createdAt: "2026-07-02T09:00:00Z"
+        }
+      ]),
+      status: "SUCCEEDED"
+    };
+
+    const next = reduceAgentChatRuntime(previous, { type: "run.requested" });
+
+    expect(next.status).toBe("PENDING");
+    expect(next.messages).toEqual(previous.messages);
+  });
+
   it("keeps assistant.message.delta backward compatible", () => {
     const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",

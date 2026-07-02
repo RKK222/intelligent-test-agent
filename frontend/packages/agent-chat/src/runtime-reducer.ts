@@ -22,6 +22,7 @@ export type AgentChatRuntimeState = {
 
 export type AgentChatRuntimeAction =
   | { type: "event"; event: RunEvent }
+  | { type: "run.requested" }
   | { type: "user.submitted"; prompt: string; parts?: PromptPart[]; createdAt?: string }
   | { type: "permission.replied"; requestId: string }
   | { type: "question.replied"; requestId: string }
@@ -44,6 +45,10 @@ export function reduceAgentChatRuntime(
 ): AgentChatRuntimeState {
   if (action.type === "reset") {
     return createInitialAgentChatRuntimeState(action.messages ?? []);
+  }
+  if (action.type === "run.requested") {
+    // 新一轮沿用当前 transcript，但必须清掉上一轮终态，避免旧状态压住新 Run 的动画。
+    return { ...state, status: "PENDING" };
   }
   if (action.type === "permission.replied") {
     return { ...state, permissions: state.permissions.filter((item) => item.requestId !== action.requestId) };

@@ -16,7 +16,7 @@ Agent 对话和结构化卡片展示包。
 - 提供 Agent/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和线程内任务分解展示；模型选择器按 Provider 分组展示模型，选择模型时同步更新 Provider 与 Model。
 - Skill 调用不新增独立卡片类型或 `skill.*` 事件；当 tool/message part 的 `tool` 或 `toolName` 为 `skill` 时，在前端展示为 Skill 调用块，展示 Skill 名称、用途、状态和折叠详情。
 - Prompt composer 支持文本、文件附件、图片附件和附件 chips；文件读取后只向 app 层返回平台 `PromptPart`，不直接提交后端。
-- History tab 支持受控搜索、选择会话、置顶/取消置顶和删除回调；实际 API 调用由 app 层完成。
+- History tab 支持受控搜索、选择会话、置顶/取消置顶和删除回调；实际 API 调用和历史正文加载态由 app 层完成，正文展示不等待消息反馈等附属请求。
 - 提供纯 RunEvent reducer，把 `message.part.delta`、permission/question、todo、diff 等事件归并为对话展示状态；opencode 重发的远端 user message/part 会合并回当前乐观 user 消息，slash command 展开后的技能正文不会覆盖用户原始命令、误建 assistant 消息或拼入回答；导出的 `normalizeMessagePart` 统一兼容 opencode `id/tool/state.input/metadata/status/time` 原始结构和平台规范化结构，供实时事件与历史 `partsJson` 恢复共同复用。
 - 提供发送、取消、重试、打开 Diff 回调。
 - Agent 面板 tabbar 最左侧提供"实时追踪"toggle 按钮（`liveTrack` prop 受控、`toggleLiveTrack` emit 回调）：开启后由 app 层在 agent 每次调用 write/edit/apply_patch 完成时自动把该文件以只读预览打开在中间编辑器并读取磁盘最新内容刷新；本包只负责按钮态展示与切换回调，不订阅事件、不操作编辑器。

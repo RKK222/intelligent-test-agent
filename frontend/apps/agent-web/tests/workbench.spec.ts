@@ -424,7 +424,7 @@ test("switching history restores assistant documents and the file changes drawer
   });
 
   await gotoWorkbench(page);
-  await page.getByRole("button", { name: "历史对话" }).click();
+  await page.getByRole("button", { name: "历史" }).click();
   await page.getByRole("button", { name: /请生成登录测试报告/ }).click();
 
   await expect(page.getByText("测试报告已生成")).toBeVisible();
@@ -496,6 +496,57 @@ test("switching history resumes the active run event stream", async ({ page }) =
   await expect.poll(() => activeRunRequests).toContain("/api/sessions/ses_history/active-run");
   await expect.poll(() => runEventRequests).toContain("/api/internal/agent/opencode/runs/run_1/events");
   await expect(page.getByText("正交表实时输出")).toBeVisible();
+});
+
+test("history loading shows immediately and does not wait for message feedback", async ({ page }) => {
+  let releaseSessionMessages!: () => void;
+  let releaseMessageFeedback!: () => void;
+  const sessionMessagesGate = new Promise<void>((resolve) => {
+    releaseSessionMessages = resolve;
+  });
+  const messageFeedbackGate = new Promise<void>((resolve) => {
+    releaseMessageFeedback = resolve;
+  });
+  const feedbackRequests: string[] = [];
+
+  await mockBackendApi(page, {
+    sessions: [
+      {
+        sessionId: "ses_history",
+        workspaceId: "wrk_1234567890abcdef",
+        title: "历史加载测试",
+        status: "ACTIVE",
+        pinned: false,
+        createdAt: "2026-06-28T08:00:00Z",
+        updatedAt: "2026-06-28T08:01:00Z"
+      }
+    ],
+    sessionMessages: [
+      {
+        messageId: "msg_assistant",
+        sessionId: "ses_history",
+        role: "ASSISTANT",
+        content: "历史正文已加载",
+        createdAt: "2026-06-28T08:01:00Z"
+      }
+    ],
+    sessionMessagesGate,
+    messageFeedbackGate,
+    feedbackRequests
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "历史" }).click();
+  await page.getByRole("button", { name: /历史加载测试/ }).click();
+
+  await expect(page.getByText("正在加载历史对话…")).toBeVisible();
+
+  releaseSessionMessages();
+  await expect(page.getByText("历史正文已加载")).toBeVisible();
+  await expect.poll(() => feedbackRequests).toContain("/api/internal/platform/opencode-runtime/messages/msg_assistant/feedback/me");
+  await expect(page.getByText("正在加载历史对话…")).toHaveCount(0);
+
+  releaseMessageFeedback();
 });
 
 test("workbench disables chat until opencode process is initialized", async ({ page }) => {
@@ -932,6 +983,9 @@ async function mockBackendApi(
     ensureDefaultRequiresReady?: boolean;
     sessions?: Array<Record<string, unknown>>;
     sessionMessages?: Array<Record<string, unknown>>;
+    sessionMessagesGate?: Promise<void>;
+    messageFeedbackGate?: Promise<void>;
+    feedbackRequests?: string[];
     historyRun?: Record<string, unknown>;
     historyDiffFiles?: Array<Record<string, unknown>>;
     activeRun?: Record<string, unknown> | null;
@@ -1313,7 +1367,14 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/sessions/ses_history/messages") {
+      await capture.sessionMessagesGate;
       await route.fulfill(json(pageOf(capture.sessionMessages ?? [])));
+      return;
+    }
+    if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/messages\/[^/]+\/feedback\/me$/.test(url.pathname)) {
+      capture.feedbackRequests?.push(url.pathname);
+      await capture.messageFeedbackGate;
+      await route.fulfill(json(null));
       return;
     }
     if (method === "GET" && /^\/api\/sessions\/[^/]+\/active-run$/.test(url.pathname)) {
