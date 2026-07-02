@@ -133,6 +133,13 @@ const internalSshPrefix = computed(() => {
 
 const currentCreateInternal = computed(() => isInternalRepositoryMode(repoDeploymentMode.value));
 
+const currentDeploymentMode = computed(() => repositoryDeploymentOptions.value.defaultDeploymentMode || EXTERNAL_DEPLOYMENT_MODE);
+const currentDeploymentModeLabel = computed(() => repositoryDeploymentModeLabel(currentDeploymentMode.value));
+const repositoryDeploymentModeWarning = computed(() => {
+  if (repoDeploymentMode.value === currentDeploymentMode.value) return "";
+  return `当前部署模式为${currentDeploymentModeLabel.value}，若修改部署模式，将导致无法访问版本库。`;
+});
+
 const editRepositoryDisplayGitUrl = computed(() => {
   if (isInternalRepositoryMode(editRepositoryDeploymentMode.value)) {
     return `${internalSshPrefix.value}${editRepositoryGitUrl.value}`;
@@ -317,9 +324,19 @@ function focusEditNameInput() {
           <el-alert v-if="errorMessage && createDialogVisible" :title="errorMessage" type="error" :closable="false" show-icon class="ta-error" style="margin-bottom: 16px;" />
           <el-form label-width="120px">
             <el-form-item label="部署模式">
-              <el-select v-model="repoDeploymentMode" aria-label="部署模式" style="width: 160px">
-                <el-option v-for="option in repositoryDeploymentOptions.options" :key="option.mode" :label="option.label" :value="option.mode" />
-              </el-select>
+              <div class="ta-deployment-mode-field">
+                <el-select v-model="repoDeploymentMode" aria-label="部署模式" style="width: 160px">
+                  <el-option v-for="option in repositoryDeploymentOptions.options" :key="option.mode" :label="option.label" :value="option.mode" />
+                </el-select>
+                <el-alert
+                  v-if="repositoryDeploymentModeWarning"
+                  :title="repositoryDeploymentModeWarning"
+                  type="warning"
+                  :closable="false"
+                  show-icon
+                  class="ta-deployment-mode-warning"
+                />
+              </div>
             </el-form-item>
             <el-form-item label="版本库地址">
               <div v-if="currentCreateInternal" class="ta-git-url-input-group">
@@ -481,6 +498,16 @@ function focusEditNameInput() {
   border-right: 0;
   border-radius: 4px 0 0 4px;
   background: #f5f7fa;
+}
+.ta-deployment-mode-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+}
+.ta-deployment-mode-warning {
+  width: 100%;
 }
 .ta-repository-create-form {
   display: flex;

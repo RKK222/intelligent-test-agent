@@ -251,6 +251,18 @@ describe("SettingsRepositoryPanel settings", () => {
     }));
   });
 
+  it("warns when selected repository deployment mode differs from current deployment mode", async () => {
+    const api = createApi();
+    const { findByText, getByLabelText, getByText } = renderPanel(api);
+
+    expect(await findByText("共 2 个版本库")).toBeTruthy();
+
+    await fireEvent.click(getByText("新增"));
+    await fireEvent.update(getByLabelText("部署模式"), "INTERNAL");
+
+    expect(await findByText("当前部署模式为外部部署，若修改部署模式，将导致无法访问版本库。")).toBeTruthy();
+  });
+
   it("lists internal repositories with stored git url and shows dynamic url only in edit dialog", async () => {
     const api = createApi();
     vi.mocked(api.listRepositories!).mockResolvedValue({
