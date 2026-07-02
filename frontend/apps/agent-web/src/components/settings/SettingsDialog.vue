@@ -37,11 +37,11 @@ function close() {
   emit("close");
 }
 
-function handleSwitchMenu(key: MenuKey) {
+function handleSwitchMenu(key: string) {
   if (key === "repository") {
     autoOpenCreate.value = true;
   }
-  selectMenu(key);
+  selectMenu(key as MenuKey);
 }
 
 function selectMenu(key: MenuKey) {
