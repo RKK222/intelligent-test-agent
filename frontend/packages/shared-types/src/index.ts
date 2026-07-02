@@ -551,6 +551,31 @@ export type UserOpencodeProcess = {
   checkedAt: string;
 };
 
+export type OpencodeProcessStartOperationStatus = "RUNNING" | "SUCCEEDED" | "FAILED" | string;
+export type OpencodeProcessStartOperationStepStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | string;
+
+export type OpencodeProcessStartOperationStep = {
+  /** 后端字段名；部分单测夹具兼容历史 code 写法。 */
+  step?: string;
+  code?: string;
+  name: string;
+  status: OpencodeProcessStartOperationStepStatus;
+};
+
+export type OpencodeProcessStartOperation = {
+  operationId: string;
+  status: OpencodeProcessStartOperationStatus;
+  currentStep: string;
+  steps: OpencodeProcessStartOperationStep[];
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  processId?: string | null;
+  serviceAddress?: string | null;
+  traceId: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 // ---- opencode 运行管理类型 ----
 
 export type OpencodeRuntimeManagementOverviewParams = {

@@ -28,6 +28,7 @@ import type {
   RuntimeResourceInfo,
   RuntimeToolInfo,
   Session,
+  OpencodeProcessStartOperation,
   UserOpencodeProcess,
   Workspace,
   WorkspaceBackendServer,
@@ -48,6 +49,7 @@ import FigmaShell from "./FigmaShell.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
 import FigmaChatPanel from "./FigmaChatPanel.vue";
+import OpencodeProcessStartupDialog from "./OpencodeProcessStartupDialog.vue";
 import SettingsDialog from "./settings/SettingsDialog.vue";
 import ServerWorkspacePickerDialog from "./ServerWorkspacePickerDialog.vue";
 import SystemManagementWrapper from "./SystemManagementWrapper.vue";
@@ -87,6 +89,19 @@ const authStore = useAuthStore();
 const router = useRouter();
 const OPENCODE_PROCESS_STATUS_FAST_REFETCH_INTERVAL_MS = 5000;
 const OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS = 30000;
+const OPENCODE_PROCESS_START_OPERATION_POLL_INTERVAL_MS = 500;
+const OPENCODE_PROCESS_START_STEPS = [
+  { step: "VALIDATING_REQUEST", name: "校验请求" },
+  { step: "CHECKING_ASSIGNMENT", name: "确认分配" },
+  { step: "SELECTING_CONTAINER", name: "选择容器" },
+  { step: "PREPARING_STARTUP", name: "准备启动参数" },
+  { step: "STARTING_PROCESS", name: "进程启动" },
+  { step: "SAVING_CANDIDATE", name: "记录候选进程" },
+  { step: "CHECKING_PROCESS", name: "检查进程" },
+  { step: "HEALTH_CHECKING", name: "健康检查" },
+  { step: "SAVING_BINDING", name: "写入绑定" },
+  { step: "COMPLETED", name: "完成" }
+] as const;
 const SELECTED_PROVIDER_STORAGE_KEY = "ta_selected_provider";
 const SELECTED_MODEL_STORAGE_KEY = "ta_selected_model";
 const ACTIVE_RUN_PROBE_INTERVAL_MS = 1500;
@@ -290,6 +305,7 @@ onBeforeUnmount(() => {
   window.removeEventListener("keydown", onWindowKeydown);
   clearFileTreeRetryTimers();
   stopActiveRunProbe();
+  stopProcessStartupPolling();
 });
 
 // Chat runtime：单一 reducer 维护，dispatch 闭包更新
@@ -487,6 +503,106 @@ const selectedWorkspaceFileRouteReady = computed(() => {
   const workspaceId = selectedWorkspaceIdRef.value;
   return Boolean(workspaceId && workspaceFileRouteReadyById.value[workspaceId]);
 });
+const processStartupDialogOpen = ref(false);
+const processStartupActionLabel = ref("启动进程");
+const processStartupOperation = ref<OpencodeProcessStartOperation | null>(null);
+let processStartupPollTimer: ReturnType<typeof setInterval> | null = null;
+
+function newProcessStartupOperationId(): string {
+  const randomPart =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID().replace(/-/g, "").slice(0, 14)
+      : Math.random().toString(36).slice(2, 16);
+  return `opi_${Date.now().toString(36)}_${randomPart}`;
+}
+
+function initialProcessStartupOperation(operationId: string): OpencodeProcessStartOperation {
+  const now = new Date().toISOString();
+  return {
+    operationId,
+    status: "RUNNING",
+    currentStep: "VALIDATING_REQUEST",
+    steps: OPENCODE_PROCESS_START_STEPS.map((step, index) => ({
+      ...step,
+      status: index === 0 ? "RUNNING" : "PENDING"
+    })),
+    traceId: "",
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function stopProcessStartupPolling() {
+  if (processStartupPollTimer) {
+    clearInterval(processStartupPollTimer);
+    processStartupPollTimer = null;
+  }
+}
+
+async function refreshProcessStartupOperation(operationId: string) {
+  try {
+    const operation = await api.getOpencodeProcessStartOperation(operationId);
+    processStartupOperation.value = operation;
+    if (operation.status === "SUCCEEDED") {
+      stopProcessStartupPolling();
+      processStartupDialogOpen.value = false;
+      void opencodeProcessQuery.refetch();
+    } else if (operation.status === "FAILED") {
+      stopProcessStartupPolling();
+    }
+  } catch {
+    // 初始化 POST 刚发出时 operation 可能尚未落库，短轮询继续等待下一次快照。
+  }
+}
+
+function startProcessStartupPolling(operationId: string) {
+  stopProcessStartupPolling();
+  void refreshProcessStartupOperation(operationId);
+  processStartupPollTimer = setInterval(() => {
+    void refreshProcessStartupOperation(operationId);
+  }, OPENCODE_PROCESS_START_OPERATION_POLL_INTERVAL_MS);
+}
+
+function failLocalProcessStartupOperation(error: unknown) {
+  const current = processStartupOperation.value;
+  if (!current || current.status === "FAILED" || current.status === "SUCCEEDED") {
+    return;
+  }
+  const apiError = error instanceof BackendApiError ? error : null;
+  const errorCode = apiError?.code ?? "INTERNAL_ERROR";
+  const errorMessage = apiError?.message ?? (error instanceof Error ? error.message : "初始化 opencode 进程失败");
+  const traceId = apiError?.traceId ?? current.traceId;
+  const currentStep = current.currentStep || "STARTING_PROCESS";
+  processStartupOperation.value = {
+    ...current,
+    status: "FAILED",
+    currentStep,
+    errorCode,
+    errorMessage,
+    traceId,
+    updatedAt: new Date().toISOString(),
+    steps: current.steps.map((step) => {
+      const stepCode = step.step ?? step.code;
+      if (stepCode === currentStep) {
+        return { ...step, status: "FAILED" };
+      }
+      if (step.status === "RUNNING") {
+        return { ...step, status: "SUCCEEDED" };
+      }
+      return step;
+    })
+  };
+}
+
+function beginInitializeOpencodeProcess() {
+  const operationId = newProcessStartupOperationId();
+  processStartupActionLabel.value =
+    opencodeProcessStatus.value?.serviceStatus === "NOT_RUNNING" ? "启动进程" : "分配专属进程";
+  processStartupOperation.value = initialProcessStartupOperation(operationId);
+  processStartupDialogOpen.value = true;
+  startProcessStartupPolling(operationId);
+  initializeOpencodeProcessMutation.mutate(operationId);
+}
 
 // 拆分就绪条件：不同能力依赖不同条件
 // 1. 模型和 Provider：登录后立即加载，不依赖 workspace 和 opencode
@@ -1150,22 +1266,36 @@ watch(
 );
 
 const initializeOpencodeProcessMutation = useMutation({
-  mutationFn: () => api.initializeMyOpencodeProcess(),
-  onSuccess: (status) => {
+  mutationFn: (operationId?: string) => api.initializeMyOpencodeProcess(operationId),
+  onSuccess: (status, operationId) => {
     queryClient.setQueryData(opencodeProcessQueryKey.value, status);
+    if (operationId) {
+      void refreshProcessStartupOperation(operationId);
+    }
+    if (status.status === "READY") {
+      stopProcessStartupPolling();
+      processStartupDialogOpen.value = false;
+    }
   },
-  onError: (error) => {
+  onError: (error, operationId) => {
     void (async () => {
       try {
         const refreshed = await opencodeProcessQuery.refetch();
         if (refreshed.data?.status === "READY") {
           queryClient.setQueryData(opencodeProcessQueryKey.value, refreshed.data);
           feedback.value = { kind: "info", title: "opencode 进程可用", description: refreshed.data.serviceAddress ?? refreshed.data.message };
+          stopProcessStartupPolling();
+          processStartupDialogOpen.value = false;
           return;
         }
       } catch {
         // 保留原始初始化错误，避免复查失败吞掉真正原因。
       }
+      if (operationId) {
+        await refreshProcessStartupOperation(operationId);
+      }
+      failLocalProcessStartupOperation(error);
+      stopProcessStartupPolling();
       feedback.value = errorFeedback("初始化 opencode 进程失败", error);
     })();
   }
@@ -2985,7 +3115,7 @@ async function handleLogout() {
           @stop="handleStopRun"
           @retry="handleRetryRun"
           @new-conversation="handleNewConversation"
-          @initialize-process="() => initializeOpencodeProcessMutation.mutate()"
+          @initialize-process="beginInitializeOpencodeProcess"
           @refresh-process="refreshOpencodeProcessStatus"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
           @reply-permission="(requestId: string, decision: 'once' | 'always' | 'reject') => replyPermissionMutation.mutate({ requestId, decision })"
@@ -3054,6 +3184,13 @@ async function handleLogout() {
   />
 
   <SettingsDialog :open="settingsOpen" :current-user="authStore.currentUser" @close="settingsOpen = false" />
+
+  <OpencodeProcessStartupDialog
+    :open="processStartupDialogOpen"
+    :action-label="processStartupActionLabel"
+    :operation="processStartupOperation"
+    @close="processStartupDialogOpen = false"
+  />
 </template>
 
 <style scoped>

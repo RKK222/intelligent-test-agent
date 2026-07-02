@@ -210,10 +210,18 @@ class UserOpencodeBackendRoutingService {
         if ("/runs".equals(suffix)) {
             return HttpMethod.POST.equals(method) ? Optional.of(agentId) : Optional.empty();
         }
+        if (isProcessInitializeOperationRead(suffix, method)) {
+            return Optional.empty();
+        }
         if (suffix.startsWith("/runs/")) {
             return Optional.empty();
         }
         return Optional.of(agentId);
+    }
+
+    private boolean isProcessInitializeOperationRead(String suffix, HttpMethod method) {
+        return HttpMethod.GET.equals(method)
+                && suffix.startsWith("/processes/me/initialize-operations/");
     }
 
     private boolean isPlatformRuntimePath(String path, HttpMethod method) {

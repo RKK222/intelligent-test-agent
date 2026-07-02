@@ -10,6 +10,7 @@ import com.icbc.testagent.domain.node.ExecutionNodeStatus;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStep;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
@@ -145,11 +146,30 @@ public class OpencodeProcessStartupService {
      * 调用 manager start 后立即确认健康；只有 health healthy 才返回 RUNNING 进程。
      */
     public OpencodeServerProcess startAndVerify(OpencodeProcessStartupRequest request) {
-        OpencodeProcessStartResult started = gateway.startProcess(startCommand(request));
-        if (started == null) {
-            throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 管理进程启动未返回结果");
+        return startAndVerify(request, OpencodeProcessStartProgress.noop());
+    }
+
+    /**
+     * 调用 manager start 后立即确认健康，并按可选 operation 记录启动公共链路进度。
+     */
+    public OpencodeServerProcess startAndVerify(
+            OpencodeProcessStartupRequest request,
+            OpencodeProcessStartProgress progress) {
+        OpencodeProcessStartProgress resolvedProgress = progress == null ? OpencodeProcessStartProgress.noop() : progress;
+        try {
+            resolvedProgress.step(OpencodeProcessStartOperationStep.STARTING_PROCESS);
+            OpencodeProcessStartResult started = gateway.startProcess(startCommand(request));
+            if (started == null) {
+                throw new PlatformException(ErrorCode.OPENCODE_BAD_GATEWAY, "opencode 管理进程启动未返回结果");
+            }
+            return markStartedAndVerify(request, started.pid(), started.message(), resolvedProgress);
+        } catch (PlatformException exception) {
+            resolvedProgress.failed(exception);
+            throw exception;
+        } catch (RuntimeException exception) {
+            resolvedProgress.failed(exception);
+            throw exception;
         }
-        return markStartedAndVerify(request, started.pid(), started.message());
     }
 
     /**
@@ -159,6 +179,18 @@ public class OpencodeProcessStartupService {
             OpencodeProcessStartupRequest request,
             Long pid,
             String startMessage) {
+        return markStartedAndVerify(request, pid, startMessage, OpencodeProcessStartProgress.noop());
+    }
+
+    /**
+     * 在外部 restart 已返回 STARTED 后，复用同一套候选快照、health 和最终状态回写逻辑。
+     */
+    public OpencodeServerProcess markStartedAndVerify(
+            OpencodeProcessStartupRequest request,
+            Long pid,
+            String startMessage,
+            OpencodeProcessStartProgress progress) {
+        OpencodeProcessStartProgress resolvedProgress = progress == null ? OpencodeProcessStartProgress.noop() : progress;
         Instant now = Instant.now(clock);
         OpencodeProcessId processId = request.processId() == null
                 ? new OpencodeProcessId(RuntimeIdGenerator.opencodeProcessId())
@@ -181,17 +213,20 @@ public class OpencodeProcessStartupService {
                 createdAt,
                 now,
                 request.traceId());
+        resolvedProgress.step(OpencodeProcessStartOperationStep.SAVING_CANDIDATE);
         repository.saveOpencodeServerProcess(candidate);
-        OpencodeProcessStatusProbe probe = waitForStartupHealth(candidate.processId(), request.traceId());
+        OpencodeProcessStatusProbe probe = waitForStartupHealth(candidate.processId(), request.traceId(), resolvedProgress);
         if (probe.status() != OpencodeProcessProbeStatus.RUNNING) {
             ErrorCode errorCode = probe.errorCode() == null ? ErrorCode.OPENCODE_UNAVAILABLE : probe.errorCode();
             persistFailedStartup(candidate, probe, request.traceId());
+            resolvedProgress.failed(errorCode.name(), startupFailureMessage(probe));
             throw new PlatformException(
                     errorCode,
                     startupFailureMessage(probe),
                     Map.of("processId", candidate.processId().value(), "port", candidate.port()));
         }
         OpencodeServerProcess running = probe.process().orElse(candidate);
+        resolvedProgress.step(OpencodeProcessStartOperationStep.SAVING_BINDING);
         repository.saveUserBinding(new UserOpencodeProcessBinding(
                 running.userId(),
                 OPENCODE_AGENT_ID,
@@ -207,11 +242,22 @@ public class OpencodeProcessStartupService {
     }
 
     private OpencodeProcessStatusProbe waitForStartupHealth(OpencodeProcessId processId, String traceId) {
+        return waitForStartupHealth(processId, traceId, OpencodeProcessStartProgress.noop());
+    }
+
+    private OpencodeProcessStatusProbe waitForStartupHealth(
+            OpencodeProcessId processId,
+            String traceId,
+            OpencodeProcessStartProgress progress) {
         int maxAttempts = startupHealthMaxAttempts();
         Instant deadline = Instant.now(clock).plus(startupHealthTimeout);
         OpencodeProcessStatusProbe probe = null;
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            progress.step(OpencodeProcessStartOperationStep.CHECKING_PROCESS);
             probe = statusQueryService.query(processId, traceId);
+            if (probe.status() != OpencodeProcessProbeStatus.NOT_STARTED) {
+                progress.step(OpencodeProcessStartOperationStep.HEALTH_CHECKING);
+            }
             if (!shouldRetryStartupHealth(probe)
                     || attempt == maxAttempts
                     || !Instant.now(clock).isBefore(deadline)) {

@@ -89,6 +89,7 @@
 | `/api/internal/agent/{agentId}/runs/{runId}/events` | 订阅 RunEvent SSE。 |
 | `/api/internal/agent/{agentId}/runs/{runId}/diff` | 查询 Run 级 Diff。 |
 | `/api/internal/agent/{agentId}/processes/me` | 查询或初始化当前用户的 opencode 进程。 |
+| `/api/internal/agent/{agentId}/processes/me/initialize-operations/{operationId}` | 只读查询当前用户 opencode 进程初始化进度。 |
 | `/api/internal/agent/opencode/api/agent` | Agent 目录。 |
 | `/api/internal/agent/opencode/api/model` | Model 目录。 |
 | `/api/internal/agent/opencode/api/status` | Runtime 健康状态。 |
@@ -99,6 +100,43 @@
 | `/api/internal/agent/opencode/session/{sessionId}/abort` | Session abort。 |
 | `/api/internal/agent/opencode/permission?sessionId={sessionId}` | Pending permission；opencode 原路径不包含平台 sessionId，因此使用 query 定位平台 session。 |
 | `/api/internal/agent/opencode/question?sessionId={sessionId}` | Pending question；opencode 原路径不包含平台 sessionId，因此使用 query 定位平台 session。 |
+
+## 当前用户 opencode 进程 API
+
+Base URL：`/api/internal/agent/{agentId}/processes/me`，当前 `agentId` 只支持 `opencode`。所有接口要求已登录用户，使用统一 `ApiResponse` / `ApiErrorResponse` 和 `X-Trace-Id`。
+
+| 方法 | 路径 | 用途 | 请求体 | 响应 |
+|---|---|---|---|---|
+| `GET` | `/` | 查询当前用户 opencode 进程强健康状态，不自动启动。 | 无 | `UserOpencodeProcessResponse` |
+| `POST` | `/initialize` | 初始化或重建当前用户 opencode 进程。 | 可空；可传 `{ "operationId": "opi_..." }` 开启进度记录。 | `UserOpencodeProcessResponse` |
+| `GET` | `/initialize-operations/{operationId}` | 只读查询当前用户发起的初始化进度；不触发 manager health/start，不写 RunEvent。 | 无 | `OpencodeProcessStartOperationResponse` |
+
+`operationId` 由前端生成，格式为 `opi_` 开头，后续 8 到 120 位字母、数字、下划线或短横线；旧客户端不传 `operationId` 时 `POST /initialize` 保持同步返回兼容。
+
+`OpencodeProcessStartOperationResponse`：
+
+```json
+{
+  "operationId": "opi_1234567890abcdef",
+  "status": "RUNNING",
+  "currentStep": "HEALTH_CHECKING",
+  "steps": [
+    { "step": "VALIDATING_REQUEST", "code": "VALIDATING_REQUEST", "name": "校验请求", "status": "SUCCEEDED" },
+    { "step": "HEALTH_CHECKING", "code": "HEALTH_CHECKING", "name": "健康检查", "status": "RUNNING" }
+  ],
+  "errorCode": null,
+  "errorMessage": null,
+  "processId": null,
+  "serviceAddress": null,
+  "traceId": "trace_1234567890abcdef",
+  "createdAt": "2026-07-02T12:00:00Z",
+  "updatedAt": "2026-07-02T12:00:03Z"
+}
+```
+
+步骤顺序固定为：`VALIDATING_REQUEST`、`CHECKING_ASSIGNMENT`、`SELECTING_CONTAINER`、`PREPARING_STARTUP`、`STARTING_PROCESS`、`SAVING_CANDIDATE`、`CHECKING_PROCESS`、`HEALTH_CHECKING`、`SAVING_BINDING`、`COMPLETED`。失败时 `status=FAILED`，`currentStep` 停留在失败步骤，`errorCode/errorMessage/traceId` 可直接展示给前端。
+
+对应测试：`RuntimeControllerTest`、`UserOpencodeProcessAssignmentServiceTest`、`MyBatisOpencodeProcessStartOperationRepositoryIntegrationTest`、`backend-api.test.ts`、`OpencodeProcessStartupDialog.test.ts`。
 
 ## AI 回复反馈 API
 

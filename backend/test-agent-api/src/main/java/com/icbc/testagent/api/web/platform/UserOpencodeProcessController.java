@@ -3,6 +3,8 @@ package com.icbc.testagent.api.web.platform;
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.common.api.ApiResponse;
+import com.icbc.testagent.common.error.ErrorCode;
+import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import java.util.Objects;
@@ -10,6 +12,7 @@ import java.util.function.Function;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
@@ -48,10 +51,26 @@ public class UserOpencodeProcessController {
     @PostMapping("/api/internal/agent/{agentId}/processes/me/initialize")
     public Mono<ApiResponse<RuntimeDtos.UserOpencodeProcessResponse>> initialize(
             @PathVariable String agentId,
+            @RequestBody(required = false) RuntimeDtos.UserOpencodeProcessInitializeRequest request,
             ServerWebExchange exchange) {
         UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        String operationId = request == null ? null : request.operationId();
         return blockingResponse(exchange, traceId -> RuntimeDtos.UserOpencodeProcessResponse.from(
-                processAssignmentService.initialize(userId, agentId, traceId)));
+                processAssignmentService.initialize(userId, agentId, traceId, operationId)));
+    }
+
+    /**
+     * 查询当前用户发起的 opencode 进程初始化进度，只读数据库快照。
+     */
+    @GetMapping("/api/internal/agent/{agentId}/processes/me/initialize-operations/{operationId}")
+    public Mono<ApiResponse<RuntimeDtos.OpencodeProcessStartOperationResponse>> initializeOperation(
+            @PathVariable String agentId,
+            @PathVariable String operationId,
+            ServerWebExchange exchange) {
+        UserId userId = AuthWebSupport.getAuthPrincipal(exchange).userId();
+        return blockingResponse(exchange, traceId -> RuntimeDtos.OpencodeProcessStartOperationResponse.from(
+                processAssignmentService.findStartOperation(userId, agentId, operationId)
+                        .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "opencode 进程初始化进度不存在"))));
     }
 
     private <T> Mono<ApiResponse<T>> blockingResponse(ServerWebExchange exchange, Function<String, T> action) {

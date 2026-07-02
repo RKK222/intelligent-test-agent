@@ -122,6 +122,31 @@ describe("backend-api", () => {
           }),
           { status: 200 }
         )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            traceId: "trace_fixed",
+            data: {
+              operationId: "opi_1234567890abcdef",
+              status: "FAILED",
+              currentStep: "HEALTH_CHECKING",
+              errorCode: "OPENCODE_UNAVAILABLE",
+              errorMessage: "启动后 10 秒内未通过健康检查：connection refused",
+              processId: "ocp_1234567890abcdef",
+              serviceAddress: "10.8.0.12:4096",
+              traceId: "trace_fixed",
+              steps: [
+                { code: "VALIDATING_REQUEST", name: "校验请求", status: "SUCCEEDED" },
+                { code: "HEALTH_CHECKING", name: "健康检查", status: "FAILED" }
+              ],
+              createdAt: "2026-06-24T00:00:00Z",
+              updatedAt: "2026-06-24T00:00:05Z"
+            }
+          }),
+          { status: 200 }
+        )
       );
     const client = createBackendApiClient({
       baseUrl: "http://api",
@@ -131,16 +156,27 @@ describe("backend-api", () => {
     });
 
     await expect(client.getMyOpencodeProcess()).resolves.toMatchObject({ status: "NEEDS_INITIALIZATION", initializable: true });
-    await expect(client.initializeMyOpencodeProcess()).resolves.toMatchObject({
+    await expect(client.initializeMyOpencodeProcess("opi_1234567890abcdef")).resolves.toMatchObject({
       status: "READY",
       baseUrl: "http://10.8.0.12:4096",
       serviceStatus: "RUNNING",
       serviceAddress: "10.8.0.12:4096"
     });
+    await expect(client.getOpencodeProcessStartOperation("opi_1234567890abcdef")).resolves.toMatchObject({
+      operationId: "opi_1234567890abcdef",
+      status: "FAILED",
+      currentStep: "HEALTH_CHECKING",
+      errorCode: "OPENCODE_UNAVAILABLE",
+      steps: expect.arrayContaining([expect.objectContaining({ code: "HEALTH_CHECKING", status: "FAILED" })])
+    });
 
     expect(fetcher.mock.calls[0]?.[0]).toBe("http://api/api/internal/agent/opencode/processes/me");
     expect(fetcher.mock.calls[1]?.[0]).toBe("http://api/api/internal/agent/opencode/processes/me/initialize");
+    expect(fetcher.mock.calls[2]?.[0]).toBe(
+      "http://api/api/internal/agent/opencode/processes/me/initialize-operations/opi_1234567890abcdef"
+    );
     expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "POST" }));
+    expect(fetcher.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({ operationId: "opi_1234567890abcdef" }));
     const headers = fetcher.mock.calls[0]?.[1]?.headers as Headers;
     expect(headers.get("Authorization")).toBe("Bearer token_123");
   });

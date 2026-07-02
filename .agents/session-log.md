@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-02 - opencode 用户进程初始化增加轮询进度
+
+- Why: 用户在“已分配但未运行”状态下点击启动/分配 opencode 进程时，前端只能等同步初始化返回，无法看到公共启动链路中的具体步骤，也无法定位 manager start、进程检查或健康检查失败原因。
+- What: `POST /api/internal/agent/{agentId}/processes/me/initialize` 增加可选 `operationId`，新增只读 `GET /initialize-operations/{operationId}`；后端把校验、确认分配、选择容器、准备参数、进程启动、记录候选进程、检查进程、健康检查、写入绑定和完成/失败写入 `opencode_process_start_operations`，前端 `AgentWorkbench` 生成 `opi_...` 并用 `OpencodeProcessStartupDialog` 每 500ms 轮询展示。
+- How: Domain 增加 operation 模型/步骤枚举/repository 端口，persistence 用 Flyway + MyBatis XML mapper 落表，runtime 在 `UserOpencodeProcessAssignmentService` 和 `OpencodeProcessStartupService` 中穿透可选进度记录器；API GET 只读 DB、不触发 manager health/start、不写 RunEvent。前端只改工作台层状态，`FigmaChatPanel` 继续只 emit 初始化事件。
+- Result: runtime/API/persistence 定向测试、backend-api/agent-web typecheck 和 Vitest 通过；计划中的后端聚合 `mvn -pl test-agent-opencode-runtime,test-agent-api,test-agent-persistence -am test` 在 `test-agent-persistence` 既有全量测试处失败（H2 `ON CONFLICT`、`usr_test_dev` fixture 外键、默认/loopback seed 断言），runtime 和 API 模块在该 reactor 中已通过。
+
 ### 2026-07-02 - slash command 展开 user part 不能误建 assistant 输出
 
 - Why: opencode 可能先发送 `message.part.updated`，再发送或不及时发送 `message.updated(role=user)`；slash command 会被展开成完整技能提示词，展开文本与本地原始 `/command 参数` 不相等，旧 reducer 会把该 user text part 当作 assistant 输出显示。

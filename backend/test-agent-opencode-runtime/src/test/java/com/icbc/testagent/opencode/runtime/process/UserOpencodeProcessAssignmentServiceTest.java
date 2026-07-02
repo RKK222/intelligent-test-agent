@@ -26,6 +26,10 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeManagerBackendConnectio
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperation;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationRepository;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStatus;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStep;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
@@ -94,6 +98,35 @@ class UserOpencodeProcessAssignmentServiceTest {
                 .isEqualTo(new LinuxServerId("10.8.0.13"));
         assertThat(repository.savedNodes).hasSize(1);
         assertThat(repository.savedNodes.getFirst().baseUrl()).isEqualTo("http://10.8.0.21:4200");
+    }
+
+    @org.junit.jupiter.api.Test
+    void initializeRecordsProgressStepsWhenOperationIdProvided() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_idle", container("ctr_idle", "10.8.0.13", 4200, 4205, 4, 0));
+        RecordingStartOperationRepository operations = new RecordingStartOperationRepository();
+        RecordingGateway gateway = new RecordingGateway();
+        UserOpencodeProcessAssignmentService service = service(repository, gateway, operations);
+
+        UserOpencodeProcessStatusResponse response = service.initialize(USER_ID, "opencode", TRACE_ID, "opi_1234567890abcdef");
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.READY);
+        OpencodeProcessStartOperation operation = operations.findById("opi_1234567890abcdef", USER_ID).orElseThrow();
+        assertThat(operation.status()).isEqualTo(OpencodeProcessStartOperationStatus.SUCCEEDED);
+        assertThat(operation.currentStep()).isEqualTo(OpencodeProcessStartOperationStep.COMPLETED);
+        assertThat(operation.processId()).isEqualTo(response.processId());
+        assertThat(operation.serviceAddress()).isEqualTo("10.8.0.21:4200");
+        assertThat(operations.steps).containsSubsequence(
+                OpencodeProcessStartOperationStep.VALIDATING_REQUEST,
+                OpencodeProcessStartOperationStep.CHECKING_ASSIGNMENT,
+                OpencodeProcessStartOperationStep.SELECTING_CONTAINER,
+                OpencodeProcessStartOperationStep.PREPARING_STARTUP,
+                OpencodeProcessStartOperationStep.STARTING_PROCESS,
+                OpencodeProcessStartOperationStep.SAVING_CANDIDATE,
+                OpencodeProcessStartOperationStep.CHECKING_PROCESS,
+                OpencodeProcessStartOperationStep.HEALTH_CHECKING,
+                OpencodeProcessStartOperationStep.SAVING_BINDING,
+                OpencodeProcessStartOperationStep.COMPLETED);
     }
 
     @org.junit.jupiter.api.Test
@@ -541,6 +574,13 @@ class UserOpencodeProcessAssignmentServiceTest {
     private static UserOpencodeProcessAssignmentService service(
             FakeRepository repository,
             RecordingGateway gateway,
+            OpencodeProcessStartOperationRepository operationRepository) {
+        return serviceWithPublicConfigDir(repository, gateway, Path.of(CONFIG_DIR), "10.8.0.21", "10.8.0.21", operationRepository);
+    }
+
+    private static UserOpencodeProcessAssignmentService service(
+            FakeRepository repository,
+            RecordingGateway gateway,
             String linuxServerId,
             String advertisedHost) {
         return serviceWithPublicConfigDir(repository, gateway, Path.of(CONFIG_DIR), linuxServerId, advertisedHost);
@@ -559,6 +599,16 @@ class UserOpencodeProcessAssignmentServiceTest {
             Path publicConfigDir,
             String linuxServerId,
             String advertisedHost) {
+        return serviceWithPublicConfigDir(repository, gateway, publicConfigDir, linuxServerId, advertisedHost, null);
+    }
+
+    private static UserOpencodeProcessAssignmentService serviceWithPublicConfigDir(
+            FakeRepository repository,
+            RecordingGateway gateway,
+            Path publicConfigDir,
+            String linuxServerId,
+            String advertisedHost,
+            OpencodeProcessStartOperationRepository operationRepository) {
         return new UserOpencodeProcessAssignmentService(
                 repository,
                 commonParameters(publicConfigDir),
@@ -574,7 +624,9 @@ class UserOpencodeProcessAssignmentServiceTest {
                                 Duration.ofSeconds(10),
                                 Duration.ofSeconds(30),
                                 Duration.ofSeconds(5),
-                                100)));
+                                100)),
+                null,
+                operationRepository);
     }
 
     private static final String SESSION_DIR = "/tmp/testagent/.session/";
@@ -754,6 +806,114 @@ class UserOpencodeProcessAssignmentServiceTest {
         @Override
         public OpencodeProcessControlResult stopProcess(OpencodeProcessControlCommand command) {
             throw new UnsupportedOperationException("stopProcess is not used");
+        }
+    }
+
+    static class RecordingStartOperationRepository implements OpencodeProcessStartOperationRepository {
+        private final Map<String, OpencodeProcessStartOperation> operations = new LinkedHashMap<>();
+        private final List<OpencodeProcessStartOperationStep> steps = new ArrayList<>();
+
+        @Override
+        public OpencodeProcessStartOperation start(
+                String operationId,
+                UserId requestedBy,
+                String agentId,
+                String traceId,
+                Instant now) {
+            OpencodeProcessStartOperation operation = new OpencodeProcessStartOperation(
+                    operationId,
+                    requestedBy,
+                    agentId,
+                    OpencodeProcessStartOperationStatus.RUNNING,
+                    OpencodeProcessStartOperationStep.VALIDATING_REQUEST,
+                    null,
+                    null,
+                    null,
+                    null,
+                    traceId,
+                    now,
+                    now);
+            operations.put(operationId, operation);
+            steps.add(operation.currentStep());
+            return operation;
+        }
+
+        @Override
+        public OpencodeProcessStartOperation markStep(String operationId, OpencodeProcessStartOperationStep step, Instant now) {
+            OpencodeProcessStartOperation current = operations.get(operationId);
+            OpencodeProcessStartOperation operation = new OpencodeProcessStartOperation(
+                    current.operationId(),
+                    current.requestedBy(),
+                    current.agentId(),
+                    OpencodeProcessStartOperationStatus.RUNNING,
+                    step,
+                    null,
+                    null,
+                    current.processId(),
+                    current.serviceAddress(),
+                    current.traceId(),
+                    current.createdAt(),
+                    now);
+            operations.put(operationId, operation);
+            steps.add(step);
+            return operation;
+        }
+
+        @Override
+        public OpencodeProcessStartOperation markSucceeded(
+                String operationId,
+                String processId,
+                String serviceAddress,
+                Instant now) {
+            OpencodeProcessStartOperation current = operations.get(operationId);
+            OpencodeProcessStartOperation operation = new OpencodeProcessStartOperation(
+                    current.operationId(),
+                    current.requestedBy(),
+                    current.agentId(),
+                    OpencodeProcessStartOperationStatus.SUCCEEDED,
+                    OpencodeProcessStartOperationStep.COMPLETED,
+                    null,
+                    null,
+                    processId,
+                    serviceAddress,
+                    current.traceId(),
+                    current.createdAt(),
+                    now);
+            operations.put(operationId, operation);
+            steps.add(OpencodeProcessStartOperationStep.COMPLETED);
+            return operation;
+        }
+
+        @Override
+        public OpencodeProcessStartOperation markFailed(
+                String operationId,
+                OpencodeProcessStartOperationStep step,
+                String errorCode,
+                String errorMessage,
+                Instant now) {
+            OpencodeProcessStartOperation current = operations.get(operationId);
+            OpencodeProcessStartOperation operation = new OpencodeProcessStartOperation(
+                    current.operationId(),
+                    current.requestedBy(),
+                    current.agentId(),
+                    OpencodeProcessStartOperationStatus.FAILED,
+                    step,
+                    errorCode,
+                    errorMessage,
+                    current.processId(),
+                    current.serviceAddress(),
+                    current.traceId(),
+                    current.createdAt(),
+                    now);
+            operations.put(operationId, operation);
+            steps.add(step);
+            return operation;
+        }
+
+        @Override
+        public Optional<OpencodeProcessStartOperation> findById(String operationId, UserId requestedBy) {
+            return Optional.ofNullable(operations.get(operationId))
+                    .filter(operation -> operation.requestedBy().equals(requestedBy));
         }
     }
 

@@ -59,6 +59,7 @@ import type {
   OpencodeRuntimeManagedProcessCommandResult,
   OpencodeRuntimeManagementUserProcessParams,
   OpencodeRuntimeProcess,
+  OpencodeProcessStartOperation,
   PageResponse,
   PlatformUserSummary,
   PersonalWorkspace,
@@ -794,11 +795,16 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         timeoutMs: 120000
       }),
     getMyOpencodeProcess: () => request<UserOpencodeProcess>(agentPath("/processes/me")),
-    initializeMyOpencodeProcess: () =>
+    initializeMyOpencodeProcess: (operationId?: string) =>
       request<UserOpencodeProcess>(agentPath("/processes/me/initialize"), {
         method: "POST",
+        ...(operationId ? { body: JSON.stringify({ operationId }) } : {}),
         timeoutMs: 120000
       }),
+    getOpencodeProcessStartOperation: (operationId: string) =>
+      request<OpencodeProcessStartOperation>(
+        agentPath(`/processes/me/initialize-operations/${encodeURIComponent(operationId)}`)
+      ),
     getOpencodeRuntimeManagementOverview: (params: OpencodeRuntimeManagementOverviewParams = {}) =>
       request<OpencodeRuntimeManagementOverview>(`${opencodeRuntimeManagementBase}/overview${query({ ...params })}`),
     getOpencodeRuntimeManagementUserProcesses: (params: OpencodeRuntimeManagementUserProcessParams) =>

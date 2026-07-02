@@ -5,6 +5,9 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.icbc.testagent.opencode.runtime.run.StartRunInput;
 import com.icbc.testagent.opencode.runtime.process.socket.ManagerBackendEndpoint;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperation;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStatus;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStep;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.run.Run;
@@ -380,6 +383,84 @@ final class RuntimeDtos {
                     response.checkedAt(),
                     response.serviceStatus().name(),
                     response.serviceAddress());
+        }
+    }
+
+    /**
+     * 当前用户 opencode 进程初始化请求体，operationId 可空以兼容旧调用。
+     */
+    record UserOpencodeProcessInitializeRequest(String operationId) {
+    }
+
+    /**
+     * opencode 进程初始化进度响应 DTO，供前端轮询展示步骤状态。
+     */
+    record OpencodeProcessStartOperationResponse(
+            String operationId,
+            String status,
+            String currentStep,
+            List<OpencodeProcessStartOperationStepResponse> steps,
+            String errorCode,
+            String errorMessage,
+            String processId,
+            String serviceAddress,
+            String traceId,
+            Instant createdAt,
+            Instant updatedAt) {
+
+        static OpencodeProcessStartOperationResponse from(OpencodeProcessStartOperation operation) {
+            return new OpencodeProcessStartOperationResponse(
+                    operation.operationId(),
+                    operation.status().name(),
+                    operation.currentStep().name(),
+                    List.of(OpencodeProcessStartOperationStep.values()).stream()
+                            .map(step -> OpencodeProcessStartOperationStepResponse.from(operation, step))
+                            .toList(),
+                    operation.errorCode(),
+                    operation.errorMessage(),
+                    operation.processId(),
+                    operation.serviceAddress(),
+                    operation.traceId(),
+                    operation.createdAt(),
+                    operation.updatedAt());
+        }
+    }
+
+    /**
+     * 单个初始化步骤的展示状态，后端按枚举顺序从 operation 快照推导。
+     */
+    record OpencodeProcessStartOperationStepResponse(
+            String step,
+            String code,
+            String name,
+            String status) {
+
+        static OpencodeProcessStartOperationStepResponse from(
+                OpencodeProcessStartOperation operation,
+                OpencodeProcessStartOperationStep step) {
+            return new OpencodeProcessStartOperationStepResponse(
+                    step.name(),
+                    step.name(),
+                    step.displayName(),
+                    stepStatus(operation, step));
+        }
+
+        private static String stepStatus(OpencodeProcessStartOperation operation, OpencodeProcessStartOperationStep step) {
+            if (operation.status() == OpencodeProcessStartOperationStatus.SUCCEEDED) {
+                return "SUCCEEDED";
+            }
+            int currentOrdinal = operation.currentStep().ordinal();
+            int stepOrdinal = step.ordinal();
+            if (operation.status() == OpencodeProcessStartOperationStatus.FAILED) {
+                if (stepOrdinal < currentOrdinal) {
+                    return "SUCCEEDED";
+                }
+                return stepOrdinal == currentOrdinal ? "FAILED" : "PENDING";
+            }
+            if (stepOrdinal < currentOrdinal) {
+                return "SUCCEEDED";
+            }
+            return stepOrdinal == currentOrdinal ? "RUNNING" : "PENDING";
         }
     }
 

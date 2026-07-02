@@ -15,6 +15,9 @@ import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessHeartbeatStore;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessManagementRepository;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperation;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationRepository;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStep;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcess;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeServerProcessStatus;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
@@ -31,6 +34,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -45,6 +49,7 @@ public class UserOpencodeProcessAssignmentService {
     private static final Duration STALE_READY_GRACE_PERIOD = Duration.ofSeconds(60);
     private static final String PARAM_OPENCODE_SESSION_DIR = "OPENCODE_SESSION_DIR";
     private static final String PARAM_OPENCODE_PUBLIC_CONFIG_DIR = "OPENCODE_PUBLIC_CONFIG_DIR";
+    private static final Pattern OPERATION_ID_PATTERN = Pattern.compile("^opi_[A-Za-z0-9_-]{8,120}$");
     private static final CommonParameterValues EMPTY_PARAMETER_VALUES = new CommonParameterValues() {
         @Override
         public java.util.Optional<String> resolvedValue(String englishName) {
@@ -82,6 +87,7 @@ public class UserOpencodeProcessAssignmentService {
     private final OpencodeProcessStartupService startupService;
     private final OpencodeProcessStatusQueryService statusQueryService;
     private final OpencodeServerAddressResolver addressResolver;
+    private final OpencodeProcessStartOperationRepository startOperationRepository;
 
     /**
      * 注入进程管理 Repository、兼容节点 Repository 和管理进程 gateway。
@@ -103,7 +109,7 @@ public class UserOpencodeProcessAssignmentService {
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessHeartbeatStore heartbeatStore) {
-        this(repository, EMPTY_PARAMETER_VALUES, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, null, null);
+        this(repository, EMPTY_PARAMETER_VALUES, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, null, null, null);
     }
 
     /**
@@ -130,7 +136,8 @@ public class UserOpencodeProcessAssignmentService {
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessHeartbeatStore heartbeatStore,
             OpencodeProcessStartupService startupService,
-            OpencodeProcessStatusQueryService statusQueryService) {
+            OpencodeProcessStatusQueryService statusQueryService,
+            OpencodeProcessStartOperationRepository startOperationRepository) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
         this.commonParameterValues = Objects.requireNonNull(commonParameterValues, "commonParameterValues must not be null");
         this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
@@ -141,6 +148,7 @@ public class UserOpencodeProcessAssignmentService {
                 ? new OpencodeProcessStatusQueryService(repository, gateway, heartbeatStore)
                 : statusQueryService;
         this.addressResolver = new OpencodeServerAddressResolver(backendLifecycle.advertisedHost());
+        this.startOperationRepository = startOperationRepository;
         this.startupService = startupService == null
                 ? new OpencodeProcessStartupService(
                         repository,
@@ -162,7 +170,39 @@ public class UserOpencodeProcessAssignmentService {
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessHeartbeatStore heartbeatStore) {
-        this(repository, commonParameterValues, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, null, null);
+        this(
+                repository,
+                commonParameterValues,
+                executionNodeRepository,
+                gateway,
+                backendLifecycle,
+                heartbeatStore == null ? disabledHeartbeatStore() : heartbeatStore,
+                null,
+                null,
+                null);
+    }
+
+    /**
+     * 兼容旧测试构造器，允许注入进程启动进度仓储。
+     */
+    public UserOpencodeProcessAssignmentService(
+            OpencodeProcessManagementRepository repository,
+            CommonParameterValues commonParameterValues,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            BackendJavaProcessLifecycleService backendLifecycle,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            OpencodeProcessStartOperationRepository startOperationRepository) {
+        this(
+                repository,
+                commonParameterValues,
+                executionNodeRepository,
+                gateway,
+                backendLifecycle,
+                heartbeatStore == null ? disabledHeartbeatStore() : heartbeatStore,
+                null,
+                null,
+                startOperationRepository);
     }
 
     /**
@@ -279,17 +319,57 @@ public class UserOpencodeProcessAssignmentService {
      * 初始化或重建当前用户 opencode 进程；真实启动由 gateway 完成。
      */
     public UserOpencodeProcessStatusResponse initialize(UserId userId, String agentId, String traceId) {
+        return initialize(userId, agentId, traceId, null);
+    }
+
+    /**
+     * 初始化或重建当前用户 opencode 进程；operationId 存在时同步记录公共启动链路进度。
+     */
+    public UserOpencodeProcessStatusResponse initialize(
+            UserId userId,
+            String agentId,
+            String traceId,
+            String operationId) {
         validateAgent(agentId);
+        String normalizedOperationId = normalizeOperationId(operationId);
+        OpencodeProcessStartProgress progress = OpencodeProcessStartProgress.start(
+                startOperationRepository,
+                normalizedOperationId,
+                userId,
+                OPENCODE_AGENT_ID,
+                traceId,
+                Instant::now);
+        try {
+            return initializeWithProgress(userId, traceId, progress);
+        } catch (PlatformException exception) {
+            progress.failed(exception);
+            throw exception;
+        } catch (RuntimeException exception) {
+            progress.failed(exception);
+            throw exception;
+        }
+    }
+
+    private UserOpencodeProcessStatusResponse initializeWithProgress(
+            UserId userId,
+            String traceId,
+            OpencodeProcessStartProgress progress) {
         Instant now = Instant.now();
+        progress.step(OpencodeProcessStartOperationStep.CHECKING_ASSIGNMENT);
         Optional<UserOpencodeProcessBinding> existingBinding = repository.findUserBinding(userId, OPENCODE_AGENT_ID);
         Optional<OpencodeServerProcess> existingProcess = existingBinding.flatMap(binding -> activeProcess(binding).or(() ->
                 repository.findOpencodeServerProcessById(binding.processId())));
         if (existingProcess.isPresent()) {
+            progress.step(OpencodeProcessStartOperationStep.CHECKING_PROCESS);
             OpencodeProcessStatusProbe probe = statusQueryService.query(existingProcess.get().processId(), traceId);
+            if (probe.status() != OpencodeProcessProbeStatus.NOT_STARTED) {
+                progress.step(OpencodeProcessStartOperationStep.HEALTH_CHECKING);
+            }
             if (probe.status() == OpencodeProcessProbeStatus.RUNNING) {
                 OpencodeServerProcess refreshed = probe.process().orElse(existingProcess.get());
                 ExecutionNode node = projectExecutionNode(refreshed, now, traceId);
                 executionNodeRepository.save(node);
+                progress.succeeded(refreshed.processId().value(), serviceAddress(refreshed));
                 return ready(refreshed, "opencode 进程可用", now);
             }
         }
@@ -304,7 +384,10 @@ public class UserOpencodeProcessAssignmentService {
                 .orElseGet(() -> repository.findHealthyContainersConnectedToBackend(
                         backendLifecycle.backendProcessId(),
                         CONTAINER_CANDIDATE_LIMIT));
-        OpencodeProcessStartCommand command = startCommand(userId, chooseContainer(candidates), traceId);
+        progress.step(OpencodeProcessStartOperationStep.SELECTING_CONTAINER);
+        OpencodeContainer container = chooseContainer(candidates);
+        progress.step(OpencodeProcessStartOperationStep.PREPARING_STARTUP);
+        OpencodeProcessStartCommand command = startCommand(userId, container, traceId);
         OpencodeServerProcess process = startupService.startAndVerify(new OpencodeProcessStartupRequest(
                 userId,
                 existingBinding.map(UserOpencodeProcessBinding::processId).orElse(null),
@@ -316,8 +399,24 @@ public class UserOpencodeProcessAssignmentService {
                 command.baseUrl(),
                 command.sessionPath(),
                 command.configPath(),
-                traceId));
+                traceId), progress);
+        progress.succeeded(process.processId().value(), serviceAddress(process));
         return ready(process, "opencode 进程可用", now);
+    }
+
+    /**
+     * 只读当前用户发起的初始化 operation，不触发 manager health/start 或 RunEvent。
+     */
+    public Optional<OpencodeProcessStartOperation> findStartOperation(
+            UserId userId,
+            String agentId,
+            String operationId) {
+        validateAgent(agentId);
+        String normalizedOperationId = normalizeOperationId(operationId);
+        if (startOperationRepository == null || normalizedOperationId == null) {
+            return Optional.empty();
+        }
+        return startOperationRepository.findById(normalizedOperationId, userId);
     }
 
     /**
@@ -687,6 +786,20 @@ public class UserOpencodeProcessAssignmentService {
         if (agentId == null || !OPENCODE_AGENT_ID.equals(agentId.trim().toLowerCase())) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "当前只支持 opencode 用户进程");
         }
+    }
+
+    private String normalizeOperationId(String operationId) {
+        if (operationId == null || operationId.isBlank()) {
+            return null;
+        }
+        String normalized = operationId.trim();
+        if (!OPERATION_ID_PATTERN.matcher(normalized).matches()) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "operationId 格式无效",
+                    Map.of("operationId", normalized));
+        }
+        return normalized;
     }
 
     private PlatformException unavailableException(String message) {

@@ -22,6 +22,9 @@ import com.icbc.testagent.opencode.runtime.run.StartRunInput;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperation;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStatus;
+import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStep;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.opencode.runtime.session.SessionApplicationService;
 import com.icbc.testagent.workspace.WorkspaceApplicationService;
@@ -289,6 +292,22 @@ class RuntimeControllerTest {
                 .thenReturn(ready);
         when(service.initialize(eq(new UserId("usr_1234567890abcdef")), eq("opencode"), eq("trace_1234567890abcdef")))
                 .thenReturn(ready);
+        when(service.initialize(eq(new UserId("usr_1234567890abcdef")), eq("opencode"), eq("trace_1234567890abcdef"), eq("opi_1234567890abcdef")))
+                .thenReturn(ready);
+        when(service.findStartOperation(eq(new UserId("usr_1234567890abcdef")), eq("opencode"), eq("opi_1234567890abcdef")))
+                .thenReturn(Optional.of(new OpencodeProcessStartOperation(
+                        "opi_1234567890abcdef",
+                        new UserId("usr_1234567890abcdef"),
+                        "opencode",
+                        OpencodeProcessStartOperationStatus.FAILED,
+                        OpencodeProcessStartOperationStep.HEALTH_CHECKING,
+                        "OPENCODE_UNAVAILABLE",
+                        "启动后 10 秒内未通过健康检查：connection refused",
+                        "ocp_1234567890abcdef",
+                        "10.8.0.12:4096",
+                        "trace_1234567890abcdef",
+                        NOW,
+                        NOW)));
         WebTestClient client = WebTestClient.bindToController(new UserOpencodeProcessController(service))
                 .webFilter(new TraceIdWebFilter())
                 .webFilter(authenticatedUserFilter())
@@ -308,6 +327,10 @@ class RuntimeControllerTest {
         client.post()
                 .uri("/api/internal/agent/opencode/processes/me/initialize")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"operationId":"opi_1234567890abcdef"}
+                        """)
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
@@ -315,6 +338,21 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.processId").isEqualTo("ocp_1234567890abcdef")
                 .jsonPath("$.data.serviceStatus").isEqualTo("RUNNING")
                 .jsonPath("$.data.serviceAddress").isEqualTo("10.8.0.12:4096");
+
+        client.get()
+                .uri("/api/internal/agent/opencode/processes/me/initialize-operations/opi_1234567890abcdef")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.operationId").isEqualTo("opi_1234567890abcdef")
+                .jsonPath("$.data.status").isEqualTo("FAILED")
+                .jsonPath("$.data.currentStep").isEqualTo("HEALTH_CHECKING")
+                .jsonPath("$.data.errorCode").isEqualTo("OPENCODE_UNAVAILABLE")
+                .jsonPath("$.data.errorMessage").isEqualTo("启动后 10 秒内未通过健康检查：connection refused")
+                .jsonPath("$.data.steps[0].code").isEqualTo("VALIDATING_REQUEST")
+                .jsonPath("$.data.steps[0].name").isEqualTo("校验请求")
+                .jsonPath("$.data.steps[7].status").isEqualTo("FAILED");
     }
 
     @Test

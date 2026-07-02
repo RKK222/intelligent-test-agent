@@ -494,6 +494,7 @@ V10 种子数据对 F-COSS 的影响：
 | `opencode_manager_backend_connections` | manager 与后端 Java 实例的持久 WebSocket 连接拓扑，按 `(manager_id, backend_process_id)` 唯一；在线连接视图以 Redis manager 快照中的连接列表为准。 |
 | `opencode_server_processes` | 用户专属 opencode server 进程，记录用户、Linux 服务器、容器、主机直通端口、PID、`base_url`、启动路径和健康状态。 |
 | `user_opencode_process_bindings` | 用户到 opencode 进程的当前绑定，按 `(user_id, agent_id)` 唯一，首期 `agent_id='opencode'`。 |
+| `opencode_process_start_operations` | 当前用户 opencode 进程初始化进度快照，供前端按 `operationId` 轮询展示启动步骤和失败原因。 |
 
 关键约束：
 
@@ -510,6 +511,31 @@ V10 种子数据对 F-COSS 的影响：
 - 历史 `opencode_server_processes.updated_at` 可能早于 `created_at`；读取这类旧记录时由 persistence 映射层按 `created_at` 归一化，避免领域对象校验阻断用户进程状态查询和重新初始化。新写入数据仍必须保持 `updated_at >= created_at`。
 - 应用回滚时可保留这些新增表；如需完整回退 Web 用户对话到固定节点模式，应回滚后端和前端镜像，而不是删除 V10 表或清理 `/data/.testagent/agent-opencode/.session/{port}`。
 - 后端启动或拓扑变化时更新 `linux_servers`、`backend_java_processes`，Java 进程在线心跳写入 Redis 快照，TTL 为 10 秒；manager WebSocket 注册更新 `opencode_containers`、`opencode_container_managers` 和 `opencode_manager_backend_connections` 的持久拓扑，`managerHeartbeat` 只写 Redis manager 快照，TTL 为 10 秒。
+
+## V20260702120000 opencode 进程初始化进度表
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260702120000__create_opencode_process_start_operations.sql` 创建 `opencode_process_start_operations`，只保存当前用户初始化 opencode 进程的一次进度快照，不写测试、演示或本地开发数据。
+
+| 字段 | 说明 |
+|---|---|
+| `operation_id` | 前端生成的业务 ID，使用 `opi_` 前缀，唯一。 |
+| `requested_by_user_id` | 发起初始化的用户，外键引用 `users.user_id`；进度查询按该字段做用户隔离。 |
+| `agent_id` | Agent 标识，当前为 `opencode`。 |
+| `status` | `RUNNING`、`SUCCEEDED`、`FAILED`。 |
+| `current_step` | 当前启动步骤：校验、确认分配、选择容器、准备参数、进程启动、记录候选进程、检查进程、健康检查、写入绑定或完成。 |
+| `error_code` / `error_message` | 失败时可展示给前端的稳定错误码和安全失败说明。 |
+| `process_id` / `service_address` | 成功后回填的 opencode 进程 ID 和展示地址。 |
+| `trace_id` | 初始化链路 traceId。 |
+
+索引：
+
+- `operation_id` 唯一约束支持按操作 ID 定位。
+- `idx_opencode_process_start_operations_user_updated(requested_by_user_id, updated_at)` 支持当前用户进度查询和排查。
+
+兼容策略：
+
+- 旧客户端不传 `operationId` 时不写该表，`POST /initialize` 仍按同步接口返回。
+- 该表是 HTTP 轮询进度快照，不写入 `run_events`，也不参与 RunEvent SSE 续传。
 
 ## V10 F-COSS 应用开发种子数据
 

@@ -15,6 +15,7 @@
 - Controller 只调用业务模块 service，不直接访问 Repository、generated SDK 或 JDBC 实现。
 - 维护 `RuntimeDtos` 等平台 DTO，不返回 generated SDK DTO。
 - runtime Controller 只读取可选认证主体并传入 `test-agent-opencode-runtime`，有用户主体时由业务层使用用户专属 opencode 进程，无用户主体时保持 static-token 兼容 fallback。
+- 当前用户 opencode 进程初始化接口支持可选 `operationId` 请求体并新增 `initialize-operations/{operationId}` 只读进度查询；Controller 只做用户隔离、DTO 映射和 traceId 处理，不在 GET 进度接口触发 manager health/start 或 RunEvent。
 - RunEvent SSE 建连时先委托 runtime 恢复 opencode projected messages，再进入 durable replay 与 live bus 合流。
 - 暴露 Workspace/Agent 配置文件 WebSocket 路由、ticket 和 WebSocket RPC 入口：Controller/Handler 只做鉴权、`SUPER_ADMIN` 校验、ticket、Origin、traceId、协议 envelope 和统一错误包装，文件系统操作继续委托 `test-agent-workspace-management`。Workspace 路由优先使用用户进程服务器归属；ticket 签发在轻量归属未 READY 时会复查当前用户 opencode 强状态，避免文件树与右侧进程状态卡展示不一致，仍不触发 start 命令；Agent 配置文件路由按 scope/workspace/worktree 的服务器归属定位目标后端，不新增跨服务器 HTTP 文件代理；Run、初始化和用户进程状态接口仍由 runtime 执行强健康检查。
 - 暴露 Agent 配置管理 HTTP 和进度 WebSocket 入口：Controller 只做认证、`SUPER_ADMIN` 写权限、DTO 和 traceId 转换；公共 worktree 列表接口只返回指定服务器上的 `ACTIVE/PUBLIC` 元数据和创建人字段，文件内容仍必须走文件 WebSocket；进度 WebSocket 使用一次性 ticket、Origin 白名单和 `snapshot/step/completed/failed` envelope，业务逻辑委托 `test-agent-workspace-management`。
@@ -49,7 +50,7 @@
 
 ## 测试覆盖
 
-- `RuntimeControllerTest` 覆盖 Workspace 查询、Session、Run、Diff、agent-scoped Run URL、RunEvent SSE 恢复快照和内部平台兼容 URL。
+- `RuntimeControllerTest` 覆盖 Workspace 查询、Session、Run、Diff、agent-scoped Run URL、当前用户 opencode 进程初始化进度 GET、RunEvent SSE 恢复快照和内部平台兼容 URL。
 - `RuntimeManagementControllerTest` 覆盖运行管理 overview、按 `linuxServerId` 的后端指标历史主 API、旧 `backendProcessId` 指标兼容入口和进程重启/停止 API 的 `SUPER_ADMIN` 成功、跨 Java 后端路由优先于本地 manager gateway、manager 下属 opencode server 明细与归属字段响应映射、命令结果响应映射、用户名筛选/响应映射、`windowMinutes` 预设窗口、`hours` 兼容、历史参数默认值与上限、非超级管理员拒绝、未认证、非法分页/状态参数和 traceId；`RuntimeManagementBackendRoutingServiceTest` 覆盖按容器归属服务器转发命令和路由头防循环。
 - `SchedulerManagementControllerTest` 覆盖定时任务管理 API 的 `SUPER_ADMIN` 成功、`APP_ADMIN`/匿名拒绝、非法状态参数、任务 patch、手动触发和运行记录查询。
 - `AiMessageFeedbackControllerTest` 覆盖登录用户提交/查询自己的消息反馈，以及匿名请求拒绝。
