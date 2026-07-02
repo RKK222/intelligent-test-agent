@@ -199,6 +199,21 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
+    void parseStatusPorcelainMarksUnmergedEntriesAsConflict() {
+        GitWorkspaceService service = new GitWorkspaceService(new RecordingExecutor(""));
+
+        List<GitWorkspaceService.GitStatusEntry> entries = service.parseStatusPorcelain("AU workspace/docs/conflict.md\n");
+
+        assertThat(entries).singleElement().satisfies(entry -> {
+            assertThat(entry.path()).isEqualTo("workspace/docs/conflict.md");
+            assertThat(entry.rawStatus()).isEqualTo("AU");
+            assertThat(entry.status()).isEqualTo("conflict");
+            assertThat(entry.unmerged()).isTrue();
+            assertThat(entry.staged()).isTrue();
+        });
+    }
+
+    @Test
     void collectDiffFilesMergesStagedAndUnstagedPatchStats() {
         RecordingExecutor executor = new RecordingExecutor("");
         executor.stdoutByCall.put(1, "diff --git a/src/App.java b/src/App.java\n@@ -1 +1 @@\n-old\n+staged\n");

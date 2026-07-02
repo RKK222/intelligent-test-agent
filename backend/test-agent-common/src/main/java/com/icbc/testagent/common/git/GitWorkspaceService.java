@@ -667,7 +667,20 @@ public class GitWorkspaceService {
             return indexStatus == '?' && worktreeStatus == '?';
         }
 
+        public boolean unmerged() {
+            return rawStatus.equals("DD")
+                    || rawStatus.equals("AU")
+                    || rawStatus.equals("UD")
+                    || rawStatus.equals("UA")
+                    || rawStatus.equals("DU")
+                    || rawStatus.equals("AA")
+                    || rawStatus.equals("UU");
+        }
+
         public String status() {
+            if (unmerged()) {
+                return "conflict";
+            }
             if (untrackedFile()) {
                 return "untracked";
             }

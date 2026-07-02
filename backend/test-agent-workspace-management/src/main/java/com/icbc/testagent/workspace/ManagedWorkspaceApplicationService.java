@@ -1005,6 +1005,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             List<ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse> files = gitWorkspaceService.collectDiffFiles(gitRoot, porcelain).stream()
                     .map(file -> new ManagedWorkspaceResponses.WorkspaceGitDiffFileResponse(
                             stripDisplayPathPrefix(file.path(), finalDisplayPathPrefix),
+                            file.rawStatus(),
                             file.status(),
                             file.staged(),
                             file.patch(),

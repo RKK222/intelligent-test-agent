@@ -106,18 +106,24 @@ const signOff = ref(false);
 const noVerify = ref(false);
 const amend = ref(false);
 
+type WorkspacePanelDiffFile = RunDiffFile & { rawStatus?: string };
+
 // Local arrays for workspace diff
-const workspaceDiffFiles = ref<RunDiffFile[]>([]);
+const workspaceDiffFiles = ref<WorkspacePanelDiffFile[]>([]);
 const stagedWorkspacePaths = ref<Set<string>>(new Set());
 const discardingWorkspacePaths = ref<Set<string>>(new Set());
 
 // Workspace diff computed lists
 const workspaceUnstaged = computed(() =>
-  workspaceDiffFiles.value.filter((f) => !stagedWorkspacePaths.value.has(f.path))
+  workspaceDiffFiles.value.filter((f) => !stagedWorkspacePaths.value.has(f.path) && !isConflictFile(f))
 );
 const workspaceStaged = computed(() =>
-  workspaceDiffFiles.value.filter((f) => stagedWorkspacePaths.value.has(f.path))
+  workspaceDiffFiles.value.filter((f) => stagedWorkspacePaths.value.has(f.path) && !isConflictFile(f))
 );
+const workspaceConflicts = computed(() =>
+  workspaceDiffFiles.value.filter((f) => isConflictFile(f))
+);
+const hasWorkspaceConflicts = computed(() => workspaceConflicts.value.length > 0);
 
 // Agent diff lists (Public + Workspace)
 const publicAgentDiffs = ref<AgentConfigDiffFile[]>([]);
@@ -142,7 +148,7 @@ const agentsStaged = computed(() => {
 });
 
 // Overall counts
-const totalUnstagedCount = computed(() => workspaceUnstaged.value.length + agentsUnstaged.value.length);
+const totalUnstagedCount = computed(() => workspaceUnstaged.value.length + workspaceConflicts.value.length + agentsUnstaged.value.length);
 const totalStagedCount = computed(() => workspaceStaged.value.length + agentsStaged.value.length);
 
 // Watch for workspace change
@@ -175,11 +181,12 @@ async function refreshChanges(options: { preserveError?: boolean } = {}) {
         if (token !== refreshChangesToken) return;
         workspaceDiffFiles.value = gitDiff.files.map((f) => ({
           path: f.path,
+          rawStatus: f.rawStatus,
           status: f.status,
           patch: f.patch,
           additions: f.additions,
           deletions: f.deletions
-        })) as RunDiffFile[];
+        }));
         // 同步后端 staged 状态到前端 Set
         const stagedPaths = new Set<string>();
         gitDiff.files.forEach((f) => { if (f.staged) stagedPaths.add(f.path); });
@@ -268,6 +275,11 @@ function notifyChangesRefreshed(paths?: string[], reloadOpenFiles?: boolean) {
   if (paths) payload.paths = paths;
   if (reloadOpenFiles !== undefined) payload.reloadOpenFiles = reloadOpenFiles;
   emit("changes-refreshed", payload);
+}
+
+function isConflictFile(file: { status?: string; rawStatus?: string }): boolean {
+  const rawStatus = (file.rawStatus ?? "").trim();
+  return file.status === "conflict" || ["DD", "AU", "UD", "UA", "DU", "AA", "UU"].includes(rawStatus);
 }
 
 async function discardWorkspaceFile(path: string) {
@@ -360,6 +372,11 @@ function handleOpenFileDiff(path: string, source: "vcs" | "agent", scope?: "PUBL
 // Commit changes
 async function handleCommit(push = false) {
   if (!props.canWrite || committing.value) return;
+  if (hasWorkspaceConflicts.value) {
+    errorMessage.value = "当前个人工作区存在合并冲突，请先解决冲突文件后再重新提交并推送。";
+    progressMessage.value = "";
+    return;
+  }
   const msg = commitMessage.value.trim();
   if (!msg) {
     errorMessage.value = "请输入提交说明";
@@ -518,7 +535,7 @@ function errorMessageFor(error: unknown, fallback: string): string {
 
 function getBadgeTone(status: string) {
   const s = status.toLowerCase();
-  if (s === "deleted" || s === "d") return "danger";
+  if (s === "deleted" || s === "d" || s === "conflict") return "danger";
   if (s === "added" || s === "a" || s === "untracked" || s === "?") return "success";
   return "warning"; // modified, etc.
 }
@@ -566,10 +583,25 @@ defineExpose({
               <ChevronDown v-if="workspaceUnstagedExpanded" class="h-3 w-3" :stroke-width="1.5" />
               <ChevronRight v-else class="h-3 w-3" :stroke-width="1.5" />
               <span>应用工作空间</span>
-              <span class="git-sub-badge ml-1">({{ workspaceUnstaged.length }})</span>
+              <span class="git-sub-badge ml-1">({{ workspaceUnstaged.length + workspaceConflicts.length }})</span>
             </div>
             <div v-show="workspaceUnstagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
-              <div v-if="workspaceUnstaged.length === 0" class="git-empty-text">暂无变更</div>
+              <div v-if="workspaceConflicts.length > 0" class="git-conflict-note">
+                请先解决冲突文件后再重新提交并推送
+              </div>
+              <div
+                v-for="file in workspaceConflicts"
+                :key="file.path"
+                class="git-file-row git-conflict-row group"
+                @click="handleOpenFileDiff(file.path, 'vcs')"
+              >
+                <Badge tone="danger" class="mr-1 py-0 px-1 text-[9px] uppercase">CONFLICT</Badge>
+                <span class="git-file-name" :title="file.path">{{ file.path }}</span>
+                <span v-if="file.rawStatus" class="git-raw-status ml-1">{{ file.rawStatus }}</span>
+                <span v-if="file.additions" class="git-additions ml-1">+{{ file.additions }}</span>
+                <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
+              </div>
+              <div v-if="workspaceUnstaged.length === 0 && workspaceConflicts.length === 0" class="git-empty-text">暂无变更</div>
               <div
                 v-for="file in workspaceUnstaged"
                 :key="file.path"
@@ -666,6 +698,9 @@ defineExpose({
               <span class="git-sub-badge ml-1">({{ workspaceStaged.length }})</span>
             </div>
             <div v-show="workspaceStagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
+              <div v-if="hasWorkspaceConflicts && workspaceStaged.length > 0" class="git-conflict-note">
+                以下暂存项来自未完成合并自动应用的变更，解决冲突后会随 merge 一起提交
+              </div>
               <div v-if="workspaceStaged.length === 0" class="git-empty-text">无暂存文件</div>
               <div
                 v-for="file in workspaceStaged"
@@ -679,6 +714,7 @@ defineExpose({
                 <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
                 
                 <button
+                  v-if="!hasWorkspaceConflicts"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="回退文件改动"
@@ -689,6 +725,7 @@ defineExpose({
                   <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
                 </button>
                 <button
+                  v-if="!hasWorkspaceConflicts"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="取消暂存"
@@ -753,7 +790,7 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-commit flex-1"
-          :disabled="committing || totalStagedCount === 0 || !commitMessage.trim()"
+          :disabled="committing || hasWorkspaceConflicts || totalStagedCount === 0 || !commitMessage.trim()"
           @click="handleCommit(false)"
         >
           <FolderGit2 class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
@@ -762,7 +799,7 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-push flex-1"
-          :disabled="committing || totalStagedCount === 0 || !commitMessage.trim()"
+          :disabled="committing || hasWorkspaceConflicts || totalStagedCount === 0 || !commitMessage.trim()"
           @click="handleCommit(true)"
         >
           <Upload class="h-3.5 w-3.5 shrink-0" :stroke-width="1.5" />
@@ -947,6 +984,21 @@ defineExpose({
   background: #f4f4f5;
 }
 
+.git-conflict-row {
+  background: #fef2f2;
+  color: #7f1d1d;
+}
+
+.git-conflict-row:hover {
+  background: #fee2e2;
+}
+
+.git-conflict-note {
+  padding: 4px 6px;
+  font-size: 11px;
+  color: #b91c1c;
+}
+
 .git-file-name {
   flex: 1;
   min-width: 0;
@@ -969,6 +1021,12 @@ defineExpose({
 }
 
 .git-deletions {
+  font-size: 10px;
+  font-weight: 600;
+  color: #b91c1c;
+}
+
+.git-raw-status {
   font-size: 10px;
   font-weight: 600;
   color: #b91c1c;

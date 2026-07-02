@@ -252,4 +252,81 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect(view.queryByText("src/selected.ts")).toBeNull());
     expect(await view.findByText("src/unselected.ts")).toBeTruthy();
   });
+
+  it("keeps conflict prompt after publish refresh and separates unmerged files from staged files", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [
+          {
+            path: "workspace/docs/selected.md",
+            status: "untracked",
+            rawStatus: "??",
+            staged: false,
+            patch: "--- /dev/null\n+++ b/workspace/docs/selected.md\n@@ -0,0 +1 @@\n+selected",
+            additions: 1,
+            deletions: 0
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        files: [
+          {
+            path: "workspace/docs/conflict.md",
+            status: "conflict",
+            rawStatus: "AU",
+            staged: true,
+            patch: "",
+            additions: 0,
+            deletions: 0
+          },
+          {
+            path: "workspace/docs/auto-merged-delete.md",
+            status: "deleted",
+            rawStatus: "D ",
+            staged: true,
+            patch: "diff --git a/workspace/docs/auto-merged-delete.md b/workspace/docs/auto-merged-delete.md\n--- a/workspace/docs/auto-merged-delete.md\n+++ /dev/null\n@@ -1 +0,0 @@\n-old",
+            additions: 0,
+            deletions: 1
+          }
+        ]
+      });
+    apiClientMock.publishPersonalWorkspace.mockResolvedValueOnce({
+      status: "CONFLICT",
+      personalWorkspaceId: "psw_default",
+      versionId: "awv_1",
+      conflictFiles: ["workspace/docs/conflict.md"],
+      message: "合并冲突，请在个人工作区中解决冲突后重新提交并推送"
+    });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true
+      },
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    expect(await view.findByText("workspace/docs/selected.md")).toBeTruthy();
+
+    await fireEvent.click(view.getByTitle("暂存文件"));
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: conflict prompt");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", {
+      commitMessage: "fix: conflict prompt",
+      files: ["workspace/docs/selected.md"]
+    }));
+    expect(await view.findByText(/合并冲突：请在个人工作区中解决 workspace\/docs\/conflict.md/)).toBeTruthy();
+    expect(await view.findByText("CONFLICT")).toBeTruthy();
+    expect(await view.findByText("AU")).toBeTruthy();
+    expect(await view.findByText("workspace/docs/auto-merged-delete.md")).toBeTruthy();
+    expect(await view.findByText("以下暂存项来自未完成合并自动应用的变更，解决冲突后会随 merge 一起提交")).toBeTruthy();
+    expect(view.getByText("STAGED (已暂存) (1)")).toBeTruthy();
+    expect((view.getByRole("button", { name: "提交并推送" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(view.queryByText("提交并推送成功！")).toBeNull();
+  });
 });

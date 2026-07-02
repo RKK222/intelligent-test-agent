@@ -997,7 +997,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-to-application` | 将所选个人工作区文件同步到应用版本工作区；目标副本必须 clean，后端先 fetch/pull --ff-only，再复制文件、提交并 push。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/sync-from-application` | 将所选应用版本工作区文件同步到个人工作区。 |
 | `POST` | `/workspace-versions/{versionId}/ensure-default-personal-workspace` | 确保默认个人工作区存在：查询 (versionId, userId, workspaceName=default)，存在则复用返回，不存在则后台创建。 |
-| `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取工作区变更文件列表，返回 `{ files: [{ path, status, staged, patch, additions, deletions }] }`。 |
+| `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取工作区变更文件列表，返回 `{ files: [{ path, rawStatus, status, staged, patch, additions, deletions }] }`；Git unmerged 状态会返回 `status=conflict`。 |
 | `POST` | `/workspaces/{workspaceId}/git-discard` | 丢弃当前个人 worktree 中指定工作区相对路径的本地 Git 改动；已跟踪文件执行 restore，新增/未跟踪文件定点 clean。 |
 | `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 个人工作区"提交并推送"：请求体必须带 `files`，后端只暂存并提交这些前端已暂存文件；随后确保当前服务器应用版本副本可用（必要时按当前 `OPENCODE_APP_WORKSPACE_ROOT` 修复旧路径），先把远端特性分支合入个人 worktree，再在应用版本副本（特性分支）上 merge 个人分支并只 push 特性分支；个人分支不推送远端；真实合并冲突返回业务 `CONFLICT` 与冲突文件列表，冲突保留在个人 worktree 供用户解决；认证、网络、远端拒绝等非冲突 Git 错误按统一错误响应返回。 |
 
@@ -1104,7 +1104,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 ### 工作区本地 Git Diff
 
-`GET /workspaces/{workspaceId}/git-diff` 无请求参数。后端通过 runtime workspace 反查 personal workspace，使用其 `repoRootPath` 执行 `git status --porcelain` + `git diff`，并复用公共解析逻辑处理路径反转义、rename 新路径、staged/unstaged patch 合并和 additions/deletions 统计，返回每个变更文件的 path、status、staged、patch、additions、deletions。不依赖 opencode `/vcs/diff`，opencode 服务异常不影响变更列表刷新。
+`GET /workspaces/{workspaceId}/git-diff` 无请求参数。后端通过 runtime workspace 反查 personal workspace，使用其 `repoRootPath` 执行 `git status --porcelain` + `git diff`，并复用公共解析逻辑处理路径反转义、rename 新路径、staged/unstaged patch 合并和 additions/deletions 统计，返回每个变更文件的 path、rawStatus、status、staged、patch、additions、deletions。`rawStatus` 是 Git porcelain 两字符状态码，`DD/AU/UD/UA/DU/AA/UU` 统一映射为 `status=conflict`，供前端把冲突文件从普通 staged/unstaged 文件中拆出展示。不依赖 opencode `/vcs/diff`，opencode 服务异常不影响变更列表刷新。
 
 响应 `WorkspaceGitDiffResponse`：
 
@@ -1113,6 +1113,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "files": [
     {
       "path": "src/App.java",
+      "rawStatus": " M",
       "status": "modified",
       "staged": false,
       "patch": "@@ -1,3 +1,4 @@\n...",
@@ -1156,7 +1157,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 合并结果：
 
 - **成功（MERGED）**：更新应用版本 `targetCommitHash` 和当前服务器 replica commit，广播其他服务器同步。
-- **冲突（CONFLICT）**：返回冲突文件列表，不推送特性分支；如果冲突发生在个人 worktree 合入特性分支阶段，后端不会 abort，冲突文件保留在当前个人 worktree。用户在当前个人 worktree 中解决冲突并保存后，重新点击提交并推送完成 merge commit 和特性分支推送。应用版本副本合并阶段如出现冲突，后端会 abort 应用版本副本上的 merge 且不推送。
+- **冲突（CONFLICT）**：返回冲突文件列表，不推送特性分支；如果冲突发生在个人 worktree 合入特性分支阶段，后端不会 abort，冲突文件保留在当前个人 worktree。用户在当前个人 worktree 中解决冲突并保存后，重新点击提交并推送完成 merge commit 和特性分支推送。前端必须保留 `CONFLICT` 提示，并通过 `git-diff` 中的 `status=conflict/rawStatus` 把 unmerged 文件单独展示为待解决冲突，不能作为普通 staged 删除展示；冲突未解决期间提交按钮必须禁用，普通 staged 文件仅作为 merge 自动应用的中间状态展示。应用版本副本合并阶段如出现冲突，后端会 abort 应用版本副本上的 merge 且不推送。
 
 响应 `PersonalWorkspacePublishResponse`：
 

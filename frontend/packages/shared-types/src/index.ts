@@ -1585,6 +1585,7 @@ export type DefaultPersonalWorkspaceResponse = {
 /** 本地 Git diff 文件（不依赖 opencode） */
 export type WorkspaceGitDiffFile = {
   path: string;
+  rawStatus?: string;
   status: string;
   staged: boolean;
   patch: string;

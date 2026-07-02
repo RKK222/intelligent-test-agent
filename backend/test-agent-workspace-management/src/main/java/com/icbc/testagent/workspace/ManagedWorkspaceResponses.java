@@ -332,6 +332,7 @@ public final class ManagedWorkspaceResponses {
      */
     public record WorkspaceGitDiffFileResponse(
             String path,
+            String rawStatus,
             String status,
             boolean staged,
             String patch,

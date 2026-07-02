@@ -2801,6 +2801,6 @@ bash /tmp/test-api-after-restart.sh
 ### 2026-07-02 - 修复个人 worktree 发布冲突提示与 unmerged diff 展示
 
 - Why: 个人 worktree 发布接口实际返回业务 `CONFLICT` 且未推送远端，但前端在刷新变更列表时清掉冲突提示，用户看到类似成功状态；同时 `git status --porcelain` 的 `AU/UU` 等 unmerged 状态被当作普通 staged 删除展示，导致误以为提交后“stash”文件被删除。
-- What: `GitWorkspaceService` 保留 Git 两字符 `rawStatus`，并将 `DD/AU/UD/UA/DU/AA/UU` 统一映射为 `status=conflict`；工作区 `git-diff` 响应新增 `rawStatus`。Git Changes 面板在 publish 返回 `CONFLICT` 后保留错误提示，刷新后把冲突文件单独展示为 `CONFLICT`，不再计入普通 staged/unstaged 文件列表。
+- What: `GitWorkspaceService` 保留 Git 两字符 `rawStatus`，并将 `DD/AU/UD/UA/DU/AA/UU` 统一映射为 `status=conflict`；工作区 `git-diff` 响应新增 `rawStatus`。Git Changes 面板在 publish 返回 `CONFLICT` 后保留错误提示，刷新后把冲突文件单独展示为 `CONFLICT`，不再计入普通 staged/unstaged 文件列表；冲突未解决时禁用提交按钮，并提示普通 staged 项是未完成 merge 自动应用的中间状态。
 - How: 只改 workspace git diff DTO、公共 Git porcelain 解析和前端 Git 变更面板展示；不自动 abort/reset 用户个人 worktree 中的冲突现场。同步更新 HTTP API、workspace-management README、agent-web README，并补充后端解析和前端 publish 冲突回归测试。
 - Result: 定向后端与前端测试、workspace-management 编译、agent-web/shared-types typecheck 和 `git diff --check` 通过；本次不涉及数据库、事件、鉴权、安全或环境配置变更。
