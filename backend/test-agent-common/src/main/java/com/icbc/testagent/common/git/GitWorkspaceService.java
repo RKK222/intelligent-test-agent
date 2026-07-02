@@ -211,6 +211,16 @@ public class GitWorkspaceService {
     }
 
     /**
+     * 更新本地仓库 remote.origin.url。内部部署模式会按当前操作人统一认证号动态刷新 origin。
+     */
+    public void setOriginUrl(Path repoRoot, String gitUrl, String privateKey) {
+        executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "remote", "set-url", "origin", gitUrl),
+                privateKey,
+                DEFAULT_TIMEOUT);
+    }
+
+    /**
      * 读取 HEAD commit，个人空间记录 base commit 时使用。
      */
     public String headCommit(Path repoRoot) {

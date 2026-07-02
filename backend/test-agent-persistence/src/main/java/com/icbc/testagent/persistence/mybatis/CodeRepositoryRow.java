@@ -11,6 +11,7 @@ public record CodeRepositoryRow(
         String name,
         String englishName,
         String repositoryType,
+        String deploymentMode,
         boolean standard,
         Instant createdAt,
         Instant updatedAt) {

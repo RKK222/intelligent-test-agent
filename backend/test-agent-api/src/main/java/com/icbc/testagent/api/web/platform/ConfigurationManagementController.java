@@ -123,6 +123,12 @@ public class ConfigurationManagementController {
         return ok(exchange, service.listRepositoryTypes());
     }
 
+    @GetMapping("/repository-deployment-options")
+    public ApiResponse<Object> repositoryDeploymentOptions(ServerWebExchange exchange) {
+        UserId userId = requireAdmin(exchange);
+        return ok(exchange, service.repositoryDeploymentOptions(userId));
+    }
+
     @PostMapping("/repositories")
     public ApiResponse<Object> createRepository(
             @RequestBody ConfigurationManagementDtos.CreateRepositoryRequest request,
@@ -133,7 +139,8 @@ public class ConfigurationManagementController {
                 request.name(),
                 request.englishName(),
                 request.standard(),
-                request.repositoryType()));
+                request.repositoryType(),
+                request.deploymentMode()));
     }
 
     @PatchMapping("/repositories/{repositoryId}")

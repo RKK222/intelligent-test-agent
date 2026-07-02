@@ -12,8 +12,11 @@ import com.icbc.testagent.configuration.management.ConfigurationManagementApplic
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.ApplicationMemberResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.ApplicationResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.CodeRepositoryResponse;
+import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryDeploymentOptionResponse;
+import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryDeploymentOptionsResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryTypeOptionResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.SshKeyResponse;
+import com.icbc.testagent.domain.configuration.CodeRepositoryDeploymentMode;
 import com.icbc.testagent.domain.configuration.CodeRepositoryType;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.dictionary.Dictionary;
@@ -190,12 +193,14 @@ class ConfigurationManagementControllerTest {
                 eq("演示库"),
                 eq("demo"),
                 eq(false),
-                eq(CodeRepositoryType.TEST_WORK_REPOSITORY.value())))
+                eq(CodeRepositoryType.TEST_WORK_REPOSITORY.value()),
+                eq(CodeRepositoryDeploymentMode.INTERNAL.value())))
                 .thenReturn(new CodeRepositoryResponse(
                         "repo_123",
                         "https://gitee.com/demo/repo.git",
                         "演示库",
                         "demo",
+                        CodeRepositoryDeploymentMode.INTERNAL.value(),
                         CodeRepositoryType.TEST_WORK_REPOSITORY.value(),
                         "测试工作库",
                         true,
@@ -208,14 +213,38 @@ class ConfigurationManagementControllerTest {
                 .header("X-Trace-Id", TRACE_ID)
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
-                        {"gitUrl":"https://gitee.com/demo/repo.git","name":"演示库","englishName":"demo","standard":false,"repositoryType":"TEST_WORK_REPOSITORY"}
+                        {"gitUrl":"https://gitee.com/demo/repo.git","name":"演示库","englishName":"demo","standard":false,"repositoryType":"TEST_WORK_REPOSITORY","deploymentMode":"INTERNAL"}
                         """)
                 .exchange()
                 .expectStatus().isOk()
                 .expectBody()
+                .jsonPath("$.data.deploymentMode").isEqualTo(CodeRepositoryDeploymentMode.INTERNAL.value())
                 .jsonPath("$.data.repositoryType").isEqualTo(CodeRepositoryType.TEST_WORK_REPOSITORY.value())
                 .jsonPath("$.data.repositoryTypeLabel").isEqualTo("测试工作库")
                 .jsonPath("$.data.standard").isEqualTo(true);
+    }
+
+    @Test
+    void repositoryDeploymentOptionsReturnCurrentUserInternalSshPrefix() {
+        ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
+        when(service.repositoryDeploymentOptions(USER_ID))
+                .thenReturn(new RepositoryDeploymentOptionsResponse(
+                        CodeRepositoryDeploymentMode.INTERNAL.value(),
+                        "ssh://AUTH_1@",
+                        List.of(
+                                new RepositoryDeploymentOptionResponse(CodeRepositoryDeploymentMode.EXTERNAL.value(), "外部部署"),
+                                new RepositoryDeploymentOptionResponse(CodeRepositoryDeploymentMode.INTERNAL.value(), "内部部署"))));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_APP_ADMIN));
+
+        client.get()
+                .uri("/api/internal/platform/configuration-management/repository-deployment-options")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.defaultDeploymentMode").isEqualTo(CodeRepositoryDeploymentMode.INTERNAL.value())
+                .jsonPath("$.data.internalSshPrefix").isEqualTo("ssh://AUTH_1@")
+                .jsonPath("$.data.options[1].mode").isEqualTo(CodeRepositoryDeploymentMode.INTERNAL.value());
     }
 
     @Test

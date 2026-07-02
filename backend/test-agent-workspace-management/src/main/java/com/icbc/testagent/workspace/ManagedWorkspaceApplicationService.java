@@ -567,7 +567,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String workspaceRootValue = appWorkspaceValue(normalizedVersion, repository, template);
         String privateKey = privateKeyFor(repository, userId);
         progress.step(WorkspaceCreateOperationStep.PREPARING_REPOSITORY);
-        prepareApplicationRepo(repository, resolvedBranch, repoRoot, workspaceRoot, privateKey);
+        prepareApplicationRepo(repository, resolvedBranch, repoRoot, workspaceRoot, privateKey, effectiveGitUrl(repository, userId));
         progress.step(WorkspaceCreateOperationStep.CREATING_RUNTIME_WORKSPACE);
         Workspace runtimeWorkspace = createRuntimeWorkspace(
                 template.workspaceName() + "-" + normalizedVersion,
@@ -1366,7 +1366,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             throw new PlatformException(ErrorCode.CONFLICT, "应用版本工作区存在未提交变更，无法 git pull", Map.of("versionId", versionId));
         }
         CodeRepository repository = existingRepository(version.repositoryId());
-        gitWorkspaceService.pullFastForward(replicaRepoRoot, version.branch(), privateKeyFor(repository, userId));
+        String privateKey = privateKeyFor(repository, userId);
+        ensureInternalOrigin(repository, userId, replicaRepoRoot, privateKey);
+        gitWorkspaceService.pullFastForward(replicaRepoRoot, version.branch(), privateKey);
         Instant now = Instant.now();
         String headCommit = gitWorkspaceService.headCommit(replicaRepoRoot);
         ApplicationWorkspaceVersion updatedVersion = managedWorkspaceRepository.updateVersionTargetCommit(version.versionId(), headCommit, now);
@@ -1445,7 +1447,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .map(ManagedWorkspaceResponses.BranchPreferenceResponse::from);
     }
 
-    private void prepareApplicationRepo(CodeRepository repository, String branch, Path repoRoot, Path workspaceRoot, String privateKey) {
+    private void prepareApplicationRepo(CodeRepository repository, String branch, Path repoRoot, Path workspaceRoot, String privateKey, String effectiveGitUrl) {
         try {
             if (Files.exists(repoRoot)) {
                 if (!Files.isDirectory(repoRoot)) {
@@ -1453,12 +1455,13 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 }
                 String origin = gitWorkspaceService.originUrl(repoRoot);
                 String currentBranch = gitWorkspaceService.currentBranch(repoRoot);
-                if (!repository.gitUrl().equals(origin) || !branch.equals(currentBranch)) {
+                if (!repository.matchesStoredOrigin(origin) || !branch.equals(currentBranch)) {
                     throw new PlatformException(ErrorCode.CONFLICT, "已有目录不是目标代码库分支", Map.of("path", repoRoot.toString()));
                 }
+                ensureInternalOrigin(repository, effectiveGitUrl, repoRoot, privateKey);
             } else {
                 Files.createDirectories(repoRoot.getParent());
-                gitWorkspaceService.cloneBranch(repository.gitUrl(), branch, repoRoot, privateKey);
+                gitWorkspaceService.cloneBranch(effectiveGitUrl, branch, repoRoot, privateKey);
             }
             if (!Files.isDirectory(workspaceRoot)) {
                 throw new PlatformException(ErrorCode.CONFLICT, "应用工作区目录不存在", Map.of("path", workspaceRoot.toString()));
@@ -1500,7 +1503,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String repoRootValue = appRepoValue(version.version(), repository);
         String workspaceRootValue = appWorkspaceValue(version.version(), repository, template);
         String privateKey = privateKeyFor(repository, userId);
-        prepareApplicationRepo(repository, version.branch(), repoRoot, workspaceRoot, privateKey);
+        prepareApplicationRepo(repository, version.branch(), repoRoot, workspaceRoot, privateKey, effectiveGitUrl(repository, userId));
         Optional<ApplicationWorkspaceVersionReplica> existing = managedWorkspaceRepository.findVersionReplica(
                 version.versionId(),
                 serverIdentity.linuxServerId());
@@ -1688,7 +1691,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 return;
             }
             CodeRepository repository = existingRepository(version.repositoryId());
-            gitWorkspaceService.pullFastForward(replicaRepoRoot, version.branch(), privateKeyFor(repository, userId));
+            String privateKey = privateKeyFor(repository, userId);
+            ensureInternalOrigin(repository, userId, replicaRepoRoot, privateKey);
+            gitWorkspaceService.pullFastForward(replicaRepoRoot, version.branch(), privateKey);
             Instant now = Instant.now();
             String headCommit = gitWorkspaceService.headCommit(replicaRepoRoot);
             ApplicationWorkspaceVersion updatedVersion = managedWorkspaceRepository.updateVersionTargetCommit(version.versionId(), headCommit, now);
@@ -1713,7 +1718,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         // yyyy年M月 格式的版本在分支名里需转为 yyyy-MM，避免 git ref 中出现中文 / 年月字面量。
         String branchFragment = sanitizeVersionForBranchAndPath(version);
         String expected = "feature_testagent_" + branchFragment;
-        List<String> branches = gitRemoteService.listBranches(repository.gitUrl(), privateKeyFor(repository, userId));
+        List<String> branches = gitRemoteService.listBranches(effectiveGitUrl(repository, userId), privateKeyFor(repository, userId));
         if (!branches.contains(expected)) {
             throw new PlatformException(ErrorCode.CONFLICT, repository.name() + "代码库无" + expected + "分支，请到开发者门户创建分支", Map.of("branch", expected));
         }
@@ -2167,7 +2172,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     private String privateKeyFor(CodeRepository repository, UserId userId) {
-        if (!requiresSshKey(repository.gitUrl())) {
+        if (!repository.internalDeployment() && !requiresSshKey(repository.gitUrl())) {
             return null;
         }
         UserSshKey sshKey = configurationRepository.findSshKeys(userId).stream()
@@ -2184,6 +2189,26 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 sshKey.encryptedPrivateKey(),
                 sshKey.encryptedAesKey(),
                 sshKey.encryptionNonce());
+    }
+
+    private String effectiveGitUrl(CodeRepository repository, UserId userId) {
+        if (!repository.internalDeployment()) {
+            return repository.gitUrl();
+        }
+        return repository.effectiveGitUrl(existingUser(userId).unifiedAuthId());
+    }
+
+    private void ensureInternalOrigin(CodeRepository repository, UserId userId, Path repoRoot, String privateKey) {
+        if (!repository.internalDeployment()) {
+            return;
+        }
+        ensureInternalOrigin(repository, effectiveGitUrl(repository, userId), repoRoot, privateKey);
+    }
+
+    private void ensureInternalOrigin(CodeRepository repository, String effectiveGitUrl, Path repoRoot, String privateKey) {
+        if (repository.internalDeployment()) {
+            gitWorkspaceService.setOriginUrl(repoRoot, effectiveGitUrl, privateKey);
+        }
     }
 
     private Path appRepoRoot(String version, CodeRepository repository) {

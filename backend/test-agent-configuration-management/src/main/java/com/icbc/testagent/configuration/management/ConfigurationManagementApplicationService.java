@@ -10,6 +10,8 @@ import com.icbc.testagent.configuration.management.ConfigurationManagementRespon
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.ApplicationResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.ApplicationWorkspaceResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.CodeRepositoryResponse;
+import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryDeploymentOptionResponse;
+import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryDeploymentOptionsResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryTypeOptionResponse;
 import com.icbc.testagent.common.git.SshKeyEncryptionService;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.SshKeyResponse;
@@ -20,6 +22,7 @@ import com.icbc.testagent.domain.configuration.ApplicationMember;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspace;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.icbc.testagent.domain.configuration.CodeRepository;
+import com.icbc.testagent.domain.configuration.CodeRepositoryDeploymentMode;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
 import com.icbc.testagent.domain.configuration.CodeRepositoryType;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
@@ -34,11 +37,13 @@ import com.icbc.testagent.domain.user.UserRepository;
 import java.net.URI;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,7 +54,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class ConfigurationManagementApplicationService {
 
     private static final Pattern SCP_LIKE_SSH_URL = Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9._-]+:.+");
-    private static final Pattern REPOSITORY_ENGLISH_NAME_PATTERN = Pattern.compile("^[A-Za-z]{1,29}$");
+    private static final Pattern REPOSITORY_ENGLISH_NAME_PATTERN = Pattern.compile("^[A-Za-z0-9](?:[A-Za-z0-9-]{0,126}[A-Za-z0-9])?$");
+    private static final Pattern WHITESPACE = Pattern.compile("\\s");
 
     private final ConfigurationManagementRepository configurationRepository;
     private final DictionaryRepository dictionaryRepository;
@@ -58,6 +64,7 @@ public class ConfigurationManagementApplicationService {
     private final GitCloneCacheService gitCloneCacheService;
     private final SshKeyEncryptionService sshKeyEncryptionService;
     private final ManagedWorkspaceRepository managedWorkspaceRepository;
+    private final String defaultRepositoryDeploymentMode;
 
     /**
      * 注入领域端口和公共 Git/加密服务。
@@ -69,8 +76,22 @@ public class ConfigurationManagementApplicationService {
             UserRepository userRepository,
             GitCloneCacheService gitCloneCacheService,
             SshKeyEncryptionService sshKeyEncryptionService,
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            @Value("${test-agent.deployment.mode:external}") String deploymentMode) {
+        this(configurationRepository, dictionaryRepository, userRepository, new GitRemoteService(), gitCloneCacheService, sshKeyEncryptionService, managedWorkspaceRepository, deploymentMode);
+    }
+
+    /**
+     * 测试可注入 fake Git 服务，避免执行真实远端命令。
+     */
+    ConfigurationManagementApplicationService(
+            ConfigurationManagementRepository configurationRepository,
+            DictionaryRepository dictionaryRepository,
+            UserRepository userRepository,
+            GitCloneCacheService gitCloneCacheService,
+            SshKeyEncryptionService sshKeyEncryptionService,
             ManagedWorkspaceRepository managedWorkspaceRepository) {
-        this(configurationRepository, dictionaryRepository, userRepository, new GitRemoteService(), gitCloneCacheService, sshKeyEncryptionService, managedWorkspaceRepository);
+        this(configurationRepository, dictionaryRepository, userRepository, new GitRemoteService(), gitCloneCacheService, sshKeyEncryptionService, managedWorkspaceRepository, "external");
     }
 
     /**
@@ -84,6 +105,18 @@ public class ConfigurationManagementApplicationService {
             GitCloneCacheService gitCloneCacheService,
             SshKeyEncryptionService sshKeyEncryptionService,
             ManagedWorkspaceRepository managedWorkspaceRepository) {
+        this(configurationRepository, dictionaryRepository, userRepository, gitRemoteService, gitCloneCacheService, sshKeyEncryptionService, managedWorkspaceRepository, "external");
+    }
+
+    ConfigurationManagementApplicationService(
+            ConfigurationManagementRepository configurationRepository,
+            DictionaryRepository dictionaryRepository,
+            UserRepository userRepository,
+            GitRemoteService gitRemoteService,
+            GitCloneCacheService gitCloneCacheService,
+            SshKeyEncryptionService sshKeyEncryptionService,
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            String deploymentMode) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
         this.dictionaryRepository = Objects.requireNonNull(dictionaryRepository, "dictionaryRepository must not be null");
         this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
@@ -91,6 +124,7 @@ public class ConfigurationManagementApplicationService {
         this.gitCloneCacheService = Objects.requireNonNull(gitCloneCacheService, "gitCloneCacheService must not be null");
         this.sshKeyEncryptionService = Objects.requireNonNull(sshKeyEncryptionService, "sshKeyEncryptionService must not be null");
         this.managedWorkspaceRepository = Objects.requireNonNull(managedWorkspaceRepository, "managedWorkspaceRepository must not be null");
+        this.defaultRepositoryDeploymentMode = CodeRepositoryDeploymentMode.fromDeploymentProperty(deploymentMode).value();
     }
 
     public List<ApplicationResponse> listApplications(Boolean enabledOnly) {
@@ -143,15 +177,38 @@ public class ConfigurationManagementApplicationService {
                 .toList();
     }
 
+    public RepositoryDeploymentOptionsResponse repositoryDeploymentOptions(UserId currentUserId) {
+        User user = existingUser(currentUserId);
+        return new RepositoryDeploymentOptionsResponse(
+                defaultRepositoryDeploymentMode,
+                "ssh://" + user.unifiedAuthId() + "@",
+                List.of(
+                        new RepositoryDeploymentOptionResponse(CodeRepositoryDeploymentMode.EXTERNAL.value(), "外部部署"),
+                        new RepositoryDeploymentOptionResponse(CodeRepositoryDeploymentMode.INTERNAL.value(), "内部部署")));
+    }
+
     public CodeRepositoryResponse createRepository(
             String gitUrl,
             String name,
             String englishName,
             Boolean standard,
             String repositoryType) {
-        String normalizedUrl = validateGitUrl(gitUrl);
+        return createRepository(gitUrl, name, englishName, standard, repositoryType, CodeRepositoryDeploymentMode.EXTERNAL.value());
+    }
+
+    public CodeRepositoryResponse createRepository(
+            String gitUrl,
+            String name,
+            String englishName,
+            Boolean standard,
+            String repositoryType,
+            String deploymentMode) {
+        String normalizedDeploymentMode = normalizeRepositoryDeploymentMode(deploymentMode);
+        String normalizedUrl = CodeRepositoryDeploymentMode.INTERNAL.value().equals(normalizedDeploymentMode)
+                ? validateInternalGitUrl(gitUrl)
+                : validateGitUrl(gitUrl);
         String normalizedName = requireText(name, "代码库名称不能为空", "name");
-        String normalizedEnglishName = normalizeRepositoryEnglishName(englishName);
+        String normalizedEnglishName = normalizeRepositoryEnglishName(englishName, normalizedUrl, normalizedDeploymentMode);
         String normalizedRepositoryType = normalizeRepositoryTypeForCreate(repositoryType, standard);
         configurationRepository.findRepositoryByGitUrl(normalizedUrl).ifPresent(repository -> {
             throw new PlatformException(
@@ -167,6 +224,7 @@ public class ConfigurationManagementApplicationService {
                 normalizedName,
                 normalizedEnglishName,
                 normalizedRepositoryType,
+                normalizedDeploymentMode,
                 CodeRepositoryType.fromValue(normalizedRepositoryType).standard(),
                 now,
                 now);
@@ -226,7 +284,7 @@ public class ConfigurationManagementApplicationService {
 
     public List<String> listBranches(String repositoryId, UserId currentUserId) {
         CodeRepository repository = existingRepository(new CodeRepositoryId(repositoryId));
-        return gitRemoteService.listBranches(repository.gitUrl(), privateKeyFor(repository, currentUserId));
+        return gitRemoteService.listBranches(effectiveGitUrl(repository, currentUserId), privateKeyFor(repository, currentUserId));
     }
 
     /**
@@ -237,7 +295,7 @@ public class ConfigurationManagementApplicationService {
         CodeRepository repository = existingRepository(new CodeRepositoryId(repositoryId));
         String normalizedBranch = requireText(branch, "分支不能为空", "branch");
         String privateKey = privateKeyFor(repository, currentUserId);
-        return gitCloneCacheService.listDirectories(repository.gitUrl(), normalizedBranch, privateKey);
+        return gitCloneCacheService.listDirectories(effectiveGitUrl(repository, currentUserId), normalizedBranch, privateKey);
     }
 
     public List<ApplicationWorkspaceResponse> listWorkspaces(String appId) {
@@ -333,7 +391,7 @@ public class ConfigurationManagementApplicationService {
     }
 
     private String privateKeyFor(CodeRepository repository, UserId currentUserId) {
-        if (!requiresSshKey(repository.gitUrl())) {
+        if (!repository.internalDeployment() && !requiresSshKey(repository.gitUrl())) {
             return null;
         }
         UserSshKey sshKey = configurationRepository.findSshKeys(currentUserId).stream()
@@ -405,15 +463,64 @@ public class ConfigurationManagementApplicationService {
         throw new PlatformException(ErrorCode.VALIDATION_ERROR, "仅支持 SSH 或 HTTPS Git URL", Map.of("gitUrl", value));
     }
 
+    private String validateInternalGitUrl(String gitUrl) {
+        String value = requireText(gitUrl, "代码库地址不能为空", "gitUrl");
+        if (value.contains("://") || value.contains("@") || WHITESPACE.matcher(value).find()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "内部版本库地址必须为 host[:port]/path，不包含协议、用户和空白字符", Map.of("gitUrl", value));
+        }
+        int slash = value.indexOf('/');
+        if (slash <= 0 || slash == value.length() - 1) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "内部版本库地址必须包含仓库路径", Map.of("gitUrl", value));
+        }
+        String path = value.substring(slash + 1);
+        for (String segment : path.split("/")) {
+            if (segment.isBlank() || ".".equals(segment) || "..".equals(segment)) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "内部版本库路径无效", Map.of("gitUrl", value));
+            }
+        }
+        return value;
+    }
+
+    private String normalizeRepositoryDeploymentMode(String deploymentMode) {
+        try {
+            return CodeRepositoryDeploymentMode.fromValue(deploymentMode).value();
+        } catch (IllegalArgumentException exception) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "版本库部署模式无效",
+                    Map.of("field", "deploymentMode", "deploymentMode", deploymentMode));
+        }
+    }
+
+    private String normalizeRepositoryEnglishName(String englishName, String gitUrl, String deploymentMode) {
+        if ((englishName == null || englishName.isBlank())
+                && CodeRepositoryDeploymentMode.INTERNAL.value().equals(deploymentMode)) {
+            return normalizeRepositoryEnglishName(deriveInternalRepositoryEnglishName(gitUrl));
+        }
+        return normalizeRepositoryEnglishName(englishName);
+    }
+
     private String normalizeRepositoryEnglishName(String englishName) {
         String value = requireText(englishName, "版本库英文名称不能为空", "englishName");
         if (!REPOSITORY_ENGLISH_NAME_PATTERN.matcher(value).matches()) {
             throw new PlatformException(
                     ErrorCode.VALIDATION_ERROR,
-                    "版本库英文名称只能输入 1 到 29 位英文字母",
+                    "版本库英文名称只能使用字母、数字和连字符，长度 1 到 128，且不能以连字符开头或结尾",
                     Map.of("field", "englishName"));
         }
-        return value.toLowerCase(java.util.Locale.ROOT);
+        return value.toLowerCase(Locale.ROOT);
+    }
+
+    private String deriveInternalRepositoryEnglishName(String gitUrl) {
+        int slash = gitUrl.indexOf('/');
+        String path = slash >= 0 ? gitUrl.substring(slash + 1) : gitUrl;
+        while (path.endsWith("/") && path.length() > 1) {
+            path = path.substring(0, path.length() - 1);
+        }
+        if (path.endsWith(".git")) {
+            path = path.substring(0, path.length() - ".git".length());
+        }
+        return path.replace('/', '-').toLowerCase(Locale.ROOT);
     }
 
     private String normalizeRepositoryTypeForCreate(String repositoryType, Boolean legacyStandard) {
@@ -451,6 +558,13 @@ public class ConfigurationManagementApplicationService {
 
     private static boolean requiresSshKey(String gitUrl) {
         return gitUrl.startsWith("ssh://") || isScpLikeSshUrl(gitUrl);
+    }
+
+    private String effectiveGitUrl(CodeRepository repository, UserId currentUserId) {
+        if (!repository.internalDeployment()) {
+            return repository.gitUrl();
+        }
+        return repository.effectiveGitUrl(existingUser(currentUserId).unifiedAuthId());
     }
 
     private static boolean isScpLikeSshUrl(String gitUrl) {
@@ -523,6 +637,7 @@ public class ConfigurationManagementApplicationService {
                 repository.gitUrl(),
                 repository.name(),
                 repository.englishName(),
+                repository.deploymentMode(),
                 repository.repositoryType(),
                 repositoryTypeLabel(repository.repositoryType()),
                 repository.standard(),

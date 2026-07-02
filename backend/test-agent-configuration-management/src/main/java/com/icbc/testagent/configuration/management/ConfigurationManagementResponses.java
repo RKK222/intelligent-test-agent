@@ -36,6 +36,7 @@ public final class ConfigurationManagementResponses {
             String gitUrl,
             String name,
             String englishName,
+            String deploymentMode,
             String repositoryType,
             String repositoryTypeLabel,
             boolean standard,
@@ -44,6 +45,15 @@ public final class ConfigurationManagementResponses {
     }
 
     public record RepositoryTypeOptionResponse(String typeCode, String typeLabel) {
+    }
+
+    public record RepositoryDeploymentOptionResponse(String mode, String label) {
+    }
+
+    public record RepositoryDeploymentOptionsResponse(
+            String defaultDeploymentMode,
+            String internalSshPrefix,
+            java.util.List<RepositoryDeploymentOptionResponse> options) {
     }
 
     public record ApplicationWorkspaceResponse(

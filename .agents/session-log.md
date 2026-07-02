@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-02 - 版本库支持内部 SCM 部署模式
+
+- Why: 企业内部 SCM 需要按当前操作人的统一认证号动态拼接 `ssh://{unifiedAuthId}@...` Git 地址，但数据库只能保存不含用户号的 SCM 地址片段；外部部署必须保持原完整 Git URL 行为不变。
+- What: `code_repositories` 新增 `deployment_mode`，默认 `EXTERNAL`；`INTERNAL` 时 `git_url` 只保存 `host[:port]/path`，编辑页动态显示只读 `ssh://当前用户@` 前缀，列表仍展示数据库保存值。内部版本库英文名为空时按路径最后的 Git path 派生并把 `/` 替换为 `-`；Git clone/fetch/pull/push/list branches/list directories 都按当前用户动态生成实际 URL，origin 校验会去掉 `ssh://任意用户@` 后比较存储片段。
+- How: 领域层新增部署模式枚举和有效 Git URL/origin 比较方法；配置管理服务增加内部 URL 校验、部署模式选项 API 和默认部署模式读取；持久层通过 MyBatis XML/Flyway 增加字段并同步迁移窗口 JDBC 映射；工作区 Git 操作在内部模式刷新 origin；前端版本库弹窗增加内外部模式选择、内部只读前缀和英文名派生。统一认证号不作为敏感信息脱敏，仍按既有规则保护 SSH key、token、Authorization、Cookie。
+- Result: 新增/调整的 domain、configuration-management、persistence、workspace-management、API 和前端 settings/backend-api 定向测试通过；`shared-types`、`backend-api`、`agent-web` 类型检查通过。后端聚合 `mvn -pl test-agent-domain,test-agent-common,test-agent-configuration-management,test-agent-workspace-management,test-agent-persistence,test-agent-api -am test` 仅在 persistence 全量测试失败，剩余为既有 H2 `ON CONFLICT`、`usr_test_dev` fixture 外键、默认用户/loopback seed 断言问题；本次新增的 `deployment_mode` MyBatis/Flyway/JDBC 兼容定向测试已通过。未修改 `.env*`、generated SDK 或事件类型。
+
 ### 2026-07-02 - 新增部署模式配置项
 
 - Why: 需要一个开关区分系统部署在企业内部还是外部，用于后续按部署环境差异化模型目录来源默认值、功能开关等；默认外部模式，可由环境变量切换为内部模式。

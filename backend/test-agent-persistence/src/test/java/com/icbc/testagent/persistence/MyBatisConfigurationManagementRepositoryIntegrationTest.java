@@ -3,6 +3,7 @@ package com.icbc.testagent.persistence;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.icbc.testagent.domain.configuration.CodeRepository;
+import com.icbc.testagent.domain.configuration.CodeRepositoryDeploymentMode;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
 import com.icbc.testagent.domain.configuration.CodeRepositoryType;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
@@ -83,12 +84,14 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
                 .get()
                 .satisfies(saved -> {
                     assertThat(saved.repositoryType()).isEqualTo(CodeRepositoryType.TEST_WORK_REPOSITORY.value());
+                    assertThat(saved.deploymentMode()).isEqualTo(CodeRepositoryDeploymentMode.EXTERNAL.value());
                     assertThat(saved.standard()).isTrue();
                 });
         assertThat(repository.findRepository(new CodeRepositoryId("repo_legacy_application")))
                 .get()
                 .satisfies(saved -> {
                     assertThat(saved.repositoryType()).isEqualTo(CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value());
+                    assertThat(saved.deploymentMode()).isEqualTo(CodeRepositoryDeploymentMode.EXTERNAL.value());
                     assertThat(saved.standard()).isFalse();
                 });
     }
@@ -101,6 +104,7 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
                 "资产库",
                 "assetrepo",
                 CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.INTERNAL.value(),
                 true,
                 NOW,
                 NOW);
@@ -111,6 +115,7 @@ class MyBatisConfigurationManagementRepositoryIntegrationTest {
                 .get()
                 .satisfies(saved -> {
                     assertThat(saved.repositoryType()).isEqualTo(CodeRepositoryType.APPLICATION_ASSET_REPOSITORY.value());
+                    assertThat(saved.deploymentMode()).isEqualTo(CodeRepositoryDeploymentMode.INTERNAL.value());
                     assertThat(saved.standard()).isFalse();
                 });
     }

@@ -67,6 +67,7 @@ import type {
   PromptPart,
   PublicAgentRepositoryStatus,
   ProviderInfo,
+  RepositoryDeploymentOptions,
   PublishPersonalWorkspacePayload,
   PublishPersonalWorkspaceResult,
   QuestionRequest,
@@ -1071,6 +1072,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<PageResponse<CodeRepositoryConfig>>(`${configurationBase}/repositories${query({ page, size })}`),
     listRepositoryTypes: () =>
       request<RepositoryTypeOption[]>(`${configurationBase}/repository-types`),
+    getRepositoryDeploymentOptions: () =>
+      request<RepositoryDeploymentOptions>(`${configurationBase}/repository-deployment-options`),
     createRepository: (payload: CreateRepositoryPayload) =>
       request<CodeRepositoryConfig>(`${configurationBase}/repositories`, { method: "POST", body: JSON.stringify(payload) }),
     updateRepository: (repositoryId: string, payload: UpdateRepositoryPayload) =>

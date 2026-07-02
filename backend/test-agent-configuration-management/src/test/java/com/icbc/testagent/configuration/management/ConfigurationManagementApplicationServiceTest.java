@@ -13,6 +13,7 @@ import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.SshKeyEncryptionService;
 import com.icbc.testagent.domain.configuration.CodeRepositoryType;
 import com.icbc.testagent.domain.configuration.CodeRepository;
+import com.icbc.testagent.domain.configuration.CodeRepositoryDeploymentMode;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
 import com.icbc.testagent.domain.configuration.SshKeyId;
@@ -21,8 +22,10 @@ import com.icbc.testagent.domain.dictionary.DictId;
 import com.icbc.testagent.domain.dictionary.Dictionary;
 import com.icbc.testagent.domain.dictionary.DictionaryRepository;
 import com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceRepository;
+import com.icbc.testagent.domain.user.User;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
+import com.icbc.testagent.domain.user.UserStatus;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -99,6 +102,39 @@ class ConfigurationManagementApplicationServiceTest {
     }
 
     @Test
+    void createInternalRepositoryStoresSuffixAndDerivesEnglishNameFromPath() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                repository,
+                repositoryTypeDictionaryRepository(),
+                org.mockito.Mockito.mock(UserRepository.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+        String storedGitUrl = "scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform";
+        when(repository.findRepositoryByGitUrl(storedGitUrl)).thenReturn(Optional.empty());
+        when(repository.findRepositoryByEnglishName("hzefficiencytools-interfaceplatform")).thenReturn(Optional.empty());
+        when(repository.saveRepository(argThat(saved -> CodeRepositoryDeploymentMode.INTERNAL.value().equals(saved.deploymentMode()))))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        ConfigurationManagementResponses.CodeRepositoryResponse response = service.createRepository(
+                storedGitUrl,
+                "接口平台",
+                "",
+                false,
+                CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.INTERNAL.value());
+
+        assertThat(response.gitUrl()).isEqualTo(storedGitUrl);
+        assertThat(response.englishName()).isEqualTo("hzefficiencytools-interfaceplatform");
+        assertThat(response.deploymentMode()).isEqualTo(CodeRepositoryDeploymentMode.INTERNAL.value());
+        verify(repository).saveRepository(argThat(saved ->
+                storedGitUrl.equals(saved.gitUrl())
+                        && "hzefficiencytools-interfaceplatform".equals(saved.englishName())
+                        && CodeRepositoryDeploymentMode.INTERNAL.value().equals(saved.deploymentMode())));
+    }
+
+    @Test
     void listRepositoryTypesReadsOptionsFromDictionary() {
         ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
                 org.mockito.Mockito.mock(ConfigurationManagementRepository.class),
@@ -137,7 +173,7 @@ class ConfigurationManagementApplicationServiceTest {
     }
 
     @Test
-    void repositoryEnglishNameMustBePureLettersAndShorterThanThirtyCharacters() {
+    void repositoryEnglishNameAllowsLowercaseDigitsAndHyphenButRejectsUnsafeShapes() {
         ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
                 org.mockito.Mockito.mock(ConfigurationManagementRepository.class),
                 repositoryTypeDictionaryRepository(),
@@ -149,7 +185,7 @@ class ConfigurationManagementApplicationServiceTest {
         assertThatThrownBy(() -> service.createRepository(
                 "https://gitee.com/demo/repo.git",
                 "演示库",
-                "demo-1",
+                "-demo",
                 true,
                 null))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
@@ -157,7 +193,7 @@ class ConfigurationManagementApplicationServiceTest {
         assertThatThrownBy(() -> service.createRepository(
                 "https://gitee.com/demo/repo.git",
                 "演示库",
-                "abcdefghijklmnopqrstuvwxyzabcd",
+                "a".repeat(129),
                 true,
                 null))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
@@ -212,6 +248,69 @@ class ConfigurationManagementApplicationServiceTest {
 
         assertThat(service.listBranches("repo_123", userId)).containsExactly("main");
         verify(gitRemoteService).listBranches(codeRepository.gitUrl(), PRIVATE_KEY);
+    }
+
+    @Test
+    void internalRepositoryBranchesUseCurrentUnifiedAuthIdInRuntimeGitUrl() {
+        ConfigurationManagementRepository repository = org.mockito.Mockito.mock(ConfigurationManagementRepository.class);
+        UserRepository userRepository = org.mockito.Mockito.mock(UserRepository.class);
+        GitRemoteService gitRemoteService = org.mockito.Mockito.mock(GitRemoteService.class);
+        SshKeyEncryptionService encryptionService = sshKeyFixtures.encryptionService();
+        GitCloneCacheService gitCloneCacheService = createTestCacheService();
+        UserId userId = new UserId("usr_123");
+        UserSshKey storedKey = sshKeyFixtures.encryptedSshKey(
+                new SshKeyId("ssh_123"), userId, "work", PRIVATE_KEY, NOW);
+        CodeRepository codeRepository = new CodeRepository(
+                new CodeRepositoryId("repo_123"),
+                "scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform",
+                "接口平台",
+                "hzefficiencytools-interfaceplatform",
+                CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.INTERNAL.value(),
+                false,
+                NOW,
+                NOW);
+        User user = new User(userId, "001177621", "dev", "hash", null, null, null, UserStatus.ACTIVE, NOW, NOW);
+
+        when(repository.findRepository(codeRepository.repositoryId())).thenReturn(java.util.Optional.of(codeRepository));
+        when(repository.findSshKeys(userId)).thenReturn(List.of(storedKey));
+        when(userRepository.findByUserId(userId)).thenReturn(Optional.of(user));
+        when(gitRemoteService.listBranches(
+                eq("ssh://001177621@scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform"),
+                eq(PRIVATE_KEY))).thenReturn(List.of("main"));
+
+        ConfigurationManagementApplicationService service =
+                new ConfigurationManagementApplicationService(repository, repositoryTypeDictionaryRepository(), userRepository, gitRemoteService, gitCloneCacheService, encryptionService, org.mockito.Mockito.mock(ManagedWorkspaceRepository.class));
+
+        assertThat(service.listBranches("repo_123", userId)).containsExactly("main");
+        verify(gitRemoteService).listBranches(
+                "ssh://001177621@scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform",
+                PRIVATE_KEY);
+    }
+
+    @Test
+    void repositoryDeploymentOptionsUseConfiguredDefaultAndCurrentUserPrefix() {
+        UserId userId = new UserId("usr_123");
+        UserRepository userRepository = org.mockito.Mockito.mock(UserRepository.class);
+        when(userRepository.findByUserId(userId)).thenReturn(Optional.of(
+                new User(userId, "001177621", "dev", "hash", null, null, null, UserStatus.ACTIVE, NOW, NOW)));
+        ConfigurationManagementApplicationService service = new ConfigurationManagementApplicationService(
+                org.mockito.Mockito.mock(ConfigurationManagementRepository.class),
+                repositoryTypeDictionaryRepository(),
+                userRepository,
+                org.mockito.Mockito.mock(GitRemoteService.class),
+                createTestCacheService(),
+                sshKeyFixtures.encryptionService(),
+                org.mockito.Mockito.mock(ManagedWorkspaceRepository.class),
+                "internal");
+
+        ConfigurationManagementResponses.RepositoryDeploymentOptionsResponse response = service.repositoryDeploymentOptions(userId);
+
+        assertThat(response.defaultDeploymentMode()).isEqualTo(CodeRepositoryDeploymentMode.INTERNAL.value());
+        assertThat(response.internalSshPrefix()).isEqualTo("ssh://001177621@");
+        assertThat(response.options())
+                .extracting(ConfigurationManagementResponses.RepositoryDeploymentOptionResponse::mode)
+                .containsExactly(CodeRepositoryDeploymentMode.EXTERNAL.value(), CodeRepositoryDeploymentMode.INTERNAL.value());
     }
 
     @Test

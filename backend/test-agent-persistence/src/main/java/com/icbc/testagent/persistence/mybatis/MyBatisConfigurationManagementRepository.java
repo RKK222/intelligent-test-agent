@@ -220,6 +220,7 @@ public class MyBatisConfigurationManagementRepository implements ConfigurationMa
                 row.name(),
                 row.englishName(),
                 row.repositoryType(),
+                row.deploymentMode(),
                 row.standard(),
                 row.createdAt(),
                 row.updatedAt());
@@ -232,6 +233,7 @@ public class MyBatisConfigurationManagementRepository implements ConfigurationMa
                 repository.name(),
                 repository.englishName(),
                 repository.repositoryType(),
+                repository.deploymentMode(),
                 repository.standard(),
                 repository.createdAt(),
                 repository.updatedAt());

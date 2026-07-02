@@ -646,6 +646,7 @@ describe("backend-api", () => {
           gitUrl: "https://gitee.com/demo/repo.git",
           name: "演示库",
           englishName: "demorepo",
+          deploymentMode: "INTERNAL",
           repositoryType: "TEST_WORK_REPOSITORY",
           repositoryTypeLabel: "测试工作库",
           standard: true,
@@ -684,6 +685,7 @@ describe("backend-api", () => {
       gitUrl: "https://gitee.com/demo/repo.git",
       name: "演示库",
       englishName: "demorepo",
+      deploymentMode: "INTERNAL",
       repositoryType: "TEST_WORK_REPOSITORY",
       standard: true
     });
@@ -697,6 +699,7 @@ describe("backend-api", () => {
 
     expect(JSON.parse(String(fetcher.mock.calls[0]?.[1]?.body))).toMatchObject({
       englishName: "demorepo",
+      deploymentMode: "INTERNAL",
       repositoryType: "TEST_WORK_REPOSITORY",
       standard: true
     });
@@ -724,6 +727,36 @@ describe("backend-api", () => {
 
     expect(fetcher).toHaveBeenCalledWith(
       "http://api/api/internal/platform/configuration-management/repository-types",
+      expect.any(Object)
+    );
+  });
+
+  it("loads repository deployment options from configuration APIs", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      traceId: "trace_fixed",
+      data: {
+        defaultDeploymentMode: "INTERNAL",
+        internalSshPrefix: "ssh://001177621@",
+        options: [
+          { mode: "EXTERNAL", label: "外部部署" },
+          { mode: "INTERNAL", label: "内部部署" }
+        ]
+      }
+    }), { status: 200 }));
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+
+    await expect(client.getRepositoryDeploymentOptions()).resolves.toEqual({
+      defaultDeploymentMode: "INTERNAL",
+      internalSshPrefix: "ssh://001177621@",
+      options: [
+        { mode: "EXTERNAL", label: "外部部署" },
+        { mode: "INTERNAL", label: "内部部署" }
+      ]
+    });
+
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/configuration-management/repository-deployment-options",
       expect.any(Object)
     );
   });

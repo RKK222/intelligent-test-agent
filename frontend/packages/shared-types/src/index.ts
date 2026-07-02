@@ -1388,6 +1388,7 @@ export type CodeRepositoryConfig = {
   gitUrl: string;
   name: string;
   englishName?: string | null;
+  deploymentMode?: "EXTERNAL" | "INTERNAL" | string | null;
   repositoryType?: string | null;
   repositoryTypeLabel?: string | null;
   standard: boolean;
@@ -1398,6 +1399,17 @@ export type CodeRepositoryConfig = {
 export type RepositoryTypeOption = {
   typeCode: string;
   typeLabel: string;
+};
+
+export type RepositoryDeploymentOption = {
+  mode: "EXTERNAL" | "INTERNAL" | string;
+  label: string;
+};
+
+export type RepositoryDeploymentOptions = {
+  defaultDeploymentMode: "EXTERNAL" | "INTERNAL" | string;
+  internalSshPrefix: string;
+  options: RepositoryDeploymentOption[];
 };
 
 export type ApplicationWorkspaceConfig = {
@@ -1523,6 +1535,7 @@ export type CreateRepositoryPayload = {
   gitUrl: string;
   name: string;
   englishName: string;
+  deploymentMode?: "EXTERNAL" | "INTERNAL" | string;
   repositoryType?: string;
   standard?: boolean;
 };

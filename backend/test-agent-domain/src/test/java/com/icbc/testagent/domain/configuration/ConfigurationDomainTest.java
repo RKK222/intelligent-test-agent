@@ -63,6 +63,44 @@ class ConfigurationDomainTest {
     }
 
     @Test
+    void codeRepositoryDefaultsToExternalDeploymentMode() {
+        CodeRepository repository = new CodeRepository(
+                new CodeRepositoryId("repo_external"),
+                "git@example.com:demo/repo.git",
+                "应用代码库",
+                "repo",
+                CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(),
+                false,
+                NOW,
+                NOW);
+
+        assertThat(repository.deploymentMode()).isEqualTo(CodeRepositoryDeploymentMode.EXTERNAL.value());
+        assertThat(repository.effectiveGitUrl("001177621")).isEqualTo("git@example.com:demo/repo.git");
+        assertThat(repository.matchesStoredOrigin("git@example.com:demo/repo.git")).isTrue();
+    }
+
+    @Test
+    void internalCodeRepositoryBuildsRuntimeGitUrlAndComparesOriginByStoredPart() {
+        CodeRepository repository = new CodeRepository(
+                new CodeRepositoryId("repo_internal"),
+                "scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform",
+                "接口平台",
+                "hzefficiencytools-interfaceplatform",
+                CodeRepositoryType.APPLICATION_CODE_REPOSITORY.value(),
+                CodeRepositoryDeploymentMode.INTERNAL.value(),
+                false,
+                NOW,
+                NOW);
+
+        assertThat(repository.effectiveGitUrl("001177621"))
+                .isEqualTo("ssh://001177621@scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform");
+        assertThat(repository.matchesStoredOrigin("ssh://009988776@scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform"))
+                .isTrue();
+        assertThat(repository.matchesStoredOrigin("ssh://009988776@scm-share.sdc.cs.icbc:29418/other/repo"))
+                .isFalse();
+    }
+
+    @Test
     void applicationMemberDeletionOnlyMarksDeletedAt() {
         ApplicationMember member = ApplicationMember.active(
                 new ApplicationId("app_gcms"),

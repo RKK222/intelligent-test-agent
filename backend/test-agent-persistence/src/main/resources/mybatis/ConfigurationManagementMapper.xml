@@ -31,6 +31,7 @@
             <arg column="name" javaType="java.lang.String"/>
             <arg column="english_name" javaType="java.lang.String"/>
             <arg column="repository_type" javaType="java.lang.String"/>
+            <arg column="deployment_mode" javaType="java.lang.String"/>
             <arg column="standard" javaType="_boolean"/>
             <arg column="created_at" javaType="java.time.Instant"/>
             <arg column="updated_at" javaType="java.time.Instant"/>
@@ -134,7 +135,7 @@
     </update>
 
     <select id="findRepositories" resultMap="CodeRepositoryMap">
-        select repository_id, git_url, name, english_name, repository_type, standard, created_at, updated_at
+        select repository_id, git_url, name, english_name, repository_type, deployment_mode, standard, created_at, updated_at
         from code_repositories
         order by updated_at desc, repository_id
         limit #{limit} offset #{offset}
@@ -145,29 +146,29 @@
     </select>
 
     <select id="findRepository" resultMap="CodeRepositoryMap">
-        select repository_id, git_url, name, english_name, repository_type, standard, created_at, updated_at
+        select repository_id, git_url, name, english_name, repository_type, deployment_mode, standard, created_at, updated_at
         from code_repositories
         where repository_id = #{repositoryId}
     </select>
 
     <select id="findRepositoryByGitUrl" resultMap="CodeRepositoryMap">
-        select repository_id, git_url, name, english_name, repository_type, standard, created_at, updated_at
+        select repository_id, git_url, name, english_name, repository_type, deployment_mode, standard, created_at, updated_at
         from code_repositories
         where git_url = #{gitUrl}
     </select>
 
     <select id="findRepositoryByEnglishName" resultMap="CodeRepositoryMap">
-        select repository_id, git_url, name, english_name, repository_type, standard, created_at, updated_at
+        select repository_id, git_url, name, english_name, repository_type, deployment_mode, standard, created_at, updated_at
         from code_repositories
         where english_name = #{englishName}
     </select>
 
     <insert id="insertRepository" parameterType="com.icbc.testagent.persistence.mybatis.CodeRepositoryRow">
         insert into code_repositories(
-            repository_id, git_url, name, english_name, repository_type, standard, created_at, updated_at
+            repository_id, git_url, name, english_name, repository_type, deployment_mode, standard, created_at, updated_at
         )
         values (
-            #{repositoryId}, #{gitUrl}, #{name}, #{englishName}, #{repositoryType}, #{standard}, #{createdAt}, #{updatedAt}
+            #{repositoryId}, #{gitUrl}, #{name}, #{englishName}, #{repositoryType}, #{deploymentMode}, #{standard}, #{createdAt}, #{updatedAt}
         )
     </insert>
 
@@ -182,7 +183,7 @@
     </update>
 
     <select id="findRepositoriesByApplication" resultMap="CodeRepositoryMap">
-        select r.repository_id, r.git_url, r.name, r.english_name, r.repository_type, r.standard, r.created_at, r.updated_at
+        select r.repository_id, r.git_url, r.name, r.english_name, r.repository_type, r.deployment_mode, r.standard, r.created_at, r.updated_at
         from code_repositories r
         join application_repository_links l on l.repository_id = r.repository_id
         where l.app_id = #{appId}

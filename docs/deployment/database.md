@@ -219,8 +219,9 @@
 
 - `application_members(app_id, user_id)` 唯一；`deleted_at` 为空表示有效关系。
 - `code_repositories.git_url` 唯一；不提供删除仓库配置的业务接口。
-- `code_repositories.english_name` 后续迁移新增，可空兼容历史数据；非空值唯一，新增/编辑代码库时由后端校验 1 到 29 位英文字母并统一小写保存。
+- `code_repositories.english_name` 后续迁移新增，可空兼容历史数据；非空值唯一，新增/编辑代码库时由后端校验字母、数字和连字符，最大 128 字符，并统一小写保存。
 - `code_repositories.repository_type` 后续迁移新增，取值来自通用字典 `REPOSITORY_TYPE`；旧 `standard` 字段保留，新增/读取时统一由版本库类型派生兼容值。
+- `code_repositories.deployment_mode` 后续迁移新增，取值 `EXTERNAL` / `INTERNAL`；存量数据默认 `EXTERNAL`。
 - `application_repository_links(app_id, repository_id)` 唯一。
 - `application_workspaces(app_id, repository_id, branch, directory_path)` 唯一，一个目录对应一个应用工作空间配置。
 - `user_ssh_keys.user_id` 唯一，保证每个用户最多保存一把 SSH key。
@@ -355,7 +356,7 @@ Java 后端启动时会把稳定服务器身份写入 `SYS_DATA_ROOT_DIR/.server
 | 表/字段 | 说明 |
 |---|---|
 | `common_parameters` | 通用参数表，包含参数英文名、参数中文名、参数值、适用平台 `windows/linux/macos/all`、是否允许前端修改 `editable`、创建和更新时间。 |
-| `code_repositories.english_name` | 代码库英文名称，可空兼容历史数据，非空唯一，最大 29 字符。 |
+| `code_repositories.english_name` | 代码库英文名称，可空兼容历史数据，非空唯一，初始最大 29 字符，后续扩展到 128 字符。 |
 | `workspace_create_operations` | 设置页创建应用工作空间的进度表，按 `operation_id` 记录状态、当前步骤、错误信息、关联应用/用户/模板/版本和 traceId。 |
 
 `common_parameters` 初始化 8 条 opencode 路径参数：
@@ -389,6 +390,21 @@ Java 后端启动时会把稳定服务器身份写入 `SYS_DATA_ROOT_DIR/.server
 - 历史 `standard=false` 的代码库无法自动区分代码或资产，统一回填为 `APPLICATION_CODE_REPOSITORY`。
 - 旧 `standard` 布尔列继续保留给工作空间分支规则等存量逻辑；新增版本库选择测试工作库时写 `standard=true`，选择应用代码库或应用资产库时写 `standard=false`。
 - 字典种子属于生产必需基础字典，不包含测试、演示或个人开发数据。
+
+## V20260702180000 版本库部署模式字段
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260702180000__add_code_repository_deployment_mode.sql` 为版本库增加内外部部署模式：
+
+| 表/字段 | 说明 |
+|---|---|
+| `code_repositories.deployment_mode` | 版本库部署模式，非空，默认 `EXTERNAL`；取值由领域和服务层归一化为 `EXTERNAL` / `INTERNAL`。 |
+| `code_repositories.english_name` | 从 29 字符扩展到 128 字符，以支持内部 SCM 路径派生的 `group-repository` 形式英文名。 |
+
+兼容策略：
+
+- 存量版本库统一按 `EXTERNAL` 处理，`git_url` 仍表示完整 Git 地址。
+- `INTERNAL` 版本库只在 `git_url` 保存 `host[:port]/path`，例如 `scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform`；运行 Git 操作时按当前操作人统一认证号动态拼接 `ssh://{unifiedAuthId}@{git_url}`。
+- 列表查询和应用关联查询只返回数据库保存的 `git_url`，不拼接统一认证号。
 
 ## V20260626180000 删除废弃参数 OPENCODE_WORKSPACE_ROOT
 

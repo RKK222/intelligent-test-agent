@@ -13,6 +13,7 @@ const repositories: CodeRepositoryConfig[] = [
     englishName: "wrtestapp",
     repositoryType: "TEST_WORK_REPOSITORY",
     repositoryTypeLabel: "测试工作库",
+    deploymentMode: "EXTERNAL",
     standard: true,
     createdAt: "2026-06-26T08:00:00Z",
     updatedAt: "2026-06-26T08:00:00Z"
@@ -24,6 +25,7 @@ const repositories: CodeRepositoryConfig[] = [
     englishName: "mimo",
     repositoryType: "APPLICATION_CODE_REPOSITORY",
     repositoryTypeLabel: "应用代码库",
+    deploymentMode: "EXTERNAL",
     standard: false,
     createdAt: "2026-06-26T08:00:00Z",
     updatedAt: "2026-06-26T08:00:00Z"
@@ -38,6 +40,14 @@ function createApi(): Partial<BackendApiClient> {
       { typeCode: "APPLICATION_CODE_REPOSITORY", typeLabel: "应用代码库" },
       { typeCode: "APPLICATION_ASSET_REPOSITORY", typeLabel: "应用资产库" }
     ]),
+    getRepositoryDeploymentOptions: vi.fn().mockResolvedValue({
+      defaultDeploymentMode: "EXTERNAL",
+      internalSshPrefix: "ssh://AUTH_ADMIN@",
+      options: [
+        { mode: "EXTERNAL", label: "外部部署" },
+        { mode: "INTERNAL", label: "内部部署" }
+      ]
+    }),
     createRepository: vi.fn().mockResolvedValue(repositories[1]),
     updateRepository: vi.fn().mockResolvedValue(repositories[0])
   };
@@ -183,6 +193,7 @@ describe("SettingsRepositoryPanel settings", () => {
       gitUrl: "https://gitee.com/mimo/new-repo.git",
       name: "新增测试库",
       englishName: "newrepo",
+      deploymentMode: "EXTERNAL",
       repositoryType: "TEST_WORK_REPOSITORY",
       standard: true
     }));
@@ -198,11 +209,76 @@ describe("SettingsRepositoryPanel settings", () => {
 
     await fireEvent.update(getByPlaceholderText("Git URL"), "https://gitee.com/mimo/new-repo.git");
     await fireEvent.update(getByPlaceholderText("中文名称"), "新增测试库");
-    await fireEvent.update(getByPlaceholderText("英文名称"), "new-repo");
+    await fireEvent.update(getByPlaceholderText("英文名称"), "-newrepo");
     await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("新增"));
 
-    expect(await findByText("版本库英文名称只能输入 1 到 29 位英文字母")).toBeTruthy();
+    expect(await findByText("版本库英文名称只能使用字母、数字和连字符，长度 1 到 128，且不能以连字符开头或结尾")).toBeTruthy();
     expect(api.createRepository).not.toHaveBeenCalled();
+  });
+
+  it("creates internal repositories with readonly ssh prefix and derived english name", async () => {
+    const api = createApi();
+    vi.mocked(api.getRepositoryDeploymentOptions!).mockResolvedValue({
+      defaultDeploymentMode: "INTERNAL",
+      internalSshPrefix: "ssh://AUTH_ADMIN@",
+      options: [
+        { mode: "EXTERNAL", label: "外部部署" },
+        { mode: "INTERNAL", label: "内部部署" }
+      ]
+    });
+    const { findByDisplayValue, findByText, getByPlaceholderText, getByText, container } = renderPanel(api);
+
+    expect(await findByText("共 2 个版本库")).toBeTruthy();
+
+    await fireEvent.click(getByText("新增"));
+    expect(await findByText("ssh://AUTH_ADMIN@")).toBeTruthy();
+
+    await fireEvent.update(
+      getByPlaceholderText("scm-share.sdc.cs.icbc:29418/group/repository"),
+      "scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform"
+    );
+    await fireEvent.update(getByPlaceholderText("中文名称"), "接口平台");
+    expect(await findByDisplayValue("hzefficiencytools-interfaceplatform")).toBeTruthy();
+    await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("新增"));
+
+    await waitFor(() => expect(api.createRepository).toHaveBeenCalledWith({
+      gitUrl: "scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform",
+      name: "接口平台",
+      englishName: "hzefficiencytools-interfaceplatform",
+      deploymentMode: "INTERNAL",
+      repositoryType: "APPLICATION_CODE_REPOSITORY",
+      standard: false
+    }));
+  });
+
+  it("lists internal repositories with stored git url and shows dynamic url only in edit dialog", async () => {
+    const api = createApi();
+    vi.mocked(api.listRepositories!).mockResolvedValue({
+      items: [{
+        repositoryId: "repo_internal",
+        gitUrl: "scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform",
+        name: "接口平台",
+        englishName: "hzefficiencytools-interfaceplatform",
+        repositoryType: "APPLICATION_CODE_REPOSITORY",
+        repositoryTypeLabel: "应用代码库",
+        deploymentMode: "INTERNAL",
+        standard: false,
+        createdAt: "2026-07-02T08:00:00Z",
+        updatedAt: "2026-07-02T08:00:00Z"
+      }],
+      page: 1,
+      size: 100,
+      total: 1
+    });
+    const { findByText, getByText, queryByText, container } = renderPanel(api);
+
+    expect(await findByText("hzefficiencytools-interfaceplatform · scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform")).toBeTruthy();
+    expect(queryByText("ssh://AUTH_ADMIN@scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform")).toBeNull();
+
+    await fireEvent.click(getByText("编辑"));
+
+    expect(container.querySelector(".el-dialog-stub")).toBeTruthy();
+    expect(await findByText("ssh://AUTH_ADMIN@scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform")).toBeTruthy();
   });
 
   it("labels repository management forms and cancels repository editing", async () => {

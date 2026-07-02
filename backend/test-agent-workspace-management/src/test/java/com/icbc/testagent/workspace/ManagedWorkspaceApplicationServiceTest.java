@@ -17,6 +17,7 @@ import com.icbc.testagent.domain.configuration.ApplicationMember;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspace;
 import com.icbc.testagent.domain.configuration.ApplicationWorkspaceId;
 import com.icbc.testagent.domain.configuration.CodeRepository;
+import com.icbc.testagent.domain.configuration.CodeRepositoryDeploymentMode;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
 import com.icbc.testagent.domain.configuration.CommonParameter;
 import com.icbc.testagent.domain.configuration.CommonParameterValues;
@@ -58,6 +59,7 @@ import org.junit.jupiter.api.io.TempDir;
 class ManagedWorkspaceApplicationServiceTest {
 
     private final SshKeyTestFixtures sshKeyFixtures = new SshKeyTestFixtures();
+    private static final String PRIVATE_KEY = "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n-----END OPENSSH PRIVATE KEY-----\n";
 
     @TempDir
     Path root;
@@ -99,6 +101,46 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(managed.replicas.get(0).currentCommitHash()).isEqualTo("commit_base");
         assertThat(managed.globalPreference).isNotNull();
         assertThat(managed.applicationPreference).isNotNull();
+    }
+
+    @Test
+    void internalRepositoryGitOperationsUseCurrentUsersEffectiveGitUrl() throws Exception {
+        UserId userId = new UserId("usr_1");
+        CodeRepository internalRepository = new CodeRepository(
+                new CodeRepositoryId("repo_1"),
+                "scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform",
+                "接口平台",
+                "hzefficiencytools-interfaceplatform",
+                "APPLICATION_CODE_REPOSITORY",
+                CodeRepositoryDeploymentMode.INTERNAL.value(),
+                false,
+                Instant.now(),
+                Instant.now());
+        UserSshKey sshKey = sshKeyFixtures.encryptedSshKey(
+                new SshKeyId("ssh_1"), userId, "work", PRIVATE_KEY, Instant.now());
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true, internalRepository, List.of(sshKey));
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                "main",
+                userId,
+                "trace_internal_clone");
+        git.originUrlValue = "ssh://009988776@scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform";
+
+        service.gitPullVersion(version.versionId(), userId, "127.0.0.1", "trace_internal_pull");
+
+        String expectedGitUrl = "ssh://000857009@scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform";
+        assertThat(git.clonedGitUrl).isEqualTo(expectedGitUrl);
+        assertThat(git.originUpdates)
+                .extracting(OriginUpdate::gitUrl)
+                .contains(expectedGitUrl);
+        assertThat(git.pulledBranch).isEqualTo("main");
     }
 
     @Test
@@ -1414,6 +1456,9 @@ class ManagedWorkspaceApplicationServiceTest {
         private Path pushedRepoRoot;
         private Path headCommitRepoRoot;
         private final List<PushCall> pushes = new ArrayList<>();
+        private String clonedGitUrl;
+        private String originUrlValue = "https://example.com/gcms.git";
+        private final List<OriginUpdate> originUpdates = new ArrayList<>();
 
         private FakeGitWorkspaceService(String directoryPath) {
             this.directoryPath = directoryPath;
@@ -1422,6 +1467,7 @@ class ManagedWorkspaceApplicationServiceTest {
 
         @Override
         public void cloneBranch(String gitUrl, String branch, Path repoRoot, String privateKey) {
+            this.clonedGitUrl = gitUrl;
             this.clonedBranch = branch;
             try {
                 Files.createDirectories(repoRoot.resolve(directoryPath));
@@ -1468,7 +1514,13 @@ class ManagedWorkspaceApplicationServiceTest {
 
         @Override
         public String originUrl(Path repoRoot) {
-            return "https://example.com/gcms.git";
+            return originUrlValue;
+        }
+
+        @Override
+        public void setOriginUrl(Path repoRoot, String gitUrl, String privateKey) {
+            this.originUrlValue = gitUrl;
+            this.originUpdates.add(new OriginUpdate(repoRoot, gitUrl));
         }
 
         @Override
@@ -1603,17 +1655,28 @@ class ManagedWorkspaceApplicationServiceTest {
     private record MergeCall(Path repoRoot, String branch) {
     }
 
+    private record OriginUpdate(Path repoRoot, String gitUrl) {
+    }
+
     private static final class FakeConfigurationRepository implements ConfigurationManagementRepository {
         private final boolean member;
         private final ApplicationDefinition app = new ApplicationDefinition(
                 new ApplicationId("app_gcms"), "F-GCMS", true, Instant.parse("2026-06-23T00:00:00Z"), Instant.parse("2026-06-23T00:00:00Z"));
-        private final CodeRepository repository = new CodeRepository(
-                new CodeRepositoryId("repo_1"), "https://example.com/gcms.git", "gcms/gcms", "gcms", true, Instant.now(), Instant.now());
-        private final ApplicationWorkspace workspace = new ApplicationWorkspace(
-                new ApplicationWorkspaceId("awp_1"), app.appId(), repository.repositoryId(), "main", "F-GCMS/workspace", "GCMS Workspace", Instant.now(), Instant.now());
+        private final CodeRepository repository;
+        private final List<UserSshKey> sshKeys;
+        private final ApplicationWorkspace workspace;
 
         private FakeConfigurationRepository(boolean member) {
+            this(member, new CodeRepository(
+                    new CodeRepositoryId("repo_1"), "https://example.com/gcms.git", "gcms/gcms", "gcms", true, Instant.now(), Instant.now()), List.of());
+        }
+
+        private FakeConfigurationRepository(boolean member, CodeRepository repository, List<UserSshKey> sshKeys) {
             this.member = member;
+            this.repository = repository;
+            this.sshKeys = List.copyOf(sshKeys);
+            this.workspace = new ApplicationWorkspace(
+                    new ApplicationWorkspaceId("awp_1"), app.appId(), repository.repositoryId(), "main", "F-GCMS/workspace", "GCMS Workspace", Instant.now(), Instant.now());
         }
 
         @Override public List<ApplicationDefinition> findApplications(Boolean enabledOnly) { return List.of(app); }
@@ -1646,7 +1709,7 @@ class ManagedWorkspaceApplicationServiceTest {
         @Override public ApplicationWorkspace saveWorkspace(ApplicationWorkspace workspace) { return workspace; }
         @Override public ApplicationWorkspace updateWorkspace(ApplicationWorkspace workspace) { return workspace; }
         @Override public void deleteWorkspace(ApplicationWorkspaceId workspaceId) {}
-        @Override public List<UserSshKey> findSshKeys(UserId userId) { return List.of(); }
+        @Override public List<UserSshKey> findSshKeys(UserId userId) { return sshKeys; }
         @Override public Optional<UserSshKey> findSshKey(UserId userId, SshKeyId sshKeyId) { return Optional.empty(); }
         @Override public UserSshKey saveSshKey(UserSshKey sshKey) { return sshKey; }
         @Override public void deleteSshKey(UserId userId, SshKeyId sshKeyId) {}
