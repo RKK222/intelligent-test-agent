@@ -32,9 +32,13 @@ const props = defineProps<{
   currentUser: CurrentUser | null;
 }>();
 
+const emit = defineEmits<{
+  (e: "switch-menu", key: string): void;
+}>();
+
 const api = inject<BackendApiClient>("api")!;
 
-const appTab = ref<"members" | "repositoryManagement" | "repositories" | "workspaces">("members");
+const appTab = ref<"members" | "repositories" | "workspaces">("members");
 const loading = ref(false);
 const errorMessage = ref("");
 const pendingDangerAction = ref<PendingDangerAction | null>(null);
@@ -81,21 +85,9 @@ const selectedUser = ref<PlatformUserSummary | null>(null);
 
 // 版本库
 const repositories = ref<CodeRepositoryConfig[]>([]);
-const repositoryTotal = ref(0);
 const appRepositories = ref<CodeRepositoryConfig[]>([]);
-const repositoryTypes = ref<RepositoryTypeOption[]>(DEFAULT_REPOSITORY_TYPES);
-const repoGitUrl = ref("");
-const repoName = ref("");
-const repoEnglishName = ref("");
-const repoType = ref(APPLICATION_CODE_REPOSITORY_TYPE);
 const linkRepositoryId = ref("");
 const lastLinkRepositoryId = ref("");
-const editRepositoryId = ref("");
-const editRepositoryName = ref("");
-const editRepositoryEnglishName = ref("");
-const editRepositoryTypeLabel = ref("");
-const repositoryCreateSectionRef = ref<HTMLElement | null>(null);
-const repoGitUrlInputRef = ref<{ focus: () => void } | null>(null);
 
 // 工作空间
 const workspaces = ref<ApplicationWorkspaceConfig[]>([]);
@@ -240,9 +232,7 @@ function clearAppContext() {
   selectedUser.value = null;
   userKeyword.value = "";
   repositories.value = [];
-  repositoryTotal.value = 0;
   appRepositories.value = [];
-  repositoryTypes.value = DEFAULT_REPOSITORY_TYPES;
   workspaces.value = [];
   branches.value = [];
   directories.value = [];
@@ -350,15 +340,12 @@ async function confirmDangerAction() {
 
 // 版本库管理
 async function loadRepositories() {
-  const [all, linked, types] = await Promise.all([
+  const [all, linked] = await Promise.all([
     api.listRepositories(1, 100),
-    selectedAppId.value ? api.listApplicationRepositories(selectedAppId.value) : Promise.resolve([]),
-    api.listRepositoryTypes()
+    selectedAppId.value ? api.listApplicationRepositories(selectedAppId.value) : Promise.resolve([])
   ]);
   repositories.value = all.items;
-  repositoryTotal.value = all.total;
   appRepositories.value = linked;
-  repositoryTypes.value = types.length ? types : DEFAULT_REPOSITORY_TYPES;
   if (!workspaceRepositoryId.value || !linked.some((item) => item.repositoryId === workspaceRepositoryId.value)) {
     workspaceRepositoryId.value = linked[0]?.repositoryId ?? "";
   }
@@ -368,90 +355,13 @@ function formatRepositoryOption(repository: CodeRepositoryConfig) {
   return `${repository.name}(${repository.gitUrl})`;
 }
 
-function isTestWorkRepositoryType(typeCode: string) {
-  return typeCode === TEST_WORK_REPOSITORY_TYPE;
-}
-
-function repositoryTypeLabel(repository: CodeRepositoryConfig) {
-  if (repository.repositoryTypeLabel) return repository.repositoryTypeLabel;
-  if (repository.repositoryType) {
-    return repositoryTypes.value.find((item) => item.typeCode === repository.repositoryType)?.typeLabel ?? repository.repositoryType;
-  }
-  return repository.standard ? "测试工作库" : "应用代码库";
-}
-
-// 下拉中的“添加版本库”只作为入口，不改变当前待关联版本库选择。
-async function openRepositoryCreateSection() {
-  await nextTick();
-  repositoryCreateSectionRef.value?.scrollIntoView?.({ behavior: "smooth", block: "start" });
-  // Element Plus 下拉关闭会回收焦点，延迟聚焦才能稳定落到 Git URL 输入框。
-  window.setTimeout(() => {
-    repoGitUrlInputRef.value?.focus();
-  }, 80);
-}
-
 function handleLinkRepositoryChange(repositoryId: string) {
   if (repositoryId === ADD_REPOSITORY_OPTION_VALUE) {
     linkRepositoryId.value = lastLinkRepositoryId.value;
-    appTab.value = "repositoryManagement";
-    void openRepositoryCreateSection();
+    emit("switch-menu", "repository");
     return;
   }
   lastLinkRepositoryId.value = repositoryId;
-}
-
-async function createRepository() {
-  const englishName = normalizeRepositoryEnglishName(repoEnglishName.value);
-  if (!englishName) {
-    errorMessage.value = "版本库英文名称只能输入 1 到 29 位英文字母";
-    return;
-  }
-  await run(async () => {
-    const repository = await api.createRepository({
-      gitUrl: repoGitUrl.value.trim(),
-      name: repoName.value.trim(),
-      englishName,
-      repositoryType: repoType.value,
-      standard: isTestWorkRepositoryType(repoType.value)
-    });
-    repoGitUrl.value = "";
-    repoName.value = "";
-    repoEnglishName.value = "";
-    repoType.value = APPLICATION_CODE_REPOSITORY_TYPE;
-    linkRepositoryId.value = repository.repositoryId;
-    lastLinkRepositoryId.value = repository.repositoryId;
-    await loadRepositories();
-  });
-}
-
-function startEditRepository(repository: CodeRepositoryConfig) {
-  editRepositoryId.value = repository.repositoryId;
-  editRepositoryName.value = repository.name;
-  editRepositoryEnglishName.value = repository.englishName ?? "";
-  editRepositoryTypeLabel.value = repositoryTypeLabel(repository);
-}
-
-function cancelEditRepository() {
-  editRepositoryId.value = "";
-  editRepositoryName.value = "";
-  editRepositoryEnglishName.value = "";
-  editRepositoryTypeLabel.value = "";
-}
-
-async function saveRepository() {
-  const englishName = normalizeRepositoryEnglishName(editRepositoryEnglishName.value);
-  if (!englishName) {
-    errorMessage.value = "版本库英文名称只能输入 1 到 29 位英文字母";
-    return;
-  }
-  await run(async () => {
-    await api.updateRepository(editRepositoryId.value, {
-      name: editRepositoryName.value.trim(),
-      englishName
-    });
-    cancelEditRepository();
-    await loadRepositories();
-  });
 }
 
 async function linkRepository() {
@@ -546,14 +456,7 @@ async function createWorkspace() {
   });
 }
 
-function normalizeRepositoryEnglishName(value: string) {
-  const trimmed = value.trim();
-  if (!/^[A-Za-z]{1,29}$/.test(trimmed)) {
-    errorMessage.value = "版本库英文名称只能输入 1 到 29 位英文字母";
-    return "";
-  }
-  return trimmed.toLowerCase();
-}
+// Removed normalizeRepositoryEnglishName
 
 function createWorkspaceOperationId() {
   const raw = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -704,7 +607,6 @@ onBeforeUnmount(() => {
       <div class="ta-sub-tabs" v-if="selectedAppId">
         <el-radio-group v-model="appTab" class="ta-sub-tab-group">
           <el-radio-button value="members">应用人员管理</el-radio-button>
-          <el-radio-button value="repositoryManagement">版本库管理</el-radio-button>
           <el-radio-button value="repositories">应用与版本库关联</el-radio-button>
           <el-radio-button value="workspaces">工作空间管理</el-radio-button>
         </el-radio-group>
@@ -792,71 +694,7 @@ onBeforeUnmount(() => {
 
       </div>
 
-      <!-- 版本库管理 -->
-      <div v-if="selectedAppId && appTab === 'repositoryManagement'" class="ta-panel-content">
-        <div class="ta-section">
-          <div class="ta-section-header">
-            <h4 class="ta-section-title">已有版本库</h4>
-            <div class="ta-section-actions">
-              <span class="ta-count-badge">共 {{ repositoryTotal }} 个版本库</span>
-              <el-button :disabled="loading" @click="loadRepositories">刷新</el-button>
-            </div>
-          </div>
-          <div v-for="repo in repositories" :key="repo.repositoryId" class="ta-item-row ta-edit-item">
-            <div>
-              <span class="ta-item-title">{{ repo.name }}</span>
-              <span class="ta-item-badge">{{ repositoryTypeLabel(repo) }}</span>
-              <div class="ta-item-subtitle">{{ repo.englishName || "未配置英文名" }} · {{ repo.gitUrl }}</div>
-            </div>
-            <el-button size="small" @click="startEditRepository(repo)">编辑</el-button>
-          </div>
-          <div v-if="editRepositoryId" class="ta-inline-form ta-edit-form">
-            <label class="ta-form-field">
-              <span class="ta-form-label">版本库名称</span>
-              <el-input v-model="editRepositoryName" placeholder="名称" style="width: 240px" />
-            </label>
-            <label class="ta-form-field">
-              <span class="ta-form-label">版本库英文名称</span>
-              <el-input v-model="editRepositoryEnglishName" placeholder="英文名称" style="width: 180px" />
-            </label>
-            <span class="ta-readonly-field">类型：{{ editRepositoryTypeLabel }}</span>
-            <el-button type="primary" :disabled="loading" @click="saveRepository">保存</el-button>
-            <el-button :disabled="loading" @click="cancelEditRepository">取消</el-button>
-          </div>
-        </div>
-
-        <div ref="repositoryCreateSectionRef" class="ta-section">
-          <h4 class="ta-section-title">新增版本库</h4>
-          <div class="ta-repository-create-form">
-            <label class="ta-form-field">
-              <span class="ta-form-label">版本库地址</span>
-              <el-input ref="repoGitUrlInputRef" v-model="repoGitUrl" placeholder="Git URL" style="width: 300px" />
-            </label>
-            <div class="ta-inline-form ta-repository-create-name-row">
-              <label class="ta-form-field">
-                <span class="ta-form-label">版本库名称</span>
-                <el-input v-model="repoName" placeholder="中文名称" style="width: 200px" />
-              </label>
-              <label class="ta-form-field">
-                <span class="ta-form-label">版本库英文名称</span>
-                <el-input v-model="repoEnglishName" placeholder="英文名称" style="width: 180px" />
-              </label>
-              <label class="ta-form-field">
-                <span class="ta-form-label">版本库类型</span>
-                <el-select v-model="repoType" aria-label="版本库类型" style="width: 160px">
-                  <el-option v-for="type in repositoryTypes" :key="type.typeCode" :label="type.typeLabel" :value="type.typeCode" />
-                </el-select>
-              </label>
-              <el-tooltip :content="STANDARD_REPOSITORY_TOOLTIP" placement="top">
-                <el-icon class="ta-help-icon" :title="STANDARD_REPOSITORY_TOOLTIP" aria-label="标准库说明">
-                  <InfoFilled />
-                </el-icon>
-              </el-tooltip>
-              <el-button type="primary" :disabled="loading" @click="createRepository">新增</el-button>
-            </div>
-          </div>
-        </div>
-      </div>
+      <!-- 版本库管理已移动到 SettingsRepositoryPanel.vue -->
 
       <!-- 工作空间管理 -->
       <div v-if="selectedAppId && appTab === 'workspaces'" class="ta-panel-content">

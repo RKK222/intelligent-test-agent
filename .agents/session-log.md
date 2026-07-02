@@ -2853,3 +2853,11 @@ bash /tmp/test-api-after-restart.sh
   1. 后端 `ConfigurationManagementControllerTest` 定向测试、前端 `FigmaShell.test.ts` 单元测试全部顺利通过。
   2. 前端 Vitest 217 个测试全量通过，`corepack pnpm typecheck` 成功。
   3. API 接口逻辑安全，未改变表结构、Flyway 迁移，不修改 `generated SDK` 和环境配置文件。
+
+### 2026-07-02 - 重构设置面板以分立应用管理与版本库管理菜单
+
+- Why: 版本库管理是全局系统级配置，不依赖特定的应用；而应用人员管理、应用与版本库关联和工作空间管理是应用级配置，两者合并在同一个“应用与工作空间管理”菜单下会造成布局冗余且不直观。
+- What: 将“应用与工作空间管理”重命名为“应用管理”，并将“版本库管理”抽离为左侧侧边栏中的独立设置菜单“版本库管理”。
+- How: 新建 `SettingsRepositoryPanel.vue`，将原有 `SettingsAppWorkspacePanel.vue` 中的版本库管理（已有版本库列表、编辑、新增）移出；在 `SettingsMenu.vue` 和 `SettingsDialog.vue` 中配置分立菜单项并关联文件夹图标；在 `SettingsAppWorkspacePanel.vue` 中移除版本库管理标签并定义 `switch-menu` 事件向上传播，在用户于应用与版本库关联下拉中选中“添加版本库”时自动跳转；同步重构 unit 和 Playwright 测试。
+- Result: 219 个 Vitest 前端单元测试全部通过，包括新增的 `settings-repository-panel.test.ts`；`corepack pnpm typecheck` 成功；没有对后端 API 接口、事件、数据库结构（Flyway）或 generated SDK 做任何变动。
+

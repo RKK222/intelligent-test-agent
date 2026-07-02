@@ -5,7 +5,7 @@ import type { CurrentUser } from "@test-agent/shared-types";
 import SettingsMenu from "./SettingsMenu.vue";
 import SettingsPanel from "./SettingsPanel.vue";
 
-type MenuKey = "appWorkspace" | "personal" | "userManagement";
+type MenuKey = "appWorkspace" | "repository" | "personal" | "userManagement";
 
 const props = defineProps<{
   open: boolean;
@@ -53,7 +53,7 @@ function selectMenu(key: MenuKey) {
     <div class="ta-settings-shell">
       <SettingsMenu :active-key="activeKey" :current-user="currentUser" @select="selectMenu" />
       <div class="ta-settings-content">
-        <SettingsPanel :active-key="activeKey" :current-user="currentUser" />
+        <SettingsPanel :active-key="activeKey" :current-user="currentUser" @switch-menu="selectMenu" />
       </div>
     </div>
     <template #footer>

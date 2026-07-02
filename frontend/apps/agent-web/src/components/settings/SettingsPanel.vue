@@ -2,6 +2,7 @@
 import { computed, type Component } from "vue";
 import type { CurrentUser } from "@test-agent/shared-types";
 import SettingsAppWorkspacePanel from "./SettingsAppWorkspacePanel.vue";
+import SettingsRepositoryPanel from "./SettingsRepositoryPanel.vue";
 import SettingsPersonalPanel from "./SettingsPersonalPanel.vue";
 import SettingsUserManagementPanel from "./SettingsUserManagementPanel.vue";
 
@@ -12,8 +13,13 @@ const props = defineProps<{
   currentUser: CurrentUser | null;
 }>();
 
+const emit = defineEmits<{
+  (e: "switch-menu", key: string): void;
+}>();
+
 const panels: Record<string, PanelDef> = {
-  appWorkspace: { title: "应用与工作空间管理", component: SettingsAppWorkspacePanel },
+  appWorkspace: { title: "应用管理", component: SettingsAppWorkspacePanel },
+  repository: { title: "版本库管理", component: SettingsRepositoryPanel },
   personal: { title: "个人设置", component: SettingsPersonalPanel },
   userManagement: { title: "用户管理（测试）", component: SettingsUserManagementPanel }
 };
@@ -27,7 +33,7 @@ const current = computed<PanelDef>(() => panels[props.activeKey] ?? panels.appWo
       <h3 class="ta-settings-panel-title">{{ current.title }}</h3>
     </header>
     <div class="ta-settings-panel-body">
-      <component :is="current.component" :current-user="currentUser" />
+      <component :is="current.component" :current-user="currentUser" @switch-menu="(key: string) => emit('switch-menu', key)" />
     </div>
   </div>
 </template>

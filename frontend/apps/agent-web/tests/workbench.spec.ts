@@ -204,7 +204,7 @@ test("settings dialog grants application context to super admin", async ({ page 
   await gotoWorkbench(page);
 
   await page.getByRole("button", { name: "系统设置" }).click();
-  await expect(page.getByRole("button", { name: "应用与工作空间管理" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "应用管理" })).toBeVisible();
   await expect(page.getByText("应用人员管理")).toBeVisible();
   await expect(page.locator(".el-select").filter({ has: page.getByRole("combobox", { name: "应用选择" }) }).getByText("F-GCMS")).toBeVisible();
 });
@@ -235,7 +235,7 @@ test("settings dialog shows permission placeholder for non app admins", async ({
   await gotoWorkbench(page);
 
   await page.getByRole("button", { name: "系统设置" }).click();
-  await expect(page.getByRole("button", { name: "应用与工作空间管理" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "应用管理" })).toBeVisible();
   await expect(page.getByText("您当前角色[USER]无该项设置权限。")).toBeVisible();
   expect(configurationApplicationRequests).toEqual([]);
 });

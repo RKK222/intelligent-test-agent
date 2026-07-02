@@ -225,8 +225,7 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
 
     await findByText("应用人员管理");
     const tabs = Array.from(container.querySelectorAll(".ta-sub-tab-group button")).map((item) => item.textContent?.trim());
-    expect(tabs).toEqual(["应用人员管理", "版本库管理", "应用与版本库关联", "工作空间管理"]);
-    expect(getByText("版本库管理")).toBeTruthy();
+    expect(tabs).toEqual(["应用人员管理", "应用与版本库关联", "工作空间管理"]);
 
     await fireEvent.click(getByText("应用与版本库关联"));
 
@@ -255,87 +254,15 @@ describe("SettingsAppWorkspacePanel repository settings", () => {
     expect(within(repositorySelect).getByText("添加版本库")).toBeTruthy();
   });
 
-  it("switches to repository management and focuses create form from the select create option", async () => {
-    const { findByText, getAllByLabelText, getAllByTitle, getByPlaceholderText, getByText } = renderPanel();
+  it("emits switch-menu event from the select create option", async () => {
+    const { findByText, getAllByLabelText, getByText, emitted } = renderPanel();
 
     await findByText("应用人员管理");
     await fireEvent.click(getByText("应用与版本库关联"));
 
     await fireEvent.update(getAllByLabelText("选择版本库")[0], selectCreateRepositoryValue);
-    expect(await findByText("已有版本库")).toBeTruthy();
-    expect(getByText("共 2 个版本库")).toBeTruthy();
-    await waitFor(() => expect(document.activeElement).toBe(getByPlaceholderText("Git URL")));
-    expect(getAllByTitle("测试工作库等价于原标准库，会按标准库分支规则创建工作空间。").length).toBeGreaterThan(0);
-  });
-
-  it("shows repository count and creates repositories in management tab", async () => {
-    const api = createApi();
-    const { findByText, getByLabelText, getByPlaceholderText, getByText } = renderPanel(api);
-
-    await findByText("应用人员管理");
-    await fireEvent.click(getByText("版本库管理"));
-
-    expect(await findByText("共 2 个版本库")).toBeTruthy();
-    expect(getByText("已有版本库")).toBeTruthy();
-    expect(getByText("新增版本库")).toBeTruthy();
-
-    await fireEvent.update(getByPlaceholderText("Git URL"), "https://gitee.com/mimo/new-repo.git");
-    await fireEvent.update(getByPlaceholderText("中文名称"), "新增测试库");
-    await fireEvent.update(getByPlaceholderText("英文名称"), "NewRepo");
-    await fireEvent.update(getByLabelText("版本库类型"), "TEST_WORK_REPOSITORY");
-    await fireEvent.click(getByText("新增"));
-
-    await waitFor(() => expect(api.createRepository).toHaveBeenCalledWith({
-      gitUrl: "https://gitee.com/mimo/new-repo.git",
-      name: "新增测试库",
-      englishName: "newrepo",
-      repositoryType: "TEST_WORK_REPOSITORY",
-      standard: true
-    }));
-  });
-
-  it("rejects invalid repository english names before calling the backend", async () => {
-    const api = createApi();
-    const { findByText, getByPlaceholderText, getByText } = renderPanel(api);
-
-    await findByText("应用人员管理");
-    await fireEvent.click(getByText("版本库管理"));
-
-    await fireEvent.update(getByPlaceholderText("Git URL"), "https://gitee.com/mimo/new-repo.git");
-    await fireEvent.update(getByPlaceholderText("中文名称"), "新增测试库");
-    await fireEvent.update(getByPlaceholderText("英文名称"), "new-repo");
-    await fireEvent.click(getByText("新增"));
-
-    expect(await findByText("版本库英文名称只能输入 1 到 29 位英文字母")).toBeTruthy();
-    expect(api.createRepository).not.toHaveBeenCalled();
-  });
-
-  it("labels repository management forms and cancels repository editing", async () => {
-    const { container, findByText, getAllByText, getByPlaceholderText, getByText, queryByPlaceholderText, queryByText } = renderPanel();
-
-    await findByText("应用人员管理");
-    await fireEvent.click(getByText("版本库管理"));
-
-    expect(await findByText("版本库地址")).toBeTruthy();
-    expect(getAllByText("版本库名称").length).toBeGreaterThanOrEqual(1);
-    expect(getAllByText("版本库英文名称").length).toBeGreaterThanOrEqual(1);
-    const createNameRow = container.querySelector(".ta-repository-create-name-row");
-    expect(createNameRow?.textContent).toContain("版本库名称");
-    expect(createNameRow?.textContent).toContain("版本库英文名称");
-    expect(createNameRow?.textContent).toContain("版本库类型");
-    expect(createNameRow?.querySelector("input")?.getAttribute("placeholder")).toBe("中文名称");
-
-    await fireEvent.click(getAllByText("编辑")[0]);
-    expect(getByText("取消")).toBeTruthy();
-    expect(getAllByText("版本库名称").length).toBeGreaterThanOrEqual(2);
-    expect(getAllByText("版本库英文名称").length).toBeGreaterThanOrEqual(2);
-    expect(getByText("类型：测试工作库")).toBeTruthy();
-
-    await fireEvent.update(getByPlaceholderText("名称"), "临时名称");
-    await fireEvent.click(getByText("取消"));
-
-    expect(queryByText("取消")).toBeNull();
-    expect(queryByPlaceholderText("名称")).toBeNull();
+    expect(emitted()["switch-menu"]).toBeTruthy();
+    expect(emitted()["switch-menu"][0]).toEqual(["repository"]);
   });
 
   it("shows workspace creation as three labeled steps", async () => {

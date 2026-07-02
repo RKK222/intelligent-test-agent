@@ -136,7 +136,7 @@ describe("runtime management settings", () => {
       }
     });
 
-    expect(superAdmin.getByText("应用与工作空间管理")).toBeTruthy();
+    expect(superAdmin.getByText("应用管理")).toBeTruthy();
     expect(superAdmin.queryByText("应用与工作区")).toBeNull();
     expect(superAdmin.queryByText("运行管理")).toBeNull();
     superAdmin.unmount();
@@ -174,7 +174,7 @@ describe("runtime management settings", () => {
       }
     });
 
-    expect(view.getByText("应用与工作空间管理")).toBeTruthy();
+    expect(view.getByText("应用管理")).toBeTruthy();
     expect(view.queryByText("应用与工作区")).toBeNull();
   });
 
