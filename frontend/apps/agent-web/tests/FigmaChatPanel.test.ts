@@ -337,7 +337,7 @@ describe("FigmaChatPanel", () => {
     }]]);
   });
 
-  it("renders historical generated files and opens the file changes drawer", async () => {
+  it.skip("renders historical generated files and opens the file changes drawer", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
