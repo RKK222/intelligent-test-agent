@@ -88,7 +88,7 @@ const ElInputStub = defineComponent({
   }
 });
 
-function renderPanel(api = createApi()) {
+function renderPanel(api = createApi(), extraProps = {}) {
   return render(SettingsRepositoryPanel, {
     props: {
       currentUser: {
@@ -96,7 +96,8 @@ function renderPanel(api = createApi()) {
         username: "admin",
         unifiedAuthId: "AUTH_ADMIN",
         roles: ["APP_ADMIN"]
-      }
+      },
+      ...extraProps
     },
     global: {
       stubs: {
@@ -107,6 +108,28 @@ function renderPanel(api = createApi()) {
         ElButton: {
           emits: ["click"],
           template: `<button type="button" @click="$emit('click')"><slot /></button>`
+        },
+        ElDialog: {
+          props: ["modelValue", "title"],
+          emits: ["update:modelValue", "opened"],
+          watch: {
+            modelValue: {
+              handler(val) {
+                if (val) {
+                  this.$nextTick(() => this.$emit('opened'));
+                }
+              },
+              immediate: true
+            }
+          },
+          template: `<div v-if="modelValue" class="el-dialog-stub" role="dialog"><h3>{{ title }}</h3><slot /><slot name="footer" /></div>`
+        },
+        ElForm: {
+          template: `<form><slot /></form>`
+        },
+        ElFormItem: {
+          props: ["label"],
+          template: `<div><label>{{ label }}</label><slot /></div>`
         },
         ElIcon: {
           template: `<span><slot /></span>`
@@ -132,26 +155,29 @@ describe("SettingsRepositoryPanel settings", () => {
   });
 
   it("shows repository count and lists existing repositories", async () => {
-    const { findByText, getByText } = renderPanel();
+    const { findByText, getByText, queryByText } = renderPanel();
 
     expect(await findByText("共 2 个版本库")).toBeTruthy();
     expect(getByText("已有版本库")).toBeTruthy();
-    expect(getByText("新增版本库")).toBeTruthy();
+    expect(queryByText("新增版本库")).toBeNull();
     expect(getByText("F-WRTESTAPP 本地测试库")).toBeTruthy();
     expect(getByText("MIMO 示例库")).toBeTruthy();
   });
 
   it("creates repositories in management tab", async () => {
     const api = createApi();
-    const { findByText, getByLabelText, getByPlaceholderText, getByText } = renderPanel(api);
+    const { findByText, getByLabelText, getByPlaceholderText, getByText, container } = renderPanel(api);
 
     expect(await findByText("共 2 个版本库")).toBeTruthy();
+
+    await fireEvent.click(getByText("新增")); // Open dialog
+    expect(container.querySelector(".el-dialog-stub")).toBeTruthy();
 
     await fireEvent.update(getByPlaceholderText("Git URL"), "https://gitee.com/mimo/new-repo.git");
     await fireEvent.update(getByPlaceholderText("中文名称"), "新增测试库");
     await fireEvent.update(getByPlaceholderText("英文名称"), "NewRepo");
     await fireEvent.update(getByLabelText("版本库类型"), "TEST_WORK_REPOSITORY");
-    await fireEvent.click(getByText("新增"));
+    await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("新增"));
 
     await waitFor(() => expect(api.createRepository).toHaveBeenCalledWith({
       gitUrl: "https://gitee.com/mimo/new-repo.git",
@@ -164,14 +190,16 @@ describe("SettingsRepositoryPanel settings", () => {
 
   it("rejects invalid repository english names before calling the backend", async () => {
     const api = createApi();
-    const { findByText, getByPlaceholderText, getByText } = renderPanel(api);
+    const { findByText, getByPlaceholderText, getByText, container } = renderPanel(api);
 
     expect(await findByText("共 2 个版本库")).toBeTruthy();
+
+    await fireEvent.click(getByText("新增")); // Open dialog
 
     await fireEvent.update(getByPlaceholderText("Git URL"), "https://gitee.com/mimo/new-repo.git");
     await fireEvent.update(getByPlaceholderText("中文名称"), "新增测试库");
     await fireEvent.update(getByPlaceholderText("英文名称"), "new-repo");
-    await fireEvent.click(getByText("新增"));
+    await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("新增"));
 
     expect(await findByText("版本库英文名称只能输入 1 到 29 位英文字母")).toBeTruthy();
     expect(api.createRepository).not.toHaveBeenCalled();
@@ -181,19 +209,18 @@ describe("SettingsRepositoryPanel settings", () => {
     const { container, findByText, getAllByText, getByPlaceholderText, getByText, queryByPlaceholderText, queryByText } = renderPanel();
 
     expect(await findByText("共 2 个版本库")).toBeTruthy();
+    
+    await fireEvent.click(getByText("新增")); // Open dialog
     expect(await findByText("版本库地址")).toBeTruthy();
     expect(getAllByText("版本库名称").length).toBeGreaterThanOrEqual(1);
     expect(getAllByText("版本库英文名称").length).toBeGreaterThanOrEqual(1);
-    const createNameRow = container.querySelector(".ta-repository-create-name-row");
-    expect(createNameRow?.textContent).toContain("版本库名称");
-    expect(createNameRow?.textContent).toContain("版本库英文名称");
-    expect(createNameRow?.textContent).toContain("版本库类型");
-    expect(createNameRow?.querySelector("input")?.getAttribute("placeholder")).toBe("中文名称");
+
+    await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("取消")); // Close dialog
 
     await fireEvent.click(getAllByText("编辑")[0]);
     expect(getByText("取消")).toBeTruthy();
-    expect(getAllByText("版本库名称").length).toBeGreaterThanOrEqual(2);
-    expect(getAllByText("版本库英文名称").length).toBeGreaterThanOrEqual(2);
+    expect(getAllByText("版本库名称").length).toBeGreaterThanOrEqual(1);
+    expect(getAllByText("版本库英文名称").length).toBeGreaterThanOrEqual(1);
     expect(getByText("类型：测试工作库")).toBeTruthy();
 
     await fireEvent.update(getByPlaceholderText("名称"), "临时名称");
@@ -201,5 +228,11 @@ describe("SettingsRepositoryPanel settings", () => {
 
     expect(queryByText("取消")).toBeNull();
     expect(queryByPlaceholderText("名称")).toBeNull();
+  });
+
+  it("automatically opens the dialog when autoOpenCreate prop is true", async () => {
+    const { container, findByText } = renderPanel(createApi(), { autoOpenCreate: true });
+    expect(await findByText("共 2 个版本库")).toBeTruthy();
+    expect(container.querySelector(".el-dialog-stub")).toBeTruthy();
   });
 });

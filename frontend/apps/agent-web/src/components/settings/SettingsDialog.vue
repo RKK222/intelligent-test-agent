@@ -21,12 +21,14 @@ const api = createBackendApiClient({ baseUrl: apiBaseUrl });
 provide("api", api);
 
 const activeKey = ref<MenuKey>("appWorkspace");
+const autoOpenCreate = ref(false);
 
 watch(
   () => props.open,
   (open) => {
     if (open) {
       activeKey.value = "appWorkspace";
+      autoOpenCreate.value = false;
     }
   }
 );
@@ -35,8 +37,18 @@ function close() {
   emit("close");
 }
 
+function handleSwitchMenu(key: MenuKey) {
+  if (key === "repository") {
+    autoOpenCreate.value = true;
+  }
+  selectMenu(key);
+}
+
 function selectMenu(key: MenuKey) {
   activeKey.value = key;
+  if (key !== "repository") {
+    autoOpenCreate.value = false;
+  }
 }
 </script>
 
@@ -53,7 +65,7 @@ function selectMenu(key: MenuKey) {
     <div class="ta-settings-shell">
       <SettingsMenu :active-key="activeKey" :current-user="currentUser" @select="selectMenu" />
       <div class="ta-settings-content">
-        <SettingsPanel :active-key="activeKey" :current-user="currentUser" @switch-menu="selectMenu" />
+        <SettingsPanel :active-key="activeKey" :current-user="currentUser" :auto-open-create="autoOpenCreate" @switch-menu="handleSwitchMenu" />
       </div>
     </div>
     <template #footer>

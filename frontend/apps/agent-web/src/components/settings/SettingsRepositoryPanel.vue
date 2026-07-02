@@ -19,12 +19,14 @@ const DEFAULT_REPOSITORY_TYPES: RepositoryTypeOption[] = [
 
 const props = defineProps<{
   currentUser: CurrentUser | null;
+  autoOpenCreate?: boolean;
 }>();
 
 const api = inject<BackendApiClient>("api")!;
 
 const loading = ref(false);
 const errorMessage = ref("");
+const createDialogVisible = ref(false);
 
 // 权限
 const currentRoles = computed(() => props.currentUser?.roles ?? []);
@@ -43,7 +45,6 @@ const editRepositoryId = ref("");
 const editRepositoryName = ref("");
 const editRepositoryEnglishName = ref("");
 const editRepositoryTypeLabel = ref("");
-const repositoryCreateSectionRef = ref<HTMLElement | null>(null);
 const repoGitUrlInputRef = ref<{ focus: () => void } | null>(null);
 
 async function run(action: () => Promise<void>) {
@@ -122,6 +123,7 @@ async function createRepository() {
     repoName.value = "";
     repoEnglishName.value = "";
     repoType.value = APPLICATION_CODE_REPOSITORY_TYPE;
+    createDialogVisible.value = false;
     await loadRepositories();
   });
 }
@@ -166,12 +168,18 @@ watch(() => props.currentUser, async (user) => {
   }
 }, { immediate: true });
 
-onMounted(() => {
+watch(() => props.autoOpenCreate, (val) => {
+  if (val) {
+    createDialogVisible.value = true;
+  }
+}, { immediate: true });
+
+function focusGitUrlInput() {
   // 延迟聚焦才能稳定落到 Git URL 输入框
   window.setTimeout(() => {
     repoGitUrlInputRef.value?.focus();
   }, 100);
-});
+}
 </script>
 
 <template>
@@ -182,7 +190,7 @@ onMounted(() => {
     </div>
 
     <template v-else>
-      <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon class="ta-error" />
+      <el-alert v-if="errorMessage && !createDialogVisible" :title="errorMessage" type="error" :closable="false" show-icon class="ta-error" />
 
       <div class="ta-panel-content">
         <div class="ta-section">
@@ -191,6 +199,7 @@ onMounted(() => {
             <div class="ta-section-actions">
               <span class="ta-count-badge">共 {{ repositoryTotal }} 个版本库</span>
               <el-button :disabled="loading" @click="loadRepositories">刷新</el-button>
+              <el-button type="primary" @click="createDialogVisible = true">新增</el-button>
             </div>
           </div>
           <div v-for="repo in repositories" :key="repo.repositoryId" class="ta-item-row ta-edit-item">
@@ -216,37 +225,44 @@ onMounted(() => {
           </div>
         </div>
 
-        <div ref="repositoryCreateSectionRef" class="ta-section">
-          <h4 class="ta-section-title">新增版本库</h4>
-          <div class="ta-repository-create-form">
-            <label class="ta-form-field">
-              <span class="ta-form-label">版本库地址</span>
-              <el-input ref="repoGitUrlInputRef" v-model="repoGitUrl" placeholder="Git URL" style="width: 300px" />
-            </label>
-            <div class="ta-inline-form ta-repository-create-name-row">
-              <label class="ta-form-field">
-                <span class="ta-form-label">版本库名称</span>
-                <el-input v-model="repoName" placeholder="中文名称" style="width: 200px" />
-              </label>
-              <label class="ta-form-field">
-                <span class="ta-form-label">版本库英文名称</span>
-                <el-input v-model="repoEnglishName" placeholder="英文名称" style="width: 180px" />
-              </label>
-              <label class="ta-form-field">
-                <span class="ta-form-label">版本库类型</span>
+        <!-- 新增版本库弹窗 -->
+        <el-dialog
+          v-model="createDialogVisible"
+          title="新增版本库"
+          width="540px"
+          :close-on-click-modal="false"
+          align-center
+          @opened="focusGitUrlInput"
+        >
+          <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon class="ta-error" style="margin-bottom: 16px;" />
+          <el-form label-width="120px">
+            <el-form-item label="版本库地址">
+              <el-input ref="repoGitUrlInputRef" v-model="repoGitUrl" placeholder="Git URL" />
+            </el-form-item>
+            <el-form-item label="版本库名称">
+              <el-input v-model="repoName" placeholder="中文名称" />
+            </el-form-item>
+            <el-form-item label="版本库英文名称">
+              <el-input v-model="repoEnglishName" placeholder="英文名称" />
+            </el-form-item>
+            <el-form-item label="版本库类型">
+              <div style="display: flex; align-items: center; gap: 8px;">
                 <el-select v-model="repoType" aria-label="版本库类型" style="width: 160px">
                   <el-option v-for="type in repositoryTypes" :key="type.typeCode" :label="type.typeLabel" :value="type.typeCode" />
                 </el-select>
-              </label>
-              <el-tooltip :content="STANDARD_REPOSITORY_TOOLTIP" placement="top">
-                <el-icon class="ta-help-icon" :title="STANDARD_REPOSITORY_TOOLTIP" aria-label="标准库说明">
-                  <InfoFilled />
-                </el-icon>
-              </el-tooltip>
-              <el-button type="primary" :disabled="loading" @click="createRepository">新增</el-button>
-            </div>
-          </div>
-        </div>
+                <el-tooltip :content="STANDARD_REPOSITORY_TOOLTIP" placement="top">
+                  <el-icon class="ta-help-icon" :title="STANDARD_REPOSITORY_TOOLTIP" aria-label="标准库说明">
+                    <InfoFilled />
+                  </el-icon>
+                </el-tooltip>
+              </div>
+            </el-form-item>
+          </el-form>
+          <template #footer>
+            <el-button @click="createDialogVisible = false">取消</el-button>
+            <el-button type="primary" :disabled="loading" @click="createRepository">新增</el-button>
+          </template>
+        </el-dialog>
       </div>
     </template>
   </div>
