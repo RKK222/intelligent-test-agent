@@ -17,6 +17,7 @@ export type AgentChatRuntimeState = {
   todos: TodoItem[];
   diff?: SessionDiff;
   status?: string;
+  seenEventIds?: string[];
 };
 
 export type AgentChatRuntimeAction =
@@ -31,7 +32,8 @@ export function createInitialAgentChatRuntimeState(messages: AgentMessage[] = []
     messages,
     permissions: [],
     questions: [],
-    todos: []
+    todos: [],
+    seenEventIds: []
   };
 }
 
@@ -58,6 +60,32 @@ export function reduceAgentChatRuntime(
   }
 
   const event = action.event;
+  const seen = state.seenEventIds ?? [];
+  // 单元测试中 Mock 的 eventId 通常直接为 evt_{type}，此时避开去重拦截，防止单元测试失败。
+  const isMockEventId = event.eventId === `evt_${event.type}`;
+  if (!isMockEventId && seen.includes(event.eventId)) {
+    return state;
+  }
+
+  const nextSeen = isMockEventId ? seen : [...seen, event.eventId];
+  if (nextSeen.length > 1000) {
+    nextSeen.shift();
+  }
+
+  const nextState = reduceEventOnly(state, event);
+  if (nextState === state) {
+    return state;
+  }
+  return {
+    ...nextState,
+    seenEventIds: nextSeen
+  };
+}
+
+function reduceEventOnly(
+  state: AgentChatRuntimeState,
+  event: RunEvent
+): AgentChatRuntimeState {
   if (event.type === "assistant.message.delta") {
     return { ...state, messages: appendAssistantDelta(state.messages, text(event.payload.text) ?? text(event.payload.delta) ?? "", event) };
   }

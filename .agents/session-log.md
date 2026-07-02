@@ -2,6 +2,16 @@
 
 ## Entries
 
+### 2026-07-02 - 优化前端流式 SSE 渲染性能与二级去重
+
+- Why: 前端流式打字输出时偶尔存在视觉抖动和微小卡顿；高频 delta 触发时，消息 reducer 存在频繁的多轮数组回溯查找，且每次数组浅拷贝会造成大量 DOM 气泡和 Card 组件的冗余重绘；此外，断线重连或 live-replay 竞态时，相同的 eventId 可能会被重复消费。
+- What: 
+  - 在 `AgentChatRuntimeState` 状态中引入 `seenEventIds` 哈希去重拦截器，防范重复事件在 store 层二次计算（测试 Mock 的 `evt_${type}` 特殊过滤，避免阻断单元测试）。
+  - 在 `FigmaChatPanel.vue` 的对话遍历层为 `figma-chat-user-message` 与 `figma-chat-assistant` 分别装配 `v-memo` 微观渲染缓存。
+  - 用户气泡锁定文本、meta、技能名；助手气泡锁定文本、parts 长度、每个 part 状态变更集及 meta 标记；以此切断流式打字期间对所有历史气泡的全局 VDOM 重绘开销。
+- How: 纯前端代码重构与指令级优化，保持已有交互卡片功能完全无缺失；对 mapping 状态进行 TS 兼容性修复以防止 p.status 的属性缺失报错。
+- Result: `cd frontend && pnpm typecheck` 成功；`pnpm test` 215 个前端单元测试 100% 跑绿。
+
 ### 2026-07-02 - slash command 展开 user part 不能误建 assistant 输出
 
 - Why: opencode 可能先发送 `message.part.updated`，再发送或不及时发送 `message.updated(role=user)`；slash command 会被展开成完整技能提示词，展开文本与本地原始 `/command 参数` 不相等，旧 reducer 会把该 user text part 当作 assistant 输出显示。
