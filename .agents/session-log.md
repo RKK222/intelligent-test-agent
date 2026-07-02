@@ -2,6 +2,25 @@
 
 ## Entries
 
+### 2026-07-02 - 版本库新增校验和内部模式字段控制
+
+- Why: 内部部署模式下，版本库英文名称应自动根据 Git 地址生成且不允许人工编辑。同时，新建版本库表单中的版本库类型应默认为空且必选，版本库名称也应当是必输项。
+- What:
+  - 内部部署模式下，将版本库英文名称输入框设为 disabled，且每次修改 Git 地址时强制自动派生最新英文名。
+  - 版本库类型 `repoType` 默认值初始化为空字符串 `""`，并且添加下拉选择 placeholder 提示。
+  - 新增版本库时增加表单校验：版本库名称不能为空，版本库类型不能为空。
+- How:
+  - 修改 `SettingsRepositoryPanel.vue`：
+    - `repoType` ref 初始化为 `""`。
+    - `openCreateRepositoryDialog` 内对 `repoGitUrl`、`repoName`、`repoEnglishName`、`repoEnglishNameTouched` 和 `repoType` 进行初始化置空。
+    - 调整 `syncDerivedEnglishName`，如果 `currentCreateInternal` 为 true，强制覆盖更新 `repoEnglishName`，不受 `repoEnglishNameTouched` 标记影响。
+    - 绑定 `el-input` 的 `:disabled="currentCreateInternal"`。
+    - 在 `createRepository` 中增加针对 `repoName` 与 `repoType` 的非空校验，失败时分别提示 "请输入版本库名称" 和 "请选择版本库类型" 并返回。
+  - 修改 `settings-repository-panel.test.ts`：
+    - 修改 mock stub `ElInputStub` 绑定 `disabled` 属性到原生 `input`。
+    - 调整原有测试用例以在点击“新增”前选择版本库类型，并新增校验及字段禁用的回归测试用例。
+- Result: 前端 `corepack pnpm test settings-repository-panel` (11 个测试) 与 `corepack pnpm typecheck` 全部通过。未修改 generated SDK、后端 API 协议或环境配置文件。
+
 ### 2026-07-02 - 用户 opencode 进程按服务器名称展示和解析
 
 - Why: `linuxServerId` 已改为稳定服务器身份后，用户绑定状态仍可能把服务器名当网络地址拼成 `server-a:port`，导致头像菜单、右侧状态卡和降级响应展示伪地址，后续启动/校验也容易混淆服务器身份与当前可访问 host。

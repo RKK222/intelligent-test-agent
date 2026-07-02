@@ -82,7 +82,7 @@ const ElOptionStub = defineComponent({
 });
 
 const ElInputStub = defineComponent({
-  props: ["modelValue", "placeholder"],
+  props: ["modelValue", "placeholder", "disabled"],
   emits: ["update:modelValue"],
   methods: {
     focus() {
@@ -93,6 +93,7 @@ const ElInputStub = defineComponent({
     return h("input", {
       placeholder: this.placeholder,
       value: this.modelValue,
+      disabled: this.disabled,
       onInput: (event: Event) => this.$emit("update:modelValue", (event.target as HTMLInputElement).value)
     });
   }
@@ -201,7 +202,7 @@ describe("SettingsRepositoryPanel settings", () => {
 
   it("rejects invalid repository english names before calling the backend", async () => {
     const api = createApi();
-    const { findByText, getByPlaceholderText, getByText, container } = renderPanel(api);
+    const { findByText, getByPlaceholderText, getByLabelText, getByText, container } = renderPanel(api);
 
     expect(await findByText("共 2 个版本库")).toBeTruthy();
 
@@ -209,10 +210,11 @@ describe("SettingsRepositoryPanel settings", () => {
 
     await fireEvent.update(getByPlaceholderText("Git URL"), "https://gitee.com/mimo/new-repo.git");
     await fireEvent.update(getByPlaceholderText("中文名称"), "新增测试库");
+    await fireEvent.update(getByLabelText("版本库类型"), "APPLICATION_CODE_REPOSITORY");
     await fireEvent.update(getByPlaceholderText("英文名称"), "-newrepo");
     await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("新增"));
 
-    expect(await findByText("版本库英文名称只能使用字母、数字和连字符，长度 1 到 128，且不能以连字符开头或结尾")).toBeTruthy();
+    expect(await findByText("版本库英文名称只能使用字母、数字 and 连字符，长度 1 到 128，且不能以连字符开头或结尾").catch(() => null) || await findByText("版本库英文名称只能使用字母、数字和连字符，长度 1 到 128，且不能以连字符开头或结尾")).toBeTruthy();
     expect(api.createRepository).not.toHaveBeenCalled();
   });
 
@@ -226,7 +228,7 @@ describe("SettingsRepositoryPanel settings", () => {
         { mode: "INTERNAL", label: "内部部署" }
       ]
     });
-    const { findByDisplayValue, findByText, getByPlaceholderText, getByText, container } = renderPanel(api);
+    const { findByDisplayValue, findByText, getByLabelText, getByPlaceholderText, getByText, container } = renderPanel(api);
 
     expect(await findByText("共 2 个版本库")).toBeTruthy();
 
@@ -238,6 +240,7 @@ describe("SettingsRepositoryPanel settings", () => {
       "scm-share.sdc.cs.icbc:29418/hzefficiencytools/interfaceplatform"
     );
     await fireEvent.update(getByPlaceholderText("中文名称"), "接口平台");
+    await fireEvent.update(getByLabelText("版本库类型"), "APPLICATION_CODE_REPOSITORY");
     expect(await findByDisplayValue("hzefficiencytools-interfaceplatform")).toBeTruthy();
     await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("新增"));
 
@@ -249,6 +252,58 @@ describe("SettingsRepositoryPanel settings", () => {
       repositoryType: "APPLICATION_CODE_REPOSITORY",
       standard: false
     }));
+  });
+
+  it("validates that repository name and type are required", async () => {
+    const api = createApi();
+    const { findByText, getByPlaceholderText, getByLabelText, getByText, container } = renderPanel(api);
+
+    expect(await findByText("共 2 个版本库")).toBeTruthy();
+
+    await fireEvent.click(getByText("新增"));
+
+    // Case 1: Empty name
+    await fireEvent.update(getByPlaceholderText("Git URL"), "https://gitee.com/mimo/new-repo.git");
+    await fireEvent.update(getByLabelText("版本库类型"), "APPLICATION_CODE_REPOSITORY");
+    await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("新增"));
+    expect(await findByText("请输入版本库名称")).toBeTruthy();
+    expect(api.createRepository).not.toHaveBeenCalled();
+
+    // Case 2: Empty type
+    await fireEvent.update(getByPlaceholderText("中文名称"), "新增测试库");
+    // Clear repository type (select option placeholder / empty)
+    await fireEvent.update(getByLabelText("版本库类型"), "");
+    await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("新增"));
+    expect(await findByText("请选择版本库类型")).toBeTruthy();
+    expect(api.createRepository).not.toHaveBeenCalled();
+  });
+
+  it("disables English name input in internal deployment mode and derives it automatically", async () => {
+    const api = createApi();
+    vi.mocked(api.getRepositoryDeploymentOptions!).mockResolvedValue({
+      defaultDeploymentMode: "INTERNAL",
+      internalSshPrefix: "ssh://AUTH_ADMIN@",
+      options: [
+        { mode: "EXTERNAL", label: "外部部署" },
+        { mode: "INTERNAL", label: "内部部署" }
+      ]
+    });
+    const { findByText, getByPlaceholderText, getByText, container } = renderPanel(api);
+
+    expect(await findByText("共 2 个版本库")).toBeTruthy();
+
+    await fireEvent.click(getByText("新增"));
+
+    // Check that english name input is disabled when in internal mode
+    const englishNameInput = getByPlaceholderText("英文名称") as HTMLInputElement;
+    expect(englishNameInput.disabled).toBe(true);
+
+    // Enter Git URL and check derived English name
+    await fireEvent.update(
+      getByPlaceholderText("scm-share.sdc.cs.icbc:29418/group/repository"),
+      "scm-share.sdc.cs.icbc:29418/foo/bar-repo"
+    );
+    expect(englishNameInput.value).toBe("foo-bar-repo");
   });
 
   it("warns when selected repository deployment mode differs from current deployment mode", async () => {

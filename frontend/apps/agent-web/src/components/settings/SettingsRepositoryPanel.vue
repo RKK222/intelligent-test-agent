@@ -55,7 +55,7 @@ const repoName = ref("");
 const repoEnglishName = ref("");
 const repoEnglishNameTouched = ref(false);
 const repoDeploymentMode = ref(EXTERNAL_DEPLOYMENT_MODE);
-const repoType = ref(APPLICATION_CODE_REPOSITORY_TYPE);
+const repoType = ref("");
 const editRepositoryId = ref("");
 const editRepositoryName = ref("");
 const editRepositoryEnglishName = ref("");
@@ -165,8 +165,12 @@ function deriveInternalRepositoryEnglishName(gitUrl: string) {
 }
 
 function syncDerivedEnglishName() {
-  if (!currentCreateInternal.value || repoEnglishNameTouched.value) return;
-  repoEnglishName.value = deriveInternalRepositoryEnglishName(repoGitUrl.value);
+  if (currentCreateInternal.value) {
+    repoEnglishName.value = deriveInternalRepositoryEnglishName(repoGitUrl.value);
+  } else {
+    if (repoEnglishNameTouched.value) return;
+    repoEnglishName.value = "";
+  }
 }
 
 function markRepositoryEnglishNameTouched(value: string) {
@@ -177,6 +181,11 @@ function markRepositoryEnglishNameTouched(value: string) {
 function openCreateRepositoryDialog() {
   errorMessage.value = "";
   repoDeploymentMode.value = repositoryDeploymentOptions.value.defaultDeploymentMode || EXTERNAL_DEPLOYMENT_MODE;
+  repoGitUrl.value = "";
+  repoName.value = "";
+  repoEnglishName.value = "";
+  repoEnglishNameTouched.value = false;
+  repoType.value = "";
   syncDerivedEnglishName();
   createDialogVisible.value = true;
 }
@@ -186,6 +195,14 @@ function closeCreateRepositoryDialog() {
 }
 
 async function createRepository() {
+  if (!repoName.value.trim()) {
+    errorMessage.value = "请输入版本库名称";
+    return;
+  }
+  if (!repoType.value) {
+    errorMessage.value = "请选择版本库类型";
+    return;
+  }
   const resolvedEnglishName = repoEnglishName.value || (currentCreateInternal.value ? deriveInternalRepositoryEnglishName(repoGitUrl.value) : "");
   const englishName = normalizeRepositoryEnglishName(resolvedEnglishName);
   if (!englishName) {
@@ -206,7 +223,7 @@ async function createRepository() {
     repoEnglishName.value = "";
     repoEnglishNameTouched.value = false;
     repoDeploymentMode.value = repositoryDeploymentOptions.value.defaultDeploymentMode || EXTERNAL_DEPLOYMENT_MODE;
-    repoType.value = APPLICATION_CODE_REPOSITORY_TYPE;
+    repoType.value = "";
     createDialogVisible.value = false;
     await loadRepositories();
   });
@@ -349,11 +366,11 @@ function focusEditNameInput() {
               <el-input v-model="repoName" placeholder="中文名称" />
             </el-form-item>
             <el-form-item label="版本库英文名称">
-              <el-input :model-value="repoEnglishName" placeholder="英文名称" @update:model-value="markRepositoryEnglishNameTouched" />
+              <el-input :model-value="repoEnglishName" placeholder="英文名称" :disabled="currentCreateInternal" @update:model-value="markRepositoryEnglishNameTouched" />
             </el-form-item>
             <el-form-item label="版本库类型">
               <div style="display: flex; align-items: center; gap: 8px;">
-                <el-select v-model="repoType" aria-label="版本库类型" style="width: 160px">
+                <el-select v-model="repoType" aria-label="版本库类型" placeholder="选择版本库类型" style="width: 160px">
                   <el-option v-for="type in repositoryTypes" :key="type.typeCode" :label="type.typeLabel" :value="type.typeCode" />
                 </el-select>
                 <el-tooltip :content="STANDARD_REPOSITORY_TOOLTIP" placement="top">
