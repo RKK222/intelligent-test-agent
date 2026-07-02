@@ -2220,7 +2220,11 @@ function onCompositionEnd() {
     <div ref="scrollEl" class="figma-chat-scroll">
       <template v-for="message in displayMessages" :key="message.id">
         <!-- 用户消息气泡 (右对齐) -->
-        <div v-if="message.role === 'user'" class="figma-chat-user-message">
+        <div
+          v-if="message.role === 'user'"
+          class="figma-chat-user-message"
+          v-memo="[message.content, message.meta, message._skillName]"
+        >
           <div class="figma-chat-user-meta-row">
             <div v-if="message.meta" class="figma-chat-bubble-meta">
               你 · {{ message.meta }}
@@ -2241,7 +2245,17 @@ function onCompositionEnd() {
         </div>
 
         <!-- 助手消息 (左对齐) -->
-        <div v-else class="figma-chat-assistant">
+        <div
+          v-else
+          class="figma-chat-assistant"
+          v-memo="[
+            message.content,
+            message.meta,
+            message.parts?.length,
+            message.parts?.map(p => ('status' in p ? p.status : '')).join(','),
+            message._error
+          ]"
+        >
           <div class="figma-chat-avatar">
             <img :src="aiHeaderUrl" alt="AI" class="figma-chat-avatar-icon" />
           </div>
