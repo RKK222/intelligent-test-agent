@@ -63,6 +63,15 @@ class ManagedWorkspaceApplicationServiceTest {
     Path root;
 
     @Test
+    void personalWorkspaceCreationUsesOneSharedCreator() throws Exception {
+        Path sourcePath = Path.of(System.getProperty("user.dir"))
+                .resolve("src/main/java/com/icbc/testagent/workspace/ManagedWorkspaceApplicationService.java");
+        String source = Files.readString(sourcePath);
+
+        assertThat(source).doesNotContain("doCreatePersonalWorkspaceWithName(");
+    }
+
+    @Test
     void createsStandardApplicationVersionWorkspaceAndRecordsRecentUsage() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();

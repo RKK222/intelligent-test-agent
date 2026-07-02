@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-02 - 复用自定义与 default 个人 worktree 创建流程
+
+- Why: 自定义命名个人工作区和自动确保的 default 个人工作区都创建个人 worktree、运行态 Workspace、PersonalWorkspace 并写入 recent，原先保留了两套几乎相同的私有创建方法。
+- What: `ManagedWorkspaceApplicationService` 抽出共享个人工作区创建核心和分支生成 helper；自定义命名入口与 default 自动创建入口复用同一流程，并保留各自当前副本获取策略。
+- How: default 旧记录 repair 继续单独处理路径修复；新增结构回归测试防止重新引入 `doCreatePersonalWorkspaceWithName` 复制流程。
+- Result: `mvn -pl test-agent-workspace-management -am -Dtest=ManagedWorkspaceApplicationServiceTest -DfailIfNoTests=false -Dsurefire.failIfNoSpecifiedTests=false test` 通过；不涉及 API、事件、数据库、前端 UI 或环境配置。
+
 ### 2026-07-02 - 合并未推送提交并保留未跟踪文件 Diff patch
 
 - Why: 本地 `main` 与最新 `origin/main` 已分叉，需要把本地未推送提交压成一个提交并保留远端新增修复；冲突合并时工作区 Git Diff 解析从业务层迁到 `GitWorkspaceService` 后，未跟踪文件的 pseudo patch 行为不能丢失，否则前端 Diff 视图会显示空 patch。

@@ -638,15 +638,32 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String traceId) {
         ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(versionId));
         ensureMember(version.appId(), userId);
+        return createPersonalWorkspaceForVersion(
+                version,
+                workspaceName,
+                userId,
+                traceId,
+                PersonalWorkspaceReplicaMode.ENSURE_LOCAL);
+    }
+
+    /**
+     * 自定义命名个人工作区和 default 个人工作区共用同一套落库流程。
+     * 调用方负责成员校验，并通过 replicaMode 明确选择是否先确保本机应用版本副本。
+     */
+    private ManagedWorkspaceResponses.PersonalWorkspaceResponse createPersonalWorkspaceForVersion(
+            ApplicationWorkspaceVersion version,
+            String workspaceName,
+            UserId userId,
+            String traceId,
+            PersonalWorkspaceReplicaMode replicaMode) {
         ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
         String normalizedName = requireText(workspaceName, "个人工作区名称不能为空", "workspaceName");
         PersonalWorkspaceId personalId = new PersonalWorkspaceId(RuntimeIdGenerator.personalWorkspaceId());
-        String sanitizedName = sanitizeBranchPart(normalizedName);
-        String branch = version.branch() + "_" + sanitizeBranchPart(userId.value()) + "_" + sanitizedName;
+        String branch = personalWorkspaceBranch(version, userId, normalizedName);
         Path repoRoot = personalRepoRootWithName(version, userId, branch);
         Path workspaceRoot = repoRoot.resolve(template.directoryPath()).normalize();
         CodeRepository repository = existingRepository(version.repositoryId());
-        ApplicationWorkspaceVersionReplica applicationReplica = ensureLocalReplica(version, template, userId, traceId);
+        ApplicationWorkspaceVersionReplica applicationReplica = personalWorkspaceReplica(version, template, userId, traceId, replicaMode);
         ensurePersonalWorktreeRoot(
                 Path.of(applicationReplica.repoRootPath()),
                 repoRoot,
@@ -672,6 +689,22 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 now));
         markRecent(userId, version.appId(), runtimeWorkspace.workspaceId());
         return ManagedWorkspaceResponses.PersonalWorkspaceResponse.from(saved, runtimeWorkspace);
+    }
+
+    private String personalWorkspaceBranch(ApplicationWorkspaceVersion version, UserId userId, String workspaceName) {
+        return version.branch() + "_" + sanitizeBranchPart(userId.value()) + "_" + sanitizeBranchPart(workspaceName);
+    }
+
+    private ApplicationWorkspaceVersionReplica personalWorkspaceReplica(
+            ApplicationWorkspaceVersion version,
+            ApplicationWorkspace template,
+            UserId userId,
+            String traceId,
+            PersonalWorkspaceReplicaMode replicaMode) {
+        return switch (replicaMode) {
+            case ENSURE_LOCAL -> ensureLocalReplica(version, template, userId, traceId);
+            case READY_OR_LEGACY -> readyReplicaOrLegacy(version, serverIdentity.linuxServerId());
+        };
     }
 
     public ManagedWorkspaceResponses.WorkspaceRuntimeResponse markRecentWorkspace(String workspaceId, UserId userId) {
@@ -774,8 +807,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
         // 不存在则新建：按新规则命名分支 {branch}_{userId}_default
         try {
-            ManagedWorkspaceResponses.PersonalWorkspaceResponse created = doCreatePersonalWorkspaceWithName(
-                    versionId, defaultName, userId, traceId);
+            ManagedWorkspaceResponses.PersonalWorkspaceResponse created = createPersonalWorkspaceForVersion(
+                    version,
+                    defaultName,
+                    userId,
+                    traceId,
+                    PersonalWorkspaceReplicaMode.READY_OR_LEGACY);
             return new ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse(
                     created.personalWorkspaceId(),
                     created.workspaceName(),
@@ -794,7 +831,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             Workspace runtimeWorkspace,
             UserId userId,
             String traceId) {
-        String expectedBranch = version.branch() + "_" + sanitizeBranchPart(userId.value()) + "_default";
+        String expectedBranch = personalWorkspaceBranch(version, userId, "default");
         Path expectedRepoRoot = personalRepoRootWithName(version, userId, expectedBranch);
         ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
         Path expectedWorkspaceRoot = effectiveWorkspaceRoot(expectedRepoRoot, expectedRepoRoot.resolve(template.directoryPath()).normalize());
@@ -883,54 +920,6 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             return normalizedRepo;
         }
         return normalizedConfigured;
-    }
-
-    /**
-     * 创建个人工作区（使用新的命名规则：{branch}_{userId}_{workspaceName}）。
-     * 与 doCreatePersonalWorkspace 核心逻辑相同，区别在于分支命名使用 workspaceName 而不是 personalId。
-     */
-    private ManagedWorkspaceResponses.PersonalWorkspaceResponse doCreatePersonalWorkspaceWithName(
-            String versionId,
-            String workspaceName,
-            UserId userId,
-            String traceId) {
-        ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(versionId));
-        ensureMember(version.appId(), userId);
-        ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
-        String normalizedName = requireText(workspaceName, "个人工作区名称不能为空", "workspaceName");
-        PersonalWorkspaceId personalId = new PersonalWorkspaceId(RuntimeIdGenerator.personalWorkspaceId());
-        // 新分支命名: {应用版本分支}_{userId}_{workspaceName}
-        String sanitizedName = sanitizeBranchPart(normalizedName);
-        String branch = version.branch() + "_" + sanitizeBranchPart(userId.value()) + "_" + sanitizedName;
-        Path repoRoot = personalRepoRootWithName(version, userId, branch);
-        Path workspaceRoot = repoRoot.resolve(template.directoryPath()).normalize();
-        CodeRepository repository = existingRepository(version.repositoryId());
-        ApplicationWorkspaceVersionReplica applicationReplica = readyReplicaOrLegacy(version, serverIdentity.linuxServerId());
-        ensurePersonalWorktreeRoot(
-                Path.of(applicationReplica.repoRootPath()),
-                repoRoot,
-                branch,
-                privateKeyFor(repository, userId));
-        workspaceRoot = effectiveWorkspaceRoot(repoRoot, workspaceRoot);
-        Workspace runtimeWorkspace = createRuntimeWorkspace(normalizedName, workspaceRoot, traceId);
-        Instant now = Instant.now();
-        PersonalWorkspace saved = managedWorkspaceRepository.savePersonalWorkspace(new PersonalWorkspace(
-                personalId,
-                version.versionId(),
-                version.appId(),
-                version.applicationWorkspaceId(),
-                userId,
-                normalizedName,
-                branch,
-                realPath(repoRoot).toString(),
-                realPath(workspaceRoot).toString(),
-                runtimeWorkspace.workspaceId(),
-                gitWorkspaceService.headCommit(repoRoot),
-                ManagedWorkspaceStatus.ACTIVE,
-                now,
-                now));
-        markRecent(userId, version.appId(), runtimeWorkspace.workspaceId());
-        return ManagedWorkspaceResponses.PersonalWorkspaceResponse.from(saved, runtimeWorkspace);
     }
 
     private void ensurePersonalWorktreeRoot(Path applicationRepoRoot, Path repoRoot, String branch, String privateKey) {
@@ -2059,6 +2048,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     private static String sanitizeBranchPart(String value) {
         return sanitizePathPart(value);
+    }
+
+    private enum PersonalWorkspaceReplicaMode {
+        ENSURE_LOCAL,
+        READY_OR_LEGACY
     }
 
     private static final class WorkspaceCreateProgress {
