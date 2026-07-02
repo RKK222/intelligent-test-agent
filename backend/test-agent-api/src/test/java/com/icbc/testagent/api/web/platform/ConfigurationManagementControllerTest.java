@@ -9,6 +9,7 @@ import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.GlobalExceptionHandler;
 import com.icbc.testagent.api.web.common.TraceIdWebFilter;
 import com.icbc.testagent.configuration.management.ConfigurationManagementApplicationService;
+import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.ApplicationMemberResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.ApplicationResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.CodeRepositoryResponse;
 import com.icbc.testagent.configuration.management.ConfigurationManagementResponses.RepositoryTypeOptionResponse;
@@ -84,6 +85,82 @@ class ConfigurationManagementControllerTest {
                 .expectStatus().isOk()
                 .expectBody()
                 .jsonPath("$.data[0].appId").isEqualTo("app_gcms");
+    }
+
+    @Test
+    void nonAdminCanAddSelfAsApplicationMember() {
+        ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
+        when(service.addMember("app_gcms", USER_ID.value())).thenReturn(new ApplicationMemberResponse(
+                USER_ID.value(),
+                "admin",
+                "AUTH_1",
+                null,
+                null,
+                null));
+        WebTestClient client = client(service, List.of());
+
+        client.post()
+                .uri("/api/internal/platform/configuration-management/applications/app_gcms/members")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"userId":"usr_1234567890abcdef"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.userId").isEqualTo(USER_ID.value());
+
+        verify(service).addMember("app_gcms", USER_ID.value());
+    }
+
+    @Test
+    void nonAdminCannotAddAnotherApplicationMember() {
+        ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
+        WebTestClient client = client(service, List.of());
+
+        client.post()
+                .uri("/api/internal/platform/configuration-management/applications/app_gcms/members")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"userId":"usr_other_1234567890"}
+                        """)
+                .exchange()
+                .expectStatus().isForbidden()
+                .expectBody()
+                .jsonPath("$.code").isEqualTo("FORBIDDEN")
+                .jsonPath("$.details.appId").isEqualTo("app_gcms")
+                .jsonPath("$.details.targetUserId").isEqualTo("usr_other_1234567890");
+
+        org.mockito.Mockito.verify(service, org.mockito.Mockito.never()).addMember(eq("app_gcms"), anyString());
+    }
+
+    @Test
+    void superAdminCanAddAnotherApplicationMember() {
+        ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
+        when(service.addMember("app_gcms", "usr_other_1234567890")).thenReturn(new ApplicationMemberResponse(
+                "usr_other_1234567890",
+                "other",
+                "AUTH_2",
+                null,
+                null,
+                null));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/configuration-management/applications/app_gcms/members")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"userId":"usr_other_1234567890"}
+                        """)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.userId").isEqualTo("usr_other_1234567890");
+
+        verify(service).addMember("app_gcms", "usr_other_1234567890");
     }
 
     @Test

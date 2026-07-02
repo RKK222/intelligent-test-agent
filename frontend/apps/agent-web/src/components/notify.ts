@@ -26,11 +26,21 @@ function describeError(error: unknown): { message: string; traceId?: string } {
   return { message: "未知错误" };
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
 function renderHtml(title: string, description?: string, traceId?: string): string {
-  if (!description && !traceId) return title;
-  const detail = description ? `<div class="ta-notify-detail">${description}</div>` : "";
-  const meta = traceId ? `<div class="ta-notify-meta">traceId: ${traceId}</div>` : "";
-  return `<div class="ta-notify-title">${title}</div>${detail}${meta}`;
+  const safeTitle = escapeHtml(title);
+  if (!description && !traceId) return safeTitle;
+  const detail = description ? `<div class="ta-notify-detail">${escapeHtml(description)}</div>` : "";
+  const meta = traceId ? `<div class="ta-notify-meta">traceId: ${escapeHtml(traceId)}</div>` : "";
+  return `<div class="ta-notify-title">${safeTitle}</div>${detail}${meta}`;
 }
 
 export function showMessage(kind: MessageKind, title: string, description?: string, traceId?: string) {

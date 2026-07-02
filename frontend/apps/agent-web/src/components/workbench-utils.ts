@@ -254,11 +254,50 @@ function countPatchStats(patch: string): { additions: number; deletions: number 
   return { additions, deletions };
 }
 
-export function errorFeedback(title: string, error: unknown): Feedback {
+export function errorFeedback(title: string, error: unknown, fallbackContext: Record<string, unknown> = {}): Feedback {
   if (error instanceof BackendApiError) {
-    return { kind: "error", title, description: `${error.code}: ${error.message}`, traceId: error.traceId };
+    const loadingContext = formatLoadingContext(error.details, fallbackContext);
+    return {
+      kind: "error",
+      title,
+      description: [`${error.code}: ${error.message}`, loadingContext].filter(Boolean).join("；"),
+      traceId: error.traceId
+    };
   }
   return { kind: "error", title, description: error instanceof Error ? error.message : "未知错误" };
+}
+
+function formatLoadingContext(details: Record<string, unknown>, fallbackContext: Record<string, unknown>): string {
+  const merged = { ...fallbackContext, ...details };
+  const hasContext = ["appId", "appName", "version", "versionId", "workspaceKind", "workspaceName", "workspaceId", "personalWorkspaceId"]
+    .some((key) => displayValue(merged[key]) !== undefined);
+  if (!hasContext) {
+    return "";
+  }
+  const appId = displayValue(merged.appId) ?? "未确定";
+  const appName = displayValue(merged.appName) ?? "未确定";
+  const version = displayValue(merged.version) ?? displayValue(merged.versionId) ?? "未确定";
+  const workspaceKind = displayValue(merged.workspaceKind) ?? "未确定";
+  const workspaceName = displayValue(merged.workspaceName) ?? displayValue(merged.workspaceId) ?? "未确定";
+  const extraEntries: Array<[string, unknown]> = [
+    ["versionId", merged.versionId],
+    ["applicationWorkspaceId", merged.applicationWorkspaceId],
+    ["workspaceId", merged.workspaceId],
+    ["personalWorkspaceId", merged.personalWorkspaceId]
+  ];
+  const extras = extraEntries
+    .map(([label, value]) => {
+      const display = displayValue(value);
+      return display ? `${label}: ${display}` : "";
+    })
+    .filter((value): value is string => Boolean(value));
+  return [`应用 ${appName}(${appId})`, `版本 ${version}`, `工作区 ${workspaceKind}:${workspaceName}`, ...extras].join("；");
+}
+
+function displayValue(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return undefined;
 }
 
 export function historyItems(run: Run | null, sessions: Session[]) {

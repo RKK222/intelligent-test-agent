@@ -3,8 +3,11 @@ package com.icbc.testagent.api.web.platform;
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.common.api.ApiResponse;
+import com.icbc.testagent.common.error.ErrorCode;
+import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.git.RsaKeyService;
 import com.icbc.testagent.configuration.management.ConfigurationManagementApplicationService;
+import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
@@ -74,7 +77,14 @@ public class ConfigurationManagementController {
             @PathVariable String appId,
             @RequestBody ConfigurationManagementDtos.AddMemberRequest request,
             ServerWebExchange exchange) {
-        AuthWebSupport.getAuthPrincipal(exchange);
+        AuthPrincipal principal = AuthWebSupport.getAuthPrincipal(exchange);
+        String targetUserId = request.userId() == null ? "" : request.userId();
+        if (!principal.userId().value().equals(targetUserId) && !AuthWebSupport.hasRole(principal, APP_ADMIN)) {
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    "普通用户只能将自己加入应用",
+                    Map.of("appId", appId, "currentUserId", principal.userId().value(), "targetUserId", targetUserId));
+        }
         return ok(exchange, service.addMember(appId, request.userId()));
     }
 

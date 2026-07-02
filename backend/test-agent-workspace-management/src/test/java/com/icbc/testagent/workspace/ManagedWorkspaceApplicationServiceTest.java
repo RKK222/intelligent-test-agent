@@ -235,6 +235,81 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void recentWorkspaceForbiddenIncludesLoadingContext() {
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService creator = service(new FakeConfigurationRepository(true), managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = creator.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+        ManagedWorkspaceApplicationService reader = service(new FakeConfigurationRepository(false), managed, workspaces, git);
+
+        assertThatThrownBy(() -> reader.recentWorkspace("app_gcms", new UserId("usr_1")))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN);
+                    assertThat(exception.getMessage())
+                            .contains("F-GCMS(app_gcms)")
+                            .contains("20260707")
+                            .contains("default 私人工作区:default");
+                    assertThat(exception.details())
+                            .containsEntry("loadingStage", "application-recent-workspace")
+                            .containsEntry("appId", "app_gcms")
+                            .containsEntry("appName", "F-GCMS")
+                            .containsEntry("versionId", version.versionId())
+                            .containsEntry("version", "20260707")
+                            .containsEntry("applicationWorkspaceId", "awp_1")
+                            .containsEntry("workspaceKind", "default 私人工作区")
+                            .containsEntry("workspaceName", "default")
+                            .containsEntry("workspaceId", personal.runtimeWorkspace().workspaceId())
+                            .containsEntry("personalWorkspaceId", personal.personalWorkspaceId());
+                });
+    }
+
+    @Test
+    void ensureDefaultPersonalWorkspaceForbiddenIncludesVersionAndDefaultContext() {
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService creator = service(new FakeConfigurationRepository(true), managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = creator.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        ManagedWorkspaceApplicationService reader = service(new FakeConfigurationRepository(false), managed, workspaces, git);
+
+        assertThatThrownBy(() -> reader.ensureDefaultPersonalWorkspace(version.versionId(), new UserId("usr_1"), "trace_default"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.FORBIDDEN);
+                    assertThat(exception.getMessage())
+                            .contains("F-GCMS(app_gcms)")
+                            .contains("20260707")
+                            .contains("default 私人工作区:default");
+                    assertThat(exception.details())
+                            .containsEntry("loadingStage", "ensure-default-personal-workspace")
+                            .containsEntry("appId", "app_gcms")
+                            .containsEntry("appName", "F-GCMS")
+                            .containsEntry("versionId", version.versionId())
+                            .containsEntry("version", "20260707")
+                            .containsEntry("applicationWorkspaceId", "awp_1")
+                            .containsEntry("workspaceKind", "default 私人工作区")
+                            .containsEntry("workspaceName", "default");
+                    assertThat(exception.details()).doesNotContainKeys("workspaceId", "personalWorkspaceId");
+                });
+    }
+
+    @Test
     void createsPersonalWorkspaceFromApplicationVersionWorktree() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -1126,7 +1201,7 @@ class ManagedWorkspaceApplicationServiceTest {
                 new UserId("usr_1"),
                 "trace_publish");
 
-        Path applicationRepoRoot = applicationRepoRoot();
+        Path personalRepoRoot = personalRepoRoot(personal.personalWorkspaceBranch());
 
         assertThat(result.status()).isEqualTo("CONFLICT");
         assertThat(result.conflictFiles()).containsExactly("src/Main.java", "README.md");

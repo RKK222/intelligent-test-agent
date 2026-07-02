@@ -16,9 +16,14 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
 test("switching to an application without recent workspace clears the previous file tree", async ({ page }) => {
   const fileRequests: Array<{ workspaceId: string; path: string }> = [];
   const defaultPersonalRequests: string[] = [];
+  const personalWorkspaceRequests: string[] = [];
   await mockBackendApi(page, {
     fileRequests,
     defaultPersonalRequests,
+    personalWorkspaceRequests,
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
     applications: [
       { appId: "app_gcms", appName: "F-GCMS", enabled: true },
       { appId: "app_coss", appName: "F-COSS", enabled: true }
@@ -48,7 +53,8 @@ test("switching to an application without recent workspace clears the previous f
   await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
   await expect(page.getByRole("button", { name: /tests/ })).toHaveCount(0);
   expect(fileRequests).toContainEqual({ workspaceId: "wrk_personal_default", path: "" });
-  expect(defaultPersonalRequests).toEqual(["awv_20260715"]);
+  expect(personalWorkspaceRequests).toEqual(["awv_20260715"]);
+  expect(defaultPersonalRequests).toEqual([]);
   const switcher = page.locator(".ta-workbench-footer-branch");
   await expect(switcher).toBeVisible();
   await switcher.click();
@@ -70,12 +76,17 @@ test("workbench does not read a workspace file tree before an application is sel
   expect(fileRequests).toEqual([]);
 });
 
-test("application recent workspace resolves to default personal worktree before loading files", async ({ page }) => {
+test("application recent workspace loads existing default personal worktree before loading files", async ({ page }) => {
   const fileRequests: Array<{ workspaceId: string; path: string }> = [];
   const defaultPersonalRequests: string[] = [];
+  const personalWorkspaceRequests: string[] = [];
   await mockBackendApi(page, {
     fileRequests,
     defaultPersonalRequests,
+    personalWorkspaceRequests,
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
     recentWorkspaces: {
       app_gcms: {
         ...workspace(),
@@ -90,9 +101,39 @@ test("application recent workspace resolves to default personal worktree before 
 
   await gotoWorkbench(page);
 
-  await expect.poll(() => defaultPersonalRequests).toEqual(["awv_20260715"]);
+  await expect.poll(() => personalWorkspaceRequests).toEqual(["awv_20260715"]);
+  expect(defaultPersonalRequests).toEqual([]);
   await expect.poll(() => fileRequests).toContainEqual({ workspaceId: "wrk_personal_default", path: "" });
   await expect(page.getByRole("button", { name: /worktree: feature_testagent_20260715_usr_admin_default/ }).first()).toBeVisible();
+});
+
+test("switch application forbidden feedback renders loading context details", async ({ page }) => {
+  await mockBackendApi(page, {
+    forbiddenRecentWorkspaces: {
+      app_gcms: {
+        code: "FORBIDDEN",
+        message: "无该应用工作区权限",
+        details: {
+          appId: "app_gcms",
+          appName: "F-GCMS",
+          versionId: "awv_20260715",
+          version: "20260715",
+          workspaceKind: "default 私人工作区",
+          workspaceName: "default",
+          workspaceId: "wrk_personal_default",
+          personalWorkspaceId: "psw_default"
+        }
+      }
+    }
+  });
+
+  await gotoWorkbench(page);
+
+  await expect(page.getByText("切换应用失败")).toBeVisible();
+  await expect(page.getByText(/应用 F-GCMS\(app_gcms\)/)).toBeVisible();
+  await expect(page.getByText(/版本 20260715/)).toBeVisible();
+  await expect(page.getByText(/工作区 default 私人工作区:default/)).toBeVisible();
+  await expect(page.getByText(/workspaceId: wrk_personal_default/)).toBeVisible();
 });
 
 test("user avatar menu logs out and returns to login", async ({ page }) => {
@@ -139,7 +180,7 @@ test("login redirects to workbench and clears the initial opencode process check
   await expect(page.getByText("正在检查 opencode 进程")).toHaveCount(0);
 });
 
-test("admin application fallback runs after auth roles arrive", async ({ page }) => {
+test("application switch menu excludes unjoined apps and keeps them in join dialog", async ({ page }) => {
   let releaseAuthMe!: () => void;
   const configurationApplicationRequests: string[] = [];
   const authMeGate = new Promise<void>((resolve) => {
@@ -156,13 +197,17 @@ test("admin application fallback runs after auth roles arrive", async ({ page })
   await gotoWorkbench(page);
 
   await expect(page.getByRole("button", { name: "未选择应用" })).toBeVisible();
-  expect(configurationApplicationRequests).toEqual([]);
 
   releaseAuthMe();
 
-  await expect(page.getByRole("button", { name: "F-GCMS" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /tests/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "未选择应用" })).toBeVisible();
   expect(configurationApplicationRequests).toContain("GET /api/internal/platform/configuration-management/applications");
+  await page.getByRole("button", { name: "未选择应用" }).click();
+  await expect(page.getByRole("option", { name: /F-GCMS/ })).toHaveCount(0);
+  await page.getByRole("option", { name: /加入其他应用/ }).click();
+  await expect(page.locator(".figma-add-app-card")).toContainText("加入其他应用");
+  await page.locator(".figma-add-app-select").click();
+  await expect(page.getByRole("option", { name: "F-GCMS" })).toBeVisible();
 });
 
 test("super admin can open system management from the activity bar", async ({ page }) => {
@@ -301,6 +346,38 @@ test("application without recent version does not fallback to first template ver
   await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
   await expect(page.locator(".ta-workbench-footer-branch")).toBeVisible();
   await expect.poll(() => defaultPersonalRequests).toEqual([]);
+  expect(fileRequests).toEqual([]);
+});
+
+test("application recent version without default personal workspace stays empty", async ({ page }) => {
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const defaultPersonalRequests: string[] = [];
+  const personalWorkspaceRequests: string[] = [];
+  await mockBackendApi(page, {
+    fileRequests,
+    defaultPersonalRequests,
+    personalWorkspaceRequests,
+    personalWorkspaces: {
+      awv_20260715: []
+    },
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        workspaceId: "wrk_app_replica",
+        name: "F-GCMS 报表 / 20260715",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms"
+      }
+    }
+  });
+
+  await gotoWorkbench(page);
+
+  await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
+  await expect(page.locator(".ta-workbench-footer-branch")).toBeVisible();
+  await expect.poll(() => personalWorkspaceRequests).toEqual(["awv_20260715"]);
+  expect(defaultPersonalRequests).toEqual([]);
   expect(fileRequests).toEqual([]);
 });
 
@@ -646,16 +723,21 @@ test("workbench refetches opencode status when initialize returns a stale failur
   await expect(page.getByText("初始化 opencode 进程失败")).toHaveCount(0);
 });
 
-test("workbench retries application workspace selection after opencode becomes ready", async ({ page }) => {
+test("workbench does not create default personal workspace while opencode becomes ready", async ({ page }) => {
   const fileRequests: Array<{ workspaceId: string; path: string }> = [];
   const defaultPersonalRequests: string[] = [];
+  const personalWorkspaceRequests: string[] = [];
   const processInitializations: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
     processStatus: "NEEDS_INITIALIZATION",
     ensureDefaultRequiresReady: true,
     fileRequests,
     defaultPersonalRequests,
+    personalWorkspaceRequests,
     processInitializations,
+    personalWorkspaces: {
+      awv_20260715: []
+    },
     recentWorkspaces: {
       app_gcms: {
         ...workspace(),
@@ -669,14 +751,17 @@ test("workbench retries application workspace selection after opencode becomes r
   });
 
   await gotoWorkbench(page);
-  await expect.poll(() => defaultPersonalRequests.length).toBeGreaterThanOrEqual(1);
+  await expect.poll(() => personalWorkspaceRequests).toEqual(["awv_20260715"]);
+  expect(defaultPersonalRequests).toEqual([]);
   expect(fileRequests).toEqual([]);
+  await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
 
   await page.getByRole("button", { name: "分配专属进程" }).click();
 
   await expect.poll(() => processInitializations.length).toBe(1);
-  await expect.poll(() => defaultPersonalRequests.length).toBeGreaterThanOrEqual(2);
-  await expect.poll(() => fileRequests).toContainEqual({ workspaceId: "wrk_personal_default", path: "" });
+  expect(defaultPersonalRequests).toEqual([]);
+  expect(fileRequests).toEqual([]);
+  await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
 });
 
 test("phase 11 runtime flow sends attachment parts and handles docks", async ({ page }) => {
@@ -1028,6 +1113,9 @@ async function mockBackendApi(
     applications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     managedApplications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     recentWorkspaces?: Record<string, (ReturnType<typeof workspace> & Record<string, unknown>) | null>;
+    forbiddenRecentWorkspaces?: Record<string, { code: string; message: string; details?: Record<string, unknown>; status?: number }>;
+    personalWorkspaces?: Record<string, Array<Record<string, unknown>>>;
+    personalWorkspaceRequests?: string[];
     /** 自定义 /vcs/status 返回，覆盖默认的 { status: "ready", branch: "main", defaultBranch: "main" }。 */
     vcsStatus?: { status?: string; branch?: string; defaultBranch?: string };
     /** 收集「+新增版本」发出的 POST workspace-templates/{id}/versions 请求的 version 字段（用户原值）。 */
@@ -1283,12 +1371,28 @@ async function mockBackendApi(
         return;
       }
       if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/applications/app_gcms/recent-workspace") {
+        const forbidden = capture.forbiddenRecentWorkspaces?.app_gcms;
+        if (forbidden) {
+          await route.fulfill({
+            status: forbidden.status ?? 403,
+            ...jsonFailure(forbidden.code, forbidden.message, forbidden.details)
+          });
+          return;
+        }
         await route.fulfill(json(capture.recentWorkspaces?.app_gcms ?? workspace()));
         return;
       }
       const recentWorkspaceMatch = url.pathname.match(/^\/api\/internal\/platform\/workspace-management\/applications\/([^/]+)\/recent-workspace$/);
       if (method === "GET" && recentWorkspaceMatch) {
         const appId = recentWorkspaceMatch[1] ?? "";
+        const forbidden = capture.forbiddenRecentWorkspaces?.[appId];
+        if (forbidden) {
+          await route.fulfill({
+            status: forbidden.status ?? 403,
+            ...jsonFailure(forbidden.code, forbidden.message, forbidden.details)
+          });
+          return;
+        }
         await route.fulfill(json(capture.recentWorkspaces?.[appId] ?? null));
         return;
       }
@@ -1327,7 +1431,9 @@ async function mockBackendApi(
         return;
       }
       if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/workspace-versions\/[^/]+\/personal-workspaces$/.test(url.pathname)) {
-        await route.fulfill(json([]));
+        const versionId = url.pathname.match(/\/workspace-versions\/([^/]+)\/personal-workspaces$/)?.[1] ?? "";
+        capture.personalWorkspaceRequests?.push(versionId);
+        await route.fulfill(json(capture.personalWorkspaces?.[versionId] ?? []));
         return;
       }
       if (method === "POST" && /\/api\/internal\/platform\/workspace-management\/workspace-versions\/[^/]+\/ensure-default-personal-workspace$/.test(url.pathname)) {
@@ -1562,11 +1668,11 @@ function json(data: unknown) {
   };
 }
 
-function jsonFailure(code: string, message: string) {
+function jsonFailure(code: string, message: string, details: Record<string, unknown> = {}) {
   return {
     contentType: "application/json",
     headers: corsHeaders(),
-    body: JSON.stringify({ success: false, traceId: "trace_e2e", code, message, retryable: true, details: {} })
+    body: JSON.stringify({ success: false, traceId: "trace_e2e", code, message, retryable: true, details })
   };
 }
 
@@ -1607,6 +1713,32 @@ function workspace() {
     name: "demo-tests",
     rootPath: "/Users/huang/workspace/demo-tests",
     linuxServerId: "10.8.0.12",
+    status: "ACTIVE",
+    createdAt: "2026-06-19T00:00:00Z",
+    updatedAt: "2026-06-19T00:00:00Z"
+  };
+}
+
+function defaultPersonalWorkspace(versionId: string) {
+  return {
+    personalWorkspaceId: "psw_default",
+    versionId,
+    appId: "app_gcms",
+    applicationWorkspaceId: "awp_1",
+    workspaceName: "default",
+    branch: "feature_testagent_20260715_usr_admin_default",
+    repoRootPath: "/Users/huang/workspace/personal-default",
+    workspaceRootPath: "/Users/huang/workspace/personal-default",
+    runtimeWorkspace: {
+      ...workspace(),
+      workspaceId: "wrk_personal_default",
+      name: "default",
+      rootPath: "/Users/huang/workspace/personal-default",
+      appId: "app_gcms",
+      versionId,
+      applicationWorkspaceId: "awp_1"
+    },
+    baseCommit: "commit_base",
     status: "ACTIVE",
     createdAt: "2026-06-19T00:00:00Z",
     updatedAt: "2026-06-19T00:00:00Z"

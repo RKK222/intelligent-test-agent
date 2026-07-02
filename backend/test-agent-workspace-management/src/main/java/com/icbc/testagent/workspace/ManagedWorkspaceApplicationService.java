@@ -275,7 +275,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     public List<ManagedWorkspaceResponses.WorkspaceTemplateResponse> listTemplates(String appId, UserId userId) {
-        ApplicationId applicationId = existingMemberApp(appId, userId).appId();
+        ApplicationId applicationId = existingMemberApp(appId, userId, "workspace-templates").appId();
         Map<String, Boolean> standardByRepoId = configurationRepository.findRepositoriesByApplication(applicationId).stream()
                 .collect(Collectors.toMap(
                         repo -> repo.repositoryId().value(),
@@ -289,7 +289,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     public List<ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse> listVersions(String templateId, UserId userId) {
         ApplicationWorkspace template = existingTemplate(new ApplicationWorkspaceId(templateId));
-        ensureMember(template.appId(), userId);
+        ensureMember(template.appId(), userId, loadingContext("workspace-versions")
+                .applicationWorkspaceId(template.workspaceId().value())
+                .workspaceKind("应用工作空间模板")
+                .workspaceName(template.workspaceName()));
         return managedWorkspaceRepository.findVersions(template.workspaceId()).stream()
                 .map(this::versionResponse)
                 .toList();
@@ -330,7 +333,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             UserId userId,
             String targetLinuxServerId,
             String traceId) {
-        ApplicationDefinition application = existingMemberApp(appId, userId);
+        ApplicationDefinition application = existingMemberApp(appId, userId, "create-workspace-version");
         ApplicationWorkspace template = existingTemplate(new ApplicationWorkspaceId(templateId));
         if (!template.appId().equals(application.appId())) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "工作空间不属于当前应用", Map.of("workspaceId", templateId));
@@ -622,7 +625,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     public List<ManagedWorkspaceResponses.PersonalWorkspaceResponse> listPersonalWorkspaces(String versionId, UserId userId) {
         ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(versionId));
-        ensureMember(version.appId(), userId);
+        ensureMember(version.appId(), userId, loadingContextForVersion(
+                "personal-workspaces",
+                version,
+                "个人工作区列表",
+                null));
         return managedWorkspaceRepository.findPersonalWorkspaces(version.versionId(), userId).stream()
                 .map(this::personalResponse)
                 .toList();
@@ -648,7 +655,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             UserId userId,
             String traceId) {
         ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(versionId));
-        ensureMember(version.appId(), userId);
+        ensureMember(version.appId(), userId, loadingContextForVersion(
+                "create-personal-workspace",
+                version,
+                "个人工作区",
+                workspaceName));
         return createPersonalWorkspaceForVersion(
                 version,
                 workspaceName,
@@ -715,7 +726,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         Workspace workspace = existingWorkspace(new WorkspaceId(workspaceId));
         ApplicationId appId = appIdForRuntimeWorkspace(workspace.workspaceId())
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "托管工作区不存在", Map.of("workspaceId", workspaceId)));
-        ensureMember(appId, userId);
+        ApplicationDefinition application = existingEnabledApp(appId.value());
+        ensureMember(appId, userId, loadingContextForWorkspace("mark-recent-workspace", application, workspace));
         markRecent(userId, appId, workspace.workspaceId());
         // 复用 recent-workspace 的回填逻辑，把 appId/versionId/applicationWorkspaceId 一起回写，
         // 让前端在切到运行态 Workspace 时立即拿到当前版本与模板信息，无需等模板 versions 异步加载。
@@ -737,7 +749,13 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         // 应用级最近工作区按应用维度持久化；同样在响应里回写应用 / 版本 / 模板 ID，
         // 让前端在「切换应用 → 自动进入 per-app recent」链路里也能立即定位到当前版本并高亮工作区菜单。
         // 工作区对应的运行态 Workspace 已被应用版本回收、或工作区仅作为个人工作区存在时，versionId / applicationWorkspaceId 留空。
-        ApplicationId applicationId = existingMemberApp(appId, userId).appId();
+        ApplicationDefinition application = existingEnabledApp(appId);
+        LoadingContext context = loadingContextForApplicationPreference(
+                "application-recent-workspace",
+                application,
+                userId);
+        ensureMember(application.appId(), userId, context);
+        ApplicationId applicationId = application.appId();
         return managedWorkspaceRepository.findApplicationPreference(userId, applicationId)
                 .flatMap(preference -> workspaceRepository.findById(preference.workspaceId()))
                 .map(workspace -> resolveRecentWorkspaceResponse(workspace));
@@ -791,7 +809,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             UserId userId,
             String traceId) {
         ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(versionId));
-        ensureMember(version.appId(), userId);
+        ensureMember(version.appId(), userId, loadingContextForVersion(
+                "ensure-default-personal-workspace",
+                version,
+                "default 私人工作区",
+                "default"));
         String defaultName = "default";
         // 先查是否已有 (versionId, userId, workspaceName=default) 的私人空间
         Optional<PersonalWorkspace> existing = managedWorkspaceRepository.findPersonalWorkspaces(version.versionId(), userId).stream()
@@ -1148,8 +1170,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
         CodeRepository repository = existingRepository(version.repositoryId());
         String privateKey = privateKeyFor(repository, userId);
-        Path personalRepoRoot = Path.of(personal.repoRootPath());
-        Path personalWorkspaceRoot = Path.of(personal.workspaceRootPath());
+        Path personalRepoRoot = pathResolver.resolve(personal.repoRootPath());
+        Path personalWorkspaceRoot = pathResolver.resolve(personal.workspaceRootPath());
         List<String> gitFiles = repoRelativeFiles(personalRepoRoot, personalWorkspaceRoot, normalizeFiles(files));
 
         // 1. 只暂存前端显式选择的文件，避免一次发布把未选择的 diff 全部提交并从列表消失。
@@ -1321,7 +1343,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String targetLinuxServerId,
             String traceId) {
         ApplicationWorkspaceVersion version = existingVersion(new ApplicationWorkspaceVersionId(versionId));
-        ensureMember(version.appId(), userId);
+        ensureMember(version.appId(), userId, loadingContextForVersion(
+                "git-pull-version",
+                version,
+                "应用版本工作区",
+                version.version()));
         ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
         if (!serverIdentity.linuxServerId().equals(targetLinuxServerId)) {
             publishVersionSync(version, userId, "GIT_PULL_REQUESTED", traceId, Map.of("targetLinuxServerId", targetLinuxServerId));
@@ -1378,8 +1404,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String workspaceId,
             String branch,
             UserId userId) {
-        ApplicationId applicationId = existingMemberApp(appId, userId).appId();
+        ApplicationDefinition application = existingEnabledApp(appId);
         Workspace workspace = existingWorkspace(new WorkspaceId(workspaceId));
+        ensureMember(application.appId(), userId, loadingContextForWorkspace("mark-recent-branch", application, workspace));
+        ApplicationId applicationId = application.appId();
         ApplicationId workspaceAppId = appIdForRuntimeWorkspace(workspace.workspaceId())
                 .orElseThrow(() -> new PlatformException(ErrorCode.NOT_FOUND, "工作区不属于任何应用", Map.of("workspaceId", workspaceId)));
         if (!applicationId.equals(workspaceAppId)) {
@@ -1815,9 +1843,78 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     private ApplicationDefinition existingMemberApp(String appId, UserId userId) {
+        return existingMemberApp(appId, userId, "managed-workspace");
+    }
+
+    private ApplicationDefinition existingMemberApp(String appId, UserId userId, String loadingStage) {
         ApplicationDefinition application = existingEnabledApp(appId);
-        ensureMember(application.appId(), userId);
+        ensureMember(application.appId(), userId, loadingContext(loadingStage)
+                .application(application)
+                .workspaceKind("应用工作区"));
         return application;
+    }
+
+    private LoadingContext loadingContext(String loadingStage) {
+        return new LoadingContext(loadingStage);
+    }
+
+    private LoadingContext loadingContextForVersion(
+            String loadingStage,
+            ApplicationWorkspaceVersion version,
+            String workspaceKind,
+            String workspaceName) {
+        return loadingContext(loadingStage)
+                .applicationId(version.appId().value())
+                .version(version)
+                .applicationWorkspaceId(version.applicationWorkspaceId().value())
+                .workspaceKind(workspaceKind)
+                .workspaceName(workspaceName);
+    }
+
+    private LoadingContext loadingContextForApplicationPreference(
+            String loadingStage,
+            ApplicationDefinition application,
+            UserId userId) {
+        Optional<UserWorkspacePreference> preference = managedWorkspaceRepository.findApplicationPreference(userId, application.appId());
+        if (preference.isPresent()) {
+            Optional<Workspace> workspace = workspaceRepository.findById(preference.get().workspaceId());
+            if (workspace.isPresent()) {
+                return loadingContextForWorkspace(loadingStage, application, workspace.get());
+            }
+        }
+        return loadingContext(loadingStage)
+                .application(application)
+                .workspaceKind("应用最近工作区/default 私人工作区候选");
+    }
+
+    private LoadingContext loadingContextForWorkspace(
+            String loadingStage,
+            ApplicationDefinition application,
+            Workspace workspace) {
+        LoadingContext context = loadingContext(loadingStage)
+                .application(application)
+                .workspaceKind("应用最近工作区")
+                .workspaceName(workspace.name())
+                .workspaceId(workspace.workspaceId().value());
+        // 优先按个人工作区反查；recent 常指向 default 私人 worktree，必须在无权限错误里标明。
+        Optional<PersonalWorkspace> personal = managedWorkspaceRepository.findPersonalWorkspaceByRuntimeWorkspace(workspace.workspaceId());
+        if (personal.isPresent()) {
+            PersonalWorkspace current = personal.get();
+            context.applicationId(current.appId().value())
+                    .applicationWorkspaceId(current.applicationWorkspaceId().value())
+                    .versionId(current.versionId().value())
+                    .workspaceKind("default".equals(current.workspaceName()) ? "default 私人工作区" : "私人工作区")
+                    .workspaceName(current.workspaceName())
+                    .personalWorkspaceId(current.personalWorkspaceId().value());
+            managedWorkspaceRepository.findVersion(current.versionId()).ifPresent(context::version);
+            return context;
+        }
+        managedWorkspaceRepository.findVersionByRuntimeWorkspace(workspace.workspaceId()).ifPresent(version -> context
+                .applicationId(version.appId().value())
+                .version(version)
+                .applicationWorkspaceId(version.applicationWorkspaceId().value())
+                .workspaceKind("应用版本工作区"));
+        return context;
     }
 
     private void ensureRepositoryLinked(ApplicationId appId, CodeRepositoryId repositoryId) {
@@ -1863,8 +1960,162 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     private void ensureMember(ApplicationId appId, UserId userId) {
+        ensureMember(appId, userId, loadingContext("managed-workspace").applicationId(appId.value()));
+    }
+
+    private void ensureMember(ApplicationId appId, UserId userId, LoadingContext context) {
         if (!configurationRepository.isActiveMember(appId, userId)) {
-            throw new PlatformException(ErrorCode.FORBIDDEN, "无该应用工作区权限", Map.of("appId", appId.value()));
+            LoadingContext resolvedContext = (context == null ? loadingContext("managed-workspace") : context)
+                    .applicationId(appId.value());
+            if (resolvedContext.appName == null) {
+                configurationRepository.findApplication(appId).ifPresent(resolvedContext::application);
+            }
+            throw new PlatformException(
+                    ErrorCode.FORBIDDEN,
+                    resolvedContext.permissionMessage(),
+                    resolvedContext.details());
+        }
+    }
+
+    /**
+     * 构造托管工作区权限错误上下文。只暴露业务 ID 和展示名，不写入物理路径、Git URL 或密钥信息。
+     */
+    private static final class LoadingContext {
+        private final String loadingStage;
+        private String appId;
+        private String appName;
+        private String versionId;
+        private String version;
+        private String applicationWorkspaceId;
+        private String workspaceKind;
+        private String workspaceName;
+        private String workspaceId;
+        private String personalWorkspaceId;
+
+        private LoadingContext(String loadingStage) {
+            this.loadingStage = loadingStage;
+        }
+
+        private LoadingContext application(ApplicationDefinition application) {
+            if (application != null) {
+                this.appId = application.appId().value();
+                this.appName = application.appName();
+            }
+            return this;
+        }
+
+        private LoadingContext applicationId(String appId) {
+            this.appId = firstNonBlank(this.appId, appId);
+            return this;
+        }
+
+        private LoadingContext version(ApplicationWorkspaceVersion version) {
+            if (version != null) {
+                this.versionId = version.versionId().value();
+                this.version = version.version();
+                this.applicationWorkspaceId = version.applicationWorkspaceId().value();
+                this.appId = firstNonBlank(this.appId, version.appId().value());
+            }
+            return this;
+        }
+
+        private LoadingContext versionId(String versionId) {
+            if (versionId != null && !versionId.isBlank()) {
+                this.versionId = versionId;
+            }
+            return this;
+        }
+
+        private LoadingContext applicationWorkspaceId(String applicationWorkspaceId) {
+            if (applicationWorkspaceId != null && !applicationWorkspaceId.isBlank()) {
+                this.applicationWorkspaceId = applicationWorkspaceId;
+            }
+            return this;
+        }
+
+        private LoadingContext workspaceKind(String workspaceKind) {
+            if (workspaceKind != null && !workspaceKind.isBlank()) {
+                this.workspaceKind = workspaceKind;
+            }
+            return this;
+        }
+
+        private LoadingContext workspaceName(String workspaceName) {
+            if (workspaceName != null && !workspaceName.isBlank()) {
+                this.workspaceName = workspaceName;
+            }
+            return this;
+        }
+
+        private LoadingContext workspaceId(String workspaceId) {
+            this.workspaceId = firstNonBlank(this.workspaceId, workspaceId);
+            return this;
+        }
+
+        private LoadingContext personalWorkspaceId(String personalWorkspaceId) {
+            this.personalWorkspaceId = firstNonBlank(this.personalWorkspaceId, personalWorkspaceId);
+            return this;
+        }
+
+        private String permissionMessage() {
+            return "无该应用工作区权限：当前正在加载应用 "
+                    + displayApp()
+                    + "，版本 "
+                    + displayVersion()
+                    + "，工作区 "
+                    + displayWorkspace();
+        }
+
+        private Map<String, Object> details() {
+            Map<String, Object> details = new LinkedHashMap<>();
+            putIfPresent(details, "loadingStage", loadingStage);
+            putIfPresent(details, "appId", appId);
+            putIfPresent(details, "appName", appName);
+            putIfPresent(details, "versionId", versionId);
+            putIfPresent(details, "version", version);
+            putIfPresent(details, "applicationWorkspaceId", applicationWorkspaceId);
+            putIfPresent(details, "workspaceKind", workspaceKind);
+            putIfPresent(details, "workspaceName", workspaceName);
+            putIfPresent(details, "workspaceId", workspaceId);
+            putIfPresent(details, "personalWorkspaceId", personalWorkspaceId);
+            return Map.copyOf(details);
+        }
+
+        private String displayApp() {
+            String resolvedAppId = display(appId);
+            String resolvedAppName = display(appName);
+            if ("未确定".equals(resolvedAppName) && "未确定".equals(resolvedAppId)) {
+                return "未确定";
+            }
+            return resolvedAppName + "(" + resolvedAppId + ")";
+        }
+
+        private String displayVersion() {
+            return display(firstNonBlank(version, versionId));
+        }
+
+        private String displayWorkspace() {
+            return display(workspaceKind) + ":" + display(firstNonBlank(workspaceName, workspaceId));
+        }
+
+        private static void putIfPresent(Map<String, Object> target, String key, String value) {
+            if (value != null && !value.isBlank()) {
+                target.put(key, value);
+            }
+        }
+
+        private static String display(String value) {
+            return value == null || value.isBlank() ? "未确定" : value;
+        }
+
+        private static String firstNonBlank(String first, String second) {
+            if (first != null && !first.isBlank()) {
+                return first;
+            }
+            if (second != null && !second.isBlank()) {
+                return second;
+            }
+            return null;
         }
     }
 

@@ -494,13 +494,14 @@ macOS 本地环境迁移到项目内 `temp/` 时，先停止服务并运行 `too
 首次进入（无 recent）行为：
 
 - 前端 `handleSelectApp` → `pickDefaultWorkspaceForApp`：
-  1. 读取 `user_application_workspace_preferences`；命中且能反查 `versionId` 时，调用 `ensure-default-personal-workspace` 加载当前用户该版本 default 私人 worktree。
-  2. 未命中，或命中记录不能反查 `versionId`：只选择应用，保持工作区空态，不兜底首模板首版本，不创建 default 私人 worktree。
-  3. 空态仍保留左侧工作区切换入口，用户可手动选择版本、创建版本或新增私人工作区。
+  1. 读取 `user_application_workspace_preferences`；命中且能反查 `versionId` 时，只读查询该版本下当前用户已有个人工作区列表。
+  2. 仅当存在 `workspaceName=default` 且带运行态 `workspaceId` 的个人工作区记录时加载该 default 私人 worktree。
+  3. 未命中、命中记录不能反查 `versionId` 或没有 default 私人工作区记录：只选择应用，保持工作区空态，不兜底首模板首版本，不创建 default 私人 worktree。
+  4. 空态仍保留左侧工作区切换入口，用户可手动选择版本、创建版本或新增私人工作区。
 
 V10 种子数据对 F-COSS 的影响：
 
-- `V10__seed_fcoss_application.sql` 同步写入 `user_application_workspace_preferences(user='888888888', app='app_fcoss', workspace='wrk_fcoss_20260701')`，本地开发用户首次进入 F-COSS 直接落到最新版本。
+- `V10__seed_fcoss_application.sql` 同步写入 `user_application_workspace_preferences(user='888888888', app='app_fcoss', workspace='wrk_fcoss_20260701')`，本地开发用户首次进入 F-COSS 可还原到该应用/版本上下文；只有该版本下已经存在当前用户 `default` 私人工作区记录时才会自动加载工作区。
 - 删除/重置后只要重新执行 `V10`（幂等）即可恢复默认状态；偏好表本身的幂等写入由 `INSERT ... ON CONFLICT DO UPDATE` 在 `ManagedWorkspaceRepository.savePreference` 内保证。
 
 ## opencode 用户进程管理表版本调整

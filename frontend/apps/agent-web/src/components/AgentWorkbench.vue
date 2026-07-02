@@ -352,24 +352,8 @@ const managedApplicationsQuery = useQuery({
   retry: false
 });
 const managedApplications = computed<ManagedApplication[]>(() => managedApplicationsQuery.data.value ?? []);
-const canListAllApplications = computed(() => {
-  const roles = authStore.currentUser?.roles ?? [];
-  return roles.includes("APP_ADMIN") || roles.includes("SUPER_ADMIN");
-});
-const allApplicationsEnabled = computed(
-  () => canListAllApplications.value && managedApplicationsQuery.isSuccess.value && managedApplications.value.length === 0
-);
-const allApplicationsQuery = useQuery({
-  queryKey: ["managed-workspace", "applications", "admin-fallback"],
-  enabled: allApplicationsEnabled,
-  queryFn: () => api.listApplications(true),
-  retry: false
-});
-// 右上角应用目录优先展示当前用户加入的应用；管理员未加入任何应用时，回退到配置管理启用应用，
-// 避免应用菜单一直显示"未选择应用"，同时后续 recent workspace 权限仍由 workspace-management 兜底。
-const applicationCatalog = computed<ManagedApplication[]>(() =>
-  managedApplications.value.length ? managedApplications.value : (allApplicationsQuery.data.value ?? [])
-);
+// 右上角切换菜单只展示当前用户已加入的托管应用；未加入应用仅进入"加入其他应用"弹窗。
+const applicationCatalog = computed<ManagedApplication[]>(() => managedApplications.value);
 // 全局最近工作区：跨应用维度维护「上一次进入的应用 + 工作区」组合。
 // 重新登录或换电脑登录时，前端用它直接还原上次的应用上下文（替代之前总是回退 apps[0] 的逻辑），
 // 工作区是否在当前用户权限内则继续走 per-app recent；无 versionId 的应用只选应用不加载工作区。
@@ -1004,9 +988,8 @@ async function recoverActiveRunForSession(sessionId: string, reason: string): Pr
 }
 
 // ===== 默认值与联动 effect =====
-// 选择默认应用：优先使用「全局最近工作区」所属应用，让用户重新登录或换电脑登录时
-// 自动回到上次所在的应用 + 工作区组合；该应用在当前账号的应用目录里找不到时降级到 apps[0]，
-// 都没结果则保持空态，由应用目录和工作空间模板配置驱动后续进入。
+// 选择默认应用：优先使用「全局最近工作区」所属应用；没有可用全局 recent 时降级到已加入应用的第一项。
+// 这里仅负责选应用，是否加载工作区继续由 per-app recent + 已存在 default 私人工作区决定。
 function trySelectDefaultApp() {
   if (selectedAppId.value) return;
   const apps = applicationCatalog.value;
@@ -1856,14 +1839,19 @@ function mergeRecentRuntimeResponse(workspace: Workspace, response: Workspace): 
 async function pickDefaultWorkspaceForApp(appId: string): Promise<{ workspace: Workspace; isFallback: boolean; personalWorkspaceId?: string; personalWorkspaceBranch?: string } | null> {
   const recent = await api.getRecentManagedWorkspaceForApplication(appId);
   if (recent?.versionId) {
-    // recent 可能指向应用版本副本或历史运行态 workspace；进入应用时统一确保并切到用户 default 私人 worktree，
-    // 后续文件树、保存和 Git diff 都落在私人空间，避免直接修改应用版本副本。
-    const defaultPw = await api.ensureDefaultPersonalWorkspace(recent.versionId);
+    // 登录/切应用默认加载是只读选择：只使用已存在的 default 私人工作区，不在无历史时创建或修复。
+    const personalWorkspaces = await api.listPersonalWorkspaces(recent.versionId);
+    const defaultPw = personalWorkspaces.find((workspace) =>
+      workspace.workspaceName === "default" && Boolean(workspace.runtimeWorkspace?.workspaceId)
+    );
+    if (!defaultPw) {
+      return null;
+    }
     return {
       workspace: defaultPw.runtimeWorkspace,
       isFallback: false,
       personalWorkspaceId: defaultPw.personalWorkspaceId,
-      personalWorkspaceBranch: defaultPw.personalWorkspaceBranch
+      personalWorkspaceBranch: defaultPw.branch
     };
   }
   return null;
@@ -1960,7 +1948,8 @@ async function handleSelectApp(appId: string) {
     }
     // 应用没有可用 recent/versionId 时保持空态，不回退到普通本机目录选择。
   } catch (error) {
-    feedback.value = errorFeedback("切换应用失败", error);
+    const currentApp = applicationCatalog.value.find((app) => app.appId === appId);
+    feedback.value = errorFeedback("切换应用失败", error, { appId, appName: currentApp?.appName });
   } finally {
     if (selectionSeq === appSelectionSeq) {
       selectingAppId = undefined;

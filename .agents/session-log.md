@@ -2868,3 +2868,9 @@ bash /tmp/test-api-after-restart.sh
 - How: 新建 `SettingsRepositoryPanel.vue`；将新增和编辑表单分别包裹在 `el-dialog` 里，点击已有版本库列表行中的“编辑”按钮或右上角“新增”按钮时触发对应弹窗，并在打开时自动通过 `@opened` 聚焦；在 `SettingsMenu.vue` 和 `SettingsDialog.vue` 中配置分立菜单项并关联文件夹图标；在 `SettingsAppWorkspacePanel.vue` 中移除版本库管理标签并定义 `switch-menu` 事件向上传播以支持跳转；同步重构 unit 和 Playwright 测试以断言新的弹窗交互。
 - Result: 221 个 Vitest 前端单元测试全部通过，包括新增/修改的 `settings-repository-panel.test.ts`；`corepack pnpm typecheck` 成功；没有对后端 API 接口、事件、数据库结构（Flyway）或 generated SDK 做任何变动。
 
+### 2026-07-02 - 修复默认私人工作区加载与应用权限提示
+
+- Why: 合并其他代码后，切换应用可能因菜单展示未加入应用而进入无权限流程；同时登录/切应用 recent 命中会自动 ensure default 私人工作区，不符合“没有历史/没有私人工作区就不加载”的要求，`FORBIDDEN: 无该应用工作区权限` 也缺少当前加载上下文。
+- What: 前端 `pickDefaultWorkspaceForApp` 改为只读查询当前版本已有 `workspaceName=default` 且带 runtime workspaceId 的私人工作区，找不到则空态且不发文件树请求；应用切换菜单只展示已加入应用，未加入应用仅在“加入其他应用”弹窗展示。后端托管工作区成员校验统一补充加载上下文 details；`addMember` 约束普通用户只能给自己加成员，管理员/超级管理员才能给别人加成员。发布个人 worktree 时同步修复 logical `personalworktree:` 路径必须先解析为物理路径再传 Git。
+- How: 不新增 API endpoint、不改数据库结构或 Flyway；同步更新 HTTP API、数据库部署说明、前端 README 和 workspace-management README，并补充后端服务/API 单测与前端 mock E2E。
+- Result: `ManagedWorkspaceApplicationServiceTest`、`ConfigurationManagementControllerTest`、agent-web typecheck、目标 Playwright E2E 和 `git diff --check` 均通过。默认登录/切应用不再创建 default 私人工作区；权限错误会显示应用、版本、工作区类型/名称/ID，且只暴露安全业务字段。
