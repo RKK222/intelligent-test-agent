@@ -135,7 +135,7 @@ public class ManagedWorkspaceController {
 
     @GetMapping("/personal-workspaces/{personalWorkspaceId}/diff")
     public ApiResponse<Object> diffPersonalWorkspace(@PathVariable String personalWorkspaceId, ServerWebExchange exchange) {
-        return ok(exchange, service.diffPersonalWorkspace(personalWorkspaceId, userId(exchange)));
+        return ok(exchange, service.diffPersonalWorkspace(personalWorkspaceId, userId(exchange), RuntimeApiSupport.traceId(exchange)));
     }
 
     @PostMapping("/personal-workspaces/{personalWorkspaceId}/sync-to-application")

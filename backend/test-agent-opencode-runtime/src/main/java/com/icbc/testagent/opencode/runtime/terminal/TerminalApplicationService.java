@@ -6,6 +6,7 @@ import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.domain.session.SessionStatus;
+import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
@@ -13,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Objects;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -31,21 +33,40 @@ public class TerminalApplicationService {
     private final TerminalTicketStore ticketStore;
     private final TerminalTicketRateLimiter ticketRateLimiter;
     private final TerminalAuditLogger auditLogger;
+    private final ManagedWorkspacePathResolver pathResolver;
 
     /**
      * 创建 PTY ticket 应用服务，所有安全校验在签发 ticket 前完成。
      */
+    @Autowired
+    public TerminalApplicationService(
+            WorkspaceRepository workspaceRepository,
+            SessionRepository sessionRepository,
+            TerminalTicketStore ticketStore,
+            TerminalTicketRateLimiter ticketRateLimiter,
+            TerminalAuditLogger auditLogger,
+            ManagedWorkspacePathResolver pathResolver) {
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
+        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
+        this.ticketStore = Objects.requireNonNull(ticketStore, "ticketStore must not be null");
+        this.ticketRateLimiter = Objects.requireNonNull(ticketRateLimiter, "ticketRateLimiter must not be null");
+        this.auditLogger = Objects.requireNonNull(auditLogger, "auditLogger must not be null");
+        this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
+    }
+
     public TerminalApplicationService(
             WorkspaceRepository workspaceRepository,
             SessionRepository sessionRepository,
             TerminalTicketStore ticketStore,
             TerminalTicketRateLimiter ticketRateLimiter,
             TerminalAuditLogger auditLogger) {
-        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
-        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
-        this.ticketStore = Objects.requireNonNull(ticketStore, "ticketStore must not be null");
-        this.ticketRateLimiter = Objects.requireNonNull(ticketRateLimiter, "ticketRateLimiter must not be null");
-        this.auditLogger = Objects.requireNonNull(auditLogger, "auditLogger must not be null");
+        this(
+                workspaceRepository,
+                sessionRepository,
+                ticketStore,
+                ticketRateLimiter,
+                auditLogger,
+                ManagedWorkspacePathResolver.legacyOnly());
     }
 
     /**
@@ -100,7 +121,7 @@ public class TerminalApplicationService {
      */
     private Path workspaceRoot(Workspace workspace) {
         try {
-            return Path.of(workspace.rootPath()).toRealPath();
+            return pathResolver.resolve(workspace.rootPath()).toRealPath();
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.CONFLICT, "Workspace 根路径不可用", Map.of("workspaceId", workspace.workspaceId().value()), exception);
         }

@@ -43,6 +43,7 @@ import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
+import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import java.nio.file.Files;
@@ -115,6 +116,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     private final ConfigurationManagementRepository configurationRepository;
     private final CommonParameterValues commonParameterValues;
+    private final ManagedWorkspacePathResolver pathResolver;
     private final WorkspaceCreateOperationRepository workspaceCreateOperationRepository;
     private final ManagedWorkspaceRepository managedWorkspaceRepository;
     private final WorkspaceRepository workspaceRepository;
@@ -252,6 +254,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             ServerBroadcastPublisher broadcastPublisher) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
         this.commonParameterValues = Objects.requireNonNull(commonParameterValues, "commonParameterValues must not be null");
+        this.pathResolver = new ManagedWorkspacePathResolver(this.commonParameterValues);
         this.workspaceCreateOperationRepository = Objects.requireNonNull(workspaceCreateOperationRepository, "workspaceCreateOperationRepository must not be null");
         this.managedWorkspaceRepository = Objects.requireNonNull(managedWorkspaceRepository, "managedWorkspaceRepository must not be null");
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
@@ -557,6 +560,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String target = requireText(targetLinuxServerId, "目标服务器不能为空", "targetLinuxServerId");
         Path repoRoot = appRepoRoot(normalizedVersion, repository);
         Path workspaceRoot = repoRoot.resolve(template.directoryPath()).normalize();
+        String repoRootValue = appRepoValue(normalizedVersion, repository);
+        String workspaceRootValue = appWorkspaceValue(normalizedVersion, repository, template);
         String privateKey = privateKeyFor(repository, userId);
         progress.step(WorkspaceCreateOperationStep.PREPARING_REPOSITORY);
         prepareApplicationRepo(repository, resolvedBranch, repoRoot, workspaceRoot, privateKey);
@@ -564,6 +569,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         Workspace runtimeWorkspace = createRuntimeWorkspace(
                 template.workspaceName() + "-" + normalizedVersion,
                 workspaceRoot,
+                workspaceRootValue,
                 traceId);
         Instant now = Instant.now();
         ApplicationWorkspaceVersion saved = managedWorkspaceRepository.saveVersion(new ApplicationWorkspaceVersion(
@@ -573,8 +579,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 repository.repositoryId(),
                 normalizedVersion,
                 resolvedBranch,
-                realPath(repoRoot).toString(),
-                realPath(workspaceRoot).toString(),
+                repoRootValue,
+                workspaceRootValue,
                 runtimeWorkspace.workspaceId(),
                 userId,
                 ManagedWorkspaceStatus.ACTIVE,
@@ -586,6 +592,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 saved,
                 realPath(repoRoot),
                 realPath(workspaceRoot),
+                repoRootValue,
+                workspaceRootValue,
                 runtimeWorkspace.workspaceId(),
                 saved.targetCommitHash(),
                 traceId,
@@ -606,7 +614,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             markRecent(userId, application.appId(), replica.runtimeWorkspaceId());
         }
         publishVersionSync(saved, userId, "CREATED", traceId, Map.of());
-        return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.from(saved, replica, runtimeWorkspace);
+        return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.from(
+                versionForResponse(saved),
+                replicaForResponse(replica),
+                workspaceForResponse(runtimeWorkspace));
     }
 
     public List<ManagedWorkspaceResponses.PersonalWorkspaceResponse> listPersonalWorkspaces(String versionId, UserId userId) {
@@ -642,35 +653,38 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 version,
                 workspaceName,
                 userId,
-                traceId,
-                PersonalWorkspaceReplicaMode.ENSURE_LOCAL);
+                traceId);
     }
 
     /**
      * 自定义命名个人工作区和 default 个人工作区共用同一套落库流程。
-     * 调用方负责成员校验，并通过 replicaMode 明确选择是否先确保本机应用版本副本。
+     * 调用方负责成员校验；创建前必须先确保当前服务器应用版本副本，避免旧绝对路径被当作 Git 根目录。
      */
     private ManagedWorkspaceResponses.PersonalWorkspaceResponse createPersonalWorkspaceForVersion(
             ApplicationWorkspaceVersion version,
             String workspaceName,
             UserId userId,
-            String traceId,
-            PersonalWorkspaceReplicaMode replicaMode) {
+            String traceId) {
         ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
         String normalizedName = requireText(workspaceName, "个人工作区名称不能为空", "workspaceName");
         PersonalWorkspaceId personalId = new PersonalWorkspaceId(RuntimeIdGenerator.personalWorkspaceId());
         String branch = personalWorkspaceBranch(version, userId, normalizedName);
         Path repoRoot = personalRepoRootWithName(version, userId, branch);
         Path workspaceRoot = repoRoot.resolve(template.directoryPath()).normalize();
+        String repoRootValue = personalRepoValue(version, userId, branch);
+        String workspaceRootValue = personalWorkspaceValue(version, template, userId, branch);
         CodeRepository repository = existingRepository(version.repositoryId());
-        ApplicationWorkspaceVersionReplica applicationReplica = personalWorkspaceReplica(version, template, userId, traceId, replicaMode);
+        ApplicationWorkspaceVersionReplica applicationReplica = ensureLocalReplica(version, template, userId, traceId);
         ensurePersonalWorktreeRoot(
-                Path.of(applicationReplica.repoRootPath()),
+                pathResolver.resolve(applicationReplica.repoRootPath()),
                 repoRoot,
                 branch,
                 privateKeyFor(repository, userId));
         workspaceRoot = effectiveWorkspaceRoot(repoRoot, workspaceRoot);
-        Workspace runtimeWorkspace = createRuntimeWorkspace(normalizedName, workspaceRoot, traceId);
+        if (workspaceRoot.equals(repoRoot.toAbsolutePath().normalize())) {
+            workspaceRootValue = repoRootValue;
+        }
+        Workspace runtimeWorkspace = createRuntimeWorkspace(normalizedName, workspaceRoot, workspaceRootValue, traceId);
         Instant now = Instant.now();
         PersonalWorkspace saved = managedWorkspaceRepository.savePersonalWorkspace(new PersonalWorkspace(
                 personalId,
@@ -680,31 +694,21 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 userId,
                 normalizedName,
                 branch,
-                realPath(repoRoot).toString(),
-                realPath(workspaceRoot).toString(),
+                repoRootValue,
+                workspaceRootValue,
                 runtimeWorkspace.workspaceId(),
                 gitWorkspaceService.headCommit(repoRoot),
                 ManagedWorkspaceStatus.ACTIVE,
                 now,
                 now));
         markRecent(userId, version.appId(), runtimeWorkspace.workspaceId());
-        return ManagedWorkspaceResponses.PersonalWorkspaceResponse.from(saved, runtimeWorkspace);
+        return ManagedWorkspaceResponses.PersonalWorkspaceResponse.from(
+                personalForResponse(saved),
+                workspaceForResponse(runtimeWorkspace));
     }
 
     private String personalWorkspaceBranch(ApplicationWorkspaceVersion version, UserId userId, String workspaceName) {
         return version.branch() + "_" + sanitizeBranchPart(userId.value()) + "_" + sanitizeBranchPart(workspaceName);
-    }
-
-    private ApplicationWorkspaceVersionReplica personalWorkspaceReplica(
-            ApplicationWorkspaceVersion version,
-            ApplicationWorkspace template,
-            UserId userId,
-            String traceId,
-            PersonalWorkspaceReplicaMode replicaMode) {
-        return switch (replicaMode) {
-            case ENSURE_LOCAL -> ensureLocalReplica(version, template, userId, traceId);
-            case READY_OR_LEGACY -> readyReplicaOrLegacy(version, serverIdentity.linuxServerId());
-        };
     }
 
     public ManagedWorkspaceResponses.WorkspaceRuntimeResponse markRecentWorkspace(String workspaceId, UserId userId) {
@@ -722,8 +726,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         // 全局最近工作区会随用户切换应用而变化；为了让前端在重新登录或换电脑时能直接还原
         // 上一次所在的应用 + 模板 + 版本组合（让左下角"切换工作空间"按钮立刻显示当前工作区），
         // 这里在返回时把工作区所属的托管应用 appId、应用版本 versionId、模板 applicationWorkspaceId 一并写出。
-        // 工作区不属于任何应用版本时（例如历史手动注册或超级管理员服务器工作空间），三者留空，前端会按
-        // 降级策略（首应用 / 首模板首版本）兜底。
+        // 工作区不属于任何应用版本时（例如历史手动注册或超级管理员服务器工作空间），三者留空；前端只选择应用，
+        // 不再兜底加载首模板首版本。
         return managedWorkspaceRepository.findGlobalPreference(userId)
                 .flatMap(preference -> workspaceRepository.findById(preference.workspaceId()))
                 .map(workspace -> resolveRecentWorkspaceResponse(workspace));
@@ -760,7 +764,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 if (applicationWorkspaceId == null) applicationWorkspaceId = pw.applicationWorkspaceId().value();
             }
         }
-        return ManagedWorkspaceResponses.WorkspaceRuntimeResponse.from(workspace, appId, versionId, applicationWorkspaceId);
+        return ManagedWorkspaceResponses.WorkspaceRuntimeResponse.from(
+                workspaceForResponse(workspace),
+                appId,
+                versionId,
+                applicationWorkspaceId);
     }
 
     /**
@@ -802,7 +810,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     pw.personalWorkspaceId().value(),
                     pw.workspaceName(),
                     pw.branch(),
-                    ManagedWorkspaceResponses.WorkspaceRuntimeResponse.from(runtimeWorkspace,
+                    ManagedWorkspaceResponses.WorkspaceRuntimeResponse.from(workspaceForResponse(runtimeWorkspace),
                             version.appId().value(), version.versionId().value(), version.applicationWorkspaceId().value()));
         }
         // 不存在则新建：按新规则命名分支 {branch}_{userId}_default
@@ -811,8 +819,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     version,
                     defaultName,
                     userId,
-                    traceId,
-                    PersonalWorkspaceReplicaMode.READY_OR_LEGACY);
+                    traceId);
             return new ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse(
                     created.personalWorkspaceId(),
                     created.workspaceName(),
@@ -835,8 +842,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         Path expectedRepoRoot = personalRepoRootWithName(version, userId, expectedBranch);
         ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
         Path expectedWorkspaceRoot = effectiveWorkspaceRoot(expectedRepoRoot, expectedRepoRoot.resolve(template.directoryPath()).normalize());
-        String expectedRepoPath = expectedRepoRoot.toAbsolutePath().normalize().toString();
-        String expectedWorkspacePath = expectedWorkspaceRoot.toAbsolutePath().normalize().toString();
+        Path expectedRepoPath = expectedRepoRoot.toAbsolutePath().normalize();
+        Path expectedWorkspacePath = expectedWorkspaceRoot.toAbsolutePath().normalize();
         boolean matches = expectedBranch.equals(personal.branch())
                 && sameNormalizedPath(expectedRepoPath, personal.repoRootPath())
                 && sameNormalizedPath(expectedWorkspacePath, personal.workspaceRootPath())
@@ -847,18 +854,23 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         CodeRepository repository = existingRepository(version.repositoryId());
         ApplicationWorkspaceVersionReplica applicationReplica = ensureLocalReplica(version, template, userId, traceId);
         ensurePersonalWorktreeRoot(
-                Path.of(applicationReplica.repoRootPath()),
+                pathResolver.resolve(applicationReplica.repoRootPath()),
                 expectedRepoRoot,
                 expectedBranch,
                 privateKeyFor(repository, userId));
         expectedWorkspaceRoot = effectiveWorkspaceRoot(expectedRepoRoot, expectedRepoRoot.resolve(template.directoryPath()).normalize());
-        expectedRepoPath = realPath(expectedRepoRoot).toString();
-        expectedWorkspacePath = realPath(expectedWorkspaceRoot).toString();
+        expectedRepoPath = realPath(expectedRepoRoot);
+        expectedWorkspacePath = realPath(expectedWorkspaceRoot);
+        String expectedRepoValue = personalRepoValue(version, userId, expectedBranch);
+        String expectedWorkspaceValue = personalWorkspaceValue(version, template, userId, expectedBranch);
+        if (expectedWorkspacePath.equals(expectedRepoPath)) {
+            expectedWorkspaceValue = expectedRepoValue;
+        }
         Instant now = Instant.now();
         Workspace repairedRuntime = workspaceRepository.save(new Workspace(
                 runtimeWorkspace.workspaceId(),
                 runtimeWorkspace.name(),
-                expectedWorkspacePath,
+                expectedWorkspaceValue,
                 runtimeWorkspace.status(),
                 runtimeWorkspace.createdAt(),
                 now,
@@ -872,8 +884,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 personal.userId(),
                 personal.workspaceName(),
                 expectedBranch,
-                expectedRepoPath,
-                expectedWorkspacePath,
+                expectedRepoValue,
+                expectedWorkspaceValue,
                 repairedRuntime.workspaceId(),
                 gitWorkspaceService.headCommit(expectedRepoRoot),
                 personal.status(),
@@ -890,9 +902,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             return false;
         }
         try {
-            Path personalRepoRoot = Path.of(personal.repoRootPath()).toAbsolutePath().normalize();
-            Path runtimeRoot = Path.of(runtimeWorkspace.rootPath()).toAbsolutePath().normalize();
-            Path personalWorkspaceRoot = Path.of(personal.workspaceRootPath()).toAbsolutePath().normalize();
+            Path personalRepoRoot = pathResolver.resolve(personal.repoRootPath()).toAbsolutePath().normalize();
+            Path runtimeRoot = pathResolver.resolve(runtimeWorkspace.rootPath()).toAbsolutePath().normalize();
+            Path personalWorkspaceRoot = pathResolver.resolve(personal.workspaceRootPath()).toAbsolutePath().normalize();
             return Files.isDirectory(personalRepoRoot)
                     && Files.isDirectory(runtimeRoot)
                     && Files.isDirectory(personalWorkspaceRoot)
@@ -903,11 +915,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
     }
 
-    private boolean sameNormalizedPath(String left, String right) {
+    private boolean sameNormalizedPath(Path left, String right) {
         if (left == null || right == null) {
             return false;
         }
-        return Path.of(left).toAbsolutePath().normalize().equals(Path.of(right).toAbsolutePath().normalize());
+        return left.toAbsolutePath().normalize().equals(pathResolver.resolve(right).toAbsolutePath().normalize());
     }
 
     private Path effectiveWorkspaceRoot(Path repoRoot, Path configuredWorkspaceRoot) {
@@ -977,6 +989,42 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .normalize();
     }
 
+    private String appRepoValue(String version, CodeRepository repository) {
+        return pathResolver.appValue(
+                sanitizeVersionForBranchAndPath(version),
+                requireRepositoryEnglishName(repository));
+    }
+
+    private String appWorkspaceValue(String version, CodeRepository repository, ApplicationWorkspace template) {
+        return pathResolver.appValue(
+                sanitizeVersionForBranchAndPath(version),
+                requireRepositoryEnglishName(repository),
+                template.directoryPath());
+    }
+
+    private String personalRepoValue(ApplicationWorkspaceVersion version, UserId userId, String branch) {
+        CodeRepository repository = existingRepository(version.repositoryId());
+        return pathResolver.personalValue(
+                sanitizeVersionForBranchAndPath(version.version()),
+                sanitizePathPart(userId.value()),
+                requireRepositoryEnglishName(repository),
+                sanitizePathPart(branch));
+    }
+
+    private String personalWorkspaceValue(
+            ApplicationWorkspaceVersion version,
+            ApplicationWorkspace template,
+            UserId userId,
+            String branch) {
+        CodeRepository repository = existingRepository(version.repositoryId());
+        return pathResolver.personalValue(
+                sanitizeVersionForBranchAndPath(version.version()),
+                sanitizePathPart(userId.value()),
+                requireRepositoryEnglishName(repository),
+                sanitizePathPart(branch),
+                template.directoryPath());
+    }
+
     /**
      * 基于本地 Git 获取工作区变更文件列表（不依赖 opencode runtime /vcs/diff）。
      * 通过 workspace 反查 personal workspace，若找到则基于其 repoRoot 进行 git status/diff；
@@ -990,11 +1038,11 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String displayPathPrefix = "";
         if (personal.isPresent()) {
             ensurePersonalOwner(personal.get(), userId);
-            gitRoot = Path.of(personal.get().repoRootPath());
-            displayPathPrefix = repoRelativePrefix(gitRoot, Path.of(personal.get().workspaceRootPath()));
+            gitRoot = pathResolver.resolve(personal.get().repoRootPath());
+            displayPathPrefix = repoRelativePrefix(gitRoot, pathResolver.resolve(personal.get().workspaceRootPath()));
         } else {
             // 回退：直接基于 workspace rootPath（可能是应用版本工作区副本）
-            gitRoot = Path.of(workspace.rootPath());
+            gitRoot = pathResolver.resolve(workspace.rootPath());
         }
         if (!Files.exists(gitRoot)) {
             return new ManagedWorkspaceResponses.WorkspaceGitDiffResponse(List.of());
@@ -1028,8 +1076,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         ensurePersonalOwner(current, userId);
         ApplicationWorkspaceVersion version = existingVersion(current.versionId());
         CodeRepository repository = existingRepository(version.repositoryId());
-        Path repoRoot = Path.of(current.repoRootPath());
-        Path workspaceRoot = Path.of(current.workspaceRootPath());
+        Path repoRoot = pathResolver.resolve(current.repoRootPath());
+        Path workspaceRoot = pathResolver.resolve(current.workspaceRootPath());
         List<String> gitFiles = repoRelativeFiles(repoRoot, workspaceRoot, normalizeFiles(files));
         try {
             Map<String, GitStatusEntry> statuses = new LinkedHashMap<>();
@@ -1118,7 +1166,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         //    如果这里冲突，冲突文件会留在用户当前可编辑的个人工作区，由用户解决后再次发布。
         ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
         ApplicationWorkspaceVersionReplica applicationReplica = ensureLocalReplica(version, template, userId, traceId);
-        Path applicationRepoRoot = Path.of(applicationReplica.repoRootPath());
+        Path applicationRepoRoot = pathResolver.resolve(applicationReplica.repoRootPath());
         String applicationBranch = version.branch();
         if (!gitWorkspaceService.isWorktreeClean(applicationRepoRoot)) {
             throw new PlatformException(
@@ -1184,14 +1232,14 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
     }
 
-    public ManagedWorkspaceResponses.WorkspaceDiffResponse diffPersonalWorkspace(String personalWorkspaceId, UserId userId) {
+    public ManagedWorkspaceResponses.WorkspaceDiffResponse diffPersonalWorkspace(String personalWorkspaceId, UserId userId, String traceId) {
         PersonalWorkspace personal = existingPersonal(new PersonalWorkspaceId(personalWorkspaceId));
         ensurePersonalOwner(personal, userId);
         ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
-        ApplicationWorkspaceVersionReplica applicationReplica = replicaForPersonalWorkspace(version, personal);
+        ApplicationWorkspaceVersionReplica applicationReplica = replicaForPersonalWorkspace(version, personal, traceId);
         return new ManagedWorkspaceResponses.WorkspaceDiffResponse(compareDirectories(
-                Path.of(personal.workspaceRootPath()),
-                Path.of(applicationReplica.workspaceRootPath())));
+                pathResolver.resolve(personal.workspaceRootPath()),
+                pathResolver.resolve(applicationReplica.workspaceRootPath())));
     }
 
     public ManagedWorkspaceResponses.WorkspaceSyncResponse syncPersonalToApplication(
@@ -1203,12 +1251,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         PersonalWorkspace personal = existingPersonal(new PersonalWorkspaceId(personalWorkspaceId));
         ensurePersonalOwner(personal, userId);
         ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
-        ApplicationWorkspaceVersionReplica applicationReplica = replicaForPersonalWorkspace(version, personal);
+        ApplicationWorkspaceVersionReplica applicationReplica = replicaForPersonalWorkspace(version, personal, traceId);
         List<String> normalizedFiles = normalizeFiles(files);
         WorkspaceSyncRecordId syncId = new WorkspaceSyncRecordId(RuntimeIdGenerator.workspaceSyncRecordId());
         try {
-            Path applicationRepoRoot = Path.of(applicationReplica.repoRootPath());
-            Path applicationWorkspaceRoot = Path.of(applicationReplica.workspaceRootPath());
+            Path applicationRepoRoot = pathResolver.resolve(applicationReplica.repoRootPath());
+            Path applicationWorkspaceRoot = pathResolver.resolve(applicationReplica.workspaceRootPath());
             CodeRepository repository = existingRepository(version.repositoryId());
             String privateKey = privateKeyFor(repository, userId);
             GitPublishWorkflow.PublishResult publishResult = gitPublishWorkflow.syncFilesThenPush(
@@ -1218,7 +1266,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                     "test-agent sync " + syncId.value(),
                     force,
                     privateKey,
-                    () -> copyFiles(Path.of(personal.workspaceRootPath()), applicationWorkspaceRoot, normalizedFiles));
+                    () -> copyFiles(pathResolver.resolve(personal.workspaceRootPath()), applicationWorkspaceRoot, normalizedFiles));
             Instant now = Instant.now();
             String headCommit = publishResult.headCommit();
             ApplicationWorkspaceVersion updatedVersion = managedWorkspaceRepository.updateVersionTargetCommit(version.versionId(), headCommit, now);
@@ -1240,10 +1288,10 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         PersonalWorkspace personal = existingPersonal(new PersonalWorkspaceId(personalWorkspaceId));
         ensurePersonalOwner(personal, userId);
         ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
-        ApplicationWorkspaceVersionReplica applicationReplica = replicaForPersonalWorkspace(version, personal);
+        ApplicationWorkspaceVersionReplica applicationReplica = replicaForPersonalWorkspace(version, personal, traceId);
         List<String> normalizedFiles = normalizeFiles(files);
         WorkspaceSyncRecordId syncId = new WorkspaceSyncRecordId(RuntimeIdGenerator.workspaceSyncRecordId());
-        copyFiles(Path.of(applicationReplica.workspaceRootPath()), Path.of(personal.workspaceRootPath()), normalizedFiles);
+        copyFiles(pathResolver.resolve(applicationReplica.workspaceRootPath()), pathResolver.resolve(personal.workspaceRootPath()), normalizedFiles);
         saveSync(syncId, userId, applicationReplica.runtimeWorkspaceId(), personal.runtimeWorkspaceId(), WorkspaceSyncDirection.APPLICATION_TO_PERSONAL, normalizedFiles, false, WorkspaceSyncStatus.SUCCEEDED, traceId);
         return new ManagedWorkspaceResponses.WorkspaceSyncResponse(syncId.value(), WorkspaceSyncStatus.SUCCEEDED.name(), normalizedFiles, false);
     }
@@ -1287,13 +1335,14 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
         ApplicationWorkspaceVersionReplica replica = managedWorkspaceRepository.findVersionReplica(version.versionId(), targetLinuxServerId)
                 .orElseGet(() -> ensureReplicaForTarget(version, template, userId, targetLinuxServerId, "GIT_PULL", traceId));
-        if (!gitWorkspaceService.isWorktreeClean(Path.of(replica.repoRootPath()))) {
+        Path replicaRepoRoot = pathResolver.resolve(replica.repoRootPath());
+        if (!gitWorkspaceService.isWorktreeClean(replicaRepoRoot)) {
             throw new PlatformException(ErrorCode.CONFLICT, "应用版本工作区存在未提交变更，无法 git pull", Map.of("versionId", versionId));
         }
         CodeRepository repository = existingRepository(version.repositoryId());
-        gitWorkspaceService.pullFastForward(Path.of(replica.repoRootPath()), version.branch(), privateKeyFor(repository, userId));
+        gitWorkspaceService.pullFastForward(replicaRepoRoot, version.branch(), privateKeyFor(repository, userId));
         Instant now = Instant.now();
-        String headCommit = gitWorkspaceService.headCommit(Path.of(replica.repoRootPath()));
+        String headCommit = gitWorkspaceService.headCommit(replicaRepoRoot);
         ApplicationWorkspaceVersion updatedVersion = managedWorkspaceRepository.updateVersionTargetCommit(version.versionId(), headCommit, now);
         ApplicationWorkspaceVersionReplica updatedReplica = managedWorkspaceRepository.saveVersionReplica(replica.ready(headCommit, now, traceId));
         publishVersionSync(updatedVersion, userId, "GIT_PULLED", traceId, Map.of());
@@ -1420,6 +1469,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         CodeRepository repository = existingRepository(version.repositoryId());
         Path repoRoot = appRepoRoot(version.version(), repository);
         Path workspaceRoot = repoRoot.resolve(template.directoryPath()).normalize();
+        String repoRootValue = appRepoValue(version.version(), repository);
+        String workspaceRootValue = appWorkspaceValue(version.version(), repository, template);
         String privateKey = privateKeyFor(repository, userId);
         prepareApplicationRepo(repository, version.branch(), repoRoot, workspaceRoot, privateKey);
         Optional<ApplicationWorkspaceVersionReplica> existing = managedWorkspaceRepository.findVersionReplica(
@@ -1431,14 +1482,14 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 .map(current -> new Workspace(
                         current.workspaceId(),
                         current.name(),
-                        realPath(workspaceRoot).toString(),
+                        workspaceRootValue,
                         current.status(),
                         current.createdAt(),
                         now,
                         serverIdentity.linuxServerId(),
                         traceId))
                 .map(workspaceRepository::save)
-                .orElseGet(() -> createRuntimeWorkspace(template.workspaceName() + "-" + version.version(), workspaceRoot, traceId));
+                .orElseGet(() -> createRuntimeWorkspace(template.workspaceName() + "-" + version.version(), workspaceRoot, workspaceRootValue, traceId));
         String currentCommit = syncReplicaToTargetCommit(version, repoRoot, privateKey, existing.orElse(null), traceId);
         ApplicationWorkspaceVersion updatedVersion = version.targetCommitHash() == null
                 ? managedWorkspaceRepository.updateVersionTargetCommit(version.versionId(), currentCommit, now)
@@ -1448,8 +1499,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                         current.replicaId(),
                         updatedVersion.versionId(),
                         serverIdentity.linuxServerId(),
-                        realPath(repoRoot).toString(),
-                        realPath(workspaceRoot).toString(),
+                        repoRootValue,
+                        workspaceRootValue,
                         runtimeWorkspace.workspaceId(),
                         currentCommit,
                         WorkspaceReplicaSyncStatus.READY,
@@ -1462,8 +1513,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                         new ApplicationWorkspaceVersionReplicaId(RuntimeIdGenerator.applicationWorkspaceVersionReplicaId()),
                         updatedVersion.versionId(),
                         serverIdentity.linuxServerId(),
-                        realPath(repoRoot).toString(),
-                        realPath(workspaceRoot).toString(),
+                        repoRootValue,
+                        workspaceRootValue,
                         runtimeWorkspace.workspaceId(),
                         currentCommit,
                         WorkspaceReplicaSyncStatus.READY,
@@ -1504,6 +1555,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             ApplicationWorkspaceVersion version,
             Path repoRoot,
             Path workspaceRoot,
+            String repoRootValue,
+            String workspaceRootValue,
             WorkspaceId runtimeWorkspaceId,
             String currentCommit,
             String traceId,
@@ -1512,8 +1565,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 new ApplicationWorkspaceVersionReplicaId(RuntimeIdGenerator.applicationWorkspaceVersionReplicaId()),
                 version.versionId(),
                 serverIdentity.linuxServerId(),
-                repoRoot.toString(),
-                workspaceRoot.toString(),
+                repoRootValue,
+                workspaceRootValue,
                 runtimeWorkspaceId,
                 currentCommit,
                 WorkspaceReplicaSyncStatus.READY,
@@ -1524,32 +1577,12 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 now));
     }
 
-    private ApplicationWorkspaceVersionReplica readyReplicaOrLegacy(ApplicationWorkspaceVersion version, String linuxServerId) {
-        return managedWorkspaceRepository.findVersionReplica(version.versionId(), linuxServerId)
-                .orElseGet(() -> new ApplicationWorkspaceVersionReplica(
-                        new ApplicationWorkspaceVersionReplicaId(RuntimeIdGenerator.applicationWorkspaceVersionReplicaId()),
-                        version.versionId(),
-                        linuxServerId,
-                        version.repoRootPath(),
-                        version.workspaceRootPath(),
-                        version.runtimeWorkspaceId(),
-                        version.targetCommitHash(),
-                        WorkspaceReplicaSyncStatus.READY,
-                        null,
-                        version.targetCommitUpdatedAt(),
-                        "trace_legacy_replica",
-                        version.createdAt(),
-                        version.updatedAt()));
-    }
-
-    private ApplicationWorkspaceVersionReplica replicaForPersonalWorkspace(ApplicationWorkspaceVersion version, PersonalWorkspace personal) {
-        String linuxServerId = workspaceRepository.findById(personal.runtimeWorkspaceId())
-                .map(Workspace::linuxServerId)
-                .orElse(serverIdentity.linuxServerId());
-        if (linuxServerId == null || linuxServerId.isBlank()) {
-            linuxServerId = serverIdentity.linuxServerId();
-        }
-        return readyReplicaOrLegacy(version, linuxServerId);
+    private ApplicationWorkspaceVersionReplica replicaForPersonalWorkspace(
+            ApplicationWorkspaceVersion version,
+            PersonalWorkspace personal,
+            String traceId) {
+        ApplicationWorkspace template = existingTemplate(version.applicationWorkspaceId());
+        return ensureLocalReplica(version, template, personal.userId(), traceId);
     }
 
     private Optional<ApplicationWorkspaceVersionReplica> waitForReadyReplica(
@@ -1621,14 +1654,15 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         String reason = payloadString(payload, "reason").orElse("SYNC");
         ApplicationWorkspaceVersionReplica replica = ensureLocalReplica(version, template, userId, event.traceId());
         if ("GIT_PULL_REQUESTED".equals(reason)) {
-            if (!gitWorkspaceService.isWorktreeClean(Path.of(replica.repoRootPath()))) {
+            Path replicaRepoRoot = pathResolver.resolve(replica.repoRootPath());
+            if (!gitWorkspaceService.isWorktreeClean(replicaRepoRoot)) {
                 managedWorkspaceRepository.saveVersionReplica(replica.failed("工作树存在未提交变更", Instant.now(), event.traceId()));
                 return;
             }
             CodeRepository repository = existingRepository(version.repositoryId());
-            gitWorkspaceService.pullFastForward(Path.of(replica.repoRootPath()), version.branch(), privateKeyFor(repository, userId));
+            gitWorkspaceService.pullFastForward(replicaRepoRoot, version.branch(), privateKeyFor(repository, userId));
             Instant now = Instant.now();
-            String headCommit = gitWorkspaceService.headCommit(Path.of(replica.repoRootPath()));
+            String headCommit = gitWorkspaceService.headCommit(replicaRepoRoot);
             ApplicationWorkspaceVersion updatedVersion = managedWorkspaceRepository.updateVersionTargetCommit(version.versionId(), headCommit, now);
             ApplicationWorkspaceVersionReplica updatedReplica = managedWorkspaceRepository.saveVersionReplica(replica.ready(headCommit, now, event.traceId()));
             publishVersionSync(updatedVersion, userId, "GIT_PULLED", event.traceId(), Map.of("targetLinuxServerId", updatedReplica.linuxServerId()));
@@ -1658,12 +1692,13 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return expected;
     }
 
-    private Workspace createRuntimeWorkspace(String name, Path workspaceRoot, String traceId) {
+    private Workspace createRuntimeWorkspace(String name, Path workspaceRoot, String storedRootPath, String traceId) {
         Instant now = Instant.now();
+        realPath(workspaceRoot);
         Workspace workspace = new Workspace(
                 new WorkspaceId(RuntimeIdGenerator.workspaceId()),
                 name,
-                realPath(workspaceRoot).toString(),
+                requireText(storedRootPath, "工作区根路径不能为空", "rootPath"),
                 WorkspaceStatus.ACTIVE,
                 now,
                 now,
@@ -1676,7 +1711,9 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         ApplicationWorkspaceVersionReplica replica = managedWorkspaceRepository.findVersionReplica(version.versionId(), serverIdentity.linuxServerId())
                 .orElse(null);
         if (replica == null) {
-            return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.from(version, existingWorkspace(version.runtimeWorkspaceId()));
+            return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.from(
+                    versionForResponse(version),
+                    workspaceForResponse(existingWorkspace(version.runtimeWorkspaceId())));
         }
         return versionResponse(version, replica);
     }
@@ -1685,13 +1722,73 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             ApplicationWorkspaceVersion version,
             ApplicationWorkspaceVersionReplica replica) {
         return ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse.from(
-                version,
-                replica,
-                existingWorkspace(replica.runtimeWorkspaceId()));
+                versionForResponse(version),
+                replicaForResponse(replica),
+                workspaceForResponse(existingWorkspace(replica.runtimeWorkspaceId())));
     }
 
     private ManagedWorkspaceResponses.PersonalWorkspaceResponse personalResponse(PersonalWorkspace personal) {
-        return ManagedWorkspaceResponses.PersonalWorkspaceResponse.from(personal, existingWorkspace(personal.runtimeWorkspaceId()));
+        return ManagedWorkspaceResponses.PersonalWorkspaceResponse.from(
+                personalForResponse(personal),
+                workspaceForResponse(existingWorkspace(personal.runtimeWorkspaceId())));
+    }
+
+    private Workspace workspaceForResponse(Workspace workspace) {
+        return pathResolver.withResolvedRootPath(workspace);
+    }
+
+    private ApplicationWorkspaceVersion versionForResponse(ApplicationWorkspaceVersion version) {
+        return new ApplicationWorkspaceVersion(
+                version.versionId(),
+                version.applicationWorkspaceId(),
+                version.appId(),
+                version.repositoryId(),
+                version.version(),
+                version.branch(),
+                pathResolver.resolve(version.repoRootPath()).toString(),
+                pathResolver.resolve(version.workspaceRootPath()).toString(),
+                version.runtimeWorkspaceId(),
+                version.createdBy(),
+                version.status(),
+                version.targetCommitHash(),
+                version.targetCommitUpdatedAt(),
+                version.createdAt(),
+                version.updatedAt());
+    }
+
+    private ApplicationWorkspaceVersionReplica replicaForResponse(ApplicationWorkspaceVersionReplica replica) {
+        return new ApplicationWorkspaceVersionReplica(
+                replica.replicaId(),
+                replica.versionId(),
+                replica.linuxServerId(),
+                pathResolver.resolve(replica.repoRootPath()).toString(),
+                pathResolver.resolve(replica.workspaceRootPath()).toString(),
+                replica.runtimeWorkspaceId(),
+                replica.currentCommitHash(),
+                replica.syncStatus(),
+                replica.lastError(),
+                replica.lastSyncedAt(),
+                replica.traceId(),
+                replica.createdAt(),
+                replica.updatedAt());
+    }
+
+    private PersonalWorkspace personalForResponse(PersonalWorkspace personal) {
+        return new PersonalWorkspace(
+                personal.personalWorkspaceId(),
+                personal.versionId(),
+                personal.appId(),
+                personal.applicationWorkspaceId(),
+                personal.userId(),
+                personal.workspaceName(),
+                personal.branch(),
+                pathResolver.resolve(personal.repoRootPath()).toString(),
+                pathResolver.resolve(personal.workspaceRootPath()).toString(),
+                personal.runtimeWorkspaceId(),
+                personal.baseCommit(),
+                personal.status(),
+                personal.createdAt(),
+                personal.updatedAt());
     }
 
     private void markRecent(UserId userId, ApplicationId appId, WorkspaceId workspaceId) {
@@ -2078,11 +2175,6 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
     private static String sanitizeBranchPart(String value) {
         return sanitizePathPart(value);
-    }
-
-    private enum PersonalWorkspaceReplicaMode {
-        ENSURE_LOCAL,
-        READY_OR_LEGACY
     }
 
     private static final class WorkspaceCreateProgress {

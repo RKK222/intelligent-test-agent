@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-02 - 托管工作区路径逻辑化与默认空态加载
+
+- Why: 切换应用在当前服务器没有 READY 副本时会把旧数据库绝对路径当成本机 Git 根目录，导致 `GIT_UNAVAILABLE`；同时登录/切应用无 per-app recent 时会兜底首模板首版本并自动创建 default 私人 worktree，不符合“无历史不加载工作区”的新规则。
+- What: 托管应用版本、副本、私人工作区和托管 runtime workspace 新写入逻辑路径 `appworkspace:` / `personalworktree:`，旧绝对路径只作为 legacy 兼容读取；所有 Git、文件树、Agent 配置、Run、Terminal 和文件 WebSocket 使用前统一解析为当前服务器物理路径；默认私人工作区改为先确保本机应用版本副本，前端无 recent 时只选应用并保留工作区切换入口。
+- How: 新增 `ManagedWorkspacePathResolver` 和 Spring Bean，服务层写逻辑路径、响应返回解析后的物理路径；`ManagedWorkspaceApplicationService` 的 default/personal/sync/diff/pull 路径全部走 `ensureLocalReplica`；前端 `pickDefaultWorkspaceForApp` 只在 recent 带 `versionId` 时加载 default 私人 worktree，空 workspace 状态下仍挂载文件树和 footer。
+- Result: `ManagedWorkspacePathResolverTest`、`ManagedWorkspaceApplicationServiceTest`、`test-agent-opencode-runtime -am test`、`test-agent-app -am -DskipTests package`、`agent-web typecheck`、定向 Playwright mock E2E 和 `git diff --check` 均通过；无 Flyway 数据迁移，旧数据保持兼容读取。
+
 ### 2026-07-02 - opencode 用户进程初始化增加轮询进度
 
 - Why: 用户在“已分配但未运行”状态下点击启动/分配 opencode 进程时，前端只能等同步初始化返回，无法看到公共启动链路中的具体步骤，也无法定位 manager start、进程检查或健康检查失败原因。

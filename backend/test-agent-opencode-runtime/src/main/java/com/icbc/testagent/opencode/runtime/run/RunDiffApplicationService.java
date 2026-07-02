@@ -21,6 +21,7 @@ import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
 import com.icbc.testagent.domain.session.Session;
+import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.event.RunEventAppender;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -49,10 +51,33 @@ public class RunDiffApplicationService {
     private final RunEventAppender runEventAppender;
     private final AgentRuntimeRegistry agentRuntimeRegistry;
     private final AgentSessionBindingRepository agentSessionBindingRepository;
+    private final ManagedWorkspacePathResolver pathResolver;
 
     /**
      * 创建 Run Diff 应用服务，依赖领域仓储和 agent runtime registry，不直接访问持久化实现。
      */
+    @Autowired
+    public RunDiffApplicationService(
+            WorkspaceRepository workspaceRepository,
+            com.icbc.testagent.domain.session.SessionRepository sessionRepository,
+            RunRepository runRepository,
+            RunEventRepository runEventRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            RunEventAppender runEventAppender,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            ManagedWorkspacePathResolver pathResolver) {
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
+        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
+        this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
+        this.runEventRepository = Objects.requireNonNull(runEventRepository, "runEventRepository must not be null");
+        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
+        this.runEventAppender = Objects.requireNonNull(runEventAppender, "runEventAppender must not be null");
+        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
+        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
+        this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
+    }
+
     public RunDiffApplicationService(
             WorkspaceRepository workspaceRepository,
             com.icbc.testagent.domain.session.SessionRepository sessionRepository,
@@ -62,14 +87,16 @@ public class RunDiffApplicationService {
             RunEventAppender runEventAppender,
             AgentRuntimeRegistry agentRuntimeRegistry,
             AgentSessionBindingRepository agentSessionBindingRepository) {
-        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
-        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
-        this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
-        this.runEventRepository = Objects.requireNonNull(runEventRepository, "runEventRepository must not be null");
-        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
-        this.runEventAppender = Objects.requireNonNull(runEventAppender, "runEventAppender must not be null");
-        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
-        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
+        this(
+                workspaceRepository,
+                sessionRepository,
+                runRepository,
+                runEventRepository,
+                executionNodeRepository,
+                runEventAppender,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                ManagedWorkspacePathResolver.legacyOnly());
     }
 
     /**
@@ -102,7 +129,7 @@ public class RunDiffApplicationService {
         AgentDiffResult result = runtime.getDiff(new AgentDiffCommand(
                         node,
                         binding.get().remoteSessionId(),
-                        workspace.rootPath(),
+                        workspaceRoot(workspace),
                         null,
                         messageId,
                         traceId))
@@ -161,7 +188,7 @@ public class RunDiffApplicationService {
         AgentRejectDiffResult result = runtime.rejectDiff(new AgentRejectDiffCommand(
                         node,
                         binding.remoteSessionId(),
-                        workspace.rootPath(),
+                        workspaceRoot(workspace),
                         null,
                         messageId,
                         partId,
@@ -206,6 +233,10 @@ public class RunDiffApplicationService {
                         ErrorCode.NOT_FOUND,
                         "Workspace 不存在",
                         Map.of("workspaceId", run.workspaceId().value())));
+    }
+
+    private String workspaceRoot(Workspace workspace) {
+        return pathResolver.resolve(workspace.rootPath()).toString();
     }
 
     /**

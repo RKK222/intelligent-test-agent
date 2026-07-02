@@ -102,6 +102,45 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void createsManagedWorkspaceRecordsWithLogicalPathsAndPhysicalResponsePaths() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+
+        assertThat(version.repoRootPath().replace('\\', '/')).endsWith("/appworkspace/20260707/gcms");
+        assertThat(version.workspaceRootPath().replace('\\', '/')).endsWith("/appworkspace/20260707/gcms/F-GCMS/workspace");
+        assertThat(version.runtimeWorkspace().rootPath().replace('\\', '/')).endsWith("/appworkspace/20260707/gcms/F-GCMS/workspace");
+        assertThat(managed.versions.get(0).repoRootPath()).isEqualTo("appworkspace:20260707/gcms");
+        assertThat(managed.versions.get(0).workspaceRootPath()).isEqualTo("appworkspace:20260707/gcms/F-GCMS/workspace");
+        assertThat(managed.replicas.get(0).repoRootPath()).isEqualTo("appworkspace:20260707/gcms");
+        assertThat(managed.replicas.get(0).workspaceRootPath()).isEqualTo("appworkspace:20260707/gcms/F-GCMS/workspace");
+        assertThat(workspaces.saved.get(0).rootPath()).isEqualTo("appworkspace:20260707/gcms/F-GCMS/workspace");
+        assertThat(managed.personals.get(0).repoRootPath())
+                .isEqualTo("personalworktree:20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default");
+        assertThat(managed.personals.get(0).workspaceRootPath())
+                .isEqualTo("personalworktree:20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default/F-GCMS/workspace");
+        assertThat(workspaces.findById(managed.personals.get(0).runtimeWorkspaceId())).get()
+                .satisfies(workspace -> assertThat(workspace.rootPath())
+                        .isEqualTo("personalworktree:20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default/F-GCMS/workspace"));
+        assertThat(personal.runtimeWorkspace().rootPath().replace('\\', '/'))
+                .endsWith("/personalworktree/20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default/F-GCMS/workspace");
+    }
+
+    @Test
     void createsVersionForTargetServerAndBroadcastsSyncRequest() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
@@ -253,6 +292,54 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(personal.personalWorkspaceBranch()).isEqualTo("feature_testagent_20260707_usr_1_default");
         assertThat(git.reusedWorktreeBranch).isEqualTo("feature_testagent_20260707_usr_1_default");
         assertThat(managed.personals).hasSize(1);
+    }
+
+    @Test
+    void ensureDefaultPersonalWorkspaceEnsuresLocalReplicaInsteadOfUsingLegacyVersionPath() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        Instant now = Instant.now();
+        WorkspaceId staleRuntimeId = new WorkspaceId("wrk_stale_legacy");
+        workspaces.save(new Workspace(
+                staleRuntimeId,
+                "legacy",
+                "/Users/rina/Desktop/mimo仓库/intelligent-test-agent/F-GCMS/workspace",
+                WorkspaceStatus.ACTIVE,
+                now,
+                now,
+                "legacy-server",
+                "trace_legacy"));
+        managed.versions.add(new ApplicationWorkspaceVersion(
+                new ApplicationWorkspaceVersionId("awv_stale_legacy"),
+                new ApplicationWorkspaceId("awp_1"),
+                new ApplicationId("app_gcms"),
+                new CodeRepositoryId("repo_1"),
+                "20260707",
+                "feature_testagent_20260707",
+                "/Users/rina/Desktop/mimo仓库/intelligent-test-agent",
+                "/Users/rina/Desktop/mimo仓库/intelligent-test-agent/F-GCMS/workspace",
+                staleRuntimeId,
+                new UserId("usr_1"),
+                com.icbc.testagent.domain.managedworkspace.ManagedWorkspaceStatus.ACTIVE,
+                "commit_base",
+                now,
+                now,
+                now));
+
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                "awv_stale_legacy",
+                new UserId("usr_1"),
+                "trace_default");
+
+        assertThat(git.createWorktreeBaseRepoRoot).isEqualTo(root.resolve("appworkspace/20260707/gcms").toAbsolutePath().normalize());
+        assertThat(managed.replicas).singleElement().satisfies(replica -> {
+            assertThat(replica.repoRootPath()).isEqualTo("appworkspace:20260707/gcms");
+            assertThat(replica.workspaceRootPath()).isEqualTo("appworkspace:20260707/gcms/F-GCMS/workspace");
+        });
+        assertThat(personal.runtimeWorkspace().rootPath()).doesNotContain("/Users/rina/Desktop");
     }
 
     @Test
@@ -424,8 +511,8 @@ class ManagedWorkspaceApplicationServiceTest {
                 .contains("/personalworktree/20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default/F-GCMS/workspace");
         assertThat(managed.personals.get(0).branch()).isEqualTo("feature_testagent_20260707_usr_1_default");
         assertThat(workspaces.findById(runtimeId)).get()
-                .satisfies(workspace -> assertThat(workspace.rootPath().replace('\\', '/'))
-                        .contains("/personalworktree/20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default/F-GCMS/workspace"));
+                .satisfies(workspace -> assertThat(workspace.rootPath())
+                        .isEqualTo("personalworktree:20260707/usr_1/gcms/feature_testagent_20260707_usr_1_default/F-GCMS/workspace"));
     }
 
     @Test
@@ -480,11 +567,12 @@ class ManagedWorkspaceApplicationServiceTest {
                 new UserId("usr_1"),
                 "trace_repair_missing_dir");
 
-        String expectedRepoRoot = repoRoot.toRealPath().toString();
+        String expectedRepoRoot = repoRoot.toAbsolutePath().normalize().toString();
+        String expectedRepoValue = "personalworktree:20260707/usr_1/gcms/" + branch;
         assertThat(repaired.runtimeWorkspace().rootPath()).isEqualTo(expectedRepoRoot);
-        assertThat(managed.personals.get(0).workspaceRootPath()).isEqualTo(expectedRepoRoot);
+        assertThat(managed.personals.get(0).workspaceRootPath()).isEqualTo(expectedRepoValue);
         assertThat(workspaces.findById(runtimeId)).get()
-                .satisfies(workspace -> assertThat(workspace.rootPath()).isEqualTo(expectedRepoRoot));
+                .satisfies(workspace -> assertThat(workspace.rootPath()).isEqualTo(expectedRepoValue));
     }
 
     @Test
@@ -676,13 +764,14 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.committedFiles).containsExactly("F-GCMS/workspace/case.txt");
         assertThat(git.pushedBranch).isEqualTo("feature_testagent_20260707");
         assertThat(git.pushedForce).isTrue();
+        Path applicationRepoRoot = applicationRepoRoot();
         assertThat(git.calls).containsSequence(
-                "clean:" + Path.of(managed.replicas.get(0).repoRootPath()),
-                "fetch:" + Path.of(managed.replicas.get(0).repoRootPath()),
-                "pull:" + Path.of(managed.replicas.get(0).repoRootPath()) + ":feature_testagent_20260707",
-                "commit:" + Path.of(managed.replicas.get(0).repoRootPath()) + ":F-GCMS/workspace/case.txt",
-                "push:" + Path.of(managed.replicas.get(0).repoRootPath()) + ":feature_testagent_20260707:true",
-                "head:" + Path.of(managed.replicas.get(0).repoRootPath()));
+                "clean:" + applicationRepoRoot,
+                "fetch:" + applicationRepoRoot,
+                "pull:" + applicationRepoRoot + ":feature_testagent_20260707",
+                "commit:" + applicationRepoRoot + ":F-GCMS/workspace/case.txt",
+                "push:" + applicationRepoRoot + ":feature_testagent_20260707:true",
+                "head:" + applicationRepoRoot);
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_after_push");
         assertThat(managed.replicas.get(0).currentCommitHash()).isEqualTo("commit_after_push");
         assertThat(managed.syncRecords).hasSize(1);
@@ -731,7 +820,10 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.pushedBranch).isNull();
         assertThat(managed.syncRecords).hasSize(1);
         assertThat(managed.syncRecords.get(0).status()).isEqualTo(WorkspaceSyncStatus.FAILED);
-        assertThat(git.calls).containsExactly("clean:" + Path.of(managed.replicas.get(0).repoRootPath()));
+        Path applicationRepoRoot = applicationRepoRoot();
+        assertThat(git.calls).containsExactly(
+                "head:" + applicationRepoRoot,
+                "clean:" + applicationRepoRoot);
     }
 
     @Test
@@ -859,8 +951,8 @@ class ManagedWorkspaceApplicationServiceTest {
                 new UserId("usr_1"),
                 "trace_publish");
 
-        Path applicationRepoRoot = Path.of(managed.replicas.get(0).repoRootPath());
-        Path personalRepoRoot = Path.of(managed.personals.get(0).repoRootPath());
+        Path applicationRepoRoot = applicationRepoRoot();
+        Path personalRepoRoot = personalRepoRoot(personal.personalWorkspaceBranch());
 
         assertThat(result.status()).isEqualTo("MERGED");
         assertThat(result.versionId()).isEqualTo(version.versionId());
@@ -950,11 +1042,12 @@ class ManagedWorkspaceApplicationServiceTest {
                 new UserId("usr_1"),
                 "trace_publish");
 
-        Path applicationRepoRoot = Path.of(managed.replicas.get(0).repoRootPath());
+        Path applicationRepoRoot = applicationRepoRoot();
         Workspace runtimeWorkspace = workspaces.findById(current.runtimeWorkspaceId()).orElseThrow();
 
         assertThat(result.status()).isEqualTo("MERGED");
-        assertThat(applicationRepoRoot).isEqualTo(root.resolve("appworkspace/20260707/gcms").toRealPath());
+        assertThat(managed.replicas.get(0).repoRootPath()).isEqualTo("appworkspace:20260707/gcms");
+        assertThat(applicationRepoRoot).isEqualTo(root.resolve("appworkspace/20260707/gcms").toAbsolutePath().normalize());
         assertThat(runtimeWorkspace.rootPath()).doesNotContain("D:\\data");
         assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_merged_repaired");
@@ -1033,7 +1126,7 @@ class ManagedWorkspaceApplicationServiceTest {
                 new UserId("usr_1"),
                 "trace_publish");
 
-        Path personalRepoRoot = Path.of(managed.personals.get(0).repoRootPath());
+        Path applicationRepoRoot = applicationRepoRoot();
 
         assertThat(result.status()).isEqualTo("CONFLICT");
         assertThat(result.conflictFiles()).containsExactly("src/Main.java", "README.md");
@@ -1131,6 +1224,17 @@ class ManagedWorkspaceApplicationServiceTest {
                 new RecordingBroadcastPublisher());
     }
 
+    private Path applicationRepoRoot() {
+        return root.resolve("appworkspace/20260707/gcms").toAbsolutePath().normalize();
+    }
+
+    private Path personalRepoRoot(String branch) {
+        return root.resolve("personalworktree/20260707/usr_1/gcms")
+                .resolve(branch)
+                .toAbsolutePath()
+                .normalize();
+    }
+
     /**
      * 内存通用参数仓库：把工作区根目录参数指向 @TempDir 下的子目录，common_parameters 为唯一来源。
      */
@@ -1210,6 +1314,7 @@ class ManagedWorkspaceApplicationServiceTest {
         private final List<String> calls = new ArrayList<>();
         private boolean failCreateWorktreeWithConflict;
         private String reusedWorktreeBranch;
+        private Path createWorktreeBaseRepoRoot;
         private String nextStatusPorcelain = "";
         private final Map<String, String> diffByFile = new java.util.HashMap<>();
         private final Map<String, String> diffByFileAndStage = new java.util.HashMap<>();
@@ -1252,6 +1357,7 @@ class ManagedWorkspaceApplicationServiceTest {
 
         @Override
         public void createWorktree(Path repoRoot, Path worktreeRoot, String branch, String privateKey) {
+            this.createWorktreeBaseRepoRoot = repoRoot;
             this.worktreeBranch = branch;
             if (failCreateWorktreeWithConflict) {
                 throw new PlatformException(
@@ -1264,6 +1370,7 @@ class ManagedWorkspaceApplicationServiceTest {
 
         @Override
         public void createWorktreeReusingBranch(Path repoRoot, Path worktreeRoot, String branch, String privateKey) {
+            this.createWorktreeBaseRepoRoot = repoRoot;
             this.reusedWorktreeBranch = branch;
             createWorktreeDirectory(worktreeRoot);
         }

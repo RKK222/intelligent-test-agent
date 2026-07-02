@@ -7,6 +7,7 @@ import com.icbc.testagent.common.pagination.PageRequest;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
+import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import java.nio.file.Files;
@@ -31,6 +32,7 @@ public class WorkspaceApplicationService {
     private final WorkspaceRepository workspaceRepository;
     private final WorkspaceFileService fileService;
     private final WorkspaceServerIdentity serverIdentity;
+    private final ManagedWorkspacePathResolver pathResolver;
 
     /**
      * 构造 Workspace 应用服务，注入领域 Repository 端口和文件服务，避免 Controller 直接访问底层资源。
@@ -39,17 +41,29 @@ public class WorkspaceApplicationService {
     public WorkspaceApplicationService(
             WorkspaceRepository workspaceRepository,
             WorkspaceFileService fileService,
-            WorkspaceServerIdentity serverIdentity) {
+            WorkspaceServerIdentity serverIdentity,
+            ManagedWorkspacePathResolver pathResolver) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.fileService = Objects.requireNonNull(fileService, "fileService must not be null");
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
+        this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
     }
 
     /**
      * 兼容旧测试构造路径，未显式注入服务器身份时使用本地默认值。
      */
     public WorkspaceApplicationService(WorkspaceRepository workspaceRepository, WorkspaceFileService fileService) {
-        this(workspaceRepository, fileService, new WorkspaceServerIdentity("127.0.0.1"));
+        this(workspaceRepository, fileService, new WorkspaceServerIdentity("127.0.0.1"), ManagedWorkspacePathResolver.legacyOnly());
+    }
+
+    /**
+     * 兼容旧测试构造路径，未显式注入路径解析器时只处理普通绝对路径。
+     */
+    public WorkspaceApplicationService(
+            WorkspaceRepository workspaceRepository,
+            WorkspaceFileService fileService,
+            WorkspaceServerIdentity serverIdentity) {
+        this(workspaceRepository, fileService, serverIdentity, ManagedWorkspacePathResolver.legacyOnly());
     }
 
     /**
@@ -95,7 +109,12 @@ public class WorkspaceApplicationService {
      * 分页查询工作区列表；分页边界由 PageRequest 统一校验。
      */
     public PageResponse<Workspace> listWorkspaces(PageRequest pageRequest) {
-        return workspaceRepository.findPage(pageRequest);
+        PageResponse<Workspace> page = workspaceRepository.findPage(pageRequest);
+        return new PageResponse<>(
+                page.items().stream().map(this::workspaceForResponse).toList(),
+                page.page(),
+                page.size(),
+                page.total());
     }
 
     /**
@@ -103,6 +122,7 @@ public class WorkspaceApplicationService {
      */
     public Workspace getWorkspace(WorkspaceId workspaceId) {
         return workspaceRepository.findById(workspaceId)
+                .map(this::workspaceForResponse)
                 .orElseThrow(() -> {
                     LOGGER.warn("Workspace not found, workspaceId={}", workspaceId.value());
                     return new PlatformException(
@@ -116,12 +136,12 @@ public class WorkspaceApplicationService {
      * 校验工作区属于当前后端服务器；历史空服务器字段在根目录可访问时回填当前服务器。
      */
     public Workspace requireWorkspaceOnCurrentServer(WorkspaceId workspaceId, String traceId) {
-        Workspace workspace = getWorkspace(workspaceId);
+        Workspace workspace = rawWorkspace(workspaceId);
         String currentLinuxServerId = serverIdentity.linuxServerId();
         if (workspace.linuxServerId() == null) {
-            validateRootPath(workspace.rootPath());
+            validateRootPath(resolvedRootPath(workspace));
             Workspace bound = workspace.withLinuxServerId(currentLinuxServerId, traceId, Instant.now());
-            return workspaceRepository.save(bound);
+            return workspaceForResponse(workspaceRepository.save(bound));
         }
         if (!currentLinuxServerId.equals(workspace.linuxServerId())) {
             throw new PlatformException(
@@ -132,8 +152,8 @@ public class WorkspaceApplicationService {
                             "workspaceLinuxServerId", workspace.linuxServerId(),
                             "currentLinuxServerId", currentLinuxServerId));
         }
-        validateRootPath(workspace.rootPath());
-        return workspace;
+        validateRootPath(resolvedRootPath(workspace));
+        return workspaceForResponse(workspace);
     }
 
     /**
@@ -214,5 +234,24 @@ public class WorkspaceApplicationService {
         } catch (Exception exception) {
             throw new PlatformException(ErrorCode.VALIDATION_ERROR, "工作区根路径不存在", Map.of("rootPath", rootPath), exception);
         }
+    }
+
+    private Workspace workspaceForResponse(Workspace workspace) {
+        return pathResolver.withResolvedRootPath(workspace);
+    }
+
+    private String resolvedRootPath(Workspace workspace) {
+        return pathResolver.resolve(workspace.rootPath()).toString();
+    }
+
+    private Workspace rawWorkspace(WorkspaceId workspaceId) {
+        return workspaceRepository.findById(workspaceId)
+                .orElseThrow(() -> {
+                    LOGGER.warn("Workspace not found, workspaceId={}", workspaceId.value());
+                    return new PlatformException(
+                            ErrorCode.NOT_FOUND,
+                            "Workspace 不存在",
+                            Map.of("workspaceId", workspaceId.value()));
+                });
     }
 }

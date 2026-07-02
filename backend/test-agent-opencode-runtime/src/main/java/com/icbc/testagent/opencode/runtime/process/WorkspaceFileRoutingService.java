@@ -7,6 +7,7 @@ import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
@@ -35,6 +36,7 @@ public class WorkspaceFileRoutingService {
     private final WorkspaceRepository workspaceRepository;
     private final UserOpencodeProcessAssignmentService assignmentService;
     private final BackendJavaRouteResolver routeResolver;
+    private final ManagedWorkspacePathResolver pathResolver;
     private final Clock clock;
 
     /**
@@ -44,8 +46,9 @@ public class WorkspaceFileRoutingService {
     public WorkspaceFileRoutingService(
             WorkspaceRepository workspaceRepository,
             UserOpencodeProcessAssignmentService assignmentService,
-            BackendJavaRouteResolver routeResolver) {
-        this(workspaceRepository, assignmentService, routeResolver, Clock.systemUTC());
+            BackendJavaRouteResolver routeResolver,
+            ManagedWorkspacePathResolver pathResolver) {
+        this(workspaceRepository, assignmentService, routeResolver, pathResolver, Clock.systemUTC());
     }
 
     /**
@@ -56,9 +59,19 @@ public class WorkspaceFileRoutingService {
             UserOpencodeProcessAssignmentService assignmentService,
             BackendJavaRouteResolver routeResolver,
             Clock clock) {
+        this(workspaceRepository, assignmentService, routeResolver, ManagedWorkspacePathResolver.legacyOnly(), clock);
+    }
+
+    public WorkspaceFileRoutingService(
+            WorkspaceRepository workspaceRepository,
+            UserOpencodeProcessAssignmentService assignmentService,
+            BackendJavaRouteResolver routeResolver,
+            ManagedWorkspacePathResolver pathResolver,
+            Clock clock) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
         this.routeResolver = Objects.requireNonNull(routeResolver, "routeResolver must not be null");
+        this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
     }
 
@@ -156,7 +169,7 @@ public class WorkspaceFileRoutingService {
 
     private boolean rootPathAvailable(String rootPath) {
         try {
-            return Files.isDirectory(Path.of(rootPath).toRealPath());
+            return Files.isDirectory(pathResolver.resolve(rootPath).toRealPath());
         } catch (Exception ignored) {
             return false;
         }

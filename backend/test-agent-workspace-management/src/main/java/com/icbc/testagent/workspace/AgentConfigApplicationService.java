@@ -26,6 +26,7 @@ import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.user.UserRepository;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
+import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import java.nio.file.Files;
@@ -88,6 +89,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private final GitPublishWorkflow gitPublishWorkflow;
     private final SshKeyEncryptionService sshKeyEncryptionService;
     private final WorkspaceFileService fileService;
+    private final ManagedWorkspacePathResolver pathResolver;
     private final WorkspaceServerIdentity serverIdentity;
     private final ServerBroadcastPublisher broadcastPublisher;
     private final Clock clock;
@@ -104,6 +106,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             AgentConfigRepository agentConfigRepository,
             UserRepository userRepository,
             WorkspaceFileService fileService,
+            ManagedWorkspacePathResolver pathResolver,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
             ObjectProvider<AgentConfigProgressSink> progressSinkProvider,
@@ -118,6 +121,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 new GitWorkspaceService(),
                 sshKeyEncryptionService,
                 fileService,
+                pathResolver,
                 serverIdentity,
                 broadcastPublisher,
                 Clock.systemUTC(),
@@ -134,6 +138,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             GitWorkspaceService gitWorkspaceService,
             SshKeyEncryptionService sshKeyEncryptionService,
             WorkspaceFileService fileService,
+            ManagedWorkspacePathResolver pathResolver,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
             Clock clock,
@@ -148,10 +153,42 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         this.gitPublishWorkflow = new GitPublishWorkflow(this.gitWorkspaceService);
         this.sshKeyEncryptionService = Objects.requireNonNull(sshKeyEncryptionService, "sshKeyEncryptionService must not be null");
         this.fileService = Objects.requireNonNull(fileService, "fileService must not be null");
+        this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
         this.broadcastPublisher = broadcastPublisher == null ? NOOP_BROADCAST : broadcastPublisher;
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.progressSink = progressSink == null ? AgentConfigProgressSink.NOOP : progressSink;
+    }
+
+    AgentConfigApplicationService(
+            CommonParameterValues commonParameterValues,
+            ConfigurationManagementRepository configurationRepository,
+            WorkspaceRepository workspaceRepository,
+            AgentConfigRepository agentConfigRepository,
+            UserRepository userRepository,
+            GitRemoteService gitRemoteService,
+            GitWorkspaceService gitWorkspaceService,
+            SshKeyEncryptionService sshKeyEncryptionService,
+            WorkspaceFileService fileService,
+            WorkspaceServerIdentity serverIdentity,
+            ServerBroadcastPublisher broadcastPublisher,
+            Clock clock,
+            AgentConfigProgressSink progressSink) {
+        this(
+                commonParameterValues,
+                configurationRepository,
+                workspaceRepository,
+                agentConfigRepository,
+                userRepository,
+                gitRemoteService,
+                gitWorkspaceService,
+                sshKeyEncryptionService,
+                fileService,
+                ManagedWorkspacePathResolver.legacyOnly(),
+                serverIdentity,
+                broadcastPublisher,
+                clock,
+                progressSink);
     }
 
     public AgentConfigResponses.AgentConfigStatusResponse publicStatus(boolean superAdmin) {
@@ -176,15 +213,17 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
 
     public AgentConfigResponses.AgentConfigStatusResponse workspaceStatus(String workspaceId, boolean superAdmin) {
         Workspace workspace = existingWorkspace(workspaceId);
+        Path root = workspaceRoot(workspace);
+        boolean gitRepository = gitWorkspaceService.isGitRepository(root);
         return new AgentConfigResponses.AgentConfigStatusResponse(
                 AgentConfigScope.WORKSPACE.name(),
                 true,
                 superAdmin,
                 null,
-                workspace.rootPath(),
-                workspaceStandardAgentRoot(Path.of(workspace.rootPath())).toString(),
-                gitWorkspaceService.isGitRepository(Path.of(workspace.rootPath())) ? gitWorkspaceService.currentBranch(Path.of(workspace.rootPath())) : null,
-                gitWorkspaceService.isGitRepository(Path.of(workspace.rootPath())) ? gitWorkspaceService.headCommit(Path.of(workspace.rootPath())) : null);
+                root.toString(),
+                workspaceStandardAgentRoot(root).toString(),
+                gitRepository ? gitWorkspaceService.currentBranch(root) : null,
+                gitRepository ? gitWorkspaceService.headCommit(root) : null);
     }
 
     public List<String> publicBranches(UserId userId) {
@@ -498,7 +537,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         String normalizedBranch = requireText(branch, "分支不能为空", "branch");
         String worktreeName = worktreeName(baseName);
         String privateKey = decryptSingleSshKey(userId);
-        Path repoRoot = Path.of(workspace.rootPath());
+        Path repoRoot = workspaceRoot(workspace);
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.WORKSPACE, workspace.workspaceId(), "create-worktree", normalizedBranch, traceId);
         try {
             ensureExistingCleanRepository(repoRoot, null);
@@ -641,7 +680,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.WORKSPACE, workspace.workspaceId(), "publish", null, traceId);
         try {
             String privateKey = decryptSingleSshKey(userId);
-            Path repoRoot = Path.of(workspace.rootPath());
+            Path repoRoot = workspaceRoot(workspace);
             ensureExistingCleanRepository(repoRoot, null);
             String branch = gitWorkspaceService.currentBranch(repoRoot);
             String commitHash;
@@ -987,9 +1026,13 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private Path repoRootForWorkspaceOperation(String workspaceId, String worktreeId) {
         Workspace workspace = existingWorkspace(workspaceId);
         if (worktreeId == null || worktreeId.isBlank()) {
-            return Path.of(workspace.rootPath());
+            return workspaceRoot(workspace);
         }
         return Path.of(existingWorktree(worktreeId, AgentConfigScope.WORKSPACE, workspace.workspaceId()).rootPath());
+    }
+
+    private Path workspaceRoot(Workspace workspace) {
+        return pathResolver.resolve(workspace.rootPath()).toAbsolutePath().normalize();
     }
 
     private AgentConfigWorktree existingWorktree(String worktreeId, AgentConfigScope scope, WorkspaceId workspaceId) {

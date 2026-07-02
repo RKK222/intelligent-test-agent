@@ -241,8 +241,8 @@
 
 | 表 | 说明 |
 |---|---|
-| `application_workspace_versions` | 应用工作空间模板的版本实例，记录版本、实际分支、物理仓库目录、opencode 工作目录和关联运行态 `workspaces.workspace_id`。 |
-| `personal_workspaces` | 用户基于应用版本工作区派生的 git worktree，记录展示名称、私有分支、物理目录、base commit 和关联运行态 Workspace。 |
+| `application_workspace_versions` | 应用工作空间模板的版本实例，记录版本、实际分支、托管仓库目录逻辑值、opencode 工作目录逻辑值和关联运行态 `workspaces.workspace_id`。 |
+| `personal_workspaces` | 用户基于应用版本工作区派生的 git worktree，记录展示名称、私有分支、托管目录逻辑值、base commit 和关联运行态 Workspace。 |
 | `user_global_workspace_preferences` | 用户全局最近使用的托管运行态 Workspace。 |
 | `user_application_workspace_preferences` | 用户在某应用下最近使用的托管运行态 Workspace。 |
 | `workspace_sync_records` | 个人工作区与应用版本工作区同步审计，记录方向、文件列表、是否强推、结果和 traceId。 |
@@ -258,8 +258,9 @@
 兼容策略：
 
 - 不迁移、不删除既有手动 `workspaces`、sessions、runs；新增托管工作区只是在创建版本或个人空间时新增运行态 `workspaces` 记录。
+- 新建或显式修复的托管路径不再写数据库绝对路径：应用版本/副本使用 `appworkspace:<versionSegment>/<repositoryEnglishName>[/<templateDirectory>]`，个人 worktree 使用 `personalworktree:<versionSegment>/<userId>/<repositoryEnglishName>/<branch>[/<templateDirectory>]`。运行时分别按通用参数 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 解析为当前服务器物理路径；旧 Unix/Windows 绝对路径只兼容读取，不做批量迁移。
 - `application_workspaces.branch` 继续保留作为模板创建兼容字段；版本实际分支以 `application_workspace_versions.branch` 为准。
-- 应用版本和个人工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定，`common_parameters` 为唯一事实源，缺失时直接抛业务异常（不再回退 yaml 或代码默认值）。数据库只记录最终路径，不负责创建或清理目录。
+- 应用版本和个人工作区物理根目录由 `common_parameters` 中的 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 决定，`common_parameters` 为唯一事实源，缺失时直接抛业务异常（不再回退 yaml 或代码默认值）。托管表只记录逻辑路径，不负责创建或清理目录；普通手工注册 `workspaces` 可继续保存用户选择的绝对目录。
 
 ## V20260627010000 user_ssh_keys 新增 encrypted_aes_key 列
 
@@ -456,7 +457,7 @@ macOS 本地环境迁移到项目内 `temp/` 时，先停止服务并运行 `too
 
 兼容策略：
 
-- 旧 `application_workspace_versions.runtime_workspace_id/repo_root_path/workspace_root_path` 保留，作为首次创建节点和旧响应兼容字段。
+- 旧 `application_workspace_versions.runtime_workspace_id/repo_root_path/workspace_root_path` 保留，作为首次创建节点和旧响应兼容字段；新建/显式修复记录保存 `appworkspace:` 逻辑路径，接口响应返回解析后的当前服务器物理路径。
 - migration 只对已具备 `workspaces.linux_server_id` 的历史应用版本回填副本；`current_commit_hash` 为空，由启动/周期补偿任务读取本机 Git HEAD 后更新。
 - `target_commit_hash` 为空的历史版本在首次本机副本校验成功后由业务层回填为当前 HEAD；随后各服务器通过内部广播和补偿扫描追平。
 
@@ -468,13 +469,12 @@ macOS 本地环境迁移到项目内 `temp/` 时，先停止服务并运行 `too
 - `user_global_workspace_preferences(user_id)` 唯一键：作为跨应用维度的兜底，避免用户切换应用时丢失上下文。
 - 每次用户切换工作空间（`POST /workspaces/{workspaceId}/recent`）由后端 `ManagedWorkspaceApplicationService.markRecent` 同步写入两表，互不冲突。
 
-首次进入（无 recent）回退策略：
+首次进入（无 recent）行为：
 
 - 前端 `handleSelectApp` → `pickDefaultWorkspaceForApp`：
-  1. 读取 `user_application_workspace_preferences`；命中即用。
-  2. 未命中：调 `listWorkspaceTemplates` + `listWorkspaceVersions` 拿到第一个模板的第一个版本的 `runtimeWorkspace`，再调 `POST /workspaces/{workspaceId}/recent` 写入偏好。
-  3. 应用下没有任何模板/版本：保持空态，不提供普通本机目录选择入口。
-- 兜底命中会立即持久化偏好，保证"第二次进入直接命中第 1 步"。
+  1. 读取 `user_application_workspace_preferences`；命中且能反查 `versionId` 时，调用 `ensure-default-personal-workspace` 加载当前用户该版本 default 私人 worktree。
+  2. 未命中，或命中记录不能反查 `versionId`：只选择应用，保持工作区空态，不兜底首模板首版本，不创建 default 私人 worktree。
+  3. 空态仍保留左侧工作区切换入口，用户可手动选择版本、创建版本或新增私人工作区。
 
 V10 种子数据对 F-COSS 的影响：
 

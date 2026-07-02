@@ -207,7 +207,7 @@ defineExpose({
                 class="figma-fe-section-action-btn"
                 title="刷新文件树"
                 aria-label="刷新文件树"
-                :disabled="loadingPath?.has('')"
+                :disabled="!workspaceId || loadingPath?.has('')"
                 @click="emit('refresh')"
               >
                 <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': loadingPath?.has('') }" :stroke-width="1.5" />
@@ -220,7 +220,11 @@ defineExpose({
               <span class="figma-fe-error-text">{{ fileTreeError }}</span>
               <button type="button" class="figma-fe-error-retry" @click="emit('refresh')">重试</button>
             </div>
+            <div v-else-if="!workspaceId" class="figma-fe-empty-workspace">
+              当前应用尚未切换到可用工作区。
+            </div>
             <FileExplorer
+              v-else
               :workspace-name="workspaceName"
               :workspace-root-path="workspaceRootPath"
               :entries-by-directory="entriesByDirectory"
@@ -524,6 +528,18 @@ defineExpose({
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.figma-fe-empty-workspace {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 96px;
+  padding: 16px;
+  color: #71717a;
+  font-size: 12px;
+  text-align: center;
 }
 
 .figma-fe-error-retry {

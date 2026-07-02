@@ -971,7 +971,7 @@ WebSocket 消息协议见 `docs/api/event-stream.md` 的“Workspace File WebSoc
 
 ### 应用版本工作区 API
 
-Base URL：`/api/internal/platform/workspace-management`。该能力把配置管理中的应用工作空间模板落为物理 Git 目录，并同步创建运行态 `workspaces` 记录；`workspaces.root_path` 即后续传给 opencode 的工作目录。旧的手动目录注册 `/api/workspaces` 保持兼容。
+Base URL：`/api/internal/platform/workspace-management`。该能力把配置管理中的应用工作空间模板落为托管 Git 目录，并同步创建运行态 `workspaces` 记录。新建或显式修复的托管路径在数据库中保存逻辑值：应用版本/副本使用 `appworkspace:<versionSegment>/<repositoryEnglishName>[/<templateDirectory>]`，个人 worktree 使用 `personalworktree:<versionSegment>/<userId>/<repositoryEnglishName>/<branch>[/<templateDirectory>]`；使用时分别基于通用参数 `OPENCODE_APP_WORKSPACE_ROOT`、`OPENCODE_PERSONAL_WORKTREE_ROOT` 解析为当前服务器物理路径。响应里的 `repoRootPath`、`workspaceRootPath`、`runtimeWorkspace.rootPath` 对托管工作区均为解析后的当前服务器物理路径；历史 Unix/Windows 绝对路径只兼容读取，不批量迁移。旧的手动目录注册 `/api/workspaces` 保持兼容，可继续保存用户选择的绝对目录。
 
 鉴权：
 
@@ -1016,13 +1016,13 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 - `yyyy年M月` 格式入库时 `version` 字段保留原值；派生分支名/路径时转 `yyyy-MM`（如 `2024年1月` → `2024-01`），避免 git ref / 路径里出现中文。
 - 标准代码库分支固定为 `feature_testagent_{branchFragment}`，其中 `branchFragment` 是 `version` 经 `sanitizeVersionForBranchAndPath` 转换后的值（`yyyyMMdd` 原样使用）；后端会用当前用户 SSH key 先查分支；不存在时返回 `CONFLICT`。
 - 非标准代码库必须传入 `branch`（前端选择的分支名），后端按该分支 clone。
-- 应用版本工作区物理仓库根目录读取通用参数 `OPENCODE_APP_WORKSPACE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终仓库目录为 `{root}/{branchFragment}/{repository.englishName}`，opencode root 为仓库目录下模板 `directoryPath`。
+- 应用版本工作区物理仓库根目录读取通用参数 `OPENCODE_APP_WORKSPACE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终仓库目录为 `{root}/{branchFragment}/{repository.englishName}`，opencode root 为仓库目录下模板 `directoryPath`。新记录入库保存 `appworkspace:` 逻辑路径，响应返回解析后的当前服务器物理路径。
 - 历史代码库若缺少 `englishName`，创建或接管应用版本工作区会返回 `VALIDATION_ERROR`，需要先在版本库管理补齐英文名称。
 - 磁盘目录已存在时，后端校验 origin URL 和当前分支，匹配则接管，不覆盖、不删除；不匹配返回 `CONFLICT`。
 - SSH Git 操作只使用当前登录用户保存的唯一 SSH key；HTTPS 不额外支持账号或 token。
 - 多服务器部署下，版本主记录保存 `targetCommitHash`，每台服务器通过 `application_workspace_version_replicas` 记录本机副本路径、运行态 Workspace、当前 commit 和同步状态。`runtimeWorkspace` 返回当前用户 READY 的 opencode agent 所在服务器副本；目标副本未就绪时返回 `CONFLICT`。
 
-`ApplicationWorkspaceVersionResponse`：
+`ApplicationWorkspaceVersionResponse`（路径字段均为当前服务器解析后的物理路径，不是数据库原始逻辑值）：
 
 ```json
 {
@@ -1063,7 +1063,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-个人工作区基于应用版本仓库创建 git worktree，分支名为 `{应用版本分支}_{userId}_{workspaceName}`，其中 `workspaceName` 会安全化为 Git/path 可用片段。物理根目录读取通用参数 `OPENCODE_PERSONAL_WORKTREE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终目录包含 `{version}/{userId}/{repository.englishName}/{应用版本分支}_{userId}_{workspaceName}`，前端展示 `workspaceName` 和当前 worktree 分支。同一用户在同一应用版本下 `workspaceName` 唯一。
+个人工作区基于应用版本仓库创建 git worktree，分支名为 `{应用版本分支}_{userId}_{workspaceName}`，其中 `workspaceName` 会安全化为 Git/path 可用片段。物理根目录读取通用参数 `OPENCODE_PERSONAL_WORKTREE_ROOT`（`common_parameters` 唯一来源，缺失抛 `INTERNAL_ERROR`）；最终目录包含 `{version}/{userId}/{repository.englishName}/{应用版本分支}_{userId}_{workspaceName}`，新记录入库保存 `personalworktree:` 逻辑路径，响应返回解析后的当前服务器物理路径。前端展示 `workspaceName` 和当前 worktree 分支。同一用户在同一应用版本下 `workspaceName` 唯一。
 
 同步请求体：
 
@@ -1082,9 +1082,9 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 1. 先查询 `(versionId, userId, workspaceName=default)` 是否已有个人工作区记录。
 2. 存在：直接复用，返回 `DefaultPersonalWorkspaceResponse`（含 `personalWorkspaceId`、`personalWorkspaceName`、`personalWorkspaceBranch`、`runtimeWorkspace`）。
-3. 不存在：后台创建个人工作区（`git worktree add -b {branch}_{userId}_default`）。如果同名个人分支已存在，后端会尝试复用该分支挂载 worktree；如果目标目录已存在且是同一分支的 Git worktree，则接管并补运行态记录；如果同名分支仍登记在旧路径且目标规范路径不存在，后端会先 `git worktree move` 重挂载到规范路径。只有目标目录被其他内容占用时返回 `CONFLICT`。
+3. 不存在：先按 `ENSURE_LOCAL` 确保当前服务器有 READY 应用版本副本，再后台创建个人工作区（`git worktree add -b {branch}_{userId}_default`）。如果当前服务器没有副本，后端会基于 `OPENCODE_APP_WORKSPACE_ROOT` 创建本机副本；禁止再用旧 `application_workspace_versions` 绝对路径伪造成 READY replica。如果同名个人分支已存在，后端会尝试复用该分支挂载 worktree；如果目标目录已存在且是同一分支的 Git worktree，则接管并补运行态记录；如果同名分支仍登记在旧路径且目标规范路径不存在，后端会先 `git worktree move` 重挂载到规范路径。只有目标目录被其他内容占用时返回 `CONFLICT`。
 
-默认个人工作区分支命名规则：`{应用版本分支}_{userId}_default`（与旧规则的 `_{personalWorkspaceId}` 不同）。已有 `workspaceName=default` 的旧个人工作区记录如果 branch/path 不符合新规范，`ensure-default-personal-workspace` 会非破坏式创建或重挂载规范 worktree，并把 `personal_workspaces` 与关联运行态 `workspaces.root_path` 更新到新路径；旧物理目录不会被自动删除。新建自定义私人空间同样使用 `{应用版本分支}_{userId}_{workspaceName}`。
+默认个人工作区分支命名规则：`{应用版本分支}_{userId}_default`（与旧规则的 `_{personalWorkspaceId}` 不同）。已有 `workspaceName=default` 的旧个人工作区记录如果 branch/path 不符合新规范，`ensure-default-personal-workspace` 会非破坏式创建或重挂载规范 worktree，并把 `personal_workspaces` 与关联运行态 `workspaces.root_path` 更新为 `personalworktree:` 逻辑路径；旧物理目录不会被自动删除。新建自定义私人空间同样使用 `{应用版本分支}_{userId}_{workspaceName}`。
 
 响应 `DefaultPersonalWorkspaceResponse`：
 
@@ -1185,24 +1185,23 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 - 工作台左下角的"应用工作空间"按钮按当前应用（`selectedAppId`）查询 `GET /applications/{appId}/workspace-templates`，渲染第一级菜单（只显示 `workspaceName`，不显示 `directoryPath` / `branch`）。
 - 鼠标 hover 第一级菜单项时按需触发 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 加载该模板下的版本（懒加载，未展开的模板不发请求）。
-- 点击版本或应用 recent 命中带 `versionId` 的工作区后，前端都会调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用、接管或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好，并触发工作台切换。普通工作区文件树、保存和左侧 Git 变更面板都基于该默认个人 worktree。
+- 点击版本或应用级 recent 命中且能反查 `versionId` 的工作区后，前端都会调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在（复用、接管或创建），再通过 `POST /workspaces/{workspaceId}/recent` 写入最近使用偏好，并触发工作台切换。当前用户当前应用没有 recent，或 recent 不能反查 `versionId` 时，只选择应用，不自动加载工作区、不创建 default 私人 worktree。普通工作区文件树、保存和左侧 Git 变更面板都基于该 default 私人 worktree。
 - 当前版本匹配规则：优先按 `runtimeWorkspace.workspaceId` 精确匹配，其次按 `workspaceRootPath` 匹配 `selectedWorkspace.rootPath`。
 - 第二级菜单（版本列表）底部固定一行「+新增版本」：点击后弹 el-dialog，内嵌 `ElDatePicker`（`type=date`, `format=yyyyMMdd`），标准库直接选日期；非标准库先通过 `GET /repositories/{repoId}/branches` 加载分支列表，用户选择分支后再选日期。提交时调用 `POST /applications/{appId}/workspace-templates/{templateId}/versions`，请求体 `version` 字段为 `yyyyMMdd` 格式，非标准库同时传递 `branch`。成功后失效 `versionsByTemplateId` 缓存并把新建版本切到工作区。
 
 应用级"默认工作空间"解析规则（前端 `handleSelectApp` + `pickDefaultWorkspaceForApp`）：
 
 1. 调用 `GET /applications/{appId}/recent-workspace` 读取 `user_application_workspace_preferences` 中 `(user_id, app_id)` 对应的最近使用运行态 Workspace。
-2. 命中 recent：调用 `POST /workspaces/{workspaceId}/recent` 刷新时间戳（幂等），再切工作台。
-3. 未命中 recent：调用 `GET /applications/{appId}/workspace-templates` 拉取应用下的工作空间模板，取第一个模板；再调用 `GET /applications/{appId}/workspace-templates/{templateId}/versions` 拉取该模板下的版本，取第一个版本；然后调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace` 确保默认个人工作区存在，使用其 `runtimeWorkspace`。
-4. 兜底命中：调用 `POST /workspaces/{workspaceId}/recent` 把该 Workspace 写入 `(user_id, app_id)` 与 `(user_id, NULL)` 两条偏好，下次进入直接命中第 2 步。
-5. 应用下没有任何工作空间模板/版本时保持空态，不提供普通本机目录选择入口。
+2. 命中 recent 且响应带 `versionId`：调用 `POST /workspace-versions/{versionId}/ensure-default-personal-workspace`，拿到当前用户该版本的 default 私人 worktree 后，再调用 `POST /workspaces/{workspaceId}/recent` 刷新时间戳并切工作台。
+3. 未命中 recent，或 recent 不能反查 `versionId`：保持工作区空态，不拉首模板首版本，不自动创建 default 私人 worktree；左侧工作区切换入口仍显示，用户可手动选择版本或新增版本。
+4. 应用下没有任何工作空间模板/版本时保持空态，不提供普通本机目录选择入口。
 
 跨应用"默认进入应用"还原规则（前端 `trySelectDefaultApp`，重新登录 / 换电脑登录时使用）：
 
 1. 应用目录加载完成且 `selectedAppId` 为空时，先等待 `GET /recent-workspace` 返回「全局最近 Workspace」及其 `appId`（`WorkspaceRuntimeResponse.appId`，仅全局接口填充，其他接口为 `null`）。
-2. 命中且 `appId` 在当前账号的应用目录里：调用 `handleSelectApp(appId)` 走上面「应用级默认工作空间」解析链，自然落到 per-app recent（多数情况下就是上次的版本工作区）。
-3. 命中但 `appId` 不在当前账号的应用目录里（应用被禁用 / 被移除 / 切换租户）：降级到 `apps[0]`，由「应用级默认工作空间」解析链兜底。
-4. 全局 recent 接口报错或返回 `null`：同样降级到 `apps[0]`。
+2. 命中且 `appId` 在当前账号的应用目录里：调用 `handleSelectApp(appId)` 走上面「应用级默认工作空间」解析链；只有 per-app recent 带 `versionId` 才加载 default 私人 worktree。
+3. 命中但 `appId` 不在当前账号的应用目录里（应用被禁用 / 被移除 / 切换租户）：降级到 `apps[0]`，但不会因此自动加载工作区。
+4. 全局 recent 接口报错或返回 `null`：同样降级到 `apps[0]`，只选择应用。
 5. 应用目录为空：保持空态，由应用目录和工作空间模板配置驱动后续进入。
 
 `POST /workspaces/{workspaceId}/recent` 兼容说明：
@@ -1211,7 +1210,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 - 工作区不属于任何应用（即 `appIdForRuntimeWorkspace` 既不匹配应用版本也不匹配个人工作区）时返回 `NOT_FOUND`；前端 `applyManagedWorkspace` 静默吞掉该错误，切换流程不受影响。
 - `WorkspaceRuntimeResponse.appId` / `versionId` / `applicationWorkspaceId` 字段：
   - `GET /recent-workspace`、`GET /applications/{appId}/recent-workspace`：必定填充（工作区不属于任何应用版本时三者均为 `null`），用于前端在重新登录或换电脑登录时直接还原上次所在的应用 + 模板 + 版本，让左下角"切换工作空间"按钮立刻显示当前工作区名 + 版本号。
-  - `POST /workspaces/{workspaceId}/recent`：同样回填上述三个字段，调用方拿到响应后可把 versionId / applicationWorkspaceId 合并到工作区上，确保会话切换 / 应用级兜底选择首模板首版本等路径也能立即定位当前版本与模板，不必等模板 versions 异步加载。
+  - `POST /workspaces/{workspaceId}/recent`：同样回填上述三个字段，调用方拿到响应后可把 versionId / applicationWorkspaceId 合并到工作区上，确保会话切换和用户显式选择版本等路径也能立即定位当前版本与模板，不必等模板 versions 异步加载。
   - 其他接口（`GET /workspaces/{workspaceId}` 等）：仍返回 `null`，由调用方按 `appId` 自行索引；不在响应里重复写出托管应用信息，避免引入「运行态 Workspace → 托管应用」反向依赖。
 - `POST /applications/{appId}/workspaces/{workspaceId}/branch-preference` 用于在 (appId, workspaceId) 维度持久化用户最近选择的 VCS 分支（写入 `user_workspace_branch_preferences`，按 (user_id, app_id, workspace_id) 唯一索引 upsert）。请求体为 `{"branch":"<branch-name>"}`；调用方需先校验工作区属于该应用。
 - `GET /applications/{appId}/workspaces/{workspaceId}/branch-preference` 返回 `BranchPreferenceResponse { appId, workspaceId, branch, updatedAt }`，未设置时返回 `null`，前端可据此在进入工作区时自动回填分支显示或提示用户当前本地分支与偏好分支不一致。

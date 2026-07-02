@@ -31,6 +31,7 @@ import com.icbc.testagent.domain.session.SessionMessageId;
 import com.icbc.testagent.domain.session.SessionMessageRepository;
 import com.icbc.testagent.domain.session.SessionMessageRole;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.event.RunEventAppender;
@@ -82,6 +83,7 @@ public class RunApplicationService {
     private final RunEventPersistencePolicy runEventPersistencePolicy;
     private final ModelCatalogApplicationService modelCatalogService;
     private final UserOpencodeProcessAssignmentService userProcessAssignmentService;
+    private final ManagedWorkspacePathResolver workspacePathResolver;
     private final AgentRuntimeTargetResolver runtimeTargetResolver;
     private final RunSessionMessageSnapshotService snapshotService;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
@@ -104,6 +106,7 @@ public class RunApplicationService {
             RunEventPersistencePolicy runEventPersistencePolicy,
             ModelCatalogApplicationService modelCatalogService,
             UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            ManagedWorkspacePathResolver workspacePathResolver,
             RunSessionMessageSnapshotService snapshotService) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
@@ -118,13 +121,15 @@ public class RunApplicationService {
         this.runEventPersistencePolicy = Objects.requireNonNull(runEventPersistencePolicy, "runEventPersistencePolicy must not be null");
         this.modelCatalogService = modelCatalogService;
         this.userProcessAssignmentService = userProcessAssignmentService;
+        this.workspacePathResolver = Objects.requireNonNull(workspacePathResolver, "workspacePathResolver must not be null");
         this.runtimeTargetResolver = new AgentRuntimeTargetResolver(
                 workspaceRepository,
                 sessionRepository,
                 executionNodeRepository,
                 agentRuntimeRegistry,
                 agentSessionBindingRepository,
-                userProcessAssignmentService);
+                userProcessAssignmentService,
+                this.workspacePathResolver);
         this.snapshotService = snapshotService == null
                 ? new RunSessionMessageSnapshotService(
                         runRepository,
@@ -166,6 +171,7 @@ public class RunApplicationService {
                 runEventPersistencePolicy,
                 null,
                 null,
+                ManagedWorkspacePathResolver.legacyOnly(),
                 null);
     }
 
@@ -197,6 +203,7 @@ public class RunApplicationService {
                 new RunEventPersistencePolicy(),
                 null,
                 userProcessAssignmentService,
+                ManagedWorkspacePathResolver.legacyOnly(),
                 null);
     }
 
@@ -337,7 +344,7 @@ public class RunApplicationService {
             AgentStartRunCommand command = new AgentStartRunCommand(
                     target.node(),
                     binding.remoteSessionId(),
-                    workspace.rootPath(),
+                    workspaceRootPath(workspace),
                     null,
                     prompt,
                     toAgentPromptParts(input, workspace),
@@ -531,7 +538,7 @@ public class RunApplicationService {
      * 将 workspace 相对路径转成 file URL，并拒绝路径穿越到 workspace 根目录外。
      */
     private String workspaceFileUrl(Workspace workspace, String path) {
-        Path root = Path.of(workspace.rootPath()).toAbsolutePath().normalize();
+        Path root = workspaceRoot(workspace);
         Path target = root.resolve(path).toAbsolutePath().normalize();
         if (!target.startsWith(root)) {
             throw new PlatformException(
@@ -663,7 +670,7 @@ public class RunApplicationService {
                             runtime.cancelSession(new AgentCancelCommand(
                                         node,
                                         binding.remoteSessionId(),
-                                        workspace.rootPath(),
+                                        workspaceRootPath(workspace),
                                         null,
                                         traceId))
                                     .block()));
@@ -780,7 +787,7 @@ public class RunApplicationService {
                         node,
                         run.runId(),
                         remoteSessionId,
-                        workspace.rootPath(),
+                        workspaceRootPath(workspace),
                         null,
                         traceId))
                 // opencode event SSE 是长连接；本 Run 收到首个终态后结束订阅，避免同一远端会话的下一轮消息串入旧 Run。
@@ -970,12 +977,20 @@ public class RunApplicationService {
             return Optional.empty();
         }
         String path = rawPath.replaceFirst("^([ab])/", "");
-        String root = workspace.rootPath();
+        String root = workspaceRootPath(workspace);
         if (path.equals(root) || path.startsWith(root + "/")) {
             path = path.substring(root.length()).replaceFirst("^/+", "");
         }
         path = path.replaceFirst("^\\./", "");
         return path.isBlank() || path.startsWith("/") ? Optional.empty() : Optional.of(path);
+    }
+
+    private Path workspaceRoot(Workspace workspace) {
+        return workspacePathResolver.resolve(workspace.rootPath()).toAbsolutePath().normalize();
+    }
+
+    private String workspaceRootPath(Workspace workspace) {
+        return workspaceRoot(workspace).toString();
     }
 
     private Optional<Map<String, Object>> mapValue(Object value) {

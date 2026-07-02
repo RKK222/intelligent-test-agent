@@ -15,14 +15,23 @@ test("workbench opens a workspace file with mocked backend api", async ({ page }
 
 test("switching to an application without recent workspace clears the previous file tree", async ({ page }) => {
   const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const defaultPersonalRequests: string[] = [];
   await mockBackendApi(page, {
     fileRequests,
+    defaultPersonalRequests,
     applications: [
       { appId: "app_gcms", appName: "F-GCMS", enabled: true },
       { appId: "app_coss", appName: "F-COSS", enabled: true }
     ],
     recentWorkspaces: {
-      app_gcms: workspace(),
+      app_gcms: {
+        ...workspace(),
+        workspaceId: "wrk_app_replica",
+        name: "F-GCMS 报表 / 20260715",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms"
+      },
       app_coss: null
     }
   });
@@ -38,7 +47,12 @@ test("switching to an application without recent workspace clears the previous f
   await expect(page.getByRole("button", { name: "F-COSS" })).toBeVisible();
   await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
   await expect(page.getByRole("button", { name: /tests/ })).toHaveCount(0);
-  expect(fileRequests).toContainEqual({ workspaceId: "wrk_1234567890abcdef", path: "" });
+  expect(fileRequests).toContainEqual({ workspaceId: "wrk_personal_default", path: "" });
+  expect(defaultPersonalRequests).toEqual(["awv_20260715"]);
+  const switcher = page.locator(".ta-workbench-footer-branch");
+  await expect(switcher).toBeVisible();
+  await switcher.click();
+  await expect(page.locator(".ta-workbench-cascade-panel")).toContainText("应用：F-COSS");
 });
 
 test("workbench does not read a workspace file tree before an application is selected", async ({ page }) => {
@@ -241,6 +255,53 @@ test("empty application workspace state does not expose local directory picker",
   await gotoWorkbench(page);
 
   await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
+});
+
+test("application without recent version does not fallback to first template version", async ({ page }) => {
+  const fileRequests: Array<{ workspaceId: string; path: string }> = [];
+  const defaultPersonalRequests: string[] = [];
+  await mockBackendApi(page, {
+    fileRequests,
+    defaultPersonalRequests,
+    recentWorkspaces: { app_gcms: null },
+    workspaceTemplates: {
+      app_gcms: [
+        {
+          workspaceId: "awp_main",
+          workspaceName: "F-GCMS 主服务",
+          appId: "app_gcms",
+          repositoryId: "repo_1",
+          defaultBranch: "main",
+          createdAt: "2026-06-24T00:00:00Z",
+          updatedAt: "2026-06-24T00:00:00Z"
+        }
+      ]
+    },
+    workspaceVersions: {
+      "app_gcms:awp_main": [
+        {
+          versionId: "awv_20260715",
+          applicationWorkspaceId: "awp_main",
+          appId: "app_gcms",
+          repositoryId: "repo_1",
+          version: "20260715",
+          branch: "feature_testagent_20260715",
+          repoRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1",
+          workspaceRootPath: "/tmp/test-agent/appworkspace/awp_main/repo_1/F-GCMS/workspace",
+          status: "ACTIVE",
+          createdAt: "2026-06-24T00:00:00Z",
+          updatedAt: "2026-06-24T00:00:00Z"
+        }
+      ]
+    }
+  });
+
+  await gotoWorkbench(page);
+
+  await expect(page.getByText("当前应用尚未切换到可用工作区。")).toBeVisible();
+  await expect(page.locator(".ta-workbench-footer-branch")).toBeVisible();
+  await expect.poll(() => defaultPersonalRequests).toEqual([]);
+  expect(fileRequests).toEqual([]);
 });
 
 test("model picker groups models by provider and updates run model", async ({ page }) => {

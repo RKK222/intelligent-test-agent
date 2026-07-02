@@ -14,6 +14,7 @@ import com.icbc.testagent.domain.session.Session;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver;
 import com.icbc.testagent.domain.workspace.Workspace;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.domain.workspace.WorkspaceRepository;
@@ -23,6 +24,7 @@ import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
@@ -37,10 +39,29 @@ public class AgentRuntimeTargetResolver {
     private final AgentRuntimeRegistry agentRuntimeRegistry;
     private final AgentSessionBindingRepository agentSessionBindingRepository;
     private final UserOpencodeProcessAssignmentService userProcessAssignmentService;
+    private final ManagedWorkspacePathResolver pathResolver;
 
     /**
      * 注入 runtime 目标解析所需端口；用户进程服务仅在认证用户访问默认 opencode 时使用。
      */
+    @Autowired
+    public AgentRuntimeTargetResolver(
+            WorkspaceRepository workspaceRepository,
+            SessionRepository sessionRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            UserOpencodeProcessAssignmentService userProcessAssignmentService,
+            ManagedWorkspacePathResolver pathResolver) {
+        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
+        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
+        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
+        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
+        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
+        this.userProcessAssignmentService = userProcessAssignmentService;
+        this.pathResolver = Objects.requireNonNull(pathResolver, "pathResolver must not be null");
+    }
+
     public AgentRuntimeTargetResolver(
             WorkspaceRepository workspaceRepository,
             SessionRepository sessionRepository,
@@ -48,12 +69,14 @@ public class AgentRuntimeTargetResolver {
             AgentRuntimeRegistry agentRuntimeRegistry,
             AgentSessionBindingRepository agentSessionBindingRepository,
             UserOpencodeProcessAssignmentService userProcessAssignmentService) {
-        this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
-        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
-        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
-        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
-        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
-        this.userProcessAssignmentService = userProcessAssignmentService;
+        this(
+                workspaceRepository,
+                sessionRepository,
+                executionNodeRepository,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                userProcessAssignmentService,
+                ManagedWorkspacePathResolver.legacyOnly());
     }
 
     /**
@@ -69,7 +92,7 @@ public class AgentRuntimeTargetResolver {
             return new WorkspaceRuntimeTarget(runtime, node, null);
         }
         Workspace workspace = findWorkspace(new WorkspaceId(workspaceId));
-        return new WorkspaceRuntimeTarget(runtime, node, workspace.rootPath());
+        return new WorkspaceRuntimeTarget(runtime, node, workspaceRoot(workspace));
     }
 
     /**
@@ -93,7 +116,7 @@ public class AgentRuntimeTargetResolver {
             return new SessionRuntimeTarget(
                     runtime,
                     userAssignment.get().node(),
-                    workspace.rootPath(),
+                    workspaceRoot(workspace),
                     binding.remoteSessionId());
         }
         AgentSessionBinding binding = findAgentBinding(resolvedAgentId, session, traceId)
@@ -106,7 +129,7 @@ public class AgentRuntimeTargetResolver {
                         ErrorCode.OPENCODE_UNAVAILABLE,
                         "会话绑定的 agent 执行节点不存在",
                         Map.of("agentId", resolvedAgentId, "nodeId", binding.executionNodeId().value())));
-        return new SessionRuntimeTarget(runtime, node, workspace.rootPath(), binding.remoteSessionId());
+        return new SessionRuntimeTarget(runtime, node, workspaceRoot(workspace), binding.remoteSessionId());
     }
 
     /**
@@ -144,7 +167,7 @@ public class AgentRuntimeTargetResolver {
         // 首次或用户进程迁移后才创建远端 session；旧远端 session 保留给 opencode 自身清理。
         AgentCreateSessionResult created = runtime.createSession(new AgentCreateSessionCommand(
                         node,
-                        workspace.rootPath(),
+                        workspaceRoot(workspace),
                         null,
                         session.title(),
                         traceId))
@@ -232,6 +255,10 @@ public class AgentRuntimeTargetResolver {
 
     private boolean isDefaultOpencode(String agentId) {
         return AgentRuntimeRegistry.DEFAULT_AGENT_ID.equals(agentRuntimeRegistry.normalize(agentId));
+    }
+
+    private String workspaceRoot(Workspace workspace) {
+        return pathResolver.resolve(workspace.rootPath()).toString();
     }
 
     /**

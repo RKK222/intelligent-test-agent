@@ -371,7 +371,7 @@ const applicationCatalog = computed<ManagedApplication[]>(() =>
 );
 // 全局最近工作区：跨应用维度维护「上一次进入的应用 + 工作区」组合。
 // 重新登录或换电脑登录时，前端用它直接还原上次的应用上下文（替代之前总是回退 apps[0] 的逻辑），
-// 工作区是否在当前用户权限内则继续走 per-app recent / 模板首版本兜底。
+// 工作区是否在当前用户权限内则继续走 per-app recent；无 versionId 的应用只选应用不加载工作区。
 const globalRecentQuery = useQuery({
   queryKey: ["managed-workspace", "recent-workspace"],
   queryFn: () => api.getRecentManagedWorkspace(),
@@ -1816,10 +1816,8 @@ function mergeRecentRuntimeResponse(workspace: Workspace, response: Workspace): 
   return merged;
 }
 
-// 查询指定应用下的"默认进入工作空间"：优先 recent 偏好，否则回退到首模板的首版本。
-// 回退时通过 ensureDefaultPersonalWorkspace 创建/复用默认个人工作区，避免直接使用应用版本副本。
-// 返回 { workspace, isFallback }：isFallback=true 表示走了"首模板首版本"的兜底，false 表示命中 recent。
-// 两种情况最终都会通过 applyManagedWorkspace 写入 recent，下次进入直接命中该条偏好。
+// 查询指定应用下的"默认进入工作空间"：只有 per-app recent 能反查到 versionId 时才进入 default 私人 worktree。
+// 无历史或历史不带 versionId 时只选择应用，不自动创建/加载工作区。
 async function pickDefaultWorkspaceForApp(appId: string): Promise<{ workspace: Workspace; isFallback: boolean; personalWorkspaceId?: string; personalWorkspaceBranch?: string } | null> {
   const recent = await api.getRecentManagedWorkspaceForApplication(appId);
   if (recent?.versionId) {
@@ -1833,29 +1831,18 @@ async function pickDefaultWorkspaceForApp(appId: string): Promise<{ workspace: W
       personalWorkspaceBranch: defaultPw.personalWorkspaceBranch
     };
   }
-  if (recent) {
-    return { workspace: recent, isFallback: false };
-  }
-  const templates = await api.listWorkspaceTemplates(appId);
-  const firstTemplate = templates[0];
-  if (!firstTemplate) return null;
-  const versions = await api.listWorkspaceVersions(appId, firstTemplate.workspaceId);
-  const firstVersion = versions[0];
-  if (!firstVersion) return null;
-  // 确保默认个人工作区存在（复用或创建），避免直接使用应用版本副本
-  const defaultPw = await api.ensureDefaultPersonalWorkspace(firstVersion.versionId);
-  if (!defaultPw.runtimeWorkspace?.workspaceId) return null;
-  return {
-    workspace: defaultPw.runtimeWorkspace,
-    isFallback: true,
-    personalWorkspaceId: defaultPw.personalWorkspaceId,
-    personalWorkspaceBranch: defaultPw.personalWorkspaceBranch
-  };
+  return null;
 }
 
 // WorkbenchFooter / FigmaFileExplorer 上两级菜单展开模板时调用，触发版本懒加载。
 function handleLoadVersions(templateId: string) {
   ensureAppVersionsLoaded(templateId);
+}
+
+function refreshCurrentWorkspacePanels() {
+  if (!selectedWorkspace.value) return;
+  void loadDirectory("", undefined, true);
+  void refreshWorkspaceGitDiff();
 }
 
 // 「+新增版本」流程：把 yyyyMMdd 和后端所需的 branch（非标准库）传给 createWorkspaceVersion。
@@ -1922,10 +1909,8 @@ async function handleSelectApp(appId: string) {
   selectedWorkspaceId.value = undefined;
   selectedAppId.value = appId;
   try {
-    // 解析应用下的"默认工作空间"：
-    //   1) 优先使用 user_application_workspace_preferences 中的 recent；
-    //   2) 没有 recent 时回退到首模板的首版本，并把这条记录写入 recent，下次进入即可命中。
-    // 两种情况都通过 applyManagedWorkspace 完成"写偏好 + 切工作区"两步，保证状态与持久化一致。
+    // 只有当前用户当前应用 recent 能反查到 versionId 时，才加载对应 default 私人 worktree。
+    // 无历史时只切应用并保持工作区空态，footer 仍可新增版本或选择私人工作区。
     const pick = await pickDefaultWorkspaceForApp(appId);
     if (selectionSeq !== appSelectionSeq) {
       return;
@@ -1938,7 +1923,7 @@ async function handleSelectApp(appId: string) {
       rememberPersonalWorkspace(pick.personalWorkspaceId, pick.personalWorkspaceBranch);
       return;
     }
-    // 应用下没有任何工作空间模板/版本，保持空态，不回退到普通本机目录选择。
+    // 应用没有可用 recent/versionId 时保持空态，不回退到普通本机目录选择。
   } catch (error) {
     feedback.value = errorFeedback("切换应用失败", error);
   } finally {
@@ -2963,10 +2948,9 @@ async function handleLogout() {
     <template #files>
       <div v-if="selectedManagedApplication || selectedWorkspace" class="managed-workspace-layout">
         <FigmaFileExplorer
-          v-if="selectedWorkspace"
           class="managed-workspace-files"
-          :workspace-name="selectedWorkspace.name"
-          :workspace-root-path="selectedWorkspace.rootPath"
+          :workspace-name="selectedWorkspace?.name ?? '未选择工作区'"
+          :workspace-root-path="selectedWorkspace?.rootPath"
           :entries-by-directory="entriesByDirectory"
           :expanded-directories="expandedDirectories"
           :active-path="activePath"
@@ -2980,7 +2964,7 @@ async function handleLogout() {
           :creating-version="creatingVersion"
           :can-write="isSuperAdmin"
           :api-base-url="apiBaseUrl"
-          :workspace-id="selectedWorkspace.workspaceId"
+          :workspace-id="selectedWorkspace?.workspaceId"
           :personal-workspace-id="currentPersonalWorkspaceId"
           :personal-workspace-branch="currentPersonalWorkspaceBranch"
           :show-server-workspace-switch="isSuperAdmin"
@@ -2991,7 +2975,7 @@ async function handleLogout() {
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
           @open-diff="handleOpenDiff"
-          @refresh="() => { loadDirectory('', undefined, true); refreshWorkspaceGitDiff(); }"
+          @refresh="refreshCurrentWorkspacePanels"
           @changes-refreshed="(payload) => refreshWorkspaceGitDiff({ reloadOpenFiles: payload?.reloadOpenFiles ?? true, paths: payload?.paths })"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
@@ -3000,9 +2984,6 @@ async function handleLogout() {
           @open-server-workspace-picker="openServerWorkspacePicker"
           @search="handleFileSearch"
         />
-        <div v-else class="managed-workspace-empty">
-          <p>当前应用尚未切换到可用工作区。</p>
-        </div>
       </div>
       <div v-else class="managed-workspace-empty">
         <p>请选择应用后进入应用版本或个人工作区。</p>

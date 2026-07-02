@@ -46,6 +46,13 @@ public record Workspace(
     }
 
     /**
+     * 返回替换根路径后的工作区副本。用于 API/业务执行前把托管逻辑路径解析为物理路径，不代表持久化字段变更。
+     */
+    public Workspace withRootPath(String rootPath) {
+        return new Workspace(workspaceId, name, rootPath, status, createdAt, updatedAt, linuxServerId, traceId);
+    }
+
+    /**
      * 校验工作区领域对象的不变量，确保路径、名称、状态、时间和 traceId 均有效。
      */
     public Workspace {
