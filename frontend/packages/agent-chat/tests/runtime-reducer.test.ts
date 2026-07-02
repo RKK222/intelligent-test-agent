@@ -105,6 +105,50 @@ describe("agent-chat runtime reducer", () => {
     expect(completed.messages).toHaveLength(2);
   });
 
+  it("keeps expanded slash command user parts out of the assistant response", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "/generate-cases-path 对车贷的开发文档，生成路径图",
+      createdAt: "2026-07-02T02:16:00Z"
+    });
+    const withRemoteUser = reduceAgentChatRuntime(submitted, {
+      type: "event",
+      event: event("message.updated", {
+        message: { id: "msg_user_command", role: "user" }
+      })
+    });
+    const withExpandedDelta = reduceAgentChatRuntime(withRemoteUser, {
+      type: "event",
+      event: event("message.part.delta", {
+        messageID: "msg_user_command",
+        partID: "part_user_command",
+        partType: "text",
+        delta: "# 路径法案例生成\n\n## 步骤"
+      })
+    });
+    const completed = reduceAgentChatRuntime(withExpandedDelta, {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_user_command",
+        part: {
+          id: "part_user_command",
+          messageID: "msg_user_command",
+          type: "text",
+          text: "# 路径法案例生成\n\n## 步骤\n\n输出路径图。"
+        }
+      })
+    });
+
+    expect(completed.messages).toMatchObject([
+      {
+        role: "user",
+        messageId: "msg_user_command",
+        text: "/generate-cases-path 对车贷的开发文档，生成路径图"
+      }
+    ]);
+    expect(completed.messages).toHaveLength(1);
+  });
+
   it("merges a delayed remote user snapshot back into the optimistic user message", () => {
     const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "user.submitted",

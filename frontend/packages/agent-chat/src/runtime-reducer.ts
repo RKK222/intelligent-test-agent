@@ -184,6 +184,13 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent) {
   const partId = text(event.payload.partId) ?? text(event.payload.partID) ?? `part-${event.seq}`;
   const partType = text(event.payload.partType) ?? text(event.payload.partKind);
   const delta = text(event.payload.delta) ?? text(event.payload.text) ?? "";
+  const exactMessage = messages.find(
+    (message) => message.role !== "card" && (message.messageId === messageId || message.id === messageId)
+  );
+  // slash command 会把展开后的技能正文作为远端 user part 推流；保留用户输入，不把它误建成 assistant 回复。
+  if (exactMessage?.role === "user") {
+    return messages;
+  }
   const exact = findAssistantMessage(messages, messageId);
   const lastIdx = exact.message ? -1 : findLastAssistantInCurrentTurn(messages);
   const assistant: Extract<AgentMessage, { role: "assistant" }> =
@@ -246,7 +253,7 @@ function upsertPart(messages: AgentMessage[], event: RunEvent) {
   const exactMessage = exactMessageIndex >= 0 ? messages[exactMessageIndex] : undefined;
   if (exactMessage?.role === "user") {
     const userText = text(raw.text) ?? text(raw.content);
-    return userText === undefined
+    return userText === undefined || exactMessage.text
       ? messages
       : replaceOrAppendMessage(messages, exactMessageIndex, { ...exactMessage, text: userText });
   }
