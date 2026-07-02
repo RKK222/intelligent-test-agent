@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ElMessage } from "element-plus";
 import { computed, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
@@ -383,6 +384,40 @@ const shellApps = computed(() =>
   applicationCatalog.value.map((app) => ({ id: app.appId, name: app.appName, description: app.enabled ? "已启用" : "已停用" }))
 );
 const selectedManagedApplication = computed(() => applicationCatalog.value.find((app) => app.appId === selectedAppId.value));
+
+// ===== 开启应用列表查询与加入应用逻辑 =====
+const allEnabledApplicationsQuery = useQuery({
+  queryKey: ["managed-workspace", "all-enabled-applications"],
+  queryFn: () => api.listApplications(true),
+  retry: false
+});
+
+const joinableApps = computed(() => {
+  const currentIds = new Set(shellApps.value.map((app) => app.id));
+  const allApps = allEnabledApplicationsQuery.data.value ?? [];
+  return allApps.filter((app) => !currentIds.has(app.appId));
+});
+
+async function handleJoinApp(appId: string, callback: (success: boolean) => void) {
+  const currentUserId = authStore.currentUser?.userId;
+  if (!currentUserId) {
+    ElMessage.error("未获取到当前用户信息，请重新登录");
+    callback(false);
+    return;
+  }
+  try {
+    await api.addApplicationMember(appId, currentUserId);
+    ElMessage.success("成功加入应用");
+    // 重新拉取已加入的应用和未加入的应用列表
+    void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "applications"] });
+    void queryClient.invalidateQueries({ queryKey: ["managed-workspace", "all-enabled-applications"] });
+    callback(true);
+  } catch (error) {
+    ElMessage.error(error instanceof Error ? error.message : "加入应用失败");
+    callback(false);
+  }
+}
+
 
 // ===== 应用工作空间模板与版本（两级菜单数据源） =====
 // 一级菜单：归属当前应用的工作空间模板（如 F-COSS 主服务）；二级菜单：模板下的应用版本（如 20260701）。
@@ -2894,6 +2929,7 @@ async function handleLogout() {
     :show-left-panel="leftPanelOpen"
     :show-right-panel="rightPanelOpen"
     :apps="shellApps"
+    :joinable-apps="joinableApps"
     :selected-app-id="selectedAppId"
     :current-user-name="authStore.currentUser?.username"
     :current-user-role-labels="authStore.currentUser?.roleLabels"
@@ -2904,6 +2940,7 @@ async function handleLogout() {
     @select-app="handleSelectApp"
     @refresh-opencode-process="refreshOpencodeProcessStatus"
     @logout="handleLogout"
+    @join-app="handleJoinApp"
   >
     <template #activity>
       <nav class="figma-activity-nav" aria-label="工作台活动栏">

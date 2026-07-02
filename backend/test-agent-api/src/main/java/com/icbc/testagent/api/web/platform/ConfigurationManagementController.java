@@ -59,7 +59,7 @@ public class ConfigurationManagementController {
     public ApiResponse<Object> listApplications(
             @RequestParam(name = "enabled", required = false) Boolean enabled,
             ServerWebExchange exchange) {
-        requireAdmin(exchange);
+        AuthWebSupport.getAuthPrincipal(exchange);
         return ok(exchange, service.listApplications(enabled));
     }
 
@@ -74,7 +74,7 @@ public class ConfigurationManagementController {
             @PathVariable String appId,
             @RequestBody ConfigurationManagementDtos.AddMemberRequest request,
             ServerWebExchange exchange) {
-        requireAdmin(exchange);
+        AuthWebSupport.getAuthPrincipal(exchange);
         return ok(exchange, service.addMember(appId, request.userId()));
     }
 

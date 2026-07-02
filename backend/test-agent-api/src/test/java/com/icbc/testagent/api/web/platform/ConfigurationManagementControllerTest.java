@@ -72,16 +72,18 @@ class ConfigurationManagementControllerTest {
     }
 
     @Test
-    void nonAdminCannotAccessApplicationManagement() {
-        WebTestClient client = client(org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class), List.of());
+    void nonAdminCanAccessApplicationManagement() {
+        ConfigurationManagementApplicationService service = org.mockito.Mockito.mock(ConfigurationManagementApplicationService.class);
+        when(service.listApplications(true)).thenReturn(List.of(new ApplicationResponse("app_gcms", "F-GCMS", true)));
+        WebTestClient client = client(service, List.of());
 
         client.get()
                 .uri("/api/internal/platform/configuration-management/applications?enabled=true")
                 .header("X-Trace-Id", TRACE_ID)
                 .exchange()
-                .expectStatus().isForbidden()
+                .expectStatus().isOk()
                 .expectBody()
-                .jsonPath("$.code").isEqualTo("FORBIDDEN");
+                .jsonPath("$.data[0].appId").isEqualTo("app_gcms");
     }
 
     @Test

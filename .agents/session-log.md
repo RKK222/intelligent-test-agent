@@ -2832,7 +2832,7 @@ bash /tmp/test-api-after-restart.sh
 
 - Why: 前端此前直接调用 opencode session command，长技能请求期间没有平台 Run 和 RunEvent SSE，导致页面只显示“思考中”、刷新或历史重进无法接管、终止无目标，并可能把同一 workspace 全局事件流的其它会话或后续轮次内容混入当前 Run。
 - What: slash 技能改为通过 `POST /runs` 携带可选 `command/arguments` 创建平台 Run；后端先持久化 Run、绑定 remote session 并订阅事件，再后台调用原生 `/session/{sessionID}/command`。事件流按显式 `sessionID/sessionId` 过滤，并在首个成功/失败终态后结束订阅；前端把 `PENDING` 纳入忙碌/恢复状态，模型偏好继续沿用既有 localStorage 机制。
-- How: 复用现有 `RunApplicationService`、`AgentRuntime`、`OpencodeClientFacade`、active-run 恢复、Run 取消和 RunEvent SSE 链路；原生命令不自动重试，使用 24 小时硬超时，取消仍走 session abort。同步更新 HTTP/事件文档、模块 README、前端包说明，并补充 API、gateway、facade、runtime、前端队列和 Playwright 回归测试。
+- How: 复用现有 `RunApplicationService`、`AgentRuntime`、`OpencodeClientFacade`、active-run 恢复、Run 取消和 RunEvent SSE 链路；原生命令不自动重试，使用 24 小时硬超时，取消仍走 session abort。同步更新 HTTP/事件文档、模块 README、前端包说明，并补充 API、gateway、facade、runtime、前端队列 and Playwright 回归测试。
 - Result: 定向后端测试、前端单测/typecheck/build、桌面和移动 mock E2E 通过；按 `.env.test` 重启三服务后，真实 UI 验证正常对话、文件读取工具、路径图技能实时输出、刷新后从历史恢复运行中任务、任务完成、正交表技能终止、终止状态展示和模型刷新保持均可用。未修改 manager 配置、环境文件、数据库结构、事件类型、鉴权或 generated SDK。
 
 ### 2026-07-02 - 修复个人 worktree 发布冲突提示与 unmerged diff 展示
@@ -2841,3 +2841,15 @@ bash /tmp/test-api-after-restart.sh
 - What: `GitWorkspaceService` 保留 Git 两字符 `rawStatus`，并将 `DD/AU/UD/UA/DU/AA/UU` 统一映射为 `status=conflict`；工作区 `git-diff` 响应新增 `rawStatus`。Git Changes 面板在 publish 返回 `CONFLICT` 后保留错误提示，刷新后把冲突文件单独展示为 `CONFLICT`，不再计入普通 staged/unstaged 文件列表；冲突未解决时禁用提交按钮，并提示普通 staged 项是未完成 merge 自动应用的中间状态。
 - How: 只改 workspace git diff DTO、公共 Git porcelain 解析和前端 Git 变更面板展示；不自动 abort/reset 用户个人 worktree 中的冲突现场。同步更新 HTTP API、workspace-management README、agent-web README，并补充后端解析和前端 publish 冲突回归测试。
 - Result: 定向后端与前端测试、workspace-management 编译、agent-web/shared-types typecheck 和 `git diff --check` 通过；本次不涉及数据库、事件、鉴权、安全或环境配置变更。
+### 2026-07-02 - 支持普通用户在头像左侧应用下拉加入其他应用
+
+- Why: 用户需要能够自主加入系统中的其他应用，而当前应用人员管理的成员添加和列表查询接口仅限应用管理员和超级管理员访问。
+- What: 在头部应用下拉菜单（用户头像左侧）最下方展示一个 “+ 加入其他应用” 菜单项。点击后弹出一个居中浮层（Figma 风格的 div 弹窗），展示用户当前所属的应用（以标签形式展示），并提供下拉框供用户选择未加入的已启用应用。点击“保存”后，调用后端 API 完成应用成员的添加并自动刷新顶部的应用列表。
+- How:
+  1. 后端修改 `ConfigurationManagementController`，移除了 `listApplications` 和 `addMember` 接口上的 `requireAdmin(exchange)` 角色校验，使得任何已登录的普通用户都可以查询应用列表和添加应用成员。
+  2. 前端 `FigmaShell.vue` 增加 `joinableApps` 属性，当点击 “+ 加入其他应用” 时打开 `.figma-add-app-overlay` 浮层展示当前加入的应用和未加入应用的选择框，保存时触发 `join-app` 事件。
+  3. `AgentWorkbench.vue` 增加 `allEnabledApplicationsQuery` 以拉取系统中所有启用的应用，计算出未加入的 `joinableApps` 并传入 `FigmaShell.vue`，并在接收到 `join-app` 时调用 `api.addApplicationMember(appId, userId)`，成功后 invalidate 对应的 Vue-Query 缓存进行列表的热更新。
+- Result:
+  1. 后端 `ConfigurationManagementControllerTest` 定向测试、前端 `FigmaShell.test.ts` 单元测试全部顺利通过。
+  2. 前端 Vitest 217 个测试全量通过，`corepack pnpm typecheck` 成功。
+  3. API 接口逻辑安全，未改变表结构、Flyway 迁移，不修改 `generated SDK` 和环境配置文件。

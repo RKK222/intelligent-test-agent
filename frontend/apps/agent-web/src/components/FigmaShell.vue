@@ -17,6 +17,7 @@ const props = withDefaults(
     workspaceName?: string;
     bottomOpen?: boolean;
     apps?: AppItem[];
+    joinableApps?: { appId: string; appName: string }[];
     selectedAppId?: string;
     currentUserName?: string;
     currentUserRoleLabels?: string[];
@@ -32,6 +33,7 @@ const props = withDefaults(
       { id: "gcms-2024", name: "GCMS-2024", description: "气相色谱质谱年度测试" },
       { id: "ms-runner", name: "MS-Runner", description: "质谱批量回归任务" }
     ],
+    joinableApps: () => [],
     selectedAppId: "fgcms-psn",
     showLeftPanel: true,
     showRightPanel: true
@@ -69,6 +71,7 @@ const emit = defineEmits<{
   (e: "select-app", appId: string): void;
   (e: "logout"): void;
   (e: "refresh-opencode-process"): void;
+  (e: "join-app", appId: string, callback: (success: boolean) => void): void;
 }>();
 
 const appMenuOpen = ref(false);
@@ -823,6 +826,33 @@ onUnmounted(() => {
   clearAllRobotTimers();
   if (inactivityTimer) clearTimeout(inactivityTimer);
 });
+
+// --- Join Applications Logic ---
+const addAppVisible = ref(false);
+const selectedAppToJoin = ref("");
+const joining = ref(false);
+
+function openAddApp() {
+  addAppVisible.value = true;
+  selectedAppToJoin.value = "";
+  appMenuOpen.value = false;
+}
+
+function closeAddApp() {
+  addAppVisible.value = false;
+  selectedAppToJoin.value = "";
+}
+
+function submitJoinApp() {
+  if (!selectedAppToJoin.value || joining.value) return;
+  joining.value = true;
+  emit("join-app", selectedAppToJoin.value, (success) => {
+    joining.value = false;
+    if (success) {
+      closeAddApp();
+    }
+  });
+}
 </script>
 
 <template>
@@ -870,7 +900,51 @@ onUnmounted(() => {
               </div>
               <span v-if="app.id === selectedApp?.id" class="figma-app-menu-item-check">✓</span>
             </li>
+            <li class="figma-app-menu-divider" />
+            <li class="figma-app-menu-item is-add-app" role="option" tabindex="0" @mousedown.prevent="openAddApp">
+              <div class="figma-app-menu-item-main figma-app-menu-add-item">
+                <span class="figma-app-menu-add-icon">+</span>
+                <span class="figma-app-menu-add-text">加入其他应用</span>
+              </div>
+            </li>
           </ul>
+        </div>
+
+        <!-- 加入应用弹窗 (弹出div) -->
+        <div v-if="addAppVisible" class="figma-add-app-overlay" @click="closeAddApp">
+          <div class="figma-add-app-card" @click.stop>
+            <div class="figma-add-app-header">
+              <span class="figma-add-app-title">加入其他应用</span>
+              <button type="button" class="figma-add-app-close" @click="closeAddApp">×</button>
+            </div>
+            <div class="figma-add-app-body">
+              <div class="figma-add-app-section">
+                <label class="figma-add-app-label">已加入的应用</label>
+                <div class="figma-joined-apps-tags">
+                  <span v-for="app in apps" :key="app.id" class="figma-joined-app-tag">
+                    {{ app.name }}
+                  </span>
+                </div>
+              </div>
+              <div class="figma-add-app-section">
+                <label class="figma-add-app-label">选择要加入的应用</label>
+                <el-select v-model="selectedAppToJoin" placeholder="请选择应用" class="figma-add-app-select" size="default">
+                  <el-option
+                    v-for="app in joinableApps"
+                    :key="app.appId"
+                    :label="app.appName"
+                    :value="app.appId"
+                  />
+                </el-select>
+              </div>
+            </div>
+            <div class="figma-add-app-footer">
+              <el-button size="small" @click="closeAddApp">取消</el-button>
+              <el-button type="primary" size="small" :loading="joining" :disabled="!selectedAppToJoin" @click="submitJoinApp">
+                保存
+              </el-button>
+            </div>
+          </div>
         </div>
         <div class="figma-user-menu-wrapper" @click.stop @blur="onUserMenuBlur">
           <button
@@ -1212,6 +1286,146 @@ onUnmounted(() => {
 
 .figma-app-menu-item.is-active {
   background: #fafafa;
+}
+
+.figma-app-menu-divider {
+  height: 1px;
+  background: #e4e4e7;
+  margin: 4px 0;
+}
+
+.figma-app-menu-add-item {
+  display: flex;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px;
+  color: #18a978;
+}
+
+.figma-app-menu-add-icon {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.figma-app-menu-add-text {
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* ---- Join App Pop-up Overlay ---- */
+.figma-add-app-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: fadeIn 0.18s ease-out;
+}
+
+.figma-add-app-card {
+  width: 380px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: slideUp 0.18s ease-out;
+}
+
+.figma-add-app-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #f4f4f5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.figma-add-app-title {
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 15px;
+  font-weight: 600;
+  color: #18181b;
+}
+
+.figma-add-app-close {
+  background: transparent;
+  border: none;
+  font-size: 20px;
+  color: #999;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  transition: color 0.1s;
+}
+
+.figma-add-app-close:hover {
+  color: #333;
+}
+
+.figma-add-app-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.figma-add-app-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.figma-add-app-label {
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  font-weight: 500;
+  color: #71717a;
+}
+
+.figma-joined-apps-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.figma-joined-app-tag {
+  background: #f4f4f5;
+  color: #3f3f46;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.figma-add-app-select {
+  width: 100%;
+}
+
+.figma-add-app-footer {
+  padding: 12px 20px 16px;
+  background: #fafafa;
+  border-top: 1px solid #f4f4f5;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(8px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
 }
 
 .figma-app-menu-item-main {
