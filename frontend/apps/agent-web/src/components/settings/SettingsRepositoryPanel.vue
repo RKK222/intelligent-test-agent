@@ -46,6 +46,8 @@ const editRepositoryName = ref("");
 const editRepositoryEnglishName = ref("");
 const editRepositoryTypeLabel = ref("");
 const repoGitUrlInputRef = ref<{ focus: () => void } | null>(null);
+const editDialogVisible = ref(false);
+const editNameInputRef = ref<{ focus: () => void } | null>(null);
 
 async function run(action: () => Promise<void>) {
   loading.value = true;
@@ -133,6 +135,7 @@ function startEditRepository(repository: CodeRepositoryConfig) {
   editRepositoryName.value = repository.name;
   editRepositoryEnglishName.value = repository.englishName ?? "";
   editRepositoryTypeLabel.value = repositoryTypeLabel(repository);
+  editDialogVisible.value = true;
 }
 
 function cancelEditRepository() {
@@ -140,6 +143,7 @@ function cancelEditRepository() {
   editRepositoryName.value = "";
   editRepositoryEnglishName.value = "";
   editRepositoryTypeLabel.value = "";
+  editDialogVisible.value = false;
 }
 
 async function saveRepository() {
@@ -180,6 +184,13 @@ function focusGitUrlInput() {
     repoGitUrlInputRef.value?.focus();
   }, 100);
 }
+
+function focusEditNameInput() {
+  // 延迟聚焦才能稳定落到名称输入框
+  window.setTimeout(() => {
+    editNameInputRef.value?.focus();
+  }, 100);
+}
 </script>
 
 <template>
@@ -190,7 +201,7 @@ function focusGitUrlInput() {
     </div>
 
     <template v-else>
-      <el-alert v-if="errorMessage && !createDialogVisible" :title="errorMessage" type="error" :closable="false" show-icon class="ta-error" />
+      <el-alert v-if="errorMessage && !createDialogVisible && !editDialogVisible" :title="errorMessage" type="error" :closable="false" show-icon class="ta-error" />
 
       <div class="ta-panel-content">
         <div class="ta-section">
@@ -210,19 +221,7 @@ function focusGitUrlInput() {
             </div>
             <el-button size="small" @click="startEditRepository(repo)">编辑</el-button>
           </div>
-          <div v-if="editRepositoryId" class="ta-inline-form ta-edit-form">
-            <label class="ta-form-field">
-              <span class="ta-form-label">版本库名称</span>
-              <el-input v-model="editRepositoryName" placeholder="名称" style="width: 240px" />
-            </label>
-            <label class="ta-form-field">
-              <span class="ta-form-label">版本库英文名称</span>
-              <el-input v-model="editRepositoryEnglishName" placeholder="英文名称" style="width: 180px" />
-            </label>
-            <span class="ta-readonly-field">类型：{{ editRepositoryTypeLabel }}</span>
-            <el-button type="primary" :disabled="loading" @click="saveRepository">保存</el-button>
-            <el-button :disabled="loading" @click="cancelEditRepository">取消</el-button>
-          </div>
+          <!-- 编辑版本库弹窗已在下方定义 -->
         </div>
 
         <!-- 新增版本库弹窗 -->
@@ -234,7 +233,7 @@ function focusGitUrlInput() {
           align-center
           @opened="focusGitUrlInput"
         >
-          <el-alert v-if="errorMessage" :title="errorMessage" type="error" :closable="false" show-icon class="ta-error" style="margin-bottom: 16px;" />
+          <el-alert v-if="errorMessage && createDialogVisible" :title="errorMessage" type="error" :closable="false" show-icon class="ta-error" style="margin-bottom: 16px;" />
           <el-form label-width="120px">
             <el-form-item label="版本库地址">
               <el-input ref="repoGitUrlInputRef" v-model="repoGitUrl" placeholder="Git URL" />
@@ -261,6 +260,33 @@ function focusGitUrlInput() {
           <template #footer>
             <el-button @click="createDialogVisible = false">取消</el-button>
             <el-button type="primary" :disabled="loading" @click="createRepository">新增</el-button>
+          </template>
+        </el-dialog>
+
+        <!-- 编辑版本库弹窗 -->
+        <el-dialog
+          v-model="editDialogVisible"
+          title="编辑版本库"
+          width="540px"
+          :close-on-click-modal="false"
+          align-center
+          @opened="focusEditNameInput"
+        >
+          <el-alert v-if="errorMessage && editDialogVisible" :title="errorMessage" type="error" :closable="false" show-icon class="ta-error" style="margin-bottom: 16px;" />
+          <el-form label-width="120px">
+            <el-form-item label="版本库名称">
+              <el-input ref="editNameInputRef" v-model="editRepositoryName" placeholder="名称" />
+            </el-form-item>
+            <el-form-item label="版本库英文名称">
+              <el-input v-model="editRepositoryEnglishName" placeholder="英文名称" />
+            </el-form-item>
+            <el-form-item label="版本库类型">
+              <span class="ta-readonly-field">{{ editRepositoryTypeLabel }}</span>
+            </el-form-item>
+          </el-form>
+          <template #footer>
+            <el-button @click="cancelEditRepository">取消</el-button>
+            <el-button type="primary" :disabled="loading" @click="saveRepository">保存</el-button>
           </template>
         </el-dialog>
       </div>

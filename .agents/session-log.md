@@ -2857,7 +2857,7 @@ bash /tmp/test-api-after-restart.sh
 ### 2026-07-02 - 重构设置面板以分立应用管理与版本库管理菜单
 
 - Why: 版本库管理是全局系统级配置，不依赖特定的应用；而应用人员管理、应用与版本库关联和工作空间管理是应用级配置，两者合并在同一个“应用与工作空间管理”菜单下会造成布局冗余且不直观。
-- What: 将“应用与工作空间管理”重命名为“应用管理”，并将“版本库管理”抽离为独立设置菜单“版本库管理”；同时，将“新增版本库”表单从底部移至右上角“新增”按钮触发的模态弹窗（Dialog）中，提升整体交互设计。
-- How: 新建 `SettingsRepositoryPanel.vue`，实现已有版本库的列表展示与编辑，将新增表单包裹进 `el-dialog` 并由右上角“新增”按钮控制显示；在 `SettingsMenu.vue` 和 `SettingsDialog.vue` 中配置分立菜单项并关联文件夹图标；在 `SettingsAppWorkspacePanel.vue` 中移除版本库管理标签并定义 `switch-menu` 事件向上传播，在用户于应用与版本库关联下拉中选中“添加版本库”时自动跳转；通过 `autoOpenCreate` 属性在页面跳转时自动拉起弹窗并聚焦输入框；同步重构 unit 和 Playwright 测试。
-- Result: 220 个 Vitest 前端单元测试全部通过，包括新增/修改的 `settings-repository-panel.test.ts`；`corepack pnpm typecheck` 成功；没有对后端 API 接口、事件、数据库结构（Flyway）或 generated SDK 做任何变动。
+- What: 将“应用与工作空间管理”重命名为“应用管理”，并将“版本库管理”抽离为独立设置菜单“版本库管理”；同时，将“新增版本库”和“编辑版本库”表单从内联布局分别移至各自独立的 `el-dialog` 模态弹窗中，全面提升交互一致性。
+- How: 新建 `SettingsRepositoryPanel.vue`；将新增和编辑表单分别包裹在 `el-dialog` 里，点击已有版本库列表行中的“编辑”按钮或右上角“新增”按钮时触发对应弹窗，并在打开时自动通过 `@opened` 聚焦；在 `SettingsMenu.vue` 和 `SettingsDialog.vue` 中配置分立菜单项并关联文件夹图标；在 `SettingsAppWorkspacePanel.vue` 中移除版本库管理标签并定义 `switch-menu` 事件向上传播以支持跳转；同步重构 unit 和 Playwright 测试以断言新的弹窗交互。
+- Result: 221 个 Vitest 前端单元测试全部通过，包括新增/修改的 `settings-repository-panel.test.ts`；`corepack pnpm typecheck` 成功；没有对后端 API 接口、事件、数据库结构（Flyway）或 generated SDK 做任何变动。
 

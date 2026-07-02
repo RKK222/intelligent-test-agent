@@ -217,17 +217,34 @@ describe("SettingsRepositoryPanel settings", () => {
 
     await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("取消")); // Close dialog
 
-    await fireEvent.click(getAllByText("编辑")[0]);
-    expect(getByText("取消")).toBeTruthy();
-    expect(getAllByText("版本库名称").length).toBeGreaterThanOrEqual(1);
-    expect(getAllByText("版本库英文名称").length).toBeGreaterThanOrEqual(1);
-    expect(getByText("类型：测试工作库")).toBeTruthy();
+    await fireEvent.click(getAllByText("编辑")[0]); // Open edit dialog
+    expect(container.querySelector(".el-dialog-stub")).toBeTruthy();
+    expect(within(container.querySelector(".el-dialog-stub")!).getByText("测试工作库")).toBeTruthy();
 
     await fireEvent.update(getByPlaceholderText("名称"), "临时名称");
-    await fireEvent.click(getByText("取消"));
+    await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("取消"));
 
     expect(queryByText("取消")).toBeNull();
     expect(queryByPlaceholderText("名称")).toBeNull();
+  });
+
+  it("edits repositories via edit dialog", async () => {
+    const api = createApi();
+    const { findByText, getByPlaceholderText, getByText, getAllByText, container } = renderPanel(api);
+
+    expect(await findByText("共 2 个版本库")).toBeTruthy();
+
+    await fireEvent.click(getAllByText("编辑")[0]); // Click first editing button
+    expect(container.querySelector(".el-dialog-stub h3")?.textContent).toBe("编辑版本库");
+
+    await fireEvent.update(getByPlaceholderText("名称"), "新名称");
+    await fireEvent.update(getByPlaceholderText("英文名称"), "newname");
+    await fireEvent.click(within(container.querySelector(".el-dialog-stub")!).getByText("保存"));
+
+    await waitFor(() => expect(api.updateRepository).toHaveBeenCalledWith("repo_wr", {
+      name: "新名称",
+      englishName: "newname"
+    }));
   });
 
   it("automatically opens the dialog when autoOpenCreate prop is true", async () => {
