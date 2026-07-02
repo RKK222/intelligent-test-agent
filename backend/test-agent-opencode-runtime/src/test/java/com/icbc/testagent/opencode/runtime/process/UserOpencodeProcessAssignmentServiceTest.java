@@ -17,6 +17,7 @@ import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.ContainerManagerId;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServer;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
+import com.icbc.testagent.domain.opencodeprocess.LinuxServerStatus;
 import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.ManagerConnectionStatus;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainer;
@@ -358,6 +359,8 @@ class UserOpencodeProcessAssignmentServiceTest {
 
         assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.UNAVAILABLE);
         assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.NOT_RUNNING);
+        assertThat(response.linuxServerId()).isEqualTo("10.8.0.12");
+        assertThat(response.port()).isEqualTo(4096);
         assertThat(response.serviceAddress()).isEqualTo("10.8.0.12:4096");
     }
 
@@ -376,7 +379,95 @@ class UserOpencodeProcessAssignmentServiceTest {
 
         assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.UNAVAILABLE);
         assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.NOT_RUNNING);
-        assertThat(response.serviceAddress()).isEqualTo("10.8.0.12:4096");
+        assertThat(response.linuxServerId()).isEqualTo("10.8.0.12");
+        assertThat(response.port()).isEqualTo(4096);
+        assertThat(response.serviceAddress()).isNull();
+    }
+
+    @org.junit.jupiter.api.Test
+    void statusResolvesBindingAddressFromCurrentBackendWhenServerIdIsStableName() {
+        FakeRepository repository = new FakeRepository();
+        repository.containers.put("ctr_bound", container("ctr_bound", "server-a", 4096, 4100, 4, 0));
+        repository.bindings.put(
+                USER_ID.value() + ":opencode",
+                binding(USER_ID, new OpencodeProcessId("ocp_missing_process"), "server-a", 4097));
+        UserOpencodeProcessAssignmentService service = service(
+                repository,
+                new RecordingGateway(),
+                "server-a",
+                "192.168.100.165",
+                heartbeatStore(List.of(backendSnapshot("bjp_selected", "server-a", "http://192.168.100.171:8080", NOW))));
+
+        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.NEEDS_INITIALIZATION);
+        assertThat(response.linuxServerId()).isEqualTo("server-a");
+        assertThat(response.port()).isEqualTo(4097);
+        assertThat(response.serviceAddress()).isEqualTo("192.168.100.171:4097");
+        assertThat(response.serviceAddress()).isNotEqualTo("server-a:4097");
+    }
+
+    @org.junit.jupiter.api.Test
+    void allocationStatusKeepsServerNameAndDoesNotInventAddressWhenBackendIsUnavailable() {
+        FakeRepository repository = new FakeRepository();
+        repository.bindings.put(
+                USER_ID.value() + ":opencode",
+                binding(USER_ID, new OpencodeProcessId("ocp_existing"), "server-b", 4097));
+        UserOpencodeProcessAssignmentService service = service(repository, new RecordingGateway(), "server-a", "192.168.100.165");
+
+        UserOpencodeProcessStatusResponse response = service.allocationStatus(
+                USER_ID,
+                "opencode",
+                "已分配 opencode 专属进程，但目标服务器后端不可用，暂无法确认进程健康状态",
+                TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.UNAVAILABLE);
+        assertThat(response.linuxServerId()).isEqualTo("server-b");
+        assertThat(response.port()).isEqualTo(4097);
+        assertThat(response.serviceAddress()).isNull();
+    }
+
+    @org.junit.jupiter.api.Test
+    void staleProcessWithStableServerNameBaseUrlDoesNotInventAddressWhenBackendIsUnavailable() {
+        FakeRepository repository = new FakeRepository();
+        OpencodeServerProcess process = process(
+                "ocp_existing",
+                USER_ID,
+                "server-a",
+                "ctr_old",
+                4097,
+                OpencodeServerProcessStatus.UNHEALTHY);
+        repository.processes.put(process.processId().value(), process);
+        repository.bindings.put(USER_ID.value() + ":opencode", binding(USER_ID, process.processId(), "server-a", 4097));
+        RecordingGateway gateway = new RecordingGateway();
+        gateway.health = OpencodeProcessHealthResult.unhealthy("down");
+        UserOpencodeProcessAssignmentService service = service(repository, gateway, "server-b", "192.168.100.165");
+
+        UserOpencodeProcessStatusResponse response = service.status(USER_ID, "opencode", TRACE_ID);
+
+        assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.UNAVAILABLE);
+        assertThat(response.linuxServerId()).isEqualTo("server-a");
+        assertThat(response.port()).isEqualTo(4097);
+        assertThat(response.baseUrl()).isEqualTo("http://server-a:4097");
+        assertThat(response.serviceAddress()).isNull();
+    }
+
+    @org.junit.jupiter.api.Test
+    void statusResponseDoesNotDeriveServiceAddressFromStableServerName() {
+        UserOpencodeProcessStatusResponse response = new UserOpencodeProcessStatusResponse(
+                UserOpencodeProcessAvailability.UNAVAILABLE,
+                false,
+                "目标服务器后端不可用",
+                null,
+                "server-a",
+                null,
+                4097,
+                null,
+                NOW,
+                UserOpencodeServiceStatus.NOT_RUNNING,
+                null);
+
+        assertThat(response.serviceAddress()).isNull();
     }
 
     @org.junit.jupiter.api.Test
@@ -398,7 +489,9 @@ class UserOpencodeProcessAssignmentServiceTest {
         assertThat(response.status()).isEqualTo(UserOpencodeProcessAvailability.UNAVAILABLE);
         assertThat(response.initializable()).isFalse();
         assertThat(response.serviceStatus()).isEqualTo(UserOpencodeServiceStatus.NOT_RUNNING);
-        assertThat(response.serviceAddress()).isEqualTo("10.8.0.12:4097");
+        assertThat(response.linuxServerId()).isEqualTo("10.8.0.12");
+        assertThat(response.port()).isEqualTo(4097);
+        assertThat(response.serviceAddress()).isNull();
         assertThat(response.message()).contains("已分配");
         assertThat(gateway.healthCommands).isEmpty();
         assertThat(repository.findContainerCalls).isZero();
@@ -583,7 +676,16 @@ class UserOpencodeProcessAssignmentServiceTest {
             RecordingGateway gateway,
             String linuxServerId,
             String advertisedHost) {
-        return serviceWithPublicConfigDir(repository, gateway, Path.of(CONFIG_DIR), linuxServerId, advertisedHost);
+        return service(repository, gateway, linuxServerId, advertisedHost, disabledHeartbeatStore());
+    }
+
+    private static UserOpencodeProcessAssignmentService service(
+            FakeRepository repository,
+            RecordingGateway gateway,
+            String linuxServerId,
+            String advertisedHost,
+            OpencodeProcessHeartbeatStore heartbeatStore) {
+        return serviceWithPublicConfigDir(repository, gateway, Path.of(CONFIG_DIR), linuxServerId, advertisedHost, heartbeatStore);
     }
 
     private static UserOpencodeProcessAssignmentService serviceWithPublicConfigDir(
@@ -599,7 +701,7 @@ class UserOpencodeProcessAssignmentServiceTest {
             Path publicConfigDir,
             String linuxServerId,
             String advertisedHost) {
-        return serviceWithPublicConfigDir(repository, gateway, publicConfigDir, linuxServerId, advertisedHost, null);
+        return serviceWithPublicConfigDir(repository, gateway, publicConfigDir, linuxServerId, advertisedHost, disabledHeartbeatStore(), null);
     }
 
     private static UserOpencodeProcessAssignmentService serviceWithPublicConfigDir(
@@ -608,6 +710,27 @@ class UserOpencodeProcessAssignmentServiceTest {
             Path publicConfigDir,
             String linuxServerId,
             String advertisedHost,
+            OpencodeProcessHeartbeatStore heartbeatStore) {
+        return serviceWithPublicConfigDir(repository, gateway, publicConfigDir, linuxServerId, advertisedHost, heartbeatStore, null);
+    }
+
+    private static UserOpencodeProcessAssignmentService serviceWithPublicConfigDir(
+            FakeRepository repository,
+            RecordingGateway gateway,
+            Path publicConfigDir,
+            String linuxServerId,
+            String advertisedHost,
+            OpencodeProcessStartOperationRepository operationRepository) {
+        return serviceWithPublicConfigDir(repository, gateway, publicConfigDir, linuxServerId, advertisedHost, disabledHeartbeatStore(), operationRepository);
+    }
+
+    private static UserOpencodeProcessAssignmentService serviceWithPublicConfigDir(
+            FakeRepository repository,
+            RecordingGateway gateway,
+            Path publicConfigDir,
+            String linuxServerId,
+            String advertisedHost,
+            OpencodeProcessHeartbeatStore heartbeatStore,
             OpencodeProcessStartOperationRepository operationRepository) {
         return new UserOpencodeProcessAssignmentService(
                 repository,
@@ -625,7 +748,7 @@ class UserOpencodeProcessAssignmentServiceTest {
                                 Duration.ofSeconds(30),
                                 Duration.ofSeconds(5),
                                 100)),
-                null,
+                heartbeatStore,
                 operationRepository);
     }
 
@@ -770,6 +893,52 @@ class UserOpencodeProcessAssignmentServiceTest {
                 NOW,
                 NOW,
                 TRACE_ID);
+    }
+
+    private static BackendRuntimeSnapshot backendSnapshot(
+            String backendProcessId,
+            String linuxServerId,
+            String listenUrl,
+            Instant heartbeatAt) {
+        LinuxServerId serverId = new LinuxServerId(linuxServerId);
+        return new BackendRuntimeSnapshot(
+                new LinuxServer(
+                        serverId,
+                        linuxServerId,
+                        LinuxServerStatus.READY,
+                        Map.of("backendListenUrl", listenUrl),
+                        heartbeatAt,
+                        NOW.minusSeconds(60),
+                        heartbeatAt,
+                        TRACE_ID),
+                new BackendJavaProcess(
+                        new BackendProcessId(backendProcessId),
+                        serverId,
+                        listenUrl,
+                        com.icbc.testagent.domain.opencodeprocess.BackendJavaProcessStatus.READY,
+                        NOW.minusSeconds(60),
+                        heartbeatAt,
+                        NOW.minusSeconds(60),
+                        heartbeatAt,
+                        TRACE_ID));
+    }
+
+    private static OpencodeProcessHeartbeatStore heartbeatStore(List<BackendRuntimeSnapshot> backendSnapshots) {
+        return new OpencodeProcessHeartbeatStore() {
+            @Override public void recordBackendHeartbeat(LinuxServerId linuxServerId, Instant heartbeatAt) { }
+            @Override public void recordBackendSnapshot(BackendRuntimeSnapshot snapshot) { }
+            @Override public void recordManagerSnapshot(ManagerRuntimeSnapshot snapshot) { }
+            @Override public void recordOpencodeHeartbeat(OpencodeProcessId processId, Instant heartbeatAt) { }
+            @Override public List<BackendRuntimeSnapshot> liveBackendSnapshots() { return backendSnapshots; }
+            @Override public List<ManagerRuntimeSnapshot> liveManagerSnapshots() { return List.of(); }
+            @Override public Set<LinuxServerId> liveBackendServerIds() { return Set.of(); }
+            @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
+            @Override public void cleanupExpiredHeartbeats() { }
+        };
+    }
+
+    private static OpencodeProcessHeartbeatStore disabledHeartbeatStore() {
+        return heartbeatStore(List.of());
     }
 
     private static final class RecordingGateway implements OpencodeProcessManagerGateway {

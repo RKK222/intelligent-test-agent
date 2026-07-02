@@ -107,6 +107,20 @@ public class BackendJavaProcessLifecycleService {
     }
 
     /**
+     * 返回当前 Java 进程所属的稳定 Linux 服务器身份，供统一后端路由解析复用。
+     */
+    public LinuxServerId linuxServerId() {
+        return settings.linuxServerId();
+    }
+
+    /**
+     * 返回当前 Java 对其它后端可访问的 HTTP 监听地址。
+     */
+    public String listenUrl() {
+        return settings.listenUrl();
+    }
+
+    /**
      * 返回当前服务器对其它 Java、manager 和 opencode server 可访问的主机名/IP。
      */
     public String advertisedHost() {

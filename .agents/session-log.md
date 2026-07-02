@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-02 - 用户 opencode 进程按服务器名称展示和解析
+
+- Why: `linuxServerId` 已改为稳定服务器身份后，用户绑定状态仍可能把服务器名当网络地址拼成 `server-a:port`，导致头像菜单、右侧状态卡和降级响应展示伪地址，后续启动/校验也容易混淆服务器身份与当前可访问 host。
+- What: 用户进程状态、文件 WebSocket affinity 和 API 转发降级不再用 `linuxServerId + ":" + port` 派生 `serviceAddress`；绑定存在但进程缺失或目标后端不可达时保留 `linuxServerId/port`，仅在能按统一 `BackendJavaRouteResolver` 找到当前 Java `listenUrl` host 时返回当前地址。前端头像菜单和状态卡改为展示 `状态(服务器名 / 当前地址)`，地址缺失时展示 `状态(服务器名)`。
+- How: `UserOpencodeProcessAssignmentService` 复用公共 Java 路由解析当前 host，READY 进程优先使用真实 `baseUrl`，旧 baseUrl host 等于稳定服务器名时刷新为当前地址；状态查询 health 使用当前 advertised host。同步更新 API/部署/前端/shared-types 文档，并补充后端路由降级和前端展示测试。
+- Result: `mvn -pl test-agent-opencode-runtime,test-agent-api -am test`、`corepack pnpm@10.25.0 test -- apps/agent-web/tests/FigmaShell.test.ts apps/agent-web/tests/FigmaChatPanel.test.ts`、`corepack pnpm@10.25.0 --filter @test-agent/agent-web typecheck` 和 `git diff --check` 通过；未新增 API 字段、数据库字段或事件类型。
+
 ### 2026-07-02 - 版本库支持内部 SCM 部署模式
 
 - Why: 企业内部 SCM 需要按当前操作人的统一认证号动态拼接 `ssh://{unifiedAuthId}@...` Git 地址，但数据库只能保存不含用户号的 SCM 地址片段；外部部署必须保持原完整 Git URL 行为不变。

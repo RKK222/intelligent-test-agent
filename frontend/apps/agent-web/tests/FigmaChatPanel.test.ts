@@ -531,6 +531,7 @@ describe("FigmaChatPanel", () => {
           status: "UNAVAILABLE",
           initializable: false,
           serviceStatus: "NOT_RUNNING",
+          linuxServerId: "server-a",
           serviceAddress: "192.168.100.115:4097",
           message: "目标服务器后端不可用，暂无法确认 opencode 进程健康状态"
         }
@@ -538,8 +539,28 @@ describe("FigmaChatPanel", () => {
     });
 
     expect(wrapper.text()).toContain("opencode 进程不可用");
-    expect(wrapper.get(".figma-chat-process-message").text()).toBe("192.168.100.115:4097");
+    expect(wrapper.get(".figma-chat-process-message").text()).toBe("server-a / 192.168.100.115:4097");
     expect(wrapper.text()).not.toContain("尚未分配 opencode 专属进程");
+  });
+
+  it("shows the assigned server name without deriving a fake address", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processRequired: true,
+        processStatus: {
+          status: "UNAVAILABLE",
+          initializable: false,
+          serviceStatus: "NOT_RUNNING",
+          linuxServerId: "server-a",
+          port: 4097,
+          message: "目标服务器后端不可用，暂无法确认 opencode 进程健康状态"
+        }
+      }
+    });
+
+    expect(wrapper.get(".figma-chat-process-message").text()).toBe("server-a");
+    expect(wrapper.text()).not.toContain("server-a:4097");
   });
 
   it("shows the loading label while initializing, differentiated by service status", async () => {

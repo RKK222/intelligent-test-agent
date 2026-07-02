@@ -60,11 +60,12 @@ class UserOpencodeBackendRoutingWebFilterTest {
     void routesUserProcessRequestToBoundBackendAndPreservesAuthTraceAndBody() {
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
-                .thenReturn(Optional.of("10.8.0.22"));
+                .thenReturn(Optional.of("server-b"));
         RecordingHttpClient httpClient = new RecordingHttpClient(200, """
                 {"success":true,"traceId":"trace_1234567890abcdef","data":{"status":"READY"}}
                 """);
-        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore("10.8.0.22"), httpClient);
+        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore(List.of(
+                backend("bjp_1234567890abcdef", "server-b", "http://10.8.0.22:8080", NOW))), httpClient);
         MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
                 .post("/api/internal/agent/opencode/processes/me/initialize?force=true")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
@@ -153,7 +154,7 @@ class UserOpencodeBackendRoutingWebFilterTest {
     void missingTargetBackendReturnsAllocationStatusForReadOnlyProcessStatus() {
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
-                .thenReturn(Optional.of("10.8.0.22"));
+                .thenReturn(Optional.of("server-b"));
         Mockito.when(assignmentService.allocationStatus(
                         Mockito.eq(USER_ID),
                         Mockito.eq("opencode"),
@@ -179,14 +180,16 @@ class UserOpencodeBackendRoutingWebFilterTest {
         assertThat(exchange.getResponse().getBodyAsString().block()).contains(
                 "\"status\":\"UNAVAILABLE\"",
                 "\"serviceStatus\":\"NOT_RUNNING\"",
-                "\"serviceAddress\":\"10.8.0.22:4097\"");
+                "\"linuxServerId\":\"server-b\"",
+                "\"port\":4097",
+                "\"serviceAddress\":null");
     }
 
     @Test
     void failedForwardReturnsAllocationStatusForReadOnlyProcessStatus() {
         UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
         Mockito.when(assignmentService.routingLinuxServerId(USER_ID, "opencode"))
-                .thenReturn(Optional.of("10.8.0.22"));
+                .thenReturn(Optional.of("server-b"));
         Mockito.when(assignmentService.allocationStatus(
                         Mockito.eq(USER_ID),
                         Mockito.eq("opencode"),
@@ -194,7 +197,8 @@ class UserOpencodeBackendRoutingWebFilterTest {
                         Mockito.eq("trace_1234567890abcdef")))
                 .thenReturn(allocatedStatus("目标服务器后端不可用，暂无法确认 opencode 进程健康状态"));
         RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}", true);
-        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore("10.8.0.22"), httpClient);
+        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore(List.of(
+                backend("bjp_1234567890abcdef", "server-b", "http://10.8.0.22:8080", NOW))), httpClient);
         MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
                 .get("/api/internal/agent/opencode/processes/me")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
@@ -206,7 +210,9 @@ class UserOpencodeBackendRoutingWebFilterTest {
         assertThat(exchange.getResponse().getBodyAsString().block()).contains(
                 "\"status\":\"UNAVAILABLE\"",
                 "\"serviceStatus\":\"NOT_RUNNING\"",
-                "\"serviceAddress\":\"10.8.0.22:4097\"");
+                "\"linuxServerId\":\"server-b\"",
+                "\"port\":4097",
+                "\"serviceAddress\":null");
     }
 
     @Test
@@ -254,13 +260,13 @@ class UserOpencodeBackendRoutingWebFilterTest {
                 false,
                 message,
                 null,
+                "server-b",
                 null,
-                null,
-                null,
+                4097,
                 null,
                 NOW,
                 UserOpencodeServiceStatus.NOT_RUNNING,
-                "10.8.0.22:4097");
+                null);
     }
 
     private static void assertRequestIsForwarded(String path) {

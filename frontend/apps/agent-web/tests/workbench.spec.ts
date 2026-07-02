@@ -146,7 +146,7 @@ test("user avatar menu logs out and returns to login", async ({ page }) => {
 
   await page.getByRole("button", { name: "当前用户 admin" }).click();
   await expect.poll(() => processStatusRequests.length).toBeGreaterThanOrEqual(2);
-  await expect(page.getByText("运行中(10.8.0.12:4096)")).toBeVisible();
+  await expect(page.getByText("运行中(server-a / 10.8.0.12:4096)")).toBeVisible();
   // 灰显的「应用管理员」角色行应在菜单顶部，且在用户名 / 退出登录之前出现。
   const roleRow = page.locator(".figma-user-menu-role");
   await expect(roleRow).toBeVisible();
@@ -1773,7 +1773,7 @@ function opencodeProcessStatus(status: "READY" | "NEEDS_INITIALIZATION" | "UNAVA
       initializable: false,
       message: "opencode 进程可用",
       processId: "ocp_1234567890abcdef",
-      linuxServerId: "10.8.0.12",
+      linuxServerId: "server-a",
       containerId: "ctr_01",
       port: 4096,
       baseUrl: "http://10.8.0.12:4096",

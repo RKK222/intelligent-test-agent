@@ -27,9 +27,12 @@ public final class LinuxServerIpResolver {
 
     private static final Logger log = LoggerFactory.getLogger(LinuxServerIpResolver.class);
 
-    /** 虚拟/容器桥接网卡名前缀，枚举时跳过，避免误选 docker0/br-/veth 等桥接地址。 */
+    /**
+     * 虚拟/容器桥接网卡名前缀，枚举时跳过，避免误选 docker0/br-/veth 等桥接地址。
+     * 同时覆盖 Windows 下 Hyper-V 虚拟交换机（vEthernet）和 WSL 虚拟网卡，避免多网卡场景下误选。
+     */
     private static final Pattern VIRTUAL_INTERFACE = Pattern.compile(
-            "docker0|br-.*|veth.*|virbr.*|cni.*|flannel.*|calico.*|tun.*|tap.*");
+            "docker0|br-.*|veth.*|virbr.*|cni.*|flannel.*|calico.*|tun.*|tap.*|vEthernet.*|Hyper-V.*|WSL.*");
 
     private final String resolved;
 

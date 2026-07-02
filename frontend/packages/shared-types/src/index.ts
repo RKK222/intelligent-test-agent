@@ -535,7 +535,7 @@ export type UserOpencodeProcess = {
   status: UserOpencodeProcessStatus;
   /** 头像菜单展示状态：未分配、运行中、未运行。旧后端缺失时前端从 status/baseUrl 推断。 */
   serviceStatus?: UserOpencodeServiceStatus;
-  /** 头像菜单展示地址，格式为 advertisedHost:内部opencode端口。 */
+  /** 头像菜单展示地址，格式为当前可访问 host:内部opencode端口；无法解析时为空。 */
   serviceAddress?: string | null;
   initializable: boolean;
   /** 用户绑定指向的 Linux 服务器已无可用容器，但本地仍有可路由节点时为 true。 */
@@ -544,6 +544,7 @@ export type UserOpencodeProcess = {
   localFallback?: boolean;
   message: string;
   processId?: string;
+  /** 稳定服务器身份，不保证是可连接 IP，不能直接拼接为 host:port。 */
   linuxServerId?: string;
   containerId?: string;
   port?: number;

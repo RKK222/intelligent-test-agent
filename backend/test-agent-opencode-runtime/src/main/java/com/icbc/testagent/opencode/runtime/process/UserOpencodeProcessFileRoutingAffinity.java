@@ -20,11 +20,9 @@ public record UserOpencodeProcessFileRoutingAffinity(
         Instant checkedAt) {
 
     /**
-     * 兼容调用方遗漏 serviceAddress 的情况，优先由服务器 ID 与端口派生展示地址。
+     * serviceAddress 只表示已解析的当前网络地址；缺失时保留为空，避免把稳定服务器身份当 host。
      */
     public UserOpencodeProcessFileRoutingAffinity {
-        if ((serviceAddress == null || serviceAddress.isBlank()) && linuxServerId != null && port != null) {
-            serviceAddress = linuxServerId + ":" + port;
-        }
+        serviceAddress = serviceAddress == null || serviceAddress.isBlank() ? null : serviceAddress.trim();
     }
 }

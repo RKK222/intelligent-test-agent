@@ -22,6 +22,7 @@ import com.icbc.testagent.opencode.runtime.run.StartRunInput;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAvailability;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
+import com.icbc.testagent.opencode.runtime.process.UserOpencodeServiceStatus;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperation;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStatus;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStep;
@@ -283,11 +284,13 @@ class RuntimeControllerTest {
                 false,
                 "opencode 进程可用",
                 "ocp_1234567890abcdef",
-                "10.8.0.12",
+                "server-a",
                 "ctr_01",
                 4096,
                 "http://10.8.0.12:4096",
-                NOW);
+                NOW,
+                UserOpencodeServiceStatus.RUNNING,
+                "10.8.0.12:4096");
         when(service.status(eq(new UserId("usr_1234567890abcdef")), eq("opencode"), eq("trace_1234567890abcdef")))
                 .thenReturn(ready);
         when(service.initialize(eq(new UserId("usr_1234567890abcdef")), eq("opencode"), eq("trace_1234567890abcdef")))

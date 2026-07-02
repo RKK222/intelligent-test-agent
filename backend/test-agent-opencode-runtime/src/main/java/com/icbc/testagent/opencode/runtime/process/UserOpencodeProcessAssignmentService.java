@@ -7,6 +7,7 @@ import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
 import com.icbc.testagent.domain.node.ExecutionNodeStatus;
 import com.icbc.testagent.domain.configuration.CommonParameterValues;
+import com.icbc.testagent.domain.opencodeprocess.BackendJavaProcess;
 import com.icbc.testagent.domain.opencodeprocess.BackendRuntimeSnapshot;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.ManagerRuntimeSnapshot;
@@ -24,6 +25,8 @@ import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBinding;
 import com.icbc.testagent.domain.opencodeprocess.UserOpencodeProcessBindingStatus;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.opencode.runtime.process.socket.BackendJavaProcessLifecycleService;
+import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings;
+import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -87,6 +90,7 @@ public class UserOpencodeProcessAssignmentService {
     private final OpencodeProcessStartupService startupService;
     private final OpencodeProcessStatusQueryService statusQueryService;
     private final OpencodeServerAddressResolver addressResolver;
+    private final BackendJavaRouteResolver routeResolver;
     private final OpencodeProcessStartOperationRepository startOperationRepository;
 
     /**
@@ -109,7 +113,7 @@ public class UserOpencodeProcessAssignmentService {
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessHeartbeatStore heartbeatStore) {
-        this(repository, EMPTY_PARAMETER_VALUES, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, null, null, null);
+        this(repository, EMPTY_PARAMETER_VALUES, executionNodeRepository, gateway, backendLifecycle, heartbeatStore, null, null, null, null);
     }
 
     /**
@@ -135,6 +139,7 @@ public class UserOpencodeProcessAssignmentService {
             OpencodeProcessManagerGateway gateway,
             BackendJavaProcessLifecycleService backendLifecycle,
             OpencodeProcessHeartbeatStore heartbeatStore,
+            BackendJavaRouteResolver routeResolver,
             OpencodeProcessStartupService startupService,
             OpencodeProcessStatusQueryService statusQueryService,
             OpencodeProcessStartOperationRepository startOperationRepository) {
@@ -148,6 +153,9 @@ public class UserOpencodeProcessAssignmentService {
                 ? new OpencodeProcessStatusQueryService(repository, gateway, heartbeatStore)
                 : statusQueryService;
         this.addressResolver = new OpencodeServerAddressResolver(backendLifecycle.advertisedHost());
+        this.routeResolver = routeResolver == null
+                ? defaultRouteResolver(heartbeatStore, backendLifecycle)
+                : routeResolver;
         this.startOperationRepository = startOperationRepository;
         this.startupService = startupService == null
                 ? new OpencodeProcessStartupService(
@@ -158,6 +166,32 @@ public class UserOpencodeProcessAssignmentService {
                         this.statusQueryService,
                         Clock.systemUTC())
                 : startupService;
+    }
+
+    /**
+     * 兼容旧测试构造器，未显式注入 resolver 时仍使用统一路由解析器。
+     */
+    public UserOpencodeProcessAssignmentService(
+            OpencodeProcessManagementRepository repository,
+            CommonParameterValues commonParameterValues,
+            ExecutionNodeRepository executionNodeRepository,
+            OpencodeProcessManagerGateway gateway,
+            BackendJavaProcessLifecycleService backendLifecycle,
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            OpencodeProcessStartupService startupService,
+            OpencodeProcessStatusQueryService statusQueryService,
+            OpencodeProcessStartOperationRepository startOperationRepository) {
+        this(
+                repository,
+                commonParameterValues,
+                executionNodeRepository,
+                gateway,
+                backendLifecycle,
+                heartbeatStore,
+                null,
+                startupService,
+                statusQueryService,
+                startOperationRepository);
     }
 
     /**
@@ -177,6 +211,7 @@ public class UserOpencodeProcessAssignmentService {
                 gateway,
                 backendLifecycle,
                 heartbeatStore == null ? disabledHeartbeatStore() : heartbeatStore,
+                null,
                 null,
                 null,
                 null);
@@ -200,6 +235,7 @@ public class UserOpencodeProcessAssignmentService {
                 gateway,
                 backendLifecycle,
                 heartbeatStore == null ? disabledHeartbeatStore() : heartbeatStore,
+                null,
                 null,
                 null,
                 startOperationRepository);
@@ -639,9 +675,9 @@ public class UserOpencodeProcessAssignmentService {
                 true,
                 message,
                 null,
+                binding.linuxServerId().value(),
                 null,
-                null,
-                null,
+                binding.port(),
                 null,
                 checkedAt,
                 UserOpencodeServiceStatus.NOT_RUNNING,
@@ -657,9 +693,9 @@ public class UserOpencodeProcessAssignmentService {
                 true,
                 message,
                 null,
+                binding.linuxServerId().value(),
                 null,
-                null,
-                null,
+                binding.port(),
                 serviceAddress(binding),
                 checkedAt);
     }
@@ -672,11 +708,11 @@ public class UserOpencodeProcessAssignmentService {
                 UserOpencodeProcessAvailability.NEEDS_INITIALIZATION,
                 true,
                 message,
-                null,
-                null,
-                null,
-                null,
-                null,
+                process.processId().value(),
+                process.linuxServerId().value(),
+                process.containerId().value(),
+                process.port(),
+                process.baseUrl(),
                 checkedAt,
                 UserOpencodeServiceStatus.NOT_RUNNING,
                 serviceAddress(process));
@@ -719,9 +755,9 @@ public class UserOpencodeProcessAssignmentService {
                 false,
                 message,
                 null,
+                binding.linuxServerId().value(),
                 null,
-                null,
-                null,
+                binding.port(),
                 null,
                 checkedAt,
                 UserOpencodeServiceStatus.NOT_RUNNING,
@@ -737,9 +773,9 @@ public class UserOpencodeProcessAssignmentService {
                 false,
                 message,
                 null,
+                binding.linuxServerId().value(),
                 null,
-                null,
-                null,
+                binding.port(),
                 serviceAddress(binding),
                 checkedAt);
     }
@@ -752,28 +788,84 @@ public class UserOpencodeProcessAssignmentService {
                 UserOpencodeProcessAvailability.UNAVAILABLE,
                 false,
                 message,
-                null,
-                null,
-                null,
-                null,
-                null,
+                process.processId().value(),
+                process.linuxServerId().value(),
+                process.containerId().value(),
+                process.port(),
+                process.baseUrl(),
                 checkedAt,
                 UserOpencodeServiceStatus.NOT_RUNNING,
                 serviceAddress(process));
     }
 
     private String serviceAddress(UserOpencodeProcessBinding binding) {
-        if (binding == null || binding.linuxServerId() == null) {
+        if (binding == null) {
             return null;
         }
-        return binding.linuxServerId().value() + ":" + binding.port();
+        return serviceAddress(binding.linuxServerId(), binding.port());
     }
 
     private String serviceAddress(OpencodeServerProcess process) {
         if (process == null) {
             return null;
         }
+        String processHost = host(process.baseUrl());
+        boolean hostIsStableServerId = processHost != null && processHost.equals(process.linuxServerId().value());
+        if (processHost == null || processHost.isBlank() || hostIsStableServerId) {
+            String routedAddress = serviceAddress(process.linuxServerId(), process.port());
+            if (routedAddress != null) {
+                return routedAddress;
+            }
+            if (hostIsStableServerId && !isIpv4Address(processHost)) {
+                return null;
+            }
+        }
         return addressResolver.serviceAddress(process.baseUrl(), process.port());
+    }
+
+    private String serviceAddress(LinuxServerId linuxServerId, int port) {
+        if (linuxServerId == null) {
+            return null;
+        }
+        try {
+            BackendJavaProcess backend = routeResolver.requireBackend(linuxServerId);
+            String host = host(backend.listenUrl());
+            return host == null || host.isBlank() ? null : host + ":" + port;
+        } catch (PlatformException exception) {
+            return null;
+        }
+    }
+
+    private static String host(String url) {
+        if (url == null || url.isBlank()) {
+            return null;
+        }
+        try {
+            return URI.create(url.trim()).getHost();
+        } catch (IllegalArgumentException ignored) {
+            return null;
+        }
+    }
+
+    private static boolean isIpv4Address(String host) {
+        if (host == null || host.isBlank()) {
+            return false;
+        }
+        String[] parts = host.split("\\.", -1);
+        if (parts.length != 4) {
+            return false;
+        }
+        for (String part : parts) {
+            try {
+                int value = Integer.parseInt(part);
+                if (value < 0 || value > 255) {
+                    return false;
+                }
+            } catch (NumberFormatException exception) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private String statusFailureMessage(OpencodeProcessStatusProbe probe) {
@@ -804,6 +896,25 @@ public class UserOpencodeProcessAssignmentService {
 
     private PlatformException unavailableException(String message) {
         return new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, message, Map.of("agentId", OPENCODE_AGENT_ID));
+    }
+
+    private static BackendJavaRouteResolver defaultRouteResolver(
+            OpencodeProcessHeartbeatStore heartbeatStore,
+            BackendJavaProcessLifecycleService backendLifecycle) {
+        ManagerControlSettings settings = new ManagerControlSettings(
+                "",
+                backendLifecycle.listenUrl(),
+                backendLifecycle.linuxServerId(),
+                backendLifecycle.advertisedHost(),
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(10),
+                Duration.ofSeconds(10),
+                100);
+        return new BackendJavaRouteResolver(
+                heartbeatStore,
+                settings,
+                backendLifecycle.backendProcessId(),
+                Clock.systemUTC());
     }
 
     private static OpencodeProcessHeartbeatStore disabledHeartbeatStore() {

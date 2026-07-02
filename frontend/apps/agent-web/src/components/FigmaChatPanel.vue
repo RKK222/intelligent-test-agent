@@ -1498,8 +1498,8 @@ function parseDiffLines(patch: string | undefined): DiffLine[] {
 
 const hasFileChanges = computed(() => (props.fileChanges?.length ?? 0) > 0)
 
-// 推断 opencode 专属进程服务地址（与头像菜单 opencodeServiceDisplay 保持一致），
-// 用于 serviceStatus 缺失时的回退推断
+// 推断 opencode 专属进程当前网络地址（与头像菜单保持一致），
+// linuxServerId 只代表稳定服务器身份，不能再拿来拼 host:port。
 function resolveServiceAddress(process?: OpencodeProcessState | null): string {
   if (!process) return ''
   if (process.serviceAddress?.trim()) return process.serviceAddress.trim()
@@ -1512,8 +1512,18 @@ function resolveServiceAddress(process?: OpencodeProcessState | null): string {
   } catch {
     /* ignore */
   }
-  if (process.linuxServerId && process.port) return `${process.linuxServerId}:${process.port}`
   return ''
+}
+
+function resolveServerName(process?: OpencodeProcessState | null): string {
+  return process?.linuxServerId?.trim() ?? ''
+}
+
+function resolveServiceTarget(process?: OpencodeProcessState | null): string {
+  const serverName = resolveServerName(process)
+  const address = resolveServiceAddress(process)
+  if (serverName && address) return `${serverName} / ${address}`
+  return serverName || address
 }
 
 const processReady = computed(() => {
@@ -1538,7 +1548,7 @@ const effectiveServiceStatus = computed<string>(() => {
   const p = props.processStatus
   if (p?.serviceStatus) return p.serviceStatus
   if (p?.status === 'READY') return 'RUNNING'
-  return resolveServiceAddress(p) ? 'NOT_RUNNING' : 'UNASSIGNED'
+  return resolveServiceTarget(p) ? 'NOT_RUNNING' : 'UNASSIGNED'
 })
 const processStatusTitle = computed(() => {
   if (props.processLoading && !props.processStatus) return '正在检查 opencode 进程'
@@ -1566,7 +1576,7 @@ const processStatusText = computed(() => {
   if (props.processRequired && !props.processStatus)
     return '请刷新进程状态后重试'
   if (!props.processStatus) return ''
-  return resolveServiceAddress(props.processStatus) || props.processStatus.message
+  return resolveServiceTarget(props.processStatus) || props.processStatus.message
 })
 
 // 进程状态卡片可折叠：默认收起为右下角一个小圆点（带渐变虚化），

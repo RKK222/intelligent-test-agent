@@ -42,14 +42,12 @@ public record UserOpencodeProcessStatusResponse(
                 baseUrl,
                 checkedAt,
                 defaultServiceStatus(status),
-                serviceAddress(linuxServerId, port));
+                null);
     }
 
     public UserOpencodeProcessStatusResponse {
         serviceStatus = serviceStatus == null ? defaultServiceStatus(status) : serviceStatus;
-        if ((serviceAddress == null || serviceAddress.isBlank()) && linuxServerId != null && port != null) {
-            serviceAddress = serviceAddress(linuxServerId, port);
-        }
+        serviceAddress = serviceAddress == null || serviceAddress.isBlank() ? null : serviceAddress.trim();
     }
 
     private static UserOpencodeServiceStatus defaultServiceStatus(UserOpencodeProcessAvailability status) {
@@ -58,10 +56,4 @@ public record UserOpencodeProcessStatusResponse(
                 : UserOpencodeServiceStatus.UNASSIGNED;
     }
 
-    private static String serviceAddress(String linuxServerId, Integer port) {
-        if (linuxServerId == null || linuxServerId.isBlank() || port == null) {
-            return null;
-        }
-        return linuxServerId + ":" + port;
-    }
 }

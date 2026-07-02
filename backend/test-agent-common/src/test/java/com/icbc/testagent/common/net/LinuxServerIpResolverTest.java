@@ -31,6 +31,26 @@ class LinuxServerIpResolverTest {
     }
 
     @Test
+    void skipsHyperVVirtualEthernetInterface() {
+        List<InterfaceInfo> interfaces = List.of(
+                new InterfaceInfo("vEthernet (Default Switch)", true, false, false, List.of("172.18.0.1")),
+                new InterfaceInfo("vEthernet (WSL)", true, false, false, List.of("172.19.0.1")),
+                new InterfaceInfo("eth0", true, false, false, List.of("192.168.1.10")));
+
+        assertThat(LinuxServerIpResolver.detect(interfaces)).isEqualTo("192.168.1.10");
+    }
+
+    @Test
+    void skipsWslVirtualInterface() {
+        List<InterfaceInfo> interfaces = List.of(
+                new InterfaceInfo("eth0", true, false, false, List.of("10.0.0.5")),
+                new InterfaceInfo("WSL (Hyper-V firewall)", true, false, false, List.of("192.168.0.1")));
+
+        // WSL 前缀匹配应被过滤，只剩 eth0 的 10.0.0.5
+        assertThat(LinuxServerIpResolver.detect(interfaces)).isEqualTo("10.0.0.5");
+    }
+
+    @Test
     void picksStableFirstWhenMultipleCandidates() {
         List<InterfaceInfo> interfaces = List.of(
                 new InterfaceInfo("eth1", true, false, false, List.of("192.168.1.10")),

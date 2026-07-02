@@ -156,8 +156,18 @@ function opencodeServiceAddress(process?: UserOpencodeProcess | null) {
   if (process.serviceAddress?.trim()) return process.serviceAddress.trim();
   const addressFromBaseUrl = serviceAddressFromBaseUrl(process.baseUrl);
   if (addressFromBaseUrl) return addressFromBaseUrl;
-  if (process.linuxServerId && process.port) return `${process.linuxServerId}:${process.port}`;
   return "";
+}
+
+function opencodeServiceServerName(process?: UserOpencodeProcess | null) {
+  return process?.linuxServerId?.trim() ?? "";
+}
+
+function opencodeServiceTarget(process?: UserOpencodeProcess | null) {
+  const serverName = opencodeServiceServerName(process);
+  const address = opencodeServiceAddress(process);
+  if (serverName && address) return `${serverName} / ${address}`;
+  return serverName || address;
 }
 
 const opencodeServiceDisplay = computed(() => {
@@ -168,13 +178,14 @@ const opencodeServiceDisplay = computed(() => {
   if (!process) {
     return { tone: "checking", text: "状态未知" };
   }
-  const address = opencodeServiceAddress(process);
-  const serviceStatus = process?.serviceStatus ?? (process?.status === "READY" ? "RUNNING" : address ? "NOT_RUNNING" : "UNASSIGNED");
+  const target = opencodeServiceTarget(process);
+  const hasAssignedServer = Boolean(opencodeServiceServerName(process) || opencodeServiceAddress(process));
+  const serviceStatus = process?.serviceStatus ?? (process?.status === "READY" ? "RUNNING" : hasAssignedServer ? "NOT_RUNNING" : "UNASSIGNED");
   if (serviceStatus === "RUNNING") {
-    return { tone: "running", text: address ? `运行中(${address})` : "运行中" };
+    return { tone: "running", text: target ? `运行中(${target})` : "运行中" };
   }
   if (serviceStatus === "NOT_RUNNING") {
-    return { tone: "stopped", text: address ? `未运行(${address})` : "未运行" };
+    return { tone: "stopped", text: target ? `未运行(${target})` : "未运行" };
   }
   return { tone: "unassigned", text: "待分配专属进程" };
 });

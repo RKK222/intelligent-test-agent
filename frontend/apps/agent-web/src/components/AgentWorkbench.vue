@@ -2158,12 +2158,13 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   }
   if (!opencodeProcessReady.value) {
     // 与聊天面板状态卡一致：按 serviceStatus 区分"未分配 / 未运行"提示
+    const assignedServerName = opencodeProcessStatus.value?.linuxServerId?.trim();
+    const assignedServiceAddress = opencodeProcessStatus.value?.serviceAddress?.trim() || opencodeProcessStatus.value?.baseUrl?.trim();
     const svc =
       opencodeProcessStatus.value?.serviceStatus ??
       (opencodeProcessStatus.value?.status === "READY"
         ? "RUNNING"
-        : opencodeProcessStatus.value?.serviceAddress?.trim() ||
-          (opencodeProcessStatus.value?.linuxServerId && opencodeProcessStatus.value?.port)
+        : assignedServerName || assignedServiceAddress
           ? "NOT_RUNNING"
           : "UNASSIGNED");
     const procTitle =

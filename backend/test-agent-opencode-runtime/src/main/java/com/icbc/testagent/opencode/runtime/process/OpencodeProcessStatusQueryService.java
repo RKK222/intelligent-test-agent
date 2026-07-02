@@ -106,7 +106,7 @@ public class OpencodeProcessStatusQueryService {
         try {
             OpencodeProcessHealthResult health = gateway.checkHealth(new OpencodeProcessHealthCommand(
                     process.processId(),
-                    process.baseUrl(),
+                    healthBaseUrl(process),
                     traceId));
             if (health == null) {
                 // Manager 返回 null 表示网关异常，不持久化，返回 STALE
@@ -213,6 +213,10 @@ public class OpencodeProcessStatusQueryService {
     }
 
     private String refreshedBaseUrl(OpencodeServerProcess process) {
+        return addressResolver == null ? process.baseUrl() : addressResolver.baseUrl(process.port());
+    }
+
+    private String healthBaseUrl(OpencodeServerProcess process) {
         return addressResolver == null ? process.baseUrl() : addressResolver.baseUrl(process.port());
     }
 

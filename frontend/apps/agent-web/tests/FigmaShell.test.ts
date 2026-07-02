@@ -3,6 +3,52 @@ import { describe, expect, it } from "vitest";
 import FigmaShell from "../src/components/FigmaShell.vue";
 
 describe("FigmaShell", () => {
+  it("shows process status with server name and resolved address", async () => {
+    const wrapper = mount(FigmaShell, {
+      props: {
+        currentUserName: "888888888",
+        opencodeProcessStatus: {
+          status: "NEEDS_INITIALIZATION",
+          initializable: true,
+          message: "opencode 进程不可用，需要重新初始化",
+          linuxServerId: "server-a",
+          port: 82,
+          serviceStatus: "NOT_RUNNING",
+          serviceAddress: "192.168.100.171:82",
+          checkedAt: "2026-07-02T00:00:00Z"
+        },
+        opencodeProcessLoading: false
+      }
+    });
+
+    await wrapper.get(".figma-user-avatar-btn").trigger("click");
+
+    expect(wrapper.get(".figma-user-menu-service-text").text()).toBe("未运行(server-a / 192.168.100.171:82)");
+  });
+
+  it("shows server name without inventing an address when service address is missing", async () => {
+    const wrapper = mount(FigmaShell, {
+      props: {
+        currentUserName: "888888888",
+        opencodeProcessStatus: {
+          status: "UNAVAILABLE",
+          initializable: false,
+          message: "目标服务器后端不可用",
+          linuxServerId: "server-a",
+          port: 82,
+          serviceStatus: "NOT_RUNNING",
+          checkedAt: "2026-07-02T00:00:00Z"
+        },
+        opencodeProcessLoading: false
+      }
+    });
+
+    await wrapper.get(".figma-user-avatar-btn").trigger("click");
+
+    expect(wrapper.get(".figma-user-menu-service-text").text()).toBe("未运行(server-a)");
+    expect(wrapper.text()).not.toContain("server-a:82");
+  });
+
   it("shows unknown instead of unassigned when process status query has no data", async () => {
     const wrapper = mount(FigmaShell, {
       props: {
