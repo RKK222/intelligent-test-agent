@@ -9,16 +9,20 @@
 - How: Domain 增加 operation 模型/步骤枚举/repository 端口，persistence 用 Flyway + MyBatis XML mapper 落表，runtime 在 `UserOpencodeProcessAssignmentService` 和 `OpencodeProcessStartupService` 中穿透可选进度记录器；API GET 只读 DB、不触发 manager health/start、不写 RunEvent。前端只改工作台层状态，`FigmaChatPanel` 继续只 emit 初始化事件。
 - Result: runtime/API/persistence 定向测试、backend-api/agent-web typecheck 和 Vitest 通过；计划中的后端聚合 `mvn -pl test-agent-opencode-runtime,test-agent-api,test-agent-persistence -am test` 在 `test-agent-persistence` 既有全量测试处失败（H2 `ON CONFLICT`、`usr_test_dev` fixture 外键、默认/loopback seed 断言），runtime 和 API 模块在该 reactor 中已通过。
 ### 2026-07-02 - 对话框思考与能力卡片渲染重构，优化状态字与文字流光效果
+### 2026-07-02 - 对话框思考与能力卡片渲染重构，优化状态字与文字流光效果，添加气泡复制按钮
 
 - Why: 
   1. 任务结束后，部分运行中状态（“思考状态 思考中”）依然停留在“思考中”并伴随动画，无法自动恢复为已完成态，体验不一致。
   2. 思考过程（reasoning）和工具调用（tool）的卡片式渲染（ProcessDisclosure）增加了大量不必要的边框、背景及胶囊徽标，导致侧边栏窄对话面板中的信息密度偏低且杂乱。
   3. 卡片外壳移除后，正在运行中的状态节点需要更突出的指示，用户希望以文字流光（文字渐变流动）效果呈现。
+  4. 展开/折叠面板在大量日志条目下点击非常卡顿，需要优化 Vue `v-memo` 依赖。
+  5. 用户需要能便捷复制用户输入文本和助手回答的 Markdown 文本内容。
 - What:
-  1. 合并思考过程：在 `MessageParts.vue` 渲染前，将同一个助手消息中的所有 `reasoning` 思考零件合并为一个，且统一呈现在最上方，避免多次思考产生多个冗余的“思考中”。
-  2. 移除卡片容器：重构 `ReasoningPartBlock.vue` 和 `ToolPartBlock.vue`，彻底弃用 `ProcessDisclosure` 卡片包装，改用无背景、无卡片框的**轻量级文本/日志行时间线**呈现。
-  3. 精确的任务运行态同步：修改 `AssistantThread.vue`，仅向最后一个助手消息传递 `running` 状态，确保历史消息的思考与工具状态被强制归一化为已完成或非运行态；并且在零件块中当 `props.running` 为 `false` 时，任何活跃状态强制转为完成态，彻底修复“思考中”残留问题。
-  4. 文字流光效果：在 `globals.css` 中新增 `.ta-text-shimmer` 流光 CSS 动画，并在 `ReasoningPartBlock.vue` 与 `ToolPartBlock.vue` 运行态文本中应用该效果。
+  1. 合并思考过程：在 `MessageParts.vue` 与 `FigmaChatPanel.vue` 的 `messageOtherParts` 渲染前，将同一个助手消息中的所有 `reasoning` 思考零件合并为一个，且统一呈现在最上方，避免多次思考产生多个冗余的“思考中”。
+  2. 移除卡片容器：重构 `ReasoningPartBlock.vue`、`ToolPartBlock.vue` 与 `FigmaChatPanel.vue` 中的 details 卡片样式，彻底弃用卡片背景与外框，改用无背景、无卡片框的**轻量级文本/日志行时间线**呈现。
+  3. 精确的任务运行态同步与文字流光：修改 `AssistantThread.vue` 限制仅最新助手消息可呈运行态；在 `globals.css` 中新增 `.ta-text-shimmer` 流光 CSS 动画，并在 `ReasoningPartBlock.vue`、`ToolPartBlock.vue` 与 `FigmaChatPanel.vue` 运行态文本中应用该效果。
+  4. 解决展开卡顿：引入 `messageExpandedState` 计算当前消息下的折叠状态，并将其加入 `.figma-chat-assistant` 的 `v-memo` 依赖，使得点击展开时只会精确重绘对应消息气泡，消除全局卡顿。
+  5. 气泡一键复制：在用户气泡与助手文本气泡右上角新增基于 hover 触发的 `.figma-chat-bubble-copy-btn` 一键复制按钮，实现静默复制。
 - How: 纯前端组件与样式重构，无后端和数据库改动；更新了 `agent-chat` 包的 README。
 - Result: 运行 `corepack pnpm typecheck` 成功；`corepack pnpm test` 全量通过（31 个测试包 217 个用例全绿），无类型或逻辑错误。
 

@@ -26,6 +26,8 @@ import {
   Upload,
   User,
   X,
+  Copy,
+  Check,
 } from 'lucide-vue-next'
 import type {
   AgentMessage,
@@ -347,10 +349,25 @@ function copyErrorMessage() {
   })
 }
 
+const copySuccessId = ref<string | null>(null)
+function copyText(text: string, id: string) {
+  navigator.clipboard.writeText(text).then(() => {
+    copySuccessId.value = id
+    setTimeout(() => {
+      if (copySuccessId.value === id) {
+        copySuccessId.value = null
+      }
+    }, 1500)
+  }).catch((err) => {
+    console.error('Failed to copy: ', err)
+  })
+}
+
 function messageOtherParts(msg: ChatMessage): MessagePart[] {
   if (!Array.isArray(msg.parts)) return []
-  return msg.parts.filter((p) => {
-    if (p.type === 'reasoning') return true
+  const reasoningParts = msg.parts.filter((p) => p.type === 'reasoning') as Array<Extract<MessagePart, { type: 'reasoning' }>>
+  const otherParts = msg.parts.filter((p) => {
+    if (p.type === 'reasoning') return false
     if (p.type === 'retry') return true
     if (p.type === 'tool') {
       const toolName = (p.toolName ?? '').toLowerCase()
@@ -366,6 +383,44 @@ function messageOtherParts(msg: ChatMessage): MessagePart[] {
     }
     return false
   })
+
+  if (reasoningParts.length === 0) {
+    return otherParts
+  }
+
+  const mergedText = reasoningParts
+    .map((p) => p.text)
+    .filter((t) => typeof t === 'string' && t.trim().length > 0)
+    .join('\n\n')
+    .trim()
+
+  let mergedStatus = 'completed'
+  if (props.running && msg.id === lastAssistant.value?.id) {
+    const hasRunning = reasoningParts.some((p) => {
+      const status = ((p as { status?: string }).status ?? '').toLowerCase()
+      return ['running', 'in_progress', 'streaming', 'started', 'active'].includes(status)
+    })
+    if (hasRunning) {
+      mergedStatus = 'running'
+    }
+  }
+
+  let totalDurationMs = 0
+  for (const p of reasoningParts) {
+    if (typeof p.durationMs === 'number' && Number.isFinite(p.durationMs)) {
+      totalDurationMs += p.durationMs
+    }
+  }
+
+  const mergedReasoning = {
+    partId: `${msg.id}-merged-reasoning`,
+    type: 'reasoning',
+    text: mergedText,
+    status: mergedStatus,
+    durationMs: totalDurationMs > 0 ? totalDurationMs : undefined
+  } as MessagePart
+
+  return [mergedReasoning, ...otherParts]
 }
 
 /** 从 tool part 获取展示用的输出文本 */
@@ -409,7 +464,6 @@ function partIsRunning(part: MessagePart): boolean {
   return ['running', 'in_progress', 'streaming', 'started', 'active'].includes(status)
 }
 
-/** 最新回复尚未结束时，reasoning 仍属于整轮思考过程，不能提前展示为已完成。 */
 function reasoningIsRunning(message: ChatMessage, part: MessagePart): boolean {
   return partIsRunning(part) || (props.running && message.id === lastAssistant.value?.id)
 }
@@ -968,6 +1022,11 @@ function toggleFileExpanded(msgId: string, opType: string) {
 }
 function isFileExpanded(msgId: string, opType: string) {
   return expandedFileKeys.value.has(`${msgId}:${opType}`)
+}
+function messageExpandedState(msgId: string): string {
+  return Array.from(expandedFileKeys.value)
+    .filter((k) => k.startsWith(msgId + ':'))
+    .join(',')
 }
 
 // 从 tool input 中提取文件路径，bash 命令则尝试从 command 中解析
@@ -2242,6 +2301,16 @@ function onCompositionEnd() {
             <div v-else class="figma-chat-bubble-content">
               {{ message.content }}
             </div>
+            <button
+              v-if="!message._skillName"
+              type="button"
+              class="figma-chat-bubble-copy-btn"
+              title="复制"
+              @click="copyText(message.content, message.id + '-copy')"
+            >
+              <Check v-if="copySuccessId === message.id + '-copy'" :size="12" style="color: #2ecc71" />
+              <Copy v-else :size="12" />
+            </button>
           </div>
         </div>
 
@@ -2254,7 +2323,8 @@ function onCompositionEnd() {
             message.meta,
             message.parts?.length,
             message.parts?.map(p => ('status' in p ? p.status : '')).join(','),
-            message._error
+            message._error,
+            messageExpandedState(message.id)
           ]"
         >
           <div class="figma-chat-avatar">
@@ -2574,12 +2644,22 @@ function onCompositionEnd() {
                           reasoningIsRunning(message, part) && 'figma-chat-process-dot--running',
                         ]"
                       />
-                      <span class="figma-chat-process-title">思考状态</span>
+                      <span
+                        :class="[
+                          'figma-chat-process-title',
+                          reasoningIsRunning(message, part) && 'ta-text-shimmer'
+                        ]"
+                      >思考状态</span>
                       <span
                         v-if="reasoningDurationText(part)"
                         class="figma-chat-process-meta"
                       >已思考 {{ reasoningDurationText(part) }}</span>
-                      <span class="figma-chat-process-status-label">
+                      <span
+                        :class="[
+                          'figma-chat-process-status-label',
+                          reasoningIsRunning(message, part) && 'ta-text-shimmer'
+                        ]"
+                      >
                         {{ reasoningIsRunning(message, part) ? '思考中' : '已完成' }}
                       </span>
                       <ChevronRight class="figma-chat-process-chevron" :size="14" />
@@ -2610,7 +2690,12 @@ function onCompositionEnd() {
                           toolIsFailed(part) && 'figma-chat-process-dot--error',
                         ]"
                       />
-                      <span class="figma-chat-process-title">{{ (part as any).toolName || '工具' }}</span>
+                      <span
+                        :class="[
+                          'figma-chat-process-title',
+                          partIsRunning(part) && 'ta-text-shimmer'
+                        ]"
+                      >{{ (part as any).toolName || '工具' }}</span>
                       <span
                         v-if="(part as any).input"
                         class="figma-chat-process-meta"
@@ -2621,6 +2706,7 @@ function onCompositionEnd() {
                         :class="[
                           'figma-chat-process-status-label',
                           toolIsFailed(part) && 'figma-chat-process-status-label--error',
+                          partIsRunning(part) && 'ta-text-shimmer'
                         ]"
                       >{{
                         partIsRunning(part) ? '执行中' :
@@ -2679,6 +2765,15 @@ function onCompositionEnd() {
                 </div>
                 <div v-else-if="message.content.trim()" class="figma-chat-text-bubble">
                   <MarkdownView :source="formatThinking(message.content)" />
+                  <button
+                    type="button"
+                    class="figma-chat-bubble-copy-btn figma-chat-bubble-copy-btn--assistant"
+                    title="复制"
+                    @click="copyText(message.content, message.id + '-copy')"
+                  >
+                    <Check v-if="copySuccessId === message.id + '-copy'" :size="12" style="color: #2ecc71" />
+                    <Copy v-else :size="12" />
+                  </button>
                 </div>
 
                 <!-- Inline Subtasks List -->
@@ -4232,6 +4327,7 @@ function onCompositionEnd() {
   background: var(--ta-chat-user-bg);
   color: #111;
   border-radius: 12px;
+  position: relative;
 }
 
 .figma-chat-bubble--assistant {
@@ -4253,6 +4349,46 @@ function onCompositionEnd() {
   margin-top: 10px;
   font-size: 14px;
   line-height: 1.6;
+  position: relative;
+}
+
+.figma-chat-bubble-copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  opacity: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: #ffffff;
+  color: var(--ta-chat-muted, #888);
+  cursor: pointer;
+  transition: opacity 0.2s, background-color 0.12s;
+  z-index: 10;
+  padding: 0;
+}
+
+.figma-chat-bubble-copy-btn--assistant {
+  top: 10px;
+  right: 10px;
+}
+
+.figma-chat-bubble--user:hover .figma-chat-bubble-copy-btn,
+.figma-chat-text-bubble:hover .figma-chat-bubble-copy-btn {
+  opacity: 1;
+}
+
+.figma-chat-bubble-copy-btn:hover {
+  background: var(--ta-panel-2, #f4f4f5);
+  color: var(--ta-chat-text, #333);
+}
+
+.figma-chat-bubble-copy-btn:active {
+  background: var(--ta-panel-3, #e4e4e7);
 }
 
 .figma-chat-document-list {
@@ -6373,17 +6509,15 @@ function onCompositionEnd() {
 /* 与 agent-chat 包的 ProcessDisclosure 风格保持一致 */
 
 .figma-chat-process-detail {
-  margin-top: 6px;
+  margin-top: 4px;
   overflow: hidden;
-  border-radius: 8px;
-  border: 1px solid rgba(0, 0, 0, 0.04);
-  background: rgba(0, 0, 0, 0.015);
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  border: none;
+  background: transparent;
 }
 
 .figma-chat-process-detail:hover {
-  background: rgba(0, 0, 0, 0.03);
-  border-color: rgba(0, 0, 0, 0.08);
+  background: transparent;
+  border-color: transparent;
 }
 
 @keyframes ta-shimmer {
@@ -6396,23 +6530,21 @@ function onCompositionEnd() {
 }
 
 .figma-chat-process-detail.is-running {
-  background: linear-gradient(90deg, rgba(0, 0, 0, 0.01) 25%, rgba(0, 0, 0, 0.04) 50%, rgba(0, 0, 0, 0.01) 75%);
-  background-size: 200% 100%;
-  animation: ta-shimmer 1.5s infinite linear;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 
 .figma-chat-process-detail--error {
-  border-color: rgba(235, 94, 83, 0.3);
-  background: rgba(235, 94, 83, 0.04);
+  border: none;
+  background: transparent;
 }
 
 .figma-chat-process-summary {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  padding: 3px 0;
   cursor: pointer;
   user-select: none;
   font-size: 12px;
@@ -6461,16 +6593,14 @@ function onCompositionEnd() {
 
 .figma-chat-process-status-label {
   flex-shrink: 0;
-  padding: 0 6px;
-  border-radius: 4px;
-  font-size: 10px;
-  line-height: 16px;
+  padding: 0;
+  font-size: 11px;
   color: var(--ta-chat-muted, #888);
-  background: var(--ta-chat-chip-bg, #f0f0f0);
+  background: transparent;
 }
 
 .figma-chat-process-status-label--error {
-  background: rgba(235, 94, 83, 0.12);
+  background: transparent;
   color: #c0392b;
 }
 
@@ -6485,8 +6615,10 @@ details[open] .figma-chat-process-chevron {
 }
 
 .figma-chat-process-body {
-  border-top: 1px solid var(--ta-chat-border, #e5e5e5);
-  padding: 8px 10px;
+  border-top: none;
+  border-left: 1px solid var(--ta-chat-border, #e5e5e5);
+  margin-left: 3px;
+  padding: 4px 0 8px 12px;
 }
 
 /* 工具 part 内部区域 */
