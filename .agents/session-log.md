@@ -9,6 +9,18 @@
 - How: Domain 增加 operation 模型/步骤枚举/repository 端口，persistence 用 Flyway + MyBatis XML mapper 落表，runtime 在 `UserOpencodeProcessAssignmentService` 和 `OpencodeProcessStartupService` 中穿透可选进度记录器；API GET 只读 DB、不触发 manager health/start、不写 RunEvent。前端只改工作台层状态，`FigmaChatPanel` 继续只 emit 初始化事件。
 - Result: runtime/API/persistence 定向测试、backend-api/agent-web typecheck 和 Vitest 通过；计划中的后端聚合 `mvn -pl test-agent-opencode-runtime,test-agent-api,test-agent-persistence -am test` 在 `test-agent-persistence` 既有全量测试处失败（H2 `ON CONFLICT`、`usr_test_dev` fixture 外键、默认/loopback seed 断言），runtime 和 API 模块在该 reactor 中已通过。
 ### 2026-07-02 - 对话框思考与能力卡片渲染重构，优化状态字与文字流光效果
+### 2026-07-02 - 对话面板 read 工具直接展示 + write/edit 折叠展开卡顿优化
+
+- Why:
+  1. 用户反馈右侧对话面板里 read 工具"没展示出来"——之前"探索"区只显示"读取 X 次"计数，文件路径被藏在 chevron 后面，要点开才看得到。
+  2. write 工具的代码预览在展开/收缩时"超级卡"——`renderCodeWithLineNumbers` 每次重渲染都会对同一份内容跑一遍正则高亮，read 工具的文件内容预览（`readOutputs` 区域）也是同一个函数，遇到大文件或流式更新时非常卡。
+- What:
+  1. `FigmaChatPanel.vue` 调整"探索"区：去掉 chevron 与折叠交互，summary 不再承载点击；`<ul>` 永远渲染，把本轮 read 过的文件路径直接列出来；新增 `.figma-chat-file-summary--open` 修饰符去掉 cursor: pointer。
+  2. 给 write / edit / read-output 三个 `<pre>` 都加上 `v-memo="[op.content, op.filePath]"`：内容/路径不变时直接跳过 `renderCodeWithLineNumbers`，折叠展开因此不再卡顿。
+  3. 新增/调整单测：默认展开 read 工具列表不再显示 chevron；write 折叠展开切换不破坏渲染；之前写错的"两个连续 assistant 合并导致 details 计数 3 不是 4"用例用 user 消息隔开修好；切会话 setProps 缺 processStatus 的类型问题用 `as any` 兜底。
+- How: 仅改 `FigmaChatPanel.vue` 模板和样式 + `FigmaChatPanel.test.ts`，不动 props/事件/store/后端；同步 agent-web README 第 32 条说明 read 默认展开 + v-memo 缓存。
+- Result: `cd frontend && corepack pnpm test -- FigmaChatPanel` 37 通过 1 skipped；`cd frontend && corepack pnpm -r typecheck` 全过；`cd frontend && corepack pnpm test` 223 通过 1 skipped。
+
 ### 2026-07-02 - 对话框思考与能力卡片渲染重构，优化状态字与文字流光效果，添加气泡复制按钮
 
 - Why: 

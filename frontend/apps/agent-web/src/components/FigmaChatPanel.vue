@@ -468,6 +468,27 @@ function reasoningIsRunning(message: ChatMessage, part: MessagePart): boolean {
   return partIsRunning(part) || (props.running && message.id === lastAssistant.value?.id)
 }
 
+/**
+ * 当前 part 是否属于"最近一条 assistant 消息"。
+ * 给最近一轮的工具/思考折叠块默认展开，让用户能直接看到这一次 Run 里发生过什么；
+ * 之前轮的折叠块保持收起，避免历史会话回看时被一大片细节铺满。
+ * 同时保留用户手动收起的偏好（由 <details> 自身的 open 状态管理）。
+ */
+function isInLastAssistantMessage(message: ChatMessage): boolean {
+  return lastAssistant.value?.id === message.id
+}
+
+/**
+ * 折叠块在以下任一情况时默认展开：
+ * 1) part 本身仍在运行中（实时跟踪进行中的工具调用）
+ * 2) 所属 assistant 消息是当前轮的最后一条（让用户能"一翻开就看到"最近一轮做了什么）
+ * 当新一轮开始后，旧轮的 lastAssistant 会切走，折叠块自动重新收起，
+ * 实现"先输出一小段、再缩起来"的轻量活动流。
+ */
+function partShouldOpen(message: ChatMessage, part: MessagePart): boolean {
+  return partIsRunning(part) || isInLastAssistantMessage(message)
+}
+
 /** 从 tool input 生成一行摘要文字，显示在 tool 折叠块标题行 */
 function summaryFromToolInput(toolName: string, input: Record<string, unknown> | undefined): string {
   if (!input) return ''
@@ -819,8 +840,11 @@ function toggleChoiceStep() {
 
 const choiceOptions = computed<ChoiceOption[]>(() => {
   if (props.running) return []
-  const last = displayMessages.value.filter((m) => m.role === 'assistant').pop()
-  if (!last) return []
+  // 仅当整段对话的最后一条消息本身就是 assistant（用户尚未回复）时才识别为待答问题。
+  // 这样切换到历史会话时，agent 已经收到回复、进入下一轮的场景不会把旧问题再弹一次。
+  const lastMessage = displayMessages.value[displayMessages.value.length - 1]
+  if (!lastMessage || lastMessage.role !== 'assistant') return []
+  const last = lastMessage
   const text = last.content
   if (!text) return []
   let clean = text.replace(/\*\*(\d+)\*\*/g, '$1')
@@ -870,9 +894,11 @@ const choiceOptions = computed<ChoiceOption[]>(() => {
 
 const choiceQuestion = computed(() => {
   if (choiceOptions.value.length === 0) return ''
-  const last = displayMessages.value.filter((m) => m.role === 'assistant').pop()
-  if (!last) return ''
-  const text = last.content
+  // 同样限定到"最后一条消息本身"：避免历史会话中已被用户回过的旧问题再次触发
+  // "提问"文案（仅在用户没回复时显示）。
+  const lastMessage = displayMessages.value[displayMessages.value.length - 1]
+  if (!lastMessage || lastMessage.role !== 'assistant') return ''
+  const text = lastMessage.content
   const firstOpt = choiceOptions.value[0]
   const idx = text.indexOf(`${firstOpt.index}.`)
   const before = idx > 0 ? text.slice(0, idx).trim() : ''
@@ -883,9 +909,11 @@ const choiceQuestion = computed(() => {
 })
 
 const isProblemList = computed(() => {
-  const last = displayMessages.value.filter((m) => m.role === 'assistant').pop()
-  if (!last) return false
-  const text = last.content.slice(0, 200)
+  // 同理只判断最后一条 assistant 是否以"报错/缺陷"结尾；
+  // 历史会话里这条 assistant 之后还有用户回复时不再被当作问题列表。
+  const lastMessage = displayMessages.value[displayMessages.value.length - 1]
+  if (!lastMessage || lastMessage.role !== 'assistant') return false
+  const text = lastMessage.content.slice(0, 200)
   return /(?:存在以下问题|以下问题|发现以下[问题错误]|错误如下|异常如下|报错|warning|error|bug\s*[:：]|缺陷如下|注意以下)/i.test(
     text
   )
@@ -941,6 +969,17 @@ function resetChoice() {
   choiceStep.value = 'select'
   supplementText.value = ''
 }
+
+// 切换 Session 时把'本轮已取消选择题'的本地标记清掉，避免用户在 A 会话取消后切到
+// B 会话时 B 里的未答问题被错误吞掉。
+// 判据：消息列表第一项 id 变了（reset 整个数组），同会话内追加消息不会触发。
+watch(
+  () => props.messages[0]?.id,
+  () => {
+    resetChoice()
+    choiceDismissed.value = false
+  }
+)
 
 // ===== 技能面板 =====
 // 直接展示 OpenCode /command 返回的 source=skill 项；Agent 是否可调用由 OpenCode 原生 permission.skill 判定。
@@ -2283,7 +2322,7 @@ function onCompositionEnd() {
         <div
           v-if="message.role === 'user'"
           class="figma-chat-user-message"
-          v-memo="[message.content, message.meta, message._skillName]"
+          v-memo="[message.content, message.meta, message._skillName, copySuccessId === message.id + '-copy']"
         >
           <div class="figma-chat-user-meta-row">
             <div v-if="message.meta" class="figma-chat-bubble-meta">
@@ -2301,15 +2340,17 @@ function onCompositionEnd() {
             <div v-else class="figma-chat-bubble-content">
               {{ message.content }}
             </div>
+          </div>
+          <div v-if="!message._skillName" class="figma-chat-user-feedback">
             <button
-              v-if="!message._skillName"
               type="button"
-              class="figma-chat-bubble-copy-btn"
+              class="figma-chat-action-btn"
               title="复制"
               @click="copyText(message.content, message.id + '-copy')"
             >
               <Check v-if="copySuccessId === message.id + '-copy'" :size="12" style="color: #2ecc71" />
               <Copy v-else :size="12" />
+              <span>{{ copySuccessId === message.id + '-copy' ? '已复制' : '复制' }}</span>
             </button>
           </div>
         </div>
@@ -2324,7 +2365,8 @@ function onCompositionEnd() {
             message.parts?.length,
             message.parts?.map(p => ('status' in p ? p.status : '')).join(','),
             message._error,
-            messageExpandedState(message.id)
+            messageExpandedState(message.id),
+            copySuccessId === message.id + '-copy'
           ]"
         >
           <div class="figma-chat-avatar">
@@ -2348,15 +2390,13 @@ function onCompositionEnd() {
                     messageEditCount(message) > 0
                   "
                 >
-                  <!-- 探索 -->
+                  <!-- 探索：read 工具调用列表。直接展开文件路径，让用户能
+                       看到 agent 这一轮读了哪些文件，无需再点 chevron。 -->
                   <div
                     v-if="messageReadCount(message) > 0"
-                    class="figma-chat-file-summary"
+                    class="figma-chat-file-summary figma-chat-file-summary--open"
                   >
-                    <div
-                      class="figma-chat-file-summary-row"
-                      @click="toggleFileExpanded(message.id, 'read')"
-                    >
+                    <div class="figma-chat-file-summary-row">
                       <span>{{
                         running && message.id === lastAssistant?.id
                           ? '正在探索'
@@ -2365,21 +2405,8 @@ function onCompositionEnd() {
                       <span style="color: #a1a5b1"
                         >读取 {{ messageReadCount(message) }} 次</span
                       >
-                      <ChevronRight
-                        v-if="!isFileExpanded(message.id, 'read')"
-                        class="figma-chat-read-chevron"
-                        :size="14"
-                      />
-                      <ChevronDown
-                        v-else
-                        class="figma-chat-read-chevron"
-                        :size="14"
-                      />
                     </div>
-                    <ul
-                      v-if="isFileExpanded(message.id, 'read')"
-                      class="figma-chat-file-list"
-                    >
+                    <ul class="figma-chat-file-list">
                       <li
                         v-for="(op, i) in messageFileOps(message).filter(
                           (o) => o.opType === 'read'
@@ -2439,6 +2466,7 @@ function onCompositionEnd() {
                         <div class="figma-chat-file-item">
                           <pre
                             v-if="op.content"
+                            v-memo="[op.content, op.filePath]"
                             class="figma-chat-write-preview"
                             v-html="
                               renderCodeWithLineNumbers(op.content, op.filePath)
@@ -2488,6 +2516,7 @@ function onCompositionEnd() {
                         <div class="figma-chat-file-item">
                           <pre
                             v-if="op.content"
+                            v-memo="[op.content, op.filePath]"
                             class="figma-chat-write-preview"
                             v-html="
                               renderCodeWithLineNumbers(op.content, op.filePath)
@@ -2565,7 +2594,7 @@ function onCompositionEnd() {
                         <span style="color: #a1a5b1; margin-left: auto; font-size: 10px;">{{ ro.language }}</span>
                       </template>
                       <template v-else>
-                        <FileText :size="14" class="shrink-0" style="color: #a1a5b1" />
+                        <Folder :size="14" class="shrink-0" style="color: #a1a5b1" />
                         <span class="figma-chat-file-name">{{ getFileName(ro.path) }}</span>
                         <span style="color: #a1a5b1; margin-left: 6px">目录 · {{ ro.entries?.length ?? 0 }} 项</span>
                       </template>
@@ -2591,6 +2620,7 @@ function onCompositionEnd() {
                         </div>
                         <div class="figma-chat-file-item">
                           <pre
+                            v-memo="[ro.content, ro.path]"
                             class="figma-chat-write-preview"
                             v-html="
                               renderCodeWithLineNumbers(ro.content, ro.path)
@@ -2633,9 +2663,13 @@ function onCompositionEnd() {
                     </a>
                   </div>
 
-                  <!-- reasoning 折叠块（非运行中，运行中由 thinkingLines 实时展示） -->
+                  <!-- reasoning 折叠块：
+                       - 默认仅在"当前轮的最后一条 assistant 消息"或"part 仍在运行"时展开，
+                         之后轮进来时自动收起；让用户感受到"先输出一段，再缩起来"的活动流。
+                       - 旧轮（lastAssistant 切换走）则保持收起，回看历史更紧凑。 -->
                   <details
                     v-else-if="part.type === 'reasoning' && (part as any).text"
+                    :open="partShouldOpen(message, part)"
                     class="figma-chat-process-detail"
                     :class="{ 'is-running': reasoningIsRunning(message, part) }"
                   >
@@ -2674,10 +2708,12 @@ function onCompositionEnd() {
                     </div>
                   </details>
 
-                  <!-- tool 折叠块（bash/grep/glob 等，含输入/输出/错误） -->
+                  <!-- tool 折叠块（bash/grep/glob 等，含输入/输出/错误）：
+                       - 默认仅在"当前轮的最后一条 assistant 消息"或"part 仍在运行"时展开，
+                         与 reasoning 保持一致的"先输出一段再缩起来"行为。 -->
                   <details
                     v-else-if="part.type === 'tool' && !isUrlFetchTool((part as any).toolName)"
-                    :open="partIsRunning(part)"
+                    :open="partShouldOpen(message, part)"
                     :class="[
                       'figma-chat-process-detail',
                       toolIsFailed(part) && 'figma-chat-process-detail--error',
@@ -2767,15 +2803,6 @@ function onCompositionEnd() {
                 </div>
                 <div v-else-if="message.content.trim()" class="figma-chat-text-bubble">
                   <MarkdownView :source="formatThinking(message.content)" />
-                  <button
-                    type="button"
-                    class="figma-chat-bubble-copy-btn figma-chat-bubble-copy-btn--assistant"
-                    title="复制"
-                    @click="copyText(message.content, message.id + '-copy')"
-                  >
-                    <Check v-if="copySuccessId === message.id + '-copy'" :size="12" style="color: #2ecc71" />
-                    <Copy v-else :size="12" />
-                  </button>
                 </div>
 
                 <!-- Inline Subtasks List -->
@@ -2847,8 +2874,9 @@ function onCompositionEnd() {
                 </div>
               </div>
             </div>
-            <div v-if="canFeedback(message)" class="figma-chat-feedback">
+            <div v-if="canFeedback(message) || (message.content && message.content.trim())" class="figma-chat-feedback">
               <button
+                v-if="canFeedback(message)"
                 type="button"
                 :class="[
                   'figma-chat-feedback-btn',
@@ -2858,10 +2886,11 @@ function onCompositionEnd() {
                 title="满意"
                 @click="submitPositiveFeedback(message)"
               >
-                <ThumbsUp :size="14" />
+                <ThumbsUp :size="12" />
                 <span>满意</span>
               </button>
               <button
+                v-if="canFeedback(message)"
                 type="button"
                 :class="[
                   'figma-chat-feedback-btn',
@@ -2872,8 +2901,19 @@ function onCompositionEnd() {
                 title="不满意"
                 @click="openNegativeFeedback(message)"
               >
-                <ThumbsDown :size="14" />
+                <ThumbsDown :size="12" />
                 <span>不满意</span>
+              </button>
+              <button
+                v-if="message.content && message.content.trim()"
+                type="button"
+                class="figma-chat-action-btn"
+                title="复制内容"
+                @click="copyText(message.content, message.id + '-copy')"
+              >
+                <Check v-if="copySuccessId === message.id + '-copy'" :size="12" style="color: #2ecc71" />
+                <Copy v-else :size="12" />
+                <span>{{ copySuccessId === message.id + '-copy' ? '已复制' : '复制' }}</span>
               </button>
             </div>
           </div>
@@ -4396,11 +4436,8 @@ function onCompositionEnd() {
 
 /* ===== 目录/文件浏览结构样式 ===== */
 .figma-chat-dir-list {
-  background: var(--ta-panel-2, #fafafc);
-  border: 1px solid var(--ta-chat-border, #eef0f3);
-  border-radius: 8px;
-  padding: 6px 10px;
-  margin-top: 6px;
+  padding: 4px 0;
+  margin-top: 4px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -4414,13 +4451,8 @@ function onCompositionEnd() {
   gap: 6px;
   font-size: 12px;
   color: var(--ta-chat-text, #333);
-  padding: 4px 6px;
-  border-radius: 4px;
-  transition: background-color 0.12s;
-}
-
-.figma-chat-dir-item:hover {
-  background: var(--ta-panel-3, #f4f4f5);
+  padding: 2px 0;
+  cursor: default;
 }
 
 .figma-chat-dir-icon {
@@ -4498,7 +4530,8 @@ function onCompositionEnd() {
   margin-top: 6px;
 }
 
-.figma-chat-feedback-btn {
+.figma-chat-feedback-btn,
+.figma-chat-action-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -4515,7 +4548,8 @@ function onCompositionEnd() {
 }
 
 .figma-chat-feedback-btn:hover:not(:disabled),
-.figma-chat-feedback-btn.is-selected {
+.figma-chat-feedback-btn.is-selected,
+.figma-chat-action-btn:hover:not(:disabled) {
   border-color: #8ab4ff;
   background: #eef5ff;
   color: #1f5fbf;
@@ -4593,15 +4627,28 @@ function onCompositionEnd() {
   cursor: pointer;
   user-select: none;
 }
+/* 探索区（read 工具列表）默认展开文件路径，summary 不再承载点击折叠 */
+.figma-chat-file-summary--open {
+  cursor: default;
+}
+.figma-chat-file-summary--open .figma-chat-file-summary-row {
+  cursor: default;
+}
 .figma-chat-file-summary-row {
   display: flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
-  line-height: 20px;
-  color: #000;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ta-chat-text, #333);
   font-weight: 600;
   white-space: nowrap;
+}
+
+.figma-chat-user-feedback {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
 }
 .figma-chat-file-name {
   color: #a1a5b1;
@@ -4863,52 +4910,37 @@ function onCompositionEnd() {
   font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
 }
 
-.figma-chat-stopped {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-left: 30px;
-  font-size: 12px;
-  color: #555;
-  font-weight: 500;
-  align-self: flex-start;
-}
-
-.figma-chat-stopped-icon {
-  flex-shrink: 0;
-  color: #555;
-}
-
-.figma-chat-completed {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding-left: 30px;
-  font-size: 12px;
-  /* color: #18a978; */
-  font-weight: 500;
-  align-self: flex-start;
-}
-
-.figma-chat-completed-icon {
-  flex-shrink: 0;
-  color: #18a978;
-}
-
+.figma-chat-stopped,
+.figma-chat-completed,
 .figma-chat-failed {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding-left: 30px;
+  padding-left: 12px;
+  margin-top: 4px;
+  margin-bottom: 4px;
   font-size: 12px;
-  color: #8c8c8c;
+  color: var(--ta-chat-muted, #888);
   font-weight: 500;
   align-self: flex-start;
 }
 
+.figma-chat-stopped-icon,
+.figma-chat-completed-icon,
 .figma-chat-failed-icon {
   flex-shrink: 0;
-  color: #8c8c8c;
+}
+
+.figma-chat-stopped-icon {
+  color: #eb5e53;
+}
+
+.figma-chat-completed-icon {
+  color: #18a978;
+}
+
+.figma-chat-failed-icon {
+  color: #eb5e53;
 }
 
 /* ---- Task Panel (above input, during running) ---- */
@@ -6908,23 +6940,25 @@ details[open] .figma-chat-process-chevron {
 
 /* ---- Retry Card ---- */
 .figma-chat-retry-card {
-  margin: 10px 10px 10px 30px;
+  margin: 6px 12px;
   background: #fff1f0;
   border: 1px solid #ffa39e;
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 6px;
+  padding: 8px 12px;
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  align-self: flex-start;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  align-self: stretch;
 }
 
 .figma-chat-retry-card-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 13px;
-  color: #d46b08;
+  font-size: 12px;
+  color: #ff4d4f;
+  flex: 1;
 }
 
 .figma-chat-retry-card-icon {
@@ -6940,7 +6974,7 @@ details[open] .figma-chat-process-chevron {
 .figma-chat-retry-card-copy {
   color: #1890ff;
   cursor: pointer;
-  font-size: 12px;
+  font-size: 11px;
   margin-left: 8px;
   user-select: none;
 }
@@ -6950,17 +6984,17 @@ details[open] .figma-chat-process-chevron {
 }
 
 .figma-chat-retry-card-btn {
-  align-self: flex-start;
-  height: 28px;
-  padding: 0 16px;
+  height: 24px;
+  padding: 0 12px;
   background: #ffffff;
   border: 1px solid #d9d9d9;
-  border-radius: 6px;
+  border-radius: 4px;
   color: #595959;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.12s ease;
+  white-space: nowrap;
 }
 
 .figma-chat-retry-card-btn:hover {

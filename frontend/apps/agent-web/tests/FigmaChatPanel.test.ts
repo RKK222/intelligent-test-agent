@@ -672,9 +672,127 @@ describe("FigmaChatPanel", () => {
     expect(details.text()).toContain("思考中");
     expect(details.text()).not.toContain("已完成");
 
-    expect((details.element as HTMLDetailsElement).open).toBe(false);
-    await details.get("summary").trigger("click");
+    // 推理折叠块属于"最近一条 assistant 消息"时默认展开，便于用户感受到活动流。
+    // 用户点击 summary 可以手动收起。
     expect((details.element as HTMLDetailsElement).open).toBe(true);
+    await details.get("summary").trigger("click");
+    expect((details.element as HTMLDetailsElement).open).toBe(false);
+  });
+
+  it("keeps the reasoning and tool details collapsed for older assistant messages", () => {
+    // 历史会话中：第一条 assistant（已答过）应当保持收起；只有最后一条才默认展开。
+    // 中间用一条 user 消息隔开，避免 FigmaChatPanel 的"连续 assistant 合并"把
+    // a1/a2 拼成一条，导致 details 数变成 3 而不是 4。
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "u1", messageId: "u1", role: "user",
+            text: "先读一些文件",
+            createdAt: "2026-06-25T08:59:00.000Z"
+          },
+          {
+            id: "a1", messageId: "a1", role: "assistant",
+            text: "较早的回复",
+            parts: [
+              { partId: "reason-old", type: "reasoning", text: "已结束的思考", status: "completed", durationMs: 1200 },
+              { partId: "tool-old", type: "tool", toolName: "bash", status: "completed", input: { command: "ls" } }
+            ],
+            createdAt: "2026-06-25T09:00:00.000Z"
+          },
+          {
+            id: "u2", messageId: "u2", role: "user",
+            text: "继续",
+            createdAt: "2026-06-25T09:00:30.000Z"
+          },
+          {
+            id: "a2", messageId: "a2", role: "assistant",
+            text: "最近的回复",
+            parts: [
+              { partId: "reason-new", type: "reasoning", text: "新一轮思考", status: "running" },
+              { partId: "tool-new", type: "tool", toolName: "bash", status: "running", input: { command: "pwd" } }
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        running: true,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    const detailsList = wrapper.findAll(".figma-chat-process-detail");
+    // a1：reasoning + bash = 2 details；a2：reasoning + bash = 2 details；共 4
+    expect(detailsList.length).toBe(4);
+    // 顺序：reason-old、tool-old、reason-new、tool-new
+    const [oldReason, oldTool, newReason, newTool] = detailsList;
+    expect((oldReason.element as HTMLDetailsElement).open).toBe(false);
+    expect((oldTool.element as HTMLDetailsElement).open).toBe(false);
+    expect((newReason.element as HTMLDetailsElement).open).toBe(true);
+    expect((newTool.element as HTMLDetailsElement).open).toBe(true);
+  });
+
+  it("does not resurface the choice panel when switching to a historical session where the user has already replied", async () => {
+    // 历史会话最后一条是 user（用户已回答），不应再把旧 assistant 的选项弹出来。
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "u1", messageId: "u1", role: "user",
+            text: "请帮我设计测试用例",
+            createdAt: "2026-06-25T09:00:00.000Z"
+          },
+          {
+            id: "a1", messageId: "a1", role: "assistant",
+            text: "请选择下一步：\n1. 生成测试用例\n2. 分析测试对象",
+            createdAt: "2026-06-25T09:00:30.000Z"
+          },
+          {
+            id: "u2", messageId: "u2", role: "user",
+            text: "1",
+            createdAt: "2026-06-25T09:00:45.000Z"
+          }
+        ],
+        running: false,
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    expect(wrapper.find(".figma-chat-choice-panel").exists()).toBe(false);
+  });
+
+  it("clears a previously dismissed choice when switching to a fresh session", async () => {
+    // 在 A 会话里点过"取消" → 切到 B 会话（最后一条仍是 assistant、未答）时，
+    // B 的待答问题应正常出现，而不是被 A 的取消态吞掉。
+    const initial = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "sa-a1", messageId: "sa-a1", role: "assistant",
+            text: "请选择：\n1. A 路径\n2. B 路径",
+            createdAt: "2026-06-25T09:00:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+    // 触发"取消"，choiceDismissed = true
+    await initial.get(".figma-chat-choice-cancel").trigger("click");
+    expect(initial.find(".figma-chat-choice-panel").exists()).toBe(false);
+
+    // 切到 B 会话：第一条消息 id 变化 → 触发 watcher
+    await initial.setProps({
+      messages: [
+        {
+          id: "sb-a1", messageId: "sb-a1", role: "assistant",
+          text: "请选择：\n1. C 路径\n2. D 路径",
+          createdAt: "2026-06-25T10:00:00.000Z"
+        }
+      ],
+      processStatus: { status: "READY", initializable: false, message: "ready" }
+    } as any);
+
+    expect(initial.find(".figma-chat-choice-panel").exists()).toBe(true);
   });
 
   it("shows the assistant avatar beside the running status", () => {
@@ -688,6 +806,72 @@ describe("FigmaChatPanel", () => {
 
     expect(wrapper.find(".figma-chat-running-assistant .figma-chat-avatar").exists()).toBe(true);
     expect(wrapper.find(".figma-chat-running-assistant .figma-chat-status").exists()).toBe(true);
+  });
+
+  it("shows the read tool file paths directly in the explore section", () => {
+    // 之前 read 工具只显示"读取 X 次"计数，文件路径被藏在 chevron 后面。
+    // 现在应当默认展开文件路径列表，方便用户看到 agent 读了哪些文件。
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1", messageId: "a1", role: "assistant",
+            text: "已分析两个文件",
+            parts: [
+              { partId: "read-1", type: "tool", toolName: "read", status: "completed",
+                input: { filePath: "/tmp/login.test.ts" } },
+              { partId: "read-2", type: "tool", toolName: "read", status: "completed",
+                input: { filePath: "/tmp/login.ts" } }
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    // 探索区里应当直接显示两个文件名，无需点击
+    const exploreSection = wrapper.find(".figma-chat-file-summary--open");
+    expect(exploreSection.exists()).toBe(true);
+    const exploreText = exploreSection.text();
+    expect(exploreText).toContain("login.test.ts");
+    expect(exploreText).toContain("login.ts");
+    // 不应再保留 chevron / 折叠交互
+    expect(exploreSection.find(".figma-chat-read-chevron").exists()).toBe(false);
+  });
+
+  it("uses v-memo on write/edit previews so the syntax highlight is cached across rerenders", async () => {
+    // 验证 v-memo 在重渲染时不会重新调用 renderCodeWithLineNumbers。
+    // 用一个包含较长内容的大文件，渲染两次（一次折叠、一次展开），
+    // 第二次展开后 v-memo 应跳过 re-render。
+    const longContent = Array.from({ length: 80 }, (_, i) => `line ${i + 1}: const x = ${i};`).join("\n");
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1", messageId: "a1", role: "assistant",
+            text: "写入完成",
+            parts: [
+              { partId: "write-1", type: "tool", toolName: "write", status: "completed",
+                input: { filePath: "/tmp/long.ts", content: longContent } }
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    // 折叠时不应渲染 pre
+    expect(wrapper.find(".figma-chat-write-preview").exists()).toBe(false);
+    // 展开后应当渲染（一次性计算 v-memo 缓存）
+    const summaryRow = wrapper.find(".figma-chat-file-summary-row");
+    await summaryRow.trigger("click");
+    expect(wrapper.find(".figma-chat-write-preview").exists()).toBe(true);
+    // 折叠再展开，v-memo 应命中缓存
+    await summaryRow.trigger("click");
+    await summaryRow.trigger("click");
+    expect(wrapper.find(".figma-chat-write-preview").exists()).toBe(true);
   });
 
   it("shows read tool output as structured FilePart, not in main text", () => {
