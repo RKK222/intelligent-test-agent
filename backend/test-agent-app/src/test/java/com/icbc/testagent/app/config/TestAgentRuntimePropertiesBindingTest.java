@@ -191,6 +191,53 @@ class TestAgentRuntimePropertiesBindingTest {
     }
 
     @Test
+    void defaultDeploymentModeIsExternal() {
+        contextRunner.run(context -> {
+            TestAgentRuntimeProperties.Deployment deployment = context
+                    .getBean(TestAgentRuntimeProperties.class)
+                    .getDeployment();
+
+            assertThat(deployment.getMode()).isEqualTo("external");
+            assertThat(deployment.isExternal()).isTrue();
+            assertThat(deployment.isInternal()).isFalse();
+        });
+    }
+
+    @Test
+    void deploymentModeDefaultsToExternalWhenConfiguredValueIsBlank() {
+        contextRunner
+                .withPropertyValues("test-agent.deployment.mode=")
+                .run(context -> {
+                    TestAgentRuntimeProperties.Deployment deployment = context
+                            .getBean(TestAgentRuntimeProperties.class)
+                            .getDeployment();
+
+                    assertThat(deployment.isExternal()).isTrue();
+                    assertThat(deployment.isInternal()).isFalse();
+                });
+    }
+
+    @Test
+    void deploymentModeBindsInternalFromEnvironmentVariable() {
+        profileContextRunner
+                .withPropertyValues(
+                        "spring.profiles.active=prod",
+                        "TEST_AGENT_DB_URL=jdbc:postgresql://prod-postgres.example.internal:5432/test_agent",
+                        "TEST_AGENT_DB_USERNAME=test_agent",
+                        "TEST_AGENT_DB_PASSWORD=secret",
+                        "TEST_AGENT_DEPLOYMENT_MODE=internal")
+                .run(context -> {
+                    TestAgentRuntimeProperties.Deployment deployment = context
+                            .getBean(TestAgentRuntimeProperties.class)
+                            .getDeployment();
+
+                    assertThat(deployment.getMode()).isEqualTo("internal");
+                    assertThat(deployment.isInternal()).isTrue();
+                    assertThat(deployment.isExternal()).isFalse();
+                });
+    }
+
+    @Test
     void prodProfileBindsExternalServicesWithoutBundledDatabaseOrRedis() {
         profileContextRunner
                 .withPropertyValues(

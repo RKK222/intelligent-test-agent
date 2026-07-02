@@ -14,12 +14,20 @@ import org.springframework.stereotype.Component;
 @ConfigurationProperties(prefix = "test-agent")
 public class TestAgentRuntimeProperties {
 
+    private final Deployment deployment = new Deployment();
     private final Security security = new Security();
     private final RateLimit rateLimit = new RateLimit();
     private final Files files = new Files();
     private final Opencode opencode = new Opencode();
     private final Terminal terminal = new Terminal();
     private final GitCloneCache gitCloneCache = new GitCloneCache();
+
+    /**
+     * 返回部署环境配置。
+     */
+    public Deployment getDeployment() {
+        return deployment;
+    }
 
     /**
      * 返回安全配置，包括 API token 和 CORS 来源白名单。
@@ -61,6 +69,44 @@ public class TestAgentRuntimeProperties {
      */
     public GitCloneCache getGitCloneCache() {
         return gitCloneCache;
+    }
+
+    /**
+     * 部署环境配置项。
+     */
+    public static class Deployment {
+        /**
+         * 部署模式：external（外部部署，默认）或 internal（企业内部部署）。
+         */
+        private String mode = "external";
+
+        /**
+         * 返回部署模式。
+         */
+        public String getMode() {
+            return mode;
+        }
+
+        /**
+         * 绑定部署模式。
+         */
+        public void setMode(String mode) {
+            this.mode = mode;
+        }
+
+        /**
+         * 判断是否为企业内部部署模式。
+         */
+        public boolean isInternal() {
+            return "internal".equalsIgnoreCase(mode);
+        }
+
+        /**
+         * 判断是否为外部部署模式。
+         */
+        public boolean isExternal() {
+            return !isInternal();
+        }
     }
 
     /**

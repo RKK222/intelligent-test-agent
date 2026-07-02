@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-02 - 新增部署模式配置项
+
+- Why: 需要一个开关区分系统部署在企业内部还是外部，用于后续按部署环境差异化模型目录来源默认值、功能开关等；默认外部模式，可由环境变量切换为内部模式。
+- What: 在 `application.yml` 的 `test-agent` 节下新增 `deployment.mode`，环境变量 `TEST_AGENT_DEPLOYMENT_MODE`，默认 `external`，可选 `internal`；`TestAgentRuntimeProperties` 新增 `Deployment` 内部类并提供 `isInternal()/isExternal()` 判断方法。
+- How: 复用既有 `@ConfigurationProperties(prefix="test-agent")` + `${ENV:default}` 模式，不新增 API/数据库/事件/Flyway；同步更新 `backend/README.md` 环境变量表和 `docs/deployment/backend.md` 参数表，并在 `TestAgentRuntimePropertiesBindingTest` 补充默认值、空白值和 internal 绑定三个测试。
+- Result: `TestAgentRuntimePropertiesBindingTest` 13 个测试全通过（含新增 3 个），`mvn compile` 成功；本次不涉及 API、事件、数据库结构、鉴权或 generated SDK 变更。
+
 ### 2026-07-02 - 版本库类型改为字典下拉并兼容 standard
 
 - Why: 版本库管理需要把原“是否标准库”勾选升级为“版本库类型”下拉，同时存量工作空间分支规则仍依赖旧 `standard` 字段。

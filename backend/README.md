@@ -112,6 +112,7 @@ cp .env.local.example .env.local
 | `TEST_AGENT_SCHEDULER_ENABLED` | 是否启用定时任务后台扫描，默认 false；启用时使用同一 Redis。 |
 | `TEST_AGENT_OPENCODE_BASE_URL` | 本地脚本判断是否启动 opencode-manager 和端口池的地址，不再作为 Java 固定 opencode node 配置。 |
 | `TEST_AGENT_LINUX_SERVER_ID` | 稳定 Linux 服务器身份，可使用 `server-a`、`prod_01`、`10.1.2.3` 等 1-128 位标识；缺失时使用 Java 主机名。 |
+| `TEST_AGENT_DEPLOYMENT_MODE` | 部署模式：`external`（外部部署，默认）或 `internal`（企业内部部署）。 |
 | `TEST_AGENT_SERVER_ADVERTISED_HOST` | 当前 Java/用户 opencode server 对其它后端和浏览器可访问的主机地址；缺失时复用现有内网 IPv4 探测。 |
 | `TEST_AGENT_MODEL_CATALOG_SOURCE` | 模型目录来源：`opencode` 保持旧代理，`external` 直连 OpenAI-compatible `/models`，`internal` 从数据库读取企业内模型。local 默认 `external`，test/prod 默认 `internal`；历史 `bailian` 值兼容为 `external`。 |
 | `EXTERNAL_API_KEY` | 外部 OpenAI-compatible API Key；变量名可通过 `TEST_AGENT_EXTERNAL_MODEL_API_KEY_ENV` 改为其他环境变量名。 |
