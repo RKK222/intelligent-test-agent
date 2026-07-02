@@ -551,6 +551,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
      * 个人工作区"提交并推送"：将个人 worktree 合并回应用版本分支。
      * @param personalWorkspaceId 个人工作区 ID
      * @param payload.commitMessage 提交说明
+     * @param payload.files 工作区 Git diff 返回的相对路径，只发布前端暂存的文件
      */
     publishPersonalWorkspace: (personalWorkspaceId: string, payload: PublishPersonalWorkspacePayload) =>
       request<PublishPersonalWorkspaceResult>(

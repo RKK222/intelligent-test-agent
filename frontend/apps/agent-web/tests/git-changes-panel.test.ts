@@ -17,6 +17,7 @@ const apiClientMock = vi.hoisted(() => ({
   commitWorkspaceAgentConfig: vi.fn(),
   publishPublicAgentConfig: vi.fn(),
   publishWorkspaceAgentConfig: vi.fn(),
+  publishPersonalWorkspace: vi.fn(),
   connectAgentConfigProgress: vi.fn()
 }));
 
@@ -45,6 +46,13 @@ describe("GitChangesPanel", () => {
     apiClientMock.discardWorkspaceGitFiles.mockResolvedValue(undefined);
     apiClientMock.getPublicAgentDiff.mockResolvedValue({ files: [] });
     apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({ files: [] });
+    apiClientMock.publishPersonalWorkspace.mockResolvedValue({
+      status: "MERGED",
+      personalWorkspaceId: "psw_default",
+      versionId: "awv_1",
+      conflictFiles: [],
+      message: "合并成功"
+    });
     apiClientMock.connectAgentConfigProgress.mockResolvedValue({ close: vi.fn() });
   });
 
@@ -181,5 +189,67 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect(changesRefreshed).toHaveBeenCalledWith({
       paths: ["workspace/02-设计/Test Material.md"]
     }));
+  });
+
+  it("publishes only staged application workspace files", async () => {
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [
+          {
+            path: "src/selected.ts",
+            status: "modified",
+            staged: false,
+            patch: "@@ -1 +1 @@\n-old\n+selected",
+            additions: 1,
+            deletions: 1
+          },
+          {
+            path: "src/unselected.ts",
+            status: "modified",
+            staged: false,
+            patch: "@@ -1 +1 @@\n-old\n+unselected",
+            additions: 1,
+            deletions: 1
+          }
+        ]
+      })
+      .mockResolvedValueOnce({
+        files: [
+          {
+            path: "src/unselected.ts",
+            status: "modified",
+            staged: false,
+            patch: "@@ -1 +1 @@\n-old\n+unselected",
+            additions: 1,
+            deletions: 1
+          }
+        ]
+      });
+
+    const view = render(GitChangesPanel, {
+      props: {
+        workspaceId: "wrk_1234567890abcdef",
+        personalWorkspaceId: "psw_default",
+        apiBaseUrl: "http://api",
+        canWrite: true
+      },
+      global: {
+        plugins: [createPinia()]
+      }
+    });
+
+    expect(await view.findByText("src/selected.ts")).toBeTruthy();
+    expect(await view.findByText("src/unselected.ts")).toBeTruthy();
+
+    await fireEvent.click(view.getAllByTitle("暂存文件")[0]);
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: selected only");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", {
+      commitMessage: "fix: selected only",
+      files: ["src/selected.ts"]
+    }));
+    await waitFor(() => expect(view.queryByText("src/selected.ts")).toBeNull());
+    expect(await view.findByText("src/unselected.ts")).toBeTruthy();
   });
 });

@@ -209,6 +209,7 @@ public class ManagedWorkspaceController {
         return ok(exchange, service.publishPersonalWorkspace(
                 personalWorkspaceId,
                 request.commitMessage(),
+                request.files(),
                 userId(exchange),
                 RuntimeApiSupport.traceId(exchange)));
     }

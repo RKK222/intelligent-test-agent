@@ -8,6 +8,13 @@
 - What: `POST /api/internal/agent/{agentId}/processes/me/initialize` 增加可选 `operationId`，新增只读 `GET /initialize-operations/{operationId}`；后端把校验、确认分配、选择容器、准备参数、进程启动、记录候选进程、检查进程、健康检查、写入绑定和完成/失败写入 `opencode_process_start_operations`，前端 `AgentWorkbench` 生成 `opi_...` 并用 `OpencodeProcessStartupDialog` 每 500ms 轮询展示。
 - How: Domain 增加 operation 模型/步骤枚举/repository 端口，persistence 用 Flyway + MyBatis XML mapper 落表，runtime 在 `UserOpencodeProcessAssignmentService` 和 `OpencodeProcessStartupService` 中穿透可选进度记录器；API GET 只读 DB、不触发 manager health/start、不写 RunEvent。前端只改工作台层状态，`FigmaChatPanel` 继续只 emit 初始化事件。
 - Result: runtime/API/persistence 定向测试、backend-api/agent-web typecheck 和 Vitest 通过；计划中的后端聚合 `mvn -pl test-agent-opencode-runtime,test-agent-api,test-agent-persistence -am test` 在 `test-agent-persistence` 既有全量测试处失败（H2 `ON CONFLICT`、`usr_test_dev` fixture 外键、默认/loopback seed 断言），runtime 和 API 模块在该 reactor 中已通过。
+### 2026-07-02 - 修复个人 worktree 发布误提交未暂存文件
+
+- Why: 个人 worktree 左侧 Git 面板的“暂存”只是前端选择状态，后端发布仍执行 `git add --all`；用户只选择/保留一个文件发布时，其余本地 diff 也被提交并从个人 worktree 消失，且发布链路失败时远端特性分支可能没有收到内容。
+- What: 个人 worktree publish 请求体新增 `files`，前端点击“提交并推送”只传应用工作空间已暂存文件路径；后端将这些工作区相对路径映射为仓库相对路径后调用 `stageFiles`，不再 `stageAll`。同时保留本地合并语义：先把最新特性分支合入个人 worktree，冲突留在个人 worktree；无冲突后把个人分支合入应用版本副本并只 push 特性分支。
+- How: 不回退个人 worktree 创建重构，不改分支命名、recent 记录或旧路径自愈；同步 workspace-management README、agent-web README 和 HTTP API 文档，补充后端/前端回归测试覆盖“只发布前端暂存文件”。
+- Result: `mvn -pl test-agent-workspace-management -am -Dtest=ManagedWorkspaceApplicationServiceTest -Dsurefire.failIfNoSpecifiedTests=false test`、`mvn -pl test-agent-api -am -Dtest=ManagedWorkspaceControllerTest -Dsurefire.failIfNoSpecifiedTests=false test`、`mvn -pl test-agent-workspace-management -am test`、`corepack pnpm@10.25.0 --dir frontend test -- git-changes-panel.test.ts`、`corepack pnpm@10.25.0 --dir frontend --filter @test-agent/agent-web typecheck`、`corepack pnpm@10.25.0 --dir frontend --filter @test-agent/backend-api typecheck` 和 `git diff --check` 通过。
+
 ### 2026-07-02 - 优化前端流式 SSE 渲染性能与二级去重
 
 - Why: 前端流式打字输出时偶尔存在视觉抖动和微小卡顿；高频 delta 触发时，消息 reducer 存在频繁的多轮数组回溯查找，且每次数组浅拷贝会造成大量 DOM 气泡和 Card 组件的冗余重绘；此外，断线重连或 live-replay 竞态时，相同的 eventId 可能会被重复消费。

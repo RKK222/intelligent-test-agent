@@ -403,7 +403,10 @@ async function handleCommit(push = false) {
         return;
       }
       progressMessage.value = "正在合并推送到应用版本分支...";
-      const result = await api.publishPersonalWorkspace(props.personalWorkspaceId, { commitMessage: msg });
+      const result = await api.publishPersonalWorkspace(props.personalWorkspaceId, {
+        commitMessage: msg,
+        files: workspaceStaged.value.map((file) => file.path)
+      });
       if (result.status === "CONFLICT") {
         const conflictList = result.conflictFiles.length > 0
           ? result.conflictFiles.join("、")

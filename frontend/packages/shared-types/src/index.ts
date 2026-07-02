@@ -1562,6 +1562,7 @@ export type SyncWorkspacePayload = {
 
 export type PublishPersonalWorkspacePayload = {
   commitMessage: string;
+  files: string[];
 };
 
 /** 个人工作区发布结果 */

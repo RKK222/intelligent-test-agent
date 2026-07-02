@@ -855,6 +855,7 @@ class ManagedWorkspaceApplicationServiceTest {
         ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
                 personal.personalWorkspaceId(),
                 "fix: 修复缺陷",
+                List.of("README.md"),
                 new UserId("usr_1"),
                 "trace_publish");
 
@@ -863,13 +864,13 @@ class ManagedWorkspaceApplicationServiceTest {
 
         assertThat(result.status()).isEqualTo("MERGED");
         assertThat(result.versionId()).isEqualTo(version.versionId());
-        // 合并方向：在应用版本副本上把个人分支 merge 进特性分支。
+        // 合并方向：先在个人 worktree 上合入最新特性分支，再在应用版本副本上把个人分支 merge 进特性分支。
         assertThat(git.mergeCalls)
                 .extracting(MergeCall::branch)
-                .containsExactly(personal.personalWorkspaceBranch());
+                .containsExactly(version.branch(), personal.personalWorkspaceBranch());
         assertThat(git.mergeCalls)
                 .extracting(MergeCall::repoRoot)
-                .containsExactly(applicationRepoRoot);
+                .containsExactly(personalRepoRoot, applicationRepoRoot);
         assertThat(git.mergedBranch).isEqualTo(personal.personalWorkspaceBranch());
         assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
         // 不再推送个人 worktree 分支，只推送应用版本特性分支；应用分支推送发生在应用版本副本仓库
@@ -881,8 +882,10 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.pushedRepoRoot).isEqualTo(applicationRepoRoot);
         // head commit 取自应用版本副本而非个人 worktree
         assertThat(git.headCommitRepoRoot).isEqualTo(applicationRepoRoot);
-        // 个人 worktree 只负责 stage + commit
-        assertThat(git.stagedRepoRoot).isEqualTo(personalRepoRoot);
+        // 个人 worktree 只 stage 用户在前端暂存的文件，不能 git add --all 把其它 diff 一起提交。
+        assertThat(git.stagedRepoRoot).isNull();
+        assertThat(git.stagedFilesRepoRoot).isEqualTo(personalRepoRoot);
+        assertThat(git.stagedFiles).containsExactly("F-GCMS/workspace/README.md");
         assertThat(git.committedStagedRepoRoot).isEqualTo(personalRepoRoot);
         assertThat(git.committedStagedMessage).isEqualTo("fix: 修复缺陷");
         // 版本 targetCommitHash 和副本 commit 已更新到合并后的 commit
@@ -943,6 +946,7 @@ class ManagedWorkspaceApplicationServiceTest {
         ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
                 personal.personalWorkspaceId(),
                 "fix: 修复旧路径",
+                List.of("README.md"),
                 new UserId("usr_1"),
                 "trace_publish");
 
@@ -983,6 +987,7 @@ class ManagedWorkspaceApplicationServiceTest {
         ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
                 personal.personalWorkspaceId(),
                 "fix: retry publish",
+                List.of("README.md"),
                 new UserId("usr_1"),
                 "trace_publish");
 
@@ -993,7 +998,7 @@ class ManagedWorkspaceApplicationServiceTest {
                 .containsExactly(version.branch());
         assertThat(git.mergeCalls)
                 .extracting(MergeCall::branch)
-                .containsExactly(personal.personalWorkspaceBranch());
+                .containsExactly(version.branch(), personal.personalWorkspaceBranch());
         assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_merged_retry");
     }
 
@@ -1024,18 +1029,18 @@ class ManagedWorkspaceApplicationServiceTest {
         ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
                 personal.personalWorkspaceId(),
                 "fix: 修复缺陷",
+                List.of("README.md"),
                 new UserId("usr_1"),
                 "trace_publish");
 
-        Path applicationRepoRoot = Path.of(managed.replicas.get(0).repoRootPath());
+        Path personalRepoRoot = Path.of(managed.personals.get(0).repoRootPath());
 
         assertThat(result.status()).isEqualTo("CONFLICT");
         assertThat(result.conflictFiles()).containsExactly("src/Main.java", "README.md");
-        // 合并方向仍应是个人分支 merge 进应用版本特性分支
-        assertThat(git.mergedBranch).isEqualTo(personal.personalWorkspaceBranch());
-        assertThat(git.mergedBranchRepoRoot).isEqualTo(applicationRepoRoot);
-        // 冲突后必须终止应用版本副本上的 merge，避免副本长期停留在冲突状态。
-        assertThat(git.abortedMergeRepoRoot).isEqualTo(applicationRepoRoot);
+        // 冲突留在当前个人 worktree，用户才能在编辑器中解决。
+        assertThat(git.mergedBranch).isEqualTo(version.branch());
+        assertThat(git.mergedBranchRepoRoot).isEqualTo(personalRepoRoot);
+        assertThat(git.abortedMergeRepoRoot).isNull();
         // 冲突时不应推送
         assertThat(git.pushedBranch).isNull();
         // 版本 commit 不应更新
@@ -1069,6 +1074,7 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThatThrownBy(() -> service.publishPersonalWorkspace(
                 personal.personalWorkspaceId(),
                 "fix: 修复缺陷",
+                List.of("README.md"),
                 new UserId("usr_1"),
                 "trace_publish"))
                 .isInstanceOfSatisfying(PlatformException.class, exception ->
@@ -1214,6 +1220,8 @@ class ManagedWorkspaceApplicationServiceTest {
         private String currentBranchValue;
         // 个人 worktree 推送（合并回应用版本特性分支）链路记录
         private Path stagedRepoRoot;
+        private Path stagedFilesRepoRoot;
+        private List<String> stagedFiles = List.of();
         private Path committedStagedRepoRoot;
         private String committedStagedMessage;
         private Path fetchedRepoRoot;
@@ -1324,7 +1332,16 @@ class ManagedWorkspaceApplicationServiceTest {
         }
 
         @Override
+        public void stageFiles(Path repoRoot, List<String> files, String privateKey) {
+            this.stagedFilesRepoRoot = repoRoot;
+            this.stagedFiles = List.copyOf(files);
+        }
+
+        @Override
         public void commitStaged(Path repoRoot, String message, String privateKey) {
+            if (nextStatusPorcelain.isBlank()) {
+                throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "nothing to commit", Map.of());
+            }
             this.committedStagedRepoRoot = repoRoot;
             this.committedStagedMessage = message;
         }
