@@ -487,6 +487,38 @@ function partShouldOpen(message: ChatMessage, part: MessagePart): boolean {
   return partIsRunning(part) || isInLastAssistantMessage(message)
 }
 
+// 记录工具 part 的展开/收起状态（由用户手动点击 summary 触发切换）
+const manualToolStates = ref<Record<string, boolean>>({})
+
+function getToolPartKey(message: ChatMessage, part: MessagePart): string {
+  return `${message.id}:${part.partId || `${part.type}-${(part as any).toolName || ''}`}`
+}
+
+function toggleToolOpen(message: ChatMessage, part: MessagePart) {
+  const key = getToolPartKey(message, part)
+  manualToolStates.value[key] = !isToolOpen(message, part)
+}
+
+function isToolOpen(message: ChatMessage, part: MessagePart): boolean {
+  const key = getToolPartKey(message, part)
+  const manualVal = manualToolStates.value[key]
+  if (manualVal !== undefined) {
+    return manualVal
+  }
+  // bash 工具默认收起，其他工具或运行中状态默认展开
+  if (part.type === 'tool' && (part as any).toolName === 'bash') {
+    return partIsRunning(part)
+  }
+  return partShouldOpen(message, part)
+}
+
+function messageToolsExpandedState(msgId: string): string {
+  return Object.entries(manualToolStates.value)
+    .filter(([k, v]) => k.startsWith(msgId + ':') && v)
+    .map(([k]) => k)
+    .join(',')
+}
+
 /** 从 tool input 生成一行摘要文字，显示在 tool 折叠块标题行 */
 function summaryFromToolInput(toolName: string, input: Record<string, unknown> | undefined): string {
   if (!input) return ''
@@ -2381,6 +2413,7 @@ function onCompositionEnd() {
             message.parts?.map(p => ('status' in p ? p.status : '')).join(','),
             message._error,
             messageExpandedState(message.id),
+            messageToolsExpandedState(message.id),
             copySuccessId === message.id + '-copy'
           ]"
         >
@@ -2740,17 +2773,17 @@ function onCompositionEnd() {
 
                   <!-- tool 折叠块（bash/grep/glob 等，含输入/输出/错误）：
                        - 默认仅在"当前轮的最后一条 assistant 消息"或"part 仍在运行"时展开，
-                         与 reasoning 保持一致的"先输出一段再缩起来"行为。 -->
+                         与 reasoning 保持一致的"先输出一段再缩起来"行为；但 bash 命令默认收起。 -->
                   <details
                     v-else-if="part.type === 'tool' && !isUrlFetchTool((part as any).toolName)"
-                    :open="partShouldOpen(message, part)"
+                    :open="isToolOpen(message, part)"
                     :class="[
                       'figma-chat-process-detail',
                       toolIsFailed(part) && 'figma-chat-process-detail--error',
                       partIsRunning(part) && 'is-running'
                     ]"
                   >
-                    <summary class="figma-chat-process-summary" @click.prevent>
+                    <summary class="figma-chat-process-summary" @click.prevent="toggleToolOpen(message, part)">
                       <span
                         :class="[
                           'figma-chat-process-dot',

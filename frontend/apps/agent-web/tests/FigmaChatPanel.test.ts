@@ -1047,4 +1047,50 @@ describe("FigmaChatPanel", () => {
     // 错误在 tool 折叠块中显示
     expect(allText).toContain("read");
   });
+
+  it("collapses completed bash tool outputs by default and expands them on click", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "a1", messageId: "a1", role: "assistant",
+            text: "Hello",
+            parts: [
+              { partId: "bash-1", type: "tool", toolName: "bash", status: "completed", output: "bash output content", input: { command: "echo test" } },
+              { partId: "grep-1", type: "tool", toolName: "grep", status: "completed", output: "grep output content", input: { query: "search" } }
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    const details = wrapper.findAll("details");
+    expect(details).toHaveLength(2);
+
+    const bashDetails = details.find(d => d.text().includes("bash"));
+    const grepDetails = details.find(d => d.text().includes("grep"));
+
+    expect(bashDetails).toBeTruthy();
+    expect(grepDetails).toBeTruthy();
+
+    // Bash should be collapsed by default
+    expect(bashDetails?.element.getAttribute("open")).toBeNull();
+
+    // Grep (in the last assistant message) should be expanded by default
+    expect(grepDetails?.element.getAttribute("open")).not.toBeNull();
+
+    // Click the bash details key/summary to expand
+    const bashSummary = bashDetails?.get("summary");
+    await bashSummary?.trigger("click");
+
+    // Bash should now be expanded
+    expect(bashDetails?.element.getAttribute("open")).not.toBeNull();
+
+    // Click the bash details key/summary again to collapse
+    await bashSummary?.trigger("click");
+    expect(bashDetails?.element.getAttribute("open")).toBeNull();
+  });
 });

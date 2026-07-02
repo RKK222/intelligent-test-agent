@@ -2,6 +2,20 @@
 
 ## Entries
 
+### 2026-07-02 - 对话面板 bash 工具输出默认收起与手动折叠支持
+
+- Why: 智能体执行 bash 命令的输出可能很长，默认完全展开会占用大量聊天区域，不利于用户快速浏览上下文。用户希望 bash 输出默认收起，并通过点击工具头部/key 展开或折叠。
+- What: 将 bash 工具输出的详情块（details）默认状态设为收起（未运行状态下），同时保留其他工具或运行中状态默认展开的逻辑；允许用户点击任何工具详情头部（summary）进行展开或折叠。
+- How: 
+  - 修改 `FigmaChatPanel.vue`：
+    - 新增 `manualToolStates` 响应式对象，记录用户手动展开/收起的状态，键为 `message.id` Scoped 的工具标识。
+    - 定义 `getToolPartKey`、`toggleToolOpen`、`isToolOpen` 和 `messageToolsExpandedState` 辅助函数。
+    - 在 `<details>` tag 中将 `:open="isToolOpen(message, part)"` 替换为 `:open="isToolOpen(message, part)"`，并在 `<summary>` 上绑定 `@click.prevent="toggleToolOpen(message, part)"`。
+    - 将 `messageToolsExpandedState(message.id)` 加入助手消息的 `v-memo` 依赖中，以确保点击时精准触发 Vue 对对应消息的重绘。
+  - 修改 `FigmaChatPanel.test.ts`：
+    - 新增测试用例 `collapses completed bash tool outputs by default and expands them on click` 验证 bash 默认折叠和点击切换行为。
+- Result: 前端全量单测（241个用例）均通过，`corepack pnpm build` 和 `typecheck` 验证成功。未修改任何后端 API、数据库或环境配置文件。
+
 ### 2026-07-02 - 版本库新增校验和内部模式字段控制
 
 - Why: 内部部署模式下，版本库英文名称应自动根据 Git 地址生成且不允许人工编辑。同时，新建版本库表单中的版本库类型应默认为空且必选，版本库名称也应当是必输项。
