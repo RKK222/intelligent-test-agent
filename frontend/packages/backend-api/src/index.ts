@@ -127,6 +127,27 @@ export type BackendApiClientOptions = {
   webSocketFactory?: WorkspaceWebSocketFactory;
   traceIdFactory?: () => string;
   requestTimeoutMs?: number;
+  rawExchangeObserver?: (exchange: RawHttpExchange) => void;
+};
+
+export type RawHttpExchangePhase = "response" | "error" | "timeout";
+
+export type RawHttpExchange = {
+  id: string;
+  method: string;
+  url: string;
+  path: string;
+  traceId: string;
+  requestHeaders: Record<string, string>;
+  requestBody?: string;
+  responseStatus?: number;
+  responseHeaders?: Record<string, string>;
+  responseText?: string;
+  errorMessage?: string;
+  phase: RawHttpExchangePhase;
+  startedAt: string;
+  endedAt: string;
+  durationMs: number;
 };
 
 export class BackendApiError extends Error {
@@ -232,10 +253,35 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     if (init.signal?.aborted) {
       controller.abort();
     }
+    const method = (init.method ?? "GET").toUpperCase();
+    const url = `${requestBaseUrl}${path}`;
+    const startedAtMs = Date.now();
+    const startedAt = new Date(startedAtMs).toISOString();
+    const rawBase = {
+      id: defaultTraceId(),
+      method,
+      url,
+      path: pathFromUrl(url),
+      traceId,
+      requestHeaders: safeRequestHeaders(headers),
+      requestBody: bodyToRawText(init.body),
+      startedAt
+    };
+    let rawExchangeReported = false;
     try {
       const { timeoutMs: _, ...restInit } = init;
-      const response = await fetcher(`${requestBaseUrl}${path}`, { ...restInit, headers, signal: controller.signal });
-      const body = await readJson(response);
+      const response = await fetcher(url, { ...restInit, headers, signal: controller.signal });
+      const responseText = await response.text();
+      rawExchangeReported = true;
+      notifyRawExchange(options.rawExchangeObserver, {
+        ...rawBase,
+        responseStatus: response.status,
+        responseHeaders: responseHeadersToRecord(response.headers),
+        responseText,
+        phase: "response",
+        ...rawTiming(startedAtMs)
+      });
+      const body = readJsonFromText(response, responseText);
       if (!response.ok || !isSuccessResponse<T>(body)) {
         const error = new BackendApiError(response.status, normalizeFailure(body, traceId, response.status));
         // 401 未认证：触发全局跳转到登录页
@@ -249,6 +295,14 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       }
       return body.data;
     } catch (error) {
+      if (!rawExchangeReported) {
+        notifyRawExchange(options.rawExchangeObserver, {
+          ...rawBase,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          phase: timedOut ? "timeout" : "error",
+          ...rawTiming(startedAtMs)
+        });
+      }
       if (timedOut) {
         throw new BackendApiError(408, {
           success: false,
@@ -1383,8 +1437,7 @@ function isSuccessResponse<T>(body: unknown): body is ApiResponse<T> & { success
   return typeof body === "object" && body !== null && (body as { success?: unknown }).success === true;
 }
 
-async function readJson(response: Response): Promise<unknown> {
-  const text = await response.text();
+function readJsonFromText(response: Response, text: string): unknown {
   if (!text) {
     return { success: true, data: undefined, traceId: response.headers.get("X-Trace-Id") ?? "trace_unknown" };
   }
@@ -1392,6 +1445,65 @@ async function readJson(response: Response): Promise<unknown> {
     return JSON.parse(text) as unknown;
   } catch {
     return { success: false, code: "BAD_RESPONSE", message: text, traceId: response.headers.get("X-Trace-Id") ?? "trace_unknown" };
+  }
+}
+
+async function readJson(response: Response): Promise<unknown> {
+  return readJsonFromText(response, await response.text());
+}
+
+function safeRequestHeaders(headers: Headers): Record<string, string> {
+  const allowList = new Set(["accept", "content-type", "x-trace-id"]);
+  const result: Record<string, string> = {};
+  headers.forEach((value, key) => {
+    const normalized = key.toLowerCase();
+    if (allowList.has(normalized)) {
+      result[normalized] = value;
+    }
+  });
+  return result;
+}
+
+function responseHeadersToRecord(headers: Headers): Record<string, string> {
+  const result: Record<string, string> = {};
+  headers.forEach((value, key) => {
+    result[key.toLowerCase()] = value;
+  });
+  return result;
+}
+
+function bodyToRawText(body: BodyInit | null | undefined): string | undefined {
+  if (typeof body === "string") {
+    return body;
+  }
+  if (body instanceof URLSearchParams) {
+    return body.toString();
+  }
+  return undefined;
+}
+
+function pathFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.pathname}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
+
+function rawTiming(startedAtMs: number): Pick<RawHttpExchange, "endedAt" | "durationMs"> {
+  const endedAtMs = Date.now();
+  return {
+    endedAt: new Date(endedAtMs).toISOString(),
+    durationMs: Math.max(0, endedAtMs - startedAtMs)
+  };
+}
+
+function notifyRawExchange(observer: BackendApiClientOptions["rawExchangeObserver"], exchange: RawHttpExchange) {
+  try {
+    observer?.(exchange);
+  } catch {
+    // 调试观察器不应影响业务请求。
   }
 }
 

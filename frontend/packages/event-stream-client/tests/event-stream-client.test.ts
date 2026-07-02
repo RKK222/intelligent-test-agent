@@ -22,8 +22,13 @@ class FakeEventSource implements EventSourceLike {
     this.closed = true;
   }
 
-  emit(type: string, data: unknown) {
-    const event = new MessageEvent(type, { data: JSON.stringify(data) });
+  emit(type: string, data: unknown, lastEventId = "") {
+    const event = new MessageEvent(type, { data: JSON.stringify(data), lastEventId });
+    this.listeners.get(type)?.forEach((listener) => listener(event));
+  }
+
+  emitRaw(type: string, data: string, lastEventId = "") {
+    const event = new MessageEvent(type, { data, lastEventId });
     this.listeners.get(type)?.forEach((listener) => listener(event));
   }
 }
@@ -122,6 +127,42 @@ describe("event-stream-client", () => {
     });
 
     expect(openedUrl).toBe("http://api/api/internal/agent/opencode/runs/run_1/events?lastEventId=4");
+    expect(received).toEqual(["message.part.delta"]);
+  });
+
+  it("reports raw SSE message data before attempting to parse run events", () => {
+    const source = new FakeEventSource();
+    const rawMessages: Array<Record<string, string | undefined>> = [];
+    const received: string[] = [];
+
+    subscribeRunEvents({
+      baseUrl: "http://api",
+      runId: "run_1",
+      eventSourceFactory: () => source,
+      onRawMessage: (message: Record<string, string | undefined>) => rawMessages.push(message),
+      onEvent: (event) => received.push(event.type)
+    } as Parameters<typeof subscribeRunEvents>[0] & {
+      onRawMessage: (message: Record<string, string | undefined>) => void;
+    });
+
+    source.emitRaw("message.part.delta", "{bad json", "evt_raw_bad");
+    source.emit("message.part.delta", {
+      eventId: "evt_1",
+      runId: "run_1",
+      seq: 1,
+      type: "message.part.delta",
+      payload: { delta: "hello" }
+    }, "evt_raw_good");
+
+    expect(rawMessages).toHaveLength(2);
+    expect(rawMessages[0]).toMatchObject({
+      runId: "run_1",
+      eventName: "message.part.delta",
+      data: "{bad json",
+      lastEventId: "evt_raw_bad"
+    });
+    expect(rawMessages[0].receivedAt).toEqual(expect.any(String));
+    expect(rawMessages[1].data).toContain('"delta":"hello"');
     expect(received).toEqual(["message.part.delta"]);
   });
 

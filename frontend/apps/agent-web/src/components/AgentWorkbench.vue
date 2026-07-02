@@ -3,10 +3,10 @@ import { computed, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, sha
 import { useRouter } from "vue-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
-import { BackendApiError, createBackendApiClient } from "@test-agent/backend-api";
+import { BackendApiError, createBackendApiClient, type RawHttpExchange } from "@test-agent/backend-api";
 import { DiffViewer, parseUnifiedPatch } from "@test-agent/diff-viewer";
 import { CodeEditor, languageFromPath, type EditorSelectionContext } from "@test-agent/editor";
-import { subscribeRunEvents } from "@test-agent/event-stream-client";
+import { subscribeRunEvents, type RunEventRawMessage } from "@test-agent/event-stream-client";
 import { Code2, MessageSquare, Monitor } from "lucide-vue-next";
 import { Setting as ElSetting } from "@element-plus/icons-vue";
 import type {
@@ -79,7 +79,7 @@ import {
 } from "./workbench-utils";
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
-const api = createBackendApiClient({ baseUrl: apiBaseUrl });
+const api = createBackendApiClient({ baseUrl: apiBaseUrl, rawExchangeObserver: observeRawHttpExchange });
 provide("api", api);
 const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
@@ -90,6 +90,26 @@ const OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS = 30000;
 const SELECTED_PROVIDER_STORAGE_KEY = "ta_selected_provider";
 const SELECTED_MODEL_STORAGE_KEY = "ta_selected_model";
 const ACTIVE_RUN_PROBE_INTERVAL_MS = 1500;
+const RAW_OUTPUT_MAX_ENTRIES_PER_SESSION = 1000;
+const RAW_OUTPUT_BODY_LIMIT = 200_000;
+
+type RawOutputKind = "request" | "response" | "sse";
+
+type RawOutputEntry = {
+  id: string;
+  kind: RawOutputKind;
+  title: string;
+  method?: string;
+  path?: string;
+  status?: number;
+  eventName?: string;
+  traceId?: string;
+  runId?: string;
+  contentType?: string;
+  body: string;
+  truncated?: boolean;
+  occurredAt: string;
+};
 
 const isSuperAdmin = computed(() => authStore.currentUser?.roles?.includes("SUPER_ADMIN") === true);
 
@@ -137,6 +157,8 @@ const searchResults = ref<FileSearchResult[]>([]);
 const searchLoading = ref(false);
 const session = shallowRef<Session | null>(null);
 const run = shallowRef<Run | null>(null);
+const rawEntriesBySessionId = ref<Record<string, RawOutputEntry[]>>({});
+const rawRunSessionMap = ref<Record<string, string>>({});
 const lastPrompt = ref("");
 const selectedAgent = ref("");
 const storedRuntimePreference = readStoredRuntimePreference();
@@ -186,6 +208,10 @@ let selectingAppId: string | undefined;
 let appSelectionSeq = 0;
 const readonlySessionReason = ref("");
 const chatTitle = computed(() => session.value?.title ?? "生成测试案例");
+const currentRawOutputEntries = computed(() => {
+  const sessionId = session.value?.sessionId;
+  return sessionId ? rawEntriesBySessionId.value[sessionId] ?? [] : [];
+});
 // 任务消耗展示：duration 取 chatStartedAt 实时计算；tokens 从助手消息的 step-finish part
 // 累计（opencode 每轮 step 结束会上报 tokens.total）；thought for 累计 reasoning part 的
 // durationMs。Run 结束后保留最后值继续展示。Run 切换时清零。
@@ -599,6 +625,209 @@ function stopActiveRunProbe() {
   }
 }
 
+function observeRawHttpExchange(exchange: RawHttpExchange) {
+  if (!isConversationRawExchange(exchange)) {
+    return;
+  }
+  const sessionId = extractRawExchangeSessionId(exchange);
+  if (!sessionId) {
+    return;
+  }
+  const requestBody = truncateRawOutputBody(exchange.requestBody ?? "");
+  appendRawOutputEntry(sessionId, {
+    id: nextRawOutputId("req"),
+    kind: "request",
+    title: `${exchange.method} ${exchange.path}`,
+    method: exchange.method,
+    path: exchange.path,
+    traceId: exchange.traceId,
+    body: requestBody.body,
+    truncated: requestBody.truncated,
+    occurredAt: exchange.startedAt
+  });
+
+  const responseBody = truncateRawOutputBody(exchange.responseText ?? exchange.errorMessage ?? "");
+  appendRawOutputEntry(sessionId, {
+    id: nextRawOutputId("res"),
+    kind: "response",
+    title: `${exchange.responseStatus ?? exchange.phase.toUpperCase()} ${exchange.method} ${exchange.path}`,
+    method: exchange.method,
+    path: exchange.path,
+    status: exchange.responseStatus,
+    traceId: exchange.responseHeaders?.["x-trace-id"] ?? exchange.traceId,
+    contentType: exchange.responseHeaders?.["content-type"],
+    body: responseBody.body,
+    truncated: responseBody.truncated,
+    occurredAt: exchange.endedAt
+  });
+}
+
+function observeRawRunEventMessage(message: RunEventRawMessage, fallbackSessionId?: string) {
+  const parsed = parseRawJsonObject(message.data);
+  const traceId = rawText(parsed?.traceId);
+  const sessionId = rawRunSessionMap.value[message.runId] ?? fallbackSessionId ?? session.value?.sessionId;
+  if (!sessionId) {
+    return;
+  }
+  const body = truncateRawOutputBody(message.data);
+  appendRawOutputEntry(sessionId, {
+    id: nextRawOutputId("sse"),
+    kind: "sse",
+    title: `${message.eventName}${message.lastEventId ? ` #${message.lastEventId}` : ""}`,
+    eventName: message.eventName,
+    runId: message.runId,
+    traceId,
+    body: body.body,
+    truncated: body.truncated,
+    occurredAt: message.receivedAt
+  });
+}
+
+let rawOutputSeq = 0;
+
+function nextRawOutputId(prefix: string) {
+  rawOutputSeq += 1;
+  return `${prefix}_${Date.now()}_${rawOutputSeq}`;
+}
+
+function appendRawOutputEntry(sessionId: string, entry: RawOutputEntry) {
+  const current = rawEntriesBySessionId.value[sessionId] ?? [];
+  rawEntriesBySessionId.value = {
+    ...rawEntriesBySessionId.value,
+    [sessionId]: [...current, entry].slice(-RAW_OUTPUT_MAX_ENTRIES_PER_SESSION)
+  };
+}
+
+function clearCurrentRawOutput() {
+  const sessionId = session.value?.sessionId;
+  if (!sessionId) {
+    return;
+  }
+  rawEntriesBySessionId.value = {
+    ...rawEntriesBySessionId.value,
+    [sessionId]: []
+  };
+}
+
+function rememberRunSession(value: Run | null | undefined) {
+  if (!value?.runId || !value.sessionId) {
+    return;
+  }
+  rawRunSessionMap.value = {
+    ...rawRunSessionMap.value,
+    [value.runId]: value.sessionId
+  };
+}
+
+function truncateRawOutputBody(body: string): { body: string; truncated?: boolean } {
+  if (body.length <= RAW_OUTPUT_BODY_LIMIT) {
+    return { body };
+  }
+  return {
+    body: `${body.slice(0, RAW_OUTPUT_BODY_LIMIT)}\n...[已截断，原始长度 ${body.length} 字符]`,
+    truncated: true
+  };
+}
+
+function isConversationRawExchange(exchange: RawHttpExchange) {
+  const path = rawPathWithoutQuery(exchange.path);
+  if (exchange.method === "POST" && path === "/api/sessions") {
+    return true;
+  }
+  if (/^\/api\/sessions\/[^/]+\/messages$/.test(path)) {
+    return true;
+  }
+  if (/^\/api\/sessions\/[^/]+\/active-run$/.test(path)) {
+    return true;
+  }
+  if (exchange.method === "POST" && /^\/api\/internal\/agent\/[^/]+\/runs$/.test(path)) {
+    return true;
+  }
+  if (exchange.method === "POST" && /^\/api\/internal\/agent\/[^/]+\/runs\/[^/]+\/cancel$/.test(path)) {
+    return true;
+  }
+  if (exchange.method === "POST" && /^\/api\/internal\/agent\/[^/]+\/permission\/[^/]+\/reply$/.test(path)) {
+    return true;
+  }
+  return exchange.method === "POST" && /^\/api\/internal\/agent\/[^/]+\/question\/[^/]+\/(reply|reject)$/.test(path);
+}
+
+function extractRawExchangeSessionId(exchange: RawHttpExchange): string | undefined {
+  const pathSession = exchange.path.match(/^\/api\/sessions\/([^/?]+)/)?.[1];
+  if (pathSession) {
+    return decodeRawPathPart(pathSession);
+  }
+  const querySession = rawSessionIdFromUrl(exchange.url);
+  if (querySession) {
+    return querySession;
+  }
+  const request = parseRawJsonObject(exchange.requestBody);
+  const requestSession = rawText(request?.sessionId);
+  if (requestSession) {
+    return requestSession;
+  }
+  const response = parseRawJsonObject(exchange.responseText);
+  const responseData = rawRecord(response?.data);
+  const responseSession = rawText(responseData?.sessionId);
+  if (responseSession) {
+    return responseSession;
+  }
+  const responseRunId = rawText(responseData?.runId);
+  if (responseRunId && rawRunSessionMap.value[responseRunId]) {
+    return rawRunSessionMap.value[responseRunId];
+  }
+  const pathRunId = exchange.path.match(/^\/api\/internal\/agent\/[^/]+\/runs\/([^/?]+)/)?.[1];
+  if (pathRunId) {
+    const runId = decodeRawPathPart(pathRunId);
+    if (rawRunSessionMap.value[runId]) {
+      return rawRunSessionMap.value[runId];
+    }
+    if (run.value?.runId === runId) {
+      return session.value?.sessionId;
+    }
+  }
+  return session.value?.sessionId;
+}
+
+function rawPathWithoutQuery(path: string) {
+  return path.split("?")[0] ?? path;
+}
+
+function rawSessionIdFromUrl(url: string) {
+  try {
+    return new URL(url).searchParams.get("sessionId") ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeRawPathPart(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
+function parseRawJsonObject(value: string | undefined): Record<string, unknown> | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    return rawRecord(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
+function rawRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function rawText(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
 async function recoverActiveRunForSession(sessionId: string, reason: string): Promise<Run | null> {
   const seq = ++activeRunProbeSeq;
   try {
@@ -610,6 +839,7 @@ async function recoverActiveRunForSession(sessionId: string, reason: string): Pr
       if (run.value?.runId !== activeRun.runId || run.value.status !== activeRun.status) {
         // 刷新、历史切换或启动请求仍未返回时，以后端 active-run 为准接管 SSE。
         run.value = activeRun;
+        rememberRunSession(activeRun);
         logs.value = [...logs.value.slice(-200), `[run] recovered ${activeRun.runId} ${activeRun.status} via ${reason}`];
       }
       return activeRun;
@@ -731,6 +961,7 @@ watch(run, (r, _old, onCleanup) => {
   const subscription = subscribeRunEvents({
     baseUrl: apiBaseUrl,
     runId: r.runId,
+    onRawMessage: (message) => observeRawRunEventMessage(message, r.sessionId),
     onEvent: (event) => handleRunEvent(event),
     onStatus: (status) => {
       logs.value = [...logs.value.slice(-200), `[sse] ${status}`];
@@ -769,6 +1000,7 @@ watch(liveTrack, (on) => {
 });
 // 新 Run 开始时清空已跟随记录。
 watch(run, (r) => {
+  rememberRunSession(r);
   if (r && ["RUNNING", "CANCELLING"].includes(r.status)) {
     liveFollowedParts.value = new Set();
   }
@@ -885,6 +1117,7 @@ const startRunMutation = useMutation({
   },
   onSuccess: (started) => {
     run.value = started;
+    rememberRunSession(started);
     logs.value = [...logs.value, `[run] ${started.runId} ${started.status}`];
   },
   onError: (error) => {
@@ -1108,6 +1341,7 @@ const cancelRunMutation = useMutation({
   },
   onSuccess: (cancelled) => {
     run.value = cancelled;
+    rememberRunSession(cancelled);
   },
   onError: (error) => {
     feedback.value = errorFeedback("取消 Run 失败", error);
@@ -2447,6 +2681,7 @@ async function switchSession(sessionId: string) {
           api.getRunDiff(lastMsgWithRunId.runId).catch(() => ({ files: [] }))
         ]);
         run.value = runDetail;
+        rememberRunSession(runDetail);
         const runFiles = (diffDetail.files ?? []).map((file) => ({
           ...file,
           path: normalizeWorkspacePath(file.path) || file.path
@@ -2744,6 +2979,7 @@ async function handleLogout() {
           :message-feedbacks="messageFeedbacks"
           :feedback-submitting="feedbackSubmitting"
           :commands="commands"
+          :raw-output-entries="currentRawOutputEntries"
           placeholder="描述测试任务，例如：跑 checkout 模块并分析失败原因"
           @send="(text: string) => handleSend(text)"
           @stop="handleStopRun"
@@ -2758,6 +2994,7 @@ async function handleLogout() {
           @select-session="(id: string) => switchSession(id)"
           @select-model="(model) => selectRuntimeModel(model)"
           @submit-feedback="handleSubmitFeedback"
+          @clear-raw-output="clearCurrentRawOutput"
           @close="rightPanelOpen = false"
         />
       </div>

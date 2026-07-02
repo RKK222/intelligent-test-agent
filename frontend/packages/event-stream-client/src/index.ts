@@ -12,9 +12,18 @@ export type RunEventSubscribeOptions = {
   agentId?: string;
   lastEventId?: string;
   onEvent: (event: RunEvent) => void;
+  onRawMessage?: (message: RunEventRawMessage) => void;
   onStatus?: (status: RunEventStreamStatus) => void;
   onError?: (error: Event) => void;
   eventSourceFactory?: EventSourceFactory;
+};
+
+export type RunEventRawMessage = {
+  runId: string;
+  eventName: string;
+  lastEventId?: string;
+  data: string;
+  receivedAt: string;
 };
 
 export type EventSourceLike = {
@@ -73,6 +82,13 @@ export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventS
 
   const handleEvent: EventListener = (event) => {
     const message = event as MessageEvent<string>;
+    options.onRawMessage?.({
+      runId: options.runId,
+      eventName: event.type,
+      lastEventId: message.lastEventId || undefined,
+      data: message.data,
+      receivedAt: new Date().toISOString()
+    });
     const parsed = parseRunEvent(message.data);
     if (!parsed) {
       return;

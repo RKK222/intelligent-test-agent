@@ -172,6 +172,78 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("send")).toEqual([["后台轮询时发送"]]);
   });
 
+  it("opens a raw output floating panel with filters and clear action", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        rawOutputEntries: [
+          {
+            id: "raw_req_1",
+            kind: "request",
+            title: "POST /api/internal/agent/opencode/runs",
+            method: "POST",
+            path: "/api/internal/agent/opencode/runs",
+            traceId: "trace_frontend",
+            body: '{"sessionId":"ses_1","prompt":"hello"}',
+            occurredAt: "2026-07-02T08:00:00.000Z"
+          },
+          {
+            id: "raw_sse_1",
+            kind: "sse",
+            title: "message.part.delta",
+            eventName: "message.part.delta",
+            runId: "run_1",
+            body: '{"type":"message.part.delta","payload":{"delta":"world"}}',
+            occurredAt: "2026-07-02T08:00:01.000Z"
+          }
+        ]
+      } as any
+    });
+
+    const rawButton = wrapper.findAll("button").find((button) => button.text().includes("原始输出"));
+    expect(rawButton).toBeTruthy();
+    await rawButton!.trigger("click");
+
+    expect(wrapper.find(".figma-chat-raw-output-panel").exists()).toBe(true);
+    expect(wrapper.find(".figma-chat-raw-output-panel").attributes("style")).toContain("left:");
+    const preTexts = wrapper.findAll("pre").map((pre) => pre.text()).join("\n");
+    expect(preTexts).toContain('{"sessionId":"ses_1","prompt":"hello"}');
+    expect(preTexts).toContain('{"type":"message.part.delta","payload":{"delta":"world"}}');
+
+    const sseFilter = wrapper.findAll(".figma-chat-raw-filter").find((button) => button.text() === "SSE");
+    expect(sseFilter).toBeTruthy();
+    await sseFilter!.trigger("click");
+
+    expect(wrapper.text()).not.toContain("POST /api/internal/agent/opencode/runs");
+    expect(wrapper.text()).toContain("message.part.delta");
+    expect(wrapper.find("pre").text()).toContain('{"type":"message.part.delta","payload":{"delta":"world"}}');
+
+    const clearButton = wrapper.findAll("button").find((button) => button.text().includes("清空"));
+    expect(clearButton).toBeTruthy();
+    await clearButton!.trigger("click");
+    expect(wrapper.emitted("clear-raw-output")).toEqual([[]]);
+
+    await wrapper.get('[aria-label="关闭原始输出"]').trigger("click");
+    expect(wrapper.find(".figma-chat-raw-output-panel").exists()).toBe(false);
+  });
+
+  it("shows an empty raw output state for sessions without captured exchanges", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        rawOutputEntries: []
+      } as any
+    });
+
+    const rawButton = wrapper.findAll("button").find((button) => button.text().includes("原始输出"));
+    expect(rawButton).toBeTruthy();
+    await rawButton!.trigger("click");
+
+    expect(wrapper.text()).toContain("当前会话暂无原始报文");
+  });
+
   it("shows the checking state before the first process status response arrives", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

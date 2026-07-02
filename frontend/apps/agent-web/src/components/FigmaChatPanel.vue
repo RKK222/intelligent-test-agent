@@ -439,6 +439,24 @@ export type TaskUsage = {
   totalDuration?: string
 }
 
+export type RawOutputKind = 'request' | 'response' | 'sse'
+
+export type RawOutputEntry = {
+  id: string
+  kind: RawOutputKind
+  title: string
+  method?: string
+  path?: string
+  status?: number
+  eventName?: string
+  traceId?: string
+  runId?: string
+  contentType?: string
+  body: string
+  truncated?: boolean
+  occurredAt: string
+}
+
 type OpencodeProcessState = {
   status: string
   initializable: boolean
@@ -503,9 +521,12 @@ const props =
     feedbackSubmitting?: Record<string, boolean>
     /** 可用命令列表（含 source=skill 的 Skill Command） */
     commands?: Array<{ commandId: string; name: string; description?: string; source?: string; arguments?: string }>
+    /** 当前会话在前端内存中捕获的浏览器与平台后端原始报文 */
+    rawOutputEntries?: RawOutputEntry[]
   }>(), {
     processRefreshBlocksSubmit: true,
-    commands: () => []
+    commands: () => [],
+    rawOutputEntries: () => []
   })
 
 const emit =
@@ -523,6 +544,7 @@ const emit =
     (e: 'initialize-process'): void
     (e: 'refresh-process'): void
     (e: 'select-model', model: any): void
+    (e: 'clear-raw-output'): void
     (
       e: 'submit-feedback',
       payload: {
@@ -1743,11 +1765,109 @@ function selectHistoryItem(id: string) {
   closeHistoryDrawer()
 }
 
+type RawOutputFilter = 'all' | RawOutputKind
+
+const rawOutputOpen = ref(false)
+const rawOutputFilter = ref<RawOutputFilter>('all')
+const rawOutputPosition = ref(defaultRawOutputPosition())
+let rawDragState: { startX: number; startY: number; originX: number; originY: number } | null = null
+
+const rawOutputPanelStyle = computed(() => ({
+  left: `${rawOutputPosition.value.x}px`,
+  top: `${rawOutputPosition.value.y}px`
+}))
+
+const filteredRawOutputEntries = computed(() => {
+  const entries = props.rawOutputEntries ?? []
+  if (rawOutputFilter.value === 'all') return entries
+  return entries.filter((entry) => entry.kind === rawOutputFilter.value)
+})
+
+const rawOutputFilterOptions: Array<{ value: RawOutputFilter; label: string }> = [
+  { value: 'all', label: '全部' },
+  { value: 'request', label: '请求' },
+  { value: 'response', label: '响应' },
+  { value: 'sse', label: 'SSE' },
+]
+
+function defaultRawOutputPosition() {
+  if (typeof window === 'undefined') {
+    return { x: 80, y: 72 }
+  }
+  return {
+    x: Math.max(24, Math.min(360, window.innerWidth - 800)),
+    y: 72,
+  }
+}
+
+function openRawOutput() {
+  rawOutputOpen.value = true
+}
+
+function closeRawOutput() {
+  rawOutputOpen.value = false
+  stopRawOutputDrag()
+}
+
+function rawOutputKindLabel(kind: RawOutputKind) {
+  if (kind === 'request') return '请求'
+  if (kind === 'response') return '响应'
+  return 'SSE'
+}
+
+function rawOutputTime(value: string) {
+  return value ? value.replace('T', ' ').slice(0, 19) : ''
+}
+
+function rawOutputBody(entry: RawOutputEntry) {
+  return entry.body || '（空报文体）'
+}
+
+function startRawOutputDrag(event: PointerEvent) {
+  if ((event.target as HTMLElement | null)?.closest('button')) return
+  event.preventDefault()
+  rawDragState = {
+    startX: event.clientX,
+    startY: event.clientY,
+    originX: rawOutputPosition.value.x,
+    originY: rawOutputPosition.value.y,
+  }
+  window.addEventListener('pointermove', moveRawOutputPanel)
+  window.addEventListener('pointerup', stopRawOutputDrag, { once: true })
+}
+
+function moveRawOutputPanel(event: PointerEvent) {
+  if (!rawDragState) return
+  const nextX = rawDragState.originX + event.clientX - rawDragState.startX
+  const nextY = rawDragState.originY + event.clientY - rawDragState.startY
+  rawOutputPosition.value = {
+    x: clampRawOutputPosition(nextX, 8, typeof window === 'undefined' ? nextX : window.innerWidth - 120),
+    y: clampRawOutputPosition(nextY, 8, typeof window === 'undefined' ? nextY : window.innerHeight - 56),
+  }
+}
+
+function stopRawOutputDrag() {
+  rawDragState = null
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('pointermove', moveRawOutputPanel)
+    window.removeEventListener('pointerup', stopRawOutputDrag)
+  }
+}
+
+function clampRawOutputPosition(value: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, value))
+}
+
 // Esc 关闭面板内浮层：监听全局 keydown，只在当前浮层打开时响应。
 function onOverlayKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && attachmentDialogOpen.value) {
     event.preventDefault()
     closeAttachmentDialog()
+    return
+  }
+  if (event.key === 'Escape' && rawOutputOpen.value) {
+    event.preventDefault()
+    closeRawOutput()
     return
   }
   if (event.key === 'Escape' && historyDrawerOpen.value) {
@@ -1766,6 +1886,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onOverlayKeydown)
+  stopRawOutputDrag()
   stopRunTimer()
 })
 
@@ -2075,6 +2196,15 @@ function onCompositionEnd() {
     <header class="figma-chat-header">
       <div class="figma-chat-header-left">
         <h2 class="figma-chat-title" :title="title || '生成测试案例'">{{ title || '生成测试案例' }}</h2>
+        <button
+          type="button"
+          class="figma-chat-header-btn"
+          title="查看前端与平台后端原始报文"
+          @click="openRawOutput"
+        >
+          <FileText :size="15" />
+          <span>原始输出</span>
+        </button>
         <button
           type="button"
           class="figma-chat-header-btn"
@@ -3513,6 +3643,69 @@ function onCompositionEnd() {
       </div>
     </div>
 
+    <div
+      v-if="rawOutputOpen"
+      class="figma-chat-raw-output-panel"
+      :style="rawOutputPanelStyle"
+      role="dialog"
+      aria-modal="false"
+      aria-label="原始输出"
+    >
+      <header class="figma-chat-raw-output-header" @pointerdown="startRawOutputDrag">
+        <div class="figma-chat-raw-output-title">
+          <FileText :size="15" />
+          <span>原始输出</span>
+          <span class="figma-chat-raw-output-count">{{ filteredRawOutputEntries.length }}/{{ props.rawOutputEntries?.length ?? 0 }}</span>
+        </div>
+        <div class="figma-chat-raw-output-actions">
+          <button
+            v-for="option in rawOutputFilterOptions"
+            :key="option.value"
+            type="button"
+            :class="['figma-chat-raw-filter', rawOutputFilter === option.value && 'is-active']"
+            @click="rawOutputFilter = option.value"
+          >
+            {{ option.label }}
+          </button>
+          <button type="button" class="figma-chat-raw-action" @click="emit('clear-raw-output')">清空</button>
+          <button
+            type="button"
+            class="figma-chat-raw-close"
+            aria-label="关闭原始输出"
+            @click="closeRawOutput"
+          >
+            <X :size="14" />
+          </button>
+        </div>
+      </header>
+      <div class="figma-chat-raw-output-body">
+        <div v-if="filteredRawOutputEntries.length === 0" class="figma-chat-raw-empty">
+          当前会话暂无原始报文
+        </div>
+        <template v-else>
+          <section
+            v-for="entry in filteredRawOutputEntries"
+            :key="entry.id"
+            class="figma-chat-raw-entry"
+          >
+            <div class="figma-chat-raw-entry-meta">
+              <span :class="['figma-chat-raw-kind', `figma-chat-raw-kind--${entry.kind}`]">{{ rawOutputKindLabel(entry.kind) }}</span>
+              <span class="figma-chat-raw-entry-title">{{ entry.title }}</span>
+              <span class="figma-chat-raw-entry-time">{{ rawOutputTime(entry.occurredAt) }}</span>
+            </div>
+            <div class="figma-chat-raw-entry-details">
+              <span v-if="entry.status">status {{ entry.status }}</span>
+              <span v-if="entry.contentType">{{ entry.contentType }}</span>
+              <span v-if="entry.traceId">trace {{ entry.traceId }}</span>
+              <span v-if="entry.runId">run {{ entry.runId }}</span>
+              <span v-if="entry.truncated">已截断</span>
+            </div>
+            <pre class="figma-chat-raw-pre">{{ rawOutputBody(entry) }}</pre>
+          </section>
+        </template>
+      </div>
+    </div>
+
     <el-dialog
       v-model="negativeFeedbackOpen"
       title="不满意反馈"
@@ -3587,6 +3780,180 @@ function onCompositionEnd() {
   color: var(--ta-text);
   background: var(--ta-hover);
   border-color: var(--ta-muted);
+}
+.figma-chat-raw-output-panel {
+  position: fixed;
+  z-index: 2500;
+  width: min(760px, calc(100vw - 48px));
+  height: min(620px, calc(100vh - 96px));
+  min-width: 360px;
+  min-height: 260px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  resize: both;
+  border: 1px solid var(--ta-border);
+  border-radius: 8px;
+  background: var(--ta-surface);
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.18);
+}
+.figma-chat-raw-output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 42px;
+  padding: 8px 10px 8px 12px;
+  border-bottom: 1px solid var(--ta-border);
+  background: var(--ta-panel);
+  cursor: move;
+  user-select: none;
+}
+.figma-chat-raw-output-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ta-text);
+}
+.figma-chat-raw-output-count {
+  color: var(--ta-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.figma-chat-raw-output-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.figma-chat-raw-filter,
+.figma-chat-raw-action,
+.figma-chat-raw-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  border: 1px solid var(--ta-border);
+  border-radius: 6px;
+  background: var(--ta-surface);
+  color: var(--ta-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.figma-chat-raw-filter {
+  min-width: 42px;
+  padding: 0 8px;
+}
+.figma-chat-raw-filter.is-active {
+  color: var(--ta-text);
+  border-color: var(--ta-ink);
+  background: var(--ta-hover);
+}
+.figma-chat-raw-action {
+  padding: 0 9px;
+}
+.figma-chat-raw-close {
+  width: 26px;
+}
+.figma-chat-raw-filter:hover,
+.figma-chat-raw-action:hover,
+.figma-chat-raw-close:hover {
+  color: var(--ta-text);
+  background: var(--ta-hover);
+}
+.figma-chat-raw-output-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+  background: var(--ta-surface);
+}
+.figma-chat-raw-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ta-muted);
+  font-size: 13px;
+}
+.figma-chat-raw-entry {
+  border: 1px solid var(--ta-border);
+  border-radius: 8px;
+  background: var(--ta-panel);
+  overflow: hidden;
+}
+.figma-chat-raw-entry + .figma-chat-raw-entry {
+  margin-top: 10px;
+}
+.figma-chat-raw-entry-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px 4px;
+  min-width: 0;
+}
+.figma-chat-raw-kind {
+  flex-shrink: 0;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.figma-chat-raw-kind--request {
+  color: #075985;
+  background: #e0f2fe;
+}
+.figma-chat-raw-kind--response {
+  color: #166534;
+  background: #dcfce7;
+}
+.figma-chat-raw-kind--sse {
+  color: #7c2d12;
+  background: #ffedd5;
+}
+.figma-chat-raw-entry-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ta-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.figma-chat-raw-entry-time {
+  margin-left: auto;
+  flex-shrink: 0;
+  color: var(--ta-muted);
+  font-size: 11px;
+}
+.figma-chat-raw-entry-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 10px 8px;
+  color: var(--ta-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+}
+.figma-chat-raw-pre {
+  margin: 0;
+  max-height: none;
+  overflow: auto;
+  border-top: 1px solid var(--ta-border);
+  padding: 10px;
+  color: var(--ta-text);
+  background: #f8fafc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .figma-chat-history-drawer {
   position: absolute;

@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-02 - 前端原始报文查看器只捕获浏览器可见数据
+
+- Why: 用户需要在右侧对话框查看前端用户发送给平台后端、以及前端从平台后端收到的原始报文，用于排查前端渲染前的真实输入输出；同时明确不是 opencode server 端原始事件，也不需要后端持久化。
+- What: `backend-api` 增加可选 `rawExchangeObserver`，只暴露安全请求头、请求体、响应状态/响应头和响应原文；`event-stream-client` 增加 `onRawMessage`，在解析 RunEvent 前回调浏览器 `EventSource` 实际拿到的 `MessageEvent.data`；`AgentWorkbench` 按 session 维护内存 entries，`FigmaChatPanel` 提供可拖动、可 resize 的“原始输出”浮层和请求/响应/SSE 筛选。
+- How: 只在 `AgentWorkbench` 创建 backend-api client 时启用 observer，并保守过滤会话创建、Run 启动/取消、active-run、消息加载、permission/question 回复和 RunEvent SSE；单 session 保留最近 1000 条，单条正文超过 200000 字符截断；不记录 `Authorization`、Cookie，不新增 API、SSE 契约、表结构或 Flyway migration。
+- Result: `cd frontend && corepack pnpm test -- backend-api event-stream-client FigmaChatPanel`、`corepack pnpm --filter @test-agent/agent-web typecheck`、`corepack pnpm --filter @test-agent/backend-api typecheck`、`corepack pnpm --filter @test-agent/event-stream-client typecheck` 和 `git diff --check` 通过。
+
 ### 2026-07-02 - 复用自定义与 default 个人 worktree 创建流程
 
 - Why: 自定义命名个人工作区和自动确保的 default 个人工作区都创建个人 worktree、运行态 Workspace、PersonalWorkspace 并写入 recent，原先保留了两套几乎相同的私有创建方法。

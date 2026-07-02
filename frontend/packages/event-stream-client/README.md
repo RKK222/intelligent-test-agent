@@ -10,6 +10,7 @@
 - 监听平台 RunEvent wire name。
 - 所有事件（包括 transient 文本增量）优先按 `eventId` 去重，兼容缺失 `eventId` 的旧事件时才回退 `runId + seq`；`seq=0` 且缺失 `eventId` 的旧增量不能按固定序号互相去重。
 - 使用 `lastEventId` query 参数支持浏览器原生 EventSource 的首次续传，agent URL 下格式不变。
+- 可选 `onRawMessage` 在解析 RunEvent 前回调浏览器实际收到的 SSE `MessageEvent.data`、事件名、`lastEventId`、runId 和接收时间；浏览器 `EventSource` 不暴露完整 HTTP 字节流，因此该回调不代表 DevTools 里的 wire bytes。
 - 提供关闭订阅和连接状态回调。
 
 已知事件包括旧 `run.*`、`assistant.message.delta`、`tool.*`、`diff.*`，以及 opencode Web App 运行态 `message.*`、`session.status`、`todo.updated`、`permission.*`、`question.*`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`。transient live output 的 payload `seq=0` 且没有 SSE `id`，客户端必须依赖 payload `eventId` 去重。

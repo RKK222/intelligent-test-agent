@@ -7,6 +7,7 @@
 ## 主要职责
 
 - 统一 baseUrl、traceId、鉴权头和 JSON 解析。
+- 可选 `rawExchangeObserver` 供前端调试面板记录浏览器与平台后端之间的最终 method/url/path/traceId、请求体、响应状态/响应头和响应原文；observer 不记录 `Authorization`、Cookie 等敏感请求头，也不改变后端 API 契约。
 - 支持 `agentId?: string` 配置，默认 `opencode`；Run、Diff 和 runtime 相关请求统一走 `/api/internal/agent/{agentId}/...`。
 - 默认 30 秒请求超时，可通过 `requestTimeoutMs` 覆盖，或通过单个请求 init 参数中的 `timeoutMs` 进行局部覆盖；超时统一映射为 `BackendApiError` 的 `REQUEST_TIMEOUT`。
 - 映射统一错误响应为 `BackendApiError`。

@@ -22,6 +22,50 @@ describe("backend-api", () => {
     expect(headers.get("X-Trace-Id")).toBe("trace_fixed");
   });
 
+  it("reports raw backend exchanges without exposing sensitive request headers", async () => {
+    const responseText = JSON.stringify({
+      success: true,
+      traceId: "trace_backend",
+      data: { runId: "run_1", sessionId: "ses_1" }
+    });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(responseText, {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-trace-id": "trace_backend"
+        }
+      })
+    );
+    const exchanges: Array<Record<string, unknown>> = [];
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      apiToken: "token_secret",
+      fetcher,
+      traceIdFactory: () => "trace_frontend",
+      rawExchangeObserver: (exchange: Record<string, unknown>) => exchanges.push(exchange)
+    } as Parameters<typeof createBackendApiClient>[0] & {
+      rawExchangeObserver: (exchange: Record<string, unknown>) => void;
+    });
+
+    await client.startRun("ses_1", "hello");
+
+    expect(exchanges).toHaveLength(1);
+    expect(exchanges[0]).toMatchObject({
+      method: "POST",
+      url: "http://api/api/internal/agent/opencode/runs",
+      path: "/api/internal/agent/opencode/runs",
+      traceId: "trace_frontend",
+      requestBody: JSON.stringify({ sessionId: "ses_1", prompt: "hello" }),
+      responseStatus: 200,
+      responseText
+    });
+    expect((exchanges[0].responseHeaders as Record<string, string>)["content-type"]).toBe("application/json");
+    expect((exchanges[0].responseHeaders as Record<string, string>)["x-trace-id"]).toBe("trace_backend");
+    expect(JSON.stringify(exchanges[0])).not.toContain("token_secret");
+    expect(JSON.stringify(exchanges[0])).not.toContain("Authorization");
+  });
+
   it("uses a custom agent id for agent-scoped run APIs", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: { runId: "run_1" } }), {

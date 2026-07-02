@@ -15,6 +15,7 @@
 2. Run、Diff 和 runtime 相关请求默认使用 `agentId=opencode` 的 `/api/internal/agent/{agentId}/...` URL；切换 agent 只能通过 `backend-api` 配置，不得在页面组件中手拼旧 runtime URL。
 3. 工作区文件和 Agent 配置文件的目录列表、读取、写入只能通过 `backend-api` 的文件 WebSocket route/ticket/RPC helper；页面组件不得回退到 HTTP 文件接口或自行拼接 WebSocket URL。公共 Agent worktree/直接目录切换只能更新 `worktreeId/linuxServerId` 上下文，后续文件操作仍由 `backend-api` 申请 route 和 ticket。
 4. API 请求、响应、错误类型必须与 `docs/api/http-api.md` 一致；新增或变更 API 必须同步 `docs/api/http-api.md` 和 `docs/architecture/module-map.md`。
+5. 前端调试用原始报文查看器只能通过 `backend-api` 的可选 observer 捕获浏览器可访问的请求体和响应文本，不得记录 `Authorization`、Cookie 等敏感请求头，不得新增后端持久化或绕过平台后端直连 opencode。
 
 ## RunEvent SSE
 
@@ -22,6 +23,7 @@
 2. RunEvent SSE 默认使用 `agentId=opencode` 的 `/api/internal/agent/{agentId}/runs/{runId}/events` URL；旧 `/api/runs/{runId}/events` 只作为后端兼容入口。
 3. 高频事件不得逐条触发重型渲染，必须合并、节流或按面板局部更新。
 4. 事件类型和字段变更必须同步 `docs/api/event-stream.md`。SSE 契约以该文件为单一事实源。
+5. 原始 SSE 调试回调只能保存浏览器 `EventSource` 暴露的 `MessageEvent.data`、事件名和 `lastEventId` 等前端可见字段；它不是完整 HTTP wire bytes，也不得替代 RunEvent 契约文档。
 
 ## 组件与状态
 
