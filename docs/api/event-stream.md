@@ -137,6 +137,7 @@ scope 发现与缓存规则：
 
 - child discovery 来源包括 task/tool part metadata 中的 `sessionID/sessionId`、`session.created/session.updated` 的 `parentID/parentId`，以及 `session.children(root)` bootstrap 候选。
 - 原生 opencode task 子 Agent 是两阶段事件：先出现 root `message.part.updated` 的 `part.type=tool`、`part.tool=task`、`state.status=pending`，此时通常没有 child session；随后 `session.created/session.updated` 带 `parentID/parentId` 创建 child session。runtime `RunSessionScopeRouter` 会按 `runId + parentSessionId` 维护 pending task FIFO 队列，在 child session 事件没有 task 字段时补齐最早未绑定 task 的 `taskMessageId/taskPartId/taskCallId`。
+- `message.part.updated` 的 task metadata 也可能直接携带 child `sessionId/sessionID`；这只用于发现 child 和补齐 `session.child.discovered/session.scope.updated`，原始 task part 仍属于 root assistant message，payload scope 必须保持 `sessionId=rootSessionId`、`isChildSession=false`。
 - child session metadata 会从 `info.agent` 和 `info.title` 提取展示信息；`title` 会去掉形如 `(@explore subagent)` 的 opencode 原生后缀后写入 `session.child.discovered/session.scope.updated` payload。
 - opencode `payload.type=sync`、`payload.syncEvent.type=message.part.updated.1` 这类包装会在 mapper 层还原为内层事件类型、事件 ID 和 data；direct 事件与 sync 包装共享同一个 raw event id 时由 runtime dedup 过滤，避免重复 pending task 或重复 child discovery。
 - 当前 Run 只纳入本 Run 启动后发现，或能绑定到本 Run task part 的 child；历史 root 下已有 child 不会无条件进入新 Run scope。
@@ -154,9 +155,10 @@ scope 发现与缓存规则：
 - `@test-agent/agent-chat` 的 RunEvent reducer 会把 `message.updated`、`message.part.updated`、`message.part.delta` payload 中的 `sessionId/sessionID`、`rootSessionId`、`parentSessionId`、`isChildSession/childSession`、`taskMessageId`、`taskPartId`、`taskCallId` 归入运行期 `messageScopesById` 索引，key 使用消息 ID。
 - 为兼容历史调试或 raw opencode 事件包装，前端 reducer 在归并前会展开 `payload.properties`，再按同一套 `messageID/partID/sessionID` 和 lower camel 字段读取消息、part 与 scope；标准 RunEvent 仍以扁平 payload 为主。
 - `message.part.updated` 的 `part.type=tool` 且 `part.tool=task` 时，前端从 `part.state.metadata.sessionId/sessionID` 或 payload scope 识别子会话，并生成 `SubagentSession`：标题优先取 `state.title`，再取 `state.input.description`、`state.input.prompt` 首行；Agent 名称优先取 `state.input.subagent_type`，再取 `metadata.agent`，缺失时展示 `Task`；状态优先取 `part.state.status`。
+- 若历史 live payload 同时携带 `sessionId=child`、`sessionID=root`、`isChildSession=true` 和 root `part.sessionID`，前端按 root task part 兼容处理，避免同一个 root message scope 被覆盖成 child。
 - `session.child.discovered` 和 `session.scope.updated` 到达时，前端用 payload 中的 `sessionId`、`parentSessionId`、`taskMessageId`、`taskPartId`、`taskCallId` 补全子会话索引和 `taskPartId -> sessionId` 映射。
 - 原生两阶段场景下，未绑定的 root task part 会先显示为不可点击“智能体 / 准备中”；收到带 `taskPartId` 的 child discovery 后，同一个入口转为 `Explore + title` 并可点击。
-- 主 Agent 视图过滤 `messageScopesById[messageId].isChildSession=true` 的 user/assistant 输出，只保留 root 输出和 root task tool part 卡片；点击 task 卡片后切到对应 child session 视图。若后续 `message.part.removed`、`message.removed` 或 snapshot 缺少原始 task part，但 `subagentsBySessionId/subagentByTaskPartId` 仍有绑定索引，前端会在主视图合成一个导航入口，避免子 Agent 卡片短暂出现后消失。
+- 主 Agent 视图过滤 `messageScopesById[messageId].isChildSession=true` 的 user/assistant 输出，只保留 root 输出和 root task tool part 卡片；task 子 Agent 卡片始终独立展示，不参与普通 `tool-group` 折叠；点击 task 卡片后切到对应 child session 视图。若后续 `message.part.removed`、`message.removed` 或 snapshot 缺少原始 task part，但 `subagentsBySessionId/subagentByTaskPartId` 仍有绑定索引，前端会在主视图合成一个导航入口，避免子 Agent 卡片短暂出现后消失。
 - 子 Agent 视图只展示 `messageScopesById[messageId].sessionId` 等于当前 child session 的完整时间线，不展示 composer、Todo、permission/question 输入区。缺少 scope 的历史消息按 root 消息兼容处理。
 
 终态派生规则：

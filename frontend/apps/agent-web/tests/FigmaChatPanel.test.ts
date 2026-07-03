@@ -344,6 +344,86 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
   });
 
+  it("shows multiple subagent cards directly without folding them into a task group", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "msg_user_root",
+            messageId: "msg_user_root",
+            role: "user",
+            text: "分析前后端结构",
+            createdAt: "2026-07-03T00:00:00Z"
+          },
+          {
+            id: "msg_root",
+            messageId: "msg_root",
+            role: "assistant",
+            text: "",
+            parts: [
+              {
+                partId: "prt_task_backend",
+                type: "tool",
+                toolName: "task",
+                callId: "call_task_backend",
+                status: "running",
+                input: { description: "Explore backend structure", subagent_type: "explore" }
+              },
+              {
+                partId: "prt_task_frontend",
+                type: "tool",
+                toolName: "task",
+                callId: "call_task_frontend",
+                status: "running",
+                input: { description: "Explore frontend structure", subagent_type: "explore" }
+              }
+            ],
+            createdAt: "2026-07-03T00:00:01Z"
+          }
+        ],
+        messageScopesById: {
+          msg_user_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+          msg_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false }
+        },
+        subagentsBySessionId: {
+          ses_backend: {
+            sessionId: "ses_backend",
+            parentSessionId: "ses_root",
+            taskMessageId: "msg_root",
+            taskPartId: "prt_task_backend",
+            taskCallId: "call_task_backend",
+            agentName: "Explore",
+            title: "Explore backend structure",
+            status: "running",
+            updatedAt: "2026-07-03T00:00:00Z"
+          },
+          ses_frontend: {
+            sessionId: "ses_frontend",
+            parentSessionId: "ses_root",
+            taskMessageId: "msg_root",
+            taskPartId: "prt_task_frontend",
+            taskCallId: "call_task_frontend",
+            agentName: "Explore",
+            title: "Explore frontend structure",
+            status: "running",
+            updatedAt: "2026-07-03T00:00:00Z"
+          }
+        },
+        subagentByTaskPartId: {
+          prt_task_backend: "ses_backend",
+          prt_task_frontend: "ses_frontend"
+        },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.find("[data-testid='oc-tool-group']").exists()).toBe(false);
+    expect(wrapper.findAll(".oc-subagent-card")).toHaveLength(2);
+    expect(wrapper.text()).toContain("Explore backend structure");
+    expect(wrapper.text()).toContain("Explore frontend structure");
+  });
+
   it("keeps native pending task visible and converts it to a clickable subagent card", async () => {
     const rootMessages = [
       {

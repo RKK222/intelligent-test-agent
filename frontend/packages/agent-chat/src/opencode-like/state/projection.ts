@@ -150,6 +150,15 @@ function appendAssistantGroupRow(
 
   if (part?.type === "tool") {
     const toolKey = normalizeToolName(part);
+    // task 是子 Agent 导航入口，必须直接可见，不能并入普通工具折叠组。
+    if (toolKey === "task") {
+      appendSingleAssistantPartRow(rows, accumulator, {
+        userMessageId,
+        messageId: assistantMessageId,
+        partId: group.partId
+      });
+      return;
+    }
     const ref = { messageId: assistantMessageId, partId: group.partId };
     const existingIndex = accumulator.toolGroupIndices[toolKey];
     if (typeof existingIndex === "number") {

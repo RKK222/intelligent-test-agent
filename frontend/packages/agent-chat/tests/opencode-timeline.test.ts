@@ -103,6 +103,61 @@ describe("OpencodeTimeline", () => {
     expect(onSelectSubagent).toHaveBeenCalledWith("ses_child_backend");
   });
 
+  it("renders multiple task subagent cards directly without folding them into a tool group", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "分析前后端结构"),
+        assistantMessage("msg_assistant_1", [
+          {
+            ...toolPart("prt_task_backend", "task", {
+              description: "Explore backend structure",
+              subagent_type: "explore"
+            }),
+            status: "running"
+          },
+          {
+            ...toolPart("prt_task_frontend", "task", {
+              description: "Explore frontend structure",
+              subagent_type: "explore"
+            }),
+            status: "running"
+          }
+        ])
+      ],
+      subagentsBySessionId: {
+        ses_backend: {
+          sessionId: "ses_backend",
+          taskMessageId: "msg_assistant_1",
+          taskPartId: "prt_task_backend",
+          agentName: "Explore",
+          title: "Explore backend structure",
+          status: "running",
+          updatedAt: "2026-07-03T00:00:00Z"
+        },
+        ses_frontend: {
+          sessionId: "ses_frontend",
+          taskMessageId: "msg_assistant_1",
+          taskPartId: "prt_task_frontend",
+          agentName: "Explore",
+          title: "Explore frontend structure",
+          status: "running",
+          updatedAt: "2026-07-03T00:00:00Z"
+        }
+      },
+      subagentByTaskPartId: {
+        prt_task_backend: "ses_backend",
+        prt_task_frontend: "ses_frontend"
+      }
+    } as any);
+
+    const { container, getByText } = render(OpencodeTimeline, { props: { state } });
+
+    expect(container.querySelector("[data-testid='oc-tool-group']")).toBeNull();
+    expect(container.querySelectorAll(".oc-subagent-card")).toHaveLength(2);
+    expect(getByText("Explore backend structure")).toBeTruthy();
+    expect(getByText("Explore frontend structure")).toBeTruthy();
+  });
+
   it("renders pending native task parts as disabled agent rows", () => {
     const onSelectSubagent = vi.fn();
     const state = createOpencodeLikeState({

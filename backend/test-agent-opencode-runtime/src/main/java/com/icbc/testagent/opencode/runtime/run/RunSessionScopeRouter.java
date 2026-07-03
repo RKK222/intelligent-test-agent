@@ -59,8 +59,7 @@ class RunSessionScopeRouter {
         List<RunEventDraft> routed = new ArrayList<>();
         Optional<TaskChildCandidate> taskCandidate = taskChildCandidate(rootScope, draft.payload());
         String eventSessionId = eventSessionId(draft.payload()).orElse(null);
-        String dedupSessionId = taskCandidate.map(TaskChildCandidate::sessionId)
-                .orElse(eventSessionId == null ? rootScope.rootSessionId() : eventSessionId);
+        String dedupSessionId = eventSessionId == null ? rootScope.rootSessionId() : eventSessionId;
         if (useRuntimeCache && rawEventId(draft.payload())
                 .filter(rawEventId -> !runtimeCache.claimRawEvent(rootScope.runId(), dedupSessionId, rawEventId))
                 .isPresent()) {
@@ -79,7 +78,8 @@ class RunSessionScopeRouter {
             ChildRoute child = discoverChild(rootScope, draft, taskCandidate.get().toDiscovery());
             routed.addAll(child.discoveryEvents());
             routed.addAll(drainPending(rootScope, child));
-            routed.add(recontextualize(draft, child.scopeContext()));
+            // task part 是 root assistant 的导航入口；child discovery 只建立子会话索引，不能把 root part 改成 child scope。
+            routed.add(recontextualize(draft, rootContext(rootScope, draft)));
             return List.copyOf(routed);
         }
 

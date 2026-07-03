@@ -151,8 +151,8 @@ function reduceEventOnly(
     }, messageIdFromPartEvent(event), scope);
   }
   if (event.type === "message.part.updated") {
-    const scope = scopeFromPayload(event.payload);
     const raw = record(event.payload.part) ?? record(event.payload.message) ?? event.payload;
+    const scope = scopeForPartUpdated(event, raw);
     const messageId = messageIdFromPartEvent(event);
     let next = rememberMessageScope({
       ...state,
@@ -624,6 +624,34 @@ function scopeFromPayload(payload: Record<string, unknown>): MessageScope | unde
     taskCallId: text(payload.taskCallId) ?? text(payload.taskCallID)
   };
   return Object.values(scope).some((value) => value !== undefined) ? scope : undefined;
+}
+
+function scopeForPartUpdated(event: RunEvent, raw: Record<string, unknown> | undefined): MessageScope | undefined {
+  const scope = scopeFromPayload(event.payload);
+  if (!raw) {
+    return scope;
+  }
+  const tool = text(raw.toolName) ?? text(raw.tool) ?? text(raw.name);
+  if (tool !== "task") {
+    return scope;
+  }
+  const rootSessionId = scope?.rootSessionId ?? text(event.payload.rootSessionId);
+  if (!rootSessionId) {
+    return scope;
+  }
+  const partSessionId = text(raw.sessionId) ?? text(raw.sessionID);
+  const payloadUpperSessionId = text(event.payload.sessionID);
+  if (partSessionId !== rootSessionId && payloadUpperSessionId !== rootSessionId) {
+    return scope;
+  }
+  // opencode task part 是主 Agent 的导航入口；child session 只用于卡片绑定，不能覆盖 root message scope。
+  return {
+    ...scope,
+    sessionId: rootSessionId,
+    rootSessionId,
+    parentSessionId: undefined,
+    isChildSession: false
+  };
 }
 
 function rememberMessageScope(

@@ -186,6 +186,50 @@ describe("opencode-like conversation state", () => {
     expect(createTimelineRows(childState).map((row) => row.type)).toEqual(["user-message", "assistant-part"]);
   });
 
+  it("projects task tool parts as independent rows instead of a folded tool group", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "分析前后端结构"),
+        assistantMessage("msg_assistant_1", [
+          toolPart("prt_task_backend", "task", { description: "Explore backend structure", subagent_type: "explore" }),
+          toolPart("prt_task_frontend", "task", { description: "Explore frontend structure", subagent_type: "explore" })
+        ])
+      ],
+      subagentsBySessionId: {
+        ses_backend: {
+          sessionId: "ses_backend",
+          taskMessageId: "msg_assistant_1",
+          taskPartId: "prt_task_backend",
+          agentName: "Explore",
+          title: "Explore backend structure",
+          status: "running",
+          updatedAt: "2026-07-03T00:00:00Z"
+        },
+        ses_frontend: {
+          sessionId: "ses_frontend",
+          taskMessageId: "msg_assistant_1",
+          taskPartId: "prt_task_frontend",
+          agentName: "Explore",
+          title: "Explore frontend structure",
+          status: "running",
+          updatedAt: "2026-07-03T00:00:00Z"
+        }
+      },
+      subagentByTaskPartId: {
+        prt_task_backend: "ses_backend",
+        prt_task_frontend: "ses_frontend"
+      }
+    } as any);
+
+    const rows = createTimelineRows(state);
+
+    expect(rows.some((row) => row.type === "tool-group")).toBe(false);
+    expect(rows.filter((row) => row.type === "assistant-part").map((row) => (row as any).partId)).toEqual([
+      "prt_task_backend",
+      "prt_task_frontend"
+    ]);
+  });
+
   it("keeps raw-properties task part visible in the root projection after child output arrives", () => {
     const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "user.submitted",

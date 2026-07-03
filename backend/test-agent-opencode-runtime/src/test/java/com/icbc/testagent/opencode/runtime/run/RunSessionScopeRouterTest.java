@@ -94,13 +94,17 @@ class RunSessionScopeRouterTest {
                 NOW,
                 payload(Map.of(
                         "rawType", "message.part.updated",
+                        "sessionID", ROOT_SESSION_ID,
                         "messageID", "msg_task",
                         "partID", "part_task",
                         "part", Map.of(
                                 "id", "part_task",
                                 "messageID", "msg_task",
+                                "sessionID", ROOT_SESSION_ID,
+                                "type", "tool",
+                                "tool", "task",
                                 "callID", "call_task",
-                                "metadata", Map.of("sessionID", CHILD_SESSION_ID)))),
+                                "metadata", Map.of("sessionID", CHILD_SESSION_ID, "parentSessionId", ROOT_SESSION_ID)))),
                 rootScope());
 
         List<RunEventDraft> routed = route(draft);
@@ -117,6 +121,11 @@ class RunSessionScopeRouterTest {
         assertThat(child.taskPartId()).isEqualTo("part_task");
         assertThat(child.taskCallId()).isEqualTo("call_task");
         assertThat(routed.get(0).payload()).containsEntry("parentSessionId", ROOT_SESSION_ID);
+        RunEventDraft taskPart = routed.get(2);
+        assertThat(taskPart.scopeContext().childSession()).isFalse();
+        assertThat(taskPart.scopeContext().sessionId()).isEqualTo(ROOT_SESSION_ID);
+        assertThat(taskPart.payload()).containsEntry("sessionId", ROOT_SESSION_ID)
+                .containsEntry("isChildSession", false);
     }
 
     @Test

@@ -70,6 +70,18 @@
   - 修改 `AgentWorkbench.vue` 优化 model preference 变更策略与 pending 保护。
 - Result:
   - 前端 `corepack pnpm build` 与 typecheck 完美通过，时间线版面结构宽裕透气，文件名突出醒目，偏好切换机制运行稳健。
+### 2026-07-03 - 固定子 Agent task 入口 root scope 与独立展示
+
+- Why:
+  - 子 Agent task 入口偶发显示“智能体 / 准备中”后消失，停止后 `Explore` 又折叠在 task 分组里；根因是 task metadata discovery 分支把原始 root task part 改成 child scope，主视图会过滤掉 root assistant message，且前端把多个 `tool=task` part 当普通工具聚合。
+- What:
+  - `RunSessionScopeRouter` 在 task metadata 发现 child session 时仍输出 child discovery/scope updated，但原始 `message.part.updated` task part 固定保留 root scope。
+  - `agent-chat` reducer 对历史/错误 live payload 做防御兼容：`payload.sessionId=child` 但 `payload.sessionID/part.sessionID=root` 的 task part 仍按 root message scope 记录，同时保留 `taskPartId -> childSessionId` 绑定。
+  - `opencode-like` 投影让 `tool=task` 子 Agent 卡片跳过普通工具折叠组，每个 task part 独立直接展示。
+- How:
+  - 不新增 API、不改数据库、不改 generated SDK、不改环境配置；只修改 runtime scope router、agent-chat reducer/projection、回归测试和稳定文档。
+- Result:
+  - 偶发的 root task 被 child scope 覆盖不再导致主视图入口消失；多个 `Explore` 子 Agent 卡片在主对话中直接可见，不需要展开 task 分组。
 
 ### 2026-07-03 - 绑定原生 pending task 与 child session
 

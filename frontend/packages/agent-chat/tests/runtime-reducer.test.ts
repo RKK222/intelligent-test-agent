@@ -252,6 +252,68 @@ describe("agent-chat runtime reducer", () => {
     expect((withTask as any).messageScopesById.msg_root?.isChildSession).not.toBe(true);
   });
 
+  it("keeps root task parts in root scope when live payload also carries child session scope", () => {
+    const next = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.part.updated", {
+        discoveredDuringRun: true,
+        taskMessageId: "msg_root",
+        parentSessionId: "ses_root",
+        rawType: "message.part.updated",
+        sessionId: "ses_child",
+        sessionID: "ses_root",
+        isChildSession: true,
+        taskPartId: "prt_task",
+        taskCallId: "call_task",
+        rootSessionId: "ses_root",
+        part: {
+          type: "tool",
+          tool: "task",
+          callID: "call_task",
+          id: "prt_task",
+          sessionID: "ses_root",
+          messageID: "msg_root",
+          state: {
+            title: "Explore backend structure",
+            metadata: {
+              parentSessionId: "ses_root",
+              sessionId: "ses_child"
+            },
+            status: "running",
+            input: {
+              description: "Explore backend structure",
+              subagent_type: "explore"
+            }
+          }
+        }
+      })
+    });
+
+    const rootAssistant = next.messages.find(
+      (message) => message.role === "assistant" && message.messageId === "msg_root"
+    );
+
+    expect(rootAssistant).toMatchObject({
+      role: "assistant",
+      messageId: "msg_root",
+      parts: [{ partId: "prt_task", type: "tool", toolName: "task", status: "running" }]
+    });
+    expect((next as any).messageScopesById.msg_root).toMatchObject({
+      sessionId: "ses_root",
+      rootSessionId: "ses_root",
+      isChildSession: false,
+      taskPartId: "prt_task"
+    });
+    expect((next as any).subagentByTaskPartId.prt_task).toBe("ses_child");
+    expect((next as any).subagentsBySessionId.ses_child).toMatchObject({
+      sessionId: "ses_child",
+      taskMessageId: "msg_root",
+      taskPartId: "prt_task",
+      agentName: "Explore",
+      title: "Explore backend structure"
+    });
+  });
+
   it("updates subagent indexes from session child discovery events", () => {
     const next = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",
