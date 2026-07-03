@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-03 - 收敛 Run 启动前失败的聊天运行态
+
+- Why:
+  - `/api/sessions` 创建失败或 Run HTTP 提交失败发生在后端创建 Run 之前，不会产生 `run.failed` RunEvent；
+  - 前端已先分发 `run.requested`，如果没有本地失败终态，右侧 chat 会一直显示运行中。
+- What:
+  - `agent-chat` reducer 新增 `run.request.failed` 本地动作，把 `PENDING` 收敛为 `FAILED` 并清空 streaming overlay；
+  - `AgentWorkbench` 在 `startRunMutation.onError` 中分发该动作，并锁定本轮本地耗时。
+- How:
+  - 不改 API、SSE、数据库或后端；只补前端状态机和定向 reducer 回归测试。
+- Result:
+  - Session 创建失败后，前端展示“启动 Run 失败”反馈，同时停止 chat 运行态和停止按钮。
+
 ### 2026-07-03 - 收敛对话时间线过程行与极简输出样式
 
 - Why:

@@ -22,6 +22,20 @@ describe("agent-chat runtime reducer", () => {
     expect(next.messages).toEqual(previous.messages);
   });
 
+  it("stops a pending local run when the startup request fails", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "这次创建会话会失败",
+      createdAt: "2026-07-03T11:24:00Z"
+    });
+    const pending = reduceAgentChatRuntime(submitted, { type: "run.requested" });
+
+    const failed = reduceAgentChatRuntime(pending, { type: "run.request.failed", message: "数据冲突" });
+
+    expect(failed.status).toBe("FAILED");
+    expect(failed.messages).toEqual(submitted.messages);
+  });
+
   it("keeps assistant.message.delta backward compatible", () => {
     const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",

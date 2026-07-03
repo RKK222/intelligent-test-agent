@@ -1258,7 +1258,16 @@ const startRunMutation = useMutation({
     logs.value = [...logs.value, `[run] ${started.runId} ${started.status}`];
   },
   onError: (error) => {
-    feedback.value = errorFeedback("启动 Run 失败", error);
+    const startFailureFeedback = errorFeedback("启动 Run 失败", error);
+    feedback.value = startFailureFeedback;
+    dispatchChat({ type: "run.request.failed", message: startFailureFeedback.description });
+    // Session 创建或 Run HTTP 提交失败时没有 RunEvent 终态，前端需要本地锁定本轮耗时。
+    if (chatStartedAt.value) {
+      totalDurationMs.value += Date.now() - chatStartedAt.value;
+      lastDuration = formatDurationMs(Date.now() - chatStartedAt.value);
+      chatStartedAt.value = null;
+      nowTick.value = Date.now();
+    }
     if (session.value?.sessionId && !isRunBusyStatus(run.value?.status)) {
       void recoverActiveRunForSession(session.value.sessionId, "start-run-error");
     }

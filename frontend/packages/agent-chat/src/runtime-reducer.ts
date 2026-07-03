@@ -24,6 +24,7 @@ export type AgentChatRuntimeState = {
 export type AgentChatRuntimeAction =
   | { type: "event"; event: RunEvent }
   | { type: "run.requested" }
+  | { type: "run.request.failed"; message?: string }
   | { type: "user.submitted"; prompt: string; parts?: PromptPart[]; createdAt?: string }
   | { type: "permission.replied"; requestId: string }
   | { type: "question.replied"; requestId: string }
@@ -51,6 +52,10 @@ export function reduceAgentChatRuntime(
   if (action.type === "run.requested") {
     // 新一轮沿用当前 transcript，但必须清掉上一轮终态，避免旧状态压住新 Run 的动画。
     return { ...state, status: "PENDING", streamingTextByPartId: {} };
+  }
+  if (action.type === "run.request.failed") {
+    // 本地启动阶段失败时不会有后端 RunEvent 终态，必须在 reducer 内收敛运行态。
+    return { ...state, status: "FAILED", streamingTextByPartId: {} };
   }
   if (action.type === "permission.replied") {
     return { ...state, permissions: state.permissions.filter((item) => item.requestId !== action.requestId) };
