@@ -3267,3 +3267,10 @@ bash /tmp/test-api-after-restart.sh
 - What: `AgentWorkbench` 在模型目录加载后校验已保存偏好，目录外模型或 provider 不匹配时自动回退并持久化当前 `defaultModel`；`RunApplicationService` 在托管模型目录模式下校验请求模型，合法模型原样使用，缺失/非法/目录外模型回退默认模型，目录为空时返回 `VALIDATION_ERROR` 且不启动远端 run。
 - How: 未改 API 字段、数据库、generated SDK 或 `.env.local`；同步更新 HTTP API、agent-web README 和 opencode-runtime README，并补充前端 Playwright 与后端 application service 回归测试。
 - Result: 旧浏览器偏好不会继续命中已不在当前目录中的 provider；如果当前默认 provider 本身余额或鉴权异常，仍通过既有 `run.failed` 真实错误展示链路暴露给前端。
+
+### 2026-07-03 - 修复 Agent 下拉加载慢和失败后不刷新
+
+- Why: 右侧输入区 Agent 下拉依赖运行态 `/api/agent` 目录；首次加载慢、接口失败或返回空时，旧 UI 会因空列表禁用按钮，用户无法打开下拉重试，也可能在切换 workspace 后被旧响应回填。
+- What: `backend-api.listAgents(workspaceId, init?)` 支持单请求 `signal/timeoutMs`；`AgentWorkbench` 使用显式 workspaceId query key、8 秒短超时、READY/切换/打开/失败重试主动刷新，并在目录变化后校验 `selectedAgent` 是否仍是可作为主 Agent 的 `primary/all` 项；`FigmaChatPanel` 增加 loading/error/empty/retry 状态，进程 READY 时不再因空列表禁用 Agent 按钮。
+- How: 只改前端 client、工作台组件、对话面板和前端文档；不直连 opencode，不修改后端 HTTP 契约、事件、数据库、generated SDK 或环境配置。
+- Result: `FigmaChatPanel`/`backend-api` 单测、workbench 桌面与移动 mock E2E、agent-web/backend-api typecheck 均通过；旧 workspace 的慢 Agent 响应不会覆盖当前 workspace，失败后可在下拉内重试恢复。

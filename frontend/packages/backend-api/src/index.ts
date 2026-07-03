@@ -973,7 +973,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
     getRunDiff: (runId: string) => request<RunDiff>(agentPath(`/runs/${encodeURIComponent(runId)}/diff`)),
     acceptRunDiff: (runId: string) => request<RunDiffAction>(agentPath(`/runs/${encodeURIComponent(runId)}/diff/accept`), { method: "POST" }),
     rejectRunDiff: (runId: string) => request<RunDiffAction>(agentPath(`/runs/${encodeURIComponent(runId)}/diff/reject`), { method: "POST" }),
-    listAgents: async (workspaceId?: string) => (await runtimeList(agentPath(`/api/agent${query({ workspaceId })}`), request)).map(toAgentInfo),
+    listAgents: async (workspaceId?: string, init?: ExtraRequestInit) =>
+      (await runtimeList(agentPath(`/api/agent${query({ workspaceId })}`), request, init)).map(toAgentInfo),
     listModels: async (workspaceId?: string) => (await runtimeList(agentPath(`/api/model${query({ workspaceId })}`), request)).map(toModelInfo),
     listProviders: async (workspaceId?: string) =>
       (await runtimeList(agentPath(`/api/provider${query({ workspaceId })}`), request)).map(toProviderInfo),
@@ -1363,8 +1364,8 @@ function toWebSocketUrl(baseUrl: string, webSocketUrl: string): string {
   return absolute;
 }
 
-async function runtimeList(path: string, request: RequestFn) {
-  return listFromRuntimeEnvelope(await request<unknown>(path));
+async function runtimeList(path: string, request: RequestFn, init?: ExtraRequestInit) {
+  return listFromRuntimeEnvelope(await request<unknown>(path, init));
 }
 
 function postRuntime(path: string, payload: Record<string, unknown> | undefined, request: RequestFn, init?: ExtraRequestInit) {

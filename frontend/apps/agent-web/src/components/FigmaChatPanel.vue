@@ -585,6 +585,12 @@ const props =
     modelPickerDisabled?: boolean
     /** 可作为主运行入口选择的 Agent 列表 */
     agents?: AgentInfo[]
+    /** Agent 目录首次加载中。 */
+    agentsLoading?: boolean
+    /** Agent 目录已有数据后的后台刷新中。 */
+    agentsRefreshing?: boolean
+    /** Agent 目录加载失败文案。 */
+    agentsError?: string
     /** 当前选中的主 Agent 标识 */
     selectedAgent?: string
     /** 终止按钮是否禁用 */
@@ -650,6 +656,7 @@ const emit =
     (e: 'refresh-process'): void
     (e: 'select-model', model: any): void
     (e: 'change-agent', agentId: string): void
+    (e: 'refresh-agents'): void
     (e: 'clear-raw-output'): void
     (
       e: 'submit-feedback',
@@ -679,7 +686,11 @@ function toggleDropdown(event: Event) {
 function toggleAgentDropdown(event: Event) {
   event.stopPropagation()
   dropdownOpen.value = false
-  agentDropdownOpen.value = !agentDropdownOpen.value
+  const nextOpen = !agentDropdownOpen.value
+  agentDropdownOpen.value = nextOpen
+  if (nextOpen) {
+    emit('refresh-agents')
+  }
 }
 
 function closeDropdown() {
@@ -802,6 +813,11 @@ function selectAgent(agent: AgentInfo) {
   emit('change-agent', agentValue(agent))
   agentDropdownOpen.value = false
   agentSearch.value = ''
+}
+
+function retryAgentCatalog(event: Event) {
+  event.stopPropagation()
+  emit('refresh-agents')
 }
 const inputComposing = ref(false)
 const negativeFeedbackOpen = ref(false)
@@ -1671,6 +1687,7 @@ const processReady = computed(() => {
   }
   return !props.processStatus || props.processStatus.status === 'READY'
 })
+const agentPickerDisabled = computed(() => props.processRequired === true && !processReady.value)
 const processSubmitBlocked = computed(
   () =>
     props.running ||
@@ -3625,12 +3642,12 @@ function onCompositionEnd() {
               :content="selectedAgentLabel"
               placement="top"
               :show-after="100"
-              :disabled="mainAgentOptions.length === 0"
+              :disabled="agentPickerDisabled && mainAgentOptions.length === 0"
             >
               <button
                 type="button"
                 class="figma-chat-card-btn figma-chat-agent-btn"
-                :disabled="mainAgentOptions.length === 0"
+                :disabled="agentPickerDisabled"
                 aria-label="切换 Agent"
                 @click.stop="toggleAgentDropdown"
               >
@@ -3649,29 +3666,41 @@ function onCompositionEnd() {
                   @keydown.enter.prevent
                 />
               </div>
+              <div v-if="agentsRefreshing" class="figma-chat-agent-refreshing">刷新中...</div>
               <div class="figma-chat-agent-dropdown-list">
-                <button
-                  v-for="agent in filteredMainAgents"
-                  :key="agentValue(agent)"
-                  type="button"
-                  :class="['figma-chat-agent-option-item', isSelectedAgent(agent) && 'is-active']"
-                  @click="selectAgent(agent)"
-                >
-                  <div class="figma-chat-agent-option-info">
-                    <span
-                      class="figma-chat-agent-option-dot"
-                      :style="{ backgroundColor: agent.color || '#3366ff' }"
-                    />
-                    <span class="figma-chat-agent-option-text">
-                      <span class="figma-chat-agent-option-name">{{ agentLabel(agent) }}</span>
-                      <span v-if="agent.description" class="figma-chat-agent-option-desc">{{ agent.description }}</span>
-                    </span>
-                  </div>
-                  <span v-if="isSelectedAgent(agent)" class="figma-chat-agent-option-checked">✓</span>
-                </button>
-                <div v-if="filteredMainAgents.length === 0" class="figma-chat-agent-empty">
-                  暂无匹配 Agent
+                <div v-if="agentsLoading" class="figma-chat-agent-empty">
+                  正在加载 Agent...
                 </div>
+                <div v-else-if="agentsError" class="figma-chat-agent-empty figma-chat-agent-error">
+                  <span>{{ agentsError }}</span>
+                  <button type="button" class="figma-chat-agent-retry" aria-label="重新加载 Agent" @click="retryAgentCatalog">
+                    重新加载
+                  </button>
+                </div>
+                <template v-else>
+                  <button
+                    v-for="agent in filteredMainAgents"
+                    :key="agentValue(agent)"
+                    type="button"
+                    :class="['figma-chat-agent-option-item', isSelectedAgent(agent) && 'is-active']"
+                    @click="selectAgent(agent)"
+                  >
+                    <div class="figma-chat-agent-option-info">
+                      <span
+                        class="figma-chat-agent-option-dot"
+                        :style="{ backgroundColor: agent.color || '#3366ff' }"
+                      />
+                      <span class="figma-chat-agent-option-text">
+                        <span class="figma-chat-agent-option-name">{{ agentLabel(agent) }}</span>
+                        <span v-if="agent.description" class="figma-chat-agent-option-desc">{{ agent.description }}</span>
+                      </span>
+                    </div>
+                    <span v-if="isSelectedAgent(agent)" class="figma-chat-agent-option-checked">✓</span>
+                  </button>
+                  <div v-if="filteredMainAgents.length === 0" class="figma-chat-agent-empty">
+                    {{ mainAgentOptions.length === 0 ? '暂无可用 Agent' : '暂无匹配 Agent' }}
+                  </div>
+                </template>
               </div>
             </div>
           </div>
@@ -6870,6 +6899,12 @@ function onCompositionEnd() {
   border-bottom: 1px solid var(--ta-border, #e4e4e7);
 }
 
+.figma-chat-agent-refreshing {
+  padding: 6px 12px 0;
+  font-size: 11px;
+  color: var(--ta-muted, #8c8c8c);
+}
+
 .figma-chat-agent-search-input {
   width: 100%;
   height: 32px;
@@ -6892,6 +6927,28 @@ function onCompositionEnd() {
   min-height: 0;
   overflow-y: auto;
   padding: 8px 12px 12px;
+}
+
+.figma-chat-agent-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.figma-chat-agent-retry {
+  border: 0;
+  background: transparent;
+  color: var(--ta-ink, #3b82f6);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 0;
+}
+
+.figma-chat-agent-retry:hover,
+.figma-chat-agent-retry:focus-visible {
+  text-decoration: underline;
 }
 
 .figma-chat-agent-option-item {

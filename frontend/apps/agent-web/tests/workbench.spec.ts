@@ -453,6 +453,129 @@ test("agent picker updates the run agent", async ({ page }) => {
   });
 });
 
+test("agent picker retries after the catalog request fails", async ({ page }) => {
+  const agentRequests: string[] = [];
+  await mockBackendApi(page, {
+    agentRequests,
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    agentResponses: [
+      { status: 504, code: "OPENCODE_TIMEOUT", message: "Agent 目录加载超时" },
+      { status: 504, code: "OPENCODE_TIMEOUT", message: "Agent 目录加载超时" },
+      [{ id: "build", name: "Build", mode: "primary", description: "默认构建" }]
+    ]
+  });
+
+  await gotoWorkbench(page);
+  await expect.poll(() => agentRequests.length).toBe(1);
+
+  await page.getByRole("button", { name: "切换 Agent" }).click();
+  const agentDialog = page.getByRole("dialog", { name: "Agent 选择" });
+  await expect(agentDialog).toBeVisible();
+  await expect(agentDialog).toContainText("Agent 目录加载超时");
+
+  await agentDialog.getByRole("button", { name: "重新加载 Agent" }).click();
+
+  await expect.poll(() => agentRequests.length).toBeGreaterThanOrEqual(2);
+  await expect(agentDialog).toContainText("Build");
+});
+
+test("agent catalog uses the current workspace when an older request finishes later", async ({ page }) => {
+  let releaseGcmsAgents!: () => void;
+  const gcmsAgentsGate = new Promise<void>((resolve) => {
+    releaseGcmsAgents = resolve;
+  });
+  const agentRequests: string[] = [];
+  await mockBackendApi(page, {
+    agentRequests,
+    applications: [
+      { appId: "app_gcms", appName: "F-GCMS", enabled: true },
+      { appId: "app_coss", appName: "F-COSS", enabled: true }
+    ],
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        workspaceId: "wrk_app_gcms",
+        appId: "app_gcms",
+        versionId: "awv_gcms",
+        applicationWorkspaceId: "awp_gcms"
+      },
+      app_coss: {
+        ...workspace(),
+        workspaceId: "wrk_app_coss",
+        appId: "app_coss",
+        versionId: "awv_coss",
+        applicationWorkspaceId: "awp_coss"
+      }
+    },
+    personalWorkspaces: {
+      awv_gcms: [
+        {
+          ...defaultPersonalWorkspace("awv_gcms"),
+          applicationWorkspaceId: "awp_gcms",
+          runtimeWorkspace: {
+            ...workspace(),
+            workspaceId: "wrk_gcms_default",
+            name: "gcms-default",
+            appId: "app_gcms",
+            versionId: "awv_gcms",
+            applicationWorkspaceId: "awp_gcms"
+          }
+        }
+      ],
+      awv_coss: [
+        {
+          ...defaultPersonalWorkspace("awv_coss"),
+          appId: "app_coss",
+          applicationWorkspaceId: "awp_coss",
+          runtimeWorkspace: {
+            ...workspace(),
+            workspaceId: "wrk_coss_default",
+            name: "coss-default",
+            appId: "app_coss",
+            versionId: "awv_coss",
+            applicationWorkspaceId: "awp_coss"
+          }
+        }
+      ]
+    },
+    agentGatesByWorkspace: {
+      wrk_gcms_default: gcmsAgentsGate
+    },
+    agentsByWorkspace: {
+      wrk_gcms_default: [{ id: "gcms", name: "GCMS Agent", mode: "primary" }],
+      wrk_coss_default: [{ id: "coss", name: "COSS Agent", mode: "primary" }]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await expect(page.getByRole("button", { name: "F-GCMS" })).toBeVisible();
+
+  await page.getByRole("button", { name: "F-GCMS" }).click();
+  await page.getByRole("option", { name: /F-COSS/ }).click();
+
+  await expect(page.getByRole("button", { name: "F-COSS" })).toBeVisible();
+  await expect.poll(() => agentRequests.some((request) => request.includes("workspaceId=wrk_coss_default"))).toBe(true);
+  await page.getByRole("button", { name: "切换 Agent" }).click();
+  const agentDialog = page.getByRole("dialog", { name: "Agent 选择" });
+  await expect(agentDialog).toContainText("COSS Agent");
+
+  releaseGcmsAgents();
+
+  await page.waitForTimeout(100);
+  await expect(agentDialog).toContainText("COSS Agent");
+  await expect(agentDialog).not.toContainText("GCMS Agent");
+});
+
 test("model picker keeps the selected model after page reload", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
@@ -1229,6 +1352,9 @@ async function mockBackendApi(
     configurationApplicationRequests?: string[];
     agentRequests?: string[];
     agents?: Array<Record<string, unknown>>;
+    agentResponses?: Array<Array<Record<string, unknown>> | { status?: number; code: string; message: string; details?: Record<string, unknown> }>;
+    agentsByWorkspace?: Record<string, Array<Record<string, unknown>>>;
+    agentGatesByWorkspace?: Record<string, Promise<void>>;
     models?: Array<Record<string, unknown>>;
     providers?: Array<Record<string, unknown>>;
     applications?: Array<{ appId: string; appName: string; enabled: boolean }>;
@@ -1385,6 +1511,7 @@ async function mockBackendApi(
   const workspaceItems = [workspace()];
   const applications = capture.applications ?? [{ appId: "app_gcms", appName: "F-GCMS", enabled: true }];
   const managedApplications = capture.managedApplications ?? applications;
+  const agentResponses = [...(capture.agentResponses ?? [])];
   let currentProcessStatus = capture.processStatus ?? "READY";
   let sshKeys: Array<Record<string, unknown>> = [];
   await page.route("**/api/**", async (route) => {
@@ -1679,8 +1806,19 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/agent") {
+      const workspaceId = url.searchParams.get("workspaceId") ?? "";
       capture.agentRequests?.push(`${method} ${url.pathname}${url.search}`);
-      await route.fulfill(json(capture.agents ?? [{ id: "build", name: "Build" }]));
+      await capture.agentGatesByWorkspace?.[workspaceId];
+      const queued = agentResponses.length > 0 ? agentResponses.shift() : undefined;
+      if (queued && !Array.isArray(queued)) {
+        await route.fulfill({
+          status: queued.status ?? 500,
+          ...jsonFailure(queued.code, queued.message, queued.details)
+        });
+        return;
+      }
+      const agents = queued ?? capture.agentsByWorkspace?.[workspaceId] ?? capture.agents ?? [{ id: "build", name: "Build" }];
+      await route.fulfill(json(agents));
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/model") {

@@ -997,6 +997,41 @@ describe("backend-api", () => {
     expect(fetcher).toHaveBeenCalledWith("http://api/api/internal/agent/opencode/api/agent?workspaceId=wrk_1234567890abcdef", expect.any(Object));
   });
 
+  it("lists runtime agents with caller cancellation and local timeout options", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    let resolveFetch: ((response: Response) => void) | undefined;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((_url, init) => {
+      capturedSignal = init?.signal as AbortSignal | undefined;
+      return new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      });
+    });
+    const client = createBackendApiClient({ baseUrl: "http://api", fetcher, traceIdFactory: () => "trace_fixed" });
+    const controller = new AbortController();
+
+    const request = client.listAgents("wrk_1234567890abcdef", { signal: controller.signal, timeoutMs: 8000 });
+
+    await Promise.resolve();
+    expect(fetcher).toHaveBeenCalledWith("http://api/api/internal/agent/opencode/api/agent?workspaceId=wrk_1234567890abcdef", expect.any(Object));
+    const init = fetcher.mock.calls[0]?.[1] as RequestInit & { timeoutMs?: number };
+    expect(init.timeoutMs).toBeUndefined();
+    let assertionError: unknown;
+    try {
+      controller.abort();
+      expect(capturedSignal?.aborted).toBe(true);
+    } catch (error) {
+      assertionError = error;
+    } finally {
+      resolveFetch?.(
+        new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: [{ id: "build", name: "Build" }] }), { status: 200 })
+      );
+      await request.catch(() => undefined);
+    }
+    if (assertionError) {
+      throw assertionError;
+    }
+  });
+
   it("preserves command catalog source and hints for slash parameter forms", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(

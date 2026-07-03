@@ -92,6 +92,7 @@ const router = useRouter();
 const OPENCODE_PROCESS_STATUS_FAST_REFETCH_INTERVAL_MS = 5000;
 const OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS = 30000;
 const OPENCODE_PROCESS_START_OPERATION_POLL_INTERVAL_MS = 500;
+const AGENT_CATALOG_REQUEST_TIMEOUT_MS = 8000;
 const OPENCODE_PROCESS_START_STEPS = [
   { step: "VALIDATING_REQUEST", name: "校验请求" },
   { step: "CHECKING_ASSIGNMENT", name: "确认分配" },
@@ -652,9 +653,10 @@ const providersQuery = useQuery({
 
 // Agent、Command 需要 opencode READY + workspace
 const agentsQuery = useQuery({
-  queryKey: ["runtime", "agents", selectedWorkspaceIdRef],
+  queryKey: computed(() => ["runtime", "agents", selectedWorkspaceIdRef.value ?? ""] as const),
   enabled: opencodeCatalogReady,
-  queryFn: () => api.listAgents(selectedWorkspaceIdRef.value!),
+  queryFn: ({ signal, queryKey }) =>
+    api.listAgents(String(queryKey[2]), { signal, timeoutMs: AGENT_CATALOG_REQUEST_TIMEOUT_MS }),
   retry: false
 });
 const commandsQuery = useQuery({
@@ -703,6 +705,9 @@ const vcsStatusQuery = useQuery({
 });
 
 const agents = computed(() => agentsQuery.data.value ?? []);
+const agentsLoading = computed(() => opencodeCatalogReady.value && agentsQuery.isFetching.value && agents.value.length === 0);
+const agentsRefreshing = computed(() => opencodeCatalogReady.value && agentsQuery.isFetching.value && agents.value.length > 0);
+const agentsError = computed(() => agentCatalogErrorMessage(agentsQuery.error.value));
 const models = computed(() => modelsQuery.data.value ?? []);
 const providers = computed(() => providersQuery.data.value ?? []);
 const commands = computed(() => commandsQuery.data.value ?? []);
@@ -731,6 +736,22 @@ function refreshOpencodeProcessStatus() {
   void opencodeProcessQuery.refetch().finally(() => {
     manualOpencodeProcessRefreshing.value = false;
   });
+}
+
+function agentCatalogErrorMessage(error: unknown): string {
+  if (!error) return "";
+  if (error instanceof BackendApiError) {
+    return error.message || "Agent 目录加载失败";
+  }
+  if (error instanceof Error) {
+    return error.message || "Agent 目录加载失败";
+  }
+  return "Agent 目录加载失败";
+}
+
+function refreshAgentsCatalog() {
+  if (!opencodeCatalogReady.value || agentsQuery.isFetching.value) return;
+  void agentsQuery.refetch();
 }
 const historyList = computed(() => historyItems(run.value, sessionsItems.value));
 const historyLoadingSessionId = ref<string | null>(null);
@@ -1063,7 +1084,10 @@ watch(activePath, () => {
     markdownPreview.value = false;
   }
 });
-watch(selectedWorkspaceIdRef, (id) => {
+watch(selectedWorkspaceIdRef, (id, previous) => {
+  if (previous && previous !== id) {
+    void queryClient.cancelQueries({ queryKey: ["runtime", "agents", previous], exact: true });
+  }
   if (id) {
     workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [id]: false };
     void loadDirectory("", id);
@@ -1071,12 +1095,18 @@ watch(selectedWorkspaceIdRef, (id) => {
   }
 }, { immediate: true });
 watch(agentsQuery.data, (data) => {
-  if (!selectedAgent.value && data?.length) {
-    // 主运行 Agent 与 opencode local.agent.list() 保持一致：排除 subagent 和 hidden。
-    const defaultAgent = data.find((agent) => agent.mode !== "subagent" && !agent.hidden) ?? data[0];
-    if (defaultAgent.agentId) {
-      selectedAgent.value = defaultAgent.agentId;
-    }
+  if (!data) return;
+  // 主运行 Agent 与 opencode local.agent.list() 保持一致：排除 subagent 和 hidden。
+  const defaultAgent = data.find((agent) => agent.mode !== "subagent" && !agent.hidden);
+  if (!defaultAgent?.agentId) {
+    selectedAgent.value = "";
+    return;
+  }
+  const currentAgent = selectedAgent.value
+    ? data.find((agent) => agent.agentId === selectedAgent.value || agent.name === selectedAgent.value)
+    : undefined;
+  if (!currentAgent || currentAgent.mode === "subagent" || currentAgent.hidden) {
+    selectedAgent.value = defaultAgent.agentId;
   }
 });
 watch(providersQuery.data, (data) => {
@@ -1108,6 +1138,7 @@ watch(opencodeProcessReady, (ready, previous) => {
   void queryClient.invalidateQueries({ queryKey: ["runtime", "lsp"] });
   void queryClient.invalidateQueries({ queryKey: ["runtime", "mcp"] });
   void queryClient.invalidateQueries({ queryKey: ["runtime", "vcs"] });
+  refreshAgentsCatalog();
   if (selectedWorkspaceId.value) {
     void loadDirectory("", selectedWorkspaceId.value, true);
   }
@@ -3225,6 +3256,9 @@ async function handleLogout() {
           :selected-model-label="selectedModelLabel"
           :model-picker-disabled="false"
           :agents="agents"
+          :agents-loading="agentsLoading"
+          :agents-refreshing="agentsRefreshing"
+          :agents-error="agentsError"
           :selected-agent="selectedAgent"
           :stop-disabled="!canStopRun"
           :stop-disabled-reason="stopDisabledReason"
@@ -3247,6 +3281,7 @@ async function handleLogout() {
           @reject-question="(requestId: string) => rejectQuestionMutation.mutate(requestId)"
           @select-session="(id: string) => switchSession(id)"
           @change-agent="selectRuntimeAgent"
+          @refresh-agents="refreshAgentsCatalog"
           @select-model="(model) => selectRuntimeModel(model)"
           @submit-feedback="handleSubmitFeedback"
           @clear-raw-output="clearCurrentRawOutput"

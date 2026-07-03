@@ -44,6 +44,57 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("change-agent")).toEqual([["all-rounder"]]);
   });
 
+  it("keeps the agent picker openable while agents are loading", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        agents: [],
+        agentsLoading: true
+      } as any
+    });
+
+    const button = wrapper.get('[aria-label="切换 Agent"]');
+    expect(button.attributes("disabled")).toBeUndefined();
+    await button.trigger("click");
+
+    expect(wrapper.find(".figma-chat-agent-dropdown").exists()).toBe(true);
+    expect(wrapper.text()).toContain("正在加载 Agent");
+  });
+
+  it("emits refresh when the agent picker failed to load", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        agents: [],
+        agentsError: "Agent 目录加载失败"
+      } as any
+    });
+
+    await wrapper.get('[aria-label="切换 Agent"]').trigger("click");
+
+    expect(wrapper.text()).toContain("Agent 目录加载失败");
+    await wrapper.get('[aria-label="重新加载 Agent"]').trigger("click");
+
+    expect(wrapper.emitted("refresh-agents")).toEqual([[], []]);
+  });
+
+  it("shows an empty state when the agent catalog has no main agents", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        agents: []
+      } as any
+    });
+
+    await wrapper.get('[aria-label="切换 Agent"]').trigger("click");
+
+    expect(wrapper.find(".figma-chat-agent-dropdown").exists()).toBe(true);
+    expect(wrapper.text()).toContain("暂无可用 Agent");
+  });
+
   it("shows mentionable subagent/all agents when the user types at-sign", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
