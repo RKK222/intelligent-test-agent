@@ -34,6 +34,20 @@
   - 不改 reducer、投影顺序、RunEvent、后端 API 或默认折叠逻辑；保留“同一回合 reasoning 合并为一行、默认收起”的当前行为，只降低视觉权重并修正头像对齐。
 - Result:
   - 前端 Vitest 全量通过（36 files, 299 passed, 1 skipped），`@test-agent/agent-chat` typecheck 通过；Playwright 构造 DOM 检查隐藏 step 行头像与 reasoning 触发器 top delta 为 0px，reasoning `已完成` 与工具 `已读取` x delta 为 0px；前端 Vite 已在 `127.0.0.1:3001` 启动验证入口。
+### 2026-07-04 - 文件修改摘要默认折叠并汇总增减行
+
+- Why:
+  - 右侧 opencode-like 时间线中的“文件修改 N”摘要会默认展开大量文件，挤占对话区域；折叠后也需要保留本轮变更规模信息。
+- What:
+  - `DiffSummaryRow` 改为默认折叠，标题行展示全部文件新增/删除行数汇总，点击标题展开文件列表；展开后的单个文件条目仍负责打开对应文件。
+  - 补充时间线回归测试，覆盖默认折叠、点击展开/收起，以及父级 diff 文件列表变化后折叠态汇总自动更新。
+- How:
+  - 修改 `frontend/packages/agent-chat/src/opencode-like/components/rows/DiffSummaryRow.vue` 和 `styles/diff.css`；
+  - 同步更新 `frontend/packages/agent-chat/tests/opencode-timeline.test.ts` 与 `frontend/packages/agent-chat/README.md`。
+- Result:
+  - `corepack pnpm vitest run packages/agent-chat/tests/opencode-timeline.test.ts packages/agent-chat/tests/opencode-like-state.test.ts` 通过；
+  - `corepack pnpm --filter @test-agent/agent-chat typecheck` 通过。
+
 ### 2026-07-04 - 修复文件预览模式下 Monaco 编辑器坍塌与原始文件信息不可见
 
 - Why:

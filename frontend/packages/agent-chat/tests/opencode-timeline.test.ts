@@ -55,7 +55,47 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelector(".oc-text-part")).toBeTruthy();
     expect(container.querySelector(".oc-text-part .oc-icon-button")).toBeTruthy();
     expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();
+    await fireEvent.click(container.querySelector(".oc-diff-summary__header") as HTMLElement);
     expect(getByText("src/checkout.ts")).toBeTruthy();
+  });
+
+  it("keeps diff files collapsed by default and updates folded line totals when files change", async () => {
+    const initialState = createOpencodeLikeState({
+      messages: [userMessage("msg_user_1", "生成文件")],
+      diffFiles: [
+        { path: "src/a.ts", patch: "", additions: 2, deletions: 1, status: "modified" },
+        { path: "src/b.ts", patch: "", additions: 3, deletions: 4, status: "modified" }
+      ]
+    });
+
+    const { container, getByText, queryByText, rerender } = render(OpencodeTimeline, {
+      props: { state: initialState }
+    });
+
+    expect(container.querySelector(".oc-diff-summary__header")?.getAttribute("aria-expanded")).toBe("false");
+    expect(getByText("+5")).toBeTruthy();
+    expect(getByText("-5")).toBeTruthy();
+    expect(queryByText("src/a.ts")).toBeNull();
+
+    await fireEvent.click(container.querySelector(".oc-diff-summary__header") as HTMLElement);
+    expect(container.querySelector(".oc-diff-summary__header")?.getAttribute("aria-expanded")).toBe("true");
+    expect(getByText("src/a.ts")).toBeTruthy();
+
+    await fireEvent.click(container.querySelector(".oc-diff-summary__header") as HTMLElement);
+    expect(container.querySelector(".oc-diff-summary__header")?.getAttribute("aria-expanded")).toBe("false");
+
+    const updatedState = createOpencodeLikeState({
+      messages: [userMessage("msg_user_1", "生成文件")],
+      diffFiles: [
+        { path: "src/a.ts", patch: "", additions: 10, deletions: 0, status: "modified" },
+        { path: "src/c.ts", patch: "", additions: 1, deletions: 2, status: "modified" }
+      ]
+    });
+    await rerender({ state: updatedState });
+
+    expect(getByText("+11")).toBeTruthy();
+    expect(getByText("-2")).toBeTruthy();
+    expect(queryByText("src/c.ts")).toBeNull();
   });
 
   it("renders task tool parts as clickable subagent cards", async () => {
