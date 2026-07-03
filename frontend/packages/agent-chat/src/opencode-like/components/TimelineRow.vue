@@ -22,7 +22,7 @@ import ContextToolGroup from "./tools/ContextToolGroup.vue";
 import ToolPartGroup from "./tools/ToolPartGroup.vue";
 
 const props = defineProps<TimelineRowProps>();
-const emit = defineEmits<{ openDiff: []; selectSubagent: [sessionId: string] }>();
+const emit = defineEmits<{ openDiff: []; openFile: [path: string]; selectSubagent: [sessionId: string] }>();
 
 const userMessage = computed(() => props.state.messageById[props.row.type === "error" ? "" : props.row.userMessageId]);
 
@@ -146,6 +146,7 @@ const toolGroupParts = computed(() => {
     class="oc-row"
     :files="row.files"
     @open-diff="emit('openDiff')"
+    @open-file="(path) => emit('openFile', path)"
   />
   <ErrorRow v-else-if="row.type === 'error'" class="oc-row" :message="row.message" />
 </template>

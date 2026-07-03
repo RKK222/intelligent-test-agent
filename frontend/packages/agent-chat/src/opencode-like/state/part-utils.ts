@@ -17,6 +17,9 @@ export function isRenderablePart(part: MessagePart, options: { showReasoningSumm
   if (part.type === "reasoning") {
     return options.showReasoningSummaries && (part.text.trim().length > 0 || part.status === "running");
   }
+  if (part.type === "file") {
+    return false;
+  }
   return true;
 }
 

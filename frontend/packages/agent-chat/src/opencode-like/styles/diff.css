@@ -74,3 +74,17 @@
 .oc-diff-line.is-hunk {
   color: var(--oc-accent);
 }
+
+.oc-diff-file.is-clickable {
+  cursor: pointer;
+  border-radius: var(--oc-radius-sm);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.oc-diff-file.is-clickable:hover {
+  background-color: var(--oc-surface-muted);
+}
+
+.oc-diff-file.is-clickable:hover .oc-diff-file__path {
+  color: var(--oc-accent);
+}

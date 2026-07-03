@@ -654,6 +654,7 @@ const emit =
     (e: 'open-tasks'): void
     (e: 'update:inputValue', value: string): void
     (e: 'open-diff', path: string): void
+    (e: 'open-file', path: string): void
     (e: 'initialize-process'): void
     (e: 'refresh-process'): void
     (e: 'select-model', model: any): void
@@ -2588,6 +2589,7 @@ function onCompositionEnd() {
         v-else
         :state="opencodeTimelineState"
         @open-diff="openTimelineDiff"
+        @open-file="(path) => emit('open-file', path)"
         @select-subagent="selectSubagent"
       />
       <div v-if="!activeSubagentSessionId && !historyLoading && !props.running && lastFeedbackableMessage" class="figma-chat-timeline-actions">
