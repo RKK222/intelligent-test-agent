@@ -107,7 +107,7 @@ const OPENCODE_PROCESS_START_STEPS = [
 const SELECTED_PROVIDER_STORAGE_KEY = "ta_selected_provider";
 const SELECTED_MODEL_STORAGE_KEY = "ta_selected_model";
 const ACTIVE_RUN_PROBE_INTERVAL_MS = 1500;
-const RAW_OUTPUT_MAX_ENTRIES_PER_SESSION = 1000;
+const RAW_OUTPUT_MAX_ENTRIES_PER_SESSION = 10000;
 const RAW_OUTPUT_BODY_LIMIT = 200_000;
 
 type RawOutputKind = "request" | "response" | "sse";

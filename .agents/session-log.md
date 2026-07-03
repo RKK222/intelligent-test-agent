@@ -53,6 +53,13 @@
 - What: 发布前新增远程变化预览与 expected HEAD 校验，应用 pull 后立即同步版本和本机副本 commit；冲突路径关闭 `core.quotepath`，支持全部保留个人版本、全部采用远程版本和取消 merge，目标侧缺失按 Git 删除语义处理。前端复用已加载 diff 更新数量角标、拦截旧工作区请求回写，并明确 AU/UD 删除侧。
 - How: 复用 `GitWorkspaceService`、个人工作区归属校验和现有发布编排，新增 preview/resolve-all HTTP 契约；真实临时 Git 仓库覆盖中文修改/删除冲突，服务测试覆盖预览汇总、HEAD 变化前置拦截和冲突后的元数据同步，前端测试覆盖预览确认与批量处理。处理了会话开始前遗留的 `git pull --rebase`，保留两侧 session log 后完成 7 个本地提交重放。
 - Result: common 24 个、workspace-management 36 个、API Controller 和 Git 面板/合并编辑器定向测试通过，agent-web typecheck/build 通过；使用 `.env.test` / `test` profile / JDK 25 重启并检查健康状态。未修改环境文件、数据库、事件、generated SDK 或 888 当前个人 worktree 冲突内容。
+### 2026-07-03 - 原始输出限制改为10000条
+
+- Why: 调试过程中需要查看更多的原始报文（包括请求、响应和 SSE 消息），原有 1000 条的限制不够用，需要将其调整至 10000 条以保留更多历史。
+- What: 修改 `AgentWorkbench.vue` 中定义会话级原始报文最大条数的常量 `RAW_OUTPUT_MAX_ENTRIES_PER_SESSION` 从 1000 改为 10000。
+- How: 变更 `AgentWorkbench.vue` 常量值，并通过 `corepack pnpm test` 跑通所有前端单元测试。
+- Result: 前端所有单元测试均通过，无 API 协议、事件流、数据库或环境配置改动。
+
 ### 2026-07-03 - 修复对话流跟滚与用户向上滚动防锁死问题
 
 - Why: 当智能体在思考或工具输出时，高频流式数据更新会触发自动跟滚；原逻辑使用平滑动画且缺乏全局滚动原打断，导致用户在向上拖滚动条或使用滚轮/键盘等方式阅读历史时会被强制下拉到底部。
