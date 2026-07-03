@@ -45,7 +45,7 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelector(".oc-context-group")).toBeTruthy();
     expect(container.querySelector(".oc-assistant-part")).toBeTruthy();
     expect(container.querySelector(".oc-diff-summary")).toBeTruthy();
-    expect(getByText("查看文件")).toBeTruthy();
+    expect(getByText("文件修改 1")).toBeTruthy();
     expect(getByText("分析 checkout 失败")).toBeTruthy();
     expect(getByText("探索")).toBeTruthy();
     expect(getByText("读取 2 次")).toBeTruthy();
@@ -237,8 +237,8 @@ describe("OpencodeTimeline", () => {
 
     expect(container.querySelectorAll('[data-testid="oc-tool-group"]')).toHaveLength(3);
     expect(container.querySelectorAll(".oc-tool-group__trigger")).toHaveLength(3);
-    expect(getByText("Bash")).toBeTruthy();
-    expect(getByText("Skill")).toBeTruthy();
+    expect(getByText("bash")).toBeTruthy();
+    expect(getByText("skill")).toBeTruthy();
     expect(container.querySelectorAll(".oc-tool-group__trigger .oc-tool__subtitle")[0]?.textContent).toBe("2 次");
     expect(container.querySelectorAll(".oc-tool-group__trigger .oc-tool__status")[0]?.textContent).toBe("已读取");
     expect(container.querySelectorAll(".oc-tool-group__trigger .oc-tool__status")[1]?.textContent).toBe("失败");

@@ -2,6 +2,22 @@
 
 ## Entries
 
+### 2026-07-03 - 收敛时间线样式、文件预览 Mermaid 切换与修改文件入口
+
+- Why:
+  - opencode-like 时间线继续存在助手头像与首行内容对齐不稳定、Mermaid 预览按钮过大且工作区文件预览无法在脚本/图表间切换、文件修改卡片入口仍可能走 Diff 的问题。
+- What:
+  - 将聊天 Markdown 和工作区 Markdown 预览中的 Mermaid 代码块统一为轻量“脚本/图表”切换，默认展示脚本，点击后按需加载 `mermaid` 渲染图表，按钮和内容落在同一浅色容器内。
+  - 恢复 assistant frame 固定头像列栅格，移除 `has-header` 的 flex 强制覆盖，并用头像尺寸变量统一工具、思考、正文首行对齐。
+  - 工具标题恢复 opencode 风格小写，短绝对路径保留开头 `/`，文件修改卡片头部和文件行都改为打开文件而不是打开 Diff。
+- How:
+  - 修改 `agent-chat` 的 `MarkdownView.vue`、opencode-like rows/tools/parts/diff 样式、工具路径展示和 diff summary 行；修改 `editor` 的 `MarkdownPreview.vue` 增加 Mermaid 切换能力并引入 `mermaid` 依赖。
+  - 同步更新 agent-chat/editor/agent-web 相关单元测试，未改后端 API、RunEvent、DTO、数据库或 generated SDK。
+- Result:
+  - `git diff --check` 通过。
+  - `corepack pnpm@10.25.0 --dir frontend exec vitest run packages/agent-chat/tests/MarkdownView.test.ts packages/editor/tests/MarkdownPreview.test.ts packages/agent-chat/tests/opencode-timeline.test.ts apps/agent-web/tests/FigmaChatPanel.test.ts` 通过（76 passed, 1 skipped）。
+  - `@test-agent/agent-chat`、`@test-agent/editor`、`@test-agent/agent-web` typecheck 均通过。
+
 ### 2026-07-03 - 优化对话时间线行间距、工具状态样式与文件输出路径展示
 
 - Why:

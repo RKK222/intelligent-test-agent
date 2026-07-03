@@ -1,6 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/vue";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render } from "@testing-library/vue";
 import MarkdownPreview from "../src/MarkdownPreview.vue";
+
+vi.mock("mermaid", () => {
+  return {
+    default: {
+      initialize: vi.fn(),
+      render: vi.fn().mockResolvedValue({ svg: "<svg id='mock-preview-svg'>Mocked SVG</svg>" })
+    }
+  };
+});
 
 // 等待防抖（150ms）+ markdown-it/dompurify/highlight.js 动态 import 完成并完成 DOM 更新
 const waitRender = () => new Promise((r) => setTimeout(r, 350));
@@ -68,5 +77,30 @@ describe("MarkdownPreview", () => {
   it("空内容显示占位", async () => {
     const { findByText } = render(MarkdownPreview, { props: { content: "   " } });
     expect(await findByText("无内容")).toBeTruthy();
+  });
+
+  it("mermaid 在工作区预览里支持脚本与图表切换", async () => {
+    const { container } = render(MarkdownPreview, {
+      props: { content: "```mermaid\ngraph TD;\n  A-->B;\n```" }
+    });
+    await waitRender();
+
+    const chartBtn = container.querySelector(".ta-mermaid-preview-btn");
+    expect(chartBtn).toBeTruthy();
+    expect(chartBtn?.textContent).toContain("图表");
+    expect(container.querySelector("code.language-mermaid")?.textContent).toContain("graph TD;");
+
+    if (chartBtn) {
+      await fireEvent.click(chartBtn);
+      await waitRender();
+      expect(container.querySelector("#mock-preview-svg")).toBeTruthy();
+      expect((container.querySelector(".ta-mermaid-script") as HTMLElement | null)?.hidden).toBe(true);
+    }
+
+    const scriptBtn = container.querySelector('[data-mermaid-mode="script"]');
+    if (scriptBtn) {
+      await fireEvent.click(scriptBtn);
+      expect((container.querySelector(".ta-mermaid-script") as HTMLElement | null)?.hidden).toBe(false);
+    }
   });
 });

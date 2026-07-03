@@ -17,10 +17,8 @@ const emit = defineEmits<{
 }>();
 
 function handleHeaderClick() {
-  if (props.files.length === 1) {
+  if (props.files.length > 0) {
     emit("openFile", props.files[0].path);
-  } else {
-    emit("openDiff");
   }
 }
 </script>
@@ -32,7 +30,6 @@ function handleHeaderClick() {
         <FileDiff class="oc-tool__icon" />
         文件修改 {{ files.length }}
       </span>
-      <span class="oc-diff-summary__action">查看文件</span>
     </button>
     <div class="oc-diff-summary__files">
       <div

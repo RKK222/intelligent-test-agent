@@ -25,6 +25,7 @@ const scrollEl = ref<HTMLElement | null>(null);
 // markdown-it 实例与 DOMPurify 句柄，懒加载后缓存
 const mdRef = shallowRef<{ render: (src: string) => string } | null>(null);
 const purifyRef = shallowRef<{ sanitize: (dirty: string) => string } | null>(null);
+const mermaidRef = shallowRef<any>(null);
 // 首次加载 markdown-it/dompurify 之前给一个轻量占位
 const loading = ref(true);
 // 是否已发出过 ready（仅首次渲染完成时发一次）
@@ -34,7 +35,19 @@ let renderTimer: ReturnType<typeof setTimeout> | null = null;
 let syncRaf = 0;
 
 // 懒加载 markdown-it + highlight.js + dompurify，仅在首次需要渲染时加载，避免进入首屏 bundle
-async function ensureLibs() {
+async function ensureLibs(needMermaid = false) {
+  if (mdRef.value && purifyRef.value && (!needMermaid || mermaidRef.value)) {
+    return;
+  }
+  if (needMermaid && !mermaidRef.value) {
+    const mermaidMod = await import("mermaid");
+    mermaidRef.value = mermaidMod.default;
+    mermaidRef.value.initialize({
+      startOnLoad: false,
+      theme: "neutral",
+      securityLevel: "loose"
+    });
+  }
   if (mdRef.value && purifyRef.value) {
     return;
   }
@@ -62,6 +75,18 @@ async function ensureLibs() {
     const token = tokens[idx];
     const lang = token.info ? token.info.trim() : "";
     const attrs = slf.renderAttrs(token);
+    if (lang === "mermaid") {
+      const id = `ta-mermaid-${Math.random().toString(36).substring(2, 9)}`;
+      const escapedCode = md.utils.escapeHtml(token.content);
+      return `<div${attrs} class="mermaid-block is-script" id="${id}" data-content="${encodeURIComponent(token.content)}">
+        <div class="ta-mermaid-header">
+          <button type="button" class="ta-mermaid-mode-btn is-active" data-mermaid-mode="script" data-block-id="${id}">脚本</button>
+          <button type="button" class="ta-mermaid-mode-btn ta-mermaid-preview-btn" data-mermaid-mode="chart" data-block-id="${id}">图表</button>
+        </div>
+        <pre class="hljs ta-mermaid-script"><code class="language-mermaid">${escapedCode}</code></pre>
+        <div class="ta-mermaid-chart" hidden></div>
+      </div>`;
+    }
     let code: string;
     if (lang && hljsMod.default.getLanguage(lang)) {
       try {
@@ -76,6 +101,64 @@ async function ensureLibs() {
   };
   mdRef.value = md;
   purifyRef.value = DOMPurifyMod.default;
+}
+
+async function handleMdPreviewClick(event: MouseEvent) {
+  const target = event.target as HTMLElement;
+  const btn = target.closest(".ta-mermaid-mode-btn") as HTMLButtonElement | null;
+  if (!btn) return;
+
+  const blockId = btn.getAttribute("data-block-id");
+  if (!blockId) return;
+
+  const block = document.getElementById(blockId);
+  if (!block) return;
+
+  const mode = btn.getAttribute("data-mermaid-mode") ?? "script";
+  const scriptEl = block.querySelector<HTMLElement>(".ta-mermaid-script");
+  const chartEl = block.querySelector<HTMLElement>(".ta-mermaid-chart");
+
+  block.querySelectorAll<HTMLButtonElement>(".ta-mermaid-mode-btn").forEach((button) => {
+    button.classList.toggle("is-active", button === btn);
+  });
+
+  if (mode === "script") {
+    if (scriptEl) scriptEl.hidden = false;
+    if (chartEl) chartEl.hidden = true;
+    block.classList.add("is-script");
+    block.classList.remove("is-chart");
+    return;
+  }
+
+  if (!chartEl) return;
+  const content = decodeURIComponent(block.getAttribute("data-content") ?? "");
+  const originalText = btn.textContent ?? "图表";
+  btn.disabled = true;
+  btn.textContent = "渲染中";
+
+  try {
+    await ensureLibs(true);
+    if (mermaidRef.value && !chartEl.innerHTML.trim()) {
+      const { svg } = await mermaidRef.value.render(blockId + "-svg", content);
+      chartEl.innerHTML = svg;
+    }
+    if (scriptEl) scriptEl.hidden = true;
+    chartEl.hidden = false;
+    block.classList.add("is-chart");
+    block.classList.remove("is-script");
+  } catch (err) {
+    console.error("Mermaid render error:", err);
+    if (scriptEl) scriptEl.hidden = false;
+    chartEl.hidden = true;
+    block.classList.add("is-script");
+    block.classList.remove("is-chart");
+
+    const badDiv = document.getElementById(`d${blockId}-svg`);
+    if (badDiv) badDiv.remove();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = originalText;
+  }
 }
 
 // 实际渲染：markdown-it 转 HTML 后用 DOMPurify 消毒，防御本地文件中的脚本/恶意链接
@@ -176,6 +259,7 @@ defineExpose({ scrollToSourceLine });
     ref="scrollEl"
     class="md-preview flex h-full min-h-0 flex-col overflow-auto bg-[var(--ta-surface)] pl-14 pr-6 py-4 text-[13px] leading-[1.7] text-[var(--ta-text)]"
     style="padding:28px;"
+    @click="handleMdPreviewClick"
     @scroll="onScroll"
   >
     <div v-if="loading" class="text-[12px] text-[var(--ta-muted)]">正在准备预览…</div>
@@ -256,6 +340,70 @@ defineExpose({ scrollToSourceLine });
 
 .markdown-body :deep(pre code) {
   background: transparent;
+}
+
+.markdown-body :deep(.mermaid-block) {
+  background: var(--ta-panel-2, var(--ta-control));
+  border: 1px solid var(--ta-border);
+  border-radius: 6px;
+  padding: 6px;
+  margin: 8px 0;
+  overflow-x: auto;
+}
+
+.markdown-body :deep(.ta-mermaid-header) {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0 0 6px;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--ta-border) 70%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ta-control) 72%, #ffffff);
+}
+
+.markdown-body :deep(.ta-mermaid-mode-btn) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 20px;
+  padding: 0 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ta-text);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.markdown-body :deep(.ta-mermaid-mode-btn:hover) {
+  background: color-mix(in srgb, var(--ta-border) 72%, transparent);
+}
+
+.markdown-body :deep(.ta-mermaid-mode-btn.is-active) {
+  background: var(--ta-surface);
+  color: var(--ta-ink);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.markdown-body :deep(.ta-mermaid-mode-btn:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.markdown-body :deep(.ta-mermaid-script[hidden]),
+.markdown-body :deep(.ta-mermaid-chart[hidden]) {
+  display: none !important;
+}
+
+.markdown-body :deep(.ta-mermaid-chart) {
+  display: flex;
+  justify-content: center;
+  min-width: 360px;
 }
 </style>
 

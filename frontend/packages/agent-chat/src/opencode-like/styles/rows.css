@@ -62,9 +62,12 @@
 }
 
 .oc-assistant-frame {
+  --oc-avatar-size: 28px;
+  --oc-avatar-column: calc(var(--oc-avatar-size) + 6px);
+  --oc-avatar-gap: 12px;
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  column-gap: 12px;
+  grid-template-columns: var(--oc-avatar-column) minmax(0, 1fr);
+  column-gap: var(--oc-avatar-gap);
   align-items: start;
   max-width: 100%;
 }
@@ -72,7 +75,7 @@
 .oc-assistant-frame.is-continuation {
   display: block;
   margin-top: 6px;
-  padding-left: 46px;
+  padding-left: calc(var(--oc-avatar-column) + var(--oc-avatar-gap));
   max-width: 100%;
 }
 
@@ -86,28 +89,28 @@
 }
 
 .oc-assistant-frame.has-header {
-  display: flex !important;
-  flex-direction: row !important;
-  align-items: flex-start !important;
-  gap: 12px !important;
-  padding-left: 0 !important;
+  display: grid;
+  grid-template-columns: var(--oc-avatar-column) minmax(0, 1fr);
+  column-gap: var(--oc-avatar-gap);
+  align-items: start;
+  padding-left: 0;
 }
 
 .oc-assistant-frame.has-header .oc-assistant-frame__content {
-  flex: 1 1 0% !important;
-  min-width: 0 !important;
+  grid-column: 2;
+  min-width: 0;
 }
 
 .oc-assistant-frame__avatar {
   display: inline-flex;
-  width: 28px;
-  height: 28px;
+  width: var(--oc-avatar-size);
+  height: var(--oc-avatar-size);
   align-items: center;
   justify-content: center;
   border-radius: 9px;
   background: #18181b;
   color: #ffffff;
-  margin-top: 5px;
+  margin-top: 0;
 }
 
 .oc-assistant-frame__avatar-icon {
@@ -136,6 +139,7 @@
 }
 
 .oc-thinking-frame .oc-thinking-row {
+  min-height: var(--oc-avatar-size);
   padding: 0;
 }
 

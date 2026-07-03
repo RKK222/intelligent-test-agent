@@ -40,7 +40,7 @@ let renderTimer: ReturnType<typeof setTimeout> | null = null
 // 懒加载三件套；只在首个 MarkdownView 挂载时触发一次，后续实例复用缓存的句柄
 async function ensureLibs(needMermaid = false) {
   const promises: Array<Promise<any>> = []
-  
+
   if (!mdRef.value) {
     promises.push(import('markdown-it').then(m => { mdRef.value = m.default }))
   }
@@ -72,25 +72,22 @@ async function ensureLibs(needMermaid = false) {
       linkify: true,
       typographer: false,
     })
-    
+
     md.renderer.rules.fence = (tokens: any[], idx: number, _options: any, _env: any, slf: any) => {
       const token = tokens[idx]
       const lang = token.info ? token.info.trim() : ''
       const attrs = slf.renderAttrs(token)
-      
+
       if (lang === 'mermaid') {
         const id = `ta-mermaid-${Math.random().toString(36).substring(2, 9)}`
         const escapedCode = md.utils.escapeHtml(token.content)
-        return `<div class="mermaid-block is-preview" id="${id}" data-content="${encodeURIComponent(token.content)}">
+        return `<div class="mermaid-block is-script" id="${id}" data-content="${encodeURIComponent(token.content)}">
           <div class="ta-mermaid-header">
-            <button type="button" class="ta-mermaid-preview-btn" data-block-id="${id}">
-              <svg class="mermaid-icon" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                <polygon points="5 3 19 12 5 21 5 3"></polygon>
-              </svg>
-              <span>预览图表</span>
-            </button>
+            <button type="button" class="ta-mermaid-mode-btn is-active" data-mermaid-mode="script" data-block-id="${id}">脚本</button>
+            <button type="button" class="ta-mermaid-mode-btn ta-mermaid-preview-btn" data-mermaid-mode="chart" data-block-id="${id}">图表</button>
           </div>
-          <pre class="hljs"><code class="language-mermaid">${escapedCode}</code></pre>
+          <pre class="hljs ta-mermaid-script"><code class="language-mermaid">${escapedCode}</code></pre>
+          <div class="ta-mermaid-chart" hidden></div>
         </div>`
       }
 
@@ -114,7 +111,7 @@ async function ensureLibs(needMermaid = false) {
 
 async function handleMdViewClick(event: MouseEvent) {
   const target = event.target as HTMLElement
-  const btn = target.closest('.ta-mermaid-preview-btn') as HTMLButtonElement | null
+  const btn = target.closest('.ta-mermaid-mode-btn') as HTMLButtonElement | null
   if (!btn) return
 
   const blockId = btn.getAttribute('data-block-id')
@@ -123,29 +120,51 @@ async function handleMdViewClick(event: MouseEvent) {
   const block = document.getElementById(blockId)
   if (!block) return
 
-  const content = decodeURIComponent(block.getAttribute('data-content') ?? '')
-  
-  btn.disabled = true
-  const span = btn.querySelector('span')
-  if (span) {
-    span.textContent = '渲染中…'
+  const mode = btn.getAttribute('data-mermaid-mode') ?? 'script'
+  const scriptEl = block.querySelector<HTMLElement>('.ta-mermaid-script')
+  const chartEl = block.querySelector<HTMLElement>('.ta-mermaid-chart')
+
+  block.querySelectorAll<HTMLButtonElement>('.ta-mermaid-mode-btn').forEach(button => {
+    button.classList.toggle('is-active', button === btn)
+  })
+
+  if (mode === 'script') {
+    if (scriptEl) scriptEl.hidden = false
+    if (chartEl) chartEl.hidden = true
+    block.classList.add('is-script')
+    block.classList.remove('is-chart')
+    return
   }
+
+  if (!chartEl) return
+  const content = decodeURIComponent(block.getAttribute('data-content') ?? '')
+
+  btn.disabled = true
+  const originalText = btn.textContent ?? '图表'
+  btn.textContent = '渲染中'
 
   try {
     await ensureLibs(true)
-    if (mermaidRef.value) {
+    if (mermaidRef.value && !chartEl.innerHTML.trim()) {
       const { svg } = await mermaidRef.value.render(blockId + '-svg', content)
-      block.innerHTML = svg
-      block.classList.remove('is-preview')
+      chartEl.innerHTML = svg
     }
+    if (scriptEl) scriptEl.hidden = true
+    chartEl.hidden = false
+    block.classList.add('is-chart')
+    block.classList.remove('is-script')
   } catch (err) {
     console.error('Mermaid render error:', err)
-    const escaped = mdRef.value?.utils.escapeHtml(content) ?? ''
-    block.innerHTML = `<pre class="hljs"><code>${escaped}</code></pre>`
-    block.classList.remove('is-preview')
-    
+    if (scriptEl) scriptEl.hidden = false
+    chartEl.hidden = true
+    block.classList.add('is-script')
+    block.classList.remove('is-chart')
+
     const badDiv = document.getElementById(`d${blockId}-svg`)
     if (badDiv) badDiv.remove()
+  } finally {
+    btn.disabled = false
+    btn.textContent = originalText
   }
 }
 
@@ -353,46 +372,57 @@ onBeforeUnmount(() => {
   background: var(--ta-chat-detail-bg, rgba(0, 0, 0, 0.05));
   border: 1px solid var(--ta-chat-border, var(--ta-border));
   border-radius: 6px;
-  padding: 10px;
+  padding: 6px;
   margin: 6px 0;
   overflow-x: auto;
-  display: flex;
-  justify-content: center;
 }
 
-.markdown-body :deep(.mermaid-block.is-preview) {
-  padding: 0;
-  border: none;
-  background: transparent;
-}
-
-.markdown-body :deep(.ta-mermaid-preview-btn) {
+.markdown-body :deep(.ta-mermaid-header) {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: var(--ta-chat-detail-bg, #f4f4f5);
-  border: 1px solid var(--ta-chat-border, #e4e4e7);
+  gap: 3px;
+  margin: 0 0 6px;
+  padding: 2px;
+  border: 1px solid color-mix(in srgb, var(--ta-chat-border, #e4e4e7) 70%, transparent);
   border-radius: 6px;
+  background: color-mix(in srgb, var(--ta-chat-detail-bg, #f4f4f5) 72%, #ffffff);
+}
+
+.markdown-body :deep(.ta-mermaid-mode-btn) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 34px;
+  height: 20px;
+  padding: 0 6px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
   color: var(--ta-chat-text, #18181b);
-  font-size: 13px;
+  font-size: 11px;
+  line-height: 18px;
   cursor: pointer;
   transition: all 0.15s ease;
-  margin: 6px 0;
 }
 
-.markdown-body :deep(.ta-mermaid-preview-btn:hover) {
-  background: var(--ta-chat-border, #e4e4e7);
+.markdown-body :deep(.ta-mermaid-mode-btn:hover) {
+  background: color-mix(in srgb, var(--ta-chat-border, #e4e4e7) 72%, transparent);
 }
 
-.markdown-body :deep(.ta-mermaid-preview-btn:disabled) {
+.markdown-body :deep(.ta-mermaid-mode-btn.is-active) {
+  background: var(--ta-surface, #ffffff);
+  color: var(--ta-chat-text, #18181b);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.markdown-body :deep(.ta-mermaid-mode-btn:disabled) {
   opacity: 0.6;
   cursor: not-allowed;
 }
 
-.markdown-body :deep(.mermaid-icon) {
-  width: 14px;
-  height: 14px;
-  color: var(--ta-chat-text, #18181b);
+.markdown-body :deep(.ta-mermaid-chart) {
+  display: flex;
+  justify-content: center;
+  min-width: 360px;
 }
 </style>

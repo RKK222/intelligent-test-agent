@@ -14,8 +14,8 @@
   display: grid;
   width: min(100%, 560px);
   grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
-  min-height: unset;
-  padding: 6px 10px;
+  min-height: var(--oc-avatar-size, 28px);
+  padding: 0 10px;
   column-gap: 8px;
   align-items: center;
   color: var(--oc-muted);
@@ -80,14 +80,14 @@
   grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
   align-items: center;
   column-gap: 8px;
-  padding: 6px 10px;
+  min-height: var(--oc-avatar-size, 28px);
+  padding: 0 10px;
   color: var(--oc-fg);
   background: transparent;
   border: 0;
   border-radius: var(--oc-radius-sm);
   cursor: pointer;
   text-align: left;
-  min-height: unset;
   font-family: var(--oc-font-sans);
   transition: background-color 0.15s ease, color 0.15s ease;
 }

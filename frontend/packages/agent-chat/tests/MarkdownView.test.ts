@@ -70,24 +70,24 @@ describe("MarkdownView", () => {
     expect(getByText("准备输出…")).toBeTruthy();
   });
 
-  it("mermaid 预览按钮未点击展示代码，点击后渲染图表", async () => {
+  it("mermaid 默认展示脚本，支持切换为图表", async () => {
     const { container } = render(MarkdownView, {
       props: { source: "```mermaid\ngraph TD;\n  A-->B;\n```" }
     });
     await waitRender();
 
-    // 1. 未点击前展示代码和按钮
+    // 1. 未点击前展示脚本和切换按钮
     const btn = container.querySelector(".ta-mermaid-preview-btn");
     expect(btn).toBeTruthy();
-    expect(btn?.textContent).toContain("预览图表");
+    expect(btn?.textContent).toContain("图表");
     expect(container.querySelector("code.language-mermaid")?.textContent).toContain("graph TD;");
 
-    // 2. 点击后，显示渲染图表
+    // 2. 点击后显示渲染图表，脚本仍在 DOM 中便于切回
     if (btn) {
       await fireEvent.click(btn);
       await waitRender();
       expect(container.querySelector("#mock-svg")).toBeTruthy();
-      expect(container.querySelector("code.language-mermaid")).toBeNull();
+      expect((container.querySelector(".ta-mermaid-script") as HTMLElement | null)?.hidden).toBe(true);
     }
   });
 });

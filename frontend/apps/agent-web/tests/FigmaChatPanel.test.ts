@@ -1068,7 +1068,7 @@ describe("FigmaChatPanel", () => {
     }
 
     expect(wrapper.findAll('[data-testid="oc-tool-group"]')).toHaveLength(1);
-    expect(wrapper.find('[data-testid="oc-tool-group"]').text()).toContain("Bash");
+    expect(wrapper.find('[data-testid="oc-tool-group"]').text()).toContain("bash");
     expect(wrapper.find('[data-testid="oc-tool-group"]').text()).toContain("2 次");
   });
 
@@ -1309,7 +1309,7 @@ describe("FigmaChatPanel", () => {
     });
 
     expect(wrapper.find(".oc-tool").exists()).toBe(true);
-    expect(wrapper.text()).toContain("Write");
+    expect(wrapper.text()).toContain("write");
     expect(wrapper.text()).toContain("tmp/long.ts");
   });
 
@@ -1396,7 +1396,7 @@ describe("FigmaChatPanel", () => {
     });
 
     expect(wrapper.findAll(".oc-tool")).toHaveLength(1);
-    expect(wrapper.text()).toContain("Bash");
+    expect(wrapper.text()).toContain("bash");
     await wrapper.get(".oc-tool__trigger").trigger("click");
     expect(wrapper.text()).toContain("编译成功");
   });
@@ -1460,7 +1460,7 @@ describe("FigmaChatPanel", () => {
     const allText = wrapper.text();
     expect(allText).not.toContain("No such file or directory");
     // 错误在 tool 折叠块中显示
-    expect(allText).toContain("Read");
+    expect(allText).toContain("read");
     await wrapper.get(".oc-tool__trigger").trigger("click");
     expect(wrapper.text()).toContain("No such file or directory");
   });
@@ -1485,7 +1485,7 @@ describe("FigmaChatPanel", () => {
     });
 
     const bashTool = wrapper.get(".oc-tool");
-    expect(wrapper.text()).toContain("Bash");
+    expect(wrapper.text()).toContain("bash");
     expect(wrapper.find(".oc-tool__body").exists()).toBe(false);
 
     await bashTool.get(".oc-tool__trigger").trigger("click");

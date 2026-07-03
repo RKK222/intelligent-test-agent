@@ -24,41 +24,41 @@ export function getToolInfo(part: Extract<MessagePart, { type: "tool" }>): ToolI
   const path = toolPath(part);
   const displayPath = formatDisplayPath(path);
   if (tool === "skill") {
-    return { title: "Skill", subtitle: displayPath, fullSubtitle: path, family: "skill" };
+    return { title: "skill", subtitle: displayPath, fullSubtitle: path, family: "skill" };
   }
   if (tool === "bash") {
-    return { title: "Bash", subtitle: commandValue(part), family: "shell" };
+    return { title: "bash", subtitle: commandValue(part), family: "shell" };
   }
   if (tool === "read") {
-    return { title: "Read", subtitle: displayPath, fullSubtitle: path, family: "context" };
+    return { title: "read", subtitle: displayPath, fullSubtitle: path, family: "context" };
   }
   if (tool === "list") {
-    return { title: "List", subtitle: displayPath, fullSubtitle: path, family: "context" };
+    return { title: "list", subtitle: displayPath, fullSubtitle: path, family: "context" };
   }
   if (tool === "glob") {
-    return { title: "Glob", subtitle: text(part.input?.pattern), family: "context" };
+    return { title: "glob", subtitle: text(part.input?.pattern), family: "context" };
   }
   if (tool === "grep") {
     const pattern = text(part.input?.pattern);
-    return { title: "Grep", subtitle: pattern ?? displayPath, fullSubtitle: pattern ? path : undefined, family: "context" };
+    return { title: "grep", subtitle: pattern ?? displayPath, fullSubtitle: pattern ? path : undefined, family: "context" };
   }
   if (tool === "edit" || tool === "write") {
-    return { title: tool === "edit" ? "Edit" : "Write", subtitle: displayPath, fullSubtitle: path, family: "file" };
+    return { title: tool, subtitle: displayPath, fullSubtitle: path, family: "file" };
   }
   if (tool === "apply_patch") {
-    return { title: "Apply patch", subtitle: displayPath, fullSubtitle: path, family: "diff" };
+    return { title: "apply patch", subtitle: displayPath, fullSubtitle: path, family: "diff" };
   }
   if (tool === "webfetch" || tool === "web_fetch") {
-    return { title: "Web fetch", subtitle: text(part.input?.url), family: "web" };
+    return { title: "web fetch", subtitle: text(part.input?.url), family: "web" };
   }
   if (tool === "websearch" || tool === "web_search") {
-    return { title: "Web search", subtitle: text(part.input?.query), family: "web" };
+    return { title: "web search", subtitle: text(part.input?.query), family: "web" };
   }
   if (tool === "task") {
-    return { title: "Task", subtitle: text(part.input?.description) ?? text(part.input?.prompt), family: "task" };
+    return { title: "task", subtitle: text(part.input?.description) ?? text(part.input?.prompt), family: "task" };
   }
   if (tool === "question") {
-    return { title: "Question", subtitle: text(part.input?.question), family: "question" };
+    return { title: "question", subtitle: text(part.input?.question), family: "question" };
   }
   return { title: part.toolName, subtitle: displayPath, fullSubtitle: path, family: "generic" };
 }
@@ -92,6 +92,7 @@ export function formatDisplayPath(path: string | undefined): string | undefined 
     return undefined;
   }
   let normalized = path.replace(/\\/g, "/");
+  const wasAbsolute = normalized.startsWith("/");
 
   // 1. Strip absolute path prefix
   normalized = normalized.replace(/^.*\/intelligent-test-agent\//, "");
@@ -121,7 +122,10 @@ export function formatDisplayPath(path: string | undefined): string | undefined 
 
   const last2 = segments.slice(-2).join("/");
   if (last2.length <= 32) {
-    return segments.length > 2 ? `.../${last2}` : last2;
+    if (segments.length > 2) {
+      return `.../${last2}`;
+    }
+    return wasAbsolute ? `/${last2}` : last2;
   }
 
   const last1 = segments.at(-1)!;

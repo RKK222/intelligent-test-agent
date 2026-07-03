@@ -6,14 +6,12 @@
 }
 
 .oc-diff-summary__header {
-  display: grid;
+  display: flex;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
   color: var(--oc-muted);
-  font-size: var(--oc-text-sm);
   border: 0;
   border-bottom: 1px solid var(--oc-border);
   background: transparent;
@@ -25,13 +23,17 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  color: var(--oc-fg);
+  font-weight: 600;
+  font-size: var(--oc-text-md);
+  line-height: 20px;
 }
 
-.oc-diff-summary__action {
-  color: var(--oc-accent);
-  font-size: var(--oc-text-xs);
-  justify-self: end;
-  white-space: nowrap;
+.oc-tool__icon {
+  width: 14px;
+  height: 14px;
+  color: var(--oc-subtle);
+  flex-shrink: 0;
 }
 
 .oc-diff-summary__files {
