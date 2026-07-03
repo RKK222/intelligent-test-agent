@@ -185,6 +185,69 @@ describe("opencode-like conversation state", () => {
     expect(childState.partsByMessageId.msg_child_answer.map((part) => part.partId)).toEqual(["prt_child_answer"]);
     expect(createTimelineRows(childState).map((row) => row.type)).toEqual(["user-message", "assistant-part"]);
   });
+
+  it("keeps raw-properties task part visible in the root projection after child output arrives", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "分析前端结构",
+      createdAt: "2026-07-03T00:00:00Z"
+    });
+    const withTask = reduceAgentChatRuntime(submitted, {
+      type: "event",
+      event: event("message.part.updated", {
+        properties: {
+          sessionID: "ses_root",
+          rootSessionId: "ses_root",
+          part: {
+            type: "tool",
+            tool: "task",
+            callID: "call_task",
+            state: {
+              title: "Explore frontend structure",
+              status: "running",
+              input: {
+                description: "Explore frontend structure",
+                subagent_type: "explore"
+              },
+              metadata: {
+                parentSessionId: "ses_root",
+                sessionId: "ses_child"
+              }
+            },
+            id: "prt_task",
+            messageID: "msg_root",
+            sessionID: "ses_root"
+          },
+          messageID: "msg_root"
+        }
+      })
+    });
+    const withChildText = reduceAgentChatRuntime(withTask, {
+      type: "event",
+      event: event("message.part.delta", {
+        sessionID: "ses_child",
+        sessionId: "ses_child",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskMessageId: "msg_root",
+        taskPartId: "prt_task",
+        taskCallId: "call_task",
+        messageID: "msg_child",
+        partID: "prt_child_text",
+        partType: "text",
+        delta: "子 Agent 输出"
+      })
+    });
+
+    const rootState = createOpencodeLikeState(withChildText as any);
+    const rows = createTimelineRows(rootState);
+
+    expect(rootState.partsByMessageId.msg_root.map((part) => part.partId)).toEqual(["prt_task"]);
+    expect(rootState.partsByMessageId.msg_child).toBeUndefined();
+    expect(rows.some((row) => row.type === "assistant-part" && row.messageId === "msg_root" && row.partId === "prt_task")).toBe(true);
+    expect(rows.some((row) => row.type === "assistant-part" && row.messageId === "msg_child")).toBe(false);
+  });
 });
 
 function userMessage(id: string, text: string): Extract<AgentMessage, { role: "user" }> {

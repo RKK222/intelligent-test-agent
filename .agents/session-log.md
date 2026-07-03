@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-03 - 兼容 raw properties 防止子 Agent 卡片消失
+
+- Why:
+  - 用户反馈子 Agent 卡片在主对话中出现后立刻消失，导致无法点击进入子 Agent 对话；实际可由 `message.part.updated` 仍携带 opencode raw `payload.properties` 包装复现，reducer 无法识别其中的 `messageID/part.id/sessionID`。
+- What:
+  - `agent-chat` RunEvent reducer 在入口展开 `payload.properties`，后续 message/part upsert、Run Session scope 和 subagent 索引继续使用同一套扁平字段读取逻辑。
+  - 补充 reducer 与 opencode-like state 回归测试，覆盖 raw properties task part 在 root projection 中持续可见，同时 child text 不混入主视图。
+- How:
+  - 只改前端 reducer、agent-chat 测试和事件/包文档；不新增 API、不改后端、数据库、generated SDK 或环境配置。
+- Result:
+  - raw `properties` 形态的 task 子 Agent 事件会稳定生成 root assistant task part 与 `taskPartId -> sessionId` 映射，主视图保留可点击子 Agent 卡片。
+
 ### 2026-07-03 - 失败卡片展示真实 Run 错误
 
 - Why:

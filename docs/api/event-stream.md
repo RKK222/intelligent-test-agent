@@ -149,6 +149,7 @@ scope 发现与缓存规则：
 前端展示处理：
 
 - `@test-agent/agent-chat` 的 RunEvent reducer 会把 `message.updated`、`message.part.updated`、`message.part.delta` payload 中的 `sessionId/sessionID`、`rootSessionId`、`parentSessionId`、`isChildSession/childSession`、`taskMessageId`、`taskPartId`、`taskCallId` 归入运行期 `messageScopesById` 索引，key 使用消息 ID。
+- 为兼容历史调试或 raw opencode 事件包装，前端 reducer 在归并前会展开 `payload.properties`，再按同一套 `messageID/partID/sessionID` 和 lower camel 字段读取消息、part 与 scope；标准 RunEvent 仍以扁平 payload 为主。
 - `message.part.updated` 的 `part.type=tool` 且 `part.tool=task` 时，前端从 `part.state.metadata.sessionId/sessionID` 或 payload scope 识别子会话，并生成 `SubagentSession`：标题优先取 `state.title`，再取 `state.input.description`、`state.input.prompt` 首行；Agent 名称优先取 `state.input.subagent_type`，再取 `metadata.agent`，缺失时展示 `Task`；状态优先取 `part.state.status`。
 - `session.child.discovered` 和 `session.scope.updated` 到达时，前端用 payload 中的 `sessionId`、`parentSessionId`、`taskMessageId`、`taskPartId`、`taskCallId` 补全子会话索引和 `taskPartId -> sessionId` 映射。
 - 主 Agent 视图过滤 `messageScopesById[messageId].isChildSession=true` 的 user/assistant 输出，只保留 root 输出和 root task tool part 卡片；点击 task 卡片后切到对应 child session 视图。

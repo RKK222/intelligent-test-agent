@@ -179,6 +179,79 @@ describe("agent-chat runtime reducer", () => {
     });
   });
 
+  it("keeps subagent task cards when message.part.updated uses opencode raw properties", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "分析前端结构",
+      createdAt: "2026-07-03T00:00:00Z"
+    });
+    const withTask = reduceAgentChatRuntime(submitted, {
+      type: "event",
+      event: event("message.part.updated", {
+        properties: {
+          sessionID: "ses_root",
+          part: {
+            type: "tool",
+            tool: "task",
+            callID: "call_task",
+            state: {
+              title: "Explore frontend structure",
+              metadata: {
+                parentSessionId: "ses_root",
+                sessionId: "ses_child",
+                model: { modelID: "deepseek-v4", providerID: "opencode" }
+              },
+              status: "running",
+              input: {
+                description: "Explore frontend structure",
+                subagent_type: "explore"
+              },
+              time: { start: 1783075022016 }
+            },
+            id: "prt_task",
+            sessionID: "ses_root",
+            messageID: "msg_root"
+          },
+          id: "prt_task",
+          messageID: "msg_root"
+        }
+      })
+    });
+
+    const rootAssistant = withTask.messages.find(
+      (message) => message.role === "assistant" && message.messageId === "msg_root"
+    );
+
+    expect(rootAssistant).toMatchObject({
+      role: "assistant",
+      messageId: "msg_root",
+      parts: [
+        {
+          partId: "prt_task",
+          type: "tool",
+          toolName: "task",
+          callId: "call_task",
+          status: "running"
+        }
+      ]
+    });
+    expect((withTask as any).subagentByTaskPartId.prt_task).toBe("ses_child");
+    expect((withTask as any).subagentsBySessionId.ses_child).toMatchObject({
+      sessionId: "ses_child",
+      parentSessionId: "ses_root",
+      taskMessageId: "msg_root",
+      taskPartId: "prt_task",
+      taskCallId: "call_task",
+      agentName: "Explore",
+      title: "Explore frontend structure",
+      status: "running"
+    });
+    expect((withTask as any).messageScopesById.msg_root).toMatchObject({
+      sessionId: "ses_root"
+    });
+    expect((withTask as any).messageScopesById.msg_root?.isChildSession).not.toBe(true);
+  });
+
   it("updates subagent indexes from session child discovery events", () => {
     const next = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",

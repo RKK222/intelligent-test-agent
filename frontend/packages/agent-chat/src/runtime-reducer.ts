@@ -104,8 +104,9 @@ export function reduceAgentChatRuntime(
 
 function reduceEventOnly(
   state: AgentChatRuntimeState,
-  event: RunEvent
+  rawEvent: RunEvent
 ): AgentChatRuntimeState {
+  const event = normalizeRunEventPayload(rawEvent);
   if (event.type === "assistant.message.delta") {
     return { ...state, messages: appendAssistantDelta(state.messages, text(event.payload.text) ?? text(event.payload.delta) ?? "", event) };
   }
@@ -254,6 +255,22 @@ function reduceEventOnly(
     return { ...state, status: runStatusFromEvent(event), messages };
   }
   return state;
+}
+
+function normalizeRunEventPayload(event: RunEvent): RunEvent {
+  const properties = record(event.payload.properties);
+  if (!properties) {
+    return event;
+  }
+  // 兼容 opencode raw event 包装形态：message/session 字段可能仍在 payload.properties 下。
+  // properties 中的 id 通常是 part/message id，优先覆盖 raw event id，避免 task 卡片 key 丢失。
+  return {
+    ...event,
+    payload: {
+      ...event.payload,
+      ...properties
+    }
+  };
 }
 
 function appendAssistantDelta(messages: AgentMessage[], delta: string, event: RunEvent) {
