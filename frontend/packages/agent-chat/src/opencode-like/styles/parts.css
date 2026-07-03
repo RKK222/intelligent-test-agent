@@ -35,8 +35,50 @@
 }
 
 .oc-reasoning-part {
+  width: min(100%, 560px);
   color: var(--oc-muted);
   font-size: var(--oc-text-sm);
+}
+
+.oc-reasoning-part .oc-disclosure__trigger {
+  width: min(100%, 560px);
+  max-width: 100%;
+  min-height: 28px;
+  grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
+  column-gap: 8px;
+  padding: 3px 10px;
+  align-items: center;
+  color: var(--oc-muted);
+}
+
+.oc-reasoning-part .oc-disclosure__trigger .oc-tool__title {
+  grid-column: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--oc-muted);
+  font-size: var(--oc-text-sm);
+  font-weight: 500;
+  line-height: 18px;
+}
+
+.oc-reasoning-part .oc-disclosure__trigger .oc-tool__status {
+  grid-column: 3;
+  justify-self: end;
+}
+
+.oc-reasoning-part .oc-disclosure__trigger .oc-tool__chevron {
+  grid-column: 4;
+}
+
+.oc-reasoning-part.is-running .oc-disclosure__trigger .oc-tool__title::before,
+.oc-disclosure.is-running.oc-reasoning-part .oc-disclosure__trigger .oc-tool__title::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--oc-accent);
+  animation: oc-pulse 1.6s ease-in-out infinite;
 }
 
 .oc-disclosure.is-running .oc-tool__title,

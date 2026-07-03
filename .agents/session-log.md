@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-03 - 收紧 reasoning 折叠行与头像中心线对齐
+
+- Why:
+  - 当前 opencode-like timeline 中，“思考状态”默认折叠且位于输出过程顶部，如果仍按工具行的大列宽样式展示，会在窄面板里显得像漂浮标题，并容易与助手头像产生水平错位观感。
+- What:
+  - 仅调整 `agent-chat` 当前 timeline 主路径样式：把 `.oc-reasoning-part` 折叠触发器收紧为轻量单行，运行中用小圆点提示；针对带头像的 reasoning 首行用 `:has(.oc-reasoning-part)` 做中心线对齐。
+- How:
+  - 不改 reducer、投影顺序、RunEvent、后端 API 或默认折叠逻辑；保留“同一回合 reasoning 合并为一行、默认收起”的当前行为，只降低视觉权重并修正头像对齐。
+- Result:
+  - 前端 Vitest 全量通过（36 files, 299 passed, 1 skipped），`@test-agent/agent-chat` typecheck 通过；Playwright 构造 DOM 检查隐藏 step 行头像与 reasoning 触发器 top delta 为 0px，reasoning `已完成` 与工具 `已读取` x delta 为 0px；前端 Vite 已在 `127.0.0.1:3001` 启动验证入口。
+
 ### 2026-07-03 - 收敛时间线样式、文件预览 Mermaid 切换与修改文件入口
 
 - Why:

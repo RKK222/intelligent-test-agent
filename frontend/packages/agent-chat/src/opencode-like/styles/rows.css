@@ -96,6 +96,21 @@
   padding-left: 0;
 }
 
+.oc-assistant-frame.has-header:has(.oc-reasoning-part) {
+  align-items: center;
+}
+
+.oc-timeline-root:not([data-debug="true"]) .oc-assistant-frame.has-header:has(.oc-unknown-part) {
+  pointer-events: none;
+  z-index: 1;
+}
+
+.oc-timeline-root:not([data-debug="true"])
+  .oc-assistant-frame.has-header:has(.oc-unknown-part)
+  .oc-assistant-frame__avatar {
+  transform: translateY(calc(var(--oc-avatar-size) + 6px));
+}
+
 .oc-assistant-frame.has-header .oc-assistant-frame__content {
   grid-column: 2;
   min-width: 0;
