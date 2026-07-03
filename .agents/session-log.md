@@ -16,6 +16,19 @@
 - Result:
   - `FigmaChatPanel` 组件测试覆盖底部 Agent 过滤、切换 emit 与 `@` 候选替换；Playwright mock 覆盖切换 Agent 后 Run 请求体携带新 `agent`。
 
+### 2026-07-03 - 按真实运行状态展示聊天终态徽标
+
+- Why:
+  - Run 启动前失败已经能把 reducer 收敛到 `FAILED`，但 `FigmaChatPanel` 只根据 `running` 从 true 变 false 和消息内 error 猜测终态；
+  - Session 创建失败这类没有 assistant error 消息的场景会误显示“任务完成”。
+- What:
+  - `FigmaChatPanel` 新增 `runtimeStatus` 输入，优先按 `FAILED/ERROR` 显示“任务失败”，按 `CANCELLED/STOPPED` 显示手动终止，按 `SUCCEEDED/COMPLETED` 显示完成；
+  - `AgentWorkbench` 将当前 `chatState.status ?? run?.status` 传给聊天面板。
+- How:
+  - 只调整前端 UI 状态判定与组件测试，不修改后端、API、RunEvent 或数据库。
+- Result:
+  - 本地启动失败后底部徽标显示“任务失败”，不再误显示“任务完成”。
+
 ### 2026-07-03 - 收敛 Run 启动前失败的聊天运行态
 
 - Why:

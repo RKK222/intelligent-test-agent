@@ -3172,6 +3172,7 @@ async function handleLogout() {
           :messages="chatState.messages"
           :streaming-text-by-part-id="chatState.streamingTextByPartId"
           :running="runtimeBusy"
+          :runtime-status="chatState.status ?? run?.status"
           :title="chatTitle"
           :file-changes="diffFiles"
           :task-usage="taskUsage"

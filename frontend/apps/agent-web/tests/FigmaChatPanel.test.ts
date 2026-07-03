@@ -548,6 +548,29 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("2.0w tokens");
   });
 
+  it("shows failed task status from runtime status", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "u-failed",
+            messageId: "u-failed",
+            role: "user",
+            text: "创建会话失败",
+            createdAt: "2026-07-03T11:24:00.000Z"
+          }
+        ],
+        running: false,
+        runtimeStatus: "FAILED",
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.text()).toContain("任务失败");
+    expect(wrapper.text()).not.toContain("任务完成");
+  });
+
   it("uses the opencode timeline instead of the legacy running task panel", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

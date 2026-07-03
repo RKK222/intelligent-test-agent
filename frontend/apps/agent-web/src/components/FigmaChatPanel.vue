@@ -566,6 +566,7 @@ const props =
   withDefaults(defineProps<{
     messages: ChatMessageInput[]
     running?: boolean
+    runtimeStatus?: string
     placeholder?: string
     inputValue?: string
     title?: string
@@ -853,6 +854,22 @@ function submitNegativeFeedback() {
 const wasStopped = ref(false)
 const wasCompleted = ref(false)
 const wasFailed = ref(false)
+
+function normalizedRuntimeStatus(): string {
+  return (props.runtimeStatus ?? '').toUpperCase()
+}
+
+function isRuntimeFailureStatus(): boolean {
+  return ['FAILED', 'ERROR'].includes(normalizedRuntimeStatus())
+}
+
+function isRuntimeStoppedStatus(): boolean {
+  return ['CANCELLED', 'STOPPED'].includes(normalizedRuntimeStatus())
+}
+
+function isRuntimeSuccessStatus(): boolean {
+  return ['SUCCEEDED', 'COMPLETED'].includes(normalizedRuntimeStatus())
+}
 
 // ===== 运行计时器 =====
 const runStartTime = ref<number | null>(null)
@@ -2135,7 +2152,8 @@ watch(
       stopRunTimer()
       if (!wasStopped.value) {
         const hasError = displayMessages.value.some((m) => m._error)
-        if (hasError) wasFailed.value = true
+        if (hasError || isRuntimeFailureStatus()) wasFailed.value = true
+        else if (isRuntimeStoppedStatus()) wasStopped.value = true
         else wasCompleted.value = true
       }
     }
@@ -2220,6 +2238,17 @@ const displayMessages = computed<ChatMessage[]>(() => {
   }
   return merged
 })
+
+const hasVisibleMessages = computed(() => displayMessages.value.length > 0)
+const showTaskFailed = computed(() =>
+  !props.running && hasVisibleMessages.value && (wasFailed.value || isRuntimeFailureStatus())
+)
+const showTaskStopped = computed(() =>
+  !props.running && hasVisibleMessages.value && !showTaskFailed.value && (wasStopped.value || isRuntimeStoppedStatus())
+)
+const showTaskCompleted = computed(() =>
+  !props.running && hasVisibleMessages.value && !showTaskFailed.value && !showTaskStopped.value && (wasCompleted.value || isRuntimeSuccessStatus())
+)
 
 const timelineMessages = computed<AgentMessage[]>(() =>
   (props.messages ?? []).map((message, index) => {
@@ -3136,7 +3165,7 @@ function onCompositionEnd() {
 
       <!-- 手动终止提示 -->
       <div
-        v-if="wasStopped && !running && displayMessages.length > 0"
+        v-if="showTaskStopped"
         class="figma-chat-stopped"
       >
         <MinusCircle :size="14" class="figma-chat-stopped-icon" />
@@ -3145,7 +3174,7 @@ function onCompositionEnd() {
 
       <!-- 重试卡片 -->
       <div
-        v-if="wasFailed && !running && displayMessages.length > 0"
+        v-if="showTaskFailed"
         class="figma-chat-retry-card"
       >
         <div class="figma-chat-retry-card-header">
@@ -3158,18 +3187,16 @@ function onCompositionEnd() {
 
       <!-- 对话失败提示 -->
       <div
-        v-if="wasFailed && !running && displayMessages.length > 0"
+        v-if="showTaskFailed"
         class="figma-chat-failed"
       >
         <MinusCircle :size="14" class="figma-chat-failed-icon" />
-        <span>异常中断</span>
+        <span>任务失败</span>
       </div>
 
       <!-- 对话完成提示 -->
       <div
-        v-if="
-          wasCompleted && !wasFailed && !running && displayMessages.length > 0
-        "
+        v-if="showTaskCompleted"
         class="figma-chat-completed"
       >
         <CheckCircle :size="14" class="figma-chat-completed-icon" />
