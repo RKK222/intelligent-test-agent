@@ -124,6 +124,7 @@ const conflictResolving = ref(false);
 const showCommitProgressDialog = ref(false);
 const commitStep = ref(0);
 const executedCommands = ref<string[]>([]);
+const hasLivePublishCommand = ref(false);
 const mergeResolutionCompleted = ref(false);
 
 type PublishGitStep =
@@ -216,14 +217,23 @@ function commandsForStep(commands: string[] | undefined, step?: string | null): 
 
 function applyPublishExecution(step: string | null | undefined, commands?: string[]) {
   commitStep.value = commitStepNumber(step);
-  executedCommands.value = commandsForStep(commands, step);
+  const currentStepCommands = commandsForStep(commands, step);
+  // 发布接口返回的是整条 Git 流程的历史命令。进度弹框只展示当前步骤的具体命令，
+  // 因此兜底展示当前/失败步骤最后一条，避免成功后一次性把所有命令刷到面板。
+  executedCommands.value = currentStepCommands.length > 0
+    ? [currentStepCommands[currentStepCommands.length - 1]]
+    : [];
 }
 
 function applyPublishProgressEvent(event: AgentConfigProgressEvent) {
   if (event.currentStep) {
     commitStep.value = commitStepNumber(event.currentStep);
+    if (!event.command?.trim() && event.status === "RUNNING") {
+      executedCommands.value = [];
+    }
   }
   if (event.command && event.command.trim()) {
+    hasLivePublishCommand.value = true;
     executedCommands.value = [event.command];
   }
   if (event.type === "failed") {
@@ -657,6 +667,7 @@ async function handleCommit(push = false) {
   errorMessage.value = "";
   progressMessage.value = "";
   executedCommands.value = [];
+  hasLivePublishCommand.value = false;
   showCommitProgressDialog.value = false;
   commitStep.value = 0;
 
@@ -744,7 +755,11 @@ async function handleCommit(push = false) {
           setTimeout(() => publishProgressSocket?.close(), 1000);
         }
       })();
-      applyPublishExecution(result.currentStep, result.executedCommands);
+      if (!hasLivePublishCommand.value) {
+        applyPublishExecution(result.currentStep, result.executedCommands);
+      } else if (result.currentStep) {
+        commitStep.value = commitStepNumber(result.currentStep);
+      }
       if (result.status === "CONFLICT") {
         const conflictMessage = `合并产生 ${result.conflictFiles.length} 个冲突文件。可全部保留个人版本、全部采用远程版本，或逐个处理。`;
         errorMessage.value = conflictMessage;

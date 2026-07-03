@@ -3000,3 +3000,10 @@ bash /tmp/test-api-after-restart.sh
 - What: 个人发布预览在 merge 进行中只返回已记录应用 HEAD，不再 fetch/pull；继续发布在冲突已解决后复用当前 READY 应用副本，提交已有 merge index，跳过重复拉取和重复 merge 应用分支到个人分支。发布响应新增 `currentStep`，失败 `PlatformException.details` 增加 `failedStep/executedCommands`；前端进度弹窗按当前/失败步骤过滤真实 Git 命令，冲突解决后继续发布不再二次预览。同步更新 shared types、HTTP API、workspace-management/backend-api/agent-web 文档和回归测试。
 - How: 保持 Git 原生命令链路，不新增数据库、事件、环境配置或 generated SDK；普通发布仍走白名单 stage/commit、应用分支合入个人分支、个人分支合回应用副本、push 应用分支的原流程。构造 test profile 数据时确认 `888888888 / 123456` 对应 `usr_test_dev`，在其 default personal worktree 中保留 1 个 `UU` 冲突文件和 2 个普通未暂存文件用于复测。
 - Result: `ManagedWorkspaceApplicationServiceTest`、`ManagedWorkspaceControllerTest`、`GitWorkspaceServiceTest`、`GitWorkspaceServiceRealGitTest`、Git 面板/冲突编辑器 Vitest、agent-web/backend-api typecheck、agent-web build、`git diff --check` 均通过；按 `.env.test` 重启后后端 readiness 和前端 3000 正常，真实页面首次打开变更区即显示 3 个文件，普通文件可在冲突存在时单独暂存并取消暂存。
+
+### 2026-07-03 - 修复发布弹窗实时 Git 命令展示并清理本地 opencode 脏绑定
+
+- Why: 个人 worktree 发布弹窗虽然已接收 Git 命令进度事件，但接口成功返回后又用 `executedCommands` 全量历史覆盖实时状态，导致用户看到命令一次性堆叠；同时本地 test 库中 `usr_test_dev` 存在旧 ACTIVE binding 指向已停止的 `4097`，manager 本地 state 曾只托管 `4096`，会触发 `port 4097 is not managed`。
+- What: `GitChangesPanel.vue` 增加实时命令标记，收到 WebSocket 命令后只展示当前最新命令；接口结果只在没有实时命令时兜底展示当前/失败步骤最后一条命令。清理 test 库中 `usr_test_dev` 的旧 `user_opencode_process_bindings`、`opencode_server_processes`、`opencode_process_start_operations` 记录，并停止本机孤儿 `opencode serve`/清空 manager process state。
+- How: 复用既有 Agent Config progress WebSocket 和 `executedCommands` 状态，不新增进度通道或后端 API；新增 Git 面板 Vitest 覆盖“实时命令不被最终 command history 覆盖”。本地清理只作用于 `888888888 / usr_test_dev`，不修改 dotenv 或生产 migration。
+- Result: `git-changes-panel.test.ts` 15 个用例通过，`@test-agent/agent-web typecheck` 通过；按 `.env.test` 重启三服务成功，后端 readiness 和前端 3000 正常。重新初始化 `888888888` 的 opencode 进程成功，当前状态 `READY`，端口 `4097`。
