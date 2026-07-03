@@ -34,6 +34,20 @@
   - 不改 reducer、投影顺序、RunEvent、后端 API 或默认折叠逻辑；保留“同一回合 reasoning 合并为一行、默认收起”的当前行为，只降低视觉权重并修正头像对齐。
 - Result:
   - 前端 Vitest 全量通过（36 files, 299 passed, 1 skipped），`@test-agent/agent-chat` typecheck 通过；Playwright 构造 DOM 检查隐藏 step 行头像与 reasoning 触发器 top delta 为 0px，reasoning `已完成` 与工具 `已读取` x delta 为 0px；前端 Vite 已在 `127.0.0.1:3001` 启动验证入口。
+### 2026-07-04 - 修复 Run session scope MERGE 时间参数类型推断
+
+- Why:
+  - 后端处理 opencode `session.created` 时持续 WARN `Failed to route opencode stream event`，根因是 PostgreSQL 执行 `RunSessionScopeMapper.xml` 的 `MERGE ... USING (VALUES ...)` 时把 `updated_at` 参数推断为 `text`，无法写入 `timestamp without time zone` 列。
+- What:
+  - `RunSessionScopeMapper.xml` 在 `upsertScope` 和 `upsertSession` 的 `created_at/discovered_at/updated_at` 参数上显式 `cast(... as timestamp)`；补充 `PersistenceSqlConventionTest` 固化 PostgreSQL MERGE 时间参数 cast 约束。
+  - 同步更新 persistence README、PACKAGE 说明和数据库部署文档，记录 H2 PostgreSQL 模式无法覆盖该 PostgreSQL 参数类型推断差异。
+- How:
+  - 先用新增源码约束测试确认当前 XML 缺少 cast 会失败，再修改 mapper；用真实 PostgreSQL 临时表 prepared statement 验证 text 参数加 cast 后可 insert/update。
+- Result:
+  - 定向 `PersistenceSqlConventionTest#runSessionScopeMergeUsesTimestampCastsForPostgreSql` 和 `MyBatisRunSessionScopeRepositoryIntegrationTest` 通过；`mvn clean package -DskipTests` 通过。
+  - 本地 test profile 三服务重启成功，后端 readiness 为 UP；重启后后端日志未再出现 `updated_at` 类型错误或 `BadSqlGrammarException`，5 秒内行数无增长。
+  - `mvn -pl test-agent-persistence -am test` 仍命中既有无关失败：H2 对存量 `ON CONFLICT` SQL 不兼容、`usr_test_dev` fixture 外键缺失、默认用户 seed 断言问题。
+
 ### 2026-07-04 - 修复 RunEvent live bus 并发背压导致后端刷屏
 
 - Why:

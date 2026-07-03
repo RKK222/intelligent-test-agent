@@ -30,7 +30,7 @@
         merge into run_session_scopes as target
         using (values (
             #{row.runId}, #{row.rootSessionId}, #{row.scopeVersion}, #{row.traceId},
-            #{row.metadataJson}, #{row.createdAt}, #{row.updatedAt}
+            #{row.metadataJson}, cast(#{row.createdAt} as timestamp), cast(#{row.updatedAt} as timestamp)
         )) as source(run_id, root_session_id, scope_version, trace_id, metadata_json, created_at, updated_at)
         on target.run_id = source.run_id
         when matched then update set
@@ -52,7 +52,7 @@
         using (values (
             #{row.runId}, #{row.sessionId}, #{row.rootSessionId}, #{row.parentSessionId}, #{row.childSession},
             #{row.discoverySource}, #{row.taskMessageId}, #{row.taskPartId}, #{row.taskCallId}, #{row.traceId},
-            #{row.metadataJson}, #{row.discoveredAt}, #{row.updatedAt}
+            #{row.metadataJson}, cast(#{row.discoveredAt} as timestamp), cast(#{row.updatedAt} as timestamp)
         )) as source(
             run_id, session_id, root_session_id, parent_session_id, child_session, discovery_source,
             task_message_id, task_part_id, task_call_id, trace_id, metadata_json, discovered_at, updated_at

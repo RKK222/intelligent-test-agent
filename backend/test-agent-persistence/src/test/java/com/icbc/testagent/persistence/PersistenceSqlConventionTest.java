@@ -84,6 +84,18 @@ class PersistenceSqlConventionTest {
     }
 
     @Test
+    void runSessionScopeMergeUsesTimestampCastsForPostgreSql() throws IOException {
+        Path resourceRoot = locate("src/main/resources");
+        String mapperXml = Files.readString(resourceRoot.resolve("mybatis/RunSessionScopeMapper.xml"));
+
+        assertThat(mapperXml)
+                .as("PostgreSQL MERGE USING (VALUES ...) 会把未定型时间参数推断为 text，时间列必须显式 cast")
+                .contains("cast(#{row.createdAt} as timestamp)")
+                .contains("cast(#{row.updatedAt} as timestamp)")
+                .contains("cast(#{row.discoveredAt} as timestamp)");
+    }
+
+    @Test
     void newJdbcSqlIsRestrictedToLegacyAllowlist() throws IOException {
         Path persistenceRoot = locate("src/main/java/com/icbc/testagent/persistence");
         Set<String> jdbcFiles;
