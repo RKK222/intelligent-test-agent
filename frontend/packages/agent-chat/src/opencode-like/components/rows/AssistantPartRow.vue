@@ -1,10 +1,12 @@
 <script lang="ts">
-import type { MessagePart } from "@test-agent/shared-types";
+import type { MessagePart, SubagentSession } from "@test-agent/shared-types";
 
 export type AssistantPartRowProps = {
   part: MessagePart;
   streamingTextByPartId?: Record<string, string>;
   previousAssistantPart?: boolean;
+  subagentsBySessionId?: Record<string, SubagentSession>;
+  subagentByTaskPartId?: Record<string, string>;
 };
 </script>
 
@@ -16,6 +18,7 @@ import FilePartView from "../parts/FilePartView.vue";
 import UnknownPartView from "../parts/UnknownPartView.vue";
 
 defineProps<AssistantPartRowProps>();
+const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
 </script>
 
 <template>
@@ -30,7 +33,13 @@ defineProps<AssistantPartRowProps>();
       :part="part"
       :streaming-text-by-part-id="streamingTextByPartId"
     />
-    <ToolPartView v-else-if="part.type === 'tool'" :part="part" />
+    <ToolPartView
+      v-else-if="part.type === 'tool'"
+      :part="part"
+      :subagents-by-session-id="subagentsBySessionId"
+      :subagent-by-task-part-id="subagentByTaskPartId"
+      @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
+    />
     <FilePartView v-else-if="part.type === 'file'" :part="part" />
     <UnknownPartView v-else :part="part" />
   </div>

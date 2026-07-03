@@ -1,12 +1,14 @@
 import type {
   AgentMessage,
   MessagePart,
+  MessageScope,
   ModelInfo,
   PermissionRequest,
   ProviderInfo,
   QuestionRequest,
   RunDiffFile,
   SessionDiff,
+  SubagentSession,
   TodoItem
 } from "@test-agent/shared-types";
 
@@ -35,6 +37,10 @@ export type OpencodeLikeConversationInput = {
   runtimeStatus?: OpencodeLikeRuntimeStatus;
   streamingTextByPartId?: Record<string, string>;
   showReasoningSummaries?: boolean;
+  messageScopesById?: Record<string, MessageScope>;
+  subagentsBySessionId?: Record<string, SubagentSession>;
+  subagentByTaskPartId?: Record<string, string>;
+  activeSubagentSessionId?: string | null;
 };
 
 export type OpencodeLikeConversationState = {
@@ -53,6 +59,10 @@ export type OpencodeLikeConversationState = {
   todos: TodoItem[];
   running: boolean;
   showReasoningSummaries: boolean;
+  messageScopesById: Record<string, MessageScope>;
+  subagentsBySessionId: Record<string, SubagentSession>;
+  subagentByTaskPartId: Record<string, string>;
+  activeSubagentSessionId?: string | null;
 };
 
 export type TimelineRow =

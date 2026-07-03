@@ -3,9 +3,11 @@ import type {
   AgentInfo,
   AgentMessage,
   CommandInfo,
+  MessageScope,
   ModelInfo,
   ProviderInfo,
   RuntimeResourceInfo,
+  SubagentSession,
   TodoItem
 } from "@test-agent/shared-types";
 import type { ComposerAttachment } from "./prompt-parts";
@@ -24,6 +26,9 @@ export type AssistantThreadProps = {
   mode?: string;
   todos?: TodoItem[];
   streamingTextByPartId?: Record<string, string>;
+  messageScopesById?: Record<string, MessageScope>;
+  subagentsBySessionId?: Record<string, SubagentSession>;
+  subagentByTaskPartId?: Record<string, string>;
 };
 </script>
 
@@ -42,7 +47,10 @@ const props = withDefaults(defineProps<AssistantThreadProps>(), {
   models: () => [],
   providers: () => [],
   todos: () => [],
-  streamingTextByPartId: () => ({})
+  streamingTextByPartId: () => ({}),
+  messageScopesById: () => ({}),
+  subagentsBySessionId: () => ({}),
+  subagentByTaskPartId: () => ({})
 });
 const emit = defineEmits<{
   send: [prompt: string, attachments: ComposerAttachment[]];
@@ -60,6 +68,7 @@ const viewportRef = ref<HTMLElement | null>(null);
 const isAtBottom = ref(true);
 const hasNewContent = ref(false);
 const userInterrupted = ref(false);
+const activeSubagentSessionId = ref<string | null>(null);
 let isProgrammaticScroll = false;
 
 const timelineState = computed(() =>
@@ -69,8 +78,31 @@ const timelineState = computed(() =>
     providers: props.providers,
     models: props.models,
     todos: props.todos,
-    streamingTextByPartId: props.streamingTextByPartId
+    streamingTextByPartId: props.streamingTextByPartId,
+    messageScopesById: props.messageScopesById,
+    subagentsBySessionId: props.subagentsBySessionId,
+    subagentByTaskPartId: props.subagentByTaskPartId,
+    activeSubagentSessionId: activeSubagentSessionId.value
   })
+);
+
+function selectSubagent(sessionId: string) {
+  if (props.subagentsBySessionId[sessionId]) {
+    activeSubagentSessionId.value = sessionId;
+  }
+}
+
+function returnToRootAgent() {
+  activeSubagentSessionId.value = null;
+}
+
+watch(
+  () => props.subagentsBySessionId,
+  (value) => {
+    if (activeSubagentSessionId.value && !value[activeSubagentSessionId.value]) {
+      activeSubagentSessionId.value = null;
+    }
+  }
 );
 
 // 流式内容指纹：变化时触发自动滚动
@@ -160,7 +192,11 @@ function jumpToBottom() {
         <div class="text-[13px] font-semibold text-[var(--ta-chat-text)]">开始与测试智能体对话</div>
         <div class="text-[12px] text-[var(--ta-chat-muted)]">描述测试任务，例如：跑 checkout 模块并分析失败原因</div>
       </div>
-      <OpencodeTimeline :state="timelineState" @open-diff="emit('openDiff')" />
+      <OpencodeTimeline
+        :state="timelineState"
+        @open-diff="emit('openDiff')"
+        @select-subagent="selectSubagent"
+      />
       <button
         v-if="hasNewContent"
         type="button"
@@ -170,8 +206,9 @@ function jumpToBottom() {
         查看新内容
       </button>
     </div>
-    <TodoPanel :todos="todos" />
+    <TodoPanel v-if="!activeSubagentSessionId" :todos="todos" />
     <ComposerArea
+      v-if="!activeSubagentSessionId"
       :running="running"
       :commands="commands"
       :resources="resources"
@@ -179,7 +216,13 @@ function jumpToBottom() {
       @cancel="emit('cancel')"
       @retry="emit('retry')"
     />
+    <div v-else class="ta-subagent-notice">
+      <span>子 Agent 不支持对话，</span>
+      <button type="button" class="ta-subagent-notice__return" @click="returnToRootAgent">切换到主 Agent</button>
+      <span>。</span>
+    </div>
     <RuntimeControls
+      v-if="!activeSubagentSessionId"
       :agents="agents"
       :models="models"
       :commands="commands"
@@ -196,3 +239,32 @@ function jumpToBottom() {
     />
   </div>
 </template>
+
+<style scoped>
+.ta-subagent-notice {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border-top: 1px solid var(--ta-chat-border);
+  color: var(--ta-chat-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.ta-subagent-notice__return {
+  border: 0;
+  background: transparent;
+  color: var(--ta-accent);
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+}
+
+.ta-subagent-notice__return:hover {
+  color: var(--ta-accent-strong, var(--ta-accent));
+  text-decoration: underline;
+}
+</style>

@@ -3171,6 +3171,9 @@ async function handleLogout() {
         <FigmaChatPanel
           :messages="chatState.messages"
           :streaming-text-by-part-id="chatState.streamingTextByPartId"
+          :message-scopes-by-id="chatState.messageScopesById"
+          :subagents-by-session-id="chatState.subagentsBySessionId"
+          :subagent-by-task-part-id="chatState.subagentByTaskPartId"
           :running="runtimeBusy"
           :runtime-status="chatState.status ?? run?.status"
           :title="chatTitle"

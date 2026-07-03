@@ -3,6 +3,7 @@ import type {
   AgentInfo,
   AgentMessage,
   CommandInfo,
+  MessageScope,
   ModelInfo,
   PermissionRequest,
   ProviderInfo,
@@ -10,6 +11,7 @@ import type {
   RuntimeResourceInfo,
   RuntimeStatus,
   RuntimeToolInfo,
+  SubagentSession,
   TodoItem
 } from "@test-agent/shared-types";
 import type { ComposerAttachment } from "./prompt-parts";
@@ -38,6 +40,9 @@ export type AgentChatProps = {
   tools?: RuntimeToolInfo[];
   runtimeStatus?: RuntimeStatus;
   streamingTextByPartId?: Record<string, string>;
+  messageScopesById?: Record<string, MessageScope>;
+  subagentsBySessionId?: Record<string, SubagentSession>;
+  subagentByTaskPartId?: Record<string, string>;
   selectedAgent?: string;
   selectedProvider?: string;
   selectedModel?: string;
@@ -69,6 +74,9 @@ const props = withDefaults(defineProps<AgentChatProps>(), {
   resources: () => [],
   tools: () => [],
   streamingTextByPartId: () => ({}),
+  messageScopesById: () => ({}),
+  subagentsBySessionId: () => ({}),
+  subagentByTaskPartId: () => ({}),
   mode: "build"
 });
 const emit = defineEmits<{
@@ -170,6 +178,9 @@ function onHistorySearchInput(value: string) {
           :mode="mode"
           :todos="todos"
           :streaming-text-by-part-id="streamingTextByPartId"
+          :message-scopes-by-id="messageScopesById"
+          :subagents-by-session-id="subagentsBySessionId"
+          :subagent-by-task-part-id="subagentByTaskPartId"
           @send="(prompt, attachments) => emit('send', prompt, attachments)"
           @cancel="emit('cancel')"
           @retry="emit('retry')"

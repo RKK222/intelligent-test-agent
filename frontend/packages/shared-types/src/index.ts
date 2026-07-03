@@ -952,6 +952,8 @@ export type RunEventType =
   | "message.part.delta"
   | "session.diff"
   | "session.status"
+  | "session.child.discovered"
+  | "session.scope.updated"
   | "todo.updated"
   | "tool.started"
   | "tool.finished"
@@ -978,6 +980,29 @@ export type RunEvent = {
   traceId: string;
   occurredAt: string;
   payload: Record<string, unknown>;
+};
+
+export type MessageScope = {
+  sessionId?: string;
+  rootSessionId?: string;
+  parentSessionId?: string;
+  isChildSession?: boolean;
+  taskMessageId?: string;
+  taskPartId?: string;
+  taskCallId?: string;
+};
+
+export type SubagentSession = {
+  sessionId: string;
+  parentSessionId?: string;
+  taskMessageId?: string;
+  taskPartId?: string;
+  taskCallId?: string;
+  agentName: string;
+  title: string;
+  status: string;
+  modelLabel?: string;
+  updatedAt: string;
 };
 
 export type RunDiffFile = {

@@ -2,6 +2,22 @@
 
 ## Entries
 
+### 2026-07-03 - 子 Agent 对话切换展示
+
+- Why:
+  - opencode task 子 Agent 的输出会混入主 Agent 对话，导致主任务和子会话内容难以区分；用户要求主视图只显示子 Agent 调用卡片，点击后切换到子 Agent 完整时间线，并隐藏子视图输入框。
+- What:
+  - `agent-chat` reducer 新增 Run Session scope 运行期索引：`messageScopesById`、`subagentsBySessionId`、`subagentByTaskPartId`，从 `message.*`、`session.child.discovered`、`session.scope.updated` 和 task tool metadata 识别子会话。
+  - `opencode-like` 时间线按 `activeSubagentSessionId` 过滤主/子消息；task 工具渲染为可点击子 Agent 卡片，子视图只展示目标 child session 输出。
+  - `FigmaChatPanel` 和 `AssistantThread` 支持主/子 Agent 切换；子 Agent 页面隐藏 composer、Todo、permission/question 等主交互，仅保留“切换到主 Agent”提示。
+  - 同步更新事件流、agent-chat、agent-web 和 shared-types 文档。
+- How:
+  - 只改前端 reducer、组件、投影状态、样式、测试和文档；不新增后端 API，不改 generated SDK，不改数据库。
+  - 缺少 scope 的历史消息继续按 root 消息兼容展示；本次子 Agent 切换优先覆盖当前运行期和 active-run SSE 恢复。
+- Result:
+  - 定向 vitest 覆盖 child scope 隔离、subagent 索引、主/子投影、task 卡片点击和右侧面板子视图隐藏输入框。
+  - `cd frontend && corepack pnpm typecheck` 通过。
+
 ### 2026-07-03 - 满意度反馈按钮在对话结束后展示
 
 - Why:

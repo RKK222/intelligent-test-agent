@@ -21,7 +21,7 @@ import ReasoningPartGroup from "./parts/ReasoningPartGroup.vue";
 import ContextToolGroup from "./tools/ContextToolGroup.vue";
 
 const props = defineProps<TimelineRowProps>();
-const emit = defineEmits<{ openDiff: [] }>();
+const emit = defineEmits<{ openDiff: []; selectSubagent: [sessionId: string] }>();
 
 const userMessage = computed(() => props.state.messageById[props.row.type === "error" ? "" : props.row.userMessageId]);
 
@@ -90,6 +90,9 @@ const reasoningParts = computed(() => {
       :part="assistantPart"
       :streaming-text-by-part-id="state.streamingTextByPartId"
       :previous-assistant-part="row.previousAssistantPart"
+      :subagents-by-session-id="state.subagentsBySessionId"
+      :subagent-by-task-part-id="state.subagentByTaskPartId"
+      @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
     />
   </AssistantMessageFrame>
   <AssistantMessageFrame

@@ -7,6 +7,8 @@ import type {
   RunDiffFile,
   RunEvent,
   SessionDiff,
+  MessageScope,
+  SubagentSession,
   TodoItem
 } from "@test-agent/shared-types";
 
@@ -19,6 +21,9 @@ export type AgentChatRuntimeState = {
   status?: string;
   seenEventIds?: string[];
   streamingTextByPartId: Record<string, string>;
+  messageScopesById: Record<string, MessageScope>;
+  subagentsBySessionId: Record<string, SubagentSession>;
+  subagentByTaskPartId: Record<string, string>;
 };
 
 export type AgentChatRuntimeAction =
@@ -37,7 +42,10 @@ export function createInitialAgentChatRuntimeState(messages: AgentMessage[] = []
     questions: [],
     todos: [],
     seenEventIds: [],
-    streamingTextByPartId: {}
+    streamingTextByPartId: {},
+    messageScopesById: {},
+    subagentsBySessionId: {},
+    subagentByTaskPartId: {}
   };
 }
 
@@ -102,40 +110,59 @@ function reduceEventOnly(
     return { ...state, messages: appendAssistantDelta(state.messages, text(event.payload.text) ?? text(event.payload.delta) ?? "", event) };
   }
   if (event.type === "message.updated") {
-    return { ...state, messages: upsertMessage(state.messages, event.payload, event) };
+    const scope = scopeFromPayload(event.payload);
+    const messageId = messageIdFromMessagePayload(event.payload, event);
+    return rememberMessageScope(
+      { ...state, messages: upsertMessage(state.messages, event.payload, event, scope?.isChildSession === true) },
+      messageId,
+      scope
+    );
   }
   if (event.type === "message.removed") {
     const messageId = text(event.payload.messageId) ?? text(event.payload.messageID) ?? text(event.payload.id);
     const removed = messageId
       ? state.messages.find((message) => message.role !== "card" && (message.id === messageId || message.messageId === messageId))
       : undefined;
-    return messageId
-      ? {
-          ...state,
-          messages: state.messages.filter(
-            (message) => message.id !== messageId && (message.role === "card" || message.messageId !== messageId)
-          ),
-          streamingTextByPartId: clearStreamingForParts(state.streamingTextByPartId, removed?.role === "assistant" ? removed.parts : undefined)
-        }
-      : state;
-  }
-  if (event.type === "message.part.delta") {
-    const messages = mergePartDelta(state.messages, event);
-    if (messages === state.messages) {
+    if (!messageId) {
       return state;
     }
+    const nextScopes = { ...state.messageScopesById };
+    delete nextScopes[messageId];
     return {
+      ...state,
+      messages: state.messages.filter(
+        (message) => message.id !== messageId && (message.role === "card" || message.messageId !== messageId)
+      ),
+      messageScopesById: nextScopes,
+      streamingTextByPartId: clearStreamingForParts(state.streamingTextByPartId, removed?.role === "assistant" ? removed.parts : undefined)
+    };
+  }
+  if (event.type === "message.part.delta") {
+    const scope = scopeFromPayload(event.payload);
+    const messages = mergePartDelta(state.messages, event, scope?.isChildSession === true);
+    if (messages === state.messages) {
+      return rememberMessageScope(state, messageIdFromPartEvent(event), scope);
+    }
+    return rememberMessageScope({
       ...state,
       messages,
       streamingTextByPartId: appendStreamingText(state.streamingTextByPartId, event)
-    };
+    }, messageIdFromPartEvent(event), scope);
   }
   if (event.type === "message.part.updated") {
-    return {
+    const scope = scopeFromPayload(event.payload);
+    const raw = record(event.payload.part) ?? record(event.payload.message) ?? event.payload;
+    const messageId = messageIdFromPartEvent(event);
+    let next = rememberMessageScope({
       ...state,
-      messages: upsertPart(state.messages, event),
+      messages: upsertPart(state.messages, event, scope?.isChildSession === true),
       streamingTextByPartId: clearStreamingText(state.streamingTextByPartId, partIdFromEvent(event))
-    };
+    }, messageId, scope);
+    const taskSubagent = subagentFromTaskPart(event, raw);
+    if (taskSubagent) {
+      next = rememberSubagent(next, taskSubagent);
+    }
+    return next;
   }
   if (event.type === "message.part.removed") {
     return {
@@ -208,6 +235,10 @@ function reduceEventOnly(
         .map((item, index) => toTodoItem(item, index))
     };
   }
+  if (event.type === "session.child.discovered" || event.type === "session.scope.updated") {
+    const subagent = subagentFromScopeEvent(event, state);
+    return subagent ? rememberSubagent(state, subagent) : state;
+  }
   if (event.type === "session.status") {
     return { ...state, status: text(event.payload.status) ?? state.status };
   }
@@ -245,7 +276,7 @@ function appendAssistantDelta(messages: AgentMessage[], delta: string, event: Ru
   ] satisfies AgentMessage[];
 }
 
-function mergePartDelta(messages: AgentMessage[], event: RunEvent) {
+function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssistantMessage = false) {
   const messageId = text(event.payload.messageId) ?? text(event.payload.messageID) ?? `assistant-${event.runId}`;
   const partId = text(event.payload.partId) ?? text(event.payload.partID) ?? `part-${event.seq}`;
   const partType = text(event.payload.partType) ?? text(event.payload.partKind);
@@ -258,7 +289,7 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent) {
     return messages;
   }
   const exact = findAssistantMessage(messages, messageId);
-  const lastIdx = exact.message ? -1 : findLastAssistantInCurrentTurn(messages);
+  const lastIdx = exact.message || forceNewAssistantMessage ? -1 : findLastAssistantInCurrentTurn(messages);
   const assistant: Extract<AgentMessage, { role: "assistant" }> =
     exact.message ??
     (lastIdx >= 0 ? (messages[lastIdx] as Extract<AgentMessage, { role: "assistant" }>) : undefined) ??
@@ -306,7 +337,7 @@ function mergeTextualPart(current: MessagePart | undefined, partId: string, part
   return { partId, type: "text", text: textValue, status: "running" };
 }
 
-function upsertPart(messages: AgentMessage[], event: RunEvent) {
+function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistantMessage = false) {
   const raw = record(event.payload.part) ?? record(event.payload.message) ?? event.payload;
   const messageId = text(event.payload.messageId) ?? text(event.payload.messageID) ?? text(raw.messageId) ?? text(raw.messageID);
   const partId = text(raw.partId) ?? text(raw.partID) ?? text(raw.id);
@@ -348,7 +379,7 @@ function upsertPart(messages: AgentMessage[], event: RunEvent) {
     }
   }
   const exact = findAssistantMessage(messages, messageId);
-  const lastIdx = exact.message ? -1 : findLastAssistantInCurrentTurn(messages);
+  const lastIdx = exact.message || forceNewAssistantMessage ? -1 : findLastAssistantInCurrentTurn(messages);
   const assistant: Extract<AgentMessage, { role: "assistant" }> =
     exact.message ??
     (lastIdx >= 0 ? (messages[lastIdx] as Extract<AgentMessage, { role: "assistant" }>) : undefined) ??
@@ -390,13 +421,13 @@ function removePart(messages: AgentMessage[], event: RunEvent) {
   });
 }
 
-function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown>, event: RunEvent) {
+function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown>, event: RunEvent, forceNewMessage = false) {
   const raw = record(payload.message) ?? record(payload.info) ?? payload;
   const messageId = text(raw.messageId) ?? text(raw.messageID) ?? text(raw.id) ?? `message-${event.seq}`;
   const role = text(raw.role) === "user" ? "user" : "assistant";
   const incomingText = text(raw.text) ?? text(raw.content);
   let index = messages.findIndex((item) => item.id === messageId || (item.role !== "card" && item.messageId === messageId));
-  if (role === "user" && index < 0) {
+  if (role === "user" && index < 0 && !forceNewMessage) {
     const pendingUserIndex = findLastUserInCurrentTurn(messages);
     const pendingUser = pendingUserIndex >= 0 ? messages[pendingUserIndex] : undefined;
     if (pendingUser?.role === "user" && (incomingText === undefined || pendingUser.text === incomingText)) {
@@ -542,6 +573,173 @@ function toolCardKey(payload: Record<string, unknown>) {
     text(payload.partID) ??
     text(payload.rawEventId)
   );
+}
+
+function messageIdFromMessagePayload(payload: Record<string, unknown>, event: RunEvent): string | undefined {
+  const raw = record(payload.message) ?? record(payload.info) ?? payload;
+  return text(raw.messageId) ?? text(raw.messageID) ?? text(raw.id) ?? (event.type === "message.updated" ? `message-${event.seq}` : undefined);
+}
+
+function messageIdFromPartEvent(event: RunEvent): string | undefined {
+  const raw = record(event.payload.part) ?? record(event.payload.message) ?? event.payload;
+  return (
+    text(event.payload.messageId) ??
+    text(event.payload.messageID) ??
+    text(raw.messageId) ??
+    text(raw.messageID) ??
+    (event.type === "message.part.delta" ? `assistant-${event.runId}` : undefined)
+  );
+}
+
+function scopeFromPayload(payload: Record<string, unknown>): MessageScope | undefined {
+  const sessionId = text(payload.sessionId) ?? text(payload.sessionID);
+  const rootSessionId = text(payload.rootSessionId);
+  const parentSessionId = text(payload.parentSessionId);
+  const inferredChildSession = sessionId !== undefined && rootSessionId !== undefined ? sessionId !== rootSessionId : undefined;
+  const isChildSession = booleanValue(payload.isChildSession) ?? booleanValue(payload.childSession) ?? inferredChildSession;
+  const scope: MessageScope = {
+    sessionId,
+    rootSessionId,
+    parentSessionId,
+    isChildSession,
+    taskMessageId: text(payload.taskMessageId) ?? text(payload.taskMessageID),
+    taskPartId: text(payload.taskPartId) ?? text(payload.taskPartID),
+    taskCallId: text(payload.taskCallId) ?? text(payload.taskCallID)
+  };
+  return Object.values(scope).some((value) => value !== undefined) ? scope : undefined;
+}
+
+function rememberMessageScope(
+  state: AgentChatRuntimeState,
+  messageId: string | undefined,
+  scope: MessageScope | undefined
+): AgentChatRuntimeState {
+  if (!messageId || !scope) {
+    return state;
+  }
+  return {
+    ...state,
+    messageScopesById: {
+      ...state.messageScopesById,
+      [messageId]: {
+        ...(state.messageScopesById[messageId] ?? {}),
+        ...scope
+      }
+    }
+  };
+}
+
+function subagentFromTaskPart(event: RunEvent, raw: Record<string, unknown> | undefined): SubagentSession | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  const state = record(raw.state);
+  const input = record(raw.input) ?? record(state?.input);
+  const metadata = record(raw.metadata) ?? record(state?.metadata);
+  const payloadScope = scopeFromPayload(event.payload);
+  const tool = text(raw.toolName) ?? text(raw.tool) ?? text(raw.name);
+  if (tool !== "task") {
+    return undefined;
+  }
+  const scopedChildSessionId = payloadScope?.isChildSession === true ? payloadScope.sessionId : undefined;
+  const childSessionId = text(metadata?.sessionId) ?? text(metadata?.sessionID) ?? scopedChildSessionId;
+  if (!childSessionId) {
+    return undefined;
+  }
+  const rootSessionId =
+    payloadScope?.rootSessionId ??
+    (payloadScope?.isChildSession === false ? payloadScope.sessionId : undefined) ??
+    text(event.payload.sessionId) ??
+    text(event.payload.sessionID);
+  const messageId = messageIdFromPartEvent(event);
+  const partId = text(raw.partId) ?? text(raw.partID) ?? text(raw.id);
+  const callId = text(raw.callId) ?? text(raw.callID);
+  const title = text(state?.title) ?? text(raw.title) ?? text(input?.description) ?? firstLine(text(input?.prompt)) ?? "Subagent task";
+  const agentName = displayName(text(input?.subagent_type) ?? text(metadata?.agent) ?? "Task");
+  const status = text(state?.status) ?? text(raw.status) ?? "running";
+  return {
+    sessionId: childSessionId,
+    parentSessionId: text(metadata?.parentSessionId) ?? payloadScope?.parentSessionId ?? rootSessionId,
+    taskMessageId: messageId,
+    taskPartId: partId,
+    taskCallId: callId,
+    agentName,
+    title,
+    status,
+    modelLabel: modelLabel(metadata),
+    updatedAt: event.occurredAt
+  };
+}
+
+function subagentFromScopeEvent(event: RunEvent, state: AgentChatRuntimeState): SubagentSession | undefined {
+  const sessionId = text(event.payload.sessionId) ?? text(event.payload.sessionID);
+  const taskPartId = text(event.payload.taskPartId) ?? text(event.payload.taskPartID);
+  if (!sessionId || !taskPartId) {
+    return undefined;
+  }
+  const metadata = record(event.payload.metadata);
+  const previousSessionId = state.subagentByTaskPartId[taskPartId];
+  const previous = previousSessionId ? state.subagentsBySessionId[previousSessionId] : state.subagentsBySessionId[sessionId];
+  return {
+    sessionId,
+    parentSessionId: text(event.payload.parentSessionId) ?? previous?.parentSessionId,
+    taskMessageId: text(event.payload.taskMessageId) ?? text(event.payload.taskMessageID) ?? previous?.taskMessageId,
+    taskPartId,
+    taskCallId: text(event.payload.taskCallId) ?? text(event.payload.taskCallID) ?? previous?.taskCallId,
+    agentName: displayName(text(metadata?.agentName) ?? text(metadata?.agent) ?? previous?.agentName ?? "Task"),
+    title: text(metadata?.title) ?? previous?.title ?? "Subagent task",
+    status: text(event.payload.status) ?? previous?.status ?? "running",
+    modelLabel: previous?.modelLabel,
+    updatedAt: event.occurredAt
+  };
+}
+
+function rememberSubagent(state: AgentChatRuntimeState, subagent: SubagentSession): AgentChatRuntimeState {
+  const previous = state.subagentsBySessionId[subagent.sessionId];
+  const merged: SubagentSession = {
+    ...previous,
+    ...subagent,
+    agentName: subagent.agentName || previous?.agentName || "Task",
+    title: subagent.title || previous?.title || "Subagent task",
+    status: subagent.status || previous?.status || "running",
+    updatedAt: subagent.updatedAt || previous?.updatedAt || new Date().toISOString()
+  };
+  return {
+    ...state,
+    subagentsBySessionId: {
+      ...state.subagentsBySessionId,
+      [merged.sessionId]: merged
+    },
+    subagentByTaskPartId: merged.taskPartId
+      ? { ...state.subagentByTaskPartId, [merged.taskPartId]: merged.sessionId }
+      : state.subagentByTaskPartId
+  };
+}
+
+function modelLabel(metadata: Record<string, unknown> | undefined): string | undefined {
+  const model = record(metadata?.model);
+  if (!model) {
+    return undefined;
+  }
+  const providerId = text(model.providerID) ?? text(model.providerId);
+  const modelId = text(model.modelID) ?? text(model.modelId) ?? text(model.id);
+  if (providerId && modelId) {
+    return `${providerId} / ${modelId}`;
+  }
+  return modelId ?? providerId;
+}
+
+function firstLine(value: string | undefined): string | undefined {
+  const line = value?.split(/\r?\n/).map((item) => item.trim()).find(Boolean);
+  return line && line.length > 80 ? `${line.slice(0, 77)}...` : line;
+}
+
+function displayName(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "Task";
+  }
+  return `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}`;
 }
 
 /**
@@ -874,4 +1072,8 @@ function text(value: unknown) {
 
 function number(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function booleanValue(value: unknown) {
+  return typeof value === "boolean" ? value : undefined;
 }

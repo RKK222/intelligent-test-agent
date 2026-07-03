@@ -10,12 +10,16 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
   const assistantMessagesByParent: Record<string, Extract<AgentMessage, { role: "assistant" }>[]> = {};
   const partsByMessageId: Record<string, MessagePart[]> = {};
   let currentUserId: string | undefined;
+  const activeSubagentSessionId = input.activeSubagentSessionId ?? null;
 
   for (const message of input.messages) {
     if (message.role === "card") {
       continue;
     }
     const id = canonicalMessageId(message);
+    if (!messageVisibleInView(id, input, activeSubagentSessionId)) {
+      continue;
+    }
     messageById[message.id] = message;
     messageById[id] = message;
 
@@ -51,8 +55,24 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
     questions: input.questions ?? [],
     todos: input.todos ?? [],
     running: input.running ?? runtimeStatus.type === "busy",
-    showReasoningSummaries: input.showReasoningSummaries ?? true
+    showReasoningSummaries: input.showReasoningSummaries ?? true,
+    messageScopesById: input.messageScopesById ?? {},
+    subagentsBySessionId: input.subagentsBySessionId ?? {},
+    subagentByTaskPartId: input.subagentByTaskPartId ?? {},
+    activeSubagentSessionId
   };
+}
+
+function messageVisibleInView(
+  messageId: string,
+  input: OpencodeLikeConversationInput,
+  activeSubagentSessionId: string | null
+): boolean {
+  const scope = input.messageScopesById?.[messageId];
+  if (activeSubagentSessionId) {
+    return scope?.sessionId === activeSubagentSessionId;
+  }
+  return scope?.isChildSession !== true;
 }
 
 function partsForAssistant(message: Extract<AgentMessage, { role: "assistant" }>): MessagePart[] {

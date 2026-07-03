@@ -34,8 +34,10 @@ import type {
   AiFeedbackReasonCode,
   AiFeedbackRating,
   AiMessageFeedback,
+  MessageScope,
   MessagePart,
   RunDiffFile,
+  SubagentSession,
   TodoItem,
 } from '@test-agent/shared-types'
 import aiHeaderUrl from '../assets/figma/ai-header.svg'
@@ -615,13 +617,22 @@ const props =
     streamingTextByPartId?: Record<string, string>
     /** opencode todo.updated 投影出的任务列表，固定展示在输入框上方。 */
     todos?: TodoItem[]
+    /** RunEvent scope 索引：用于把主 Agent 与子 Agent 输出分离展示。 */
+    messageScopesById?: Record<string, MessageScope>
+    /** 当前运行期发现的子 Agent 会话索引。 */
+    subagentsBySessionId?: Record<string, SubagentSession>
+    /** task part 到子 Agent session 的索引。 */
+    subagentByTaskPartId?: Record<string, string>
   }>(), {
     processRefreshBlocksSubmit: true,
     commands: () => [],
     agents: () => [],
     rawOutputEntries: () => [],
     streamingTextByPartId: () => ({}),
-    todos: () => []
+    todos: () => [],
+    messageScopesById: () => ({}),
+    subagentsBySessionId: () => ({}),
+    subagentByTaskPartId: () => ({})
   })
 
 const emit =
@@ -2279,6 +2290,8 @@ const timelineDiffFiles = computed<RunDiffFile[]>(() =>
   }))
 )
 
+const activeSubagentSessionId = ref<string | null>(null)
+
 const opencodeTimelineState = computed(() =>
   createOpencodeLikeState({
     messages: timelineMessages.value,
@@ -2286,12 +2299,35 @@ const opencodeTimelineState = computed(() =>
     diffFiles: timelineDiffFiles.value,
     streamingTextByPartId: props.streamingTextByPartId,
     todos: props.todos,
+    messageScopesById: props.messageScopesById,
+    subagentsBySessionId: props.subagentsBySessionId,
+    subagentByTaskPartId: props.subagentByTaskPartId,
+    activeSubagentSessionId: activeSubagentSessionId.value,
   })
 )
 
 function openTimelineDiff() {
   emit('open-diff', props.fileChanges?.at(-1)?.path ?? '')
 }
+
+function selectSubagent(sessionId: string) {
+  if (props.subagentsBySessionId[sessionId]) {
+    activeSubagentSessionId.value = sessionId
+  }
+}
+
+function returnToRootAgent() {
+  activeSubagentSessionId.value = null
+}
+
+watch(
+  () => props.subagentsBySessionId,
+  (value) => {
+    if (activeSubagentSessionId.value && !value[activeSubagentSessionId.value]) {
+      activeSubagentSessionId.value = null
+    }
+  }
+)
 
 const lastAssistant = computed(() => {
   for (let i = displayMessages.value.length - 1; i >= 0; i -= 1) {
@@ -2509,8 +2545,9 @@ function onCompositionEnd() {
         v-else
         :state="opencodeTimelineState"
         @open-diff="openTimelineDiff"
+        @select-subagent="selectSubagent"
       />
-      <div v-if="!historyLoading && !props.running && displayMessages.some(canFeedback)" class="figma-chat-timeline-actions">
+      <div v-if="!activeSubagentSessionId && !historyLoading && !props.running && displayMessages.some(canFeedback)" class="figma-chat-timeline-actions">
         <template v-for="message in displayMessages" :key="`${message.id}:actions`">
           <div v-if="canFeedback(message)" class="figma-chat-feedback">
             <button
@@ -3165,7 +3202,7 @@ function onCompositionEnd() {
 
       <!-- 手动终止提示 -->
       <div
-        v-if="showTaskStopped"
+        v-if="!activeSubagentSessionId && showTaskStopped"
         class="figma-chat-stopped"
       >
         <MinusCircle :size="14" class="figma-chat-stopped-icon" />
@@ -3174,7 +3211,7 @@ function onCompositionEnd() {
 
       <!-- 重试卡片 -->
       <div
-        v-if="showTaskFailed"
+        v-if="!activeSubagentSessionId && showTaskFailed"
         class="figma-chat-retry-card"
       >
         <div class="figma-chat-retry-card-header">
@@ -3187,7 +3224,7 @@ function onCompositionEnd() {
 
       <!-- 对话失败提示 -->
       <div
-        v-if="showTaskFailed"
+        v-if="!activeSubagentSessionId && showTaskFailed"
         class="figma-chat-failed"
       >
         <MinusCircle :size="14" class="figma-chat-failed-icon" />
@@ -3196,7 +3233,7 @@ function onCompositionEnd() {
 
       <!-- 对话完成提示 -->
       <div
-        v-if="showTaskCompleted"
+        v-if="!activeSubagentSessionId && showTaskCompleted"
         class="figma-chat-completed"
       >
         <CheckCircle :size="14" class="figma-chat-completed-icon" />
@@ -3269,7 +3306,7 @@ function onCompositionEnd() {
 
 
     <!-- 任务消耗提示（位于输入框上方） -->
-    <div v-if="hasTaskUsageDisplay" class="figma-chat-usage">
+    <div v-if="!activeSubagentSessionId && hasTaskUsageDisplay" class="figma-chat-usage">
       <img
         v-if="running"
         :src="planLoadingUrl"
@@ -3315,7 +3352,7 @@ function onCompositionEnd() {
 
     <!-- 收起态：右下角一个小圆点，带渐变虚化；点击展开，支持拖动改位置 -->
     <button
-      v-if="processStatusDotVisible"
+      v-if="!activeSubagentSessionId && processStatusDotVisible"
       type="button"
       :class="[
         'figma-chat-process-dot',
@@ -3331,7 +3368,7 @@ function onCompositionEnd() {
 
     <!-- 展开态：原状态卡片；点击收起回圆点 -->
     <div
-      v-else-if="processStatusVisible"
+      v-else-if="!activeSubagentSessionId && processStatusVisible"
       :class="[
         'figma-chat-process-status',
         processReady ? 'is-ready' : 'is-blocking',
@@ -3364,7 +3401,7 @@ function onCompositionEnd() {
     </div>
 
     <!-- 技能面板：输入 / 触发 -->
-    <div v-if="showSkillPanel" class="figma-chat-skill-panel">
+    <div v-if="!activeSubagentSessionId && showSkillPanel" class="figma-chat-skill-panel">
       <div class="figma-chat-choice-header">
         <div class="figma-chat-choice-question">技能</div>
         <button
@@ -3396,7 +3433,7 @@ function onCompositionEnd() {
     </div>
 
     <!-- Agent @ 候选：遵循 opencode prompt autocomplete，只展示 subagent/all 且非 hidden 的 Agent。 -->
-    <div v-if="showAgentPanel" class="figma-chat-agent-panel">
+    <div v-if="!activeSubagentSessionId && showAgentPanel" class="figma-chat-agent-panel">
       <div class="figma-chat-choice-header">
         <div class="figma-chat-choice-question">Agent</div>
         <button
@@ -3428,7 +3465,7 @@ function onCompositionEnd() {
 
     <!-- 作废说明：运行中旧任务面板已由 OpencodeTimeline 的工具/事件行取代，避免两套来源显示不一致。 -->
     <!-- 选择题面板：固定展示在输入区域上方，保留 composer 供用户继续补充内容。 -->
-    <div v-if="showChoicePanel" class="figma-chat-choice-panel">
+    <div v-if="!activeSubagentSessionId && showChoicePanel" class="figma-chat-choice-panel">
       <!-- Step 1: 选择选项 -->
       <template v-if="choiceStep === 'select'">
         <div class="figma-chat-choice-header">
@@ -3550,9 +3587,9 @@ function onCompositionEnd() {
         </div>
       </template>
     </div>
-    <TodoPanel :todos="todos" />
+    <TodoPanel v-if="!activeSubagentSessionId" :todos="todos" />
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
-    <div class="figma-chat-composer">
+    <div v-if="!activeSubagentSessionId" class="figma-chat-composer">
       <div class="figma-chat-input-card" @click="onComposerCardClick">
         <textarea
           v-model="localInput"
@@ -3755,6 +3792,11 @@ function onCompositionEnd() {
           </button>
         </div>
       </div>
+    </div>
+    <div v-else class="figma-chat-subagent-notice">
+      <span>子 Agent 不支持对话，</span>
+      <button type="button" class="figma-chat-subagent-return" @click="returnToRootAgent">切换到主 Agent</button>
+      <span>。</span>
     </div>
     <!-- 与左侧面板、中心面板底部栏等高的常驻 footer -->
     <div class="figma-chat-footer" />
@@ -6017,6 +6059,35 @@ function onCompositionEnd() {
   flex-shrink: 0;
   padding: 8px 10px 10px;
   background: transparent;
+}
+
+.figma-chat-subagent-notice {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--ta-chat-border);
+  background: var(--ta-chat-bg);
+  color: var(--ta-chat-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.figma-chat-subagent-return {
+  border: 0;
+  background: transparent;
+  color: var(--ta-accent);
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  cursor: pointer;
+}
+
+.figma-chat-subagent-return:hover {
+  color: var(--ta-accent-strong, var(--ta-accent));
+  text-decoration: underline;
 }
 
 /* 统一输入卡片：圆角边框容器，textarea + 底部工具行整合在一起 */

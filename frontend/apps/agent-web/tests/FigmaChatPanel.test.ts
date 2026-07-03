@@ -165,6 +165,109 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("高优先级");
   });
 
+  it("switches from the root timeline to a subagent timeline without showing the composer", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "msg_user_root",
+            messageId: "msg_user_root",
+            role: "user",
+            text: "分析前端结构",
+            createdAt: "2026-07-03T00:00:00Z"
+          },
+          {
+            id: "msg_root",
+            messageId: "msg_root",
+            role: "assistant",
+            text: "",
+            parts: [
+              {
+                partId: "prt_task_frontend",
+                type: "tool",
+                toolName: "task",
+                callId: "call_task_frontend",
+                status: "running",
+                input: {
+                  description: "Explore frontend structure",
+                  subagent_type: "explore"
+                }
+              }
+            ],
+            createdAt: "2026-07-03T00:00:01Z"
+          },
+          {
+            id: "msg_child_user",
+            messageId: "msg_child_user",
+            role: "user",
+            text: "Explore frontend structure",
+            createdAt: "2026-07-03T00:00:02Z"
+          },
+          {
+            id: "msg_child_answer",
+            messageId: "msg_child_answer",
+            role: "assistant",
+            text: "子 Agent 已读取前端目录。",
+            parts: [{ partId: "prt_child_answer", type: "text", text: "子 Agent 已读取前端目录。" }],
+            createdAt: "2026-07-03T00:00:03Z"
+          }
+        ],
+        messageScopesById: {
+          msg_user_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+          msg_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+          msg_child_user: {
+            sessionId: "ses_child_frontend",
+            rootSessionId: "ses_root",
+            parentSessionId: "ses_root",
+            isChildSession: true,
+            taskPartId: "prt_task_frontend"
+          },
+          msg_child_answer: {
+            sessionId: "ses_child_frontend",
+            rootSessionId: "ses_root",
+            parentSessionId: "ses_root",
+            isChildSession: true,
+            taskPartId: "prt_task_frontend"
+          }
+        },
+        subagentsBySessionId: {
+          ses_child_frontend: {
+            sessionId: "ses_child_frontend",
+            parentSessionId: "ses_root",
+            taskMessageId: "msg_root",
+            taskPartId: "prt_task_frontend",
+            taskCallId: "call_task_frontend",
+            agentName: "Explore",
+            title: "Explore frontend structure",
+            status: "running",
+            updatedAt: "2026-07-03T00:00:00Z"
+          }
+        },
+        subagentByTaskPartId: { prt_task_frontend: "ses_child_frontend" },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
+    expect(wrapper.find(".oc-subagent-card").exists()).toBe(true);
+    expect(wrapper.text()).toContain("Explore frontend structure");
+    expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
+
+    await wrapper.get(".oc-subagent-card").trigger("click");
+
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
+    expect(wrapper.text()).toContain("Explore frontend structure");
+    expect(wrapper.text()).toContain("子 Agent 已读取前端目录。");
+    expect(wrapper.text()).toContain("子 Agent 不支持对话");
+    expect(wrapper.find(".figma-chat-subagent-return").exists()).toBe(true);
+
+    await wrapper.get(".figma-chat-subagent-return").trigger("click");
+
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
+    expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
+  });
+
   it("sends the trimmed prompt and clears the composer when the process is ready", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

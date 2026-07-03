@@ -12,7 +12,7 @@ import TimelineRow from "./TimelineRow.vue";
 import { createTimelineRows } from "../state/projection";
 
 const props = defineProps<OpencodeTimelineProps>();
-const emit = defineEmits<{ openDiff: [] }>();
+const emit = defineEmits<{ openDiff: []; selectSubagent: [sessionId: string] }>();
 const rows = computed(() => createTimelineRows(props.state));
 </script>
 
@@ -28,6 +28,7 @@ const rows = computed(() => createTimelineRows(props.state));
         :row="row"
         :state="state"
         @open-diff="emit('openDiff')"
+        @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
       />
     </div>
   </div>

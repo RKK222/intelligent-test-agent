@@ -88,6 +88,126 @@ describe("agent-chat runtime reducer", () => {
     ]);
   });
 
+  it("tracks subagent scopes and keeps child output out of the root assistant message", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "分析前端结构",
+      createdAt: "2026-07-03T00:00:00Z"
+    });
+    const withTask = reduceAgentChatRuntime(submitted, {
+      type: "event",
+      event: event("message.part.updated", {
+        sessionID: "ses_root",
+        rootSessionId: "ses_root",
+        messageID: "msg_root",
+        part: {
+          id: "prt_task",
+          messageID: "msg_root",
+          type: "tool",
+          tool: "task",
+          callID: "call_task",
+          state: {
+            title: "Explore frontend structure",
+            status: "running",
+            input: {
+              description: "Explore frontend structure",
+              subagent_type: "explore"
+            },
+            metadata: {
+              parentSessionId: "ses_root",
+              sessionId: "ses_child",
+              model: { providerID: "opencode", modelID: "deepseek-v4" }
+            }
+          }
+        }
+      })
+    });
+
+    expect((withTask as any).subagentsBySessionId.ses_child).toMatchObject({
+      sessionId: "ses_child",
+      parentSessionId: "ses_root",
+      taskMessageId: "msg_root",
+      taskPartId: "prt_task",
+      taskCallId: "call_task",
+      agentName: "Explore",
+      title: "Explore frontend structure",
+      status: "running",
+      modelLabel: "opencode / deepseek-v4"
+    });
+    expect((withTask as any).subagentByTaskPartId.prt_task).toBe("ses_child");
+
+    const withChildText = reduceAgentChatRuntime(withTask, {
+      type: "event",
+      event: event("message.part.delta", {
+        sessionID: "ses_child",
+        sessionId: "ses_child",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskMessageId: "msg_root",
+        taskPartId: "prt_task",
+        taskCallId: "call_task",
+        messageID: "msg_child",
+        partID: "prt_child_text",
+        partType: "text",
+        delta: "子 Agent 输出"
+      })
+    });
+
+    const rootAssistant = withChildText.messages.find(
+      (message) => message.role === "assistant" && message.messageId === "msg_root"
+    );
+    const childAssistant = withChildText.messages.find(
+      (message) => message.role === "assistant" && message.messageId === "msg_child"
+    );
+
+    expect(rootAssistant).toMatchObject({ role: "assistant", messageId: "msg_root", text: "" });
+    expect(childAssistant).toMatchObject({
+      role: "assistant",
+      messageId: "msg_child",
+      text: "子 Agent 输出",
+      parts: [{ partId: "prt_child_text", type: "text", text: "子 Agent 输出" }]
+    });
+    expect((withChildText as any).messageScopesById.msg_child).toMatchObject({
+      sessionId: "ses_child",
+      rootSessionId: "ses_root",
+      parentSessionId: "ses_root",
+      isChildSession: true,
+      taskMessageId: "msg_root",
+      taskPartId: "prt_task",
+      taskCallId: "call_task"
+    });
+  });
+
+  it("updates subagent indexes from session child discovery events", () => {
+    const next = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("session.child.discovered", {
+        sessionId: "ses_child_2",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskMessageId: "msg_root",
+        taskPartId: "prt_task_2",
+        taskCallId: "call_task_2",
+        metadata: {
+          title: "Explore backend structure",
+          agentName: "Explore"
+        }
+      })
+    });
+
+    expect((next as any).subagentByTaskPartId.prt_task_2).toBe("ses_child_2");
+    expect((next as any).subagentsBySessionId.ses_child_2).toMatchObject({
+      sessionId: "ses_child_2",
+      parentSessionId: "ses_root",
+      taskMessageId: "msg_root",
+      taskPartId: "prt_task_2",
+      taskCallId: "call_task_2",
+      agentName: "Explore",
+      title: "Explore backend structure"
+    });
+  });
+
   it("keeps live user message parts out of the assistant response", () => {
     const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "user.submitted",

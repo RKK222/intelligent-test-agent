@@ -1,9 +1,11 @@
 <script lang="ts">
 import type { Component } from "vue";
-import type { MessagePart } from "@test-agent/shared-types";
+import type { MessagePart, SubagentSession } from "@test-agent/shared-types";
 
 export type ToolPartViewProps = {
   part: Extract<MessagePart, { type: "tool" }>;
+  subagentsBySessionId?: Record<string, SubagentSession>;
+  subagentByTaskPartId?: Record<string, string>;
 };
 </script>
 
@@ -26,6 +28,7 @@ import QuestionToolView from "../tools/QuestionToolView.vue";
 import { normalizeToolName } from "../../state/tool-registry";
 
 const props = defineProps<ToolPartViewProps>();
+const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
 
 const component = computed<Component>(() => {
   const name = normalizeToolName(props.part);
@@ -44,8 +47,18 @@ const component = computed<Component>(() => {
   if (name === "question") return QuestionToolView;
   return GenericToolView;
 });
+
+const subagent = computed(() => {
+  const sessionId = props.subagentByTaskPartId?.[props.part.partId];
+  return sessionId ? props.subagentsBySessionId?.[sessionId] : undefined;
+});
 </script>
 
 <template>
-  <component :is="component" :part="part" />
+  <component
+    :is="component"
+    :part="part"
+    :subagent="subagent"
+    @select-subagent="(sessionId: string) => emit('selectSubagent', sessionId)"
+  />
 </template>

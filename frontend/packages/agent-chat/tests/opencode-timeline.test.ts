@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render } from "@testing-library/vue";
 import { nextTick } from "vue";
 import type { AgentMessage, MessagePart } from "@test-agent/shared-types";
@@ -56,6 +56,51 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelector(".oc-text-part .oc-icon-button")).toBeTruthy();
     expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();
     expect(getByText("src/checkout.ts")).toBeTruthy();
+  });
+
+  it("renders task tool parts as clickable subagent cards", async () => {
+    const onSelectSubagent = vi.fn();
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "分析前后端结构"),
+        assistantMessage("msg_assistant_1", [
+          {
+            ...toolPart("prt_task_backend", "task", {
+              description: "Explore backend structure",
+              subagent_type: "explore"
+            }),
+            callId: "call_task_backend",
+            status: "running"
+          }
+        ])
+      ],
+      subagentsBySessionId: {
+        ses_child_backend: {
+          sessionId: "ses_child_backend",
+          parentSessionId: "ses_root",
+          taskMessageId: "msg_assistant_1",
+          taskPartId: "prt_task_backend",
+          taskCallId: "call_task_backend",
+          agentName: "Explore",
+          title: "Explore backend structure",
+          status: "running",
+          updatedAt: "2026-07-03T00:00:00Z"
+        }
+      },
+      subagentByTaskPartId: { prt_task_backend: "ses_child_backend" }
+    } as any);
+
+    const { container, getByText } = render(OpencodeTimeline, {
+      props: { state, onSelectSubagent }
+    });
+
+    expect(container.querySelector(".oc-subagent-card")).toBeTruthy();
+    expect(getByText("Explore")).toBeTruthy();
+    expect(getByText("Explore backend structure")).toBeTruthy();
+
+    await fireEvent.click(container.querySelector(".oc-subagent-card") as HTMLElement);
+
+    expect(onSelectSubagent).toHaveBeenCalledWith("ses_child_backend");
   });
 
   it("uses the opencode-like timeline as the AssistantThread main rendering path", async () => {

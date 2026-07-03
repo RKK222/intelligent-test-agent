@@ -35,7 +35,6 @@ describe("opencode-like conversation state", () => {
       "user-message",
       "context-tool-group",
       "assistant-part",
-      "thinking",
       "diff-summary"
     ]);
     expect(rows[1]).toMatchObject({
@@ -117,6 +116,74 @@ describe("opencode-like conversation state", () => {
     });
 
     expect(completed.streamingTextByPartId).toEqual({});
+  });
+
+  it("filters child scoped messages out of the root view and shows them in the child view", () => {
+    const messages: AgentMessage[] = [
+      userMessage("msg_user_root", "分析前端结构"),
+      assistantMessage("msg_root", [
+        toolPart("prt_task_frontend", "task", {
+          description: "Explore frontend structure",
+          subagent_type: "explore"
+        })
+      ]),
+      userMessage("msg_child_user", "Explore frontend structure"),
+      assistantMessage("msg_child_answer", [textPart("prt_child_answer", "子 Agent 已读取前端目录。")])
+    ];
+    const messageScopesById = {
+      msg_user_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+      msg_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+      msg_child_user: {
+        sessionId: "ses_child",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskPartId: "prt_task_frontend"
+      },
+      msg_child_answer: {
+        sessionId: "ses_child",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskPartId: "prt_task_frontend"
+      }
+    };
+    const subagentsBySessionId = {
+      ses_child: {
+        sessionId: "ses_child",
+        parentSessionId: "ses_root",
+        taskMessageId: "msg_root",
+        taskPartId: "prt_task_frontend",
+        taskCallId: "call_task",
+        agentName: "Explore",
+        title: "Explore frontend structure",
+        status: "running",
+        updatedAt: "2026-07-03T00:00:00Z"
+      }
+    };
+
+    const rootState = createOpencodeLikeState({
+      messages,
+      messageScopesById,
+      subagentsBySessionId,
+      subagentByTaskPartId: { prt_task_frontend: "ses_child" }
+    } as any);
+    const childState = createOpencodeLikeState({
+      messages,
+      messageScopesById,
+      subagentsBySessionId,
+      subagentByTaskPartId: { prt_task_frontend: "ses_child" },
+      activeSubagentSessionId: "ses_child"
+    } as any);
+
+    expect(rootState.userMessages.map((message) => message.messageId)).toEqual(["msg_user_root"]);
+    expect(rootState.partsByMessageId.msg_child_answer).toBeUndefined();
+    expect(createTimelineRows(rootState).some((row) => row.type === "assistant-part" && row.messageId === "msg_child_answer")).toBe(false);
+    expect(rootState.partsByMessageId.msg_root.map((part) => part.partId)).toEqual(["prt_task_frontend"]);
+
+    expect(childState.userMessages.map((message) => message.messageId)).toEqual(["msg_child_user"]);
+    expect(childState.partsByMessageId.msg_child_answer.map((part) => part.partId)).toEqual(["prt_child_answer"]);
+    expect(createTimelineRows(childState).map((row) => row.type)).toEqual(["user-message", "assistant-part"]);
   });
 });
 
