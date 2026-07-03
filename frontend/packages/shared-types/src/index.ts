@@ -1598,6 +1598,7 @@ export type PublishPersonalWorkspaceResult = {
   remotePushed?: boolean;
   headCommit?: string | null;
   executedCommands?: string[];
+  currentStep?: "PREPARE_REMOTE" | "COMMIT_LOCAL" | "MERGE_PERSONAL" | "MERGE_APPLICATION" | "PUSH_REMOTE" | "COMPLETED" | string | null;
 };
 
 export type PublishPersonalWorkspacePreview = {

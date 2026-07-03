@@ -123,6 +123,15 @@ const conflictResolving = ref(false);
 const showCommitProgressDialog = ref(false);
 const commitStep = ref(0);
 const executedCommands = ref<string[]>([]);
+const mergeResolutionCompleted = ref(false);
+
+type PublishGitStep =
+  | "PREPARE_REMOTE"
+  | "COMMIT_LOCAL"
+  | "MERGE_PERSONAL"
+  | "MERGE_APPLICATION"
+  | "PUSH_REMOTE"
+  | "COMPLETED";
 
 function getCommitStepClass(stepNum: number) {
   if (errorMessage.value && commitStep.value === stepNum) {
@@ -161,6 +170,65 @@ function getCommitStepStatusText(stepNum: number) {
     return "RUNNING";
   }
   return "PENDING";
+}
+
+function commitStepNumber(step?: string | null): number {
+  switch (step) {
+    case "COMMIT_LOCAL":
+      return 2;
+    case "MERGE_PERSONAL":
+    case "MERGE_APPLICATION":
+      return 3;
+    case "PUSH_REMOTE":
+      return 4;
+    case "COMPLETED":
+      return 5;
+    case "PREPARE_REMOTE":
+    default:
+      return 1;
+  }
+}
+
+function commandsForStep(commands: string[] | undefined, step?: string | null): string[] {
+  if (!commands?.length) return [];
+  if (!step || step === "COMPLETED") return commands;
+  const matches = commands.filter((command) => {
+    const normalized = ` ${command.toLowerCase()} `;
+    switch (step as PublishGitStep) {
+      case "PREPARE_REMOTE":
+        return normalized.includes(" fetch ") || normalized.includes(" pull ");
+      case "COMMIT_LOCAL":
+        return normalized.includes(" reset ")
+          || normalized.includes(" add ")
+          || normalized.includes(" commit ");
+      case "MERGE_PERSONAL":
+      case "MERGE_APPLICATION":
+        return normalized.includes(" merge ");
+      case "PUSH_REMOTE":
+        return normalized.includes(" push ");
+      default:
+        return true;
+    }
+  });
+  return matches.length > 0 ? matches : commands;
+}
+
+function applyPublishExecution(step: string | null | undefined, commands?: string[]) {
+  commitStep.value = commitStepNumber(step);
+  executedCommands.value = commandsForStep(commands, step);
+}
+
+function publishErrorExecution(error: unknown) {
+  if (!(error instanceof BackendApiError)) return;
+  const failedStep = typeof error.details?.failedStep === "string"
+    ? error.details.failedStep
+    : null;
+  const commands = Array.isArray(error.details?.executedCommands)
+    ? error.details.executedCommands.filter((command): command is string => typeof command === "string")
+    : [];
+  if (failedStep || commands.length > 0) {
+    applyPublishExecution(failedStep, commands);
+  }
 }
 // 切换测试数据可能发生在真实刷新未完成时，用 token 丢弃旧请求回写，避免列表被清空。
 let refreshChangesToken = 0;
@@ -219,6 +287,7 @@ const totalStagedCount = computed(() => workspaceStaged.value.length + agentsSta
 watch(
   () => props.workspaceId,
   () => {
+    mergeResolutionCompleted.value = false;
     stagedWorkspacePaths.value.clear();
     void refreshChanges();
   },
@@ -415,6 +484,7 @@ async function resolveWorkspaceConflict(payload: {
     await api.resolveWorkspaceGitConflict(props.workspaceId, { path, ...payload });
     activeConflict.value = null;
     await refreshChanges();
+    mergeResolutionCompleted.value = workspaceConflicts.value.length === 0;
     notifyChangesRefreshed([path], true);
   } catch (error) {
     errorMessage.value = errorMessageFor(error, "解决 Git 冲突失败");
@@ -430,6 +500,7 @@ async function abortWorkspaceConflict() {
   try {
     await api.abortWorkspaceGitConflict(props.workspaceId);
     activeConflict.value = null;
+    mergeResolutionCompleted.value = false;
     await refreshChanges();
     notifyChangesRefreshed(undefined, true);
   } catch (error) {
@@ -449,6 +520,7 @@ async function resolveAllWorkspaceConflicts(resolution: "CURRENT" | "INCOMING") 
     await api.resolveAllWorkspaceGitConflicts(props.workspaceId, { resolution });
     activeConflict.value = null;
     await refreshChanges();
+    mergeResolutionCompleted.value = workspaceConflicts.value.length === 0;
     notifyChangesRefreshed(undefined, true);
   } catch (error) {
     errorMessage.value = errorMessageFor(error, "批量解决 Git 冲突失败");
@@ -572,11 +644,12 @@ async function handleCommit(push = false) {
   errorMessage.value = "";
   progressMessage.value = "";
   executedCommands.value = [];
-  showCommitProgressDialog.value = true;
-  commitStep.value = 1; // 准备合并并拉取远程分支
+  showCommitProgressDialog.value = false;
+  commitStep.value = 0;
 
   try {
     if (workbench.useMockTestData) {
+      showCommitProgressDialog.value = true;
       progressMessage.value = "正在提交变更 (测试模式)...";
       executedCommands.value.push("git status");
       await new Promise((resolve) => setTimeout(resolve, 800));
@@ -622,33 +695,45 @@ async function handleCommit(push = false) {
         return;
       }
       progressMessage.value = "正在合并推送到应用版本分支...";
-      const preview = await api.previewPersonalWorkspacePublish(props.personalWorkspaceId);
-      executedCommands.value = ["git fetch origin"];
-      if (
-        preview.incomingCommitCount > 0
-        && !window.confirm(
-          `远程应用分支有 ${preview.incomingCommitCount} 个新提交，涉及 ${preview.changedFileCount} 个文件`
-          + `（新增 ${preview.addedCount}、修改 ${preview.modifiedCount}、删除 ${preview.deletedCount}、重命名 ${preview.renamedCount}）。`
-          + "继续后 Git 会先合并这些变化；如有冲突，可一键全部保留个人版本或远程版本。是否继续？"
-        )
-      ) {
-        progressMessage.value = "";
-        showCommitProgressDialog.value = false;
-        committing.value = false;
-        return;
+      let expectedApplicationHead: string | undefined;
+      if (!mergeResolutionCompleted.value) {
+        const preview = await api.previewPersonalWorkspacePublish(props.personalWorkspaceId);
+        expectedApplicationHead = preview.applicationHead || undefined;
+        if (
+          preview.incomingCommitCount > 0
+          && !window.confirm(
+            `应用分支相对当前个人分支多 ${preview.incomingCommitCount} 个提交，涉及 ${preview.changedFileCount} 个文件`
+            + `（新增 ${preview.addedCount}、修改 ${preview.modifiedCount}、删除 ${preview.deletedCount}、重命名 ${preview.renamedCount}）。`
+            + "继续后 Git 会把应用分支合入个人分支；如有冲突，将保留 Git 原生冲突现场。是否继续？"
+          )
+        ) {
+          progressMessage.value = "";
+          committing.value = false;
+          return;
+        }
       }
-      commitStep.value = 2; // 暂存并提交本地变更
-      const result = await api.publishPersonalWorkspace(props.personalWorkspaceId, {
+
+      showCommitProgressDialog.value = true;
+      commitStep.value = mergeResolutionCompleted.value ? 2 : 1;
+      const payload: {
+        commitMessage: string;
+        files: string[];
+        expectedApplicationHead?: string;
+      } = {
         commitMessage: msg,
-        files: workspaceStaged.value.map((file) => file.path),
-        expectedApplicationHead: preview.applicationHead
-      });
-      executedCommands.value = result.executedCommands || [];
+        files: workspaceStaged.value.map((file) => file.path)
+      };
+      if (expectedApplicationHead) {
+        payload.expectedApplicationHead = expectedApplicationHead;
+      }
+      const result = await api.publishPersonalWorkspace(props.personalWorkspaceId, payload);
+      applyPublishExecution(result.currentStep, result.executedCommands);
       if (result.status === "CONFLICT") {
         const conflictMessage = `合并产生 ${result.conflictFiles.length} 个冲突文件。可全部保留个人版本、全部采用远程版本，或逐个处理。`;
         errorMessage.value = conflictMessage;
         progressMessage.value = "";
-        commitStep.value = 3; // Step 3 failed
+        commitStep.value = commitStepNumber(result.currentStep ?? "MERGE_PERSONAL");
+        mergeResolutionCompleted.value = false;
         await refreshChanges({ preserveError: true });
         errorMessage.value = conflictMessage;
         committing.value = false;
@@ -660,6 +745,7 @@ async function handleCommit(push = false) {
       commitStep.value = 5; // Success
       // 推送成功：清除暂存状态
       stagedWorkspacePaths.value.clear();
+      mergeResolutionCompleted.value = false;
       progressMessage.value = "已提交并推送到应用版本！";
       await new Promise((resolve) => setTimeout(resolve, 500));
     } else if (!push && workspaceStaged.value.length > 0) {
@@ -717,6 +803,7 @@ async function handleCommit(push = false) {
       progressMessage.value = "";
     }, 2000);
   } catch (error) {
+    publishErrorExecution(error);
     progressMessage.value = "";
     errorMessage.value = errorMessageFor(error, "提交失败");
   } finally {
@@ -1121,7 +1208,7 @@ defineExpose({
           <li :class="['ta-process-startup-step', getCommitStepClass(1)]">
             <component :is="getCommitStepIcon(1)" :size="18" class="ta-process-startup-step-icon" />
             <div class="ta-process-startup-step-copy">
-              <span>准备合并并拉取远程分支</span>
+              <span>校验并同步应用分支</span>
               <small>{{ getCommitStepStatusText(1) }}</small>
             </div>
           </li>
@@ -1150,7 +1237,7 @@ defineExpose({
 
         <!-- Command Log Console -->
         <div class="px-4 py-3 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/20">
-          <div class="text-xs font-semibold text-zinc-500 mb-2 uppercase tracking-wider">执行的 Git 命令日志</div>
+          <div class="text-xs font-semibold text-zinc-500 mb-2 uppercase tracking-wider">当前步骤执行的 Git 命令</div>
           <div class="bg-zinc-950 dark:bg-black text-zinc-300 font-mono text-xs p-3 rounded-lg overflow-y-auto max-h-[160px] space-y-1.5 leading-relaxed border border-zinc-900 shadow-inner">
             <div v-if="executedCommands.length === 0" class="text-zinc-500 italic text-xs">暂无执行的命令</div>
             <div v-for="(cmd, idx) in executedCommands" :key="idx" class="flex items-start gap-1">

@@ -1044,8 +1044,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/workspaces/{workspaceId}/git-conflict/resolve` | 解决单个冲突并定点 stage，支持当前、应用、两者、手工内容和删除语义。 |
 | `POST` | `/workspaces/{workspaceId}/git-conflict/resolve-all` | 使用 Git index 原生 ours/theirs 批量解决全部冲突；只支持 `CURRENT/INCOMING`。 |
 | `POST` | `/workspaces/{workspaceId}/git-conflict/abort` | 在个人 worktree 中执行 `merge --abort`，取消整次未完成合并。 |
-| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish-preview` | 拉取应用远程分支并返回 HEAD、待合入提交数、A/M/D/R 汇总和样例路径；不修改个人 worktree。 |
-| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 先校验可选 `expectedApplicationHead`，再只提交 `files` 白名单、合并并推送；冲突返回 `CONFLICT`，推送失败不会返回成功。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish-preview` | 发布前预检应用分支 HEAD、待合入提交数、A/M/D/R 汇总和样例路径；不修改个人 worktree。若个人 worktree 已处于未完成 merge，只返回已记录的应用 HEAD，不重复拉取远程。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 先校验可选 `expectedApplicationHead`，再只提交 `files` 白名单、合并并推送；冲突返回 `CONFLICT`，推送失败不会返回成功。响应包含 `currentStep/executedCommands` 供前端展示真实 Git 阶段。 |
 
 `POST /applications/{appId}/workspace-templates/{templateId}/versions` 请求体：
 
@@ -1213,14 +1213,14 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 }
 ```
 
-提交前调用 `POST /personal-workspaces/{personalWorkspaceId}/publish-preview`。预览返回 `applicationHead/personalHead/incomingCommitCount/changedFileCount/addedCount/modifiedCount/deletedCount/renamedCount/samplePaths`。有待合入提交时前端确认后，将 `applicationHead` 原样传给 publish；若确认后应用 HEAD 再次变化，publish 会在修改个人 index 或创建提交前返回 `CONFLICT`。应用分支 pull 成功后会立即同步版本 target commit 和本机副本 commit，即使随后个人 merge 冲突也不保留陈旧元数据。
+提交前调用 `POST /personal-workspaces/{personalWorkspaceId}/publish-preview`。预览返回 `applicationHead/personalHead/incomingCommitCount/changedFileCount/addedCount/modifiedCount/deletedCount/renamedCount/samplePaths`。有待合入提交时前端确认后，将 `applicationHead` 原样传给 publish；若确认后应用 HEAD 再次变化，publish 会在修改个人 index 或创建提交前返回 `CONFLICT`。应用分支 pull 成功后会立即同步版本 target commit 和本机副本 commit，即使随后个人 merge 冲突也不保留陈旧元数据。若个人 worktree 已经处于 Git 原生 merge 状态，预览和继续发布都不再重复拉取远程；用户解决全部 unmerged 文件后，重新发布只完成 merge commit、把个人分支合回应用副本并 push。
 
 后端执行流程：
 
 1. 将 `files` 映射为仓库相对路径。普通发布先把 index 恢复到 `HEAD`，再只 stage 并提交这些文件；未选择文件保留在工作树。merge 重试则保留完整 merge index，在所有冲突解决后提交 Git 自动合并项和解决结果。
 2. 确保当前服务器应用版本副本可用：副本路径不存在、不是当前机器路径或历史运行态 Workspace 根目录仍指向旧系统路径时，按当前 `OPENCODE_APP_WORKSPACE_ROOT` 重新准备本机副本并更新副本/Workspace 记录。
-3. 切到应用版本副本（checkout 在应用版本特性分支）：`git fetch origin` + `git pull --ff-only {appVersionBranch}`，先把远端特性分支拉到本地。
-4. 在个人 worktree 中 `git merge --no-ff {appVersionBranch}`，把最新特性分支合入个人分支；如发生冲突，冲突文件保留在当前个人 worktree。
+3. 普通发布切到应用版本副本（checkout 在应用版本特性分支）：`git fetch origin` + `git pull --ff-only {appVersionBranch}`，先把远端特性分支拉到本地。若个人 worktree 已有未完成 merge 且冲突已解决，则复用已有 READY 应用副本，不再 fetch/pull。
+4. 普通发布在个人 worktree 中 `git merge --no-ff {appVersionBranch}`，把最新特性分支合入个人分支；如发生冲突，冲突文件保留在当前个人 worktree。merge 重试时跳过该步骤，直接提交用户已解决的 merge index。
 5. 在应用版本副本中 `git merge --no-ff {personalBranch}`，把已包含最新特性分支的本地个人分支合回特性分支（合并方向为「特性分支 ← 个人分支」）。
 6. `git push origin {appVersionBranch}` 推送应用版本特性分支；个人分支不推送远端。
 
@@ -1241,7 +1241,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "message": "合并成功: abc123...",
   "remotePushed": true,
   "headCommit": "abc123...",
-  "executedCommands": ["git fetch", "git merge", "git push"]
+  "executedCommands": ["git fetch", "git merge", "git push"],
+  "currentStep": "COMPLETED"
 }
 
 // 冲突
@@ -1251,11 +1252,12 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "versionId": "awv_...",
   "conflictFiles": ["src/App.java", "src/Config.java"],
   "message": "合并冲突，请在个人工作区中解决冲突后重新提交并推送",
-  "executedCommands": ["git fetch", "git merge"]
+  "executedCommands": ["git fetch", "git merge"],
+  "currentStep": "MERGE_PERSONAL"
 }
 ```
 
-`remotePushed` 只有在应用版本分支 `git push` 成功并读取发布后的 HEAD 后才为 `true`；前端未收到 `remotePushed=true` 时不得展示推送成功。
+`currentStep` 取值为 `PREPARE_REMOTE`、`COMMIT_LOCAL`、`MERGE_PERSONAL`、`MERGE_APPLICATION`、`PUSH_REMOTE`、`COMPLETED`。`remotePushed` 只有在应用版本分支 `git push` 成功并读取发布后的 HEAD 后才为 `true`；前端未收到 `remotePushed=true` 时不得展示推送成功。发布接口抛出统一错误时，`details.failedStep` 和 `details.executedCommands` 会尽量返回失败前已进入的 Git 阶段和已执行命令，前端命令日志应按失败步骤过滤展示，不展示预检或后续步骤的命令。
 
 前端两级菜单（应用工作空间→版本）使用说明：
 

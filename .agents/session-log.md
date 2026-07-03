@@ -2986,3 +2986,10 @@ bash /tmp/test-api-after-restart.sh
 - What: 前端 `pickDefaultWorkspaceForApp` 改为只读查询当前版本已有 `workspaceName=default` 且带 runtime workspaceId 的私人工作区，找不到则空态且不发文件树请求；应用切换菜单只展示已加入应用，未加入应用仅在“加入其他应用”弹窗展示。后端托管工作区成员校验统一补充加载上下文 details；`addMember` 约束普通用户只能给自己加成员，管理员/超级管理员才能给别人加成员。发布个人 worktree 时同步修复 logical `personalworktree:` 路径必须先解析为物理路径再传 Git。
 - How: 不新增 API endpoint、不改数据库结构或 Flyway；同步更新 HTTP API、数据库部署说明、前端 README 和 workspace-management README，并补充后端服务/API 单测与前端 mock E2E。
 - Result: `ManagedWorkspaceApplicationServiceTest`、`ConfigurationManagementControllerTest`、agent-web typecheck、目标 Playwright E2E 和 `git diff --check` 均通过。默认登录/切应用不再创建 default 私人工作区；权限错误会显示应用、版本、工作区类型/名称/ID，且只暴露安全业务字段。
+
+### 2026-07-03 - 修正个人 worktree 发布进度与冲突续提交流程
+
+- Why: Git 变更区在个人 worktree 已进入原生 merge 冲突后，继续发布仍会重复预览/拉取应用分支；发布进度弹窗把预检命令当作失败步骤命令展示，且后端错误未透传失败阶段和已执行命令，容易出现“暂存阶段失败但错误是拉取失败”的错位。
+- What: 个人发布预览在 merge 进行中只返回已记录应用 HEAD，不再 fetch/pull；继续发布在冲突已解决后复用当前 READY 应用副本，提交已有 merge index，跳过重复拉取和重复 merge 应用分支到个人分支。发布响应新增 `currentStep`，失败 `PlatformException.details` 增加 `failedStep/executedCommands`；前端进度弹窗按当前/失败步骤过滤真实 Git 命令，冲突解决后继续发布不再二次预览。同步更新 shared types、HTTP API、workspace-management/backend-api/agent-web 文档和回归测试。
+- How: 保持 Git 原生命令链路，不新增数据库、事件、环境配置或 generated SDK；普通发布仍走白名单 stage/commit、应用分支合入个人分支、个人分支合回应用副本、push 应用分支的原流程。构造 test profile 数据时确认 `888888888 / 123456` 对应 `usr_test_dev`，在其 default personal worktree 中保留 1 个 `UU` 冲突文件和 2 个普通未暂存文件用于复测。
+- Result: `ManagedWorkspaceApplicationServiceTest`、`ManagedWorkspaceControllerTest`、`GitWorkspaceServiceTest`、`GitWorkspaceServiceRealGitTest`、Git 面板/冲突编辑器 Vitest、agent-web/backend-api typecheck、agent-web build、`git diff --check` 均通过；按 `.env.test` 重启后后端 readiness 和前端 3000 正常，真实页面首次打开变更区即显示 3 个文件，普通文件可在冲突存在时单独暂存并取消暂存。

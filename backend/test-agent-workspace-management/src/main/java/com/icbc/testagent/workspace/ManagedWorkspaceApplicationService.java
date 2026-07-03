@@ -1401,6 +1401,20 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
         CodeRepository repository = existingRepository(version.repositoryId());
         Path personalRepoRoot = pathResolver.resolve(personal.repoRootPath());
+        if (gitWorkspaceService.isMergeInProgress(personalRepoRoot)) {
+            String applicationHead = currentApplicationHead(version, personal, traceId);
+            String personalHead = gitWorkspaceService.headCommit(personalRepoRoot);
+            return new ManagedWorkspaceResponses.PersonalWorkspacePublishPreviewResponse(
+                    applicationHead,
+                    personalHead,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of());
+        }
         PreparedApplicationBranch prepared = prepareApplicationBranch(
                 version, repository, userId, traceId);
         String personalHead = gitWorkspaceService.headCommit(personalRepoRoot);
@@ -1437,20 +1451,17 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String expectedApplicationHead,
             UserId userId,
             String traceId) {
+        PublishProgressContext progress = new PublishProgressContext();
+        List<String> commands = List.of();
         try {
             com.icbc.testagent.common.git.GitCommandExecutor.startRecording();
             ManagedWorkspaceResponses.PersonalWorkspacePublishResponse response =
-                    publishPersonalWorkspaceInternal(personalWorkspaceId, commitMessage, files, expectedApplicationHead, userId, traceId);
-            return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
-                    response.status(),
-                    response.personalWorkspaceId(),
-                    response.versionId(),
-                    response.conflictFiles(),
-                    response.message(),
-                    response.remotePushed(),
-                    response.headCommit(),
-                    new java.util.ArrayList<>(com.icbc.testagent.common.git.GitCommandExecutor.stopRecording())
-            );
+                    publishPersonalWorkspaceInternal(personalWorkspaceId, commitMessage, files, expectedApplicationHead, userId, traceId, progress);
+            commands = new java.util.ArrayList<>(com.icbc.testagent.common.git.GitCommandExecutor.stopRecording());
+            return response.withExecution(commands, progress.currentStep());
+        } catch (PlatformException exception) {
+            commands = new java.util.ArrayList<>(com.icbc.testagent.common.git.GitCommandExecutor.stopRecording());
+            throw withPublishProgressDetails(exception, progress.currentStep(), commands);
         } finally {
             com.icbc.testagent.common.git.GitCommandExecutor.stopRecording();
         }
@@ -1462,7 +1473,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             List<String> files,
             String expectedApplicationHead,
             UserId userId,
-            String traceId) {
+            String traceId,
+            PublishProgressContext progress) {
         PersonalWorkspace personal = existingPersonal(new PersonalWorkspaceId(personalWorkspaceId));
         ensurePersonalOwner(personal, userId);
         ApplicationWorkspaceVersion version = existingVersion(personal.versionId());
@@ -1477,13 +1489,21 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         if (mergeInProgress) {
             List<String> unresolved = gitWorkspaceService.conflictPaths(personalRepoRoot);
             if (!unresolved.isEmpty()) {
+                progress.step("MERGE_PERSONAL");
                 return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
                         "CONFLICT", personalWorkspaceId, version.versionId().value(), unresolved,
-                        "仍有未解决的合并冲突", false, null);
+                        "仍有未解决的合并冲突", false, null)
+                        .withExecution(List.of(), progress.currentStep());
             }
         }
-        PreparedApplicationBranch prepared = prepareApplicationBranch(
-                version, repository, userId, traceId);
+        PreparedApplicationBranch prepared;
+        if (mergeInProgress) {
+            prepared = currentPreparedApplicationBranch(version, personal, traceId);
+        } else {
+            progress.step("PREPARE_REMOTE");
+            prepared = prepareApplicationBranch(
+                    version, repository, userId, traceId);
+        }
         if (expectedApplicationHead != null
                 && !expectedApplicationHead.isBlank()
                 && !expectedApplicationHead.equals(prepared.headCommit())) {
@@ -1496,6 +1516,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
 
         // 2. 普通发布清空索引后只暂存白名单；merge 重试保留已解决冲突的完整 index。
+        progress.step("COMMIT_LOCAL");
         if (!mergeInProgress) {
             gitWorkspaceService.resetIndexToHead(personalRepoRoot, privateKey);
             gitWorkspaceService.stageFiles(personalRepoRoot, gitFiles, privateKey);
@@ -1510,26 +1531,30 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
         // 3. 把已确认的最新特性分支合入个人 worktree。
         //    如果这里冲突，冲突文件会留在用户当前可编辑的个人工作区，由用户解决后再次发布。
-        ApplicationWorkspaceVersionReplica applicationReplica = prepared.replica();
         Path applicationRepoRoot = prepared.repoRoot();
         String applicationBranch = version.branch();
-        try {
-            gitWorkspaceService.mergeBranch(personalRepoRoot, applicationBranch, privateKey);
-        } catch (PlatformException mergeException) {
-            List<String> conflictFiles = List.of();
+        if (!mergeInProgress) {
+            progress.step("MERGE_PERSONAL");
             try {
-                conflictFiles = gitWorkspaceService.conflictPaths(personalRepoRoot);
-            } catch (Exception ignored) {
+                gitWorkspaceService.mergeBranch(personalRepoRoot, applicationBranch, privateKey);
+            } catch (PlatformException mergeException) {
+                List<String> conflictFiles = List.of();
+                try {
+                    conflictFiles = gitWorkspaceService.conflictPaths(personalRepoRoot);
+                } catch (Exception ignored) {
+                }
+                if (conflictFiles.isEmpty()) {
+                    throw mergeException;
+                }
+                return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
+                        "CONFLICT", personalWorkspaceId, version.versionId().value(), conflictFiles,
+                        "合并冲突，请在个人工作区中解决冲突后重新提交并推送", false, null)
+                        .withExecution(List.of(), progress.currentStep());
             }
-            if (conflictFiles.isEmpty()) {
-                throw mergeException;
-            }
-            return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
-                    "CONFLICT", personalWorkspaceId, version.versionId().value(), conflictFiles,
-                    "合并冲突，请在个人工作区中解决冲突后重新提交并推送", false, null);
         }
 
         // 4. 个人分支已包含最新特性分支后，再在应用版本副本上本地合并个人分支。
+        progress.step("MERGE_APPLICATION");
         try {
             gitWorkspaceService.mergeBranch(applicationRepoRoot, personal.branch(), privateKey);
         } catch (PlatformException mergeException) {
@@ -1546,6 +1571,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         }
 
         // 5. 合并成功：只推送应用版本特性分支，更新版本 targetCommitHash 和副本 commit。
+        progress.step("PUSH_REMOTE");
         gitWorkspaceService.push(applicationRepoRoot, applicationBranch, false, privateKey);
         Instant now = Instant.now();
         String headCommit = gitWorkspaceService.headCommit(applicationRepoRoot);
@@ -1556,9 +1582,81 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             managedWorkspaceRepository.saveVersionReplica(currentReplica.get().ready(headCommit, now, traceId));
         }
         publishVersionSync(updatedVersion, userId, "PERSONAL_PUBLISHED", traceId, Map.of());
+        progress.step("COMPLETED");
         return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
                 "MERGED", personalWorkspaceId, version.versionId().value(), List.of(),
                 "合并成功: " + headCommit, true, headCommit);
+    }
+
+    private PlatformException withPublishProgressDetails(
+            PlatformException exception,
+            String failedStep,
+            List<String> executedCommands) {
+        Map<String, Object> details = new java.util.LinkedHashMap<>(exception.details());
+        if (failedStep != null && !failedStep.isBlank()) {
+            details.put("failedStep", failedStep);
+        }
+        if (executedCommands != null && !executedCommands.isEmpty()) {
+            details.put("executedCommands", List.copyOf(executedCommands));
+        }
+        return new PlatformException(exception.errorCode(), exception.getMessage(), details, exception);
+    }
+
+    private PreparedApplicationBranch currentPreparedApplicationBranch(
+            ApplicationWorkspaceVersion version,
+            PersonalWorkspace personal,
+            String traceId) {
+        ApplicationWorkspaceVersionReplica replica = managedWorkspaceRepository.findVersionReplica(
+                        version.versionId(),
+                        serverIdentity.linuxServerId())
+                .filter(item -> item.syncStatus() == WorkspaceReplicaSyncStatus.READY)
+                .orElseThrow(() -> new PlatformException(
+                        ErrorCode.CONFLICT,
+                        "已有 Git 合并未完成，但当前服务器缺少可继续发布的应用版本副本",
+                        Map.of("versionId", version.versionId().value(), "personalWorkspaceId", personal.personalWorkspaceId().value())));
+        return new PreparedApplicationBranch(
+                replica,
+                pathResolver.resolve(replica.repoRootPath()),
+                currentApplicationHead(version, replica));
+    }
+
+    private String currentApplicationHead(
+            ApplicationWorkspaceVersion version,
+            PersonalWorkspace personal,
+            String traceId) {
+        return currentPreparedApplicationBranch(version, personal, traceId).headCommit();
+    }
+
+    private String currentApplicationHead(
+            ApplicationWorkspaceVersion version,
+            ApplicationWorkspaceVersionReplica replica) {
+        String head = firstNonBlank(replica.currentCommitHash(), version.targetCommitHash());
+        if (!head.isBlank()) {
+            return head;
+        }
+        return gitWorkspaceService.headCommit(pathResolver.resolve(replica.repoRootPath()));
+    }
+
+    private static String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+        if (second != null && !second.isBlank()) {
+            return second;
+        }
+        return "";
+    }
+
+    private static final class PublishProgressContext {
+        private String currentStep = "PREPARE_REMOTE";
+
+        private void step(String currentStep) {
+            this.currentStep = currentStep;
+        }
+
+        private String currentStep() {
+            return currentStep;
+        }
     }
 
     private PreparedApplicationBranch prepareApplicationBranch(

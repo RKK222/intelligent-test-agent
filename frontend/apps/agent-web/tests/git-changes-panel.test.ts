@@ -30,11 +30,29 @@ const apiClientMock = vi.hoisted(() => ({
 
 vi.mock("@test-agent/backend-api", () => ({
   BackendApiError: class BackendApiError extends Error {
-    code = "UNKNOWN";
-    traceId = "trace_fixed";
-    details = {};
-    retryable = false;
-    status = 500;
+    code: string;
+    traceId: string;
+    details: Record<string, unknown>;
+    retryable: boolean;
+    status: number;
+
+    constructor(
+      status: number,
+      failure: {
+        code: string;
+        message: string;
+        traceId: string;
+        details?: Record<string, unknown>;
+        retryable?: boolean;
+      }
+    ) {
+      super(failure.message);
+      this.code = failure.code;
+      this.traceId = failure.traceId;
+      this.details = failure.details ?? {};
+      this.retryable = failure.retryable ?? false;
+      this.status = status;
+    }
   },
   createBackendApiClient: () => apiClientMock
 }));
@@ -439,6 +457,69 @@ describe("GitChangesPanel", () => {
 
     expect(await view.findByText(/远端推送结果未确认/)).toBeTruthy();
     expect(view.queryByText("提交并推送成功！")).toBeNull();
+  });
+
+  it("does not run preview again after conflicts were resolved in the current merge", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    const conflict = { path: "src/conflict.ts", status: "conflict", rawStatus: "UU", staged: true, patch: "", additions: 0, deletions: 0 };
+    const resolved = { path: "src/conflict.ts", status: "modified", rawStatus: "M ", staged: true, patch: "@@ -1 +1 @@\n-old\n+resolved", additions: 1, deletions: 1 };
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({ files: [conflict] })
+      .mockResolvedValueOnce({ files: [resolved] })
+      .mockResolvedValueOnce({ files: [] });
+
+    const view = render(GitChangesPanel, {
+      props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
+      global: { plugins: [createPinia()] }
+    });
+
+    await fireEvent.click(await view.findByRole("button", { name: /保留个人/ }));
+    await waitFor(() => expect(apiClientMock.resolveAllWorkspaceGitConflicts)
+      .toHaveBeenCalledWith("wrk_1234567890abcdef", { resolution: "CURRENT" }));
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: finish merge");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", {
+      commitMessage: "fix: finish merge",
+      files: ["src/conflict.ts"]
+    }));
+    expect(apiClientMock.previewPersonalWorkspacePublish).not.toHaveBeenCalled();
+  });
+
+  it("shows failed step commands from backend error details instead of stale preview commands", async () => {
+    const { BackendApiError } = await import("@test-agent/backend-api");
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "src/selected.ts", status: "modified", staged: false, patch: "", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValueOnce({
+        files: [{ path: "src/selected.ts", status: "modified", rawStatus: "M ", staged: true, patch: "", additions: 1, deletions: 0 }]
+      });
+    apiClientMock.publishPersonalWorkspace.mockRejectedValueOnce(new BackendApiError(502, {
+      success: false,
+      code: "GIT_UNAVAILABLE",
+      message: "Git 远程读取失败",
+      traceId: "trace_publish",
+      details: {
+        failedStep: "PREPARE_REMOTE",
+        executedCommands: ["git -C /repo fetch origin", "git -C /repo pull --ff-only feature_x"]
+      }
+    }));
+
+    const view = render(GitChangesPanel, {
+      props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("src/selected.ts")).toBeTruthy();
+    await fireEvent.click(view.getByTitle("暂存文件"));
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: remote");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    expect(await view.findByText(/提交失败：Git 远程读取失败/)).toBeTruthy();
+    expect(await view.findByText("git -C /repo pull --ff-only feature_x")).toBeTruthy();
+    expect(view.queryByText("git fetch origin")).toBeNull();
+    expect(view.getByText("FAILED")).toBeTruthy();
   });
 
   it("opens the three-way editor for a conflict row", async () => {

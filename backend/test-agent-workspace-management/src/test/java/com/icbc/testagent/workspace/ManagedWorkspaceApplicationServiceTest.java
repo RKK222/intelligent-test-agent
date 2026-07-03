@@ -1252,6 +1252,54 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void publishPersonalWorkspaceContinuesResolvedNativeMergeWithoutPullingRemoteAgain() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        git.nextStatusPorcelain = "M F-GCMS/workspace/README.md\n";
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms",
+                "awp_1",
+                "20260707",
+                null,
+                new UserId("usr_1"),
+                "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(),
+                new UserId("usr_1"),
+                "trace_default");
+        git.calls.clear();
+        git.mergeInProgress = true;
+        git.nextConflictPaths = List.of();
+        git.nextHeadCommit = "commit_merged_after_resolve";
+
+        ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "fix: finish native merge",
+                List.of("README.md"),
+                "commit_base",
+                new UserId("usr_1"),
+                "trace_publish");
+
+        assertThat(result.status()).isEqualTo("MERGED");
+        assertThat(result.currentStep()).isEqualTo("COMPLETED");
+        assertThat(git.calls)
+                .noneMatch(call -> call.startsWith("fetch:") || call.startsWith("pull:"));
+        assertThat(git.resetIndexRepoRoot).isNull();
+        assertThat(git.stagedFilesRepoRoot).isNull();
+        assertThat(git.committedStagedRepoRoot).isEqualTo(personalRepoRoot(personal.personalWorkspaceBranch()));
+        assertThat(git.mergeCalls)
+                .extracting(MergeCall::branch)
+                .containsExactly(personal.personalWorkspaceBranch());
+        assertThat(git.pushes)
+                .extracting(PushCall::branch)
+                .containsExactly(version.branch());
+    }
+
+    @Test
     void publishPersonalWorkspaceReturnsConflictWhenMergeFails() {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
