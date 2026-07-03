@@ -417,6 +417,36 @@ describe("opencode-like conversation state", () => {
     expect(rows.some((row) => row.type === "assistant-part" && row.messageId === "msg_child")).toBe(false);
   });
 
+  it("does not attach a stale synthetic subagent entry to later turns when the original task message is gone", () => {
+    const messages: AgentMessage[] = [
+      userMessage("msg_user_1", "分析项目结构"),
+      userMessage("msg_user_2", "继续生成接口文档"),
+      assistantMessage("msg_assistant_2", [toolPart("prt_read", "read", { filePath: "docs/api/http-api.md" })])
+    ];
+
+    const state = createOpencodeLikeState({
+      messages,
+      subagentsBySessionId: {
+        ses_child: {
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          taskMessageId: "msg_missing_task",
+          taskPartId: "prt_task_old",
+          taskCallId: "call_task",
+          agentName: "Explore",
+          title: "Explore backend structure",
+          status: "completed",
+          updatedAt: "2026-07-03T00:00:00Z"
+        }
+      },
+      subagentByTaskPartId: { prt_task_old: "ses_child" }
+    } as any);
+    const rows = createTimelineRows(state);
+
+    expect(state.partsByMessageId.msg_assistant_2.map((part) => part.partId)).toEqual(["prt_read"]);
+    expect(rows.some((row) => row.type === "assistant-part" && row.partId === "prt_task_old")).toBe(false);
+  });
+
   it("adds a stable synthetic subagent entry when the original task part is missing", () => {
     const messages: AgentMessage[] = [
       userMessage("msg_user_1", "分析项目结构"),

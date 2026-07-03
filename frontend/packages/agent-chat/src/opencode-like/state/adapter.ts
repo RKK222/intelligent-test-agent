@@ -11,7 +11,6 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
   const partsByMessageId: Record<string, MessagePart[]> = {};
   let currentUserId: string | undefined;
   const activeSubagentSessionId = input.activeSubagentSessionId ?? null;
-  const visibleAssistantIds: string[] = [];
 
   for (const message of input.messages) {
     if (message.role === "card") {
@@ -31,7 +30,6 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
     }
 
     partsByMessageId[id] = partsForAssistant(message);
-    visibleAssistantIds.push(id);
     if (currentUserId) {
       assistantMessagesByParent[currentUserId] = [...(assistantMessagesByParent[currentUserId] ?? []), message];
     } else {
@@ -48,7 +46,6 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
       subagentByTaskPartId,
       partsByMessageId,
       messageById,
-      visibleAssistantIds,
       userMessages,
       assistantMessagesByParent,
       orphanAssistantMessages
@@ -112,7 +109,6 @@ function appendSyntheticSubagentEntries(params: {
   subagentByTaskPartId: Record<string, string>;
   partsByMessageId: Record<string, MessagePart[]>;
   messageById: Record<string, AgentMessage>;
-  visibleAssistantIds: string[];
   userMessages: Extract<AgentMessage, { role: "user" }>[];
   assistantMessagesByParent: Record<string, Extract<AgentMessage, { role: "assistant" }>[]>;
   orphanAssistantMessages: Extract<AgentMessage, { role: "assistant" }>[];
@@ -123,8 +119,11 @@ function appendSyntheticSubagentEntries(params: {
       params.subagentByTaskPartId[partId] = subagent.sessionId;
       continue;
     }
-    const messageId = chooseSyntheticMessageId(subagent, params.partsByMessageId, params.visibleAssistantIds);
-    const targetMessageId = messageId ?? `subagent-entry:${subagent.sessionId}`;
+    const messageId = chooseSyntheticMessageId(subagent, params.partsByMessageId);
+    if (!messageId) {
+      continue;
+    }
+    const targetMessageId = messageId;
     const targetMessage = ensureSyntheticAssistantMessage(params, targetMessageId, subagent);
     const canonicalId = canonicalMessageId(targetMessage);
     params.partsByMessageId[canonicalId] = [
@@ -143,13 +142,13 @@ function hasTaskPart(partsByMessageId: Record<string, MessagePart[]>, partId: st
 
 function chooseSyntheticMessageId(
   subagent: SubagentSession,
-  partsByMessageId: Record<string, MessagePart[]>,
-  visibleAssistantIds: string[]
+  partsByMessageId: Record<string, MessagePart[]>
 ): string | undefined {
   if (subagent.taskMessageId && Object.prototype.hasOwnProperty.call(partsByMessageId, subagent.taskMessageId)) {
     return subagent.taskMessageId;
   }
-  return visibleAssistantIds.at(-1);
+  // 子 Agent 入口只能补回原始 task message；原消息已移除时不猜测最新轮次，避免旧子 Agent 串到后续对话。
+  return undefined;
 }
 
 function ensureSyntheticAssistantMessage(

@@ -1,3 +1,24 @@
+@property --oc-pulse-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+@keyframes oc-pulse-global {
+  0%,
+  100% {
+    --oc-pulse-opacity: 0.45;
+  }
+
+  50% {
+    --oc-pulse-opacity: 1;
+  }
+}
+
+:root {
+  animation: oc-pulse-global 1.6s ease-in-out infinite;
+}
+
 @keyframes oc-pulse {
   0%,
   100% {
@@ -38,7 +59,7 @@
   height: 6px;
   border-radius: 999px;
   background: var(--oc-muted);
-  animation: oc-pulse 1.6s ease-in-out infinite;
+  opacity: var(--oc-pulse-opacity);
 }
 
 .oc-progress-bar {

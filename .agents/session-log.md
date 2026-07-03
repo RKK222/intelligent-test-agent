@@ -3583,9 +3583,9 @@ bash /tmp/test-api-after-restart.sh
 - Why: 聊天时间线中“进行中”（工具运行中状态）与“思考中”（AI 思考状态）的闪烁频率不一致，且有不同的 pulse 持续时间（1.2s、1.6s、1.8s），导致多项任务并行/处于活跃态时闪烁参差不齐，视觉效果不够统一。
 - What: 将所有表示“运行中/思考中”状态的呼吸脉冲闪烁动画频率统一为一致的 `1.6s ease-in-out`。同时修正了部分因 CSS 选择器不匹配导致的潜在渲染问题。
 - How: 
-  - 修改 `animations.css`，将 `.oc-thinking-dot` 的 `oc-pulse` 持续时间由 `1.2s` 调整为 `1.6s`；
-  - 修改 `rows.css`，将 `.oc-working-status` 的 `oc-pulse` 持续时间由 `1.8s` 调整为 `1.6s`；
-  - 修改 `parts.css`，将 `.oc-disclosure.is-running .oc-tool__subtitle` 选择器修正为 `.oc-disclosure.is-running .oc-tool__status`，使其能够正确应用于折叠组件的状态标签。
-  - 上述修改使全局时间线（`OpencodeTimeline`）中的所有闪烁状态、提示和等待标示全部以 `1.6s` 步调保持一致。
+  - 修复由于新挂载组件动画计时重置导致“进行中”与“思考中”闪烁步调（相位）不一致的问题。通过 CSS Houdini `@property` 注册全局 CSS 变量 `--oc-pulse-opacity`，并在 `:root` 上统一执行单个全局脉冲动画 `oc-pulse-global`；所有闪烁相关的元素（包括状态胶囊、等待点、以及工作状态容器）直接引用该全局变量，从而实现完美的帧级别同步。
+  - 修改 `animations.css`，将 `.oc-thinking-dot` 调整为使用全局呼吸透明度；
+  - 修改 `rows.css`，将 `.oc-working-status` 调整为使用全局呼吸透明度；
+  - 修改 `parts.css` 和 `tools.css`，将 `.oc-disclosure.is-running .oc-tool__status` 和 `.oc-tool__status.is-running` 调整为使用全局呼吸透明度，确保所有进行中与思考中的状态胶囊在帧级别上百分百步调一致。
 - Result: 前端 Vitest 单元测试全部顺利通过，项目无类型和构建错误。
 
