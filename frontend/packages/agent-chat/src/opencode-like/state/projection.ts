@@ -1,4 +1,5 @@
 import { canonicalMessageId, groupRenderableParts } from "./part-utils";
+import { normalizeToolName } from "./tool-registry";
 import type { OpencodeLikeConversationState, TimelineRow } from "./types";
 
 type AssistantRowAccumulator = {
@@ -6,6 +7,8 @@ type AssistantRowAccumulator = {
   partIndex: number;
   contextGroupIndex?: number;
   reasoningGroupIndex?: number;
+  toolPartIndices: Record<string, number>;
+  toolGroupIndices: Record<string, number>;
 };
 
 export function createTimelineRows(state: OpencodeLikeConversationState): TimelineRow[] {
@@ -17,7 +20,9 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
 
   const orphanAccumulator: AssistantRowAccumulator = {
     hasAssistantHeader: false,
-    partIndex: 0
+    partIndex: 0,
+    toolPartIndices: {},
+    toolGroupIndices: {}
   };
   for (const assistantMessage of state.orphanAssistantMessages) {
     const assistantMessageId = canonicalMessageId(assistantMessage);
@@ -44,7 +49,9 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
     const assistantMessages = state.assistantMessagesByParent[userMessageId] ?? [];
     const accumulator: AssistantRowAccumulator = {
       hasAssistantHeader: false,
-      partIndex: 0
+      partIndex: 0,
+      toolPartIndices: {},
+      toolGroupIndices: {}
     };
     for (const assistantMessage of assistantMessages) {
       const assistantMessageId = canonicalMessageId(assistantMessage);
@@ -141,13 +148,70 @@ function appendAssistantGroupRow(
     return;
   }
 
+  if (part?.type === "tool") {
+    const toolKey = normalizeToolName(part);
+    const ref = { messageId: assistantMessageId, partId: group.partId };
+    const existingIndex = accumulator.toolGroupIndices[toolKey];
+    if (typeof existingIndex === "number") {
+      const existing = rows[existingIndex];
+      if (existing?.type === "tool-group") {
+        existing.refs.push(ref);
+      }
+      return;
+    }
+
+    const firstPartIndex = accumulator.toolPartIndices[toolKey];
+    const firstRow = typeof firstPartIndex === "number" ? rows[firstPartIndex] : undefined;
+    if (firstRow?.type === "assistant-part") {
+      rows[firstPartIndex] = {
+        type: "tool-group",
+        key: `tool:${toolKey}:${firstRow.userMessageId}:${firstRow.messageId}:${firstRow.partId}`,
+        userMessageId: firstRow.userMessageId,
+        messageId: firstRow.messageId,
+        refs: [
+          { messageId: firstRow.messageId, partId: firstRow.partId },
+          ref
+        ],
+        busy: state.running,
+        previousAssistantPart: firstRow.previousAssistantPart,
+        showAssistantHeader: firstRow.showAssistantHeader
+      };
+      accumulator.toolGroupIndices[toolKey] = firstPartIndex;
+      return;
+    }
+
+    appendSingleAssistantPartRow(rows, accumulator, {
+      userMessageId,
+      messageId: assistantMessageId,
+      partId: group.partId
+    });
+    accumulator.toolPartIndices[toolKey] = rows.length - 1;
+    return;
+  }
+
+  appendSingleAssistantPartRow(rows, accumulator, {
+    userMessageId,
+    messageId: assistantMessageId,
+    partId: group.partId
+  });
+}
+
+function appendSingleAssistantPartRow(
+  rows: TimelineRow[],
+  accumulator: AssistantRowAccumulator,
+  params: {
+    userMessageId: string;
+    messageId: string;
+    partId: string;
+  }
+): void {
   const showAssistantHeader = !accumulator.hasAssistantHeader;
   rows.push({
     type: "assistant-part",
-    key: `part:${assistantMessageId}:${group.partId}`,
-    userMessageId,
-    messageId: assistantMessageId,
-    partId: group.partId,
+    key: `part:${params.messageId}:${params.partId}`,
+    userMessageId: params.userMessageId,
+    messageId: params.messageId,
+    partId: params.partId,
     previousAssistantPart: accumulator.partIndex > 0 || accumulator.hasAssistantHeader,
     showAssistantHeader
   });

@@ -11,6 +11,31 @@ const markdownViewStub = {
 };
 
 describe("FigmaChatPanel", () => {
+  it("loads model options from provider model lists when the flat model list is empty", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        models: [],
+        providers: [
+          {
+            providerId: "north",
+            name: "North Provider",
+            models: [{ id: "north-mini", name: "North Mini Code Free" }]
+          }
+        ],
+        selectedModel: "north/north-mini"
+      } as any
+    });
+
+    await wrapper.get('[aria-label="切换模型"]').trigger("click");
+
+    expect(wrapper.find(".figma-chat-model-dropdown").exists()).toBe(true);
+    expect(wrapper.text()).toContain("North Provider");
+    expect(wrapper.text()).toContain("North Mini Code Free");
+    expect(wrapper.text()).not.toContain("暂无匹配模型");
+  });
+
   it("shows visible primary/all agents in the composer agent picker and emits changes", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -1042,7 +1067,9 @@ describe("FigmaChatPanel", () => {
       expect(src).not.toContain("permission denied");
     }
 
-    expect(wrapper.findAll(".oc-tool")).toHaveLength(2);
+    expect(wrapper.findAll('[data-testid="oc-tool-group"]')).toHaveLength(1);
+    expect(wrapper.find('[data-testid="oc-tool-group"]').text()).toContain("bash");
+    expect(wrapper.find('[data-testid="oc-tool-group"]').text()).toContain("2 次");
   });
 
   it("does NOT include reasoning text in the main content", () => {

@@ -114,13 +114,47 @@ class ModelCatalogApplicationServiceTest {
     }
 
     @Test
-    void legacyBailianSourceIsTreatedAsExternalSource() {
+    void opencodeSourceLeavesModelCatalogUnmanaged() {
+        ModelCatalogProperties properties = new ModelCatalogProperties();
+        properties.setSource("opencode");
+        ModelCatalogApplicationService service = new ModelCatalogApplicationService(properties, new FakeModelRepository(), objectMapper);
+
+        assertThat(service.managedSourceEnabled()).isFalse();
+    }
+
+    @Test
+    void externalSourceUsesConfiguredExternalProviderModels() {
+        ModelCatalogProperties properties = new ModelCatalogProperties();
+        properties.setSource("external");
+        properties.getExternal().setProviderId("deepseek");
+        properties.getExternal().setDefaultModel("deepseek-v4-flash");
+        properties.getExternal().setModels(List.of(
+                new ModelCatalogProperties.Model("deepseek-v4-flash", "DeepSeek V4 Flash", List.of("text"), 65536, 8192, true, 10)));
+        ModelCatalogApplicationService service = new ModelCatalogApplicationService(properties, new FakeModelRepository(), objectMapper);
+
+        List<Map<String, Object>> models = service.listModels();
+
+        assertThat(models).hasSize(1);
+        assertThat(models.getFirst())
+                .containsEntry("providerId", "deepseek")
+                .containsEntry("id", "deepseek-v4-flash")
+                .containsEntry("name", "DeepSeek V4 Flash");
+    }
+
+    @Test
+    void legacyBailianSourceKeepsModelStudioDefaults() {
         ModelCatalogProperties properties = new ModelCatalogProperties();
 
         properties.setSource("bailian");
+        ModelCatalogApplicationService service = new ModelCatalogApplicationService(properties, new FakeModelRepository(), objectMapper);
 
-        assertThat(properties.getSource()).isEqualTo("external");
-        assertThat(properties.activeProvider()).isSameAs(properties.getExternal());
+        assertThat(properties.getSource()).isEqualTo("bailian");
+        assertThat(properties.activeProvider()).isSameAs(properties.getBailian());
+        assertThat(service.listProviders().getFirst())
+                .containsEntry("providerId", "modelstudio")
+                .containsEntry("name", "Model Studio Coding Plan");
+        assertThat(service.listModels()).extracting(item -> item.get("id"))
+                .contains("qwen3.5-plus", "kimi-k2.5", "qwen3-coder-plus");
     }
 
     private ExecutionNode node() {

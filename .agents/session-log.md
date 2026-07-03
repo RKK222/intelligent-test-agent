@@ -3261,6 +3261,12 @@ bash /tmp/test-api-after-restart.sh
 - How: 新增 `MyBatisRunEventRepository`、`RunEventMapper.xml` 与集成测试，保留旧 `JdbcRunEventRepository` 但移除生产 Bean；`RunApplicationService` 在订阅事件流时用 runtime router 重写 scope metadata、drain pending 并交给既有 RunEvent pipeline；Redis key 使用 `test-agent:run-scope:{runId}:pending:{sessionId}` 和 `test-agent:run-scope:{runId}:dedup:{sessionId}:{rawEventId}`，TTL 30 分钟。同步更新 opencode-client/runtime/persistence README、PACKAGE、事件流文档和数据库部署文档。
 - Result: 定向 persistence、runtime、client 测试通过，`mvn -pl test-agent-api,test-agent-opencode-runtime,test-agent-opencode-client -am test` 全量通过；`rawEventId == null` 不进入 Redis dedup，派生 `run.succeeded/run.failed` 不复用源 raw id，payload 仍兼容旧 SSE 前端。未修改 generated SDK、环境配置和无关前端文件。
 
+### 2026-07-03 - 归并同类工具过程行并修复模型目录加载
+
+- Why: 当前 opencode-like timeline 只合并 reasoning/context，bash/read/skill/question 等同类型工具仍按 part 重复铺开，造成过程区噪声和状态列错落；同时模型列表在旧 `source=bailian` 本地配置下被归到空的 `external-openai` 配置，右侧下拉显示空列表。
+- What: 前端 timeline 在同一用户回合内按规范化 toolName 把重复工具合并为一个默认收起的工具组，展开后继续渲染原始工具详情；单条工具仍保持原展示，避免 task 子 Agent 卡片被无意义折叠。`FigmaChatPanel` 和 `AgentWorkbench` 合并 `models` 与 `providers[].models`。后端模型目录明确分流：`opencode` 保持原生代理，`external` 走外部 OpenAI-compatible `/models`，`internal` 走库表，历史 `bailian` 使用内置 Model Studio provider 和 qwen/kimi 模型清单。
+- How: 修改 `agent-chat` 的 timeline 投影和 `.oc-*` 展示组件、`agent-web` 的模型目录前端合并逻辑，以及 runtime 模型目录 source/provider 选择；未改接口路径、RunEvent、数据库、generated SDK 或环境配置文件。同步更新 `agent-chat`/`agent-web`、backend/runtime README 和模型目录 API/部署说明，并补充 Vitest 与后端单测覆盖。
+- Result: `ModelCatalogApplicationServiceTest` 7 个用例通过；`opencode-timeline.test.ts`、`MarkdownView.test.ts`、`FigmaChatPanel.test.ts` 定向 Vitest 通过；`@test-agent/agent-chat` 与 `@test-agent/agent-web` typecheck 通过；`git diff --check` 通过。按 `.env.test`/`test` profile 启动本地服务成功，health/readiness、前端 HEAD、CORS preflight 和模型/Provider 目录 smoke 均通过。
 ### 2026-07-03 - 修复模型偏好命中过期 provider 导致 Insufficient Balance
 
 - Why: `Insufficient Balance` 是上游模型 provider 返回的真实错误；前端 localStorage 中的旧 `provider/model` 会长期保留，后端此前也直接透传请求模型，导致模型目录已切换后仍可能打到余额不足或不可用 provider。

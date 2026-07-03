@@ -1,5 +1,6 @@
 .oc-tool,
 .oc-context-group,
+.oc-tool-group,
 .oc-disclosure {
   border: 0;
   border-radius: 0;
@@ -8,7 +9,8 @@
 }
 
 .oc-disclosure__trigger,
-.oc-context-group__trigger {
+.oc-context-group__trigger,
+.oc-tool-group__trigger {
   display: grid;
   width: 100%;
   grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
@@ -25,7 +27,8 @@
 }
 
 .oc-disclosure__trigger .oc-tool__title,
-.oc-context-group__trigger .oc-tool__title {
+.oc-context-group__trigger .oc-tool__title,
+.oc-tool-group__trigger .oc-tool__title {
   grid-column: 1;
   min-width: 0;
   overflow: hidden;
@@ -37,8 +40,13 @@
   line-height: 20px;
 }
 
+.oc-tool-group__trigger .oc-tool__title {
+  text-transform: lowercase;
+}
+
 .oc-disclosure__trigger .oc-tool__subtitle,
-.oc-context-group__trigger .oc-tool__subtitle {
+.oc-context-group__trigger .oc-tool__subtitle,
+.oc-tool-group__trigger .oc-tool__subtitle {
   grid-column: 2;
   min-width: 0;
   overflow: hidden;
@@ -51,7 +59,8 @@
 }
 
 .oc-disclosure__trigger .oc-tool__chevron,
-.oc-context-group__trigger .oc-tool__chevron {
+.oc-context-group__trigger .oc-tool__chevron,
+.oc-tool-group__trigger .oc-tool__chevron {
   grid-column: 4;
   width: 14px;
   height: 14px;
@@ -129,7 +138,8 @@
 
 .oc-tool__body,
 .oc-disclosure__body,
-.oc-context-group__body {
+.oc-context-group__body,
+.oc-tool-group__body {
   border-top: 0;
   border-left: 1px solid var(--oc-border);
   margin: 2px 0 0 4px;
@@ -240,6 +250,7 @@
 @media (max-width: 520px) {
   .oc-disclosure__trigger,
   .oc-context-group__trigger,
+  .oc-tool-group__trigger,
   .oc-tool__trigger {
     grid-template-columns: 74px minmax(0, 1fr) 50px 16px;
   }

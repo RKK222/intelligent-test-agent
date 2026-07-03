@@ -144,7 +144,7 @@ public class ModelCatalogApplicationService {
     }
 
     private List<Map<String, Object>> externalModels() {
-        ModelCatalogProperties.Provider provider = properties.getExternal();
+        ModelCatalogProperties.Provider provider = properties.activeProvider();
         try {
             HttpRequest.Builder builder = HttpRequest.newBuilder()
                     .uri(URI.create(stripTrailingSlash(provider.getBaseUrl()) + "/models"))
@@ -173,7 +173,7 @@ public class ModelCatalogApplicationService {
     }
 
     private List<Map<String, Object>> configuredExternalModels() {
-        ModelCatalogProperties.Provider provider = properties.getExternal();
+        ModelCatalogProperties.Provider provider = properties.activeProvider();
         return provider.getModels().stream().map(model -> toConfiguredPayload(provider.getProviderId(), model)).toList();
     }
 

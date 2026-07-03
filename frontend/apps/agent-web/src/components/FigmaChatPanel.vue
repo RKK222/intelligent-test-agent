@@ -608,6 +608,8 @@ const props =
     processInitializing?: boolean
     /** 可选模型列表（供快速标签使用） */
     models?: any[]
+    /** Provider 列表；部分后端只在 provider.models 内返回模型目录。 */
+    providers?: any[]
     /** 当前选中的模型标识 */
     selectedModel?: string
     /** 当前用户对 assistant 消息的反馈状态 */
@@ -706,9 +708,22 @@ onBeforeUnmount(() => {
   window.removeEventListener('click', closeDropdown)
 })
 
+const allModels = computed(() => {
+  const byValue = new Map<string, any>()
+  for (const model of props.models ?? []) {
+    byValue.set(modelValue(model), model)
+  }
+  for (const provider of props.providers ?? []) {
+    for (const model of provider.models ?? []) {
+      const providerModel = { ...model, providerId: model.providerId ?? provider.providerId }
+      byValue.set(modelValue(providerModel), providerModel)
+    }
+  }
+  return Array.from(byValue.values())
+})
+
 const recommendedModels = computed(() => {
-  if (!props.models) return []
-  return props.models.slice(0, 4)
+  return allModels.value.slice(0, 4)
 })
 
 function getModelColor(model: any) {
@@ -722,6 +737,8 @@ function getModelColor(model: any) {
 
 function getProviderName(providerId?: string) {
   if (!providerId) return '其他'
+  const provider = props.providers?.find((item) => item.providerId === providerId)
+  if (provider?.name) return provider.name
   const names: Record<string, string> = {
     'openai': 'OpenAI',
     'anthropic': 'Anthropic',
@@ -736,11 +753,10 @@ function getProviderName(providerId?: string) {
 }
 
 const modelGroups = computed(() => {
-  if (!props.models) return []
   const keyword = modelSearch.value.trim().toLowerCase()
   const groups = new Map<string, { providerId: string; providerName: string; models: any[] }>()
   
-  props.models.forEach((model) => {
+  allModels.value.forEach((model) => {
     const haystack = `${model.name} ${model.id} ${model.providerId ?? ''}`.toLowerCase()
     if (keyword && !haystack.includes(keyword)) {
       return

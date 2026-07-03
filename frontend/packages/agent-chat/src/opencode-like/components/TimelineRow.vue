@@ -19,6 +19,7 @@ import ErrorRow from "./rows/ErrorRow.vue";
 import AssistantMessageFrame from "./rows/AssistantMessageFrame.vue";
 import ReasoningPartGroup from "./parts/ReasoningPartGroup.vue";
 import ContextToolGroup from "./tools/ContextToolGroup.vue";
+import ToolPartGroup from "./tools/ToolPartGroup.vue";
 
 const props = defineProps<TimelineRowProps>();
 const emit = defineEmits<{ openDiff: []; selectSubagent: [sessionId: string] }>();
@@ -35,7 +36,12 @@ const assistantPart = computed<MessagePart | undefined>(() => {
 
 const assistantMessage = computed(() => {
   const row = props.row;
-  if (row.type !== "assistant-part" && row.type !== "context-tool-group" && row.type !== "reasoning-group") {
+  if (
+    row.type !== "assistant-part" &&
+    row.type !== "context-tool-group" &&
+    row.type !== "reasoning-group" &&
+    row.type !== "tool-group"
+  ) {
     return undefined;
   }
   const message = props.state.messageById[row.messageId];
@@ -61,6 +67,16 @@ const reasoningParts = computed(() => {
     .map((ref) => props.state.partsByMessageId[ref.messageId]?.find((part) => part.partId === ref.partId))
     .filter((part): part is Extract<MessagePart, { type: "reasoning" }> => part?.type === "reasoning");
 });
+
+const toolGroupParts = computed(() => {
+  const row = props.row;
+  if (row.type !== "tool-group") {
+    return [];
+  }
+  return row.refs
+    .map((ref) => props.state.partsByMessageId[ref.messageId]?.find((part) => part.partId === ref.partId))
+    .filter((part): part is Extract<MessagePart, { type: "tool" }> => part?.type === "tool");
+});
 </script>
 
 <template>
@@ -78,6 +94,21 @@ const reasoningParts = computed(() => {
     :show-header="row.showAssistantHeader"
   >
     <ContextToolGroup :parts="contextParts" :busy="row.busy" />
+  </AssistantMessageFrame>
+  <AssistantMessageFrame
+    v-else-if="row.type === 'tool-group' && assistantMessage"
+    class="oc-row"
+    :message="assistantMessage"
+    :continuation="row.previousAssistantPart"
+    :show-header="row.showAssistantHeader"
+  >
+    <ToolPartGroup
+      :parts="toolGroupParts"
+      :busy="row.busy"
+      :subagents-by-session-id="state.subagentsBySessionId"
+      :subagent-by-task-part-id="state.subagentByTaskPartId"
+      @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
+    />
   </AssistantMessageFrame>
   <AssistantMessageFrame
     v-else-if="row.type === 'assistant-part' && assistantPart && assistantMessage"

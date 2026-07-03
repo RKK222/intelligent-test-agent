@@ -12,7 +12,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - `opencode-like` 基于 RunEvent scope 区分主 Agent 与子 Agent 时间线：主视图过滤 child scoped 输出，仅展示 root 输出和 task 子 Agent 入口卡片；点击入口后切换到子 Agent 时间线，子视图隐藏输入框并只提供返回主 Agent 的提示。
 - 展示 message part timeline（text、reasoning、tool、file、retry 以及未知 part fallback）。旧 `card` 消息中的 Diff payload 会被收敛为 `diff-summary` 行；存量 `AgentCard`/`TimelineCard` 仅保留兼容，不作为主对话路径。
 - `reasoning`、最终 `text`、工具调用和文件引用分块展示，避免把思考、工具日志和最终答复混入同一个气泡；同一用户回合内被多个 assistant message 拆开的思考状态会合并为一个过程行，运行中仅保留一个轻量工作中动效。
-- 工具调用按 opencode 常见工具拆分专用视图：bash、read、list、glob、grep、edit、write、apply_patch、webfetch、websearch、task、skill、question；读取/检索类上下文工具默认合并为折叠的上下文组，失败工具仍单独展示错误。
+- 工具调用按 opencode 常见工具拆分专用视图：bash、read、list、glob、grep、edit、write、apply_patch、webfetch、websearch、task、skill、question；同一用户回合内被拆成多条 assistant message 的同类型工具会合并成一个默认折叠的工具组，展开后仍渲染每条原始工具详情；读取/检索类上下文工具默认合并为折叠的上下文组，失败工具进入对应工具类型归并并保留失败状态。
 - 工具视图统一使用 `.oc-*` primitives 和轻量折叠壳，工具详情默认折叠，过程行的标题、摘要、状态和展开箭头使用固定列对齐；最终文本直接以轻量气泡展示，不额外加“最终输出”标题，并保留复制按钮；工作区内长绝对路径在列表中展示为面向用户的短路径，完整路径只保留在悬浮提示中，避免 `.testagent`/personal worktree 前缀撑开对话区域。
 - 运行中状态以 `thinking` 行和工具状态展示；失败运行追加统一错误行。
 - 提供 Agent/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和输入框上方 `TodoPanel`；Todo 收起态展示待处理/进行中/已完成/已取消/其他和总数，展开态展示任务列表、状态和优先级。模型选择器按 Provider 分组展示模型，选择模型时同步更新 Provider 与 Model。

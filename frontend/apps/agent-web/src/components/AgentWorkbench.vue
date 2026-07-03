@@ -28,6 +28,8 @@ import type {
   RunEvent,
   RuntimeResourceInfo,
   RuntimeToolInfo,
+  ModelInfo,
+  ProviderInfo,
   Session,
   OpencodeProcessStartOperation,
   UserOpencodeProcess,
@@ -710,6 +712,19 @@ const agentsRefreshing = computed(() => opencodeCatalogReady.value && agentsQuer
 const agentsError = computed(() => agentCatalogErrorMessage(agentsQuery.error.value));
 const models = computed(() => modelsQuery.data.value ?? []);
 const providers = computed(() => providersQuery.data.value ?? []);
+const allModels = computed<ModelInfo[]>(() => {
+  const byValue = new Map<string, ModelInfo>();
+  for (const model of models.value) {
+    byValue.set(modelValue(model), model);
+  }
+  for (const provider of providers.value as ProviderInfo[]) {
+    for (const model of provider.models ?? []) {
+      const providerModel = { ...model, providerId: model.providerId ?? provider.providerId };
+      byValue.set(modelValue(providerModel), providerModel);
+    }
+  }
+  return Array.from(byValue.values());
+});
 const commands = computed(() => commandsQuery.data.value ?? []);
 const mcpResourcesData = computed(() => mcpResourcesQuery.data.value);
 const mcpToolsData = computed<RuntimeToolInfo[]>(() => mcpToolsQuery.data.value ?? []);
@@ -726,7 +741,7 @@ const opencodeProcessRefreshing = computed(
 const sessionsItems = computed(() => sessionsQuery.data.value?.items ?? []);
 const selectedModelInfo = computed(() => {
   const selected = modelIdOnly(selectedModel.value);
-  return models.value.find((model) => modelValue(model) === selectedModel.value || model.id === selected);
+  return allModels.value.find((model) => modelValue(model) === selectedModel.value || model.id === selected);
 });
 const selectedModelLabel = computed(() => selectedModelInfo.value?.name ?? selectedModel.value ?? "未选择模型");
 
@@ -765,7 +780,7 @@ const runtimeStatusValue = computed(() =>
 // handleChangeBranch / handleRememberCurrentBranch / loadBranchPreferenceOnEnter 等相关状态与函数全部移除。
 // VCS 分支信息仍由 runtimeStatus 读取并参与运行态展示（见 lspStatusData 等 run.status 字段），不依赖此处的引用。
 
-function selectRuntimeModel(model: typeof models.value[number]) {
+function selectRuntimeModel(model: ModelInfo) {
   if (model.providerId) {
     selectedProvider.value = model.providerId;
   }
@@ -1123,9 +1138,16 @@ watch(providersQuery.data, (data) => {
     persistRuntimePreference(selectedProvider.value, selectedModel.value);
   }
 });
-watch(modelsQuery.data, (data) => {
-  applyRuntimeModelPreference(data);
-});
+watch(allModels, (data) => {
+  const savedModel = readStoredRuntimePreference().model;
+  if (savedModel && data.some((m) => modelValue(m) === savedModel)) {
+    selectedModel.value = savedModel;
+    return;
+  }
+  if (!selectedModel.value && data[0]) {
+    selectedModel.value = modelValue(data.find((model) => model.defaultModel) ?? data[0]);
+  }
+}, { immediate: true });
 watch(opencodeProcessReady, (ready, previous) => {
   if (!ready || previous) {
     return;
@@ -1149,11 +1171,11 @@ watch(opencodeProcessReady, (ready, previous) => {
     });
   }
 });
-watch([() => selectedProvider.value, () => selectedModel.value, modelsQuery.data], ([provider, model, data]) => {
+watch([() => selectedProvider.value, () => selectedModel.value, allModels], ([provider, model, data]) => {
   if (!provider || !model || String(model).startsWith(`${provider}/`)) {
     return;
   }
-  const nextModel = (data as typeof modelsQuery.data.value | undefined)?.find((m) => m.providerId === provider);
+  const nextModel = data.find((m) => m.providerId === provider);
   if (nextModel) {
     const val = modelValue(nextModel);
     selectedModel.value = val;
@@ -3263,6 +3285,7 @@ async function handleLogout() {
           :stop-disabled="!canStopRun"
           :stop-disabled-reason="stopDisabledReason"
           :models="models"
+          :providers="providers"
           :selected-model="selectedModel"
           :message-feedbacks="messageFeedbacks"
           :feedback-submitting="feedbackSubmitting"

@@ -21,6 +21,19 @@ public class ModelCatalogProperties {
             "bearer",
             "",
             new ArrayList<>());
+    private final Provider bailian = new Provider(
+            "modelstudio",
+            "Model Studio Coding Plan",
+            "https://coding.dashscope.aliyuncs.com/v1",
+            "MODELSTUDIO_API_KEY",
+            "bearer",
+            "qwen3.5-plus",
+            new ArrayList<>(List.of(
+                    new Model("qwen3.5-plus", "qwen3.5-plus", List.of("text"), 131072, 16384, true, 10),
+                    new Model("qwen3-max-2026-01-23", "qwen3-max-2026-01-23", List.of("text"), 131072, 16384, false, 20),
+                    new Model("kimi-k2.5", "kimi-k2.5", List.of("text"), 131072, 16384, false, 30),
+                    new Model("qwen3-coder-next", "qwen3-coder-next", List.of("text"), 131072, 16384, false, 40),
+                    new Model("qwen3-coder-plus", "qwen3-coder-plus", List.of("text"), 131072, 16384, false, 50))));
     private final Provider internal = new Provider(
             "icbc-openai",
             "ICBC OpenAI",
@@ -38,26 +51,30 @@ public class ModelCatalogProperties {
                     new Model("glm-51", "glm-51", List.of("text"), 131072, 16384, false, 70))));
 
     /**
-     * 返回模型来源：opencode 保持旧代理，external 直连 OpenAI-compatible /models，internal 从数据库读取。
+     * 返回模型来源：opencode 保持原生代理，external 直连 OpenAI-compatible /models，internal 从数据库读取。
+     * 历史 bailian 明确保留为 Model Studio 兼容源。
      */
     public String getSource() {
         return source;
     }
 
     /**
-     * 绑定模型来源，空值回退到 external；历史 bailian 配置按 external 兼容处理。
+     * 绑定模型来源，空值回退到 external；历史 bailian 配置保留旧 Model Studio 默认模型。
      */
     public void setSource(String source) {
         if (source == null || source.isBlank()) {
             this.source = "external";
             return;
         }
-        String normalized = source.trim().toLowerCase();
-        this.source = "bailian".equals(normalized) ? "external" : normalized;
+        this.source = source.trim().toLowerCase();
     }
 
     public Provider getExternal() {
         return external;
+    }
+
+    public Provider getBailian() {
+        return bailian;
     }
 
     public Provider getInternal() {
@@ -68,7 +85,13 @@ public class ModelCatalogProperties {
      * 按当前 source 返回需要同步到 opencode 的 provider 配置。
      */
     public Provider activeProvider() {
-        return "internal".equals(source) ? internal : external;
+        if ("internal".equals(source)) {
+            return internal;
+        }
+        if ("bailian".equals(source)) {
+            return bailian;
+        }
+        return external;
     }
 
     /**

@@ -36,7 +36,7 @@
 - 从完成态 `write`/`edit`/`apply_patch` tool part 派生运行中 `diff.proposed`，供前端实时追踪文件变化；不调用 opencode `/vcs/diff?mode=working`，实际 Git patch 和精确行数由工作区 Git Diff 接口读取。
 - Run Diff 查询、接受和拒绝。
 - agent runtime 能力映射，包括 catalog/fs/vcs/lsp/mcp、config、provider auth/OAuth、worktree、session share、permission/question 和 MCP auth；opencode 原路径作为当前标准适配形态。
-- Model 目录编排：`opencode` 来源保持旧代理；`external` 来源直连 OpenAI-compatible `/models` 并把外部 provider 配置同步给 opencode；`internal` 来源读取 `ai_model_configs` 表并按 openclaw 企业 patch 的 `icbc-openai` 兼容配置同步给 opencode。历史 `bailian` source 会按 `external` 兼容处理。
+- Model 目录编排：`opencode` 来源保持原生代理；`external` 来源直连 OpenAI-compatible `/models` 并把外部 provider 配置同步给 opencode；`internal` 来源读取 `ai_model_configs` 表并按 openclaw 企业 patch 的 `icbc-openai` 兼容配置同步给 opencode。历史 `bailian` source 保留旧 Model Studio 默认 provider 和模型清单。
 - PTY terminal ticket、限流、active session registry、进程适配和审计。
 
 ## Model 目录配置
@@ -45,10 +45,12 @@
 
 | source | 行为 |
 |---|---|
-| `opencode` | 保持旧行为，`/api/model`、`/api/provider` 直接代理 opencode。 |
+| `opencode` | 保持原生行为，`/api/model`、`/api/provider` 直接代理 opencode。 |
 | `external` | 外网测试模式，后端请求 `external.base-url + /models` 获取模型列表；获取失败时回退到配置内置外网模型。 |
+| `bailian` | 历史兼容模式，使用旧 Model Studio provider、`MODELSTUDIO_API_KEY` 和内置 qwen/kimi 模型清单。 |
 | `internal` | 企业内模式，启动时把 openclaw 企业 patch 中的模型清单 seed 到 `ai_model_configs`，接口从数据库读取启用模型。默认模型为 `DeepSeek-V4-Flash-W8A8`。 |
 
+在 `external`、`bailian` 和 `internal` 模式下，Run 启动前会尽力 `PATCH /global/config` 到当前 opencode 执行节点，写入 OpenAI-compatible provider、默认模型和请求头配置；模型/Provider 目录读取直接来自平台目录，不触发 opencode 健康检查。provider API Key 优先读取 `test-agent.model-catalog.<external|internal>.api-key`，未配置时回退到 `api-key-env` 指定的环境变量，便于 IDEA 直接启动和脚本启动同时兼容。同步失败只记录告警，Run 仍走原有错误处理路径。
 在 `external` 和 `internal` 模式下，Run 启动和模型/Provider 目录读取前会尽力 `PATCH /global/config` 到当前 opencode 执行节点，写入 OpenAI-compatible provider、默认模型和请求头配置。Run 请求中的 `model` 会按当前模型目录校验；请求缺失、格式非法或目录外模型会回退到 `defaultModel`，目录为空时返回 `VALIDATION_ERROR` 且不启动远端 run，避免历史浏览器偏好继续命中不可用 provider。provider API Key 优先读取 `test-agent.model-catalog.<external|internal>.api-key`，未配置时回退到 `api-key-env` 指定的环境变量，便于 IDEA 直接启动和脚本启动同时兼容。同步失败只记录告警，Run 仍走原有错误处理路径。
 
 ## 测试覆盖

@@ -214,6 +214,37 @@ describe("OpencodeTimeline", () => {
     expect(getByText("最后组织回答。")).toBeTruthy();
   });
 
+  it("merges repeated tool rows by tool type in one user turn", async () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "查找需求文档"),
+        assistantMessage("msg_bash_1", [toolPart("part_bash_1", "bash", { command: "find . -name '*.md'" })]),
+        assistantMessage("msg_read_1", [
+          { ...toolPart("part_read_1", "read", { filePath: "/very/long/path/a.md" }), status: "failed" }
+        ]),
+        assistantMessage("msg_bash_2", [toolPart("part_bash_2", "bash", { command: "ls -la" })]),
+        assistantMessage("msg_skill_1", [toolPart("part_skill_1", "skill", { name: "frontend-design" })]),
+        assistantMessage("msg_skill_2", [toolPart("part_skill_2", "skill", { name: "code-reuse-first" })]),
+        assistantMessage("msg_read_2", [
+          { ...toolPart("part_read_2", "read", { filePath: "/very/long/path/b.md" }), status: "failed" }
+        ]),
+        assistantMessage("msg_answer", [textPart("part_answer", "已找到相关文档。")])
+      ]
+    });
+
+    const { container, getByText } = render(OpencodeTimeline, { props: { state } });
+    await waitMarkdown();
+
+    expect(container.querySelectorAll('[data-testid="oc-tool-group"]')).toHaveLength(3);
+    expect(container.querySelectorAll(".oc-tool-group__trigger")).toHaveLength(3);
+    expect(getByText("bash")).toBeTruthy();
+    expect(getByText("skill")).toBeTruthy();
+    expect(container.querySelectorAll(".oc-tool-group__trigger .oc-tool__subtitle")[0]?.textContent).toBe("2 次");
+    expect(container.querySelectorAll(".oc-tool-group__trigger .oc-tool__status")[0]?.textContent).toBe("已读取");
+    expect(container.querySelectorAll(".oc-tool-group__trigger .oc-tool__status")[1]?.textContent).toBe("失败");
+    expect(getByText("已找到相关文档。")).toBeTruthy();
+  });
+
   it("allows user to interrupt auto-scrolling by scrolling up", async () => {
     const initialMessages: AgentMessage[] = [
       userMessage("msg_user_1", "分析 checkout 失败"),
