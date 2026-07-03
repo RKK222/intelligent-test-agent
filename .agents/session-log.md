@@ -5,9 +5,9 @@
 ### 2026-07-03 - 恢复 opencode-like 对话时间线轻量样式
 
 - Why: opencode 对话主路径重构为 `OpencodeTimeline` 后，7 月 2 日旧 `FigmaChatPanel` 中的轻量思考、探索和 bash 工具行视觉效果没有完全延续；用户要求当前前后端输出逻辑不变，只按旧提交视觉恢复样式。
-- What: 仅修改 `frontend/packages/agent-chat/src/opencode-like/styles/` 下的 CSS token、timeline、rows、parts 和 tools 样式，使当前 timeline 保持白底、16px 正文、轻量工具行、右侧状态、左边线缩进和更接近旧图的思考/探索排版。
-- How: 未改后端、RunEvent、DTO、timeline 投影、组件状态或旧 `FigmaChatPanel` 主路径；复用当前 `.oc-*` 样式分层，避免把样式重新堆回单个 Vue 文件。显式用 `corepack pnpm@10.25.0` 跑前端命令，绕过本机 Corepack 默认 pnpm 11.9.0 与项目要求不一致的问题。
-- Result: `opencode-timeline.test.ts` 3 个用例通过，`@test-agent/agent-chat typecheck` 通过，`git diff --check` 通过；本地既有 Vite 服务 `127.0.0.1:3000` 可达并收到 CSS HMR，日志仍保留既有 `@charset/@import` 顺序警告。
+- What: 修改 `frontend/packages/agent-chat/src/opencode-like/` 的 timeline 行展示和样式，当前 timeline 自己渲染助手头像、`测试智能体 · 时间` 元信息、白底、16px 正文、轻量工具行、右侧状态、左边线缩进和更接近旧图的思考/探索排版。
+- How: 未改后端、RunEvent、DTO、业务输出顺序或旧 `FigmaChatPanel` 主路径；新增 `AssistantMessageFrame` 作为当前 timeline 的展示外壳，复用 `.oc-*` 样式分层，避免把样式重新堆回单个 Vue 文件。显式用 `corepack pnpm@10.25.0` 跑前端命令，绕过本机 Corepack 默认 pnpm 11.9.0 与项目要求不一致的问题。
+- Result: `opencode-timeline.test.ts`、`@test-agent/agent-chat typecheck`、`agent-web typecheck` 和 `git diff --check` 通过；本地既有 Vite 服务 `127.0.0.1:3000` 可达，使用 Chrome 对 `OpencodeTimeline` 同源样例截图确认白底、头像、meta、工具行和 continuation 布局生效，日志仍保留既有 `@charset/@import` 顺序警告。
 
 ### 2026-07-03 - 个人工作区发布实时展示当前 Git 命令
 

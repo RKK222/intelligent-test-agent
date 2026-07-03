@@ -27,6 +27,8 @@ describe("OpencodeTimeline", () => {
 
     expect(container.querySelector(".oc-timeline-root")).toBeTruthy();
     expect(container.querySelector(".oc-user-message")).toBeTruthy();
+    expect(container.querySelector(".oc-assistant-frame")).toBeTruthy();
+    expect(getByText("测试智能体")).toBeTruthy();
     expect(container.querySelector(".oc-context-group")).toBeTruthy();
     expect(container.querySelector(".oc-assistant-part")).toBeTruthy();
     expect(container.querySelector(".oc-diff-summary")).toBeTruthy();

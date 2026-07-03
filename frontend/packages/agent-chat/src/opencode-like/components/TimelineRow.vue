@@ -16,6 +16,7 @@ import ThinkingRow from "./rows/ThinkingRow.vue";
 import RetryRow from "./rows/RetryRow.vue";
 import DiffSummaryRow from "./rows/DiffSummaryRow.vue";
 import ErrorRow from "./rows/ErrorRow.vue";
+import AssistantMessageFrame from "./rows/AssistantMessageFrame.vue";
 import ContextToolGroup from "./tools/ContextToolGroup.vue";
 
 const props = defineProps<TimelineRowProps>();
@@ -29,6 +30,15 @@ const assistantPart = computed<MessagePart | undefined>(() => {
     return undefined;
   }
   return props.state.partsByMessageId[row.messageId]?.find((part) => part.partId === row.partId);
+});
+
+const assistantMessage = computed(() => {
+  const row = props.row;
+  if (row.type !== "assistant-part" && row.type !== "context-tool-group") {
+    return undefined;
+  }
+  const message = props.state.messageById[row.messageId];
+  return message?.role === "assistant" ? message : undefined;
 });
 
 const contextParts = computed(() => {
@@ -49,19 +59,26 @@ const contextParts = computed(() => {
     class="oc-row"
     :message="userMessage"
   />
-  <ContextToolGroup
-    v-else-if="row.type === 'context-tool-group'"
+  <AssistantMessageFrame
+    v-else-if="row.type === 'context-tool-group' && assistantMessage"
     class="oc-row"
-    :parts="contextParts"
-    :busy="row.busy"
-  />
-  <AssistantPartRow
-    v-else-if="row.type === 'assistant-part' && assistantPart"
+    :message="assistantMessage"
+    :continuation="row.previousAssistantPart"
+  >
+    <ContextToolGroup :parts="contextParts" :busy="row.busy" />
+  </AssistantMessageFrame>
+  <AssistantMessageFrame
+    v-else-if="row.type === 'assistant-part' && assistantPart && assistantMessage"
     class="oc-row"
-    :part="assistantPart"
-    :streaming-text-by-part-id="state.streamingTextByPartId"
-    :previous-assistant-part="row.previousAssistantPart"
-  />
+    :message="assistantMessage"
+    :continuation="row.previousAssistantPart"
+  >
+    <AssistantPartRow
+      :part="assistantPart"
+      :streaming-text-by-part-id="state.streamingTextByPartId"
+      :previous-assistant-part="row.previousAssistantPart"
+    />
+  </AssistantMessageFrame>
   <ThinkingRow v-else-if="row.type === 'thinking'" class="oc-row" />
   <RetryRow v-else-if="row.type === 'retry'" class="oc-row" :attempt="row.attempt" />
   <DiffSummaryRow

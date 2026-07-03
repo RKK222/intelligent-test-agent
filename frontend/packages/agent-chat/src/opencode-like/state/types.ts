@@ -62,8 +62,10 @@ export type TimelineRow =
       type: "context-tool-group";
       key: string;
       userMessageId: string;
+      messageId: string;
       refs: Array<{ messageId: string; partId: string }>;
       busy: boolean;
+      previousAssistantPart: boolean;
     }
   | {
       type: "assistant-part";

@@ -4,7 +4,7 @@
 
 .oc-markdown .markdown-body {
   background: transparent;
-  color: var(--oc-fg);
+  color: var(--oc-muted);
   font-family: var(--oc-font-sans);
   font-size: var(--oc-text-md);
   line-height: var(--oc-line-height);

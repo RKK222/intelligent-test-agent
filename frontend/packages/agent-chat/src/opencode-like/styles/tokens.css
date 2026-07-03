@@ -1,5 +1,5 @@
 .oc-timeline-root {
-  --oc-bg: var(--ta-chat-bg, #ffffff);
+  --oc-bg: var(--ta-chat-surface, #ffffff);
   --oc-surface: var(--ta-chat-surface, #ffffff);
   --oc-surface-muted: var(--ta-chat-message-bg, #f2f4f7);
   --oc-fg: var(--ta-chat-text, #25282d);

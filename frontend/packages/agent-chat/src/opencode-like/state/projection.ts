@@ -20,8 +20,10 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
           type: "context-tool-group",
           key: `${group.key}:${assistantMessageId}`,
           userMessageId: "__orphan__",
+          messageId: assistantMessageId,
           refs: group.refs.map((ref) => ({ messageId: assistantMessageId, partId: ref.partId })),
-          busy: state.running
+          busy: state.running,
+          previousAssistantPart: partIndex > 0
         });
       } else {
         rows.push({
@@ -59,8 +61,10 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
             type: "context-tool-group",
             key: `${group.key}:${assistantMessageId}`,
             userMessageId,
+            messageId: assistantMessageId,
             refs: group.refs.map((ref) => ({ messageId: assistantMessageId, partId: ref.partId })),
-            busy: state.running
+            busy: state.running,
+            previousAssistantPart: partIndex > 0
           });
         } else {
           rows.push({
