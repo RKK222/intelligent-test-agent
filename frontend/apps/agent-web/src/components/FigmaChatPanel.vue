@@ -2510,7 +2510,7 @@ function onCompositionEnd() {
         :state="opencodeTimelineState"
         @open-diff="openTimelineDiff"
       />
-      <div v-if="!historyLoading && displayMessages.some(canFeedback)" class="figma-chat-timeline-actions">
+      <div v-if="!historyLoading && !props.running && displayMessages.some(canFeedback)" class="figma-chat-timeline-actions">
         <template v-for="message in displayMessages" :key="`${message.id}:actions`">
           <div v-if="canFeedback(message)" class="figma-chat-feedback">
             <button

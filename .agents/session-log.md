@@ -2,6 +2,22 @@
 
 ## Entries
 
+### 2026-07-03 - 满意度反馈按钮在对话结束后展示
+
+- Why:
+  - 用户要求在对话（运行）期间不显示“满意/不满意”反馈按钮，仅在对话结束（即智能体回复完毕）以后才显示，以优化交互流程与界面简洁性。
+- What:
+  - 调整 `FigmaChatPanel` 组件中的反馈动作行渲染条件，增加 `!props.running` 的判断。
+  - 在 `FigmaChatPanel.test.ts` 中新增单元测试用例，以验证在运行状态时反馈按钮不被渲染。
+  - 同步更新前端 `README.md` 中对应的满意度展示说明。
+- How:
+  - 修改 `frontend/apps/agent-web/src/components/FigmaChatPanel.vue`，在反馈按钮的包裹 `div` 元素上添加 `!props.running` 到 `v-if` 指令。
+  - 修改 `frontend/apps/agent-web/tests/FigmaChatPanel.test.ts`，增加 `does not render assistant message feedback when the conversation is running` 自动化测试。
+  - 修改 `frontend/apps/agent-web/README.md` 的说明。
+- Result:
+  - 前端 `corepack pnpm test FigmaChatPanel` (48个测试用例，含 1个 skip) 全部通过。
+  - `corepack pnpm typecheck` 检查无报错。
+
 ### 2026-07-03 - 会话标题取首个非空行并截断
 
 - Why:

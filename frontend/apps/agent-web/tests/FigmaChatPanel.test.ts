@@ -446,6 +446,35 @@ describe("FigmaChatPanel", () => {
     }]]);
   });
 
+  it("does not render assistant message feedback when the conversation is running", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          { id: "msg_assistant123", messageId: "msg_assistant123", role: "assistant", text: "已完成分析", createdAt: "2026-06-25T09:01:00.000Z" }
+        ],
+        running: true,
+        messageFeedbacks: {
+          msg_assistant123: {
+            feedbackId: "fb_123",
+            messageId: "msg_assistant123",
+            sessionId: "ses_123",
+            runId: "run_123",
+            rating: "POSITIVE",
+            reasonCode: null,
+            comment: null,
+            createdAt: "2026-06-25T09:02:00.000Z",
+            updatedAt: "2026-06-25T09:02:00.000Z"
+          }
+        },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    const buttons = wrapper.findAll(".figma-chat-feedback-btn");
+    expect(buttons).toHaveLength(0);
+  });
+
   it.skip("renders historical generated files and opens the file changes drawer", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
