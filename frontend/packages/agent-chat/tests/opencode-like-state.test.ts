@@ -248,6 +248,45 @@ describe("opencode-like conversation state", () => {
     expect(rows.some((row) => row.type === "assistant-part" && row.messageId === "msg_root" && row.partId === "prt_task")).toBe(true);
     expect(rows.some((row) => row.type === "assistant-part" && row.messageId === "msg_child")).toBe(false);
   });
+
+  it("adds a stable synthetic subagent entry when the original task part is missing", () => {
+    const messages: AgentMessage[] = [
+      userMessage("msg_user_1", "分析项目结构"),
+      assistantMessage("msg_root", [])
+    ];
+
+    const state = createOpencodeLikeState({
+      messages,
+      subagentsBySessionId: {
+        ses_child: {
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          taskMessageId: "msg_root",
+          taskPartId: "prt_task",
+          taskCallId: "call_task",
+          agentName: "Explore",
+          title: "Explore project structure",
+          status: "running",
+          updatedAt: "2026-07-03T00:00:00Z"
+        }
+      },
+      subagentByTaskPartId: { prt_task: "ses_child" }
+    } as any);
+    const childState = createOpencodeLikeState({
+      messages,
+      subagentsBySessionId: state.subagentsBySessionId,
+      subagentByTaskPartId: state.subagentByTaskPartId,
+      activeSubagentSessionId: "ses_child"
+    } as any);
+
+    expect(state.partsByMessageId.msg_root.map((part) => part.partId)).toEqual(["prt_task"]);
+    expect(createTimelineRows(state)).toContainEqual(expect.objectContaining({
+      type: "assistant-part",
+      messageId: "msg_root",
+      partId: "prt_task"
+    }));
+    expect(childState.partsByMessageId.msg_root).toBeUndefined();
+  });
 });
 
 function userMessage(id: string, text: string): Extract<AgentMessage, { role: "user" }> {

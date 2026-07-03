@@ -8,14 +8,17 @@ import com.icbc.testagent.domain.event.RunSessionScopeRepository;
 import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.domain.run.RunId;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 当前 Run 的 session scope 路由器。opencode-client 只输出 raw/mapped draft，本类在 runtime 层维护 root/child 归属。
@@ -28,6 +31,7 @@ class RunSessionScopeRouter {
 
     private final RunSessionScopeRepository repository;
     private final RunSessionScopeRuntimeCache runtimeCache;
+    private final Map<PendingTaskKey, Deque<PendingTaskCandidate>> pendingTaskCandidates = new ConcurrentHashMap<>();
 
     RunSessionScopeRouter(RunSessionScopeRepository repository) {
         this(repository, RunSessionScopeRuntimeCache.disabled());
@@ -62,6 +66,9 @@ class RunSessionScopeRouter {
                 .isPresent()) {
             return List.of();
         }
+        if (taskCandidate.isEmpty()) {
+            recordPendingTaskCandidate(rootScope, draft, eventSessionId);
+        }
 
         routed.addAll(discoverBootstrapChildren(rootScope, draft));
         if (eventSessionId == null && shouldDropGlobalNonRunEvent(draft)) {
@@ -93,14 +100,23 @@ class RunSessionScopeRouter {
 
         Optional<String> parentSessionId = parentSessionId(draft.payload());
         if (parentSessionId.filter(parent -> isKnownParent(rootScope, parent)).isPresent()) {
+            String parent = parentSessionId.orElse(rootScope.rootSessionId());
+            PendingTaskCandidate pendingTask = pollPendingTaskCandidate(rootScope.runId(), parent).orElse(null);
+            Map<String, Object> metadata = childSessionMetadata(draft.payload());
+            if (pendingTask != null) {
+                metadata.putIfAbsent("taskMessageId", pendingTask.messageId());
+                metadata.putIfAbsent("taskPartId", pendingTask.partId());
+                metadata.putIfAbsent("taskCallId", pendingTask.callId());
+            }
+            metadata.putIfAbsent("rawType", valueAsText(draft.payload().get("rawType")).orElse(""));
             ChildRoute child = discoverChild(rootScope, draft, new ChildDiscovery(
                     eventSessionId,
-                    parentSessionId.orElse(rootScope.rootSessionId()),
+                    parent,
                     SOURCE_SESSION_EVENT,
-                    null,
-                    null,
-                    null,
-                    Map.of("rawType", valueAsText(draft.payload().get("rawType")).orElse(""))));
+                    pendingTask == null ? null : pendingTask.messageId(),
+                    pendingTask == null ? null : pendingTask.partId(),
+                    pendingTask == null ? null : pendingTask.callId(),
+                    Map.copyOf(metadata)));
             if (isRunTerminal(draft)) {
                 return List.copyOf(routed);
             }
@@ -306,6 +322,92 @@ class RunSessionScopeRouter {
         return Optional.of(new TaskChildCandidate(sessionId.get(), messageId, partId, callId));
     }
 
+    private void recordPendingTaskCandidate(
+            RunEventScopeContext rootScope,
+            RunEventDraft draft,
+            String eventSessionId) {
+        pendingTaskCandidate(draft.payload()).ifPresent(candidate -> {
+            String parentSessionId = eventSessionId == null ? rootScope.rootSessionId() : eventSessionId;
+            if (!isKnownParent(rootScope, parentSessionId)) {
+                return;
+            }
+            PendingTaskKey key = new PendingTaskKey(rootScope.runId(), parentSessionId);
+            Deque<PendingTaskCandidate> queue =
+                    pendingTaskCandidates.computeIfAbsent(key, ignored -> new ArrayDeque<>());
+            synchronized (queue) {
+                boolean exists = queue.stream().anyMatch(existing ->
+                        Objects.equals(existing.partId(), candidate.partId())
+                                || (candidate.callId() != null && Objects.equals(existing.callId(), candidate.callId())));
+                if (!exists) {
+                    queue.addLast(candidate);
+                    while (queue.size() > 20) {
+                        queue.removeFirst();
+                    }
+                }
+            }
+        });
+    }
+
+    private Optional<PendingTaskCandidate> pendingTaskCandidate(Map<String, Object> payload) {
+        if (!valueAsText(payload.get("rawType")).filter("message.part.updated"::equals).isPresent()) {
+            return Optional.empty();
+        }
+        Map<String, Object> part = mapValue(payload.get("part")).orElse(Map.of());
+        if (!"tool".equals(valueAsText(part.get("type")).orElse(null))
+                || !"task".equals(valueAsText(part.get("tool")).orElse(null))) {
+            return Optional.empty();
+        }
+        String partId = firstText(payload, "partID", "partId")
+                .or(() -> firstText(part, "partID", "partId", "id"))
+                .orElse(null);
+        if (partId == null) {
+            return Optional.empty();
+        }
+        String messageId = firstText(payload, "messageID", "messageId")
+                .or(() -> firstText(part, "messageID", "messageId"))
+                .orElse(null);
+        String callId = firstText(payload, "callID", "callId")
+                .or(() -> firstText(part, "callID", "callId"))
+                .orElse(null);
+        return Optional.of(new PendingTaskCandidate(messageId, partId, callId));
+    }
+
+    private Optional<PendingTaskCandidate> pollPendingTaskCandidate(RunId runId, String parentSessionId) {
+        PendingTaskKey key = new PendingTaskKey(runId, parentSessionId);
+        Deque<PendingTaskCandidate> queue = pendingTaskCandidates.get(key);
+        if (queue == null) {
+            return Optional.empty();
+        }
+        synchronized (queue) {
+            PendingTaskCandidate candidate = queue.pollFirst();
+            if (queue.isEmpty()) {
+                pendingTaskCandidates.remove(key, queue);
+            }
+            return Optional.ofNullable(candidate);
+        }
+    }
+
+    private Map<String, Object> childSessionMetadata(Map<String, Object> payload) {
+        Map<String, Object> info = mapValue(payload.get("info"))
+                .or(() -> mapValue(payload.get("rawPayload"))
+                        .flatMap(raw -> mapValue(raw.get("properties")))
+                        .flatMap(properties -> mapValue(properties.get("info"))))
+                .orElse(Map.of());
+        LinkedHashMap<String, Object> metadata = new LinkedHashMap<>();
+        firstText(info, "agent", "agentName").ifPresent(agent -> {
+            metadata.put("agent", agent);
+            metadata.put("agentName", agent);
+        });
+        firstText(info, "title").map(this::normalizeSubagentTitle)
+                .filter(title -> !title.isBlank())
+                .ifPresent(title -> metadata.put("title", title));
+        return metadata;
+    }
+
+    private String normalizeSubagentTitle(String title) {
+        return title.replaceFirst("\\s+\\(@[^)]+\\s+subagent\\)$", "").trim();
+    }
+
     private Optional<String> metadataSessionId(RunEventScopeContext rootScope, Map<String, Object> source) {
         Optional<String> sessionId = mapValue(source.get("metadata")).flatMap(this::childSessionId)
                 .or(() -> mapValue(source.get("state"))
@@ -481,5 +583,11 @@ class RunSessionScopeRouter {
                     callId,
                     Map.copyOf(metadata));
         }
+    }
+
+    private record PendingTaskKey(RunId runId, String parentSessionId) {
+    }
+
+    private record PendingTaskCandidate(String messageId, String partId, String callId) {
     }
 }

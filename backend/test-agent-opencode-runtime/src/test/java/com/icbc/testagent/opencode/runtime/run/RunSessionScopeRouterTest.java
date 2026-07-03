@@ -120,6 +120,80 @@ class RunSessionScopeRouterTest {
     }
 
     @Test
+    void pendingRootTaskPartBindsNextCreatedChildSession() {
+        RunEventDraft pendingTask = new RunEventDraft(
+                RUN_ID,
+                RunEventType.MESSAGE_PART_UPDATED,
+                "trace_scope1234567890abcdef",
+                NOW.minusMillis(10),
+                payload(Map.of(
+                        "rawType", "message.part.updated",
+                        "sessionID", ROOT_SESSION_ID,
+                        "messageID", "msg_task",
+                        "part", Map.of(
+                                "id", "part_task",
+                                "messageID", "msg_task",
+                                "sessionID", ROOT_SESSION_ID,
+                                "type", "tool",
+                                "tool", "task",
+                                "callID", "call_task",
+                                "state", Map.of("status", "pending", "input", Map.of(), "raw", "")))),
+                rootScope());
+        RunEventDraft childCreated = new RunEventDraft(
+                RUN_ID,
+                RunEventType.SESSION_CREATED,
+                "trace_scope1234567890abcdef",
+                NOW,
+                payload(Map.of(
+                        "rawType", "session.created",
+                        "sessionID", CHILD_SESSION_ID,
+                        "parentID", ROOT_SESSION_ID,
+                        "info", Map.of(
+                                "id", CHILD_SESSION_ID,
+                                "parentID", ROOT_SESSION_ID,
+                                "agent", "explore",
+                                "title", "Explore project structure (@explore subagent)"))),
+                rootScope());
+
+        List<RunEventDraft> routed = route(pendingTask, childCreated);
+
+        assertThat(routed).extracting(RunEventDraft::type)
+                .containsExactly(
+                        RunEventType.MESSAGE_PART_UPDATED,
+                        RunEventType.SESSION_CHILD_DISCOVERED,
+                        RunEventType.SESSION_SCOPE_UPDATED,
+                        RunEventType.SESSION_CREATED);
+        RunSessionScopeSession child = repository.findSession(RUN_ID, CHILD_SESSION_ID).orElseThrow();
+        assertThat(child.taskMessageId()).isEqualTo("msg_task");
+        assertThat(child.taskPartId()).isEqualTo("part_task");
+        assertThat(child.taskCallId()).isEqualTo("call_task");
+        assertThat(child.metadata()).containsEntry("agent", "explore")
+                .containsEntry("title", "Explore project structure");
+        assertThat(routed.get(1).payload()).containsEntry("taskMessageId", "msg_task")
+                .containsEntry("taskPartId", "part_task")
+                .containsEntry("taskCallId", "call_task")
+                .containsEntry("agent", "explore")
+                .containsEntry("title", "Explore project structure");
+    }
+
+    @Test
+    void multiplePendingTaskPartsBindCreatedChildrenByFifo() {
+        RunEventDraft firstTask = pendingTaskDraft("msg_first", "part_first", "call_first", NOW.minusMillis(30));
+        RunEventDraft secondTask = pendingTaskDraft("msg_second", "part_second", "call_second", NOW.minusMillis(20));
+        RunEventDraft firstChild = childSessionCreatedDraft("ses_child_first1234567890", "Explore backend (@explore subagent)");
+        RunEventDraft secondChild = childSessionCreatedDraft("ses_child_second1234567890", "Explore frontend (@explore subagent)");
+
+        route(firstTask, secondTask, firstChild, secondChild);
+
+        assertThat(repository.findSession(RUN_ID, "ses_child_first1234567890")).get()
+                .extracting(RunSessionScopeSession::taskPartId)
+                .isEqualTo("part_first");
+        assertThat(repository.findSession(RUN_ID, "ses_child_second1234567890")).get()
+                .extracting(RunSessionScopeSession::taskPartId)
+                .isEqualTo("part_second");
+    }
+
+    @Test
     void sessionUpdatedParentIdDiscoversChild() {
         List<RunEventDraft> routed = route(new RunEventDraft(
                 RUN_ID,
@@ -231,6 +305,37 @@ class RunSessionScopeRouterTest {
     }
 
     @Test
+    void duplicateNativeTaskAndChildCreatedRawEventsDoNotCreateDuplicateDiscovery() {
+        RunEventDraft task = pendingTaskDraft("msg_task", "prt_task", "call_task", NOW.minusMillis(10));
+        task = new RunEventDraft(task.runId(), task.type(), task.traceId(), task.occurredAt(),
+                withRawEventId(task.payload(), "evt_task"), task.scopeContext());
+        RunEventDraft duplicateTask = new RunEventDraft(task.runId(), task.type(), task.traceId(), task.occurredAt(),
+                withRawEventId(task.payload(), "evt_task"), task.scopeContext());
+        RunEventDraft childCreated = childSessionCreatedDraft(CHILD_SESSION_ID, "Explore project (@explore subagent)");
+        childCreated = new RunEventDraft(childCreated.runId(), childCreated.type(), childCreated.traceId(),
+                childCreated.occurredAt(), withRawEventId(childCreated.payload(), "evt_child_created"),
+                childCreated.scopeContext());
+        RunEventDraft duplicateChildCreated = new RunEventDraft(childCreated.runId(), childCreated.type(),
+                childCreated.traceId(), childCreated.occurredAt(),
+                withRawEventId(childCreated.payload(), "evt_child_created"), childCreated.scopeContext());
+
+        assertThat(route(task)).extracting(RunEventDraft::type)
+                .containsExactly(RunEventType.MESSAGE_PART_UPDATED);
+        assertThat(route(duplicateTask)).isEmpty();
+
+        assertThat(route(childCreated)).extracting(RunEventDraft::type)
+                .containsExactly(
+                        RunEventType.SESSION_CHILD_DISCOVERED,
+                        RunEventType.SESSION_SCOPE_UPDATED,
+                        RunEventType.SESSION_CREATED);
+        assertThat(route(duplicateChildCreated)).isEmpty();
+        assertThat(repository.sessions).hasSize(1);
+        assertThat(repository.findSession(RUN_ID, CHILD_SESSION_ID)).get()
+                .extracting(RunSessionScopeSession::taskPartId)
+                .isEqualTo("prt_task");
+    }
+
+    @Test
     void knownChildPermissionQuestionAndSessionDiffStayInChildScope() {
         route(new RunEventDraft(
                 RUN_ID,
@@ -323,6 +428,45 @@ class RunSessionScopeRouterTest {
                 "trace_scope1234567890abcdef",
                 NOW,
                 payload(Map.of("rawType", rawType, "sessionID", CHILD_SESSION_ID)),
+                rootScope());
+    }
+
+    private RunEventDraft pendingTaskDraft(String messageId, String partId, String callId, Instant occurredAt) {
+        return new RunEventDraft(
+                RUN_ID,
+                RunEventType.MESSAGE_PART_UPDATED,
+                "trace_scope1234567890abcdef",
+                occurredAt,
+                payload(Map.of(
+                        "rawType", "message.part.updated",
+                        "sessionID", ROOT_SESSION_ID,
+                        "messageID", messageId,
+                        "part", Map.of(
+                                "id", partId,
+                                "messageID", messageId,
+                                "sessionID", ROOT_SESSION_ID,
+                                "type", "tool",
+                                "tool", "task",
+                                "callID", callId,
+                                "state", Map.of("status", "pending", "input", Map.of(), "raw", "")))),
+                rootScope());
+    }
+
+    private RunEventDraft childSessionCreatedDraft(String sessionId, String title) {
+        return new RunEventDraft(
+                RUN_ID,
+                RunEventType.SESSION_CREATED,
+                "trace_scope1234567890abcdef",
+                NOW,
+                payload(Map.of(
+                        "rawType", "session.created",
+                        "sessionID", sessionId,
+                        "parentID", ROOT_SESSION_ID,
+                        "info", Map.of(
+                                "id", sessionId,
+                                "parentID", ROOT_SESSION_ID,
+                                "agent", "explore",
+                                "title", title))),
                 rootScope());
     }
 

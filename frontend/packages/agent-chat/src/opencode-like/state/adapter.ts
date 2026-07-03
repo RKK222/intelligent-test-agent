@@ -1,4 +1,4 @@
-import type { AgentMessage, MessagePart, RunDiffFile } from "@test-agent/shared-types";
+import type { AgentMessage, MessagePart, RunDiffFile, SubagentSession } from "@test-agent/shared-types";
 import { createModelCatalog } from "./model-catalog";
 import { canonicalMessageId } from "./part-utils";
 import type { OpencodeLikeConversationInput, OpencodeLikeConversationState, OpencodeLikeRuntimeStatus } from "./types";
@@ -11,6 +11,7 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
   const partsByMessageId: Record<string, MessagePart[]> = {};
   let currentUserId: string | undefined;
   const activeSubagentSessionId = input.activeSubagentSessionId ?? null;
+  const visibleAssistantIds: string[] = [];
 
   for (const message of input.messages) {
     if (message.role === "card") {
@@ -30,6 +31,7 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
     }
 
     partsByMessageId[id] = partsForAssistant(message);
+    visibleAssistantIds.push(id);
     if (currentUserId) {
       assistantMessagesByParent[currentUserId] = [...(assistantMessagesByParent[currentUserId] ?? []), message];
     } else {
@@ -39,6 +41,19 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
 
   const runtimeStatus = input.runtimeStatus ?? runtimeStatusFromLegacy(input.status, input.running);
   const diffFiles = input.diffFiles ?? input.diff?.files ?? diffFilesFromCards(input.messages);
+  const subagentByTaskPartId = { ...(input.subagentByTaskPartId ?? {}) };
+  if (!activeSubagentSessionId) {
+    appendSyntheticSubagentEntries({
+      subagents: input.subagentsBySessionId ?? {},
+      subagentByTaskPartId,
+      partsByMessageId,
+      messageById,
+      visibleAssistantIds,
+      userMessages,
+      assistantMessagesByParent,
+      orphanAssistantMessages
+    });
+  }
 
   return {
     messages: input.messages,
@@ -58,7 +73,7 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
     showReasoningSummaries: input.showReasoningSummaries ?? true,
     messageScopesById: input.messageScopesById ?? {},
     subagentsBySessionId: input.subagentsBySessionId ?? {},
-    subagentByTaskPartId: input.subagentByTaskPartId ?? {},
+    subagentByTaskPartId,
     activeSubagentSessionId
   };
 }
@@ -77,7 +92,7 @@ function messageVisibleInView(
 
 function partsForAssistant(message: Extract<AgentMessage, { role: "assistant" }>): MessagePart[] {
   if (message.parts?.length) {
-    return message.parts;
+    return [...message.parts];
   }
   if (!message.text.trim()) {
     return [];
@@ -90,6 +105,106 @@ function partsForAssistant(message: Extract<AgentMessage, { role: "assistant" }>
       status: "completed"
     }
   ];
+}
+
+function appendSyntheticSubagentEntries(params: {
+  subagents: Record<string, SubagentSession>;
+  subagentByTaskPartId: Record<string, string>;
+  partsByMessageId: Record<string, MessagePart[]>;
+  messageById: Record<string, AgentMessage>;
+  visibleAssistantIds: string[];
+  userMessages: Extract<AgentMessage, { role: "user" }>[];
+  assistantMessagesByParent: Record<string, Extract<AgentMessage, { role: "assistant" }>[]>;
+  orphanAssistantMessages: Extract<AgentMessage, { role: "assistant" }>[];
+}): void {
+  for (const subagent of Object.values(params.subagents)) {
+    const partId = subagent.taskPartId ?? `subagent:${subagent.sessionId}`;
+    if (hasTaskPart(params.partsByMessageId, partId)) {
+      params.subagentByTaskPartId[partId] = subagent.sessionId;
+      continue;
+    }
+    const messageId = chooseSyntheticMessageId(subagent, params.partsByMessageId, params.visibleAssistantIds);
+    const targetMessageId = messageId ?? `subagent-entry:${subagent.sessionId}`;
+    const targetMessage = ensureSyntheticAssistantMessage(params, targetMessageId, subagent);
+    const canonicalId = canonicalMessageId(targetMessage);
+    params.partsByMessageId[canonicalId] = [
+      ...(params.partsByMessageId[canonicalId] ?? []),
+      syntheticSubagentPart(partId, subagent)
+    ];
+    params.subagentByTaskPartId[partId] = subagent.sessionId;
+  }
+}
+
+function hasTaskPart(partsByMessageId: Record<string, MessagePart[]>, partId: string): boolean {
+  return Object.values(partsByMessageId).some((parts) =>
+    parts.some((part) => part.partId === partId && part.type === "tool" && part.toolName === "task")
+  );
+}
+
+function chooseSyntheticMessageId(
+  subagent: SubagentSession,
+  partsByMessageId: Record<string, MessagePart[]>,
+  visibleAssistantIds: string[]
+): string | undefined {
+  if (subagent.taskMessageId && Object.prototype.hasOwnProperty.call(partsByMessageId, subagent.taskMessageId)) {
+    return subagent.taskMessageId;
+  }
+  return visibleAssistantIds.at(-1);
+}
+
+function ensureSyntheticAssistantMessage(
+  params: {
+    messageById: Record<string, AgentMessage>;
+    userMessages: Extract<AgentMessage, { role: "user" }>[];
+    assistantMessagesByParent: Record<string, Extract<AgentMessage, { role: "assistant" }>[]>;
+    orphanAssistantMessages: Extract<AgentMessage, { role: "assistant" }>[];
+    partsByMessageId: Record<string, MessagePart[]>;
+  },
+  messageId: string,
+  subagent: SubagentSession
+): Extract<AgentMessage, { role: "assistant" }> {
+  const existing = params.messageById[messageId];
+  if (existing?.role === "assistant") {
+    return existing;
+  }
+  const synthetic: Extract<AgentMessage, { role: "assistant" }> = {
+    id: messageId,
+    messageId,
+    role: "assistant",
+    text: "",
+    createdAt: subagent.updatedAt,
+    parts: []
+  };
+  params.messageById[messageId] = synthetic;
+  params.partsByMessageId[messageId] = params.partsByMessageId[messageId] ?? [];
+  const latestUser = params.userMessages.at(-1);
+  if (latestUser) {
+    const userId = canonicalMessageId(latestUser);
+    params.assistantMessagesByParent[userId] = [...(params.assistantMessagesByParent[userId] ?? []), synthetic];
+  } else {
+    params.orphanAssistantMessages.push(synthetic);
+  }
+  return synthetic;
+}
+
+function syntheticSubagentPart(partId: string, subagent: SubagentSession): Extract<MessagePart, { type: "tool" }> {
+  return {
+    partId,
+    type: "tool",
+    toolName: "task",
+    callId: subagent.taskCallId,
+    status: subagent.status || "running",
+    input: {
+      description: subagent.title,
+      subagent_type: subagent.agentName
+    },
+    metadata: {
+      sessionId: subagent.sessionId,
+      parentSessionId: subagent.parentSessionId,
+      synthetic: true
+    },
+    startedAt: subagent.updatedAt
+  };
 }
 
 function runtimeStatusFromLegacy(status: string | undefined, running: boolean | undefined): OpencodeLikeRuntimeStatus {

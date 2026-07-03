@@ -23,7 +23,7 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 - `GeneratedOpencodeSdkGateway`：唯一直接调用 generated SDK 的内部适配器。
 - `OpencodeCreateSessionCommand`、`OpencodeCreateSessionResult`：创建远端 opencode session 并只返回远端 session id。
 - `OpencodeStartRunCommand`、`OpencodeStartCommand`、`OpencodePromptPart`、`OpencodeStartRunResult`：平台 Run 启动命令、原生 slash command、稳定 prompt part 模型和结果，分别映射到 opencode `prompt_async` 与 `/session/{sessionID}/command`，不向 app/domain 暴露 generated DTO。
-- `OpencodeRunEventMapper`：把 opencode raw JSON event 映射为平台 `RunEventDraft`，未知事件降级为 `opencode.event.unknown`；支持按 `RunEventScopeContext` 生成规范化 session 事件和 root 终态派生事件，并为常见 `*ID` 字段补充 lower camel alias。workspace 级全局事件流不在 client 层按 root session 过滤，当前 Run 的 root/child scope 由 runtime router 判定。
+- `OpencodeRunEventMapper`：把 opencode raw JSON event 映射为平台 `RunEventDraft`，未知事件降级为 `opencode.event.unknown`；支持按 `RunEventScopeContext` 生成规范化 session 事件和 root 终态派生事件，并为常见 `*ID` 字段补充 lower camel alias。mapper 会把 opencode `payload.type=sync`、`payload.syncEvent.type=*.1` 包装还原为内层事件 type/id/data，保证 runtime router 能用同一 raw event id 去重 direct 与 sync 事件。workspace 级全局事件流不在 client 层按 root session 过滤，当前 Run 的 root/child scope 由 runtime router 判定。
 - `OpencodeDiffCommand` / `OpencodeDiffResult`：封装 opencode `sessionDiff`，不泄露 `SnapshotFileDiff`。
 - `OpencodeRejectDiffCommand` / `OpencodeRejectDiffResult`：封装 opencode `sessionRevert`，用于 Run 级拒绝 Diff。
 - `OpencodeRuntimeCommand` / `OpencodeRuntimeResult`：运行态通用 facade 命令，用于受控访问 opencode Web App 需要的 agent/model/provider/command/reference、session、permission、question、fs/vcs/lsp/mcp status/resources/tools 等 HTTP API；返回 Jackson `JsonNode`，不泄露 generated DTO。

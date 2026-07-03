@@ -8,8 +8,8 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
 
-const title = computed(() => props.subagent?.title ?? text(props.part.input?.description) ?? text(props.part.input?.prompt) ?? "Subagent task");
-const agentName = computed(() => props.subagent?.agentName ?? displayName(text(props.part.input?.subagent_type) ?? "Task"));
+const title = computed(() => props.subagent?.title ?? text(props.part.input?.description) ?? text(props.part.input?.prompt) ?? "准备子 Agent");
+const agentName = computed(() => props.subagent?.agentName ?? (text(props.part.input?.subagent_type) ? displayName(text(props.part.input?.subagent_type) ?? "") : "智能体"));
 const status = computed(() => props.subagent?.status ?? props.part.status);
 const clickable = computed(() => Boolean(props.subagent?.sessionId));
 
@@ -24,13 +24,15 @@ function text(value: unknown): string | undefined {
 }
 
 function displayName(value: string): string {
-  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+  const trimmed = value.trim();
+  return trimmed ? `${trimmed.charAt(0).toUpperCase()}${trimmed.slice(1)}` : "智能体";
 }
 
 function formatStatus(value: string | undefined): string {
   const normalized = value?.toLowerCase();
   if (normalized === "completed" || normalized === "success") return "已完成";
   if (normalized === "running") return "进行中";
+  if (normalized === "pending") return "准备中";
   if (normalized === "failed" || normalized === "error") return "失败";
   return value ?? "";
 }
