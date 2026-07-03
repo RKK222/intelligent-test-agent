@@ -370,6 +370,21 @@ public final class ManagedWorkspaceResponses {
     }
 
     /**
+     * 发布前只同步应用分支并汇总待合入个人分支的变化，不修改个人 worktree。
+     */
+    public record PersonalWorkspacePublishPreviewResponse(
+            String applicationHead,
+            String personalHead,
+            int incomingCommitCount,
+            int changedFileCount,
+            int addedCount,
+            int modifiedCount,
+            int deletedCount,
+            int renamedCount,
+            List<String> samplePaths) {
+    }
+
+    /**
      * 确保默认私有工作区存在后的统一响应，同时返回个人工作区和运行态 workspace。
      */
     public record DefaultPersonalWorkspaceResponse(

@@ -24,6 +24,7 @@ import {
 import type {
   AgentConfigDiffFile,
   RunDiffFile,
+  WorkspaceGitDiffFile,
   WorkspaceGitConflict,
   WorkspaceGitConflictResolution
 } from "@test-agent/shared-types";
@@ -46,7 +47,11 @@ const emit = defineEmits<{
     scope?: "PUBLIC" | "WORKSPACE";
     file?: WorkspacePanelDiffFile;
   }];
-  "changes-refreshed": [payload?: { paths?: string[]; reloadOpenFiles?: boolean }];
+  "changes-refreshed": [payload?: {
+    paths?: string[];
+    reloadOpenFiles?: boolean;
+    files?: WorkspaceGitDiffFile[];
+  }];
 }>();
 
 const workbench = useWorkbenchStore();
@@ -312,7 +317,21 @@ async function unstageWorkspaceFile(path: string) {
 }
 
 function notifyChangesRefreshed(paths?: string[], reloadOpenFiles?: boolean) {
-  const payload: { paths?: string[]; reloadOpenFiles?: boolean } = {};
+  const payload: {
+    paths?: string[];
+    reloadOpenFiles?: boolean;
+    files: WorkspaceGitDiffFile[];
+  } = {
+    files: workspaceDiffFiles.value.map((file) => ({
+      path: file.path,
+      rawStatus: file.rawStatus,
+      status: file.status,
+      staged: stagedWorkspacePaths.value.has(file.path),
+      patch: file.patch,
+      additions: file.additions,
+      deletions: file.deletions
+    }))
+  };
   if (paths) payload.paths = paths;
   if (reloadOpenFiles !== undefined) payload.reloadOpenFiles = reloadOpenFiles;
   emit("changes-refreshed", payload);
@@ -367,6 +386,24 @@ async function abortWorkspaceConflict() {
     notifyChangesRefreshed(undefined, true);
   } catch (error) {
     errorMessage.value = errorMessageFor(error, "取消 Git 合并失败");
+  } finally {
+    conflictResolving.value = false;
+  }
+}
+
+async function resolveAllWorkspaceConflicts(resolution: "CURRENT" | "INCOMING") {
+  if (!props.workspaceId || conflictResolving.value) return;
+  const label = resolution === "CURRENT" ? "个人版本" : "远程应用版本";
+  if (!window.confirm(`将 ${workspaceConflicts.value.length} 个冲突文件全部采用${label}，是否继续？`)) return;
+  conflictResolving.value = true;
+  errorMessage.value = "";
+  try {
+    await api.resolveAllWorkspaceGitConflicts(props.workspaceId, { resolution });
+    activeConflict.value = null;
+    await refreshChanges();
+    notifyChangesRefreshed(undefined, true);
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "批量解决 Git 冲突失败");
   } finally {
     conflictResolving.value = false;
   }
@@ -522,18 +559,29 @@ async function handleCommit(push = false) {
         return;
       }
       progressMessage.value = "正在合并推送到应用版本分支...";
+      const preview = await api.previewPersonalWorkspacePublish(props.personalWorkspaceId);
+      if (
+        preview.incomingCommitCount > 0
+        && !window.confirm(
+          `远程应用分支有 ${preview.incomingCommitCount} 个新提交，涉及 ${preview.changedFileCount} 个文件`
+          + `（新增 ${preview.addedCount}、修改 ${preview.modifiedCount}、删除 ${preview.deletedCount}、重命名 ${preview.renamedCount}）。`
+          + "继续后 Git 会先合并这些变化；如有冲突，可一键全部保留个人版本或远程版本。是否继续？"
+        )
+      ) {
+        progressMessage.value = "";
+        return;
+      }
       const result = await api.publishPersonalWorkspace(props.personalWorkspaceId, {
         commitMessage: msg,
-        files: workspaceStaged.value.map((file) => file.path)
+        files: workspaceStaged.value.map((file) => file.path),
+        expectedApplicationHead: preview.applicationHead
       });
       if (result.status === "CONFLICT") {
-        const conflictList = result.conflictFiles.length > 0
-          ? result.conflictFiles.join("、")
-          : "未知文件";
-        errorMessage.value = `合并冲突：请在个人工作区中解决 ${conflictList} 的冲突后重新「提交并推送」。当前仍停留在个人工作区，应用版本副本不受影响。`;
+        const conflictMessage = `合并产生 ${result.conflictFiles.length} 个冲突文件。可全部保留个人版本、全部采用远程版本，或逐个处理。`;
+        errorMessage.value = conflictMessage;
         progressMessage.value = "";
         await refreshChanges({ preserveError: true });
-        errorMessage.value = `合并冲突：请在个人工作区中解决 ${conflictList} 的冲突后重新「提交并推送」。当前仍停留在个人工作区，应用版本副本不受影响。`;
+        errorMessage.value = conflictMessage;
         committing.value = false;
         return;
       }
@@ -710,7 +758,16 @@ defineExpose({
             </div>
             <div v-show="workspaceUnstagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
               <div v-if="workspaceConflicts.length > 0" class="git-conflict-note">
-                请先解决冲突文件后再重新提交并推送
+                <span>共 {{ workspaceConflicts.length }} 个冲突；可批量处理，也可点击文件逐个处理</span>
+                <button type="button" :disabled="conflictResolving" @click.stop="resolveAllWorkspaceConflicts('CURRENT')">
+                  全部保留个人版本
+                </button>
+                <button type="button" :disabled="conflictResolving" @click.stop="resolveAllWorkspaceConflicts('INCOMING')">
+                  全部采用远程版本
+                </button>
+                <button type="button" :disabled="conflictResolving" @click.stop="abortWorkspaceConflict">
+                  取消本次合并
+                </button>
               </div>
               <div
                 v-for="file in workspaceConflicts"

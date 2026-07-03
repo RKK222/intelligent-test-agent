@@ -194,7 +194,7 @@ onBeforeUnmount(disposeEditors);
             {{ conflict.currentContent == null ? "采用删除" : "保留当前" }}
           </Button>
         </div>
-        <div v-if="conflict.currentContent == null" class="merge-missing"><Trash2 class="h-4 w-4" /> 此版本中不存在该文件</div>
+        <div v-if="conflict.currentContent == null" class="merge-missing"><Trash2 class="h-4 w-4" /> 个人版本已删除此文件</div>
         <div v-show="conflict.currentContent != null" ref="currentEl" class="merge-monaco"></div>
       </section>
       <section class="merge-pane">
@@ -204,7 +204,7 @@ onBeforeUnmount(disposeEditors);
             {{ conflict.incomingContent == null ? "采用删除" : "采用应用" }}
           </Button>
         </div>
-        <div v-if="conflict.incomingContent == null" class="merge-missing"><Trash2 class="h-4 w-4" /> 此版本中不存在该文件</div>
+        <div v-if="conflict.incomingContent == null" class="merge-missing"><Trash2 class="h-4 w-4" /> 远程版本已删除此文件</div>
         <div v-show="conflict.incomingContent != null" ref="incomingEl" class="merge-monaco"></div>
       </section>
     </div>

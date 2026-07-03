@@ -48,7 +48,11 @@ const emit = defineEmits<{
   toggleDirectory: [path: string];
   openFile: [path: string];
   openDiff: [payload: string | { path: string; source: "vcs" | "agent"; scope?: "PUBLIC" | "WORKSPACE" }];
-  "changes-refreshed": [payload?: { paths?: string[]; reloadOpenFiles?: boolean }];
+  "changes-refreshed": [payload?: {
+    paths?: string[];
+    reloadOpenFiles?: boolean;
+    files?: import("@test-agent/shared-types").WorkspaceGitDiffFile[];
+  }];
   refresh: [];
   // 选择某个应用版本后由父组件切换运行态 Workspace
   selectVersion: [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];

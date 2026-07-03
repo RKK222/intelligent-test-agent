@@ -1274,6 +1274,7 @@ class ManagedWorkspaceApplicationServiceTest {
                 version.versionId(),
                 new UserId("usr_1"),
                 "trace_default");
+        git.nextHeadCommit = "commit_remote";
 
         ManagedWorkspaceResponses.PersonalWorkspacePublishResponse result = service.publishPersonalWorkspace(
                 personal.personalWorkspaceId(),
@@ -1294,8 +1295,69 @@ class ManagedWorkspaceApplicationServiceTest {
         assertThat(git.abortedMergeRepoRoot).isNull();
         // 冲突时不应推送
         assertThat(git.pushedBranch).isNull();
-        // 版本 commit 不应更新
-        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_base");
+        // 应用分支已 pull 成功，即使随后个人 merge 冲突，版本和副本也必须记录实际远程 HEAD。
+        assertThat(managed.versions.get(0).targetCommitHash()).isEqualTo("commit_remote");
+        assertThat(managed.replicas.get(0).currentCommitHash()).isEqualTo("commit_remote");
+    }
+
+    @Test
+    void previewsIncomingApplicationChangesWithoutTouchingPersonalIndex() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.nextHeadCommit = "commit_remote";
+        git.nextCommitCount = 3;
+        git.nextNameStatus = "A\t新增.md\nM\t修改.md\nD\t删除.md\nR100\t旧名.md\t新名.md\n";
+
+        ManagedWorkspaceResponses.PersonalWorkspacePublishPreviewResponse preview =
+                service.previewPersonalWorkspacePublish(
+                        personal.personalWorkspaceId(), new UserId("usr_1"), "trace_preview");
+
+        assertThat(preview.applicationHead()).isEqualTo("commit_remote");
+        assertThat(preview.incomingCommitCount()).isEqualTo(3);
+        assertThat(preview.changedFileCount()).isEqualTo(4);
+        assertThat(preview.addedCount()).isEqualTo(1);
+        assertThat(preview.modifiedCount()).isEqualTo(1);
+        assertThat(preview.deletedCount()).isEqualTo(1);
+        assertThat(preview.renamedCount()).isEqualTo(1);
+        assertThat(preview.samplePaths()).containsExactly("新增.md", "修改.md", "删除.md", "新名.md");
+        assertThat(git.resetIndexRepoRoot).isNull();
+        assertThat(git.committedStagedRepoRoot).isNull();
+    }
+
+    @Test
+    void rejectsChangedApplicationHeadBeforeCreatingPersonalCommit() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.nextHeadCommit = "commit_changed_after_preview";
+
+        assertThatThrownBy(() -> service.publishPersonalWorkspace(
+                personal.personalWorkspaceId(),
+                "fix: should not commit",
+                List.of("README.md"),
+                "commit_seen_in_preview",
+                new UserId("usr_1"),
+                "trace_publish"))
+                .isInstanceOfSatisfying(PlatformException.class, exception ->
+                        assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT));
+
+        assertThat(git.resetIndexRepoRoot).isNull();
+        assertThat(git.stagedFilesRepoRoot).isNull();
+        assertThat(git.committedStagedRepoRoot).isNull();
+        assertThat(git.pushes).isEmpty();
     }
 
     @Test
@@ -1507,6 +1569,8 @@ class ManagedWorkspaceApplicationServiceTest {
         private boolean pushedForce;
         private String pulledBranch;
         private String nextHeadCommit = "commit_base";
+        private int nextCommitCount;
+        private String nextNameStatus = "";
         private boolean worktreeClean = true;
         private final List<String> calls = new ArrayList<>();
         private boolean failCreateWorktreeWithConflict;
@@ -1634,6 +1698,16 @@ class ManagedWorkspaceApplicationServiceTest {
             calls.add("head:" + repoRoot);
             this.headCommitRepoRoot = repoRoot;
             return nextHeadCommit;
+        }
+
+        @Override
+        public int countCommits(Path repoRoot, String from, String to) {
+            return nextCommitCount;
+        }
+
+        @Override
+        public String diffNameStatus(Path repoRoot, String from, String to) {
+            return nextNameStatus;
         }
 
         @Override

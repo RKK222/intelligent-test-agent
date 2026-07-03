@@ -1585,6 +1585,7 @@ export type SyncWorkspacePayload = {
 export type PublishPersonalWorkspacePayload = {
   commitMessage: string;
   files: string[];
+  expectedApplicationHead?: string;
 };
 
 /** 个人工作区发布结果 */
@@ -1596,6 +1597,18 @@ export type PublishPersonalWorkspaceResult = {
   message: string;
   remotePushed?: boolean;
   headCommit?: string | null;
+};
+
+export type PublishPersonalWorkspacePreview = {
+  applicationHead: string;
+  personalHead: string;
+  incomingCommitCount: number;
+  changedFileCount: number;
+  addedCount: number;
+  modifiedCount: number;
+  deletedCount: number;
+  renamedCount: number;
+  samplePaths: string[];
 };
 
 export type WorkspaceGitConflict = {
@@ -1613,6 +1626,10 @@ export type ResolveWorkspaceGitConflictPayload = {
   path: string;
   resolution: WorkspaceGitConflictResolution;
   content?: string | null;
+};
+
+export type ResolveAllWorkspaceGitConflictsPayload = {
+  resolution: "CURRENT" | "INCOMING";
 };
 
 /** 确保默认个人工作区响应 */

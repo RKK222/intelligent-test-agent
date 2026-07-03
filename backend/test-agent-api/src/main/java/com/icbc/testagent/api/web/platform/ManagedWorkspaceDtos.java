@@ -25,6 +25,9 @@ final class ManagedWorkspaceDtos {
     record ResolveWorkspaceGitConflictRequest(String path, String resolution, String content) {
     }
 
+    record ResolveAllWorkspaceGitConflictsRequest(String resolution) {
+    }
+
     /**
      * VCS 分支偏好写入请求体：当前分支名由前端从 IDE 或 vcs.status 拿到。
      */
@@ -35,6 +38,9 @@ final class ManagedWorkspaceDtos {
      * 个人工作区"提交并推送"（合并回应用版本分支）的请求体。
      * files 使用工作区 Git diff 返回的相对路径，只发布前端暂存的文件。
      */
-    record PublishPersonalWorkspaceRequest(String commitMessage, List<String> files) {
+    record PublishPersonalWorkspaceRequest(
+            String commitMessage,
+            List<String> files,
+            String expectedApplicationHead) {
     }
 }

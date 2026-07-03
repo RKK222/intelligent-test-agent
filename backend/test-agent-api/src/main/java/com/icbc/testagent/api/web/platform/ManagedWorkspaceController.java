@@ -246,6 +246,25 @@ public class ManagedWorkspaceController {
         return ok(exchange, null);
     }
 
+    @PostMapping("/workspaces/{workspaceId}/git-conflict/resolve-all")
+    public ApiResponse<Object> resolveAllWorkspaceGitConflicts(
+            @PathVariable String workspaceId,
+            @RequestBody ManagedWorkspaceDtos.ResolveAllWorkspaceGitConflictsRequest request,
+            ServerWebExchange exchange) {
+        service.resolveAllWorkspaceGitConflicts(workspaceId, request.resolution(), userId(exchange));
+        return ok(exchange, null);
+    }
+
+    @PostMapping("/personal-workspaces/{personalWorkspaceId}/publish-preview")
+    public ApiResponse<Object> previewPersonalWorkspacePublish(
+            @PathVariable String personalWorkspaceId,
+            ServerWebExchange exchange) {
+        return ok(exchange, service.previewPersonalWorkspacePublish(
+                personalWorkspaceId,
+                userId(exchange),
+                RuntimeApiSupport.traceId(exchange)));
+    }
+
     /**
      * 个人工作区"提交并推送"：将个人 worktree 合并回应用版本分支。
      * 合并成功: 更新版本 commit；冲突: 返回 CONFLICT + 冲突文件列表。
@@ -259,6 +278,7 @@ public class ManagedWorkspaceController {
                 personalWorkspaceId,
                 request.commitMessage(),
                 request.files(),
+                request.expectedApplicationHead(),
                 userId(exchange),
                 RuntimeApiSupport.traceId(exchange)));
     }

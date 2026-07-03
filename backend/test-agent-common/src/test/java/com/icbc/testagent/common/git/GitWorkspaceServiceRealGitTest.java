@@ -65,6 +65,62 @@ class GitWorkspaceServiceRealGitTest {
         assertThat(service.isMergeInProgress(repo)).isTrue();
     }
 
+    @Test
+    void resolvesChineseAddDeleteConflictsWithNativeCurrentAndIncomingStages() throws Exception {
+        Path currentRepo = createAddDeleteConflict("current");
+        GitWorkspaceService service = new GitWorkspaceService();
+
+        assertThat(service.conflictPaths(currentRepo))
+                .containsExactlyInAnyOrder("中文/个人新增.txt", "中文/远程新增.txt");
+        service.resolveAllConflicts(
+                currentRepo,
+                GitWorkspaceService.ConflictResolutionSide.CURRENT,
+                null);
+
+        assertThat(service.conflictPaths(currentRepo)).isEmpty();
+        assertThat(Files.readString(currentRepo.resolve("中文/个人新增.txt"))).isEqualTo("current\n");
+        assertThat(currentRepo.resolve("中文/远程新增.txt")).doesNotExist();
+
+        Path incomingRepo = createAddDeleteConflict("incoming");
+        service.resolveAllConflicts(
+                incomingRepo,
+                GitWorkspaceService.ConflictResolutionSide.INCOMING,
+                null);
+
+        assertThat(service.conflictPaths(incomingRepo)).isEmpty();
+        assertThat(incomingRepo.resolve("中文/个人新增.txt")).doesNotExist();
+        assertThat(Files.readString(incomingRepo.resolve("中文/远程新增.txt"))).isEqualTo("incoming\n");
+    }
+
+    private Path createAddDeleteConflict(String suffix) throws Exception {
+        Path repo = tempDir.resolve("repo-" + suffix);
+        Files.createDirectories(repo);
+        git(repo, "init", "-b", "main");
+        git(repo, "config", "user.name", "Test Agent");
+        git(repo, "config", "user.email", "test-agent@example.invalid");
+        Files.createDirectories(repo.resolve("中文"));
+        write(repo, "中文/个人新增.txt", "base-current\n");
+        write(repo, "中文/远程新增.txt", "base-incoming\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "conflict base");
+        git(repo, "checkout", "-b", "application");
+        Files.delete(repo.resolve("中文/个人新增.txt"));
+        write(repo, "中文/远程新增.txt", "incoming\n");
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "application delete and modify");
+        git(repo, "checkout", "main");
+        write(repo, "中文/个人新增.txt", "current\n");
+        Files.delete(repo.resolve("中文/远程新增.txt"));
+        git(repo, "add", "--all");
+        git(repo, "commit", "-m", "personal modify and delete");
+        try {
+            git(repo, "merge", "--no-ff", "application");
+        } catch (RuntimeException ignored) {
+            // 预期生成 UD/DU 冲突。
+        }
+        return repo;
+    }
+
     private Path initializeRepository() throws Exception {
         Path repo = tempDir.resolve("repo");
         Files.createDirectories(repo);

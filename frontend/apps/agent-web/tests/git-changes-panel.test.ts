@@ -12,6 +12,7 @@ const apiClientMock = vi.hoisted(() => ({
   getWorkspaceGitConflict: vi.fn(),
   resolveWorkspaceGitConflict: vi.fn(),
   abortWorkspaceGitConflict: vi.fn(),
+  resolveAllWorkspaceGitConflicts: vi.fn(),
   getPublicAgentDiff: vi.fn(),
   getWorkspaceAgentDiff: vi.fn(),
   stagePublicAgentFiles: vi.fn(),
@@ -23,6 +24,7 @@ const apiClientMock = vi.hoisted(() => ({
   publishPublicAgentConfig: vi.fn(),
   publishWorkspaceAgentConfig: vi.fn(),
   publishPersonalWorkspace: vi.fn(),
+  previewPersonalWorkspacePublish: vi.fn(),
   connectAgentConfigProgress: vi.fn()
 }));
 
@@ -63,6 +65,17 @@ describe("GitChangesPanel", () => {
       remotePushed: true,
       headCommit: "commit_merged"
     });
+    apiClientMock.previewPersonalWorkspacePublish.mockResolvedValue({
+      applicationHead: "application_head",
+      personalHead: "personal_head",
+      incomingCommitCount: 0,
+      changedFileCount: 0,
+      addedCount: 0,
+      modifiedCount: 0,
+      deletedCount: 0,
+      renamedCount: 0,
+      samplePaths: []
+    });
     apiClientMock.getWorkspaceGitConflict.mockResolvedValue({
       path: "src/conflict.ts",
       rawStatus: "UU",
@@ -73,11 +86,14 @@ describe("GitChangesPanel", () => {
     });
     apiClientMock.resolveWorkspaceGitConflict.mockResolvedValue(undefined);
     apiClientMock.abortWorkspaceGitConflict.mockResolvedValue(undefined);
+    apiClientMock.resolveAllWorkspaceGitConflicts.mockResolvedValue(undefined);
     apiClientMock.connectAgentConfigProgress.mockResolvedValue({ close: vi.fn() });
   });
 
   afterEach(() => {
     cleanup();
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
   });
 
   it("does not expose mock data button and loads workspace plus application agent changes", async () => {
@@ -205,9 +221,9 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect(apiClientMock.discardWorkspaceGitFiles)
       .toHaveBeenCalledWith("wrk_1234567890abcdef", ["workspace/02-设计/Test Material.md"]));
     await waitFor(() => expect(view.queryByText("workspace/02-设计/Test Material.md")).toBeNull());
-    await waitFor(() => expect(changesRefreshed).toHaveBeenCalledWith({
+    await waitFor(() => expect(changesRefreshed).toHaveBeenCalledWith(expect.objectContaining({
       paths: ["workspace/02-设计/Test Material.md"]
-    }));
+    })));
   });
 
   it("publishes only staged application workspace files", async () => {
@@ -289,7 +305,8 @@ describe("GitChangesPanel", () => {
 
     await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", {
       commitMessage: "fix: selected only",
-      files: ["src/selected.ts"]
+      files: ["src/selected.ts"],
+      expectedApplicationHead: "application_head"
     }));
     await waitFor(() => expect(view.queryByText("src/selected.ts")).toBeNull());
     expect(await view.findByText("src/unselected.ts")).toBeTruthy();
@@ -377,9 +394,10 @@ describe("GitChangesPanel", () => {
 
     await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", {
       commitMessage: "fix: conflict prompt",
-      files: ["workspace/docs/selected.md"]
+      files: ["workspace/docs/selected.md"],
+      expectedApplicationHead: "application_head"
     }));
-    expect(await view.findByText(/合并冲突：请在个人工作区中解决 workspace\/docs\/conflict.md/)).toBeTruthy();
+    expect(await view.findByText(/合并产生 1 个冲突文件/)).toBeTruthy();
     expect(await view.findByText("CONFLICT")).toBeTruthy();
     expect(await view.findByText("AU")).toBeTruthy();
     expect(await view.findByText("workspace/docs/auto-merged-delete.md")).toBeTruthy();
@@ -523,5 +541,59 @@ describe("GitChangesPanel", () => {
         deletions: file.deletions
       }
     }]]);
+  });
+
+  it("resolves all conflicts with one native side selection", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [
+          { path: "冲突-A.md", status: "conflict", rawStatus: "UD", staged: true, patch: "", additions: 0, deletions: 0 },
+          { path: "冲突-B.md", status: "conflict", rawStatus: "AU", staged: true, patch: "", additions: 0, deletions: 0 }
+        ]
+      })
+      .mockResolvedValue({ files: [] });
+    const view = render(GitChangesPanel, {
+      props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
+      global: { plugins: [createPinia()] }
+    });
+
+    await fireEvent.click(await view.findByRole("button", { name: "全部保留个人版本" }));
+
+    await waitFor(() => expect(apiClientMock.resolveAllWorkspaceGitConflicts)
+      .toHaveBeenCalledWith("wrk_1234567890abcdef", { resolution: "CURRENT" }));
+  });
+
+  it("pauses publish when incoming application changes are not confirmed", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(false);
+    apiClientMock.previewPersonalWorkspacePublish.mockResolvedValueOnce({
+      applicationHead: "application_new",
+      personalHead: "personal_head",
+      incomingCommitCount: 4,
+      changedFileCount: 12,
+      addedCount: 2,
+      modifiedCount: 8,
+      deletedCount: 1,
+      renamedCount: 1,
+      samplePaths: ["README.md"]
+    });
+    apiClientMock.getWorkspaceGitDiff
+      .mockResolvedValueOnce({
+        files: [{ path: "src/selected.ts", status: "modified", staged: false, patch: "", additions: 1, deletions: 0 }]
+      })
+      .mockResolvedValue({
+        files: [{ path: "src/selected.ts", status: "modified", staged: true, patch: "", additions: 1, deletions: 0 }]
+      });
+    const view = render(GitChangesPanel, {
+      props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
+      global: { plugins: [createPinia()] }
+    });
+
+    await fireEvent.click(await view.findByTitle("暂存文件"));
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: preview");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    await waitFor(() => expect(apiClientMock.previewPersonalWorkspacePublish).toHaveBeenCalledWith("psw_default"));
+    expect(apiClientMock.publishPersonalWorkspace).not.toHaveBeenCalled();
   });
 });

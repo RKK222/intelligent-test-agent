@@ -71,6 +71,7 @@ import type {
   PublishPersonalWorkspacePayload,
   PublishPersonalWorkspaceResult,
   ResolveWorkspaceGitConflictPayload,
+  ResolveAllWorkspaceGitConflictsPayload,
   QuestionRequest,
   RepositoryTypeOption,
   RoleOption,
@@ -103,6 +104,7 @@ import type {
   WorkspaceDiff,
   WorkspaceGitDiff,
   WorkspaceGitConflict,
+  PublishPersonalWorkspacePreview,
   WorkspaceSyncResult,
   WorkspaceBranchPreference,
   WorkspaceDirectoryList,
@@ -570,6 +572,14 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict/resolve`,
         { method: "POST", body: JSON.stringify(payload) }
       ),
+    resolveAllWorkspaceGitConflicts: (
+      workspaceId: string,
+      payload: ResolveAllWorkspaceGitConflictsPayload
+    ) =>
+      request<void>(
+        `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict/resolve-all`,
+        { method: "POST", body: JSON.stringify(payload) }
+      ),
     abortWorkspaceGitConflict: (workspaceId: string) =>
       request<void>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict/abort`,
@@ -585,6 +595,11 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<PublishPersonalWorkspaceResult>(
         `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/publish`,
         { method: "POST", body: JSON.stringify(payload) }
+      ),
+    previewPersonalWorkspacePublish: (personalWorkspaceId: string) =>
+      request<PublishPersonalWorkspacePreview>(
+        `${workspaceManagementBase}/personal-workspaces/${encodeURIComponent(personalWorkspaceId)}/publish-preview`,
+        { method: "POST" }
       ),
     listFiles: async (workspaceId: string, path = "") => {
       const entries = await workspaceFileRpc<BackendFileTreeEntry[]>(workspaceId, "workspace.list", { path });

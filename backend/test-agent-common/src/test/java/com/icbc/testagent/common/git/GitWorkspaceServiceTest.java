@@ -334,7 +334,8 @@ class GitWorkspaceServiceTest {
         assertThat(service.conflictPaths(tempDir)).containsExactly("src/Main.java", "README.md");
 
         assertThat(executor.calls).containsExactly(new Call(
-                List.of("git", "-C", tempDir.toString(), "diff", "--name-only", "--diff-filter", "U"),
+                List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(),
+                        "diff", "--name-only", "--diff-filter", "U"),
                 null));
     }
 

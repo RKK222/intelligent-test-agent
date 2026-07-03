@@ -33,7 +33,8 @@ import type {
   UserOpencodeProcess,
   Workspace,
   WorkspaceBackendServer,
-  WorkspaceDirectoryList
+  WorkspaceDirectoryList,
+  WorkspaceGitDiffFile
 } from "@test-agent/shared-types";
 import { TerminalPanel } from "@test-agent/terminal";
 import { TestRunnerPanel } from "@test-agent/test-runner";
@@ -1029,7 +1030,7 @@ watch(selectedWorkspaceIdRef, (id) => {
     void loadDirectory("", id);
     void refreshWorkspaceGitDiff();
   }
-});
+}, { immediate: true });
 watch(agentsQuery.data, (data) => {
   if (!selectedAgent.value && data?.[0]?.agentId) {
     selectedAgent.value = data[0].agentId;
@@ -2680,9 +2681,26 @@ async function refreshOpenWorkspaceTabsFromDisk(paths?: string[]) {
   }
 }
 
-async function refreshWorkspaceGitDiff(options: { reloadOpenFiles?: boolean; paths?: string[] } = {}) {
+let workspaceGitDiffRefreshToken = 0;
+
+async function refreshWorkspaceGitDiff(options: {
+  reloadOpenFiles?: boolean;
+  paths?: string[];
+  files?: WorkspaceGitDiffFile[];
+} = {}) {
+  const token = ++workspaceGitDiffRefreshToken;
+  const workspaceId = selectedWorkspaceIdRef.value;
   try {
-    const nextFiles = await loadWorkspaceGitDiffFiles();
+    const nextFiles = options.files
+      ? options.files.map((file) => ({
+          path: file.path,
+          status: file.status,
+          patch: file.patch,
+          additions: file.additions,
+          deletions: file.deletions
+        }))
+      : await loadWorkspaceGitDiffFiles();
+    if (token !== workspaceGitDiffRefreshToken || workspaceId !== selectedWorkspaceIdRef.value) return;
     vcsDiffFiles.value = nextFiles;
     if (diffSource.value === "vcs") {
       diffFiles.value = nextFiles;
@@ -3019,7 +3037,11 @@ async function handleLogout() {
           @open-file="openFile"
           @open-diff="handleOpenDiff"
           @refresh="refreshCurrentWorkspacePanels"
-          @changes-refreshed="(payload) => refreshWorkspaceGitDiff({ reloadOpenFiles: payload?.reloadOpenFiles ?? true, paths: payload?.paths })"
+          @changes-refreshed="(payload) => refreshWorkspaceGitDiff({
+            reloadOpenFiles: payload?.reloadOpenFiles ?? true,
+            paths: payload?.paths,
+            files: payload?.files
+          })"
           @select-version="handleSelectVersion"
           @load-versions="handleLoadVersions"
           @create-version="handleCreateVersion"

@@ -1042,8 +1042,10 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/workspaces/{workspaceId}/git-unstage` | 把当前个人 worktree 中指定的非冲突文件从真实 Git index 撤回工作树。 |
 | `GET` | `/workspaces/{workspaceId}/git-conflict?path={path}` | 读取个人 worktree 冲突文件的 Git base/current/incoming stage 与工作树结果。 |
 | `POST` | `/workspaces/{workspaceId}/git-conflict/resolve` | 解决单个冲突并定点 stage，支持当前、应用、两者、手工内容和删除语义。 |
+| `POST` | `/workspaces/{workspaceId}/git-conflict/resolve-all` | 使用 Git index 原生 ours/theirs 批量解决全部冲突；只支持 `CURRENT/INCOMING`。 |
 | `POST` | `/workspaces/{workspaceId}/git-conflict/abort` | 在个人 worktree 中执行 `merge --abort`，取消整次未完成合并。 |
-| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 个人工作区"提交并推送"：请求体必须带 `files`，后端只暂存并提交这些前端已暂存文件；随后确保当前服务器应用版本副本可用（必要时按当前 `OPENCODE_APP_WORKSPACE_ROOT` 修复旧路径），先把远端特性分支合入个人 worktree，再在应用版本副本（特性分支）上 merge 个人分支并只 push 特性分支；个人分支不推送远端；真实合并冲突返回业务 `CONFLICT` 与冲突文件列表，冲突保留在个人 worktree 供用户解决；认证、网络、远端拒绝等非冲突 Git 错误按统一错误响应返回。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish-preview` | 拉取应用远程分支并返回 HEAD、待合入提交数、A/M/D/R 汇总和样例路径；不修改个人 worktree。 |
+| `POST` | `/personal-workspaces/{personalWorkspaceId}/publish` | 先校验可选 `expectedApplicationHead`，再只提交 `files` 白名单、合并并推送；冲突返回 `CONFLICT`，推送失败不会返回成功。 |
 
 `POST /applications/{appId}/workspace-templates/{templateId}/versions` 请求体：
 
@@ -1197,7 +1199,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 {"path":"src/App.java","resolution":"MANUAL","content":"编辑后的最终内容"}
 ```
 
-`resolution` 支持 `CURRENT`、`INCOMING`、`BOTH`、`MANUAL`、`DELETE`。非冲突路径返回 `CONFLICT`。`POST /workspaces/{workspaceId}/git-conflict/abort` 无请求体，仅在存在未完成 merge 时成功。
+`resolution` 支持 `CURRENT`、`INCOMING`、`BOTH`、`MANUAL`、`DELETE`。非冲突路径返回 `CONFLICT`。批量接口请求体为 `{"resolution":"CURRENT"}` 或 `{"resolution":"INCOMING"}`，分别将全部冲突采用个人侧 stage 2 或远程侧 stage 3；目标侧不存在的文件按删除处理，不要求逐个解决。`POST /workspaces/{workspaceId}/git-conflict/abort` 无请求体，仅在存在未完成 merge 时成功。
 
 ### 个人工作区提交并推送
 
@@ -1206,9 +1208,12 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 ```json
 {
   "commitMessage": "feat: 新增测试案例",
-  "files": ["src/App.java", "README.md"]
+  "files": ["src/App.java", "README.md"],
+  "expectedApplicationHead": "6093725..."
 }
 ```
+
+提交前调用 `POST /personal-workspaces/{personalWorkspaceId}/publish-preview`。预览返回 `applicationHead/personalHead/incomingCommitCount/changedFileCount/addedCount/modifiedCount/deletedCount/renamedCount/samplePaths`。有待合入提交时前端确认后，将 `applicationHead` 原样传给 publish；若确认后应用 HEAD 再次变化，publish 会在修改个人 index 或创建提交前返回 `CONFLICT`。应用分支 pull 成功后会立即同步版本 target commit 和本机副本 commit，即使随后个人 merge 冲突也不保留陈旧元数据。
 
 后端执行流程：
 

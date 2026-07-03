@@ -18,6 +18,7 @@ import com.icbc.testagent.workspace.ManagedWorkspaceApplicationService;
 import com.icbc.testagent.workspace.ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse;
 import com.icbc.testagent.workspace.ManagedWorkspaceResponses.BranchPreferenceResponse;
 import com.icbc.testagent.workspace.ManagedWorkspaceResponses.ManagedApplicationResponse;
+import com.icbc.testagent.workspace.ManagedWorkspaceResponses.PersonalWorkspacePublishPreviewResponse;
 import com.icbc.testagent.workspace.ManagedWorkspaceResponses.WorkspaceRuntimeResponse;
 import com.icbc.testagent.workspace.ManagedWorkspaceResponses.WorkspaceGitConflictResponse;
 import java.time.Instant;
@@ -240,6 +241,33 @@ class ManagedWorkspaceControllerTest {
 
         verify(service).resolveWorkspaceGitConflict(
                 "wks_123", "src/Login.java", "MANUAL", "resolved", USER_ID);
+    }
+
+    @Test
+    void publishPreviewAndResolveAllForwardNewGitContract() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+        when(service.previewPersonalWorkspacePublish("psw_123", USER_ID, TRACE_ID))
+                .thenReturn(new PersonalWorkspacePublishPreviewResponse(
+                        "app-head", "personal-head", 2, 3, 1, 1, 1, 0, List.of("README.md")));
+
+        client(service).post()
+                .uri("/api/internal/platform/workspace-management/personal-workspaces/psw_123/publish-preview")
+                .header("X-Trace-Id", TRACE_ID)
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.applicationHead").isEqualTo("app-head")
+                .jsonPath("$.data.incomingCommitCount").isEqualTo(2);
+
+        client(service).post()
+                .uri("/api/internal/platform/workspace-management/workspaces/wks_123/git-conflict/resolve-all")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("{\"resolution\":\"CURRENT\"}")
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).resolveAllWorkspaceGitConflicts("wks_123", "CURRENT", USER_ID);
     }
 
     @Test

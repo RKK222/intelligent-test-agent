@@ -286,13 +286,103 @@ public class GitWorkspaceService {
      */
     public List<String> conflictPaths(Path repoRoot) {
         GitCommandResult result = executor.execute(
-                List.of("git", "-C", repoRoot.toString(), "diff", "--name-only", "--diff-filter", "U"),
+                gitNoQuotedPath(repoRoot, "diff", "--name-only", "--diff-filter", "U"),
                 null,
                 DEFAULT_TIMEOUT);
         return result.stdoutText()
                 .lines()
                 .filter(line -> !line.isBlank())
                 .toList();
+    }
+
+    /**
+     * 使用 Git index 原生 stage 批量解决冲突。CURRENT 对应 stage 2/ours，
+     * INCOMING 对应 stage 3/theirs；目标 stage 不存在表示该侧删除文件。
+     */
+    public void resolveAllConflicts(
+            Path repoRoot,
+            ConflictResolutionSide side,
+            String privateKey) {
+        Objects.requireNonNull(side, "side must not be null");
+        List<String> conflicts = conflictPaths(repoRoot);
+        if (conflicts.isEmpty()) {
+            return;
+        }
+        List<String> checkoutFiles = new ArrayList<>();
+        List<String> deletedFiles = new ArrayList<>();
+        for (String file : conflicts) {
+            if (conflictStages(repoRoot, file).contains(side.stage())) {
+                checkoutFiles.add(file);
+            } else {
+                deletedFiles.add(file);
+            }
+        }
+        if (!checkoutFiles.isEmpty()) {
+            ArrayList<String> command = new ArrayList<>();
+            command.add("git");
+            command.add("-C");
+            command.add(repoRoot.toString());
+            command.add("checkout");
+            command.add(side == ConflictResolutionSide.CURRENT ? "--ours" : "--theirs");
+            command.add("--");
+            command.addAll(checkoutFiles);
+            executor.execute(List.copyOf(command), privateKey, DEFAULT_TIMEOUT);
+            stageFiles(repoRoot, checkoutFiles, privateKey);
+        }
+        if (!deletedFiles.isEmpty()) {
+            ArrayList<String> command = new ArrayList<>();
+            command.add("git");
+            command.add("-C");
+            command.add(repoRoot.toString());
+            command.add("rm");
+            command.add("--");
+            command.addAll(deletedFiles);
+            executor.execute(List.copyOf(command), privateKey, DEFAULT_TIMEOUT);
+        }
+    }
+
+    public enum ConflictResolutionSide {
+        CURRENT(2),
+        INCOMING(3);
+
+        private final int stage;
+
+        ConflictResolutionSide(int stage) {
+            this.stage = stage;
+        }
+
+        int stage() {
+            return stage;
+        }
+    }
+
+    /**
+     * 统计 from 不包含、to 包含的提交数，用于发布前远程变化预览。
+     */
+    public int countCommits(Path repoRoot, String from, String to) {
+        String output = executor.execute(
+                List.of("git", "-C", repoRoot.toString(), "rev-list", "--count", from + ".." + to),
+                null,
+                DEFAULT_TIMEOUT).stdoutText().trim();
+        try {
+            return Integer.parseInt(output);
+        } catch (NumberFormatException exception) {
+            throw new PlatformException(
+                    com.icbc.testagent.common.error.ErrorCode.GIT_UNAVAILABLE,
+                    "解析 Git 提交数量失败",
+                    java.util.Map.of("output", output),
+                    exception);
+        }
+    }
+
+    /**
+     * 返回两提交之间的 name-status，路径关闭 quote，供业务层汇总 A/M/D/R。
+     */
+    public String diffNameStatus(Path repoRoot, String from, String to) {
+        return executor.execute(
+                gitNoQuotedPath(repoRoot, "diff", "--name-status", "-M", from + "..." + to),
+                null,
+                DEFAULT_TIMEOUT).stdoutText();
     }
 
     /**

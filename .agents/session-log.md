@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-03 - 增加工作区发布预览、Git 原生批量冲突处理和 Diff 自动刷新
+
+- Why: 888 个人 worktree 只显示一个本地变更，提交后才拉入应用分支的大批变化并产生 8 个 AU 冲突；中文冲突路径被 Git 八进制转义，冲突只能逐个处理，应用分支 pull 后版本/副本 commit 仍可能陈旧，Diff 数量首次进入还需要手工刷新。
+- What: 发布前新增远程变化预览与 expected HEAD 校验，应用 pull 后立即同步版本和本机副本 commit；冲突路径关闭 `core.quotepath`，支持全部保留个人版本、全部采用远程版本和取消 merge，目标侧缺失按 Git 删除语义处理。前端复用已加载 diff 更新数量角标、拦截旧工作区请求回写，并明确 AU/UD 删除侧。
+- How: 复用 `GitWorkspaceService`、个人工作区归属校验和现有发布编排，新增 preview/resolve-all HTTP 契约；真实临时 Git 仓库覆盖中文修改/删除冲突，服务测试覆盖预览汇总、HEAD 变化前置拦截和冲突后的元数据同步，前端测试覆盖预览确认与批量处理。处理了会话开始前遗留的 `git pull --rebase`，保留两侧 session log 后完成 7 个本地提交重放。
+- Result: common 24 个、workspace-management 36 个、API Controller 和 Git 面板/合并编辑器定向测试通过，agent-web typecheck/build 通过；使用 `.env.test` / `test` profile / JDK 25 重启并检查健康状态。未修改环境文件、数据库、事件、generated SDK 或 888 当前个人 worktree 冲突内容。
+
 ### 2026-07-02 - 对话面板 bash 工具输出默认收起与手动折叠支持
 
 - Why: 智能体执行 bash 命令的输出可能很长，默认完全展开会占用大量聊天区域，不利于用户快速浏览上下文。用户希望 bash 输出默认收起，并通过点击工具头部/key 展开或折叠。
