@@ -517,7 +517,6 @@ export type FileChangeStat = {
 export type TaskUsage = {
   duration?: string
   tokens?: number
-  thoughtFor?: string
   totalDuration?: string
 }
 
@@ -2407,9 +2406,7 @@ const hasTaskUsage = computed(
   () =>
     !!(
       props.taskUsage &&
-      (props.taskUsage.duration ||
-        props.taskUsage.tokens !== undefined ||
-        props.taskUsage.thoughtFor ||
+      (props.taskUsage.tokens !== undefined ||
         props.taskUsage.totalDuration)
     )
 )
@@ -2461,22 +2458,61 @@ const hasTaskUsageDisplay = computed(
   () =>
     !!(
       props.taskUsage &&
-      (props.taskUsage.duration ||
-        displayTokens.value !== undefined ||
-        props.taskUsage.thoughtFor ||
+      (displayTokens.value !== undefined ||
         props.taskUsage.totalDuration)
     )
 )
 
 const scrollEl = ref<HTMLElement | null>(null)
+const isAtBottom = ref(true)
+const hasNewContent = ref(false)
+const userInterruptedScroll = ref(false)
+let isProgrammaticScroll = false
+const scrollBottomThreshold = 36
+
+function viewportIsAtBottom(viewport: HTMLElement) {
+  return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= scrollBottomThreshold
+}
+
+// 仅在用户仍停留在底部时跟随流式输出；用户向上阅读后不再强制拉回底部。
+function shouldFollowOutput() {
+  return !userInterruptedScroll.value && isAtBottom.value
+}
+
+function handleChatScroll(event: Event) {
+  const viewport = event.currentTarget as HTMLElement
+  if (isProgrammaticScroll) {
+    isProgrammaticScroll = false
+    return
+  }
+  const atBottom = viewportIsAtBottom(viewport)
+  isAtBottom.value = atBottom
+  if (atBottom) {
+    hasNewContent.value = false
+    userInterruptedScroll.value = false
+  } else {
+    userInterruptedScroll.value = true
+  }
+}
 
 // 滚动到底部，使用 setTimeout 确保 DOM 完全更新
 function scrollToBottom() {
   setTimeout(() => {
     if (scrollEl.value) {
+      isProgrammaticScroll = true
       scrollEl.value.scrollTop = scrollEl.value.scrollHeight
+      isAtBottom.value = true
+      hasNewContent.value = false
+      setTimeout(() => {
+        isProgrammaticScroll = false
+      }, 50)
     }
   }, 50)
+}
+
+function jumpToBottom() {
+  userInterruptedScroll.value = false
+  scrollToBottom()
 }
 
 // 监听消息变化（数量或内容），流式回复时消息内容增长但数量不变，也需要滚动
@@ -2501,12 +2537,20 @@ watch(
     return `${msgs.length}:${lastLen}`
   },
   () => {
-    nextTick(scrollToBottom)
+    if (shouldFollowOutput()) {
+      nextTick(scrollToBottom)
+    } else {
+      hasNewContent.value = true
+    }
   }
 )
 
 watch([wasCompleted, wasStopped, wasFailed], () => {
-  nextTick(scrollToBottom)
+  if (shouldFollowOutput()) {
+    nextTick(scrollToBottom)
+  } else {
+    hasNewContent.value = true
+  }
 })
 
 function formatTime(iso: string) {
@@ -2580,7 +2624,7 @@ function onCompositionEnd() {
       </div>
     </header>
 
-    <div ref="scrollEl" class="figma-chat-scroll">
+    <div ref="scrollEl" class="figma-chat-scroll" @scroll="handleChatScroll">
       <div v-if="historyLoading" class="figma-chat-history-loading" role="status">
         <Loader2 :size="18" class="figma-chat-history-loading-icon" />
         <span>正在加载历史对话…</span>
@@ -2592,6 +2636,14 @@ function onCompositionEnd() {
         @open-file="(path) => emit('open-file', path)"
         @select-subagent="selectSubagent"
       />
+      <button
+        v-if="hasNewContent"
+        type="button"
+        class="figma-chat-new-content-btn"
+        @click="jumpToBottom"
+      >
+        查看新内容
+      </button>
       <div v-if="!activeSubagentSessionId && !historyLoading && !props.running && lastFeedbackableMessage" class="figma-chat-timeline-actions">
         <div class="figma-chat-feedback">
           <button
@@ -3361,9 +3413,7 @@ function onCompositionEnd() {
       <span class="figma-chat-usage-value">
         <template
           v-if="
-            taskUsage?.duration ||
             displayTokens !== undefined ||
-            taskUsage?.thoughtFor ||
             taskUsage?.totalDuration
           "
           >(</template
@@ -3375,17 +3425,9 @@ function onCompositionEnd() {
         <template v-if="displayTokens !== undefined">
           · ↓ {{ formatTokens(displayTokens) }} tokens</template
         >
-        <template v-if="taskUsage?.thoughtFor">
-          · thought for {{ taskUsage.thoughtFor }}</template
-        >
-        <template v-if="taskUsage?.duration"
-          >· thought for {{ taskUsage.duration }}</template
-        >
         <template
           v-if="
-            taskUsage?.duration ||
             displayTokens !== undefined ||
-            taskUsage?.thoughtFor ||
             taskUsage?.totalDuration
           "
           >)</template
@@ -4630,6 +4672,28 @@ function onCompositionEnd() {
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.figma-chat-new-content-btn {
+  position: sticky;
+  bottom: 8px;
+  z-index: 8;
+  align-self: center;
+  border: 1px solid var(--ta-border, #e4e4e7);
+  border-radius: 999px;
+  background: #fff;
+  color: var(--ta-text, #18181b);
+  padding: 4px 12px;
+  font-size: 12px;
+  line-height: 18px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.figma-chat-new-content-btn:hover {
+  background: var(--ta-hover, #f4f4f5);
+  border-color: var(--ta-border-strong, #d4d4d8);
 }
 
 /* ---- File Changes Card (above task usage) ---- */

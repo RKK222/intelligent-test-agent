@@ -1,5 +1,5 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import FigmaChatPanel from "../src/components/FigmaChatPanel.vue";
 
 // MarkdownView 内部用 150ms 定时器 + 动态 import 异步渲染正文，
@@ -1666,5 +1666,53 @@ describe("FigmaChatPanel", () => {
 
     await bashTool.get(".oc-tool__trigger").trigger("click");
     expect(wrapper.find(".oc-tool__body").exists()).toBe(false);
+  });
+
+  it("keeps the current scroll position when new output arrives after the user scrolls up", async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = mount(FigmaChatPanel, {
+        props: {
+          messages: [
+            { id: "u1", role: "user", text: "分析 checkout 失败", createdAt: "2026-06-25T09:00:00.000Z" },
+            { id: "a1", messageId: "a1", role: "assistant", text: "第一段描述", createdAt: "2026-06-25T09:01:00.000Z" }
+          ],
+          running: true,
+          processStatus: { status: "READY", initializable: false, message: "ready" }
+        },
+        global: { stubs: { MarkdownView: markdownViewStub } }
+      });
+
+      const scroll = wrapper.get(".figma-chat-scroll");
+      const scrollEl = scroll.element as HTMLElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 1000 });
+      Object.defineProperty(scrollEl, "clientHeight", { configurable: true, value: 300 });
+      vi.advanceTimersByTime(60);
+      await wrapper.vm.$nextTick();
+
+      scrollEl.scrollTop = 320;
+      await scroll.trigger("scroll");
+
+      await wrapper.setProps({
+        messages: [
+          { id: "u1", role: "user", text: "分析 checkout 失败", createdAt: "2026-06-25T09:00:00.000Z" },
+          {
+            id: "a1",
+            messageId: "a1",
+            role: "assistant",
+            text: "第一段描述，新增的流式输出",
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ]
+      });
+      await wrapper.vm.$nextTick();
+      vi.advanceTimersByTime(60);
+      await wrapper.vm.$nextTick();
+
+      expect(scrollEl.scrollTop).toBe(320);
+      expect(wrapper.text()).toContain("查看新内容");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

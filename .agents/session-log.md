@@ -34,6 +34,35 @@
   - 不改 reducer、投影顺序、RunEvent、后端 API 或默认折叠逻辑；保留“同一回合 reasoning 合并为一行、默认收起”的当前行为，只降低视觉权重并修正头像对齐。
 - Result:
   - 前端 Vitest 全量通过（36 files, 299 passed, 1 skipped），`@test-agent/agent-chat` typecheck 通过；Playwright 构造 DOM 检查隐藏 step 行头像与 reasoning 触发器 top delta 为 0px，reasoning `已完成` 与工具 `已读取` x delta 为 0px；前端 Vite 已在 `127.0.0.1:3001` 启动验证入口。
+### 2026-07-04 - 移除 thought for 统计与展示并修复新建对话耗时清零
+
+- Why:
+  - 1. 用户要求前端不再显示和统计 `thought for` 相关的耗时信息（包括思考时长）。
+  - 2. 用户反馈新建对话（创建新会话）后，任务的累计耗时和上一轮的终态耗时数据没有被清零，仍然显示上一轮的残留耗时。
+- What:
+  - 1. 移除 `AgentWorkbench.vue` 中对 `thoughtFor` 的统计与计算：删除了 `accumulatedReasoningMs` 与 `lastThoughtForMs` 变量、`recomputeUsageFromChat` 的思考时间解析，并在 `taskUsage` 返回值中移除 `thoughtFor`。
+  - 2. 在 `FigmaChatPanel.vue` 中移除 `TaskUsage.thoughtFor` 属性定义及 computed properties 中的对应统计项，并在模板中删除 `thought for` 以及基于 `duration` 的 `thought for` 子项渲染模板。
+  - 3. 在 `AgentWorkbench.vue` 的 `handleNewConversation`（新建对话）和 `switchSession`（切换会话）事件处理中，显式将任务消耗统计相关的变量（`chatStartedAt`、`accumulatedTokens`、`totalDurationMs`、`lastDuration`、`lastTokens`、`nowTick` 等）全部复位，解决残留旧耗时的问题。
+  - 4. 同步更新 `frontend/apps/agent-web/README.md` 中有关“任务消耗”的信息描述。
+- How:
+  - 只修改了前端组件、配置文件和 README。通过 `corepack pnpm typecheck` 和 `corepack pnpm lint` 校验其完整性和规范，并使用 `corepack pnpm test` 跑通了全部 307 个 Vitest 单元测试，没有任何报错或回归问题。
+- Result:
+  - 前端编译与类型检查无报错；单元测试全部通过。任务消耗面板不再显示 `thought for` 文本，新建/切换对话后耗时正确清零。
+
+### 2026-07-04 - 保持聊天流式输出时的历史滚动位置
+
+- Why:
+  - 右侧 Agent 对话区在用户向上滚动查看历史时，新的流式输出会把滚动条强制拉回底部，导致无法稳定阅读历史内容。
+- What:
+  - `FigmaChatPanel` 增加 sticky scroll 状态：用户停留底部时继续自动跟随输出；用户离开底部后保留当前滚动位置，并显示“查看新内容”按钮用于手动跳回底部。
+  - 补充 `FigmaChatPanel` 回归测试，覆盖用户上滚后新 assistant 输出到达时不改变 `scrollTop`。
+  - 同步更新 `agent-web` README 中右侧消息区滚动行为说明。
+- How:
+  - 只修改前端 `agent-web` 组件、组件测试、README 和本 session log；未改后端 API、RunEvent、数据库、generated SDK 或环境配置。
+- Result:
+  - `corepack pnpm vitest run apps/agent-web/tests/FigmaChatPanel.test.ts` 通过；
+  - `corepack pnpm --filter @test-agent/agent-web typecheck` 通过。
+
 ### 2026-07-04 - 文件修改摘要默认折叠并汇总增减行
 
 - Why:
