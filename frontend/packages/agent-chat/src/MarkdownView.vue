@@ -110,6 +110,16 @@ async function ensureLibs(needMermaid = false) {
         return `<pre${attrs}><code class="hljs">${code}</code></pre>`
       }
 
+      md.renderer.rules.code_inline = (tokens: any[], idx: number, _options: any, _env: any, _slf: any) => {
+        const token = tokens[idx]
+        const escaped = md.utils.escapeHtml(token.content)
+        const isMdDoc = /\.md$/i.test(token.content.trim())
+        if (isMdDoc) {
+          return `<code class="ta-md-file">${escaped}</code>`
+        }
+        return `<code>${escaped}</code>`
+      }
+
       mdInstance = md
       purifyInstance = DOMPurify.default
       hljsInstance = hljs
@@ -238,14 +248,16 @@ onBeforeUnmount(() => {
     >
       无内容
     </div>
-    <div v-else-if="loading" class="text-[12px] text-[var(--ta-chat-muted)]">
-      {{ loadingText }}
-    </div>
     <div
       v-else-if="error"
       class="whitespace-pre-wrap text-[12px] text-[var(--ta-chat-muted)]"
     >
       {{ source }}
+    </div>
+    <!-- 已有渲染结果时，新的 source pending 不回退到 loading，避免流式更新时闪成占位。 -->
+    <div v-else-if="html" v-html="html" class="markdown-body min-w-0" />
+    <div v-else-if="loading" class="text-[12px] text-[var(--ta-chat-muted)]">
+      {{ loadingText }}
     </div>
     <!-- 经 DOMPurify 消毒后的 HTML，可安全注入；.markdown-body 提供基础排版 -->
     <div v-else v-html="html" class="markdown-body min-w-0" />
@@ -364,6 +376,10 @@ onBeforeUnmount(() => {
   border-radius: 3px;
   font-size: 0.92em;
   font-family: Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+}
+
+.markdown-body :deep(code.ta-md-file) {
+  color: #00ceb9 !important;
 }
 
 .markdown-body :deep(pre) {

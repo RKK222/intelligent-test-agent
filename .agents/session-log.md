@@ -34,6 +34,19 @@
   - 不改 reducer、投影顺序、RunEvent、后端 API 或默认折叠逻辑；保留“同一回合 reasoning 合并为一行、默认收起”的当前行为，只降低视觉权重并修正头像对齐。
 - Result:
   - 前端 Vitest 全量通过（36 files, 299 passed, 1 skipped），`@test-agent/agent-chat` typecheck 通过；Playwright 构造 DOM 检查隐藏 step 行头像与 reasoning 触发器 top delta 为 0px，reasoning `已完成` 与工具 `已读取` x delta 为 0px；前端 Vite 已在 `127.0.0.1:3001` 启动验证入口。
+### 2026-07-04 - 优化持续输出时的工作态提示
+
+- Why:
+  - 持续流式输出和大量工具过程交替出现时，running text part 会长时间停在 Markdown 的“准备输出…”占位，用户难以判断 Agent 是否仍在工作或内容是否正在增长。
+- What:
+  - `agent-chat` running/pending 文本改为轻量纯文本 live preview，显示实际增长内容和“生成中”状态，完成后再进入 Markdown 渲染。
+  - `opencode-like` 最新 running turn 在已有过程项但尚无文本输出时只追加一个 `working-status` 行，主/子 Agent 视图都复用时间线工作态，不恢复旧底部任务面板。
+  - `MarkdownView` 在非空 source 重新渲染 pending 时保留已有 HTML，空白 source 仍同步显示“无内容”并跳过重型渲染。
+- How:
+  - 只修改前端 `agent-chat` 时间线、文本渲染、样式、测试与相关 README；未改后端 API、RunEvent SSE、数据库、generated SDK 或环境配置。
+- Result:
+  - 新增/调整 Vitest 覆盖 Markdown pending 保留旧内容、running text live preview、root/child scope 下单个工作态行和无“准备输出…”占位。
+
 ### 2026-07-04 - 补强 Markdown 分屏源码区 Monaco 显式尺寸布局
 
 - Why:
@@ -3543,3 +3556,10 @@ bash /tmp/test-api-after-restart.sh
   - 更新 `opencode-timeline.test.ts` 和 `FigmaChatPanel.test.ts` 中对上述工具标题的断言，将英文名称替换为中文（如将 `bash`、`skill`、`write`、`read` 分别断言为 `"命令行"`、`"技能"`、`"写入"`、`"读取"`）。
 - How: 修改 `frontend/packages/agent-chat/src/opencode-like/state/tool-registry.ts` 以及对应的测试文件，不影响任何后端 API、事件、数据库、generated SDK 或环境配置。
 - Result: 整个前端项目打包构建和 `typecheck` 通过，308 个前端 Vitest 测试全部通过。
+
+### 2026-07-04 - 用 MarkdownView 渲染时对以 `.md` 结尾的行内代码文件路径增加高亮颜色
+
+- Why: 用户在使用 MarkdownView 时，希望对正文中类似 `frontend-opencode/docs/README.md` 且用 backticks 包裹的文件路径，显示为特定颜色 `#00ceb9` 以示区分。
+- What: 修改 `MarkdownView.vue`，重写 `markdown-it` 的 `code_inline` 规则。在渲染行内代码时，检测其文本内容，若以不区分大小写的 `.md` 结尾，则自动为生成的 `<code>` 节点添加 class `ta-md-file`。同时，在 `<style scoped>` 块中为 `.markdown-body :deep(code.ta-md-file)` 添加高亮颜色 `#00ceb9 !important` 规则。
+- How: 修改 `frontend/packages/agent-chat/src/MarkdownView.vue` 的 markdown-it 渲染逻辑与 CSS 样式。并在 `frontend/packages/agent-chat/tests/MarkdownView.test.ts` 中新增单元测试以覆盖此行为。未修改任何后端代码、HTTP 契约、事件流、数据库或环境变量配置文件。
+- Result: 新增的单元测试通过，全部 309 个前端 Vitest 测试以及 linting、typecheck 编译均成功通过。

@@ -74,6 +74,20 @@ describe("MarkdownView", () => {
     expect(getByText("准备输出…")).toBeTruthy();
   });
 
+  it("内容更新重新渲染期间保留已有 HTML，不回退到 loading 占位", async () => {
+    const { getByText, queryByText, rerender } = render(MarkdownView, {
+      props: { source: "第一版内容", loadingText: "准备输出…" }
+    });
+    await waitRender();
+
+    expect(getByText("第一版内容")).toBeTruthy();
+
+    await rerender({ source: "第二版内容", loadingText: "准备输出…" });
+
+    expect(getByText("第一版内容")).toBeTruthy();
+    expect(queryByText("准备输出…")).toBeNull();
+  });
+
   it("mermaid 默认展示脚本，支持切换为图表", async () => {
     const { container } = render(MarkdownView, {
       props: { source: "```mermaid\ngraph TD;\n  A-->B;\n```" }
@@ -93,5 +107,22 @@ describe("MarkdownView", () => {
       expect(container.querySelector("#mock-svg")).toBeTruthy();
       expect((container.querySelector(".ta-mermaid-script") as HTMLElement | null)?.hidden).toBe(true);
     }
+  });
+
+  it("对于 `` 包裹的 .md 文件应用 ta-md-file class 且普通 inline code 没有", async () => {
+    const { container } = render(MarkdownView, {
+      props: { source: "这里有 `frontend-opencode/docs/README.md`，而这个 `package.json` 则不是 md" }
+    });
+    await waitRender();
+
+    const body = container.querySelector(".markdown-body");
+    const codeElements = body?.querySelectorAll("code");
+    expect(codeElements?.length).toBe(2);
+
+    const mdCode = Array.from(codeElements || []).find(el => el.textContent === "frontend-opencode/docs/README.md");
+    const jsonCode = Array.from(codeElements || []).find(el => el.textContent === "package.json");
+
+    expect(mdCode?.classList.contains("ta-md-file")).toBe(true);
+    expect(jsonCode?.classList.contains("ta-md-file")).toBe(false);
   });
 });
