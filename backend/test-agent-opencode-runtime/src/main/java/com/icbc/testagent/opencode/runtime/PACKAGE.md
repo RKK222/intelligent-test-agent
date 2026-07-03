@@ -13,10 +13,10 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 ## 主要程序清单
 
 - `session.SessionApplicationService`：会话创建、查询、消息和归档；消息列表会优先触发 projected messages 刷新，失败回退数据库快照。
-- `run.RunApplicationService`：Run 启动、路由、通用 agent binding 创建/复用、事件订阅、active-run 查询和取消。
+- `run.RunApplicationService`：Run 启动、路由、通用 agent binding 创建/复用、root session scope 记录、事件订阅、active-run 查询和取消。
 - `run.RunDiffApplicationService`：Run 级 Diff 查询、接受和拒绝，通过当前 agent runtime fallback 查询远端 Diff。
 - `run.RunEventPersistencePolicy`：区分 durable RunEvent 与 transient live output，并清洗 tool 大字段。
-- `run.RunMessageRecoveryService`：SSE 建连时从 agent projected messages 生成 transient message snapshot。
+- `run.RunMessageRecoveryService`：SSE 建连时从 agent projected messages 生成 transient message snapshot；存在 Run scope 时按 root + child session 恢复当前 Run 子树。
 - `run.RunSessionMessageSnapshotService`：Run 终态/取消后持久化 assistant 快照、parts、token/cost，并支持消息列表刷新 fallback。
 - `runtime.OpencodeRuntimeApplicationService`：opencode Web App runtime API 到 `AgentRuntime` 的映射。
 - `process.*`：当前用户 opencode 进程分配、公共状态查询、公共启动/停止健康确认、通用参数 session/config 路径读取、manager WebSocket 控制面网关、后端实例生命周期和超级管理员运行管理快照/命令编排。

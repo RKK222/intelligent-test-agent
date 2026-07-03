@@ -7,6 +7,8 @@ import com.icbc.testagent.agent.runtime.AgentSessionMessagesCommand;
 import com.icbc.testagent.agent.runtime.AgentSessionMessagesResult;
 import com.icbc.testagent.domain.agent.AgentSessionBinding;
 import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
+import com.icbc.testagent.domain.event.RunSessionScopeRepository;
+import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
@@ -14,6 +16,7 @@ import com.icbc.testagent.domain.run.Run;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.run.RunRepository;
 import com.icbc.testagent.domain.session.Session;
+import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionRepository;
 import com.icbc.testagent.event.RunEventSsePayload;
 import java.time.Instant;
@@ -26,6 +29,7 @@ import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -46,9 +50,29 @@ public class RunMessageRecoveryService {
     private final ExecutionNodeRepository executionNodeRepository;
     private final AgentRuntimeRegistry agentRuntimeRegistry;
     private final AgentSessionBindingRepository agentSessionBindingRepository;
+    private final RunSessionScopeRepository runSessionScopeRepository;
 
     /**
      * 创建消息恢复服务，恢复过程只依赖领域仓储和 agent runtime registry。
+     */
+    @Autowired
+    public RunMessageRecoveryService(
+            RunRepository runRepository,
+            SessionRepository sessionRepository,
+            ExecutionNodeRepository executionNodeRepository,
+            AgentRuntimeRegistry agentRuntimeRegistry,
+            AgentSessionBindingRepository agentSessionBindingRepository,
+            RunSessionScopeRepository runSessionScopeRepository) {
+        this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
+        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
+        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
+        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
+        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
+        this.runSessionScopeRepository = runSessionScopeRepository;
+    }
+
+    /**
+     * 兼容旧测试构造路径；未传 scope repository 时恢复逻辑退回 root-only。
      */
     public RunMessageRecoveryService(
             RunRepository runRepository,
@@ -56,11 +80,13 @@ public class RunMessageRecoveryService {
             ExecutionNodeRepository executionNodeRepository,
             AgentRuntimeRegistry agentRuntimeRegistry,
             AgentSessionBindingRepository agentSessionBindingRepository) {
-        this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
-        this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
-        this.executionNodeRepository = Objects.requireNonNull(executionNodeRepository, "executionNodeRepository must not be null");
-        this.agentRuntimeRegistry = Objects.requireNonNull(agentRuntimeRegistry, "agentRuntimeRegistry must not be null");
-        this.agentSessionBindingRepository = Objects.requireNonNull(agentSessionBindingRepository, "agentSessionBindingRepository must not be null");
+        this(
+                runRepository,
+                sessionRepository,
+                executionNodeRepository,
+                agentRuntimeRegistry,
+                agentSessionBindingRepository,
+                null);
     }
 
     /**
@@ -88,6 +114,30 @@ public class RunMessageRecoveryService {
     }
 
     /**
+     * 异步恢复平台 Session root 下的全量历史 session tree，失败时返回空流。
+     */
+    public Flux<RunEventSsePayload> recoverSessionTree(SessionId sessionId, String traceId) {
+        return recoverSessionTree(agentRuntimeRegistry.defaultAgentId(), sessionId, traceId);
+    }
+
+    /**
+     * 异步恢复指定 agent 的 Session 级历史树，包含该 root 下跨 Run 已发现的 child session。
+     */
+    public Flux<RunEventSsePayload> recoverSessionTree(String agentId, SessionId sessionId, String traceId) {
+        Objects.requireNonNull(sessionId, "sessionId must not be null");
+        Objects.requireNonNull(traceId, "traceId must not be null");
+        String resolvedAgentId = agentRuntimeRegistry.normalize(agentId);
+        return Mono.fromCallable(() -> recoverSessionTreeSync(resolvedAgentId, sessionId, traceId))
+                .subscribeOn(Schedulers.boundedElastic())
+                .onErrorResume(error -> {
+                    LOGGER.warn("Failed to recover session tree messages from agent, agentId={}, sessionId={}, traceId={}",
+                            resolvedAgentId, sessionId.value(), traceId, error);
+                    return Mono.just(List.of());
+                })
+                .flatMapMany(Flux::fromIterable);
+    }
+
+    /**
      * 同步执行恢复查询，缺失 Run/Session/节点或未绑定远端 session 时返回空列表。
      */
     private List<RunEventSsePayload> recoverSync(String agentId, RunId runId, String traceId) {
@@ -108,24 +158,99 @@ public class RunMessageRecoveryService {
         if (node == null) {
             return List.of();
         }
-        AgentSessionMessagesResult result = runtime.sessionMessages(new AgentSessionMessagesCommand(
+        return recoverScopes(runtime, node, runId.value(), traceId, runScopes(runId, binding.remoteSessionId()));
+    }
+
+    /**
+     * 同步恢复 Session root 下的历史子树；没有 scope 记录时降级为 root-only。
+     */
+    private List<RunEventSsePayload> recoverSessionTreeSync(String agentId, SessionId sessionId, String traceId) {
+        AgentRuntime runtime = agentRuntimeRegistry.require(agentId);
+        Session session = sessionRepository.findById(sessionId).orElse(null);
+        if (session == null) {
+            return List.of();
+        }
+        AgentSessionBinding binding = findAgentBinding(agentId, session, traceId).orElse(null);
+        if (binding == null) {
+            return List.of();
+        }
+        ExecutionNode node = executionNodeRepository.findById(binding.executionNodeId()).orElse(null);
+        if (node == null) {
+            return List.of();
+        }
+        return recoverScopes(
+                runtime,
+                node,
+                "session_snapshot:" + sessionId.value(),
+                traceId,
+                historyScopes(binding.remoteSessionId()));
+    }
+
+    private List<RunEventSsePayload> recoverScopes(
+            AgentRuntime runtime,
+            ExecutionNode node,
+            String snapshotRunId,
+            String traceId,
+            List<SnapshotSessionScope> scopes) {
+        List<RunEventSsePayload> events = new ArrayList<>();
+        for (SnapshotSessionScope scopedSession : scopes) {
+            AgentSessionMessagesResult result = loadMessages(runtime, node, scopedSession.sessionId(), traceId);
+            if (result != null) {
+                events.addAll(toSnapshotEvents(snapshotRunId, traceId, result.messages(), scopedSession));
+            }
+        }
+        return List.copyOf(events);
+    }
+
+    private List<SnapshotSessionScope> runScopes(RunId runId, String rootSessionId) {
+        List<RunSessionScopeSession> scopedSessions = runSessionScopeRepository == null
+                ? List.of()
+                : runSessionScopeRepository.findSessionsByRunId(runId);
+        return snapshotScopes(rootSessionId, scopedSessions);
+    }
+
+    private List<SnapshotSessionScope> historyScopes(String rootSessionId) {
+        List<RunSessionScopeSession> scopedSessions = runSessionScopeRepository == null
+                ? List.of()
+                : runSessionScopeRepository.findSessionsByRootSessionId(rootSessionId);
+        return snapshotScopes(rootSessionId, scopedSessions);
+    }
+
+    private List<SnapshotSessionScope> snapshotScopes(
+            String rootSessionId,
+            List<RunSessionScopeSession> scopedSessions) {
+        LinkedHashMap<String, SnapshotSessionScope> scopesBySessionId = new LinkedHashMap<>();
+        scopesBySessionId.put(rootSessionId, SnapshotSessionScope.root(rootSessionId));
+        for (RunSessionScopeSession scopedSession : scopedSessions) {
+            SnapshotSessionScope snapshotScope = SnapshotSessionScope.from(scopedSession);
+            scopesBySessionId.putIfAbsent(snapshotScope.sessionId(), snapshotScope);
+        }
+        return List.copyOf(scopesBySessionId.values());
+    }
+
+    private AgentSessionMessagesResult loadMessages(
+            AgentRuntime runtime,
+            ExecutionNode node,
+            String remoteSessionId,
+            String traceId) {
+        return runtime.sessionMessages(new AgentSessionMessagesCommand(
                         node,
-                        binding.remoteSessionId(),
+                        remoteSessionId,
                         RECOVERY_MESSAGE_LIMIT,
                         RECOVERY_ORDER,
                         null,
                         traceId))
                 .block();
-        return result == null ? List.of() : toSnapshotEvents(runId, traceId, result.messages());
     }
 
     /**
      * 将 projected messages 转换为 transient SSE snapshot 事件，seq 固定为 0 表示不参与持久化续传。
      */
     private List<RunEventSsePayload> toSnapshotEvents(
-            RunId runId,
+            String snapshotRunId,
             String traceId,
-            List<AgentSessionMessage> messages) {
+            List<AgentSessionMessage> messages,
+            SnapshotSessionScope scopedSession) {
         Instant occurredAt = Instant.now();
         List<RunEventSsePayload> events = new ArrayList<>();
         for (AgentSessionMessage message : messages) {
@@ -135,15 +260,19 @@ public class RunMessageRecoveryService {
                 continue;
             }
             String messageId = text(messagePayload.get("id"));
+            LinkedHashMap<String, Object> messageEventPayload = new LinkedHashMap<>();
+            appendScopePayload(messageEventPayload, scopedSession);
+            messageEventPayload.put("message", messagePayload);
             events.add(transientPayload(
-                    runId,
+                    snapshotRunId,
                     RunEventType.MESSAGE_UPDATED,
                     traceId,
                     occurredAt,
-                    Map.of("message", messagePayload)));
+                    Map.copyOf(messageEventPayload)));
             for (Map<String, Object> part : message.parts()) {
                 Map<String, Object> partPayload = normalizePart(part, messageId);
                 LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+                appendScopePayload(payload, scopedSession);
                 String partMessageId = text(partPayload.get("messageID"));
                 if (partMessageId != null) {
                     payload.put("messageID", partMessageId);
@@ -151,7 +280,7 @@ public class RunMessageRecoveryService {
                 }
                 payload.put("part", partPayload);
                 events.add(transientPayload(
-                        runId,
+                        snapshotRunId,
                         RunEventType.MESSAGE_PART_UPDATED,
                         traceId,
                         occurredAt,
@@ -189,14 +318,14 @@ public class RunMessageRecoveryService {
      * 构造 transient SSE payload，eventId 使用 live 前缀避免和 durable 事件混淆。
      */
     private RunEventSsePayload transientPayload(
-            RunId runId,
+            String snapshotRunId,
             RunEventType type,
             String traceId,
             Instant occurredAt,
             Map<String, Object> payload) {
         return new RunEventSsePayload(
                 transientEventId(),
-                runId.value(),
+                snapshotRunId,
                 0L,
                 type.wireName(),
                 traceId,
@@ -217,6 +346,27 @@ public class RunMessageRecoveryService {
         String type = text(normalized.get("type"));
         normalized.putIfAbsent("role", "user".equals(type) ? "user" : "assistant");
         return Map.copyOf(normalized);
+    }
+
+    private void appendScopePayload(Map<String, Object> payload, SnapshotSessionScope scopedSession) {
+        if (scopedSession == null) {
+            return;
+        }
+        payload.put("rootSessionId", scopedSession.rootSessionId());
+        payload.put("sessionId", scopedSession.sessionId());
+        if (scopedSession.parentSessionId() != null) {
+            payload.put("parentSessionId", scopedSession.parentSessionId());
+        }
+        payload.put("isChildSession", scopedSession.childSession());
+        if (scopedSession.taskMessageId() != null) {
+            payload.put("taskMessageId", scopedSession.taskMessageId());
+        }
+        if (scopedSession.taskPartId() != null) {
+            payload.put("taskPartId", scopedSession.taskPartId());
+        }
+        if (scopedSession.taskCallId() != null) {
+            payload.put("taskCallId", scopedSession.taskCallId());
+        }
     }
 
     /**
@@ -248,5 +398,30 @@ public class RunMessageRecoveryService {
      */
     private String text(Object value) {
         return value instanceof String string && !string.isBlank() ? string : null;
+    }
+
+    private record SnapshotSessionScope(
+            String rootSessionId,
+            String sessionId,
+            String parentSessionId,
+            boolean childSession,
+            String taskMessageId,
+            String taskPartId,
+            String taskCallId) {
+
+        private static SnapshotSessionScope root(String rootSessionId) {
+            return new SnapshotSessionScope(rootSessionId, rootSessionId, null, false, null, null, null);
+        }
+
+        private static SnapshotSessionScope from(RunSessionScopeSession session) {
+            return new SnapshotSessionScope(
+                    session.rootSessionId(),
+                    session.sessionId(),
+                    session.parentSessionId(),
+                    session.childSession(),
+                    session.taskMessageId(),
+                    session.taskPartId(),
+                    session.taskCallId());
+        }
     }
 }

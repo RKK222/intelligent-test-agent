@@ -22,7 +22,8 @@
 - Session：`Session`、`SessionId`、`SessionStatus`、`SessionMessage`、`SessionMessageId`、`SessionMessageRole`；`Session` 内含平台置顶状态和后端内部 opencode session/node 映射字段，软删除使用 `ARCHIVED` 状态。
 - AgentSessionBinding：`AgentSessionBinding`、`AgentSessionBindingRepository`；按 `(sessionId, agentId)` 表达平台 session 到远端 agent session/node 的通用绑定，旧 opencode 字段只作兼容。
 - Run：`Run`、`RunId`、`RunStatus`、`TokenUsage`；Run 可保存单次对话 token/cost 快照。
-- RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`；RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`。
+- RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`、`RunEventScopeContext`；RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*`、`session.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`。
+- RunSessionScope：`RunSessionScope`、`RunSessionScopeSession`、`RunSessionScopeRepository`；表达当前 Run root/child opencode session scope，DB 是恢复事实源，Redis 只作为运行中 cache/pending buffer。
 - ExecutionNode：`ExecutionNode`、`ExecutionNodeId`、`ExecutionNodeStatus`。
 - RoutingDecision：`RoutingDecision`、`RoutingReason`、`ExecutionNodeRouter`。
 - OpencodeProcess：`LinuxServer`、`BackendJavaProcess`、`BackendRuntimeSnapshot`、`ServerRuntimeMetricSample`、`OpencodeContainer`、`OpencodeContainerManager`、`ManagerRuntimeSnapshot`、`OpencodeManagerBackendConnection`、`OpencodeServerProcess`、`OpencodeServerProcessFilter`、`UserOpencodeProcessBinding`、`OpencodeProcessManagementRepository` 和 `OpencodeProcessHeartbeatStore`；只表达 Linux 服务器、容器、管理进程、用户专属 opencode 进程拓扑、Redis 运行快照、查询筛选、服务器级/JVM/容器指标样本和运行心跳端口，不直接发起进程操作或 socket 通信。
@@ -31,7 +32,7 @@
 - Broadcast：`ServerBroadcastEvent`、`ServerBroadcastPublisher`、`ServerBroadcastHandler`，定义后端实例之间广播事件的领域端口，不绑定 Redis 或其他传输。
 - Scheduler：`ScheduledTask`、`ScheduledTaskPlan`、`ScheduledTaskRun`、状态枚举和值对象；用户级计划仅作为后续定时会话能力预留。
 - Analytics：`AiMessageFeedback`、反馈评分/原因枚举、`AnalyticsModels` 和 `AnalyticsRepository`；满意率、Diff 采纳率、token 强度、p95 和 freshness 等查询模型不暴露 prompt/assistant 原文或 cost 字段。
-- Repository 端口：Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、ExecutionNode、RoutingDecision、OpencodeProcessManagement、ConfigurationManagement、CommonParameter、WorkspaceCreateOperation、ManagedWorkspace、ScheduledTask、AiMessageFeedback、Analytics 持久化端口。
+- Repository 端口：Workspace、Session、AgentSessionBinding、SessionMessage、Run、RunEvent、RunSessionScope、ExecutionNode、RoutingDecision、OpencodeProcessManagement、ConfigurationManagement、CommonParameter、WorkspaceCreateOperation、ManagedWorkspace、ScheduledTask、AiMessageFeedback、Analytics 持久化端口。
 
 ## Run 状态机
 

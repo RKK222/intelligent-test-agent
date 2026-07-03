@@ -30,6 +30,13 @@ public class RunEventPersistencePolicy {
             "messageId",
             "partID",
             "partId",
+            "rootSessionId",
+            "parentSessionId",
+            "isChildSession",
+            "scopeVersion",
+            "taskMessageId",
+            "taskPartId",
+            "taskCallId",
             "sessionID",
             "sessionId",
             "status",
@@ -56,7 +63,13 @@ public class RunEventPersistencePolicy {
                 || draft.type() == RunEventType.TOOL_FINISHED
                 ? toolSummaryPayload(draft.payload())
                 : withoutRawPayload(draft.payload());
-        return new RunEventDraft(draft.runId(), draft.type(), draft.traceId(), draft.occurredAt(), payload);
+        return new RunEventDraft(
+                draft.runId(),
+                draft.type(),
+                draft.traceId(),
+                draft.occurredAt(),
+                payload,
+                draft.scopeContext());
     }
 
     /**

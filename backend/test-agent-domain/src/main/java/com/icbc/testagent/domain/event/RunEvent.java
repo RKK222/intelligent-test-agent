@@ -16,7 +16,22 @@ public record RunEvent(
         RunEventType type,
         String traceId,
         Instant occurredAt,
-        Map<String, Object> payload) {
+        Map<String, Object> payload,
+        RunEventScopeContext scopeContext) {
+
+    /**
+     * 兼容旧持久化读取路径；历史事件没有结构化 scope 时仍按 payload 原样展示。
+     */
+    public RunEvent(
+            RunEventId eventId,
+            RunId runId,
+            long seq,
+            RunEventType type,
+            String traceId,
+            Instant occurredAt,
+            Map<String, Object> payload) {
+        this(eventId, runId, seq, type, traceId, occurredAt, payload, null);
+    }
 
     /**
      * 校验已持久化事件的不变量，并复制 payload 保持事件不可变。

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.icbc.testagent.persistence.mybatis.RunSessionScopeMapper">
+    <resultMap id="RunSessionScopeSessionRowMap" type="com.icbc.testagent.persistence.mybatis.RunSessionScopeSessionRow">
+        <constructor>
+            <arg column="run_id" javaType="java.lang.String"/>
+            <arg column="session_id" javaType="java.lang.String"/>
+            <arg column="root_session_id" javaType="java.lang.String"/>
+            <arg column="parent_session_id" javaType="java.lang.String"/>
+            <arg column="child_session" javaType="_boolean"/>
+            <arg column="discovery_source" javaType="java.lang.String"/>
+            <arg column="task_message_id" javaType="java.lang.String"/>
+            <arg column="task_part_id" javaType="java.lang.String"/>
+            <arg column="task_call_id" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="metadata_json" javaType="java.lang.String"/>
+            <arg column="discovered_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="RunSessionScopeSessionColumns">
+        run_id, session_id, root_session_id, parent_session_id, child_session, discovery_source,
+        task_message_id, task_part_id, task_call_id, trace_id, metadata_json, discovered_at, updated_at
+    </sql>
+
+    <insert id="upsertScope">
+        merge into run_session_scopes as target
+        using (values (
+            #{row.runId}, #{row.rootSessionId}, #{row.scopeVersion}, #{row.traceId},
+            #{row.metadataJson}, #{row.createdAt}, #{row.updatedAt}
+        )) as source(run_id, root_session_id, scope_version, trace_id, metadata_json, created_at, updated_at)
+        on target.run_id = source.run_id
+        when matched then update set
+            root_session_id = source.root_session_id,
+            scope_version = source.scope_version,
+            trace_id = source.trace_id,
+            metadata_json = source.metadata_json,
+            updated_at = source.updated_at
+        when not matched then insert (
+            run_id, root_session_id, scope_version, trace_id, metadata_json, created_at, updated_at
+        ) values (
+            source.run_id, source.root_session_id, source.scope_version, source.trace_id,
+            source.metadata_json, source.created_at, source.updated_at
+        )
+    </insert>
+
+    <insert id="upsertSession">
+        merge into run_session_scope_sessions as target
+        using (values (
+            #{row.runId}, #{row.sessionId}, #{row.rootSessionId}, #{row.parentSessionId}, #{row.childSession},
+            #{row.discoverySource}, #{row.taskMessageId}, #{row.taskPartId}, #{row.taskCallId}, #{row.traceId},
+            #{row.metadataJson}, #{row.discoveredAt}, #{row.updatedAt}
+        )) as source(
+            run_id, session_id, root_session_id, parent_session_id, child_session, discovery_source,
+            task_message_id, task_part_id, task_call_id, trace_id, metadata_json, discovered_at, updated_at
+        )
+        on target.run_id = source.run_id and target.session_id = source.session_id
+        when matched then update set
+            root_session_id = source.root_session_id,
+            parent_session_id = source.parent_session_id,
+            child_session = source.child_session,
+            discovery_source = source.discovery_source,
+            task_message_id = source.task_message_id,
+            task_part_id = source.task_part_id,
+            task_call_id = source.task_call_id,
+            trace_id = source.trace_id,
+            metadata_json = source.metadata_json,
+            updated_at = source.updated_at
+        when not matched then insert (
+            run_id, session_id, root_session_id, parent_session_id, child_session, discovery_source,
+            task_message_id, task_part_id, task_call_id, trace_id, metadata_json, discovered_at, updated_at
+        ) values (
+            source.run_id, source.session_id, source.root_session_id, source.parent_session_id, source.child_session,
+            source.discovery_source, source.task_message_id, source.task_part_id, source.task_call_id, source.trace_id,
+            source.metadata_json, source.discovered_at, source.updated_at
+        )
+    </insert>
+
+    <select id="findSessionsByRunId" resultMap="RunSessionScopeSessionRowMap">
+        select
+        <include refid="RunSessionScopeSessionColumns"/>
+        from run_session_scope_sessions
+        where run_id = #{runId}
+        order by discovered_at, session_id
+    </select>
+
+    <select id="findSessionsByRootSessionId" resultMap="RunSessionScopeSessionRowMap">
+        select
+        <include refid="RunSessionScopeSessionColumns"/>
+        from run_session_scope_sessions
+        where root_session_id = #{rootSessionId}
+        order by child_session, discovered_at, session_id
+    </select>
+
+    <select id="findSession" resultMap="RunSessionScopeSessionRowMap">
+        select
+        <include refid="RunSessionScopeSessionColumns"/>
+        from run_session_scope_sessions
+        where run_id = #{runId}
+          and session_id = #{sessionId}
+    </select>
+</mapper>

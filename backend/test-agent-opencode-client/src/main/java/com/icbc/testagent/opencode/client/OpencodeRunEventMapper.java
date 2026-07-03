@@ -1,6 +1,7 @@
 package com.icbc.testagent.opencode.client;
 
 import com.icbc.testagent.domain.event.RunEventDraft;
+import com.icbc.testagent.domain.event.RunEventScopeContext;
 import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.run.RunId;
 import com.icbc.testagent.domain.support.DomainValidation;
@@ -8,10 +9,13 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -49,17 +53,46 @@ public class OpencodeRunEventMapper {
      * 将单条 opencode raw event 转换为平台事件草稿，未知事件保留 raw payload 供前端降级展示。
      */
     public RunEventDraft toDraft(JsonNode rawEvent, RunId runId, String traceId) {
+        List<RunEventDraft> drafts = toDraftsInternal(rawEvent, runId, traceId, inferredRootScope(rawEvent, runId));
+        return drafts.getFirst();
+    }
+
+    /**
+     * 将单条 opencode raw event 转换为当前 Run session scope 下的一组平台事件。
+     * 例如 root session idle 会产生 session.status 和 run.succeeded，child idle 只产生 session.status。
+     */
+    public List<RunEventDraft> toDrafts(
+            JsonNode rawEvent,
+            RunId runId,
+            String traceId,
+            RunEventScopeContext scopeContext) {
+        Objects.requireNonNull(scopeContext, "scopeContext must not be null");
+        if (!scopeContext.runId().equals(runId)) {
+            throw new IllegalArgumentException("scopeContext runId must match runId");
+        }
+        return toDraftsInternal(rawEvent, runId, traceId, scopeContext);
+    }
+
+    private List<RunEventDraft> toDraftsInternal(
+            JsonNode rawEvent,
+            RunId runId,
+            String traceId,
+            RunEventScopeContext scopeContext) {
         Objects.requireNonNull(rawEvent, "rawEvent must not be null");
         Objects.requireNonNull(runId, "runId must not be null");
         traceId = DomainValidation.requireText(traceId, "traceId");
 
         String rawType = rawType(rawEvent);
         Map<String, Object> payload = new LinkedHashMap<>(toMap(properties(rawEvent)));
-        RunEventType type = mapType(rawType, payload);
         payload.put("rawType", rawType);
-        payload.put("rawEventId", rawEventId(rawEvent));
+        String rawEventId = rawEventId(rawEvent);
+        if (rawEventId != null) {
+            payload.put("rawEventId", rawEventId);
+        }
         payload.put("rawPayload", toMap(rawEvent));
+        appendScopePayload(payload, scopeContext);
 
+        RunEventType type = mapType(rawType, payload);
         if (type == RunEventType.ASSISTANT_MESSAGE_DELTA) {
             copyTextAlias(payload);
         }
@@ -67,7 +100,15 @@ public class OpencodeRunEventMapper {
             copyTextAlias(payload);
         }
 
-        return new RunEventDraft(runId, type, traceId, now.get(), payload);
+        List<RunEventDraft> drafts = new ArrayList<>();
+        drafts.add(new RunEventDraft(runId, type, traceId, now.get(), payload, scopeContext));
+        if (scopeContext != null && !scopeContext.childSession() && isRootSuccessSignal(rawType, payload)) {
+            drafts.add(new RunEventDraft(runId, RunEventType.RUN_SUCCEEDED, traceId, now.get(), payload, scopeContext));
+        }
+        if (scopeContext != null && !scopeContext.childSession() && "session.error".equals(rawType)) {
+            drafts.add(new RunEventDraft(runId, RunEventType.RUN_FAILED, traceId, now.get(), payload, scopeContext));
+        }
+        return List.copyOf(drafts);
     }
 
     /**
@@ -108,9 +149,13 @@ public class OpencodeRunEventMapper {
     private RunEventType mapType(String rawType, Map<String, Object> payload) {
         return switch (rawType) {
             case "session.next.prompted" -> RunEventType.RUN_STARTED;
-            case "session.next.step.ended", "session.idle" -> RunEventType.RUN_SUCCEEDED;
-            case "session.status" -> mapSessionStatus(payload);
-            case "session.next.step.failed", "session.error" -> RunEventType.RUN_FAILED;
+            case "session.next.step.ended" -> RunEventType.OPENCODE_EVENT_UNKNOWN;
+            case "session.idle", "session.status" -> mapSessionStatus(payload);
+            case "session.error" -> RunEventType.SESSION_ERROR;
+            case "session.created" -> RunEventType.SESSION_CREATED;
+            case "session.updated" -> RunEventType.SESSION_UPDATED;
+            case "session.deleted" -> RunEventType.SESSION_DELETED;
+            case "session.next.step.failed" -> mapStepFailed(payload);
             case "session.next.text.delta" -> RunEventType.ASSISTANT_MESSAGE_DELTA;
             case "message.updated" -> RunEventType.MESSAGE_UPDATED;
             case "message.removed" -> RunEventType.MESSAGE_REMOVED;
@@ -142,15 +187,32 @@ public class OpencodeRunEventMapper {
     }
 
     /**
-     * 识别 opencode 1.17.8 的 session.status 终态；非 idle 状态继续作为未知事件透传。
+     * 规范化 opencode session.status/session.idle；终态由 scope 派生，不能直接把 child idle 当 Run 成功。
      */
     private RunEventType mapSessionStatus(Map<String, Object> payload) {
-        // opencode 1.17.8 不再发送 session.next.step.ended，idle 状态是本次 prompt 已收敛的终态信号。
-        Object status = payload.get("status");
-        if (status instanceof Map<?, ?> statusMap && "idle".equals(statusMap.get("type"))) {
-            return RunEventType.RUN_SUCCEEDED;
+        if (!payload.containsKey("status") && "session.idle".equals(payload.get("rawType"))) {
+            payload.put("status", Map.of("type", "idle"));
         }
-        return RunEventType.OPENCODE_EVENT_UNKNOWN;
+        return RunEventType.SESSION_STATUS;
+    }
+
+    private RunEventType mapStepFailed(Map<String, Object> payload) {
+        Object childSession = payload.get("isChildSession");
+        if (Boolean.TRUE.equals(childSession)) {
+            return RunEventType.SESSION_ERROR;
+        }
+        return RunEventType.RUN_FAILED;
+    }
+
+    private boolean isRootSuccessSignal(String rawType, Map<String, Object> payload) {
+        if ("session.idle".equals(rawType)) {
+            return true;
+        }
+        if (!"session.status".equals(rawType)) {
+            return false;
+        }
+        Object status = payload.get("status");
+        return status instanceof Map<?, ?> statusMap && "idle".equals(statusMap.get("type"));
     }
 
     /**
@@ -165,7 +227,7 @@ public class OpencodeRunEventMapper {
         if (payloadType.isTextual()) {
             return payloadType.asText();
         }
-        return "unknown";
+        return null;
     }
 
     /**
@@ -196,6 +258,51 @@ public class OpencodeRunEventMapper {
             return payloadProperties;
         }
         return objectMapper.createObjectNode();
+    }
+
+    private RunEventScopeContext inferredRootScope(JsonNode rawEvent, RunId runId) {
+        Optional<String> sessionId = firstSessionId(properties(rawEvent));
+        return sessionId.map(value -> RunEventScopeContext.root(runId, value)).orElse(null);
+    }
+
+    private Optional<String> firstSessionId(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return Optional.empty();
+        }
+        if (node.isObject()) {
+            JsonNode sessionId = node.path("sessionID");
+            if (sessionId.isTextual()) {
+                return Optional.of(sessionId.asText());
+            }
+            sessionId = node.path("sessionId");
+            if (sessionId.isTextual()) {
+                return Optional.of(sessionId.asText());
+            }
+            var fields = node.fields();
+            while (fields.hasNext()) {
+                Optional<String> nested = firstSessionId(fields.next().getValue());
+                if (nested.isPresent()) {
+                    return nested;
+                }
+            }
+            return Optional.empty();
+        }
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                Optional<String> nested = firstSessionId(item);
+                if (nested.isPresent()) {
+                    return nested;
+                }
+            }
+        }
+        return Optional.empty();
+    }
+
+    private void appendScopePayload(Map<String, Object> payload, RunEventScopeContext scopeContext) {
+        if (scopeContext == null) {
+            return;
+        }
+        payload.putAll(scopeContext.toPayloadMetadata());
     }
 
     /**

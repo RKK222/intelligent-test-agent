@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static java.util.Map.entry;
 
 import com.icbc.testagent.domain.event.RunEventDraft;
+import com.icbc.testagent.domain.event.RunEventScopeContext;
 import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.run.RunId;
 import java.time.Instant;
@@ -53,6 +54,9 @@ class RunEventPersistencePolicyTest {
                         entry("callID", "call_1"),
                         entry("messageID", "msg_1"),
                         entry("partID", "part_1"),
+                        entry("rootSessionId", "ses_root"),
+                        entry("sessionId", "ses_child"),
+                        entry("isChildSession", true),
                         entry("status", "completed"),
                         entry("title", "Bash"),
                         entry("error", "exit 1"),
@@ -65,6 +69,9 @@ class RunEventPersistencePolicyTest {
         assertThat(sanitized.payload()).containsEntry("callID", "call_1");
         assertThat(sanitized.payload()).containsEntry("messageID", "msg_1");
         assertThat(sanitized.payload()).containsEntry("partID", "part_1");
+        assertThat(sanitized.payload()).containsEntry("rootSessionId", "ses_root");
+        assertThat(sanitized.payload()).containsEntry("sessionId", "ses_child");
+        assertThat(sanitized.payload()).containsEntry("isChildSession", true);
         assertThat(sanitized.payload()).containsEntry("status", "completed");
         assertThat(sanitized.payload()).containsEntry("title", "Bash");
         assertThat(sanitized.payload()).containsEntry("error", "exit 1");
@@ -78,6 +85,33 @@ class RunEventPersistencePolicyTest {
                 Map.of("requestID", "perm_1", "rawPayload", Map.of("secret", "body"))));
 
         assertThat(sanitized.payload()).containsEntry("requestID", "perm_1");
+        assertThat(sanitized.payload()).doesNotContainKey("rawPayload");
+    }
+
+    @Test
+    void sanitizeKeepsStructuredScopeContext() {
+        RunEventScopeContext scopeContext = new RunEventScopeContext(
+                new RunId("run_1234567890abcdef"),
+                "ses_root",
+                "ses_child",
+                "ses_root",
+                true,
+                "msg_task",
+                "part_task",
+                "call_task",
+                2L,
+                true);
+        RunEventDraft draft = new RunEventDraft(
+                new RunId("run_1234567890abcdef"),
+                RunEventType.SESSION_STATUS,
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of("rawPayload", Map.of("full", "event")),
+                scopeContext);
+
+        RunEventDraft sanitized = policy.sanitizeForPersistence(draft);
+
+        assertThat(sanitized.scopeContext()).isEqualTo(scopeContext);
         assertThat(sanitized.payload()).doesNotContainKey("rawPayload");
     }
 

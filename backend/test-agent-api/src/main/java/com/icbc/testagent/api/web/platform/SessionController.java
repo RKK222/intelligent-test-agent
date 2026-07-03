@@ -3,13 +3,17 @@ package com.icbc.testagent.api.web.platform;
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
 import com.icbc.testagent.opencode.runtime.run.RunApplicationService;
+import com.icbc.testagent.opencode.runtime.run.RunMessageRecoveryService;
 import com.icbc.testagent.opencode.runtime.session.SessionApplicationService;
 import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
+import com.icbc.testagent.event.RunEventSsePayload;
 import jakarta.validation.Valid;
+import java.time.Duration;
+import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,21 +35,33 @@ public class SessionController {
 
     private final SessionApplicationService sessionService;
     private final RunApplicationService runService;
+    private final RunMessageRecoveryService messageRecoveryService;
 
     /**
      * 注入会话应用服务，Controller 仅保留协议和 DTO 转换职责。
      */
     public SessionController(SessionApplicationService sessionService) {
-        this(sessionService, null);
+        this(sessionService, null, null);
     }
 
     /**
      * 注入会话与 Run 应用服务，active-run 查询用于刷新后恢复 SSE。
      */
-    @Autowired
     public SessionController(SessionApplicationService sessionService, RunApplicationService runService) {
+        this(sessionService, runService, null);
+    }
+
+    /**
+     * 注入会话、Run 与消息恢复服务，Session 历史树查询复用 Run snapshot 恢复链路。
+     */
+    @Autowired
+    public SessionController(
+            SessionApplicationService sessionService,
+            RunApplicationService runService,
+            RunMessageRecoveryService messageRecoveryService) {
         this.sessionService = sessionService;
         this.runService = runService;
+        this.messageRecoveryService = messageRecoveryService;
     }
 
     /**
@@ -168,5 +184,38 @@ public class SessionController {
         return Mono.fromCallable(() -> ApiResponse.ok(RuntimeDtos.messagePage(sessionService.listMessages(
                         new SessionId(sessionId), RuntimeApiSupport.pageRequest(page, size), traceId)), traceId))
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    /**
+     * 查询 Session root 下全量历史 session tree message snapshot；agent-scoped 路径是主入口。
+     */
+    @GetMapping({
+            "/api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages",
+            "/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages",
+            "/api/sessions/{sessionId}/session-tree/messages"
+    })
+    public Mono<ApiResponse<RuntimeDtos.SessionTreeMessagesResponse>> getSessionTreeMessages(
+            @PathVariable(name = "agentId", required = false) String agentId,
+            @PathVariable String sessionId,
+            ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        SessionId currentSessionId = new SessionId(sessionId);
+        return Mono.fromCallable(() -> {
+                    List<RunEventSsePayload> snapshotEvents = messageRecoveryService == null
+                            ? List.of()
+                            : (hasAgentId(agentId)
+                                    ? messageRecoveryService.recoverSessionTree(agentId, currentSessionId, traceId)
+                                    : messageRecoveryService.recoverSessionTree(currentSessionId, traceId))
+                                    .collectList()
+                                    .block(Duration.ofSeconds(30));
+                    return ApiResponse.ok(
+                            RuntimeDtos.SessionTreeMessagesResponse.from(sessionId, snapshotEvents),
+                            traceId);
+                })
+                .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private boolean hasAgentId(String agentId) {
+        return agentId != null && !agentId.isBlank();
     }
 }

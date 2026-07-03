@@ -12,6 +12,9 @@ import com.icbc.testagent.agent.runtime.AgentStreamEventsCommand;
 import com.icbc.testagent.domain.agent.AgentSessionBinding;
 import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.event.RunEventDraft;
+import com.icbc.testagent.domain.event.RunSessionScope;
+import com.icbc.testagent.domain.event.RunSessionScopeRepository;
+import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeRepository;
@@ -86,6 +89,7 @@ public class RunApplicationService {
     private final ManagedWorkspacePathResolver workspacePathResolver;
     private final AgentRuntimeTargetResolver runtimeTargetResolver;
     private final RunSessionMessageSnapshotService snapshotService;
+    private final RunSessionScopeRepository runSessionScopeRepository;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -107,7 +111,8 @@ public class RunApplicationService {
             ModelCatalogApplicationService modelCatalogService,
             UserOpencodeProcessAssignmentService userProcessAssignmentService,
             ManagedWorkspacePathResolver workspacePathResolver,
-            RunSessionMessageSnapshotService snapshotService) {
+            RunSessionMessageSnapshotService snapshotService,
+            RunSessionScopeRepository runSessionScopeRepository) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
@@ -140,6 +145,7 @@ public class RunApplicationService {
                         agentSessionBindingRepository,
                         new ObjectMapper())
                 : snapshotService;
+        this.runSessionScopeRepository = runSessionScopeRepository;
     }
 
     /**
@@ -172,6 +178,7 @@ public class RunApplicationService {
                 null,
                 null,
                 ManagedWorkspacePathResolver.legacyOnly(),
+                null,
                 null);
     }
 
@@ -204,6 +211,7 @@ public class RunApplicationService {
                 null,
                 userProcessAssignmentService,
                 ManagedWorkspacePathResolver.legacyOnly(),
+                null,
                 null);
     }
 
@@ -327,6 +335,7 @@ public class RunApplicationService {
             syncProviderConfig(runtime, target.node(), traceId);
             Run running = runRepository.save(pending.start(Instant.now()));
             append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
+            recordRootSessionScope(resolvedAgentId, running, binding.remoteSessionId(), traceId);
             LOGGER.info("Run started, runId={}, nodeId={}, remoteSessionId={}, traceId={}",
                     running.runId().value(),
                     target.node().executionNodeId().value(),
@@ -377,6 +386,44 @@ public class RunApplicationService {
 
     private UserOpencodeProcessAssignment resolveUserProcessAssignment(UserId userId, String agentId, String traceId) {
         return runtimeTargetResolver.resolveUserProcessAssignment(userId, agentId, traceId).orElse(null);
+    }
+
+    private void recordRootSessionScope(String agentId, Run run, String remoteSessionId, String traceId) {
+        if (runSessionScopeRepository == null) {
+            return;
+        }
+        Instant now = Instant.now();
+        try {
+            runSessionScopeRepository.upsertScope(new RunSessionScope(
+                    run.runId(),
+                    remoteSessionId,
+                    1L,
+                    traceId,
+                    now,
+                    now,
+                    Map.of("agentId", agentId)));
+            runSessionScopeRepository.upsertSession(new RunSessionScopeSession(
+                    run.runId(),
+                    remoteSessionId,
+                    remoteSessionId,
+                    null,
+                    false,
+                    "ROOT",
+                    null,
+                    null,
+                    null,
+                    traceId,
+                    now,
+                    now,
+                    Map.of("agentId", agentId)));
+        } catch (RuntimeException exception) {
+            LOGGER.warn(
+                    "Failed to persist run session root scope, runId={}, remoteSessionId={}, traceId={}",
+                    run.runId().value(),
+                    remoteSessionId,
+                    traceId,
+                    exception);
+        }
     }
 
     private AgentRoutingTarget userProcessTarget(

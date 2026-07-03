@@ -3,17 +3,100 @@ package com.icbc.testagent.opencode.client;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.icbc.testagent.domain.event.RunEventDraft;
+import com.icbc.testagent.domain.event.RunEventScopeContext;
 import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.run.RunId;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class OpencodeRunEventMapperTest {
 
     private static final Instant NOW = Instant.parse("2026-06-19T00:00:00Z");
+    private static final RunId RUN_ID = new RunId("run_1234567890abcdef");
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final OpencodeRunEventMapper mapper = new OpencodeRunEventMapper(objectMapper, () -> NOW);
+
+    @Test
+    void mapsRootIdleStatusToSessionStatusAndRunSucceeded() throws Exception {
+        List<RunEventDraft> drafts = mapper.toDrafts(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_status_idle","type":"session.status","properties":{"sessionID":"ses_root","status":{"type":"idle"}}}
+                        """),
+                RUN_ID,
+                "trace_1234567890abcdef",
+                rootScope());
+
+        assertThat(drafts).extracting(RunEventDraft::type)
+                .containsExactly(RunEventType.SESSION_STATUS, RunEventType.RUN_SUCCEEDED);
+        assertThat(drafts.getFirst().payload())
+                .containsEntry("rootSessionId", "ses_root")
+                .containsEntry("sessionId", "ses_root")
+                .containsEntry("isChildSession", false)
+                .containsEntry("scopeVersion", 1L);
+    }
+
+    @Test
+    void mapsChildIdleStatusToSessionStatusOnly() throws Exception {
+        List<RunEventDraft> drafts = mapper.toDrafts(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_child_idle","type":"session.status","properties":{"sessionID":"ses_child","status":{"type":"idle"}}}
+                        """),
+                RUN_ID,
+                "trace_1234567890abcdef",
+                childScope());
+
+        assertThat(drafts).extracting(RunEventDraft::type)
+                .containsExactly(RunEventType.SESSION_STATUS);
+        assertThat(drafts.getFirst().payload())
+                .containsEntry("rootSessionId", "ses_root")
+                .containsEntry("sessionId", "ses_child")
+                .containsEntry("parentSessionId", "ses_root")
+                .containsEntry("isChildSession", true);
+    }
+
+    @Test
+    void mapsRootSessionErrorToSessionErrorAndRunFailed() throws Exception {
+        List<RunEventDraft> drafts = mapper.toDrafts(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_error","type":"session.error","properties":{"sessionID":"ses_root","error":{"message":"boom"}}}
+                        """),
+                RUN_ID,
+                "trace_1234567890abcdef",
+                rootScope());
+
+        assertThat(drafts).extracting(RunEventDraft::type)
+                .containsExactly(RunEventType.SESSION_ERROR, RunEventType.RUN_FAILED);
+    }
+
+    @Test
+    void mapsChildSessionErrorToSessionErrorOnly() throws Exception {
+        List<RunEventDraft> drafts = mapper.toDrafts(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_child_error","type":"session.error","properties":{"sessionID":"ses_child","error":{"message":"boom"}}}
+                        """),
+                RUN_ID,
+                "trace_1234567890abcdef",
+                childScope());
+
+        assertThat(drafts).extracting(RunEventDraft::type)
+                .containsExactly(RunEventType.SESSION_ERROR);
+    }
+
+    @Test
+    void doesNotMapStepEndedToRunSucceededAfterScopeSupport() throws Exception {
+        List<RunEventDraft> drafts = mapper.toDrafts(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_step_ended","type":"session.next.step.ended","properties":{"sessionID":"ses_root","messageID":"msg_remote_1"}}
+                        """),
+                RUN_ID,
+                "trace_1234567890abcdef",
+                rootScope());
+
+        assertThat(drafts).extracting(RunEventDraft::type)
+                .containsExactly(RunEventType.OPENCODE_EVENT_UNKNOWN);
+    }
 
     @Test
     void mapsToolCalledToToolStarted() throws Exception {
@@ -94,7 +177,7 @@ class OpencodeRunEventMapperTest {
     }
 
     @Test
-    void mapsStepEndedToRunSucceeded() throws Exception {
+    void mapsStepEndedToUnknownLegacyDraft() throws Exception {
         RunEventDraft draft = mapper.toDraft(
                 objectMapper.readTree("""
                         {"id":"evt_raw_done","type":"session.next.step.ended","properties":{"messageID":"msg_remote_1"}}
@@ -102,7 +185,7 @@ class OpencodeRunEventMapperTest {
                 new RunId("run_1234567890abcdef"),
                 "trace_1234567890abcdef");
 
-        assertThat(draft.type()).isEqualTo(RunEventType.RUN_SUCCEEDED);
+        assertThat(draft.type()).isEqualTo(RunEventType.OPENCODE_EVENT_UNKNOWN);
         assertThat(draft.payload()).containsEntry("messageID", "msg_remote_1");
     }
 
@@ -115,7 +198,7 @@ class OpencodeRunEventMapperTest {
                 new RunId("run_1234567890abcdef"),
                 "trace_1234567890abcdef");
 
-        assertThat(draft.type()).isEqualTo(RunEventType.RUN_SUCCEEDED);
+        assertThat(draft.type()).isEqualTo(RunEventType.SESSION_STATUS);
         assertThat(draft.payload()).containsEntry("sessionID", "ses_remote_1");
     }
 
@@ -128,11 +211,11 @@ class OpencodeRunEventMapperTest {
                 new RunId("run_1234567890abcdef"),
                 "trace_1234567890abcdef");
 
-        assertThat(draft.type()).isEqualTo(RunEventType.RUN_SUCCEEDED);
+        assertThat(draft.type()).isEqualTo(RunEventType.SESSION_STATUS);
     }
 
     @Test
-    void keepsSessionStatusBusyAsUnknown() throws Exception {
+    void mapsSessionStatusBusyToSessionStatus() throws Exception {
         RunEventDraft draft = mapper.toDraft(
                 objectMapper.readTree("""
                         {"id":"evt_raw_status_busy","type":"session.status","properties":{"sessionID":"ses_remote_1","status":{"type":"busy"}}}
@@ -140,7 +223,7 @@ class OpencodeRunEventMapperTest {
                 new RunId("run_1234567890abcdef"),
                 "trace_1234567890abcdef");
 
-        assertThat(draft.type()).isEqualTo(RunEventType.OPENCODE_EVENT_UNKNOWN);
+        assertThat(draft.type()).isEqualTo(RunEventType.SESSION_STATUS);
     }
 
     @Test
@@ -164,7 +247,7 @@ class OpencodeRunEventMapperTest {
                 new RunId("run_1234567890abcdef"),
                 "trace_1234567890abcdef");
 
-        assertThat(draft.type()).isEqualTo(RunEventType.RUN_FAILED);
+        assertThat(draft.type()).isEqualTo(RunEventType.SESSION_ERROR);
     }
 
     @Test
@@ -189,5 +272,33 @@ class OpencodeRunEventMapperTest {
                 new RunId("run_1234567890abcdef"),
                 "trace_1234567890abcdef");
         return draft.type();
+    }
+
+    private RunEventScopeContext rootScope() {
+        return new RunEventScopeContext(
+                RUN_ID,
+                "ses_root",
+                "ses_root",
+                null,
+                false,
+                null,
+                null,
+                null,
+                1L,
+                true);
+    }
+
+    private RunEventScopeContext childScope() {
+        return new RunEventScopeContext(
+                RUN_ID,
+                "ses_root",
+                "ses_child",
+                "ses_root",
+                true,
+                "msg_task",
+                "part_task",
+                "call_task",
+                2L,
+                true);
     }
 }

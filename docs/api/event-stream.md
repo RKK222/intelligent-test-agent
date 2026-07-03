@@ -54,6 +54,12 @@
 | `message.part.delta` | message part 流式增量，只实时发送，不写入 `run_events`。 |
 | `session.diff` | session 级 Diff 状态更新。 |
 | `session.status` | session busy/idle/status 更新。 |
+| `session.error` | session 错误事件；root session error 额外派生 `run.failed`，child error 不改变 Run 终态。 |
+| `session.created` | opencode session 创建事件，payload 可携带 `parentID`。 |
+| `session.updated` | opencode session 更新事件。 |
+| `session.deleted` | opencode session 删除事件。 |
+| `session.child.discovered` | 平台发现 child session 并纳入当前 Run scope。 |
+| `session.scope.updated` | 当前 Run session scope 更新。 |
 | `todo.updated` | Todo 列表更新。 |
 | `tool.started` | 工具调用开始。 |
 | `tool.finished` | 工具调用结束，payload 使用 `status` 区分 success/failed。 |
@@ -82,6 +88,28 @@
 - 如果 `Last-Event-ID` 缺失，默认从当前订阅策略允许的起点开始返回。
 - 如果 `Last-Event-ID` 非数字或小于 0，后端返回统一错误格式，错误码为 `VALIDATION_ERROR`。
 - 消息内容、文本增量和日志/tool output 不从本地 `run_events` 恢复；SSE 建连时后端通过当前 `AgentRuntime.messages` 拉取 projected messages，并转换为 transient `message.updated` / `message.part.updated` snapshot 事件。快照恢复与 durable replay、本机 live bus、远端广播并发订阅，不能让较慢的快照查询阻塞实时 delta 下发。当前 `opencode` 实现适配 opencode `GET /api/session/{sessionID}/message`。opencode workspace 级事件流中显式携带 `sessionID/sessionId` 的事件只映射到 remote session 匹配的 Run，并在该 Run 首个成功/失败终态后结束远端订阅，避免跨会话或同一会话后续轮次串流。前端刷新恢复时先用 `GET /api/sessions/{sessionId}/messages` 加载数据库/远端快照，再用 `GET /api/sessions/{sessionId}/active-run` 判断是否重新订阅本 Run SSE。
+
+## Run Session Scope
+
+RunEvent payload 可包含以下 scope 字段，前端必须允许这些字段缺失或新增：
+
+| 字段 | 说明 |
+|---|---|
+| `rootSessionId` | 当前 Run scope 的 root opencode session ID。 |
+| `sessionId` | 事件所属 opencode session ID。 |
+| `parentSessionId` | child session 的父 session ID，root 为空。 |
+| `isChildSession` | 是否 child session。 |
+| `taskMessageId` | 发现 child session 的任务消息 ID。 |
+| `taskPartId` | 发现 child session 的任务 part ID。 |
+| `taskCallId` | 发现 child session 的任务调用 ID。 |
+| `scopeVersion` | 事件映射时的 Run scope 版本。 |
+
+终态派生规则：
+
+- `session.status` 的 `status.type=idle` 和 `session.idle` 均规范化为 `session.status`。
+- root session idle 额外派生 `run.succeeded`；child session idle 只发送 `session.status`。
+- root `session.error` 额外派生 `run.failed`；child `session.error` 只发送 `session.error`。
+- `session.next.step.ended` 不再派生 `run.succeeded`，只作为兼容未知事件保留上下文。
 
 ## Phase 04 Runtime SSE
 

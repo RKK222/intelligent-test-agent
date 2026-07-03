@@ -3,6 +3,7 @@ package com.icbc.testagent.opencode.client;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.event.RunEventDraft;
+import com.icbc.testagent.domain.event.RunEventScopeContext;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import java.net.ConnectException;
 import java.time.Duration;
@@ -173,7 +174,11 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                         "streamRunEvents",
                         command.node())
                 .filter(rawEvent -> eventMapper.belongsToSession(rawEvent, command.opencodeSessionId()))
-                .map(rawEvent -> eventMapper.toDraft(rawEvent, command.runId(), command.traceId()));
+                .flatMapIterable(rawEvent -> eventMapper.toDrafts(
+                        rawEvent,
+                        command.runId(),
+                        command.traceId(),
+                        RunEventScopeContext.root(command.runId(), command.opencodeSessionId())));
     }
 
     /**

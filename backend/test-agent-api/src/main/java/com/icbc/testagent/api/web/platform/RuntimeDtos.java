@@ -17,10 +17,13 @@ import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.session.SessionMessage;
 import com.icbc.testagent.domain.session.SessionMessageRole;
 import com.icbc.testagent.domain.workspace.Workspace;
+import com.icbc.testagent.event.RunEventSsePayload;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -340,6 +343,106 @@ final class RuntimeDtos {
         }
     }
 
+    /**
+     * Run 当前 session scope 的消息树 snapshot，主用于刷新/断线恢复时一次性获取 root + child 内容。
+     */
+    record RunSessionTreeMessagesResponse(
+            String runId,
+            List<RunSessionTreeSessionResponse> sessions,
+            Map<String, List<Map<String, Object>>> messagesBySessionId,
+            List<RunSessionTreeEventResponse> events) {
+
+        static RunSessionTreeMessagesResponse from(String runId, List<RunEventSsePayload> snapshotEvents) {
+            SessionTreeProjection projection = sessionTreeProjection(snapshotEvents);
+            return new RunSessionTreeMessagesResponse(
+                    runId,
+                    projection.sessions(),
+                    projection.messagesBySessionId(),
+                    projection.events());
+        }
+    }
+
+    /**
+     * Session root 下全量历史树 snapshot，用于历史页面查看 root + 已发现 child。
+     */
+    record SessionTreeMessagesResponse(
+            String sessionId,
+            List<RunSessionTreeSessionResponse> sessions,
+            Map<String, List<Map<String, Object>>> messagesBySessionId,
+            List<RunSessionTreeEventResponse> events) {
+
+        static SessionTreeMessagesResponse from(String sessionId, List<RunEventSsePayload> snapshotEvents) {
+            SessionTreeProjection projection = sessionTreeProjection(snapshotEvents);
+            return new SessionTreeMessagesResponse(
+                    sessionId,
+                    projection.sessions(),
+                    projection.messagesBySessionId(),
+                    projection.events());
+        }
+    }
+
+    /**
+     * Run scope 内单个 session 的轻量 DTO。
+     */
+    record RunSessionTreeSessionResponse(
+            String rootSessionId,
+            String sessionId,
+            String parentSessionId,
+            boolean childSession) {
+    }
+
+    /**
+     * HTTP snapshot 中保留事件化 payload，便于前端复用 SSE reducer。
+     */
+    record RunSessionTreeEventResponse(
+            String type,
+            String rootSessionId,
+            String sessionId,
+            String parentSessionId,
+            Boolean childSession,
+            Map<String, Object> payload) {
+    }
+
+    private record SessionTreeProjection(
+            List<RunSessionTreeSessionResponse> sessions,
+            Map<String, List<Map<String, Object>>> messagesBySessionId,
+            List<RunSessionTreeEventResponse> events) {
+    }
+
+    private static SessionTreeProjection sessionTreeProjection(List<RunEventSsePayload> snapshotEvents) {
+        Map<String, RunSessionTreeSessionResponse> sessionsById = new LinkedHashMap<>();
+        Map<String, List<Map<String, Object>>> messagesBySessionId = new LinkedHashMap<>();
+        List<RunSessionTreeEventResponse> events = new ArrayList<>();
+        for (RunEventSsePayload event : snapshotEvents == null ? List.<RunEventSsePayload>of() : snapshotEvents) {
+            Map<String, Object> payload = event.payload() == null ? Map.of() : event.payload();
+            String sessionId = text(payload.get("sessionId"));
+            String rootSessionId = text(payload.get("rootSessionId"));
+            String parentSessionId = text(payload.get("parentSessionId"));
+            Boolean childSession = bool(payload.get("isChildSession"));
+            if (sessionId != null) {
+                sessionsById.putIfAbsent(sessionId, new RunSessionTreeSessionResponse(
+                        rootSessionId,
+                        sessionId,
+                        parentSessionId,
+                        Boolean.TRUE.equals(childSession)));
+                messagesBySessionId.computeIfAbsent(sessionId, ignored -> new ArrayList<>()).add(Map.copyOf(payload));
+            }
+            events.add(new RunSessionTreeEventResponse(
+                    event.type(),
+                    rootSessionId,
+                    sessionId,
+                    parentSessionId,
+                    childSession,
+                    Map.copyOf(payload)));
+        }
+        Map<String, List<Map<String, Object>>> immutableMessages = new LinkedHashMap<>();
+        messagesBySessionId.forEach((sessionId, payloads) -> immutableMessages.put(sessionId, List.copyOf(payloads)));
+        return new SessionTreeProjection(
+                List.copyOf(sessionsById.values()),
+                Map.copyOf(immutableMessages),
+                List.copyOf(events));
+    }
+
     private static List<Map<String, Object>> parseParts(String partsJson) {
         if (partsJson == null || partsJson.isBlank()) {
             return null;
@@ -349,6 +452,14 @@ final class RuntimeDtos {
         } catch (JsonProcessingException exception) {
             return null;
         }
+    }
+
+    private static String text(Object value) {
+        return value instanceof String string && !string.isBlank() ? string : null;
+    }
+
+    private static Boolean bool(Object value) {
+        return value instanceof Boolean bool ? bool : null;
     }
 
     /**

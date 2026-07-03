@@ -13,6 +13,7 @@ import com.icbc.testagent.event.RunEventSsePayload;
 import com.icbc.testagent.event.RunEventSseStreamService;
 import jakarta.validation.Valid;
 import java.time.Duration;
+import java.util.List;
 import java.util.Objects;
 import java.util.function.Function;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -210,6 +211,35 @@ public class RunController {
                 DEFAULT_POLL_INTERVAL,
                 DEFAULT_BATCH_LIMIT,
                 snapshotEvents);
+    }
+
+    /**
+     * 查询当前 Run scope 的 root + child session message snapshot；agent-scoped 路径是主入口，旧路径仅兼容。
+     */
+    @GetMapping({
+            "/api/internal/agent/{agentId}/runs/{runId}/session-tree/messages",
+            "/api/internal/platform/opencode-runtime/runs/{runId}/session-tree/messages",
+            "/api/runs/{runId}/session-tree/messages"
+    })
+    public Mono<ApiResponse<RuntimeDtos.RunSessionTreeMessagesResponse>> getSessionTreeMessages(
+            @PathVariable(name = "agentId", required = false) String agentId,
+            @PathVariable("runId") String runId,
+            ServerWebExchange exchange) {
+        String traceId = RuntimeApiSupport.traceId(exchange);
+        RunId currentRunId = new RunId(runId);
+        return Mono.fromCallable(() -> {
+                    List<RunEventSsePayload> snapshotEvents = messageRecoveryService == null
+                            ? List.of()
+                            : (hasAgentId(agentId)
+                                    ? messageRecoveryService.recover(agentId, currentRunId, traceId)
+                                    : messageRecoveryService.recover(currentRunId, traceId))
+                                    .collectList()
+                                    .block(Duration.ofSeconds(30));
+                    return ApiResponse.ok(
+                            RuntimeDtos.RunSessionTreeMessagesResponse.from(runId, snapshotEvents),
+                            traceId);
+                })
+                .subscribeOn(Schedulers.boundedElastic());
     }
 
     /**

@@ -550,6 +550,89 @@ class RuntimeControllerTest {
     }
 
     @Test
+    void runControllerExposesAgentScopedSessionTreeMessages() {
+        RunApplicationService runService = org.mockito.Mockito.mock(RunApplicationService.class);
+        RunEventSseStreamService eventStreamService = org.mockito.Mockito.mock(RunEventSseStreamService.class);
+        RunMessageRecoveryService recoveryService = org.mockito.Mockito.mock(RunMessageRecoveryService.class);
+        RunId runId = new RunId("run_1234567890abcdef");
+        RunEventSsePayload snapshot = new RunEventSsePayload(
+                "evt_live_snapshot",
+                runId.value(),
+                0,
+                "message.updated",
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of(
+                        "rootSessionId", "ses_root",
+                        "sessionId", "ses_child",
+                        "parentSessionId", "ses_root",
+                        "isChildSession", true,
+                        "message", Map.of("id", "msg_child", "role", "assistant")));
+        when(recoveryService.recover(eq("opencode"), eq(runId), eq("trace_1234567890abcdef")))
+                .thenReturn(Flux.just(snapshot));
+        WebTestClient client = WebTestClient.bindToController(new RunController(
+                        runService,
+                        null,
+                        eventStreamService,
+                        recoveryService,
+                        new RunEventSseMapper()))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.get()
+                .uri("/api/internal/agent/opencode/runs/run_1234567890abcdef/session-tree/messages")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.runId").isEqualTo(runId.value())
+                .jsonPath("$.data.sessions[0].sessionId").isEqualTo("ses_child")
+                .jsonPath("$.data.sessions[0].childSession").isEqualTo(true)
+                .jsonPath("$.data.messagesBySessionId.ses_child[0].message.id").isEqualTo("msg_child")
+                .jsonPath("$.data.events[0].type").isEqualTo("message.updated");
+    }
+
+    @Test
+    void sessionControllerExposesAgentScopedSessionTreeMessages() {
+        SessionApplicationService sessionService = org.mockito.Mockito.mock(SessionApplicationService.class);
+        RunMessageRecoveryService recoveryService = org.mockito.Mockito.mock(RunMessageRecoveryService.class);
+        SessionId sessionId = new SessionId("ses_1234567890abcdef");
+        RunEventSsePayload snapshot = new RunEventSsePayload(
+                "evt_live_snapshot",
+                "session_snapshot:" + sessionId.value(),
+                0,
+                "message.updated",
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of(
+                        "rootSessionId", "ses_root",
+                        "sessionId", "ses_child",
+                        "parentSessionId", "ses_root",
+                        "isChildSession", true,
+                        "message", Map.of("id", "msg_child", "role", "assistant")));
+        when(recoveryService.recoverSessionTree(eq("opencode"), eq(sessionId), eq("trace_1234567890abcdef")))
+                .thenReturn(Flux.just(snapshot));
+        WebTestClient client = WebTestClient.bindToController(new SessionController(
+                        sessionService,
+                        null,
+                        recoveryService))
+                .webFilter(new TraceIdWebFilter())
+                .build();
+
+        client.get()
+                .uri("/api/internal/agent/opencode/sessions/ses_1234567890abcdef/session-tree/messages")
+                .header("X-Trace-Id", "trace_1234567890abcdef")
+                .exchange()
+                .expectStatus().isOk()
+                .expectBody()
+                .jsonPath("$.data.sessionId").isEqualTo(sessionId.value())
+                .jsonPath("$.data.sessions[0].sessionId").isEqualTo("ses_child")
+                .jsonPath("$.data.sessions[0].childSession").isEqualTo(true)
+                .jsonPath("$.data.messagesBySessionId.ses_child[0].message.id").isEqualTo("msg_child")
+                .jsonPath("$.data.events[0].type").isEqualTo("message.updated");
+    }
+
+    @Test
     void sessionControllerListsSearchesUpdatesAndSoftDeletesSessions() {
         SessionApplicationService service = org.mockito.Mockito.mock(SessionApplicationService.class);
         when(service.listSessions(eq("demo"), any()))

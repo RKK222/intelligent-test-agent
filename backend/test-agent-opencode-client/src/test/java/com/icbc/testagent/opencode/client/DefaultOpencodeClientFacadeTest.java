@@ -212,6 +212,34 @@ class DefaultOpencodeClientFacadeTest {
     }
 
     @Test
+    void facadeExpandsRootIdleToSessionStatusAndRunSucceeded() throws Exception {
+        FakeGateway gateway = new FakeGateway();
+        ObjectMapper objectMapper = new ObjectMapper();
+        gateway.events = Flux.just(
+                objectMapper.readTree("""
+                        {"id":"evt_step_done","type":"session.next.step.ended","properties":{"sessionID":"ses_remote1234567890abcdef"}}
+                        """),
+                objectMapper.readTree("""
+                        {"id":"evt_idle","type":"session.status","properties":{"sessionID":"ses_remote1234567890abcdef","status":{"type":"idle"}}}
+                        """));
+        OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);
+
+        List<RunEventDraft> drafts = facade.streamRunEvents(new OpencodeStreamEventsCommand(
+                node(),
+                new RunId("run_1234567890abcdef"),
+                "ses_remote1234567890abcdef",
+                "/tmp/demo",
+                null,
+                "trace_1234567890abcdef")).collectList().block();
+
+        assertThat(drafts).extracting(RunEventDraft::type)
+                .containsExactly(
+                        RunEventType.OPENCODE_EVENT_UNKNOWN,
+                        RunEventType.SESSION_STATUS,
+                        RunEventType.RUN_SUCCEEDED);
+    }
+
+    @Test
     void facadeReadsSessionDiffWithoutLeakingGeneratedDtos() {
         FakeGateway gateway = new FakeGateway();
         OpencodeClientFacade facade = facade(gateway, Duration.ofSeconds(1), 0);

@@ -57,6 +57,8 @@
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/sessions` | `/api/sessions` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/runs` | `/api/runs` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/runs/{runId}/events` | `/api/runs/{runId}/events` |
+| `opencode-runtime` | `/api/internal/platform/opencode-runtime/runs/{runId}/session-tree/messages` | `/api/runs/{runId}/session-tree/messages` |
+| `opencode-runtime` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages` | `/api/sessions/{sessionId}/session-tree/messages` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/agents` | `/api/agents` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets` | `/api/sessions/{sessionId}/terminal/tickets` |
 | `opencode-runtime` | `/api/internal/platform/opencode-runtime/management/overview` | 无旧 URL |
@@ -87,6 +89,8 @@
 |---|---|
 | `/api/internal/agent/{agentId}/runs` | 启动 Run；默认前端传 `opencode`。 |
 | `/api/internal/agent/{agentId}/runs/{runId}/events` | 订阅 RunEvent SSE。 |
+| `/api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` | 查询当前 Run scope 的 root + child session message snapshot。 |
+| `/api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` | 查询 root session 下全量历史 session tree message snapshot。 |
 | `/api/internal/agent/{agentId}/runs/{runId}/diff` | 查询 Run 级 Diff。 |
 | `/api/internal/agent/{agentId}/processes/me` | 查询或初始化当前用户的 opencode 进程。 |
 | `/api/internal/agent/{agentId}/processes/me/initialize-operations/{operationId}` | 只读查询当前用户 opencode 进程初始化进度。 |
@@ -1306,6 +1310,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `DELETE` | `/api/sessions/{sessionId}` | 软删除会话，状态变为 `ARCHIVED`。 |
 | `POST` | `/api/sessions/{sessionId}/messages` | 追加会话消息。 |
 | `GET` | `/api/sessions/{sessionId}/messages` | 分页读取会话消息。 |
+| `GET` | `/api/sessions/{sessionId}/session-tree/messages` | 查询 root session 下全量历史 session tree message snapshot。 |
 | `GET` | `/api/sessions/{sessionId}/active-run` | 查询会话最近的非终态 Run；没有时 `data=null`。 |
 
 新平台 URL 使用 `/api/internal/platform/opencode-runtime` 前缀。例如：
@@ -1318,6 +1323,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}` |
 | `POST` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/messages` |
+| `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/session-tree/messages` |
 | `GET` | `/api/internal/platform/opencode-runtime/sessions/{sessionId}/active-run` |
 
 `POST /api/sessions` 请求体：
@@ -1357,6 +1363,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `GET /api/sessions/{sessionId}/messages` 会先在存在 agent binding 时，从 bounded-elastic 线程读取当前 agent 标准 session messages 并 upsert 到 `session_messages`；如果 opencode 进程不可用、超时或远端 session 不存在，接口回退返回数据库快照，不向前端暴露 generated SDK DTO。assistant 的 `content` 只保存可见 text part，不混入 reasoning 或 tool output；仅包含工具/文件 parts 的 assistant 消息允许 `content=""`，结构化内容仍由 `parts` 返回。
 
+`GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 返回 Session root 下全量历史消息树快照，旧 `/api/sessions/{sessionId}/session-tree/messages` 和平台内部 URL 继续兼容。后端通过 `AgentSessionBinding` 找到 root remote session，再按 `run_session_scope_sessions.root_session_id` 拉取跨 Run 已发现的 root/child session；scope 表为空时返回 root-only snapshot。响应字段与 Run 级 snapshot 一致，但顶层标识为 `sessionId`。
+
 `SessionMessageResponse` 基础字段：`messageId`、`sessionId`、`role`、`content`、`createdAt`。当前 role 使用 `USER`、`ASSISTANT`、`SYSTEM`。
 
 新增可选字段：
@@ -1378,6 +1386,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/api/runs/{runId}` | 查询 Run 状态。 |
 | `POST` | `/api/runs/{runId}/cancel` | 取消 Run。 |
 | `GET` | `/api/runs/{runId}/events` | 订阅 RunEvent SSE。 |
+| `GET` | `/api/runs/{runId}/session-tree/messages` | 查询当前 Run scope 的 root + child session message snapshot。 |
 | `GET` | `/api/runs/{runId}/diff` | 查询 Run 级 Diff。 |
 | `POST` | `/api/runs/{runId}/diff/accept` | 接受 Run 级 Diff。 |
 | `POST` | `/api/runs/{runId}/diff/reject` | 拒绝 Run 级 Diff 并触发 opencode revert。 |
@@ -1390,6 +1399,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `GET` | `/api/internal/platform/opencode-runtime/runs/{runId}` |
 | `POST` | `/api/internal/platform/opencode-runtime/runs/{runId}/cancel` |
 | `GET` | `/api/internal/platform/opencode-runtime/runs/{runId}/events` |
+| `GET` | `/api/internal/platform/opencode-runtime/runs/{runId}/session-tree/messages` |
 | `GET` | `/api/internal/platform/opencode-runtime/runs/{runId}/diff` |
 
 agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传 `opencode`。例如：
@@ -1400,6 +1410,7 @@ agent-scoped URL 使用 `/api/internal/agent/{agentId}` 前缀，前端默认传
 | `GET` | `/api/internal/agent/{agentId}/runs/{runId}` |
 | `POST` | `/api/internal/agent/{agentId}/runs/{runId}/cancel` |
 | `GET` | `/api/internal/agent/{agentId}/runs/{runId}/events` |
+| `GET` | `/api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` |
 | `GET` | `/api/internal/agent/{agentId}/runs/{runId}/diff` |
 | `POST` | `/api/internal/agent/{agentId}/runs/{runId}/diff/accept` |
 | `POST` | `/api/internal/agent/{agentId}/runs/{runId}/diff/reject` |
@@ -2116,6 +2127,27 @@ Session 运行态接口：
 `GET /api/internal/agent/{agentId}/runs/{runId}/events` 返回 `text/event-stream`，旧 `GET /api/runs/{runId}/events` 和平台内部 URL 继续兼容。`event` 使用稳定 wire name。durable RunEvent 使用 `seq` 作为 SSE `id`，可通过 `Last-Event-ID` 续传；transient live output 不设置 SSE `id`，payload `seq=0`，不参与续传。浏览器原生 `EventSource` 首次续传可使用 `?lastEventId={seq}`，后端 header 优先、query 兜底。
 
 SSE 建连时，后端会先尝试从当前 Run 绑定的 agent remote session 拉取标准 session messages，并仅把 assistant 消息转换为 transient `message.updated` / `message.part.updated` 发给前端；user 消息已在 Run 启动前由平台保存，不重复回放其 text part，避免被前端误拼进 assistant 正文。随后进入 `run_events` durable replay 与 live bus 合流。高频文本 delta、大段日志和 bash/tool output 不写入 `run_events`；如果远端 session 不可用或拉取失败，后端跳过消息恢复，不阻断 Run 状态、Diff、permission/question 等 durable RunEvent 回放。
+
+`GET /api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` 返回当前 Run scope 的消息树快照，旧 `/api/runs/{runId}/session-tree/messages` 和平台内部 URL 继续兼容。scope 表存在时后端按 root + 当前 Run child session 逐个拉取 agent projected messages；scope 表为空时按旧 root-only 远端 session 降级。响应 `data`：
+
+```json
+{
+  "runId": "run_...",
+  "sessions": [
+    { "rootSessionId": "ses_root", "sessionId": "ses_child", "parentSessionId": "ses_root", "childSession": true }
+  ],
+  "messagesBySessionId": {
+    "ses_child": [
+      { "sessionId": "ses_child", "message": { "id": "msg_...", "role": "assistant" } }
+    ]
+  },
+  "events": [
+    { "type": "message.updated", "sessionId": "ses_child", "payload": {} }
+  ]
+}
+```
+
+该接口是 HTTP snapshot 辅助入口，不替代 RunEvent SSE。它只返回当前 Run scope 子树；root session 下全量历史 child 使用 `GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 查询。
 
 PTY WebSocket 不在上述默认 HTTP/SSE 契约内，已按 `docs/standards/security.md` 增加后端受控例外入口，前端仍不得直连 opencode server、SSH、sidecar 或任意主机。
 

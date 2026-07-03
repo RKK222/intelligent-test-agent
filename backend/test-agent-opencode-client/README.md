@@ -23,7 +23,7 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 - `GeneratedOpencodeSdkGateway`：唯一直接调用 generated SDK 的内部适配器。
 - `OpencodeCreateSessionCommand`、`OpencodeCreateSessionResult`：创建远端 opencode session 并只返回远端 session id。
 - `OpencodeStartRunCommand`、`OpencodeStartCommand`、`OpencodePromptPart`、`OpencodeStartRunResult`：平台 Run 启动命令、原生 slash command、稳定 prompt part 模型和结果，分别映射到 opencode `prompt_async` 与 `/session/{sessionID}/command`，不向 app/domain 暴露 generated DTO。
-- `OpencodeRunEventMapper`：把 opencode raw JSON event 映射为平台 `RunEventDraft`，未知事件降级为 `opencode.event.unknown`；workspace 级全局事件流中显式携带 sessionID 的事件只允许进入匹配 remote session 的 Run。
+- `OpencodeRunEventMapper`：把 opencode raw JSON event 映射为平台 `RunEventDraft`，未知事件降级为 `opencode.event.unknown`；支持按 `RunEventScopeContext` 生成规范化 session 事件和 root 终态派生事件；workspace 级全局事件流中显式携带 sessionID 的事件只允许进入匹配 remote session 的 Run。
 - `OpencodeDiffCommand` / `OpencodeDiffResult`：封装 opencode `sessionDiff`，不泄露 `SnapshotFileDiff`。
 - `OpencodeRejectDiffCommand` / `OpencodeRejectDiffResult`：封装 opencode `sessionRevert`，用于 Run 级拒绝 Diff。
 - `OpencodeRuntimeCommand` / `OpencodeRuntimeResult`：运行态通用 facade 命令，用于受控访问 opencode Web App 需要的 agent/model/provider/command/reference、session、permission、question、fs/vcs/lsp/mcp status/resources/tools 等 HTTP API；返回 Jackson `JsonNode`，不泄露 generated DTO。
@@ -53,7 +53,7 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 ## 后续 AI 编码指引
 
 新增 opencode server 调用、错误映射、事件映射时改这里。除本模块外，不要让其他业务模块直接 import `com.example.opencode.sdk.*`。
-opencode 1.17.8 的 Run 终态既可能来自旧的 `session.next.step.ended`，也可能来自 `session.status` 的 `idle` 状态或 `session.idle`；这些 raw event 必须统一映射为平台 `run.succeeded`，避免前端 Run 长时间停在 `RUNNING`。
+opencode 1.17.8 的 Run 成功终态只由 root `session.status` 的 `idle` 状态或 root `session.idle` 派生；`session.next.step.ended` 只保留为兼容未知事件，不能再直接映射为 `run.succeeded`。child session idle/error 只产生 session 级事件，不改变 Run 终态。
 Web App 复刻新增识别 `message.updated`、`message.part.updated`、`message.part.delta`、`todo.updated`、`permission.*`、`question.*`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed` 等 opencode App 运行态事件，同时保留旧 `assistant.message.delta`、`tool.*`、`diff.*` 兼容事件。
 Facade 对外方法不得返回 generated SDK DTO，新增方法必须同步测试成功、超时、远端错误和 traceId 透传。`workspace` query 仅在后续接入真实 opencode workspace/control-plane 时传入；本地模式默认只传 `directory`。`prompt_async` 的 `text/file/agent` parts 必须通过 `OpencodePromptPart` 传入，generated union DTO 只允许留在本模块内部或用稳定 JSON 请求体替代。session messages 只能读取标准 `/session/{sessionID}/message`，不能改用只含切换事件的 `/api/session/{sessionID}/message`，并只能通过 facade 平台 DTO 输出。
 generated `SessionApi` 中存在和 model 同名的参数包装类时，必须在本模块内用 `ApiClient.invokeAPI` 做安全适配，不能手改 generated SDK。

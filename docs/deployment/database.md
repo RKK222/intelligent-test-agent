@@ -97,9 +97,38 @@
 - `sessions.pinned` 进入 Session API DTO；软删除复用 `status=ARCHIVED`，不新增删除时间字段，旧数据默认 `ACTIVE` 且 `pinned=false`。
 - `run_events.payload_json` 和 `execution_nodes.capabilities_json` 当前为 JSON 文本，便于 H2 和 PostgreSQL 共用测试；未来迁移到 JSONB 时必须先保持旧列读取兼容。
 - `run_events.seq` 由持久化层按同一 run 分配，取消、Diff 动作和 opencode stream 并发追加时必须依赖 `(run_id, seq)` 唯一约束冲突后重试，保持事件流单调递增且不重复。
+- `run_events.raw_event_id` 可空；opencode raw event id 缺失时必须保持 `NULL`，不能写入 `"unknown"` 这类伪值，否则会导致唯一索引误去重。
 - `session_messages.content` 保留为旧文本 fallback；V10 后新增的 `parts_json`、token/cost 字段允许为空，旧数据和旧前端继续只读 `content`。
 - `ai_model_configs` 只保存模型目录元数据，不保存 token、API key 或 provider secret；企业内调用密钥继续由部署环境变量或配置中心注入。
 - 删除或重命名状态、事件类型、数据库字段必须拆分为读取兼容、数据迁移、清理三个阶段。
+
+## V20260703141000 Run Session Scope
+
+`backend/test-agent-persistence/src/main/resources/db/migration/V20260703141000__create_run_session_scopes.sql` 为 Run session tree 和断线恢复增加结构化 scope：
+
+| 表/字段 | 说明 |
+|---|---|
+| `run_session_scopes` | Run 到 root opencode session 的 scope 主表，DB 是恢复事实源。 |
+| `run_session_scopes.root_session_id` | 当前 Run root opencode session ID。 |
+| `run_session_scopes.scope_version` | scope 版本，发现 child 时递增。 |
+| `run_session_scopes.metadata_json` | scope 扩展元数据 JSON 文本，不使用 JSONB。 |
+| `run_session_scope_sessions` | 当前 Run scope 内 root/child session 清单。 |
+| `run_session_scope_sessions.session_id` | scope 内 opencode session ID。 |
+| `run_session_scope_sessions.parent_session_id` | 父 opencode session ID，root 为空。 |
+| `run_session_scope_sessions.discovery_source` | 发现来源，如 `ROOT`、`TASK_PART`、`SESSION_EVENT`、`BOOTSTRAP`。 |
+| `run_session_scope_sessions.task_message_id/task_part_id/task_call_id` | child 与本 Run task part 的绑定信息。 |
+| `run_events.root_session_id/session_id/parent_session_id/is_child_session/scope_version` | RunEvent scope 预留列，可空兼容历史事件。 |
+| `run_events.raw_event_id` | opencode raw event ID，缺失保持 `NULL`。 |
+
+约束和索引：
+
+- `run_session_scopes.run_id` 唯一并外键引用 `runs.run_id`。
+- `run_session_scope_sessions(run_id, session_id)` 唯一。
+- `uq_run_events_scope_raw_event(run_id, session_id, raw_event_id)` 用于 raw event 去重；`raw_event_id is null` 的事件不参与误去重。
+- `idx_run_events_scope_session_seq(run_id, root_session_id, session_id, seq)` 支持 Run scope 内按 session 恢复事件。
+- `idx_run_session_scope_sessions_root(root_session_id, discovered_at)` 支持 Session 级历史树按 root session 汇总跨 Run 已发现 child。
+
+当前 `RunSessionScopeRepository` 已通过 MyBatis XML 实现，Run 启动后会记录 root scope，并支持按 Run 或 root session 查询；`JdbcRunEventRepository` 尚未迁移到 MyBatis，`run_events` scope 列为后续 append-only 仓储迁移预留。
 
 ## V5 用户认证表
 

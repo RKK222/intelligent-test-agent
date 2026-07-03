@@ -14,7 +14,20 @@ public record RunEventDraft(
         RunEventType type,
         String traceId,
         Instant occurredAt,
-        Map<String, Object> payload) {
+        Map<String, Object> payload,
+        RunEventScopeContext scopeContext) {
+
+    /**
+     * 兼容旧调用方的构造器；无 scope 的事件仍可按原 payload 语义追加。
+     */
+    public RunEventDraft(
+            RunId runId,
+            RunEventType type,
+            String traceId,
+            Instant occurredAt,
+            Map<String, Object> payload) {
+        this(runId, type, traceId, occurredAt, payload, null);
+    }
 
     /**
      * 校验事件草稿必填字段，并复制 payload，正式 eventId/seq 留给 Repository 分配。
