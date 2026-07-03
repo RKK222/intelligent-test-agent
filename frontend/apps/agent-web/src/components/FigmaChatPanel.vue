@@ -4569,6 +4569,22 @@ function onCompositionEnd() {
   margin-top: 6px;
 }
 
+.figma-chat-timeline-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin: 10px 0 0 46px;
+  padding: 0 0 12px;
+  position: relative;
+  z-index: 0;
+}
+
+.figma-chat-timeline-actions .figma-chat-feedback {
+  margin-top: 0;
+}
+
 .figma-chat-feedback-btn,
 .figma-chat-action-btn {
   display: inline-flex;

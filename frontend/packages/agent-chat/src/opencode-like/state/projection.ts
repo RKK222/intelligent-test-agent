@@ -8,6 +8,7 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
     rows.push({ type: "thinking", key: "thinking:pending", userMessageId: "__pending__" });
   }
 
+  let orphanHasAssistantHeader = false;
   for (const assistantMessage of state.orphanAssistantMessages) {
     const assistantMessageId = canonicalMessageId(assistantMessage);
     const groups = groupRenderableParts(state.partsByMessageId[assistantMessageId] ?? [], {
@@ -15,6 +16,7 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
     });
     let partIndex = 0;
     for (const group of groups) {
+      const showAssistantHeader = !orphanHasAssistantHeader;
       if (group.type === "context-tool-group") {
         rows.push({
           type: "context-tool-group",
@@ -23,7 +25,8 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
           messageId: assistantMessageId,
           refs: group.refs.map((ref) => ({ messageId: assistantMessageId, partId: ref.partId })),
           busy: state.running,
-          previousAssistantPart: partIndex > 0
+          previousAssistantPart: partIndex > 0 || orphanHasAssistantHeader,
+          showAssistantHeader
         });
       } else {
         rows.push({
@@ -32,9 +35,11 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
           userMessageId: "__orphan__",
           messageId: assistantMessageId,
           partId: group.partId,
-          previousAssistantPart: partIndex > 0
+          previousAssistantPart: partIndex > 0 || orphanHasAssistantHeader,
+          showAssistantHeader
         });
       }
+      orphanHasAssistantHeader = true;
       partIndex += 1;
     }
   }
@@ -48,6 +53,7 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
     rows.push({ type: "user-message", key: `user:${userMessageId}`, userMessageId });
 
     const assistantMessages = state.assistantMessagesByParent[userMessageId] ?? [];
+    let hasAssistantHeader = false;
     for (const assistantMessage of assistantMessages) {
       const assistantMessageId = canonicalMessageId(assistantMessage);
       const groups = groupRenderableParts(state.partsByMessageId[assistantMessageId] ?? [], {
@@ -56,6 +62,7 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
       let partIndex = 0;
 
       for (const group of groups) {
+        const showAssistantHeader = !hasAssistantHeader;
         if (group.type === "context-tool-group") {
           rows.push({
             type: "context-tool-group",
@@ -64,7 +71,8 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
             messageId: assistantMessageId,
             refs: group.refs.map((ref) => ({ messageId: assistantMessageId, partId: ref.partId })),
             busy: state.running,
-            previousAssistantPart: partIndex > 0
+            previousAssistantPart: partIndex > 0 || hasAssistantHeader,
+            showAssistantHeader
           });
         } else {
           rows.push({
@@ -73,9 +81,11 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
             userMessageId,
             messageId: assistantMessageId,
             partId: group.partId,
-            previousAssistantPart: partIndex > 0
+            previousAssistantPart: partIndex > 0 || hasAssistantHeader,
+            showAssistantHeader
           });
         }
+        hasAssistantHeader = true;
         partIndex += 1;
       }
     }

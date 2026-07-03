@@ -63,6 +63,24 @@ describe("OpencodeTimeline", () => {
     expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();
   });
 
+  it("shows one assistant header for split assistant messages in the same user turn", async () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "你是谁"),
+        assistantMessage("msg_assistant_reasoning", [reasoningPart("part_reasoning", "先判断用户意图。")]),
+        assistantMessage("msg_assistant_tool", [toolPart("part_skill", "skill", { name: "using-superpowers" })]),
+        assistantMessage("msg_assistant_answer", [textPart("part_answer", "我是测试智能体。")])
+      ]
+    });
+
+    const { container, getByText } = render(OpencodeTimeline, { props: { state } });
+    await waitMarkdown();
+
+    expect(container.querySelectorAll(".oc-assistant-frame__avatar")).toHaveLength(1);
+    expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(1);
+    expect(getByText("我是测试智能体。")).toBeTruthy();
+  });
+
   it("allows user to interrupt auto-scrolling by scrolling up", async () => {
     const initialMessages: AgentMessage[] = [
       userMessage("msg_user_1", "分析 checkout 失败"),
@@ -137,6 +155,10 @@ function assistantMessage(id: string, parts: MessagePart[]): Extract<AgentMessag
 
 function textPart(partId: string, text: string): Extract<MessagePart, { type: "text" }> {
   return { partId, type: "text", text, status: "completed" };
+}
+
+function reasoningPart(partId: string, text: string): Extract<MessagePart, { type: "reasoning" }> {
+  return { partId, type: "reasoning", text, status: "completed" };
 }
 
 function toolPart(

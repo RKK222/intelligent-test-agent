@@ -66,6 +66,7 @@ export type TimelineRow =
       refs: Array<{ messageId: string; partId: string }>;
       busy: boolean;
       previousAssistantPart: boolean;
+      showAssistantHeader: boolean;
     }
   | {
       type: "assistant-part";
@@ -74,6 +75,7 @@ export type TimelineRow =
       messageId: string;
       partId: string;
       previousAssistantPart: boolean;
+      showAssistantHeader: boolean;
     }
   | { type: "thinking"; key: string; userMessageId: string }
   | { type: "retry"; key: string; userMessageId: string; attempt?: number }

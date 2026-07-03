@@ -64,6 +64,7 @@ const contextParts = computed(() => {
     class="oc-row"
     :message="assistantMessage"
     :continuation="row.previousAssistantPart"
+    :show-header="row.showAssistantHeader"
   >
     <ContextToolGroup :parts="contextParts" :busy="row.busy" />
   </AssistantMessageFrame>
@@ -72,6 +73,7 @@ const contextParts = computed(() => {
     class="oc-row"
     :message="assistantMessage"
     :continuation="row.previousAssistantPart"
+    :show-header="row.showAssistantHeader"
   >
     <AssistantPartRow
       :part="assistantPart"

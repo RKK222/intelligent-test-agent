@@ -42,7 +42,8 @@
   margin-top: 2px;
 }
 
-.oc-assistant-frame.is-continuation .oc-assistant-frame__content {
+.oc-assistant-frame.is-continuation .oc-assistant-frame__content,
+.oc-assistant-frame.is-headerless .oc-assistant-frame__content {
   grid-column: 2;
 }
 
