@@ -366,7 +366,19 @@ public final class ManagedWorkspaceResponses {
             List<String> conflictFiles,
             String message,
             boolean remotePushed,
-            String headCommit) {
+            String headCommit,
+            List<String> executedCommands) {
+
+        public PersonalWorkspacePublishResponse(
+                String status,
+                String personalWorkspaceId,
+                String versionId,
+                List<String> conflictFiles,
+                String message,
+                boolean remotePushed,
+                String headCommit) {
+            this(status, personalWorkspaceId, versionId, conflictFiles, message, remotePushed, headCommit, List.of());
+        }
     }
 
     /**

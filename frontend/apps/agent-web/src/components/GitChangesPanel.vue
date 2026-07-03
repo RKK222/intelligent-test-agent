@@ -11,7 +11,13 @@ import {
   Minus,
   RefreshCw,
   Loader2,
-  Undo2
+  Undo2,
+  X,
+  GitMerge,
+  User,
+  CheckCircle2,
+  Circle,
+  XCircle
 } from "lucide-vue-next";
 import { createBackendApiClient, BackendApiError } from "@test-agent/backend-api";
 import { MergeConflictEditor } from "@test-agent/diff-viewer";
@@ -114,6 +120,48 @@ const progressMessage = ref("");
 const activeConflict = ref<WorkspaceGitConflict | null>(null);
 const conflictLoading = ref(false);
 const conflictResolving = ref(false);
+const showCommitProgressDialog = ref(false);
+const commitStep = ref(0);
+const executedCommands = ref<string[]>([]);
+
+function getCommitStepClass(stepNum: number) {
+  if (errorMessage.value && commitStep.value === stepNum) {
+    return "is-failed";
+  }
+  if (commitStep.value > stepNum) {
+    return "is-succeeded";
+  }
+  if (commitStep.value === stepNum) {
+    return "is-running";
+  }
+  return "is-pending";
+}
+
+function getCommitStepIcon(stepNum: number) {
+  if (errorMessage.value && commitStep.value === stepNum) {
+    return XCircle;
+  }
+  if (commitStep.value > stepNum) {
+    return CheckCircle2;
+  }
+  if (commitStep.value === stepNum) {
+    return Loader2;
+  }
+  return Circle;
+}
+
+function getCommitStepStatusText(stepNum: number) {
+  if (errorMessage.value && commitStep.value === stepNum) {
+    return "FAILED";
+  }
+  if (commitStep.value > stepNum) {
+    return "SUCCEEDED";
+  }
+  if (commitStep.value === stepNum) {
+    return "RUNNING";
+  }
+  return "PENDING";
+}
 // 切换测试数据可能发生在真实刷新未完成时，用 token 丢弃旧请求回写，避免列表被清空。
 let refreshChangesToken = 0;
 
@@ -523,15 +571,30 @@ async function handleCommit(push = false) {
   committing.value = true;
   errorMessage.value = "";
   progressMessage.value = "";
+  executedCommands.value = [];
+  showCommitProgressDialog.value = true;
+  commitStep.value = 1; // 准备合并并拉取远程分支
 
   try {
     if (workbench.useMockTestData) {
       progressMessage.value = "正在提交变更 (测试模式)...";
+      executedCommands.value.push("git status");
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      commitStep.value = 2; // 暂存并提交本地变更
+      executedCommands.value.push("git add .");
+      executedCommands.value.push("git commit -m \"" + msg + "\"");
       await new Promise((resolve) => setTimeout(resolve, 800));
       if (push) {
-        progressMessage.value = "正在推送变更到远程分支 (测试模式)...";
+        commitStep.value = 3; // 合并远程分支代码
+        executedCommands.value.push("git fetch origin main");
+        executedCommands.value.push("git merge origin/main");
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        commitStep.value = 4; // 推送合并结果到远程仓库
+        executedCommands.value.push("git push origin main");
         await new Promise((resolve) => setTimeout(resolve, 800));
       }
+      commitStep.value = 5; // Success
+      
       // Clear all staged paths
       stagedWorkspacePaths.value.clear();
       publicAgentDiffs.value.forEach((f) => {
@@ -560,6 +623,7 @@ async function handleCommit(push = false) {
       }
       progressMessage.value = "正在合并推送到应用版本分支...";
       const preview = await api.previewPersonalWorkspacePublish(props.personalWorkspaceId);
+      executedCommands.value = ["git fetch origin"];
       if (
         preview.incomingCommitCount > 0
         && !window.confirm(
@@ -569,17 +633,22 @@ async function handleCommit(push = false) {
         )
       ) {
         progressMessage.value = "";
+        showCommitProgressDialog.value = false;
+        committing.value = false;
         return;
       }
+      commitStep.value = 2; // 暂存并提交本地变更
       const result = await api.publishPersonalWorkspace(props.personalWorkspaceId, {
         commitMessage: msg,
         files: workspaceStaged.value.map((file) => file.path),
         expectedApplicationHead: preview.applicationHead
       });
+      executedCommands.value = result.executedCommands || [];
       if (result.status === "CONFLICT") {
         const conflictMessage = `合并产生 ${result.conflictFiles.length} 个冲突文件。可全部保留个人版本、全部采用远程版本，或逐个处理。`;
         errorMessage.value = conflictMessage;
         progressMessage.value = "";
+        commitStep.value = 3; // Step 3 failed
         await refreshChanges({ preserveError: true });
         errorMessage.value = conflictMessage;
         committing.value = false;
@@ -588,6 +657,7 @@ async function handleCommit(push = false) {
       if (result.status !== "MERGED" || result.remotePushed !== true) {
         throw new Error("远端推送结果未确认，请刷新变更列表并检查远程分支后重试。");
       }
+      commitStep.value = 5; // Success
       // 推送成功：清除暂存状态
       stagedWorkspacePaths.value.clear();
       progressMessage.value = "已提交并推送到应用版本！";
@@ -719,11 +789,11 @@ defineExpose({
       />
     </div>
     <!-- Header status / errors -->
-    <div v-if="errorMessage" class="git-error">
+    <div v-if="errorMessage && !showCommitProgressDialog" class="git-error">
       <AlertTriangle class="h-3.5 w-3.5 shrink-0 mt-[2px]" :stroke-width="1.5" />
       <span>{{ errorMessage }}</span>
     </div>
-    <div v-if="progressMessage" class="git-progress">
+    <div v-if="progressMessage && !showCommitProgressDialog" class="git-progress">
       <Loader2 class="h-3.5 w-3.5 shrink-0 animate-spin" :stroke-width="1.5" />
       <span>{{ progressMessage }}</span>
     </div>
@@ -757,43 +827,42 @@ defineExpose({
               <span class="git-sub-badge ml-1">({{ workspaceUnstaged.length + workspaceConflicts.length }})</span>
             </div>
             <div v-show="workspaceUnstagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
-              <div v-if="workspaceConflicts.length > 0" class="git-conflict-banner bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 rounded p-2.5 mb-2.5 text-slate-700 dark:text-slate-300">
-                <div class="flex items-start gap-2 mb-2.5">
-                  <AlertTriangle class="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-500" />
-                  <div>
-                    <div class="font-semibold text-xs text-amber-800 dark:text-amber-400">检测到 {{ workspaceConflicts.length }} 个冲突文件</div>
-                    <div class="text-[11px] text-amber-700 dark:text-amber-500 mt-0.5 leading-relaxed">可点击下方文件逐个处理，或者通过以下按钮进行批量解决：</div>
-                  </div>
+              <div v-if="workspaceConflicts.length > 0" class="git-conflict-banner bg-amber-50/80 dark:bg-amber-950/15 border border-amber-200 dark:border-amber-900/30 rounded p-2 mb-2 text-slate-700 dark:text-slate-300 shadow-sm">
+                <div class="flex items-center gap-1.5 mb-1.5">
+                  <AlertTriangle class="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
+                  <span class="font-semibold text-xs text-amber-900 dark:text-amber-400">检测到 {{ workspaceConflicts.length }} 个冲突</span>
                 </div>
-                <div class="flex flex-col gap-1.5">
-                  <div class="flex items-center gap-2">
+                <div class="flex flex-col gap-1">
+                  <div class="flex items-center gap-1.5">
                     <Button
                       size="sm"
                       variant="secondary"
-                      class="flex-1 text-[11px] h-7 border-amber-200 dark:border-amber-900 bg-white dark:bg-zinc-900 hover:bg-amber-50 text-amber-800 dark:text-amber-400 hover:text-amber-900 transition-all font-medium"
+                      class="flex-1 text-xs h-6.5 border-amber-200 hover:border-amber-300 dark:border-amber-800 bg-white hover:bg-amber-50 text-amber-900 dark:text-amber-400 dark:bg-zinc-900 dark:hover:bg-amber-950/20 transition-all font-medium px-1 flex items-center justify-center gap-1 shadow-sm"
                       :disabled="conflictResolving"
                       @click.stop="resolveAllWorkspaceConflicts('CURRENT')"
                     >
-                      全部保留个人版本
+                      <User class="h-3 w-3 text-amber-700 dark:text-amber-500" />
+                      <span>保留个人 (Mine)</span>
                     </Button>
                     <Button
                       size="sm"
                       variant="secondary"
-                      class="flex-1 text-[11px] h-7 border-amber-200 dark:border-amber-900 bg-white dark:bg-zinc-900 hover:bg-amber-50 text-amber-800 dark:text-amber-400 hover:text-amber-900 transition-all font-medium"
+                      class="flex-1 text-xs h-6.5 border-amber-200 hover:border-amber-300 dark:border-amber-800 bg-white hover:bg-amber-50 text-amber-900 dark:text-amber-400 dark:bg-zinc-900 dark:hover:bg-amber-950/20 transition-all font-medium px-1 flex items-center justify-center gap-1 shadow-sm"
                       :disabled="conflictResolving"
                       @click.stop="resolveAllWorkspaceConflicts('INCOMING')"
                     >
-                      全部采用远程版本
+                      <GitMerge class="h-3 w-3 text-amber-700 dark:text-amber-500" />
+                      <span>采用远程 (Theirs)</span>
                     </Button>
                   </div>
                   <Button
                     size="sm"
                     variant="ghost"
-                    class="w-full text-[11px] h-7 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
+                    class="w-full text-xs h-6 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 transition-all font-normal"
                     :disabled="conflictResolving"
                     @click.stop="abortWorkspaceConflict"
                   >
-                    取消本次合并
+                    取消本次合并 (Abort)
                   </Button>
                 </div>
               </div>
@@ -1029,6 +1098,76 @@ defineExpose({
           <span>提交并推送</span>
         </button>
       </div>
+    </div>
+
+    <!-- Git Commit & Push Progress Dialog Overlay -->
+    <div v-if="showCommitProgressDialog" class="ta-process-startup-backdrop" role="presentation">
+      <section class="ta-process-startup-dialog" role="dialog" aria-modal="true" aria-label="提交并推送">
+        <header class="ta-process-startup-header">
+          <div>
+            <h2 class="text-sm font-bold text-zinc-900 dark:text-zinc-100">提交并推送进度</h2>
+            <p v-if="committing" class="text-xs text-zinc-500">正在处理中...</p>
+            <p v-else-if="errorMessage" class="text-xs text-red-600 font-medium">执行失败</p>
+            <p v-else class="text-xs text-green-600 font-medium">执行成功</p>
+          </div>
+          <button type="button" class="ta-process-startup-close" aria-label="关闭" :disabled="committing" @click="showCommitProgressDialog = false">
+            <X :size="16" />
+          </button>
+        </header>
+
+        <ol class="ta-process-startup-steps px-4 py-2">
+          <li :class="['ta-process-startup-step', getCommitStepClass(1)]">
+            <component :is="getCommitStepIcon(1)" :size="18" class="ta-process-startup-step-icon" />
+            <div class="ta-process-startup-step-copy">
+              <span>准备合并并拉取远程分支</span>
+              <small>{{ getCommitStepStatusText(1) }}</small>
+            </div>
+          </li>
+          <li :class="['ta-process-startup-step', getCommitStepClass(2)]">
+            <component :is="getCommitStepIcon(2)" :size="18" class="ta-process-startup-step-icon" />
+            <div class="ta-process-startup-step-copy">
+              <span>暂存并提交本地变更</span>
+              <small>{{ getCommitStepStatusText(2) }}</small>
+            </div>
+          </li>
+          <li :class="['ta-process-startup-step', getCommitStepClass(3)]">
+            <component :is="getCommitStepIcon(3)" :size="18" class="ta-process-startup-step-icon" />
+            <div class="ta-process-startup-step-copy">
+              <span>合并远程分支代码</span>
+              <small>{{ getCommitStepStatusText(3) }}</small>
+            </div>
+          </li>
+          <li :class="['ta-process-startup-step', getCommitStepClass(4)]">
+            <component :is="getCommitStepIcon(4)" :size="18" class="ta-process-startup-step-icon" />
+            <div class="ta-process-startup-step-copy">
+              <span>推送合并结果到远程仓库</span>
+              <small>{{ getCommitStepStatusText(4) }}</small>
+            </div>
+          </li>
+        </ol>
+
+        <!-- Command Log Console -->
+        <div class="px-4 py-3 border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/20">
+          <div class="text-xs font-semibold text-zinc-500 mb-2 uppercase tracking-wider">执行的 Git 命令日志</div>
+          <div class="bg-zinc-950 dark:bg-black text-zinc-300 font-mono text-xs p-3 rounded-lg overflow-y-auto max-h-[160px] space-y-1.5 leading-relaxed border border-zinc-900 shadow-inner">
+            <div v-if="executedCommands.length === 0" class="text-zinc-500 italic text-xs">暂无执行的命令</div>
+            <div v-for="(cmd, idx) in executedCommands" :key="idx" class="flex items-start gap-1">
+              <span class="text-zinc-600 shrink-0 font-bold">$</span>
+              <span class="break-all text-left w-full">{{ cmd }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="errorMessage" class="ta-process-startup-error mx-4 my-3 text-left">
+          <strong class="text-xs">错误说明</strong>
+          <p class="text-xs leading-normal mt-1">{{ errorMessage }}</p>
+        </div>
+
+        <footer class="ta-process-startup-footer">
+          <span>{{ props.personalWorkspaceId }}</span>
+          <button type="button" :disabled="committing" @click="showCommitProgressDialog = false">关闭</button>
+        </footer>
+      </section>
     </div>
   </div>
 </template>
@@ -1381,5 +1520,154 @@ defineExpose({
 
 .git-action-btn.btn-push:hover:not(:disabled) {
   background: #1d4ed8;
+}
+
+/* Progress Dialog Styles matching OpencodeProcessStartupDialog */
+.ta-process-startup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(15 23 42 / 45%);
+  backdrop-filter: blur(2px);
+}
+
+.ta-process-startup-dialog {
+  width: min(500px, 100%);
+  max-height: min(650px, calc(100vh - 40px));
+  overflow: auto;
+  border: 1px solid var(--ta-border, #d8dee9);
+  border-radius: 12px;
+  background: var(--ta-panel, #ffffff);
+  color: var(--ta-text, #18202f);
+  box-shadow: 0 22px 55px rgb(15 23 42 / 22%);
+}
+
+.ta-process-startup-header,
+.ta-process-startup-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--ta-border, #edf2f7);
+  text-align: left;
+}
+
+.ta-process-startup-footer {
+  border-top: 1px solid var(--ta-border, #edf2f7);
+  border-bottom: 0;
+  color: var(--ta-muted, #667085);
+  font-size: 11px;
+}
+
+.ta-process-startup-close,
+.ta-process-startup-footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  border: 1px solid var(--ta-border, #e2e8f0);
+  border-radius: 6px;
+  background: var(--ta-surface, #f8fafc);
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ta-process-startup-close {
+  width: 28px;
+  padding: 0;
+}
+
+.ta-process-startup-footer button {
+  padding: 0 12px;
+  font-weight: 500;
+}
+
+.ta-process-startup-footer button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.ta-process-startup-steps {
+  display: grid;
+  gap: 0;
+  list-style: none;
+}
+
+.ta-process-startup-step {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--ta-border-subtle, #f7fafc);
+  text-align: left;
+}
+
+.ta-process-startup-step:last-child {
+  border-bottom: 0;
+}
+
+.ta-process-startup-step-icon {
+  color: var(--ta-muted, #94a3b8);
+}
+
+.ta-process-startup-step.is-running .ta-process-startup-step-icon {
+  color: #2563eb;
+  animation: ta-process-spin 1.1s linear infinite;
+}
+
+.ta-process-startup-step.is-succeeded .ta-process-startup-step-icon {
+  color: #16a34a;
+}
+
+.ta-process-startup-step.is-failed .ta-process-startup-step-icon {
+  color: #dc2626;
+}
+
+.ta-process-startup-step-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ta-process-startup-step-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 500;
+  color: #334155;
+}
+
+.ta-process-startup-step-copy small {
+  color: var(--ta-muted, #64748b);
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.ta-process-startup-error {
+  padding: 10px 12px;
+  border: 1px solid #fca5a5;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.ta-process-startup-error strong {
+  font-size: 14px;
+  display: block;
+}
+
+@keyframes ta-process-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

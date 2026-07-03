@@ -1597,6 +1597,7 @@ export type PublishPersonalWorkspaceResult = {
   message: string;
   remotePushed?: boolean;
   headCommit?: string | null;
+  executedCommands?: string[];
 };
 
 export type PublishPersonalWorkspacePreview = {

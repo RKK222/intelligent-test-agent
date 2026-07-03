@@ -1240,7 +1240,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "conflictFiles": [],
   "message": "合并成功: abc123...",
   "remotePushed": true,
-  "headCommit": "abc123..."
+  "headCommit": "abc123...",
+  "executedCommands": ["git fetch", "git merge", "git push"]
 }
 
 // 冲突
@@ -1249,7 +1250,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
   "personalWorkspaceId": "psw_...",
   "versionId": "awv_...",
   "conflictFiles": ["src/App.java", "src/Config.java"],
-  "message": "合并冲突，请在个人工作区中解决冲突后重新提交并推送"
+  "message": "合并冲突，请在个人工作区中解决冲突后重新提交并推送",
+  "executedCommands": ["git fetch", "git merge"]
 }
 ```
 

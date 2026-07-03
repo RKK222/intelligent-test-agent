@@ -1,6 +1,6 @@
 package com.icbc.testagent.common.git;
-
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -8,6 +8,27 @@ import java.util.List;
  */
 @FunctionalInterface
 public interface GitCommandExecutor {
+
+    ThreadLocal<List<String>> EXECUTED_COMMANDS = ThreadLocal.withInitial(ArrayList::new);
+    ThreadLocal<Boolean> RECORDING = ThreadLocal.withInitial(() -> false);
+
+    static void startRecording() {
+        RECORDING.set(true);
+        EXECUTED_COMMANDS.get().clear();
+    }
+
+    static List<String> stopRecording() {
+        RECORDING.set(false);
+        List<String> commands = new ArrayList<>(EXECUTED_COMMANDS.get());
+        EXECUTED_COMMANDS.get().clear();
+        return commands;
+    }
+
+    static void record(List<String> command) {
+        if (Boolean.TRUE.equals(RECORDING.get())) {
+            EXECUTED_COMMANDS.get().add(String.join(" ", command));
+        }
+    }
 
     /**
      * 执行 Git 命令并返回 stdout；privateKey 为空时使用后端进程默认 Git/SSH 环境。

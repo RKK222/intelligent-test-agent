@@ -1437,6 +1437,32 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String expectedApplicationHead,
             UserId userId,
             String traceId) {
+        try {
+            com.icbc.testagent.common.git.GitCommandExecutor.startRecording();
+            ManagedWorkspaceResponses.PersonalWorkspacePublishResponse response =
+                    publishPersonalWorkspaceInternal(personalWorkspaceId, commitMessage, files, expectedApplicationHead, userId, traceId);
+            return new ManagedWorkspaceResponses.PersonalWorkspacePublishResponse(
+                    response.status(),
+                    response.personalWorkspaceId(),
+                    response.versionId(),
+                    response.conflictFiles(),
+                    response.message(),
+                    response.remotePushed(),
+                    response.headCommit(),
+                    new java.util.ArrayList<>(com.icbc.testagent.common.git.GitCommandExecutor.stopRecording())
+            );
+        } finally {
+            com.icbc.testagent.common.git.GitCommandExecutor.stopRecording();
+        }
+    }
+
+    private ManagedWorkspaceResponses.PersonalWorkspacePublishResponse publishPersonalWorkspaceInternal(
+            String personalWorkspaceId,
+            String commitMessage,
+            List<String> files,
+            String expectedApplicationHead,
+            UserId userId,
+            String traceId) {
         PersonalWorkspace personal = existingPersonal(new PersonalWorkspaceId(personalWorkspaceId));
         ensurePersonalOwner(personal, userId);
         ApplicationWorkspaceVersion version = existingVersion(personal.versionId());

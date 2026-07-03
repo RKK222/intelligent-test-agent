@@ -2,6 +2,22 @@
 
 ## Entries
 
+### 2026-07-03 - 优化冲突批量解决 Banner 尺寸与提交进度字体字号
+
+- Why:
+  1. 上一版的冲突解决 Banner 在窄侧边栏下纵向高度过大，遮挡了较多变更文件列表区域，且底部“放弃合并”按钮被截断，不够紧凑精致。
+  2. 提交进度弹窗内的字体字号使用了不一致的 arbitrary 属性（如 `text-[10px]`、`text-[11px]`），不符合前端全局排版关于次要文字（14px）、说明Caption（12px）的统一规约。
+  3. 主项目仓库 `/Users/kaka/Desktop/intelligent-test-agent` 中残留了由上一轮会话脚本错误执行 checked out 的测试分支 `feature_testagent_20260705_*` 和临时 worktree，干扰了主工作区的干净状态。
+- What:
+  - 极简化冲突 Banner 布局：减少 padding 到 `p-2`，精简说明文案，将“全部保留个人版本 (Mine)”与“全部采用远程版本 (Theirs)”左右横向平铺，极大压缩了纵向高度，避免遮挡和滚动截断。
+  - 规整字体字号：修改进度弹窗及 CSS 中的字体大小，使用全局统一的 `text-xs` (12px) 和 `text-sm` (14px) 规约。
+  - 清理主仓库 Git 污染：强制卸载并删除所有无用的 20260705 测试 worktree 与分支，还原主仓库 main 的干净状态。
+- How:
+  - 修改 [GitChangesPanel.vue](file:///Users/kaka/Desktop/intelligent-test-agent/frontend/apps/agent-web/src/components/GitChangesPanel.vue) 中的冲突 banner 节点样式结构、横向平铺布局、以及隐藏与弹窗共存的 inline error 节点以防 Vitest 多文本冲突。
+  - 修改 [git-changes-panel.test.ts](file:///Users/kaka/Desktop/intelligent-test-agent/frontend/apps/agent-web/tests/git-changes-panel.test.ts) 以使用 regex 部分匹配新的按钮名。
+  - 执行 `git worktree remove` 和 `git branch -D` 清理无用分支。
+- Result: 前端全量 251 个 Vitest 测试全绿通过，`corepack pnpm typecheck` 成功无错。主工作区恢复干净。
+
 ### 2026-07-03 - 优化 Git 冲突 UI 与 Diff 性能并造测试数据
 
 - Why: 解决冲突时，"全部选择个人/全部选择远程" 的按钮以未定义样式的普通 HTML button 裸露在红色的冲突提示下，交互风格非常古怪、不美观；同时当文件变更列表较大时，后端对每个变更文件逐个依次运行 `git diff` 进程，产生极大的进程创建开销，导致 Diff 区域文件加载非常缓慢。

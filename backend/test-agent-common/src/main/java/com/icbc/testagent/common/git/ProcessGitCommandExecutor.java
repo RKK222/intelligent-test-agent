@@ -23,6 +23,7 @@ public class ProcessGitCommandExecutor implements GitCommandExecutor {
 
     @Override
     public GitCommandResult execute(List<String> command, String privateKey, Duration timeout) {
+        GitCommandExecutor.record(command);
         Path keyFile = null;
         try {
             ProcessBuilder builder = new ProcessBuilder(command)

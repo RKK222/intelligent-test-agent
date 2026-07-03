@@ -558,7 +558,7 @@ describe("GitChangesPanel", () => {
       global: { plugins: [createPinia()] }
     });
 
-    await fireEvent.click(await view.findByRole("button", { name: "全部保留个人版本" }));
+    await fireEvent.click(await view.findByRole("button", { name: /保留个人/ }));
 
     await waitFor(() => expect(apiClientMock.resolveAllWorkspaceGitConflicts)
       .toHaveBeenCalledWith("wrk_1234567890abcdef", { resolution: "CURRENT" }));
