@@ -96,7 +96,8 @@ public class AgentConfigOperationWebSocketHandler implements WebSocketHandler {
         message.put("type", event.type());
         message.put("operationId", event.operationId());
         message.put("status", event.status().name());
-        message.put("currentStep", event.step().name());
+        message.put("currentStep", event.currentStep());
+        message.put("command", event.command());
         message.put("errorCode", event.errorCode());
         message.put("errorMessage", event.errorMessage());
         message.put("commitHash", event.commitHash());

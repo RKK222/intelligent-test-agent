@@ -19,7 +19,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - 托管应用成员校验失败时统一返回带加载上下文的 `FORBIDDEN`：message 显示应用、版本和工作区类型/名称/ID，`details` 只包含 `loadingStage`、`appId`、`appName`、`versionId`、`version`、`applicationWorkspaceId`、`workspaceKind`、`workspaceName`、`workspaceId`、`personalWorkspaceId` 等安全业务字段，便于排查“切换应用失败”时实际加载的是哪个应用、版本和工作区。
 - 通过 domain 广播端口发布/消费 `workspace.version.sync-requested`，并通过本机补偿器扫描缺失或落后的副本。
 - 与文件相关的 git 操作、差异比对、agent/skill 文件管理优先进入本模块。
-- 工作区 Git Diff 使用 `git status --porcelain --untracked-files=all` 展开未跟踪目录中的每个文件；unmerged 状态保留 `rawStatus` 并返回 `status=conflict`。普通文件通过真实 stage/unstage API 操作 index；冲突支持逐文件处理、全部采用个人/远程版本和取消 merge。个人发布先预览远程变化并校验 expected HEAD，再提交白名单；应用 pull 后立即同步版本/副本 commit。已有 merge 冲突解决后的继续发布不再重复拉远程。只有远端 push 完成才返回 `remotePushed=true`，响应和错误 details 会携带当前 Git 阶段与已执行命令，供前端展示真实进度。
+- 工作区 Git Diff 使用 `git status --porcelain --untracked-files=all` 展开未跟踪目录中的每个文件；unmerged 状态保留 `rawStatus` 并返回 `status=conflict`。普通文件通过真实 stage/unstage API 操作 index；冲突支持逐文件处理、全部采用个人/远程版本和取消 merge。个人发布先预览远程变化并校验 expected HEAD，再提交白名单；应用 pull 后立即同步版本/副本 commit。已有 merge 冲突解决后的继续发布不再重复拉远程。只有远端 push 完成才返回 `remotePushed=true`，响应和错误 details 会携带当前 Git 阶段与已执行命令；传入 `operationId` 时复用 Agent 配置进度端口，在每条实际 Git 命令启动前发布当前 `command`，不通过轮询或额外 Git 查询获取进度。
 
 ## 测试覆盖
 

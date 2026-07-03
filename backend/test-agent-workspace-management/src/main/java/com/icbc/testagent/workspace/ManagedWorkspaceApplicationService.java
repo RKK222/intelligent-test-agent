@@ -18,6 +18,7 @@ import com.icbc.testagent.domain.configuration.CodeRepository;
 import com.icbc.testagent.domain.configuration.CodeRepositoryId;
 import com.icbc.testagent.domain.configuration.CommonParameterValues;
 import com.icbc.testagent.domain.configuration.ConfigurationManagementRepository;
+import com.icbc.testagent.domain.configuration.AgentConfigOperationStatus;
 import com.icbc.testagent.domain.configuration.UserSshKey;
 import com.icbc.testagent.domain.configuration.WorkspaceCreateOperation;
 import com.icbc.testagent.domain.configuration.WorkspaceCreateOperationRepository;
@@ -60,6 +61,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -128,6 +130,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     private final SshKeyEncryptionService sshKeyEncryptionService;
     private final WorkspaceServerIdentity serverIdentity;
     private final ServerBroadcastPublisher broadcastPublisher;
+    private final AgentConfigProgressSink progressSink;
     private final String broadcastInstanceId;
     private final Object defaultPersonalWorkspaceLock = new Object();
 
@@ -145,6 +148,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             UserRepository userRepository,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher,
+            ObjectProvider<AgentConfigProgressSink> progressSinkProvider,
             SshKeyEncryptionService sshKeyEncryptionService) {
         this(
                 configurationRepository,
@@ -157,7 +161,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 new GitWorkspaceService(),
                 sshKeyEncryptionService,
                 serverIdentity,
-                broadcastPublisher);
+                broadcastPublisher,
+                Optional.ofNullable(progressSinkProvider.getIfAvailable()).orElse(AgentConfigProgressSink.NOOP));
     }
 
     /**
@@ -182,7 +187,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 gitWorkspaceService,
                 sshKeyEncryptionService,
                 new WorkspaceServerIdentity("127.0.0.1"),
-                NOOP_BROADCAST_PUBLISHER);
+                NOOP_BROADCAST_PUBLISHER,
+                AgentConfigProgressSink.NOOP);
     }
 
     /**
@@ -209,7 +215,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 gitWorkspaceService,
                 sshKeyEncryptionService,
                 serverIdentity,
-                broadcastPublisher);
+                broadcastPublisher,
+                AgentConfigProgressSink.NOOP);
     }
 
     /**
@@ -238,7 +245,8 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
                 gitWorkspaceService,
                 sshKeyEncryptionService,
                 serverIdentity,
-                broadcastPublisher);
+                broadcastPublisher,
+                AgentConfigProgressSink.NOOP);
     }
 
     ManagedWorkspaceApplicationService(
@@ -253,6 +261,34 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             SshKeyEncryptionService sshKeyEncryptionService,
             WorkspaceServerIdentity serverIdentity,
             ServerBroadcastPublisher broadcastPublisher) {
+        this(
+                configurationRepository,
+                commonParameterValues,
+                workspaceCreateOperationRepository,
+                managedWorkspaceRepository,
+                workspaceRepository,
+                userRepository,
+                gitRemoteService,
+                gitWorkspaceService,
+                sshKeyEncryptionService,
+                serverIdentity,
+                broadcastPublisher,
+                AgentConfigProgressSink.NOOP);
+    }
+
+    ManagedWorkspaceApplicationService(
+            ConfigurationManagementRepository configurationRepository,
+            CommonParameterValues commonParameterValues,
+            WorkspaceCreateOperationRepository workspaceCreateOperationRepository,
+            ManagedWorkspaceRepository managedWorkspaceRepository,
+            WorkspaceRepository workspaceRepository,
+            UserRepository userRepository,
+            GitRemoteService gitRemoteService,
+            GitWorkspaceService gitWorkspaceService,
+            SshKeyEncryptionService sshKeyEncryptionService,
+            WorkspaceServerIdentity serverIdentity,
+            ServerBroadcastPublisher broadcastPublisher,
+            AgentConfigProgressSink progressSink) {
         this.configurationRepository = Objects.requireNonNull(configurationRepository, "configurationRepository must not be null");
         this.commonParameterValues = Objects.requireNonNull(commonParameterValues, "commonParameterValues must not be null");
         this.pathResolver = new ManagedWorkspacePathResolver(this.commonParameterValues);
@@ -266,6 +302,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         this.sshKeyEncryptionService = Objects.requireNonNull(sshKeyEncryptionService, "sshKeyEncryptionService must not be null");
         this.serverIdentity = Objects.requireNonNull(serverIdentity, "serverIdentity must not be null");
         this.broadcastPublisher = Objects.requireNonNull(broadcastPublisher, "broadcastPublisher must not be null");
+        this.progressSink = progressSink == null ? AgentConfigProgressSink.NOOP : progressSink;
         this.broadcastInstanceId = this.broadcastPublisher.instanceId();
     }
 
@@ -1438,6 +1475,16 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String personalWorkspaceId,
             String commitMessage,
             List<String> files,
+            String expectedApplicationHead,
+            UserId userId,
+            String traceId) {
+        return publishPersonalWorkspace(personalWorkspaceId, commitMessage, files, expectedApplicationHead, null, userId, traceId);
+    }
+
+    public ManagedWorkspaceResponses.PersonalWorkspacePublishResponse publishPersonalWorkspace(
+            String personalWorkspaceId,
+            String commitMessage,
+            List<String> files,
             UserId userId,
             String traceId) {
         return publishPersonalWorkspace(
@@ -1449,12 +1496,14 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
             String commitMessage,
             List<String> files,
             String expectedApplicationHead,
+            String operationId,
             UserId userId,
             String traceId) {
         PublishProgressContext progress = new PublishProgressContext();
         List<String> commands = List.of();
         try {
-            com.icbc.testagent.common.git.GitCommandExecutor.startRecording();
+            com.icbc.testagent.common.git.GitCommandExecutor.startRecording(
+                    command -> progress.command(command, operationId, traceId));
             ManagedWorkspaceResponses.PersonalWorkspacePublishResponse response =
                     publishPersonalWorkspaceInternal(personalWorkspaceId, commitMessage, files, expectedApplicationHead, userId, traceId, progress);
             commands = new java.util.ArrayList<>(com.icbc.testagent.common.git.GitCommandExecutor.stopRecording());
@@ -1647,7 +1696,7 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
         return "";
     }
 
-    private static final class PublishProgressContext {
+    private final class PublishProgressContext {
         private String currentStep = "PREPARE_REMOTE";
 
         private void step(String currentStep) {
@@ -1656,6 +1705,27 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
 
         private String currentStep() {
             return currentStep;
+        }
+
+        private void command(String command, String operationId, String traceId) {
+            if (operationId == null || operationId.isBlank()) {
+                return;
+            }
+            try {
+                progressSink.publish(new AgentConfigProgressEvent(
+                        operationId,
+                        "step",
+                        AgentConfigOperationStatus.RUNNING,
+                        currentStep,
+                        command,
+                        null,
+                        null,
+                        null,
+                        traceId,
+                        Instant.now()));
+            } catch (RuntimeException exception) {
+                LOGGER.warn("发布个人工作区 Git 进度事件失败 operationId={} traceId={}", operationId, traceId, exception);
+            }
         }
     }
 

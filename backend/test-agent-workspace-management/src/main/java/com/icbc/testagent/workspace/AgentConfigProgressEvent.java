@@ -1,7 +1,6 @@
 package com.icbc.testagent.workspace;
 
 import com.icbc.testagent.domain.configuration.AgentConfigOperationStatus;
-import com.icbc.testagent.domain.configuration.AgentConfigOperationStep;
 import java.time.Instant;
 
 /**
@@ -11,7 +10,8 @@ public record AgentConfigProgressEvent(
         String operationId,
         String type,
         AgentConfigOperationStatus status,
-        AgentConfigOperationStep step,
+        String currentStep,
+        String command,
         String errorCode,
         String errorMessage,
         String commitHash,

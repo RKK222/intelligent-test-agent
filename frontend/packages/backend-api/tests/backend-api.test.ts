@@ -1604,6 +1604,61 @@ describe("backend-api", () => {
       operationId: "aco_worktree"
     });
   });
+
+  it("waits for agent config progress websocket open before resolving", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          success: true,
+          traceId: "trace_fixed",
+          data: {
+            ticket: "agt_progress",
+            expiresAt: "2026-06-26T10:00:00Z",
+            webSocketUrl: "/api/internal/platform/workspace-management/agent-config/operations/aco_progress/ws?ticket=agt_progress"
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    const socket: {
+      onopen: WebSocketEventHandler;
+      onmessage: WebSocketEventHandler;
+      onerror: WebSocketEventHandler;
+      onclose: WebSocketEventHandler;
+      readyState: number;
+      send: (payload: string) => void;
+      close: () => void;
+    } = {
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      readyState: 0,
+      send: () => undefined,
+      close: () => undefined
+    };
+    const progressWebSocketFactory: WorkspaceWebSocketFactory = () => socket;
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed",
+      webSocketFactory: progressWebSocketFactory
+    });
+
+    const connection = client.connectAgentConfigProgress("aco_progress", vi.fn());
+    let resolved = false;
+    connection.then(() => {
+      resolved = true;
+    });
+
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    socket.readyState = 1;
+    socket.onopen?.({});
+
+    await expect(connection).resolves.toBe(socket);
+    expect(resolved).toBe(true);
+  });
 });
 
 type WebSocketEventHandler = ((event: any) => void) | null;

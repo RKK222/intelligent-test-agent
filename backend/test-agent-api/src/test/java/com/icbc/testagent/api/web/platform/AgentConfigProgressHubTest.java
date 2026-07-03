@@ -5,7 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastEvent;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastPublisher;
 import com.icbc.testagent.domain.configuration.AgentConfigOperationStatus;
-import com.icbc.testagent.domain.configuration.AgentConfigOperationStep;
 import com.icbc.testagent.workspace.AgentConfigProgressEvent;
 import com.icbc.testagent.workspace.WorkspaceServerIdentity;
 import java.time.Instant;
@@ -23,7 +22,8 @@ class AgentConfigProgressHubTest {
                 "aco_progress_12345678",
                 "step",
                 AgentConfigOperationStatus.RUNNING,
-                AgentConfigOperationStep.PUSHING,
+                "PUSHING",
+                "git push origin main",
                 null,
                 null,
                 null,
@@ -46,7 +46,8 @@ class AgentConfigProgressHubTest {
         assertThat(received)
                 .extracting(AgentConfigProgressEvent::operationId)
                 .containsExactly("aco_progress_12345678");
-        assertThat(received.get(0).step()).isEqualTo(AgentConfigOperationStep.PUSHING);
+        assertThat(received.get(0).currentStep()).isEqualTo("PUSHING");
+        assertThat(received.get(0).command()).isEqualTo("git push origin main");
     }
 
     private static final class RecordingBroadcastPublisher implements ServerBroadcastPublisher {

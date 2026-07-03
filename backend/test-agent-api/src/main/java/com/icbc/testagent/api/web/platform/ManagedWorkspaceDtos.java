@@ -41,6 +41,7 @@ final class ManagedWorkspaceDtos {
     record PublishPersonalWorkspaceRequest(
             String commitMessage,
             List<String> files,
-            String expectedApplicationHead) {
+            String expectedApplicationHead,
+            String operationId) {
     }
 }

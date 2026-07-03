@@ -29,6 +29,7 @@ import {
 } from "@test-agent/workbench-shell";
 import type {
   AgentConfigDiffFile,
+  AgentConfigProgressEvent,
   RunDiffFile,
   WorkspaceGitDiffFile,
   WorkspaceGitConflict,
@@ -216,6 +217,18 @@ function commandsForStep(commands: string[] | undefined, step?: string | null): 
 function applyPublishExecution(step: string | null | undefined, commands?: string[]) {
   commitStep.value = commitStepNumber(step);
   executedCommands.value = commandsForStep(commands, step);
+}
+
+function applyPublishProgressEvent(event: AgentConfigProgressEvent) {
+  if (event.currentStep) {
+    commitStep.value = commitStepNumber(event.currentStep);
+  }
+  if (event.command && event.command.trim()) {
+    executedCommands.value = [event.command];
+  }
+  if (event.type === "failed") {
+    errorMessage.value = event.errorMessage ? `提交失败：${event.errorMessage}` : "提交失败";
+  }
 }
 
 function publishErrorExecution(error: unknown) {
@@ -694,39 +707,43 @@ async function handleCommit(push = false) {
         committing.value = false;
         return;
       }
+      const personalWorkspaceId = props.personalWorkspaceId;
       progressMessage.value = "正在合并推送到应用版本分支...";
       let expectedApplicationHead: string | undefined;
       if (!mergeResolutionCompleted.value) {
         const preview = await api.previewPersonalWorkspacePublish(props.personalWorkspaceId);
         expectedApplicationHead = preview.applicationHead || undefined;
-        if (
-          preview.incomingCommitCount > 0
-          && !window.confirm(
-            `应用分支相对当前个人分支多 ${preview.incomingCommitCount} 个提交，涉及 ${preview.changedFileCount} 个文件`
-            + `（新增 ${preview.addedCount}、修改 ${preview.modifiedCount}、删除 ${preview.deletedCount}、重命名 ${preview.renamedCount}）。`
-            + "继续后 Git 会把应用分支合入个人分支；如有冲突，将保留 Git 原生冲突现场。是否继续？"
-          )
-        ) {
-          progressMessage.value = "";
-          committing.value = false;
-          return;
-        }
       }
 
       showCommitProgressDialog.value = true;
       commitStep.value = mergeResolutionCompleted.value ? 2 : 1;
+      const publishOperationId = newOperationId();
+      let publishProgressSocket: { close: () => void } | null = null;
+      try {
+        publishProgressSocket = await api.connectAgentConfigProgress(publishOperationId, applyPublishProgressEvent);
+      } catch {
+        publishProgressSocket = null;
+      }
       const payload: {
         commitMessage: string;
         files: string[];
         expectedApplicationHead?: string;
+        operationId?: string;
       } = {
         commitMessage: msg,
-        files: workspaceStaged.value.map((file) => file.path)
+        files: workspaceStaged.value.map((file) => file.path),
+        operationId: publishOperationId
       };
       if (expectedApplicationHead) {
         payload.expectedApplicationHead = expectedApplicationHead;
       }
-      const result = await api.publishPersonalWorkspace(props.personalWorkspaceId, payload);
+      const result = await (async () => {
+        try {
+          return await api.publishPersonalWorkspace(personalWorkspaceId, payload);
+        } finally {
+          setTimeout(() => publishProgressSocket?.close(), 1000);
+        }
+      })();
       applyPublishExecution(result.currentStep, result.executedCommands);
       if (result.status === "CONFLICT") {
         const conflictMessage = `合并产生 ${result.conflictFiles.length} 个冲突文件。可全部保留个人版本、全部采用远程版本，或逐个处理。`;

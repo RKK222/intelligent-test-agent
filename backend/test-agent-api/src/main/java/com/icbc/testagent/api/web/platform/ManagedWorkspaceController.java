@@ -279,6 +279,7 @@ public class ManagedWorkspaceController {
                 request.commitMessage(),
                 request.files(),
                 request.expectedApplicationHead(),
+                request.operationId(),
                 userId(exchange),
                 RuntimeApiSupport.traceId(exchange)));
     }

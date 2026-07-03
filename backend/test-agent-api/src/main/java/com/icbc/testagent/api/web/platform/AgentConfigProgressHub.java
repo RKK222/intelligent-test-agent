@@ -5,7 +5,6 @@ import com.icbc.testagent.domain.broadcast.ServerBroadcastEvent;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastHandler;
 import com.icbc.testagent.domain.broadcast.ServerBroadcastPublisher;
 import com.icbc.testagent.domain.configuration.AgentConfigOperationStatus;
-import com.icbc.testagent.domain.configuration.AgentConfigOperationStep;
 import com.icbc.testagent.workspace.AgentConfigProgressEvent;
 import com.icbc.testagent.workspace.AgentConfigProgressSink;
 import com.icbc.testagent.workspace.WorkspaceServerIdentity;
@@ -78,7 +77,8 @@ public class AgentConfigProgressHub implements AgentConfigProgressSink, ServerBr
         payload.put("operationId", event.operationId());
         payload.put("type", event.type());
         payload.put("status", event.status().name());
-        payload.put("step", event.step().name());
+        payload.put("step", event.currentStep());
+        putIfPresent(payload, "command", event.command());
         putIfPresent(payload, "errorCode", event.errorCode());
         putIfPresent(payload, "errorMessage", event.errorMessage());
         putIfPresent(payload, "commitHash", event.commitHash());
@@ -102,7 +102,8 @@ public class AgentConfigProgressHub implements AgentConfigProgressSink, ServerBr
                 requiredString(payload, "operationId"),
                 requiredString(payload, "type"),
                 AgentConfigOperationStatus.valueOf(requiredString(payload, "status")),
-                AgentConfigOperationStep.valueOf(requiredString(payload, "step")),
+                requiredString(payload, "step"),
+                optionalString(payload, "command"),
                 optionalString(payload, "errorCode"),
                 optionalString(payload, "errorMessage"),
                 optionalString(payload, "commitHash"),

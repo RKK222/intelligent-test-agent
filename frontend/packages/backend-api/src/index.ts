@@ -126,6 +126,9 @@ type WorkspaceWebSocketLike = {
 export type WorkspaceWebSocketFactory = (url: string) => WorkspaceWebSocketLike;
 export type AgentConfigProgressHandler = (event: AgentConfigProgressEvent) => void;
 
+const WEBSOCKET_OPEN_STATE = 1;
+const AGENT_CONFIG_PROGRESS_OPEN_TIMEOUT_MS = 3000;
+
 export type BackendApiClientOptions = {
   baseUrl?: string;
   agentId?: string;
@@ -803,7 +806,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       );
       const socket = webSocketFactory(toWebSocketUrl(baseUrl, ticket.webSocketUrl));
       socket.onmessage = (event) => onEvent(JSON.parse(event.data) as AgentConfigProgressEvent);
-      socket.onerror = () =>
+      let opened = socket.readyState === WEBSOCKET_OPEN_STATE;
+      socket.onerror = () => {
         onEvent({
           type: "failed",
           operationId,
@@ -811,6 +815,40 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
           errorCode: "WEBSOCKET_ERROR",
           errorMessage: "Agent 配置进度连接失败"
         });
+      };
+      if (!opened) {
+        // Git 发布可能在几十毫秒内执行第一条命令；这里等待连接真正打开，避免丢失“当前正在执行的命令”事件。
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            socket.close();
+            reject(new Error("Agent 配置进度连接超时"));
+          }, AGENT_CONFIG_PROGRESS_OPEN_TIMEOUT_MS);
+          socket.onopen = () => {
+            opened = true;
+            clearTimeout(timeout);
+            resolve();
+          };
+          socket.onerror = () => {
+            clearTimeout(timeout);
+            onEvent({
+              type: "failed",
+              operationId,
+              status: "FAILED",
+              errorCode: "WEBSOCKET_ERROR",
+              errorMessage: "Agent 配置进度连接失败"
+            });
+            reject(new Error("Agent 配置进度连接失败"));
+          };
+        });
+        socket.onerror = () =>
+          onEvent({
+            type: "failed",
+            operationId,
+            status: "FAILED",
+            errorCode: "WEBSOCKET_ERROR",
+            errorMessage: "Agent 配置进度连接失败"
+          });
+      }
       return socket;
     },
     listAllSessions: (page = 1, size = 20, q?: string) => request<PageResponse<Session>>(`/api/sessions${query({ page, size, q })}`),

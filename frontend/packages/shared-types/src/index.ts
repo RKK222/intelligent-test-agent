@@ -221,6 +221,7 @@ export type AgentConfigProgressEvent = {
   errorCode?: string | null;
   errorMessage?: string | null;
   commitHash?: string | null;
+  command?: string | null;
   traceId?: string;
   occurredAt?: string;
 };
@@ -1586,6 +1587,7 @@ export type PublishPersonalWorkspacePayload = {
   commitMessage: string;
   files: string[];
   expectedApplicationHead?: string;
+  operationId?: string;
 };
 
 /** 个人工作区发布结果 */

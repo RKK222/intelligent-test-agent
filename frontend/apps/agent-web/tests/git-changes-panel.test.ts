@@ -321,11 +321,12 @@ describe("GitChangesPanel", () => {
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: selected only");
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
 
-    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", {
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
       commitMessage: "fix: selected only",
       files: ["src/selected.ts"],
-      expectedApplicationHead: "application_head"
-    }));
+      expectedApplicationHead: "application_head",
+      operationId: expect.stringMatching(/^aco_/)
+    })));
     await waitFor(() => expect(view.queryByText("src/selected.ts")).toBeNull());
     expect(await view.findByText("src/unselected.ts")).toBeTruthy();
   });
@@ -410,11 +411,12 @@ describe("GitChangesPanel", () => {
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: conflict prompt");
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
 
-    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", {
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
       commitMessage: "fix: conflict prompt",
       files: ["workspace/docs/selected.md"],
-      expectedApplicationHead: "application_head"
-    }));
+      expectedApplicationHead: "application_head",
+      operationId: expect.stringMatching(/^aco_/)
+    })));
     expect(await view.findByText(/合并产生 1 个冲突文件/)).toBeTruthy();
     expect(await view.findByText("CONFLICT")).toBeTruthy();
     expect(await view.findByText("AU")).toBeTruthy();
@@ -479,10 +481,11 @@ describe("GitChangesPanel", () => {
     await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: finish merge");
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
 
-    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", {
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
       commitMessage: "fix: finish merge",
-      files: ["src/conflict.ts"]
-    }));
+      files: ["src/conflict.ts"],
+      operationId: expect.stringMatching(/^aco_/)
+    })));
     expect(apiClientMock.previewPersonalWorkspacePublish).not.toHaveBeenCalled();
   });
 
@@ -520,6 +523,38 @@ describe("GitChangesPanel", () => {
     expect(await view.findByText("git -C /repo pull --ff-only feature_x")).toBeTruthy();
     expect(view.queryByText("git fetch origin")).toBeNull();
     expect(view.getByText("FAILED")).toBeTruthy();
+  });
+
+  it("shows the currently running git command from publish progress events", async () => {
+    let progressHandler: ((event: { currentStep?: string; command?: string; status?: string }) => void) | undefined;
+    apiClientMock.connectAgentConfigProgress.mockImplementationOnce(async (_operationId: string, handler: typeof progressHandler) => {
+      progressHandler = handler;
+      return { close: vi.fn() };
+    });
+    apiClientMock.getWorkspaceGitDiff.mockResolvedValue({
+      files: [{ path: "src/selected.ts", status: "modified", rawStatus: "M ", staged: true, patch: "", additions: 1, deletions: 0 }]
+    });
+    apiClientMock.publishPersonalWorkspace.mockReturnValueOnce(new Promise(() => {}));
+
+    const view = render(GitChangesPanel, {
+      props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
+      global: { plugins: [createPinia()] }
+    });
+
+    expect(await view.findByText("src/selected.ts")).toBeTruthy();
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: remote");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    await waitFor(() => expect(apiClientMock.connectAgentConfigProgress).toHaveBeenCalled());
+    progressHandler?.({
+      currentStep: "COMMIT_LOCAL",
+      command: "git -C /repo commit -m fix: remote",
+      status: "RUNNING"
+    });
+
+    expect(await view.findByText("git -C /repo commit -m fix: remote")).toBeTruthy();
+    expect(view.getByText("RUNNING")).toBeTruthy();
+    expect(apiClientMock.publishPersonalWorkspace.mock.calls[0][1].operationId).toMatch(/^aco_/);
   });
 
   it("opens the three-way editor for a conflict row", async () => {
@@ -645,8 +680,8 @@ describe("GitChangesPanel", () => {
       .toHaveBeenCalledWith("wrk_1234567890abcdef", { resolution: "CURRENT" }));
   });
 
-  it("pauses publish when incoming application changes are not confirmed", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(false);
+  it("publishes after preview without blocking on incoming application changes", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     apiClientMock.previewPersonalWorkspacePublish.mockResolvedValueOnce({
       applicationHead: "application_new",
       personalHead: "personal_head",
@@ -675,6 +710,12 @@ describe("GitChangesPanel", () => {
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
 
     await waitFor(() => expect(apiClientMock.previewPersonalWorkspacePublish).toHaveBeenCalledWith("psw_default"));
-    expect(apiClientMock.publishPersonalWorkspace).not.toHaveBeenCalled();
+    await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
+      commitMessage: "fix: preview",
+      files: ["src/selected.ts"],
+      expectedApplicationHead: "application_new",
+      operationId: expect.stringMatching(/^aco_/)
+    })));
+    expect(confirmSpy).not.toHaveBeenCalled();
   });
 });

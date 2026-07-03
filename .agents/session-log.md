@@ -2,6 +2,13 @@
 
 ## Entries
 
+### 2026-07-03 - 个人工作区发布实时展示当前 Git 命令
+
+- Why: 提交并推送进度弹窗在步骤运行中仍显示“暂无执行的命令”，只能在请求结束后看到已执行命令；用户需要弹窗展示当前步骤正在执行的具体 Git 命令，并在下一条命令或下一阶段开始时立即切换。
+- What: 个人工作区 publish 请求支持可选 `operationId`，前端先连接既有 Agent 配置进度 WebSocket，再发起 publish；后端在每条真实 Git 命令启动前通过 `AgentConfigProgressSink` 发布 `command` 进度事件，前端弹窗实时用该事件替换当前命令，接口结束后再回填完整 `executedCommands`。发布前 preview 只保留 expected HEAD 并发保护，不再因应用分支有待合入提交弹确认框，真实冲突交给 Git merge 结果展示。
+- How: 复用 `GitCommandExecutor` 的命令记录点和 `/agent-config/operations/{operationId}/ws` ticket WebSocket，不新增轮询、不额外执行 Git 查询；`backend-api` 等待 WebSocket open 后再返回连接，避免首条命令事件在连接建立前丢失。
+- Result: 后端 workspace/API 定向测试、前端 backend-api/Git 面板/diff-viewer 定向测试和 agent-web/backend-api typecheck 通过；进度事件广播只包含 operation/status/step/command/error/commit 等安全字段，不携带文件内容、token 或私钥。
+
 ### 2026-07-03 - 极简化 Git 冲突批量解决 Banner 布局与交互
 
 - Why: 窄侧边栏下，原有的纵向大 Banner 堆叠和按钮文字换行折叠极易发生遮挡与溢出重叠，且占用过多纵向空间。此外，全局的 button 标签默认 14px 粗体规则覆盖了局部未设定字号的组件，导致按钮显得过于笨重。
