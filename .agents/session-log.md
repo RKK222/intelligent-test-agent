@@ -3520,3 +3520,26 @@ bash /tmp/test-api-after-restart.sh
 - What: `agent-chat` 时间线投影不再渲染空白 `text` part，`MarkdownView` 对空白 source 同步显示“无内容”并跳过 markdown/highlight 渲染调度，`TextPartView` 也对空源做轻量防御；`AgentWorkbench` 的任务消耗统计和实时追踪扫描改为基于 step-finish/reasoning 与已完成写文件工具的稳定签名触发，不再使用消息树 deep watch。
 - How: 新增 root/child scope + 88 次 read 聚合 + 空 running text 的投影与渲染回归测试，覆盖主/子 Agent 切换后不出现空输出占位；同步更新 `agent-chat` 与 `agent-web` README。未改后端、HTTP API、RunEvent SSE、数据库、generated SDK 或环境配置。
 - Result: 定向 Vitest、`@test-agent/agent-chat` typecheck、`@test-agent/agent-web` typecheck 和 `@test-agent/agent-web` build 均通过；build 仍有既有 CSS `@import` 顺序与大 chunk 警告，非本次改动引入。
+
+### 2026-07-04 - 翻译过程项中工具名称为中文
+
+- Why: 过程展示时间线中的部分工具调用（如 `todowrite`、`edit` 等）直接展示了英文工具名（例如 `todowrite`、`edit`），不够美观，且与已汉化的“探索”、“思考状态”等部分不一致，影响用户体验。
+- What:
+  - 汉化 `tool-registry.ts` 中 `getToolInfo` 的所有工具名映射：
+    - `skill` -> `"技能"`
+    - `bash` -> `"命令行"`
+    - `read` -> `"读取"`
+    - `list` -> `"列表"`
+    - `edit` -> `"编辑"`
+    - `write` -> `"写入"`
+    - `todowrite` -> `"更新待办"`
+    - `apply_patch` -> `"应用补丁"`
+    - `webfetch`/`web_fetch` -> `"网页获取"`
+    - `websearch`/`web_search` -> `"网页搜索"`
+    - `task` -> `"任务"`
+    - `question` -> `"提问"`
+    - `lsp` -> `"LSP"`
+    - `doom_loop`/`doomloop` -> `"死循环"`
+  - 更新 `opencode-timeline.test.ts` 和 `FigmaChatPanel.test.ts` 中对上述工具标题的断言，将英文名称替换为中文（如将 `bash`、`skill`、`write`、`read` 分别断言为 `"命令行"`、`"技能"`、`"写入"`、`"读取"`）。
+- How: 修改 `frontend/packages/agent-chat/src/opencode-like/state/tool-registry.ts` 以及对应的测试文件，不影响任何后端 API、事件、数据库、generated SDK 或环境配置。
+- Result: 整个前端项目打包构建和 `typecheck` 通过，308 个前端 Vitest 测试全部通过。

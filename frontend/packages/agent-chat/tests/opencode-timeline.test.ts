@@ -457,8 +457,8 @@ describe("OpencodeTimeline", () => {
 
     expect(container.querySelectorAll('[data-testid="oc-tool-group"]')).toHaveLength(3);
     expect(container.querySelectorAll(".oc-tool-group__trigger")).toHaveLength(3);
-    expect(getByText("bash")).toBeTruthy();
-    expect(getByText("skill")).toBeTruthy();
+    expect(getByText("命令行")).toBeTruthy();
+    expect(getByText("技能")).toBeTruthy();
     expect(container.querySelectorAll(".oc-tool-group__trigger .oc-tool__subtitle")[0]?.textContent).toBe("2 次");
     expect(container.querySelectorAll(".oc-tool-group__trigger .oc-tool__status")[0]?.textContent).toBe("已读取");
     expect(container.querySelectorAll(".oc-tool-group__trigger .oc-tool__status")[1]?.textContent).toBe("失败");

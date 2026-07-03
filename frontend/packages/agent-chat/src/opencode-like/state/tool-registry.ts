@@ -24,41 +24,53 @@ export function getToolInfo(part: Extract<MessagePart, { type: "tool" }>): ToolI
   const path = toolPath(part);
   const displayPath = formatDisplayPath(path);
   if (tool === "skill") {
-    return { title: "skill", subtitle: displayPath, fullSubtitle: path, family: "skill" };
+    return { title: "技能", subtitle: displayPath, fullSubtitle: path, family: "skill" };
   }
   if (tool === "bash") {
-    return { title: "bash", subtitle: commandValue(part), family: "shell" };
+    return { title: "命令行", subtitle: commandValue(part), family: "shell" };
   }
   if (tool === "read") {
-    return { title: "read", subtitle: displayPath, fullSubtitle: path, family: "context" };
+    return { title: "读取", subtitle: displayPath, fullSubtitle: path, family: "context" };
   }
   if (tool === "list") {
-    return { title: "list", subtitle: displayPath, fullSubtitle: path, family: "context" };
+    return { title: "列表", subtitle: displayPath, fullSubtitle: path, family: "context" };
   }
   if (tool === "glob") {
-    return { title: "glob", subtitle: text(part.input?.pattern), family: "context" };
+    return { title: "Glob", subtitle: text(part.input?.pattern), family: "context" };
   }
   if (tool === "grep") {
     const pattern = text(part.input?.pattern);
-    return { title: "grep", subtitle: pattern ?? displayPath, fullSubtitle: pattern ? path : undefined, family: "context" };
+    return { title: "Grep", subtitle: pattern ?? displayPath, fullSubtitle: pattern ? path : undefined, family: "context" };
   }
-  if (tool === "edit" || tool === "write") {
-    return { title: tool, subtitle: displayPath, fullSubtitle: path, family: "file" };
+  if (tool === "edit") {
+    return { title: "编辑", subtitle: displayPath, fullSubtitle: path, family: "file" };
+  }
+  if (tool === "write") {
+    return { title: "写入", subtitle: displayPath, fullSubtitle: path, family: "file" };
+  }
+  if (tool === "todowrite") {
+    return { title: "更新待办", subtitle: displayPath, fullSubtitle: path, family: "generic" };
   }
   if (tool === "apply_patch") {
-    return { title: "apply patch", subtitle: displayPath, fullSubtitle: path, family: "diff" };
+    return { title: "应用补丁", subtitle: displayPath, fullSubtitle: path, family: "diff" };
   }
   if (tool === "webfetch" || tool === "web_fetch") {
-    return { title: "web fetch", subtitle: text(part.input?.url), family: "web" };
+    return { title: "网页获取", subtitle: text(part.input?.url), family: "web" };
   }
   if (tool === "websearch" || tool === "web_search") {
-    return { title: "web search", subtitle: text(part.input?.query), family: "web" };
+    return { title: "网页搜索", subtitle: text(part.input?.query), family: "web" };
   }
   if (tool === "task") {
-    return { title: "task", subtitle: text(part.input?.description) ?? text(part.input?.prompt), family: "task" };
+    return { title: "任务", subtitle: text(part.input?.description) ?? text(part.input?.prompt), family: "task" };
   }
   if (tool === "question") {
-    return { title: "question", subtitle: text(part.input?.question), family: "question" };
+    return { title: "提问", subtitle: text(part.input?.question), family: "question" };
+  }
+  if (tool === "lsp") {
+    return { title: "LSP", subtitle: displayPath, fullSubtitle: path, family: "generic" };
+  }
+  if (tool === "doom_loop" || tool === "doomloop") {
+    return { title: "死循环", subtitle: displayPath, fullSubtitle: path, family: "generic" };
   }
   return { title: part.toolName, subtitle: displayPath, fullSubtitle: path, family: "generic" };
 }
