@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-03 - 绑定原生 pending task 与 child session
+
+- Why:
+  - 原生 opencode 创建子 Agent 时先发送 root `message.part.updated` task pending 事件，再发送带 `parentID` 的 child `session.created`；task part 初始没有 child session id，导致前端只能显示短暂未绑定入口，后续 snapshot/removed 或 sync 包装去重后入口偶发消失。
+- What:
+  - `OpencodeRunEventMapper` 解开 opencode `payload.syncEvent` 包装，使用内层 event type/id/data，保证 direct 与 sync 事件共享 raw event id 去重。
+  - `RunSessionScopeRouter` 对 root pending task part 维护 `runId + parentSessionId` FIFO 队列，child `session.created/session.updated(parentID)` 到达时补齐 `taskMessageId/taskPartId/taskCallId`，并从 child `info.agent/info.title` 生成展示 metadata。
+  - `agent-chat` 主视图在真实 task part 被移除或快照缺失时，基于 `subagentsBySessionId/subagentByTaskPartId` 合成子 Agent 导航入口；未绑定 task 显示“智能体 / 准备中”，绑定后显示 `Explore + title`。
+- How:
+  - 不新增 API、不改数据库、不改 generated SDK；后端保持 opencode-client 做 raw/mapped 边界、runtime router 做 scope 权威绑定，前端只消费稳定 child discovery 和展示兜底。
+- Result:
+  - 原生两阶段事件会稳定转换为可点击子 Agent 入口；补充后端 mapper/router、前端 reducer/projection/timeline/FigmaChatPanel 测试，并同步事件流与模块 README。
+
 ### 2026-07-03 - 兼容 raw properties 防止子 Agent 卡片消失
 
 - Why:

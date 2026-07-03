@@ -344,6 +344,99 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).not.toContain("子 Agent 已读取前端目录。");
   });
 
+  it("keeps native pending task visible and converts it to a clickable subagent card", async () => {
+    const rootMessages = [
+      {
+        id: "msg_user_root",
+        messageId: "msg_user_root",
+        role: "user" as const,
+        text: "分析项目结构",
+        createdAt: "2026-07-03T00:00:00Z"
+      },
+      {
+        id: "msg_root",
+        messageId: "msg_root",
+        role: "assistant" as const,
+        text: "",
+        parts: [
+          {
+            partId: "prt_task",
+            type: "tool" as const,
+            toolName: "task",
+            callId: "call_task",
+            status: "pending",
+            input: {}
+          }
+        ],
+        createdAt: "2026-07-03T00:00:01Z"
+      }
+    ];
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: rootMessages,
+        messageScopesById: {
+          msg_user_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+          msg_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false }
+        },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeDefined();
+    expect(wrapper.text()).toContain("智能体");
+    expect(wrapper.text()).toContain("准备中");
+
+    await wrapper.setProps({
+      messages: [
+        ...rootMessages,
+        {
+          id: "msg_child_answer",
+          messageId: "msg_child_answer",
+          role: "assistant",
+          text: "子 Agent 输出",
+          parts: [{ partId: "prt_child_text", type: "text", text: "子 Agent 输出" }],
+          createdAt: "2026-07-03T00:00:02Z"
+        }
+      ],
+      messageScopesById: {
+        msg_user_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+        msg_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+        msg_child_answer: {
+          sessionId: "ses_child",
+          rootSessionId: "ses_root",
+          parentSessionId: "ses_root",
+          isChildSession: true,
+          taskPartId: "prt_task"
+        }
+      },
+      subagentsBySessionId: {
+        ses_child: {
+          sessionId: "ses_child",
+          parentSessionId: "ses_root",
+          taskMessageId: "msg_root",
+          taskPartId: "prt_task",
+          taskCallId: "call_task",
+          agentName: "Explore",
+          title: "Explore project structure",
+          status: "running",
+          updatedAt: "2026-07-03T00:00:00Z"
+        }
+      },
+      subagentByTaskPartId: { prt_task: "ses_child" }
+    } as any);
+
+    expect(wrapper.find(".oc-subagent-card").attributes("disabled")).toBeUndefined();
+    expect(wrapper.text()).toContain("Explore");
+    expect(wrapper.text()).toContain("Explore project structure");
+    expect(wrapper.text()).not.toContain("子 Agent 输出");
+
+    await wrapper.get(".oc-subagent-card").trigger("click");
+
+    expect(wrapper.find(".figma-chat-composer").exists()).toBe(false);
+    expect(wrapper.text()).toContain("子 Agent 输出");
+  });
+
   it("sends the trimmed prompt and clears the composer when the process is ready", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

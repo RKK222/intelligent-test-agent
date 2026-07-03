@@ -281,6 +281,103 @@ describe("agent-chat runtime reducer", () => {
     });
   });
 
+  it("turns a pending native task part into a bound subagent after child discovery", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "分析项目结构",
+      createdAt: "2026-07-03T00:00:00Z"
+    });
+    const withPendingTask = reduceAgentChatRuntime(submitted, {
+      type: "event",
+      event: event("message.part.updated", {
+        sessionID: "ses_root",
+        rootSessionId: "ses_root",
+        messageID: "msg_root",
+        part: {
+          id: "prt_task",
+          messageID: "msg_root",
+          sessionID: "ses_root",
+          type: "tool",
+          tool: "task",
+          callID: "call_task",
+          state: { status: "pending", input: {}, raw: "" }
+        }
+      })
+    });
+
+    expect((withPendingTask as any).subagentByTaskPartId.prt_task).toBeUndefined();
+    expect((withPendingTask.messages.at(-1) as any).parts[0]).toMatchObject({
+      partId: "prt_task",
+      type: "tool",
+      toolName: "task",
+      status: "pending"
+    });
+
+    const discovered = reduceAgentChatRuntime(withPendingTask, {
+      type: "event",
+      event: event("session.child.discovered", {
+        sessionId: "ses_child",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskMessageId: "msg_root",
+        taskPartId: "prt_task",
+        taskCallId: "call_task",
+        metadata: {
+          agent: "explore",
+          title: "Explore project structure"
+        }
+      })
+    });
+
+    expect((discovered as any).subagentByTaskPartId.prt_task).toBe("ses_child");
+    expect((discovered as any).subagentsBySessionId.ses_child).toMatchObject({
+      sessionId: "ses_child",
+      parentSessionId: "ses_root",
+      taskMessageId: "msg_root",
+      taskPartId: "prt_task",
+      taskCallId: "call_task",
+      agentName: "Explore",
+      title: "Explore project structure",
+      status: "running"
+    });
+  });
+
+  it("keeps subagent indexes after task part removal", () => {
+    const withSubagent = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("session.child.discovered", {
+        sessionId: "ses_child",
+        parentSessionId: "ses_root",
+        taskMessageId: "msg_root",
+        taskPartId: "prt_task",
+        taskCallId: "call_task",
+        metadata: { agent: "explore", title: "Explore project structure" }
+      })
+    });
+    const withTask = reduceAgentChatRuntime(withSubagent, {
+      type: "event",
+      event: event("message.part.updated", {
+        sessionID: "ses_root",
+        messageID: "msg_root",
+        part: { id: "prt_task", messageID: "msg_root", type: "tool", tool: "task", callID: "call_task", state: { status: "running" } }
+      })
+    });
+    const removed = reduceAgentChatRuntime(withTask, {
+      type: "event",
+      event: event("message.part.removed", {
+        messageID: "msg_root",
+        partID: "prt_task"
+      })
+    });
+
+    expect((removed.messages.at(-1) as any).parts).toEqual([]);
+    expect((removed as any).subagentByTaskPartId.prt_task).toBe("ses_child");
+    expect((removed as any).subagentsBySessionId.ses_child).toMatchObject({
+      taskPartId: "prt_task",
+      title: "Explore project structure"
+    });
+  });
+
   it("keeps live user message parts out of the assistant response", () => {
     const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "user.submitted",

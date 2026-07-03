@@ -279,6 +279,48 @@ class OpencodeRunEventMapperTest {
     }
 
     @Test
+    void syncEventEnvelopeUsesNestedEventTypeIdAndData() throws Exception {
+        RunEventDraft draft = mapper.toDrafts(
+                objectMapper.readTree("""
+                        {
+                          "payload": {
+                            "type": "sync",
+                            "syncEvent": {
+                              "id": "evt_raw_task",
+                              "type": "message.part.updated.1",
+                              "seq": 27,
+                              "aggregateID": "ses_root",
+                              "data": {
+                                "sessionID": "ses_root",
+                                "messageID": "msg_task",
+                                "part": {
+                                  "id": "part_task",
+                                  "messageID": "msg_task",
+                                  "sessionID": "ses_root",
+                                  "type": "tool",
+                                  "tool": "task",
+                                  "callID": "call_task",
+                                  "state": {"status": "pending", "input": {}, "raw": ""}
+                                }
+                              }
+                            }
+                          }
+                        }
+                        """),
+                RUN_ID,
+                "trace_1234567890abcdef",
+                rootScope()).getFirst();
+
+        assertThat(draft.type()).isEqualTo(RunEventType.MESSAGE_PART_UPDATED);
+        assertThat(draft.payload()).containsEntry("rawEventId", "evt_raw_task")
+                .containsEntry("rawType", "message.part.updated")
+                .containsEntry("sessionID", "ses_root")
+                .containsEntry("messageID", "msg_task")
+                .containsEntry("messageId", "msg_task");
+        assertThat(draft.payload().get("part")).isInstanceOf(Map.class);
+    }
+
+    @Test
     void mapsStepEndedToUnknownLegacyDraft() throws Exception {
         RunEventDraft draft = mapper.toDraft(
                 objectMapper.readTree("""

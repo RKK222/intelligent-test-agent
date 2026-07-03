@@ -249,6 +249,10 @@ public class OpencodeRunEventMapper {
      * 兼容 opencode 顶层 type 与 payload.type 两种事件包裹格式。
      */
     private String rawType(JsonNode rawEvent) {
+        JsonNode syncType = syncEvent(rawEvent).path("type");
+        if (syncType.isTextual()) {
+            return syncType.asText().replaceFirst("\\.\\d+$", "");
+        }
         JsonNode topLevelType = rawEvent.path("type");
         if (topLevelType.isTextual()) {
             return topLevelType.asText();
@@ -264,6 +268,10 @@ public class OpencodeRunEventMapper {
      * 兼容 opencode 顶层 id 与 payload.id 两种事件 ID 格式。
      */
     private String rawEventId(JsonNode rawEvent) {
+        JsonNode syncId = syncEvent(rawEvent).path("id");
+        if (syncId.isTextual()) {
+            return syncId.asText();
+        }
         JsonNode topLevelId = rawEvent.path("id");
         if (topLevelId.isTextual()) {
             return topLevelId.asText();
@@ -279,6 +287,10 @@ public class OpencodeRunEventMapper {
      * 提取事件 properties；没有结构化属性时返回空对象，避免空指针打断事件流。
      */
     private JsonNode properties(JsonNode rawEvent) {
+        JsonNode syncData = syncEvent(rawEvent).path("data");
+        if (syncData.isObject()) {
+            return syncData;
+        }
         JsonNode topLevelProperties = rawEvent.path("properties");
         if (topLevelProperties.isObject()) {
             return topLevelProperties;
@@ -288,6 +300,11 @@ public class OpencodeRunEventMapper {
             return payloadProperties;
         }
         return objectMapper.createObjectNode();
+    }
+
+    private JsonNode syncEvent(JsonNode rawEvent) {
+        JsonNode syncEvent = rawEvent.path("payload").path("syncEvent");
+        return syncEvent.isObject() ? syncEvent : objectMapper.createObjectNode();
     }
 
     private RunEventScopeContext inferredRootScope(JsonNode rawEvent, RunId runId) {

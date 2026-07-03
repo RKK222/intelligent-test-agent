@@ -103,6 +103,31 @@ describe("OpencodeTimeline", () => {
     expect(onSelectSubagent).toHaveBeenCalledWith("ses_child_backend");
   });
 
+  it("renders pending native task parts as disabled agent rows", () => {
+    const onSelectSubagent = vi.fn();
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "分析项目结构"),
+        assistantMessage("msg_assistant_1", [
+          {
+            ...toolPart("prt_task_pending", "task", {}),
+            status: "pending"
+          }
+        ])
+      ]
+    });
+
+    const { container, getByText } = render(OpencodeTimeline, {
+      props: { state, onSelectSubagent }
+    });
+
+    expect(container.querySelector(".oc-subagent-card")).toBeTruthy();
+    expect(container.querySelector(".oc-subagent-card")?.hasAttribute("disabled")).toBe(true);
+    expect(getByText("智能体")).toBeTruthy();
+    expect(getByText("准备中")).toBeTruthy();
+    expect(onSelectSubagent).not.toHaveBeenCalled();
+  });
+
   it("uses the opencode-like timeline as the AssistantThread main rendering path", async () => {
     const messages: AgentMessage[] = [
       userMessage("msg_user_1", "分析 checkout 失败"),
