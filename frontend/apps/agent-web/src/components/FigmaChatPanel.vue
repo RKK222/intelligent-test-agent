@@ -2282,6 +2282,10 @@ const displayMessages = computed<ChatMessage[]>(() => {
   return merged
 })
 
+const lastFeedbackableMessage = computed(() => {
+  return [...displayMessages.value].reverse().find(canFeedback)
+})
+
 const hasVisibleMessages = computed(() => displayMessages.value.length > 0)
 const showTaskFailed = computed(() =>
   !props.running && hasVisibleMessages.value && (wasFailed.value || isRuntimeFailureStatus())
@@ -2586,38 +2590,36 @@ function onCompositionEnd() {
         @open-diff="openTimelineDiff"
         @select-subagent="selectSubagent"
       />
-      <div v-if="!activeSubagentSessionId && !historyLoading && !props.running && displayMessages.some(canFeedback)" class="figma-chat-timeline-actions">
-        <template v-for="message in displayMessages" :key="`${message.id}:actions`">
-          <div v-if="canFeedback(message)" class="figma-chat-feedback">
-            <button
-              type="button"
-              :class="[
-                'figma-chat-feedback-btn',
-                feedbackFor(message)?.rating === 'POSITIVE' && 'is-selected',
-              ]"
-              :disabled="feedbackSubmitting(message)"
-              title="满意"
-              @click="submitPositiveFeedback(message)"
-            >
-              <ThumbsUp :size="12" />
-              <span>满意</span>
-            </button>
-            <button
-              type="button"
-              :class="[
-                'figma-chat-feedback-btn',
-                'figma-chat-feedback-btn--negative',
-                feedbackFor(message)?.rating === 'NEGATIVE' && 'is-selected',
-              ]"
-              :disabled="feedbackSubmitting(message)"
-              title="不满意"
-              @click="openNegativeFeedback(message)"
-            >
-              <ThumbsDown :size="12" />
-              <span>不满意</span>
-            </button>
-          </div>
-        </template>
+      <div v-if="!activeSubagentSessionId && !historyLoading && !props.running && lastFeedbackableMessage" class="figma-chat-timeline-actions">
+        <div class="figma-chat-feedback">
+          <button
+            type="button"
+            :class="[
+              'figma-chat-feedback-btn',
+              feedbackFor(lastFeedbackableMessage)?.rating === 'POSITIVE' && 'is-selected',
+            ]"
+            :disabled="feedbackSubmitting(lastFeedbackableMessage)"
+            title="满意"
+            @click="submitPositiveFeedback(lastFeedbackableMessage)"
+          >
+            <ThumbsUp :size="12" />
+            <span>满意</span>
+          </button>
+          <button
+            type="button"
+            :class="[
+              'figma-chat-feedback-btn',
+              'figma-chat-feedback-btn--negative',
+              feedbackFor(lastFeedbackableMessage)?.rating === 'NEGATIVE' && 'is-selected',
+            ]"
+            :disabled="feedbackSubmitting(lastFeedbackableMessage)"
+            title="不满意"
+            @click="openNegativeFeedback(lastFeedbackableMessage)"
+          >
+            <ThumbsDown :size="12" />
+            <span>不满意</span>
+          </button>
+        </div>
       </div>
       <!-- 作废说明：旧气泡消息循环已被 OpencodeTimeline 主路径取代；保留未激活代码仅便于短期比对，不再扩展。 -->
       <template v-if="false" v-for="message in displayMessages" :key="message.id">
@@ -7663,5 +7665,88 @@ details[open] .figma-chat-process-chevron {
   background: #f5f5f5;
   border-color: #d9d9d9;
   color: #262626;
+}
+
+/* Global styles for appended-to-body feedback dialog */
+:global(.figma-chat-feedback-dialog) {
+  border-radius: 8px !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+}
+:global(.figma-chat-feedback-dialog .el-dialog__header) {
+  padding: 16px 16px 12px 16px !important;
+  margin: 0 !important;
+  border-bottom: 1px solid #e5e7eb !important;
+}
+:global(.figma-chat-feedback-dialog .el-dialog__title) {
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  color: #111827 !important;
+  line-height: 20px !important;
+}
+:global(.figma-chat-feedback-dialog .el-dialog__body) {
+  padding: 16px !important;
+}
+:global(.figma-chat-feedback-dialog .el-dialog__footer) {
+  padding: 12px 16px 16px 16px !important;
+  border-top: 1px solid #e5e7eb !important;
+  margin: 0 !important;
+  text-align: right !important;
+}
+:global(.figma-chat-feedback-reasons) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+:global(.figma-chat-feedback-reason) {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #dfe3ea;
+  border-radius: 6px;
+  background: #fff;
+  color: #394150;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+:global(.figma-chat-feedback-reason.is-selected),
+:global(.figma-chat-feedback-reason:hover) {
+  border-color: rgba(49, 91, 220, 0.3) !important;
+  background: rgba(49, 91, 220, 0.05) !important;
+  color: #3366ff !important;
+}
+:global(.figma-chat-feedback-cancel),
+:global(.figma-chat-feedback-submit) {
+  min-width: 64px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12px;
+  margin-left: 8px;
+  transition: all 0.15s ease;
+}
+:global(.figma-chat-feedback-cancel) {
+  border: 1px solid #dfe3ea;
+  background: #fff;
+  color: #4b5563;
+}
+:global(.figma-chat-feedback-cancel:hover) {
+  background: #f9fafb;
+}
+:global(.figma-chat-feedback-submit) {
+  border: 1px solid #3366ff;
+  background: #3366ff;
+  color: #fff;
+}
+:global(.figma-chat-feedback-submit:hover) {
+  background: #2552d4;
+  border-color: #2552d4;
 }
 </style>

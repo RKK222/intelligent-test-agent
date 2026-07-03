@@ -12,7 +12,7 @@
 .oc-context-group__trigger,
 .oc-tool-group__trigger {
   display: grid;
-  width: 100%;
+  width: min(100%, 560px);
   grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
   min-height: unset;
   padding: 6px 10px;
@@ -75,7 +75,7 @@
 }
 
 .oc-tool__trigger {
-  width: 100%;
+  width: min(100%, 560px);
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
   align-items: center;
@@ -293,6 +293,7 @@
 }
 
 .oc-tool.is-nested .oc-tool__trigger {
+  width: 100%;
   padding-left: 0;
 }
 
