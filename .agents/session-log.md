@@ -2,6 +2,16 @@
 
 ## Entries
 
+### 2026-07-03 - 极简化 Git 冲突批量解决 Banner 布局与交互
+
+- Why: 窄侧边栏下，原有的纵向大 Banner 堆叠和按钮文字换行折叠极易发生遮挡与溢出重叠，且占用过多纵向空间。
+- What: 重新设计并极简化 Git 冲突解决 Banner 布局，将其压缩为单行标题与三个紧凑的一级按钮平铺，完全消除文字折行和重叠，优化窄侧边栏下的自适应表现。
+- How: 修改 [GitChangesPanel.vue](file:///Users/kaka/Desktop/intelligent-test-agent/frontend/apps/agent-web/src/components/GitChangesPanel.vue)：
+  - 合并为两行结构（首行警告标题、次行操作平铺）。
+  - 精简 Mine/Theirs 按钮文本至 “保留个人” 与 “采用远程”，移除了导致宽度不足发生折行的 `(Mine)` / `(Theirs)` 英文后缀，并将高度设为 `h-6` (24px) 以满足极致紧凑的自适应要求。
+  - 将 Abort 按钮精简为 “取消”，与前两个主要操作按钮并行平铺在第二行右侧。
+- Result: 前端 34 个测试文件、251 个 Vitest 用例全绿通过，`typecheck` 正常，冲突处理区域极简化且无任何遮挡与重叠。
+
 ### 2026-07-03 - 优化冲突批量解决 Banner 尺寸与提交进度字体字号
 
 - Why:
