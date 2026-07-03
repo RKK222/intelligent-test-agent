@@ -25,9 +25,9 @@
   --oc-space-6: 24px;
   --oc-font-sans: var(--font-sans, "Geist", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif);
   --oc-font-mono: var(--font-mono, "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace);
-  --oc-text-xs: 12px;
-  --oc-text-sm: 14px;
-  --oc-text-md: 16px;
-  --oc-text-lg: 18px;
-  --oc-line-height: 1.72;
+  --oc-text-xs: 11px;
+  --oc-text-sm: 12px;
+  --oc-text-md: 14px;
+  --oc-text-lg: 16px;
+  --oc-line-height: 1.6;
 }

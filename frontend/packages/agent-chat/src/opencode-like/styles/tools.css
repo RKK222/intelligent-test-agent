@@ -27,7 +27,7 @@
   color: var(--oc-fg);
   font-weight: 600;
   font-size: var(--oc-text-md);
-  line-height: 24px;
+  line-height: 20px;
 }
 
 .oc-disclosure__trigger .oc-tool__subtitle,
@@ -35,13 +35,13 @@
   margin-left: 0;
   color: var(--oc-subtle);
   font-size: var(--oc-text-sm);
-  line-height: 22px;
+  line-height: 18px;
 }
 
 .oc-disclosure__trigger .oc-tool__chevron,
 .oc-context-group__trigger .oc-tool__chevron {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   color: var(--oc-subtle);
 }
 
@@ -63,15 +63,15 @@
   color: var(--oc-fg);
   font-weight: 600;
   font-size: var(--oc-text-md);
-  line-height: 24px;
+  line-height: 20px;
   text-transform: lowercase;
 }
 
 .oc-tool__trigger .oc-tool__subtitle {
   margin-left: 0;
   color: var(--oc-muted);
-  font-size: var(--oc-text-md);
-  line-height: 24px;
+  font-size: var(--oc-text-sm);
+  line-height: 18px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -79,8 +79,8 @@
 }
 
 .oc-tool__trigger .oc-tool__chevron {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   color: var(--oc-subtle);
   margin-left: 4px;
 }
@@ -88,8 +88,8 @@
 .oc-tool__status {
   margin-left: auto;
   flex-shrink: 0;
-  font-size: var(--oc-text-md);
-  line-height: 24px;
+  font-size: var(--oc-text-xs);
+  line-height: 16px;
   color: var(--oc-subtle);
 }
 
@@ -103,8 +103,8 @@
 .oc-context-group__body {
   border-top: 0;
   border-left: 1px solid var(--oc-border);
-  margin: 6px 0 0 5px;
-  padding: 8px 0 8px 18px;
+  margin: 4px 0 0 4px;
+  padding: 4px 0 6px 12px;
 }
 
 .oc-tool-detail {

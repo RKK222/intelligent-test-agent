@@ -2,6 +2,21 @@
 
 ## Entries
 
+### 2026-07-03 - 优化对话时间线样式及字体大小
+
+- Why: 在 opencode 对话时间线重构后，由于全局字号设置偏大（16px），在侧边栏等窄版聊天面板中显得非常笨重、不够美观。另外，助手的正式文本回答缺乏类似于旧版 FigmaChatPanel 样式的气泡框外壳，使得文字与背景融合，视觉层级不突出。
+- What: 
+  - 将时间线局部层级的字号变量进行等比例缩减，正文改回舒适的 14px，元数据改回 11px/12px，使整体版面信息更紧致。
+  - 为助手的正式文本输出部分（`TextPart`）恢复轻量、精致的气泡背景（`#fafafc`，`1px` border 及不对称的 `border-top-left-radius: 2px`），字色改为高对比度的 `var(--oc-fg)`，提供优秀的视觉锚点。
+  - 缩减思考状态、工具标题行、Chevrons 和执行主体的间距与内边距，提升界面的精致度。
+- How: 
+  - 修改 `tokens.css` 调整全局字号层级（md 设为 14px，sm 设为 12px，xs 设为 11px）并压缩行高至 1.6。
+  - 修改 `parts.css` 赋予 `.oc-text-part` 气泡外壳样式、padding 和 box-shadow，并收窄思考详情缩进。
+  - 修改 `rows.css` 明确指定 `.oc-user-message__bubble` 字号为 md 并优化助手元信息 `.oc-assistant-frame__meta` 字体大小为 xs。
+  - 修改 `tools.css` 优化各工具及思考触发器、状态的字号、Chevron 大小与缩进。
+  - 修改 `timeline.css` 压缩 timeline 边距、行间距及 turn 间隙。
+- Result: 前端全量 265 个 Vitest 测试全绿通过，`typecheck` 成功，改动完全不影响任何前后端交互逻辑。
+
 ### 2026-07-03 - 恢复 opencode-like 对话时间线轻量样式
 
 - Why: opencode 对话主路径重构为 `OpencodeTimeline` 后，7 月 2 日旧 `FigmaChatPanel` 中的轻量思考、探索和 bash 工具行视觉效果没有完全延续；用户要求当前前后端输出逻辑不变，只按旧提交视觉恢复样式。

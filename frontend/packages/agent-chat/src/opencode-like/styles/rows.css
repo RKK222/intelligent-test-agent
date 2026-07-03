@@ -9,6 +9,7 @@
   border: 1px solid var(--oc-border);
   background: var(--oc-surface);
   color: var(--oc-fg);
+  font-size: var(--oc-text-md);
   border-radius: var(--oc-radius-md);
   padding: 10px 14px;
   line-height: var(--oc-line-height);
@@ -72,10 +73,10 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
+  min-height: 20px;
   color: var(--oc-subtle);
-  font-size: var(--oc-text-md);
-  line-height: 24px;
+  font-size: var(--oc-text-xs);
+  line-height: 16px;
 }
 
 .oc-thinking-row,
