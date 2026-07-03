@@ -34,6 +34,19 @@
   - 不改 reducer、投影顺序、RunEvent、后端 API 或默认折叠逻辑；保留“同一回合 reasoning 合并为一行、默认收起”的当前行为，只降低视觉权重并修正头像对齐。
 - Result:
   - 前端 Vitest 全量通过（36 files, 299 passed, 1 skipped），`@test-agent/agent-chat` typecheck 通过；Playwright 构造 DOM 检查隐藏 step 行头像与 reasoning 触发器 top delta 为 0px，reasoning `已完成` 与工具 `已读取` x delta 为 0px；前端 Vite 已在 `127.0.0.1:3001` 启动验证入口。
+### 2026-07-04 - 优化正在工作状态行的视觉动效
+
+- Why:
+  - 用户希望对对话输出时页面显示的“正在工作 等待后续输出”这一状态行做视觉效果优化，要求其呈现类似 ChatGPT 思考时显示的那种文字呼吸/脉冲动效。
+- What:
+  - 移除了 `WorkingStatusRow.vue` 模板中的闪烁小点 `oc-thinking-dot`。
+  - 在 `rows.css` 中，为整个 `.oc-working-status` 容器添加了 `oc-pulse` 渐隐渐现的呼吸/脉冲（breathing/pulse）动画效果，并使标题和副标题文本保持固定的系统颜色，从而让所有文字以最优雅、高保真的形式跟随脉冲淡入淡出。
+- How:
+  - 修改了 `frontend/packages/agent-chat/src/opencode-like/components/rows/WorkingStatusRow.vue` 和 `frontend/packages/agent-chat/src/opencode-like/styles/rows.css`。
+  - 通过 `corepack pnpm test` 跑通了全部 Vitest 测试，执行 `corepack pnpm typecheck` 和 `corepack pnpm lint` 校验无误。
+- Result:
+  - 移除了左侧闪烁小点，且“正在工作 等待后续输出”整行文字以极富现代科技感的呼吸脉冲方式进行动画过渡，完美契合 ChatGPT 的思考态文字表现形式。
+
 ### 2026-07-04 - 优化持续输出时的工作态提示
 
 - Why:

@@ -171,6 +171,7 @@
   min-height: 22px;
   padding: 0;
   line-height: 20px;
+  animation: oc-pulse 1.8s ease-in-out infinite;
 }
 
 .oc-working-status__title {

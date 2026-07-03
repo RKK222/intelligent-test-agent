@@ -21,7 +21,6 @@ withDefaults(defineProps<WorkingStatusRowProps>(), {
     </div>
     <div class="oc-assistant-frame__content">
       <div class="oc-working-status" role="status" aria-live="polite">
-        <span class="oc-thinking-dot" aria-hidden="true" />
         <span class="oc-working-status__title">正在工作</span>
         <span class="oc-working-status__subtitle">等待后续输出</span>
       </div>
