@@ -567,9 +567,27 @@ class RuntimeControllerTest {
                         "sessionId", "ses_child",
                         "parentSessionId", "ses_root",
                         "isChildSession", true,
+                        "taskMessageId", "msg_task",
+                        "taskPartId", "part_task",
+                        "taskCallId", "call_task",
                         "message", Map.of("id", "msg_child", "role", "assistant")));
+        RunEventSsePayload permission = new RunEventSsePayload(
+                "evt_permission",
+                runId.value(),
+                12,
+                "permission.asked",
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of(
+                        "rootSessionId", "ses_root",
+                        "sessionId", "ses_child",
+                        "parentSessionId", "ses_root",
+                        "isChildSession", true,
+                        "requestId", "perm_1"));
         when(recoveryService.recover(eq("opencode"), eq(runId), eq("trace_1234567890abcdef")))
                 .thenReturn(Flux.just(snapshot));
+        when(eventStreamService.snapshotDurablePayloads(eq(runId), eq(0L), eq(100)))
+                .thenReturn(List.of(permission));
         WebTestClient client = WebTestClient.bindToController(new RunController(
                         runService,
                         null,
@@ -588,14 +606,20 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.runId").isEqualTo(runId.value())
                 .jsonPath("$.data.sessions[0].sessionId").isEqualTo("ses_child")
                 .jsonPath("$.data.sessions[0].childSession").isEqualTo(true)
+                .jsonPath("$.data.sessions[0].taskPartId").isEqualTo("part_task")
+                .jsonPath("$.data.childSessionIdByTaskPartId.part_task").isEqualTo("ses_child")
                 .jsonPath("$.data.messagesBySessionId.ses_child[0].message.id").isEqualTo("msg_child")
-                .jsonPath("$.data.events[0].type").isEqualTo("message.updated");
+                .jsonPath("$.data.messagesBySessionId.ses_child.length()").isEqualTo(1)
+                .jsonPath("$.data.events[0].type").isEqualTo("message.updated")
+                .jsonPath("$.data.events[1].type").isEqualTo("permission.asked")
+                .jsonPath("$.data.events[1].payload.requestId").isEqualTo("perm_1");
     }
 
     @Test
     void sessionControllerExposesAgentScopedSessionTreeMessages() {
         SessionApplicationService sessionService = org.mockito.Mockito.mock(SessionApplicationService.class);
         RunMessageRecoveryService recoveryService = org.mockito.Mockito.mock(RunMessageRecoveryService.class);
+        RunEventSseStreamService eventStreamService = org.mockito.Mockito.mock(RunEventSseStreamService.class);
         SessionId sessionId = new SessionId("ses_1234567890abcdef");
         RunEventSsePayload snapshot = new RunEventSsePayload(
                 "evt_live_snapshot",
@@ -609,13 +633,32 @@ class RuntimeControllerTest {
                         "sessionId", "ses_child",
                         "parentSessionId", "ses_root",
                         "isChildSession", true,
+                        "taskMessageId", "msg_task",
+                        "taskPartId", "part_task",
+                        "taskCallId", "call_task",
                         "message", Map.of("id", "msg_child", "role", "assistant")));
+        RunEventSsePayload question = new RunEventSsePayload(
+                "evt_question",
+                "run_1234567890abcdef",
+                8,
+                "question.asked",
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of(
+                        "rootSessionId", "ses_root",
+                        "sessionId", "ses_child",
+                        "parentSessionId", "ses_root",
+                        "isChildSession", true,
+                        "requestId", "q_1"));
         when(recoveryService.recoverSessionTree(eq("opencode"), eq(sessionId), eq("trace_1234567890abcdef")))
                 .thenReturn(Flux.just(snapshot));
+        when(eventStreamService.snapshotDurablePayloadsByRootSessionId(eq("ses_root"), eq(0L), eq(100)))
+                .thenReturn(List.of(question));
         WebTestClient client = WebTestClient.bindToController(new SessionController(
                         sessionService,
                         null,
-                        recoveryService))
+                        recoveryService,
+                        eventStreamService))
                 .webFilter(new TraceIdWebFilter())
                 .build();
 
@@ -628,8 +671,13 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.sessionId").isEqualTo(sessionId.value())
                 .jsonPath("$.data.sessions[0].sessionId").isEqualTo("ses_child")
                 .jsonPath("$.data.sessions[0].childSession").isEqualTo(true)
+                .jsonPath("$.data.sessions[0].taskPartId").isEqualTo("part_task")
+                .jsonPath("$.data.childSessionIdByTaskPartId.part_task").isEqualTo("ses_child")
                 .jsonPath("$.data.messagesBySessionId.ses_child[0].message.id").isEqualTo("msg_child")
-                .jsonPath("$.data.events[0].type").isEqualTo("message.updated");
+                .jsonPath("$.data.messagesBySessionId.ses_child.length()").isEqualTo(1)
+                .jsonPath("$.data.events[0].type").isEqualTo("message.updated")
+                .jsonPath("$.data.events[1].type").isEqualTo("question.asked")
+                .jsonPath("$.data.events[1].payload.requestId").isEqualTo("q_1");
     }
 
     @Test

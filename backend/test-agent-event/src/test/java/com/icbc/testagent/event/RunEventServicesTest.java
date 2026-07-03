@@ -217,6 +217,50 @@ class RunEventServicesTest {
     }
 
     @Test
+    void sseStreamServiceExposesDurablePayloadSnapshotForHistoryApis() {
+        FakeRunEventRepository repository = new FakeRunEventRepository();
+        RunId runId = new RunId("run_1234567890abcdef");
+        RunEventSseStreamService streamService = new RunEventSseStreamService(
+                new RunEventReplayService(repository),
+                new RunEventSseMapper());
+        repository.append(new RunEventDraft(
+                runId,
+                RunEventType.PERMISSION_ASKED,
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of("sessionId", "ses_child", "requestId", "perm_1")));
+
+        List<RunEventSsePayload> payloads = streamService.snapshotDurablePayloads(runId, 0, 50);
+
+        assertThat(payloads).hasSize(1);
+        assertThat(payloads.get(0).seq()).isEqualTo(1);
+        assertThat(payloads.get(0).type()).isEqualTo("permission.asked");
+        assertThat(payloads.get(0).payload()).containsEntry("requestId", "perm_1");
+    }
+
+    @Test
+    void sseStreamServiceExposesDurablePayloadSnapshotByRootSessionForSessionHistoryApis() {
+        FakeRunEventRepository repository = new FakeRunEventRepository();
+        RunId runId = new RunId("run_1234567890abcdef");
+        RunEventSseStreamService streamService = new RunEventSseStreamService(
+                new RunEventReplayService(repository),
+                new RunEventSseMapper());
+        repository.append(new RunEventDraft(
+                runId,
+                RunEventType.QUESTION_ASKED,
+                "trace_1234567890abcdef",
+                NOW,
+                Map.of("rootSessionId", "ses_root", "sessionId", "ses_child", "requestId", "q_1")));
+
+        List<RunEventSsePayload> payloads =
+                streamService.snapshotDurablePayloadsByRootSessionId("ses_root", 0, 50);
+
+        assertThat(payloads).hasSize(1);
+        assertThat(payloads.get(0).type()).isEqualTo("question.asked");
+        assertThat(payloads.get(0).payload()).containsEntry("requestId", "q_1");
+    }
+
+    @Test
     void liveBusPublishesToRemotePublisherAndSseStreamMergesRemoteEvents() {
         FakeRunEventRepository repository = new FakeRunEventRepository();
         FakeRunEventRemotePublisher remotePublisher = new FakeRunEventRemotePublisher();
@@ -312,6 +356,15 @@ class RunEventServicesTest {
             }
             return events.stream()
                     .filter(event -> event.runId().equals(runId))
+                    .filter(event -> event.seq() > lastSeq)
+                    .limit(limit)
+                    .toList();
+        }
+
+        @Override
+        public List<RunEvent> findByRootSessionIdAfter(String rootSessionId, long lastSeq, int limit) {
+            return events.stream()
+                    .filter(event -> rootSessionId.equals(event.payload().get("rootSessionId")))
                     .filter(event -> event.seq() > lastSeq)
                     .limit(limit)
                     .toList();

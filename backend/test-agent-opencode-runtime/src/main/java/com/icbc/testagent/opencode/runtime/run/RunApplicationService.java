@@ -92,6 +92,7 @@ public class RunApplicationService {
     private final AgentRuntimeTargetResolver runtimeTargetResolver;
     private final RunSessionMessageSnapshotService snapshotService;
     private final RunSessionScopeRepository runSessionScopeRepository;
+    private final RunSessionScopeRuntimeCache runSessionScopeRuntimeCache;
     private final RunSessionScopeRouter runSessionScopeRouter;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
@@ -150,7 +151,10 @@ public class RunApplicationService {
                         new ObjectMapper())
                 : snapshotService;
         this.runSessionScopeRepository = runSessionScopeRepository;
-        this.runSessionScopeRouter = new RunSessionScopeRouter(runSessionScopeRepository, runSessionScopeRuntimeCache);
+        this.runSessionScopeRuntimeCache = runSessionScopeRuntimeCache == null
+                ? RunSessionScopeRuntimeCache.disabled()
+                : runSessionScopeRuntimeCache;
+        this.runSessionScopeRouter = new RunSessionScopeRouter(runSessionScopeRepository, this.runSessionScopeRuntimeCache);
     }
 
     /**
@@ -396,33 +400,36 @@ public class RunApplicationService {
     }
 
     private void recordRootSessionScope(String agentId, Run run, String remoteSessionId, String traceId) {
+        Instant now = Instant.now();
+        RunSessionScope scope = new RunSessionScope(
+                run.runId(),
+                remoteSessionId,
+                1L,
+                traceId,
+                now,
+                now,
+                Map.of("agentId", agentId));
+        RunSessionScopeSession rootSession = new RunSessionScopeSession(
+                run.runId(),
+                remoteSessionId,
+                remoteSessionId,
+                null,
+                false,
+                "ROOT",
+                null,
+                null,
+                null,
+                traceId,
+                now,
+                now,
+                Map.of("agentId", agentId));
+        runSessionScopeRuntimeCache.recordScopeSession(scope, rootSession);
         if (runSessionScopeRepository == null) {
             return;
         }
-        Instant now = Instant.now();
         try {
-            runSessionScopeRepository.upsertScope(new RunSessionScope(
-                    run.runId(),
-                    remoteSessionId,
-                    1L,
-                    traceId,
-                    now,
-                    now,
-                    Map.of("agentId", agentId)));
-            runSessionScopeRepository.upsertSession(new RunSessionScopeSession(
-                    run.runId(),
-                    remoteSessionId,
-                    remoteSessionId,
-                    null,
-                    false,
-                    "ROOT",
-                    null,
-                    null,
-                    null,
-                    traceId,
-                    now,
-                    now,
-                    Map.of("agentId", agentId)));
+            runSessionScopeRepository.upsertScope(scope);
+            runSessionScopeRepository.upsertSession(rootSession);
         } catch (RuntimeException exception) {
             LOGGER.warn(
                     "Failed to persist run session root scope, runId={}, remoteSessionId={}, traceId={}",

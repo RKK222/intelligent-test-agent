@@ -86,6 +86,7 @@ class MyBatisRunEventRepositoryIntegrationTest {
         assertThat(event.seq()).isEqualTo(1L);
         assertThat(event.scopeContext()).isEqualTo(scopeContext);
         assertThat(repository.findByRunIdAfter(RUN_ID, 0L, 10)).containsExactly(event);
+        assertThat(repository.findByRootSessionIdAfter("ses_root", 0L, 10)).containsExactly(event);
         jdbcClient.sql("""
                 select root_session_id, session_id, parent_session_id, is_child_session, scope_version,
                        task_message_id, task_part_id, task_call_id, raw_event_id

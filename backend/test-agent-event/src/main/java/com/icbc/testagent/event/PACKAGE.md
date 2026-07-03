@@ -16,9 +16,9 @@
 - `RunEventAppender`：通过 domain 端口追加事件草稿。
 - `RunEventLiveBus`、`RunEventLiveEvent`：当前进程内按 runId 广播 durable/transient 实时事件，并把本机事件交给可选远端广播端口。
 - `RunEventRemotePublisher`、`NoopRunEventRemotePublisher`、`RedisRunEventRemotePublisher`：跨实例广播端口、默认空实现和 Redis pub/sub 实现。
-- `RunEventReplayService`：处理 Last-Event-ID 和事件增量回放。
+- `RunEventReplayService`：处理 Last-Event-ID、按 Run 增量回放和按 root session 回放历史状态事件。
 - `RunEventSseMapper`：将 durable RunEvent 映射为带 `id=seq` 的 `ServerSentEvent`，将 transient payload 映射为不带 SSE `id` 的 `ServerSentEvent`。
-- `RunEventSseStreamService`：合并 durable polling replay、本机 live bus 和可选 Redis 远端事件的 RunEvent SSE 输出服务；阻塞式回放查询 offload 到 `boundedElastic`，单次回放失败跳过本轮轮询并保持订阅。
+- `RunEventSseStreamService`：合并 durable polling replay、本机 live bus 和可选 Redis 远端事件的 RunEvent SSE 输出服务，并提供 HTTP 历史接口复用的 durable payload snapshot；阻塞式回放查询 offload 到 `boundedElastic`，单次回放失败跳过本轮轮询并保持订阅。
 - `RunEventSsePayload`：SSE body 的稳定平台事件载荷。
 - `ServerBroadcastPublisher`、`NoopServerBroadcastPublisher`、`RedisServerBroadcastPublisher`：后端实例间通用广播端口、默认空实现和 Redis pub/sub 实现，供应用版本工作区副本同步等内部业务使用。
 - 后续可新增跨实例订阅恢复和订阅管理器。

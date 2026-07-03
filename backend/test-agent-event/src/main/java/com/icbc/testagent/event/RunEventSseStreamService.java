@@ -123,6 +123,30 @@ public class RunEventSseStreamService {
     }
 
     /**
+     * 为 HTTP 历史接口提供一次性 durable RunEvent 快照，避免边界层直接依赖 Repository。
+     */
+    public List<RunEventSsePayload> snapshotDurablePayloads(RunId runId, long lastSeq, int batchLimit) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        return replayService.replayAfter(runId, Long.toString(lastSeq), batchLimit)
+                .stream()
+                .map(RunEventSsePayload::from)
+                .toList();
+    }
+
+    /**
+     * 为 Session 级历史接口按 root session 提供一次性 durable RunEvent 快照。
+     */
+    public List<RunEventSsePayload> snapshotDurablePayloadsByRootSessionId(
+            String rootSessionId,
+            long lastSeq,
+            int batchLimit) {
+        return replayService.replayByRootSessionIdAfter(rootSessionId, Long.toString(lastSeq), batchLimit)
+                .stream()
+                .map(RunEventSsePayload::from)
+                .toList();
+    }
+
+    /**
      * 将 durable repository 事件映射成 SSE，保持 seq 作为客户端续传游标。
      */
     private ServerSentEvent<RunEventSsePayload> toSse(RunEvent event) {

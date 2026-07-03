@@ -64,6 +64,8 @@
 
 ## 事件映射注意事项
 
-`OpencodeRunEventMapper` 必须兼容 opencode raw event 演进。opencode 1.17.8 中 `session.status` 的 `idle` 状态和 `session.idle` 代表本次 prompt 已结束，应在 root scope 下额外派生平台 `run.succeeded`；child scope 下只保留 `session.status`。缺失 raw event id 时不能写 `"unknown"`，派生的 `run.succeeded/run.failed` 不复用原始 `rawEventId`。
+`OpencodeRunEventMapper` 必须兼容 opencode raw event 演进。opencode 1.17.8 中 `session.status` 的 `idle` 状态和 `session.idle` 代表本次 prompt 已结束，应在 root scope 下额外派生平台 `run.succeeded`；child scope 下只保留 `session.status`。缺失 raw event id 时不能写 `"unknown"`，派生的 `run.succeeded/run.failed` 不复用原始 `rawEventId`，但要带 `derived=true` 和 `derivedFromRaw*` 来源字段。
 
-Web App 复刻时，mapper 需要优先识别 opencode App 实际消费的运行态事件：`message.updated`、`message.part.updated`、`message.part.delta`、`todo.updated`、`permission.*`、`question.*`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`。旧 `assistant.message.delta`、`tool.*`、`diff.*` 兼容事件必须保留，不能破坏现有前端。
+Web App 复刻时，mapper 需要优先识别 opencode App 实际消费的运行态事件：`message.updated`、`message.part.updated`、`message.part.delta`、`todo.updated`、`permission.*`、`question.*`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`、`reference.updated`、`file.edited`、`file.watcher.updated`。旧 `assistant.message.delta`、`tool.*`、`diff.*` 兼容事件必须保留，不能破坏现有前端。
+mapper 必须保留 opencode 原始 `sessionID/messageID/partID/callID/requestID` 字段，并补充 `sessionId/messageId/partId/callId/requestId` alias，方便前端和历史 DTO 统一读取。
+`session.diff` 必须保持同名平台事件，不得在 client mapper 中直接改写为 `diff.proposed`。

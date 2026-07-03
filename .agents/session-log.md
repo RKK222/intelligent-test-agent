@@ -53,6 +53,13 @@
 - What: 发布前新增远程变化预览与 expected HEAD 校验，应用 pull 后立即同步版本和本机副本 commit；冲突路径关闭 `core.quotepath`，支持全部保留个人版本、全部采用远程版本和取消 merge，目标侧缺失按 Git 删除语义处理。前端复用已加载 diff 更新数量角标、拦截旧工作区请求回写，并明确 AU/UD 删除侧。
 - How: 复用 `GitWorkspaceService`、个人工作区归属校验和现有发布编排，新增 preview/resolve-all HTTP 契约；真实临时 Git 仓库覆盖中文修改/删除冲突，服务测试覆盖预览汇总、HEAD 变化前置拦截和冲突后的元数据同步，前端测试覆盖预览确认与批量处理。处理了会话开始前遗留的 `git pull --rebase`，保留两侧 session log 后完成 7 个本地提交重放。
 - Result: common 24 个、workspace-management 36 个、API Controller 和 Git 面板/合并编辑器定向测试通过，agent-web typecheck/build 通过；使用 `.env.test` / `test` profile / JDK 25 重启并检查健康状态。未修改环境文件、数据库、事件、generated SDK 或 888 当前个人 worktree 冲突内容。
+### 2026-07-03 - Run Session Tree 后端事件路由与映射收口
+
+- Why: Run scope 基建需要真正落到 root/child 事件路由、历史恢复和事件对照验收，避免 child 终态误派生 Run 终态、未知全局事件污染 Run 时间线，以及 opencode Web App 事件缺映射。
+- What: RunEvent 持久化改为 MyBatis 查询 root session replay，runtime 增加运行中 scope cache、child discovery、pending/dedup 和 HTTP/SSE snapshot 的 root+child 恢复；mapper 新增 `reference.updated/file.edited/file.watcher.updated`、公共 ID alias 和派生终态来源字段；router 过滤 heartbeat/tui/pty/workspace/worktree/installation/plugin/catalog 等无 session 全局 unknown。
+- How: 保持 opencode-client 只做 raw/mapped DTO 边界，scope 归属由 `RunSessionScopeRouter` 判定；HTTP session-tree 接口合并 durable permission/question/todo 等状态事件；文档同步 API、事件、数据库和模块 README。
+- Result: `mvn -pl test-agent-api,test-agent-opencode-runtime,test-agent-opencode-client -am test`、`mvn -pl test-agent-persistence -am -Dtest=MyBatisRunEventRepositoryIntegrationTest,MyBatisRunSessionScopeRepositoryIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false test`、mapper/router/domain 定向测试和 `git diff --check` 已通过；本次不修改 generated SDK 或环境配置。
+
 ### 2026-07-03 - 对话区主路径切换为 opencode 风格时间线
 
 - Why: 右侧对话需要按 opencode 原生交互呈现 message part、工具调用和流式输出，旧气泡/卡片主路径把 reasoning、工具日志和最终回答混在一起，维护成本和视觉噪声都偏高。

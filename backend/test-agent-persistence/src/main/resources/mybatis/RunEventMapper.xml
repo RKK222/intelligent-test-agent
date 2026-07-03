@@ -74,4 +74,14 @@
         order by seq asc
         limit #{limit}
     </select>
+
+    <select id="findByRootSessionIdAfter" resultMap="RunEventRowMap">
+        select
+        <include refid="RunEventColumns"/>
+        from run_events
+        where root_session_id = #{rootSessionId}
+          and seq &gt; #{lastSeq}
+        order by occurred_at asc, run_id asc, seq asc
+        limit #{limit}
+    </select>
 </mapper>

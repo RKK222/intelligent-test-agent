@@ -8,7 +8,9 @@ import com.icbc.testagent.domain.event.RunEventType;
 import com.icbc.testagent.domain.run.RunId;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class OpencodeRunEventMapperTest {
@@ -49,6 +51,23 @@ class OpencodeRunEventMapperTest {
 
         assertThat(drafts.get(0).payload()).containsEntry("rawEventId", "evt_raw_status_idle");
         assertThat(drafts.get(1).payload()).doesNotContainKey("rawEventId");
+    }
+
+    @Test
+    void derivedRunTerminalPayloadCarriesSourceMetadata() throws Exception {
+        List<RunEventDraft> drafts = mapper.toDrafts(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_status_idle","type":"session.status","properties":{"sessionID":"ses_root","status":{"type":"idle"}}}
+                        """),
+                RUN_ID,
+                "trace_1234567890abcdef",
+                rootScope());
+
+        assertThat(drafts.get(1).payload())
+                .containsEntry("derived", true)
+                .containsEntry("derivedFromRawType", "session.status")
+                .containsEntry("derivedFromRawEventId", "evt_raw_status_idle")
+                .doesNotContainKey("rawEventId");
     }
 
     @Test
@@ -151,7 +170,7 @@ class OpencodeRunEventMapperTest {
     }
 
     @Test
-    void mapsSessionDiffToDiffProposed() throws Exception {
+    void mapsSessionDiffToSessionDiff() throws Exception {
         RunEventDraft draft = mapper.toDraft(
                 objectMapper.readTree("""
                         {"id":"evt_raw_diff","type":"session.diff","properties":{"files":["README.md"]}}
@@ -159,7 +178,7 @@ class OpencodeRunEventMapperTest {
                 new RunId("run_1234567890abcdef"),
                 "trace_1234567890abcdef");
 
-        assertThat(draft.type()).isEqualTo(RunEventType.DIFF_PROPOSED);
+        assertThat(draft.type()).isEqualTo(RunEventType.SESSION_DIFF);
     }
 
     @Test
@@ -200,6 +219,63 @@ class OpencodeRunEventMapperTest {
         assertThat(mapType("vcs.branch.updated")).isEqualTo(RunEventType.VCS_BRANCH_UPDATED);
         assertThat(mapType("lsp.updated")).isEqualTo(RunEventType.LSP_UPDATED);
         assertThat(mapType("mcp.tools.changed")).isEqualTo(RunEventType.MCP_TOOLS_CHANGED);
+    }
+
+    @Test
+    void mapsReviewChecklistEventTable() throws Exception {
+        Map<String, RunEventType> expectedTypes = new LinkedHashMap<>();
+        expectedTypes.put("message.updated", RunEventType.MESSAGE_UPDATED);
+        expectedTypes.put("message.removed", RunEventType.MESSAGE_REMOVED);
+        expectedTypes.put("message.part.updated", RunEventType.MESSAGE_PART_UPDATED);
+        expectedTypes.put("message.part.removed", RunEventType.MESSAGE_PART_REMOVED);
+        expectedTypes.put("message.part.delta", RunEventType.MESSAGE_PART_DELTA);
+        expectedTypes.put("session.created", RunEventType.SESSION_CREATED);
+        expectedTypes.put("session.updated", RunEventType.SESSION_UPDATED);
+        expectedTypes.put("session.deleted", RunEventType.SESSION_DELETED);
+        expectedTypes.put("session.diff", RunEventType.SESSION_DIFF);
+        expectedTypes.put("permission.v2.asked", RunEventType.PERMISSION_ASKED);
+        expectedTypes.put("permission.v2.replied", RunEventType.PERMISSION_REPLIED);
+        expectedTypes.put("question.v2.asked", RunEventType.QUESTION_ASKED);
+        expectedTypes.put("question.v2.replied", RunEventType.QUESTION_REPLIED);
+        expectedTypes.put("question.v2.rejected", RunEventType.QUESTION_REJECTED);
+        expectedTypes.put("vcs.branch.updated", RunEventType.VCS_BRANCH_UPDATED);
+        expectedTypes.put("lsp.updated", RunEventType.LSP_UPDATED);
+        expectedTypes.put("mcp.tools.changed", RunEventType.MCP_TOOLS_CHANGED);
+        expectedTypes.put("reference.updated", RunEventType.REFERENCE_UPDATED);
+        expectedTypes.put("file.edited", RunEventType.FILE_EDITED);
+        expectedTypes.put("file.watcher.updated", RunEventType.FILE_WATCHER_UPDATED);
+
+        for (Map.Entry<String, RunEventType> entry : expectedTypes.entrySet()) {
+            assertThat(mapType(entry.getKey())).as(entry.getKey()).isEqualTo(entry.getValue());
+        }
+    }
+
+    @Test
+    void commonPayloadAliasesAreAddedForFrontendContract() throws Exception {
+        RunEventDraft draft = mapper.toDrafts(
+                objectMapper.readTree("""
+                        {
+                          "id":"evt_raw_alias",
+                          "type":"message.part.updated",
+                          "properties":{
+                            "sessionID":"ses_root",
+                            "messageID":"msg_1",
+                            "partID":"part_1",
+                            "callID":"call_1",
+                            "requestID":"req_1"
+                          }
+                        }
+                        """),
+                RUN_ID,
+                "trace_1234567890abcdef",
+                rootScope()).getFirst();
+
+        assertThat(draft.payload())
+                .containsEntry("sessionId", "ses_root")
+                .containsEntry("messageId", "msg_1")
+                .containsEntry("partId", "part_1")
+                .containsEntry("callId", "call_1")
+                .containsEntry("requestId", "req_1");
     }
 
     @Test

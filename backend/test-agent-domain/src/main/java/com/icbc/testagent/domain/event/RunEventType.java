@@ -44,6 +44,9 @@ public enum RunEventType {
     VCS_BRANCH_UPDATED("vcs.branch.updated"),
     LSP_UPDATED("lsp.updated"),
     MCP_TOOLS_CHANGED("mcp.tools.changed"),
+    REFERENCE_UPDATED("reference.updated"),
+    FILE_EDITED("file.edited"),
+    FILE_WATCHER_UPDATED("file.watcher.updated"),
     OPENCODE_EVENT_UNKNOWN("opencode.event.unknown");
 
     private static final Map<String, RunEventType> BY_WIRE_NAME = Arrays.stream(values())

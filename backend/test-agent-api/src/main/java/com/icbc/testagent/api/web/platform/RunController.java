@@ -13,6 +13,7 @@ import com.icbc.testagent.event.RunEventSsePayload;
 import com.icbc.testagent.event.RunEventSseStreamService;
 import jakarta.validation.Valid;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.function.Function;
@@ -235,11 +236,22 @@ public class RunController {
                                     : messageRecoveryService.recover(currentRunId, traceId))
                                     .collectList()
                                     .block(Duration.ofSeconds(30));
+                    List<RunEventSsePayload> allEvents = new ArrayList<>(snapshotEvents);
+                    allEvents.addAll(durableSnapshotPayloads(currentRunId));
                     return ApiResponse.ok(
-                            RuntimeDtos.RunSessionTreeMessagesResponse.from(runId, snapshotEvents),
+                            RuntimeDtos.RunSessionTreeMessagesResponse.from(runId, allEvents),
                             traceId);
                 })
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private List<RunEventSsePayload> durableSnapshotPayloads(RunId runId) {
+        if (eventStreamService == null) {
+            return List.of();
+        }
+        List<RunEventSsePayload> payloads =
+                eventStreamService.snapshotDurablePayloads(runId, 0L, DEFAULT_BATCH_LIMIT);
+        return payloads == null ? List.of() : payloads;
     }
 
     /**

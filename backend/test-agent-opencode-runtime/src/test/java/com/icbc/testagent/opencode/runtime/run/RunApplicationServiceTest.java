@@ -541,6 +541,7 @@ class RunApplicationServiceTest {
                 RunEventType.RUN_CREATED,
                 RunEventType.RUN_STARTED,
                 RunEventType.SESSION_CHILD_DISCOVERED,
+                RunEventType.SESSION_SCOPE_UPDATED,
                 RunEventType.SESSION_STATUS);
         assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.RUNNING);
     }

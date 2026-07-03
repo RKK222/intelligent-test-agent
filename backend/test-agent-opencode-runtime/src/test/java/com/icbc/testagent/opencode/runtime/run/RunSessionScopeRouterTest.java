@@ -57,8 +57,11 @@ class RunSessionScopeRouterTest {
                 sessionDraft(RunEventType.RUN_SUCCEEDED, CHILD_SESSION_ID, ROOT_SESSION_ID, Map.of("type", "idle")));
 
         assertThat(routed).extracting(RunEventDraft::type)
-                .containsExactly(RunEventType.SESSION_CHILD_DISCOVERED, RunEventType.SESSION_STATUS);
-        RunEventDraft childStatus = routed.get(1);
+                .containsExactly(
+                        RunEventType.SESSION_CHILD_DISCOVERED,
+                        RunEventType.SESSION_SCOPE_UPDATED,
+                        RunEventType.SESSION_STATUS);
+        RunEventDraft childStatus = routed.get(2);
         assertThat(childStatus.scopeContext().sessionId()).isEqualTo(CHILD_SESSION_ID);
         assertThat(childStatus.scopeContext().parentSessionId()).isEqualTo(ROOT_SESSION_ID);
         assertThat(childStatus.scopeContext().childSession()).isTrue();
@@ -75,7 +78,10 @@ class RunSessionScopeRouterTest {
                 sessionDraft(RunEventType.RUN_FAILED, CHILD_SESSION_ID, ROOT_SESSION_ID, null));
 
         assertThat(routed).extracting(RunEventDraft::type)
-                .containsExactly(RunEventType.SESSION_CHILD_DISCOVERED, RunEventType.SESSION_ERROR);
+                .containsExactly(
+                        RunEventType.SESSION_CHILD_DISCOVERED,
+                        RunEventType.SESSION_SCOPE_UPDATED,
+                        RunEventType.SESSION_ERROR);
         assertThat(routed).noneMatch(draft -> draft.type() == RunEventType.RUN_FAILED);
     }
 
@@ -100,12 +106,17 @@ class RunSessionScopeRouterTest {
         List<RunEventDraft> routed = route(draft);
 
         assertThat(routed).extracting(RunEventDraft::type)
-                .containsExactly(RunEventType.SESSION_CHILD_DISCOVERED, RunEventType.MESSAGE_PART_UPDATED);
+                .containsExactly(
+                        RunEventType.SESSION_CHILD_DISCOVERED,
+                        RunEventType.SESSION_SCOPE_UPDATED,
+                        RunEventType.MESSAGE_PART_UPDATED);
         RunSessionScopeSession child = repository.findSession(RUN_ID, CHILD_SESSION_ID).orElseThrow();
         assertThat(child.discoverySource()).isEqualTo("TASK_PART");
+        assertThat(child.parentSessionId()).isEqualTo(ROOT_SESSION_ID);
         assertThat(child.taskMessageId()).isEqualTo("msg_task");
         assertThat(child.taskPartId()).isEqualTo("part_task");
         assertThat(child.taskCallId()).isEqualTo("call_task");
+        assertThat(routed.get(0).payload()).containsEntry("parentSessionId", ROOT_SESSION_ID);
     }
 
     @Test
@@ -119,7 +130,10 @@ class RunSessionScopeRouterTest {
                 rootScope()));
 
         assertThat(routed).extracting(RunEventDraft::type)
-                .containsExactly(RunEventType.SESSION_CHILD_DISCOVERED, RunEventType.SESSION_UPDATED);
+                .containsExactly(
+                        RunEventType.SESSION_CHILD_DISCOVERED,
+                        RunEventType.SESSION_SCOPE_UPDATED,
+                        RunEventType.SESSION_UPDATED);
         assertThat(repository.findSession(RUN_ID, CHILD_SESSION_ID))
                 .get()
                 .extracting(RunSessionScopeSession::discoverySource)
@@ -140,7 +154,10 @@ class RunSessionScopeRouterTest {
                 rootScope()));
 
         assertThat(routed).extracting(RunEventDraft::type)
-                .containsExactly(RunEventType.SESSION_CHILD_DISCOVERED, RunEventType.OPENCODE_EVENT_UNKNOWN);
+                .containsExactly(
+                        RunEventType.SESSION_CHILD_DISCOVERED,
+                        RunEventType.SESSION_SCOPE_UPDATED,
+                        RunEventType.OPENCODE_EVENT_UNKNOWN);
         assertThat(repository.findSession(RUN_ID, CHILD_SESSION_ID))
                 .get()
                 .extracting(RunSessionScopeSession::discoverySource)
@@ -193,9 +210,10 @@ class RunSessionScopeRouterTest {
         assertThat(routed).extracting(RunEventDraft::type)
                 .containsExactly(
                         RunEventType.SESSION_CHILD_DISCOVERED,
+                        RunEventType.SESSION_SCOPE_UPDATED,
                         RunEventType.SESSION_STATUS,
                         RunEventType.SESSION_UPDATED);
-        assertThat(routed.get(1).occurredAt()).isEqualTo(NOW.minusSeconds(1));
+        assertThat(routed.get(2).occurredAt()).isEqualTo(NOW.minusSeconds(1));
         assertThat(cache.pending).doesNotContainKey(CHILD_SESSION_ID);
     }
 
@@ -210,6 +228,59 @@ class RunSessionScopeRouterTest {
         assertThat(route(first)).extracting(RunEventDraft::type)
                 .containsExactly(RunEventType.SESSION_STATUS);
         assertThat(route(second)).isEmpty();
+    }
+
+    @Test
+    void knownChildPermissionQuestionAndSessionDiffStayInChildScope() {
+        route(new RunEventDraft(
+                RUN_ID,
+                RunEventType.SESSION_UPDATED,
+                "trace_scope1234567890abcdef",
+                NOW,
+                payload(Map.of("rawType", "session.updated", "sessionID", CHILD_SESSION_ID, "parentID", ROOT_SESSION_ID)),
+                rootScope()));
+
+        List<RunEventDraft> routed = route(
+                childScopedDraft(RunEventType.PERMISSION_ASKED, "permission.v2.asked"),
+                childScopedDraft(RunEventType.QUESTION_ASKED, "question.v2.asked"),
+                childScopedDraft(RunEventType.SESSION_DIFF, "session.diff"));
+
+        assertThat(routed).extracting(RunEventDraft::type)
+                .containsExactly(
+                        RunEventType.PERMISSION_ASKED,
+                        RunEventType.QUESTION_ASKED,
+                        RunEventType.SESSION_DIFF);
+        assertThat(routed).allSatisfy(draft -> {
+            assertThat(draft.scopeContext().sessionId()).isEqualTo(CHILD_SESSION_ID);
+            assertThat(draft.scopeContext().childSession()).isTrue();
+            assertThat(draft.payload()).containsEntry("rootSessionId", ROOT_SESSION_ID)
+                    .containsEntry("sessionId", CHILD_SESSION_ID)
+                    .containsEntry("isChildSession", true);
+        });
+    }
+
+    @Test
+    void dropsGlobalNonRunUnknownEvents() {
+        for (String rawType : List.of(
+                "heartbeat",
+                "server.heartbeat",
+                "tui.toast.show",
+                "pty.output",
+                "workspace.updated",
+                "worktree.updated",
+                "installation.updated",
+                "plugin.updated",
+                "catalog.updated")) {
+            RunEventDraft draft = new RunEventDraft(
+                    RUN_ID,
+                    RunEventType.OPENCODE_EVENT_UNKNOWN,
+                    "trace_scope1234567890abcdef",
+                    NOW,
+                    payload(Map.of("rawType", rawType)),
+                    rootScope());
+
+            assertThat(route(draft)).as(rawType).isEmpty();
+        }
     }
 
     private List<RunEventDraft> route(RunEventDraft... drafts) {
@@ -242,6 +313,16 @@ class RunSessionScopeRouterTest {
                 "trace_scope1234567890abcdef",
                 NOW,
                 payload,
+                rootScope());
+    }
+
+    private RunEventDraft childScopedDraft(RunEventType type, String rawType) {
+        return new RunEventDraft(
+                RUN_ID,
+                type,
+                "trace_scope1234567890abcdef",
+                NOW,
+                payload(Map.of("rawType", rawType, "sessionID", CHILD_SESSION_ID)),
                 rootScope());
     }
 

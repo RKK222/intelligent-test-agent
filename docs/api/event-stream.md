@@ -75,6 +75,9 @@
 | `vcs.branch.updated` | VCS 分支更新。 |
 | `lsp.updated` | LSP 状态更新。 |
 | `mcp.tools.changed` | MCP 工具目录更新。 |
+| `reference.updated` | reference 目录或状态更新。 |
+| `file.edited` | 文件编辑事件。 |
+| `file.watcher.updated` | 文件 watcher 状态更新。 |
 | `opencode.event.unknown` | 未识别 opencode raw event 的兼容兜底。 |
 
 ## SSE 续传
@@ -109,9 +112,13 @@ scope 发现与缓存规则：
 - child discovery 来源包括 task/tool part metadata 中的 `sessionID/sessionId`、`session.created/session.updated` 的 `parentID/parentId`，以及 `session.children(root)` bootstrap 候选。
 - 当前 Run 只纳入本 Run 启动后发现，或能绑定到本 Run task part 的 child；历史 root 下已有 child 不会无条件进入新 Run scope。
 - `session.child.discovered` 是 durable 事件，表示 child 已纳入当前 Run scope；payload 会携带 `source=TASK_PART/SESSION_EVENT/BOOTSTRAP` 和 scope metadata。
-- child 事件早于 discovery 到达时会进入运行态 Redis pending list：`test-agent:run-scope:{runId}:pending:{sessionId}`，TTL 30 分钟；child 纳入 scope 后先发送 `session.child.discovered`，再按原始发生顺序 drain pending 事件，最后处理触发 discovery 的当前事件。
+- `session.scope.updated` 是 durable 事件，当前用于 `SESSION_ADDED`，紧随 `session.child.discovered` 输出，便于前端或历史投影更新 session tree 索引。
+- child 事件早于 discovery 到达时会进入运行态 Redis pending list：`test-agent:run-scope:{runId}:pending:{sessionId}`，TTL 30 分钟；child 纳入 scope 后先发送 `session.child.discovered` 和 `session.scope.updated`，再按原始发生顺序 drain pending 事件，最后处理触发 discovery 的当前事件。
 - Redis dedup key 为 `test-agent:run-scope:{runId}:dedup:{sessionId}:{rawEventId}`，TTL 30 分钟；`rawEventId` 缺失时不写 Redis dedup。Redis 不可用时降级为 DB-only，不阻断 Run 主链路。
-- opencode raw event id 缺失时 payload 不应包含 `rawEventId`，数据库 `run_events.raw_event_id` 保持 `NULL`。由 root session 事件派生的 `run.succeeded/run.failed` 不复用原始 `rawEventId`，避免与对应 `session.status/session.error` 误去重。
+- Redis 还会缓存运行中 scope 和反向索引：`test-agent:run-scope:{runId}:active`、`test-agent:run-scope:{runId}:sessions`、`test-agent:run-scope:{runId}:session:{sessionId}`、`test-agent:run-scope:session:{sessionId}:runs`，TTL 30 分钟；DB 仍是恢复事实源。
+- opencode raw event id 缺失时 payload 不应包含 `rawEventId`，数据库 `run_events.raw_event_id` 保持 `NULL`。由 root session 事件派生的 `run.succeeded/run.failed` 不复用原始 `rawEventId`，避免与对应 `session.status/session.error` 误去重；派生事件 payload 会带 `derived=true`、`derivedFromRawType`，有原始事件 ID 时还带 `derivedFromRawEventId`。
+- payload 对常见 opencode 大写 ID 字段保留原字段并补充 lower camel alias：`sessionID -> sessionId`、`messageID -> messageId`、`partID -> partId`、`callID -> callId`、`requestID -> requestId`。前端必须允许两种字段并存。
+- `heartbeat`、`server.heartbeat`、`tui.*`、`pty.*`、`workspace.*`、`worktree.*`、`installation.*`、`plugin.*`、`catalog.*` 等不带 session 归属的全局 opencode unknown 事件默认不进入 Run 对话事件流；已知 root/child session 的未知事件仍以 `opencode.event.unknown` 保留。
 
 终态派生规则：
 
@@ -298,7 +305,8 @@ Phase 08 后，opencode raw event 的终态映射为：
 - root `session.idle` -> `session.status + run.succeeded`，应用服务同时把 Run 状态更新为 `SUCCEEDED`；child idle 只保留 `session.status`。
 - root `session.next.step.failed` / `session.error` -> `run.failed` 或 `session.error + run.failed`，应用服务同时把 Run 状态更新为 `FAILED`；child error 只保留 `session.error`。
 - `message.updated`、`message.part.updated`、`message.part.delta` 等 opencode App 事件进入同名 transient SSE，用于 message timeline；不写入 `run_events`。
-- `permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed` 进入同名平台 RunEvent，用于运行态同步。
+- `session.diff` 保持映射为 `session.diff`；`diff.proposed` 只由写入类 tool part 完成等平台派生路径产生。
+- `permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`、`reference.updated`、`file.edited`、`file.watcher.updated` 进入同名平台 RunEvent，用于运行态同步。
 
 本地 RunEvent 持久化异常不是 opencode 终态事件，不能单独生成 `run.failed` 或把 Run 状态改为 `FAILED`；前端可通过 SSE 重连和后续事件继续恢复视图。
 

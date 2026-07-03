@@ -17,4 +17,11 @@ public interface RunEventRepository {
      * 读取指定 run 在 lastSeq 之后的事件列表，供 SSE 断线恢复使用。
      */
     List<RunEvent> findByRunIdAfter(RunId runId, long lastSeq, int limit);
+
+    /**
+     * 读取指定 root session 下的事件列表，供 Session 级历史树恢复状态事件；默认实现避免迁移窗口 JDBC 实现新增 SQL。
+     */
+    default List<RunEvent> findByRootSessionIdAfter(String rootSessionId, long lastSeq, int limit) {
+        return List.of();
+    }
 }

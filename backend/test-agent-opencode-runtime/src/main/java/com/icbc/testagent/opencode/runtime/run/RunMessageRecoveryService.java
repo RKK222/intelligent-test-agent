@@ -193,10 +193,26 @@ public class RunMessageRecoveryService {
             String traceId,
             List<SnapshotSessionScope> scopes) {
         List<RunEventSsePayload> events = new ArrayList<>();
+        LinkedHashMap<String, SnapshotSessionScope> scopesBySessionId = new LinkedHashMap<>();
+        List<SnapshotSessionScope> orderedScopes = new ArrayList<>();
         for (SnapshotSessionScope scopedSession : scopes) {
+            if (!scopesBySessionId.containsKey(scopedSession.sessionId())) {
+                scopesBySessionId.put(scopedSession.sessionId(), scopedSession);
+                orderedScopes.add(scopedSession);
+            }
+        }
+        for (int index = 0; index < orderedScopes.size(); index++) {
+            SnapshotSessionScope scopedSession = orderedScopes.get(index);
             AgentSessionMessagesResult result = loadMessages(runtime, node, scopedSession.sessionId(), traceId);
             if (result != null) {
-                events.addAll(toSnapshotEvents(snapshotRunId, traceId, result.messages(), scopedSession));
+                List<AgentSessionMessage> messages = result.messages() == null ? List.of() : result.messages();
+                events.addAll(toSnapshotEvents(snapshotRunId, traceId, messages, scopedSession));
+                for (SnapshotSessionScope discovered : discoverChildScopesFromMessages(scopedSession, messages)) {
+                    if (!scopesBySessionId.containsKey(discovered.sessionId())) {
+                        scopesBySessionId.put(discovered.sessionId(), discovered);
+                        orderedScopes.add(discovered);
+                    }
+                }
             }
         }
         return List.copyOf(events);
@@ -384,6 +400,69 @@ public class RunMessageRecoveryService {
             normalized.putIfAbsent("partId", partId);
         }
         return Map.copyOf(normalized);
+    }
+
+    /**
+     * 兼容旧 Run 缺少 scope 记录的场景：从已恢复的 task part metadata 临时补齐 child 查询范围。
+     */
+    private List<SnapshotSessionScope> discoverChildScopesFromMessages(
+            SnapshotSessionScope parentScope,
+            List<AgentSessionMessage> messages) {
+        LinkedHashMap<String, SnapshotSessionScope> discoveredBySessionId = new LinkedHashMap<>();
+        for (AgentSessionMessage message : messages) {
+            Map<String, Object> messagePayload = normalizeMessage(message.message());
+            if (!"assistant".equalsIgnoreCase(text(messagePayload.get("role")))) {
+                continue;
+            }
+            String messageId = text(messagePayload.get("id"));
+            List<Map<String, Object>> parts = message.parts() == null ? List.of() : message.parts();
+            for (Map<String, Object> part : parts) {
+                Map<String, Object> partPayload = normalizePart(part, messageId);
+                metadataSessionId(partPayload)
+                        .filter(sessionId -> !parentScope.rootSessionId().equals(sessionId))
+                        .filter(sessionId -> !parentScope.sessionId().equals(sessionId))
+                        .ifPresent(sessionId -> discoveredBySessionId.putIfAbsent(
+                                sessionId,
+                                new SnapshotSessionScope(
+                                        parentScope.rootSessionId(),
+                                        sessionId,
+                                        parentScope.sessionId(),
+                                        true,
+                                        firstText(partPayload, "messageID", "messageId").orElse(messageId),
+                                        firstText(partPayload, "partID", "partId", "id").orElse(null),
+                                        firstText(partPayload, "callID", "callId").orElse(null))));
+            }
+        }
+        return List.copyOf(discoveredBySessionId.values());
+    }
+
+    private Optional<String> metadataSessionId(Map<String, Object> source) {
+        return mapValue(source.get("metadata")).flatMap(this::childSessionId)
+                .or(() -> mapValue(source.get("state"))
+                        .flatMap(state -> mapValue(state.get("metadata")))
+                        .flatMap(this::childSessionId));
+    }
+
+    private Optional<String> childSessionId(Map<String, Object> source) {
+        return firstText(source, "sessionID", "sessionId", "id");
+    }
+
+    private Optional<String> firstText(Map<String, Object> source, String... keys) {
+        for (String key : keys) {
+            String value = text(source.get(key));
+            if (value != null) {
+                return Optional.of(value);
+            }
+        }
+        return Optional.empty();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Optional<Map<String, Object>> mapValue(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return Optional.of((Map<String, Object>) map);
+        }
+        return Optional.empty();
     }
 
     /**

@@ -193,6 +193,56 @@ class RunMessageRecoveryServiceTest {
     }
 
     @Test
+    void recoveryDiscoversChildFromRootTaskPartMetadataWhenScopeIsMissing() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.resultsBySession.put(REMOTE_SESSION_ID, new OpencodeSessionMessagesResult(
+                List.of(new OpencodeSessionMessage(
+                        Map.of("id", "msg_root", "type", "assistant", "role", "assistant"),
+                        List.of(Map.of(
+                                "id", "part_task",
+                                "messageID", "msg_root",
+                                "callID", "call_task",
+                                "type", "tool",
+                                "metadata", Map.of("sessionID", "ses_child1234567890abcdef"))))),
+                null,
+                null));
+        facade.resultsBySession.put("ses_child1234567890abcdef", new OpencodeSessionMessagesResult(
+                List.of(new OpencodeSessionMessage(
+                        Map.of("id", "msg_child", "type", "assistant", "role", "assistant"),
+                        List.of(Map.of("id", "part_child", "messageID", "msg_child", "type", "text", "text", "child")))),
+                null,
+                null));
+        RunMessageRecoveryService service = new RunMessageRecoveryService(
+                new FakeRunRepository(run()),
+                new FakeSessionRepository(mappedSession()),
+                new FakeExecutionNodeRepository(),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new FakeRunSessionScopeRepository(List.of(scopeSession(REMOTE_SESSION_ID, null, false))));
+
+        List<RunEventSsePayload> payloads = service.recover(RUN_ID, "trace_1234567890abcdef")
+                .collectList()
+                .block(Duration.ofSeconds(2));
+
+        assertThat(facade.requestedSessionIds)
+                .containsExactly(REMOTE_SESSION_ID, "ses_child1234567890abcdef");
+        assertThat(payloads).extracting(RunEventSsePayload::type)
+                .containsExactly(
+                        "message.updated",
+                        "message.part.updated",
+                        "message.updated",
+                        "message.part.updated");
+        assertThat(payloads.get(2).payload())
+                .containsEntry("rootSessionId", REMOTE_SESSION_ID)
+                .containsEntry("sessionId", "ses_child1234567890abcdef")
+                .containsEntry("parentSessionId", REMOTE_SESSION_ID)
+                .containsEntry("isChildSession", true)
+                .containsEntry("taskMessageId", "msg_root")
+                .containsEntry("taskPartId", "part_task")
+                .containsEntry("taskCallId", "call_task");
+    }
+
+    @Test
     void recoveryDoesNotReplayUserPartsAsAssistantParts() {
         FakeOpencodeFacade facade = new FakeOpencodeFacade();
         facade.result = new OpencodeSessionMessagesResult(

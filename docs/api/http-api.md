@@ -2128,26 +2128,36 @@ Session 运行态接口：
 
 SSE 建连时，后端会先尝试从当前 Run 绑定的 agent remote session 拉取标准 session messages，并仅把 assistant 消息转换为 transient `message.updated` / `message.part.updated` 发给前端；user 消息已在 Run 启动前由平台保存，不重复回放其 text part，避免被前端误拼进 assistant 正文。随后进入 `run_events` durable replay 与 live bus 合流。高频文本 delta、大段日志和 bash/tool output 不写入 `run_events`；如果远端 session 不可用或拉取失败，后端跳过消息恢复，不阻断 Run 状态、Diff、permission/question 等 durable RunEvent 回放。
 
-`GET /api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` 返回当前 Run scope 的消息树快照，旧 `/api/runs/{runId}/session-tree/messages` 和平台内部 URL 继续兼容。scope 表存在时后端按 root + 当前 Run child session 逐个拉取 agent projected messages；scope 表为空时按旧 root-only 远端 session 降级。响应 `data`：
+`GET /api/internal/agent/{agentId}/runs/{runId}/session-tree/messages` 返回当前 Run scope 的消息树快照，旧 `/api/runs/{runId}/session-tree/messages` 和平台内部 URL 继续兼容。scope 表存在时后端按 root + 当前 Run child session 逐个拉取 agent projected messages；scope 表为空时按旧 root-only 远端 session 降级。响应 `events` 会合并本次消息 snapshot 与当前 Run 的 durable RunEvent，因此 permission/question/todo 等状态类事件可随 HTTP 历史响应恢复；`messagesBySessionId` 只包含 `message.*` payload，不会混入状态事件。响应 `data`：
 
 ```json
 {
   "runId": "run_...",
   "sessions": [
-    { "rootSessionId": "ses_root", "sessionId": "ses_child", "parentSessionId": "ses_root", "childSession": true }
+    {
+      "rootSessionId": "ses_root",
+      "sessionId": "ses_child",
+      "parentSessionId": "ses_root",
+      "childSession": true,
+      "taskMessageId": "msg_task",
+      "taskPartId": "part_task",
+      "taskCallId": "call_task"
+    }
   ],
+  "childSessionIdByTaskPartId": { "part_task": "ses_child" },
   "messagesBySessionId": {
     "ses_child": [
       { "sessionId": "ses_child", "message": { "id": "msg_...", "role": "assistant" } }
     ]
   },
   "events": [
-    { "type": "message.updated", "sessionId": "ses_child", "payload": {} }
+    { "type": "message.updated", "sessionId": "ses_child", "payload": {} },
+    { "type": "permission.asked", "sessionId": "ses_child", "payload": { "requestId": "perm_..." } }
   ]
 }
 ```
 
-该接口是 HTTP snapshot 辅助入口，不替代 RunEvent SSE。它只返回当前 Run scope 子树；root session 下全量历史 child 使用 `GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 查询。
+该接口是 HTTP snapshot 辅助入口，不替代 RunEvent SSE。它只返回当前 Run scope 子树；root session 下全量历史 child 使用 `GET /api/internal/agent/{agentId}/sessions/{sessionId}/session-tree/messages` 查询。Session 级接口会按消息 snapshot 中的远端 `rootSessionId` 补读 `run_events.root_session_id` 下的 durable 状态事件，用于恢复跨 Run child permission/question/todo 状态。
 
 PTY WebSocket 不在上述默认 HTTP/SSE 契约内，已按 `docs/standards/security.md` 增加后端受控例外入口，前端仍不得直连 opencode server、SSH、sidecar 或任意主机。
 

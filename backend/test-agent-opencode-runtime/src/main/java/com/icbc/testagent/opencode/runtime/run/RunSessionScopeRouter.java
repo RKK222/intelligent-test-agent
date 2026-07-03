@@ -64,6 +64,9 @@ class RunSessionScopeRouter {
         }
 
         routed.addAll(discoverBootstrapChildren(rootScope, draft));
+        if (eventSessionId == null && shouldDropGlobalNonRunEvent(draft)) {
+            return List.copyOf(routed);
+        }
 
         if (taskCandidate.isPresent()) {
             ChildRoute child = discoverChild(rootScope, draft, taskCandidate.get().toDiscovery());
@@ -107,7 +110,7 @@ class RunSessionScopeRouter {
             return List.copyOf(routed);
         }
 
-        // 显式属于未知 session 的事件不能按 root 入库；Redis pending 在后续批次接管这类事件。
+        // 显式属于未知 session 的事件不能按 root 入库；非终态 session 事件短时进入 Redis pending。
         if (isRunTerminal(draft) || explicitSessionEvent(draft.payload())) {
             if (useRuntimeCache && eventSessionId != null && !isRunTerminal(draft)) {
                 runtimeCache.appendPending(eventSessionId, draft);
@@ -151,11 +154,14 @@ class RunSessionScopeRouter {
     private ChildRoute discoverChild(RunEventScopeContext rootScope, RunEventDraft draft, ChildDiscovery discovery) {
         Optional<RunSessionScopeSession> existing = findSession(rootScope.runId(), discovery.sessionId());
         long version = scopeVersion(rootScope.runId());
+        String parentSessionId = discovery.parentSessionId() == null
+                ? rootScope.rootSessionId()
+                : discovery.parentSessionId();
         RunEventScopeContext scopeContext = new RunEventScopeContext(
                 rootScope.runId(),
                 rootScope.rootSessionId(),
                 discovery.sessionId(),
-                discovery.parentSessionId(),
+                parentSessionId,
                 true,
                 discovery.taskMessageId(),
                 discovery.taskPartId(),
@@ -168,29 +174,32 @@ class RunSessionScopeRouter {
         }
 
         Instant now = draft.occurredAt();
+        RunSessionScope scope = new RunSessionScope(
+                rootScope.runId(),
+                rootScope.rootSessionId(),
+                version,
+                draft.traceId(),
+                now,
+                now,
+                Map.of("source", discovery.source()));
+        RunSessionScopeSession scopeSession = new RunSessionScopeSession(
+                rootScope.runId(),
+                discovery.sessionId(),
+                rootScope.rootSessionId(),
+                parentSessionId,
+                true,
+                discovery.source(),
+                discovery.taskMessageId(),
+                discovery.taskPartId(),
+                discovery.taskCallId(),
+                draft.traceId(),
+                now,
+                now,
+                discovery.metadata());
+        runtimeCache.recordScopeSession(scope, scopeSession);
         if (repository != null) {
-            repository.upsertScope(new RunSessionScope(
-                    rootScope.runId(),
-                    rootScope.rootSessionId(),
-                    version,
-                    draft.traceId(),
-                    now,
-                    now,
-                    Map.of("source", discovery.source())));
-            repository.upsertSession(new RunSessionScopeSession(
-                    rootScope.runId(),
-                    discovery.sessionId(),
-                    rootScope.rootSessionId(),
-                    discovery.parentSessionId(),
-                    true,
-                    discovery.source(),
-                    discovery.taskMessageId(),
-                    discovery.taskPartId(),
-                    discovery.taskCallId(),
-                    draft.traceId(),
-                    now,
-                    now,
-                    discovery.metadata()));
+            repository.upsertScope(scope);
+            repository.upsertSession(scopeSession);
         }
 
         LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
@@ -204,7 +213,20 @@ class RunSessionScopeRouter {
                 draft.occurredAt(),
                 payload,
                 scopeContext);
-        return new ChildRoute(scopeContext, List.of(discovered));
+        LinkedHashMap<String, Object> scopeUpdatedPayload = new LinkedHashMap<>();
+        scopeUpdatedPayload.put("source", discovery.source());
+        scopeUpdatedPayload.put("action", "SESSION_ADDED");
+        scopeUpdatedPayload.put("changedSessionId", discovery.sessionId());
+        scopeUpdatedPayload.putAll(scopeContext.toPayloadMetadata());
+        scopeUpdatedPayload.putAll(discovery.metadata());
+        RunEventDraft scopeUpdated = new RunEventDraft(
+                rootScope.runId(),
+                RunEventType.SESSION_SCOPE_UPDATED,
+                draft.traceId(),
+                draft.occurredAt(),
+                scopeUpdatedPayload,
+                scopeContext);
+        return new ChildRoute(scopeContext, List.of(discovered, scopeUpdated));
     }
 
     private List<RunEventDraft> drainPending(RunEventScopeContext rootScope, ChildRoute child) {
@@ -323,6 +345,10 @@ class RunSessionScopeRouter {
     }
 
     private Optional<RunSessionScopeSession> findSession(RunId runId, String sessionId) {
+        Optional<RunSessionScopeSession> cached = runtimeCache.findScopeSession(runId, sessionId);
+        if (cached.isPresent()) {
+            return cached;
+        }
         if (repository == null) {
             return Optional.empty();
         }
@@ -342,6 +368,23 @@ class RunSessionScopeRouter {
 
     private boolean explicitSessionEvent(Map<String, Object> payload) {
         return eventSessionId(payload).isPresent();
+    }
+
+    private boolean shouldDropGlobalNonRunEvent(RunEventDraft draft) {
+        if (draft.type() != RunEventType.OPENCODE_EVENT_UNKNOWN) {
+            return false;
+        }
+        String rawType = valueAsText(draft.payload().get("rawType")).orElse("");
+        return "heartbeat".equals(rawType)
+                || "server.heartbeat".equals(rawType)
+                || rawType.startsWith("heartbeat.")
+                || rawType.startsWith("tui.")
+                || rawType.startsWith("pty.")
+                || rawType.startsWith("workspace.")
+                || rawType.startsWith("worktree.")
+                || rawType.startsWith("installation.")
+                || rawType.startsWith("plugin.")
+                || rawType.startsWith("catalog.");
     }
 
     private Optional<String> firstText(Map<String, Object> source, String... keys) {

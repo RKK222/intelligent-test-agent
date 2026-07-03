@@ -10,6 +10,8 @@ import static org.mockito.Mockito.when;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventType;
+import com.icbc.testagent.domain.event.RunSessionScope;
+import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.domain.run.RunId;
 import java.time.Duration;
 import java.time.Instant;
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.ListOperations;
+import org.springframework.data.redis.core.SetOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 
@@ -72,6 +75,57 @@ class RunSessionScopeRuntimeCacheTest {
             assertThat(restored.payload()).containsEntry("sessionID", SESSION_ID);
         });
         verify(redisTemplate).delete(key);
+    }
+
+    @Test
+    void recordScopeSessionWritesActiveMetadataSessionSetAndReverseIndex() throws Exception {
+        StringRedisTemplate redisTemplate = mock(StringRedisTemplate.class);
+        ValueOperations<String, String> values = mock(ValueOperations.class);
+        SetOperations<String, String> sets = mock(SetOperations.class);
+        when(redisTemplate.opsForValue()).thenReturn(values);
+        when(redisTemplate.opsForSet()).thenReturn(sets);
+        RunSessionScopeRuntimeCache cache = new RunSessionScopeRuntimeCache(redisTemplate, objectMapper());
+        RunSessionScope scope = new RunSessionScope(
+                RUN_ID,
+                "ses_root1234567890abcdef",
+                2L,
+                "trace_cache1234567890abcdef",
+                Instant.parse("2026-07-03T02:30:00Z"),
+                Instant.parse("2026-07-03T02:30:01Z"),
+                Map.of("agentId", "opencode"));
+        RunSessionScopeSession session = new RunSessionScopeSession(
+                RUN_ID,
+                SESSION_ID,
+                "ses_root1234567890abcdef",
+                "ses_root1234567890abcdef",
+                true,
+                "TASK_PART",
+                "msg_task",
+                "part_task",
+                "call_task",
+                "trace_cache1234567890abcdef",
+                Instant.parse("2026-07-03T02:30:01Z"),
+                Instant.parse("2026-07-03T02:30:01Z"),
+                Map.of("source", "TASK_PART"));
+
+        cache.recordScopeSession(scope, session);
+
+        verify(values).set(
+                eq("test-agent:run-scope:run_cache1234567890abcdef:active"),
+                any(String.class),
+                eq(TTL));
+        verify(values).set(
+                eq("test-agent:run-scope:run_cache1234567890abcdef:session:ses_child1234567890abcdef"),
+                any(String.class),
+                eq(TTL));
+        verify(sets).add(
+                "test-agent:run-scope:run_cache1234567890abcdef:sessions",
+                SESSION_ID);
+        verify(sets).add(
+                "test-agent:run-scope:session:ses_child1234567890abcdef:runs",
+                RUN_ID.value());
+        verify(redisTemplate).expire("test-agent:run-scope:run_cache1234567890abcdef:sessions", TTL);
+        verify(redisTemplate).expire("test-agent:run-scope:session:ses_child1234567890abcdef:runs", TTL);
     }
 
     @Test

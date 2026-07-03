@@ -91,6 +91,7 @@ public class OpencodeRunEventMapper {
         }
         payload.put("rawPayload", toMap(rawEvent));
         appendScopePayload(payload, scopeContext);
+        appendCommonPayloadAliases(payload);
 
         RunEventType type = mapType(rawType, payload);
         if (type == RunEventType.ASSISTANT_MESSAGE_DELTA) {
@@ -125,7 +126,15 @@ public class OpencodeRunEventMapper {
 
     private Map<String, Object> derivedTerminalPayload(Map<String, Object> payload) {
         Map<String, Object> terminalPayload = new LinkedHashMap<>(payload);
-        terminalPayload.remove("rawEventId");
+        Object rawEventId = terminalPayload.remove("rawEventId");
+        terminalPayload.put("derived", true);
+        Object rawType = terminalPayload.get("rawType");
+        if (rawType instanceof String rawTypeText) {
+            terminalPayload.put("derivedFromRawType", rawTypeText);
+        }
+        if (rawEventId instanceof String rawEventIdText) {
+            terminalPayload.put("derivedFromRawEventId", rawEventIdText);
+        }
         return terminalPayload;
     }
 
@@ -189,7 +198,7 @@ public class OpencodeRunEventMapper {
                 payload.put("status", "failed");
                 yield RunEventType.TOOL_FINISHED;
             }
-            case "session.diff" -> RunEventType.DIFF_PROPOSED;
+            case "session.diff" -> RunEventType.SESSION_DIFF;
             case "todo.updated" -> RunEventType.TODO_UPDATED;
             case "permission.asked", "permission.v2.asked" -> RunEventType.PERMISSION_ASKED;
             case "permission.replied", "permission.v2.replied" -> RunEventType.PERMISSION_REPLIED;
@@ -199,6 +208,9 @@ public class OpencodeRunEventMapper {
             case "vcs.branch.updated" -> RunEventType.VCS_BRANCH_UPDATED;
             case "lsp.updated" -> RunEventType.LSP_UPDATED;
             case "mcp.tools.changed" -> RunEventType.MCP_TOOLS_CHANGED;
+            case "reference.updated" -> RunEventType.REFERENCE_UPDATED;
+            case "file.edited" -> RunEventType.FILE_EDITED;
+            case "file.watcher.updated" -> RunEventType.FILE_WATCHER_UPDATED;
             case "test.finished" -> RunEventType.TEST_FINISHED;
             default -> RunEventType.OPENCODE_EVENT_UNKNOWN;
         };
@@ -321,6 +333,20 @@ public class OpencodeRunEventMapper {
             return;
         }
         payload.putAll(scopeContext.toPayloadMetadata());
+    }
+
+    private void appendCommonPayloadAliases(Map<String, Object> payload) {
+        appendAlias(payload, "sessionID", "sessionId");
+        appendAlias(payload, "messageID", "messageId");
+        appendAlias(payload, "partID", "partId");
+        appendAlias(payload, "callID", "callId");
+        appendAlias(payload, "requestID", "requestId");
+    }
+
+    private void appendAlias(Map<String, Object> payload, String sourceKey, String aliasKey) {
+        if (!payload.containsKey(aliasKey) && payload.containsKey(sourceKey)) {
+            payload.put(aliasKey, payload.get(sourceKey));
+        }
     }
 
     /**

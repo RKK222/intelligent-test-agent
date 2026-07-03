@@ -11,9 +11,14 @@ import com.icbc.testagent.domain.session.SessionId;
 import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
 import com.icbc.testagent.event.RunEventSsePayload;
+import com.icbc.testagent.event.RunEventSseStreamService;
 import jakarta.validation.Valid;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -36,32 +41,45 @@ public class SessionController {
     private final SessionApplicationService sessionService;
     private final RunApplicationService runService;
     private final RunMessageRecoveryService messageRecoveryService;
+    private final RunEventSseStreamService eventStreamService;
 
     /**
      * 注入会话应用服务，Controller 仅保留协议和 DTO 转换职责。
      */
     public SessionController(SessionApplicationService sessionService) {
-        this(sessionService, null, null);
+        this(sessionService, null, null, null);
     }
 
     /**
      * 注入会话与 Run 应用服务，active-run 查询用于刷新后恢复 SSE。
      */
     public SessionController(SessionApplicationService sessionService, RunApplicationService runService) {
-        this(sessionService, runService, null);
+        this(sessionService, runService, null, null);
     }
 
     /**
      * 注入会话、Run 与消息恢复服务，Session 历史树查询复用 Run snapshot 恢复链路。
      */
-    @Autowired
     public SessionController(
             SessionApplicationService sessionService,
             RunApplicationService runService,
             RunMessageRecoveryService messageRecoveryService) {
+        this(sessionService, runService, messageRecoveryService, null);
+    }
+
+    /**
+     * 注入会话、Run、消息恢复和事件回放服务，Session 历史树可补齐 durable 状态事件。
+     */
+    @Autowired
+    public SessionController(
+            SessionApplicationService sessionService,
+            RunApplicationService runService,
+            RunMessageRecoveryService messageRecoveryService,
+            RunEventSseStreamService eventStreamService) {
         this.sessionService = sessionService;
         this.runService = runService;
         this.messageRecoveryService = messageRecoveryService;
+        this.eventStreamService = eventStreamService;
     }
 
     /**
@@ -208,11 +226,36 @@ public class SessionController {
                                     : messageRecoveryService.recoverSessionTree(currentSessionId, traceId))
                                     .collectList()
                                     .block(Duration.ofSeconds(30));
+                    List<RunEventSsePayload> allEvents = new ArrayList<>(snapshotEvents);
+                    allEvents.addAll(durableSnapshotPayloadsByRootSessionId(snapshotEvents));
                     return ApiResponse.ok(
-                            RuntimeDtos.SessionTreeMessagesResponse.from(sessionId, snapshotEvents),
+                            RuntimeDtos.SessionTreeMessagesResponse.from(sessionId, allEvents),
                             traceId);
                 })
                 .subscribeOn(Schedulers.boundedElastic());
+    }
+
+    private List<RunEventSsePayload> durableSnapshotPayloadsByRootSessionId(List<RunEventSsePayload> snapshotEvents) {
+        if (eventStreamService == null || snapshotEvents == null || snapshotEvents.isEmpty()) {
+            return List.of();
+        }
+        Set<String> rootSessionIds = new LinkedHashSet<>();
+        for (RunEventSsePayload event : snapshotEvents) {
+            Map<String, Object> payload = event.payload();
+            Object rootSessionId = payload == null ? null : payload.get("rootSessionId");
+            if (rootSessionId instanceof String value && !value.isBlank()) {
+                rootSessionIds.add(value);
+            }
+        }
+        List<RunEventSsePayload> events = new ArrayList<>();
+        for (String rootSessionId : rootSessionIds) {
+            List<RunEventSsePayload> durable =
+                    eventStreamService.snapshotDurablePayloadsByRootSessionId(rootSessionId, 0L, 100);
+            if (durable != null) {
+                events.addAll(durable);
+            }
+        }
+        return List.copyOf(events);
     }
 
     private boolean hasAgentId(String agentId) {

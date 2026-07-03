@@ -78,6 +78,22 @@ public class MyBatisRunEventRepository implements RunEventRepository {
                 .toList();
     }
 
+    /**
+     * 按 root session 恢复跨 Run 的持久化状态事件，供 Session 级历史树使用。
+     */
+    @Override
+    public List<RunEvent> findByRootSessionIdAfter(String rootSessionId, long lastSeq, int limit) {
+        if (rootSessionId == null || rootSessionId.isBlank()) {
+            return List.of();
+        }
+        if (limit < 1 || limit > 500) {
+            throw new IllegalArgumentException("limit must be between 1 and 500");
+        }
+        return mapper.findByRootSessionIdAfter(rootSessionId, lastSeq, limit).stream()
+                .map(this::toDomain)
+                .toList();
+    }
+
     private RunEvent findByRunIdAndSeq(RunId runId, long seq) {
         RunEventRow row = mapper.findByRunIdAndSeq(runId.value(), seq);
         if (row == null) {

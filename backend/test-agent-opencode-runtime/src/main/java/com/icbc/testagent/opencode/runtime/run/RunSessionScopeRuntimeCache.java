@@ -4,12 +4,16 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.event.RunEventType;
+import com.icbc.testagent.domain.event.RunSessionScope;
+import com.icbc.testagent.domain.event.RunSessionScopeSession;
 import com.icbc.testagent.domain.run.RunId;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -38,6 +42,54 @@ class RunSessionScopeRuntimeCache {
 
     static RunSessionScopeRuntimeCache disabled() {
         return disabled(new ObjectMapper().findAndRegisterModules());
+    }
+
+    /**
+     * 记录运行中的 root/child scope 索引，供事件路由快速判断当前 Run 已知 session。
+     */
+    void recordScopeSession(RunSessionScope scope, RunSessionScopeSession session) {
+        if (redisTemplate == null) {
+            return;
+        }
+        Objects.requireNonNull(scope, "scope must not be null");
+        Objects.requireNonNull(session, "session must not be null");
+        try {
+            redisTemplate.opsForValue().set(activeKey(scope.runId()), writeActive(scope), TTL);
+            redisTemplate.opsForValue().set(sessionMetadataKey(session.runId(), session.sessionId()), writeSession(session), TTL);
+            redisTemplate.opsForSet().add(sessionSetKey(session.runId()), session.sessionId());
+            redisTemplate.expire(sessionSetKey(session.runId()), TTL);
+            redisTemplate.opsForSet().add(reverseRunSetKey(session.sessionId()), session.runId().value());
+            redisTemplate.expire(reverseRunSetKey(session.sessionId()), TTL);
+        } catch (RuntimeException exception) {
+            LOGGER.debug(
+                    "Run scope Redis active index unavailable, runId={}, sessionId={}",
+                    session.runId().value(),
+                    session.sessionId(),
+                    exception);
+        }
+    }
+
+    /**
+     * 从运行态 session metadata 读取当前 Run 已知 child；Redis miss 或异常时交给 DB 事实源兜底。
+     */
+    Optional<RunSessionScopeSession> findScopeSession(RunId runId, String sessionId) {
+        if (redisTemplate == null || runId == null || sessionId == null || sessionId.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            String json = redisTemplate.opsForValue().get(sessionMetadataKey(runId, sessionId));
+            if (json == null || json.isBlank()) {
+                return Optional.empty();
+            }
+            return Optional.of(readSession(json));
+        } catch (RuntimeException exception) {
+            LOGGER.debug(
+                    "Run scope Redis session metadata unavailable, runId={}, sessionId={}",
+                    runId.value(),
+                    sessionId,
+                    exception);
+            return Optional.empty();
+        }
     }
 
     /**
@@ -117,8 +169,84 @@ class RunSessionScopeRuntimeCache {
         return "test-agent:run-scope:%s:pending:%s".formatted(runId.value(), sessionId);
     }
 
+    private String activeKey(RunId runId) {
+        return "test-agent:run-scope:%s:active".formatted(runId.value());
+    }
+
+    private String sessionSetKey(RunId runId) {
+        return "test-agent:run-scope:%s:sessions".formatted(runId.value());
+    }
+
+    private String sessionMetadataKey(RunId runId, String sessionId) {
+        return "test-agent:run-scope:%s:session:%s".formatted(runId.value(), sessionId);
+    }
+
+    private String reverseRunSetKey(String sessionId) {
+        return "test-agent:run-scope:session:%s:runs".formatted(sessionId);
+    }
+
     private String dedupKey(RunId runId, String sessionId, String rawEventId) {
         return "test-agent:run-scope:%s:dedup:%s:%s".formatted(runId.value(), sessionId, rawEventId);
+    }
+
+    private String writeActive(RunSessionScope scope) {
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("runId", scope.runId().value());
+        payload.put("rootSessionId", scope.rootSessionId());
+        payload.put("scopeVersion", scope.scopeVersion());
+        payload.put("traceId", scope.traceId());
+        payload.put("createdAt", scope.createdAt());
+        payload.put("updatedAt", scope.updatedAt());
+        payload.put("metadata", scope.metadata());
+        return writeJson(payload, "Run scope active cache 序列化失败");
+    }
+
+    private String writeSession(RunSessionScopeSession session) {
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("runId", session.runId().value());
+        payload.put("sessionId", session.sessionId());
+        payload.put("rootSessionId", session.rootSessionId());
+        payload.put("parentSessionId", session.parentSessionId());
+        payload.put("childSession", session.childSession());
+        payload.put("discoverySource", session.discoverySource());
+        payload.put("taskMessageId", session.taskMessageId());
+        payload.put("taskPartId", session.taskPartId());
+        payload.put("taskCallId", session.taskCallId());
+        payload.put("traceId", session.traceId());
+        payload.put("discoveredAt", session.discoveredAt());
+        payload.put("updatedAt", session.updatedAt());
+        payload.put("metadata", session.metadata());
+        return writeJson(payload, "Run scope session cache 序列化失败");
+    }
+
+    private RunSessionScopeSession readSession(String json) {
+        try {
+            ScopeSessionCacheValue value = objectMapper.readValue(json, ScopeSessionCacheValue.TYPE);
+            return new RunSessionScopeSession(
+                    new RunId(value.runId()),
+                    value.sessionId(),
+                    value.rootSessionId(),
+                    value.parentSessionId(),
+                    value.childSession(),
+                    value.discoverySource(),
+                    value.taskMessageId(),
+                    value.taskPartId(),
+                    value.taskCallId(),
+                    value.traceId(),
+                    value.discoveredAt(),
+                    value.updatedAt(),
+                    value.metadata());
+        } catch (Exception exception) {
+            throw new IllegalStateException("Run scope session cache 反序列化失败", exception);
+        }
+    }
+
+    private String writeJson(Object value, String message) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception exception) {
+            throw new IllegalStateException(message, exception);
+        }
     }
 
     private String writePending(RunEventDraft draft) {
@@ -159,6 +287,25 @@ class RunSessionScopeRuntimeCache {
             Map<String, Object> payload) {
 
         private static final TypeReference<PendingDraft> TYPE = new TypeReference<>() {
+        };
+    }
+
+    private record ScopeSessionCacheValue(
+            String runId,
+            String sessionId,
+            String rootSessionId,
+            String parentSessionId,
+            boolean childSession,
+            String discoverySource,
+            String taskMessageId,
+            String taskPartId,
+            String taskCallId,
+            String traceId,
+            Instant discoveredAt,
+            Instant updatedAt,
+            Map<String, Object> metadata) {
+
+        private static final TypeReference<ScopeSessionCacheValue> TYPE = new TypeReference<>() {
         };
     }
 }

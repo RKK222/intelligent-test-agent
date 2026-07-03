@@ -350,6 +350,7 @@ final class RuntimeDtos {
             String runId,
             List<RunSessionTreeSessionResponse> sessions,
             Map<String, List<Map<String, Object>>> messagesBySessionId,
+            Map<String, String> childSessionIdByTaskPartId,
             List<RunSessionTreeEventResponse> events) {
 
         static RunSessionTreeMessagesResponse from(String runId, List<RunEventSsePayload> snapshotEvents) {
@@ -358,6 +359,7 @@ final class RuntimeDtos {
                     runId,
                     projection.sessions(),
                     projection.messagesBySessionId(),
+                    projection.childSessionIdByTaskPartId(),
                     projection.events());
         }
     }
@@ -369,6 +371,7 @@ final class RuntimeDtos {
             String sessionId,
             List<RunSessionTreeSessionResponse> sessions,
             Map<String, List<Map<String, Object>>> messagesBySessionId,
+            Map<String, String> childSessionIdByTaskPartId,
             List<RunSessionTreeEventResponse> events) {
 
         static SessionTreeMessagesResponse from(String sessionId, List<RunEventSsePayload> snapshotEvents) {
@@ -377,6 +380,7 @@ final class RuntimeDtos {
                     sessionId,
                     projection.sessions(),
                     projection.messagesBySessionId(),
+                    projection.childSessionIdByTaskPartId(),
                     projection.events());
         }
     }
@@ -388,7 +392,10 @@ final class RuntimeDtos {
             String rootSessionId,
             String sessionId,
             String parentSessionId,
-            boolean childSession) {
+            boolean childSession,
+            String taskMessageId,
+            String taskPartId,
+            String taskCallId) {
     }
 
     /**
@@ -406,12 +413,14 @@ final class RuntimeDtos {
     private record SessionTreeProjection(
             List<RunSessionTreeSessionResponse> sessions,
             Map<String, List<Map<String, Object>>> messagesBySessionId,
+            Map<String, String> childSessionIdByTaskPartId,
             List<RunSessionTreeEventResponse> events) {
     }
 
     private static SessionTreeProjection sessionTreeProjection(List<RunEventSsePayload> snapshotEvents) {
         Map<String, RunSessionTreeSessionResponse> sessionsById = new LinkedHashMap<>();
         Map<String, List<Map<String, Object>>> messagesBySessionId = new LinkedHashMap<>();
+        Map<String, String> childSessionIdByTaskPartId = new LinkedHashMap<>();
         List<RunSessionTreeEventResponse> events = new ArrayList<>();
         for (RunEventSsePayload event : snapshotEvents == null ? List.<RunEventSsePayload>of() : snapshotEvents) {
             Map<String, Object> payload = event.payload() == null ? Map.of() : event.payload();
@@ -419,13 +428,28 @@ final class RuntimeDtos {
             String rootSessionId = text(payload.get("rootSessionId"));
             String parentSessionId = text(payload.get("parentSessionId"));
             Boolean childSession = bool(payload.get("isChildSession"));
+            String taskMessageId = text(payload.get("taskMessageId"));
+            String taskPartId = text(payload.get("taskPartId"));
+            String taskCallId = text(payload.get("taskCallId"));
             if (sessionId != null) {
-                sessionsById.putIfAbsent(sessionId, new RunSessionTreeSessionResponse(
+                RunSessionTreeSessionResponse sessionResponse = new RunSessionTreeSessionResponse(
                         rootSessionId,
                         sessionId,
                         parentSessionId,
-                        Boolean.TRUE.equals(childSession)));
-                messagesBySessionId.computeIfAbsent(sessionId, ignored -> new ArrayList<>()).add(Map.copyOf(payload));
+                        Boolean.TRUE.equals(childSession),
+                        taskMessageId,
+                        taskPartId,
+                        taskCallId);
+                RunSessionTreeSessionResponse existing = sessionsById.get(sessionId);
+                if (existing == null || (existing.taskPartId() == null && taskPartId != null)) {
+                    sessionsById.put(sessionId, sessionResponse);
+                }
+                if (Boolean.TRUE.equals(childSession) && taskPartId != null) {
+                    childSessionIdByTaskPartId.putIfAbsent(taskPartId, sessionId);
+                }
+                if (isMessageEvent(event.type())) {
+                    messagesBySessionId.computeIfAbsent(sessionId, ignored -> new ArrayList<>()).add(Map.copyOf(payload));
+                }
             }
             events.add(new RunSessionTreeEventResponse(
                     event.type(),
@@ -440,7 +464,12 @@ final class RuntimeDtos {
         return new SessionTreeProjection(
                 List.copyOf(sessionsById.values()),
                 Map.copyOf(immutableMessages),
+                Map.copyOf(childSessionIdByTaskPartId),
                 List.copyOf(events));
+    }
+
+    private static boolean isMessageEvent(String type) {
+        return type != null && type.startsWith("message.");
     }
 
     private static List<Map<String, Object>> parseParts(String partsJson) {

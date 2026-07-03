@@ -24,9 +24,9 @@
 - `RunEventLiveBus`：按 runId 发布/订阅当前进程内实时事件，durable 事件带 seq，transient 事件 `seq=0`。
 - `RunEventRemotePublisher` / `NoopRunEventRemotePublisher` / `RedisRunEventRemotePublisher`：跨实例实时广播端口、默认空实现和可选 Redis pub/sub 实现；Redis 不可用时降级为本机 live bus。
 - `ServerBroadcastPublisher` / `NoopServerBroadcastPublisher` / `RedisServerBroadcastPublisher`：通用服务器广播端口的 event 模块实现，当前用于应用版本工作区副本同步；默认关闭，开启 `test-agent.server-broadcast.enabled=true` 后走 Redis channel `test-agent:server-broadcast`。
-- `RunEventReplayService`：解析 `Last-Event-ID` 并按 `runId + seq` 增量回放。
+- `RunEventReplayService`：解析 `Last-Event-ID` 并按 `runId + seq` 增量回放；Session 历史树可按 root session 读取 durable 状态事件。
 - `RunEventSseMapper`：将 durable RunEvent 映射为带 `id=seq` 的 SSE，将 transient live output 映射为不带 SSE `id` 的 SSE。
-- `RunEventSseStreamService`：合并 Repository durable replay、`RunEventLiveBus` 本机实时事件和可选 Redis 远端事件；阻塞式回放查询 offload 到 `boundedElastic`，单次 Repository 异常跳过本轮轮询并继续保持订阅，客户端断开时释放订阅。
+- `RunEventSseStreamService`：合并 Repository durable replay、`RunEventLiveBus` 本机实时事件和可选 Redis 远端事件；并为 HTTP 历史接口提供 Run 级和 root-session 级 durable payload snapshot；阻塞式回放查询 offload 到 `boundedElastic`，单次 Repository 异常跳过本轮轮询并继续保持订阅，客户端断开时释放订阅。
 
 ## 允许依赖
 

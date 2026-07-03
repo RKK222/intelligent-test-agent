@@ -33,6 +33,16 @@ public class RunEventReplayService {
     }
 
     /**
+     * 按 root session 回放持久化事件，用于 Session 级历史树补齐 permission/question/todo 等状态。
+     */
+    public List<RunEvent> replayByRootSessionIdAfter(String rootSessionId, String lastEventId, int limit) {
+        if (rootSessionId == null || rootSessionId.isBlank()) {
+            return List.of();
+        }
+        return runEventRepository.findByRootSessionIdAfter(rootSessionId, resolveLastSeq(lastEventId), limit);
+    }
+
+    /**
      * 将 SSE Last-Event-ID 转换为 durable seq；空值表示从 0 开始，非法值返回统一参数错误。
      */
     public long resolveLastSeq(String lastEventId) {

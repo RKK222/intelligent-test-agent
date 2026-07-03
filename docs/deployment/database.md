@@ -126,9 +126,10 @@
 - `run_session_scope_sessions(run_id, session_id)` 唯一。
 - `uq_run_events_scope_raw_event(run_id, session_id, raw_event_id)` 用于 raw event 去重；`raw_event_id is null` 的事件不参与误去重。
 - `idx_run_events_scope_session_seq(run_id, root_session_id, session_id, seq)` 支持 Run scope 内按 session 恢复事件。
+- `run_events.root_session_id` 也用于 Session 级历史树读取跨 Run durable 状态事件；新增查询必须继续放在 MyBatis XML。
 - `idx_run_session_scope_sessions_root(root_session_id, discovered_at)` 支持 Session 级历史树按 root session 汇总跨 Run 已发现 child。
 
-当前 `RunSessionScopeRepository` 与 `RunEventRepository` 均已通过 MyBatis XML 实现。Run 启动后会记录 root scope；runtime 发现 child session 后写入 `run_session_scope_sessions`，并在 `run_events` append 时写入结构化 scope 列。`JdbcRunEventRepository` 仅保留迁移窗口，不再作为生产 Spring Bean。`raw_event_id` 缺失必须写 `NULL`；root session 事件派生的 `run.succeeded/run.failed` 不复用原始 raw event id，避免与对应 session 事件误去重。
+当前 `RunSessionScopeRepository` 与 `RunEventRepository` 均已通过 MyBatis XML 实现。Run 启动后会记录 root scope；runtime 发现 child session 后写入 `run_session_scope_sessions`，并在 `run_events` append 时写入结构化 scope 列。`RunEventRepository` 支持按 Run 回放和按 root session 回放，后者用于 Session 级历史树恢复 permission/question/todo 等 durable 状态。`JdbcRunEventRepository` 仅保留迁移窗口，不再作为生产 Spring Bean。`raw_event_id` 缺失必须写 `NULL`；root session 事件派生的 `run.succeeded/run.failed` 不复用原始 raw event id，避免与对应 session 事件误去重。
 
 ## V5 用户认证表
 

@@ -27,4 +27,9 @@ public interface RunEventMapper {
             @Param("runId") String runId,
             @Param("lastSeq") long lastSeq,
             @Param("limit") int limit);
+
+    List<RunEventRow> findByRootSessionIdAfter(
+            @Param("rootSessionId") String rootSessionId,
+            @Param("lastSeq") long lastSeq,
+            @Param("limit") int limit);
 }
