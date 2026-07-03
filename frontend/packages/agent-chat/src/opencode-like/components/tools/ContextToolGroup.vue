@@ -14,15 +14,15 @@ import { getToolInfo } from "../../state/tool-registry";
 
 const props = defineProps<ContextToolGroupProps>();
 const open = ref(false);
-const title = computed(() => `上下文 ${props.parts.length}`);
+const titleText = computed(() => props.busy ? "正在探索" : "已探索");
+const subtitleText = computed(() => `读取 ${props.parts.length} 次`);
 </script>
 
 <template>
   <section class="oc-context-group" data-testid="oc-context-group">
     <button type="button" class="oc-context-group__trigger" @click="open = !open">
-      <Files class="oc-tool__icon" />
-      <span class="oc-tool__title">{{ title }}</span>
-      <span v-if="busy" class="oc-status-pill">读取中</span>
+      <span class="oc-tool__title">{{ titleText }}</span>
+      <span class="oc-tool__subtitle">{{ subtitleText }}</span>
       <ChevronDown v-if="open" class="oc-tool__chevron" />
       <ChevronRight v-else class="oc-tool__chevron" />
     </button>

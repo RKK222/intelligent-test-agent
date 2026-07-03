@@ -31,7 +31,8 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelector(".oc-assistant-part")).toBeTruthy();
     expect(container.querySelector(".oc-diff-summary")).toBeTruthy();
     expect(getByText("分析 checkout 失败")).toBeTruthy();
-    expect(getByText("上下文 2")).toBeTruthy();
+    expect(getByText("已探索")).toBeTruthy();
+    expect(getByText("读取 2 次")).toBeTruthy();
     await fireEvent.click(container.querySelector(".oc-context-group__trigger") as HTMLElement);
     expect(getByText("README.md")).toBeTruthy();
     expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();

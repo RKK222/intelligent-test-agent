@@ -53,6 +53,17 @@
 - What: 发布前新增远程变化预览与 expected HEAD 校验，应用 pull 后立即同步版本和本机副本 commit；冲突路径关闭 `core.quotepath`，支持全部保留个人版本、全部采用远程版本和取消 merge，目标侧缺失按 Git 删除语义处理。前端复用已加载 diff 更新数量角标、拦截旧工作区请求回写，并明确 AU/UD 删除侧。
 - How: 复用 `GitWorkspaceService`、个人工作区归属校验和现有发布编排，新增 preview/resolve-all HTTP 契约；真实临时 Git 仓库覆盖中文修改/删除冲突，服务测试覆盖预览汇总、HEAD 变化前置拦截和冲突后的元数据同步，前端测试覆盖预览确认与批量处理。处理了会话开始前遗留的 `git pull --rebase`，保留两侧 session log 后完成 7 个本地提交重放。
 - Result: common 24 个、workspace-management 36 个、API Controller 和 Git 面板/合并编辑器定向测试通过，agent-web typecheck/build 通过；使用 `.env.test` / `test` profile / JDK 25 重启并检查健康状态。未修改环境文件、数据库、事件、generated SDK 或 888 当前个人 worktree 冲突内容。
+### 2026-07-03 - 优化对话中思考与工具状态样式
+
+- Why: 为了让对话界面的思考过程与工具状态展示更加扁平、清爽，需要参照最新的设计稿去除臃肿的外边框与背景色，改用更干净的行级样式，并合理排列 Chevron 折叠标记及中文化状态文字。
+- What: 
+  - 移除了 `.oc-tool`、`.oc-context-group`、`.oc-disclosure` 的外层边框与背景色，改为扁平文本样式；
+  - 对 `思考状态` (`OcDisclosure`)、`已探索` (`ContextToolGroup`) 等折叠头部进行行内包裹排列（`display: inline-flex`），使 Chevron 紧贴标题/状态文本展示，并实现运行态时的蓝色高亮；
+  - 对 individual tools (如 `bash` 等 `OcToolShell`) 支持两端对齐排版（`margin-left: auto`），在右侧以文字显示中文化的状态并尾随 Chevron；
+  - 调整 `opencode-timeline.test.ts` 的相关断言以覆盖新类与“已探索”文本映射。
+- How: 修改 `OcDisclosure.vue`、`OcToolShell.vue`、`ContextToolGroup.vue`、`ReasoningPartView.vue`、`tools.css` 和 `parts.css` 并跑通所有单元测试。
+- Result: 前端 Vitest `corepack pnpm test` 全绿，所有组件布局及样式完全符合截图所示扁平化时间线风格。
+
 ### 2026-07-03 - 原始输出限制改为10000条
 
 - Why: 调试过程中需要查看更多的原始报文（包括请求、响应和 SSE 消息），原有 1000 条的限制不够用，需要将其调整至 10000 条以保留更多历史。

@@ -3,6 +3,7 @@ export type OcDisclosureProps = {
   title: string;
   subtitle?: string;
   defaultOpen?: boolean;
+  status?: string;
 };
 </script>
 
@@ -17,12 +18,12 @@ const open = ref(props.defaultOpen);
 </script>
 
 <template>
-  <section class="oc-disclosure">
+  <section :class="['oc-disclosure', status === 'running' ? 'is-running' : '']">
     <button type="button" class="oc-disclosure__trigger" @click="open = !open">
-      <ChevronDown v-if="open" class="oc-tool__chevron" />
-      <ChevronRight v-else class="oc-tool__chevron" />
       <span class="oc-tool__title">{{ title }}</span>
       <span v-if="subtitle" class="oc-tool__subtitle">{{ subtitle }}</span>
+      <ChevronDown v-if="open" class="oc-tool__chevron" />
+      <ChevronRight v-else class="oc-tool__chevron" />
     </button>
     <div v-if="open" class="oc-disclosure__body">
       <slot />

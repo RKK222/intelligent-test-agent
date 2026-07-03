@@ -1,69 +1,111 @@
 .oc-tool,
 .oc-context-group,
 .oc-disclosure {
-  border: 1px solid var(--oc-border);
-  border-radius: var(--oc-radius-md);
-  background: color-mix(in srgb, var(--oc-surface) 84%, transparent);
-  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  overflow: visible;
 }
 
-.oc-tool__trigger,
-.oc-context-group__trigger,
-.oc-disclosure__trigger {
-  width: 100%;
-  display: flex;
+/* Disclosure (e.g. 思考状态) and Context Group (e.g. 已探索) trigger: inline elements next to each other */
+.oc-disclosure__trigger,
+.oc-context-group__trigger {
+  display: inline-flex;
+  width: auto;
+  min-height: unset;
+  padding: 4px 0;
+  gap: 6px;
   align-items: center;
-  gap: 8px;
-  min-height: 34px;
-  padding: 7px 10px;
-  color: var(--oc-fg);
+  color: var(--oc-muted);
   background: transparent;
   border: 0;
   cursor: pointer;
   text-align: left;
 }
 
-.oc-tool__icon,
-.oc-tool__chevron {
-  width: 16px;
-  height: 16px;
-  color: var(--oc-muted);
-  flex: 0 0 auto;
-}
-
-.oc-tool__title {
+.oc-disclosure__trigger .oc-tool__title,
+.oc-context-group__trigger .oc-tool__title {
+  color: var(--oc-fg);
+  font-weight: 600;
   font-size: var(--oc-text-sm);
-  font-weight: 500;
 }
 
-.oc-tool__subtitle {
-  margin-left: auto;
-  min-width: 0;
+.oc-disclosure__trigger .oc-tool__subtitle,
+.oc-context-group__trigger .oc-tool__subtitle {
+  margin-left: 0;
+  color: var(--oc-subtle);
+  font-size: var(--oc-text-xs);
+}
+
+.oc-disclosure__trigger .oc-tool__chevron,
+.oc-context-group__trigger .oc-tool__chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--oc-subtle);
+}
+
+/* Generic Tool trigger (e.g. bash): title & command left-aligned, status and chevron right-aligned */
+.oc-tool__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  color: var(--oc-fg);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  min-height: unset;
+}
+
+.oc-tool__trigger .oc-tool__title {
+  color: var(--oc-fg);
+  font-weight: 600;
+  font-size: var(--oc-text-sm);
+  text-transform: lowercase;
+}
+
+.oc-tool__trigger .oc-tool__subtitle {
+  margin-left: 0;
   color: var(--oc-subtle);
   font-size: var(--oc-text-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 70%;
+}
+
+.oc-tool__trigger .oc-tool__chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--oc-subtle);
+  margin-left: 4px;
+}
+
+.oc-tool__status {
+  margin-left: auto;
+  font-size: var(--oc-text-xs);
+  color: var(--oc-subtle);
+}
+
+.oc-tool__status.is-failed,
+.oc-tool__status.is-error {
+  color: var(--oc-danger);
 }
 
 .oc-tool__body,
-.oc-disclosure__body {
-  border-top: 1px solid var(--oc-border);
-  padding: 10px;
+.oc-disclosure__body,
+.oc-context-group__body {
+  border-top: 0;
+  padding: 6px 0 8px 12px;
+  border-left: 1px solid var(--oc-border);
+  margin-top: 4px;
 }
 
 .oc-tool-detail {
   display: grid;
   gap: 8px;
-}
-
-.oc-context-group {
-  background: transparent;
-}
-
-.oc-context-group__body {
-  border-top: 1px solid var(--oc-border);
-  padding: 6px 10px 8px;
 }
 
 .oc-context-group__item {

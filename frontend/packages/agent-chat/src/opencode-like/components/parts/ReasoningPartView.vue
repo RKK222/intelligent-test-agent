@@ -15,13 +15,28 @@ import { readPartText } from "../../state/part-text";
 
 const props = defineProps<ReasoningPartViewProps>();
 const source = computed(() => readPartText(props.part, props.streamingTextByPartId));
+
+const subtitleText = computed(() => {
+  const status = props.part.status;
+  if (status === "completed" || status === "success") {
+    return "已完成";
+  }
+  if (status === "running") {
+    return "";
+  }
+  if (status === "failed" || status === "error") {
+    return "失败";
+  }
+  return status;
+});
 </script>
 
 <template>
   <OcDisclosure
     class="oc-reasoning-part"
     title="思考状态"
-    :subtitle="part.status"
+    :subtitle="subtitleText"
+    :status="part.status"
     :default-open="part.status === 'running'"
   >
     <div class="oc-reasoning-part__body">

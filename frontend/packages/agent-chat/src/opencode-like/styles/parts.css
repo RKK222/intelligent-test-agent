@@ -12,6 +12,11 @@
   font-size: var(--oc-text-sm);
 }
 
+.oc-disclosure.is-running .oc-tool__title,
+.oc-disclosure.is-running .oc-tool__chevron {
+  color: #2b53db;
+}
+
 .oc-reasoning-part__body {
   border-left: 1px solid var(--oc-border);
   padding-left: 12px;
