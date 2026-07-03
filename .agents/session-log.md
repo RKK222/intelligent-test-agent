@@ -34,6 +34,13 @@
     - 修改 mock stub `ElInputStub` 绑定 `disabled` 属性到原生 `input`。
     - 调整原有测试用例以在点击“新增”前选择版本库类型，并新增校验及字段禁用的回归测试用例。
 - Result: 前端 `corepack pnpm test settings-repository-panel` (11 个测试) 与 `corepack pnpm typecheck` 全部通过。未修改 generated SDK、后端 API 协议或环境配置文件。
+### 2026-07-03 - 清理 888 账户旧统一认证号 worktree
+
+- Why: 888 账户磁盘上同时存在数据库绑定的 `usr_test_dev` personal worktree 和无数据库引用的 `DEV_888888888/coss/default` worktree；后者由 2026-06-30 旧实现按 `unifiedAuthId` 生成，2026-07-01 切换为稳定 `userId` 路径并修复数据库绑定时未回收 physical worktree。
+- What: 确认旧 worktree 无 `personal_workspaces`、`workspaces`、recent preference 引用，无远程分支、无独有提交、无打开句柄后，强制移除 worktree，删除本地分支 `feature_testagent_20260618_DEV_888888888_default` 并执行 worktree prune。
+- How: 只清理 `.testagent` 下无引用的历史 physical worktree 和本地分支，不修改数据库，不触碰当前绑定的 `usr_test_dev` worktree、其 `4618396` HEAD 或正在进行的 `6093725` merge。
+- Result: Git worktree 列表只剩应用版本 worktree 和数据库绑定的 `usr_test_dev` personal worktree；旧路径和旧分支均不存在。当前 personal worktree 仍保持 48 个删除、4 个重命名、2 个新增和 8 个 `AU` 冲突，等待后续明确恢复或解决。
+
 ### 2026-07-03 - 修复工作区 Git 交互与 opencode 重启注册失败
 
 - Why: 工作区 Git 面板在冲突期间不能暂存/撤回普通文件，文件名和 Diff 打开体验不完整，冲突预设结果无法保存；随后本地重启暴露后端启动阶段并发心跳可能写出 `backend_java_processes.updated_at < created_at`，导致 manager WebSocket 注册持续失败，opencode 无法启动。
