@@ -66,9 +66,30 @@ let monacoLib: typeof monaco | null = null;
 // 内部正在用外部 content 同步模型时，跳过 change 事件，避免回环
 let syncing = false;
 
+let containerResizeObserver: ResizeObserver | null = null;
+
+function layoutEditor() {
+  if (editor.value && typeof editor.value.layout === "function") {
+    editor.value.layout();
+  }
+}
+
+function observeContainerResize() {
+  if (containerResizeObserver) {
+    containerResizeObserver.disconnect();
+    containerResizeObserver = null;
+  }
+  if (containerEl.value && typeof ResizeObserver !== "undefined") {
+    containerResizeObserver = new ResizeObserver(() => {
+      layoutEditor();
+    });
+    containerResizeObserver.observe(containerEl.value);
+  }
+}
+
 function buildModel(path: string, content: string): monaco.editor.ITextModel {
   const m = monacoLib!;
-  const uri = m.Uri.parse(`file:///${encodeURIComponent(path)}`);
+  const uri = typeof m.Uri.file === "function" ? m.Uri.file(path) : m.Uri.parse(`file:///${path}`);
   const existing = m.editor.getModel(uri);
   if (existing) {
     if (existing.getValue() !== content) {
@@ -95,6 +116,8 @@ async function ensureMonacoEditor(path: string, content: string) {
   if (editor.value) {
     editor.value.setModel(model);
     emitSelection(editor.value);
+    await nextTick();
+    layoutEditor();
     return;
   }
   const inst = monacoLib.editor.create(containerEl.value, {
@@ -118,6 +141,10 @@ async function ensureMonacoEditor(path: string, content: string) {
     }
   });
   editor.value = inst;
+  observeContainerResize();
+  await nextTick();
+  layoutEditor();
+
   inst.onDidChangeModelContent(() => {
     if (syncing) {
       return;
@@ -168,6 +195,15 @@ onMounted(async () => {
   await ensureMonacoEditor(props.path, props.content);
 });
 
+// 路径与预览分屏状态变化：重新触发 Monaco layout，确保容器尺寸变动后渲染正常
+watch(
+  () => [props.showPreview, splitPct.value, props.path],
+  async () => {
+    await nextTick();
+    layoutEditor();
+  }
+);
+
 // 路径变化：切换到新文件模型
 watch(
   () => props.path,
@@ -208,6 +244,10 @@ function onSashUp() {
 }
 
 onBeforeUnmount(() => {
+  if (containerResizeObserver) {
+    containerResizeObserver.disconnect();
+    containerResizeObserver = null;
+  }
   // 拖拽中卸载时清理全局监听，避免泄漏
   window.removeEventListener("pointermove", onSashMove);
   window.removeEventListener("pointerup", onSashUp);
@@ -275,12 +315,15 @@ function syncFromEditor() {
 watch(
   () => props.content,
   (content) => {
-    if (!model || !editor.value || content === model.getValue()) {
+    if (!model || content === model.getValue()) {
       return;
     }
     syncing = true;
     model.setValue(content);
     syncing = false;
+    if (editor.value) {
+      editor.value.layout();
+    }
   }
 );
 
@@ -292,6 +335,10 @@ watch(
 );
 
 onBeforeUnmount(() => {
+  if (containerResizeObserver) {
+    containerResizeObserver.disconnect();
+    containerResizeObserver = null;
+  }
   editor.value?.dispose();
   editor.value = null;
   model = null;
@@ -332,8 +379,8 @@ onBeforeUnmount(() => {
     <div ref="splitContainerEl" class="flex min-h-0 flex-1 flex-col">
       <div
         ref="containerEl"
-        class="min-h-0"
-        :style="isMarkdown && showPreview ? { height: splitPct + '%' } : { flex: 1 }"
+        class="min-h-0 shrink-0"
+        :style="isMarkdown && showPreview ? { height: splitPct + '%', flex: 'none' } : { flex: 1 }"
       />
       <template v-if="isMarkdown && showPreview">
         <div

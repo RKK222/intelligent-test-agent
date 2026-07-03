@@ -62,20 +62,16 @@
 }
 
 .oc-assistant-frame {
-  --oc-avatar-size: 28px;
-  --oc-avatar-column: calc(var(--oc-avatar-size) + 6px);
-  --oc-avatar-gap: 12px;
-  display: grid;
-  grid-template-columns: var(--oc-avatar-column) minmax(0, 1fr);
-  column-gap: var(--oc-avatar-gap);
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   max-width: 100%;
 }
 
 .oc-assistant-frame.is-continuation {
   display: block;
   margin-top: 6px;
-  padding-left: calc(var(--oc-avatar-column) + var(--oc-avatar-gap));
+  padding-left: 0;
   max-width: 100%;
 }
 
@@ -85,14 +81,13 @@
 }
 
 .oc-assistant-frame.is-headerless .oc-assistant-frame__content {
-  grid-column: 2;
+  grid-column: unset;
 }
 
 .oc-assistant-frame.has-header {
-  display: grid;
-  grid-template-columns: var(--oc-avatar-column) minmax(0, 1fr);
-  column-gap: var(--oc-avatar-gap);
-  align-items: start;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   padding-left: 0;
 }
 
@@ -109,11 +104,14 @@
   .oc-assistant-frame.has-header:has(.oc-unknown-part)
   .oc-assistant-frame__avatar {
   transform: translateY(calc(var(--oc-avatar-size) + 6px));
+.oc-assistant-frame.has-header .oc-assistant-frame__avatar {
+  margin-bottom: 6px;
 }
 
 .oc-assistant-frame.has-header .oc-assistant-frame__content {
-  grid-column: 2;
+  grid-column: unset;
   min-width: 0;
+  width: 100%;
 }
 
 .oc-assistant-frame__avatar {

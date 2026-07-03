@@ -34,6 +34,21 @@
   - 不改 reducer、投影顺序、RunEvent、后端 API 或默认折叠逻辑；保留“同一回合 reasoning 合并为一行、默认收起”的当前行为，只降低视觉权重并修正头像对齐。
 - Result:
   - 前端 Vitest 全量通过（36 files, 299 passed, 1 skipped），`@test-agent/agent-chat` typecheck 通过；Playwright 构造 DOM 检查隐藏 step 行头像与 reasoning 触发器 top delta 为 0px，reasoning `已完成` 与工具 `已读取` x delta 为 0px；前端 Vite 已在 `127.0.0.1:3001` 启动验证入口。
+### 2026-07-04 - 调整对话时间线内容左对齐
+
+- Why:
+  - opencode-like 时间线中的助手消息框 (AssistantMessageFrame) 使用了 2 列 Grid 布局及 46px 固定的 left-padding 给头像留列，导致下方所有思考状态、工具调用、探索卡片和正文回答在头像下方留有大面积空白缩进，不够紧凑且不符合 left-aligned 的设计预期。
+- What:
+  - 重构 `rows.css` 中的 `.oc-assistant-frame` 样式，移除 46px left-padding 及 2 列 Grid 限制，将助手消息的内容区域（`oc-assistant-frame__content`）统一设为 0 边距左对齐。
+  - 调整头像与第一行的 Flex 布局，保证头像与首行或后续各类 Part（思考状态、skill、Explore、探索、正文气泡）都紧贴对话框左边 border 齐平展放。
+- How:
+  - 修改 `frontend/packages/agent-chat/src/opencode-like/styles/rows.css`。
+  - 跑通 `opencode-timeline.test.ts` 和 `FigmaChatPanel.test.ts` 自动化单测，校验 `agent-chat` 和 `agent-web` typecheck 0 报错。
+- Result:
+  - `npx vitest run packages/agent-chat/tests/opencode-timeline.test.ts`（12 passed）。
+  - `npx vitest run apps/agent-web/tests/FigmaChatPanel.test.ts`（55 passed）。
+  - `vue-tsc --noEmit` 通过，无类型异常。
+
 ### 2026-07-04 - 修复 Run session scope MERGE 时间参数类型推断
 
 - Why:

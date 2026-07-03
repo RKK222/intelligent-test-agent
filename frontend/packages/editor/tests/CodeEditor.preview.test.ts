@@ -11,6 +11,7 @@ vi.mock("../src/monaco-env", () => {
   };
   const fakeEditor = {
     setModel: () => {},
+    layout: () => {},
     onDidChangeModelContent: () => ({ dispose: () => {} }),
     onDidChangeCursorSelection: () => ({ dispose: () => {} }),
     onDidScrollChange: () => ({ dispose: () => {} }),
@@ -24,7 +25,7 @@ vi.mock("../src/monaco-env", () => {
     dispose: () => {}
   };
   const mockMonaco = {
-    Uri: { parse: () => ({}) },
+    Uri: { parse: () => ({}), file: (p: string) => ({ path: p }) },
     KeyMod: { CtrlCmd: 1 << 11 },
     KeyCode: { KeyS: 49 },
     editor: {
