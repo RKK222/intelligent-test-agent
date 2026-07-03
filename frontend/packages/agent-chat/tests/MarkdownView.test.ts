@@ -1,6 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { render } from "@testing-library/vue";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render } from "@testing-library/vue";
 import MarkdownView from "../src/MarkdownView.vue";
+
+vi.mock("mermaid", () => {
+  return {
+    default: {
+      initialize: vi.fn(),
+      render: vi.fn().mockResolvedValue({ svg: "<svg id='mock-svg'>Mocked SVG</svg>" })
+    }
+  };
+});
 
 // 等待防抖（150ms）+ markdown-it/dompurify/highlight.js 动态 import 完成并完成 DOM 更新
 const waitRender = () => new Promise((r) => setTimeout(r, 400));
@@ -59,5 +68,26 @@ describe("MarkdownView", () => {
     });
 
     expect(getByText("准备输出…")).toBeTruthy();
+  });
+
+  it("mermaid 预览按钮未点击展示代码，点击后渲染图表", async () => {
+    const { container } = render(MarkdownView, {
+      props: { source: "```mermaid\ngraph TD;\n  A-->B;\n```" }
+    });
+    await waitRender();
+
+    // 1. 未点击前展示代码和按钮
+    const btn = container.querySelector(".ta-mermaid-preview-btn");
+    expect(btn).toBeTruthy();
+    expect(btn?.textContent).toContain("预览图表");
+    expect(container.querySelector("code.language-mermaid")?.textContent).toContain("graph TD;");
+
+    // 2. 点击后，显示渲染图表
+    if (btn) {
+      await fireEvent.click(btn);
+      await waitRender();
+      expect(container.querySelector("#mock-svg")).toBeTruthy();
+      expect(container.querySelector("code.language-mermaid")).toBeNull();
+    }
   });
 });

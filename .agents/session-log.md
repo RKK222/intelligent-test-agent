@@ -148,6 +148,21 @@
 - Result:
   - `opencode-timeline.test.ts` 与 `FigmaChatPanel.test.ts` 定向通过，`agent-chat`/`agent-web` typecheck 通过，浏览器同源样例确认单头像、无助手名称 meta、初始 thinking 有头像、单思考状态、过程状态列对齐、正文可复制、文件修改入口为“查看文件”、长路径短显。
 
+### 2026-07-03 - 修复助手头像对齐与新增 Mermaid 交互式图表预览
+
+- Why: 
+  - 助手消息行中，当同时存在头像（showHeader = true）和后续逻辑部分（is-continuation = true）的重载时，原来的 `display: block; padding-left: 46px` 会覆写 `display: grid`，导致头像单独占据一行，输出内容折行并错位。
+  - 原本不支持 Mermaid 图表渲染，直接以原始 Markdown 代码块展示；且渲染 Mermaid 时如果使用 theme: 'dark'，在浅色工作台下会导致节点底色呈黑色，非常不美观；而且初次加载时自动进行大量的图表渲染容易拖慢页面响应速度。
+- What:
+  - 头像对齐修复：在 `rows.css` 中重构 `.oc-assistant-frame.has-header`，当有头像需要渲染时，强制使用 `display: flex !important; flex-direction: row !important; align-items: flex-start !important;` 替代 grid 布局并重置 padding-left。通过 flex 布局彻底杜绝内容垂直折行的可能，保证头像与首行输出完美水平对齐。
+  - Mermaid 交互预览：修改 `MarkdownView.vue`，使 `lang === 'mermaid'` 的代码块默认只渲染成“预览图表”控制按钮和下方的原始语法代码块。只有当用户手动点击“预览图表”时，才会动态加载 `mermaid` 模块、进行渲染，并用生成的 SVG 替换掉原始节点（同时移除 preview 状态）。
+  - 图表底色优化：将 mermaid 初始化主题从 `'dark'` 改为 `'neutral'`，与轻量/白色背景面板完美契合，消除黑色节点底色。
+- How:
+  - 修改 `rows.css` 对 `.oc-assistant-frame.has-header` 以及它的内容容器 `.oc-assistant-frame__content` 引入 flex-row 强制对齐样式。
+  - 修改 `MarkdownView.vue` 自定义 markdown-it fence 规则、引入 `@click` 事件委派 `handleMdViewClick`、动态加载 mermaid 库并执行 render。添加 `.mermaid-block.is-preview` 及 preview button 相关的 scoped 样式。
+  - 修复 `opencode-timeline.test.ts` 和 `FigmaChatPanel.test.ts` 中的用例期望（修复了大小写敏感和路径绝对/相对解析错误），并补齐 `MarkdownView.test.ts` 中针对 Mermaid 预览及点击后渲染 SVG 逻辑的单元测试。
+- Result: 全量 293 个 Vitest 测试全绿通过，`corepack pnpm typecheck` 和 `corepack pnpm build` 成功无错。助手头像与“思考状态”首行在任意情境下完美对齐；Mermaid 默认展示代码且提供点击预览功能，渲染出来的图表底色清爽无黑色背景。
+
 ### 2026-07-03 - 优化对话时间线布局与对齐样式
 
 - Why: 

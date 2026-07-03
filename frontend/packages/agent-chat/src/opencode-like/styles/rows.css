@@ -85,6 +85,19 @@
   grid-column: 2;
 }
 
+.oc-assistant-frame.has-header {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: flex-start !important;
+  gap: 12px !important;
+  padding-left: 0 !important;
+}
+
+.oc-assistant-frame.has-header .oc-assistant-frame__content {
+  flex: 1 1 0% !important;
+  min-width: 0 !important;
+}
+
 .oc-assistant-frame__avatar {
   display: inline-flex;
   width: 28px;

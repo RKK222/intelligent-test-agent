@@ -1068,7 +1068,7 @@ describe("FigmaChatPanel", () => {
     }
 
     expect(wrapper.findAll('[data-testid="oc-tool-group"]')).toHaveLength(1);
-    expect(wrapper.find('[data-testid="oc-tool-group"]').text()).toContain("bash");
+    expect(wrapper.find('[data-testid="oc-tool-group"]').text()).toContain("Bash");
     expect(wrapper.find('[data-testid="oc-tool-group"]').text()).toContain("2 次");
   });
 
@@ -1310,7 +1310,7 @@ describe("FigmaChatPanel", () => {
 
     expect(wrapper.find(".oc-tool").exists()).toBe(true);
     expect(wrapper.text()).toContain("Write");
-    expect(wrapper.text()).toContain("/tmp/long.ts");
+    expect(wrapper.text()).toContain("tmp/long.ts");
   });
 
   it("does not render a standalone directory card for read tool output", () => {

@@ -30,37 +30,74 @@ const html = ref('')
 const loading = ref(true)
 const error = ref<string | null>(null)
 // shallowRef 避免对大段 HTML 做深度代理
-const mdRef = shallowRef<{ render: (src: string) => string } | null>(null)
-const purifyRef =
-  shallowRef<{ sanitize: (dirty: string) => string } | null>(null)
+const mdRef = shallowRef<any>(null)
+const purifyRef = shallowRef<any>(null)
+const hljsRef = shallowRef<any>(null)
+const mermaidRef = shallowRef<any>(null)
 
 let renderTimer: ReturnType<typeof setTimeout> | null = null
 
 // 懒加载三件套；只在首个 MarkdownView 挂载时触发一次，后续实例复用缓存的句柄
-async function ensureLibs() {
-  if (mdRef.value && purifyRef.value) {
-    return
+async function ensureLibs(needMermaid = false) {
+  const promises: Array<Promise<any>> = []
+  
+  if (!mdRef.value) {
+    promises.push(import('markdown-it').then(m => { mdRef.value = m.default }))
   }
-  const [MarkdownIt, DOMPurifyMod, hljsMod] = await Promise.all([
-    import('markdown-it'),
-    import('dompurify'),
-    props.highlight ? import('highlight.js/lib/common') : Promise.resolve(null),
-  ])
-  const md = new MarkdownIt.default({
-    html: false, // 不直接内联原始 HTML，统一交给 DOMPurify
-    linkify: true,
-    typographer: false,
-  })
-  if (props.highlight && hljsMod) {
-    // fence 默认不会把 token attrs 渲染到 <pre>，覆盖渲染以带上 hljs 高亮
-    md.renderer.rules.fence = (tokens, idx, _options, _env, slf) => {
+  if (!purifyRef.value) {
+    promises.push(import('dompurify').then(m => { purifyRef.value = m.default }))
+  }
+  if (props.highlight && !hljsRef.value) {
+    promises.push(import('highlight.js/lib/common').then(m => { hljsRef.value = m }))
+  }
+  if (needMermaid && !mermaidRef.value) {
+    promises.push(import('mermaid').then(m => {
+      mermaidRef.value = m.default
+      mermaidRef.value.initialize({
+        startOnLoad: false,
+        theme: 'neutral', // Neutral theme for better compatibility with light background
+        securityLevel: 'loose',
+      })
+    }))
+  }
+
+  if (promises.length > 0) {
+    await Promise.all(promises)
+  }
+
+  // Once markdown-it is loaded, if it's still the constructor class, instantiate it
+  if (mdRef.value && typeof mdRef.value === 'function') {
+    const md = new mdRef.value({
+      html: false, // 不直接内联原始 HTML，统一交给 DOMPurify
+      linkify: true,
+      typographer: false,
+    })
+    
+    md.renderer.rules.fence = (tokens: any[], idx: number, _options: any, _env: any, slf: any) => {
       const token = tokens[idx]
       const lang = token.info ? token.info.trim() : ''
       const attrs = slf.renderAttrs(token)
+      
+      if (lang === 'mermaid') {
+        const id = `ta-mermaid-${Math.random().toString(36).substring(2, 9)}`
+        const escapedCode = md.utils.escapeHtml(token.content)
+        return `<div class="mermaid-block is-preview" id="${id}" data-content="${encodeURIComponent(token.content)}">
+          <div class="ta-mermaid-header">
+            <button type="button" class="ta-mermaid-preview-btn" data-block-id="${id}">
+              <svg class="mermaid-icon" viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              <span>预览图表</span>
+            </button>
+          </div>
+          <pre class="hljs"><code class="language-mermaid">${escapedCode}</code></pre>
+        </div>`
+      }
+
       let code: string
-      if (lang && hljsMod.default.getLanguage(lang)) {
+      if (props.highlight && hljsRef.value && lang && hljsRef.value.default.getLanguage(lang)) {
         try {
-          code = hljsMod.default.highlight(token.content, {
+          code = hljsRef.value.default.highlight(token.content, {
             language: lang,
           }).value
           return `<pre${attrs}><code class="hljs language-${lang}">${code}</code></pre>`
@@ -71,16 +108,54 @@ async function ensureLibs() {
       code = md.utils.escapeHtml(token.content)
       return `<pre${attrs}><code class="hljs">${code}</code></pre>`
     }
+    mdRef.value = md
   }
-  mdRef.value = md
-  purifyRef.value = DOMPurifyMod.default
+}
+
+async function handleMdViewClick(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  const btn = target.closest('.ta-mermaid-preview-btn') as HTMLButtonElement | null
+  if (!btn) return
+
+  const blockId = btn.getAttribute('data-block-id')
+  if (!blockId) return
+
+  const block = document.getElementById(blockId)
+  if (!block) return
+
+  const content = decodeURIComponent(block.getAttribute('data-content') ?? '')
+  
+  btn.disabled = true
+  const span = btn.querySelector('span')
+  if (span) {
+    span.textContent = '渲染中…'
+  }
+
+  try {
+    await ensureLibs(true)
+    if (mermaidRef.value) {
+      const { svg } = await mermaidRef.value.render(blockId + '-svg', content)
+      block.innerHTML = svg
+      block.classList.remove('is-preview')
+    }
+  } catch (err) {
+    console.error('Mermaid render error:', err)
+    const escaped = mdRef.value?.utils.escapeHtml(content) ?? ''
+    block.innerHTML = `<pre class="hljs"><code>${escaped}</code></pre>`
+    block.classList.remove('is-preview')
+    
+    const badDiv = document.getElementById(`d${blockId}-svg`)
+    if (badDiv) badDiv.remove()
+  }
 }
 
 async function render() {
   try {
-    await ensureLibs()
+    await ensureLibs(false) // Don't load mermaid on initial render
     const raw = mdRef.value?.render(props.source ?? '') ?? ''
-    html.value = purifyRef.value?.sanitize(raw) ?? ''
+    const sanitized = purifyRef.value?.sanitize(raw) ?? ''
+
+    html.value = sanitized
     error.value = null
   } catch (err) {
     // 渲染失败时降级为转义后的纯文本，避免气泡里出现空白
@@ -115,7 +190,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div :class="['ta-md-view min-w-0', bodyClass]" data-testid="md-view">
+  <div :class="['ta-md-view min-w-0', bodyClass]" data-testid="md-view" @click="handleMdViewClick">
     <div v-if="loading" class="text-[12px] text-[var(--ta-chat-muted)]">
       {{ loadingText }}
     </div>
@@ -272,5 +347,52 @@ onBeforeUnmount(() => {
 .markdown-body :deep(img) {
   max-width: 100%;
   border-radius: 4px;
+}
+
+.markdown-body :deep(.mermaid-block) {
+  background: var(--ta-chat-detail-bg, rgba(0, 0, 0, 0.05));
+  border: 1px solid var(--ta-chat-border, var(--ta-border));
+  border-radius: 6px;
+  padding: 10px;
+  margin: 6px 0;
+  overflow-x: auto;
+  display: flex;
+  justify-content: center;
+}
+
+.markdown-body :deep(.mermaid-block.is-preview) {
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.markdown-body :deep(.ta-mermaid-preview-btn) {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--ta-chat-detail-bg, #f4f4f5);
+  border: 1px solid var(--ta-chat-border, #e4e4e7);
+  border-radius: 6px;
+  color: var(--ta-chat-text, #18181b);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin: 6px 0;
+}
+
+.markdown-body :deep(.ta-mermaid-preview-btn:hover) {
+  background: var(--ta-chat-border, #e4e4e7);
+}
+
+.markdown-body :deep(.ta-mermaid-preview-btn:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.markdown-body :deep(.mermaid-icon) {
+  width: 14px;
+  height: 14px;
+  color: var(--ta-chat-text, #18181b);
 }
 </style>
