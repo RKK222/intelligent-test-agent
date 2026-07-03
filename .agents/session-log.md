@@ -46,6 +46,7 @@
   - 只修改前端 `agent-chat` 时间线、文本渲染、样式、测试与相关 README；未改后端 API、RunEvent SSE、数据库、generated SDK 或环境配置。
 - Result:
   - 新增/调整 Vitest 覆盖 Markdown pending 保留旧内容、running text live preview、root/child scope 下单个工作态行和无“准备输出…”占位。
+  - 最终提交前定向 Vitest、`agent-chat`/`agent-web` typecheck、`agent-web` build 与 diff 检查均通过；build 仅保留既有 Vite CSS `@import` 顺序和大 chunk 警告。
 
 ### 2026-07-04 - 补强 Markdown 分屏源码区 Monaco 显式尺寸布局
 

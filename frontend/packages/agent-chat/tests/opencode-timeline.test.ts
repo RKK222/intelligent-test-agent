@@ -322,6 +322,94 @@ describe("OpencodeTimeline", () => {
     expect(queryByText("无内容")).toBeNull();
   });
 
+  it("renders running text as a lightweight live preview instead of a Markdown loading placeholder", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "持续输出"),
+        assistantMessage("msg_assistant_1", [textPart("part_streaming", "正在输出第一段", "running")])
+      ],
+      running: true
+    });
+
+    const { container, getByText, queryByText } = render(OpencodeTimeline, { props: { state } });
+
+    expect(getByText("正在输出第一段")).toBeTruthy();
+    expect(getByText("生成中")).toBeTruthy();
+    expect(queryByText("准备输出…")).toBeNull();
+    expect(container.querySelector(".markdown-body")).toBeNull();
+  });
+
+  it("shows one lightweight working row in a running child timeline before text output starts", async () => {
+    const messages: AgentMessage[] = [
+      userMessage("msg_user_root", "分析前端结构"),
+      assistantMessage("msg_root", [
+        {
+          ...toolPart("prt_task_frontend", "task", {
+            description: "Explore frontend structure",
+            subagent_type: "explore"
+          }),
+          callId: "call_task_frontend",
+          status: "running"
+        }
+      ]),
+      userMessage("msg_child_user", "Explore frontend structure"),
+      assistantMessage("msg_child_tools", [
+        toolPart("prt_child_read", "read", { filePath: "frontend/README.md" }),
+        textPart("prt_child_empty", "", "running")
+      ])
+    ];
+    const messageScopesById = {
+      msg_user_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+      msg_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+      msg_child_user: {
+        sessionId: "ses_child",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskPartId: "prt_task_frontend"
+      },
+      msg_child_tools: {
+        sessionId: "ses_child",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskPartId: "prt_task_frontend"
+      }
+    };
+    const subagentsBySessionId = {
+      ses_child: {
+        sessionId: "ses_child",
+        parentSessionId: "ses_root",
+        taskMessageId: "msg_root",
+        taskPartId: "prt_task_frontend",
+        taskCallId: "call_task_frontend",
+        agentName: "Explore",
+        title: "Explore frontend structure",
+        status: "running",
+        updatedAt: "2026-07-03T00:00:00Z"
+      }
+    };
+
+    const { container, getByText, queryAllByText } = render(AssistantThread, {
+      props: {
+        messages,
+        commands: [],
+        resources: [],
+        running: true,
+        messageScopesById,
+        subagentsBySessionId,
+        subagentByTaskPartId: { prt_task_frontend: "ses_child" }
+      }
+    });
+
+    await fireEvent.click(container.querySelector(".oc-subagent-card") as HTMLElement);
+
+    expect(getByText("正在工作")).toBeTruthy();
+    expect(getByText("等待后续输出")).toBeTruthy();
+    expect(queryAllByText("正在工作")).toHaveLength(1);
+    expect(container.querySelector(".oc-working-status")).toBeTruthy();
+  });
+
   it("uses the opencode-like timeline as the AssistantThread main rendering path", async () => {
     const messages: AgentMessage[] = [
       userMessage("msg_user_1", "分析 checkout 失败"),

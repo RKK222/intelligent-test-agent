@@ -275,6 +275,41 @@ describe("opencode-like conversation state", () => {
     expect(childRows.some((row) => row.type === "context-tool-group")).toBe(true);
   });
 
+  it("adds one working-status row for the latest running turn with process parts but no text output", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "读取项目结构"),
+        assistantMessage("msg_assistant_1", [
+          toolPart("part_read_1", "read", { filePath: "README.md" }),
+          toolPart("part_read_2", "read", { filePath: "frontend/README.md" })
+        ])
+      ],
+      running: true
+    });
+
+    const rows = createTimelineRows(state);
+
+    expect(rows.map((row) => row.type)).toEqual(["user-message", "context-tool-group", "working-status"]);
+    expect(rows.filter((row) => row.type === "working-status")).toHaveLength(1);
+  });
+
+  it("does not add working-status for historical turns or turns with visible text output", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "读取项目结构"),
+        assistantMessage("msg_assistant_1", [toolPart("part_read_1", "read", { filePath: "README.md" })]),
+        userMessage("msg_user_2", "总结结果"),
+        assistantMessage("msg_assistant_2", [textPart("part_running_text", "正在整理总结", "running")])
+      ],
+      running: true
+    });
+
+    const rows = createTimelineRows(state);
+
+    expect(rows.filter((row) => row.type === "working-status")).toHaveLength(0);
+    expect(rows.some((row) => row.type === "assistant-part" && row.messageId === "msg_assistant_2")).toBe(true);
+  });
+
   it("projects task tool parts as independent rows instead of a folded tool group", () => {
     const state = createOpencodeLikeState({
       messages: [

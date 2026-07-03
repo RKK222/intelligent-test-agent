@@ -5,6 +5,7 @@ import type { OpencodeLikeConversationState, TimelineRow } from "./types";
 type AssistantRowAccumulator = {
   hasAssistantHeader: boolean;
   partIndex: number;
+  hasVisibleTextOutput: boolean;
   contextGroupIndex?: number;
   reasoningGroupIndex?: number;
   toolPartIndices: Record<string, number>;
@@ -21,6 +22,7 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
   const orphanAccumulator: AssistantRowAccumulator = {
     hasAssistantHeader: false,
     partIndex: 0,
+    hasVisibleTextOutput: false,
     toolPartIndices: {},
     toolGroupIndices: {}
   };
@@ -50,6 +52,7 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
     const accumulator: AssistantRowAccumulator = {
       hasAssistantHeader: false,
       partIndex: 0,
+      hasVisibleTextOutput: false,
       toolPartIndices: {},
       toolGroupIndices: {}
     };
@@ -70,6 +73,21 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
 
     if (isActiveTurn(userMessageId, state) && state.running && accumulator.partIndex === 0) {
       rows.push({ type: "thinking", key: `thinking:${userMessageId}`, userMessageId });
+    }
+    // 已出现工具/思考过程但文本尚未开始时，只追加一个轻量工作态行，避免恢复空 text 占位。
+    if (
+      isActiveTurn(userMessageId, state) &&
+      state.running &&
+      accumulator.partIndex > 0 &&
+      !accumulator.hasVisibleTextOutput
+    ) {
+      rows.push({
+        type: "working-status",
+        key: `working:${userMessageId}`,
+        userMessageId,
+        previousAssistantPart: accumulator.partIndex > 0 || accumulator.hasAssistantHeader,
+        showAssistantHeader: !accumulator.hasAssistantHeader
+      });
     }
 
     if (isLatestTurn(userMessageId, state) && state.diffFiles.length > 0) {
@@ -123,6 +141,9 @@ function appendAssistantGroupRow(
   }
 
   const part = state.partsByMessageId[assistantMessageId]?.find((candidate) => candidate.partId === group.partId);
+  if (part?.type === "text") {
+    accumulator.hasVisibleTextOutput = true;
+  }
   if (part?.type === "reasoning") {
     const ref = { messageId: assistantMessageId, partId: group.partId };
     if (typeof accumulator.reasoningGroupIndex === "number") {

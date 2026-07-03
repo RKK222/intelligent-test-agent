@@ -45,6 +45,30 @@
   background: var(--oc-accent);
   vertical-align: -0.16em;
   animation: oc-pulse 1.1s ease-in-out infinite;
+.oc-text-part__live {
+  display: grid;
+  gap: 6px;
+}
+
+.oc-text-part__live-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.oc-text-part__live-status {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  color: var(--oc-accent);
+  font-size: var(--oc-text-sm);
+  line-height: 16px;
+}
+
+.oc-text-part__live-status .oc-thinking-dot {
+  width: 5px;
+  height: 5px;
+  background: var(--oc-accent);
 }
 
 .oc-reasoning-part {

@@ -13,6 +13,7 @@ import { computed } from "vue";
 import UserMessageRow from "./rows/UserMessageRow.vue";
 import AssistantPartRow from "./rows/AssistantPartRow.vue";
 import ThinkingRow from "./rows/ThinkingRow.vue";
+import WorkingStatusRow from "./rows/WorkingStatusRow.vue";
 import RetryRow from "./rows/RetryRow.vue";
 import DiffSummaryRow from "./rows/DiffSummaryRow.vue";
 import ErrorRow from "./rows/ErrorRow.vue";
@@ -139,6 +140,12 @@ const toolGroupParts = computed(() => {
       :streaming-text-by-part-id="state.streamingTextByPartId"
     />
   </AssistantMessageFrame>
+  <WorkingStatusRow
+    v-else-if="row.type === 'working-status'"
+    class="oc-row"
+    :continuation="row.previousAssistantPart"
+    :show-header="row.showAssistantHeader"
+  />
   <ThinkingRow v-else-if="row.type === 'thinking'" class="oc-row" />
   <RetryRow v-else-if="row.type === 'retry'" class="oc-row" :attempt="row.attempt" />
   <DiffSummaryRow

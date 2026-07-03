@@ -137,6 +137,7 @@
 }
 
 .oc-thinking-row,
+.oc-working-status,
 .oc-retry-row,
 .oc-error-row {
   display: flex;
@@ -151,14 +152,34 @@
   align-items: start;
 }
 
+.oc-working-frame {
+  align-items: start;
+}
+
 .oc-thinking-frame .oc-thinking-row {
   align-items: flex-start;
   line-height: 20px;
   padding: 0;
 }
 
-.oc-thinking-frame .oc-thinking-dot {
+.oc-thinking-frame .oc-thinking-dot,
+.oc-working-frame .oc-thinking-dot {
   margin-top: 7px;
+}
+
+.oc-working-status {
+  min-height: 22px;
+  padding: 0;
+  line-height: 20px;
+}
+
+.oc-working-status__title {
+  color: var(--oc-fg);
+  font-weight: 600;
+}
+
+.oc-working-status__subtitle {
+  color: var(--oc-muted);
 }
 
 .oc-error-row {

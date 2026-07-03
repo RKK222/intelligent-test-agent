@@ -107,6 +107,13 @@ export type TimelineRow =
       previousAssistantPart: boolean;
       showAssistantHeader: boolean;
     }
+  | {
+      type: "working-status";
+      key: string;
+      userMessageId: string;
+      previousAssistantPart: boolean;
+      showAssistantHeader: boolean;
+    }
   | { type: "thinking"; key: string; userMessageId: string }
   | { type: "retry"; key: string; userMessageId: string; attempt?: number }
   | { type: "diff-summary"; key: string; userMessageId: string; files: RunDiffFile[] }

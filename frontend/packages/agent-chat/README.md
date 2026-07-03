@@ -15,10 +15,10 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - 工具调用按 opencode 常见工具拆分专用视图：bash、read、list、glob、grep、edit、write、apply_patch、webfetch、websearch、task、skill、question；同一用户回合内被拆成多条 assistant message 的同类型工具会合并成一个默认折叠的工具组，展开后仍渲染每条原始工具详情；读取/检索类上下文工具默认合并为折叠的上下文组，失败工具进入对应工具类型归并并保留失败状态。
 - `diff-summary` 文件修改行默认折叠，折叠态在标题右侧展示全部文件的新增/删除行数汇总；点击标题展开文件列表，文件条目仍负责触发打开对应文件。
 - `diff-summary` 文件修改行默认折叠，折叠态在标题右侧展示全部文件的新增/删除行数汇总；汇总数字随文件变化刷新并短暂跳动反馈，点击标题展开文件列表，文件条目仍负责触发打开对应文件。
-- `reasoning`、最终 `text`、工具调用和文件引用分块展示，避免把思考、工具日志和最终答复混入同一个气泡；同一用户回合内被多个 assistant message 拆开的思考状态会合并为一个过程行，运行中仅保留一个轻量工作中动效。
+- `reasoning`、最终 `text`、工具调用和文件引用分块展示，避免把思考、工具日志和最终答复混入同一个气泡；同一用户回合内被多个 assistant message 拆开的思考状态会合并为一个过程行，工具/思考已发生但文本尚未开始时仅投影一个轻量工作中动效。
 - 工具调用按 opencode 常见工具拆分专用视图：bash、read、list、glob、grep、edit、write、apply_patch、webfetch、websearch、task、skill、question；同一用户回合内被拆成多条 assistant message 的同类型非 task 工具会合并成一个默认折叠的工具组，展开后仍渲染每条原始工具详情；task 子 Agent 卡片始终独立展示，不进入工具组折叠；读取/检索类上下文工具默认合并为折叠的上下文组，失败工具进入对应工具类型归并并保留失败状态。
 - 工具视图统一使用 `.oc-*` primitives 和轻量折叠壳，工具详情默认折叠，过程行的标题、摘要、状态和展开箭头使用固定列对齐；最终文本直接以轻量气泡展示，不额外加“最终输出”标题，并保留复制按钮；工作区内长绝对路径在列表中展示为面向用户的短路径，完整路径只保留在悬浮提示中，避免 `.testagent`/personal worktree 前缀撑开对话区域。
-- 运行中状态以 `thinking` 行和工具状态展示；失败运行追加统一错误行。
+- 运行中状态以 `thinking` 行、工具状态和单个 `working-status` 行展示；失败运行追加统一错误行。
 - 提供 Agent/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和输入框上方 `TodoPanel`；Todo 收起态展示待处理/进行中/已完成/已取消/其他和总数，展开态展示任务列表、状态和优先级。模型选择器按 Provider 分组展示模型，选择模型时同步更新 Provider 与 Model。
 - Skill 调用不新增独立卡片类型或 `skill.*` 事件；当 tool/message part 的 `tool` 或 `toolName` 为 `skill` 时，在前端展示为 Skill 调用块，展示 Skill 名称、用途、状态和折叠详情。
 - Prompt composer 支持文本、文件附件、图片附件和附件 chips；文件读取后只向 app 层返回平台 `PromptPart`，不直接提交后端。
@@ -30,7 +30,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - `assistant.message.delta` 旧事件继续作为兼容输入；新 `message.part.delta` 优先按 messageId/partId 合并，避免流式输出重复。
 - Agent/Model/Mode selector、slash command、`@` context、permission/question dock、Todo 和 runtime status 只暴露受控回调，HTTP 提交与 SSE 订阅仍由 app 层负责。
 - Timeline、dock、附件 chips、任务分解和 Skill/Tool 视图必须使用固定区域和换行策略，Agent 对话线程必须有独立 sticky scroll 区域：用户在底部时自动跟随，用户向上阅读时保留位置并提示有新内容，避免长命令、长路径、图片名或 streaming 文本撑开工作台。
-- `text`/`reasoning` part 通过 `MarkdownView` 懒加载 markdown-it + DOMPurify + highlight.js 渲染 Markdown、表格、链接与代码块（首屏不打包），并提供"查看原文"切换；流式生成的 text 会显示"生成中"光标。空白 `text` part 不进入主时间线，避免主/子 Agent 切换时挂载无内容的 Markdown 占位。
+- 已完成的 `text` 与 `reasoning` part 通过 `MarkdownView` 懒加载 markdown-it + DOMPurify + highlight.js 渲染 Markdown、表格、链接与代码块（首屏不打包）；running/pending `text` part 先以轻量纯文本 live preview 展示实际增长内容和"生成中"状态，完成后再切换为 Markdown 渲染。`MarkdownView` 在非空 source 重新渲染 pending 时保留已有 HTML，空白 `text` part 不进入主时间线，避免主/子 Agent 切换时挂载无内容的 Markdown 占位。
 - `step-start`/`step-finish` 内嵌 snapshot 默认折叠展示；`step-finish` 把 tokens 拆分为 input/output/reasoning 并按数量级动态展示 cost 精度。
 - `patch` part 把 `filesMap`/`fileStats` 收敛到 `metadata`，文件列表支持展开查看每文件 diff、显示 +/- 行数，并提供 hash 完整值一键复制。
 
