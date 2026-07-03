@@ -836,7 +836,7 @@ defineExpose({
                   <Button
                     size="sm"
                     variant="secondary"
-                    class="flex-1 h-6 border-amber-200 hover:border-amber-300 dark:border-amber-800 bg-white hover:bg-amber-50 text-amber-900 dark:text-amber-400 dark:bg-zinc-900 dark:hover:bg-amber-950/20 font-medium px-1 flex items-center justify-center shadow-sm"
+                    class="flex-1 text-xs h-6 border-amber-200 hover:border-amber-300 dark:border-amber-800 bg-white hover:bg-amber-50 text-amber-900 dark:text-amber-400 dark:bg-zinc-900 dark:hover:bg-amber-950/20 font-medium px-1 flex items-center justify-center shadow-sm"
                     :disabled="conflictResolving"
                     @click.stop="resolveAllWorkspaceConflicts('CURRENT')"
                   >
@@ -845,7 +845,7 @@ defineExpose({
                   <Button
                     size="sm"
                     variant="secondary"
-                    class="flex-1 h-6 border-amber-200 hover:border-amber-300 dark:border-amber-800 bg-white hover:bg-amber-50 text-amber-900 dark:text-amber-400 dark:bg-zinc-900 dark:hover:bg-amber-950/20 font-medium px-1 flex items-center justify-center shadow-sm"
+                    class="flex-1 text-xs h-6 border-amber-200 hover:border-amber-300 dark:border-amber-800 bg-white hover:bg-amber-50 text-amber-900 dark:text-amber-400 dark:bg-zinc-900 dark:hover:bg-amber-950/20 font-medium px-1 flex items-center justify-center shadow-sm"
                     :disabled="conflictResolving"
                     @click.stop="resolveAllWorkspaceConflicts('INCOMING')"
                   >
@@ -854,7 +854,7 @@ defineExpose({
                   <Button
                     size="sm"
                     variant="ghost"
-                    class="h-6 px-1.5 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 font-normal shrink-0"
+                    class="text-xs h-6 px-1.5 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 font-normal shrink-0"
                     :disabled="conflictResolving"
                     @click.stop="abortWorkspaceConflict"
                   >
