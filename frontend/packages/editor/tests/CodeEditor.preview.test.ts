@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/vue";
 
+const editorLayout = vi.fn();
+
 // 屏蔽 Monaco 真实加载（jsdom 无法运行 Monaco），提供一个最小 editor 工厂桩
 vi.mock("../src/monaco-env", () => {
   const fakeModel = {
@@ -11,7 +13,7 @@ vi.mock("../src/monaco-env", () => {
   };
   const fakeEditor = {
     setModel: () => {},
-    layout: () => {},
+    layout: editorLayout,
     onDidChangeModelContent: () => ({ dispose: () => {} }),
     onDidChangeCursorSelection: () => ({ dispose: () => {} }),
     onDidScrollChange: () => ({ dispose: () => {} }),
@@ -78,5 +80,19 @@ describe("CodeEditor Markdown 预览受控", () => {
     expect(queryByText("正在准备预览…")).toBeTruthy();
     await rerender({ ...baseProps, path: "docs/README.md", showPreview: false });
     expect(queryByText("正在准备预览…")).toBeNull();
+  });
+
+  it("预览分屏打开时按源码容器实际尺寸布局 Monaco，避免原文区域空白", async () => {
+    editorLayout.mockClear();
+    const { findByTestId } = render(CodeEditor, {
+      props: { ...baseProps, path: "docs/README.md", showPreview: true }
+    });
+    const source = await findByTestId("code-editor-source");
+    Object.defineProperty(source, "clientWidth", { configurable: true, value: 960 });
+    Object.defineProperty(source, "clientHeight", { configurable: true, value: 360 });
+
+    await new Promise(resolve => requestAnimationFrame(resolve));
+
+    expect(editorLayout).toHaveBeenLastCalledWith({ width: 960, height: 360 });
   });
 });

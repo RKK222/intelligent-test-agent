@@ -70,6 +70,14 @@ let containerResizeObserver: ResizeObserver | null = null;
 
 function layoutEditor() {
   if (editor.value && typeof editor.value.layout === "function") {
+    const width = containerEl.value?.clientWidth ?? 0;
+    const height = containerEl.value?.clientHeight ?? 0;
+    // Markdown 预览分屏会改变源码宿主高度；显式传入实际尺寸，
+    // 避免 Monaco 在 Dockview/百分比高度变更后沿用 0 尺寸而显示空白。
+    if (width > 0 && height > 0) {
+      editor.value.layout({ width, height });
+      return;
+    }
     editor.value.layout();
   }
 }
@@ -379,7 +387,8 @@ onBeforeUnmount(() => {
     <div ref="splitContainerEl" class="flex min-h-0 flex-1 flex-col">
       <div
         ref="containerEl"
-        class="min-h-0 shrink-0"
+        class="min-h-0 w-full shrink-0 overflow-hidden"
+        data-testid="code-editor-source"
         :style="isMarkdown && showPreview ? { height: splitPct + '%', flex: 'none' } : { flex: 1 }"
       />
       <template v-if="isMarkdown && showPreview">

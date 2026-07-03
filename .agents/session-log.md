@@ -34,6 +34,21 @@
   - 不改 reducer、投影顺序、RunEvent、后端 API 或默认折叠逻辑；保留“同一回合 reasoning 合并为一行、默认收起”的当前行为，只降低视觉权重并修正头像对齐。
 - Result:
   - 前端 Vitest 全量通过（36 files, 299 passed, 1 skipped），`@test-agent/agent-chat` typecheck 通过；Playwright 构造 DOM 检查隐藏 step 行头像与 reasoning 触发器 top delta 为 0px，reasoning `已完成` 与工具 `已读取` x delta 为 0px；前端 Vite 已在 `127.0.0.1:3001` 启动验证入口。
+### 2026-07-04 - 补强 Markdown 分屏源码区 Monaco 显式尺寸布局
+
+- Why:
+  - 用户反馈 Markdown 文件开启预览后，下方预览能正常显示，但上方原文编辑区仍为空白；早前的 flex/ResizeObserver 修复在部分 Dockview 百分比高度场景下仍可能只触发无参 `editor.layout()`，Monaco 继续沿用 0 尺寸。
+- What:
+  - `CodeEditor.vue` 在源码宿主存在实际 `clientWidth/clientHeight` 时调用 `editor.layout({ width, height })`，并给源码宿主补充 `w-full overflow-hidden` 和稳定测试标识。
+  - 补充 `CodeEditor.preview.test.ts` 回归测试，覆盖预览分屏打开时按源码容器实际尺寸布局 Monaco。
+  - 同步更新 `@test-agent/editor` README 和 `src/PACKAGE.md` 的 Markdown 预览布局说明。
+- How:
+  - 只修改前端 `@test-agent/editor` 包和本 session log；不改后端 API、RunEvent、数据库、generated SDK 或环境配置。
+- Result:
+  - `corepack pnpm vitest run packages/editor/tests` 通过；
+  - `corepack pnpm --filter @test-agent/editor typecheck` 通过；
+  - `corepack pnpm --filter @test-agent/agent-web typecheck` 通过。
+
 ### 2026-07-04 - 移除 thought for 统计与展示并修复新建对话耗时清零
 
 - Why:
