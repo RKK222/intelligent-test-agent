@@ -1223,16 +1223,16 @@ defineExpose({
   display: flex;
   flex-direction: column;
   gap: 2px;
-  background: #f4f4f5;
-  border: 1px solid #e4e4e7;
+  background: #fffbeb;
+  border: 1px solid #fef3c7;
   border-radius: 6px;
   padding: 3px 8px;
   margin-bottom: 4px;
 }
 
 :global(.dark) .git-conflict-banner {
-  background: #18181b;
-  border-color: #27272a;
+  background: rgba(245, 158, 11, 0.05);
+  border-color: rgba(245, 158, 11, 0.15);
 }
 
 .git-conflict-header {
@@ -1241,11 +1241,11 @@ defineExpose({
   gap: 4px;
   font-size: 11px;
   font-weight: 500;
-  color: #71717a;
+  color: #9a3412;
 }
 
 :global(.dark) .git-conflict-header {
-  color: #a1a1aa;
+  color: #fbbf24;
 }
 
 .git-conflict-actions {
