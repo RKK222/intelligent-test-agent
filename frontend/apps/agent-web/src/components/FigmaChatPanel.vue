@@ -156,15 +156,6 @@ function joinAssistantContent(left: string, right: string): string {
   return `${left.replace(/\n+$/, '')}\n${right.replace(/^\n+/, '')}`
 }
 
-type TaskPartItem = {
-  partId: string
-  type: 'tool' | 'subtask' | 'step'
-  toolName?: string
-  label: string
-  detail: string
-  status: string
-}
-
 function taskPartLabel(
   toolName: string,
   input?: Record<string, unknown>
@@ -206,24 +197,6 @@ function taskPartLabel(
     default:
       return { label: toolName || '工具', detail: file || '' }
   }
-}
-
-function taskParts(msg: ChatMessage): TaskPartItem[] {
-  if (!Array.isArray(msg.parts)) return []
-  return msg.parts
-    .filter((p: any) => p.type === 'tool' || p.type === 'subtask')
-    .map((p: any): TaskPartItem => {
-      const toolName = p.toolName || p.agent || ''
-      const { label, detail } = taskPartLabel(toolName, p.input)
-      return {
-        partId: p.partId || '',
-        type: p.type,
-        toolName,
-        label,
-        detail,
-        status: p.status || 'pending',
-      }
-    })
 }
 
 /**
@@ -668,24 +641,7 @@ const emit =
     ): void
   }>()
 
-const taskPanelRef = ref<HTMLElement | null>(null)
-const taskPanelCollapsed = ref(false)
 const collapsedMessages = ref<Record<string, boolean>>({})
-
-const liveTaskParts = computed(() => {
-  if (!props.running) return []
-  const seen = new Set<string>()
-  const items: TaskPartItem[] = []
-  for (const msg of displayMessages.value.slice(runStartMsgCount.value)) {
-    if (msg.role !== 'assistant') continue
-    for (const tp of taskParts(msg)) {
-      if (seen.has(tp.partId)) continue
-      seen.add(tp.partId)
-      items.push(tp)
-    }
-  }
-  return items
-})
 
 const localInput = ref(props.inputValue ?? '')
 const dropdownOpen = ref(false)
@@ -2048,7 +2004,6 @@ watch(
   () => props.running,
   (now, prev) => {
     if (now && !prev) {
-      taskPanelCollapsed.value = false
       thinkingExpanded.value = false
       wasCompleted.value = false
       wasFailed.value = false
@@ -2322,16 +2277,6 @@ watch(
 
 watch([wasCompleted, wasStopped, wasFailed], () => {
   nextTick(scrollToBottom)
-})
-
-// 任务面板变化时同时滚动任务面板和主聊天区到底部
-watch(liveTaskParts, () => {
-  nextTick(() => {
-    if (taskPanelRef.value) {
-      taskPanelRef.value.scrollTop = taskPanelRef.value.scrollHeight
-    }
-    scrollToBottom()
-  })
 })
 
 function formatTime(iso: string) {
@@ -3302,61 +3247,7 @@ function onCompositionEnd() {
       </div>
     </div>
 
-    <!-- 任务面板：运行中显示工具操作进度 -->
-    <div
-      v-if="running && liveTaskParts.length > 0"
-      ref="taskPanelRef"
-      :class="['figma-chat-task-panel', taskPanelCollapsed && 'figma-chat-task-panel--collapsed']"
-    >
-      <div :class="['figma-chat-task-summary', taskPanelCollapsed && 'figma-chat-task-summary--collapsed']">
-        <span>
-          已完成
-          {{ liveTaskParts.filter((t) => t.status === 'completed').length }}
-          个任务 共（{{ liveTaskParts.length }} 个）
-        </span>
-        <button
-          type="button"
-          class="figma-chat-task-collapse-btn"
-          @click="taskPanelCollapsed = !taskPanelCollapsed"
-          :title="taskPanelCollapsed ? '展开任务列表' : '收起任务列表'"
-        >
-          <ChevronUp v-if="taskPanelCollapsed" :size="12" />
-          <ChevronDown v-else :size="12" />
-        </button>
-      </div>
-      <div v-show="!taskPanelCollapsed" class="figma-chat-task-list">
-        <div
-          v-for="tp in liveTaskParts"
-          :key="tp.partId"
-          :class="['figma-chat-task-row', `figma-chat-task-row--${tp.status}`]"
-        >
-          <Loader2
-            v-if="tp.status === 'running'"
-            :size="12"
-            class="figma-chat-task-icon figma-chat-task-icon--running"
-          />
-          <CheckCircle
-            v-else-if="tp.status === 'completed'"
-            :size="12"
-            class="figma-chat-task-icon figma-chat-task-icon--completed"
-          />
-          <X
-            v-else-if="tp.status === 'error'"
-            :size="12"
-            class="figma-chat-task-icon figma-chat-task-icon--error"
-          />
-          <Circle
-            v-else
-            :size="12"
-            class="figma-chat-task-icon figma-chat-task-icon--pending"
-          />
-          <span class="figma-chat-task-label">{{ tp.label }}</span>
-          <span v-if="tp.detail" class="figma-chat-task-detail">{{
-            tp.detail
-          }}</span>
-        </div>
-      </div>
-    </div>
+    <!-- 作废说明：运行中旧任务面板已由 OpencodeTimeline 的工具/事件行取代，避免两套来源显示不一致。 -->
     <!-- 选择题面板：固定展示在输入区域上方，保留 composer 供用户继续补充内容。 -->
     <div v-if="showChoicePanel" class="figma-chat-choice-panel">
       <!-- Step 1: 选择选项 -->

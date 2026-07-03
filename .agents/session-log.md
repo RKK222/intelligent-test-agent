@@ -53,6 +53,13 @@
 - What: 发布前新增远程变化预览与 expected HEAD 校验，应用 pull 后立即同步版本和本机副本 commit；冲突路径关闭 `core.quotepath`，支持全部保留个人版本、全部采用远程版本和取消 merge，目标侧缺失按 Git 删除语义处理。前端复用已加载 diff 更新数量角标、拦截旧工作区请求回写，并明确 AU/UD 删除侧。
 - How: 复用 `GitWorkspaceService`、个人工作区归属校验和现有发布编排，新增 preview/resolve-all HTTP 契约；真实临时 Git 仓库覆盖中文修改/删除冲突，服务测试覆盖预览汇总、HEAD 变化前置拦截和冲突后的元数据同步，前端测试覆盖预览确认与批量处理。处理了会话开始前遗留的 `git pull --rebase`，保留两侧 session log 后完成 7 个本地提交重放。
 - Result: common 24 个、workspace-management 36 个、API Controller 和 Git 面板/合并编辑器定向测试通过，agent-web typecheck/build 通过；使用 `.env.test` / `test` profile / JDK 25 重启并检查健康状态。未修改环境文件、数据库、事件、generated SDK 或 888 当前个人 worktree 冲突内容。
+### 2026-07-03 - 移除旧底部实时任务面板
+
+- Why: 对话主路径已切到 `OpencodeTimeline` 后，`FigmaChatPanel` 仍渲染旧底部实时任务面板；该面板从 `displayMessages` 重新聚合 tool/subtask part，和新时间线的事件行来源不同，运行中或历史恢复时会出现“下面任务与上方事件不匹配”。
+- What: 删除旧底部实时任务面板的渲染、运行开始重置和滚动 watcher，保留“任务消耗”统计行；新增回归测试确保运行中只显示 `OpencodeTimeline`，不再出现 `.figma-chat-task-panel`。
+- How: 不改 RunEvent、message part 或 opencode-like 投影逻辑，只去掉旧面板这一第二展示源，并同步 agent-web/agent-chat 文档。
+- Result: `FigmaChatPanel` 的运行中工具/事件展示统一由 `OpencodeTimeline` 承载，避免旧任务列表与事件流不一致。
+
 ### 2026-07-03 - 标注旧对话组件作废边界
 
 - Why: 对话主路径已经切换到 `opencode-like/OpencodeTimeline`，后续开发需要明确旧气泡和结构化卡片代码只保留兼容，不再作为新增能力入口。

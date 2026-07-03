@@ -439,6 +439,68 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("2.0w tokens");
   });
 
+  it("uses the opencode timeline instead of the legacy running task panel", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        running: true,
+        messages: [
+          {
+            id: "u-old",
+            messageId: "u-old",
+            role: "user",
+            text: "上一轮任务",
+            createdAt: "2026-07-03T09:00:00.000Z"
+          },
+          {
+            id: "a-old",
+            messageId: "a-old",
+            role: "assistant",
+            text: "",
+            parts: [
+              {
+                partId: "old-bash",
+                type: "tool",
+                toolName: "bash",
+                status: "completed",
+                input: { command: "echo old task" }
+              }
+            ],
+            createdAt: "2026-07-03T09:00:01.000Z"
+          },
+          {
+            id: "u-new",
+            messageId: "u-new",
+            role: "user",
+            text: "当前任务",
+            createdAt: "2026-07-03T09:01:00.000Z"
+          },
+          {
+            id: "a-new",
+            messageId: "a-new",
+            role: "assistant",
+            text: "",
+            parts: [
+              {
+                partId: "new-read",
+                type: "tool",
+                toolName: "read",
+                status: "completed",
+                input: { filePath: "current.md" }
+              }
+            ],
+            createdAt: "2026-07-03T09:01:01.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.find(".oc-timeline-root").exists()).toBe(true);
+    expect(wrapper.find(".oc-tool").exists()).toBe(true);
+    expect(wrapper.find(".figma-chat-task-panel").exists()).toBe(false);
+  });
+
   it("opens a frontend-only attachment dialog from the composer action", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
