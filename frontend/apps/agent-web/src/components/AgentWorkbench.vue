@@ -1210,12 +1210,40 @@ watch(
   { immediate: true }
 );
 
-// 实时追踪：tool part 每次更新都扫描新完成的写文件工具，读盘刷新预览（逐次实时）。
-watch(
-  () => chatState.value.messages,
-  () => scanLiveToolParts(),
-  { deep: true }
-);
+// agent 写文件用的 opencode 工具名；这些工具的 input 带文件路径，完成时磁盘已写入。
+const LIVE_WRITE_TOOLS = new Set(["write", "edit", "apply_patch", "str_replace", "multi_edit", "create_file", "delete"]);
+
+// 实时追踪只关注新完成的写文件工具签名，避免流式文本更新触发整棵消息树深度扫描。
+const liveToolScanSignature = computed(() => {
+  const signatures: string[] = [];
+  for (const message of chatState.value.messages) {
+    if (message.role === "assistant") {
+      for (const part of message.parts ?? []) {
+        if (part.type !== "tool" || part.status !== "completed" || !LIVE_WRITE_TOOLS.has(part.toolName)) {
+          continue;
+        }
+        const path = liveToolPath(part);
+        if (path) {
+          signatures.push(`${part.partId}:${part.status}:${path}`);
+        }
+      }
+      continue;
+    }
+    if (message.role === "card" && message.cardType === "tool") {
+      const part = toolCardToVirtualPart(message);
+      if (!part || part.status !== "completed" || !LIVE_WRITE_TOOLS.has(part.toolName)) {
+        continue;
+      }
+      const path = liveToolPath(part);
+      if (path) {
+        signatures.push(`${part.partId}:${part.status}:${path}`);
+      }
+    }
+  }
+  return signatures.join("|");
+});
+
+watch(liveToolScanSignature, () => scanLiveToolParts());
 // 开启时重置已跟随记录，并立即扫描当前对话里已完成的历史写文件工具。
 watch(liveTrack, (on) => {
   liveFollowedParts.value = new Set();
@@ -1508,11 +1536,28 @@ function recomputeUsageFromChat() {
   accumulatedReasoningMs.value = reasoningMs;
 }
 
-watch(
-  () => chatState.value.messages,
-  () => recomputeUsageFromChat(),
-  { deep: true }
+const usageScanSignature = computed(() =>
+  chatState.value.messages
+    .map((message) => {
+      if (message.role !== "assistant") return "";
+      return (message.parts ?? [])
+        .map((part) => {
+          if (part.type === "step-finish") {
+            return `${part.partId}:step-finish:${part.tokens?.total ?? 0}`;
+          }
+          if (part.type === "reasoning") {
+            return `${part.partId}:reasoning:${part.durationMs ?? 0}`;
+          }
+          return "";
+        })
+        .filter(Boolean)
+        .join(",");
+    })
+    .filter(Boolean)
+    .join("|")
 );
+
+watch(usageScanSignature, () => recomputeUsageFromChat());
 
 // Run 运行时开启 1s tick 让 duration 持续滚动；空闲时停止。
 let tickHandle: ReturnType<typeof setInterval> | null = null;
@@ -2405,9 +2450,6 @@ function handleRunEvent(event: RunEvent) {
     nowTick.value = Date.now();
   }
 }
-
-// agent 写文件用的 opencode 工具名；这些工具的 input 带文件路径，完成时磁盘已写入。
-const LIVE_WRITE_TOOLS = new Set(["write", "edit", "apply_patch", "str_replace", "multi_edit", "create_file", "delete"]);
 
 // 把绝对路径或带 git 前缀的路径归一化为 workspace 相对路径（统一使用 / 分隔符）。
 // - 去掉 git diff 前缀 "a/" / "b/"

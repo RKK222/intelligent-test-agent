@@ -28,7 +28,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - `assistant.message.delta` 旧事件继续作为兼容输入；新 `message.part.delta` 优先按 messageId/partId 合并，避免流式输出重复。
 - Agent/Model/Mode selector、slash command、`@` context、permission/question dock、Todo 和 runtime status 只暴露受控回调，HTTP 提交与 SSE 订阅仍由 app 层负责。
 - Timeline、dock、附件 chips、任务分解和 Skill/Tool 视图必须使用固定区域和换行策略，Agent 对话线程必须有独立 sticky scroll 区域：用户在底部时自动跟随，用户向上阅读时保留位置并提示有新内容，避免长命令、长路径、图片名或 streaming 文本撑开工作台。
-- `text`/`reasoning` part 通过 `MarkdownView` 懒加载 markdown-it + DOMPurify + highlight.js 渲染 Markdown、表格、链接与代码块（首屏不打包），并提供"查看原文"切换；流式生成的 text 会显示"生成中"光标。
+- `text`/`reasoning` part 通过 `MarkdownView` 懒加载 markdown-it + DOMPurify + highlight.js 渲染 Markdown、表格、链接与代码块（首屏不打包），并提供"查看原文"切换；流式生成的 text 会显示"生成中"光标。空白 `text` part 不进入主时间线，避免主/子 Agent 切换时挂载无内容的 Markdown 占位。
 - `step-start`/`step-finish` 内嵌 snapshot 默认折叠展示；`step-finish` 把 tokens 拆分为 input/output/reasoning 并按数量级动态展示 cost 精度。
 - `patch` part 把 `filesMap`/`fileStats` 收敛到 `metadata`，文件列表支持展开查看每文件 diff、显示 +/- 行数，并提供 hash 完整值一键复制。
 

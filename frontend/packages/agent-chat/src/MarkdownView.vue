@@ -26,7 +26,7 @@ let mermaidLoadPromise: Promise<void> | null = null
 // - html:false + DOMPurify 兜底，保证渲染出来的 HTML 不含脚本/危险链接
 // - 与 MarkdownPreview.vue（编辑器预览）解耦：去掉源码行号、滚动联动和 gutter，
 //   让本组件专注于"消息气泡里的小型 markdown 卡片"
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import 'github-markdown-css/github-markdown.css'
 
 const props = withDefaults(defineProps<MarkdownViewProps>(), {
@@ -38,6 +38,7 @@ const props = withDefaults(defineProps<MarkdownViewProps>(), {
 const html = ref('')
 const loading = ref(true)
 const error = ref<string | null>(null)
+const sourceIsBlank = computed(() => !props.source.trim())
 
 let renderTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -179,6 +180,11 @@ async function handleMdViewClick(event: MouseEvent) {
 
 async function render() {
   try {
+    if (sourceIsBlank.value) {
+      html.value = ''
+      error.value = null
+      return
+    }
     await ensureLibs(false) // Don't load mermaid on initial render
     const raw = mdInstance?.render(props.source ?? '') ?? ''
     const sanitized = purifyInstance?.sanitize(raw) ?? ''
@@ -199,6 +205,13 @@ function scheduleRender() {
   if (renderTimer) {
     clearTimeout(renderTimer)
   }
+  if (sourceIsBlank.value) {
+    html.value = ''
+    error.value = null
+    loading.value = false
+    return
+  }
+  loading.value = true
   renderTimer = setTimeout(() => {
     void render()
   }, 150)
@@ -219,7 +232,13 @@ onBeforeUnmount(() => {
 
 <template>
   <div :class="['ta-md-view min-w-0', bodyClass]" data-testid="md-view" @click="handleMdViewClick">
-    <div v-if="loading" class="text-[12px] text-[var(--ta-chat-muted)]">
+    <div
+      v-if="sourceIsBlank"
+      class="text-[12px] text-[var(--ta-chat-muted)]"
+    >
+      无内容
+    </div>
+    <div v-else-if="loading" class="text-[12px] text-[var(--ta-chat-muted)]">
       {{ loadingText }}
     </div>
     <div
@@ -227,12 +246,6 @@ onBeforeUnmount(() => {
       class="whitespace-pre-wrap text-[12px] text-[var(--ta-chat-muted)]"
     >
       {{ source }}
-    </div>
-    <div
-      v-else-if="!source.trim()"
-      class="text-[12px] text-[var(--ta-chat-muted)]"
-    >
-      无内容
     </div>
     <!-- 经 DOMPurify 消毒后的 HTML，可安全注入；.markdown-body 提供基础排版 -->
     <div v-else v-html="html" class="markdown-body min-w-0" />

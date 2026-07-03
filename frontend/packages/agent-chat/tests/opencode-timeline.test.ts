@@ -183,6 +183,94 @@ describe("OpencodeTimeline", () => {
     expect(onSelectSubagent).not.toHaveBeenCalled();
   });
 
+  it("switches between a large root context group and a child timeline without blank output placeholders", async () => {
+    const rootReadParts = Array.from({ length: 88 }, (_, index) =>
+      toolPart(`prt_read_${index}`, "read", { filePath: `frontend/src/file-${index}.ts` })
+    );
+    const messages: AgentMessage[] = [
+      userMessage("msg_user_root", "分析前端结构"),
+      assistantMessage("msg_root", [
+        ...rootReadParts,
+        textPart("prt_empty_root_1", "", "running"),
+        textPart("prt_empty_root_2", "   ", "running"),
+        {
+          ...toolPart("prt_task_frontend", "task", {
+            description: "Explore frontend structure",
+            subagent_type: "explore"
+          }),
+          callId: "call_task_frontend",
+          status: "running"
+        }
+      ]),
+      userMessage("msg_child_user", "Explore frontend structure"),
+      assistantMessage("msg_child_answer", [
+        toolPart("prt_child_read", "read", { filePath: "frontend/README.md" }),
+        textPart("prt_empty_child", "", "running"),
+        textPart("prt_child_answer", "子 Agent 已读取前端目录。")
+      ])
+    ];
+    const messageScopesById = {
+      msg_user_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+      msg_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+      msg_child_user: {
+        sessionId: "ses_child",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskPartId: "prt_task_frontend"
+      },
+      msg_child_answer: {
+        sessionId: "ses_child",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskPartId: "prt_task_frontend"
+      }
+    };
+    const subagentsBySessionId = {
+      ses_child: {
+        sessionId: "ses_child",
+        parentSessionId: "ses_root",
+        taskMessageId: "msg_root",
+        taskPartId: "prt_task_frontend",
+        taskCallId: "call_task_frontend",
+        agentName: "Explore",
+        title: "Explore frontend structure",
+        status: "running",
+        updatedAt: "2026-07-03T00:00:00Z"
+      }
+    };
+
+    const { container, getByText, queryByText, queryAllByText } = render(AssistantThread, {
+      props: {
+        messages,
+        commands: [],
+        resources: [],
+        running: true,
+        messageScopesById,
+        subagentsBySessionId,
+        subagentByTaskPartId: { prt_task_frontend: "ses_child" }
+      }
+    });
+
+    expect(getByText("读取 88 次")).toBeTruthy();
+    expect(queryByText("子 Agent 已读取前端目录。")).toBeNull();
+
+    await fireEvent.click(container.querySelector(".oc-subagent-card") as HTMLElement);
+    await waitMarkdown();
+
+    expect(getByText("子 Agent 已读取前端目录。")).toBeTruthy();
+    expect(queryByText("读取 88 次")).toBeNull();
+
+    await fireEvent.click(getByText("切换到主 Agent"));
+    await waitMarkdown();
+
+    expect(getByText("读取 88 次")).toBeTruthy();
+    expect(queryByText("子 Agent 已读取前端目录。")).toBeNull();
+    expect(queryAllByText("准备输出…")).toHaveLength(0);
+    expect(queryByText("无内容")).toBeNull();
+  });
+
   it("uses the opencode-like timeline as the AssistantThread main rendering path", async () => {
     const messages: AgentMessage[] = [
       userMessage("msg_user_1", "分析 checkout 失败"),
@@ -398,8 +486,8 @@ function assistantMessage(id: string, parts: MessagePart[]): Extract<AgentMessag
   return { id, messageId: id, role: "assistant", text: "", parts, createdAt: "2026-07-03T00:00:01Z" };
 }
 
-function textPart(partId: string, text: string): Extract<MessagePart, { type: "text" }> {
-  return { partId, type: "text", text, status: "completed" };
+function textPart(partId: string, text: string, status = "completed"): Extract<MessagePart, { type: "text" }> {
+  return { partId, type: "text", text, status };
 }
 
 function reasoningPart(partId: string, text: string): Extract<MessagePart, { type: "reasoning" }> {

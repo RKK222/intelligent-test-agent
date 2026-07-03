@@ -3423,3 +3423,10 @@ bash /tmp/test-api-after-restart.sh
 - What: 将 `mdInstance`、`purifyInstance`、`hljsInstance`、`mermaidInstance` 以及对应的 `loadPromise`、`mermaidLoadPromise` 提升至 Vue 组件模块级作用域（`<script lang="ts">` 块），实现在同一个生命周期内所有实例共享依赖单例，并利用 Promise Coalescing 机制将并发的异步动态加载合并为单次网络请求，避免重复执行重型的 JS 初始化。
 - How: 修改 `frontend/packages/agent-chat/src/MarkdownView.vue` 和 `frontend/packages/editor/src/MarkdownPreview.vue` 两个核心组件，清除实例级的 `shallowRef` 依赖状态，改为共享的模块级 singleton 变量和 Promise，并在 `ensureLibs` 里进行并发合并处理；未改动后端代码、接口契约、数据库及环境配置文件。
 - Result: 成功优化了大量 Markdown 组件渲染时的性能，消除由于并发 `import` 造成的响应延迟。所有 303 个前端 Vitest 测试（含 `MarkdownView.test.ts` 和 `MarkdownPreview.test.ts`）全部顺利通过，类型检查和打包校验无异常。
+
+### 2026-07-04 - 修复主/子 Agent 时间线切换卡顿
+
+- Why: 主 Agent 与子 Agent 时间线来回切换时，空的 running `text` part 会被投影成多个 `TextPartView`，继而挂载 `MarkdownView` 显示“准备输出…”/“无内容”占位；同时 `AgentWorkbench` 对 `chatState.messages` 的 deep watch 会在流式事件期间反复扫描整棵消息树，放大前端主线程压力。
+- What: `agent-chat` 时间线投影不再渲染空白 `text` part，`MarkdownView` 对空白 source 同步显示“无内容”并跳过 markdown/highlight 渲染调度，`TextPartView` 也对空源做轻量防御；`AgentWorkbench` 的任务消耗统计和实时追踪扫描改为基于 step-finish/reasoning 与已完成写文件工具的稳定签名触发，不再使用消息树 deep watch。
+- How: 新增 root/child scope + 88 次 read 聚合 + 空 running text 的投影与渲染回归测试，覆盖主/子 Agent 切换后不出现空输出占位；同步更新 `agent-chat` 与 `agent-web` README。未改后端、HTTP API、RunEvent SSE、数据库、generated SDK 或环境配置。
+- Result: 定向 Vitest、`@test-agent/agent-chat` typecheck、`@test-agent/agent-web` typecheck 和 `@test-agent/agent-web` build 均通过；build 仍有既有 CSS `@import` 顺序与大 chunk 警告，非本次改动引入。

@@ -186,6 +186,95 @@ describe("opencode-like conversation state", () => {
     expect(createTimelineRows(childState).map((row) => row.type)).toEqual(["user-message", "assistant-part"]);
   });
 
+  it("does not project empty running text placeholders while preserving root and child scoped timelines", () => {
+    const rootReadParts = Array.from({ length: 88 }, (_, index) =>
+      toolPart(`prt_read_${index}`, "read", { filePath: `src/file-${index}.ts` })
+    );
+    const messages: AgentMessage[] = [
+      userMessage("msg_user_root", "分析前端结构"),
+      assistantMessage("msg_root", [
+        ...rootReadParts,
+        textPart("prt_empty_root_1", "", "running"),
+        textPart("prt_empty_root_2", "   ", "running"),
+        toolPart("prt_task_frontend", "task", {
+          description: "Explore frontend structure",
+          subagent_type: "explore"
+        })
+      ]),
+      userMessage("msg_child_user", "Explore frontend structure"),
+      assistantMessage("msg_child_answer", [
+        toolPart("prt_child_read", "read", { filePath: "frontend/README.md" }),
+        textPart("prt_empty_child", "", "running"),
+        textPart("prt_child_answer", "子 Agent 已读取前端目录。")
+      ])
+    ];
+    const messageScopesById = {
+      msg_user_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+      msg_root: { sessionId: "ses_root", rootSessionId: "ses_root", isChildSession: false },
+      msg_child_user: {
+        sessionId: "ses_child",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskPartId: "prt_task_frontend"
+      },
+      msg_child_answer: {
+        sessionId: "ses_child",
+        rootSessionId: "ses_root",
+        parentSessionId: "ses_root",
+        isChildSession: true,
+        taskPartId: "prt_task_frontend"
+      }
+    };
+    const subagentsBySessionId = {
+      ses_child: {
+        sessionId: "ses_child",
+        parentSessionId: "ses_root",
+        taskMessageId: "msg_root",
+        taskPartId: "prt_task_frontend",
+        taskCallId: "call_task",
+        agentName: "Explore",
+        title: "Explore frontend structure",
+        status: "running",
+        updatedAt: "2026-07-03T00:00:00Z"
+      }
+    };
+
+    const rootState = createOpencodeLikeState({
+      messages,
+      messageScopesById,
+      subagentsBySessionId,
+      subagentByTaskPartId: { prt_task_frontend: "ses_child" }
+    } as any);
+    const childState = createOpencodeLikeState({
+      messages,
+      messageScopesById,
+      subagentsBySessionId,
+      subagentByTaskPartId: { prt_task_frontend: "ses_child" },
+      activeSubagentSessionId: "ses_child"
+    } as any);
+    const rootRows = createTimelineRows(rootState);
+    const childRows = createTimelineRows(childState);
+    const rootAssistantPartIds = rootRows
+      .filter((row) => row.type === "assistant-part")
+      .map((row) => (row as { partId: string }).partId);
+    const childAssistantPartIds = childRows
+      .filter((row) => row.type === "assistant-part")
+      .map((row) => (row as { partId: string }).partId);
+    const rootContextRow = rootRows.find((row) => row.type === "context-tool-group") as { refs: unknown[] } | undefined;
+
+    expect(rootContextRow?.refs).toHaveLength(88);
+    expect(rootAssistantPartIds).toContain("prt_task_frontend");
+    expect(rootAssistantPartIds).not.toContain("prt_empty_root_1");
+    expect(rootAssistantPartIds).not.toContain("prt_empty_root_2");
+    expect(rootState.partsByMessageId.msg_child_answer).toBeUndefined();
+
+    expect(childState.userMessages.map((message) => message.messageId)).toEqual(["msg_child_user"]);
+    expect(childAssistantPartIds).toContain("prt_child_answer");
+    expect(childAssistantPartIds).not.toContain("prt_empty_child");
+    expect(childRows.some((row) => row.type === "context-tool-group")).toBe(true);
+  });
+
   it("projects task tool parts as independent rows instead of a folded tool group", () => {
     const state = createOpencodeLikeState({
       messages: [
@@ -341,8 +430,8 @@ function assistantMessage(id: string, parts: MessagePart[]): Extract<AgentMessag
   return { id, messageId: id, role: "assistant", text: "", parts, createdAt: "2026-07-03T00:00:01Z" };
 }
 
-function textPart(partId: string, text: string): Extract<MessagePart, { type: "text" }> {
-  return { partId, type: "text", text, status: "completed" };
+function textPart(partId: string, text: string, status = "completed"): Extract<MessagePart, { type: "text" }> {
+  return { partId, type: "text", text, status };
 }
 
 function toolPart(

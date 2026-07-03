@@ -12,7 +12,7 @@ export function isTextualPart(part: MessagePart): part is Extract<MessagePart, {
 
 export function isRenderablePart(part: MessagePart, options: { showReasoningSummaries: boolean }): boolean {
   if (part.type === "text") {
-    return part.text.trim().length > 0 || part.status === "running";
+    return part.text.trim().length > 0;
   }
   if (part.type === "reasoning") {
     return options.showReasoningSummaries && (part.text.trim().length > 0 || part.status === "running");

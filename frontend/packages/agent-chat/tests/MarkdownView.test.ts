@@ -57,9 +57,13 @@ describe("MarkdownView", () => {
     expect(code?.classList.contains("hljs")).toBe(true);
   });
 
-  it("空内容显示占位", async () => {
-    const { findByText } = render(MarkdownView, { props: { source: "   " } });
-    expect(await findByText("无内容")).toBeTruthy();
+  it("空内容同步显示占位且不进入加载态", () => {
+    const { getByText, queryByText } = render(MarkdownView, {
+      props: { source: "   ", loadingText: "准备输出…" }
+    });
+
+    expect(getByText("无内容")).toBeTruthy();
+    expect(queryByText("准备输出…")).toBeNull();
   });
 
   it("支持覆盖首次渲染占位文案", () => {
