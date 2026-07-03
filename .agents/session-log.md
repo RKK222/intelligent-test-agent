@@ -34,6 +34,22 @@
   - 不改 reducer、投影顺序、RunEvent、后端 API 或默认折叠逻辑；保留“同一回合 reasoning 合并为一行、默认收起”的当前行为，只降低视觉权重并修正头像对齐。
 - Result:
   - 前端 Vitest 全量通过（36 files, 299 passed, 1 skipped），`@test-agent/agent-chat` typecheck 通过；Playwright 构造 DOM 检查隐藏 step 行头像与 reasoning 触发器 top delta 为 0px，reasoning `已完成` 与工具 `已读取` x delta 为 0px；前端 Vite 已在 `127.0.0.1:3001` 启动验证入口。
+### 2026-07-04 - 修复子 Agent 入口跨轮次残留
+
+- Why:
+  - 用户反馈上一轮对话的子 Agent 入口有时会一直出现在后续每一轮对话中；根因是 `opencode-like/state` 在原始 task message 已不可见时，会把保留的 `subagentsBySessionId/subagentByTaskPartId` 索引合成到“最后一个可见 assistant”，导致旧子 Agent 被挂到新用户轮次。
+- What:
+  - `agent-chat` 的合成子 Agent 入口只允许补回仍可见的原始 `taskMessageId`，不再猜测挂到最新 assistant 或后续用户轮次。
+  - 补充 `opencode-like-state.test.ts` 回归测试，覆盖原 task message 已缺失时旧 `prt_task` 不会追加到新一轮 assistant parts。
+  - 同步更新 `agent-chat` README 与 `src/PACKAGE.md` 的子 Agent 补偿边界说明。
+- How:
+  - 通过 TDD 先确认新增测试在旧逻辑下失败：`msg_assistant_2` 被错误追加 `prt_task_old`。
+  - 修改 `frontend/packages/agent-chat/src/opencode-like/state/adapter.ts`，让缺少可见原始 task message 锚点的子 Agent 索引跳过投影。
+- Result:
+  - `corepack pnpm test -- packages/agent-chat/tests/opencode-like-state.test.ts` 通过。
+  - `corepack pnpm test -- packages/agent-chat/tests/opencode-like-state.test.ts packages/agent-chat/tests/opencode-timeline.test.ts packages/agent-chat/tests/runtime-reducer.test.ts` 通过（Vitest 实际执行当前前端 36 个测试文件，315 passed，1 skipped）。
+  - `corepack pnpm --filter @test-agent/agent-chat typecheck` 通过。
+
 ### 2026-07-04 - 优化正在工作状态行的视觉动效
 
 - Why:
@@ -3588,4 +3604,3 @@ bash /tmp/test-api-after-restart.sh
   - 修改 `rows.css`，将 `.oc-working-status` 调整为使用全局呼吸透明度；
   - 修改 `parts.css` 和 `tools.css`，将 `.oc-disclosure.is-running .oc-tool__status` 和 `.oc-tool__status.is-running` 调整为使用全局呼吸透明度，确保所有进行中与思考中的状态胶囊在帧级别上百分百步调一致。
 - Result: 前端 Vitest 单元测试全部顺利通过，项目无类型和构建错误。
-
