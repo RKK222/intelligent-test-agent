@@ -29,6 +29,7 @@ import {
   Check,
 } from 'lucide-vue-next'
 import type {
+  AgentInfo,
   AgentMessage,
   AiFeedbackReasonCode,
   AiFeedbackRating,
@@ -580,6 +581,10 @@ const props =
     selectedModelLabel?: string
     /** 模型选择按钮是否禁用 */
     modelPickerDisabled?: boolean
+    /** 可作为主运行入口选择的 Agent 列表 */
+    agents?: AgentInfo[]
+    /** 当前选中的主 Agent 标识 */
+    selectedAgent?: string
     /** 终止按钮是否禁用 */
     stopDisabled?: boolean
     /** 终止按钮禁用原因 */
@@ -612,6 +617,7 @@ const props =
   }>(), {
     processRefreshBlocksSubmit: true,
     commands: () => [],
+    agents: () => [],
     rawOutputEntries: () => [],
     streamingTextByPartId: () => ({}),
     todos: () => []
@@ -632,6 +638,7 @@ const emit =
     (e: 'initialize-process'): void
     (e: 'refresh-process'): void
     (e: 'select-model', model: any): void
+    (e: 'change-agent', agentId: string): void
     (e: 'clear-raw-output'): void
     (
       e: 'submit-feedback',
@@ -649,14 +656,24 @@ const collapsedMessages = ref<Record<string, boolean>>({})
 const localInput = ref(props.inputValue ?? '')
 const dropdownOpen = ref(false)
 const modelSearch = ref('')
+const agentDropdownOpen = ref(false)
+const agentSearch = ref('')
 
 function toggleDropdown(event: Event) {
   event.stopPropagation()
+  agentDropdownOpen.value = false
   dropdownOpen.value = !dropdownOpen.value
+}
+
+function toggleAgentDropdown(event: Event) {
+  event.stopPropagation()
+  dropdownOpen.value = false
+  agentDropdownOpen.value = !agentDropdownOpen.value
 }
 
 function closeDropdown() {
   dropdownOpen.value = false
+  agentDropdownOpen.value = false
 }
 
 onMounted(() => {
@@ -725,6 +742,55 @@ const modelGroups = computed(() => {
 function selectModel(model: any) {
   emit('select-model', model)
   dropdownOpen.value = false
+}
+
+function agentValue(agent: AgentInfo): string {
+  return agent.agentId || agent.name
+}
+
+function agentLabel(agent: AgentInfo): string {
+  return agent.name || agent.agentId
+}
+
+function agentMatches(agent: AgentInfo, query: string): boolean {
+  if (!query) return true
+  const q = query.toLowerCase()
+  return `${agent.name} ${agent.agentId} ${agent.description ?? ''}`.toLowerCase().includes(q)
+}
+
+const mainAgentOptions = computed(() =>
+  props.agents.filter((agent) => !agent.hidden && agent.mode !== 'subagent')
+)
+
+const mentionAgentOptions = computed(() =>
+  props.agents.filter((agent) => !agent.hidden && agent.mode !== 'primary')
+)
+
+const filteredMainAgents = computed(() =>
+  mainAgentOptions.value.filter((agent) => agentMatches(agent, agentSearch.value.trim()))
+)
+
+const selectedAgentInfo = computed(() => {
+  if (!props.selectedAgent) return mainAgentOptions.value[0]
+  return mainAgentOptions.value.find(
+    (agent) => agentValue(agent) === props.selectedAgent || agent.name === props.selectedAgent
+  ) ?? mainAgentOptions.value[0]
+})
+
+const selectedAgentLabel = computed(() => {
+  const agent = selectedAgentInfo.value
+  return agent ? agentLabel(agent) : '选择 Agent'
+})
+
+function isSelectedAgent(agent: AgentInfo): boolean {
+  const selected = props.selectedAgent || agentValue(selectedAgentInfo.value ?? agent)
+  return agentValue(agent) === selected || agent.name === selected
+}
+
+function selectAgent(agent: AgentInfo) {
+  emit('change-agent', agentValue(agent))
+  agentDropdownOpen.value = false
+  agentSearch.value = ''
 }
 const inputComposing = ref(false)
 const negativeFeedbackOpen = ref(false)
@@ -994,6 +1060,8 @@ const skills = computed<SkillItem[]>(() => {
 
 const showSkillPanel = ref(false)
 const skillFilterText = ref('')
+const showAgentPanel = ref(false)
+const agentFilterText = ref('')
 
 const filteredSkills = computed(() => {
   const q = skillFilterText.value.toLowerCase()
@@ -1005,6 +1073,21 @@ const filteredSkills = computed(() => {
   )
 })
 
+const filteredMentionAgents = computed(() => {
+  const q = agentFilterText.value.trim()
+  return mentionAgentOptions.value.filter((agent) => agentMatches(agent, q))
+})
+
+// 仅匹配输入末尾的 @query，和 opencode 原生 prompt autocomplete 一样不扫描全文。
+function currentAgentMentionQuery(text: string): string | null {
+  const match = text.match(/(^|\s)@([^\s@]*)$/)
+  return match ? match[2] : null
+}
+
+function replaceAgentMentionQuery(text: string, label: string): string {
+  return text.replace(/(^|\s)@([^\s@]*)$/, `$1@${label} `)
+}
+
 function onSkillInput(text: string) {
   const trimmed = text.trimStart()
   // 已选命令后的空格表示进入参数输入阶段，此时不再重复打开技能检索面板。
@@ -1012,10 +1095,31 @@ function onSkillInput(text: string) {
     const afterSlash = trimmed.slice(1)
     skillFilterText.value = afterSlash
     showSkillPanel.value = true
+    showAgentPanel.value = false
+    agentFilterText.value = ''
   } else {
     showSkillPanel.value = false
     skillFilterText.value = ''
   }
+}
+
+function onAgentMentionInput(text: string) {
+  const query = currentAgentMentionQuery(text)
+  if (query !== null && !props.running && !showChoicePanel.value && mentionAgentOptions.value.length > 0) {
+    agentFilterText.value = query
+    showAgentPanel.value = true
+  } else {
+    showAgentPanel.value = false
+    agentFilterText.value = ''
+  }
+}
+
+function onComposerInput(text: string) {
+  onSkillInput(text)
+  if (showSkillPanel.value) {
+    return
+  }
+  onAgentMentionInput(text)
 }
 
 function selectSkill(skill: SkillItem) {
@@ -1028,9 +1132,22 @@ function selectSkill(skill: SkillItem) {
   skillFilterText.value = ''
 }
 
+function selectMentionAgent(agent: AgentInfo) {
+  const commandText = replaceAgentMentionQuery(localInput.value, agentLabel(agent))
+  localInput.value = commandText
+  emit('update:inputValue', commandText)
+  showAgentPanel.value = false
+  agentFilterText.value = ''
+}
+
 function dismissSkillPanel() {
   showSkillPanel.value = false
   skillFilterText.value = ''
+}
+
+function dismissAgentPanel() {
+  showAgentPanel.value = false
+  agentFilterText.value = ''
 }
 
 // ===== 文件变更抽屉 =====
@@ -2001,7 +2118,7 @@ watch(
   }
 )
 
-watch(localInput, (v) => onSkillInput(v))
+watch(localInput, (v) => onComposerInput(v))
 
 watch(
   () => props.running,
@@ -3251,6 +3368,37 @@ function onCompositionEnd() {
       </div>
     </div>
 
+    <!-- Agent @ 候选：遵循 opencode prompt autocomplete，只展示 subagent/all 且非 hidden 的 Agent。 -->
+    <div v-if="showAgentPanel" class="figma-chat-agent-panel">
+      <div class="figma-chat-choice-header">
+        <div class="figma-chat-choice-question">Agent</div>
+        <button
+          type="button"
+          class="figma-chat-choice-close"
+          @click="dismissAgentPanel"
+        >
+          <X :size="14" />
+        </button>
+      </div>
+      <div class="figma-chat-agent-list">
+        <div
+          v-for="agent in filteredMentionAgents"
+          :key="agentValue(agent)"
+          class="figma-chat-agent-row"
+          @click="selectMentionAgent(agent)"
+        >
+          <User :size="16" class="figma-chat-agent-icon" />
+          <div class="figma-chat-agent-info">
+            <span class="figma-chat-agent-name">{{ agentLabel(agent) }}</span>
+            <span v-if="agent.description" class="figma-chat-agent-desc">{{ agent.description }}</span>
+          </div>
+        </div>
+        <div v-if="filteredMentionAgents.length === 0" class="figma-chat-agent-empty">
+          无匹配 Agent
+        </div>
+      </div>
+    </div>
+
     <!-- 作废说明：运行中旧任务面板已由 OpencodeTimeline 的工具/事件行取代，避免两套来源显示不一致。 -->
     <!-- 选择题面板：固定展示在输入区域上方，保留 composer 供用户继续补充内容。 -->
     <div v-if="showChoicePanel" class="figma-chat-choice-panel">
@@ -3401,6 +3549,62 @@ function onCompositionEnd() {
           >
             <Upload class="figma-chat-btn-icon" />
           </button>
+          <!-- 主 Agent 选择：遵循 opencode local.agent.list()，只展示 primary/all 且非 hidden 的 Agent。 -->
+          <div class="figma-chat-agent-select-wrapper">
+            <el-tooltip
+              :content="selectedAgentLabel"
+              placement="top"
+              :show-after="100"
+              :disabled="mainAgentOptions.length === 0"
+            >
+              <button
+                type="button"
+                class="figma-chat-card-btn figma-chat-agent-btn"
+                :disabled="mainAgentOptions.length === 0"
+                aria-label="切换 Agent"
+                @click.stop="toggleAgentDropdown"
+              >
+                <User class="figma-chat-btn-icon" />
+                <span class="figma-chat-agent-label">{{ selectedAgentLabel }}</span>
+                <ChevronDown class="figma-chat-btn-icon" />
+              </button>
+            </el-tooltip>
+            <div v-if="agentDropdownOpen" class="figma-chat-agent-dropdown" role="dialog" aria-label="Agent 选择" @click.stop>
+              <div class="figma-chat-agent-dropdown-search">
+                <input
+                  v-model="agentSearch"
+                  type="text"
+                  placeholder="搜索 Agent..."
+                  class="figma-chat-agent-search-input"
+                  @keydown.enter.prevent
+                />
+              </div>
+              <div class="figma-chat-agent-dropdown-list">
+                <button
+                  v-for="agent in filteredMainAgents"
+                  :key="agentValue(agent)"
+                  type="button"
+                  :class="['figma-chat-agent-option-item', isSelectedAgent(agent) && 'is-active']"
+                  @click="selectAgent(agent)"
+                >
+                  <div class="figma-chat-agent-option-info">
+                    <span
+                      class="figma-chat-agent-option-dot"
+                      :style="{ backgroundColor: agent.color || '#3366ff' }"
+                    />
+                    <span class="figma-chat-agent-option-text">
+                      <span class="figma-chat-agent-option-name">{{ agentLabel(agent) }}</span>
+                      <span v-if="agent.description" class="figma-chat-agent-option-desc">{{ agent.description }}</span>
+                    </span>
+                  </div>
+                  <span v-if="isSelectedAgent(agent)" class="figma-chat-agent-option-checked">✓</span>
+                </button>
+                <div v-if="filteredMainAgents.length === 0" class="figma-chat-agent-empty">
+                  暂无匹配 Agent
+                </div>
+              </div>
+            </div>
+          </div>
           <!-- 中间：模型选择 -->
           <div class="figma-chat-model-select-wrapper">
             <el-tooltip
@@ -5460,6 +5664,76 @@ function onCompositionEnd() {
   text-align: center;
 }
 
+/* ---- Agent @ 候选面板 ---- */
+.figma-chat-agent-panel {
+  padding: 12px 16px;
+  border: 1px solid var(--ta-chat-border, #e0e0e0);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  margin: 0 10px 10px;
+  flex-shrink: 0;
+}
+
+.figma-chat-agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.figma-chat-agent-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 6px;
+  background: #ffffff;
+  transition: background 0.12s ease;
+}
+
+.figma-chat-agent-row:hover {
+  background: #f5f5f5;
+}
+
+.figma-chat-agent-icon {
+  color: #3366ff;
+  flex-shrink: 0;
+}
+
+.figma-chat-agent-info {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.figma-chat-agent-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+  flex-shrink: 0;
+}
+
+.figma-chat-agent-desc {
+  font-size: 12px;
+  color: #8c8c8c;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  margin-left: 8px;
+}
+
+.figma-chat-agent-empty {
+  padding: 12px 4px;
+  font-size: 12px;
+  color: #8c8c8c;
+  text-align: center;
+}
+
 .figma-chat-skill-msg {
   display: flex;
   align-items: center;
@@ -5807,6 +6081,19 @@ function onCompositionEnd() {
   height: 26px;
   padding: 0;
   justify-content: center;
+}
+
+.figma-chat-agent-btn {
+  max-width: 140px;
+  min-width: 0;
+}
+
+.figma-chat-agent-label {
+  min-width: 0;
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .figma-chat-model-btn {
@@ -6436,6 +6723,137 @@ function onCompositionEnd() {
 
 .figma-chat-bubble-content :deep(.markdown-body blockquote) {
   background: transparent;
+}
+
+/* Agent 下拉选择框 */
+.figma-chat-agent-select-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.figma-chat-agent-dropdown {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 0;
+  width: 260px;
+  max-height: 340px;
+  background: var(--ta-panel, #ffffff);
+  border: 1px solid var(--ta-border, #e4e4e7);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.15), 0 1px 4px rgba(15, 23, 42, 0.05);
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+
+.figma-chat-agent-dropdown::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  left: 36px;
+  transform: rotate(45deg);
+  width: 12px;
+  height: 12px;
+  background: var(--ta-panel, #ffffff);
+  border-right: 1px solid var(--ta-border, #e4e4e7);
+  border-bottom: 1px solid var(--ta-border, #e4e4e7);
+  z-index: -1;
+}
+
+.figma-chat-agent-dropdown-search {
+  padding: 10px 12px 6px;
+  border-bottom: 1px solid var(--ta-border, #e4e4e7);
+}
+
+.figma-chat-agent-search-input {
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--ta-border, #e4e4e7);
+  border-radius: 8px;
+  background: var(--ta-panel-2, #f4f4f5);
+  color: var(--ta-text, #18181b);
+  padding: 0 10px;
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.figma-chat-agent-search-input:focus {
+  border-color: var(--ta-ink, #3b82f6);
+}
+
+.figma-chat-agent-dropdown-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 12px 12px;
+}
+
+.figma-chat-agent-option-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ta-text, #18181b);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.12s;
+}
+
+.figma-chat-agent-option-item:hover {
+  background: var(--ta-panel-2, #f4f4f5);
+}
+
+.figma-chat-agent-option-item.is-active {
+  background: #eaf0ff;
+  color: #1d3fb0;
+  font-weight: 600;
+}
+
+.figma-chat-agent-option-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.figma-chat-agent-option-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.figma-chat-agent-option-text {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.figma-chat-agent-option-name,
+.figma-chat-agent-option-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figma-chat-agent-option-desc {
+  color: var(--ta-muted, #71717a);
+  font-weight: 400;
+}
+
+.figma-chat-agent-option-checked {
+  color: #1d3fb0;
+  font-weight: bold;
 }
 
 /* 模型下拉选择框 */

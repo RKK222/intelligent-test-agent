@@ -2,6 +2,20 @@
 
 ## Entries
 
+### 2026-07-03 - 恢复对话区 Agent 选择与 @ 候选
+
+- Why:
+  - 当前主路径 `FigmaChatPanel` 没有接收 `AgentWorkbench` 已加载的运行态 Agent 目录，底部无法切换主 Agent；
+  - 输入框 `@` 也没有按 opencode 原生 autocomplete 口径展示可提及 Agent。
+- What:
+  - `FigmaChatPanel` 新增受控 `agents/selectedAgent` 和 `change-agent`，底部 Agent 下拉按 `mode !== "subagent" && !hidden` 展示主运行 Agent；
+  - 输入框 `@query` 候选按 `!hidden && mode !== "primary"` 展示可提及 Agent，并选中后替换为 `@agentName `；
+  - `AgentWorkbench` 下发 agents/selectedAgent，切换后 `startRun` 继续携带所选 agent。
+- How:
+  - 只改前端组件、mock 测试与稳定文档，不改后端 API、RunEvent SSE、数据库或 generated SDK。
+- Result:
+  - `FigmaChatPanel` 组件测试覆盖底部 Agent 过滤、切换 emit 与 `@` 候选替换；Playwright mock 覆盖切换 Agent 后 Run 请求体携带新 `agent`。
+
 ### 2026-07-03 - 收敛 Run 启动前失败的聊天运行态
 
 - Why:

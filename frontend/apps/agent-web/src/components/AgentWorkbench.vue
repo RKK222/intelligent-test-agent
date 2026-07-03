@@ -653,13 +653,13 @@ const providersQuery = useQuery({
 // Agent、Command 需要 opencode READY + workspace
 const agentsQuery = useQuery({
   queryKey: ["runtime", "agents", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
+  enabled: opencodeCatalogReady,
   queryFn: () => api.listAgents(selectedWorkspaceIdRef.value!),
   retry: false
 });
 const commandsQuery = useQuery({
   queryKey: ["runtime", "commands", selectedWorkspaceIdRef],
-  enabled: () => Boolean(selectedWorkspaceIdRef.value) && opencodeProcessReady.value,
+  enabled: opencodeCatalogReady,
   queryFn: () => api.listCommands(selectedWorkspaceIdRef.value!),
   retry: false
 });
@@ -751,6 +751,10 @@ function selectRuntimeModel(model: typeof models.value[number]) {
   const val = modelValue(model);
   selectedModel.value = val;
   persistRuntimePreference(selectedProvider.value, val);
+}
+
+function selectRuntimeAgent(agentId: string) {
+  selectedAgent.value = agentId;
 }
 
 let activeRunProbeSeq = 0;
@@ -1032,8 +1036,12 @@ watch(selectedWorkspaceIdRef, (id) => {
   }
 }, { immediate: true });
 watch(agentsQuery.data, (data) => {
-  if (!selectedAgent.value && data?.[0]?.agentId) {
-    selectedAgent.value = data[0].agentId;
+  if (!selectedAgent.value && data?.length) {
+    // 主运行 Agent 与 opencode local.agent.list() 保持一致：排除 subagent 和 hidden。
+    const defaultAgent = data.find((agent) => agent.mode !== "subagent" && !agent.hidden) ?? data[0];
+    if (defaultAgent.agentId) {
+      selectedAgent.value = defaultAgent.agentId;
+    }
   }
 });
 watch(providersQuery.data, (data) => {
@@ -3180,6 +3188,8 @@ async function handleLogout() {
           :todos="chatState.todos"
           :selected-model-label="selectedModelLabel"
           :model-picker-disabled="false"
+          :agents="agents"
+          :selected-agent="selectedAgent"
           :stop-disabled="!canStopRun"
           :stop-disabled-reason="stopDisabledReason"
           :models="models"
@@ -3200,6 +3210,7 @@ async function handleLogout() {
           @reply-question="(requestId: string, answers: unknown[]) => replyQuestionMutation.mutate({ requestId, answers })"
           @reject-question="(requestId: string) => rejectQuestionMutation.mutate(requestId)"
           @select-session="(id: string) => switchSession(id)"
+          @change-agent="selectRuntimeAgent"
           @select-model="(model) => selectRuntimeModel(model)"
           @submit-feedback="handleSubmitFeedback"
           @clear-raw-output="clearCurrentRawOutput"

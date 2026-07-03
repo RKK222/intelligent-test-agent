@@ -406,6 +406,53 @@ test("model picker groups models by provider and updates run model", async ({ pa
   });
 });
 
+test("agent picker updates the run agent", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  const agentRequests: string[] = [];
+  await mockBackendApi(page, {
+    runRequests,
+    agentRequests,
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    agents: [
+      { id: "build", name: "Build", mode: "primary", description: "默认构建" },
+      { id: "plan", name: "Plan", mode: "all", description: "可作为主 Agent" },
+      { id: "review", name: "Review", mode: "subagent", description: "仅用于 @ 候选" }
+    ]
+  });
+
+  await gotoWorkbench(page);
+  await expect.poll(() => agentRequests.length).toBeGreaterThanOrEqual(1);
+  await expect(page.getByRole("button", { name: "切换 Agent" })).toBeEnabled();
+
+  await page.getByRole("button", { name: "切换 Agent" }).click();
+  const agentDialog = page.getByRole("dialog", { name: "Agent 选择" });
+  await expect(agentDialog).toBeVisible();
+  await expect(agentDialog).toContainText("Build");
+  await expect(agentDialog).toContainText("Plan");
+  await expect(agentDialog).not.toContainText("Review");
+  await agentDialog.getByRole("button", { name: /Plan/ }).click();
+  await expect(page.getByRole("button", { name: "切换 Agent" })).toContainText("Plan");
+
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("use selected agent");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runRequests.length).toBe(1);
+  expect(runRequests[0]).toMatchObject({
+    prompt: "use selected agent",
+    agent: "plan"
+  });
+});
+
 test("model picker keeps the selected model after page reload", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, { runRequests });
@@ -1110,6 +1157,8 @@ async function mockBackendApi(
     authMeGate?: Promise<void>;
     logoutRequests?: string[];
     configurationApplicationRequests?: string[];
+    agentRequests?: string[];
+    agents?: Array<Record<string, unknown>>;
     applications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     managedApplications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     recentWorkspaces?: Record<string, (ReturnType<typeof workspace> & Record<string, unknown>) | null>;
@@ -1558,7 +1607,8 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/agent") {
-      await route.fulfill(json([{ id: "build", name: "Build" }]));
+      capture.agentRequests?.push(`${method} ${url.pathname}${url.search}`);
+      await route.fulfill(json(capture.agents ?? [{ id: "build", name: "Build" }]));
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/model") {

@@ -11,6 +11,83 @@ const markdownViewStub = {
 };
 
 describe("FigmaChatPanel", () => {
+  it("shows visible primary/all agents in the composer agent picker and emits changes", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        selectedAgent: "build",
+        agents: [
+          { agentId: "build", name: "Build", mode: "primary", description: "默认构建" },
+          { agentId: "all-rounder", name: "All Rounder", mode: "all", description: "可作为主 Agent" },
+          { agentId: "review", name: "Review", mode: "subagent", description: "只能 @ 调用" },
+          { agentId: "secret", name: "Secret", mode: "primary", hidden: true }
+        ]
+      } as any
+    });
+
+    await wrapper.get('[aria-label="切换 Agent"]').trigger("click");
+
+    expect(wrapper.find(".figma-chat-agent-dropdown").exists()).toBe(true);
+    expect(wrapper.text()).toContain("Build");
+    expect(wrapper.text()).toContain("All Rounder");
+    expect(wrapper.text()).not.toContain("Review");
+    expect(wrapper.text()).not.toContain("Secret");
+    expect(wrapper.get(".figma-chat-agent-option-item.is-active").text()).toContain("Build");
+
+    const allRounder = wrapper
+      .findAll(".figma-chat-agent-option-item")
+      .find((item) => item.text().includes("All Rounder"));
+    expect(allRounder).toBeTruthy();
+    await allRounder!.trigger("click");
+
+    expect(wrapper.emitted("change-agent")).toEqual([["all-rounder"]]);
+  });
+
+  it("shows mentionable subagent/all agents when the user types at-sign", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        agents: [
+          { agentId: "build", name: "Build", mode: "primary", description: "默认构建" },
+          { agentId: "review", name: "Review", mode: "subagent", description: "评审实现" },
+          { agentId: "qa", name: "QA", mode: "all", description: "测试分析" },
+          { agentId: "hidden-review", name: "Hidden Review", mode: "subagent", hidden: true }
+        ]
+      } as any
+    });
+
+    await wrapper.get("textarea").setValue("@");
+
+    const panel = wrapper.find(".figma-chat-agent-panel");
+    expect(panel.exists()).toBe(true);
+    expect(panel.text()).toContain("Review");
+    expect(panel.text()).toContain("QA");
+    expect(panel.text()).not.toContain("Build");
+    expect(panel.text()).not.toContain("Hidden Review");
+  });
+
+  it("replaces the current at-sign query when selecting a mentioned agent", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        agents: [
+          { agentId: "review", name: "Review", mode: "subagent", description: "评审实现" },
+          { agentId: "qa", name: "QA", mode: "all", description: "测试分析" }
+        ]
+      } as any
+    });
+
+    await wrapper.get("textarea").setValue("请 @re");
+    await wrapper.get(".figma-chat-agent-row").trigger("click");
+
+    expect((wrapper.get("textarea").element as HTMLTextAreaElement).value).toBe("请 @Review ");
+    expect(wrapper.emitted("update:inputValue")).toContainEqual(["请 @Review "]);
+    expect(wrapper.find(".figma-chat-agent-panel").exists()).toBe(false);
+  });
+
   it("lists native skill commands when the user types slash", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
