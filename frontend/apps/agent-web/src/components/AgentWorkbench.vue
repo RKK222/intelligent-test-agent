@@ -753,6 +753,41 @@ function selectRuntimeModel(model: typeof models.value[number]) {
   persistRuntimePreference(selectedProvider.value, val);
 }
 
+function chooseDefaultRuntimeModel(data: typeof modelsQuery.data.value | undefined) {
+  return data?.find((model) => model.defaultModel) ?? data?.[0];
+}
+
+function modelMatchesProvider(model: typeof models.value[number], provider: string) {
+  return !provider || model.providerId === provider || modelValue(model).startsWith(`${provider}/`);
+}
+
+function applyRuntimeModelPreference(data: typeof modelsQuery.data.value | undefined) {
+  if (!data?.length) {
+    selectedModel.value = "";
+    persistRuntimePreference(selectedProvider.value, "");
+    return;
+  }
+  const saved = readStoredRuntimePreference();
+  const savedModel = saved.model
+    ? data.find((model) => modelValue(model) === saved.model && modelMatchesProvider(model, saved.provider))
+    : undefined;
+  const currentModel = selectedModel.value
+    ? data.find((model) => modelValue(model) === selectedModel.value && modelMatchesProvider(model, selectedProvider.value))
+    : undefined;
+  // 模型目录是运行时可用模型的事实源；历史 localStorage 中的目录外模型必须自动回退，避免继续命中不可用 provider。
+  const nextModel = savedModel ?? currentModel ?? chooseDefaultRuntimeModel(data);
+  if (!nextModel) {
+    selectedModel.value = "";
+    persistRuntimePreference(selectedProvider.value, "");
+    return;
+  }
+  const nextProvider = nextModel.providerId || selectedProvider.value;
+  const nextValue = modelValue(nextModel);
+  selectedProvider.value = nextProvider;
+  selectedModel.value = nextValue;
+  persistRuntimePreference(nextProvider, nextValue);
+}
+
 function selectRuntimeAgent(agentId: string) {
   selectedAgent.value = agentId;
 }
@@ -1050,19 +1085,16 @@ watch(providersQuery.data, (data) => {
     selectedProvider.value = savedProvider;
     return;
   }
-  if (!selectedProvider.value && data?.[0]?.providerId) {
+  if (data?.some((p) => p.providerId === selectedProvider.value)) {
+    return;
+  }
+  if (data?.[0]?.providerId) {
     selectedProvider.value = data[0].providerId;
+    persistRuntimePreference(selectedProvider.value, selectedModel.value);
   }
 });
 watch(modelsQuery.data, (data) => {
-  const savedModel = readStoredRuntimePreference().model;
-  if (savedModel && data?.some((m) => modelValue(m) === savedModel)) {
-    selectedModel.value = savedModel;
-    return;
-  }
-  if (!selectedModel.value && data?.[0]) {
-    selectedModel.value = modelValue(data.find((model) => model.defaultModel) ?? data[0]);
-  }
+  applyRuntimeModelPreference(data);
 });
 watch(opencodeProcessReady, (ready, previous) => {
   if (!ready || previous) {

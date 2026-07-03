@@ -3248,3 +3248,10 @@ bash /tmp/test-api-after-restart.sh
 - What: 将生产 `RunEventRepository` 迁移到 MyBatis XML，写入 `RunEventDraft.scopeContext()` 对应 scope 列并让缺失 `raw_event_id` 保持 `NULL`；opencode-client 只负责 raw/mapped DTO 边界，不再按 root session 过滤；runtime 新增 `RunSessionScopeRouter`，从 task/tool metadata、`session.created/updated parentID`、`session.children(root)` bootstrap 发现当前 Run child，并丢弃 child 误派生的 Run 终态；新增 Redis 运行态 pending/dedup cache，Redis 不可用时降级为 DB-only。
 - How: 新增 `MyBatisRunEventRepository`、`RunEventMapper.xml` 与集成测试，保留旧 `JdbcRunEventRepository` 但移除生产 Bean；`RunApplicationService` 在订阅事件流时用 runtime router 重写 scope metadata、drain pending 并交给既有 RunEvent pipeline；Redis key 使用 `test-agent:run-scope:{runId}:pending:{sessionId}` 和 `test-agent:run-scope:{runId}:dedup:{sessionId}:{rawEventId}`，TTL 30 分钟。同步更新 opencode-client/runtime/persistence README、PACKAGE、事件流文档和数据库部署文档。
 - Result: 定向 persistence、runtime、client 测试通过，`mvn -pl test-agent-api,test-agent-opencode-runtime,test-agent-opencode-client -am test` 全量通过；`rawEventId == null` 不进入 Redis dedup，派生 `run.succeeded/run.failed` 不复用源 raw id，payload 仍兼容旧 SSE 前端。未修改 generated SDK、环境配置和无关前端文件。
+
+### 2026-07-03 - 修复模型偏好命中过期 provider 导致 Insufficient Balance
+
+- Why: `Insufficient Balance` 是上游模型 provider 返回的真实错误；前端 localStorage 中的旧 `provider/model` 会长期保留，后端此前也直接透传请求模型，导致模型目录已切换后仍可能打到余额不足或不可用 provider。
+- What: `AgentWorkbench` 在模型目录加载后校验已保存偏好，目录外模型或 provider 不匹配时自动回退并持久化当前 `defaultModel`；`RunApplicationService` 在托管模型目录模式下校验请求模型，合法模型原样使用，缺失/非法/目录外模型回退默认模型，目录为空时返回 `VALIDATION_ERROR` 且不启动远端 run。
+- How: 未改 API 字段、数据库、generated SDK 或 `.env.local`；同步更新 HTTP API、agent-web README 和 opencode-runtime README，并补充前端 Playwright 与后端 application service 回归测试。
+- Result: 旧浏览器偏好不会继续命中已不在当前目录中的 provider；如果当前默认 provider 本身余额或鉴权异常，仍通过既有 `run.failed` 真实错误展示链路暴露给前端。

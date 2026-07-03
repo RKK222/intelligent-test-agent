@@ -1888,8 +1888,8 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 - `parts`、`messageId`、`agent`、`model`、`variant`、`mode` 均为可选字段，旧前端不需要改动。
 - `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt_async` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。
 - file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。只有没有内联内容或 URL 时，后端才把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。
-- `model` 使用 `providerId/modelId` 字符串格式；格式不完整时后端保留旧默认模型，不向 opencode 传 model override。
-- 当后端启用托管模型目录时，前端从 Model 目录接口获取可选模型并仍按 `providerId/modelId` 提交；企业内默认模型为 `icbc-openai/DeepSeek-V4-Flash-W8A8`。
+- `model` 使用 `providerId/modelId` 字符串格式；未启用托管模型目录时，格式不完整仍保持旧行为，不向 opencode 传 model override。
+- 当后端启用托管模型目录时，前端从 Model 目录接口获取可选模型并仍按 `providerId/modelId` 提交；后端会按当前模型目录校验该期望模型。请求缺失、格式不完整或模型已不在当前目录内时，后端回退到 `defaultModel=true` 的模型，找不到默认项时使用目录首项；目录为空时返回 `VALIDATION_ERROR`，不启动远端 run。企业内默认模型为 `icbc-openai/DeepSeek-V4-Flash-W8A8`。
 - Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt_async` 请求体。
 
 启动流程会先校验当前认证用户是否已有 `READY` opencode 进程；未就绪时返回 `OPENCODE_UNAVAILABLE`，不创建本地 Run。校验通过后追加用户消息，创建 `PENDING` Run，并使用当前用户进程投影出的 `executionNodeId = "node_" + processId` 和进程记录中的 `baseUrl` 作为本次运行目标；`baseUrl` 由当前 advertised host 与端口生成。若 `(sessionId, agentId)` 的既有 `agent_session_bindings` 指向的节点不是当前用户进程节点，后端会重新创建远端 session 并覆盖绑定；旧 `sessions.opencode_*` 字段只作为 `opencode` 兼容回填来源。无用户主体的兼容调用（例如 static API token、本地放行或旧系统集成）继续走固定 `execution_nodes` 路由，不要求用户进程。
@@ -2068,7 +2068,7 @@ Model/Provider 目录兼容说明：
 - `test-agent.model-catalog.source=opencode` 时，`/api/models` 和 `/api/providers` 保持旧行为，直接代理 opencode。
 - `source=external` 时，`/api/models` 由后端请求外部 OpenAI-compatible `/models` 获取；请求失败时返回配置内置外网模型，Provider 默认为 `external-openai`。历史 `source=bailian` 会按 `external` 兼容处理。
 - `source=internal` 时，`/api/models` 从 `ai_model_configs` 表读取启用模型，Provider 为 `icbc-openai`；启动时会按 openclaw 企业 patch 的模型清单初始化表，默认模型为 `DeepSeek-V4-Flash-W8A8`。
-- Model 响应对象包含兼容字段 `id`、`modelId`、`modelID`、`providerId`、`providerID`、`name`，托管来源还会返回 `contextLimit`、`outputLimit` 和 `defaultModel`。前端优先选中 `defaultModel=true` 的模型。
+- Model 响应对象包含兼容字段 `id`、`modelId`、`modelID`、`providerId`、`providerID`、`name`，托管来源还会返回 `contextLimit`、`outputLimit` 和 `defaultModel`。前端优先选中 `defaultModel=true` 的模型；浏览器已保存的模型偏好若不在当前目录内或与 provider 不匹配，会自动清理并切回当前默认模型。
 
 Session 运行态接口：
 

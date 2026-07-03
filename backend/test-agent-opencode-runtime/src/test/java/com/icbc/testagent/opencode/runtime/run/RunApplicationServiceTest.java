@@ -43,6 +43,7 @@ import com.icbc.testagent.event.RunEventAppender;
 import com.icbc.testagent.event.RunEventLiveBus;
 import com.icbc.testagent.event.RunEventLiveEvent;
 import com.icbc.testagent.event.RunEventSsePayload;
+import com.icbc.testagent.opencode.runtime.model.ModelCatalogApplicationService;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.opencode.client.OpencodeCancelCommand;
@@ -395,6 +396,116 @@ class RunApplicationServiceTest {
         assertThat(command.parts().get(1).url()).startsWith("data:text/plain");
         assertThat(command.parts().get(2).type()).isEqualTo("agent");
         assertThat(command.parts().get(2).name()).isEqualTo("Build");
+    }
+
+    @Test
+    void managedCatalogFallsBackStaleModelToDefaultModel() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        ModelCatalogApplicationService modelCatalog = managedModelCatalog(List.of(
+                modelPayload("icbc-openai", "DeepSeek-V4-Flash-W8A8", true),
+                modelPayload("icbc-openai", "Qwen3.6-27B", false)));
+        RunApplicationService service = serviceWithModelCatalog(facade, runs, events, modelCatalog);
+
+        service.startRun(new StartRunInput(
+                        new SessionId("ses_1234567890abcdef"),
+                        "run with stale model",
+                        List.of(),
+                        null,
+                        "build",
+                        "opencode-zen/north-mini-code",
+                        null,
+                        null),
+                "trace_1234567890abcdef");
+
+        assertThat(facade.startRunCommands).hasSize(1);
+        OpencodeStartRunCommand command = facade.startRunCommands.getFirst();
+        assertThat(command.modelProviderId()).isEqualTo("icbc-openai");
+        assertThat(command.modelId()).isEqualTo("DeepSeek-V4-Flash-W8A8");
+    }
+
+    @Test
+    void managedCatalogPreservesAvailableModelSelection() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = serviceWithModelCatalog(
+                facade,
+                runs,
+                events,
+                managedModelCatalog(List.of(
+                        modelPayload("icbc-openai", "DeepSeek-V4-Flash-W8A8", true),
+                        modelPayload("icbc-openai", "Qwen3.6-27B", false))));
+
+        startRunWithModel(service, "icbc-openai/Qwen3.6-27B");
+
+        assertThat(facade.startRunCommands).hasSize(1);
+        OpencodeStartRunCommand command = facade.startRunCommands.getFirst();
+        assertThat(command.modelProviderId()).isEqualTo("icbc-openai");
+        assertThat(command.modelId()).isEqualTo("Qwen3.6-27B");
+    }
+
+    @Test
+    void managedCatalogFallsBackInvalidModelFormatToDefaultModel() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = serviceWithModelCatalog(
+                facade,
+                runs,
+                events,
+                managedModelCatalog(List.of(modelPayload("icbc-openai", "DeepSeek-V4-Flash-W8A8", true))));
+
+        startRunWithModel(service, "north-mini-code");
+
+        assertThat(facade.startRunCommands).hasSize(1);
+        OpencodeStartRunCommand command = facade.startRunCommands.getFirst();
+        assertThat(command.modelProviderId()).isEqualTo("icbc-openai");
+        assertThat(command.modelId()).isEqualTo("DeepSeek-V4-Flash-W8A8");
+    }
+
+    @Test
+    void managedCatalogFallsBackMissingModelToDefaultModel() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = serviceWithModelCatalog(
+                facade,
+                runs,
+                events,
+                managedModelCatalog(List.of(modelPayload("icbc-openai", "DeepSeek-V4-Flash-W8A8", true))));
+
+        startRunWithModel(service, null);
+
+        assertThat(facade.startRunCommands).hasSize(1);
+        OpencodeStartRunCommand command = facade.startRunCommands.getFirst();
+        assertThat(command.modelProviderId()).isEqualTo("icbc-openai");
+        assertThat(command.modelId()).isEqualTo("DeepSeek-V4-Flash-W8A8");
+    }
+
+    @Test
+    void managedCatalogRejectsRunWhenNoModelIsAvailable() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        RunApplicationService service = serviceWithModelCatalog(facade, runs, events, managedModelCatalog(List.of()));
+
+        assertThatThrownBy(() -> service.startRun(new StartRunInput(
+                        new SessionId("ses_1234567890abcdef"),
+                        "run without models",
+                        List.of(),
+                        null,
+                        "build",
+                        "opencode-zen/north-mini-code",
+                        null,
+                        null),
+                "trace_1234567890abcdef"))
+                .isInstanceOf(PlatformException.class)
+                .extracting(error -> ((PlatformException) error).errorCode())
+                .isEqualTo(ErrorCode.VALIDATION_ERROR);
+        assertThat(facade.startRunCommands).isEmpty();
+        assertThat(runs.saved).isEmpty();
     }
 
     @Test
@@ -1485,5 +1596,62 @@ class RunApplicationServiceTest {
         public Mono<OpencodeSessionMessagesResult> sessionMessages(OpencodeSessionMessagesCommand command) {
             return Mono.just(sessionMessagesResult);
         }
+    }
+
+    private static RunApplicationService serviceWithModelCatalog(
+            FakeOpencodeFacade facade,
+            FakeRunRepository runs,
+            FakeRunEventRepository events,
+            ModelCatalogApplicationService modelCatalog) {
+        return new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                modelCatalog,
+                null,
+                com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver.legacyOnly(),
+                null,
+                null,
+                null);
+    }
+
+    private static ModelCatalogApplicationService managedModelCatalog(List<Map<String, Object>> models) {
+        ModelCatalogApplicationService service = org.mockito.Mockito.mock(ModelCatalogApplicationService.class);
+        org.mockito.Mockito.when(service.managedSourceEnabled()).thenReturn(true);
+        org.mockito.Mockito.when(service.listModels()).thenReturn(models);
+        return service;
+    }
+
+    private static void startRunWithModel(RunApplicationService service, String model) {
+        service.startRun(new StartRunInput(
+                        new SessionId("ses_1234567890abcdef"),
+                        "run with selected model",
+                        List.of(),
+                        null,
+                        "build",
+                        model,
+                        null,
+                        null),
+                "trace_1234567890abcdef");
+    }
+
+    private static Map<String, Object> modelPayload(String providerId, String modelId, boolean defaultModel) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("id", modelId);
+        payload.put("modelId", modelId);
+        payload.put("modelID", modelId);
+        payload.put("providerId", providerId);
+        payload.put("providerID", providerId);
+        payload.put("name", modelId);
+        payload.put("defaultModel", defaultModel);
+        return payload;
     }
 }

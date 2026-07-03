@@ -308,7 +308,7 @@ public class RunApplicationService {
         String prompt = input.effectivePrompt();
         Session session = findSession(sessionId);
         Workspace workspace = findWorkspace(session.workspaceId());
-        ModelSelection modelSelection = parseModel(input.model());
+        ModelSelection modelSelection = resolveModelSelection(input.model());
         String opencodeAgent = resolveOpencodeAgent(input);
         Run pending = new Run(
                 new RunId(RuntimeIdGenerator.runId()),
@@ -664,6 +664,58 @@ public class RunApplicationService {
             return new ModelSelection(null, null);
         }
         return new ModelSelection(model.substring(0, slash), model.substring(slash + 1));
+    }
+
+    /**
+     * 托管模型目录启用时，运行请求中的 model 只作为期望值；目录外或格式非法的历史选择统一回退到当前默认模型。
+     */
+    private ModelSelection resolveModelSelection(String model) {
+        ModelSelection requested = parseModel(model);
+        if (modelCatalogService == null || !modelCatalogService.managedSourceEnabled()) {
+            return requested;
+        }
+        List<ModelCatalogEntry> models = modelCatalogService.listModels().stream()
+                .map(this::toModelCatalogEntry)
+                .filter(Objects::nonNull)
+                .toList();
+        if (models.isEmpty()) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "当前没有可用模型，请检查模型目录配置");
+        }
+        if (requested.providerId() != null && requested.modelId() != null) {
+            Optional<ModelCatalogEntry> matched = models.stream()
+                    .filter(item -> item.providerId().equals(requested.providerId()))
+                    .filter(item -> item.modelId().equals(requested.modelId()))
+                    .findFirst();
+            if (matched.isPresent()) {
+                return requested;
+            }
+        }
+        ModelCatalogEntry fallback = models.stream()
+                .filter(ModelCatalogEntry::defaultModel)
+                .findFirst()
+                .orElse(models.getFirst());
+        return new ModelSelection(fallback.providerId(), fallback.modelId());
+    }
+
+    private ModelCatalogEntry toModelCatalogEntry(Map<String, Object> payload) {
+        if (payload == null) {
+            return null;
+        }
+        String providerId = modelCatalogText(payload.get("providerId"), payload.get("providerID"));
+        String modelId = modelCatalogText(payload.get("id"), payload.get("modelId"), payload.get("modelID"));
+        if (providerId == null || modelId == null) {
+            return null;
+        }
+        return new ModelCatalogEntry(providerId, modelId, Boolean.TRUE.equals(payload.get("defaultModel")));
+    }
+
+    private String modelCatalogText(Object... values) {
+        for (Object value : values) {
+            if (value instanceof String text && !text.isBlank()) {
+                return text;
+            }
+        }
+        return null;
     }
 
     /**
@@ -1149,5 +1201,8 @@ public class RunApplicationService {
     }
 
     private record ModelSelection(String providerId, String modelId) {
+    }
+
+    private record ModelCatalogEntry(String providerId, String modelId, boolean defaultModel) {
     }
 }

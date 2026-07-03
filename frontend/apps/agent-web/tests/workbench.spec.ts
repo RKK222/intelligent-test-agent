@@ -455,7 +455,20 @@ test("agent picker updates the run agent", async ({ page }) => {
 
 test("model picker keeps the selected model after page reload", async ({ page }) => {
   const runRequests: Array<Record<string, unknown>> = [];
-  await mockBackendApi(page, { runRequests });
+  await mockBackendApi(page, {
+    runRequests,
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    }
+  });
 
   await gotoWorkbench(page);
 
@@ -474,6 +487,52 @@ test("model picker keeps the selected model after page reload", async ({ page })
   expect(runRequests[0]).toMatchObject({
     prompt: "use persisted model",
     model: "opencode-zen/north-mini-code"
+  });
+});
+
+test("workbench clears stale persisted model and sends catalog default", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  await mockBackendApi(page, {
+    runRequests,
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    models: [
+      {
+        id: "DeepSeek-V4-Flash-W8A8",
+        providerId: "icbc-openai",
+        name: "DeepSeek-V4-Flash-W8A8",
+        defaultModel: true
+      },
+      { id: "Qwen3.6-27B", providerId: "icbc-openai", name: "Qwen3.6-27B" }
+    ],
+    providers: [{ id: "icbc-openai", providerId: "icbc-openai", name: "ICBC OpenAI", status: "ready" }]
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem("ta_selected_provider", "opencode-zen");
+    localStorage.setItem("ta_selected_model", "opencode-zen/north-mini-code");
+  });
+
+  await gotoWorkbench(page);
+
+  await expect(page.getByRole("button", { name: "切换模型" })).toContainText("DeepSeek-V4-Flash-W8A8");
+  await expect.poll(() => page.evaluate(() => localStorage.getItem("ta_selected_model"))).toBe("icbc-openai/DeepSeek-V4-Flash-W8A8");
+
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("use catalog default model");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runRequests.length).toBe(1);
+  expect(runRequests[0]).toMatchObject({
+    prompt: "use catalog default model",
+    model: "icbc-openai/DeepSeek-V4-Flash-W8A8"
   });
 });
 
@@ -1170,6 +1229,8 @@ async function mockBackendApi(
     configurationApplicationRequests?: string[];
     agentRequests?: string[];
     agents?: Array<Record<string, unknown>>;
+    models?: Array<Record<string, unknown>>;
+    providers?: Array<Record<string, unknown>>;
     applications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     managedApplications?: Array<{ appId: string; appName: string; enabled: boolean }>;
     recentWorkspaces?: Record<string, (ReturnType<typeof workspace> & Record<string, unknown>) | null>;
@@ -1623,7 +1684,7 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/model") {
-      await route.fulfill(json([
+      await route.fulfill(json(capture.models ?? [
         { id: "sonnet", providerId: "anthropic", name: "Sonnet" },
         { id: "opus", providerId: "anthropic", name: "Opus" },
         { id: "glm-5.2", providerId: "volcengine", name: "GLM-5.2" },
@@ -1632,7 +1693,7 @@ async function mockBackendApi(
       return;
     }
     if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/provider") {
-      await route.fulfill(json([
+      await route.fulfill(json(capture.providers ?? [
         { id: "anthropic", name: "Anthropic", status: "ready" },
         { id: "volcengine", name: "Volcengine Ark", status: "ready" },
         { id: "opencode-zen", name: "OpenCode Zen", status: "ready" }
