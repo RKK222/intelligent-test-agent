@@ -2,6 +2,22 @@
 
 ## Entries
 
+### 2026-07-03 - 优化对话时间线布局与对齐样式
+
+- Why: 
+  - 对话时间线底部的满意/不满意反馈按钮与助手回答内容会发生重叠；
+  - 用户对话内容较短时，气泡也会发生不必要的换行折叠；
+  - 最终助手消息的气泡框（oc-text-part）宽度没有和已完成的工具及探索步骤行对齐；
+  - 整体行间距不够紧凑，纵向占用空间较多。
+- What: 
+  - 修复时间线重叠：为 `.oc-timeline-root` 显式设置 `flex-shrink: 0`，防止其在被 flex 容器（`.figma-chat-scroll`）压缩高度后溢出，导致兄弟节点 feedback 按钮叠在消息上。
+  - 修复用户短消息换行：将 `max-width` 限制由 `.oc-user-message__bubble` 转移至其容器 `.oc-user-message__content`，并使气泡本身 `width: fit-content` 自适应内容宽度。
+  - 宽度对齐：设置 `.oc-text-part` 宽度为 `100%`，使其右边界与上方工具的“已完成”状态对齐。
+  - 紧凑排版：调低 `--oc-line-height` 至 1.4，缩减 `.oc-timeline` 纵向 padding、用户气泡 margins，压缩 disclosures/tools 的 triggers/body margin & padding，降低 markdown 段落段间距。
+- How: 
+  - 修改 `timeline.css`、`rows.css`、`parts.css`、`tools.css`、`markdown.css` 和 `tokens.css` 等样式文件，无后端与逻辑修改。
+- Result: 前端 `corepack pnpm test` 全量通过（36个测试文件，265个测试用例），`typecheck` 成功，改动安全且美观。
+
 ### 2026-07-03 - 优化对话时间线样式及字体大小
 
 - Why: 在 opencode 对话时间线重构后，由于全局字号设置偏大（16px），在侧边栏等窄版聊天面板中显得非常笨重、不够美观。另外，助手的正式文本回答缺乏气泡框外壳导致视觉层级不突出。此外，发现无头像的 continuation 中继行与有头像的行存在 12px 的对齐偏差、Grid 容器因为空列引起了高度塌陷造成反馈按钮向上重叠遮挡、思考状态展示区因为重复 border-left 产生了双线，且用户气泡缺少对应的头像，左右 padding 偏宽内容未打到边界，字号也需要下调以增强紧致感。

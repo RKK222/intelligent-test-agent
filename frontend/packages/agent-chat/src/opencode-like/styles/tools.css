@@ -12,7 +12,7 @@
   display: inline-flex;
   width: auto;
   min-height: unset;
-  padding: 3px 0;
+  padding: 2px 0;
   gap: 6px;
   align-items: center;
   color: var(--oc-muted);
@@ -50,7 +50,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 5px 0;
+  padding: 3px 0;
   color: var(--oc-fg);
   background: transparent;
   border: 0;
@@ -103,8 +103,8 @@
 .oc-context-group__body {
   border-top: 0;
   border-left: 1px solid var(--oc-border);
-  margin: 4px 0 0 4px;
-  padding: 4px 0 6px 12px;
+  margin: 2px 0 0 4px;
+  padding: 2px 0 4px 12px;
 }
 
 .oc-tool-detail {

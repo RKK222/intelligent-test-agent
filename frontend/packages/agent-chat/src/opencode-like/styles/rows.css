@@ -1,7 +1,7 @@
 .oc-user-message {
   display: flex;
   justify-content: flex-end;
-  margin: 6px 0 18px;
+  margin: 4px 0 6px;
   gap: 12px;
   align-items: flex-start;
 }
@@ -11,17 +11,19 @@
   flex-direction: column;
   align-items: flex-end;
   min-width: 0;
+  max-width: min(620px, 82%);
 }
 
 .oc-user-message__bubble {
-  max-width: min(620px, 82%);
+  width: fit-content;
+  max-width: 100%;
   border: 1px solid var(--oc-border);
   background: var(--oc-surface);
   color: var(--oc-fg);
   font-size: var(--oc-text-md);
   border-radius: var(--oc-radius-md);
   border-top-right-radius: 2px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   line-height: var(--oc-line-height);
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
 }
