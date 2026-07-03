@@ -1,6 +1,7 @@
 .oc-text-part {
   line-height: var(--oc-line-height);
-  color: var(--oc-fg);
+  color: var(--oc-muted);
+  font-size: var(--oc-text-md);
 }
 
 .oc-text-part__body {
@@ -14,13 +15,13 @@
 
 .oc-disclosure.is-running .oc-tool__title,
 .oc-disclosure.is-running .oc-tool__chevron {
-  color: #2b53db;
+  color: var(--oc-accent);
 }
 
 .oc-reasoning-part__body {
   border-left: 1px solid var(--oc-border);
-  padding-left: 12px;
-  margin-top: 6px;
+  padding: 10px 0 8px 18px;
+  margin: 6px 0 0 5px;
 }
 
 .oc-file-part {

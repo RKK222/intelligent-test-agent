@@ -7,9 +7,10 @@
 }
 
 .oc-timeline {
-  max-width: 860px;
-  margin: 0 auto;
-  padding: 24px 28px 40px;
+  width: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 22px 24px 40px;
 }
 
 .oc-row {
@@ -17,11 +18,11 @@
 }
 
 .oc-row + .oc-row {
-  margin-top: 10px;
+  margin-top: 8px;
 }
 
 .oc-turn-gap {
-  height: 28px;
+  height: 22px;
 }
 
 .oc-empty-state {
@@ -34,4 +35,10 @@
 
 .oc-empty-state__title {
   font-size: var(--oc-text-sm);
+}
+
+@media (max-width: 520px) {
+  .oc-timeline {
+    padding: 18px 16px 32px;
+  }
 }

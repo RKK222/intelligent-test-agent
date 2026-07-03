@@ -7,13 +7,12 @@
   overflow: visible;
 }
 
-/* Disclosure (e.g. 思考状态) and Context Group (e.g. 已探索) trigger: inline elements next to each other */
 .oc-disclosure__trigger,
 .oc-context-group__trigger {
   display: inline-flex;
   width: auto;
   min-height: unset;
-  padding: 4px 0;
+  padding: 3px 0;
   gap: 6px;
   align-items: center;
   color: var(--oc-muted);
@@ -27,30 +26,31 @@
 .oc-context-group__trigger .oc-tool__title {
   color: var(--oc-fg);
   font-weight: 600;
-  font-size: var(--oc-text-sm);
+  font-size: var(--oc-text-md);
+  line-height: 24px;
 }
 
 .oc-disclosure__trigger .oc-tool__subtitle,
 .oc-context-group__trigger .oc-tool__subtitle {
   margin-left: 0;
   color: var(--oc-subtle);
-  font-size: var(--oc-text-xs);
+  font-size: var(--oc-text-sm);
+  line-height: 22px;
 }
 
 .oc-disclosure__trigger .oc-tool__chevron,
 .oc-context-group__trigger .oc-tool__chevron {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   color: var(--oc-subtle);
 }
 
-/* Generic Tool trigger (e.g. bash): title & command left-aligned, status and chevron right-aligned */
 .oc-tool__trigger {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 0;
+  padding: 5px 0;
   color: var(--oc-fg);
   background: transparent;
   border: 0;
@@ -62,30 +62,34 @@
 .oc-tool__trigger .oc-tool__title {
   color: var(--oc-fg);
   font-weight: 600;
-  font-size: var(--oc-text-sm);
+  font-size: var(--oc-text-md);
+  line-height: 24px;
   text-transform: lowercase;
 }
 
 .oc-tool__trigger .oc-tool__subtitle {
   margin-left: 0;
-  color: var(--oc-subtle);
-  font-size: var(--oc-text-xs);
+  color: var(--oc-muted);
+  font-size: var(--oc-text-md);
+  line-height: 24px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 70%;
+  max-width: min(68%, 760px);
 }
 
 .oc-tool__trigger .oc-tool__chevron {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   color: var(--oc-subtle);
   margin-left: 4px;
 }
 
 .oc-tool__status {
   margin-left: auto;
-  font-size: var(--oc-text-xs);
+  flex-shrink: 0;
+  font-size: var(--oc-text-md);
+  line-height: 24px;
   color: var(--oc-subtle);
 }
 
@@ -98,14 +102,14 @@
 .oc-disclosure__body,
 .oc-context-group__body {
   border-top: 0;
-  padding: 6px 0 8px 12px;
   border-left: 1px solid var(--oc-border);
-  margin-top: 4px;
+  margin: 6px 0 0 5px;
+  padding: 8px 0 8px 18px;
 }
 
 .oc-tool-detail {
   display: grid;
-  gap: 8px;
+  gap: 10px;
 }
 
 .oc-context-group__item {
@@ -131,4 +135,14 @@
   white-space: nowrap;
   font-family: var(--oc-font-mono);
   font-size: var(--oc-text-xs);
+}
+
+@media (max-width: 520px) {
+  .oc-tool__trigger .oc-tool__subtitle {
+    max-width: 52%;
+  }
+
+  .oc-tool__status {
+    font-size: var(--oc-text-sm);
+  }
 }

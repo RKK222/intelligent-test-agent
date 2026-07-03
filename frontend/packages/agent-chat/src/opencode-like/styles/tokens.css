@@ -1,13 +1,13 @@
 .oc-timeline-root {
-  --oc-bg: var(--ta-chat-bg, #f7f8fa);
+  --oc-bg: var(--ta-chat-bg, #ffffff);
   --oc-surface: var(--ta-chat-surface, #ffffff);
   --oc-surface-muted: var(--ta-chat-message-bg, #f2f4f7);
-  --oc-fg: var(--ta-chat-text, #1f2328);
-  --oc-muted: var(--ta-chat-muted, #667085);
-  --oc-subtle: var(--ta-chat-subtle, #8a94a6);
-  --oc-border: var(--ta-chat-border, rgba(31, 35, 40, 0.1));
+  --oc-fg: var(--ta-chat-text, #25282d);
+  --oc-muted: var(--ta-chat-muted, #6f747c);
+  --oc-subtle: var(--ta-chat-subtle, #9aa3af);
+  --oc-border: var(--ta-chat-border, #e5e7eb);
   --oc-border-strong: var(--ta-chat-border-strong, rgba(31, 35, 40, 0.18));
-  --oc-accent: var(--ta-cyan, #1d7f96);
+  --oc-accent: var(--ta-primary, #315bdc);
   --oc-danger: var(--ta-danger, #b42318);
   --oc-success: var(--ta-chat-status-done, #2f7d55);
   --oc-warning: var(--ta-warn, #9a6700);
@@ -29,5 +29,5 @@
   --oc-text-sm: 14px;
   --oc-text-md: 16px;
   --oc-text-lg: 18px;
-  --oc-line-height: 1.65;
+  --oc-line-height: 1.72;
 }

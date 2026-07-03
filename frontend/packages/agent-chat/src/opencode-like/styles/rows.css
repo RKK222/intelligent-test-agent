@@ -1,7 +1,7 @@
 .oc-user-message {
   display: flex;
   justify-content: flex-end;
-  margin: 10px 0 14px;
+  margin: 8px 0 14px;
 }
 
 .oc-user-message__bubble {
@@ -9,7 +9,7 @@
   border: 1px solid var(--oc-border);
   background: var(--oc-surface-muted);
   color: var(--oc-fg);
-  border-radius: var(--oc-radius-lg);
+  border-radius: var(--oc-radius-md);
   padding: 10px 12px;
   line-height: var(--oc-line-height);
 }
@@ -21,11 +21,11 @@
 
 .oc-assistant-part {
   max-width: 100%;
-  margin: 8px 0;
+  margin: 6px 0;
 }
 
 .oc-assistant-part.is-continuation {
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .oc-thinking-row,
@@ -36,7 +36,7 @@
   gap: var(--oc-space-2);
   color: var(--oc-muted);
   font-size: var(--oc-text-sm);
-  padding: 6px 0;
+  padding: 4px 0;
 }
 
 .oc-error-row {
