@@ -53,6 +53,19 @@
 - What: 发布前新增远程变化预览与 expected HEAD 校验，应用 pull 后立即同步版本和本机副本 commit；冲突路径关闭 `core.quotepath`，支持全部保留个人版本、全部采用远程版本和取消 merge，目标侧缺失按 Git 删除语义处理。前端复用已加载 diff 更新数量角标、拦截旧工作区请求回写，并明确 AU/UD 删除侧。
 - How: 复用 `GitWorkspaceService`、个人工作区归属校验和现有发布编排，新增 preview/resolve-all HTTP 契约；真实临时 Git 仓库覆盖中文修改/删除冲突，服务测试覆盖预览汇总、HEAD 变化前置拦截和冲突后的元数据同步，前端测试覆盖预览确认与批量处理。处理了会话开始前遗留的 `git pull --rebase`，保留两侧 session log 后完成 7 个本地提交重放。
 - Result: common 24 个、workspace-management 36 个、API Controller 和 Git 面板/合并编辑器定向测试通过，agent-web typecheck/build 通过；使用 `.env.test` / `test` profile / JDK 25 重启并检查健康状态。未修改环境文件、数据库、事件、generated SDK 或 888 当前个人 worktree 冲突内容。
+### 2026-07-03 - 修复对话流跟滚与用户向上滚动防锁死问题
+
+- Why: 当智能体在思考或工具输出时，高频流式数据更新会触发自动跟滚；原逻辑使用平滑动画且缺乏全局滚动原打断，导致用户在向上拖滚动条或使用滚轮/键盘等方式阅读历史时会被强制下拉到底部。
+- What: 
+  - 在 `AssistantThread.vue` 中引入 `isProgrammaticScroll` 原型标记来隔离“程序滚动”与“用户手动滚动”，并配以 `setTimeout` 进行多环境（如无 scroll 事件派发的 jsdom 等）清除兜底；
+  - 精简吸底逻辑，完全移除了 `firstPaint` 这一容易引起初始 rerender 时误判吸底状态的状态变量；
+  - 只要用户在视口中向上滑动（即 `scrollTop` 偏离底部大于 36px 阈值），一律在 `handleViewportScroll` 中标记 `userInterrupted = true` 并锁定自动跟滚；当用户重新返回底部或点击“查看新内容”时才解锁；
+  - 增强 `chat-utils.ts` 中的 `viewportIsAtBottom` 临界值容错阈值至 36px。
+- How: 重构 `AssistantThread.vue` 滚动处理逻辑与 `chat-utils.ts`，并在 `opencode-timeline.test.ts` 中通过劫持 `Element.prototype` 完成复杂 patch 状态下的自动锁死回归测试。
+- Result: 前端 Vitest `npx vitest run packages/agent-chat/tests/opencode-timeline.test.ts` 3 个单元测试全量成功通过；未变更后端代码。
+
+
+
 ### 2026-07-03 - Run Session Tree 后端事件路由与映射收口
 
 - Why: Run scope 基建需要真正落到 root/child 事件路由、历史恢复和事件对照验收，避免 child 终态误派生 Run 终态、未知全局事件污染 Run 时间线，以及 opencode Web App 事件缺映射。

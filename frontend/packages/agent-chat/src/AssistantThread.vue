@@ -59,6 +59,8 @@ const emit = defineEmits<{
 const viewportRef = ref<HTMLElement | null>(null);
 const isAtBottom = ref(true);
 const hasNewContent = ref(false);
+const userInterrupted = ref(false);
+let isProgrammaticScroll = false;
 
 const timelineState = computed(() =>
   createOpencodeLikeState({
@@ -83,54 +85,71 @@ const streamSignature = computed(() =>
     .join("::")
 );
 
-let firstPaint = true;
+function scrollToBottomProgrammatically(behavior: ScrollBehavior) {
+  const viewport = viewportRef.value;
+  if (!viewport) return;
+  isProgrammaticScroll = true;
+  scrollViewportToBottom(viewport, behavior);
+  setTimeout(() => {
+    isProgrammaticScroll = false;
+  }, 50);
+}
+
 watch(
   streamSignature,
   (sig, prev) => {
-    const viewport = viewportRef.value;
-    if (!viewport) return;
     if (sig === prev) return;
-    if (firstPaint || isAtBottom.value) {
-      scrollViewportToBottom(viewport, firstPaint ? "auto" : "smooth");
+
+    if (!userInterrupted.value && isAtBottom.value) {
+      scrollToBottomProgrammatically("auto");
       hasNewContent.value = false;
     } else {
       hasNewContent.value = true;
     }
-    firstPaint = false;
   },
   { flush: "post" }
 );
 
 // 首次挂载后滚到底部
 nextTick(() => {
-  if (viewportRef.value) {
-    scrollViewportToBottom(viewportRef.value, "auto");
-  }
+  scrollToBottomProgrammatically("auto");
 });
 
 function handleViewportScroll(event: Event) {
   const viewport = event.currentTarget as HTMLElement;
-  isAtBottom.value = viewportIsAtBottom(viewport);
-  if (isAtBottom.value) {
+  if (isProgrammaticScroll) {
+    isProgrammaticScroll = false;
+    return;
+  }
+
+  const atBottom = viewportIsAtBottom(viewport, 36);
+  isAtBottom.value = atBottom;
+  if (atBottom) {
     hasNewContent.value = false;
+    userInterrupted.value = false;
+  } else {
+    // 只要用户滚动离开底部，就激活锁定跟滚，防范任何流式追加导致的强制下拉
+    userInterrupted.value = true;
   }
 }
 
 function jumpToBottom() {
-  if (viewportRef.value) {
-    scrollViewportToBottom(viewportRef.value, "smooth");
-  }
+  scrollToBottomProgrammatically("smooth");
+  userInterrupted.value = false;
   hasNewContent.value = false;
   isAtBottom.value = true;
 }
 
-onBeforeUnmount(() => {
-  firstPaint = true;
-});
+
 </script>
 
 <template>
-  <div class="ta-assistant-thread">
+  <div
+    class="ta-assistant-thread"
+    :data-has-new-content="hasNewContent"
+    :data-user-interrupted="userInterrupted"
+    :data-is-at-bottom="isAtBottom"
+  >
     <div
       ref="viewportRef"
       data-testid="agent-thread-viewport"

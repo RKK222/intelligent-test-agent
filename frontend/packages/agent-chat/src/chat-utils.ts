@@ -32,8 +32,8 @@ export function partSignature(part: MessagePart) {
   return `${part.partId}:${part.type}`;
 }
 
-export function viewportIsAtBottom(viewport: HTMLElement) {
-  return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= 24;
+export function viewportIsAtBottom(viewport: HTMLElement, threshold = 36) {
+  return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= threshold;
 }
 
 export function scrollViewportToBottom(viewport: HTMLElement, behavior: ScrollBehavior) {

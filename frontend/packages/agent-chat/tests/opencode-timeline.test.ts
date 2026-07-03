@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fireEvent, render } from "@testing-library/vue";
+import { nextTick } from "vue";
 import type { AgentMessage, MessagePart } from "@test-agent/shared-types";
 import OpencodeTimeline from "../src/opencode-like/components/OpencodeTimeline.vue";
 import { createOpencodeLikeState } from "../src/opencode-like/state/adapter";
@@ -57,6 +58,69 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelector(".oc-assistant-part")).toBeTruthy();
     expect(container.querySelector(".bg-\\[var\\(--ta-chat-message-bg\\)\\]")).toBeNull();
     expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();
+  });
+
+  it("allows user to interrupt auto-scrolling by scrolling up", async () => {
+    const initialMessages: AgentMessage[] = [
+      userMessage("msg_user_1", "分析 checkout 失败"),
+      assistantMessage("msg_assistant_1", [textPart("part_answer", "第一段描述")])
+    ];
+
+    const { container, rerender, queryByText } = render(AssistantThread, {
+      props: {
+        messages: initialMessages,
+        commands: [],
+        resources: [],
+        running: true
+      }
+    });
+    await waitMarkdown();
+
+    const viewport = container.querySelector('[data-testid="agent-thread-viewport"]') as HTMLElement;
+    expect(viewport).toBeTruthy();
+
+    // 劫持原型链，防止 jsdom DOM patch 阶段重置 layout 属性导致误判 atBottom
+    const originalScrollHeight = Object.getOwnPropertyDescriptor(Element.prototype, "scrollHeight");
+    const originalClientHeight = Object.getOwnPropertyDescriptor(Element.prototype, "clientHeight");
+
+    Object.defineProperty(Element.prototype, "scrollHeight", {
+      get() { return 500; },
+      configurable: true
+    });
+    Object.defineProperty(Element.prototype, "clientHeight", {
+      get() { return 300; },
+      configurable: true
+    });
+    viewport.scrollTop = 100; // 500 - 100 - 300 = 100 > 36 (非贴底)
+
+    await fireEvent.scroll(viewport);
+
+    // 模拟流式增量新消息到来
+    const updatedMessages: AgentMessage[] = [
+      userMessage("msg_user_1", "分析 checkout 失败"),
+      assistantMessage("msg_assistant_1", [
+        textPart("part_answer", "第一段描述"),
+        textPart("part_answer2", "新增的流式回答")
+      ])
+    ];
+    await rerender({ messages: updatedMessages });
+    await waitMarkdown();
+
+    try {
+      expect(queryByText("查看新内容")).toBeTruthy();
+    } finally {
+      // 还原原型链描述符
+      if (originalScrollHeight) {
+        Object.defineProperty(Element.prototype, "scrollHeight", originalScrollHeight);
+      } else {
+        delete (Element.prototype as any).scrollHeight;
+      }
+      if (originalClientHeight) {
+        Object.defineProperty(Element.prototype, "clientHeight", originalClientHeight);
+      } else {
+        delete (Element.prototype as any).clientHeight;
+      }
+    }
   });
 });
 
