@@ -3,10 +3,18 @@ export type MarkdownPreviewProps = {
   // 待渲染的 Markdown 源码
   content?: string;
 };
+
+// Module-level cached references to avoid per-instance initialization & dynamic imports
+let mdInstance: any = null;
+let purifyInstance: any = null;
+let mermaidInstance: any = null;
+
+let loadPromise: Promise<void> | null = null;
+let mermaidLoadPromise: Promise<void> | null = null;
 </script>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import { onBeforeUnmount, ref, watch } from "vue";
 // github-markdown-css 提供 .markdown-body 基础排版样式，侧载一次即可
 import "github-markdown-css/github-markdown.css";
 
@@ -22,10 +30,6 @@ const emit = defineEmits<{
 const html = ref("");
 // 预览滚动容器（.md-preview 本身）
 const scrollEl = ref<HTMLElement | null>(null);
-// markdown-it 实例与 DOMPurify 句柄，懒加载后缓存
-const mdRef = shallowRef<{ render: (src: string) => string } | null>(null);
-const purifyRef = shallowRef<{ sanitize: (dirty: string) => string } | null>(null);
-const mermaidRef = shallowRef<any>(null);
 // 首次加载 markdown-it/dompurify 之前给一个轻量占位
 const loading = ref(true);
 // 是否已发出过 ready（仅首次渲染完成时发一次）
@@ -36,71 +40,81 @@ let syncRaf = 0;
 
 // 懒加载 markdown-it + highlight.js + dompurify，仅在首次需要渲染时加载，避免进入首屏 bundle
 async function ensureLibs(needMermaid = false) {
-  if (mdRef.value && purifyRef.value && (!needMermaid || mermaidRef.value)) {
+  if (needMermaid && !mermaidInstance) {
+    if (!mermaidLoadPromise) {
+      mermaidLoadPromise = (async () => {
+        const mermaidMod = await import("mermaid");
+        mermaidInstance = mermaidMod.default;
+        mermaidInstance.initialize({
+          startOnLoad: false,
+          theme: "neutral",
+          securityLevel: "loose"
+        });
+      })();
+    }
+    await mermaidLoadPromise;
+  }
+
+  if (mdInstance && purifyInstance) {
     return;
   }
-  if (needMermaid && !mermaidRef.value) {
-    const mermaidMod = await import("mermaid");
-    mermaidRef.value = mermaidMod.default;
-    mermaidRef.value.initialize({
-      startOnLoad: false,
-      theme: "neutral",
-      securityLevel: "loose"
-    });
+
+  if (!loadPromise) {
+    loadPromise = (async () => {
+      const [MarkdownIt, hljsMod, DOMPurifyMod] = await Promise.all([
+        import("markdown-it"),
+        import("highlight.js/lib/common"),
+        import("dompurify")
+      ]);
+      const md = new MarkdownIt.default({
+        html: false, // 不直接内联原始 HTML，交给 DOMPurify 兜底
+        linkify: true,
+        typographer: false
+      });
+      // 给顶级块打上源码行号（1 起），用于滚动联动与左侧序号对齐；
+      // 只取 level===0，避免列表项/引用内段落数字堆叠
+      md.core.ruler.push("source_line", (state) => {
+        for (const tok of state.tokens) {
+          if (tok.level === 0 && tok.map) {
+            tok.attrSet("data-source-line", String(tok.map[0] + 1));
+          }
+        }
+      });
+      // fence 默认不会把 token attrs 渲染到 <pre>，覆盖渲染以带上 data-source-line 与 hljs 高亮
+      md.renderer.rules.fence = (tokens, idx, _options, _env, slf) => {
+        const token = tokens[idx];
+        const lang = token.info ? token.info.trim() : "";
+        const attrs = slf.renderAttrs(token);
+        if (lang === "mermaid") {
+          const id = `ta-mermaid-${Math.random().toString(36).substring(2, 9)}`;
+          const escapedCode = md.utils.escapeHtml(token.content);
+          return `<div${attrs} class="mermaid-block is-script" id="${id}" data-content="${encodeURIComponent(token.content)}">
+            <div class="ta-mermaid-header">
+              <button type="button" class="ta-mermaid-mode-btn is-active" data-mermaid-mode="script" data-block-id="${id}">脚本</button>
+              <button type="button" class="ta-mermaid-mode-btn ta-mermaid-preview-btn" data-mermaid-mode="chart" data-block-id="${id}">图表</button>
+            </div>
+            <pre class="hljs ta-mermaid-script"><code class="language-mermaid">${escapedCode}</code></pre>
+            <div class="ta-mermaid-chart" hidden></div>
+          </div>`;
+        }
+        let code: string;
+        if (lang && hljsMod.default.getLanguage(lang)) {
+          try {
+            code = hljsMod.default.highlight(token.content, { language: lang }).value;
+            return `<pre${attrs}><code class="hljs language-${lang}">${code}</code></pre>`;
+          } catch {
+            // fallthrough 到纯文本转义
+          }
+        }
+        code = md.utils.escapeHtml(token.content);
+        return `<pre${attrs}><code class="hljs">${code}</code></pre>`;
+      };
+      mdInstance = md;
+      purifyInstance = DOMPurifyMod.default;
+    })();
   }
-  if (mdRef.value && purifyRef.value) {
-    return;
-  }
-  const [MarkdownIt, hljsMod, DOMPurifyMod] = await Promise.all([
-    import("markdown-it"),
-    import("highlight.js/lib/common"),
-    import("dompurify")
-  ]);
-  const md = new MarkdownIt.default({
-    html: false, // 不直接内联原始 HTML，交给 DOMPurify 兜底
-    linkify: true,
-    typographer: false
-  });
-  // 给顶级块打上源码行号（1 起），用于滚动联动与左侧序号对齐；
-  // 只取 level===0，避免列表项/引用内段落数字堆叠
-  md.core.ruler.push("source_line", (state) => {
-    for (const tok of state.tokens) {
-      if (tok.level === 0 && tok.map) {
-        tok.attrSet("data-source-line", String(tok.map[0] + 1));
-      }
-    }
-  });
-  // fence 默认不会把 token attrs 渲染到 <pre>，覆盖渲染以带上 data-source-line 与 hljs 高亮
-  md.renderer.rules.fence = (tokens, idx, _options, _env, slf) => {
-    const token = tokens[idx];
-    const lang = token.info ? token.info.trim() : "";
-    const attrs = slf.renderAttrs(token);
-    if (lang === "mermaid") {
-      const id = `ta-mermaid-${Math.random().toString(36).substring(2, 9)}`;
-      const escapedCode = md.utils.escapeHtml(token.content);
-      return `<div${attrs} class="mermaid-block is-script" id="${id}" data-content="${encodeURIComponent(token.content)}">
-        <div class="ta-mermaid-header">
-          <button type="button" class="ta-mermaid-mode-btn is-active" data-mermaid-mode="script" data-block-id="${id}">脚本</button>
-          <button type="button" class="ta-mermaid-mode-btn ta-mermaid-preview-btn" data-mermaid-mode="chart" data-block-id="${id}">图表</button>
-        </div>
-        <pre class="hljs ta-mermaid-script"><code class="language-mermaid">${escapedCode}</code></pre>
-        <div class="ta-mermaid-chart" hidden></div>
-      </div>`;
-    }
-    let code: string;
-    if (lang && hljsMod.default.getLanguage(lang)) {
-      try {
-        code = hljsMod.default.highlight(token.content, { language: lang }).value;
-        return `<pre${attrs}><code class="hljs language-${lang}">${code}</code></pre>`;
-      } catch {
-        // fallthrough 到纯文本转义
-      }
-    }
-    code = md.utils.escapeHtml(token.content);
-    return `<pre${attrs}><code class="hljs">${code}</code></pre>`;
-  };
-  mdRef.value = md;
-  purifyRef.value = DOMPurifyMod.default;
+
+  await loadPromise;
 }
 
 async function handleMdPreviewClick(event: MouseEvent) {
@@ -138,8 +152,8 @@ async function handleMdPreviewClick(event: MouseEvent) {
 
   try {
     await ensureLibs(true);
-    if (mermaidRef.value && !chartEl.innerHTML.trim()) {
-      const { svg } = await mermaidRef.value.render(blockId + "-svg", content);
+    if (mermaidInstance && !chartEl.innerHTML.trim()) {
+      const { svg } = await mermaidInstance.render(blockId + "-svg", content);
       chartEl.innerHTML = svg;
     }
     if (scriptEl) scriptEl.hidden = true;
@@ -161,11 +175,11 @@ async function handleMdPreviewClick(event: MouseEvent) {
   }
 }
 
-// 实际渲染：markdown-it 转 HTML 后用 DOMPurify 消毒，防御本地文件中的脚本/恶意链接
+// 实际渲染：markdown-it 转 HTML 后用 DOMPurify 消毒，防御本地 file 中的脚本/恶意链接
 async function render() {
   await ensureLibs();
-  const raw = mdRef.value?.render(props.content ?? "") ?? "";
-  html.value = purifyRef.value?.sanitize(raw) ?? "";
+  const raw = mdInstance?.render(props.content ?? "") ?? "";
+  html.value = purifyInstance?.sanitize(raw) ?? "";
   loading.value = false;
   if (!readyEmitted) {
     readyEmitted = true;

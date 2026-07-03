@@ -9,6 +9,15 @@ export type MarkdownViewProps = {
   // 首次懒加载 Markdown 渲染器时显示的占位文案
   loadingText?: string
 }
+
+// Module-level cached references to avoid per-instance initialization & dynamic imports
+let mdInstance: any = null
+let purifyInstance: any = null
+let hljsInstance: any = null
+let mermaidInstance: any = null
+
+let loadPromise: Promise<void> | null = null
+let mermaidLoadPromise: Promise<void> | null = null
 </script>
 
 <script setup lang="ts">
@@ -17,7 +26,7 @@ export type MarkdownViewProps = {
 // - html:false + DOMPurify 兜底，保证渲染出来的 HTML 不含脚本/危险链接
 // - 与 MarkdownPreview.vue（编辑器预览）解耦：去掉源码行号、滚动联动和 gutter，
 //   让本组件专注于"消息气泡里的小型 markdown 卡片"
-import { onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import 'github-markdown-css/github-markdown.css'
 
 const props = withDefaults(defineProps<MarkdownViewProps>(), {
@@ -29,84 +38,84 @@ const props = withDefaults(defineProps<MarkdownViewProps>(), {
 const html = ref('')
 const loading = ref(true)
 const error = ref<string | null>(null)
-// shallowRef 避免对大段 HTML 做深度代理
-const mdRef = shallowRef<any>(null)
-const purifyRef = shallowRef<any>(null)
-const hljsRef = shallowRef<any>(null)
-const mermaidRef = shallowRef<any>(null)
 
 let renderTimer: ReturnType<typeof setTimeout> | null = null
 
-// 懒加载三件套；只在首个 MarkdownView 挂载时触发一次，后续实例复用缓存的句柄
+// 懒加载三件套；合并并发 Promise，全局复用单例
 async function ensureLibs(needMermaid = false) {
-  const promises: Array<Promise<any>> = []
-
-  if (!mdRef.value) {
-    promises.push(import('markdown-it').then(m => { mdRef.value = m.default }))
-  }
-  if (!purifyRef.value) {
-    promises.push(import('dompurify').then(m => { purifyRef.value = m.default }))
-  }
-  if (props.highlight && !hljsRef.value) {
-    promises.push(import('highlight.js/lib/common').then(m => { hljsRef.value = m }))
-  }
-  if (needMermaid && !mermaidRef.value) {
-    promises.push(import('mermaid').then(m => {
-      mermaidRef.value = m.default
-      mermaidRef.value.initialize({
-        startOnLoad: false,
-        theme: 'neutral', // Neutral theme for better compatibility with light background
-        securityLevel: 'loose',
-      })
-    }))
-  }
-
-  if (promises.length > 0) {
-    await Promise.all(promises)
-  }
-
-  // Once markdown-it is loaded, if it's still the constructor class, instantiate it
-  if (mdRef.value && typeof mdRef.value === 'function') {
-    const md = new mdRef.value({
-      html: false, // 不直接内联原始 HTML，统一交给 DOMPurify
-      linkify: true,
-      typographer: false,
-    })
-
-    md.renderer.rules.fence = (tokens: any[], idx: number, _options: any, _env: any, slf: any) => {
-      const token = tokens[idx]
-      const lang = token.info ? token.info.trim() : ''
-      const attrs = slf.renderAttrs(token)
-
-      if (lang === 'mermaid') {
-        const id = `ta-mermaid-${Math.random().toString(36).substring(2, 9)}`
-        const escapedCode = md.utils.escapeHtml(token.content)
-        return `<div class="mermaid-block is-script" id="${id}" data-content="${encodeURIComponent(token.content)}">
-          <div class="ta-mermaid-header">
-            <button type="button" class="ta-mermaid-mode-btn is-active" data-mermaid-mode="script" data-block-id="${id}">脚本</button>
-            <button type="button" class="ta-mermaid-mode-btn ta-mermaid-preview-btn" data-mermaid-mode="chart" data-block-id="${id}">图表</button>
-          </div>
-          <pre class="hljs ta-mermaid-script"><code class="language-mermaid">${escapedCode}</code></pre>
-          <div class="ta-mermaid-chart" hidden></div>
-        </div>`
-      }
-
-      let code: string
-      if (props.highlight && hljsRef.value && lang && hljsRef.value.default.getLanguage(lang)) {
-        try {
-          code = hljsRef.value.default.highlight(token.content, {
-            language: lang,
-          }).value
-          return `<pre${attrs}><code class="hljs language-${lang}">${code}</code></pre>`
-        } catch {
-          // fallthrough 到纯文本转义
-        }
-      }
-      code = md.utils.escapeHtml(token.content)
-      return `<pre${attrs}><code class="hljs">${code}</code></pre>`
+  if (needMermaid && !mermaidInstance) {
+    if (!mermaidLoadPromise) {
+      mermaidLoadPromise = (async () => {
+        const m = await import('mermaid')
+        mermaidInstance = m.default
+        mermaidInstance.initialize({
+          startOnLoad: false,
+          theme: 'neutral', // Neutral theme for better compatibility with light background
+          securityLevel: 'loose',
+        })
+      })()
     }
-    mdRef.value = md
+    await mermaidLoadPromise
   }
+
+  if (mdInstance && purifyInstance && hljsInstance) {
+    return
+  }
+
+  if (!loadPromise) {
+    loadPromise = (async () => {
+      const [MarkdownIt, DOMPurify, hljs] = await Promise.all([
+        import('markdown-it'),
+        import('dompurify'),
+        import('highlight.js/lib/common')
+      ])
+
+      const md = new MarkdownIt.default({
+        html: false, // 不直接内联原始 HTML，统一交给 DOMPurify
+        linkify: true,
+        typographer: false,
+      })
+
+      md.renderer.rules.fence = (tokens: any[], idx: number, _options: any, _env: any, slf: any) => {
+        const token = tokens[idx]
+        const lang = token.info ? token.info.trim() : ''
+        const attrs = slf.renderAttrs(token)
+
+        if (lang === 'mermaid') {
+          const id = `ta-mermaid-${Math.random().toString(36).substring(2, 9)}`
+          const escapedCode = md.utils.escapeHtml(token.content)
+          return `<div class="mermaid-block is-script" id="${id}" data-content="${encodeURIComponent(token.content)}">
+            <div class="ta-mermaid-header">
+              <button type="button" class="ta-mermaid-mode-btn is-active" data-mermaid-mode="script" data-block-id="${id}">脚本</button>
+              <button type="button" class="ta-mermaid-mode-btn ta-mermaid-preview-btn" data-mermaid-mode="chart" data-block-id="${id}">图表</button>
+            </div>
+            <pre class="hljs ta-mermaid-script"><code class="language-mermaid">${escapedCode}</code></pre>
+            <div class="ta-mermaid-chart" hidden></div>
+          </div>`
+        }
+
+        let code: string
+        if (props.highlight && hljs && lang && hljs.default.getLanguage(lang)) {
+          try {
+            code = hljs.default.highlight(token.content, {
+              language: lang,
+            }).value
+            return `<pre${attrs}><code class="hljs language-${lang}">${code}</code></pre>`
+          } catch {
+            // fallthrough 到纯文本转义
+          }
+        }
+        code = md.utils.escapeHtml(token.content)
+        return `<pre${attrs}><code class="hljs">${code}</code></pre>`
+      }
+
+      mdInstance = md
+      purifyInstance = DOMPurify.default
+      hljsInstance = hljs
+    })()
+  }
+
+  await loadPromise
 }
 
 async function handleMdViewClick(event: MouseEvent) {
@@ -145,8 +154,8 @@ async function handleMdViewClick(event: MouseEvent) {
 
   try {
     await ensureLibs(true)
-    if (mermaidRef.value && !chartEl.innerHTML.trim()) {
-      const { svg } = await mermaidRef.value.render(blockId + '-svg', content)
+    if (mermaidInstance && !chartEl.innerHTML.trim()) {
+      const { svg } = await mermaidInstance.render(blockId + '-svg', content)
       chartEl.innerHTML = svg
     }
     if (scriptEl) scriptEl.hidden = true
@@ -171,8 +180,8 @@ async function handleMdViewClick(event: MouseEvent) {
 async function render() {
   try {
     await ensureLibs(false) // Don't load mermaid on initial render
-    const raw = mdRef.value?.render(props.source ?? '') ?? ''
-    const sanitized = purifyRef.value?.sanitize(raw) ?? ''
+    const raw = mdInstance?.render(props.source ?? '') ?? ''
+    const sanitized = purifyInstance?.sanitize(raw) ?? ''
 
     html.value = sanitized
     error.value = null

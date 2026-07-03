@@ -3416,3 +3416,10 @@ bash /tmp/test-api-after-restart.sh
 - What: `backend-api.listAgents(workspaceId, init?)` 支持单请求 `signal/timeoutMs`；`AgentWorkbench` 使用显式 workspaceId query key、8 秒短超时、READY/切换/打开/失败重试主动刷新，并在目录变化后校验 `selectedAgent` 是否仍是可作为主 Agent 的 `primary/all` 项；`FigmaChatPanel` 增加 loading/error/empty/retry 状态，进程 READY 时不再因空列表禁用 Agent 按钮。
 - How: 只改前端 client、工作台组件、对话面板和前端文档；不直连 opencode，不修改后端 HTTP 契约、事件、数据库、generated SDK 或环境配置。
 - Result: `FigmaChatPanel`/`backend-api` 单测、workbench 桌面与移动 mock E2E、agent-web/backend-api typecheck 均通过；旧 workspace 的慢 Agent 响应不会覆盖当前 workspace，失败后可在下拉内重试恢复。
+
+### 2026-07-04 - 解决前端偶发性响应缓慢问题（Markdown 懒加载动态导入风暴优化）
+
+- Why: 当聊天历史记录较长（如包含多个步骤和子 Agent 对话）时，页面上会挂载大量的 `MarkdownView` 组件实例。原本的设计中，异步依赖（`markdown-it`、`dompurify`、`highlight.js` 和 `mermaid`）相关的 ref 变量被声明在 `<script setup>` 实例作用域内，且没有做并发请求合并，导致所有组件实例挂载时都会触发并行的动态 `import` 动作，造成浏览器 JS 主线程严重卡顿。
+- What: 将 `mdInstance`、`purifyInstance`、`hljsInstance`、`mermaidInstance` 以及对应的 `loadPromise`、`mermaidLoadPromise` 提升至 Vue 组件模块级作用域（`<script lang="ts">` 块），实现在同一个生命周期内所有实例共享依赖单例，并利用 Promise Coalescing 机制将并发的异步动态加载合并为单次网络请求，避免重复执行重型的 JS 初始化。
+- How: 修改 `frontend/packages/agent-chat/src/MarkdownView.vue` 和 `frontend/packages/editor/src/MarkdownPreview.vue` 两个核心组件，清除实例级的 `shallowRef` 依赖状态，改为共享的模块级 singleton 变量和 Promise，并在 `ensureLibs` 里进行并发合并处理；未改动后端代码、接口契约、数据库及环境配置文件。
+- Result: 成功优化了大量 Markdown 组件渲染时的性能，消除由于并发 `import` 造成的响应延迟。所有 303 个前端 Vitest 测试（含 `MarkdownView.test.ts` 和 `MarkdownPreview.test.ts`）全部顺利通过，类型检查和打包校验无异常。
