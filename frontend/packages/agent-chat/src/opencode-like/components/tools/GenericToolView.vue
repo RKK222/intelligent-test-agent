@@ -16,7 +16,6 @@ const props = defineProps<GenericToolViewProps>();
 const info = computed(() => getToolInfo(props.part));
 const inputText = computed(() => stringify(props.part.input));
 const outputText = computed(() => stringify(outputValue(props.part)));
-const openByDefault = computed(() => props.part.status === "running" || props.part.status === "error" || props.part.status === "failed");
 
 function stringify(value: unknown): string | undefined {
   if (value === undefined || value === null) {
@@ -45,8 +44,9 @@ function outputValue(part: Extract<MessagePart, { type: "tool" }>): unknown {
   <OcToolShell
     :title="info.title"
     :subtitle="info.subtitle"
+    :subtitle-title="info.fullSubtitle"
     :status="part.status"
-    :default-open="openByDefault"
+    :default-open="false"
   >
     <div class="oc-tool-detail">
       <OcCodeBlock v-if="inputText" label="input" :code="inputText" />

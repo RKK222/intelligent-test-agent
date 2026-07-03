@@ -17,6 +17,7 @@ import RetryRow from "./rows/RetryRow.vue";
 import DiffSummaryRow from "./rows/DiffSummaryRow.vue";
 import ErrorRow from "./rows/ErrorRow.vue";
 import AssistantMessageFrame from "./rows/AssistantMessageFrame.vue";
+import ReasoningPartGroup from "./parts/ReasoningPartGroup.vue";
 import ContextToolGroup from "./tools/ContextToolGroup.vue";
 
 const props = defineProps<TimelineRowProps>();
@@ -34,7 +35,7 @@ const assistantPart = computed<MessagePart | undefined>(() => {
 
 const assistantMessage = computed(() => {
   const row = props.row;
-  if (row.type !== "assistant-part" && row.type !== "context-tool-group") {
+  if (row.type !== "assistant-part" && row.type !== "context-tool-group" && row.type !== "reasoning-group") {
     return undefined;
   }
   const message = props.state.messageById[row.messageId];
@@ -49,6 +50,16 @@ const contextParts = computed(() => {
   return row.refs
     .map((ref) => props.state.partsByMessageId[ref.messageId]?.find((part) => part.partId === ref.partId))
     .filter((part): part is Extract<MessagePart, { type: "tool" }> => part?.type === "tool");
+});
+
+const reasoningParts = computed(() => {
+  const row = props.row;
+  if (row.type !== "reasoning-group") {
+    return [];
+  }
+  return row.refs
+    .map((ref) => props.state.partsByMessageId[ref.messageId]?.find((part) => part.partId === ref.partId))
+    .filter((part): part is Extract<MessagePart, { type: "reasoning" }> => part?.type === "reasoning");
 });
 </script>
 
@@ -79,6 +90,19 @@ const contextParts = computed(() => {
       :part="assistantPart"
       :streaming-text-by-part-id="state.streamingTextByPartId"
       :previous-assistant-part="row.previousAssistantPart"
+    />
+  </AssistantMessageFrame>
+  <AssistantMessageFrame
+    v-else-if="row.type === 'reasoning-group' && assistantMessage"
+    class="oc-row"
+    :message="assistantMessage"
+    :continuation="row.previousAssistantPart"
+    :show-header="row.showAssistantHeader"
+  >
+    <ReasoningPartGroup
+      :parts="reasoningParts"
+      :busy="row.busy"
+      :streaming-text-by-part-id="state.streamingTextByPartId"
     />
   </AssistantMessageFrame>
   <ThinkingRow v-else-if="row.type === 'thinking'" class="oc-row" />

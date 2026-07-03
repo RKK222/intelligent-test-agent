@@ -2,6 +2,21 @@
 
 ## Entries
 
+### 2026-07-03 - 收敛对话时间线过程行与极简输出样式
+
+- Why:
+  - opencode-like 时间线在一次回答被拆成多条 assistant message 后，会重复展示“思考状态”和头像/过程行，运行中噪声过多；
+  - 最终输出与工作中过程输出区分不够清晰，工具详情默认展开会占用聊天区域；
+  - read/list 等工具的工作区绝对路径包含 `.testagent` 和 personal worktree 前缀，长且不利于用户理解。
+- What:
+  - 在 `createTimelineRows` 行投影层按用户回合合并 reasoning 与上下文探索工具行，运行中已有过程行时不再额外追加 thinking 行。
+  - 新增 `ReasoningPartGroup`，过程详情默认折叠，运行中只在单个“思考状态”标题上展示轻量流光动效；最终 `text` 输出默认展开，并以“最终输出/工作中输出”标题区分。
+  - 工具详情统一默认折叠；工作区长路径展示为短路径（如 `F-COSS/workspace`），完整路径保留在 title 悬浮提示。
+- How:
+  - 只修改 `frontend/packages/agent-chat/src/opencode-like` 当前主路径组件、样式和投影逻辑，以及 `FigmaChatPanel` 反馈区间距；未改后端、RunEvent、DTO、数据库或旧 `FigmaChatPanel` 作废主循环。
+- Result:
+  - `opencode-timeline.test.ts` 与 `FigmaChatPanel.test.ts` 定向通过，`agent-chat`/`agent-web` typecheck 通过，浏览器同源样例确认单头像、单思考状态、最终输出展开、长路径短显。
+
 ### 2026-07-03 - 优化对话时间线布局与对齐样式
 
 - Why: 

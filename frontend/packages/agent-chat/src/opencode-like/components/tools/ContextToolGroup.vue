@@ -29,7 +29,9 @@ const subtitleText = computed(() => `读取 ${props.parts.length} 次`);
     <div v-if="open" class="oc-context-group__body">
       <div v-for="part in parts" :key="part.partId" class="oc-context-group__item">
         <span class="oc-context-group__kind">{{ getToolInfo(part).title }}</span>
-        <span class="oc-context-group__path">{{ getToolInfo(part).subtitle ?? part.toolName }}</span>
+        <span class="oc-context-group__path" :title="getToolInfo(part).fullSubtitle ?? getToolInfo(part).subtitle ?? part.toolName">
+          {{ getToolInfo(part).subtitle ?? part.toolName }}
+        </span>
       </div>
     </div>
   </section>

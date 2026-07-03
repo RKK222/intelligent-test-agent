@@ -4,6 +4,7 @@ import { text } from "../../chat-utils";
 export type ToolInfo = {
   title: string;
   subtitle?: string;
+  fullSubtitle?: string;
   family: "context" | "shell" | "file" | "diff" | "web" | "task" | "question" | "skill" | "generic";
 };
 
@@ -21,29 +22,31 @@ export function isContextTool(part: Extract<MessagePart, { type: "tool" }>): boo
 export function getToolInfo(part: Extract<MessagePart, { type: "tool" }>): ToolInfo {
   const tool = normalizeToolName(part);
   const path = toolPath(part);
+  const displayPath = formatDisplayPath(path);
   if (tool === "skill") {
-    return { title: "Skill", subtitle: path, family: "skill" };
+    return { title: "Skill", subtitle: displayPath, fullSubtitle: path, family: "skill" };
   }
   if (tool === "bash") {
     return { title: "Bash", subtitle: commandValue(part), family: "shell" };
   }
   if (tool === "read") {
-    return { title: "Read", subtitle: path, family: "context" };
+    return { title: "Read", subtitle: displayPath, fullSubtitle: path, family: "context" };
   }
   if (tool === "list") {
-    return { title: "List", subtitle: path, family: "context" };
+    return { title: "List", subtitle: displayPath, fullSubtitle: path, family: "context" };
   }
   if (tool === "glob") {
     return { title: "Glob", subtitle: text(part.input?.pattern), family: "context" };
   }
   if (tool === "grep") {
-    return { title: "Grep", subtitle: text(part.input?.pattern) ?? path, family: "context" };
+    const pattern = text(part.input?.pattern);
+    return { title: "Grep", subtitle: pattern ?? displayPath, fullSubtitle: pattern ? path : undefined, family: "context" };
   }
   if (tool === "edit" || tool === "write") {
-    return { title: tool === "edit" ? "Edit" : "Write", subtitle: path, family: "file" };
+    return { title: tool === "edit" ? "Edit" : "Write", subtitle: displayPath, fullSubtitle: path, family: "file" };
   }
   if (tool === "apply_patch") {
-    return { title: "Apply patch", subtitle: path, family: "diff" };
+    return { title: "Apply patch", subtitle: displayPath, fullSubtitle: path, family: "diff" };
   }
   if (tool === "webfetch" || tool === "web_fetch") {
     return { title: "Web fetch", subtitle: text(part.input?.url), family: "web" };
@@ -57,7 +60,7 @@ export function getToolInfo(part: Extract<MessagePart, { type: "tool" }>): ToolI
   if (tool === "question") {
     return { title: "Question", subtitle: text(part.input?.question), family: "question" };
   }
-  return { title: part.toolName, subtitle: path, family: "generic" };
+  return { title: part.toolName, subtitle: displayPath, fullSubtitle: path, family: "generic" };
 }
 
 export function toolPath(part: Extract<MessagePart, { type: "tool" }>): string | undefined {
@@ -82,4 +85,29 @@ function outputPath(output: unknown): string | undefined {
   }
   const match = /<path>(.+?)<\/path>/s.exec(output);
   return match?.[1]?.trim();
+}
+
+function formatDisplayPath(path: string | undefined): string | undefined {
+  if (!path) {
+    return undefined;
+  }
+  const normalized = path.replace(/\\/g, "/");
+  const personalWorktreeMarker = "/workspace/personalworktree/";
+  const markerIndex = normalized.indexOf(personalWorktreeMarker);
+  if (markerIndex >= 0) {
+    const tail = normalized.slice(markerIndex + personalWorktreeMarker.length);
+    const segments = tail.split("/").filter(Boolean);
+    const branchIndex = segments.findIndex((segment) => segment.startsWith("feature_"));
+    if (branchIndex >= 0 && branchIndex + 1 < segments.length) {
+      return segments.slice(branchIndex + 1).join("/");
+    }
+  }
+  if (normalized.length <= 72) {
+    return normalized;
+  }
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.length <= 3) {
+    return normalized;
+  }
+  return `.../${segments.slice(-3).join("/")}`;
 }

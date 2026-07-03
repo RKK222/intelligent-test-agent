@@ -4575,8 +4575,8 @@ function onCompositionEnd() {
   align-items: flex-start;
   gap: 6px;
   flex: 0 0 auto;
-  margin: 10px 0 0 46px;
-  padding: 0 0 12px;
+  margin: 6px 0 0 46px;
+  padding: 0 0 8px;
   position: relative;
   z-index: 0;
 }

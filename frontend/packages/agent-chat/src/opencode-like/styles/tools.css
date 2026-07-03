@@ -20,6 +20,7 @@
   border: 0;
   cursor: pointer;
   text-align: left;
+  font-family: var(--oc-font-sans);
 }
 
 .oc-disclosure__trigger .oc-tool__title,
@@ -57,6 +58,7 @@
   cursor: pointer;
   text-align: left;
   min-height: unset;
+  font-family: var(--oc-font-sans);
 }
 
 .oc-tool__trigger .oc-tool__title {

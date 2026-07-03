@@ -2,6 +2,7 @@
 export type OcToolShellProps = {
   title: string;
   subtitle?: string;
+  subtitleTitle?: string;
   status?: string;
   defaultOpen?: boolean;
 };
@@ -29,7 +30,7 @@ function formatStatus(status: string): string {
   <section class="oc-tool">
     <button type="button" class="oc-tool__trigger" @click="open = !open">
       <span class="oc-tool__title">{{ title }}</span>
-      <span v-if="subtitle" class="oc-tool__subtitle">{{ subtitle }}</span>
+      <span v-if="subtitle" class="oc-tool__subtitle" :title="subtitleTitle ?? subtitle">{{ subtitle }}</span>
       <span v-if="status" :class="['oc-tool__status', `is-${status.toLowerCase()}`]">{{ formatStatus(status) }}</span>
       <ChevronDown v-if="open" class="oc-tool__chevron" />
       <ChevronRight v-else class="oc-tool__chevron" />

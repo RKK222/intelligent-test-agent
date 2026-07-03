@@ -799,7 +799,7 @@ describe("FigmaChatPanel", () => {
 
     expect(wrapper.findAll(".oc-reasoning-part")).toHaveLength(2);
     expect(wrapper.findAll(".oc-tool")).toHaveLength(2);
-    expect(wrapper.findAll(".oc-tool__body")).toHaveLength(1);
+    expect(wrapper.findAll(".oc-tool__body")).toHaveLength(0);
   });
 
   it("does not resurface the choice panel when switching to a historical session where the user has already replied", async () => {
@@ -1058,7 +1058,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("请求超时");
   });
 
-  it("does NOT include tool state.output or state.error in the main message body", () => {
+  it("does NOT include tool state.output or state.error in the main message body", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -1082,9 +1082,11 @@ describe("FigmaChatPanel", () => {
 
     // 正文中不出现 state.error
     const allText = wrapper.text();
-    expect(allText).toContain("No such file or directory");
+    expect(allText).not.toContain("No such file or directory");
     // 错误在 tool 折叠块中显示
     expect(allText).toContain("Read");
+    await wrapper.get(".oc-tool__trigger").trigger("click");
+    expect(wrapper.text()).toContain("No such file or directory");
   });
 
   it("collapses completed bash tool outputs by default and expands them on click", async () => {

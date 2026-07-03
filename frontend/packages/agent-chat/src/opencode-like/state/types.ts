@@ -69,6 +69,16 @@ export type TimelineRow =
       showAssistantHeader: boolean;
     }
   | {
+      type: "reasoning-group";
+      key: string;
+      userMessageId: string;
+      messageId: string;
+      refs: Array<{ messageId: string; partId: string }>;
+      busy: boolean;
+      previousAssistantPart: boolean;
+      showAssistantHeader: boolean;
+    }
+  | {
       type: "assistant-part";
       key: string;
       userMessageId: string;

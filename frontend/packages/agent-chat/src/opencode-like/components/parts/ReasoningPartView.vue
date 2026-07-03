@@ -37,7 +37,7 @@ const subtitleText = computed(() => {
     title="思考状态"
     :subtitle="subtitleText"
     :status="part.status"
-    :default-open="part.status === 'running'"
+    :default-open="false"
   >
     <div class="oc-reasoning-part__body">
       <MarkdownView :source="source" body-class="oc-markdown" />

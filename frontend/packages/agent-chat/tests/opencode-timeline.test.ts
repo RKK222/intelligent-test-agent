@@ -37,6 +37,7 @@ describe("OpencodeTimeline", () => {
     expect(getByText("读取 2 次")).toBeTruthy();
     await fireEvent.click(container.querySelector(".oc-context-group__trigger") as HTMLElement);
     expect(getByText("README.md")).toBeTruthy();
+    expect(getByText("最终输出")).toBeTruthy();
     expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();
     expect(getByText("src/checkout.ts")).toBeTruthy();
   });
@@ -79,6 +80,34 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelectorAll(".oc-assistant-frame__avatar")).toHaveLength(1);
     expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(1);
     expect(getByText("我是测试智能体。")).toBeTruthy();
+  });
+
+  it("merges repeated reasoning rows across split assistant messages in one turn", async () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "你能干什么"),
+        assistantMessage("msg_reasoning_1", [reasoningPart("part_reasoning_1", "先识别用户问题。")]),
+        assistantMessage("msg_skill", [toolPart("part_skill", "skill", { name: "using-superpowers" })]),
+        assistantMessage("msg_reasoning_2", [reasoningPart("part_reasoning_2", "再读取相关能力说明。")]),
+        assistantMessage("msg_web", [toolPart("part_web", "webfetch", { url: "https://opencode.ai" })]),
+        assistantMessage("msg_reasoning_3", [reasoningPart("part_reasoning_3", "最后组织回答。")]),
+        assistantMessage("msg_answer", [textPart("part_answer", "我可以协助软件工程任务。")])
+      ]
+    });
+
+    const { container, getByText } = render(OpencodeTimeline, { props: { state } });
+    await waitMarkdown();
+
+    expect(container.querySelectorAll(".oc-assistant-frame__avatar")).toHaveLength(1);
+    expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(1);
+    expect(container.querySelectorAll(".oc-reasoning-part .oc-disclosure__trigger")).toHaveLength(1);
+    expect(getByText("思考状态")).toBeTruthy();
+
+    await fireEvent.click(container.querySelector(".oc-reasoning-part .oc-disclosure__trigger") as HTMLElement);
+    await waitMarkdown();
+    expect(getByText("先识别用户问题。")).toBeTruthy();
+    expect(getByText("再读取相关能力说明。")).toBeTruthy();
+    expect(getByText("最后组织回答。")).toBeTruthy();
   });
 
   it("allows user to interrupt auto-scrolling by scrolling up", async () => {
