@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -635,6 +636,41 @@ public class GitWorkspaceService {
         if (entries == null || entries.isEmpty()) {
             return List.of();
         }
+
+        boolean hasStaged = false;
+        boolean hasUnstaged = false;
+        for (GitStatusEntry entry : entries) {
+            if (!entry.untrackedFile()) {
+                if (entry.staged()) {
+                    hasStaged = true;
+                }
+                if (entry.needsUnstagedDiff()) {
+                    hasUnstaged = true;
+                }
+            }
+        }
+
+        Map<String, String> stagedDiffs = Map.of();
+        Map<String, String> unstagedDiffs = Map.of();
+
+        if (hasStaged) {
+            try {
+                List<String> cmd = gitNoQuotedPath(repoRoot, "diff", "--cached");
+                String out = executor.execute(cmd, null, DEFAULT_TIMEOUT).stdoutText();
+                stagedDiffs = parseFullDiff(out);
+            } catch (Exception ignored) {
+            }
+        }
+
+        if (hasUnstaged) {
+            try {
+                List<String> cmd = gitNoQuotedPath(repoRoot, "diff");
+                String out = executor.execute(cmd, null, DEFAULT_TIMEOUT).stdoutText();
+                unstagedDiffs = parseFullDiff(out);
+            } catch (Exception ignored) {
+            }
+        }
+
         List<GitDiffFile> files = new ArrayList<>();
         for (GitStatusEntry entry : entries) {
             DiffAccumulator accumulator = new DiffAccumulator();
@@ -642,10 +678,20 @@ public class GitWorkspaceService {
                 appendNewFilePatch(entry.path(), repoRoot.resolve(entry.path()), accumulator);
             } else {
                 if (entry.staged()) {
-                    appendDiff(repoRoot, entry.path(), true, accumulator);
+                    String diff = stagedDiffs.get(entry.path());
+                    if (diff != null && !diff.isBlank()) {
+                        accumulator.append(diff);
+                    } else {
+                        appendDiff(repoRoot, entry.path(), true, accumulator);
+                    }
                 }
                 if (entry.needsUnstagedDiff()) {
-                    appendDiff(repoRoot, entry.path(), false, accumulator);
+                    String diff = unstagedDiffs.get(entry.path());
+                    if (diff != null && !diff.isBlank()) {
+                        accumulator.append(diff);
+                    } else {
+                        appendDiff(repoRoot, entry.path(), false, accumulator);
+                    }
                 }
             }
             files.add(new GitDiffFile(
@@ -658,6 +704,48 @@ public class GitWorkspaceService {
                     accumulator.deletions));
         }
         return List.copyOf(files);
+    }
+
+    /**
+     * 解析 Git 完整 Diff 输出以提取每个文件的 Diff 片段。
+     */
+    public Map<String, String> parseFullDiff(String diffOutput) {
+        Map<String, String> diffMap = new java.util.HashMap<>();
+        if (diffOutput == null || diffOutput.isEmpty()) {
+            return diffMap;
+        }
+        String[] lines = diffOutput.split("\\R");
+        StringBuilder currentBlock = new StringBuilder();
+        String currentPath = null;
+        for (String line : lines) {
+            if (line.startsWith("diff --git ")) {
+                if (currentPath != null && currentBlock.length() > 0) {
+                    diffMap.put(currentPath, currentBlock.toString());
+                }
+                currentBlock = new StringBuilder();
+                currentPath = null;
+                currentBlock.append(line).append('\n');
+                continue;
+            }
+            if (currentBlock.length() > 0) {
+                currentBlock.append(line).append('\n');
+            }
+            if (line.startsWith("--- a/")) {
+                String path = line.substring(6);
+                if (currentPath == null && !path.equals("/dev/null")) {
+                    currentPath = path;
+                }
+            } else if (line.startsWith("+++ b/")) {
+                String path = line.substring(6);
+                if (!path.equals("/dev/null")) {
+                    currentPath = path;
+                }
+            }
+        }
+        if (currentPath != null && currentBlock.length() > 0) {
+            diffMap.put(currentPath, currentBlock.toString());
+        }
+        return diffMap;
     }
 
     /**

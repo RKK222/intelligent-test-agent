@@ -28,7 +28,7 @@ import type {
   WorkspaceGitConflict,
   WorkspaceGitConflictResolution
 } from "@test-agent/shared-types";
-import { Badge } from "@test-agent/ui-kit";
+import { Badge, Button } from "@test-agent/ui-kit";
 
 type WorkspacePanelDiffFile = RunDiffFile & { rawStatus?: string };
 
@@ -757,17 +757,45 @@ defineExpose({
               <span class="git-sub-badge ml-1">({{ workspaceUnstaged.length + workspaceConflicts.length }})</span>
             </div>
             <div v-show="workspaceUnstagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
-              <div v-if="workspaceConflicts.length > 0" class="git-conflict-note">
-                <span>共 {{ workspaceConflicts.length }} 个冲突；可批量处理，也可点击文件逐个处理</span>
-                <button type="button" :disabled="conflictResolving" @click.stop="resolveAllWorkspaceConflicts('CURRENT')">
-                  全部保留个人版本
-                </button>
-                <button type="button" :disabled="conflictResolving" @click.stop="resolveAllWorkspaceConflicts('INCOMING')">
-                  全部采用远程版本
-                </button>
-                <button type="button" :disabled="conflictResolving" @click.stop="abortWorkspaceConflict">
-                  取消本次合并
-                </button>
+              <div v-if="workspaceConflicts.length > 0" class="git-conflict-banner bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 rounded p-2.5 mb-2.5 text-slate-700 dark:text-slate-300">
+                <div class="flex items-start gap-2 mb-2.5">
+                  <AlertTriangle class="h-4 w-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-500" />
+                  <div>
+                    <div class="font-semibold text-xs text-amber-800 dark:text-amber-400">检测到 {{ workspaceConflicts.length }} 个冲突文件</div>
+                    <div class="text-[11px] text-amber-700 dark:text-amber-500 mt-0.5 leading-relaxed">可点击下方文件逐个处理，或者通过以下按钮进行批量解决：</div>
+                  </div>
+                </div>
+                <div class="flex flex-col gap-1.5">
+                  <div class="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      class="flex-1 text-[11px] h-7 border-amber-200 dark:border-amber-900 bg-white dark:bg-zinc-900 hover:bg-amber-50 text-amber-800 dark:text-amber-400 hover:text-amber-900 transition-all font-medium"
+                      :disabled="conflictResolving"
+                      @click.stop="resolveAllWorkspaceConflicts('CURRENT')"
+                    >
+                      全部保留个人版本
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      class="flex-1 text-[11px] h-7 border-amber-200 dark:border-amber-900 bg-white dark:bg-zinc-900 hover:bg-amber-50 text-amber-800 dark:text-amber-400 hover:text-amber-900 transition-all font-medium"
+                      :disabled="conflictResolving"
+                      @click.stop="resolveAllWorkspaceConflicts('INCOMING')"
+                    >
+                      全部采用远程版本
+                    </Button>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="w-full text-[11px] h-7 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-all"
+                    :disabled="conflictResolving"
+                    @click.stop="abortWorkspaceConflict"
+                  >
+                    取消本次合并
+                  </Button>
+                </div>
               </div>
               <div
                 v-for="file in workspaceConflicts"

@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-03 - 优化 Git 冲突 UI 与 Diff 性能并造测试数据
+
+- Why: 解决冲突时，"全部选择个人/全部选择远程" 的按钮以未定义样式的普通 HTML button 裸露在红色的冲突提示下，交互风格非常古怪、不美观；同时当文件变更列表较大时，后端对每个变更文件逐个依次运行 `git diff` 进程，产生极大的进程创建开销，导致 Diff 区域文件加载非常缓慢。
+- What: 
+  - 前端：将 Git 冲突批量解决按钮区域升级为带警告气泡框、平行高亮双列主要操作按钮（全部保留个人版本、全部采用远程版本）与底部单行辅助取消操作的现代风格 Banner，引入 ui-kit Button 替换 unstyled 原始 HTML button。
+  - 后端：优化 `GitWorkspaceService.java`，在 `collectDiffFiles` 阶段仅执行一次全局 `git diff --cached` 和 `git diff`，并通过统一 Diff 头部特征在内存中进行高效率的多文件代码段 Map 切分映射，对 Map 未命中的文件安全回退单文件 diff 执行，降低 O(N) 进程创建开销到 O(1)。
+  - 测试与数据：适配后端 Git 聚合命令的单元测试，并在本地测试工作区制造了包含暂存、未暂存及 merge 冲突（`AGENTS.md`）的测试数据，用于完整的联调与效果体验。
+- How: 
+  - 前端修改 [GitChangesPanel.vue](file:///Users/kaka/Desktop/intelligent-test-agent/frontend/apps/agent-web/src/components/GitChangesPanel.vue) 中 `<div v-if="workspaceConflicts.length > 0">` 渲染和 ui-kit `Button` 导入；
+  - 后端修改 [GitWorkspaceService.java](file:///Users/kaka/Desktop/intelligent-test-agent/backend/test-agent-common/src/main/java/com/icbc/testagent/common/git/GitWorkspaceService.java) 实现 `parseFullDiff` 和 `collectDiffFiles` 重构，并更新 [GitWorkspaceServiceTest.java](file:///Users/kaka/Desktop/intelligent-test-agent/backend/test-agent-common/src/test/java/com/icbc/testagent/common/git/GitWorkspaceServiceTest.java) 单元测试。
+  - 在 `.testagent/agent-opencode/workspace/personalworktree` 测试工作区中通过 checkout 临时分支制造真实 `AGENTS.md` 冲突和 `CLAUDE.md`/`.env.local.example` 暂存状态。
+- Result: 后端 `test-agent-common` 63 个单元测试全部通过；前端 251 个 Vitest 单元测试和 typecheck 校验全绿通过；本地重启后使用默认用户 `888888888` / `123456` 可正常加载测试数据并观察验证效果，Diff 区性能提升明显。
+
 ### 2026-07-03 - 增加工作区发布预览、Git 原生批量冲突处理和 Diff 自动刷新
 
 - Why: 888 个人 worktree 只显示一个本地变更，提交后才拉入应用分支的大批变化并产生 8 个 AU 冲突；中文冲突路径被 Git 八进制转义，冲突只能逐个处理，应用分支 pull 后版本/副本 commit 仍可能陈旧，Diff 数量首次进入还需要手工刷新。

@@ -216,8 +216,8 @@ class GitWorkspaceServiceTest {
     @Test
     void collectDiffFilesMergesStagedAndUnstagedPatchStats() {
         RecordingExecutor executor = new RecordingExecutor("");
-        executor.stdoutByCall.put(1, "diff --git a/src/App.java b/src/App.java\n@@ -1 +1 @@\n-old\n+staged\n");
-        executor.stdoutByCall.put(2, "diff --git a/src/App.java b/src/App.java\n@@ -2 +2,2 @@\n-old2\n+unstaged\n+more\n");
+        executor.stdoutByCall.put(1, "diff --git a/src/App.java b/src/App.java\n--- a/src/App.java\n+++ b/src/App.java\n@@ -1 +1 @@\n-old\n+staged\n");
+        executor.stdoutByCall.put(2, "diff --git a/src/App.java b/src/App.java\n--- a/src/App.java\n+++ b/src/App.java\n@@ -2 +2,2 @@\n-old2\n+unstaged\n+more\n");
         GitWorkspaceService service = new GitWorkspaceService(executor);
 
         List<GitWorkspaceService.GitDiffFile> files = service.collectDiffFiles(tempDir, "MM src/App.java\n");
@@ -232,8 +232,8 @@ class GitWorkspaceServiceTest {
             assertThat(file.deletions()).isEqualTo(2);
         });
         assertThat(executor.calls).containsExactly(
-                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff", "--cached", "--", "src/App.java"), null),
-                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff", "--", "src/App.java"), null));
+                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff", "--cached"), null),
+                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff"), null));
     }
 
     @Test
@@ -259,8 +259,8 @@ class GitWorkspaceServiceTest {
     @Test
     void collectDiffFilesUsesExpectedDiffModeForStagedAddedAndUnstagedDeletedFiles() {
         RecordingExecutor executor = new RecordingExecutor("");
-        executor.stdoutByCall.put(1, "diff --git a/src/New.java b/src/New.java\n@@ -0,0 +1,2 @@\n+one\n+two\n");
-        executor.stdoutByCall.put(2, "diff --git a/src/Old.java b/src/Old.java\n@@ -1 +0,0 @@\n-old\n");
+        executor.stdoutByCall.put(1, "diff --git a/src/New.java b/src/New.java\n--- /dev/null\n+++ b/src/New.java\n@@ -0,0 +1,2 @@\n+one\n+two\n");
+        executor.stdoutByCall.put(2, "diff --git a/src/Old.java b/src/Old.java\n--- a/src/Old.java\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n");
         GitWorkspaceService service = new GitWorkspaceService(executor);
 
         List<GitWorkspaceService.GitDiffFile> files = service.collectDiffFiles(tempDir, "A  src/New.java\n D src/Old.java\n");
@@ -272,8 +272,8 @@ class GitWorkspaceServiceTest {
         assertThat(files.get(1).additions()).isZero();
         assertThat(files.get(1).deletions()).isEqualTo(1);
         assertThat(executor.calls).containsExactly(
-                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff", "--cached", "--", "src/New.java"), null),
-                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff", "--", "src/Old.java"), null));
+                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff", "--cached"), null),
+                new Call(List.of("git", "-c", "core.quotepath=false", "-C", tempDir.toString(), "diff"), null));
     }
 
     @Test
