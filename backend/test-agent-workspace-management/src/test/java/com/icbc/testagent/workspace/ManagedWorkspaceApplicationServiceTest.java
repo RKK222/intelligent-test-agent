@@ -848,6 +848,41 @@ class ManagedWorkspaceApplicationServiceTest {
     }
 
     @Test
+    void stagesAndUnstagesNonConflictFilesWhileRejectingConflictPaths() {
+        FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
+        FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();
+        FakeWorkspaceRepository workspaces = new FakeWorkspaceRepository();
+        FakeGitWorkspaceService git = new FakeGitWorkspaceService("F-GCMS/workspace");
+        ManagedWorkspaceApplicationService service = service(configuration, managed, workspaces, git);
+        ManagedWorkspaceResponses.ApplicationWorkspaceVersionResponse version = service.createVersion(
+                "app_gcms", "awp_1", "20260707", null, new UserId("usr_1"), "trace_version");
+        ManagedWorkspaceResponses.DefaultPersonalWorkspaceResponse personal = service.ensureDefaultPersonalWorkspace(
+                version.versionId(), new UserId("usr_1"), "trace_default");
+        git.nextStatusPorcelain = """
+                UU F-GCMS/workspace/src/Conflict.java
+                ?? F-GCMS/workspace/src/Changed.java
+                """;
+
+        service.stageWorkspaceGitFiles(
+                personal.runtimeWorkspace().workspaceId(),
+                List.of("src/Changed.java"),
+                new UserId("usr_1"));
+        service.unstageWorkspaceGitFiles(
+                personal.runtimeWorkspace().workspaceId(),
+                List.of("src/Changed.java"),
+                new UserId("usr_1"));
+
+        assertThat(git.stagedFiles).containsExactly("F-GCMS/workspace/src/Changed.java");
+        assertThat(git.unstagedFiles).containsExactly("F-GCMS/workspace/src/Changed.java");
+        assertThatThrownBy(() -> service.stageWorkspaceGitFiles(
+                personal.runtimeWorkspace().workspaceId(),
+                List.of("src/Conflict.java"),
+                new UserId("usr_1")))
+                .isInstanceOf(PlatformException.class)
+                .hasMessageContaining("冲突文件");
+    }
+
+    @Test
     void syncsPersonalWorkspaceFilesToApplicationAndRecordsPush() throws Exception {
         FakeConfigurationRepository configuration = new FakeConfigurationRepository(true);
         FakeManagedWorkspaceRepository managed = new FakeManagedWorkspaceRepository();

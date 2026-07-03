@@ -2699,12 +2699,28 @@ async function refreshWorkspaceGitDiff(options: { reloadOpenFiles?: boolean; pat
   }
 }
 
-async function handleOpenDiff(payload: string | { path: string; source: "vcs" | "agent"; scope?: "PUBLIC" | "WORKSPACE" }) {
+async function handleOpenDiff(payload: string | {
+  path: string;
+  source: "vcs" | "agent";
+  scope?: "PUBLIC" | "WORKSPACE";
+  file?: RunDiffFile;
+}) {
   if (typeof payload === "string") {
     await loadDiffSource("vcs");
     workbench.setSelectedDiffPath(payload);
   } else {
     if (payload.source === "vcs") {
+      // Git 面板已经持有当前文件的 patch，优先直接打开，避免重复扫描仓库造成空白 VCS 过渡态。
+      if (payload.file) {
+        const cachedFiles = vcsDiffFiles.value.some((file) => file.path === payload.path)
+          ? vcsDiffFiles.value
+          : [payload.file];
+        diffSource.value = "vcs";
+        centerMode.value = "diff";
+        diffFiles.value = cachedFiles;
+        workbench.setSelectedDiffPath(payload.path);
+        return;
+      }
       await loadDiffSource("vcs");
       workbench.setSelectedDiffPath(payload.path);
     } else {

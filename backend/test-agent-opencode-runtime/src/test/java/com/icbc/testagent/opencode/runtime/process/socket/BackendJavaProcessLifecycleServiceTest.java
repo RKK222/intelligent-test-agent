@@ -25,6 +25,7 @@ import com.icbc.testagent.domain.user.UserId;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +35,30 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class BackendJavaProcessLifecycleServiceTest {
+
+    @Test
+    void usesProcessStartTimeAsCreatedAtOnFirstHeartbeat() {
+        FakeRepository repository = new FakeRepository();
+        MutableClock clock = new MutableClock(Instant.parse("2026-06-24T00:00:00Z"));
+        BackendJavaProcessLifecycleService service = new BackendJavaProcessLifecycleService(
+                repository,
+                new RecordingHeartbeatStore(),
+                new ManagerControlSettings(
+                        "secret-token",
+                        "http://10.8.0.21:8080",
+                        new LinuxServerId("10.8.0.21"),
+                        Duration.ofSeconds(10),
+                        Duration.ofSeconds(30),
+                        Duration.ofSeconds(5),
+                        100),
+                clock);
+        clock.advance(Duration.ofMillis(500));
+
+        service.registerHeartbeat("trace_first_heartbeat");
+
+        assertThat(repository.backend.createdAt()).isEqualTo(Instant.parse("2026-06-24T00:00:00Z"));
+        assertThat(repository.backend.updatedAt()).isEqualTo(Instant.parse("2026-06-24T00:00:00.500Z"));
+    }
 
     @Test
     void registersReadyBackendProcessAndMarksOffline() {
@@ -216,5 +241,32 @@ class BackendJavaProcessLifecycleServiceTest {
         @Override public Set<LinuxServerId> liveBackendServerIds() { return Set.of(); }
         @Override public Set<OpencodeProcessId> liveOpencodeProcessIds() { return Set.of(); }
         @Override public void cleanupExpiredHeartbeats() { }
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant instant;
+
+        private MutableClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        private void advance(Duration duration) {
+            instant = instant.plus(duration);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
+        }
     }
 }

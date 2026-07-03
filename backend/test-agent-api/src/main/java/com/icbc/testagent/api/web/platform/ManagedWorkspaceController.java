@@ -198,6 +198,24 @@ public class ManagedWorkspaceController {
         return ok(exchange, null);
     }
 
+    @PostMapping("/workspaces/{workspaceId}/git-stage")
+    public ApiResponse<Object> stageWorkspaceGitFiles(
+            @PathVariable String workspaceId,
+            @RequestBody ManagedWorkspaceDtos.WorkspaceGitFilesRequest request,
+            ServerWebExchange exchange) {
+        service.stageWorkspaceGitFiles(workspaceId, request.files(), userId(exchange));
+        return ok(exchange, null);
+    }
+
+    @PostMapping("/workspaces/{workspaceId}/git-unstage")
+    public ApiResponse<Object> unstageWorkspaceGitFiles(
+            @PathVariable String workspaceId,
+            @RequestBody ManagedWorkspaceDtos.WorkspaceGitFilesRequest request,
+            ServerWebExchange exchange) {
+        service.unstageWorkspaceGitFiles(workspaceId, request.files(), userId(exchange));
+        return ok(exchange, null);
+    }
+
     @GetMapping("/workspaces/{workspaceId}/git-conflict")
     public ApiResponse<Object> getWorkspaceGitConflict(
             @PathVariable String workspaceId,

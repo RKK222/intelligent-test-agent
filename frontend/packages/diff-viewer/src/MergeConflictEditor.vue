@@ -32,9 +32,10 @@ let resultModel: monaco.editor.ITextModel | null = null;
 
 const resultDeleted = ref(false);
 const resultTouched = ref(false);
+const resultContent = ref(props.conflict.resultContent ?? "");
+let syncingResultModel = false;
 const conflictMarkersRemain = computed(() => {
-  const content = resultModel?.getValue() ?? props.conflict.resultContent ?? "";
-  return /^(<<<<<<<|=======|>>>>>>>)(?: .*)?$/m.test(content);
+  return /^(<<<<<<<|=======|>>>>>>>)(?: .*)?$/m.test(resultContent.value);
 });
 
 function languageFromPath(path: string) {
@@ -83,7 +84,7 @@ async function initializeEditors() {
   const language = languageFromPath(props.conflict.path);
   currentModel = monacoLib.editor.createModel(props.conflict.currentContent ?? "", language);
   incomingModel = monacoLib.editor.createModel(props.conflict.incomingContent ?? "", language);
-  resultModel = monacoLib.editor.createModel(props.conflict.resultContent ?? "", language);
+  resultModel = monacoLib.editor.createModel(resultContent.value, language);
   currentEditor.value = monacoLib.editor.create(currentEl.value, editorOptions(true));
   incomingEditor.value = monacoLib.editor.create(incomingEl.value, editorOptions(true));
   resultEditor.value = monacoLib.editor.create(resultEl.value, editorOptions(false));
@@ -91,6 +92,8 @@ async function initializeEditors() {
   incomingEditor.value.setModel(incomingModel);
   resultEditor.value.setModel(resultModel);
   resultModel.onDidChangeContent(() => {
+    if (syncingResultModel) return;
+    resultContent.value = resultModel?.getValue() ?? "";
     resultTouched.value = true;
     resultDeleted.value = false;
   });
@@ -114,7 +117,12 @@ function disposeEditors() {
 function applyContent(content: string | null | undefined) {
   resultTouched.value = true;
   resultDeleted.value = content == null;
-  resultModel?.setValue(content ?? "");
+  resultContent.value = content ?? "";
+  if (resultModel && resultModel.getValue() !== resultContent.value) {
+    syncingResultModel = true;
+    resultModel.setValue(resultContent.value);
+    syncingResultModel = false;
+  }
 }
 
 function keepBoth() {
@@ -129,7 +137,7 @@ function markResolved() {
     emit("resolve", { resolution: "DELETE" });
     return;
   }
-  emit("resolve", { resolution: "MANUAL", content: resultModel?.getValue() ?? "" });
+  emit("resolve", { resolution: "MANUAL", content: resultContent.value });
 }
 
 watch(
@@ -137,6 +145,7 @@ watch(
   async (conflict) => {
     resultDeleted.value = false;
     resultTouched.value = false;
+    resultContent.value = conflict.resultContent ?? "";
     if (!currentModel) {
       await nextTick();
       await initializeEditors();
@@ -145,7 +154,11 @@ watch(
     const language = languageFromPath(conflict.path);
     currentModel.setValue(conflict.currentContent ?? "");
     incomingModel?.setValue(conflict.incomingContent ?? "");
-    resultModel?.setValue(conflict.resultContent ?? "");
+    if (resultModel) {
+      syncingResultModel = true;
+      resultModel.setValue(resultContent.value);
+      syncingResultModel = false;
+    }
     if (monacoLib && currentModel && incomingModel && resultModel) {
       monacoLib.editor.setModelLanguage(currentModel, language);
       monacoLib.editor.setModelLanguage(incomingModel, language);
@@ -210,7 +223,7 @@ onBeforeUnmount(disposeEditors);
             size="sm"
             :disabled="resolving || !resultTouched || conflictMarkersRemain"
             @click="markResolved"
-          ><Check class="h-3.5 w-3.5" /> 标记已解决</Button>
+          ><Check class="h-3.5 w-3.5" /> 保存并标记已解决</Button>
         </div>
       </div>
       <div v-if="resultDeleted" class="merge-missing result-deleted"><Trash2 class="h-4 w-4" /> 结果将删除此文件</div>

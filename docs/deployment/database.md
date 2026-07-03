@@ -527,7 +527,7 @@ V10 种子数据对 F-COSS 的影响：
 | 表 | 说明 |
 |---|---|
 | `linux_servers` | Linux 服务器持久拓扑快照，`linux_server_id` 保存稳定服务器身份，记录状态、历史心跳字段和容量摘要 JSON；在线状态以 Redis Java 快照为准。 |
-| `backend_java_processes` | 后端 Java 实例持久拓扑，记录所属稳定服务器身份、实例直连地址、状态、启动时间和历史心跳字段；在线状态以 Redis Java 快照为准。 |
+| `backend_java_processes` | 后端 Java 实例持久拓扑，记录所属稳定服务器身份、实例直连地址、状态、启动时间和历史心跳字段；在线状态以 Redis Java 快照为准。首次心跳以进程启动时间写入 `created_at`，读取历史 `updated_at < created_at` 脏记录时按 `created_at` 归一化，避免阻断 manager 注册。 |
 | `opencode_containers` | opencode 容器，记录所属 Linux 服务器、容器名称、独立端口池、最大进程数、当前进程数和状态。 |
 | `opencode_container_managers` | 容器管理进程，每个容器最多一个 manager，记录协议版本、连接状态、能力 JSON 和历史心跳字段；在线状态以 Redis manager 快照为准。 |
 | `opencode_manager_backend_connections` | manager 与后端 Java 实例的持久 WebSocket 连接拓扑，按 `(manager_id, backend_process_id)` 唯一；在线连接视图以 Redis manager 快照中的连接列表为准。 |

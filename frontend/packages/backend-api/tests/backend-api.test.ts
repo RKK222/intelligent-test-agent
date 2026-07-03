@@ -22,6 +22,35 @@ describe("backend-api", () => {
     expect(headers.get("X-Trace-Id")).toBe("trace_fixed");
   });
 
+  it("stages and unstages workspace files through platform git endpoints", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(JSON.stringify({ success: true, traceId: "trace_fixed", data: null }), {
+        status: 200
+      })
+    );
+    const client = createBackendApiClient({
+      baseUrl: "http://api",
+      fetcher,
+      traceIdFactory: () => "trace_fixed"
+    });
+
+    await client.stageWorkspaceGitFiles("wrk_123", ["src/Changed.java"]);
+    await client.unstageWorkspaceGitFiles("wrk_123", ["src/Changed.java"]);
+
+    expect(fetcher.mock.calls.map((call) => [call[0], call[1]?.method, call[1]?.body])).toEqual([
+      [
+        "http://api/api/internal/platform/workspace-management/workspaces/wrk_123/git-stage",
+        "POST",
+        JSON.stringify({ files: ["src/Changed.java"] })
+      ],
+      [
+        "http://api/api/internal/platform/workspace-management/workspaces/wrk_123/git-unstage",
+        "POST",
+        JSON.stringify({ files: ["src/Changed.java"] })
+      ]
+    ]);
+  });
+
   it("reports raw backend exchanges without exposing sensitive request headers", async () => {
     const responseText = JSON.stringify({
       success: true,

@@ -164,7 +164,9 @@ public class BackendJavaProcessLifecycleService {
                 BackendJavaProcessStatus.READY,
                 startedAt,
                 now,
-                existing == null ? now : existing.createdAt(),
+                // 首次心跳可能与 manager 注册并发执行；创建时间固定为进程启动时间，
+                // 避免较早心跳后写入时把 updatedAt 更新到另一请求创建时间之前。
+                existing == null ? startedAt : existing.createdAt(),
                 now,
                 traceId);
         BackendRuntimeMetrics metrics = metricsCollector.sample();

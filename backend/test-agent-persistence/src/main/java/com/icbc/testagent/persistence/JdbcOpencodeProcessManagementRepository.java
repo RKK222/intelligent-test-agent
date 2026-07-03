@@ -61,16 +61,24 @@ public class JdbcOpencodeProcessManagementRepository extends JdbcRepositorySuppo
             instant(rs, "updated_at"),
             rs.getString("trace_id"));
 
-    private final RowMapper<BackendJavaProcess> backendProcessRowMapper = (rs, rowNum) -> new BackendJavaProcess(
-            new BackendProcessId(rs.getString("backend_process_id")),
-            new LinuxServerId(rs.getString("linux_server_id")),
-            rs.getString("listen_url"),
-            BackendJavaProcessStatus.valueOf(rs.getString("status")),
-            instant(rs, "started_at"),
-            instant(rs, "last_heartbeat_at"),
-            instant(rs, "created_at"),
-            instant(rs, "updated_at"),
-            rs.getString("trace_id"));
+    private final RowMapper<BackendJavaProcess> backendProcessRowMapper = (rs, rowNum) -> {
+        Instant createdAt = instant(rs, "created_at");
+        Instant updatedAt = instant(rs, "updated_at");
+        if (updatedAt != null && createdAt != null && updatedAt.isBefore(createdAt)) {
+            // 兼容启动阶段并发心跳曾产生的历史逆序时间，避免阻断 manager 重新注册。
+            updatedAt = createdAt;
+        }
+        return new BackendJavaProcess(
+                new BackendProcessId(rs.getString("backend_process_id")),
+                new LinuxServerId(rs.getString("linux_server_id")),
+                rs.getString("listen_url"),
+                BackendJavaProcessStatus.valueOf(rs.getString("status")),
+                instant(rs, "started_at"),
+                instant(rs, "last_heartbeat_at"),
+                createdAt,
+                updatedAt,
+                rs.getString("trace_id"));
+    };
 
     private final RowMapper<OpencodeContainer> containerRowMapper = (rs, rowNum) -> new OpencodeContainer(
             new OpencodeContainerId(rs.getString("container_id")),

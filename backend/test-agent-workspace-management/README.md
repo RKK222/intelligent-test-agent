@@ -19,7 +19,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - 托管应用成员校验失败时统一返回带加载上下文的 `FORBIDDEN`：message 显示应用、版本和工作区类型/名称/ID，`details` 只包含 `loadingStage`、`appId`、`appName`、`versionId`、`version`、`applicationWorkspaceId`、`workspaceKind`、`workspaceName`、`workspaceId`、`personalWorkspaceId` 等安全业务字段，便于排查“切换应用失败”时实际加载的是哪个应用、版本和工作区。
 - 通过 domain 广播端口发布/消费 `workspace.version.sync-requested`，并通过本机补偿器扫描缺失或落后的副本。
 - 与文件相关的 git 操作、差异比对、agent/skill 文件管理优先进入本模块。
-- 工作区 Git Diff 使用 `git status --porcelain --untracked-files=all` 展开未跟踪目录中的每个文件；unmerged 状态保留 `rawStatus` 并返回 `status=conflict`。冲突 API 读取 index stage 1/2/3，支持当前、应用、两者、手工、删除和取消 merge。普通个人发布先恢复 index 再只 stage 请求白名单；merge 重试保留完整 merge index。只有远端 push 完成才返回 `remotePushed=true`。
+- 工作区 Git Diff 使用 `git status --porcelain --untracked-files=all` 展开未跟踪目录中的每个文件；unmerged 状态保留 `rawStatus` 并返回 `status=conflict`。普通非冲突文件通过工作区 stage/unstage API 操作真实 index，冲突路径拒绝普通 index 操作；冲突 API 读取 index stage 1/2/3，支持当前、应用、两者、手工、删除和取消 merge。普通个人发布先恢复 index 再只 stage 请求白名单；merge 重试保留完整 merge index。只有远端 push 完成才返回 `remotePushed=true`。
 
 ## 测试覆盖
 
@@ -27,7 +27,7 @@ Workspace、文件管理、应用版本工作区、个人工作区、git/diff、
 - `WorkspaceFileServiceTest` 覆盖 UTF-8 读写、普通文件删除、目录删除拒绝、路径穿越拒绝、目录列表排序与上限、文件大小限制和 null 内容写入。
 - `WorkspaceDirectoryServiceTest` 覆盖服务器工作空间选择器的默认目录、只返回子目录、排序、父目录、条目上限和缺失目录错误码。
 - `GitPublishWorkflowTest` 覆盖直接发布、worktree 合并发布、冲突文件收集、merge abort、abort 失败保护，以及同步文件时先 clean/pull 再复制提交推送。
-- `ManagedWorkspaceApplicationServiceTest` 覆盖应用成员校验及 `FORBIDDEN` 加载上下文、标准库分支校验、设置页初始版本工作区创建、应用版本工作区创建、内部版本库按当前统一认证号拼接 Git URL 并刷新 origin、通用参数根目录、托管逻辑路径入库与物理路径响应、代码库英文名路径片段、服务器副本记录、目标 commit、广播发布、`git pull`、运行态 Workspace 关联、最近使用记录、私人 worktree 新命名规则、Git diff 路径解码、未跟踪文件级 patch、staged/unstaged patch 聚合、单文件 discard、个人 worktree 推送（在应用版本副本上把个人分支 merge 进特性分支后再推送特性分支，含合并冲突返回 `CONFLICT` 与冲突文件列表并 abort merge）、已提交但后续失败的 clean worktree 重试、旧应用副本路径自愈、无本机副本时创建本机副本而不是使用 legacy 绝对路径、sync-to-application 先拉取后复制提交、`yyyy年M月` 版本格式（`sanitizeVersionForBranchAndPath` 转 `yyyy-MM` 派生分支/路径）和非法版本格式拒绝。
+- `ManagedWorkspaceApplicationServiceTest` 覆盖应用成员校验及 `FORBIDDEN` 加载上下文、标准库分支校验、设置页初始版本工作区创建、应用版本工作区创建、内部版本库按当前统一认证号拼接 Git URL 并刷新 origin、通用参数根目录、托管逻辑路径入库与物理路径响应、代码库英文名路径片段、服务器副本记录、目标 commit、广播发布、`git pull`、运行态 Workspace 关联、最近使用记录、私人 worktree 新命名规则、Git diff 路径解码、未跟踪文件级 patch、staged/unstaged patch 聚合、真实 stage/unstage 与冲突路径拒绝、单文件 discard、个人 worktree 推送（在应用版本副本上把个人分支 merge 进特性分支后再推送特性分支，含合并冲突返回 `CONFLICT` 与冲突文件列表并 abort merge）、已提交但后续失败的 clean worktree 重试、旧应用副本路径自愈、无本机副本时创建本机副本而不是使用 legacy 绝对路径、sync-to-application 先拉取后复制提交、`yyyy年M月` 版本格式（`sanitizeVersionForBranchAndPath` 转 `yyyy-MM` 派生分支/路径）和非法版本格式拒绝。
 - `AgentConfigApplicationServiceTest` 覆盖公共 Git 地址未配置禁用、公共更新/初始化 clone 与广播、脏仓库保持可浏览、默认拒绝覆盖和显式恢复已跟踪修改、公共 worktree 未初始化时拒绝 clone、worktree 名称拼接日期、服务器归属保存、公共 worktree 切换列表按服务器/状态过滤并返回创建人、Agent 配置文件服务器归属查询、公共/工作空间级 diff patch 聚合、公共/工作空间 worktree publish 冲突文件返回与不推送，以及工作空间级 `.opencode/` 根下 `agents/` 与 `skills/` 技能包读写和 diff 过滤。
 
 ## 允许依赖

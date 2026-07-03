@@ -11,7 +11,7 @@
 - `web.platform` 承载平台自身接口和旧兼容入口，`web.agent` 承载 agent runtime 兼容代理入口，`web.common` 承载 traceId、鉴权、限流和统一异常等入口支撑。
 - 普通 Workspace HTTP 入口只保留查询和文件路由；服务器目录选择与创建仅通过超级管理员文件 WebSocket ticket 执行。
 - 暴露应用版本工作区、版本 `git pull` 和个人工作区运行接口，Controller 只解析登录主体、traceId、当前用户 opencode agent 服务器并委托 workspace-management；应用成员权限由业务服务校验。
-- 工作区 Git 入口包含 diff/discard、三方冲突读取、单文件解决、取消 merge 和个人工作区发布；冲突内容与解决规则由 workspace-management 负责，Controller 只转换 DTO。
+- 工作区 Git 入口包含 diff/discard、真实 stage/unstage、三方冲突读取、单文件解决、取消 merge 和个人工作区发布；冲突内容、index 操作与解决规则由 workspace-management 负责，Controller 只转换 DTO。
 - 暴露配置管理接口，Controller 只委托 configuration-management 业务服务；应用与工作区接口统一校验 `APP_ADMIN`，`SUPER_ADMIN` 继承该能力。版本库类型下拉、部署模式选项接口和新增代码库的 `repositoryType/deploymentMode` DTO 仅做协议转换，旧 `standard` 兼容派生和内部模式 SSH 前缀由业务服务处理。设置页创建应用工作空间接口会读取当前用户 READY opencode 进程的 Linux 服务器并委托 workspace-management 创建初始版本工作区，进度通过 `workspace-create-operations/{operationId}` HTTP 轮询查询。
 - Controller 只调用业务模块 service，不直接访问 Repository、generated SDK 或 JDBC 实现。
 - 维护 `RuntimeDtos` 等平台 DTO，不返回 generated SDK DTO。
@@ -67,7 +67,7 @@
 - Workspace 文件 WebSocket 入口应覆盖 route、ticket、Origin、同服务器校验、ticket 在归属未 READY 时复查强状态、RPC 成功/错误 envelope 和目录删除拒绝；对应 HTTP/协议契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
 - Agent 配置入口应覆盖公共/工作空间 status、公共仓库列表按 `linuxServerId` 去重、公共 worktree 列表权限和缺参校验、文件 WebSocket route/ticket/op、文件读写权限、Git 操作鉴权、operation ticket、Origin 拒绝和进度 envelope；对应 HTTP/协议契约同步维护在 `docs/api/http-api.md` 与 `docs/api/event-stream.md`。
 - `RuntimeApiSupportTest` 覆盖分页默认值和非法分页参数转换为统一 `VALIDATION_ERROR`。
-- `ManagedWorkspaceControllerTest` 覆盖应用版本工作区入口的认证主体、traceId、当前用户 opencode 服务器透传、请求体转换、版本 `git pull` 和最近使用接口。
+- `ManagedWorkspaceControllerTest` 覆盖应用版本工作区入口的认证主体、traceId、当前用户 opencode 服务器透传、请求体转换、版本 `git pull`、工作区 Git stage/unstage、冲突解决和最近使用接口。
 - `RuntimeSecurityConfigTest` 覆盖本地 `frontend-opencode` real E2E Origin 白名单。
 - `AuthControllerRolesTest`、`ConfigurationManagementControllerTest` 覆盖认证响应 roles、`APP_ADMIN`/`SUPER_ADMIN` 鉴权、代码库英文名、版本库类型与部署模式 DTO、版本库类型/部署模式下拉接口、工作空间创建进度轮询和 SSH key 不回显私钥。
 - `ApiTokenWebFilterTest`、`InMemoryRateLimitWebFilterTest`、`TraceIdWebFilterTest`、`GlobalExceptionHandlerTest` 覆盖鉴权、限流、traceId 和统一错误响应。

@@ -1320,6 +1320,43 @@ class JdbcRepositoryIntegrationTest {
     }
 
     @Test
+    void opencodeProcessManagementNormalizesLegacyBackendProcessTimestampOrder() {
+        jdbcClient.sql("""
+                        insert into linux_servers(
+                            linux_server_id, name, status, capacity_summary_json,
+                            last_heartbeat_at, trace_id, created_at, updated_at
+                        )
+                        values (
+                            '10.8.0.12', 'backend-a', 'READY', '{}',
+                            :createdAt, 'trace_legacy_timestamp', :createdAt, :createdAt
+                        )
+                        """)
+                .param("createdAt", NOW)
+                .update();
+        jdbcClient.sql("""
+                        insert into backend_java_processes(
+                            backend_process_id, linux_server_id, listen_url, status,
+                            started_at, last_heartbeat_at, trace_id, created_at, updated_at
+                        )
+                        values (
+                            'bjp_legacy_timestamp', '10.8.0.12', 'http://10.8.0.12:8080', 'READY',
+                            :startedAt, :updatedAt, 'trace_legacy_timestamp', :createdAt, :updatedAt
+                        )
+                        """)
+                .param("startedAt", NOW.minusSeconds(10))
+                .param("createdAt", NOW)
+                .param("updatedAt", NOW.minusMillis(250))
+                .update();
+
+        BackendJavaProcess process = opencodeProcesses
+                .findBackendJavaProcessById(new BackendProcessId("bjp_legacy_timestamp"))
+                .orElseThrow();
+
+        assertThat(process.createdAt()).isEqualTo(NOW);
+        assertThat(process.updatedAt()).isEqualTo(NOW);
+    }
+
+    @Test
     void opencodeProcessManagementFindsReadyBackendsAndConnectedContainers() {
         LinuxServer linuxServer = linuxServer();
         BackendJavaProcess currentBackend = backendJavaProcess();

@@ -551,6 +551,16 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-discard`,
         { method: "POST", body: JSON.stringify({ files }) }
       ),
+    stageWorkspaceGitFiles: (workspaceId: string, files: string[]) =>
+      request<void>(
+        `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-stage`,
+        { method: "POST", body: JSON.stringify({ files }) }
+      ),
+    unstageWorkspaceGitFiles: (workspaceId: string, files: string[]) =>
+      request<void>(
+        `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-unstage`,
+        { method: "POST", body: JSON.stringify({ files }) }
+      ),
     getWorkspaceGitConflict: (workspaceId: string, path: string) =>
       request<WorkspaceGitConflict>(
         `${workspaceManagementBase}/workspaces/${encodeURIComponent(workspaceId)}/git-conflict${query({ path })}`

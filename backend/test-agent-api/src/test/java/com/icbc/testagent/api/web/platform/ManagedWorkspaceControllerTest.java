@@ -242,6 +242,34 @@ class ManagedWorkspaceControllerTest {
                 "wks_123", "src/Login.java", "MANUAL", "resolved", USER_ID);
     }
 
+    @Test
+    void gitStageEndpointsForwardFilesAndUser() {
+        ManagedWorkspaceApplicationService service = org.mockito.Mockito.mock(ManagedWorkspaceApplicationService.class);
+
+        client(service).post()
+                .uri("/api/internal/platform/workspace-management/workspaces/wks_123/git-stage")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"files":["src/Changed.java"]}
+                        """)
+                .exchange()
+                .expectStatus().isOk();
+
+        client(service).post()
+                .uri("/api/internal/platform/workspace-management/workspaces/wks_123/git-unstage")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"files":["src/Changed.java"]}
+                        """)
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).stageWorkspaceGitFiles("wks_123", List.of("src/Changed.java"), USER_ID);
+        verify(service).unstageWorkspaceGitFiles("wks_123", List.of("src/Changed.java"), USER_ID);
+    }
+
     private WebTestClient client(ManagedWorkspaceApplicationService service) {
         return client(service, readyAssignmentService("127.0.0.1"));
     }

@@ -1134,6 +1134,52 @@ public class ManagedWorkspaceApplicationService implements ServerBroadcastHandle
     }
 
     /**
+     * 把个人工作区中的非冲突文件定点加入 Git index。
+     * 未解决冲突必须继续通过冲突解决接口处理，避免普通 stage 覆盖 index 的 stage 1/2/3。
+     */
+    public void stageWorkspaceGitFiles(String workspaceId, List<String> files, UserId userId) {
+        updateWorkspaceGitIndex(workspaceId, files, userId, true);
+    }
+
+    /**
+     * 把个人工作区中的非冲突文件从 Git index 撤回工作树。
+     * merge 期间允许撤回普通文件，但 Git 原生仍会阻止存在 unmerged 文件时提交。
+     */
+    public void unstageWorkspaceGitFiles(String workspaceId, List<String> files, UserId userId) {
+        updateWorkspaceGitIndex(workspaceId, files, userId, false);
+    }
+
+    private void updateWorkspaceGitIndex(
+            String workspaceId,
+            List<String> files,
+            UserId userId,
+            boolean stage) {
+        PersonalGitContext context = personalGitContext(workspaceId, userId);
+        List<String> displayFiles = normalizeFiles(files);
+        List<String> gitFiles = repoRelativeFiles(context.repoRoot(), context.workspaceRoot(), displayFiles);
+        Set<String> conflicts = gitWorkspaceService.parseStatusPorcelain(
+                        gitWorkspaceService.statusPorcelain(context.repoRoot())).stream()
+                .filter(GitStatusEntry::unmerged)
+                .map(GitStatusEntry::path)
+                .collect(java.util.stream.Collectors.toSet());
+        List<String> requestedConflicts = java.util.stream.IntStream.range(0, gitFiles.size())
+                .filter(index -> conflicts.contains(gitFiles.get(index)))
+                .mapToObj(displayFiles::get)
+                .toList();
+        if (!requestedConflicts.isEmpty()) {
+            throw new PlatformException(
+                    ErrorCode.CONFLICT,
+                    "冲突文件必须通过合并编辑器解决",
+                    Map.of("files", requestedConflicts));
+        }
+        if (stage) {
+            gitWorkspaceService.stageFiles(context.repoRoot(), gitFiles, context.privateKey());
+        } else {
+            gitWorkspaceService.unstageFiles(context.repoRoot(), gitFiles, context.privateKey());
+        }
+    }
+
+    /**
      * 读取个人 worktree 中单个冲突文件的 base/current/incoming 三方内容。
      */
     public ManagedWorkspaceResponses.WorkspaceGitConflictResponse getWorkspaceGitConflict(

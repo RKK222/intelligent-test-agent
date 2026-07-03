@@ -7,7 +7,7 @@ Run/Session/VCS Diff 查看和 Run 级动作入口包。
 ## 主要职责
 
 - 使用 Monaco Diff Editor 展示当前文件 Diff。
-- 复用 Monaco 懒加载能力展示当前个人版本、应用版本和可编辑合并结果；组件只 emit 冲突解决/取消决策，不直接调用后端。
+- 复用 Monaco 懒加载能力展示当前个人版本、应用版本和可编辑合并结果；合并结果使用响应式状态桥接 Monaco，保留当前、采用应用、保留两者和手工编辑都能可靠保存；组件只 emit 冲突解决/取消决策，不直接调用后端。
 - 展示 Changed Files 列表。
 - 支持 Run、Session/message、VCS 三种 Diff 来源切换。
 - 支持 split/unified 视图切换。

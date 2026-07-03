@@ -1038,6 +1038,8 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 | `POST` | `/workspace-versions/{versionId}/ensure-default-personal-workspace` | 显式确保默认个人工作区存在：查询 (versionId, userId, workspaceName=default)，存在则复用返回，不存在则后台创建。 |
 | `GET` | `/workspaces/{workspaceId}/git-diff` | 基于本地 Git（不依赖 opencode）获取工作区变更文件列表，返回 `{ files: [{ path, rawStatus, status, staged, patch, additions, deletions }] }`；Git unmerged 状态会返回 `status=conflict`。 |
 | `POST` | `/workspaces/{workspaceId}/git-discard` | 丢弃当前个人 worktree 中指定工作区相对路径的本地 Git 改动；已跟踪文件执行 restore，新增/未跟踪文件定点 clean。 |
+| `POST` | `/workspaces/{workspaceId}/git-stage` | 把当前个人 worktree 中指定的非冲突文件定点加入真实 Git index。 |
+| `POST` | `/workspaces/{workspaceId}/git-unstage` | 把当前个人 worktree 中指定的非冲突文件从真实 Git index 撤回工作树。 |
 | `GET` | `/workspaces/{workspaceId}/git-conflict?path={path}` | 读取个人 worktree 冲突文件的 Git base/current/incoming stage 与工作树结果。 |
 | `POST` | `/workspaces/{workspaceId}/git-conflict/resolve` | 解决单个冲突并定点 stage，支持当前、应用、两者、手工内容和删除语义。 |
 | `POST` | `/workspaces/{workspaceId}/git-conflict/abort` | 在个人 worktree 中执行 `merge --abort`，取消整次未完成合并。 |
@@ -1179,6 +1181,16 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 
 `files` 使用 `git-diff` 响应中的工作区相对路径。后端只允许当前用户个人 worktree 的运行态 workspace 调用；会先把路径映射到仓库相对路径，已跟踪修改/删除执行 `git restore --staged --worktree -- <file>`，新增或未跟踪文件先取消暂存再执行定点 `git clean -f -- <file>`。成功后无业务响应体，前端刷新 `git-diff` 后该文件不再出现在变更列表中。
 
+`POST /workspaces/{workspaceId}/git-stage` 与 `POST /workspaces/{workspaceId}/git-unstage` 使用相同请求体：
+
+```json
+{
+  "files": ["src/App.java"]
+}
+```
+
+后端复用个人工作区归属和路径校验，把工作区相对路径映射为仓库相对路径后分别执行定点 `git add -- <files>` 和 `git restore --staged -- <files>`。merge 冲突期间仍允许操作普通非冲突文件；unmerged 路径必须通过 `git-conflict/resolve` 处理，传入普通 stage/unstage API 会返回 `CONFLICT`。只要仍存在 unmerged 文件，Git 原生规则仍禁止 commit/push。
+
 `GET /workspaces/{workspaceId}/git-conflict?path=src/App.java` 返回 `path/rawStatus/baseContent/currentContent/incomingContent/resultContent`。四个 content 可为 `null`，表示对应 Git stage 或工作树中不存在文件；文本上限 1MB。`POST /workspaces/{workspaceId}/git-conflict/resolve` 请求体为：
 
 ```json
@@ -1210,7 +1222,7 @@ Base URL：`/api/internal/platform/workspace-management`。该能力把配置管
 合并结果：
 
 - **成功（MERGED）**：更新应用版本 `targetCommitHash` 和当前服务器 replica commit，广播其他服务器同步。
-- **冲突（CONFLICT）**：返回冲突文件列表，不推送特性分支；如果冲突发生在个人 worktree 合入特性分支阶段，后端不会 abort，冲突文件保留在当前个人 worktree。用户在当前个人 worktree 中解决冲突并保存后，重新点击提交并推送完成 merge commit 和特性分支推送。前端必须保留 `CONFLICT` 提示，并通过 `git-diff` 中的 `status=conflict/rawStatus` 把 unmerged 文件单独展示为待解决冲突，不能作为普通 staged 删除展示；冲突未解决期间提交按钮必须禁用，普通 staged 文件仅作为 merge 自动应用的中间状态展示。应用版本副本合并阶段如出现冲突，后端会 abort 应用版本副本上的 merge 且不推送。
+- **冲突（CONFLICT）**：返回冲突文件列表，不推送特性分支；如果冲突发生在个人 worktree 合入特性分支阶段，后端不会 abort，冲突文件保留在当前个人 worktree。用户在当前个人 worktree 中解决冲突并保存后，重新点击提交并推送完成 merge commit 和特性分支推送。前端必须保留 `CONFLICT` 提示，并通过 `git-diff` 中的 `status=conflict/rawStatus` 把 unmerged 文件单独展示为待解决冲突，不能作为普通 staged 删除展示；冲突未解决期间普通非冲突文件仍可真实 stage/unstage，但提交按钮必须禁用，直到所有 unmerged 文件解决。应用版本副本合并阶段如出现冲突，后端会 abort 应用版本副本上的 merge 且不推送。
 
 响应 `PersonalWorkspacePublishResponse`：
 

@@ -62,7 +62,7 @@ Browser
 | 包 | 职责 |
 |---|---|
 | `apps/agent-web` | 自研 Vue 3 + Vite 主应用，负责页面组合、Vue Query Provider、Pinia、工作空间选择、服务器工作空间选择、用户 opencode 进程状态提示/初始化入口、Run 启动、SSE 订阅编排、会话级前端原始报文内存查看器、设置模态（含版本库英文名、版本库类型、工作空间创建进度和用户管理（测试）页签）、超级管理员系统管理容器（定时任务管理 + 运行管理最新指标与 ECharts 趋势）和全局错误提示。 |
-| `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、可选安全原始 HTTP 交换 observer、超级管理员服务器目录选择、平台文件 WebSocket route/ticket/RPC（workspace 与 Agent 配置文件）、用户 opencode 进程状态/初始化、运行管理 overview 与指标历史、定时任务管理、配置管理、版本库类型字典、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询和默认 `opencode` 的 agent URL 前缀。 |
+| `packages/backend-api` | 访问平台后端服务的唯一前端 client，负责统一响应、错误、traceId、可选安全原始 HTTP 交换 observer、超级管理员服务器目录选择、平台文件 WebSocket route/ticket/RPC（workspace 与 Agent 配置文件）、工作区 Git diff/stage/unstage/冲突 API、用户 opencode 进程状态/初始化、运行管理 overview 与指标历史、定时任务管理、配置管理、版本库类型字典、工作空间创建进度轮询、应用版本工作区 API 映射、active run 恢复查询和默认 `opencode` 的 agent URL 前缀。 |
 | `packages/event-stream-client` | RunEvent SSE client，负责按默认 `opencode` agent URL 连接、自动重连、解析前原始 `MessageEvent.data` 回调、事件解析、去重和取消订阅。 |
 | `packages/workbench-shell` | dockview-vue 工作台布局、顶部栏、面板、工作台级 Pinia 状态，以及 Git 变更面板应用工作区/应用级 Agent mock 数据。 |
 | `packages/file-explorer` | 文件树、超级管理员服务器工作空间选择事件、已加载文件名过滤、变更列表和打开文件入口。 |

@@ -29,6 +29,8 @@ import type {
 } from "@test-agent/shared-types";
 import { Badge } from "@test-agent/ui-kit";
 
+type WorkspacePanelDiffFile = RunDiffFile & { rawStatus?: string };
+
 const props = defineProps<{
   workspaceId?: string;
   /** 当前默认个人工作区 ID，用于提交并推送（合并回应用版本分支） */
@@ -38,7 +40,12 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  openDiff: [payload: { path: string; source: "vcs" | "agent"; scope?: "PUBLIC" | "WORKSPACE" }];
+  openDiff: [payload: {
+    path: string;
+    source: "vcs" | "agent";
+    scope?: "PUBLIC" | "WORKSPACE";
+    file?: WorkspacePanelDiffFile;
+  }];
   "changes-refreshed": [payload?: { paths?: string[]; reloadOpenFiles?: boolean }];
 }>();
 
@@ -111,12 +118,11 @@ const signOff = ref(false);
 const noVerify = ref(false);
 const amend = ref(false);
 
-type WorkspacePanelDiffFile = RunDiffFile & { rawStatus?: string };
-
 // Local arrays for workspace diff
 const workspaceDiffFiles = ref<WorkspacePanelDiffFile[]>([]);
 const stagedWorkspacePaths = ref<Set<string>>(new Set());
 const discardingWorkspacePaths = ref<Set<string>>(new Set());
+const updatingWorkspaceIndexPaths = ref<Set<string>>(new Set());
 
 // Workspace diff computed lists
 const workspaceUnstaged = computed(() =>
@@ -167,7 +173,6 @@ watch(
 );
 
 async function refreshChanges(options: { preserveError?: boolean } = {}) {
-  if (loading.value) return;
   const token = ++refreshChangesToken;
   loading.value = true;
   if (!options.preserveError) {
@@ -263,16 +268,47 @@ function normalizeWorkspaceAgentDiffPath(path: string): string | null {
   return value.startsWith("agents/") || value.startsWith("skills/") ? value : null;
 }
 
-// Stage workspace file (simulate)
-function stageWorkspaceFile(path: string) {
-  stagedWorkspacePaths.value = new Set([...stagedWorkspacePaths.value, path]);
+// 工作区暂存必须落到真实 Git index，刷新后列表状态才不会回退。
+async function stageWorkspaceFile(path: string) {
+  if (!props.canWrite || !props.workspaceId || updatingWorkspaceIndexPaths.value.has(path)) return;
+  errorMessage.value = "";
+  updatingWorkspaceIndexPaths.value = new Set([...updatingWorkspaceIndexPaths.value, path]);
+  try {
+    if (workbench.useMockTestData) {
+      stagedWorkspacePaths.value = new Set([...stagedWorkspacePaths.value, path]);
+      return;
+    }
+    await api.stageWorkspaceGitFiles(props.workspaceId, [path]);
+    await refreshChanges();
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "暂存工作区文件失败");
+  } finally {
+    const next = new Set(updatingWorkspaceIndexPaths.value);
+    next.delete(path);
+    updatingWorkspaceIndexPaths.value = next;
+  }
 }
 
-// Unstage workspace file (simulate)
-function unstageWorkspaceFile(path: string) {
-  const next = new Set(stagedWorkspacePaths.value);
-  next.delete(path);
-  stagedWorkspacePaths.value = next;
+async function unstageWorkspaceFile(path: string) {
+  if (!props.canWrite || !props.workspaceId || updatingWorkspaceIndexPaths.value.has(path)) return;
+  errorMessage.value = "";
+  updatingWorkspaceIndexPaths.value = new Set([...updatingWorkspaceIndexPaths.value, path]);
+  try {
+    if (workbench.useMockTestData) {
+      const next = new Set(stagedWorkspacePaths.value);
+      next.delete(path);
+      stagedWorkspacePaths.value = next;
+      return;
+    }
+    await api.unstageWorkspaceGitFiles(props.workspaceId, [path]);
+    await refreshChanges();
+  } catch (error) {
+    errorMessage.value = errorMessageFor(error, "取消暂存工作区文件失败");
+  } finally {
+    const next = new Set(updatingWorkspaceIndexPaths.value);
+    next.delete(path);
+    updatingWorkspaceIndexPaths.value = next;
+  }
 }
 
 function notifyChangesRefreshed(paths?: string[], reloadOpenFiles?: boolean) {
@@ -419,8 +455,18 @@ async function unstageAgentFile(file: AgentConfigDiffFile & { scope: "PUBLIC" | 
 }
 
 // Open Diff in right Monaco Editor workspace
-function handleOpenFileDiff(path: string, source: "vcs" | "agent", scope?: "PUBLIC" | "WORKSPACE") {
-  emit("openDiff", { path, source, scope });
+function handleOpenFileDiff(
+  path: string,
+  source: "vcs" | "agent",
+  scope?: "PUBLIC" | "WORKSPACE",
+  file?: WorkspacePanelDiffFile
+) {
+  emit("openDiff", {
+    path,
+    source,
+    ...(scope ? { scope } : {}),
+    ...(file ? { file } : {})
+  });
 }
 
 // Commit changes
@@ -670,6 +716,8 @@ defineExpose({
                 v-for="file in workspaceConflicts"
                 :key="file.path"
                 class="git-file-row git-conflict-row group"
+                :title="file.path"
+                :aria-label="file.path"
                 @click="openWorkspaceConflict(file.path)"
               >
                 <Badge tone="danger" class="mr-1 py-0 px-1 text-[9px] uppercase">CONFLICT</Badge>
@@ -683,7 +731,9 @@ defineExpose({
                 v-for="file in workspaceUnstaged"
                 :key="file.path"
                 class="git-file-row group"
-                @click="handleOpenFileDiff(file.path, 'vcs')"
+                :title="file.path"
+                :aria-label="file.path"
+                @click="handleOpenFileDiff(file.path, 'vcs', undefined, file)"
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
                 <span class="git-file-name" :title="file.path">{{ file.path }}</span>
@@ -704,9 +754,11 @@ defineExpose({
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="暂存文件"
+                  :disabled="updatingWorkspaceIndexPaths.has(file.path)"
                   @click.stop="stageWorkspaceFile(file.path)"
                 >
-                  <Plus class="h-3.5 w-3.5" :stroke-width="1.5" />
+                  <Loader2 v-if="updatingWorkspaceIndexPaths.has(file.path)" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                  <Plus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
                 </button>
               </div>
             </div>
@@ -726,6 +778,8 @@ defineExpose({
                 v-for="file in agentsUnstaged"
                 :key="file.path"
                 class="git-file-row group"
+                :title="file.path"
+                :aria-label="file.path"
                 @click="handleOpenFileDiff(file.path, 'agent', file.scope)"
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
@@ -776,14 +830,16 @@ defineExpose({
             </div>
             <div v-show="workspaceStagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
               <div v-if="hasWorkspaceConflicts && workspaceStaged.length > 0" class="git-conflict-note">
-                以下暂存项来自未完成合并自动应用的变更，解决冲突后会随 merge 一起提交
+                可继续取消暂存普通文件；解决全部冲突后 Git 才允许提交
               </div>
               <div v-if="workspaceStaged.length === 0" class="git-empty-text">无暂存文件</div>
               <div
                 v-for="file in workspaceStaged"
                 :key="file.path"
                 class="git-file-row group"
-                @click="handleOpenFileDiff(file.path, 'vcs')"
+                :title="file.path"
+                :aria-label="file.path"
+                @click="handleOpenFileDiff(file.path, 'vcs', undefined, file)"
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
                 <span class="git-file-name" :title="file.path">{{ file.path }}</span>
@@ -802,13 +858,14 @@ defineExpose({
                   <Undo2 v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
                 </button>
                 <button
-                  v-if="!hasWorkspaceConflicts"
                   type="button"
                   class="git-row-action hidden group-hover:inline-flex"
                   title="取消暂存"
+                  :disabled="updatingWorkspaceIndexPaths.has(file.path)"
                   @click.stop="unstageWorkspaceFile(file.path)"
                 >
-                  <Minus class="h-3.5 w-3.5" :stroke-width="1.5" />
+                  <Loader2 v-if="updatingWorkspaceIndexPaths.has(file.path)" class="h-3.5 w-3.5 animate-spin" :stroke-width="1.5" />
+                  <Minus v-else class="h-3.5 w-3.5" :stroke-width="1.5" />
                 </button>
               </div>
             </div>
@@ -828,6 +885,8 @@ defineExpose({
                 v-for="file in agentsStaged"
                 :key="file.path"
                 class="git-file-row group"
+                :title="file.path"
+                :aria-label="file.path"
                 @click="handleOpenFileDiff(file.path, 'agent', file.scope)"
               >
                 <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
@@ -867,6 +926,7 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-commit flex-1"
+          :title="hasWorkspaceConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交' : '提交已暂存变更'"
           :disabled="committing || hasWorkspaceConflicts || totalStagedCount === 0 || !commitMessage.trim()"
           @click="handleCommit(false)"
         >
@@ -876,6 +936,7 @@ defineExpose({
         <button
           type="button"
           class="git-action-btn btn-push flex-1"
+          :title="hasWorkspaceConflicts ? 'Git 存在未解决冲突，解决全部冲突后才能提交并推送' : '提交并推送已暂存变更'"
           :disabled="committing || hasWorkspaceConflicts || totalStagedCount === 0 || !commitMessage.trim()"
           @click="handleCommit(true)"
         >

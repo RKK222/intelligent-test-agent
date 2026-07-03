@@ -34,6 +34,13 @@
     - 修改 mock stub `ElInputStub` 绑定 `disabled` 属性到原生 `input`。
     - 调整原有测试用例以在点击“新增”前选择版本库类型，并新增校验及字段禁用的回归测试用例。
 - Result: 前端 `corepack pnpm test settings-repository-panel` (11 个测试) 与 `corepack pnpm typecheck` 全部通过。未修改 generated SDK、后端 API 协议或环境配置文件。
+### 2026-07-03 - 修复工作区 Git 交互与 opencode 重启注册失败
+
+- Why: 工作区 Git 面板在冲突期间不能暂存/撤回普通文件，文件名和 Diff 打开体验不完整，冲突预设结果无法保存；随后本地重启暴露后端启动阶段并发心跳可能写出 `backend_java_processes.updated_at < created_at`，导致 manager WebSocket 注册持续失败，opencode 无法启动。
+- What: 工作区增加真实 stage/unstage API，冲突存在时只禁止 commit/push；文件行支持全路径悬浮，已加载 Diff 直接打开；三方编辑器用响应式结果驱动预设和保存。后端进程首次心跳固定以进程启动时间作为 `createdAt`，持久层兼容归一化历史逆序时间记录。
+- How: 复用现有 `GitWorkspaceService`、工作区发布/冲突 API、Monaco 三方编辑器和 `BackendJavaProcessLifecycleService`；补充 workspace/API/frontend/diff-viewer/runtime/persistence 回归测试及模块、HTTP API、数据库文档。未修改 `.env*`、generated SDK、RunEvent 或数据库 schema。
+- Result: 前端 245 通过、1 跳过，typecheck/build 通过；Git 测试仓库验证 1 个冲突保留时普通文件可独立 stage/unstage；runtime 5 个测试和历史时间归一化定向集成测试通过。按 `.env.test` / `test` profile 重启后 manager 稳定连接，`usr_test_dev` 初始化 opencode 成功，4096 端口 `/global/health` 返回 `healthy=true`、版本 `1.17.7`。
+
 ### 2026-07-02 - 修复工作区发布白名单、三方冲突处理与推送误报
 
 - Why: 个人工作区普通发布在 Git index 残留其他 staged 文件时会被无 pathspec 的 commit 一并提交；冲突文件虽能识别但没有三方查看/解决入口；发布异常后前端可能保留中间成功进度，并且缺少远端 push 的独立确认。
