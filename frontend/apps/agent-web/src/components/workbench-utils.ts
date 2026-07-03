@@ -384,10 +384,17 @@ export function diffFilesFromSessionMessages(messages: SessionMessage[]): RunDif
 }
 
 /**
- * 新会话标题直接取第一次发送的可见消息，去掉输入框首尾空白。
+ * 新会话标题取第一次发送内容的首个非空行，并限制长度，避免长 prompt 超过后端 title 字段上限。
  */
 export function sessionTitleFromFirstMessage(message: string): string {
-  return message.trim() || "新对话";
+  const line = message
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .find(Boolean);
+  if (!line) {
+    return "新对话";
+  }
+  return line.length > 72 ? `${line.slice(0, 69)}...` : line;
 }
 
 export function modelValue(model: ModelInfo) {

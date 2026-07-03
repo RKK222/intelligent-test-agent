@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-03 - 会话标题取首个非空行并截断
+
+- Why:
+  - 首次发送长 prompt 时，前端曾把完整内容作为 Session 标题，可能超过后端 `sessions.title` 长度限制并导致创建 Session 失败。
+- What:
+  - `sessionTitleFromFirstMessage` 改为取首个非空行；
+  - 标题超过 72 个字符时截断为前 69 个字符加 `...`。
+- How:
+  - 只改前端标题生成工具和对应单测，不改 API、后端、数据库或事件。
+- Result:
+  - 新会话标题不会再因多行长 prompt 直接带入完整正文。
+
 ### 2026-07-03 - 恢复对话区 Agent 选择与 @ 候选
 
 - Why:

@@ -221,8 +221,15 @@ describe("historical session restoration", () => {
     ]);
   });
 
-  it("uses the trimmed first message as the session title", () => {
+  it("uses the first non-empty line as the session title", () => {
     expect(sessionTitleFromFirstMessage("  请生成登录测试案例  ")).toBe("请生成登录测试案例");
+    expect(sessionTitleFromFirstMessage(" \n\n  第一行标题  \n第二行不进入标题")).toBe("第一行标题");
+  });
+
+  it("truncates long session titles", () => {
+    const longTitle = "a".repeat(80);
+
+    expect(sessionTitleFromFirstMessage(longTitle)).toBe(`${"a".repeat(69)}...`);
   });
 });
 
