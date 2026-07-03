@@ -16,6 +16,11 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.http.codec.ServerSentEvent;
@@ -121,6 +126,92 @@ class RunEventServicesTest {
                     assertThat(payload.type()).isEqualTo("run.started");
                 })
                 .verifyComplete();
+    }
+
+    @Test
+    void liveBusKeepsAcceptingEventsAfterSubscriberCompletes() {
+        RunEventLiveBus liveBus = new RunEventLiveBus();
+        RunId runId = new RunId("run_1234567890abcdef");
+
+        StepVerifier.create(liveBus.stream(runId).take(1))
+                .then(() -> liveBus.publishTransient(new RunEventDraft(
+                        runId,
+                        RunEventType.MESSAGE_PART_DELTA,
+                        "trace_1234567890abcdef",
+                        NOW,
+                        Map.of("delta", "first"))))
+                .assertNext(event -> assertThat(event.payload().payload()).containsEntry("delta", "first"))
+                .verifyComplete();
+
+        StepVerifier.create(liveBus.stream(runId).take(1))
+                .then(() -> liveBus.publishTransient(new RunEventDraft(
+                        runId,
+                        RunEventType.MESSAGE_PART_DELTA,
+                        "trace_1234567890abcdef",
+                        NOW,
+                        Map.of("delta", "second"))))
+                .assertNext(event -> assertThat(event.payload().payload()).containsEntry("delta", "second"))
+                .verifyComplete();
+    }
+
+    @Test
+    void liveBusDropsConcurrentOverflowWithoutTerminatingChannel() {
+        RunEventLiveBus liveBus = new RunEventLiveBus();
+        RunId runId = new RunId("run_1234567890abcdef");
+
+        StepVerifier.create(liveBus.stream(runId), 0)
+                .then(() -> publishManyConcurrently(liveBus, runId, 16, 200))
+                .thenCancel()
+                .verify();
+
+        StepVerifier.create(liveBus.stream(runId).take(1))
+                .then(() -> liveBus.publishTransient(new RunEventDraft(
+                        runId,
+                        RunEventType.MESSAGE_PART_DELTA,
+                        "trace_1234567890abcdef",
+                        NOW,
+                        Map.of("delta", "after-overflow"))))
+                .assertNext(event -> assertThat(event.payload().payload()).containsEntry("delta", "after-overflow"))
+                .verifyComplete();
+    }
+
+    private static void publishManyConcurrently(
+            RunEventLiveBus liveBus,
+            RunId runId,
+            int workerCount,
+            int eventsPerWorker) {
+        ExecutorService executor = Executors.newFixedThreadPool(workerCount);
+        CountDownLatch start = new CountDownLatch(1);
+        AtomicReference<RuntimeException> failure = new AtomicReference<>();
+        for (int worker = 0; worker < workerCount; worker++) {
+            int workerIndex = worker;
+            executor.submit(() -> {
+                try {
+                    start.await(5, TimeUnit.SECONDS);
+                    for (int index = 0; index < eventsPerWorker; index++) {
+                        liveBus.publishTransient(new RunEventDraft(
+                                runId,
+                                RunEventType.MESSAGE_PART_DELTA,
+                                "trace_1234567890abcdef",
+                                NOW,
+                                Map.of("worker", workerIndex, "index", index)));
+                    }
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                } catch (RuntimeException exception) {
+                    failure.compareAndSet(null, exception);
+                }
+            });
+        }
+        start.countDown();
+        executor.shutdown();
+        try {
+            assertThat(executor.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("publisher workers were interrupted", exception);
+        }
+        assertThat(failure.get()).isNull();
     }
 
     @Test

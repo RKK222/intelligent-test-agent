@@ -3,8 +3,10 @@ package com.icbc.testagent.event;
 import com.icbc.testagent.domain.event.RunEvent;
 import com.icbc.testagent.domain.event.RunEventDraft;
 import com.icbc.testagent.domain.run.RunId;
+import java.time.Duration;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +29,7 @@ import reactor.core.publisher.Sinks;
 public class RunEventLiveBus {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RunEventLiveBus.class);
+    private static final Duration NON_SERIALIZED_RETRY_TIMEOUT = Duration.ofMillis(100);
 
     private final Sinks.Many<RunEventLiveEvent> sink = Sinks.many().multicast().directBestEffort();
     private final RunEventRemotePublisher remotePublisher;
@@ -92,18 +95,43 @@ public class RunEventLiveBus {
      * 向 Reactor sink 写入事件；无订阅者时静默丢弃，并发发布时短时间 busy loop 重试。
      */
     private void emit(RunEventLiveEvent liveEvent) {
-        Sinks.EmitResult result = sink.tryEmitNext(liveEvent);
+        long deadlineNanos = System.nanoTime() + NON_SERIALIZED_RETRY_TIMEOUT.toNanos();
+        Sinks.EmitResult result;
+        do {
+            result = sink.tryEmitNext(liveEvent);
+            if (result == Sinks.EmitResult.OK) {
+                return;
+            }
+            if (result == Sinks.EmitResult.FAIL_NON_SERIALIZED && System.nanoTime() < deadlineNanos) {
+                Thread.onSpinWait();
+                continue;
+            }
+            handleEmitFailure(liveEvent, result);
+            return;
+        } while (true);
+    }
+
+    /**
+     * 按 best-effort 语义处理投递失败：慢客户端或断开的 SSE 连接只丢弃实时帧，不能让 sink 进入终止态。
+     */
+    private void handleEmitFailure(RunEventLiveEvent liveEvent, Sinks.EmitResult result) {
         if (result == Sinks.EmitResult.FAIL_ZERO_SUBSCRIBER) {
             LOGGER.debug("No subscriber for live event, runId={}", liveEvent.payload().runId());
             return;
         }
+        if (result == Sinks.EmitResult.FAIL_OVERFLOW || result == Sinks.EmitResult.FAIL_CANCELLED) {
+            LOGGER.debug("Dropped live event, runId={}, result={}", liveEvent.payload().runId(), result);
+            return;
+        }
         if (result == Sinks.EmitResult.FAIL_NON_SERIALIZED) {
-            sink.emitNext(liveEvent, Sinks.EmitFailureHandler.busyLooping(java.time.Duration.ofMillis(100)));
+            LOGGER.warn(
+                    "Dropped live event after non-serialized retry timeout, runId={}, timeoutMs={}",
+                    liveEvent.payload().runId(),
+                    TimeUnit.NANOSECONDS.toMillis(NON_SERIALIZED_RETRY_TIMEOUT.toNanos()));
             return;
         }
         if (result.isFailure()) {
             LOGGER.warn("Failed to emit live event, runId={}, result={}", liveEvent.payload().runId(), result);
-            return;
         }
     }
 

@@ -34,6 +34,19 @@
   - 不改 reducer、投影顺序、RunEvent、后端 API 或默认折叠逻辑；保留“同一回合 reasoning 合并为一行、默认收起”的当前行为，只降低视觉权重并修正头像对齐。
 - Result:
   - 前端 Vitest 全量通过（36 files, 299 passed, 1 skipped），`@test-agent/agent-chat` typecheck 通过；Playwright 构造 DOM 检查隐藏 step 行头像与 reasoning 触发器 top delta 为 0px，reasoning `已完成` 与工具 `已读取` x delta 为 0px；前端 Vite 已在 `127.0.0.1:3001` 启动验证入口。
+### 2026-07-04 - 修复 RunEvent live bus 并发背压导致后端刷屏
+
+- Why:
+  - 后端日志持续刷 `RunEventLiveBus Failed to emit live event ... FAIL_TERMINATED`；排查发现先有并发发布触发 `FAIL_OVERFLOW`，随后 `Sinks.Many#emitNext` 抛出 `Backpressure overflow` 并让 live bus sink 进入终止态，之后所有实时事件发布都会持续 WARN。
+- What:
+  - `RunEventLiveBus` 的 `FAIL_NON_SERIALIZED` 兜底不再调用会传播 overflow 的 `emitNext(...busyLooping...)`，改为 `tryEmitNext` 短时重试；慢客户端、断开连接或背压溢出按 best-effort 丢弃当前 live 帧，保持全局 live bus 可继续发布。
+  - 补充 event 模块并发背压回归测试，并同步事件流文档和 event 模块 README/PACKAGE 说明。
+- How:
+  - 用 `.tmp/dev-services/backend.log` 定位第一条 `FAIL_TERMINATED` 前的 `FAIL_OVERFLOW` 和 `Backpressure overflow during Sinks.Many#emitNext`，再用并发无 demand 的 `StepVerifier` 测试复现。
+  - 重启本地 test profile 服务加载新 jar，并观察新日志确认不再增长。
+- Result:
+  - `mvn -pl test-agent-event -am test` 通过，`mvn clean package -DskipTests` 通过，`./restart-dev-services.sh --profile test --env-file .env.test` 重启成功。
+  - 重启后 `.tmp/dev-services/backend.log` 5 秒内无增长，未再出现 `FAIL_TERMINATED`、`FAIL_OVERFLOW` 或 `Backpressure overflow`。
 
 ### 2026-07-03 - 收敛时间线样式、文件预览 Mermaid 切换与修改文件入口
 

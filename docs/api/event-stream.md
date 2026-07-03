@@ -329,7 +329,7 @@ data: {"eventId":"evt_live_...","runId":"run_...","seq":0,"type":"message.part.d
 - SSE 合并三个来源：durable replay 继续按 `run_events` 查询可恢复事件；本机 live bus 即时发送当前进程新产生的 durable 和 transient 事件；Redis run-event bus 开启时接收其他实例发布的 live event。
 - durable replay 每次按 `runId + lastSeq` 查询增量事件，默认批量上限 100。
 - **durable 事件可能重复投递**：落库的 durable 事件既经 live bus 即时下发，又可能在下一轮 replay 轮询中被查出（live 推送与轮询游标推进存在竞态）。同一 durable 事件携带稳定的 `evt_` 前缀 `eventId`，前端必须按 `eventId` 去重；transient 事件 `eventId` 为 `evt_live_` 前缀且 `seq=0`，同样按 `eventId` 去重。
-- `RunEventLiveBus` 基于 Reactor `Sinks`，默认只服务当前进程已连接的 SSE 订阅。设置 `TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true` 或 `test-agent.run-event.redis-bus.enabled=true` 后，后端会把 durable/transient `RunEventSsePayload` 发布到 Redis channel `test-agent:run-events`，消息包含 `originInstanceId`；本机收到自己发布的消息会忽略，其他实例收到后转发给本机 SSE 客户端。Redis 不可用、未启用或发布/订阅失败时自动降级为本机 live bus + durable replay。
+- `RunEventLiveBus` 基于 Reactor `Sinks`，默认只服务当前进程已连接的 SSE 订阅。live bus 是 best-effort 实时通道：客户端消费过慢、断开或并发发布产生背压时，后端可以丢弃当前 live 帧，但不得让全局 live bus 进入 error/complete；durable 事件仍可通过 `run_events` replay 恢复，transient 消息内容仍依赖消息快照恢复。设置 `TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true` 或 `test-agent.run-event.redis-bus.enabled=true` 后，后端会把 durable/transient `RunEventSsePayload` 发布到 Redis channel `test-agent:run-events`，消息包含 `originInstanceId`；本机收到自己发布的消息会忽略，其他实例收到后转发给本机 SSE 客户端。Redis 不可用、未启用或发布/订阅失败时自动降级为本机 live bus + durable replay。
 - polling 查询必须 offload 阻塞式 Repository；单次回放查询失败不改变 Run 状态，后端跳过本轮轮询并在下一轮继续尝试，客户端仍按既有 SSE 续传规则处理。
 - 客户端断开时释放 Flux 订阅。
 - `Last-Event-ID` 解析委托 `RunEventReplayService`；非法值映射为 `VALIDATION_ERROR`。
