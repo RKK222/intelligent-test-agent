@@ -1,0 +1,46 @@
+.oc-markdown {
+  line-height: var(--oc-line-height);
+}
+
+.oc-markdown .markdown-body {
+  background: transparent;
+  color: var(--oc-fg);
+  font-family: var(--oc-font-sans);
+  font-size: var(--oc-text-md);
+  line-height: var(--oc-line-height);
+}
+
+.oc-markdown .markdown-body p {
+  margin: 0.55em 0;
+}
+
+.oc-markdown .markdown-body p:first-child {
+  margin-top: 0;
+}
+
+.oc-markdown .markdown-body p:last-child {
+  margin-bottom: 0;
+}
+
+.oc-markdown .markdown-body code {
+  font-family: var(--oc-font-mono);
+  font-size: 0.92em;
+  background: var(--oc-code-bg);
+  border: 1px solid var(--oc-code-border);
+  border-radius: var(--oc-radius-xs);
+  padding: 0.1em 0.32em;
+}
+
+.oc-markdown .markdown-body pre {
+  overflow-x: auto;
+  background: var(--oc-code-bg);
+  border: 1px solid var(--oc-code-border);
+  border-radius: var(--oc-radius-md);
+  padding: 10px 12px;
+}
+
+.oc-markdown .markdown-body pre code {
+  border: 0;
+  padding: 0;
+  background: transparent;
+}

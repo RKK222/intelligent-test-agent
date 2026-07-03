@@ -1,0 +1,92 @@
+.oc-tool,
+.oc-context-group,
+.oc-disclosure {
+  border: 1px solid var(--oc-border);
+  border-radius: var(--oc-radius-md);
+  background: color-mix(in srgb, var(--oc-surface) 84%, transparent);
+  overflow: hidden;
+}
+
+.oc-tool__trigger,
+.oc-context-group__trigger,
+.oc-disclosure__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 7px 10px;
+  color: var(--oc-fg);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.oc-tool__icon,
+.oc-tool__chevron {
+  width: 16px;
+  height: 16px;
+  color: var(--oc-muted);
+  flex: 0 0 auto;
+}
+
+.oc-tool__title {
+  font-size: var(--oc-text-sm);
+  font-weight: 500;
+}
+
+.oc-tool__subtitle {
+  margin-left: auto;
+  min-width: 0;
+  color: var(--oc-subtle);
+  font-size: var(--oc-text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oc-tool__body,
+.oc-disclosure__body {
+  border-top: 1px solid var(--oc-border);
+  padding: 10px;
+}
+
+.oc-tool-detail {
+  display: grid;
+  gap: 8px;
+}
+
+.oc-context-group {
+  background: transparent;
+}
+
+.oc-context-group__body {
+  border-top: 1px solid var(--oc-border);
+  padding: 6px 10px 8px;
+}
+
+.oc-context-group__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  color: var(--oc-muted);
+  font-size: var(--oc-text-sm);
+}
+
+.oc-context-group__kind {
+  width: 56px;
+  flex: 0 0 auto;
+  color: var(--oc-subtle);
+  font-size: var(--oc-text-xs);
+}
+
+.oc-context-group__path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--oc-font-mono);
+  font-size: var(--oc-text-xs);
+}

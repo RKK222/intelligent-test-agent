@@ -3153,6 +3153,7 @@ async function handleLogout() {
       <div class="managed-chat-panel">
         <FigmaChatPanel
           :messages="chatState.messages"
+          :streaming-text-by-part-id="chatState.streamingTextByPartId"
           :running="runtimeBusy"
           :title="chatTitle"
           :file-changes="diffFiles"

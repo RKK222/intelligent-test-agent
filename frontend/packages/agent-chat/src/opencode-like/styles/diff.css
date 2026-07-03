@@ -1,0 +1,72 @@
+.oc-diff-summary {
+  border: 1px solid var(--oc-border);
+  border-radius: var(--oc-radius-md);
+  background: var(--oc-surface);
+  overflow: hidden;
+}
+
+.oc-diff-summary__header {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  color: var(--oc-muted);
+  font-size: var(--oc-text-sm);
+  border: 0;
+  border-bottom: 1px solid var(--oc-border);
+  background: transparent;
+  cursor: pointer;
+}
+
+.oc-diff-summary__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.oc-diff-summary__action {
+  color: var(--oc-accent);
+  font-size: var(--oc-text-xs);
+}
+
+.oc-diff-summary__files {
+  padding: 3px 0;
+}
+
+.oc-diff-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  font-family: var(--oc-font-mono);
+  font-size: var(--oc-text-xs);
+}
+
+.oc-diff-file__path {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oc-diff-line {
+  font-family: var(--oc-font-mono);
+  font-size: var(--oc-text-xs);
+  white-space: pre;
+}
+
+.oc-diff-line.is-add {
+  color: var(--oc-success);
+}
+
+.oc-diff-line.is-del {
+  color: var(--oc-danger);
+}
+
+.oc-diff-line.is-hunk {
+  color: var(--oc-accent);
+}

@@ -1,0 +1,35 @@
+@keyframes oc-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes oc-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: -100% 0;
+  }
+}
+
+.oc-thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--oc-muted);
+  animation: oc-pulse 1.2s infinite ease-in-out;
+}
+
+.oc-progress-bar {
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--oc-accent), transparent);
+  background-size: 200% 100%;
+  animation: oc-shimmer 1.6s linear infinite;
+}

@@ -1,0 +1,37 @@
+.oc-timeline-root {
+  min-height: 0;
+  background: var(--oc-bg);
+  color: var(--oc-fg);
+  font-family: var(--oc-font-sans);
+  font-size: var(--oc-text-md);
+}
+
+.oc-timeline {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 28px 40px;
+}
+
+.oc-row {
+  position: relative;
+}
+
+.oc-row + .oc-row {
+  margin-top: 10px;
+}
+
+.oc-turn-gap {
+  height: 28px;
+}
+
+.oc-empty-state {
+  display: flex;
+  min-height: 220px;
+  align-items: center;
+  justify-content: center;
+  color: var(--oc-muted);
+}
+
+.oc-empty-state__title {
+  font-size: var(--oc-text-sm);
+}

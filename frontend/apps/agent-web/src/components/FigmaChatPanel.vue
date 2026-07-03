@@ -35,11 +35,12 @@ import type {
   AiFeedbackRating,
   AiMessageFeedback,
   MessagePart,
+  RunDiffFile,
 } from '@test-agent/shared-types'
 import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
-import { MarkdownView } from '@test-agent/agent-chat'
+import { MarkdownView, OpencodeTimeline, createOpencodeLikeState } from '@test-agent/agent-chat'
 
 type ChatMessageInput = AgentMessage & { content?: string }
 
@@ -631,10 +632,13 @@ const props =
     commands?: Array<{ commandId: string; name: string; description?: string; source?: string; arguments?: string }>
     /** 当前会话在前端内存中捕获的浏览器与平台后端原始报文 */
     rawOutputEntries?: RawOutputEntry[]
+    /** message.part.delta 的流式 overlay，避免 text/reasoning 闪烁或重复。 */
+    streamingTextByPartId?: Record<string, string>
   }>(), {
     processRefreshBlocksSubmit: true,
     commands: () => [],
-    rawOutputEntries: () => []
+    rawOutputEntries: () => [],
+    streamingTextByPartId: () => ({})
   })
 
 const emit =
@@ -2142,6 +2146,48 @@ const displayMessages = computed<ChatMessage[]>(() => {
   return merged
 })
 
+const timelineMessages = computed<AgentMessage[]>(() =>
+  (props.messages ?? []).map((message, index) => {
+    if (message.role === 'card') {
+      return message
+    }
+    const text =
+      typeof message.text === 'string' && message.text.length > 0
+        ? message.text
+        : typeof message.content === 'string'
+          ? message.content
+          : ''
+    return {
+      ...message,
+      id: message.id ?? message.messageId ?? `${message.role}-${index}`,
+      text,
+    } as AgentMessage
+  })
+)
+
+const timelineDiffFiles = computed<RunDiffFile[]>(() =>
+  (props.fileChanges ?? []).map((file) => ({
+    path: file.path,
+    patch: file.patch ?? '',
+    additions: file.additions ?? 0,
+    deletions: file.deletions ?? 0,
+    status: file.status ?? 'modified',
+  }))
+)
+
+const opencodeTimelineState = computed(() =>
+  createOpencodeLikeState({
+    messages: timelineMessages.value,
+    running: props.running,
+    diffFiles: timelineDiffFiles.value,
+    streamingTextByPartId: props.streamingTextByPartId,
+  })
+)
+
+function openTimelineDiff() {
+  emit('open-diff', props.fileChanges?.at(-1)?.path ?? '')
+}
+
 const lastAssistant = computed(() => {
   for (let i = displayMessages.value.length - 1; i >= 0; i -= 1) {
     if (displayMessages.value[i].role === 'assistant')
@@ -2364,7 +2410,45 @@ function onCompositionEnd() {
         <Loader2 :size="18" class="figma-chat-history-loading-icon" />
         <span>正在加载历史对话…</span>
       </div>
-      <template v-else v-for="message in displayMessages" :key="message.id">
+      <OpencodeTimeline
+        v-else
+        :state="opencodeTimelineState"
+        @open-diff="openTimelineDiff"
+      />
+      <div v-if="!historyLoading && displayMessages.some(canFeedback)" class="figma-chat-timeline-actions">
+        <template v-for="message in displayMessages" :key="`${message.id}:actions`">
+          <div v-if="canFeedback(message)" class="figma-chat-feedback">
+            <button
+              type="button"
+              :class="[
+                'figma-chat-feedback-btn',
+                feedbackFor(message)?.rating === 'POSITIVE' && 'is-selected',
+              ]"
+              :disabled="feedbackSubmitting(message)"
+              title="满意"
+              @click="submitPositiveFeedback(message)"
+            >
+              <ThumbsUp :size="12" />
+              <span>满意</span>
+            </button>
+            <button
+              type="button"
+              :class="[
+                'figma-chat-feedback-btn',
+                'figma-chat-feedback-btn--negative',
+                feedbackFor(message)?.rating === 'NEGATIVE' && 'is-selected',
+              ]"
+              :disabled="feedbackSubmitting(message)"
+              title="不满意"
+              @click="openNegativeFeedback(message)"
+            >
+              <ThumbsDown :size="12" />
+              <span>不满意</span>
+            </button>
+          </div>
+        </template>
+      </div>
+      <template v-if="false" v-for="message in displayMessages" :key="message.id">
         <!-- 用户消息气泡 (右对齐) -->
         <div
           v-if="message.role === 'user'"
@@ -2532,7 +2616,7 @@ function onCompositionEnd() {
                             v-memo="[op.content, op.filePath]"
                             class="figma-chat-write-preview"
                             v-html="
-                              renderCodeWithLineNumbers(op.content, op.filePath)
+                              renderCodeWithLineNumbers(op.content || '', op.filePath || '')
                             "
                           ></pre>
                         </div>
@@ -2582,7 +2666,7 @@ function onCompositionEnd() {
                             v-memo="[op.content, op.filePath]"
                             class="figma-chat-write-preview"
                             v-html="
-                              renderCodeWithLineNumbers(op.content, op.filePath)
+                              renderCodeWithLineNumbers(op.content || '', op.filePath || '')
                             "
                           ></pre>
                         </div>
@@ -3026,7 +3110,7 @@ function onCompositionEnd() {
       </div>
 
       <!-- 空态 -->
-      <div v-if="displayMessages.length === 0" class="figma-chat-empty">
+      <div v-if="false && displayMessages.length === 0" class="figma-chat-empty">
         <div class="figma-chat-empty-icon">
           <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
             <circle
@@ -3054,7 +3138,7 @@ function onCompositionEnd() {
 
       <!-- 运行中状态 -->
       <div
-        v-if="showRunningAssistant"
+        v-if="false && showRunningAssistant"
         class="figma-chat-running-assistant"
       >
         <div class="figma-chat-avatar">

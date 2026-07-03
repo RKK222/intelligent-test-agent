@@ -2,14 +2,15 @@
 
 ## 职责
 
-渲染 Agent 对话区和 RunEvent 派生卡片。
+渲染 Agent 对话区、RunEvent 派生状态和 opencode 风格消息/工具时间线。
 
 ## 主要程序清单
 
-- `AgentChat.vue`：Agent/历史 tab、受控 History 搜索与置顶/删除回调、Agent/Provider/Model selector（Agent 下拉已过滤为 primary+all，排除 subagent/hidden）、runtime status bar、slash command palette、`@` context picker、permission/question dock、message part timeline、输入框和动作按钮。
-- `AgentCard.vue`、`TimelineCard.vue`：统一 `TimelineCard` 折叠壳，以及 Plan、Tool、Test、Diff、Event 卡片的 payload 派生展示；Diff 卡片展开区展示文件、状态和行变更表格。
-- `AssistantThread.vue`：对话线程视图，负责区分 reasoning 思考过程、任务分解、Skill/Tool 调用与 text 最终回答，并计算运行中、最新工具和最新 Diff 的默认展开状态，不直接接入平台 API。
-- `runtime-reducer.ts`：归并 RunEvent 对话状态，将 opencode 重发的 user message/part 合并回当前 user 消息；slash command 展开后的技能正文不会覆盖原始命令或误建 assistant 消息；并导出 `normalizeMessagePart` 供实时事件和历史 `partsJson` 共用同一套 opencode part 字段归一化规则。
+- `AgentChat.vue`：Agent/历史 tab、受控 History 搜索与置顶/删除回调、Agent/Provider/Model selector（Agent 下拉已过滤为 primary+all，排除 subagent/hidden）、runtime status bar、slash command palette、`@` context picker、permission/question dock、opencode-like message part timeline、输入框和动作按钮。
+- `AssistantThread.vue`：对话线程视图，负责把消息、运行态、模型目录、Diff 文件和 `streamingTextByPartId` 传入 `createOpencodeLikeState`，并使用 `OpencodeTimeline` 作为主渲染路径；不直接接入平台 API。
+- `opencode-like/`：opencode 风格时间线模块。`state/adapter.ts` 归并会话输入，`state/projection.ts` 投影时间线行，`state/tool-registry.ts` 识别常见工具；`components/` 下按 row、part、tool、primitive 分层渲染；`styles/` 下集中维护 `.oc-*` token、布局、markdown、diff 和动画样式。
+- `runtime-reducer.ts`：归并 RunEvent 对话状态，将 opencode 重发的 user message/part 合并回当前 user 消息；slash command 展开后的技能正文不会覆盖原始命令或误建 assistant 消息；`message.part.delta` 写入 `streamingTextByPartId` 临时 overlay，最终 `updated/removed` 或 message 删除后清理；并导出 `normalizeMessagePart` 供实时事件和历史 `partsJson` 共用同一套 opencode part 字段归一化规则。
+- `AgentCard.vue`、`TimelineCard.vue`：存量结构化卡片兼容组件。新对话正文不要再扩展这条主路径，优先在 `opencode-like/` 下新增 part/tool 视图。
 - `ComposerArea.vue`、`RuntimeControls.vue`、`ChicPopover.vue`、`RuntimeDock.vue`、`SuggestionPanel.vue`、`TaskBreakdown.vue`、`MessageParts.vue`、`ProcessDisclosure.vue`、`AnswerPart.vue`、`PlainAnswer.vue`、`ReasoningPartBlock.vue`、`ToolPartBlock.vue`、`ToolPayloadBlock.vue`、`ToolDetail.vue`：对话区子组件与浅色过程信息展示块（含 `tool=skill` 的 Skill 调用分类展示）。
 - `chat-utils.ts`：斜杠/上下文查询、附件合并、流式指纹、卡片默认展开判定等纯函数。
 - `process-status.ts`：过程状态归一化、中文文案、状态色和 Skill tool 判定工具。

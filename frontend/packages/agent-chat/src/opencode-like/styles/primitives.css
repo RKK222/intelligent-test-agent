@@ -1,0 +1,108 @@
+.oc-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--oc-radius-sm);
+  background: transparent;
+  color: var(--oc-subtle);
+  cursor: pointer;
+}
+
+.oc-icon-button:hover {
+  background: var(--oc-surface-muted);
+  color: var(--oc-fg);
+}
+
+.oc-icon-button__icon {
+  width: 14px;
+  height: 14px;
+}
+
+.oc-status-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--oc-border);
+  border-radius: 999px;
+  color: var(--oc-muted);
+  font-size: var(--oc-text-xs);
+}
+
+.oc-meta-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  color: var(--oc-subtle);
+  font-size: var(--oc-text-xs);
+}
+
+.oc-code-block {
+  overflow: hidden;
+  border: 1px solid var(--oc-code-border);
+  border-radius: var(--oc-radius-md);
+  background: var(--oc-code-bg);
+}
+
+.oc-code-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--oc-code-border);
+  color: var(--oc-subtle);
+  font-size: var(--oc-text-xs);
+}
+
+.oc-code-block__pre {
+  max-height: 320px;
+  margin: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  color: var(--oc-fg);
+  font-family: var(--oc-font-mono);
+  font-size: var(--oc-text-xs);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.oc-file-path {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-width: 0;
+  color: var(--oc-muted);
+  font-family: var(--oc-font-mono);
+  font-size: var(--oc-text-xs);
+}
+
+.oc-file-path span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.oc-file-path__icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.oc-inline-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 7px;
+  border-radius: var(--oc-radius-sm);
+  background: var(--oc-code-bg);
+  color: var(--oc-muted);
+  font-size: var(--oc-text-xs);
+}

@@ -37,6 +37,7 @@ export type AgentChatProps = {
   resources?: RuntimeResourceInfo[];
   tools?: RuntimeToolInfo[];
   runtimeStatus?: RuntimeStatus;
+  streamingTextByPartId?: Record<string, string>;
   selectedAgent?: string;
   selectedProvider?: string;
   selectedModel?: string;
@@ -67,6 +68,7 @@ const props = withDefaults(defineProps<AgentChatProps>(), {
   commands: () => [],
   resources: () => [],
   tools: () => [],
+  streamingTextByPartId: () => ({}),
   mode: "build"
 });
 const emit = defineEmits<{
@@ -167,6 +169,7 @@ function onHistorySearchInput(value: string) {
           :selected-model="selectedModel"
           :mode="mode"
           :todos="todos"
+          :streaming-text-by-part-id="streamingTextByPartId"
           @send="(prompt, attachments) => emit('send', prompt, attachments)"
           @cancel="emit('cancel')"
           @retry="emit('retry')"

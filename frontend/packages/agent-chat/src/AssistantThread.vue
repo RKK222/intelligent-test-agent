@@ -23,31 +23,26 @@ export type AssistantThreadProps = {
   selectedModel?: string;
   mode?: string;
   todos?: TodoItem[];
+  streamingTextByPartId?: Record<string, string>;
 };
 </script>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
-import { Bot, UserRound } from "lucide-vue-next";
-import AgentCard from "./AgentCard.vue";
 import ComposerArea from "./ComposerArea.vue";
-import MessageParts from "./MessageParts.vue";
-import PlainAnswer from "./PlainAnswer.vue";
+import OpencodeTimeline from "./opencode-like/components/OpencodeTimeline.vue";
 import RuntimeControls from "./RuntimeControls.vue";
 import TaskBreakdown from "./TaskBreakdown.vue";
-import {
-  partSignature,
-  scrollViewportToBottom,
-  shouldOpenCardByDefault,
-  viewportIsAtBottom
-} from "./chat-utils";
+import { createOpencodeLikeState } from "./opencode-like/state/adapter";
+import { partSignature, scrollViewportToBottom, viewportIsAtBottom } from "./chat-utils";
 
 const props = withDefaults(defineProps<AssistantThreadProps>(), {
   mode: "build",
   agents: () => [],
   models: () => [],
   providers: () => [],
-  todos: () => []
+  todos: () => [],
+  streamingTextByPartId: () => ({})
 });
 const emit = defineEmits<{
   send: [prompt: string, attachments: ComposerAttachment[]];
@@ -65,23 +60,16 @@ const viewportRef = ref<HTMLElement | null>(null);
 const isAtBottom = ref(true);
 const hasNewContent = ref(false);
 
-// 默认展开的卡片：最新的 tool / diff 卡片
-const defaultOpenCardIds = computed(() => {
-  const reversed = [...props.messages].reverse();
-  return {
-    latestToolId: reversed.find((m) => m.role === "card" && m.cardType === "tool")?.id,
-    latestDiffId: reversed.find((m) => m.role === "card" && m.cardType === "diff")?.id
-  };
-});
-
-const lastAssistantIndex = computed(() => {
-  for (let i = props.messages.length - 1; i >= 0; i--) {
-    if (props.messages[i].role === "assistant") {
-      return i;
-    }
-  }
-  return -1;
-});
+const timelineState = computed(() =>
+  createOpencodeLikeState({
+    messages: props.messages,
+    running: props.running,
+    providers: props.providers,
+    models: props.models,
+    todos: props.todos,
+    streamingTextByPartId: props.streamingTextByPartId
+  })
+);
 
 // 流式内容指纹：变化时触发自动滚动
 const streamSignature = computed(() =>
@@ -154,42 +142,7 @@ onBeforeUnmount(() => {
         <div class="text-[12px] text-[var(--ta-chat-muted)]">描述测试任务，例如：跑 checkout 模块并分析失败原因</div>
       </div>
       <TaskBreakdown :todos="todos" />
-      <template v-for="(message, index) in messages" :key="message.id">
-        <AgentCard
-          v-if="message.role === 'card'"
-          :message="message"
-          :default-open="shouldOpenCardByDefault(message, defaultOpenCardIds)"
-          @open-diff="emit('openDiff')"
-        />
-        <div v-else-if="message.role === 'assistant'" class="flex justify-start gap-2">
-          <span
-            class="mt-6 flex h-8 w-8 shrink-0 items-center justify-center rounded border border-[var(--ta-chat-border)] bg-[var(--ta-chat-detail-bg)] text-[var(--ta-chat-subtle)]"
-            aria-hidden="true"
-          >
-            <Bot class="h-4 w-4" />
-          </span>
-          <div class="max-w-[calc(100%_-_44px)] rounded-md border border border-[var(--ta-chat-border)] bg-[var(--ta-chat-message-bg)] px-3 py-3">
-            <MessageParts
-              v-if="message.parts?.length"
-              :parts="message.parts"
-              :fallback-text="message.text"
-              :running="running && index === lastAssistantIndex"
-            />
-            <PlainAnswer v-else :text="message.text" />
-          </div>
-        </div>
-        <div v-else class="flex justify-end gap-2">
-          <div class="max-w-[78%] rounded-xl bg-ta-chat-user-bg px-3 py-2 text-[var(--ta-chat-text)]">
-            <p class="m-0 whitespace-pre-wrap text-[13px] leading-6 text-[var(--ta-chat-text)]">{{ message.text }}</p>
-          </div>
-          <span
-            class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-[var(--ta-control-strong)] text-[var(--ta-subtle)]"
-            aria-hidden="true"
-          >
-            <UserRound class="h-4 w-4" />
-          </span>
-        </div>
-      </template>
+      <OpencodeTimeline :state="timelineState" @open-diff="emit('openDiff')" />
       <button
         v-if="hasNewContent"
         type="button"

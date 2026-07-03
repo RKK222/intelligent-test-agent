@@ -1,8 +1,13 @@
+import "./opencode-like/styles/index.css";
+
 export { default as AgentChat } from "./AgentChat.vue";
 export type { AgentChatProps, HistoryItem } from "./AgentChat.vue";
 export { default as AssistantThread } from "./AssistantThread.vue";
 export type { AssistantThreadProps } from "./AssistantThread.vue";
 export { default as AgentCard } from "./AgentCard.vue";
+export { default as OpencodeTimeline } from "./opencode-like/components/OpencodeTimeline.vue";
+export { createOpencodeLikeState, createTimelineRows } from "./opencode-like";
+export type { OpencodeLikeConversationState, TimelineRow } from "./opencode-like";
 export { buildComposerPromptParts, fileToPromptAttachment } from "./prompt-parts";
 export type { ComposerAttachment } from "./prompt-parts";
 export { reduceAgentChatRuntime, createInitialAgentChatRuntimeState, normalizeMessagePart } from "./runtime-reducer";

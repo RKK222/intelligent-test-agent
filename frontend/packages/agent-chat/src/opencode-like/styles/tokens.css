@@ -1,0 +1,33 @@
+.oc-timeline-root {
+  --oc-bg: var(--ta-chat-bg, #f7f8fa);
+  --oc-surface: var(--ta-chat-surface, #ffffff);
+  --oc-surface-muted: var(--ta-chat-message-bg, #f2f4f7);
+  --oc-fg: var(--ta-chat-text, #1f2328);
+  --oc-muted: var(--ta-chat-muted, #667085);
+  --oc-subtle: var(--ta-chat-subtle, #8a94a6);
+  --oc-border: var(--ta-chat-border, rgba(31, 35, 40, 0.1));
+  --oc-border-strong: var(--ta-chat-border-strong, rgba(31, 35, 40, 0.18));
+  --oc-accent: var(--ta-cyan, #1d7f96);
+  --oc-danger: var(--ta-danger, #b42318);
+  --oc-success: var(--ta-chat-status-done, #2f7d55);
+  --oc-warning: var(--ta-warn, #9a6700);
+  --oc-code-bg: var(--ta-chat-detail-bg, rgba(31, 35, 40, 0.04));
+  --oc-code-border: var(--ta-chat-border, rgba(31, 35, 40, 0.1));
+  --oc-radius-xs: 4px;
+  --oc-radius-sm: 6px;
+  --oc-radius-md: 8px;
+  --oc-radius-lg: 12px;
+  --oc-space-1: 4px;
+  --oc-space-2: 8px;
+  --oc-space-3: 12px;
+  --oc-space-4: 16px;
+  --oc-space-5: 20px;
+  --oc-space-6: 24px;
+  --oc-font-sans: var(--ta-font-sans, "Geist Sans", "Noto Sans SC", system-ui, sans-serif);
+  --oc-font-mono: var(--ta-font-mono, "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace);
+  --oc-text-xs: 12px;
+  --oc-text-sm: 14px;
+  --oc-text-md: 16px;
+  --oc-text-lg: 18px;
+  --oc-line-height: 1.65;
+}

@@ -53,6 +53,12 @@
 - What: 发布前新增远程变化预览与 expected HEAD 校验，应用 pull 后立即同步版本和本机副本 commit；冲突路径关闭 `core.quotepath`，支持全部保留个人版本、全部采用远程版本和取消 merge，目标侧缺失按 Git 删除语义处理。前端复用已加载 diff 更新数量角标、拦截旧工作区请求回写，并明确 AU/UD 删除侧。
 - How: 复用 `GitWorkspaceService`、个人工作区归属校验和现有发布编排，新增 preview/resolve-all HTTP 契约；真实临时 Git 仓库覆盖中文修改/删除冲突，服务测试覆盖预览汇总、HEAD 变化前置拦截和冲突后的元数据同步，前端测试覆盖预览确认与批量处理。处理了会话开始前遗留的 `git pull --rebase`，保留两侧 session log 后完成 7 个本地提交重放。
 - Result: common 24 个、workspace-management 36 个、API Controller 和 Git 面板/合并编辑器定向测试通过，agent-web typecheck/build 通过；使用 `.env.test` / `test` profile / JDK 25 重启并检查健康状态。未修改环境文件、数据库、事件、generated SDK 或 888 当前个人 worktree 冲突内容。
+### 2026-07-03 - 对话区主路径切换为 opencode 风格时间线
+
+- Why: 右侧对话需要按 opencode 原生交互呈现 message part、工具调用和流式输出，旧气泡/卡片主路径把 reasoning、工具日志和最终回答混在一起，维护成本和视觉噪声都偏高。
+- What: 新增 `@test-agent/agent-chat` 的 `opencode-like/` 时间线模块，`AssistantThread` 与 `FigmaChatPanel` 主路径改用 `OpencodeTimeline`；RunEvent reducer 增加 `streamingTextByPartId` 临时 overlay，避免 `message.part.delta` 和最终 part 重复；补充时间线状态、组件渲染和 agent-web 聊天面板回归测试。
+- How: 通过 `createOpencodeLikeState` 和 `createTimelineRows` 统一投影用户消息、孤立助手历史、assistant parts、运行态、Diff、permission/question/todo 和模型目录；工具视图按 bash/read/list/glob/grep/edit/write/apply_patch/webfetch/websearch/task/skill/question 拆分，读取/检索类上下文工具默认折叠成组，失败工具单独展示错误。旧 `FigmaChatPanel` 气泡循环已从主渲染路径移除，仅保留为未激活兼容代码。
+- Result: `cd frontend && corepack pnpm exec vitest run`、`corepack pnpm typecheck`、`corepack pnpm lint`、`corepack pnpm build` 均通过；build 仍有既有 CSS `@import` 顺序和 chunk size 警告。本次未修改 API、SSE 事件、数据库、generated SDK 或环境配置。
 
 ### 2026-07-02 - 对话面板 bash 工具输出默认收起与手动折叠支持
 

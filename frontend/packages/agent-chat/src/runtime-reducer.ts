@@ -18,6 +18,7 @@ export type AgentChatRuntimeState = {
   diff?: SessionDiff;
   status?: string;
   seenEventIds?: string[];
+  streamingTextByPartId: Record<string, string>;
 };
 
 export type AgentChatRuntimeAction =
@@ -34,7 +35,8 @@ export function createInitialAgentChatRuntimeState(messages: AgentMessage[] = []
     permissions: [],
     questions: [],
     todos: [],
-    seenEventIds: []
+    seenEventIds: [],
+    streamingTextByPartId: {}
   };
 }
 
@@ -48,7 +50,7 @@ export function reduceAgentChatRuntime(
   }
   if (action.type === "run.requested") {
     // 新一轮沿用当前 transcript，但必须清掉上一轮终态，避免旧状态压住新 Run 的动画。
-    return { ...state, status: "PENDING" };
+    return { ...state, status: "PENDING", streamingTextByPartId: {} };
   }
   if (action.type === "permission.replied") {
     return { ...state, permissions: state.permissions.filter((item) => item.requestId !== action.requestId) };
@@ -99,23 +101,43 @@ function reduceEventOnly(
   }
   if (event.type === "message.removed") {
     const messageId = text(event.payload.messageId) ?? text(event.payload.messageID) ?? text(event.payload.id);
+    const removed = messageId
+      ? state.messages.find((message) => message.role !== "card" && (message.id === messageId || message.messageId === messageId))
+      : undefined;
     return messageId
       ? {
           ...state,
           messages: state.messages.filter(
             (message) => message.id !== messageId && (message.role === "card" || message.messageId !== messageId)
-          )
+          ),
+          streamingTextByPartId: clearStreamingForParts(state.streamingTextByPartId, removed?.role === "assistant" ? removed.parts : undefined)
         }
       : state;
   }
   if (event.type === "message.part.delta") {
-    return { ...state, messages: mergePartDelta(state.messages, event) };
+    const messages = mergePartDelta(state.messages, event);
+    if (messages === state.messages) {
+      return state;
+    }
+    return {
+      ...state,
+      messages,
+      streamingTextByPartId: appendStreamingText(state.streamingTextByPartId, event)
+    };
   }
   if (event.type === "message.part.updated") {
-    return { ...state, messages: upsertPart(state.messages, event) };
+    return {
+      ...state,
+      messages: upsertPart(state.messages, event),
+      streamingTextByPartId: clearStreamingText(state.streamingTextByPartId, partIdFromEvent(event))
+    };
   }
   if (event.type === "message.part.removed") {
-    return { ...state, messages: removePart(state.messages, event) };
+    return {
+      ...state,
+      messages: removePart(state.messages, event),
+      streamingTextByPartId: clearStreamingText(state.streamingTextByPartId, partIdFromEvent(event))
+    };
   }
   if (event.type === "tool.started" || event.type === "tool.finished") {
     return {
@@ -771,6 +793,46 @@ function removeEmptyAssistant(messages: AgentMessage[]): AgentMessage[] {
     return messages.slice(0, -1);
   }
   return messages;
+}
+
+function appendStreamingText(streamingTextByPartId: Record<string, string>, event: RunEvent): Record<string, string> {
+  const partId = partIdFromEvent(event);
+  const delta = text(event.payload.delta) ?? text(event.payload.text) ?? "";
+  if (!partId || !delta) {
+    return streamingTextByPartId;
+  }
+  return {
+    ...streamingTextByPartId,
+    [partId]: `${streamingTextByPartId[partId] ?? ""}${delta}`
+  };
+}
+
+function clearStreamingText(streamingTextByPartId: Record<string, string>, partId: string | undefined): Record<string, string> {
+  if (!partId || streamingTextByPartId[partId] === undefined) {
+    return streamingTextByPartId;
+  }
+  const next = { ...streamingTextByPartId };
+  delete next[partId];
+  return next;
+}
+
+function clearStreamingForParts(
+  streamingTextByPartId: Record<string, string>,
+  parts: MessagePart[] | undefined
+): Record<string, string> {
+  if (!parts?.length) {
+    return streamingTextByPartId;
+  }
+  let next = streamingTextByPartId;
+  for (const part of parts) {
+    next = clearStreamingText(next, part.partId);
+  }
+  return next;
+}
+
+function partIdFromEvent(event: RunEvent): string | undefined {
+  const raw = record(event.payload.part) ?? event.payload;
+  return text(event.payload.partId) ?? text(event.payload.partID) ?? text(raw.partId) ?? text(raw.partID) ?? text(raw.id);
 }
 
 function upsertById<T extends { requestId: string }>(items: T[], item: T) {

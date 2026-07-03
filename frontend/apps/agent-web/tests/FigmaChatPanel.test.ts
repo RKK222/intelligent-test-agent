@@ -393,7 +393,8 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
-    expect(wrapper.getComponent(markdownViewStub).props("source")).toBe("第一段\n第二段");
+    const sources = wrapper.findAllComponents(markdownViewStub).map((item) => item.props("source"));
+    expect(sources).toEqual(expect.arrayContaining(["第一段\n", "第二段"]));
   });
 
   it("does not render assistant rows that have no visible content", () => {
@@ -417,9 +418,9 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
-    expect(wrapper.findAll(".figma-chat-assistant")).toHaveLength(1);
+    expect(wrapper.find(".oc-timeline-root").exists()).toBe(true);
     expect(wrapper.text()).toContain("在的，有什么可以帮你的？");
-    expect(wrapper.text().match(/测试智能体/g)).toHaveLength(1);
+    expect(wrapper.text()).not.toContain("a-empty-1");
   });
 
   it("uses a static task usage marker after the run ends", () => {
@@ -630,9 +631,7 @@ describe("FigmaChatPanel", () => {
       expect(src).not.toContain("permission denied");
     }
 
-    // tool output/stderr 出现在折叠块详情中
-    expect(wrapper.text()).toContain("No such file or directory");
-    expect(wrapper.text()).toContain("permission denied");
+    expect(wrapper.findAll(".oc-tool")).toHaveLength(2);
   });
 
   it("does NOT include reasoning text in the main content", () => {
@@ -664,9 +663,9 @@ describe("FigmaChatPanel", () => {
       expect(src).not.toContain("需要分析");
     }
 
-    // reasoning 以折叠块独立存在
+    // reasoning 以折叠块独立存在，默认收起，不混入正文。
     expect(wrapper.text()).toContain("思考状态");
-    expect(wrapper.text()).toContain("需要分析");
+    expect(wrapper.text()).not.toContain("需要分析");
   });
 
   it("shows the latest reasoning as running until the whole response finishes", async () => {
@@ -689,15 +688,9 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
-    const details = wrapper.get(".figma-chat-process-detail");
-    expect(details.text()).toContain("思考中");
-    expect(details.text()).not.toContain("已完成");
-
-    // 推理折叠块属于"最近一条 assistant 消息"时默认展开，便于用户感受到活动流。
-    // 用户点击 summary 可以手动收起。
-    expect((details.element as HTMLDetailsElement).open).toBe(true);
-    await details.get("summary").trigger("click");
-    expect((details.element as HTMLDetailsElement).open).toBe(false);
+    const reasoning = wrapper.get(".oc-reasoning-part");
+    expect(reasoning.text()).toContain("思考状态");
+    expect(wrapper.text()).toContain("正在生成回答");
   });
 
   it("keeps the reasoning and tool details collapsed for older assistant messages", () => {
@@ -742,15 +735,9 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
-    const detailsList = wrapper.findAll(".figma-chat-process-detail");
-    // a1：reasoning + bash = 2 details；a2：reasoning + bash = 2 details；共 4
-    expect(detailsList.length).toBe(4);
-    // 顺序：reason-old、tool-old、reason-new、tool-new
-    const [oldReason, oldTool, newReason, newTool] = detailsList;
-    expect((oldReason.element as HTMLDetailsElement).open).toBe(false);
-    expect((oldTool.element as HTMLDetailsElement).open).toBe(false);
-    expect((newReason.element as HTMLDetailsElement).open).toBe(true);
-    expect((newTool.element as HTMLDetailsElement).open).toBe(true);
+    expect(wrapper.findAll(".oc-reasoning-part")).toHaveLength(2);
+    expect(wrapper.findAll(".oc-tool")).toHaveLength(2);
+    expect(wrapper.findAll(".oc-tool__body")).toHaveLength(1);
   });
 
   it("does not resurface the choice panel when switching to a historical session where the user has already replied", async () => {
@@ -825,8 +812,7 @@ describe("FigmaChatPanel", () => {
       }
     });
 
-    expect(wrapper.find(".figma-chat-running-assistant .figma-chat-avatar").exists()).toBe(true);
-    expect(wrapper.find(".figma-chat-running-assistant .figma-chat-status").exists()).toBe(true);
+    expect(wrapper.find(".oc-thinking-row").exists()).toBe(true);
   });
 
   it("allows the explore section to expand and collapse", async () => {
@@ -849,16 +835,16 @@ describe("FigmaChatPanel", () => {
       }
     });
 
-    const exploreSection = wrapper.find(".figma-chat-file-summary");
+    const exploreSection = wrapper.find(".oc-context-group");
     expect(exploreSection.exists()).toBe(true);
     expect(exploreSection.text()).not.toContain("login.test.ts");
-    expect(exploreSection.find(".figma-chat-read-chevron").exists()).toBe(true);
+    expect(exploreSection.find(".oc-tool__chevron").exists()).toBe(true);
 
-    await exploreSection.get(".figma-chat-file-summary-row").trigger("click");
+    await exploreSection.get(".oc-context-group__trigger").trigger("click");
     expect(exploreSection.text()).toContain("login.test.ts");
     expect(exploreSection.text()).toContain("login.ts");
 
-    await exploreSection.get(".figma-chat-file-summary-row").trigger("click");
+    await exploreSection.get(".oc-context-group__trigger").trigger("click");
     expect(exploreSection.text()).not.toContain("login.test.ts");
   });
 
@@ -884,18 +870,9 @@ describe("FigmaChatPanel", () => {
       }
     });
 
-    // 折叠时不应渲染 pre
-    expect(wrapper.find(".figma-chat-write-preview").exists()).toBe(false);
-    // 文件工具只能走文件摘要，不应再额外出现一份通用 tool 详情。
-    expect(wrapper.find(".figma-chat-process-detail").exists()).toBe(false);
-    // 展开后应当渲染（一次性计算 v-memo 缓存）
-    const summaryRow = wrapper.find(".figma-chat-file-summary-row");
-    await summaryRow.trigger("click");
-    expect(wrapper.find(".figma-chat-write-preview").exists()).toBe(true);
-    // 折叠再展开，v-memo 应命中缓存
-    await summaryRow.trigger("click");
-    await summaryRow.trigger("click");
-    expect(wrapper.find(".figma-chat-write-preview").exists()).toBe(true);
+    expect(wrapper.find(".oc-tool").exists()).toBe(true);
+    expect(wrapper.text()).toContain("Write");
+    expect(wrapper.text()).toContain("/tmp/long.ts");
   });
 
   it("does not render a standalone directory card for read tool output", () => {
@@ -926,7 +903,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).not.toContain("workspace/");
   });
 
-  it("shows read tool output as structured FilePart, not in main text", () => {
+  it("shows read tool output as structured FilePart, not in main text", async () => {
     const xmlOutput = "<path>/tmp/test.txt</path><type>file</type><content>1: hello world</content>";
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -956,11 +933,12 @@ describe("FigmaChatPanel", () => {
       expect(src).not.toContain("hello world");
     }
 
-    // read output 在结构化 FilePart 中（文件名显示）
+    // read 输出被收敛到 context group，展开后显示文件名。
+    await wrapper.get(".oc-context-group__trigger").trigger("click");
     expect(wrapper.text()).toContain("test.txt");
   });
 
-  it("renders a completed assistant message that only has tool parts (no text)", () => {
+  it("renders a completed assistant message that only has tool parts (no text)", async () => {
     // 消息只有 tool parts 没有 text -> 应作为结构化块展示
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -979,10 +957,9 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
-    // assistant 消息存在
-    expect(wrapper.findAll(".figma-chat-assistant")).toHaveLength(1);
-    // 有折叠块展示工具信息
-    expect(wrapper.text()).toContain("bash");
+    expect(wrapper.findAll(".oc-tool")).toHaveLength(1);
+    expect(wrapper.text()).toContain("Bash");
+    await wrapper.get(".oc-tool__trigger").trigger("click");
     expect(wrapper.text()).toContain("编译成功");
   });
 
@@ -1045,7 +1022,7 @@ describe("FigmaChatPanel", () => {
     const allText = wrapper.text();
     expect(allText).toContain("No such file or directory");
     // 错误在 tool 折叠块中显示
-    expect(allText).toContain("read");
+    expect(allText).toContain("Read");
   });
 
   it("collapses completed bash tool outputs by default and expands them on click", async () => {
@@ -1067,30 +1044,14 @@ describe("FigmaChatPanel", () => {
       global: { stubs: { MarkdownView: markdownViewStub } }
     });
 
-    const details = wrapper.findAll("details");
-    expect(details).toHaveLength(2);
+    const bashTool = wrapper.get(".oc-tool");
+    expect(wrapper.text()).toContain("Bash");
+    expect(wrapper.find(".oc-tool__body").exists()).toBe(false);
 
-    const bashDetails = details.find(d => d.text().includes("bash"));
-    const grepDetails = details.find(d => d.text().includes("grep"));
+    await bashTool.get(".oc-tool__trigger").trigger("click");
+    expect(wrapper.text()).toContain("bash output content");
 
-    expect(bashDetails).toBeTruthy();
-    expect(grepDetails).toBeTruthy();
-
-    // Bash should be collapsed by default
-    expect(bashDetails?.element.getAttribute("open")).toBeNull();
-
-    // Grep (in the last assistant message) should be expanded by default
-    expect(grepDetails?.element.getAttribute("open")).not.toBeNull();
-
-    // Click the bash details key/summary to expand
-    const bashSummary = bashDetails?.get("summary");
-    await bashSummary?.trigger("click");
-
-    // Bash should now be expanded
-    expect(bashDetails?.element.getAttribute("open")).not.toBeNull();
-
-    // Click the bash details key/summary again to collapse
-    await bashSummary?.trigger("click");
-    expect(bashDetails?.element.getAttribute("open")).toBeNull();
+    await bashTool.get(".oc-tool__trigger").trigger("click");
+    expect(wrapper.find(".oc-tool__body").exists()).toBe(false);
   });
 });
