@@ -415,6 +415,26 @@ describe("agent-chat runtime reducer", () => {
     });
   });
 
+  it("maps native todo.updated payload.todos and creates unique ids when opencode omits ids", () => {
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("todo.updated", {
+        sessionID: "ses_123",
+        todos: [
+          { content: "分析需求", status: "pending", priority: "high" },
+          { content: "编写实现", status: "in_progress", priority: "medium" },
+          { content: "补充测试", status: "completed", priority: "low" },
+          { content: "废弃旧路径", status: "cancelled", priority: "low" }
+        ]
+      })
+    });
+
+    expect(state.todos.map((item) => item.text)).toEqual(["分析需求", "编写实现", "补充测试", "废弃旧路径"]);
+    expect(state.todos.map((item) => item.status)).toEqual(["pending", "in_progress", "completed", "cancelled"]);
+    expect(new Set(state.todos.map((item) => item.id)).size).toBe(4);
+    expect(state.todos.every((item) => item.id !== "todo" && item.id !== "unknown")).toBe(true);
+  });
+
   it("records terminal run status from run events", () => {
     const failed = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",

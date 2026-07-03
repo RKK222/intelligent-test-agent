@@ -3168,6 +3168,7 @@ async function handleLogout() {
           :process-initializing="initializeOpencodeProcessMutation.isPending.value"
           :permissions="chatState.permissions"
           :questions="chatState.questions"
+          :todos="chatState.todos"
           :selected-model-label="selectedModelLabel"
           :model-picker-disabled="false"
           :stop-disabled="!canStopRun"

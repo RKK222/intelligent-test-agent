@@ -189,12 +189,18 @@ function reduceEventOnly(
     return requestId ? { ...state, questions: state.questions.filter((item) => item.requestId !== requestId) } : state;
   }
   if (event.type === "todo.updated") {
-    const raw = Array.isArray(event.payload.todo) ? event.payload.todo : Array.isArray(event.payload.items) ? event.payload.items : [];
+    const raw = Array.isArray(event.payload.todos)
+      ? event.payload.todos
+      : Array.isArray(event.payload.todo)
+        ? event.payload.todo
+        : Array.isArray(event.payload.items)
+          ? event.payload.items
+          : [];
     return {
       ...state,
       todos: raw
         .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
-        .map(toTodoItem)
+        .map((item, index) => toTodoItem(item, index))
     };
   }
   if (event.type === "session.status") {
@@ -716,11 +722,12 @@ function toQuestionRequest(payload: Record<string, unknown>, event: RunEvent): Q
   };
 }
 
-function toTodoItem(value: Record<string, unknown>): TodoItem {
-  const id = text(value.id) ?? "todo";
+function toTodoItem(value: Record<string, unknown>, index = 0): TodoItem {
+  const fallbackText = text(value.text) ?? text(value.content) ?? text(value.title) ?? `todo-${index}`;
+  const id = text(value.id) ?? text(value.todoId) ?? text(value.todoID) ?? fallbackTodoId(index, fallbackText);
   return {
     id,
-    text: text(value.text) ?? text(value.content) ?? text(value.title) ?? id,
+    text: fallbackText,
     status: text(value.status) ?? "pending",
     priority: text(value.priority),
     title: text(value.title),
@@ -731,6 +738,15 @@ function toTodoItem(value: Record<string, unknown>): TodoItem {
     steps: Array.isArray(value.steps) ? value.steps.filter((item): item is string => typeof item === "string") : undefined,
     updatedAt: text(value.updatedAt)
   };
+}
+
+function fallbackTodoId(index: number, content: string): string {
+  // opencode 原生 Todo 没有 id；用序号和内容 hash 生成稳定 key，避免多条任务都落到同一个 Vue key。
+  let hash = 0;
+  for (const char of content) {
+    hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
+  }
+  return `todo_${index}_${hash.toString(36)}`;
 }
 
 function runStatusFromEvent(event: RunEvent) {

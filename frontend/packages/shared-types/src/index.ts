@@ -1237,7 +1237,7 @@ export type RuntimeToolInfo = {
 export type TodoItem = {
   id: string;
   text: string;
-  status: "pending" | "in_progress" | "completed" | string;
+  status: "pending" | "in_progress" | "completed" | "cancelled" | string;
   priority?: "low" | "medium" | "high" | string;
   title?: string;
   description?: string;

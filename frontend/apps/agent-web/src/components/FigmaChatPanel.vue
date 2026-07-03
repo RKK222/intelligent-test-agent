@@ -14,7 +14,6 @@ import {
   FileText,
   Folder,
   History,
-  ListTodo,
   Loader2,
   MinusCircle,
   PanelRightClose,
@@ -36,11 +35,12 @@ import type {
   AiMessageFeedback,
   MessagePart,
   RunDiffFile,
+  TodoItem,
 } from '@test-agent/shared-types'
 import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
-import { MarkdownView, OpencodeTimeline, createOpencodeLikeState } from '@test-agent/agent-chat'
+import { MarkdownView, OpencodeTimeline, TodoPanel, createOpencodeLikeState } from '@test-agent/agent-chat'
 
 type ChatMessageInput = AgentMessage & { content?: string }
 
@@ -607,11 +607,14 @@ const props =
     rawOutputEntries?: RawOutputEntry[]
     /** message.part.delta 的流式 overlay，避免 text/reasoning 闪烁或重复。 */
     streamingTextByPartId?: Record<string, string>
+    /** opencode todo.updated 投影出的任务列表，固定展示在输入框上方。 */
+    todos?: TodoItem[]
   }>(), {
     processRefreshBlocksSubmit: true,
     commands: () => [],
     rawOutputEntries: () => [],
-    streamingTextByPartId: () => ({})
+    streamingTextByPartId: () => ({}),
+    todos: () => []
   })
 
 const emit =
@@ -2136,6 +2139,7 @@ const opencodeTimelineState = computed(() =>
     running: props.running,
     diffFiles: timelineDiffFiles.value,
     streamingTextByPartId: props.streamingTextByPartId,
+    todos: props.todos,
   })
 )
 
@@ -3371,6 +3375,7 @@ function onCompositionEnd() {
         </div>
       </template>
     </div>
+    <TodoPanel :todos="todos" />
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div class="figma-chat-composer">
       <div class="figma-chat-input-card" @click="onComposerCardClick">

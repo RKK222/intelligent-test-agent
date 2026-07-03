@@ -54,6 +54,12 @@
   - 修改 `rows.css` 对 `.oc-assistant-frame.is-continuation` 设为 block + padding-left: 46px 布局，并完善用户头像和不对称气泡的样式类。
   - 修改 `timeline.css` 将 `.oc-timeline` 的 padding 设为 `10px 8px 20px`，并将 `.oc-row + .oc-row` 的 margin-top 改为 4px，`.oc-turn-gap` 的高度设为 8px。
 - Result: 前端全量 266 个 Vitest 测试全绿通过，`typecheck` 成功，改动完全不影响任何前后端交互逻辑。
+### 2026-07-03 - Todo 面板迁入 opencode-like
+
+- Why: opencode 原生 `todo.updated` 事件使用 `payload.todos[]` 且 Todo 无稳定 `id`，前端原 reducer 只识别 `todo/items`，当前右侧主面板也没有展示 todos。
+- What: 新增 `opencode-like` Todo 面板并固定展示在输入框上方，收起态展示待处理/进行中/已完成/已取消/其他和总数，展开态展示任务列表；`AgentWorkbench` 将 `chatState.todos` 传入 `FigmaChatPanel`。
+- How: reducer 兼容 `payload.todos` 并为无 id 的 Todo 按序号和内容生成展示 key；不新增后端 SSE 类型或 API，只补充事件文档与前端包说明。
+- Result: Todo 展示入口从旧 `TaskBreakdown/ProcessDisclosure` 迁到 `.oc-*` 组件体系，`todo.updated` 的真实 opencode payload 可被当前右侧面板消费。
 
 ### 2026-07-03 - 恢复 opencode-like 对话时间线轻量样式
 

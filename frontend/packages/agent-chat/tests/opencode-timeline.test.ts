@@ -80,6 +80,48 @@ describe("OpencodeTimeline", () => {
     expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();
   });
 
+  it("shows a collapsible todo panel above the composer", async () => {
+    const messages: AgentMessage[] = [userMessage("msg_user_1", "实现 Todo 展示")];
+    const { container, getByText, queryByText } = render(AssistantThread, {
+      props: {
+        messages,
+        commands: [],
+        resources: [],
+        running: false,
+        todos: [
+          { id: "todo_1", text: "分析 SSE 字段", status: "pending", priority: "high" },
+          { id: "todo_2", text: "实现面板", status: "in_progress", priority: "medium" },
+          { id: "todo_3", text: "补充测试", status: "completed", priority: "low" },
+          { id: "todo_4", text: "移除旧入口", status: "cancelled", priority: "low" },
+          { id: "todo_5", text: "未知状态兼容", status: "blocked", priority: "high" }
+        ]
+      }
+    });
+
+    const thread = container.querySelector(".ta-assistant-thread");
+    const todoPanel = container.querySelector(".oc-todo-panel");
+    const composer = container.querySelector(".ta-composer-form");
+    expect(todoPanel).toBeTruthy();
+    expect(composer).toBeTruthy();
+    expect(todoPanel?.parentElement).toBe(thread);
+    expect(Array.from(thread?.children ?? []).indexOf(todoPanel as Element)).toBeLessThan(
+      Array.from(thread?.children ?? []).indexOf(composer as Element)
+    );
+    expect(getByText("待处理 1")).toBeTruthy();
+    expect(getByText("进行中 1")).toBeTruthy();
+    expect(getByText("已完成 1")).toBeTruthy();
+    expect(getByText("已取消 1")).toBeTruthy();
+    expect(getByText("其他 1")).toBeTruthy();
+    expect(getByText("共 5")).toBeTruthy();
+    expect(queryByText("分析 SSE 字段")).toBeNull();
+
+    await fireEvent.click(container.querySelector(".oc-todo-panel__header") as HTMLElement);
+
+    expect(getByText("分析 SSE 字段")).toBeTruthy();
+    expect(getByText("未知状态兼容")).toBeTruthy();
+    expect(getByText("blocked")).toBeTruthy();
+  });
+
   it("shows one assistant header for split assistant messages in the same user turn", async () => {
     const state = createOpencodeLikeState({
       messages: [

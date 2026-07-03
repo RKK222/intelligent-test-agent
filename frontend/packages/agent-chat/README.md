@@ -14,7 +14,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - 工具调用按 opencode 常见工具拆分专用视图：bash、read、list、glob、grep、edit、write、apply_patch、webfetch、websearch、task、skill、question；读取/检索类上下文工具默认合并为折叠的上下文组，失败工具仍单独展示错误。
 - 工具视图统一使用 `.oc-*` primitives 和轻量折叠壳，工具详情默认折叠，过程行的标题、摘要、状态和展开箭头使用固定列对齐；最终文本直接以轻量气泡展示，不额外加“最终输出”标题，并保留复制按钮；工作区内长绝对路径在列表中展示为面向用户的短路径，完整路径只保留在悬浮提示中，避免 `.testagent`/personal worktree 前缀撑开对话区域。
 - 运行中状态以 `thinking` 行和工具状态展示；失败运行追加统一错误行。
-- 提供 Agent/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和线程内任务分解展示；模型选择器按 Provider 分组展示模型，选择模型时同步更新 Provider 与 Model。
+- 提供 Agent/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和输入框上方 `TodoPanel`；Todo 收起态展示待处理/进行中/已完成/已取消/其他和总数，展开态展示任务列表、状态和优先级。模型选择器按 Provider 分组展示模型，选择模型时同步更新 Provider 与 Model。
 - Skill 调用不新增独立卡片类型或 `skill.*` 事件；当 tool/message part 的 `tool` 或 `toolName` 为 `skill` 时，在前端展示为 Skill 调用块，展示 Skill 名称、用途、状态和折叠详情。
 - Prompt composer 支持文本、文件附件、图片附件和附件 chips；文件读取后只向 app 层返回平台 `PromptPart`，不直接提交后端。
 - History tab 支持受控搜索、选择会话、置顶/取消置顶和删除回调；实际 API 调用和历史正文加载态由 app 层完成，正文展示不等待消息反馈等附属请求。
@@ -35,7 +35,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - 旧结构化卡片路径 `AgentCard.vue`、`TimelineCard.vue`、`ToolPayloadBlock.vue` 已作废；旧 `card` 消息中的 Diff payload 由 `opencode-like/state` 收敛为 `diff-summary` 行展示。
 - `FigmaChatPanel.vue` 中旧 `.figma-chat-*` 气泡消息循环已从主路径禁用，不再作为新交互或新样式的修改入口。
 - `FigmaChatPanel.vue` 中旧底部实时任务面板已作废并停止渲染；运行中工具/事件只由 `OpencodeTimeline` 展示，避免任务列表与时间线事件来自不同聚合逻辑。
-- `ProcessDisclosure.vue` 仍被 `TaskBreakdown.vue` 等存量局部视图复用，不整体标废；但不要用它恢复旧对话主路径。
+- `ProcessDisclosure.vue` 仍被 `TaskBreakdown.vue` 等存量局部视图复用，不整体标废；但不要用它恢复旧对话主路径或新的 Todo 展示，新 Todo 展示必须使用 `opencode-like/components/TodoPanel.vue`。
 
 ## 禁止事项
 

@@ -56,6 +56,38 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
   });
 
+  it("renders todos above the composer and expands the task list on demand", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        todos: [
+          { id: "todo_1", text: "分析 SSE 字段", status: "pending", priority: "high" },
+          { id: "todo_2", text: "实现面板", status: "in_progress", priority: "medium" },
+          { id: "todo_3", text: "补充测试", status: "completed", priority: "low" },
+          { id: "todo_4", text: "取消旧入口", status: "cancelled", priority: "low" }
+        ]
+      } as any
+    });
+
+    const todoPanel = wrapper.find(".oc-todo-panel");
+    const composer = wrapper.find(".figma-chat-composer");
+    expect(todoPanel.exists()).toBe(true);
+    expect(composer.exists()).toBe(true);
+    expect(todoPanel.element.compareDocumentPosition(composer.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(wrapper.text()).toContain("待处理 1");
+    expect(wrapper.text()).toContain("进行中 1");
+    expect(wrapper.text()).toContain("已完成 1");
+    expect(wrapper.text()).toContain("已取消 1");
+    expect(wrapper.text()).toContain("共 4");
+    expect(wrapper.text()).not.toContain("分析 SSE 字段");
+
+    await wrapper.get(".oc-todo-panel__header").trigger("click");
+
+    expect(wrapper.text()).toContain("分析 SSE 字段");
+    expect(wrapper.text()).toContain("高优先级");
+  });
+
   it("sends the trimmed prompt and clears the composer when the process is ready", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

@@ -80,6 +80,32 @@
 | `file.watcher.updated` | 文件 watcher 状态更新。 |
 | `opencode.event.unknown` | 未识别 opencode raw event 的兼容兜底。 |
 
+## `todo.updated`
+
+`todo.updated` 表示当前 opencode session 的 Todo 列表整体刷新。平台后端只把 opencode raw event 映射为同名 RunEvent，不改写 Todo 结构；前端必须把每次事件视为列表快照，而不是单项增量。
+
+payload 字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `sessionID` / `sessionId` | string | Todo 所属 opencode session。后端可能同时补充 lower camel alias。 |
+| `todos` | array | opencode 原生 Todo 列表。兼容旧前端测试和历史 payload 时也允许读取 `todo` 或 `items`。 |
+
+`todos[]` 字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `content` | string | 任务简述，前端映射为 `TodoItem.text`。 |
+| `status` | string | 当前状态。已知值：`pending`、`in_progress`、`completed`、`cancelled`。 |
+| `priority` | string | 优先级。已知值：`high`、`medium`、`low`。 |
+
+前端展示：
+
+- `pending` 显示为“待处理”，`in_progress` 显示为“进行中”，`completed` 显示为“已完成”，`cancelled` 显示为“已取消”。
+- 未知 `status` 保留原始字符串展示，并归入“其他”数量。
+- opencode 原生 Todo 没有稳定 `id` 字段，前端在缺少 `id/todoId/todoID` 时按数组位置和内容生成展示用 key。
+- 右侧对话面板在输入框上方显示 Todo 面板：收起态展示各状态数量和总数，展开态展示完整 Todo 列表。
+
 ## SSE 续传
 
 - SSE `event` 使用 RunEvent 的 `type`。

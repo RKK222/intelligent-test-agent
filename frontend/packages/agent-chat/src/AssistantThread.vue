@@ -32,7 +32,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import ComposerArea from "./ComposerArea.vue";
 import OpencodeTimeline from "./opencode-like/components/OpencodeTimeline.vue";
 import RuntimeControls from "./RuntimeControls.vue";
-import TaskBreakdown from "./TaskBreakdown.vue";
+import TodoPanel from "./opencode-like/components/TodoPanel.vue";
 import { createOpencodeLikeState } from "./opencode-like/state/adapter";
 import { partSignature, scrollViewportToBottom, viewportIsAtBottom } from "./chat-utils";
 
@@ -160,7 +160,6 @@ function jumpToBottom() {
         <div class="text-[13px] font-semibold text-[var(--ta-chat-text)]">开始与测试智能体对话</div>
         <div class="text-[12px] text-[var(--ta-chat-muted)]">描述测试任务，例如：跑 checkout 模块并分析失败原因</div>
       </div>
-      <TaskBreakdown :todos="todos" />
       <OpencodeTimeline :state="timelineState" @open-diff="emit('openDiff')" />
       <button
         v-if="hasNewContent"
@@ -171,6 +170,7 @@ function jumpToBottom() {
         查看新内容
       </button>
     </div>
+    <TodoPanel :todos="todos" />
     <ComposerArea
       :running="running"
       :commands="commands"

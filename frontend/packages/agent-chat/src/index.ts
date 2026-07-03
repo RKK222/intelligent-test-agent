@@ -7,6 +7,7 @@ export type { AssistantThreadProps } from "./AssistantThread.vue";
 // 作废兼容导出：AgentCard 属于旧结构化卡片主路径，新对话展示请使用 OpencodeTimeline。
 export { default as AgentCard } from "./AgentCard.vue";
 export { default as OpencodeTimeline } from "./opencode-like/components/OpencodeTimeline.vue";
+export { default as TodoPanel } from "./opencode-like/components/TodoPanel.vue";
 export { createOpencodeLikeState, createTimelineRows } from "./opencode-like";
 export type { OpencodeLikeConversationState, TimelineRow } from "./opencode-like";
 export { buildComposerPromptParts, fileToPromptAttachment } from "./prompt-parts";
