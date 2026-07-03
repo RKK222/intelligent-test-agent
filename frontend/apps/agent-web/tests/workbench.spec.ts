@@ -497,6 +497,17 @@ test("retrying a failed chat run sends the previous prompt again", async ({ page
   const runRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
     runRequests,
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
     runEvents: [
       event(1, "run.failed", {
         error: { name: "ConnectionError", message: "您的请求断开，请重试" }
@@ -510,7 +521,7 @@ test("retrying a failed chat run sends the previous prompt again", async ({ page
   await composer.fill("重试这条测试任务");
   await page.getByRole("button", { name: "发送" }).click();
   await expect.poll(() => runRequests.length).toBe(1);
-  await expect(page.getByText("您的请求断开，请重试！ (974)")).toBeVisible();
+  await expect(page.getByText("您的请求断开，请重试")).toBeVisible();
 
   await page.locator(".figma-chat-retry-card-btn").click();
 

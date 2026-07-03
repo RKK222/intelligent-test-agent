@@ -317,8 +317,7 @@ function renderCodeWithLineNumbers(content: string, filePath: string): string {
 }
 
 function copyErrorMessage() {
-  const lastErr = displayMessages.value.filter((m) => m._error).pop()
-  const errorText = lastErr?.content || 'Unknown connection error.'
+  const errorText = taskFailureMessage.value
   navigator.clipboard.writeText(errorText).then(() => {
     console.log('Error copied to clipboard')
   }).catch((err) => {
@@ -2260,6 +2259,13 @@ const showTaskStopped = computed(() =>
 const showTaskCompleted = computed(() =>
   !props.running && hasVisibleMessages.value && !showTaskFailed.value && !showTaskStopped.value && (wasCompleted.value || isRuntimeSuccessStatus())
 )
+const fallbackTaskFailureMessage = '您的请求断开，请重试。'
+const taskFailureMessage = computed(() => {
+  const error = [...displayMessages.value]
+    .reverse()
+    .find((message) => message._error && message.content.trim().length > 0)
+  return error?.content.trim() || fallbackTaskFailureMessage
+})
 
 const timelineMessages = computed<AgentMessage[]>(() =>
   (props.messages ?? []).map((message, index) => {
@@ -3216,7 +3222,7 @@ function onCompositionEnd() {
       >
         <div class="figma-chat-retry-card-header">
           <AlertTriangle :size="14" class="figma-chat-retry-card-icon" />
-          <span class="figma-chat-retry-card-text">您的请求断开，请重试！ (974)</span>
+          <span class="figma-chat-retry-card-text">{{ taskFailureMessage }}</span>
           <span class="figma-chat-retry-card-copy" @click="copyErrorMessage">复制错误信息</span>
         </div>
         <button class="figma-chat-retry-card-btn" @click="emit('retry')">重试</button>

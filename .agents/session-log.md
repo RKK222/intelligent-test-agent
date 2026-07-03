@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-03 - 失败卡片展示真实 Run 错误
+
+- Why:
+  - 右侧对话失败重试卡固定展示“您的请求断开，请重试！(974)”，但实际 `run.failed` 已携带 `Insufficient Balance` 等真实错误信息，用户无法直接看到根因。
+- What:
+  - `FigmaChatPanel` 的失败重试卡改为优先展示最近一条 `_error` 消息内容，缺失时才回退通用断开提示。
+  - “复制错误信息”与失败卡展示文案共用同一个真实错误来源。
+  - 补充组件回归测试和 mock E2E 断言，并修正该 E2E 缺少可用工作区 fixture 导致发送按钮禁用的问题。
+- How:
+  - 只改 agent-web 前端组件、测试和 README，不修改后端 API、RunEvent 契约、数据库或 generated SDK。
+- Result:
+  - `Insufficient Balance` 这类模型供应商错误会直接显示在失败卡片中，用户不必点击复制才能知道真实错误。
+
 ### 2026-07-03 - 子 Agent 对话切换展示
 
 - Why:

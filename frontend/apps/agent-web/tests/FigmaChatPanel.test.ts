@@ -703,6 +703,40 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).not.toContain("任务完成");
   });
 
+  it("shows the real run failure message in the retry card", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "u-balance",
+            messageId: "u-balance",
+            role: "user",
+            text: "继续执行任务",
+            createdAt: "2026-07-03T11:24:00.000Z"
+          },
+          {
+            id: "event-balance",
+            role: "card",
+            cardType: "event",
+            title: "Run 执行失败",
+            payload: {
+              type: "run.failed",
+              error: { name: "ProviderError", message: "Insufficient Balance" }
+            },
+            createdAt: "2026-07-03T11:24:01.000Z"
+          }
+        ],
+        running: false,
+        runtimeStatus: "FAILED",
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.find(".figma-chat-retry-card-text").text()).toContain("Insufficient Balance");
+    expect(wrapper.find(".figma-chat-retry-card-text").text()).not.toContain("974");
+  });
+
   it("uses the opencode timeline instead of the legacy running task panel", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
