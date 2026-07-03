@@ -2,6 +2,25 @@
 
 ## Entries
 
+### 2026-07-03 - 优化对话时间线行间距、工具状态样式与文件输出路径展示
+
+- Why:
+  - 1. 对话时间线的步骤行和思维行之间的纵向间距过近，显得拥挤不美观；
+  - 2. 工具和思考状态行设计单调、缺乏视觉吸引力，且工具标题强行小写不够规整；
+  - 3. 文件输出展示了冗余的相对工作区前缀（如 `F-COSS/workspace/`），导致在窄侧边栏下被 ellipsis 截断成无意义字符，无法直接阅读文件名；
+  - 4. 前置合并引入的冲突标志虽已被处理，但 `allModels` watch 会在切换/加载工作区时因数据为空导致 transient 清除用户的模型和供应商配置。
+- What:
+  - 1. 调大 timeline 行间距 `.oc-row` (从 4px 到 8px) 和 continuation 段间距 (从 2px 到 6px)，触发器垂直 padding 从 2px/3px 调至 6px。
+  - 2. 美化工具状态 `oc-tool__status` 为 premium 渐变高亮微章，移除工具标题的 lowercase 强转以恢复规范大小写，添加 hover 背景变色与平滑过渡。
+  - 3. 增强 `formatDisplayPath` 自动识别并剥离 `/Users/..`、`test-workspaces/[app]/workspace/` 等冗余前缀，优先保留 filename 并在 32 字符内合理显示 parent 路径。
+  - 4. 修复 `AgentWorkbench` 对 `allModels` 的侦听逻辑，在 queries pending 期间跳过 preference reset，确保跨 workspace 切换时偏好不丢失。
+- How:
+  - 修改 `tool-registry.ts` 处理路径裁剪逻辑，修改 `ToolPartGroup.vue` 的 title Casing。
+  - 修改 `timeline.css`、`rows.css`、`tools.css` 相关类以调优间距、圆角、背景、badge 样式与过渡效果。
+  - 修改 `AgentWorkbench.vue` 优化 model preference 变更策略与 pending 保护。
+- Result:
+  - 前端 `corepack pnpm build` 与 typecheck 完美通过，时间线版面结构宽裕透气，文件名突出醒目，偏好切换机制运行稳健。
+
 ### 2026-07-03 - 兼容 raw properties 防止子 Agent 卡片消失
 
 - Why:

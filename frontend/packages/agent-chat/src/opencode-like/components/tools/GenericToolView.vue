@@ -3,6 +3,7 @@ import type { MessagePart } from "@test-agent/shared-types";
 
 export type GenericToolViewProps = {
   part: Extract<MessagePart, { type: "tool" }>;
+  nested?: boolean;
 };
 </script>
 
@@ -47,6 +48,7 @@ function outputValue(part: Extract<MessagePart, { type: "tool" }>): unknown {
     :subtitle-title="info.fullSubtitle"
     :status="part.status"
     :default-open="false"
+    :nested="nested"
   >
     <div class="oc-tool-detail">
       <OcCodeBlock v-if="inputText" label="input" :code="inputText" />

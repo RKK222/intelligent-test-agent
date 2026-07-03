@@ -5,6 +5,7 @@ export type OcToolShellProps = {
   subtitleTitle?: string;
   status?: string;
   defaultOpen?: boolean;
+  nested?: boolean;
 };
 </script>
 
@@ -27,7 +28,7 @@ function formatStatus(status: string): string {
 </script>
 
 <template>
-  <section class="oc-tool">
+  <section :class="['oc-tool', nested ? 'is-nested' : '']">
     <button type="button" class="oc-tool__trigger" @click="open = !open">
       <span class="oc-tool__title">{{ title }}</span>
       <span v-if="subtitle" class="oc-tool__subtitle" :title="subtitleTitle ?? subtitle">{{ subtitle }}</span>

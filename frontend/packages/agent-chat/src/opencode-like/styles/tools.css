@@ -15,15 +15,23 @@
   width: 100%;
   grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
   min-height: unset;
-  padding: 2px 0;
+  padding: 6px 10px;
   column-gap: 8px;
   align-items: center;
   color: var(--oc-muted);
   background: transparent;
   border: 0;
+  border-radius: var(--oc-radius-sm);
   cursor: pointer;
   text-align: left;
   font-family: var(--oc-font-sans);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.oc-disclosure__trigger:hover,
+.oc-context-group__trigger:hover,
+.oc-tool-group__trigger:hover {
+  background: var(--oc-surface-muted);
 }
 
 .oc-disclosure__trigger .oc-tool__title,
@@ -40,9 +48,7 @@
   line-height: 20px;
 }
 
-.oc-tool-group__trigger .oc-tool__title {
-  text-transform: lowercase;
-}
+/* No lowercase transform for tool titles */
 
 .oc-disclosure__trigger .oc-tool__subtitle,
 .oc-context-group__trigger .oc-tool__subtitle,
@@ -74,14 +80,20 @@
   grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
   align-items: center;
   column-gap: 8px;
-  padding: 3px 0;
+  padding: 6px 10px;
   color: var(--oc-fg);
   background: transparent;
   border: 0;
+  border-radius: var(--oc-radius-sm);
   cursor: pointer;
   text-align: left;
   min-height: unset;
   font-family: var(--oc-font-sans);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.oc-tool__trigger:hover {
+  background: var(--oc-surface-muted);
 }
 
 .oc-tool__trigger .oc-tool__title {
@@ -94,7 +106,6 @@
   font-weight: 600;
   font-size: var(--oc-text-md);
   line-height: 20px;
-  text-transform: lowercase;
 }
 
 .oc-tool__trigger .oc-tool__subtitle {
@@ -120,20 +131,36 @@
 .oc-tool__status {
   grid-column: 3;
   justify-self: end;
-  font-size: var(--oc-text-xs);
-  line-height: 16px;
-  color: var(--oc-subtle);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  padding: 2px 6px;
+  border-radius: var(--oc-radius-xs);
   white-space: nowrap;
+  background: var(--oc-surface-muted);
+  color: var(--oc-muted);
+  border: 1px solid var(--oc-border);
 }
 
 .oc-tool__status.is-failed,
 .oc-tool__status.is-error {
+  background: rgba(180, 35, 24, 0.07);
   color: var(--oc-danger);
+  border-color: rgba(180, 35, 24, 0.25);
 }
 
 .oc-tool__status.is-running {
+  background: rgba(49, 91, 220, 0.07);
   color: var(--oc-accent);
+  border-color: rgba(49, 91, 220, 0.25);
   animation: oc-pulse 1.6s ease-in-out infinite;
+}
+
+.oc-tool__status.is-completed,
+.oc-tool__status.is-success {
+  background: rgba(47, 125, 85, 0.07);
+  color: var(--oc-success);
+  border-color: rgba(47, 125, 85, 0.25);
 }
 
 .oc-tool__body,
@@ -141,9 +168,9 @@
 .oc-context-group__body,
 .oc-tool-group__body {
   border-top: 0;
-  border-left: 1px solid var(--oc-border);
-  margin: 2px 0 0 4px;
-  padding: 2px 0 4px 12px;
+  border-left: 1.5px solid var(--oc-border);
+  margin: 4px 0 4px 14px;
+  padding: 4px 0 6px 16px;
 }
 
 .oc-tool-detail {
@@ -153,14 +180,14 @@
 
 .oc-subagent-card {
   display: grid;
-  grid-template-columns: 96px minmax(0, 1fr) auto;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
   align-items: center;
   width: min(100%, 560px);
-  min-height: 44px;
-  padding: 8px 12px;
-  column-gap: 10px;
+  min-height: 38px;
+  padding: 6px 10px;
+  column-gap: 8px;
   border: 1px solid var(--oc-border);
-  border-radius: var(--oc-radius-md);
+  border-radius: var(--oc-radius-sm);
   background: var(--oc-surface);
   color: var(--oc-fg);
   font-family: var(--oc-font-sans);
@@ -258,4 +285,19 @@
   .oc-tool__status {
     font-size: var(--oc-text-sm);
   }
+}
+
+/* Flat layout for nested tools inside groups to reduce visible hierarchies */
+.oc-tool.is-nested {
+  border-left: none;
+}
+
+.oc-tool.is-nested .oc-tool__trigger {
+  padding-left: 0;
+}
+
+.oc-tool.is-nested .oc-tool__body {
+  border-left: none;
+  margin-left: 0;
+  padding-left: 0;
 }

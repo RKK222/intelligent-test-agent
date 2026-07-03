@@ -91,23 +91,39 @@ export function formatDisplayPath(path: string | undefined): string | undefined 
   if (!path) {
     return undefined;
   }
-  const normalized = path.replace(/\\/g, "/");
-  const personalWorktreeMarker = "/workspace/personalworktree/";
+  let normalized = path.replace(/\\/g, "/");
+
+  // 1. Strip absolute path prefix
+  normalized = normalized.replace(/^.*\/intelligent-test-agent\//, "");
+  // 2. Strip test-workspaces/F-COSS/workspace/ or test-workspaces/F-COSS/
+  normalized = normalized.replace(/^test-workspaces\/[^/]+\/(workspace\/)?/, "");
+  // 3. Strip F-COSS/workspace/ or similar starting prefix
+  normalized = normalized.replace(/^[^/]+\/workspace\//, "");
+
+  const personalWorktreeMarker = "workspace/personalworktree/";
   const markerIndex = normalized.indexOf(personalWorktreeMarker);
   if (markerIndex >= 0) {
     const tail = normalized.slice(markerIndex + personalWorktreeMarker.length);
     const segments = tail.split("/").filter(Boolean);
     const branchIndex = segments.findIndex((segment) => segment.startsWith("feature_"));
     if (branchIndex >= 0 && branchIndex + 1 < segments.length) {
-      return segments.slice(branchIndex + 1).join("/");
+      normalized = segments.slice(branchIndex + 1).join("/");
     }
   }
-  if (normalized.length <= 72) {
-    return normalized;
-  }
+
   const segments = normalized.split("/").filter(Boolean);
-  if (segments.length <= 3) {
+  if (segments.length === 0) {
     return normalized;
   }
-  return `.../${segments.slice(-3).join("/")}`;
+  if (segments.length === 1) {
+    return segments[0];
+  }
+
+  const last2 = segments.slice(-2).join("/");
+  if (last2.length <= 32) {
+    return segments.length > 2 ? `.../${last2}` : last2;
+  }
+
+  const last1 = segments.at(-1)!;
+  return segments.length > 1 ? `.../${last1}` : last1;
 }

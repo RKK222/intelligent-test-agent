@@ -21,7 +21,7 @@ const emit = defineEmits<{ selectSubagent: [sessionId: string] }>();
 const open = ref(false);
 
 const firstInfo = computed(() => (props.parts[0] ? getToolInfo(props.parts[0]) : undefined));
-const titleText = computed(() => (firstInfo.value?.title ?? "Tool").toLowerCase());
+const titleText = computed(() => firstInfo.value?.title ?? "Tool");
 const subtitleText = computed(() => {
   if (props.parts.length > 1) {
     return `${props.parts.length} 次`;
@@ -62,6 +62,7 @@ const statusText = computed(() => {
         :part="part"
         :subagents-by-session-id="subagentsBySessionId"
         :subagent-by-task-part-id="subagentByTaskPartId"
+        :nested="true"
         @select-subagent="(sessionId) => emit('selectSubagent', sessionId)"
       />
     </div>

@@ -797,10 +797,12 @@ function modelMatchesProvider(model: typeof models.value[number], provider: stri
   return !provider || model.providerId === provider || modelValue(model).startsWith(`${provider}/`);
 }
 
-function applyRuntimeModelPreference(data: typeof modelsQuery.data.value | undefined) {
+function applyRuntimeModelPreference(data: ModelInfo[] | undefined) {
   if (!data?.length) {
-    selectedModel.value = "";
-    persistRuntimePreference(selectedProvider.value, "");
+    if (!modelsQuery.isPending.value && !providersQuery.isPending.value) {
+      selectedModel.value = "";
+      persistRuntimePreference(selectedProvider.value, "");
+    }
     return;
   }
   const saved = readStoredRuntimePreference();
@@ -1139,14 +1141,7 @@ watch(providersQuery.data, (data) => {
   }
 });
 watch(allModels, (data) => {
-  const savedModel = readStoredRuntimePreference().model;
-  if (savedModel && data.some((m) => modelValue(m) === savedModel)) {
-    selectedModel.value = savedModel;
-    return;
-  }
-  if (!selectedModel.value && data[0]) {
-    selectedModel.value = modelValue(data.find((model) => model.defaultModel) ?? data[0]);
-  }
+  applyRuntimeModelPreference(data);
 }, { immediate: true });
 watch(opencodeProcessReady, (ready, previous) => {
   if (!ready || previous) {

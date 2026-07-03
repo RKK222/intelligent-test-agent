@@ -6,6 +6,7 @@ export type ToolPartViewProps = {
   part: Extract<MessagePart, { type: "tool" }>;
   subagentsBySessionId?: Record<string, SubagentSession>;
   subagentByTaskPartId?: Record<string, string>;
+  nested?: boolean;
 };
 </script>
 
@@ -59,6 +60,7 @@ const subagent = computed(() => {
     :is="component"
     :part="part"
     :subagent="subagent"
+    :nested="nested"
     @select-subagent="(sessionId: string) => emit('selectSubagent', sessionId)"
   />
 </template>
