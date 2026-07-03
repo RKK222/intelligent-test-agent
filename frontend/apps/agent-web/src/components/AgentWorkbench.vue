@@ -233,15 +233,12 @@ const currentRawOutputEntries = computed(() => {
   return sessionId ? rawEntriesBySessionId.value[sessionId] ?? [] : [];
 });
 // 任务消耗展示：duration 取 chatStartedAt 实时计算；tokens 从助手消息的 step-finish part
-// 累计（opencode 每轮 step 结束会上报 tokens.total）；thought for 累计 reasoning part 的
-// durationMs。Run 结束后保留最后值继续展示。Run 切换时清零。
+// 累计（opencode 每轮 step 结束会上报 tokens.total）。Run 结束后保留最后值继续展示。Run 切换时清零。
 const chatStartedAt = ref<number | null>(null);
 const accumulatedTokens = ref(0);
-const accumulatedReasoningMs = ref(0);
 const totalDurationMs = ref(0);
 let lastDuration: string | undefined;
 let lastTokens = 0;
-let lastThoughtForMs = 0;
 const nowTick = ref(Date.now());
 const settingsOpen = ref(false);
 const serverWorkspacePickerOpen = ref(false);
@@ -1489,11 +1486,11 @@ function parseDurationStringToMs(input: string): number {
 }
 
 // 任务消耗：duration 优先用 chatStartedAt 实时计算（每秒刷新），结束后回退 lastDuration。
-// tokens/thoughtFor 优先用累计值，fallback 到 run 终态事件 payload 中的字段以保持向后兼容。
-const taskUsage = computed<{ duration?: string; tokens?: number; thoughtFor?: string; totalDuration?: string }>(() => {
+// tokens 优先用累计值，fallback 到 run 终态事件 payload 中的字段以保持向后兼容。
+const taskUsage = computed<{ duration?: string; tokens?: number; totalDuration?: string }>(() => {
   // 引用 nowTick 以触发每秒重算
   void nowTick.value;
-  const usage: { duration?: string; tokens?: number; thoughtFor?: string; totalDuration?: string } = {};
+  const usage: { duration?: string; tokens?: number; totalDuration?: string } = {};
   if (chatStartedAt.value) {
     usage.duration = formatDurationMs(Date.now() - chatStartedAt.value);
   } else if (lastDuration) {
@@ -1502,10 +1499,6 @@ const taskUsage = computed<{ duration?: string; tokens?: number; thoughtFor?: st
   const tokens = accumulatedTokens.value > 0 ? accumulatedTokens.value : lastTokens;
   if (tokens > 0) {
     usage.tokens = tokens;
-  }
-  const reasoningMs = accumulatedReasoningMs.value > 0 ? accumulatedReasoningMs.value : lastThoughtForMs;
-  if (reasoningMs > 0) {
-    usage.thoughtFor = formatDurationMs(reasoningMs);
   }
   // 累计时间 = 已完成各轮耗时 + 当前轮实时耗时
   const finishedMs = totalDurationMs.value;
@@ -1517,23 +1510,19 @@ const taskUsage = computed<{ duration?: string; tokens?: number; thoughtFor?: st
   return usage;
 });
 
-// 扫描 chatState.messages，累计 step-finish tokens 与 reasoning durationMs。
+// 扫描 chatState.messages，累计 step-finish tokens。
 // 一次 Run 内多次 step-finish 会重复累加，与 opencode 上报的每轮消耗一致。
 function recomputeUsageFromChat() {
   let tokens = 0;
-  let reasoningMs = 0;
   for (const message of chatState.value.messages) {
     if (message.role !== "assistant") continue;
     for (const part of message.parts ?? []) {
       if (part.type === "step-finish") {
         tokens += part.tokens?.total ?? 0;
-      } else if (part.type === "reasoning") {
-        reasoningMs += part.durationMs ?? 0;
       }
     }
   }
   accumulatedTokens.value = tokens;
-  accumulatedReasoningMs.value = reasoningMs;
 }
 
 const usageScanSignature = computed(() =>
@@ -1544,9 +1533,6 @@ const usageScanSignature = computed(() =>
         .map((part) => {
           if (part.type === "step-finish") {
             return `${part.partId}:step-finish:${part.tokens?.total ?? 0}`;
-          }
-          if (part.type === "reasoning") {
-            return `${part.partId}:reasoning:${part.durationMs ?? 0}`;
           }
           return "";
         })
@@ -1783,11 +1769,9 @@ function resetWorkspaceState() {
   // 切工作区时同步清掉任务消耗计时与上一轮终态展示，避免旧 Run 的 token/duration 残留。
   chatStartedAt.value = null;
   accumulatedTokens.value = 0;
-  accumulatedReasoningMs.value = 0;
   totalDurationMs.value = 0;
   lastDuration = undefined;
   lastTokens = 0;
-  lastThoughtForMs = 0;
   nowTick.value = Date.now();
   dispatchChat({ type: "reset" });
   // 切工作区时清掉个人工作区 ID，避免旧版本的空 ID 残留导致提交/推送指向错误目标。
@@ -2335,10 +2319,9 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   if (!displayPrompt) {
     return;
   }
-  // 启动计时 + 重置任务消耗累计（lastDuration/lastTokens/lastThoughtForMs 保留上一轮终态以供刷新对比）
+  // 启动计时 + 重置任务消耗累计（lastDuration/lastTokens 保留上一轮终态以供刷新对比）
   chatStartedAt.value = Date.now();
   accumulatedTokens.value = 0;
-  accumulatedReasoningMs.value = 0;
   // 解析命令（包括 Skill Command，格式为 /skill-name）
   const command = parseCommand(prompt, promptMode.value);
   if (runtimeBusy.value) {
@@ -2431,8 +2414,8 @@ function handleRunEvent(event: RunEvent) {
         loadDirectory(dir, undefined, true);
       }
     }, 500);
-    // 计算任务消耗统计：duration 由 chatStartedAt 锁定，tokens/thoughtFor 仍优先取累计值；
-    // 如果后端 payload 直接带上 tokens 或 thoughtFor 字段，则覆盖一次（向后兼容未来后端实现）。
+    // 计算任务消耗统计：duration 由 chatStartedAt 锁定，tokens 仍优先取累计值；
+    // 如果后端 payload 直接带上 tokens 字段，则覆盖一次（向后兼容未来后端实现）。
     if (chatStartedAt.value) {
       totalDurationMs.value += Date.now() - chatStartedAt.value;
       lastDuration = formatDurationMs(Date.now() - chatStartedAt.value);
@@ -2441,10 +2424,6 @@ function handleRunEvent(event: RunEvent) {
     const payload = event.payload as Record<string, unknown>;
     if (typeof payload.tokens === "number") {
       lastTokens = payload.tokens;
-    }
-    if (typeof payload.thoughtFor === "string") {
-      // 兼容未来后端直接以 "1s"/"100ms" 等字符串上报
-      lastThoughtForMs = parseDurationStringToMs(payload.thoughtFor);
     }
     // 触发 taskUsage 重新计算
     nowTick.value = Date.now();
@@ -2984,6 +2963,13 @@ async function switchSession(sessionId: string) {
   }
   session.value = selected;
   readonlySessionReason.value = readonlyReason;
+  // 切换会话后先清空上一轮任务的消耗统计，防止上一轮对话的耗时残留。
+  chatStartedAt.value = null;
+  accumulatedTokens.value = 0;
+  totalDurationMs.value = 0;
+  lastDuration = undefined;
+  lastTokens = 0;
+  nowTick.value = Date.now();
   try {
     const page = await api.listSessionMessages(sessionId, 1, 100);
     if (switchSeq !== historySwitchSeq) {
@@ -3042,6 +3028,14 @@ function handleNewConversation() {
   feedbackSubmitting.value = {};
   readonlySessionReason.value = "";
   diffFiles.value = [];
+  
+  // 新建对话后清空任务消耗统计，防止上一轮对话的耗时残留。
+  chatStartedAt.value = null;
+  accumulatedTokens.value = 0;
+  totalDurationMs.value = 0;
+  lastDuration = undefined;
+  lastTokens = 0;
+  nowTick.value = Date.now();
 }
 
 async function loadFeedbacksForMessages(messages: Array<{ messageId?: string; role?: string }>, expectedSessionId?: string) {
