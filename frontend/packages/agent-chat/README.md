@@ -29,6 +29,13 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - `step-start`/`step-finish` 内嵌 snapshot 默认折叠展示；`step-finish` 把 tokens 拆分为 input/output/reasoning 并按数量级动态展示 cost 精度。
 - `patch` part 把 `filesMap`/`fileStats` 收敛到 `metadata`，文件列表支持展开查看每文件 diff、显示 +/- 行数，并提供 hash 完整值一键复制。
 
+## 作废代码边界
+
+- 旧气泡消息 part 路径 `MessageParts.vue` 及其子组件（`AnswerPart.vue`、`PlainAnswer.vue`、`ReasoningPartBlock.vue`、`ToolPartBlock.vue`、`ToolDetail.vue`、`FilePartBlock.vue`、`SubtaskPartBlock.vue`、`PatchBlock.vue`、`SnapshotBlock.vue`、`StepMarker.vue`、`StepFinishMarker.vue`、`AgentChip.vue`、`RetryBlock.vue`、`CompactionMarker.vue`、`PartMarker.vue`）已作废，仅为历史兼容和短期比对保留；新 message part 展示必须在 `opencode-like/` 下扩展。
+- 旧结构化卡片路径 `AgentCard.vue`、`TimelineCard.vue`、`ToolPayloadBlock.vue` 已作废；旧 `card` 消息中的 Diff payload 由 `opencode-like/state` 收敛为 `diff-summary` 行展示。
+- `FigmaChatPanel.vue` 中旧 `.figma-chat-*` 气泡消息循环已从主路径禁用，不再作为新交互或新样式的修改入口。
+- `ProcessDisclosure.vue` 仍被 `TaskBreakdown.vue` 等存量局部视图复用，不整体标废；但不要用它恢复旧对话主路径。
+
 ## 禁止事项
 
 - 不直接启动 Run。

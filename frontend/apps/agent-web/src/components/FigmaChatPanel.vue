@@ -2448,6 +2448,7 @@ function onCompositionEnd() {
           </div>
         </template>
       </div>
+      <!-- 作废说明：旧气泡消息循环已被 OpencodeTimeline 主路径取代；保留未激活代码仅便于短期比对，不再扩展。 -->
       <template v-if="false" v-for="message in displayMessages" :key="message.id">
         <!-- 用户消息气泡 (右对齐) -->
         <div

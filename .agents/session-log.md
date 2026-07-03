@@ -53,6 +53,13 @@
 - What: 发布前新增远程变化预览与 expected HEAD 校验，应用 pull 后立即同步版本和本机副本 commit；冲突路径关闭 `core.quotepath`，支持全部保留个人版本、全部采用远程版本和取消 merge，目标侧缺失按 Git 删除语义处理。前端复用已加载 diff 更新数量角标、拦截旧工作区请求回写，并明确 AU/UD 删除侧。
 - How: 复用 `GitWorkspaceService`、个人工作区归属校验和现有发布编排，新增 preview/resolve-all HTTP 契约；真实临时 Git 仓库覆盖中文修改/删除冲突，服务测试覆盖预览汇总、HEAD 变化前置拦截和冲突后的元数据同步，前端测试覆盖预览确认与批量处理。处理了会话开始前遗留的 `git pull --rebase`，保留两侧 session log 后完成 7 个本地提交重放。
 - Result: common 24 个、workspace-management 36 个、API Controller 和 Git 面板/合并编辑器定向测试通过，agent-web typecheck/build 通过；使用 `.env.test` / `test` profile / JDK 25 重启并检查健康状态。未修改环境文件、数据库、事件、generated SDK 或 888 当前个人 worktree 冲突内容。
+### 2026-07-03 - 标注旧对话组件作废边界
+
+- Why: 对话主路径已经切换到 `opencode-like/OpencodeTimeline`，后续开发需要明确旧气泡和结构化卡片代码只保留兼容，不再作为新增能力入口。
+- What: 在旧 `AgentCard`/`TimelineCard`/`MessageParts` 及旧 part 子组件顶部增加作废注释，并在 `FigmaChatPanel` 已禁用的旧气泡循环前标注作废说明；同步更新前端总览、agent-chat README/PACKAGE 和 module-map。
+- How: 只插入中文作废注释和稳定文档说明，不调整旧组件模板、状态、样式或运行逻辑；`ProcessDisclosure` 仍被 `TaskBreakdown` 等局部视图使用，因此仅在文档中说明不要用它恢复旧对话主路径。
+- Result: 旧代码边界明确，新对话展示能力继续要求落在 `frontend/packages/agent-chat/src/opencode-like/`。
+
 ### 2026-07-03 - 优化对话中思考与工具状态样式
 
 - Why: 为了让对话界面的思考过程与工具状态展示更加扁平、清爽，需要参照最新的设计稿去除臃肿的外边框与背景色，改用更干净的行级样式，并合理排列 Chevron 折叠标记及中文化状态文字。

@@ -4,6 +4,7 @@ export { default as AgentChat } from "./AgentChat.vue";
 export type { AgentChatProps, HistoryItem } from "./AgentChat.vue";
 export { default as AssistantThread } from "./AssistantThread.vue";
 export type { AssistantThreadProps } from "./AssistantThread.vue";
+// 作废兼容导出：AgentCard 属于旧结构化卡片主路径，新对话展示请使用 OpencodeTimeline。
 export { default as AgentCard } from "./AgentCard.vue";
 export { default as OpencodeTimeline } from "./opencode-like/components/OpencodeTimeline.vue";
 export { createOpencodeLikeState, createTimelineRows } from "./opencode-like";

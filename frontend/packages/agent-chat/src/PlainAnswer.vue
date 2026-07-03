@@ -1,3 +1,4 @@
+<!-- 作废说明：旧气泡消息 part 渲染路径已被 opencode-like/OpencodeTimeline 取代；仅为历史兼容保留，不再扩展新能力。 -->
 <script lang="ts">
 export type PlainAnswerProps = { text: string };
 </script>
