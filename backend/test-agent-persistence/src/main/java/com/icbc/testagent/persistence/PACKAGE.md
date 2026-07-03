@@ -16,6 +16,8 @@
 - `mybatis.MyBatisPersistenceConfig`：扫描 persistence 内部 MyBatis mapper。
 - `mybatis.CommonParameterMapper` / `mybatis/CommonParameterMapper.xml`：通用参数 MyBatis 试点 SQL。
 - `mybatis.MyBatisCommonParameterRepository`：通用参数领域端口的生产 Bean。
+- `mybatis.RunEventMapper` / `mybatis/RunEventMapper.xml`：RunEvent append-only MyBatis SQL，写入结构化 scope 列和可空 raw event id。
+- `mybatis.MyBatisRunEventRepository`：RunEvent 领域端口的生产 Bean，保留 `(run_id, seq)` 冲突重试和 `runId + lastSeq` 增量读取。
 - `mybatis.RunSessionScopeMapper` / `mybatis/RunSessionScopeMapper.xml`：Run session scope MyBatis SQL，包含按 Run 和按 root session 查询。
 - `mybatis.MyBatisRunSessionScopeRepository`：RunSessionScope 领域端口的生产 Bean。
 - `JdbcWorkspaceRepository`：实现 Workspace 持久化端口。
@@ -24,7 +26,7 @@
 - `JdbcAgentSessionBindingRepository`：实现通用 agent session 绑定端口，支持按 `(sessionId, agentId)` 查询、按 `(agentId, remoteSessionId)` 查询和 upsert。
 - `JdbcSessionMessageRepository`：实现 SessionMessage 保存、按 messageId/远端 messageId 查询、分页和计数，并映射 parts/token/cost 快照字段。
 - `JdbcRunRepository`：实现 Run 持久化端口，包含 token/cost 快照和最近非终态 Run 查询。
-- `JdbcRunEventRepository`：实现 RunEvent append-only 追加和增量读取；并发追加时依赖 `(run_id, seq)` 唯一约束冲突后重试来保持 seq 单调且不重复。
+- `JdbcRunEventRepository`：RunEvent 存量 JDBC 实现已不再作为生产 Spring Bean，仅保留迁移窗口。
 - `JdbcExecutionNodeRepository`：实现执行节点保存和可路由节点查询。
 - `JdbcRoutingDecisionRepository`：实现路由决策保存和查询。
 - `JdbcOpencodeProcessManagementRepository`：实现 opencode 用户进程管理拓扑、用户进程、用户绑定持久化，以及运行管理页拓扑列表、连接列表、进程分页筛选和绑定关联查询；读取历史用户进程时会兼容 `updated_at < created_at` 的脏数据并按 `created_at` 归一化，避免旧记录阻断状态查询和重新初始化。
@@ -85,7 +87,7 @@
 - persistence 模块集成测试。
 - Repository、migration、唯一约束、事务、分页和排序测试；当前使用 H2 PostgreSQL 模式执行 Flyway migration。
 - AgentSessionBinding 测试必须覆盖 upsert 查询、唯一约束和旧 `sessions.opencode_*` 字段回填。
-- RunEvent 测试必须覆盖同一 run 的并发 append，防止 stream 事件和取消事件同时落库时重复分配 seq。
+- RunEvent 测试必须覆盖同一 run 的并发 append、scope 列写入和 raw event id 缺失写 `NULL`，防止 stream 事件和取消事件同时落库时重复分配 seq 或误去重。
 - SessionMessage/Run 测试必须覆盖 token/cost 字段、parts_json、远端 messageId 幂等查询和 active-run 查询。
 - ExecutionNode 测试必须覆盖可路由节点过滤和排序，防止不可用或满载节点被派发。
 - OpencodeProcessManagement 测试必须覆盖拓扑读写、V17 loopback 种子清理、历史用户进程时间戳归一化、健康容器查询、用户绑定唯一约束、服务器端口唯一约束和容器管理进程一对一约束。

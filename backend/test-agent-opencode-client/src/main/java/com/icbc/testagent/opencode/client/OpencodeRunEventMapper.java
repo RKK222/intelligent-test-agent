@@ -103,12 +103,30 @@ public class OpencodeRunEventMapper {
         List<RunEventDraft> drafts = new ArrayList<>();
         drafts.add(new RunEventDraft(runId, type, traceId, now.get(), payload, scopeContext));
         if (scopeContext != null && !scopeContext.childSession() && isRootSuccessSignal(rawType, payload)) {
-            drafts.add(new RunEventDraft(runId, RunEventType.RUN_SUCCEEDED, traceId, now.get(), payload, scopeContext));
+            drafts.add(new RunEventDraft(
+                    runId,
+                    RunEventType.RUN_SUCCEEDED,
+                    traceId,
+                    now.get(),
+                    derivedTerminalPayload(payload),
+                    scopeContext));
         }
         if (scopeContext != null && !scopeContext.childSession() && "session.error".equals(rawType)) {
-            drafts.add(new RunEventDraft(runId, RunEventType.RUN_FAILED, traceId, now.get(), payload, scopeContext));
+            drafts.add(new RunEventDraft(
+                    runId,
+                    RunEventType.RUN_FAILED,
+                    traceId,
+                    now.get(),
+                    derivedTerminalPayload(payload),
+                    scopeContext));
         }
         return List.copyOf(drafts);
+    }
+
+    private Map<String, Object> derivedTerminalPayload(Map<String, Object> payload) {
+        Map<String, Object> terminalPayload = new LinkedHashMap<>(payload);
+        terminalPayload.remove("rawEventId");
+        return terminalPayload;
     }
 
     /**
@@ -242,7 +260,7 @@ public class OpencodeRunEventMapper {
         if (payloadId.isTextual()) {
             return payloadId.asText();
         }
-        return "unknown";
+        return null;
     }
 
     /**

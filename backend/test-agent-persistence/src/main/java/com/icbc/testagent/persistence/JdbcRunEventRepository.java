@@ -16,12 +16,10 @@ import java.util.UUID;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.stereotype.Repository;
 
 /**
  * RunEvent JDBC Repository，集中维护 append-only 的 eventId 和同一 run 内 seq 分配规则。
  */
-@Repository
 public class JdbcRunEventRepository extends JdbcRepositorySupport implements RunEventRepository {
 
     private static final TypeReference<Map<String, Object>> PAYLOAD_TYPE = new TypeReference<>() {

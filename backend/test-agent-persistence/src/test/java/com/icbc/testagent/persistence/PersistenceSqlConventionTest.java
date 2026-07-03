@@ -69,6 +69,21 @@ class PersistenceSqlConventionTest {
     }
 
     @Test
+    void runEventRepositoryUsesMyBatisAsTheSpringBean() throws IOException {
+        Path javaRoot = locate("src/main/java");
+        Path resourceRoot = locate("src/main/resources");
+
+        assertThat(Files.readString(javaRoot.resolve("com/icbc/testagent/persistence/JdbcRunEventRepository.java")))
+                .doesNotContain("@Repository");
+        assertThat(javaRoot.resolve("com/icbc/testagent/persistence/mybatis/MyBatisRunEventRepository.java"))
+                .exists();
+        assertThat(javaRoot.resolve("com/icbc/testagent/persistence/mybatis/RunEventMapper.java"))
+                .exists();
+        assertThat(resourceRoot.resolve("mybatis/RunEventMapper.xml"))
+                .exists();
+    }
+
+    @Test
     void newJdbcSqlIsRestrictedToLegacyAllowlist() throws IOException {
         Path persistenceRoot = locate("src/main/java/com/icbc/testagent/persistence");
         Set<String> jdbcFiles;

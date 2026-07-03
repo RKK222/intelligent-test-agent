@@ -14,6 +14,8 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 
 - `session.SessionApplicationService`：会话创建、查询、消息和归档；消息列表会优先触发 projected messages 刷新，失败回退数据库快照。
 - `run.RunApplicationService`：Run 启动、路由、通用 agent binding 创建/复用、root session scope 记录、事件订阅、active-run 查询和取消。
+- `run.RunSessionScopeRouter`：在 runtime 层维护当前 Run root/child session scope，负责 child discovery、pending drain、raw event dedup 和 child 终态过滤。
+- `run.RunSessionScopeRuntimeCache`：Redis 运行态增强，维护 `test-agent:run-scope:{runId}:pending:{sessionId}` 与 `test-agent:run-scope:{runId}:dedup:{sessionId}:{rawEventId}`，TTL 30 分钟，Redis 不可用时降级。
 - `run.RunDiffApplicationService`：Run 级 Diff 查询、接受和拒绝，通过当前 agent runtime fallback 查询远端 Diff。
 - `run.RunEventPersistencePolicy`：区分 durable RunEvent 与 transient live output，并清洗 tool 大字段。
 - `run.RunMessageRecoveryService`：SSE 建连时从 agent projected messages 生成 transient message snapshot；存在 Run scope 时按 root + child session 恢复当前 Run 子树。
@@ -26,7 +28,7 @@ agent 运行态业务根包，负责平台 Session/Run 与远端 agent 能力之
 
 - `test-agent-common`、`test-agent-domain`、`test-agent-event`。
 - `test-agent-agent-runtime`。
-- Reactor、Jackson、Spring Context。
+- Reactor、Jackson、Spring Context、Spring Data Redis。
 
 ## 禁止依赖
 

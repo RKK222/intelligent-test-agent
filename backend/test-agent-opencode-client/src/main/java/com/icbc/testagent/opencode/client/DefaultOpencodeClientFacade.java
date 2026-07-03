@@ -173,7 +173,6 @@ public class DefaultOpencodeClientFacade implements OpencodeClientFacade {
                                 command.traceId())),
                         "streamRunEvents",
                         command.node())
-                .filter(rawEvent -> eventMapper.belongsToSession(rawEvent, command.opencodeSessionId()))
                 .flatMapIterable(rawEvent -> eventMapper.toDrafts(
                         rawEvent,
                         command.runId(),

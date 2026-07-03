@@ -187,7 +187,7 @@ class DefaultOpencodeClientFacadeTest {
     }
 
     @Test
-    void facadeDropsEventsBelongingToAnotherRemoteSession() throws Exception {
+    void facadeKeepsWorkspaceEventsForRuntimeScopeRouter() throws Exception {
         FakeGateway gateway = new FakeGateway();
         ObjectMapper objectMapper = new ObjectMapper();
         gateway.events = Flux.just(
@@ -207,8 +207,9 @@ class DefaultOpencodeClientFacadeTest {
                 null,
                 "trace_1234567890abcdef")).collectList().block();
 
-        assertThat(drafts).hasSize(1);
-        assertThat(drafts.getFirst().payload()).containsEntry("rawEventId", "evt_current");
+        assertThat(drafts).hasSize(2);
+        assertThat(drafts).extracting(draft -> draft.payload().get("rawEventId"))
+                .containsExactly("evt_other", "evt_current");
     }
 
     @Test

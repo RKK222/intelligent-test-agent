@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.icbc.testagent.persistence.mybatis.RunEventMapper">
+    <resultMap id="RunEventRowMap" type="com.icbc.testagent.persistence.mybatis.RunEventRow">
+        <constructor>
+            <arg column="event_id" javaType="java.lang.String"/>
+            <arg column="run_id" javaType="java.lang.String"/>
+            <arg column="seq" javaType="_long"/>
+            <arg column="type" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="occurred_at" javaType="java.time.Instant"/>
+            <arg column="payload_json" javaType="java.lang.String"/>
+            <arg column="root_session_id" javaType="java.lang.String"/>
+            <arg column="session_id" javaType="java.lang.String"/>
+            <arg column="parent_session_id" javaType="java.lang.String"/>
+            <arg column="is_child_session" javaType="_boolean"/>
+            <arg column="scope_version" javaType="java.lang.Long"/>
+            <arg column="task_message_id" javaType="java.lang.String"/>
+            <arg column="task_part_id" javaType="java.lang.String"/>
+            <arg column="task_call_id" javaType="java.lang.String"/>
+            <arg column="raw_event_id" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="RunEventColumns">
+        event_id, run_id, seq, type, trace_id, occurred_at, payload_json,
+        root_session_id, session_id, parent_session_id, is_child_session, scope_version,
+        task_message_id, task_part_id, task_call_id, raw_event_id
+    </sql>
+
+    <select id="nextSeq" resultType="java.lang.Long">
+        select coalesce(max(seq), 0) + 1
+        from run_events
+        where run_id = #{runId}
+    </select>
+
+    <insert id="insert">
+        insert into run_events(
+            event_id, run_id, seq, type, trace_id, occurred_at, payload_json,
+            root_session_id, session_id, parent_session_id, is_child_session, scope_version,
+            task_message_id, task_part_id, task_call_id, raw_event_id
+        ) values (
+            #{row.eventId}, #{row.runId}, #{row.seq}, #{row.type}, #{row.traceId}, #{row.occurredAt}, #{row.payloadJson},
+            #{row.rootSessionId}, #{row.sessionId}, #{row.parentSessionId}, #{row.childSession}, #{row.scopeVersion},
+            #{row.taskMessageId}, #{row.taskPartId}, #{row.taskCallId}, #{row.rawEventId}
+        )
+    </insert>
+
+    <select id="findByRunIdAndSeq" resultMap="RunEventRowMap">
+        select
+        <include refid="RunEventColumns"/>
+        from run_events
+        where run_id = #{runId}
+          and seq = #{seq}
+    </select>
+
+    <select id="findByRunIdSessionIdAndRawEventId" resultMap="RunEventRowMap">
+        select
+        <include refid="RunEventColumns"/>
+        from run_events
+        where run_id = #{runId}
+          and session_id = #{sessionId}
+          and raw_event_id = #{rawEventId}
+    </select>
+
+    <select id="findByRunIdAfter" resultMap="RunEventRowMap">
+        select
+        <include refid="RunEventColumns"/>
+        from run_events
+        where run_id = #{runId}
+          and seq &gt; #{lastSeq}
+        order by seq asc
+        limit #{limit}
+    </select>
+</mapper>

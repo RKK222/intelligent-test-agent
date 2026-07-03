@@ -12,6 +12,7 @@ import com.icbc.testagent.agent.runtime.AgentStreamEventsCommand;
 import com.icbc.testagent.domain.agent.AgentSessionBinding;
 import com.icbc.testagent.domain.agent.AgentSessionBindingRepository;
 import com.icbc.testagent.domain.event.RunEventDraft;
+import com.icbc.testagent.domain.event.RunEventScopeContext;
 import com.icbc.testagent.domain.event.RunSessionScope;
 import com.icbc.testagent.domain.event.RunSessionScopeRepository;
 import com.icbc.testagent.domain.event.RunSessionScopeSession;
@@ -59,6 +60,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 
@@ -90,6 +92,7 @@ public class RunApplicationService {
     private final AgentRuntimeTargetResolver runtimeTargetResolver;
     private final RunSessionMessageSnapshotService snapshotService;
     private final RunSessionScopeRepository runSessionScopeRepository;
+    private final RunSessionScopeRouter runSessionScopeRouter;
     private final ExecutionNodeRouter executionNodeRouter = new ExecutionNodeRouter();
 
     /**
@@ -112,7 +115,8 @@ public class RunApplicationService {
             UserOpencodeProcessAssignmentService userProcessAssignmentService,
             ManagedWorkspacePathResolver workspacePathResolver,
             RunSessionMessageSnapshotService snapshotService,
-            RunSessionScopeRepository runSessionScopeRepository) {
+            RunSessionScopeRepository runSessionScopeRepository,
+            RunSessionScopeRuntimeCache runSessionScopeRuntimeCache) {
         this.workspaceRepository = Objects.requireNonNull(workspaceRepository, "workspaceRepository must not be null");
         this.sessionRepository = Objects.requireNonNull(sessionRepository, "sessionRepository must not be null");
         this.runRepository = Objects.requireNonNull(runRepository, "runRepository must not be null");
@@ -146,6 +150,7 @@ public class RunApplicationService {
                         new ObjectMapper())
                 : snapshotService;
         this.runSessionScopeRepository = runSessionScopeRepository;
+        this.runSessionScopeRouter = new RunSessionScopeRouter(runSessionScopeRepository, runSessionScopeRuntimeCache);
     }
 
     /**
@@ -179,6 +184,7 @@ public class RunApplicationService {
                 null,
                 ManagedWorkspacePathResolver.legacyOnly(),
                 null,
+                null,
                 null);
     }
 
@@ -211,6 +217,7 @@ public class RunApplicationService {
                 null,
                 userProcessAssignmentService,
                 ManagedWorkspacePathResolver.legacyOnly(),
+                null,
                 null,
                 null);
     }
@@ -830,6 +837,7 @@ public class RunApplicationService {
             ExecutionNode node,
             Workspace workspace,
             String traceId) {
+        RunEventScopeContext rootScope = RunEventScopeContext.root(run.runId(), remoteSessionId);
         runtime.streamRunEvents(new AgentStreamEventsCommand(
                         node,
                         run.runId(),
@@ -837,6 +845,18 @@ public class RunApplicationService {
                         workspaceRootPath(workspace),
                         null,
                         traceId))
+                .concatMap(draft -> Mono.fromCallable(() -> runSessionScopeRouter.route(rootScope, draft))
+                        .subscribeOn(Schedulers.boundedElastic())
+                        .flatMapMany(Flux::fromIterable)
+                        .onErrorResume(error -> {
+                            LOGGER.warn(
+                                    "Failed to route opencode stream event, runId={}, eventType={}, traceId={}",
+                                    run.runId().value(),
+                                    draft.type().wireName(),
+                                    traceId,
+                                    error);
+                            return Flux.empty();
+                        }))
                 // opencode event SSE 是长连接；本 Run 收到首个终态后结束订阅，避免同一远端会话的下一轮消息串入旧 Run。
                 .takeUntil(draft -> draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED)
                 // opencode stream 来自 Netty 线程，事件入库或实时发布必须串行 offload，且本地 DB 抖动不能误判为 Run 失败。

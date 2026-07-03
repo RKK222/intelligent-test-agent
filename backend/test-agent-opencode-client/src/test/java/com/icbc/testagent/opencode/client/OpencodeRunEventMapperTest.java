@@ -38,6 +38,20 @@ class OpencodeRunEventMapperTest {
     }
 
     @Test
+    void derivedRunTerminalDoesNotReuseRawEventId() throws Exception {
+        List<RunEventDraft> drafts = mapper.toDrafts(
+                objectMapper.readTree("""
+                        {"id":"evt_raw_status_idle","type":"session.status","properties":{"sessionID":"ses_root","status":{"type":"idle"}}}
+                        """),
+                RUN_ID,
+                "trace_1234567890abcdef",
+                rootScope());
+
+        assertThat(drafts.get(0).payload()).containsEntry("rawEventId", "evt_raw_status_idle");
+        assertThat(drafts.get(1).payload()).doesNotContainKey("rawEventId");
+    }
+
+    @Test
     void mapsChildIdleStatusToSessionStatusOnly() throws Exception {
         List<RunEventDraft> drafts = mapper.toDrafts(
                 objectMapper.readTree("""
@@ -109,6 +123,18 @@ class OpencodeRunEventMapperTest {
 
         assertThat(draft.type()).isEqualTo(RunEventType.TOOL_STARTED);
         assertThat(draft.payload()).containsEntry("tool", "bash");
+    }
+
+    @Test
+    void missingRawEventIdDoesNotWriteUnknownSentinel() throws Exception {
+        RunEventDraft draft = mapper.toDraft(
+                objectMapper.readTree("""
+                        {"type":"session.next.tool.called","properties":{"tool":"bash"}}
+                        """),
+                new RunId("run_1234567890abcdef"),
+                "trace_1234567890abcdef");
+
+        assertThat(draft.payload()).doesNotContainKey("rawEventId");
     }
 
     @Test

@@ -498,6 +498,54 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void serviceDoesNotMarkRunSucceededWhenChildSessionIdleIsMisderivedByClient() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.streamEvents = command -> Flux.just(
+                new RunEventDraft(
+                        command.runId(),
+                        RunEventType.SESSION_STATUS,
+                        command.traceId(),
+                        Instant.now(),
+                        Map.of(
+                                "rawType", "session.status",
+                                "sessionID", "ses_child1234567890abcdef",
+                                "parentID", REMOTE_SESSION_ID,
+                                "status", Map.of("type", "idle"))),
+                new RunEventDraft(
+                        command.runId(),
+                        RunEventType.RUN_SUCCEEDED,
+                        command.traceId(),
+                        Instant.now(),
+                        Map.of(
+                                "rawType", "session.status",
+                                "sessionID", "ses_child1234567890abcdef",
+                                "parentID", REMOTE_SESSION_ID,
+                                "status", Map.of("type", "idle"))));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitEventTypes(
+                events,
+                RunEventType.RUN_CREATED,
+                RunEventType.RUN_STARTED,
+                RunEventType.SESSION_CHILD_DISCOVERED,
+                RunEventType.SESSION_STATUS);
+        assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.RUNNING);
+    }
+
+    @Test
     void servicePersistsAssistantSnapshotAndRunUsageWhenTerminalEventArrives() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();

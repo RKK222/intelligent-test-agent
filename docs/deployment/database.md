@@ -6,7 +6,7 @@
 
 - 关系型数据库连接池继续统一使用 Druid，migration 继续由 Flyway 管理。
 - 新增或修改关系型数据库 SQL 必须通过 `test-agent-persistence` 的 MyBatis XML mapper 实现；mapper 接口只声明方法，禁止写注解 SQL。
-- 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository` 与 Agent 配置 `AgentConfigRepository` 已迁移到 MyBatis XML。
+- 存量 `Jdbc*Repository` 仅保留迁移窗口，后续触及其 SQL 时迁移到 MyBatis XML。当前通用参数 `CommonParameterRepository`、Agent 配置 `AgentConfigRepository` 与 `RunEventRepository` 已迁移到 MyBatis XML。
 - Flyway migration 只能承载表结构变更、历史数据兼容迁移和生产必需的基础字典/系统参数；禁止通过 Flyway 写入测试、演示、个人开发或环境专属数据（例如样例应用/工作区、默认开发账号、默认本地进程绑定）。此类数据必须放在测试 fixture、`test-agent-test-support`、mock 数据、显式本地开发脚本或人工初始化流程中。历史已存在的开发种子迁移仅为兼容已落库环境保留，后续不得新增同类迁移。
 
 ## V1 核心表
@@ -128,7 +128,7 @@
 - `idx_run_events_scope_session_seq(run_id, root_session_id, session_id, seq)` 支持 Run scope 内按 session 恢复事件。
 - `idx_run_session_scope_sessions_root(root_session_id, discovered_at)` 支持 Session 级历史树按 root session 汇总跨 Run 已发现 child。
 
-当前 `RunSessionScopeRepository` 已通过 MyBatis XML 实现，Run 启动后会记录 root scope，并支持按 Run 或 root session 查询；`JdbcRunEventRepository` 尚未迁移到 MyBatis，`run_events` scope 列为后续 append-only 仓储迁移预留。
+当前 `RunSessionScopeRepository` 与 `RunEventRepository` 均已通过 MyBatis XML 实现。Run 启动后会记录 root scope；runtime 发现 child session 后写入 `run_session_scope_sessions`，并在 `run_events` append 时写入结构化 scope 列。`JdbcRunEventRepository` 仅保留迁移窗口，不再作为生产 Spring Bean。`raw_event_id` 缺失必须写 `NULL`；root session 事件派生的 `run.succeeded/run.failed` 不复用原始 raw event id，避免与对应 session 事件误去重。
 
 ## V5 用户认证表
 

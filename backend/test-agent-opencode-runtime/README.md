@@ -7,7 +7,7 @@
 ## 主要职责
 
 - Session 创建、查询、消息追加和归档。
-- Run 启动、取消、远端 agent session 懒创建/复用、事件订阅和终态处理；平台保存 `RUNNING` 并订阅事件后异步提交远端 prompt 或原生 session command，不等待远端长任务完成才返回 Run，提交失败统一追加 `run.failed`。事件订阅绑定本 Run 的 remote session，并在首个终态后结束，避免其它会话或同一会话下一轮消息串入旧 Run。
+- Run 启动、取消、远端 agent session 懒创建/复用、事件订阅和终态处理；平台保存 `RUNNING` 并订阅事件后异步提交远端 prompt 或原生 session command，不等待远端长任务完成才返回 Run，提交失败统一追加 `run.failed`。事件订阅先经 `RunSessionScopeRouter` 判定 root/child scope，并在 root 成功/失败终态后结束，避免其它会话或同一会话下一轮消息串入旧 Run。
 - AI 回复满意度反馈归属校验和 upsert：只允许登录用户对自己会话或自己触发 Run 的 `ASSISTANT` 消息提交 `POSITIVE/NEGATIVE` 反馈，评论最多 300 字。
 - 运营分析 rollup 与查询：主链路只写事实，后台 runner 通过数据库锁默认刷新最近窗口的 hourly/daily rollup 和 Run 耗时直方图；查询服务只读 rollup 并返回 freshness，不统计、不展示、不导出 cost/costUsd。
 - 当前用户 opencode 进程状态查询、头像菜单服务状态投影、初始化契约、防绕过 Run 校验、runtime 代理用户进程路由、manager WebSocket 命令网关，以及用户进程到兼容 `ExecutionNode` 的投影。
@@ -31,7 +31,7 @@
 - `UserOpencodeProcessAssignmentService.fileRoutingAffinity` 是文件 WebSocket 路由专用只读入口，只表达文件操作应落到哪台 Linux 服务器，不代表 opencode server 健康可用；Run、初始化、头像状态仍调用 `status` / `initialize` / `requireReadyProcess` 保持强健康检查语义。
 - `UserOpencodeProcessAssignmentService` 创建用户 opencode 进程时，session/config 路径读取 `common_parameters.OPENCODE_SESSION_DIR` 和 `common_parameters.OPENCODE_PUBLIC_CONFIG_DIR`；缺失或空白时抛平台错误，不回退环境变量或代码默认路径。初始化时 Java 仍按当前后端已连接的健康容器视图选择进程数最少且有空闲端口的目标容器，然后经公共启动服务向该容器对应的 manager 下发 `start`；manager 使用已通过 `configUpdate` 同步的配置路径。`OPENCODE_PUBLIC_CONFIG_DIR` 是否存在且非空只由目标 manager 在所在服务器检查，Java 本机不做 `Files.*` 校验。manager 返回 `errorCode=OPENCODE_UNAVAILABLE` 时，message 会包含目标服务器和 manager 实际检查的配置目录，socket gateway 映射为同码平台错误并原样透出。manager `STARTED` 仅表示启动命令完成，公共启动服务还必须立即调用 health；health healthy 才能返回 READY。
   `baseUrl/serviceAddress` 使用当前服务器 advertised host 和端口生成，不使用 `linuxServerId` 拼接地址。
-- RunEvent 持久化策略、实时发布和 agent projected messages 恢复；Run 启动后记录 root session scope，SSE/HTTP snapshot 恢复优先按 Run scope 拉取 root + child projected messages，Session 历史 snapshot 按 root session 查询跨 Run 已发现的 child，scope 缺失时回退 root-only。
+- RunEvent 持久化策略、实时发布和 agent projected messages 恢复；Run 启动后记录 root session scope，`RunSessionScopeRouter` 根据 task/tool metadata、`session.created/session.updated parentID` 和 `session.children` bootstrap 发现 child；`RunSessionScopeRuntimeCache` 用 Redis 30 分钟 TTL 做 pending child event buffer 与 raw event dedup，Redis 不可用时降级为 DB-only。SSE/HTTP snapshot 恢复优先按 Run scope 拉取 root + child projected messages，Session 历史 snapshot 按 root session 查询跨 Run 已发现的 child，scope 缺失时回退 root-only。
 - Run 终态/取消后的 `session_messages` 快照持久化，包含 assistant 可见 text、完整 message parts 和 token/cost；reasoning/tool output 不拼入回答正文，无 text 的工具步骤以空正文加结构化 parts 保存。
 - 从完成态 `write`/`edit`/`apply_patch` tool part 派生运行中 `diff.proposed`，供前端实时追踪文件变化；不调用 opencode `/vcs/diff?mode=working`，实际 Git patch 和精确行数由工作区 Git Diff 接口读取。
 - Run Diff 查询、接受和拒绝。
@@ -66,6 +66,8 @@
 - `ManagerControlMessageCodecTest`、`ManagerControlApplicationServiceTest`、`ManagerConnectionRegistryTest`、`SocketOpencodeProcessManagerGatewayTest`、`BackendJavaProcessLifecycleServiceTest`、`OpencodeManagerConfigSyncServiceTest` 覆盖 manager 控制面消息、Redis manager 心跳、兼容后端列表响应编码、连接路由、启动期后端进程父表补齐、start/health/restart/stop 命令等待、后端实例心跳与创建时间固定、本地 manager-backend 连接自举，以及 `configRequest` 下发完整运行配置、最大进程数热刷新和路径参数不热广播。
 - `RunDiffApplicationServiceTest` 覆盖 Diff 事件优先读取、agent runtime Diff fallback、接受/拒绝动作和缺失 messageID 冲突。
 - `RunEventPersistencePolicyTest` 覆盖消息投影只走实时通道、关键状态事件持久化、tool payload 清洗、scopeContext 保留和 rawPayload 移除。
+- `RunSessionScopeRouterTest` 覆盖 root/child idle/error 终态派生、task metadata/session parentID/session.children child discovery、未知 child pending drain、嵌套 session 防串流和 raw event dedup。
+- `RunSessionScopeRuntimeCacheTest` 覆盖 Redis pending/dedup key、30 分钟 TTL、pending JSON drain 和 Redis 不可用降级。
 - `RunMessageRecoveryServiceTest` 覆盖 agent session messages 中 assistant 恢复为 transient SSE snapshot、Run scope 下 root + child snapshot、Session root 下全量历史 snapshot、user part 不重复回放，以及未绑定/远端失败时降级为空。
 - `SessionApplicationServiceTest` 覆盖 Session 创建前 Workspace 校验、归档隐藏、标题/置顶更新、消息追加默认 role 和消息列表 DB fallback。
 - `AiMessageFeedbackApplicationServiceTest` 覆盖反馈创建/更新、assistant role 校验、消息归属校验和评论长度边界。
@@ -93,7 +95,7 @@
 ## 后续 AI 编码指引
 
 新增与会话、运行、事件、Diff、permission/question、runtime catalog、terminal 相关业务编排时改这里；新增 agent 适配器应放在 `test-agent-agent-runtime`。Controller 和 URL 映射必须放在 `test-agent-api`。
-高频文本 delta、message projection 和大段 tool/bash 输出不应写入 `run_events`；消息内容刷新恢复优先从 agent 标准 session messages 拉取并 upsert 到 `session_messages`，历史查询的远端刷新必须在 bounded-elastic 线程执行，agent 不可用时回退数据库快照。Run scope 存在时只恢复当前 Run 的 root + child 子树；Session 级历史树按 root session 汇总跨 Run 已发现的 child。Run 状态、Diff、permission/question 等平台关键事件继续依赖 durable RunEvent。
+高频文本 delta、message projection 和大段 tool/bash 输出不应写入 `run_events`；消息内容刷新恢复优先从 agent 标准 session messages 拉取并 upsert 到 `session_messages`，历史查询的远端刷新必须在 bounded-elastic 线程执行，agent 不可用时回退数据库快照。Run scope 存在时只恢复当前 Run 的 root + child 子树；Session 级历史树按 root session 汇总跨 Run 已发现的 child。Run 状态、Diff、permission/question 等平台关键事件继续依赖 durable RunEvent。child idle/error 只能产生 session 事件，root idle/error 才能派生 `run.succeeded/run.failed`；child 事件早于 discovery 到达时只进入 Redis pending，不按 root 入库。
 运营分析新增指标时优先扩展 `AnalyticsModels`、`AnalyticsRepository`、rollup runner 和查询服务；API 查询不得绕过 rollup 直接扫原始事实表，导出字段不得包含 prompt/assistant 原文、密钥或费用字段。
 生产 `OpencodeProcessManagerGateway` 通过 manager WebSocket 控制面下发 `start`/`health`/`restart`/`stop` 命令；无连接、超时或异常必须转换为平台 opencode 错误码。测试仍可使用 fake gateway 固定初始化、健康检查或运行管理命令结果。
 所有 opencode server 启动入口必须调用 `OpencodeProcessStartupService`，由公共服务统一完成启动、候选进程快照、启动后 health 和最终状态回写；不要在新增业务编排中直接调用 `gateway.startProcess()` 并自行写进程、binding、heartbeat 或 `ExecutionNode`。
