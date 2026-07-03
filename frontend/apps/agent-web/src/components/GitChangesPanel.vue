@@ -827,16 +827,16 @@ defineExpose({
               <span class="git-sub-badge ml-1">({{ workspaceUnstaged.length + workspaceConflicts.length }})</span>
             </div>
             <div v-show="workspaceUnstagedExpanded" class="git-sub-content pl-2 py-0.5 space-y-0.5">
-              <div v-if="workspaceConflicts.length > 0" class="git-conflict-banner bg-amber-50/80 dark:bg-amber-950/15 border border-amber-200/60 dark:border-amber-900/30 rounded py-0.5 px-1.5 mb-2 text-slate-700 dark:text-slate-300 shadow-sm flex items-center justify-between gap-1.5">
-                <div class="flex items-center gap-1 shrink-0">
-                  <AlertTriangle class="h-3.5 w-3.5 text-amber-600 dark:text-amber-500" />
-                  <span class="font-semibold">{{ workspaceConflicts.length }} 个冲突文件：</span>
+              <div v-if="workspaceConflicts.length > 0" class="git-conflict-banner">
+                <div class="git-conflict-header">
+                  <AlertTriangle class="h-3.5 w-3.5 text-amber-600 dark:text-amber-500 shrink-0" />
+                  <span>检测到 {{ workspaceConflicts.length }} 个冲突</span>
                 </div>
-                <div class="flex items-center gap-1 min-w-0 flex-1 justify-end">
+                <div class="git-conflict-actions">
                   <Button
                     size="sm"
-                    variant="secondary"
-                    class="h-6 border-amber-200 hover:border-amber-300 dark:border-amber-800 bg-white hover:bg-amber-50 text-amber-900 dark:text-amber-400 dark:bg-zinc-900 dark:hover:bg-amber-950/20 font-medium px-2 flex items-center justify-center shadow-sm shrink-0"
+                    variant="ghost"
+                    class="git-conflict-action-btn"
                     aria-label="保留个人"
                     title="保留个人 (Mine)"
                     :disabled="conflictResolving"
@@ -846,8 +846,8 @@ defineExpose({
                   </Button>
                   <Button
                     size="sm"
-                    variant="secondary"
-                    class="h-6 border-amber-200 hover:border-amber-300 dark:border-amber-800 bg-white hover:bg-amber-50 text-amber-900 dark:text-amber-400 dark:bg-zinc-900 dark:hover:bg-amber-950/20 font-medium px-2 flex items-center justify-center shadow-sm shrink-0"
+                    variant="ghost"
+                    class="git-conflict-action-btn"
                     aria-label="采用远程"
                     title="采用远程 (Theirs)"
                     :disabled="conflictResolving"
@@ -858,7 +858,7 @@ defineExpose({
                   <Button
                     size="sm"
                     variant="ghost"
-                    class="h-6 px-1.5 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 font-normal shrink-0"
+                    class="git-conflict-action-btn btn-abort"
                     aria-label="取消"
                     title="取消本次合并 (Abort)"
                     :disabled="conflictResolving"
@@ -1220,12 +1220,89 @@ defineExpose({
 }
 
 .git-conflict-banner {
-  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: #f4f4f5;
+  border: 1px solid #e4e4e7;
+  border-radius: 6px;
+  padding: 3px 8px;
+  margin-bottom: 4px;
 }
 
-.git-conflict-banner button,
-.git-conflict-banner :deep(button) {
+:global(.dark) .git-conflict-banner {
+  background: #18181b;
+  border-color: #27272a;
+}
+
+.git-conflict-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #71717a;
+}
+
+:global(.dark) .git-conflict-header {
+  color: #a1a1aa;
+}
+
+.git-conflict-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.git-conflict-action-btn,
+.git-conflict-banner :deep(.git-conflict-action-btn) {
+  height: 18px !important;
+  padding: 0 6px !important;
+  border: 0 !important;
+  background: transparent !important;
   font-size: 11px !important;
+  font-weight: 500 !important;
+  color: #d97706 !important;
+  border-radius: 3px !important;
+  cursor: pointer !important;
+  box-shadow: none !important;
+  transition: background-color 0.12s ease;
+}
+
+.git-conflict-action-btn:hover,
+.git-conflict-banner :deep(.git-conflict-action-btn:hover) {
+  background: #fef3c7 !important;
+}
+
+:global(.dark) .git-conflict-action-btn,
+:global(.dark) .git-conflict-banner :deep(.git-conflict-action-btn) {
+  color: #fbbf24 !important;
+}
+
+:global(.dark) .git-conflict-action-btn:hover,
+:global(.dark) .git-conflict-banner :deep(.git-conflict-action-btn:hover) {
+  background: rgba(251, 191, 36, 0.1) !important;
+}
+
+.git-conflict-action-btn.btn-abort,
+.git-conflict-banner :deep(.git-conflict-action-btn.btn-abort) {
+  color: #71717a !important;
+  margin-left: auto;
+}
+
+.git-conflict-action-btn.btn-abort:hover,
+.git-conflict-banner :deep(.git-conflict-action-btn.btn-abort:hover) {
+  background: #e4e4e7 !important;
+}
+
+:global(.dark) .git-conflict-action-btn.btn-abort,
+:global(.dark) .git-conflict-banner :deep(.git-conflict-action-btn.btn-abort) {
+  color: #a1a1aa !important;
+}
+
+:global(.dark) .git-conflict-action-btn.btn-abort:hover,
+:global(.dark) .git-conflict-banner :deep(.git-conflict-action-btn.btn-abort:hover) {
+  background: rgba(255, 255, 255, 0.05) !important;
 }
 
 .git-lists-container {
