@@ -3007,3 +3007,10 @@ bash /tmp/test-api-after-restart.sh
 - What: `GitChangesPanel.vue` 增加实时命令标记，收到 WebSocket 命令后只展示当前最新命令；接口结果只在没有实时命令时兜底展示当前/失败步骤最后一条命令。清理 test 库中 `usr_test_dev` 的旧 `user_opencode_process_bindings`、`opencode_server_processes`、`opencode_process_start_operations` 记录，并停止本机孤儿 `opencode serve`/清空 manager process state。
 - How: 复用既有 Agent Config progress WebSocket 和 `executedCommands` 状态，不新增进度通道或后端 API；新增 Git 面板 Vitest 覆盖“实时命令不被最终 command history 覆盖”。本地清理只作用于 `888888888 / usr_test_dev`，不修改 dotenv 或生产 migration。
 - Result: `git-changes-panel.test.ts` 15 个用例通过，`@test-agent/agent-web typecheck` 通过；按 `.env.test` 重启三服务成功，后端 readiness 和前端 3000 正常。重新初始化 `888888888` 的 opencode 进程成功，当前状态 `READY`，端口 `4097`。
+
+### 2026-07-03 - 去掉个人发布前端无进度 preview 阻塞
+
+- Why: 用户点击“提交并推送”后，前端先调用 `publish-preview`，该接口会同步远程应用分支且没有进度弹窗；实际测试中 preview 阶段约 23 秒，随后 publish 又重复执行远程同步约 27 秒，导致先在侧栏卡住，后面弹窗才出现。
+- What: `GitChangesPanel.vue` 提交路径不再调用 `previewPersonalWorkspacePublish`，直接打开进度弹窗并调用 `publishPersonalWorkspace`；请求体不再携带 `expectedApplicationHead`。后端 publish 本身仍会在个人提交前同步应用分支，因此远程同步统一纳入同一条进度流。
+- How: 只改前端提交路径与 Git 面板回归测试，不改 API URL、后端服务、数据库、事件或环境配置。测试断言提交时不调用 preview，弹窗立即出现，publish payload 不带 `expectedApplicationHead`。
+- Result: `git-changes-panel.test.ts` 15 个用例通过，`@test-agent/agent-web typecheck` 通过；按 `.env.test` 重启三服务成功。重新为 `888888888 / usr_test_dev` 构造测试数据：1 个 `UU` 冲突文件、1 个 `M ` staged 普通文件、1 个 ` M` unstaged 普通文件；后端 git-diff API 已验证返回 3 个文件。opencode 已重新初始化为 `READY`。

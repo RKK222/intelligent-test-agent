@@ -720,12 +720,6 @@ async function handleCommit(push = false) {
       }
       const personalWorkspaceId = props.personalWorkspaceId;
       progressMessage.value = "正在合并推送到应用版本分支...";
-      let expectedApplicationHead: string | undefined;
-      if (!mergeResolutionCompleted.value) {
-        const preview = await api.previewPersonalWorkspacePublish(props.personalWorkspaceId);
-        expectedApplicationHead = preview.applicationHead || undefined;
-      }
-
       showCommitProgressDialog.value = true;
       commitStep.value = mergeResolutionCompleted.value ? 2 : 1;
       const publishOperationId = newOperationId();
@@ -738,16 +732,12 @@ async function handleCommit(push = false) {
       const payload: {
         commitMessage: string;
         files: string[];
-        expectedApplicationHead?: string;
         operationId?: string;
       } = {
         commitMessage: msg,
         files: workspaceStaged.value.map((file) => file.path),
         operationId: publishOperationId
       };
-      if (expectedApplicationHead) {
-        payload.expectedApplicationHead = expectedApplicationHead;
-      }
       const result = await (async () => {
         try {
           return await api.publishPersonalWorkspace(personalWorkspaceId, payload);

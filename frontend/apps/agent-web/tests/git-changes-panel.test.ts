@@ -324,9 +324,10 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
       commitMessage: "fix: selected only",
       files: ["src/selected.ts"],
-      expectedApplicationHead: "application_head",
       operationId: expect.stringMatching(/^aco_/)
     })));
+    expect(apiClientMock.publishPersonalWorkspace.mock.calls[0][1]).not.toHaveProperty("expectedApplicationHead");
+    expect(apiClientMock.previewPersonalWorkspacePublish).not.toHaveBeenCalled();
     await waitFor(() => expect(view.queryByText("src/selected.ts")).toBeNull());
     expect(await view.findByText("src/unselected.ts")).toBeTruthy();
   });
@@ -414,9 +415,10 @@ describe("GitChangesPanel", () => {
     await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
       commitMessage: "fix: conflict prompt",
       files: ["workspace/docs/selected.md"],
-      expectedApplicationHead: "application_head",
       operationId: expect.stringMatching(/^aco_/)
     })));
+    expect(apiClientMock.publishPersonalWorkspace.mock.calls[0][1]).not.toHaveProperty("expectedApplicationHead");
+    expect(apiClientMock.previewPersonalWorkspacePublish).not.toHaveBeenCalled();
     expect(await view.findByText(/合并产生 1 个冲突文件/)).toBeTruthy();
     expect(await view.findByText("CONFLICT")).toBeTruthy();
     expect(await view.findByText("AU")).toBeTruthy();
@@ -735,19 +737,7 @@ describe("GitChangesPanel", () => {
       .toHaveBeenCalledWith("wrk_1234567890abcdef", { resolution: "CURRENT" }));
   });
 
-  it("publishes after preview without blocking on incoming application changes", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-    apiClientMock.previewPersonalWorkspacePublish.mockResolvedValueOnce({
-      applicationHead: "application_new",
-      personalHead: "personal_head",
-      incomingCommitCount: 4,
-      changedFileCount: 12,
-      addedCount: 2,
-      modifiedCount: 8,
-      deletedCount: 1,
-      renamedCount: 1,
-      samplePaths: ["README.md"]
-    });
+  it("opens publish progress immediately without blocking on preview", async () => {
     apiClientMock.getWorkspaceGitDiff
       .mockResolvedValueOnce({
         files: [{ path: "src/selected.ts", status: "modified", staged: false, patch: "", additions: 1, deletions: 0 }]
@@ -755,22 +745,23 @@ describe("GitChangesPanel", () => {
       .mockResolvedValue({
         files: [{ path: "src/selected.ts", status: "modified", staged: true, patch: "", additions: 1, deletions: 0 }]
       });
+    apiClientMock.publishPersonalWorkspace.mockReturnValueOnce(new Promise(() => {}));
     const view = render(GitChangesPanel, {
       props: { workspaceId: "wrk_1234567890abcdef", personalWorkspaceId: "psw_default", apiBaseUrl: "http://api", canWrite: true },
       global: { plugins: [createPinia()] }
     });
 
     await fireEvent.click(await view.findByTitle("暂存文件"));
-    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: preview");
+    await fireEvent.update(view.getByPlaceholderText("输入提交说明。首行为主题，空行后为详细描述..."), "fix: publish");
     await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
 
-    await waitFor(() => expect(apiClientMock.previewPersonalWorkspacePublish).toHaveBeenCalledWith("psw_default"));
+    expect(await view.findByText("提交并推送进度")).toBeTruthy();
+    expect(apiClientMock.previewPersonalWorkspacePublish).not.toHaveBeenCalled();
     await waitFor(() => expect(apiClientMock.publishPersonalWorkspace).toHaveBeenCalledWith("psw_default", expect.objectContaining({
-      commitMessage: "fix: preview",
+      commitMessage: "fix: publish",
       files: ["src/selected.ts"],
-      expectedApplicationHead: "application_new",
       operationId: expect.stringMatching(/^aco_/)
     })));
-    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(apiClientMock.publishPersonalWorkspace.mock.calls[0][1]).not.toHaveProperty("expectedApplicationHead");
   });
 });
