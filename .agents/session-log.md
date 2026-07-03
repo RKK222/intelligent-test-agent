@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-03 - 增强 timeline 正文持续输出感
+
+- Why:
+  - 用户希望整体输出更接近 Codex：正文持续输出保持可见，过程信息按需折叠；同时当前“思考状态”标题偏小，和下方工具标题层级不一致。
+- What:
+  - 仅调整 `agent-chat` opencode-like 样式：运行中的正文输出增加轻量呼吸边框和行尾光标，保留正文持续展开；reasoning/tool/context 仍使用现有折叠逻辑；“思考状态”字号和字重提升到工具标题层级。
+- How:
+  - 不改后端、RunEvent、reducer、投影顺序、默认折叠规则或 API；只修改 `parts.css` 的 running text 与 reasoning title 样式。
+- Result:
+  - Playwright 构造 DOM 验证 running text cursor 生效且 reasoning 标题为 13px/600；`@test-agent/agent-chat` typecheck 通过；前端 Vitest 全量通过（36 files, 299 passed, 1 skipped）。
+
 ### 2026-07-03 - 收紧 reasoning 折叠行与头像中心线对齐
 
 - Why:
