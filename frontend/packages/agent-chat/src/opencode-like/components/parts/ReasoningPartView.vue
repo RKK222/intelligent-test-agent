@@ -11,7 +11,7 @@ export type ReasoningPartViewProps = {
 import { computed } from "vue";
 import MarkdownView from "../../../MarkdownView.vue";
 import OcDisclosure from "../primitives/OcDisclosure.vue";
-import { readPartText } from "../../state/part-text";
+import { compactPartPreview, readPartText } from "../../state/part-text";
 
 const props = defineProps<ReasoningPartViewProps>();
 const source = computed(() => readPartText(props.part, props.streamingTextByPartId));
@@ -22,19 +22,22 @@ const subtitleText = computed(() => {
     return "已完成";
   }
   if (status === "running") {
-    return "";
+    return "思考中";
   }
   if (status === "failed" || status === "error") {
     return "失败";
   }
   return status;
 });
+
+const detailText = computed(() => compactPartPreview(source.value));
 </script>
 
 <template>
   <OcDisclosure
     class="oc-reasoning-part"
     title="思考状态"
+    :detail="detailText"
     :subtitle="subtitleText"
     :status="part.status"
     :default-open="false"

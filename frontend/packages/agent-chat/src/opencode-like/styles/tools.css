@@ -45,6 +45,7 @@
   font-weight: 600;
   font-size: var(--oc-text-md);
   line-height: 20px;
+  text-transform: uppercase;
 }
 
 /* No lowercase transform for tool titles */
@@ -104,6 +105,7 @@
   font-weight: 600;
   font-size: var(--oc-text-md);
   line-height: 20px;
+  text-transform: uppercase;
 }
 
 .oc-tool__trigger .oc-tool__subtitle {
@@ -218,6 +220,7 @@
   line-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 

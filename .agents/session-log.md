@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-03 - reasoning 折叠头展示最新尾部摘要
+
+- Why:
+  - 用户希望 reasoning 默认仍折叠，但折叠头能像 Codex 一样持续变化；上一版若取首句摘要，会在长 reasoning 流式追加时一直停留在第一句。
+- What:
+  - `OcDisclosure` 支持中间列 detail 文本，reasoning 折叠头展示压缩后的最新尾部摘要；状态徽标按 `running/completed/failed` 复用工具行颜色；工具英文标题统一 CSS uppercase。
+- How:
+  - 仅改前端 `agent-chat` 当前 opencode-like 主路径组件、样式、测试和 README；不改后端、RunEvent、reducer、投影顺序、API 或数据库。
+- Result:
+  - `@test-agent/agent-chat` typecheck 通过；前端 Vitest 全量通过（36 files, 299 passed, 1 skipped）；`git diff --check` 通过；前端 Vite 验证入口 `127.0.0.1:3001` 可达。
+
 ### 2026-07-03 - 增强 timeline 正文持续输出感
 
 - Why:

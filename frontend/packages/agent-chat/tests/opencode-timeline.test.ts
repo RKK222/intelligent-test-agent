@@ -230,6 +230,7 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(0);
     expect(container.querySelectorAll(".oc-reasoning-part .oc-disclosure__trigger")).toHaveLength(1);
     expect(container.querySelector(".oc-reasoning-part .oc-tool__status")?.textContent).toBe("已完成");
+    expect(container.querySelector(".oc-reasoning-part .oc-tool__subtitle")?.textContent).toContain("最后组织回答。");
     expect(getByText("思考状态")).toBeTruthy();
 
     await fireEvent.click(container.querySelector(".oc-reasoning-part .oc-disclosure__trigger") as HTMLElement);

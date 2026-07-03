@@ -12,7 +12,7 @@ export type ReasoningPartGroupProps = {
 import { computed } from "vue";
 import MarkdownView from "../../../MarkdownView.vue";
 import OcDisclosure from "../primitives/OcDisclosure.vue";
-import { readPartText } from "../../state/part-text";
+import { compactPartPreview, readPartText } from "../../state/part-text";
 
 const props = defineProps<ReasoningPartGroupProps>();
 
@@ -37,12 +37,15 @@ const subtitleText = computed(() => {
   if (aggregateStatus.value === "failed") return "失败";
   return "已完成";
 });
+
+const detailText = computed(() => compactPartPreview(source.value));
 </script>
 
 <template>
   <OcDisclosure
     class="oc-reasoning-part"
     title="思考状态"
+    :detail="detailText"
     :subtitle="subtitleText"
     :status="aggregateStatus"
     :default-open="false"

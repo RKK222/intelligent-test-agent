@@ -1194,9 +1194,9 @@ describe("FigmaChatPanel", () => {
       expect(src).not.toContain("需要分析");
     }
 
-    // reasoning 以折叠块独立存在，默认收起，不混入正文。
+    // reasoning 以折叠块独立存在，折叠头可展示短摘要，但不能混入最终正文。
     expect(wrapper.text()).toContain("思考状态");
-    expect(wrapper.text()).not.toContain("需要分析");
+    expect(wrapper.text()).toContain("需要分析");
   });
 
   it("shows the latest reasoning as running until the whole response finishes", async () => {

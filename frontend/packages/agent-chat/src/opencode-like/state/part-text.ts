@@ -15,3 +15,11 @@ export function readPartText(
   }
   return `${part.text}${overlay}`;
 }
+
+export function compactPartPreview(text: string, maxLength = 42): string {
+  const compacted = text.replace(/\s+/g, " ").trim();
+  if (!compacted) {
+    return "";
+  }
+  return compacted.length > maxLength ? `...${compacted.slice(-maxLength)}` : compacted;
+}
