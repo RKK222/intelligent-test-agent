@@ -3577,3 +3577,15 @@ bash /tmp/test-api-after-restart.sh
 - What: 修改 `MarkdownView.vue`，重写 `markdown-it` 的 `code_inline` 规则。在渲染行内代码时，检测其文本内容，若以不区分大小写的 `.md` 结尾，则自动为生成的 `<code>` 节点添加 class `ta-md-file`。同时，在 `<style scoped>` 块中为 `.markdown-body :deep(code.ta-md-file)` 添加高亮颜色 `#00ceb9 !important` 规则。
 - How: 修改 `frontend/packages/agent-chat/src/MarkdownView.vue` 的 markdown-it 渲染逻辑与 CSS 样式。并在 `frontend/packages/agent-chat/tests/MarkdownView.test.ts` 中新增单元测试以覆盖此行为。未修改任何后端代码、HTTP 契约、事件流、数据库或环境变量配置文件。
 - Result: 新增的单元测试通过，全部 309 个前端 Vitest 测试以及 linting、typecheck 编译均成功通过。
+
+### 2026-07-04 - 统一运行中与思考状态呼吸闪烁频率
+
+- Why: 聊天时间线中“进行中”（工具运行中状态）与“思考中”（AI 思考状态）的闪烁频率不一致，且有不同的 pulse 持续时间（1.2s、1.6s、1.8s），导致多项任务并行/处于活跃态时闪烁参差不齐，视觉效果不够统一。
+- What: 将所有表示“运行中/思考中”状态的呼吸脉冲闪烁动画频率统一为一致的 `1.6s ease-in-out`。同时修正了部分因 CSS 选择器不匹配导致的潜在渲染问题。
+- How: 
+  - 修改 `animations.css`，将 `.oc-thinking-dot` 的 `oc-pulse` 持续时间由 `1.2s` 调整为 `1.6s`；
+  - 修改 `rows.css`，将 `.oc-working-status` 的 `oc-pulse` 持续时间由 `1.8s` 调整为 `1.6s`；
+  - 修改 `parts.css`，将 `.oc-disclosure.is-running .oc-tool__subtitle` 选择器修正为 `.oc-disclosure.is-running .oc-tool__status`，使其能够正确应用于折叠组件的状态标签。
+  - 上述修改使全局时间线（`OpencodeTimeline`）中的所有闪烁状态、提示和等待标示全部以 `1.6s` 步调保持一致。
+- Result: 前端 Vitest 单元测试全部顺利通过，项目无类型和构建错误。
+
