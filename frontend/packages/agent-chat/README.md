@@ -6,13 +6,13 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 
 ## 主要职责
 
-- 展示用户/助手消息。`AssistantThread` 和 agent-web 的 `FigmaChatPanel` 主路径均复用 `OpencodeTimeline`，不再以旧气泡/结构化卡片作为主要正文渲染方式。
+- 展示用户/助手消息。`AssistantThread` 和 agent-web 的 `FigmaChatPanel` 主路径均复用 `OpencodeTimeline`，不再以旧气泡/结构化卡片作为主要正文渲染方式；助手侧只保留头像作为来源标识，不额外展示名称/时间行，以匹配用户气泡无名称的极简对话形态。
 - 右侧 Agent 面板保留 Figma Web IDE 风格的 47px Chat/History 顶部 tab、紧凑消息流和底部 composer/runtime 控制区，适配约 245px 窄面板。
 - `opencode-like/state` 提供 `createOpencodeLikeState` 与 `createTimelineRows`，把用户消息、孤立助手历史消息、assistant parts、运行态、Diff 文件、permission/question/todo 与模型目录归并为稳定时间线行。
 - 展示 message part timeline（text、reasoning、tool、file、retry 以及未知 part fallback）。旧 `card` 消息中的 Diff payload 会被收敛为 `diff-summary` 行；存量 `AgentCard`/`TimelineCard` 仅保留兼容，不作为主对话路径。
 - `reasoning`、最终 `text`、工具调用和文件引用分块展示，避免把思考、工具日志和最终答复混入同一个气泡；同一用户回合内被多个 assistant message 拆开的思考状态会合并为一个过程行，运行中仅保留一个轻量工作中动效。
 - 工具调用按 opencode 常见工具拆分专用视图：bash、read、list、glob、grep、edit、write、apply_patch、webfetch、websearch、task、skill、question；读取/检索类上下文工具默认合并为折叠的上下文组，失败工具仍单独展示错误。
-- 工具视图统一使用 `.oc-*` primitives 和轻量折叠壳，工具详情默认折叠，最终文本输出默认展开；工作区内长绝对路径在列表中展示为面向用户的短路径，完整路径只保留在悬浮提示中，避免 `.testagent`/personal worktree 前缀撑开对话区域。
+- 工具视图统一使用 `.oc-*` primitives 和轻量折叠壳，工具详情默认折叠，过程行的标题、摘要、状态和展开箭头使用固定列对齐；最终文本直接以轻量气泡展示，不额外加“最终输出”标题，并保留复制按钮；工作区内长绝对路径在列表中展示为面向用户的短路径，完整路径只保留在悬浮提示中，避免 `.testagent`/personal worktree 前缀撑开对话区域。
 - 运行中状态以 `thinking` 行和工具状态展示；失败运行追加统一错误行。
 - 提供 Agent/Model/Mode selector、runtime status bar、slash command palette、`@` context picker、permission dock、question dock 和线程内任务分解展示；模型选择器按 Provider 分组展示模型，选择模型时同步更新 Provider 与 Model。
 - Skill 调用不新增独立卡片类型或 `skill.*` 事件；当 tool/message part 的 `tool` 或 `toolName` 为 `skill` 时，在前端展示为 Skill 调用块，展示 Skill 名称、用途、状态和折叠详情。

@@ -6,6 +6,8 @@ export type MarkdownViewProps = {
   bodyClass?: string
   // 是否对 fence 默认语言做高亮（关闭可避免 highlight.js bundle 加载）
   highlight?: boolean
+  // 首次懒加载 Markdown 渲染器时显示的占位文案
+  loadingText?: string
 }
 </script>
 
@@ -21,6 +23,7 @@ import 'github-markdown-css/github-markdown.css'
 const props = withDefaults(defineProps<MarkdownViewProps>(), {
   bodyClass: '',
   highlight: true,
+  loadingText: '渲染中…',
 })
 
 const html = ref('')
@@ -114,7 +117,7 @@ onBeforeUnmount(() => {
 <template>
   <div :class="['ta-md-view min-w-0', bodyClass]" data-testid="md-view">
     <div v-if="loading" class="text-[12px] text-[var(--ta-chat-muted)]">
-      渲染中…
+      {{ loadingText }}
     </div>
     <div
       v-else-if="error"

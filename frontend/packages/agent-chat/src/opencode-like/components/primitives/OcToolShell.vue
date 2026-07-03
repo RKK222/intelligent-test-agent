@@ -19,9 +19,9 @@ const open = ref(props.defaultOpen);
 
 function formatStatus(status: string): string {
   const val = status.toLowerCase();
-  if (val === "completed" || val === "success") return "已完成";
+  if (val === "completed" || val === "success") return "已读取";
   if (val === "failed" || val === "error") return "失败";
-  if (val === "running") return "运行中";
+  if (val === "running") return "进行中";
   return status;
 }
 </script>

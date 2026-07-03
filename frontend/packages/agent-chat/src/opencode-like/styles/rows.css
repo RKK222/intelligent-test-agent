@@ -65,7 +65,7 @@
   display: grid;
   grid-template-columns: 34px minmax(0, 1fr);
   column-gap: 12px;
-  align-items: flex-start;
+  align-items: start;
   max-width: 100%;
 }
 
@@ -94,6 +94,7 @@
   border-radius: 9px;
   background: #18181b;
   color: #ffffff;
+  margin-top: 3px;
 }
 
 .oc-assistant-frame__avatar-icon {
@@ -106,16 +107,6 @@
   min-width: 0;
 }
 
-.oc-assistant-frame__meta {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 20px;
-  color: var(--oc-subtle);
-  font-size: var(--oc-text-xs);
-  line-height: 16px;
-}
-
 .oc-thinking-row,
 .oc-retry-row,
 .oc-error-row {
@@ -125,6 +116,14 @@
   color: var(--oc-muted);
   font-size: var(--oc-text-sm);
   padding: 4px 0;
+}
+
+.oc-thinking-frame {
+  align-items: start;
+}
+
+.oc-thinking-frame .oc-thinking-row {
+  padding: 0;
 }
 
 .oc-error-row {

@@ -87,7 +87,7 @@ function outputPath(output: unknown): string | undefined {
   return match?.[1]?.trim();
 }
 
-function formatDisplayPath(path: string | undefined): string | undefined {
+export function formatDisplayPath(path: string | undefined): string | undefined {
   if (!path) {
     return undefined;
   }

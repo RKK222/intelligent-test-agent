@@ -6,10 +6,10 @@
 }
 
 .oc-diff-summary__header {
-  display: flex;
+  display: grid;
   width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
   padding: 8px 10px;
   color: var(--oc-muted);
@@ -30,6 +30,8 @@
 .oc-diff-summary__action {
   color: var(--oc-accent);
   font-size: var(--oc-text-xs);
+  justify-self: end;
+  white-space: nowrap;
 }
 
 .oc-diff-summary__files {
@@ -37,7 +39,8 @@
 }
 
 .oc-diff-file {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px 32px;
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
@@ -57,6 +60,7 @@
   font-family: var(--oc-font-mono);
   font-size: var(--oc-text-xs);
   white-space: pre;
+  justify-self: end;
 }
 
 .oc-diff-line.is-add {

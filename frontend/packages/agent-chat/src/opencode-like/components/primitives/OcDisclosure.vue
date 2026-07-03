@@ -21,7 +21,7 @@ const open = ref(props.defaultOpen);
   <section :class="['oc-disclosure', status === 'running' ? 'is-running' : '']">
     <button type="button" class="oc-disclosure__trigger" @click="open = !open">
       <span class="oc-tool__title">{{ title }}</span>
-      <span v-if="subtitle" class="oc-tool__subtitle">{{ subtitle }}</span>
+      <span v-if="subtitle" :class="['oc-tool__status', status === 'running' ? 'is-running' : '']">{{ subtitle }}</span>
       <ChevronDown v-if="open" class="oc-tool__chevron" />
       <ChevronRight v-else class="oc-tool__chevron" />
     </button>

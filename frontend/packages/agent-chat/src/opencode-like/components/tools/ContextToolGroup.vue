@@ -9,20 +9,21 @@ export type ContextToolGroupProps = {
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { ChevronDown, ChevronRight, Files } from "lucide-vue-next";
+import { ChevronDown, ChevronRight } from "lucide-vue-next";
 import { getToolInfo } from "../../state/tool-registry";
 
 const props = defineProps<ContextToolGroupProps>();
 const open = ref(false);
-const titleText = computed(() => props.busy ? "正在探索" : "已探索");
+const statusText = computed(() => props.busy ? "进行中" : "已读取");
 const subtitleText = computed(() => `读取 ${props.parts.length} 次`);
 </script>
 
 <template>
   <section class="oc-context-group" data-testid="oc-context-group">
     <button type="button" class="oc-context-group__trigger" @click="open = !open">
-      <span class="oc-tool__title">{{ titleText }}</span>
+      <span class="oc-tool__title">探索</span>
       <span class="oc-tool__subtitle">{{ subtitleText }}</span>
+      <span :class="['oc-tool__status', props.busy ? 'is-running' : 'is-completed']">{{ statusText }}</span>
       <ChevronDown v-if="open" class="oc-tool__chevron" />
       <ChevronRight v-else class="oc-tool__chevron" />
     </button>

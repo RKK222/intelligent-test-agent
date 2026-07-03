@@ -804,7 +804,7 @@ test("phase 11 runtime flow sends attachment parts and handles docks", async ({ 
   expect(questionReplies[0]).toEqual({ answers: [["staging"]] });
 
   await expect(page.getByText("Agent 提出了文件修改")).toBeVisible();
-  await page.getByRole("button", { name: "查看 Diff" }).click();
+  await page.getByRole("button", { name: "查看文件" }).click();
   await expect(page.getByText("+1,2")).toBeVisible();
   await page.getByTitle("引用 hunk").click();
   await expect(page.getByRole("main").getByText("已引用当前 hunk")).toBeVisible();

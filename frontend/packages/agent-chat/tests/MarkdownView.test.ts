@@ -52,4 +52,12 @@ describe("MarkdownView", () => {
     const { findByText } = render(MarkdownView, { props: { source: "   " } });
     expect(await findByText("无内容")).toBeTruthy();
   });
+
+  it("支持覆盖首次渲染占位文案", () => {
+    const { getByText } = render(MarkdownView, {
+      props: { source: "正文", loadingText: "准备输出…" }
+    });
+
+    expect(getByText("准备输出…")).toBeTruthy();
+  });
 });

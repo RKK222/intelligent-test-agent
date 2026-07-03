@@ -9,6 +9,19 @@ import AssistantThread from "../src/AssistantThread.vue";
 const waitMarkdown = () => new Promise((resolve) => setTimeout(resolve, 400));
 
 describe("OpencodeTimeline", () => {
+  it("shows the assistant avatar for the initial thinking state", () => {
+    const state = createOpencodeLikeState({
+      messages: [],
+      running: true
+    });
+
+    const { container, getByText } = render(OpencodeTimeline, { props: { state } });
+
+    expect(getByText("思考中")).toBeTruthy();
+    expect(container.querySelectorAll(".oc-assistant-frame__avatar")).toHaveLength(1);
+    expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(0);
+  });
+
   it("renders user rows, context tool groups, assistant parts and diff summary with oc classes", async () => {
     const state = createOpencodeLikeState({
       messages: [
@@ -28,16 +41,19 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelector(".oc-timeline-root")).toBeTruthy();
     expect(container.querySelector(".oc-user-message")).toBeTruthy();
     expect(container.querySelector(".oc-assistant-frame")).toBeTruthy();
-    expect(getByText("测试智能体")).toBeTruthy();
+    expect(container.querySelector(".oc-assistant-frame__meta")).toBeNull();
     expect(container.querySelector(".oc-context-group")).toBeTruthy();
     expect(container.querySelector(".oc-assistant-part")).toBeTruthy();
     expect(container.querySelector(".oc-diff-summary")).toBeTruthy();
+    expect(getByText("查看文件")).toBeTruthy();
     expect(getByText("分析 checkout 失败")).toBeTruthy();
-    expect(getByText("已探索")).toBeTruthy();
+    expect(getByText("探索")).toBeTruthy();
     expect(getByText("读取 2 次")).toBeTruthy();
+    expect(container.querySelector(".oc-context-group__trigger .oc-tool__status")?.textContent).toBe("已读取");
     await fireEvent.click(container.querySelector(".oc-context-group__trigger") as HTMLElement);
     expect(getByText("README.md")).toBeTruthy();
-    expect(getByText("最终输出")).toBeTruthy();
+    expect(container.querySelector(".oc-text-part")).toBeTruthy();
+    expect(container.querySelector(".oc-text-part .oc-icon-button")).toBeTruthy();
     expect(getByText("定位到 checkout 表单校验失败。")).toBeTruthy();
     expect(getByText("src/checkout.ts")).toBeTruthy();
   });
@@ -78,7 +94,7 @@ describe("OpencodeTimeline", () => {
     await waitMarkdown();
 
     expect(container.querySelectorAll(".oc-assistant-frame__avatar")).toHaveLength(1);
-    expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(1);
+    expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(0);
     expect(getByText("我是测试智能体。")).toBeTruthy();
   });
 
@@ -99,8 +115,9 @@ describe("OpencodeTimeline", () => {
     await waitMarkdown();
 
     expect(container.querySelectorAll(".oc-assistant-frame__avatar")).toHaveLength(1);
-    expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(1);
+    expect(container.querySelectorAll(".oc-assistant-frame__meta")).toHaveLength(0);
     expect(container.querySelectorAll(".oc-reasoning-part .oc-disclosure__trigger")).toHaveLength(1);
+    expect(container.querySelector(".oc-reasoning-part .oc-tool__status")?.textContent).toBe("已完成");
     expect(getByText("思考状态")).toBeTruthy();
 
     await fireEvent.click(container.querySelector(".oc-reasoning-part .oc-disclosure__trigger") as HTMLElement);
