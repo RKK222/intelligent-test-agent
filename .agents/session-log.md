@@ -34,6 +34,23 @@
   - 不改 reducer、投影顺序、RunEvent、后端 API 或默认折叠逻辑；保留“同一回合 reasoning 合并为一行、默认收起”的当前行为，只降低视觉权重并修正头像对齐。
 - Result:
   - 前端 Vitest 全量通过（36 files, 299 passed, 1 skipped），`@test-agent/agent-chat` typecheck 通过；Playwright 构造 DOM 检查隐藏 step 行头像与 reasoning 触发器 top delta 为 0px，reasoning `已完成` 与工具 `已读取` x delta 为 0px；前端 Vite 已在 `127.0.0.1:3001` 启动验证入口。
+### 2026-07-04 - 修复文件预览模式下 Monaco 编辑器坍塌与原始文件信息不可见
+
+- Why:
+  - 打开 Markdown 文件并启用“预览”（分屏预览模式）时，上方 Monaco 编辑器区域变为空白/白屏，无法看到原始文件信息。
+  - 根因：`CodeEditor.vue` 的 `containerEl` 在 Markdown 预览开启时使用 `:style="{ height: splitPct + '%' }"`，但在 Flex 列容器中缺少 `flex: 'none'` (或 `flex-shrink: 0`)，导致 flex 布局计算时容器高度坍塌；且在切换预览状态、拖拽 sash 或切换文件时，未触发 `editor.layout()`，导致 Monaco 内部 DOM 视口与行渲染保留 0 尺寸。另外，`m.Uri.parse("file:///" + encodeURIComponent(path))` 将路径斜杠转义，影响 Monaco 的 URI 路径识别。
+- What:
+  - `CodeEditor.vue` 给 `containerEl` 增加 `flex: 'none'` 与 `shrink-0`，防止 Flex box 在 percentage height 下压缩 DOM 高度。
+  - 引入 `ResizeObserver` 监听 `containerEl` 尺寸变化，并在 `props.showPreview`、`splitPct`、`path` 或 `content` 变化后通过 `nextTick` 调用 `editor.layout()` 重算布局。
+  - 安全改用 `m.Uri.file(path)`（带有 `m.Uri.parse` 降级兜底），并同步修复 `CodeEditor.preview.test.ts` 中 `fakeEditor.layout` 与 `Uri.file` 的 mock 桩。
+  - 更新 `@test-agent/editor` 包与 `src/` 下 README/PACKAGE 说明。
+- How:
+  - 修改 `frontend/packages/editor/src/CodeEditor.vue` 和 `frontend/packages/editor/tests/CodeEditor.preview.test.ts`；
+  - 修改 `frontend/packages/editor/README.md` 和 `frontend/packages/editor/src/PACKAGE.md`。
+- Result:
+  - 前端全量 36 个测试文件、305 个 Vitest 测试用例全绿通过 (`npx pnpm --dir frontend test`)；
+  - 前端 `npx pnpm --dir frontend run typecheck` 检查通过无错误。
+
 ### 2026-07-04 - 调整对话时间线内容左对齐
 
 - Why:
