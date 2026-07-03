@@ -42,6 +42,29 @@
   justify-self: end;
 }
 
+.oc-diff-summary__totals.is-bumping .oc-diff-line {
+  animation: oc-diff-total-bump 0.32s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.oc-diff-summary__totals.is-bumping .oc-diff-line.is-del {
+  animation-delay: 40ms;
+}
+
+@keyframes oc-diff-total-bump {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  38% {
+    transform: translateY(-4px) scale(1.08);
+  }
+  68% {
+    transform: translateY(2px) scale(0.98);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
 .oc-tool__icon {
   width: 14px;
   height: 14px;
@@ -76,6 +99,7 @@
   font-size: var(--oc-text-xs);
   white-space: pre;
   justify-self: end;
+  transform-origin: center;
 }
 
 .oc-diff-line.is-add {
@@ -102,4 +126,10 @@
 
 .oc-diff-file.is-clickable:hover .oc-diff-file__path {
   color: var(--oc-accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oc-diff-summary__totals.is-bumping .oc-diff-line {
+    animation: none;
+  }
 }

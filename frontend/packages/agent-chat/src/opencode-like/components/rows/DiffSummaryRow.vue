@@ -7,7 +7,7 @@ export type DiffSummaryRowProps = {
 </script>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { ChevronDown, ChevronRight, FileDiff } from "lucide-vue-next";
 import { formatDisplayPath } from "../../state/tool-registry";
 
@@ -27,6 +27,32 @@ const lineTotals = computed(() =>
     { additions: 0, deletions: 0 }
   )
 );
+const totalsBumping = ref(false);
+const totalsBumpKey = ref(0);
+let totalsBumpTimer: ReturnType<typeof setTimeout> | undefined;
+
+function clearTotalsBumpTimer() {
+  if (totalsBumpTimer) {
+    clearTimeout(totalsBumpTimer);
+    totalsBumpTimer = undefined;
+  }
+}
+
+watch(lineTotals, (next, previous) => {
+  if (!previous || expanded.value) return;
+  if (next.additions === previous.additions && next.deletions === previous.deletions) return;
+
+  clearTotalsBumpTimer();
+  // 折叠态数字变化时重新挂载汇总节点，确保连续变化也会重新触发 CSS 跳动动画。
+  totalsBumpKey.value += 1;
+  totalsBumping.value = true;
+  totalsBumpTimer = setTimeout(() => {
+    totalsBumping.value = false;
+    totalsBumpTimer = undefined;
+  }, 320);
+});
+
+onBeforeUnmount(clearTotalsBumpTimer);
 </script>
 
 <template>
@@ -41,7 +67,11 @@ const lineTotals = computed(() =>
         <FileDiff class="oc-tool__icon" />
         文件修改 {{ files.length }}
       </span>
-      <span class="oc-diff-summary__totals" aria-label="文件总增减行">
+      <span
+        :key="totalsBumpKey"
+        :class="['oc-diff-summary__totals', totalsBumping ? 'is-bumping' : '']"
+        aria-label="文件总增减行"
+      >
         <span class="oc-diff-line is-add">+{{ lineTotals.additions }}</span>
         <span class="oc-diff-line is-del">-{{ lineTotals.deletions }}</span>
       </span>
