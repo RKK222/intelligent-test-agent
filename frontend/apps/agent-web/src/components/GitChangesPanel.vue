@@ -830,13 +830,13 @@ defineExpose({
               <div v-if="workspaceConflicts.length > 0" class="git-conflict-banner bg-amber-50/80 dark:bg-amber-950/15 border border-amber-200/60 dark:border-amber-900/30 rounded p-2 mb-2 text-slate-700 dark:text-slate-300 shadow-sm">
                 <div class="flex items-center gap-1 mb-1.5">
                   <AlertTriangle class="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-500" />
-                  <span class="font-semibold text-[11px] text-amber-900 dark:text-amber-400">检测到 {{ workspaceConflicts.length }} 个冲突</span>
+                  <span class="font-semibold text-xs text-amber-900 dark:text-amber-400">检测到 {{ workspaceConflicts.length }} 个冲突</span>
                 </div>
                 <div class="flex items-center gap-1.5">
                   <Button
                     size="sm"
                     variant="secondary"
-                    class="flex-1 text-[11px] h-6 border-amber-200 hover:border-amber-300 dark:border-amber-800 bg-white hover:bg-amber-50 text-amber-900 dark:text-amber-400 dark:bg-zinc-900 dark:hover:bg-amber-950/20 font-medium px-1 flex items-center justify-center shadow-sm"
+                    class="flex-1 h-6 border-amber-200 hover:border-amber-300 dark:border-amber-800 bg-white hover:bg-amber-50 text-amber-900 dark:text-amber-400 dark:bg-zinc-900 dark:hover:bg-amber-950/20 font-medium px-1 flex items-center justify-center shadow-sm"
                     :disabled="conflictResolving"
                     @click.stop="resolveAllWorkspaceConflicts('CURRENT')"
                   >
@@ -845,7 +845,7 @@ defineExpose({
                   <Button
                     size="sm"
                     variant="secondary"
-                    class="flex-1 text-[11px] h-6 border-amber-200 hover:border-amber-300 dark:border-amber-800 bg-white hover:bg-amber-50 text-amber-900 dark:text-amber-400 dark:bg-zinc-900 dark:hover:bg-amber-950/20 font-medium px-1 flex items-center justify-center shadow-sm"
+                    class="flex-1 h-6 border-amber-200 hover:border-amber-300 dark:border-amber-800 bg-white hover:bg-amber-50 text-amber-900 dark:text-amber-400 dark:bg-zinc-900 dark:hover:bg-amber-950/20 font-medium px-1 flex items-center justify-center shadow-sm"
                     :disabled="conflictResolving"
                     @click.stop="resolveAllWorkspaceConflicts('INCOMING')"
                   >
@@ -854,7 +854,7 @@ defineExpose({
                   <Button
                     size="sm"
                     variant="ghost"
-                    class="text-[11px] h-6 px-1.5 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 font-normal shrink-0"
+                    class="h-6 px-1.5 text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 font-normal shrink-0"
                     :disabled="conflictResolving"
                     @click.stop="abortWorkspaceConflict"
                   >
