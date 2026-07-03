@@ -139,8 +139,13 @@
 }
 
 .oc-thinking-frame .oc-thinking-row {
-  min-height: var(--oc-avatar-size);
+  align-items: flex-start;
+  line-height: 20px;
   padding: 0;
+}
+
+.oc-thinking-frame .oc-thinking-dot {
+  margin-top: 7px;
 }
 
 .oc-error-row {

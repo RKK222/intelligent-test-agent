@@ -14,7 +14,6 @@
   display: grid;
   width: min(100%, 560px);
   grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
-  min-height: var(--oc-avatar-size, 28px);
   padding: 0 10px;
   column-gap: 8px;
   align-items: center;
@@ -80,7 +79,6 @@
   grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
   align-items: center;
   column-gap: 8px;
-  min-height: var(--oc-avatar-size, 28px);
   padding: 0 10px;
   color: var(--oc-fg);
   background: transparent;

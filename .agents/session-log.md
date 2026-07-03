@@ -17,6 +17,7 @@
   - `git diff --check` 通过。
   - `corepack pnpm@10.25.0 --dir frontend exec vitest run packages/agent-chat/tests/MarkdownView.test.ts packages/editor/tests/MarkdownPreview.test.ts packages/agent-chat/tests/opencode-timeline.test.ts apps/agent-web/tests/FigmaChatPanel.test.ts` 通过（76 passed, 1 skipped）。
   - `@test-agent/agent-chat`、`@test-agent/editor`、`@test-agent/agent-web` typecheck 均通过。
+  - 后续对齐修正确认不要把首行强行撑到头像高度；应让头像顶边和右侧首个内容块顶边对齐，初始 thinking 行内部单独设置 20px 行高。
 
 ### 2026-07-03 - 优化对话时间线行间距、工具状态样式与文件输出路径展示
 
