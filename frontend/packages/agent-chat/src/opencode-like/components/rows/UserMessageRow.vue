@@ -7,13 +7,19 @@ export type UserMessageRowProps = {
 </script>
 
 <script setup lang="ts">
+import { User } from "lucide-vue-next";
 defineProps<UserMessageRowProps>();
 </script>
 
 <template>
   <div class="oc-user-message" data-testid="oc-user-message">
-    <div class="oc-user-message__bubble">
-      <p>{{ message.text }}</p>
+    <div class="oc-user-message__content">
+      <div class="oc-user-message__bubble">
+        <p>{{ message.text }}</p>
+      </div>
+    </div>
+    <div class="oc-user-message__avatar" aria-hidden="true">
+      <User class="oc-user-message__avatar-icon" />
     </div>
   </div>
 </template>

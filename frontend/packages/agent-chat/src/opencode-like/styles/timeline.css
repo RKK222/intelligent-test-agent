@@ -10,7 +10,7 @@
   width: 100%;
   max-width: none;
   margin: 0;
-  padding: 12px 14px 24px;
+  padding: 10px 8px 20px;
 }
 
 .oc-row {
@@ -18,11 +18,11 @@
 }
 
 .oc-row + .oc-row {
-  margin-top: 6px;
+  margin-top: 4px;
 }
 
 .oc-turn-gap {
-  height: 12px;
+  height: 8px;
 }
 
 .oc-empty-state {

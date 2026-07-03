@@ -8,7 +8,7 @@
   border-radius: 10px;
   border-top-left-radius: 2px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
-  margin-top: 6px;
+  margin-top: 4px;
   display: block;
   width: fit-content;
   max-width: 100%;
@@ -29,9 +29,9 @@
 }
 
 .oc-reasoning-part__body {
-  border-left: 1px solid var(--oc-border);
-  padding: 6px 0 6px 14px;
-  margin: 4px 0 0 4px;
+  border-left: 0;
+  padding: 0;
+  margin: 0;
 }
 
 .oc-file-part {
