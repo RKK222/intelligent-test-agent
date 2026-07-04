@@ -104,6 +104,8 @@
   .oc-assistant-frame.has-header:has(.oc-unknown-part)
   .oc-assistant-frame__avatar {
   transform: translateY(calc(var(--oc-avatar-size) + 6px));
+}
+
 .oc-assistant-frame.has-header .oc-assistant-frame__avatar {
   margin-bottom: 6px;
 }

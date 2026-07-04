@@ -45,6 +45,8 @@
   background: var(--oc-accent);
   vertical-align: -0.16em;
   animation: oc-pulse 1.1s ease-in-out infinite;
+}
+
 .oc-text-part__live {
   display: grid;
   gap: 6px;
