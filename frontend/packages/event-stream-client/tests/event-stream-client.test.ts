@@ -130,6 +130,29 @@ describe("event-stream-client", () => {
     expect(received).toEqual(["message.part.delta"]);
   });
 
+  it("ignores queued messages after close and events from other runs", () => {
+    const source = new FakeEventSource();
+    const received: string[] = [];
+
+    const subscription = subscribeRunEvents({
+      baseUrl: "http://api",
+      runId: "run_1",
+      eventSourceFactory: () => source,
+      onEvent: (event) => received.push(event.runId)
+    });
+
+    source.emit("run.started", { eventId: "evt_1", runId: "run_other", seq: 1, type: "run.started", payload: {} });
+    subscription.close();
+    const closedListeners = [...(source.listeners.get("run.started") ?? [])];
+    closedListeners.forEach((listener) =>
+      listener(new MessageEvent("run.started", {
+        data: JSON.stringify({ eventId: "evt_2", runId: "run_1", seq: 2, type: "run.started", payload: {} })
+      }))
+    );
+
+    expect(received).toEqual([]);
+  });
+
   it("reports raw SSE message data before attempting to parse run events", () => {
     const source = new FakeEventSource();
     const rawMessages: Array<Record<string, string | undefined>> = [];

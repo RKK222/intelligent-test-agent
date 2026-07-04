@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-04 - 修复手动终止状态跨 Run 残留
+
+- Why:
+  - 用户反馈手动终止后再次发送消息，新一轮已经完成但右侧面板仍显示“已手动终止”；根因是旧 Run 的取消终态可能在新 Run 开始后晚到，且面板本地 `wasStopped` 记忆没有在新 Run 开始时清理。
+- What:
+  - `AgentWorkbench` 只接收当前订阅且仍为页面活动 Run 的 RunEvent；`event-stream-client` 在订阅关闭后不再投递已排队回调，并丢弃 runId 不匹配事件；`FigmaChatPanel` 在新一轮运行开始时清理上一轮完成/失败/手动终止提示。
+  - 补充前端回归测试覆盖旧 `run.cancelled` 不污染当前 Run、SSE close 后不投递、下一轮成功不显示“已手动终止”。
+- How:
+  - 按 TDD 先写失败用例，再增加 `runEventMatchesRun` 纯函数和客户端边界防护；仅修改前端状态隔离与相关 README/PACKAGE 说明，不变更后端 API、RunEvent 契约或数据库。
+- Result:
+  - 定向 `corepack pnpm test -- FigmaChatPanel workbench-utils event-stream-client` 通过（36 files, 318 passed, 1 skipped）。
+  - `@test-agent/agent-web` 与 `@test-agent/event-stream-client` typecheck 通过。
+
 ### 2026-07-03 - reasoning 折叠头展示最新尾部摘要
 
 - Why:

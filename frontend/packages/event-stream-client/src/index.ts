@@ -81,6 +81,9 @@ export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventS
   options.onStatus?.("connecting");
 
   const handleEvent: EventListener = (event) => {
+    if (closed) {
+      return;
+    }
     const message = event as MessageEvent<string>;
     options.onRawMessage?.({
       runId: options.runId,
@@ -91,6 +94,9 @@ export function subscribeRunEvents(options: RunEventSubscribeOptions): RunEventS
     });
     const parsed = parseRunEvent(message.data);
     if (!parsed) {
+      return;
+    }
+    if (parsed.runId !== options.runId) {
       return;
     }
     // 如果 eventId 是 fallback 的 runId:seq，说明后端未提供显式 eventId

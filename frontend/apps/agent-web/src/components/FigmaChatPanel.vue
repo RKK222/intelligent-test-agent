@@ -2185,6 +2185,7 @@ watch(
   (now, prev) => {
     if (now && !prev) {
       thinkingExpanded.value = false
+      wasStopped.value = false
       wasCompleted.value = false
       wasFailed.value = false
       choiceDismissed.value = false

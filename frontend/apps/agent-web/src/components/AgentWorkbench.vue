@@ -76,6 +76,7 @@ import {
   notifyOnAttention,
   parseCommand,
   promptFromParts,
+  runEventMatchesRun,
   runtimeResources,
   runtimeStatus,
   sessionTitleFromFirstMessage,
@@ -1184,7 +1185,12 @@ watch(run, (r, _old, onCleanup) => {
     baseUrl: apiBaseUrl,
     runId: r.runId,
     onRawMessage: (message) => observeRawRunEventMessage(message, r.sessionId),
-    onEvent: (event) => handleRunEvent(event),
+    onEvent: (event) => {
+      if (!runEventMatchesRun(event, r.runId, run.value)) {
+        return;
+      }
+      handleRunEvent(event);
+    },
     onStatus: (status) => {
       logs.value = [...logs.value.slice(-200), `[sse] ${status}`];
     },

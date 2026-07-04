@@ -952,6 +952,55 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).not.toContain("任务完成");
   });
 
+  it("clears the manual stopped marker when a new run starts and succeeds", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "u-stop",
+            messageId: "u-stop",
+            role: "user",
+            text: "停止上一轮",
+            createdAt: "2026-07-04T09:00:00.000Z"
+          }
+        ],
+        running: true,
+        runtimeStatus: "RUNNING",
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    await wrapper.get('[aria-label="停止执行"]').trigger("click");
+    await wrapper.setProps({ running: false, runtimeStatus: "CANCELLED" });
+    expect(wrapper.text()).toContain("已手动终止");
+
+    await wrapper.setProps({
+      messages: [
+        {
+          id: "u-stop",
+          messageId: "u-stop",
+          role: "user",
+          text: "停止上一轮",
+          createdAt: "2026-07-04T09:00:00.000Z"
+        },
+        {
+          id: "u-next",
+          messageId: "u-next",
+          role: "user",
+          text: "继续下一轮",
+          createdAt: "2026-07-04T09:01:00.000Z"
+        }
+      ],
+      running: true,
+      runtimeStatus: "RUNNING"
+    });
+    await wrapper.setProps({ running: false, runtimeStatus: "SUCCEEDED" });
+
+    expect(wrapper.text()).not.toContain("已手动终止");
+    expect(wrapper.text()).toContain("任务完成");
+  });
+
   it("shows the real run failure message in the retry card", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

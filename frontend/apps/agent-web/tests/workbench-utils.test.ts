@@ -5,6 +5,7 @@ import {
   diffFilesFromSessionMessages,
   filterWorkspaceRootEntries,
   inferDiffFromToolPart,
+  runEventMatchesRun,
   mergeDiffFiles,
   messagesFromSessionMessages,
   normalizePathKey,
@@ -47,6 +48,24 @@ describe("workspaceLoadIsCurrent", () => {
     expect(workspaceLoadIsCurrent("wrk_a", 3, "wrk_a", 3)).toBe(true);
     expect(workspaceLoadIsCurrent("wrk_a", 3, "wrk_b", 3)).toBe(false);
     expect(workspaceLoadIsCurrent("wrk_a", 2, "wrk_a", 3)).toBe(false);
+  });
+});
+
+describe("runEventMatchesRun", () => {
+  it("accepts events only for the subscribed and current run", () => {
+    const current = {
+      runId: "run_current",
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      status: "RUNNING",
+      createdAt: "2026-07-04T09:00:00Z",
+      updatedAt: "2026-07-04T09:00:00Z"
+    };
+
+    expect(runEventMatchesRun({ runId: "run_current" }, "run_current", current)).toBe(true);
+    expect(runEventMatchesRun({ runId: "run_old" }, "run_current", current)).toBe(false);
+    expect(runEventMatchesRun({ runId: "run_current" }, "run_old", current)).toBe(false);
+    expect(runEventMatchesRun({ runId: "run_current" }, "run_current", { ...current, runId: "run_next" })).toBe(false);
   });
 });
 

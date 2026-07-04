@@ -43,6 +43,17 @@ export function workspaceLoadIsCurrent(
   return requestWorkspaceId === selectedWorkspaceId && requestGeneration === currentGeneration;
 }
 
+/**
+ * RunEvent 只能更新当前订阅且仍是当前页面活动的 Run，防止旧 SSE 关闭窗口内的晚到终态污染新一轮。
+ */
+export function runEventMatchesRun(
+  event: Pick<RunEvent, "runId">,
+  subscribedRunId: string | undefined,
+  currentRun: Pick<Run, "runId"> | null | undefined
+): boolean {
+  return Boolean(event.runId && subscribedRunId && currentRun?.runId && event.runId === subscribedRunId && event.runId === currentRun.runId);
+}
+
 export function diffFilesFromPayload(payload: Record<string, unknown>): RunDiffFile[] {
   const raw = Array.isArray(payload.diff) ? payload.diff : Array.isArray(payload.files) ? payload.files : [];
   return raw
