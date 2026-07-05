@@ -64,8 +64,8 @@ export function reduceAgentChatRuntime(
     return createInitialAgentChatRuntimeState(action.messages ?? []);
   }
   if (action.type === "run.requested") {
-    // 新一轮沿用当前 transcript，但必须清掉上一轮终态，避免旧状态压住新 Run 的动画。
-    return { ...state, status: "PENDING", runtimeStatus: { type: "busy" }, streamingTextByPartId: {} };
+    // 新一轮沿用当前 transcript，但必须清掉上一轮终态、失败卡和 Todo，避免旧状态压住新 Run。
+    return { ...state, status: "PENDING", runtimeStatus: { type: "busy" }, messages: removeRunFailedCards(state.messages), todos: [], streamingTextByPartId: {} };
   }
   if (action.type === "run.request.failed") {
     // 本地启动阶段失败时不会有后端 RunEvent 终态，必须在 reducer 内收敛运行态。
@@ -287,7 +287,11 @@ function reduceEventOnly(
       const errorInfo = extractErrorInfo(event.payload);
       // 移除最后一条没有实际内容的 assistant 消息
       messages = removeEmptyAssistant(messages);
-      messages = appendCard(messages, "event", "⚠️ Run 执行失败", { error: errorInfo, type: "run.failed" }, event);
+      messages = removeRunFailedCards(messages, event.runId);
+      messages = appendCard(messages, "event", "⚠️ Run 执行失败", { error: errorInfo, type: "run.failed", runId: event.runId }, event);
+    } else if (event.type === "run.succeeded" || event.type === "run.cancelled") {
+      // 后到成功/取消终态代表本 Run 最终没有失败，清理此前 transport error 产生的失败卡。
+      messages = removeRunFailedCards(messages, event.runId);
     }
     return { ...state, status: runStatusFromEvent(event), runtimeStatus: runtimeStatusFromRunEvent(event), messages };
   }
@@ -1084,12 +1088,16 @@ function normalizeQuestionKind(
   item: Record<string, unknown>,
   options: Array<{ id: string; label: string; description?: string }> | undefined
 ): "single" | "multiple" | "text" | string {
+  const multiple = booleanValue(item.multiple);
+  if (multiple === true) {
+    return "multiple";
+  }
+  if (multiple === false && options && options.length > 0) {
+    return "single";
+  }
   const explicit = text(item.kind) ?? text(item.type);
   if (explicit === "single" || explicit === "multiple" || explicit === "text") {
     return explicit;
-  }
-  if (booleanValue(item.multiple) === true) {
-    return "multiple";
   }
   if (options && options.length > 0) {
     return "single";
@@ -1198,6 +1206,16 @@ function removeEmptyAssistant(messages: AgentMessage[]): AgentMessage[] {
     return messages.slice(0, -1);
   }
   return messages;
+}
+
+function removeRunFailedCards(messages: AgentMessage[], runId?: string): AgentMessage[] {
+  return messages.filter((message) => {
+    if (message.role !== "card" || message.cardType !== "event" || text(message.payload.type) !== "run.failed") {
+      return true;
+    }
+    const cardRunId = text(message.payload.runId);
+    return runId !== undefined && cardRunId !== undefined && cardRunId !== runId;
+  });
 }
 
 function appendStreamingText(streamingTextByPartId: Record<string, string>, event: RunEvent): Record<string, string> {

@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-05 - 清理新一轮对话 Todo 残留
+
+- Why:
+  - 用户反馈上一轮对话的 Todo 面板会在下一轮对话开始后继续显示；根因是 `agent-chat` reducer 的 `run.requested` 只清理运行态和 streaming overlay，未清空上一轮 `todos`。
+- What:
+  - `run.requested` 现在保留 transcript、新 Run busy 态和旧失败卡清理逻辑，同时清空上一轮 Todo 快照；本轮收到新的 `todo.updated` 后再展示新任务。
+  - 解决了当前工作区中 `agent-chat` reducer/README/PACKAGE 以及相关说明文档的既有冲突，合并保留 retry 可见化与失败卡按最终 root 终态收敛的说明。
+- How:
+  - 先补红灯测试确认旧 `todo_old` 会残留，再在 reducer 中加入 `todos: []`；不改后端 API、RunEvent wire shape、数据库或 generated SDK。
+- Result:
+  - `corepack pnpm test packages/agent-chat/tests/runtime-reducer.test.ts`、`corepack pnpm --filter @test-agent/agent-chat typecheck`、`corepack pnpm --filter @test-agent/agent-web typecheck` 和 `git diff --check` 均通过。
+
 ### 2026-07-05 - 前端 retry 倒计时与自动重试
 
 - Why:
@@ -4029,3 +4041,10 @@ bash /tmp/test-api-after-restart.sh
 - What: `agent-chat` runtime state 新增结构化 `runtimeStatus`，从 `session.status` 对象提取 `type/attempt/message/action`；opencode-like 时间线在 `runtimeStatus.type=retry` 时渲染 retry 行并显示上游 message/action link，抑制普通 thinking/working 占位；`FigmaChatPanel` 从 `AgentWorkbench` 接收结构化状态并传入时间线。
 - How: 修改 `runtime-reducer`、opencode-like adapter/projection/types/RetryRow 样式、`AgentWorkbench` 和 `FigmaChatPanel`，补充 reducer、时间线和工作台面板回归测试。同步 `docs/api/event-stream.md`、`frontend/README.md` 和 `agent-chat` 包说明；未改后端 API、数据库、generated SDK 或环境配置。
 - Result: `corepack pnpm --dir frontend test -- runtime-reducer opencode-like-state FigmaChatPanel`、`corepack pnpm --dir frontend --filter @test-agent/agent-chat typecheck`、`corepack pnpm --dir frontend --filter @test-agent/agent-web typecheck` 和 `git diff --check` 通过。
+
+### 2026-07-05 - 修正 Streaming response failed 先到后的最终 Run 状态
+
+- Why: 上一版只防止 transport error 后到覆盖已成功 Run，但仍存在 `Streaming response failed` 先到、root `run.succeeded` 后到时 Run 被提前标失败且前端关闭订阅/保留旧失败卡的问题；用户明确要求任务状态与报错展示以最后一次 root 终态消息为准。
+- What: `Run.applyTerminalFact` 允许应用层记录后到 root 终态事实；`RunApplicationService` 对 `Streaming response failed` 等 transport error 增加短暂延迟窗口，窗口内收到 root 终态则不追加旧 `run.failed`，无 root 终态时仍收敛失败；前端 reducer 在新 Run 请求和后到成功/取消终态时清理旧 `run.failed` 失败卡。
+- How: 先补充后端“transport error 先到、root success 后到”红灯用例和前端 reducer 失败卡残留红灯用例，再修改 runtime 终态处理与 agent-chat reducer，并扩展 workbench mock E2E 断言旧 SSE 错误、失败卡和底部“任务失败”不跨新一轮成功残留。同步 domain/runtime/frontend/agent-chat README、包说明和 `docs/api/event-stream.md`。
+- Result: `mvn -pl test-agent-domain,test-agent-opencode-runtime -am test`、`corepack pnpm exec vitest run packages/agent-chat/tests/runtime-reducer.test.ts`、目标 workbench Playwright、`corepack pnpm typecheck` 和后端 `mvn clean package -DskipTests` 均通过；未修改数据库 schema、Flyway、HTTP API 字段或 SSE 事件类型。

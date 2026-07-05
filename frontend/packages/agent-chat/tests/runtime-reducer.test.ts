@@ -3,7 +3,7 @@ import { createInitialAgentChatRuntimeState, reduceAgentChatRuntime } from "../s
 import type { RunEvent } from "@test-agent/shared-types";
 
 describe("agent-chat runtime reducer", () => {
-  it("starts a new run without clearing the existing conversation", () => {
+  it("starts a new run without clearing the existing conversation but clears stale todos", () => {
     const previous = {
       ...createInitialAgentChatRuntimeState([
         {
@@ -13,13 +13,25 @@ describe("agent-chat runtime reducer", () => {
           createdAt: "2026-07-02T09:00:00Z"
         }
       ]),
-      status: "SUCCEEDED"
+      status: "SUCCEEDED",
+      todos: [{ id: "todo_old", text: "上一轮任务", status: "completed" }]
     };
 
     const next = reduceAgentChatRuntime(previous, { type: "run.requested" });
 
     expect(next.status).toBe("PENDING");
     expect(next.messages).toEqual(previous.messages);
+    expect(next.todos).toEqual([]);
+
+    const updated = reduceAgentChatRuntime(next, {
+      type: "event",
+      event: event("todo.updated", {
+        todos: [{ id: "todo_new", content: "本轮任务", status: "in_progress" }]
+      })
+    });
+
+    expect(updated.todos).toHaveLength(1);
+    expect(updated.todos[0]).toMatchObject({ id: "todo_new", text: "本轮任务", status: "in_progress" });
   });
 
   it("stops a pending local run when the startup request fails", () => {
@@ -1000,6 +1012,41 @@ describe("agent-chat runtime reducer", () => {
 
     expect(failed.status).toBe("FAILED");
     expect(cancelled.status).toBe("CANCELLED");
+  });
+
+  it("uses the later success terminal event and removes stale failed cards for the same run", () => {
+    const failed = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("run.failed", {
+        status: "FAILED",
+        error: { name: "ConnectionError", message: "Streaming response failed" }
+      })
+    });
+
+    const succeeded = reduceAgentChatRuntime(failed, {
+      type: "event",
+      event: { ...event("run.succeeded", { status: "SUCCEEDED" }), eventId: "evt_run_succeeded_later", seq: 2 }
+    });
+
+    expect(failed.status).toBe("FAILED");
+    expect(failed.messages).toHaveLength(1);
+    expect(succeeded.status).toBe("SUCCEEDED");
+    expect(succeeded.messages).toHaveLength(0);
+  });
+
+  it("clears stale run failed cards when a new run is requested", () => {
+    const failed = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("run.failed", {
+        status: "FAILED",
+        error: { name: "Error", message: "Model not found" }
+      })
+    });
+
+    const pending = reduceAgentChatRuntime(failed, { type: "run.requested" });
+
+    expect(pending.status).toBe("PENDING");
+    expect(pending.messages).toHaveLength(0);
   });
 
   it("normalizes the eight extended part types via message.part.updated", () => {
