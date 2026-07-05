@@ -64,6 +64,17 @@
   - 仅修改 `frontend/apps/agent-web` 前端状态同步和测试；不改后端 API、RunEvent 契约、数据库、generated SDK 或环境配置。
 - Result:
   - 定向 Vitest（`workbench-utils.test.ts`、`git-changes-panel.test.ts`）、`@test-agent/agent-web` typecheck 和新增 Playwright 用例通过。
+### 2026-07-05 - 修复原始输出面板事件时区未本地化
+
+- Why:
+  - 原始输出调试面板右上角显示的时间是未经时区转换的 UTC 格式（从 ISO 字符串直接截取），导致其与用户的实际本地时间对不上。
+- What:
+  - 在 `FigmaChatPanel.vue` 中修改 `rawOutputTime` 逻辑，将传入的时间字符串解析为 `Date` 对象，然后将其格式化为本地的 `YYYY-MM-DD HH:mm:ss` 格式字符串。
+- How:
+  - 仅修改前端 `FigmaChatPanel.vue` 的时间格式化函数，使用原生的 `Date` API 获取本地时间各部分，不影响后端接口与任何底层数据。
+- Result:
+  - `@test-agent/agent-web` typecheck 0 报错；运行 Vitest 全量单元测试成功通过。
+
 ### 2026-07-05 - 调整非文件夹文件占位为2px并增加悬浮对齐线
 
 - Why:

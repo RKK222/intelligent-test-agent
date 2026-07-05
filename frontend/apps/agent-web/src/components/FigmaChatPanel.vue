@@ -2208,7 +2208,19 @@ function rawOutputKindLabel(kind: RawOutputKind) {
 }
 
 function rawOutputTime(value: string) {
-  return value ? value.replace('T', ' ').slice(0, 19) : ''
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value.replace('T', ' ').slice(0, 19)
+  }
+  const pad = (n: number) => n.toString().padStart(2, '0')
+  const yyyy = date.getFullYear()
+  const MM = pad(date.getMonth() + 1)
+  const dd = pad(date.getDate())
+  const hh = pad(date.getHours())
+  const mm = pad(date.getMinutes())
+  const ss = pad(date.getSeconds())
+  return `${yyyy}-${MM}-${dd} ${hh}:${mm}:${ss}`
 }
 
 function rawOutputBody(entry: RawOutputEntry) {
