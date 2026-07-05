@@ -389,6 +389,43 @@ describe("FigmaChatPanel", () => {
     ]);
   });
 
+  it("keeps long question content in a scrollable area above the composer", () => {
+    const longOptions = Array.from({ length: 18 }, (_, index) => ({
+      id: `option_${index}`,
+      label: `选项 ${index + 1}`,
+      description: `这是一段很长的选项说明 ${index + 1}，用于模拟 question.asked 返回较多选项时的面板高度。`
+    }));
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        questions: [
+          {
+            requestId: "ques_long",
+            sessionId: "ses_1",
+            createdAt: "2026-07-05T06:35:23.000Z",
+            questions: [
+              {
+                questionId: "q1",
+                text: "请从较长的问题列表里选择一个方案",
+                kind: "single",
+                options: longOptions
+              }
+            ]
+          }
+        ]
+      } as any
+    });
+
+    const scrollArea = wrapper.get(".figma-chat-question-scroll");
+    const actions = wrapper.get(".figma-chat-question-actions");
+    const composer = wrapper.get(".figma-chat-composer");
+
+    expect(scrollArea.findAll(".figma-chat-question-option")).toHaveLength(18);
+    expect(scrollArea.find(".figma-chat-question-actions").exists()).toBe(false);
+    expect(actions.element.compareDocumentPosition(composer.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("emits reject-question when the question panel is ignored", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

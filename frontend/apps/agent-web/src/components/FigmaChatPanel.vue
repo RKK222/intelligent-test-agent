@@ -3531,51 +3531,53 @@ function onCompositionEnd() {
           v-if="item.questions.length > 0"
           class="figma-chat-question-card"
         >
-          <div class="figma-chat-question-page-head">
-            <div class="figma-chat-question-progress">{{ questionProgressText(item) }}</div>
-            <div v-if="currentQuestionRequired(item).header" class="figma-chat-question-header">
-              {{ currentQuestionRequired(item).header }}
+          <div class="figma-chat-question-scroll">
+            <div class="figma-chat-question-page-head">
+              <div class="figma-chat-question-progress">{{ questionProgressText(item) }}</div>
+              <div v-if="currentQuestionRequired(item).header" class="figma-chat-question-header">
+                {{ currentQuestionRequired(item).header }}
+              </div>
             </div>
-          </div>
-          <div class="figma-chat-question-item">
-            <div class="figma-chat-question-title">{{ currentQuestionRequired(item).text }}</div>
-            <div class="figma-chat-question-hint">{{ questionHelpText(currentQuestionRequired(item)) }}</div>
-            <input
-              v-if="isTextQuestion(currentQuestionRequired(item))"
-              :value="questionCustomAnswers[currentQuestionRequired(item).questionId] ?? ''"
-              class="figma-chat-question-custom-input"
-              placeholder="输入你的答案..."
-              @input="setQuestionCustomAnswer(currentQuestionRequired(item), ($event.target as HTMLInputElement).value)"
-            />
-            <div v-else class="figma-chat-question-options">
-              <button
-                v-for="option in questionOptions(currentQuestionRequired(item))"
-                :key="option.id"
-                type="button"
-                :class="[
-                  'figma-chat-question-option',
-                  isQuestionOptionSelected(currentQuestionRequired(item), option.label) && 'is-selected',
-                ]"
-                @click="chooseQuestionOption(currentQuestionRequired(item), option.label)"
-              >
-                <span class="figma-chat-question-option-mark" aria-hidden="true"></span>
-                <span class="figma-chat-question-option-copy">
-                  <span class="figma-chat-question-option-label">{{ option.label }}</span>
-                  <span v-if="option.description" class="figma-chat-question-option-description">{{ option.description }}</span>
-                </span>
-              </button>
-              <label class="figma-chat-question-custom-card">
-                <span class="figma-chat-question-option-mark" aria-hidden="true"></span>
-                <span class="figma-chat-question-option-copy">
-                  <span class="figma-chat-question-option-label">输入自己的答案</span>
-                  <input
-                    :value="questionCustomAnswers[currentQuestionRequired(item).questionId] ?? ''"
-                    class="figma-chat-question-custom-input"
-                    placeholder="输入你的答案..."
-                    @input="setQuestionCustomAnswer(currentQuestionRequired(item), ($event.target as HTMLInputElement).value)"
-                  />
-                </span>
-              </label>
+            <div class="figma-chat-question-item">
+              <div class="figma-chat-question-title">{{ currentQuestionRequired(item).text }}</div>
+              <div class="figma-chat-question-hint">{{ questionHelpText(currentQuestionRequired(item)) }}</div>
+              <input
+                v-if="isTextQuestion(currentQuestionRequired(item))"
+                :value="questionCustomAnswers[currentQuestionRequired(item).questionId] ?? ''"
+                class="figma-chat-question-custom-input"
+                placeholder="输入你的答案..."
+                @input="setQuestionCustomAnswer(currentQuestionRequired(item), ($event.target as HTMLInputElement).value)"
+              />
+              <div v-else class="figma-chat-question-options">
+                <button
+                  v-for="option in questionOptions(currentQuestionRequired(item))"
+                  :key="option.id"
+                  type="button"
+                  :class="[
+                    'figma-chat-question-option',
+                    isQuestionOptionSelected(currentQuestionRequired(item), option.label) && 'is-selected',
+                  ]"
+                  @click="chooseQuestionOption(currentQuestionRequired(item), option.label)"
+                >
+                  <span class="figma-chat-question-option-mark" aria-hidden="true"></span>
+                  <span class="figma-chat-question-option-copy">
+                    <span class="figma-chat-question-option-label">{{ option.label }}</span>
+                    <span v-if="option.description" class="figma-chat-question-option-description">{{ option.description }}</span>
+                  </span>
+                </button>
+                <label class="figma-chat-question-custom-card">
+                  <span class="figma-chat-question-option-mark" aria-hidden="true"></span>
+                  <span class="figma-chat-question-option-copy">
+                    <span class="figma-chat-question-option-label">输入自己的答案</span>
+                    <input
+                      :value="questionCustomAnswers[currentQuestionRequired(item).questionId] ?? ''"
+                      class="figma-chat-question-custom-input"
+                      placeholder="输入你的答案..."
+                      @input="setQuestionCustomAnswer(currentQuestionRequired(item), ($event.target as HTMLInputElement).value)"
+                    />
+                  </span>
+                </label>
+              </div>
             </div>
           </div>
           <div class="figma-chat-question-actions">
@@ -5562,6 +5564,8 @@ function onCompositionEnd() {
 
 .figma-chat-question-dock {
   flex-shrink: 0;
+  min-height: 0;
+  max-height: min(62vh, calc(100vh - 260px));
   margin: 0 10px 10px;
   padding: 8px;
   border: 1px solid var(--ta-chat-border, #e0e0e0);
@@ -5571,17 +5575,24 @@ function onCompositionEnd() {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  overflow: hidden;
 }
 
 .figma-chat-question-card,
 .figma-chat-permission-card {
   display: flex;
   flex-direction: column;
+  min-height: 0;
   gap: 14px;
   padding: 14px 12px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #ffffff;
+}
+
+.figma-chat-question-card {
+  max-height: 100%;
+  flex: 1 1 auto;
 }
 
 .figma-chat-permission-card {
@@ -5593,6 +5604,26 @@ function onCompositionEnd() {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.figma-chat-question-scroll {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+}
+
+.figma-chat-question-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.figma-chat-question-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #d4d4d8;
 }
 
 .figma-chat-question-page-head {
@@ -5758,6 +5789,7 @@ function onCompositionEnd() {
 
 .figma-chat-question-actions {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: flex-start;
   gap: 8px;
