@@ -66,7 +66,7 @@ export function createOpencodeLikeState(input: OpencodeLikeConversationInput): O
     permissions: input.permissions ?? [],
     questions: input.questions ?? [],
     todos: input.todos ?? [],
-    running: input.running ?? runtimeStatus.type === "busy",
+    running: input.running ?? (runtimeStatus.type === "busy" || runtimeStatus.type === "retry"),
     showReasoningSummaries: input.showReasoningSummaries ?? true,
     messageScopesById: input.messageScopesById ?? {},
     subagentsBySessionId: input.subagentsBySessionId ?? {},
@@ -210,6 +210,9 @@ function runtimeStatusFromLegacy(status: string | undefined, running: boolean | 
   const normalized = status?.toLowerCase();
   if (normalized === "failed") {
     return { type: "failed" };
+  }
+  if (normalized === "retry") {
+    return { type: "retry" };
   }
   if (normalized === "cancelled" || normalized === "canceled") {
     return { type: "cancelled" };

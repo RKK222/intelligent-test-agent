@@ -11,6 +11,7 @@ import type {
   SubagentSession,
   TodoItem
 } from "@test-agent/shared-types";
+import type { OpencodeLikeRuntimeStatus } from "./opencode-like";
 
 export type AgentChatRuntimeState = {
   messages: AgentMessage[];
@@ -19,6 +20,7 @@ export type AgentChatRuntimeState = {
   todos: TodoItem[];
   diff?: SessionDiff;
   status?: string;
+  runtimeStatus?: OpencodeLikeRuntimeStatus;
   seenEventIds?: string[];
   streamingTextByPartId: Record<string, string>;
   messageScopesById: Record<string, MessageScope>;
@@ -60,11 +62,11 @@ export function reduceAgentChatRuntime(
   }
   if (action.type === "run.requested") {
     // 新一轮沿用当前 transcript，但必须清掉上一轮终态，避免旧状态压住新 Run 的动画。
-    return { ...state, status: "PENDING", streamingTextByPartId: {} };
+    return { ...state, status: "PENDING", runtimeStatus: { type: "busy" }, streamingTextByPartId: {} };
   }
   if (action.type === "run.request.failed") {
     // 本地启动阶段失败时不会有后端 RunEvent 终态，必须在 reducer 内收敛运行态。
-    return { ...state, status: "FAILED", streamingTextByPartId: {} };
+    return { ...state, status: "FAILED", runtimeStatus: { type: "failed", message: action.message }, streamingTextByPartId: {} };
   }
   if (action.type === "run.stream.error") {
     // EventSource 异常可能会自动重连，不能把 Run 直接标记失败；只把诊断信息写入时间线。
@@ -268,7 +270,12 @@ function reduceEventOnly(
     return subagent ? rememberSubagent(state, subagent) : state;
   }
   if (event.type === "session.status") {
-    return { ...state, status: text(event.payload.status) ?? state.status };
+    const runtimeStatus = runtimeStatusFromSessionStatus(event.payload.status);
+    return {
+      ...state,
+      status: runtimeStatus?.type.toUpperCase() ?? text(event.payload.status) ?? state.status,
+      runtimeStatus: runtimeStatus ?? state.runtimeStatus
+    };
   }
   if (event.type === "run.started" || event.type === "run.created" || event.type === "run.cancelling" || event.type === "run.succeeded" || event.type === "run.failed" || event.type === "run.cancelled") {
     let messages = state.messages;
@@ -279,9 +286,37 @@ function reduceEventOnly(
       messages = removeEmptyAssistant(messages);
       messages = appendCard(messages, "event", "⚠️ Run 执行失败", { error: errorInfo, type: "run.failed" }, event);
     }
-    return { ...state, status: runStatusFromEvent(event), messages };
+    return { ...state, status: runStatusFromEvent(event), runtimeStatus: runtimeStatusFromRunEvent(event), messages };
   }
   return state;
+}
+
+function runtimeStatusFromSessionStatus(status: unknown): OpencodeLikeRuntimeStatus | undefined {
+  const statusRecord = record(status);
+  if (!statusRecord) {
+    const statusText = text(status)?.toLowerCase();
+    return statusText === "retry" ? { type: "retry" } : undefined;
+  }
+  const type = text(statusRecord.type)?.toLowerCase();
+  if (!type) {
+    return undefined;
+  }
+  const action = record(statusRecord.action);
+  return {
+    type,
+    attempt: number(statusRecord.attempt),
+    message: text(statusRecord.message),
+    action: action
+      ? {
+          reason: text(action.reason),
+          provider: text(action.provider),
+          title: text(action.title),
+          message: text(action.message),
+          label: text(action.label),
+          link: text(action.link)
+        }
+      : undefined
+  };
 }
 
 function normalizeRunEventPayload(event: RunEvent): RunEvent {
@@ -1075,6 +1110,20 @@ function runStatusFromEvent(event: RunEvent) {
     "run.failed": "FAILED",
     "run.cancelled": "CANCELLED"
   }[event.type] ?? event.type;
+}
+
+function runtimeStatusFromRunEvent(event: RunEvent): OpencodeLikeRuntimeStatus {
+  const status = runStatusFromEvent(event).toLowerCase();
+  if (status === "failed") {
+    return { type: "failed", message: extractErrorInfo(event.payload).message };
+  }
+  if (status === "cancelled" || status === "canceled") {
+    return { type: "cancelled" };
+  }
+  if (status === "pending" || status === "running" || status === "cancelling") {
+    return { type: "busy" };
+  }
+  return { type: "idle" };
 }
 
 function diffFilesFromPayload(payload: Record<string, unknown>): RunDiffFile[] {

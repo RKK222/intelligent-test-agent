@@ -1894,6 +1894,39 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".oc-thinking-row").exists()).toBe(true);
   });
 
+  it("shows opencode retry status instead of leaving the run as thinking", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "u-retry",
+            messageId: "u-retry",
+            role: "user",
+            text: "完成车贷的接口案例设计",
+            createdAt: "2026-07-05T09:05:39.000Z"
+          }
+        ],
+        running: true,
+        runtimeStatus: "RETRY",
+        timelineRuntimeStatus: {
+          type: "retry",
+          attempt: 1,
+          message: "Free usage exceeded, subscribe to Go",
+          action: {
+            message: "Subscribe to OpenCode Go for reliable access to the best open-source models, starting at $5/month.",
+            label: "subscribe",
+            link: "https://opencode.ai/go"
+          }
+        },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    expect(wrapper.find(".oc-thinking-row").exists()).toBe(false);
+    expect(wrapper.find(".oc-retry-row").text()).toContain("Free usage exceeded, subscribe to Go");
+    expect(wrapper.find(".oc-retry-row a").attributes("href")).toBe("https://opencode.ai/go");
+  });
+
   it("allows the explore section to expand and collapse", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

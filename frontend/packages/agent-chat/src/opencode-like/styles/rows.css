@@ -150,6 +150,26 @@
   padding: 4px 0;
 }
 
+.oc-retry-row {
+  flex-wrap: wrap;
+  align-items: baseline;
+}
+
+.oc-retry-row__message {
+  min-width: 0;
+  color: var(--oc-text);
+  overflow-wrap: anywhere;
+}
+
+.oc-retry-row__link {
+  color: var(--oc-accent);
+  text-decoration: none;
+}
+
+.oc-retry-row__link:hover {
+  text-decoration: underline;
+}
+
 .oc-thinking-frame {
   align-items: start;
 }

@@ -60,6 +60,43 @@ describe("agent-chat runtime reducer", () => {
     ]);
   });
 
+  it("keeps opencode session retry status visible with the upstream action", () => {
+    const pending = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), { type: "run.requested" });
+
+    const next = reduceAgentChatRuntime(pending, {
+      type: "event",
+      event: event("session.status", {
+        status: {
+          type: "retry",
+          attempt: 1,
+          message: "Free usage exceeded, subscribe to Go",
+          action: {
+            reason: "free_tier_limit",
+            provider: "opencode",
+            title: "Free limit reached",
+            message: "Subscribe to OpenCode Go for reliable access to the best open-source models, starting at $5/month.",
+            label: "subscribe",
+            link: "https://opencode.ai/go"
+          },
+          next: 1783296000351
+        }
+      })
+    });
+
+    expect(next.status).toBe("RETRY");
+    expect(next.runtimeStatus).toMatchObject({
+      type: "retry",
+      attempt: 1,
+      message: "Free usage exceeded, subscribe to Go",
+      action: {
+        reason: "free_tier_limit",
+        provider: "opencode",
+        label: "subscribe",
+        link: "https://opencode.ai/go"
+      }
+    });
+  });
+
   it("keeps assistant.message.delta backward compatible", () => {
     const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",

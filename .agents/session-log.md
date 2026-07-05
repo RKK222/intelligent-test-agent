@@ -3944,3 +3944,10 @@ bash /tmp/test-api-after-restart.sh
 - What: 后端 `RunApplicationService` 在 stream/prompt 异步错误收敛为 `run.failed` 时写入安全的 `message` 与 `error.name/message`；前端 `AgentWorkbench` 在 EventSource 连接异常时为当前 Run 只追加一次本地 SSE 诊断到原始输出，并派发 `run.stream.error`，`agent-chat` 时间线展示诊断卡但不把 Run 直接标记失败。
 - How: 复用现有 `failRunFromStream`、原始输出缓存和 `agent-chat` card 渲染路径，不新增 RunEvent 类型、不改数据库、不改 generated SDK。同步更新事件流文档、opencode-runtime README 和 agent-web README。
 - Result: 前端 reducer/event-stream-client Vitest、agent-chat/agent-web typecheck、后端 `RunApplicationServiceTest` 通过；`restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 后端打包成功但本地启动失败，阻塞在 `.env.test` 指向的 PostgreSQL 连接超时/EOF，`127.0.0.1:8080` 未启动，前端 3000 仍有既有 Vite 进程返回 200。
+
+### 2026-07-05 - opencode session.status retry 状态前端可见化
+
+- Why: 用户提供的 RunEvent 显示 opencode 返回 `session.status`，其中 `status.type=retry`、`message=Free usage exceeded, subscribe to Go`、`action.reason=free_tier_limit`；事件已经到达前端，但 reducer 只读取字符串 `payload.status`，工作台时间线继续按 running 展示“思考中”，没有说明上游限额/重试原因。
+- What: `agent-chat` runtime state 新增结构化 `runtimeStatus`，从 `session.status` 对象提取 `type/attempt/message/action`；opencode-like 时间线在 `runtimeStatus.type=retry` 时渲染 retry 行并显示上游 message/action link，抑制普通 thinking/working 占位；`FigmaChatPanel` 从 `AgentWorkbench` 接收结构化状态并传入时间线。
+- How: 修改 `runtime-reducer`、opencode-like adapter/projection/types/RetryRow 样式、`AgentWorkbench` 和 `FigmaChatPanel`，补充 reducer、时间线和工作台面板回归测试。同步 `docs/api/event-stream.md`、`frontend/README.md` 和 `agent-chat` 包说明；未改后端 API、数据库、generated SDK 或环境配置。
+- Result: `corepack pnpm --dir frontend test -- runtime-reducer opencode-like-state FigmaChatPanel`、`corepack pnpm --dir frontend --filter @test-agent/agent-chat typecheck`、`corepack pnpm --dir frontend --filter @test-agent/agent-web typecheck` 和 `git diff --check` 通过。

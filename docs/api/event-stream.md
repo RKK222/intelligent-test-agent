@@ -207,6 +207,7 @@ scope 发现与缓存规则：
 - `message.part.updated` 的 `part.type=tool` 且 `part.tool=task` 时，前端从 `part.state.metadata.sessionId/sessionID` 或 payload scope 识别子会话，并生成 `SubagentSession`：标题优先取 `state.title`，再取 `state.input.description`、`state.input.prompt` 首行；Agent 名称优先取 `state.input.subagent_type`，再取 `metadata.agent`，缺失时展示 `Task`；状态优先取 `part.state.status`。
 - 若历史 live payload 同时携带 `sessionId=child`、`sessionID=root`、`isChildSession=true` 和 root `part.sessionID`，前端按 root task part 兼容处理，避免同一个 root message scope 被覆盖成 child。
 - `session.child.discovered` 和 `session.scope.updated` 到达时，前端用 payload 中的 `sessionId`、`parentSessionId`、`taskMessageId`、`taskPartId`、`taskCallId` 补全子会话索引和 `taskPartId -> sessionId` 映射。
+- `session.status` 的 `payload.status` 可能是字符串，也可能是 opencode 原生对象。当前已知对象形态包含 `type`、`attempt`、`message`、`action` 和 `next`；当 `status.type=retry` 时，前端必须把它归一为运行期 `runtimeStatus.type=retry`，在时间线展示上游 `message` 和可选 `action.link`，不能继续只显示普通“思考中”。
 - 原生两阶段场景下，未绑定的 root task part 会先显示为不可点击“智能体 / 准备中”；收到带 `taskPartId` 的 child discovery 后，同一个入口转为 `Explore + title` 并可点击。
 - 主 Agent 视图过滤 `messageScopesById[messageId].isChildSession=true` 的 user/assistant 输出，只保留 root 输出和 root task tool part 卡片；task 子 Agent 卡片始终独立展示，不参与普通 `tool-group` 折叠；点击 task 卡片后切到对应 child session 视图。若后续 `message.part.removed`、`message.removed` 或 snapshot 缺少原始 task part，但 `subagentsBySessionId/subagentByTaskPartId` 仍有绑定索引，前端会在主视图合成一个导航入口，避免子 Agent 卡片短暂出现后消失。
 - 子 Agent 视图只展示 `messageScopesById[messageId].sessionId` 等于当前 child session 的完整时间线，不展示 composer、Todo、permission/question 输入区。缺少 scope 的历史消息按 root 消息兼容处理。
@@ -214,6 +215,7 @@ scope 发现与缓存规则：
 终态派生规则：
 
 - `session.status` 的 `status.type=idle` 和 `session.idle` 均规范化为 `session.status`。
+- `session.status` 的 `status.type=retry` 不派生 `run.failed` 或 `run.succeeded`，也不更新 Run 终态；它表示上游仍在等待重试或需要用户处理限额/订阅等 action，前端应作为非终态运行状态展示。
 - root session idle 额外派生 `run.succeeded`；child session idle 只发送 `session.status`。
 - root `session.error` 额外派生 `run.failed`；child `session.error` 只发送 `session.error`。
 - `session.next.step.ended` 不再派生 `run.succeeded`，只作为兼容未知事件保留上下文。

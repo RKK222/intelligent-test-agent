@@ -15,7 +15,7 @@ type AssistantRowAccumulator = {
 export function createTimelineRows(state: OpencodeLikeConversationState): TimelineRow[] {
   const rows: TimelineRow[] = [];
 
-  if (state.userMessages.length === 0 && state.orphanAssistantMessages.length === 0 && state.running) {
+  if (state.userMessages.length === 0 && state.orphanAssistantMessages.length === 0 && state.running && state.runtimeStatus.type !== "retry") {
     rows.push({ type: "thinking", key: "thinking:pending", userMessageId: "__pending__" });
   }
 
@@ -71,13 +71,14 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
       }
     }
 
-    if (isActiveTurn(userMessageId, state) && state.running && accumulator.partIndex === 0) {
+    if (isActiveTurn(userMessageId, state) && state.running && state.runtimeStatus.type !== "retry" && accumulator.partIndex === 0) {
       rows.push({ type: "thinking", key: `thinking:${userMessageId}`, userMessageId });
     }
     // 已出现工具/思考过程但文本尚未开始时，只追加一个轻量工作态行，避免恢复空 text 占位。
     if (
       isActiveTurn(userMessageId, state) &&
       state.running &&
+      state.runtimeStatus.type !== "retry" &&
       accumulator.partIndex > 0 &&
       !accumulator.hasVisibleTextOutput
     ) {
@@ -97,6 +98,16 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
 
   if (state.runtimeStatus.type === "failed") {
     rows.push({ type: "error", key: "runtime:error", message: state.runtimeStatus.message ?? "运行失败" });
+  }
+  if (state.runtimeStatus.type === "retry") {
+    rows.push({
+      type: "retry",
+      key: "runtime:retry",
+      userMessageId: latestUserMessageId(state) ?? "__pending__",
+      attempt: state.runtimeStatus.attempt,
+      message: state.runtimeStatus.message,
+      action: state.runtimeStatus.action
+    });
   }
 
   return rows;
@@ -260,4 +271,9 @@ function isActiveTurn(userMessageId: string, state: OpencodeLikeConversationStat
 function isLatestTurn(userMessageId: string, state: OpencodeLikeConversationState): boolean {
   const latest = state.userMessages.at(-1);
   return Boolean(latest && canonicalMessageId(latest) === userMessageId);
+}
+
+function latestUserMessageId(state: OpencodeLikeConversationState): string | undefined {
+  const latest = state.userMessages.at(-1);
+  return latest ? canonicalMessageId(latest) : undefined;
 }

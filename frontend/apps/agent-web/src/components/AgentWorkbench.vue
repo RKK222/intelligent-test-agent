@@ -3462,6 +3462,7 @@ async function handleLogout() {
           :subagent-by-task-part-id="chatState.subagentByTaskPartId"
           :running="runtimeBusy"
           :runtime-status="chatState.status ?? run?.status"
+          :timeline-runtime-status="chatState.runtimeStatus"
           :title="chatTitle"
           :file-changes="diffFiles"
           :task-usage="taskUsage"

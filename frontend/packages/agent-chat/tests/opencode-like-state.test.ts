@@ -66,6 +66,29 @@ describe("opencode-like conversation state", () => {
     });
   });
 
+  it("projects runtime retry status instead of a generic thinking row", () => {
+    const state = createOpencodeLikeState({
+      messages: [userMessage("msg_user_1", "完成车贷的接口案例设计")],
+      running: true,
+      runtimeStatus: {
+        type: "retry",
+        attempt: 1,
+        message: "Free usage exceeded, subscribe to Go",
+        action: { label: "subscribe", link: "https://opencode.ai/go" }
+      }
+    });
+
+    const rows = createTimelineRows(state);
+
+    expect(rows.map((row) => row.type)).toEqual(["user-message", "retry"]);
+    expect(rows.at(-1)).toMatchObject({
+      type: "retry",
+      attempt: 1,
+      message: "Free usage exceeded, subscribe to Go",
+      action: { label: "subscribe", link: "https://opencode.ai/go" }
+    });
+  });
+
   it("formats provider and model labels from the catalog", () => {
     const state = createOpencodeLikeState({
       messages: [],

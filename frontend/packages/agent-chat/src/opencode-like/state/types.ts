@@ -16,6 +16,14 @@ export type OpencodeLikeRuntimeStatus = {
   type: "idle" | "busy" | "retry" | "failed" | "cancelled" | string;
   attempt?: number;
   message?: string;
+  action?: {
+    reason?: string;
+    provider?: string;
+    title?: string;
+    message?: string;
+    label?: string;
+    link?: string;
+  };
 };
 
 export type ModelCatalog = {
@@ -115,7 +123,14 @@ export type TimelineRow =
       showAssistantHeader: boolean;
     }
   | { type: "thinking"; key: string; userMessageId: string }
-  | { type: "retry"; key: string; userMessageId: string; attempt?: number }
+  | {
+      type: "retry";
+      key: string;
+      userMessageId: string;
+      attempt?: number;
+      message?: string;
+      action?: OpencodeLikeRuntimeStatus["action"];
+    }
   | { type: "diff-summary"; key: string; userMessageId: string; files: RunDiffFile[] }
   | { type: "error"; key: string; message: string };
 

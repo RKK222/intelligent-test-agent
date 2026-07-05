@@ -144,6 +144,6 @@ tools/dev-phase11-real-e2e.sh --start-services
 
 - 全局 theme token、Figma Web IDE 风格 activity rail、Dockview/Monaco 视觉适配、滚动条、panel chrome 和轻量动画由 `apps/agent-web/src/styles/globals.css` 承载；包内组件只消费这些 token，不在业务组件里复制整套主题。
 - `packages/ui-kit` 只提供 Button、Badge、Input、Tabs 等无业务状态基础控件；运行态选择、permission/question、terminal 和 Diff 语义仍放在对应 feature package。
-- 面板、toolbar、terminal、Diff、Agent timeline 和文件树必须保持稳定尺寸。Agent timeline 主路径使用 `packages/agent-chat/src/opencode-like` 的 `.oc-*` 时间线，把 reasoning 思考过程、上下文工具组、Skill/Tool 调用、文件引用、Diff 摘要与最终回答分块展示并保留独立滚动区域；右侧 Agent 对话框继续消费全局 `--ta-*`/`--ta-chat-*` token，避免 hover、streaming 文本、warning、hunk 导航或状态徽标导致布局跳动。
+- 面板、toolbar、terminal、Diff、Agent timeline 和文件树必须保持稳定尺寸。Agent timeline 主路径使用 `packages/agent-chat/src/opencode-like` 的 `.oc-*` 时间线，把 reasoning 思考过程、上下文工具组、Skill/Tool 调用、文件引用、Diff 摘要与最终回答分块展示并保留独立滚动区域；`session.status.retry` 这类上游等待重试/限额状态必须转成 runtime retry 行展示，不能停留在普通“思考中”；右侧 Agent 对话框继续消费全局 `--ta-*`/`--ta-chat-*` token，避免 hover、streaming 文本、warning、hunk 导航或状态徽标导致布局跳动。
 - 旧 `.figma-chat-*` 气泡消息循环、`AgentCard`/`TimelineCard` 和 `MessageParts` 旧 part 组件只作为作废兼容代码保留；新增对话展示能力必须落在 `packages/agent-chat/src/opencode-like`。
 - 真实三服务 E2E 尚无最新通过记录；当前只能认为 mock E2E 和单元测试覆盖了主流程，不能把真实联调标记为完成。

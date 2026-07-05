@@ -45,7 +45,7 @@ import type {
 import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
-import { MarkdownView, OpencodeTimeline, TodoPanel, createOpencodeLikeState } from '@test-agent/agent-chat'
+import { MarkdownView, OpencodeTimeline, TodoPanel, createOpencodeLikeState, type OpencodeLikeRuntimeStatus } from '@test-agent/agent-chat'
 
 type ChatMessageInput = AgentMessage & { content?: string }
 
@@ -608,6 +608,7 @@ const props =
     messages: ChatMessageInput[]
     running?: boolean
     runtimeStatus?: string
+    timelineRuntimeStatus?: OpencodeLikeRuntimeStatus
     placeholder?: string
     inputValue?: string
     title?: string
@@ -2459,6 +2460,8 @@ const opencodeTimelineState = computed(() =>
   createOpencodeLikeState({
     messages: timelineMessages.value,
     running: props.running,
+    status: props.runtimeStatus,
+    runtimeStatus: props.timelineRuntimeStatus,
     diffFiles: timelineDiffFiles.value,
     streamingTextByPartId: props.streamingTextByPartId,
     todos: props.todos,
