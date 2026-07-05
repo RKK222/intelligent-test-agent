@@ -23,6 +23,7 @@ profile="test"
 env_file=""
 skip_backend_build=false
 skip_frontend_build=false
+frontend_dependencies_checked=false
 # 后端需要直连数据库和 Redis，显式清空 JVM 从系统继承的代理属性。
 BACKEND_JAVA_DIRECT_NETWORK_ARGS=(
   "-Djava.net.useSystemProxies=false"
@@ -47,8 +48,8 @@ in dependency order: backend -> opencode-manager -> frontend.
 Services managed by this script:
   backend           Spring Boot test-agent-app (java -jar, profile from --profile).
   opencode-manager  Go opencode-manager supervisor (./opencode-manager/bin/opencode-manager run).
-                    Started by default for the test profile, or when
-                    TEST_AGENT_OPENCODE_BASE_URL is a local URL.
+                    Started automatically when TEST_AGENT_OPENCODE_BASE_URL
+                    is a local URL.
                     Standalone `opencode serve` is NOT started separately when the
                     manager runs, because the manager spawns opencode child processes.
   frontend          agent-web Vite dev server (corepack pnpm dev).
@@ -349,7 +350,10 @@ should_start_opencode_manager() {
       ;;
     auto|"")
       if [[ "${profile:-}" == "test" ]]; then
-        return 0
+        if [[ -n "${TEST_AGENT_OPENCODE_BASE_URL:-}" ]] && is_local_opencode_url "${TEST_AGENT_OPENCODE_BASE_URL}"; then
+          return 0
+        fi
+        return 1
       fi
       # token 已有默认值，这里改用 TEST_AGENT_OPENCODE_BASE_URL 是否配置且指向本机作为启动判据；
       # 校验环境的占位 env 不配置该地址，远端 opencode 环境也不应拉起本地 manager。
@@ -667,7 +671,55 @@ build_backend() {
   (cd "${BACKEND_DIR}" && mvn clean package -Dmaven.test.skip=true)
 }
 
+frontend_dependency_manifest_changed() {
+  local marker="$1"
+  local manifest changed
+  local scan_roots=()
+
+  for manifest in "${FRONTEND_DIR}/pnpm-lock.yaml" "${FRONTEND_DIR}/pnpm-workspace.yaml" "${FRONTEND_DIR}/package.json"; do
+    if [[ -f "${manifest}" && "${manifest}" -nt "${marker}" ]]; then
+      return 0
+    fi
+  done
+
+  for manifest in "${FRONTEND_DIR}/apps" "${FRONTEND_DIR}/packages"; do
+    if [[ -d "${manifest}" ]]; then
+      scan_roots+=("${manifest}")
+    fi
+  done
+  if [[ "${#scan_roots[@]}" -eq 0 ]]; then
+    return 1
+  fi
+
+  # 工作区包的 package.json 变化也会让本地软链和依赖树过期，需触发一次 frozen install。
+  changed="$(find "${scan_roots[@]}" -path '*/node_modules' -prune -o -name package.json -newer "${marker}" -print -quit 2>/dev/null || true)"
+  [[ -n "${changed}" ]]
+}
+
+ensure_frontend_dependencies() {
+  local marker="${FRONTEND_DIR}/node_modules/.modules.yaml"
+
+  if [[ "${frontend_dependencies_checked}" == "true" ]]; then
+    return
+  fi
+
+  require_command corepack
+  if [[ ! -f "${marker}" ]]; then
+    echo "Installing frontend dependencies: frontend/node_modules is missing."
+    (cd "${FRONTEND_DIR}" && corepack pnpm install --frozen-lockfile)
+  elif frontend_dependency_manifest_changed "${marker}"; then
+    echo "Installing frontend dependencies: frontend lockfile or package manifest changed."
+    (cd "${FRONTEND_DIR}" && corepack pnpm install --frozen-lockfile)
+  else
+    echo "Frontend dependencies are up to date."
+  fi
+
+  frontend_dependencies_checked=true
+}
+
 build_frontend() {
+  ensure_frontend_dependencies
+
   if [[ "${skip_frontend_build}" == "true" ]]; then
     echo "Skipping frontend build."
     return
@@ -807,6 +859,8 @@ start_opencode_manager() {
 }
 
 start_frontend() {
+  ensure_frontend_dependencies
+
   mkdir -p "${LOG_DIR}"
   echo "Starting frontend on ${frontend_host}:${frontend_port}. Logs: ${LOG_DIR}/frontend.log"
   : >"${LOG_DIR}/frontend.log"

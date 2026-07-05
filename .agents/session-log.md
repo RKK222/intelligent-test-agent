@@ -3824,3 +3824,10 @@ bash /tmp/test-api-after-restart.sh
   - 先补充后端竞态红灯用例，复现 `run.succeeded` 已保存后异步 `Streaming response failed` 覆盖状态；再落 MyBatis Run 仓储、运行服务 CAS 处理和前端 EventSource 回归测试。未做历史数据修复 migration。
 - Result:
   - 定向 `RunApplicationServiceTest`、`MyBatisRunRepositoryIntegrationTest`、`PersistenceSqlConventionTest`、新增 Playwright SSE 清理用例、前端 typecheck 和后端 `mvn clean package -DskipTests` 通过。完整 persistence 测试仍命中既有 H2/fixture 无关失败，完整 workbench e2e 仍有多处既有用例失败；本次目标用例通过。
+
+### 2026-07-05 - 重启脚本自动补齐前端 pnpm 依赖
+
+- Why: 前端构建报 `Failed to resolve import "@vscode/codicons/dist/codicon.css"`，实际是 `frontend/pnpm-lock.yaml` 和 package manifest 已声明依赖，但本地 `node_modules` 未同步；仅重启服务不会自动修复这类 stale install。
+- What: `restart-dev-services.sh` 新增 `ensure_frontend_dependencies`，在前端 build 和 dev server 启动前检查 `frontend/node_modules/.modules.yaml` 是否落后于 lockfile、workspace 配置或各包 `package.json`，过期或缺失时执行 `corepack pnpm install --frozen-lockfile`；manager auto 启动判定同步收紧为 opencode base URL 指向本机时才启动，避免远端 opencode 环境误拉本地 manager。
+- How: 补充 `tools/verify-dev-scripts.sh` 断言，并同步 `docs/guides/ai-workflow.md` 与 `frontend/README.md` 的本地重启说明。未修改 `.env.local`、API、RunEvent、数据库、generated SDK 或生产 migration。
+- Result: `tools/verify-dev-scripts.sh` 通过；`corepack pnpm --filter @test-agent/agent-web build` 通过并确认 codicon 字体产物生成；`./restart-dev-services.sh --profile local --env-file .env.local --skip-backend-build --skip-frontend-build` 重启成功，前端日志路径为 `.tmp/dev-services/frontend.log`。

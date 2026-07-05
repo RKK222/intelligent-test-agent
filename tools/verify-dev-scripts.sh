@@ -54,6 +54,12 @@ fi
 if ! grep -Fq '"${TEST_AGENT_ROOT}/temp/fcoss/' "${ROOT_DIR}/restart-dev-services.sh"; then
   fail "restart script should create demo workspaces under the project temp directory"
 fi
+if ! grep -Fq "ensure_frontend_dependencies" "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script should verify frontend dependencies before build/dev startup"
+fi
+if ! grep -Fq "corepack pnpm install --frozen-lockfile" "${ROOT_DIR}/restart-dev-services.sh"; then
+  fail "restart script should install frontend dependencies with frozen lockfile when node_modules is stale"
+fi
 if grep -Eq '\benglish_name\b' "${ROOT_DIR}/tools/cleanup-old-path-data.sql"; then
   fail "cleanup SQL must use the real common_parameters.parameter_english column"
 fi
