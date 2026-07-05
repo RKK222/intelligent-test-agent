@@ -23,6 +23,7 @@ import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
+import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -31,6 +32,8 @@ import reactor.core.publisher.Mono;
  */
 @Component
 public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
+
+    private static final int OPENCODE_RESPONSE_MAX_IN_MEMORY_SIZE = 16 * 1024 * 1024;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -426,9 +429,18 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
      * 为每次 gateway 调用创建带 baseUrl 和 traceId header 的 generated ApiClient。
      */
     private ApiClient apiClient(ExecutionNode node, String traceId) {
-        return new ApiClient()
+        return new ApiClient(webClient())
                 .setBasePath(node.baseUrl())
                 .addDefaultHeader(TraceConstants.TRACE_ID_HEADER, traceId);
+    }
+
+    /**
+     * opencode session message 快照会包含完整 tool/read/write parts；默认 256KB 缓冲会导致历史恢复失败。
+     */
+    private WebClient webClient() {
+        return ApiClient.buildWebClientBuilder(ApiClient.createDefaultMapper(null))
+                .codecs(configurer -> configurer.defaultCodecs().maxInMemorySize(OPENCODE_RESPONSE_MAX_IN_MEMORY_SIZE))
+                .build();
     }
 
     /**

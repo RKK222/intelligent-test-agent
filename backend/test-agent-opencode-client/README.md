@@ -20,7 +20,7 @@ generated SDK 的业务封装层，后端其他模块只应通过这里调用 op
 ## 已有实现
 
 - `OpencodeClientFacade` / `DefaultOpencodeClientFacade`：提供 health、createSession、startRun、startCommand、cancelSession、streamRunEvents、getDiff、rejectDiff 能力；原生 command 由平台 Run 后台持有，不使用普通 30 秒超时或自动重试。
-- `GeneratedOpencodeSdkGateway`：唯一直接调用 generated SDK 的内部适配器。
+- `GeneratedOpencodeSdkGateway`：唯一直接调用 generated SDK 的内部适配器；使用自定义 generated `ApiClient` WebClient 缓冲上限，避免 `/session/{sessionID}/message` 大量 tool/read/write parts 超过默认 256KB 后无法恢复历史消息。
 - `OpencodeCreateSessionCommand`、`OpencodeCreateSessionResult`：创建远端 opencode session 并只返回远端 session id。
 - `OpencodeStartRunCommand`、`OpencodeStartCommand`、`OpencodePromptPart`、`OpencodeStartRunResult`：平台 Run 启动命令、原生 slash command、稳定 prompt part 模型和结果，分别映射到 opencode `prompt_async` 与 `/session/{sessionID}/command`，不向 app/domain 暴露 generated DTO。
 - `OpencodeRunEventMapper`：把 opencode raw JSON event 映射为平台 `RunEventDraft`，未知事件降级为 `opencode.event.unknown`；支持按 `RunEventScopeContext` 生成规范化 session 事件和 root 终态派生事件，并为常见 `*ID` 字段补充 lower camel alias。mapper 会把 opencode `payload.type=sync`、`payload.syncEvent.type=*.1` 包装还原为内层事件 type/id/data，保证 runtime router 能用同一 raw event id 去重 direct 与 sync 事件。workspace 级全局事件流不在 client 层按 root session 过滤，当前 Run 的 root/child scope 由 runtime router 判定。

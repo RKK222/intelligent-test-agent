@@ -425,6 +425,43 @@ class GeneratedOpencodeSdkGatewayTest {
         }
     }
 
+    @Test
+    void gatewayReadsLargeSessionMessageSnapshot() throws Exception {
+        String largeText = "车贷接口案例".repeat(35_000);
+        HttpServer server = startServer(exchange -> respond(exchange, 200, "application/json", """
+                [
+                  {
+                    "info": {
+                      "id": "msg_large1234567890abcdef",
+                      "sessionID": "ses_remote1234567890abcdef",
+                      "role": "assistant",
+                      "time": {"created": 1781846400000}
+                    },
+                    "parts": [
+                      {
+                        "id": "part_text_large",
+                        "messageID": "msg_large1234567890abcdef",
+                        "type": "text",
+                        "text": "%s"
+                      }
+                    ]
+                  }
+                ]
+                """.formatted(largeText)));
+
+        try {
+            OpencodeSessionMessagesResult result = new GeneratedOpencodeSdkGateway()
+                    .sessionMessages(node(server), REMOTE_SESSION_ID, 100, "asc", null, TRACE_ID)
+                    .block(Duration.ofSeconds(5));
+
+            assertThat(result.messages()).singleElement().satisfies(message ->
+                    assertThat(message.parts()).singleElement().satisfies(part ->
+                            assertThat(part.get("text")).isEqualTo(largeText)));
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private static HttpServer startServer(HttpHandler handler) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", handler);

@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-05 - 放宽 opencode 历史消息快照响应缓冲
+
+- Why:
+  - 用户反馈点击历史后第二轮对话 assistant 内容缺失，但“原始输出”里能看到完整消息；排查确认不是前端按时间过滤，也不是原始输出没落库，而是后端终态刷新 `session_messages` 前调用 opencode `/session/{sessionID}/message` 拉历史快照时，响应超过 Spring WebClient 默认 256KB 缓冲并抛出 `DataBufferLimitException`。
+- What:
+  - `GeneratedOpencodeSdkGateway` 继续作为唯一直接调用 generated SDK 的适配器，但创建 generated `ApiClient` 时注入自定义 WebClient，把 opencode 响应 `maxInMemorySize` 调整为 16MB，避免大 session message snapshot 在进入快照写库前拉取失败。
+  - 新增大响应历史消息快照回归测试，模拟超 256KB 的 assistant 文本并验证 `sessionMessages` 能正常解析。
+  - 同步 `test-agent-opencode-client` README，说明该适配器对 generated `ApiClient` 的缓冲配置原因。
+- How:
+  - 不手改 generated SDK，只在业务封装层复用 generated `ApiClient.buildWebClientBuilder(...)` 构造 WebClient；不改 API、RunEvent 契约、数据库结构或环境配置。
+- Result:
+  - `mvn -pl test-agent-opencode-client -am test -DskipITs`、`GeneratedOpencodeSdkGatewayTest` 定向测试和 `git diff --check` 通过；本地重启脚本能完成后端打包，但使用 `.env.test` 启动时 PostgreSQL 连接读超时，后端 readiness 未起来，端到端页面历史恢复仍需在测试库可连后复验。
+
 ### 2026-07-05 - 防止运行时 Diff 劫持已打开的 VCS Diff
 
 - Why:
