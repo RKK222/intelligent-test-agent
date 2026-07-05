@@ -917,6 +917,12 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("message.part.delta");
     expect(wrapper.find("pre").text()).toContain('{"type":"message.part.delta","payload":{"delta":"world"}}');
 
+    await wrapper.get('[aria-label="搜索原始输出"]').setValue("trace_frontend");
+    expect(wrapper.text()).toContain("无匹配的原始报文");
+
+    await wrapper.get('[aria-label="搜索原始输出"]').setValue("world");
+    expect(wrapper.text()).toContain("message.part.delta");
+
     const clearButton = wrapper.findAll("button").find((button) => button.text().includes("清空"));
     expect(clearButton).toBeTruthy();
     await clearButton!.trigger("click");
@@ -940,6 +946,32 @@ describe("FigmaChatPanel", () => {
     await rawButton!.trigger("click");
 
     expect(wrapper.text()).toContain("当前会话暂无原始报文");
+  });
+
+  it("shows created and updated times in the history drawer", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        history: [
+          {
+            id: "ses_history_abcdef",
+            title: "车贷案例设计",
+            createdAt: "2026-07-02T08:00:00.000Z",
+            updatedAt: "2026-07-02T09:30:00.000Z"
+          }
+        ]
+      } as any
+    });
+
+    const historyButton = wrapper.findAll("button").find((button) => button.text().includes("历史"));
+    expect(historyButton).toBeTruthy();
+    await historyButton!.trigger("click");
+
+    expect(wrapper.text()).toContain("车贷案例设计");
+    expect(wrapper.text()).toContain("创建");
+    expect(wrapper.text()).toContain("更新");
+    expect(wrapper.text()).toContain("#abcdef");
   });
 
   it("shows the checking state before the first process status response arrives", () => {

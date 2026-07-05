@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-05 - 历史列表时间与原始输出搜索
+
+- Why:
+  - 用户希望历史记录能同时看到创建时间和最后修改时间，并希望“原始输出”浮层能直接检索所有已捕获原始报文内容，便于定位请求、响应、SSE、traceId 和正文片段。
+- What:
+  - 历史列表适配函数保留 session 原始 `createdAt/updatedAt`，右侧历史抽屉卡片同时展示“创建 / 更新”时间，并允许按更新时间搜索。
+  - “原始输出”浮层新增本地搜索框，和现有请求/响应/SSE 类型筛选叠加过滤标题、URL、method、eventName、status、contentType、traceId、runId、发生时间和正文。
+  - 同步 `agent-web` README 说明该调试浮层的本地搜索能力和历史抽屉时间展示。
+- How:
+  - 仅修改 `frontend/apps/agent-web` 前端展示、适配函数、组件测试和文档，不改后端 API、RunEvent 契约、数据库或 generated SDK。
+- Result:
+  - `@test-agent/agent-web` typecheck 通过；`FigmaChatPanel.test.ts` 与 `workbench-utils.test.ts` 定向 Vitest 通过（93 passed, 1 skipped）。
+
 ### 2026-07-05 - 优化对话失败卡间距与错误信息
 
 - Why:

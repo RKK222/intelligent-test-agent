@@ -318,7 +318,8 @@ export function historyItems(run: Run | null, sessions: Session[]) {
       title: item.title,
       preview: `${item.agent ?? "agent"} ${item.model?.id ?? ""}`.trim() || "Session",
       status: item.status,
-      updatedAt: new Date(item.updatedAt).toLocaleTimeString("zh-CN", { hour12: false }),
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
       pinned: item.pinned
     })),
     {
@@ -326,7 +327,8 @@ export function historyItems(run: Run | null, sessions: Session[]) {
       title: run ? `Run ${run.runId}` : "本地会话",
       preview: run ? `状态 ${run.status}` : "等待发起智能体任务",
       status: run?.status ?? "IDLE",
-      updatedAt: new Date().toLocaleTimeString("zh-CN", { hour12: false })
+      createdAt: run?.createdAt,
+      updatedAt: run?.updatedAt ?? new Date().toISOString()
     }
   ];
 }

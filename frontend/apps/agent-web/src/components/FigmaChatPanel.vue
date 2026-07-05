@@ -616,7 +616,7 @@ const props =
     /** 文件变更行（来自 SSE 事件统计） */
     fileChanges?: FileChangeStat[]
     /** 历史对话列表 */
-    history?: Array<{ id: string; title: string; createdAt?: string }>
+    history?: Array<{ id: string; title: string; createdAt?: string; updatedAt?: string }>
     /** 正在切换历史会话；旧正文在此期间隐藏，避免误以为点击无响应。 */
     historyLoading?: boolean
     /** 当前选中的模型展示名 */
@@ -2072,9 +2072,26 @@ const filteredHistory = computed(() => {
   return list.filter(
     (item) =>
       item.title.toLowerCase().includes(q) ||
-      (item.createdAt && item.createdAt.includes(q))
+      (item.createdAt && item.createdAt.includes(q)) ||
+      (item.updatedAt && item.updatedAt.includes(q))
   )
 })
+
+function historyTime(value?: string) {
+  if (!value) return '暂无'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value.replace('T', ' ').slice(0, 16)
+  }
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+}
+
 function closeHistoryDrawer() {
   historyDrawerOpen.value = false
   historySearchQuery.value = ''
@@ -2088,6 +2105,7 @@ type RawOutputFilter = 'all' | RawOutputKind
 
 const rawOutputOpen = ref(false)
 const rawOutputFilter = ref<RawOutputFilter>('all')
+const rawOutputSearchQuery = ref('')
 const rawOutputPosition = ref(defaultRawOutputPosition())
 let rawDragState: { startX: number; startY: number; originX: number; originY: number } | null = null
 
@@ -2098,8 +2116,12 @@ const rawOutputPanelStyle = computed(() => ({
 
 const filteredRawOutputEntries = computed(() => {
   const entries = props.rawOutputEntries ?? []
-  if (rawOutputFilter.value === 'all') return entries
-  return entries.filter((entry) => entry.kind === rawOutputFilter.value)
+  const typedEntries = rawOutputFilter.value === 'all'
+    ? entries
+    : entries.filter((entry) => entry.kind === rawOutputFilter.value)
+  const query = rawOutputSearchQuery.value.trim().toLowerCase()
+  if (!query) return typedEntries
+  return typedEntries.filter((entry) => rawOutputSearchText(entry).includes(query))
 })
 
 const rawOutputFilterOptions: Array<{ value: RawOutputFilter; label: string }> = [
@@ -2126,6 +2148,26 @@ function openRawOutput() {
 function closeRawOutput() {
   rawOutputOpen.value = false
   stopRawOutputDrag()
+}
+
+function rawOutputSearchText(entry: RawOutputEntry) {
+  return [
+    entry.kind,
+    rawOutputKindLabel(entry.kind),
+    entry.title,
+    entry.method,
+    entry.path,
+    entry.eventName,
+    entry.status,
+    entry.contentType,
+    entry.traceId,
+    entry.runId,
+    entry.occurredAt,
+    entry.body,
+  ]
+    .filter((item) => item !== undefined && item !== null)
+    .join('\n')
+    .toLowerCase()
 }
 
 function rawOutputKindLabel(kind: RawOutputKind) {
@@ -4231,7 +4273,8 @@ function onCompositionEnd() {
                 <div class="figma-chat-history-card-content">
                   <div class="figma-chat-history-card-title">{{ item.title || '新对话' }}</div>
                   <div class="figma-chat-history-card-meta">
-                    <span>{{ item.createdAt ? item.createdAt.replace('T', ' ').slice(0, 16) : '最近创建' }}</span>
+                    <span>创建 {{ historyTime(item.createdAt) }}</span>
+                    <span>更新 {{ historyTime(item.updatedAt) }}</span>
                     <span class="figma-chat-history-card-id">#{{ item.id.slice(-6) }}</span>
                   </div>
                 </div>
@@ -4277,9 +4320,18 @@ function onCompositionEnd() {
           </button>
         </div>
       </header>
+      <div class="figma-chat-raw-search">
+        <input
+          v-model="rawOutputSearchQuery"
+          type="search"
+          class="figma-chat-raw-search-input"
+          placeholder="搜索原始输出内容、URL、traceId、runId..."
+          aria-label="搜索原始输出"
+        />
+      </div>
       <div class="figma-chat-raw-output-body">
         <div v-if="filteredRawOutputEntries.length === 0" class="figma-chat-raw-empty">
-          当前会话暂无原始报文
+          {{ rawOutputSearchQuery.trim() || rawOutputFilter !== 'all' ? '无匹配的原始报文' : '当前会话暂无原始报文' }}
         </div>
         <template v-else>
           <section
@@ -4464,6 +4516,26 @@ function onCompositionEnd() {
 .figma-chat-raw-close:hover {
   color: var(--ta-text);
   background: var(--ta-hover);
+}
+.figma-chat-raw-search {
+  flex-shrink: 0;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--ta-border);
+  background: var(--ta-panel);
+}
+.figma-chat-raw-search-input {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--ta-border);
+  border-radius: 6px;
+  background: var(--ta-surface);
+  color: var(--ta-text);
+  font-size: 12px;
+  outline: none;
+}
+.figma-chat-raw-search-input:focus {
+  border-color: var(--ta-focus, #3b82f6);
 }
 .figma-chat-raw-output-body {
   flex: 1;
@@ -4656,7 +4728,8 @@ function onCompositionEnd() {
 .figma-chat-history-card-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 10px;
   font-size: 11px;
   color: var(--ta-muted);
 }
