@@ -12,6 +12,18 @@
   - 仅修改 `frontend/packages/agent-chat/src/opencode-like/styles/parts.css` 与 `tools.css`，不改后端、RunEvent、reducer、API 或数据库。
 - Result:
   - Playwright 构造 DOM 验证工具行与正文气泡宽度均等于内容列宽度；`@test-agent/agent-chat` typecheck 通过；前端 Vitest 通过（37 files, 332 passed, 1 skipped）；`127.0.0.1:3000` 前端入口可达。
+### 2026-07-05 - 修复普通编号回复误弹提问面板
+
+- Why:
+  - 用户反馈 SSE 报文只有 assistant 文本和终态事件，没有 `question.asked`，但页面仍在输入框上方弹出“1/2 个问题”面板；根因是 `FigmaChatPanel` 旧本地启发式会把最后一条 assistant 的普通编号列表误识别为待答选择题。
+- What:
+  - 删除 `FigmaChatPanel.vue` 基于 assistant 文本的 `choiceOptions/showChoicePanel` 解析和旧选择题面板，改为只渲染 `question.asked` / `permission.asked` 经 reducer 投影出的受控请求。
+  - 新增回归测试覆盖普通编号 assistant 输出不弹提问面板、事件驱动问题可回复/拒绝，以及 reducer 不从 `message.part.updated` 文本推断 question。
+  - 同步更新 `frontend/apps/agent-web/src/PACKAGE.md` 和 `frontend/packages/agent-chat/README.md`，明确提问 UI 只能由 RunEvent `question.asked` 驱动。
+- How:
+  - 在 `FigmaChatPanel` 中新增 `permissions/questions` props 与 `reply-permission/reply-question/reject-question` emit，答题结果仍交给 `AgentWorkbench` 现有 mutation 处理；普通 assistant 编号列表只按正文渲染。
+- Result:
+  - `FigmaChatPanel.test.ts`、`runtime-reducer.test.ts` 和 `@test-agent/agent-web` typecheck 通过；未改后端 API、RunEvent 契约、数据库、generated SDK 或环境配置。
 
 ### 2026-07-05 - 修复文件树对齐、列表背景色、图标切换、机器名优先压缩、首页底色、取消选中、主体区域底色全白及文件夹前导箭头 14x14 化
 

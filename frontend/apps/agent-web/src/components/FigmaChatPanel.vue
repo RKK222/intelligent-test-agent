@@ -36,6 +36,8 @@ import type {
   AiMessageFeedback,
   MessageScope,
   MessagePart,
+  PermissionRequest,
+  QuestionRequest,
   RunDiffFile,
   SubagentSession,
   TodoItem,
@@ -626,6 +628,10 @@ const props =
     streamingTextByPartId?: Record<string, string>
     /** opencode todo.updated 投影出的任务列表，固定展示在输入框上方。 */
     todos?: TodoItem[]
+    /** permission.asked 投影出的待处理权限请求。 */
+    permissions?: PermissionRequest[]
+    /** question.asked 投影出的待处理提问请求。 */
+    questions?: QuestionRequest[]
     /** RunEvent scope 索引：用于把主 Agent 与子 Agent 输出分离展示。 */
     messageScopesById?: Record<string, MessageScope>
     /** 当前运行期发现的子 Agent 会话索引。 */
@@ -639,6 +645,8 @@ const props =
     rawOutputEntries: () => [],
     streamingTextByPartId: () => ({}),
     todos: () => [],
+    permissions: () => [],
+    questions: () => [],
     messageScopesById: () => ({}),
     subagentsBySessionId: () => ({}),
     subagentByTaskPartId: () => ({})
@@ -663,6 +671,9 @@ const emit =
     (e: 'change-agent', agentId: string): void
     (e: 'refresh-agents'): void
     (e: 'clear-raw-output'): void
+    (e: 'reply-permission', requestId: string, decision: 'once' | 'always' | 'reject'): void
+    (e: 'reply-question', requestId: string, answers: unknown[]): void
+    (e: 'reject-question', requestId: string): void
     (
       e: 'submit-feedback',
       payload: {
@@ -962,164 +973,45 @@ const formattedRunDuration = computed(() => {
   return `${m}:${s.toString().padStart(2, '0')}s`
 })
 
-// ===== 选择题检测 =====
-type ChoiceOption = { index: number; label: string }
-const selectedChoice = ref<number | null>(null)
-const choiceCustomInput = ref('')
-const choiceDismissed = ref(false)
-const choiceStep = ref<'select' | 'supplement'>('select')
-const supplementText = ref('')
+// ===== 事件驱动提问/权限 dock =====
+const questionAnswers = ref<Record<string, string>>({})
+const questionMultiAnswers = ref<Record<string, string[]>>({})
 
-function toggleChoiceStep() {
-  if (choiceStep.value === 'select') {
-    choiceStep.value = 'supplement'
-  } else {
-    choiceStep.value = 'select'
-  }
+function answerQuestion(questionId: string, value: string) {
+  questionAnswers.value = { ...questionAnswers.value, [questionId]: value }
 }
 
-const choiceOptions = computed<ChoiceOption[]>(() => {
-  if (props.running) return []
-  // 仅当整段对话的最后一条消息本身就是 assistant（用户尚未回复）时才识别为待答问题。
-  // 这样切换到历史会话时，agent 已经收到回复、进入下一轮的场景不会把旧问题再弹一次。
-  const lastMessage = displayMessages.value[displayMessages.value.length - 1]
-  if (!lastMessage || lastMessage.role !== 'assistant') return []
-  const last = lastMessage
-  const text = last.content
-  if (!text) return []
-  let clean = text.replace(/\*\*(\d+)\*\*/g, '$1')
-  clean = clean.replace(/\*\*([^*]+)\*\*/g, '$1')
-  clean = clean.replace(/\*([^*]+)\*/g, '$1')
-  clean = clean.replace(/^[-\s>#*]+/gm, '')
-  console.log('[choice] last assistant content (前200字):', clean.slice(0, 200))
-  const lines = clean.split('\n')
-  const opts: ChoiceOption[] = []
-  for (const line of lines) {
-    const trimmed = line.trim()
-    let m = trimmed.match(/^(\d+)[\.\)、\|：:\s]+\s*(.+)/)
-    if (!m) m = trimmed.match(/^[\[【\(](\d+)[\]】\)][\s]*(.+)/)
-    if (!m) {
-      m = trimmed.match(/^([一二三四五六七八九十]+)[、\.\s]\s*(.+)/)
-      if (m) {
-        const map: Record<string, number> = {
-          一: 1,
-          二: 2,
-          三: 3,
-          四: 4,
-          五: 5,
-          六: 6,
-          七: 7,
-          八: 8,
-          九: 9,
-          十: 10,
-        }
-        const idx = map[m[1]]
-        if (idx) m = [m[0], String(idx), m[2]]
-        else m = null
-      }
+function toggleMultiQuestionAnswer(questionId: string, value: string) {
+  const current = questionMultiAnswers.value[questionId] ?? []
+  const next = current.includes(value)
+    ? current.filter((item) => item !== value)
+    : [...current, value]
+  questionMultiAnswers.value = { ...questionMultiAnswers.value, [questionId]: next }
+}
+
+function buildQuestionAnswers(item: QuestionRequest): unknown[][] {
+  return item.questions.map((question) => {
+    if (question.kind === 'multiple') {
+      return questionMultiAnswers.value[question.questionId] ?? []
     }
-    if (m) {
-      const label = m[2].trim().slice(0, 80)
-      if (label) opts.push({ index: parseInt(m[1]), label })
+    const value = questionAnswers.value[question.questionId]?.trim()
+    return value ? [value] : []
+  })
+}
+
+function canReplyQuestion(item: QuestionRequest): boolean {
+  return item.questions.every((question) => {
+    if (question.kind === 'multiple') {
+      return (questionMultiAnswers.value[question.questionId]?.length ?? 0) > 0
     }
-  }
-  console.log('[choice] detected opts:', opts)
-  if (opts.length < 2) return []
-  for (let i = 0; i < opts.length; i++) {
-    if (opts[i].index !== i + 1) return []
-  }
-  console.log('[choice] showing panel with', opts.length, 'options')
-  return opts
-})
-
-const choiceQuestion = computed(() => {
-  if (choiceOptions.value.length === 0) return ''
-  // 同样限定到"最后一条消息本身"：避免历史会话中已被用户回过的旧问题再次触发
-  // "提问"文案（仅在用户没回复时显示）。
-  const lastMessage = displayMessages.value[displayMessages.value.length - 1]
-  if (!lastMessage || lastMessage.role !== 'assistant') return ''
-  const text = lastMessage.content
-  const firstOpt = choiceOptions.value[0]
-  const idx = text.indexOf(`${firstOpt.index}.`)
-  const before = idx > 0 ? text.slice(0, idx).trim() : ''
-  const paras = before.split(/\n\n+/)
-  const lastPara = paras.pop()?.trim() || ''
-  const sentences = lastPara.split(/[。！？?!]/)
-  return sentences.slice(-2).join(' ').trim().slice(0, 100)
-})
-
-const isProblemList = computed(() => {
-  // 同理只判断最后一条 assistant 是否以"报错/缺陷"结尾；
-  // 历史会话里这条 assistant 之后还有用户回复时不再被当作问题列表。
-  const lastMessage = displayMessages.value[displayMessages.value.length - 1]
-  if (!lastMessage || lastMessage.role !== 'assistant') return false
-  const text = lastMessage.content.slice(0, 200)
-  return /(?:存在以下问题|以下问题|发现以下[问题错误]|错误如下|异常如下|报错|warning|error|bug\s*[:：]|缺陷如下|注意以下)/i.test(
-    text
-  )
-})
-
-const showChoicePanel = computed(
-  () =>
-    !wasStopped.value &&
-    !choiceDismissed.value &&
-    choiceOptions.value.length >= 2 &&
-    !isProblemList.value
-)
-
-function selectChoice(index: number) {
-  selectedChoice.value = index
-  choiceCustomInput.value = ''
+    return Boolean(questionAnswers.value[question.questionId]?.trim())
+  })
 }
 
-function confirmChoice() {
-  if (selectedChoice.value !== null || choiceCustomInput.value.trim()) {
-    choiceStep.value = 'supplement'
-  }
+function replyQuestion(item: QuestionRequest) {
+  if (!canReplyQuestion(item)) return
+  emit('reply-question', item.requestId, buildQuestionAnswers(item))
 }
-
-function backToChoice() {
-  choiceStep.value = 'select'
-  supplementText.value = ''
-}
-
-function submitSupplement() {
-  const parts: string[] = []
-  if (selectedChoice.value !== null) {
-    const opt = choiceOptions.value.find(
-      (o) => o.index === selectedChoice.value
-    )
-    if (opt) parts.push(`${opt.index}. ${opt.label}`)
-  } else if (choiceCustomInput.value.trim()) {
-    parts.push(choiceCustomInput.value.trim())
-  }
-  if (supplementText.value.trim()) parts.push(supplementText.value.trim())
-  if (parts.length > 0) emit('send', parts.join('\n'))
-  resetChoice()
-}
-
-function cancelChoice() {
-  resetChoice()
-  choiceDismissed.value = true
-}
-
-function resetChoice() {
-  selectedChoice.value = null
-  choiceCustomInput.value = ''
-  choiceStep.value = 'select'
-  supplementText.value = ''
-}
-
-// 切换 Session 时把'本轮已取消选择题'的本地标记清掉，避免用户在 A 会话取消后切到
-// B 会话时 B 里的未答问题被错误吞掉。
-// 判据：消息列表第一项 id 变了（reset 整个数组），同会话内追加消息不会触发。
-watch(
-  () => props.messages[0]?.id,
-  () => {
-    resetChoice()
-    choiceDismissed.value = false
-  }
-)
 
 // ===== 技能面板 =====
 // 直接展示 OpenCode /command 返回的 source=skill 项；Agent 是否可调用由 OpenCode 原生 permission.skill 判定。
@@ -1170,7 +1062,7 @@ function replaceAgentMentionQuery(text: string, label: string): string {
 function onSkillInput(text: string) {
   const trimmed = text.trimStart()
   // 已选命令后的空格表示进入参数输入阶段，此时不再重复打开技能检索面板。
-  if (/^\/\S*$/.test(trimmed) && !props.running && !showChoicePanel.value) {
+  if (/^\/\S*$/.test(trimmed) && !props.running) {
     const afterSlash = trimmed.slice(1)
     skillFilterText.value = afterSlash
     showSkillPanel.value = true
@@ -1184,7 +1076,7 @@ function onSkillInput(text: string) {
 
 function onAgentMentionInput(text: string) {
   const query = currentAgentMentionQuery(text)
-  if (query !== null && !props.running && !showChoicePanel.value && mentionAgentOptions.value.length > 0) {
+  if (query !== null && !props.running && mentionAgentOptions.value.length > 0) {
     agentFilterText.value = query
     showAgentPanel.value = true
   } else {
@@ -2208,7 +2100,6 @@ watch(
       wasStopped.value = false
       wasCompleted.value = false
       wasFailed.value = false
-      choiceDismissed.value = false
       runStartMsgCount.value = displayMessages.value.length
       startRunTimer()
     }
@@ -2602,7 +2493,6 @@ function submit() {
   wasStopped.value = false
   wasCompleted.value = false
   wasFailed.value = false
-  choiceDismissed.value = false
   emit('send', text)
   localInput.value = ''
   emit('update:inputValue', '')
@@ -3527,129 +3417,77 @@ function onCompositionEnd() {
     </div>
 
     <!-- 作废说明：运行中旧任务面板已由 OpencodeTimeline 的工具/事件行取代，避免两套来源显示不一致。 -->
-    <!-- 选择题面板：固定展示在输入区域上方，保留 composer 供用户继续补充内容。 -->
-    <div v-if="!activeSubagentSessionId && showChoicePanel" class="figma-chat-choice-panel">
-      <!-- Step 1: 选择选项 -->
-      <template v-if="choiceStep === 'select'">
-        <div class="figma-chat-choice-header">
-          <div v-if="choiceQuestion" class="figma-chat-choice-question">
-            {{ choiceQuestion }}
-          </div>
-          <div class="figma-chat-choice-pagination" @click="toggleChoiceStep">
-            <ChevronUp :size="12" class="figma-chat-pagination-icon" />
-            <span class="figma-chat-pagination-text">1/2 个问题</span>
-          </div>
-          <button
-            type="button"
-            class="figma-chat-choice-close"
-            @click="cancelChoice"
-          >
-            <X :size="14" />
-          </button>
+    <section
+      v-if="!activeSubagentSessionId && (permissions.length || questions.length)"
+      class="figma-chat-question-dock"
+    >
+      <div
+        v-for="permission in permissions"
+        :key="permission.requestId"
+        class="figma-chat-permission-card"
+      >
+        <div class="figma-chat-question-title">{{ permission.title ?? permission.type }}</div>
+        <div class="figma-chat-question-description">
+          {{ permission.description ?? permission.pattern ?? permission.requestId }}
         </div>
-        <div class="figma-chat-choice-list">
-          <div
-            v-for="opt in choiceOptions"
-            :key="opt.index"
-            :class="[
-              'figma-chat-choice-row',
-              selectedChoice === opt.index && 'figma-chat-choice-row--selected',
-            ]"
-            @click="selectChoice(opt.index)"
-          >
-            <span class="figma-chat-choice-label">{{ opt.label }}</span>
-            <span v-if="selectedChoice === opt.index" class="figma-chat-choice-enter-icon">⏎</span>
-          </div>
-          <div
-            :class="[
-              'figma-chat-choice-row figma-chat-choice-row--other',
-              selectedChoice === null && 'figma-chat-choice-row--selected',
-            ]"
-            @click="selectedChoice = null"
-          >
-            <span class="figma-chat-choice-other-label">其他</span>
-            <input
-              v-model="choiceCustomInput"
-              class="figma-chat-choice-input"
-              placeholder="请输入..."
-              maxlength="500"
-              @focus="selectedChoice = null"
-            />
-            <span v-if="selectedChoice === null" class="figma-chat-choice-enter-icon" style="margin-right: 4px;">⏎</span>
-            <span class="figma-chat-choice-char-count">{{ choiceCustomInput.length }}/500</span>
-          </div>
+        <div class="figma-chat-question-actions">
+          <button type="button" class="figma-chat-question-submit" @click="emit('reply-permission', permission.requestId, 'once')">一次</button>
+          <button type="button" class="figma-chat-question-submit" @click="emit('reply-permission', permission.requestId, 'always')">始终</button>
+          <button type="button" class="figma-chat-question-reject" @click="emit('reply-permission', permission.requestId, 'reject')">拒绝</button>
         </div>
-        <div class="figma-chat-choice-actions">
-          <button
-            type="button"
-            class="figma-chat-choice-cancel"
-            @click="cancelChoice"
-          >
-            取消
-          </button>
-          <button
-            type="button"
-            class="figma-chat-choice-confirm"
-            :disabled="selectedChoice === null && !choiceCustomInput.trim()"
-            @click="confirmChoice"
-          >
-            确定
-          </button>
-        </div>
-      </template>
-      <!-- Step 2: 补充信息 -->
-      <template v-else>
-        <div class="figma-chat-choice-header">
-          <div class="figma-chat-supplement-title">
-            是否更多需要补充信息需要提供?
-          </div>
-          <div class="figma-chat-choice-pagination" @click="toggleChoiceStep">
-            <ChevronUp :size="12" class="figma-chat-pagination-icon" />
-            <span class="figma-chat-pagination-text">2/2 个问题</span>
-          </div>
-          <button
-            type="button"
-            class="figma-chat-choice-close"
-            @click="cancelChoice"
-          >
-            <X :size="14" />
-          </button>
-        </div>
-        <div class="figma-chat-supplement-textarea-wrapper">
-          <textarea
-            v-model="supplementText"
-            class="figma-chat-supplement-textarea"
-            placeholder="添加补充信息"
-            rows="3"
-            maxlength="1000"
+      </div>
+      <div
+        v-for="item in questions"
+        :key="item.requestId"
+        class="figma-chat-question-card"
+      >
+        <div v-for="question in item.questions" :key="question.questionId" class="figma-chat-question-item">
+          <div class="figma-chat-question-title">{{ question.text }}</div>
+          <input
+            v-if="question.kind === 'text'"
+            :value="questionAnswers[question.questionId] ?? ''"
+            class="figma-chat-question-input"
+            placeholder="回答"
+            @input="answerQuestion(question.questionId, ($event.target as HTMLInputElement).value)"
           />
-          <span class="figma-chat-supplement-char-count">{{ supplementText.length }}/1000</span>
+          <div v-else class="figma-chat-question-options">
+            <button
+              v-for="option in (question.options?.length ? question.options : [{ id: 'confirm', label: '确认' }])"
+              :key="option.id"
+              type="button"
+              :class="[
+                'figma-chat-question-option',
+                question.kind === 'multiple'
+                  ? questionMultiAnswers[question.questionId]?.includes(option.id) && 'is-selected'
+                  : questionAnswers[question.questionId] === option.id && 'is-selected',
+              ]"
+              @click="question.kind === 'multiple'
+                ? toggleMultiQuestionAnswer(question.questionId, option.id)
+                : answerQuestion(question.questionId, option.id)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
         </div>
-        <div class="figma-chat-choice-actions">
+        <div class="figma-chat-question-actions">
           <button
             type="button"
-            class="figma-chat-choice-cancel"
-            @click="cancelChoice"
+            class="figma-chat-question-reject"
+            @click="emit('reject-question', item.requestId)"
           >
-            取消
+            拒绝
           </button>
           <button
             type="button"
-            class="figma-chat-supplement-back"
-            @click="backToChoice"
+            class="figma-chat-question-submit"
+            :disabled="!canReplyQuestion(item)"
+            @click="replyQuestion(item)"
           >
-            上一步
-          </button>
-          <button
-            type="button"
-            class="figma-chat-choice-confirm"
-            @click="submitSupplement"
-          >
-            确定
+            回复
           </button>
         </div>
-      </template>
-    </div>
+      </div>
+    </section>
     <TodoPanel v-if="!activeSubagentSessionId" :todos="todos" />
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div v-if="!activeSubagentSessionId" class="figma-chat-composer">
@@ -5558,17 +5396,7 @@ function onCompositionEnd() {
   white-space: nowrap;
 }
 
-/* ---- 选择题面板 ---- */
-.figma-chat-choice-panel {
-  flex-shrink: 0;
-  margin: 0 10px 10px;
-  padding: 12px 16px;
-  border: 1px solid var(--ta-chat-border, #e0e0e0);
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.04);
-}
-
+/* ---- 技能/Agent 候选共享头部 ---- */
 .figma-chat-choice-header {
   display: flex;
   align-items: center;
@@ -5604,236 +5432,135 @@ function onCompositionEnd() {
   color: #555;
 }
 
-.figma-chat-choice-list {
+.figma-chat-question-dock {
+  flex-shrink: 0;
+  margin: 0 10px 10px;
+  padding: 10px;
+  border: 1px solid var(--ta-chat-border, #e0e0e0);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  margin-bottom: 12px;
-  max-height: 200px;
-  overflow-y: auto;
+  gap: 8px;
 }
 
-.figma-chat-choice-row {
+.figma-chat-question-card,
+.figma-chat-permission-card {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  cursor: pointer;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
   background: #ffffff;
-  border: 1px solid #f0f0f0;
-  border-radius: 6px;
-  transition: all 0.12s ease;
 }
 
-.figma-chat-choice-row:hover {
-  background: #f5f5f5;
-  border-color: #bfbfbf;
+.figma-chat-permission-card {
+  border-color: rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.06);
 }
 
-.figma-chat-choice-row--selected {
-  background: #f5f5f5;
-  border-color: #bfbfbf;
+.figma-chat-question-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.figma-chat-choice-label {
+.figma-chat-question-title {
   font-size: 13px;
   line-height: 18px;
-  color: #595959;
-  flex: 1;
-  text-align: left;
+  font-weight: 700;
+  color: #1f2937;
 }
 
-.figma-chat-choice-row--selected .figma-chat-choice-label {
-  color: #1a1a1a;
-  font-weight: 500;
+.figma-chat-question-description {
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 18px;
+  color: #6b7280;
 }
 
-.figma-chat-choice-enter-icon {
-  font-size: 14px;
-  color: #8c8c8c;
-  margin-left: 8px;
-  flex-shrink: 0;
-}
-
-/* ---- Choose / Pagination ---- */
-.figma-chat-choice-pagination {
+.figma-chat-question-options {
   display: flex;
-  align-items: center;
-  gap: 2px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.figma-chat-question-option,
+.figma-chat-question-submit,
+.figma-chat-question-reject {
+  min-height: 28px;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
   cursor: pointer;
-  margin-left: auto;
-  margin-right: 8px;
-  color: #8c8c8c;
-  font-size: 11px;
-  user-select: none;
-  padding: 2px 6px;
-  border-radius: 4px;
-  transition: background 0.12s, color 0.12s;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
-.figma-chat-choice-pagination:hover {
-  background: #f5f5f5;
-  color: #595959;
+.figma-chat-question-option {
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #374151;
 }
 
-.figma-chat-pagination-icon {
-  color: #8c8c8c;
+.figma-chat-question-option:hover,
+.figma-chat-question-option.is-selected {
+  border-color: #111827;
+  background: #f3f4f6;
+  color: #111827;
 }
 
-/* ---- Choose / Other ---- */
-.figma-chat-choice-row--other {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-}
-
-.figma-chat-choice-other-label {
+.figma-chat-question-input {
+  min-height: 34px;
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: #ffffff;
+  color: #111827;
   font-size: 13px;
-  color: #595959;
-  flex-shrink: 0;
-}
-
-.figma-chat-choice-row--selected .figma-chat-choice-other-label {
-  color: #1a1a1a;
-  font-weight: 500;
-}
-
-.figma-chat-choice-input {
-  flex: 1;
-  border: none;
   outline: none;
-  background: transparent;
-  font-size: 13px;
-  color: #1a1a1a;
-  padding: 0;
 }
 
-.figma-chat-choice-input::placeholder {
-  color: #bfbfbf;
+.figma-chat-question-input:focus {
+  border-color: #111827;
 }
 
-.figma-chat-choice-char-count {
-  font-size: 11px;
-  color: #bfbfbf;
-  flex-shrink: 0;
-  margin-left: 8px;
-  user-select: none;
-}
-
-.figma-chat-choice-actions {
+.figma-chat-question-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 }
 
-.figma-chat-choice-cancel,
-.figma-chat-supplement-back,
-.figma-chat-choice-confirm {
-  height: 28px;
-  padding: 0 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.12s ease;
-  box-sizing: border-box;
-}
-
-.figma-chat-choice-cancel,
-.figma-chat-supplement-back {
-  background: #ffffff;
-  border: 1px solid #d9d9d9;
-  color: #595959;
-}
-
-.figma-chat-choice-cancel:hover,
-.figma-chat-supplement-back:hover {
-  background: #f5f5f5;
-  border-color: #d9d9d9;
-  color: #262626;
-}
-
-.figma-chat-choice-confirm {
-  background: #1a1a1a;
-  border: 1px solid #1a1a1a;
+.figma-chat-question-submit {
+  border: 1px solid #111827;
+  background: #111827;
   color: #ffffff;
 }
 
-.figma-chat-choice-confirm:not(:disabled):hover {
-  background: #333333;
-  border-color: #333333;
+.figma-chat-question-submit:not(:disabled):hover {
+  background: #374151;
+  border-color: #374151;
 }
 
-.figma-chat-choice-confirm:disabled {
-  background: #f5f5f5;
-  border-color: #d9d9d9;
-  color: #bfbfbf;
+.figma-chat-question-submit:disabled {
+  border-color: #d1d5db;
+  background: #f3f4f6;
+  color: #9ca3af;
   cursor: not-allowed;
 }
 
-/* ---- 选择面板第二步：补充信息 ---- */
-.figma-chat-supplement-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: #1a1a1a;
-  padding: 6px 2px 4px;
-  line-height: 1.45;
-  flex: 1;
-}
-
-.figma-chat-supplement-textarea-wrapper {
-  position: relative;
-  width: 100%;
-  margin-bottom: 12px;
-}
-
-.figma-chat-supplement-textarea {
-  width: 100%;
-  padding: 8px 12px 24px;
-  border: 1px solid #e0e0e0;
-  border-radius: 6px;
+.figma-chat-question-reject {
+  border: 1px solid #d1d5db;
   background: #ffffff;
-  font-size: 13px;
-  line-height: 1.5;
-  color: #1a1a1a;
-  outline: none;
-  resize: none;
-  font-family: inherit;
-  box-sizing: border-box;
-  transition: border-color 0.12s ease;
+  color: #4b5563;
 }
 
-.figma-chat-supplement-textarea:focus {
-  border-color: #bfbfbf;
-}
-
-.figma-chat-supplement-textarea::placeholder {
-  color: #bfbfbf;
-}
-
-.figma-chat-supplement-char-count {
-  position: absolute;
-  right: 12px;
-  bottom: 8px;
-  font-size: 11px;
-  color: #bfbfbf;
-  user-select: none;
-}
-
-.figma-chat-supplement-back {
-  padding: 3px 10px;
-  border-radius: 4px;
-  font-size: 11px;
-  cursor: pointer;
-  border: none;
-  background: #f0f1f4;
-  color: #666;
-  transition: background 0.12s;
-}
-
-.figma-chat-supplement-back:hover {
-  background: #e4e5e9;
+.figma-chat-question-reject:hover {
+  background: #f3f4f6;
+  color: #111827;
 }
 
 /* ---- 技能面板 ---- */

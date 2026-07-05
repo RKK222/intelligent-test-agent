@@ -41,6 +41,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 - 旧结构化卡片路径 `AgentCard.vue`、`TimelineCard.vue`、`ToolPayloadBlock.vue` 已作废；旧 `card` 消息中的 Diff payload 由 `opencode-like/state` 收敛为 `diff-summary` 行展示。
 - `FigmaChatPanel.vue` 中旧 `.figma-chat-*` 气泡消息循环已从主路径禁用，不再作为新交互或新样式的修改入口。
 - `FigmaChatPanel.vue` 中旧底部实时任务面板已作废并停止渲染；运行中工具/事件只由 `OpencodeTimeline` 展示，避免任务列表与时间线事件来自不同聚合逻辑。
+- `FigmaChatPanel.vue` 中旧本地文本启发式选择题面板已作废；提问 UI 只能由 RunEvent `question.asked` 归并出的 `QuestionRequest` 驱动，普通 assistant 编号列表必须按正文展示。
 - `ProcessDisclosure.vue` 仍被 `TaskBreakdown.vue` 等存量局部视图复用，不整体标废；但不要用它恢复旧对话主路径或新的 Todo 展示，新 Todo 展示必须使用 `opencode-like/components/TodoPanel.vue`。
 
 ## 禁止事项

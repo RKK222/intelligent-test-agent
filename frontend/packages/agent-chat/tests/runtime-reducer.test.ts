@@ -731,6 +731,29 @@ describe("agent-chat runtime reducer", () => {
     expect(replied.questions).toHaveLength(1);
   });
 
+  it("does not infer questions from numbered assistant text parts", () => {
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_1",
+        part: {
+          id: "part_1",
+          messageID: "msg_1",
+          type: "text",
+          text: "是。`index.html` 是入口页面，加载顺序为：\n\n1. `styles.css` — 样式\n2. `mock.js` — 模拟数据（必须在前）\n3. `app.js` — 主逻辑"
+        }
+      })
+    });
+
+    expect(state.questions).toEqual([]);
+    expect(state.messages).toMatchObject([
+      {
+        role: "assistant",
+        parts: [{ partId: "part_1", type: "text" }]
+      }
+    ]);
+  });
+
   it("merges tool started and finished events for the same call", () => {
     const started = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",

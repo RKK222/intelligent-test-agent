@@ -203,7 +203,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-skill-panel").exists()).toBe(false);
   });
 
-  it("keeps the composer visible below a detected choice panel", () => {
+  it("does not show a question panel for ordinary numbered assistant output", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -211,7 +211,7 @@ describe("FigmaChatPanel", () => {
             id: "a1",
             messageId: "a1",
             role: "assistant",
-            text: "请选择下一步：\n1. 生成测试用例\n2. 分析测试对象",
+            text: "是。`index.html` 是入口页面，加载顺序为：\n\n1. `styles.css` — 样式\n2. `mock.js` — 模拟数据（必须在前）\n3. `app.js` — 主逻辑",
             createdAt: "2026-06-25T09:01:00.000Z"
           }
         ],
@@ -219,8 +219,51 @@ describe("FigmaChatPanel", () => {
       }
     });
 
-    expect(wrapper.find(".figma-chat-choice-panel").exists()).toBe(true);
+    expect(wrapper.find(".figma-chat-choice-panel").exists()).toBe(false);
+    expect(wrapper.find(".figma-chat-question-dock").exists()).toBe(false);
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
+  });
+
+  it("renders event-driven questions above the composer and emits replies", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        questions: [
+          {
+            requestId: "ques_1",
+            sessionId: "ses_1",
+            createdAt: "2026-07-05T06:35:23.000Z",
+            questions: [
+              {
+                questionId: "q1",
+                text: "请选择目标环境",
+                kind: "single",
+                options: [
+                  { id: "dev", label: "开发环境" },
+                  { id: "staging", label: "预发环境" }
+                ]
+              }
+            ]
+          }
+        ]
+      } as any
+    });
+
+    const dock = wrapper.find(".figma-chat-question-dock");
+    const composer = wrapper.find(".figma-chat-composer");
+    expect(dock.exists()).toBe(true);
+    expect(composer.exists()).toBe(true);
+    expect(dock.element.compareDocumentPosition(composer.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dock.text()).toContain("请选择目标环境");
+
+    await wrapper.findAll(".figma-chat-question-option").find((item) => item.text().includes("预发环境"))!.trigger("click");
+    await wrapper.get(".figma-chat-question-submit").trigger("click");
+
+    expect(wrapper.emitted("reply-question")).toEqual([["ques_1", [["staging"]]]]);
+
+    await wrapper.get(".figma-chat-question-reject").trigger("click");
+    expect(wrapper.emitted("reject-question")).toEqual([["ques_1"]]);
   });
 
   it("renders todos above the composer and expands the task list on demand", async () => {
@@ -1526,8 +1569,8 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.findAll(".oc-tool__body")).toHaveLength(0);
   });
 
-  it("does not resurface the choice panel when switching to a historical session where the user has already replied", async () => {
-    // 历史会话最后一条是 user（用户已回答），不应再把旧 assistant 的选项弹出来。
+  it("does not infer event questions from historical assistant option text", async () => {
+    // 提问 UI 只由 question.asked 事件驱动，历史 assistant 的编号文本不再触发本地解析。
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -1553,11 +1596,10 @@ describe("FigmaChatPanel", () => {
     });
 
     expect(wrapper.find(".figma-chat-choice-panel").exists()).toBe(false);
+    expect(wrapper.find(".figma-chat-question-dock").exists()).toBe(false);
   });
 
-  it("clears a previously dismissed choice when switching to a fresh session", async () => {
-    // 在 A 会话里点过"取消" → 切到 B 会话（最后一条仍是 assistant、未答）时，
-    // B 的待答问题应正常出现，而不是被 A 的取消态吞掉。
+  it("does not infer event questions when switching to a fresh numbered assistant message", async () => {
     const initial = mount(FigmaChatPanel, {
       props: {
         messages: [
@@ -1570,11 +1612,9 @@ describe("FigmaChatPanel", () => {
         processStatus: { status: "READY", initializable: false, message: "ready" }
       }
     });
-    // 触发"取消"，choiceDismissed = true
-    await initial.get(".figma-chat-choice-cancel").trigger("click");
     expect(initial.find(".figma-chat-choice-panel").exists()).toBe(false);
+    expect(initial.find(".figma-chat-question-dock").exists()).toBe(false);
 
-    // 切到 B 会话：第一条消息 id 变化 → 触发 watcher
     await initial.setProps({
       messages: [
         {
@@ -1586,7 +1626,8 @@ describe("FigmaChatPanel", () => {
       processStatus: { status: "READY", initializable: false, message: "ready" }
     } as any);
 
-    expect(initial.find(".figma-chat-choice-panel").exists()).toBe(true);
+    expect(initial.find(".figma-chat-choice-panel").exists()).toBe(false);
+    expect(initial.find(".figma-chat-question-dock").exists()).toBe(false);
   });
 
   it("shows the assistant avatar beside the running status", () => {
