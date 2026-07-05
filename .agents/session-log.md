@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-05 - 修复运行中上滑被拉回底部
+
+- Why:
+  - 用户反馈修复“查看新内容”误弹后，智能体运行中对话无法上滑到顶部；根因是运行中的工具状态、part 状态等非文本增长更新也会清理滚动提示并把 `isAtBottom/userInterruptedScroll` 重置为贴底状态，后续刷新随即强制滚回底部。
+- What:
+  - `FigmaChatPanel` 将“清掉新内容提示”和“重置贴底跟随状态”拆开，运行中非内容增长的消息元数据更新不再改写用户滚动锁。
+  - 新增回归测试覆盖运行中工具状态从 `running` 变为 `completed` 时，用户上滑位置保持不变且不误弹“查看新内容”。
+- How:
+  - 仅修改 `frontend/apps/agent-web` 的聊天滚动状态逻辑和组件测试；不改后端 API、RunEvent 契约、数据库、generated SDK 或环境配置。
+- Result:
+  - `FigmaChatPanel.test.ts` 定向 Vitest 和 `@test-agent/agent-web` typecheck 通过。
+
 ### 2026-07-05 - 修复新内容提示误弹与编辑器 Tab 批量关闭
 
 - Why:

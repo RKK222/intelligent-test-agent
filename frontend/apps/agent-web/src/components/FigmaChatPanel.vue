@@ -2590,8 +2590,12 @@ const userInterruptedScroll = ref(false)
 let isProgrammaticScroll = false
 const scrollBottomThreshold = 36
 
-function resetNewContentNotice() {
+function clearNewContentNotice() {
   hasNewContent.value = false
+}
+
+function resetScrollFollowState() {
+  clearNewContentNotice()
   userInterruptedScroll.value = false
   isAtBottom.value = true
 }
@@ -2673,13 +2677,21 @@ watch(
     }
   },
   (current, previous) => {
+    if (current.length === 0) {
+      resetScrollFollowState()
+      return
+    }
     const sameLastMessage = current.lastId === previous?.lastId
     const grewLastMessage = sameLastMessage && current.lastLen > (previous?.lastLen ?? 0)
     const appendedMessage = current.length > (previous?.length ?? 0)
     const receivedLiveOutput = props.running && (grewLastMessage || appendedMessage)
     if (!receivedLiveOutput) {
-      resetNewContentNotice()
-      if (shouldFollowOutput()) {
+      // 运行中的工具状态、part 状态或反馈元数据更新不代表有新正文输出；
+      // 必须保留用户上滑后的滚动锁，避免工作中状态刷新把视口强制拉回底部。
+      if (!props.running) {
+        clearNewContentNotice()
+      }
+      if (!props.running && shouldFollowOutput()) {
         nextTick(scrollToBottom)
       }
       return
@@ -2702,7 +2714,7 @@ watch(
   () => [props.historyLoading, props.running] as const,
   ([historyLoading, running], [previousHistoryLoading, previousRunning]) => {
     if (historyLoading || (!running && previousRunning)) {
-      resetNewContentNotice()
+      clearNewContentNotice()
     }
     if (previousHistoryLoading && !historyLoading) {
       nextTick(scrollToBottom)

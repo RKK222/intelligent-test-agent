@@ -2184,6 +2184,66 @@ describe("FigmaChatPanel", () => {
     }
   });
 
+  it("does not force-scroll to bottom when running message metadata changes while the user is reading above", async () => {
+    vi.useFakeTimers();
+    try {
+      const wrapper = mount(FigmaChatPanel, {
+        props: {
+          messages: [
+            { id: "u1", role: "user", text: "读取项目文件", createdAt: "2026-06-25T09:00:00.000Z" },
+            {
+              id: "a1",
+              messageId: "a1",
+              role: "assistant",
+              text: "正在检查上下文",
+              parts: [
+                { partId: "read-1", type: "tool", toolName: "read", status: "running", input: { filePath: "README.md" } }
+              ],
+              createdAt: "2026-06-25T09:01:00.000Z"
+            }
+          ],
+          running: true,
+          processStatus: { status: "READY", initializable: false, message: "ready" }
+        },
+        global: { stubs: { MarkdownView: markdownViewStub } }
+      });
+
+      const scroll = wrapper.get(".figma-chat-scroll");
+      const scrollEl = scroll.element as HTMLElement;
+      Object.defineProperty(scrollEl, "scrollHeight", { configurable: true, value: 1000 });
+      Object.defineProperty(scrollEl, "clientHeight", { configurable: true, value: 300 });
+      vi.advanceTimersByTime(60);
+      await wrapper.vm.$nextTick();
+
+      scrollEl.scrollTop = 120;
+      await scroll.trigger("scroll");
+
+      await wrapper.setProps({
+        messages: [
+          { id: "u1", role: "user", text: "读取项目文件", createdAt: "2026-06-25T09:00:00.000Z" },
+          {
+            id: "a1",
+            messageId: "a1",
+            role: "assistant",
+            text: "正在检查上下文",
+            parts: [
+              { partId: "read-1", type: "tool", toolName: "read", status: "completed", input: { filePath: "README.md" } }
+            ],
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ]
+      });
+      await wrapper.vm.$nextTick();
+      vi.advanceTimersByTime(60);
+      await wrapper.vm.$nextTick();
+
+      expect(scrollEl.scrollTop).toBe(120);
+      expect(wrapper.text()).not.toContain("查看新内容");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not show the new-content button when a finished history session is loaded while scrolled up", async () => {
     vi.useFakeTimers();
     try {
