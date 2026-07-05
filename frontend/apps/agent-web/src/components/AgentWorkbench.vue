@@ -74,6 +74,7 @@ import {
   messagesFromSessionMessages,
   modelIdOnly,
   modelValue,
+  nextCenterModeAfterVcsRefresh,
   notifyOnAttention,
   parseCommand,
   promptFromParts,
@@ -2983,6 +2984,7 @@ async function refreshWorkspaceGitDiff(options: {
     vcsDiffFiles.value = nextFiles;
     if (diffSource.value === "vcs") {
       diffFiles.value = nextFiles;
+      centerMode.value = nextCenterModeAfterVcsRefresh(centerMode.value, diffSource.value, nextFiles);
       if (!workbench.selectedDiffPath || !nextFiles.some((file) => file.path === workbench.selectedDiffPath)) {
         workbench.setSelectedDiffPath(nextFiles[0]?.path);
       }

@@ -861,6 +861,47 @@ test("a live diff refreshes the changed file parent directory before the run fin
   await expect.poll(() => gitDiffRequests.length).toBeGreaterThan(0);
 });
 
+test("discarding the last VCS diff closes the stale diff panel", async ({ page }) => {
+  const diffFiles = [
+    {
+      path: "tests/checkout.spec.ts",
+      status: "modified",
+      staged: false,
+      patch: "@@ -1 +1 @@\n-old\n+new",
+      additions: 1,
+      deletions: 1
+    }
+  ];
+  await mockBackendApi(page, {
+    authRoles: ["SUPER_ADMIN"],
+    historyDiffFiles: diffFiles,
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "变更" }).click();
+  const changeRow = page.locator(".git-file-row").filter({ hasText: "tests/checkout.spec.ts" }).first();
+  await changeRow.click();
+  await expect(page.getByText("基线版本（只读）")).toBeVisible();
+
+  diffFiles.length = 0;
+  await changeRow.hover();
+  await page.getByTitle("回退文件改动").click();
+
+  await expect(page.getByText("暂无 Diff")).toHaveCount(0);
+  await expect(page.getByText("基线版本（只读）")).toHaveCount(0);
+});
+
 test("switching history restores assistant documents and the file changes drawer", async ({ page }) => {
   await mockBackendApi(page, {
     sessions: [
@@ -1835,6 +1876,10 @@ async function mockBackendApi(
       if (method === "GET" && /\/api\/internal\/platform\/workspace-management\/workspaces\/[^/]+\/git-diff$/.test(url.pathname)) {
         capture.gitDiffRequests?.push(`${method} ${url.pathname}`);
         await route.fulfill(json({ files: capture.historyDiffFiles ?? [] }));
+        return;
+      }
+      if (method === "POST" && /\/api\/internal\/platform\/workspace-management\/workspaces\/[^/]+\/git-discard$/.test(url.pathname)) {
+        await route.fulfill(json(null));
         return;
       }
     }

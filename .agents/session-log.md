@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-05 - 修复回退最后一个 VCS Diff 后残留空 Diff 面板
+
+- Why:
+  - 用户在左侧变更面板打开 VCS Diff 后连续点击“回退文件改动”，最后一个变更被清空时，中间编辑区仍停留在旧 `DiffViewer` 空态，只剩 `VCS / Split / 刷新` 工具栏和空白内容区。
+- What:
+  - `AgentWorkbench` 在工作区 Git diff 刷新后，如果当前来源是 `vcs` 且文件列表为空，会自动从 Diff 面板回到编辑器面板，避免保留过期空 Diff UI。
+  - 新增 `nextCenterModeAfterVcsRefresh` 状态转移 helper 和回归测试，并补充 Playwright 用户路径覆盖“打开 VCS Diff -> 回退最后一个变更”。
+- How:
+  - 仅修改 `frontend/apps/agent-web` 前端状态同步和测试；不改后端 API、RunEvent 契约、数据库、generated SDK 或环境配置。
+- Result:
+  - 定向 Vitest（`workbench-utils.test.ts`、`git-changes-panel.test.ts`）、`@test-agent/agent-web` typecheck 和新增 Playwright 用例通过。
+
 ### 2026-07-05 - 修复运行中上滑被拉回底部
 
 - Why:

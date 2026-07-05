@@ -54,6 +54,23 @@ export function runEventMatchesRun(
   return Boolean(event.runId && subscribedRunId && currentRun?.runId && event.runId === subscribedRunId && event.runId === currentRun.runId);
 }
 
+type WorkbenchCenterMode = "editor" | "diff" | "system";
+type WorkbenchDiffSource = "run" | "session" | "vcs" | "agent";
+
+/**
+ * VCS 文件被全部回退后，中心区不能继续停留在空 Diff 面板，否则会显示旧工具栏和“暂无 Diff”。
+ */
+export function nextCenterModeAfterVcsRefresh(
+  currentMode: WorkbenchCenterMode,
+  diffSource: WorkbenchDiffSource,
+  files: RunDiffFile[]
+): WorkbenchCenterMode {
+  if (currentMode === "diff" && diffSource === "vcs" && files.length === 0) {
+    return "editor";
+  }
+  return currentMode;
+}
+
 export function diffFilesFromPayload(payload: Record<string, unknown>): RunDiffFile[] {
   const raw = Array.isArray(payload.diff) ? payload.diff : Array.isArray(payload.files) ? payload.files : [];
   return raw

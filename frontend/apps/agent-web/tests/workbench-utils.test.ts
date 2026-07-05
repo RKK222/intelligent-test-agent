@@ -9,6 +9,7 @@ import {
   mergeDiffFiles,
   messagesFromSessionMessages,
   normalizePathKey,
+  nextCenterModeAfterVcsRefresh,
   sessionTitleFromFirstMessage,
   workspaceLoadIsCurrent
 } from "../src/components/workbench-utils";
@@ -185,6 +186,18 @@ describe("normalizePathKey", () => {
   it("returns empty string for falsy input", () => {
     expect(normalizePathKey("")).toBe("");
     expect(normalizePathKey(undefined)).toBe("");
+  });
+});
+
+describe("nextCenterModeAfterVcsRefresh", () => {
+  it("leaves the VCS diff panel when the refreshed diff list becomes empty", () => {
+    expect(nextCenterModeAfterVcsRefresh("diff", "vcs", [])).toBe("editor");
+  });
+
+  it("keeps the diff panel when VCS still has files or another source is active", () => {
+    expect(nextCenterModeAfterVcsRefresh("diff", "vcs", [file("src/App.vue", 1, 0)])).toBe("diff");
+    expect(nextCenterModeAfterVcsRefresh("diff", "run", [])).toBe("diff");
+    expect(nextCenterModeAfterVcsRefresh("editor", "vcs", [])).toBe("editor");
   });
 });
 
