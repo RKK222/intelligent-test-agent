@@ -66,6 +66,12 @@ function onRowClick(entry: FileTreeEntry) {
         :style="{ paddingLeft: depth * 16 + 6 + 'px' }"
         @click="onRowClick(entry)"
       >
+        <span
+          v-for="i in depth"
+          :key="i"
+          class="ta-file-tree-indent-guide"
+          :style="{ left: 13 + (i - 1) * 16 + 'px' }"
+        />
         <template v-if="entry.type === 'directory'">
           <i
             v-if="!isKnownEmptyDirectory(entry.path)"
@@ -75,7 +81,7 @@ function onRowClick(entry: FileTreeEntry) {
           <span v-else class="ta-file-tree-spacer" />
         </template>
         <template v-else>
-          <span class="ta-file-tree-spacer" />
+          <span class="ta-file-tree-file-spacer" />
           <FileIcon :entry="entry" />
         </template>
         <span class="min-w-0 flex-1 truncate">{{ entry.name }}</span>

@@ -417,6 +417,7 @@ h3 {
 }
 
 .ta-file-tree-row {
+  position: relative;
   display: flex;
   width: 100%;
   height: var(--ta-tree-row-height);
@@ -474,6 +475,29 @@ h3 {
   justify-content: center;
   color: var(--ta-tree-muted);
   line-height: 14px !important;
+}
+
+.ta-file-tree-file-spacer {
+  display: inline-flex;
+  width: 2px !important;
+  height: var(--ta-tree-row-height);
+  flex: 0 0 2px !important;
+}
+
+.ta-file-tree-indent-guide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--ta-tree-border, #e5e5e5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.ta-file-tree-scroll:hover .ta-file-tree-indent-guide,
+.agent-tree:hover .ta-file-tree-indent-guide {
+  opacity: 1;
 }
 
 .ta-file-tree-icon {

@@ -173,7 +173,7 @@ function fileIconClass(name: string, path: string) {
           :style="{ paddingLeft: '6px' }"
           @click="emit('openFile', entry.path)"
         >
-          <span class="ta-file-tree-spacer" />
+          <span class="ta-file-tree-file-spacer" />
           <FileIcon :entry="{ name: entry.name, path: entry.path, type: 'file' }" />
           <span class="min-w-0 truncate">
             <template v-for="segment in highlightKeyword(entry.name, displayKeyword)" :key="segment.text">

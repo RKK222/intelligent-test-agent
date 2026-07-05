@@ -77,6 +77,12 @@ function onRowClick() {
       :style="{ paddingLeft: `${indentPx}px` }"
       @click="onRowClick"
     >
+      <span
+        v-for="i in depth"
+        :key="i"
+        class="ta-file-tree-indent-guide"
+        :style="{ left: 13 + (i - 1) * 16 + 'px' }"
+      />
       <template v-if="isDirectory">
         <i
           v-if="!isKnownEmpty"
@@ -86,7 +92,7 @@ function onRowClick() {
         <span v-else class="ta-file-tree-spacer" />
       </template>
       <template v-else>
-        <span class="ta-file-tree-spacer" />
+        <span class="ta-file-tree-file-spacer" />
         <FileIcon :entry="entry" />
       </template>
       <span class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
