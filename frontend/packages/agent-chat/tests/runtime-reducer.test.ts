@@ -1015,6 +1015,59 @@ describe("agent-chat runtime reducer", () => {
     expect(cancelled.status).toBe("CANCELLED");
   });
 
+  it("normalizes object session.status retry payloads and keeps the run active", () => {
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("session.status", {
+        status: {
+          type: "retry",
+          attempt: 1,
+          message: "Free usage exceeded, subscribe to Go",
+          action: {
+            label: "subscribe",
+            link: "https://opencode.ai/go"
+          },
+          next: 1783296000963
+        }
+      })
+    });
+
+    expect(state.status).toBe("RETRY");
+    expect(state.runtimeStatus).toMatchObject({
+      type: "retry",
+      retryKey: "evt_session.status",
+      attempt: 1,
+      maxAttempts: 3,
+      message: "Free usage exceeded, subscribe to Go",
+      retryAfterSeconds: 60,
+      action: {
+        label: "subscribe",
+        link: "https://opencode.ai/go"
+      }
+    });
+  });
+
+  it("clears retry runtime status when assistant output resumes", () => {
+    const retrying = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("session.status", {
+        status: {
+          type: "retry",
+          attempt: 1,
+          message: "Free usage exceeded, subscribe to Go"
+        }
+      })
+    });
+
+    const resumed = reduceAgentChatRuntime(retrying, {
+      type: "event",
+      event: { ...event("message.part.delta", { messageID: "msg_1", partID: "part_1", partType: "text", delta: "继续" }), eventId: "evt_message_part_delta_after_retry" }
+    });
+
+    expect(resumed.status).toBe("RUNNING");
+    expect(resumed.runtimeStatus).toEqual({ type: "busy" });
+  });
+
   it("uses the later success terminal event and removes stale failed cards for the same run", () => {
     const failed = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",

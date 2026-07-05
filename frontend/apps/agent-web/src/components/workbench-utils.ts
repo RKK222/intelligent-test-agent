@@ -75,18 +75,18 @@ const DEFAULT_RETRY_MAX_ATTEMPTS = 3;
  */
 export function resolveRetryDeadline(
   deadlines: RetryDeadlineMap,
-  retryStatus: OpencodeLikeRuntimeStatus | undefined,
+  retryRuntimeStatus: OpencodeLikeRuntimeStatus | undefined,
   nowMs = Date.now()
 ): { deadlines: RetryDeadlineMap; deadlineMs?: number } {
-  if (!retryStatus || retryStatus.type !== "retry") {
+  if (!retryRuntimeStatus || retryRuntimeStatus.type !== "retry") {
     return { deadlines };
   }
-  const key = retryDeadlineKey(retryStatus);
+  const key = retryDeadlineKey(retryRuntimeStatus);
   const existing = key ? deadlines[key] : undefined;
   if (Number.isFinite(existing)) {
     return { deadlines, deadlineMs: existing };
   }
-  const waitSeconds = Math.max(0, retryStatus.retryAfterSeconds ?? DEFAULT_RETRY_WAIT_SECONDS);
+  const waitSeconds = Math.max(0, retryRuntimeStatus.retryAfterSeconds ?? DEFAULT_RETRY_WAIT_SECONDS);
   const deadlineMs = nowMs + waitSeconds * 1000;
   return key
     ? { deadlines: { ...deadlines, [key]: deadlineMs }, deadlineMs }
@@ -94,11 +94,11 @@ export function resolveRetryDeadline(
 }
 
 export function retryCountdownSeconds(
-  retryStatus: OpencodeLikeRuntimeStatus | undefined,
+  retryRuntimeStatus: OpencodeLikeRuntimeStatus | undefined,
   nowMs = Date.now(),
   deadlines: RetryDeadlineMap = {}
 ): number {
-  const { deadlineMs } = resolveRetryDeadline(deadlines, retryStatus, nowMs);
+  const { deadlineMs } = resolveRetryDeadline(deadlines, retryRuntimeStatus, nowMs);
   if (!Number.isFinite(deadlineMs)) {
     return 0;
   }
@@ -106,24 +106,24 @@ export function retryCountdownSeconds(
 }
 
 export function retryExpirationDecision(
-  retryStatus: OpencodeLikeRuntimeStatus | undefined,
+  retryRuntimeStatus: OpencodeLikeRuntimeStatus | undefined,
   nowMs = Date.now(),
   deadlines: RetryDeadlineMap = {}
 ): RetryExpirationDecision {
-  if (!retryStatus || retryStatus.type !== "retry" || retryCountdownSeconds(retryStatus, nowMs, deadlines) > 0) {
+  if (!retryRuntimeStatus || retryRuntimeStatus.type !== "retry" || retryCountdownSeconds(retryRuntimeStatus, nowMs, deadlines) > 0) {
     return "wait";
   }
-  const attempt = retryStatus.attempt ?? 0;
-  const maxAttempts = retryStatus.maxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS;
+  const attempt = retryRuntimeStatus.attempt ?? 0;
+  const maxAttempts = retryRuntimeStatus.maxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS;
   return attempt >= maxAttempts ? "fail" : "retry";
 }
 
 export function shouldFailExhaustedRetry(
-  retryStatus: OpencodeLikeRuntimeStatus | undefined,
+  retryRuntimeStatus: OpencodeLikeRuntimeStatus | undefined,
   nowMs = Date.now(),
   deadlines: RetryDeadlineMap = {}
 ): boolean {
-  return retryExpirationDecision(retryStatus, nowMs, deadlines) === "fail";
+  return retryExpirationDecision(retryRuntimeStatus, nowMs, deadlines) === "fail";
 }
 
 export function prepareAutoRetryRun(
@@ -145,8 +145,8 @@ export function prepareAutoRetryRun(
   return { type: "start", input: draft };
 }
 
-function retryDeadlineKey(retryStatus: OpencodeLikeRuntimeStatus): string {
-  return retryStatus.retryKey ?? `${retryStatus.attempt ?? 0}:${retryStatus.message ?? ""}`;
+function retryDeadlineKey(retryRuntimeStatus: OpencodeLikeRuntimeStatus): string {
+  return retryRuntimeStatus.retryKey ?? `${retryRuntimeStatus.attempt ?? 0}:${retryRuntimeStatus.message ?? ""}`;
 }
 
 function autoRetryRunIsBusyStatus(status: Run["status"] | string | undefined): boolean {

@@ -156,6 +156,44 @@ payload 字段：
 
 `answers` 外层数组顺序必须与 `questions[]` 顺序一致，内层数组为该问题的一组答案文本。
 
+## `session.status`
+
+`session.status` 表示 opencode session 的运行状态变化。平台会保留 opencode 原生 `status` 对象，前端必须兼容 `payload.status` 为字符串或对象两种形态。
+
+当 `payload.status.type="retry"` 时，表示当前 Run 因模型供应商临时限制、网络或服务端重试策略进入等待重试状态。典型 payload：
+
+```json
+{
+  "status": {
+    "type": "retry",
+    "attempt": 1,
+    "message": "Free usage exceeded, subscribe to Go",
+    "action": {
+      "label": "subscribe",
+      "link": "https://opencode.ai/go"
+    },
+    "next": 1783296000963
+  }
+}
+```
+
+retry 字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `status.type` | string | `retry` 表示等待重试。 |
+| `status.attempt` | number | 当前重试次数，从 1 开始。 |
+| `status.message` | string | 面向用户展示的重试原因。 |
+| `status.action` | object | 可选操作建议，例如订阅入口。前端当前只保留字段，不主动跳转。 |
+| `status.next` | number | opencode 原生下一次重试时间戳；前端展示统一按 60 秒倒计时处理。 |
+
+前端展示处理：
+
+- `session.status.retry` 在右侧时间线展示原因和“重试中 N 秒后 - 第 X 次 / 共 3 次”。
+- 等待 retry 时前端运行态仍视为运行中，不出队 busy follow-up，不关闭 RunEvent SSE，也不显示失败卡。
+- 前端按固定 60 秒倒计时展示每次 retry；最多等待 3 次。第 1/2 次倒计时结束后可 best-effort 取消当前等待 Run，并用最近一次 Run 草稿自动新建 Run；第 3 次倒计时结束前若收到后续消息、非 retry 状态或 `run.*` 终态，以后续事件为准；若倒计时结束后仍没有新状态，前端本地把对话收敛为失败并展示最近一次 retry message。
+- 后端 `run.succeeded/run.failed/run.cancelled` 仍是持久 Run 终态事实源；前端 retry 失败兜底只用于避免浏览器一直停留在运行中。
+
 ## SSE 续传
 
 - SSE `event` 使用 RunEvent 的 `type`。

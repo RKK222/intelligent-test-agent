@@ -50,6 +50,7 @@ describe("follow-up queue", () => {
   it("keeps runtime animation for active or starting runs without a terminal status", () => {
     expect(isRuntimeBusy("RUNNING", undefined, false)).toBe(true);
     expect(isRuntimeBusy(undefined, "RUNNING", false)).toBe(true);
+    expect(isRuntimeBusy("RUNNING", "RETRY", false)).toBe(true);
     expect(isRuntimeBusy(undefined, undefined, true)).toBe(true);
     expect(isRuntimeBusy("SUCCEEDED", undefined, true)).toBe(true);
     expect(isRuntimeBusy("SUCCEEDED", undefined, false)).toBe(false);

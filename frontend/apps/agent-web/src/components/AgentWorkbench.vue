@@ -1580,6 +1580,16 @@ const stopDisabledReason = computed(() => {
   return "";
 });
 
+function lockCurrentRunDuration() {
+  if (!chatStartedAt.value) {
+    return;
+  }
+  totalDurationMs.value += Date.now() - chatStartedAt.value;
+  lastDuration = formatDurationMs(Date.now() - chatStartedAt.value);
+  chatStartedAt.value = null;
+  nowTick.value = Date.now();
+}
+
 // 把累计毫秒数格式化为 "Xm Ys" 或 "Ys" 的展示文案。
 function formatDurationMs(ms: number): string {
   const totalSec = Math.floor(ms / 1000);

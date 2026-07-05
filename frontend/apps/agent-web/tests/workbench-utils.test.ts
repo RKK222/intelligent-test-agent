@@ -84,8 +84,7 @@ describe("retry status helpers", () => {
       attempt: 1,
       maxAttempts: 3,
       message: "Free usage exceeded, subscribe to Go",
-      retryAfterSeconds: 60,
-      retryAt: "2026-07-05T11:00:00.000Z"
+      retryAfterSeconds: 60
     } as const;
     const receivedAt = Date.parse("2026-07-05T11:29:00.000Z");
     const resolved = resolveRetryDeadline({}, retry, receivedAt);
@@ -102,8 +101,7 @@ describe("retry status helpers", () => {
       retryKey: "evt_retry_1",
       attempt: 1,
       maxAttempts: 3,
-      retryAfterSeconds: 60,
-      retryAt: ""
+      retryAfterSeconds: 60
     } as const;
     const deadlines = { evt_retry_1: Date.parse("2026-07-05T11:30:00.000Z") };
     const resolved = resolveRetryDeadline(deadlines, retry, Date.parse("2026-07-05T11:29:30.000Z"));
@@ -120,8 +118,7 @@ describe("retry status helpers", () => {
       retryKey: "evt_retry_1",
       attempt: 1,
       maxAttempts: 3,
-      retryAfterSeconds: 60,
-      retryAt: ""
+      retryAfterSeconds: 60
     } as const;
 
     expect(retryExpirationDecision(retry, now - 1, deadlines)).toBe("wait");

@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-05 - 合并 retry rebase 冲突
+
+- Why:
+  - rebase 回放 `a656f6b37` 时，旧 `retryStatus` 方案与当前 `runtimeStatus`、自动重试、root 终态收敛、Todo 清理和 retry action 链接产生冲突，需要逐处合并避免功能回退。
+- What:
+  - 最终统一保留 `runtimeStatus.type === "retry"`，吸收 retry 倒计时展示、本地 60 秒 deadline、第 1/2 次自动重试和第 3 次本地失败兜底；清理旧 `SessionRetryStatus`/`retryStatus` 文案和重复 retry row 投影。
+  - 保留 Run 进展清理 retry busy 态、新 Run 清理 Todo、失败卡清理、root 终态收敛、SSE 本地诊断和 retry 行 action 链接能力。
+- How:
+  - 只合并前端 retry reducer、agent-web 工作台状态、opencode-like 时间线、定向测试和稳定文档；不新增 HTTP API、不改 SSE wire shape、不改数据库或环境配置。
+- Result:
+  - 冲突标记检查、定向 Vitest、`@test-agent/agent-chat` typecheck 和 `@test-agent/agent-web` typecheck 均通过；`.workbuddy/memory` 下既有未暂存删除保持在本次提交之外。
+
 ### 2026-07-05 - 清理新一轮对话 Todo 残留
 
 - Why:

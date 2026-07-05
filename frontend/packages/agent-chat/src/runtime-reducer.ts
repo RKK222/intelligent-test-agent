@@ -124,7 +124,7 @@ export function reduceAgentChatRuntime(
     nextSeen.shift();
   }
 
-  const nextState = reduceEventOnly(state, event);
+  const nextState = clearRetryOnProgress(reduceEventOnly(state, event), event);
   if (nextState === state) {
     return state;
   }
@@ -364,6 +364,30 @@ function normalizeRunEventPayload(event: RunEvent): RunEvent {
       ...properties
     }
   };
+}
+
+function clearRetryOnProgress(state: AgentChatRuntimeState, event: RunEvent): AgentChatRuntimeState {
+  if (state.runtimeStatus?.type !== "retry" || !isProgressAfterRetryEvent(event.type)) {
+    return state;
+  }
+  return {
+    ...state,
+    status: state.status === "RETRY" ? "RUNNING" : state.status,
+    runtimeStatus: { type: "busy" }
+  };
+}
+
+function isProgressAfterRetryEvent(type: string): boolean {
+  return [
+    "assistant.message.delta",
+    "message.updated",
+    "message.part.updated",
+    "message.part.delta",
+    "tool.started",
+    "tool.finished",
+    "diff.proposed",
+    "session.diff"
+  ].includes(type);
 }
 
 function appendAssistantDelta(messages: AgentMessage[], delta: string, event: RunEvent) {

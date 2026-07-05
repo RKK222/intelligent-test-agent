@@ -65,7 +65,8 @@ export function isRuntimeBusy(
 }
 
 function isBusyStatus(status: string | undefined): boolean {
-  return isRunBusyStatus(status?.toUpperCase());
+  const normalized = status?.toUpperCase();
+  return normalized === "RETRY" || isRunBusyStatus(normalized);
 }
 
 function isTerminalStatus(status: string | undefined): boolean {
