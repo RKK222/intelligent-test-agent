@@ -77,6 +77,42 @@ function getFileName(path: string): string {
   return normalized.split('/').filter(Boolean).pop() || path
 }
 
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+}
+
+function textValue(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+// 失败卡片优先展示后端或 RunEvent 给出的真实错误，再补充 code / traceId，避免退化成“未知错误”。
+function eventFailureText(payload?: Record<string, unknown>): string {
+  if (!payload) return ''
+  const error = recordValue(payload.error)
+  const errorData = recordValue(error?.data)
+  const message =
+    textValue(error?.message) ??
+    textValue(errorData?.message) ??
+    textValue(payload.message) ??
+    textValue(error?.name) ??
+    textValue(errorData?.name)
+  const code = textValue(payload.code) ?? textValue(error?.code) ?? textValue(errorData?.code)
+  const statusCode = numberValue(errorData?.statusCode) ?? numberValue(error?.statusCode) ?? numberValue(payload.statusCode)
+  const traceId = textValue(payload.traceId) ?? textValue(error?.traceId) ?? textValue(errorData?.traceId)
+  const suffix = [
+    code ? `code: ${code}` : '',
+    statusCode ? `status: ${statusCode}` : '',
+    traceId ? `traceId: ${traceId}` : '',
+  ].filter(Boolean)
+  return [message ?? '', suffix.length ? `(${suffix.join(', ')})` : ''].filter(Boolean).join(' ')
+}
+
 /**
  * 解析 read 工具输出的 XML 格式文件/目录内容。
  */
@@ -2217,10 +2253,7 @@ const displayMessages = computed<ChatMessage[]>(() => {
           payload?: Record<string, unknown>
         }
         if (card.cardType === 'event') {
-          const err = card.payload?.error as
-            | { name?: string; message?: string }
-            | undefined
-          const detail = err?.message || err?.name || ''
+          const detail = eventFailureText(card.payload)
           return {
             id: m.id ?? `card-${index}`,
             role: 'assistant' as const,
@@ -4994,8 +5027,8 @@ function onCompositionEnd() {
   align-items: flex-start;
   gap: 6px;
   flex: 0 0 auto;
-  margin: 6px 0 0 46px;
-  padding: 0 0 8px;
+  margin: 2px 0 0 46px;
+  padding: 0 0 4px;
   position: relative;
   z-index: 0;
 }
@@ -7760,7 +7793,7 @@ details[open] .figma-chat-process-chevron {
 
 /* ---- Retry Card ---- */
 .figma-chat-retry-card {
-  margin: 6px 12px;
+  margin: 4px 10px 6px 46px;
   background: #fff1f0;
   border: 1px solid #ffa39e;
   border-radius: 6px;
@@ -7769,7 +7802,7 @@ details[open] .figma-chat-process-chevron {
   flex-direction: row;
   align-items: center;
   gap: 12px;
-  align-self: stretch;
+  align-self: auto;
 }
 
 .figma-chat-retry-card-header {

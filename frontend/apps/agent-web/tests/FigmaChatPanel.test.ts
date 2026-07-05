@@ -1384,6 +1384,45 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-retry-card-text").text()).not.toContain("974");
   });
 
+  it("shows fallback run failure metadata instead of a generic retry message", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "u-timeout",
+            messageId: "u-timeout",
+            role: "user",
+            text: "继续执行任务",
+            createdAt: "2026-07-03T11:24:00.000Z"
+          },
+          {
+            id: "event-timeout",
+            role: "card",
+            cardType: "event",
+            title: "Run 执行失败",
+            payload: {
+              type: "run.failed",
+              message: "EventSource connection closed",
+              code: "SSE_DISCONNECTED",
+              traceId: "trace_retry_1"
+            },
+            createdAt: "2026-07-03T11:24:01.000Z"
+          }
+        ],
+        running: false,
+        runtimeStatus: "FAILED",
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any,
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    const text = wrapper.find(".figma-chat-retry-card-text").text();
+    expect(text).toContain("EventSource connection closed");
+    expect(text).toContain("SSE_DISCONNECTED");
+    expect(text).toContain("trace_retry_1");
+    expect(text).not.toContain("您的请求断开，请重试");
+  });
+
   it("uses the opencode timeline instead of the legacy running task panel", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

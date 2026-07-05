@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-05 - 优化对话失败卡间距与错误信息
+
+- Why:
+  - 用户反馈右侧 timeline 反馈按钮、失败重试卡与上一段输出距离过大，失败卡只显示“您的请求断开，请重试”或“未知错误”时缺少有效排查信息；同时询问历史对话重试与提问态展示原因。
+- What:
+  - 收紧 `FigmaChatPanel` 中 timeline 反馈操作区和失败重试卡的垂直间距，并让失败卡按内容列缩进展示。
+  - 失败卡从 RunEvent / card payload 中提取 `error.message`、`payload.message`、`code`、`statusCode`、`traceId` 等字段，避免有真实错误信息时仍退回通用断开文案。
+  - 确认当前历史会话重试仍复用最近一次 prompt；若历史会话因工作区不可用或无权限被置为只读，`handleSend` 会阻止重试，这是现有前端保护逻辑。
+- How:
+  - 仅修改 `frontend/apps/agent-web/src/components/FigmaChatPanel.vue` 与对应组件测试，不改后端、RunEvent 契约、API、数据库或 generated SDK。
+- Result:
+  - `@test-agent/agent-web` typecheck、`@test-agent/agent-chat` typecheck、`FigmaChatPanel.test.ts` 定向 Vitest 和 `git diff --check` 通过；`127.0.0.1:3000` 前端入口可达。
+
 ### 2026-07-05 - Agent timeline 内容块宽度自适应
 
 - Why:
