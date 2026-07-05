@@ -3925,3 +3925,10 @@ bash /tmp/test-api-after-restart.sh
 - What: `agent-chat` reducer 归一化原生 question 字段，保留选项说明并按 `multiple/options` 映射单选、多选、文本题；`FigmaChatPanel` 改为分页式问题卡，支持选项 label/description、自定义答案、上一步/下一步、最后一页提交和忽略。
 - How: 新增 runtime reducer 和 Figma 面板回归测试，覆盖用户给出的 `question.asked` 样例、普通 `message.part.updated` 不生成 question、单选/多选/文本题、自定义答案和分页提交。同步 `docs/api/event-stream.md`、`agent-web` 包说明和 `agent-chat` README。
 - Result: 定向 `FigmaChatPanel.test.ts` 和 `runtime-reducer.test.ts` 已通过；未改后端 API、数据库、generated SDK 或环境配置。
+
+### 2026-07-05 - RunEvent SSE 异常增加前端可见诊断
+
+- Why: 用户反馈某个对话在手工终止前原始消息已停止继续输出，前端没有解释为什么停止；本地未能直接查到该 trace 的 run_events，且 `.env.test` PostgreSQL 握手被服务端关闭，无法读取远端事实库。
+- What: 后端 `RunApplicationService` 在 stream/prompt 异步错误收敛为 `run.failed` 时写入安全的 `message` 与 `error.name/message`；前端 `AgentWorkbench` 在 EventSource 连接异常时为当前 Run 只追加一次本地 SSE 诊断到原始输出，并派发 `run.stream.error`，`agent-chat` 时间线展示诊断卡但不把 Run 直接标记失败。
+- How: 复用现有 `failRunFromStream`、原始输出缓存和 `agent-chat` card 渲染路径，不新增 RunEvent 类型、不改数据库、不改 generated SDK。同步更新事件流文档、opencode-runtime README 和 agent-web README。
+- Result: 前端 reducer/event-stream-client Vitest、agent-chat/agent-web typecheck、后端 `RunApplicationServiceTest` 通过；`restart-dev-services.sh --profile test --env-file .env.test --skip-frontend-build` 后端打包成功但本地启动失败，阻塞在 `.env.test` 指向的 PostgreSQL 连接超时/EOF，`127.0.0.1:8080` 未启动，前端 3000 仍有既有 Vite 进程返回 200。

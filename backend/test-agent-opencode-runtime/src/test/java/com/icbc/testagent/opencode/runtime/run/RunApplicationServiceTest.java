@@ -220,6 +220,13 @@ class RunApplicationServiceTest {
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
         awaitRunStatus(service, run.runId(), RunStatus.FAILED);
         awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_FAILED);
+        Map<String, Object> payload = events.events.get(2).payload();
+        assertThat(payload).containsEntry("message", "prompt failed");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> error = (Map<String, Object>) payload.get("error");
+        assertThat(error)
+                .containsEntry("name", "IllegalStateException")
+                .containsEntry("message", "prompt failed");
     }
 
     @Test

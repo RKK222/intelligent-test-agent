@@ -1175,7 +1175,11 @@ public class RunApplicationService {
                 saveRunIfStatus(failed, current.status(), traceId, "stream_error")
                         .ifPresent(saved -> {
                             append(saved.runId(), RunEventType.RUN_FAILED, traceId, occurredAt,
-                                    Map.of("error", error.getClass().getSimpleName()));
+                                    Map.of(
+                                            "error", Map.of(
+                                                    "name", error.getClass().getSimpleName(),
+                                                    "message", safeStreamErrorMessage(error)),
+                                            "message", safeStreamErrorMessage(error)));
                             snapshotService.persistRunSnapshot(agentId, saved, traceId);
                         });
             }
@@ -1183,6 +1187,21 @@ public class RunApplicationService {
             LOGGER.warn("Failed to persist opencode stream failure, runId={}, traceId={}",
                     run.runId().value(), traceId, exception);
         }
+    }
+
+    /**
+     * 事件流错误会展示给前端，只保留单行短消息，避免泄露堆栈、路径或过长第三方响应。
+     */
+    private String safeStreamErrorMessage(Throwable error) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) {
+            return error.getClass().getSimpleName();
+        }
+        String firstLine = message.lines().findFirst().orElse(error.getClass().getSimpleName()).trim();
+        if (firstLine.length() <= 300) {
+            return firstLine;
+        }
+        return firstLine.substring(0, 300);
     }
 
     /**

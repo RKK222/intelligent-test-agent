@@ -30,6 +30,7 @@ export type AgentChatRuntimeAction =
   | { type: "event"; event: RunEvent }
   | { type: "run.requested" }
   | { type: "run.request.failed"; message?: string }
+  | { type: "run.stream.error"; message?: string; runId?: string; occurredAt?: string }
   | { type: "user.submitted"; prompt: string; parts?: PromptPart[]; createdAt?: string }
   | { type: "permission.replied"; requestId: string }
   | { type: "question.replied"; requestId: string }
@@ -64,6 +65,32 @@ export function reduceAgentChatRuntime(
   if (action.type === "run.request.failed") {
     // 本地启动阶段失败时不会有后端 RunEvent 终态，必须在 reducer 内收敛运行态。
     return { ...state, status: "FAILED", streamingTextByPartId: {} };
+  }
+  if (action.type === "run.stream.error") {
+    // EventSource 异常可能会自动重连，不能把 Run 直接标记失败；只把诊断信息写入时间线。
+    const occurredAt = action.occurredAt ?? new Date().toISOString();
+    const eventId = `local-stream-error-${action.runId ?? "unknown"}-${occurredAt}`;
+    return {
+      ...state,
+      messages: appendCard(
+        state.messages,
+        "event",
+        "RunEvent SSE 连接异常",
+        {
+          error: { message: action.message ?? "浏览器事件流连接异常，正在等待自动重连", name: "EventSourceError" },
+          type: "run.stream.error"
+        },
+        {
+          eventId,
+          runId: action.runId ?? "run_unknown",
+          seq: 0,
+          type: "run.failed",
+          traceId: "trace_frontend",
+          occurredAt,
+          payload: {}
+        }
+      )
+    };
   }
   if (action.type === "permission.replied") {
     return { ...state, permissions: state.permissions.filter((item) => item.requestId !== action.requestId) };

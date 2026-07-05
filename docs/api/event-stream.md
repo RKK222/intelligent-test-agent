@@ -45,7 +45,7 @@
 | `run.started` | Run 已开始执行。 |
 | `run.cancelling` | Run 正在取消。 |
 | `run.succeeded` | Run 成功结束。 |
-| `run.failed` | Run 失败结束。 |
+| `run.failed` | Run 失败结束，payload 可携带安全的 `message` 或 `error.message/name` 供前端失败卡片展示。 |
 | `run.cancelled` | Run 已取消。 |
 | `assistant.message.delta` | 助手消息增量，只实时发送，不写入 `run_events`。 |
 | `message.updated` | opencode Web App message projection 更新；实时发送，断线后由 opencode session messages snapshot 恢复。 |
@@ -217,7 +217,7 @@ scope 发现与缓存规则：
 - root session idle 额外派生 `run.succeeded`；child session idle 只发送 `session.status`。
 - root `session.error` 额外派生 `run.failed`；child `session.error` 只发送 `session.error`。
 - `session.next.step.ended` 不再派生 `run.succeeded`，只作为兼容未知事件保留上下文。
-- 后端持久化终态时必须先读取当前 Run 并执行条件状态写入；条件不匹配说明已有终态或更新先落库，此时不追加派生终态事件、不刷新终态快照。`Streaming response failed` 等 transport error 没有独立业务终态含义，只能在 Run 仍非终态时收敛为 `run.failed`。
+- 后端持久化终态时必须先读取当前 Run 并执行条件状态写入；条件不匹配说明已有终态或更新先落库，此时不追加派生终态事件、不刷新终态快照。`Streaming response failed` 等 transport error 没有独立业务终态含义，只能在 Run 仍非终态时收敛为 `run.failed`，并在 payload 中保留单行、长度受限的安全错误说明，供前端解释为什么停止输出。
 
 ## Phase 04 Runtime SSE
 

@@ -182,6 +182,7 @@ const session = shallowRef<Session | null>(null);
 const run = shallowRef<Run | null>(null);
 const rawEntriesBySessionId = ref<Record<string, RawOutputEntry[]>>({});
 const rawRunSessionMap = ref<Record<string, string>>({});
+const reportedRunEventStreamErrors = new Set<string>();
 const lastPrompt = ref("");
 const selectedAgent = ref("");
 const storedRuntimePreference = readStoredRuntimePreference();
@@ -950,6 +951,22 @@ function observeRawRunEventMessage(message: RunEventRawMessage, fallbackSessionI
   });
 }
 
+function observeRunEventStreamError(runId: string, fallbackSessionId?: string) {
+  const sessionId = rawRunSessionMap.value[runId] ?? fallbackSessionId ?? session.value?.sessionId;
+  if (!sessionId) {
+    return;
+  }
+  appendRawOutputEntry(sessionId, {
+    id: nextRawOutputId("sse_error"),
+    kind: "sse",
+    title: "SSE connection error",
+    eventName: "error",
+    runId,
+    body: "EventSource reported a connection error. The browser will keep retrying automatically; wait for a run.failed/run.succeeded/run.cancelled event for the final run state.",
+    occurredAt: new Date().toISOString()
+  });
+}
+
 let rawOutputSeq = 0;
 
 function nextRawOutputId(prefix: string) {
@@ -1250,7 +1267,13 @@ watch(run, (r, _old, onCleanup) => {
     },
     onError: () => {
       if (run.value?.runId === r.runId && isRunBusyStatus(run.value.status)) {
-        feedback.value = { kind: "error", title: RUN_EVENT_SSE_ERROR_TITLE, description: "前端会等待浏览器自动重连" };
+        const message = "浏览器事件流连接异常，前端会等待自动重连；如后端确认失败，会继续收到 run.failed。";
+        feedback.value = { kind: "error", title: RUN_EVENT_SSE_ERROR_TITLE, description: message };
+        if (!reportedRunEventStreamErrors.has(r.runId)) {
+          reportedRunEventStreamErrors.add(r.runId);
+          observeRunEventStreamError(r.runId, r.sessionId);
+          dispatchChat({ type: "run.stream.error", runId: r.runId, message });
+        }
       }
     }
   });

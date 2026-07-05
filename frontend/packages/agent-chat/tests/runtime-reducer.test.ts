@@ -36,6 +36,30 @@ describe("agent-chat runtime reducer", () => {
     expect(failed.messages).toEqual(submitted.messages);
   });
 
+  it("adds a visible diagnostic card when the SSE stream reports an error", () => {
+    const pending = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), { type: "run.requested" });
+
+    const next = reduceAgentChatRuntime(pending, {
+      type: "run.stream.error",
+      runId: "run_123",
+      message: "浏览器事件流连接异常",
+      occurredAt: "2026-07-05T10:00:00Z"
+    });
+
+    expect(next.status).toBe("PENDING");
+    expect(next.messages).toMatchObject([
+      {
+        role: "card",
+        cardType: "event",
+        title: "RunEvent SSE 连接异常",
+        payload: {
+          type: "run.stream.error",
+          error: { name: "EventSourceError", message: "浏览器事件流连接异常" }
+        }
+      }
+    ]);
+  });
+
   it("keeps assistant.message.delta backward compatible", () => {
     const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",
