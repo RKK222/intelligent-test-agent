@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-05 - 原始输出搜索命中高亮
+
+- Why:
+  - 用户希望“原始输出”检索框搜到内容后，相关字符能在结果中直接高亮，便于在大段请求/响应/SSE 原文里定位命中位置。
+- What:
+  - `FigmaChatPanel` 原始输出面板在搜索命中时，对标题、详情字段和正文中的匹配片段渲染高亮。
+  - 高亮使用文本切片渲染，不使用 `v-html`，避免把原始报文当 HTML 注入。
+  - 同步 `agent-web` README 中原始输出搜索能力说明。
+- How:
+  - 仅修改前端展示和组件测试，不改后端 API、RunEvent 契约、数据库或 generated SDK。
+- Result:
+  - `@test-agent/agent-web` typecheck 通过；`FigmaChatPanel.test.ts` 定向 Vitest 通过（64 passed, 1 skipped）。
+
 ### 2026-07-05 - 历史列表时间与原始输出搜索
 
 - Why:

@@ -2102,6 +2102,7 @@ function selectHistoryItem(id: string) {
 }
 
 type RawOutputFilter = 'all' | RawOutputKind
+type RawOutputHighlightPart = { text: string; matched: boolean }
 
 const rawOutputOpen = ref(false)
 const rawOutputFilter = ref<RawOutputFilter>('all')
@@ -2168,6 +2169,35 @@ function rawOutputSearchText(entry: RawOutputEntry) {
     .filter((item) => item !== undefined && item !== null)
     .join('\n')
     .toLowerCase()
+}
+
+function rawOutputQuery() {
+  return rawOutputSearchQuery.value.trim()
+}
+
+function highlightRawOutputText(value: string | number | undefined | null): RawOutputHighlightPart[] {
+  const text = value === undefined || value === null ? '' : String(value)
+  const query = rawOutputQuery()
+  if (!text || !query) {
+    return [{ text, matched: false }]
+  }
+  const lowerText = text.toLowerCase()
+  const lowerQuery = query.toLowerCase()
+  const parts: RawOutputHighlightPart[] = []
+  let cursor = 0
+  while (cursor < text.length) {
+    const index = lowerText.indexOf(lowerQuery, cursor)
+    if (index < 0) {
+      parts.push({ text: text.slice(cursor), matched: false })
+      break
+    }
+    if (index > cursor) {
+      parts.push({ text: text.slice(cursor, index), matched: false })
+    }
+    parts.push({ text: text.slice(index, index + query.length), matched: true })
+    cursor = index + query.length
+  }
+  return parts.length > 0 ? parts : [{ text, matched: false }]
 }
 
 function rawOutputKindLabel(kind: RawOutputKind) {
@@ -4341,17 +4371,51 @@ function onCompositionEnd() {
           >
             <div class="figma-chat-raw-entry-meta">
               <span :class="['figma-chat-raw-kind', `figma-chat-raw-kind--${entry.kind}`]">{{ rawOutputKindLabel(entry.kind) }}</span>
-              <span class="figma-chat-raw-entry-title">{{ entry.title }}</span>
+              <span class="figma-chat-raw-entry-title">
+                <span
+                  v-for="(part, index) in highlightRawOutputText(entry.title)"
+                  :key="`title-${entry.id}-${index}`"
+                  :class="part.matched && 'figma-chat-raw-highlight'"
+                >{{ part.text }}</span>
+              </span>
               <span class="figma-chat-raw-entry-time">{{ rawOutputTime(entry.occurredAt) }}</span>
             </div>
             <div class="figma-chat-raw-entry-details">
-              <span v-if="entry.status">status {{ entry.status }}</span>
-              <span v-if="entry.contentType">{{ entry.contentType }}</span>
-              <span v-if="entry.traceId">trace {{ entry.traceId }}</span>
-              <span v-if="entry.runId">run {{ entry.runId }}</span>
+              <span v-if="entry.status">
+                <span
+                  v-for="(part, index) in highlightRawOutputText(`status ${entry.status}`)"
+                  :key="`status-${entry.id}-${index}`"
+                  :class="part.matched && 'figma-chat-raw-highlight'"
+                >{{ part.text }}</span>
+              </span>
+              <span v-if="entry.contentType">
+                <span
+                  v-for="(part, index) in highlightRawOutputText(entry.contentType)"
+                  :key="`content-type-${entry.id}-${index}`"
+                  :class="part.matched && 'figma-chat-raw-highlight'"
+                >{{ part.text }}</span>
+              </span>
+              <span v-if="entry.traceId">
+                <span
+                  v-for="(part, index) in highlightRawOutputText(`trace ${entry.traceId}`)"
+                  :key="`trace-${entry.id}-${index}`"
+                  :class="part.matched && 'figma-chat-raw-highlight'"
+                >{{ part.text }}</span>
+              </span>
+              <span v-if="entry.runId">
+                <span
+                  v-for="(part, index) in highlightRawOutputText(`run ${entry.runId}`)"
+                  :key="`run-${entry.id}-${index}`"
+                  :class="part.matched && 'figma-chat-raw-highlight'"
+                >{{ part.text }}</span>
+              </span>
               <span v-if="entry.truncated">已截断</span>
             </div>
-            <pre class="figma-chat-raw-pre">{{ rawOutputBody(entry) }}</pre>
+            <pre class="figma-chat-raw-pre"><span
+              v-for="(part, index) in highlightRawOutputText(rawOutputBody(entry))"
+              :key="`body-${entry.id}-${index}`"
+              :class="part.matched && 'figma-chat-raw-highlight'"
+            >{{ part.text }}</span></pre>
           </section>
         </template>
       </div>
@@ -4611,6 +4675,14 @@ function onCompositionEnd() {
   color: var(--ta-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   font-size: 11px;
+}
+.figma-chat-raw-highlight {
+  border-radius: 3px;
+  padding: 0 1px;
+  background: #fef08a;
+  color: #713f12;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 .figma-chat-raw-pre {
   margin: 0;

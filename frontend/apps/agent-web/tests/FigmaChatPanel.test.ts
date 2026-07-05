@@ -922,6 +922,7 @@ describe("FigmaChatPanel", () => {
 
     await wrapper.get('[aria-label="搜索原始输出"]').setValue("world");
     expect(wrapper.text()).toContain("message.part.delta");
+    expect(wrapper.find(".figma-chat-raw-highlight").text()).toBe("world");
 
     const clearButton = wrapper.findAll("button").find((button) => button.text().includes("清空"));
     expect(clearButton).toBeTruthy();
