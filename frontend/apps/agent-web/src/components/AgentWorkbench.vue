@@ -74,6 +74,7 @@ import {
   messagesFromSessionMessages,
   modelIdOnly,
   modelValue,
+  nextCenterModeAfterRunDiff,
   nextCenterModeAfterVcsRefresh,
   notifyOnAttention,
   parseCommand,
@@ -2507,6 +2508,7 @@ function handleRunEvent(event: RunEvent) {
       path: normalizeWorkspacePath(f.path) || f.path
     }));
     if (files.length) {
+      centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
       diffSource.value = "run";
       diffFiles.value = mergeDiffFiles(diffFiles.value, files);
       workbench.setSelectedDiffPath(files[0]?.path);
@@ -2523,6 +2525,7 @@ function handleRunEvent(event: RunEvent) {
       path: normalizeWorkspacePath(f.path) || f.path
     }));
     if (files.length) {
+      centerMode.value = nextCenterModeAfterRunDiff(centerMode.value, diffSource.value);
       diffSource.value = "session";
       diffFiles.value = mergeDiffFiles(diffFiles.value, files);
       workbench.setSelectedDiffPath(files[0]?.path);

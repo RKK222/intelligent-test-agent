@@ -71,6 +71,20 @@ export function nextCenterModeAfterVcsRefresh(
   return currentMode;
 }
 
+/**
+ * 运行中新产出的 Run Diff 只更新右侧文件修改摘要；如果用户正在看 VCS/Agent Diff，
+ * 不自动劫持中间区为旧 Run Diff 面板。
+ */
+export function nextCenterModeAfterRunDiff(
+  currentMode: WorkbenchCenterMode,
+  previousDiffSource: WorkbenchDiffSource
+): WorkbenchCenterMode {
+  if (currentMode === "diff" && previousDiffSource !== "run") {
+    return "editor";
+  }
+  return currentMode;
+}
+
 export function diffFilesFromPayload(payload: Record<string, unknown>): RunDiffFile[] {
   const raw = Array.isArray(payload.diff) ? payload.diff : Array.isArray(payload.files) ? payload.files : [];
   return raw

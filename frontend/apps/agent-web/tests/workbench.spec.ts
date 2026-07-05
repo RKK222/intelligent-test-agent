@@ -861,6 +861,49 @@ test("a live diff refreshes the changed file parent directory before the run fin
   await expect.poll(() => gitDiffRequests.length).toBeGreaterThan(0);
 });
 
+test("a live run diff does not hijack an open VCS diff panel", async ({ page }) => {
+  await mockBackendApi(page, {
+    authRoles: ["SUPER_ADMIN"],
+    historyDiffFiles: [
+      {
+        path: "tests/checkout.spec.ts",
+        status: "modified",
+        staged: false,
+        patch: "@@ -1 +1 @@\n-old\n+new",
+        additions: 1,
+        deletions: 1
+      }
+    ],
+    runEvents: [
+      event(1, "diff.proposed", {
+        files: [{ path: "tests/generated.spec.ts", status: "added", additions: 8, deletions: 0 }]
+      })
+    ],
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    }
+  });
+
+  await gotoWorkbench(page);
+  await page.getByRole("button", { name: "变更" }).click();
+  await page.locator(".git-file-row").filter({ hasText: "tests/checkout.spec.ts" }).first().click();
+  await expect(page.getByText("基线版本（只读）")).toBeVisible();
+
+  await page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因").fill("继续生成文件");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect(page.getByText("基线版本（只读）")).toHaveCount(0);
+  await expect(page.getByText("Run Diff")).toHaveCount(0);
+});
+
 test("discarding the last VCS diff closes the stale diff panel", async ({ page }) => {
   const diffFiles = [
     {

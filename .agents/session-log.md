@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-05 - 防止运行时 Diff 劫持已打开的 VCS Diff
+
+- Why:
+  - 用户打开左侧 Git 变更文件的 VCS Diff 后，智能体继续产出文件触发 `diff.proposed`，中间区会被自动切到旧的 Run Diff 面板，出现 `Run / Split / 刷新` 的旧 UI。
+- What:
+  - 新增 `nextCenterModeAfterRunDiff` 状态规则：运行时 Run Diff 只更新右侧文件修改数据；如果用户正在中间区查看 VCS/Agent Diff，不再自动劫持为 Run Diff，而是回到编辑器面板。
+  - 新增 Playwright 回归覆盖“打开 VCS Diff 后收到 live run diff”的用户路径。
+- How:
+  - 仅调整 `frontend/apps/agent-web` 的前端状态同步和测试；不改后端 API、RunEvent 契约、数据库、generated SDK 或环境配置。
+- Result:
+  - 定向 Vitest、`@test-agent/agent-web` typecheck、打开 VCS Diff 后收到 live run diff 的 Playwright 用例，以及回退最后一个 VCS Diff 的 Playwright 用例通过。
+
 ### 2026-07-05 - 修复回退最后一个 VCS Diff 后残留空 Diff 面板
 
 - Why:

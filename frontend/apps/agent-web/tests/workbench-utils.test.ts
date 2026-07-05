@@ -10,6 +10,7 @@ import {
   messagesFromSessionMessages,
   normalizePathKey,
   nextCenterModeAfterVcsRefresh,
+  nextCenterModeAfterRunDiff,
   sessionTitleFromFirstMessage,
   workspaceLoadIsCurrent
 } from "../src/components/workbench-utils";
@@ -198,6 +199,19 @@ describe("nextCenterModeAfterVcsRefresh", () => {
     expect(nextCenterModeAfterVcsRefresh("diff", "vcs", [file("src/App.vue", 1, 0)])).toBe("diff");
     expect(nextCenterModeAfterVcsRefresh("diff", "run", [])).toBe("diff");
     expect(nextCenterModeAfterVcsRefresh("editor", "vcs", [])).toBe("editor");
+  });
+});
+
+describe("nextCenterModeAfterRunDiff", () => {
+  it("does not let live run diffs hijack an open VCS diff panel", () => {
+    expect(nextCenterModeAfterRunDiff("diff", "vcs")).toBe("editor");
+    expect(nextCenterModeAfterRunDiff("diff", "agent")).toBe("editor");
+  });
+
+  it("keeps current mode when already showing run diff or not showing a diff panel", () => {
+    expect(nextCenterModeAfterRunDiff("diff", "run")).toBe("diff");
+    expect(nextCenterModeAfterRunDiff("editor", "vcs")).toBe("editor");
+    expect(nextCenterModeAfterRunDiff("system", "vcs")).toBe("system");
   });
 });
 
