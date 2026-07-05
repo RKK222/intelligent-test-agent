@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-05 - Agent timeline 内容块宽度自适应
+
+- Why:
+  - 用户在拉宽右侧对话面板后发现最终回答正文气泡和“探索/技能”等工具行仍停留在固定宽度，不能贴合可用内容列右侧。
+- What:
+  - 将 `opencode-like` 当前主 timeline 的正文 `text` part、reasoning 折叠行、工具/上下文/工具组触发器和子 Agent 卡片从 `inline-block` 或 `min(100%, 560px)` 调整为 `width: 100%`，随 assistant 内容列自适应。
+- How:
+  - 仅修改 `frontend/packages/agent-chat/src/opencode-like/styles/parts.css` 与 `tools.css`，不改后端、RunEvent、reducer、API 或数据库。
+- Result:
+  - Playwright 构造 DOM 验证工具行与正文气泡宽度均等于内容列宽度；`@test-agent/agent-chat` typecheck 通过；前端 Vitest 通过（37 files, 332 passed, 1 skipped）；`127.0.0.1:3000` 前端入口可达。
+
 ### 2026-07-05 - 修复文件树对齐、列表背景色、图标切换、机器名优先压缩、首页底色、取消选中、主体区域底色全白及文件夹前导箭头 14x14 化
 
 - Why:

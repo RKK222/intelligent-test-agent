@@ -12,7 +12,7 @@
 .oc-context-group__trigger,
 .oc-tool-group__trigger {
   display: grid;
-  width: min(100%, 560px);
+  width: 100%;
   grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
   padding: 0 10px;
   column-gap: 8px;
@@ -75,7 +75,7 @@
 }
 
 .oc-tool__trigger {
-  width: min(100%, 560px);
+  width: 100%;
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
   align-items: center;
@@ -182,7 +182,7 @@
   display: grid;
   grid-template-columns: 88px minmax(0, 1fr) auto;
   align-items: center;
-  width: min(100%, 560px);
+  width: 100%;
   min-height: 38px;
   padding: 6px 10px;
   column-gap: 8px;

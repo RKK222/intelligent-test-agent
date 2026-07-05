@@ -10,8 +10,10 @@
   border-top-left-radius: 2px;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
   margin-top: 0;
-  display: inline-block;
+  display: block;
+  width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
 }
 
 .oc-text-part__copy {
@@ -74,13 +76,13 @@
 }
 
 .oc-reasoning-part {
-  width: min(100%, 560px);
+  width: 100%;
   color: var(--oc-muted);
   font-size: var(--oc-text-sm);
 }
 
 .oc-reasoning-part .oc-disclosure__trigger {
-  width: min(100%, 560px);
+  width: 100%;
   max-width: 100%;
   min-height: 28px;
   grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
