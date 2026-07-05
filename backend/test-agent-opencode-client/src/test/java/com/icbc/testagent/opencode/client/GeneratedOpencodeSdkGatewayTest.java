@@ -462,6 +462,41 @@ class GeneratedOpencodeSdkGatewayTest {
         }
     }
 
+    @Test
+    void gatewayReadsSessionMessagesNextCursorFromHeader() throws Exception {
+        AtomicReference<RequestSnapshot> request = new AtomicReference<>();
+        HttpServer server = startServer(exchange -> {
+            request.set(snapshot(exchange));
+            exchange.getResponseHeaders().set("X-Next-Cursor", "cursor_next_page");
+            respond(exchange, 200, "application/json", """
+                    [
+                      {
+                        "info": {
+                          "id": "msg_cursor1234567890abcdef",
+                          "sessionID": "ses_remote1234567890abcdef",
+                          "role": "assistant"
+                        },
+                        "parts": []
+                      }
+                    ]
+                    """);
+        });
+
+        try {
+            OpencodeSessionMessagesResult result = new GeneratedOpencodeSdkGateway()
+                    .sessionMessages(node(server), REMOTE_SESSION_ID, 50, "asc", "cursor_previous_page", TRACE_ID)
+                    .block(Duration.ofSeconds(5));
+
+            assertThat(result.nextCursor()).isEqualTo("cursor_next_page");
+            assertThat(result.messages()).singleElement().satisfies(message ->
+                    assertThat(message.message()).containsEntry("id", "msg_cursor1234567890abcdef"));
+            assertThat(request.get().query()).containsEntry("limit", List.of("50"));
+            assertThat(request.get().query()).containsEntry("before", List.of("cursor_previous_page"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private static HttpServer startServer(HttpHandler handler) throws IOException {
         HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         server.createContext("/", handler);

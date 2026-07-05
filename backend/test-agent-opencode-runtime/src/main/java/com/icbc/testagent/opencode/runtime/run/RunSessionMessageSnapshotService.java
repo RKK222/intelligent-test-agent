@@ -25,11 +25,13 @@ import com.icbc.testagent.domain.session.SessionRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -41,7 +43,8 @@ import org.springframework.stereotype.Service;
 public class RunSessionMessageSnapshotService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(RunSessionMessageSnapshotService.class);
-    private static final int SNAPSHOT_LIMIT = 200;
+    private static final int SNAPSHOT_PAGE_LIMIT = 50;
+    private static final int SNAPSHOT_MAX_MESSAGES = 200;
 
     private final RunRepository runRepository;
     private final SessionRepository sessionRepository;
@@ -102,23 +105,16 @@ public class RunSessionMessageSnapshotService {
                 return false;
             }
             AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
-            AgentSessionMessagesResult result = runtime.sessionMessages(new AgentSessionMessagesCommand(
-                            node.get(),
-                            binding.get().remoteSessionId(),
-                            SNAPSHOT_LIMIT,
-                            "asc",
-                            null,
-                            traceId))
-                    .block();
-            if (result == null) {
+            SnapshotUsage runUsage = refreshSnapshotPages(
+                    runtime,
+                    node.get(),
+                    binding.get().remoteSessionId(),
+                    resolvedAgentId,
+                    session,
+                    run,
+                    traceId);
+            if (runUsage == null) {
                 return false;
-            }
-            SnapshotUsage runUsage = SnapshotUsage.empty();
-            for (AgentSessionMessage message : result.messages()) {
-                Optional<SnapshotUsage> usage = upsertAssistantMessage(resolvedAgentId, session.sessionId(), run, message, traceId);
-                if (usage.isPresent() && usage.get().hasValue()) {
-                    runUsage = usage.get();
-                }
             }
             if (run != null && runUsage.hasValue()) {
                 runRepository.save(run.withUsage(runUsage.tokenUsage(), runUsage.costUsd()));
@@ -134,6 +130,60 @@ public class RunSessionMessageSnapshotService {
                     exception);
             return false;
         }
+    }
+
+    private SnapshotUsage refreshSnapshotPages(
+            AgentRuntime runtime,
+            ExecutionNode node,
+            String remoteSessionId,
+            String agentId,
+            Session session,
+            Run run,
+            String traceId) {
+        SnapshotUsage runUsage = SnapshotUsage.empty();
+        Instant runUsageAt = null;
+        Set<String> seenCursors = new HashSet<>();
+        String cursor = null;
+        int loaded = 0;
+        while (loaded < SNAPSHOT_MAX_MESSAGES) {
+            int pageLimit = Math.min(SNAPSHOT_PAGE_LIMIT, SNAPSHOT_MAX_MESSAGES - loaded);
+            AgentSessionMessagesResult result = runtime.sessionMessages(new AgentSessionMessagesCommand(
+                            node,
+                            remoteSessionId,
+                            pageLimit,
+                            "asc",
+                            cursor,
+                            traceId))
+                    .block();
+            if (result == null) {
+                return null;
+            }
+            loaded += result.messages().size();
+            for (AgentSessionMessage message : result.messages()) {
+                Optional<SnapshotUsage> usage = upsertAssistantMessage(agentId, session.sessionId(), run, message, traceId);
+                Instant messageCreatedAt = projectedCreatedAt(message).orElse(Instant.now());
+                if (usage.isPresent() && usage.get().hasValue()
+                        && (runUsageAt == null || messageCreatedAt.isAfter(runUsageAt))) {
+                    runUsage = usage.get();
+                    runUsageAt = messageCreatedAt;
+                }
+            }
+            String nextCursor = result.nextCursor();
+            if (nextCursor == null || result.messages().isEmpty()) {
+                break;
+            }
+            if (!seenCursors.add(nextCursor)) {
+                LOGGER.warn(
+                        "Detected repeated agent session snapshot cursor, stop paging; sessionId={}, runId={}, agentId={}, traceId={}",
+                        session.sessionId().value(),
+                        run == null ? null : run.runId().value(),
+                        agentId,
+                        traceId);
+                break;
+            }
+            cursor = nextCursor;
+        }
+        return runUsage;
     }
 
     private Optional<AgentSessionBinding> findAgentBinding(String agentId, Session session, String traceId) {
@@ -173,13 +223,15 @@ public class RunSessionMessageSnapshotService {
         }
         Optional<SessionMessage> existing = sessionMessageRepository.findBySessionIdAndRemoteMessageId(sessionId, remoteMessageId);
         Instant now = Instant.now();
+        Instant createdAt = existing.map(SessionMessage::createdAt)
+                .orElseGet(() -> projectedCreatedAt(projected).orElse(now));
         SnapshotUsage usage = usage(projected);
         SessionMessage message = new SessionMessage(
                 existing.map(SessionMessage::messageId).orElseGet(() -> new SessionMessageId(RuntimeIdGenerator.messageId())),
                 sessionId,
                 SessionMessageRole.ASSISTANT,
                 projectedContent.orElse(""),
-                existing.map(SessionMessage::createdAt).orElse(now),
+                createdAt,
                 traceId,
                 run == null ? existing.map(SessionMessage::runId).orElse(null) : run.runId(),
                 agentId,
@@ -190,6 +242,18 @@ public class RunSessionMessageSnapshotService {
                 now);
         sessionMessageRepository.save(message);
         return Optional.of(usage);
+    }
+
+    private Optional<Instant> projectedCreatedAt(AgentSessionMessage projected) {
+        Map<String, Object> message = projected.message();
+        Map<String, Object> time = mapValue(message.get("time")).orElse(Map.of());
+        return longValue(time, "created", "createdAt", "created_at")
+                .or(() -> longValue(message, "createdAt", "created_at"))
+                .map(this::epochInstant);
+    }
+
+    private Instant epochInstant(long value) {
+        return value > 10_000_000_000L ? Instant.ofEpochMilli(value) : Instant.ofEpochSecond(value);
     }
 
     private boolean isAssistant(Map<String, Object> message) {

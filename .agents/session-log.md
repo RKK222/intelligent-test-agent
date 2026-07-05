@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-05 - opencode 历史消息快照改为分页恢复
+
+- Why:
+  - 上一轮把 generated `ApiClient` 的响应缓冲调到 16MB 只能规避默认 256KB 报错，仍然依赖单次大响应；进一步排查 opencode legacy `/session/{sessionID}/message` 发现分页 cursor 通过 `X-Next-Cursor` header 返回，平台已有 command/result cursor 字段但未透传。
+- What:
+  - `GeneratedOpencodeSdkGateway` 改为读取 `X-Next-Cursor`，`AgentSessionMessagesResult` 保留 cursor，`RunSessionMessageSnapshotService` 以 50 条一页、最多 200 条分页拉取并 upsert。
+  - 快照保存 assistant 消息时优先使用远端 message `time.created` 作为 `session_messages.created_at`，避免从最新页翻旧页时按写入时间造成历史错序；Run token/cost 选择远端时间最新的 usage。
+  - 补充 gateway header cursor 测试和 Run 终态分页快照测试，并同步 agent-runtime、opencode-client、opencode-runtime README 及 API/SSE 文档说明。
+- How:
+  - 不手改 generated SDK，不改数据库结构；继续通过 `AgentRuntime -> OpencodeClientFacade -> GeneratedOpencodeSdkGateway` 既有边界读取标准 `/session/{sessionID}/message`，不切到 `/api/session/{sessionID}/message`。
+- Result:
+  - `GeneratedOpencodeSdkGatewayTest`、`RunApplicationServiceTest` 定向测试、`mvn -pl test-agent-opencode-runtime -am test -DskipITs` 和 `git diff --check` 通过；本地服务启动仍需受 `.env.test` 数据库连通性约束复验。
+
 ### 2026-07-05 - 放宽 opencode 历史消息快照响应缓冲
 
 - Why:

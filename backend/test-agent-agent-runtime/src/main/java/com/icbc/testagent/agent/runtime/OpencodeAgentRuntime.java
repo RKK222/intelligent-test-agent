@@ -194,7 +194,10 @@ public class OpencodeAgentRuntime implements AgentRuntime {
     }
 
     private AgentSessionMessagesResult toSessionMessagesResult(OpencodeSessionMessagesResult result) {
-        return new AgentSessionMessagesResult(result.messages().stream().map(this::toSessionMessage).toList());
+        return new AgentSessionMessagesResult(
+                result.messages().stream().map(this::toSessionMessage).toList(),
+                result.previousCursor(),
+                result.nextCursor());
     }
 
     private AgentSessionMessage toSessionMessage(OpencodeSessionMessage message) {

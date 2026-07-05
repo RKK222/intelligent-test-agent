@@ -20,6 +20,7 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -394,7 +395,7 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
             String cursor,
             String traceId) {
         ApiClient apiClient = apiClient(node, traceId);
-        ParameterizedTypeReference<List<Map<String, Object>>> returnType = new ParameterizedTypeReference<>() {
+        ParameterizedTypeReference<Map<String, Object>> returnType = new ParameterizedTypeReference<>() {
         };
         Map<String, Object> pathParams = new HashMap<>();
         pathParams.put("sessionID", opencodeSessionId);
@@ -420,9 +421,8 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
                         contentType,
                         new String[]{},
                         returnType)
-                .bodyToMono(returnType)
-                .defaultIfEmpty(List.of())
-                .map(messages -> toSessionMessagesResult(messages, order));
+                .toEntityList(returnType)
+                .map(response -> toSessionMessagesResult(response, order));
     }
 
     /**
@@ -483,10 +483,10 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
      * 将标准 session message envelope 转换为平台结果，并按调用方要求调整顺序。
      */
     private OpencodeSessionMessagesResult toSessionMessagesResult(
-            List<Map<String, Object>> response,
+            ResponseEntity<List<Map<String, Object>>> response,
             String order) {
         List<OpencodeSessionMessage> messages = new ArrayList<>();
-        for (Map<String, Object> envelope : response) {
+        for (Map<String, Object> envelope : response.getBody() == null ? List.<Map<String, Object>>of() : response.getBody()) {
             Map<String, Object> info = stringObjectMap(envelope.get("info"));
             if (info.isEmpty()) {
                 continue;
@@ -496,7 +496,10 @@ public class GeneratedOpencodeSdkGateway implements OpencodeSdkGateway {
         if ("desc".equalsIgnoreCase(order)) {
             Collections.reverse(messages);
         }
-        return new OpencodeSessionMessagesResult(List.copyOf(messages), null, null);
+        return new OpencodeSessionMessagesResult(
+                List.copyOf(messages),
+                null,
+                optionalText(response.getHeaders().getFirst("X-Next-Cursor")));
     }
 
     /**

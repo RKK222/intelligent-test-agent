@@ -807,6 +807,85 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void servicePagesAssistantSnapshotWhenRemoteReturnsNextCursor() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.sessionMessages = command -> {
+            if (command.cursor() == null) {
+                return Mono.just(new OpencodeSessionMessagesResult(
+                        List.of(new OpencodeSessionMessage(
+                                Map.of(
+                                        "id", "msg_page_one_1234567890abcdef",
+                                        "type", "assistant",
+                                        "role", "assistant",
+                                        "time", Map.of("created", 1781846402000L),
+                                        "tokens", Map.of("output", 20),
+                                        "cost", new BigDecimal("2.00000000")),
+                                List.of(Map.of(
+                                        "id", "part_page_one",
+                                        "messageID", "msg_page_one_1234567890abcdef",
+                                        "type", "text",
+                                        "text", "第一页")))),
+                        null,
+                        "cursor_page_two"));
+            }
+            return Mono.just(new OpencodeSessionMessagesResult(
+                    List.of(new OpencodeSessionMessage(
+                            Map.of(
+                                    "id", "msg_page_two_1234567890abcdef",
+                                    "type", "assistant",
+                                    "role", "assistant",
+                                    "time", Map.of("created", 1781846401000L),
+                                    "tokens", Map.of("output", 10),
+                                    "cost", new BigDecimal("1.00000000")),
+                            List.of(Map.of(
+                                    "id", "part_page_two",
+                                    "messageID", "msg_page_two_1234567890abcdef",
+                                    "type", "text",
+                                    "text", "第二页")))),
+                    null,
+                    null));
+        };
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.RUN_SUCCEEDED,
+                command.traceId(),
+                Instant.now(),
+                Map.of("messageID", "msg_page_two_1234567890abcdef")));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                messages,
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
+        awaitMessageCount(messages, 3);
+        assertThat(facade.sessionMessagesCommands).hasSize(2);
+        assertThat(facade.sessionMessagesCommands.get(0).limit()).isEqualTo(50);
+        assertThat(facade.sessionMessagesCommands.get(0).cursor()).isNull();
+        assertThat(facade.sessionMessagesCommands.get(1).limit()).isEqualTo(50);
+        assertThat(facade.sessionMessagesCommands.get(1).cursor()).isEqualTo("cursor_page_two");
+        assertThat(messages.saved).extracting(SessionMessage::content).contains("第一页", "第二页");
+        assertThat(messages.saved).filteredOn(message -> "第一页".equals(message.content()))
+                .singleElement()
+                .satisfies(message -> assertThat(message.createdAt()).isEqualTo(Instant.ofEpochMilli(1781846402000L)));
+        assertThat(messages.saved).filteredOn(message -> "第二页".equals(message.content()))
+                .singleElement()
+                .satisfies(message -> assertThat(message.createdAt()).isEqualTo(Instant.ofEpochMilli(1781846401000L)));
+        assertThat(service.getRun(run.runId()).tokenUsage().output()).isEqualTo(20L);
+        assertThat(service.getRun(run.runId()).costUsd()).isEqualByComparingTo("2.00000000");
+    }
+
+    @Test
     void serviceMarksRunFailedWhenOpencodeStreamEmitsTerminalEvent() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();
@@ -1660,10 +1739,13 @@ class RunApplicationServiceTest {
         private final List<OpencodeStartRunCommand> startRunCommands = new ArrayList<>();
         private final List<OpencodeStartCommand> startCommandCommands = new ArrayList<>();
         private final List<OpencodeRuntimeCommand> runtimeCommands = new ArrayList<>();
+        private final List<OpencodeSessionMessagesCommand> sessionMessagesCommands = new ArrayList<>();
         private final List<String> callOrder = new ArrayList<>();
         private String lastPrompt;
         private RuntimeException createSessionError;
         private OpencodeSessionMessagesResult sessionMessagesResult = new OpencodeSessionMessagesResult(List.of(), null, null);
+        private Function<OpencodeSessionMessagesCommand, Mono<OpencodeSessionMessagesResult>> sessionMessages =
+                command -> Mono.just(sessionMessagesResult);
         private Function<OpencodeStreamEventsCommand, Flux<RunEventDraft>> streamEvents = ignored -> Flux.empty();
         private Function<OpencodeStartRunCommand, Mono<OpencodeStartRunResult>> startRun =
                 ignored -> Mono.just(new OpencodeStartRunResult(true));
@@ -1727,7 +1809,8 @@ class RunApplicationServiceTest {
 
         @Override
         public Mono<OpencodeSessionMessagesResult> sessionMessages(OpencodeSessionMessagesCommand command) {
-            return Mono.just(sessionMessagesResult);
+            sessionMessagesCommands.add(command);
+            return sessionMessages.apply(command);
         }
     }
 
