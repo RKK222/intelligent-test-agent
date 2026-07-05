@@ -105,6 +105,8 @@ export function createTimelineRows(state: OpencodeLikeConversationState): Timeli
       key: "runtime:retry",
       userMessageId: latestUserMessageId(state) ?? "__pending__",
       attempt: state.runtimeStatus.attempt,
+      maxAttempts: state.runtimeStatus.maxAttempts,
+      retryAfterSeconds: state.runtimeStatus.retryAfterSeconds,
       message: state.runtimeStatus.message,
       action: state.runtimeStatus.action
     });

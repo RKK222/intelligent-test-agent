@@ -78,14 +78,21 @@ import {
   nextCenterModeAfterVcsRefresh,
   notifyOnAttention,
   parseCommand,
+  prepareAutoRetryRun,
   promptFromParts,
+  resolveRetryDeadline,
+  retryCountdownSeconds,
+  retryExpirationDecision,
   runEventMatchesRun,
   runtimeResources,
   runtimeStatus,
   sessionTitleFromFirstMessage,
+  shouldFailExhaustedRetry,
   syntheticEvent,
   text,
-  workspaceLoadIsCurrent
+  workspaceLoadIsCurrent,
+  type AutoRetryRunDraft,
+  type RetryDeadlineMap
 } from "./workbench-utils";
 
 const apiBaseUrl = import.meta.env.VITE_TEST_AGENT_API_BASE_URL ?? "http://127.0.0.1:8080";
@@ -186,6 +193,7 @@ const rawEntriesBySessionId = ref<Record<string, RawOutputEntry[]>>({});
 const rawRunSessionMap = ref<Record<string, string>>({});
 const reportedRunEventStreamErrors = new Set<string>();
 const lastPrompt = ref("");
+const lastRunDraft = ref<AutoRetryRunDraft | null>(null);
 const selectedAgent = ref("");
 const storedRuntimePreference = readStoredRuntimePreference();
 const selectedProvider = ref(storedRuntimePreference.provider);
@@ -202,6 +210,10 @@ const diffViewerRef = ref<InstanceType<typeof DiffViewer> | null>(null);
 const isDiffDirty = ref(false);
 const sessionSearch = ref("");
 const followUpQueue = ref<FollowUpDraft[]>([]);
+const retryDeadlines = ref<RetryDeadlineMap>({});
+const retryActionInFlightKey = ref<string | null>(null);
+const autoRetryStarting = ref(false);
+const ignoredRunIds = ref<Set<string>>(new Set());
 const diffContextParts = ref<PromptPart[]>([]);
 const editorSelection = ref<EditorSelectionContext | undefined>(undefined);
 const bottomMode = ref<"run" | "terminal">("run");
@@ -329,6 +341,14 @@ const feedbackSubmitting = ref<Record<string, boolean>>({});
 const platformMessageIdsByRemoteId = ref<Record<string, string>>({});
 function dispatchChat(action: Parameters<typeof reduceAgentChatRuntime>[1]) {
   chatState.value = reduceAgentChatRuntime(chatState.value, action);
+}
+
+function clearAutoRetryState() {
+  lastRunDraft.value = null;
+  retryDeadlines.value = {};
+  retryActionInFlightKey.value = null;
+  autoRetryStarting.value = false;
+  ignoredRunIds.value = new Set();
 }
 
 function isPlatformSessionMessageId(id: string | undefined): id is string {
@@ -1115,6 +1135,9 @@ function rawText(value: unknown): string | undefined {
 }
 
 async function recoverActiveRunForSession(sessionId: string, reason: string): Promise<Run | null> {
+  if (autoRetryStarting.value) {
+    return null;
+  }
   const seq = ++activeRunProbeSeq;
   try {
     const activeRun = await api.getActiveRun(sessionId);
@@ -1259,6 +1282,9 @@ watch(run, (r, _old, onCleanup) => {
     runId: r.runId,
     onRawMessage: (message) => observeRawRunEventMessage(message, r.sessionId),
     onEvent: (event) => {
+      if (ignoredRunIds.value.has(event.runId)) {
+        return;
+      }
       if (!runEventMatchesRun(event, r.runId, run.value)) {
         return;
       }
@@ -1535,6 +1561,17 @@ const initializeOpencodeProcessMutation = useMutation({
 const runtimeBusy = computed(() =>
   isRuntimeBusy(run.value?.status, chatState.value.status, startRunMutation.isPending.value)
 );
+const timelineRuntimeStatusForPanel = computed(() => {
+  const status = chatState.value.runtimeStatus;
+  if (!status || status.type !== "retry") {
+    return status;
+  }
+  void nowTick.value;
+  return {
+    ...status,
+    retryAfterSeconds: retryCountdownSeconds(status, nowTick.value, retryDeadlines.value)
+  };
+});
 const canStopRun = computed(() => Boolean(run.value && isRunBusyStatus(run.value.status) && !cancelRunMutation.isPending.value));
 const stopDisabledReason = computed(() => {
   if (cancelRunMutation.isPending.value) return "正在终止";
@@ -1652,6 +1689,96 @@ watch(runtimeBusy, (busy) => {
   else stopTick();
 }, { immediate: true });
 
+watch(
+  () => chatState.value.runtimeStatus,
+  (status) => {
+    if (!status || status.type !== "retry") {
+      retryActionInFlightKey.value = null;
+      return;
+    }
+    const resolved = resolveRetryDeadline(retryDeadlines.value, status, Date.now());
+    if (resolved.deadlines !== retryDeadlines.value) {
+      retryDeadlines.value = resolved.deadlines;
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  [() => chatState.value.runtimeStatus, nowTick],
+  () => {
+    const status = chatState.value.runtimeStatus;
+    if (!status || status.type !== "retry") {
+      return;
+    }
+    const resolved = resolveRetryDeadline(retryDeadlines.value, status, nowTick.value);
+    if (resolved.deadlines !== retryDeadlines.value) {
+      retryDeadlines.value = resolved.deadlines;
+    }
+    const decision = retryExpirationDecision(status, nowTick.value, retryDeadlines.value);
+    if (decision === "wait") {
+      return;
+    }
+    const key = retryActionKey(status);
+    if (retryActionInFlightKey.value === key) {
+      return;
+    }
+    retryActionInFlightKey.value = key;
+    if (shouldFailExhaustedRetry(status, nowTick.value, retryDeadlines.value)) {
+      failRetryingRun(status.message ?? "重试 3 次后仍然失败");
+      return;
+    }
+    handleAutoRetryRun();
+  },
+  { immediate: true }
+);
+
+function retryActionKey(status: { retryKey?: string; attempt?: number; message?: string }): string {
+  return status.retryKey ?? `${status.attempt ?? 0}:${status.message ?? ""}`;
+}
+
+function failRetryingRun(message: string) {
+  const occurredAt = new Date().toISOString();
+  dispatchChat({
+    type: "event",
+    event: syntheticEvent("run.failed", { error: { name: "RetryExhausted", message }, status: "FAILED" }, occurredAt)
+  });
+  if (run.value && isRunBusyStatus(run.value.status)) {
+    run.value = { ...run.value, status: "FAILED", updatedAt: occurredAt };
+  }
+  if (chatStartedAt.value) {
+    totalDurationMs.value += Date.now() - chatStartedAt.value;
+    lastDuration = formatDurationMs(Date.now() - chatStartedAt.value);
+    chatStartedAt.value = null;
+    nowTick.value = Date.now();
+  }
+}
+
+function handleAutoRetryRun() {
+  const prepared = prepareAutoRetryRun(run.value, lastRunDraft.value, new Date().toISOString());
+  if (prepared.type === "missing-draft") {
+    feedback.value = { kind: "error", title: "自动重试失败", description: "未找到上一条任务内容，请重新输入后发送" };
+    failRetryingRun("未找到可自动重试的任务内容");
+    return;
+  }
+  autoRetryStarting.value = true;
+  if (prepared.cancelRunId) {
+    ignoredRunIds.value = new Set([...ignoredRunIds.value, prepared.cancelRunId]);
+    void api.cancelRun(prepared.cancelRunId).catch(() => undefined);
+  }
+  if (prepared.localRun) {
+    run.value = prepared.localRun;
+  }
+  clearRunEventSseFeedback();
+  lastRunDraft.value = prepared.input;
+  dispatchChat({ type: "run.requested" });
+  startRunMutation.mutate(prepared.input, {
+    onSettled: () => {
+      autoRetryStarting.value = false;
+    }
+  });
+}
+
 // follow-up 队列：Run 空闲且有排队 prompt 时自动出队执行
 watch(
   [followUpQueue, run, session, () => startRunMutation.isPending.value, opencodeProcessReady],
@@ -1668,8 +1795,10 @@ watch(
       return;
     }
     followUpQueue.value = queue;
+    const draft: AutoRetryRunDraft = { prompt: next.prompt, parts: next.parts, command: next.command };
+    lastRunDraft.value = draft;
     dispatchChat({ type: "run.requested" });
-    startRunMutation.mutate({ prompt: next.prompt, parts: next.parts, command: next.command });
+    startRunMutation.mutate(draft);
   }
 );
 
@@ -1693,6 +1822,7 @@ const deleteSessionMutation = useMutation({
     if (session.value?.sessionId === deleted.sessionId) {
       session.value = null;
       run.value = null;
+      clearAutoRetryState();
       dispatchChat({ type: "reset" });
     }
     void queryClient.invalidateQueries({ queryKey: ["sessions"] });
@@ -1860,6 +1990,7 @@ function resetWorkspaceState() {
   lastDuration = undefined;
   lastTokens = 0;
   nowTick.value = Date.now();
+  clearAutoRetryState();
   dispatchChat({ type: "reset" });
   // 切工作区时清掉个人工作区 ID，避免旧版本的空 ID 残留导致提交/推送指向错误目标。
   selectedWorkspaceSnapshot.value = undefined;
@@ -2456,9 +2587,11 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     return;
   }
   // slash 技能和普通消息统一创建平台 Run，才能复用 SSE、刷新恢复和终止能力。
+  const runDraft: AutoRetryRunDraft = { prompt: displayPrompt, parts, title: displayPrompt, command: command ?? undefined };
+  lastRunDraft.value = runDraft;
   clearRunEventSseFeedback();
   dispatchChat({ type: "run.requested" });
-  startRunMutation.mutate({ prompt: displayPrompt, parts, title: displayPrompt, command: command ?? undefined });
+  startRunMutation.mutate(runDraft);
 }
 
 function handleStopRun() {
@@ -3136,6 +3269,7 @@ async function switchSession(sessionId: string) {
   lastDuration = undefined;
   lastTokens = 0;
   nowTick.value = Date.now();
+  clearAutoRetryState();
   try {
     const page = await api.listSessionMessages(sessionId, 1, 100);
     if (switchSeq !== historySwitchSeq) {
@@ -3190,6 +3324,7 @@ async function switchSession(sessionId: string) {
 function handleNewConversation() {
   session.value = null;
   run.value = null;
+  clearAutoRetryState();
   dispatchChat({ type: "reset" });
   messageFeedbacks.value = {};
   feedbackSubmitting.value = {};
@@ -3465,7 +3600,7 @@ async function handleLogout() {
           :subagent-by-task-part-id="chatState.subagentByTaskPartId"
           :running="runtimeBusy"
           :runtime-status="chatState.status ?? run?.status"
-          :timeline-runtime-status="chatState.runtimeStatus"
+          :timeline-runtime-status="timelineRuntimeStatusForPanel"
           :title="chatTitle"
           :file-changes="diffFiles"
           :task-usage="taskUsage"

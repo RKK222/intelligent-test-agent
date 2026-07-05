@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-05 - 前端 retry 倒计时与自动重试
+
+- Why:
+  - `session.status.retry` 从 SSE 重放或延迟到达时，前端按事件 `occurredAt` 计算倒计时会直接显示 0 秒并停住；同时 retry 等待期间仍可能显示普通“思考中”，用户无法判断正在等待重试。
+- What:
+  - `agent-chat` 的 retry runtime status 增加 `retryKey`、60 秒倒计时和 3 次上限，时间线 retry 行展示“重试中 N 秒后 - 第 X 次 / 共 3 次”，并在 retry 时抑制 thinking/working-status。
+  - `agent-web` 改为按前端首次收到 retry 事件的时间维护本地 deadline；第 1/2 次到期后用最近一次 Run 草稿自动新建 Run，第 3 次仍无后续事件时本地收敛为失败。
+  - 同步 frontend README、agent-web/agent-chat README 和 RunEvent 文档说明。
+- How:
+  - 不新增后端 API、不改 SSE wire shape、不改数据库；旧等待 Run 只做 best-effort cancel，旧 SSE runId 会被前端忽略，自动重试直接调用现有 `startRun`。
+- Result:
+  - 定向 Vitest（`workbench-utils`、`FigmaChatPanel`、`runtime-reducer`、`opencode-like-state`）和 `@test-agent/agent-web`、`@test-agent/agent-chat` typecheck 通过。
+
 ### 2026-07-05 - opencode 历史消息快照改为分页恢复
 
 - Why:
@@ -51,6 +64,22 @@
   - 仅修改 `frontend/apps/agent-web` 前端状态同步和测试；不改后端 API、RunEvent 契约、数据库、generated SDK 或环境配置。
 - Result:
   - 定向 Vitest（`workbench-utils.test.ts`、`git-changes-panel.test.ts`）、`@test-agent/agent-web` typecheck 和新增 Playwright 用例通过。
+### 2026-07-05 - 调整非文件夹文件占位为2px并增加悬浮对齐线
+
+- Why:
+  - 1. 用户反馈文件相对文件夹的位置目前过于靠后，决定将文件前导占位宽度缩减为 2px 以优化视觉对齐。
+  - 2. 用户要求当鼠标悬浮在列表区域时，显示类似 VS Code 的纵向文件夹缩进引导对齐线，方便长目录或深层目录下的对齐辨识。
+- What:
+  - 1. 在文件浏览 Vue 组件（`DirectoryRows.vue`、`AgentConfigTreeNode.vue`、`FileExplorer.vue`）中，将文件行前导的 14px 宽 `ta-file-tree-spacer` 占位替换为专用的 `ta-file-tree-file-spacer`。
+  - 2. 在 `globals.css` 中新增 `.ta-file-tree-file-spacer`（2px 宽）及 `.ta-file-tree-indent-guide`（1px 宽，且默认 `opacity: 0` 并带有渐变过渡）样式类。
+  - 3. 在 `globals.css` 中为 `.ta-file-tree-row` 添加 `position: relative;` 确保子级对齐线可以绝对定位锚定。
+  - 4. 在 `DirectoryRows.vue` 和 `AgentConfigTreeNode.vue` 的行按钮内部，通过 `v-for="i in depth"` 渲染 `depth` 条 `.ta-file-tree-indent-guide` 绝对定位线，位置计算公式为 `left: 13 + (i - 1) * 16` 像素，水平上完美对齐各上级文件夹折叠箭头的几何中心。
+  - 5. 在 `globals.css` 中添加 `:hover` 激活规则：当鼠标悬停在 `.ta-file-tree-scroll` 或 `.agent-tree` 列表滚动容器上时，显示内部所有的缩进引导线。
+- How:
+  - 结合 CSS `opacity` 与 `:hover` 选择器实现只在列表容器悬浮时淡入缩进引导线，保持文件树在静止无交互时的视觉干净度；利用行相对定位和基于 `depth` 计算 left 偏移量的 span，在非扁平树节点上精确投影每一级父辈折叠线的延长垂直线。
+- Result:
+  - 前端 `corepack pnpm typecheck` 和 `corepack pnpm build` 编译打包均无报错。
+  - 全量 Vitest 单元测试运行通过（346 passed | 1 skipped）。
 
 ### 2026-07-05 - 修复运行中上滑被拉回底部
 

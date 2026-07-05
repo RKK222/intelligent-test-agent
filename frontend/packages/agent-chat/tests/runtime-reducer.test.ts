@@ -86,7 +86,10 @@ describe("agent-chat runtime reducer", () => {
     expect(next.status).toBe("RETRY");
     expect(next.runtimeStatus).toMatchObject({
       type: "retry",
+      retryKey: "evt_session.status",
       attempt: 1,
+      maxAttempts: 3,
+      retryAfterSeconds: 60,
       message: "Free usage exceeded, subscribe to Go",
       action: {
         reason: "free_tier_limit",

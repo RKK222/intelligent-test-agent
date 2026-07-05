@@ -72,8 +72,11 @@ describe("opencode-like conversation state", () => {
       running: true,
       runtimeStatus: {
         type: "retry",
+        retryKey: "evt_retry_1",
         attempt: 1,
+        maxAttempts: 3,
         message: "Free usage exceeded, subscribe to Go",
+        retryAfterSeconds: 60,
         action: { label: "subscribe", link: "https://opencode.ai/go" }
       }
     });
@@ -84,9 +87,33 @@ describe("opencode-like conversation state", () => {
     expect(rows.at(-1)).toMatchObject({
       type: "retry",
       attempt: 1,
+      maxAttempts: 3,
       message: "Free usage exceeded, subscribe to Go",
+      retryAfterSeconds: 60,
       action: { label: "subscribe", link: "https://opencode.ai/go" }
     });
+  });
+
+  it("does not project working status while retrying after tool activity", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "继续执行"),
+        assistantMessage("msg_assistant_1", [toolPart("part_read", "read", { filePath: "README.md" })])
+      ],
+      running: true,
+      runtimeStatus: {
+        type: "retry",
+        retryKey: "evt_retry_1",
+        attempt: 1,
+        maxAttempts: 3,
+        retryAfterSeconds: 60
+      }
+    });
+    const rows = createTimelineRows(state);
+
+    expect(rows.some((row) => row.type === "thinking")).toBe(false);
+    expect(rows.some((row) => row.type === "working-status")).toBe(false);
+    expect(rows.at(-1)).toMatchObject({ type: "retry", retryAfterSeconds: 60 });
   });
 
   it("formats provider and model labels from the catalog", () => {

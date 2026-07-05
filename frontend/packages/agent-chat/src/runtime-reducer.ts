@@ -13,6 +13,9 @@ import type {
 } from "@test-agent/shared-types";
 import type { OpencodeLikeRuntimeStatus } from "./opencode-like";
 
+const SESSION_STATUS_RETRY_WAIT_SECONDS = 60;
+const SESSION_STATUS_MAX_RETRY_ATTEMPTS = 3;
+
 export type AgentChatRuntimeState = {
   messages: AgentMessage[];
   permissions: PermissionRequest[];
@@ -270,7 +273,7 @@ function reduceEventOnly(
     return subagent ? rememberSubagent(state, subagent) : state;
   }
   if (event.type === "session.status") {
-    const runtimeStatus = runtimeStatusFromSessionStatus(event.payload.status);
+    const runtimeStatus = runtimeStatusFromSessionStatus(event);
     return {
       ...state,
       status: runtimeStatus?.type.toUpperCase() ?? text(event.payload.status) ?? state.status,
@@ -291,19 +294,35 @@ function reduceEventOnly(
   return state;
 }
 
-function runtimeStatusFromSessionStatus(status: unknown): OpencodeLikeRuntimeStatus | undefined {
+function runtimeStatusFromSessionStatus(event: RunEvent): OpencodeLikeRuntimeStatus | undefined {
+  const status = event.payload.status ?? event.payload;
   const statusRecord = record(status);
   if (!statusRecord) {
     const statusText = text(status)?.toLowerCase();
-    return statusText === "retry" ? { type: "retry" } : undefined;
+    return statusText === "retry"
+      ? {
+          type: "retry",
+          retryKey: retryKeyFromEvent(event),
+          maxAttempts: SESSION_STATUS_MAX_RETRY_ATTEMPTS,
+          retryAfterSeconds: SESSION_STATUS_RETRY_WAIT_SECONDS
+        }
+      : undefined;
   }
   const type = text(statusRecord.type)?.toLowerCase();
   if (!type) {
     return undefined;
   }
   const action = record(statusRecord.action);
+  const retryFields = type === "retry"
+    ? {
+        retryKey: retryKeyFromEvent(event),
+        maxAttempts: SESSION_STATUS_MAX_RETRY_ATTEMPTS,
+        retryAfterSeconds: SESSION_STATUS_RETRY_WAIT_SECONDS
+      }
+    : {};
   return {
     type,
+    ...retryFields,
     attempt: number(statusRecord.attempt),
     message: text(statusRecord.message),
     action: action
@@ -317,6 +336,14 @@ function runtimeStatusFromSessionStatus(status: unknown): OpencodeLikeRuntimeSta
         }
       : undefined
   };
+}
+
+function retryKeyFromEvent(event: RunEvent): string {
+  if (event.eventId) {
+    return event.eventId;
+  }
+  const fallback = [event.traceId, event.runId, event.seq].filter((item) => item !== undefined && item !== "").join(":");
+  return fallback || `retry:${Date.parse(event.occurredAt) || 0}`;
 }
 
 function normalizeRunEventPayload(event: RunEvent): RunEvent {

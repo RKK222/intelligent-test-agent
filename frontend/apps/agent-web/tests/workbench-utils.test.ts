@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MessagePart, RunDiffFile } from "@test-agent/shared-types";
+import type { MessagePart, PromptPart, Run, RunDiffFile } from "@test-agent/shared-types";
 import {
   diffFilesFromPayload,
   diffFilesFromSessionMessages,
@@ -11,7 +11,12 @@ import {
   normalizePathKey,
   nextCenterModeAfterVcsRefresh,
   nextCenterModeAfterRunDiff,
+  prepareAutoRetryRun,
+  resolveRetryDeadline,
+  retryCountdownSeconds,
+  retryExpirationDecision,
   sessionTitleFromFirstMessage,
+  shouldFailExhaustedRetry,
   workspaceLoadIsCurrent
 } from "../src/components/workbench-utils";
 import type { FileTreeEntry } from "@test-agent/shared-types";
@@ -68,6 +73,95 @@ describe("runEventMatchesRun", () => {
     expect(runEventMatchesRun({ runId: "run_old" }, "run_current", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_old", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_current", { ...current, runId: "run_next" })).toBe(false);
+  });
+});
+
+describe("retry status helpers", () => {
+  it("starts a replayed retry countdown from the client receipt time", () => {
+    const retry = {
+      type: "retry",
+      retryKey: "evt_retry_1",
+      attempt: 1,
+      maxAttempts: 3,
+      message: "Free usage exceeded, subscribe to Go",
+      retryAfterSeconds: 60,
+      retryAt: "2026-07-05T11:00:00.000Z"
+    } as const;
+    const receivedAt = Date.parse("2026-07-05T11:29:00.000Z");
+    const resolved = resolveRetryDeadline({}, retry, receivedAt);
+
+    expect(resolved.deadlineMs).toBe(Date.parse("2026-07-05T11:30:00.000Z"));
+    expect(retryCountdownSeconds(retry, receivedAt, resolved.deadlines)).toBe(60);
+    expect(retryCountdownSeconds(retry, Date.parse("2026-07-05T11:29:59.000Z"), resolved.deadlines)).toBe(1);
+    expect(retryCountdownSeconds(retry, Date.parse("2026-07-05T11:30:00.000Z"), resolved.deadlines)).toBe(0);
+  });
+
+  it("reuses an existing retry deadline for the same retry key", () => {
+    const retry = {
+      type: "retry",
+      retryKey: "evt_retry_1",
+      attempt: 1,
+      maxAttempts: 3,
+      retryAfterSeconds: 60,
+      retryAt: ""
+    } as const;
+    const deadlines = { evt_retry_1: Date.parse("2026-07-05T11:30:00.000Z") };
+    const resolved = resolveRetryDeadline(deadlines, retry, Date.parse("2026-07-05T11:29:30.000Z"));
+
+    expect(resolved.deadlines).toBe(deadlines);
+    expect(resolved.deadlineMs).toBe(deadlines.evt_retry_1);
+  });
+
+  it("auto-retries the first two expired retry attempts and fails the third", () => {
+    const deadlines = { evt_retry_1: Date.parse("2026-07-05T11:30:00.000Z") };
+    const now = Date.parse("2026-07-05T11:30:00.000Z");
+    const retry = {
+      type: "retry",
+      retryKey: "evt_retry_1",
+      attempt: 1,
+      maxAttempts: 3,
+      retryAfterSeconds: 60,
+      retryAt: ""
+    } as const;
+
+    expect(retryExpirationDecision(retry, now - 1, deadlines)).toBe("wait");
+    expect(retryExpirationDecision(retry, now, deadlines)).toBe("retry");
+    expect(retryExpirationDecision({ ...retry, attempt: 2 }, now, deadlines)).toBe("retry");
+    expect(retryExpirationDecision({ ...retry, attempt: 3 }, now, deadlines)).toBe("fail");
+    expect(shouldFailExhaustedRetry({ ...retry, attempt: 3 }, now, deadlines)).toBe(true);
+  });
+});
+
+describe("auto retry run helpers", () => {
+  it("prepares a new run from the last run draft and cancels the current busy run", () => {
+    const parts: PromptPart[] = [{ type: "text", text: "继续执行" }];
+    const currentRun: Run = {
+      runId: "run_old",
+      sessionId: "ses_1",
+      workspaceId: "wrk_1",
+      status: "RUNNING",
+      createdAt: "2026-07-05T11:00:00Z",
+      updatedAt: "2026-07-05T11:00:00Z"
+    };
+    const draft = {
+      prompt: "继续执行",
+      parts,
+      title: "继续执行",
+      command: { command: "skill", arguments: "frontend" }
+    };
+
+    expect(prepareAutoRetryRun(currentRun, draft, "2026-07-05T11:01:00.000Z")).toEqual({
+      type: "start",
+      input: draft,
+      cancelRunId: "run_old",
+      localRun: { ...currentRun, status: "CANCELLED", updatedAt: "2026-07-05T11:01:00.000Z" }
+    });
+  });
+
+  it("fails auto retry when the previous run draft is missing", () => {
+    expect(prepareAutoRetryRun(null, null, "2026-07-05T11:01:00.000Z")).toEqual({
+      type: "missing-draft"
+    });
   });
 });
 

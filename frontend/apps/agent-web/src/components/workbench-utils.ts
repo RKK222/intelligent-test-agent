@@ -15,7 +15,7 @@ import type {
   SessionMessage,
   Workspace
 } from "@test-agent/shared-types";
-import type { AgentChatRuntimeAction } from "@test-agent/agent-chat";
+import type { AgentChatRuntimeAction, OpencodeLikeRuntimeStatus } from "@test-agent/agent-chat";
 import type { EditorSelectionContext } from "@test-agent/editor";
 import type { Feedback } from "@test-agent/ui-kit";
 import { buildComposerPromptParts, normalizeMessagePart, type ComposerAttachment } from "@test-agent/agent-chat";
@@ -52,6 +52,105 @@ export function runEventMatchesRun(
   currentRun: Pick<Run, "runId"> | null | undefined
 ): boolean {
   return Boolean(event.runId && subscribedRunId && currentRun?.runId && event.runId === subscribedRunId && event.runId === currentRun.runId);
+}
+
+export type RetryDeadlineMap = Record<string, number>;
+export type RetryExpirationDecision = "wait" | "retry" | "fail";
+export type AutoRetryRunDraft = {
+  prompt: string;
+  parts: PromptPart[];
+  title?: string;
+  command?: { command: string; arguments: string };
+};
+export type AutoRetryRunPreparation =
+  | { type: "missing-draft" }
+  | { type: "start"; input: AutoRetryRunDraft; cancelRunId?: string; localRun?: Run };
+
+const DEFAULT_RETRY_WAIT_SECONDS = 60;
+const DEFAULT_RETRY_MAX_ATTEMPTS = 3;
+
+/**
+ * retry 事件可能来自 SSE 重放，不能用 occurredAt 推导倒计时。
+ * 同一个 retryKey 首次进入前端时固定记录本地 deadline，后续 tick 只读取该 deadline。
+ */
+export function resolveRetryDeadline(
+  deadlines: RetryDeadlineMap,
+  retryStatus: OpencodeLikeRuntimeStatus | undefined,
+  nowMs = Date.now()
+): { deadlines: RetryDeadlineMap; deadlineMs?: number } {
+  if (!retryStatus || retryStatus.type !== "retry") {
+    return { deadlines };
+  }
+  const key = retryDeadlineKey(retryStatus);
+  const existing = key ? deadlines[key] : undefined;
+  if (Number.isFinite(existing)) {
+    return { deadlines, deadlineMs: existing };
+  }
+  const waitSeconds = Math.max(0, retryStatus.retryAfterSeconds ?? DEFAULT_RETRY_WAIT_SECONDS);
+  const deadlineMs = nowMs + waitSeconds * 1000;
+  return key
+    ? { deadlines: { ...deadlines, [key]: deadlineMs }, deadlineMs }
+    : { deadlines, deadlineMs };
+}
+
+export function retryCountdownSeconds(
+  retryStatus: OpencodeLikeRuntimeStatus | undefined,
+  nowMs = Date.now(),
+  deadlines: RetryDeadlineMap = {}
+): number {
+  const { deadlineMs } = resolveRetryDeadline(deadlines, retryStatus, nowMs);
+  if (!Number.isFinite(deadlineMs)) {
+    return 0;
+  }
+  return Math.max(0, Math.ceil(((deadlineMs as number) - nowMs) / 1000));
+}
+
+export function retryExpirationDecision(
+  retryStatus: OpencodeLikeRuntimeStatus | undefined,
+  nowMs = Date.now(),
+  deadlines: RetryDeadlineMap = {}
+): RetryExpirationDecision {
+  if (!retryStatus || retryStatus.type !== "retry" || retryCountdownSeconds(retryStatus, nowMs, deadlines) > 0) {
+    return "wait";
+  }
+  const attempt = retryStatus.attempt ?? 0;
+  const maxAttempts = retryStatus.maxAttempts ?? DEFAULT_RETRY_MAX_ATTEMPTS;
+  return attempt >= maxAttempts ? "fail" : "retry";
+}
+
+export function shouldFailExhaustedRetry(
+  retryStatus: OpencodeLikeRuntimeStatus | undefined,
+  nowMs = Date.now(),
+  deadlines: RetryDeadlineMap = {}
+): boolean {
+  return retryExpirationDecision(retryStatus, nowMs, deadlines) === "fail";
+}
+
+export function prepareAutoRetryRun(
+  currentRun: Run | null | undefined,
+  draft: AutoRetryRunDraft | null | undefined,
+  updatedAt = new Date().toISOString()
+): AutoRetryRunPreparation {
+  if (!draft || !draft.prompt.trim()) {
+    return { type: "missing-draft" };
+  }
+  if (currentRun && autoRetryRunIsBusyStatus(currentRun.status)) {
+    return {
+      type: "start",
+      input: draft,
+      cancelRunId: currentRun.runId,
+      localRun: { ...currentRun, status: "CANCELLED", updatedAt }
+    };
+  }
+  return { type: "start", input: draft };
+}
+
+function retryDeadlineKey(retryStatus: OpencodeLikeRuntimeStatus): string {
+  return retryStatus.retryKey ?? `${retryStatus.attempt ?? 0}:${retryStatus.message ?? ""}`;
+}
+
+function autoRetryRunIsBusyStatus(status: Run["status"] | string | undefined): boolean {
+  return status === "PENDING" || status === "QUEUED" || status === "RUNNING" || status === "CANCELLING";
 }
 
 type WorkbenchCenterMode = "editor" | "diff" | "system";

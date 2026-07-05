@@ -14,7 +14,10 @@ import type {
 
 export type OpencodeLikeRuntimeStatus = {
   type: "idle" | "busy" | "retry" | "failed" | "cancelled" | string;
+  retryKey?: string;
   attempt?: number;
+  maxAttempts?: number;
+  retryAfterSeconds?: number;
   message?: string;
   action?: {
     reason?: string;
@@ -128,6 +131,8 @@ export type TimelineRow =
       key: string;
       userMessageId: string;
       attempt?: number;
+      maxAttempts?: number;
+      retryAfterSeconds?: number;
       message?: string;
       action?: OpencodeLikeRuntimeStatus["action"];
     }

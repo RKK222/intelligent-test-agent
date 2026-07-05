@@ -1911,6 +1911,8 @@ describe("FigmaChatPanel", () => {
         timelineRuntimeStatus: {
           type: "retry",
           attempt: 1,
+          maxAttempts: 3,
+          retryAfterSeconds: 60,
           message: "Free usage exceeded, subscribe to Go",
           action: {
             message: "Subscribe to OpenCode Go for reliable access to the best open-source models, starting at $5/month.",
@@ -1923,6 +1925,7 @@ describe("FigmaChatPanel", () => {
     });
 
     expect(wrapper.find(".oc-thinking-row").exists()).toBe(false);
+    expect(wrapper.find(".oc-retry-row").text()).toContain("重试中 60 秒后 - 第 1 次 / 共 3 次");
     expect(wrapper.find(".oc-retry-row").text()).toContain("Free usage exceeded, subscribe to Go");
     expect(wrapper.find(".oc-retry-row a").attributes("href")).toBe("https://opencode.ai/go");
   });

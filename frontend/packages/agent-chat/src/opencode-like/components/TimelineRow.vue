@@ -147,7 +147,15 @@ const toolGroupParts = computed(() => {
     :show-header="row.showAssistantHeader"
   />
   <ThinkingRow v-else-if="row.type === 'thinking'" class="oc-row" />
-  <RetryRow v-else-if="row.type === 'retry'" class="oc-row" :attempt="row.attempt" :message="row.message" :action="row.action" />
+  <RetryRow
+    v-else-if="row.type === 'retry'"
+    class="oc-row"
+    :attempt="row.attempt"
+    :max-attempts="row.maxAttempts"
+    :retry-after-seconds="row.retryAfterSeconds"
+    :message="row.message"
+    :action="row.action"
+  />
   <DiffSummaryRow
     v-else-if="row.type === 'diff-summary'"
     class="oc-row"
