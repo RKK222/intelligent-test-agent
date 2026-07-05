@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-05 - 修复新内容提示误弹与编辑器 Tab 批量关闭
+
+- Why:
+  - 用户反馈“查看新内容”应只在滚动条不在底部且运行中有新消息输出时出现，但新建对话和已完结历史会话也会误弹；同时希望编辑器 tab 像 VS Code 一样支持关闭右侧所有、关闭左侧所有和关闭所有。
+- What:
+  - `FigmaChatPanel` 将新内容提示收紧为 `running=true` 且最后消息增长或追加时才展示，并在历史加载、运行结束和非实时消息替换时清理提示状态。
+  - `FigmaEditorArea` 新增 tab 右键菜单，支持批量关闭右侧、左侧和全部标签；`AgentWorkbench` 复用既有关闭流程，批量关闭遇到未保存文件时仍中断并弹出确认。
+  - 同步 `agent-web` README，并新增组件回归测试覆盖提示误弹和 tab 批量关闭路径。
+- How:
+  - 仅修改 `frontend/apps/agent-web` 前端展示、工作台事件转发、组件测试和 README；不改后端 API、RunEvent 契约、数据库、generated SDK 或环境配置。
+- Result:
+  - 相关 Vitest 通过（2 files, 70 passed, 1 skipped）；`@test-agent/agent-web` typecheck 通过；`git diff --check` 通过；当前 worktree 前端 dev server 已在 `http://127.0.0.1:3001/` 启动并返回 HTTP 200。
+
 ### 2026-07-05 - 原始输出搜索命中高亮
 
 - Why:

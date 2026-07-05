@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import tabCloseUrl from "../assets/figma/tab-close.svg";
 import fileIconUrl from "../assets/figma/file-icon.svg";
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref } from "vue";
 import { Eye, EyeOff } from "lucide-vue-next";
 import type { EditorTab as WorkbenchTab } from "@test-agent/workbench-shell";
 import { languageFromPath } from "@test-agent/editor";
@@ -37,6 +37,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   activate: [path: string];
   close: [path: string];
+  closeMany: [paths: string[]];
   editorAction: [];
   save: [];
   "select-version": [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
@@ -54,10 +55,47 @@ const activeIsMarkdown = computed(() => {
   return languageFromPath(props.activePath) === "markdown";
 });
 
+const tabMenu = ref<{ path: string; x: number; y: number } | null>(null);
+
+const tabMenuIndex = computed(() =>
+  tabMenu.value ? props.tabs.findIndex((tab) => tab.path === tabMenu.value?.path) : -1
+);
+
+const leftTabPaths = computed(() => {
+  if (tabMenuIndex.value <= 0) return [];
+  return props.tabs.slice(0, tabMenuIndex.value).map((tab) => tab.path);
+});
+
+const rightTabPaths = computed(() => {
+  if (tabMenuIndex.value < 0) return [];
+  return props.tabs.slice(tabMenuIndex.value + 1).map((tab) => tab.path);
+});
+
+const allTabPaths = computed(() => props.tabs.map((tab) => tab.path));
+
 function toggleMarkdownPreview() {
   if (!activeIsMarkdown.value) return;
   emit("update:markdownPreview", !props.markdownPreview);
 }
+
+function openTabMenu(event: MouseEvent, path: string) {
+  event.preventDefault();
+  tabMenu.value = { path, x: event.clientX, y: event.clientY };
+}
+
+function closeTabMenu() {
+  tabMenu.value = null;
+}
+
+function emitCloseMany(paths: string[]) {
+  if (paths.length === 0) return;
+  emit("closeMany", paths);
+  closeTabMenu();
+}
+
+onBeforeUnmount(() => {
+  closeTabMenu();
+});
 </script>
 
 <template>
@@ -70,6 +108,7 @@ function toggleMarkdownPreview() {
         role="tab"
         :aria-selected="activePath === tab.path"
         @click="emit('activate', tab.path)"
+        @contextmenu="openTabMenu($event, tab.path)"
       >
         <div class="figma-editor-tab-inner">
           <img :src="fileIconUrl" alt="file" class="figma-editor-tab-icon" />
@@ -107,6 +146,49 @@ function toggleMarkdownPreview() {
         <span>{{ markdownPreview ? "关闭预览" : "预览" }}</span>
       </button>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="tabMenu"
+        class="figma-editor-tab-menu-backdrop"
+        @click="closeTabMenu"
+        @contextmenu.prevent="closeTabMenu"
+      />
+      <div
+        v-if="tabMenu"
+        class="figma-editor-tab-menu"
+        role="menu"
+        :style="{ left: `${tabMenu.x}px`, top: `${tabMenu.y}px` }"
+      >
+        <button
+          type="button"
+          role="menuitem"
+          class="figma-editor-tab-menu-item"
+          :disabled="rightTabPaths.length === 0"
+          @click="emitCloseMany(rightTabPaths)"
+        >
+          关闭右侧所有
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="figma-editor-tab-menu-item"
+          :disabled="leftTabPaths.length === 0"
+          @click="emitCloseMany(leftTabPaths)"
+        >
+          关闭左侧所有
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="figma-editor-tab-menu-item"
+          :disabled="allTabPaths.length === 0"
+          @click="emitCloseMany(allTabPaths)"
+        >
+          关闭所有
+        </button>
+      </div>
+    </Teleport>
 
     <div class="figma-editor-content">
       <slot />
@@ -302,6 +384,49 @@ function toggleMarkdownPreview() {
 
 .figma-editor-tab-preview.is-active:hover {
   background: #dde7ff;
+}
+
+.figma-editor-tab-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: transparent;
+}
+
+.figma-editor-tab-menu {
+  position: fixed;
+  z-index: 1201;
+  min-width: 148px;
+  padding: 4px;
+  border: 1px solid #d8d8d8;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.16);
+}
+
+.figma-editor-tab-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #242424;
+  cursor: pointer;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 12px;
+  text-align: left;
+}
+
+.figma-editor-tab-menu-item:hover:not(:disabled) {
+  background: #f1f1f1;
+}
+
+.figma-editor-tab-menu-item:disabled {
+  color: #a3a3a3;
+  cursor: not-allowed;
 }
 
 /* ---- Content ---- */

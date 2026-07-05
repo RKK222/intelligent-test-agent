@@ -1886,6 +1886,19 @@ function handleCloseTab(path: string) {
   }
 }
 
+function handleCloseTabs(paths: string[]) {
+  for (const path of paths) {
+    const tab = workbench.tabs.find((t) => t.path === path);
+    if (!tab) continue;
+    if (!tab.livePreview && tab.content !== tab.savedContent) {
+      tabPathToClose.value = path;
+      showUnsavedConfirm.value = true;
+      return;
+    }
+    workbench.closeTab(path);
+  }
+}
+
 function confirmCloseTab() {
   if (tabPathToClose.value) {
     workbench.closeTab(tabPathToClose.value);
@@ -3390,6 +3403,7 @@ async function handleLogout() {
           :markdown-preview="markdownPreview"
           @activate="(path: string) => workbench.setActivePath(path)"
           @close="handleCloseTab"
+          @close-many="handleCloseTabs"
           @editor-action="() => {}"
           @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
           @select-version="handleSelectVersion"

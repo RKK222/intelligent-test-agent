@@ -2590,6 +2590,12 @@ const userInterruptedScroll = ref(false)
 let isProgrammaticScroll = false
 const scrollBottomThreshold = 36
 
+function resetNewContentNotice() {
+  hasNewContent.value = false
+  userInterruptedScroll.value = false
+  isAtBottom.value = true
+}
+
 function viewportIsAtBottom(viewport: HTMLElement) {
   return viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight <= scrollBottomThreshold
 }
@@ -2635,28 +2641,49 @@ function jumpToBottom() {
   scrollToBottom()
 }
 
+function messageIdentity(message: ChatMessageInput, index: number) {
+  return message.id ?? (message as { messageId?: string }).messageId ?? `${message.role}-${index}`
+}
+
+function lastMessageContentLength(message: ChatMessageInput | undefined) {
+  if (!message || (message.role !== 'user' && message.role !== 'assistant')) return 0
+  if (typeof message.content === 'string') return message.content.length
+  if (typeof (message as { text?: string }).text === 'string') {
+    return (message as { text?: string }).text?.length ?? 0
+  }
+  if (Array.isArray((message as { parts?: unknown[] }).parts)) {
+    return ((message as { parts?: unknown[] }).parts ?? []).reduce(
+      (n: number, p: unknown) => n + (partText(p)?.length || 0),
+      0
+    )
+  }
+  return 0
+}
+
 // 监听消息变化（数量或内容），流式回复时消息内容增长但数量不变，也需要滚动
 watch(
   () => {
     const msgs = props.messages
-    if (!msgs || msgs.length === 0) return '0:0'
+    if (!msgs || msgs.length === 0) return { length: 0, lastId: '', lastLen: 0 }
     const last = msgs[msgs.length - 1]
-    if (last.role !== 'user' && last.role !== 'assistant')
-      return `${msgs.length}:0`
-    const lastLen =
-      typeof last.content === 'string'
-        ? last.content.length
-        : typeof (last as { text?: string }).text === 'string'
-        ? (last as { text?: string }).text?.length ?? 0
-        : Array.isArray((last as { parts?: unknown[] }).parts)
-        ? ((last as { parts?: unknown[] }).parts ?? []).reduce(
-            (n: number, p: unknown) => n + (partText(p)?.length || 0),
-            0
-          )
-        : 0
-    return `${msgs.length}:${lastLen}`
+    return {
+      length: msgs.length,
+      lastId: messageIdentity(last, msgs.length - 1),
+      lastLen: lastMessageContentLength(last)
+    }
   },
-  () => {
+  (current, previous) => {
+    const sameLastMessage = current.lastId === previous?.lastId
+    const grewLastMessage = sameLastMessage && current.lastLen > (previous?.lastLen ?? 0)
+    const appendedMessage = current.length > (previous?.length ?? 0)
+    const receivedLiveOutput = props.running && (grewLastMessage || appendedMessage)
+    if (!receivedLiveOutput) {
+      resetNewContentNotice()
+      if (shouldFollowOutput()) {
+        nextTick(scrollToBottom)
+      }
+      return
+    }
     if (shouldFollowOutput()) {
       nextTick(scrollToBottom)
     } else {
@@ -2668,10 +2695,20 @@ watch(
 watch([wasCompleted, wasStopped, wasFailed], () => {
   if (shouldFollowOutput()) {
     nextTick(scrollToBottom)
-  } else {
-    hasNewContent.value = true
   }
 })
+
+watch(
+  () => [props.historyLoading, props.running] as const,
+  ([historyLoading, running], [previousHistoryLoading, previousRunning]) => {
+    if (historyLoading || (!running && previousRunning)) {
+      resetNewContentNotice()
+    }
+    if (previousHistoryLoading && !historyLoading) {
+      nextTick(scrollToBottom)
+    }
+  }
+)
 
 function formatTime(iso: string) {
   try {
