@@ -3854,3 +3854,10 @@ bash /tmp/test-api-after-restart.sh
 - What: `restart-dev-services.sh` 新增 `ensure_frontend_dependencies`，在前端 build 和 dev server 启动前检查 `frontend/node_modules/.modules.yaml` 是否落后于 lockfile、workspace 配置或各包 `package.json`，过期或缺失时执行 `corepack pnpm install --frozen-lockfile`；manager auto 启动判定同步收紧为 opencode base URL 指向本机时才启动，避免远端 opencode 环境误拉本地 manager。
 - How: 补充 `tools/verify-dev-scripts.sh` 断言，并同步 `docs/guides/ai-workflow.md` 与 `frontend/README.md` 的本地重启说明。未修改 `.env.local`、API、RunEvent、数据库、generated SDK 或生产 migration。
 - Result: `tools/verify-dev-scripts.sh` 通过；`corepack pnpm --filter @test-agent/agent-web build` 通过并确认 codicon 字体产物生成；`./restart-dev-services.sh --profile local --env-file .env.local --skip-backend-build --skip-frontend-build` 重启成功，前端日志路径为 `.tmp/dev-services/frontend.log`。
+
+### 2026-07-05 - 优化 question.asked 提问面板
+
+- Why: opencode 原生 `question.asked` payload 使用 `question/header/options/multiple/custom` 字段，前端 reducer 之前没有根据 `multiple:false + options` 推断单选题，导致面板只显示标题和输入框；同时普通文本编号列表和 question 工具过程必须继续避免误弹提问面板。
+- What: `agent-chat` reducer 归一化原生 question 字段，保留选项说明并按 `multiple/options` 映射单选、多选、文本题；`FigmaChatPanel` 改为分页式问题卡，支持选项 label/description、自定义答案、上一步/下一步、最后一页提交和忽略。
+- How: 新增 runtime reducer 和 Figma 面板回归测试，覆盖用户给出的 `question.asked` 样例、普通 `message.part.updated` 不生成 question、单选/多选/文本题、自定义答案和分页提交。同步 `docs/api/event-stream.md`、`agent-web` 包说明和 `agent-chat` README。
+- Result: 定向 `FigmaChatPanel.test.ts` 和 `runtime-reducer.test.ts` 已通过；未改后端 API、数据库、generated SDK 或环境配置。

@@ -107,6 +107,55 @@ payload 字段：
 - opencode 原生 Todo 没有稳定 `id` 字段，前端在缺少 `id/todoId/todoID` 时按数组位置和内容生成展示用 key。
 - 右侧对话面板在输入框上方显示 Todo 面板：收起态展示各状态数量和总数，展开态展示完整 Todo 列表。
 
+## `question.asked`
+
+`question.asked` 表示当前 Run 需要用户回答一个或多个问题。平台事件保留 opencode 原生问题字段，不要求后端把字段提前改写成前端展示模型；前端 reducer 负责兼容归一化。`message.part.updated` 中 `part.type=tool`、`part.tool=question` 只作为时间线工具过程展示，不得生成提问面板。
+
+payload 字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `id` / `requestId` / `requestID` | string | 提问请求 ID，前端归一化为 `QuestionRequest.requestId`。 |
+| `sessionID` / `sessionId` | string | 提问所属 opencode session。 |
+| `questions` | array | opencode 原生问题数组；兼容历史 payload 时，缺少数组也允许把 payload 自身视为一个问题。 |
+| `tool` | object | 可选工具调用上下文，例如 `messageID/callID`，用于调试和时间线关联。 |
+
+`questions[]` 字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `question` / `text` / `prompt` | string | 问题正文，前端归一化为 `QuestionRequest.questions[].text`。 |
+| `header` | string | 可选问题短标题，前端作为辅助信息展示。 |
+| `options` | array | 可选选项列表。 |
+| `multiple` | boolean | `true` 表示多选；`false` 且存在 `options` 时表示单选。 |
+| `custom` | boolean | 是否允许自定义答案的兼容字段；当前前端分页面板始终提供“输入自己的答案”。 |
+| `required` | boolean | 可选必答标记；缺失时前端按现有待答问题处理。 |
+
+`options[]` 字段：
+
+| 字段 | 类型 | 说明 |
+|---|---|---|
+| `label` | string | 展示和提交使用的选项文本。 |
+| `description` | string | 可选选项说明。 |
+
+前端归一化规则：
+
+- `multiple:true` 归一化为 `kind:"multiple"`。
+- 存在 `options` 且不是 `multiple:true` 时归一化为 `kind:"single"`。
+- 没有 `options` 时归一化为 `kind:"text"`。
+- `options[].label/description` 必须保留；提交答案时使用用户选择的 `label` 文本，而不是本地展示用 id。
+- 自定义答案作为该问题的有效答案：单选题中与选项互斥，多选题中作为附加答案提交。
+
+回复接口仍使用 HTTP `POST /api/internal/agent/{agentId}/sessions/{sessionId}/questions/{requestId}/reply`，body 为：
+
+```json
+{
+  "answers": [["需求文档"], ["需要更轻量"]]
+}
+```
+
+`answers` 外层数组顺序必须与 `questions[]` 顺序一致，内层数组为该问题的一组答案文本。
+
 ## SSE 续传
 
 - SSE `event` 使用 RunEvent 的 `type`。

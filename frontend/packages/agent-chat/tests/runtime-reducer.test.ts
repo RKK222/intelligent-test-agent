@@ -731,6 +731,90 @@ describe("agent-chat runtime reducer", () => {
     expect(replied.questions).toHaveLength(1);
   });
 
+  it("normalizes opencode question.asked options into single-choice questions", () => {
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("question.asked", {
+        id: "que_f31142aac001QiO13RfFtetggq",
+        sessionID: "ses_1",
+        questions: [
+          {
+            question: "领导说需求不满足客户要求，请告诉我具体需要修改哪方面？",
+            header: "修改范围",
+            options: [
+              { label: "需求文档", description: "修改 需求.md / requirements.md 的内容" },
+              { label: "UI 界面", description: "修改 index.html / styles.css 的视觉或布局" }
+            ],
+            multiple: false
+          }
+        ]
+      })
+    });
+
+    expect(state.questions).toEqual([
+      {
+        requestId: "que_f31142aac001QiO13RfFtetggq",
+        sessionId: "ses_1",
+        createdAt: "2026-06-19T00:00:00Z",
+        questions: [
+          {
+            questionId: "que_f31142aac001QiO13RfFtetggq:0",
+            text: "领导说需求不满足客户要求，请告诉我具体需要修改哪方面？",
+            header: "修改范围",
+            kind: "single",
+            options: [
+              { id: "需求文档", label: "需求文档", description: "修改 需求.md / requirements.md 的内容" },
+              { id: "UI 界面", label: "UI 界面", description: "修改 index.html / styles.css 的视觉或布局" }
+            ],
+            custom: undefined,
+            required: undefined
+          }
+        ]
+      }
+    ]);
+  });
+
+  it("normalizes multiple and text question variants", () => {
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("question.asked", {
+        requestId: "ques_1",
+        sessionId: "ses_1",
+        questions: [
+          {
+            id: "q_multi",
+            question: "需要哪些调整？",
+            options: [{ label: "样式", description: "调整 CSS" }],
+            multiple: true,
+            custom: true
+          },
+          { id: "q_text", question: "还有什么补充？" }
+        ]
+      })
+    });
+
+    expect(state.questions[0]?.questions).toEqual([
+      {
+        questionId: "q_multi",
+        text: "需要哪些调整？",
+        header: undefined,
+        kind: "multiple",
+        options: [{ id: "样式", label: "样式", description: "调整 CSS" }],
+        custom: true,
+        required: undefined
+      },
+      {
+        questionId: "q_text",
+        text: "还有什么补充？",
+        header: undefined,
+        kind: "text",
+        options: undefined,
+        custom: undefined,
+        required: undefined
+      }
+    ]);
+  });
+
   it("does not infer questions from numbered assistant text parts", () => {
     const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "event",

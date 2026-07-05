@@ -224,7 +224,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.find(".figma-chat-composer").exists()).toBe(true);
   });
 
-  it("renders event-driven questions above the composer and emits replies", async () => {
+  it("renders a single-choice question with option descriptions and emits selected labels", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
@@ -240,8 +240,8 @@ describe("FigmaChatPanel", () => {
                 text: "请选择目标环境",
                 kind: "single",
                 options: [
-                  { id: "dev", label: "开发环境" },
-                  { id: "staging", label: "预发环境" }
+                  { id: "dev", label: "开发环境", description: "连接本地 mock 数据" },
+                  { id: "staging", label: "预发环境", description: "连接预发服务验证" }
                 ]
               }
             ]
@@ -255,15 +255,158 @@ describe("FigmaChatPanel", () => {
     expect(dock.exists()).toBe(true);
     expect(composer.exists()).toBe(true);
     expect(dock.element.compareDocumentPosition(composer.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(dock.text()).toContain("1/1 个问题");
     expect(dock.text()).toContain("请选择目标环境");
+    expect(dock.text()).toContain("连接预发服务验证");
 
     await wrapper.findAll(".figma-chat-question-option").find((item) => item.text().includes("预发环境"))!.trigger("click");
     await wrapper.get(".figma-chat-question-submit").trigger("click");
 
-    expect(wrapper.emitted("reply-question")).toEqual([["ques_1", [["staging"]]]]);
+    expect(wrapper.emitted("reply-question")).toEqual([["ques_1", [["预发环境"]]]]);
+  });
+
+  it("submits a custom answer instead of the selected single-choice option", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        questions: [
+          {
+            requestId: "ques_custom",
+            sessionId: "ses_1",
+            createdAt: "2026-07-05T06:35:23.000Z",
+            questions: [
+              {
+                questionId: "q1",
+                text: "请选择目标环境",
+                kind: "single",
+                options: [
+                  { id: "dev", label: "开发环境" },
+                  { id: "staging", label: "预发环境" }
+                ],
+                custom: true
+              }
+            ]
+          }
+        ]
+      } as any
+    });
+
+    await wrapper.findAll(".figma-chat-question-option").find((item) => item.text().includes("预发环境"))!.trigger("click");
+    await wrapper.get(".figma-chat-question-custom-input").setValue("灰度环境");
+    await wrapper.get(".figma-chat-question-submit").trigger("click");
+
+    expect(wrapper.emitted("reply-question")).toEqual([["ques_custom", [["灰度环境"]]]]);
+  });
+
+  it("pages through multiple questions and only submits from the last page", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        questions: [
+          {
+            requestId: "ques_multi_page",
+            sessionId: "ses_1",
+            createdAt: "2026-07-05T06:35:23.000Z",
+            questions: [
+              {
+                questionId: "q1",
+                text: "领导想要什么风格的文字动效？",
+                kind: "single",
+                options: [
+                  { id: "shimmer", label: "保持 Shimmer，换颜色", description: "保留光泽扫光动效，只改渐变颜色" },
+                  { id: "fade", label: "换淡入效果", description: "整段/整句逐渐显示出来" }
+                ]
+              },
+              {
+                questionId: "q2",
+                text: "还有什么补充要求？",
+                kind: "text"
+              }
+            ]
+          }
+        ]
+      } as any
+    });
+
+    expect(wrapper.text()).toContain("1/2 个问题");
+    expect(wrapper.text()).toContain("领导想要什么风格的文字动效？");
+    expect(wrapper.text()).not.toContain("还有什么补充要求？");
+    expect(wrapper.find(".figma-chat-question-submit").exists()).toBe(false);
+
+    await wrapper.get(".figma-chat-question-next").trigger("click");
+
+    expect(wrapper.text()).toContain("2/2 个问题");
+    expect(wrapper.text()).toContain("还有什么补充要求？");
+    expect(wrapper.find(".figma-chat-question-prev").exists()).toBe(true);
+    expect(wrapper.find(".figma-chat-question-submit").exists()).toBe(true);
+
+    await wrapper.get(".figma-chat-question-custom-input").setValue("需要更轻量");
+    await wrapper.get(".figma-chat-question-prev").trigger("click");
+    await wrapper.findAll(".figma-chat-question-option").find((item) => item.text().includes("换淡入效果"))!.trigger("click");
+    await wrapper.get(".figma-chat-question-next").trigger("click");
+    await wrapper.get(".figma-chat-question-submit").trigger("click");
+
+    expect(wrapper.emitted("reply-question")).toEqual([["ques_multi_page", [["换淡入效果"], ["需要更轻量"]]]]);
+  });
+
+  it("submits multiple selected labels with an additional custom answer", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        questions: [
+          {
+            requestId: "ques_multiple",
+            sessionId: "ses_1",
+            createdAt: "2026-07-05T06:35:23.000Z",
+            questions: [
+              {
+                questionId: "q1",
+                text: "需要修改哪方面？",
+                kind: "multiple",
+                options: [
+                  { id: "requirements", label: "需求文档", description: "修改 requirements.md" },
+                  { id: "ui", label: "UI 界面", description: "修改视觉或布局" },
+                  { id: "logic", label: "前端功能逻辑", description: "修改 app.js" }
+                ],
+                custom: true
+              }
+            ]
+          }
+        ]
+      } as any
+    });
+
+    await wrapper.findAll(".figma-chat-question-option").find((item) => item.text().includes("需求文档"))!.trigger("click");
+    await wrapper.findAll(".figma-chat-question-option").find((item) => item.text().includes("UI 界面"))!.trigger("click");
+    await wrapper.get(".figma-chat-question-custom-input").setValue("还要调整交互文案");
+    await wrapper.get(".figma-chat-question-submit").trigger("click");
+
+    expect(wrapper.emitted("reply-question")).toEqual([
+      ["ques_multiple", [["需求文档", "UI 界面", "还要调整交互文案"]]]
+    ]);
+  });
+
+  it("emits reject-question when the question panel is ignored", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        questions: [
+          {
+            requestId: "ques_reject",
+            sessionId: "ses_1",
+            createdAt: "2026-07-05T06:35:23.000Z",
+            questions: [{ questionId: "q1", text: "需要修改哪方面？", kind: "text" }]
+          }
+        ]
+      } as any
+    });
 
     await wrapper.get(".figma-chat-question-reject").trigger("click");
-    expect(wrapper.emitted("reject-question")).toEqual([["ques_1"]]);
+    expect(wrapper.emitted("reject-question")).toEqual([["ques_reject"]]);
   });
 
   it("renders todos above the composer and expands the task list on demand", async () => {

@@ -958,23 +958,54 @@ function toQuestionRequest(payload: Record<string, unknown>, event: RunEvent): Q
     sessionId: text(payload.sessionId) ?? text(payload.sessionID) ?? "",
     questions: rawQuestions
       .filter((item): item is Record<string, unknown> => typeof item === "object" && item !== null)
-      .map((item, index) => ({
-        questionId: text(item.questionId) ?? text(item.questionID) ?? text(item.id) ?? `${requestId}:${index}`,
-        text: text(item.text) ?? text(item.prompt) ?? text(item.question) ?? "",
-        kind: text(item.kind) ?? text(item.type) ?? "text",
-        options: Array.isArray(item.options)
-          ? item.options
-              .filter((option): option is Record<string, unknown> => typeof option === "object" && option !== null)
-              .map((option) => ({
-                id: text(option.id) ?? text(option.value) ?? text(option.label) ?? "option",
-                label: text(option.label) ?? text(option.value) ?? text(option.id) ?? "option",
-                description: text(option.description)
-              }))
-          : undefined,
-        required: typeof item.required === "boolean" ? item.required : undefined
-      })),
+      .map((item, index) => {
+        const options = normalizeQuestionOptions(item.options);
+        return {
+          questionId: text(item.questionId) ?? text(item.questionID) ?? text(item.id) ?? `${requestId}:${index}`,
+          header: text(item.header),
+          text: text(item.text) ?? text(item.prompt) ?? text(item.question) ?? "",
+          kind: normalizeQuestionKind(item, options),
+          options,
+          custom: booleanValue(item.custom),
+          required: typeof item.required === "boolean" ? item.required : undefined
+        };
+      }),
     createdAt: text(payload.createdAt) ?? event.occurredAt
   };
+}
+
+function normalizeQuestionOptions(value: unknown): Array<{ id: string; label: string; description?: string }> | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const options = value
+    .filter((option): option is Record<string, unknown> => typeof option === "object" && option !== null)
+    .map((option, index) => {
+      const label = text(option.label) ?? text(option.value) ?? text(option.id) ?? `option-${index + 1}`;
+      return {
+        id: text(option.id) ?? text(option.value) ?? label,
+        label,
+        description: text(option.description)
+      };
+    });
+  return options.length > 0 ? options : undefined;
+}
+
+function normalizeQuestionKind(
+  item: Record<string, unknown>,
+  options: Array<{ id: string; label: string; description?: string }> | undefined
+): "single" | "multiple" | "text" | string {
+  const explicit = text(item.kind) ?? text(item.type);
+  if (explicit === "single" || explicit === "multiple" || explicit === "text") {
+    return explicit;
+  }
+  if (booleanValue(item.multiple) === true) {
+    return "multiple";
+  }
+  if (options && options.length > 0) {
+    return "single";
+  }
+  return explicit ?? "text";
 }
 
 function toTodoItem(value: Record<string, unknown>, index = 0): TodoItem {

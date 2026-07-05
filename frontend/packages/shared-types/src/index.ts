@@ -1193,9 +1193,11 @@ export type QuestionRequest = {
   sessionId: string;
   questions: Array<{
     questionId: string;
+    header?: string;
     text: string;
     kind: "single" | "multiple" | "text" | string;
     options?: Array<{ id: string; label: string; description?: string }>;
+    custom?: boolean;
     required?: boolean;
   }>;
   createdAt: string;

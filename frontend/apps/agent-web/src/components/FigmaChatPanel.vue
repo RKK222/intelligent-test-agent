@@ -976,9 +976,14 @@ const formattedRunDuration = computed(() => {
 // ===== 事件驱动提问/权限 dock =====
 const questionAnswers = ref<Record<string, string>>({})
 const questionMultiAnswers = ref<Record<string, string[]>>({})
+const questionCustomAnswers = ref<Record<string, string>>({})
+const questionPageByRequestId = ref<Record<string, number>>({})
 
-function answerQuestion(questionId: string, value: string) {
+type FigmaQuestionItem = QuestionRequest['questions'][number]
+
+function answerSingleQuestion(questionId: string, value: string) {
   questionAnswers.value = { ...questionAnswers.value, [questionId]: value }
+  questionCustomAnswers.value = { ...questionCustomAnswers.value, [questionId]: '' }
 }
 
 function toggleMultiQuestionAnswer(questionId: string, value: string) {
@@ -989,23 +994,108 @@ function toggleMultiQuestionAnswer(questionId: string, value: string) {
   questionMultiAnswers.value = { ...questionMultiAnswers.value, [questionId]: next }
 }
 
+function setQuestionCustomAnswer(question: FigmaQuestionItem, value: string) {
+  questionCustomAnswers.value = { ...questionCustomAnswers.value, [question.questionId]: value }
+  if (!isMultipleQuestion(question) && value.trim().length > 0) {
+    questionAnswers.value = { ...questionAnswers.value, [question.questionId]: '' }
+  }
+}
+
+function isMultipleQuestion(question: FigmaQuestionItem): boolean {
+  return question.kind === 'multiple'
+}
+
+function isTextQuestion(question: FigmaQuestionItem): boolean {
+  return question.kind === 'text' || !question.options?.length
+}
+
+function questionOptions(question: FigmaQuestionItem) {
+  return question.options?.length ? question.options : []
+}
+
+function currentQuestionIndex(item: QuestionRequest): number {
+  const current = questionPageByRequestId.value[item.requestId] ?? 0
+  return Math.min(Math.max(current, 0), Math.max(item.questions.length - 1, 0))
+}
+
+function currentQuestion(item: QuestionRequest): FigmaQuestionItem | undefined {
+  return item.questions[currentQuestionIndex(item)]
+}
+
+function currentQuestionRequired(item: QuestionRequest): FigmaQuestionItem {
+  return currentQuestion(item) ?? item.questions[0]
+}
+
+function questionProgressText(item: QuestionRequest): string {
+  return `${currentQuestionIndex(item) + 1}/${item.questions.length} 个问题`
+}
+
+function questionHelpText(question: FigmaQuestionItem): string {
+  if (isMultipleQuestion(question)) {
+    return '可选择多个答案'
+  }
+  if (isTextQuestion(question)) {
+    return '请输入答案'
+  }
+  return '选择一个答案'
+}
+
+function isFirstQuestionPage(item: QuestionRequest): boolean {
+  return currentQuestionIndex(item) === 0
+}
+
+function isLastQuestionPage(item: QuestionRequest): boolean {
+  return currentQuestionIndex(item) >= item.questions.length - 1
+}
+
+function showPreviousQuestion(item: QuestionRequest) {
+  questionPageByRequestId.value = {
+    ...questionPageByRequestId.value,
+    [item.requestId]: Math.max(currentQuestionIndex(item) - 1, 0)
+  }
+}
+
+function showNextQuestion(item: QuestionRequest) {
+  questionPageByRequestId.value = {
+    ...questionPageByRequestId.value,
+    [item.requestId]: Math.min(currentQuestionIndex(item) + 1, Math.max(item.questions.length - 1, 0))
+  }
+}
+
+function isQuestionOptionSelected(question: FigmaQuestionItem, label: string): boolean {
+  if (isMultipleQuestion(question)) {
+    return questionMultiAnswers.value[question.questionId]?.includes(label) ?? false
+  }
+  return questionAnswers.value[question.questionId] === label
+}
+
+function chooseQuestionOption(question: FigmaQuestionItem, label: string) {
+  if (isMultipleQuestion(question)) {
+    toggleMultiQuestionAnswer(question.questionId, label)
+    return
+  }
+  answerSingleQuestion(question.questionId, label)
+}
+
+function answersForQuestion(question: FigmaQuestionItem): string[] {
+  const custom = questionCustomAnswers.value[question.questionId]?.trim()
+  if (isMultipleQuestion(question)) {
+    const selected = questionMultiAnswers.value[question.questionId] ?? []
+    return custom ? [...selected, custom] : selected
+  }
+  if (isTextQuestion(question)) {
+    return custom ? [custom] : []
+  }
+  const selected = questionAnswers.value[question.questionId]?.trim()
+  return custom ? [custom] : selected ? [selected] : []
+}
+
 function buildQuestionAnswers(item: QuestionRequest): unknown[][] {
-  return item.questions.map((question) => {
-    if (question.kind === 'multiple') {
-      return questionMultiAnswers.value[question.questionId] ?? []
-    }
-    const value = questionAnswers.value[question.questionId]?.trim()
-    return value ? [value] : []
-  })
+  return item.questions.map((question) => answersForQuestion(question))
 }
 
 function canReplyQuestion(item: QuestionRequest): boolean {
-  return item.questions.every((question) => {
-    if (question.kind === 'multiple') {
-      return (questionMultiAnswers.value[question.questionId]?.length ?? 0) > 0
-    }
-    return Boolean(questionAnswers.value[question.questionId]?.trim())
-  })
+  return item.questions.every((question) => answersForQuestion(question).length > 0)
 }
 
 function replyQuestion(item: QuestionRequest) {
@@ -3436,57 +3526,95 @@ function onCompositionEnd() {
           <button type="button" class="figma-chat-question-reject" @click="emit('reply-permission', permission.requestId, 'reject')">拒绝</button>
         </div>
       </div>
-      <div
-        v-for="item in questions"
-        :key="item.requestId"
-        class="figma-chat-question-card"
-      >
-        <div v-for="question in item.questions" :key="question.questionId" class="figma-chat-question-item">
-          <div class="figma-chat-question-title">{{ question.text }}</div>
-          <input
-            v-if="question.kind === 'text'"
-            :value="questionAnswers[question.questionId] ?? ''"
-            class="figma-chat-question-input"
-            placeholder="回答"
-            @input="answerQuestion(question.questionId, ($event.target as HTMLInputElement).value)"
-          />
-          <div v-else class="figma-chat-question-options">
+      <template v-for="item in questions" :key="item.requestId">
+        <div
+          v-if="item.questions.length > 0"
+          class="figma-chat-question-card"
+        >
+          <div class="figma-chat-question-page-head">
+            <div class="figma-chat-question-progress">{{ questionProgressText(item) }}</div>
+            <div v-if="currentQuestionRequired(item).header" class="figma-chat-question-header">
+              {{ currentQuestionRequired(item).header }}
+            </div>
+          </div>
+          <div class="figma-chat-question-item">
+            <div class="figma-chat-question-title">{{ currentQuestionRequired(item).text }}</div>
+            <div class="figma-chat-question-hint">{{ questionHelpText(currentQuestionRequired(item)) }}</div>
+            <input
+              v-if="isTextQuestion(currentQuestionRequired(item))"
+              :value="questionCustomAnswers[currentQuestionRequired(item).questionId] ?? ''"
+              class="figma-chat-question-custom-input"
+              placeholder="输入你的答案..."
+              @input="setQuestionCustomAnswer(currentQuestionRequired(item), ($event.target as HTMLInputElement).value)"
+            />
+            <div v-else class="figma-chat-question-options">
+              <button
+                v-for="option in questionOptions(currentQuestionRequired(item))"
+                :key="option.id"
+                type="button"
+                :class="[
+                  'figma-chat-question-option',
+                  isQuestionOptionSelected(currentQuestionRequired(item), option.label) && 'is-selected',
+                ]"
+                @click="chooseQuestionOption(currentQuestionRequired(item), option.label)"
+              >
+                <span class="figma-chat-question-option-mark" aria-hidden="true"></span>
+                <span class="figma-chat-question-option-copy">
+                  <span class="figma-chat-question-option-label">{{ option.label }}</span>
+                  <span v-if="option.description" class="figma-chat-question-option-description">{{ option.description }}</span>
+                </span>
+              </button>
+              <label class="figma-chat-question-custom-card">
+                <span class="figma-chat-question-option-mark" aria-hidden="true"></span>
+                <span class="figma-chat-question-option-copy">
+                  <span class="figma-chat-question-option-label">输入自己的答案</span>
+                  <input
+                    :value="questionCustomAnswers[currentQuestionRequired(item).questionId] ?? ''"
+                    class="figma-chat-question-custom-input"
+                    placeholder="输入你的答案..."
+                    @input="setQuestionCustomAnswer(currentQuestionRequired(item), ($event.target as HTMLInputElement).value)"
+                  />
+                </span>
+              </label>
+            </div>
+          </div>
+          <div class="figma-chat-question-actions">
             <button
-              v-for="option in (question.options?.length ? question.options : [{ id: 'confirm', label: '确认' }])"
-              :key="option.id"
               type="button"
-              :class="[
-                'figma-chat-question-option',
-                question.kind === 'multiple'
-                  ? questionMultiAnswers[question.questionId]?.includes(option.id) && 'is-selected'
-                  : questionAnswers[question.questionId] === option.id && 'is-selected',
-              ]"
-              @click="question.kind === 'multiple'
-                ? toggleMultiQuestionAnswer(question.questionId, option.id)
-                : answerQuestion(question.questionId, option.id)"
+              class="figma-chat-question-reject"
+              @click="emit('reject-question', item.requestId)"
             >
-              {{ option.label }}
+              忽略
+            </button>
+            <div class="figma-chat-question-action-spacer"></div>
+            <button
+              v-if="!isFirstQuestionPage(item)"
+              type="button"
+              class="figma-chat-question-prev"
+              @click="showPreviousQuestion(item)"
+            >
+              上一步
+            </button>
+            <button
+              v-if="!isLastQuestionPage(item)"
+              type="button"
+              class="figma-chat-question-next"
+              @click="showNextQuestion(item)"
+            >
+              下一步
+            </button>
+            <button
+              v-else
+              type="button"
+              class="figma-chat-question-submit"
+              :disabled="!canReplyQuestion(item)"
+              @click="replyQuestion(item)"
+            >
+              提交
             </button>
           </div>
         </div>
-        <div class="figma-chat-question-actions">
-          <button
-            type="button"
-            class="figma-chat-question-reject"
-            @click="emit('reject-question', item.requestId)"
-          >
-            拒绝
-          </button>
-          <button
-            type="button"
-            class="figma-chat-question-submit"
-            :disabled="!canReplyQuestion(item)"
-            @click="replyQuestion(item)"
-          >
-            回复
-          </button>
-        </div>
-      </div>
+      </template>
     </section>
     <TodoPanel v-if="!activeSubagentSessionId" :todos="todos" />
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
@@ -5435,7 +5563,7 @@ function onCompositionEnd() {
 .figma-chat-question-dock {
   flex-shrink: 0;
   margin: 0 10px 10px;
-  padding: 10px;
+  padding: 8px;
   border: 1px solid var(--ta-chat-border, #e0e0e0);
   border-radius: 8px;
   background: #ffffff;
@@ -5449,8 +5577,8 @@ function onCompositionEnd() {
 .figma-chat-permission-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 10px;
+  gap: 14px;
+  padding: 14px 12px;
   border: 1px solid #e5e7eb;
   border-radius: 8px;
   background: #ffffff;
@@ -5467,11 +5595,35 @@ function onCompositionEnd() {
   gap: 8px;
 }
 
-.figma-chat-question-title {
-  font-size: 13px;
-  line-height: 18px;
+.figma-chat-question-page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.figma-chat-question-progress {
+  font-size: 14px;
+  line-height: 20px;
   font-weight: 700;
-  color: #1f2937;
+  color: #111827;
+}
+
+.figma-chat-question-header {
+  overflow: hidden;
+  color: #6b7280;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.figma-chat-question-title {
+  font-size: 16px;
+  line-height: 22px;
+  font-weight: 700;
+  color: #111827;
 }
 
 .figma-chat-question-description {
@@ -5481,38 +5633,103 @@ function onCompositionEnd() {
   color: #6b7280;
 }
 
+.figma-chat-question-hint {
+  font-size: 13px;
+  line-height: 18px;
+  color: #8a8a8a;
+}
+
 .figma-chat-question-options {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .figma-chat-question-option,
+.figma-chat-question-custom-card,
 .figma-chat-question-submit,
-.figma-chat-question-reject {
-  min-height: 28px;
+.figma-chat-question-reject,
+.figma-chat-question-prev,
+.figma-chat-question-next {
+  min-height: 32px;
   border-radius: 6px;
-  padding: 4px 10px;
+  padding: 6px 12px;
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
-.figma-chat-question-option {
+.figma-chat-question-option,
+.figma-chat-question-custom-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 58px;
   border: 1px solid #d1d5db;
   background: #ffffff;
   color: #374151;
+  text-align: left;
 }
 
 .figma-chat-question-option:hover,
-.figma-chat-question-option.is-selected {
+.figma-chat-question-option.is-selected,
+.figma-chat-question-custom-card:focus-within {
   border-color: #111827;
   background: #f3f4f6;
   color: #111827;
 }
 
-.figma-chat-question-input {
+.figma-chat-question-option-mark {
+  position: relative;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  border: 1px solid #d1d5db;
+  border-radius: 999px;
+  background: #ffffff;
+}
+
+.figma-chat-question-option.is-selected .figma-chat-question-option-mark {
+  border-color: #111827;
+}
+
+.figma-chat-question-option.is-selected .figma-chat-question-option-mark::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #111827;
+  content: "";
+}
+
+.figma-chat-question-option-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.figma-chat-question-option-label {
+  color: #111827;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+}
+
+.figma-chat-question-option-description {
+  color: #6f6f6f;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+}
+
+.figma-chat-question-custom-input {
   min-height: 34px;
   width: 100%;
   border: 1px solid #d1d5db;
@@ -5524,14 +5741,30 @@ function onCompositionEnd() {
   outline: none;
 }
 
-.figma-chat-question-input:focus {
+.figma-chat-question-custom-card .figma-chat-question-custom-input {
+  min-height: 24px;
+  border: none;
+  padding: 0;
+  background: transparent;
+}
+
+.figma-chat-question-custom-input:focus {
   border-color: #111827;
+}
+
+.figma-chat-question-custom-card .figma-chat-question-custom-input:focus {
+  border-color: transparent;
 }
 
 .figma-chat-question-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: flex-start;
   gap: 8px;
+}
+
+.figma-chat-question-action-spacer {
+  flex: 1;
 }
 
 .figma-chat-question-submit {
@@ -5558,7 +5791,16 @@ function onCompositionEnd() {
   color: #4b5563;
 }
 
-.figma-chat-question-reject:hover {
+.figma-chat-question-prev,
+.figma-chat-question-next {
+  border: 1px solid #d1d5db;
+  background: #ffffff;
+  color: #111827;
+}
+
+.figma-chat-question-reject:hover,
+.figma-chat-question-prev:hover,
+.figma-chat-question-next:hover {
   background: #f3f4f6;
   color: #111827;
 }
