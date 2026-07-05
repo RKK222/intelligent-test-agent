@@ -823,12 +823,17 @@ test("new run success clears stale RunEvent SSE connection feedback", async ({ p
   await page.getByRole("button", { name: "发送" }).click();
   await expect(page.getByText("RunEvent SSE 连接异常")).toBeVisible();
   await expect(page.locator(".figma-chat-retry-card")).toContainText("Streaming response failed");
+  await expect(page.getByText("任务失败")).toBeVisible();
 
   await composer.fill("第二轮成功");
   await page.getByRole("button", { name: "发送" }).click();
 
   await expect.poll(() => runRequests.length).toBe(2);
   await expect(page.getByText("RunEvent SSE 连接异常")).toHaveCount(0);
+  await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
+  await expect(page.getByText("Streaming response failed")).toHaveCount(0);
+  await expect(page.getByText("任务失败")).toHaveCount(0);
+  await expect(page.getByText("任务完成")).toBeVisible();
 });
 
 test("a live diff refreshes the changed file parent directory before the run finishes", async ({ page }) => {

@@ -47,6 +47,7 @@ import com.icbc.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -74,6 +75,7 @@ public class RunApplicationService {
     private static final int ROUTING_CANDIDATE_LIMIT = 50;
     private static final String DEFAULT_OPENCODE_AGENT = "build";
     private static final Set<String> LIVE_DIFF_TOOLS = Set.of("write", "edit", "apply_patch");
+    private static final Duration TRANSPORT_ERROR_TERMINAL_GRACE = Duration.ofMillis(300);
 
     private final WorkspaceRepository workspaceRepository;
     private final com.icbc.testagent.domain.session.SessionRepository sessionRepository;
@@ -943,19 +945,14 @@ public class RunApplicationService {
     private void appendStreamEvent(String agentId, Run originalRun, Workspace workspace, RunEventDraft draft) {
         if (draft.type() == RunEventType.RUN_SUCCEEDED || draft.type() == RunEventType.RUN_FAILED) {
             Run current = runRepository.findById(originalRun.runId()).orElse(originalRun);
-            if (!current.status().isTerminal()) {
-                Run terminal;
-                if (draft.type() == RunEventType.RUN_SUCCEEDED) {
-                    terminal = current.succeed(draft.occurredAt());
-                } else {
-                    terminal = current.fail(draft.occurredAt());
-                }
-                saveRunIfStatus(terminal, current.status(), draft.traceId(), "terminal_event")
-                        .ifPresent(saved -> {
-                            runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
-                            snapshotService.persistRunSnapshot(agentId, saved, draft.traceId());
-                        });
-            }
+            RunStatus terminalStatus = draft.type() == RunEventType.RUN_SUCCEEDED
+                    ? RunStatus.SUCCEEDED
+                    : RunStatus.FAILED;
+            // root run.succeeded/run.failed 是远端会话终态事实源；它允许纠正先到的 transport error 临时失败。
+            Run terminal = current.applyTerminalFact(terminalStatus, draft.occurredAt());
+            Run saved = runRepository.save(terminal);
+            runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
+            snapshotService.persistRunSnapshot(agentId, saved, draft.traceId());
             return;
         }
         if (draft.type() == RunEventType.MESSAGE_PART_UPDATED) {
@@ -1167,6 +1164,27 @@ public class RunApplicationService {
      * 事件流异常时尽力把 Run 标记失败；失败落库本身异常只记录日志。
      */
     private void failRunFromStream(String agentId, Run run, String traceId, Throwable error) {
+        if (isStreamingTransportError(error)) {
+            LOGGER.info(
+                    "Delay Run failure for transport error, runId={}, delayMs={}, traceId={}",
+                    run.runId().value(),
+                    TRANSPORT_ERROR_TERMINAL_GRACE.toMillis(),
+                    traceId);
+            Mono.delay(TRANSPORT_ERROR_TERMINAL_GRACE)
+                    .publishOn(Schedulers.boundedElastic())
+                    .subscribe(
+                            ignored -> failRunFromStreamNow(agentId, run, traceId, error),
+                            delayedError -> LOGGER.warn(
+                                    "Failed to schedule delayed Run stream failure, runId={}, traceId={}",
+                                    run.runId().value(),
+                                    traceId,
+                                    delayedError));
+            return;
+        }
+        failRunFromStreamNow(agentId, run, traceId, error);
+    }
+
+    private void failRunFromStreamNow(String agentId, Run run, String traceId, Throwable error) {
         try {
             Run current = runRepository.findById(run.runId()).orElse(run);
             if (!current.status().isTerminal()) {
@@ -1187,6 +1205,18 @@ public class RunApplicationService {
             LOGGER.warn("Failed to persist opencode stream failure, runId={}, traceId={}",
                     run.runId().value(), traceId, exception);
         }
+    }
+
+    private boolean isStreamingTransportError(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && message.toLowerCase(java.util.Locale.ROOT).contains("streaming response failed")) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     /**

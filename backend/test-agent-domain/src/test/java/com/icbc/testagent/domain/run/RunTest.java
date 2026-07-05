@@ -69,4 +69,24 @@ class RunTest {
         assertThat(scheduled.sourceRefId()).isEqualTo("str_1234567890abcdef");
         assertThat(scheduled.triggeredByUserId()).isEqualTo(new UserId("usr_1234567890abcdef"));
     }
+
+    @Test
+    void terminalFactCanCorrectEarlierTerminalStatusWithoutMovingUpdatedAtBackward() {
+        Run failed = new Run(
+                new RunId("run_1234567890abcdef"),
+                new SessionId("ses_1234567890abcdef"),
+                new WorkspaceId("wrk_1234567890abcdef"),
+                RunStatus.FAILED,
+                CREATED_AT,
+                UPDATED_AT,
+                "trace_123");
+
+        Run succeeded = failed.applyTerminalFact(RunStatus.SUCCEEDED, CREATED_AT.plusSeconds(1));
+
+        assertThat(succeeded.status()).isEqualTo(RunStatus.SUCCEEDED);
+        assertThat(succeeded.updatedAt()).isEqualTo(UPDATED_AT);
+        assertThatThrownBy(() -> failed.applyTerminalFact(RunStatus.RUNNING, UPDATED_AT))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("terminalStatus");
+    }
 }

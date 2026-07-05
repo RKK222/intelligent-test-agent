@@ -860,6 +860,7 @@ describe("agent-chat runtime reducer", () => {
           {
             id: "q_multi",
             question: "需要哪些调整？",
+            type: "single",
             options: [{ label: "样式", description: "调整 CSS" }],
             multiple: true,
             custom: true

@@ -667,6 +667,80 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void serviceUsesLaterRootTerminalEventAfterEarlierAsyncPromptTransportFailure() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
+        FakeExecutionNodeRepository nodes = new FakeExecutionNodeRepository();
+        FakeAgentSessionBindingRepository bindings = new FakeAgentSessionBindingRepository();
+        AgentRuntimeRegistry registry = runtimeRegistry(facade);
+        CountingSnapshotService snapshots = new CountingSnapshotService(runs, sessions, messages, nodes, registry, bindings);
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.RUN_SUCCEEDED,
+                command.traceId(),
+                Instant.now().plusMillis(100),
+                Map.of("messageID", "msg_remote1234567890abcdef")))
+                .delaySubscription(Duration.ofMillis(80));
+        facade.startRun = ignored -> Mono.error(new IllegalStateException("Streaming response failed"));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                sessions,
+                runs,
+                messages,
+                nodes,
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                registry,
+                bindings,
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                null,
+                null,
+                com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver.legacyOnly(),
+                snapshots,
+                null,
+                null);
+
+        Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
+        sleep(Duration.ofMillis(500));
+        assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.SUCCEEDED);
+        assertThat(events.events).extracting(RunEvent::type)
+                .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_SUCCEEDED);
+        assertThat(snapshots.persistCalls).isEqualTo(1);
+    }
+
+    @Test
+    void serviceMarksRunFailedWhenStreamingTransportFailsWithoutTerminalEvent() {
+        FakeRunRepository runs = new FakeRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        facade.startRun = ignored -> Mono.error(new IllegalStateException("Streaming response failed"));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                runs,
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository());
+
+        Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        awaitRunStatus(service, run.runId(), RunStatus.FAILED);
+        assertThat(events.events).extracting(RunEvent::type)
+                .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_FAILED);
+    }
+
+    @Test
     void serviceDoesNotMarkRunSucceededWhenChildSessionIdleIsMisderivedByClient() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();

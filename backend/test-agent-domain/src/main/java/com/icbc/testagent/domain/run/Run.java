@@ -178,6 +178,34 @@ public record Run(
     }
 
     /**
+     * 按 root 终态事件记录最终事实；用于纠正先到的 transport error 临时失败。
+     * 该方法只接受终态，并保持 updatedAt 不早于当前值，避免异步事件时间戳倒退。
+     */
+    public Run applyTerminalFact(RunStatus terminalStatus, Instant terminalOccurredAt) {
+        Objects.requireNonNull(terminalStatus, "terminalStatus must not be null");
+        Objects.requireNonNull(terminalOccurredAt, "terminalOccurredAt must not be null");
+        if (!terminalStatus.isTerminal()) {
+            throw new IllegalArgumentException("terminalStatus must be terminal");
+        }
+        Instant nextUpdatedAt = terminalOccurredAt.isBefore(updatedAt) ? updatedAt : terminalOccurredAt;
+        return new Run(
+                runId,
+                sessionId,
+                workspaceId,
+                terminalStatus,
+                createdAt,
+                nextUpdatedAt,
+                traceId,
+                tokenUsage,
+                costUsd,
+                sourceType,
+                sourceRefId,
+                triggeredByUserId,
+                agentId,
+                modelId);
+    }
+
+    /**
      * 将正在取消的 Run 标记为取消终态，通常由远端取消确认或本地 pending 取消触发。
      */
     public Run cancel(Instant nextUpdatedAt) {

@@ -21,7 +21,7 @@
 - Workspace：`Workspace`、`WorkspaceId`。
 - Session：`Session`、`SessionId`、`SessionStatus`、`SessionMessage`、`SessionMessageId`、`SessionMessageRole`；`Session` 内含平台置顶状态和后端内部 opencode session/node 映射字段，软删除使用 `ARCHIVED` 状态。
 - AgentSessionBinding：`AgentSessionBinding`、`AgentSessionBindingRepository`；按 `(sessionId, agentId)` 表达平台 session 到远端 agent session/node 的通用绑定，旧 opencode 字段只作兼容。
-- Run：`Run`、`RunId`、`RunStatus`、`TokenUsage`；Run 可保存单次对话 token/cost 快照。`RunRepository.saveIfStatus` 提供按当前状态条件保存语义，用于终态事件与异步 transport error 并发到达时避免旧快照覆盖已落库终态。
+- Run：`Run`、`RunId`、`RunStatus`、`TokenUsage`；Run 可保存单次对话 token/cost 快照。`RunRepository.saveIfStatus` 提供按当前状态条件保存语义，用于终态事件与异步 transport error 并发到达时避免旧快照覆盖已落库终态；`Run.applyTerminalFact` 只接受 root `run.succeeded/run.failed/run.cancelled` 等终态事实，用于以后到 root 终态纠正先到的 transport error 临时失败。
 - RunEvent：`RunEvent`、`RunEventDraft`、`RunEventId`、`RunEventType`、`RunEventScopeContext`；RunEventRepository 支持按 Run 回放和按 root session 回放历史状态事件。RunEventType 覆盖基础 `run.*`、`tool.*`、`diff.*`、`session.*` 事件以及 Web App 的 `message.*`、`permission.*`、`question.*`、`todo.updated`、`vcs.branch.updated`、`lsp.updated`、`mcp.tools.changed`、`reference.updated`、`file.edited`、`file.watcher.updated`。
 - RunSessionScope：`RunSessionScope`、`RunSessionScopeSession`、`RunSessionScopeRepository`；表达当前 Run root/child opencode session scope，DB 是恢复事实源，Redis 只作为运行中 cache/pending buffer。
 - ExecutionNode：`ExecutionNode`、`ExecutionNodeId`、`ExecutionNodeStatus`。
@@ -41,6 +41,7 @@
 - `CANCELLING -> CANCELLED|FAILED`。
 - `SUCCEEDED`、`FAILED`、`CANCELLED` 为终态。
 - pending Run 收到取消请求时直接进入 `CANCELLED`。
+- 普通领域状态机不允许终态继续流转；但 root RunEvent 终态是远端事实源，应用层可通过 `applyTerminalFact` 记录后到终态事实，以支持 `Streaming response failed` 等 transport error 先到、root 成功/失败后到时按最后 root 终态校正 Run 结果。
 
 ## 测试覆盖
 

@@ -479,9 +479,9 @@ h3 {
 
 .ta-file-tree-file-spacer {
   display: inline-flex;
-  width: 2px !important;
+  width: 1px !important;
   height: var(--ta-tree-row-height);
-  flex: 0 0 2px !important;
+  flex: 0 0 1px !important;
 }
 
 .ta-file-tree-indent-guide {
