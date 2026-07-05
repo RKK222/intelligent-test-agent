@@ -34,11 +34,17 @@ describe("follow-up queue", () => {
     expect(canStartFollowUp(null, false)).toBe(true);
   });
 
-  it("stops runtime animation when either current status is terminal", () => {
+  it("stops runtime animation when the current chat status is terminal", () => {
     expect(isRuntimeBusy("RUNNING", "SUCCEEDED", false)).toBe(false);
-    expect(isRuntimeBusy("SUCCEEDED", "RUNNING", false)).toBe(false);
     expect(isRuntimeBusy("RUNNING", "FAILED", false)).toBe(false);
     expect(isRuntimeBusy("RUNNING", "CANCELLED", false)).toBe(false);
+    expect(isRuntimeBusy("SUCCEEDED", undefined, false)).toBe(false);
+  });
+
+  it("keeps a retried run busy while the previous run is terminal", () => {
+    expect(isRuntimeBusy("FAILED", "PENDING", false)).toBe(true);
+    expect(isRuntimeBusy("SUCCEEDED", "RUNNING", false)).toBe(true);
+    expect(isRuntimeBusy("CANCELLED", "CANCELLING", false)).toBe(true);
   });
 
   it("keeps runtime animation for active or starting runs without a terminal status", () => {

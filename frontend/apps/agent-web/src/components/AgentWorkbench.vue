@@ -31,6 +31,7 @@ import type {
   ModelInfo,
   ProviderInfo,
   Session,
+  SessionMessage,
   OpencodeProcessStartOperation,
   UserOpencodeProcess,
   Workspace,
@@ -96,6 +97,7 @@ const OPENCODE_PROCESS_STATUS_FAST_REFETCH_INTERVAL_MS = 5000;
 const OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS = 30000;
 const OPENCODE_PROCESS_START_OPERATION_POLL_INTERVAL_MS = 500;
 const AGENT_CATALOG_REQUEST_TIMEOUT_MS = 8000;
+const RUN_EVENT_SSE_ERROR_TITLE = "RunEvent SSE 连接异常";
 const OPENCODE_PROCESS_START_STEPS = [
   { step: "VALIDATING_REQUEST", name: "校验请求" },
   { step: "CHECKING_ASSIGNMENT", name: "确认分配" },
@@ -206,6 +208,12 @@ const rightPanelOpen = ref(true);
 const savedLeftPanelOpen = ref(true);
 const savedRightPanelOpen = ref(true);
 
+function clearRunEventSseFeedback() {
+  if (feedback.value?.title === RUN_EVENT_SSE_ERROR_TITLE) {
+    feedback.value = null;
+  }
+}
+
 watch(centerMode, (newMode, oldMode) => {
   if (newMode === "system") {
     if (oldMode !== "system") {
@@ -315,9 +323,55 @@ onBeforeUnmount(() => {
 const chatState = ref(createInitialAgentChatRuntimeState(initialMessages));
 const messageFeedbacks = ref<Record<string, AiMessageFeedback | null>>({});
 const feedbackSubmitting = ref<Record<string, boolean>>({});
+const platformMessageIdsByRemoteId = ref<Record<string, string>>({});
 function dispatchChat(action: Parameters<typeof reduceAgentChatRuntime>[1]) {
   chatState.value = reduceAgentChatRuntime(chatState.value, action);
 }
+
+function isPlatformSessionMessageId(id: string | undefined): id is string {
+  return /^msg_[0-9a-f]{32}$/i.test(id ?? "");
+}
+
+function isRemoteRuntimeMessageId(id: string | undefined): id is string {
+  return Boolean(id?.startsWith("msg_") && !isPlatformSessionMessageId(id));
+}
+
+function rememberPersistedMessageIdentities(messages: Pick<SessionMessage, "messageId" | "remoteMessageId">[]) {
+  const next: Record<string, string> = {};
+  for (const message of messages) {
+    if (message.remoteMessageId && isPlatformSessionMessageId(message.messageId)) {
+      next[message.remoteMessageId] = message.messageId;
+    }
+  }
+  if (Object.keys(next).length > 0) {
+    platformMessageIdsByRemoteId.value = { ...platformMessageIdsByRemoteId.value, ...next };
+  }
+}
+
+function remoteMessageIdForAgentMessage(message: AgentMessage): string | undefined {
+  if (message.role === "card") return undefined;
+  if (isRemoteRuntimeMessageId(message.remoteMessageId)) return message.remoteMessageId;
+  if (isRemoteRuntimeMessageId(message.messageId)) return message.messageId;
+  if (isRemoteRuntimeMessageId(message.id)) return message.id;
+  return undefined;
+}
+
+function platformMessageIdForAgentMessage(message: AgentMessage): string | undefined {
+  if (message.role === "card") return undefined;
+  if (isPlatformSessionMessageId(message.platformMessageId)) return message.platformMessageId;
+  if (isPlatformSessionMessageId(message.messageId)) return message.messageId;
+  if (isPlatformSessionMessageId(message.id)) return message.id;
+  const remoteMessageId = remoteMessageIdForAgentMessage(message);
+  return remoteMessageId ? platformMessageIdsByRemoteId.value[remoteMessageId] : undefined;
+}
+
+const chatMessagesForPanel = computed<AgentMessage[]>(() =>
+  chatState.value.messages.map((message) => {
+    if (message.role === "card") return message;
+    const platformMessageId = platformMessageIdForAgentMessage(message);
+    return platformMessageId ? { ...message, platformMessageId } : message;
+  })
+);
 
 const tabs = computed(() => workbench.tabs);
 const activePath = computed(() => workbench.activePath);
@@ -1195,7 +1249,9 @@ watch(run, (r, _old, onCleanup) => {
       logs.value = [...logs.value.slice(-200), `[sse] ${status}`];
     },
     onError: () => {
-      feedback.value = { kind: "error", title: "RunEvent SSE 连接异常", description: "前端会等待浏览器自动重连" };
+      if (run.value?.runId === r.runId && isRunBusyStatus(run.value.status)) {
+        feedback.value = { kind: "error", title: RUN_EVENT_SSE_ERROR_TITLE, description: "前端会等待浏览器自动重连" };
+      }
     }
   });
   onCleanup(() => subscription.close());
@@ -1817,6 +1873,32 @@ function workspaceNameFromPath(path: string) {
   return path.split(/[\\/]+/).filter(Boolean).at(-1) ?? "Workspace";
 }
 
+const tabPathToClose = ref<string | null>(null);
+const showUnsavedConfirm = ref(false);
+
+function handleCloseTab(path: string) {
+  const tab = workbench.tabs.find((t) => t.path === path);
+  if (tab && !tab.livePreview && tab.content !== tab.savedContent) {
+    tabPathToClose.value = path;
+    showUnsavedConfirm.value = true;
+  } else {
+    workbench.closeTab(path);
+  }
+}
+
+function confirmCloseTab() {
+  if (tabPathToClose.value) {
+    workbench.closeTab(tabPathToClose.value);
+  }
+  showUnsavedConfirm.value = false;
+  tabPathToClose.value = null;
+}
+
+function cancelCloseTab() {
+  showUnsavedConfirm.value = false;
+  tabPathToClose.value = null;
+}
+
 async function openServerWorkspacePicker() {
   if (!isSuperAdmin.value) return;
   serverWorkspacePickerOpen.value = true;
@@ -2336,6 +2418,7 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     return;
   }
   // slash 技能和普通消息统一创建平台 Run，才能复用 SSE、刷新恢复和终止能力。
+  clearRunEventSseFeedback();
   dispatchChat({ type: "run.requested" });
   startRunMutation.mutate({ prompt: displayPrompt, parts, title: displayPrompt, command: command ?? undefined });
 }
@@ -2410,6 +2493,9 @@ function handleRunEvent(event: RunEvent) {
       void refreshWorkspaceGitDiff();
     }
   } else if (event.type === "run.succeeded" || event.type === "run.failed" || event.type === "run.cancelled") {
+    if (event.type === "run.succeeded") {
+      clearRunEventSseFeedback();
+    }
     run.value = run.value
       ? { ...run.value, status: event.type === "run.succeeded" ? "SUCCEEDED" : event.type === "run.failed" ? "FAILED" : "CANCELLED" }
       : run.value;
@@ -2431,8 +2517,41 @@ function handleRunEvent(event: RunEvent) {
     if (typeof payload.tokens === "number") {
       lastTokens = payload.tokens;
     }
+    if (run.value?.sessionId) {
+      // 实时 RunEvent 中的 message id 来自 opencode，反馈接口需要平台落库后的 messageId。
+      // 终态后异步刷新 Session 快照，把 remoteMessageId 映射到平台 messageId 后再开放反馈按钮。
+      void refreshPersistedFeedbackIdentities(run.value.sessionId);
+    }
     // 触发 taskUsage 重新计算
     nowTick.value = Date.now();
+  }
+}
+
+function hasUnmappedAssistantRemoteMessages(): boolean {
+  return chatState.value.messages.some((message) => {
+    if (message.role !== "assistant" || platformMessageIdForAgentMessage(message)) {
+      return false;
+    }
+    const remoteMessageId = remoteMessageIdForAgentMessage(message);
+    return Boolean(remoteMessageId && !platformMessageIdsByRemoteId.value[remoteMessageId]);
+  });
+}
+
+async function refreshPersistedFeedbackIdentities(sessionId: string, attempt = 1): Promise<void> {
+  try {
+    const page = await api.listSessionMessages(sessionId, 1, 100);
+    if (session.value?.sessionId !== sessionId) {
+      return;
+    }
+    rememberPersistedMessageIdentities(page.items);
+    await loadFeedbacksForMessages(page.items, sessionId);
+    if (attempt < 3 && hasUnmappedAssistantRemoteMessages()) {
+      setTimeout(() => void refreshPersistedFeedbackIdentities(sessionId, attempt + 1), 500);
+    }
+  } catch {
+    if (attempt < 3 && session.value?.sessionId === sessionId) {
+      setTimeout(() => void refreshPersistedFeedbackIdentities(sessionId, attempt + 1), 500);
+    }
   }
 }
 
@@ -2981,6 +3100,7 @@ async function switchSession(sessionId: string) {
     if (switchSeq !== historySwitchSeq) {
       return;
     }
+    rememberPersistedMessageIdentities(page.items);
     dispatchChat({ type: "reset", messages: messagesFromSessionMessages(page.items) });
     historyLoadingSessionId.value = null;
     // 正文是历史切换的首要结果；反馈状态随后补齐，不阻塞用户阅读。
@@ -3032,6 +3152,7 @@ function handleNewConversation() {
   dispatchChat({ type: "reset" });
   messageFeedbacks.value = {};
   feedbackSubmitting.value = {};
+  platformMessageIdsByRemoteId.value = {};
   readonlySessionReason.value = "";
   diffFiles.value = [];
   
@@ -3044,9 +3165,13 @@ function handleNewConversation() {
   nowTick.value = Date.now();
 }
 
-async function loadFeedbacksForMessages(messages: Array<{ messageId?: string; role?: string }>, expectedSessionId?: string) {
+async function loadFeedbacksForMessages(
+  messages: Array<Pick<SessionMessage, "messageId" | "role" | "remoteMessageId">>,
+  expectedSessionId?: string
+) {
+  rememberPersistedMessageIdentities(messages);
   const assistantMessageIds = messages
-    .filter(message => message.role === "ASSISTANT" && message.messageId?.startsWith("msg_"))
+    .filter(message => message.role === "ASSISTANT" && isPlatformSessionMessageId(message.messageId))
     .map(message => message.messageId!)
   const uniqueIds = [...new Set(assistantMessageIds)];
   const loaded: Record<string, AiMessageFeedback | null> = {};
@@ -3264,7 +3389,7 @@ async function handleLogout() {
           :show-server-workspace-switch="isSuperAdmin"
           :markdown-preview="markdownPreview"
           @activate="(path: string) => workbench.setActivePath(path)"
-          @close="(path: string) => workbench.closeTab(path)"
+          @close="handleCloseTab"
           @editor-action="() => {}"
           @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
           @select-version="handleSelectVersion"
@@ -3291,7 +3416,7 @@ async function handleLogout() {
     <template #chat>
       <div class="managed-chat-panel">
         <FigmaChatPanel
-          :messages="chatState.messages"
+          :messages="chatMessagesForPanel"
           :streaming-text-by-part-id="chatState.streamingTextByPartId"
           :message-scopes-by-id="chatState.messageScopesById"
           :subagents-by-session-id="chatState.subagentsBySessionId"
@@ -3412,6 +3537,20 @@ async function handleLogout() {
     :operation="processStartupOperation"
     @close="processStartupDialogOpen = false"
   />
+
+  <!-- 未保存二次确认弹窗 -->
+  <div v-if="showUnsavedConfirm" class="ta-confirm-backdrop" role="presentation">
+    <div class="ta-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+      <div class="ta-confirm-body">
+        <h3 id="confirm-title" class="ta-confirm-title">未保存的修改</h3>
+        <p class="ta-confirm-desc">该文件有未保存的修改，关闭将丢失这些修改。确定要关闭吗？</p>
+      </div>
+      <div class="ta-confirm-footer">
+        <button type="button" class="ta-btn-cancel" @click="cancelCloseTab">取消</button>
+        <button type="button" class="ta-btn-confirm" @click="confirmCloseTab">确认关闭</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -3522,5 +3661,86 @@ async function handleLogout() {
   background: #ffffff;
   border: 0.5px dashed var(--ta-border-strong);
   margin: 0;
+}
+
+.ta-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: rgba(15, 23, 42, 0.4);
+  backdrop-filter: blur(1px);
+}
+
+.ta-confirm-dialog {
+  width: 320px;
+  background: #ffffff;
+  border-radius: 8px;
+  border: 1px solid var(--ta-border);
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.ta-confirm-body {
+  padding: 20px 20px 16px 20px;
+}
+
+.ta-confirm-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #111;
+  margin: 0;
+}
+
+.ta-confirm-desc {
+  font-size: 13px;
+  color: #666;
+  margin: 8px 0 0 0;
+  line-height: 1.5;
+}
+
+.ta-confirm-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px 20px;
+  background: #fafafa;
+  border-top: 1px solid #f0f0f0;
+}
+
+.ta-btn-cancel {
+  font-size: 13px;
+  font-weight: 500;
+  color: #555;
+  background: #fff;
+  border: 1px solid #dcdcdc;
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.ta-btn-cancel:hover {
+  background: #f5f5f5;
+  border-color: #ccc;
+}
+
+.ta-btn-confirm {
+  font-size: 13px;
+  font-weight: 500;
+  color: #fff;
+  background: #f97316; /* 橙色 */
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+.ta-btn-confirm:hover {
+  background: #ea580c; /* 深橙色 */
 }
 </style>

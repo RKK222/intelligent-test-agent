@@ -23,6 +23,7 @@
 5. 前端断线后通过 Last-Event-ID 续传 durable RunEvent；消息内容恢复只从 opencode session projected messages 获取。
 6. 不把 opencode raw event 原样透传给前端，也不把大段日志、bash/tool output 或高频文本 delta 作为平台持久化事件保存。
 7. generated SDK 事件必须在 `test-agent-event` 或 `test-agent-opencode-client` 映射为平台事件。
+8. root `run.succeeded/run.failed/run.cancelled` 是 Run 终态事实源；一旦终态已落库，后到的 prompt_async 提交错误、SSE 订阅 transport error 或浏览器连接错误都不得覆盖 Run 状态，也不得补写冲突 `run.failed`。
 
 ## RunEvent 基础字段
 
@@ -167,6 +168,7 @@ scope 发现与缓存规则：
 - root session idle 额外派生 `run.succeeded`；child session idle 只发送 `session.status`。
 - root `session.error` 额外派生 `run.failed`；child `session.error` 只发送 `session.error`。
 - `session.next.step.ended` 不再派生 `run.succeeded`，只作为兼容未知事件保留上下文。
+- 后端持久化终态时必须先读取当前 Run 并执行条件状态写入；条件不匹配说明已有终态或更新先落库，此时不追加派生终态事件、不刷新终态快照。`Streaming response failed` 等 transport error 没有独立业务终态含义，只能在 Run 仍非终态时收敛为 `run.failed`。
 
 ## Phase 04 Runtime SSE
 

@@ -113,6 +113,43 @@ describe("AgentConfigPanel", () => {
     resolvePublicFiles([]);
   });
 
+  it("renders agent files with VS Code codicons and compact tree rows", async () => {
+    apiClientMock.listPublicAgentFiles.mockResolvedValue([
+      { path: "agents", name: "agents", type: "directory" },
+      { path: "README.md", name: "README.md", type: "file" }
+    ]);
+
+    const { view } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalled());
+    expect(await view.findByText("agents")).toBeTruthy();
+    expect(await view.findByText("README.md")).toBeTruthy();
+    expect(view.container.querySelector(".ta-file-tree-row")).toBeTruthy();
+    expect(view.container.querySelector(".codicon-folder")).toBeFalsy();
+    expect(view.container.querySelector("svg.ta-file-tree-icon")).toBeTruthy();
+    expect(view.container.querySelector("use")?.getAttribute("href")).toContain("#Readme");
+  });
+
+  it("highlights the opened agent file instead of keeping the root scope active", async () => {
+    apiClientMock.listPublicAgentFiles.mockResolvedValue([
+      { path: ".gitignore", name: ".gitignore", type: "file" }
+    ]);
+    apiClientMock.readPublicAgentFile.mockResolvedValue({
+      path: ".gitignore",
+      content: "node_modules",
+      encoding: "utf-8"
+    });
+
+    const { view } = renderPanel();
+
+    await fireEvent.click(await view.findByText(".gitignore"));
+
+    await waitFor(() => expect(apiClientMock.readPublicAgentFile).toHaveBeenCalledWith(".gitignore", undefined, "linux-1"));
+    const fileRow = view.getByText(".gitignore").closest("button");
+    expect(fileRow?.classList.contains("is-active")).toBe(true);
+    expect(view.container.querySelector(".agent-root-row.active")).toBeNull();
+  });
+
   it("switches public level to a selected worktree and reloads files with worktree context", async () => {
     apiClientMock.listPublicAgentWorktrees.mockResolvedValue([publicWorktreeOption()]);
 

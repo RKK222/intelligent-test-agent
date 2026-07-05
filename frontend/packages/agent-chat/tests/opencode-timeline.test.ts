@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/vue";
+import { fireEvent, render, within } from "@testing-library/vue";
 import { nextTick } from "vue";
 import type { AgentMessage, MessagePart } from "@test-agent/shared-types";
 import OpencodeTimeline from "../src/opencode-like/components/OpencodeTimeline.vue";
@@ -107,6 +107,95 @@ describe("OpencodeTimeline", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("shows the conversation locator only after more than three user turns", async () => {
+    const { container, rerender } = render(OpencodeTimeline, {
+      props: {
+        state: createOpencodeLikeState({
+          messages: conversationMessages(3)
+        })
+      }
+    });
+
+    expect(container.querySelector('[data-testid="oc-conversation-locator-trigger"]')).toBeNull();
+
+    await rerender({
+      state: createOpencodeLikeState({
+        messages: conversationMessages(4)
+      })
+    });
+
+    expect(container.querySelector('[data-testid="oc-conversation-locator-trigger"]')).toBeTruthy();
+  });
+
+  it("opens a locator panel with turn summaries and file chips", async () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "第一轮：读取项目文档"),
+        assistantMessage("msg_assistant_1", [textPart("part_answer_1", "已读取项目入口文档。")]),
+        userMessage("msg_user_2", "第二轮：检查文件变更"),
+        assistantMessage("msg_assistant_2", [
+          textPart("part_answer_2", "已实现并提交：修复主子 Agent 时间线切换卡顿。"),
+          filePart("part_file_1", "README.md"),
+          toolPart("part_read_1", "read", { filePath: "session-log.md" }),
+          toolPart("part_edit_1", "edit", { path: "src/main.ts" }),
+          toolPart("part_write_1", "write", { file_path: "docs/README.md" })
+        ]),
+        userMessage("msg_user_3", "第三轮：补充验证"),
+        assistantMessage("msg_assistant_3", [reasoningPart("part_reasoning_3", "先确认交互边界。")]),
+        userMessage("msg_user_4", "第四轮：继续"),
+        assistantMessage("msg_assistant_4", [textPart("part_answer_4", "超过三轮后显示定位器。")])
+      ]
+    });
+
+    const { container, getByTestId } = render(OpencodeTimeline, { props: { state } });
+
+    await fireEvent.click(getByTestId("oc-conversation-locator-trigger"));
+
+    const panel = document.body.querySelector('[data-testid="oc-conversation-locator-panel"]') as HTMLElement;
+    expect(panel).toBeTruthy();
+    const panelQueries = within(panel);
+    expect(panelQueries.getByText("第二轮：检查文件变更")).toBeTruthy();
+    expect(panelQueries.getByText(/已实现并提交/)).toBeTruthy();
+    expect(panelQueries.getByText("README.md")).toBeTruthy();
+    expect(panelQueries.getByText("session-log.md")).toBeTruthy();
+    expect(panelQueries.getByText("+2")).toBeTruthy();
+    expect(container.querySelector(".oc-conversation-locator")).toBeTruthy();
+  });
+
+  it("scrolls to the selected turn from the locator panel", async () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const state = createOpencodeLikeState({
+        messages: conversationMessages(4)
+      });
+
+      const { getByTestId } = render(OpencodeTimeline, { props: { state } });
+
+      await fireEvent.click(getByTestId("oc-conversation-locator-trigger"));
+      const panel = document.body.querySelector('[data-testid="oc-conversation-locator-panel"]') as HTMLElement;
+      await fireEvent.click(within(panel).getByRole("button", { name: "定位到第 3 轮对话" }));
+
+      expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    } finally {
+      HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+    }
+  });
+
+  it("shows the conversation locator through AssistantThread main rendering path", () => {
+    const { container } = render(AssistantThread, {
+      props: {
+        messages: conversationMessages(4),
+        commands: [],
+        resources: [],
+        running: false
+      }
+    });
+
+    expect(container.querySelector('[data-testid="oc-conversation-locator-trigger"]')).toBeTruthy();
   });
 
   it("renders task tool parts as clickable subagent cards", async () => {
@@ -639,4 +728,18 @@ function toolPart(
   input: Record<string, unknown>
 ): Extract<MessagePart, { type: "tool" }> {
   return { partId, type: "tool", toolName, status: "completed", input };
+}
+
+function filePart(partId: string, path: string): Extract<MessagePart, { type: "file" }> {
+  return { partId, type: "file", path, name: path };
+}
+
+function conversationMessages(turns: number): AgentMessage[] {
+  return Array.from({ length: turns }, (_, index): AgentMessage[] => {
+    const turn = index + 1;
+    return [
+      userMessage(`msg_user_${turn}`, `第 ${turn} 轮对话`),
+      assistantMessage(`msg_assistant_${turn}`, [textPart(`part_answer_${turn}`, `第 ${turn} 轮回答摘要。`)])
+    ];
+  }).flat();
 }

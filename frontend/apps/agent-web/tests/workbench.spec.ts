@@ -1,12 +1,31 @@
 import { expect, test, type Page } from "@playwright/test";
 
 test("workbench opens a workspace file with mocked backend api", async ({ page }) => {
-  await mockBackendApi(page);
+  await mockBackendApi(page, {
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    },
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1",
+        appId: "app_gcms"
+      }
+    }
+  });
 
   await gotoWorkbench(page);
 
   await expect(page.getByText("MIMO测试智能体")).toBeVisible();
   await expect(page.getByRole("button", { name: "关闭运行与终端" })).toBeVisible();
+  const workspaceTreeRow = page.getByRole("button", { name: /tests/ });
+  await expect(workspaceTreeRow).toBeVisible();
+  await expect.poll(() => workspaceTreeRow.evaluate((el) => getComputedStyle(el).height)).toBe("22px");
+  await expect.poll(() => workspaceTreeRow.evaluate((el) => getComputedStyle(el).fontSize)).toBe("13px");
+  const agentRootRow = page.locator(".agent-root-row").first();
+  await expect(agentRootRow).toBeVisible();
+  await expect.poll(() => agentRootRow.evaluate((el) => getComputedStyle(el).height)).toBe("22px");
   await page.getByRole("button", { name: /tests/ }).click();
   await page.getByRole("button", { name: /checkout.spec.ts/ }).click();
   await expect(page.getByText("tests/checkout.spec.ts", { exact: true }).first()).toBeVisible();
@@ -679,6 +698,7 @@ test("retrying a failed chat run sends the previous prompt again", async ({ page
   const runRequests: Array<Record<string, unknown>> = [];
   await mockBackendApi(page, {
     runRequests,
+    runIds: ["run_1", "run_2"],
     recentWorkspaces: {
       app_gcms: {
         ...workspace(),
@@ -692,9 +712,12 @@ test("retrying a failed chat run sends the previous prompt again", async ({ page
     },
     runEvents: [
       event(1, "run.failed", {
-        error: { name: "ConnectionError", message: "您的请求断开，请重试" }
+        error: { name: "ConnectionError", message: "Streaming response failed" }
       })
-    ]
+    ],
+    runEventsByRunId: {
+      run_2: []
+    }
   });
 
   await gotoWorkbench(page);
@@ -703,12 +726,109 @@ test("retrying a failed chat run sends the previous prompt again", async ({ page
   await composer.fill("重试这条测试任务");
   await page.getByRole("button", { name: "发送" }).click();
   await expect.poll(() => runRequests.length).toBe(1);
-  await expect(page.getByText("您的请求断开，请重试")).toBeVisible();
+  await expect(page.locator(".figma-chat-retry-card-text")).toContainText("Streaming response failed");
 
   await page.locator(".figma-chat-retry-card-btn").click();
 
   await expect.poll(() => runRequests.length).toBe(2);
   expect(runRequests[1]).toMatchObject({ prompt: "重试这条测试任务" });
+  await expect(page.locator(".figma-chat-retry-card")).toHaveCount(0);
+});
+
+test("new run success clears stale RunEvent SSE connection feedback", async ({ page }) => {
+  const runRequests: Array<Record<string, unknown>> = [];
+  await page.addInitScript(() => {
+    class MockRunEventSource {
+      onopen: ((event: Event) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      private readonly listeners = new Map<string, Set<EventListener>>();
+      private closed = false;
+
+      constructor(readonly url: string) {
+        const runId = decodeURIComponent(url).match(/\/runs\/([^/]+)\/events/)?.[1] ?? "run_1";
+        window.setTimeout(() => this.onopen?.(new Event("open")), 0);
+        if (runId === "run_1") {
+          window.setTimeout(() => {
+            if (!this.closed) {
+              this.onerror?.(new Event("error"));
+            }
+          }, 20);
+          window.setTimeout(() => {
+            this.emit("run.failed", runId, 1, {
+              error: { name: "ConnectionError", message: "Streaming response failed" }
+            });
+          }, 60);
+        } else {
+          window.setTimeout(() => {
+            this.emit("run.succeeded", runId, 1, {});
+          }, 20);
+        }
+      }
+
+      addEventListener(type: string, listener: EventListener) {
+        const listeners = this.listeners.get(type) ?? new Set<EventListener>();
+        listeners.add(listener);
+        this.listeners.set(type, listeners);
+      }
+
+      removeEventListener(type: string, listener: EventListener) {
+        this.listeners.get(type)?.delete(listener);
+      }
+
+      close() {
+        this.closed = true;
+      }
+
+      private emit(type: string, runId: string, seq: number, payload: Record<string, unknown>) {
+        if (this.closed) {
+          return;
+        }
+        const message = new MessageEvent(type, {
+          data: JSON.stringify({
+            eventId: `evt_mock_${runId}_${seq}`,
+            runId,
+            seq,
+            type,
+            traceId: "trace_e2e",
+            occurredAt: "2026-06-19T00:00:00Z",
+            payload
+          }),
+          lastEventId: String(seq)
+        });
+        this.listeners.get(type)?.forEach((listener) => listener(message));
+      }
+    }
+    (window as Window & { EventSource: typeof EventSource }).EventSource = MockRunEventSource as unknown as typeof EventSource;
+  });
+  await mockBackendApi(page, {
+    runRequests,
+    runIds: ["run_1", "run_2"],
+    recentWorkspaces: {
+      app_gcms: {
+        ...workspace(),
+        appId: "app_gcms",
+        versionId: "awv_20260715",
+        applicationWorkspaceId: "awp_1"
+      }
+    },
+    personalWorkspaces: {
+      awv_20260715: [defaultPersonalWorkspace("awv_20260715")]
+    }
+  });
+
+  await gotoWorkbench(page);
+
+  const composer = page.getByPlaceholder("描述测试任务，例如：跑 checkout 模块并分析失败原因");
+  await composer.fill("第一轮触发 SSE error");
+  await page.getByRole("button", { name: "发送" }).click();
+  await expect(page.getByText("RunEvent SSE 连接异常")).toBeVisible();
+  await expect(page.locator(".figma-chat-retry-card")).toContainText("Streaming response failed");
+
+  await composer.fill("第二轮成功");
+  await page.getByRole("button", { name: "发送" }).click();
+
+  await expect.poll(() => runRequests.length).toBe(2);
+  await expect(page.getByText("RunEvent SSE 连接异常")).toHaveCount(0);
 });
 
 test("a live diff refreshes the changed file parent directory before the run finishes", async ({ page }) => {
@@ -1345,6 +1465,8 @@ async function mockBackendApi(
     fileRequests?: Array<{ workspaceId: string; path: string }>;
     gitDiffRequests?: string[];
     runEvents?: Array<ReturnType<typeof event>>;
+    runIds?: string[];
+    runEventsByRunId?: Record<string, Array<ReturnType<typeof event>>>;
     fileContents?: Record<string, string>;
     authRoles?: string[];
     authMeGate?: Promise<void>;
@@ -1856,8 +1978,10 @@ async function mockBackendApi(
     }
     if (method === "POST" && url.pathname === "/api/internal/agent/opencode/runs") {
       capture.runRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
+      const requestIndex = (capture.runRequests?.length ?? 1) - 1;
+      const runId = capture.runIds?.[requestIndex] ?? "run_1";
       await route.fulfill(json({
-        runId: "run_1",
+        runId,
         sessionId: "ses_1",
         workspaceId: "wrk_1234567890abcdef",
         status: "RUNNING",
@@ -1871,12 +1995,15 @@ async function mockBackendApi(
       await route.fulfill(json({ accepted: true }));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/runs/run_1/events") {
+    const runEventsMatch = url.pathname.match(/^\/api\/internal\/agent\/opencode\/runs\/([^/]+)\/events$/);
+    if (method === "GET" && runEventsMatch) {
+      const runId = runEventsMatch[1] ?? "run_1";
       capture.runEventRequests?.push(url.pathname);
+      const runEvents = capture.runEventsByRunId?.[runId] ?? capture.runEvents;
       await route.fulfill({
         status: 200,
         headers: { ...corsHeaders(), "Content-Type": "text/event-stream", "Cache-Control": "no-cache" },
-        body: sse(capture.runEvents ?? [
+        body: sse(runEvents ?? [
           event(1, "permission.asked", { requestId: "perm_1", sessionId: "ses_1", title: "Run bash", description: "Allow npm test?" }),
           event(2, "question.asked", {
             requestId: "ques_1",

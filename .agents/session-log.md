@@ -2,6 +2,188 @@
 
 ## Entries
 
+### 2026-07-05 - 修复文件树对齐、列表背景色、图标切换、机器名优先压缩、首页底色、取消选中、主体区域底色全白及文件夹前导箭头 14x14 化
+
+- Why:
+  - 1. 用户反馈工作台左侧文件树中，图标 and 文字没有对齐，图标视觉上偏上。
+  - 2. 用户要求将工作空间与 Agents 两块文件列表展示区域 of 底色由原先 the 浅灰色改为白色。
+  - 3. 用户要求文件夹取消图标展示（仅保留展开/折叠三角箭头），文件图标切换为 Material Icon Theme 风格彩色图标。
+  - 4. 用户要求侧边栏宽度变窄时，优先压缩/截断机器名（如 `huangzhenrendeMacBook-Air.local`），绝对禁止压缩/截断文件夹或根节点名称（如 `公共级`、`应用级`、`工作空间`）。
+  - 5. 用户要求将主页背景/底色修改为较淡雅的浅蓝色 `#F0F4FA`（替代原先的 `#f5f5f5`）。
+  - 6. 用户要求侧边栏中的 Agents 两个配置级根节点（“公共级”与“应用级”）在初始加载时不要默认有灰色高亮选中状态。
+  - 7. 用户要求将红线圈起的主体内容区域（包含左侧边栏、中侧编辑器卡片、各面板容器、拖拽分隔条、以及聊天面板）的底色背景全部统一修改为纯白色 `#ffffff`。
+  - 8. 用户要求文件夹前面的展开/折叠箭头（即 twistie 图标）统一调整为 14x14 大小。
+- What:
+  - 1. 在 `globals.css` 中微调文件树图标 `position: relative; top: 1px;` 提升对齐感；`--ta-tree-bg` 全局修改为 `#ffffff` 实现列表底色纯白。
+  - 2. `@test-agent/file-explorer` 引入完整 Material Icon Theme SVG 精灵图（`sprite.svg`） and `FileIcon.vue` 组件；`fileIcons.ts` 建立文件拓展名/精准文件名映射，文件夹类型直接返回空以移除文件夹图标。
+  - 3. 为 `AgentConfigPanel.vue` 中的 `.agent-root-title` 以及 `FigmaFileExplorer.vue` 中的 `.figma-fe-section-title` 加上 `flex-shrink: 0; white-space: nowrap;` 约束，确保文件夹/区段名称永不被压缩；为机器名与 worktree badge 元素设为 `flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;`，实现优先省略压缩机器名。
+  - 4. 修改 `globals.css` 中定义主页、全局背景 and 底层面板的全局变量 `--ta-bg`、`--ta-chrome`、`--ta-panel`、`--ta-control`、`--secondary` 和语义 token `--background` 为 `#F0F4FA`。
+  - 5. 将 `AgentConfigPanel.vue` 中定义的 `activeScope` 响应式变量初始值由原先的 `"PUBLIC"` 修改为 `null`；并为 Git 操作相关操作函数及 `v-if="activeScope"` 加上安全卫语句检查；同时引入局部常量 `scope` 以规避 TypeScript 对 ref 变量闭包类型收窄的静态推导局限。
+  - 6. 修改 `FigmaShell.vue` 中涉及左侧文件树面板容器 `.figma-panel-left`、左右分割拖拽条 `.figma-files-resize-handle` / `.figma-chat-resize-handle`、中间内容包装器 `.figma-main-card-container` 以及右侧聊天背景 `.figma-chat-body` 等所有残留灰色的背景定义，全部统一改为 `#ffffff`。
+  - 7. 在 `globals.css` 中拆分 `.ta-file-tree-spacer` 与 `.ta-file-tree-twistie` 样式规则，将其宽度 `width` 与弹性基准 `flex-basis` 以及文本行高 `line-height` 统一调整为 `14px`，确保文件夹前导的折叠/展开指示图标及其对应的空白占位符在 14x14px 大小下对齐无间。
+- How:
+  - 1. SVG 精灵图通过 Vite SVG 模块导入与 SVG `<use :href="...">` 实现，图标大小保持 16x16px 矢量高清显示。
+  - 2. 伸缩布局上，通过显式声明 `flex-shrink: 0` 保护文件夹固定文案，由右侧 badge 容器承载弹性溢出截断 (`ellipsis`)，解决了之前两项文本同时按比例挤压导致"公共级"被挤成"共"字的问题。
+  - 3. 统一全局浅色底色设计变量至雅致淡蓝 `#F0F4FA`，使主布局底色、背景色以及未激活 tab 栏与内容面形成高雅和谐 we cool-tone color scheme。
+  - 4. 将初始 `activeScope` 设为 `null`，确保两级根节点只有在用户真实点击互动时才会呈现灰色高亮激活态。
+  - 5. 将主体面板组合（Figma 风格布局中被红色线条包围的所有区域）的各级背景 and 分割条底色深度渲染为纯白 `#ffffff`，与外部大屏淡蓝的底色背景 `#F0F4FA` 形成强烈对比，提升视觉层次感。
+- Result:
+  - 单元测试（37 test files, 331 passed）、`vue-tsc` 类型检查全部通过，主体内容区成功更新为纯白背景。
+
+### 2026-07-04 - 文件浏览区切换为 VS Code Workbench 风格
+
+- Why:
+  - 用户要求把左侧工作空间文件树和 Agents 文件树改成当前 CloudStudio 页面里的 VS Code Workbench 风格，包含字体、字号、间距、样式和文件图标。
+- What:
+  - 新增 `--ta-tree-*` 文件浏览局部 token，工作区文件树、搜索结果、变更列表和 Agent 配置树统一为 `#f8f8f8` 背景、`#e5e5e5` 分隔线、13px 系统 UI 字体和 22px 行高。
+  - `@test-agent/file-explorer` 新增 `@vscode/codicons@0.0.45` 和 `getVsCodeFileIconClass`，工作区文件树与 Agent 配置树复用 codicon 文件/目录图标。
+- How:
+  - 没有恢复旧 Bootstrap Icons 方案；只在文件浏览区导入 VS Code codicon CSS，并通过全局 `.ta-file-tree-*` 类约束紧凑行高。E2E 冷启动若遇到 `Outdated Optimize Dep`，需要清理 Vite `.vite` 预构建缓存后重跑。
+- Result:
+  - 定向 file-explorer/agent-config Vitest、两个前端包 typecheck 和新增 workbench 视觉断言通过；完整校验结果见本次提交说明。
+
+### 2026-07-04 - 回退文件树 Bootstrap Icons 接入
+
+- Why:
+  - 用户明确要求回退上一轮“文件树接入 Bootstrap Icons 文件类型图标”的修改。
+- What:
+  - 通过 `git revert --no-commit 518add084` 撤销 `bootstrap-icons` 依赖、文件类型图标映射、文件树/搜索结果图标替换、相关测试和文档同步。
+- How:
+  - 使用非破坏性 revert 保留 Git 历史，不使用 `reset --hard`；仅额外保留本条 session log 说明回退原因。
+- Result:
+  - 文件树恢复为原先的 `lucide-vue-next` 通用文件/目录图标；`@test-agent/file-explorer` 不再依赖 `bootstrap-icons`。
+
+### 2026-07-04 - 新建对话按钮更换图标及悬浮提示即时化
+
+- Why:
+  - 1. 用户要求将右侧输入卡片内的“新建对话”按钮图标从加号（Plus）更换为笔写字的图标。
+  - 2. 用户要求将“新建对话”和“上传附件”两个按钮在鼠标悬浮时即时显示对应的文字提示，消除 hover 时的显示延时。
+- What:
+  - 1. 在 `FigmaChatPanel.vue` 中从 `lucide-vue-next` 导入 `SquarePen`，并用 `<SquarePen>` 替换原“新建对话”按钮中的 `<Plus>` 图标组件。
+  - 2. 将“新建对话”按钮和“上传附件”按钮分别用 `<el-tooltip>` 裹挟，并将 `:show-after` 延迟参数设定为 `0` 实现无延迟即时呈现。
+  - 3. 移除了两个按钮原生的 `title` 属性，避免浏览器原生的悬浮气泡干扰 Element Plus tooltip 的展示。
+- How:
+  - 1. 修改 `frontend/apps/agent-web/src/components/FigmaChatPanel.vue`：
+    - 将 `lucide-vue-next` 导入处的 `Plus` 改为 `SquarePen`。
+    - 用 `<el-tooltip content="上传附件" placement="top" :show-after="0">` 包装上传附件 `<button>`。
+    - 用 `<el-tooltip content="新建对话" placement="top" :show-after="0">` 包装新建对话 `<button>`，并将里面的 `<Plus />` 换成 `<SquarePen />`。
+- Result:
+  - 1. 前端 `corepack pnpm typecheck` 和 `corepack pnpm build` 运行成功，无 TypeScript 校验和打包错误。
+  - 2. Vitest 单元测试 `corepack pnpm test FigmaChatPanel.test.ts` 完美通过（62 passed）。
+  - 3. 无需修改任何后端逻辑、API 契约、数据库或 generated SDK。
+
+### 2026-07-04 - 文件编辑多 Tab 高度改为30px与滚动条优化
+
+- Why:
+  - 1. 用户要求保持多 Tab 编辑区高度为 30px。
+  - 2. 用户要求当 tab 个数超过宽度时，悬停在 tab 上时显示横向滚动条，非悬停时不显示。
+  - 3. 任何时候都绝对不能出现纵向滚动条。
+- What:
+  - 1. 将 `.figma-editor-tabs` 容器高度修改为 `30px`，使其比原先的 `38px` 更紧凑，且保持在 30px 高度不变。
+  - 2. 优化滚动条展示方式，将 WebKit 滚动条高度降为更精致的 `3px`，并在 hover 时呈现半透明 `rgba(0, 0, 0, 0.2)`，非 hover 时完全透明，防止滚动条在 hover 瞬间因为从无到有导致内容高度抖动。
+  - 3. 通过 `overflow-y: hidden !important` 强行限制任何时候都在 Tab 区域无法产生纵向滚动条。
+- How:
+  - 1. 修改 `frontend/apps/agent-web/src/components/FigmaEditorArea.vue` 中的 CSS 样式：
+     - `.figma-editor-tabs` 设定 `height: 30px;` 并保持 `overflow-y: hidden !important;` 约束。
+     - `::-webkit-scrollbar` 高度由 `4px` 减为 `3px`，且 border-radius 相应调整为 `3px`。
+- Result:
+  - 1. 前端 `corepack pnpm typecheck` 校验通过，没有任何 TS 编译错误。
+  - 2. 前端 329 个单元测试（`corepack pnpm test`）完美通过，无回归问题。
+  - 3. 本地 Git status 干净，无无关重构或多余改动。
+
+### 2026-07-04 - 修复反馈误用 opencode 远端消息 ID
+
+- Why:
+  - 用户反馈反馈接口仍返回 `NOT_FOUND: 消息不存在`，失败 URL 中的 `msg_f2d478d96001861rLCyXjYqf75` 是 opencode 远端 message id，不是平台 `session_messages.message_id`；仅判断 `msg_` 前缀会误把远端 ID 当成平台反馈目标。
+- What:
+  - 前端 `AgentMessage` 明确区分 `platformMessageId` 和 `remoteMessageId`；实时 reducer 只把 opencode 事件 ID 标记为 `remoteMessageId`，历史 Session message 恢复时带上平台 ID 和远端 ID。
+  - `FigmaChatPanel` 只允许 `msg_` + 32 位 hex 的平台 messageId 提交反馈；Run 终态后 `AgentWorkbench` 刷新当前 Session message 快照，用 `remoteMessageId -> platformMessageId` 补齐映射后再显示反馈按钮。
+- How:
+  - 先补充红灯用例覆盖“远端 opencode msg_* 不展示反馈”和“映射到平台 ID 后提交平台 ID”，再修改 shared-types、agent-chat reducer、agent-web 工作台与反馈面板，并同步 README/PACKAGE 说明。
+- Result:
+  - `FigmaChatPanel.test.ts`、`workbench-utils.test.ts`、`runtime-reducer.test.ts` 定向与全文件测试通过；`@test-agent/agent-web`、`@test-agent/agent-chat`、`@test-agent/shared-types` typecheck 通过。
+  - 未修改后端 API、RunEvent、数据库、generated SDK 或环境配置。
+
+### 2026-07-04 - 文本编辑框未保存文件标题加*号及关闭二次确认
+
+- Why:
+  - 1. 用户要求在文本编辑框中，修改但未保存的文件标题前面加一个橙色的 `*` 号，提示用户该文件有未保存的修改。
+  - 2. 用户要求当未保存的文件被关闭时，弹出 `div` 二次确认弹窗，防止用户误关闭导致修改丢失。
+  - 3. 当多 Tab 数量超出宽度时需要提供横向滚动条，平时隐藏，鼠标悬停时显式出现；且必须绝对限制任何时候都不能出现纵向滚动条。
+- What:
+  - 1. 修改未保存标题星号：在 `FigmaEditorArea.vue` 的 Tab 标题前面，当文件处于修改未保存状态时，渲染一个橙色的 `*` 号。
+  - 2. 关闭二次确认弹窗：在 `AgentWorkbench.vue` 拦截 `@close` 事件。如果检测到目标 Tab 属于未保存的文件（即 `!tab.livePreview && tab.content !== tab.savedContent`），则缓存待关闭文件路径并弹出二次确认 `div` 弹窗。
+  - 3. 弹窗交互：点击“确认关闭”则关闭 Tab 并销毁弹窗，点击“取消”则仅销毁弹窗，数据无损。
+  - 4. Tab 滚动条优化：在 `FigmaEditorArea.vue` 中调整 `.figma-editor-tabs` 容器样式。通过使用 `::-webkit-scrollbar` 微调、设置 Firefox 及 Webkit 的滚动条展示规则，实现悬停时显示精美的 4px 细横向滚动条，非悬停时滚动条完全透明不占位，且通过 `overflow-y: hidden !important` 杜绝了纵向滚动条的产生。
+- How:
+  - 1. 修改 `frontend/apps/agent-web/src/components/FigmaEditorArea.vue`：在 `tab.title` 之前插入带有判断条件的 `<span>*</span>`，并在 style scoped 中定义 `.figma-editor-tab-dirty-star` 样式，指定橙色（`#f97316`）并微调 margins 使之排版协调。
+  - 2. 修改 `frontend/apps/agent-web/src/components/AgentWorkbench.vue`：将 `@close` 绑定变更为 `handleCloseTab`，并在 setup 中声明 `tabPathToClose` 与 `showUnsavedConfirm` 两个响应式变量及 `handleCloseTab`, `confirmCloseTab`, `cancelCloseTab` 逻辑方法。
+  - 3. 在 `AgentWorkbench.vue` 的模板最底部添加二次确认 `div` 结构，并在 style scoped 中增加相应的遮罩、对话框、按钮的 Figma 极简拟物化样式（包括橙色高亮的主确认按钮与呼吸感背景）。
+  - 4. 修改 `FigmaEditorArea.vue` 的 CSS：在 `.figma-editor-tabs` 加上 `overflow-y: hidden !important` 限制与 hover 自定义滚动条展现规则。
+- Result:
+  - 前端运行 `corepack pnpm typecheck` 和 `corepack pnpm lint` 完美通过，无类型或格式错误。
+  - 确认本改动完全在前端局部实现，不改变任何后端 API、DTO、数据库结构或 generated SDK。
+
+### 2026-07-04 - 修复流式失败后重试仍显示旧错误
+
+- Why:
+  - 用户反馈对话出现 `Streaming response failed` 后点击重试仍报错；根因是重试先把聊天 reducer 切到新一轮 `PENDING`，但旧平台 Run 仍保持 `FAILED`，运行态合并逻辑让上一轮终态压住了新一轮启动态。
+- What:
+  - `AgentWorkbench` 的 busy 判定现在优先识别聊天 reducer 的 `PENDING/RUNNING/CANCELLING`，重试期间不会被上一轮 `FAILED/SUCCEEDED/CANCELLED` 覆盖；失败卡片重试仍复用最近 prompt 重新创建 Run，不新增 API。
+  - Playwright mock 支持按请求序号返回不同 runId，并为失败重试用例覆盖第一轮 `Streaming response failed`、第二轮新 Run 启动后旧失败卡片消失。
+- How:
+  - 先补充 `follow-up-queue.test.ts` 红灯，确认 `FAILED + PENDING` 旧逻辑返回非 busy；再修改 `follow-up-queue.ts` 的状态优先级，并同步 `agent-web` README。
+- Result:
+  - 定向 Vitest 与 Playwright 重试用例通过；未修改后端 API、RunEvent、数据库、generated SDK 或环境配置。
+
+### 2026-07-04 - 修复合并 assistant 消息后的反馈 messageId
+
+- Why:
+  - 用户提交 AI 回复反馈时后端返回 `NOT_FOUND: 消息不存在`；根因是 `FigmaChatPanel` 会把连续 assistant 片段合并为一个展示气泡，但反馈按钮沿用了合并前第一段的运行期临时 id，后端 `ai_message_feedback` 接口只接受已落库的 `session_messages.message_id`（`msg_*`）。
+- What:
+  - `FigmaChatPanel` 展示态新增独立 `feedbackMessageId`，反馈按钮、选中状态和提交中状态都按后端持久化 `msg_*` 查询/提交，不再把临时 assistant id 传给反馈 API。
+  - 合并连续 assistant 消息时优先保留后续片段中的持久化 `msg_*`，避免最终回答已落库但气泡 id 仍是临时 id。
+- How:
+  - 先补充 `FigmaChatPanel.test.ts` 回归用例，复现“临时 assistant 片段 + 持久化 assistant 片段合并后点击满意”必须提交 `msg_*`。
+  - 修改 `frontend/apps/agent-web/src/components/FigmaChatPanel.vue` 的反馈 id 选择逻辑，并同步更新 `frontend/apps/agent-web/README.md`。
+- Result:
+  - 定向红灯确认后，`corepack pnpm --filter @test-agent/agent-web exec vitest run tests/FigmaChatPanel.test.ts --environment jsdom` 通过（58 passed，1 skipped）。
+  - 未修改后端 API、RunEvent、数据库或 generated SDK。
+
+### 2026-07-04 - 优化对话定位器 UI 与任务消耗/运行状态展示布局
+
+- Why:
+  - 1. 用户要求优化对话定位器（ConversationLocator）：需放置在右侧、指示线变短、突出横线匹配当前选中的对话轮次、悬浮浮层后对话项只占 2 行且具有不透明白色背景。
+  - 2. 用户要求将位于输入框上方的“任务消耗”提示栏与消息流中的任务终态提示（已手动终止、任务失败、任务完成）移动至最下方的底部常驻栏（footer）。
+- What:
+  - 1. 对话定位放置在右侧：将定位器触发按钮定位在右侧边缘，浮动面板向左侧展开。
+  - 2. 横线短一点：指示器的线宽由原来的 24px/28px 减小到常规 10px / 激活 16px。
+  - 3. 突出的横线匹配当前定位的对话：将原来的 3 个静态横线改为根据轮次动态渲染，激活的轮次对应的横线高亮展示。
+  - 4. 浮层内每个对话 2 行，白底不透明：通过隐藏文件列表并将摘要部分限制为 1 行（标题 1 行 + 摘要 1 行 = 2 行）实现定位器卡片内容固定为 2 行。修复 CSS 作用域问题（Teleport 到 body 丢失变量）以实现纯白不透明（`#ffffff`）背景和文字颜色重载。
+  - 5. 任务消耗与运行状态提示下移：将 `figma-chat-usage` 的 DOM 结构从 `textarea` 上方搬移至 `.figma-chat-footer` 内。移除了滚动消息流中的 `figma-chat-stopped`、`figma-chat-failed`、`figma-chat-completed` 状态栏，并改在 footer 内的 `.figma-chat-usage` 容器中以内联文字形式（显示红色的已手动终止/任务失败，绿色的任务完成）进行常驻展示。在两者之间加入 `·` 分隔符。
+- How:
+  - 1. 修改 `tokens.css`：将 `.oc-conversation-locator__panel` 显式加入 `--oc-*` 变量声明组中。
+  - 2. 修改 `ConversationLocator.vue`：使用 `v-for="turn in turns"` 循环渲染 spans，并根据 `activeTurnId === turn.id` 动态覆盖高亮；同时更新 `updatePanelPosition` 使其向左弹出。
+  - 3. 修改 `locator.css`：重新设定定位器的 sticky 与右侧定位属性，更新 `span` 宽度属性和激活态，对 `.oc-conversation-locator__panel` 及其内部元素强制设定 light-theme 级别的纯白背景和深色文字，隐藏文件元素，并将摘要截断设为 `-webkit-line-clamp: 1`。
+  - 4. 修改 `FigmaChatPanel.vue`：将 `figma-chat-usage` 放入 `figma-chat-footer`；在 footer 中独立渲染 status 元素（使其与 `hasTaskUsageDisplay` 解耦以防止缺少消耗数据时状态被吞），使用 `<template v-if="hasTaskUsageDisplay">` 隔离消耗字段；同时增加 `.figma-chat-status-item` 及各状态颜色、内联图标与间隔符 CSS 样式。
+- Result:
+  - 前端 Vitest 324 个单测（包含 `FigmaChatPanel.test.ts` 状态与消耗判定用例）完美通过，无回归。
+
+### 2026-07-04 - 增加对话时间线左侧定位器
+
+- Why:
+  - 用户希望右侧对话输出在超过 3 轮后，左侧中线出现类似截图的对话定位能力，便于长对话中快速回到某一轮。
+- What:
+  - `OpencodeTimeline` 新增左侧中线悬浮定位器；当前可见时间线用户对话轮次大于 3 时显示，弹层列出全部轮次的用户问题、助手摘要和最多 2 个文件 chips，点击轮次滚动定位到对应用户消息。
+  - 能力落在 `agent-chat` 的 `opencode-like` 主路径，因此 `AssistantThread` 和 `FigmaChatPanel` 复用的时间线都会生效。
+- How:
+  - 先补充 Vitest 回归测试覆盖 3/4 轮阈值、弹层摘要与文件 chips、点击滚动、`AssistantThread` 主路径集成；再新增内部定位器组件、摘要 helper 和样式，未改公开 props/type。
+  - 同步更新 `frontend/packages/agent-chat/README.md`；未改后端 API、RunEvent、数据库、generated SDK 或环境配置。
+- Result:
+  - `corepack pnpm test -- packages/agent-chat/tests/opencode-timeline.test.ts` 通过；
+  - `corepack pnpm --filter @test-agent/agent-chat typecheck` 通过；
+  - `corepack pnpm --filter @test-agent/agent-web typecheck` 通过。
+
 ### 2026-07-04 - 修复手动终止状态跨 Run 残留
 
 - Why:
@@ -423,7 +605,7 @@
   - 修复用户短消息换行：将 `max-width` 限制由 `.oc-user-message__bubble` 转移至其容器 `.oc-user-message__content`，并使气泡本身 `width: fit-content` 自适应内容宽度。
   - 宽度对齐：设置 `.oc-text-part` 宽度为 `100%`，使其右边界与上方工具的“已完成”状态对齐。
   - 紧凑排版：调低 `--oc-line-height` 至 1.4，缩减 `.oc-timeline` 纵向 padding、用户气泡 margins，压缩 disclosures/tools 的 triggers/body margin & padding，降低 markdown 段落段间距。
-- How: 
+- How:
   - 修改 `timeline.css`、`rows.css`、`parts.css`、`tools.css`、`markdown.css` 和 `tokens.css` 等样式文件，无后端与逻辑修改。
 - Result: 前端 `corepack pnpm test` 全量通过（36个测试文件，265个测试用例），`typecheck` 成功，改动安全且美观。
 
@@ -3617,3 +3799,28 @@ bash /tmp/test-api-after-restart.sh
   - 修改 `rows.css`，将 `.oc-working-status` 调整为使用全局呼吸透明度；
   - 修改 `parts.css` 和 `tools.css`，将 `.oc-disclosure.is-running .oc-tool__status` 和 `.oc-tool__status.is-running` 调整为使用全局呼吸透明度，确保所有进行中与思考中的状态胶囊在帧级别上百分百步调一致。
 - Result: 前端 Vitest 单元测试全部顺利通过，项目无类型和构建错误。
+
+### 2026-07-04 - 修复对话定位导致出现横向滚动条及代码块右侧空白不居中的布局 Bug
+
+- Why:
+  1. 当对话超过 3 轮时，`ConversationLocator` 开始显示。其触发元素 `.oc-conversation-locator__trigger` 使用了 `right: -12px` 负偏移。由于滚动容器 `.ta-thread-viewport` 在存在滚动条占位（`scrollbar-gutter: stable`）时实际可用右 padding 减小，导致触发元素右侧超出视口宽度，触发了多余的横向滚动条。
+  2. `.oc-text-part` 消息气泡原先使用了 `padding: 8px 38px 8px 12px`。由于右侧 padding（38px）远大于左侧（12px），导致气泡内的 Markdown 代码块渲染后右边出现巨大的不对称空白，内容没有水平居中。
+- What:
+  1. 将 `.oc-conversation-locator__trigger` 中的 `span` 宽度由 `10px`/`16px` 按用户要求加长 50% 调整为 `7.5px`（默认）/ `13.5px`（激活态），并将 trigger 容器宽度从 `24px` 缩减为 `14px`。
+  2. 将 `.oc-text-part` 的 padding 调整为 `8px 12px`（左右对称的 12px），消除代码块右侧多余的巨大空白，使其与左边保持一样的间距，且不影响右上角复制按钮的正常绝对定位。
+- How:
+  修改 `frontend/packages/agent-chat/src/opencode-like/styles/locator.css` 以及 `parts.css` 对应的 CSS 规则。不改动任何后端 API、数据库或环境变量配置。
+- Result: 整个前端项目 Vitest 324 个测试全部顺利通过，构建正常，消除了横向滚动条并修复了代码块右侧的空白间距。
+
+### 2026-07-04 - 防止成功 Run 被流式错误覆盖为失败
+
+- Why:
+  - 用户提供的原始输出最后已出现 `run.succeeded`，但同会话后续仍显示 `Streaming response failed` 且任务状态失败；确认根因是 root 终态事件与 `prompt_async`/事件流 transport error 并发到达时，旧的无条件 Run 状态保存可能让后到失败覆盖已成功 Run。
+- What:
+  - `RunRepository` 增加 `saveIfStatus` 条件保存端口，生产 `RunRepository` 迁到 MyBatis XML，并通过 `where run_id = ? and status = ?` 原子条件写入终态。
+  - `RunApplicationService` 的 root 终态事件和 transport error 失败收敛都改为 CAS 成功后才追加终态事件与快照；CAS 失败时不再补写冲突 `run.failed`。
+  - `AgentWorkbench` 在新 Run 请求和 `run.succeeded` 到达时清理旧 SSE 连接异常，并限制 late SSE error 只影响当前 busy Run。
+- How:
+  - 先补充后端竞态红灯用例，复现 `run.succeeded` 已保存后异步 `Streaming response failed` 覆盖状态；再落 MyBatis Run 仓储、运行服务 CAS 处理和前端 EventSource 回归测试。未做历史数据修复 migration。
+- Result:
+  - 定向 `RunApplicationServiceTest`、`MyBatisRunRepositoryIntegrationTest`、`PersistenceSqlConventionTest`、新增 Playwright SSE 清理用例、前端 typecheck 和后端 `mvn clean package -DskipTests` 通过。完整 persistence 测试仍命中既有 H2/fixture 无关失败，完整 workbench e2e 仍有多处既有用例失败；本次目标用例通过。

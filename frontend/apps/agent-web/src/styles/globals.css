@@ -8,14 +8,14 @@
    对齐目标 Frame 的浅灰 chrome、白色编辑面、发丝边框和紧凑 14px 信息密度。 */
 :root {
   color-scheme: light;
-  --ta-bg: #f5f5f5;
+  --ta-bg: #F0F4FA;
   --ta-bg-2: #eeeeee;
-  --ta-chrome: #f5f5f5;
+  --ta-chrome: #F0F4FA;
   --ta-tabbar: #eaeaea;
-  --ta-panel: #f5f5f5;
+  --ta-panel: #F0F4FA;
   --ta-panel-2: #ffffff;
   --ta-surface: #ffffff;
-  --ta-control: #f5f5f5;
+  --ta-control: #F0F4FA;
   --ta-control-strong: #e0e0e0;
   --ta-hover: #e8e8e8;
   --ta-active: #e0e0e0;
@@ -34,6 +34,16 @@
   --ta-del: rgba(158, 59, 52, 0.12);
   --ta-add: rgba(63, 122, 90, 0.12);
   --ta-line-numbers: #b5b5b5;
+  --ta-tree-bg: #ffffff;
+  --ta-tree-border: #e5e5e5;
+  --ta-tree-border-strong: #d6d6d6;
+  --ta-tree-text: #3b3b3b;
+  --ta-tree-muted: #8b949e;
+  --ta-tree-hover: #f0f0f0;
+  --ta-tree-active: #e8e8e8;
+  --ta-tree-row-height: 22px;
+  --ta-tree-font-size: 13px;
+  --ta-tree-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
   --ta-chat-bg: #f5f5f5;
   --ta-chat-surface: #ffffff;
   --ta-chat-message-bg: #ffffff;
@@ -56,7 +66,7 @@
   /* ===== 语义 token（对齐前端样式规范） ===== */
   --primary: #333333;
   --primary-foreground: #ffffff;
-  --secondary: #f5f5f5;
+  --secondary: #F0F4FA;
   --secondary-foreground: #333333;
   --muted: #7a7a7a;
   --muted-foreground: #7a7a7a;
@@ -64,7 +74,7 @@
   --accent-foreground: #ffffff;
   --destructive: #9e3b34;
   --destructive-foreground: #ffffff;
-  --background: #f5f5f5;
+  --background: #F0F4FA;
   --foreground: #333333;
   --border: #eaeaea;
   --surface: #ffffff;
@@ -351,9 +361,11 @@ h3 {
 
 .ta-icon-tabbar {
   display: flex;
-  height: 45px;
-  border-bottom: 1px solid var(--ta-border);
-  background: var(--ta-tabbar);
+  height: 30px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--ta-tree-border);
+  background: var(--ta-tree-bg);
+  font-family: var(--ta-tree-font-family);
 }
 .ta-icon-tab {
   display: inline-flex;
@@ -362,16 +374,188 @@ h3 {
   align-items: center;
   justify-content: center;
   border-bottom: 2px solid transparent;
-  color: var(--ta-muted);
+  color: var(--ta-tree-muted);
+  cursor: pointer;
   transition: color 0.14s ease, background-color 0.14s ease, border-color 0.14s ease;
 }
 .ta-icon-tab:hover {
-  background: var(--ta-hover);
-  color: var(--ta-text);
+  background: var(--ta-tree-hover);
+  color: var(--ta-tree-text);
 }
 .ta-icon-tab.is-active {
-  border-bottom-color: var(--ta-ink);
-  color: var(--ta-ink);
+  border-bottom-color: var(--ta-tree-text);
+  color: var(--ta-tree-text);
+}
+
+.ta-file-browser {
+  color: var(--ta-tree-text);
+  font-family: var(--ta-tree-font-family);
+  font-size: var(--ta-tree-font-size);
+  font-weight: 400;
+}
+
+.ta-file-tree-scroll {
+  min-height: 0;
+  flex: 1;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px 0;
+  background: var(--ta-tree-bg);
+}
+
+.ta-file-tree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 24px;
+  padding: 0 6px;
+  color: var(--ta-tree-muted);
+  font-family: var(--ta-tree-font-family);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.ta-file-tree-row {
+  display: flex;
+  width: 100%;
+  height: var(--ta-tree-row-height);
+  min-height: var(--ta-tree-row-height);
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ta-tree-text);
+  cursor: pointer;
+  font-family: var(--ta-tree-font-family);
+  font-size: var(--ta-tree-font-size);
+  font-weight: 400;
+  line-height: var(--ta-tree-row-height);
+  padding-block: 0;
+  padding-right: 4px;
+  text-align: left;
+}
+
+.ta-file-tree-row:hover {
+  background: var(--ta-tree-hover);
+}
+
+.ta-file-tree-row.is-active,
+.ta-file-tree-row.active {
+  background: var(--ta-tree-active);
+  color: var(--ta-tree-text);
+}
+
+.ta-file-tree-row:focus-visible {
+  outline: 1px solid var(--ta-tree-border-strong);
+  outline-offset: -1px;
+}
+
+.ta-file-tree-icon,
+.ta-file-tree-loading {
+  display: inline-flex;
+  width: 16px;
+  height: var(--ta-tree-row-height);
+  flex: 0 0 16px;
+  align-items: center;
+  justify-content: center;
+  color: var(--ta-tree-muted);
+  line-height: 16px;
+}
+
+.ta-file-tree-spacer,
+.ta-file-tree-twistie {
+  display: inline-flex;
+  width: 14px !important;
+  height: var(--ta-tree-row-height);
+  flex: 0 0 14px !important;
+  align-items: center;
+  justify-content: center;
+  color: var(--ta-tree-muted);
+  line-height: 14px !important;
+}
+
+.ta-file-tree-icon {
+  font-size: 16px;
+  position: relative;
+  top: 1px;
+}
+
+.ta-file-tree-twistie {
+  font-size: 14px !important;
+  transform-origin: center;
+  transition: transform 0.08s ease;
+  position: relative;
+  top: 4px !important;
+}
+
+.ta-file-tree-twistie.is-open {
+  top: 1px !important;
+  transform: rotate(90deg);
+}
+
+.ta-file-tree-loading {
+  margin-left: auto;
+  font-size: 14px;
+  position: relative;
+  top: 1px;
+}
+
+.ta-file-tree-badge,
+.ta-file-tree-status,
+.ta-file-tree-path {
+  flex-shrink: 0;
+  color: var(--ta-tree-muted);
+  font-size: 11px;
+  line-height: var(--ta-tree-row-height);
+}
+
+.ta-file-tree-badge.is-added {
+  color: var(--ta-ok);
+}
+
+.ta-file-tree-badge.is-deleted {
+  color: var(--ta-error);
+}
+
+.ta-file-tree-status {
+  min-width: 42px;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.ta-file-tree-status.is-added {
+  color: var(--ta-ok);
+}
+
+.ta-file-tree-status.is-deleted {
+  color: var(--ta-error);
+}
+
+.ta-file-tree-status.is-modified,
+.ta-file-tree-status.is-renamed {
+  color: var(--ta-warn);
+}
+
+.ta-file-tree-path {
+  min-width: 0;
+  max-width: 45%;
+}
+
+.ta-file-tree-mark {
+  border-radius: 2px;
+  background: #fff2a8;
+  color: inherit;
+  padding: 0 1px;
+}
+
+.ta-file-tree-empty {
+  padding: 12px 8px;
+  color: var(--ta-tree-muted);
+  font-family: var(--ta-tree-font-family);
+  font-size: 12px;
+  text-align: center;
 }
 
 .ta-agent-tabbar {
@@ -411,6 +595,7 @@ h3 {
   flex: 1 1 auto;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior-y: none;
   background: var(--ta-chat-bg);
   padding: 16px;
   scrollbar-gutter: stable;
@@ -730,4 +915,3 @@ h3 {
   animation: ta-text-shimmer 2s linear infinite;
   display: inline-block;
 }
-

@@ -946,12 +946,15 @@ public class RunApplicationService {
             if (!current.status().isTerminal()) {
                 Run terminal;
                 if (draft.type() == RunEventType.RUN_SUCCEEDED) {
-                    terminal = runRepository.save(current.succeed(draft.occurredAt()));
+                    terminal = current.succeed(draft.occurredAt());
                 } else {
-                    terminal = runRepository.save(current.fail(draft.occurredAt()));
+                    terminal = current.fail(draft.occurredAt());
                 }
-                runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
-                snapshotService.persistRunSnapshot(agentId, terminal, draft.traceId());
+                saveRunIfStatus(terminal, current.status(), draft.traceId(), "terminal_event")
+                        .ifPresent(saved -> {
+                            runEventAppender.append(runEventPersistencePolicy.sanitizeForPersistence(draft));
+                            snapshotService.persistRunSnapshot(agentId, saved, draft.traceId());
+                        });
             }
             return;
         }
@@ -1167,15 +1170,38 @@ public class RunApplicationService {
         try {
             Run current = runRepository.findById(run.runId()).orElse(run);
             if (!current.status().isTerminal()) {
-                Run failed = runRepository.save(current.fail(Instant.now()));
-                append(failed.runId(), RunEventType.RUN_FAILED, traceId, Instant.now(),
-                        Map.of("error", error.getClass().getSimpleName()));
-                snapshotService.persistRunSnapshot(agentId, failed, traceId);
+                Instant occurredAt = Instant.now();
+                Run failed = current.fail(occurredAt);
+                saveRunIfStatus(failed, current.status(), traceId, "stream_error")
+                        .ifPresent(saved -> {
+                            append(saved.runId(), RunEventType.RUN_FAILED, traceId, occurredAt,
+                                    Map.of("error", error.getClass().getSimpleName()));
+                            snapshotService.persistRunSnapshot(agentId, saved, traceId);
+                        });
             }
         } catch (RuntimeException exception) {
             LOGGER.warn("Failed to persist opencode stream failure, runId={}, traceId={}",
                     run.runId().value(), traceId, exception);
         }
+    }
+
+    /**
+     * 条件保存 Run 状态，CAS 失败代表已有更新先落库，不能再追加冲突终态事件或快照。
+     */
+    private Optional<Run> saveRunIfStatus(Run candidate, RunStatus expectedStatus, String traceId, String reason) {
+        Run saved = runRepository.saveIfStatus(candidate, expectedStatus);
+        if (saved == candidate) {
+            return Optional.of(saved);
+        }
+        LOGGER.info(
+                "Skipped stale Run status write, runId={}, expectedStatus={}, requestedStatus={}, actualStatus={}, reason={}, traceId={}",
+                candidate.runId().value(),
+                expectedStatus.name(),
+                candidate.status().name(),
+                saved.status().name(),
+                reason,
+                traceId);
+        return Optional.empty();
     }
 
     private record AgentRoutingTarget(ExecutionNode node, RoutingDecision decision) {

@@ -7,7 +7,7 @@
 ## 主要职责
 
 - Session 创建、查询、消息追加和归档。
-- Run 启动、取消、远端 agent session 懒创建/复用、事件订阅和终态处理；平台保存 `RUNNING` 并订阅事件后异步提交远端 prompt 或原生 session command，不等待远端长任务完成才返回 Run，提交失败统一追加 `run.failed`。事件订阅先经 `RunSessionScopeRouter` 判定 root/child scope，并在 root 成功/失败终态后结束，避免其它会话或同一会话下一轮消息串入旧 Run。
+- Run 启动、取消、远端 agent session 懒创建/复用、事件订阅和终态处理；平台保存 `RUNNING` 并订阅事件后异步提交远端 prompt 或原生 session command，不等待远端长任务完成才返回 Run。root `run.succeeded/run.failed` 终态事件是 Run 终态事实源；提交/订阅 transport error 只在 Run 仍处于非终态且条件状态写入成功时追加 `run.failed`，不得覆盖已落库的成功、失败或取消终态。事件订阅先经 `RunSessionScopeRouter` 判定 root/child scope，并在 root 成功/失败终态后结束，避免其它会话或同一会话下一轮消息串入旧 Run。
 - AI 回复满意度反馈归属校验和 upsert：只允许登录用户对自己会话或自己触发 Run 的 `ASSISTANT` 消息提交 `POSITIVE/NEGATIVE` 反馈，评论最多 300 字。
 - 运营分析 rollup 与查询：主链路只写事实，后台 runner 通过数据库锁默认刷新最近窗口的 hourly/daily rollup 和 Run 耗时直方图；查询服务只读 rollup 并返回 freshness，不统计、不展示、不导出 cost/costUsd。
 - 当前用户 opencode 进程状态查询、头像菜单服务状态投影、初始化契约、防绕过 Run 校验、runtime 代理用户进程路由、manager WebSocket 命令网关，以及用户进程到兼容 `ExecutionNode` 的投影。
@@ -55,7 +55,7 @@
 
 ## 测试覆盖
 
-- `RunApplicationServiceTest` 覆盖 Run 创建、远端 prompt 非阻塞提交及异步失败、通用 binding 保存/复用、远端 session 懒创建/复用、用户进程节点 upsert、用户进程 binding 不一致自动重建、sticky node、prompt parts、终态事件、终态消息快照/token 持久化、reasoning/tool output 与可见正文隔离、瞬态消息事件、tool part 实时 Diff 派生和取消编排。
+- `RunApplicationServiceTest` 覆盖 Run 创建、远端 prompt 非阻塞提交及异步失败、通用 binding 保存/复用、远端 session 懒创建/复用、用户进程节点 upsert、用户进程 binding 不一致自动重建、sticky node、prompt parts、终态事件、终态消息快照/token 持久化、reasoning/tool output 与可见正文隔离、瞬态消息事件、tool part 实时 Diff 派生、取消编排，以及 `run.succeeded` 与 `Streaming response failed` 竞态下不追加冲突 `run.failed`、不重复终态快照。
 - `BackendJavaRouteResolverTest` 覆盖同服务器多 Java 快照保留、manager 连接优先于最新心跳、当前服务器本地兜底、远端目标判断、`containerId` 按最新 manager 快照解析所属服务器，以及目标 Java 不可用时统一 `OPENCODE_UNAVAILABLE`。
 - `OpencodeProcessStatusQueryServiceTest` 覆盖公共状态查询服务的进程记录缺失、health healthy、not-running 映射 STOPPED、普通不健康和 manager 异常返回 STALE 且不覆盖数据库稳定状态，以及 heartbeat 刷新。
 - `OpencodeProcessStartupServiceTest` 覆盖公共启动服务的 start、候选进程保存、启动后公共状态查询、短暂 HTTP health 不可达时等待恢复、manager 控制错误立即失败、持续健康失败超时、失败候选状态收敛、RUNNING/binding/heartbeat/ExecutionNode 回写和旧进程/绑定时间复用。

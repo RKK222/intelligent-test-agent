@@ -240,6 +240,27 @@ describe("historical session restoration", () => {
     ]);
   });
 
+  it("keeps platform and remote message ids when restoring assistant messages", () => {
+    const mapped = messagesFromSessionMessages([
+      {
+        messageId: "msg_11111111111111111111111111111111",
+        remoteMessageId: "msg_f2d478d96001861rLCyXjYqf75",
+        sessionId: "ses_1",
+        role: "ASSISTANT",
+        content: "已完成",
+        createdAt: "2026-06-28T08:00:00Z"
+      }
+    ]);
+
+    expect(mapped[0]).toMatchObject({
+      id: "msg_11111111111111111111111111111111",
+      messageId: "msg_11111111111111111111111111111111",
+      platformMessageId: "msg_11111111111111111111111111111111",
+      remoteMessageId: "msg_f2d478d96001861rLCyXjYqf75",
+      role: "assistant"
+    });
+  });
+
   it("uses the first non-empty line as the session title", () => {
     expect(sessionTitleFromFirstMessage("  请生成登录测试案例  ")).toBe("请生成登录测试案例");
     expect(sessionTitleFromFirstMessage(" \n\n  第一行标题  \n第二行不进入标题")).toBe("第一行标题");

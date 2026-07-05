@@ -120,6 +120,20 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).toContain("暂无可用 Agent");
   });
 
+  it("renders the new conversation action as an icon-only button", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    const newConversationButton = wrapper.get(".figma-chat-new-btn");
+
+    expect(newConversationButton.attributes("aria-label")).toBe("新建对话");
+    expect(newConversationButton.text()).toBe("");
+  });
+
   it("shows mentionable subagent/all agents when the user types at-sign", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
@@ -763,15 +777,23 @@ describe("FigmaChatPanel", () => {
   });
 
   it("emits assistant message feedback from persisted assistant messages", async () => {
+    const platformMessageId = "msg_0123456789abcdef0123456789abcdef";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
-          { id: "msg_assistant123", messageId: "msg_assistant123", role: "assistant", text: "已完成分析", createdAt: "2026-06-25T09:01:00.000Z" }
+          {
+            id: platformMessageId,
+            messageId: platformMessageId,
+            platformMessageId,
+            role: "assistant",
+            text: "已完成分析",
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
         ],
         messageFeedbacks: {
-          msg_assistant123: {
+          [platformMessageId]: {
             feedbackId: "fb_123",
-            messageId: "msg_assistant123",
+            messageId: platformMessageId,
             sessionId: "ses_123",
             runId: "run_123",
             rating: "POSITIVE",
@@ -793,22 +815,126 @@ describe("FigmaChatPanel", () => {
     await buttons[0].trigger("click");
 
     expect(wrapper.emitted("submit-feedback")).toEqual([[{
-      messageId: "msg_assistant123",
+      messageId: platformMessageId,
+      rating: "POSITIVE"
+    }]]);
+  });
+
+  it("emits persisted feedback id after merging a temporary assistant message", async () => {
+    const platformMessageId = "msg_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "assistant-run_123",
+            role: "assistant",
+            text: "正在分析",
+            createdAt: "2026-06-25T09:00:00.000Z"
+          },
+          {
+            id: platformMessageId,
+            messageId: platformMessageId,
+            platformMessageId,
+            role: "assistant",
+            text: "最终结论",
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        messageFeedbacks: {
+          [platformMessageId]: null
+        },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    const buttons = wrapper.findAll(".figma-chat-feedback-btn");
+    expect(buttons.length).toBeGreaterThanOrEqual(2);
+
+    await buttons[0].trigger("click");
+
+    expect(wrapper.emitted("submit-feedback")).toEqual([[{
+      messageId: platformMessageId,
+      rating: "POSITIVE"
+    }]]);
+  });
+
+  it("does not render assistant feedback for remote opencode message ids", () => {
+    const remoteMessageId = "msg_f2d478d96001861rLCyXjYqf75";
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: remoteMessageId,
+            messageId: remoteMessageId,
+            remoteMessageId,
+            role: "assistant",
+            text: "实时输出已完成",
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    expect(wrapper.findAll(".figma-chat-feedback-btn")).toHaveLength(0);
+  });
+
+  it("submits platform message id after a remote message is mapped to persistence", async () => {
+    const remoteMessageId = "msg_f2d478d96001861rLCyXjYqf75";
+    const platformMessageId = "msg_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: remoteMessageId,
+            messageId: remoteMessageId,
+            remoteMessageId,
+            platformMessageId,
+            role: "assistant",
+            text: "实时输出已落库",
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
+        ],
+        messageFeedbacks: {
+          [platformMessageId]: null
+        },
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      },
+      global: { stubs: { MarkdownView: markdownViewStub } }
+    });
+
+    const buttons = wrapper.findAll(".figma-chat-feedback-btn");
+    expect(buttons).toHaveLength(2);
+
+    await buttons[0].trigger("click");
+
+    expect(wrapper.emitted("submit-feedback")).toEqual([[{
+      messageId: platformMessageId,
       rating: "POSITIVE"
     }]]);
   });
 
   it("does not render assistant message feedback when the conversation is running", async () => {
+    const platformMessageId = "msg_cccccccccccccccccccccccccccccccc";
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [
-          { id: "msg_assistant123", messageId: "msg_assistant123", role: "assistant", text: "已完成分析", createdAt: "2026-06-25T09:01:00.000Z" }
+          {
+            id: platformMessageId,
+            messageId: platformMessageId,
+            platformMessageId,
+            role: "assistant",
+            text: "已完成分析",
+            createdAt: "2026-06-25T09:01:00.000Z"
+          }
         ],
         running: true,
         messageFeedbacks: {
-          msg_assistant123: {
+          [platformMessageId]: {
             feedbackId: "fb_123",
-            messageId: "msg_assistant123",
+            messageId: platformMessageId,
             sessionId: "ses_123",
             runId: "run_123",
             rating: "POSITIVE",

@@ -1310,8 +1310,26 @@ export type TerminalTicketResponse = {
 };
 
 export type AgentMessage =
-  | { id: string; role: "user"; text: string; parts?: PromptPart[]; createdAt: string; messageId?: string }
-  | { id: string; role: "assistant"; text: string; parts?: MessagePart[]; createdAt: string; messageId?: string }
+  | {
+      id: string;
+      role: "user";
+      text: string;
+      parts?: PromptPart[];
+      createdAt: string;
+      messageId?: string;
+      platformMessageId?: string;
+      remoteMessageId?: string;
+    }
+  | {
+      id: string;
+      role: "assistant";
+      text: string;
+      parts?: MessagePart[];
+      createdAt: string;
+      messageId?: string;
+      platformMessageId?: string;
+      remoteMessageId?: string;
+    }
   | {
       id: string;
       role: "card";

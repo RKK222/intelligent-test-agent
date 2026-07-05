@@ -12,7 +12,6 @@ import {
   Plus,
   RefreshCw,
   Upload,
-  Users,
   MoreHorizontal
 } from "lucide-vue-next";
 import { createBackendApiClient } from "@test-agent/backend-api";
@@ -38,6 +37,7 @@ const props = defineProps<{
   canWrite: boolean;
   hideHeader?: boolean;
   hideGitOps?: boolean;
+  activePath?: string;
 }>();
 
 const emit = defineEmits<{
@@ -55,7 +55,8 @@ const rootExpanded = ref<Set<Scope>>(new Set(["PUBLIC"]));
 const expandedByScope = ref<Record<Scope, Set<string>>>({ PUBLIC: new Set(), WORKSPACE: new Set() });
 const loadingByScope = ref<Record<Scope, Set<string>>>({ PUBLIC: new Set(), WORKSPACE: new Set() });
 const errorMessage = ref("");
-const activeScope = ref<Scope>("PUBLIC");
+const activeScope = ref<Scope | null>(null);
+const activeFileByScope = ref<Record<Scope, string | null>>({ PUBLIC: null, WORKSPACE: null });
 const diffFiles = ref<AgentConfigDiffFile[]>([]);
 const selectedDiffPath = ref("");
 const commitMessage = ref("");
@@ -78,6 +79,12 @@ const publicConfigLinuxServerId = computed<string | null>({
 const busy = ref(false);
 const activeWorktree = computed(() => activeScope.value === "PUBLIC" ? publicWorktree.value : workspaceWorktree.value);
 const selectedDiff = computed(() => diffFiles.value.find((file) => file.path === selectedDiffPath.value) ?? diffFiles.value[0]);
+const activeAgentFile = computed(() => {
+  if (props.activePath) {
+    return activeAgentFileFromEditorPath(props.activePath);
+  }
+  return activeAgentFileFromLocalSelection();
+});
 
 let refreshAllToken = 0;
 const refreshing = ref(false);
@@ -153,6 +160,39 @@ function worktreeId(scope: Scope) {
   return scope === "PUBLIC" ? publicWorktree.value?.worktreeId : workspaceWorktree.value?.worktreeId;
 }
 
+function activeAgentFileFromLocalSelection() {
+  if (!activeScope.value) return null;
+  const path = activeFileByScope.value[activeScope.value];
+  return path ? { scope: activeScope.value, path } : null;
+}
+
+function activeAgentFileFromEditorPath(path?: string) {
+  if (!path) return null;
+  const publicPrefix = "agent-public:";
+  const workspacePrefix = "agent-workspace:";
+  const scope: Scope | null = path.startsWith(publicPrefix)
+    ? "PUBLIC"
+    : path.startsWith(workspacePrefix)
+      ? "WORKSPACE"
+      : null;
+  if (!scope) return null;
+  const prefix = scope === "PUBLIC" ? publicPrefix : workspacePrefix;
+  const rest = path.slice(prefix.length);
+  const firstSeparator = rest.indexOf(":");
+  const secondSeparator = firstSeparator >= 0 ? rest.indexOf(":", firstSeparator + 1) : -1;
+  const rawPath = secondSeparator >= 0
+    ? rest.slice(secondSeparator + 1)
+    : firstSeparator >= 0
+      ? rest.slice(firstSeparator + 1)
+      : rest;
+  return { scope, path: decodeURIComponent(rawPath) };
+}
+
+function isRootActive(scope: Scope) {
+  if (props.activePath) return false;
+  return activeScope.value === scope && activeFileByScope.value[scope] === null;
+}
+
 async function loadDirectory(scope: Scope, path: string, force = false) {
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   if (scope === "PUBLIC" && status.value.PUBLIC?.enabled === false) return;
@@ -194,6 +234,7 @@ function withTimeout<T>(promise: Promise<T>, message: string, timeoutMs = REQUES
 
 function toggleRoot(scope: Scope) {
   activeScope.value = scope;
+  activeFileByScope.value = { ...activeFileByScope.value, [scope]: null };
   const next = new Set(rootExpanded.value);
   if (next.has(scope)) {
     next.delete(scope);
@@ -206,6 +247,7 @@ function toggleRoot(scope: Scope) {
 
 function toggleDirectory(scope: Scope, path: string) {
   activeScope.value = scope;
+  activeFileByScope.value = { ...activeFileByScope.value, [scope]: null };
   if (loadingByScope.value[scope].has(path)) return;
   const next = new Set(expandedByScope.value[scope]);
   if (next.has(path)) {
@@ -224,6 +266,7 @@ async function openFile(scope: Scope, path: string) {
     const file = scope === "PUBLIC"
       ? await api.readPublicAgentFile(path, worktreeId(scope), linuxServerId)
       : await api.readWorkspaceAgentFile(props.workspaceId!, path, worktreeId(scope));
+    activeFileByScope.value = { ...activeFileByScope.value, [scope]: path };
     emit("openFile", { scope, path, content: file, readonly: scope === "PUBLIC" ? !props.canWrite : false, worktreeId: worktreeId(scope), linuxServerId });
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, "读取 Agent 文件失败");
@@ -768,6 +811,7 @@ async function submitCreateWorktree() {
 }
 
 async function loadDiff(scope = activeScope.value) {
+  if (!scope) return;
   if (scope === "WORKSPACE" && !props.workspaceId) return;
   activeScope.value = scope;
   busy.value = true;
@@ -785,15 +829,17 @@ async function loadDiff(scope = activeScope.value) {
 }
 
 async function stage(file: AgentConfigDiffFile) {
-  if (activeScope.value === "PUBLIC" && !props.canWrite) return;
+  const scope = activeScope.value;
+  if (!scope) return;
+  if (scope === "PUBLIC" && !props.canWrite) return;
   busy.value = true;
   try {
-    if (activeScope.value === "PUBLIC") {
-      await api.stagePublicAgentFiles([file.path], worktreeId(activeScope.value));
+    if (scope === "PUBLIC") {
+      await api.stagePublicAgentFiles([file.path], worktreeId(scope));
     } else {
-      await api.stageWorkspaceAgentFiles(props.workspaceId!, [file.path], worktreeId(activeScope.value));
+      await api.stageWorkspaceAgentFiles(props.workspaceId!, [file.path], worktreeId(scope));
     }
-    await loadDiff(activeScope.value);
+    await loadDiff(scope);
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, "暂存 Agent 文件失败");
   } finally {
@@ -802,34 +848,38 @@ async function stage(file: AgentConfigDiffFile) {
 }
 
 async function commit() {
-  if (activeScope.value === "PUBLIC" && !props.canWrite) return;
+  const scope = activeScope.value;
+  if (!scope) return;
+  if (scope === "PUBLIC" && !props.canWrite) return;
   if (!commitMessage.value.trim()) return;
   const message = commitMessage.value.trim();
   const operationId = newOperationId();
   await runOperation(
     () =>
-      activeScope.value === "PUBLIC"
-        ? api.commitPublicAgentConfig({ message, worktreeId: worktreeId(activeScope.value), operationId })
-        : api.commitWorkspaceAgentConfig(props.workspaceId!, { message, worktreeId: worktreeId(activeScope.value), operationId }),
+      scope === "PUBLIC"
+        ? api.commitPublicAgentConfig({ message, worktreeId: worktreeId(scope), operationId })
+        : api.commitWorkspaceAgentConfig(props.workspaceId!, { message, worktreeId: worktreeId(scope), operationId }),
     "提交 Agent 配置",
     operationId
   );
   commitMessage.value = "";
-  await loadDiff(activeScope.value);
+  await loadDiff(scope);
 }
 
 async function publish() {
-  if (activeScope.value === "PUBLIC" && !props.canWrite) return;
+  const scope = activeScope.value;
+  if (!scope) return;
+  if (scope === "PUBLIC" && !props.canWrite) return;
   const operationId = newOperationId();
   await runOperation(
     () =>
-      activeScope.value === "PUBLIC"
-        ? api.publishPublicAgentConfig(worktreeId(activeScope.value), operationId)
-        : api.publishWorkspaceAgentConfig(props.workspaceId!, worktreeId(activeScope.value), operationId),
+      scope === "PUBLIC"
+        ? api.publishPublicAgentConfig(worktreeId(scope), operationId)
+        : api.publishWorkspaceAgentConfig(props.workspaceId!, worktreeId(scope), operationId),
     "发布 Agent 配置",
     operationId
   );
-  await refreshScope(activeScope.value);
+  await refreshScope(scope);
 }
 
 async function runOperation<T>(action: () => Promise<T>, label: string, knownOperationId?: string): Promise<T | null> {
@@ -884,11 +934,11 @@ defineExpose({
     </div>
 
     <div class="agent-tree">
-      <div class="agent-root-row" :class="{ active: activeScope === 'PUBLIC' }">
+      <div class="agent-root-row" :class="{ active: isRootActive('PUBLIC') }">
         <el-tooltip content="公共级 agents 及skills" placement="top-start" :show-after="50">
           <button type="button" class="agent-root-main" @click="toggleRoot('PUBLIC')">
-            <Globe2 class="h-3.5 w-3.5" :stroke-width="1.5" />
-            <span>公共级</span>
+            <i :class="['codicon codicon-chevron-right ta-file-tree-twistie', rootExpanded.has('PUBLIC') && 'is-open']" aria-hidden="true" />
+            <span class="agent-root-title">公共级</span>
             <span v-if="publicRootBadge" class="agent-root-badge">{{ publicRootBadge }}</span>
           </button>
         </el-tooltip>
@@ -937,7 +987,7 @@ defineExpose({
         </div>
       </div>
       <div v-if="rootExpanded.has('PUBLIC')" class="agent-node-list">
-        <div v-if="loadingByScope.PUBLIC.has('')" class="agent-loading"><Loader2 class="h-3.5 w-3.5 animate-spin" />加载中</div>
+        <div v-if="loadingByScope.PUBLIC.has('')" class="agent-loading"><i class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />加载中</div>
         <AgentConfigTreeNode
           v-for="entry in entriesByScope.PUBLIC[''] ?? []"
           :key="`PUBLIC:${entry.path}`"
@@ -946,12 +996,13 @@ defineExpose({
           :entries-by-directory="entriesByScope.PUBLIC"
           :expanded-directories="expandedByScope.PUBLIC"
           :loading-path="loadingByScope.PUBLIC"
+          :active-path="activeAgentFile?.scope === 'PUBLIC' ? activeAgentFile.path : undefined"
           @toggle="(path) => toggleDirectory('PUBLIC', path)"
           @open-file="(path) => openFile('PUBLIC', path)"
         />
       </div>
 
-      <div class="agent-root-row" :class="{ active: activeScope === 'WORKSPACE' }">
+      <div class="agent-root-row" :class="{ active: isRootActive('WORKSPACE') }">
         <el-tooltip content="应用自定义 agents 及 skills，应用可以自己心中修改和发布" placement="top-start" :show-after="50">
           <button
             type="button"
@@ -959,8 +1010,8 @@ defineExpose({
             :disabled="!workspaceId"
             @click="toggleRoot('WORKSPACE')"
           >
-            <Users class="h-3.5 w-3.5" :stroke-width="1.5" />
-            <span>应用级</span>
+            <i :class="['codicon codicon-chevron-right ta-file-tree-twistie', rootExpanded.has('WORKSPACE') && 'is-open']" aria-hidden="true" />
+            <span class="agent-root-title">应用级</span>
             <span v-if="workspaceWorktree" class="agent-root-badge">{{ workspaceWorktree.worktreeName }}</span>
           </button>
         </el-tooltip>
@@ -987,7 +1038,7 @@ defineExpose({
         </button>
       </div>
       <div v-if="rootExpanded.has('WORKSPACE')" class="agent-node-list">
-        <div v-if="loadingByScope.WORKSPACE.has('')" class="agent-loading"><Loader2 class="h-3.5 w-3.5 animate-spin" />加载中</div>
+        <div v-if="loadingByScope.WORKSPACE.has('')" class="agent-loading"><i class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />加载中</div>
         <AgentConfigTreeNode
           v-for="entry in entriesByScope.WORKSPACE[''] ?? []"
           :key="`WORKSPACE:${entry.path}`"
@@ -996,13 +1047,14 @@ defineExpose({
           :entries-by-directory="entriesByScope.WORKSPACE"
           :expanded-directories="expandedByScope.WORKSPACE"
           :loading-path="loadingByScope.WORKSPACE"
+          :active-path="activeAgentFile?.scope === 'WORKSPACE' ? activeAgentFile.path : undefined"
           @toggle="(path) => toggleDirectory('WORKSPACE', path)"
           @open-file="(path) => openFile('WORKSPACE', path)"
         />
       </div>
     </div>
 
-    <div v-if="(canWrite || activeScope === 'WORKSPACE') && !hideGitOps" class="agent-diff">
+    <div v-if="activeScope && (canWrite || activeScope === 'WORKSPACE') && !hideGitOps" class="agent-diff">
       <div class="agent-diff-toolbar">
         <button type="button" class="agent-action-btn" :disabled="busy" @click="loadDiff()">
           <GitCompare class="h-3.5 w-3.5" :stroke-width="1.5" />
@@ -1355,8 +1407,10 @@ defineExpose({
   height: 100%;
   min-height: 0;
   flex-direction: column;
-  background: var(--ta-panel, #fafafa);
-  color: var(--ta-text, #18181b);
+  background: var(--ta-tree-bg, #f8f8f8);
+  color: var(--ta-tree-text, #3b3b3b);
+  font-family: var(--ta-tree-font-family);
+  font-size: var(--ta-tree-font-size);
 }
 .agent-config-header,
 .agent-root-row,
@@ -1367,13 +1421,13 @@ defineExpose({
   gap: 6px;
 }
 .agent-config-header {
-  height: 28px;
+  height: 24px;
   justify-content: space-between;
-  border-bottom: 1px solid var(--ta-border, #e4e4e7);
+  border-bottom: 1px solid var(--ta-tree-border, #e5e5e5);
   padding: 0 8px;
   font-size: 12px;
   font-weight: 600;
-  color: var(--ta-muted, #6b7280);
+  color: var(--ta-tree-muted, #8b949e);
 }
 .agent-error {
   display: flex;
@@ -1429,36 +1483,75 @@ defineExpose({
   min-height: 160px;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 8px;
+  padding: 4px 0;
+  background: var(--ta-tree-bg, #f8f8f8);
 }
 .agent-root-row {
-  min-height: 28px;
-  border-radius: 6px;
+  height: var(--ta-tree-row-height, 22px);
+  min-height: var(--ta-tree-row-height, 22px);
+  border-radius: 0;
+  color: var(--ta-tree-text, #3b3b3b);
+  font-size: var(--ta-tree-font-size, 13px);
+  line-height: var(--ta-tree-row-height, 22px);
 }
+.agent-root-row:hover,
 .agent-root-row.active {
-  background: #f4f4f5;
+  background: var(--ta-tree-active, #e8e8e8);
 }
 .agent-root-main {
   display: flex;
   min-width: 0;
   flex: 1;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  height: 100%;
   border: 0;
   background: transparent;
   color: inherit;
-  font-size: 13px;
+  font-size: var(--ta-tree-font-size, 13px);
+  font-weight: 400;
+  line-height: var(--ta-tree-row-height, 22px);
+  padding: 0 0 0 6px;
   cursor: pointer;
 }
+.agent-root-title {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
 .agent-root-badge {
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ta-muted, #6b7280);
+  color: var(--ta-tree-muted, #8b949e);
   font-size: 11px;
 }
-.agent-icon-btn,
+.agent-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 20px;
+  height: 20px;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ta-tree-muted, #8b949e);
+  font-size: 12px;
+  cursor: pointer;
+}
+.agent-icon-btn {
+  padding: 0;
+  transition: background-color 0.1s, color 0.1s;
+}
+.agent-icon-btn:hover {
+  background: var(--ta-tree-hover, #f0f0f0);
+  color: var(--ta-tree-text, #3b3b3b);
+}
+.agent-icon-btn:active {
+  background: var(--ta-tree-active, #e8e8e8);
+}
 .agent-action-btn {
   display: inline-flex;
   align-items: center;
@@ -1471,20 +1564,6 @@ defineExpose({
   color: var(--ta-muted, #6b7280);
   font-size: 12px;
   cursor: pointer;
-}
-.agent-icon-btn {
-  width: 24px;
-  padding: 0;
-  transition: background-color 0.1s, color 0.1s;
-}
-.agent-icon-btn:hover {
-  background: var(--ta-hover, #f4f4f5);
-  color: var(--ta-text, #18181b);
-}
-.agent-icon-btn:active {
-  background: var(--ta-active, #e4e4e7);
-}
-.agent-action-btn {
   padding: 0 8px;
   border-color: var(--ta-border, #e4e4e7);
   background: #fff;
@@ -1554,15 +1633,17 @@ defineExpose({
   pointer-events: none;
 }
 .agent-node-list {
-  padding-left: 8px;
+  padding-left: 0;
 }
 .agent-loading {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
-  color: var(--ta-muted, #6b7280);
-  font-size: 12px;
+  height: var(--ta-tree-row-height, 22px);
+  padding: 0 8px;
+  color: var(--ta-tree-muted, #8b949e);
+  font-size: var(--ta-tree-font-size, 13px);
+  line-height: var(--ta-tree-row-height, 22px);
 }
 .agent-diff {
   display: flex;

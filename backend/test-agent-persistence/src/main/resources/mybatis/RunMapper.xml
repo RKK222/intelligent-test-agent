@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.icbc.testagent.persistence.mybatis.RunMapper">
+    <resultMap id="RunRowMap" type="com.icbc.testagent.persistence.mybatis.RunRow">
+        <constructor>
+            <arg column="run_id" javaType="java.lang.String"/>
+            <arg column="session_id" javaType="java.lang.String"/>
+            <arg column="workspace_id" javaType="java.lang.String"/>
+            <arg column="status" javaType="java.lang.String"/>
+            <arg column="trace_id" javaType="java.lang.String"/>
+            <arg column="created_at" javaType="java.time.Instant"/>
+            <arg column="updated_at" javaType="java.time.Instant"/>
+            <arg column="tokens_input" javaType="java.lang.Long"/>
+            <arg column="tokens_output" javaType="java.lang.Long"/>
+            <arg column="tokens_reasoning" javaType="java.lang.Long"/>
+            <arg column="tokens_cache_read" javaType="java.lang.Long"/>
+            <arg column="tokens_cache_write" javaType="java.lang.Long"/>
+            <arg column="cost_usd" javaType="java.math.BigDecimal"/>
+            <arg column="source_type" javaType="java.lang.String"/>
+            <arg column="source_ref_id" javaType="java.lang.String"/>
+            <arg column="triggered_by_user_id" javaType="java.lang.String"/>
+            <arg column="agent_id" javaType="java.lang.String"/>
+            <arg column="model_id" javaType="java.lang.String"/>
+        </constructor>
+    </resultMap>
+
+    <sql id="RunColumns">
+        run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
+        tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, cost_usd,
+        source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
+    </sql>
+
+    <sql id="RunAssignments">
+        session_id = #{row.sessionId},
+        workspace_id = #{row.workspaceId},
+        status = #{row.status},
+        trace_id = #{row.traceId},
+        created_at = #{row.createdAt},
+        updated_at = #{row.updatedAt},
+        tokens_input = #{row.tokensInput},
+        tokens_output = #{row.tokensOutput},
+        tokens_reasoning = #{row.tokensReasoning},
+        tokens_cache_read = #{row.tokensCacheRead},
+        tokens_cache_write = #{row.tokensCacheWrite},
+        cost_usd = #{row.costUsd},
+        source_type = #{row.sourceType},
+        source_ref_id = #{row.sourceRefId},
+        triggered_by_user_id = #{row.triggeredByUserId},
+        agent_id = #{row.agentId},
+        model_id = #{row.modelId}
+    </sql>
+
+    <insert id="insert">
+        insert into runs(
+            run_id, session_id, workspace_id, status, trace_id, created_at, updated_at,
+            tokens_input, tokens_output, tokens_reasoning,
+            tokens_cache_read, tokens_cache_write, cost_usd,
+            source_type, source_ref_id, triggered_by_user_id, agent_id, model_id
+        ) values (
+            #{row.runId}, #{row.sessionId}, #{row.workspaceId}, #{row.status}, #{row.traceId}, #{row.createdAt}, #{row.updatedAt},
+            #{row.tokensInput}, #{row.tokensOutput}, #{row.tokensReasoning},
+            #{row.tokensCacheRead}, #{row.tokensCacheWrite}, #{row.costUsd},
+            #{row.sourceType}, #{row.sourceRefId}, #{row.triggeredByUserId}, #{row.agentId}, #{row.modelId}
+        )
+    </insert>
+
+    <update id="update">
+        update runs
+        set
+        <include refid="RunAssignments"/>
+        where run_id = #{row.runId}
+    </update>
+
+    <update id="updateIfStatus">
+        update runs
+        set
+        <include refid="RunAssignments"/>
+        where run_id = #{row.runId}
+          and status = #{expectedStatus}
+    </update>
+
+    <select id="findById" resultMap="RunRowMap">
+        select
+        <include refid="RunColumns"/>
+        from runs
+        where run_id = #{runId}
+    </select>
+
+    <select id="findLatestActiveBySessionId" resultMap="RunRowMap">
+        select
+        <include refid="RunColumns"/>
+        from runs
+        where session_id = #{sessionId}
+          and status in ('PENDING', 'RUNNING', 'CANCELLING')
+        order by updated_at desc, id desc
+        limit 1
+    </select>
+</mapper>

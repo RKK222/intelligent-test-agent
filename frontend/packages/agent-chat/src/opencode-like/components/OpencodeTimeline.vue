@@ -9,6 +9,7 @@ export type OpencodeTimelineProps = {
 <script setup lang="ts">
 import { computed } from "vue";
 import TimelineRow from "./TimelineRow.vue";
+import ConversationLocator from "./ConversationLocator.vue";
 import { createTimelineRows } from "../state/projection";
 
 const props = defineProps<OpencodeTimelineProps>();
@@ -18,6 +19,7 @@ const rows = computed(() => createTimelineRows(props.state));
 
 <template>
   <div class="oc-timeline-root">
+    <ConversationLocator :state="state" />
     <div class="oc-timeline">
       <div v-if="rows.length === 0" class="oc-empty-state">
         <div class="oc-empty-state__title">等待任务输入</div>

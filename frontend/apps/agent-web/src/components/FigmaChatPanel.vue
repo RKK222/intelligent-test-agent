@@ -17,7 +17,7 @@ import {
   Loader2,
   MinusCircle,
   PanelRightClose,
-  Plus,
+  SquarePen,
   Send,
   Square,
   ThumbsDown,
@@ -57,6 +57,9 @@ type ReadOutputInfo = {
 
 type ChatMessage = {
   id: string
+  platformMessageId?: string
+  remoteMessageId?: string
+  feedbackMessageId?: string
   role: 'user' | 'assistant'
   content: string
   meta?: string
@@ -858,29 +861,46 @@ function modelValue(model: { id: string; providerId?: string }) {
 }
 
 function canFeedback(message: ChatMessage) {
-  return message.role === 'assistant' && !message._error && message.id.startsWith('msg_')
+  return message.role === 'assistant' && !message._error && feedbackMessageId(message) !== undefined
 }
 
 function feedbackFor(message: ChatMessage) {
-  return props.messageFeedbacks?.[message.id] ?? null
+  const id = feedbackMessageId(message)
+  return id ? props.messageFeedbacks?.[id] ?? null : null
 }
 
 function feedbackSubmitting(message: ChatMessage) {
-  return props.feedbackSubmitting?.[message.id] === true
+  const id = feedbackMessageId(message)
+  return id ? props.feedbackSubmitting?.[id] === true : false
 }
 
 function submitPositiveFeedback(message: ChatMessage) {
-  if (!canFeedback(message)) return
-  emit('submit-feedback', { messageId: message.id, rating: 'POSITIVE' })
+  const id = feedbackMessageId(message)
+  if (!id) return
+  emit('submit-feedback', { messageId: id, rating: 'POSITIVE' })
 }
 
 function openNegativeFeedback(message: ChatMessage) {
-  if (!canFeedback(message)) return
+  const id = feedbackMessageId(message)
+  if (!id) return
   const current = feedbackFor(message)
-  negativeFeedbackMessageId.value = message.id
+  negativeFeedbackMessageId.value = id
   negativeFeedbackReason.value = current?.rating === 'NEGATIVE' ? current.reasonCode ?? '' : ''
   negativeFeedbackComment.value = current?.rating === 'NEGATIVE' ? current.comment ?? '' : ''
   negativeFeedbackOpen.value = true
+}
+
+function feedbackMessageId(message: ChatMessage): string | undefined {
+  const id = message.feedbackMessageId ?? message.platformMessageId
+  return isPlatformMessageId(id) ? id : undefined
+}
+
+function isPlatformMessageId(id: string | undefined): id is string {
+  return /^msg_[0-9a-f]{32}$/i.test(id ?? '')
+}
+
+function isRemoteRuntimeMessageId(id: string | undefined): id is string {
+  return Boolean(id?.startsWith('msg_') && !isPlatformMessageId(id))
 }
 
 function submitNegativeFeedback() {
@@ -2250,8 +2270,17 @@ const displayMessages = computed<ChatMessage[]>(() => {
       const hasParts = hasVisibleParts(m as AgentMessage)
       // 有 tool/file part 的消息即使没有文本也保留，不因 running 状态变化而消失
       if (!text.trim() && !hasParts) return null
+      const platformMessageId = m.role === 'assistant'
+        ? ([m.platformMessageId, m.messageId, m.id].find(isPlatformMessageId) as string | undefined)
+        : undefined
+      const remoteMessageId = m.role === 'assistant'
+        ? m.remoteMessageId ?? ([m.messageId, m.id].find(isRemoteRuntimeMessageId) as string | undefined)
+        : undefined
       return {
         id: m.messageId ?? m.id ?? `${m.role}-${index}`,
+        platformMessageId,
+        remoteMessageId,
+        feedbackMessageId: platformMessageId,
         role: m.role,
         content: text,
         _skillName: skillName,
@@ -2276,6 +2305,10 @@ const displayMessages = computed<ChatMessage[]>(() => {
       last.content = joinAssistantContent(last.content, msg.content)
       last.parts = [...last.parts, ...msg.parts]
       if (msg.meta) last.meta = msg.meta
+      // 连续 assistant 消息会合并展示；反馈必须绑定后端落库的 msg_*，不能沿用运行时临时 id。
+      last.platformMessageId = msg.platformMessageId ?? last.platformMessageId
+      last.remoteMessageId = msg.remoteMessageId ?? last.remoteMessageId
+      last.feedbackMessageId = msg.feedbackMessageId ?? last.feedbackMessageId
     } else {
       merged.push(msg)
     }
@@ -3296,14 +3329,7 @@ function onCompositionEnd() {
         </div>
       </template>
 
-      <!-- 手动终止提示 -->
-      <div
-        v-if="!activeSubagentSessionId && showTaskStopped"
-        class="figma-chat-stopped"
-      >
-        <MinusCircle :size="14" class="figma-chat-stopped-icon" />
-        <span>已手动终止</span>
-      </div>
+
 
       <!-- 重试卡片 -->
       <div
@@ -3318,23 +3344,7 @@ function onCompositionEnd() {
         <button class="figma-chat-retry-card-btn" @click="emit('retry')">重试</button>
       </div>
 
-      <!-- 对话失败提示 -->
-      <div
-        v-if="!activeSubagentSessionId && showTaskFailed"
-        class="figma-chat-failed"
-      >
-        <MinusCircle :size="14" class="figma-chat-failed-icon" />
-        <span>任务失败</span>
-      </div>
 
-      <!-- 对话完成提示 -->
-      <div
-        v-if="!activeSubagentSessionId && showTaskCompleted"
-        class="figma-chat-completed"
-      >
-        <CheckCircle :size="14" class="figma-chat-completed-icon" />
-        <span>任务完成</span>
-      </div>
 
       <!-- 空态 -->
       <div v-if="false && displayMessages.length === 0" class="figma-chat-empty">
@@ -3401,40 +3411,7 @@ function onCompositionEnd() {
 
 
 
-    <!-- 任务消耗提示（位于输入框上方） -->
-    <div v-if="!activeSubagentSessionId && hasTaskUsageDisplay" class="figma-chat-usage">
-      <img
-        v-if="running"
-        :src="planLoadingUrl"
-        alt=""
-        class="figma-chat-usage-icon"
-      />
-      <span v-else class="figma-chat-usage-dot" aria-hidden="true" />
-      <span class="figma-chat-usage-label">任务消耗：</span>
-      <span class="figma-chat-usage-value">
-        <template
-          v-if="
-            displayTokens !== undefined ||
-            taskUsage?.totalDuration
-          "
-          >(</template
-        >
-        <template v-if="taskUsage?.totalDuration">
-          {{ taskUsage.totalDuration }}</template
-        >
 
-        <template v-if="displayTokens !== undefined">
-          · ↓ {{ formatTokens(displayTokens) }} tokens</template
-        >
-        <template
-          v-if="
-            displayTokens !== undefined ||
-            taskUsage?.totalDuration
-          "
-          >)</template
-        >
-      </span>
-    </div>
 
     <!-- 收起态：右下角一个小圆点，带渐变虚化；点击展开，支持拖动改位置 -->
     <button
@@ -3690,15 +3667,20 @@ function onCompositionEnd() {
         />
         <div class="figma-chat-card-actions">
           <!-- 左侧：附件上传 -->
-          <button
-            type="button"
-            class="figma-chat-card-btn figma-chat-attachment-btn"
-            aria-label="上传附件"
-            title="上传附件"
-            @click="openAttachmentDialog"
+          <el-tooltip
+            content="上传附件"
+            placement="top"
+            :show-after="0"
           >
-            <Upload class="figma-chat-btn-icon" />
-          </button>
+            <button
+              type="button"
+              class="figma-chat-card-btn figma-chat-attachment-btn"
+              aria-label="上传附件"
+              @click="openAttachmentDialog"
+            >
+              <Upload class="figma-chat-btn-icon" />
+            </button>
+          </el-tooltip>
           <!-- 主 Agent 选择：遵循 opencode local.agent.list()，只展示 primary/all 且非 hidden 的 Agent。 -->
           <div class="figma-chat-agent-select-wrapper">
             <el-tooltip
@@ -3858,15 +3840,21 @@ function onCompositionEnd() {
           </div>
           <div class="figma-chat-card-spacer" />
           <!-- 右侧：新建对话 + 发送/停止 -->
-          <button
-            type="button"
-            class="figma-chat-card-btn figma-chat-new-btn"
-            :disabled="processSubmitBlocked"
-            @click="emit('new-conversation')"
+          <el-tooltip
+            content="新建对话"
+            placement="top"
+            :show-after="0"
           >
-            <Plus class="figma-chat-btn-icon" />
-            <span>新建对话</span>
-          </button>
+            <button
+              type="button"
+              class="figma-chat-card-btn figma-chat-new-btn"
+              aria-label="新建对话"
+              :disabled="processSubmitBlocked"
+              @click="emit('new-conversation')"
+            >
+              <SquarePen class="figma-chat-btn-icon" />
+            </button>
+          </el-tooltip>
           <button
             v-if="!running"
             type="button"
@@ -3897,7 +3885,71 @@ function onCompositionEnd() {
       <span>。</span>
     </div>
     <!-- 与左侧面板、中心面板底部栏等高的常驻 footer -->
-    <div class="figma-chat-footer" />
+    <div class="figma-chat-footer">
+      <div v-if="!activeSubagentSessionId" class="figma-chat-usage">
+        <span
+          v-if="showTaskStopped"
+          class="figma-chat-status-item figma-chat-status-stopped"
+        >
+          <MinusCircle class="figma-chat-status-icon-inline" />
+          <span>已手动终止</span>
+        </span>
+        <span
+          v-else-if="showTaskFailed"
+          class="figma-chat-status-item figma-chat-status-failed"
+        >
+          <MinusCircle class="figma-chat-status-icon-inline" />
+          <span>任务失败</span>
+        </span>
+        <span
+          v-else-if="showTaskCompleted"
+          class="figma-chat-status-item figma-chat-status-completed"
+        >
+          <CheckCircle class="figma-chat-status-icon-inline" />
+          <span>任务完成</span>
+        </span>
+
+        <span
+          v-if="(showTaskStopped || showTaskFailed || showTaskCompleted) && hasTaskUsageDisplay"
+          class="figma-chat-status-divider"
+          aria-hidden="true"
+        >·</span>
+
+        <template v-if="hasTaskUsageDisplay">
+          <img
+            v-if="running"
+            :src="planLoadingUrl"
+            alt=""
+            class="figma-chat-usage-icon"
+          />
+          <span v-else class="figma-chat-usage-dot" aria-hidden="true" />
+          <span class="figma-chat-usage-label">任务消耗：</span>
+          <span class="figma-chat-usage-value">
+            <template
+              v-if="
+                displayTokens !== undefined ||
+                taskUsage?.totalDuration
+              "
+              >(</template
+            >
+            <template v-if="taskUsage?.totalDuration">
+              {{ taskUsage.totalDuration }}</template
+            >
+
+            <template v-if="displayTokens !== undefined">
+              · ↓ {{ formatTokens(displayTokens) }} tokens</template
+            >
+            <template
+              v-if="
+                displayTokens !== undefined ||
+                taskUsage?.totalDuration
+              "
+              >)</template
+            >
+          </span>
+        </template>
+      </div>
+    </div>
 
     <div
       v-if="attachmentDialogOpen"
@@ -4295,7 +4347,7 @@ function onCompositionEnd() {
   align-items: center;
   justify-content: space-between;
   padding: 0 56px 0 16px;
-  height: 48px;
+  height: 30px;
   border-bottom: 1px solid var(--ta-border);
   background: var(--ta-surface);
   user-select: none;
@@ -4313,7 +4365,7 @@ function onCompositionEnd() {
   gap: 6px;
   padding: 4px 10px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: var(--ta-muted);
   background: transparent;
@@ -4626,7 +4678,7 @@ function onCompositionEnd() {
 /* ---- Header ---- */
 
 .figma-chat-title {
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.0143em;
   color: #18181b;
@@ -4668,6 +4720,7 @@ function onCompositionEnd() {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior-y: none;
   padding: 12px 12px 6px;
   background: #fff;
   display: flex;
@@ -5975,18 +6028,18 @@ function onCompositionEnd() {
   align-items: center;
   flex-wrap: nowrap;
   gap: 6px;
-  padding: 6px 18px 8px;
-  background: #fff;
+  padding: 0;
+  background: transparent;
   font-family: 'JetBrains Mono', 'PingFang SC', monospace;
-  font-size: 12px;
-  line-height: 20px;
+  font-size: 11px;
+  line-height: 1;
   color: #a40dbc;
   letter-spacing: -0.0125em;
 }
 
 .figma-chat-usage-icon {
-  width: 20px;
-  height: 20px;
+  width: 14px;
+  height: 14px;
   flex-shrink: 0;
   display: block;
 }
@@ -6016,6 +6069,38 @@ function onCompositionEnd() {
   display: inline-flex;
   gap: 4px;
   font-weight: 500;
+}
+
+.figma-chat-status-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+.figma-chat-status-stopped,
+.figma-chat-status-failed {
+  color: #cf222e;
+}
+
+.figma-chat-status-completed {
+  color: #1a7f37;
+}
+
+.figma-chat-status-icon-inline {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.figma-chat-status-divider {
+  color: var(--ta-chat-muted, #8b8ea0);
+  opacity: 0.5;
+  margin: 0 2px;
+  flex-shrink: 0;
 }
 
 .figma-chat-add {
@@ -6390,9 +6475,12 @@ function onCompositionEnd() {
 /* ---- 常驻底部 footer（与左侧面板、中心面板底栏等高对齐） ---- */
 .figma-chat-footer {
   flex-shrink: 0;
-  height: 36px;
+  height: 30px;
   background: #fff;
   border-top: 1px solid #ddd;
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
 }
 
 /* ---- Attachment Dialog ---- */

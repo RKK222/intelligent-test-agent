@@ -338,6 +338,8 @@ export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMe
       return {
         id: message.messageId,
         messageId: message.messageId,
+        platformMessageId: message.messageId,
+        remoteMessageId: message.remoteMessageId,
         role: "user",
         text: message.content,
         createdAt: message.createdAt
@@ -346,6 +348,8 @@ export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMe
     return {
       id: message.messageId,
       messageId: message.messageId,
+      platformMessageId: message.messageId,
+      remoteMessageId: message.remoteMessageId,
       role: "assistant",
       text: message.content,
       parts: normalizeSessionMessageParts(message),

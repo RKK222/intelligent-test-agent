@@ -84,6 +84,21 @@ class PersistenceSqlConventionTest {
     }
 
     @Test
+    void runRepositoryUsesMyBatisAsTheSpringBean() throws IOException {
+        Path javaRoot = locate("src/main/java");
+        Path resourceRoot = locate("src/main/resources");
+
+        assertThat(Files.readString(javaRoot.resolve("com/icbc/testagent/persistence/JdbcRunRepository.java")))
+                .doesNotContain("@Repository");
+        assertThat(javaRoot.resolve("com/icbc/testagent/persistence/mybatis/MyBatisRunRepository.java"))
+                .exists();
+        assertThat(javaRoot.resolve("com/icbc/testagent/persistence/mybatis/RunMapper.java"))
+                .exists();
+        assertThat(resourceRoot.resolve("mybatis/RunMapper.xml"))
+                .exists();
+    }
+
+    @Test
     void runSessionScopeMergeUsesTimestampCastsForPostgreSql() throws IOException {
         Path resourceRoot = locate("src/main/resources");
         String mapperXml = Files.readString(resourceRoot.resolve("mybatis/RunSessionScopeMapper.xml"));

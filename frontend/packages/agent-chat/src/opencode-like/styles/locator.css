@@ -1,0 +1,171 @@
+.oc-conversation-locator {
+  position: sticky;
+  top: 50%;
+  z-index: 6;
+  width: 0;
+  height: 0;
+  overflow: visible;
+  margin-left: auto;
+}
+
+.oc-conversation-locator__trigger {
+  position: absolute;
+  /* 避免在有滚动条占位时超出 padding 边界引发横向滚动条，从 -15px 改为 -4px */
+  right: -12px;
+  left: auto;
+  top: 0;
+  display: inline-flex;
+  width: 14px;
+  min-height: 44px;
+  height: auto;
+  padding: 8px 0;
+  transform: translateY(-50%);
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 0;
+  border-radius: var(--oc-radius-sm);
+  background: transparent;
+  color: var(--oc-muted);
+  cursor: pointer;
+  transition: background-color 0.14s ease, color 0.14s ease;
+}
+
+.oc-conversation-locator__trigger span {
+  display: block;
+  width: 7.5px;
+  height: 3px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.45;
+  transition: opacity 0.14s ease, width 0.14s ease;
+}
+
+.oc-conversation-locator__trigger span.is-active {
+  width: 13.5px;
+  opacity: 0.96;
+}
+
+.oc-conversation-locator__trigger:hover,
+.oc-conversation-locator__trigger:focus-visible,
+.oc-conversation-locator__trigger[aria-expanded="true"] {
+  background: var(--oc-code-bg);
+  color: var(--oc-fg);
+  outline: none;
+}
+
+.oc-conversation-locator__trigger:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--oc-accent) 35%, transparent);
+}
+
+.oc-conversation-locator__panel {
+  position: fixed;
+  z-index: 70;
+  max-width: calc(100vw - 24px);
+  max-height: min(520px, calc(100vh - 32px));
+  transform: translateY(-50%);
+  overflow: hidden;
+  border: 1px solid #e5e7eb;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow: 0 22px 56px rgba(15, 23, 42, 0.16);
+  color: #25282d;
+  font-family: var(--oc-font-sans);
+}
+
+.oc-conversation-locator__panel-title {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 12px 14px 10px;
+  font-size: var(--oc-text-sm);
+  font-weight: 700;
+  color: #6f747c;
+}
+
+.oc-conversation-locator__list {
+  display: flex;
+  max-height: min(470px, calc(100vh - 88px));
+  flex-direction: column;
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.oc-conversation-locator__item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  padding: 10px 9px;
+  text-align: left;
+  color: #25282d;
+  cursor: pointer;
+}
+
+.oc-conversation-locator__item:hover,
+.oc-conversation-locator__item:focus-visible,
+.oc-conversation-locator__item.is-active {
+  border-color: #e5e7eb;
+  background: rgba(31, 35, 40, 0.04);
+  outline: none;
+}
+
+.oc-conversation-locator__item.is-active {
+  border-color: rgba(31, 35, 40, 0.18);
+}
+
+.oc-conversation-locator__index {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: #f2f4f7;
+  color: #6f747c;
+  font-size: var(--oc-text-sm);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.oc-conversation-locator__item.is-active .oc-conversation-locator__index {
+  background: #25282d;
+  color: #ffffff;
+}
+
+.oc-conversation-locator__item-body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.oc-conversation-locator__item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--oc-text-md);
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.oc-conversation-locator__item-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #6f747c;
+  font-size: var(--oc-text-md);
+  font-weight: 500;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.oc-conversation-locator__files {
+  display: none;
+}
+
+[data-oc-turn-row="true"] {
+  scroll-margin-top: 16px;
+}

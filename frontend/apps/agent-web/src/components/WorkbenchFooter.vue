@@ -594,7 +594,7 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 36px;
+  height: 30px;
   padding: 0 12px;
   background: #fff;
   border-top: 1px solid #eaeaea;

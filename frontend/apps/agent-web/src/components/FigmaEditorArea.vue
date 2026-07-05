@@ -73,6 +73,10 @@ function toggleMarkdownPreview() {
       >
         <div class="figma-editor-tab-inner">
           <img :src="fileIconUrl" alt="file" class="figma-editor-tab-icon" />
+          <span
+            v-if="!tab.livePreview && tab.content !== tab.savedContent"
+            class="figma-editor-tab-dirty-star"
+          >*</span>
           <span class="figma-editor-tab-title">{{ tab.title }}</span>
           <button
             type="button"
@@ -145,10 +149,38 @@ function toggleMarkdownPreview() {
 /* ---- Tabs ---- */
 .figma-editor-tabs {
   display: flex;
-  height: 38px;
+  height: 30px;
   flex-shrink: 0;
   overflow-x: auto;
+  overflow-y: hidden !important;
   background: #fafafa;
+  scrollbar-width: none;
+}
+
+.figma-editor-tabs::-webkit-scrollbar {
+  height: 3px;
+}
+
+.figma-editor-tabs::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 3px;
+}
+
+.figma-editor-tabs::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.figma-editor-tabs:hover {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+.figma-editor-tabs:hover::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+.figma-editor-tabs:hover::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.4);
 }
 
 .figma-editor-tab {
@@ -180,6 +212,15 @@ function toggleMarkdownPreview() {
   width: 24px;
   height: 16px;
   opacity: 0.6;
+}
+
+.figma-editor-tab-dirty-star {
+  color: #f97316; /* 橙色 */
+  font-weight: bold;
+  font-size: 14px;
+  margin-right: -2px; /* 拉近与标题的距离 */
+  margin-left: -2px; /* 拉近与图标的距离 */
+  line-height: 1;
 }
 
 .figma-editor-tab-title {

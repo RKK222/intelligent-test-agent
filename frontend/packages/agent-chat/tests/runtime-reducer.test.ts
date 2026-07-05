@@ -88,6 +88,22 @@ describe("agent-chat runtime reducer", () => {
     ]);
   });
 
+  it("marks live opencode message ids as remote ids instead of platform feedback ids", () => {
+    const remoteMessageId = "msg_f2d478d96001861rLCyXjYqf75";
+    const state = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "event",
+      event: event("message.updated", { message: { id: remoteMessageId, role: "assistant", content: "实时输出" } })
+    });
+
+    expect(state.messages[0]).toMatchObject({
+      role: "assistant",
+      messageId: remoteMessageId,
+      remoteMessageId,
+      text: "实时输出"
+    });
+    expect(state.messages[0]).not.toHaveProperty("platformMessageId");
+  });
+
   it("tracks subagent scopes and keeps child output out of the root assistant message", () => {
     const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "user.submitted",

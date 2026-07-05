@@ -80,7 +80,9 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataAccessResourceFailureException;
@@ -606,6 +608,55 @@ class RunApplicationServiceTest {
         assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
         awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
         awaitEventTypes(events, RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_SUCCEEDED);
+    }
+
+    @Test
+    void serviceKeepsSucceededRunWhenAsyncPromptTransportFailsAfterTerminalEvent() {
+        TerminalRaceRunRepository runs = new TerminalRaceRunRepository();
+        FakeRunEventRepository events = new FakeRunEventRepository();
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        FakeSessionRepository sessions = new FakeSessionRepository(session());
+        FakeSessionMessageRepository messages = new FakeSessionMessageRepository();
+        FakeExecutionNodeRepository nodes = new FakeExecutionNodeRepository();
+        FakeAgentSessionBindingRepository bindings = new FakeAgentSessionBindingRepository();
+        AgentRuntimeRegistry registry = runtimeRegistry(facade);
+        CountingSnapshotService snapshots = new CountingSnapshotService(runs, sessions, messages, nodes, registry, bindings);
+        facade.streamEvents = command -> Flux.just(new RunEventDraft(
+                command.runId(),
+                RunEventType.RUN_SUCCEEDED,
+                command.traceId(),
+                Instant.now(),
+                Map.of("messageID", "msg_remote1234567890abcdef")))
+                .delaySubscription(Duration.ofMillis(50));
+        facade.startRun = ignored -> Mono.error(new IllegalStateException("Streaming response failed"));
+        RunApplicationService service = new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                sessions,
+                runs,
+                messages,
+                nodes,
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(events),
+                registry,
+                bindings,
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                null,
+                null,
+                com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver.legacyOnly(),
+                snapshots,
+                null,
+                null);
+
+        Run run = service.startRun(new SessionId("ses_1234567890abcdef"), "run the tests", "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        awaitRunStatus(service, run.runId(), RunStatus.SUCCEEDED);
+        sleep(Duration.ofMillis(200));
+        assertThat(service.getRun(run.runId()).status()).isEqualTo(RunStatus.SUCCEEDED);
+        assertThat(events.events).extracting(RunEvent::type)
+                .containsExactly(RunEventType.RUN_CREATED, RunEventType.RUN_STARTED, RunEventType.RUN_SUCCEEDED);
+        assertThat(snapshots.persistCalls).isEqualTo(1);
     }
 
     @Test
@@ -1286,6 +1337,15 @@ class RunApplicationServiceTest {
         }
     }
 
+    private static void sleep(Duration duration) {
+        try {
+            Thread.sleep(duration.toMillis());
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted while waiting for async stream event", exception);
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private static Map<String, Object> mapObject(Object value) {
         return (Map<String, Object>) value;
@@ -1352,7 +1412,7 @@ class RunApplicationServiceTest {
         }
     }
 
-    private static final class FakeRunRepository implements RunRepository {
+    private static class FakeRunRepository implements RunRepository {
         private final List<Run> saved = new CopyOnWriteArrayList<>();
 
         @Override
@@ -1372,6 +1432,72 @@ class RunApplicationServiceTest {
                     .filter(run -> run.sessionId().equals(sessionId))
                     .filter(run -> !run.status().isTerminal())
                     .reduce((first, second) -> second);
+        }
+    }
+
+    private static final class TerminalRaceRunRepository extends FakeRunRepository {
+        private final CountDownLatch failedSaveStarted = new CountDownLatch(1);
+        private final CountDownLatch succeededSaved = new CountDownLatch(1);
+
+        @Override
+        public Run save(Run run) {
+            if (run.status() == RunStatus.FAILED) {
+                failedSaveStarted.countDown();
+                await(succeededSaved);
+            }
+            Run saved = super.save(run);
+            if (run.status() == RunStatus.SUCCEEDED) {
+                succeededSaved.countDown();
+            }
+            return saved;
+        }
+
+        @Override
+        public Run saveIfStatus(Run run, RunStatus expectedStatus) {
+            if (run.status() == RunStatus.FAILED) {
+                failedSaveStarted.countDown();
+                await(succeededSaved);
+            }
+            Optional<Run> current = findById(run.runId());
+            if (current.isPresent() && current.get().status() != expectedStatus) {
+                return current.get();
+            }
+            Run saved = super.save(run);
+            if (run.status() == RunStatus.SUCCEEDED) {
+                succeededSaved.countDown();
+            }
+            return saved;
+        }
+
+        private static void await(CountDownLatch latch) {
+            try {
+                if (!latch.await(1, TimeUnit.SECONDS)) {
+                    throw new AssertionError("timed out waiting for concurrent terminal transition");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("interrupted while waiting for concurrent terminal transition", exception);
+            }
+        }
+    }
+
+    private static final class CountingSnapshotService extends RunSessionMessageSnapshotService {
+        private int persistCalls;
+
+        private CountingSnapshotService(
+                RunRepository runs,
+                FakeSessionRepository sessions,
+                SessionMessageRepository messages,
+                ExecutionNodeRepository nodes,
+                AgentRuntimeRegistry registry,
+                AgentSessionBindingRepository bindings) {
+            super(runs, sessions, messages, nodes, registry, bindings, new com.fasterxml.jackson.databind.ObjectMapper());
+        }
+
+        @Override
+        public boolean persistRunSnapshot(String agentId, Run run, String traceId) {
+            persistCalls++;
+            return true;
         }
     }
 

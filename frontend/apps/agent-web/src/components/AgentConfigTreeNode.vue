@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { ChevronRight, FileText, Folder, Loader2 } from "lucide-vue-next";
 import { cn } from "@test-agent/ui-kit";
+import { FileIcon } from "@test-agent/file-explorer";
 import type { FileTreeEntry } from "@test-agent/shared-types";
 
 /**
@@ -29,6 +29,8 @@ const props = defineProps<{
   expandedDirectories: Set<string>;
   /** 父组件持有的正在加载的目录集合 */
   loadingPath: Set<string>;
+  /** 当前被编辑器选中的 Agent 文件路径 */
+  activePath?: string;
 }>();
 
 const emit = defineEmits<{
@@ -47,10 +49,11 @@ const children = computed<FileTreeEntry[] | undefined>(() => props.entriesByDire
 const isExpanded = computed(() => props.expandedDirectories.has(props.entry.path));
 const isLoading = computed(() => props.loadingPath.has(props.entry.path));
 const isDirectory = computed(() => props.entry.type === "directory");
+const isActiveFile = computed(() => !isDirectory.value && props.activePath === props.entry.path);
 const isKnownEmpty = computed(
   () => isDirectory.value && Array.isArray(children.value) && children.value.length === 0
 );
-const indentPx = computed(() => 4 + props.depth * 14);
+const indentPx = computed(() => 6 + props.depth * 16);
 
 function onRowClick() {
   if (isDirectory.value) {
@@ -68,27 +71,28 @@ function onRowClick() {
     <button
       type="button"
       :class="cn(
-        'flex h-7 w-full items-center gap-1 rounded text-left text-[14px] leading-5 text-[var(--ta-subtle)] hover:bg-[var(--ta-hover)]'
+        'ta-file-tree-row',
+        isActiveFile && 'is-active'
       )"
-      :style="{ paddingLeft: `${indentPx}px`, paddingRight: '4px' }"
+      :style="{ paddingLeft: `${indentPx}px` }"
       @click="onRowClick"
     >
       <template v-if="isDirectory">
-        <ChevronRight
+        <i
           v-if="!isKnownEmpty"
-          :class="cn('h-3.5 w-3.5 text-[var(--ta-muted)] transition', isExpanded && 'rotate-90')"
+          :class="cn('codicon codicon-chevron-right ta-file-tree-twistie', isExpanded && 'is-open')"
+          aria-hidden="true"
         />
-        <span v-else class="w-3.5" />
-        <Folder class="h-4 w-4 text-[var(--ta-muted)]" />
+        <span v-else class="ta-file-tree-spacer" />
       </template>
       <template v-else>
-        <span class="w-3.5" />
-        <FileText class="h-4 w-4 text-[var(--ta-muted)]" />
+        <span class="ta-file-tree-spacer" />
+        <FileIcon :entry="entry" />
       </template>
       <span class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
-      <Loader2 v-if="isLoading" class="h-3.5 w-3.5 animate-spin text-[var(--ta-muted)]" />
+      <i v-if="isLoading" class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />
     </button>
-    <div v-if="isDirectory && isExpanded" class="space-y-px">
+    <div v-if="isDirectory && isExpanded">
       <AgentConfigTreeNode
         v-for="child in children ?? []"
         :key="child.path"
@@ -97,6 +101,7 @@ function onRowClick() {
         :entries-by-directory="entriesByDirectory"
         :expanded-directories="expandedDirectories"
         :loading-path="loadingPath"
+        :active-path="activePath"
         @toggle="(path: string) => emit('toggle', path)"
         @open-file="(path: string) => emit('openFile', path)"
       />

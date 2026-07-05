@@ -1146,7 +1146,6 @@ function submitJoinApp() {
   justify-content: space-between;
   height: 36px;
   background: #fff;
-  border-bottom: 1px solid #eaeaea;
   padding: 0 10px;
   flex-shrink: 0;
   z-index: 30;
@@ -1690,6 +1689,7 @@ function submitJoinApp() {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  padding: 0px;
   position: relative;
 }
 
@@ -1714,7 +1714,7 @@ function submitJoinApp() {
 .figma-panel-left {
   /* 宽度由 :style="width: ${leftPanelWidth}px" 动态控制 */
   flex-shrink: 0;
-  background: #fafafa;
+  background: #ffffff;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -1726,12 +1726,12 @@ function submitJoinApp() {
 }
 
 .figma-files-resize-handle {
-  width: 6px;
+  width: 1px;
   flex-shrink: 0;
   cursor: col-resize;
   position: relative;
   z-index: 5;
-  background: #f5f5f5;
+  background: #ffffff;
   transition: background-color 0.14s ease;
 }
 
@@ -1764,7 +1764,7 @@ function submitJoinApp() {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: #f6f6f6;
+  background: #ffffff;
   padding: 0;
 }
 
@@ -1816,7 +1816,7 @@ function submitJoinApp() {
   cursor: col-resize;
   position: relative;
   z-index: 5;
-  background: #f5f5f5;
+  background: #ffffff;
   transition: background-color 0.14s ease;
 }
 
@@ -1850,7 +1850,7 @@ function submitJoinApp() {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: #f5f5f5;
+  background: #ffffff;
 }
 
 /* ---- Bottom Drawer ---- */

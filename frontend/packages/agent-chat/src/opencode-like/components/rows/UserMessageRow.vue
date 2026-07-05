@@ -12,7 +12,12 @@ defineProps<UserMessageRowProps>();
 </script>
 
 <template>
-  <div class="oc-user-message" data-testid="oc-user-message">
+  <div
+    class="oc-user-message"
+    data-testid="oc-user-message"
+    data-oc-turn-row="true"
+    :data-oc-turn-id="message.messageId ?? message.id"
+  >
     <div class="oc-user-message__content">
       <div class="oc-user-message__bubble">
         <p>{{ message.text }}</p>

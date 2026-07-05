@@ -331,6 +331,8 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
   }
   const nextAssistant = {
     ...assistant,
+    messageId: assistant.messageId ?? messageId,
+    remoteMessageId: assistant.remoteMessageId ?? messageId,
     text: nextPart.type === "text" ? `${assistant.text}${delta}` : assistant.text,
     parts
   };
@@ -380,6 +382,7 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
         ...user,
         id: messageId,
         messageId,
+        remoteMessageId: messageId,
         text: delayedUserText ?? user.text
       });
     }
@@ -391,7 +394,8 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
       return replaceOrAppendMessage(messages, slashUserPartIndex, {
         ...user,
         id: messageId,
-        messageId
+        messageId,
+        remoteMessageId: messageId
       });
     }
   }
@@ -419,6 +423,8 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
   }
   return replaceOrAppendMessage(messages, replaceIndex, {
     ...assistant,
+    messageId: assistant.messageId ?? messageId,
+    remoteMessageId: assistant.remoteMessageId ?? messageId,
     text: part.type === "text" ? part.text : assistant.text,
     parts
   });
@@ -461,6 +467,7 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
   const base = {
     id: messageId,
     messageId,
+    remoteMessageId: messageId,
     text: incomingText ?? (existing && existing.role !== "card" ? existing.text : ""),
     createdAt: text(raw.createdAt) ?? event.occurredAt,
   };

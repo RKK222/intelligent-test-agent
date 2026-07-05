@@ -53,10 +53,19 @@ export function isRuntimeBusy(
   if (mutationPending) {
     return true;
   }
-  if (isTerminalStatus(runStatus) || isTerminalStatus(chatStatus)) {
+  // 重试会先把 chat reducer 切到新一轮 PENDING，再等待新的 Run HTTP 响应；
+  // 此时旧 run 可能仍是 FAILED/SUCCEEDED，不能让上一轮终态压住新一轮启动态。
+  if (isBusyStatus(chatStatus)) {
+    return true;
+  }
+  if (isTerminalStatus(chatStatus) || isTerminalStatus(runStatus)) {
     return false;
   }
-  return isRunBusyStatus(runStatus) || isRunBusyStatus(chatStatus);
+  return isBusyStatus(runStatus);
+}
+
+function isBusyStatus(status: string | undefined): boolean {
+  return isRunBusyStatus(status?.toUpperCase());
 }
 
 function isTerminalStatus(status: string | undefined): boolean {

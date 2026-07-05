@@ -12,12 +12,10 @@ import com.icbc.testagent.domain.workspace.WorkspaceId;
 import java.util.Optional;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.stereotype.Repository;
 
 /**
  * Run JDBC Repository，只负责保存状态机结果，不在持久化层重新判断状态迁移。
  */
-@Repository
 public class JdbcRunRepository extends JdbcRepositorySupport implements RunRepository {
 
     private final JdbcClient jdbcClient;

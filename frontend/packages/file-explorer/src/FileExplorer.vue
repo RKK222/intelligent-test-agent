@@ -24,11 +24,13 @@ export type ExplorerTab = "explorer" | "search" | "changes";
 
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { FileText, FolderTree, GitBranch, RefreshCw, Search } from "lucide-vue-next";
-import { Badge, Input, cn } from "@test-agent/ui-kit";
+import { FolderTree, GitBranch, RefreshCw, Search } from "lucide-vue-next";
+import { Input, cn } from "@test-agent/ui-kit";
 import { filterLoadedFiles } from "./filterLoadedFiles";
+import { getVsCodeFileIconClass } from "./fileIcons";
 import { highlightKeyword } from "./highlightKeyword";
 import DirectoryRows from "./DirectoryRows.vue";
+import FileIcon from "./FileIcon.vue";
 
 const props = withDefaults(defineProps<FileExplorerProps>(), { workspaceName: "Workspace" });
 const computedTab = computed(() => props.activeTab ?? tab.value);
@@ -81,10 +83,18 @@ const changeStats = computed(() => {
   }
   return map;
 });
+
+function fileNameOf(path: string) {
+  return path.split("/").pop() || path;
+}
+
+function fileIconClass(name: string, path: string) {
+  return getVsCodeFileIconClass({ name, path, type: "file" });
+}
 </script>
 
 <template>
-  <div class="flex h-full min-h-0 flex-col bg-[var(--ta-panel)]">
+  <div class="ta-file-browser flex h-full min-h-0 flex-col bg-[var(--ta-tree-bg)]">
     <div v-if="!hideTabbar" class="ta-icon-tabbar" role="tablist" aria-label="工作区面板">
       <button
         type="button"
@@ -115,8 +125,8 @@ const changeStats = computed(() => {
         <span v-if="changedFiles.length" class="ml-1 text-[10px]">{{ changedFiles.length }}</span>
       </button>
     </div>
-    <div v-if="computedTab === 'explorer'" class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2 text-[14px]">
-      <div v-if="!hideHeader" class="mb-1 flex h-7 items-center justify-between rounded px-2 text-[12px] font-semibold text-[var(--ta-muted)]">
+    <div v-if="computedTab === 'explorer'" class="ta-file-tree-scroll">
+      <div v-if="!hideHeader" class="ta-file-tree-header">
         <span class="min-w-0 truncate" :title="workspaceName">{{ workspaceName }}</span>
         <div class="flex shrink-0 items-center gap-1">
           <button
@@ -142,9 +152,9 @@ const changeStats = computed(() => {
         @open-file="emit('openFile', $event)"
       />
     </div>
-    <div v-else-if="computedTab === 'search'" class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
-      <div class="relative">
-        <Search class="pointer-events-none absolute left-2 top-2 h-4 w-4 text-[var(--ta-muted)]" :stroke-width="1.5" />
+    <div v-else-if="computedTab === 'search'" class="ta-file-tree-scroll">
+      <div class="relative px-2 pb-1 pt-1">
+        <Search class="pointer-events-none absolute left-4 top-[7px] h-4 w-4 text-[var(--ta-tree-muted)]" :stroke-width="1.5" />
         <Input
           :model-value="searchKeyword ?? keyword"
           class="ta-file-search-input"
@@ -152,42 +162,44 @@ const changeStats = computed(() => {
           @update:model-value="handleSearchInput"
         />
       </div>
-      <div v-if="searchLoading" class="mt-3 text-center text-[12px] text-[var(--ta-muted)]">搜索中...</div>
-      <div v-else-if="displayKeyword && (!displaySearchResults || displaySearchResults.length === 0)" class="mt-3 text-center text-[12px] text-[var(--ta-muted)]">无匹配文件</div>
-      <div v-else class="mt-2 space-y-1">
+      <div v-if="searchLoading" class="ta-file-tree-empty">搜索中...</div>
+      <div v-else-if="displayKeyword && (!displaySearchResults || displaySearchResults.length === 0)" class="ta-file-tree-empty">无匹配文件</div>
+      <div v-else>
         <button
           v-for="entry in displaySearchResults"
           :key="entry.path"
           type="button"
-          :class="cn('flex flex-col h-auto min-h-7 w-full items-start gap-0.5 rounded px-2 py-1.5 text-left hover:bg-[var(--ta-hover)]')"
+          :class="cn('ta-file-tree-row')"
+          :style="{ paddingLeft: '6px' }"
           @click="emit('openFile', entry.path)"
         >
-          <div class="flex items-center gap-2 min-w-0">
-            <FileText class="h-4 w-4 shrink-0 text-[var(--ta-muted)]" :stroke-width="1.5" />
-            <span class="min-w-0 truncate text-[14px] text-[var(--ta-text)]">
-              <template v-for="segment in highlightKeyword(entry.name, displayKeyword)" :key="segment.text">
-                <mark v-if="segment.match" class="bg-yellow-200 text-inherit rounded px-0.5">{{ segment.text }}</mark>
-                <span v-else>{{ segment.text }}</span>
-              </template>
-            </span>
-          </div>
-          <span v-if="entry.directory" class="ml-6 text-[11px] text-[var(--ta-muted)] truncate">{{ entry.directory }}</span>
+          <span class="ta-file-tree-spacer" />
+          <FileIcon :entry="{ name: entry.name, path: entry.path, type: 'file' }" />
+          <span class="min-w-0 truncate">
+            <template v-for="segment in highlightKeyword(entry.name, displayKeyword)" :key="segment.text">
+              <mark v-if="segment.match" class="ta-file-tree-mark">{{ segment.text }}</mark>
+              <span v-else>{{ segment.text }}</span>
+            </template>
+          </span>
+          <span v-if="entry.directory" class="ta-file-tree-path truncate">{{ entry.directory }}</span>
         </button>
       </div>
     </div>
-    <div v-else-if="computedTab === 'changes'" class="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
-      <div class="space-y-1">
+    <div v-else-if="computedTab === 'changes'" class="ta-file-tree-scroll">
+      <div>
         <button
           v-for="file in changedFiles"
           :key="file.path"
           type="button"
-          class="flex w-full items-center gap-2 rounded border border-[var(--ta-border)] bg-[var(--ta-surface)] px-2 py-2 text-left hover:border-[var(--ta-border-strong)]"
+          class="ta-file-tree-row"
+          :style="{ paddingLeft: '6px' }"
           @click="emit('openDiff', file.path)"
         >
-          <Badge :tone="file.status === 'deleted' ? 'danger' : file.status === 'added' ? 'success' : 'warning'">{{ file.status }}</Badge>
-          <span class="min-w-0 flex-1 truncate text-[12px] text-[var(--ta-text)]">{{ file.path }}</span>
-          <span class="text-[11px] text-[#3f7a5a]">+{{ file.additions }}</span>
-          <span class="text-[11px] text-[#9e3b34]">-{{ file.deletions }}</span>
+          <span :class="cn('ta-file-tree-status', `is-${file.status}`)">{{ file.status }}</span>
+          <FileIcon :entry="{ name: fileNameOf(file.path), path: file.path, type: 'file' }" />
+          <span class="min-w-0 flex-1 truncate">{{ file.path }}</span>
+          <span class="ta-file-tree-badge is-added">+{{ file.additions }}</span>
+          <span class="ta-file-tree-badge is-deleted">-{{ file.deletions }}</span>
         </button>
       </div>
     </div>
@@ -199,20 +211,20 @@ const changeStats = computed(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--ta-muted, #6b7280);
+  color: var(--ta-tree-muted, #8b949e);
   cursor: pointer;
   transition: background-color 0.12s ease, color 0.12s ease;
 }
 
 .ta-fe-icon-btn:hover {
   background: transparent;
-  color: var(--ta-text, #18181b);
+  color: var(--ta-tree-text, #3b3b3b);
 }
 
 .ta-fe-icon-btn:focus-visible {
@@ -221,8 +233,10 @@ const changeStats = computed(() => {
 }
 
 .ta-file-search-input {
-  padding-left: 28px !important;
-  font-size: 12px !important;
-  font-family: "Geist", "Noto Sans SC", sans-serif !important;
+  height: 24px !important;
+  padding-left: 26px !important;
+  border-radius: 2px !important;
+  font-size: var(--ta-tree-font-size) !important;
+  font-family: var(--ta-tree-font-family) !important;
 }
 </style>

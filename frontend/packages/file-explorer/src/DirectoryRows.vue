@@ -15,8 +15,8 @@ export type DirectoryRowsProps = {
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { ChevronRight, FileText, Folder, Loader2 } from "lucide-vue-next";
 import { cn } from "@test-agent/ui-kit";
+import FileIcon from "./FileIcon.vue";
 
 const props = withDefaults(defineProps<DirectoryRowsProps>(), { depth: 0 });
 const emit = defineEmits<{
@@ -60,31 +60,31 @@ function onRowClick(entry: FileTreeEntry) {
       <button
         type="button"
         :class="cn(
-          'flex h-7 w-full items-center gap-1 rounded px-1 text-left text-[14px] leading-5 text-[var(--ta-subtle)] hover:bg-[var(--ta-hover)]',
-          activePath === entry.path && 'bg-[var(--ta-active)] text-[var(--ta-ink)]'
+          'ta-file-tree-row',
+          activePath === entry.path && 'is-active'
         )"
-        :style="{ paddingLeft: depth * 14 + 4 + 'px' }"
+        :style="{ paddingLeft: depth * 16 + 6 + 'px' }"
         @click="onRowClick(entry)"
       >
         <template v-if="entry.type === 'directory'">
-          <ChevronRight
+          <i
             v-if="!isKnownEmptyDirectory(entry.path)"
-            :class="cn('h-3.5 w-3.5 text-[var(--ta-muted)] transition', expandedDirectories.has(entry.path) && 'rotate-90')"
+            :class="cn('codicon codicon-chevron-right ta-file-tree-twistie', expandedDirectories.has(entry.path) && 'is-open')"
+            aria-hidden="true"
           />
-          <span v-else class="w-3.5" />
-          <Folder class="h-4 w-4 text-[var(--ta-muted)]" />
+          <span v-else class="ta-file-tree-spacer" />
         </template>
         <template v-else>
-          <span class="w-3.5" />
-          <FileText class="h-4 w-4 text-[var(--ta-muted)]" />
+          <span class="ta-file-tree-spacer" />
+          <FileIcon :entry="entry" />
         </template>
         <span class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
         <template v-if="entry.type === 'file' && changeStats?.[entry.path]">
-          <span class="shrink-0 text-[10px] leading-5 text-[#3f7a5a]">+{{ changeStats[entry.path].additions }}</span>
-          <span class="shrink-0 text-[10px] leading-5 text-[#9e3b34]">-{{ changeStats[entry.path].deletions }}</span>
+          <span class="ta-file-tree-badge is-added">+{{ changeStats[entry.path].additions }}</span>
+          <span class="ta-file-tree-badge is-deleted">-{{ changeStats[entry.path].deletions }}</span>
         </template>
         <!-- 加载指示：使用旋转图标，避免行尾细小的 "..." 难以被发现而引起重复点击。 -->
-        <Loader2 v-if="loadingPath?.has(entry.path)" :class="cn('h-3.5 w-3.5 shrink-0 animate-spin text-[var(--ta-muted)]')" />
+        <i v-if="loadingPath?.has(entry.path)" class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />
       </button>
       <DirectoryRows
         v-if="entry.type === 'directory' && expandedDirectories.has(entry.path)"

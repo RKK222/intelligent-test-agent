@@ -60,7 +60,7 @@ const emit = defineEmits<{
   loadVersions: [templateId: string];
   // 「+新增版本」弹窗确认后由父组件调用 createWorkspaceVersion。
   createVersion: [payload: { template: AppWorkspaceTemplate; version: string; branch?: string }];
-  openAgentFile: [payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null }];
+  openAgentFile: [payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null; linuxServerId?: string | null }];
   openServerWorkspacePicker: [];
   // 搜索事件
   search: [keyword: string];
@@ -293,6 +293,7 @@ defineExpose({
               :can-write="!!canWrite"
               :hide-header="true"
               :hide-git-ops="true"
+              :active-path="activePath"
               @open-file="emit('openAgentFile', $event)"
             />
           </div>
@@ -322,37 +323,13 @@ defineExpose({
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  background: var(--ta-tree-bg);
+  color: var(--ta-tree-text);
+  font-family: var(--ta-tree-font-family);
 }
 
-.ta-icon-tabbar {
-  display: flex;
-  height: 38px;
-  background: #fafafa;
-  border-bottom: 1px solid #e4e4e7;
+.figma-file-explorer > .ta-icon-tabbar {
   padding-right: 36px; /* Make space for the absolutely-positioned sidebar toggle button */
-  flex-shrink: 0;
-}
-
-.ta-icon-tab {
-  display: inline-flex;
-  min-width: 0;
-  flex: 1 1 0;
-  align-items: center;
-  justify-content: center;
-  border-bottom: 2px solid transparent;
-  color: #71717a;
-  cursor: pointer;
-  transition: color 0.14s ease, background-color 0.14s ease, border-color 0.14s ease;
-}
-
-.ta-icon-tab:hover {
-  background: #f4f4f5;
-  color: #18181b;
-}
-
-.ta-icon-tab.is-active {
-  border-bottom-color: #18181b;
-  color: #18181b;
 }
 
 .figma-fe-body {
@@ -361,7 +338,7 @@ defineExpose({
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: #fafafa;
+  background: var(--ta-tree-bg);
 }
 
 .figma-fe-section {
@@ -380,17 +357,17 @@ defineExpose({
 
 /* Border separator when resizer is NOT present */
 .figma-fe-section + .figma-fe-section {
-  border-top: 1px solid #e4e4e7;
+  border-top: 1px solid var(--ta-tree-border);
 }
 
 .figma-fe-section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 32px;
-  padding: 0 8px;
-  background: #fafafa;
-  border-bottom: 1px solid #e4e4e7;
+  height: 24px;
+  padding: 0 6px;
+  background: var(--ta-tree-bg);
+  border-bottom: 1px solid var(--ta-tree-border);
   user-select: none;
   flex-shrink: 0;
 }
@@ -402,7 +379,7 @@ defineExpose({
   border: none;
   background: transparent;
   padding: 0;
-  color: #555;
+  color: var(--ta-tree-text);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
@@ -412,10 +389,11 @@ defineExpose({
 }
 
 .figma-fe-section-header-trigger:hover {
-  color: #18181b;
+  color: var(--ta-tree-text);
 }
 
 .figma-fe-section-title {
+  flex-shrink: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -423,7 +401,7 @@ defineExpose({
 
 .figma-fe-section-worktree {
   font-size: 11px;
-  color: #71717a;
+  color: var(--ta-tree-muted);
   font-weight: normal;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -445,20 +423,20 @@ defineExpose({
   width: 22px;
   height: 22px;
   border: none;
-  border-radius: 4px;
+  border-radius: 0;
   background: transparent;
-  color: #71717a;
+  color: var(--ta-tree-muted);
   cursor: pointer;
   transition: background-color 0.1s, color 0.1s;
 }
 
 .figma-fe-section-action-btn:hover {
-  background: #e4e4e7;
-  color: #18181b;
+  background: var(--ta-tree-hover);
+  color: var(--ta-tree-text);
 }
 
 .figma-fe-section-action-btn:active {
-  background: #d4d4d8;
+  background: var(--ta-tree-active);
 }
 
 .figma-fe-section-action-btn:disabled {
@@ -492,7 +470,7 @@ defineExpose({
   top: 50%;
   height: 1px;
   margin-top: -0.5px;
-  background: #e4e4e7;
+  background: var(--ta-tree-border);
   transition: background-color 0.14s ease;
 }
 
@@ -501,7 +479,7 @@ defineExpose({
 }
 
 .figma-fe-resize-handle:hover::after {
-  background: #bbb;
+  background: var(--ta-tree-border-strong);
 }
 
 .figma-fe-resize-handle:active {
@@ -509,7 +487,7 @@ defineExpose({
 }
 
 .figma-fe-body :deep(.bg-\[var\(--ta-panel\)\]) {
-  background: #fafafa;
+  background: var(--ta-tree-bg);
 }
 
 /* 文件树面板内错误提示 */
@@ -541,7 +519,7 @@ defineExpose({
   flex: 1;
   min-height: 96px;
   padding: 16px;
-  color: #71717a;
+  color: var(--ta-tree-muted);
   font-size: 12px;
   text-align: center;
 }

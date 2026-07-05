@@ -8,6 +8,7 @@
 
 - 定义 API 响应、Workspace、WorkspaceDirectoryList、Session、SessionMessage、Run、RunEvent、Diff、AgentMessage 类型；Workspace 可选携带 `linuxServerId`，用于前端文件 WebSocket 同服务器路由。
 - `SessionMessage` 保留旧 `content` 字段，并可选承载 `runId`、`remoteMessageId`、`parts`、`tokens`、`costUsd`、`updatedAt`，用于展示后端持久化的 Run 快照和 opencode message part projection；旧响应缺失这些字段时前端继续按纯文本展示。
+- `AgentMessage` 可选区分 `platformMessageId` 与 `remoteMessageId`：前者表示平台 `session_messages.message_id`，用于反馈等平台 API；后者表示实时 opencode message id，只用于运行期归并和终态后映射。
 - `Run` 可选承载 `tokens`、`costUsd`，统计口径为单次 Run；缺失字段必须按未知消耗处理。
 - 新增 PromptPart、MessagePart、ToolPart、PermissionRequest、QuestionRequest、AgentInfo、ModelInfo、ProviderInfo、CommandInfo、RuntimeResourceInfo、RuntimeToolInfo、SessionDiff、TodoItem、RuntimeStatus、TerminalTicketRequest、TerminalTicketResponse 等 Web App 运行态 projection 类型。
 - `CommandInfo` 的 `source/hints` 为可选字段，用于保留 opencode command catalog 的来源和参数提示；旧 payload 不提供时前端必须兼容。
