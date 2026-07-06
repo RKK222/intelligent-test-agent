@@ -23,12 +23,14 @@ services:
       OPENCODE_MANAGER_PORT_END: "${OPENCODE_WORKER_1_PORT_END:-4105}"
       OPENCODE_MANAGER_TOKEN: "${TEST_AGENT_OPENCODE_MANAGER_TOKEN:?set TEST_AGENT_OPENCODE_MANAGER_TOKEN}"
       OPENCODE_MANAGER_STATE_DIR: "/data/.testagent/agent-opencode/manager/worker-1"
-      OPENCODE_BIN: "/usr/local/bin/opencode"
+      OPENCODE_BIN: "/opt/test-agent/programs/opencode/bin/opencode"
+      TEST_AGENT_PROGRAM_ROOT: "/opt/test-agent/programs"
       OPENCODE_ALLOWED_CORS: "${OPENCODE_ALLOWED_CORS:-}"
       OPENCODE_MANAGER_HEARTBEAT_INTERVAL: "${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}"
       OPENCODE_MANAGER_RECONNECT_INTERVAL: "${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}"
     volumes:
       - "${TEST_AGENT_DATA_ROOT:-/data/.testagent}:/data/.testagent"
+      - "${TEST_AGENT_PROGRAM_ROOT:-./dist/programs}:/opt/test-agent/programs:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
@@ -59,12 +61,14 @@ services:
       OPENCODE_MANAGER_PORT_END: "${OPENCODE_WORKER_2_PORT_END:-4115}"
       OPENCODE_MANAGER_TOKEN: "${TEST_AGENT_OPENCODE_MANAGER_TOKEN:?set TEST_AGENT_OPENCODE_MANAGER_TOKEN}"
       OPENCODE_MANAGER_STATE_DIR: "/data/.testagent/agent-opencode/manager/worker-2"
-      OPENCODE_BIN: "/usr/local/bin/opencode"
+      OPENCODE_BIN: "/opt/test-agent/programs/opencode/bin/opencode"
+      TEST_AGENT_PROGRAM_ROOT: "/opt/test-agent/programs"
       OPENCODE_ALLOWED_CORS: "${OPENCODE_ALLOWED_CORS:-}"
       OPENCODE_MANAGER_HEARTBEAT_INTERVAL: "${OPENCODE_MANAGER_HEARTBEAT_INTERVAL:-5s}"
       OPENCODE_MANAGER_RECONNECT_INTERVAL: "${OPENCODE_MANAGER_RECONNECT_INTERVAL:-10s}"
     volumes:
       - "${TEST_AGENT_DATA_ROOT:-/data/.testagent}:/data/.testagent"
+      - "${TEST_AGENT_PROGRAM_ROOT:-./dist/programs}:/opt/test-agent/programs:ro"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:

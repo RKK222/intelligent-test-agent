@@ -50,11 +50,14 @@ RUN npm config set registry "${NPM_REGISTRY}" \
     && npm cache clean --force
 
 COPY --from=manager-build /out/opencode-manager /usr/local/bin/opencode-manager
+COPY deploy/internal/opencode-worker-entrypoint.sh /usr/local/bin/opencode-worker-entrypoint
+RUN chmod +x /usr/local/bin/opencode-manager /usr/local/bin/opencode-worker-entrypoint
 
 ENV OPENCODE_BIN=/usr/local/bin/opencode
 ENV OPENCODE_MANAGER_STATE_DIR=/data/.testagent/agent-opencode/manager
+ENV TEST_AGENT_PROGRAM_ROOT=/opt/test-agent/programs
 
 WORKDIR /data/.testagent/agent-opencode/workspace
 
-ENTRYPOINT ["tini", "--"]
-CMD ["opencode-manager", "run"]
+ENTRYPOINT ["tini", "--", "opencode-worker-entrypoint"]
+CMD ["run"]

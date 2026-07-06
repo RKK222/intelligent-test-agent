@@ -45,10 +45,13 @@ deploy/internal/package-release.sh
 deploy/internal/dist/backend/test-agent-app.jar
 deploy/internal/dist/frontend/
 deploy/internal/dist/test-agent-frontend-dist.tar.gz
+deploy/internal/dist/programs/
+deploy/internal/dist/test-agent-programs.tar.gz
 test-agent-opencode-worker_internal-linux-amd64.tar
 ```
 
 也就是说：后端 jar 和前端 dist 会随打包一起出来；前端不做业务镜像，实体 Nginx 直接托管 `dist/frontend`。
+第一版 `opencode-worker` 镜像里仍内置 `opencode-manager` 和 `opencode-ai` CLI；同时脚本会把这两个程序导出到 `dist/programs/`，Compose 默认把该目录挂进 worker，运行时优先使用外挂程序，找不到时才回退镜像内置程序。
 
 只打某一类交付物：
 
@@ -80,6 +83,44 @@ docker save -o test-agent-opencode-worker-internal-amd64.tar test-agent-opencode
 ```bash
 docker load -i test-agent-opencode-worker-internal-amd64.tar
 ```
+
+## opencode 程序外挂升级
+
+worker 容器启动时按以下优先级选择程序：
+
+```text
+/opt/test-agent/programs/bin/opencode-manager
+/opt/test-agent/programs/opencode/bin/opencode
+```
+
+如果上述路径不存在或不可执行，则回退到镜像内置的：
+
+```text
+/usr/local/bin/opencode-manager
+/usr/local/bin/opencode
+```
+
+目标机器首次部署可把交付包中的 `test-agent-programs.tar.gz` 解压到统一目录，例如：
+
+```bash
+mkdir -p /opt/test-agent
+tar -C /opt/test-agent -xzf deploy/internal/dist/test-agent-programs.tar.gz
+```
+
+然后在 `deploy/internal/.env` 中配置：
+
+```dotenv
+TEST_AGENT_PROGRAM_ROOT=/opt/test-agent/programs
+```
+
+后续只升级 opencode 或 manager 时，可以只替换 `/opt/test-agent/programs` 下对应文件，再重启 worker：
+
+```bash
+cd deploy/internal
+docker compose --env-file .env restart opencode-worker-1 opencode-worker-2
+```
+
+如果已有用户 `opencode serve` 子进程在运行，建议先通过平台运行管理停止或重启相关用户进程，避免旧子进程继续使用旧版本。
 
 ## 实体 Nginx 部署
 
@@ -118,6 +159,7 @@ cp deploy/internal/env.example deploy/internal/.env
 
 - `TEST_AGENT_OPENCODE_MANAGER_TOKEN`
 - `TEST_AGENT_DATA_ROOT`
+- `TEST_AGENT_PROGRAM_ROOT`
 - 两个 worker 的端口池
 
 启动：
@@ -135,4 +177,4 @@ docker compose --env-file .env ps
 
 ## 运行时外部依赖
 
-`opencode-worker` 镜像内已包含 `opencode-manager` 和 npm 安装的 `opencode-ai` CLI。目标环境仍必须提供 PostgreSQL、Redis、企业内模型服务、Git/SSH 网络和 Java 后端所需密钥。`/data/.testagent/agent-opencode/.config/opencode/` 必须由超级管理员完成公共配置初始化且非空，否则 manager 会拒绝启动用户 opencode 进程。
+`opencode-worker` 镜像内已包含 `opencode-manager` 和 npm 安装的 `opencode-ai` CLI；外挂程序目录用于后续小版本更新。目标环境仍必须提供 PostgreSQL、Redis、企业内模型服务、Git/SSH 网络和 Java 后端所需密钥。`/data/.testagent/agent-opencode/.config/opencode/` 必须由超级管理员完成公共配置初始化且非空，否则 manager 会拒绝启动用户 opencode 进程。

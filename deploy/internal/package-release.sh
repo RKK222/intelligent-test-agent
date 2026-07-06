@@ -172,12 +172,37 @@ build_opencode_worker_image() {
     "${ROOT_DIR}"
   docker image inspect "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" >/dev/null
 
+  export_worker_programs
+
   if [[ "${SAVE_TARBALL}" -eq 1 ]]; then
     local tar_path="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
     echo "Saving ${TEST_AGENT_OPENCODE_WORKER_IMAGE} to ${tar_path}"
     docker save -o "${tar_path}" "${TEST_AGENT_OPENCODE_WORKER_IMAGE}"
     ls -lh "${tar_path}"
   fi
+}
+
+export_worker_programs() {
+  local programs_dir="${OUTPUT_DIR}/programs"
+  local container_id
+  container_id="$(docker create "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" true)"
+
+  rm -rf "${programs_dir}"
+  mkdir -p "${programs_dir}/bin" "${programs_dir}/opencode/bin" "${programs_dir}/opencode/lib/node_modules"
+
+  if ! docker cp "${container_id}:/usr/local/bin/opencode-manager" "${programs_dir}/bin/opencode-manager" \
+    || ! docker cp "${container_id}:/usr/local/bin/opencode" "${programs_dir}/opencode/bin/opencode" \
+    || ! docker cp "${container_id}:/usr/local/lib/node_modules/opencode-ai" "${programs_dir}/opencode/lib/node_modules/opencode-ai"; then
+    docker rm -f "${container_id}" >/dev/null 2>&1 || true
+    return 1
+  fi
+  docker rm -f "${container_id}" >/dev/null
+
+  chmod +x "${programs_dir}/bin/opencode-manager" || true
+  chmod +x "${programs_dir}/opencode/bin/opencode" || true
+  printf 'opencode package: %s\n' "${OPENCODE_AI_PACKAGE}" >"${programs_dir}/VERSION"
+  tar -C "${OUTPUT_DIR}" -czf "${OUTPUT_DIR}/test-agent-programs.tar.gz" programs
+  ls -lh "${OUTPUT_DIR}/test-agent-programs.tar.gz"
 }
 
 load_dotenv "${ENV_FILE}"
@@ -230,6 +255,8 @@ if [[ "${PACKAGE_FRONTEND}" -eq 1 ]]; then
 fi
 if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
   echo "  opencode worker image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
+  echo "  external programs: ${OUTPUT_DIR}/programs"
+  echo "  external programs archive: ${OUTPUT_DIR}/test-agent-programs.tar.gz"
   echo
   echo "Target import:"
   echo "  docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"

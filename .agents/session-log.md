@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-06 - opencode worker 支持外置程序优先
+
+- Why:
+  - 企业内希望镜像主要承载运行环境，第一版仍内置 opencode 和 opencode-manager，但后续升级可以直接替换宿主机外挂程序而不重打镜像。
+- What:
+  - `opencode-worker` 镜像新增启动包装脚本，优先使用 `/opt/test-agent/programs/bin/opencode-manager` 和 `/opt/test-agent/programs/opencode/bin/opencode`，不可用时回退镜像内置程序。
+  - Compose 为两个 worker 增加 `TEST_AGENT_PROGRAM_ROOT` 挂载；打包脚本从 worker 镜像导出 `dist/programs/` 和 `test-agent-programs.tar.gz`。
+- How:
+  - 镜像仍通过 npm 安装 `opencode-ai` 并编译当前仓库 `opencode-manager`；导出外挂程序时从镜像内复制 manager 二进制、opencode 全局 bin 和 `opencode-ai` npm 包。
+- Result:
+  - `bash -n deploy/internal/package-release.sh`、`bash -n deploy/internal/opencode-worker-entrypoint.sh`、`deploy/internal/package-release.sh --help`、`docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 和 `git diff --check` 通过；未实际构建镜像。
+
 ### 2026-07-06 - 工作区上下文改走原生 file parts
 
 - Why:
