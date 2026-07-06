@@ -1,3 +1,4 @@
+<script setup lang="ts">
 import tabCloseUrl from "../assets/figma/tab-close.svg";
 import { computed, onBeforeUnmount, ref, watch, nextTick } from "vue";
 import { FileIcon } from "@test-agent/file-explorer";
