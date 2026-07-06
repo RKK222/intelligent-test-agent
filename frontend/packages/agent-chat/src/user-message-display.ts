@@ -57,23 +57,30 @@ export function workspaceContextAttachmentsFromUserPrompt(text: string): UserPro
 export function workspaceContextAttachmentsFromPromptParts(
   parts: PromptPart[] | undefined
 ): UserPromptWorkspaceContextAttachment[] {
-  const attachments: UserPromptWorkspaceContextAttachment[] = (parts ?? [])
-    .filter((part): part is Extract<PromptPart, { type: "file" }> => part.type === "file")
-    .map((part) => {
-      const path = part.path ?? part.name ?? "attachment";
-      const contextType = part.source?.contextType === "selection" ? "selection" : "file";
-      const startLine = part.source?.startLine;
-      const endLine = part.source?.endLine;
-      return {
-        type: contextType,
-        path,
-        fileName: part.name ?? fileNameFromPath(path),
-        lines:
-          contextType === "selection" && Number.isFinite(startLine) && Number.isFinite(endLine)
-            ? `${startLine}-${endLine}`
-            : undefined
-      };
+  const attachments: UserPromptWorkspaceContextAttachment[] = [];
+  for (const part of parts ?? []) {
+    if (part.type === "text") {
+      // 选区上下文第一版按 prompt-only 发送，历史与实时展示都需要从 text part 恢复关联 chip。
+      attachments.push(...workspaceContextAttachmentsFromUserPrompt(part.text));
+      continue;
+    }
+    if (part.type !== "file") {
+      continue;
+    }
+    const path = part.path ?? part.name ?? "attachment";
+    const contextType = part.source?.contextType === "selection" ? "selection" : "file";
+    const startLine = part.source?.startLine;
+    const endLine = part.source?.endLine;
+    attachments.push({
+      type: contextType,
+      path,
+      fileName: part.name ?? fileNameFromPath(path),
+      lines:
+        contextType === "selection" && Number.isFinite(startLine) && Number.isFinite(endLine)
+          ? `${startLine}-${endLine}`
+          : undefined
     });
+  }
   return uniqueWorkspaceContextAttachments(attachments);
 }
 

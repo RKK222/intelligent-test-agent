@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-06 - 收敛选区上下文回放展示
+
+- Why:
+  - 选区上下文改为 text prompt-only 后，opencode 回放的 user text part 可能包含完整 `<context>` prompt；旧 reducer 在远端 user part 晚到或以 delta 到达时会误建 assistant 文本块，导致内部 prompt 在对话中可见，且 text part 中的选区 chip 恢复不稳定。
+- What:
+  - `agent-chat` 用 `displayTextFromUserPrompt()` 归一化远端 user message/part 匹配；序列化工作区 prompt 的 `message.part.updated` 和完整 `message.part.delta` 都会归并回乐观 user 消息，不再渲染为 assistant 输出。
+  - 用户消息附件恢复同时解析 text prompt part 与原生 file part；整文件仍走 opencode 原生 file part，选区继续走 text prompt-only。
+- How:
+  - 不新增 API、SSE 字段、数据库或后端链路；复用现有 Run `parts`、用户消息展示解析和 opencode file part 适配。
+- Result:
+  - 定向 Vitest（`user-message-display`、`runtime-reducer`、`opencode-timeline`、`chat-context-store`、`prompt-context`）、`@test-agent/agent-chat` typecheck、`@test-agent/agent-web` typecheck、`git diff --check` 通过；本地 test profile 三服务重启成功，health/readiness/frontend/CORS 检查通过。
+
 ### 2026-07-06 - 修复历史对话关联文件恢复
 
 - Why:

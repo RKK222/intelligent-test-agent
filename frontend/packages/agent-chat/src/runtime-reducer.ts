@@ -12,6 +12,7 @@ import type {
   TodoItem
 } from "@test-agent/shared-types";
 import type { OpencodeLikeRuntimeStatus } from "./opencode-like";
+import { displayTextFromUserPrompt } from "./user-message-display";
 
 const SESSION_STATUS_RETRY_WAIT_SECONDS = 60;
 const SESSION_STATUS_MAX_RETRY_ATTEMPTS = 3;
@@ -422,6 +423,21 @@ function mergePartDelta(messages: AgentMessage[], event: RunEvent, forceNewAssis
   if (exactMessage?.role === "user") {
     return messages;
   }
+  const displayDelta = displayTextFromUserPrompt(delta);
+  const delayedUserPartIndex = displayDelta !== delta ? findUnlinkedUserByText(messages, delta) : -1;
+  if (delayedUserPartIndex >= 0) {
+    const user = messages[delayedUserPartIndex];
+    if (user.role === "user") {
+      return replaceOrAppendMessage(messages, delayedUserPartIndex, {
+        ...user,
+        id: messageId,
+        messageId,
+        remoteMessageId: messageId,
+        text: displayDelta,
+        parts: appendPromptPart(user.parts, { type: "text", text: delta })
+      });
+    }
+  }
   const exact = findAssistantMessage(messages, messageId);
   const lastIdx = exact.message || forceNewAssistantMessage ? -1 : findLastAssistantInCurrentTurn(messages);
   const assistant: Extract<AgentMessage, { role: "assistant" }> =
@@ -488,13 +504,14 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
     const userText = syntheticTextPart(raw) ? undefined : text(raw.text) ?? text(raw.content);
     const userPart = promptPartFromUserRaw(raw);
     const nextParts = userPart ? appendPromptPart(exactMessage.parts, userPart) : exactMessage.parts;
-    const nextText = userText === undefined || exactMessage.text ? exactMessage.text : userText;
+    const nextText = userText === undefined || exactMessage.text ? exactMessage.text : displayTextFromUserPrompt(userText);
     if (nextText === exactMessage.text && nextParts === exactMessage.parts) {
       return messages;
     }
     return replaceOrAppendMessage(messages, exactMessageIndex, { ...exactMessage, text: nextText, parts: nextParts });
   }
   const delayedUserText = text(raw.text) ?? text(raw.content);
+  const delayedUserPart = promptPartFromUserRaw(raw);
   const delayedUserPartIndex = findUnlinkedUserByText(messages, delayedUserText);
   if (delayedUserPartIndex >= 0) {
     const user = messages[delayedUserPartIndex];
@@ -504,7 +521,8 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
         id: messageId,
         messageId,
         remoteMessageId: messageId,
-        text: delayedUserText ?? user.text
+        text: delayedUserText ? displayTextFromUserPrompt(delayedUserText) : user.text,
+        parts: delayedUserPart ? appendPromptPart(user.parts, delayedUserPart) : user.parts
       });
     }
   }
@@ -649,7 +667,7 @@ function upsertMessage(messages: AgentMessage[], payload: Record<string, unknown
     id: messageId,
     messageId,
     remoteMessageId: messageId,
-    text: incomingText ?? (existing && existing.role !== "card" ? existing.text : ""),
+    text: role === "user" && incomingText ? displayTextFromUserPrompt(incomingText) : incomingText ?? (existing && existing.role !== "card" ? existing.text : ""),
     createdAt: text(raw.createdAt) ?? event.occurredAt,
   };
   const message: AgentMessage = role === "user"
@@ -694,8 +712,9 @@ function findUnlinkedUserByText(messages: AgentMessage[], incomingText: string |
   if (incomingText === undefined) {
     return -1;
   }
+  const displayText = displayTextFromUserPrompt(incomingText);
   return messages.findIndex(
-    (message) => message.role === "user" && !message.messageId && message.text === incomingText
+    (message) => message.role === "user" && !message.messageId && (message.text === incomingText || message.text === displayText)
   );
 }
 

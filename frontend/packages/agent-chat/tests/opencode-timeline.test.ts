@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, within } from "@testing-library/vue";
 import { nextTick } from "vue";
-import type { AgentMessage, MessagePart } from "@test-agent/shared-types";
+import type { AgentMessage, MessagePart, PromptPart } from "@test-agent/shared-types";
 import OpencodeTimeline from "../src/opencode-like/components/OpencodeTimeline.vue";
 import { createOpencodeLikeState } from "../src/opencode-like/state/adapter";
 import AssistantThread from "../src/AssistantThread.vue";
@@ -81,6 +81,44 @@ describe("OpencodeTimeline", () => {
     const { container, getByText, queryByText } = render(OpencodeTimeline, { props: { state } });
 
     expect(getByText("写了什么内容")).toBeTruthy();
+    expect(getByText("文件")).toBeTruthy();
+    expect(getByText("api.md")).toBeTruthy();
+    expect(queryByText(/<context/)).toBeNull();
+    expect(container.querySelector(".oc-user-message__bubble")?.textContent).not.toContain("以下是用户添加的工作区上下文");
+  });
+
+  it("renders selection and file chips from user prompt parts without exposing serialized context", () => {
+    const serializedPrompt = [
+      "用户问题：",
+      "能看到什么内容",
+      "",
+      "以下是用户添加的工作区上下文：",
+      "",
+      '<context type="selection" path="99-测试数据/Git冲突处理/冲突文件.md" lines="5-5">',
+      "应用分支上的修改，用于制造合并冲突。",
+      "</context>"
+    ].join("\n");
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_context_part", "能看到什么内容", [
+          { type: "text", text: serializedPrompt },
+          {
+            type: "file",
+            path: "docs/api.md",
+            name: "api.md",
+            content: "# API",
+            source: { contextType: "file" }
+          }
+        ])
+      ]
+    });
+
+    const { container, getByText, queryByText } = render(OpencodeTimeline, { props: { state } });
+
+    expect(getByText("能看到什么内容")).toBeTruthy();
+    expect(getByText("选区")).toBeTruthy();
+    expect(getByText("冲突文件.md")).toBeTruthy();
+    expect(getByText("L5-5")).toBeTruthy();
     expect(getByText("文件")).toBeTruthy();
     expect(getByText("api.md")).toBeTruthy();
     expect(queryByText(/<context/)).toBeNull();
@@ -757,8 +795,8 @@ describe("OpencodeTimeline", () => {
   });
 });
 
-function userMessage(id: string, text: string): Extract<AgentMessage, { role: "user" }> {
-  return { id, messageId: id, role: "user", text, createdAt: "2026-07-03T00:00:00Z" };
+function userMessage(id: string, text: string, parts?: PromptPart[]): Extract<AgentMessage, { role: "user" }> {
+  return { id, messageId: id, role: "user", text, parts, createdAt: "2026-07-03T00:00:00Z" };
 }
 
 function assistantMessage(id: string, parts: MessagePart[]): Extract<AgentMessage, { role: "assistant" }> {

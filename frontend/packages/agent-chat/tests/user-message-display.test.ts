@@ -99,6 +99,33 @@ describe("displayTextFromUserPrompt", () => {
     ]);
   });
 
+  it("extracts associated workspace context metadata from serialized text prompt parts", () => {
+    expect(
+      workspaceContextAttachmentsFromPromptParts([
+        {
+          type: "text",
+          text: [
+            "用户问题：",
+            "能看到什么内容",
+            "",
+            "以下是用户添加的工作区上下文：",
+            "",
+            '<context type="selection" path="99-测试数据/Git冲突处理/冲突文件.md" lines="5-5">',
+            "应用分支上的修改，用于制造合并冲突。",
+            "</context>"
+          ].join("\n")
+        }
+      ])
+    ).toEqual([
+      {
+        type: "selection",
+        path: "99-测试数据/Git冲突处理/冲突文件.md",
+        fileName: "冲突文件.md",
+        lines: "5-5"
+      }
+    ]);
+  });
+
   it("deduplicates repeated native workspace file prompt parts", () => {
     expect(
       workspaceContextAttachmentsFromPromptParts([
