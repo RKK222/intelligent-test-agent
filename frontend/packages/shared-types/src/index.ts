@@ -580,6 +580,32 @@ export type UserOpencodeProcess = {
   checkedAt: string;
 };
 
+export type UserOpencodeProcessHealthStatus =
+  | "HEALTHY"
+  | "UNHEALTHY"
+  | "PROCESS_NOT_FOUND"
+  | "MANAGER_UNAVAILABLE"
+  | "BACKEND_UNAVAILABLE"
+  | string;
+
+export type UserOpencodeProcessHealthRequest = {
+  linuxServerId: string;
+  containerId: string;
+  port: number;
+};
+
+export type UserOpencodeProcessHealth = {
+  healthy: boolean;
+  status: UserOpencodeProcessHealthStatus;
+  serviceStatus: "RUNNING" | "NOT_RUNNING" | string;
+  linuxServerId: string;
+  containerId: string;
+  port: number;
+  baseUrl?: string | null;
+  checkedAt: string;
+  message: string;
+};
+
 export type OpencodeProcessStartOperationStatus = "RUNNING" | "SUCCEEDED" | "FAILED" | string;
 export type OpencodeProcessStartOperationStepStatus = "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | string;
 

@@ -113,6 +113,26 @@ class UserOpencodeBackendRoutingWebFilterTest {
     }
 
     @Test
+    void weakHealthRequestSkipsBindingRoutingBecauseTargetComesFromQueryParameters() {
+        UserOpencodeProcessAssignmentService assignmentService = Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        RecordingHttpClient httpClient = new RecordingHttpClient(200, "{}");
+        UserOpencodeBackendRoutingWebFilter filter = filter(assignmentService, heartbeatStore("server-b"), httpClient);
+        MockServerWebExchange exchange = authenticatedExchange(MockServerHttpRequest
+                .get("/api/internal/agent/opencode/processes/me/health?linuxServerId=server-b&containerId=ctr_01&port=4096")
+                .build());
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+
+        filter.filter(exchange, chain(exchange1 -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        })).block(Duration.ofSeconds(2));
+
+        assertThat(chainCalled).isTrue();
+        assertThat(httpClient.requests).isEmpty();
+        Mockito.verifyNoInteractions(assignmentService);
+    }
+
+    @Test
     void routesConfigurationWorkspaceCreationBecauseItRequiresUserOpencodeServer() {
         assertRequestIsForwarded("/api/internal/platform/configuration-management/applications/app_1/workspaces");
     }

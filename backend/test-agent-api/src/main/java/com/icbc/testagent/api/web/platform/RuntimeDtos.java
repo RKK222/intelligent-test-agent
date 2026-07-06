@@ -8,6 +8,7 @@ import com.icbc.testagent.opencode.runtime.process.socket.ManagerBackendEndpoint
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperation;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStatus;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeProcessStartOperationStep;
+import com.icbc.testagent.opencode.runtime.process.OpencodeProcessWeakHealthResponse;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessStatusResponse;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.run.Run;
@@ -530,6 +531,34 @@ final class RuntimeDtos {
      * 当前用户 opencode 进程初始化请求体，operationId 可空以兼容旧调用。
      */
     record UserOpencodeProcessInitializeRequest(String operationId) {
+    }
+
+    /**
+     * 当前用户 opencode 进程弱健康响应 DTO；用于前端高频健康轮询，不代表数据库状态。
+     */
+    record UserOpencodeProcessHealthResponse(
+            boolean healthy,
+            String status,
+            String serviceStatus,
+            String linuxServerId,
+            String containerId,
+            int port,
+            String baseUrl,
+            Instant checkedAt,
+            String message) {
+
+        static UserOpencodeProcessHealthResponse from(OpencodeProcessWeakHealthResponse response) {
+            return new UserOpencodeProcessHealthResponse(
+                    response.healthy(),
+                    response.status().name(),
+                    response.serviceStatus(),
+                    response.linuxServerId(),
+                    response.containerId(),
+                    response.port(),
+                    response.baseUrl(),
+                    response.checkedAt(),
+                    response.message());
+        }
     }
 
     /**

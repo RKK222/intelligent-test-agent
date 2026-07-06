@@ -918,33 +918,7 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("send")).toEqual([["后台刷新时发送"]]);
   });
 
-  it("requests a process refresh when the user focuses the composer textarea", async () => {
-    const wrapper = mount(FigmaChatPanel, {
-      props: {
-        messages: [],
-        processStatus: { status: "READY", initializable: false, message: "ready" }
-      }
-    });
-
-    await wrapper.get("textarea").trigger("focus");
-
-    expect(wrapper.emitted("refresh-process")).toEqual([[]]);
-  });
-
-  it("requests a process refresh when the user clicks the composer card", async () => {
-    const wrapper = mount(FigmaChatPanel, {
-      props: {
-        messages: [],
-        processStatus: { status: "READY", initializable: false, message: "ready" }
-      }
-    });
-
-    await wrapper.get(".figma-chat-input-card").trigger("click");
-
-    expect(wrapper.emitted("refresh-process")).toEqual([[]]);
-  });
-
-  it("deduplicates focus and click refresh requests from the same interaction", async () => {
+  it("does not request a process refresh when the user focuses or clicks the composer", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {
         messages: [],
@@ -955,7 +929,7 @@ describe("FigmaChatPanel", () => {
     await wrapper.get("textarea").trigger("focus");
     await wrapper.get(".figma-chat-input-card").trigger("click");
 
-    expect(wrapper.emitted("refresh-process")).toEqual([[]]);
+    expect(wrapper.emitted("refresh-process")).toBeUndefined();
   });
 
   it("blocks submit actions and skips duplicate refresh while process status is refreshing", async () => {

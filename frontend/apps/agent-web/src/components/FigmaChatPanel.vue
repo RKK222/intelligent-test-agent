@@ -712,7 +712,6 @@ const emit =
     (e: 'open-diff', path: string): void
     (e: 'open-file', path: string): void
     (e: 'initialize-process'): void
-    (e: 'refresh-process'): void
     (e: 'select-model', model: any): void
     (e: 'change-agent', agentId: string): void
     (e: 'refresh-agents'): void
@@ -2035,33 +2034,8 @@ function onProcessStatusDotResize() {
   )
 }
 
-const PROCESS_REFRESH_DEDUPE_MS = 2000
-let lastProcessRefreshRequestedAt = 0
-
-function requestProcessRefresh() {
-  if (
-    props.running ||
-    props.processLoading ||
-    props.processRefreshing ||
-    (!props.processRequired && !props.processStatus)
-  ) {
-    return
-  }
-  const now = Date.now()
-  // focus 和 click 经常在同一次用户交互里连续触发，做轻量去重避免重复健康检查。
-  if (now - lastProcessRefreshRequestedAt < PROCESS_REFRESH_DEDUPE_MS) return
-  lastProcessRefreshRequestedAt = now
-  emit('refresh-process')
-}
-
 function onContextPreview(item: ChatContextItem) {
   emit('preview-context', item)
-}
-
-function onComposerCardClick(event: MouseEvent) {
-  const target = event.target as HTMLElement | null
-  if (target?.closest('button')) return
-  requestProcessRefresh()
 }
 
 // 抽屉可见文件列表（按 props 顺序）；选中态基于 drawerSelectedPath。
@@ -3877,6 +3851,7 @@ function onCompositionEnd() {
           aria-orientation="horizontal"
           @pointerdown.stop.prevent="startComposerResize"
         />
+      <div class="figma-chat-input-card">
         <textarea
           v-model="localInput"
           class="figma-chat-textarea"
@@ -3884,7 +3859,6 @@ function onCompositionEnd() {
           :placeholder="placeholder || 'Ask the AI agent...'"
           rows="1"
           :disabled="running || !processReady"
-          @focus="requestProcessRefresh"
           @keydown="onKeydown"
           @compositionstart="onCompositionStart"
           @compositionend="onCompositionEnd"

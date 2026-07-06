@@ -25,6 +25,18 @@
   - 只修改 `ReasoningPartGroup.vue`、`ReasoningPartView.vue`、`.oc-reasoning-part*` 样式、包说明和定向时间线测试；不改 Run API、SSE、后端 opencode prompt parts、用户消息附件展示或最终回答样式。
 - Result:
   - `corepack pnpm test packages/agent-chat/tests/opencode-timeline.test.ts packages/agent-chat/tests/user-message-display.test.ts packages/agent-chat/tests/runtime-reducer.test.ts`、`corepack pnpm --filter @test-agent/agent-chat typecheck`、`git diff --check` 通过；浏览器样式读取确认当前回答正文仍为 `.oc-text-part` Markdown 路径。
+### 2026-07-06 - opencode 弱健康检查与前端轮询收敛
+
+- Why:
+  - 页面静置时 `/processes/me`、MCP/LSP 等强状态查询仍高频刷新，后台日志持续输出；需要把常态健康判定改为轻量轮询，降低数据库、manager 强健康和运行态目录压力。
+- What:
+  - 新增 `/api/internal/agent/{agentId}/processes/me/health`，由 `OpencodeProcessStatusQueryService.weakHealth` 只读 Redis manager 快照并直接调用 opencode `/global/health`；跨服务器请求使用公共 `BackendJavaRouteResolver` 和 `BackendHttpForwarder` 按 `linuxServerId` 随机转发目标 Java。
+  - 前端 `/processes/me` 取消定时轮询，登录/刷新获取分配信息后每 10 秒调用弱健康；弱健康不健康、头像打开和初始化完成才复查 `/processes/me`。发送、目录加载和运行态 ready 以弱健康为常态来源，`/processes/me` 返回时覆盖一次当前状态；MCP/LSP 改 5 分钟，VCS 保持 30 秒。
+- How:
+  - 不改数据库、不改 generated SDK、不新增前端直连 opencode；同步 `backend-api`、`shared-types`、HTTP API 文档、前后端 README/PACKAGE，并补后端/前端定向测试。
+- Result:
+  - 后端目标 Maven 测试、前端 backend-api/workbench-utils/FigmaChatPanel Vitest、`@test-agent/agent-web` 与 `@test-agent/backend-api` typecheck 均通过。
+
 ### 2026-07-06 - 编辑器页脚与文件Tab样式交互优化
 
 - Why:

@@ -60,6 +60,8 @@ import type {
   OpencodeRuntimeManagementUserProcessParams,
   OpencodeRuntimeProcess,
   OpencodeProcessStartOperation,
+  UserOpencodeProcessHealth,
+  UserOpencodeProcessHealthRequest,
   PageResponse,
   PlatformUserSummary,
   PersonalWorkspace,
@@ -918,6 +920,8 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         timeoutMs: 120000
       }),
     getMyOpencodeProcess: () => request<UserOpencodeProcess>(agentPath("/processes/me")),
+    getMyOpencodeProcessHealth: (params: UserOpencodeProcessHealthRequest) =>
+      request<UserOpencodeProcessHealth>(agentPath(`/processes/me/health${query(params)}`)),
     initializeMyOpencodeProcess: (operationId?: string) =>
       request<UserOpencodeProcess>(agentPath("/processes/me/initialize"), {
         method: "POST",

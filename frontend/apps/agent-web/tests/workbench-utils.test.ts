@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { MessagePart, PromptPart, Run, RunDiffFile, SessionMessage, SessionTreeMessagesResponse } from "@test-agent/shared-types";
 import {
+  OPENCODE_HEALTH_REFETCH_INTERVAL_MS,
+  OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS,
+  OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS,
+  opencodeAvailabilityFromHealth,
+  opencodeAvailabilityFromProcess,
+  opencodeHealthRequestFromProcess,
   chatStateFromSessionTreeSnapshot,
   dedupeSessionMessages,
   diffFilesFromPayload,
@@ -76,6 +82,99 @@ describe("runEventMatchesRun", () => {
     expect(runEventMatchesRun({ runId: "run_old" }, "run_current", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_old", current)).toBe(false);
     expect(runEventMatchesRun({ runId: "run_current" }, "run_current", { ...current, runId: "run_next" })).toBe(false);
+  });
+});
+
+describe("opencode readiness helpers", () => {
+  it("keeps health, runtime catalog and VCS refresh intervals explicit", () => {
+    expect(OPENCODE_HEALTH_REFETCH_INTERVAL_MS).toBe(10_000);
+    expect(OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS).toBe(300_000);
+    expect(OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS).toBe(30_000);
+  });
+
+  it("builds weak health request only after process assignment is known", () => {
+    expect(
+      opencodeHealthRequestFromProcess({
+        status: "READY",
+        initializable: false,
+        message: "ready",
+        linuxServerId: "server-a",
+        containerId: "ctr_01",
+        port: 4096,
+        checkedAt: "2026-07-06T00:00:00Z"
+      })
+    ).toEqual({ linuxServerId: "server-a", containerId: "ctr_01", port: 4096 });
+
+    expect(
+      opencodeHealthRequestFromProcess({
+        status: "READY",
+        initializable: false,
+        message: "ready",
+        linuxServerId: "server-a",
+        containerId: "ctr_01",
+        checkedAt: "2026-07-06T00:00:00Z"
+      })
+    ).toBeNull();
+
+    expect(
+      opencodeHealthRequestFromProcess({
+        status: "READY",
+        initializable: false,
+        message: "ready",
+        linuxServerId: "server-a",
+        containerId: "ctr_01",
+        port: 0,
+        checkedAt: "2026-07-06T00:00:00Z"
+      })
+    ).toBeNull();
+  });
+
+  it("lets processes/me override readiness when it returns", () => {
+    expect(
+      opencodeAvailabilityFromProcess({
+        status: "READY",
+        initializable: false,
+        message: "ready",
+        checkedAt: "2026-07-06T00:00:00Z"
+      })
+    ).toEqual({ ready: true, source: "process" });
+
+    expect(
+      opencodeAvailabilityFromProcess({
+        status: "UNAVAILABLE",
+        initializable: true,
+        message: "unhealthy",
+        checkedAt: "2026-07-06T00:00:00Z"
+      })
+    ).toEqual({ ready: false, source: "process" });
+  });
+
+  it("uses weak health as the normal readiness source between processes/me refreshes", () => {
+    expect(
+      opencodeAvailabilityFromHealth({
+        healthy: true,
+        status: "HEALTHY",
+        serviceStatus: "RUNNING",
+        linuxServerId: "server-a",
+        containerId: "ctr_01",
+        port: 4096,
+        checkedAt: "2026-07-06T00:00:00Z",
+        message: "ok"
+      })
+    ).toEqual({ ready: true, source: "health" });
+
+    expect(
+      opencodeAvailabilityFromHealth({
+        healthy: false,
+        status: "UNHEALTHY",
+        serviceStatus: "NOT_RUNNING",
+        linuxServerId: "server-a",
+        containerId: "ctr_01",
+        port: 4096,
+        checkedAt: "2026-07-06T00:00:10Z",
+        message: "HTTP 503"
+      })
+    ).toEqual({ ready: false, source: "health" });
   });
 });
 

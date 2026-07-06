@@ -14,6 +14,9 @@ import type {
   Session,
   SessionMessage,
   SessionTreeMessagesResponse,
+  UserOpencodeProcess,
+  UserOpencodeProcessHealth,
+  UserOpencodeProcessHealthRequest,
   Workspace
 } from "@test-agent/shared-types";
 import type { AgentChatRuntimeAction, AgentChatRuntimeState, OpencodeLikeRuntimeStatus } from "@test-agent/agent-chat";
@@ -59,6 +62,50 @@ export function runEventMatchesRun(
   currentRun: Pick<Run, "runId"> | null | undefined
 ): boolean {
   return Boolean(event.runId && subscribedRunId && currentRun?.runId && event.runId === subscribedRunId && event.runId === currentRun.runId);
+}
+
+export const OPENCODE_HEALTH_REFETCH_INTERVAL_MS = 10_000;
+export const OPENCODE_RUNTIME_CAPABILITY_REFETCH_INTERVAL_MS = 300_000;
+export const OPENCODE_VCS_STATUS_REFETCH_INTERVAL_MS = 30_000;
+
+export type OpencodeAvailabilitySource = "process" | "health";
+export type OpencodeAvailabilityState = {
+  ready: boolean;
+  source: OpencodeAvailabilitySource;
+};
+
+/**
+ * 弱健康检查必须基于 /processes/me 返回的分配归属，缺任一字段时不发请求。
+ */
+export function opencodeHealthRequestFromProcess(
+  process: Partial<UserOpencodeProcess> | null | undefined
+): UserOpencodeProcessHealthRequest | null {
+  if (!process?.linuxServerId || !process.containerId || !Number.isInteger(process.port) || (process.port as number) <= 0) {
+    return null;
+  }
+  return {
+    linuxServerId: process.linuxServerId,
+    containerId: process.containerId,
+    port: process.port as number
+  };
+}
+
+/**
+ * /processes/me 是强状态查询；它一旦返回，就覆盖当前前端 readiness。
+ */
+export function opencodeAvailabilityFromProcess(
+  process: Partial<UserOpencodeProcess> | null | undefined
+): OpencodeAvailabilityState {
+  return { ready: process?.status === "READY", source: "process" };
+}
+
+/**
+ * 弱健康检查是常态 readiness 来源；只更新健康态，不改变进程归属。
+ */
+export function opencodeAvailabilityFromHealth(
+  health: Partial<UserOpencodeProcessHealth> | null | undefined
+): OpencodeAvailabilityState {
+  return { ready: Boolean(health?.healthy), source: "health" };
 }
 
 export type RetryDeadlineMap = Record<string, number>;
