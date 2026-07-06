@@ -31,7 +31,8 @@ public class LegacyApiGoneWebFilter implements WebFilter {
             "/api/auth/login",
             "/api/auth/logout",
             "/api/auth/me",
-            "/api/auth/refresh");
+            "/api/auth/refresh",
+            "/api/auth/login-by-unified-auth");
     private static final Set<String> LEGACY_EXACT_PATHS = Set.of(
             "/api/agents",
             "/api/models",
