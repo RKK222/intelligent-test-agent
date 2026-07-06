@@ -4116,3 +4116,19 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - 1. `corepack pnpm test FigmaChatPanel` 单元测试全部通过。
   - 2. `corepack pnpm typecheck` 及 `corepack pnpm lint` 检查全部无报错通过。
+
+### 2026-07-06 - 每次点击文件自动滚动并聚焦到文件预览板块的最后一个文件展示
+
+- Why:
+  - 用户希望在点击文件（包括新文件被打开或激活最后一个文件）时，中间的文件预览板块（Figma 风格 tab 列表）能够直接自动滚动到最后面（最右侧）的最后一个文件展示，并自动聚焦到对应的文件名 tab 上，省去用户手工拖拽/划动横向滚动条去最右边寻找的麻烦。
+- What:
+  - 1. 给 `FigmaEditorArea.vue` 组件中的 `.figma-editor-tabs` 容器添加 `ref="tabsContainer"`，并为 `.figma-editor-tab` 标签元素添加 `tabindex="0"` 和 focus / focus-visible 的精致微光指示 CSS。
+  - 2. 引入 `watch` 和 `nextTick`，监听 `tabs.length`（有新文件打开并追加到末尾时）和 `activePath`（激活 tab 时）。
+  - 3. 在对应的 `watch` 触发时，若有新 tab 加入或是当前激活的是最后一个 tab，在 `nextTick` 中自动将 `tabsContainer` 的 `scrollLeft` 滚动至 `scrollWidth`。
+  - 4. 每次 `activePath` 改变时，在 `nextTick` 中找到当前激活的 tab DOM 元素 `.figma-editor-tab--active` 并执行 `focus()` 让焦点直接聚焦过去。
+  - 5. 更新前端单元测试 `FigmaEditorArea.test.ts`，新增测试用例验证自动滚动与焦点聚焦 (document.activeElement) 的逻辑。
+- How:
+  - 修改 `frontend/apps/agent-web/src/components/FigmaEditorArea.vue` 的 template、script、CSS，以及新增单元测试 `frontend/apps/agent-web/tests/FigmaEditorArea.test.ts`。
+- Result:
+  - 运行 `corepack pnpm test FigmaEditorArea.test.ts --run` 全部通过，所有的聚焦与滚动断言均通过。
+
