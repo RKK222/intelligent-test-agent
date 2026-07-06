@@ -582,6 +582,64 @@ describe("agent-chat runtime reducer", () => {
     expect(completed.messages).toHaveLength(2);
   });
 
+  it("keeps native opencode user file parts on the user message", () => {
+    const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
+      type: "user.submitted",
+      prompt: "what in this",
+      createdAt: "2026-07-06T00:00:00Z"
+    });
+    const withRemoteUser = reduceAgentChatRuntime(submitted, {
+      type: "event",
+      event: event("message.updated", {
+        message: { id: "msg_user_file", role: "user" }
+      })
+    });
+    const withSyntheticReadText = reduceAgentChatRuntime(withRemoteUser, {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_user_file",
+        part: {
+          id: "part_synthetic_read",
+          messageID: "msg_user_file",
+          type: "text",
+          synthetic: true,
+          text: "Called the Read tool with the following input"
+        }
+      })
+    });
+    const withFilePart = reduceAgentChatRuntime(withSyntheticReadText, {
+      type: "event",
+      event: event("message.part.updated", {
+        messageID: "msg_user_file",
+        part: {
+          id: "part_file",
+          messageID: "msg_user_file",
+          type: "file",
+          filename: "CLAUDE.md",
+          mime: "text/plain",
+          url: "data:text/plain;base64,IyBDbGF1ZGU="
+        }
+      })
+    });
+
+    expect(withFilePart.messages).toMatchObject([
+      {
+        role: "user",
+        messageId: "msg_user_file",
+        text: "what in this",
+        parts: [
+          {
+            type: "file",
+            name: "CLAUDE.md",
+            mimeType: "text/plain",
+            url: "data:text/plain;base64,IyBDbGF1ZGU="
+          }
+        ]
+      }
+    ]);
+    expect(withFilePart.messages).toHaveLength(1);
+  });
+
   it("keeps expanded slash command user parts out of the assistant response", () => {
     const submitted = reduceAgentChatRuntime(createInitialAgentChatRuntimeState(), {
       type: "user.submitted",

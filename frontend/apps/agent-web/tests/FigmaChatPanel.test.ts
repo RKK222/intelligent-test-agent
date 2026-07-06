@@ -203,6 +203,43 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.text()).not.toContain("以下是用户添加的工作区上下文");
   });
 
+  it("renders associated workspace contexts from native user message file parts", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "msg_user_parts",
+            role: "user",
+            text: "写了什么内容",
+            parts: [
+              { type: "text", text: "写了什么内容" },
+              {
+                type: "file",
+                path: "src/UserService.java",
+                name: "UserService.java",
+                content: "class UserService {}",
+                source: {
+                  text: "class UserService {}",
+                  startLine: 20,
+                  endLine: 35,
+                  contextType: "selection"
+                }
+              }
+            ],
+            createdAt: "2026-07-06T00:00:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    expect(wrapper.text()).toContain("写了什么内容");
+    expect(wrapper.text()).toContain("选区");
+    expect(wrapper.text()).toContain("UserService.java");
+    expect(wrapper.text()).toContain("L20-35");
+    expect(wrapper.text()).not.toContain("<context");
+  });
+
   it("shows mentionable subagent/all agents when the user types at-sign", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

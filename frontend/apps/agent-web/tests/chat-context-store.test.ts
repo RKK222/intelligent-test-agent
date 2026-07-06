@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import {
   CHAT_CONTEXT_LIMITS,
+  chatContextItemsToPromptParts,
   serializeChatContexts,
   useChatContextStore,
   validateChatSend,
@@ -73,13 +74,48 @@ describe("chat context store", () => {
     expect(store.addFileContext(file({ id: "file_2" }))).toEqual({ ok: false, reason: "该文件已添加" });
   });
 
-  it("validates send input and serializes contexts in stable order", () => {
+  it("validates send input and converts contexts to native file prompt parts", () => {
     const items = [selection(), file({ id: "file_2", path: "docs/api.md", fileName: "api.md" })];
 
     expect(validateChatSend("x".repeat(CHAT_CONTEXT_LIMITS.MAX_USER_INPUT_CHARS + 1), items)).toEqual({
       ok: false,
       reason: "输入内容过长，请精简后再发送"
     });
+
+    expect(chatContextItemsToPromptParts(items)).toEqual([
+      {
+        type: "file",
+        path: "src/App.ts",
+        name: "App.ts",
+        mimeType: "text/plain",
+        content: "const a = 1;",
+        source: {
+          text: "const a = 1;",
+          start: 0,
+          end: "const a = 1;".length,
+          startLine: 3,
+          endLine: 3,
+          contextType: "selection"
+        }
+      },
+      {
+        type: "file",
+        path: "docs/api.md",
+        name: "api.md",
+        mimeType: "text/plain",
+        content: "hello\nworld",
+        source: {
+          text: "hello\nworld",
+          start: 0,
+          end: "hello\nworld".length,
+          contextType: "file"
+        }
+      }
+    ]);
+  });
+
+  it("keeps legacy serialized context format available for history display compatibility", () => {
+    const items = [selection(), file({ id: "file_2", path: "docs/api.md", fileName: "api.md" })];
 
     const prompt = serializeChatContexts("怎么改？", items);
     expect(prompt).toContain("用户问题：\n怎么改？");

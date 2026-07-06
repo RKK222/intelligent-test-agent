@@ -1067,7 +1067,14 @@ export type PromptPart =
       mimeType?: string;
       content?: string;
       url?: string;
-      source?: { start?: number; end?: number; text?: string };
+      source?: {
+        start?: number;
+        end?: number;
+        text?: string;
+        startLine?: number;
+        endLine?: number;
+        contextType?: "selection" | "file" | string;
+      };
     }
   | { type: "agent"; agentId: string; name?: string }
   | { type: "reference"; id: string; label: string; uri?: string; metadata?: Record<string, unknown> };

@@ -1,5 +1,6 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
+import type { PromptPart } from "@test-agent/shared-types";
 
 export const CHAT_CONTEXT_LIMITS = {
   MAX_SELECTION_CHARS: 20_000,
@@ -111,6 +112,41 @@ export function serializeChatContexts(userInput: string, items: ChatContextItem[
 
 function escapeContextAttribute(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+}
+
+export function chatContextItemsToPromptParts(items: ChatContextItem[]): Extract<PromptPart, { type: "file" }>[] {
+  return items.map((item) => {
+    if (item.type === "selection") {
+      return {
+        type: "file",
+        path: item.path,
+        name: item.fileName,
+        mimeType: "text/plain",
+        content: item.text,
+        source: {
+          text: item.text,
+          start: 0,
+          end: item.text.length,
+          startLine: item.startLine,
+          endLine: item.endLine,
+          contextType: "selection"
+        }
+      };
+    }
+    return {
+      type: "file",
+      path: item.path,
+      name: item.fileName,
+      mimeType: "text/plain",
+      content: item.content,
+      source: {
+        text: item.content,
+        start: 0,
+        end: item.content.length,
+        contextType: "file"
+      }
+    };
+  });
 }
 
 export const useChatContextStore = defineStore("chat-context", () => {

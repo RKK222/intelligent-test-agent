@@ -14,7 +14,11 @@ export { buildComposerPromptParts, fileToPromptAttachment } from "./prompt-parts
 export type { ComposerAttachment } from "./prompt-parts";
 export { reduceAgentChatRuntime, createInitialAgentChatRuntimeState, normalizeMessagePart } from "./runtime-reducer";
 export type { AgentChatRuntimeState, AgentChatRuntimeAction } from "./runtime-reducer";
-export { displayTextFromUserPrompt, workspaceContextAttachmentsFromUserPrompt } from "./user-message-display";
+export {
+  displayTextFromUserPrompt,
+  workspaceContextAttachmentsFromPromptParts,
+  workspaceContextAttachmentsFromUserPrompt
+} from "./user-message-display";
 export type { UserPromptWorkspaceContextAttachment } from "./user-message-display";
 export { default as MarkdownView } from "./MarkdownView.vue";
 export type { MarkdownViewProps } from "./MarkdownView.vue";

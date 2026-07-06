@@ -51,8 +51,8 @@ import {
 } from "@test-agent/workbench-shell";
 import { useAuthStore } from "../stores/authStore";
 import {
+  chatContextItemsToPromptParts,
   createContextId,
-  serializeChatContexts,
   useChatContextStore,
   validateChatSend,
   type ChatContextItem
@@ -2695,14 +2695,14 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     feedback.value = { kind: "info", title: "上下文过长", description: sendValidation.reason };
     return;
   }
-  const serializedPrompt = serializeChatContexts(prompt, chatContextStore.items);
+  const chatContextParts = chatContextItemsToPromptParts(chatContextStore.items);
   // 显式上下文附件存在时，不再叠加旧的“当前活动编辑器/选区”隐式 PromptPart，
   // 避免同一选区或整个活动文件在本轮请求中重复进入模型上下文。
   const implicitEditorTab = chatContextStore.items.length === 0 ? activeTab.value : undefined;
   const implicitEditorSelection = chatContextStore.items.length === 0 ? editorSelection.value : undefined;
-  const parts = buildPromptParts(serializedPrompt, implicitEditorTab, attachments, diffContextParts.value, implicitEditorSelection);
+  const parts = buildPromptParts(prompt, implicitEditorTab, attachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
   const displayPrompt = prompt.trim() || promptFromParts(parts);
-  const submitPrompt = serializedPrompt.trim() || displayPrompt;
+  const submitPrompt = prompt.trim() || displayPrompt;
   lastPrompt.value = submitPrompt;
   diffContextParts.value = [];
   dispatchChat({ type: "user.submitted", prompt: displayPrompt, parts });

@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-06 - 工作区上下文改走原生 file parts
+
+- Why:
+  - opencode 原生附件抓包显示用户输入和附件应落在同一个 user message 的 `text` / `file` parts 中；此前工作区上下文附件通过 `<context>` 文本拼接进入 prompt，和原生附件链路不一致。
+- What:
+  - 工作区整文件和 Monaco 选区发送时转换为 `PromptPart.type=file`，选区通过 `source.contextType/startLine/endLine` 保留来源；用户消息展示优先从 user `file` parts 渲染关联文件/选区 chip，旧 `<context>` 文本仅保留历史兼容解析。
+- How:
+  - 复用既有 Run API `parts`、后端 `AgentPromptPart.file` 和 opencode `prompt_async.parts` 链路；不新增后端接口、不改数据库、不直连 opencode server。
+- Result:
+  - 已补充 store、runtime reducer、历史消息恢复、用户消息展示回归测试；验证结果以本次收尾命令为准。
+
 ### 2026-07-06 - 对话界面样式及交互优化美化（TDesign风格）
 
 - Why:

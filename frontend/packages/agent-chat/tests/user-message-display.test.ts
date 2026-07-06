@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { displayTextFromUserPrompt, workspaceContextAttachmentsFromUserPrompt } from "../src/user-message-display";
+import {
+  displayTextFromUserPrompt,
+  workspaceContextAttachmentsFromPromptParts,
+  workspaceContextAttachmentsFromUserPrompt
+} from "../src/user-message-display";
 
 describe("displayTextFromUserPrompt", () => {
   it("hides serialized workspace context from user message display", () => {
@@ -48,6 +52,48 @@ describe("displayTextFromUserPrompt", () => {
         type: "file",
         path: "docs/a&b.md",
         fileName: "a&b.md",
+        lines: undefined
+      }
+    ]);
+  });
+
+  it("extracts associated workspace context metadata from native file prompt parts", () => {
+    expect(
+      workspaceContextAttachmentsFromPromptParts([
+        {
+          type: "text",
+          text: "写了什么内容"
+        },
+        {
+          type: "file",
+          path: "src/UserService.java",
+          name: "UserService.java",
+          content: "class UserService {}",
+          source: {
+            text: "class UserService {}",
+            startLine: 20,
+            endLine: 35,
+            contextType: "selection"
+          }
+        },
+        {
+          type: "file",
+          path: "docs/api.md",
+          name: "api.md",
+          content: "# API"
+        }
+      ])
+    ).toEqual([
+      {
+        type: "selection",
+        path: "src/UserService.java",
+        fileName: "UserService.java",
+        lines: "20-35"
+      },
+      {
+        type: "file",
+        path: "docs/api.md",
+        fileName: "api.md",
         lines: undefined
       }
     ]);

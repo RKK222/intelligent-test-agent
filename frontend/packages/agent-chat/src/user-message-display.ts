@@ -1,3 +1,5 @@
+import type { PromptPart } from "@test-agent/shared-types";
+
 const CONTEXT_PROMPT_PREFIX = "用户问题：";
 const CONTEXT_PROMPT_MARKER = "以下是用户添加的工作区上下文：";
 
@@ -50,6 +52,28 @@ export function workspaceContextAttachmentsFromUserPrompt(text: string): UserPro
     });
   }
   return attachments;
+}
+
+export function workspaceContextAttachmentsFromPromptParts(
+  parts: PromptPart[] | undefined
+): UserPromptWorkspaceContextAttachment[] {
+  return (parts ?? [])
+    .filter((part): part is Extract<PromptPart, { type: "file" }> => part.type === "file")
+    .map((part) => {
+      const path = part.path ?? part.name ?? "attachment";
+      const contextType = part.source?.contextType === "selection" ? "selection" : "file";
+      const startLine = part.source?.startLine;
+      const endLine = part.source?.endLine;
+      return {
+        type: contextType,
+        path,
+        fileName: part.name ?? fileNameFromPath(path),
+        lines:
+          contextType === "selection" && Number.isFinite(startLine) && Number.isFinite(endLine)
+            ? `${startLine}-${endLine}`
+            : undefined
+      };
+    });
 }
 
 function contextAttributes(source: string): Record<string, string> {

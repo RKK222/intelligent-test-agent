@@ -485,10 +485,14 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
   );
   const exactMessage = exactMessageIndex >= 0 ? messages[exactMessageIndex] : undefined;
   if (exactMessage?.role === "user") {
-    const userText = text(raw.text) ?? text(raw.content);
-    return userText === undefined || exactMessage.text
-      ? messages
-      : replaceOrAppendMessage(messages, exactMessageIndex, { ...exactMessage, text: userText });
+    const userText = syntheticTextPart(raw) ? undefined : text(raw.text) ?? text(raw.content);
+    const userPart = promptPartFromUserRaw(raw);
+    const nextParts = userPart ? appendPromptPart(exactMessage.parts, userPart) : exactMessage.parts;
+    const nextText = userText === undefined || exactMessage.text ? exactMessage.text : userText;
+    if (nextText === exactMessage.text && nextParts === exactMessage.parts) {
+      return messages;
+    }
+    return replaceOrAppendMessage(messages, exactMessageIndex, { ...exactMessage, text: nextText, parts: nextParts });
   }
   const delayedUserText = text(raw.text) ?? text(raw.content);
   const delayedUserPartIndex = findUnlinkedUserByText(messages, delayedUserText);
@@ -545,6 +549,66 @@ function upsertPart(messages: AgentMessage[], event: RunEvent, forceNewAssistant
     text: part.type === "text" ? part.text : assistant.text,
     parts
   });
+}
+
+function promptPartFromUserRaw(raw: Record<string, unknown>): PromptPart | undefined {
+  const partType = text(raw.type) ?? text(raw.partType);
+  if (partType === "text" && !syntheticTextPart(raw)) {
+    const value = text(raw.text) ?? text(raw.content);
+    return value ? { type: "text", text: value } : undefined;
+  }
+  if (partType !== "file") {
+    return undefined;
+  }
+  const rawSource = record(raw.source);
+  const source = promptPartSource(rawSource);
+  return {
+    type: "file",
+    path: text(raw.path) ?? text(rawSource?.path),
+    name: text(raw.name) ?? text(raw.filename),
+    mimeType: text(raw.mimeType) ?? text(raw.mime),
+    content: text(raw.content),
+    url: text(raw.url),
+    source
+  };
+}
+
+function promptPartSource(source: Record<string, unknown> | undefined): Extract<PromptPart, { type: "file" }>["source"] | undefined {
+  if (!source) {
+    return undefined;
+  }
+  const nestedText = record(source.text);
+  return {
+    start: number(source.start) ?? number(nestedText?.start),
+    end: number(source.end) ?? number(nestedText?.end),
+    text: text(source.text) ?? text(nestedText?.value),
+    startLine: number(source.startLine),
+    endLine: number(source.endLine),
+    contextType: text(source.contextType),
+    ...(text(source.path) ? { path: text(source.path) } : {})
+  } as Extract<PromptPart, { type: "file" }>["source"];
+}
+
+function appendPromptPart(parts: PromptPart[] | undefined, part: PromptPart): PromptPart[] {
+  const existing = parts ?? [];
+  if (existing.some((item) => promptPartKey(item) === promptPartKey(part))) {
+    return existing;
+  }
+  return [...existing, part];
+}
+
+function promptPartKey(part: PromptPart): string {
+  if (part.type === "file") {
+    return `file:${part.path ?? ""}:${part.name ?? ""}:${part.url ?? ""}:${part.source?.startLine ?? ""}:${part.source?.endLine ?? ""}`;
+  }
+  if (part.type === "text") {
+    return `text:${part.text}`;
+  }
+  return JSON.stringify(part);
+}
+
+function syntheticTextPart(raw: Record<string, unknown>): boolean {
+  return raw.synthetic === true;
 }
 
 function removePart(messages: AgentMessage[], event: RunEvent) {

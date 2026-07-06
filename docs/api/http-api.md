@@ -1840,7 +1840,11 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
   "prompt": "run prompt",
   "parts": [
     { "type": "text", "text": "run prompt" },
-    { "type": "file", "path": "src/App.tsx", "source": { "text": "file content", "start": 0, "end": 12 } },
+    {
+      "type": "file",
+      "path": "src/App.tsx",
+      "source": { "text": "file content", "start": 0, "end": 12, "contextType": "selection", "startLine": 3, "endLine": 8 }
+    },
     { "type": "agent", "agentId": "build" },
     { "type": "reference", "id": "ref_1", "label": "Current issue", "uri": "mcp://issues/1" }
   ],
@@ -1861,7 +1865,7 @@ Run 路由、远端 session 解析和事件订阅完成后，接口立即返回 
 - 旧 `prompt: string` 继续有效；`parts` 缺失时后端按单个 text part 处理。
 - `parts`、`messageId`、`agent`、`model`、`variant`、`mode` 均为可选字段，旧前端不需要改动。
 - `parts` 会下沉为当前 agent runtime 的 prompt parts；`opencode` 实现适配为 `prompt_async` 的 `text/file/agent` parts，`reference` part 会转换为可读 text part。
-- file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。只有没有内联内容或 URL 时，后端才把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。
+- file part 带 `source.text` 或 `content` 时后端生成 `data:` URL；前端图片附件可直接提交 `url: "data:<mime>;base64,..."`。只有没有内联内容或 URL 时，后端才把 workspace 内路径转为 `file://` URL，越出 workspace 的路径返回 `VALIDATION_ERROR`。`source.startLine/endLine/contextType` 是可选前端来源元数据，当前用于工作区选区附件展示，旧客户端和旧后端可忽略。
 - `model` 使用 `providerId/modelId` 字符串格式；未启用托管模型目录时，格式不完整仍保持旧行为，不向 opencode 传 model override。
 - 当后端启用托管模型目录时，前端从 Model 目录接口获取可选模型并仍按 `providerId/modelId` 提交；后端会按当前模型目录校验该期望模型。请求缺失、格式不完整或模型已不在当前目录内时，后端回退到 `defaultModel=true` 的模型，找不到默认项时使用目录首项；目录为空时返回 `VALIDATION_ERROR`，不启动远端 run。企业内默认模型为 `icbc-openai/DeepSeek-V4-Flash-W8A8`。
 - Agent/Model/Variant/Mode 属于运行态选择，不代表 Provider/server/settings 配置；其中 `mode` 当前只保留为平台字段，opencode `PromptInput` 不支持该字段，因此 opencode runtime 不写入 `prompt_async` 请求体。

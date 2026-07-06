@@ -9,12 +9,19 @@ export type UserMessageRowProps = {
 <script setup lang="ts">
 import { computed } from "vue";
 import { FileText, Scissors, User } from "lucide-vue-next";
-import { displayTextFromUserPrompt, workspaceContextAttachmentsFromUserPrompt } from "../../../user-message-display";
+import {
+  displayTextFromUserPrompt,
+  workspaceContextAttachmentsFromPromptParts,
+  workspaceContextAttachmentsFromUserPrompt
+} from "../../../user-message-display";
 import OcCopyButton from "../primitives/OcCopyButton.vue";
 
 const props = defineProps<UserMessageRowProps>();
 const displayText = computed(() => displayTextFromUserPrompt(props.message.text));
-const workspaceContexts = computed(() => workspaceContextAttachmentsFromUserPrompt(props.message.text));
+const workspaceContexts = computed(() => {
+  const partContexts = workspaceContextAttachmentsFromPromptParts(props.message.parts);
+  return partContexts.length ? partContexts : workspaceContextAttachmentsFromUserPrompt(props.message.text);
+});
 </script>
 
 <template>

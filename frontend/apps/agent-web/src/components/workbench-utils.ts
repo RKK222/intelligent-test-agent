@@ -515,6 +515,7 @@ export function messagesFromSessionMessages(messages: SessionMessage[]): AgentMe
         remoteMessageId: message.remoteMessageId,
         role: "user",
         text: message.content,
+        parts: normalizeSessionPromptParts(message),
         createdAt: message.createdAt
       };
     }
@@ -688,6 +689,45 @@ function normalizeSessionMessageParts(message: SessionMessage): MessagePart[] {
       );
     })
     .filter((part): part is MessagePart => part !== null);
+}
+
+function normalizeSessionPromptParts(message: SessionMessage): PromptPart[] {
+  return (message.parts ?? [])
+    .map((part): PromptPart | null => {
+      if (!part || typeof part !== "object") {
+        return null;
+      }
+      const raw = part as unknown as Record<string, unknown>;
+      const partType = text(raw.type);
+      if (partType === "text" && raw.synthetic !== true) {
+        const value = text(raw.text) ?? text(raw.content);
+        return value ? { type: "text", text: value } satisfies PromptPart : null;
+      }
+      if (partType !== "file") {
+        return null;
+      }
+      const source = record(raw.source);
+      const nestedText = record(source?.text);
+      return {
+        type: "file",
+        path: text(raw.path) ?? text(source?.path),
+        name: text(raw.name) ?? text(raw.filename),
+        mimeType: text(raw.mimeType) ?? text(raw.mime),
+        content: text(raw.content),
+        url: text(raw.url),
+        source: source
+          ? {
+              start: number(source.start) ?? number(nestedText?.start),
+              end: number(source.end) ?? number(nestedText?.end),
+              text: text(source.text) ?? text(nestedText?.value),
+              startLine: number(source.startLine),
+              endLine: number(source.endLine),
+              contextType: text(source.contextType)
+            }
+          : undefined
+      } satisfies PromptPart;
+    })
+    .filter((part): part is PromptPart => part !== null);
 }
 
 /**
