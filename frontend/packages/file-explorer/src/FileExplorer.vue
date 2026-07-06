@@ -89,6 +89,13 @@ function fileNameOf(path: string) {
   return path.split("/").pop() || path;
 }
 
+function getStatusLabel(status?: string): string {
+  if (!status) return "M";
+  const s = status.toLowerCase();
+  if (s === "untracked") return "U";
+  return s.charAt(0).toUpperCase();
+}
+
 function fileIconClass(name: string, path: string) {
   return getVsCodeFileIconClass({ name, path, type: "file" });
 }
@@ -198,9 +205,9 @@ function fileIconClass(name: string, path: string) {
           :style="{ paddingLeft: '6px' }"
           @click="emit('openDiff', file.path)"
         >
-          <span :class="cn('ta-file-tree-status', `is-${file.status}`)">{{ file.status }}</span>
+          <span :class="cn('ta-file-tree-status', `is-${file.status}`)">{{ getStatusLabel(file.status) }}</span>
           <FileIcon :entry="{ name: fileNameOf(file.path), path: file.path, type: 'file' }" />
-          <span class="min-w-0 flex-1 truncate">{{ file.path }}</span>
+          <span class="min-w-0 flex-1 truncate" :title="file.path">{{ fileNameOf(file.path) }}</span>
           <span class="ta-file-tree-badge is-added">+{{ file.additions }}</span>
           <span class="ta-file-tree-badge is-deleted">-{{ file.deletions }}</span>
         </button>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type CSSProperties } from 'vue'
 import {
   AlertTriangle,
   ArrowUpRight,
@@ -737,6 +737,12 @@ const emit =
 const collapsedMessages = ref<Record<string, boolean>>({})
 
 const localInput = ref(props.inputValue ?? '')
+const COMPOSER_TEXTAREA_MIN_HEIGHT = 40
+const COMPOSER_TEXTAREA_MAX_HEIGHT = 260
+const composerTextareaHeight = ref(COMPOSER_TEXTAREA_MIN_HEIGHT)
+const isResizingComposer = ref(false)
+let composerResizeStartY = 0
+let composerResizeStartHeight = COMPOSER_TEXTAREA_MIN_HEIGHT
 const dropdownOpen = ref(false)
 const modelSearch = ref('')
 const agentDropdownOpen = ref(false)
@@ -769,7 +775,42 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeDropdown)
+  stopComposerResize()
 })
+
+const composerTextareaStyle = computed<CSSProperties>(() => ({
+  height: `${composerTextareaHeight.value}px`,
+  maxHeight: `${COMPOSER_TEXTAREA_MAX_HEIGHT}px`,
+  resize: 'none'
+}))
+
+function clampComposerTextareaHeight(height: number) {
+  return Math.min(COMPOSER_TEXTAREA_MAX_HEIGHT, Math.max(COMPOSER_TEXTAREA_MIN_HEIGHT, height))
+}
+
+function onComposerResizeMove(event: PointerEvent) {
+  if (!isResizingComposer.value) return
+  const deltaY = composerResizeStartY - event.clientY
+  composerTextareaHeight.value = clampComposerTextareaHeight(composerResizeStartHeight + deltaY)
+}
+
+function stopComposerResize() {
+  if (!isResizingComposer.value) return
+  isResizingComposer.value = false
+  window.removeEventListener('pointermove', onComposerResizeMove)
+  window.removeEventListener('pointerup', stopComposerResize)
+  window.removeEventListener('pointercancel', stopComposerResize)
+}
+
+function startComposerResize(event: PointerEvent) {
+  if (event.button !== 0 && event.pointerType === 'mouse') return
+  isResizingComposer.value = true
+  composerResizeStartY = event.clientY
+  composerResizeStartHeight = composerTextareaHeight.value
+  window.addEventListener('pointermove', onComposerResizeMove)
+  window.addEventListener('pointerup', stopComposerResize)
+  window.addEventListener('pointercancel', stopComposerResize)
+}
 
 const allModels = computed(() => {
   const byValue = new Map<string, any>()
@@ -3824,10 +3865,22 @@ function onCompositionEnd() {
     />
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div v-if="!activeSubagentSessionId" class="figma-chat-composer">
-      <div class="figma-chat-input-card" @click="onComposerCardClick">
+      <div
+        class="figma-chat-input-card"
+        :class="{ 'is-resizing': isResizingComposer }"
+        @click="onComposerCardClick"
+      >
+        <div
+          class="figma-chat-composer-resize-handle"
+          role="separator"
+          aria-label="拖动调整输入框高度"
+          aria-orientation="horizontal"
+          @pointerdown.stop.prevent="startComposerResize"
+        />
         <textarea
           v-model="localInput"
           class="figma-chat-textarea"
+          :style="composerTextareaStyle"
           :placeholder="placeholder || 'Ask the AI agent...'"
           rows="1"
           :disabled="running || !processReady"
@@ -4245,14 +4298,14 @@ function onCompositionEnd() {
                     ]"
                     >{{
                       file.status === 'added'
-                        ? '新增'
+                        ? 'A'
                         : file.status === 'deleted'
-                        ? '删除'
-                        : '修改'
+                        ? 'D'
+                        : 'M'
                     }}</span
                   >
                   <span class="figma-chat-drawer-file-path">{{
-                    file.path
+                    getFileName(file.path)
                   }}</span>
                   <span class="figma-chat-drawer-file-stats">
                     <span v-if="file.additions" class="figma-chat-add"
@@ -6579,6 +6632,7 @@ function onCompositionEnd() {
 
 /* 统一输入卡片：圆角边框容器，textarea + 底部工具行整合在一起 */
 .figma-chat-input-card {
+  position: relative;
   display: flex;
   flex-direction: column;
   border: 1px solid #d4d4d4;
@@ -6589,6 +6643,41 @@ function onCompositionEnd() {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
+.figma-chat-composer-resize-handle {
+  position: absolute;
+  z-index: 2;
+  top: -5px;
+  left: 0;
+  right: 0;
+  height: 10px;
+  cursor: ns-resize;
+  touch-action: none;
+  display: flex;
+  justify-content: center;
+}
+
+.figma-chat-composer-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(0, 0, 0, 0.1);
+  transition: background-color 0.15s ease, width 0.15s ease;
+}
+
+.figma-chat-composer-resize-handle:hover::before,
+.figma-chat-input-card.is-resizing .figma-chat-composer-resize-handle::before {
+  background: rgba(0, 0, 0, 0.3);
+  width: 48px;
+}
+
+.figma-chat-input-card.is-resizing {
+  border-color: #3366ff;
+  box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
 .figma-chat-input-card:focus-within {
   border-color: #3366ff;
   box-shadow: 0 0 0 3px rgba(51, 102, 255, 0.1), 0 2px 8px rgba(0, 0, 0, 0.06);
@@ -6597,7 +6686,7 @@ function onCompositionEnd() {
 .figma-chat-textarea {
   width: 100%;
   min-height: 40px;
-  max-height: 140px;
+  max-height: 260px;
   padding: 8px 12px 4px;
   font-family: 'Inter', 'PingFang SC', sans-serif;
   font-size: 14px;
@@ -6608,6 +6697,7 @@ function onCompositionEnd() {
   resize: none;
   outline: none;
   box-sizing: border-box;
+  overflow-y: auto;
 }
 
 .figma-chat-textarea:disabled {

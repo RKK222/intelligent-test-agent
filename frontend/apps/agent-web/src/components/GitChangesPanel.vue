@@ -881,6 +881,19 @@ function getBadgeTone(status: string) {
   return "warning"; // modified, etc.
 }
 
+function getFileName(path: string): string {
+  if (!path) return "";
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).pop() || path;
+}
+
+function getStatusLabel(status?: string): string {
+  if (!status) return "M";
+  const s = status.toLowerCase();
+  if (s === "untracked") return "U";
+  return s.charAt(0).toUpperCase();
+}
+
 defineExpose({
   refreshChanges
 });
@@ -986,7 +999,7 @@ defineExpose({
                 @click="openWorkspaceConflict(file.path)"
               >
                 <Badge tone="danger" class="mr-1 py-0 px-1 text-[9px] uppercase">CONFLICT</Badge>
-                <span class="git-file-name" :title="file.path">{{ file.path }}</span>
+                <span class="git-file-name" :title="file.path">{{ getFileName(file.path) }}</span>
                 <span v-if="file.rawStatus" class="git-raw-status ml-1">{{ file.rawStatus }}</span>
                 <span v-if="file.additions" class="git-additions ml-1">+{{ file.additions }}</span>
                 <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
@@ -1000,8 +1013,8 @@ defineExpose({
                 :aria-label="file.path"
                 @click="handleOpenFileDiff(file.path, 'vcs', undefined, file)"
               >
-                <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
-                <span class="git-file-name" :title="file.path">{{ file.path }}</span>
+                <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
+                <span class="git-file-name" :title="file.path">{{ getFileName(file.path) }}</span>
                 <span v-if="file.additions" class="git-additions ml-1">+{{ file.additions }}</span>
                 <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
                 
@@ -1047,10 +1060,10 @@ defineExpose({
                 :aria-label="file.path"
                 @click="handleOpenFileDiff(file.path, 'agent', file.scope)"
               >
-                <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
+                <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
                 <span class="git-file-name" :title="file.path">
                   <span class="git-scope-label">[{{ file.scope === 'PUBLIC' ? '公共' : '应用级' }}]</span>
-                  {{ file.path }}
+                  {{ getFileName(file.path) }}
                 </span>
                 
                 <button
@@ -1106,8 +1119,8 @@ defineExpose({
                 :aria-label="file.path"
                 @click="handleOpenFileDiff(file.path, 'vcs', undefined, file)"
               >
-                <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
-                <span class="git-file-name" :title="file.path">{{ file.path }}</span>
+                <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
+                <span class="git-file-name" :title="file.path">{{ getFileName(file.path) }}</span>
                 <span v-if="file.additions" class="git-additions ml-1">+{{ file.additions }}</span>
                 <span v-if="file.deletions" class="git-deletions ml-1">-{{ file.deletions }}</span>
                 
@@ -1154,10 +1167,10 @@ defineExpose({
                 :aria-label="file.path"
                 @click="handleOpenFileDiff(file.path, 'agent', file.scope)"
               >
-                <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ file.status || 'M' }}</Badge>
+                <Badge :tone="getBadgeTone(file.status)" class="mr-1 py-0 px-1 text-[9px] uppercase">{{ getStatusLabel(file.status) }}</Badge>
                 <span class="git-file-name" :title="file.path">
                   <span class="git-scope-label">[{{ file.scope === 'PUBLIC' ? '公共' : '应用级' }}]</span>
-                  {{ file.path }}
+                  {{ getFileName(file.path) }}
                 </span>
                 
                 <button

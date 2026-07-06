@@ -171,6 +171,29 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("remove-chat-context")).toEqual([["ctx_1"]]);
   });
 
+  it("resizes the composer textarea by dragging the top edge", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      }
+    });
+
+    const textarea = wrapper.get("textarea");
+    const handle = wrapper.get(".figma-chat-composer-resize-handle");
+
+    expect(textarea.classes()).toContain("figma-chat-textarea");
+    expect(handle.attributes("aria-label")).toBe("拖动调整输入框高度");
+    expect(getComputedStyle(textarea.element).resize).toBe("none");
+    expect(getComputedStyle(textarea.element).maxHeight).toBe("260px");
+
+    handle.element.dispatchEvent(new MouseEvent("pointerdown", { button: 0, clientY: 240, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("pointermove", { clientY: 180 }));
+    window.dispatchEvent(new MouseEvent("pointerup", { clientY: 180 }));
+
+    expect((textarea.element as HTMLTextAreaElement).style.height).toBe("100px");
+  });
+
   it("does not expose serialized workspace contexts in user message bubbles", () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

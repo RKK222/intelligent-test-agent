@@ -2,12 +2,25 @@
 
 ## Entries
 
+### 2026-07-06 - 优化 Diff 文件列表展示及聊天高度拉伸手柄美化
+
+- Why:
+  - 1. 用户要求优化 Diff 区域文件列表展示：将状态（modified, untracked, deleted, added）缩写为首字母，隐藏具体冗长路径仅展示文件名，鼠标悬浮时提供全路径 tooltip，以提升信息密度并保持界面简洁整齐。
+  - 2. 用户反馈聊天卡片的输入卡片高度拉伸手柄样式太丑（默认会显示横跨整行宽度的亮蓝色条，过于突兀）。
+- What:
+  - 1. 对 GitChangesPanel.vue、DiffViewer.vue、DiffSummaryRow.vue、FileExplorer.vue、AgentCard.vue 和 FigmaChatPanel.vue 多个文件列表进行统一重构，通过 getStatusLabel 与 getFileName（或 fileNameOf）将状态转为首字母大写（如 M, U, D, A），路径切为 basename，并加上 :title="file.path" 保证鼠标 hover 可看全路径。
+  - 2. 对 FigmaChatPanel.vue 的 .figma-chat-composer-resize-handle 拖拽手柄样式进行重塑，移除了原来突兀的整行亮蓝色细条，改用居中对齐、大小 36px * 4px、圆角 2px 且更淡雅的半透明灰色（rgba(0,0,0,0.1)）小药丸拉伸手柄；并在 hover 和拖拽时带有微观过渡动画（宽度由 36px 延伸至 48px，颜色加深为 rgba(0,0,0,0.3)）。
+- How:
+  - 仅限前端 Vue 组件结构微调及 CSS 优化，不改动任何后端 API、DTO、数据库结构、或者打包部署脚本。
+- Result:
+  - corepack pnpm typecheck 与 corepack pnpm lint 在 frontend 目录下顺利执行通过，0 编译错误，0 格式/类型警告。
+
 ### 2026-07-06 - 收紧思考状态展开渲染
 
 - Why:
   - opencode reasoning 展开时首次挂载 Markdown 渲染器会触发动态加载和高亮处理，体感打开慢；同时思考过程不应抢占最终回答的字号和视觉重量。
 - What:
-  - `agent-chat` 的 opencode-like reasoning 展开详情改为紧凑纯文本渲染，字号压到 `--oc-text-xs`，触发区高度和行高同步收紧；最终回答 `TextPartView` / `.oc-text-part` 仍保持原 Markdown 渲染路径和字号。
+  - `agent-chat` 的 opencode-like reasoning 展开详情改为紧凑纯文本渲染，字号压到 10px，触发区高度和行高同步收紧；对 `.oc-reasoning-part` 内可能残留的 Markdown 思考详情也增加同作用域字号兜底；最终回答 `TextPartView` / `.oc-text-part` 仍保持原 Markdown 渲染路径和字号。
 - How:
   - 只修改 `ReasoningPartGroup.vue`、`ReasoningPartView.vue`、`.oc-reasoning-part*` 样式、包说明和定向时间线测试；不改 Run API、SSE、后端 opencode prompt parts、用户消息附件展示或最终回答样式。
 - Result:

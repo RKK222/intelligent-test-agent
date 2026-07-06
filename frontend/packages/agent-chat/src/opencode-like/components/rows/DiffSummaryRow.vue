@@ -18,6 +18,13 @@ const emit = defineEmits<{
 }>();
 
 const expanded = ref(false);
+
+function getFileName(path: string): string {
+  if (!path) return "";
+  const normalized = path.replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).pop() || path;
+}
+
 const lineTotals = computed(() =>
   props.files.reduce(
     (totals, file) => ({
@@ -85,7 +92,7 @@ onBeforeUnmount(clearTotalsBumpTimer);
         class="oc-diff-file is-clickable"
         @click="emit('openFile', file.path)"
       >
-        <span class="oc-diff-file__path" :title="file.path">{{ formatDisplayPath(file.path) ?? file.path }}</span>
+        <span class="oc-diff-file__path" :title="file.path">{{ getFileName(file.path) }}</span>
         <span class="oc-diff-line is-add">+{{ file.additions }}</span>
         <span class="oc-diff-line is-del">-{{ file.deletions }}</span>
       </div>
