@@ -4368,3 +4368,14 @@ bash /tmp/test-api-after-restart.sh
   - 保留前端客户端自动拼接 `/api` 的约定，文档明确 `VITE_TEST_AGENT_API_BASE_URL` 不要追加 `/api`；Java 的 `SYS_DATA_ROOT_DIR` 通用参数需要配置为 `/data/testagent/data`，并与 compose 传给 manager 的同名环境变量一致。
 - Result:
   - `go test ./internal/config`、compose config、脚本语法检查、`package-release.sh --help` 和 `git diff --check` 通过；compose 解析结果显示数据和程序挂载、manager 环境变量均指向 `/data/testagent`。
+
+### 2026-07-06 - 企业内部署模板补齐 ICBC OpenAI 配置
+
+- Why:
+  - 部署 env 中需要参考桌面 openclaw 企业配置补齐 `icbc-openai` 模型地址和 token 变量，避免只配置前端 API 地址后 Java 仍缺少企业模型运行参数。
+- What:
+  - 在 `deploy/internal/env.example` 增加 `TEST_AGENT_MODEL_CATALOG_SOURCE=internal`、`TEST_AGENT_ICBC_OPENAI_BASE_URL`、`TEST_AGENT_ICBC_OPENAI_TOKEN_ENV`、`ICBC_OPENAI_AUTH_TOKEN` 占位符、`TEST_AGENT_ICBC_OPENAI_AUTH_MODE=bearer` 和 openclaw 默认模型 `Qwen3.6-35B-A3B`；部署 README 同步 Java 启动示例和必改项。
+- How:
+  - 只保留本项目实际读取的变量；openclaw 的 `MIMOAGENT_ICBC_OPENAI_UCID/ENVIRONMENT` 没有本项目消费路径，未写入部署模板。真实 token 不入库，仅保留占位符。
+- Result:
+  - compose config、部署脚本语法检查和 `git diff --check` 通过。

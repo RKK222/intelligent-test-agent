@@ -37,6 +37,13 @@ TEST_AGENT_OPENCODE_MANAGER_TOKEN=<same-manager-token>
 TEST_AGENT_CORS_ALLOWED_ORIGINS=http://<gateway-host>
 TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true
 TEST_AGENT_SERVER_BROADCAST_ENABLED=true
+TEST_AGENT_MODEL_CATALOG_SOURCE=internal
+TEST_AGENT_INTERNAL_DEFAULT_MODEL=Qwen3.6-35B-A3B
+TEST_AGENT_ICBC_OPENAI_BASE_URL=http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1
+TEST_AGENT_ICBC_OPENAI_TOKEN_ENV=ICBC_OPENAI_AUTH_TOKEN
+ICBC_OPENAI_AUTH_TOKEN=<icbc-openai-token>
+TEST_AGENT_ICBC_OPENAI_AUTH_MODE=bearer
+TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME=ucid
 ```
 
 Java 的 `SYS_DATA_ROOT_DIR` 需要与 worker 挂载的 `TEST_AGENT_DATA_ROOT` 对齐，企业内默认是 `/data/testagent/data`，以便 worker 读取 `.serverid` 和 `.serverhost`。如果数据库通用参数仍是 Linux 默认 `/data/.testagent`，部署时需要在系统管理通用参数中把 Linux 平台 `SYS_DATA_ROOT_DIR` 改为 `/data/testagent/data`。如果后续扩成多服务器部署，每台服务器仍按“一台服务器一套 Nginx、前端、Java、worker”的方式独立配置。
@@ -168,6 +175,7 @@ cp deploy/internal/env.example deploy/internal/.env
 编辑 `deploy/internal/.env`，至少修改：
 
 - `VITE_TEST_AGENT_API_BASE_URL`，填企业 API base URL，例如 `http://test-agent.example.com`；不要追加 `/api`
+- `ICBC_OPENAI_AUTH_TOKEN`，填企业内 `icbc-openai` 访问 token；不要提交真实 token
 - `TEST_AGENT_OPENCODE_MANAGER_TOKEN`
 - `TEST_AGENT_DATA_ROOT`
 - `TEST_AGENT_PROGRAM_ROOT`
