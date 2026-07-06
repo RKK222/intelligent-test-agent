@@ -2,6 +2,23 @@
 
 ## Entries
 
+### 2026-07-06 - 对话界面样式及交互优化美化（TDesign风格）
+
+- Why:
+  - 1. 上下文中添加文件的卡片样式和外框略显粗糙；
+  - 2. 智能体输出内容中的复制按钮定位在右上角，有时会与大段文本内容发生遮挡重合；
+  - 3. 用户消息气泡和智能体消息风格不统一，需要按照 TDesign Chat 的高级美学来统一视觉风格；
+  - 4. 用户输入的消息也应该配备复制按钮，并能带入包含可能携带的附件上下文和部分文本在内的完整内容。
+- What:
+  - 1. 调整了 ChatContextAttachmentList.vue 和 ChatContextAttachmentCard.vue 的样式，移除粗糙的外框，降低卡片高度为 26px，去除 "文件/选区" 文字标签，增加 hover 时主色蓝与浅蓝背景的联动，更加紧凑精美。
+  - 2. 在 UserMessageRow.vue 中引入并挂载 OcCopyButton，复制时绑定为 message.text 完整输入以保留附件及部分文本。
+  - 3. 重构 rows.css 中用户消息气泡背景为 TDesign 经典主色蓝（#0052d9），文字变白，气泡阴影加深；附件 chip 变更为淡蓝色背景（#ecf2fe）和主色蓝字（#0052d9），统一色系。
+  - 4. 彻底解决重叠：在 rows.css 的用户气泡与 parts.css 的智能体气泡中加了 36px 右安全边距（padding-right: 36px），防止绝对定位的复制按钮和文本重合。
+- How:
+  - 完全由前端 CSS 和局部的展示 Vue 组件承载，未修改任何后端 API、DTO、数据库结构或环境配置文件。
+- Result:
+  - 前端编译和打包 pnpm build (vue-tsc --noEmit && vite build) 顺利执行通过。
+
 ### 2026-07-06 - 修复上下文附件发送后展示
 
 - Why:

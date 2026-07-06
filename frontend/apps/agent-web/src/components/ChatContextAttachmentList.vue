@@ -53,9 +53,9 @@ const summaryText = computed(() =>
   gap: 6px;
   margin-bottom: 8px;
   padding: 6px 8px;
-  border: 1px solid var(--ta-border, #e5e7eb);
-  border-radius: 10px;
-  background: #fff;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  border-radius: 8px;
+  background: #fafafa;
 }
 
 .chat-context-list-head {

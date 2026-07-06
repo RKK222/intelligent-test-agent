@@ -41,7 +41,6 @@ function onCardKeydown(event: KeyboardEvent) {
     @keydown="onCardKeydown"
   >
     <component :is="item.type === 'selection' ? Scissors : FileText" class="chat-context-card-icon" />
-    <span class="chat-context-card-type">{{ item.type === 'selection' ? '选区' : '文件' }}</span>
     <span class="chat-context-card-name">{{ item.fileName }}</span>
     <span class="chat-context-card-meta">{{ getContextItemLineText(item) }} · {{ formatNumber(item.charCount) }} 字</span>
     <button
@@ -61,20 +60,22 @@ function onCardKeydown(event: KeyboardEvent) {
   align-items: center;
   min-width: 0;
   max-width: 100%;
-  height: 30px;
+  height: 26px;
   gap: 6px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #fafafa;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: #f3f3f3;
   color: var(--ta-chat-text, #1f2937);
-  padding: 0 4px 0 9px;
+  padding: 0 4px 0 8px;
   font-size: 12px;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .chat-context-card:hover {
-  border-color: #c7d2fe;
-  background: #fff;
+  border-color: #0052d9;
+  background: #ecf2fe;
+  color: #0052d9;
 }
 
 .chat-context-card.is-warning {
@@ -108,6 +109,11 @@ function onCardKeydown(event: KeyboardEvent) {
   color: var(--ta-chat-muted, #64748b);
 }
 
+.chat-context-card:hover .chat-context-card-meta {
+  color: #0052d9;
+  opacity: 0.8;
+}
+
 .chat-context-card-remove {
   display: inline-flex;
   align-items: center;
@@ -119,10 +125,11 @@ function onCardKeydown(event: KeyboardEvent) {
   background: transparent;
   color: var(--ta-chat-muted, #64748b);
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .chat-context-card-remove:hover {
-  background: #eef2f7;
-  color: #111827;
+  background: rgba(0, 82, 217, 0.1);
+  color: #0052d9;
 }
 </style>

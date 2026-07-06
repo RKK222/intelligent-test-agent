@@ -10,6 +10,7 @@ export type UserMessageRowProps = {
 import { computed } from "vue";
 import { FileText, Scissors, User } from "lucide-vue-next";
 import { displayTextFromUserPrompt, workspaceContextAttachmentsFromUserPrompt } from "../../../user-message-display";
+import OcCopyButton from "../primitives/OcCopyButton.vue";
 
 const props = defineProps<UserMessageRowProps>();
 const displayText = computed(() => displayTextFromUserPrompt(props.message.text));
@@ -25,6 +26,9 @@ const workspaceContexts = computed(() => workspaceContextAttachmentsFromUserProm
   >
     <div class="oc-user-message__content">
       <div class="oc-user-message__bubble">
+        <div class="oc-user-message__copy">
+          <OcCopyButton :value="message.text" />
+        </div>
         <p>{{ displayText }}</p>
       </div>
       <div v-if="workspaceContexts.length" class="oc-user-message__contexts" aria-label="本轮关联的工作区上下文">
