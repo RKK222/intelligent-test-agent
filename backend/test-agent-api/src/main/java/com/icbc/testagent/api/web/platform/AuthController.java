@@ -66,6 +66,30 @@ public class AuthController {
     }
 
     /**
+     * 通过统一认证号登录（AAM 跳转后使用）。成功后返回 Token，Token 在 Redis 中保存 1 天。
+     */
+    @PostMapping("/api/auth/login-by-unified-auth")
+    public ResponseEntity<ApiResponse<AuthDtos.LoginResponse>> loginByUnifiedAuth(
+            @Valid @RequestBody AuthDtos.UnifiedAuthLoginRequest request,
+            ServerWebExchange exchange) {
+        String traceId = traceIdFrom(exchange);
+
+        AuthPrincipal principal = authApplicationService.loginByUnifiedAuthId(
+                request.unifiedAuthId(),
+                ipFrom(exchange),
+                userAgentFrom(exchange));
+
+        AuthDtos.LoginResponse response = new AuthDtos.LoginResponse(
+                principal.token(),
+                principal.userId().value(),
+                principal.username(),
+                principal.unifiedAuthId(),
+                principal.roles());
+
+        return ResponseEntity.ok(ApiResponse.ok(response, traceId));
+    }
+
+    /**
      * 用户登出。从 Redis 中删除当前 Token。
      */
     @PostMapping("/api/auth/logout")

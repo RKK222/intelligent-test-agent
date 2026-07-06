@@ -27,6 +27,18 @@ public final class AuthDtos {
     }
 
     /**
+     * 统一认证登录请求体（通过 AAM 跳转后登录）。
+     */
+    public record UnifiedAuthLoginRequest(String unifiedAuthId) {
+
+        public UnifiedAuthLoginRequest {
+            if (unifiedAuthId == null || unifiedAuthId.isBlank()) {
+                throw new IllegalArgumentException("统一认证号不能为空");
+            }
+        }
+    }
+
+    /**
      * 登录成功响应体。
      */
     public record LoginResponse(String token, String userId, String username, String unifiedAuthId, java.util.List<String> roles) {

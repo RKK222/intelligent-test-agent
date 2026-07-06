@@ -65,4 +65,9 @@ public class UserDomainService {
         return userRepository.findByUsername(username)
                 .orElseThrow(() -> new PlatformException(ErrorCode.UNAUTHENTICATED, "用户名或密码错误"));
     }
+
+    public User findByUnifiedAuthId(String unifiedAuthId) {
+        return userRepository.findByUnifiedAuthId(unifiedAuthId)
+                .orElseThrow(() -> new PlatformException(ErrorCode.UNAUTHENTICATED, "用户不存在"));
+    }
 }

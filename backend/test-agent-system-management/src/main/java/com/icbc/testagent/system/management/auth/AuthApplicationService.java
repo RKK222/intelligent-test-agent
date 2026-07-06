@@ -98,6 +98,39 @@ public class AuthApplicationService {
     }
 
     /**
+     * 通过统一认证号登录：验证用户存在后生成 Token，保存登录日志。
+     *
+     * @param unifiedAuthId 统一认证号（来自 AAM）
+     * @param ipAddress     请求 IP
+     * @param userAgent     浏览器 User-Agent
+     * @return 认证成功后的 {@link AuthPrincipal}，包含 Token 和用户基本信息
+     * @throws com.icbc.testagent.common.error.PlatformException 用户不存在或账户已停用时
+     */
+    public AuthPrincipal loginByUnifiedAuthId(String unifiedAuthId, String ipAddress, String userAgent) {
+        User user = userDomainService.findByUnifiedAuthId(unifiedAuthId);
+
+        if (!user.canLogin()) {
+            throw new com.icbc.testagent.common.error.PlatformException(
+                    com.icbc.testagent.common.error.ErrorCode.FORBIDDEN, "用户账户已停用");
+        }
+
+        String token = UUID.randomUUID().toString().replace("-", "");
+        Instant now = Instant.now();
+        AuthPrincipal principal = new AuthPrincipal(
+                token, user.userId(), user.username(), user.unifiedAuthId(),
+                loadRoleValues(user),
+                now, now.plus(TOKEN_TTL));
+
+        tokenStore.save(principal);
+
+        UserLoginLog successLog = UserLoginLog.success(
+                RuntimeIdGenerator.logId(), user.userId(), ipAddress, userAgent);
+        loginLogRepository.save(successLog);
+
+        return principal;
+    }
+
+    /**
      * 刷新 Token：根据已有认证主体创建新 Token，旧 Token 失效。
      *
      * @param oldPrincipal 当前有效的认证主体
