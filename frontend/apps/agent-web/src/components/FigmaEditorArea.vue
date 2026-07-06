@@ -231,7 +231,7 @@ watch(
       :markdown-preview-mode="markdownPreviewMode"
       show-save
       @save="emit('save')"
-      @update:markdown-preview-mode="(mode) => { emit('update:markdownPreviewMode', mode); emit('update:markdownPreview', mode !== 'off'); }"
+      @update:markdown-preview-mode="(mode) => emit('update:markdownPreviewMode', mode)"
       @select-version="(payload) => emit('select-version', payload)"
       @load-versions="(templateId) => emit('load-versions', templateId)"
       @create-version="(payload) => emit('create-version', payload)"

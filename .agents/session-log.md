@@ -35,14 +35,14 @@
   - 5. 用户要求文件 Tab 页中的图标改为与工作空间文件树一致的分类型 Material 文件图标。
 - What:
   - 1. `WorkbenchFooter` 页脚右侧新增 MD 预览图标按钮，放在 Save 按钮左侧，仅在 `showPreviewButton`（`activeIsMarkdown`）为 true 时渲染。
-  - 2. `WorkbenchFooter` 增加单双击识别定时器逻辑：单击切换为 `full` 整体预览或 `off` 关闭，双击切换为 `split` 分上下屏或 `off` 关闭；`CodeEditor` 支持受控 `previewMode` (`off` | `full` | `split`) 渲染。
+  - 2. `WorkbenchFooter` 增加单双击识别定时器逻辑：单击切换为 `full` 整体预览或 `off` 关闭，双击切换为 `split` 分上下屏或 `off` 关闭；修复了层级传递中 `update:markdownPreview` 覆盖 `markdownPreviewMode` 导致的双击分屏无法保持的漏洞；`CodeEditor` 支持受控 `previewMode` (`off` | `full` | `split`) 渲染。
   - 3. `WorkbenchFooter` 中的预览与保存按钮去除了 `<span>` 文字标签，并统一定制为 26x26 方形精美图标按钮。
   - 4. `WorkbenchFooter` 将“写入路径：”标签文案修改为“路径：”。
   - 5. `FigmaEditorArea` 使用 `@test-agent/file-explorer` 的 `FileIcon` 替换原 Tab 页通用静态文件图标，实现按扩展名/文件名与工作区文件树同步渲染彩色 Material 文件图标。
 - How:
   - 仅修改前端 `FigmaEditorArea.vue`、`WorkbenchFooter.vue`、`CodeEditor.vue`、`AgentWorkbench.vue` 及对应 Vitest 单元测试，不改动任何后端 API、数据库或环境配置文件。
 - Result:
-  - Vitest 定向测试 `packages/editor/tests/CodeEditor.preview.test.ts` 全部 6 个用例通过。
+  - Vitest 定向测试 `packages/editor/tests/CodeEditor.preview.test.ts` 与 `apps/agent-web/tests/WorkbenchFooter.test.ts` 全部 10 个用例通过。
 
 ### 2026-07-06 - 修复所有文件偶发性白板不显示内容问题
 

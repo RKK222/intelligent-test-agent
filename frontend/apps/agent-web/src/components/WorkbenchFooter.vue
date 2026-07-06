@@ -334,7 +334,7 @@ function handlePreviewClick() {
     } else {
       emit("update:markdownPreviewMode", "off");
     }
-  }, 220);
+  }, 250);
 }
 
 function handlePreviewDblClick() {
@@ -560,8 +560,8 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
         :title="markdownPreviewMode === 'split' ? '分屏预览 (双击分上下)' : markdownPreviewMode === 'full' ? '整体预览 (双击分上下)' : '预览 (单击整体/双击分上下)'"
         :aria-pressed="markdownPreviewMode !== 'off'"
         data-testid="footer-markdown-preview"
-        @click="handlePreviewClick"
-        @dblclick="handlePreviewDblClick"
+        @click.stop="handlePreviewClick"
+        @dblclick.stop="handlePreviewDblClick"
       >
         <component :is="markdownPreviewMode !== 'off' ? EyeOff : Eye" class="ta-workbench-footer-icon" />
       </button>
