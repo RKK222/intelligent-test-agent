@@ -2,7 +2,7 @@
 import { ElConfigProvider } from "element-plus";
 import { zhCnWithArabicMonths } from "./utils/locale";
 import { useAuthStore } from "./stores/authStore";
-import { watch } from "vue";
+import { watch, onMounted } from "vue";
 import { RouterView, useRouter } from "vue-router";
 import { jumpAam } from "./utils/aamLogin";
 
@@ -11,18 +11,18 @@ const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icb
 const authStore = useAuthStore();
 const router = useRouter();
 
+onMounted(() => {
+  const TOKEN_KEY = "test-agent.auth.token";
+  const storedToken = localStorage.getItem(TOKEN_KEY);
+  if (storedToken && !authStore.token) {
+    authStore.saveToken(storedToken);
+  }
+});
+
 watch(
-  () => router.currentRoute.value.fullPath,
-  () => {
-    const urlToken = router.currentRoute.value.query.token;
-    if (urlToken && typeof urlToken === "string") {
-      authStore.saveToken(urlToken);
-      const { token: _, userId: __, ...restQuery } = router.currentRoute.value.query;
-      router.replace({ path: router.currentRoute.value.path, query: restQuery });
-      return;
-    }
-    const token = authStore.token;
-    if (!token && router.currentRoute.value.name !== "login") {
+  () => authStore.token,
+  (newToken) => {
+    if (!newToken && router.currentRoute.value.name !== "login") {
       jumpAam(window.location.href, AAM_BASE_URL);
     }
   }
