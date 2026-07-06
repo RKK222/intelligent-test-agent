@@ -79,7 +79,7 @@ class RuntimeControllerTest {
                 .build();
 
         client.post()
-                .uri("/api/runs")
+                .uri("/api/internal/platform/opencode-runtime/runs")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
@@ -172,7 +172,7 @@ class RuntimeControllerTest {
                 .build();
 
         client.post()
-                .uri("/api/runs")
+                .uri("/api/internal/platform/opencode-runtime/runs")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
@@ -207,7 +207,7 @@ class RuntimeControllerTest {
                 .build();
 
         client.post()
-                .uri("/api/runs")
+                .uri("/api/internal/platform/opencode-runtime/runs")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
@@ -233,7 +233,7 @@ class RuntimeControllerTest {
                 .build();
 
         client.post()
-                .uri("/api/runs")
+                .uri("/api/internal/platform/opencode-runtime/runs")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
@@ -263,7 +263,7 @@ class RuntimeControllerTest {
                 .build();
 
         client.post()
-                .uri("/api/runs")
+                .uri("/api/internal/platform/opencode-runtime/runs")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
@@ -409,7 +409,7 @@ class RuntimeControllerTest {
                 .build();
 
         client.get()
-                .uri("/api/runs/run_1234567890abcdef/diff")
+                .uri("/api/internal/platform/opencode-runtime/runs/run_1234567890abcdef/diff")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -418,7 +418,7 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.files[0].additions").isEqualTo(2);
 
         client.post()
-                .uri("/api/runs/run_1234567890abcdef/diff/accept")
+                .uri("/api/internal/platform/opencode-runtime/runs/run_1234567890abcdef/diff/accept")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -427,7 +427,7 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.status").isEqualTo("accepted");
 
         client.post()
-                .uri("/api/runs/run_1234567890abcdef/diff/reject")
+                .uri("/api/internal/platform/opencode-runtime/runs/run_1234567890abcdef/diff/reject")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -452,7 +452,7 @@ class RuntimeControllerTest {
                 .build();
 
         client.get()
-                .uri("/api/runs/run_1234567890abcdef/events?lastEventId=7")
+                .uri("/api/internal/platform/opencode-runtime/runs/run_1234567890abcdef/events?lastEventId=7")
                 .exchange()
                 .expectStatus().isOk();
 
@@ -536,7 +536,7 @@ class RuntimeControllerTest {
                 .build();
 
         List<RunEventSsePayload> payloads = client.get()
-                .uri("/api/runs/run_1234567890abcdef/events")
+                .uri("/api/internal/platform/opencode-runtime/runs/run_1234567890abcdef/events")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -699,7 +699,7 @@ class RuntimeControllerTest {
                 .build();
 
         client.get()
-                .uri("/api/sessions?q=demo&page=1&size=20")
+                .uri("/api/internal/platform/opencode-runtime/sessions?q=demo&page=1&size=20")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -708,7 +708,7 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.items[0].pinned").isEqualTo(true);
 
         client.patch()
-                .uri("/api/sessions/ses_1234567890abcdef")
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
@@ -721,7 +721,7 @@ class RuntimeControllerTest {
                 .jsonPath("$.data.pinned").isEqualTo(false);
 
         client.delete()
-                .uri("/api/sessions/ses_1234567890abcdef")
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -766,7 +766,7 @@ class RuntimeControllerTest {
                 .build();
 
         client.get()
-                .uri("/api/sessions/ses_1234567890abcdef/messages?page=1&size=20")
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/messages?page=1&size=20")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -790,7 +790,7 @@ class RuntimeControllerTest {
                 .build();
 
         client.get()
-                .uri("/api/sessions/ses_1234567890abcdef/messages?page=1&size=20&refresh=false")
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/messages?page=1&size=20&refresh=false")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -829,7 +829,7 @@ class RuntimeControllerTest {
                 .build();
 
         client.get()
-                .uri("/api/sessions/ses_1234567890abcdef/active-run")
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/active-run")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()

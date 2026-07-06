@@ -78,7 +78,6 @@ public class RunController {
      * 启动一次运行，支持 prompt 字符串和 Phase 11 prompt parts 两种输入形态。
      */
     @PostMapping({
-            "/api/runs",
             "/api/internal/platform/opencode-runtime/runs",
             "/api/internal/agent/{agentId}/runs"
     })
@@ -97,7 +96,6 @@ public class RunController {
      * 查询运行详情，当前只做 runId 边界转换并委托应用层。
      */
     @GetMapping({
-            "/api/runs/{runId}",
             "/api/internal/platform/opencode-runtime/runs/{runId}",
             "/api/internal/agent/{agentId}/runs/{runId}"
     })
@@ -112,7 +110,6 @@ public class RunController {
      * 取消运行，traceId 用于记录取消事件和后续排障。
      */
     @PostMapping({
-            "/api/runs/{runId}/cancel",
             "/api/internal/platform/opencode-runtime/runs/{runId}/cancel",
             "/api/internal/agent/{agentId}/runs/{runId}/cancel"
     })
@@ -130,7 +127,6 @@ public class RunController {
      * 读取运行 diff，diff 来源和 fallback 逻辑由 RunDiffApplicationService 封装。
      */
     @GetMapping({
-            "/api/runs/{runId}/diff",
             "/api/internal/platform/opencode-runtime/runs/{runId}/diff",
             "/api/internal/agent/{agentId}/runs/{runId}/diff"
     })
@@ -148,7 +144,6 @@ public class RunController {
      * 接受运行产生的 diff，并把动作结果包装为统一响应。
      */
     @PostMapping({
-            "/api/runs/{runId}/diff/accept",
             "/api/internal/platform/opencode-runtime/runs/{runId}/diff/accept",
             "/api/internal/agent/{agentId}/runs/{runId}/diff/accept"
     })
@@ -166,7 +161,6 @@ public class RunController {
      * 拒绝运行产生的 diff，并保留与 accept 相同的响应结构。
      */
     @PostMapping({
-            "/api/runs/{runId}/diff/reject",
             "/api/internal/platform/opencode-runtime/runs/{runId}/diff/reject",
             "/api/internal/agent/{agentId}/runs/{runId}/diff/reject"
     })
@@ -185,7 +179,6 @@ public class RunController {
      */
     @GetMapping(
             value = {
-                    "/api/runs/{runId}/events",
                     "/api/internal/platform/opencode-runtime/runs/{runId}/events",
                     "/api/internal/agent/{agentId}/runs/{runId}/events"
             },
@@ -219,8 +212,7 @@ public class RunController {
      */
     @GetMapping({
             "/api/internal/agent/{agentId}/runs/{runId}/session-tree/messages",
-            "/api/internal/platform/opencode-runtime/runs/{runId}/session-tree/messages",
-            "/api/runs/{runId}/session-tree/messages"
+            "/api/internal/platform/opencode-runtime/runs/{runId}/session-tree/messages"
     })
     public Mono<ApiResponse<RuntimeDtos.RunSessionTreeMessagesResponse>> getSessionTreeMessages(
             @PathVariable(name = "agentId", required = false) String agentId,

@@ -15,7 +15,7 @@ class RuntimeSecurityConfigTest {
 
         var source = config.corsConfigurationSource();
         var exchange = MockServerWebExchange.from(MockServerHttpRequest
-                .options("/api/sessions")
+                .options("/api/internal/platform/opencode-runtime/sessions")
                 .header("Origin", "http://127.0.0.1:4187")
                 .header("Access-Control-Request-Method", "POST"));
 
@@ -30,7 +30,7 @@ class RuntimeSecurityConfigTest {
 
         org.springframework.web.cors.reactive.CorsWebFilter filter = config.corsWebFilter();
         var exchange = MockServerWebExchange.from(MockServerHttpRequest
-                .options("http://127.0.0.1:8080/api/sessions")
+                .options("http://127.0.0.1:8080/api/internal/platform/opencode-runtime/sessions")
                 .header("Origin", "http://127.0.0.1:4187")
                 .header("Access-Control-Request-Method", "POST"));
 

@@ -448,31 +448,6 @@ describe("backend-api", () => {
       "http://api/api/internal/platform/opencode-runtime/management/linux-servers/10.8.0.12/backend-metrics"
     );
 
-    fetcher.mockResolvedValueOnce(
-      new Response(
-        JSON.stringify({
-          success: true,
-          data: {
-            generatedAt: "2026-06-24T00:00:00Z",
-            linuxServerId: "10.8.0.12",
-            backendProcessId: "bjp_1234567890abcdef",
-            from: "2026-06-22T00:00:00Z",
-            to: "2026-06-24T00:00:00Z",
-            samples: [{ sampledAt: "2026-06-24T00:00:00Z", jvmThreadsLive: 42 }]
-          }
-        }),
-        { status: 200 }
-      )
-    );
-
-    await expect(client.getOpencodeRuntimeBackendProcessMetrics("bjp_1234567890abcdef")).resolves.toMatchObject({
-      linuxServerId: "10.8.0.12",
-      backendProcessId: "bjp_1234567890abcdef",
-      samples: [{ jvmThreadsLive: 42 }]
-    });
-    expect(fetcher.mock.calls[2]?.[0]).toBe(
-      "http://api/api/internal/platform/opencode-runtime/management/backend-processes/bjp_1234567890abcdef/metrics"
-    );
   });
 
   it("maps opencode runtime managed process actions through platform URL", async () => {
@@ -994,7 +969,10 @@ describe("backend-api", () => {
       { agentId: "build", name: "Build", description: "Run tests" }
     ]);
 
-    expect(fetcher).toHaveBeenCalledWith("http://api/api/internal/agent/opencode/api/agent?workspaceId=wrk_1234567890abcdef", expect.any(Object));
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/opencode-runtime/agents?workspaceId=wrk_1234567890abcdef",
+      expect.any(Object)
+    );
   });
 
   it("lists runtime agents with caller cancellation and local timeout options", async () => {
@@ -1012,7 +990,10 @@ describe("backend-api", () => {
     const request = client.listAgents("wrk_1234567890abcdef", { signal: controller.signal, timeoutMs: 8000 });
 
     await Promise.resolve();
-    expect(fetcher).toHaveBeenCalledWith("http://api/api/internal/agent/opencode/api/agent?workspaceId=wrk_1234567890abcdef", expect.any(Object));
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/opencode-runtime/agents?workspaceId=wrk_1234567890abcdef",
+      expect.any(Object)
+    );
     const init = fetcher.mock.calls[0]?.[1] as RequestInit & { timeoutMs?: number };
     expect(init.timeoutMs).toBeUndefined();
     let assertionError: unknown;
@@ -1083,7 +1064,7 @@ describe("backend-api", () => {
     await client.replySessionPermission("ses_1234567890abcdef", "per_123", { decision: "once" });
 
     expect(fetcher).toHaveBeenCalledWith(
-      "http://api/api/internal/agent/opencode/permission/per_123/reply?sessionId=ses_1234567890abcdef",
+      "http://api/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/permissions/per_123/reply",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ decision: "once" })
@@ -1103,7 +1084,7 @@ describe("backend-api", () => {
     ]);
 
     expect(fetcher).toHaveBeenCalledWith(
-      "http://api/api/internal/agent/opencode/experimental/tool/ids?workspaceId=wrk_1234567890abcdef",
+      "http://api/api/internal/platform/opencode-runtime/mcp/tools?workspaceId=wrk_1234567890abcdef",
       expect.any(Object)
     );
   });
@@ -1125,7 +1106,10 @@ describe("backend-api", () => {
       items: [{ messageId: "msg_1", content: "hello" }]
     });
 
-    expect(fetcher).toHaveBeenCalledWith("http://api/api/sessions/ses_1/messages?page=1&size=100&refresh=false", expect.any(Object));
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/opencode-runtime/sessions/ses_1/messages?page=1&size=100&refresh=false",
+      expect.any(Object)
+    );
   });
 
   it("reads session tree messages through the agent-scoped history API", async () => {
@@ -1173,7 +1157,10 @@ describe("backend-api", () => {
 
     await expect(client.getActiveRun("ses_1")).resolves.toMatchObject({ runId: "run_1", status: "RUNNING" });
 
-    expect(fetcher).toHaveBeenCalledWith("http://api/api/sessions/ses_1/active-run", expect.any(Object));
+    expect(fetcher).toHaveBeenCalledWith(
+      "http://api/api/internal/platform/opencode-runtime/sessions/ses_1/active-run",
+      expect.any(Object)
+    );
   });
 
   it("uses platform session management APIs without direct opencode URLs", async () => {
@@ -1208,10 +1195,10 @@ describe("backend-api", () => {
     await client.updateSession("ses_1", { title: "Renamed", pinned: false });
     await client.deleteSession("ses_1");
 
-    expect(fetcher.mock.calls[0]?.[0]).toBe("http://api/api/sessions?page=1&size=20&q=pin");
-    expect(fetcher.mock.calls[1]?.[0]).toBe("http://api/api/sessions/ses_1");
+    expect(fetcher.mock.calls[0]?.[0]).toBe("http://api/api/internal/platform/opencode-runtime/sessions?page=1&size=20&q=pin");
+    expect(fetcher.mock.calls[1]?.[0]).toBe("http://api/api/internal/platform/opencode-runtime/sessions/ses_1");
     expect(fetcher.mock.calls[1]?.[1]).toEqual(expect.objectContaining({ method: "PATCH", body: JSON.stringify({ title: "Renamed", pinned: false }) }));
-    expect(fetcher.mock.calls[2]?.[0]).toBe("http://api/api/sessions/ses_1");
+    expect(fetcher.mock.calls[2]?.[0]).toBe("http://api/api/internal/platform/opencode-runtime/sessions/ses_1");
     expect(fetcher.mock.calls[2]?.[1]).toEqual(expect.objectContaining({ method: "DELETE" }));
   });
 
@@ -1242,7 +1229,7 @@ describe("backend-api", () => {
           data: {
             ticket: "pty_123",
             expiresAt: "2026-06-19T13:00:00Z",
-            webSocketUrl: "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_123"
+            webSocketUrl: "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_123"
           }
         }),
         { status: 200 }
@@ -1260,11 +1247,11 @@ describe("backend-api", () => {
     ).resolves.toEqual({
       ticket: "pty_123",
       expiresAt: "2026-06-19T13:00:00Z",
-      webSocketUrl: "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_123"
+      webSocketUrl: "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_123"
     });
 
     expect(fetcher).toHaveBeenCalledWith(
-      "http://api/api/sessions/ses_1234567890abcdef/terminal/tickets",
+      "http://api/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/tickets",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ workspaceId: "wrk_1234567890abcdef", cwd: "packages/app", cols: 120, rows: 32 })
@@ -1325,7 +1312,7 @@ describe("backend-api", () => {
     ]);
 
     expect(fetcher.mock.calls.map((call) => call[0])).toEqual([
-      "http://api/api/workspaces/wrk_1234567890abcdef/file-ws-route",
+      "http://api/api/internal/platform/workspace-management/workspaces/wrk_1234567890abcdef/file-ws-route",
       "http://10.8.0.12:8080/api/internal/platform/workspace-management/file-ws/tickets"
     ]);
     expect(sockets[0]?.url).toBe("ws://10.8.0.12:8080/api/internal/platform/workspace-management/file/ws?ticket=wft_1234567890abcdef");

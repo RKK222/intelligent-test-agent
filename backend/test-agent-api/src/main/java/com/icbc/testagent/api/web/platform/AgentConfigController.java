@@ -8,12 +8,8 @@ import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.domain.auth.AuthPrincipal;
 import com.icbc.testagent.domain.dictionary.Dictionary;
-import com.icbc.testagent.domain.user.UserId;
 import com.icbc.testagent.workspace.AgentConfigApplicationService;
 import com.icbc.testagent.workspace.AgentConfigResponses;
-import com.icbc.testagent.workspace.FileContentResponse;
-import com.icbc.testagent.workspace.FileTreeEntryResponse;
-import jakarta.validation.Valid;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -21,7 +17,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -149,45 +144,6 @@ public class AgentConfigController {
         return ApiResponse.ok(fileRoutingService.route(request), RuntimeApiSupport.traceId(exchange));
     }
 
-    @GetMapping("/public/files")
-    public ApiResponse<List<FileTreeEntryResponse>> listPublicAgentConfigFiles(
-            @RequestParam(required = false) String path,
-            @RequestParam(required = false) String worktreeId,
-            ServerWebExchange exchange) {
-        AuthWebSupport.getAuthPrincipal(exchange);
-        var target = routingService.forwardTargetForPublicWorktree(worktreeId);
-        if (target.isPresent()) {
-            throw fileWebSocketRequired(target.get());
-        }
-        return ApiResponse.ok(service.listPublicAgentFiles(path, worktreeId), RuntimeApiSupport.traceId(exchange));
-    }
-
-    @GetMapping("/public/files/content")
-    public ApiResponse<FileContentResponse> readPublicAgentConfigFile(
-            @RequestParam String path,
-            @RequestParam(required = false) String worktreeId,
-            ServerWebExchange exchange) {
-        AuthWebSupport.getAuthPrincipal(exchange);
-        var target = routingService.forwardTargetForPublicWorktree(worktreeId);
-        if (target.isPresent()) {
-            throw fileWebSocketRequired(target.get());
-        }
-        return ApiResponse.ok(service.readPublicAgentFile(path, worktreeId), RuntimeApiSupport.traceId(exchange));
-    }
-
-    @PutMapping("/public/files/content")
-    public ApiResponse<Void> writePublicAgentConfigFile(
-            @Valid @RequestBody AgentConfigDtos.FileContentRequest request,
-            ServerWebExchange exchange) {
-        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
-        var target = routingService.forwardTargetForPublicWorktree(request.worktreeId());
-        if (target.isPresent()) {
-            throw fileWebSocketRequired(target.get());
-        }
-        service.writePublicAgentFile(request.path(), request.content(), request.worktreeId());
-        return ApiResponse.ok(null, RuntimeApiSupport.traceId(exchange));
-    }
-
     @PostMapping("/public/worktrees")
     public ApiResponse<Object> createPublicWorktree(
             @RequestBody AgentConfigDtos.WorktreeRequest request,
@@ -300,36 +256,6 @@ public class AgentConfigController {
                 RuntimeApiSupport.traceId(exchange)));
     }
 
-    @GetMapping("/workspaces/{workspaceId}/files")
-    public ApiResponse<List<FileTreeEntryResponse>> listWorkspaceFiles(
-            @PathVariable String workspaceId,
-            @RequestParam(required = false) String path,
-            @RequestParam(required = false) String worktreeId,
-            ServerWebExchange exchange) {
-        AuthWebSupport.getAuthPrincipal(exchange);
-        return ApiResponse.ok(service.listWorkspaceAgentFiles(workspaceId, path, worktreeId), RuntimeApiSupport.traceId(exchange));
-    }
-
-    @GetMapping("/workspaces/{workspaceId}/files/content")
-    public ApiResponse<FileContentResponse> readWorkspaceFile(
-            @PathVariable String workspaceId,
-            @RequestParam String path,
-            @RequestParam(required = false) String worktreeId,
-            ServerWebExchange exchange) {
-        AuthWebSupport.getAuthPrincipal(exchange);
-        return ApiResponse.ok(service.readWorkspaceAgentFile(workspaceId, path, worktreeId), RuntimeApiSupport.traceId(exchange));
-    }
-
-    @PutMapping("/workspaces/{workspaceId}/files/content")
-    public ApiResponse<Void> writeWorkspaceFile(
-            @PathVariable String workspaceId,
-            @RequestBody AgentConfigDtos.FileContentRequest request,
-            ServerWebExchange exchange) {
-        AuthWebSupport.getAuthPrincipal(exchange);
-        service.writeWorkspaceAgentFile(workspaceId, request.path(), request.content(), request.worktreeId());
-        return ApiResponse.ok(null, RuntimeApiSupport.traceId(exchange));
-    }
-
     @PostMapping("/workspaces/{workspaceId}/worktrees")
     public ApiResponse<Object> createWorkspaceWorktree(
             @PathVariable String workspaceId,
@@ -427,10 +353,4 @@ public class AgentConfigController {
         return ApiResponse.ok(data, RuntimeApiSupport.traceId(exchange));
     }
 
-    private PlatformException fileWebSocketRequired(String linuxServerId) {
-        return new PlatformException(
-                ErrorCode.CONFLICT,
-                "Agent 配置文件操作请使用文件 WebSocket",
-                Map.of("linuxServerId", linuxServerId, "webSocketRequired", true));
-    }
 }

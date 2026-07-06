@@ -38,7 +38,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询可用 agent，兼容项目自有 API 和内部平台 API。
      */
     @GetMapping({
-            "/api/agents",
             "/api/internal/platform/opencode-runtime/agents",
     })
     public Mono<ApiResponse<Object>> listAgents(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
@@ -49,7 +48,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询模型列表，workspaceId 可选以支持默认运行节点。
      */
     @GetMapping({
-            "/api/models",
             "/api/internal/platform/opencode-runtime/models",
     })
     public Mono<ApiResponse<Object>> listModels(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
@@ -60,7 +58,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询 provider 列表，返回体保持 opencode 原始结构。
      */
     @GetMapping({
-            "/api/providers",
             "/api/internal/platform/opencode-runtime/providers",
     })
     public Mono<ApiResponse<Object>> listProviders(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
@@ -71,7 +68,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询命令列表，用于 Web IDE 命令面板。
      */
     @GetMapping({
-            "/api/commands",
             "/api/internal/platform/opencode-runtime/commands",
     })
     public Mono<ApiResponse<Object>> listCommands(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
@@ -82,7 +78,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询引用列表，透传 opencode reference API。
      */
     @GetMapping({
-            "/api/references",
             "/api/internal/platform/opencode-runtime/references",
     })
     public Mono<ApiResponse<Object>> listReferences(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
@@ -93,7 +88,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询 runtime 健康状态，供前端兼容 opencode Web App status 请求。
      */
     @GetMapping({
-            "/api/status",
             "/api/internal/platform/opencode-runtime/status",
     })
     public Mono<ApiResponse<Object>> runtimeStatus(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
@@ -104,7 +98,6 @@ public class PlatformOpencodeRuntimeController {
      * 列出文件系统目录，路径解析和 workspace 路由由应用服务负责。
      */
     @GetMapping({
-            "/api/fs/list",
             "/api/internal/platform/opencode-runtime/fs/list",
     })
     public Mono<ApiResponse<Object>> fsList(
@@ -118,7 +111,6 @@ public class PlatformOpencodeRuntimeController {
      * 通过 opencode 文件搜索接口查找文件。
      */
     @GetMapping({
-            "/api/fs/find",
             "/api/internal/platform/opencode-runtime/fs/find",
     })
     public Mono<ApiResponse<Object>> fsFind(
@@ -132,7 +124,6 @@ public class PlatformOpencodeRuntimeController {
      * 读取文件内容，必须经后端代理而不是前端直连 opencode。
      */
     @GetMapping({
-            "/api/fs/read",
             "/api/internal/platform/opencode-runtime/fs/read",
     })
     public Mono<ApiResponse<Object>> fsRead(
@@ -146,7 +137,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询版本控制状态，返回 opencode runtime 原始响应。
      */
     @GetMapping({
-            "/api/vcs/status",
             "/api/internal/platform/opencode-runtime/vcs/status",
     })
     public Mono<ApiResponse<Object>> vcsStatus(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
@@ -157,7 +147,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询版本控制 diff，mode/context 只做透传不在 Controller 中解释。
      */
     @GetMapping({
-            "/api/vcs/diff",
             "/api/internal/platform/opencode-runtime/vcs/diff",
     })
     public Mono<ApiResponse<Object>> vcsDiff(
@@ -172,7 +161,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询 LSP 状态，供前端判断语言服务可用性。
      */
     @GetMapping({
-            "/api/lsp/status",
             "/api/internal/platform/opencode-runtime/lsp/status",
     })
     public Mono<ApiResponse<Object>> lspStatus(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
@@ -183,7 +171,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询 MCP 服务状态。
      */
     @GetMapping({
-            "/api/mcp/status",
             "/api/internal/platform/opencode-runtime/mcp/status",
     })
     public Mono<ApiResponse<Object>> mcpStatus(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
@@ -194,7 +181,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询 MCP 资源列表，兼容 opencode experimental resource 路径。
      */
     @GetMapping({
-            "/api/mcp/resources",
             "/api/internal/platform/opencode-runtime/mcp/resources",
     })
     public Mono<ApiResponse<Object>> mcpResources(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
@@ -205,7 +191,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询 MCP 工具列表，provider/model 参数用于 opencode runtime 侧过滤。
      */
     @GetMapping({
-            "/api/mcp/tools",
             "/api/internal/platform/opencode-runtime/mcp/tools",
     })
     public Mono<ApiResponse<Object>> mcpTools(
@@ -220,7 +205,6 @@ public class PlatformOpencodeRuntimeController {
      * 读取 opencode 配置，前端只访问平台代理路径。
      */
     @GetMapping({
-            "/api/config",
             "/api/internal/platform/opencode-runtime/config",
     })
     public Mono<ApiResponse<Object>> getConfig(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
@@ -231,7 +215,6 @@ public class PlatformOpencodeRuntimeController {
      * 更新 opencode 配置，响应仍由统一 ApiResponse 包装。
      */
     @PatchMapping({
-            "/api/config",
             "/api/internal/platform/opencode-runtime/config",
     })
     public Mono<ApiResponse<Object>> updateConfig(
@@ -245,7 +228,6 @@ public class PlatformOpencodeRuntimeController {
      * 触发 opencode 全局 dispose，供设置页重载运行态。
      */
     @PostMapping({
-            "/api/global/dispose",
             "/api/internal/platform/opencode-runtime/global/dispose",
     })
     public Mono<ApiResponse<Object>> disposeGlobal(ServerWebExchange exchange) {
@@ -256,7 +238,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询 provider auth 状态。
      */
     @GetMapping({
-            "/api/provider/auth",
             "/api/internal/platform/opencode-runtime/provider/auth",
     })
     public Mono<ApiResponse<Object>> listProviderAuth(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
@@ -267,7 +248,6 @@ public class PlatformOpencodeRuntimeController {
      * 发起 provider OAuth。
      */
     @PostMapping({
-            "/api/provider/{providerId}/oauth/authorize",
             "/api/internal/platform/opencode-runtime/provider/{providerId}/oauth/authorize",
     })
     public Mono<ApiResponse<Object>> authorizeProviderOAuth(
@@ -281,7 +261,6 @@ public class PlatformOpencodeRuntimeController {
      * 完成 provider OAuth 回调。
      */
     @PostMapping({
-            "/api/provider/{providerId}/oauth/callback",
             "/api/internal/platform/opencode-runtime/provider/{providerId}/oauth/callback",
     })
     public Mono<ApiResponse<Object>> completeProviderOAuth(
@@ -295,7 +274,6 @@ public class PlatformOpencodeRuntimeController {
      * 写入 provider auth secret，secret 仅透传给运行态。
      */
     @PutMapping({
-            "/api/auth/{providerId}",
             "/api/internal/platform/opencode-runtime/auth/{providerId}",
     })
     public Mono<ApiResponse<Object>> setProviderAuth(
@@ -309,7 +287,6 @@ public class PlatformOpencodeRuntimeController {
      * 删除 provider auth secret。
      */
     @DeleteMapping({
-            "/api/auth/{providerId}",
             "/api/internal/platform/opencode-runtime/auth/{providerId}",
     })
     public Mono<ApiResponse<Object>> removeProviderAuth(@PathVariable String providerId, ServerWebExchange exchange) {
@@ -320,7 +297,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询 experimental worktree。
      */
     @GetMapping({
-            "/api/worktrees",
             "/api/internal/platform/opencode-runtime/worktrees",
     })
     public Mono<ApiResponse<Object>> listWorktrees(@RequestParam(required = false) String workspaceId, ServerWebExchange exchange) {
@@ -331,7 +307,6 @@ public class PlatformOpencodeRuntimeController {
      * 创建 experimental worktree。
      */
     @PostMapping({
-            "/api/worktrees",
             "/api/internal/platform/opencode-runtime/worktrees",
     })
     public Mono<ApiResponse<Object>> createWorktree(
@@ -344,7 +319,6 @@ public class PlatformOpencodeRuntimeController {
      * 删除 experimental worktree。
      */
     @DeleteMapping({
-            "/api/worktrees",
             "/api/internal/platform/opencode-runtime/worktrees",
     })
     public Mono<ApiResponse<Object>> removeWorktree(
@@ -357,7 +331,6 @@ public class PlatformOpencodeRuntimeController {
      * 重置 experimental worktree。
      */
     @PostMapping({
-            "/api/worktrees/reset",
             "/api/internal/platform/opencode-runtime/worktrees/reset",
     })
     public Mono<ApiResponse<Object>> resetWorktree(
@@ -370,7 +343,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询会话子会话列表，支撑 Web IDE 的会话树。
      */
     @GetMapping({
-            "/api/sessions/{sessionId}/children",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/children",
     })
     public Mono<ApiResponse<Object>> sessionChildren(@PathVariable String sessionId, ServerWebExchange exchange) {
@@ -381,7 +353,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询会话 todo 状态，保持与 opencode session todo API 一致。
      */
     @GetMapping({
-            "/api/sessions/{sessionId}/todo",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/todo",
     })
     public Mono<ApiResponse<Object>> sessionTodo(@PathVariable String sessionId, ServerWebExchange exchange) {
@@ -392,7 +363,6 @@ public class PlatformOpencodeRuntimeController {
      * 查询会话 diff，messageId 可选用于定位特定消息产生的变更。
      */
     @GetMapping({
-            "/api/sessions/{sessionId}/diff",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/diff",
     })
     public Mono<ApiResponse<Object>> sessionDiff(
@@ -406,7 +376,6 @@ public class PlatformOpencodeRuntimeController {
      * 中止 opencode 会话当前执行。
      */
     @PostMapping({
-            "/api/sessions/{sessionId}/abort",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/abort",
     })
     public Mono<ApiResponse<Object>> abortSession(@PathVariable String sessionId, ServerWebExchange exchange) {
@@ -417,7 +386,6 @@ public class PlatformOpencodeRuntimeController {
      * fork 会话，body 原样交给运行态应用服务适配 opencode。
      */
     @PostMapping({
-            "/api/sessions/{sessionId}/fork",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/fork",
     })
     public Mono<ApiResponse<Object>> forkSession(
@@ -431,7 +399,6 @@ public class PlatformOpencodeRuntimeController {
      * 压缩会话上下文，对外仍使用统一 ApiResponse。
      */
     @PostMapping({
-            "/api/sessions/{sessionId}/compact",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/compact",
     })
     public Mono<ApiResponse<Object>> compactSession(
@@ -445,7 +412,6 @@ public class PlatformOpencodeRuntimeController {
      * 回滚会话变更，body 中的 part/message 信息由应用层转换。
      */
     @PostMapping({
-            "/api/sessions/{sessionId}/revert",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/revert",
     })
     public Mono<ApiResponse<Object>> revertSession(
@@ -459,7 +425,6 @@ public class PlatformOpencodeRuntimeController {
      * 撤销回滚操作，维持与 revert 对称的兼容路径。
      */
     @PostMapping({
-            "/api/sessions/{sessionId}/unrevert",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/unrevert",
     })
     public Mono<ApiResponse<Object>> unrevertSession(
@@ -473,7 +438,6 @@ public class PlatformOpencodeRuntimeController {
      * 向会话发送命令消息，具体请求体由 runtime service 规范化。
      */
     @PostMapping({
-            "/api/sessions/{sessionId}/command",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/command",
     })
     public Mono<ApiResponse<Object>> commandSession(
@@ -487,7 +451,6 @@ public class PlatformOpencodeRuntimeController {
      * 向会话发送 shell 命令，仍通过后端代理执行安全边界控制。
      */
     @PostMapping({
-            "/api/sessions/{sessionId}/shell",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/shell",
     })
     public Mono<ApiResponse<Object>> shellSession(
@@ -501,7 +464,6 @@ public class PlatformOpencodeRuntimeController {
      * 创建会话分享链接。
      */
     @PostMapping({
-            "/api/sessions/{sessionId}/share",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/share",
     })
     public Mono<ApiResponse<Object>> shareSession(@PathVariable String sessionId, ServerWebExchange exchange) {
@@ -512,7 +474,6 @@ public class PlatformOpencodeRuntimeController {
      * 取消会话分享。
      */
     @DeleteMapping({
-            "/api/sessions/{sessionId}/share",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/share",
     })
     public Mono<ApiResponse<Object>> unshareSession(@PathVariable String sessionId, ServerWebExchange exchange) {
@@ -523,7 +484,6 @@ public class PlatformOpencodeRuntimeController {
      * 列出会话待处理权限请求。
      */
     @GetMapping({
-            "/api/sessions/{sessionId}/permissions",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/permissions"
     })
     public Mono<ApiResponse<Object>> listPermissions(@PathVariable String sessionId, ServerWebExchange exchange) {
@@ -534,7 +494,6 @@ public class PlatformOpencodeRuntimeController {
      * 回复权限请求，decision 等字段由应用层生成 opencode 兼容请求体。
      */
     @PostMapping({
-            "/api/sessions/{sessionId}/permissions/{requestId}/reply",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/permissions/{requestId}/reply"
     })
     public Mono<ApiResponse<Object>> replyPermission(
@@ -549,7 +508,6 @@ public class PlatformOpencodeRuntimeController {
      * 列出会话待处理问题请求。
      */
     @GetMapping({
-            "/api/sessions/{sessionId}/questions",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions"
     })
     public Mono<ApiResponse<Object>> listQuestions(@PathVariable String sessionId, ServerWebExchange exchange) {
@@ -560,7 +518,6 @@ public class PlatformOpencodeRuntimeController {
      * 回复问题请求，保留统一 traceId 以便关联运行态日志。
      */
     @PostMapping({
-            "/api/sessions/{sessionId}/questions/{requestId}/reply",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reply"
     })
     public Mono<ApiResponse<Object>> replyQuestion(
@@ -575,7 +532,6 @@ public class PlatformOpencodeRuntimeController {
      * 拒绝问题请求。
      */
     @PostMapping({
-            "/api/sessions/{sessionId}/questions/{requestId}/reject",
             "/api/internal/platform/opencode-runtime/sessions/{sessionId}/questions/{requestId}/reject"
     })
     public Mono<ApiResponse<Object>> rejectQuestion(
@@ -639,7 +595,6 @@ public class PlatformOpencodeRuntimeController {
      * 发起 MCP auth。
      */
     @PostMapping({
-            "/api/mcp/{name}/auth",
             "/api/internal/platform/opencode-runtime/mcp/{name}/auth",
     })
     public Mono<ApiResponse<Object>> startMcpAuth(
@@ -653,7 +608,6 @@ public class PlatformOpencodeRuntimeController {
      * 完成 MCP auth callback。
      */
     @PostMapping({
-            "/api/mcp/{name}/auth/callback",
             "/api/internal/platform/opencode-runtime/mcp/{name}/auth/callback",
     })
     public Mono<ApiResponse<Object>> completeMcpAuth(
@@ -667,7 +621,6 @@ public class PlatformOpencodeRuntimeController {
      * 执行 MCP auth authenticate。
      */
     @PostMapping({
-            "/api/mcp/{name}/auth/authenticate",
             "/api/internal/platform/opencode-runtime/mcp/{name}/auth/authenticate",
     })
     public Mono<ApiResponse<Object>> authenticateMcp(
@@ -681,7 +634,6 @@ public class PlatformOpencodeRuntimeController {
      * 删除 MCP auth。
      */
     @DeleteMapping({
-            "/api/mcp/{name}/auth",
             "/api/internal/platform/opencode-runtime/mcp/{name}/auth",
     })
     public Mono<ApiResponse<Object>> removeMcpAuth(@PathVariable String name, ServerWebExchange exchange) {

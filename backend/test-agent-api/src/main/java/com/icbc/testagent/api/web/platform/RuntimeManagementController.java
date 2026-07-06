@@ -7,7 +7,6 @@ import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
 import com.icbc.testagent.common.pagination.PageRequest;
-import com.icbc.testagent.domain.opencodeprocess.BackendProcessId;
 import com.icbc.testagent.domain.dictionary.Dictionary;
 import com.icbc.testagent.domain.opencodeprocess.LinuxServerId;
 import com.icbc.testagent.domain.opencodeprocess.OpencodeContainerId;
@@ -180,31 +179,6 @@ public class RuntimeManagementController {
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
-    /**
-     * 查询单个后端 Java 进程近 48 小时内的 Redis 指标历史，保留给旧客户端兼容。
-     */
-    @GetMapping("/api/internal/platform/opencode-runtime/management/backend-processes/{backendProcessId}/metrics")
-    public Mono<ApiResponse<RuntimeManagementDtos.BackendMetricHistoryResponse>> backendProcessMetrics(
-            @PathVariable String backendProcessId,
-            @RequestParam(required = false) Integer windowMinutes,
-            @RequestParam(required = false) Integer hours,
-            @RequestParam(required = false) Integer maxPoints,
-            ServerWebExchange exchange) {
-        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
-        String traceId = RuntimeApiSupport.traceId(exchange);
-        BackendProcessId parsedBackendProcessId = parseBackendProcessId(backendProcessId);
-        Duration resolvedWindow = parseMetricWindow(windowMinutes, hours);
-        int resolvedMaxPoints = parseMetricMaxPoints(maxPoints);
-        return Mono.fromCallable(() -> ApiResponse.ok(
-                        RuntimeManagementDtos.BackendMetricHistoryResponse.from(queryService.backendProcessMetrics(
-                                parsedBackendProcessId,
-                                resolvedWindow,
-                                resolvedMaxPoints,
-                                traceId)),
-                        traceId))
-                .subscribeOn(Schedulers.boundedElastic());
-    }
-
     private Mono<ApiResponse<RuntimeManagementDtos.ManagedProcessCommandResponse>> controlManagedProcess(
             String containerId,
             String port,
@@ -287,18 +261,6 @@ public class RuntimeManagementController {
             return new UserId(value);
         } catch (IllegalArgumentException exception) {
             throw validationError("用户 ID 无效", "userId", value, exception);
-        }
-    }
-
-    private BackendProcessId parseBackendProcessId(String rawBackendProcessId) {
-        String value = textOrNull(rawBackendProcessId);
-        if (value == null) {
-            throw validationError("后端进程 ID 无效", "backendProcessId", rawBackendProcessId, null);
-        }
-        try {
-            return new BackendProcessId(value);
-        } catch (IllegalArgumentException exception) {
-            throw validationError("后端进程 ID 无效", "backendProcessId", value, exception);
         }
     }
 

@@ -372,47 +372,6 @@ class RuntimeManagementControllerTest {
     }
 
     @Test
-    void legacyBackendProcessMetricEndpointDelegatesToIpBasedHistory() {
-        RuntimeManagementQueryService service = org.mockito.Mockito.mock(RuntimeManagementQueryService.class);
-        when(service.backendProcessMetrics(
-                        eq(new BackendProcessId("bjp_1234567890abcdef")),
-                        eq(Duration.ofMinutes(30)),
-                        eq(720),
-                        eq("trace_1234567890abcdef")))
-                .thenReturn(new RuntimeManagementBackendMetricHistory(
-                        NOW,
-                        new LinuxServerId("10.8.0.12"),
-                        Optional.of(new BackendProcessId("bjp_1234567890abcdef")),
-                        NOW.minusSeconds(3600),
-                        NOW,
-                        List.of(new RuntimeManagementBackendMetricSample(
-                                NOW,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                null,
-                                300L,
-                                400L,
-                                500L,
-                                7L,
-                                42))));
-        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
-
-        client.get()
-                .uri("/api/internal/platform/opencode-runtime/management/backend-processes/bjp_1234567890abcdef/metrics?windowMinutes=30&maxPoints=720")
-                .header("X-Trace-Id", "trace_1234567890abcdef")
-                .exchange()
-                .expectStatus().isOk()
-                .expectBody()
-                .jsonPath("$.data.linuxServerId").isEqualTo("10.8.0.12")
-                .jsonPath("$.data.backendProcessId").isEqualTo("bjp_1234567890abcdef")
-                .jsonPath("$.data.samples[0].jvmThreadsLive").isEqualTo(42);
-    }
-
-    @Test
     void metricHistoryAcceptsOnlyPresetWindowMinutes() {
         RuntimeManagementQueryService service = org.mockito.Mockito.mock(RuntimeManagementQueryService.class);
         WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));

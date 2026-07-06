@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-06 - 全面作废后端旧接口
+
+- Why:
+  - 旧 `/api/...` runtime/workspace 兼容入口容易被前端继续误用，并且历史消息旧查询会触发快照刷新；需要按“立即强制作废”统一返回 `410 API_GONE`，让新客户端只走 internal platform 和 agent-scoped API。
+- What:
+  - 后端新增 `API_GONE` 和 `LegacyApiGoneWebFilter`，拦截旧 `/api/runs/**`、`/api/sessions/**`、`/api/workspaces/**`、opencode runtime 裸路径、旧 terminal、旧 HTTP 文件、旧 backendProcess metrics 和 manager-backends 诊断入口；稳定 `/api/auth/login|logout|me|refresh` 保留。
+  - Controller 清理旧映射，前端 `backend-api` 迁移 Session、Workspace、runtime metadata、terminal、file-ws-route、permission/question 等调用到新 URL；历史正文继续使用 agent-scoped session-tree，反馈映射使用 platform messages `refresh=false`。
+- How:
+  - 拦截器在进入 Controller、业务服务或跨 Java 转发前写统一 `ApiErrorResponse`；不改数据库结构、RunEvent payload 或 generated SDK。同步 HTTP/SSE API 文档、后端 API README、`backend-api` README 和 `agent-web` README。
+- Result:
+  - 后端 `test-agent-common,test-agent-api -am test`、`backend-api` Vitest 和历史会话相关 Playwright 用例通过；完整 `workbench.spec.ts` 仍有设置权限、模型下拉语义、发送流程等既有非本次路径迁移断言失败，已在本次结果中保留风险说明。
+
 ### 2026-07-06 - internal UCID 同步增加明文排查日志
 
 - Why:

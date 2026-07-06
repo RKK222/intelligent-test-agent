@@ -14,7 +14,7 @@ class ApiTokenWebFilterTest {
     @Test
     void filterAllowsRequestsWhenTokenIsNotConfigured() {
         ApiTokenWebFilter filter = new ApiTokenWebFilter(null);
-        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/workspaces"));
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/internal/platform/workspace-management/workspaces"));
         exchange.getAttributes().put(TraceConstants.TRACE_ID_ATTRIBUTE, "trace_1234567890abcdef");
         final boolean[] called = {false};
         WebFilterChain chain = currentExchange -> {
@@ -30,7 +30,7 @@ class ApiTokenWebFilterTest {
     @Test
     void filterRejectsRequestsWhenBearerTokenDoesNotMatch() {
         ApiTokenWebFilter filter = new ApiTokenWebFilter("secret-token");
-        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/workspaces"));
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/internal/platform/workspace-management/workspaces"));
         exchange.getAttributes().put(TraceConstants.TRACE_ID_ATTRIBUTE, "trace_1234567890abcdef");
 
         filter.filter(exchange, currentExchange -> Mono.empty()).block();

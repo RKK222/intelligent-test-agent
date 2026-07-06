@@ -63,7 +63,7 @@ class TerminalWebSocketHandlerTest {
                         "http://localhost:3000",
                         "trace_1234567890abcdef"))
                 .thenReturn(ticket);
-        FakeWebSocketSession session = FakeWebSocketSession.allowed("/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
 
         handler(terminalService, processFactory, registry, defaultOptions(), auditLogger).handle(session).block();
 
@@ -79,7 +79,7 @@ class TerminalWebSocketHandlerTest {
     void rejectsDisallowedOriginBeforeConsumingTicket() throws Exception {
         TerminalApplicationService terminalService = Mockito.mock(TerminalApplicationService.class);
         TerminalProcessFactory processFactory = Mockito.mock(TerminalProcessFactory.class);
-        FakeWebSocketSession session = FakeWebSocketSession.disallowed("/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+        FakeWebSocketSession session = FakeWebSocketSession.disallowed("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
 
         handler(terminalService, processFactory, new TerminalActiveSessionRegistry()).handle(session).block();
 
@@ -102,7 +102,7 @@ class TerminalWebSocketHandlerTest {
                 .thenReturn(ticket);
         when(processFactory.start(ticket))
                 .thenThrow(new PlatformException(ErrorCode.OPENCODE_UNAVAILABLE, "PTY 后端不可用"));
-        FakeWebSocketSession session = FakeWebSocketSession.allowed("/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+        FakeWebSocketSession session = FakeWebSocketSession.allowed("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
 
         handler(terminalService, processFactory, registry).handle(session).block();
 
@@ -130,7 +130,7 @@ class TerminalWebSocketHandlerTest {
         when(terminal.output()).thenReturn(Flux.empty());
         when(terminal.close()).thenReturn(Mono.empty());
         FakeWebSocketSession session = FakeWebSocketSession.allowed(
-                "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef",
+                "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef",
                 List.of("""
                         {"type":"input","data":"12345"}
                         """));
@@ -166,7 +166,7 @@ class TerminalWebSocketHandlerTest {
         when(terminal.resize(120, 32)).thenReturn(Mono.empty());
         when(terminal.close()).thenReturn(Mono.empty());
         FakeWebSocketSession session = FakeWebSocketSession.allowed(
-                "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef",
+                "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef",
                 List.of(
                         """
                         {"type":"input","data":"echo hi\\n"}
@@ -211,7 +211,7 @@ class TerminalWebSocketHandlerTest {
             return Mono.empty();
         });
         FakeWebSocketSession session = FakeWebSocketSession.allowed(
-                "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef",
+                "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef",
                 List.of("not-json"));
 
         handler(terminalService, processFactory, registry).handle(session).block(Duration.ofSeconds(1));
@@ -244,7 +244,7 @@ class TerminalWebSocketHandlerTest {
         when(terminal.output()).thenReturn(Flux.just(TerminalServerMessage.exit(0, 1)));
         when(terminal.close()).thenReturn(Mono.empty());
         FakeWebSocketSession session = FakeWebSocketSession.allowed(
-                "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+                "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
 
         handler(terminalService, processFactory, registry, defaultOptions(), auditLogger)
                 .handle(session)
@@ -278,7 +278,7 @@ class TerminalWebSocketHandlerTest {
             return Mono.empty();
         });
         FakeWebSocketSession session = FakeWebSocketSession.allowedUntilClose(
-                "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+                "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
 
         handler(terminalService, processFactory, registry, options, auditLogger).handle(session).block(Duration.ofSeconds(1));
 
@@ -316,7 +316,7 @@ class TerminalWebSocketHandlerTest {
             return Mono.empty();
         });
         FakeWebSocketSession session = FakeWebSocketSession.allowedUntilClose(
-                "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+                "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
 
         handler(terminalService, processFactory, registry, options, auditLogger).handle(session).block(Duration.ofSeconds(1));
 

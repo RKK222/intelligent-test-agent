@@ -9,7 +9,6 @@ import com.icbc.testagent.opencode.runtime.process.socket.ManagerControlSettings
 import java.util.List;
 import java.util.Objects;
 import org.springframework.http.HttpHeaders;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
@@ -36,9 +35,8 @@ public class ManagerBackendDiscoveryController {
     }
 
     /**
-     * 返回所有可被 manager 直连的后端实例 WebSocket 地址。
+     * manager-backends HTTP 诊断入口已作废，运行管理请使用 overview。
      */
-    @GetMapping("/api/internal/platform/opencode-runtime/manager-backends")
     public Mono<ApiResponse<List<RuntimeDtos.ManagerBackendResponse>>> discover(
             @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
             ServerWebExchange exchange) {

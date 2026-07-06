@@ -39,10 +39,7 @@ public class WorkspaceFileSocketController {
     /**
      * 为普通工作空间文件操作定位目标后端服务器。
      */
-    @PostMapping({
-            "/api/workspaces/{workspaceId}/file-ws-route",
-            "/api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route"
-    })
+    @PostMapping("/api/internal/platform/workspace-management/workspaces/{workspaceId}/file-ws-route")
     public ApiResponse<WorkspaceFileRouteResponse> routeWorkspace(
             @PathVariable String workspaceId,
             ServerWebExchange exchange) {

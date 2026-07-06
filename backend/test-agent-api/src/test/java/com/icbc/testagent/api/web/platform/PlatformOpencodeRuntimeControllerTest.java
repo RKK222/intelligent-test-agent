@@ -31,7 +31,7 @@ class PlatformOpencodeRuntimeControllerTest {
         WebTestClient client = client(service, null);
 
         client.get()
-                .uri("/api/agents?workspaceId=wrk_1234567890abcdef")
+                .uri("/api/internal/platform/opencode-runtime/agents?workspaceId=wrk_1234567890abcdef")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -49,7 +49,7 @@ class PlatformOpencodeRuntimeControllerTest {
         WebTestClient client = client(service, null);
 
         client.get()
-                .uri("/api/status?workspaceId=wrk_1234567890abcdef")
+                .uri("/api/internal/platform/opencode-runtime/status?workspaceId=wrk_1234567890abcdef")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -71,7 +71,7 @@ class PlatformOpencodeRuntimeControllerTest {
         WebTestClient client = client(service, null);
 
         client.post()
-                .uri("/api/sessions/ses_1234567890abcdef/permissions/req_1/reply")
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/permissions/req_1/reply")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
@@ -97,7 +97,7 @@ class PlatformOpencodeRuntimeControllerTest {
         WebTestClient client = client(service, null);
 
         client.get()
-                .uri("/api/mcp/tools?workspaceId=wrk_1234567890abcdef&provider=anthropic&model=claude-sonnet")
+                .uri("/api/internal/platform/opencode-runtime/mcp/tools?workspaceId=wrk_1234567890abcdef&provider=anthropic&model=claude-sonnet")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -115,7 +115,7 @@ class PlatformOpencodeRuntimeControllerTest {
         WebTestClient client = client(service, null);
 
         client.post()
-                .uri("/api/sessions/ses_1234567890abcdef/share")
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/share")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -134,7 +134,7 @@ class PlatformOpencodeRuntimeControllerTest {
         WebTestClient client = client(service, principal(userId));
 
         client.get()
-                .uri("/api/status?workspaceId=wrk_1234567890abcdef")
+                .uri("/api/internal/platform/opencode-runtime/status?workspaceId=wrk_1234567890abcdef")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk()
@@ -153,7 +153,7 @@ class PlatformOpencodeRuntimeControllerTest {
         WebTestClient client = client(service, null);
 
         client.get()
-                .uri("/api/status?workspaceId=wrk_1234567890abcdef")
+                .uri("/api/internal/platform/opencode-runtime/status?workspaceId=wrk_1234567890abcdef")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .exchange()
                 .expectStatus().isOk();
