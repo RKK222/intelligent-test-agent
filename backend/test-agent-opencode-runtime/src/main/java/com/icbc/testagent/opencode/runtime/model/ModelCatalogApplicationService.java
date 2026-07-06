@@ -136,6 +136,7 @@ public class ModelCatalogApplicationService {
             return;
         }
         String ucid = resolveCurrentUcid(userId);
+        logInternalUcidHeader(traceId, userId, ucid);
         try {
             runtime.runtime(new AgentRuntimeCommand(node, "PATCH", "/global/config", null, null, Map.of(), providerConfigPatch(ucid), traceId))
                     .block();
@@ -155,6 +156,20 @@ public class ModelCatalogApplicationService {
                 .map(User::unifiedAuthId)
                 .filter(value -> value != null && !value.isBlank())
                 .orElse(null);
+    }
+
+    private void logInternalUcidHeader(String traceId, UserId userId, String ucid) {
+        if (!internalSourceEnabled()) {
+            return;
+        }
+        // UCID 是企业内模型 API 的路由标识，按当前项目约定允许明文记录；认证 token 仍不得写入日志。
+        LOGGER.info("event=model_provider_ucid_header_resolved traceId={} providerId={} userId={} ucidHeaderName={} ucid={} ucidPresent={}",
+                traceId,
+                properties.getInternal().getProviderId(),
+                userId == null ? "" : userId.value(),
+                properties.getInternal().getUcidHeaderName(),
+                ucid == null ? "" : ucid,
+                ucid != null && !ucid.isBlank());
     }
 
     private void seedInternalModels() {

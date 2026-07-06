@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-06 - internal UCID 同步增加明文排查日志
+
+- Why:
+  - 需要在企业内模型调用前确认当前 Run 解析到的 UCID 与 header 名，用户明确确认 UCID 在本项目不作为敏感信息处理，允许明文打印。
+- What:
+  - `ModelCatalogApplicationService` 在 internal provider 同步前输出 `model_provider_ucid_header_resolved` 单行日志，包含 `traceId/providerId/userId/ucidHeaderName/ucid/ucidPresent`，不打印 token 或请求体。
+- How:
+  - 复用现有 SLF4J 日志；日志位于 `PATCH /global/config` 前，便于即使 provider 同步失败也能排查 UCID 解析结果。
+- Result:
+  - `ModelCatalogApplicationServiceTest` 定向测试通过；标准 `.env.test` 重启成功，后端 readiness 和前端入口均可达。
+
 ### 2026-07-06 - internal 模型调用透传当前用户 UCID
 
 - Why:
