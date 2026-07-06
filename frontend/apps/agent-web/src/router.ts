@@ -8,18 +8,6 @@ const TOKEN_KEY = "test-agent.auth.token";
 
 const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login/";
 
-(function initAuthFromUrl() {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  const urlToken = url.searchParams.get("token");
-  if (urlToken) {
-    localStorage.setItem(TOKEN_KEY, urlToken);
-    url.searchParams.delete("token");
-    url.searchParams.delete("userId");
-    window.history.replaceState({}, "", url.toString());
-  }
-})();
-
 // SPA 客户端路由：/ 工作台、/s/:sessionId 只读 transcript、/login 登录页
 export const router = createRouter({
   history: createWebHistory(),
@@ -93,6 +81,13 @@ function isKnownLoginRedirectPath(pathname: string): boolean {
 router.beforeEach((to, _from) => {
   if (to.name === "login") {
     return true;
+  }
+
+  const urlToken = to.query.token;
+  if (urlToken && typeof urlToken === "string") {
+    localStorage.setItem(TOKEN_KEY, urlToken);
+    const { token: _, userId: __, ...restQuery } = to.query;
+    return { path: to.path, query: restQuery, replace: true };
   }
 
   const token = localStorage.getItem(TOKEN_KEY);
