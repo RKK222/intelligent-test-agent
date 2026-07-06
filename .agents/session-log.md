@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-06 - 修复 FigmaChatPanel.vue onComposerCardClick 缺失导致的 vue-tsc 编译错误
+
+- Why:
+  - 近期在优化聊天输入框组件时，清理了弃用的进程刷新逻辑，但误删了 `<script setup>` 中的 `onComposerCardClick` 点击处理函数，同时模板中遗留了多余未闭合的 `<div class="figma-chat-input-card">` 标签，导致 `pnpm build` 执行 `vue-tsc --noEmit` 时抛出 `TS2339: Property 'onComposerCardClick' does not exist on type...` 终止构建。
+- What:
+  - 1. 在 `FigmaChatPanel.vue` 的 `<script setup>` 中恢复并完善 `onComposerCardClick` 点击逻辑（点击输入卡片空白区域时聚焦内部 textarea，并避开按钮、手柄和下拉框等交互元素）。
+  - 2. 清理模板中多余的重复 `<div class="figma-chat-input-card">` 标签。
+- How:
+  - 仅修改前端 `FigmaChatPanel.vue` 的交互函数及模板结构，无后端 API 或底层架构变更。
+- Result:
+  - 执行 `npx vue-tsc --noEmit` 校验 0 错误，前端构建恢复成功。
+
 ### 2026-07-06 - 优化 Diff 文件列表展示及聊天高度拉伸手柄美化
 
 - Why:

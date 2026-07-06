@@ -811,6 +811,25 @@ function startComposerResize(event: PointerEvent) {
   window.addEventListener('pointercancel', stopComposerResize)
 }
 
+/**
+ * 点击输入框卡片空白区域时，自动聚焦到内部文本输入框（避开按钮、手柄和下拉框等子元素）
+ */
+function onComposerCardClick(event: MouseEvent) {
+  const target = event.target as HTMLElement | null
+  if (
+    target?.closest('button') ||
+    target?.closest('.figma-chat-composer-resize-handle') ||
+    target?.closest('.figma-chat-agent-dropdown') ||
+    target?.closest('.figma-chat-model-dropdown')
+  ) {
+    return
+  }
+  const textarea = (event.currentTarget as HTMLElement | null)?.querySelector('textarea')
+  if (textarea && document.activeElement !== textarea) {
+    textarea.focus()
+  }
+}
+
 const allModels = computed(() => {
   const byValue = new Map<string, any>()
   for (const model of props.models ?? []) {
@@ -3851,7 +3870,6 @@ function onCompositionEnd() {
           aria-orientation="horizontal"
           @pointerdown.stop.prevent="startComposerResize"
         />
-      <div class="figma-chat-input-card">
         <textarea
           v-model="localInput"
           class="figma-chat-textarea"
