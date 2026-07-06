@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-06 - 修复历史对话关联文件恢复
+
+- Why:
+  - 历史会话中用户消息只显示文本，未展示本轮关联的工作区文件/选区 chip；根因是平台 DB 的 user `session_messages.parts_json` 未保存 Run 启动时的 prompt parts，且前端合并 session tree 时会保留 DB user 消息而丢掉 tree user file parts。
+- What:
+  - `RunApplicationService` 保存用户消息时同步序列化 `StartRunInput.parts` 到 `partsJson`，并继续透传 file source 中的 `contextType/startLine/endLine`。
+  - 前端历史恢复合并 DB 与 session tree 时，user 消息保留平台 messageId，同时吸收 tree user 的 file parts，作为旧历史/回放数据的兜底。
+- How:
+  - 不新增 API、SSE 字段或数据库结构；复用既有 `session_messages.parts_json`、`PromptPart` 和用户消息展示层的 file chip 解析逻辑。
+- Result:
+  - 后端定向 `RunApplicationServiceTest#servicePassesPromptPartsAndRuntimeSelectionToOpencodeFacade` 通过；前端 `prompt-context`、`workbench-utils`、`user-message-display` 和 `opencode-timeline` 定向 Vitest 通过。
+
 ### 2026-07-06 - opencode worker 支持外置程序优先
 
 - Why:
@@ -4319,3 +4331,15 @@ bash /tmp/test-api-after-restart.sh
   - 保留 Java 直接部署、前端 dist 由实体 Nginx 托管、opencode/manager 外挂程序优先的既有设计，只修正实例数量、变量命名和部署说明。
 - Result:
   - `docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 只解析出一个 worker，且 opencode 端口保持宿主机端口与容器端口一致；脚本语法检查和 `git diff --check` 通过。
+
+### 2026-07-06 - 工作区选区上下文对齐 opencode 原生 file part
+
+- Why:
+  - 工作区选中几行后发送，UI 和对话效果仍可能表现为携带整个活动文件；根因是旧的隐式编辑器附件在无选区时会回退为活动文件全文，且后端转 opencode file part 时没有把 `contextType/startLine/endLine` 来源字段透传回来。
+- What:
+  - 收紧前端隐式编辑器 part：只有存在真实选区文本时才生成 file prompt part，不再用活动文件全文兜底；选区 part 补齐 `contextType=selection`、`startLine`、`endLine`。
+  - 后端 `RunApplicationService` 转换 file prompt part 时保留平台 source 中的上下文类型和行号，保证 opencode message part 回放后前端仍能识别为“选区 Lx-Ly”，而不是普通整文件。
+- How:
+  - 修改 `frontend/apps/agent-web/src/components/prompt-context.ts` 和 `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunApplicationService.java`，并补充前端 prompt-context 单测与后端 RunApplicationService 单测。
+- Result:
+  - `corepack pnpm exec vitest run apps/agent-web/tests/prompt-context.test.ts apps/agent-web/tests/workbench-utils.test.ts packages/agent-chat/tests/user-message-display.test.ts packages/agent-chat/tests/opencode-timeline.test.ts`、`corepack pnpm --filter @test-agent/agent-web typecheck` 和后端定向 `RunApplicationServiceTest#servicePassesPromptPartsAndRuntimeSelectionToOpencodeFacade` 通过。

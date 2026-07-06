@@ -560,6 +560,17 @@ export function messagesFromSessionTreeSnapshot(snapshot: SessionTreeMessagesRes
 function mergeSessionTreeMessages(persistedMessages: AgentMessage[], treeMessages: AgentMessage[]): AgentMessage[] {
   const usedTreeIndexes = new Set<number>();
   const merged = persistedMessages.map((message) => {
+    if (message.role === "user") {
+      const treeIndex = treeMessages.findIndex((candidate, index) =>
+        !usedTreeIndexes.has(index) && candidate.role === "user" && agentMessagesMatch(message, candidate)
+      );
+      if (treeIndex < 0) {
+        return message;
+      }
+      usedTreeIndexes.add(treeIndex);
+      // 历史 DB 保留平台 messageId；session tree 可能才有原生 file parts，用于恢复关联文件 chip。
+      return mergeUserMessageWithTreeParts(message, treeMessages[treeIndex] as Extract<AgentMessage, { role: "user" }>);
+    }
     if (message.role !== "assistant") {
       return message;
     }
@@ -579,6 +590,50 @@ function mergeSessionTreeMessages(persistedMessages: AgentMessage[], treeMessage
     }
   });
   return merged;
+}
+
+function mergeUserMessageWithTreeParts(
+  persisted: Extract<AgentMessage, { role: "user" }>,
+  tree: Extract<AgentMessage, { role: "user" }>
+): Extract<AgentMessage, { role: "user" }> {
+  const parts = mergePromptParts(persisted.parts, tree.parts);
+  return {
+    ...persisted,
+    remoteMessageId: persisted.remoteMessageId ?? tree.remoteMessageId ?? tree.messageId ?? tree.id,
+    parts: parts.length > 0 ? parts : persisted.parts
+  };
+}
+
+function mergePromptParts(left: PromptPart[] | undefined, right: PromptPart[] | undefined): PromptPart[] {
+  const merged: PromptPart[] = [];
+  const seen = new Set<string>();
+  for (const part of [...(left ?? []), ...(right ?? [])]) {
+    const key = promptPartStableKey(part);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    merged.push(part);
+  }
+  return merged;
+}
+
+function promptPartStableKey(part: PromptPart): string {
+  if (part.type === "file") {
+    return [
+      "file",
+      part.path ?? "",
+      part.name ?? "",
+      part.url ?? "",
+      part.source?.contextType ?? "",
+      part.source?.startLine ?? "",
+      part.source?.endLine ?? ""
+    ].join(":");
+  }
+  if (part.type === "text") {
+    return `text:${part.text}`;
+  }
+  return stableStringify(part);
 }
 
 function agentMessagesMatch(left: AgentMessage, right: AgentMessage): boolean {

@@ -44,6 +44,7 @@ import com.icbc.testagent.opencode.runtime.model.ModelCatalogApplicationService;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignment;
 import com.icbc.testagent.opencode.runtime.process.UserOpencodeProcessAssignmentService;
 import com.icbc.testagent.opencode.runtime.runtime.AgentRuntimeTargetResolver;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -74,6 +75,7 @@ public class RunApplicationService {
     private static final Logger LOGGER = LoggerFactory.getLogger(RunApplicationService.class);
     private static final int ROUTING_CANDIDATE_LIMIT = 50;
     private static final String DEFAULT_OPENCODE_AGENT = "build";
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final Set<String> LIVE_DIFF_TOOLS = Set.of("write", "edit", "apply_patch");
     private static final Duration TRANSPORT_ERROR_TERMINAL_GRACE = Duration.ofMillis(300);
 
@@ -335,7 +337,7 @@ public class RunApplicationService {
         }
         pending = pending.withRuntimeSelection(opencodeAgent, firstText(modelSelection.modelId(), input.model()));
         runRepository.save(pending);
-        saveUserMessage(session.sessionId(), pending.runId(), prompt, userId, traceId, now);
+        saveUserMessage(session.sessionId(), pending.runId(), prompt, input.parts(), userId, traceId, now);
         append(pending.runId(), RunEventType.RUN_CREATED, traceId, now, Map.of("status", RunStatus.PENDING.name()));
 
         try {
@@ -577,6 +579,9 @@ public class RunApplicationService {
         if (path != null) {
             source.put("path", path);
         }
+        copySourceValue(part.source(), source, "contextType");
+        copySourceValue(part.source(), source, "startLine");
+        copySourceValue(part.source(), source, "endLine");
         if (text != null) {
             source.put("text", Map.of(
                     "value", text,
@@ -598,6 +603,23 @@ public class RunApplicationService {
                 "value", value,
                 "start", sourceNumber(part.source(), "start", 0),
                 "end", sourceNumber(part.source(), "end", value.length()));
+    }
+
+    /**
+     * 透传平台工作区上下文来源字段，避免 opencode 回放 file part 时选区被还原成整文件附件。
+     */
+    private void copySourceValue(Map<String, Object> source, LinkedHashMap<String, Object> target, String key) {
+        if (source == null) {
+            return;
+        }
+        Object value = source.get(key);
+        if (value instanceof String stringValue && !stringValue.isBlank()) {
+            target.put(key, stringValue);
+            return;
+        }
+        if (value instanceof Number) {
+            target.put(key, value);
+        }
     }
 
     /**
@@ -812,7 +834,14 @@ public class RunApplicationService {
     /**
      * 保存用户消息投影，记录 runId 以支持按每次对话查询用户输入与消耗。
      */
-    private void saveUserMessage(SessionId sessionId, RunId runId, String prompt, UserId userId, String traceId, Instant createdAt) {
+    private void saveUserMessage(
+            SessionId sessionId,
+            RunId runId,
+            String prompt,
+            List<StartRunInput.PromptPart> parts,
+            UserId userId,
+            String traceId,
+            Instant createdAt) {
         SessionMessage message = new SessionMessage(
                 new SessionMessageId(RuntimeIdGenerator.messageId()),
                 sessionId,
@@ -823,13 +852,28 @@ public class RunApplicationService {
                 runId,
                 null,
                 null,
-                null,
+                userPromptPartsJson(parts, traceId).orElse(null),
                 null,
                 null,
                 createdAt);
         sessionMessageRepository.save(userId == null
                 ? message
                 : message.withSource(ConversationSourceType.MANUAL, null, userId));
+    }
+
+    /**
+     * 保存用户原始 prompt parts，历史对话可据此恢复本轮关联文件/选区 chip。
+     */
+    private Optional<String> userPromptPartsJson(List<StartRunInput.PromptPart> parts, String traceId) {
+        if (parts == null || parts.isEmpty()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(OBJECT_MAPPER.writeValueAsString(parts));
+        } catch (JsonProcessingException exception) {
+            LOGGER.warn("Failed to serialize user prompt parts, traceId={}", traceId, exception);
+            return Optional.empty();
+        }
     }
 
     /**

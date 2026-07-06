@@ -15,17 +15,24 @@ export function buildEditorFilePromptPart(
   if (!activeTab?.path) {
     return undefined;
   }
-  const selectedText = selection?.text.trim() ? selection.text : undefined;
+  if (!selection) {
+    return undefined;
+  }
+  const selectedText = selection.text.trim() ? selection.text : undefined;
+  if (!selectedText) {
+    return undefined;
+  }
   return {
     type: "file",
     path: activeTab.path,
     name: activeTab.path.split("/").at(-1) ?? activeTab.path,
-    source: selectedText
-      ? {
-          start: selection?.startLineNumber,
-          end: selection?.endLineNumber,
-          text: selectedText.slice(0, 12000)
-        }
-      : { text: activeTab.content.slice(0, 12000) }
+    source: {
+      start: selection.startLineNumber,
+      end: selection.endLineNumber,
+      text: selectedText.slice(0, 12000),
+      startLine: selection.startLineNumber,
+      endLine: selection.endLineNumber,
+      contextType: "selection"
+    }
   };
 }

@@ -477,6 +477,95 @@ describe("historical session restoration", () => {
     });
   });
 
+  it("keeps user file parts from session tree when persisted user message has no parts", () => {
+    const persisted: SessionMessage[] = [
+      {
+        messageId: "msg_user_platform",
+        sessionId: "ses_root",
+        role: "USER",
+        content: "这个文件里有什么内容",
+        createdAt: "2026-07-06T08:00:00Z"
+      },
+      {
+        messageId: "msg_assistant_platform",
+        sessionId: "ses_root",
+        role: "ASSISTANT",
+        content: "文件内容如下",
+        createdAt: "2026-07-06T08:01:00Z"
+      }
+    ];
+    const snapshot: SessionTreeMessagesResponse = {
+      sessionId: "ses_root",
+      sessions: [],
+      messagesBySessionId: {},
+      childSessionIdByTaskPartId: {},
+      events: [
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "remote_user", role: "user", content: "这个文件里有什么内容" }
+          }
+        },
+        {
+          type: "message.part.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            messageID: "remote_user",
+            part: {
+              id: "part_file",
+              messageID: "remote_user",
+              type: "file",
+              filename: "冲突文件.md",
+              url: "data:text/plain;base64,LS0t",
+              source: {
+                path: "99-测试数据/Git冲突处理/冲突文件.md",
+                contextType: "file"
+              }
+            }
+          }
+        },
+        {
+          type: "message.updated",
+          rootSessionId: "ses_root",
+          sessionId: "ses_root",
+          childSession: false,
+          payload: {
+            rootSessionId: "ses_root",
+            sessionId: "ses_root",
+            message: { id: "remote_assistant", role: "assistant", content: "文件内容如下" }
+          }
+        }
+      ]
+    };
+
+    const state = chatStateFromSessionTreeSnapshot(snapshot, persisted);
+
+    expect(state.messages).toHaveLength(2);
+    expect(state.messages[0]).toMatchObject({
+      role: "user",
+      messageId: "msg_user_platform",
+      text: "这个文件里有什么内容",
+      parts: [
+        {
+          type: "file",
+          path: "99-测试数据/Git冲突处理/冲突文件.md",
+          name: "冲突文件.md",
+          url: "data:text/plain;base64,LS0t",
+          source: { contextType: "file", path: "99-测试数据/Git冲突处理/冲突文件.md" }
+        }
+      ]
+    });
+  });
+
   it("normalizes raw opencode parts and restores generated documents", () => {
     const messages = [
       {
