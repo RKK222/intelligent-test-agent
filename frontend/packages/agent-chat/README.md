@@ -6,7 +6,7 @@ Agent 对话运行态展示包。主对话视图采用 opencode 风格的消息/
 
 ## 主要职责
 
-- 展示用户/助手消息。`AssistantThread` 和 agent-web 的 `FigmaChatPanel` 主路径均复用 `OpencodeTimeline`，不再以旧气泡/结构化卡片作为主要正文渲染方式；用户气泡展示层会隐藏前端序列化的工作区 `<context>` 块，只显示用户原始提问；助手侧只保留头像作为来源标识，不额外展示名称/时间行，以匹配用户气泡无名称的极简对话形态。
+- 展示用户/助手消息。`AssistantThread` 和 agent-web 的 `FigmaChatPanel` 主路径均复用 `OpencodeTimeline`，不再以旧气泡/结构化卡片作为主要正文渲染方式；用户气泡展示层会隐藏前端序列化的工作区 `<context>` 块，只显示用户原始提问，并在气泡下方用只读 chip 展示本轮关联的工作区文件/选区；助手侧只保留头像作为来源标识，不额外展示名称/时间行，以匹配用户气泡无名称的极简对话形态。
 - 右侧 Agent 面板保留 Figma Web IDE 风格的 47px Chat/History 顶部 tab、紧凑消息流和底部 composer/runtime 控制区，适配约 245px 窄面板。
 - `opencode-like/state` 提供 `createOpencodeLikeState` 与 `createTimelineRows`，把用户消息、孤立助手历史消息、assistant parts、运行态、Diff 文件、permission/question/todo 与模型目录归并为稳定时间线行。
 - `OpencodeTimeline` 在当前可见时间线用户对话轮次大于 3 时显示左侧中线对话定位器；定位器弹层列出全部轮次的用户问题、助手摘要和最多 2 个文件 chips，点击轮次会滚动定位到对应用户消息。该能力只消费现有 `AgentMessage`/message part 投影，不新增 API、事件或持久化字段。

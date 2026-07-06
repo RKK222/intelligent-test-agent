@@ -33,6 +33,52 @@
   white-space: pre-wrap;
 }
 
+.oc-user-message__contexts {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 100%;
+  margin-top: 6px;
+}
+
+.oc-user-message__context-chip {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  height: 24px;
+  gap: 5px;
+  padding: 0 8px;
+  border: 1px solid var(--oc-border);
+  border-radius: 7px;
+  background: var(--oc-surface-muted);
+  color: var(--oc-muted);
+  font-size: var(--oc-text-sm);
+  line-height: 1;
+}
+
+.oc-user-message__context-icon {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+}
+
+.oc-user-message__context-type,
+.oc-user-message__context-lines {
+  flex: 0 0 auto;
+}
+
+.oc-user-message__context-name {
+  min-width: 0;
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--oc-fg);
+  font-weight: 500;
+}
+
 .oc-user-message__avatar {
   display: inline-flex;
   width: 28px;

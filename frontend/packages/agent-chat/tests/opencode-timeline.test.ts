@@ -81,6 +81,8 @@ describe("OpencodeTimeline", () => {
     const { container, getByText, queryByText } = render(OpencodeTimeline, { props: { state } });
 
     expect(getByText("写了什么内容")).toBeTruthy();
+    expect(getByText("文件")).toBeTruthy();
+    expect(getByText("api.md")).toBeTruthy();
     expect(queryByText(/<context/)).toBeNull();
     expect(container.querySelector(".oc-user-message__bubble")?.textContent).not.toContain("以下是用户添加的工作区上下文");
   });

@@ -196,6 +196,9 @@ describe("FigmaChatPanel", () => {
     });
 
     expect(wrapper.text()).toContain("写了什么内容");
+    expect(wrapper.text()).toContain("选区");
+    expect(wrapper.text()).toContain("a.md");
+    expect(wrapper.text()).toContain("L1-2");
     expect(wrapper.text()).not.toContain("<context");
     expect(wrapper.text()).not.toContain("以下是用户添加的工作区上下文");
   });

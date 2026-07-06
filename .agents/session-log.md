@@ -7,7 +7,7 @@
 - Why:
   - 工作区上下文附件发送后仍停留在输入区，且历史/回放消息会把前端序列化的 `<context>` prompt 当作用户气泡正文展示。
 - What:
-  - 发送被本地接受或排队后清空 `useChatContextStore`；`agent-chat` 用户消息展示层从序列化 prompt 中提取原始问题，隐藏工作区上下文块；上下文附件条样式收敛为更紧凑的附件 chip。
+  - 发送被本地接受或排队后清空 `useChatContextStore`；`agent-chat` 用户消息展示层从序列化 prompt 中提取原始问题，隐藏工作区上下文块，并在用户气泡下方展示本轮关联文件/选区 chip；上下文附件条样式收敛为更紧凑的附件 chip。
 - How:
   - 不改 Run API、SSE、数据库或后端消息存储；仅在前端展示层派生可见文案，发送给 Agent 的结构化上下文仍保持不变。
 - Result:

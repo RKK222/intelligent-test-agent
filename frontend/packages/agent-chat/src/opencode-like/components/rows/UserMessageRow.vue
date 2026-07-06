@@ -8,11 +8,12 @@ export type UserMessageRowProps = {
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { User } from "lucide-vue-next";
-import { displayTextFromUserPrompt } from "../../../user-message-display";
+import { FileText, Scissors, User } from "lucide-vue-next";
+import { displayTextFromUserPrompt, workspaceContextAttachmentsFromUserPrompt } from "../../../user-message-display";
 
 const props = defineProps<UserMessageRowProps>();
 const displayText = computed(() => displayTextFromUserPrompt(props.message.text));
+const workspaceContexts = computed(() => workspaceContextAttachmentsFromUserPrompt(props.message.text));
 </script>
 
 <template>
@@ -25,6 +26,19 @@ const displayText = computed(() => displayTextFromUserPrompt(props.message.text)
     <div class="oc-user-message__content">
       <div class="oc-user-message__bubble">
         <p>{{ displayText }}</p>
+      </div>
+      <div v-if="workspaceContexts.length" class="oc-user-message__contexts" aria-label="本轮关联的工作区上下文">
+        <span
+          v-for="context in workspaceContexts"
+          :key="`${context.type}:${context.path}:${context.lines ?? ''}`"
+          class="oc-user-message__context-chip"
+          :title="context.path"
+        >
+          <component :is="context.type === 'selection' ? Scissors : FileText" class="oc-user-message__context-icon" />
+          <span class="oc-user-message__context-type">{{ context.type === 'selection' ? '选区' : '文件' }}</span>
+          <span class="oc-user-message__context-name">{{ context.fileName }}</span>
+          <span v-if="context.lines" class="oc-user-message__context-lines">L{{ context.lines }}</span>
+        </span>
       </div>
     </div>
     <div class="oc-user-message__avatar" aria-hidden="true">
