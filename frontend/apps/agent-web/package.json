@@ -2,7 +2,7 @@
   "name": "@test-agent/agent-web",
   "private": true,
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --mode local",
     "build": "vue-tsc --noEmit --pretty false && vite build",
     "build:prod": "vue-tsc --noEmit --pretty false && vite build",
     "build:dev": "vue-tsc --noEmit --pretty false && vite build --mode development",
