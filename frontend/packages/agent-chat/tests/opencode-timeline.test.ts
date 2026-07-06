@@ -609,6 +609,29 @@ describe("OpencodeTimeline", () => {
     expect(getByText("我是测试智能体。")).toBeTruthy();
   });
 
+  it("keeps step-start metadata on the same assistant line as reasoning", async () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_1", "这个文件里有什么内容"),
+        assistantMessage("msg_assistant_reasoning", [
+          { partId: "part_step_start", type: "step-start", snapshot: "start" },
+          reasoningPart("part_reasoning", "先读取文件内容。")
+        ])
+      ]
+    });
+
+    const { container, getByText } = render(OpencodeTimeline, { props: { state } });
+    await waitMarkdown();
+
+    const frame = container.querySelector(".oc-assistant-frame.has-header");
+    expect(frame).toBeTruthy();
+    expect(frame?.querySelector(".oc-assistant-frame__avatar")).toBeTruthy();
+    expect(frame?.textContent).toContain("思考状态");
+    expect(container.querySelectorAll(".oc-assistant-frame")).toHaveLength(1);
+    expect(container.querySelector(".oc-unknown-part")).toBeNull();
+    expect(getByText("思考状态")).toBeTruthy();
+  });
+
   it("merges repeated reasoning rows across split assistant messages in one turn", async () => {
     const state = createOpencodeLikeState({
       messages: [
