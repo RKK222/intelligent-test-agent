@@ -250,8 +250,8 @@ class AgentConfigApplicationServiceTest {
         assertThat(git.pushedForce).isFalse();
         assertThat(git.privateKeyUsed).isEqualTo(PRIVATE_KEY);
         assertThat(git.resetCommit).isNull();
-        // 新流程不再调用 fetch/pull
-        assertThat(git.fetchCallCount).isZero();
+        assertThat(git.fetchCallCount).isEqualTo(1);
+        assertThat(git.mergedBranch).isEqualTo("origin/main");
         assertThat(git.pulledBranch).isNull();
         assertThat(response.status()).isEqualTo("SUCCEEDED");
         assertThat(response.commitHash()).isEqualTo("commit_after_update_and_push");
@@ -263,7 +263,7 @@ class AgentConfigApplicationServiceTest {
     }
 
     @Test
-    void publicUpdateAndPushSkipsCommitAndPushWhenWorktreeIsClean() throws Exception {
+    void publicUpdateAndPushSkipsCommitButStillPushesWhenWorktreeIsClean() throws Exception {
         Files.createDirectories(root.resolve(".config/.git"));
         Files.createDirectories(root.resolve(".config/opencode"));
         Files.writeString(root.resolve(".config/opencode/config.json"), "{}");
@@ -290,8 +290,10 @@ class AgentConfigApplicationServiceTest {
 
         assertThat(git.stagedAllCallCount).isEqualTo(1);
         assertThat(git.lastCommitMessage).isNull();
-        assertThat(git.pushedBranch).isNull();
-        assertThat(git.fetchCallCount).isZero();
+        assertThat(git.pushedBranch).isEqualTo("main");
+        assertThat(git.pushedForce).isFalse();
+        assertThat(git.fetchCallCount).isEqualTo(1);
+        assertThat(git.mergedBranch).isEqualTo("origin/main");
         assertThat(response.status()).isEqualTo("SUCCEEDED");
         assertThat(response.commitHash()).isEqualTo("commit_base");
         assertThat(publisher.events).hasSize(1);
@@ -325,6 +327,75 @@ class AgentConfigApplicationServiceTest {
         assertThat(git.resetCommit).isEqualTo("HEAD");
         assertThat(git.stagedAllCallCount).isEqualTo(1);
         assertThat(git.lastCommitMessage).isEqualTo("chore: sync");
+        assertThat(git.pushedBranch).isEqualTo("main");
+        assertThat(response.status()).isEqualTo("SUCCEEDED");
+    }
+
+    @Test
+    void publicUpdateAndPushReportsConflictWhenRemoteMergeConflicts() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode/agents"));
+        Files.writeString(root.resolve(".config/opencode/agents/review.md"), "local");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.worktreeClean = false;
+        git.stagedAfterAdd = "M opencode/agents/review.md";
+        git.failMergeWithConflict = true;
+        git.conflictFiles = List.of("opencode/agents/review.md");
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher());
+
+        assertThatThrownBy(() -> service.updatePublicConfigAndPush(
+                "main",
+                "chore: sync",
+                "aco_update_push_conflict",
+                false,
+                ADMIN,
+                "trace_update_push"))
+                .isInstanceOfSatisfying(PlatformException.class, exception -> {
+                    assertThat(exception.errorCode()).isEqualTo(ErrorCode.CONFLICT);
+                    assertThat(exception.details()).containsEntry("conflictFiles", List.of("opencode/agents/review.md"));
+                });
+
+        assertThat(git.fetchCallCount).isEqualTo(1);
+        assertThat(git.lastCommitMessage).isEqualTo("chore: sync");
+        assertThat(git.mergedBranch).isEqualTo("origin/main");
+        assertThat(git.pushedBranch).isNull();
+    }
+
+    @Test
+    void publicUpdateAndPushCommitsResolvedMergeBeforePushing() throws Exception {
+        Files.createDirectories(root.resolve(".config/.git"));
+        Files.createDirectories(root.resolve(".config/opencode/agents"));
+        Files.writeString(root.resolve(".config/opencode/agents/review.md"), "resolved");
+        RecordingGitWorkspaceService git = new RecordingGitWorkspaceService();
+        git.mergeInProgress = true;
+        git.conflictFiles = List.of();
+        AgentConfigApplicationService service = service(
+                Map.of(
+                        "OPENCODE_PUBLIC_AGENT_GIT_URL", "git@gitee.com:test/agent-config.git",
+                        "OPENCODE_PUBLIC_CONFIG_GIT_ROOT", root.resolve(".config").toString(),
+                        "OPENCODE_PUBLIC_CONFIG_WORKTREE_ROOT", root.resolve(".configdev").toString()),
+                new InMemoryAgentConfigRepository(),
+                git,
+                new RecordingBroadcastPublisher());
+
+        AgentConfigResponses.AgentConfigOperationResponse response = service.updatePublicConfigAndPush(
+                "main",
+                "chore: resolve conflict",
+                "aco_update_push_resolved",
+                false,
+                ADMIN,
+                "trace_update_push");
+
+        assertThat(git.fetchCallCount).isZero();
+        assertThat(git.stagedAllCallCount).isZero();
+        assertThat(git.lastCommitMessage).isEqualTo("chore: resolve conflict");
         assertThat(git.pushedBranch).isEqualTo("main");
         assertThat(response.status()).isEqualTo("SUCCEEDED");
     }
@@ -1003,6 +1074,8 @@ class AgentConfigApplicationServiceTest {
         private String lastCommitMessage;
         private String pushedBranch;
         private Boolean pushedForce;
+        private String mergedBranch;
+        private boolean mergeInProgress;
         private boolean failMergeWithConflict;
         private List<String> conflictFiles = List.of();
         private Path abortedMergeRepoRoot;
@@ -1063,9 +1136,15 @@ class AgentConfigApplicationServiceTest {
 
         @Override
         public void mergeBranch(Path repoRoot, String branch, String privateKey) {
+            this.mergedBranch = branch;
             if (failMergeWithConflict) {
                 throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "合并冲突", Map.of());
             }
+        }
+
+        @Override
+        public boolean isMergeInProgress(Path repoRoot) {
+            return mergeInProgress;
         }
 
         @Override

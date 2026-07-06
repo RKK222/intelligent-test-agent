@@ -15,8 +15,8 @@ final class AgentConfigDtos {
     }
 
     /**
-     * 公共配置"更新+提交并推送"复合请求：先按分支 fetch/reset/pull，再 stage 已跟踪/未跟踪修改，
-     * 然后用 commitMessage 生成一次提交并 push 到远端。discardLocalChanges 为 true 时才允许覆盖受控仓库中的已跟踪修改。
+     * 公共配置"更新+提交并推送"复合请求：先 fetch 远端，再 stage/commit 本地修改、merge 远端分支并 push。
+     * discardLocalChanges 为 true 时才允许覆盖受控仓库中的已跟踪修改。
      */
     record UpdatePublicConfigAndPushRequest(
             String branch,
@@ -46,6 +46,12 @@ final class AgentConfigDtos {
     }
 
     record StageRequest(List<String> files, String worktreeId) {
+    }
+
+    record GitConflictRequest(String path, String resolution, String content, String worktreeId, String linuxServerId) {
+    }
+
+    record ResolveAllGitConflictsRequest(String resolution, String worktreeId, String linuxServerId) {
     }
 
     record CommitRequest(String message, String worktreeId, String operationId) {

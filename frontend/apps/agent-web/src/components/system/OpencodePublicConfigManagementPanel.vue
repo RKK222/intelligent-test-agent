@@ -12,6 +12,7 @@ const api = inject<BackendApiClient>("api")!;
 const rows = ref<PublicAgentRepositoryStatus[]>([]);
 const loading = ref(false);
 const initializing = ref(false);
+const pullingServerId = ref<string | null>(null);
 const errorMessage = ref("");
 const successMessage = ref("");
 const dialogOpen = ref(false);
@@ -94,6 +95,25 @@ async function submitInitialize() {
     initErrorMessage.value = formatError(error, "初始化公共配置仓库失败");
   } finally {
     initializing.value = false;
+  }
+}
+
+async function pullRepository(repository: PublicAgentRepositoryStatus) {
+  const branch = repository.currentBranch?.trim();
+  if (!repository.initialized || !branch || pullingServerId.value) {
+    return;
+  }
+  pullingServerId.value = repository.linuxServerId;
+  errorMessage.value = "";
+  successMessage.value = "";
+  try {
+    const updated = await api.pullPublicAgentRepository(repository.linuxServerId, branch, newOperationId(), false);
+    rows.value = rows.value.map((row) => (row.linuxServerId === updated.linuxServerId ? updated : row));
+    successMessage.value = `服务器 ${updated.linuxServerId} 公共配置仓库已拉取到最新`;
+  } catch (error) {
+    errorMessage.value = formatError(error, "拉取公共配置仓库失败");
+  } finally {
+    pullingServerId.value = null;
   }
 }
 
@@ -204,14 +224,25 @@ function newOperationId() {
               <td class="ta-opencode-config-mono">{{ shortHash(row.commitHash) }}</td>
               <td class="ta-opencode-config-message">{{ formatNullable(row.message) }}</td>
               <td>
-                <button
-                  type="button"
-                  class="ta-opencode-config-btn"
-                  :disabled="!row.initializationAllowed || initializing"
-                  @click="openInitializeDialog(row)"
-                >
-                  初始化
-                </button>
+                <div class="ta-opencode-config-actions">
+                  <button
+                    type="button"
+                    class="ta-opencode-config-btn"
+                    :disabled="!row.initializationAllowed || initializing"
+                    @click="openInitializeDialog(row)"
+                  >
+                    初始化
+                  </button>
+                  <button
+                    type="button"
+                    class="ta-opencode-config-btn"
+                    :disabled="!row.initialized || !row.currentBranch || pullingServerId !== null"
+                    @click="pullRepository(row)"
+                  >
+                    <Loader2 v-if="pullingServerId === row.linuxServerId" class="ta-opencode-config-icon is-spin" />
+                    拉取
+                  </button>
+                </div>
               </td>
             </tr>
           </tbody>
@@ -280,6 +311,12 @@ function newOperationId() {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.ta-opencode-config-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
 }
 .ta-opencode-config-toolbar {
   padding: 12px 14px;

@@ -119,6 +119,14 @@ function api(overrides: Partial<BackendApiClient> = {}) {
     getOpencodeRuntimeManagementOverview: vi.fn().mockResolvedValue(emptyRuntimeOverview),
     listPublicAgentRepositories: vi.fn().mockResolvedValue([publicRepository]),
     listPublicAgentBranches: vi.fn().mockResolvedValue(["main", "develop"]),
+    pullPublicAgentRepository: vi.fn().mockResolvedValue({
+      ...publicRepository,
+      status: "READY",
+      initialized: true,
+      currentBranch: "main",
+      commitHash: "def5678",
+      message: "已拉取"
+    }),
     initializePublicAgentRepository: vi.fn().mockResolvedValue({
       ...publicRepository,
       status: "READY",
@@ -219,6 +227,32 @@ describe("scheduler management panel", () => {
       expect(backendApi.initializePublicAgentRepository).toHaveBeenCalledWith("linux-1", "main", expect.stringMatching(/^aco_/))
     );
     expect(await view.findByText("服务器 linux-1 公共配置仓库已初始化")).toBeTruthy();
+    view.queryClient.clear();
+  });
+
+  it("system management lets super admin pull initialized public opencode repository", async () => {
+    const initializedPublicRepository = {
+      ...publicRepository,
+      status: "READY",
+      initialized: true,
+      currentBranch: "master",
+      commitHash: "abc1234",
+      message: "已初始化"
+    };
+    const backendApi = api({
+      listPublicAgentRepositories: vi.fn().mockResolvedValue([initializedPublicRepository])
+    });
+    const view = renderWithApi(SystemManagementPanel, backendApi);
+
+    await fireEvent.click(view.getByText("配置管理", { selector: ".ta-system-menu-text" }));
+
+    expect(await view.findByText("opencode公共配置管理")).toBeTruthy();
+    await fireEvent.click(view.getByRole("button", { name: "拉取" }));
+
+    await waitFor(() =>
+      expect(backendApi.pullPublicAgentRepository).toHaveBeenCalledWith("linux-1", "master", expect.stringMatching(/^aco_/), false)
+    );
+    expect(await view.findByText("服务器 linux-1 公共配置仓库已拉取到最新")).toBeTruthy();
     view.queryClient.clear();
   });
 });

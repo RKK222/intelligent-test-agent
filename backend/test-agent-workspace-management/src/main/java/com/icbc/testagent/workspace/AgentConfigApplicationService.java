@@ -2,6 +2,7 @@ package com.icbc.testagent.workspace;
 
 import com.icbc.testagent.common.error.ErrorCode;
 import com.icbc.testagent.common.error.PlatformException;
+import com.icbc.testagent.common.git.GitCommandExecutor;
 import com.icbc.testagent.common.git.GitRemoteService;
 import com.icbc.testagent.common.git.GitWorkspaceService;
 import com.icbc.testagent.common.git.GitWorkspaceService.GitDiffFile;
@@ -31,6 +32,7 @@ import com.icbc.testagent.domain.workspace.WorkspaceRepository;
 import com.icbc.testagent.domain.workspace.WorkspaceStatus;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -42,7 +44,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -52,6 +57,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class AgentConfigApplicationService implements ServerBroadcastHandler {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(AgentConfigApplicationService.class);
 
     public static final String PUBLIC_SYNC_EVENT = "agent-config.public-sync-requested";
 
@@ -65,6 +72,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private static final String PUBLIC_AGENT_LEGACY_RELATIVE_ROOT = "opencode/agents";
     private static final String WORKSPACE_AGENT_RELATIVE_ROOT = ".opencode";
     private static final String WORKSPACE_AGENT_LEGACY_RELATIVE_ROOT = ".opencode/agents";
+    private static final long MAX_CONFLICT_FILE_BYTES = 1024L * 1024L;
     private static final Pattern OPERATION_ID_PATTERN = Pattern.compile("^aco_[A-Za-z0-9_-]{8,128}$");
     private static final Pattern WORKTREE_NAME_PATTERN = Pattern.compile("^[A-Za-z0-9._-]{1,64}$");
     private static final DateTimeFormatter WORKTREE_SUFFIX_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd").withZone(ZoneOffset.UTC);
@@ -298,14 +306,13 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     }
 
     /**
-     * "更新公共配置 + 提交并推送"复合操作：先 stage 工作区全部变更并用 commitMessage 生成一次提交，最后 push 到远端并广播同步。
+     * "更新公共配置 + 提交并推送"复合操作：fetch 远端最新提交后提交本地变更，合并远端分支，再 push 并广播同步。
      * <p>
-     * 设计上 <strong>不</strong> 调用 ensurePublicRepositoryReady：先 reset/pull 会破坏本地未提交内容并让后续 stage 无内容可提交。
      * 工作区有未提交修改时按以下语义处理：
      * <ul>
-     *   <li>discardLocalChanges=true：先 {@code git reset --hard HEAD} 放弃受控仓库中的已跟踪修改，再 stage+commit+push；</li>
-     *   <li>discardLocalChanges=false：保留所有本地修改并 stage+commit+push；</li>
-     *   <li>工作区无变更时不产生新 commit，仅返回当前 commit hash（视为幂等成功）。</li>
+     *   <li>discardLocalChanges=true：先 {@code git reset --hard HEAD} 放弃受控仓库中的已跟踪修改，再 fetch+commit+merge+push；</li>
+     *   <li>discardLocalChanges=false：保留所有本地修改并提交，再合并远端分支；</li>
+     *   <li>工作区无变更时不产生新 commit，但仍 fetch+merge+push，确保已有未推送本地提交和远端新增提交正确汇合。</li>
      * </ul>
      * <p>
      * 失败时统一抛 {@link PlatformException}，前端按统一错误格式处理。
@@ -320,6 +327,7 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         String normalizedBranch = requireText(branch, "分支不能为空", "branch");
         String normalizedMessage = requireText(commitMessage, "提交说明不能为空", "commitMessage");
         AgentConfigProgress progress = startProgress(operationId, AgentConfigScope.PUBLIC, null, "update-and-push", normalizedBranch, traceId);
+        GitCommandExecutor.startRecording(command -> progress.command(command, traceId));
         try {
             PublicConfig config = requireEnabledPublicConfig();
             String privateKey = decryptSingleSshKey(userId);
@@ -331,18 +339,35 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
             if (discardLocalChanges && !gitWorkspaceService.isWorktreeClean(repoRoot)) {
                 gitWorkspaceService.resetHardToCommit(repoRoot, "HEAD");
             }
-            String headBefore = gitWorkspaceService.headCommit(repoRoot);
-            progress.step(AgentConfigOperationStep.COMMITTING);
-            gitWorkspaceService.stageAll(repoRoot, privateKey);
-            if (!gitWorkspaceService.isWorktreeClean(repoRoot) || hasStagedChanges(repoRoot)) {
+            boolean mergeInProgress = gitWorkspaceService.isMergeInProgress(repoRoot);
+            if (mergeInProgress) {
+                List<String> unresolved = gitWorkspaceService.conflictPaths(repoRoot);
+                if (!unresolved.isEmpty()) {
+                    throw publicMergeConflict(unresolved, "仍有未解决的公共 Agent 合并冲突");
+                }
+                progress.step(AgentConfigOperationStep.COMMITTING);
                 gitWorkspaceService.commitStaged(repoRoot, normalizedMessage, privateKey);
+            } else {
+                progress.step(AgentConfigOperationStep.PREPARING_REPOSITORY);
+                gitWorkspaceService.fetch(repoRoot, privateKey);
+                progress.step(AgentConfigOperationStep.COMMITTING);
+                gitWorkspaceService.stageAll(repoRoot, privateKey);
+                if (!gitWorkspaceService.isWorktreeClean(repoRoot) || hasStagedChanges(repoRoot)) {
+                    gitWorkspaceService.commitStaged(repoRoot, normalizedMessage, privateKey);
+                }
+                progress.step(AgentConfigOperationStep.MERGING);
+                try {
+                    gitWorkspaceService.mergeBranch(repoRoot, "origin/" + normalizedBranch, privateKey);
+                } catch (PlatformException mergeException) {
+                    List<String> conflictFiles = gitWorkspaceService.conflictPaths(repoRoot);
+                    if (!conflictFiles.isEmpty()) {
+                        throw publicMergeConflict(conflictFiles, "公共 Agent 合并远端分支产生冲突，请解决后重新提交并推送");
+                    }
+                    throw mergeException;
+                }
             }
-            String headAfter = gitWorkspaceService.headCommit(repoRoot);
-            boolean hasNewCommit = !headBefore.equals(headAfter);
-            if (hasNewCommit) {
-                progress.step(AgentConfigOperationStep.PUSHING);
-                gitWorkspaceService.push(repoRoot, normalizedBranch, false, privateKey);
-            }
+            progress.step(AgentConfigOperationStep.PUSHING);
+            gitWorkspaceService.push(repoRoot, normalizedBranch, false, privateKey);
             String commitHash = gitWorkspaceService.headCommit(repoRoot);
             progress.step(AgentConfigOperationStep.BROADCASTING);
             broadcastPublicSync(normalizedBranch, commitHash, "update-and-push", traceId);
@@ -353,6 +378,8 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         } catch (Exception exception) {
             progress.failed(ErrorCode.INTERNAL_ERROR.name(), "公共 Agent 配置更新并推送失败");
             throw new PlatformException(ErrorCode.INTERNAL_ERROR, "公共 Agent 配置更新并推送失败", Map.of(), exception);
+        } finally {
+            GitCommandExecutor.stopRecording();
         }
     }
 
@@ -362,6 +389,102 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
     private boolean hasStagedChanges(Path repoRoot) {
         String porcelain = gitWorkspaceService.statusPorcelain(repoRoot);
         return !porcelain.trim().isEmpty();
+    }
+
+    private PlatformException publicMergeConflict(List<String> conflictFiles, String message) {
+        return new PlatformException(
+                ErrorCode.CONFLICT,
+                message,
+                Map.of("conflictFiles", List.copyOf(conflictFiles)));
+    }
+
+    public ManagedWorkspaceResponses.WorkspaceGitConflictResponse getPublicGitConflict(String path, String worktreeId) {
+        Path repoRoot = repoRootForPublicOperation(worktreeId);
+        String gitFile = publicGitFile(path);
+        Set<Integer> stages = gitWorkspaceService.conflictStages(repoRoot, gitFile);
+        if (stages.isEmpty()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "文件当前不是未解决的 Git 冲突", Map.of("path", gitFile));
+        }
+        Path resultPath = repoRoot.resolve(gitFile).normalize();
+        return new ManagedWorkspaceResponses.WorkspaceGitConflictResponse(
+                gitFile,
+                conflictRawStatus(repoRoot, gitFile),
+                conflictStageContent(repoRoot, stages, 1, gitFile),
+                conflictStageContent(repoRoot, stages, 2, gitFile),
+                conflictStageContent(repoRoot, stages, 3, gitFile),
+                readConflictWorkingContent(resultPath));
+    }
+
+    public void resolvePublicGitConflict(String path, String resolution, String content, String worktreeId, UserId userId) {
+        Path repoRoot = repoRootForPublicOperation(worktreeId);
+        String gitFile = publicGitFile(path);
+        Set<Integer> stages = gitWorkspaceService.conflictStages(repoRoot, gitFile);
+        if (stages.isEmpty()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "文件当前不是未解决的 Git 冲突", Map.of("path", gitFile));
+        }
+        String mode = requireText(resolution, "冲突解决方式不能为空", "resolution").toUpperCase(Locale.ROOT);
+        String resolved = switch (mode) {
+            case "CURRENT" -> conflictStageContent(repoRoot, stages, 2, gitFile);
+            case "INCOMING" -> conflictStageContent(repoRoot, stages, 3, gitFile);
+            case "BOTH" -> joinConflictSides(
+                    conflictStageContent(repoRoot, stages, 2, gitFile),
+                    conflictStageContent(repoRoot, stages, 3, gitFile));
+            case "MANUAL" -> content;
+            case "DELETE" -> null;
+            default -> throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "不支持的冲突解决方式",
+                    Map.of("resolution", mode));
+        };
+        if ("MANUAL".equals(mode) && content == null) {
+            throw new PlatformException(ErrorCode.VALIDATION_ERROR, "手工解决内容不能为空", Map.of("field", "content"));
+        }
+        Path target = repoRoot.resolve(gitFile).normalize();
+        try {
+            if (resolved == null) {
+                Files.deleteIfExists(target);
+            } else {
+                byte[] bytes = resolved.getBytes(StandardCharsets.UTF_8);
+                if (bytes.length > MAX_CONFLICT_FILE_BYTES) {
+                    throw new PlatformException(ErrorCode.VALIDATION_ERROR, "冲突文件超过 1MB 限制", Map.of("path", gitFile));
+                }
+                Files.createDirectories(target.getParent());
+                Files.writeString(target, resolved, StandardCharsets.UTF_8);
+            }
+            gitWorkspaceService.stageFiles(repoRoot, List.of(gitFile), decryptSingleSshKey(userId));
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "解决公共 Agent Git 冲突失败", Map.of("path", gitFile), exception);
+        }
+    }
+
+    public void abortPublicGitConflict(String worktreeId, UserId userId) {
+        Path repoRoot = repoRootForPublicOperation(worktreeId);
+        if (!gitWorkspaceService.isMergeInProgress(repoRoot)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "当前没有可取消的 Git 合并", Map.of());
+        }
+        gitWorkspaceService.abortMerge(repoRoot, decryptSingleSshKey(userId));
+    }
+
+    public void resolveAllPublicGitConflicts(String resolution, String worktreeId, UserId userId) {
+        Path repoRoot = repoRootForPublicOperation(worktreeId);
+        if (!gitWorkspaceService.isMergeInProgress(repoRoot)) {
+            throw new PlatformException(ErrorCode.CONFLICT, "当前没有可解决的 Git 合并", Map.of());
+        }
+        if (gitWorkspaceService.conflictPaths(repoRoot).isEmpty()) {
+            throw new PlatformException(ErrorCode.CONFLICT, "当前没有未解决的 Git 冲突", Map.of());
+        }
+        String mode = requireText(resolution, "冲突解决方式不能为空", "resolution").toUpperCase(Locale.ROOT);
+        GitWorkspaceService.ConflictResolutionSide side = switch (mode) {
+            case "CURRENT" -> GitWorkspaceService.ConflictResolutionSide.CURRENT;
+            case "INCOMING" -> GitWorkspaceService.ConflictResolutionSide.INCOMING;
+            default -> throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "批量解决只支持 CURRENT 或 INCOMING",
+                    Map.of("resolution", mode));
+        };
+        gitWorkspaceService.resolveAllConflicts(repoRoot, side, decryptSingleSshKey(userId));
     }
 
     public List<FileTreeEntryResponse> listPublicAgentFiles(String relativePath, String worktreeId) {
@@ -1185,6 +1308,48 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         return List.copyOf(normalized);
     }
 
+    private String publicGitFile(String path) {
+        return normalizeFiles(List.of(path)).get(0);
+    }
+
+    private String conflictRawStatus(Path repoRoot, String gitFile) {
+        return gitWorkspaceService.parseStatusPorcelain(gitWorkspaceService.statusPorcelain(repoRoot)).stream()
+                .filter(entry -> entry.path().equals(gitFile))
+                .map(GitStatusEntry::rawStatus)
+                .findFirst()
+                .orElse("UU");
+    }
+
+    private String conflictStageContent(Path repoRoot, Set<Integer> stages, int stage, String gitFile) {
+        return stages.contains(stage) ? gitWorkspaceService.conflictStageContent(repoRoot, stage, gitFile) : null;
+    }
+
+    private String readConflictWorkingContent(Path target) {
+        try {
+            if (!Files.exists(target)) {
+                return null;
+            }
+            if (Files.size(target) > MAX_CONFLICT_FILE_BYTES) {
+                throw new PlatformException(ErrorCode.VALIDATION_ERROR, "冲突文件超过 1MB 限制", Map.of());
+            }
+            return Files.readString(target, StandardCharsets.UTF_8);
+        } catch (PlatformException exception) {
+            throw exception;
+        } catch (Exception exception) {
+            throw new PlatformException(ErrorCode.GIT_UNAVAILABLE, "读取公共 Agent Git 冲突文件失败", Map.of(), exception);
+        }
+    }
+
+    private String joinConflictSides(String current, String incoming) {
+        if (current == null || incoming == null) {
+            throw new PlatformException(
+                    ErrorCode.VALIDATION_ERROR,
+                    "文件删除冲突不能使用保留两者",
+                    Map.of());
+        }
+        return current + (current.endsWith("\n") ? "" : "\n") + incoming;
+    }
+
     private List<String> normalizeWorkspaceAgentFiles(List<String> files) {
         return normalizeFiles(files).stream()
                 .map(this::workspaceAgentGitPath)
@@ -1299,6 +1464,27 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
         private void failed(String errorCode, String errorMessage) {
             operation = agentConfigRepository.saveOperation(operation.failed(errorCode, errorMessage, now()));
             publish("failed", operation);
+        }
+
+        private void command(String command, String traceId) {
+            if (command == null || command.isBlank()) {
+                return;
+            }
+            try {
+                progressSink.publish(new AgentConfigProgressEvent(
+                        operation.operationId(),
+                        "step",
+                        operation.status(),
+                        operation.currentStep().name(),
+                        command,
+                        null,
+                        null,
+                        null,
+                        traceId,
+                        now()));
+            } catch (RuntimeException exception) {
+                LOGGER.warn("发布公共 Agent Git 命令进度事件失败 operationId={} traceId={}", operation.operationId(), traceId, exception);
+            }
         }
 
         private void publish(String type, AgentConfigOperation value) {

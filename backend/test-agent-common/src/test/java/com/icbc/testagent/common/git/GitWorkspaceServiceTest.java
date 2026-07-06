@@ -38,6 +38,21 @@ class GitWorkspaceServiceTest {
     }
 
     @Test
+    void classifiesNonFastForwardPushAsRemoteRejected() {
+        GitCommandFailure failure = GitCommandFailureClassifier.classify(
+                List.of("git", "-C", tempDir.toString(), "push", "origin", "master"),
+                """
+                        ! [rejected]        master -> master (fetch first)
+                        error: failed to push some refs to 'gitee.com:demo/repo.git'
+                        hint: Updates were rejected because the remote contains work that you do not have locally.
+                        """);
+
+        assertThat(failure.type()).isEqualTo("REMOTE_REJECTED");
+        assertThat(failure.message()).isEqualTo("Git 远端拒绝推送");
+        assertThat(failure.hint()).contains("先拉取远端最新提交");
+    }
+
+    @Test
     void createWorktreeCreatesNewBranchFromApplicationBranch() {
         RecordingExecutor executor = new RecordingExecutor("");
         GitWorkspaceService service = new GitWorkspaceService(executor);

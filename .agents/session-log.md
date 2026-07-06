@@ -4166,3 +4166,16 @@ bash /tmp/test-api-after-restart.sh
   - 修改 `frontend/apps/agent-web/src/components/FigmaEditorArea.vue` 的 template、script、CSS，以及新增单元测试 `frontend/apps/agent-web/tests/FigmaEditorArea.test.ts`。
 - Result:
   - 运行 `corepack pnpm test FigmaEditorArea.test.ts --run` 全部通过，所有的聚焦与滚动断言均通过。
+
+### 2026-07-06 - 公共 Agent 提交并推送补齐远端同步、冲突处理和真实进度
+
+- Why:
+  - 公共 Agent 本地仓库存在未推送提交时，前端可能显示“提交成功”但远端实际没有更新；同时远端 `master` 已有新提交，本地 `origin/master` 缓存落后，旧流程没有先 fetch/merge，也没有在公共 Agent 入口复用工作区冲突解决能力。
+- What:
+  - 公共 Agent `update-and-push` 改为 `fetch -> stage/commit -> merge origin/{branch} -> push -> broadcast`，无本次新 commit 时仍继续 merge/push；merge 冲突返回 `CONFLICT` 和 `conflictFiles` 并保留原生 merge 现场，解决后再次提交会先落 merge commit 再 push。
+  - 增加超级管理员公共仓库显式拉取入口、公共冲突读取/逐个解决/批量解决/取消接口，前端复用三方冲突编辑器，并在公共 Agent 提交弹窗展示拉取、暂存提交、合并、推送、广播阶段和当前 Git 命令。
+  - Git push 被远端拒绝时归类为 `REMOTE_REJECTED`，避免统一落到未知错误。
+- How:
+  - 修改 workspace-management 公共 Agent Git 编排、API Controller/DTO、backend-api、AgentConfigPanel 和系统公共配置管理面板；同步 HTTP API、模块 README 与前端 README，并补充后端/前端回归测试。
+- Result:
+  - 定向后端 workspace/API/common 测试、前端 Vitest、前端 typecheck、`git diff --check` 均通过；按 `.env.test` 重启本地服务成功，后端 health/readiness、前端 3000 和 CORS 预检通过。实际远端检查确认 `/Users/kaka/Desktop/intelligent-test-agent/.testagent/agent-opencode/.config` 本地 HEAD 为 `6e12505`，远端 `master` 为 `f85b920`，说明用户先前那次 UI 成功提示没有推送到远端。
