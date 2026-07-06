@@ -1,15 +1,12 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { jumpAam } from "./utils/aamLogin";
+import { useAuthStore } from "./stores/authStore";
 
-/**
- * Token 在 localStorage 中的存储 key，与 authStore 保持一致。
- */
 const TOKEN_KEY = "test-agent.auth.token";
 const UNIFIED_AUTH_ID_KEY = "test-agent.auth.unifiedAuthId";
 
 const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login/";
 
-// SPA 客户端路由：/ 工作台、/s/:sessionId 只读 transcript、/login 登录页
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -39,10 +36,6 @@ export const router = createRouter({
 
 const LOGIN_REDIRECT_BASE_URL = "http://test-agent.local";
 
-/**
- * 解析登录成功后的跳转目标。
- * 只允许跳回当前 SPA 内已知页面，避免旧的 /error 或外部地址让登录成功后停在空白页。
- */
 export function resolveLoginRedirect(rawRedirect: unknown): string {
   if (typeof rawRedirect !== "string") {
     return "/";
@@ -75,14 +68,12 @@ function isKnownLoginRedirectPath(pathname: string): boolean {
   return pathname === "/" || /^\/s\/[^/]+$/.test(pathname);
 }
 
-/**
- * 全局前置守卫：检查用户是否已登录，未登录时跳转登录页。
- * 登录页和勿需登录的路径直接放行。
- */
 router.beforeEach(async (to, _from) => {
   if (to.name === "login") {
     return true;
   }
+
+  const authStore = useAuthStore();
 
   const unifiedAuthId = to.query.userId;
   if (unifiedAuthId && typeof unifiedAuthId === "string") {
@@ -103,7 +94,7 @@ router.beforeEach(async (to, _from) => {
 
       const data = await response.json();
       if (data.data && data.data.token) {
-        localStorage.setItem(TOKEN_KEY, data.data.token);
+        authStore.saveToken(data.data.token);
         localStorage.setItem(UNIFIED_AUTH_ID_KEY, unifiedAuthId);
       }
     } catch (error) {
@@ -116,6 +107,10 @@ router.beforeEach(async (to, _from) => {
   if (!token) {
     jumpAam(window.location.href, AAM_BASE_URL);
     return false;
+  }
+
+  if (!authStore.token) {
+    authStore.saveToken(token);
   }
 
   return true;
