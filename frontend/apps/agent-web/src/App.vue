@@ -6,15 +6,18 @@ import { watch } from "vue";
 import { RouterView, useRouter } from "vue-router";
 import { jumpAam } from "./utils/aamLogin";
 
-const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login//";
+const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login2//";
 
 const authStore = useAuthStore();
 const router = useRouter();
 
-// 监听 URL 变化，切换页面时检查登录状态，未登录则跳转 AAM 认证
 watch(
   () => router.currentRoute.value.fullPath,
   () => {
+    const urlToken = router.currentRoute.value.query.token;
+    if (urlToken && typeof urlToken === "string") {
+      authStore.saveToken(urlToken);
+    }
     const token = authStore.token;
     if (!token && router.currentRoute.value.name !== "login") {
       jumpAam(window.location.href, AAM_BASE_URL);
@@ -27,6 +30,7 @@ watch(
  * 任何组件遇到 401 错误时可调用此方法。
  */
 function handleUnauthorized() {
+  console.log('>>>>>>>>>>登录校验>>>>>>>>>>',AAM_BASE_URL)
   authStore.clearAuth();
   jumpAam(window.location.href, AAM_BASE_URL);
 }

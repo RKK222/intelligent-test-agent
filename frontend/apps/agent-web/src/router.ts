@@ -79,9 +79,13 @@ function isKnownLoginRedirectPath(pathname: string): boolean {
  * 登录页和勿需登录的路径直接放行。
  */
 router.beforeEach((to, _from) => {
-  // 登录页不需要鉴权
   if (to.name === "login") {
     return true;
+  }
+
+  const urlToken = to.query.token;
+  if (urlToken && typeof urlToken === "string") {
+    localStorage.setItem(TOKEN_KEY, urlToken);
   }
 
   const token = localStorage.getItem(TOKEN_KEY);
