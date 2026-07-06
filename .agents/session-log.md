@@ -4185,9 +4185,10 @@ bash /tmp/test-api-after-restart.sh
 - Why:
   - 用户在公共 Agent 合并冲突后只能看到编辑器里的 Git 冲突标记，不知道哪些文件冲突；提交失败进度弹窗和公共级文件树也缺少直接处理冲突的按钮。
 - What:
-  - 公共级 Agents 树在刷新时自动读取公共 diff，冲突文件行标红并显示“冲突”标记；公共级下新增冲突文件列表，提供逐个“处理冲突”、全部保留本地、全部采用远端和取消合并按钮。
+  - 公共级 Agents 树在刷新时通过轻量 `GET /public/git-conflicts` 只读取未解决冲突路径，避免拉取完整 diff patch；冲突文件行标红并显示“冲突”标记；公共级下新增冲突文件列表，提供逐个“处理冲突”、全部保留本地、全部采用远端和取消合并按钮。
   - 公共 Agent 提交失败弹窗在合并冲突时直接列出冲突文件，并提供相同处理按钮；点击“处理冲突”打开既有三方冲突编辑器。
+  - 公共 Agent 合并编辑器弹框宽度提升到桌面端约 1120px，并保留小屏 `calc(100vw - 48px)` 自适应。
 - How:
-  - 复用 `AgentConfigPanel` 已有公共冲突 API 和 `MergeConflictEditor`，只扩展面板可见入口和 `AgentConfigTreeNode` 冲突标识，不新增后端接口。
+  - 复用 `GitWorkspaceService.conflictPaths`、`AgentConfigPanel` 已有公共冲突处理 API 和 `MergeConflictEditor`，新增轻量冲突路径 HTTP/API client 方法，并扩展面板可见入口和 `AgentConfigTreeNode` 冲突标识。
 - Result:
-  - `corepack pnpm test -- apps/agent-web/tests/agent-config-panel.test.ts`、`corepack pnpm typecheck` 和 `git diff --check` 通过。
+  - `corepack pnpm test -- apps/agent-web/tests/agent-config-panel.test.ts`、`corepack pnpm typecheck`、`mvn -pl test-agent-api -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=AgentConfigControllerTest test` 和 `git diff --check` 通过。

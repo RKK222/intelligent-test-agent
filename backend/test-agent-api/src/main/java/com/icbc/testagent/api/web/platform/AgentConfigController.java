@@ -156,6 +156,22 @@ public class AgentConfigController {
                 RuntimeApiSupport.traceId(exchange)));
     }
 
+    @GetMapping("/public/git-conflicts")
+    public ApiResponse<Object> listPublicGitConflicts(
+            @RequestParam(required = false) String worktreeId,
+            @RequestParam(required = false) String linuxServerId,
+            ServerWebExchange exchange) {
+        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return publicConflictTarget(worktreeId, linuxServerId)
+                .map(target -> routingService.forward(
+                        exchange,
+                        target,
+                        null,
+                        new TypeReference<ApiResponse<Object>>() {}))
+                .orElseGet(() -> ok(exchange, new AgentConfigDtos.GitConflictFilesResponse(
+                        service.publicGitConflictFiles(worktreeId))));
+    }
+
     @GetMapping("/public/git-conflict")
     public ApiResponse<Object> getPublicGitConflict(
             @RequestParam String path,

@@ -61,6 +61,7 @@ const errorMessage = ref("");
 const activeScope = ref<Scope | null>(null);
 const activeFileByScope = ref<Record<Scope, string | null>>({ PUBLIC: null, WORKSPACE: null });
 const diffFiles = ref<AgentConfigDiffFile[]>([]);
+const publicConflictPathHints = ref<string[]>([]);
 const selectedDiffPath = ref("");
 const commitMessage = ref("");
 const progressEvents = ref<AgentConfigProgressEvent[]>([]);
@@ -82,9 +83,18 @@ const publicConfigLinuxServerId = computed<string | null>({
 const busy = ref(false);
 const activeWorktree = computed(() => activeScope.value === "PUBLIC" ? publicWorktree.value : workspaceWorktree.value);
 const selectedDiff = computed(() => diffFiles.value.find((file) => file.path === selectedDiffPath.value) ?? diffFiles.value[0]);
-const publicConflictFiles = computed(() =>
-  activeScope.value === "PUBLIC" ? diffFiles.value.filter((file) => isConflictFile(file)) : []
-);
+const publicConflictFiles = computed<AgentConfigDiffFile[]>(() => {
+  const byPath = new Map<string, AgentConfigDiffFile>();
+  if (activeScope.value === "PUBLIC") {
+    diffFiles.value.filter((file) => isConflictFile(file)).forEach((file) => byPath.set(file.path, file));
+  }
+  publicConflictPathHints.value.forEach((path) => {
+    if (!byPath.has(path)) {
+      byPath.set(path, { path, status: "conflict", staged: false, patch: "" });
+    }
+  });
+  return Array.from(byPath.values());
+});
 const publicConflictPathSet = computed(() => new Set(publicConflictFiles.value.map((file) => file.path)));
 const firstPublicConflictFile = computed(() => publicConflictFiles.value[0] ?? null);
 const activeAgentFile = computed(() => {
@@ -127,7 +137,7 @@ async function refreshAll() {
     await Promise.allSettled(tasks);
     if (token !== refreshAllToken) return;
     if (props.canWrite && status.value.PUBLIC?.enabled !== false) {
-      await loadDiff("PUBLIC");
+      await loadPublicConflictFiles();
     }
   } finally {
     if (token === refreshAllToken) {
@@ -494,6 +504,16 @@ async function openPublicConflict(path: string) {
   }
 }
 
+async function loadPublicConflictFiles() {
+  if (!props.canWrite || status.value.PUBLIC?.enabled === false) return;
+  try {
+    const response = await api.getPublicAgentGitConflictFiles(publicWorktree.value?.worktreeId, publicConflictLinuxServerId());
+    publicConflictPathHints.value = response.files;
+  } catch (error) {
+    errorMessage.value = formatAgentConfigError(error, "加载公共 Agent 冲突文件失败");
+  }
+}
+
 function openFirstPublicConflict() {
   const first = firstPublicConflictFile.value;
   if (!first) return;
@@ -514,6 +534,7 @@ async function resolvePublicConflict(payload: { resolution: WorkspaceGitConflict
     });
     activePublicConflict.value = null;
     await loadDiff("PUBLIC");
+    await loadPublicConflictFiles();
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, "解决公共 Agent Git 冲突失败");
   } finally {
@@ -533,6 +554,7 @@ async function resolveAllPublicConflicts(resolution: "CURRENT" | "INCOMING") {
     });
     activePublicConflict.value = null;
     await loadDiff("PUBLIC");
+    await loadPublicConflictFiles();
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, "批量解决公共 Agent Git 冲突失败");
   } finally {
@@ -548,6 +570,7 @@ async function abortPublicConflict() {
     await api.abortPublicAgentGitConflict(publicWorktree.value?.worktreeId, publicConflictLinuxServerId());
     activePublicConflict.value = null;
     await loadDiff("PUBLIC");
+    await loadPublicConflictFiles();
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, "取消公共 Agent Git 合并失败");
   } finally {
@@ -1003,6 +1026,9 @@ async function loadDiff(scope = activeScope.value) {
       ? await api.getPublicAgentDiff(worktreeId(scope))
       : await api.getWorkspaceAgentDiff(props.workspaceId!, worktreeId(scope));
     diffFiles.value = diff.files;
+    if (scope === "PUBLIC") {
+      publicConflictPathHints.value = diff.files.filter((file) => isConflictFile(file)).map((file) => file.path);
+    }
     selectedDiffPath.value = diff.files[0]?.path ?? "";
   } catch (error) {
     errorMessage.value = formatAgentConfigError(error, "加载 Agent Diff 失败");
@@ -1837,6 +1863,11 @@ defineExpose({
   justify-content: center;
   background: rgba(0, 0, 0, 0.35);
   padding: 24px;
+}
+.agent-merge-overlay :deep(.merge-editor) {
+  width: min(1120px, calc(100vw - 48px));
+  height: min(920px, calc(100vh - 48px));
+  max-width: calc(100vw - 48px);
 }
 .agent-modal-alert,
 .agent-modal-loading {

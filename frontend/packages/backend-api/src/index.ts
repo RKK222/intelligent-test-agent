@@ -695,11 +695,7 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         body: JSON.stringify({ branch, operationId, discardLocalChanges })
       }),
     /**
-     * 公共配置"提交并推送"复合接口：不预拉取远端，直接提交当前工作区变更并推送到远端。
-     * @param payload.branch 远端分支
-     * @param payload.commitMessage 提交说明（必填）
-     * @param payload.operationId 进度 operationId
-     * @param payload.discardLocalChanges 是否覆盖受控仓库的已跟踪修改
+     * 公共配置"提交并推送"复合接口：fetch 远端后提交本地变更、merge 远端分支并推送。
      */
     updatePublicAgentConfigAndPush: (payload: {
       branch: string;
@@ -711,6 +707,10 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
         method: "POST",
         body: JSON.stringify(payload)
       }),
+    getPublicAgentGitConflictFiles: (worktreeId?: string | null, linuxServerId?: string | null) =>
+      request<{ files: string[] }>(
+        `${agentConfigBase}/public/git-conflicts${query({ worktreeId, linuxServerId })}`
+      ),
     getPublicAgentGitConflict: (path: string, worktreeId?: string | null, linuxServerId?: string | null) =>
       request<WorkspaceGitConflict>(
         `${agentConfigBase}/public/git-conflict${query({ path, worktreeId, linuxServerId })}`

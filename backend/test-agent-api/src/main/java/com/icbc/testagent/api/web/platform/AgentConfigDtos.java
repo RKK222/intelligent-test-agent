@@ -25,6 +25,9 @@ final class AgentConfigDtos {
             Boolean discardLocalChanges) {
     }
 
+    record GitConflictFilesResponse(List<String> files) {
+    }
+
     record WorktreeRequest(String baseName, String branch, String operationId, String linuxServerId) {
     }
 

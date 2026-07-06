@@ -25,6 +25,7 @@ const apiClientMock = vi.hoisted(() => ({
   writeWorkspaceAgentFile: vi.fn(),
   updatePublicAgentConfig: vi.fn(),
   updatePublicAgentConfigAndPush: vi.fn(),
+  getPublicAgentGitConflictFiles: vi.fn(),
   getPublicAgentDiff: vi.fn(),
   getWorkspaceAgentDiff: vi.fn(),
   stagePublicAgentFiles: vi.fn(),
@@ -83,6 +84,7 @@ describe("AgentConfigPanel", () => {
     apiClientMock.writeWorkspaceAgentFile.mockResolvedValue(undefined);
     apiClientMock.updatePublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED" });
     apiClientMock.updatePublicAgentConfigAndPush.mockResolvedValue({ status: "SUCCEEDED", commitHash: "newcommit123" });
+    apiClientMock.getPublicAgentGitConflictFiles.mockResolvedValue({ files: [] });
     apiClientMock.getPublicAgentDiff.mockResolvedValue({ files: [] });
     apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({ files: [] });
     apiClientMock.stagePublicAgentFiles.mockResolvedValue(undefined);
@@ -138,6 +140,19 @@ describe("AgentConfigPanel", () => {
     await waitFor(() => expect(apiClientMock.listPublicAgentFiles).toHaveBeenCalled());
     await waitFor(() => expect(apiClientMock.listWorkspaceAgentFiles).toHaveBeenCalledWith("wrk_1234567890abcdef", "", undefined));
     resolvePublicFiles([]);
+  });
+
+  it("loads public conflict file names without fetching full public diff on startup", async () => {
+    apiClientMock.getPublicAgentGitConflictFiles.mockResolvedValueOnce({
+      files: ["opencode/agents/test-design-agent.md"]
+    });
+
+    const { view } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.getPublicAgentGitConflictFiles).toHaveBeenCalledWith(undefined, "linux-1"));
+    expect(apiClientMock.getPublicAgentDiff).not.toHaveBeenCalled();
+    expect(await view.findByText("公共级存在 1 个冲突文件")).toBeTruthy();
+    expect(await view.findByText("opencode/agents/test-design-agent.md")).toBeTruthy();
   });
 
   it("renders agent files with VS Code codicons and compact tree rows", async () => {

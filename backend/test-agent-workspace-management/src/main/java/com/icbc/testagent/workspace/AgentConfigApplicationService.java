@@ -415,6 +415,10 @@ public class AgentConfigApplicationService implements ServerBroadcastHandler {
                 readConflictWorkingContent(resultPath));
     }
 
+    public List<String> publicGitConflictFiles(String worktreeId) {
+        return gitWorkspaceService.conflictPaths(repoRootForPublicOperation(worktreeId));
+    }
+
     public void resolvePublicGitConflict(String path, String resolution, String content, String worktreeId, UserId userId) {
         Path repoRoot = repoRootForPublicOperation(worktreeId);
         String gitFile = publicGitFile(path);
