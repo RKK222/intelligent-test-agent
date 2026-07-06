@@ -50,6 +50,12 @@ import {
   type EditorTab
 } from "@test-agent/workbench-shell";
 import { useAuthStore } from "../stores/authStore";
+import {
+  createContextId,
+  serializeChatContexts,
+  useChatContextStore,
+  validateChatSend
+} from "../stores/chatContextStore";
 import FigmaShell from "./FigmaShell.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
 import FigmaEditorArea from "./FigmaEditorArea.vue";
@@ -103,6 +109,7 @@ provide("api", api);
 const queryClient = useQueryClient();
 const workbench = useWorkbenchStore();
 const authStore = useAuthStore();
+const chatContextStore = useChatContextStore();
 const router = useRouter();
 const OPENCODE_PROCESS_STATUS_FAST_REFETCH_INTERVAL_MS = 5000;
 const OPENCODE_PROCESS_STATUS_READY_REFETCH_INTERVAL_MS = 30000;
@@ -1200,6 +1207,7 @@ watch(activePath, () => {
 watch(selectedWorkspaceIdRef, (id, previous) => {
   if (previous && previous !== id) {
     void queryClient.cancelQueries({ queryKey: ["runtime", "agents", previous], exact: true });
+    chatContextStore.clearContexts();
   }
   if (id) {
     workspaceFileRouteReadyById.value = { ...workspaceFileRouteReadyById.value, [id]: false };
@@ -2516,6 +2524,90 @@ async function openFile(path: string) {
   }
 }
 
+function fileNameOf(path: string): string {
+  return path.split(/[\\/]+/).filter(Boolean).at(-1) ?? path;
+}
+
+function notifyChatContextValidation(result: { ok: true } | { ok: false; reason: string }, successTitle?: string) {
+  if (!result.ok) {
+    feedback.value = { kind: "info", title: "无法添加上下文", description: result.reason };
+    return;
+  }
+  if (successTitle) {
+    feedback.value = { kind: "success", title: successTitle };
+  }
+}
+
+function addCurrentSelectionToChatContext() {
+  if (!activeTab.value?.path || !editorSelection.value?.text.trim()) {
+    feedback.value = { kind: "info", title: "请先选中文本", description: "在编辑器中选中代码或文本后再添加到对话。" };
+    return;
+  }
+  const tab = activeTab.value;
+  const selection = editorSelection.value;
+  const text = selection.text;
+  const result = chatContextStore.addSelectionContext({
+    id: createContextId(),
+    type: "selection",
+    source: "workspace",
+    path: tab.path,
+    fileName: fileNameOf(tab.path),
+    language: languageFromPath(tab.path),
+    startLine: selection.startLineNumber,
+    endLine: selection.endLineNumber,
+    text,
+    charCount: text.length,
+    createdAt: Date.now()
+  });
+  notifyChatContextValidation(result, "已添加选区上下文");
+}
+
+function looksBinaryContent(content: string): boolean {
+  if (!content) return false;
+  if (content.includes("\u0000")) return true;
+  const sample = content.slice(0, 4096);
+  let control = 0;
+  for (let i = 0; i < sample.length; i += 1) {
+    const code = sample.charCodeAt(i);
+    if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
+      control += 1;
+    }
+  }
+  return sample.length > 0 && control / sample.length > 0.08;
+}
+
+async function addWorkspaceFileToChatContext(path: string) {
+  if (!selectedWorkspace.value) {
+    feedback.value = { kind: "info", title: "未选择工作区", description: "请先切换到可用工作区。" };
+    return;
+  }
+  try {
+    const file = await api.readFile(selectedWorkspace.value.workspaceId, path);
+    if (looksBinaryContent(file.content)) {
+      feedback.value = { kind: "info", title: "暂不支持添加二进制文件", description: path };
+      return;
+    }
+    const content = file.content;
+    const lineCount = content.length === 0 ? 0 : content.split("\n").length;
+    const result = chatContextStore.addFileContext({
+      id: createContextId(),
+      type: "file",
+      source: "workspace",
+      path,
+      fileName: fileNameOf(path),
+      language: languageFromPath(path),
+      content,
+      charCount: content.length,
+      lineCount,
+      sizeBytes: new Blob([content]).size,
+      createdAt: Date.now()
+    });
+    notifyChatContextValidation(result, "已添加文件上下文");
+  } catch (error) {
+    feedback.value = errorFeedback("添加文件上下文失败", error);
+  }
+}
+
 async function openAgentFile(payload: { scope: "PUBLIC" | "WORKSPACE"; path: string; content: FileContent; readonly: boolean; worktreeId?: string | null; linuxServerId?: string | null }) {
   centerMode.value = "editor";
   const tabPath = agentTabPath(payload.scope, payload.path, payload.worktreeId, payload.linuxServerId);
@@ -2580,12 +2672,23 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
     feedback.value = { kind: "info", title: "未选择工作区", description: "请先切换到应用版本或个人工作区，再发送任务。" };
     return;
   }
-  const parts = buildPromptParts(prompt, activeTab.value, attachments, diffContextParts.value, editorSelection.value);
+  const sendValidation = validateChatSend(prompt.trim(), chatContextStore.items);
+  if (!sendValidation.ok) {
+    feedback.value = { kind: "info", title: "上下文过长", description: sendValidation.reason };
+    return;
+  }
+  const serializedPrompt = serializeChatContexts(prompt, chatContextStore.items);
+  // 显式上下文附件存在时，不再叠加旧的“当前活动编辑器/选区”隐式 PromptPart，
+  // 避免同一选区或整个活动文件在本轮请求中重复进入模型上下文。
+  const implicitEditorTab = chatContextStore.items.length === 0 ? activeTab.value : undefined;
+  const implicitEditorSelection = chatContextStore.items.length === 0 ? editorSelection.value : undefined;
+  const parts = buildPromptParts(serializedPrompt, implicitEditorTab, attachments, diffContextParts.value, implicitEditorSelection);
   const displayPrompt = prompt.trim() || promptFromParts(parts);
-  lastPrompt.value = displayPrompt;
+  const submitPrompt = serializedPrompt.trim() || displayPrompt;
+  lastPrompt.value = submitPrompt;
   diffContextParts.value = [];
   dispatchChat({ type: "user.submitted", prompt: displayPrompt, parts });
-  if (!displayPrompt) {
+  if (!submitPrompt) {
     return;
   }
   // 启动计时 + 重置任务消耗累计（lastDuration/lastTokens 保留上一轮终态以供刷新对比）
@@ -2594,12 +2697,12 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   // 解析命令（包括 Skill Command，格式为 /skill-name）
   const command = parseCommand(prompt, promptMode.value);
   if (runtimeBusy.value) {
-    followUpQueue.value = enqueueFollowUp(followUpQueue.value, createFollowUpDraft(displayPrompt, parts, undefined, command ?? undefined));
+    followUpQueue.value = enqueueFollowUp(followUpQueue.value, createFollowUpDraft(submitPrompt, parts, undefined, command ?? undefined));
     feedback.value = { kind: "info", title: "Prompt 已排队", description: `等待当前 Run 完成后继续执行，队列 ${followUpQueue.value.length} 条` };
     return;
   }
   // slash 技能和普通消息统一创建平台 Run，才能复用 SSE、刷新恢复和终止能力。
-  const runDraft: AutoRetryRunDraft = { prompt: displayPrompt, parts, title: displayPrompt, command: command ?? undefined };
+  const runDraft: AutoRetryRunDraft = { prompt: submitPrompt, parts, title: displayPrompt, command: command ?? undefined };
   lastRunDraft.value = runDraft;
   clearRunEventSseFeedback();
   dispatchChat({ type: "run.requested" });
@@ -3497,6 +3600,7 @@ async function handleLogout() {
           :file-tree-error="fileTreeError"
           @toggle-directory="toggleDirectory"
           @open-file="openFile"
+          @add-file-context="addWorkspaceFileToChatContext"
           @open-diff="handleOpenDiff"
           @refresh="refreshCurrentWorkspacePanels"
           @changes-refreshed="(payload) => refreshWorkspaceGitDiff({
@@ -3589,6 +3693,7 @@ async function handleLogout() {
           @activate="(path: string) => workbench.setActivePath(path)"
           @close="handleCloseTab"
           @close-many="handleCloseTabs"
+          @add-file-context="addWorkspaceFileToChatContext"
           @editor-action="() => {}"
           @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
           @select-version="handleSelectVersion"
@@ -3606,6 +3711,7 @@ async function handleLogout() {
             :show-preview="markdownPreview"
             @change="(content: string) => activeTab && workbench.updateTabContent(activeTab.path, content)"
             @save="() => activeTab && !activeTab.livePreview && saveMutation.mutate(activeTab)"
+            @add-selection-context="addCurrentSelectionToChatContext"
             @selection-change="(selection: EditorSelectionContext | undefined) => (editorSelection = selection)"
           />
         </FigmaEditorArea>
@@ -3637,6 +3743,10 @@ async function handleLogout() {
           :permissions="chatState.permissions"
           :questions="chatState.questions"
           :todos="chatState.todos"
+          :chat-contexts="chatContextStore.items"
+          :chat-context-total-chars="chatContextStore.totalCharCount"
+          :chat-context-over-limit="chatContextStore.isOverLimit"
+          :chat-context-error="chatContextStore.lastError"
           :selected-model-label="selectedModelLabel"
           :model-picker-disabled="false"
           :agents="agents"
@@ -3671,6 +3781,8 @@ async function handleLogout() {
           @select-model="(model) => selectRuntimeModel(model)"
           @submit-feedback="handleSubmitFeedback"
           @clear-raw-output="clearCurrentRawOutput"
+          @remove-chat-context="chatContextStore.removeContext"
+          @clear-chat-contexts="chatContextStore.clearContexts"
           @close="rightPanelOpen = false"
         />
       </div>

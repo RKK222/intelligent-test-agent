@@ -46,6 +46,9 @@ import aiHeaderUrl from '../assets/figma/ai-header.svg'
 import planLoadingUrl from '../assets/figma/plan-loadding.gif'
 import panelCloseUrl from '../assets/figma/panel-close.svg'
 import { MarkdownView, OpencodeTimeline, TodoPanel, createOpencodeLikeState, type OpencodeLikeRuntimeStatus } from '@test-agent/agent-chat'
+import ChatContextAttachmentList from './ChatContextAttachmentList.vue'
+import type { ChatContextItem } from '../stores/chatContextStore'
+import { validateChatSend } from '../stores/chatContextStore'
 
 type ChatMessageInput = AgentMessage & { content?: string }
 
@@ -665,6 +668,11 @@ const props =
     streamingTextByPartId?: Record<string, string>
     /** opencode todo.updated 投影出的任务列表，固定展示在输入框上方。 */
     todos?: TodoItem[]
+    /** 用户从工作区添加到本轮对话的选区/文件上下文附件。 */
+    chatContexts?: ChatContextItem[]
+    chatContextTotalChars?: number
+    chatContextOverLimit?: boolean
+    chatContextError?: string | null
     /** permission.asked 投影出的待处理权限请求。 */
     permissions?: PermissionRequest[]
     /** question.asked 投影出的待处理提问请求。 */
@@ -682,6 +690,7 @@ const props =
     rawOutputEntries: () => [],
     streamingTextByPartId: () => ({}),
     todos: () => [],
+    chatContexts: () => [],
     permissions: () => [],
     questions: () => [],
     messageScopesById: () => ({}),
@@ -708,6 +717,8 @@ const emit =
     (e: 'change-agent', agentId: string): void
     (e: 'refresh-agents'): void
     (e: 'clear-raw-output'): void
+    (e: 'remove-chat-context', id: string): void
+    (e: 'clear-chat-contexts'): void
     (e: 'reply-permission', requestId: string, decision: 'once' | 'always' | 'reject'): void
     (e: 'reply-question', requestId: string, answers: unknown[]): void
     (e: 'reject-question', requestId: string): void
@@ -1749,6 +1760,14 @@ const processSubmitBlocked = computed(
     !processReady.value ||
     (props.processRefreshing && props.processRefreshBlocksSubmit !== false)
 )
+const contextSendValidation = computed(() => validateChatSend(localInput.value.trim(), props.chatContexts ?? []))
+const contextSubmitBlocked = computed(() => !contextSendValidation.value.ok || props.chatContextOverLimit === true)
+const contextSendBlockedReason = computed(() => {
+  if (!contextSendValidation.value.ok) return contextSendValidation.value.reason
+  if (props.chatContextOverLimit) return '上下文超过限制，无法发送'
+  return ''
+})
+const sendSubmitBlocked = computed(() => processSubmitBlocked.value || contextSubmitBlocked.value)
 const processStatusVisible = computed(
   () =>
     props.processRequired || props.processLoading || props.processStatus != null
@@ -2748,7 +2767,7 @@ function formatTime(iso: string) {
 
 function submit() {
   const text = localInput.value.trim()
-  if (!text || processSubmitBlocked.value) return
+  if (!text || sendSubmitBlocked.value) return
   wasStopped.value = false
   wasCompleted.value = false
   wasFailed.value = false
@@ -3788,6 +3807,15 @@ function onCompositionEnd() {
       </template>
     </section>
     <TodoPanel v-if="!activeSubagentSessionId" :todos="todos" />
+    <ChatContextAttachmentList
+      v-if="!activeSubagentSessionId"
+      :items="chatContexts"
+      :total-char-count="chatContextTotalChars ?? 0"
+      :over-limit="chatContextOverLimit || contextSubmitBlocked"
+      :error="chatContextError || contextSendBlockedReason"
+      @remove="emit('remove-chat-context', $event)"
+      @clear="emit('clear-chat-contexts')"
+    />
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div v-if="!activeSubagentSessionId" class="figma-chat-composer">
       <div class="figma-chat-input-card" @click="onComposerCardClick">
@@ -3996,7 +4024,8 @@ function onCompositionEnd() {
             v-if="!running"
             type="button"
             class="figma-chat-send-card"
-            :disabled="!localInput.trim() || processSubmitBlocked"
+            :disabled="!localInput.trim() || sendSubmitBlocked"
+            :title="contextSendBlockedReason || '发送'"
             aria-label="发送"
             @click="submit"
           >

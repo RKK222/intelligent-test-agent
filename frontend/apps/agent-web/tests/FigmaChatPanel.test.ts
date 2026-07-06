@@ -134,6 +134,43 @@ describe("FigmaChatPanel", () => {
     expect(newConversationButton.text()).toBe("");
   });
 
+  it("renders workspace context attachments and blocks oversized input before sending", async () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [],
+        processStatus: { status: "READY", initializable: false, message: "ready" },
+        chatContexts: [
+          {
+            id: "ctx_1",
+            type: "selection",
+            source: "workspace",
+            path: "src/UserService.java",
+            fileName: "UserService.java",
+            startLine: 20,
+            endLine: 35,
+            text: "class UserService {}",
+            charCount: 20,
+            createdAt: 1
+          }
+        ],
+        chatContextTotalChars: 20
+      } as any
+    });
+
+    expect(wrapper.text()).toContain("已添加 1 个上下文");
+    expect(wrapper.text()).toContain("UserService.java");
+    expect(wrapper.text()).toContain("L20-L35");
+
+    await wrapper.get("textarea").setValue("x".repeat(20_001));
+    await wrapper.get(".figma-chat-send-card").trigger("click");
+
+    expect(wrapper.emitted("send")).toBeUndefined();
+    expect(wrapper.text()).toContain("输入内容过长，请精简后再发送");
+
+    await wrapper.get(".chat-context-card-remove").trigger("click");
+    expect(wrapper.emitted("remove-chat-context")).toEqual([["ctx_1"]]);
+  });
+
   it("shows mentionable subagent/all agents when the user types at-sign", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

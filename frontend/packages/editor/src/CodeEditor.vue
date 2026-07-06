@@ -26,6 +26,7 @@ export type CodeEditorProps = {
 export type CodeEditorEmits = {
   change: [content: string];
   save: [];
+  addSelectionContext: [];
   selectionChange: [selection: EditorSelectionContext | undefined];
   "update:showPreview": [enabled: boolean];
 };
@@ -176,6 +177,15 @@ async function ensureMonacoEditor(path: string, content: string) {
       emit("save");
     });
   }
+  inst.addAction({
+    id: "test-agent-add-selection-to-chat-context",
+    label: "添加选中内容到对话",
+    contextMenuGroupId: "navigation",
+    contextMenuOrder: 1.5,
+    run: () => {
+      emit("addSelectionContext");
+    }
+  });
   emitSelection(inst);
 }
 

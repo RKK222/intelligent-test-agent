@@ -37,6 +37,7 @@ const computedTab = computed(() => props.activeTab ?? tab.value);
 const emit = defineEmits<{
   toggleDirectory: [path: string];
   openFile: [path: string];
+  addFileContext: [path: string];
   openDiff: [path: string];
   refresh: [];
   search: [keyword: string];
@@ -150,6 +151,7 @@ function fileIconClass(name: string, path: string) {
         :depth="0"
         @toggle-directory="emit('toggleDirectory', $event)"
         @open-file="emit('openFile', $event)"
+        @add-file-context="emit('addFileContext', $event)"
       />
     </div>
     <div v-else-if="computedTab === 'search'" class="ta-file-tree-scroll">
@@ -172,6 +174,7 @@ function fileIconClass(name: string, path: string) {
           :class="cn('ta-file-tree-row')"
           :style="{ paddingLeft: '6px' }"
           @click="emit('openFile', entry.path)"
+          @contextmenu.prevent="emit('addFileContext', entry.path)"
         >
           <span class="ta-file-tree-file-spacer" />
           <FileIcon :entry="{ name: entry.name, path: entry.path, type: 'file' }" />

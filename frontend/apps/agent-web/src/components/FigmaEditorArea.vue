@@ -38,6 +38,7 @@ const emit = defineEmits<{
   activate: [path: string];
   close: [path: string];
   closeMany: [paths: string[]];
+  addFileContext: [path: string];
   editorAction: [];
   save: [];
   "select-version": [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
@@ -190,6 +191,14 @@ watch(
         role="menu"
         :style="{ left: `${tabMenu.x}px`, top: `${tabMenu.y}px` }"
       >
+        <button
+          type="button"
+          role="menuitem"
+          class="figma-editor-tab-menu-item"
+          @click="emit('addFileContext', tabMenu.path); closeTabMenu()"
+        >
+          添加当前文件到对话
+        </button>
         <button
           type="button"
           role="menuitem"

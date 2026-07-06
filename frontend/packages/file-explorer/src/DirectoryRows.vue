@@ -14,7 +14,7 @@ export type DirectoryRowsProps = {
 </script>
 
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { cn } from "@test-agent/ui-kit";
 import FileIcon from "./FileIcon.vue";
 
@@ -22,6 +22,7 @@ const props = withDefaults(defineProps<DirectoryRowsProps>(), { depth: 0 });
 const emit = defineEmits<{
   toggleDirectory: [path: string];
   openFile: [path: string];
+  addFileContext: [path: string];
 }>();
 
 const entries = computed(() => {
@@ -32,6 +33,28 @@ const entries = computed(() => {
     return a.type === "directory" ? -1 : 1;
   });
 });
+
+const fileContextMenu = ref<{ path: string; x: number; y: number } | null>(null);
+
+function openFileContextMenu(event: MouseEvent, entry: FileTreeEntry) {
+  if (entry.type !== "file") {
+    return;
+  }
+  event.preventDefault();
+  fileContextMenu.value = { path: entry.path, x: event.clientX, y: event.clientY };
+}
+
+function closeFileContextMenu() {
+  fileContextMenu.value = null;
+}
+
+function emitAddFileContext() {
+  if (!fileContextMenu.value) {
+    return;
+  }
+  emit("addFileContext", fileContextMenu.value.path);
+  closeFileContextMenu();
+}
 
 // 目录是否"已知为空"：子项已加载且为空数组。
 // - 未加载：保持 chevron，让用户点击触发懒加载。
@@ -65,6 +88,7 @@ function onRowClick(entry: FileTreeEntry) {
         )"
         :style="{ paddingLeft: depth * 16 + 6 + 'px' }"
         @click="onRowClick(entry)"
+        @contextmenu="openFileContextMenu($event, entry)"
       >
         <span
           v-for="i in depth"
@@ -103,7 +127,64 @@ function onRowClick(entry: FileTreeEntry) {
         :depth="depth + 1"
         @toggle-directory="emit('toggleDirectory', $event)"
         @open-file="emit('openFile', $event)"
+        @add-file-context="emit('addFileContext', $event)"
       />
     </div>
+    <Teleport to="body">
+      <div
+        v-if="fileContextMenu"
+        class="ta-file-context-menu-backdrop"
+        @click="closeFileContextMenu"
+        @contextmenu.prevent="closeFileContextMenu"
+      />
+      <div
+        v-if="fileContextMenu"
+        class="ta-file-context-menu"
+        role="menu"
+        :style="{ left: `${fileContextMenu.x}px`, top: `${fileContextMenu.y}px` }"
+      >
+        <button type="button" role="menuitem" class="ta-file-context-menu-item" @click="emitAddFileContext">
+          添加文件到对话
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
+
+<style scoped>
+.ta-file-context-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2600;
+  background: transparent;
+}
+
+.ta-file-context-menu {
+  position: fixed;
+  z-index: 2601;
+  min-width: 140px;
+  padding: 4px;
+  border: 1px solid #d4d4d8;
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgb(15 23 42 / 18%);
+}
+
+.ta-file-context-menu-item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  padding: 6px 8px;
+  color: #1f2937;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ta-file-context-menu-item:hover {
+  background: #f1f5f9;
+}
+</style>

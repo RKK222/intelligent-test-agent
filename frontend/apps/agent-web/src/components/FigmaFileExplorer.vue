@@ -47,6 +47,7 @@ defineProps<FileExplorerProps & {
 const emit = defineEmits<{
   toggleDirectory: [path: string];
   openFile: [path: string];
+  addFileContext: [path: string];
   openDiff: [payload: string | { path: string; source: "vcs" | "agent"; scope?: "PUBLIC" | "WORKSPACE" }];
   "changes-refreshed": [payload?: {
     paths?: string[];
@@ -244,6 +245,7 @@ defineExpose({
               :search-keyword="searchKeyword"
               @toggle-directory="emit('toggleDirectory', $event)"
               @open-file="emit('openFile', $event)"
+              @add-file-context="emit('addFileContext', $event)"
               @open-diff="emit('openDiff', $event)"
               @refresh="emit('refresh')"
               @search="emit('search', $event)"

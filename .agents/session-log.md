@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-06 - 工作区上下文附件前端接入
+
+- Why:
+  - 企业内部适配优先需要把工作区选区和文件作为对话上下文传给 Agent，并在前端先完成大小拦截，避免超长上下文直接进入模型。
+- What:
+  - 新增 `useChatContextStore`、上下文附件列表/卡片/预览抽屉；接入 Monaco 选区右键、文件树右键菜单和编辑器 Tab 右键菜单；发送时把上下文序列化进 prompt。
+- How:
+  - 第一版不改后端 API/SSE/数据库；显式上下文存在时不再叠加旧的活动编辑器隐式 PromptPart，避免重复携带同一选区或文件。
+- Result:
+  - `agent-web`/`file-explorer`/`editor` typecheck、上下文 store 与聊天面板定向 Vitest、`git diff --check` 通过；现有前端 dev server `http://127.0.0.1:3000` 返回 200。
+
 ### 2026-07-06 - Docker Compose 收敛为仅 opencode worker
 
 - Why:
