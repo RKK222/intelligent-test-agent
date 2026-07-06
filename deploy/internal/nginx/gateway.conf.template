@@ -4,13 +4,11 @@ map $http_upgrade $connection_upgrade {
 }
 
 upstream test_agent_backend {
-    least_conn;
-    server ${TEST_AGENT_BACKEND_1};
-    server ${TEST_AGENT_BACKEND_2};
+    server ${TEST_AGENT_BACKEND};
 }
 
 server {
-    listen 8080;
+    listen ${TEST_AGENT_NGINX_LISTEN_PORT};
     server_name _;
     root ${TEST_AGENT_FRONTEND_ROOT};
     index index.html;

@@ -4308,3 +4308,14 @@ bash /tmp/test-api-after-restart.sh
   - 复用 `GitWorkspaceService.conflictPaths`、`AgentConfigPanel` 已有公共冲突处理 API 和 `MergeConflictEditor`，新增轻量冲突路径 HTTP/API client 方法，并扩展面板可见入口和 `AgentConfigTreeNode` 冲突标识。
 - Result:
   - `corepack pnpm test -- apps/agent-web/tests/agent-config-panel.test.ts`、`corepack pnpm typecheck`、`mvn -pl test-agent-api -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=AgentConfigControllerTest test` 和 `git diff --check` 通过。
+
+### 2026-07-06 - 企业内单服务器部署配置收敛为单实例
+
+- Why:
+  - 企业内第一版部署口径应是一台服务器启动 1 个实体 Nginx、1 份前端 dist、1 个 Java 后端和 1 个 opencode worker 容器，之前示例误按双 Java、双 worker 编排。
+- What:
+  - 将 `deploy/internal/docker-compose.yml` 收敛为单个 `opencode-worker` 服务；`deploy/internal/env.example` 改为单个 `TEST_AGENT_BACKEND` 和单组 `OPENCODE_WORKER_*` 端口变量；Nginx 模板改为单后端 upstream，并用 `TEST_AGENT_NGINX_LISTEN_PORT` 控制入口监听端口。
+- How:
+  - 保留 Java 直接部署、前端 dist 由实体 Nginx 托管、opencode/manager 外挂程序优先的既有设计，只修正实例数量、变量命名和部署说明。
+- Result:
+  - `docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 只解析出一个 worker，且 opencode 端口保持宿主机端口与容器端口一致；脚本语法检查和 `git diff --check` 通过。

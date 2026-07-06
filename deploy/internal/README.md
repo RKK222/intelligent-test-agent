@@ -1,6 +1,6 @@
 # 企业内 Docker 部署文件
 
-本目录提供企业内部署文件：后端按 jar 直接部署，Nginx 按实体服务部署并托管前端 `dist/`，Docker Compose 只负责 2 个 `opencode-worker` 容器。
+本目录提供企业内部署文件，默认按单服务器一套服务部署：1 个实体 Nginx、1 份前端 `dist/`、1 个直接运行的 Java 后端、1 个 `opencode-worker` 容器。Docker Compose 只负责启动这个 `opencode-worker` 容器。
 
 ## 端口约束
 
@@ -16,7 +16,7 @@ Java 后端创建用户 opencode 进程时，会从 manager 上报的 `portStart
 
 ## Java 直接部署前提
 
-两路 Java 后端示例：
+单服务器只启动 1 个 Java 后端。建议 Java 监听本机 `8080`，Nginx 监听对外入口端口，例如 `80`：
 
 ```bash
 server.port=8080
@@ -29,7 +29,7 @@ TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true
 TEST_AGENT_SERVER_BROADCAST_ENABLED=true
 ```
 
-第二路 Java 使用不同 `server.port`，例如 `8081`。如果两路 Java 在同一台 Linux 上，保持相同 `TEST_AGENT_LINUX_SERVER_ID`；如果在不同服务器上，每台服务器使用自己的稳定 ID。Java 的 `SYS_DATA_ROOT_DIR` 需要与 worker 挂载的 `TEST_AGENT_DATA_ROOT` 对齐，默认是 `/data/.testagent`，以便 worker 读取 `.serverid` 和 `.serverhost`。
+Java 的 `SYS_DATA_ROOT_DIR` 需要与 worker 挂载的 `TEST_AGENT_DATA_ROOT` 对齐，默认是 `/data/.testagent`，以便 worker 读取 `.serverid` 和 `.serverhost`。如果后续扩成多服务器部署，每台服务器仍按“一台服务器一套 Nginx、前端、Java、worker”的方式独立配置。
 
 ## 打包交付物
 
@@ -117,7 +117,7 @@ TEST_AGENT_PROGRAM_ROOT=/opt/test-agent/programs
 
 ```bash
 cd deploy/internal
-docker compose --env-file .env restart opencode-worker-1 opencode-worker-2
+docker compose --env-file .env restart opencode-worker
 ```
 
 如果已有用户 `opencode serve` 子进程在运行，建议先通过平台运行管理停止或重启相关用户进程，避免旧子进程继续使用旧版本。
@@ -127,7 +127,7 @@ docker compose --env-file .env restart opencode-worker-1 opencode-worker-2
 实体 Nginx 至少需要做两件事：
 
 - 静态资源根目录指向 `deploy/internal/dist/frontend/` 或解压后的 `test-agent-frontend-dist.tar.gz`。
-- `/api`、SSE 和 WebSocket 请求反向代理到两个直接部署的 Java 后端。
+- `/api`、SSE 和 WebSocket 请求反向代理到本机直接部署的 Java 后端。
 
 `deploy/internal/nginx/` 下的配置文件只作为实体 Nginx 配置参考，不由 Docker Compose 启动。
 
@@ -135,14 +135,14 @@ docker compose --env-file .env restart opencode-worker-1 opencode-worker-2
 
 ```bash
 TEST_AGENT_FRONTEND_ROOT=/opt/test-agent/frontend
-TEST_AGENT_BACKEND_1=127.0.0.1:8080
-TEST_AGENT_BACKEND_2=127.0.0.1:8081
+TEST_AGENT_NGINX_LISTEN_PORT=80
+TEST_AGENT_BACKEND=127.0.0.1:8080
 ```
 
 生成实体 Nginx 配置示例：
 
 ```bash
-envsubst '${TEST_AGENT_FRONTEND_ROOT} ${TEST_AGENT_BACKEND_1} ${TEST_AGENT_BACKEND_2}' \
+envsubst '${TEST_AGENT_NGINX_LISTEN_PORT} ${TEST_AGENT_FRONTEND_ROOT} ${TEST_AGENT_BACKEND}' \
   < deploy/internal/nginx/gateway.conf.template \
   > /etc/nginx/conf.d/test-agent.conf
 ```
@@ -160,7 +160,7 @@ cp deploy/internal/env.example deploy/internal/.env
 - `TEST_AGENT_OPENCODE_MANAGER_TOKEN`
 - `TEST_AGENT_DATA_ROOT`
 - `TEST_AGENT_PROGRAM_ROOT`
-- 两个 worker 的端口池
+- worker 的端口池
 
 启动：
 
