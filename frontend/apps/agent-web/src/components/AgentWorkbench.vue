@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElMessage } from "element-plus";
-import { computed, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, onScopeDispose, provide, ref, shallowRef, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/vue-query";
 import { AgentChat, buildComposerPromptParts, createInitialAgentChatRuntimeState, reduceAgentChatRuntime, type ComposerAttachment } from "@test-agent/agent-chat";
@@ -3103,6 +3103,25 @@ function expandPathToFile(relPath: string) {
   expandedDirectories.value = next;
 }
 
+// 双击 Tab 页：在左侧文件树中展开并滚动定位到对应文件
+function handleLocateFile(path: string) {
+  if (!path) return;
+  workbench.setActivePath(path);
+  expandPathToFile(path);
+  void nextTick(() => {
+    scrollToActiveFileTreeRow();
+    setTimeout(scrollToActiveFileTreeRow, 100);
+    setTimeout(scrollToActiveFileTreeRow, 300);
+  });
+}
+
+function scrollToActiveFileTreeRow() {
+  const activeRowEl = document.querySelector(".ta-file-tree-scroll .ta-file-tree-row.is-active") as HTMLElement | null;
+  if (activeRowEl) {
+    activeRowEl.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }
+}
+
 // 从 tool card 消息的 payload 提取工具名，兼容多种字段名。
 function toolNameFromPayload(payload: Record<string, unknown>): string | undefined {
   const name = payload.toolName ?? payload.tool ?? payload.name;
@@ -3809,6 +3828,7 @@ async function handleLogout() {
           :markdown-preview="markdownPreview"
           :markdown-preview-mode="markdownPreviewMode"
           @activate="(path: string) => workbench.setActivePath(path)"
+          @locate-file="handleLocateFile"
           @close="handleCloseTab"
           @close-many="handleCloseTabs"
           @add-file-context="addWorkspaceFileToChatContext"

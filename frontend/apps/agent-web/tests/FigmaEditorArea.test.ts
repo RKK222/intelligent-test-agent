@@ -117,4 +117,25 @@ describe("FigmaEditorArea", () => {
 
     wrapper.unmount();
   });
+
+  it("emits locateFile when a tab is double clicked", async () => {
+    const wrapper = mount(FigmaEditorArea, {
+      attachTo: document.body,
+      props: {
+        tabs,
+        activePath: "src/b.ts"
+      },
+      global: {
+        stubs: {
+          WorkbenchFooter: true
+        }
+      }
+    });
+
+    const tabEls = wrapper.findAll(".figma-editor-tab");
+    await tabEls[1].trigger("dblclick");
+
+    expect(wrapper.emitted("locateFile")).toEqual([["src/b.ts"]]);
+    wrapper.unmount();
+  });
 });

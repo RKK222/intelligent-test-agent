@@ -40,6 +40,7 @@ const emit = defineEmits<{
   close: [path: string];
   closeMany: [paths: string[]];
   addFileContext: [path: string];
+  locateFile: [path: string];
   editorAction: [];
   save: [];
   "select-version": [payload: { template: AppWorkspaceTemplate; version: AppWorkspaceVersion }];
@@ -136,6 +137,7 @@ watch(
         :aria-selected="activePath === tab.path"
         tabindex="0"
         @click="emit('activate', tab.path)"
+        @dblclick="emit('locateFile', tab.path)"
         @contextmenu="openTabMenu($event, tab.path)"
       >
         <div class="figma-editor-tab-inner">

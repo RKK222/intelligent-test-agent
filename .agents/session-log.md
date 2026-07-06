@@ -25,6 +25,18 @@
   - 只修改 `ReasoningPartGroup.vue`、`ReasoningPartView.vue`、`.oc-reasoning-part*` 样式、包说明和定向时间线测试；不改 Run API、SSE、后端 opencode prompt parts、用户消息附件展示或最终回答样式。
 - Result:
   - `corepack pnpm test packages/agent-chat/tests/opencode-timeline.test.ts packages/agent-chat/tests/user-message-display.test.ts packages/agent-chat/tests/runtime-reducer.test.ts`、`corepack pnpm --filter @test-agent/agent-chat typecheck`、`git diff --check` 通过；浏览器样式读取确认当前回答正文仍为 `.oc-text-part` Markdown 路径。
+### 2026-07-06 - 支持双击编辑器 Tab 页自动展开并定位到左侧文件树
+
+- Why:
+  - 用户希望双击编辑器顶部的文件 Tab 页（如 `OpenCode自我介绍.md`）时，左侧工作区文件树能够立刻展开各层父级目录，并平滑滚动定位到对应的文件节点。
+- What:
+  - `FigmaEditorArea` 增加 Tab 节点 `@dblclick` 事件，向上派发 `locateFile` 事件。
+  - `AgentWorkbench` 监听 `locate-file`，调用 `expandPathToFile` 将所有祖先目录加入 `expandedDirectories` 并按需懒加载；同时触发 `scrollToActiveFileTreeRow` 使用 `scrollIntoView({ block: "nearest", behavior: "smooth" })` 自动将目标文件滚动居中定位。
+- How:
+  - 仅修改前端 `FigmaEditorArea.vue`、`AgentWorkbench.vue` 及对应 Vitest 单元测试，不改动任何后端 API、数据库或环境配置文件。
+- Result:
+  - Vitest 定向测试 `apps/agent-web/tests/FigmaEditorArea.test.ts` 全部 3 个用例通过；`npx vue-tsc --noEmit` 静态类型检查 0 报错。
+
 ### 2026-07-06 - opencode 弱健康检查与前端轮询收敛
 
 - Why:
