@@ -7,6 +7,13 @@ const UNIFIED_AUTH_ID_KEY = "test-agent.auth.unifiedAuthId";
 
 const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login/";
 
+/**
+ * 当前环境标识：localhost 表示本地开发模式，其他值走 AAM 统一认证。
+ * 通过环境变量 VITE_ENV 控制。
+ */
+const APP_ENV = import.meta.env.VITE_ENV ?? "";
+const IS_LOCAL_ENV = APP_ENV === "localhost";
+
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
@@ -106,6 +113,9 @@ router.beforeEach(async (to, _from) => {
 
   const token = sessionStorage.getItem(TOKEN_KEY);
   if (!token) {
+    if (IS_LOCAL_ENV) {
+      return { name: "login", replace: true };
+    }
     jumpAam(window.location.href, AAM_BASE_URL);
     return false;
   }

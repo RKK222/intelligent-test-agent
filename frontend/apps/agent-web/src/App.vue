@@ -7,6 +7,8 @@ import { RouterView, useRouter } from "vue-router";
 import { jumpAam } from "./utils/aamLogin";
 
 const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login2//";
+const APP_ENV = import.meta.env.VITE_ENV ?? "";
+const IS_LOCAL_ENV = APP_ENV === "localhost";
 
 const authStore = useAuthStore();
 const router = useRouter();
@@ -23,7 +25,11 @@ watch(
   () => authStore.token,
   (newToken) => {
     if (!newToken && router.currentRoute.value.name !== "login") {
-      jumpAam(window.location.href, AAM_BASE_URL);
+      if (IS_LOCAL_ENV) {
+        router.replace({ name: "login" });
+      } else {
+        jumpAam(window.location.href, AAM_BASE_URL);
+      }
     }
   }
 );
@@ -35,7 +41,11 @@ watch(
 function handleUnauthorized() {
   console.log('>>>>>>>>>>登录校验>>>>>>>>>>',AAM_BASE_URL)
   authStore.clearAuth();
-  jumpAam(window.location.href, AAM_BASE_URL);
+  if (IS_LOCAL_ENV) {
+    router.replace({ name: "login" });
+  } else {
+    jumpAam(window.location.href, AAM_BASE_URL);
+  }
 }
 
 // 暴露到 window 供非 Vue 上下文使用
