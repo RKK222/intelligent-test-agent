@@ -180,6 +180,57 @@ class GeneratedOpencodeSdkGatewayTest {
     }
 
     @Test
+    void gatewaySummarizesPromptAsyncPartsWithoutLeakingFileContent() {
+        Map<String, Object> request = Map.of(
+                "parts", List.of(
+                        Map.of("type", "text", "text", "what in this"),
+                        Map.of(
+                                "type", "file",
+                                "mime", "text/plain",
+                                "filename", "冲突文件.md",
+                                "url", "data:text/plain;base64,5YaF5a65OiDov5nmmK8=",
+                                "source", Map.of(
+                                        "type", "file",
+                                        "path", "99-测试数据/Git冲突处理/冲突文件.md",
+                                        "text", Map.of(
+                                                "value", "内容：这是远程/应用分支上的修改",
+                                                "start", 4,
+                                                "end", 21)))));
+
+        List<Map<String, Object>> summary = GeneratedOpencodeSdkGateway.summarizePromptAsyncRequest(request);
+
+        assertThat(summary).hasSize(2);
+        assertThat(summary.get(0)).containsEntry("type", "text").containsEntry("textChars", 12);
+        assertThat(summary.get(1))
+                .containsEntry("type", "file")
+                .containsEntry("mime", "text/plain")
+                .containsEntry("filename", "冲突文件.md");
+        assertThat(summary.get(1).get("url"))
+                .isInstanceOfSatisfying(Map.class, url -> {
+                    Map<?, ?> urlSummary = (Map<?, ?>) url;
+                    assertThat(urlSummary.get("scheme")).isEqualTo("data");
+                    assertThat(urlSummary.get("dataUrl")).isEqualTo(true);
+                    assertThat(urlSummary.get("base64Chars")).isEqualTo(20);
+                });
+        assertThat(summary.get(1).get("source"))
+                .isInstanceOfSatisfying(Map.class, source -> {
+                    Map<?, ?> sourceSummary = (Map<?, ?>) source;
+                    assertThat(sourceSummary.get("type")).isEqualTo("file");
+                    assertThat(sourceSummary.get("path")).isEqualTo("99-测试数据/Git冲突处理/冲突文件.md");
+                    assertThat(sourceSummary.get("text"))
+                            .isInstanceOfSatisfying(Map.class, text ->
+                                    {
+                                        Map<?, ?> textSummary = (Map<?, ?>) text;
+                                        assertThat(textSummary.get("present")).isEqualTo(true);
+                                        assertThat(textSummary.get("chars")).isEqualTo(16);
+                                        assertThat(textSummary.get("start")).isEqualTo(4);
+                                        assertThat(textSummary.get("end")).isEqualTo(21);
+                                    });
+                });
+        assertThat(summary.toString()).doesNotContain("内容：这是远程/应用分支上的修改", "5YaF5a65OiDov5nmmK8=");
+    }
+
+    @Test
     void gatewayAbortsSessionWithoutWorkspaceQuery() throws Exception {
         AtomicReference<RequestSnapshot> request = new AtomicReference<>();
         HttpServer server = startServer(exchange -> {

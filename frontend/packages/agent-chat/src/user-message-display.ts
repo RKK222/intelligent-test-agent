@@ -51,13 +51,13 @@ export function workspaceContextAttachmentsFromUserPrompt(text: string): UserPro
       lines: type === "selection" ? attrs.lines : undefined
     });
   }
-  return attachments;
+  return uniqueWorkspaceContextAttachments(attachments);
 }
 
 export function workspaceContextAttachmentsFromPromptParts(
   parts: PromptPart[] | undefined
 ): UserPromptWorkspaceContextAttachment[] {
-  return (parts ?? [])
+  const attachments: UserPromptWorkspaceContextAttachment[] = (parts ?? [])
     .filter((part): part is Extract<PromptPart, { type: "file" }> => part.type === "file")
     .map((part) => {
       const path = part.path ?? part.name ?? "attachment";
@@ -74,6 +74,22 @@ export function workspaceContextAttachmentsFromPromptParts(
             : undefined
       };
     });
+  return uniqueWorkspaceContextAttachments(attachments);
+}
+
+// opencode 实时 message.updated 与本地 optimistic user message 可能携带同一 file part，展示层按来源去重。
+function uniqueWorkspaceContextAttachments(
+  attachments: UserPromptWorkspaceContextAttachment[]
+): UserPromptWorkspaceContextAttachment[] {
+  const seen = new Set<string>();
+  return attachments.filter((attachment) => {
+    const key = `${attachment.type}:${attachment.path}:${attachment.lines ?? ""}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 }
 
 function contextAttributes(source: string): Record<string, string> {

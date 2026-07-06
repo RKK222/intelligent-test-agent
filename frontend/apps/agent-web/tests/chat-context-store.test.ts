@@ -1,9 +1,10 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import {
   CHAT_CONTEXT_LIMITS,
   chatContextItemsToPromptParts,
   serializeChatContexts,
+  summarizeChatContextItems,
   useChatContextStore,
   validateChatSend,
   type ChatContextItem
@@ -76,6 +77,7 @@ describe("chat context store", () => {
 
   it("validates send input and converts contexts to native file prompt parts", () => {
     const items = [selection(), file({ id: "file_2", path: "docs/api.md", fileName: "api.md" })];
+    const debug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
 
     expect(validateChatSend("x".repeat(CHAT_CONTEXT_LIMITS.MAX_USER_INPUT_CHARS + 1), items)).toEqual({
       ok: false,
@@ -111,6 +113,25 @@ describe("chat context store", () => {
           contextType: "file"
         }
       }
+    ]);
+    expect(debug).toHaveBeenCalledWith("workspace_context_parts_built", {
+      component: "chatContextStore",
+      action: "build_prompt_parts",
+      count: 2,
+      partsCount: 2,
+      items: [
+        { type: "selection", path: "src/App.ts", fileName: "App.ts", charCount: "const a = 1;".length, startLine: 3, endLine: 3 },
+        { type: "file", path: "docs/api.md", fileName: "api.md", charCount: "hello\nworld".length }
+      ]
+    });
+    expect(JSON.stringify(debug.mock.calls)).not.toContain("hello\nworld");
+    debug.mockRestore();
+  });
+
+  it("summarizes workspace contexts without logging content", () => {
+    expect(summarizeChatContextItems([selection(), file()])).toEqual([
+      { type: "selection", path: "src/App.ts", fileName: "App.ts", charCount: "const a = 1;".length, startLine: 3, endLine: 3 },
+      { type: "file", path: "README.md", fileName: "README.md", charCount: "hello\nworld".length }
     ]);
   });
 

@@ -14,6 +14,18 @@
 - Result:
   - `bash -n deploy/internal/package-release.sh`、`bash -n deploy/internal/opencode-worker-entrypoint.sh`、`deploy/internal/package-release.sh --help`、`docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 和 `git diff --check` 通过；未实际构建镜像。
 
+### 2026-07-06 - 补充工作区上下文原生附件链路日志
+
+- Why:
+  - 需要证明工作区文件/选区上下文不是另起 `<context>` prompt 拼接链路，而是适配 opencode 原生 `text/file/agent` parts；同时 UI 发送后用户气泡应只显示原始问题并展示关联文件 chip。
+- What:
+  - 前端发送前新增 `workspace_context_parts_built`、`workspace_context_send_prepared` 摘要调试日志；后端 `GeneratedOpencodeSdkGateway` 在调用 `/session/{sessionID}/prompt_async` 前后新增 `opencode_prompt_async_request_prepared`、`opencode_prompt_async_request_accepted` 摘要日志。
+  - 用户消息工作区上下文 chip 按 `type/path/lines` 去重，避免本地 optimistic user message 与 opencode 实时 user file part 重复显示同一附件。
+- How:
+  - 日志只输出 part 类型、路径、文件名、mime、URL scheme/dataUrl、字符数和 source 范围，不输出用户正文、附件正文、完整 data URL、token 或密钥；仍复用既有 Run API parts、后端 `AgentPromptPart` 和 opencode gateway 链路。
+- Result:
+  - 本地 UI 使用 `888888888/123456` 登录、启动 opencode 进程、从工作区文件树右键添加 `99-测试数据/Git冲突处理/冲突文件.md` 并发送，后端日志确认发给 opencode 的 `prompt_async` 为 2 个 parts：text + file，file 为 `data:` URL、`mime=text/plain`、`filename=冲突文件.md`、`source.path=99-测试数据/Git冲突处理/冲突文件.md`、`source.text.chars=59`。
+
 ### 2026-07-06 - 工作区上下文改走原生 file parts
 
 - Why:

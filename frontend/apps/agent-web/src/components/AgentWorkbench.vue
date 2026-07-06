@@ -53,6 +53,7 @@ import { useAuthStore } from "../stores/authStore";
 import {
   chatContextItemsToPromptParts,
   createContextId,
+  summarizeChatContextItems,
   useChatContextStore,
   validateChatSend,
   type ChatContextItem
@@ -2703,6 +2704,19 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   const parts = buildPromptParts(prompt, implicitEditorTab, attachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
   const displayPrompt = prompt.trim() || promptFromParts(parts);
   const submitPrompt = prompt.trim() || displayPrompt;
+  if (chatContextStore.items.length > 0) {
+    console.debug("workspace_context_send_prepared", {
+      component: "AgentWorkbench",
+      action: "send_prompt",
+      contextCount: chatContextStore.items.length,
+      attachmentsCount: attachments.length,
+      diffContextCount: diffContextParts.value.length,
+      partsCount: parts.length,
+      promptChars: prompt.trim().length,
+      contexts: summarizeChatContextItems(chatContextStore.items),
+      parts: summarizePromptParts(parts)
+    });
+  }
   lastPrompt.value = submitPrompt;
   diffContextParts.value = [];
   dispatchChat({ type: "user.submitted", prompt: displayPrompt, parts });
@@ -2727,6 +2741,33 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   dispatchChat({ type: "run.requested" });
   chatContextStore.clearContexts();
   startRunMutation.mutate(runDraft);
+}
+
+function summarizePromptParts(parts: PromptPart[]) {
+  return parts.map((part) => {
+    if (part.type === "file") {
+      return {
+        type: part.type,
+        path: part.path,
+        name: part.name,
+        mimeType: part.mimeType,
+        hasContent: Boolean(part.content),
+        hasUrl: Boolean(part.url),
+        source: part.source
+          ? {
+              contextType: part.source.contextType,
+              startLine: part.source.startLine,
+              endLine: part.source.endLine,
+              hasText: Boolean(part.source.text)
+            }
+          : undefined
+      };
+    }
+    if (part.type === "text") {
+      return { type: part.type, charCount: part.text.length };
+    }
+    return { type: part.type };
+  });
 }
 
 function handleStopRun() {

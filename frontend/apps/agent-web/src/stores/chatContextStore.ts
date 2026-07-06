@@ -40,6 +40,14 @@ export type ChatFileContextItem = {
 export type ChatContextItem = ChatSelectionContextItem | ChatFileContextItem;
 
 export type ChatContextValidationResult = { ok: true } | { ok: false; reason: string };
+export type ChatContextLogSummary = {
+  type: ChatContextItem["type"];
+  path: string;
+  fileName: string;
+  charCount: number;
+  startLine?: number;
+  endLine?: number;
+};
 
 export function createContextId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -115,7 +123,7 @@ function escapeContextAttribute(value: string): string {
 }
 
 export function chatContextItemsToPromptParts(items: ChatContextItem[]): Extract<PromptPart, { type: "file" }>[] {
-  return items.map((item) => {
+  const parts: Extract<PromptPart, { type: "file" }>[] = items.map((item) => {
     if (item.type === "selection") {
       return {
         type: "file",
@@ -147,6 +155,26 @@ export function chatContextItemsToPromptParts(items: ChatContextItem[]): Extract
       }
     };
   });
+  if (items.length > 0) {
+    console.debug("workspace_context_parts_built", {
+      component: "chatContextStore",
+      action: "build_prompt_parts",
+      count: items.length,
+      partsCount: parts.length,
+      items: summarizeChatContextItems(items)
+    });
+  }
+  return parts;
+}
+
+export function summarizeChatContextItems(items: ChatContextItem[]): ChatContextLogSummary[] {
+  return items.map((item) => ({
+    type: item.type,
+    path: item.path,
+    fileName: item.fileName,
+    charCount: item.charCount,
+    ...(item.type === "selection" ? { startLine: item.startLine, endLine: item.endLine } : {})
+  }));
 }
 
 export const useChatContextStore = defineStore("chat-context", () => {

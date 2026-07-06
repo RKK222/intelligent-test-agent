@@ -98,4 +98,40 @@ describe("displayTextFromUserPrompt", () => {
       }
     ]);
   });
+
+  it("deduplicates repeated native workspace file prompt parts", () => {
+    expect(
+      workspaceContextAttachmentsFromPromptParts([
+        {
+          type: "text",
+          text: "写了什么内容"
+        },
+        {
+          type: "file",
+          path: "99-测试数据/Git冲突处理/冲突文件.md",
+          name: "冲突文件.md",
+          content: "内容",
+          source: {
+            contextType: "file"
+          }
+        },
+        {
+          type: "file",
+          path: "99-测试数据/Git冲突处理/冲突文件.md",
+          name: "冲突文件.md",
+          content: "内容",
+          source: {
+            contextType: "file"
+          }
+        }
+      ])
+    ).toEqual([
+      {
+        type: "file",
+        path: "99-测试数据/Git冲突处理/冲突文件.md",
+        fileName: "冲突文件.md",
+        lines: undefined
+      }
+    ]);
+  });
 });
