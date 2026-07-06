@@ -17,6 +17,8 @@
   - 4. 彻底解决重叠：在 rows.css 的用户气泡与 parts.css 的智能体气泡中加了 36px 右安全边距（padding-right: 36px），微调缩小后的复制按钮在气泡右上角定位，防止与文本重合。
   - 5. 消息布局与头像对称化：重构 rows.css 中智能体框架布局（.oc-assistant-frame），将头像与内容排列由 column 变更为 row 左右水平对齐，并在 continuation 态时为正文层提供 40px 的左内边距以保持完美侧边对齐；显式指定智能体头像宽高为 28px（与用户一致），圆角 9px，并换上更匹配色系的莫兰迪深灰蓝（#2e384d）背景，达成左右对齐和头像外观的完全对称。
   - 6. 输入框扁平化优化：调小 FigmaChatPanel.vue 聊天文本框（.figma-chat-textarea）的 min-height（由 64px 降为 40px），收紧 padding 为 8px 12px 4px，使未输入文本时的整体输入卡片更扁平精巧，更具现代感。
+  - 7. 气泡扁平化微调：将用户输入气泡（.oc-user-message__bubble）和智能体回答气泡（.oc-text-part）的上下 padding 从 8px 调小为 6px，使气泡整体高度更矮、更精简紧凑；同步把对应的复制按钮绝对定位 top 偏移从 7px 调整为 5px 保持垂直居中。
+  - 8. 附件列表对齐优化：为 ChatContextAttachmentList.vue（.chat-context-list）添加 margin-left: 10px 和 margin-right: 10px，使其在水平宽度上与下方的输入容器完美居中对齐，消除顶到两侧边缘的不对称感。
 - How:
   - 完全由前端 CSS 和局部的展示 Vue 组件承载，未修改任何后端 API、DTO、数据库结构或环境配置文件。
 - Result:

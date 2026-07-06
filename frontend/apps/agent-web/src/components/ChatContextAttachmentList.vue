@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed } from "vue";
 import type { ChatContextItem } from "../stores/chatContextStore";
 import { CHAT_CONTEXT_LIMITS } from "../stores/chatContextStore";
 import ChatContextAttachmentCard from "./ChatContextAttachmentCard.vue";
-import ChatContextPreviewDrawer from "./ChatContextPreviewDrawer.vue";
 
 const props = defineProps<{
   items: ChatContextItem[];
@@ -15,9 +14,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   remove: [id: string];
   clear: [];
+  preview: [item: ChatContextItem];
 }>();
-
-const previewItem = ref<ChatContextItem | null>(null);
 
 const summaryText = computed(() =>
   `已添加 ${props.items.length} 个上下文，约 ${props.totalCharCount.toLocaleString("zh-CN")} / ${CHAT_CONTEXT_LIMITS.MAX_TOTAL_CONTEXT_CHARS.toLocaleString("zh-CN")} 字`
@@ -35,14 +33,13 @@ const summaryText = computed(() =>
         v-for="item in items"
         :key="item.id"
         :item="item"
-        @preview="previewItem = $event"
+        @preview="emit('preview', $event)"
         @remove="emit('remove', $event)"
       />
     </div>
     <div v-if="overLimit || error" class="chat-context-list-error">
       {{ error || '上下文过长，暂不能发送。请删除部分文件，或改为选择关键片段。' }}
     </div>
-    <ChatContextPreviewDrawer :item="previewItem" @close="previewItem = null" />
   </section>
 </template>
 
@@ -51,7 +48,9 @@ const summaryText = computed(() =>
   display: flex;
   flex-direction: column;
   gap: 6px;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+  margin-left: 10px;
+  margin-right: 10px;
   padding: 6px 8px;
   border: 1px solid rgba(0, 0, 0, 0.04);
   border-radius: 8px;

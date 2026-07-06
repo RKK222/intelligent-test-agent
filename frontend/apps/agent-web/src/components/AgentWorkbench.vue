@@ -54,7 +54,8 @@ import {
   createContextId,
   serializeChatContexts,
   useChatContextStore,
-  validateChatSend
+  validateChatSend,
+  type ChatContextItem
 } from "../stores/chatContextStore";
 import FigmaShell from "./FigmaShell.vue";
 import FigmaFileExplorer from "./FigmaFileExplorer.vue";
@@ -409,6 +410,7 @@ const tabs = computed(() => workbench.tabs);
 const activePath = computed(() => workbench.activePath);
 const selectedDiffPath = computed(() => workbench.selectedDiffPath);
 const activeTab = computed(() => tabs.value.find((tab: EditorTab) => tab.path === activePath.value));
+const codeEditorRef = ref<any>(null);
 const breadcrumbDisplay = computed(() => {
   if (!activePath.value) return "";
   return activePath.value.split(/[\\/]+/).filter(Boolean).join(" › ");
@@ -2524,6 +2526,22 @@ async function openFile(path: string) {
   }
 }
 
+async function handlePreviewContext(item: ChatContextItem) {
+  if (!item.path) {
+    return;
+  }
+  await openFile(item.path);
+  if (item.type === "selection") {
+    setTimeout(() => {
+      codeEditorRef.value?.revealSelection({
+        startLine: item.startLine,
+        endLine: item.endLine,
+        text: item.text
+      });
+    }, 150);
+  }
+}
+
 function fileNameOf(path: string): string {
   return path.split(/[\\/]+/).filter(Boolean).at(-1) ?? path;
 }
@@ -3705,6 +3723,7 @@ async function handleLogout() {
           @update:markdown-preview="(value: boolean) => (markdownPreview = value)"
         >
           <CodeEditor
+            ref="codeEditorRef"
             :path="activeTab?.path"
             :content="activeTab?.content"
             :dirty="activeTab && !activeTab.livePreview ? activeTab.content !== activeTab.savedContent : false"
@@ -3774,6 +3793,7 @@ async function handleLogout() {
           @refresh-process="refreshOpencodeProcessStatus"
           @open-diff="(path: string) => { if (path) workbench.setSelectedDiffPath(path); centerMode = 'diff'; }"
           @open-file="openFile"
+          @preview-context="handlePreviewContext"
           @reply-permission="(requestId: string, decision: 'once' | 'always' | 'reject') => replyPermissionMutation.mutate({ requestId, decision })"
           @reply-question="(requestId: string, answers: unknown[]) => replyQuestionMutation.mutate({ requestId, answers })"
           @reject-question="(requestId: string) => rejectQuestionMutation.mutate(requestId)"

@@ -24,7 +24,7 @@
   font-size: var(--oc-text-md);
   border-radius: var(--oc-radius-md);
   border-top-right-radius: 2px;
-  padding: 8px 36px 8px 12px;
+  padding: 6px 36px 6px 12px;
   line-height: var(--oc-line-height);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 }
@@ -37,7 +37,7 @@
 
 .oc-user-message__copy {
   position: absolute;
-  top: 7px;
+  top: 5px;
   right: 8px;
   opacity: 0;
   transition: opacity 0.2s ease;

@@ -361,6 +361,49 @@ onBeforeUnmount(() => {
   editor.value = null;
   model = null;
 });
+
+function revealSelection(payload: { startLine: number; endLine: number; text: string }) {
+  const inst = editor.value;
+  if (!inst || !monacoLib || !model) return;
+  
+  let range: monaco.Range | null = null;
+  
+  if (payload.text) {
+    const matches = model.findMatches(payload.text, false, false, false, null, true);
+    if (matches.length > 0) {
+      let bestMatch = matches[0];
+      let minDiff = Math.abs(bestMatch.range.startLineNumber - payload.startLine);
+      for (const m of matches) {
+        const diff = Math.abs(m.range.startLineNumber - payload.startLine);
+        if (diff < minDiff) {
+          minDiff = diff;
+          bestMatch = m;
+        }
+      }
+      range = bestMatch.range;
+    }
+  }
+  
+  if (!range && payload.startLine && payload.endLine) {
+    const lineContent = model.getLineContent(payload.startLine);
+    range = new monacoLib.Range(
+      payload.startLine,
+      1,
+      payload.endLine,
+      lineContent.length + 1
+    );
+  }
+  
+  if (range) {
+    inst.setSelection(range);
+    inst.revealRangeInCenter(range, 1);
+    inst.focus();
+  }
+}
+
+defineExpose({
+  revealSelection
+});
 </script>
 
 <template>

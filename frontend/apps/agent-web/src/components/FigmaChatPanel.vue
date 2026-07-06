@@ -719,6 +719,7 @@ const emit =
     (e: 'clear-raw-output'): void
     (e: 'remove-chat-context', id: string): void
     (e: 'clear-chat-contexts'): void
+    (e: 'preview-context', item: ChatContextItem): void
     (e: 'reply-permission', requestId: string, decision: 'once' | 'always' | 'reject'): void
     (e: 'reply-question', requestId: string, answers: unknown[]): void
     (e: 'reject-question', requestId: string): void
@@ -2010,6 +2011,10 @@ function requestProcessRefresh() {
   if (now - lastProcessRefreshRequestedAt < PROCESS_REFRESH_DEDUPE_MS) return
   lastProcessRefreshRequestedAt = now
   emit('refresh-process')
+}
+
+function onContextPreview(item: ChatContextItem) {
+  emit('preview-context', item)
 }
 
 function onComposerCardClick(event: MouseEvent) {
@@ -3815,6 +3820,7 @@ function onCompositionEnd() {
       :error="chatContextError || contextSendBlockedReason"
       @remove="emit('remove-chat-context', $event)"
       @clear="emit('clear-chat-contexts')"
+      @preview="onContextPreview"
     />
     <!-- 统一输入卡片：textarea + 底部工具行（附件、模型、新建、发送/停止）整合在一个圆角卡片内 -->
     <div v-if="!activeSubagentSessionId" class="figma-chat-composer">
