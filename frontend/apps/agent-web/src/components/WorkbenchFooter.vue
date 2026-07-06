@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { ArrowLeftRight, Eye, EyeOff, Plus, Save, ServerCog } from "lucide-vue-next";
-import { ElDatePicker, ElDialog } from "element-plus";
+import { ElDatePicker, ElDialog, ElTooltip } from "element-plus";
 import type { ApplicationWorkspaceTemplate, ApplicationWorkspaceVersion } from "@test-agent/shared-types";
 import type { BackendApiClient } from "@test-agent/backend-api";
 
@@ -553,27 +553,37 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
     </div>
 
     <div v-if="showSave" class="ta-workbench-footer-right">
-      <button
+      <ElTooltip
         v-if="showPreviewButton"
-        type="button"
-        :class="['ta-workbench-footer-preview', { 'is-active': markdownPreviewMode !== 'off' }]"
-        :title="markdownPreviewMode === 'split' ? '分屏预览 (双击分上下)' : markdownPreviewMode === 'full' ? '整体预览 (双击分上下)' : '预览 (单击整体/双击分上下)'"
-        :aria-pressed="markdownPreviewMode !== 'off'"
-        data-testid="footer-markdown-preview"
-        @click.stop="handlePreviewClick"
-        @dblclick.stop="handlePreviewDblClick"
+        :content="markdownPreviewMode === 'split' ? '分屏预览 (双击分上下)' : markdownPreviewMode === 'full' ? '整体预览 (双击分上下)' : '预览 (单击整体/双击分上下)'"
+        placement="top"
+        :show-after="0"
       >
-        <component :is="markdownPreviewMode !== 'off' ? EyeOff : Eye" class="ta-workbench-footer-icon" />
-      </button>
-      <button
-        type="button"
-        class="ta-workbench-footer-save"
-        :disabled="!dirty || readonly || saving"
-        :title="readonly ? '只读文件不可保存' : saving ? '保存中…' : '保存 (Ctrl+S)'"
-        @click="emit('save')"
+        <button
+          type="button"
+          :class="['ta-workbench-footer-preview', { 'is-active': markdownPreviewMode !== 'off' }]"
+          :aria-pressed="markdownPreviewMode !== 'off'"
+          data-testid="footer-markdown-preview"
+          @click.stop="handlePreviewClick"
+          @dblclick.stop="handlePreviewDblClick"
+        >
+          <component :is="markdownPreviewMode !== 'off' ? EyeOff : Eye" class="ta-workbench-footer-icon" />
+        </button>
+      </ElTooltip>
+      <ElTooltip
+        :content="readonly ? '只读文件不可保存' : saving ? '保存中…' : '保存 (Ctrl+S)'"
+        placement="top"
+        :show-after="0"
       >
-        <Save class="ta-workbench-footer-save-icon" />
-      </button>
+        <button
+          type="button"
+          class="ta-workbench-footer-save"
+          :disabled="!dirty || readonly || saving"
+          @click="emit('save')"
+        >
+          <Save class="ta-workbench-footer-save-icon" />
+        </button>
+      </ElTooltip>
     </div>
   </footer>
   <!--

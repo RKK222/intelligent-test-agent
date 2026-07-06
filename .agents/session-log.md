@@ -36,7 +36,7 @@
 - What:
   - 1. `WorkbenchFooter` 页脚右侧新增 MD 预览图标按钮，放在 Save 按钮左侧，仅在 `showPreviewButton`（`activeIsMarkdown`）为 true 时渲染。
   - 2. `WorkbenchFooter` 增加单双击识别定时器逻辑：单击切换为 `full` 整体预览或 `off` 关闭，双击切换为 `split` 分上下屏或 `off` 关闭；修复了层级传递中 `update:markdownPreview` 覆盖 `markdownPreviewMode` 导致的双击分屏无法保持的漏洞；`CodeEditor` 支持受控 `previewMode` (`off` | `full` | `split`) 渲染。
-  - 3. `WorkbenchFooter` 中的预览与保存按钮去除了 `<span>` 文字标签，并统一定制为 26x26 方形精美图标按钮。
+  - 3. `WorkbenchFooter` 中的预览与保存按钮去除了 `<span>` 文字标签，并统一定制为 26x26 方形精美图标按钮；包裹 `ElTooltip` 并配置 `:show-after="0"` 实现鼠标悬浮即时显示提示文案，无原生延时。
   - 4. `WorkbenchFooter` 将“写入路径：”标签文案修改为“路径：”。
   - 5. `FigmaEditorArea` 使用 `@test-agent/file-explorer` 的 `FileIcon` 替换原 Tab 页通用静态文件图标，实现按扩展名/文件名与工作区文件树同步渲染彩色 Material 文件图标。
 - How:
