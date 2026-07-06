@@ -1,6 +1,6 @@
 # 企业内 Docker 部署文件
 
-本目录提供企业内部署文件：后端按 jar 直接部署，前端按 `dist/` 静态文件交付，Docker Compose 只负责 1 个 Nginx 入口、2 个挂载前端 dist 的 Nginx 容器和 2 个 `opencode-worker` 容器。
+本目录提供企业内部署文件：后端按 jar 直接部署，Nginx 按实体服务部署并托管前端 `dist/`，Docker Compose 只负责 2 个 `opencode-worker` 容器。
 
 ## 端口约束
 
@@ -48,7 +48,7 @@ deploy/internal/dist/test-agent-frontend-dist.tar.gz
 test-agent-opencode-worker_internal-linux-amd64.tar
 ```
 
-也就是说：后端 jar 和前端 dist 会随打包一起出来；前端不做业务镜像，Compose 里的两个前端容器直接用标准 `nginx:1.27-alpine` 挂载 `dist/frontend`。
+也就是说：后端 jar 和前端 dist 会随打包一起出来；前端不做业务镜像，实体 Nginx 直接托管 `dist/frontend`。
 
 只打某一类交付物：
 
@@ -81,7 +81,32 @@ docker save -o test-agent-opencode-worker-internal-amd64.tar test-agent-opencode
 docker load -i test-agent-opencode-worker-internal-amd64.tar
 ```
 
-## 启动 Compose
+## 实体 Nginx 部署
+
+实体 Nginx 至少需要做两件事：
+
+- 静态资源根目录指向 `deploy/internal/dist/frontend/` 或解压后的 `test-agent-frontend-dist.tar.gz`。
+- `/api`、SSE 和 WebSocket 请求反向代理到两个直接部署的 Java 后端。
+
+`deploy/internal/nginx/` 下的配置文件只作为实体 Nginx 配置参考，不由 Docker Compose 启动。
+
+示例模板 `deploy/internal/nginx/gateway.conf.template` 使用这些变量：
+
+```bash
+TEST_AGENT_FRONTEND_ROOT=/opt/test-agent/frontend
+TEST_AGENT_BACKEND_1=127.0.0.1:8080
+TEST_AGENT_BACKEND_2=127.0.0.1:8081
+```
+
+生成实体 Nginx 配置示例：
+
+```bash
+envsubst '${TEST_AGENT_FRONTEND_ROOT} ${TEST_AGENT_BACKEND_1} ${TEST_AGENT_BACKEND_2}' \
+  < deploy/internal/nginx/gateway.conf.template \
+  > /etc/nginx/conf.d/test-agent.conf
+```
+
+## 启动 opencode worker Compose
 
 复制环境变量模板：
 
@@ -91,11 +116,8 @@ cp deploy/internal/env.example deploy/internal/.env
 
 编辑 `deploy/internal/.env`，至少修改：
 
-- `TEST_AGENT_BACKEND_1`
-- `TEST_AGENT_BACKEND_2`
 - `TEST_AGENT_OPENCODE_MANAGER_TOKEN`
 - `TEST_AGENT_DATA_ROOT`
-- `TEST_AGENT_FRONTEND_DIST_DIR`
 - 两个 worker 的端口池
 
 启动：
@@ -109,7 +131,6 @@ docker compose --env-file .env up -d
 
 ```bash
 docker compose --env-file .env ps
-curl -fsS http://127.0.0.1:${TEST_AGENT_GATEWAY_HTTP_PORT:-80}/health
 ```
 
 ## 运行时外部依赖

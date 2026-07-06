@@ -2,6 +2,19 @@
 
 ## Entries
 
+### 2026-07-06 - Docker Compose 收敛为仅 opencode worker
+
+- Why:
+  - 用户明确 Nginx 也按实体服务部署，Docker 只用于 `opencode + opencode-manager` worker 容器。
+- What:
+  - `deploy/internal/docker-compose.yml` 删除 gateway 和 frontend Nginx 容器，只保留两个 opencode worker。
+  - 实体 Nginx 模板改为直接 `root ${TEST_AGENT_FRONTEND_ROOT}` 托管前端 dist，并把 `/api` 代理到两个 Java 后端。
+  - `env.example` 和 README 同步说明 Compose 不再管理 Nginx 或前端容器。
+- How:
+  - 保留 `deploy/internal/nginx/` 作为实体 Nginx 配置参考，不由 Compose 挂载或启动。
+- Result:
+  - `docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 展开后只包含 `opencode-worker-1/2`；`bash -n deploy/internal/package-release.sh` 和 `git diff --check` 通过。
+
 ### 2026-07-06 - 企业内打包改为 jar + frontend dist + worker 镜像
 
 - Why:
