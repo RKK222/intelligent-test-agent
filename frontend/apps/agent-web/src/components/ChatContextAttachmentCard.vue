@@ -73,9 +73,9 @@ function onCardKeydown(event: KeyboardEvent) {
 }
 
 .chat-context-card:hover {
-  border-color: #0052d9;
-  background: #ecf2fe;
-  color: #0052d9;
+  border-color: #4f5e7b;
+  background: #f0f3f8;
+  color: #4f5e7b;
 }
 
 .chat-context-card.is-warning {
@@ -110,7 +110,7 @@ function onCardKeydown(event: KeyboardEvent) {
 }
 
 .chat-context-card:hover .chat-context-card-meta {
-  color: #0052d9;
+  color: #4f5e7b;
   opacity: 0.8;
 }
 
@@ -129,7 +129,7 @@ function onCardKeydown(event: KeyboardEvent) {
 }
 
 .chat-context-card-remove:hover {
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052d9;
+  background: rgba(79, 94, 123, 0.15);
+  color: #4f5e7b;
 }
 </style>
