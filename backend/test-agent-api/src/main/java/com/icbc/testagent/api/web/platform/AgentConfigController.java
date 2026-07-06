@@ -103,6 +103,29 @@ public class AgentConfigController {
                         RuntimeApiSupport.traceId(exchange)), RuntimeApiSupport.traceId(exchange)));
     }
 
+    @PostMapping("/public/repositories/{linuxServerId}/pull")
+    public ApiResponse<AgentConfigResponses.PublicRepositoryStatusResponse> pullPublicRepository(
+            @PathVariable String linuxServerId,
+            @RequestBody AgentConfigDtos.BranchRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return routingService.forwardTargetForRequestedServer(linuxServerId)
+                .map(target -> routingService.forward(
+                        exchange,
+                        target,
+                        request,
+                        new TypeReference<ApiResponse<AgentConfigResponses.PublicRepositoryStatusResponse>>() {}))
+                .orElseGet(() -> {
+                    service.updatePublicConfig(
+                            request.branch(),
+                            request.operationId(),
+                            Boolean.TRUE.equals(request.discardLocalChanges()),
+                            principal.userId(),
+                            RuntimeApiSupport.traceId(exchange));
+                    return ApiResponse.ok(service.localPublicRepositoryStatus(), RuntimeApiSupport.traceId(exchange));
+                });
+    }
+
     @PostMapping("/public/update")
     public ApiResponse<Object> updatePublic(
             @RequestBody AgentConfigDtos.BranchRequest request,
@@ -117,7 +140,7 @@ public class AgentConfigController {
     }
 
     /**
-     * 公共配置"更新 + 提交并推送"复合接口：按分支拉取最新后 stage 工作区全部变更并用 commitMessage 生成一次提交，最后 push 到远端并广播同步。
+     * 公共配置"提交并推送"复合接口：fetch 远端后提交本地修改、merge 远端分支、push 并广播同步。
      */
     @PostMapping("/public/update-and-push")
     public ApiResponse<Object> updatePublicAndPush(
@@ -131,6 +154,97 @@ public class AgentConfigController {
                 Boolean.TRUE.equals(request.discardLocalChanges()),
                 principal.userId(),
                 RuntimeApiSupport.traceId(exchange)));
+    }
+
+    @GetMapping("/public/git-conflicts")
+    public ApiResponse<Object> listPublicGitConflicts(
+            @RequestParam(required = false) String worktreeId,
+            @RequestParam(required = false) String linuxServerId,
+            ServerWebExchange exchange) {
+        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return publicConflictTarget(worktreeId, linuxServerId)
+                .map(target -> routingService.forward(
+                        exchange,
+                        target,
+                        null,
+                        new TypeReference<ApiResponse<Object>>() {}))
+                .orElseGet(() -> ok(exchange, new AgentConfigDtos.GitConflictFilesResponse(
+                        service.publicGitConflictFiles(worktreeId))));
+    }
+
+    @GetMapping("/public/git-conflict")
+    public ApiResponse<Object> getPublicGitConflict(
+            @RequestParam String path,
+            @RequestParam(required = false) String worktreeId,
+            @RequestParam(required = false) String linuxServerId,
+            ServerWebExchange exchange) {
+        AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return publicConflictTarget(worktreeId, linuxServerId)
+                .map(target -> routingService.forward(
+                        exchange,
+                        target,
+                        null,
+                        new TypeReference<ApiResponse<Object>>() {}))
+                .orElseGet(() -> ok(exchange, service.getPublicGitConflict(path, worktreeId)));
+    }
+
+    @PostMapping("/public/git-conflict/resolve")
+    public ApiResponse<Object> resolvePublicGitConflict(
+            @RequestBody AgentConfigDtos.GitConflictRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return publicConflictTarget(request.worktreeId(), request.linuxServerId())
+                .map(target -> routingService.forward(
+                        exchange,
+                        target,
+                        request,
+                        new TypeReference<ApiResponse<Object>>() {}))
+                .orElseGet(() -> {
+                    service.resolvePublicGitConflict(
+                            request.path(),
+                            request.resolution(),
+                            request.content(),
+                            request.worktreeId(),
+                            principal.userId());
+                    return ok(exchange, null);
+                });
+    }
+
+    @PostMapping("/public/git-conflict/resolve-all")
+    public ApiResponse<Object> resolveAllPublicGitConflicts(
+            @RequestBody AgentConfigDtos.ResolveAllGitConflictsRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        return publicConflictTarget(request.worktreeId(), request.linuxServerId())
+                .map(target -> routingService.forward(
+                        exchange,
+                        target,
+                        request,
+                        new TypeReference<ApiResponse<Object>>() {}))
+                .orElseGet(() -> {
+                    service.resolveAllPublicGitConflicts(request.resolution(), request.worktreeId(), principal.userId());
+                    return ok(exchange, null);
+                });
+    }
+
+    @PostMapping("/public/git-conflict/abort")
+    public ApiResponse<Object> abortPublicGitConflict(
+            @RequestBody(required = false) AgentConfigDtos.ResolveAllGitConflictsRequest request,
+            ServerWebExchange exchange) {
+        AuthPrincipal principal = AuthWebSupport.requireRole(exchange, Dictionary.ROLE_SUPER_ADMIN);
+        AgentConfigDtos.ResolveAllGitConflictsRequest resolved = request == null
+                ? new AgentConfigDtos.ResolveAllGitConflictsRequest(null, null, null)
+                : request;
+        return publicConflictTarget(resolved.worktreeId(), resolved.linuxServerId())
+                .map(target -> routingService.forward(
+                        exchange,
+                        target,
+                        resolved,
+                        new TypeReference<ApiResponse<Object>>() {}))
+                .orElseGet(() -> {
+                    service.abortPublicGitConflict(resolved.worktreeId(), principal.userId());
+                    return ok(exchange, null);
+                });
     }
 
     @PostMapping("/file-ws-route")
@@ -351,6 +465,16 @@ public class AgentConfigController {
 
     private ApiResponse<Object> ok(ServerWebExchange exchange, Object data) {
         return ApiResponse.ok(data, RuntimeApiSupport.traceId(exchange));
+    }
+
+    private java.util.Optional<String> publicConflictTarget(String worktreeId, String linuxServerId) {
+        if (worktreeId != null && !worktreeId.isBlank()) {
+            return routingService.forwardTargetForPublicWorktree(worktreeId);
+        }
+        if (linuxServerId == null || linuxServerId.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        return routingService.forwardTargetForRequestedServer(linuxServerId);
     }
 
 }

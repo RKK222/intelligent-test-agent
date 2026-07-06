@@ -28,6 +28,10 @@ final class GitCommandFailureClassifier {
             "WORKTREE_CONFLICT",
             "Git worktree 创建冲突",
             "请更换 worktree 名称，或清理已存在的同名分支/目录后重试。");
+    private static final GitCommandFailure REMOTE_REJECTED = new GitCommandFailure(
+            "REMOTE_REJECTED",
+            "Git 远端拒绝推送",
+            "请先拉取远端最新提交并确认本地仓库可快进，再重新提交或推送。");
     private static final GitCommandFailure UNKNOWN = new GitCommandFailure(
             "UNKNOWN",
             "Git 远端读取失败",
@@ -53,6 +57,11 @@ final class GitCommandFailureClassifier {
         if (containsAny(commandText, " worktree ", " worktree add ")
                 && containsAny(text, "already exists", "is already checked out", "missing but already registered")) {
             return WORKTREE_CONFLICT;
+        }
+        if (containsAny(commandText, " push ")
+                && containsAny(text, "non-fast-forward", "fetch first", "updates were rejected", "remote rejected",
+                "failed to push some refs")) {
+            return REMOTE_REJECTED;
         }
         if (containsAny(text, "repository not found", "not appear to be a git repository",
                 "could not read from remote repository", "repository does not exist", "access denied")) {

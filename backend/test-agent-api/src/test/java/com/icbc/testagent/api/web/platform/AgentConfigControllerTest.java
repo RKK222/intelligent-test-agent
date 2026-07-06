@@ -141,6 +141,48 @@ class AgentConfigControllerTest {
     }
 
     @Test
+    void superAdminCanPullTargetPublicRepository() {
+        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
+        when(service.updatePublicConfig(
+                "master",
+                "aco_pull_12345678",
+                false,
+                USER_ID,
+                TRACE_ID)).thenReturn(new com.icbc.testagent.workspace.AgentConfigResponses.AgentConfigOperationResponse(
+                "aco_pull_12345678",
+                "PUBLIC",
+                null,
+                "update",
+                "SUCCEEDED",
+                "BROADCASTING",
+                null,
+                null,
+                "master",
+                "commit_latest",
+                TRACE_ID,
+                Instant.parse("2026-06-25T00:00:00Z"),
+                Instant.parse("2026-06-25T00:00:01Z")));
+        WebTestClient client = client(service, List.of(Dictionary.ROLE_SUPER_ADMIN));
+
+        client.post()
+                .uri("/api/internal/platform/workspace-management/agent-config/public/repositories/127.0.0.1/pull")
+                .header("X-Trace-Id", TRACE_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .bodyValue("""
+                        {"branch":"master","operationId":"aco_pull_12345678","discardLocalChanges":false}
+                        """)
+                .exchange()
+                .expectStatus().isOk();
+
+        verify(service).updatePublicConfig(
+                "master",
+                "aco_pull_12345678",
+                false,
+                USER_ID,
+                TRACE_ID);
+    }
+
+    @Test
     void superAdminCanReadLocalPublicRepositoryStatus() {
         AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
         when(service.localPublicRepositoryStatus()).thenReturn(new PublicRepositoryStatusResponse(

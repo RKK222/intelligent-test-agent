@@ -4166,3 +4166,29 @@ bash /tmp/test-api-after-restart.sh
   - 修改 `frontend/apps/agent-web/src/components/FigmaEditorArea.vue` 的 template、script、CSS，以及新增单元测试 `frontend/apps/agent-web/tests/FigmaEditorArea.test.ts`。
 - Result:
   - 运行 `corepack pnpm test FigmaEditorArea.test.ts --run` 全部通过，所有的聚焦与滚动断言均通过。
+
+### 2026-07-06 - 公共 Agent 提交并推送补齐远端同步、冲突处理和真实进度
+
+- Why:
+  - 公共 Agent 本地仓库存在未推送提交时，前端可能显示“提交成功”但远端实际没有更新；同时远端 `master` 已有新提交，本地 `origin/master` 缓存落后，旧流程没有先 fetch/merge，也没有在公共 Agent 入口复用工作区冲突解决能力。
+- What:
+  - 公共 Agent `update-and-push` 改为 `fetch -> stage/commit -> merge origin/{branch} -> push -> broadcast`，无本次新 commit 时仍继续 merge/push；merge 冲突返回 `CONFLICT` 和 `conflictFiles` 并保留原生 merge 现场，解决后再次提交会先落 merge commit 再 push。
+  - 增加超级管理员公共仓库显式拉取入口、公共冲突读取/逐个解决/批量解决/取消接口，前端复用三方冲突编辑器，并在公共 Agent 提交弹窗展示拉取、暂存提交、合并、推送、广播阶段和当前 Git 命令。
+  - Git push 被远端拒绝时归类为 `REMOTE_REJECTED`，避免统一落到未知错误。
+- How:
+  - 修改 workspace-management 公共 Agent Git 编排、API Controller/DTO、backend-api、AgentConfigPanel 和系统公共配置管理面板；同步 HTTP API、模块 README 与前端 README，并补充后端/前端回归测试。
+- Result:
+  - 定向后端 workspace/API/common 测试、前端 Vitest、前端 typecheck、`git diff --check` 均通过；按 `.env.test` 重启本地服务成功，后端 health/readiness、前端 3000 和 CORS 预检通过。实际远端检查确认 `/Users/kaka/Desktop/intelligent-test-agent/.testagent/agent-opencode/.config` 本地 HEAD 为 `6e12505`，远端 `master` 为 `f85b920`，说明用户先前那次 UI 成功提示没有推送到远端。
+
+### 2026-07-06 - 公共 Agent 冲突文件和处理入口前端可见化
+
+- Why:
+  - 用户在公共 Agent 合并冲突后只能看到编辑器里的 Git 冲突标记，不知道哪些文件冲突；提交失败进度弹窗和公共级文件树也缺少直接处理冲突的按钮。
+- What:
+  - 公共级 Agents 树在刷新时通过轻量 `GET /public/git-conflicts` 只读取未解决冲突路径，避免拉取完整 diff patch；冲突文件行标红并显示“冲突”标记；公共级下新增冲突文件列表，提供逐个“处理冲突”、全部保留本地、全部采用远端和取消合并按钮。
+  - 公共 Agent 提交失败弹窗在合并冲突时直接列出冲突文件，并提供相同处理按钮；点击“处理冲突”打开既有三方冲突编辑器。
+  - 公共 Agent 合并编辑器弹框宽度提升到桌面端约 1120px，并保留小屏 `calc(100vw - 48px)` 自适应。
+- How:
+  - 复用 `GitWorkspaceService.conflictPaths`、`AgentConfigPanel` 已有公共冲突处理 API 和 `MergeConflictEditor`，新增轻量冲突路径 HTTP/API client 方法，并扩展面板可见入口和 `AgentConfigTreeNode` 冲突标识。
+- Result:
+  - `corepack pnpm test -- apps/agent-web/tests/agent-config-panel.test.ts`、`corepack pnpm typecheck`、`mvn -pl test-agent-api -am -Dsurefire.failIfNoSpecifiedTests=false -Dtest=AgentConfigControllerTest test` 和 `git diff --check` 通过。

@@ -681,17 +681,21 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
           body: JSON.stringify({ branch, operationId })
         }
       ),
+    pullPublicAgentRepository: (linuxServerId: string, branch: string, operationId?: string, discardLocalChanges = false) =>
+      request<PublicAgentRepositoryStatus>(
+        `${agentConfigBase}/public/repositories/${encodeURIComponent(linuxServerId)}/pull`,
+        {
+          method: "POST",
+          body: JSON.stringify({ branch, operationId, discardLocalChanges })
+        }
+      ),
     updatePublicAgentConfig: (branch: string, operationId?: string, discardLocalChanges = false) =>
       request<AgentConfigOperation>(`${agentConfigBase}/public/update`, {
         method: "POST",
         body: JSON.stringify({ branch, operationId, discardLocalChanges })
       }),
     /**
-     * 公共配置"更新 + 提交并推送"复合接口：按分支拉取最新后用 commitMessage 提交并推送到远端。
-     * @param payload.branch 远端分支
-     * @param payload.commitMessage 提交说明（必填）
-     * @param payload.operationId 进度 operationId
-     * @param payload.discardLocalChanges 是否覆盖受控仓库的已跟踪修改
+     * 公共配置"提交并推送"复合接口：fetch 远端后提交本地变更、merge 远端分支并推送。
      */
     updatePublicAgentConfigAndPush: (payload: {
       branch: string;
@@ -702,6 +706,35 @@ export function createBackendApiClient(options: BackendApiClientOptions = {}) {
       request<AgentConfigOperation>(`${agentConfigBase}/public/update-and-push`, {
         method: "POST",
         body: JSON.stringify(payload)
+      }),
+    getPublicAgentGitConflictFiles: (worktreeId?: string | null, linuxServerId?: string | null) =>
+      request<{ files: string[] }>(
+        `${agentConfigBase}/public/git-conflicts${query({ worktreeId, linuxServerId })}`
+      ),
+    getPublicAgentGitConflict: (path: string, worktreeId?: string | null, linuxServerId?: string | null) =>
+      request<WorkspaceGitConflict>(
+        `${agentConfigBase}/public/git-conflict${query({ path, worktreeId, linuxServerId })}`
+      ),
+    resolvePublicAgentGitConflict: (payload: ResolveWorkspaceGitConflictPayload & {
+      worktreeId?: string | null;
+      linuxServerId?: string | null;
+    }) =>
+      request<void>(`${agentConfigBase}/public/git-conflict/resolve`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    resolveAllPublicAgentGitConflicts: (payload: ResolveAllWorkspaceGitConflictsPayload & {
+      worktreeId?: string | null;
+      linuxServerId?: string | null;
+    }) =>
+      request<void>(`${agentConfigBase}/public/git-conflict/resolve-all`, {
+        method: "POST",
+        body: JSON.stringify(payload)
+      }),
+    abortPublicAgentGitConflict: (worktreeId?: string | null, linuxServerId?: string | null) =>
+      request<void>(`${agentConfigBase}/public/git-conflict/abort`, {
+        method: "POST",
+        body: JSON.stringify({ worktreeId, linuxServerId })
       }),
     listPublicAgentFiles: async (path = "", worktreeId?: string | null, linuxServerId?: string | null) => {
       const entries = await agentConfigFileRpc<BackendFileTreeEntry[]>(
