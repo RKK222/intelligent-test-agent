@@ -66,8 +66,20 @@ public class UserDomainService {
                 .orElseThrow(() -> new PlatformException(ErrorCode.UNAUTHENTICATED, "用户名或密码错误"));
     }
 
-    public User findByUnifiedAuthId(String unifiedAuthId) {
+    /**
+     * 根据统一认证号查找用户，不存在时自动创建。
+     * user_id、unified_auth_id、username 均使用统一认证号，
+     * password_hash 使用统一认证号经 BCrypt 加密。
+     */
+    public User findOrCreateByUnifiedAuthId(String unifiedAuthId) {
         return userRepository.findByUnifiedAuthId(unifiedAuthId)
-                .orElseThrow(() -> new PlatformException(ErrorCode.UNAUTHENTICATED, "用户不存在"));
+                .orElseGet(() -> {
+                    String passwordHash = passwordEncoder.encode(unifiedAuthId);
+                    User user = User.createNew(
+                            unifiedAuthId, unifiedAuthId, unifiedAuthId,
+                            passwordHash, null, null, null);
+                    userRepository.save(user);
+                    return user;
+                });
     }
 }

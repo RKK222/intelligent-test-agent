@@ -108,7 +108,7 @@ public class AuthApplicationService {
      * @throws com.icbc.testagent.common.error.PlatformException 用户不存在或账户已停用时
      */
     public AuthPrincipal loginByUnifiedAuthId(String unifiedAuthId, String token, String ipAddress, String userAgent) {
-        User user = userDomainService.findByUnifiedAuthId(unifiedAuthId);
+        User user = userDomainService.findOrCreateByUnifiedAuthId(unifiedAuthId);
 
         if (!user.canLogin()) {
             throw new com.icbc.testagent.common.error.PlatformException(
