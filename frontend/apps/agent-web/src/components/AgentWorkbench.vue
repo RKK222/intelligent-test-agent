@@ -2699,6 +2699,7 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   if (runtimeBusy.value) {
     followUpQueue.value = enqueueFollowUp(followUpQueue.value, createFollowUpDraft(submitPrompt, parts, undefined, command ?? undefined));
     feedback.value = { kind: "info", title: "Prompt 已排队", description: `等待当前 Run 完成后继续执行，队列 ${followUpQueue.value.length} 条` };
+    chatContextStore.clearContexts();
     return;
   }
   // slash 技能和普通消息统一创建平台 Run，才能复用 SSE、刷新恢复和终止能力。
@@ -2706,6 +2707,7 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   lastRunDraft.value = runDraft;
   clearRunEventSseFeedback();
   dispatchChat({ type: "run.requested" });
+  chatContextStore.clearContexts();
   startRunMutation.mutate(runDraft);
 }
 

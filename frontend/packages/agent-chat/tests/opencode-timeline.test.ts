@@ -59,6 +59,32 @@ describe("OpencodeTimeline", () => {
     expect(getByText("src/checkout.ts")).toBeTruthy();
   });
 
+  it("renders only the original question for serialized workspace context prompts", () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage(
+          "msg_user_context",
+          [
+            "用户问题：",
+            "写了什么内容",
+            "",
+            "以下是用户添加的工作区上下文：",
+            "",
+            '<context type="file" path="docs/api.md">',
+            "接口说明",
+            "</context>"
+          ].join("\n")
+        )
+      ]
+    });
+
+    const { container, getByText, queryByText } = render(OpencodeTimeline, { props: { state } });
+
+    expect(getByText("写了什么内容")).toBeTruthy();
+    expect(queryByText(/<context/)).toBeNull();
+    expect(container.querySelector(".oc-user-message__bubble")?.textContent).not.toContain("以下是用户添加的工作区上下文");
+  });
+
   it("keeps diff files collapsed by default and updates folded line totals when files change", async () => {
     vi.useFakeTimers();
     try {

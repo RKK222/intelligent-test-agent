@@ -171,6 +171,35 @@ describe("FigmaChatPanel", () => {
     expect(wrapper.emitted("remove-chat-context")).toEqual([["ctx_1"]]);
   });
 
+  it("does not expose serialized workspace contexts in user message bubbles", () => {
+    const wrapper = mount(FigmaChatPanel, {
+      props: {
+        messages: [
+          {
+            id: "msg_user_context",
+            role: "user",
+            text: [
+              "用户问题：",
+              "写了什么内容",
+              "",
+              "以下是用户添加的工作区上下文：",
+              "",
+              '<context type="selection" path="docs/a.md" lines="1-2">',
+              "上下文内容",
+              "</context>"
+            ].join("\n"),
+            createdAt: "2026-07-06T00:00:00.000Z"
+          }
+        ],
+        processStatus: { status: "READY", initializable: false, message: "ready" }
+      } as any
+    });
+
+    expect(wrapper.text()).toContain("写了什么内容");
+    expect(wrapper.text()).not.toContain("<context");
+    expect(wrapper.text()).not.toContain("以下是用户添加的工作区上下文");
+  });
+
   it("shows mentionable subagent/all agents when the user types at-sign", async () => {
     const wrapper = mount(FigmaChatPanel, {
       props: {

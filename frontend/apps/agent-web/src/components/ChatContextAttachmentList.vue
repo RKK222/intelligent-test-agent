@@ -52,10 +52,10 @@ const summaryText = computed(() =>
   flex-direction: column;
   gap: 6px;
   margin-bottom: 8px;
-  padding: 8px;
+  padding: 6px 8px;
   border: 1px solid var(--ta-border, #e5e7eb);
-  border-radius: 8px;
-  background: #f8fafc;
+  border-radius: 10px;
+  background: #fff;
 }
 
 .chat-context-list-head {
@@ -70,7 +70,7 @@ const summaryText = computed(() =>
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  color: var(--ta-chat-muted, #64748b);
+  color: var(--ta-chat-muted, #6b7280);
   font-size: 12px;
 }
 
@@ -83,7 +83,7 @@ const summaryText = computed(() =>
   flex: 0 0 auto;
   border: 0;
   background: transparent;
-  color: #475569;
+  color: #4b5563;
   font-size: 12px;
   cursor: pointer;
 }

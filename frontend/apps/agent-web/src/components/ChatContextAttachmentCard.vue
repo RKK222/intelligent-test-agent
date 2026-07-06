@@ -61,20 +61,20 @@ function onCardKeydown(event: KeyboardEvent) {
   align-items: center;
   min-width: 0;
   max-width: 100%;
-  height: 28px;
+  height: 30px;
   gap: 6px;
-  border: 1px solid var(--ta-border, #d8dee8);
-  border-radius: 6px;
-  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fafafa;
   color: var(--ta-chat-text, #1f2937);
-  padding: 0 4px 0 8px;
+  padding: 0 4px 0 9px;
   font-size: 12px;
   cursor: pointer;
 }
 
 .chat-context-card:hover {
-  border-color: var(--ta-accent, #3366ff);
-  background: #f8fbff;
+  border-color: #c7d2fe;
+  background: #fff;
 }
 
 .chat-context-card.is-warning {
@@ -84,8 +84,8 @@ function onCardKeydown(event: KeyboardEvent) {
 
 .chat-context-card-icon,
 .chat-context-card-remove-icon {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
   flex: 0 0 auto;
 }
 
