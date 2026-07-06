@@ -103,6 +103,7 @@ public class ModelCatalogProperties {
         private String baseUrl;
         private String apiKeyEnv;
         private String apiKey;
+        private String ucidHeaderName = "ucid";
         private String authMode;
         private String defaultModel;
         private List<Model> models;
@@ -173,6 +174,24 @@ public class ModelCatalogProperties {
          */
         public void setApiKey(String apiKey) {
             this.apiKey = apiKey == null ? "" : apiKey.trim();
+        }
+
+        /**
+         * 企业内 provider 透传当前登录人统一认证号时使用的请求头名称。
+         */
+        public String getUcidHeaderName() {
+            return ucidHeaderName;
+        }
+
+        /**
+         * 绑定 UCID 请求头名称，空白值回退到企业 API 默认的 ucid。
+         */
+        public void setUcidHeaderName(String ucidHeaderName) {
+            if (ucidHeaderName == null || ucidHeaderName.isBlank()) {
+                this.ucidHeaderName = "ucid";
+                return;
+            }
+            this.ucidHeaderName = ucidHeaderName.trim();
         }
 
         public String getAuthMode() {

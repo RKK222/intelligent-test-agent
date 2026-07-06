@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-06 - internal 模型调用透传当前用户 UCID
+
+- Why:
+  - 企业内 `internal` 模型源调用内网 OpenAI-compatible API 时缺少当前登录人的 UCID；由于 opencode `/global/config` 是进程级配置，必须避免多用户共用进程时 header 串号。
+- What:
+  - `ModelCatalogApplicationService` 在 internal provider 同步时按当前 `UserId` 查询 `User.unifiedAuthId`，写入可配置的 `ucid-header-name`；`RunApplicationService` 在 internal 模式拒绝匿名 Run，并要求命中用户专属 opencode 进程后再同步 provider。
+  - 各 Spring profile 增加 `TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME`，并同步 backend/runtime/deployment 文档。
+- How:
+  - 复用现有 `UserRepository`、`AgentRuntimeTargetResolver` 和 Run 前 `PATCH /global/config` 链路，不改 opencode，不新增数据库和 API。
+- Result:
+  - 定向 ModelCatalog/Run 测试通过，`test-agent-app` 打包通过；标准 `.env.test` 重启成功，后端 health/readiness、前端和 CORS 预检均通过。全量 `test-agent-app -am test` 仍受既有 persistence H2 集成测试问题阻塞。
+
 ### 2026-07-06 - 新增企业内 Docker Compose 部署文件
 
 - Why:
@@ -4131,4 +4143,3 @@ bash /tmp/test-api-after-restart.sh
   - 修改 `frontend/apps/agent-web/src/components/FigmaEditorArea.vue` 的 template、script、CSS，以及新增单元测试 `frontend/apps/agent-web/tests/FigmaEditorArea.test.ts`。
 - Result:
   - 运行 `corepack pnpm test FigmaEditorArea.test.ts --run` 全部通过，所有的聚焦与滚动断言均通过。
-

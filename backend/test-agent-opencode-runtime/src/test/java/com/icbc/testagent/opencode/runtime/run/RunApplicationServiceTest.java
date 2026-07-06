@@ -355,6 +355,53 @@ class RunApplicationServiceTest {
     }
 
     @Test
+    void internalModelSourceRejectsAnonymousRunBeforeLegacyRouting() {
+        FakeRunRepository runs = new FakeRunRepository();
+        ModelCatalogApplicationService modelCatalog = org.mockito.Mockito.mock(ModelCatalogApplicationService.class);
+        org.mockito.Mockito.when(modelCatalog.internalSourceEnabled()).thenReturn(true);
+        RunApplicationService service = serviceWithModelCatalog(
+                new FakeOpencodeFacade(),
+                runs,
+                new FakeRunEventRepository(),
+                modelCatalog);
+
+        assertThatThrownBy(() -> service.startRun(
+                        new StartRunInput(new SessionId("ses_1234567890abcdef"), "run the tests", List.of(), null, null, null, null, null),
+                        "trace_1234567890abcdef"))
+                .isInstanceOf(PlatformException.class)
+                .extracting(error -> ((PlatformException) error).errorCode())
+                .isEqualTo(ErrorCode.UNAUTHENTICATED);
+        assertThat(runs.saved).isEmpty();
+    }
+
+    @Test
+    void internalModelSourceSyncsProviderConfigWithCurrentUserId() {
+        FakeOpencodeFacade facade = new FakeOpencodeFacade();
+        UserId userId = new UserId("usr_1234567890abcdef");
+        ExecutionNode assignedNode = userProcessNode("node_ocp_1234567890abcdef", "http://10.8.0.12:4096");
+        UserOpencodeProcessAssignmentService assignmentService = org.mockito.Mockito.mock(UserOpencodeProcessAssignmentService.class);
+        org.mockito.Mockito.when(assignmentService.requireReadyProcess(userId, "opencode", "trace_1234567890abcdef"))
+                .thenReturn(new UserOpencodeProcessAssignment(assignedNode));
+        ModelCatalogApplicationService modelCatalog = org.mockito.Mockito.mock(ModelCatalogApplicationService.class);
+        org.mockito.Mockito.when(modelCatalog.managedSourceEnabled()).thenReturn(true);
+        org.mockito.Mockito.when(modelCatalog.internalSourceEnabled()).thenReturn(true);
+        org.mockito.Mockito.when(modelCatalog.listModels()).thenReturn(List.of(modelPayload("icbc-openai", "DeepSeek-V4-Flash-W8A8", true)));
+        RunApplicationService service = serviceWithModelCatalogAndAssignment(facade, modelCatalog, assignmentService);
+
+        Run run = service.startRun(
+                userId,
+                new StartRunInput(new SessionId("ses_1234567890abcdef"), "run the tests", List.of(), null, null, null, null, null),
+                "trace_1234567890abcdef");
+
+        assertThat(run.status()).isEqualTo(RunStatus.RUNNING);
+        org.mockito.Mockito.verify(modelCatalog).syncProviderConfig(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq(assignedNode),
+                org.mockito.ArgumentMatchers.eq("trace_1234567890abcdef"),
+                org.mockito.ArgumentMatchers.eq(userId));
+    }
+
+    @Test
     void servicePassesPromptPartsAndRuntimeSelectionToOpencodeFacade() {
         FakeRunRepository runs = new FakeRunRepository();
         FakeRunEventRepository events = new FakeRunEventRepository();
@@ -1907,6 +1954,30 @@ class RunApplicationServiceTest {
                 new RunEventPersistencePolicy(),
                 modelCatalog,
                 null,
+                com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver.legacyOnly(),
+                null,
+                null,
+                null);
+    }
+
+    private static RunApplicationService serviceWithModelCatalogAndAssignment(
+            FakeOpencodeFacade facade,
+            ModelCatalogApplicationService modelCatalog,
+            UserOpencodeProcessAssignmentService assignmentService) {
+        return new RunApplicationService(
+                new FakeWorkspaceRepository(),
+                new FakeSessionRepository(session()),
+                new FakeRunRepository(),
+                new FakeSessionMessageRepository(),
+                new FakeExecutionNodeRepository(),
+                new FakeRoutingDecisionRepository(),
+                new RunEventAppender(new FakeRunEventRepository()),
+                runtimeRegistry(facade),
+                new FakeAgentSessionBindingRepository(),
+                new RunEventLiveBus(),
+                new RunEventPersistencePolicy(),
+                modelCatalog,
+                assignmentService,
                 com.icbc.testagent.domain.workspace.ManagedWorkspacePathResolver.legacyOnly(),
                 null,
                 null,
