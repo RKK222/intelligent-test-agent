@@ -1,7 +1,0 @@
-**
-!frontend/
-!frontend/**
-!deploy/
-!deploy/internal/
-!deploy/internal/nginx/
-!deploy/internal/nginx/frontend.conf

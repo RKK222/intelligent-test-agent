@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-06 - 企业内打包改为 jar + frontend dist + worker 镜像
+
+- Why:
+  - 用户确认前端不需要业务镜像，应直接交付 `dist/`；同时企业内打包结果应包含后端可执行 jar。
+- What:
+  - `deploy/internal/package-release.sh` 取代 `build-images.sh`，打包产物包括 `dist/backend/test-agent-app.jar`、`dist/frontend/`、`test-agent-frontend-dist.tar.gz` 和 opencode-worker 镜像 tar。
+  - 删除前端 Dockerfile；Compose 中两个前端服务改为标准 `nginx:1.27-alpine` 挂载 `TEST_AGENT_FRONTEND_DIST_DIR`。
+- How:
+  - 后端 jar 通过 `mvn -pl test-agent-app -am -DskipTests package` 生成后复制到交付目录；前端通过 `corepack pnpm --filter @test-agent/agent-web build` 生成 dist；opencode-worker 仍使用 Dockerfile 构建。
+- Result:
+  - `bash -n deploy/internal/package-release.sh`、`deploy/internal/package-release.sh --help`、`docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 和 `git diff --check` 通过；未执行完整打包构建。
+
 ### 2026-07-06 - 补充企业内镜像打包脚本
 
 - Why:

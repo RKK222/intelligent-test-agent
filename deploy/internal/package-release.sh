@@ -1,0 +1,236 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+ENV_FILE="${SCRIPT_DIR}/.env"
+if [[ ! -f "${ENV_FILE}" ]]; then
+  ENV_FILE="${SCRIPT_DIR}/env.example"
+fi
+OUTPUT_DIR="${SCRIPT_DIR}/dist"
+OUTPUT_DIR_FROM_ARG=0
+PLATFORM="linux/amd64"
+PACKAGE_BACKEND=1
+PACKAGE_FRONTEND=1
+PACKAGE_OPENCODE_WORKER=1
+SAVE_TARBALL=1
+
+usage() {
+  cat <<'USAGE'
+Usage: deploy/internal/package-release.sh [options]
+
+Build enterprise internal delivery artifacts:
+  - backend executable jar
+  - frontend dist files and tar.gz
+  - opencode-worker image and docker-loadable tar
+
+Options:
+  --env-file <path>       Dotenv file to read. Defaults to deploy/internal/.env, then env.example.
+  --output-dir <path>     Artifact output directory. Defaults to deploy/internal/dist.
+  --platform <platform>   Docker build platform for opencode-worker. Defaults to linux/amd64.
+  --backend-only          Package only the backend jar.
+  --frontend-only         Package only the frontend dist.
+  --opencode-only         Package only the opencode worker image.
+  --no-save               Build opencode image but do not export tarball.
+  -h, --help              Show this help.
+USAGE
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --env-file)
+      ENV_FILE="$2"
+      shift 2
+      ;;
+    --output-dir)
+      OUTPUT_DIR="$2"
+      OUTPUT_DIR_FROM_ARG=1
+      shift 2
+      ;;
+    --platform)
+      PLATFORM="$2"
+      shift 2
+      ;;
+    --backend-only)
+      PACKAGE_BACKEND=1
+      PACKAGE_FRONTEND=0
+      PACKAGE_OPENCODE_WORKER=0
+      shift
+      ;;
+    --frontend-only)
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=1
+      PACKAGE_OPENCODE_WORKER=0
+      shift
+      ;;
+    --opencode-only)
+      PACKAGE_BACKEND=0
+      PACKAGE_FRONTEND=0
+      PACKAGE_OPENCODE_WORKER=1
+      shift
+      ;;
+    --no-save)
+      SAVE_TARBALL=0
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+load_dotenv() {
+  local file="$1"
+  [[ -f "${file}" ]] || return 0
+  local line key value
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "${line}" || "${line}" == \#* ]] && continue
+    [[ "${line}" == export\ * ]] && line="${line#export }"
+    [[ "${line}" == *=* ]] || continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    key="${key//[[:space:]]/}"
+    [[ "${key}" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    if [[ "${value}" == \"*\" && "${value}" == *\" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "${value}" == \'*\' && "${value}" == *\' ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+    if [[ -z "${!key+x}" ]]; then
+      printf -v "${key}" '%s' "${value}"
+      export "${key}"
+    fi
+  done <"${file}"
+}
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Required command not found: $1" >&2
+    exit 1
+  fi
+}
+
+tag_to_tar_name() {
+  local tag="$1"
+  local platform="$2"
+  local platform_suffix="${platform//\//-}"
+  local safe="${tag//\//_}"
+  safe="${safe//:/_}"
+  printf '%s-%s.tar' "${safe}" "${platform_suffix}"
+}
+
+package_backend() {
+  local backend_dir="${OUTPUT_DIR}/backend"
+  mkdir -p "${backend_dir}"
+  echo "Building backend jar"
+  (cd "${ROOT_DIR}/backend" && mvn -q -pl test-agent-app -am -DskipTests package)
+
+  local jar
+  jar="$(find "${ROOT_DIR}/backend/test-agent-app/target" -maxdepth 1 -type f -name 'test-agent-app-*.jar' ! -name '*.original' | sort | tail -n 1)"
+  if [[ -z "${jar}" ]]; then
+    echo "Backend jar not found under backend/test-agent-app/target" >&2
+    exit 1
+  fi
+  cp "${jar}" "${backend_dir}/test-agent-app.jar"
+  ls -lh "${backend_dir}/test-agent-app.jar"
+}
+
+package_frontend() {
+  local frontend_dir="${OUTPUT_DIR}/frontend"
+  echo "Building frontend dist"
+  (cd "${ROOT_DIR}/frontend" && corepack pnpm install --frozen-lockfile && VITE_TEST_AGENT_API_BASE_URL="${VITE_TEST_AGENT_API_BASE_URL:-}" corepack pnpm --filter @test-agent/agent-web build)
+
+  rm -rf "${frontend_dir}"
+  mkdir -p "${frontend_dir}"
+  cp -R "${ROOT_DIR}/frontend/apps/agent-web/dist/." "${frontend_dir}/"
+  tar -C "${OUTPUT_DIR}" -czf "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz" frontend
+  ls -lh "${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"
+}
+
+build_opencode_worker_image() {
+  echo "Building ${TEST_AGENT_OPENCODE_WORKER_IMAGE} for ${PLATFORM}"
+  docker buildx build \
+    --platform "${PLATFORM}" \
+    -f "${ROOT_DIR}/deploy/internal/opencode-worker.Dockerfile" \
+    -t "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" \
+    --load \
+    --build-arg "GOPROXY=${GOPROXY}" \
+    --build-arg "NPM_REGISTRY=${NPM_REGISTRY}" \
+    --build-arg "DEBIAN_MIRROR=${DEBIAN_MIRROR}" \
+    --build-arg "DEBIAN_SECURITY_MIRROR=${DEBIAN_SECURITY_MIRROR}" \
+    --build-arg "OPENCODE_AI_PACKAGE=${OPENCODE_AI_PACKAGE}" \
+    "${ROOT_DIR}"
+  docker image inspect "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" >/dev/null
+
+  if [[ "${SAVE_TARBALL}" -eq 1 ]]; then
+    local tar_path="${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
+    echo "Saving ${TEST_AGENT_OPENCODE_WORKER_IMAGE} to ${tar_path}"
+    docker save -o "${tar_path}" "${TEST_AGENT_OPENCODE_WORKER_IMAGE}"
+    ls -lh "${tar_path}"
+  fi
+}
+
+load_dotenv "${ENV_FILE}"
+
+if [[ "${OUTPUT_DIR_FROM_ARG}" -eq 0 && -n "${TEST_AGENT_IMAGE_OUTPUT_DIR:-}" ]]; then
+  if [[ "${TEST_AGENT_IMAGE_OUTPUT_DIR}" = /* ]]; then
+    OUTPUT_DIR="${TEST_AGENT_IMAGE_OUTPUT_DIR}"
+  else
+    OUTPUT_DIR="${ROOT_DIR}/${TEST_AGENT_IMAGE_OUTPUT_DIR}"
+  fi
+fi
+
+TEST_AGENT_OPENCODE_WORKER_IMAGE="${TEST_AGENT_OPENCODE_WORKER_IMAGE:-test-agent-opencode-worker:internal}"
+NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
+GOPROXY="${GOPROXY:-https://goproxy.cn,direct}"
+DEBIAN_MIRROR="${DEBIAN_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian}"
+DEBIAN_SECURITY_MIRROR="${DEBIAN_SECURITY_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/debian-security}"
+OPENCODE_AI_PACKAGE="${OPENCODE_AI_PACKAGE:-opencode-ai@1.17.8}"
+VITE_TEST_AGENT_API_BASE_URL="${VITE_TEST_AGENT_API_BASE_URL:-}"
+
+mkdir -p "${OUTPUT_DIR}"
+
+echo "Using env file: ${ENV_FILE}"
+echo "Output dir: ${OUTPUT_DIR}"
+echo "Platform: ${PLATFORM}"
+
+if [[ "${PACKAGE_BACKEND}" -eq 1 ]]; then
+  require_command mvn
+  package_backend
+fi
+
+if [[ "${PACKAGE_FRONTEND}" -eq 1 ]]; then
+  require_command corepack
+  package_frontend
+fi
+
+if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 ]]; then
+  require_command docker
+  build_opencode_worker_image
+fi
+
+echo
+echo "Artifacts:"
+if [[ "${PACKAGE_BACKEND}" -eq 1 ]]; then
+  echo "  backend jar: ${OUTPUT_DIR}/backend/test-agent-app.jar"
+fi
+if [[ "${PACKAGE_FRONTEND}" -eq 1 ]]; then
+  echo "  frontend dist: ${OUTPUT_DIR}/frontend"
+  echo "  frontend archive: ${OUTPUT_DIR}/test-agent-frontend-dist.tar.gz"
+fi
+if [[ "${PACKAGE_OPENCODE_WORKER}" -eq 1 && "${SAVE_TARBALL}" -eq 1 ]]; then
+  echo "  opencode worker image tar: ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
+  echo
+  echo "Target import:"
+  echo "  docker load -i ${OUTPUT_DIR}/$(tag_to_tar_name "${TEST_AGENT_OPENCODE_WORKER_IMAGE}" "${PLATFORM}")"
+fi

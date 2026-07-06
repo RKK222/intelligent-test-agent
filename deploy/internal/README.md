@@ -1,6 +1,6 @@
 # 企业内 Docker 部署文件
 
-本目录提供企业内部署的容器侧文件：2 个前端静态容器、1 个 Nginx 入口、2 个 `opencode-worker` 容器。Java 后端仍按当前方案直接部署，不放进本 Compose。
+本目录提供企业内部署文件：后端按 jar 直接部署，前端按 `dist/` 静态文件交付，Docker Compose 只负责 1 个 Nginx 入口、2 个挂载前端 dist 的 Nginx 容器和 2 个 `opencode-worker` 容器。
 
 ## 端口约束
 
@@ -31,31 +31,36 @@ TEST_AGENT_SERVER_BROADCAST_ENABLED=true
 
 第二路 Java 使用不同 `server.port`，例如 `8081`。如果两路 Java 在同一台 Linux 上，保持相同 `TEST_AGENT_LINUX_SERVER_ID`；如果在不同服务器上，每台服务器使用自己的稳定 ID。Java 的 `SYS_DATA_ROOT_DIR` 需要与 worker 挂载的 `TEST_AGENT_DATA_ROOT` 对齐，默认是 `/data/.testagent`，以便 worker 读取 `.serverid` 和 `.serverhost`。
 
-## 构建镜像
+## 打包交付物
 
 在仓库根目录执行：
 
 ```bash
-deploy/internal/build-images.sh
+deploy/internal/package-release.sh
 ```
 
-脚本默认读取 `deploy/internal/.env`；如果该文件不存在，则读取 `deploy/internal/env.example`。它会构建 `linux/amd64` 镜像并导出到 `deploy/internal/dist/`：
+脚本默认读取 `deploy/internal/.env`；如果该文件不存在，则读取 `deploy/internal/env.example`。它会产出：
 
 ```text
-test-agent-frontend_internal-linux-amd64.tar
+deploy/internal/dist/backend/test-agent-app.jar
+deploy/internal/dist/frontend/
+deploy/internal/dist/test-agent-frontend-dist.tar.gz
 test-agent-opencode-worker_internal-linux-amd64.tar
 ```
 
-也可以手工执行：
+也就是说：后端 jar 和前端 dist 会随打包一起出来；前端不做业务镜像，Compose 里的两个前端容器直接用标准 `nginx:1.27-alpine` 挂载 `dist/frontend`。
+
+只打某一类交付物：
 
 ```bash
-docker buildx build \
-  --platform linux/amd64 \
-  -f deploy/internal/frontend.Dockerfile \
-  -t test-agent-frontend:internal \
-  --load \
-  .
+deploy/internal/package-release.sh --backend-only
+deploy/internal/package-release.sh --frontend-only
+deploy/internal/package-release.sh --opencode-only
+```
 
+opencode worker 镜像也可以手工执行：
+
+```bash
 docker buildx build \
   --platform linux/amd64 \
   -f deploy/internal/opencode-worker.Dockerfile \
@@ -67,14 +72,12 @@ docker buildx build \
 离线交付时导出 tar：
 
 ```bash
-docker save -o test-agent-frontend-internal-amd64.tar test-agent-frontend:internal
 docker save -o test-agent-opencode-worker-internal-amd64.tar test-agent-opencode-worker:internal
 ```
 
 目标机器导入：
 
 ```bash
-docker load -i test-agent-frontend-internal-amd64.tar
 docker load -i test-agent-opencode-worker-internal-amd64.tar
 ```
 
@@ -92,6 +95,7 @@ cp deploy/internal/env.example deploy/internal/.env
 - `TEST_AGENT_BACKEND_2`
 - `TEST_AGENT_OPENCODE_MANAGER_TOKEN`
 - `TEST_AGENT_DATA_ROOT`
+- `TEST_AGENT_FRONTEND_DIST_DIR`
 - 两个 worker 的端口池
 
 启动：
@@ -110,4 +114,4 @@ curl -fsS http://127.0.0.1:${TEST_AGENT_GATEWAY_HTTP_PORT:-80}/health
 
 ## 运行时外部依赖
 
-镜像内已包含前端静态产物、`opencode-manager` 和 npm 安装的 `opencode-ai` CLI。目标环境仍必须提供 PostgreSQL、Redis、企业内模型服务、Git/SSH 网络和 Java 后端所需密钥。`/data/.testagent/agent-opencode/.config/opencode/` 必须由超级管理员完成公共配置初始化且非空，否则 manager 会拒绝启动用户 opencode 进程。
+`opencode-worker` 镜像内已包含 `opencode-manager` 和 npm 安装的 `opencode-ai` CLI。目标环境仍必须提供 PostgreSQL、Redis、企业内模型服务、Git/SSH 网络和 Java 后端所需密钥。`/data/.testagent/agent-opencode/.config/opencode/` 必须由超级管理员完成公共配置初始化且非空，否则 manager 会拒绝启动用户 opencode 进程。
