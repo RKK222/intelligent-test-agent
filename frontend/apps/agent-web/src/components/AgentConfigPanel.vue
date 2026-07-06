@@ -85,6 +85,8 @@ const selectedDiff = computed(() => diffFiles.value.find((file) => file.path ===
 const publicConflictFiles = computed(() =>
   activeScope.value === "PUBLIC" ? diffFiles.value.filter((file) => isConflictFile(file)) : []
 );
+const publicConflictPathSet = computed(() => new Set(publicConflictFiles.value.map((file) => file.path)));
+const firstPublicConflictFile = computed(() => publicConflictFiles.value[0] ?? null);
 const activeAgentFile = computed(() => {
   if (props.activePath) {
     return activeAgentFileFromEditorPath(props.activePath);
@@ -123,6 +125,10 @@ async function refreshAll() {
     if (status.value.PUBLIC?.enabled !== false) tasks.push(loadDirectory("PUBLIC", "", true));
     if (props.workspaceId) tasks.push(loadDirectory("WORKSPACE", "", true));
     await Promise.allSettled(tasks);
+    if (token !== refreshAllToken) return;
+    if (props.canWrite && status.value.PUBLIC?.enabled !== false) {
+      await loadDiff("PUBLIC");
+    }
   } finally {
     if (token === refreshAllToken) {
       refreshing.value = false;
@@ -486,6 +492,12 @@ async function openPublicConflict(path: string) {
   } finally {
     publicConflictLoading.value = false;
   }
+}
+
+function openFirstPublicConflict() {
+  const first = firstPublicConflictFile.value;
+  if (!first) return;
+  void openPublicConflict(first.path);
 }
 
 async function resolvePublicConflict(payload: { resolution: WorkspaceGitConflictResolution; content?: string | null }) {
@@ -1179,6 +1191,30 @@ defineExpose({
         </div>
       </div>
       <div v-if="rootExpanded.has('PUBLIC')" class="agent-node-list">
+        <div v-if="publicConflictFiles.length > 0" class="agent-public-conflict-panel">
+          <div class="agent-public-conflict-heading">
+            <AlertTriangle class="h-3.5 w-3.5" :stroke-width="1.5" />
+            <span>公共级存在 {{ publicConflictFiles.length }} 个冲突文件</span>
+          </div>
+          <div class="agent-public-conflict-list">
+            <button
+              v-for="file in publicConflictFiles"
+              :key="`public-conflict:${file.path}`"
+              type="button"
+              class="agent-public-conflict-file"
+              :disabled="publicConflictLoading"
+              @click="openPublicConflict(file.path)"
+            >
+              <span>{{ file.path }}</span>
+              <span>处理冲突</span>
+            </button>
+          </div>
+          <div class="agent-conflict-actions">
+            <button type="button" :disabled="publicConflictResolving" @click="resolveAllPublicConflicts('CURRENT')">全部保留本地</button>
+            <button type="button" :disabled="publicConflictResolving" @click="resolveAllPublicConflicts('INCOMING')">全部采用远端</button>
+            <button type="button" :disabled="publicConflictResolving" @click="abortPublicConflict">取消合并</button>
+          </div>
+        </div>
         <div v-if="loadingByScope.PUBLIC.has('')" class="agent-loading"><i class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />加载中</div>
         <AgentConfigTreeNode
           v-for="entry in entriesByScope.PUBLIC[''] ?? []"
@@ -1189,6 +1225,7 @@ defineExpose({
           :expanded-directories="expandedByScope.PUBLIC"
           :loading-path="loadingByScope.PUBLIC"
           :active-path="activeAgentFile?.scope === 'PUBLIC' ? activeAgentFile.path : undefined"
+          :conflict-paths="publicConflictPathSet"
           @toggle="(path) => toggleDirectory('PUBLIC', path)"
           @open-file="(path) => openFile('PUBLIC', path)"
         />
@@ -1240,6 +1277,7 @@ defineExpose({
           :expanded-directories="expandedByScope.WORKSPACE"
           :loading-path="loadingByScope.WORKSPACE"
           :active-path="activeAgentFile?.scope === 'WORKSPACE' ? activeAgentFile.path : undefined"
+          :conflict-paths="new Set()"
           @toggle="(path) => toggleDirectory('WORKSPACE', path)"
           @open-file="(path) => openFile('WORKSPACE', path)"
         />
@@ -1443,7 +1481,7 @@ defineExpose({
                 @keydown.enter="canSubmitUpdatePublicConfig && submitUpdatePublicConfig()"
               />
               <span class="agent-modal-help">
-                流程：stage 当前工作区变更 → 提交 → push 到远端；不自动拉取远端
+                流程：拉取远端最新提交 → 暂存并提交本地变更 → 合并远端分支 → 推送到远端
               </span>
             </div>
 
@@ -1541,6 +1579,25 @@ defineExpose({
           <div v-if="updatePublicProgressError" class="agent-git-progress-error">
             <strong>错误说明</strong>
             <p>{{ updatePublicProgressError }}</p>
+            <div v-if="publicConflictFiles.length > 0" class="agent-git-progress-conflicts">
+              <div class="agent-git-progress-conflict-title">冲突文件</div>
+              <button
+                v-for="file in publicConflictFiles"
+                :key="`progress-conflict:${file.path}`"
+                type="button"
+                class="agent-git-progress-conflict-file"
+                :disabled="publicConflictLoading"
+                @click="openPublicConflict(file.path)"
+              >
+                <span>{{ file.path }}</span>
+                <span>处理冲突</span>
+              </button>
+              <div class="agent-conflict-actions">
+                <button type="button" :disabled="publicConflictResolving" @click="resolveAllPublicConflicts('CURRENT')">全部保留本地</button>
+                <button type="button" :disabled="publicConflictResolving" @click="resolveAllPublicConflicts('INCOMING')">全部采用远端</button>
+                <button type="button" :disabled="publicConflictResolving" @click="abortPublicConflict">取消合并</button>
+              </div>
+            </div>
           </div>
         </section>
       </div>
@@ -1714,6 +1771,62 @@ defineExpose({
   padding: 5px 8px;
   font-size: 12px;
   color: #9a3412;
+}
+.agent-public-conflict-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 6px 6px;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  background: #fff7f7;
+  padding: 8px;
+  color: #991b1b;
+}
+.agent-public-conflict-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.agent-public-conflict-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.agent-public-conflict-file,
+.agent-git-progress-conflict-file {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #fecaca;
+  border-radius: 5px;
+  background: #fff;
+  color: #991b1b;
+  cursor: pointer;
+  font-size: 12px;
+  min-height: 26px;
+  padding: 4px 7px;
+  text-align: left;
+}
+.agent-public-conflict-file span:first-child,
+.agent-git-progress-conflict-file span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.agent-public-conflict-file span:last-child,
+.agent-git-progress-conflict-file span:last-child {
+  color: #b91c1c;
+  font-weight: 600;
+}
+.agent-public-conflict-file:disabled,
+.agent-git-progress-conflict-file:disabled {
+  cursor: default;
+  opacity: 0.5;
 }
 .agent-merge-overlay {
   position: fixed;
@@ -1991,6 +2104,17 @@ defineExpose({
 .agent-conflict-actions button:disabled {
   cursor: default;
   opacity: 0.5;
+}
+.agent-git-progress-conflicts {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.agent-git-progress-conflict-title {
+  color: #991b1b;
+  font-size: 12px;
+  font-weight: 700;
 }
 .agent-diff-file {
   display: grid;

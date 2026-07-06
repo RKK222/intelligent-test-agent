@@ -25,6 +25,12 @@ const apiClientMock = vi.hoisted(() => ({
   writeWorkspaceAgentFile: vi.fn(),
   updatePublicAgentConfig: vi.fn(),
   updatePublicAgentConfigAndPush: vi.fn(),
+  getPublicAgentDiff: vi.fn(),
+  getWorkspaceAgentDiff: vi.fn(),
+  stagePublicAgentFiles: vi.fn(),
+  stageWorkspaceAgentFiles: vi.fn(),
+  unstagePublicAgentFiles: vi.fn(),
+  unstageWorkspaceAgentFiles: vi.fn(),
   getPublicAgentGitConflict: vi.fn(),
   resolvePublicAgentGitConflict: vi.fn(),
   resolveAllPublicAgentGitConflicts: vi.fn(),
@@ -77,6 +83,12 @@ describe("AgentConfigPanel", () => {
     apiClientMock.writeWorkspaceAgentFile.mockResolvedValue(undefined);
     apiClientMock.updatePublicAgentConfig.mockResolvedValue({ status: "SUCCEEDED" });
     apiClientMock.updatePublicAgentConfigAndPush.mockResolvedValue({ status: "SUCCEEDED", commitHash: "newcommit123" });
+    apiClientMock.getPublicAgentDiff.mockResolvedValue({ files: [] });
+    apiClientMock.getWorkspaceAgentDiff.mockResolvedValue({ files: [] });
+    apiClientMock.stagePublicAgentFiles.mockResolvedValue(undefined);
+    apiClientMock.stageWorkspaceAgentFiles.mockResolvedValue(undefined);
+    apiClientMock.unstagePublicAgentFiles.mockResolvedValue(undefined);
+    apiClientMock.unstageWorkspaceAgentFiles.mockResolvedValue(undefined);
     apiClientMock.getPublicAgentGitConflict.mockResolvedValue({
       path: "opencode/agents/review.md",
       rawStatus: "UU",
@@ -362,6 +374,54 @@ describe("AgentConfigPanel", () => {
       expect.stringContaining("non-fast-forward")
     ));
     expect(notifyMock.notifySuccess).not.toHaveBeenCalled();
+  });
+
+  it("shows conflict files and opens public conflict editor after update-and-push conflict", async () => {
+    apiClientMock.updatePublicAgentConfigAndPush.mockResolvedValueOnce({
+      status: "FAILED",
+      currentStep: "MERGING",
+      errorMessage: "合并冲突，请先处理 opencode/agents/test-design-agent.md 后重试"
+    });
+    apiClientMock.getPublicAgentDiff.mockResolvedValue({
+      files: [
+        {
+          path: "opencode/agents/test-design-agent.md",
+          status: "conflict",
+          rawStatus: "UU",
+          staged: false,
+          patch: "",
+          additions: 0,
+          deletions: 0
+        }
+      ]
+    });
+    apiClientMock.getPublicAgentGitConflict.mockResolvedValueOnce({
+      path: "opencode/agents/test-design-agent.md",
+      rawStatus: "UU",
+      baseContent: "base",
+      currentContent: "local",
+      incomingContent: "remote",
+      resultContent: "<<<<<<< HEAD\nlocal\n=======\nremote\n>>>>>>> origin/master"
+    });
+    const { view } = renderPanel();
+
+    await waitFor(() => expect(apiClientMock.getPublicAgentConfigStatus).toHaveBeenCalled());
+    await fireEvent.click(view.getByText("更新公共配置"));
+    await view.findByLabelText("提交信息 *");
+    await fireEvent.update(view.getByLabelText("提交信息 *"), "feat: resolve conflict");
+    await fireEvent.click(view.getByRole("button", { name: "提交并推送" }));
+
+    expect(await view.findAllByText("opencode/agents/test-design-agent.md")).not.toHaveLength(0);
+    const conflictButtons = await view.findAllByText("处理冲突");
+    await fireEvent.click(conflictButtons[0]);
+
+    await waitFor(() => expect(apiClientMock.getPublicAgentGitConflict).toHaveBeenCalledWith(
+      "opencode/agents/test-design-agent.md",
+      undefined,
+      "linux-1"
+    ));
+    expect(await view.findByText("合并编辑器")).toBeTruthy();
+    expect(await view.findByText("合并结果（可编辑）")).toBeTruthy();
   });
 });
 

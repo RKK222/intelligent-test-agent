@@ -31,6 +31,8 @@ const props = defineProps<{
   loadingPath: Set<string>;
   /** 当前被编辑器选中的 Agent 文件路径 */
   activePath?: string;
+  /** Git 冲突文件路径集合，用于在文件树中直接标识冲突文件。 */
+  conflictPaths?: Set<string>;
 }>();
 
 const emit = defineEmits<{
@@ -50,6 +52,7 @@ const isExpanded = computed(() => props.expandedDirectories.has(props.entry.path
 const isLoading = computed(() => props.loadingPath.has(props.entry.path));
 const isDirectory = computed(() => props.entry.type === "directory");
 const isActiveFile = computed(() => !isDirectory.value && props.activePath === props.entry.path);
+const isConflictFile = computed(() => !isDirectory.value && props.conflictPaths?.has(props.entry.path));
 const isKnownEmpty = computed(
   () => isDirectory.value && Array.isArray(children.value) && children.value.length === 0
 );
@@ -72,7 +75,8 @@ function onRowClick() {
       type="button"
       :class="cn(
         'ta-file-tree-row',
-        isActiveFile && 'is-active'
+        isActiveFile && 'is-active',
+        isConflictFile && 'is-conflict'
       )"
       :style="{ paddingLeft: `${indentPx}px` }"
       @click="onRowClick"
@@ -96,6 +100,7 @@ function onRowClick() {
         <FileIcon :entry="entry" />
       </template>
       <span class="min-w-0 flex-1 truncate">{{ entry.name }}</span>
+      <span v-if="isConflictFile" class="agent-tree-conflict-badge">冲突</span>
       <i v-if="isLoading" class="codicon codicon-loading codicon-modifier-spin ta-file-tree-loading" aria-hidden="true" />
     </button>
     <div v-if="isDirectory && isExpanded">
@@ -108,9 +113,29 @@ function onRowClick() {
         :expanded-directories="expandedDirectories"
         :loading-path="loadingPath"
         :active-path="activePath"
+        :conflict-paths="conflictPaths"
         @toggle="(path: string) => emit('toggle', path)"
         @open-file="(path: string) => emit('openFile', path)"
       />
     </div>
   </div>
 </template>
+
+<style scoped>
+.ta-file-tree-row.is-conflict {
+  color: #b91c1c;
+  background: #fff1f2;
+}
+
+.agent-tree-conflict-badge {
+  flex: none;
+  border: 1px solid #fecaca;
+  border-radius: 999px;
+  background: #fff;
+  color: #b91c1c;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  padding: 0 5px;
+}
+</style>

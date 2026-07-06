@@ -4179,3 +4179,15 @@ bash /tmp/test-api-after-restart.sh
   - 修改 workspace-management 公共 Agent Git 编排、API Controller/DTO、backend-api、AgentConfigPanel 和系统公共配置管理面板；同步 HTTP API、模块 README 与前端 README，并补充后端/前端回归测试。
 - Result:
   - 定向后端 workspace/API/common 测试、前端 Vitest、前端 typecheck、`git diff --check` 均通过；按 `.env.test` 重启本地服务成功，后端 health/readiness、前端 3000 和 CORS 预检通过。实际远端检查确认 `/Users/kaka/Desktop/intelligent-test-agent/.testagent/agent-opencode/.config` 本地 HEAD 为 `6e12505`，远端 `master` 为 `f85b920`，说明用户先前那次 UI 成功提示没有推送到远端。
+
+### 2026-07-06 - 公共 Agent 冲突文件和处理入口前端可见化
+
+- Why:
+  - 用户在公共 Agent 合并冲突后只能看到编辑器里的 Git 冲突标记，不知道哪些文件冲突；提交失败进度弹窗和公共级文件树也缺少直接处理冲突的按钮。
+- What:
+  - 公共级 Agents 树在刷新时自动读取公共 diff，冲突文件行标红并显示“冲突”标记；公共级下新增冲突文件列表，提供逐个“处理冲突”、全部保留本地、全部采用远端和取消合并按钮。
+  - 公共 Agent 提交失败弹窗在合并冲突时直接列出冲突文件，并提供相同处理按钮；点击“处理冲突”打开既有三方冲突编辑器。
+- How:
+  - 复用 `AgentConfigPanel` 已有公共冲突 API 和 `MergeConflictEditor`，只扩展面板可见入口和 `AgentConfigTreeNode` 冲突标识，不新增后端接口。
+- Result:
+  - `corepack pnpm test -- apps/agent-web/tests/agent-config-panel.test.ts`、`corepack pnpm typecheck` 和 `git diff --check` 通过。
