@@ -17,6 +17,9 @@ watch(
     const urlToken = router.currentRoute.value.query.token;
     if (urlToken && typeof urlToken === "string") {
       authStore.saveToken(urlToken);
+      const { token: _, userId: __, ...restQuery } = router.currentRoute.value.query;
+      router.replace({ path: router.currentRoute.value.path, query: restQuery });
+      return;
     }
     const token = authStore.token;
     if (!token && router.currentRoute.value.name !== "login") {

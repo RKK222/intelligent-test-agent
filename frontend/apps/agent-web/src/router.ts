@@ -86,6 +86,8 @@ router.beforeEach((to, _from) => {
   const urlToken = to.query.token;
   if (urlToken && typeof urlToken === "string") {
     localStorage.setItem(TOKEN_KEY, urlToken);
+    const { token: _, userId: __, ...restQuery } = to.query;
+    return { path: to.path, query: restQuery, replace: true };
   }
 
   const token = localStorage.getItem(TOKEN_KEY);
