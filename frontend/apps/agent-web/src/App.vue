@@ -4,6 +4,9 @@ import { zhCnWithArabicMonths } from "./utils/locale";
 import { useAuthStore } from "./stores/authStore";
 import { watch } from "vue";
 import { RouterView, useRouter } from "vue-router";
+import { jumpAam } from "./utils/aamLogin";
+
+const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login/";
 
 const authStore = useAuthStore();
 const router = useRouter();
@@ -13,7 +16,7 @@ watch(
   () => authStore.token,
   (newToken) => {
     if (!newToken && router.currentRoute.value.name !== "login") {
-      router.push({ name: "login", query: { redirect: router.currentRoute.value.fullPath } });
+      jumpAam(window.location.href, AAM_BASE_URL);
     }
   }
 );
@@ -24,7 +27,7 @@ watch(
  */
 function handleUnauthorized() {
   authStore.clearAuth();
-  router.push({ name: "login", query: { redirect: router.currentRoute.value.fullPath } });
+  jumpAam(window.location.href, AAM_BASE_URL);
 }
 
 // 暴露到 window 供非 Vue 上下文使用

@@ -1,9 +1,12 @@
 import { createRouter, createWebHistory } from "vue-router";
+import { jumpAam } from "./utils/aamLogin";
 
 /**
  * Token 在 localStorage 中的存储 key，与 authStore 保持一致。
  */
 const TOKEN_KEY = "test-agent.auth.token";
+
+const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login/";
 
 // SPA 客户端路由：/ 工作台、/s/:sessionId 只读 transcript、/login 登录页
 export const router = createRouter({
@@ -81,11 +84,10 @@ router.beforeEach((to, _from) => {
     return true;
   }
 
-  // 检查是否有 Token
   const token = localStorage.getItem(TOKEN_KEY);
   if (!token) {
-    // 未登录，跳转到登录页并记录原始路径
-    return { name: "login", query: { redirect: to.fullPath } };
+    jumpAam(window.location.href, AAM_BASE_URL);
+    return false;
   }
 
   return true;
