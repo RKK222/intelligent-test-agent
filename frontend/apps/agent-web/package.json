@@ -5,7 +5,7 @@
     "dev": "vite",
     "build": "vue-tsc --noEmit --pretty false && vite build",
     "build:prod": "vue-tsc --noEmit --pretty false && vite build",
-    "build:local": "vue-tsc --noEmit --pretty false && vite build --mode local",
+    "build:dev": "vue-tsc --noEmit --pretty false && vite build --mode development",
     "lint": "vue-tsc --noEmit --pretty false",
     "typecheck": "vue-tsc --noEmit --pretty false"
   },
