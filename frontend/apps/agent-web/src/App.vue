@@ -6,16 +6,17 @@ import { watch } from "vue";
 import { RouterView, useRouter } from "vue-router";
 import { jumpAam } from "./utils/aamLogin";
 
-const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login/";
+const AAM_BASE_URL = import.meta.env.VITE_AAM_BASE_URL ?? "http://zfw.sdc.cs.icbc/aam/login//";
 
 const authStore = useAuthStore();
 const router = useRouter();
 
-// 监听 Token 变化，Token 被清除时自动跳转到登录页
+// 监听 URL 变化，切换页面时检查登录状态，未登录则跳转 AAM 认证
 watch(
-  () => authStore.token,
-  (newToken) => {
-    if (!newToken && router.currentRoute.value.name !== "login") {
+  () => router.currentRoute.value.fullPath,
+  () => {
+    const token = authStore.token;
+    if (!token && router.currentRoute.value.name !== "login") {
       jumpAam(window.location.href, AAM_BASE_URL);
     }
   }
