@@ -4067,3 +4067,13 @@ bash /tmp/test-api-after-restart.sh
 - What: 工作台历史恢复改用 agent-scoped session tree；兼容 messages 接口新增 `refresh=false` DB-only；前端对历史 DB rows 和 session-tree events 做读时去重；后端缺少远端 id 时生成合成 `remoteMessageId` 做幂等 upsert。
 - How: 更新 `SessionController`、`SessionApplicationService`、`RunSessionMessageSnapshotService`、`backend-api`、`shared-types`、`AgentWorkbench`、`workbench-utils` 和 `ReadonlyTranscript`，补充前后端测试并同步 HTTP API 与相关 README。不删除历史重复数据，不改数据库 schema、RunEvent 类型或 generated SDK。
 - Result: 定向 backend API/runtime 测试、frontend Vitest/typecheck 与历史切换 Playwright 用例通过；历史重复 DB rows 会在读取时隐藏，后续刷新不会因缺少远端 id 继续新增重复 assistant 快照。
+
+### 2026-07-06 - 屏蔽 Monaco Editor 内部取消操作导致的未捕获 Promise Rejection
+
+- Why: 当 Monaco Editor 实例被销毁、切换模型或快速切换文件时，内部的 `Delayer.cancel` 或异步操作由于取消而抛出 `Canceled` 异常。由于 Monaco Editor 内部未对其进行 `.catch()` 处理，导致浏览器抛出 `Uncaught (in promise) Canceled: Canceled` 异常，污染控制台，并可能导致测试或生产报错监控工具误报。
+- What: 在主前端项目和复刻工程的页面入口文件以及 Vitest 单元测试的 setup 文件中，全局监听 `unhandledrejection` 事件，并拦截和屏蔽来自 Monaco Editor 的 harmless `Canceled` 异常。
+- How:
+  - 修改 `frontend/apps/agent-web/src/main.ts` 和 `frontend-opencode/src/main.ts` 入口文件，添加 `window.addEventListener("unhandledrejection", ...)` 逻辑，识别并屏蔽 `reason === "Canceled"`、`reason.name === "Canceled"` 或 `reason.message === "Canceled"` 的 Promise 异常。
+  - 同步修改 `frontend/vitest.setup.ts` 和 `frontend-opencode/tests/setup.ts` 测试配置文件，保证单元测试在 JSDOM 运行环境下也能够自动过滤并屏蔽该取消错误。
+- Result: 成功屏蔽了 Monaco Editor 的未捕获取消异常，控制台不再有 `Uncaught (in promise) Canceled` 的干扰日志；前端主工程与复刻工程的 Vue Typecheck、Vitest 单元测试全数顺利通过。
+

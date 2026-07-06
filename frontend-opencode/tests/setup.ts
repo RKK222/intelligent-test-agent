@@ -1,6 +1,20 @@
 import "@testing-library/jest-dom/vitest";
 import { vi } from "vitest";
 
+// 屏蔽 Monaco Editor 内部由取消操作导致的未捕获 Promise Rejection
+if (typeof window !== "undefined") {
+  window.addEventListener("unhandledrejection", (event) => {
+    if (
+      event.reason &&
+      (event.reason === "Canceled" ||
+        event.reason.name === "Canceled" ||
+        event.reason.message === "Canceled")
+    ) {
+      event.preventDefault();
+    }
+  });
+}
+
 Object.defineProperty(window, "matchMedia", {
   writable: true,
   value: vi.fn().mockImplementation((query: string) => ({
