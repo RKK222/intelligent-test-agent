@@ -27,7 +27,7 @@ class InMemoryRateLimitWebFilterTest {
     }
 
     private static MockServerWebExchange exchange() {
-        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/runs"));
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/internal/agent/opencode/runs"));
         exchange.getAttributes().put(TraceConstants.TRACE_ID_ATTRIBUTE, "trace_1234567890abcdef");
         return exchange;
     }

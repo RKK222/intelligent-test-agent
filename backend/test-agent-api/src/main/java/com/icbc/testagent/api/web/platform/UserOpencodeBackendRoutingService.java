@@ -17,7 +17,6 @@ import com.icbc.testagent.workspace.WorkspaceServerIdentity;
 import java.net.http.HttpClient;
 import java.net.http.HttpResponse;
 import java.time.Duration;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -49,22 +48,6 @@ class UserOpencodeBackendRoutingService {
             "/api/internal/platform/configuration-management/applications/";
     private static final String WORKSPACE_MANAGEMENT_PREFIX =
             "/api/internal/platform/workspace-management/";
-    private static final List<String> LEGACY_RUNTIME_PREFIXES = List.of(
-            "/api/agents",
-            "/api/models",
-            "/api/providers",
-            "/api/commands",
-            "/api/references",
-            "/api/status",
-            "/api/fs/",
-            "/api/vcs/",
-            "/api/lsp/",
-            "/api/mcp/",
-            "/api/config",
-            "/api/global/",
-            "/api/provider/",
-            "/api/worktrees",
-            "/api/sessions");
 
     private final UserOpencodeProcessAssignmentService assignmentService;
     private final BackendJavaRouteResolver routeResolver;
@@ -184,7 +167,7 @@ class UserOpencodeBackendRoutingService {
         if (agentPathAgentId.isPresent()) {
             return agentPathAgentId;
         }
-        if (isPlatformRuntimePath(path, method) || isLegacyRuntimePath(path, method)) {
+        if (isPlatformRuntimePath(path, method)) {
             return Optional.of(OPENCODE_AGENT_ID);
         }
         if (isManagedWorkspacePath(path, method)) {
@@ -241,29 +224,6 @@ class UserOpencodeBackendRoutingService {
             return HttpMethod.POST.equals(method);
         }
         return !suffix.startsWith("/runs/");
-    }
-
-    private boolean isLegacyRuntimePath(String path, HttpMethod method) {
-        if ("/api/runs".equals(path)) {
-            return HttpMethod.POST.equals(method);
-        }
-        if (path.startsWith("/api/runs/")) {
-            return false;
-        }
-        if (isPlatformAuthPath(path)) {
-            return false;
-        }
-        if (path.startsWith("/api/workspaces/") && path.endsWith("/sessions")) {
-            return true;
-        }
-        return LEGACY_RUNTIME_PREFIXES.stream().anyMatch(prefix -> path.equals(prefix) || path.startsWith(prefix));
-    }
-
-    private boolean isPlatformAuthPath(String path) {
-        return path.equals("/api/auth/login")
-                || path.equals("/api/auth/logout")
-                || path.equals("/api/auth/me")
-                || path.equals("/api/auth/refresh");
     }
 
     private boolean isManagedWorkspacePath(String path, HttpMethod method) {

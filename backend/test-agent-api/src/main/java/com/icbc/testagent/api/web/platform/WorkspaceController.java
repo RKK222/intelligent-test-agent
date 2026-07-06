@@ -1,19 +1,12 @@
 package com.icbc.testagent.api.web.platform;
 
 import com.icbc.testagent.api.web.common.RuntimeApiSupport;
-import com.icbc.testagent.workspace.FileContentResponse;
-import com.icbc.testagent.workspace.FileStatusResponse;
-import com.icbc.testagent.workspace.FileTreeEntryResponse;
 import com.icbc.testagent.workspace.WorkspaceApplicationService;
 import com.icbc.testagent.common.api.ApiResponse;
 import com.icbc.testagent.common.pagination.PageResponse;
 import com.icbc.testagent.domain.workspace.WorkspaceId;
-import jakarta.validation.Valid;
-import java.util.List;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ServerWebExchange;
@@ -36,7 +29,7 @@ public class WorkspaceController {
     /**
      * 分页列出工作区，分页参数统一交给 RuntimeApiSupport 校验和默认化。
      */
-    @GetMapping({"/api/workspaces", "/api/internal/platform/workspace-management/workspaces"})
+    @GetMapping("/api/internal/platform/workspace-management/workspaces")
     public ApiResponse<PageResponse<RuntimeDtos.WorkspaceResponse>> listWorkspaces(
             @RequestParam(required = false) Integer page,
             @RequestParam(required = false) Integer size,
@@ -48,7 +41,7 @@ public class WorkspaceController {
     /**
      * 查询单个工作区详情，路径参数在 HTTP 边界转换为领域 ID。
      */
-    @GetMapping({"/api/workspaces/{workspaceId}", "/api/internal/platform/workspace-management/workspaces/{workspaceId}"})
+    @GetMapping("/api/internal/platform/workspace-management/workspaces/{workspaceId}")
     public ApiResponse<RuntimeDtos.WorkspaceResponse> getWorkspace(
             @PathVariable String workspaceId,
             ServerWebExchange exchange) {
@@ -56,52 +49,4 @@ public class WorkspaceController {
         return ApiResponse.ok(RuntimeDtos.WorkspaceResponse.from(workspaceService.getWorkspace(new WorkspaceId(workspaceId))), traceId);
     }
 
-    /**
-     * 列出工作区内文件树，path 为空时由应用层解释为工作区根目录。
-     */
-    @GetMapping({"/api/workspaces/{workspaceId}/files", "/api/internal/platform/workspace-management/workspaces/{workspaceId}/files"})
-    public ApiResponse<List<FileTreeEntryResponse>> listFiles(
-            @PathVariable String workspaceId,
-            @RequestParam(required = false) String path,
-            ServerWebExchange exchange) {
-        String traceId = RuntimeApiSupport.traceId(exchange);
-        return ApiResponse.ok(workspaceService.listFiles(new WorkspaceId(workspaceId), path), traceId);
-    }
-
-    /**
-     * 读取工作区文件内容，路径安全校验由 workspace 应用服务统一执行。
-     */
-    @GetMapping({"/api/workspaces/{workspaceId}/files/content", "/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/content"})
-    public ApiResponse<FileContentResponse> readFile(
-            @PathVariable String workspaceId,
-            @RequestParam String path,
-            ServerWebExchange exchange) {
-        String traceId = RuntimeApiSupport.traceId(exchange);
-        return ApiResponse.ok(workspaceService.readFile(new WorkspaceId(workspaceId), path), traceId);
-    }
-
-    /**
-     * 写入工作区文件内容，Controller 不直接触碰文件系统。
-     */
-    @PutMapping({"/api/workspaces/{workspaceId}/files/content", "/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/content"})
-    public ApiResponse<Void> writeFile(
-            @PathVariable String workspaceId,
-            @Valid @RequestBody RuntimeDtos.WriteFileRequest request,
-            ServerWebExchange exchange) {
-        String traceId = RuntimeApiSupport.traceId(exchange);
-        workspaceService.writeFile(new WorkspaceId(workspaceId), request.path(), request.content());
-        return ApiResponse.ok(null, traceId);
-    }
-
-    /**
-     * 查询单个文件状态，用于前端在写入或展示前判断文件是否存在及类型。
-     */
-    @GetMapping({"/api/workspaces/{workspaceId}/files/status", "/api/internal/platform/workspace-management/workspaces/{workspaceId}/files/status"})
-    public ApiResponse<FileStatusResponse> fileStatus(
-            @PathVariable String workspaceId,
-            @RequestParam String path,
-            ServerWebExchange exchange) {
-        String traceId = RuntimeApiSupport.traceId(exchange);
-        return ApiResponse.ok(workspaceService.fileStatus(new WorkspaceId(workspaceId), path), traceId);
-    }
 }

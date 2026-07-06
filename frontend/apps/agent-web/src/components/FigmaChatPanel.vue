@@ -5809,14 +5809,14 @@ function onCompositionEnd() {
   min-height: 0;
   max-height: min(62vh, calc(100vh - 260px));
   margin: 0 10px 10px;
-  padding: 8px;
-  border: 1px solid var(--ta-chat-border, #e0e0e0);
+  padding: 6px;
+  border: 1px solid var(--ta-chat-border, #eaeaea);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--ta-chat-surface, #ffffff);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   overflow: hidden;
 }
 
@@ -5825,11 +5825,11 @@ function onCompositionEnd() {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  gap: 14px;
-  padding: 14px 12px;
-  border: 1px solid #e5e7eb;
+  gap: 10px;
+  padding: 10px 8px;
+  border: 1px solid var(--ta-chat-border, #eaeaea);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--ta-chat-surface, #ffffff);
 }
 
 .figma-chat-question-card {
@@ -5838,8 +5838,8 @@ function onCompositionEnd() {
 }
 
 .figma-chat-permission-card {
-  border-color: rgba(245, 158, 11, 0.35);
-  background: rgba(245, 158, 11, 0.06);
+  border-color: rgba(148, 96, 21, 0.35);
+  background: rgba(148, 96, 21, 0.06);
 }
 
 .figma-chat-question-item {
@@ -5853,7 +5853,7 @@ function onCompositionEnd() {
   min-height: 0;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 4px;
@@ -5865,7 +5865,7 @@ function onCompositionEnd() {
 
 .figma-chat-question-scroll::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: #d4d4d8;
+  background: var(--ta-chat-border-strong, #cfcfcf);
 }
 
 .figma-chat-question-page-head {
@@ -5876,107 +5876,111 @@ function onCompositionEnd() {
 }
 
 .figma-chat-question-progress {
-  font-size: 14px;
-  line-height: 20px;
-  font-weight: 700;
-  color: #111827;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 400;
+  color: var(--ta-chat-muted, #7a7a7a);
 }
 
 .figma-chat-question-header {
   overflow: hidden;
-  color: #6b7280;
+  color: var(--ta-chat-muted, #7a7a7a);
   font-size: 12px;
-  font-weight: 600;
-  line-height: 18px;
+  font-weight: 500;
+  line-height: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .figma-chat-question-title {
-  font-size: 16px;
-  line-height: 22px;
-  font-weight: 700;
-  color: #111827;
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--ta-chat-text, #333333);
 }
 
 .figma-chat-question-description {
   white-space: pre-wrap;
   font-size: 12px;
-  line-height: 18px;
-  color: #6b7280;
+  line-height: 16px;
+  color: var(--ta-chat-muted, #7a7a7a);
 }
 
 .figma-chat-question-hint {
-  font-size: 13px;
-  line-height: 18px;
-  color: #8a8a8a;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ta-chat-muted, #7a7a7a);
 }
 
 .figma-chat-question-options {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.figma-chat-question-option,
-.figma-chat-question-custom-card,
-.figma-chat-question-submit,
-.figma-chat-question-reject,
-.figma-chat-question-prev,
-.figma-chat-question-next {
-  min-height: 32px;
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+  gap: 6px;
 }
 
 .figma-chat-question-option,
 .figma-chat-question-custom-card {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
-  min-height: 58px;
-  border: 1px solid #d1d5db;
-  background: #ffffff;
-  color: #374151;
+  min-height: 44px;
+  border-radius: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--ta-chat-border, #eaeaea);
+  background: var(--ta-chat-surface, #ffffff);
+  color: var(--ta-chat-text, #333333);
   text-align: left;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+.figma-chat-question-submit,
+.figma-chat-question-reject,
+.figma-chat-question-prev,
+.figma-chat-question-next {
+  min-height: 28px;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
 }
 
 .figma-chat-question-option:hover,
 .figma-chat-question-option.is-selected,
 .figma-chat-question-custom-card:focus-within {
-  border-color: #111827;
-  background: #f3f4f6;
-  color: #111827;
+  border-color: var(--ta-accent, #333333);
+  background: var(--ta-chat-hover, #eeeeee);
+  color: var(--ta-chat-text, #333333);
 }
 
 .figma-chat-question-option-mark {
   position: relative;
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
-  border: 1px solid #d1d5db;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+  border: 1px solid var(--ta-chat-border, #eaeaea);
   border-radius: 999px;
-  background: #ffffff;
+  background: var(--ta-chat-surface, #ffffff);
 }
 
 .figma-chat-question-option.is-selected .figma-chat-question-option-mark {
-  border-color: #111827;
+  border-color: var(--ta-accent, #333333);
 }
 
 .figma-chat-question-option.is-selected .figma-chat-question-option-mark::after {
   position: absolute;
   top: 3px;
   left: 3px;
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 999px;
-  background: #111827;
+  background: var(--ta-accent, #333333);
   content: "";
 }
 
@@ -5985,32 +5989,32 @@ function onCompositionEnd() {
   min-width: 0;
   flex: 1;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .figma-chat-question-option-label {
-  color: #111827;
+  color: var(--ta-chat-text, #333333);
   font-size: 14px;
-  font-weight: 700;
-  line-height: 20px;
-}
-
-.figma-chat-question-option-description {
-  color: #6f6f6f;
-  font-size: 13px;
-  font-weight: 400;
+  font-weight: 500;
   line-height: 18px;
 }
 
+.figma-chat-question-option-description {
+  color: var(--ta-chat-muted, #7a7a7a);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
 .figma-chat-question-custom-input {
-  min-height: 34px;
+  min-height: 30px;
   width: 100%;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--ta-chat-border, #eaeaea);
   border-radius: 6px;
-  padding: 6px 10px;
-  background: #ffffff;
-  color: #111827;
-  font-size: 13px;
+  padding: 4px 8px;
+  background: var(--ta-chat-surface, #ffffff);
+  color: var(--ta-chat-text, #333333);
+  font-size: 14px;
   outline: none;
 }
 
@@ -6022,7 +6026,7 @@ function onCompositionEnd() {
 }
 
 .figma-chat-question-custom-input:focus {
-  border-color: #111827;
+  border-color: var(--ta-accent, #333333);
 }
 
 .figma-chat-question-custom-card .figma-chat-question-custom-input:focus {
@@ -6034,7 +6038,7 @@ function onCompositionEnd() {
   flex-shrink: 0;
   align-items: center;
   justify-content: flex-start;
-  gap: 8px;
+  gap: 6px;
 }
 
 .figma-chat-question-action-spacer {
@@ -6042,41 +6046,41 @@ function onCompositionEnd() {
 }
 
 .figma-chat-question-submit {
-  border: 1px solid #111827;
-  background: #111827;
-  color: #ffffff;
+  border: 1px solid var(--ta-accent, #333333);
+  background: var(--ta-accent, #333333);
+  color: var(--primary-foreground, #ffffff);
 }
 
 .figma-chat-question-submit:not(:disabled):hover {
-  background: #374151;
-  border-color: #374151;
+  background: var(--ta-accent-2, #555555);
+  border-color: var(--ta-accent-2, #555555);
 }
 
 .figma-chat-question-submit:disabled {
-  border-color: #d1d5db;
-  background: #f3f4f6;
-  color: #9ca3af;
+  border-color: var(--ta-chat-border, #eaeaea);
+  background: var(--ta-chat-process-bg, #f5f5f5);
+  color: var(--ta-chat-muted, #7a7a7a);
   cursor: not-allowed;
 }
 
 .figma-chat-question-reject {
-  border: 1px solid #d1d5db;
-  background: #ffffff;
-  color: #4b5563;
+  border: 1px solid var(--ta-chat-border, #eaeaea);
+  background: var(--ta-chat-surface, #ffffff);
+  color: var(--ta-chat-subtle, #555555);
 }
 
 .figma-chat-question-prev,
 .figma-chat-question-next {
-  border: 1px solid #d1d5db;
-  background: #ffffff;
-  color: #111827;
+  border: 1px solid var(--ta-chat-border, #eaeaea);
+  background: var(--ta-chat-surface, #ffffff);
+  color: var(--ta-chat-text, #333333);
 }
 
 .figma-chat-question-reject:hover,
 .figma-chat-question-prev:hover,
 .figma-chat-question-next:hover {
-  background: #f3f4f6;
-  color: #111827;
+  background: var(--ta-chat-hover, #eeeeee);
+  color: var(--ta-chat-text, #333333);
 }
 
 /* ---- 技能面板 ---- */

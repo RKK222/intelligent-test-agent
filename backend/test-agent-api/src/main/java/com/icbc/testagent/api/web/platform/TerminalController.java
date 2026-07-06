@@ -33,10 +33,7 @@ public class TerminalController {
     /**
      * 创建终端连接 ticket，允许空请求体以便前端使用默认 cwd、shell 和窗口尺寸。
      */
-    @PostMapping({
-            "/api/sessions/{sessionId}/terminal/tickets",
-            "/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets"
-    })
+    @PostMapping("/api/internal/platform/opencode-runtime/sessions/{sessionId}/terminal/tickets")
     public Mono<ApiResponse<TerminalTicketResponse>> createTicket(
             @PathVariable String sessionId,
             @RequestBody(required = false) TerminalTicketRequest request,
@@ -64,10 +61,6 @@ public class TerminalController {
             String sessionId,
             TerminalTicketResponse response,
             ServerWebExchange exchange) {
-        String requestPath = exchange.getRequest().getPath().pathWithinApplication().value();
-        if (!requestPath.startsWith("/api/internal/platform/opencode-runtime/")) {
-            return response;
-        }
         return new TerminalTicketResponse(
                 response.ticket(),
                 response.expiresAt(),

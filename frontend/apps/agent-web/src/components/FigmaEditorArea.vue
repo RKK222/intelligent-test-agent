@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import tabCloseUrl from "../assets/figma/tab-close.svg";
 import fileIconUrl from "../assets/figma/file-icon.svg";
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch, nextTick } from "vue";
 import { Eye, EyeOff } from "lucide-vue-next";
 import type { EditorTab as WorkbenchTab } from "@test-agent/workbench-shell";
 import { languageFromPath } from "@test-agent/editor";
@@ -96,17 +96,47 @@ function emitCloseMany(paths: string[]) {
 onBeforeUnmount(() => {
   closeTabMenu();
 });
+
+const tabsContainer = ref<HTMLElement | null>(null);
+
+// 监听激活的 tab 路径和 tabs 长度，当新打开了文件或者当前激活的是最后一个 tab 时直接滚到最右侧展示
+watch(
+  [() => props.tabs.length, () => props.activePath],
+  ([newLength, newActivePath], [oldLength, oldActivePath]) => {
+    nextTick(() => {
+      if (!tabsContainer.value) return;
+      const isLastTabActive =
+        props.tabs.length > 0 &&
+        props.tabs[props.tabs.length - 1].path === props.activePath;
+      if (newLength > (oldLength ?? 0) || isLastTabActive) {
+        tabsContainer.value.scrollLeft = tabsContainer.value.scrollWidth;
+      }
+      
+      // 焦点聚焦到当前激活的 tab 元素上
+      if (props.activePath) {
+        const activeTabEl = tabsContainer.value.querySelector(
+          ".figma-editor-tab--active"
+        ) as HTMLElement | null;
+        if (activeTabEl) {
+          activeTabEl.focus();
+        }
+      }
+    });
+  },
+  { immediate: true }
+);
 </script>
 
 <template>
   <div class="figma-editor-area">
-    <div class="figma-editor-tabs">
+    <div ref="tabsContainer" class="figma-editor-tabs">
       <div
         v-for="tab in tabs"
         :key="tab.path"
         :class="['figma-editor-tab', { 'figma-editor-tab--active': activePath === tab.path }]"
         role="tab"
         :aria-selected="activePath === tab.path"
+        tabindex="0"
         @click="emit('activate', tab.path)"
         @contextmenu="openTabMenu($event, tab.path)"
       >
@@ -280,6 +310,15 @@ onBeforeUnmount(() => {
   background: #fff;
   border-top-color: #555;
   border-top-width: 2px;
+}
+
+.figma-editor-tab:focus {
+  outline: none;
+}
+
+.figma-editor-tab:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1.5px rgba(29, 63, 176, 0.4);
 }
 
 .figma-editor-tab-inner {

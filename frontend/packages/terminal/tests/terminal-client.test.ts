@@ -43,13 +43,15 @@ describe("terminal client", () => {
       ticket: {
         ticket: "pty_123",
         expiresAt: "2026-06-19T13:00:00Z",
-        webSocketUrl: "/api/sessions/ses_1/terminal/ws?ticket=pty_123"
+        webSocketUrl: "/api/internal/platform/opencode-runtime/sessions/ses_1/terminal/ws?ticket=pty_123"
       },
       WebSocketCtor: FakeWebSocket,
       onEvent: (event) => events.push(event.type)
     });
 
-    expect(FakeWebSocket.instances[0]?.url).toBe("ws://127.0.0.1:8080/api/sessions/ses_1/terminal/ws?ticket=pty_123");
+    expect(FakeWebSocket.instances[0]?.url).toBe(
+      "ws://127.0.0.1:8080/api/internal/platform/opencode-runtime/sessions/ses_1/terminal/ws?ticket=pty_123"
+    );
 
     FakeWebSocket.instances[0]?.open();
     session.sendInput("npm test\n");
@@ -79,7 +81,7 @@ describe("terminal client", () => {
       ticket: {
         ticket: "pty_123",
         expiresAt: "2026-06-19T13:00:00Z",
-        webSocketUrl: "ws://localhost:8080/api/sessions/ses_1/terminal/ws?ticket=pty_123"
+        webSocketUrl: "ws://localhost:8080/api/internal/platform/opencode-runtime/sessions/ses_1/terminal/ws?ticket=pty_123"
       },
       WebSocketCtor: FakeWebSocket,
       onEvent
@@ -103,7 +105,7 @@ describe("terminal client", () => {
       ticket: {
         ticket: "pty_123",
         expiresAt: "2026-06-19T13:00:00Z",
-        webSocketUrl: "ws://localhost:8080/api/sessions/ses_1/terminal/ws?ticket=pty_123"
+        webSocketUrl: "ws://localhost:8080/api/internal/platform/opencode-runtime/sessions/ses_1/terminal/ws?ticket=pty_123"
       },
       WebSocketCtor: FakeWebSocket,
       onEvent

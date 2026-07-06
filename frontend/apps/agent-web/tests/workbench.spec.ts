@@ -1087,7 +1087,7 @@ test("switching history restores assistant documents and the file changes summar
   await page.getByRole("button", { name: /请生成登录测试报告/ }).click();
 
   await expect.poll(() => sessionTreeRequests).toContain("/api/internal/agent/opencode/sessions/ses_history/session-tree/messages");
-  await expect.poll(() => sessionMessageRequests).toContain("/api/sessions/ses_history/messages?page=1&size=100&refresh=false");
+  await expect.poll(() => sessionMessageRequests).toContain("/api/internal/platform/opencode-runtime/sessions/ses_history/messages?page=1&size=100&refresh=false");
   await expect(page.getByText("测试报告已生成")).toBeVisible();
   const changesCard = page.getByRole("button", { name: /文件修改 1/ });
   await expect(changesCard).toContainText("+1");
@@ -1164,7 +1164,7 @@ test("switching history resumes the active run event stream", async ({ page }) =
   await page.getByRole("button", { name: "历史" }).click();
   await page.getByRole("button", { name: /generate-cases-orthogonal/ }).click();
 
-  await expect.poll(() => activeRunRequests).toContain("/api/sessions/ses_history/active-run");
+  await expect.poll(() => activeRunRequests).toContain("/api/internal/platform/opencode-runtime/sessions/ses_history/active-run");
   await expect.poll(() => runEventRequests).toContain("/api/internal/agent/opencode/runs/run_1/events");
   await expect(page.getByText("正交表实时输出")).toBeVisible();
 });
@@ -1267,7 +1267,7 @@ test("history loading shows immediately and does not wait for message feedback",
   releaseSessionMessages();
   await expect(page.getByText("历史正文已加载")).toHaveCount(1);
   await expect.poll(() => sessionTreeRequests).toContain("/api/internal/agent/opencode/sessions/ses_history/session-tree/messages");
-  await expect.poll(() => sessionMessageRequests).toContain("/api/sessions/ses_history/messages?page=1&size=100&refresh=false");
+  await expect.poll(() => sessionMessageRequests).toContain("/api/internal/platform/opencode-runtime/sessions/ses_history/messages?page=1&size=100&refresh=false");
   await expect.poll(() => feedbackRequests).toEqual([
     "/api/internal/platform/opencode-runtime/messages/msg_1234567890abcdef1234567890abcdef/feedback/me"
   ]);
@@ -2093,12 +2093,12 @@ async function mockBackendApi(
       await route.fulfill(json(opencodeProcessStatus(currentProcessStatus)));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/workspaces") {
+    if (method === "GET" && url.pathname === "/api/internal/platform/workspace-management/workspaces") {
       await route.fulfill(json(pageOf(workspaceItems)));
       return;
     }
-    if (method === "POST" && /^\/api\/workspaces\/[^/]+\/file-ws-route$/.test(url.pathname)) {
-      const workspaceId = url.pathname.match(/\/api\/workspaces\/([^/]+)\/file-ws-route$/)?.[1] ?? "";
+    if (method === "POST" && /^\/api\/internal\/platform\/workspace-management\/workspaces\/[^/]+\/file-ws-route$/.test(url.pathname)) {
+      const workspaceId = url.pathname.match(/\/api\/internal\/platform\/workspace-management\/workspaces\/([^/]+)\/file-ws-route$/)?.[1] ?? "";
       await route.fulfill(json({
         workspaceId,
         linuxServerId: "10.8.0.12",
@@ -2109,8 +2109,8 @@ async function mockBackendApi(
       }));
       return;
     }
-    if (method === "GET" && /^\/api\/workspaces\/[^/]+$/.test(url.pathname)) {
-      const workspaceId = url.pathname.match(/\/api\/workspaces\/([^/]+)$/)?.[1];
+    if (method === "GET" && /^\/api\/internal\/platform\/workspace-management\/workspaces\/[^/]+$/.test(url.pathname)) {
+      const workspaceId = url.pathname.match(/\/api\/internal\/platform\/workspace-management\/workspaces\/([^/]+)$/)?.[1];
       await route.fulfill(json(workspaceItems.find((item) => item.workspaceId === workspaceId) ?? workspace()));
       return;
     }
@@ -2126,16 +2126,16 @@ async function mockBackendApi(
       await route.fulfill({ status: 500, ...json({ error: "workspace files must use websocket" }) });
       return;
     }
-    if (method === "GET" && /\/api\/workspaces\/[^/]+\/sessions$/.test(url.pathname)) {
+    if (method === "GET" && /\/api\/internal\/platform\/opencode-runtime\/workspaces\/[^/]+\/sessions$/.test(url.pathname)) {
       await route.fulfill(json(pageOf(capture.sessions ?? [])));
       return;
     }
-    if (method === "POST" && url.pathname === "/api/sessions") {
+    if (method === "POST" && url.pathname === "/api/internal/platform/opencode-runtime/sessions") {
       capture.sessionRequests?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await route.fulfill(json(session()));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/sessions") {
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/sessions") {
       await route.fulfill(json(pageOf(capture.sessions ?? [])));
       return;
     }
@@ -2151,7 +2151,7 @@ async function mockBackendApi(
       }));
       return;
     }
-    if (method === "GET" && /^\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
+    if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
       capture.sessionMessageRequests?.push(`${url.pathname}${url.search}`);
       await capture.sessionMessagesGate;
       await route.fulfill(json(pageOf(capture.sessionMessages ?? [])));
@@ -2163,7 +2163,7 @@ async function mockBackendApi(
       await route.fulfill(json(null));
       return;
     }
-    if (method === "GET" && /^\/api\/sessions\/[^/]+\/active-run$/.test(url.pathname)) {
+    if (method === "GET" && /^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/active-run$/.test(url.pathname)) {
       capture.activeRunRequests?.push(url.pathname);
       await route.fulfill(json(capture.activeRun ?? null));
       return;
@@ -2176,7 +2176,7 @@ async function mockBackendApi(
       await route.fulfill(json({ runId: "run_history", files: capture.historyDiffFiles ?? [] }));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/agent") {
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/agents") {
       const workspaceId = url.searchParams.get("workspaceId") ?? "";
       capture.agentRequests?.push(`${method} ${url.pathname}${url.search}`);
       await capture.agentGatesByWorkspace?.[workspaceId];
@@ -2192,7 +2192,7 @@ async function mockBackendApi(
       await route.fulfill(json(agents));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/model") {
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/models") {
       await route.fulfill(json(capture.models ?? [
         { id: "sonnet", providerId: "anthropic", name: "Sonnet" },
         { id: "opus", providerId: "anthropic", name: "Opus" },
@@ -2201,7 +2201,7 @@ async function mockBackendApi(
       ]));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/provider") {
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/providers") {
       await route.fulfill(json(capture.providers ?? [
         { id: "anthropic", name: "Anthropic", status: "ready" },
         { id: "volcengine", name: "Volcengine Ark", status: "ready" },
@@ -2209,19 +2209,26 @@ async function mockBackendApi(
       ]));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/api/command") {
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/commands") {
       await route.fulfill(json([{ id: "test", name: "test", description: "Run tests" }]));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/experimental/resource") {
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/mcp/resources") {
       await route.fulfill(json([{ id: "issue-1", name: "Issue 1", uri: "mcp://issue/1", type: "issue" }]));
       return;
     }
-    if (method === "GET" && url.pathname === "/api/internal/agent/opencode/experimental/tool/ids") {
+    if (method === "GET" && url.pathname === "/api/internal/platform/opencode-runtime/mcp/tools") {
       await route.fulfill(json(["bash"]));
       return;
     }
-    if (method === "GET" && ["/api/internal/agent/opencode/lsp", "/api/internal/agent/opencode/mcp", "/api/internal/agent/opencode/vcs/status"].includes(url.pathname)) {
+    if (
+      method === "GET" &&
+      [
+        "/api/internal/platform/opencode-runtime/lsp/status",
+        "/api/internal/platform/opencode-runtime/mcp/status",
+        "/api/internal/platform/opencode-runtime/vcs/status"
+      ].includes(url.pathname)
+    ) {
       await route.fulfill(json(capture.vcsStatus ?? { status: "ready", branch: "main", defaultBranch: "main" }));
       return;
     }
@@ -2269,22 +2276,22 @@ async function mockBackendApi(
       await route.fulfill(json({ runId: "run_1", files: [diffFile()] }));
       return;
     }
-    if (method === "POST" && url.pathname === "/api/internal/agent/opencode/permission/perm_1/reply") {
+    if (method === "POST" && url.pathname === "/api/internal/platform/opencode-runtime/sessions/ses_1/permissions/perm_1/reply") {
       capture.permissionReplies?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await route.fulfill(json({ accepted: true }));
       return;
     }
-    if (method === "POST" && url.pathname === "/api/internal/agent/opencode/question/ques_1/reply") {
+    if (method === "POST" && url.pathname === "/api/internal/platform/opencode-runtime/sessions/ses_1/questions/ques_1/reply") {
       capture.questionReplies?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await route.fulfill(json({ accepted: true }));
       return;
     }
-    if (method === "POST" && url.pathname === "/api/sessions/ses_1/terminal/tickets") {
+    if (method === "POST" && url.pathname === "/api/internal/platform/opencode-runtime/sessions/ses_1/terminal/tickets") {
       capture.terminalTickets?.push(JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>);
       await route.fulfill(json({
         ticket: "pty_123",
         expiresAt: "2026-06-19T13:00:00Z",
-        webSocketUrl: "/api/sessions/ses_1/terminal/ws?ticket=pty_123"
+        webSocketUrl: "/api/internal/platform/opencode-runtime/sessions/ses_1/terminal/ws?ticket=pty_123"
       }));
       return;
     }

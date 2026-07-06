@@ -12,11 +12,11 @@ test.describe("phase 11 real service integration", () => {
   test("creates a real opencode-backed session and opens a PTY terminal websocket", async ({ page }) => {
     const workspaceRoot = await createWorkspaceFixture();
     try {
-      const workspace = await apiPost<{ workspaceId: string }>("/api/workspaces", {
+      const workspace = await apiPost<{ workspaceId: string }>("/api/internal/platform/workspace-management/workspaces", {
         name: `phase11-real-${Date.now()}`,
         rootPath: workspaceRoot
       });
-      const session = await apiPost<{ sessionId: string }>("/api/sessions", {
+      const session = await apiPost<{ sessionId: string }>("/api/internal/platform/opencode-runtime/sessions", {
         workspaceId: workspace.workspaceId,
         title: "Phase 11 real E2E"
       });
@@ -24,7 +24,7 @@ test.describe("phase 11 real service integration", () => {
       const mappingTicket = await establishOpencodeMapping(session.sessionId);
       const ticket =
         mappingTicket ??
-        (await apiPost<{ webSocketUrl: string }>(`/api/sessions/${session.sessionId}/terminal/tickets`, {
+        (await apiPost<{ webSocketUrl: string }>(`/api/internal/platform/opencode-runtime/sessions/${session.sessionId}/terminal/tickets`, {
           workspaceId: workspace.workspaceId,
           cols: 120,
           rows: 32
@@ -52,7 +52,7 @@ async function createWorkspaceFixture() {
 
 async function establishOpencodeMapping(sessionId: string): Promise<{ webSocketUrl: string } | null> {
   try {
-    await apiPost("/api/runs", {
+    await apiPost("/api/internal/agent/opencode/runs", {
       sessionId,
       prompt: "Reply with phase11-real-e2e-ready. Do not modify files.",
       parts: [{ type: "text", text: "Reply with phase11-real-e2e-ready. Do not modify files." }]
@@ -69,7 +69,7 @@ async function establishOpencodeMapping(sessionId: string): Promise<{ webSocketU
 
 async function tryCreateTerminalTicket(sessionId: string) {
   try {
-    return await apiPost<{ webSocketUrl: string }>(`/api/sessions/${sessionId}/terminal/tickets`, { cols: 80, rows: 24 });
+    return await apiPost<{ webSocketUrl: string }>(`/api/internal/platform/opencode-runtime/sessions/${sessionId}/terminal/tickets`, { cols: 80, rows: 24 });
   } catch {
     return null;
   }

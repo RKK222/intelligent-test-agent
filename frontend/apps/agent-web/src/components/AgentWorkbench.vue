@@ -1039,13 +1039,13 @@ function truncateRawOutputBody(body: string): { body: string; truncated?: boolea
 
 function isConversationRawExchange(exchange: RawHttpExchange) {
   const path = rawPathWithoutQuery(exchange.path);
-  if (exchange.method === "POST" && path === "/api/sessions") {
+  if (exchange.method === "POST" && path === "/api/internal/platform/opencode-runtime/sessions") {
     return true;
   }
-  if (/^\/api\/sessions\/[^/]+\/messages$/.test(path)) {
+  if (/^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/messages$/.test(path)) {
     return true;
   }
-  if (/^\/api\/sessions\/[^/]+\/active-run$/.test(path)) {
+  if (/^\/api\/internal\/platform\/opencode-runtime\/sessions\/[^/]+\/active-run$/.test(path)) {
     return true;
   }
   if (exchange.method === "POST" && /^\/api\/internal\/agent\/[^/]+\/runs$/.test(path)) {

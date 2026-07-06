@@ -10,6 +10,11 @@ import com.icbc.testagent.domain.model.AiModelConfigRepository;
 import com.icbc.testagent.domain.node.ExecutionNode;
 import com.icbc.testagent.domain.node.ExecutionNodeId;
 import com.icbc.testagent.domain.node.ExecutionNodeStatus;
+import com.icbc.testagent.domain.user.User;
+import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.user.UserRepository;
+import com.icbc.testagent.common.pagination.PageRequest;
+import com.icbc.testagent.common.pagination.PageResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -97,6 +102,46 @@ class ModelCatalogApplicationServiceTest {
     }
 
     @Test
+    void internalSourcePatchesOpencodeWithCurrentUserUcid() {
+        ModelCatalogProperties properties = new ModelCatalogProperties();
+        properties.setSource("internal");
+        FakeModelRepository repository = new FakeModelRepository();
+        FakeUserRepository users = new FakeUserRepository();
+        users.save(User.createNew("usr_1234567890abcdef", "ucid_001", "test-user", "password-hash", "org", "rd", "dept"));
+        ModelCatalogApplicationService service = new ModelCatalogApplicationService(properties, repository, objectMapper, users);
+        service.seedInternalModelsAfterStartup();
+        RecordingRuntime runtime = new RecordingRuntime();
+
+        service.syncProviderConfig(runtime, node(), "trace_model_ucid_test", new UserId("usr_1234567890abcdef"));
+
+        assertThat(runtime.command).isNotNull();
+        assertThat(runtime.command.body()).asString()
+                .contains("environment=test")
+                .contains("ucid=ucid_001")
+                .contains("Auth-Token");
+    }
+
+    @Test
+    void internalSourceUsesConfiguredUcidHeaderName() {
+        ModelCatalogProperties properties = new ModelCatalogProperties();
+        properties.setSource("internal");
+        properties.getInternal().setUcidHeaderName("UCID");
+        FakeModelRepository repository = new FakeModelRepository();
+        FakeUserRepository users = new FakeUserRepository();
+        users.save(User.createNew("usr_1234567890abcdef", "ucid_002", "test-user", "password-hash", "org", "rd", "dept"));
+        ModelCatalogApplicationService service = new ModelCatalogApplicationService(properties, repository, objectMapper, users);
+        service.seedInternalModelsAfterStartup();
+        RecordingRuntime runtime = new RecordingRuntime();
+
+        service.syncProviderConfig(runtime, node(), "trace_model_ucid_header_test", new UserId("usr_1234567890abcdef"));
+
+        assertThat(runtime.command).isNotNull();
+        assertThat(runtime.command.body()).asString()
+                .contains("UCID=ucid_002")
+                .doesNotContain("ucid=ucid_002");
+    }
+
+    @Test
     void syncProviderConfigUsesConfiguredApiKeyBeforeEnvironmentReference() {
         ModelCatalogProperties properties = new ModelCatalogProperties();
         properties.setSource("external");
@@ -120,6 +165,15 @@ class ModelCatalogApplicationServiceTest {
         ModelCatalogApplicationService service = new ModelCatalogApplicationService(properties, new FakeModelRepository(), objectMapper);
 
         assertThat(service.managedSourceEnabled()).isFalse();
+    }
+
+    @Test
+    void internalSourceIsRecognizedForUserScopedHeaders() {
+        ModelCatalogProperties properties = new ModelCatalogProperties();
+        properties.setSource("internal");
+        ModelCatalogApplicationService service = new ModelCatalogApplicationService(properties, new FakeModelRepository(), objectMapper);
+
+        assertThat(service.internalSourceEnabled()).isTrue();
     }
 
     @Test
@@ -214,6 +268,49 @@ class ModelCatalogApplicationServiceTest {
         @Override
         public Optional<AiModelConfig> findDefaultByProvider(String providerId) {
             return findEnabledByProvider(providerId).stream().filter(AiModelConfig::defaultModel).findFirst();
+        }
+    }
+
+    private static class FakeUserRepository implements UserRepository {
+        private final Map<UserId, User> users = new LinkedHashMap<>();
+
+        @Override
+        public void save(User user) {
+            users.put(user.userId(), user);
+        }
+
+        @Override
+        public Optional<User> findByUserId(UserId userId) {
+            return Optional.ofNullable(users.get(userId));
+        }
+
+        @Override
+        public Optional<User> findByUnifiedAuthId(String unifiedAuthId) {
+            return users.values().stream()
+                    .filter(user -> user.unifiedAuthId().equals(unifiedAuthId))
+                    .findFirst();
+        }
+
+        @Override
+        public Optional<User> findByUsername(String username) {
+            return users.values().stream()
+                    .filter(user -> user.username().equals(username))
+                    .findFirst();
+        }
+
+        @Override
+        public PageResponse<User> findPage(String keyword, PageRequest pageRequest) {
+            return new PageResponse<>(List.copyOf(users.values()), pageRequest.page(), pageRequest.size(), users.size());
+        }
+
+        @Override
+        public boolean existsByUsername(String username) {
+            return findByUsername(username).isPresent();
+        }
+
+        @Override
+        public boolean existsByUnifiedAuthId(String unifiedAuthId) {
+            return findByUnifiedAuthId(unifiedAuthId).isPresent();
         }
     }
 }

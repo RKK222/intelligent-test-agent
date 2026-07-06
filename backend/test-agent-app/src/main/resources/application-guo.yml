@@ -43,6 +43,7 @@ test-agent:
       name: ICBC OpenAI
       base-url: http://ai-code.sdc.icbc:9070/icbc/jdt/model/api/openai/v1
       api-key-env: ICBC_OPENAI_AUTH_TOKEN
+      ucid-header-name: ${TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME:ucid}
       auth-mode: auth-token
       default-model: DeepSeek-V4-Flash-W8A8
   opencode:

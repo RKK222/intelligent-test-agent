@@ -50,12 +50,11 @@
 | `bailian` | 历史兼容模式，使用旧 Model Studio provider、`MODELSTUDIO_API_KEY` 和内置 qwen/kimi 模型清单。 |
 | `internal` | 企业内模式，启动时把 openclaw 企业 patch 中的模型清单 seed 到 `ai_model_configs`，接口从数据库读取启用模型。默认模型为 `DeepSeek-V4-Flash-W8A8`。 |
 
-在 `external`、`bailian` 和 `internal` 模式下，Run 启动前会尽力 `PATCH /global/config` 到当前 opencode 执行节点，写入 OpenAI-compatible provider、默认模型和请求头配置；模型/Provider 目录读取直接来自平台目录，不触发 opencode 健康检查。provider API Key 优先读取 `test-agent.model-catalog.<external|internal>.api-key`，未配置时回退到 `api-key-env` 指定的环境变量，便于 IDEA 直接启动和脚本启动同时兼容。同步失败只记录告警，Run 仍走原有错误处理路径。
-在 `external` 和 `internal` 模式下，Run 启动和模型/Provider 目录读取前会尽力 `PATCH /global/config` 到当前 opencode 执行节点，写入 OpenAI-compatible provider、默认模型和请求头配置。Run 请求中的 `model` 会按当前模型目录校验；请求缺失、格式非法或目录外模型会回退到 `defaultModel`，目录为空时返回 `VALIDATION_ERROR` 且不启动远端 run，避免历史浏览器偏好继续命中不可用 provider。provider API Key 优先读取 `test-agent.model-catalog.<external|internal>.api-key`，未配置时回退到 `api-key-env` 指定的环境变量，便于 IDEA 直接启动和脚本启动同时兼容。同步失败只记录告警，Run 仍走原有错误处理路径。
+在 `external`、`bailian` 和 `internal` 模式下，Run 启动前会尽力 `PATCH /global/config` 到当前 opencode 执行节点，写入 OpenAI-compatible provider、默认模型和请求头配置；模型/Provider 目录读取直接来自平台目录，不触发 opencode 健康检查。Run 请求中的 `model` 会按当前模型目录校验；请求缺失、格式非法或目录外模型会回退到 `defaultModel`，目录为空时返回 `VALIDATION_ERROR` 且不启动远端 run，避免历史浏览器偏好继续命中不可用 provider。provider API Key 优先读取 `test-agent.model-catalog.<external|internal>.api-key`，未配置时回退到 `api-key-env` 指定的环境变量，便于 IDEA 直接启动和脚本启动同时兼容。`internal` 模式要求当前登录用户和用户专属 opencode 进程，Run 前会从 `User.unifiedAuthId` 取当前用户 UCID，并按 `test-agent.model-catalog.internal.ucid-header-name`（默认 `ucid`）写入 provider headers；同步失败只记录告警，Run 仍走原有错误处理路径。
 
 ## 测试覆盖
 
-- `RunApplicationServiceTest` 覆盖 Run 创建、远端 prompt 非阻塞提交及异步失败错误说明、通用 binding 保存/复用、远端 session 懒创建/复用、用户进程节点 upsert、用户进程 binding 不一致自动重建、sticky node、prompt parts、终态事件、终态消息快照/token 分页持久化、reasoning/tool output 与可见正文隔离、瞬态消息事件、tool part 实时 Diff 派生、取消编排，以及 `run.succeeded` 与 `Streaming response failed` 竞态：成功先到时不追加冲突失败，transport error 先到但随后 root 成功时最终仍为成功，没有 root 终态时延迟收敛失败且保留安全错误说明。
+- `RunApplicationServiceTest` 覆盖 Run 创建、远端 prompt 非阻塞提交及异步失败错误说明、通用 binding 保存/复用、远端 session 懒创建/复用、用户进程节点 upsert、用户进程 binding 不一致自动重建、internal 模式拒绝匿名 Run 并把当前用户传给 provider 同步、sticky node、prompt parts、终态事件、终态消息快照/token 分页持久化、reasoning/tool output 与可见正文隔离、瞬态消息事件、tool part 实时 Diff 派生、取消编排，以及 `run.succeeded` 与 `Streaming response failed` 竞态：成功先到时不追加冲突失败，transport error 先到但随后 root 成功时最终仍为成功，没有 root 终态时延迟收敛失败且保留安全错误说明。
 - `BackendJavaRouteResolverTest` 覆盖同服务器多 Java 快照保留、manager 连接优先于最新心跳、当前服务器本地兜底、远端目标判断、`containerId` 按最新 manager 快照解析所属服务器，以及目标 Java 不可用时统一 `OPENCODE_UNAVAILABLE`。
 - `OpencodeProcessStatusQueryServiceTest` 覆盖公共状态查询服务的进程记录缺失、health healthy、not-running 映射 STOPPED、普通不健康和 manager 异常返回 STALE 且不覆盖数据库稳定状态，以及 heartbeat 刷新。
 - `OpencodeProcessStartupServiceTest` 覆盖公共启动服务的 start、候选进程保存、启动后公共状态查询、短暂 HTTP health 不可达时等待恢复、manager 控制错误立即失败、持续健康失败超时、失败候选状态收敛、RUNNING/binding/heartbeat/ExecutionNode 回写和旧进程/绑定时间复用。
@@ -75,7 +74,7 @@
 - `AiMessageFeedbackApplicationServiceTest` 覆盖反馈创建/更新、assistant role 校验、消息归属校验和评论长度边界。
 - `AnalyticsQueryServiceTest` 覆盖 overview 指标口径、空分母、参数边界和 CSV 不含 cost 字段。
 - `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
-- `ModelCatalogApplicationServiceTest` 覆盖企业内模型 seed、`DeepSeek-V4-Flash-W8A8` 默认模型和 opencode provider 配置同步请求；`RunApplicationServiceTest` 覆盖托管模型目录下合法选择保留、过期/非法/缺失模型回退默认模型，以及目录为空时拒绝启动。
+- `ModelCatalogApplicationServiceTest` 覆盖企业内模型 seed、`DeepSeek-V4-Flash-W8A8` 默认模型、internal provider 配置同步时写入当前用户 UCID header，以及 opencode provider 配置同步请求；`RunApplicationServiceTest` 覆盖托管模型目录下合法选择保留、过期/非法/缺失模型回退默认模型，以及目录为空时拒绝启动。
 - `OpencodeRuntimeApplicationServiceTest` 覆盖 agent/provider/MCP runtime path、用户进程节点路由、固定节点 fallback、session binding 自动重建、config/provider OAuth/worktree/share/MCP auth、workspace directory 透传和 permission reply body 兼容。
 - `Terminal*Test` 覆盖 ticket 签发/消费/过期、active session 互斥、输入/输出限流、WebSocket envelope 编解码和本地进程适配。
 

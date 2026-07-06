@@ -2,6 +2,54 @@
 
 ## Entries
 
+### 2026-07-06 - 全面作废后端旧接口
+
+- Why:
+  - 旧 `/api/...` runtime/workspace 兼容入口容易被前端继续误用，并且历史消息旧查询会触发快照刷新；需要按“立即强制作废”统一返回 `410 API_GONE`，让新客户端只走 internal platform 和 agent-scoped API。
+- What:
+  - 后端新增 `API_GONE` 和 `LegacyApiGoneWebFilter`，拦截旧 `/api/runs/**`、`/api/sessions/**`、`/api/workspaces/**`、opencode runtime 裸路径、旧 terminal、旧 HTTP 文件、旧 backendProcess metrics 和 manager-backends 诊断入口；稳定 `/api/auth/login|logout|me|refresh` 保留。
+  - Controller 清理旧映射，前端 `backend-api` 迁移 Session、Workspace、runtime metadata、terminal、file-ws-route、permission/question 等调用到新 URL；历史正文继续使用 agent-scoped session-tree，反馈映射使用 platform messages `refresh=false`。
+- How:
+  - 拦截器在进入 Controller、业务服务或跨 Java 转发前写统一 `ApiErrorResponse`；不改数据库结构、RunEvent payload 或 generated SDK。同步 HTTP/SSE API 文档、后端 API README、`backend-api` README 和 `agent-web` README。
+- Result:
+  - 后端 `test-agent-common,test-agent-api -am test`、`backend-api` Vitest 和历史会话相关 Playwright 用例通过；完整 `workbench.spec.ts` 仍有设置权限、模型下拉语义、发送流程等既有非本次路径迁移断言失败，已在本次结果中保留风险说明。
+
+### 2026-07-06 - internal UCID 同步增加明文排查日志
+
+- Why:
+  - 需要在企业内模型调用前确认当前 Run 解析到的 UCID 与 header 名，用户明确确认 UCID 在本项目不作为敏感信息处理，允许明文打印。
+- What:
+  - `ModelCatalogApplicationService` 在 internal provider 同步前输出 `model_provider_ucid_header_resolved` 单行日志，包含 `traceId/providerId/userId/ucidHeaderName/ucid/ucidPresent`，不打印 token 或请求体。
+- How:
+  - 复用现有 SLF4J 日志；日志位于 `PATCH /global/config` 前，便于即使 provider 同步失败也能排查 UCID 解析结果。
+- Result:
+  - `ModelCatalogApplicationServiceTest` 定向测试通过；标准 `.env.test` 重启成功，后端 readiness 和前端入口均可达。
+
+### 2026-07-06 - internal 模型调用透传当前用户 UCID
+
+- Why:
+  - 企业内 `internal` 模型源调用内网 OpenAI-compatible API 时缺少当前登录人的 UCID；由于 opencode `/global/config` 是进程级配置，必须避免多用户共用进程时 header 串号。
+- What:
+  - `ModelCatalogApplicationService` 在 internal provider 同步时按当前 `UserId` 查询 `User.unifiedAuthId`，写入可配置的 `ucid-header-name`；`RunApplicationService` 在 internal 模式拒绝匿名 Run，并要求命中用户专属 opencode 进程后再同步 provider。
+  - 各 Spring profile 增加 `TEST_AGENT_ICBC_OPENAI_UCID_HEADER_NAME`，并同步 backend/runtime/deployment 文档。
+- How:
+  - 复用现有 `UserRepository`、`AgentRuntimeTargetResolver` 和 Run 前 `PATCH /global/config` 链路，不改 opencode，不新增数据库和 API。
+- Result:
+  - 定向 ModelCatalog/Run 测试通过，`test-agent-app` 打包通过；标准 `.env.test` 重启成功，后端 health/readiness、前端和 CORS 预检均通过。全量 `test-agent-app -am test` 仍受既有 persistence H2 集成测试问题阻塞。
+
+### 2026-07-06 - 新增企业内 Docker Compose 部署文件
+
+- Why:
+  - 需要按“Java 直接部署、2 个前端容器、2 个后端直连入口、opencode+manager 镜像部署”的企业内拓扑补齐可落地的 Dockerfile 和 Compose 文件，并明确 Java 使用 manager 上报端口生成 opencode `baseUrl` 的端口约束。
+- What:
+  - 新增 `deploy/internal/`：前端静态镜像 Dockerfile、opencode worker 镜像 Dockerfile、2 前端 + 网关 + 2 worker 的 `docker-compose.yml`、Nginx 模板、env 示例和 README。
+  - opencode worker 镜像内包含 1 个 `opencode-manager` 和 npm 安装的 `opencode-ai` CLI；运行期由 manager 按端口池动态拉起 0..N 个 `opencode serve` 子进程。
+- How:
+  - Compose 中 worker 使用 `4096-4105:4096-4105`、`4106-4115:4106-4115` 这类 hostPort 与 containerPort 数值一致的映射；README 明确禁止 `14096:4096` 这类内外端口不一致配置。
+  - Java 后端不纳入 Compose，由 gateway 通过 `TEST_AGENT_BACKEND_1/2` 代理直接部署的两个 Java 端口。
+- Result:
+  - `docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 通过并展开出 2 个前端、2 个 worker 和网关；本机 Buildx 不支持 `--check`，未执行镜像构建。
+
 ### 2026-07-05 - 合并 retry rebase 冲突
 
 - Why:
@@ -4067,3 +4115,54 @@ bash /tmp/test-api-after-restart.sh
 - What: 工作台历史恢复改用 agent-scoped session tree；兼容 messages 接口新增 `refresh=false` DB-only；前端对历史 DB rows 和 session-tree events 做读时去重；后端缺少远端 id 时生成合成 `remoteMessageId` 做幂等 upsert。
 - How: 更新 `SessionController`、`SessionApplicationService`、`RunSessionMessageSnapshotService`、`backend-api`、`shared-types`、`AgentWorkbench`、`workbench-utils` 和 `ReadonlyTranscript`，补充前后端测试并同步 HTTP API 与相关 README。不删除历史重复数据，不改数据库 schema、RunEvent 类型或 generated SDK。
 - Result: 定向 backend API/runtime 测试、frontend Vitest/typecheck 与历史切换 Playwright 用例通过；历史重复 DB rows 会在读取时隐藏，后续刷新不会因缺少远端 id 继续新增重复 assistant 快照。
+
+### 2026-07-06 - 屏蔽 Monaco Editor 内部取消操作导致的未捕获 Promise Rejection
+
+- Why: 当 Monaco Editor 实例被销毁、切换模型或快速切换文件时，内部的 `Delayer.cancel` 或异步操作由于取消而抛出 `Canceled` 异常。由于 Monaco Editor 内部未对其进行 `.catch()` 处理，导致浏览器抛出 `Uncaught (in promise) Canceled: Canceled` 异常，污染控制台，并可能导致测试或生产报错监控工具误报。
+- What: 在主前端项目和复刻工程的页面入口文件以及 Vitest 单元测试的 setup 文件中，全局监听 `unhandledrejection` 事件，并拦截和屏蔽来自 Monaco Editor 的 harmless `Canceled` 异常。
+- How:
+  - 修改 `frontend/apps/agent-web/src/main.ts` 和 `frontend-opencode/src/main.ts` 入口文件，添加 `window.addEventListener("unhandledrejection", ...)` 逻辑，识别并屏蔽 `reason === "Canceled"`、`reason.name === "Canceled"` 或 `reason.message === "Canceled"` 的 Promise 异常。
+  - 同步修改 `frontend/vitest.setup.ts` 和 `frontend-opencode/tests/setup.ts` 测试配置文件，保证单元测试在 JSDOM 运行环境下也能够自动过滤并屏蔽该取消错误。
+- Result: 成功屏蔽了 Monaco Editor 的未捕获取消异常，控制台不再有 `Uncaught (in promise) Canceled` 的干扰日志；前端主工程与复刻工程的 Vue Typecheck、Vitest 单元测试全数顺利通过。
+
+### 2026-07-06 - 优化提问/权限弹窗与符合前端规范的字号/色彩调整
+### 2026-07-06 - 优化提问/权限弹窗与符合前端规范的字号/色彩及紧凑布局调整
+
+- Why:
+  - 用户反馈 `question.asked` 提问弹框与权限确认卡片的字号偏大且较松散，整体设计和颜色（写死的十六进制、RGB 值）没有遵守前端样式规约与语义 Token 要求。
+- What:
+  - 1. 调整字号与字重以对齐前端排版体系：
+     - 将提问标题 `.figma-chat-question-title` 字号由 `16px` (700) 调至 `14px` (600)，行高缩减为 `18px`；
+     - 将进度文本 `.figma-chat-question-progress` 和指示头 `.figma-chat-question-header` 的 font-weight 分别调整为 400 和 500，行高调为 `16px`；
+     - 将提示文本 `.figma-chat-question-hint` 从 `13px` 调至标准 `12px` (Caption)，行高调为 `16px`；
+     - 将选项 label `.figma-chat-question-option-label` 的字重由强烈的 `700` (Bold) 调整为标准的 `500` (Medium)，选项描述从 `13px` 调整为 `12px` (Caption) 400，行高分别调为 `18px` 与 `16px`；
+     - 将自定义输入 `.figma-chat-question-custom-input` 字号从 `13px` 改为 `14px`，padding 调为更紧凑的 `4px 8px`，最小高度设为 `30px`；
+     - 动作按钮文字字号统一调整为标准的 `12px` (Caption)，使得右侧面板侧边栏内的交互按钮更加小巧精致。
+  - 2. 色彩及边框对齐全局语义 Token 体系，避免写死颜色：
+     - 所有 background 和 border 调整为消费 `var(--ta-chat-border)`, `var(--ta-chat-surface)`, `var(--ta-chat-text)`, `var(--ta-chat-muted)` 以及 `var(--ta-accent)` 等全局 token；
+     - 权限弹窗 `.figma-chat-permission-card` 的警告色边框与背景替换为与全局 `--warning` (#946015) 匹配的 RGB 透明度版本，保持优雅统一的浅冷色调视觉设计。
+  - 3. 紧凑型布局调整，优化信息密度：
+     - 外层卡片和内容滚动的 `gap` 从 `14px` 缩减为 `10px`，外层 dock 容器 `gap` 缩减为 `6px`，padding 从 `8px` 调整为 `6px`；
+     - 面板 padding 从 `14px 12px` 缩减为 `10px 8px`；
+     - 动作按钮 `.figma-chat-question-submit` 等最小高度由 `32px` 调整为 `28px`，padding 降为 `4px 10px`，按钮间距缩减为 `6px`；
+     - 选项卡片 `.figma-chat-question-option` / `.figma-chat-question-custom-card` 最小高度由 `52px` (原 `58px`) 调至 `44px`，选项内置 checkbox 框指示圆圈大小由 `16x16px` 调整为更紧凑的 `14x14px`，完美融合列表行信息密度。
+- How:
+  - 仅修改 `frontend/apps/agent-web/src/components/FigmaChatPanel.vue` 组件中的 `<style>` 样式模块，不涉及任何底层数据结构、API 契约或后端业务逻辑。
+- Result:
+  - 1. `corepack pnpm test FigmaChatPanel` 单元测试全部通过。
+  - 2. `corepack pnpm typecheck` 及 `corepack pnpm lint` 检查全部无报错通过。
+
+### 2026-07-06 - 每次点击文件自动滚动并聚焦到文件预览板块的最后一个文件展示
+
+- Why:
+  - 用户希望在点击文件（包括新文件被打开或激活最后一个文件）时，中间的文件预览板块（Figma 风格 tab 列表）能够直接自动滚动到最后面（最右侧）的最后一个文件展示，并自动聚焦到对应的文件名 tab 上，省去用户手工拖拽/划动横向滚动条去最右边寻找的麻烦。
+- What:
+  - 1. 给 `FigmaEditorArea.vue` 组件中的 `.figma-editor-tabs` 容器添加 `ref="tabsContainer"`，并为 `.figma-editor-tab` 标签元素添加 `tabindex="0"` 和 focus / focus-visible 的精致微光指示 CSS。
+  - 2. 引入 `watch` 和 `nextTick`，监听 `tabs.length`（有新文件打开并追加到末尾时）和 `activePath`（激活 tab 时）。
+  - 3. 在对应的 `watch` 触发时，若有新 tab 加入或是当前激活的是最后一个 tab，在 `nextTick` 中自动将 `tabsContainer` 的 `scrollLeft` 滚动至 `scrollWidth`。
+  - 4. 每次 `activePath` 改变时，在 `nextTick` 中找到当前激活的 tab DOM 元素 `.figma-editor-tab--active` 并执行 `focus()` 让焦点直接聚焦过去。
+  - 5. 更新前端单元测试 `FigmaEditorArea.test.ts`，新增测试用例验证自动滚动与焦点聚焦 (document.activeElement) 的逻辑。
+- How:
+  - 修改 `frontend/apps/agent-web/src/components/FigmaEditorArea.vue` 的 template、script、CSS，以及新增单元测试 `frontend/apps/agent-web/tests/FigmaEditorArea.test.ts`。
+- Result:
+  - 运行 `corepack pnpm test FigmaEditorArea.test.ts --run` 全部通过，所有的聚焦与滚动断言均通过。

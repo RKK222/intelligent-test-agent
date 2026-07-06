@@ -15,14 +15,12 @@ import org.springframework.web.reactive.socket.server.support.WebSocketHandlerAd
 public class TerminalWebSocketConfig {
 
     /**
-     * 注册 ticket 保护的 terminal WebSocket 路径，兼容旧 URL 和 internal platform URL。
+     * 注册 ticket 保护的 terminal WebSocket 路径，只保留 internal platform URL。
      */
     @Bean
     HandlerMapping terminalWebSocketHandlerMapping(TerminalWebSocketHandler handler) {
         SimpleUrlHandlerMapping mapping = new SimpleUrlHandlerMapping();
-        mapping.setUrlMap(Map.of(
-                "/api/sessions/*/terminal/ws", handler,
-                "/api/internal/platform/opencode-runtime/sessions/*/terminal/ws", handler));
+        mapping.setUrlMap(Map.of("/api/internal/platform/opencode-runtime/sessions/*/terminal/ws", handler));
         mapping.setOrder(-1);
         return mapping;
     }

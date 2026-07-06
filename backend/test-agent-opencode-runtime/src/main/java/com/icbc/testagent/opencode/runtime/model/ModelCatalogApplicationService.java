@@ -5,6 +5,9 @@ import com.icbc.testagent.agent.runtime.AgentRuntimeCommand;
 import com.icbc.testagent.domain.model.AiModelConfig;
 import com.icbc.testagent.domain.model.AiModelConfigRepository;
 import com.icbc.testagent.domain.node.ExecutionNode;
+import com.icbc.testagent.domain.user.User;
+import com.icbc.testagent.domain.user.UserId;
+import com.icbc.testagent.domain.user.UserRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
@@ -20,6 +23,7 @@ import java.util.Objects;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
@@ -34,18 +38,36 @@ public class ModelCatalogApplicationService {
     private final ModelCatalogProperties properties;
     private final AiModelConfigRepository modelConfigRepository;
     private final ObjectMapper objectMapper;
+    private final UserRepository userRepository;
     private final HttpClient httpClient;
 
     /**
-     * 注入配置、模型配置仓储和 JSON 工具。
+     * 注入配置、模型配置仓储、JSON 工具和用户仓储；internal 模式同步 provider 时需要按当前用户解析 UCID。
      */
+    @Autowired
     public ModelCatalogApplicationService(
+            ModelCatalogProperties properties,
+            AiModelConfigRepository modelConfigRepository,
+            ObjectMapper objectMapper,
+            UserRepository userRepository) {
+        this.properties = Objects.requireNonNull(properties, "properties must not be null");
+        this.modelConfigRepository = Objects.requireNonNull(modelConfigRepository, "modelConfigRepository must not be null");
+        this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.userRepository = Objects.requireNonNull(userRepository, "userRepository must not be null");
+        this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    }
+
+    /**
+     * 测试兼容构造；没有用户仓储时 internal provider 同步不会写入用户级 UCID。
+     */
+    ModelCatalogApplicationService(
             ModelCatalogProperties properties,
             AiModelConfigRepository modelConfigRepository,
             ObjectMapper objectMapper) {
         this.properties = Objects.requireNonNull(properties, "properties must not be null");
         this.modelConfigRepository = Objects.requireNonNull(modelConfigRepository, "modelConfigRepository must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.userRepository = null;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     }
 
@@ -66,6 +88,13 @@ public class ModelCatalogApplicationService {
      */
     public boolean managedSourceEnabled() {
         return !"opencode".equals(properties.getSource());
+    }
+
+    /**
+     * 当前是否使用企业内模型来源；该来源需要登录用户和用户专属 opencode 进程避免 UCID 串号。
+     */
+    public boolean internalSourceEnabled() {
+        return "internal".equals(properties.getSource());
     }
 
     /**
@@ -96,11 +125,20 @@ public class ModelCatalogApplicationService {
      * 尽力把当前 provider 定义写入 opencode 配置；失败只记录日志，保留原 Run 错误路径。
      */
     public void syncProviderConfig(AgentRuntime runtime, ExecutionNode node, String traceId) {
+        syncProviderConfig(runtime, node, traceId, null);
+    }
+
+    /**
+     * 尽力把当前 provider 定义写入 opencode 配置；internal 模式会把当前用户统一认证号写入 provider headers。
+     */
+    public void syncProviderConfig(AgentRuntime runtime, ExecutionNode node, String traceId, UserId userId) {
         if (!managedSourceEnabled()) {
             return;
         }
+        String ucid = resolveCurrentUcid(userId);
+        logInternalUcidHeader(traceId, userId, ucid);
         try {
-            runtime.runtime(new AgentRuntimeCommand(node, "PATCH", "/global/config", null, null, Map.of(), providerConfigPatch(), traceId))
+            runtime.runtime(new AgentRuntimeCommand(node, "PATCH", "/global/config", null, null, Map.of(), providerConfigPatch(ucid), traceId))
                     .block();
         } catch (Exception exception) {
             LOGGER.warn("event=model_provider_sync_failed traceId={} providerId={} error={}",
@@ -108,6 +146,30 @@ public class ModelCatalogApplicationService {
                     properties.activeProvider().getProviderId(),
                     exception.getClass().getSimpleName());
         }
+    }
+
+    private String resolveCurrentUcid(UserId userId) {
+        if (!internalSourceEnabled() || userId == null || userRepository == null) {
+            return null;
+        }
+        return userRepository.findByUserId(userId)
+                .map(User::unifiedAuthId)
+                .filter(value -> value != null && !value.isBlank())
+                .orElse(null);
+    }
+
+    private void logInternalUcidHeader(String traceId, UserId userId, String ucid) {
+        if (!internalSourceEnabled()) {
+            return;
+        }
+        // UCID 是企业内模型 API 的路由标识，按当前项目约定允许明文记录；认证 token 仍不得写入日志。
+        LOGGER.info("event=model_provider_ucid_header_resolved traceId={} providerId={} userId={} ucidHeaderName={} ucid={} ucidPresent={}",
+                traceId,
+                properties.getInternal().getProviderId(),
+                userId == null ? "" : userId.value(),
+                properties.getInternal().getUcidHeaderName(),
+                ucid == null ? "" : ucid,
+                ucid != null && !ucid.isBlank());
     }
 
     private void seedInternalModels() {
@@ -218,7 +280,7 @@ public class ModelCatalogApplicationService {
         return payload;
     }
 
-    private Map<String, Object> providerConfigPatch() {
+    private Map<String, Object> providerConfigPatch(String ucid) {
         ModelCatalogProperties.Provider provider = properties.activeProvider();
         Map<String, Object> models = new LinkedHashMap<>();
         if ("internal".equals(properties.getSource())) {
@@ -236,6 +298,9 @@ public class ModelCatalogApplicationService {
         Map<String, String> headers = new LinkedHashMap<>();
         if ("internal".equals(properties.getSource())) {
             headers.put("environment", "test");
+            if (ucid != null && !ucid.isBlank()) {
+                headers.put(properties.getInternal().getUcidHeaderName(), ucid);
+            }
         }
         String apiKey = resolveApiKey(provider);
         String envRef = "{env:" + provider.getApiKeyEnv() + "}";

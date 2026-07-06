@@ -304,7 +304,17 @@ public class RunApplicationService {
                 input.sessionId().value(),
                 traceId);
         AgentRuntime runtime = agentRuntimeRegistry.require(resolvedAgentId);
+        if (modelCatalogService != null && modelCatalogService.internalSourceEnabled() && userId == null) {
+            throw new PlatformException(
+                    ErrorCode.UNAUTHENTICATED,
+                    "internal model source requires current login user");
+        }
         UserOpencodeProcessAssignment userProcessAssignment = resolveUserProcessAssignment(userId, resolvedAgentId, traceId);
+        if (modelCatalogService != null && modelCatalogService.internalSourceEnabled() && userProcessAssignment == null) {
+            throw new PlatformException(
+                    ErrorCode.OPENCODE_UNAVAILABLE,
+                    "internal model source requires dedicated user opencode process");
+        }
         Instant now = Instant.now();
         SessionId sessionId = input.sessionId();
         String prompt = input.effectivePrompt();
@@ -345,7 +355,7 @@ public class RunApplicationService {
                     workspace,
                     target.node(),
                     traceId);
-            syncProviderConfig(runtime, target.node(), traceId);
+            syncProviderConfig(runtime, target.node(), traceId, userId);
             Run running = runRepository.save(pending.start(Instant.now()));
             append(running.runId(), RunEventType.RUN_STARTED, traceId, Instant.now(), Map.of("status", RunStatus.RUNNING.name()));
             recordRootSessionScope(resolvedAgentId, running, binding.remoteSessionId(), traceId);
@@ -487,9 +497,9 @@ public class RunApplicationService {
     /**
      * 托管模型源启用时，在真正 prompt_async 前尽力同步 provider 定义到 opencode。
      */
-    private void syncProviderConfig(AgentRuntime runtime, ExecutionNode node, String traceId) {
+    private void syncProviderConfig(AgentRuntime runtime, ExecutionNode node, String traceId, UserId userId) {
         if (modelCatalogService != null && modelCatalogService.managedSourceEnabled()) {
-            modelCatalogService.syncProviderConfig(runtime, node, traceId);
+            modelCatalogService.syncProviderConfig(runtime, node, traceId, userId);
         }
     }
 

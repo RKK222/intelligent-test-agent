@@ -3,7 +3,6 @@ package com.icbc.testagent.api.web.platform;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.never;
 
 import com.icbc.testagent.api.web.common.AuthWebSupport;
 import com.icbc.testagent.api.web.common.GlobalExceptionHandler;
@@ -20,7 +19,6 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.reactive.server.WebTestClient;
@@ -313,36 +311,6 @@ class AgentConfigControllerTest {
                 .jsonPath("$.data.webSocketPath").isEqualTo("/api/internal/platform/workspace-management/file/ws");
 
         verify(fileRoutingService).route(request);
-        verifyNoInteractions(service);
-    }
-
-    @Test
-    void remotePublicFileHttpCompatibilityEndpointRejectsInsteadOfForwarding() {
-        AgentConfigApplicationService service = org.mockito.Mockito.mock(AgentConfigApplicationService.class);
-        AgentConfigBackendRoutingService routingService = org.mockito.Mockito.mock(AgentConfigBackendRoutingService.class);
-        when(routingService.forwardTargetForPublicWorktree("agw_remote")).thenReturn(Optional.of("linux-2"));
-        WebTestClient client = client(
-                service,
-                new AgentConfigOperationTicketService(new AgentConfigOperationTicketStore()),
-                routingService,
-                org.mockito.Mockito.mock(AgentConfigFileRoutingService.class),
-                List.of(Dictionary.ROLE_USER));
-
-        client.get()
-                .uri("/api/internal/platform/workspace-management/agent-config/public/files?worktreeId=agw_remote")
-                .header("X-Trace-Id", TRACE_ID)
-                .exchange()
-                .expectStatus().isEqualTo(409)
-                .expectBody()
-                .jsonPath("$.code").isEqualTo("CONFLICT")
-                .jsonPath("$.message").isEqualTo("Agent 配置文件操作请使用文件 WebSocket");
-
-        verify(routingService).forwardTargetForPublicWorktree("agw_remote");
-        verify(routingService, never()).forward(
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.any());
         verifyNoInteractions(service);
     }
 

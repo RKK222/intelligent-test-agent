@@ -14,7 +14,7 @@ class AuthWebSupportTest {
 
     @Test
     void optionalAuthPrincipalReturnsPrincipalWhenExchangeHasAuthenticatedUser() {
-        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/status"));
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/internal/platform/opencode-runtime/status"));
         AuthPrincipal principal = principal();
         exchange.getAttributes().put(AuthWebSupport.AUTH_ATTR, principal);
 
@@ -23,7 +23,7 @@ class AuthWebSupportTest {
 
     @Test
     void optionalAuthPrincipalReturnsEmptyWhenExchangeHasNoAuthenticatedUser() {
-        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/status"));
+        MockServerWebExchange exchange = MockServerWebExchange.from(MockServerHttpRequest.get("/api/internal/platform/opencode-runtime/status"));
 
         assertThat(AuthWebSupport.getOptionalAuthPrincipal(exchange)).isEmpty();
     }

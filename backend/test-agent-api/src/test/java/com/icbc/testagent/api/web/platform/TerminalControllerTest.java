@@ -25,13 +25,13 @@ class TerminalControllerTest {
                 .thenReturn(new TerminalTicketResponse(
                         "pty_1234567890abcdef",
                         Instant.parse("2026-06-19T00:01:00Z"),
-                        "/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef"));
+                        "/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef"));
         WebTestClient client = WebTestClient.bindToController(new TerminalController(service))
                 .webFilter(new TraceIdWebFilter())
                 .build();
 
         client.post()
-                .uri("/api/sessions/ses_1234567890abcdef/terminal/tickets")
+                .uri("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/tickets")
                 .header("X-Trace-Id", "trace_1234567890abcdef")
                 .contentType(MediaType.APPLICATION_JSON)
                 .bodyValue("""
@@ -42,7 +42,7 @@ class TerminalControllerTest {
                 .expectBody()
                 .jsonPath("$.success").isEqualTo(true)
                 .jsonPath("$.data.ticket").isEqualTo("pty_1234567890abcdef")
-                .jsonPath("$.data.webSocketUrl").isEqualTo("/api/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
+                .jsonPath("$.data.webSocketUrl").isEqualTo("/api/internal/platform/opencode-runtime/sessions/ses_1234567890abcdef/terminal/ws?ticket=pty_1234567890abcdef");
     }
 
     @Test

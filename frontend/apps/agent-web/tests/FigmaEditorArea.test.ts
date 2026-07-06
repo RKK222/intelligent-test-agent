@@ -55,4 +55,66 @@ describe("FigmaEditorArea", () => {
 
     wrapper.unmount();
   });
+
+  it("scrolls to the end when tabs are added or the last tab is activated", async () => {
+    const wrapper = mount(FigmaEditorArea, {
+      attachTo: document.body,
+      props: {
+        tabs: [
+          { id: "src/a.ts", path: "src/a.ts", title: "a.ts", content: "a", savedContent: "a" }
+        ],
+        activePath: "src/a.ts"
+      },
+      global: {
+        stubs: {
+          WorkbenchFooter: true
+        }
+      }
+    });
+
+    const containerEl = wrapper.find(".figma-editor-tabs").element as HTMLElement;
+    Object.defineProperty(containerEl, "scrollWidth", {
+      configurable: true,
+      value: 1000
+    });
+
+    // 1. 增加 tabs 长度，应该滚动到最后
+    await wrapper.setProps({
+      tabs: [
+        { id: "src/a.ts", path: "src/a.ts", title: "a.ts", content: "a", savedContent: "a" },
+        { id: "src/b.ts", path: "src/b.ts", title: "b.ts", content: "b", savedContent: "b" }
+      ],
+      activePath: "src/a.ts"
+    });
+    await wrapper.vm.$nextTick();
+    expect(containerEl.scrollLeft).toBe(1000);
+    // 应该聚焦到 a.ts (索引 0)
+    expect(document.activeElement).toBe(wrapper.findAll(".figma-editor-tab")[0].element);
+
+    // 重置 scrollLeft
+    containerEl.scrollLeft = 0;
+
+    // 2. 激活最后一个 tab (b.ts)，应该滚动到最后
+    await wrapper.setProps({
+      activePath: "src/b.ts"
+    });
+    await wrapper.vm.$nextTick();
+    expect(containerEl.scrollLeft).toBe(1000);
+    // 应该聚焦到 b.ts (索引 1)
+    expect(document.activeElement).toBe(wrapper.findAll(".figma-editor-tab")[1].element);
+
+    // 重置 scrollLeft
+    containerEl.scrollLeft = 0;
+
+    // 3. 激活一个不是最后的 tab (a.ts)，不应该触发滚动到最后
+    await wrapper.setProps({
+      activePath: "src/a.ts"
+    });
+    await wrapper.vm.$nextTick();
+    expect(containerEl.scrollLeft).toBe(0);
+    // 应该聚焦到 a.ts (索引 0)
+    expect(document.activeElement).toBe(wrapper.findAll(".figma-editor-tab")[0].element);
+
+    wrapper.unmount();
+  });
 });
