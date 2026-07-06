@@ -109,7 +109,7 @@ function buildModel(path: string, content: string): monaco.editor.ITextModel {
   return m.editor.createModel(content, languageFromPath(path), uri);
 }
 
-async function ensureMonacoEditor(path: string, content: string) {
+async function ensureMonacoEditor(path: string) {
   if (!containerEl.value || !containerEl.value.parentNode) {
     return;
   }
@@ -121,7 +121,7 @@ async function ensureMonacoEditor(path: string, content: string) {
     console.error("Failed to load Monaco Editor");
     return;
   }
-  model = buildModel(path, content);
+  model = buildModel(path, props.content);
   if (editor.value) {
     editor.value.setModel(model);
     emitSelection(editor.value);
@@ -210,7 +210,7 @@ onMounted(async () => {
   if (!props.path || !containerEl.value) {
     return;
   }
-  await ensureMonacoEditor(props.path, props.content);
+  await ensureMonacoEditor(props.path);
 });
 
 // 路径与预览分屏状态变化：重新触发 Monaco layout，确保容器尺寸变动后渲染正常
@@ -231,7 +231,7 @@ watch(
     }
     // 切换文件时由父级决定是否关闭预览；这里不主动改写 props。
     await nextTick();
-    await ensureMonacoEditor(path, props.content);
+    await ensureMonacoEditor(path);
   }
 );
 

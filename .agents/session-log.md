@@ -25,6 +25,17 @@
   - 只修改 `ReasoningPartGroup.vue`、`ReasoningPartView.vue`、`.oc-reasoning-part*` 样式、包说明和定向时间线测试；不改 Run API、SSE、后端 opencode prompt parts、用户消息附件展示或最终回答样式。
 - Result:
   - `corepack pnpm test packages/agent-chat/tests/opencode-timeline.test.ts packages/agent-chat/tests/user-message-display.test.ts packages/agent-chat/tests/runtime-reducer.test.ts`、`corepack pnpm --filter @test-agent/agent-chat typecheck`、`git diff --check` 通过；浏览器样式读取确认当前回答正文仍为 `.oc-text-part` Markdown 路径。
+### 2026-07-06 - 修复所有文件偶发性白板不显示内容问题
+
+- Why:
+  - 文件查看时，偶发性出现所有文件都无法查看到内容（白板），但后端接口有返回（Markdown预览区可正常显示）。根因是 `CodeEditor.vue` 中的 `ensureMonacoEditor` 在方法被调用时过早捕获了当时为空的 `content` 入参；当首次打开文件触发 Monaco 库异步按需加载 (`await import`) 时，若后端文件内容请求在等待期间返回，会因 `model` 尚未创建而在 `watch` 中被丢弃。当加载恢复后，编辑器使用已被丢弃响应的旧空内容创建并挂载模型，导致内容永久性白板；由于所有异步等待均阻塞在对 Monaco 包加载的 `await` 上，如果用户在卡顿期间连续点击多个文件，这批文件的实际内容都会被吞掉从而全部白板。
+- What:
+  - 修改 `CodeEditor.vue` 中的 `ensureMonacoEditor` 签名，移除 `content` 入参。
+  - 在创建或更新 `model` 时，直接从 `props.content` 读取最新文本而不是依赖过期的闭包参数，确保不管是否存在由于等待 Monaco 包加载带来的时间差，编辑器都能渲染真实返回的最新内容。
+- How:
+  - 仅修改前端 `frontend/packages/editor/src/CodeEditor.vue` 的状态获取时机，不改动生命周期流程或销毁逻辑；不改后端 API 契约、数据库结构或环境配置。
+- Result:
+  - 前端渲染竞态漏洞已堵塞，修复了偶发性的全部文件白板问题。
 
 ### 2026-07-06 - 收敛选区上下文回放展示
 
