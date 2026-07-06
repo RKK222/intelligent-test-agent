@@ -4357,3 +4357,14 @@ bash /tmp/test-api-after-restart.sh
   - 修改 `frontend/apps/agent-web/src/components/prompt-context.ts` 和 `backend/test-agent-opencode-runtime/src/main/java/com/icbc/testagent/opencode/runtime/run/RunApplicationService.java`，并补充前端 prompt-context 单测与后端 RunApplicationService 单测。
 - Result:
   - `corepack pnpm exec vitest run apps/agent-web/tests/prompt-context.test.ts apps/agent-web/tests/workbench-utils.test.ts packages/agent-chat/tests/user-message-display.test.ts packages/agent-chat/tests/opencode-timeline.test.ts`、`corepack pnpm --filter @test-agent/agent-web typecheck` 和后端定向 `RunApplicationServiceTest#servicePassesPromptPartsAndRuntimeSelectionToOpencodeFacade` 通过。
+
+### 2026-07-06 - 企业内部署目录统一到 /data/testagent
+
+- Why:
+  - 企业内单服务器部署要求项目基础目录统一为 `/data/testagent`，前端包、opencode 外挂程序、数据目录和打包输出都要在该目录下扩展；前端构建也需要直接写企业 API base URL。
+- What:
+  - `deploy/internal/env.example` 改为 `/data/testagent/{data,frontend,programs,dist}` 路径；compose 和 worker 镜像容器内路径同步改成 `/data/testagent`；`VITE_TEST_AGENT_API_BASE_URL` 示例改为企业 API base URL；Go manager 支持 `SYS_DATA_ROOT_DIR` 环境变量覆盖启动前读取 `.serverid/.serverhost` 的目录。
+- How:
+  - 保留前端客户端自动拼接 `/api` 的约定，文档明确 `VITE_TEST_AGENT_API_BASE_URL` 不要追加 `/api`；Java 的 `SYS_DATA_ROOT_DIR` 通用参数需要配置为 `/data/testagent/data`，并与 compose 传给 manager 的同名环境变量一致。
+- Result:
+  - `go test ./internal/config`、compose config、脚本语法检查、`package-release.sh --help` 和 `git diff --check` 通过；compose 解析结果显示数据和程序挂载、manager 环境变量均指向 `/data/testagent`。

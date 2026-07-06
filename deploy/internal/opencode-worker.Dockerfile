@@ -53,11 +53,12 @@ COPY --from=manager-build /out/opencode-manager /usr/local/bin/opencode-manager
 COPY deploy/internal/opencode-worker-entrypoint.sh /usr/local/bin/opencode-worker-entrypoint
 RUN chmod +x /usr/local/bin/opencode-manager /usr/local/bin/opencode-worker-entrypoint
 
+ENV SYS_DATA_ROOT_DIR=/data/testagent/data
 ENV OPENCODE_BIN=/usr/local/bin/opencode
-ENV OPENCODE_MANAGER_STATE_DIR=/data/.testagent/agent-opencode/manager
-ENV TEST_AGENT_PROGRAM_ROOT=/opt/test-agent/programs
+ENV OPENCODE_MANAGER_STATE_DIR=/data/testagent/data/agent-opencode/manager
+ENV TEST_AGENT_PROGRAM_ROOT=/data/testagent/programs
 
-WORKDIR /data/.testagent/agent-opencode/workspace
+WORKDIR /data/testagent/data/agent-opencode/workspace
 
 ENTRYPOINT ["tini", "--", "opencode-worker-entrypoint"]
 CMD ["run"]

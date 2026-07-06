@@ -27,7 +27,7 @@ Build enterprise internal delivery artifacts:
 
 Options:
   --env-file <path>       Dotenv file to read. Defaults to deploy/internal/.env, then env.example.
-  --output-dir <path>     Artifact output directory. Defaults to deploy/internal/dist.
+  --output-dir <path>     Artifact output directory. Defaults to TEST_AGENT_IMAGE_OUTPUT_DIR or deploy/internal/dist.
   --platform <platform>   Docker build platform for opencode-worker. Defaults to linux/amd64.
   --backend-only          Package only the backend jar.
   --frontend-only         Package only the frontend dist.

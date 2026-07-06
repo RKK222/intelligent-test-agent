@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXTERNAL_PROGRAM_ROOT="${TEST_AGENT_PROGRAM_ROOT:-/opt/test-agent/programs}"
+EXTERNAL_PROGRAM_ROOT="${TEST_AGENT_PROGRAM_ROOT:-/data/testagent/programs}"
 EXTERNAL_MANAGER="${EXTERNAL_PROGRAM_ROOT}/bin/opencode-manager"
 EXTERNAL_OPENCODE="${EXTERNAL_PROGRAM_ROOT}/opencode/bin/opencode"
 BUILTIN_MANAGER="/usr/local/bin/opencode-manager"

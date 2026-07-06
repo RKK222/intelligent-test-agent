@@ -2,6 +2,16 @@
 
 本目录提供企业内部署文件，默认按单服务器一套服务部署：1 个实体 Nginx、1 份前端 `dist/`、1 个直接运行的 Java 后端、1 个 `opencode-worker` 容器。Docker Compose 只负责启动这个 `opencode-worker` 容器。
 
+企业部署根目录统一使用 `/data/testagent`，建议目录规划如下：
+
+```text
+/data/testagent/
+  data/       Java 的 SYS_DATA_ROOT_DIR，也是 worker 的数据挂载目录
+  frontend/   前端 dist 解压目录，供实体 Nginx 托管
+  programs/   外挂 opencode-manager 和 opencode CLI
+  dist/       打包脚本输出的 jar、前端包、程序包和镜像 tar
+```
+
 ## 端口约束
 
 Java 后端创建用户 opencode 进程时，会从 manager 上报的 `portStart..portEnd` 里选择端口，并用 `TEST_AGENT_SERVER_ADVERTISED_HOST/.serverhost + port` 生成 `baseUrl`。当前协议没有独立的 `containerPort` 和 `publishedPort` 字段。
@@ -29,7 +39,7 @@ TEST_AGENT_RUN_EVENT_REDIS_BUS_ENABLED=true
 TEST_AGENT_SERVER_BROADCAST_ENABLED=true
 ```
 
-Java 的 `SYS_DATA_ROOT_DIR` 需要与 worker 挂载的 `TEST_AGENT_DATA_ROOT` 对齐，默认是 `/data/.testagent`，以便 worker 读取 `.serverid` 和 `.serverhost`。如果后续扩成多服务器部署，每台服务器仍按“一台服务器一套 Nginx、前端、Java、worker”的方式独立配置。
+Java 的 `SYS_DATA_ROOT_DIR` 需要与 worker 挂载的 `TEST_AGENT_DATA_ROOT` 对齐，企业内默认是 `/data/testagent/data`，以便 worker 读取 `.serverid` 和 `.serverhost`。如果数据库通用参数仍是 Linux 默认 `/data/.testagent`，部署时需要在系统管理通用参数中把 Linux 平台 `SYS_DATA_ROOT_DIR` 改为 `/data/testagent/data`。如果后续扩成多服务器部署，每台服务器仍按“一台服务器一套 Nginx、前端、Java、worker”的方式独立配置。
 
 ## 打包交付物
 
@@ -42,11 +52,11 @@ deploy/internal/package-release.sh
 脚本默认读取 `deploy/internal/.env`；如果该文件不存在，则读取 `deploy/internal/env.example`。它会产出：
 
 ```text
-deploy/internal/dist/backend/test-agent-app.jar
-deploy/internal/dist/frontend/
-deploy/internal/dist/test-agent-frontend-dist.tar.gz
-deploy/internal/dist/programs/
-deploy/internal/dist/test-agent-programs.tar.gz
+/data/testagent/dist/backend/test-agent-app.jar
+/data/testagent/dist/frontend/
+/data/testagent/dist/test-agent-frontend-dist.tar.gz
+/data/testagent/dist/programs/
+/data/testagent/dist/test-agent-programs.tar.gz
 test-agent-opencode-worker_internal-linux-amd64.tar
 ```
 
@@ -89,8 +99,8 @@ docker load -i test-agent-opencode-worker-internal-amd64.tar
 worker 容器启动时按以下优先级选择程序：
 
 ```text
-/opt/test-agent/programs/bin/opencode-manager
-/opt/test-agent/programs/opencode/bin/opencode
+/data/testagent/programs/bin/opencode-manager
+/data/testagent/programs/opencode/bin/opencode
 ```
 
 如果上述路径不存在或不可执行，则回退到镜像内置的：
@@ -103,17 +113,17 @@ worker 容器启动时按以下优先级选择程序：
 目标机器首次部署可把交付包中的 `test-agent-programs.tar.gz` 解压到统一目录，例如：
 
 ```bash
-mkdir -p /opt/test-agent
-tar -C /opt/test-agent -xzf deploy/internal/dist/test-agent-programs.tar.gz
+mkdir -p /data/testagent
+tar -C /data/testagent -xzf /data/testagent/dist/test-agent-programs.tar.gz
 ```
 
 然后在 `deploy/internal/.env` 中配置：
 
 ```dotenv
-TEST_AGENT_PROGRAM_ROOT=/opt/test-agent/programs
+TEST_AGENT_PROGRAM_ROOT=/data/testagent/programs
 ```
 
-后续只升级 opencode 或 manager 时，可以只替换 `/opt/test-agent/programs` 下对应文件，再重启 worker：
+后续只升级 opencode 或 manager 时，可以只替换 `/data/testagent/programs` 下对应文件，再重启 worker：
 
 ```bash
 cd deploy/internal
@@ -126,7 +136,7 @@ docker compose --env-file .env restart opencode-worker
 
 实体 Nginx 至少需要做两件事：
 
-- 静态资源根目录指向 `deploy/internal/dist/frontend/` 或解压后的 `test-agent-frontend-dist.tar.gz`。
+- 静态资源根目录指向 `/data/testagent/frontend/` 或解压后的 `test-agent-frontend-dist.tar.gz`。
 - `/api`、SSE 和 WebSocket 请求反向代理到本机直接部署的 Java 后端。
 
 `deploy/internal/nginx/` 下的配置文件只作为实体 Nginx 配置参考，不由 Docker Compose 启动。
@@ -134,7 +144,7 @@ docker compose --env-file .env restart opencode-worker
 示例模板 `deploy/internal/nginx/gateway.conf.template` 使用这些变量：
 
 ```bash
-TEST_AGENT_FRONTEND_ROOT=/opt/test-agent/frontend
+TEST_AGENT_FRONTEND_ROOT=/data/testagent/frontend
 TEST_AGENT_NGINX_LISTEN_PORT=80
 TEST_AGENT_BACKEND=127.0.0.1:8080
 ```
@@ -157,6 +167,7 @@ cp deploy/internal/env.example deploy/internal/.env
 
 编辑 `deploy/internal/.env`，至少修改：
 
+- `VITE_TEST_AGENT_API_BASE_URL`，填企业 API base URL，例如 `http://test-agent.example.com`；不要追加 `/api`
 - `TEST_AGENT_OPENCODE_MANAGER_TOKEN`
 - `TEST_AGENT_DATA_ROOT`
 - `TEST_AGENT_PROGRAM_ROOT`
@@ -177,4 +188,4 @@ docker compose --env-file .env ps
 
 ## 运行时外部依赖
 
-`opencode-worker` 镜像内已包含 `opencode-manager` 和 npm 安装的 `opencode-ai` CLI；外挂程序目录用于后续小版本更新。目标环境仍必须提供 PostgreSQL、Redis、企业内模型服务、Git/SSH 网络和 Java 后端所需密钥。`/data/.testagent/agent-opencode/.config/opencode/` 必须由超级管理员完成公共配置初始化且非空，否则 manager 会拒绝启动用户 opencode 进程。
+`opencode-worker` 镜像内已包含 `opencode-manager` 和 npm 安装的 `opencode-ai` CLI；外挂程序目录用于后续小版本更新。目标环境仍必须提供 PostgreSQL、Redis、企业内模型服务、Git/SSH 网络和 Java 后端所需密钥。`/data/testagent/data/agent-opencode/.config/opencode/` 必须由超级管理员完成公共配置初始化且非空，否则 manager 会拒绝启动用户 opencode 进程。

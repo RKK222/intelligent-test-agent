@@ -29,6 +29,24 @@ func TestLoadFromEnvReadsServerIdentityAndHostFilesFromSysDataRootOnLinux(t *tes
 	}
 }
 
+func TestLoadFromEnvUsesSysDataRootDirEnvOverride(t *testing.T) {
+	setBaseManagerEnv(t)
+	t.Setenv("SYS_DATA_ROOT_DIR", "/data/testagent/data")
+
+	cfg, err := loadFromEnvWithRuntime(testRuntime("linux", map[string]string{
+		"/data/testagent/data/.serverid":   "linux-prod-a\n",
+		"/data/testagent/data/.serverhost": "10.8.0.12\n",
+		"/etc/hostname":                    "container-abc123\n",
+	}))
+	if err != nil {
+		t.Fatalf("loadFromEnvWithRuntime returned error: %v", err)
+	}
+
+	if cfg.LinuxServerID != "linux-prod-a" {
+		t.Fatalf("expected server identity from SYS_DATA_ROOT_DIR override, got %q", cfg.LinuxServerID)
+	}
+}
+
 func TestLoadFromEnvReadsServerIdentityFileFromSysDataRootOnDarwin(t *testing.T) {
 	setBaseManagerEnv(t)
 	t.Setenv("OPENCODE_MANAGER_CONTAINER_ID", "ctr_01")
