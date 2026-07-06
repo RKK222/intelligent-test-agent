@@ -1,12 +1,12 @@
-export function getAamUrl(url: string, baseURL = "http://zfw.sdc.cs.icbc/aam/login/") {
+export function getAamUrl(url, baseURL = "http://zfw.sdc.cs.icbc/aam/login/") {
   const baseStr = encodeToUrl(url);
   return baseURL + baseStr;
 }
-export function jumpAam(url: string, baseURL = "http://zfw.sdc.cs.icbc/aam/login/") {
+export function jumpAam(url, baseURL = "http://zfw.sdc.cs.icbc/aam/login/") {
   const aamUrl = baseURL;
   window.location.href = aamUrl + encodeToUrl(url);
 }
-function encodeToUrl(url: string) {
+function encodeToUrl(url) {
   const encoder = new TextEncoder();
   const data = encoder.encode(url);
   let binary = "";
