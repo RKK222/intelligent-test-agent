@@ -555,10 +555,13 @@ function onVersionClick(template: AppWorkspaceTemplate, version: AppWorkspaceVer
     <div v-if="showSave" class="ta-workbench-footer-right">
       <ElTooltip
         v-if="showPreviewButton"
-        :content="markdownPreviewMode === 'split' ? '分屏预览 (双击分上下)' : markdownPreviewMode === 'full' ? '整体预览 (双击分上下)' : '预览 (单击整体/双击分上下)'"
         placement="top"
         :show-after="0"
       >
+        <template #content>
+          <div>单击：整体预览</div>
+          <div>双击：分屏预览</div>
+        </template>
         <button
           type="button"
           :class="['ta-workbench-footer-preview', { 'is-active': markdownPreviewMode !== 'off' }]"
