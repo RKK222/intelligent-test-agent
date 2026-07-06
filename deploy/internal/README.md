@@ -36,6 +36,19 @@ TEST_AGENT_SERVER_BROADCAST_ENABLED=true
 在仓库根目录执行：
 
 ```bash
+deploy/internal/build-images.sh
+```
+
+脚本默认读取 `deploy/internal/.env`；如果该文件不存在，则读取 `deploy/internal/env.example`。它会构建 `linux/amd64` 镜像并导出到 `deploy/internal/dist/`：
+
+```text
+test-agent-frontend_internal-linux-amd64.tar
+test-agent-opencode-worker_internal-linux-amd64.tar
+```
+
+也可以手工执行：
+
+```bash
 docker buildx build \
   --platform linux/amd64 \
   -f deploy/internal/frontend.Dockerfile \

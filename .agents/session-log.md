@@ -2,6 +2,18 @@
 
 ## Entries
 
+### 2026-07-06 - 补充企业内镜像打包脚本
+
+- Why:
+  - 企业内 Docker 部署文件已有 Dockerfile 和 Compose，但还缺少一条可重复执行的镜像构建与离线 tar 导出入口。
+- What:
+  - 新增 `deploy/internal/build-images.sh`，默认读取 `deploy/internal/.env` 或 `env.example`，构建前端和 opencode worker 的 `linux/amd64` 镜像，并导出 docker-loadable tar 包。
+  - `deploy/internal/env.example` 增加 `TEST_AGENT_IMAGE_OUTPUT_DIR`，README 增加脚本用法。
+- How:
+  - 脚本自行解析 `KEY=VALUE` dotenv，不执行文件内容；构建参数继续复用既有镜像 tag、npm/Corepack、Go proxy、Debian mirror 和 `OPENCODE_AI_PACKAGE` 配置。
+- Result:
+  - `bash -n deploy/internal/build-images.sh`、`deploy/internal/build-images.sh --help`、`docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 和 `git diff --check` 通过；未实际构建镜像。
+
 ### 2026-07-06 - 全面作废后端旧接口
 
 - Why:
