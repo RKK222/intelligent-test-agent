@@ -53,6 +53,7 @@ import { useAuthStore } from "../stores/authStore";
 import {
   chatContextItemsToPromptParts,
   createContextId,
+  serializeChatContexts,
   summarizeChatContextItems,
   useChatContextStore,
   validateChatSend,
@@ -2701,14 +2702,20 @@ function handleSend(prompt: string, attachments: ComposerAttachment[] = []) {
   // 避免同一选区或整个活动文件在本轮请求中重复进入模型上下文。
   const implicitEditorTab = chatContextStore.items.length === 0 ? activeTab.value : undefined;
   const implicitEditorSelection = chatContextStore.items.length === 0 ? editorSelection.value : undefined;
-  const parts = buildPromptParts(prompt, implicitEditorTab, attachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
-  const displayPrompt = prompt.trim() || promptFromParts(parts);
-  const submitPrompt = prompt.trim() || displayPrompt;
+  const selectionContexts = chatContextStore.items.filter((item): item is Extract<ChatContextItem, { type: "selection" }> => item.type === "selection");
+  const displayParts = buildPromptParts(prompt, implicitEditorTab, attachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
+  const displayPrompt = prompt.trim() || promptFromParts(displayParts);
+  const rawSubmitPrompt = prompt.trim() || displayPrompt;
+  // 选区文本直接作为结构化 prompt 发送，避免 opencode 将其回放成整文件附件或触发原生文件读取。
+  const submitPrompt = selectionContexts.length > 0 ? serializeChatContexts(rawSubmitPrompt, selectionContexts) : rawSubmitPrompt;
+  // prompt_async 有 parts 时只发送 parts；selection 必须进入 text part，不能只放在顶层 prompt。
+  const parts = buildPromptParts(submitPrompt, implicitEditorTab, attachments, [...chatContextParts, ...diffContextParts.value], implicitEditorSelection);
   if (chatContextStore.items.length > 0) {
     console.debug("workspace_context_send_prepared", {
       component: "AgentWorkbench",
       action: "send_prompt",
       contextCount: chatContextStore.items.length,
+      selectionContextCount: selectionContexts.length,
       attachmentsCount: attachments.length,
       diffContextCount: diffContextParts.value.length,
       partsCount: parts.length,

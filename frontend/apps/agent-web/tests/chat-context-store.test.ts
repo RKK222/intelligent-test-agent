@@ -75,7 +75,7 @@ describe("chat context store", () => {
     expect(store.addFileContext(file({ id: "file_2" }))).toEqual({ ok: false, reason: "该文件已添加" });
   });
 
-  it("validates send input and converts contexts to native file prompt parts", () => {
+  it("validates send input and converts only whole-file contexts to native file prompt parts", () => {
     const items = [selection(), file({ id: "file_2", path: "docs/api.md", fileName: "api.md" })];
     const debug = vi.spyOn(console, "debug").mockImplementation(() => undefined);
 
@@ -85,21 +85,6 @@ describe("chat context store", () => {
     });
 
     expect(chatContextItemsToPromptParts(items)).toEqual([
-      {
-        type: "file",
-        path: "src/App.ts",
-        name: "App.ts",
-        mimeType: "text/plain",
-        content: "const a = 1;",
-        source: {
-          text: "const a = 1;",
-          start: 0,
-          end: "const a = 1;".length,
-          startLine: 3,
-          endLine: 3,
-          contextType: "selection"
-        }
-      },
       {
         type: "file",
         path: "docs/api.md",
@@ -118,12 +103,13 @@ describe("chat context store", () => {
       component: "chatContextStore",
       action: "build_prompt_parts",
       count: 2,
-      partsCount: 2,
+      partsCount: 1,
       items: [
         { type: "selection", path: "src/App.ts", fileName: "App.ts", charCount: "const a = 1;".length, startLine: 3, endLine: 3 },
         { type: "file", path: "docs/api.md", fileName: "api.md", charCount: "hello\nworld".length }
       ]
     });
+    expect(JSON.stringify(debug.mock.calls)).not.toContain("const a = 1;");
     expect(JSON.stringify(debug.mock.calls)).not.toContain("hello\nworld");
     debug.mockRestore();
   });

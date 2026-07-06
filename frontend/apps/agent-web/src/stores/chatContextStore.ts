@@ -123,25 +123,9 @@ function escapeContextAttribute(value: string): string {
 }
 
 export function chatContextItemsToPromptParts(items: ChatContextItem[]): Extract<PromptPart, { type: "file" }>[] {
-  const parts: Extract<PromptPart, { type: "file" }>[] = items.map((item) => {
-    if (item.type === "selection") {
-      return {
-        type: "file",
-        path: item.path,
-        name: item.fileName,
-        mimeType: "text/plain",
-        content: item.text,
-        source: {
-          text: item.text,
-          start: 0,
-          end: item.text.length,
-          startLine: item.startLine,
-          endLine: item.endLine,
-          contextType: "selection"
-        }
-      };
-    }
-    return {
+  const parts: Extract<PromptPart, { type: "file" }>[] = items
+    .filter((item): item is ChatFileContextItem => item.type === "file")
+    .map((item) => ({
       type: "file",
       path: item.path,
       name: item.fileName,
@@ -153,8 +137,7 @@ export function chatContextItemsToPromptParts(items: ChatContextItem[]): Extract
         end: item.content.length,
         contextType: "file"
       }
-    };
-  });
+    }));
   if (items.length > 0) {
     console.debug("workspace_context_parts_built", {
       component: "chatContextStore",

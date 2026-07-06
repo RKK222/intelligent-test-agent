@@ -4332,6 +4332,20 @@ bash /tmp/test-api-after-restart.sh
 - Result:
   - `docker compose --env-file deploy/internal/env.example -f deploy/internal/docker-compose.yml config` 只解析出一个 worker，且 opencode 端口保持宿主机端口与容器端口一致；脚本语法检查和 `git diff --check` 通过。
 
+### 2026-07-06 - 工作区选区上下文不再走 opencode file attachment
+
+- Why:
+  - 用户只选择文件第一行时，发送后仍出现“文件 冲突文件.md”附件并可能触发整文件读取；用 opencode file part 承载选区会被原生能力按文件附件回放，不适合表达局部选中文本。
+- What:
+  - 选区上下文改为直接拼入本轮 `submitPrompt` 的结构化 `<context type="selection">` 文本；用户气泡仍展示原始问题，避免大段上下文外露。
+  - `chatContextItemsToPromptParts` 只把整文件上下文转换为 opencode 原生 `file` part，选区不再生成 `file` part。
+  - `prompt_async` 有 `parts` 时 opencode 实际消费 text part，因此发送时必须用包含选区的 `submitPrompt` 重新构造 `parts`，不能只改顶层 prompt。
+  - 本条结论覆盖同日上一版“选区对齐 opencode 原生 file part”的尝试；该方案会让 opencode 把局部选区当文件附件回放。
+- How:
+  - 修改 `AgentWorkbench.handleSend` 和 `chatContextStore`，保留整文件原生附件链路，收敛选区链路为 prompt-only。
+- Result:
+  - 前端 4 个定向测试文件 48 条用例通过，`@test-agent/agent-web` typecheck 通过；本地服务已通过 `./restart-dev-services.sh` 重启，前端 `http://127.0.0.1:3000`、后端 readiness 均正常。
+
 ### 2026-07-06 - 工作区选区上下文对齐 opencode 原生 file part
 
 - Why:
