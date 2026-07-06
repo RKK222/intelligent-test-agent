@@ -125,6 +125,32 @@ describe("OpencodeTimeline", () => {
     expect(container.querySelector(".oc-user-message__bubble")?.textContent).not.toContain("以下是用户添加的工作区上下文");
   });
 
+  it("opens reasoning details as plain text without mounting MarkdownView", async () => {
+    const state = createOpencodeLikeState({
+      messages: [
+        userMessage("msg_user_reasoning", "分析流程"),
+        assistantMessage("msg_assistant_reasoning", [
+          reasoningPart(
+            "part_reasoning",
+            ["第一步：读取上下文", "", "- 保留原始换行", "- 不触发 Markdown 渲染器"].join("\n")
+          )
+        ])
+      ]
+    });
+
+    const { container, getByText, queryByTestId } = render(OpencodeTimeline, { props: { state } });
+
+    expect(getByText("思考状态")).toBeTruthy();
+    expect(container.querySelector(".oc-reasoning-part__plain")).toBeNull();
+
+    await fireEvent.click(container.querySelector(".oc-reasoning-part .oc-disclosure__trigger") as HTMLElement);
+
+    const plain = container.querySelector(".oc-reasoning-part__plain");
+    expect(plain?.textContent).toContain("第一步：读取上下文");
+    expect(plain?.textContent).toContain("- 不触发 Markdown 渲染器");
+    expect(queryByTestId("md-view")).toBeNull();
+  });
+
   it("keeps diff files collapsed by default and updates folded line totals when files change", async () => {
     vi.useFakeTimers();
     try {
@@ -694,10 +720,10 @@ describe("OpencodeTimeline", () => {
     expect(getByText("思考状态")).toBeTruthy();
 
     await fireEvent.click(container.querySelector(".oc-reasoning-part .oc-disclosure__trigger") as HTMLElement);
-    await waitMarkdown();
-    expect(getByText("先识别用户问题。")).toBeTruthy();
-    expect(getByText("再读取相关能力说明。")).toBeTruthy();
-    expect(getByText("最后组织回答。")).toBeTruthy();
+    const plain = container.querySelector(".oc-reasoning-part__plain");
+    expect(plain?.textContent).toContain("先识别用户问题。");
+    expect(plain?.textContent).toContain("再读取相关能力说明。");
+    expect(plain?.textContent).toContain("最后组织回答。");
   });
 
   it("merges repeated tool rows by tool type in one user turn", async () => {

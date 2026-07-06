@@ -2,6 +2,17 @@
 
 ## Entries
 
+### 2026-07-06 - 收紧思考状态展开渲染
+
+- Why:
+  - opencode reasoning 展开时首次挂载 Markdown 渲染器会触发动态加载和高亮处理，体感打开慢；同时思考过程不应抢占最终回答的字号和视觉重量。
+- What:
+  - `agent-chat` 的 opencode-like reasoning 展开详情改为紧凑纯文本渲染，字号压到 `--oc-text-xs`，触发区高度和行高同步收紧；最终回答 `TextPartView` / `.oc-text-part` 仍保持原 Markdown 渲染路径和字号。
+- How:
+  - 只修改 `ReasoningPartGroup.vue`、`ReasoningPartView.vue`、`.oc-reasoning-part*` 样式、包说明和定向时间线测试；不改 Run API、SSE、后端 opencode prompt parts、用户消息附件展示或最终回答样式。
+- Result:
+  - `corepack pnpm test packages/agent-chat/tests/opencode-timeline.test.ts packages/agent-chat/tests/user-message-display.test.ts packages/agent-chat/tests/runtime-reducer.test.ts`、`corepack pnpm --filter @test-agent/agent-chat typecheck`、`git diff --check` 通过；浏览器样式读取确认当前回答正文仍为 `.oc-text-part` Markdown 路径。
+
 ### 2026-07-06 - 收敛选区上下文回放展示
 
 - Why:

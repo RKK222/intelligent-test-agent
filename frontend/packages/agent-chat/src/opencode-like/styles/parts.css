@@ -78,16 +78,16 @@
 .oc-reasoning-part {
   width: 100%;
   color: var(--oc-muted);
-  font-size: var(--oc-text-sm);
+  font-size: var(--oc-text-xs);
 }
 
 .oc-reasoning-part .oc-disclosure__trigger {
   width: 100%;
   max-width: 100%;
-  min-height: 28px;
-  grid-template-columns: 88px minmax(0, 1fr) 56px 16px;
-  column-gap: 8px;
-  padding: 3px 10px;
+  min-height: 22px;
+  grid-template-columns: 72px minmax(0, 1fr) 48px 14px;
+  column-gap: 6px;
+  padding: 0 8px;
   align-items: center;
   color: var(--oc-muted);
 }
@@ -96,16 +96,23 @@
   grid-column: 1;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   color: var(--oc-muted);
-  font-size: var(--oc-text-md);
+  font-size: var(--oc-text-xs);
   font-weight: 600;
-  line-height: 20px;
+  line-height: 14px;
+}
+
+.oc-reasoning-part .oc-disclosure__trigger .oc-tool__subtitle {
+  font-size: var(--oc-text-xs);
+  line-height: 14px;
 }
 
 .oc-reasoning-part .oc-disclosure__trigger .oc-tool__status {
   grid-column: 3;
   justify-self: end;
+  font-size: var(--oc-text-xs);
+  padding: 1px 5px;
 }
 
 .oc-reasoning-part .oc-disclosure__trigger .oc-tool__chevron {
@@ -136,6 +143,16 @@
   border-left: 0;
   padding: 0;
   margin: 0;
+}
+
+.oc-reasoning-part__plain {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--oc-font-sans);
+  font-size: var(--oc-text-xs);
+  line-height: 1.35;
+  color: var(--oc-muted);
 }
 
 .oc-file-part {
